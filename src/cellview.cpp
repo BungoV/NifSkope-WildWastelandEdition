@@ -3276,6 +3276,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		if ( !unreadableMatNames.isEmpty() )
 			s << " (" << unreadableMatNames.join( QLatin1String( ", " ) ) << ")";
 		s << "\n";
+		// lane FXREST1: editor-only shapes the loader left out (per distinct model loaded)
+		s << "  editor markers left out: " << lodgenEditorMarkerCount( -1 ) << " shapes named EditorMarker*, "
+		  << lodgenEditorMarkerCount( -2 ) << " with the word inside the name, in "
+		  << lodgenEditorMarkerInsideModels().size() << " models ("
+		  << lodgenEditorMarkerInsideModels().join( QLatin1String( "; " ) ) << ")\n";
 		// lane GLOW1
 		s << "  billboards: " << billboardShapes << " shapes turned to the camera, "
 		  << billboardFlat << " welded flat" << ( glowRed ? " (WW_CELL_GLOW_RED)" : "" ) << "\n";
