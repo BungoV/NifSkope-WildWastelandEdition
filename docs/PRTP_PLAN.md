@@ -1403,6 +1403,83 @@ Still open (proposals only; the ranked list is in notes/deck1/DECK_MATRIX.md sec
   BEFORE exe is a main build. The merged build is green on cell_fx, cell_fxdepth, cell_is (Q 99.69 / 97.92 /
   99.94 / 98.94), cell_spec and cell_lit.
 
+### 2ah. Outdoors the bounce row takes the sky and the sun (lane SKY1, 2026-10-02)
+
+Built in cd54e9d8, gated in 26212267, merged with main a54dfd62 (PROBEVIEW1's passes) in the lane's merge commit.
+
+**What it was.** The bounce row relit the baked probes with the cell's placed lights only. Outdoors that is a few
+lamps: the sun and the sky, which light everything out there, never reached a surfel or a probe, and the weather's
+ambient was laid on every surface at full strength, under a porch as much as in the street.
+
+**When it applies.** Only in an exterior the weather is lighting: Scene mode Lookdev with a weather resolved (the
+existing mode and its existing weather / hour controls; no new control, row or INI key). In the plain viewport light
+there is no weather, so the row stays as it was and its notes line says `gi sky: none (...)`. Interiors bake every
+sky octant at 0 and the code does not run for them: an interior is the same byte for byte (gate, below).
+
+**The three terms, and what each one physically is.**
+
+1. *Sun at a surfel.* Irradiance `E = sun color x max(0, N.L)` where one ray from the surfel (lifted 2 units along
+   its normal) toward the sun reaches 400,000 units through the bake's own triangle soup without a hit. The surfel
+   then leaves `B = albedo x E` like it does for a placed light, and the links carry it to the probes. Why the soup
+   and not the visibility grid: the grid only knows probe-to-voxel sight lines inside the baked volume; it cannot
+   answer "does the sun reach this surfel". The soup is the same geometry the bake traced its links through.
+2. *Sky at a probe.* A probe stores, per octant, the share of that octant's rays that left the scene (`skyVis`) and
+   the mean glass tint those rays crossed (`skyTint`, v4). The weather gives a six-axis directional ambient (what a
+   surface facing each axis takes from the whole sky and surroundings). For each of the six axes the probe's sky
+   irradiance is `pi x ambient(axis) x mean over the four octants on that axis's side of (skyVis x skyTint)`.
+   The `pi` puts it in the same unit as the gathered bounce (the shader divides by pi).
+3. *The weather's ambient where the grid stands in.* The viewer lays the weather's ambient on every surface
+   unshadowed. Where the bounce grid is valid the grid's sky term REPLACES it (the program takes away `share x its
+   own ambient`, share = how much of the pixel's grid sample is valid; probe 90 shows that share). Without this the
+   sky would be counted twice and a porch could never be darker than the street.
+
+**What is exact.** The weather colors and the sun direction are the ones the view is drawn with (same record, same
+hour blend). The visibility and tint are the bake's stored numbers, untouched. The sun's shadow uses the bake's own
+triangles. The link gather, the grid and the shader blend are the row's existing path.
+
+**What is approximated (say these to anyone reading the picture).**
+- Eight directions against six axes: an axis takes the plain mean of its four octants; the cosine weighting inside
+  an octant is ignored, and the sky is taken as even inside an octant.
+- The weather's ambient is a "what a surface facing this way receives" color, not a sky radiance. Using it scaled by
+  visibility is right in the open for an up-facing surface (all four upper octants open: exactly the weather's
+  ambient) and under full cover (0). On flat open ground the four lower octants see the ground (visibility 0), so a
+  wall takes about half the weather's sideways ambient from the sky term and a down-facing surface almost none; the
+  rest of what the weather's flat ambient used to give them now has to come from the real bounce (the sunlit ground
+  through the links). That is physically the right source, but it is darker than the weather's authored fill.
+- One sun ray per surfel: a hard shadow edge at surfel size, no penumbra.
+- The sun passes glass untinted (the soup's glass list is not consulted for the sun ray); the sky's tint is applied.
+- No clouds: neither the sun nor the sky is dimmed by the cloud layers.
+- The sky lights probes only. It does not light surfels, so the sky's own bounce off surfaces (sky -> wall ->
+  porch) is not in. The sun's bounce is.
+- A room's sky through a window is left out (interiors untouched; the bake stores 0 for them).
+- Legacy (non-PBR) shapes switch from the flat ambient to the directional grid sky where the grid stands in; their
+  ambient specular stays. PBR shapes' bounce takes the material's AO in this mode.
+- The sun's strength follows the viewer's PBR sun scale (1 unless pinned), as the direct sun does.
+- One exterior bake is kept for the weather/hour re-relight (0.4 s after a change; no new bake).
+
+**Controls for gates only.** `WW_CELL_SKY_RED=off|novis|notint|sunthrough|keepamb`; with `WW_CELL_GI_DUMP` an
+exterior also writes `gi_sky.bin`, `gi_sun.bin`, `gi_sky.txt`. Probe 90 = the share of the weather ambient replaced.
+
+**Gate.** `tests/spells/cell_sky.sh` + `cell_sky_check.py`. The checker reads the plugin's weather and climate
+itself, traces its own sun rays through the soup, gathers its own links and blends its own grid; nothing calls
+NifSkope. Cameras at eye height (Concord's street is near z 6200), picked from the bake's sky shares.
+
+| cell / view | stage | green | red that must fail |
+|---|---|---|---|
+| Concord (657 probes, 26865 surfels) | W weather | ambient up 0.1304 0.2388 0.4045, sun 0.759, 0.013 deg off | -- |
+| | U sun | 5739 sunlit of 15857 facing; agree 100.0% | sunthrough: 10076 shaded lit, total 2.242 |
+| | S sky | 386 probes see sky; agree 100.0%, 1.000 | off: 0.004 (no sky file); novis: 4.337 |
+| | B totals | agree 100.0% (sky 69.7% of the total, lamps 0.39%) | |
+| | C grid | 3283 voxels; agree 100.0% | |
+| open street | D probe 5 / 90 | 100.0%, 0.999 / 100.0%, 1.000 | off: 0.000 |
+| covered spot | D probe 5 / 90 | 100.0%, 0.998 / 100.0%, 1.000 | novis: probe 5 total 2.805 |
+| covered spot | O | upper sky 0.215 of the open sky (viewer 0.215); an open street probe: 0.90 | |
+| open / covered | R | darker where the grid stands in: 100% / 100% (79 / 100 levels) | keepamb: 0.0% |
+| Graygarden (279 probes, greenhouses) | T glass | 141 probes through glass; agree 100.0% | notint: 0.0%, 1.144 |
+| DmndSolomonsHouse01 | I interior | probe 5, lit picture, gi_surfels / probes / grid byte-identical, plain and Lookdev | |
+
+After the merge with main a54dfd62 the green reran PASS with the interior compared against main's own exe.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

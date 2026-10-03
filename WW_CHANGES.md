@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Outdoors, the bounce light now takes the sky and the sun (2026-10-02)
+
+- In an exterior cell lit by the weather (Scene mode Lookdev), the cell view's GI row now adds the sky and the
+  sun to the baked probes, not only the placed lamps. A probe gets the weather's ambient color in proportion to
+  how much sky it actually sees in each direction (tinted where it looks through glass), and every surface the sun
+  reaches through the cell's own geometry bounces the sun's light onward.
+- Where the probe grid reaches, its sky replaces the weather's flat ambient, so a porch, an awning or a narrow
+  alley is now darker than the open street, as it is in the game. Measured at Concord: a covered spot's probes
+  see 0.215 of the open sky above them, an open street probe about 0.90.
+- Change the weather or the hour in Lookdev and the bounce follows about half a second later, without a new bake.
+- Nothing changes indoors, and nothing changes in the plain viewport light (there is no weather to take a sky from).
+- New gate: tests/spells/cell_sky.sh (Concord and Graygarden, plus an interior that must stay identical).
+
 ## Cell view: the haze is lit like the game's, and the picture is tone-mapped once (lanes FXLIT1 + HDR1, 2026-10-03)
 
 ### Lit effects (lane FXLIT1)

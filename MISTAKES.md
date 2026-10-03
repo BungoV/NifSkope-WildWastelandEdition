@@ -5,6 +5,19 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02 -- SKY1: "the cell program draws nothing outdoors" was a camera under the ground
+
+- What happened: lane PROBEVIEW1 dropped Concord from its gate because every pass picture was identical, and the
+  note "a Lookdev exterior ignores the cell program" was handed to SKY1 as a blocker.
+- The measurement: the program census (WW_PROGRAM_CENSUS) shows the cell program IS served there (205 shapes
+  fo4_cell, 6 fo4_effectcell, in plain mode and in Lookdev alike). The camera was WW_RENDER_CENTER z = 300,
+  while Concord's ground is near z 6200 (the bake's probes stand at 5848..7398). From under the terrain nothing
+  of the cell is in view: plain mode showed a flat background, Lookdev showed only its background cube (a blurred
+  photo of houses), which looked like a scene and so hid the mistake.
+- Rule: before calling a renderer path broken on an exterior, read the ground height from the probes (or the
+  notes' center plus the LAND heights) and put the camera at eye height; a picture that does not change with
+  any setting is first a camera question. A Lookdev background can look like geometry.
+
 ## 2026-10-03 -- FXLIT1 + HDR1: a checker that skipped material swaps; a hand-copied light stride
 
 ### FXLIT1 (2026-10-02/03): blamed the viewer's parse for a checker that skipped material swaps
