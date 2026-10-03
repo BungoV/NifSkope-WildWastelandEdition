@@ -118,6 +118,7 @@ def main(a):
         refl = r3.stdout.strip().splitlines()[-1] if r3.stdout.strip() else r3.stderr.strip()[:200]
         if r3.returncode != 0:
             fails.append('reference: ' + refl[:160])
+        refl = refl[:22] + ' (irradiance median %.3f p95 %.3f)' % irr_of(refl)
     treel = trees(a, txt, tris, P, (x0, y0, x1, y1), lodi, cmd, work, fails)
     print('far %s%s: %d probes over %d cells, %d triangles; heights outside %d; colour %d/%d; roofline worst %.0f '
           '(hoist %.0f); %s; %s; %s; %s'
