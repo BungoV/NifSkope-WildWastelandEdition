@@ -78,6 +78,24 @@ Newest at the top.
   rule, not a story about the geometry.
 - Slot 1 held label -1 (voxels lit with no room) until known rooms ranked first.
 
+### 2026-10-03 lane SRGBTAG1
+- WW_LODGEN_RESOURCES is in Mod Organizer order: the LAST root wins. My first gate run put the fixture root FIRST. The vanilla texture won, and every shot was identical: a false green, caught only because the gate also checks that the fixture texture was actually drawn (fixture vs vanilla must differ). Rule: every override-fixture gate carries a "fixture used" check.
+- A first draft of the code comment claimed the game "never" uses the file's tag. Todd's treat says the opposite: the tag is kept, and the engine ADDS sRGB per slot (diffuse yes, normal/spec no). Write the verdict comment only after the trace is finished.
+- A Python byte-replace of "\n" inside a heredoc silently matched nothing twice. Use the Edit tool for one-line shell-script fixes.
+
+- 2026-10-03 BAKEBLOCK1: edited a bash gate's header while that gate was running under the lock; bash reads
+  the script as it goes, the run ended "unexpected EOF" after all its shots. Judged again with RECHECK=1.
+  Rule: never edit a script that a background run is executing.
+- 2026-10-03 BAKEBLOCK1: passed a relative exe path (release/NifSkope.exe) to cell_speed_run.py from a
+  scratch script; Windows Python's CreateProcess did not find it (WinError 2) and the measurement run was
+  lost in the lock queue. Pass absolute paths to Python launchers.
+- 2026-10-03 BAKEBLOCK1: promoted bakes to the 5x5 + far but not relights of a bake on disk; cell_gi's
+  one-pass relight then traced a one-cell soup under a 5x5 bake (rebuild agree 56.9%). Whatever traces the
+  soup of a bake must load what the bake loaded.
+- 2026-10-03 BAKEBLOCK1: first horizon idea tested street probes; buildings fill a street probe's band in the
+  5x5 alone, so no-LOD could never fail there. The horizon check takes high probes whose band is open in the
+  5x5 alone.
+
 ## 2026-10-03 BOUNCE2: a gate script edited while a runner was executing it
 
 - What: cell_gi.sh was edited (Edit tool) while gates.sh was running `bash tests/spells/cell_gi.sh --red grow`

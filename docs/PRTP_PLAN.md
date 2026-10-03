@@ -1732,6 +1732,42 @@ bungo: "I don't want it to keep showing the low res cubemap instead."
 - Open: the bake's surfel cell (70) straddles thin walls, so the dark room's probes carry ~10% of the lit side
   before the grid; split surfels by room in the bake (proposed lane).
 
+### 2ap. An exterior bake sees the 5x5 block and the far LOD (lane BAKEBLOCK1, 2026-10-03)
+bungo on CAPTURE1's Concord sheet: "the sky is visible where the geometry should be". The sheets and gates
+opened exteriors as `Commonwealth|-15,17|1`, so rays leaving the cell counted as sky where the neighbors'
+buildings stand. Ruled 2026-09-30 (item 5): the 5x5 block at full detail and LOD beyond.
+- Every exterior bake (WW_CELL_PROBE_BAKE or the panel's Bake) loads the 5x5 block whatever n it was asked
+  (`spec.n = max(n, 5)`), then appends the far soup: `probeFarAppendRing` (src/probefar.cpp) puts the
+  worldspace's .lodl ground (step 8, coloured from the .VT.32 sheet), water, .lodi boxes and TREE1 trees
+  out to ceil(rayMax / 4096) = 32 cells, minus the 5x5 (ProbeFarSpec hole; an object goes by the cell of its
+  middle). Probes and surfels are still written for the asked cell only. No toggle.
+- A relight of a bake on disk (WW_CELL_GI_FROM) loads the same block + far: its shadow, sun and feed rays
+  trace the soup, and a one-cell soup under a 5x5 bake failed cell_gi's own rebuild (voxel agree 56.9%).
+  cell_gi.sh's one-pass rung against the exe before BOUNCE2 now holds on the interiors only (that exe
+  relights one cell); Concord's one-pass rebuild still runs and passes.
+- The .lodl is found at WW_CELL_FAR_LOD, else `FO4CSLOD/<ws>/<ws>.lodl` under the data root, the lodgen
+  resources, the LOD panel's output, then the MO2 mods folder. None found: the census says
+  `far soup: NONE -- no FO4CSLOD/... in <places>` and a warning is logged; the bake is not silent about it.
+- Census: `bake block 5x5 (asked 1x1); far soup <path> out to 32 cells: ... triangles +N, ms`.
+- Cost, Concord -15,17 (lean headless bake, 31 GB machine): one cell 12.7 s / 2.2 GB peak; 5x5 + far
+  65.7 s / 6.3 GB (4.4M soup triangles; the far part +1.69M in 8.6 s); 748 probes (one cell: 657 -- the
+  placer sees the neighbors). Lit (non-lean, GUI-like) bake: 115.3 s / 6.7 GB peak. It fits; no fallback exists or is needed.
+- Gate tests/spells/cell_bakeblock.sh + cell_bakeblock_check.py (independent soup reader, Python tracer,
+  prtp_reference.exe). Bars set before the green run. Green: BLOCK fewest small tris 17341 (>= 1024 in each
+  of 25 cells); FAR min sector 132408 (>= 100); OCTANTS at the Concord probe sky sum 0.430 -> 0.297 (drop
+  0.133, no octant rises; the lower four 0.030 -> 0), reference vs .tbk 0.005; HORIZON band -1..+2 deg
+  full / 5x5-only 0.368 over 8 high probes (<= 0.75); EDGE 24 probes on the north edge, the reference on
+  -15,17's soup vs -15,18's: p95 0.0015, max 0.0020 (<= 0.015 / 0.05). Reds: n1 fails all five (EDGE p95
+  0.125, HORIZON 1.000); nolod fails FAR and HORIZON (0.995).
+- Exterior scripts that stay n=1 say why in their header (cell_edmark, cell_pass, cell_skyfull, cell_pick:
+  view tests, no bake). cell_gi, cell_sky and cell_workspace ask n=1 and get the 5x5 + far from the exe.
+- Sheet: scratchpad/bakeblock1_20261003/concord_cube_before_after.png (the Concord probe's cube, albedo, on
+  grey: the one-cell bake's band +-5 deg is 0.378 sky; with the block 0.001).
+- Also: tests/spells/cell_skyfull.sh stage O (pinned OFF = the exe before SKYFULL1) now takes cell_pass's
+  noise rule: the old exe shot twice (rung2_), allowed max(3 x its px, 20) px and 3 x its largest step.
+  Green: Concord 0 px (floor 0), Sanctuary 0 px (floor 8 px, 1 level). `--red level1` (+1 level over 160x160)
+  FAILS (25600 px).
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

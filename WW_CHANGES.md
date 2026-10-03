@@ -31,6 +31,19 @@
   Load doors count as closed, and probes no longer stand on roof tops or the backs of one-sided walls.
   The Vault 111 scanner door no longer shows magenta in the GI pass.
 
+- **Outdoor bakes see the neighbors and the horizon** (lane BAKEBLOCK1). Baking the light of an outdoor cell
+  now loads the 5x5 block of cells around it at full detail, as the game does, and the distant land, buildings
+  and trees from the LOD files out to the horizon. Before, a cell was baked alone and its probes counted the
+  sky where the next street's buildings stand (Concord's street probe: 43% sky, now 30%; at the horizon 38%,
+  now 0). Only the cell's own probes are written. Costs about a minute and 6.3 GB for Concord.
+
+### Lane SRGBTAG1 (2026-10-03): sRGB-tagged diffuse textures no longer draw near-black
+- Mod textures saved as BC7_UNORM_SRGB (DXGI 99) drew about four times darker than in game on every ordinary (BGSM / non-PBRM) material. The BoS Infantry undersuit went from a mean of 89 to 25 out of 255.
+- What the game does (1.10.155): it asks for every lighting-material diffuse as sRGB itself, so a texture tagged sRGB and the same texture untagged look identical in game. The tag changes nothing there.
+- NifSkope now reads a Fallout 4 file texture tagged sRGB exactly as it reads the untagged one. Because of that, the tag stops mattering in NifSkope too. This covers the ordinary, cell and effect shaders.
+- Unchanged: PBRM materials (they already handled the tag and stay byte-identical), environment cube maps, and solid-colour placeholder textures.
+- New gate: tests/spells/srgbtag_legacy.sh. It renders the same texture blocks with the untagged and tagged headers on a vanilla duct, plus his undersuit against a copy retagged untagged. Both pairs are pixel-identical. The red arm is the old build, or WW_SRGBTAG1_RED=1.
+
 ## Probe bake: drip splashes no longer bake as solid swirls; two more ways to take a surface's color (lane CAPTURE1, 2026-10-03)
 
 - The water drips on the Vault 111 walkway (and other glass and water that only bends what is behind it) are no
