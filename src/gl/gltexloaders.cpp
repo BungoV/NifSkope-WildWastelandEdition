@@ -1228,6 +1228,52 @@ static void extract_pbr_lut_data( QByteArray & data )
 	data = pbrLUTData;
 }
 
+/* lane SRGBTAG1 (2026-10-03): in Fallout 4 the _SRGB tag in a DDS header makes no difference to a lighting
+ * material's diffuse. Todd's treat (1.10.155): BSLightingShaderMaterialBase::LoadBaseTextures asks for the diffuse slot
+ * with the sRGB flag SET (normal and smoothness/spec slots with it clear); BSShaderManager::GetTexture carries
+ * it to NiTexture::CreateStreaming, and BSGraphics::CreateTexture( desc, srgb ) runs MakeSRGB on the format
+ * (BC7_UNORM 98 -> BC7_UNORM_SRGB 99, and so on). A 98 diffuse is therefore viewed as 99 anyway, and a file
+ * already tagged 99 gets the same view: 98 and 99 render identically in game, which is why the BoS armor
+ * looks right there. NifSkope's legacy programs (fo4_default, fo4_cell, the effect shaders, ...) read an
+ * untagged diffuse raw and work in that space; GL decoding a tagged one in the sampler drew it about five
+ * times darker (65/255 -> 13/255 on the BoS undersuit). So a Fallout 4 era file texture that GL holds as
+ * sRGB has its hardware decode SKIPPED from the moment it loads: every program reads the stored bytes, the
+ * same as it reads the untagged file, and the tag stops mattering, as in the game. The PBRM program already
+ * skipped it per draw and decodes in its shader for both tags, so its output does not move. Solid-colour
+ * textures ("#AARRGGBBs", e.g. the renderer's perceptual-grey default) and cube maps (CUBE1: the env cube
+ * is meant to decode) keep the decode. Test pin: WW_SRGBTAG1_RED=1 keeps the old decode (the gates' red arm). */
+void TexCache::wwFo4SrgbTagAsUnorm( const NifModel * nif, const QString & filepath, GLenum target, GLint internalFormat )
+{
+	if ( target != GL_TEXTURE_2D || !nif || filepath.startsWith( QChar('#') ) )
+		return;
+	const quint32 bsVersion = nif->getBSVersion();
+	if ( bsVersion < 130 || bsVersion >= 151 )	// Fallout 4 (130) only: Starfield / Fallout 76 decode by design
+		return;
+	switch ( internalFormat ) {
+	case 0x8C40:	// GL_SRGB
+	case 0x8C41:	// GL_SRGB8
+	case 0x8C42:	// GL_SRGB_ALPHA
+	case 0x8C43:	// GL_SRGB8_ALPHA8
+	case 0x8C48:	// GL_COMPRESSED_SRGB
+	case 0x8C49:	// GL_COMPRESSED_SRGB_ALPHA
+	case 0x8C4C:	// GL_COMPRESSED_SRGB_S3TC_DXT1_EXT
+	case 0x8C4D:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT
+	case 0x8C4E:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT
+	case 0x8C4F:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
+	case 0x8E8D:	// GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM
+		break;
+	default:
+		return;
+	}
+	static const bool red = qEnvironmentVariableIntValue( "WW_SRGBTAG1_RED" ) == 1;
+	if ( red )
+		return;
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	if ( !c || !c->hasExtension( QByteArrayLiteral( "GL_EXT_texture_sRGB_decode" ) ) )
+		return;
+	glTexParameteri( GL_TEXTURE_2D, 0x8A48, 0x8A4A );	// TEXTURE_SRGB_DECODE_EXT = SKIP_DECODE_EXT
+}
+
 GLuint TexCache::texLoad( const NifModel * nif, const QString & filepath,
 							TexFmt & format, GLenum & target, GLuint & width, GLuint & height, GLuint * id )
 {
@@ -1330,6 +1376,7 @@ GLuint TexCache::texLoad( const NifModel * nif, const QString & filepath,
 		GLint tmp = 0;
 		glGetTexLevelParameteriv( t, 0, GL_TEXTURE_COMPRESSED, &tmp );
 		format.isCompressed = bool( tmp );
+		wwFo4SrgbTagAsUnorm( nif, filepath, target, format.internalFormat );
 	} else {
 		throw QString( "unknown texture format" );
 	}
