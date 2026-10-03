@@ -1,5 +1,11 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+- Interiors that show the sky in the game (the cell's Show Sky flag, e.g. the Museum of Freedom) now get
+  daylight from the sky in the bounce light: rays that leave through windows and holes count as sky, and in
+  Lookdev the weather's sky colors light them, on top of the cell's own ambient. Closed interiors (vaults,
+  houses) are exactly as before. The sun shines in only for cells with Use Sky Lighting and Sunlight Shadows
+  both set (none in the base game). (lane SKYINT1)
+
 ## The bounce light bounces more than once (2026-10-03)
 
 - The cell view's GI row used to bounce the light once: lamps (and outdoors the sun) light the surfaces, the

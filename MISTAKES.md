@@ -5,6 +5,14 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+- 2026-10-03 SKYINT1: `bs.noSky = spec.interior` assumed every interior is closed; 91 of 1412 vanilla
+  interiors show the sky. Read the record's flags before deciding a class of cell has no X.
+- 2026-10-03 SKYINT1: `CELLS=""` on a harness command line did not mean "no cells": `${CELLS:-default}`
+  treats empty as unset, so the exterior loop ran and gave 2 fake FAILs. cell_sky.sh now uses `${CELLS-...}`;
+  check every harness default for `:-` before passing an empty list.
+- 2026-10-03 SKYINT1: the brief said the worktree had scratchpad/before_main; it did not, and the interior
+  arm FAILed on "no exe". Check the BEFORE path exists before reading a FAIL count.
+
 ## 2026-10-03 BOUNCE2: a gate script edited while a runner was executing it
 
 - What: cell_gi.sh was edited (Edit tool) while gates.sh was running `bash tests/spells/cell_gi.sh --red grow`

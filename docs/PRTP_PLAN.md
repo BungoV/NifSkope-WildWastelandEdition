@@ -1580,6 +1580,34 @@ Open:
   no box is guarded by the wall ray alone.
 - The GPU relight, bricks, the sky picture and fog GI are out of scope. The FO4CS reader comes last.
 
+### 2ak. Interiors that show the sky (lane SKYINT1, 2026-10-03)
+
+The cell view baked every interior with `noSky`: a ray that left the cell was void, never sky. The game's
+cell record says otherwise. CELL DATA (uint16) carries bit 7 Show Sky, bit 8 Use Sky Lighting, bit 11
+Sunlight Shadows; the game's sky-light-shadow test wants bits 8 AND 11. Census over Fallout4.esm + 6 DLC
+masters: 1412 interiors, 91 Show Sky (66 alone, 25 with Use Sky Lighting), 0 with Sunlight Shadows.
+ConcordMuseum01 = 0x1181, MuseumOfWitchcraft01 = 0x0083, Vault111Cryo = 0x0003.
+
+Rule (Division deck s18: a miss is sky):
+- bit 7 clear: unchanged (misses unlinked, no sky file, the relight's sky off). Byte for byte proven.
+- bit 7 set: misses are sky shares in the 8 octants, as outdoors; in Lookdev the relight lights them
+  with the weather's six DALC colors (SKY1's probeSkyCube), ADDED beside the cell's XCLL ambient: the grid
+  never stands in for the ambient indoors (gi.skyLit stays false for interiors).
+- bits 8 + 11: the sun through openings too (shadow ray per surfel). No vanilla cell uses it.
+- bit 8 alone adds nothing beyond bit 7 (the weather already lights the sky shares).
+
+Measured: Museum 627 of 1017 probes see sky, mean 0.115 of the sphere; sky is 66% of the relit total;
+prtp_reference re-trace worst 0.0029. Forcing Vault111Cryo to Show Sky (the false-sky red) gives
+487 of 720 probes, mean 0.175, p95 0.646, worst 0.792 -- the cell's cracks and missing exterior shell.
+
+Limits: an interior cell has no exterior ground or world, so the Museum's roof and window probes see
+"sky" downward (lower octants 0.3-0.9) and take the weather's -Z color there. 8 octants are too coarse
+to separate a window's sky from the void under it; per-direction sky is SKYPIC1.
+
+Gate: tests/spells/cell_sky.sh skyint arm (stages V N I W U S T B + prtp_reference), reds
+WW_CELL_SKYINT_RED=noflag and =all. Bake time unchanged (rays 2228 -> 2162 ms); the relight takes
++19% (451 -> 535 ms) because the extra light needs 7 bounce passes to settle instead of 4.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
