@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 
 #include "gl/celllights.h"
 #include "probebvh.h"
+#include "probebake.h"
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -18,6 +19,7 @@ BSD License - see nifskope.h
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <thread>
@@ -785,18 +787,106 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	// the voxels a fragment on a surfel's surface samples (the shader's normal offset, then +-1)
 	const size_t nVox = size_t( dims[0] ) * size_t( dims[1] ) * size_t( dims[2] );
 	std::vector<quint8> near( nVox, 0 );
+	// lane ROOMCLAMP1: the rooms (src/proberooms.h), rebuilt from the soup; red "noclamp": none (every surface,
+	// probe and slot then has the room -1 and the blend is the one before the lane)
+	R.roomsOn = spec.red != QLatin1String( "noclamp" ) && probeRoomsBuild( soup, spec.rooms, &R.rooms );
+	const ProbeRooms & RM = R.rooms;
+	// every probe's rooms: its cell's, or in a solid cell the nearest air cell's within two cells
+	std::vector<std::array<int, 2>> probeRoom( up.size(), { { -1, -1 } } );
+	if ( R.roomsOn ) {
+		std::vector<std::array<int, 3>> offs;
+		for ( int dz = -2; dz <= 2; dz++ )
+			for ( int dy = -2; dy <= 2; dy++ )
+				for ( int dx = -2; dx <= 2; dx++ )
+					offs.push_back( { dx, dy, dz } );
+		std::stable_sort( offs.begin(), offs.end(), []( const std::array<int, 3> & a, const std::array<int, 3> & b ) {
+			return a[0] * a[0] + a[1] * a[1] + a[2] * a[2] < b[0] * b[0] + b[1] * b[1] + b[2] * b[2];
+		} );
+		for ( size_t j = 0; j < up.size(); j++ ) {
+			for ( const auto & o : offs ) {
+				const double q[3] = { up[j].p[0] + o[0] * RM.cell, up[j].p[1] + o[1] * RM.cell, up[j].p[2] + o[2] * RM.cell };
+				int r2[2];
+				if ( RM.at( q, r2 ) && r2[0] >= 0 ) {
+					probeRoom[j] = { r2[0], r2[1] };
+					break;
+				}
+			}
+			R.probesRoomless += probeRoom[j][0] < 0;
+		}
+		for ( const auto & pr : probeRoom )
+			R.probeRooms.insert( R.probeRooms.end(), { pr[0], pr[1] } );
+	}
+	// lane ROOMCLAMP1: per near voxel, the rooms of the surfaces reading it (at most four), how many read it from
+	// each, and each room's eye: its sample point (surface + half a voxel along its normal) nearest the voxel's
+	// centre, where a fragment of that room reading the voxel stands
+	struct VS { int lab[4] = { -1, -1, -1, -1 }; int n[4] = { 0, 0, 0, 0 }; float eye[4][3]; float eyeD[4] = { 1e30f, 1e30f, 1e30f, 1e30f }; int used = 0; };
+	std::vector<VS> vs( nVox );
 	for ( const US & u : us ) {
 		int g[3];
-		for ( int c = 0; c < 3; c++ )
-			g[c] = int( std::floor( ( u.p[c] + u.n[c] * v * 0.5 - R.origin[c] ) / v ) );
+		double s[3];
+		for ( int c = 0; c < 3; c++ ) {
+			s[c] = u.p[c] + u.n[c] * v * 0.5;
+			g[c] = int( std::floor( ( s[c] - R.origin[c] ) / v ) );
+		}
+		int L[2] = { -1, -1 };
+		if ( R.roomsOn )
+			RM.surface( u.p, u.n, L );
 		for ( int dz = -1; dz <= 1; dz++ )
 			for ( int dy = -1; dy <= 1; dy++ )
 				for ( int dx = -1; dx <= 1; dx++ ) {
 					const int x = g[0] + dx, y = g[1] + dy, z = g[2] + dz;
-					if ( x >= 0 && y >= 0 && z >= 0 && x < dims[0] && y < dims[1] && z < dims[2] )
-						near[( size_t( z ) * size_t( dims[1] ) + size_t( y ) ) * size_t( dims[0] ) + size_t( x )] = 1;
+					if ( x < 0 || y < 0 || z < 0 || x >= dims[0] || y >= dims[1] || z >= dims[2] )
+						continue;
+					const size_t i = ( size_t( z ) * size_t( dims[1] ) + size_t( y ) ) * size_t( dims[0] ) + size_t( x );
+					near[i] = 1;
+					const int gi[3] = { x, y, z };
+					double d2 = 0.0;
+					for ( int c = 0; c < 3; c++ ) {
+						const double e = s[c] - ( R.origin[c] + ( gi[c] + 0.5 ) * v );
+						d2 += e * e;
+					}
+					VS & V = vs[i];
+					for ( int li = 0; li < ( L[1] >= 0 ? 2 : 1 ); li++ ) {
+						int k = 0;
+						while ( k < V.used && V.lab[k] != L[li] )
+							k++;
+						if ( k == V.used ) {
+							if ( V.used == 4 )
+								continue;
+							V.lab[V.used++] = L[li];
+						}
+						V.n[k]++;
+						if ( d2 < V.eyeD[k] ) {
+							V.eyeD[k] = float( d2 );
+							for ( int c = 0; c < 3; c++ )
+								V.eye[k][c] = float( s[c] );
+						}
+					}
 				}
 	}
+	// the two slots: the rooms read most (first seen first on a tie); a known room before the surfaces that found
+	// none (-1: the shader's room blend never matches it, only the plain blend reads slot 0)
+	std::vector<std::array<int, 2>> slotOf( nVox, { { -1, -1 } } );   // index into VS, -1 none
+	for ( size_t i = 0; i < nVox; i++ ) {
+		const VS & V = vs[i];
+		int b0 = -1, b1 = -1;
+		auto more = [&]( int k, int than ) {
+			return than < 0 || ( V.lab[k] >= 0 ) > ( V.lab[than] >= 0 )
+				|| ( ( V.lab[k] >= 0 ) == ( V.lab[than] >= 0 ) && V.n[k] > V.n[than] );
+		};
+		for ( int k = 0; k < V.used; k++ ) {
+			if ( more( k, b0 ) ) {
+				b1 = b0;
+				b0 = k;
+			} else if ( more( k, b1 ) )
+				b1 = k;
+		}
+		if ( b1 >= 0 && V.lab[b1] < 0 )
+			b1 = -1;
+		slotOf[i] = { b0, b1 };
+	}
+	const bool redNoEye = spec.red == QLatin1String( "noeye" );
+	std::atomic<int> nEye( 0 ), nFar( 0 ), nBare( 0 ), nTwo( 0 ), nTwoBare( 0 ), nElse( 0 );
 	std::vector<size_t> todo;
 	for ( size_t i = 0; i < nVox; i++ )
 		if ( near[i] )
@@ -804,6 +894,11 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.voxelsNear = int( todo.size() );
 	R.grid.assign( nVox * 6 * 4, 0.0f );
 	R.gridSky.assign( nVox * 6 * 4, 0.0f );	// lane PROBEVIEW1: the same voxels, the same weights
+	if ( R.roomsOn ) {
+		R.grid2.assign( nVox * 6 * 4, 0.0f );
+		R.gridSky2.assign( nVox * 6 * 4, 0.0f );
+		R.slotRooms.assign( nVox, probeRoomsPack( -1, -1 ) );
+	}
 	std::atomic<qint64> vr( 0 ), vb( 0 );
 	std::atomic<int> valid( 0 );
 	parallelFor( todo.size(), [&]( size_t k ) {
@@ -811,58 +906,183 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		const int x = int( i % size_t( dims[0] ) ), y = int( ( i / size_t( dims[0] ) ) % size_t( dims[1] ) ),
 			z = int( i / ( size_t( dims[0] ) * size_t( dims[1] ) ) );
 		const double c[3] = { R.origin[0] + ( x + 0.5 ) * v, R.origin[1] + ( y + 0.5 ) * v, R.origin[2] + ( z + 0.5 ) * v };
-		const Key3 ck { floorDiv( float( c[0] ), float( rad ) ), floorDiv( float( c[1] ), float( rad ) ), floorDiv( float( c[2] ), float( rad ) ) };
-		double acc[6][3] = {}, accSky[6] = {}, wsum = 0.0;
+		int cr[2] = { -1, -1 };
+		if ( R.roomsOn )
+			RM.at( c, cr );
+		const VS & V = vs[i];
 		qint64 nr = 0, nb = 0;
-		for ( int dz = -1; dz <= 1; dz++ )
-			for ( int dy = -1; dy <= 1; dy++ )
-				for ( int dx = -1; dx <= 1; dx++ ) {
-					auto it = ph.find( Key3 { ck.x + dx, ck.y + dy, ck.z + dz } );
-					if ( it == ph.end() )
-						continue;
-					for ( int j : it->second ) {
-						const UP & P = up[size_t( j )];
-						double d2 = 0.0;
-						for ( int a = 0; a < 3; a++ )
-							d2 += ( P.p[a] - c[a] ) * ( P.p[a] - c[a] );
-						if ( d2 >= rad * rad )
-							continue;
-						if ( !redNoVis ) {
-							nr++;
-							if ( blocked( c, P.p, 0.0 ) ) {
-								nb++;
+		int labs[2] = { -1, -1 };
+		for ( int slot = 0; slot < 2; slot++ ) {
+			const int si = slotOf[i][size_t( slot )];
+			if ( si < 0 )
+				continue;
+			const int lab = V.lab[si];
+			labs[slot] = lab;
+			if ( slot == 1 )
+				nTwo++;
+			double acc[6][3] = {}, accSky[6] = {}, wsum = 0.0;
+			// the probes of room `lab` (any: -1) within r of o that o sees, weighted (1 - d^2/r^2)^2
+			auto gather = [&]( const double o[3], double r ) {
+				const Key3 ck { floorDiv( float( o[0] ), float( rad ) ), floorDiv( float( o[1] ), float( rad ) ), floorDiv( float( o[2] ), float( rad ) ) };
+				const int reach = int( std::ceil( r / rad ) );
+				for ( int dz = -reach; dz <= reach; dz++ )
+					for ( int dy = -reach; dy <= reach; dy++ )
+						for ( int dx = -reach; dx <= reach; dx++ ) {
+							auto it = ph.find( Key3 { ck.x + dx, ck.y + dy, ck.z + dz } );
+							if ( it == ph.end() )
 								continue;
+							for ( int j : it->second ) {
+								if ( lab >= 0 && probeRoom[size_t( j )][0] != lab && probeRoom[size_t( j )][1] != lab )
+									continue;
+								const UP & P = up[size_t( j )];
+								double d2 = 0.0;
+								for ( int a = 0; a < 3; a++ )
+									d2 += ( P.p[a] - o[a] ) * ( P.p[a] - o[a] );
+								if ( d2 >= r * r )
+									continue;
+								if ( !redNoVis ) {
+									nr++;
+									if ( blocked( o, P.p, 0.0 ) ) {
+										nb++;
+										continue;
+									}
+								}
+								const double t = 1.0 - d2 / ( r * r );
+								const double w = t * t;
+								wsum += w;
+								for ( int a = 0; a < 6; a++ ) {
+									for ( int ch = 0; ch < 3; ch++ )
+										acc[a][ch] += w * P.E[a][ch];
+									accSky[a] += w * P.sky[a];
+								}
 							}
 						}
-						const double t = 1.0 - d2 / ( rad * rad );
-						const double w = t * t;
-						wsum += w;
-						for ( int a = 0; a < 6; a++ ) {
-							for ( int ch = 0; ch < 3; ch++ )
-								acc[a][ch] += w * P.E[a][ch];
-							accSky[a] += w * P.sky[a];
-						}
-					}
+			};
+			const double e[3] = { V.eye[si][0], V.eye[si][1], V.eye[si][2] };
+			// from the centre when it stands in the slot's room (or no room is known), else from the slot's eye
+			const bool fromCentre = lab < 0 || cr[0] == lab || cr[1] == lab;
+			if ( !fromCentre )
+				nElse++;
+			gather( fromCentre ? c : e, rad );
+			// lane ROOMCLAMP1: blocked at the centre (inside a wall, or behind it): from the voxel's eye, then twice as far
+			if ( wsum <= 0.0 && !redNoEye ) {
+				if ( fromCentre ) {
+					gather( e, rad );
+					if ( wsum > 0.0 && slot == 0 )
+						nEye++;
 				}
+				if ( wsum <= 0.0 ) {
+					gather( e, 2.0 * rad );
+					if ( wsum > 0.0 && slot == 0 )
+						nFar++;
+				}
+			}
+			if ( wsum <= 0.0 ) {
+				if ( slot == 0 )
+					nBare++;
+				else
+					nTwoBare++;
+				continue;
+			}
+			if ( slot == 0 )
+				valid++;
+			std::vector<float> & G = slot == 0 ? R.grid : R.grid2;
+			std::vector<float> & GS = slot == 0 ? R.gridSky : R.gridSky2;
+			for ( int a = 0; a < 6; a++ ) {
+				const size_t o = ( size_t( a ) * nVox + i ) * 4;
+				for ( int ch = 0; ch < 3; ch++ )
+					G[o + size_t( ch )] = float( acc[a][ch] / wsum );
+				G[o + 3] = 1.0f;
+				GS[o] = GS[o + 1] = GS[o + 2] = float( accSky[a] / wsum );
+				GS[o + 3] = 1.0f;
+			}
+		}
 		vr += nr;
 		vb += nb;
-		if ( wsum <= 0.0 )
-			return;
-		valid++;
-		for ( int a = 0; a < 6; a++ ) {
-			float * g = &R.grid[( ( ( size_t( a ) * size_t( dims[2] ) + size_t( z ) ) * size_t( dims[1] ) + size_t( y ) )
-				* size_t( dims[0] ) + size_t( x ) ) * 4];
-			for ( int ch = 0; ch < 3; ch++ )
-				g[ch] = float( acc[a][ch] / wsum );
-			g[3] = 1.0f;
-			float * k = &R.gridSky[size_t( g - R.grid.data() )];
-			k[0] = k[1] = k[2] = float( accSky[a] / wsum );
-			k[3] = 1.0f;
-		}
+		if ( R.roomsOn )
+			R.slotRooms[i] = probeRoomsPack( labs[0], labs[1] );
 	} );
 	R.visRays = vr;
 	R.visBlocked = vb;
 	R.voxelsValid = valid;
+	R.voxelsEye = nEye;
+	R.voxelsFar = nFar;
+	R.voxelsTwoRooms = nTwo;
+	R.voxelsCentreElsewhere = nElse;
+	// lane ROOMCLAMP1: a slot whose eye sees no probe either (a pocket: a beam's top under the ceiling) takes the
+	// mean of the valid slots of its room among its neighbours, two rings at most
+	for ( int ring = 0; ring < 2 && !redNoEye; ring++ ) {
+		struct GW { size_t i; int slot; float val[6][4]; };
+		std::vector<GW> grow;
+		for ( size_t i : todo ) {
+			for ( int slot = 0; slot < 2; slot++ ) {
+				const int si = slotOf[i][size_t( slot )];
+				if ( si < 0 )
+					continue;
+				const std::vector<float> & G0 = slot == 0 ? R.grid : R.grid2;
+				if ( G0[i * 4 + 3] > 0.0f )
+					continue;
+				const int lab = vs[i].lab[si];
+				const int x = int( i % size_t( dims[0] ) ), y = int( ( i / size_t( dims[0] ) ) % size_t( dims[1] ) ),
+					z = int( i / ( size_t( dims[0] ) * size_t( dims[1] ) ) );
+				double s[6][4] = {};
+				int n = 0;
+				for ( int dz = -1; dz <= 1; dz++ )
+					for ( int dy = -1; dy <= 1; dy++ )
+						for ( int dx = -1; dx <= 1; dx++ ) {
+							const int xx = x + dx, yy = y + dy, zz = z + dz;
+							if ( xx < 0 || yy < 0 || zz < 0 || xx >= dims[0] || yy >= dims[1] || zz >= dims[2] )
+								continue;
+							const size_t j = ( size_t( zz ) * size_t( dims[1] ) + size_t( yy ) ) * size_t( dims[0] ) + size_t( xx );
+							for ( int sj = 0; sj < 2; sj++ ) {
+								const int q = slotOf[j][size_t( sj )];
+								if ( q < 0 || vs[j].lab[q] != lab )
+									continue;
+								const std::vector<float> & G = sj == 0 ? R.grid : R.grid2;
+								const std::vector<float> & GS = sj == 0 ? R.gridSky : R.gridSky2;
+								if ( G[j * 4 + 3] <= 0.0f )
+									continue;
+								n++;
+								for ( int a = 0; a < 6; a++ ) {
+									const size_t o = ( size_t( a ) * nVox + j ) * 4;
+									for ( int ch = 0; ch < 3; ch++ )
+										s[a][ch] += G[o + size_t( ch )];
+									s[a][3] += GS[o];
+								}
+							}
+						}
+				if ( !n )
+					continue;
+				GW w;
+				w.i = i;
+				w.slot = slot;
+				for ( int a = 0; a < 6; a++ )
+					for ( int ch = 0; ch < 4; ch++ )
+						w.val[a][ch] = float( s[a][ch] / n );
+				grow.push_back( w );
+			}
+		}
+		for ( const GW & w : grow ) {
+			std::vector<float> & G = w.slot == 0 ? R.grid : R.grid2;
+			std::vector<float> & GS = w.slot == 0 ? R.gridSky : R.gridSky2;
+			for ( int a = 0; a < 6; a++ ) {
+				const size_t o = ( size_t( a ) * nVox + w.i ) * 4;
+				for ( int ch = 0; ch < 3; ch++ )
+					G[o + size_t( ch )] = w.val[a][ch];
+				G[o + 3] = 1.0f;
+				GS[o] = GS[o + 1] = GS[o + 2] = w.val[a][3];
+				GS[o + 3] = 1.0f;
+			}
+			if ( w.slot == 0 ) {
+				R.voxelsGrown++;
+				R.voxelsValid++;
+				nBare--;
+			} else
+				nTwoBare--;
+		}
+	}
+	R.voxelsBare = nBare;
+	R.voxelsTwoBare = nTwoBare;
 	R.msGrid = clock.nsecsElapsed() / 1e6 - R.msLight - R.msGather - R.msBounce;
 
 	// the gate's copies
@@ -917,6 +1137,23 @@ static QString bounceCensusText( const ProbeGiResult & r )
 		.arg( r.feedRays ).arg( r.feedBlocked ).arg( r.feedOtherRoom ).arg( r.msBounce, 0, 'f', 0 );
 }
 
+void probeGiRoomsInto( ProbeGiResult & r, WwCellGi & gi )
+{
+	if ( !r.roomsOn || gi.rgba.empty() )
+		return;
+	gi.rgba.insert( gi.rgba.end(), r.grid2.begin(), r.grid2.end() );
+	gi.sky.insert( gi.sky.end(), r.gridSky2.begin(), r.gridSky2.end() );
+	gi.slotRooms = std::move( r.slotRooms );
+	gi.rooms.resize( r.rooms.a.size() );
+	for ( size_t i = 0; i < r.rooms.a.size(); i++ )
+		gi.rooms[i] = probeRoomsPack( r.rooms.a[i], r.rooms.b[i] );
+	for ( int c = 0; c < 3; c++ ) {
+		gi.roomsOrigin[c] = r.rooms.origin[c];
+		gi.roomsDims[c] = r.rooms.dims[c];
+	}
+	gi.roomsCell = r.rooms.cell;
+}
+
 QString probeGiCensusText( const ProbeGiResult & r )
 {
 	if ( !r.ok )
@@ -928,6 +1165,14 @@ QString probeGiCensusText( const ProbeGiResult & r )
 		.arg( r.shadowRays ).arg( r.shadowBlocked ).arg( r.dims[0] ).arg( r.dims[1] ).arg( r.dims[2] )
 		.arg( double( r.voxel ), 0, 'f', 1 ).arg( double( r.radius ), 0, 'f', 1 ).arg( r.voxelsNear ).arg( r.voxelsValid )
 		.arg( r.visRays ).arg( r.visBlocked ).arg( r.msLight, 0, 'f', 0 ).arg( r.msGather, 0, 'f', 0 ).arg( r.msGrid, 0, 'f', 0 )
+		+ QStringLiteral( "\n  gi grid: voxels blocked at their centre filled from their eye: within the radius %1, "
+			"within twice it %2; from valid neighbours %3; left empty %4" ).arg( r.voxelsEye ).arg( r.voxelsFar )
+			.arg( r.voxelsGrown ).arg( r.voxelsBare )   // lane ROOMCLAMP1
+		+ QStringLiteral( "\n  " ) + ( r.roomsOn ? probeRoomsCensusText( r.rooms )
+			+ QStringLiteral( "\n  gi rooms: voxels with a second room %1 (left empty %2), slots gathered from their eye "
+				"(the centre in another room) %3, probes in no room %4" ).arg( r.voxelsTwoRooms ).arg( r.voxelsTwoBare )
+				.arg( r.voxelsCentreElsewhere ).arg( r.probesRoomless )
+			: QStringLiteral( "gi rooms: off (red noclamp: one value a voxel)" ) )
 		+ ( r.skyLit ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() )
 		+ QStringLiteral( "\n  " ) + bounceCensusText( r );
 }
@@ -1036,10 +1281,117 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 			t.write( s.toUtf8() );
 		}
 	}
+	/* lane ROOMCLAMP1, with the rooms on:
+	 *   gi_rooms.bin  the fine grid (proberooms.h probeRoomsDump)
+	 *   gi_slots.bin  gi_grid.bin's header, then per voxel int32 slot 0 room, int32 slot 1 room (-1 none), then
+	 *                 slot 1's grid (gi_grid.bin's layout), then slot 1's sky grid
+	 *   gi_proberooms.bin  int32 n, then per probe int32 room, int32 second room */
+	if ( r.roomsOn ) {
+		if ( !probeRoomsDump( r.rooms, QDir( dir ).filePath( QStringLiteral( "gi_rooms.bin" ) ), err ) )
+			return false;
+		QByteArray labs;
+		labs.reserve( int( r.slotRooms.size() * 8 ) );
+		for ( float p : r.slotRooms ) {
+			const int k = int( p + 0.5f );
+			labs += i32( k / 4096 - 1 ) + i32( k % 4096 - 1 );
+		}
+		std::vector<float> both( r.grid2 );
+		both.insert( both.end(), r.gridSky2.begin(), r.gridSky2.end() );
+		if ( !put( QStringLiteral( "gi_slots.bin" ), gh + labs, both ) )
+			return false;
+		QFile pr( QDir( dir ).filePath( QStringLiteral( "gi_proberooms.bin" ) ) );
+		if ( !pr.open( QIODevice::WriteOnly ) ) {
+			*err = QStringLiteral( "cannot write %1" ).arg( pr.fileName() );
+			return false;
+		}
+		pr.write( i32( qint32( r.probeRooms.size() / 2 ) ) );
+		pr.write( reinterpret_cast<const char *>( r.probeRooms.data() ), qint64( r.probeRooms.size() * 4 ) );
+	}
 	QFile m( QDir( dir ).filePath( QStringLiteral( "gi_meta.txt" ) ) );
 	if ( m.open( QIODevice::WriteOnly ) )
 		m.write( QStringLiteral( "fixtureClear %1\nradiusScale %2\nred %3\n%4\n" ).arg( double( spec.fixtureClear ) )
 			.arg( double( spec.radiusScale ) ).arg( spec.red.isEmpty() ? QStringLiteral( "-" ) : spec.red )
 			.arg( probeGiCensusText( r ) ).toUtf8() );
 	return true;
+}
+
+// lane ROOMCLAMP1: `probegi --soup <f> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b [--light ...]
+// [--spacing s] [--rays n] [--passes n] [--red noclamp|...] [--rooms-red conn26|boxes|glasswall] [--pinch u]
+// [--cell u]`: place, bake (<dir>/bake), relight as an interior lit by the lights given, dump into <dir>
+int probeGiCli( const QStringList & args )
+{
+	QString soupPath, outDir, rect;
+	ProbePlaceSpec ps;
+	ProbeBakeSpec bs;
+	ProbeGiSpec gs;
+	WwCellLighting L;
+	L.interior = true;
+	for ( int i = 0; i < args.size(); i++ ) {
+		const QString & a = args[i];
+		const QString nx = i + 1 < args.size() ? args[i + 1] : QString();
+		if ( a == QLatin1String( "--soup" ) ) { soupPath = nx; i++; }
+		else if ( a == QLatin1String( "--out" ) ) { outDir = nx; i++; }
+		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
+		else if ( a == QLatin1String( "--spacing" ) ) { ps.spacing = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--rays" ) ) { bs.rays = nx.toInt(); i++; }
+		else if ( a == QLatin1String( "--passes" ) ) { gs.passes = nx.toInt(); i++; }
+		else if ( a == QLatin1String( "--red" ) ) { gs.red = nx; i++; }
+		else if ( a == QLatin1String( "--rooms-red" ) ) { gs.rooms.red = nx; i++; }
+		else if ( a == QLatin1String( "--pinch" ) ) { gs.rooms.pinch = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--cell" ) ) { gs.rooms.cell = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--light" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 7 ) {
+				WwCellLight l;
+				for ( int c = 0; c < 3; c++ ) {
+					l.pos[c] = v[c].toFloat();
+					l.color[c] = v[4 + c].toFloat();
+				}
+				l.radius = v[3].toFloat();
+				L.lights.push_back( l );
+			}
+			i++;
+		}
+	}
+	const QStringList rc = rect.split( ',' );
+	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() ) {
+		std::fprintf( stderr, "usage: probegi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b "
+			"[--light ...] [--spacing s] [--rays n] [--passes n] [--red noclamp|noeye|novis|...] "
+			"[--rooms-red conn26|boxes|glasswall] [--pinch u] [--cell u]\n" );
+		return 2;
+	}
+	ps.minX = rc[0].toFloat();
+	ps.minY = rc[1].toFloat();
+	ps.maxX = rc[2].toFloat();
+	ps.maxY = rc[3].toFloat();
+	ProbeSoup soup;
+	QString err;
+	if ( !probeSoupRead( soupPath, &soup, &err ) ) {
+		std::fprintf( stderr, "probegi: %s\n", qPrintable( err ) );
+		return 1;
+	}
+	ProbePlaceResult pr;
+	if ( !probePlace( soup, ps, &pr ) ) {
+		std::fprintf( stderr, "probegi: placement: %s\n", qPrintable( pr.error ) );
+		return 1;
+	}
+	const QString bakeDir = QDir( outDir ).filePath( QStringLiteral( "bake" ) );
+	ProbeBakeResult br;
+	if ( !probeBake( soup, pr.probes, bs, bakeDir, &br, &pr.roomBoxes ) ) {
+		std::fprintf( stderr, "probegi: %s\n", qPrintable( br.error ) );
+		return 1;
+	}
+	ProbeGiResult gr;
+	if ( !probeGiRelight( soup, bakeDir, L, gs, &gr ) ) {
+		std::fprintf( stderr, "probegi: %s\n", qPrintable( gr.error ) );
+		return 1;
+	}
+	if ( !probeGiDump( gr, gs, outDir, &err ) ) {
+		std::fprintf( stderr, "probegi: %s\n", qPrintable( err ) );
+		return 1;
+	}
+	std::fputs( qPrintable( probeCensusText( pr ) ), stdout );
+	std::fputs( qPrintable( probeBakeCensusText( br ) ), stdout );
+	std::fputs( qPrintable( probeGiCensusText( gr ) + QStringLiteral( "\n" ) ), stdout );
+	return 0;
 }

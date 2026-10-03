@@ -283,11 +283,15 @@ struct Chunk
 
 } // namespace
 
-bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, const ProbeBakeSpec & spec,
+bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn, const ProbeBakeSpec & spec,
 	const QString & outDir, ProbeBakeResult * out, const std::vector<ProbeRoomBox> * roomBoxes )
 {
 	ProbeBakeResult & R = *out;
 	R = ProbeBakeResult();
+	// lane ROOMCLAMP1: the probes the bake traces (a probe outside the shell is moved or dropped below)
+	std::vector<ProbePoint> probesOwn( probesIn );
+	const std::vector<ProbePoint> & probes = probesOwn;
+	std::vector<int> cubeDumpProbes = spec.cubeDumpProbes;
 	if ( soup.tris.empty() || probes.empty() ) {
 		R.error = soup.tris.empty() ? QStringLiteral( "the soup is empty" ) : QStringLiteral( "no probes to bake" );
 		return false;
@@ -362,6 +366,162 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 			}
 			doorBoxes.push_back( b );
 		}
+
+	/* ---- lane ROOMCLAMP1: PROBES OUTSIDE THE SHELL (the DDGI / APV practice). An interior's shell is one-sided:
+	 * seen from outside the building (standing on its roof) a probe's rays meet the BACKS of faces (n . d > 0
+	 * by the stored winding; a two-sided face has no back). A probe whose back-face share of the sphere is over
+	 * spec.backMax moves to the nearest point of a 35-unit lattice (within 280) under it, 16 units clear of any
+	 * surface; none: it is dropped. backMax >= 1 or red "backface": every probe stays (the old bake). */
+	{
+		const int NB = 256, NQ = 32;
+		std::vector<double> bd( size_t( NB ) * 3 );
+		const double gold = 3.14159265358979323846 * ( 3.0 - std::sqrt( 5.0 ) );
+		for ( int i = 0; i < NB; i++ ) {
+			const double z = 1.0 - ( 2.0 * i + 1.0 ) / NB, r = std::sqrt( std::max( 0.0, 1.0 - z * z ) );
+			bd[size_t( i ) * 3 + 0] = r * std::cos( gold * i );
+			bd[size_t( i ) * 3 + 1] = r * std::sin( gold * i );
+			bd[size_t( i ) * 3 + 2] = z;
+		}
+		// the share over `n` rays (every NB / n-th of the set), the nearest hit in *near
+		auto backShare = [&]( const double pl[3], int n, double * near ) -> double {
+			int back = 0;
+			*near = 1e300;
+			const int stride = NB / n;
+			for ( int i = 0; i < NB; i += stride ) {
+				const double * d = &bd[size_t( i ) * 3];
+				double t = 0;
+				int tri = -1;
+				if ( !bvh.ray( pl, d, spec.rayMax, &t, &tri ) || tri < 0 )
+					continue;
+				*near = std::min( *near, t );
+				if ( soup.isTwoSided( size_t( tri ) ) )
+					continue;
+				const float * p = &bvh.t[size_t( tri ) * 9];
+				const double e1[3] = { double( p[3] ) - p[0], double( p[4] ) - p[1], double( p[5] ) - p[2] };
+				const double e2[3] = { double( p[6] ) - p[0], double( p[7] ) - p[1], double( p[8] ) - p[2] };
+				const double nn[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+				if ( nn[0] * d[0] + nn[1] * d[1] + nn[2] * d[2] > 0 )
+					back++;
+			}
+			return double( back ) / double( ( NB + stride - 1 ) / stride );
+		};
+		// lane ROOMCLAMP1: a roof top (nothing straight above, the back of a one-sided face straight below) is
+		// never a move's target: a point on a roof can sit just under the bar (Museum, 2 such moves at 0.23)
+		auto roofTop = [&]( const double c[3] ) -> bool {
+			const double up[3] = { 0, 0, 1 }, dn[3] = { 0, 0, -1 };
+			double t = 0;
+			int tri = -1;
+			if ( bvh.ray( c, up, spec.rayMax, &t, &tri ) && tri >= 0 )
+				return false;
+			if ( !bvh.ray( c, dn, spec.rayMax, &t, &tri ) || tri < 0 || soup.isTwoSided( size_t( tri ) ) )
+				return false;
+			const float * p = &bvh.t[size_t( tri ) * 9];
+			const double e1[2] = { double( p[3] ) - p[0], double( p[4] ) - p[1] };
+			const double e2[2] = { double( p[6] ) - p[0], double( p[7] ) - p[1] };
+			return e1[0] * e2[1] - e1[1] * e2[0] < 0;   // n.z < 0: the ray down meets its back
+		};
+		const bool ruleOn = spec.backMax < 1.0f && spec.red != QLatin1String( "backface" );
+		const double step = 35.0, reach = 280.0, clear = 16.0;
+		std::vector<std::array<double, 3>> offs;
+		const int kr = int( reach / step );
+		for ( int k = -kr; k <= kr; k++ )
+			for ( int j = -kr; j <= kr; j++ )
+				for ( int i = -kr; i <= kr; i++ ) {
+					const double o3[3] = { i * step, j * step, k * step };
+					const double l2 = o3[0] * o3[0] + o3[1] * o3[1] + o3[2] * o3[2];
+					if ( l2 > 0 && l2 <= reach * reach )
+						offs.push_back( { o3[0], o3[1], o3[2] } );
+				}
+		std::stable_sort( offs.begin(), offs.end(), []( const std::array<double, 3> & a, const std::array<double, 3> & b ) {
+			return a[0] * a[0] + a[1] * a[1] + a[2] * a[2] < b[0] * b[0] + b[1] * b[1] + b[2] * b[2];
+		} );
+		const size_t np = probesOwn.size();
+		std::vector<double> share( np, 0.0 );
+		std::vector<int> fate( np, 0 );   // 0 kept, 1 moved, 2 dropped
+		std::vector<std::array<double, 3>> moved( np );
+		std::atomic<size_t> next( 0 );
+		auto work = [&]() {
+			for ( size_t pi; ( pi = next++ ) < np; ) {
+				const ProbePoint & pp = probesOwn[pi];
+				const double pl[3] = { double( pp.pos[0] ) - O[0], double( pp.pos[1] ) - O[1], double( pp.pos[2] ) };
+				double near = 0;
+				share[pi] = backShare( pl, NB, &near );
+				if ( !ruleOn || share[pi] <= double( spec.backMax ) )
+					continue;
+				fate[pi] = 2;
+				for ( const auto & o3 : offs ) {
+					const double c[3] = { pl[0] + o3[0], pl[1] + o3[1], pl[2] + o3[2] };
+					if ( backShare( c, NQ, &near ) > double( spec.backMax ) || !( near > clear ) )
+						continue;
+					if ( backShare( c, NB, &near ) > double( spec.backMax ) || !( near > clear ) || roofTop( c ) )
+						continue;
+					fate[pi] = 1;
+					moved[pi] = { c[0] + O[0], c[1] + O[1], c[2] };
+					break;
+				}
+			}
+		};
+		{
+			using std::thread;
+			const int nt = std::max( 1, spec.threads > 0 ? spec.threads : int( thread::hardware_concurrency() ) );
+			std::vector<std::thread> pool;
+			for ( int t = 0; t < nt; t++ )
+				pool.emplace_back( work );
+			for ( std::thread & t : pool )
+				t.join();
+		}
+		R.backMax = spec.backMax;
+		R.backRule = ruleOn;
+		R.backHist.assign( 20, 0 );
+		std::vector<int> newIndex( np, -1 );
+		std::vector<ProbePoint> kept;
+		kept.reserve( np );
+		for ( size_t pi = 0; pi < np; pi++ ) {
+			R.backHist[size_t( std::min( 19, int( share[pi] * 20.0 ) ) )]++;
+			R.backShareMax = std::max( R.backShareMax, share[pi] );
+			if ( fate[pi] == 2 ) {
+				R.backDropped++;
+				continue;
+			}
+			ProbePoint q = probesOwn[pi];
+			if ( fate[pi] == 1 ) {
+				R.backMoved++;
+				for ( int k = 0; k < 3; k++ )
+					q.pos[k] = float( moved[pi][size_t( k )] );
+				// its room: the room box it now stands in (none: outdoors)
+				q.room[0] = 0;
+				q.room[1] = kProbeRoomNone;
+				if ( roomBoxes )
+					for ( const ProbeRoomBox & b : *roomBoxes )
+						if ( q.pos[0] >= b.lo[0] && q.pos[0] <= b.hi[0] && q.pos[1] >= b.lo[1] && q.pos[1] <= b.hi[1]
+							&& q.pos[2] >= b.lo[2] && q.pos[2] <= b.hi[2] ) {
+							q.room[0] = b.room;
+							break;
+						}
+			}
+			newIndex[pi] = int( kept.size() );
+			kept.push_back( q );
+		}
+		if ( !spec.backDump.isEmpty() ) {   // the gate's list: index, position, share, fate, where it went
+			QFile f( spec.backDump );
+			if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) ) {
+				QTextStream ts( &f );
+				ts << "# probe\tx\ty\tz\tbackshare\tfate\tnx\tny\tnz\tbackMax " << spec.backMax << ( ruleOn ? "" : " RULE OFF" ) << "\n";
+				for ( size_t pi = 0; pi < np; pi++ )
+					ts << pi << "\t" << probesOwn[pi].pos[0] << "\t" << probesOwn[pi].pos[1] << "\t" << probesOwn[pi].pos[2]
+					   << "\t" << share[pi] << "\t" << ( fate[pi] == 0 ? "kept" : fate[pi] == 1 ? "moved" : "dropped" ) << "\t"
+					   << ( fate[pi] == 1 ? moved[pi][0] : 0.0 ) << "\t" << ( fate[pi] == 1 ? moved[pi][1] : 0.0 ) << "\t"
+					   << ( fate[pi] == 1 ? moved[pi][2] : 0.0 ) << "\n";
+			}
+		}
+		for ( int & ci : cubeDumpProbes )
+			ci = ( ci >= 0 && size_t( ci ) < np ) ? newIndex[size_t( ci )] : -1;
+		probesOwn.swap( kept );
+		if ( probesOwn.empty() ) {
+			R.error = QStringLiteral( "every probe stood outside the shell" );
+			return false;
+		}
+	}
 
 	// the ray set: a Fibonacci sphere, 4 pi / N steradians each
 	std::vector<double> dirs( size_t( N ) * 3 );
@@ -995,15 +1155,15 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 		typedef std::unordered_map<Key, Acc, KeyHash> AccMap;
 		std::vector<AccMap> accF( chunks.size() ), accB( chunks.size() );
 		std::vector<qint64> cSamp( chunks.size(), 0 ), cDrop( chunks.size(), 0 ), cExtra( chunks.size(), 0 );
-		std::vector<std::vector<char>> dumps( spec.cubeDumpProbes.size() );
+		std::vector<std::vector<char>> dumps( cubeDumpProbes.size() );
 		auto cubeChunk = [&]( Chunk & ch ) {
 			const size_t ci = size_t( &ch - chunks.data() );
 			for ( int pi = ch.first; pi < ch.first + ch.count; pi++ ) {
 				const ProbePoint & pp = probes[size_t( pi )];
 				const double o[3] = { double( pp.pos[0] ) - O[0], double( pp.pos[1] ) - O[1], double( pp.pos[2] ) };
 				int slot = -1;
-				for ( size_t s = 0; s < spec.cubeDumpProbes.size(); s++ )
-					if ( spec.cubeDumpProbes[s] == pi )
+				for ( size_t s = 0; s < cubeDumpProbes.size(); s++ )
+					if ( cubeDumpProbes[s] == pi )
 						slot = int( s );
 				std::vector<quint8> drgb;
 				std::vector<float> ddist, dfac, dnrm;
@@ -1138,7 +1298,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 			QFile tf( spec.cubeDump + QStringLiteral( ".txt" ) );
 			if ( tf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
 				QTextStream ts( &tf );
-				for ( const int pi : spec.cubeDumpProbes )
+				for ( const int pi : cubeDumpProbes )
 					if ( pi >= 0 && size_t( pi ) < probes.size() )
 						ts << pi << "\t" << probes[size_t( pi )].pos[0] << "\t" << probes[size_t( pi )].pos[1] << "\t"
 						   << probes[size_t( pi )].pos[2] << "\t" << F << "\n";
@@ -1349,6 +1509,13 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 		  << r.boxesWritten << "\n";
 	else
 		t << "bake: .tbk v3 (FO4CS's own format; no back sides, rooms, doors or glass)\n";
+	// lane ROOMCLAMP1: probes outside the shell
+	t << "bake: outside the shell (back-face share over " << QString::number( r.backMax, 'f', 2 )
+	  << ( r.backRule ? "" : ", RULE OFF" ) << "): moved " << r.backMoved << ", dropped " << r.backDropped
+	  << ", largest share " << QString::number( r.backShareMax, 'f', 3 ) << "; share histogram (0.05 steps)";
+	for ( int h : r.backHist )
+		t << " " << h;
+	t << "\n";
 	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite ) << "\n";
 	if ( r.albedoWay != QLatin1String( "tri" ) && !r.albedoWay.isEmpty() )   // lane CAPTURE1
 		t << "bake albedo way: " << r.albedoWay << "; samples " << r.albSamples << ", pixels dropped " << r.albDropped
@@ -1378,12 +1545,16 @@ int probeBakeCli( const QStringList & args )
 		else if ( a == QLatin1String( "--max-links" ) ) { bs.maxLinks = quint32( qBound( 8, nx.toInt(), 4096 ) ); i++; }
 		else if ( a == QLatin1String( "--no-openings" ) ) { ps.apertures = false; }
 		else if ( a == QLatin1String( "--no-rooms" ) ) { ps.coverage = false; }
+		// lane ROOMCLAMP1: the back-face rule's threshold and list, the placer's red (floor)
+		else if ( a == QLatin1String( "--back-max" ) ) { bs.backMax = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--back-dump" ) ) { bs.backDump = nx; i++; }
+		else if ( a == QLatin1String( "--place-red" ) ) { ps.red = nx; i++; }
 	}
 	const QStringList rc = rect.split( ',' );
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 ) {
 		std::fprintf( stderr, "usage: probebake --soup <file> --rect minX,minY,maxX,maxY --out <dir> "
-			"[--rays n] [--threads n] [--spacing s] [--red octant|normal|oneside|rooms|glass] [--no-sky] [--no-spill] [--tbk 3|4] "
-			"[--max-links n] [--no-openings] [--no-rooms]\n" );
+			"[--rays n] [--threads n] [--spacing s] [--red octant|normal|oneside|rooms|glass|backface] [--no-sky] [--no-spill] [--tbk 3|4] "
+			"[--max-links n] [--no-openings] [--no-rooms] [--back-max f] [--back-dump tsv] [--place-red floor|...]\n" );
 		return 2;
 	}
 	ps.minX = rc[0].toFloat();

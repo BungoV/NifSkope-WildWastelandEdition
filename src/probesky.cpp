@@ -112,6 +112,7 @@ void relightKept()
 		.arg( double( gr.voxel ), 0, 'f', 1 );
 	gi.rgba = std::move( gr.grid );
 	gi.sky = std::move( gr.gridSky );	// the Pass drop-down's sky share (weather-free, carried over)
+	probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1
 	wwCellGiPublish( k.nif, gi );
 	// the surfel and probe previews carry the relit light: publish them again, keeping Show probes
 	WwCellProbeView pv;

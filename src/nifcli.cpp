@@ -13,6 +13,7 @@ See the LICENSE.md file for the full license text.
 #include "probeplace.h"
 #include "probebake.h"
 #include "probefar.h"		// lane PRTPFAR
+#include "probegi.h"		// lane ROOMCLAMP1: probegi
 
 #include "freezeanim.h"
 #include "gamemanager.h"
@@ -7363,6 +7364,13 @@ int nifskopeCliMain( const QStringList & args )
 	// (lane PRTPBAKE; src/probebake.cpp)
 	if ( cmd == QLatin1String( "probebake" ) ) {
 		const int rc = probeBakeCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// `probegi` places, bakes and relights a soup by the lights given, then dumps (lane ROOMCLAMP1; src/probegi.cpp)
+	if ( cmd == QLatin1String( "probegi" ) ) {
+		const int rc = probeGiCli( a );
 		out().flush();
 		err().flush();
 		return rc;

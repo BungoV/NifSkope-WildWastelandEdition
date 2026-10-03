@@ -59,6 +59,9 @@ struct EsmRefr
 	 * Creation Kit applies it to the LOD model when it builds vanilla's .bto,
 	 * so a LOD bake that ignores it draws the wrong colourway. */
 	quint32 materialSwap = 0;
+	/* lane ROOMCLAMP1: XTEL, a door's teleport (its first field, the destination door), 0 when none. A load
+	 * door: in game it never opens, it only plays a short animation and loads elsewhere. */
+	quint32 teleport = 0;
 	/* Lane PRTP1 (2026-09-30): what a placed LIGH overrides. XRDS is the
 	 * radius, when `hasRadius` (else the base's DATA radius stands; the plugin
 	 * stores NEGATIVE values too -- 2,080 of the gate's 3,945 rows -- so no sentinel). XLIG is six

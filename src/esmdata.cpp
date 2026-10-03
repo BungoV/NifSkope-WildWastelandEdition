@@ -496,6 +496,8 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 						 * parent's runtime state is not in the plugin. */
 						ref.enableParent = esm->mapFormID( *r, f.readUInt32() );
 						ref.enableParentOpposite = ( f.readUInt32() & 1 ) != 0;
+					} else if ( f == "XTEL" && f.size() >= 4 ) {
+						ref.teleport = esm->mapFormID( *r, f.readUInt32() );   // lane ROOMCLAMP1
 					} else if ( f == "XLYR" && f.size() >= 4 ) {
 						ref.layer = esm->mapFormID( *r, f.readUInt32() );
 					} else if ( f == "XMSP" && f.size() >= 4 ) {

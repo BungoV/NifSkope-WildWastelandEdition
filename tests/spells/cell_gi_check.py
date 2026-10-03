@@ -35,6 +35,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_lit_check import lights_of, inside  # noqa: E402
 from probe_bake import read_tbk, unpack_dir, floordiv  # noqa: E402
+from cell_rooms_check import read_rooms, room_at, surface_room, gi_sample  # noqa: E402
 
 SURF_OFF = 2.0      # the relight's shadow segment starts this far off the surface (probegi.cpp)
 AXES = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]], float)
@@ -117,7 +118,18 @@ def read_dump(d):
     G = np.frombuffer(b, '<f4', 6 * dims[0] * dims[1] * dims[2] * 4, 32).reshape(6, dims[2], dims[1], dims[0], 4)
     meta = open(os.path.join(d, 'gi_meta.txt'), encoding='utf-8').read()
     clear = float(re.search(r'fixtureClear (\S+)', meta).group(1))
-    return S, P, dict(origin=np.array([ox, oy, oz], float), voxel=float(vox), radius=float(rad), dims=dims, grid=G), clear
+    out = dict(origin=np.array([ox, oy, oz], float), voxel=float(vox), radius=float(rad), dims=dims, grid=G)
+    # lane ROOMCLAMP1: the rooms (gi_rooms.bin), each voxel's two slots and slot 1's grid (gi_slots.bin), the probes'
+    # rooms (gi_proberooms.bin); absent with the red noclamp (one value a voxel)
+    if all(os.path.exists(os.path.join(d, f)) for f in ('gi_rooms.bin', 'gi_slots.bin', 'gi_proberooms.bin')):
+        nv = dims[0] * dims[1] * dims[2]
+        s = open(os.path.join(d, 'gi_slots.bin'), 'rb').read()
+        out['R'] = read_rooms(os.path.join(d, 'gi_rooms.bin'))
+        out['slots'] = np.frombuffer(s, '<i4', 2 * nv, 32).reshape(dims[2], dims[1], dims[0], 2)
+        out['grid2'] = np.frombuffer(s, '<f4', 6 * nv * 4, 32 + 8 * nv).reshape(6, dims[2], dims[1], dims[0], 4)
+        b = open(os.path.join(d, 'gi_proberooms.bin'), 'rb').read()
+        out['prooms'] = np.frombuffer(b, '<i4', 2 * struct.unpack_from('<i', b)[0], 4).reshape(-1, 2)
+    return S, P, out, clear
 
 
 def surfel_light(lights, p, n, soup, clear, shapes=True):
@@ -250,16 +262,32 @@ def stage_b(tbks, S, P, row_of, Bsrc=None, sky=None):
             % ('PASS' if ok else 'FAIL', len(cubes), lit, unresolved, 100 * share))
 
 
-def stage_c(S, P, G, soup):
+def stage_c(S, P, G, soup, eye_rule=True):
+    """lane ROOMCLAMP1: a voxel no probe is seen from at its centre gathers from its EYE (the sample point
+    surface + half a voxel along the normal nearest its centre) within the radius, then twice it; still none:
+    the mean of its valid neighbours (two rings). eye_rule False (the run's red noeye): the old centre-only grid."""
     v, o, dims, rad, grid = G['voxel'], G['origin'], G['dims'], G['radius'], G['grid']
-    g = np.floor((S[:, 0:3] + S[:, 3:6] * v * 0.5 - o) / v).astype(int)
+    sp = S[:, 0:3] + S[:, 3:6] * v * 0.5
+    g = np.floor((sp - o) / v).astype(int)
+    if 'R' in G:
+        return stage_c_rooms(S, P, G, soup, sp, g, eye_rule)
     near = np.zeros((dims[2], dims[1], dims[0]), bool)
+    eyeD = np.full((dims[2], dims[1], dims[0]), np.inf)
+    eye = np.zeros((dims[2], dims[1], dims[0], 3))
     for dz in (-1, 0, 1):
         for dy in (-1, 0, 1):
             for dx in (-1, 0, 1):
                 q = g + np.array([dx, dy, dz])
                 m = np.all((q >= 0) & (q < np.array(dims)), 1)
                 near[q[m, 2], q[m, 1], q[m, 0]] = True
+                qm, sm = q[m], sp[m]
+                d2 = np.sum((sm - (o + (qm + 0.5) * v)) ** 2, 1)
+                order = np.argsort(-d2, kind='stable')      # the nearest written last wins
+                qo, so, do = qm[order], sm[order], d2[order]
+                cur = eyeD[qo[:, 2], qo[:, 1], qo[:, 0]]
+                take = do < cur
+                eyeD[qo[take, 2], qo[take, 1], qo[take, 0]] = do[take]
+                eye[qo[take, 2], qo[take, 1], qo[take, 0]] = so[take]
     valid = grid[0, :, :, :, 3] > 0.5
     if np.any(valid & ~near):
         return 'C FAIL voxel grid: %d voxels away from every surface hold light' % int(np.sum(valid & ~near))
@@ -270,28 +298,179 @@ def stage_c(S, P, G, soup):
            [(tuple(c), False) for c in ez[rng.choice(len(ez), size=min(100, len(ez)), replace=False)]]
     pp, cube = P[:, 0:3], P[:, 3:21].reshape(-1, 6, 3)
     good, rays, blocked = 0, 0, 0
-    for (z, y, x), isvalid in pick:
-        c = o + (np.array([x, y, z], float) + 0.5) * v
+    ways = {'centre': 0, 'eye': 0, 'far': 0, 'grown': 0, 'empty': 0}
+
+    def gather(c, r):
+        nonlocal rays, blocked
         d2 = np.sum((pp - c) ** 2, 1)
         acc, ws = np.zeros((6, 3)), 0.0
-        for j in np.nonzero(d2 < rad * rad)[0]:
+        for j in np.nonzero(d2 < r * r)[0]:
             rays += 1
             if soup.blocked(c, pp[j], 0.0):
                 blocked += 1
                 continue
-            w = (1 - d2[j] / (rad * rad)) ** 2
+            w = (1 - d2[j] / (r * r)) ** 2
             ws += w
             acc += w * cube[j]
-        if not isvalid:
-            good += int(ws == 0.0)
-        elif ws > 0:
-            got = np.stack([grid[a, z, y, x, 0:3] for a in range(6)])
+        return acc, ws
+    for (z, y, x), isvalid in pick:
+        c = o + (np.array([x, y, z], float) + 0.5) * v
+        acc, ws = gather(c, rad)
+        way = 'centre'
+        if ws == 0.0 and eye_rule:
+            e = eye[z, y, x]
+            acc, ws = gather(e, rad)
+            way = 'eye'
+            if ws == 0.0:
+                acc, ws = gather(e, 2 * rad)
+                way = 'far'
+        got = np.stack([grid[a, z, y, x, 0:3] for a in range(6)])
+        if ws == 0.0:
+            # grown: the mean of valid neighbours lies inside their range, component by component
+            nb = [(z + a, y + b, x + c2) for a in (-1, 0, 1) for b in (-1, 0, 1) for c2 in (-1, 0, 1)
+                  if (a, b, c2) != (0, 0, 0) and 0 <= z + a < dims[2] and 0 <= y + b < dims[1] and 0 <= x + c2 < dims[0]]
+            vals = [np.stack([grid[s, k[0], k[1], k[2], 0:3] for s in range(6)]) for k in nb if valid[k]]
+            if not isvalid:
+                ways['empty'] += 1
+                good += 1
+            elif eye_rule and vals:
+                ways['grown'] += 1
+                lo, hi = np.min(vals, 0), np.max(vals, 0)
+                good += int(np.all(got >= lo - 1e-4 * (1 + np.abs(lo))) and np.all(got <= hi + 1e-4 * (1 + np.abs(hi))))
+            continue
+        ways[way] += 1
+        if isvalid:
             good += int(close(got, acc / ws))
     share = good / len(pick)
     ok = share >= 0.97 and blocked >= 20
-    return ('C %s voxel grid: %d voxels (%d lit, %d empty), %d probe segments, %d blocked; agree %.1f%%'
+    return ('C %s voxel grid: %d voxels (%d lit, %d empty), %d probe segments, %d blocked; agree %.1f%% (from the centre '
+            '%d, the eye %d, twice the radius %d, neighbours %d, empty %d)'
             % ('PASS' if ok else 'FAIL', len(pick), sum(1 for _, a in pick if a), sum(1 for _, a in pick if not a),
-               rays, blocked, 100 * share))
+               rays, blocked, 100 * share, ways['centre'], ways['eye'], ways['far'], ways['grown'], ways['empty']))
+
+
+def surfel_rooms(R, S):
+    """Every surfel's room by the surface rule (cell_rooms_check.surface_room): the two direct reads in bulk, the
+    rest one by one."""
+    p, n = S[:, 0:3], S[:, 3:6]
+    out = np.full((len(S), 2), -1, int)
+    dims = np.array(R['dims'])
+    for k in (0.75, 1.75):
+        c = np.floor((p + n * k * R['cell'] - R['origin']) / R['cell']).astype(int)
+        ok = np.all((c >= 0) & (c < dims), 1) & (out[:, 0] < 0)
+        ab = np.full((len(S), 2), -1, int)
+        ab[ok] = R['ab'][c[ok, 2], c[ok, 1], c[ok, 0]]
+        take = ok & (ab[:, 0] >= 0)
+        out[take] = ab[take]
+    for i in np.nonzero(out[:, 0] < 0)[0]:
+        L = surface_room(R, p[i], n[i])
+        if L is not None:
+            out[i] = L
+    return out
+
+
+def stage_c_rooms(S, P, G, soup, sp, g, eye_rule):
+    """lane ROOMCLAMP1: with rooms each voxel keeps two slots, the two rooms its surfaces read most. A slot gathers
+    only the probes of its room (gi_proberooms.bin, room or second room), from the voxel's centre when the centre
+    stands in that room, else from the slot's eye (the nearest sample point of a surface of that room); then from
+    the eye, then twice the radius; still none: the mean of the same room's valid slots among the neighbours."""
+    v, o, dims, rad = G['voxel'], G['origin'], G['dims'], G['radius']
+    R, slots, prooms = G['R'], G['slots'], G['prooms']
+    grids = (G['grid'], G['grid2'])
+    SR = surfel_rooms(R, S)
+    near = np.zeros((dims[2], dims[1], dims[0]), bool)
+    for dz in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                q = g + np.array([dx, dy, dz])
+                m = np.all((q >= 0) & (q < np.array(dims)), 1)
+                near[q[m, 2], q[m, 1], q[m, 0]] = True
+    fails = []
+    for k in (0, 1):
+        stray = (grids[k][0, :, :, :, 3] > 0.5) & ~near
+        if np.any(stray):
+            fails.append('%d slot-%d voxels away from every surface hold light' % (int(stray.sum()), k))
+        nolab = (grids[k][0, :, :, :, 3] > 0.5) & (slots[:, :, :, k] < 0) & (k == 1)
+        if np.any(nolab):
+            fails.append('%d slot-1 voxels hold light with no room' % int(nolab.sum()))
+    rng = np.random.default_rng(11)
+    pick = []
+    for k in (0, 1):
+        valid = grids[k][0, :, :, :, 3] > 0.5
+        vz = np.argwhere(valid)
+        ez = np.argwhere(near & ~valid & (slots[:, :, :, k] >= -1 if k == 0 else slots[:, :, :, k] >= 0))
+        nv, ne = (150, 100) if k == 0 else (100, 50)
+        pick += [(tuple(c), True, k) for c in vz[rng.choice(len(vz), size=min(nv, len(vz)), replace=False)]] if len(vz) else []
+        pick += [(tuple(c), False, k) for c in ez[rng.choice(len(ez), size=min(ne, len(ez)), replace=False)]] if len(ez) else []
+    pp, cube = P[:, 0:3], P[:, 3:21].reshape(-1, 6, 3)
+    good, rays, blocked, leak = 0, 0, 0, 0
+    ways = {'centre': 0, 'elsewhere': 0, 'eye': 0, 'far': 0, 'grown': 0, 'empty': 0}
+
+    def gather(c, r, lab):
+        nonlocal rays, blocked
+        d2 = np.sum((pp - c) ** 2, 1)
+        acc, ws = np.zeros((6, 3)), 0.0
+        inroom = np.ones(len(pp), bool) if lab < 0 else (prooms[:, 0] == lab) | (prooms[:, 1] == lab)
+        for j in np.nonzero((d2 < r * r) & inroom)[0]:
+            rays += 1
+            if soup.blocked(c, pp[j], 0.0):
+                blocked += 1
+                continue
+            w = (1 - d2[j] / (r * r)) ** 2
+            ws += w
+            acc += w * cube[j]
+        return acc, ws
+    for (z, y, x), isvalid, k in pick:
+        lab = int(slots[z, y, x, k])
+        c = o + (np.array([x, y, z], float) + 0.5) * v
+        # the slot's eye: the nearest sample point (in surfel order on a tie) of a surface of its room reading the voxel
+        m = np.all(np.abs(g - np.array([x, y, z])) <= 1, 1) & ((SR[:, 0] == lab) | (SR[:, 1] == lab))
+        idx = np.nonzero(m)[0]
+        e = sp[idx[np.argmin(np.sum((sp[idx] - c) ** 2, 1))]] if len(idx) else c
+        cr = room_at(R, c)
+        centre = lab < 0 or lab in cr
+        acc, ws = gather(c if centre else e, rad, lab)
+        way = 'centre' if centre else 'elsewhere'
+        if ws == 0.0 and eye_rule:
+            if centre:
+                acc, ws = gather(e, rad, lab)
+                way = 'eye'
+            if ws == 0.0:
+                acc, ws = gather(e, 2 * rad, lab)
+                way = 'far'
+        got = np.stack([grids[k][a, z, y, x, 0:3] for a in range(6)])
+        if ws == 0.0:
+            vals = []
+            for a in (-1, 0, 1):
+                for b in (-1, 0, 1):
+                    for c2 in (-1, 0, 1):
+                        zz, yy, xx = z + a, y + b, x + c2
+                        if (a, b, c2) == (0, 0, 0) or not (0 <= zz < dims[2] and 0 <= yy < dims[1] and 0 <= xx < dims[0]):
+                            continue
+                        for sj in (0, 1):
+                            if slots[zz, yy, xx, sj] == lab and grids[sj][0, zz, yy, xx, 3] > 0.5:
+                                vals.append(np.stack([grids[sj][s, zz, yy, xx, 0:3] for s in range(6)]))
+            if not isvalid:
+                ways['empty'] += 1
+                good += 1
+            elif eye_rule and vals:
+                ways['grown'] += 1
+                lo, hi = np.min(vals, 0), np.max(vals, 0)
+                good += int(np.all(got >= lo - 1e-4 * (1 + np.abs(lo))) and np.all(got <= hi + 1e-4 * (1 + np.abs(hi))))
+            continue
+        ways[way] += 1
+        if isvalid:
+            ok = close(got, acc / ws)
+            good += int(ok)
+    share = good / max(len(pick), 1)
+    ok = share >= 0.97 and blocked >= 20 and not fails
+    return ('C %s voxel grid (rooms %d): %d slots (%d lit, %d empty; %d of them slot 1), %d probe segments, %d blocked; '
+            'agree %.1f%% (from the centre %d, the eye with the centre in another room %d, the eye %d, twice the radius '
+            '%d, neighbours %d, empty %d)%s'
+            % ('PASS' if ok else 'FAIL', R['rooms'], len(pick), sum(1 for _, a, _k in pick if a),
+               sum(1 for _, a, _k in pick if not a), sum(1 for _, _a, k in pick if k == 1), rays, blocked, 100 * share,
+               ways['centre'], ways['elsewhere'], ways['eye'], ways['far'], ways['grown'], ways['empty'],
+               ('; ' + '; '.join(fails)) if fails else ''))
 
 
 # ---------------------------------------------------------------- F: more than one bounce (lane BOUNCE2)
@@ -528,6 +707,14 @@ def stage_d(run, cell, G, sub='', label='D'):
     pick = rng.choice(len(ys), size=min(20000, len(ys)), replace=False)
     ys, xs = ys[pick], xs[pick]
     exp = sample_grid(G, P[ys, xs], N[ys, xs] / nlen[ys, xs][:, None])
+    if 'R' in G:     # lane ROOMCLAMP1: cellGiRoomSample (cell_rooms_check.gi_sample) where the surface finds a room
+        GG = {'origin': G['origin'], 'voxel': G['voxel'], 'dims': G['dims'], 'g': G['grid'], 'g2': G['grid2'], 'slots': G['slots']}
+        Nn = N[ys, xs] / nlen[ys, xs][:, None]
+        for t, (pw, nw) in enumerate(zip(P[ys, xs], Nn)):
+            if surface_room(G['R'], pw, nw) is None:
+                continue
+            s = gi_sample(GG, G['R'], pw, nw)
+            exp[t] = np.clip((np.maximum(s[0:3] / s[3], 0) if s[3] > 0.01 else 0.0) / math.pi, 0, 1)
     got = img[5][ys, xs] / 255.0
     good = np.all(np.abs(got - exp) <= 3.0 / 255 + 0.05 * exp, axis=1)
     lit = exp.max(1) > 0.02

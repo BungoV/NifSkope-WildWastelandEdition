@@ -29,6 +29,8 @@ constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 i
 constexpr int kTexelsPerLight = 8;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias;
 										// lane HEMI1 the 6th to 8th: the box rows (cell_lights.glsl CELL_TPL)
 constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
+constexpr int kGiSlotUnit = 18;		// lane ROOMCLAMP1: the grid's slot rooms, the fine rooms (sampler3D, R32F); off
+constexpr int kRoomUnit = 19;		// on a GPU with fewer than 20 units (the blend before the lane)
 constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
 constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
 constexpr int kShadowUnit = 10;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
@@ -149,7 +151,7 @@ ClState & st()
 			s.pass = 0;
 		for ( const QByteArray & r : qgetenv( "WW_CELL_PV_RED" ).split( ',' ) ) {
 			const QByteArray t = r.trimmed();
-			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : 0;
+			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : 0;   // lane ROOMCLAMP1: noclamp
 		}
 	}
 	return s;
@@ -165,6 +167,9 @@ struct Gpu
 	GLuint giTex = 0;
 	const void * giDoc = nullptr;
 	int giVersion = 0;
+	GLuint slotTex = 0, roomTex = 0;	// lane ROOMCLAMP1: uploaded with the GI grid (the same document and version)
+	const void * roomDoc = nullptr;
+	int roomVersion = 0, units = -1;
 	GLuint skyTex = 0;		// lane PROBEVIEW1: the sky grid, bound on the GI unit in the Sky visibility pass
 	const void * skyDoc = nullptr;
 	int skyVersion = 0;
@@ -384,7 +389,7 @@ void wwCellLightsUniforms( Scene * scene )
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
-		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], G->dims[2] * 6, 0, GL_RGBA, GL_FLOAT,
+		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], G->dims[2] * ( G->slotRooms.empty() ? 6 : 12 ), 0, GL_RGBA, GL_FLOAT,
 			sky.data() );
 		g.skyDoc = scene->nifModel;
 		g.skyVersion = s.giVersion.value( scene->nifModel );
@@ -400,7 +405,7 @@ void wwCellLightsUniforms( Scene * scene )
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
-		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], G->dims[2] * 6, 0, GL_RGBA, GL_FLOAT,
+		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], G->dims[2] * ( G->slotRooms.empty() ? 6 : 12 ), 0, GL_RGBA, GL_FLOAT,
 			G->rgba.data() );
 		g.giDoc = scene->nifModel;
 		g.giVersion = s.giVersion.value( scene->nifModel );
@@ -409,12 +414,56 @@ void wwCellLightsUniforms( Scene * scene )
 	const bool giDraw = skyDraw || ( G && pass != 2 && g.giTex && g.giDoc == scene->nifModel );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, skyDraw ? g.skyTex : giDraw ? g.giTex : 0 );
+	// lane ROOMCLAMP1: the rooms (src/proberooms.h): the grid's slot rooms and the fine rooms, nearest, R32F
+	if ( g.units < 0 ) {
+		GLint units = 0;
+		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
+		g.units = units;
+	}
+	const bool roomsUp = giDraw && !G->slotRooms.empty() && !G->rooms.empty() && g.units > kRoomUnit;
+	if ( roomsUp && ( g.roomDoc != scene->nifModel || g.roomVersion != s.giVersion.value( scene->nifModel ) ) ) {
+		auto up3 = [&]( GLuint & tex, int unit, const int * d, const std::vector<float> & v ) {
+			if ( !tex )
+				fn->glGenTextures( 1, &tex );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
+			fn->glBindTexture( GL_TEXTURE_3D, tex );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+			fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+			fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R32F, d[0], d[1], d[2], 0, GL_RED, GL_FLOAT, v.data() );
+		};
+		up3( g.slotTex, kGiSlotUnit, G->dims, G->slotRooms );
+		up3( g.roomTex, kRoomUnit, G->roomsDims, G->rooms );
+		g.roomDoc = scene->nifModel;
+		g.roomVersion = s.giVersion.value( scene->nifModel );
+	}
+	const bool roomsDraw = roomsUp && g.roomDoc == scene->nifModel;
+	if ( g.units > kRoomUnit ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiSlotUnit ) );
+		fn->glBindTexture( GL_TEXTURE_3D, roomsDraw ? g.slotTex : 0 );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kRoomUnit ) );
+		fn->glBindTexture( GL_TEXTURE_3D, roomsDraw ? g.roomTex : 0 );
+		prog->uni1i( "cellGiSlots", kGiSlotUnit );
+		prog->uni1i( "cellRooms", kRoomUnit );
+	} else {	// two sampler3D may share a unit; a sampler3D on a 2D unit fails the draw
+		prog->uni1i( "cellGiSlots", kGiUnit );
+		prog->uni1i( "cellRooms", kGiUnit );
+	}
+	prog->uni1b( "cellGiRooms", roomsDraw );
+	if ( roomsDraw ) {
+		prog->uni3f( "cellRoomsOrigin", G->roomsOrigin[0], G->roomsOrigin[1], G->roomsOrigin[2] );
+		prog->uni1f( "cellRoomsCell", G->roomsCell );
+		prog->uni3f( "cellRoomsDims", float( G->roomsDims[0] ), float( G->roomsDims[1] ), float( G->roomsDims[2] ) );
+	}
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellGi", kGiUnit );
 	prog->uni1b( "cellGiOn", giDraw );
 	prog->uni1b( "cellGiSky", giDraw && !skyDraw && G->skyLit );	// lane SKY1 (never on the sky-share grid)
 	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
-	prog->uni1i( "cellPassRed", s.passRed & 3 );
+	prog->uni1i( "cellPassRed", s.passRed & 11 );	// lane ROOMCLAMP1: + 8 noclamp
 	if ( giDraw ) {
 		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
 		prog->uni1f( "cellGiVoxel", G->voxel );

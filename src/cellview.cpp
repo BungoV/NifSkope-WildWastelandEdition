@@ -1248,6 +1248,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		 *  real defect cannot hide inside the expected one. */
 		bool expectLod = false;
 		QString actorKey;   //!< lane PLACED1: a placed actor (src/cellactor.h); its shapes come from there
+		bool loadDoor = false;   //!< lane ROOMCLAMP1: a door with a teleport (XTEL)
 	};
 	QVector<Placement> placements;
 	QHash<QString, int> skippedByType;
@@ -1451,6 +1452,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		out.enableParentOppositeFlag = r.enableParentOpposite;
 #endif
 		out.swap = r.materialSwap ? r.materialSwap : lb.materialSwap;
+		out.loadDoor = r.teleport != 0;
 		placements.append( out );
 	};
 
@@ -1783,6 +1785,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	QString glassCensus;
 	const QByteArray glassDump = qgetenv( "WW_CELL_PROBE_GLASS" );
 	int soupGlassShapes = 0;
+	int soupLoadDoors = 0;   // lane ROOMCLAMP1
+	const bool loadDoorRed = qEnvironmentVariable( "WW_CELL_PROBE_LOADDOOR_RED" ) == QLatin1String( "open" );
 	// lane BAKE4: WW_CELL_PROBE_SOUP_REFS=<tsv> lists every reference the soup took (form, role, base type)
 	QString soupRefList;
 	const QByteArray soupRefDump = qgetenv( "WW_CELL_PROBE_SOUP_REFS" );
@@ -2129,6 +2133,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				tn = QStringLiteral( "water" );
 			}
 			soupFoliage = ml.startsWith( QLatin1String( "landscape\\" ) );
+			/* lane ROOMCLAMP1: a load door (XTEL) never opens in game: solid in the soup, always shut, no
+			 * opening for rooms or the placer. WW_CELL_PROBE_LOADDOOR_RED=open keeps today's rule (gate red). */
+			if ( role == 2 && p.loadDoor ) {
+				soupLoadDoors++;
+				if ( !loadDoorRed )
+					role = 1;
+			}
 			if ( role == 0 )
 				soupSkippedTypes[tn]++;
 			else if ( role == 1 )
@@ -2270,6 +2281,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 						} else if ( okTri ) {
 							probeSoup.addTri( w[0], w[1], w[2] );
 						}
+						if ( okTri && s.nearFacts.twoSided )
+							probeSoup.markLastTwoSided();   // lane ROOMCLAMP1: no back face
 					}
 				}
 			}
@@ -2896,6 +2909,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			  << ", spacing " << ps.spacing << ( ps.red.isEmpty() ? QString() : QStringLiteral( ", RED " ) + ps.red )
 			  << "\n";
 			t << "  probe soup refs " << soupRefs << ", doors " << int( probeSoup.doors.size() )
+			  << ", load doors shut " << ( loadDoorRed ? 0 : soupLoadDoors ) << " of " << soupLoadDoors
+			  << ( loadDoorRed ? " RED open" : "" )
 			  << ", shapes left out (effect, glass, decal, leaves) " << soupShapesDropped << ", refs left out by type";
 			QStringList sk = soupSkippedTypes.keys();
 			std::sort( sk.begin(), sk.end() );
@@ -2944,6 +2959,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				if ( br.toInt() > 0 )
 					bs.rays = br.toInt();
 				bs.red = QString::fromLatin1( qgetenv( "WW_PROBE_BAKE_RED" ) );
+				// lane ROOMCLAMP1: the outside-the-shell threshold (gate red: 1 = off) and the gate's list
+				if ( qEnvironmentVariableIsSet( "WW_CELL_PROBE_BACKMAX" ) )
+					bs.backMax = qEnvironmentVariable( "WW_CELL_PROBE_BACKMAX" ).toFloat();
+				bs.backDump = qEnvironmentVariable( "WW_CELL_PROBE_BACKDUMP" );
 				// an interior's misses are void, never sky -- unless its cell shows the sky (lane SKYINT1, the deck's
 				// rule: a ray that meets nothing sees the sky)
 				bs.noSky = spec.interior && !( cellInteriorFlags( world.interior() ) & 0x0080u );
@@ -3124,6 +3143,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			ProbeGiSpec gs;
 			gs.red = QString::fromLatin1( qgetenv( "WW_CELL_GI_RED" ) ).trimmed();
 			gs.passes = qEnvironmentVariableIntValue( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
+			gs.rooms.red = QString::fromLatin1( qgetenv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
 			// lane SKYINT1: and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
 			const quint16 cf = spec.interior ? cellInteriorFlags( world.interior() ) : quint16( 0 );
@@ -3155,6 +3175,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				// lane SKY1; lane SKYINT1: an interior keeps its own ambient, so its grid never stands in for the weather's
 				gi.skyLit = gr.skyLit && !spec.interior && gs.skyRed != QLatin1String( "keepamb" );
 				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
+				probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1: the second slots and the rooms
 				wwCellGiPublish( nif, gi );
 				if ( !spec.interior || gs.interiorSky )
 					probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather relights it

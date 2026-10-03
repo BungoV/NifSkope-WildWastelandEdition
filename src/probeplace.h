@@ -105,6 +105,16 @@ struct ProbeSoup
 		mat.resize( size_t( triCount() ) - 1 );
 		mat.push_back( m );
 	}
+	/*! lane ROOMCLAMP1: 1 = the triangle's material is two-sided (SLSF2 Double_Sided or BGSM bTwoSided): it
+	 *  has no back. Shorter than the triangle count = the rest are one-sided (empty: all one-sided; their
+	 *  front is the stored winding). The soup file carries it as an optional 'TWO1' tail after 'GLS1'. */
+	std::vector<quint8> twoSided;
+	void markLastTwoSided()
+	{
+		twoSided.resize( size_t( triCount() ), 0 );
+		twoSided.back() = 1;
+	}
+	bool isTwoSided( size_t tri ) const { return tri < twoSided.size() && twoSided[tri]; }
 };
 
 //! Lane BAKE4: one box of an enclosed room's air (world units), what `.tbk` v4 writes for the
@@ -193,6 +203,9 @@ struct ProbePlaceResult
 	int apFrames = 0;
 	int rooms = 0, roomsOpen = 0, roomsLedge = 0, roomsSealed = 0, roomsTiny = 0, room = 0, cover = 0, roomNear = 0;
 	int walkCells = 0, coverCells = 0, hallCells = 0, cutCells = 0, blindLeft = 0;
+	int backFloors = 0;         //!< lane ROOMCLAMP1: air cells refused as walkable: only the back of one-sided faces below
+	int backColumnHits = 0;     //!< lane ROOMCLAMP1: column levels (first hit or gap) on the back of a one-sided face: no probe
+	int backPlaced = 0;         //!< lane ROOMCLAMP1: room / cover probes refused: the back of a one-sided face within 200 below
 	bool gridClamped = false;
 	//! lane BAKE4: the air of every enclosed room a probe stands in, and the probes given a room
 	std::vector<ProbeRoomBox> roomBoxes;

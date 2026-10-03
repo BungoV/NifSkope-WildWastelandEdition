@@ -83,6 +83,10 @@ struct ProbeBakeSpec
 	//! notes\probecap tracer's layout) are written to cubeDump
 	QString cubeDump;
 	std::vector<int> cubeDumpProbes;
+	/*! lane ROOMCLAMP1: a probe whose rays meet the BACKS of one-sided faces on more than this share of the
+	 *  sphere stands outside the shell: moved to the nearest clear point under it, or dropped (>= 1: off). */
+	float backMax = 0.25f;
+	QString backDump;   //!< the gate's list of every probe's share and fate (empty: none)
 };
 
 struct ProbeBakeResult
@@ -115,6 +119,12 @@ struct ProbeBakeResult
 	double glassMean = 0;                   //!< over probes: the sphere share seen through glass
 	int probesRoomed = 0, boxesWritten = 0; //!< probes standing in an enclosed room; room boxes written (summed over files)
 	double msRays = 0, msWrite = 0;
+	// lane ROOMCLAMP1: probes outside the shell
+	bool backRule = false;
+	float backMax = 0.25f;
+	int backMoved = 0, backDropped = 0;
+	double backShareMax = 0;
+	std::vector<int> backHist;              //!< probes per 0.05 of back-face share (20 bins), before the rule
 	QStringList files;
 	QString error;
 };
