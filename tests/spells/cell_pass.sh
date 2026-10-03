@@ -25,8 +25,13 @@ set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 EXE="${EXE:-$REPO/release/NifSkope.exe}"
-BEFORE_EXE="${BEFORE_EXE:-$REPO/scratchpad/probeview1_20261002/before_rt/NifSkope.exe}"
+# the reference is a whole runtime FOLDER (exe + its own shaders/), main before the last landed lane;
+# the overseer refreshes scratchpad/before_main at each landing (COMMIT names it)
+BEFORE_EXE="${BEFORE_EXE:-$REPO/scratchpad/before_main/NifSkope.exe}"
 BAKES="${BAKES:-$REPO/scratchpad/probeview1_20261002/src_bakes}"
+for f in "$BEFORE_EXE" "$(dirname "$BEFORE_EXE")/shaders" "$BAKES"; do
+	[ -e "$f" ] || { echo "FAIL (2) missing reference: $f"; exit 2; }
+done
 SCOPE="${SCOPE:-cell_pass}"
 REGKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
 wipe_scope() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
