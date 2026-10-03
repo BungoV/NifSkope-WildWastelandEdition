@@ -257,6 +257,7 @@ vec3 tonemap(vec3 x)
 #ifdef WW_CELLLIGHTS
 #include "cell_lights.glsl"
 #include "cell_ao.glsl"
+#include "cell_ssr.glsl"
 #endif
 
 void main()
@@ -511,6 +512,10 @@ void main()
 		cubeK = hasCubeMap ? cellCubeGame( CubeMap, reflectedWS, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
 		                                   cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection, -ViewDir )
 		                   : vec3( 0.0 );
+	// lane SSR1: the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
+	if ( cellOn )
+		cubeK = cellSsrMix( cubeK, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
+		                    cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection );
 #endif
 
 	vec3 backlight = vec3(0.0);
@@ -566,6 +571,7 @@ void main()
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, specColor, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
+	vec3 cellSsrScene = color.rgb * color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
 	// lane AO1: the ambient obscurance on the whole lit colour (linear, so its root here), before the fog
 	if ( cellOn )
 		color.rgb *= sqrt( cellAoFactor() );
@@ -581,7 +587,7 @@ void main()
 	// lane IMGS1: the cell's imagespace in place of the viewer's curve; probe 6 writes the linear colour raw
 	vec3 cellHdr = color.rgb * color.rgb;
 	if ( cellOn && cellIsOn )
-		color.rgb = cellImageSpace( color.rgb );
+		color.rgb = cellIsLinear ? cellHdr : cellImageSpace( color.rgb );	// lane HDR1: linear into the HDR frame
 	else
 #endif
 	color.rgb = tonemap( color.rgb );
@@ -639,6 +645,8 @@ void main()
 		fragColor = cellProbe == 6 ? vec4( cellHdr, color.a ) : vec4( cellProbeOut( normal, -ViewDir, alphaR, kSmith ), 1.0 );
 	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )	// lane CUBE1
 		fragColor = vec4( cellProbe == 50 ? clamp( cubeK * 0.25, 0.0, 1.0 ) : cellCubeProbe( offset, normal ), 1.0 );
+	if ( cellOn && cellPass > 0 && cellProbe == 0 )	// lane PROBEVIEW1: the PRTP band's Pass
+		fragColor = vec4( cellPassOut( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ), 1.0 );
 #endif
 #ifdef WW_FOG
 	vec3 fogProbeOut;
@@ -648,5 +656,7 @@ void main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 )
 		fragColor = cellAoPassOut( normal, -ViewDir );	// lane AO1
+	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
+		fragColor = cellSsrProbeOut( cellSsrScene );	// lane SSR1
 #endif
 }

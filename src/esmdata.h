@@ -69,6 +69,12 @@ struct EsmRefr
 	float radius = 0.0f;
 	int xligCount = 0;
 	float xlig[6] = { 0, 0, 0, 0, 0, 0 };
+	/* lane HEMI1: a light's box. `lightBox` = the XLKR target under KYWD 00115705 LightBoxLink
+	 * (0 when none); a primitive ref carries XPRM: its type (1 Box) and half extents as stored. */
+	quint32 lightBox = 0;
+	bool hasPrim = false;
+	quint32 primType = 0;
+	float primHalf[3] = { 0, 0, 0 };
 };
 
 /* Lane PRTP1: one LIGH record (wbDefinitionsFO4 LIGH DATA + FNAM). The
@@ -549,6 +555,11 @@ public:
 	//! TX00 LUT path; false when not an IMGS
 	bool imageSpace( quint32 formID, QString & edid, QByteArray & hnam, QByteArray & cnam, QByteArray & tnam,
 		QString & lut ) const;
+
+	//! lane PLACED1: the plugin itself, for readers kept in their own files (src/esmplaced.cpp)
+	ESMFile * plugin() const { return esm.get(); }
+	//! lane PLACED1: the open interior's child groups, load order (empty for a worldspace)
+	const QVector<quint32> & interiorChildGroups() const { return interiorGroups; }
 
 private:
 	std::unique_ptr<ESMFile> esm;

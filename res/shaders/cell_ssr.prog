@@ -1,0 +1,4 @@
+# The cell view's screen-space reflections (lane SSR1; src/gl/cellssr.cpp). Full-screen passes over the
+# half-size buffers. No conditions: never picked for a shape; cellssr.cpp selects it by name.
+
+shaders cell_ssr.vert cell_ssr.frag

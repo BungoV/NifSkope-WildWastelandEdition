@@ -44,16 +44,22 @@ struct ProbeGiResult
 	std::vector<float> grid;
 	std::vector<float> probeCube;       //!< per probe: pos[3] + 6 x rgb
 	std::vector<float> surfelOut;       //!< per unique surfel: pos[3] nrm[3] albedo[3] B[3]
+	// lane PROBEVIEW1: the Pass drop-down's data
+	float surfelCell = 32.0f;           //!< the first file's surfel cell size
+	std::vector<float> gridSky;         //!< the grid's layout, rgb = the blended open-sky share, a = valid
+	std::vector<float> probeSky;        //!< per probe: the sky share on +X -X +Y -Y +Z -Z (mean of its 4 octants)
+	std::vector<int> probeLinkStart;    //!< probe i links surfels probeLinks[start[i] .. start[i + 1])
+	std::vector<int> probeLinks;        //!< surfelOut indices, one per resolved link
 	double msLight = 0, msGather = 0, msGrid = 0;
 	// lane SKY1 (src/probesky.h): the sky and the sun of a weather-lit exterior
-	bool sky = false;                   //!< the relight took them (the grid's sky then stands in for the weather's ambient)
+	bool skyLit = false;                //!< the relight took them (the grid's sky then stands in for the weather's ambient)
 	QString skyLabel;
 	int surfelsSun = 0;                 //!< surfels the sun reaches
 	qint64 sunRays = 0, sunBlocked = 0;
 	int probesSky = 0;                  //!< probes that see any sky
 	double skyVisMean = 0;              //!< over probes: the mean of the eight octants' sky share
 	int probesTinted = 0;               //!< probes with a tinted octant (sky seen through glass)
-	std::vector<float> probeSky;        //!< per probe: 6 x rgb, the sky's part of probeCube
+	std::vector<float> probeSkyE;       //!< per probe: 6 x rgb, the sky's part of probeCube
 	std::vector<float> surfelSun;       //!< per unique surfel: rgb, the sun's part of B
 };
 

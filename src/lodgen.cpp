@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "lodgenbc7.h"
 #include "lodgengpu.h"
 #include "lodgenao.h"
+#include "cellspeed.h"
 
 #include <QMutex>
 #include <QCoreApplication>
@@ -1409,6 +1410,7 @@ struct LodSrcShape
 	 *  Read by the cell view's glass only; nothing gated reads them. */
 	bool effectBlend = false;
 	bool effectMatRead = false;          //!< the BGEM read (cell view effect buckets)
+	bool effectLit = false;              //!< lane FXLIT1: the effect-lighting flag, the BGEM's or the property's (cell view only)
 	QByteArray effectBlock;              //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
 	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
 	float refractStrength = 0.0f;        //!< lane EFX1: the lighting property's Refraction Strength (cell view only)
@@ -2255,9 +2257,14 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	NifModel src;
 	QByteArray bytes;
 	QBuffer dev( &bytes );
+	const qint64 speedT0 = CellSpeed::nowNs();   // lane SPEED1: stage timers, off unless WW_CELL_SPEED_DUMP
 	const bool found = lodgenReadAsset( dataRoot, path, "meshes", ".nif", bytes );
+	const qint64 speedT1 = CellSpeed::nowNs();
 	const bool loaded = found && dev.open( QIODevice::ReadOnly )
 		&& src.load( dev, path.toLocal8Bit().constData() );
+	CellSpeed::add( "model file read", speedT1 - speedT0 );
+	CellSpeed::add( "model parse", CellSpeed::nowNs() - speedT1 );
+	CellSpeed::Acc speedExtract( "model extract (vertices, materials)" );
 	/* load() leaves the model in its Loading state; loadFromFile() clears it
 	 * and this path must too, or index lookups below answer as they do
 	 * mid-load and every model comes back shapeless - seen as "no
@@ -2537,6 +2544,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.effectBlend = em.hasAlphaBlend();
 							s.matAlpha = em.alpha();
 							s.effectMatRead = true;
+							// lane FXLIT1: lit by the placed lights in the game (cell view only)
+							s.effectLit = ( em.effectShaderFlags2() & 0x0004U ) && em.lightingInfluence() > 0.0f;
 							s.bakeBlend = em.hasAlphaBlend();   // lane BAKE4: the material's blend wins
 							s.bakeBlendSrc = quint8( em.alphaSourceBlend() );
 							s.bakeBlendDst = quint8( em.alphaDestinationBlend() );
@@ -2603,6 +2612,9 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					QBuffer eb( &s.effectBlock );
 					if ( !( eb.open( QIODevice::WriteOnly ) && src.saveIndex( eb, iShader ) ) )
 						s.effectBlock.clear();
+					// lane FXLIT1: Shader Flags 2 bit 30, Effect Lighting
+					s.effectLit = ( src.get<quint32>( iShader, "Shader Flags 2" ) & 0x40000000U )
+						&& src.get<quint8>( iShader, "Lighting Influence" ) > 0;
 				}
 				/* A shape that NAMED a material and got nothing out of it, out of
 				 * any of the three sources. It is counted and drawn neutral rather
@@ -2683,6 +2695,13 @@ bool lodgenNativeLoadModelPlaced( void * user, const QString & model, const Lodg
 	return nativeLoadModelImpl( user, model, swap, out, true, true );
 }
 
+// lane SPEED1: the same load with nothing kept in this thread's cache (the cell view's workers, cellmodelahead.h)
+bool lodgenNativeLoadModelPlacedOnce( void * user, const QString & model, const LodgenMaterialSubst * swap,
+	std::vector<NativeSrcShape> * out )
+{
+	return nativeLoadModelImpl( user, model, swap, out, false, true );
+}
+
 bool lodgenNativeLoadModelOnce( void * user, const QString & model, const LodgenMaterialSubst * swap,
 	std::vector<NativeSrcShape> * out )
 {
@@ -2748,6 +2767,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.effectTex0 = s.effectTex0; n.matUnreadable = s.matUnreadable;
 		n.effectBlend = s.effectBlend; n.matAlpha = s.matAlpha;
 		n.effectMatRead = s.effectMatRead; n.shaderSF1 = s.shaderSF1; n.shaderSF2 = s.shaderSF2;
+		n.effectLit = s.effectLit;	// lane FXLIT1
 		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;	// lane EFX1
 		n.refractStrength = s.refractStrength;
 		n.bakeBlend = s.bakeBlend; n.bakeBlendSrc = s.bakeBlendSrc; n.bakeBlendDst = s.bakeBlendDst;	// lane BAKE4

@@ -31,10 +31,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glscene.h"
+#include "cellspeed.h"
 
 #include "hkxplayback.h"
 
 #include "gl/renderer.h"
+#include "gl/cellhdr.h"
 #include "gl/gltex.h"
 #include "gl/glcontroller.h"
 #include "gl/controllers.h"
@@ -295,6 +297,7 @@ void Scene::updateLodLevel( int level )
 
 void Scene::make( NifModel * nif, bool flushTextures )
 {
+	CellSpeed::Acc speedAcc( "scene made from the document (Scene::make)" );   // lane SPEED1
 	clear( flushTextures );
 
 	if ( !nif )
@@ -502,12 +505,16 @@ bool Scene::grabRefractionSource()
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 
-	if ( !refractionTexId || refractionTexW != w || refractionTexH != h ) {
+	/* lane HDR1: a multisampled source resolves only into its own format, so the copy follows the frame:
+	 * the cell's linear frame is RGBA16F (gl/cellhdr.h) */
+	const GLenum fmt = wwCellHdrActive() ? GL_RGBA16F : GL_RGBA8;
+	if ( !refractionTexId || refractionTexW != w || refractionTexH != h || refractionTexFormat != fmt ) {
 		if ( !refractionTexId )
 			fn->glGenTextures( 1, &refractionTexId );
 		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
 		fn->glBindTexture( GL_TEXTURE_2D, refractionTexId );
-		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( fmt ), w, h, 0, GL_RGBA, fmt == GL_RGBA8 ? GL_UNSIGNED_BYTE : GL_FLOAT, nullptr );
+		refractionTexFormat = fmt;
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );

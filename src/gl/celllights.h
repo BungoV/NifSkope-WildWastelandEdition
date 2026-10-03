@@ -29,13 +29,25 @@ BSD License - see nifskope.h
  * 3 its low bytes (each over the 65536-unit box centred on the published centre), 4 the world
  * normal * 0.5 + 0.5), WW_CELL_LIT_RED=<red>: "linear" (the radial curve without its 2.2 power),
  * "axis" (spots shine along -Z), "nodalc" (the interior ambient dropped), "ambientlit" (the Ambient Only
- * lights, which add no direct light in game, drawn as ordinary lights; lane AMBO1), "ambientfull" (the Ambient
- * Only lights' ambient adjustment ignored; lane AMBO2). Probe 5 (lane PRTPGI): the bounce's irradiance E(N) / pi,
- * raw. Probe 11 (lane AMBO2): the interior ambient's per-channel affine sum before its 2.2, x 8, clamped to 0..1. */
+ * lights, which add no direct light in game, drawn as ordinary lights; lane AMBO1), "hemiomni" (hemisphere
+ * and box lights drawn as plain omni lights again; lane HEMI1), "ambientfull" (the Ambient Only lights' ambient
+ * adjustment ignored; lane AMBO2). Probe 5 (lane PRTPGI): the bounce's irradiance E(N) / pi, raw. Probe 11
+ * (lane AMBO2): the interior ambient's per-channel affine sum before its 2.2, x 8, clamped to 0..1.
+ *
+ * LIGHT SHAPES (lane HEMI1, from the game's code and shaders, docs/PRTP_PLAN.md "light shapes"). The type comes from the
+ * LIGH flags first: 0x800 hemisphere, else 0x400 / 0x4000 spot, else a box when the ref links, by keyword
+ * 00115705 LightBoxLink, to a ref carrying an XPRM primitive; else omni. Flag 0x20000 is never read. A
+ * hemisphere and a box draw the omni curve (the same radial term from the light's own position and radius),
+ * clipped by a volume: a pixel is lit only where its surface point lies inside it.
+ *   hemisphere = the half ball on the light's local +X side: (P - pos) . dir >= 0
+ *   box        = the linked ref's box: centered on its position, half extents = XPRM bounds as stored,
+ *                axes from its rotation (the light's own radius and curve still apply inside) */
 
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
+#include <cmath>
 #include <vector>
 
 class Scene;
@@ -56,17 +68,35 @@ struct WwCellLight
 	int shadow = 0;                 //!< lane SHADOW1: 0 none, 1 spot (0x400), 2 hemisphere (0x800), 3 omni (0x1000)
 	float nearClip = 10.0f;         //!< DATA Near Clip + XLIG Near Clip delta: casters nearer the light cast nothing
 	float shadowBias = 0.0f;        //!< XLIG Shadow Depth Bias (read and echoed; its scale is unread, not applied)
+	int shape = 0;                  //!< lane HEMI1: 0 omni (or spot), 1 hemisphere (dir = its plane normal), 2 box
+	float box[3][4] = {};           //!< lane HEMI1: box local coordinate k = dot(box[k].xyz, P) + box[k].w, inside |k| <= 1
 };
+
+//! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
+inline bool wwCellLightShapeIn( const WwCellLight & l, double x, double y, double z )
+{
+	if ( l.shape == 1 )
+		return ( x - l.pos[0] ) * l.dir[0] + ( y - l.pos[1] ) * l.dir[1] + ( z - l.pos[2] ) * l.dir[2] >= 0.0;
+	if ( l.shape == 2 )
+		for ( int k = 0; k < 3; k++ )
+			if ( std::abs( l.box[k][0] * x + l.box[k][1] * y + l.box[k][2] * z + l.box[k][3] ) > 1.0 )
+				return false;
+	return true;
+}
 
 /* lane AMBO2: an Ambient Only light (LIGH flag 0x100000) as the game draws it: a sphere volume of 1.22077 x its
  * radius (base + XRDS) at the light; the cell ambient of every surface inside it has each channel's affine sum
  * (before the 2.2) scaled by k = pow(byte / 255, 2.2) x fade. The first light in plugin order that holds a
- * point wins; it replaces the cell ambient there, never adds. No fade at the edge, no camera rule. */
+ * point wins; it replaces the cell ambient there, never adds. No fade at the edge, no camera rule.
+ * Lane HEMI1: the game gives an Ambient Only light its shape like any other light, so one linked to a box
+ * (LIGHT SHAPES above; 29 of the 39 placed) fills that box instead of the sphere, whatever its radius. */
 struct WwCellAmbientLight
 {
 	float pos[3] = { 0, 0, 0 };     //!< world
 	float volume = 0.0f;            //!< 1.22077 x radius
 	float k[3] = { 1, 1, 1 };       //!< per channel, folded into the ambient before its power
+	bool hasBox = false;            //!< lane HEMI1: the volume is `box`, not the sphere
+	float box[3][4] = {};           //!< lane HEMI1: as WwCellLight::box, inside |k| < 1
 };
 
 struct WwCellLighting
@@ -96,6 +126,7 @@ struct WwCellLighting
 	 * reads 163840, near <= 0 or > far reads 0.17 far, so an interior always fogs. Colours byte / 255 x their
 	 * scale, then pow 2.2. Heights are world z. */
 	bool hasFog = false;
+	float clipDist = 0.0f;              //!< lane SSR1: an interior's clip distance (XCLL offset 32; Inherits 0x80), 0 = none
 	float fogK[6][4] = {};
 	QString fogNote;
 	QString summary;                    //!< one census line
@@ -114,10 +145,22 @@ struct WwCellGi
 	float voxel = 64.0f;
 	int dims[3] = { 0, 0, 0 };
 	std::vector<float> rgba;
+	std::vector<float> sky;	// lane PROBEVIEW1: the same layout, rgb = the probes' open-sky share, a = valid
 	QString summary;
-	bool sky = false;   //!< lane SKY1: the grid holds the weather's sky; it stands in for the weather's ambient
+	bool skyLit = false;   //!< lane SKY1: the grid holds the weather's sky; it stands in for the weather's ambient
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
+
+/*! lane PROBEVIEW1: the PRTP band's Pass (Division deck, s18/s40/s65 views). 0 Combined (the frame as drawn),
+ *  1 GI (the probe grid's E / pi on the surface's normal), 2 Sky visibility (the probes' open-sky share on the
+ *  normal), 3 Surfel color, 4 Surfel light (src/gl/cellprobeview.h draws the surfels over a magenta frame).
+ *  Stored as WW/CellPass; the pin WW_CELL_PASS (number or entry name) wins. WW_CELL_PV_RED=direct|nonormal|open. */
+QStringList wwCellPassNames();
+int wwCellPass();
+//! the Pass this document draws: the stored one once its bake is relit (a GI grid published), else Combined
+int wwCellPassFor( const void * nif );
+void wwCellSetPass( int pass );
+int wwCellPassRed();
 const WwCellGi * wwCellGiFor( const void * nif );
 //! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
 bool wwCellGiOn();

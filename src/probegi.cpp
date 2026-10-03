@@ -247,7 +247,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	const bool redSunThrough = spec.skyRed == QLatin1String( "sunthrough" );
 	const bool sunOn = skyOn && spec.sky.sunTo[2] > 0.0f
 		&& ( spec.sky.sun[0] > 0.0f || spec.sky.sun[1] > 0.0f || spec.sky.sun[2] > 0.0f );
-	R.sky = skyOn;
+	R.skyLit = skyOn;
 	R.skyLabel = spec.sky.label;
 
 	// ---- the bake's files, by name (the gate reads them in the same order)
@@ -335,6 +335,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 	}
 	R.surfels = int( us.size() );
+	if ( !tbks.empty() )
+		R.surfelCell = tbks[0].h.surfelCellSize;	// lane PROBEVIEW1
 	const QVector<WwCellLight> & lights = lighting.lights;
 	std::atomic<qint64> rays( 0 ), shadowed( 0 );
 	std::atomic<int> lit( 0 );
@@ -349,7 +351,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		for ( const WwCellLight & l : lights ) {
 			const double Lv[3] = { l.pos[0] - u.p[0], l.pos[1] - u.p[1], l.pos[2] - u.p[2] };
 			const double d = std::sqrt( Lv[0] * Lv[0] + Lv[1] * Lv[1] + Lv[2] * Lv[2] );
-			if ( d >= l.radius )
+			if ( d >= l.radius || !wwCellLightShapeIn( l, u.p[0], u.p[1], u.p[2] ) )	// lane HEMI1: the volume
 				continue;
 			const double inv = 1.0 / std::max( d, 0.001 );
 			const double L[3] = { Lv[0] * inv, Lv[1] * inv, Lv[2] * inv };
@@ -423,9 +425,10 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.msLight = clock.nsecsElapsed() / 1e6;
 
 	// ---- 2. every probe's ambient cube from its links
-	struct UP { double p[3]; double E[6][3]; double S[6][3]; };   // S: the sky's part of E (lane SKY1)
+	struct UP { double p[3]; double E[6][3]; double sky[6]; double S[6][3]; };   // S: the sky's part of E (lane SKY1)
 	std::vector<UP> up;
 	double skyVisSum = 0.0;
+	R.probeLinkStart.assign( 1, 0 );	// lane PROBEVIEW1
 	for ( size_t f = 0; f < tbks.size(); f++ ) {
 		const Tbk & t = tbks[f];
 		const float cs = t.h.surfelCellSize;
@@ -444,6 +447,16 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				P.p[c] = pr.position[c];
 			std::memset( P.E, 0, sizeof P.E );
 			std::memset( P.S, 0, sizeof P.S );
+			/* lane PROBEVIEW1: the open-sky share on each axis = the mean of the four octants on its side
+			 * (octant = x<0 | (y<0)<<1 | (z<0)<<2, the bake's skyVis) */
+			for ( int a = 0; a < 6; a++ ) {
+				const int bit = 1 << ( a / 2 ), want = ( a & 1 ) ? bit : 0;
+				double sum = 0.0;
+				for ( int o = 0; o < 8; o++ )
+					if ( ( o & bit ) == want )
+						sum += double( pr.skyVis[o] );
+				P.sky[a] = std::min( std::max( sum * 0.25, 0.0 ), 1.0 );
+			}
 			const Key3 pk { floorDiv( pr.position[0], cs ), floorDiv( pr.position[1], cs ), floorDiv( pr.position[2], cs ) };
 			double linked = 0.0;
 			for ( quint32 j = 0; j < pr.linkCount; j++ ) {
@@ -458,7 +471,9 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 					R.linksUnresolved++;
 					continue;
 				}
-				const US & u = us[size_t( ( sideBack ? fileBack : fileSurfel )[f][size_t( it->second )] )];
+				const int ui = ( sideBack ? fileBack : fileSurfel )[f][size_t( it->second )];
+				const US & u = us[size_t( ui )];
+				R.probeLinks.push_back( ui );
 				double tint[3] = { 1, 1, 1 };
 				if ( li < t.lext.size() )
 					for ( int c = 0; c < 3; c++ )
@@ -504,6 +519,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 						P.E[a][c] += P.S[a][c];
 			}
 			up.push_back( P );
+			R.probeLinkStart.push_back( int( R.probeLinks.size() ) );
 		}
 	}
 	R.probes = int( up.size() );
@@ -585,6 +601,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			todo.push_back( i );
 	R.voxelsNear = int( todo.size() );
 	R.grid.assign( nVox * 6 * 4, 0.0f );
+	R.gridSky.assign( nVox * 6 * 4, 0.0f );	// lane PROBEVIEW1: the same voxels, the same weights
 	std::atomic<qint64> vr( 0 ), vb( 0 );
 	std::atomic<int> valid( 0 );
 	parallelFor( todo.size(), [&]( size_t k ) {
@@ -593,7 +610,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			z = int( i / ( size_t( dims[0] ) * size_t( dims[1] ) ) );
 		const double c[3] = { R.origin[0] + ( x + 0.5 ) * v, R.origin[1] + ( y + 0.5 ) * v, R.origin[2] + ( z + 0.5 ) * v };
 		const Key3 ck { floorDiv( float( c[0] ), float( rad ) ), floorDiv( float( c[1] ), float( rad ) ), floorDiv( float( c[2] ), float( rad ) ) };
-		double acc[6][3] = {}, wsum = 0.0;
+		double acc[6][3] = {}, accSky[6] = {}, wsum = 0.0;
 		qint64 nr = 0, nb = 0;
 		for ( int dz = -1; dz <= 1; dz++ )
 			for ( int dy = -1; dy <= 1; dy++ )
@@ -618,9 +635,11 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 						const double t = 1.0 - d2 / ( rad * rad );
 						const double w = t * t;
 						wsum += w;
-						for ( int a = 0; a < 6; a++ )
+						for ( int a = 0; a < 6; a++ ) {
 							for ( int ch = 0; ch < 3; ch++ )
 								acc[a][ch] += w * P.E[a][ch];
+							accSky[a] += w * P.sky[a];
+						}
 					}
 				}
 		vr += nr;
@@ -634,6 +653,9 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			for ( int ch = 0; ch < 3; ch++ )
 				g[ch] = float( acc[a][ch] / wsum );
 			g[3] = 1.0f;
+			float * k = &R.gridSky[size_t( g - R.grid.data() )];
+			k[0] = k[1] = k[2] = float( accSky[a] / wsum );
+			k[3] = 1.0f;
 		}
 	} );
 	R.visRays = vr;
@@ -654,13 +676,15 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		for ( int a = 0; a < 6; a++ )
 			for ( int c = 0; c < 3; c++ )
 				R.probeCube.push_back( float( P.E[a][c] ) );
+		for ( int a = 0; a < 6; a++ )
+			R.probeSky.push_back( float( P.sky[a] ) );
 	}
 	if ( skyOn ) {   // lane SKY1: the sky's and the sun's parts, for the gate
-		R.probeSky.reserve( up.size() * 18 );
+		R.probeSkyE.reserve( up.size() * 18 );
 		for ( const UP & P : up )
 			for ( int a = 0; a < 6; a++ )
 				for ( int c = 0; c < 3; c++ )
-					R.probeSky.push_back( float( P.S[a][c] ) );
+					R.probeSkyE.push_back( float( P.S[a][c] ) );
 		R.surfelSun.reserve( us.size() * 3 );
 		for ( const US & u : us )
 			for ( int c = 0; c < 3; c++ )
@@ -690,7 +714,7 @@ QString probeGiCensusText( const ProbeGiResult & r )
 		.arg( r.shadowRays ).arg( r.shadowBlocked ).arg( r.dims[0] ).arg( r.dims[1] ).arg( r.dims[2] )
 		.arg( double( r.voxel ), 0, 'f', 1 ).arg( double( r.radius ), 0, 'f', 1 ).arg( r.voxelsNear ).arg( r.voxelsValid )
 		.arg( r.visRays ).arg( r.visBlocked ).arg( r.msLight, 0, 'f', 0 ).arg( r.msGather, 0, 'f', 0 ).arg( r.msGrid, 0, 'f', 0 )
-		+ ( r.sky ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() );
+		+ ( r.skyLit ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() );
 }
 
 /* The dump (little-endian):
@@ -698,6 +722,9 @@ QString probeGiCensusText( const ProbeGiResult & r )
  *   gi_probes.bin   int32 n, then n x 21 float32: position, E on +X -X +Y -Y +Z -Z (rgb each);
  *                   the probes in file-name order, then file order
  *   gi_grid.bin     float32 origin[3], voxel, radius; int32 dims[3]; then the grid (probegi.h)
+ *   gi_skygrid.bin  the same header, then the sky grid (lane PROBEVIEW1)
+ *   gi_probesky.bin int32 n, then n x 6 float32: the sky share on +X -X +Y -Y +Z -Z
+ *   gi_links.bin    int32 n, int32 start[n + 1], then int32 surfel index (gi_surfels.bin order) per resolved link
  *   gi_meta.txt     the spec */
 bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QString & dir, QString * err )
 {
@@ -727,8 +754,8 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 	 *   gi_sun.bin   int32 n, then n x 3 float32: the sun's part of each surfel's B (same order)
 	 *   gi_sky.txt   the light the relight used: amb (six rows, a surface facing +X -X +Y -Y +Z -Z),
 	 *                sunTo, sun, the label, the red */
-	if ( r.sky ) {
-		if ( !put( QStringLiteral( "gi_sky.bin" ), i32( r.probes ), r.probeSky ) )
+	if ( r.skyLit ) {
+		if ( !put( QStringLiteral( "gi_sky.bin" ), i32( r.probes ), r.probeSkyE ) )
 			return false;
 		if ( !put( QStringLiteral( "gi_sun.bin" ), i32( r.surfels ), r.surfelSun ) )
 			return false;
@@ -745,6 +772,21 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 				.arg( spec.sky.label, spec.skyRed.isEmpty() ? QStringLiteral( "-" ) : spec.skyRed );
 			s.write( t.toUtf8() );
 		}
+	}
+	// lane PROBEVIEW1: the sky grid (gi_grid.bin's header and layout), each probe's six sky shares, its links
+	if ( !put( QStringLiteral( "gi_skygrid.bin" ), gh, r.gridSky ) )
+		return false;
+	if ( !put( QStringLiteral( "gi_probesky.bin" ), i32( r.probes ), r.probeSky ) )
+		return false;
+	{
+		QFile f( QDir( dir ).filePath( QStringLiteral( "gi_links.bin" ) ) );
+		if ( !f.open( QIODevice::WriteOnly ) ) {
+			*err = QStringLiteral( "cannot write %1" ).arg( f.fileName() );
+			return false;
+		}
+		f.write( i32( r.probes ) );
+		f.write( reinterpret_cast<const char *>( r.probeLinkStart.data() ), qint64( r.probeLinkStart.size() * 4 ) );
+		f.write( reinterpret_cast<const char *>( r.probeLinks.data() ), qint64( r.probeLinks.size() * 4 ) );
 	}
 	QFile m( QDir( dir ).filePath( QStringLiteral( "gi_meta.txt" ) ) );
 	if ( m.open( QIODevice::WriteOnly ) )

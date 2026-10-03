@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "nifskope.h"
+#include "cellmesh.h"
 #include "gl/glscene.h"
 #include "glview.h"
 #include "model/nifmodel.h"
@@ -137,6 +138,7 @@ void NifSkope::sltExport( QAction* a )
 	QModelIndex index = currentNifIndex();
 	auto impex = impexOptions.value(a->data().toInt(), {});
 	if ( impex.exportFn ) {
+		cellMeshMaterializeAll( nif );	// lane SPEED1: an exporter reads the document; a cell's welded rows are written first
 		impex.exportFn(nif, ogl->scene, index);
 	}
 }

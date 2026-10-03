@@ -99,6 +99,8 @@ QString CellRefTable::fateName( CellRefFate fate )
 	case CellRefFate::Disabled: return QStringLiteral( "disabled" );
 	case CellRefFate::NoModel:  return QStringLiteral( "no model" );
 	case CellRefFate::Marker:   return QStringLiteral( "marker" );
+	case CellRefFate::Projected: return QStringLiteral( "projected decal, no shape of its own" );
+	case CellRefFate::Refused:  return QStringLiteral( "refused, see the census" );
 	}
 	return QStringLiteral( "?" );
 }

@@ -1,5 +1,6 @@
 #include "gamemanager.h"
 
+#include "celltexahead.h"
 #include "ba2file.hpp"
 #include "bsrefl.hpp"
 #include "material.hpp"
@@ -594,6 +595,7 @@ GameManager::GameResources * GameManager::addNIFResourcePath( const NifModel * n
 
 void GameManager::removeNIFResourcePath( const NifModel * nif )
 {
+	CellTexAhead::stop( nif );   // lane SPEED1: no worker thread reads through resources that are going
 	QMutexLocker	resourceLock( &nifResourceMutex() );
 	auto	i = nifResourceMap.find( nif );
 	if ( i == nifResourceMap.end() )

@@ -10,6 +10,10 @@ NifSkope dumped (WW_CELL_IS_DUMP, the measure pass at full size).
   B  the bloom NifSkope echoed (lane BLOOM1: size, texels past the threshold, peak) = ours from the dump
   P  the picture = our chain over the dump + our bloom, on the pixels that end on an opaque cell-lit surface:
      >= 97% within 3/255 of the rebuild's 3x3 neighbourhood range (the shot is antialiased, the dump is not)
+  Q  (lane HDR1) the blended pixels: where an effect or a blended cell-lit draw lands over a cell-lit surface
+     (stencil 3), the picture = our chain over the dump's linear SUM + our bloom, the same tolerance, >= 95%
+     of them (>= 2000 px, else skipped). The game tone-maps the sum once; tone-mapping each layer and
+     blending the results in display space (the red control perfrag) parts from it wherever layers stack
 
 usage  cell_is_check.py <Fallout4.esm> <cell EDID> <run dir> [nolut|noexp|nograde]
        (run dir holds on.png, on.hdr, on.hdr.txt; the optional word rebuilds WITHOUT that stage: a self-check
@@ -193,12 +197,31 @@ def main(esm, cell, run, red=''):
     strict = np.abs(want - pic).max(-1)[geo]
     frac = float((d <= 3.0 / 255.0).mean()) if d.size else 0.0
     okP = frac >= 0.97 and d.size >= 5000
-    print('P %s  %.2f%% of %d opaque cell-lit pixels (%.0f%% of the frame) within 3/255 of the rebuild '
-          '(strict per pixel %.2f%%, median %.2f/255)' % (
-              'PASS' if okP else 'FAIL', 100 * frac, d.size, 100.0 * d.size / (w * h),
-              100 * float((strict <= 3.0 / 255.0).mean()) if d.size else 0.0,
-              255 * float(np.median(strict)) if d.size else 0.0))
-    ok = okA and okB and okP
+    mix = cover == 3
+    if d.size < 5000 and int(mix.sum()) >= 2000:
+        # lane HDR1: a camera inside the haze (the walkway) has no bare surface; stage Q judges it instead
+        okP = True
+        print('P skip  only %d opaque cell-lit pixels (< 5000); the frame is blended, stage Q judges it' % d.size)
+    else:
+        print('P %s  %.2f%% of %d opaque cell-lit pixels (%.0f%% of the frame) within 3/255 of the rebuild '
+              '(strict per pixel %.2f%%, median %.2f/255)' % (
+                  'PASS' if okP else 'FAIL', 100 * frac, d.size, 100.0 * d.size / (w * h),
+                  100 * float((strict <= 3.0 / 255.0).mean()) if d.size else 0.0,
+                  255 * float(np.median(strict)) if d.size else 0.0))
+    # lane HDR1: Q, the blended pixels (stencil 3) against the chain over the linear sum
+    dq = np.maximum(np.maximum(lo - pic, pic - hi), 0.0).max(-1)[mix]
+    if dq.size < 2000:
+        okQ = True
+        print('Q skip  only %d blended pixels over a cell-lit surface (< 2000)' % dq.size)
+    else:
+        fq = float((dq <= 3.0 / 255.0).mean())
+        okQ = fq >= 0.95
+        print('Q %s  %.2f%% of %d blended pixels (%.0f%% of the frame) within 3/255 of the chain over the sum '
+              '(median %.2f/255)' % ('PASS' if okQ else 'FAIL', 100 * fq, dq.size, 100.0 * dq.size / (w * h),
+                                     255 * float(np.median(np.abs(want - pic).max(-1)[mix]))))
+        if dq.size >= 0.10 * w * h:	# the red perfrag is judged here only: layers stack
+            print('Q blend share %.0f%% stacked' % (100.0 * dq.size / (w * h)))
+    ok = okA and okB and okP and okQ
     print('imagespace %s' % ('PASS' if ok else 'FAIL'))
     return 0 if ok else 1
 

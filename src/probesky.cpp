@@ -4,6 +4,7 @@
 
 #include "esmweather.h"
 #include "gl/celllights.h"
+#include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"
 #include "gl/scenelighting.h"
 #include "probegi.h"
@@ -106,11 +107,23 @@ void relightKept()
 		gi.dims[c] = gr.dims[c];
 	}
 	gi.voxel = gr.voxel;
-	gi.sky = gr.sky && k.spec.skyRed != QLatin1String( "keepamb" );
+	gi.skyLit = gr.skyLit && k.spec.skyRed != QLatin1String( "keepamb" );
 	gi.summary = QStringLiteral( "grid %1x%2x%3 voxel %4" ).arg( gr.dims[0] ).arg( gr.dims[1] ).arg( gr.dims[2] )
 		.arg( double( gr.voxel ), 0, 'f', 1 );
 	gi.rgba = std::move( gr.grid );
+	gi.sky = std::move( gr.gridSky );	// the Pass drop-down's sky share (weather-free, carried over)
 	wwCellGiPublish( k.nif, gi );
+	// the surfel and probe previews carry the relit light: publish them again, keeping Show probes
+	WwCellProbeView pv;
+	if ( const WwCellProbeView * old = wwCellProbeViewFor( k.nif ) )
+		pv.probesShown = old->probesShown;
+	pv.surfelCell = gr.surfelCell;
+	pv.surfels = std::move( gr.surfelOut );
+	pv.probes = std::move( gr.probeCube );
+	pv.probeSky = std::move( gr.probeSky );
+	pv.linkStart = std::move( gr.probeLinkStart );
+	pv.links = std::move( gr.probeLinks );
+	wwCellProbeViewPublish( k.nif, pv );
 	if ( k.view )
 		k.view->requestUpdate();
 }

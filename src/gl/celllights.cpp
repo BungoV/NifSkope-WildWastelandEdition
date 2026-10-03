@@ -6,10 +6,12 @@ BSD License - see nifskope.h
 
 #include "celllights.h"
 
+#include "gl/cellssr.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
+#include "gl/cellhdr.h"
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -24,7 +26,8 @@ namespace
 {
 
 constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 is the CSM map
-constexpr int kTexelsPerLight = 5;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias
+constexpr int kTexelsPerLight = 8;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias;
+										// lane HEMI1 the 6th to 8th: the box rows (cell_lights.glsl CELL_TPL)
 constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
 constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
 constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
@@ -66,6 +69,9 @@ struct ClState
 	bool shadowRed = false; // WW_CELL_SHADOW_RED=noshadow: the maps rendered, every factor read as 1
 	QString shadowLast = QStringLiteral( "none yet" );
 	int fogProbe = 0;       // lane FOG2: WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog colour ^ 1/2.2) | 8 (its d, z), per fragment
+	int pass = 0;           // lane PROBEVIEW1: the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
+	bool passPinned = false;
+	int passRed = 0;        // WW_CELL_PV_RED: 1 direct, 2 nonormal (the shader), 4 open (every sky direction open)
 };
 
 ClState & st()
@@ -118,13 +124,33 @@ ClState & st()
 			s.red = 64;	// lane RIM1: the lights' No Rim / Ignore Roughness flags ignored
 		else if ( red == "ambientlit" )
 			s.red = 128;	// lane AMBO1: the Ambient Only lights drawn as ordinary lights
+		else if ( red == "hemiomni" )
+			s.red = 256;	// lane HEMI1: hemisphere and box lights drawn as plain omni lights (the cell view applies it)
 		else if ( red == "cubeold" )
 			s.red = 512;	// lane CUBE1: the interior cube map at its old scale (squared, x Lambert, default cube)
 		else if ( red == "ambientfull" )
 			s.red = 1024;	// lane AMBO2: the Ambient Only lights' ambient adjustment ignored
+		else if ( red == "probefx" )
+			s.red = 4096;	// lane FRAT1: effects and refraction shapes drawn into the probe passes again
 		// lane POOL1: the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
 		if ( qgetenv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
 			s.red |= 65536;
+		// lane PROBEVIEW1: the Pass, by number or by its entry's name
+		const QByteArray passPin = qgetenv( "WW_CELL_PASS" ).trimmed();
+		if ( !passPin.isEmpty() ) {
+			s.passPinned = true;
+			const QStringList names = wwCellPassNames();
+			const int byName = names.indexOf( QString::fromLatin1( passPin ) );
+			s.pass = byName >= 0 ? byName : passPin.toInt();
+		} else {
+			s.pass = QSettings().value( QStringLiteral( "WW/CellPass" ), 0 ).toInt();
+		}
+		if ( s.pass < 0 || s.pass >= int( wwCellPassNames().size() ) )
+			s.pass = 0;
+		for ( const QByteArray & r : qgetenv( "WW_CELL_PV_RED" ).split( ',' ) ) {
+			const QByteArray t = r.trimmed();
+			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : 0;
+		}
 	}
 	return s;
 }
@@ -139,6 +165,9 @@ struct Gpu
 	GLuint giTex = 0;
 	const void * giDoc = nullptr;
 	int giVersion = 0;
+	GLuint skyTex = 0;		// lane PROBEVIEW1: the sky grid, bound on the GI unit in the Sky visibility pass
+	const void * skyDoc = nullptr;
+	int skyVersion = 0;
 	GLuint lutTex = 0;
 	const void * lutDoc = nullptr;
 	int lutVersion = 0;
@@ -222,7 +251,8 @@ bool wwCellLightsWanted( Scene * scene )
 {
 	if ( !scene || !scene->renderer || !scene->nifModel || scene->selecting )
 		return false;
-	if ( !st().on || !wwCellLightsFor( scene->nifModel ) )
+	// lane PROBEVIEW1: a Pass other than Combined draws through the cell program with the Cell lights row off too
+	if ( !( st().on || wwCellPassFor( scene->nifModel ) > 0 ) || !wwCellLightsFor( scene->nifModel ) )
 		return false;
 	// an orthographic camera has no eye position to measure light distances from
 	return scene->hasOption( Scene::DoLighting ) && scene->renderer->globalUniforms->projectionMatrix[3][3] != 1.0f;
@@ -234,7 +264,40 @@ bool wwCellLightsWanted( Scene * scene )
 bool wwCellProbePass( Scene * scene )
 {
 	const ClState & s = st();
-	return ( s.probe > 0 || s.fogProbe > 0 ) && wwCellLightsWanted( scene );
+	if ( s.red & 4096 )
+		return false;	// lane FRAT1: WW_CELL_LIT_RED=probefx, the effects write over the probes (as before lane EFX1)
+	return ( s.probe > 0 || s.fogProbe > 0 || ( scene && wwCellPassFor( scene->nifModel ) > 0 ) ) && wwCellLightsWanted( scene );
+}
+
+int wwCellPassFor( const void * nif )
+{
+	const int p = st().pass;
+	return p > 0 && nif && wwCellGiFor( nif ) ? p : 0;
+}
+
+QStringList wwCellPassNames()
+{
+	return { QStringLiteral( "Combined" ), QStringLiteral( "GI" ), QStringLiteral( "Sky visibility" ),
+		QStringLiteral( "Surfel color" ), QStringLiteral( "Surfel light" ) };
+}
+
+int wwCellPass()
+{
+	return st().pass;
+}
+
+void wwCellSetPass( int pass )
+{
+	ClState & s = st();
+	if ( s.passPinned || pass < 0 || pass >= int( wwCellPassNames().size() ) )
+		return;
+	s.pass = pass;
+	QSettings().setValue( QStringLiteral( "WW/CellPass" ), pass );
+}
+
+int wwCellPassRed()
+{
+	return st().passRed;
 }
 
 void wwCellLightsUniforms( Scene * scene )
@@ -263,18 +326,23 @@ void wwCellLightsUniforms( Scene * scene )
 		for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
 			const WwCellLight & l = L->lights.at( i );
 			float dir[3] = { l.dir[0], l.dir[1], l.dir[2] };
-			const float tex[20] = {
+			// lane HEMI1: texel 1.w = cos(FOV / 2) for a spot, else the shape: -2 omni, -3 hemisphere, -4 box
+			const float shape = l.spot ? l.cosOuter : l.shape == 1 ? -3.0f : l.shape == 2 ? -4.0f : -2.0f;
+			const float tex[kTexelsPerLight * 4] = {
 				l.pos[0], l.pos[1], l.pos[2], l.radius,
-				l.color[0], l.color[1], l.color[2], l.spot ? l.cosOuter : -2.0f,
+				l.color[0], l.color[1], l.color[2], shape,
 				dir[0], dir[1], dir[2], l.cone,
 				l.bias, l.scale, l.exponent,
 				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) ),	// lane RIM1
-				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias };
-			t.insert( t.end(), tex, tex + 20 );
+				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias,
+				l.box[0][0], l.box[0][1], l.box[0][2], l.box[0][3],
+				l.box[1][0], l.box[1][1], l.box[1][2], l.box[1][3],
+				l.box[2][0], l.box[2][1], l.box[2][2], l.box[2][3] };
+			t.insert( t.end(), tex, tex + kTexelsPerLight * 4 );
 		}
 		g.bufShStamp = g.shStamp;
 		if ( t.empty() )
-			t.assign( 20, 0.0f );	// a buffer texture must have a store
+			t.assign( kTexelsPerLight * 4, 0.0f );	// a buffer texture must have a store
 		if ( !g.buf ) {
 			fn->glGenBuffers( 1, &g.buf );
 			fn->glGenTextures( 1, &g.tex );
@@ -298,8 +366,30 @@ void wwCellLightsUniforms( Scene * scene )
 		fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
 	}
 	// lane PRTPGI: the bounce grid, bound (like the buffer above) whether or not this draw uses it
-	const WwCellGi * G = on && s.giOn ? wwCellGiFor( scene->nifModel ) : nullptr;
-	if ( G && !G->rgba.empty() && ( g.giDoc != scene->nifModel || g.giVersion != s.giVersion.value( scene->nifModel ) ) ) {
+	// lane PROBEVIEW1: a Pass reads the grid with the GI row off too; Sky visibility binds the sky grid in its place
+	const int pass = wwCellPassFor( scene->nifModel );
+	const WwCellGi * G = on && ( s.giOn || pass > 0 ) ? wwCellGiFor( scene->nifModel ) : nullptr;
+	if ( G && pass == 2 && !G->sky.empty() && ( g.skyDoc != scene->nifModel || g.skyVersion != s.giVersion.value( scene->nifModel ) ) ) {
+		std::vector<float> sky = G->sky;
+		if ( s.passRed & 4 )	// red "open": every direction open to the sky
+			for ( size_t i = 0; i + 3 < sky.size(); i += 4 )
+				sky[i] = sky[i + 1] = sky[i + 2] = sky[i + 3];
+		if ( !g.skyTex )
+			fn->glGenTextures( 1, &g.skyTex );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
+		fn->glBindTexture( GL_TEXTURE_3D, g.skyTex );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], G->dims[2] * 6, 0, GL_RGBA, GL_FLOAT,
+			sky.data() );
+		g.skyDoc = scene->nifModel;
+		g.skyVersion = s.giVersion.value( scene->nifModel );
+	}
+	if ( G && pass != 2 && !G->rgba.empty() && ( g.giDoc != scene->nifModel || g.giVersion != s.giVersion.value( scene->nifModel ) ) ) {
 		if ( !g.giTex )
 			fn->glGenTextures( 1, &g.giTex );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
@@ -315,13 +405,16 @@ void wwCellLightsUniforms( Scene * scene )
 		g.giDoc = scene->nifModel;
 		g.giVersion = s.giVersion.value( scene->nifModel );
 	}
-	const bool giDraw = G && g.giTex && g.giDoc == scene->nifModel;
+	const bool skyDraw = G && pass == 2 && g.skyTex && g.skyDoc == scene->nifModel;
+	const bool giDraw = skyDraw || ( G && pass != 2 && g.giTex && g.giDoc == scene->nifModel );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
-	fn->glBindTexture( GL_TEXTURE_3D, giDraw ? g.giTex : 0 );
+	fn->glBindTexture( GL_TEXTURE_3D, skyDraw ? g.skyTex : giDraw ? g.giTex : 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellGi", kGiUnit );
 	prog->uni1b( "cellGiOn", giDraw );
-	prog->uni1b( "cellGiSky", giDraw && G->sky );	// lane SKY1
+	prog->uni1b( "cellGiSky", giDraw && !skyDraw && G->skyLit );	// lane SKY1 (never on the sky-share grid)
+	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
+	prog->uni1i( "cellPassRed", s.passRed & 3 );
 	if ( giDraw ) {
 		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
 		prog->uni1f( "cellGiVoxel", G->voxel );
@@ -395,6 +488,7 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1f( "cellShadowTexel", 2.0f / float( kShadowFace ) );
 	prog->uni1i( "cellIsLut", kLutUnit );
 	prog->uni1b( "cellIsOn", isDraw );
+	prog->uni1b( "cellIsLinear", isDraw && wwCellHdrActive() );	// lane HDR1: write linear light, tone-mapped once
 	prog->uni1b( "cellIsLutOn", lutDraw );
 	if ( isDraw ) {
 		const float * h = L->isHdr;
@@ -441,7 +535,11 @@ void wwCellLightsUniforms( Scene * scene )
 	for ( int i = 0; i < ambo; i++ ) {
 		const WwCellAmbientLight & a = L->ambientLights[i];
 		prog->uni4f_l( prog->uniLocation( "cellAmbo[%d]", i ), FloatVector4( a.pos[0], a.pos[1], a.pos[2], a.volume ) );
-		prog->uni4f_l( prog->uniLocation( "cellAmboK[%d]", i ), FloatVector4( a.k[0], a.k[1], a.k[2], 0.0f ) );
+		// lane HEMI1: K.w = 1 marks a box volume, its three rows in cellAmboBox
+		prog->uni4f_l( prog->uniLocation( "cellAmboK[%d]", i ), FloatVector4( a.k[0], a.k[1], a.k[2], a.hasBox ? 1.0f : 0.0f ) );
+		for ( int k = 0; k < 3 && a.hasBox; k++ )
+			prog->uni4f_l( prog->uniLocation( "cellAmboBox[%d]", i * 3 + k ),
+				FloatVector4( a.box[k][0], a.box[k][1], a.box[k][2], a.box[k][3] ) );
 	}
 	prog->uni1b( "cellHasDir", L->hasDirectional );
 	prog->uni3f( "cellDirColor", L->dirColor[0], L->dirColor[1], L->dirColor[2] );
@@ -500,8 +598,8 @@ void wwCellImageSpaceSetOn( bool on )
 
 bool wwCellImageSpaceWanted( Scene * scene )
 {
-	if ( !st().isOn || !wwCellLightsWanted( scene ) )
-		return false;
+	if ( !st().isOn || !scene || wwCellPassFor( scene->nifModel ) > 0 || !wwCellLightsWanted( scene ) )
+		return false;	// lane PROBEVIEW1: a Pass shows the probes' own values, not the imagespace's grade
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
 	return L && L->hasImageSpace;
 }
@@ -676,6 +774,9 @@ QString wwCellLightsEcho( Scene * scene )
 		o += QStringLiteral( " probe=%1" ).arg( s.probe );
 	if ( s.red )
 		o += QStringLiteral( " red=%1" ).arg( s.red );
+	if ( s.pass > 0 )	// lane PROBEVIEW1
+		o += QStringLiteral( " pass=%1(asked=%2 %3, sky=%4, pvred=%5)" ).arg( scene ? wwCellPassFor( scene->nifModel ) : 0 )
+			.arg( s.pass ).arg( wwCellPassNames().value( s.pass ) ).arg( G && !G->sky.empty() ? 1 : 0 ).arg( s.passRed );
 	return o + QLatin1Char( ' ' ) + wwCellShadowEcho( scene );
 }
 
@@ -1240,6 +1341,26 @@ void wwCellAoPass( Scene * scene, bool run )
 	if ( wasBlend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST ); else fn->glDisable( GL_SCISSOR_TEST );
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
+}
+
+// lane SSR1: this frame's opaque pass and depth pyramid, for the reflections' march (src/gl/cellssr.h)
+bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
+{
+	if ( !scene || !scene->renderer || !aoGpus().contains( scene->renderer ) )
+		return false;
+	const AoGpu & g = aoGpus()[scene->renderer];
+	if ( !g.ready || g.doc != scene->nifModel )
+		return false;
+	out.gbuf = g.gbuf.tex;
+	out.depthRb = g.gbufDepth;
+	out.w = g.gbuf.w;
+	out.h = g.gbuf.h;
+	for ( int m = 1; m < 5; m++ ) {
+		out.mip[m] = g.mip[m].tex;
+		out.mipW[m] = g.mip[m].w;
+		out.mipH[m] = g.mip[m].h;
+	}
+	return true;
 }
 
 void wwCellAoDraw( Scene * scene, bool cellProgram )
