@@ -1680,6 +1680,36 @@ Gate tests/spells/cell_edmark.sh: A census = independent reader's models (5/5), 
 px over those models' ground (bar <= 40). Red `--red prefix` (WW_CELL_EDMARK_RED=prefix): A 0 vs 5,
 B 4478 px -- FAIL.
 
+### 2ao. The whole sky in the Lookdev preview (lane SKYFULL1, 2026-10-03)
+
+bungo: "I don't want it to keep showing the low res cubemap instead."
+
+- The Sky, Sun, Clouds and Moon rows ship ON (`LdState`, src/gl/lookdevstage.cpp). The studio cube is now only
+  the reflection/IBL source and the fallback when the dome refuses; the fallback is named in the sky line
+  (`cube:fallback(the dome refused)` after `sky:refused(<why>)`), and `cube(sky row off)` when the row is off.
+- Stars: the game's stars shape (meshes\sky\stars.nif, its sky shader's Source Texture and UV scale/offset),
+  tinted by the weather's Stars colour row (NAM0 row 6), alpha = the sky clock's stars alpha, hidden at alpha 0
+  or a black row. They turn about the GMST axis (fStarsRotate{X,Y,Z}Axis, exe default +Z) by
+  2 pi fmod(whole days + hour/24, fStarsRotateDays) / fStarsRotateDays (Fallout4.esm sets 1.0027 days, a
+  sidereal day). Drawn on the dome, under the moon (its shadow disc hides them), with the cloud-layer program.
+  The turn's sign is inferred, not measured.
+- Interiors: with the Sky row on, an interior whose CELL DATA lacks bit 7 (Show Sky) draws no sky at all (black
+  clear, `sky:none(interior without Show Sky)`); a Show Sky interior draws the dome through its openings.
+  `WwCellLighting::showSky` carries the flag from the cell view.
+- Telemetry: the sky line (`drew=` in the Lookdev status/census echo) names each pass drawn, hidden or refused;
+  stderr prints `lookdev sky: <line>` whenever it changes (the cloud clock left out of the comparison).
+- Camera: `WW_RENDER_PITCH=<deg>` tilts a pinned side view up (positive = up), for sky shots.
+- Gates: cell_gi / cell_sky / cell_pass and the pbr_csm1 / pbr_fog1 / pbr_r2b gates pin all four rows OFF where
+  they measure (byte-stable probe numbers); cell_gi and cell_sky add an unmeasured `sheet_lit.png` per exterior
+  view under the whole sky (checked to be the dome). pbr_wx1's `off` stage now pins the rows for its byte
+  compare and judges the unpinned run as the full sky (`off_*_default`). The live weather leg checks the rows
+  start ON, then switches them all OFF before stepping each ON.
+- New gate tests/spells/cell_skyfull.sh + cell_skyfull_check.py (stages S B O T N I), reds off / nodome /
+  nostars / interiorsky.
+- Consistent with the ratified physical-atmosphere direction where NifSkope can: the preview reads the same
+  vanilla weather records (colour rows, Sky Scale, clock) the physical model will later replace; nothing here
+  adds a hand dial.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

@@ -11,6 +11,11 @@
   starting with it were left out, so a green wire box showed over some wasteland shrubs. The cell notes
   count what was left out. Gate tests/spells/cell_edmark.sh.
 
+- **The real sky by default (SKYFULL1).** Lookdev now draws the weather sky dome, sun, clouds and moon out of
+  the box, plus the night stars (the game's star field, its colour and fade from the weather and the clock,
+  turning with the days). The blurry cube only shows when the sky mesh can't be found, and the status line says
+  why. Closed interiors show no sky; interiors with Show Sky show it through their windows.
+
 ## Probe bake: drip splashes no longer bake as solid swirls; two more ways to take a surface's color (lane CAPTURE1, 2026-10-03)
 
 - The water drips on the Vault 111 walkway (and other glass and water that only bends what is behind it) are no

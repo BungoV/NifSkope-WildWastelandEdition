@@ -34,6 +34,17 @@ Newest at the top.
 - Open follow-up: tests/spells/cell_fxlit_check.py still bounds models with startswith('editormarker');
   harmless today (only models with lit effects), switch it to the substring rule when next touched.
 
+- 10-03 SKYFULL1: two headless cell shots ran to their timeout with no picture because the command-line file
+  and the WW_RENDER_SHOT path were RELATIVE (`tests/fixtures/empty.wwcell`, `scratchpad/...png`): NifSkope
+  resolves them elsewhere, opens nothing and never shoots. Always pass absolute paths (`$REPO/...`) to a
+  headless launch. (40 min lost.)
+- 10-03 SKYFULL1: a harness scope has no resource stack, so the sky meshes (meshes\sky\*.nif) do not resolve
+  and the dome refuses; any harness that wants the sky must pass `WW_LODGEN_RESOURCES=<loose data>`.
+- 10-03 SKYFULL1: the first green sky gate failed 2 of 31 on the CAMERA, not the sky: a pinned view's eye stands
+  2 x WW_RENDER_DIST from the look-at, so dist 400 put it 800 units out, inside Concord's houses and under the
+  Sanctuary hill (flat olive / brown frames). Sky shots use dist 20 so the eye stays at the open look-at. Look at
+  a gate's frames before trusting its pixel stages.
+
 ## 2026-10-03 BOUNCE2: a gate script edited while a runner was executing it
 
 - What: cell_gi.sh was edited (Edit tool) while gates.sh was running `bash tests/spells/cell_gi.sh --red grow`
