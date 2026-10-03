@@ -528,6 +528,7 @@ void main()
 	// AO belongs on ambient, not on direct light: occlusion describes what the
 	// surface cannot see of the environment, and applying it to a direct lobe
 	// double-darkens contact shadows.
+	vec3 preAmbDiff = outDiff;	// lane SKY1: what the block below adds is the ambient's diffuse
 	if ( sceneMode >= 1 && hasStudioCube ) {
 		// Studio: the SFCubeMapCache pair. The irradiance cube is the radiance
 		// average (a uniform cube L stays L), so Lambert takes it without 1/PI.
@@ -622,6 +623,11 @@ void main()
 				cubeK = cellSsrMix( cubeK, cellCubeMat.y * sg.g, cellCubeMat.x * sg.r, envReflection );
 			}
 			outSpec += cubeK * cE;
+		} else if ( cellGiSky ) {
+			// lane SKY1: the grid's sky stands in for the weather's unshadowed ambient by its valid share,
+			// and takes the material's AO as that ambient did
+			outDiff += cDiff + giDiff * s.ao - cellGiSkyK( Pw, sw.N ) * ( outDiff - preAmbDiff );
+			outSpec += cSpec;
 		} else {
 			outDiff += cDiff + giDiff;
 			outSpec += cSpec;

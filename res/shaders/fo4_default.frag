@@ -564,6 +564,9 @@ void main()
 	// Emissive
 	color.rgb += emissive * glowScaleSRGB;
 #ifdef WW_CELLLIGHTS
+	// lane SKY1: outdoors the bounce grid's sky stands in for the weather's unshadowed ambient (0 elsewhere)
+	if ( cellOn && cellGiSky )
+		color.rgb -= cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ) * A.rgb * albedo;
 	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, specColor, alphaR, kSmith,

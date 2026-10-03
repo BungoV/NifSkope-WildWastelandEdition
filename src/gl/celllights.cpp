@@ -412,6 +412,7 @@ void wwCellLightsUniforms( Scene * scene )
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellGi", kGiUnit );
 	prog->uni1b( "cellGiOn", giDraw );
+	prog->uni1b( "cellGiSky", giDraw && !skyDraw && G->skyLit );	// lane SKY1 (never on the sky-share grid)
 	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
 	prog->uni1i( "cellPassRed", s.passRed & 3 );
 	if ( giDraw ) {

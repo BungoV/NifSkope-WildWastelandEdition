@@ -32,6 +32,9 @@ uniform sampler3D cellGi;
 uniform vec3 cellGiOrigin;
 uniform float cellGiVoxel;
 uniform vec3 cellGiDims;
+// lane SKY1 (src/probesky.h): a weather-lit exterior's grid holds the sky the probes see, so it stands in
+// for the weather's unshadowed ambient by the grid's valid share (0 where the grid does not reach)
+uniform bool cellGiSky;
 // lane PROBEVIEW1: the PRTP band's Pass (0 Combined, 1 GI, 2 Sky visibility, 3 Surfel color, 4 Surfel light).
 // In the Sky visibility pass the CPU binds the sky grid on cellGi (same layout, rgb = the probes' sky share).
 uniform int cellPass;
@@ -167,7 +170,18 @@ vec4 cellGiSample( vec3 P, vec3 N )
 vec3 cellGiE( vec3 P, vec3 N )
 {
 	vec4 s = cellGiSample( P, N );
+	// lane SKY1: with the sky in the grid the sample keeps its valid share (E x share), the other
+	// ( 1 - share ) being the weather's own ambient the program leaves in (cellGiSkyK)
+	if ( cellGiSky )
+		return max( s.rgb, vec3( 0.0 ) );
 	return s.a > 0.01 ? max( s.rgb / s.a, vec3( 0.0 ) ) : vec3( 0.0 );
+}
+// lane SKY1: the share of the weather's ambient the grid's sky replaces at P (0: not a sky grid)
+float cellGiSkyK( vec3 P, vec3 N )
+{
+	if ( !cellGiOn || !cellGiSky || cellInterior )
+		return 0.0;
+	return clamp( cellGiSample( P, N ).a, 0.0, 1.0 );
 }
 
 /* lane HEMI1: the game draws a hemisphere or box light as an omni light clipped by its volume (celllights.h):
@@ -219,6 +233,8 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 		return vec3( 0.0 );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
+	if ( cellProbe == 90 )	// lane SKY1: the share of the weather's ambient the grid's sky replaced
+		return vec3( cellGiSkyK( P, N ) );
 	if ( cellProbe == 1 ) {
 		vec3 E = vec3( 0.0 );
 		for ( int i = 0; i < cellLightCount; i++ ) {
@@ -491,6 +507,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 		return vec3( 0.0 );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
+	if ( cellProbe == 90 )	// lane SKY1 (60-74 are other lanes'): the share of the weather's ambient the grid's sky replaced
+		return vec3( cellGiSkyK( P, N ) );
 	if ( cellProbe == 1 || cellProbe == 8 || cellProbe == 10 || cellProbe == 30 ) {
 		// 1: the irradiance / 4; 8 (lanes ON1, RIM1): the game's diffuse (Oren-Nayar + rim) / 4, seen from the camera;
 		// 10 (lane RIM1): the rim alone x 4, sixteen times probe 8's reach, so the per-light rim flags show

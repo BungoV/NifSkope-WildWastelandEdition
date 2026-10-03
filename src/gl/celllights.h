@@ -147,6 +147,7 @@ struct WwCellGi
 	std::vector<float> rgba;
 	std::vector<float> sky;	// lane PROBEVIEW1: the same layout, rgb = the probes' open-sky share, a = valid
 	QString summary;
+	bool skyLit = false;   //!< lane SKY1: the grid holds the weather's sky; it stands in for the weather's ambient
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
 
