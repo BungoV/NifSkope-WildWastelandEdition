@@ -1654,6 +1654,32 @@ difference is in a lost triangle's reach, a same-hits triangle tie in the rebuil
 mille). Reds: the centroid and nofilter cube reds fail C; WW_CELL_BAKE_REFRACT_RED=keep fails R; a hit bake
 against main fails X.
 
+### 2an. Effect shapes in the rest of the views; editor-only shapes (lane FXREST1, 2026-10-03)
+The "purple at the Vault door" (Vault111Cryo, camera -2990,-417,111 view 4 dist 450) is not an effect
+shape. The GI pass view skips effects entirely (pass view with every effect hidden: identical, max 1
+level). The position probes put 109 of the 110 purple pixels on the wall piece V111RWallCrL01 near the
+floor, floor guides, a chair and suit boxes -- 1 inside a V111RadScanner01 box. It is the pass view's
+designed "no probe reaches here" magenta: 40% of those pixels have no valid GI voxel around them (0.1%
+elsewhere), median trilinear valid weight 0.33-0.77 against ~1.0. A probe coverage hole at wall/floor
+edges, left to the probe-placement lane (ROOMCLAMP1). CAPTURE1's surfel-pass sheets are magenta by
+design (surfel tiles over a magenta frame).
+
+Effect shapes do not reach the bake: the soup already leaves out effect, glass, decal and leaves shapes.
+
+Census (cell dump models read from the loose data): Vault111Cryo 138 effect shapes (754 placed), base
+alpha 0: 43 (79 placed), greyscale palette: 30 (272 placed), both 5 (incl. the scanner's GlowPanel);
+ConcordMuseum01 64 (278) / 2 (10) / 20 (135) / 1; Concord ext -15,17 33 (39) / 0 / 16 (16) / 0. No
+view changed for any of them in this lane.
+
+The green wire box in the wasteland eye views was ShrubGroupLarge04's 'VisibilityEditorMarker' (an
+effect mesh). The game removes every node or shape whose name contains "EditorMarker" (any case); the
+model loader dropped only names starting with it. The loader now follows the game, for the cell view and
+the LOD near library alike; the notes count "editor markers left out" (wasteland ext -18,17: 1 by the
+prefix, 5 with the word inside, in 5 shrub/hedgerow models; Vault 34/0, Museum 258/0, Concord 14/0).
+Gate tests/spells/cell_edmark.sh: A census = independent reader's models (5/5), B the effects change 0
+px over those models' ground (bar <= 40). Red `--red prefix` (WW_CELL_EDMARK_RED=prefix): A 0 vs 5,
+B 4478 px -- FAIL.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

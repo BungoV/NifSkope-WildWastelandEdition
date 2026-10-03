@@ -6,6 +6,11 @@
   houses) are exactly as before. The sun shines in only for cells with Use Sky Lighting and Sunlight Shadows
   both set (none in the base game). (lane SKYINT1)
 
+- **Editor-only shapes hidden like the game (FXREST1).** A shape or node whose name contains
+  "EditorMarker" anywhere (e.g. a shrub's VisibilityEditorMarker) no longer draws; before, only names
+  starting with it were left out, so a green wire box showed over some wasteland shrubs. The cell notes
+  count what was left out. Gate tests/spells/cell_edmark.sh.
+
 ## Probe bake: drip splashes no longer bake as solid swirls; two more ways to take a surface's color (lane CAPTURE1, 2026-10-03)
 
 - The water drips on the Vault 111 walkway (and other glass and water that only bends what is behind it) are no

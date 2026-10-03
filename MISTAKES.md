@@ -24,6 +24,16 @@ Newest at the top.
   soup's tree is rebuilt, so a ray meeting two coincident triangles may take the other one. Rule: when a soup
   changes, compare hits (place, normal, sample count) before albedo bytes, and bound what is left.
 
+- 2026-10-03 FXREST1: the brief blamed the scanner's effect shader for the purple at the Vault door. The
+  pass view never draws effects; the purple was the GI pass view's own "no probe" marker on a wall piece.
+  Rule: run the effects-hidden diff and the position-probe owner count before naming a culprit
+  (skill ww-cell-mark-owner).
+- 2026-10-03 FXREST1: the model loader matched "EditorMarker" as a name prefix; the game matches it
+  anywhere in the name. Rule: copy the game's match rule exactly (substring vs prefix, case) when
+  porting a filter.
+- Open follow-up: tests/spells/cell_fxlit_check.py still bounds models with startswith('editormarker');
+  harmless today (only models with lit effects), switch it to the substring rule when next touched.
+
 ## 2026-10-03 BOUNCE2: a gate script edited while a runner was executing it
 
 - What: cell_gi.sh was edited (Edit tool) while gates.sh was running `bash tests/spells/cell_gi.sh --red grow`
