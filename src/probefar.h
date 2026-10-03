@@ -13,7 +13,11 @@
  *    `.VT.*.lodt` beside it (the terrain's own albedo, grass tint folded in), sRGB decoded to linear;
  *  - water: the cell's water plane where the cell has water above its lowest ground;
  *  - buildings: the `.lodi` occluder boxes (boxes fitted INSIDE each placed object's LOD mesh),
- *    which also set the roofline the probe is hoisted over.
+ *    which also set the roofline the probe is hoisted over;
+ *  - trees (lane TREE1, 2026-10-02): every `.lodi` placement whose `.lodo` base is a tree, as its
+ *    coarsest authored LOD model, each alpha-tested triangle shrunk about its centroid to the share of
+ *    it its texture keeps (the bake knows solid triangles only), in the mean color of the texels that
+ *    pass, read from the LOD folder's own texture arrays. A canopy raises the roofline as a box does.
  *  The probes then go through the same bake as the near ones (src/probebake.cpp) into `.tbk` v3 files,
  *  one per cell, surfel cell 512. */
 
@@ -34,7 +38,10 @@ struct ProbeFarSpec
 	int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 	int sheetDim = 32;          //!< which `.VT.<dim>.lodt` level gives the colour (0 = no colour)
 	float ringCells = 2.0f;     //!< ground kept this many cells past the region, so edge probes see ground
-	QString red;                //!< "shift": read the heights one cell off (the height gate must fail)
+	/*! "shift": read the heights one cell off (the height gate must fail). Lane TREE1, each must fail
+	 *  the tree gate: "notrees" leaves the trees out, "treebox" puts a solid box a tree, "treeshift"
+	 *  stands every tree one cell east, "canopy" leaves the roofline under the trees. */
+	QString red;
 };
 
 struct ProbeFarResult
@@ -45,6 +52,13 @@ struct ProbeFarResult
 	qint64 heightOutside = 0;           //!< samples outside their cell's stored lo..hi (must be 0)
 	double hoistMean = 0;               //!< mean probe height over the ground under it
 	float roofMax = 0;
+	// lane TREE1
+	int trees = 0, treesPlaced = 0;     //!< trees in the soup; tree placements the LOD data has in the ground's cells
+	qint64 treeTris = 0, treeFirst = 0; //!< their soup triangles, the first of them (they run to the end)
+	double treeArea = 0, treeAreaFull = 0;   //!< soup area of the trees; the same triangles before shrinking
+	int treeMaterials = 0, treeNoTexture = 0;   //!< tree materials met; those the LOD folder has no layer for
+	int treeCells = 0;                  //!< cells whose roofline a canopy raised
+	QString treeNote;                   //!< why there are none, when there are none
 	QString sheet, error;
 };
 

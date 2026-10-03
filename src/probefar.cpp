@@ -1,19 +1,27 @@
 #include "probefar.h"
 
 #include "lodifile.h"
+#include "lodofile.h"
 #include "lodtfile.h"
 #include "lodtsheets.h"
 #include "probebake.h"
 #include "io/lodvfile.h"
 
+#include "ddstxt16.hpp"
+
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QTextStream>
+#include <QtEndian>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <map>
+#include <memory>
 
 /* THE FAR MAP (lane PRTPFAR; docs/PRTP_PLAN.md 2h). See probefar.h. */
 
@@ -46,6 +54,327 @@ struct CellRec
 	float lo = 0, hi = 0, waterH = 0, roof = -1.0e30f;
 	bool ok = false, water = false;
 };
+
+/* lane TREE1: THE TREES. The bake knows solid triangles of one color, and a leaf card is mostly holes
+ * (its texture keeps 0.08 .. 0.43 of it). So a tree goes in as its coarsest authored LOD model (what the
+ * game shows far away), every alpha-tested triangle shrunk about its centroid to the share of it its
+ * texture keeps, in the mean color of the texels that pass: to a ray the same area, color and place.
+ * Measured against the first-slot models cut out texel by texel (Concord block, 48 probes, irradiance
+ * median / 95th percentile): this 0.017 / 0.038, the first slot the same way 0.016 / 0.029, leaf cards
+ * left solid 0.038 / 0.092, a solid box a tree 0.289 / 0.741, no trees 0.117 / 0.229. */
+// a tree material the LOD folder holds no texture layer for is solid bark, sRGB 74, 62, 48 (counted)
+const float kBark[3] = { srgbToLinear( 74 / 255.0f ), srgbToLinear( 62 / 255.0f ), srgbToLinear( 48 / 255.0f ) };
+
+struct TreeTri
+{
+	float p[9];
+	quint8 rgb[3];
+};
+
+struct TreeModel
+{
+	std::vector<TreeTri> tris;   //!< model space, as they go into the soup
+	std::vector<float> top;      //!< every authored vertex of every slot, 3 each: the canopy
+	double area = 0, areaFull = 0;
+};
+
+struct TreeMat
+{
+	const DDSTexture16 * tex = nullptr;
+	int threshold = 0;
+};
+
+// a material path as the LOD folder's lists key it: lower case, from "materials\"
+QString treeSource( QString s )
+{
+	s = s.trimmed().toLower().replace( QChar( '/' ), QChar( '\\' ) );
+	const int k = s.lastIndexOf( QLatin1String( "materials\\" ) );
+	return k > 0 ? s.mid( k ) : s;
+}
+
+class FarTrees
+{
+public:
+	FarTrees( const LodoLibrary & l, const QString & lodiPath, bool boxes );
+	const TreeModel & model( quint16 baseId, bool mirrored );
+	int materials() const { return int( mats.size() ); }
+	int noTexture = 0;
+
+private:
+	const TreeMat & material( quint16 id );
+	void readManifests();
+	void texels( const TreeMat & m, const float uv[3][2], float & cover, float lin[3] ) const;
+
+	const LodoLibrary & lib;
+	bool solidBoxes;
+	QDir dir;
+	QString world;
+	QHash<QString, QPair<QString, int>> layers;   // material -> the texture array's size class, its layer
+	bool manifestsRead = false;
+	QHash<QString, QByteArray> arrays;            // size class -> the array file
+	std::vector<std::unique_ptr<DDSTexture16>> textures;
+	std::map<quint16, TreeMat> mats;
+	std::map<quint32, TreeModel> models;
+};
+
+FarTrees::FarTrees( const LodoLibrary & l, const QString & lodiPath, bool boxes ) : lib( l ), solidBoxes( boxes )
+{
+	const QFileInfo fi( lodiPath );
+	dir = fi.absoluteDir();
+	world = fi.completeBaseName();
+	// Objects/<world>.LodgenArrays.txt: family class layer lodm color normal mask emissive source emissiveScale
+	QFile list( dir.filePath( QStringLiteral( "Objects/%1.LodgenArrays.txt" ).arg( world ) ) );
+	if ( list.open( QIODevice::ReadOnly ) )
+		while ( !list.atEnd() ) {
+			const QStringList c = QString::fromUtf8( list.readLine() ).trimmed().split( QChar( ' ' ) );
+			if ( c.size() < 10 || c[0].startsWith( QChar( '#' ) ) )
+				continue;
+			const QString key = treeSource( c[c.size() - 2] );
+			if ( !layers.contains( key ) )
+				layers.insert( key, { c[1], c[2].toInt() } );
+		}
+}
+
+/* A material the list does not name shares its layer with one it does (the list is keyed on the
+ * textures). The chunk manifests say which: `M <shape> <material>` and `A <shape> <layer> <array>`. */
+void FarTrees::readManifests()
+{
+	manifestsRead = true;
+	const QStringList names = dir.entryList( { world + QStringLiteral( ".*.BTO.manifest.txt" ) }, QDir::Files, QDir::Name );
+	for ( const QString & name : names ) {
+		QFile mf( dir.filePath( name ) );
+		if ( !mf.open( QIODevice::ReadOnly ) )
+			continue;
+		std::map<QByteArray, QString> shape;
+		QHash<QByteArray, QPair<QString, int>> layer;
+		while ( !mf.atEnd() ) {
+			const QByteArray ln = mf.readLine().trimmed();
+			if ( ln.startsWith( "M " ) ) {
+				const int s = ln.indexOf( ' ', 2 );
+				if ( s > 0 )
+					shape[ln.mid( 2, s - 2 )] = treeSource( QString::fromUtf8( ln.mid( s + 1 ) ) );
+			} else if ( ln.startsWith( "A " ) ) {
+				const QList<QByteArray> c = ln.split( ' ' );
+				// ...\<world>.LodgenArrays.<size class>.lodm
+				const QList<QByteArray> dot = c.size() >= 4 ? c.last().split( '.' ) : QList<QByteArray>();
+				if ( dot.size() >= 3 && c[2].toInt() >= 0 )
+					layer.insert( c[1], { QString::fromUtf8( dot[dot.size() - 2] ), c[2].toInt() } );
+			}
+		}
+		for ( const auto & s : shape )
+			if ( !layers.contains( s.second ) && layer.contains( s.first ) )
+				layers.insert( s.second, layer.value( s.first ) );
+	}
+}
+
+const TreeMat & FarTrees::material( quint16 id )
+{
+	const auto it = mats.find( id );
+	if ( it != mats.end() )
+		return it->second;
+	TreeMat m;
+	if ( id < lib.materials.size() ) {
+		const LodoMaterial & row = lib.materials[id];
+		m.threshold = row.alphaThreshold;
+		const QString key = treeSource( lib.stringAt( row.lodmStringOffset ) );
+		if ( !layers.contains( key ) && !manifestsRead )
+			readManifests();
+		const auto l = layers.constFind( key );
+		if ( l != layers.constEnd() ) {
+			if ( !arrays.contains( l->first ) ) {
+				QFile df( dir.filePath( QStringLiteral( "Objects/%1.LodgenArrays.%2_d.DDS" ).arg( world, l->first ) ) );
+				arrays.insert( l->first, df.open( QIODevice::ReadOnly ) ? df.readAll() : QByteArray() );
+			}
+			/* One layer as a texture of its own: the file's header, then that layer's bytes (the
+			 * decoder reads at most 256 layers of a file, and all of them). */
+			const QByteArray & dds = arrays[l->first];
+			const qint64 count = dds.size() > 148 && dds.mid( 84, 4 ) == "DX10"
+				? qint64( qFromLittleEndian<quint32>( reinterpret_cast<const uchar *>( dds.constData() ) + 140 ) ) : 0;
+			const qint64 per = count > 0 ? ( qint64( dds.size() ) - 148 ) / count : 0;
+			if ( per > 0 && l->second >= 0 && l->second < count ) {
+				const QByteArray one = dds.left( 148 ) + dds.mid( int( 148 + qint64( l->second ) * per ), int( per ) );
+				try {
+					textures.emplace_back( new DDSTexture16( reinterpret_cast<const unsigned char *>( one.constData() ),
+						size_t( one.size() ) ) );
+					m.tex = textures.back().get();
+				} catch ( std::exception & ) {
+					m.tex = nullptr;
+				}
+			}
+		}
+	}
+	if ( !m.tex )
+		noTexture++;
+	return mats.emplace( id, m ).first->second;
+}
+
+// what the texture keeps of a triangle, and the mean color of that: one texel at the middle of each
+// piece of the triangle, the pieces about two texels wide
+void FarTrees::texels( const TreeMat & m, const float uv[3][2], float & cover, float lin[3] ) const
+{
+	cover = 1.0f;
+	for ( int k = 0; k < 3; k++ )
+		lin[k] = kBark[k];
+	if ( !m.tex )
+		return;
+	const int w = m.tex->getWidth(), h = m.tex->getHeight();
+	float e = 0;
+	for ( int i = 0; i < 3; i++ ) {
+		const int j = ( i + 1 ) % 3;
+		e = std::max( { e, std::fabs( uv[i][0] - uv[j][0] ) * float( w ), std::fabs( uv[i][1] - uv[j][1] ) * float( h ) } );
+	}
+	const int n = std::clamp( int( std::ceil( e / 2.0f ) ), 2, 48 );
+	const bool linear = m.tex->isSRGBTexture();   // an sRGB format is decoded to linear already
+	int all = 0, pass = 0;
+	double sum[3] = { 0, 0, 0 };
+	auto take = [&]( float a, float b ) {
+		const float u = uv[0][0] + a * ( uv[1][0] - uv[0][0] ) + b * ( uv[2][0] - uv[0][0] );
+		const float v = uv[0][1] + a * ( uv[1][1] - uv[0][1] ) + b * ( uv[2][1] - uv[0][1] );
+		const FloatVector4 c = FloatVector4::convertFloat16( m.tex->getPixelN( int( std::floor( ( u - std::floor( u ) ) * float( w ) ) ),
+			int( std::floor( ( v - std::floor( v ) ) * float( h ) ) ), 0 ) );
+		all++;
+		if ( m.threshold && int( std::lround( std::clamp( c[3], 0.0f, 1.0f ) * 255.0f ) ) < m.threshold )
+			return;
+		pass++;
+		for ( int k = 0; k < 3; k++ ) {
+			const float g = std::clamp( c[size_t( k )], 0.0f, 1.0f );
+			sum[k] += linear ? g : srgbToLinear( g );
+		}
+	};
+	for ( int i = 0; i < n; i++ )
+		for ( int j = 0; j < n - i; j++ ) {
+			take( ( float( i ) + 1.0f / 3.0f ) / float( n ), ( float( j ) + 1.0f / 3.0f ) / float( n ) );
+			if ( j < n - i - 1 )
+				take( ( float( i ) + 2.0f / 3.0f ) / float( n ), ( float( j ) + 2.0f / 3.0f ) / float( n ) );
+		}
+	cover = float( pass ) / float( all );
+	for ( int k = 0; k < 3 && pass; k++ )
+		lin[k] = float( sum[k] / pass );
+}
+
+const TreeModel & FarTrees::model( quint16 baseId, bool mirrored )
+{
+	const quint32 key = ( quint32( baseId ) << 1 ) | quint32( mirrored );
+	const auto it = models.find( key );
+	if ( it != models.end() )
+		return it->second;
+	TreeModel & M = models[key];
+	const LodoBase & base = lib.bases[baseId];
+	struct V
+	{
+		float p[3], uv[2];
+	};
+	// the full-detail clusters of one authored slot, each with its vertices decoded
+	auto walk = [&]( quint16 meshId, const std::function<void( const LodoCluster &, quint32, const std::vector<V> & )> & fn ) {
+		const LodoMesh & mesh = lib.meshes[meshId];
+		std::vector<V> v;
+		for ( quint32 c = mesh.clusterFirst; c < mesh.clusterFirst + mesh.clusterCount && c < lib.clusters.size(); c++ ) {
+			if ( c < lib.clusterLods.size() && lib.clusterLods[c].level != 0 )
+				continue;
+			const LodoCluster & cl = lib.clusters[c];
+			v.clear();
+			for ( size_t vi = cl.vertexBase; vi < size_t( cl.vertexBase ) + cl.vertexCount && vi < lib.vertices.size(); vi++ ) {
+				const LodoVertex & lv = lib.vertices[vi];
+				V o;
+				for ( int k = 0; k < 3; k++ )
+					o.p[k] = lodoDequantU16( lv.pos[k], mesh.aabbMin[k], mesh.aabbExtent[k] );
+				for ( int k = 0; k < 2; k++ )
+					o.uv[k] = lodoDequantU16( lv.uv[k], mesh.uvMin[k], mesh.uvExtent[k] );
+				v.push_back( o );
+			}
+			fn( cl, c, v );
+		}
+	};
+	int far = -1;   // the coarsest authored slot
+	for ( int r = 0; r < 4; r++ ) {
+		if ( base.rep[r] == LODO_NO_MESH || base.rep[r] >= lib.meshes.size() )
+			continue;
+		far = r;
+		if ( std::find( base.rep, base.rep + r, base.rep[r] ) == base.rep + r )
+			walk( base.rep[r], [&]( const LodoCluster &, quint32, const std::vector<V> & v ) {
+				for ( const V & o : v )
+					M.top.insert( M.top.end(), o.p, o.p + 3 );
+			} );
+	}
+	if ( far < 0 )
+		return M;
+	// the repetition breaker's mirror is about each material's OWN U range (the viewer's rule, src/lodinative.cpp)
+	std::map<quint16, std::pair<float, float>> uRange;
+	if ( mirrored )
+		walk( base.rep[far], [&]( const LodoCluster & cl, quint32, const std::vector<V> & v ) {
+			for ( const V & o : v ) {
+				auto r = uRange.emplace( cl.materialId, std::make_pair( o.uv[0], o.uv[0] ) ).first;
+				r->second.first = std::min( r->second.first, o.uv[0] );
+				r->second.second = std::max( r->second.second, o.uv[0] );
+			}
+		} );
+	double tone[3] = { 0, 0, 0 };
+	walk( base.rep[far], [&]( const LodoCluster & cl, quint32 c, const std::vector<V> & v ) {
+		const TreeMat & mat = material( cl.materialId );
+		const float uMid = mirrored ? uRange[cl.materialId].first + uRange[cl.materialId].second : 0.0f;
+		const size_t li = size_t( c ) * LODO_LOCAL_INDEX_BYTES;
+		for ( int t = 0; t < int( cl.triangleCount ) && li + size_t( t ) * 3 + 2 < lib.localIndices.size(); t++ ) {
+			const quint8 * ix = &lib.localIndices[li + size_t( t ) * 3];
+			if ( ix[0] >= v.size() || ix[1] >= v.size() || ix[2] >= v.size() )
+				continue;
+			const V * s[3] = { &v[ix[0]], &v[ix[1]], &v[ix[2]] };
+			float uv[3][2], mid[3] = { 0, 0, 0 }, e1[3], e2[3];
+			for ( int i = 0; i < 3; i++ ) {
+				uv[i][0] = mirrored ? uMid - s[i]->uv[0] : s[i]->uv[0];
+				uv[i][1] = s[i]->uv[1];
+				for ( int k = 0; k < 3; k++ )
+					mid[k] += s[i]->p[k] / 3.0f;
+			}
+			for ( int k = 0; k < 3; k++ ) {
+				e1[k] = s[1]->p[k] - s[0]->p[k];
+				e2[k] = s[2]->p[k] - s[0]->p[k];
+			}
+			const double full = 0.5 * std::sqrt( std::pow( double( e1[1] ) * e2[2] - double( e1[2] ) * e2[1], 2.0 )
+				+ std::pow( double( e1[2] ) * e2[0] - double( e1[0] ) * e2[2], 2.0 )
+				+ std::pow( double( e1[0] ) * e2[1] - double( e1[1] ) * e2[0], 2.0 ) );
+			float cover = 1.0f, lin[3];
+			texels( mat, uv, cover, lin );
+			M.areaFull += full;
+			if ( cover <= 0.0f )
+				continue;
+			M.area += full * cover;
+			TreeTri tt;
+			const float shrink = std::sqrt( cover );
+			for ( int i = 0; i < 3; i++ )
+				for ( int k = 0; k < 3; k++ )
+					tt.p[i * 3 + k] = mid[k] + ( s[i]->p[k] - mid[k] ) * shrink;
+			for ( int k = 0; k < 3; k++ ) {
+				tt.rgb[k] = toByte( lin[k] );
+				tone[k] += double( lin[k] ) * full * cover;
+			}
+			M.tris.push_back( tt );
+		}
+	} );
+	if ( solidBoxes && !M.tris.empty() ) {
+		// the gate's refuter: the model's whole bounding box, solid, in the tree's mean color
+		const LodoMesh & mesh = lib.meshes[base.rep[far]];
+		TreeTri tt;
+		for ( int k = 0; k < 3; k++ )
+			tt.rgb[k] = toByte( float( tone[k] / std::max( M.area, 1.0e-9 ) ) );
+		float v[8][3];
+		for ( int k = 0; k < 8; k++ )
+			for ( int r = 0; r < 3; r++ )
+				v[k][r] = mesh.aabbMin[r] + ( ( k >> r ) & 1 ? mesh.aabbExtent[r] : 0.0f );
+		static const int F[6][4] = { { 0, 2, 3, 1 }, { 4, 5, 7, 6 }, { 0, 1, 5, 4 }, { 2, 6, 7, 3 }, { 0, 4, 6, 2 }, { 1, 3, 7, 5 } };
+		M.tris.clear();
+		const float * x = mesh.aabbExtent;
+		M.area = M.areaFull = 2.0 * ( double( x[0] ) * x[1] + double( x[1] ) * x[2] + double( x[2] ) * x[0] );
+		for ( const auto & fc : F )
+			for ( int half = 0; half < 2; half++ ) {
+				const int q[3] = { fc[0], fc[1 + half], fc[2 + half] };
+				for ( int i = 0; i < 3; i++ )
+					for ( int k = 0; k < 3; k++ )
+						tt.p[i * 3 + k] = v[q[i]][k];
+				M.tris.push_back( tt );
+			}
+	}
+	return M;
+}
 
 }   // namespace
 
@@ -256,7 +585,96 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 					}
 				}
 		}
-	}
+
+		// --- lane TREE1: the trees, every placement whose library base is a tree (see FarTrees)
+		const QFileInfo li( spec.lodi );
+		const QString lodoPath = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodo" ) );
+		LodoHeader oh;
+		LodoLibrary lib;
+		if ( spec.red == QLatin1String( "notrees" ) )
+			R.treeNote = QStringLiteral( "--red notrees" );
+		else if ( !QFileInfo::exists( lodoPath ) )
+			R.treeNote = QStringLiteral( "no %1 beside the .lodi" ).arg( QFileInfo( lodoPath ).fileName() );
+		else if ( !lodoRead( lodoPath, &oh, &lib, false, &err ) )
+			return fail( QStringLiteral( "%1: %2" ).arg( lodoPath, err ) );
+		else {
+			FarTrees trees( lib, spec.lodi, spec.red == QLatin1String( "treebox" ) );
+			const bool canopy = spec.red != QLatin1String( "canopy" );
+			const float east = spec.red == QLatin1String( "treeshift" ) ? kCell : 0.0f;
+			std::vector<char> raised( cells.size(), 0 );
+			R.treeFirst = soup.triCount();
+			const int cw = std::max( 1, int( lh.chunkCells ) );
+			for ( quint32 ci = 0; ci < quint32( lt.chunks.size() ); ci++ ) {
+				const LodiChunk & ch = lt.chunks[ci];
+				int chx = 0, chy = 0;
+				lodiChunkAt( lh, ci, &chx, &chy );
+				if ( !ch.instanceCount || chx * cw > gx1 || chx * cw + cw - 1 < gx0 || chy * cw > gy1 || chy * cw + cw - 1 < gy0 )
+					continue;
+				for ( quint32 ii = ch.instanceFirst; ii < ch.instanceFirst + ch.instanceCount && ii < lt.instances.size(); ii++ ) {
+					const LodiInstance & inst = lt.instances[ii];
+					if ( inst.baseId >= lib.bases.size() || !( lib.bases[inst.baseId].flags & LODO_BASE_TREE ) )
+						continue;
+					float pos[3];
+					lodiDecodePosition( lh, ci, ch, inst, pos );
+					const int tx = int( std::floor( pos[0] / kCell ) ), ty = int( std::floor( pos[1] / kCell ) );
+					if ( tx < gx0 || tx > gx1 || ty < gy0 || ty > gy1 )
+						continue;
+					R.treesPlaced++;
+					const TreeModel & tm = trees.model( inst.baseId, ( inst.flags & LODI_INST_MIRRORED ) != 0 );
+					if ( tm.tris.empty() )
+						continue;
+					float quat[4], m[9];
+					lodiUnpackRotation( inst.rot, quat, m );
+					const float sc = lodiScaleValue( inst.scale, inst.flags );
+					pos[0] += east;
+					// as the viewer stands it: world = position + rotation x ( model x scale )
+					auto world = [&]( const float * l, float * w ) {
+						for ( int r = 0; r < 3; r++ )
+							w[r] = pos[r] + ( m[r * 3 + 0] * l[0] + m[r * 3 + 1] * l[1] + m[r * 3 + 2] * l[2] ) * sc;
+					};
+					/* The canopy is roofline, as a box is: every authored vertex of every slot lifts the
+					 * cell it stands in. Left alone, 28 of 48 Concord probes saw under 0.40 of a 0.5 sky
+					 * (9 under 0.25); the coarsest slot is in places 568 units taller than the first. */
+					auto lift = [&]( const float * w ) {
+						const int cx = int( std::floor( w[0] / kCell ) ), cy = int( std::floor( w[1] / kCell ) );
+						if ( !canopy || cx < gx0 || cx > gx1 || cy < gy0 || cy > gy1 || w[2] <= at( cx, cy ).roof )
+							return;
+						at( cx, cy ).roof = w[2];
+						const size_t si = size_t( cy - gy0 ) * size_t( W ) + size_t( cx - gx0 );
+						if ( !raised[si] ) {
+							raised[si] = 1;
+							R.treeCells++;
+						}
+					};
+					for ( const TreeTri & t : tm.tris ) {
+						float a[3], b[3], c[3];
+						world( t.p, a );
+						world( t.p + 3, b );
+						world( t.p + 6, c );
+						soup.addTri( a, b, c, t.rgb );
+						// a shrunk leaf can cross into the next cell still high (the gate's Concord block, 117 units)
+						lift( a );
+						lift( b );
+						lift( c );
+					}
+					R.trees++;
+					R.treeTris += qint64( tm.tris.size() );
+					R.treeArea += tm.area * double( sc ) * double( sc );
+					R.treeAreaFull += tm.areaFull * double( sc ) * double( sc );
+					for ( size_t k = 0; k + 2 < tm.top.size(); k += 3 ) {
+						float w[3];
+						world( &tm.top[k], w );
+						lift( w );
+					}
+				}
+			}
+			R.treeMaterials = trees.materials();
+			R.treeNoTexture = trees.noTexture;
+			if ( !R.trees )
+				R.treeNote = QStringLiteral( "the LOD data places none here" );
+		}
+	} else
+		R.treeNote = QStringLiteral( "no --lodi" );
 
 	// --- one probe per cell, hoisted over the roofline at the cell's middle
 	double hoistSum = 0;
@@ -292,6 +710,13 @@ QString probeFarCensusText( const ProbeFarResult & r )
 	t << "far: ground quads " << r.quads << " (colour from the sheet " << r.albedoQuads << "), water quads "
 	  << r.waterQuads << ", building boxes " << r.boxes << " in " << r.boxCells << " cells\n";
 	t << "far: height samples outside their cell's stored range " << r.heightOutside << "; colour sheet " << r.sheet << "\n";
+	if ( r.trees )
+		t << "far: trees " << r.trees << " of " << r.treesPlaced << " in the LOD data (" << r.treeTris
+		  << " triangles from soup triangle " << r.treeFirst << ", keeping " << QString::number( r.treeAreaFull > 0 ? r.treeArea / r.treeAreaFull : 0.0, 'f', 3 )
+		  << " of their area), tree materials " << r.treeMaterials << " (without a texture " << r.treeNoTexture
+		  << "), cells a canopy raised " << r.treeCells << "\n";
+	else
+		t << "far: trees 0 (" << r.treeNote << ")\n";
 	return s;
 }
 
@@ -335,7 +760,7 @@ int probeFarCli( const QStringList & args )
 	if ( fs.lodl.isEmpty() || ( outDir.isEmpty() && soupOut.isEmpty() ) ) {
 		std::fprintf( stderr, "usage: probefar --lodl <world.lodl> [--lodi <world.lodi>] --out <dir> [--cells x0,y0,x1,y1] "
 			"[--step n] [--hoist u] [--sheet-dim n] [--sector u] [--rays n] [--threads n] [--surfel-cell u] [--max-links n] "
-			"[--soup-out f.psp] [--probes-out f.txt] [--red shift]\n" );
+			"[--soup-out f.psp] [--probes-out f.txt] [--red shift|notrees|treebox|treeshift|canopy]\n" );
 		return 2;
 	}
 	ProbeSoup soup;
