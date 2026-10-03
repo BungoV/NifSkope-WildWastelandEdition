@@ -1792,6 +1792,37 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	 * output is byte for byte the exe from before the lane, which the before/after gates compare against. */
 	const bool roomclampPin = qgetenv( "WW_CELL_ROOMCLAMP_PIN" ).trimmed() == "off";
 	const bool loadDoorRed = roomclampPin || qEnvironmentVariable( "WW_CELL_PROBE_LOADDOOR_RED" ) == QLatin1String( "open" );
+	/* lane ALPHATEST1: an alpha-tested shape's triangles carry their UVs and its map's alpha (probemask.h): a
+	 * ray through a texel under the material's threshold passes on (the Concord storefront glass is 66-72%
+	 * holes). A map whose every texel passes needs no mask. WW_CELL_ALPHATEST_PIN=off (gates only, never a
+	 * user toggle) keeps every alpha-tested face solid: byte for byte the exe from before the lane. */
+	const bool alphaPin = qgetenv( "WW_CELL_ALPHATEST_PIN" ).trimmed() == "off";
+	struct MaskInfo { int map = -1; int minA = 255; };
+	QHash<QString, MaskInfo> maskOfTex;
+	QHash<QString, int> maskModelIdx;
+	int amShapes = 0, amShapesNoHole = 0, amShapesUnread = 0, amAlbMoved = 0;
+	// gate only (tests/spells/alphatest_check.py): one row per kept shape: first soup triangle, count, model, material, map
+	const QByteArray soupShapesPath = qgetenv( "WW_CELL_PROBE_SOUP_SHAPES" );
+	QString soupShapes;
+	auto maskOf = [&]( const QString & tex ) -> MaskInfo {
+		const QString k = tex.toLower();
+		auto it = maskOfTex.constFind( k );
+		if ( it != maskOfTex.constEnd() )
+			return *it;
+		MaskInfo mi;
+		probebvh::AlphaMask::Map mp;
+		if ( probeAlb.alphaBytes( tex, &mp.w, &mp.h, &mp.a, &mi.minA ) ) {
+			mi.map = int( probeSoup.amask.maps.size() );
+			if ( mi.minA >= 255 ) {
+				mi.map = -2;   // read, nothing under any threshold: no mask kept
+			} else {
+				probeSoup.amask.maps.push_back( std::move( mp ) );
+				probeSoup.amask.mapNames.push_back( tex.toStdString() );
+			}
+		}
+		maskOfTex.insert( k, mi );
+		return mi;
+	};
 	// lane BAKE4: WW_CELL_PROBE_SOUP_REFS=<tsv> lists every reference the soup took (form, role, base type)
 	QString soupRefList;
 	const QByteArray soupRefDump = qgetenv( "WW_CELL_PROBE_SOUP_REFS" );
@@ -2237,6 +2268,27 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 								s.nearFacts.effectShader || !s.effectTex0.isEmpty() ? s.effectTex0 : s.tex0, false ) );
 						}
 				} else {
+					// lane ALPHATEST1: this shape's alpha-test mask (-1: none, solid as before)
+					int amMap = -1, amModel = -1;
+					const quint8 amThr = s.nearFacts.alphaRef;
+					if ( !alphaPin && s.nearFacts.alphaTest && s.geom.uv.size() >= nv * 2 ) {
+						const MaskInfo mi = maskOf( s.tex0 );
+						if ( mi.map == -1 ) {
+							amShapesUnread++;
+						} else if ( mi.map < 0 || mi.minA >= int( amThr ) ) {
+							amShapesNoHole++;
+						} else {
+							amMap = mi.map;
+							amShapes++;
+							auto mit2 = maskModelIdx.constFind( model );
+							if ( mit2 == maskModelIdx.constEnd() ) {
+								mit2 = maskModelIdx.insert( model, int( probeSoup.amask.models.size() ) );
+								probeSoup.amask.models.push_back( QString( model ).toStdString() );
+							}
+							amModel = *mit2;
+						}
+					}
+					const int amFirst = probeSoup.triCount();
 					for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 						float w[3][3];
 						bool okTri = true;
@@ -2266,6 +2318,28 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 								for ( int k = 0; k < 3; k++ )
 									vc[k] = ( s.geom.rgba[i0 * 4 + size_t( k )] + s.geom.rgba[i1 * 4 + size_t( k )]
 										+ s.geom.rgba[i2 * 4 + size_t( k )] ) / ( 3.0f * 255.0f );
+							/* lane ALPHATEST1: a masked triangle whose UV centroid is a hole reads its color at
+							 * the solid point nearest the centroid (a 4x4 barycentric grid): no ray stops on a hole */
+							if ( amMap >= 0 && probeSoup.amask.alphaAt( amMap, uv[0], uv[1] ) < int( amThr ) ) {
+								double bestD = 1e300;
+								float buv[2] = { uv[0], uv[1] };
+								for ( int a = 0; a < 4; a++ )
+									for ( int c = 0; a + c < 4; c++ ) {
+										const float b1 = ( a + 0.5f ) / 4.5f, b2 = ( c + 0.5f ) / 4.5f, b0 = 1.0f - b1 - b2;
+										const float q[2] = {
+											b0 * s.geom.uv[i0 * 2] + b1 * s.geom.uv[i1 * 2] + b2 * s.geom.uv[i2 * 2],
+											b0 * s.geom.uv[i0 * 2 + 1] + b1 * s.geom.uv[i1 * 2 + 1] + b2 * s.geom.uv[i2 * 2 + 1] };
+										const double dd = std::pow( b1 - 1.0 / 3, 2 ) + std::pow( b2 - 1.0 / 3, 2 );
+										if ( dd < bestD && probeSoup.amask.alphaAt( amMap, q[0], q[1] ) >= int( amThr ) ) {
+											bestD = dd;
+											buv[0] = q[0];
+											buv[1] = q[1];
+										}
+									}
+								amAlbMoved += bestD < 1e300 ? 1 : 0;
+								uv[0] = buv[0];
+								uv[1] = buv[1];
+							}
 							quint8 rgb[3] = { 128, 128, 128 };
 							/* a palette material is painted as the game paints it: the map's green
 							 * picks the column, the paint index (or scale x vertex red) the row */
@@ -2288,7 +2362,19 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 						}
 						if ( okTri && s.nearFacts.twoSided )
 							probeSoup.markLastTwoSided();   // lane ROOMCLAMP1: no back face
+						if ( okTri && amMap >= 0 ) {   // lane ALPHATEST1
+							float tuv[6];
+							for ( int k = 0; k < 3; k++ ) {
+								const size_t vi = size_t( s.geom.tris[t + size_t( k )] );
+								tuv[k * 2] = s.geom.uv[vi * 2];
+								tuv[k * 2 + 1] = s.geom.uv[vi * 2 + 1];
+							}
+							probeSoup.markLastMasked( amMap, amThr, tuv, amModel );
+						}
 					}
+					if ( !soupShapesPath.isEmpty() && probeSoup.triCount() > amFirst )
+						soupShapes += QStringLiteral( "%1\t%2\t%3\t%4\t%5\n" ).arg( amFirst ).arg( probeSoup.triCount() - amFirst )
+							.arg( model, s.matName, s.tex0 );
 				}
 			}
 			/* THE MESH'S OWN VERTEX COLORS (lane PRTPPLACE, 2026-09-30): the loader kept them
@@ -2906,6 +2992,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		QString perr;
 		if ( !soupDump.isEmpty() && !probeSoupWrite( QString::fromLocal8Bit( soupDump ), probeSoup, &perr ) )
 			qWarning() << "WW_CELL_PROBE_SOUP:" << perr;
+		if ( !soupShapesPath.isEmpty() ) {   // lane ALPHATEST1 gate
+			QFile f( QString::fromLocal8Bit( soupShapesPath ) );
+			if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+				f.write( ( QStringLiteral( "first\tcount\tmodel\tmaterial\tmap\n" ) + soupShapes ).toUtf8() );
+		}
 		ProbePlaceResult pr;
 		const bool placed = probePlace( probeSoup, ps, &pr );
 		if ( placed && !probeOut.isEmpty() && !probeWriteTsv( probeOut, ps, pr, &perr ) )
@@ -2924,6 +3015,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			for ( const QString & k : sk )
 				t << " " << k << " " << soupSkippedTypes.value( k );
 			t << "\n";
+			// lane ALPHATEST1: the alpha-test masks
+			t << "  probe soup alpha-test masks" << ( alphaPin ? " PIN off (every face solid)" : "" ) << ": shapes masked "
+			  << amShapes << ", triangles " << int( probeSoup.amask.tris.size() ) << ", maps " << int( probeSoup.amask.maps.size() )
+			  << "; alpha-tested shapes left solid: map with no texel under the threshold " << amShapesNoHole
+			  << ", map unread " << amShapesUnread << "; triangle colors read off a centroid hole " << amAlbMoved << "\n";
 			// lane CAPTURE1: refraction-only shapes left out of the soup, per model
 			t << "  probe soup refraction-only shapes left out " << soupRefractShapes << " (" << soupRefractTris
 			  << " triangles)" << ( refractKeepRed ? " RED keep: kept as surfaces" : "" );

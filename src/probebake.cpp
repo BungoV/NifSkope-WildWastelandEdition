@@ -341,6 +341,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		bvh.t[i + 2] = soup.tris[i + 2];
 	}
 	bvh.build();
+	bvh.mask = &soup.amask;   // lane ALPHATEST1: a ray through an alpha-test hole passes on (no surfel there)
 	// lane BAKE4: the glass in its own tree (it holds no surfel and stops no ray), the doors local
 	probebvh::Bvh gbvh;
 	if ( glassOn ) {

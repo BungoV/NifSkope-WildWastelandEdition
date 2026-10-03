@@ -300,6 +300,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		bvh.t[i + 2] = soup.tris[i + 2];
 	}
 	bvh.build();
+	bvh.mask = &soup.amask;   // lane ALPHATEST1: light passes an alpha-test hole
 	auto blocked = [&]( const double p[3], const double q[3], double clearEnd ) -> bool {
 		double d[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] };
 		const double len = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );

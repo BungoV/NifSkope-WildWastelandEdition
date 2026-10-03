@@ -47,6 +47,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cstring>
 #include <vector>
 
+#include "probemask.h"   // lane ALPHATEST1: the alpha-test masks (their own pushed pragma; the soup includes them too)
+
 namespace probebvh {
 
 // ------------------------------------------------------------------ the BVH
@@ -67,6 +69,8 @@ struct Bvh
 	std::vector<Node> nodes;
 	std::vector<int> idx;
 	std::vector<float> cen;
+	//! lane ALPHATEST1: the soup's masks (triangle numbers = this tree's); null or empty = every face solid
+	const AlphaMask * mask = nullptr;
 
 	void bounds( int b, int e, float lo[3], float hi[3] ) const
 	{
@@ -162,6 +166,12 @@ struct Bvh
 
 	static bool tri( const float * p, const double o[3], const double d[3], double & tOut )
 	{
+		double u, v;
+		return tri( p, o, d, tOut, u, v );
+	}
+	//! as above, with the hit's barycentrics (u weighs vertex 1, v vertex 2)
+	static bool tri( const float * p, const double o[3], const double d[3], double & tOut, double & u, double & v )
+	{
 		const double e1[3] = { p[3] - double( p[0] ), p[4] - double( p[1] ), p[5] - double( p[2] ) };
 		const double e2[3] = { p[6] - double( p[0] ), p[7] - double( p[1] ), p[8] - double( p[2] ) };
 		const double pv[3] = { d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2],
@@ -171,12 +181,12 @@ struct Bvh
 			return false;
 		const double id = 1.0 / det;
 		const double tv[3] = { o[0] - p[0], o[1] - p[1], o[2] - p[2] };
-		const double u = ( tv[0] * pv[0] + tv[1] * pv[1] + tv[2] * pv[2] ) * id;
+		u = ( tv[0] * pv[0] + tv[1] * pv[1] + tv[2] * pv[2] ) * id;
 		if ( u < 0.0 || u > 1.0 )
 			return false;
 		const double qv[3] = { tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2],
 			tv[0] * e1[1] - tv[1] * e1[0] };
-		const double v = ( d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2] ) * id;
+		v = ( d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2] ) * id;
 		if ( v < 0.0 || u + v > 1.0 )
 			return false;
 		tOut = ( e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2] ) * id;
@@ -193,6 +203,7 @@ struct Bvh
 			inv[k] = std::fabs( d[k] ) > 1e-300 ? 1.0 / d[k] : 0.0;   // 0 = flat in this axis
 		double best = tmax;
 		bool hit = false;
+		const bool useMask = mask && !mask->empty();
 		int hitTri = -1;
 		int stack[128];
 		int sp = 0;
@@ -203,8 +214,9 @@ struct Bvh
 				continue;
 			if ( nd.left < 0 ) {
 				for ( int i = nd.first; i < nd.first + nd.count; i++ ) {
-					double tt;
-					if ( tri( &t[size_t( idx[size_t( i )] ) * 9], o, d, tt ) && tt > 1e-4 && tt <= best ) {
+					double tt, bu, bv;
+					if ( tri( &t[size_t( idx[size_t( i )] ) * 9], o, d, tt, bu, bv ) && tt > 1e-4 && tt <= best
+						&& !( useMask && mask->hole( idx[size_t( i )], bu, bv ) ) ) {
 						best = tt;
 						hit = true;
 						hitTri = idx[size_t( i )];
