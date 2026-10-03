@@ -14,7 +14,9 @@
  *         sun through the bake's soup meets nothing; it leaves through the links like a placed
  *         light's. (The visibility grid knows probe-to-voxel sight lines only.)
  *  Not in it: the sky's own bounce off surfaces, clouds, glass on the sun's way, soft sun edges,
- *  and any interior (an interior's octants are all 0 and its relight is unchanged).
+ *  and a closed interior (its octants are all 0 and its relight is unchanged). Lane SKYINT1: an interior
+ *  whose cell shows the sky (CELL DATA bit 7) bakes its misses as sky and takes the sky term here,
+ *  beside its own ambient (the grid never replaces it); the sun only with bits 8 + 11 (no vanilla cell).
  *
  *  The weather and the hour are the view's own. When they change the bake is relit again
  *  (probeSkyTick, one call a frame; the relight runs once the light has stood still 0.4 s). */

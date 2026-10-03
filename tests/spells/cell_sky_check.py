@@ -824,8 +824,127 @@ def stage_r(run, sub, name, X, tag='R'):
                'too few to judge' if lo.sum() < 50 else 'the two pictures are equal on %.1f%%' % (100 * same)))
 
 
+# ---------------------------------------------------------------- lane SKYINT1: an interior's own flags
+SHOW_SKY, USE_SKY_LIGHTING, SUNLIGHT_SHADOWS = 0x80, 0x100, 0x800
+MIN_SKY_PROBES = 20     # as stage S outdoors: a Show Sky interior must have at least this many probes seeing sky
+
+
+def cell_flags(esm, edid):
+    """the interior CELL's DATA flags, this file's own walk of the plugin (nested groups, compressed records)"""
+    data = open(esm, 'rb').read()
+    pos = 24 + struct.unpack_from('<I', data, 4)[0]
+    while pos + 24 <= len(data):
+        typ, size = struct.unpack_from('<4sI', data, pos)
+        if typ == b'GRUP':
+            pos += 24
+            continue
+        if typ == b'CELL':
+            flags = struct.unpack_from('<I', data, pos + 8)[0]
+            body = data[pos + 24:pos + 24 + size]
+            if flags & 0x00040000:
+                body = zlib.decompress(body[4:])
+            fl, q = {}, 0
+            while q + 6 <= len(body):
+                t, sz = struct.unpack_from('<4sH', body, q)
+                fl.setdefault(t, body[q + 6:q + 6 + sz])
+                q += 6 + sz
+            if fl.get(b'EDID', b'').rstrip(b'\0').decode('latin1').lower() == edid.lower():
+                d = fl.get(b'DATA', b'\0')
+                return d[0] | (d[1] << 8 if len(d) > 1 else 0)
+        pos += 24 + size
+    raise SystemExit('no CELL %s in %s' % (edid, esm))
+
+
+def flag_words(f):
+    return 'flags %04X: Show Sky %s, Use Sky Lighting %s, Sunlight Shadows %s' % (
+        f, 'yes' if f & SHOW_SKY else 'no', 'yes' if f & USE_SKY_LIGHTING else 'no', 'yes' if f & SUNLIGHT_SHADOWS else 'no')
+
+
+def stage_v(tbks, f):
+    """V: the .tbk's sky shares against the cell's Show Sky flag. Closed: every share exactly 0. Show Sky: at
+    least MIN_SKY_PROBES probes see sky. The mean is the share of a probe's sphere that met nothing."""
+    sky = np.concatenate([np.clip(t['probes']['sky'].astype(np.float64), 0, 1) for _, t in tbks])
+    sphere = sky.sum(1) / 8.0
+    sees = int((sky.max(1) > 0).sum())
+    nums = ('%d probes, %d see sky; sphere share mean %.4f, p95 %.4f, worst %.4f'
+            % (len(sky), sees, sphere.mean(), np.percentile(sphere, 95), sphere.max()))
+    if f & SHOW_SKY:
+        ok = sees >= MIN_SKY_PROBES
+        return 'V %s sky in a Show Sky interior (%s): %s (at least %d must)' % (
+            'PASS' if ok else 'FAIL', flag_words(f), nums, MIN_SKY_PROBES), ok
+    ok = sees == 0
+    return 'V %s no sky in a closed interior (%s): %s (none may)' % ('PASS' if ok else 'FAIL', flag_words(f), nums), ok
+
+
+def sky_files(d):
+    return [f for f in ('gi_sky.bin', 'gi_sun.bin', 'gi_sky.txt') if os.path.exists(os.path.join(d, 'dump', f))]
+
+
+def stage_u_off(S, sub, f):
+    """U for an interior whose flags keep the sun out (Use Sky Lighting + Sunlight Shadows not both set)"""
+    p = os.path.join(sub, 'dump', 'gi_sun.bin')
+    if not os.path.exists(p):
+        return 'U FAIL sun: the viewer wrote no gi_sun.bin', None
+    V = read_f32(p, 3)
+    lit = int((V.max(1) > 1e-9).sum()) if len(V) == len(S) else -1
+    ok = lit == 0
+    return ('U %s sun kept out (%s): the viewer lights %d of %d surfels with the sun (none may)'
+            % ('PASS' if ok else 'FAIL', flag_words(f), lit, len(S))), V
+
+
+def main_interior(esm, run, edid, weather, hour):
+    """lane SKYINT1: one interior run (bake/, soup.psp, dump/, lit.notes), judged against its own flags"""
+    f = cell_flags(esm, edid)
+    bake = os.path.join(run, 'bake')
+    tbks = [(n, read_tbk(os.path.join(bake, n))) for n in sorted(os.listdir(bake)) if n.endswith('.tbk')]
+    v, okV = stage_v(tbks, f)
+    lines = [v]
+    notes = os.path.join(run, 'lit.notes')
+    said = open(notes, encoding='utf-8', errors='replace').read() if os.path.exists(notes) else ''
+    m = re.search(r'cell flags 0x([0-9a-fA-F]{4})', said)
+    okN = bool(m) and int(m.group(1), 16) == f
+    lines.append('N %s the viewer read the cell\'s flags: %s, this file %04X' % (
+        'PASS' if okN else 'FAIL', ('0x' + m.group(1)) if m else 'no "cell flags" line', f))
+    if not f & SHOW_SKY:
+        extra = sky_files(run)
+        lines.append('I %s no sky file in a closed interior\'s dump%s' % (
+            'PASS' if not extra else 'FAIL', (': ' + ' '.join(extra)) if extra else ''))
+    else:
+        S, P, G, _ = read_dump(os.path.join(run, 'dump'))
+        soup = Soup(os.path.join(run, 'soup.psp'))
+        W = weather_light(esm, weather, hour)
+        lines.append(stage_w(W, run))
+        sunIn = (f & (USE_SKY_LIGHTING | SUNLIGHT_SHADOWS)) == (USE_SKY_LIGHTING | SUNLIGHT_SHADOWS)
+        if sunIn:
+            sunOwn, faces, shade = own_sun(S, soup, W)
+            u, Vsun = stage_u(S, sunOwn, faces, shade, run)
+        else:
+            sunOwn = np.zeros((len(S), 3))
+            u, Vsun = stage_u_off(S, run, f)
+        lines.append(u)
+        s, t, sky, Vsky = stage_s(tbks, W, run)
+        lines += [s, t]
+        rows = dump_rows(tbks, S)
+        missing = sum(int((r < 0).sum()) for pair in rows for r in pair)
+        if missing:
+            lines.append('B FAIL probe totals: %d of the bake\'s surfels are not in the dump' % missing)
+        else:
+            placed = S[:, 9:12] - (Vsun if Vsun is not None else 0.0)
+            cubes, unresolved = own_gather(tbks, rows, placed + sunOwn, sky)
+            onlyPlaced, _ = own_gather(tbks, rows, placed, np.zeros_like(sky))
+            lines.append(stage_b(cubes, unresolved, P, sky, float(onlyPlaced.sum() / max(cubes.sum(), 1e-9))))
+    for ln in lines:
+        print(ln)
+    bad = [ln for ln in lines if ' FAIL' in ln.split(':')[0]]
+    judged = [ln for ln in lines if ' PASS' in ln.split(':')[0]]
+    need = 6 if f & SHOW_SKY else 3
+    ok = not bad and len(judged) >= need
+    print('sky %s %s  (%d stages pass, %d fail)' % (edid, 'PASS' if ok else 'FAIL', len(judged), len(bad)))
+    return 0 if ok else 1
+
+
 # ---------------------------------------------------------------- an interior: nothing may move
-def interior(d):
+def interior(d, flags=None):
     lines, ok = [], True
     a, b = os.path.join(d, 'before'), os.path.join(d, 'after')
     for f in ('probe5.png', 'lit.png'):
@@ -852,22 +971,26 @@ def interior(d):
         ok &= good
         lines.append('I %s %s: %d bytes, %s' % ('PASS' if good else 'FAIL', f, len(ba),
                                                 'byte for byte the same' if ba == bb else 'DIFFERENT (%d bytes after)' % len(bb)))
-    extra = [f for f in ('gi_sky.bin', 'gi_sun.bin', 'gi_sky.txt') if os.path.exists(os.path.join(b, 'dump', f))]
-    ok &= not extra
-    lines.append('I %s no sky file in an interior\'s dump%s' % ('PASS' if not extra else 'FAIL', (': ' + ' '.join(extra)) if extra else ''))
+    # lane SKYINT1: no sky file only where the cell's Show Sky flag is clear (this arm's cell must be closed)
+    extra = sky_files(b)
+    closed = flags is None or not flags & SHOW_SKY
+    ok &= not extra and closed
+    lines.append('I %s no sky file in a closed interior\'s dump%s%s' % (
+        'PASS' if not extra and closed else 'FAIL', (': ' + ' '.join(extra)) if extra else '',
+        '' if flags is None else ' (%s%s)' % (flag_words(flags), '' if closed else ': this arm needs a closed cell')))
     return lines, ok
 
 
 # ---------------------------------------------------------------- main
 def main(argv):
-    if argv and argv[0] == '--interior':
-        lines, ok = interior(argv[1])
+    if argv and argv[0] == '--interior':   # --interior <dir> [<esm> <edid>]
+        lines, ok = interior(argv[1], cell_flags(argv[2], argv[3]) if len(argv) >= 4 else None)
         for ln in lines:
             print(ln)
         print('sky interior %s' % ('PASS' if ok else 'FAIL'))
         return 0 if ok else 1
     esm, run = argv[0], argv[1]
-    weather, hour, red, fresh, specs = 'CommonwealthClear', 12.0, '', False, []
+    weather, hour, red, fresh, specs, cell = 'CommonwealthClear', 12.0, '', False, [], ''
     i = 2
     while i < len(argv):
         if argv[i] == '--weather':
@@ -886,8 +1009,13 @@ def main(argv):
         elif argv[i] == '--fresh':
             fresh = True
             i += 1
+        elif argv[i] == '--cell':   # lane SKYINT1: an interior run, judged by its own flags
+            cell = argv[i + 1]
+            i += 2
         else:
             raise SystemExit('unknown argument ' + argv[i])
+    if cell:
+        return main_interior(esm, run, cell, weather, hour)
     sub = os.path.join(run, 'red_' + red) if red else run
     bake = os.path.join(run, 'bake')
     tbks = [(f, read_tbk(os.path.join(bake, f))) for f in sorted(os.listdir(bake)) if f.endswith('.tbk')]

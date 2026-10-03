@@ -1649,6 +1649,9 @@ bool EsmWorld::loadInterior( const QString & esmPath, const QString & cell, QStr
 				ic.lightingTemplate = esm->mapFormID( *found, f.readUInt32() );
 			} else if ( f == "XCIM" && f.size() >= 4 ) {
 				ic.imageSpace = esm->mapFormID( *found, f.readUInt32() );
+			} else if ( f == "DATA" && f.size() >= 1 ) {   // lane SKYINT1: the cell's flags (one byte in old records)
+				const unsigned char * d = f.data();
+				ic.flags = quint16( d[0] | ( f.size() >= 2 ? d[1] << 8 : 0 ) );
 			} else if ( f == "XCLW" && f.size() >= 4 ) {
 				ic.waterHeight = f.readFloat();
 				ic.hasWater = ic.waterHeight < 2.0e9f;     // the no-water sentinel

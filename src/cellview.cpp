@@ -770,6 +770,18 @@ const CellProbeKind * cellProbeKinds( int * count )
 	return g_probeKinds;
 }
 
+/* lane SKYINT1: an interior's CELL DATA flags, bit 7 Show Sky, 8 Use Sky Lighting, 11 Sunlight Shadows. The
+ * gate's refuters (WW_CELL_SKYINT_RED): "noflag" every interior is read as closed, "all" every one as Show Sky. */
+static quint16 cellInteriorFlags( const EsmInteriorCell & ic )
+{
+	const QByteArray red = qgetenv( "WW_CELL_SKYINT_RED" ).trimmed();
+	if ( red == "noflag" )
+		return quint16( ic.flags & ~0x0980u );
+	if ( red == "all" )
+		return quint16( ic.flags | 0x0080u );
+	return ic.flags;
+}
+
 static int cellProbeKindOf( const ProbePoint & q )
 {
 	switch ( q.cls ) {
@@ -2842,7 +2854,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				if ( br.toInt() > 0 )
 					bs.rays = br.toInt();
 				bs.red = QString::fromLatin1( qgetenv( "WW_PROBE_BAKE_RED" ) );
-				bs.noSky = spec.interior;   // an interior's misses are void, never sky
+				// an interior's misses are void, never sky -- unless its cell shows the sky (lane SKYINT1, the deck's
+				// rule: a ray that meets nothing sees the sky)
+				bs.noSky = spec.interior && !( cellInteriorFlags( world.interior() ) & 0x0080u );
 				ProbeBakeResult bres;
 				t << "  bake albedo: object triangles from their map " << albTextured << " (of them through a paint palette "
 				  << albPalette << "), grey (no map read) "
@@ -2988,7 +3002,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			gs.red = QString::fromLatin1( qgetenv( "WW_CELL_GI_RED" ) ).trimmed();
 			gs.passes = qEnvironmentVariableIntValue( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
-			if ( !spec.interior ) {
+			// lane SKYINT1: and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
+			const quint16 cf = spec.interior ? cellInteriorFlags( world.interior() ) : quint16( 0 );
+			gs.interiorSky = ( cf & 0x0080u ) != 0;
+			gs.interiorSun = gs.interiorSky && ( cf & 0x0900u ) == 0x0900u;
+			if ( !spec.interior || gs.interiorSky ) {
 				gs.sky = probeSkyLightNow();
 				gs.skyRed = QString::fromLatin1( qgetenv( "WW_CELL_SKY_RED" ) ).trimmed();
 				if ( !gs.sky.on )
@@ -3011,10 +3029,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				if ( !dump.isEmpty() && !probeGiDump( gr, gs, dump, &derr ) )
 					probeNotes += QStringLiteral( "  gi dump FAILED: %1\n" ).arg( derr );
 				gi.rgba = std::move( gr.grid );
-				gi.skyLit = gr.skyLit && gs.skyRed != QLatin1String( "keepamb" );   // lane SKY1
+				// lane SKY1; lane SKYINT1: an interior keeps its own ambient, so its grid never stands in for the weather's
+				gi.skyLit = gr.skyLit && !spec.interior && gs.skyRed != QLatin1String( "keepamb" );
 				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
 				wwCellGiPublish( nif, gi );
-				if ( !spec.interior )
+				if ( !spec.interior || gs.interiorSky )
 					probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather relights it
 				WwCellProbeView pv;	// lane PROBEVIEW1: the surfel and probe previews
 				pv.surfelCell = gr.surfelCell;
@@ -3041,6 +3060,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			     : QStringLiteral( "%1 bytes" ).arg( ic.xcll.size() ) )
 			  << ", lighting template 0x" << QString::number( ic.lightingTemplate, 16 ).rightJustified( 8, '0' )
 			  << ", inherits 0x" << QString::number( ic.inherits, 16 ) << ")\n";
+			const quint16 cf = cellInteriorFlags( ic );   // lane SKYINT1
+			s << "  cell flags 0x" << QString::number( ic.flags, 16 ).rightJustified( 4, '0' ) << ": Show Sky "
+			  << ( ( cf & 0x0080u ) ? "yes" : "no" ) << ", Use Sky Lighting " << ( ( cf & 0x0100u ) ? "yes" : "no" )
+			  << ", Sunlight Shadows " << ( ( cf & 0x0800u ) ? "yes" : "no" )
+			  << ( cf != ic.flags ? QStringLiteral( " (RED %1)" ).arg( QString::fromLatin1( qgetenv( "WW_CELL_SKYINT_RED" ) ) ) : QString() )
+			  << "\n";
 		} else {
 			s << "cell view " << spec.world << " " << spec.cx << "," << spec.cy
 			  << " block " << spec.n << "x" << spec.n

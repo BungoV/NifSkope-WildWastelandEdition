@@ -118,6 +118,7 @@ struct EsmInteriorCell
 	quint8 fogNearColor[3] = { 0, 0, 0 };
 	float fogNear = 0.0f, fogFar = 0.0f;
 	quint32 inherits = 0;           //!< XCLL "Inherits" flags: which fields come from LTMP
+	quint16 flags = 0;              //!< DATA (lane SKYINT1): bit 7 Show Sky, 8 Use Sky Lighting, 11 Sunlight Shadows
 	bool hasWater = false;
 	float waterHeight = 0.0f;       //!< XCLW, valid when hasWater
 };

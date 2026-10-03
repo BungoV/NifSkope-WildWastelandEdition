@@ -255,12 +255,12 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	const bool redNoShadow = spec.red == QLatin1String( "noshadow" );
 	const bool redNoVis = spec.red == QLatin1String( "novis" );
 	const bool redFlip = spec.red == QLatin1String( "flip" );
-	// lane SKY1: the weather's sky and sun, outdoors only
-	const bool skyOn = spec.sky.on && !lighting.interior && spec.skyRed != QLatin1String( "off" );
+	// lane SKY1: the weather's sky and sun, outdoors; lane SKYINT1: and in an interior that shows the sky
+	const bool skyOn = spec.sky.on && ( !lighting.interior || spec.interiorSky ) && spec.skyRed != QLatin1String( "off" );
 	const bool redSkyNoVis = spec.skyRed == QLatin1String( "novis" );
 	const bool redSkyNoTint = spec.skyRed == QLatin1String( "notint" );
 	const bool redSunThrough = spec.skyRed == QLatin1String( "sunthrough" );
-	const bool sunOn = skyOn && spec.sky.sunTo[2] > 0.0f
+	const bool sunOn = skyOn && ( !lighting.interior || spec.interiorSun ) && spec.sky.sunTo[2] > 0.0f
 		&& ( spec.sky.sun[0] > 0.0f || spec.sky.sun[1] > 0.0f || spec.sky.sun[2] > 0.0f );
 	R.skyLit = skyOn;
 	R.skyLabel = spec.sky.label;

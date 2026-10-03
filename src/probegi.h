@@ -98,6 +98,10 @@ struct ProbeGiSpec
 	 *  octant sees the sky, "notint" the glass tint is ignored, "sunthrough" the sun has no shadow ray. */
 	ProbeSkyLight sky;
 	QString skyRed;
+	/*! lane SKYINT1: an interior whose cell shows the sky (CELL DATA bit 7): its sky shares take the weather's
+	 *  sky like an exterior's; the sun only with Use Sky Lighting + Sunlight Shadows (bits 8 and 11). */
+	bool interiorSky = false;
+	bool interiorSun = false;
 	/*! lane BOUNCE2: 0 = repeat until settled (at most maxPasses), n = exactly n passes (1 = one bounce; the gates
 	 *  that measure one bounce pin it, WW_CELL_GI_PASSES). Refuters in `red`: "rooms" (a surfel reads every probe
 	 *  in the radius, walls and rooms ignored), "grow" (the feedback's albedo is 1.5: gain above one). */

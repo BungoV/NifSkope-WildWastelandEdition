@@ -20,8 +20,22 @@
 #   --red sunthrough  U  the sun lights surfels through walls and roofs
 #   --red keepamb     R  the weather's unshadowed ambient left in beside the grid's sky
 #
-# USAGE  bash tests/spells/cell_sky.sh [--red off|novis|notint|sunthrough|keepamb]
-#        PHASE="bake views interior check" (default all four; a hold on the window may take them in turn)
+# INTERIORS THAT SHOW THE SKY (lane SKYINT1, 2026-10-03; phase skyint). An interior whose CELL DATA has bit 7
+# (Show Sky) bakes a ray that meets nothing as sky (the Division deck's rule) and its relight takes the weather's
+# sky like an exterior's; the sun only with bits 8 + 11 (Use Sky Lighting + Sunlight Shadows; no vanilla cell).
+# Per cell of SKYINT (Lookdev, one launch: bake + relight + dump), cell_sky_check.py --cell reads the flags
+# ITSELF from the plugin: V the .tbk's sky shares (closed: every one 0; Show Sky: at least 20 probes see sky),
+# N the viewer read the same flags, I (closed) no sky file in the dump, and for Show Sky cells W U S T B as
+# outdoors (U: the sun kept out). tests/prtp_reference.py re-traces a Show Sky cell's sky shares with its own
+# brute-force tracer (worst octant 0.01 of the sphere, the bar set on exteriors); build it once with
+#   g++ -O3 -std=c++17 -static -pthread tests/prtp_reference.cpp -o release/prtp_reference.exe   (or REF=)
+# Reds (WW_CELL_SKYINT_RED, a bake of their own; each must FAIL stage V):
+#   --red noflag      V  the flag ignored: the Museum of Freedom bakes no sky
+#   --red all         V  every interior read as Show Sky: Vault111Cryo's misses (mesh cracks) become sky;
+#                        its sphere share is the false sky the deck's rule gives a closed cell
+#
+# USAGE  bash tests/spells/cell_sky.sh [--red off|novis|notint|sunthrough|keepamb|noflag|all]
+#        PHASE="bake views skyint interior check" (default all five; a hold on the window may take them in turn)
 #        RECHECK=1 judges the files already shot (no launch).
 #        CELLS="tag:x,y ..."; VIEWS_<tag>="name=cx,cy,cz/view/dist ..." (look-at point, WW_RENDER_VIEW, distance)
 
@@ -59,11 +73,21 @@ SIZE="${SIZE:-960x600}"
 WORLD="${WORLD:-Commonwealth}"
 WEATHER="${WEATHER:-CommonwealthClear}"
 HOUR="${HOUR:-12}"
-PHASE="${PHASE:-bake views interior check}"
+PHASE="${PHASE:-bake views skyint interior check}"
 RECHECK="${RECHECK:-0}"
 [ "$RECHECK" = 1 ] && PHASE="check"
 # Graygarden: the cell with outdoor glass (its greenhouses), for the notint red; no view, the dump alone
-CELLS="${CELLS:-concord:-15,17 graygarden:-12,4}"
+# lane SKYINT1: an empty CELLS (or SKYINT) is none, not the default
+CELLS="${CELLS-concord:-15,17 graygarden:-12,4}"
+# lane SKYINT1: the Museum of Freedom (Show Sky + Use Sky Lighting), a Show Sky cell of another kind (Show Sky
+# alone), a closed vault; its reds take one cell each and no exterior
+SKYINT="${SKYINT-museum:ConcordMuseum01 witch:MuseumOfWitchcraft01 cryo:Vault111Cryo}"
+REF="${REF:-$REPO/release/prtp_reference.exe}"
+case "$RED" in
+	noflag) CELLS=""; SKYINT="museum:ConcordMuseum01" ;;
+	all) CELLS=""; SKYINT="cryo:Vault111Cryo" ;;
+	?*) SKYINT="" ;;
+esac
 INTERIOR="${INTERIOR:-DmndSolomonsHouse01}"
 INTERIOR_CAM="${INTERIOR_CAM:-1450,-20,150}"
 # the cameras, eye height (Concord's street is near z 6200: a camera at z 300 is under the ground and shows
@@ -195,6 +219,44 @@ for spec in $CELLS; do
 	fi
 done
 
+# ---- lane SKYINT1: interiors judged by their own Show Sky flag (a red bakes its own cell with the defect on)
+for spec in $SKYINT; do
+	tag="${spec%%:*}"; edid="${spec##*:}"
+	run="$OUT/skyint${RED:+_red_$RED}/$tag"
+	say "== interior $edid ($tag${RED:+, RED $RED}; $WEATHER hour $HOUR)"
+	if has skyint; then
+		rm -rf "$run"; mkdir -p "$run"
+		[ "$(shoot "$EXE" "interior|$edid" "$run/probes.tsv" "$run/lit.png" "" "${LD[@]}" WW_CELL_GI=1 \
+			${RED:+WW_CELL_SKYINT_RED=$RED} \
+			WW_CELL_PROBE_SOUP="$(winpath "$run/soup.psp")" WW_CELL_PROBE_BAKE="$(winpath "$run/bake")" \
+			WW_CELL_GI_DUMP="$(winpath "$run/dump")")" = 1 ] && ok=1 || ok=0
+		grep -h "cell flags\|  bake: [0-9]\|  gi sky\|  gi:" "$run/lit.notes" | head -4 | cut -c1-260 | tee -a "$LOG"
+		check "$edid: the picture and the bake written" "$ok"
+	fi
+	if has check && [ -d "$run/bake" ]; then
+		python "$(dirname "$0")/cell_sky_check.py" "$ESM" "$run" --cell "$edid" --weather "$WEATHER" --hour "$HOUR" \
+			> "$run/check.txt" 2>&1
+		sed 's/^/  /' "$run/check.txt" | tee -a "$LOG"
+		if [ -n "$RED" ]; then
+			check "$edid: the red control FAILS stage V" "$(grep -q "^V FAIL" "$run/check.txt" && echo 1 || echo 0)"
+		else
+			check "$edid: every stage matches the plugin's flags and the independent rebuild" \
+				"$(grep -q "^sky $edid PASS" "$run/check.txt" && echo 1 || echo 0)"
+			if grep -q "^V PASS sky in a Show Sky" "$run/check.txt"; then
+				if [ -x "$REF" ]; then
+					python "$(dirname "$0")/prtp_reference.py" "$(winpath "$run/soup.psp")" "$(winpath "$run/bake")" \
+						--ref "$(winpath "$REF")" > "$run/reference.txt" 2>&1
+					sed 's/^/  /' "$run/reference.txt" | tee -a "$LOG"
+					check "$edid: the sky shares re-traced by the brute-force reference" \
+						"$(grep -q "^reference PASS" "$run/reference.txt" && echo 1 || echo 0)"
+				else
+					say "  FAIL  no reference tracer at $REF (build line in this header)"; fails=$((fails+1))
+				fi
+			fi
+		fi
+	fi
+done
+
 # ---- an interior: the lane must not move it by one pixel
 if [ -z "$RED" ] && { has interior || has check; }; then
 	say "== interior $INTERIOR: before the lane ($(basename "$BEFORE")) against after"
@@ -219,7 +281,7 @@ if [ -z "$RED" ] && { has interior || has check; }; then
 			check "$INTERIOR ($mode): the pictures written" "$ok"
 		fi
 		if has check && [ -d "$idir/after" ]; then
-			python "$(dirname "$0")/cell_sky_check.py" --interior "$idir" > "$idir/check.txt" 2>&1
+			python "$(dirname "$0")/cell_sky_check.py" --interior "$idir" "$ESM" "$INTERIOR" > "$idir/check.txt" 2>&1
 			sed 's/^/  /' "$idir/check.txt" | tee -a "$LOG"
 			check "$INTERIOR ($mode): byte for byte what the exe before the lane gave" "$(grep -q "^sky interior PASS" "$idir/check.txt" && echo 1 || echo 0)"
 		fi

@@ -95,7 +95,7 @@ void relightKept()
 {
 	Kept & k = kept();
 	const WwCellLighting * L = k.nif ? wwCellLightsFor( k.nif ) : nullptr;
-	if ( !L || L->interior )
+	if ( !L || ( L->interior && !k.spec.interiorSky ) )   // lane SKYINT1: an interior that shows the sky too
 		return;
 	k.spec.sky = k.wanted;
 	ProbeGiResult gr;
@@ -107,7 +107,7 @@ void relightKept()
 		gi.dims[c] = gr.dims[c];
 	}
 	gi.voxel = gr.voxel;
-	gi.skyLit = gr.skyLit && k.spec.skyRed != QLatin1String( "keepamb" );
+	gi.skyLit = gr.skyLit && !L->interior && k.spec.skyRed != QLatin1String( "keepamb" );
 	gi.summary = QStringLiteral( "grid %1x%2x%3 voxel %4" ).arg( gr.dims[0] ).arg( gr.dims[1] ).arg( gr.dims[2] )
 		.arg( double( gr.voxel ), 0, 'f', 1 );
 	gi.rgba = std::move( gr.grid );
