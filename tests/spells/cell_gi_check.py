@@ -66,6 +66,35 @@ class Soup:
         self.keys, first = np.unique(key[order], return_index=True)
         self.first = np.append(first, len(order))
         self.tris = tri[order]
+        # lane ALPHATEST1: the soup's alpha-test masks (AMK1 tail): a hit on a texel under the threshold passes on
+        from alphatest_check import read_soup
+        _n, _t, am = read_soup(path)
+        self.am = None
+        if am is not None and len(am['rec']):
+            self.am = am
+            self.amOf = np.full(ntri, -1, np.int64)
+            self.amOf[am['rec']['tri'].astype(np.int64)] = np.arange(len(am['rec']))
+
+    def holes(self, tri, b1, b2):
+        """True where the hit at barycentrics (b1, b2) of soup triangle tri lands on an alpha-test hole"""
+        out = np.zeros(len(tri), bool)
+        if self.am is None:
+            return out
+        r = self.amOf[tri]
+        for i in np.nonzero(r >= 0)[0]:
+            rec = self.am['rec'][r[i]]
+            uv = rec['uv'].astype(np.float64)
+            b0 = 1.0 - b1[i] - b2[i]
+            u = b0 * uv[0] + b1[i] * uv[2] + b2[i] * uv[4]
+            v = b0 * uv[1] + b1[i] * uv[3] + b2[i] * uv[5]
+            m = self.am['maps'][int(rec['map'])]
+            h, w = m.shape
+            u -= math.floor(u)
+            v -= math.floor(v)
+            x = min(max(int(u * w), 0), w - 1)
+            y = min(max(int(v * h), 0), h - 1)
+            out[i] = int(m[y, x]) < int(rec['thr'])
+        return out
 
     @staticmethod
     def key(ix, iy, iz):
@@ -90,7 +119,8 @@ class Soup:
         idx = [self.tris[self.first[p]:self.first[p + 1]] for p in pos]
         if not idx:
             return False
-        T = self.t[np.unique(np.concatenate(idx))]
+        ti = np.unique(np.concatenate(idx))
+        T = self.t[ti]
         p0, e1, e2 = T[:, 0], T[:, 1] - T[:, 0], T[:, 2] - T[:, 0]
         pv = np.cross(d[None, :], e2)
         det = np.einsum('tk,tk->t', e1, pv)
@@ -101,7 +131,11 @@ class Soup:
         qv = np.cross(tv, e1)
         v = (qv @ d) * idt
         t = np.einsum('tk,tk->t', e2, qv) * idt
-        return bool(np.any(ok & (u >= 0) & (u <= 1) & (v >= 0) & (u + v <= 1) & (t > 1e-4) & (t <= tmax)))
+        hit = ok & (u >= 0) & (u <= 1) & (v >= 0) & (u + v <= 1) & (t > 1e-4) & (t <= tmax)
+        if self.am is not None and hit.any():
+            hi_ = np.nonzero(hit)[0]
+            hit[hi_[self.holes(ti[hi_], u[hi_], v[hi_])]] = False
+        return bool(np.any(hit))
 
 
 # ---------------------------------------------------------------- the dump
