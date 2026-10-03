@@ -1797,6 +1797,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	 * holes). A map whose every texel passes needs no mask. WW_CELL_ALPHATEST_PIN=off (gates only, never a
 	 * user toggle) keeps every alpha-tested face solid: byte for byte the exe from before the lane. */
 	const bool alphaPin = qgetenv( "WW_CELL_ALPHATEST_PIN" ).trimmed() == "off";
+	// Measurement pin only: WW_CELL_ALPHATEST_FOLIAGE=keep puts landscape\ alpha-tested cards in the soup with their mask.
+	const bool foliageKeep = qgetenv( "WW_CELL_ALPHATEST_FOLIAGE" ).trimmed() == "keep";
 	struct MaskInfo { int map = -1; int minA = 255; };
 	QHash<QString, MaskInfo> maskOfTex;
 	QHash<QString, int> maskModelIdx;
@@ -2245,7 +2247,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 					soupRefractModels[model]++;
 				}
 				if ( refractOnly || s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
-					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest ) ) {
+					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest && !foliageKeep ) ) {
 					soupShapesDropped++;
 					if ( wantExtra )   // lane CAPTURE1 red nofilter: the cube sees what the soup leaves out
 						for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
