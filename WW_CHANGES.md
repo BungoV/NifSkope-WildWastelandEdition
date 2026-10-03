@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Trees in the far map (2026-10-02)
+
+- The far map (the bounce light baked for places far from you, `probefar`) now has the trees in it. Until now a
+  wooded hillside bounced light as if it were bare ground, and a far probe could sit inside a treetop.
+- Every tree your LOD set places goes in, as its own authored far LOD model (never a simplified one). The leaves
+  keep only the share of each leaf card their texture really has (the holes stay holes), in the leaves' own
+  color from the LOD texture arrays. No game archive and no cell is opened.
+- Treetops now count as roofs: each far probe floats 512 units above the tallest tree in its cell, so none of
+  them sits in the leaves any more.
+- Nothing to switch on: rebaking the far map picks the trees up. No new menu row, no new setting.
+
 ## Outdoors, the bounce light now takes the sky and the sun (2026-10-02)
 
 - In an exterior cell lit by the weather (Scene mode Lookdev), the cell view's GI row now adds the sky and the

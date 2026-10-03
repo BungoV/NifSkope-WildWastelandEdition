@@ -5,6 +5,17 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02 -- TREE1: the canopy lifted the roofline by the authored vertices only, not the soup's own
+
+The far map's trees go in shrunk (each leaf triangle pulled toward its middle to the share its texture keeps).
+The canopy rule raised each cell's roofline by every AUTHORED vertex of the tree, which looked like the stricter
+choice. But a shrunk triangle that crosses a cell border can move a high vertex INTO the next cell, where no
+authored vertex stands that high: on the Concord block one probe (cell -17,20) stood 395 units over the soup's
+top instead of 512. The tree checker (authored vertices) passed; the far map's older roofline check (every soup
+vertex) caught it. Fix: every soup vertex of a tree lifts its cell too, as well as every authored vertex.
+Rule: when geometry is transformed before it goes in, a bound taken from the source geometry does not bound the
+result; take the bound from what actually went in (and keep the source bound too if a rule names it).
+
 ## 2026-10-02 -- SKY1: "the cell program draws nothing outdoors" was a camera under the ground
 
 - What happened: lane PROBEVIEW1 dropped Concord from its gate because every pass picture was identical, and the

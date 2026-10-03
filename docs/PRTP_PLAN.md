@@ -1480,6 +1480,43 @@ NifSkope. Cameras at eye height (Concord's street is near z 6200), picked from t
 
 After the merge with main a54dfd62 the green reran PASS with the interior compared against main's own exe.
 
+### 2ai. Trees in the far map (lane TREE1, 2026-10-02)
+
+(Letter: next free after 2ah SKY1 at splice time.)
+
+What: `probefar` (2h) put ground, water and the .lodi occluder boxes in the far soup and no trees, so a wooded
+hillside bounced like bare ground and a far probe could stand inside a canopy. Now every .lodi placement whose
+.lodo base is a tree goes in as its COARSEST authored slot (lodgen never decimates; no model is simplified).
+
+How (src/probefar.cpp, class FarTrees + the tree loop in probeFarBuild):
+- Texture layers from Objects/<world>.LodgenArrays.txt (`source` column), else the chunk manifests' M/A lines;
+  one BC3 array DDS read per layer. Each alpha-tested triangle keeps the share of its texels that pass (cover),
+  shrunk about its centroid by sqrt(cover), in the mean linear color of the passing texels.
+- Canopy: each cell's roofline is raised by every authored vertex (all slots) of the trees in it AND by every
+  tree vertex that went into the soup (a shrunk leaf can cross into the next cell; MISTAKES 2026-10-02).
+- Census: `far: trees N of M ... (T triangles from soup triangle F, keeping A of their area), tree materials K
+  (without a texture 0), cells a canopy raised C`. Tree triangles are soup[F:].
+- Reds (`--red`): notrees, treebox (a solid box per tree), treeshift (every tree one cell east), canopy (roofline
+  ignores trees).
+
+Gate (tests/spells/probe_far.py + the independent reader tests/spells/probe_far_trees.py, own BC3 decode on
+lodgen_native_decode.py): every placed tree in the soup once (centroid match, tol 0.5), no stray tree triangle,
+tree area within 0.05 of what the textures keep, canopy >= hoist; with --treeref the bake against a brute-force
+trace of the reference (soup ground + boxes + first-slot models cut texel by texel, kmax 8): irradiance median
+<= 0.10, p95 <= 0.25, and median <= half the no-tree bake's. Bar set before any tree bake.
+
+Numbers (merged exe, 2026-10-03):
+- Concord block -20,12..-10,22: 8771/8771 trees, stray 0, twice 0, area 0.985, canopy 512, roofline 512;
+  bar 0.059/0.103 (no trees 0.230). Own-soup reference 0.053/0.108 (2h without trees was 0.027/0.046: open).
+- Wooded block -24,20..-14,30: 9166/9166, area 0.985, canopy 512, bar 0.056/0.088 (no trees 0.284).
+- Reds all FAIL: notrees 0/8771; treebox stray 105252, area 10.021; treeshift stray 214987; canopy roofline
+  -2356; hoist -1488.
+- Whole Commonwealth: 70 s, 280 MB (was 51 s, 265 MB): 85582 of 85582 trees, 2,013,012 triangles keeping 0.328
+  of their area, 30 materials, 0 untextured, 3713 cells raised.
+
+Open: the far map's own-soup reference error doubled with the trees in (still inside the bars); the cell view
+has no far-map consumer, so the eye-height renders are offline (scratch eyeshot.py); FO4CS reader comes last.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
