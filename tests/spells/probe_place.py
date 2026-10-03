@@ -49,6 +49,10 @@ def write_soup(path, tris, doors):
         f.write(t.tobytes())
         for ref, lo, hi in doors:
             f.write(struct.pack('<I3f3f', ref, *lo, *hi))
+        # lane ROOMCLAMP1: these boxes are wound inward (winding was never the placer's business here);
+        # every face two-sided keeps this gate on the rules it was written for (cell_rooms gates winding)
+        f.write(struct.pack('<II', 0x314F5754, len(t)))
+        f.write(b'\x01' * len(t))
 
 
 def read_tsv(path):

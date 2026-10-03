@@ -32,6 +32,14 @@ uniform sampler3D cellGi;
 uniform vec3 cellGiOrigin;
 uniform float cellGiVoxel;
 uniform vec3 cellGiDims;
+// lane ROOMCLAMP1 (src/proberooms.h): with rooms the grid holds 12 slabs (slot 0's six, then slot 1's); cellGiSlots
+// per voxel and cellRooms per fine cell hold two rooms packed as (a + 1) x 4096 + (b + 1), -1 none
+uniform bool cellGiRooms;
+uniform sampler3D cellGiSlots;
+uniform sampler3D cellRooms;
+uniform vec3 cellRoomsOrigin;
+uniform float cellRoomsCell;
+uniform vec3 cellRoomsDims;
 // lane SKY1 (src/probesky.h): a weather-lit exterior's grid holds the sky the probes see, so it stands in
 // for the weather's unshadowed ambient by the grid's valid share (0 where the grid does not reach)
 uniform bool cellGiSky;
@@ -154,12 +162,112 @@ vec3 cellShadowProbe( vec3 P, vec3 N )
 
 // the bounce's irradiance at P, normal N: the three facing slabs blended by n^2, sampled half a
 // voxel off the surface (the grid's voxels behind a wall are its other room's)
+ivec2 cellRoomUnpack( float v )
+{
+	int k = int( v + 0.5 );
+	return ivec2( k / 4096 - 1, k - ( k / 4096 ) * 4096 - 1 );
+}
+ivec2 cellRoomAt( vec3 q )
+{
+	vec3 c = floor( ( q - cellRoomsOrigin ) / cellRoomsCell );
+	if ( any( lessThan( c, vec3( 0.0 ) ) ) || any( greaterThanEqual( c, cellRoomsDims ) ) )
+		return ivec2( -1 );
+	return cellRoomUnpack( texelFetch( cellRooms, ivec3( c ), 0 ).r );
+}
+// lane ROOMCLAMP1: the blend of the 8 voxels' slots of room L, trilinear weights (sum in .rgba, weight in ws)
+vec4 cellGiRoomBlend( vec3 P, vec3 N, ivec2 L, out float ws )
+{
+	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel - 0.5;
+	ivec3 i0 = ivec3( floor( g ) );
+	vec3 f = g - vec3( i0 );
+	ivec3 dm = ivec3( cellGiDims );
+	ivec3 sl = ivec3( N.x >= 0.0 ? 0 : 1, N.y >= 0.0 ? 2 : 3, N.z >= 0.0 ? 4 : 5 ) * dm.z;
+	vec3 n2 = N * N;
+	vec4 s = vec4( 0.0 );
+	ws = 0.0;
+	for ( int k = 0; k < 8; k++ ) {
+		ivec3 o = ivec3( k & 1, ( k >> 1 ) & 1, ( k >> 2 ) & 1 );
+		ivec3 c = clamp( i0 + o, ivec3( 0 ), dm - 1 );
+		vec3 t = mix( 1.0 - f, f, vec3( o ) );
+		float w = t.x * t.y * t.z;
+		ivec2 S = cellRoomUnpack( texelFetch( cellGiSlots, c, 0 ).r );
+		int base = ( S.x >= 0 && ( S.x == L.x || S.x == L.y ) ) ? 0 : ( S.y >= 0 && ( S.y == L.x || S.y == L.y ) ) ? 6 * dm.z : -1;
+		if ( base < 0 || w <= 0.0 )
+			continue;
+		vec4 v = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.x ), 0 )
+		       + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.y ), 0 )
+		       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.z ), 0 );
+		if ( v.a <= 0.0 )
+			continue;   // lane ROOMCLAMP1: an empty slot (no probe of its room reached the voxel): no weight
+		s += w * v;
+		ws += w;
+	}
+	return s;
+}
+// lane ROOMCLAMP1: the blend of only the voxels (slots) of the surface's own room, trilinear weights renormalized;
+// the room read at P + N x 0.75 cell, else 1.75 cell (the surface's own cell is solid). Both in a wall's cells (a
+// floor beside a thin wall, an inner corner): of the 8 cells round either read in the surface's plane, the air cell
+// nearest its read (the sum of the faces crossed) whose blend has weight, the 0.75 read first on a tie (an inner
+// corner's nearest air is the outdoors across the wall, which no voxel there holds). The same search when the
+// read room's blend has no weight (a pocket behind a pipe: no voxel holds it). .a < 0: no room with weight (the
+// plain trilinear; black was the old answer)
+vec4 cellGiRoomSample( vec3 P, vec3 N )
+{
+	float ws;
+	ivec2 L = cellRoomAt( P + N * ( 0.75 * cellRoomsCell ) );
+	if ( L.x < 0 )
+		L = cellRoomAt( P + N * ( 1.75 * cellRoomsCell ) );
+	if ( L.x >= 0 ) {
+		vec4 s = cellGiRoomBlend( P, N, L, ws );
+		if ( ws > 0.0 )
+			return s / ws;
+	}
+	vec3 aN = abs( N );
+	int m = ( aN.x >= aN.y && aN.x >= aN.z ) ? 0 : ( aN.y >= aN.z ? 1 : 2 );
+	int ta = m == 0 ? 1 : 0, tb = m == 2 ? 1 : 2;
+	float best = 3.0;
+	bool found = false;
+	vec4 r = vec4( 0.0 );
+	for ( int k = 0; k < 2; k++ ) {
+		vec3 q = P + N * ( ( k == 0 ? 0.75 : 1.75 ) * cellRoomsCell );
+		vec3 u = ( q - cellRoomsOrigin ) / cellRoomsCell;
+		vec3 f = u - floor( u );
+		for ( int sa = -1; sa <= 1; sa++ ) {
+			for ( int sb = -1; sb <= 1; sb++ ) {
+				if ( sa == 0 && sb == 0 )
+					continue;
+				vec3 e = vec3( 0.0 );
+				e[ta] = float( sa );
+				e[tb] = float( sb );
+				ivec2 c = cellRoomAt( q + e * cellRoomsCell );
+				if ( c.x < 0 )
+					continue;
+				float d = ( sa > 0 ? 1.0 - f[ta] : sa < 0 ? f[ta] : 0.0 ) + ( sb > 0 ? 1.0 - f[tb] : sb < 0 ? f[tb] : 0.0 );
+				if ( d >= best )
+					continue;
+				vec4 s = cellGiRoomBlend( P, N, c, ws );
+				if ( ws > 0.0 ) {
+					found = true;
+					best = d;
+					r = s / ws;
+				}
+			}
+		}
+	}
+	return found ? r : vec4( -1.0 );
+}
+
 vec4 cellGiSample( vec3 P, vec3 N )
 {
+	if ( cellGiRooms && ( cellPassRed & 8 ) == 0 ) {	// lane ROOMCLAMP1 (red noclamp: WW_CELL_PV_RED)
+		vec4 r = cellGiRoomSample( P, N );
+		if ( r.a >= 0.0 )
+			return r;
+	}
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;
 	vec2 xy = g.xy / cellGiDims.xy;
 	float z = clamp( g.z, 0.5, cellGiDims.z - 0.5 );
-	float depth = 6.0 * cellGiDims.z;
+	float depth = ( cellGiRooms ? 12.0 : 6.0 ) * cellGiDims.z;
 	vec3 n2 = N * N;
 	vec4 s = n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
 	       + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )

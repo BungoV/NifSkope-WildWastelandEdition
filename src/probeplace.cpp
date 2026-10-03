@@ -121,6 +121,7 @@ struct Grid
 	float o[3] = { 0, 0, 0 };   // local coords of voxel (0,0,0)'s low corner
 	float v = 35.0f;
 	std::vector<quint8> s;      // 1 = solid
+	std::vector<quint8> up;     // lane ROOMCLAMP1: 1 = a solid voxel a probe may stand on (empty: every solid one)
 
 	//! 1 solid, 0 air, -1 outside the grid
 	int at( int x, int y, int z ) const
@@ -248,6 +249,21 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 	const float kWallDirs[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
 	float lowestFloor = 3.4e38f;
 	std::vector<float> surfaces;
+	/* lane ROOMCLAMP1: a probe never stands on the back of a one-sided face (an interior shell's roof seen from
+	 * above: outside the building). The surface still bounds the gaps below it. Red "floor": the old rule. */
+	std::vector<quint8> surfBack;
+	const bool redFloor = spec.red == QLatin1String( "floor" );
+	auto backFacingDown = [&]( int tri ) -> bool {
+		if ( redFloor || tri < 0 || soup.isTwoSided( size_t( tri ) ) )
+			return false;
+		const float * q = &bvh.t[size_t( tri ) * 9];
+		const double e1[3] = { double( q[3] ) - q[0], double( q[4] ) - q[1], double( q[5] ) - q[2] };
+		const double e2[3] = { double( q[6] ) - q[0], double( q[7] ) - q[1], double( q[8] ) - q[2] };
+		const double nx = e1[1] * e2[2] - e1[2] * e2[1], ny = e1[2] * e2[0] - e1[0] * e2[2];
+		const double nz = e1[0] * e2[1] - e1[1] * e2[0];
+		const double nl = std::sqrt( nx * nx + ny * ny + nz * nz );
+		return nl > 0 && nz / nl < -0.05;
+	};
 	const qint64 i0 = qint64( std::ceil( spec.minX / spec.spacing ) );
 	const qint64 j0 = qint64( std::ceil( spec.minY / spec.spacing ) );
 	for ( qint64 j = j0;; ++j ) {
@@ -262,16 +278,19 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			const double x = double( wx ) - O[0], y = double( wy ) - O[1];
 			// the column descent
 			surfaces.clear();
+			surfBack.clear();
 			double cursor = top;
 			while ( surfaces.size() < maxSurfaces && cursor > bottom ) {
-				const double f[3] = { x, y, cursor }, to[3] = { x, y, bottom };
+				const double f[3] = { x, y, cursor }, down[3] = { 0.0, 0.0, -1.0 };
 				double dist = 0;
-				if ( !castRay( f, to, &dist ) )
+				int tri = -1;
+				if ( !( cursor - bottom > 1e-9 ) || !bvh.ray( f, down, cursor - bottom, &dist, &tri ) )
 					break;
 				const float hitZ = float( cursor - dist );
 				if ( !surfaces.empty() && !( hitZ < surfaces.back() - 1e-3f ) )
 					break;
 				surfaces.push_back( hitZ );
+				surfBack.push_back( backFacingDown( tri ) ? 1 : 0 );
 				cursor = double( hitZ ) - spec.pierceStep;
 			}
 			if ( surfaces.empty() ) {
@@ -284,14 +303,23 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			point.pos[1] = float( y );
 			point.pos[2] = surfaces[0] + spec.eye;
 			point.cls = ProbeClass::FirstHit;
-			std::vector<ProbePoint> origins { point };
-			addProbe( point );
-			R.firstHit++;
+			std::vector<ProbePoint> origins;
+			if ( surfBack[0] ) {
+				R.backColumnHits++;
+			} else {
+				origins.push_back( point );
+				addProbe( point );
+				R.firstHit++;
+			}
 			int level = 0;
 			for ( size_t s = 1; s < surfaces.size(); ++s ) {
 				const float gap = surfaces[s - 1] - surfaces[s];
 				if ( !( gap >= spec.minAirGap ) ) {
 					R.gapsRejected++;
+					continue;
+				}
+				if ( surfBack[s] ) {
+					R.backColumnHits++;
 					continue;
 				}
 				if ( level + 1 >= spec.maxLevels ) {
@@ -428,12 +456,29 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 		g.o[1] = ly0;
 		g.o[2] = gz0;
 		g.s.assign( size_t( g.nx ) * size_t( g.ny ) * size_t( g.nz ), 0 );
+		/* lane ROOMCLAMP1: which solid voxels a probe may stand on (the interior rule's frame only). The back of
+		 * a one-sided face is never a floor: a voxel whose every face is one-sided with its front pointing down
+		 * (an interior shell's roof seen from above, from outside the building) is solid but no floor. */
+		const bool wantUp = angDeg == 0.0f && spec.coverage && g0.s.empty() && spec.red != QLatin1String( "floor" );
+		g.up.clear();
+		if ( wantUp )
+			g.up.assign( g.s.size(), 0 );
 		const float hv[3] = { g.v * 0.5f, g.v * 0.5f, g.v * 0.5f };
 		for ( size_t i = 0; i < bvh.t.size(); i += 9 ) {
 			float p[9];
 			for ( int k = 0; k < 3; k++ ) {
 				toG( bvh.t[i + size_t( k ) * 3 + 0], bvh.t[i + size_t( k ) * 3 + 1], p[k * 3 + 0], p[k * 3 + 1] );
 				p[k * 3 + 2] = bvh.t[i + size_t( k ) * 3 + 2];
+			}
+			bool floorTri = false;
+			if ( wantUp ) {
+				const float * q = &bvh.t[i];
+				const double e1[3] = { double( q[3] ) - q[0], double( q[4] ) - q[1], double( q[5] ) - q[2] };
+				const double e2[3] = { double( q[6] ) - q[0], double( q[7] ) - q[1], double( q[8] ) - q[2] };
+				const double nx = e1[1] * e2[2] - e1[2] * e2[1], ny = e1[2] * e2[0] - e1[0] * e2[2];
+				const double nz = e1[0] * e2[1] - e1[1] * e2[0];
+				const double nl = std::sqrt( nx * nx + ny * ny + nz * nz );
+				floorTri = soup.isTwoSided( i / 9 ) || !( nl > 0 ) || nz / nl >= -0.05;
 			}
 			int lo[3], hi[3];
 			bool skip = false;
@@ -450,13 +495,17 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			for ( int z = lo[2]; z <= hi[2]; z++ )
 				for ( int y = lo[1]; y <= hi[1]; y++ )
 					for ( int x = lo[0]; x <= hi[0]; x++ ) {
-						quint8 & cell = g.s[( size_t( z ) * size_t( g.ny ) + size_t( y ) ) * size_t( g.nx ) + size_t( x )];
-						if ( cell )
+						const size_t ci = ( size_t( z ) * size_t( g.ny ) + size_t( y ) ) * size_t( g.nx ) + size_t( x );
+						quint8 & cell = g.s[ci];
+						if ( cell && ( !floorTri || g.up[ci] ) )
 							continue;
 						const float c[3] = { g.o[0] + ( x + 0.5f ) * g.v, g.o[1] + ( y + 0.5f ) * g.v,
 							g.o[2] + ( z + 0.5f ) * g.v };
-						if ( triBox( c, hv, p ) )
+						if ( triBox( c, hv, p ) ) {
 							cell = 1;
+							if ( floorTri )
+								g.up[ci] = 1;
+						}
 					}
 		}
 		R.msVoxel += double( tm.nsecsElapsed() ) / 1e6;
@@ -744,6 +793,10 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			for ( int z = 1; z < G.nz; z++ ) {
 				if ( G.at( x, y, z ) != 0 || G.at( x, y, z - 1 ) != 1 )
 					continue;
+				if ( !G.up.empty() && !G.up[( size_t( z - 1 ) * size_t( G.ny ) + size_t( y ) ) * size_t( G.nx ) + size_t( x )] ) {
+					R.backFloors++;   // lane ROOMCLAMP1: on the back of a one-sided face
+					continue;
+				}
 				int h = 0;
 				while ( z + h < G.nz && G.at( x, y, z + h ) == 0 )
 					h++;
@@ -887,6 +940,18 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 	auto place = [&]( const WCell & c, ProbeClass cls, int roomId ) {
 		double p[3];
 		standAt( c, p );
+		/* lane ROOMCLAMP1: a room or cover probe with the back of a one-sided face within 200 straight below stands
+		 * behind a shell (a roof seen from above, a round hull's outer skin from inside its void: its voxel floor
+		 * came from a near-vertical face in the same voxel). No probe; the cover pass gives the cells round it another. */
+		if ( !redFloor ) {   // any frame (PrydwenHull01's is turned: no voxel floor mask there)
+			const double dn[3] = { 0, 0, -1 };
+			double t = 0;
+			int tri = -1;
+			if ( bvh.ray( p, dn, 200.0, &t, &tri ) && backFacingDown( tri ) ) {
+				R.backPlaced++;
+				return;
+			}
+		}
 		indexProbe( p );
 		ProbePoint pp;
 		pp.pos[0] = float( p[0] );
@@ -1243,6 +1308,8 @@ QString probeCensusText( const ProbePlaceResult & r )
 	  << r.roomsOpen << " open to the ground or a drop, " << r.roomsLedge << " mostly a drop (furniture tops, ledges), " << r.roomsSealed << " sealed (hollows), " << r.roomsTiny << " too small; walkable cells " << r.walkCells
 	  << ", in enclosed rooms " << r.coverCells << " (hallway " << r.hallCells << "), cut at openings " << r.cutCells
 	  << "; blind cells left " << r.blindLeft << "\n";
+	t << "floors: refused on the back of a one-sided face: walkable cells " << r.backFloors << ", column levels "
+	  << r.backColumnHits << ", room/cover probes " << r.backPlaced << "\n";   // lane ROOMCLAMP1
 	t << "room ids: " << r.roomIds << " enclosed rooms named, probes in a room " << r.probesInRoom
 	  << " (openings " << r.apertureRooms << "), room boxes " << r.roomBoxes.size() << "\n";
 	t << "probe soup: " << r.soupTris << " triangles; voxel grid " << r.gridX << " x " << r.gridY << " x "
@@ -1314,6 +1381,14 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		f.write( reinterpret_cast<const char *>( soup.glass.data() ), qint64( soup.glass.size() * sizeof( float ) ) );
 		f.write( reinterpret_cast<const char *>( soup.glassT.data() ), qint64( soup.glassT.size() ) );
 	}
+	// lane ROOMCLAMP1: the two-sided triangles, one byte each (written only when any is)
+	if ( !soup.twoSided.empty() ) {
+		std::vector<quint8> ts( soup.tris.size() / 9, 0 );
+		std::copy( soup.twoSided.begin(), soup.twoSided.begin() + qMin( soup.twoSided.size(), ts.size() ), ts.begin() );
+		const quint32 tail[2] = { 0x314F5754u /* 'TWO1' */, quint32( ts.size() ) };
+		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		f.write( reinterpret_cast<const char *>( ts.data() ), qint64( ts.size() ) );
+	}
 	return true;
 }
 
@@ -1368,6 +1443,14 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			soup->glass.clear();
 			soup->glassT.clear();
 		}
+		more = f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+	}
+	// lane ROOMCLAMP1: the optional two-sided tail
+	soup->twoSided.clear();
+	if ( more && tail[0] == 0x314F5754u && tail[1] == head[1] ) {
+		soup->twoSided.resize( size_t( tail[1] ) );
+		if ( f.read( reinterpret_cast<char *>( soup->twoSided.data() ), qint64( tail[1] ) ) != qint64( tail[1] ) )
+			soup->twoSided.clear();
 	}
 	return true;
 }

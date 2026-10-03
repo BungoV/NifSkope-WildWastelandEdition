@@ -256,6 +256,10 @@ def write_soup(path, tris, alb, doors=(), glass=None):
             f.write(struct.pack('<II', GLS_MAGIC, len(g)))
             f.write(g.tobytes())
             f.write(bytes([c for _, tr in glass for c in tr]))
+        # lane ROOMCLAMP1: the ground is wound down on purpose (facing is the bake's job); every face
+        # two-sided keeps these gates off the outside-the-shell rule (cell_rooms gates winding)
+        f.write(struct.pack('<II', 0x314F5754, len(t)))
+        f.write(b'\x01' * len(t))
 
 
 def in_room(p, pad=0.0):

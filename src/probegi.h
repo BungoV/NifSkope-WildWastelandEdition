@@ -25,9 +25,11 @@
  *  the probes gather again. Until the largest change is under a thousandth of the brightest surfel. */
 
 #include "probeplace.h"
+#include "proberooms.h"
 #include "probesky.h"
 
 #include <QString>
+#include <QStringList>
 
 #include <vector>
 
@@ -46,6 +48,21 @@ struct ProbeGiResult
 	float radius = 0.0f;                //!< the probe blend radius
 	int voxelsNear = 0, voxelsValid = 0;
 	qint64 visRays = 0, visBlocked = 0;
+	/*! lane ROOMCLAMP1: near voxels no probe was seen from at their centre (the centre inside a wall or behind
+	 *  it), filled from their eye instead -- the surface sample point nearest the centre: within the radius
+	 *  (voxelsEye), within twice it (voxelsFar); the mean of valid neighbours, two rings (voxelsGrown); still
+	 *  none (voxelsBare). Red "noeye": the old hole. */
+	int voxelsEye = 0, voxelsFar = 0, voxelsGrown = 0, voxelsBare = 0;
+	/*! lane ROOMCLAMP1 (src/proberooms.h): the rooms. Each near voxel keeps two slots, the two rooms the surfaces
+	 *  reading it stand in most; a slot gathers only the probes of its room, from the voxel's centre when the
+	 *  centre is in that room, else from the slot's eye. grid / gridSky then hold slot 0 and grid2 / gridSky2
+	 *  slot 1 (the same layout); slotRooms = probeRoomsPack( slot 0 room, slot 1 room ) per voxel (-1: none). Red
+	 *  "noclamp": no rooms, one value a voxel (the blend before the lane). */
+	bool roomsOn = false;
+	ProbeRooms rooms;
+	std::vector<float> grid2, gridSky2, slotRooms;
+	std::vector<int> probeRooms;        //!< per probe: its room, its second room (-1 none)
+	int voxelsTwoRooms = 0, voxelsTwoBare = 0, voxelsCentreElsewhere = 0, probesRoomless = 0;
 	/*! six slabs (+X -X +Y -Y +Z -Z), each dims[2] deep, x fastest: (r, g, b, valid) a voxel; rgb is
 	 *  E x valid, so a filtered sample divides by its own valid (the renderer's 3D texture as is) */
 	std::vector<float> grid;
@@ -91,8 +108,10 @@ struct ProbeGiSpec
 	int maxVoxels = 400000;
 	float radiusScale = 2.0f;       //!< blend radius = this x the median probe-to-nearest-probe distance
 	/*! deliberate defects for the gate's refuters: "noshadow" (no shadow rays), "novis" (the grid
-	 *  ignores visibility), "flip" (links gathered from the opposite direction). Empty in real runs. */
+	 *  ignores visibility), "flip" (links gathered from the opposite direction), "noeye" (lane ROOMCLAMP1:
+	 *  a voxel blocked at its centre stays empty), "noclamp" (lane ROOMCLAMP1: no rooms). Empty in real runs. */
 	QString red;
+	ProbeRoomSpec rooms;            //!< lane ROOMCLAMP1: the room labels (its red: WW_CELL_ROOMS_RED)
 	/*! lane SKY1: the weather light of an exterior (off = none: an interior, or a view the weather
 	 *  does not light), and its refuters (WW_CELL_SKY_RED): "off" neither sky nor sun, "novis" every
 	 *  octant sees the sky, "notint" the glass tint is ignored, "sunthrough" the sun has no shadow ray. */
@@ -113,9 +132,14 @@ struct ProbeGiSpec
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.
 bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCellLighting & lighting,
 	const ProbeGiSpec & spec, ProbeGiResult * out );
+//! lane ROOMCLAMP1: after gi.rgba / gi.sky took grid / gridSky, append slot 1 and hand the rooms over (none: no-op)
+void probeGiRoomsInto( ProbeGiResult & r, struct WwCellGi & gi );
 //! One census line.
 QString probeGiCensusText( const ProbeGiResult & r );
 //! The gate's dump: gi_surfels.bin, gi_probes.bin, gi_grid.bin in `dir` (layouts in probegi.cpp).
 bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QString & dir, QString * err );
+/*! lane ROOMCLAMP1: `probegi` places, bakes and relights a dumped soup by the lights given (an interior), then
+ *  dumps (the synthetic rooms gate, tests/spells/cell_rooms.sh) */
+int probeGiCli( const QStringList & args );
 
 #endif // PROBEGI_H

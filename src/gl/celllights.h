@@ -149,6 +149,12 @@ struct WwCellGi
 	std::vector<float> sky;	// lane PROBEVIEW1: the same layout, rgb = the probes' open-sky share, a = valid
 	QString summary;
 	bool skyLit = false;   //!< lane SKY1: the grid holds the weather's sky; it stands in for the weather's ambient
+	/*! lane ROOMCLAMP1 (src/proberooms.h): with rooms, rgba and sky hold 12 slabs (slot 0's six, then slot 1's);
+	 *  slotRooms = per voxel the packed rooms of its two slots, rooms = per fine cell its packed rooms (empty: none) */
+	std::vector<float> slotRooms, rooms;	// (Qt reserves "slots")
+	float roomsOrigin[3] = { 0, 0, 0 };
+	float roomsCell = 16.0f;
+	int roomsDims[3] = { 0, 0, 0 };
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
 
