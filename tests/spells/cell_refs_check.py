@@ -27,6 +27,7 @@ Exit code 0 only when both set claims hold.
 """
 
 import struct
+import re
 import sys
 
 from cell_census import Esm, Rec, decompress, fields
@@ -91,7 +92,7 @@ def cell_children(esm, world_edid, cx, cy):
             target = form
     if target is None:
         raise SystemExit('no CELL at %d,%d in %s' % (cx, cy, world_edid))
-    return target, persistent_cell, refs
+    return target, persistent_cell, refs, grid
 
 
 def main():
@@ -101,8 +102,29 @@ def main():
     cx, cy = int(cx), int(cy)
 
     esm = Esm(esm_path)
-    target, pcell, refs = cell_children(esm, world, cx, cy)
+    target, pcell, refs, grid = cell_children(esm, world, cx, cy)
     own = set(refs.get(target, ()))
+    # Lane BAKEBLOCK1: a bake loads the 5x5 around the asked cell, and the dump
+    # then lists every loaded cell ('# cell <name> (x,y) form ...'). The list is
+    # judged against the plugin's own children of EVERY cell the dump names; the
+    # asked cell must be one of them, and every named cell must exist.
+    named = set()
+    for line in open(dump_path):
+        m = re.match(r'^# cell .*\((-?\d+),(-?\d+)\) form ', line)
+        if m:
+            named.add((int(m.group(1)), int(m.group(2))))
+    if named and (cx, cy) not in named:
+        print('RESULT bad: the dump does not name the asked cell %d,%d' % (cx, cy))
+        return 1
+    by_xy = {xy: f for f, xy in grid.items() if f != pcell}
+    for xy in sorted(named - {(cx, cy)}):
+        if xy not in by_xy:
+            print('RESULT bad: the dump names a cell the plugin has not: %d,%d' % xy)
+            return 1
+        own |= set(refs.get(by_xy[xy], ()))
+    if len(named) > 1:
+        print('the dump names %d loaded cells; their own children: %d references'
+              % (len(named), len(own)))
     persistent = set(refs.get(pcell, ())) if pcell is not None else set()
     print('cell 0x%08X at %d,%d: %d references in its own child group'
           % (target, cx, cy, len(own)))

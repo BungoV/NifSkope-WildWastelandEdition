@@ -247,8 +247,22 @@ bool runPrtpStage( NifSkope * skope, int stage )
 	const int filesSaid = note.section( QLatin1Char( ' ' ), 1, 1 ).toInt();
 	add( "PRTP: the note's file count is the folder's", filesSaid > 0 && filesSaid == tbks.size(),
 		QStringLiteral( "%1 vs %2" ).arg( filesSaid ).arg( tbks.size() ) );
-	add( "PRTP: Bake keeps the kind rows", panel->probeKindRows().join( QLatin1Char( '|' ) ) == keptRows,
-		panel->probeKindRows().join( QLatin1Char( '|' ) ) );
+	{	// lane BAKEBLOCK1: an exterior Bake loads the 5x5 around the asked cell, so the probes it places see the
+		// neighbours' walls and cover -- the asked block's probes, kinds judged with more of the world around them.
+		// The rows must stay whole (8 kinds + All, adding up) and All may move only by edge probes (<= 5%).
+		const QStringList baked = panel->probeKindRows();
+		auto countOf = []( const QString & row ) { return row.section( QLatin1Char( ' ' ), -1 ).toInt(); };
+		const QStringList kept = keptRows.split( QLatin1Char( '|' ) );
+		int sum = 0;
+		for ( int i = 0; i + 1 < baked.size(); i++ )
+			sum += countOf( baked[i] );
+		const int allBaked = baked.isEmpty() ? 0 : countOf( baked.last() );
+		const int allKept = kept.isEmpty() ? 0 : countOf( kept.last() );
+		add( "PRTP: Bake keeps the kind rows (whole, adding up, All within 5% of Place's)",
+			baked.size() == kept.size() && allBaked > 0 && sum == allBaked
+				&& qAbs( allBaked - allKept ) * 20 <= allKept,
+			baked.join( QLatin1Char( '|' ) ) + QStringLiteral( " vs Place All %1" ).arg( allKept ) );
+	}
 	{	// lane PROBEVIEW1: the bake relit, the Pass drop-down is live
 		QComboBox * pass = dCell->findChild<QComboBox *>( QStringLiteral( "CellWorkspaceCellPass" ) );
 		add( "PRTP: Pass is on after Bake", pass && pass->isEnabled() );
