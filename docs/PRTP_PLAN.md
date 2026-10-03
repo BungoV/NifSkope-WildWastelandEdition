@@ -1608,6 +1608,108 @@ Gate: tests/spells/cell_sky.sh skyint arm (stages V N I W U S T B + prtp_referen
 WW_CELL_SKYINT_RED=noflag and =all. Bake time unchanged (rays 2228 -> 2162 ms); the relight takes
 +19% (451 -> 535 ms) because the extra light needs 7 bounce passes to settle instead of 4.
 
+### 2al. Surfel albedo and normal: three ways, side by side (lane CAPTURE1, 2026-10-03)
+
+What a surfel stores as its albedo and normal decides what color the bounce light takes. Until now one way
+existed: the average of the per-triangle albedo bytes over the bake rays that hit the cell, and the face normal
+(tri). This lane adds two more behind WW_CELL_BAKE_ALBEDO, the .tbk format unchanged, and lays all three out for
+bungo to choose from. Nothing was picked; tri stays the default.
+
+- tri (default): unchanged but for the refraction repair below. With that repair held back
+  (WW_CELL_BAKE_REFRACT_RED=keep) it is byte for byte the pre-lane bake (`cell_albedo_check.py same`); with it,
+  `refract` bounds every difference to the lost triangles' reach.
+- hit: each bake ray's own hit samples the texture at its barycentric UV, at the mip its footprint asks for,
+  times the vertex color; the normal is the vertex normal there. Free in time (inside the ray pass).
+- cube (WW_CELL_BAKE_CUBE_FACE 64/128/256): each probe traces a G-buffer cube of the soup (the bake has no GL
+  context) and every surfel takes the mean of the pixels that land in it.
+- Facing: a way's smooth normal may face away from a probe that links the surfel (the links were decided on
+  the face normal). Such normals are bisected toward the face normal until they face every linker; the census
+  counts them ("normals leaned to face their links"). probe_bake.py check: 0 facing away on every way.
+- Repair in all ways (no key): refraction-only shapes (lighting shader, Shader Flags 1 bit 15, no effect
+  shader) leave the probe soup and the cube capture. Their diffuse slot holds a normal map; in game they only
+  bend what is behind them. Vault111Cryo: 21 shapes, 3614 triangles (Effects\WaterSplashDrips.nif x15, the gear
+  door's glass, two sinks, the fountain x2). Concord: 1 shape, 16 triangles (a barrel fire grating).
+
+Numbers, judge = cube256 (it favors the cube way; read with that in mind). Albedo error sRGB8 med/p90, normal
+error degrees med/p90, all surfels | big flat walls:
+
+| Cell | Way | Albedo all | Albedo walls | Normal all | Normal walls | Bake wall s / cpu s / peak MB |
+|---|---|---|---|---|---|---|
+| Vault | tri | 4.5/16.4 | 4.4/22.0 | 2.7/15.0 | 0.3/7.2 | 14.0 / 27.8 / 2533 |
+| Vault | hit | 4.3/24.3 | 1.6/8.2 | 2.2/14.0 | 0.0/6.6 | 14.2 / 29.1 / 2560 |
+| Vault | cube64 | 1.7/9.7 | 0.9/3.9 | 0.6/5.1 | 0.0/2.9 | 15.9 / 59.3 / 2548 |
+| Vault | cube128 | 1.0/4.2 | 0.6/2.0 | 0.3/2.8 | 0.0/1.3 | 22.8 / 142.8 / 2518 |
+| Vault | cube256 | judge | judge | judge | judge | 49.6 / 457 / 2581 |
+| Concord | tri | 6.7/20.5 | 9.6/23.5 | 0.9/10.0 | 0.3/2.5 | 7.9 / 21.8 / 2272 |
+| Concord | hit | 3.9/12.5 | 4.9/12.6 | 0.5/8.2 | 0.0/1.7 | 8.9 / 23.5 / 2285 |
+| Concord | cube64 | 1.9/6.5 | 2.4/7.0 | 0.1/2.0 | 0.0/0.4 | 13.1 / 55.9 / 2267 |
+| Concord | cube128 | 1.3/3.4 | 1.4/3.6 | 0.0/1.0 | 0.0/0.2 | 20.3 / 143 / 2279 |
+
+No way bakes faster than tri; peak memory is the cell load (~2.3-2.6 GB) whatever the way. The lit picture moves
+little: combined views differ from tri by 0.1-0.7 levels mean, p99 at most 2.
+
+Gates (tests/spells/cell_albedo_check.py): same (B), way (S same set, D it did something, C the cube sees the
+soup), judge, refract (R soup lost triangles and gained none, P probes moved only beside them, X every other
+difference is in a lost triangle's reach, a same-hits triangle tie in the rebuilt tree, or under half a per
+mille). Reds: the centroid and nofilter cube reds fail C; WW_CELL_BAKE_REFRACT_RED=keep fails R; a hit bake
+against main fails X.
+
+### 2an. Effect shapes in the rest of the views; editor-only shapes (lane FXREST1, 2026-10-03)
+The "purple at the Vault door" (Vault111Cryo, camera -2990,-417,111 view 4 dist 450) is not an effect
+shape. The GI pass view skips effects entirely (pass view with every effect hidden: identical, max 1
+level). The position probes put 109 of the 110 purple pixels on the wall piece V111RWallCrL01 near the
+floor, floor guides, a chair and suit boxes -- 1 inside a V111RadScanner01 box. It is the pass view's
+designed "no probe reaches here" magenta: 40% of those pixels have no valid GI voxel around them (0.1%
+elsewhere), median trilinear valid weight 0.33-0.77 against ~1.0. A probe coverage hole at wall/floor
+edges, left to the probe-placement lane (ROOMCLAMP1). CAPTURE1's surfel-pass sheets are magenta by
+design (surfel tiles over a magenta frame).
+
+Effect shapes do not reach the bake: the soup already leaves out effect, glass, decal and leaves shapes.
+
+Census (cell dump models read from the loose data): Vault111Cryo 138 effect shapes (754 placed), base
+alpha 0: 43 (79 placed), greyscale palette: 30 (272 placed), both 5 (incl. the scanner's GlowPanel);
+ConcordMuseum01 64 (278) / 2 (10) / 20 (135) / 1; Concord ext -15,17 33 (39) / 0 / 16 (16) / 0. No
+view changed for any of them in this lane.
+
+The green wire box in the wasteland eye views was ShrubGroupLarge04's 'VisibilityEditorMarker' (an
+effect mesh). The game removes every node or shape whose name contains "EditorMarker" (any case); the
+model loader dropped only names starting with it. The loader now follows the game, for the cell view and
+the LOD near library alike; the notes count "editor markers left out" (wasteland ext -18,17: 1 by the
+prefix, 5 with the word inside, in 5 shrub/hedgerow models; Vault 34/0, Museum 258/0, Concord 14/0).
+Gate tests/spells/cell_edmark.sh: A census = independent reader's models (5/5), B the effects change 0
+px over those models' ground (bar <= 40). Red `--red prefix` (WW_CELL_EDMARK_RED=prefix): A 0 vs 5,
+B 4478 px -- FAIL.
+
+### 2ao. The whole sky in the Lookdev preview (lane SKYFULL1, 2026-10-03)
+
+bungo: "I don't want it to keep showing the low res cubemap instead."
+
+- The Sky, Sun, Clouds and Moon rows ship ON (`LdState`, src/gl/lookdevstage.cpp). The studio cube is now only
+  the reflection/IBL source and the fallback when the dome refuses; the fallback is named in the sky line
+  (`cube:fallback(the dome refused)` after `sky:refused(<why>)`), and `cube(sky row off)` when the row is off.
+- Stars: the game's stars shape (meshes\sky\stars.nif, its sky shader's Source Texture and UV scale/offset),
+  tinted by the weather's Stars colour row (NAM0 row 6), alpha = the sky clock's stars alpha, hidden at alpha 0
+  or a black row. They turn about the GMST axis (fStarsRotate{X,Y,Z}Axis, exe default +Z) by
+  2 pi fmod(whole days + hour/24, fStarsRotateDays) / fStarsRotateDays (Fallout4.esm sets 1.0027 days, a
+  sidereal day). Drawn on the dome, under the moon (its shadow disc hides them), with the cloud-layer program.
+  The turn's sign is inferred, not measured.
+- Interiors: with the Sky row on, an interior whose CELL DATA lacks bit 7 (Show Sky) draws no sky at all (black
+  clear, `sky:none(interior without Show Sky)`); a Show Sky interior draws the dome through its openings.
+  `WwCellLighting::showSky` carries the flag from the cell view.
+- Telemetry: the sky line (`drew=` in the Lookdev status/census echo) names each pass drawn, hidden or refused;
+  stderr prints `lookdev sky: <line>` whenever it changes (the cloud clock left out of the comparison).
+- Camera: `WW_RENDER_PITCH=<deg>` tilts a pinned side view up (positive = up), for sky shots.
+- Gates: cell_gi / cell_sky / cell_pass and the pbr_csm1 / pbr_fog1 / pbr_r2b gates pin all four rows OFF where
+  they measure (byte-stable probe numbers); cell_gi and cell_sky add an unmeasured `sheet_lit.png` per exterior
+  view under the whole sky (checked to be the dome). pbr_wx1's `off` stage now pins the rows for its byte
+  compare and judges the unpinned run as the full sky (`off_*_default`). The live weather leg checks the rows
+  start ON, then switches them all OFF before stepping each ON.
+- New gate tests/spells/cell_skyfull.sh + cell_skyfull_check.py (stages S B O T N I), reds off / nodome /
+  nostars / interiorsky.
+- Consistent with the ratified physical-atmosphere direction where NifSkope can: the preview reads the same
+  vanilla weather records (colour rows, Sky Scale, clock) the physical model will later replace; nothing here
+  adds a hand dial.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

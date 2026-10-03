@@ -538,9 +538,10 @@ void weatherLeg( NifSkope * skope, WwScState & st )
 	check( st, QStringLiteral( "(floor) the Sky, Clouds, Sun, Moon and Game Day rows exist" ), all );
 	if ( !all )
 		return;
-	check( st, QStringLiteral( "(ship) every preview row starts OFF in a fresh scope" ),
-		!sky->isChecked() && !clouds->isChecked() && !sun->isChecked() && !moon->isChecked()
-		&& !wwLookdevSky() && !wwLookdevClouds() && !wwLookdevSun() && !wwLookdevMoon() );
+	// lane SKYFULL1: the preview rows ship ON (bungo 10-03: the real sky, never the low-res cube)
+	check( st, QStringLiteral( "(ship) every preview row starts ON in a fresh scope" ),
+		sky->isChecked() && clouds->isChecked() && sun->isChecked() && moon->isChecked()
+		&& wwLookdevSky() && wwLookdevClouds() && wwLookdevSun() && wwLookdevMoon() );
 	if ( !w->isVisible() ) {
 		w->show();
 		pump();
@@ -555,6 +556,8 @@ void weatherLeg( NifSkope * skope, WwScState & st )
 		sky->isEnabled() && clouds->isEnabled() && sun->isEnabled() && moon->isEnabled() && day->isEnabled() );
 
 	hour->setValue( 12.0 );
+	for ( QCheckBox * b : { sky, sun, clouds, moon } )	// lane SKYFULL1: from all OFF, each row ON in turn
+		b->setChecked( false );
 	pump();
 	struct Step { QCheckBox * box; const char * name; bool ( *get )(); const char * echo; const char * key; };
 	const Step steps[] = {

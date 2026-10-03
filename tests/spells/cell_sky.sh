@@ -118,7 +118,8 @@ fi
 
 # the weather the view is lit by, pinned: Lookdev, the plain sun arc, no sky dome / fog / ground / tonemap
 LD=( WW_LOOKDEV=1 WW_LOOKDEV_WEATHER="$WEATHER" WW_LOOKDEV_HOUR="$HOUR" WW_LOOKDEV_SUN=0 WW_LOOKDEV_GROUND=0
-	WW_LOOKDEV_SKY=0 WW_LOOKDEV_FOG=0 WW_LOOKDEV_SHADOWS=0 WW_LOOKDEV_PLUGINS="$ESM" )
+	WW_LOOKDEV_SKY=0 WW_LOOKDEV_CLOUDS=0 WW_LOOKDEV_MOON=0 WW_LOOKDEV_FOG=0 WW_LOOKDEV_SHADOWS=0 WW_LOOKDEV_PLUGINS="$ESM" )
+# lane SKYFULL1: the preview rows ship ON; all four stay pinned OFF here so the probe numbers stay byte-stable
 
 shoot() {   # shoot <exe> <WW_CELL_OPEN tail> <probes.tsv> <shot.png> <cx,cy,cz/view/dist or ''> <env...>
 	local exe="$1" open="$2" tsv="$3" shot="$4" cam="$5"; shift 5
@@ -166,6 +167,11 @@ for spec in $CELLS; do
 				done
 				[ "$(shoot "$EXE" "$open" "$run/probes.tsv" "$d/r_lit.png" "$cam" "${LD[@]}" "${from[@]}")" = 1 ] || ok=0
 				[ "$(shoot "$EXE" "$open" "$run/probes.tsv" "$d/r_keepamb.png" "$cam" "${LD[@]}" "${from[@]}" WW_CELL_SKY_RED=keepamb)" = 1 ] || ok=0
+				# lane SKYFULL1: the sheet he sees = the same view under the whole sky (dome, sun, clouds, moon, stars);
+				# not measured here (the probe numbers above keep the rows OFF), only checked to be the dome
+				if [ -z "$RED" ]; then
+					[ "$(shoot "$EXE" "$open" "$run/probes.tsv" "$d/sheet_lit.png" "$cam" "${LD[@]}" "${from[@]}" WW_LOOKDEV_SKY=1 WW_LOOKDEV_SUN=1 WW_LOOKDEV_CLOUDS=1 WW_LOOKDEV_MOON=1 WW_LODGEN_RESOURCES="$DATA")" = 1 ] 						&& grep -q "lookdev sky: sky:dome(" "$d/sheet_lit.notes" || { say "  $name: the sheet did not draw the dome"; ok=0; }
+				fi
 				if [ "$name" = covered ]; then
 					pbr=( WW_PBRM_MODE=pbr WW_PBRM_AUTOREPLACE=1 )
 					[ "$(shoot "$EXE" "$open" "$run/probes.tsv" "$d/rp_lit.png" "$cam" "${LD[@]}" "${from[@]}" "${pbr[@]}")" = 1 ] || ok=0

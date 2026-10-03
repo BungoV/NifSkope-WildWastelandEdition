@@ -65,6 +65,11 @@ QStringList lodgenResourceSearchPaths();
  *  the file on disk for a loose hit. False when nothing has it. */
 bool lodgenProbeAsset( const QString & dataRoot, const QString & relPath,
 	QString * entry, QString * kind, QString * path, QByteArray * bytes );
+/*! lane FXREST1: shapes the model loader left out as editor markers this process: add 1 / 2 counts one
+ *  (named EditorMarker* / the word inside the name, e.g. VisibilityEditorMarker); -1 / -2 read the totals. */
+int lodgenEditorMarkerCount( int add, const QString & model = QString() );
+//! lane FXREST1: the models (data-relative, lower case, backslashes) that lost a shape to the inside-name rule
+QStringList lodgenEditorMarkerInsideModels();
 /*! Up to `limit` of the paths the stack's index holds, sorted. For a harness
  *  that has to name a file inside an archive without guessing one. */
 QStringList lodgenListResourceFiles( int limit );

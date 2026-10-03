@@ -817,6 +817,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 {
 	WwCellLighting L;
 	L.interior = spec.interior;
+	L.showSky = spec.interior && ( cellInteriorFlags( world.interior() ) & 0x0080u );	// lane SKYFULL1
 	for ( int k = 0; k < 3; k++ )
 		L.center[k] = center[k];
 	const bool axisRed = ( wwCellLightsRed() & 2 ) != 0;
@@ -3297,6 +3298,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		if ( !unreadableMatNames.isEmpty() )
 			s << " (" << unreadableMatNames.join( QLatin1String( ", " ) ) << ")";
 		s << "\n";
+		// lane FXREST1: editor-only shapes the loader left out (per distinct model loaded)
+		s << "  editor markers left out: " << lodgenEditorMarkerCount( -1 ) << " shapes named EditorMarker*, "
+		  << lodgenEditorMarkerCount( -2 ) << " with the word inside the name, in "
+		  << lodgenEditorMarkerInsideModels().size() << " models ("
+		  << lodgenEditorMarkerInsideModels().join( QLatin1String( "; " ) ) << ")\n";
 		// lane GLOW1
 		s << "  billboards: " << billboardShapes << " shapes turned to the camera, "
 		  << billboardFlat << " welded flat" << ( glowRed ? " (WW_CELL_GLOW_RED)" : "" ) << "\n";

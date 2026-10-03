@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "lookdevstage.h"
 
 #include "esmweather.h"
+#include "gl/celllights.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -24,6 +25,7 @@ BSD License - see nifskope.h
 #include <QFile>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QSettings>
 
 #include <algorithm>
@@ -75,7 +77,9 @@ struct LdState
 	QString climateEdid;
 
 	// the weather preview (lane PBRWX1)
-	bool sky = false, sun = false, clouds = false, moon = false;
+	// lane SKYFULL1: all four ON by default (bungo 10-03: the real sky, never the low-res cube); the cube
+	// stays the reflection source and the fallback when the dome refuses (named in the echo)
+	bool sky = true, sun = true, clouds = true, moon = true;
 	double gameDay = 0.0;
 	bool pinSky = false, pinSun = false, pinClouds = false, pinMoon = false, pinDay = false;
 	double pinCloudTime = -1.0;
@@ -758,6 +762,7 @@ struct SkyFrame
 	WwSkyClock c;
 	float skyScale = 1.0f;
 	float up[3] = {}, lo[3] = {}, hz[3] = {}, sun[3] = {}, glare[3] = {}, moonGlare[3] = {};	// linear
+	float stars[3] = {};	// lane SKYFULL1: NAM0 row 6, the stars' tint (linear)
 	float glareAlpha = 0.0f;
 };
 
@@ -782,6 +787,7 @@ SkyFrame skyFrame()
 	row( WwRowSun, f.sun );
 	row( WwRowSunGlare, f.glare );
 	row( WwRowMoonGlare, f.moonGlare );
+	row( WwRowStars, f.stars );
 	if ( wwLookdevRed( "skyswap" ) )
 		for ( int c = 0; c < 3; c++ )
 			std::swap( f.up[c], f.hz[c] );
@@ -803,6 +809,11 @@ struct SkyMeshes
 	SkyMesh dome;
 	QVector<SkyMesh> clouds;
 	QString domeWhy, cloudsWhy;
+	// lane SKYFULL1: meshes\sky\stars.nif and its sky shader's texture
+	const void * starsTriedWith = nullptr;
+	bool starsTried = false, starsOk = false;
+	SkyMesh stars;
+	QString starsTex, starsWhy;
 };
 
 SkyMeshes & skyMeshes()
@@ -909,14 +920,17 @@ const SkyMesh * domeMesh( Scene * scene, QString * why )
 		m.dome = SkyMesh();
 		NifModel src;
 		QString w;
-		if ( loadSkyNif( scene, QStringLiteral( "meshes/sky/atmosphere.nif" ), src, &w ) ) {
+		// lane SKYFULL1 red "nodome": the dome's file never resolves (the refusal is named, the cube falls back)
+		const QString domePath = wwLookdevRed( "nodome" ) ? QStringLiteral( "meshes/sky/atmosphere_red_nodome.nif" )
+			: QStringLiteral( "meshes/sky/atmosphere.nif" );
+		if ( loadSkyNif( scene, domePath, src, &w ) ) {
 			for ( int b = 0; b < src.getBlockCount() && !m.domeOk; b++ ) {
 				const QModelIndex i = src.getBlockIndex( b );
 				if ( src.blockInherits( i, "BSTriShape" ) )
 					m.domeOk = readSkyShape( src, i, m.dome );
 			}
 			if ( !m.domeOk )
-				w = QStringLiteral( "meshes/sky/atmosphere.nif has no readable BSTriShape" );
+				w = domePath + QStringLiteral( " has no readable BSTriShape" );
 		}
 		m.domeWhy = w;
 	}
@@ -954,6 +968,48 @@ const QVector<SkyMesh> * cloudMeshes( Scene * scene, QString * why )
 	if ( why )
 		*why = m.cloudsWhy;
 	return m.cloudsOk ? &m.clouds : nullptr;
+}
+
+//! lane SKYFULL1: Stars.nif, its first shape (uv scale/offset of its sky shader baked in) and that shader's texture
+const SkyMesh * starsMesh( Scene * scene, QString * tex, QString * why )
+{
+	SkyMeshes & m = skyMeshes();
+	if ( !m.starsOk && ( !m.starsTried || m.starsTriedWith != scene->nifModel ) ) {
+		m.starsTried = true;
+		m.starsTriedWith = scene->nifModel;
+		m.stars = SkyMesh();
+		m.starsTex.clear();
+		NifModel src;
+		QString w;
+		if ( loadSkyNif( scene, QStringLiteral( "meshes/sky/stars.nif" ), src, &w ) ) {
+			for ( int b = 0; b < src.getBlockCount() && !m.starsOk; b++ ) {
+				const QModelIndex i = src.getBlockIndex( b );
+				if ( !src.blockInherits( i, "BSTriShape" ) || !readSkyShape( src, i, m.stars ) )
+					continue;
+				m.starsOk = true;
+				const QModelIndex iSh = src.getBlockIndex( src.getLink( i, "Shader Property" ) );
+				if ( iSh.isValid() && src.blockInherits( iSh, "BSSkyShaderProperty" ) ) {
+					m.starsTex = src.get<QString>( iSh, "Source Texture" );
+					const Vector2 o = src.get<Vector2>( iSh, "UV Offset" ), sc = src.get<Vector2>( iSh, "UV Scale" );
+					if ( sc[0] != 0.0f || sc[1] != 0.0f )
+						for ( int k = 0; k + 1 < m.stars.uv.size(); k += 2 ) {
+							m.stars.uv[k] = m.stars.uv[k] * sc[0] + o[0];
+							m.stars.uv[k + 1] = m.stars.uv[k + 1] * sc[1] + o[1];
+						}
+				}
+			}
+			if ( !m.starsOk )
+				w = QStringLiteral( "meshes/sky/stars.nif has no readable BSTriShape" );
+			else if ( m.starsTex.isEmpty() )
+				m.starsTex = QStringLiteral( "textures/sky/skystars.dds" );
+		}
+		m.starsWhy = w;
+	}
+	if ( why )
+		*why = m.starsWhy;
+	if ( tex )
+		*tex = m.starsTex;
+	return m.starsOk ? &m.stars : nullptr;
 }
 
 //! a record's texture path ("Sky\X.dds", relative to Textures) as the texture cache takes it
@@ -1238,6 +1294,86 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		.arg( secs, 0, 'f', 3 );
 }
 
+/*! lane SKYFULL1: the night sky. The stars shape (sky object type 5) takes the weather's Stars colour row as
+ * its tint and the sky clock's stars alpha; it is hidden at alpha 0 or a black row (as the game does). Its
+ * turn: 2 pi fmod(whole days + hour/24, fStarsRotateDays) / fStarsRotateDays about the normalized
+ * fStarsRotate{X,Y,Z}Axis (exe defaults 4 days, +Z). Drawn with the cloud layer program (same texture x
+ * vertex colour x tint x Sky Scale, alpha blended). */
+void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
+{
+	LdState & s = st();
+	if ( !s.haveWeather ) {
+		drew << QString( "stars:refused(%1)" ).arg( s.weatherRefusal );
+		return;
+	}
+	if ( wwLookdevRed( "nostars" ) )
+		return;	// red: the night sky goes missing without a word (the stars gate must fail)
+	const float a = f.c.starsAlpha;
+	const bool black = f.stars[0] <= 0.0f && f.stars[1] <= 0.0f && f.stars[2] <= 0.0f;
+	if ( a <= 0.0f || black ) {
+		drew << QString( "stars:hidden(alpha=%1%2)" ).arg( f3( a ), black ? QStringLiteral( ",stars row black" ) : QString() );
+		return;
+	}
+	QString tex, why;
+	const SkyMesh * m = starsMesh( scene, &tex, &why );
+	if ( !m ) {
+		drew << QString( "stars:refused(%1)" ).arg( why );
+		return;
+	}
+	// the turn
+	constexpr double kTau = 6.283185307179586;
+	const float rotDays = s.gmst.starsRotDays > 1e-6f ? s.gmst.starsRotDays : 4.0f;
+	const double days = std::floor( s.gameDay ) + s.hour / 24.0;
+	const float ang = float( kTau * std::fmod( days, double( rotDays ) ) / double( rotDays ) );
+	float ax[3] = { s.gmst.starsAxis[0], s.gmst.starsAxis[1], s.gmst.starsAxis[2] };
+	const float al = std::sqrt( ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2] );
+	if ( al < 1e-6f ) {
+		ax[0] = ax[1] = 0.0f;
+		ax[2] = 1.0f;
+	} else {
+		for ( float & c : ax )
+			c /= al;
+	}
+	const float cs = std::cos( ang ), sn = std::sin( ang );
+	QVector<float> pos( m->pos.size() );
+	for ( int k = 0; k + 2 < m->pos.size(); k += 3 ) {
+		const float v[3] = { m->pos[k], m->pos[k + 1], m->pos[k + 2] };
+		const float d = ax[0] * v[0] + ax[1] * v[1] + ax[2] * v[2];
+		const float x[3] = { ax[1] * v[2] - ax[2] * v[1], ax[2] * v[0] - ax[0] * v[2], ax[0] * v[1] - ax[1] * v[0] };
+		for ( int c = 0; c < 3; c++ )
+			pos[k + c] = v[c] * cs + x[c] * sn + ax[c] * d * ( 1.0f - cs );	// Rodrigues
+	}
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "lookdev_clouds.prog" );
+	if ( !prog ) {
+		drew << QStringLiteral( "stars:refused(lookdev_clouds.prog did not link)" );
+		return;
+	}
+	const QString path = skyTexPath( tex );
+	r->fn->glActiveTexture( GL_TEXTURE0 );
+	if ( scene->bindTexture( QStringView( path ), true ) <= 0 ) {
+		r->stopProgram();
+		drew << QString( "stars:refused(%1 did not resolve)" ).arg( path );
+		return;
+	}
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
+	skyState( r, true, false );
+	prog->uni1i( "Tex", 0 );
+	prog->uni1b( "probe", false );
+	prog->uni3f( "colLin", f.stars[0], f.stars[1], f.stars[2] );
+	prog->uni1f( "alpha", a );
+	prog->uni2f( "uvOffset", 0.0f, 0.0f );
+	prog->uni1f( "skyScale", f.skyScale );
+	prog->uni1f( "sceneExposure", wwSceneExposureScale() );
+	prog->uni1i( "viewTransform", wwSceneViewTransform() );
+	const float * attrs[8] = { pos.constData(), m->col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
+		m->uv.constData() };
+	r->drawShape( m->nv, 0x20000043ULL, unsigned( m->idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, m->idx.constData() );
+	r->stopProgram();
+	drew << QString( "stars:%1(alpha=%2,turn=%3deg)" ).arg( path, f3( a ) ).arg( double( ang ) * 360.0 / kTau, 0, 'f', 1 );
+}
+
 } // namespace
 
 bool wwLookdevDrawBackground( Scene * scene )
@@ -1252,6 +1388,21 @@ bool wwLookdevDrawBackground( Scene * scene )
 	if ( anyPart && perspective ) {
 		resolve();
 		QStringList drew;
+		// lane SKYFULL1: the game draws no sky in an interior unless its cell has Show Sky (DATA bit 7); with the
+		// Sky row on, such an interior gets the black clear and no pass at all (red "interiorsky": the sky leaks in)
+		const WwCellLighting * cl = scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
+		if ( sx.sky && cl && cl->interior && !cl->showSky && !wwLookdevRed( "interiorsky" ) ) {
+			GLfloat was[4];
+			glGetFloatv( GL_COLOR_CLEAR_VALUE, was );
+			glClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
+			glClear( GL_COLOR_BUFFER_BIT );
+			glClearColor( was[0], was[1], was[2], was[3] );
+			const QString line = QStringLiteral( "sky:none(interior without Show Sky)" );
+			if ( sx.skyLast != line )
+				fprintf( stderr, "lookdev sky: %s\n", qPrintable( line ) );
+			sx.skyLast = line;
+			return true;
+		}
 		const SkyFrame f = skyFrame();
 		// the dome replaces the cube; a dome that will not resolve falls back to the cube, by name
 		bool dome = false;
@@ -1261,6 +1412,10 @@ bool wwLookdevDrawBackground( Scene * scene )
 		}
 		if ( !dome && !drawCube( scene, !sx.sun ) )
 			return false;
+		if ( !dome )	// lane SKYFULL1: the cube is only ever the named fallback
+			drew << ( sx.sky ? QStringLiteral( "cube:fallback(the dome refused)" ) : QStringLiteral( "cube(sky row off)" ) );
+		else
+			drawStars( scene, f, drew );	// lane SKYFULL1: on the dome, under the moon (its shadow disc hides them)
 		if ( !sx.sky && wwLookdevRed( "skyleak" ) )
 			drawDome( scene, f, 0.02f, drew );
 		const float moonMul = sx.moon ? 1.0f : ( wwLookdevRed( "moonleak" ) ? 0.02f : 0.0f );
@@ -1274,7 +1429,11 @@ bool wwLookdevDrawBackground( Scene * scene )
 			drawClouds( scene, f, cloudMul, drew );
 		if ( sunMul > 0.0f )
 			drawSunQuad( scene, f, true, sunMul, drew );
-		sx.skyLast = drew.isEmpty() ? QStringLiteral( "nothing" ) : drew.join( QChar( '|' ) );
+		const QString line = drew.isEmpty() ? QStringLiteral( "nothing" ) : drew.join( QChar( '|' ) );
+		static const QRegularExpression clock( QStringLiteral( " t=[0-9.]+" ) );
+		if ( QString( sx.skyLast ).remove( clock ) != QString( line ).remove( clock ) )
+			fprintf( stderr, "lookdev sky: %s\n", qPrintable( line ) );	// lane SKYFULL1: each pass drawn or refused
+		sx.skyLast = line;
 		glDisable( GL_BLEND );
 		glEnable( GL_DEPTH_TEST );
 		glDepthMask( GL_TRUE );

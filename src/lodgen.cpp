@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QMutexLocker>
+#include <QSet>
 
 #include "esmdata.h"
 #include "nativeemit.h"
@@ -2209,6 +2210,29 @@ bool lodgenIsTreeModel( const QString & model )
 	return i + 1 < c.size() && c[i] == QLatin1String( "landscape" );
 }
 
+// lane FXREST1: editor-marker shapes the model loader left out, per process (1 by the prefix, 2 inside the name)
+static QMutex edMarkMutex;
+static QSet<QString> edMarkInsideModels;
+int lodgenEditorMarkerCount( int add, const QString & model )
+{
+	static std::atomic<int> prefixN { 0 }, insideN { 0 };
+	if ( add == 1 )
+		return ++prefixN;
+	if ( add == 2 ) {
+		QMutexLocker lock( &edMarkMutex );
+		edMarkInsideModels.insert( QString( model ).replace( QChar( '/' ), QChar( '\\' ) ).toLower() );
+		return ++insideN;
+	}
+	return add == -1 ? prefixN.load() : insideN.load();
+}
+QStringList lodgenEditorMarkerInsideModels()
+{
+	QMutexLocker lock( &edMarkMutex );
+	QStringList l = edMarkInsideModels.values();
+	l.sort();
+	return l;
+}
+
 namespace
 {
 
@@ -2299,16 +2323,23 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			 * markers under one, as untextured effect-shader shapes, and they were
 			 * baked into the library with an empty material: the magenta squares on
 			 * the roofs of the urban view (bungo 2026-09-17). */
+			/* lane FXREST1: the game's test is a case-insensitive substring, not a prefix, so
+			 * `VisibilityEditorMarker` (a green effect box in the large shrub groups) goes too.
+			 * WW_CELL_EDMARK_RED=prefix keeps the old prefix rule (the gate's red). */
 			{
-				bool marker = false;
+				static const bool prefixRed = qgetenv( "WW_CELL_EDMARK_RED" ).trimmed() == "prefix";
+				bool marker = false, prefix = false;
 				int blk = b;
 				for ( int hop = 0; blk >= 0 && hop < 64 && !marker; hop++ ) {
-					marker = src.get<QString>( src.getBlockIndex( blk ), "Name" )
-						.startsWith( QStringLiteral( "EditorMarker" ), Qt::CaseInsensitive );
+					const QString nm = src.get<QString>( src.getBlockIndex( blk ), "Name" );
+					prefix = nm.startsWith( QStringLiteral( "EditorMarker" ), Qt::CaseInsensitive );
+					marker = prefix || ( !prefixRed && nm.contains( QStringLiteral( "EditorMarker" ), Qt::CaseInsensitive ) );
 					blk = src.getParent( blk );
 				}
-				if ( marker )
+				if ( marker ) {
+					lodgenEditorMarkerCount( prefix ? 1 : 2, meshPath );
 					continue;
+				}
 			}
 			const BSVertexDesc desc = src.get<BSVertexDesc>( iShape, "Vertex Desc" );
 			const quint16 flags = quint16( ( desc.Value() >> 44 ) & 0xFFFF );

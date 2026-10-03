@@ -855,6 +855,8 @@ WwSkyGmst EsmWeather::gmst()
 		{ "fSecundaAngleFadeEnd", &g.secundaFadeEnd, false }, { "fMasserAngleFadeStart", &g.masserFadeStart, false },
 		{ "fMasserAngleFadeEnd", &g.masserFadeEnd, false },
 		{ "fDirectionalFogPower", &g.dirFogPower, false },
+		{ "fStarsRotateDays", &g.starsRotDays, false }, { "fStarsRotateXAxis", &g.starsAxis[0], false },	// lane SKYFULL1
+		{ "fStarsRotateYAxis", &g.starsAxis[1], false }, { "fStarsRotateZAxis", &g.starsAxis[2], false },
 	};
 	const ESMFile::ESMRecord * r0 = esm->findRecord( 0U );
 	if ( !r0 )

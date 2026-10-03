@@ -140,7 +140,8 @@ harness() {  # harness <tag> [KEY=VALUE ...]  -- one in-app harness launch
 want() { [ -z "$ONLY" ] || [[ "$ONLY" == *",$1,"* ]]; }
 aimed() { [ -z "$RED" ] || [ "$RED" = "$1" ] || [ "$RED" = "${2:-}" ]; }
 ESPW="$(winpath "$ESP")"
-LOOK="WW_LIGHTING_MODE=lookdev WW_LOOKDEV=1 WW_VIEW_TRANSFORM=standard"
+# lane SKYFULL1: the preview rows ship ON; this gate pins all four OFF (the pictures it measures predate them)
+LOOK="WW_LIGHTING_MODE=lookdev WW_LOOKDEV=1 WW_VIEW_TRANSFORM=standard WW_LOOKDEV_SKY=0 WW_LOOKDEV_SUN=0 WW_LOOKDEV_CLOUDS=0 WW_LOOKDEV_MOON=0"
 
 # shellcheck disable=SC2086
 if want g1 && aimed stride rowswap; then

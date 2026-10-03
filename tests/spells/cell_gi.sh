@@ -73,7 +73,8 @@ CELLS="${CELLS:-Vault111Cryo DmndSolomonsHouse01 concord}"
 # -3440,-417 looking +x; picked by a soup ray test (floor under the eye, 450 clear ahead)
 : "${PAIRS_Vault111Cryo:=door=-2990,-417,111/4/450}"
 LD=( WW_LOOKDEV=1 WW_LOOKDEV_WEATHER=CommonwealthClear WW_LOOKDEV_HOUR=12 WW_LOOKDEV_SUN=0 WW_LOOKDEV_GROUND=0
-	WW_LOOKDEV_SKY=0 WW_LOOKDEV_FOG=0 WW_LOOKDEV_SHADOWS=0 WW_LOOKDEV_PLUGINS="$ESM" )
+	WW_LOOKDEV_SKY=0 WW_LOOKDEV_CLOUDS=0 WW_LOOKDEV_MOON=0 WW_LOOKDEV_FOG=0 WW_LOOKDEV_SHADOWS=0 WW_LOOKDEV_PLUGINS="$ESM" )
+# lane SKYFULL1: the preview rows ship ON; all four stay pinned OFF here so the probe numbers stay byte-stable
 is_ext() { [ "$1" = concord ]; }
 
 mkdir -p "$OUT"
@@ -109,7 +110,9 @@ shoot() {   # [XE=<exe>] [XCAM=x,y,z/view/dist] shoot <run dir> <cell> <tag> <en
 	else
 		open=( WW_CELL_OPEN="$ESM|interior|$cell" )
 	fi
-	env WW_CELL_LIT=1 "${open[@]}" "$@" "${cam[@]}" WW_CELL_DATAROOT="$DATA" \
+	# lane CAPTURE1 drops refraction-only shapes from the soup (cell_albedo_check.py refract gates that); kept
+	# here so the one-pass run stays byte for byte the pre-BOUNCE2 exe (which ignores the key)
+	env WW_CELL_LIT=1 WW_CELL_BAKE_REFRACT_RED=keep "${open[@]}" "$@" "${cam[@]}" WW_CELL_DATAROOT="$DATA" \
 		WW_CELL_PROBES="$(winpath "$run/probes.tsv")" WW_CELL_PROBES_HIDE=1 \
 		WW_RENDER_SHOT="$(winpath "$shot")" WW_RENDER_SIZE="$SIZE" WW_RENDER_CLEAN=1 \
 		WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 1500 "$exe" --port "$PORT" "$(winpath "$SPEC")" > "$notes" 2>&1
@@ -133,6 +136,10 @@ for cell in $CELLS; do
 	from=( WW_CELL_GI_FROM="$(winpath "$run/bake")" )
 	if [ -z "$RED" ] || [ "$RED" = "off" ]; then
 		[ "$(shoot "$run" "$cell" nogi WW_CELL_GI=0 "${from[@]}")" = 1 ] || ok=0
+		# lane SKYFULL1: an exterior's sheet = the lit picture under the whole sky (not measured; the dome checked)
+		if is_ext "$cell" && [ -z "$RED" ]; then
+			[ "$(shoot "$run" "$cell" sheet_lit WW_CELL_GI=$gi "${from[@]}" WW_LOOKDEV_SKY=1 WW_LOOKDEV_SUN=1 WW_LOOKDEV_CLOUDS=1 WW_LOOKDEV_MOON=1 WW_LODGEN_RESOURCES="$DATA")" = 1 ] 				&& grep -q "lookdev sky: sky:dome(" "$run/sheet_lit.notes" || { say "  the sheet did not draw the dome"; ok=0; }
+		fi
 		if ! is_ext "$cell"; then
 			for p in 2 3 4 5; do
 				[ "$(shoot "$run" "$cell" probe$p WW_CELL_GI=$gi WW_CELL_LIT_PROBE=$p "${from[@]}")" = 1 ] || ok=0
