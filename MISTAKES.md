@@ -5,6 +5,28 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-03 BOUNCE2: a gate script edited while a runner was executing it
+
+- What: cell_gi.sh was edited (Edit tool) while gates.sh was running `bash tests/spells/cell_gi.sh --red grow`
+  from the same file. Bash reads a script as it goes, so the running copy hit "unexpected EOF" at its last
+  lines: the red's checks had already passed, but the verdict line and exit code were lost and the run was redone.
+- Rule: never edit a gate script while any lock holder runs it. Edit a copy, or wait for the run to end.
+
+## 2026-10-03 BOUNCE2: a gate camera placed by box coordinates, inside a wall
+
+- What: the "door" render camera was set from the room box (eye 60 units inside its wall side). The eye was
+  20 units from a wall, so both pictures showed one flat wall. That cost one full gate run.
+- Rule: pick an eye with a soup ray test first (floor under the eye, 450 units clear ahead), as the
+  ww-cell-eye-height-shot skill says. Scratch: scratchpad/bounce2_20261003/pick_door_cam.py.
+
+## 2026-10-03 BOUNCE2: the series bound forgot the sky as a source
+
+- What: outdoors the probes carry the sky, so the second pass adds sky light reflected once by the surfaces.
+  That is new light, not a bounce of the first pass. The bound gain <= 1/(1-albedo), taken against pass 1
+  alone, failed Concord when its green was correct (1.4496 against 1.3455).
+- Rule: the geometric-series bound is taken against the whole source (direct light + every outside light
+  reflected once), never against pass 1 alone. Concord over its source: 1.0802 <= 1.3455.
+
 ## 2026-10-02 -- TREE1: the canopy lifted the roofline by the authored vertices only, not the soup's own
 
 The far map's trees go in shrunk (each leaf triangle pulled toward its middle to the share its texture keeps).

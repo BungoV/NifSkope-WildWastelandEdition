@@ -1517,6 +1517,69 @@ Numbers (merged exe, 2026-10-03):
 Open: the far map's own-soup reference error doubled with the trees in (still inside the bars); the cell view
 has no far-map consumer, so the eye-height renders are offline (scratch eyeshot.py); FO4CS reader comes last.
 
+### 2aj. The relight bounces until it settles (lane BOUNCE2, 2026-10-03)
+
+(Letter: next free after 2ai TREE1 at splice time.)
+
+What: the probe relight (2i) did one bounce. Each surfel's light B = albedo x E came from the cell's lights
+(and outdoors the sun), the probes gathered it, and that was the end. The deck's row C11 (slides 46-49) feeds
+each surfel the light its probe gathered on the previous pass. Now the relight repeats this until it settles.
+
+How (src/probegi.cpp, after the probe hash in step 3):
+- Which probe each surfel reads: from the surfel's point + 2 units along its normal, every probe within the
+  grid radius r that is visible (a BVH ray) and in the surfel's room. The weight is (1 - d^2/r^2)^2, the same
+  as the grid's. If none qualifies inside r, the closest allowed probe within 2r is used with weight 1. If
+  there is none at all, the surfel takes no feedback.
+- The surfel's room is the nearest .tbk v4 room box to p + 17.5n, within 35 units. A probe matches when either
+  of its two pext room ids is the surfel's room. A surfel in no box takes any visible probe in reach (only
+  the wall ray guards it).
+- A pass: B_k = B_1 + albedo x E_feed(k-1) / pi, where E_feed is the n^2 blend of the facing axes as in the
+  renderer. Then the probes re-gather with the same expression order as pass 1 (links, then the unlinked
+  factor, then outdoors the sky part).
+- Stop when the largest change per surfel <= 1e-3 x the brightest B, or at 64 passes. The bar is set for
+  quality. bungo's rule: never cut passes for speed; report the time instead.
+- Pin WW_CELL_GI_PASSES=n runs exactly n passes. n = 1 is the old relight byte for byte. Gate reds:
+  WW_CELL_GI_RED=rooms (feedback ignores rooms and walls) and =grow (feedback albedo 1.5).
+- Census: `gi bounce: N passes (settled), last change X of the brightest Y, gain G; F of S surfels read a probe
+  (C the closest only), R in a known room; feed rays, blocked, probes in another room refused; ms`.
+- Dump: gi_bounce.bin (last B per surfel), gi_feed.bin (each surfel's probes + weights + room), gi_passes.txt.
+  gi_surfels.bin keeps pass 1. gi_probes.bin and the grid are the last pass's.
+- No menu row, no INI key. Settled is the default.
+
+Gate (tests/spells/cell_gi.sh + cell_gi_check.py):
+- Stage F, an independent twin. It builds its own feed lists (own rays, own room boxes) on 400 sampled
+  surfels, and counts every dumped read from another room and the sampled reads through a wall. It then
+  repeats the passes with its own gather and compares the pass count, the per-pass sum of B (1%) and the last B
+  (97% agree).
+- Settled: the change per pass must fall, and gain over the source <= 1/(1-albedo). The source is the direct
+  light plus, outdoors, the sky once off the surfaces.
+- Stage P: the Pass view's GI at 1 pass and settled, same camera. No pixel darker, mean brighter.
+- The one-pass pin against the exe from before the lane: every dump .bin byte-identical. The picture is
+  within GPU noise (at most 1 level on 100 pixels; the old exe against itself differs that way too).
+- cell_pass and cell_sky pin WW_CELL_GI_PASSES=1, because they rebuild one pass and compare with a one-pass
+  exe.
+
+Numbers (lane exe, 2026-10-03):
+- Vault111Cryo: 8 passes, gain 1.6327 (bound 2.3595, albedo 0.576), rate 0.409 per pass. 20881 of 26978
+  surfels fed (3170 by the closest probe). 69816 reads from another room refused. 83 ms.
+  - The door room (box -596443128): 74% of its surfels get no direct light, and 85% of its settled light is
+    bounce.
+  - Pass GI view, door camera: mean 32.66 -> 42.57. Overview: 41.87 -> 47.66.
+- DmndSolomonsHouse01: 4 passes, gain 1.1274 (bound 1.1784), 8 ms.
+- Concord (Lookdev CommonwealthClear 12:00, the street camera): 5 passes, gain 1.4496 (1.0802 over its
+  source, bound 1.3455), 71 ms. Pass GI 73.21 -> 74.18 (the sky dominates).
+- Every F: reads from another room 0, through a wall 0. The one-pass pin is byte-identical in all three places.
+- Reds, all FAIL F:
+  - rooms: reads from another room 26956 / 966 / 46826, through a wall 991 / 1177 / 2350;
+  - grow: 64 passes, never settled, last B agree 22.7 / 20.9 / 13.8%;
+  - onepass: twin 1 pass against 8 / 4 / 5, last B agree 34.4 / 99.8 / 58.8%.
+- Time: the bounce adds 8-83 ms to a 0.1-0.2 s relight.
+
+Open:
+- Room boxes cover surfel air poorly: 8% of surfels lie inside a box and 46-53% within 35 units. A surfel in
+  no box is guarded by the wall ray alone.
+- The GPU relight, bricks, the sky picture and fog GI are out of scope. The FO4CS reader comes last.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

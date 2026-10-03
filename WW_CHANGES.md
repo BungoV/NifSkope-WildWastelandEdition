@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## The bounce light bounces more than once (2026-10-03)
+
+- The cell view's GI row used to bounce the light once: lamps (and outdoors the sun) light the surfaces, the
+  probes collect that, and the surfaces near them get it back. Now the light keeps bouncing: each surface also
+  reflects what its probes collected, the probes collect again, and this repeats until it stops changing
+  (Vault 111's cryo wing: 8 rounds; a Diamond City house: 4; Concord: 5).
+- A surface only takes light from probes it can see and that stand in its own room, so light does not leak
+  through walls into the next room.
+- Rooms lit only through a doorway gain the most. In Vault 111, one side room gets 85% of its light from the
+  extra bounces.
+- It costs about 0.1 s per relight at most (83 ms in the Vault). No new menu row and no new setting: the
+  repeated bounce is simply on. It takes the idea of the GI deck's multi-bounce slides. No code was copied
+  from CasualPRT.
+- cell_gi PASS in all three places; cell_pass and cell_sky PASS (both pinned to one bounce, which is still
+  byte for byte the old result).
+
 ## Probes drawn as spheres (2026-10-03)
 
 - The probe view draws each probe as a sphere, as the probe view in the GI deck does, instead of a box. A point on the
