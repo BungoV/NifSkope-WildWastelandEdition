@@ -645,6 +645,10 @@ void main()
 		fragColor = cellProbe == 6 ? vec4( cellHdr, color.a ) : vec4( cellProbeOut( normal, -ViewDir, alphaR, kSmith ), 1.0 );
 	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )	// lane CUBE1
 		fragColor = vec4( cellProbe == 50 ? clamp( cubeK * 0.25, 0.0, 1.0 ) : cellCubeProbe( offset, normal ), 1.0 );
+	if ( cellOn && cellProbe == 80 )	// lane GICAL1 (80; 81-89 kept for it): the albedo as drawn, texture gamma space
+		fragColor = vec4( clamp( albedo, 0.0, 1.0 ), 1.0 );
+	if ( cellOn && cellProbe == 81 )	// lane GICAL1: the same, blends and decals composited over it with their own alpha
+		fragColor = vec4( clamp( albedo, 0.0, 1.0 ), color.a );
 	if ( cellOn && cellPass > 0 && cellProbe == 0 )	// lane PROBEVIEW1: the PRTP band's Pass
 		fragColor = vec4( cellPassOut( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ), 1.0 );
 #endif

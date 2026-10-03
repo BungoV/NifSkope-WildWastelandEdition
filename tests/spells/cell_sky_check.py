@@ -717,7 +717,7 @@ def room_expect(X, G):
           'slots': G['slots']}
     res = []
     for p_, n_ in variants(X['P'], X['N']):
-        s = np.array([cell_rooms_check.gi_sample(GG, G['R'], p_[i], n_[i]) for i in range(len(p_))])
+        s = np.array([cell_rooms_check.gi_sample(GG, G['R'], p_[i], n_[i], fill=False) for i in range(len(p_))])   # a sky grid: no gap fill
         res.append((np.clip(np.maximum(s[:, 0:3], 0) / math.pi, 0, 1), np.clip(s[:, 3], 0, 1)))
     e5, e90 = res[0]
     X = dict(X)

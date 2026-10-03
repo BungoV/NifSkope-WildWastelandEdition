@@ -10,6 +10,8 @@ uniform samplerBuffer cellLights;	// 8 texels a light: pos+radius, color+cosOute
 uniform int cellLightCount;
 uniform vec4 cellRow[3];			// world = (dot(row.xyz, posView) + row.w), the view's inverse
 uniform bool cellHasDalc;
+uniform int cellGiAmb;				// lane GICAL1: WW_CELL_GI_AMB, the interior ambient beside the GI: 0 keep, 1 replace, 2 off, 3 max, 4 asgi (red)
+uniform bool cellGiFill;			// lane GICAL1: a GI gap takes the weighted mean round it (WW_CELL_GI_FILL=0: off, black as before)
 uniform vec4 cellDalc[3];			// per channel: (p - n) / 2 per axis, mean of the six (byte / 255)
 uniform bool cellHasDir;
 uniform vec3 cellDirColor;			// linear
@@ -211,12 +213,15 @@ vec4 cellGiRoomBlend( vec3 P, vec3 N, ivec2 L, out float ws )
 // corner's nearest air is the outdoors across the wall, which no voxel there holds). The same search when the
 // read room's blend has no weight (a pocket behind a pipe: no voxel holds it). .a < 0: no room with weight (the
 // plain trilinear; black was the old answer)
-vec4 cellGiRoomSample( vec3 P, vec3 N )
+// Ls (lane GICAL1): the surface's room whether or not its blend has weight (the read, else the nearest air cell beside
+// it; -1: none), for the gap fill
+vec4 cellGiRoomSample( vec3 P, vec3 N, out ivec2 Ls )
 {
 	float ws;
 	ivec2 L = cellRoomAt( P + N * ( 0.75 * cellRoomsCell ) );
 	if ( L.x < 0 )
 		L = cellRoomAt( P + N * ( 1.75 * cellRoomsCell ) );
+	Ls = L;
 	if ( L.x >= 0 ) {
 		vec4 s = cellGiRoomBlend( P, N, L, ws );
 		if ( ws > 0.0 )
@@ -225,7 +230,8 @@ vec4 cellGiRoomSample( vec3 P, vec3 N )
 	vec3 aN = abs( N );
 	int m = ( aN.x >= aN.y && aN.x >= aN.z ) ? 0 : ( aN.y >= aN.z ? 1 : 2 );
 	int ta = m == 0 ? 1 : 0, tb = m == 2 ? 1 : 2;
-	float best = 3.0;
+	float best = 3.0, bestAny = 3.0;
+	bool direct = L.x >= 0;
 	bool found = false;
 	vec4 r = vec4( 0.0 );
 	for ( int k = 0; k < 2; k++ ) {
@@ -243,6 +249,10 @@ vec4 cellGiRoomSample( vec3 P, vec3 N )
 				if ( c.x < 0 )
 					continue;
 				float d = ( sa > 0 ? 1.0 - f[ta] : sa < 0 ? f[ta] : 0.0 ) + ( sb > 0 ? 1.0 - f[tb] : sb < 0 ? f[tb] : 0.0 );
+				if ( !direct && d < bestAny ) {
+					bestAny = d;
+					Ls = c;	// lane GICAL1: the nearest air cell, with weight or not
+				}
 				if ( d >= best )
 					continue;
 				vec4 s = cellGiRoomBlend( P, N, c, ws );
@@ -257,12 +267,60 @@ vec4 cellGiRoomSample( vec3 P, vec3 N )
 	return found ? r : vec4( -1.0 );
 }
 
+/* lane GICAL1 (item 5): the gap fill. A surface whose blend has no valid weight (no probe reached the 8 voxels: today
+ * black, or with rooms the plain trilinear, which ignores walls) takes the weighted mean of the valid voxels within
+ * 2 voxels (the 4x4x4 block round the sample), of the surface's own room (L) when the grid has rooms; weight
+ * (1 - d / 2.5)^2 in voxels. Returns rgba / the weight (cellGiE divides by .a); .a = 0: nothing in reach. */
+vec4 cellGiFillAt( vec3 P, vec3 N, ivec2 L )
+{
+	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel - 0.5;
+	ivec3 i0 = ivec3( floor( g ) );
+	ivec3 dm = ivec3( cellGiDims );
+	ivec3 sl = ivec3( N.x >= 0.0 ? 0 : 1, N.y >= 0.0 ? 2 : 3, N.z >= 0.0 ? 4 : 5 ) * dm.z;
+	vec3 n2 = N * N;
+	vec4 s = vec4( 0.0 );
+	float ws = 0.0;
+	for ( int k = 0; k < 64; k++ ) {
+		ivec3 c = i0 + ivec3( k & 3, ( k >> 2 ) & 3, ( k >> 4 ) & 3 ) - 1;
+		if ( any( lessThan( c, ivec3( 0 ) ) ) || any( greaterThanEqual( c, dm ) ) )
+			continue;
+		float w = 1.0 - length( vec3( c ) - g ) / 2.5;
+		if ( w <= 0.0 )
+			continue;
+		int base = 0;
+		if ( cellGiRooms ) {
+			if ( L.x < 0 )
+				return vec4( 0.0 );	// rooms but no room here: nothing safe to borrow
+			ivec2 S = cellRoomUnpack( texelFetch( cellGiSlots, c, 0 ).r );
+			base = ( S.x >= 0 && ( S.x == L.x || S.x == L.y ) ) ? 0 : ( S.y >= 0 && ( S.y == L.x || S.y == L.y ) ) ? 6 * dm.z : -1;
+			if ( base < 0 )
+				continue;
+		}
+		vec4 v = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.x ), 0 )
+		       + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.y ), 0 )
+		       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.z ), 0 );
+		if ( v.a <= 0.0 )
+			continue;
+		w *= w;
+		s += w * v;
+		ws += w;
+	}
+	return ws > 0.0 ? s / ws : vec4( 0.0 );
+}
+
 vec4 cellGiSample( vec3 P, vec3 N )
 {
+	bool fill = cellGiFill && cellInterior && !cellGiSky;	// interiors only: an exterior's gap keeps the weather's ambient (cellGiSkyK), also under the keepamb red
+	ivec2 Ls = ivec2( -1 );
 	if ( cellGiRooms && ( cellPassRed & 8 ) == 0 ) {	// lane ROOMCLAMP1 (red noclamp: WW_CELL_PV_RED)
-		vec4 r = cellGiRoomSample( P, N );
-		if ( r.a >= 0.0 )
+		vec4 r = cellGiRoomSample( P, N, Ls );
+		if ( r.a > 0.01 || ( r.a >= 0.0 && !fill ) )
 			return r;
+		if ( fill ) {	// lane GICAL1: a gap, or no room with weight (the plain trilinear ignores walls)
+			vec4 f = cellGiFillAt( P, N, Ls );
+			if ( f.a > 0.01 || r.a >= 0.0 )
+				return f.a > 0.01 ? f : r;
+		}
 	}
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;
 	vec2 xy = g.xy / cellGiDims.xy;
@@ -272,6 +330,11 @@ vec4 cellGiSample( vec3 P, vec3 N )
 	vec4 s = n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
 	       + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )
 	       + n2.z * texture( cellGi, vec3( xy, ( z + ( N.z >= 0.0 ? 4.0 : 5.0 ) * cellGiDims.z ) / depth ) );
+	if ( fill && !cellGiRooms && s.a <= 0.01 ) {	// lane GICAL1: a gap in a grid without rooms
+		vec4 f = cellGiFillAt( P, N, Ls );
+		if ( f.a > 0.01 )
+			return f;
+	}
 	return s;
 }
 
@@ -522,6 +585,23 @@ vec3 cellAmbient( vec3 N, vec3 P )
 	return pow( max( cellAmbientSum( N, P ), vec3( 0.0 ) ), vec3( 2.2 ) );
 }
 
+/* lane GICAL1 (item 2, docs/cloud/GICAL1_DESIGN.md 6.3): the interior ambient beside our GI, as WW_CELL_GI_AMB asks.
+ * gi = the GI's irradiance / pi, the ambient's own units. keep (0, the default: both, as before), replace (1: the
+ * ambient x (1 - the grid's valid share), as SKY1 does outdoors), off (2), max (3: the larger of the two), asgi
+ * (4, the measure's red: the ambient := the GI). Without the GI every rule but off keeps the ambient. */
+vec3 cellAmbGi( vec3 amb, vec3 gi, vec3 P, vec3 N )
+{
+	if ( cellGiAmb == 2 )
+		return vec3( 0.0 );	// off: also with the GI off (the energy check's "neither" arm)
+	if ( cellGiAmb == 0 || !cellGiOn )
+		return amb;
+	if ( cellGiAmb == 1 )
+		return amb * ( 1.0 - clamp( cellGiSample( P, N ).a, 0.0, 1.0 ) );
+	if ( cellGiAmb == 3 )
+		return max( amb - gi, vec3( 0.0 ) );
+	return gi;
+}
+
 #ifndef WW_CELL_FX
 /* lane CUBE1: per draw (src/gl/renderer.cpp): the material's specular scale (0 with its specular switch off),
  * its smoothness, 3 when its OWN env map is bound and the sampler decodes its sRGB (1: own, but untagged, decoded
@@ -591,6 +671,8 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	vec3 Ed = diffOn + gi;	// what the albedo takes: the direct terms through Oren-Nayar (lane ON1)
 	if ( cellHasDalc ) {
 		vec3 amb = cellAmbient( N, P );
+		if ( cellGiAmb != 0 )
+			amb = cellAmbGi( amb, gi, P, N );	// lane GICAL1
 		E += amb;
 		Ed += amb;
 	}

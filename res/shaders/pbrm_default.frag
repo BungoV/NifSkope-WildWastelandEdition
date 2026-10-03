@@ -593,10 +593,17 @@ void main()
 			outDiff = cDiff + giDiff;
 			outSpec = cSpec;
 			cE += giE;
-			if ( cellHasDalc ) {
+			if ( cellHasDalc && cellGiAmb == 0 ) {
 				outDiff += cellAmbient( sw.N, Pw ) * rho * keepInd * s.ao;	// lane AMBO2: P picks the Ambient Only volume
 				outSpec += cellAmbient( reflect( -Vw, sw.N ), Pw ) * Espec * s.ao;
 				cE += cellAmbient( sw.N, Pw );
+			} else if ( cellHasDalc ) {	// lane GICAL1: WW_CELL_GI_AMB (cellAmbGi); the reflection's ambient by the same luminance share
+				vec3 a0 = cellAmbient( sw.N, Pw );
+				vec3 a1 = cellAmbGi( a0, giE, Pw, sw.N );
+				float k = dot( a1, vec3( 0.2126, 0.7152, 0.0722 ) ) / max( dot( a0, vec3( 0.2126, 0.7152, 0.0722 ) ), 1.0e-6 );
+				outDiff += a1 * rho * keepInd * s.ao;
+				outSpec += cellAmbient( reflect( -Vw, sw.N ), Pw ) * k * Espec * s.ao;
+				cE += a1;
 			}
 			if ( cellHasDir ) {
 				vec3 dD, dS;
