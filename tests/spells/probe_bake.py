@@ -60,6 +60,7 @@ LINK = np.dtype([('delta', '<i2', 3), ('dir', '<i2', 2), ('w', '<u2')])
 LINKEXT = np.dtype([('side', 'u1'), ('tint', 'u1', 3), ('door', '<u4')])
 PROBEEXT = np.dtype([('skytint', 'u1', (8, 3)), ('room', '<u4', 2)])
 ROOMBOX = np.dtype([('room', '<u4'), ('lo', '<f4', 3), ('hi', '<f4', 3), ('res', '<u4')])
+EMIT = np.dtype([('surfel', '<u4'), ('le', '<f4', 3)])   # lane EMISSIVEGI1: top bit of surfel = the back list
 assert SURFEL.itemsize == 32 and PROBE.itemsize == 144 and LINK.itemsize == 12
 assert LINKEXT.itemsize == 8 and PROBEEXT.itemsize == 32 and ROOMBOX.itemsize == 32
 
@@ -84,10 +85,10 @@ def read_tbk(path):
     if (magic & 0xffffffff) != TBK_MAGIC or ver not in (3, 4) or kind != 1:
         raise ValueError('magic/version/kind %x %d %d' % (magic & 0xffffffff, ver, kind))
     need = 64 + 32 * ns + 144 * np_ + 12 * nl
-    nb = nbox = 0
+    nb = nbox = nem = 0
     if ver == 4:
-        nb, nbox = res[0], res[1]
-        need += 32 * nb + 8 * nl + 32 * np_ + 32 * nbox
+        nb, nbox, nem = res[0], res[1], res[3]   # lane EMISSIVEGI1: res[3] = the emissive tail's count
+        need += 32 * nb + 8 * nl + 32 * np_ + 32 * nbox + 16 * nem
     if len(b) != need:
         raise ValueError('size %d, the counts say %d' % (len(b), need))
     o = 64
@@ -98,7 +99,8 @@ def read_tbk(path):
         back = np.frombuffer(b, SURFEL, nb, o); o += 32 * nb
         lx = np.frombuffer(b, LINKEXT, nl, o); o += 8 * nl
         px = np.frombuffer(b, PROBEEXT, np_, o); o += 32 * np_
-        bx = np.frombuffer(b, ROOMBOX, nbox, o)
+        bx = np.frombuffer(b, ROOMBOX, nbox, o); o += 32 * nbox
+        em = np.frombuffer(b, EMIT, nem, o)
     else:   # what a v3 file means in v4's terms: front sides, clear, no doors, no rooms
         back = np.zeros(0, SURFEL)
         lx = np.zeros(nl, LINKEXT)
@@ -107,7 +109,8 @@ def read_tbk(path):
         px['skytint'] = 255
         px['room'][:, 1] = ROOM_NONE
         bx = np.zeros(0, ROOMBOX)
-    return dict(ver=ver, content=res[2] if ver == 4 else 0, cx=cx, cy=cy, cell=cs, flags=flags, surfels=s,
+        em = np.zeros(0, EMIT)
+    return dict(emits=em, ver=ver, content=res[2] if ver == 4 else 0, cx=cx, cy=cy, cell=cs, flags=flags, surfels=s,
                 probes=p, links=lk, back=back, lext=lx, pext=px, boxes=bx)
 
 

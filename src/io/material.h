@@ -74,6 +74,8 @@ public:
 	float refractionPower() const { return fRefractionPower; }
 	float environmentMapScale() const { return fEnvironmentMappingMaskScale; }
 	Color3 emittanceColor() const { return cEmittanceColor; }
+	//! lane EMISSIVEGI1: bGlowmap (the glow slot is read; set with an empty slot = black, as the renderer)
+	bool glowmapEnabled() const { return bGlowmap != 0; }
 	quint32 commonShaderFlags1() const {
 		return ( tileFlags & 3U ) | ( bAlphaBlend ? 0x0004U : 0U ) | ( bAlphaTest ? 0x0008U : 0U )
 			| ( bZBufferWrite ? 0x0010U : 0U ) | ( bZBufferTest ? 0x0020U : 0U )

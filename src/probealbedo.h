@@ -43,6 +43,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QHash>
 #include <QString>
 
+#include <vector>
+
 class DDSTexture16;
 
 class ProbeAlbedo
@@ -77,12 +79,21 @@ public:
 		const float vc[3], float out[3] );
 	//! the map's mip-0 size (texels), for the footprint's mip choice
 	static void sizeOf( const DDSTexture16 * t, int * w, int * h );
+	/*! Lane ALPHATEST1: the map's alpha as bytes (0..255, row 0 = v 0) at its largest mip of at most
+	 *  1024 texels across, decoded once and dropped (the bake's alpha-test masks). False = no map read.
+	 *  `minA` takes the smallest alpha (a map whose every texel passes the test needs no mask). */
+	bool alphaBytes( const QString & tex, int * w, int * h, std::vector<unsigned char> * a, int * minA );
+	/*! Lane EMISSIVEGI1: the map's RGB as stored (0..255, not sRGB-decoded: the glow map the shader adds in
+	 *  sqrt-of-linear space), 3 bytes a texel, row 0 = v 0, at its largest mip of at most 1024 texels across.
+	 *  False = no map read. */
+	bool rgbBytes( const QString & tex, int * w, int * h, std::vector<unsigned char> * rgb );
 
 	int texturesRead = 0, texturesMissing = 0;
 	int finesRead = 0;
 
 private:
 	const DDSTexture16 * load( const QString & tex, int cap = 64 );
+	DDSTexture16 * decode( const QString & tex, int cap );
 	QString root;
 	QHash<QString, DDSTexture16 *> cache;
 	QHash<QString, DDSTexture16 *> fine;   // lane CAPTURE1

@@ -20,6 +20,10 @@
 // between 0.01 and the hit's t - 0.01, and one within 0.01 of the crossing before
 // it is that pane's twin face (counted once). The radiance columns carry it; 24 more
 // columns follow the SH: the sky share seen through the glass, per octant, r g b.
+//
+// Lane ALPHATEST1: the soup's optional AMK1 tail (alpha-test masks). A hit on a
+// masked triangle whose texel (nearest, wrapped uv, at the hit's own barycentrics)
+// is under the threshold is no hit: the ray goes on, as in the game's alpha test.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -38,6 +42,27 @@ struct Soup
 	std::vector<float> alb;                                // linear, 3 per triangle
 	std::vector<double> glass;                             // panes: 9 per pane
 	std::vector<double> glassT;                            // 3 per pane, 0..1
+	// lane ALPHATEST1: masks
+	struct Map { int w = 0, h = 0; std::vector<uint8_t> a; };
+	struct Masked { int map = -1; uint32_t thr = 0; float uv[6]; };
+	std::vector<Map> maps;
+	std::vector<int> maskOf;                               // per triangle, into `masked`; -1 = solid
+	std::vector<Masked> masked;
+	bool hole( size_t tri, float b1, float b2 ) const
+	{
+		if ( maskOf.empty() || maskOf[tri] < 0 )
+			return false;
+		const Masked & m = masked[size_t( maskOf[tri] )];
+		const Map & mp = maps[size_t( m.map )];
+		const double b0 = 1.0 - double( b1 ) - b2;
+		double u = b0 * m.uv[0] + b1 * double( m.uv[2] ) + b2 * double( m.uv[4] );
+		double v = b0 * m.uv[1] + b1 * double( m.uv[3] ) + b2 * double( m.uv[5] );
+		u -= std::floor( u );
+		v -= std::floor( v );
+		const int x = std::min( std::max( int( u * mp.w ), 0 ), mp.w - 1 );
+		const int y = std::min( std::max( int( v * mp.h ), 0 ), mp.h - 1 );
+		return mp.a[size_t( y ) * size_t( mp.w ) + size_t( x )] < m.thr;
+	}
 };
 
 bool readSoup( const char * path, Soup & s )
@@ -64,13 +89,57 @@ bool readSoup( const char * path, Soup & s )
 		if ( std::fread( a.data(), 1, a.size(), f ) != a.size() )
 			a.clear();
 	}
-	if ( std::fread( tail, 4, 2, f ) == 2 && tail[0] == 0x31534C47u ) {   // 'GLS1'
+	bool more = std::fread( tail, 4, 2, f ) == 2;
+	if ( more && tail[0] == 0x31534C47u ) {   // 'GLS1'
 		std::vector<float> g( size_t( tail[1] ) * 9 );
 		std::vector<uint8_t> gt( size_t( tail[1] ) * 3 );
 		if ( std::fread( g.data(), 4, g.size(), f ) == g.size() && std::fread( gt.data(), 1, gt.size(), f ) == gt.size() ) {
 			s.glass.assign( g.begin(), g.end() );
 			for ( uint8_t c : gt )
 				s.glassT.push_back( c / 255.0 );
+		}
+		more = std::fread( tail, 4, 2, f ) == 2;
+	}
+	if ( more && tail[0] == 0x314F5754u ) {   // 'TWO1' (lane ROOMCLAMP1): one byte a triangle, not used here
+		std::fseek( f, long( tail[1] ), SEEK_CUR );
+		more = std::fread( tail, 4, 2, f ) == 2;
+	}
+	if ( more && tail[0] == 0x314B4D41u ) {   // 'AMK1' (lane ALPHATEST1): its own reader of the masks
+		bool ok = true;
+		auto u32 = [&]() { uint32_t x = 0; ok = ok && std::fread( &x, 4, 1, f ) == 1; return x; };
+		const uint32_t nm = u32();
+		for ( uint32_t m = 0; ok && m < nm; m++ ) {
+			std::fseek( f, long( u32() ), SEEK_CUR );   // the name
+			Soup::Map mp;
+			mp.w = int( u32() );
+			mp.h = int( u32() );
+			ok = ok && mp.w > 0 && mp.h > 0 && mp.w <= 16384 && mp.h <= 16384;
+			if ( !ok )
+				break;
+			mp.a.resize( size_t( mp.w ) * size_t( mp.h ) );
+			ok = std::fread( mp.a.data(), 1, mp.a.size(), f ) == mp.a.size();
+			s.maps.push_back( std::move( mp ) );
+		}
+		const uint32_t nmod = u32();
+		for ( uint32_t m = 0; ok && m < nmod; m++ )
+			std::fseek( f, long( u32() ), SEEK_CUR );
+		s.maskOf.assign( n, -1 );
+		for ( uint32_t i = 0; ok && i < tail[1]; i++ ) {
+			const uint32_t tri = u32(), map = u32();
+			u32();   // model
+			Soup::Masked mk;
+			mk.thr = u32();
+			mk.map = int( map );
+			ok = ok && std::fread( mk.uv, 4, 6, f ) == 6 && tri < n && map < nm;
+			if ( !ok )
+				break;
+			s.maskOf[tri] = int( s.masked.size() );
+			s.masked.push_back( mk );
+		}
+		if ( !ok ) {
+			std::fprintf( stderr, "soup %s: AMK1 tail unreadable\n", path );
+			std::fclose( f );
+			return false;
 		}
 	}
 	std::fclose( f );
@@ -191,7 +260,7 @@ int main( int argc, char ** argv )
 	FILE * out = std::fopen( argv[7], "w" );
 	if ( !out )
 		return 1;
-	std::fprintf( out, "# prtp_reference rays %zu tris %zu sun %.4f %.4f %.4f\n", M, T, sx, sy, sz );
+	std::fprintf( out, "# prtp_reference rays %zu tris %zu sun %.4f %.4f %.4f masked %zu\n", M, T, sx, sy, sz, s.masked.size() );
 	const unsigned nth = std::max( 1u, std::thread::hardware_concurrency() );
 	for ( size_t p = 0; p < NP; p++ ) {
 		const float px = P[p * 3], py = P[p * 3 + 1], pz = P[p * 3 + 2];
@@ -230,7 +299,7 @@ int main( int argc, char ** argv )
 						if ( v < 0.0f || u + v > 1.0f )
 							continue;
 						const float t = tq * inv;
-						if ( t > 0.01f && t < tb[r - r0] ) {
+						if ( t > 0.01f && t < tb[r - r0] && !s.hole( i, u, v ) ) {
 							tb[r - r0] = t;
 							ib[r - r0] = int( i );
 						}
