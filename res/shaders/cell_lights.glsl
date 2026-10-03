@@ -3,8 +3,10 @@
 // (fo4_cell.frag); src/gl/celllights.cpp sets every uniform.
 
 uniform bool cellOn;
-uniform samplerBuffer cellLights;	// 5 texels a light: pos+radius, color+cosOuter (-2 omni), dir+cone, bias scale exponent flags
-									// (1 noSpec, 2 noRim, 4 ignoreRoughness), shadow slot (-1 none) kind near-clip xlig-bias
+uniform samplerBuffer cellLights;	// 8 texels a light: pos+radius, color+cosOuter (-2 omni, -3 hemisphere, -4 box), dir+cone,
+									// bias scale exponent flags (1 noSpec, 2 noRim, 4 ignoreRoughness), shadow slot (-1 none)
+									// kind near-clip xlig-bias, then the box's three rows (lane HEMI1)
+#define CELL_TPL 8					// texels a light (celllights.cpp kTexelsPerLight)
 uniform int cellLightCount;
 uniform vec4 cellRow[3];			// world = (dot(row.xyz, posView) + row.w), the view's inverse
 uniform bool cellHasDalc;
@@ -20,6 +22,7 @@ uniform int cellProbe;
 uniform int cellAmboCount;
 uniform vec4 cellAmbo[16];
 uniform vec4 cellAmboK[16];
+uniform vec4 cellAmboBox[48];		// lane HEMI1: where cellAmboK[i].w is 1 the volume is a box, rows i * 3 .. i * 3 + 2
 uniform int cellRed;				// 1 linear: the radial curve without its 2.2; 8 lambert, 16 normalised, 32 norim,
 									// 64 rimflags (the lights' rim / roughness flags ignored); 512 cubeold (lane CUBE1)
 // lane PRTPGI: the bake relit by these lights (src/probegi.h), six axis slabs of dims.z each, x fastest;
@@ -29,9 +32,14 @@ uniform sampler3D cellGi;
 uniform vec3 cellGiOrigin;
 uniform float cellGiVoxel;
 uniform vec3 cellGiDims;
+// lane PROBEVIEW1: the PRTP band's Pass (0 Combined, 1 GI, 2 Sky visibility, 3 Surfel color, 4 Surfel light).
+// In the Sky visibility pass the CPU binds the sky grid on cellGi (same layout, rgb = the probes' sky share).
+uniform int cellPass;
+uniform int cellPassRed;			// the gate's reds: 1 direct (the lights leak into GI), 2 nonormal (sampled facing up)
 
 // lane IMGS1: the cell's imagespace, the game's own HDR -> display chain (src/gl/celllights.h)
 uniform bool cellIsOn;
+uniform bool cellIsLinear;			// lane HDR1: write linear light, the frame is tone-mapped once (cell_hdr.frag)
 uniform float cellIsExposure;		// clamp( middle gray / (adapted + 0.001), min, max ), the CPU's
 uniform float cellIsE;				// HNAM Tonemap E: the curve's toe numerator
 uniform float cellIsAdapted;		// the frame's mean luminance, the contrast pivot
@@ -54,7 +62,8 @@ vec3 cellImageSpace( vec3 sqrtColor )
 {
 	vec3 x = max( sqrtColor, vec3( 0.0 ) );
 	x = x * x;
-#ifndef WW_CELL_FX	// lane EFX2: an effect blends over a surface that already took the bloom
+// lane EFX2: an effect blends over a surface that already took the bloom; lane HDR1: the one tone map takes it
+#if !defined( WW_CELL_FX ) || defined( WW_CELL_HDR )
 	if ( cellIsBloomOn )	// the tonemap PS adds the bloom target before its exposure multiply
 		x += texture( cellIsBloom, ( gl_FragCoord.xy - cellIsBloomRect.xy ) * cellIsBloomRect.zw ).rgb;
 #endif
@@ -99,11 +108,11 @@ float cellRadial( float d, float r, vec3 bse )
  * a hardware 2x2 compare), / 9, as the game's 9 taps. A hemisphere lights nothing behind its plane. */
 float cellShadowF( int i, vec3 P, vec3 N )
 {
-	vec4 t4 = texelFetch( cellLights, i * 5 + 4 );
+	vec4 t4 = texelFetch( cellLights, i * CELL_TPL + 4 );
 	if ( !cellShadowOn || t4.y < 0.5 )
 		return 1.0;
-	vec4 t0 = texelFetch( cellLights, i * 5 );
-	if ( t4.y > 1.5 && t4.y < 2.5 && dot( P - t0.xyz, texelFetch( cellLights, i * 5 + 2 ).xyz ) < 0.0 )
+	vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
+	if ( t4.y > 1.5 && t4.y < 2.5 && dot( P - t0.xyz, texelFetch( cellLights, i * CELL_TPL + 2 ).xyz ) < 0.0 )
 		return 0.0;	// the mask's paraboloid: behind the hemisphere's plane is unlit (in a slot or not)
 	if ( t4.x < -0.5 )
 		return 1.0;	// a shadow light beyond the slot budget: unshadowed (the game's budget is unread)
@@ -127,10 +136,10 @@ vec3 cellShadowProbe( vec3 P, vec3 N )
 {
 	vec3 o = vec3( 0.0 );
 	for ( int i = 0; i < cellLightCount; i++ ) {
-		float slot = texelFetch( cellLights, i * 5 + 4 ).x;
+		float slot = texelFetch( cellLights, i * CELL_TPL + 4 ).x;
 		if ( slot < -0.5 || slot > 2.5 )
 			continue;
-		vec4 t0 = texelFetch( cellLights, i * 5 );
+		vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 		vec3 Lv = t0.xyz - P;
 		float d = length( Lv );
 		if ( d >= t0.w || dot( N, Lv / max( d, 0.001 ) ) < 0.05 )
@@ -142,7 +151,7 @@ vec3 cellShadowProbe( vec3 P, vec3 N )
 
 // the bounce's irradiance at P, normal N: the three facing slabs blended by n^2, sampled half a
 // voxel off the surface (the grid's voxels behind a wall are its other room's)
-vec3 cellGiE( vec3 P, vec3 N )
+vec4 cellGiSample( vec3 P, vec3 N )
 {
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;
 	vec2 xy = g.xy / cellGiDims.xy;
@@ -152,25 +161,48 @@ vec3 cellGiE( vec3 P, vec3 N )
 	vec4 s = n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
 	       + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )
 	       + n2.z * texture( cellGi, vec3( xy, ( z + ( N.z >= 0.0 ? 4.0 : 5.0 ) * cellGiDims.z ) / depth ) );
+	return s;
+}
+
+vec3 cellGiE( vec3 P, vec3 N )
+{
+	vec4 s = cellGiSample( P, N );
 	return s.a > 0.01 ? max( s.rgb / s.a, vec3( 0.0 ) ) : vec3( 0.0 );
+}
+
+/* lane HEMI1: the game draws a hemisphere or box light as an omni light clipped by its volume (celllights.h):
+ * true when P lies inside light i's. shape = texel 1.w (-3 hemisphere, -4 box; anything else has none). */
+bool cellShapeIn( int i, vec3 P, vec3 Lpos, float shape )
+{
+	if ( shape > -2.5 )
+		return true;
+	if ( shape > -3.5 )
+		return dot( P - Lpos, texelFetch( cellLights, i * CELL_TPL + 2 ).xyz ) >= 0.0;
+	vec4 b0 = texelFetch( cellLights, i * CELL_TPL + 5 );
+	vec4 b1 = texelFetch( cellLights, i * CELL_TPL + 6 );
+	vec4 b2 = texelFetch( cellLights, i * CELL_TPL + 7 );
+	vec3 k = vec3( dot( b0.xyz, P ) + b0.w, dot( b1.xyz, P ) + b1.w, dot( b2.xyz, P ) + b2.w );
+	return all( lessThanEqual( abs( k ), vec3( 1.0 ) ) );
 }
 
 /* light i at world point P, normal N: its colour x the radial curve x the spot cone (no N.L), and
  * the direction to it; zero when out of reach or behind the surface. The PBR path's per-light term. */
 vec3 cellLightE( int i, vec3 P, vec3 N, out vec3 L, out bool noSpec )
 {
-	vec4 t0 = texelFetch( cellLights, i * 5 );
+	vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 	vec3 Lv = t0.xyz - P;
 	float d = length( Lv );
 	L = Lv / max( d, 0.001 );
 	noSpec = true;
 	if ( d >= t0.w || dot( N, L ) <= 0.0 )
 		return vec3( 0.0 );
-	vec4 t1 = texelFetch( cellLights, i * 5 + 1 );
-	vec4 t3 = texelFetch( cellLights, i * 5 + 3 );
+	vec4 t1 = texelFetch( cellLights, i * CELL_TPL + 1 );
+	if ( !cellShapeIn( i, P, t0.xyz, t1.w ) )
+		return vec3( 0.0 );	// lane HEMI1
+	vec4 t3 = texelFetch( cellLights, i * CELL_TPL + 3 );
 	float a = cellRadial( d, t0.w, t3.xyz );
 	if ( t1.w > -1.5 ) {
-		vec4 t2 = texelFetch( cellLights, i * 5 + 2 );
+		vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
 		float base = clamp( 1.0 - ( 1.0 - dot( -L, t2.xyz ) ) / max( 1.0 - t1.w, 1e-4 ), 0.0, 1.0 );
 		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
 	}
@@ -183,6 +215,8 @@ vec3 cellLightE( int i, vec3 P, vec3 N, out vec3 L, out bool noSpec )
 // the harness probes for a program without the legacy BRDF helpers (pbrm_cell)
 vec3 cellProbeRaw( vec3 P, vec3 N )
 {
+	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
+		return vec3( 0.0 );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
 	if ( cellProbe == 1 ) {
@@ -203,6 +237,33 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 	if ( cellProbe == 3 )
 		return mod( q, 256.0 ) / 255.0;
 	return N * 0.5 + 0.5;
+}
+
+/* lane PROBEVIEW1: a probe pass's picture on a white surface (the deck's s40 / s18): no albedo, no direct light,
+ * no fog, no imagespace. GI = E(N) / pi, the GI row's own sample; Sky visibility = the sky grid read the same way.
+ * Display: pow(clamp(x), 1 / 2.2), a fixed curve so two bakes compare. Magenta = no probe reaches here (s65);
+ * in the surfel passes every surface is magenta and the surfel tiles draw over it (src/gl/cellprobeview.h). */
+vec3 cellPassOut( vec3 P, vec3 N )
+{
+	const vec3 none = vec3( 1.0, 0.0, 1.0 );
+	if ( cellPass >= 3 || !cellGiOn )
+		return none;
+	vec4 s = cellGiSample( P, ( cellPassRed & 2 ) != 0 ? vec3( 0.0, 0.0, 1.0 ) : N );
+	if ( s.a <= 0.01 )
+		return none;
+	vec3 v = max( s.rgb / s.a, vec3( 0.0 ) );
+	if ( cellPass == 1 ) {
+		v *= 0.31830989;
+		if ( ( cellPassRed & 1 ) != 0 ) {	// red "direct": the cell's lights leak into the pass
+			for ( int i = 0; i < cellLightCount; i++ ) {
+				vec3 L;
+				bool ns;
+				vec3 c = cellLightE( i, P, N, L, ns );
+				v += c * max( dot( N, L ), 0.0 );
+			}
+		}
+	}
+	return pow( clamp( v, 0.0, 1.0 ), vec3( 1.0 / 2.2 ) );
 }
 
 #if !defined( WW_CELL_PBR ) && !defined( WW_CELL_FX )	// lane EFX2: the effect program takes none of the surface lobes
@@ -268,7 +329,7 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 	cellRimSum = vec3( 0.0 );
 	spec = vec3( 0.0 );
 	for ( int i = 0; i < cellLightCount; i++ ) {
-		vec4 t0 = texelFetch( cellLights, i * 5 );
+		vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 		vec3 Lv = t0.xyz - P;
 		float d = length( Lv );
 		if ( d >= t0.w )
@@ -277,12 +338,14 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 		float NdotL = dot( N, L );
 		if ( NdotL <= 0.0 )
 			continue;
-		vec4 t1 = texelFetch( cellLights, i * 5 + 1 );
-		vec4 t3 = texelFetch( cellLights, i * 5 + 3 );
+		vec4 t1 = texelFetch( cellLights, i * CELL_TPL + 1 );
+		if ( !cellShapeIn( i, P, t0.xyz, t1.w ) )
+			continue;	// lane HEMI1
+		vec4 t3 = texelFetch( cellLights, i * CELL_TPL + 3 );
 		float a = cellRadial( d, t0.w, t3.xyz );
 		if ( t1.w > -1.5 ) {
 			// PRTP2 section 2: base = saturate(1 - (1 - dot(-L, dir)) / (1 - cosOuter)), cone = min(base^falloff, 1)
-			vec4 t2 = texelFetch( cellLights, i * 5 + 2 );
+			vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
 			float base = clamp( 1.0 - ( 1.0 - dot( -L, t2.xyz ) ) / max( 1.0 - t1.w, 1e-4 ), 0.0, 1.0 );
 			a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
 		}
@@ -308,6 +371,13 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 vec3 cellAmboScale( vec3 P )
 {
 	for ( int i = 0; i < cellAmboCount; i++ ) {
+		if ( cellAmboK[i].w > 0.5 ) {	// lane HEMI1: linked to a box, it fills the box (not the sphere)
+			vec4 b0 = cellAmboBox[i * 3], b1 = cellAmboBox[i * 3 + 1], b2 = cellAmboBox[i * 3 + 2];
+			vec3 k = vec3( dot( b0.xyz, P ) + b0.w, dot( b1.xyz, P ) + b1.w, dot( b2.xyz, P ) + b2.w );
+			if ( all( lessThan( abs( k ), vec3( 1.0 ) ) ) )
+				return cellAmboK[i].rgb;
+			continue;
+		}
 		vec3 d = P - cellAmbo[i].xyz;
 		if ( dot( d, d ) < cellAmbo[i].w * cellAmbo[i].w )
 			return cellAmboK[i].rgb;
@@ -417,6 +487,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 {
 	vec3 P = cellWorldPos( posView );
 	vec3 N = cellWorldDir( normalView );
+	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
+		return vec3( 0.0 );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
 	if ( cellProbe == 1 || cellProbe == 8 || cellProbe == 10 || cellProbe == 30 ) {

@@ -43,6 +43,12 @@ struct ProbeGiResult
 	std::vector<float> grid;
 	std::vector<float> probeCube;       //!< per probe: pos[3] + 6 x rgb
 	std::vector<float> surfelOut;       //!< per unique surfel: pos[3] nrm[3] albedo[3] B[3]
+	// lane PROBEVIEW1: the Pass drop-down's data
+	float surfelCell = 32.0f;           //!< the first file's surfel cell size
+	std::vector<float> gridSky;         //!< the grid's layout, rgb = the blended open-sky share, a = valid
+	std::vector<float> probeSky;        //!< per probe: the sky share on +X -X +Y -Y +Z -Z (mean of its 4 octants)
+	std::vector<int> probeLinkStart;    //!< probe i links surfels probeLinks[start[i] .. start[i + 1])
+	std::vector<int> probeLinks;        //!< surfelOut indices, one per resolved link
 	double msLight = 0, msGather = 0, msGrid = 0;
 };
 

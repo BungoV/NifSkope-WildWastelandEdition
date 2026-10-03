@@ -83,6 +83,8 @@ struct NativeSrcShape
 	 *  shape through a BSEffectShaderProperty naming it, with the source property's
 	 *  own flags, so the palette alpha (holes) and vertex alpha reach the renderer. */
 	bool effectMatRead = false;
+	//! Lane FXLIT1: the effect-lighting flag (the BGEM's when it reads, else Shader Flags 2 bit 30). Cell view only.
+	bool effectLit = false;
 	quint32 shaderSF1 = 0, shaderSF2 = 0;
 	/*! Lane EFX1: an effect property that names no BGEM (its look is in the NIF), the
 	 *  block serialized, and the shape's NiAlphaProperty flags (0 = none). Cell view only. */

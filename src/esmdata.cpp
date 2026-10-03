@@ -508,6 +508,20 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 						ref.xligCount = qMin( 6, int( f.size() / 4 ) );
 						for ( int i = 0; i < ref.xligCount; i++ )
 							ref.xlig[i] = f.readFloat();
+					} else if ( f == "XLKR" && f.size() >= 8 ) {
+						// lane HEMI1: the LightBoxLink keyword's target is the light's box
+						const quint32 kw = esm->mapFormID( *r, f.readUInt32() );
+						const quint32 to = esm->mapFormID( *r, f.readUInt32() );
+						if ( kw == 0x00115705U )
+							ref.lightBox = to;
+					} else if ( f == "XPRM" && f.size() >= 32 ) {
+						// lane HEMI1: Bounds (half extents) 3 floats, Color 3, Unknown, Type
+						for ( int i = 0; i < 3; i++ )
+							ref.primHalf[i] = f.readFloat();
+						for ( int i = 0; i < 4; i++ )
+							f.readFloat();
+						ref.primType = f.readUInt32();
+						ref.hasPrim = true;
 					}
 				}
 				if ( ref.base ) {

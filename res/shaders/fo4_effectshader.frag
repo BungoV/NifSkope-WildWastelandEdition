@@ -54,7 +54,10 @@ out vec4 fragColor;
  * cell view, transcribed from Shaders011.fxp (docs/PRTP_PLAN.md 2q):
  *   colour   = texture x vertex colour x base colour, all linear (sampled sRGB, base colour powered 2.2)
  *   lighting = mix( c, c x emit, lighting influence ), emit the script-set external emit colour, WHITE when
- *              unset: no room light reaches an effect (its vertex shader sums no light)
+ *              unset. That is the UNLIT effect. One whose material sets the effect-lighting flag takes the
+ *              game's lit shader instead (lane FXLIT1, src/gl/cellfxlit.h): emit = the directional colour +
+ *              up to four placed lights, colour x pow( 1 - saturate( d / radius )^2, 2.2 ) x the spot cone,
+ *              per pixel, no N.L and no shadow
  *   Soft     = saturate( (scene w - w) / soft depth ) x smoothstep( 0.075, 0.5, w / soft depth ), w the view
  *              depth; on alpha, or on the palette's row for a greyscale-to-palette effect
  *   fog      = mix( c, fog colour, f ) for a blended effect, c x (1 - f) for an additive one
@@ -69,6 +72,48 @@ uniform float fxSoftDepth;		// game units
 uniform float fxDistScale;		// view units -> game units
 uniform bool fxAdditive;
 uniform int fxRed;				// 2 nosoft, 4 nolin, 8 hide
+// lane FXLIT1: this shape's model's placed lights (src/gl/cellfxlit.h)
+uniform int fxLitMode;			// 0 an unlit effect; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
+uniform vec4 fxLit;				// indices into cellLights, -1 = none
+uniform vec4 fxLitScale;		// 1 (a red control's per-light ratio)
+uniform vec3 fxLitId;			// probe 70: the model's serial + 1, 24 bits
+
+// one placed light on a lit effect at world point P, as the game's lit effect shader sums it
+vec3 cellFxLight( int i, vec3 P )
+{
+	vec4 t0 = texelFetch( cellLights, i * CELL_TPL );	// lane FXLIT1: the stride is HEMI1's 8 texels a light
+	vec4 t1 = texelFetch( cellLights, i * CELL_TPL + 1 );
+	vec3 Lv = t0.xyz - P;
+	float d = length( Lv );
+	float q = clamp( d / max( t0.w, 0.001 ), 0.0, 1.0 );
+	float a = 1.0 - q * q;
+	if ( ( fxLitMode & 4 ) == 0 )
+		a = pow( a, 2.2 );
+	if ( t1.w > -1.5 ) {	// a spot: the game's cone, its cosine + 0.001
+		vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
+		float c = clamp( dot( -Lv / max( d, 0.001 ), t2.xyz ), 0.0, 1.0 );
+		float base = clamp( 1.0 - ( 1.0 - c ) / max( 1.0 - ( t1.w + 0.001 ), 1e-4 ), 0.0, 1.0 );
+		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
+	}
+	return t1.rgb * a;
+}
+
+// what a lit effect's colour is multiplied by at P: mix( 1, directional + its lights, lighting influence )
+vec3 cellFxLit( vec3 P )
+{
+	if ( ( fxLitMode & 8 ) != 0 )
+		return vec3( 1.0 );
+	vec3 E = cellHasDir ? cellDirColor : vec3( 0.0 );
+	if ( ( fxLitMode & 2 ) != 0 ) {
+		for ( int i = 0; i < cellLightCount; i++ )
+			E += cellFxLight( i, P );
+	} else {
+		for ( int k = 0; k < 4; k++ )
+			if ( fxLit[k] > -0.5 )
+				E += cellFxLight( int( fxLit[k] + 0.5 ), P ) * fxLitScale[k];
+	}
+	return mix( vec3( 1.0 ), E, lightingInfluence );
+}
 
 float cellFxFade()
 {
@@ -201,6 +246,19 @@ void main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn ) {
 		vec3 lin = ( fxRed & 4 ) != 0 ? max( color.rgb, vec3( 0.0 ) ) : pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
+		if ( fxLitMode != 0 ) {	// lane FXLIT1: a lit effect, in linear light, before the fog
+			vec3 P = cellWorldPos( -ViewDir );
+			vec3 m = cellFxLit( P );
+			if ( cellProbe >= 70 && cellProbe <= 74 ) {
+				// its probes, opaque: 70 the model, 71 / 72 the position (as probes 2 / 3), 73 / 74 the multiplier / 4
+				vec3 q = cellProbe >= 73 ? floor( clamp( m * 0.25, 0.0, 1.0 ) * 65535.0 + 0.5 )
+					: clamp( floor( P - cellCenter + 32768.0 ), 0.0, 65535.0 );
+				bool high = cellProbe == 71 || cellProbe == 73;
+				fragColor = vec4( cellProbe == 70 ? fxLitId : high ? floor( q / 256.0 ) / 255.0 : mod( q, 256.0 ) / 255.0, 1.0 );
+				return;
+			}
+			lin *= m;
+		}
 		if ( fogOn ) {
 			vec3 posView = -ViewDir;
 			float hb;
@@ -212,7 +270,8 @@ void main()
 		if ( cellProbe == 6 )
 			fragColor = vec4( lin, color.a );
 		else
-			fragColor = vec4( cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, vec3( 1.0 / 2.2 ) ), color.a );
+			fragColor = vec4( cellIsLinear ? lin	// lane HDR1: linear, summed in the HDR frame, tone-mapped once
+				: cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, vec3( 1.0 / 2.2 ) ), color.a );
 		return;
 	}
 #endif

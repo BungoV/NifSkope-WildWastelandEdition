@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "gltex.h"
+#include "cellspeed.h"
 
 #include "message.h"
 #include "gl/glscene.h"
@@ -265,6 +266,23 @@ const TexCache::Tex::ImageInfo * TexCache::getTextureInfo( const QStringView & f
 	return nullptr;
 }
 
+// lane PRTP5 (the cell census): what the frames since the last flush asked this cache for
+void TexCache::wwAskedAndMissing( int & asked, int & missing, QStringList * names ) const
+{
+	asked = missing = 0;
+	for ( size_t i = 0; i <= textureHashMask; i++ ) {
+		const Tex &	tx = textures[i];
+		if ( !tx.nameLen || !tx.imageInfo )
+			continue;
+		asked++;
+		if ( tx.mipmaps )
+			continue;
+		missing++;
+		if ( names )
+			names->append( tx.imageInfo->filename );
+	}
+}
+
 static inline const QString & convertToQString( const QString & s )
 {
 	return s;
@@ -385,6 +403,7 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 std::uint16_t TexCache::loadTex( Tex & tx, const NifModel * nif )
 {
 	Tex::ImageInfo *	i = tx.imageInfo;
+	CellSpeed::Acc speedAcc( "texture loads (find, decode, upload)" );   // lane SPEED1
 
 	if ( !isSupported( i->filename ) ) {
 		tx.id[0] = GLuint( -1 );

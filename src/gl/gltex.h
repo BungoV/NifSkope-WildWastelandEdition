@@ -210,6 +210,8 @@ public:
 	void setOpenGLContext( NifSkopeOpenGLContext * context );
 
 	const Tex::ImageInfo * getTextureInfo( const QStringView & file ) const;
+	//! lane PRTP5: textures asked for since the last flush, and those of them that did not load
+	void wwAskedAndMissing( int & asked, int & missing, QStringList * names = nullptr ) const;
 
 	// returns true if the settings have changed
 	static bool loadSettings( QSettings & settings );

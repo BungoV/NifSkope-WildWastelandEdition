@@ -42,11 +42,14 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/lookdevstage.h"
 #include "gl/sunshadow.h"
 #include "gl/celllights.h"
+#include "gl/cellfxlit.h"
+#include "gl/cellssr.h"
 #include "esmweather.h"
 #include "io/material.h"
 #include "model/nifmodel.h"
 #include "ui/settingsdialog.h"
 #include "gl/BSMesh.h"
+#include "gl/cellhdr.h"
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 
@@ -151,11 +154,24 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		glStencilMask( cell ? 0x03 : 0x02 );
 		glStencilFunc( GL_ALWAYS, !cell ? 2 : glIsEnabled( GL_BLEND ) ? 3 : 1, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	} else if ( wwCellHdrActive() ) {
+		// lane HDR1: the linear frame (cellhdr.h). The stencil keeps who wrote a pixel last: 1 a cell program or a
+		// cell effect (linear light, tone-mapped once at the end), 2 any other program (its value as written)
+		const bool lin = program && ( program->name == std::string_view( "fo4_cell.prog" )
+			|| program->name == std::string_view( "pbrm_cell.prog" ) || program->name == std::string_view( "fo4_effectcell.prog" ) );
+		glEnable( GL_STENCIL_TEST );
+		glStencilMask( 0x03 );
+		glStencilFunc( GL_ALWAYS, lin ? 1 : 2, 0xFF );
+		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
 	}
 	// lane AO1: the obscurance's opaque pass (normal + depth from the opaque cell-lit draws only), and every
 	// other cell-lit draw reads this frame's obscurance (celllights.h)
 	if ( mesh && wwAoScene )
 		wwCellAoDraw( wwAoScene, program && ( program->name == std::string_view( "fo4_cell.prog" )
+			|| program->name == std::string_view( "pbrm_cell.prog" ) ) );
+	// lane SSR1: the reflections' scene pass, and the reflection a flagged opaque draw reads (cellssr.h)
+	if ( mesh && wwAoScene )
+		wwCellSsrDraw( wwAoScene, program && ( program->name == std::string_view( "fo4_cell.prog" )
 			|| program->name == std::string_view( "pbrm_cell.prog" ) ) );
 	/* WW_PBRM_CENSUS (lane PBRR0) rides the same exits: every return of
 	 * setupProgram passes through here with the program it actually bound,
@@ -277,6 +293,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
 	wwAoScene = mesh->scene;	// lane AO1
+	{	// lane SSR1: the draw's reflection flag (an environment-mapped material file with its reflections switch on)
+		const Material * sm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
+		wwCellSsrNote( sm && sm->isShaderMaterial() && sm->bEnvironmentMapping && sm->bScreenSpaceReflections );
+	}
 
 	/* Read here, not inside wwProgramCensus: `Shape::bslsp` is protected and
 	 * only a Shape's friends -- Renderer's own members -- may read it. */
@@ -1675,6 +1695,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			fn->glBindTexture( GL_TEXTURE_2D, soft ? scene->fxDepthTexId : 0 );
 			prog->uni1i_l( prog->uniLocation( "fxDepth" ), texunit++ );
 			prog->uni1i( "fxRed", wwCellFxRed() );
+			wwCellFxLitUniforms( scene, mesh->id() );	// lane FXLIT1: a lit effect's four placed lights
 		}
 
 		// BSEffectShader textures (FIXME: should implement using error color?)
@@ -1686,6 +1707,22 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		if ( nifVersion >= 130 ) {
 
 			prog->uni1f( "lightingInfluence", esp->lightingInfluence );
+			if ( wwCellFxLitProbeShape( scene, mesh->id() ) && qEnvironmentVariableIsSet( "WW_CELL_FXLIT_DUMP" ) ) {
+				// lane FXLIT1: what each lit effect's probe drew with, once per shape (the gate's dump)
+				static QSet<int> said;
+				if ( !said.contains( mesh->id() ) ) {
+					said.insert( mesh->id() );
+					int serial = -1;
+					wwCellFxLitFor( scene->nifModel, mesh->id(), &serial );
+					qInfo().noquote() << "cell fxlit: shape" << mesh->id() << "model" << serial << "influence"
+						<< esp->lightingInfluence << "material" << ( esp->getMaterial() ? "read" : "none" )
+						<< "shape name" << mesh->getName();
+					if ( Material * fm = esp->getMaterial(); fm && fm->isEffectMaterial() )
+						qInfo().noquote() << "cell fxlit:   its material: influence"
+							<< static_cast<EffectMaterial *>( fm )->lightingInfluence() << "flags2"
+							<< static_cast<EffectMaterial *>( fm )->effectShaderFlags2() << "textures" << fm->textures().join( "," );
+				}
+			}
 
 			prog->uni1i( "hasNormalMap", esp->hasNormalMap && scene->hasOption(Scene::DoLighting)
 						&& scene->hasOption(Scene::DoNormalMap) );
@@ -1875,6 +1912,14 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		GLint dst = 0;
 		glGetIntegerv( GL_BLEND_DST_RGB, &dst );
 		prog->uni1b( "fxAdditive", glIsEnabled( GL_BLEND ) && dst == GL_ONE );
+		if ( wwCellFxLitProbeShape( scene, mesh->id() ) ) {
+			// lane FXLIT1: its probes write the lit effects opaque, the nearest card winning: layered cards drawn
+			// without a depth write leave the last one drawn, which differed between the five probe runs
+			glDisable( GL_BLEND );
+			glEnable( GL_DEPTH_TEST );
+			glDepthFunc( GL_LEQUAL );
+			glDepthMask( GL_TRUE );
+		}
 	}
 	return true;
 }

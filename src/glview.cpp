@@ -31,6 +31,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glview.h"
+#include "cellspeed.h"
+#include "celltexahead.h"
 
 #include "rdccapture.h"
 
@@ -42,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/sunshadow.h"
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
+#include "gl/cellhdr.h"
 #include "impostorchunk.h"
 #include "impostorpreviewtest.h"
 #include "gl/glshape.h"
@@ -130,6 +133,8 @@ private:
 #include <QOpenGLFunctions>
 #include <QOpenGLFramebufferObject>
 #include "gl/celllights.h"	// lane IMGS1: the imagespace measure
+#include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
+#include "gl/cellssr.h"
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -3662,6 +3667,8 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 
 void GLView::paintGL()
 {
+	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
+	CellTexAhead::Frame texAheadFrame;   // lane SPEED1: a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
 	QElapsedTimer wwPaintClock;
 	wwPaintClock.start();
@@ -4031,6 +4038,7 @@ void GLView::paintGL()
 	// node first and use one globally sorted transparent/refraction pass.
 	// lane AO1: the obscurance first; the measure reads the obscured light, as the game's adaptation does
 	wwCellAoPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );
+	wwCellSsrPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );	// lane SSR1: needs that pass's depth
 	if ( !scene->selecting && workspaceDrawScenes.isEmpty() )
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
 
@@ -4046,7 +4054,11 @@ void GLView::paintGL()
 		// without touching GL state.
 		ImpostorChunk::draw( scene, ImpostorDraw::Options() );
 		if ( !wwImpostorPreviewSuppressScene() ) {
+			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
+			const bool hdr = workspaceDrawScenes.isEmpty() && wwCellHdrBegin( scene );
 			scene->draw();
+			if ( hdr )
+				wwCellHdrEnd( scene );
 			for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
 				ws->draw();
 		}
@@ -4073,6 +4085,9 @@ void GLView::paintGL()
 			ws->drawOverlays();
 		glDisable( GL_BLEND );
 	}
+
+	// lane PROBEVIEW1: the PRTP band's Pass overlays (surfel tiles, lit probes, the picked probe's links)
+	wwCellProbeViewDraw( scene, viewTrans );
 
 	// Selected-bone weight heatmap. Per-corner colours are supplied by the
 	// Rigging Manager, while the viewport owns only an ephemeral triangle soup.
@@ -23912,6 +23927,10 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 			mouseRayWorld( QPointF( evtPos ), cellRayO, cellRayD );
 			const float cellO[3] = { cellRayO[0], cellRayO[1], cellRayO[2] };
 			const float cellD[3] = { cellRayD[0], cellRayD[1], cellRayD[2] };
+			if ( wwCellProbeViewPick( scene, cellO, cellD ) ) {	// lane PROBEVIEW1: a probe, in a Pass
+				update();
+				return;
+			}
 			if ( cellPickClick( model, cellO, cellD ) ) {
 				update();
 				return;

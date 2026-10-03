@@ -1,5 +1,197 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: the haze is lit like the game's, and the picture is tone-mapped once (lanes FXLIT1 + HDR1, 2026-10-03)
+
+### Lit effects (lane FXLIT1)
+
+- Cell view: an effect material with the effect-lighting flag is now lit the game's way. Its value is
+  multiplied by mix(1, directional + the placed model's (up to) four lights, lighting influence), per pixel.
+  Each light's term is color x pow(1 - sat(d/r)^2, 2.2) x cone. Effects without the flag keep their old
+  path; the gate proves that pixel for pixel against the exe from before the lane.
+- Gate tests/spells/cell_fx.sh stage L, with probes 70..74 (model, position, multiplier). The independent
+  checker tests/spells/cell_fxlit_check.py reads the plugin and the models itself, and it applies material
+  swaps (the placement's swap, else the base's first) before reading a BGEM.
+  - Vault walkway: 99.9% of 516027 px agree, total ratio 1.000.
+  - Third Rail: 99.9% of 3580 px agree, total ratio 1.000.
+  - Reds white / nofade / all / nopower each FAIL L.
+- Stage U (unflagged effects unchanged) is judged at the Third Rail, where 513 px of unflagged effects show
+  and 0 px differ from the exe before. Every Vault effect carries the flag, so U skips there.
+- Stage N now keeps a 3 px margin around anything the nosoft shot touches. The dimmer lit cards' rims had
+  turned 94 px at camera 1 into "effect-free" pixels. The exe from before the lane skipped N at that camera
+  too (102 px).
+- Probes write depth (nearest card wins). Without it, layered mist cards gave the five probe runs different
+  cards.
+- Dump-only telemetry (WW_CELL_FXLIT_DUMP): one line per probed shape with the influence and the material
+  the shader drew with.
+
+### One tone map (lane HDR1)
+
+- Cell view: with the imagespace on, surfaces and effects are summed in linear light (a multisampled float
+  frame) and tone-mapped once, as the game does. The bloom is added once, at that pass. Stacked haze cards
+  no longer each add their own tone-mapped value, so the walkway's far door no longer goes white.
+- Gate tests/spells/cell_is.sh stage Q, judged on blended pixels:
+  - Green: 97.7-99.9% at four cameras, including bungo's walkway camera.
+  - Red WW_CELL_HDR_RED=perfrag (the old per-fragment path) fails at 72-81%.
+- No setting of its own: it is part of the Cell lights row.
+
+### Merge of main into FXLIT1 + HDR1 (2026-10-03)
+
+- The lit-effect light sum now reads the cell light buffer through HEMI1's stride (CELL_TPL, 8 texels a
+  light). The literal 5 it had read the wrong texels after the merge: no light on any effect.
+- Stage U's exe from before the lane must be a main build after each merge of main. The pre-merge one
+  showed main's decals and actors as differences.
+- cell_ssr stage L on the merged build: 3 and 15 px of main's placed decals differ run to run. With SSR1's
+  pending fix (decals off in both shots), it passes.
+
+## PRTP Pass drop-down (lane PROBEVIEW1, 2026-10-03)
+
+The PRTP band gains one row: **Pass**, beside GI. It previews what the probe bake holds, the Division deck's debug views:
+
+- **Combined** - the ordinary picture (unchanged, byte-for-byte against the pre-lane exe).
+- **GI** - every surface shows the probe grid's irradiance on its normal (E / pi, display curve 1/2.2), with no lights, no albedo and no image space. Magenta marks surfaces no probe reaches.
+- **Sky visibility** - the same for each probe's open-sky share (the bake's eight octants, averaged to six axes and blended into a second grid). Interiors read black.
+- **Surfel color / Surfel light** - every surfel drawn as a splat on its surface, colored by its albedo or by its outgoing light B / pi. Bare surface stays magenta, so holes in the surfel cover show.
+- With Show probes on, each probe draws as a box whose six faces carry its own value. Click a probe to draw a line to every surfel it links (yellow outline on the picked box). Click empty space to clear.
+
+The row is off until the document's bake is relit. Harness switches: WW_CELL_PASS (number or name), WW_CELL_PV_PROBE, WW_CELL_PV_DUMP, WW_CELL_PV_ID, WW_CELL_PV_RED.
+
+Gate: tests/spells/cell_pass.sh + cell_pass_check.py. It rebuilds every value from the .tbk files and the collision soup with its own reader and sampler. Three red controls must fail: direct, nonormal and open.
+
+## Cell view: a NifSkope window that goes through the game cell by cell, checks each cell and can bake its probes (2026-10-02)
+
+- NifSkope can now go through a whole plugin by itself, a piece at a time, without ever loading the whole world:
+  every interior alone, and the outdoor map as tiles of 5x5 cells that do not overlap, each tile loaded once.
+  (The first version opened every outdoor cell with the 5x5 around it, so everything was loaded 25 times.)
+- What it does at each stop is a list of steps, done on the one load:
+  - the per-cell check-up (what loaded, what is missing): one line per cell in a plain tab-separated file under
+    `release/cell_census/` (opens in a spreadsheet): references, shapes, triangles, lights placed / lit / skipped and
+    why, the models and textures that could not be loaded, seconds, memory;
+  - the probe bake for the same cells (the existing headless bake), into a folder you name.
+  Start it with `WW_CELL_CENSUS_TEST=<file>`, `WW_CELL_CENSUS_PLUGINS=<plugin>`, and for the bake
+  `WW_CELL_CENSUS_STEPS=census,bake WW_CELL_CENSUS_BAKE=<folder>`. Nothing new in the menus.
+- For the bake it can load a ring of neighbor cells around each tile (`WW_CELL_CENSUS_MARGIN=1`), because a probe
+  only sees what is loaded with it: without the ring, probes at a tile's edge take the neighbor's buildings for sky.
+- A stretch of map with nothing placed in it gets its lines without loading anything (25 cells in 3 ms).
+- It can be stopped at any time and goes on where it stopped. A tile that is too big, or that crashed the window,
+  is opened cell by cell the next time, and the line says so.
+- Several windows can share the work: each takes its own slice (`WW_CELL_CENSUS_SLICE=1/2`, `2/2`, any number) and
+  writes its own file; `tests/spells/cell_census_merge.py` joins them. No cell is done twice or left out.
+- New gate `tests/spells/cell_census.sh`: a second, independent reader of the plugin checks that every cell has
+  exactly one line and that each line's reference and light counts are the plugin's. Five red controls
+  (`--red stale | dropcell | dropslice | doubleslice | nobake`) must FAIL.
+- Measured on a sample (20 interiors, 75 outdoor cells): an interior about 14 seconds, a 5x5 tile around Sanctuary
+  about 2 minutes (5 seconds a cell). Estimated for all of Fallout4.esm, one window: the check-up alone about 11
+  hours (it was about 5 days); with the probe bake and a one-cell ring about 2 days. The whole-game run has not
+  been started.
+- Pick-up items are 3.4% and actors 0.6% of everything placed in the game (counted from the plugin), so leaving
+  them out of the bake saves little time.
+
+## Cell view: a cell opens in a quarter of the time and little more than half the memory (2026-10-02)
+
+- Opening a cell is three to four times faster and takes 37-45% less memory, with the same picture and the
+  same counts. Measured on three cells, the old way against the new in the same program, same machine, one
+  other NifSkope window open:
+
+  | cell | seconds before | seconds now | peak memory before | now | processor cores busy |
+  |---|---|---|---|---|---|
+  | Vault 111 (cryo), 1455 placed objects | 23.8 | 6.8 | 4.4 GB | 2.5 GB | 1.0 -> 2.4 |
+  | Boston mayoral shelter, 3687 objects | 40.5 | 10.1 | 7.9 GB | 5.0 GB | 1.0 -> 3.3 |
+  | Commonwealth -21,6, a 3x3 block, 3591 objects | 38.3 | 9.1 | 7.6 GB | 4.1 GB | 1.0 -> 3.1 |
+
+  (Seconds include starting the program and the 2.5 s the test waits before its picture.)
+- What changed, in the order it mattered:
+  1. The cell's geometry is no longer written into the document row by row. It is kept beside the document
+     and drawn from there; the rows appear the moment something asks for them (a save, a spell, the block
+     inspector). A saved cell is the same file as before, byte for byte.
+  2. Texture files are read by helper threads while the cell is being put together, instead of one at a time
+     on the drawing thread during the first picture.
+  3. Model files are read on up to eight helper threads before the cell is assembled.
+- Models were already shared between copies of the same object (1455 placed objects = 295 model reads); that
+  was suspected to be the problem and is not.
+- A bake run without a lit picture (`WW_CELL_PROBE_BAKE`) no longer loads the things the light bake ignores
+  anyway (pick-up items, placed people and creatures, disabled references, markers). The bake's files are the same, byte for byte.
+  Vault111Cryo: 17.5 s -> 11.1 s, 3.0 -> 2.5 GB.
+- No new menu row, setting or INI key. Nothing to switch on.
+- Still open: opening four cells one after another in one window ends at 4.7, 5.2, 5.3 and 4.8 GB (it levels
+  off rather than adding up); the old path's figure for the same walk was not measured. A 5x5 block was not re-timed today (it needs 15+ GB free and a quiet machine).
+  About 2.7 GB of the shelter's 5 GB is texture memory held by the graphics driver.
+- Gate: `tests/spells/cell_speed.sh` (three cells: picture, counts, saved file, seconds and memory with a floor of
+  50% / 33%; four red controls) and `tests/spells/cell_speed_bake.sh` (the bake's files; one red control).
+- Decals land the same way every time a cell opens (before, which of two touching surfaces a decal took could
+  change from one opening to the next).
+
+## Cell view: the game's floor reflections (screen-space reflections) (2026-10-02)
+
+The game mirrors what stands around a shiny floor in the floor itself: it looks across the picture it has
+already drawn and, where a reflected ray meets something, uses that instead of the material's cube map. The
+cell view now does the same, the way the game's own shaders do it: only materials with an environment map
+and the "Screen Space Reflections" switch on in their material file reflect, only indoors, and the result
+blends with the cube map reflection by how sure the march is that it found something.
+
+What you will see: very little. Measured in the Vault 111 cryo walkway at eye height, the picture changes on
+about 7% of its pixels, by about half a shade on average (at most 25 shades in a few spots). The bright pools
+under the walkway lamps were already in the picture before this (they come from the lamps and the cube map
+reflection, not from this pass). Nothing to switch on: it rides the Cell lights row. No new settings.
+
+## Cell view: the light check now also watches two misty rooms (2026-10-02)
+
+Nothing you see changes. Two rooms looked at from straight above, Fraternal Post 115 and Pickman Gallery, used
+to disagree with the automatic check of the placed lights on about one pixel in ten. The lights were drawn
+right. The check reads where each pixel is in the room from a helper picture, and the faint ceiling mist in
+those rooms had been drawn into that helper picture, which moved the reading by a few hundred units. That was
+repaired the day before (mist and other effects are left out of the helper pictures); this change only proves
+it and keeps it proven:
+
+- Both rooms are now part of the light check (three views), and agree on every checked pixel.
+- A check-only switch puts the mist back into the helper pictures; the check then fails in four of its five
+  views, so the check is known to notice if this ever returns. The switch is an environment variable for the
+  test script, not a menu row or a setting.
+
+## Cell view: decals and the people of a cell are drawn (2026-10-02)
+
+Two kinds of placed content were missing from the cell view. Both are cell content, so they show whenever a cell
+is open: no new menu row, no setting.
+
+- Decals. The stains, moss, grime, puddles and scorch marks a level designer projects onto walls and floors are
+  now drawn, each on the surfaces inside its own box and facing it, the way the game projects them, and lit by
+  the cell's lights like the surface underneath. The Vault 111 cryo room has 540 of them; 513 are drawn. 26 are
+  left out because the game rolls dice for their size or picks one of four pictures at random, and the cell view
+  does not guess; 1 finds no surface to land on. The general store in Milton has 185, all drawn.
+- Actors. Settlers, vault residents, corpses and creatures placed in an interior are drawn standing at their
+  placed spot: the race's body, the outfit over it (with the body parts the outfit covers hidden), the head the
+  game pre-built for that person, hair and skin. Vault 81's atrium cell shows 31 of its 33 residents; the cryo
+  room shows the 11 frozen neighbors in their pods and 2 radroaches; Malden Center shows 24 of 47 (23 of them
+  are corpses).
+
+What is not there, and is counted by name in the cell's census line instead:
+- Actors the game picks by dice ("leveled" raiders, ghouls, synths): 14 in Malden Center, 12 in the cryo room.
+- Robots built from parts (Mr. Handy, Protectron, Assaultron): 1 each in Vault 81 and Malden Center.
+- Corpses lie where they fell in the game (ragdoll). The cell view cannot simulate that: a corpse stands upright
+  in its rest pose at its placed spot. The census line says how many.
+- Nobody is animated; everyone stands in the skeleton's rest pose (upright, arms held a little away from the
+  body). Outfit pieces the game picks by dice are left off, so such a person stands in their underwear (all 24
+  drawn in Malden Center).
+- Exterior cells show no actors yet. Actors cannot be picked or listed in the reference list yet.
+- Decals and actors are never part of a bake: the probe bake, the far map and the LOD bakes see the same cell with
+  or without them.
+
+## Cell view: half-sphere lights and boxed lights light only their own space (2026-10-02)
+
+Some of the game's lights are not round. A "hemisphere" light shines to one side only (a ceiling lamp that must
+not light the floor above it), and many ordinary lights are tied to a box in the Creation Kit so they stop at a
+wall or a floor instead of leaking into the next room. The cell view used to draw all of them as full round
+lights, so rooms picked up light through walls and ceilings. Now:
+
+- Hemisphere lights (17 placed in the game) light only the side they face.
+- Lights linked to a box (1877 placed) light only inside that box. Example: in Cabot House the ground floor no
+  longer catches the two upstairs lamps (about a fifth of that view gets darker, nothing gets brighter).
+- "Ambient Only" lights linked to a box (29 of the 39) now dim the room's ambient inside that box instead of
+  inside a big sphere. In Vault 111 this moves where the dimmed zones end. This one follows how the game sets
+  lights up and has not yet been compared with a game screenshot.
+
+The bounce light (GI) follows the same shapes. Nothing to switch on: it rides the Cell lights row. No new
+settings.
+
 ## Probe bake: both sides of a thin wall, rooms, and glass (2026-10-02)
 
 - The light bake (the probe files, `.tbk`) now keeps BOTH faces of a thin wall. A wall thinner than one bake
