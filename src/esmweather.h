@@ -147,6 +147,9 @@ struct WwSkyGmst
 	float masserFadeStart = 5.0f, masserFadeEnd = 10.0f;
 	QStringList fromEsm;	// the EditorIDs a loaded plugin set
 	float dirFogPower = 8.0f;	// fDirectionalFogPower (lane FOG1; ESM and exe agree on 8)
+	// lane SKYFULL1: the stars' turn, exe defaults (angle = 2 pi fmod(days, rotDays) / rotDays about the axis)
+	float starsRotDays = 4.0f;	// fStarsRotateDays
+	float starsAxis[3] = { 0.0f, 0.0f, 1.0f };	// fStarsRotate{X,Y,Z}Axis
 	//! "name=value(esm|exe) ..." for the CLI and the census
 	QString describe() const;
 };

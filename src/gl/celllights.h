@@ -102,6 +102,7 @@ struct WwCellAmbientLight
 struct WwCellLighting
 {
 	bool interior = false;
+	bool showSky = false;	//!< lane SKYFULL1: an interior whose CELL DATA has bit 7 (Show Sky); the Lookdev sky draws there
 	QVector<WwCellLight> lights;
 	QVector<WwCellAmbientLight> ambientLights;  //!< lane AMBO2, in plugin order (the first that holds a point wins)
 	bool hasDalc = false;

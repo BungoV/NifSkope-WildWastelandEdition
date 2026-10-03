@@ -94,7 +94,8 @@ common_env() {
 		WW_PBRM_MODE=pbr WW_PBRM_AUTOREPLACE=1 WW_RENDER_PARTICLES=1 \
 		WW_RENDER_SHADOWS=0 WW_RENDER_CONTACT=0 WW_RENDER_AO=0 WW_RENDER_SSGI=0
 }
-LOOK="WW_LIGHTING_MODE=lookdev WW_LOOKDEV=1 WW_VIEW_TRANSFORM=standard WW_EXPOSURE_EV=0"
+# lane SKYFULL1: the preview rows ship ON; this gate pins all four OFF (the pictures it measures predate them)
+LOOK="WW_LIGHTING_MODE=lookdev WW_LOOKDEV=1 WW_VIEW_TRANSFORM=standard WW_EXPOSURE_EV=0 WW_LOOKDEV_SKY=0 WW_LOOKDEV_SUN=0 WW_LOOKDEV_CLOUDS=0 WW_LOOKDEV_MOON=0"
 
 shot() {  # shot <exe dir> <tag> <nif> [KEY=VALUE ...] -- one picture + census
 	local arm="$1" tag="$2" nif="$3"; shift 3
@@ -130,6 +131,7 @@ harness() {  # harness <tag> [KEY=VALUE ...]
 		WW_LOOKDEV_DATA="$(winpath "$GAME")" \
 		WW_RENDER_VIEW=8 \
 		WW_SCENE_TEST=1 WW_SCENE_TEST_LOG="$(winpath "$OUT/$tag.harness.log")" \
+		WW_LOOKDEV_SKY=0 WW_LOOKDEV_SUN=0 WW_LOOKDEV_CLOUDS=0 WW_LOOKDEV_MOON=0 \
 		"$@" \
 		timeout 300 "$ARM/NifSkope.exe" --port "$PORT" "$(winpath "$DUCT")" > "$OUT/$tag.log" 2>&1
 	local rc=$?

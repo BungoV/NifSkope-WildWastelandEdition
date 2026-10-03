@@ -715,6 +715,19 @@ def main():
                 n = sum(1 for p in diff.getdata() if p != (0, 0, 0, 0))
             rec("%s: every part OFF = before_pbrwx1, byte for byte" % base, n == 0,
                 "%d px differ, %s vs %s" % (n, a.size, b.size))
+        # lane SKYFULL1: no pins = the rows' shipped defaults, all ON: the picture is the full sky, not the old cube
+        for base in sorted(f[:-12] for f in os.listdir(OUT) if f.startswith("off_") and f.endswith("_default.png")):
+            from PIL import Image, ImageChops
+            po = os.path.join(OUT, base + "_old.png")
+            if not os.path.isfile(po):
+                rec("%s_default: the before_pbrwx1 picture" % base, False, "missing")
+                continue
+            a = Image.open(os.path.join(OUT, base + "_default.png")).convert("RGBA")
+            b = Image.open(po).convert("RGBA")
+            n = sum(1 for p in ImageChops.difference(a, b).getdata() if p != (0, 0, 0, 0)) if a.size == b.size else -1
+            cen = txt(base + "_default.pbrm") or ""
+            rec("%s_default: no pins = every row ON (the echo) and the picture is not the old cube (%d px differ >= 1000)"
+                % (base, n), "preview=sky:1,sun:1,clouds:1,moon:1" in cen and n >= 1000, "%d px" % n)
 
     # ---- live
     hl = os.path.join(OUT, "live.harness.log")

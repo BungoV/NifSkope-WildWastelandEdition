@@ -90,7 +90,8 @@ shoot() {   # shoot <exe> <run dir> <cell> <tag> <env...>
 	local cv="CAM_$cell" vv="VIEW_$cell" dv="DIST_$cell" open=() look=()
 	if [ "$cell" = concord ]; then
 		open=( WW_CELL_OPEN="$ESM|Commonwealth|-15,17|1" WW_LOOKDEV=1 WW_LOOKDEV_WEATHER=CommonwealthClear
-			WW_LOOKDEV_HOUR=12 WW_LOOKDEV_SUN=0 WW_LOOKDEV_GROUND=0 WW_LOOKDEV_PLUGINS="$ESM" WW_CELL_IS=0 )
+			WW_LOOKDEV_HOUR=12 WW_LOOKDEV_SUN=0 WW_LOOKDEV_GROUND=0 WW_LOOKDEV_PLUGINS="$ESM" WW_CELL_IS=0
+			WW_LOOKDEV_SKY=0 WW_LOOKDEV_CLOUDS=0 WW_LOOKDEV_MOON=0 )	# lane SKYFULL1: the rows ship ON; pinned OFF here
 	else
 		open=( WW_CELL_OPEN="$ESM|interior|$cell" )
 	fi

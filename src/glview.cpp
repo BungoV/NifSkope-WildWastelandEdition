@@ -6618,6 +6618,9 @@ void GLView::wwApplyCameraPinNow()
 		else if ( wwPin.view == ViewUser )
 			Rot = wwBlenderStartupRotation;
 		view = wwPin.view;
+		// lane SKYFULL1: WW_RENDER_PITCH tilts a pinned side view up by that many degrees (the sky shots)
+		if ( qEnvironmentVariableIsSet( "WW_RENDER_PITCH" ) )
+			Rot[0] -= qEnvironmentVariable( "WW_RENDER_PITCH" ).toFloat();
 	}
 
 	if ( wwPin.haveCenter )

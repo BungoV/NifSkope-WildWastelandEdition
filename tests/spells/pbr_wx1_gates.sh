@@ -191,7 +191,9 @@ if want off && aimed skyleak sunleak cloudleak moonleak; then
 			up1) FR="$UP WW_RENDER_FOV=120 WW_LOOKDEV_HOUR=1" ;;
 		esac
 		shot "$OLD" off_${f}_old $FR
-		shot "$ARM" off_${f}_new $FR $REDPIN
+		# lane SKYFULL1: the rows ship ON now; the unpinned run is the full sky (judged: it is NOT the old picture)
+		shot "$ARM" off_${f}_default $FR $REDPIN
+		shot "$ARM" off_${f}_new $FR $NOPART $REDPIN
 		shot "$ARM" off_${f}_pinned_new $FR $NOPART $REDPIN
 	done
 fi
