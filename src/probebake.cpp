@@ -189,6 +189,7 @@ struct Bin
 	quint32 n = 0;
 	double alb2[3] = { 0, 0, 0 }, nrm2[3] = { 0, 0, 0 };   // lane CAPTURE1: the hit way's samples
 	quint32 n2 = 0;
+	double nrmS[3] = { 0, 0, 0 };   // lane SMOOTHN1: the smooth normal at each hit (the tri way's stored normal)
 	void add( const Bin & o )
 	{
 		for ( int k = 0; k < 3; k++ ) {
@@ -197,6 +198,7 @@ struct Bin
 			alb[k] += o.alb[k];
 			alb2[k] += o.alb2[k];
 			nrm2[k] += o.nrm2[k];
+			nrmS[k] += o.nrmS[k];
 		}
 		n += o.n;
 		n2 += o.n2;
@@ -280,6 +282,9 @@ struct Chunk
 	qint64 turned = 0;          // links refused by the facing rule
 	qint64 back = 0, door = 0, tinted = 0;   // v4 links: to a back surfel, through a door, through glass
 	qint64 decal = 0, surfHits = 0;          // lane GICAL1: surfel hits under a decal; all surfel hits
+	qint64 smoothHits = 0, nmapHits = 0;     // lane SMOOTHN1: hits given a smooth normal; bent by a normal map
+	qint64 rays = 0;                         // lane SMOOTHN1: rays cast in pass 2 (the base set plus the extra batches)
+	int raised = 0, multMax = 1;             // lane SMOOTHN1: probes given extra batches; the largest multiple
 };
 
 } // namespace
@@ -322,6 +327,20 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	const bool redCentroid = spec.albedoRed == QLatin1String( "centroid" );
 	const bool redNoFilter = spec.albedoRed == QLatin1String( "nofilter" );
 	R.albedoWay = wayHit ? QStringLiteral( "hit" ) : wayCube ? QStringLiteral( "cube" ) : QStringLiteral( "tri" );
+	/* lane SMOOTHN1: the soup's vertex normals (NIF normals, the ground's VNML): a hit's normal is their blend at
+	 * the hit, in every way; the hit and cube ways also bend it by the shape's normal map */
+	const bool smoothOn = !soup.vn.empty();
+	for ( size_t i = 0; smoothOn && i < size_t( soup.triCount() ); i++ )
+		R.smoothTris += soup.hasNormals( i ) ? 1 : 0;
+	if ( matOk )
+		for ( const ProbeSoup::TriMat & m : soup.mat )
+			R.nmapTris += m.ntex >= 0 ? 1 : 0;
+	/* lane SMOOTHN1: noise-driven ray counts. Every probe casts today's set (N Fibonacci rays); a probe whose
+	 * light-free estimate is still noisy after it gets more batches of N (the same set, turned at random,
+	 * seeded by the probe and the batch) up to adaptMax x N. Never fewer rays than the base set. */
+	const int adaptMax = qBound( 1, spec.adaptMax, 64 );
+	R.adaptMax = adaptMax;
+	R.baseRays = N;
 	if ( spec.albedoWay != R.albedoWay )
 		R.albedoWay += QStringLiteral( " (asked %1; the soup carries no per-triangle material)" ).arg( spec.albedoWay );
 
@@ -549,6 +568,86 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		dirs[size_t( i ) * 3 + 2] = z;
 	}
 	const double omega = kFourPi / N;
+	/* lane SMOOTHN1: batch b of probe pi: b = 0 is the set above; b > 0 the same set under a random rotation
+	 * (Shoemake's uniform quaternion), seeded by (pi, b) alone -- the same rays whatever thread runs it */
+	auto batchDirs = [&]( int pi, int b, std::vector<double> & buf ) -> const double * {
+		if ( b == 0 )
+			return dirs.data();
+		quint64 s = quint64( pi ) * 0x9E3779B97F4A7C15ull ^ ( quint64( b ) * 0xD1B54A32D192ED03ull + 0x5851F42D4C957F2Dull );
+		auto next = [&s]() {
+			s += 0x9E3779B97F4A7C15ull;
+			quint64 z = s;
+			z = ( z ^ ( z >> 30 ) ) * 0xBF58476D1CE4E5B9ull;
+			z = ( z ^ ( z >> 27 ) ) * 0x94D049BB133111EBull;
+			z ^= z >> 31;
+			return double( z >> 11 ) * ( 1.0 / 9007199254740992.0 );
+		};
+		const double u1 = next(), u2 = next(), u3 = next(), tp = 2.0 * 3.14159265358979323846;
+		const double a = std::sqrt( 1.0 - u1 ), c = std::sqrt( u1 );
+		const double x = a * std::sin( tp * u2 ), y = a * std::cos( tp * u2 ), z = c * std::sin( tp * u3 ), w = c * std::cos( tp * u3 );
+		const double M[9] = { 1 - 2 * ( y * y + z * z ), 2 * ( x * y - z * w ), 2 * ( x * z + y * w ),
+			2 * ( x * y + z * w ), 1 - 2 * ( x * x + z * z ), 2 * ( y * z - x * w ),
+			2 * ( x * z - y * w ), 2 * ( y * z + x * w ), 1 - 2 * ( x * x + y * y ) };
+		buf.resize( dirs.size() );
+		for ( size_t i = 0; i < dirs.size(); i += 3 )
+			for ( int r = 0; r < 3; r++ )
+				buf[i + size_t( r )] = M[r * 3] * dirs[i] + M[r * 3 + 1] * dirs[i + 1] + M[r * 3 + 2] * dirs[i + 2];
+		return buf.data();
+	};
+	/* lane SMOOTHN1: the noise test after each batch. The light-free estimate per octant (a ray's value: 1 for sky,
+	 * the hit triangle's albedo luma, 0 for the void) is split into 8 interleaved subsets (ray index mod 8); the
+	 * standard error of the octant mean from the subsets' spread must fall under max(rel x mean, abs) in every
+	 * octant, or the probe takes another batch (up to adaptMax batches). */
+	std::vector<int> multOf( probes.size(), 1 );
+	auto noisy = [&]( const double ps[8][8], const double pc[8][8] ) {
+		for ( int oc = 0; oc < 8; oc++ ) {
+			double m[8], mean = 0;
+			bool ok = true;
+			for ( int s = 0; s < 8 && ok; s++ ) {
+				ok = pc[s][oc] > 0;
+				m[s] = ok ? ps[s][oc] / pc[s][oc] : 0.0;
+				mean += m[s] / 8.0;
+			}
+			if ( !ok )
+				continue;
+			double v = 0;
+			for ( int s = 0; s < 8; s++ )
+				v += ( m[s] - mean ) * ( m[s] - mean ) / 7.0;
+			if ( std::sqrt( v / 8.0 ) > std::max( double( spec.adaptRel ) * mean, double( spec.adaptAbs ) ) )
+				return true;
+		}
+		return false;
+	};
+	/* lane SMOOTHN1: the smooth normal at local point p of soup triangle tri (its vertex normals blended by the
+	 * barycentric weights, renormalized), on fn's side; false when the soup has none for it */
+	auto smoothAt = [&]( int tri, const double p[3], const double fn[3], double out[3] ) -> bool {
+		if ( !smoothOn || !soup.hasNormals( size_t( tri ) ) )
+			return false;
+		const float * T = &bvh.t[size_t( tri ) * 9];
+		const double e1[3] = { double( T[3] ) - T[0], double( T[4] ) - T[1], double( T[5] ) - T[2] };
+		const double e2[3] = { double( T[6] ) - T[0], double( T[7] ) - T[1], double( T[8] ) - T[2] };
+		const double v[3] = { p[0] - T[0], p[1] - T[1], p[2] - T[2] };
+		auto dot = []( const double * a, const double * b ) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+		const double d00 = dot( e1, e1 ), d01 = dot( e1, e2 ), d11 = dot( e2, e2 ), d20 = dot( v, e1 ),
+			d21 = dot( v, e2 ), den = d00 * d11 - d01 * d01;
+		if ( !( std::fabs( den ) > 0 ) )
+			return false;
+		double w1 = ( d11 * d20 - d01 * d21 ) / den, w2 = ( d00 * d21 - d01 * d20 ) / den;
+		w1 = std::clamp( w1, 0.0, 1.0 );
+		w2 = std::clamp( w2, 0.0, 1.0 - w1 );
+		const double w[3] = { 1.0 - w1 - w2, w1, w2 };
+		double sn[3] = { 0, 0, 0 };
+		for ( int i = 0; i < 3; i++ )
+			for ( int k = 0; k < 3; k++ )
+				sn[k] += w[i] * soup.vn[size_t( tri ) * 9 + size_t( i * 3 + k )] / 32767.0;
+		const double sl = std::sqrt( dot( sn, sn ) );
+		if ( !( sl > 1e-6 ) )
+			return false;
+		const double s = dot( sn, fn ) < 0 ? -1.0 / sl : 1.0 / sl;
+		for ( int k = 0; k < 3; k++ )
+			out[k] = sn[k] * s;
+		return true;
+	};
 	auto octantOf = [redOct]( const double d[3] ) {
 		int o = ( d[0] < 0 ? 1 : 0 ) | ( d[1] < 0 ? 2 : 0 ) | ( d[2] < 0 ? 4 : 0 );
 		if ( redOct )
@@ -600,15 +699,17 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	 * a3 its tri-way albedo bytes), for the hit and cube ways. p = the local hit point, dist and
 	 * omegaS = the sample's distance and solid angle (its footprint picks the mip), fn = the face
 	 * normal turned toward the probe. Albedo linear 0..1; the normal is the interpolated vertex
-	 * normal on fn's side (fn when the mesh has none). */
+	 * normal on fn's side (fn when the mesh has none). Lane SMOOTHN1: returns bit 0 = the soup's smooth
+	 * normal was used, bit 1 = a normal map bent it. */
 	auto matAt = [&]( const float * T, const ProbeSoup::TriMat & m, const quint8 * a3, const double p[3],
-		double dist, double omegaS, const double fn[3], const double * d, double alb[3], double nrm[3] ) {
+		double dist, double omegaS, const double fn[3], const double * d, double alb[3], double nrm[3], int vt ) -> int {
+		int used = 0;
 		for ( int k = 0; k < 3; k++ ) {
 			alb[k] = a3 ? a3[k] / 255.0 : 0.5;
 			nrm[k] = fn[k];
 		}
 		if ( redCentroid )
-			return;
+			return used;
 		const double e1[3] = { double( T[3] ) - T[0], double( T[4] ) - T[1], double( T[5] ) - T[2] };
 		const double e2[3] = { double( T[6] ) - T[0], double( T[7] ) - T[1], double( T[8] ) - T[2] };
 		const double v[3] = { p[0] - T[0], p[1] - T[1], p[2] - T[2] };
@@ -616,25 +717,31 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		const double d00 = dot( e1, e1 ), d01 = dot( e1, e2 ), d11 = dot( e2, e2 ), d20 = dot( v, e1 ),
 			d21 = dot( v, e2 ), den = d00 * d11 - d01 * d01;
 		if ( !( std::fabs( den ) > 0 ) )
-			return;
+			return used;
 		double w1 = ( d11 * d20 - d01 * d21 ) / den, w2 = ( d00 * d21 - d01 * d20 ) / den;
 		w1 = std::clamp( w1, 0.0, 1.0 );
 		w2 = std::clamp( w2, 0.0, 1.0 - w1 );
 		const double w[3] = { 1.0 - w1 - w2, w1, w2 };
+		/* lane SMOOTHN1: the soup's vertex normals (vt: the soup triangle; -1 = a left-out shape) when it carries
+		 * them -- the ground's VNML too -- else the material's (the models', as before) */
+		const bool fromVn = vt >= 0 && soup.hasNormals( size_t( vt ) );
 		double sn[3] = { 0, 0, 0 };
 		for ( int i = 0; i < 3; i++ )
 			for ( int k = 0; k < 3; k++ )
-				sn[k] += w[i] * m.n[i * 3 + k] / 32767.0;
+				sn[k] += w[i] * ( fromVn ? soup.vn[size_t( vt ) * 9 + size_t( i * 3 + k )] : m.n[i * 3 + k] ) / 32767.0;
 		const double sl = std::sqrt( dot( sn, sn ) );
+		double side = 1.0;
 		if ( sl > 1e-6 ) {
-			const double s = dot( sn, fn ) < 0 ? -1.0 / sl : 1.0 / sl;
+			side = dot( sn, fn ) < 0 ? -1.0 : 1.0;
 			for ( int k = 0; k < 3; k++ )
-				nrm[k] = sn[k] * s;
+				nrm[k] = sn[k] * side / sl;
+			used |= fromVn ? 1 : 0;
 		}
 		const DDSTexture16 * tx = m.tex >= 0 ? static_cast<const DDSTexture16 *>( soup.matTexPtr[size_t( m.tex )] ) : nullptr;
-		if ( !tx )
-			return;
-		const DDSTexture16 * pl = m.pal >= 0 ? static_cast<const DDSTexture16 *>( soup.matTexPtr[size_t( m.pal )] ) : nullptr;
+		const DDSTexture16 * nx = m.ntex >= 0 && sl > 1e-6 ? static_cast<const DDSTexture16 *>( soup.matTexPtr[size_t( m.ntex )] )
+			: nullptr;
+		if ( !tx && !nx )
+			return used;
 		float uv[2] = { 0, 0 }, vc[3] = { 0, 0, 0 };
 		for ( int i = 0; i < 3; i++ ) {
 			uv[0] += float( w[i] ) * m.uv[i * 2];
@@ -647,16 +754,53 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		const double aw = 0.5 * std::sqrt( dot( cr, cr ) );
 		const double auv = 0.5 * std::fabs( double( m.uv[2] - m.uv[0] ) * ( m.uv[5] - m.uv[1] )
 			- double( m.uv[4] - m.uv[0] ) * ( m.uv[3] - m.uv[1] ) );
-		int tw = 1, th = 1;
-		ProbeAlbedo::sizeOf( tx, &tw, &th );
 		const double cosI = std::max( std::fabs( dot( fn, d ) ), 0.1 );
-		const double texels = aw > 0 ? dist * dist * omegaS / cosI * auv * tw * th / aw : 0.0;
-		const float lod = texels > 1.0 ? float( 0.5 * std::log2( texels ) ) : 0.0f;
+		auto lodOf = [&]( const DDSTexture16 * x ) {
+			int tw = 1, th = 1;
+			ProbeAlbedo::sizeOf( x, &tw, &th );
+			const double texels = aw > 0 ? dist * dist * omegaS / cosI * auv * tw * th / aw : 0.0;
+			return texels > 1.0 ? float( 0.5 * std::log2( texels ) ) : 0.0f;
+		};
+		/* lane SMOOTHN1: the normal map at the hit, in the frame the cell view draws with (normal n, the NIF's
+		 * tangent t made square to n, n x t): x (n x t) + y t + z n, then on the side the probe sees */
+		if ( nx ) {
+			double un[3], tb[3] = { 0, 0, 0 };
+			for ( int k = 0; k < 3; k++ )
+				un[k] = sn[k] / sl;
+			for ( int i = 0; i < 3; i++ )
+				for ( int k = 0; k < 3; k++ )
+					tb[k] += w[i] * m.t[i * 3 + k] / 32767.0;
+			const double tu = dot( tb, un );
+			for ( int k = 0; k < 3; k++ )
+				tb[k] -= un[k] * tu;
+			const double tl = std::sqrt( dot( tb, tb ) );
+			if ( tl > 1e-6 ) {
+				for ( int k = 0; k < 3; k++ )
+					tb[k] /= tl;
+				const double bb[3] = { un[1] * tb[2] - un[2] * tb[1], un[2] * tb[0] - un[0] * tb[2], un[0] * tb[1] - un[1] * tb[0] };
+				float tn[3];
+				ProbeAlbedo::sampleNormal( nx, uv[0], uv[1], lodOf( nx ), tn );
+				double pn[3];
+				for ( int k = 0; k < 3; k++ )
+					pn[k] = tn[0] * bb[k] + tn[1] * tb[k] + tn[2] * un[k];
+				const double pl2 = std::sqrt( dot( pn, pn ) );
+				if ( pl2 > 1e-6 ) {
+					for ( int k = 0; k < 3; k++ )
+						nrm[k] = pn[k] * side / pl2;
+					used |= 2;
+				}
+			}
+		}
+		if ( !tx )
+			return used;
+		const DDSTexture16 * pl = m.pal >= 0 ? static_cast<const DDSTexture16 *>( soup.matTexPtr[size_t( m.pal )] ) : nullptr;
+		const float lod = lodOf( tx );
 		const float row = m.row >= 0.0f ? m.row : m.rowScale * vc[0];
 		float out[3];
 		ProbeAlbedo::sampleLod( tx, pl, uv[0], uv[1], lod, row, vc, out );
 		for ( int k = 0; k < 3; k++ )
 			alb[k] = out[k];
+		return used;
 	};
 	/* lane BAKE4: what the glass between the probe and tEnd lets through, per channel: the
 	 * product over every pane crossed. A pane is crossed once (the next search starts a
@@ -714,11 +858,25 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		for ( int pi = ch.first; pi < ch.first + ch.count; pi++ ) {
 			const ProbePoint & pp = probes[size_t( pi )];
 			const double o[3] = { double( pp.pos[0] ) - O[0], double( pp.pos[1] ) - O[1], double( pp.pos[2] ) };
+			int mult = 1;
+			double ps[8][8] = {}, pc[8][8] = {};
+			std::vector<double> rbuf;
+			for ( int b = 0; b < mult; b++ ) {
+			const double * bd = batchDirs( pi, b, rbuf );
 			for ( int i = 0; i < N; i++ ) {
-				const double * d = &dirs[size_t( i ) * 3];
+				const double * d = &bd[size_t( i ) * 3];
 				double t = 0;
 				int tri;
-				if ( !cast( o, d, &t, &tri ) || !( t > 1.0e-3 ) )
+				const bool hitAny = cast( o, d, &t, &tri );
+				if ( adaptMax > 1 ) {   // lane SMOOTHN1: the light-free estimate the noise test reads
+					const quint8 * a = hitAny && albKnown ? &soup.alb[size_t( tri ) * 3] : nullptr;
+					const double val = hitAny ? ( a ? ( 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2] ) / 255.0 : 0.5 )
+						: ( spec.noSky ? 0.0 : 1.0 );
+					const int oc = ( d[0] < 0 ? 1 : 0 ) | ( d[1] < 0 ? 2 : 0 ) | ( d[2] < 0 ? 4 : 0 );
+					ps[i & 7][oc] += val;
+					pc[i & 7][oc] += 1.0;
+				}
+				if ( !hitAny || !( t > 1.0e-3 ) )
 					continue;
 				float hw[3];
 				hitPoint( o, d, t, hw );
@@ -727,6 +885,14 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				if ( bin < 0 )
 					continue;
 				Bin & s = ch.surfels[keyFor( hw, cellS )].b[bin];
+				{   // lane SMOOTHN1: the smooth normal at the hit (the face normal where the soup has none)
+					const double p[3] = { o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t };
+					double ns[3];
+					const bool sm = smoothAt( tri, p, n, ns );
+					ch.smoothHits += sm ? 1 : 0;
+					for ( int k = 0; k < 3; k++ )
+						s.nrmS[k] += sm ? ns[k] : n[k];
+				}
 				/* lane GICAL1: a decal lying on the hit surface (within 2 units in front of it, 0.25 behind) covers it
 				 * by its mean coverage, over its own albedo (the game blends it over the surface) */
 				double dA = 0;
@@ -749,8 +915,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				if ( wayHit ) {   // lane CAPTURE1: the hit's own point
 					const double p[3] = { o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t };
 					double a2[3], n2[3];
-					matAt( &bvh.t[size_t( tri ) * 9], soup.mat[size_t( tri )], &soup.alb[size_t( tri ) * 3], p, t, omega,
-						n, d, a2, n2 );
+					const int used = matAt( &bvh.t[size_t( tri ) * 9], soup.mat[size_t( tri )], &soup.alb[size_t( tri ) * 3], p, t,
+						omega, n, d, a2, n2, tri );
+					ch.nmapHits += ( used & 2 ) ? 1 : 0;
 					for ( int k = 0; k < 3; k++ ) {
 						s.alb2[k] += a2[k];
 						s.nrm2[k] += n2[k];
@@ -758,6 +925,14 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					s.n2++;
 				}
 			}
+			// lane SMOOTHN1: still noisy after this batch: one more (never fewer than the base set)
+			if ( b + 1 == mult && mult < adaptMax && noisy( ps, pc ) )
+				mult++;
+			}
+			multOf[size_t( pi )] = mult;
+			if ( mult > 1 )
+				ch.raised++;
+			ch.multMax = std::max( ch.multMax, mult );
 		}
 	};
 
@@ -776,24 +951,31 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			cells.clear();
 			double oSky[8] = {}, oSurf[8] = {}, oD[8] = {}, oD2[8] = {}, total = 0, voidW = 0;
 			double skyT[8][3] = {}, glassW = 0;
+			// lane SMOOTHN1: the probe's batches (pass 1 chose how many), each ray 4 pi / (N x batches)
+			const int mult = multOf[size_t( pi )];
+			const double om = kFourPi / ( double( N ) * mult );
+			std::vector<double> rbuf;
+			for ( int b = 0; b < mult; b++ ) {
+			const double * bd = batchDirs( pi, b, rbuf );
+			ch.rays += N;
 			for ( int i = 0; i < N; i++ ) {
-				const double * d = &dirs[size_t( i ) * 3];
+				const double * d = &bd[size_t( i ) * 3];
 				double t = 0;
 				int tri;
 				const int oc = octantOf( d );
 				const bool hit = cast( o, d, &t, &tri );
 				double T[3] = { 1.0, 1.0, 1.0 };
 				if ( glassOn && transmit( o, d, hit ? t : double( spec.rayMax ), T ) )
-					glassW += omega;
+					glassW += om;
 				if ( !hit ) {
 					if ( spec.noSky )
-						voidW += omega;   // an interior: out through an opening, into nothing
+						voidW += om;   // an interior: out through an opening, into nothing
 					else {
-						oSky[oc] += omega;
+						oSky[oc] += om;
 						for ( int c = 0; c < 3; c++ )
-							skyT[oc][c] += omega * T[c];
+							skyT[oc][c] += om * T[c];
 					}
-					total += omega;
+					total += om;
 					ch.misses++;
 					continue;
 				}
@@ -815,15 +997,16 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 						lk.door = doorOn( o, d, t );
 				}
 				Cell & cl = cells[lk];
-				cl.w += omega;
+				cl.w += om;
 				for ( int a = 0; a < 3; a++ ) {
-					cl.dir[a] += d[a] * omega;
-					cl.tw[a] += T[a] * omega;
+					cl.dir[a] += d[a] * om;
+					cl.tw[a] += T[a] * om;
 				}
-				oSurf[oc] += omega;
-				oD[oc] += t * omega;
-				oD2[oc] += t * t * omega;
-				total += omega;
+				oSurf[oc] += om;
+				oD[oc] += t * om;
+				oD2[oc] += t * t * om;
+				total += om;
+			}
 			}
 			// the record, as the reader's accumulator emits it
 			ProbeOut po;
@@ -1004,6 +1187,14 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			+ double( sr.normal[2] ) * sr.normal[2] );
 		for ( int c = 0; c < 3; c++ )
 			f.n[c] = ql > 0 ? sr.normal[c] / ql : 0.0;
+		/* lane SMOOTHN1: the tri way stores the mean smooth normal (f.n, the facing rule's, stays the face
+		 * normal's, as the hit way's does; the lean below keeps every link facing) */
+		if ( smoothOn && !wayHit ) {
+			const double ls = std::sqrt( a.nrmS[0] * a.nrmS[0] + a.nrmS[1] * a.nrmS[1] + a.nrmS[2] * a.nrmS[2] );
+			if ( ls > 1e-9 )
+				for ( int c = 0; c < 3; c++ )
+					sr.normal[c] = qint16( std::lround( std::clamp( a.nrmS[c] / ls, -1.0, 1.0 ) * 32767.0 ) );
+		}
 		/* lane CAPTURE1: the hit way rewrites the stored albedo and normal only; f.n (the facing
 		 * rule's) stays the face normal's, so the links are the tri way's */
 		if ( wayHit && a.n2 ) {
@@ -1112,6 +1303,11 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		R.linksTinted += ch.tinted;
 		R.decalHits += ch.decal;
 		R.surfelHits += ch.surfHits;
+		R.smoothHits += ch.smoothHits;   // lane SMOOTHN1
+		R.nmapHits += ch.nmapHits;
+		R.raysCast += ch.rays;
+		R.probesRaised += ch.raised;
+		R.multMax = std::max( R.multMax, ch.multMax );
 	}
 	R.msRays = double( tm.nsecsElapsed() ) / 1e6;
 	tm.restart();
@@ -1184,6 +1380,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		typedef std::unordered_map<Key, Acc, KeyHash> AccMap;
 		std::vector<AccMap> accF( chunks.size() ), accB( chunks.size() );
 		std::vector<qint64> cSamp( chunks.size(), 0 ), cDrop( chunks.size(), 0 ), cExtra( chunks.size(), 0 );
+		std::vector<qint64> cNmap( chunks.size(), 0 );   // lane SMOOTHN1: pixels a normal map bent
 		std::vector<std::vector<char>> dumps( cubeDumpProbes.size() );
 		auto cubeChunk = [&]( Chunk & ch ) {
 			const size_t ci = size_t( &ch - chunks.data() );
@@ -1229,8 +1426,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					const double p[3] = { o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t };
 					static const quint8 grey[3] = { 128, 128, 128 };
 					double a[3], nn[3];
-					matAt( T, extra ? soup.cubeExtraMat[size_t( tri )] : soup.mat[size_t( tri )],
-						extra ? grey : &soup.alb[size_t( tri ) * 3], p, t, com[px], fn, d, a, nn );
+					const int used = matAt( T, extra ? soup.cubeExtraMat[size_t( tri )] : soup.mat[size_t( tri )],
+						extra ? grey : &soup.alb[size_t( tri ) * 3], p, t, com[px], fn, d, a, nn, extra ? -1 : tri );
+					cNmap[ci] += ( used & 2 ) ? 1 : 0;
 					if ( slot >= 0 ) {
 						for ( int k = 0; k < 3; k++ ) {
 							drgb[px * 3 + size_t( k )] = quint8( std::lround( std::clamp( a[k], 0.0, 1.0 ) * 255.0 ) );
@@ -1282,6 +1480,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			R.albSamples += cSamp[c];
 			R.albDropped += cDrop[c];
 			R.albExtra += cExtra[c];
+			R.nmapHits += cNmap[c];
 			for ( const auto & e : accF[c] ) {
 				Acc & z = allF[e.first];
 				for ( int k = 0; k < 3; k++ ) {
@@ -1340,7 +1539,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	 * the face normal linked (a curved edge seen at a grazing angle). Such a surfel's normal leans
 	 * toward its face normal just far enough to face every probe that links it (bisection; the
 	 * face normal itself always does), so the links stay the tri way's and every link faces. */
-	if ( wayHit || wayCube ) {
+	if ( wayHit || wayCube || smoothOn ) {   // lane SMOOTHN1: the tri way's smooth normal too
 		typedef std::unordered_map<Key, std::vector<std::array<double, 3>>, KeyHash> DirMap;
 		DirMap dF, dB;
 		for ( const Chunk & ch : chunks )
@@ -1416,7 +1615,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	R.turnedMean /= qMax( 1, R.probes );
 	R.voidMean /= qMax( 1, R.probes );
 	R.noSky = spec.noSky;
-	R.rays = qint64( R.probes ) * N;
+	R.rays = R.raysCast;   // lane SMOOTHN1: the base set plus every extra batch
 
 	if ( !QDir().mkpath( outDir ) ) {
 		R.error = QStringLiteral( "cannot create %1" ).arg( outDir );
@@ -1549,6 +1748,12 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 		t << " " << h;
 	t << "\n";
 	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite ) << "\n";
+	// lane SMOOTHN1
+	t << "bake smooth normals: soup triangles with vertex normals " << r.smoothTris << ", surfel hits given one "
+	  << r.smoothHits << " of " << r.surfelHits << "; normal-mapped triangles " << r.nmapTris << ", samples a normal map bent "
+	  << r.nmapHits << "\n";
+	t << "bake ray counts: base " << r.baseRays << " a probe, up to " << r.adaptMax << "x; probes given extra batches " << r.probesRaised << " of " << r.probes
+	  << ", most " << r.multMax << "x, rays cast " << r.raysCast << " (base set alone " << qint64( r.probes ) * r.baseRays << ")\n";
 	if ( r.albedoWay != QLatin1String( "tri" ) && !r.albedoWay.isEmpty() )   // lane CAPTURE1
 		t << "bake albedo way: " << r.albedoWay << "; samples " << r.albSamples << ", pixels dropped " << r.albDropped
 		  << ", on left-out shapes " << r.albExtra << "; surfels rewritten " << r.albSurfels << ", kept tri "
@@ -1569,6 +1774,8 @@ int probeBakeCli( const QStringList & args )
 		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
 		else if ( a == QLatin1String( "--spacing" ) ) { ps.spacing = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--rays" ) ) { bs.rays = nx.toInt(); i++; }
+		// lane SMOOTHN1: the noise-driven extra batches, at most n x the base set (1 = the base set alone, the old bake)
+		else if ( a == QLatin1String( "--adapt" ) ) { bs.adaptMax = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--threads" ) ) { bs.threads = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--red" ) ) { bs.red = nx; i++; }
 		else if ( a == QLatin1String( "--no-sky" ) ) { bs.noSky = true; }
@@ -1585,7 +1792,7 @@ int probeBakeCli( const QStringList & args )
 	const QStringList rc = rect.split( ',' );
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 ) {
 		std::fprintf( stderr, "usage: probebake --soup <file> --rect minX,minY,maxX,maxY --out <dir> "
-			"[--rays n] [--threads n] [--spacing s] [--red octant|normal|oneside|rooms|glass|backface] [--no-sky] [--no-spill] [--tbk 3|4] "
+			"[--rays n] [--adapt n] [--threads n] [--spacing s] [--red octant|normal|oneside|rooms|glass|backface] [--no-sky] [--no-spill] [--tbk 3|4] "
 			"[--max-links n] [--no-openings] [--no-rooms] [--back-max f] [--back-dump tsv] [--place-red floor|...]\n" );
 		return 2;
 	}

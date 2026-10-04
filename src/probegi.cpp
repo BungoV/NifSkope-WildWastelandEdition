@@ -1335,6 +1335,8 @@ int probeGiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
 		else if ( a == QLatin1String( "--spacing" ) ) { ps.spacing = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--rays" ) ) { bs.rays = nx.toInt(); i++; }
+		// lane SMOOTHN1: the noise-driven extra batches, at most n x the base set (1 = the base set alone, the old bake)
+		else if ( a == QLatin1String( "--adapt" ) ) { bs.adaptMax = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--passes" ) ) { gs.passes = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--red" ) ) { gs.red = nx; i++; }
 		else if ( a == QLatin1String( "--rooms-red" ) ) { gs.rooms.red = nx; i++; }
@@ -1357,7 +1359,7 @@ int probeGiCli( const QStringList & args )
 	const QStringList rc = rect.split( ',' );
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() ) {
 		std::fprintf( stderr, "usage: probegi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b "
-			"[--light ...] [--spacing s] [--rays n] [--passes n] [--red noclamp|noeye|novis|...] "
+			"[--light ...] [--spacing s] [--rays n] [--adapt n] [--passes n] [--red noclamp|noeye|novis|...] "
 			"[--rooms-red conn26|boxes|glasswall] [--pinch u] [--cell u]\n" );
 		return 2;
 	}

@@ -1863,6 +1863,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 * They, and the placed decals (TXST, projected below), are folded into the surfel albedo (ProbeSoup::decal).
  * WW_CELL_BAKE_DECALS=0 leaves them out, as before. */
 	const bool decalFold = qEnvironmentVariable( "WW_CELL_BAKE_DECALS" ) != QLatin1String( "0" );
+	/* lane SMOOTHN1: the bake's hit normal is the surface's smooth one -- the NIF's vertex normals, the ground's
+	 * LAND VNML -- blended at the hit (every albedo way); the hit and cube ways also bend it by the shape's
+	 * normal map at the hit's UV. WW_CELL_BAKE_SMOOTH=0 (the face normal, as before, byte for byte) and
+	 * WW_CELL_BAKE_NMAP=0 (no normal maps) are the gates' reds only. */
+	const bool smoothOn = qEnvironmentVariable( "WW_CELL_BAKE_SMOOTH" ) != QLatin1String( "0" );
+	const bool nmapOn = smoothOn && qEnvironmentVariable( "WW_CELL_BAKE_NMAP" ) != QLatin1String( "0" );
+	int soupSmoothTris = 0, soupLandVnml = 0, soupLandDerived = 0, soupNmapModelSpace = 0;
+	const QString landDump = qEnvironmentVariable( "WW_CELL_BAKE_LAND_DUMP" );
 	int soupDecalShapes = 0, soupPlacedDecals = 0, soupPlacedDecalTris = 0;
 	int soupRefractShapes = 0, soupRefractTris = 0;
 	QMap<QString, int> soupRefractModels;
@@ -2297,6 +2305,20 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 						for ( int k = 0; k < 3; k++ )
 							m.n[i * 3 + k] = l > 1e-6f ? qint16( std::lround( std::clamp( wn[k] / l, -1.0f, 1.0f ) * 32767.0f ) ) : 0;
 					}
+					if ( nmapOn && s.geom.tan.size() >= nv * 3 ) {   // lane SMOOTHN1: the tangent the cell view draws with
+						const Vector3 wt = p.rot * Vector3( s.geom.tan[vi * 3], s.geom.tan[vi * 3 + 1], s.geom.tan[vi * 3 + 2] );
+						const float l = wt.length();
+						for ( int k = 0; k < 3; k++ )
+							m.t[i * 3 + k] = l > 1e-6f ? qint16( std::lround( std::clamp( wt[k] / l, -1.0f, 1.0f ) * 32767.0f ) ) : 0;
+					}
+				}
+				/* lane SMOOTHN1: the shape's tangent-space normal map (a model-space one, Shader Flags 1 bit 12, is
+				 * left out and counted: its channels are model axes, not a tangent frame) */
+				if ( nmapOn && !s.tex1.isEmpty() && s.geom.tan.size() >= nv * 3 ) {
+					if ( s.shaderSF1 & ( 1U << 12 ) )
+						soupNmapModelSpace++;
+					else
+						m.ntex = matTexOf( s.tex1 );
 				}
 				return m;
 			};
@@ -2435,6 +2457,17 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 							probeSoup.addTri( w[0], w[1], w[2], rgb );
 							if ( wantMat )
 								probeSoup.setLastMat( triMat( t, s.tex0, true ) );
+							if ( smoothOn && s.geom.nrm.size() >= nv * 3 ) {   // lane SMOOTHN1: the NIF's vertex normals, world
+								float vn9[9];
+								for ( int i = 0; i < 3; i++ ) {
+									const size_t vi = size_t( s.geom.tris[t + size_t( i )] );
+									const Vector3 wn = p.rot * Vector3( s.geom.nrm[vi * 3], s.geom.nrm[vi * 3 + 1], s.geom.nrm[vi * 3 + 2] );
+									for ( int k = 0; k < 3; k++ )
+										vn9[i * 3 + k] = wn[k];
+								}
+								probeSoup.setLastNormals( vn9 );
+								soupSmoothTris++;
+							}
 						} else if ( okTri ) {
 							probeSoup.addTri( w[0], w[1], w[2] );
 						}
@@ -3032,6 +3065,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	if ( probing ) {
 		if ( !spec.interior ) {
 			// the ground is part of what a column ray meets, painted or not
+			QFile landDumpFile;   // lane SMOOTHN1: the gate's land (heights + raw VNML), WW_CELL_BAKE_LAND_DUMP
+			if ( !landDump.isEmpty() && baking ) {
+				landDumpFile.setFileName( landDump );
+				if ( landDumpFile.open( QIODevice::WriteOnly ) )
+					landDumpFile.write( "LND1", 4 );
+			}
 			for ( int y = y0; y <= y1; y++ )
 				for ( int x = x0; x <= x1; x++ ) {
 					EsmLand l;
@@ -3039,6 +3078,37 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 						continue;
 					const float ox = float( x ) * CELL_UNITS, oy = float( y ) * CELL_UNITS;
 					const float st = CELL_UNITS / float( LAND_GRID - 1 );
+					if ( landDumpFile.isOpen() ) {
+						const qint32 xy[2] = { x, y };
+						const quint8 hn = l.hasNormals ? 1 : 0;
+						landDumpFile.write( reinterpret_cast<const char *>( xy ), sizeof xy );
+						landDumpFile.write( reinterpret_cast<const char *>( &hn ), 1 );
+						landDumpFile.write( reinterpret_cast<const char *>( &l.heights[0][0] ), sizeof l.heights );
+						landDumpFile.write( reinterpret_cast<const char *>( l.normalsRaw ), sizeof l.normalsRaw );
+					}
+					/* lane SMOOTHN1: the ground's vertex normals -- its VNML, or (a LAND without one) the heights'
+					 * central differences -- so a terrain hit gets the game's smooth normal, not its quad's face */
+					auto landN = [&]( int r, int c, float * o ) {
+						if ( l.hasNormals ) {
+							for ( int k = 0; k < 3; k++ )
+								o[k] = l.normals[r][c][k];
+							return;
+						}
+						const int c0 = qMax( c - 1, 0 ), c1 = qMin( c + 1, LAND_GRID - 1 );
+						const int r0 = qMax( r - 1, 0 ), r1 = qMin( r + 1, LAND_GRID - 1 );
+						const float gx = ( l.heights[r][c1] - l.heights[r][c0] ) / ( float( c1 - c0 ) * st );
+						const float gy = ( l.heights[r1][c] - l.heights[r0][c] ) / ( float( r1 - r0 ) * st );
+						const float n = std::sqrt( gx * gx + gy * gy + 1.0f );
+						o[0] = -gx / n;
+						o[1] = -gy / n;
+						o[2] = 1.0f / n;
+					};
+					if ( baking && smoothOn ) {
+						if ( l.hasNormals )
+							soupLandVnml++;
+						else
+							soupLandDerived++;
+					}
 					for ( int r = 0; r + 1 < LAND_GRID; r++ )
 						for ( int c = 0; c + 1 < LAND_GRID; c++ ) {
 							const float a[3] = { ox + c * st, oy + r * st, l.heights[r][c] };
@@ -3066,7 +3136,21 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 								for ( int k = 0; k < 3; k++ )
 									rgb[k] = quint8( std::lround( ProbeAlbedo::srgbToLinear( g[k] ) * 255.0f ) );
 								probeSoup.addTri( a, b, cc, rgb );
+								if ( smoothOn ) {
+									float vn9[9];
+									landN( r, c, vn9 );
+									landN( r, c + 1, vn9 + 3 );
+									landN( r + 1, c + 1, vn9 + 6 );
+									probeSoup.setLastNormals( vn9 );
+								}
 								probeSoup.addTri( a, cc, d, rgb );
+								if ( smoothOn ) {
+									float vn9[9];
+									landN( r, c, vn9 );
+									landN( r + 1, c + 1, vn9 + 3 );
+									landN( r + 1, c, vn9 + 6 );
+									probeSoup.setLastNormals( vn9 );
+								}
 							} else {
 								probeSoup.addTri( a, b, cc );
 								probeSoup.addTri( a, cc, d );
@@ -3183,6 +3267,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				if ( qEnvironmentVariableIsSet( "WW_CELL_PROBE_BACKMAX" ) )
 					bs.backMax = qEnvironmentVariable( "WW_CELL_PROBE_BACKMAX" ).toFloat();
 				bs.backDump = qEnvironmentVariable( "WW_CELL_PROBE_BACKDUMP" );
+				// lane SMOOTHN1: the most batches a noisy probe takes (1 = the base set alone: the gate's pin)
+				if ( qEnvironmentVariableIntValue( "WW_CELL_PROBE_BAKE_ADAPT" ) > 0 )
+					bs.adaptMax = qEnvironmentVariableIntValue( "WW_CELL_PROBE_BAKE_ADAPT" );
 				// an interior's misses are void, never sky -- unless its cell shows the sky (lane SKYINT1, the deck's
 				// rule: a ray that meets nothing sees the sky)
 				bs.noSky = spec.interior && !( cellInteriorFlags( world.interior() ) & 0x0080u );
@@ -3225,6 +3312,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				  << albUntextured << ", ground quads from the splat " << albLandSplat << ", flat tone x VCLR "
 				  << albLandFlat << ", maps read " << probeAlb.texturesRead << ", missing " << probeAlb.texturesMissing
 				  << "\n";
+				// lane SMOOTHN1: where the soup's vertex normals came from
+				t << "  bake smooth normals " << ( smoothOn ? "on" : "OFF (WW_CELL_BAKE_SMOOTH=0)" ) << ", normal maps "
+				  << ( nmapOn ? "on" : "OFF" ) << ": object triangles with NIF normals " << soupSmoothTris << ", ground cells from VNML "
+				  << soupLandVnml << ", from the heights (no VNML) " << soupLandDerived << ", model-space normal maps left out "
+				  << soupNmapModelSpace << "\n";
 				// lane BAKE4: the placer's room boxes go into the `.tbk` v4 files
 				if ( !probeBake( probeSoup, pr.probes, bs, QDir::cleanPath( dir ), &bres, &pr.roomBoxes ) ) {
 					t << "  bake REFUSED: " << bres.error << "\n";

@@ -75,6 +75,9 @@ public:
 	 *  (the map's green, `row`) instead, as samplePalette(). */
 	static void sampleLod( const DDSTexture16 * t, const DDSTexture16 * pal, float u, float v, float lod, float row,
 		const float vc[3], float out[3] );
+	/*! lane SMOOTHN1: a tangent-space normal map at (u, v) and mip `lod`, decoded as the cell view's shader
+	 *  decodes it (x, y = rg * 2 - 1, z = sqrt(1 - x^2 - y^2)); the raw texel, no sRGB curve. */
+	static void sampleNormal( const DDSTexture16 * t, float u, float v, float lod, float out[3] );
 	//! the map's mip-0 size (texels), for the footprint's mip choice
 	static void sizeOf( const DDSTexture16 * t, int * w, int * h );
 

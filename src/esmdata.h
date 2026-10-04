@@ -323,6 +323,11 @@ struct EsmLand
 	QVector<EsmLandLayer> layers[4];        //!< ATXT/VTXT layers, draw order
 	bool hasColors = false;                 //!< VCLR present
 	quint8 colors[33][33][3];               //!< [row][col] RGB, 255 = neutral
+	/*! Lane SMOOTHN1: VNML, the game's own vertex normals on the same 33x33 grid ([row][col], world x y z,
+	 *  unit length after decode). The raw bytes are kept beside them so a gate can decode them on its own. */
+	bool hasNormals = false;
+	float normals[33][33][3];
+	quint8 normalsRaw[33 * 33 * 3];
 };
 
 /*! v9 (lane HORIZON3, 2026-09-19): ONE WORKSHOP BUILD AREA.
