@@ -96,6 +96,32 @@ Newest at the top.
   5x5 alone, so no-LOD could never fail there. The horizon check takes high probes whose band is open in the
   5x5 alone.
 
+## 2026-10-03 lane GICAL1
+
+- The Edit tool rewrote fo4_default.frag (a mixed-ending file) with LF only, dropping its 34 CRLF lines. Caught by a
+  byte count, restored by an aligned diff. Since then every edit to a mixed file goes through a small script that
+  edits the LF view and gives each line back its old ending (work/tools/eoledit.py).
+- Backslashes collapse when a heredoc goes through the tool call ("\\n" became "\n", a sed "\\" failed). Build such
+  strings in Python with chr(92) or write the edit list with the Write tool.
+- The first STATUS timestamps were typed from feel ("22:0x") instead of read from the clock. Fixed after running date.
+- The shader's "nearest air cell" in the GI room sample kept the FIRST candidate, not the nearest (the test
+  "already found" doubled as "is direct"). Found while writing the Python twin, before any build.
+- Probe 80 (albedo as drawn, blends skipped) was first read as "dark grime over 59% of the view, the bake 2x too
+  bright". It was p80 drawing blended shapes opaque. Probe 81 (blends composited by their own alpha) is the honest
+  reference: the decals change 36% of the w1 pixels and darken the albedo 12%.
+- The first decal fold took only the dropped blend/decal SHAPES and missed the PLACED decals (TXST refs projected
+  after the soup is built): 0.7% of surfel hits under a decal, the w1 mean unchanged in the 4th decimal. One bake
+  and one build spent. Before folding "what the soup leaves out", list every route that draws into the visible
+  picture but not into the soup (dropped shapes, placed decals, actors, effects) and count each in the census.
+- The gap fill was gated on "not the sky mode" instead of "an interior". The cell_sky keepamb red turns the sky mode
+  off on an exterior, so the fill ran outdoors there: cell_sky R open fell to 89.9% equal (bar 97%). Gate a feature
+  on the scope it was designed for (cellInterior), not on the absence of another mode.
+- I fixed CRLF on 4 shader lines after the last build. The sky gate's freshness check then failed, and the next
+  build did nothing (make relinks only when code changes, and the shaders are copied only on a relink). Do every
+  source touch before the last build; after a shader-only change, touch one .cpp so the build relinks.
+- gates.sh ran cell_pass without checking its reference bakes; they live only in other checkouts. Check a gate's
+  inputs exist before a long queue.
+
 ## 2026-10-03 BOUNCE2: a gate script edited while a runner was executing it
 
 - What: cell_gi.sh was edited (Edit tool) while gates.sh was running `bash tests/spells/cell_gi.sh --red grow`
