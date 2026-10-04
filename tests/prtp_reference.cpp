@@ -44,7 +44,7 @@ struct Soup
 	std::vector<double> glassT;                            // 3 per pane, 0..1
 	// lane ALPHATEST1: masks
 	struct Map { int w = 0, h = 0; std::vector<uint8_t> a; };
-	struct Masked { int map = -1; uint32_t thr = 0; float uv[6]; };
+	struct Masked { int map = -1; uint32_t thr = 0; float uv[6]; float as[3] = { 1, 1, 1 }; };   // as: lane ALPHATEST2
 	std::vector<Map> maps;
 	std::vector<int> maskOf;                               // per triangle, into `masked`; -1 = solid
 	std::vector<Masked> masked;
@@ -61,7 +61,12 @@ struct Soup
 		v -= std::floor( v );
 		const int x = std::min( std::max( int( u * mp.w ), 0 ), mp.w - 1 );
 		const int y = std::min( std::max( int( v * mp.h ), 0 ), mp.h - 1 );
-		return mp.a[size_t( y ) * size_t( mp.w ) + size_t( x )] < m.thr;
+		const int a = mp.a[size_t( y ) * size_t( mp.w ) + size_t( x )];
+		if ( m.as[0] == 1.0f && m.as[1] == 1.0f && m.as[2] == 1.0f )
+			return uint32_t( a ) < m.thr;
+		// lane ALPHATEST2: the renderer's product, map alpha x the corners' scale interpolated
+		const double sc = b0 * m.as[0] + double( b1 ) * m.as[1] + double( b2 ) * m.as[2];
+		return double( a ) * sc < double( m.thr );
 	}
 	std::vector<int16_t> vn;                               // lane SMOOTHN1: 9 snorm16 a triangle (empty: none)
 };
@@ -112,7 +117,8 @@ bool readSoup( const char * path, Soup & s )
 		if ( std::fread( &bytes, 4, 1, f ) != 1 )
 			break;
 		const long long body = _ftelli64( f );
-		if ( tail[0] == 0x314B4D41u ) {   // 'AMK1' (lane ALPHATEST1): its own reader of the masks
+		if ( tail[0] == 0x314B4D41u || tail[0] == 0x324B4D41u ) {   // 'AMK1' (lane ALPHATEST1): its own reader of the masks
+			const bool amk2 = tail[0] == 0x324B4D41u;   // lane ALPHATEST2: + 3 f32 a triangle, the corners' scale (AMK1's slot)
 			bool ok = true;
 			auto u32 = [&]() { uint32_t x = 0; ok = ok && std::fread( &x, 4, 1, f ) == 1; return x; };
 			const uint32_t nm = u32();
@@ -139,6 +145,8 @@ bool readSoup( const char * path, Soup & s )
 				mk.thr = u32();
 				mk.map = int( map );
 				ok = ok && std::fread( mk.uv, 4, 6, f ) == 6 && tri < n && map < nm;
+				if ( amk2 )
+					ok = ok && std::fread( mk.as, 4, 3, f ) == 3;
 				if ( !ok )
 					break;
 				s.maskOf[tri] = int( s.masked.size() );

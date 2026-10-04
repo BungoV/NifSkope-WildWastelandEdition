@@ -1414,7 +1414,11 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( s.size() ) );
 			f.write( s.data(), qint64( s.size() ) );
 		};
-		sizedBegin( 0x314B4D41u /* 'AMK1' */, quint32( soup.amask.tris.size() ) );
+		/* lane ALPHATEST2: 'AMK2' = AMK1 with 3 f32 more a triangle (each corner's vertex alpha x material alpha),
+		 * written only when some triangle's scale is not 1: otherwise the AMK1 bytes exactly. LAND6: it takes AMK1's
+		 * slot in the sized order (AMK1 or AMK2, EMT1, VNM1, DRG1). */
+		const bool amk2 = soup.amask.anyScaled();
+		sizedBegin( amk2 ? 0x324B4D41u /* 'AMK2' */ : 0x314B4D41u /* 'AMK1' */, quint32( soup.amask.tris.size() ) );
 		u32( quint32( soup.amask.maps.size() ) );
 		for ( size_t m = 0; m < soup.amask.maps.size(); m++ ) {
 			str( m < soup.amask.mapNames.size() ? soup.amask.mapNames[m] : std::string() );
@@ -1434,6 +1438,8 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( t.model ) );
 			u32( t.thr );
 			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
+			if ( amk2 )
+				f.write( reinterpret_cast<const char *>( t.as ), 12 );
 		}
 		sizedEnd();
 	}
@@ -1600,7 +1606,8 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 				return;
 			}
 			end = f.pos() + qint64( bytes );
-			if ( tail[0] == 0x314B4D41u || tail[0] == 0x31544D45u || tail[0] == 0x314D4E56u || tail[0] == 0x31475244u )
+			if ( tail[0] == 0x314B4D41u || tail[0] == 0x324B4D41u || tail[0] == 0x31544D45u || tail[0] == 0x314D4E56u
+				|| tail[0] == 0x31475244u )
 				return;
 			more = f.seek( end ) && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
 		}
@@ -1611,7 +1618,8 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 	};
 	sized();
 	// lane ALPHATEST1: the optional alpha-test masks (a short or broken tail leaves every face solid)
-	if ( more && tail[0] == 0x314B4D41u ) {
+	if ( more && ( tail[0] == 0x314B4D41u || tail[0] == 0x324B4D41u ) ) {   // AMK1, or AMK2 (lane ALPHATEST2)
+		const bool amk2 = tail[0] == 0x324B4D41u;
 		probebvh::AlphaMask am;
 		bool ok = true;
 		auto u32 = [&]( quint32 * v ) { ok = ok && f.read( reinterpret_cast<char *>( v ), 4 ) == 4; return *v; };
@@ -1661,6 +1669,8 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			u32( &thr );
 			probebvh::AlphaMask::Tri t;
 			ok = ok && f.read( reinterpret_cast<char *>( t.uv ), 24 ) == 24 && tri < head[1] && map < nm;
+			if ( amk2 )
+				ok = ok && f.read( reinterpret_cast<char *>( t.as ), 12 ) == 12;
 			if ( !ok )
 				break;
 			t.map = int( map );

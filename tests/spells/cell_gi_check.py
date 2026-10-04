@@ -93,7 +93,9 @@ class Soup:
             v -= math.floor(v)
             x = min(max(int(u * w), 0), w - 1)
             y = min(max(int(v * h), 0), h - 1)
-            out[i] = int(m[y, x]) < int(rec['thr'])
+            s = (b0 * float(rec['as'][0]) + b1[i] * float(rec['as'][1]) + b2[i] * float(rec['as'][2]))
+            # lane ALPHATEST2: map alpha x (vertex alpha x material alpha); all 1 = the integer test
+            out[i] = (int(m[y, x]) < int(rec['thr'])) if s == 1.0 else (float(m[y, x]) * s < float(rec['thr']))
         return out
 
     @staticmethod

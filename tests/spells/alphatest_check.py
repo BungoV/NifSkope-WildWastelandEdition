@@ -17,6 +17,11 @@ masked triangles only (Moller-Trumbore in float64), and the mask is sampled HERE
 The red (WW_CELL_ALPHATEST_PIN=off) soup carries no AMK1 tail: pass --masks <green soup.psp>; the masked
 triangles' geometry must equal the red soup's (checked).
 
+Lane ALPHATEST2 (2026-10-04): an 'AMK2' tail carries each corner's scale (vertex alpha x material alpha); the
+hole test is map alpha x the interpolated scale < threshold, as the renderer's. The scale red
+(WW_CELL_ALPHATEST_RED=noscale) soup carries AMK1: pass --masks <green soup.psp> and the twin, applying the
+green scales, must FAIL it wherever a scaled texel decides.
+
 usage: python alphatest_check.py <run dir> [--masks <soup.psp>] [--data <data root>] [--front S --front-behind S
        --front-gap G --corner S --corner-reach R] [--expect green|red]
 """
@@ -28,6 +33,24 @@ import impostor_bc_decode as bcd
 
 EPS = 0.05
 SOUP, ALB, GLS, TWO, AMK = 0x31505350, 0x31424C41, 0x31534C47, 0x314F5754, 0x314B4D41
+AMK2 = 0x324B4D41   # lane ALPHATEST2: AMK1 + 3 f32 a triangle, each corner's vertex alpha x material alpha
+AMK_DT = [('tri', '<u4'), ('map', '<i4'), ('model', '<i4'), ('thr', '<u4'), ('uv', '<f4', 6)]
+
+
+def amk_records(b, p, n, amk2):
+    """the AMK1/AMK2 triangle records, always with an 'as' field (1, 1, 1 for AMK1)"""
+    src = np.frombuffer(b, np.dtype(AMK_DT + ([('as', '<f4', 3)] if amk2 else [])), n, p)
+    rec = np.zeros(n, np.dtype(AMK_DT + [('as', '<f4', 3)]))
+    for k, *_ in AMK_DT:
+        rec[k] = src[k]
+    rec['as'] = src['as'] if amk2 else 1.0
+    return rec
+
+
+def amk_scale(rec, b1, b2):
+    """the scale at barycentrics (b1, b2): interpolated like the vertex colour (probemask.h)"""
+    a = rec['as'].astype(np.float64)
+    return (1.0 - b1 - b2) * a[..., 0] + b1 * a[..., 1] + b2 * a[..., 2]
 
 
 def read_soup(path, want_tris=None):
@@ -53,7 +76,7 @@ def read_soup(path, want_tris=None):
             end = p + nb
             if end > len(b):
                 break
-            if m == AMK:
+            if m in (AMK, AMK2):   # lane ALPHATEST2's AMK2 sits in AMK1's slot (LAND6)
                 am = {'maps': [], 'names': [], 'models': []}
                 nm, = struct.unpack_from('<I', b, p); p += 4
                 for _ in range(nm):
@@ -65,11 +88,10 @@ def read_soup(path, want_tris=None):
                 for _ in range(nmod):
                     ln, = struct.unpack_from('<I', b, p); p += 4
                     am['models'].append(b[p:p + ln].decode()); p += ln
-                rec = np.frombuffer(b, np.dtype([('tri', '<u4'), ('map', '<i4'), ('model', '<i4'), ('thr', '<u4'),
-                                                 ('uv', '<f4', 6)]), n, p)
-                p += n * 40
+                rec = amk_records(b, p, n, m == AMK2)
+                p += n * (52 if m == AMK2 else 40)
                 am['rec'] = rec
-                assert p == end, 'AMK1 tail does not fill its %d bytes' % nb
+                assert p == end, 'AMK tail does not fill its %d bytes' % nb
             p = end
     return ntri, tris, am
 
@@ -234,6 +256,8 @@ def main(argv):
     T = tris[rec['tri'].astype(np.int64)].astype(np.float64).reshape(-1, 3, 3)
     uv = rec['uv'].astype(np.float64).reshape(-1, 3, 2)
     thr = rec['thr'].astype(np.float64)
+    asc = rec['as'].astype(np.float64)   # lane ALPHATEST2: each corner's vertex alpha x material alpha (1 = AMK1)
+    say('scaled masked triangles %d (scale min %.3f)' % (int((asc != 1).any(1).sum()), float(asc.min()) if len(asc) else 1.0))
     mapi = rec['map'].astype(np.int64)
     modi = rec['model'].astype(np.int64)
     shapes = read_shapes(run)
@@ -317,13 +341,14 @@ def main(argv):
             s = mapi[kk] == mi
             mp = twin[mi]; h_, w_ = mp.shape
             th = thr[kk[s]]
+            sc = b0[s] * asc[kk[s], 0] + b1[s] * asc[kk[s], 1] + b2[s] * asc[kk[s], 2]   # the renderer's product
             x = np.clip(((U[s] - np.floor(U[s])) * w_).astype(np.int64), 0, w_ - 1)
             y = np.clip(((V[s] - np.floor(V[s])) * h_).astype(np.int64), 0, h_ - 1)
-            a[s] = mp[y, x] < th
+            a[s] = mp[y, x] * sc < th
             anyh = np.zeros(s.sum(), bool); allh = np.ones(s.sum(), bool)
             for dy in (-1, 0, 1):
                 for dx in (-1, 0, 1):
-                    q = mp[(y + dy) % h_, (x + dx) % w_] < th
+                    q = mp[(y + dy) % h_, (x + dx) % w_] * sc < th
                     anyh |= q; allh &= q
             edge[s] = anyh != allh
         # the soup stores float32 world positions (about 0.004 units of rounding at 60000): at a grazing ray the

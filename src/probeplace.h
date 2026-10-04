@@ -135,7 +135,8 @@ struct ProbeSoup
 	 *  lane LAND5: the tails after TWO1 are SIZED (magic, count, body bytes) in the order AMK1, EMT1, VNM1, DRG1;
 	 *  a reader skips one it does not know by its byte count. */
 	probebvh::AlphaMask amask;
-	void markLastMasked( int map, quint8 thr, const float uv[6], int model )
+	//! lane ALPHATEST2: `as` = each corner's vertex alpha x material alpha (null = 1, 1, 1); any != 1 -> 'AMK2'
+	void markLastMasked( int map, quint8 thr, const float uv[6], int model, const float * as = nullptr )
 	{
 		amask.triOf.resize( size_t( triCount() ), -1 );
 		probebvh::AlphaMask::Tri t;
@@ -144,6 +145,9 @@ struct ProbeSoup
 		t.model = model;
 		for ( int k = 0; k < 6; k++ )
 			t.uv[k] = uv[k];
+		if ( as )
+			for ( int k = 0; k < 3; k++ )
+				t.as[k] = as[k];
 		amask.triOf.back() = int( amask.tris.size() );
 		amask.tris.push_back( t );
 	}

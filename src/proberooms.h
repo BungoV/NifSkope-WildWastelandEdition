@@ -18,7 +18,13 @@
  *       its two sides (one value per side: the window between a room and the outdoors)
  *  A surface reads its room at P + N x 0.75 cell, or P + N x 1.75 cell when that is still solid (the surface's
  *  own cell). Refuters (WW_CELL_ROOMS_RED): "conn26" the floods 26-connected, "boxes" each room its bounding box
- *  (the old room boxes), "glasswall" glass names no room. */
+ *  (the old room boxes), "glasswall" glass names no room, "nomask" an alpha-tested triangle is solid all over.
+ *
+ *  Lane ALPHATEST2 (2026-10-04): an alpha-tested triangle (ProbeSoup::amask, the bake rays' own holes) closes a
+ *  cell only where it is mostly solid: its surface is sampled about cell/8 apart (stratified, jittered), each
+ *  sample a hole or not by the bake's own test, and a cell its samples fall in is solid only when under half of
+ *  them are holes -- a chain-link fence or a grille no longer closes a room; boards with thin gaps still do. A
+ *  cell the triangle touches but no sample falls in takes the triangle's overall share. */
 
 #include "probeplace.h"
 
@@ -45,6 +51,7 @@ struct ProbeRooms
 	int rooms = 0;                  //!< rooms 1 .. rooms (0 = outdoors)
 	qint64 cellsAir = 0, cellsSolid = 0, cellsGlass = 0, cellsDoor = 0, cellsCore = 0, cellsLeft = 0;
 	qint64 cellsOpening = 0, glassBoth = 0;
+	qint64 cellsMaskOpen = 0, cellsMaskSolid = 0;   //!< lane ALPHATEST2: cells masked triangles touch, left air / solid
 	int cores = 0, coresOutdoors = 0, pockets = 0, folded = 0;
 	double ms = 0;
 

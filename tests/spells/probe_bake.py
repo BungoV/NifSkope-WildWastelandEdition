@@ -248,7 +248,7 @@ def scene():
     return np.array(tris, dtype=np.float64), alb
 
 
-def write_soup(path, tris, alb, doors=(), glass=None):
+def write_soup(path, tris, alb, doors=(), glass=None, amask=None):
     t = np.asarray(tris, dtype='<f4').reshape(-1, 9)
     with open(path, 'wb') as f:
         f.write(struct.pack('<III', SOUP_MAGIC, len(t), len(doors)))
@@ -266,6 +266,24 @@ def write_soup(path, tris, alb, doors=(), glass=None):
         # two-sided keeps these gates off the outside-the-shell rule (cell_rooms gates winding)
         f.write(struct.pack('<II', 0x314F5754, len(t)))
         f.write(b'\x01' * len(t))
+        # lane ALPHATEST2: amask = dict(maps=[(name, w, h, alpha bytes)], models=[name],
+        # recs=[(tri, map, model, thr, uv6, as3 or None)]); 'AMK2' when any scale is not 1, else 'AMK1'
+        if amask:
+            amk2 = any(r[5] is not None and tuple(r[5]) != (1.0, 1.0, 1.0) for r in amask['recs'])
+            # LAND6: sized like every tail after TWO1 (LAND5): u32 magic, u32 count, u32 body bytes, body
+            body = struct.pack('<I', len(amask['maps']))
+            for name, w, h, a in amask['maps']:
+                nb = name.encode()
+                body += struct.pack('<I', len(nb)) + nb + struct.pack('<II', w, h) + bytes(a)
+            body += struct.pack('<I', len(amask['models']))
+            for name in amask['models']:
+                nb = name.encode()
+                body += struct.pack('<I', len(nb)) + nb
+            for tri, mp, mod, thr, uv, sc in sorted(amask['recs'], key=lambda r: r[0]):
+                body += struct.pack('<IiiI6f', tri, mp, mod, thr, *uv)
+                if amk2:
+                    body += struct.pack('<3f', *(sc if sc is not None else (1.0, 1.0, 1.0)))
+            f.write(struct.pack('<III', 0x324B4D41 if amk2 else 0x314B4D41, len(amask['recs']), len(body)) + body)
 
 
 def in_room(p, pad=0.0):

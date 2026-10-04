@@ -1948,6 +1948,27 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	};
 	struct MaskInfo { int map = -1; int minA = 255; };
 	QHash<QString, MaskInfo> maskOfTex;
+	/* lane ALPHATEST2: the tested alpha is vertex alpha x map alpha x material alpha (probemask.h), so a map with no
+	 * texel under 255 still has holes under a scale < 1: such a map is kept on demand (its own entry, read again).
+	 * WW_CELL_ALPHATEST_RED=noscale (gates only, never a user toggle): every scale 1, the ALPHATEST1 mask. */
+	const bool alphaNoScale = qgetenv( "WW_CELL_ALPHATEST_RED" ).trimmed() == "noscale";
+	QHash<QString, int> fullMaskOfTex;   // lower-case path -> into probeSoup.amask.maps (an all-255 map kept for a scale)
+	int amShapesScaled = 0, amShapesScaleOnly = 0, amTrisScaled = 0;
+	auto fullMaskOf = [&]( const QString & tex ) -> int {
+		const QString k = tex.toLower();
+		auto it = fullMaskOfTex.constFind( k );
+		if ( it != fullMaskOfTex.constEnd() )
+			return *it;
+		int idx = -1, minA = 255;
+		probebvh::AlphaMask::Map mp;
+		if ( probeAlb.alphaBytes( tex, &mp.w, &mp.h, &mp.a, &minA ) ) {
+			idx = int( probeSoup.amask.maps.size() );
+			probeSoup.amask.maps.push_back( std::move( mp ) );
+			probeSoup.amask.mapNames.push_back( tex.toStdString() );
+		}
+		fullMaskOfTex.insert( k, idx );
+		return idx;
+	};
 	QHash<QString, int> maskModelIdx;
 	int amShapes = 0, amShapesNoHole = 0, amShapesUnread = 0, amAlbMoved = 0;
 	// gate only (tests/spells/alphatest_check.py): one row per kept shape: first soup triangle, count, model, material, map
@@ -2564,14 +2585,41 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 					// lane ALPHATEST1: this shape's alpha-test mask (-1: none, solid as before)
 					int amMap = -1, amModel = -1;
 					const quint8 amThr = s.nearFacts.alphaRef;
+					/* lane ALPHATEST2: each vertex's scale = its vertex alpha x the material's fAlpha. The vertex alpha
+					 * counts as the renderer counts it (src/gl/renderer.cpp: vertexColorOverride[3] = 1 unless SLSF1
+					 * Vertex_Alpha): a colour stream drawn (the .lodo W4 rule), the Vertex_Alpha bit, and not a tree's
+					 * wind weight */
+					std::vector<float> amScale;
+					float amScaleMin = 1.0f;
+					if ( !alphaPin && !alphaNoScale && s.nearFacts.alphaTest ) {
+						const bool va = s.geom.rgba.size() == nv * 4 && s.geom.vertexAlpha && !s.nearFacts.treeAnim;
+						const float ma = std::clamp( s.matAlpha, 0.0f, 1.0f );
+						if ( va || ma != 1.0f ) {
+							amScale.assign( nv, ma );
+							if ( va )
+								for ( size_t v = 0; v < nv; v++ )
+									amScale[v] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f * ma;
+							for ( float x : amScale )
+								amScaleMin = std::min( amScaleMin, x );
+							if ( amScaleMin >= 1.0f )
+								amScale.clear();
+						}
+					}
 					if ( !alphaPin && s.nearFacts.alphaTest && s.geom.uv.size() >= nv * 2 ) {
 						const MaskInfo mi = maskOf( s.tex0 );
+						// lane ALPHATEST2: a hole exists where map alpha x scale < threshold (the smallest scale is a corner's)
+						const bool scaleHole = mi.map != -1 && double( mi.minA ) * double( amScaleMin ) < double( amThr );
 						if ( mi.map == -1 ) {
 							amShapesUnread++;
-						} else if ( mi.map < 0 || mi.minA >= int( amThr ) ) {
+						} else if ( ( mi.map < 0 || mi.minA >= int( amThr ) ) && !scaleHole ) {
 							amShapesNoHole++;
+						} else if ( mi.map < 0 && ( amMap = fullMaskOf( s.tex0 ) ) < 0 ) {
+							amShapesUnread++;   // read once, unreadable the second time (never seen)
 						} else {
-							amMap = mi.map;
+							if ( mi.map >= 0 )
+								amMap = mi.map;
+							amShapesScaleOnly += ( mi.map < 0 || mi.minA >= int( amThr ) ) ? 1 : 0;
+							amShapesScaled += amScale.empty() ? 0 : 1;
 							amShapes++;
 							auto mit2 = maskModelIdx.constFind( model );
 							if ( mit2 == maskModelIdx.constEnd() ) {
@@ -2662,7 +2710,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 										+ s.geom.rgba[i2 * 4 + size_t( k )] ) / ( 3.0f * 255.0f );
 							/* lane ALPHATEST1: a masked triangle whose UV centroid is a hole reads its color at
 							 * the solid point nearest the centroid (a 4x4 barycentric grid): no ray stops on a hole */
-							if ( amMap >= 0 && probeSoup.amask.alphaAt( amMap, uv[0], uv[1] ) < int( amThr ) ) {
+							// lane ALPHATEST2: the scale interpolates like the vertex colour (1 = the ALPHATEST1 test)
+							auto amS = [&]( float b0, float b1, float b2 ) -> double {
+								return amScale.empty() ? 1.0
+									: double( b0 * amScale[i0] + b1 * amScale[i1] + b2 * amScale[i2] );
+							};
+							if ( amMap >= 0 && probeSoup.amask.holeAt( amMap, uv[0], uv[1], amThr, amS( 1.0f / 3, 1.0f / 3, 1.0f / 3 ) ) ) {
 								double bestD = 1e300;
 								float buv[2] = { uv[0], uv[1] };
 								for ( int a = 0; a < 4; a++ )
@@ -2672,7 +2725,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 											b0 * s.geom.uv[i0 * 2] + b1 * s.geom.uv[i1 * 2] + b2 * s.geom.uv[i2 * 2],
 											b0 * s.geom.uv[i0 * 2 + 1] + b1 * s.geom.uv[i1 * 2 + 1] + b2 * s.geom.uv[i2 * 2 + 1] };
 										const double dd = std::pow( b1 - 1.0 / 3, 2 ) + std::pow( b2 - 1.0 / 3, 2 );
-										if ( dd < bestD && probeSoup.amask.alphaAt( amMap, q[0], q[1] ) >= int( amThr ) ) {
+										if ( dd < bestD && !probeSoup.amask.holeAt( amMap, q[0], q[1], amThr, amS( b0, b1, b2 ) ) ) {
 											bestD = dd;
 											buv[0] = q[0];
 											buv[1] = q[1];
@@ -2722,7 +2775,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 								tuv[k * 2] = s.geom.uv[vi * 2];
 								tuv[k * 2 + 1] = s.geom.uv[vi * 2 + 1];
 							}
-							probeSoup.markLastMasked( amMap, amThr, tuv, amModel );
+							float tas[3] = { 1.0f, 1.0f, 1.0f };   // lane ALPHATEST2
+							if ( !amScale.empty() )
+								for ( int k = 0; k < 3; k++ )
+									tas[k] = amScale[size_t( s.geom.tris[t + size_t( k )] )];
+							amTrisScaled += ( tas[0] != 1.0f || tas[1] != 1.0f || tas[2] != 1.0f ) ? 1 : 0;
+							probeSoup.markLastMasked( amMap, amThr, tuv, amModel, tas );
 						}
 						if ( okTri && emIdx >= 0 ) {   // lane EMISSIVEGI1
 							float tuv[6] = { 0, 0, 0, 0, 0, 0 };
@@ -3533,6 +3591,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			  << amShapes << ", triangles " << int( probeSoup.amask.tris.size() ) << ", maps " << int( probeSoup.amask.maps.size() )
 			  << "; alpha-tested shapes left solid: map with no texel under the threshold " << amShapesNoHole
 			  << ", map unread " << amShapesUnread << "; triangle colors read off a centroid hole " << amAlbMoved << "\n";
+			// lane ALPHATEST2: masks scaled by vertex alpha x material alpha
+			t << "  probe soup alpha-test scale" << ( alphaNoScale ? " RED noscale" : "" ) << ": shapes scaled " << amShapesScaled
+			  << ", shapes masked by the scale alone " << amShapesScaleOnly << ", triangles scaled " << amTrisScaled << "\n";
 			if ( giDoorGeom )   // lane GPURELIGHT1
 				t << "  probe soup door geometry: shapes " << dgShapes << " (alpha-tested with a hole " << dgMasked << ", blended = glass "
 				  << dgGlass << ", glass map unread " << dgGlassUnread << "), triangles " << int( probeSoup.doorGeom.door.size() )

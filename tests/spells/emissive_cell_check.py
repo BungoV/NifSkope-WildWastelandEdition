@@ -72,7 +72,7 @@ def read_soup(path):
             end = p + nb
             if end > len(b):
                 break
-            if m == AMK:
+            if m in (AMK, 0x324B4D41):   # AMK1, or lane ALPHATEST2's AMK2 in its slot (LAND6)
                 am = {'maps': []}
                 nm, = struct.unpack_from('<I', b, p); p += 4
                 for _ in range(nm):
@@ -82,10 +82,10 @@ def read_soup(path):
                 nmod, = struct.unpack_from('<I', b, p); p += 4
                 for _ in range(nmod):
                     s32()
-                am['rec'] = np.frombuffer(b, np.dtype([('tri', '<u4'), ('map', '<i4'), ('model', '<i4'), ('thr', '<u4'),
-                                                       ('uv', '<f4', 6)]), n, p)
-                p += n * 40
-                assert p == end, 'AMK1 tail does not fill its %d bytes' % nb
+                from alphatest_check import amk_records
+                am['rec'] = amk_records(b, p, n, m == 0x324B4D41)
+                p += n * (52 if m == 0x324B4D41 else 40)
+                assert p == end, 'AMK tail does not fill its %d bytes' % nb
             elif m == EMT:
                 em = {'maps': [], 'names': []}
                 nm, = struct.unpack_from('<I', b, p); p += 4
@@ -258,7 +258,8 @@ def main():
                 uv = ar['uv'].astype(np.float64)
                 u = B0 * uv[0] + B1 * uv[2] + B2 * uv[4]
                 v = B0 * uv[1] + B1 * uv[3] + B2 * uv[5]
-                solid[j] = sample(am['maps'][ar['map']], u, v) >= ar['thr']
+                sc = B0 * float(ar['as'][0]) + B1 * float(ar['as'][1]) + B2 * float(ar['as'][2])   # lane ALPHATEST2
+                solid[j] = sample(am['maps'][ar['map']], u, v) * sc >= ar['thr']
         return P, area / len(B0), L, solid, nrm
 
     # triangle centroid keys, to find each surfel cell's triangles
@@ -301,7 +302,8 @@ def main():
                     hole = np.zeros(len(r), bool)
                     for mi in np.unique(ar['map']):
                         g = ar['map'] == mi
-                        hole[g] = sample(am['maps'][mi], uu[g], vv[g]) < ar['thr'][g]
+                        sc = b0 * ar['as'][:, 0] + b1 * ar['as'][:, 1] + b2 * ar['as'][:, 2]   # lane ALPHATEST2
+                        hole[g] = sample(am['maps'][mi], uu[g], vv[g]) * sc[g] < ar['thr'][g]
                     h[r[hole], c[hole]] = False
             out[k:k + 512] = h.any(1)
         return out

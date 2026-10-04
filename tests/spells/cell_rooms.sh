@@ -3,7 +3,8 @@
 # ROOMS, LOAD DOORS AND THE OUTSIDE OF THE SHELL (lane ROOMCLAMP1, 2026-10-03; src/proberooms.h, src/probebake.h,
 # docs/PRTP_PLAN.md 2am). Judged by tests/spells/cell_rooms_check.py and cell_gi_check.py, not by eye.
 #
-#   synth   five scenes built by the checker (two rooms behind a 2-unit wall, an L room beside two closets that
+#   synth   seven scenes built by the checker (lane ALPHATEST2 adds a chain-link fence hall and a faded wall;
+#           before them:) (two rooms behind a 2-unit wall, an L room beside two closets that
 #           touch along an edge, an A-frame nave, a round two-floor tower with a hatch, glass between two rooms
 #           and to the outdoors), each through `NifSkope -no-gui probegi` (place, bake, relight, dump): the labels
 #           against the scene's own rooms, the panes and the hatch naming both sides, and the shader's blend
@@ -21,6 +22,8 @@
 #          --red conn26     the floods 26-connected: the two closets are one room
 #          --red boxes      each room its bounding box: the L's notch and the nave's eaves indoors
 #          --red glasswall  glass names no room: the panes name nothing
+#          --red nomask     lane ALPHATEST2: alpha-tested walls solid all over: the fence splits A|B, fade too
+#          --red noscale    lane ALPHATEST2: the soup without its alpha scales: the faded wall splits A|B
 #   cells  --red open       load doors as openings: rays escape through the Museum's exit door
 #          --red backface   the bake keeps probes whose rays mostly meet backs (WW_PROBE_BAKE_RED=backface)
 #          --red backmax    the bar at 1 (WW_CELL_PROBE_BACKMAX=1): the same

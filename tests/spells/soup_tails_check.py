@@ -3,7 +3,7 @@
 in the fixed order AMK1, EMT1, VNM1, DRG1 (any new tail appended last), and every reader skips a tail it does not
 know by its byte count (src/probeplace.h, the AMK1 comment). Synthetic scene from probe_bake.py, no game data.
 
-  soup_tails_check.py <nifskope.exe> <work dir> [--prtp <prtp_reference.exe>] [--red unsized]
+  soup_tails_check.py <nifskope.exe> <work dir> [--prtp <prtp_reference.exe>] [--red unsized|amk2unsized]
 
 Soups: A = the synth scene (ALB1 + TWO1); B = A + VNM1 (the ground's vertex normals tilted); C = A + an unknown
 sized tail + VNM1 + another unknown sized tail.
@@ -12,6 +12,9 @@ skipped by length), both Python readers parse C, and prtp_reference (when given)
 and a different one for A.
 Red --red unsized: C's first unknown tail is written WITHOUT its byte count (the pre-LAND5 framing), so the reader
 cannot find VNM1: the gate must FAIL.
+Lane LAND6: ALPHATEST2's AMK2 (AMK1 + each corner's alpha scale) sits in AMK1's slot, sized. Soups F/G/H/I (see
+the AMK2 block): the scale is read, unknown tails around it are skipped, VNM1 after it is still found, both Python
+readers return its scales, prtp_reference reads it. Red --red amk2unsized: AMK2 without its byte count must FAIL.
 """
 import os
 import struct
@@ -101,6 +104,58 @@ def main():
         print('python readers: alphatest_check + emissive_cell_check parse C, and find AMK1 past the unknown tail in D')
     except Exception as e:   # noqa: BLE001
         fails.append('python reader on C: %r' % (e,))
+    # LAND6: ALPHATEST2's AMK2 (AMK1 + 3 f32 a record, each corner's vertex alpha x material alpha) in AMK1's slot.
+    # Every triangle masked by one 1x1 map of alpha 200, threshold 128: at scale 1 (AMK1) nothing is a hole, at
+    # scale 0.5 (AMK2) everything is (200 x 0.5 < 128). F = A + AMK2, G = A + AMK1 (same map, scale 1),
+    # H = A + unknown + AMK2 + VNM1 + unknown, I = A + AMK2 + VNM1.
+    # PASS: G == A (scale 1 opens nothing), F != G (the scale is read), H == I (AMK2 is skipped/read by its size,
+    # VNM1 after it still found), H != F (VNM1 read past AMK2); the Python readers find AMK2's 0.5 scales in H.
+    # Red --red amk2unsized: AMK2 written without its byte count (ALPHATEST2's own framing): F's tail is not read.
+    def amk_tail(scale):
+        body = struct.pack('<I', 1) + struct.pack('<I', 0) + struct.pack('<II', 1, 1) + bytes([200])
+        body += struct.pack('<I', 0)
+        for t in range(n):
+            body += struct.pack('<IiiI6f', t, 0, -1, 128, *([0.25] * 6))
+            if scale != 1.0:
+                body += struct.pack('<3f', scale, scale, scale)
+        magic = 0x324B4D41 if scale != 1.0 else 0x314B4D41
+        if scale != 1.0 and red == 'amk2unsized':
+            return struct.pack('<II', magic, n) + body
+        return sized(magic, n, body)
+    amk2, amk1 = amk_tail(0.5), amk_tail(1.0)
+    more = {'F': base + amk2, 'G': base + amk1, 'H': base + junk1 + amk2 + vnm_tail(n) + junk2,
+            'I': base + amk2 + vnm_tail(n)}
+    for k, body in more.items():
+        paths[k] = os.path.join(work, 'tails_%s.psp' % k)
+        open(paths[k], 'wb').write(body)
+        out = pb.fresh(os.path.join(work, 'tails_%s' % k))
+        rc = pb.run_bake(exe, paths[k], out, 256, 0, '')
+        if rc.returncode != 0:
+            fails.append('probebake %s rc %d %s' % (k, rc.returncode, rc.stderr.strip()[:300]))
+            continue
+        outs[k] = out
+    if len(outs) == 7:
+        if not pb.same_files(outs['A'], outs['G']):
+            fails.append('AMK1 at scale 1 changed the bake (G != A)')
+        if pb.same_files(outs['F'], outs['G']):
+            fails.append('AMK2 scales changed nothing (F == G): AMK2 not read')
+        if not pb.same_files(outs['H'], outs['I']):
+            fails.append('unknown sized tails around AMK2 changed the bake (H != I)')
+        if pb.same_files(outs['H'], outs['F']):
+            fails.append('VNM1 after AMK2 not read (H == F)')
+        print('AMK2: G %s A, F %s G, H %s I, H %s F' % (
+            '==' if pb.same_files(outs['A'], outs['G']) else '!=', '==' if pb.same_files(outs['F'], outs['G']) else '!=',
+            '==' if pb.same_files(outs['H'], outs['I']) else '!=', '==' if pb.same_files(outs['H'], outs['F']) else '!='))
+    try:
+        _, _, am1 = alphatest_check.read_soup(paths['H'])
+        _, am2, _ = emissive_cell_check.read_soup(paths['H'])
+        for nm, am in (('alphatest_check', am1), ('emissive_cell_check', am2)):
+            ok = am is not None and len(am['rec']) == n and bool(np.all(am['rec']['as'] == 0.5))
+            if not ok:
+                fails.append('%s: AMK2 scales not found in H' % nm)
+        print('python readers: AMK2 scales 0.5 read in H past an unknown tail')
+    except Exception as e:   # noqa: BLE001
+        fails.append('python reader on H: %r' % (e,))
     if prtp:
         probes = os.path.join(work, 'tails_probes.txt')
         x0, y0, z0, x1, y1, z1 = pb.ROOM
@@ -108,7 +163,7 @@ def main():
             for x in (x0 + 150, (x0 + x1) / 2, x1 - 150):
                 f.write('%g %g %g\n' % (x, (y0 + y1) / 2, z0 + 120))
         tab = {}
-        for k in 'ABC':
+        for k in 'ABCFGHI':
             o = os.path.join(work, 'tails_prtp_%s.tsv' % k)
             rc = subprocess.run([os.path.abspath(prtp), paths[k], probes, '256', '0.3', '0.2', '1', o],
                                 capture_output=True, text=True, timeout=600)
@@ -116,7 +171,14 @@ def main():
                 fails.append('prtp_reference %s rc %d %s' % (k, rc.returncode, rc.stderr.strip()[:200]))
                 continue
             tab[k] = open(o, 'rb').read()
-        if len(tab) == 3:
+        if len(tab) == 7:
+            if tab['F'] == tab['G']:
+                fails.append('prtp_reference: AMK2 scales changed nothing (F == G)')
+            if tab['H'] != tab['I']:
+                fails.append('prtp_reference: unknown sized tails around AMK2 changed the table (H != I)')
+            print('prtp_reference: F %s G, H %s I' % ('!=' if tab['F'] != tab['G'] else '==',
+                                                     '==' if tab['H'] == tab['I'] else '!='))
+        if len(tab) == 7:
             if tab['A'] == tab['B']:
                 fails.append('prtp_reference: VNM1 changed nothing (B == A)')
             if tab['B'] != tab['C']:
