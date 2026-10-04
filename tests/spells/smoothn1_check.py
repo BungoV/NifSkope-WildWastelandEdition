@@ -468,7 +468,37 @@ def mc_reference_check(S, out):
 
 
 FIXED_CACHE = {}
-_S = None       # the scene, inherited by the worker processes (fork)
+_S = None       # the scene; a worker gets it once from its initializer (spawn: Windows, macOS, Linux alike)
+WORKER_PEAK = [0.0]   # the largest worker peak memory seen (MB), reported by the workers themselves
+
+
+def _init(S):
+    """worker initializer (lane SMOOTHN1 local, 2026-10-04): the scene arrives pickled, once per worker. The
+    cloud twin forked and read peak memory through the Unix-only `resource` module; neither exists on Windows."""
+    global _S
+    _S = S
+
+
+def peak_mb():
+    """this process's peak memory in MB: GICAL1's portable reader (Windows PeakWorkingSetSize, else ru_maxrss)
+    when gical1_check imports, else Windows only or nan."""
+    if G1 is not None and hasattr(G1, 'peak_mb'):
+        return G1.peak_mb()
+    if os.name == 'nt':
+        import ctypes
+        from ctypes import wintypes
+
+        class PMC(ctypes.Structure):
+            _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD)] + [(f, ctypes.c_size_t) for f in (
+                'PeakWorkingSetSize', 'WorkingSetSize', 'QuotaPeakPagedPoolUsage', 'QuotaPagedPoolUsage',
+                'QuotaPeakNonPagedPoolUsage', 'QuotaNonPagedPoolUsage', 'PagefileUsage', 'PeakPagefileUsage')]
+        k = ctypes.WinDLL('kernel32')
+        k.GetCurrentProcess.restype = wintypes.HANDLE
+        k.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+        m = PMC()
+        m.cb = ctypes.sizeof(PMC)
+        return m.PeakWorkingSetSize / 2.0 ** 20 if k.K32GetProcessMemoryInfo(k.GetCurrentProcess(), ctypes.byref(m), m.cb) else float('nan')
+    return float('nan')
 
 
 def _job(args):
@@ -478,15 +508,18 @@ def _job(args):
     LIGHT['patch_scale'] = dict(light[1])
     t = time.time()
     m, n, inf = bake(_S, rep, mode, red, tau_fixed)
-    return m, n, inf, time.time() - t
+    return m, n, inf, time.time() - t, peak_mb()
 
 
 def run_jobs(jobs):
     if WORKERS <= 1:
-        return [_job(j) for j in jobs]
-    import multiprocessing as mp
-    with mp.get_context('fork').Pool(WORKERS) as pool:
-        return pool.map(_job, jobs, chunksize=1)
+        out = [_job(j) for j in jobs]
+    else:
+        import multiprocessing as mp
+        with mp.get_context('spawn').Pool(WORKERS, initializer=_init, initargs=(_S,)) as pool:
+            out = pool.map(_job, jobs, chunksize=1)
+        WORKER_PEAK[0] = max([WORKER_PEAK[0]] + [r[4] for r in out])
+    return [r[:4] for r in out]
 
 
 LIGHT_ON = ((1.0, 1.0), ())
@@ -658,9 +691,7 @@ def main():
               f'{", ".join(sorted(failed)) or "none"}')
         checks.append((red, good, False))
     allok = all(c[1] for c in checks)
-    import resource
-    me = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-    ch = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024
+    me, ch = peak_mb(), WORKER_PEAK[0]
     print(f'peak memory: main {me:.0f} MB, largest worker {ch:.0f} MB, {WORKERS} workers: bound '
           f'{me + WORKERS * ch:.0f} MB')
     print(f'VERDICT:{"PASS" if allok else "FAIL"} (green {"PASS" if gok else "FAIL"}; reds '

@@ -38,6 +38,7 @@ struct Soup
 	std::vector<float> alb;                                // linear, 3 per triangle
 	std::vector<double> glass;                             // panes: 9 per pane
 	std::vector<double> glassT;                            // 3 per pane, 0..1
+	std::vector<int16_t> vn;                               // lane SMOOTHN1: 9 snorm16 a triangle (empty: none)
 };
 
 bool readSoup( const char * path, Soup & s )
@@ -64,7 +65,8 @@ bool readSoup( const char * path, Soup & s )
 		if ( std::fread( a.data(), 1, a.size(), f ) != a.size() )
 			a.clear();
 	}
-	if ( std::fread( tail, 4, 2, f ) == 2 && tail[0] == 0x31534C47u ) {   // 'GLS1'
+	bool more = std::fread( tail, 4, 2, f ) == 2;
+	if ( more && tail[0] == 0x31534C47u ) {   // 'GLS1'
 		std::vector<float> g( size_t( tail[1] ) * 9 );
 		std::vector<uint8_t> gt( size_t( tail[1] ) * 3 );
 		if ( std::fread( g.data(), 4, g.size(), f ) == g.size() && std::fread( gt.data(), 1, gt.size(), f ) == gt.size() ) {
@@ -72,6 +74,17 @@ bool readSoup( const char * path, Soup & s )
 			for ( uint8_t c : gt )
 				s.glassT.push_back( c / 255.0 );
 		}
+		more = std::fread( tail, 4, 2, f ) == 2;
+	}
+	if ( more && tail[0] == 0x314F5754u ) {   // 'TWO1': one byte a triangle, not read here
+		std::fseek( f, long( tail[1] ), SEEK_CUR );
+		more = std::fread( tail, 4, 2, f ) == 2;
+	}
+	// lane SMOOTHN1: 'VNM1', the vertex normals (9 snorm16 a triangle): the field's normal is their blend
+	if ( more && tail[0] == 0x314D4E56u && tail[1] == n ) {
+		s.vn.resize( n * 9 );
+		if ( std::fread( s.vn.data(), 2, s.vn.size(), f ) != s.vn.size() )
+			s.vn.clear();
 	}
 	std::fclose( f );
 	if ( a.empty() )
@@ -264,6 +277,29 @@ int main( int argc, char ** argv )
 			}
 			surf[o] += 1.0 / M;
 			double nx = s.nx[i], ny = s.ny[i], nz = s.nz[i];
+			if ( !s.vn.empty() ) {   // lane SMOOTHN1: the smooth normal at the hit (barycentric, renormalized)
+				const double hx = px + dx[r] * bestT[r] - s.ox[i], hy = py + dy[r] * bestT[r] - s.oy[i],
+					hz = pz + dz[r] * bestT[r] - s.oz[i];
+				const double d00 = double( s.ax[i] ) * s.ax[i] + double( s.ay[i] ) * s.ay[i] + double( s.az[i] ) * s.az[i];
+				const double d01 = double( s.ax[i] ) * s.bx[i] + double( s.ay[i] ) * s.by[i] + double( s.az[i] ) * s.bz[i];
+				const double d11 = double( s.bx[i] ) * s.bx[i] + double( s.by[i] ) * s.by[i] + double( s.bz[i] ) * s.bz[i];
+				const double d20 = hx * s.ax[i] + hy * s.ay[i] + hz * s.az[i], d21 = hx * s.bx[i] + hy * s.by[i] + hz * s.bz[i];
+				const double den = d00 * d11 - d01 * d01;
+				const int16_t * q = &s.vn[size_t( i ) * 9];
+				if ( std::fabs( den ) > 0 && ( q[0] || q[1] || q[2] || q[3] || q[4] || q[5] || q[6] || q[7] || q[8] ) ) {
+					double u = std::clamp( ( d11 * d20 - d01 * d21 ) / den, 0.0, 1.0 );
+					double v = std::clamp( ( d00 * d21 - d01 * d20 ) / den, 0.0, 1.0 - u );
+					const double w0 = 1.0 - u - v;
+					double m[3];
+					for ( int k = 0; k < 3; k++ )
+						m[k] = ( w0 * q[k] + u * q[3 + k] + v * q[6 + k] ) / 32767.0;
+					const double ml = std::sqrt( m[0] * m[0] + m[1] * m[1] + m[2] * m[2] );
+					if ( ml > 1e-6 ) {
+						const double sg = m[0] * nx + m[1] * ny + m[2] * nz < 0 ? -1.0 : 1.0;   // the face's side
+						nx = sg * m[0] / ml; ny = sg * m[1] / ml; nz = sg * m[2] / ml;
+					}
+				}
+			}
 			if ( nx * dx[r] + ny * dy[r] + nz * dz[r] > 0 ) {   // turn it toward the probe
 				nx = -nx; ny = -ny; nz = -nz;
 			}
