@@ -142,6 +142,22 @@ struct ProbeSoup
 	/*! lane EMISSIVEGI1: the triangles that glow (probeemit.h). Written as the optional 'EMT1' tail (only when any
 	 *  triangle glows), so a soup with nothing glowing stays byte for byte as before. */
 	ProbeEmit glow;   // not "emit": a Qt macro
+	/*! lane GPURELIGHT1: the doors' real geometry, as placed (closed). The bake never sees it (doors are baked open:
+	 *  `doors` only tags the openings); the GPU relight re-traces the rays that cross a door's box against it, so a
+	 *  closed door stops light by its faces, lets it through its alpha-test holes and tints it through its panes.
+	 *  9 floats a triangle (world), `door` = into `doors`; `amask` numbers these triangles; glass as the soup's
+	 *  (1 - a (1 - c) x 255). Written as the optional 'DRG1' tail after 'EMT1', only when any door has geometry. */
+	struct DoorGeom
+	{
+		std::vector<float> tris;
+		std::vector<int> door;
+		probebvh::AlphaMask amask;
+		std::vector<float> glass;
+		std::vector<quint8> glassT;
+		std::vector<int> glassDoor;
+		bool empty() const { return tris.empty() && glass.empty(); }
+	};
+	DoorGeom doorGeom;
 };
 
 //! Lane BAKE4: one box of an enclosed room's air (world units), what `.tbk` v4 writes for the

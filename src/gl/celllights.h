@@ -70,6 +70,7 @@ struct WwCellLight
 	float shadowBias = 0.0f;        //!< XLIG Shadow Depth Bias (read and echoed; its scale is unread, not applied)
 	int shape = 0;                  //!< lane HEMI1: 0 omni (or spot), 1 hemisphere (dir = its plane normal), 2 box
 	float box[3][4] = {};           //!< lane HEMI1: box local coordinate k = dot(box[k].xyz, P) + box[k].w, inside |k| <= 1
+	quint32 ref = 0;                //!< lane GPURELIGHT1: the placed reference (0: none, an effect's light)
 };
 
 //! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
@@ -105,6 +106,9 @@ struct WwCellLighting
 	bool showSky = false;	//!< lane SKYFULL1: an interior whose CELL DATA has bit 7 (Show Sky); the Lookdev sky draws there
 	QVector<WwCellLight> lights;
 	QVector<WwCellAmbientLight> ambientLights;  //!< lane AMBO2, in plugin order (the first that holds a point wins)
+	/*! lane GPURELIGHT1: the lights that start off (initially disabled, or the base's Off By Default), kept only
+	 *  when WW_CELL_GI_GPU is set: the relight records their pairs so a switch or a quest can turn them on live */
+	QVector<WwCellLight> offLights;
 	bool hasDalc = false;
 	float dalc[6][3] = {};          //!< byte / 255 as stored (PRTP2 powers AFTER the affine sum), X+ X- Y+ Y- Z+ Z-
 	bool hasDirectional = false;

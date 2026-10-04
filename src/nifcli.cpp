@@ -14,6 +14,7 @@ See the LICENSE.md file for the full license text.
 #include "probebake.h"
 #include "probefar.h"		// lane PRTPFAR
 #include "probegi.h"		// lane ROOMCLAMP1: probegi
+#include "proberelight.h"	// lane GPURELIGHT1: gpurelight
 
 #include "freezeanim.h"
 #include "gamemanager.h"
@@ -7371,6 +7372,14 @@ int nifskopeCliMain( const QStringList & args )
 	// `probegi` places, bakes and relights a soup by the lights given, then dumps (lane ROOMCLAMP1; src/probegi.cpp)
 	if ( cmd == QLatin1String( "probegi" ) ) {
 		const int rc = probeGiCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// `gpurelight` records the relight's operators on a synthetic three-door scene and gates the CPU and GPU relights
+	// (lane GPURELIGHT1; src/proberelight.cpp)
+	if ( cmd == QLatin1String( "gpurelight" ) ) {
+		const int rc = probeRelightCli( a );
 		out().flush();
 		err().flush();
 		return rc;

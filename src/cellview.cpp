@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #include "probegi.h"		// lane PRTPGI
 #include "probealbedo.h"		// lane PRTPBAKE
 #include "probefar.h"		// lane BAKEBLOCK1: the far soup beyond the loaded block
+#include "proberelight.h"	// lane GPURELIGHT1: the relight from recorded operators (CPU + GPU)
 #include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
 #include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
 #include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
@@ -52,6 +53,7 @@ BSD License - see nifskope.h
 
 #include <algorithm>
 #include <array>
+#include <map>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -858,13 +860,17 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			out[k][3] = float( w );
 		}
 	};
+	// lane GPURELIGHT1: WW_CELL_GI_GPU keeps the lights that start off in L.offLights (the relight's record)
+	const bool giKeepOff = !qgetenv( "WW_CELL_GI_GPU" ).isEmpty();
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
 			continue;
-		if ( r.initiallyDisabled || ( b.flags & 0x20 ) ) {
+		const bool startOff = r.initiallyDisabled || ( b.flags & 0x20 );
+		if ( startOff ) {
 			off++;
-			continue;
+			if ( !giKeepOff || ( b.flags & 0x100000 ) )
+				continue;
 		}
 		// lane AMBO1: an Ambient Only light (0x100000) adds no light of its own in game; it scales the cell's
 		// ambient where it applies. Lane AMBO2: inside a sphere of 1.22077 x its radius, each channel of the
@@ -958,6 +964,11 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 				boxRows( it.value(), r.scale, l.box );
 				l.shape = shapeRed ? 0 : 2;
 			}
+		}
+		l.ref = r.formID;
+		if ( startOff ) {   // lane GPURELIGHT1: recorded, lights nothing at the start
+			L.offLights.append( l );
+			continue;
 		}
 		L.lights.append( l );
 		wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // lane FXLIT1: a red control's data
@@ -1894,6 +1905,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 * holes). A map whose every texel passes needs no mask. WW_CELL_ALPHATEST_PIN=off (gates only, never a
 	 * user toggle) keeps every alpha-tested face solid: byte for byte the exe from before the lane. */
 	const bool alphaPin = qgetenv( "WW_CELL_ALPHATEST_PIN" ).trimmed() == "off";
+	/* lane GPURELIGHT1: WW_CELL_GI_GPU or WW_CELL_GI_DOORS: the doors' own triangles go into the soup's doorGeom (a
+	 * closed door stops light by its faces, lets it through its alpha-test holes, tints it through its panes) */
+	const bool giDoorGeom = baking && ( !qgetenv( "WW_CELL_GI_GPU" ).isEmpty() || !qgetenv( "WW_CELL_GI_DOORS" ).isEmpty() );
+	int dgShapes = 0, dgMasked = 0, dgGlass = 0, dgGlassUnread = 0, dgDropped = 0;
 	// Measurement pin only: WW_CELL_ALPHATEST_FOLIAGE=keep puts landscape\ alpha-tested cards in the soup with their mask.
 	const bool foliageKeep = qgetenv( "WW_CELL_ALPHATEST_FOLIAGE" ).trimmed() == "keep";
 	/* lane EMISSIVEGI1: glowing surfaces light the bake (probeemit.h). WW_CELL_EMISSIVE_PIN=off (gates only, never
@@ -2358,6 +2373,79 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				}
 				return m;
 			};
+			if ( role == 2 && giDoorGeom && !s.nearFacts.effectShader && s.effectTex0.isEmpty() && !s.nearFacts.decal ) {
+				/* lane GPURELIGHT1: this door's triangles, as placed (closed). The bake never sees them (a door only
+				 * tags its opening); the relight re-traces whatever crosses the door's box against them. */
+				ProbeSoup::DoorGeom & dg = probeSoup.doorGeom;
+				const int doorIdx = int( probeSoup.doors.size() );   // this placement's door, tagged after its shapes
+				const bool glassy = s.nearFacts.alphaBlend;
+				int dMap = -1;
+				const quint8 dThr = s.nearFacts.alphaRef;
+				if ( !glassy && !alphaPin && s.nearFacts.alphaTest && s.geom.uv.size() >= nv * 2 ) {
+					const MaskInfo mi = maskOf( s.tex0 );
+					if ( mi.map >= 0 && mi.minA < int( dThr ) )
+						dMap = mi.map;
+				}
+				dgShapes++;
+				dgMasked += dMap >= 0 ? 1 : 0;
+				dgGlass += glassy ? 1 : 0;
+				for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
+					float w[9];
+					size_t vi[3] = { 0, 0, 0 };
+					bool okTri = true;
+					for ( int k = 0; k < 3 && okTri; k++ ) {
+						vi[k] = size_t( s.geom.tris[t + size_t( k )] );
+						okTri = vi[k] < nv;
+						if ( !okTri )
+							break;
+						const Vector3 wp = p.pos + p.rot * ( Vector3( s.geom.pos[vi[k] * 3], s.geom.pos[vi[k] * 3 + 1],
+							s.geom.pos[vi[k] * 3 + 2] ) * p.scale );
+						for ( int c = 0; c < 3; c++ )
+							w[k * 3 + c] = wp[c];
+					}
+					if ( !okTri )
+						continue;
+					if ( glassy ) {   // the soup's glass rule: T = 1 - a (1 - c), c and a at the UV centroid
+						float uv[2] = { 0.5f, 0.5f }, vc[3] = { 1, 1, 1 }, lin[3] = { 1, 1, 1 }, ta = 1.0f, va = 1.0f;
+						if ( s.geom.uv.size() >= nv * 2 )
+							for ( int k = 0; k < 2; k++ )
+								uv[k] = ( s.geom.uv[vi[0] * 2 + size_t( k )] + s.geom.uv[vi[1] * 2 + size_t( k )]
+									+ s.geom.uv[vi[2] * 2 + size_t( k )] ) / 3.0f;
+						if ( s.geom.rgba.size() == nv * 4 ) {
+							for ( int k = 0; k < 3; k++ )
+								vc[k] = ( s.geom.rgba[vi[0] * 4 + size_t( k )] + s.geom.rgba[vi[1] * 4 + size_t( k )]
+									+ s.geom.rgba[vi[2] * 4 + size_t( k )] ) / ( 3.0f * 255.0f );
+							va = ( s.geom.rgba[vi[0] * 4 + 3] + s.geom.rgba[vi[1] * 4 + 3] + s.geom.rgba[vi[2] * 4 + 3] ) / ( 3.0f * 255.0f );
+						}
+						if ( !probeAlb.sample( s.tex0, uv[0], uv[1], vc, lin, &ta ) ) {
+							dgGlassUnread++;   // no map read: a neutral half-clear pane
+							lin[0] = lin[1] = lin[2] = 1.0f;
+							ta = 0.5f;
+						}
+						const float a = std::clamp( ta * va, 0.0f, 1.0f );
+						dg.glass.insert( dg.glass.end(), w, w + 9 );
+						for ( int c = 0; c < 3; c++ )
+							dg.glassT.push_back( quint8( std::lround( std::clamp( 1.0f - a * ( 1.0f - std::clamp( lin[c], 0.0f, 1.0f ) ),
+								0.0f, 1.0f ) * 255.0f ) ) );
+						dg.glassDoor.push_back( doorIdx );
+						continue;
+					}
+					dg.tris.insert( dg.tris.end(), w, w + 9 );
+					dg.door.push_back( doorIdx );
+					if ( dMap >= 0 ) {
+						dg.amask.triOf.resize( dg.door.size(), -1 );
+						probebvh::AlphaMask::Tri mt;
+						mt.map = dMap;
+						mt.thr = dThr;
+						for ( int k = 0; k < 3; k++ ) {
+							mt.uv[k * 2] = s.geom.uv[vi[k] * 2];
+							mt.uv[k * 2 + 1] = s.geom.uv[vi[k] * 2 + 1];
+						}
+						dg.amask.triOf.back() = int( dg.amask.tris.size() );
+						dg.amask.tris.push_back( mt );
+					}
+				}
+			}
 			if ( role == 1 ) {
 				if ( baking && probeGlassFeed( probeSoup, probeAlb, s, p.pos, p.rot, p.scale, p.ref, model,
 						glassDump.isEmpty() ? nullptr : &glassCensus ) )
@@ -3275,6 +3363,45 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		ps.red = QString::fromLatin1( qgetenv( "WW_PROBE_RED" ) );
 		if ( roomclampPin && ps.red.isEmpty() )
 			ps.red = QStringLiteral( "floor" );   // lane ROOMCLAMP1 pin: the old floors
+		if ( !probeSoup.doorGeom.empty() ) {
+			/* lane GPURELIGHT1: drop the triangles of a door that was never tagged (no drawn triangles), and keep
+			 * only the masks the doors use (renumbered; the soup's own list stays as it is) */
+			const ProbeSoup::DoorGeom g = std::move( probeSoup.doorGeom );
+			ProbeSoup::DoorGeom & dg = probeSoup.doorGeom;
+			dg = ProbeSoup::DoorGeom();
+			const int nd = int( probeSoup.doors.size() );
+			std::map<int, int> mapNew;
+			for ( size_t i = 0; i < g.door.size(); i++ ) {
+				if ( g.door[i] < 0 || g.door[i] >= nd ) {
+					dgDropped++;
+					continue;
+				}
+				dg.tris.insert( dg.tris.end(), g.tris.begin() + long( i * 9 ), g.tris.begin() + long( i * 9 + 9 ) );
+				dg.door.push_back( g.door[i] );
+				if ( i < g.amask.triOf.size() && g.amask.triOf[i] >= 0 ) {
+					probebvh::AlphaMask::Tri mt = g.amask.tris[size_t( g.amask.triOf[i] )];
+					auto it = mapNew.find( mt.map );
+					if ( it == mapNew.end() ) {
+						it = mapNew.emplace( mt.map, int( dg.amask.maps.size() ) ).first;
+						dg.amask.maps.push_back( probeSoup.amask.maps[size_t( mt.map )] );
+						dg.amask.mapNames.push_back( probeSoup.amask.mapNames[size_t( mt.map )] );
+					}
+					mt.map = it->second;
+					dg.amask.triOf.resize( dg.door.size(), -1 );
+					dg.amask.triOf.back() = int( dg.amask.tris.size() );
+					dg.amask.tris.push_back( mt );
+				}
+			}
+			for ( size_t i = 0; i < g.glassDoor.size(); i++ ) {
+				if ( g.glassDoor[i] < 0 || g.glassDoor[i] >= nd ) {
+					dgDropped++;
+					continue;
+				}
+				dg.glass.insert( dg.glass.end(), g.glass.begin() + long( i * 9 ), g.glass.begin() + long( i * 9 + 9 ) );
+				dg.glassT.insert( dg.glassT.end(), g.glassT.begin() + long( i * 3 ), g.glassT.begin() + long( i * 3 + 3 ) );
+				dg.glassDoor.push_back( g.glassDoor[i] );
+			}
+		}
 		ProbePlaceResult pr;
 		const bool placed = probePlace( probeSoup, ps, &pr );
 		// lane BAKEBLOCK1: past the loaded block, out to the bake's ray reach, the LOD files' far soup
@@ -3314,6 +3441,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			  << amShapes << ", triangles " << int( probeSoup.amask.tris.size() ) << ", maps " << int( probeSoup.amask.maps.size() )
 			  << "; alpha-tested shapes left solid: map with no texel under the threshold " << amShapesNoHole
 			  << ", map unread " << amShapesUnread << "; triangle colors read off a centroid hole " << amAlbMoved << "\n";
+			if ( giDoorGeom )   // lane GPURELIGHT1
+				t << "  probe soup door geometry: shapes " << dgShapes << " (alpha-tested with a hole " << dgMasked << ", blended = glass "
+				  << dgGlass << ", glass map unread " << dgGlassUnread << "), triangles " << int( probeSoup.doorGeom.door.size() )
+				  << " (masked " << int( probeSoup.doorGeom.amask.tris.size() ) << ", maps " << int( probeSoup.doorGeom.amask.maps.size() )
+				  << "), panes " << int( probeSoup.doorGeom.glassDoor.size() ) << ", dropped (door never tagged) " << dgDropped << "\n";
 			// lane EMISSIVEGI1: the glowing surfaces
 			t << "  probe soup emissive" << ( emitPin ? " PIN off (nothing glows)" : "" )
 			  << ( emitRed.isEmpty() ? "" : " RED " ) << emitRed.constData() << ": shapes glowing " << emShapes
@@ -3567,9 +3699,99 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				if ( !gs.sky.on )
 					probeNotes += QStringLiteral( "  gi sky: none (the view is not weather-lit; Scene mode Lookdev lights it with the weather)\n" );
 			}
+			/* lane GPURELIGHT1: WW_CELL_GI_GPU=1 records the relight's operators (the lights that start off too, each
+			 * with its FARVIEW1b group key), then relights from them on the CPU and on the GPU, doors open and every
+			 * door closed, and states the timings; WW_CELL_GI_RECORDS=<folder> writes the shared light record */
+			const bool giGpu = !qgetenv( "WW_CELL_GI_GPU" ).isEmpty();
+			ProbeRelightOps relOps;
+			QStringList relPlugins;
+			if ( giGpu ) {
+				for ( const QString & pl : world.pluginList().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
+					relPlugins << QFileInfo( pl.trimmed() ).fileName();
+				QHash<quint32, const EsmRefr *> refOf;
+				for ( const EsmRefr & r : lightRefs )
+					refOf.insert( r.formID, &r );
+				// FARVIEW1b 3.2: ALWAYS 0 | PARENT 1 (root, parity) | SELF 2 (a light switched itself)
+				auto keyOf = [&]( quint32 ref ) -> quint64 {
+					const auto it = refOf.constFind( ref );
+					if ( !ref || it == refOf.constEnd() )
+						return 0;
+					const EsmRefr & r = **it;
+					auto pack = []( quint64 kind, quint32 form, bool parity ) {
+						return ( kind << 62 ) | ( quint64( parity ? 1 : 0 ) << 40 ) | ( quint64( ( form >> 24 ) & 0xFFFFu ) << 24 )
+							| quint64( form & 0xFFFFFFu );
+					};
+#ifdef ESM_HAS_CELL_FIELDS
+					if ( r.enableParent ) {
+						bool parity = r.enableParentOpposite;
+						quint32 root = r.enableParent;
+						for ( int hop = 0; hop < 16; hop++ ) {
+							const auto f = enableFacts.constFind( root );
+							if ( f == enableFacts.constEnd() || !f->parent )
+								break;
+							parity ^= f->opposite;
+							root = f->parent;
+						}
+						return pack( 1, root, parity );
+					}
+#endif
+					const EsmLight & b = world.light( r.base );
+					if ( r.initiallyDisabled || ( b.exists && ( b.flags & 0x20 ) ) )
+						return pack( 2, ref, false );
+					return 0;
+				};
+				gs.record = &relOps;
+				gs.recordExtra = L->offLights;
+				for ( const QVector<WwCellLight> * v : { &L->lights, &L->offLights } )
+					for ( const WwCellLight & l : *v ) {
+						gs.recordRef.push_back( l.ref );
+						gs.recordGroup.push_back( keyOf( l.ref ) );
+					}
+			}
 			ProbeGiResult gr;
 			const bool ok = probeGiRelight( probeSoup, giBakeDir, *L, gs, &gr );
 			probeNotes += QStringLiteral( "  %1\n" ).arg( probeGiCensusText( gr ) );
+			if ( giGpu && ok && relOps.built ) {
+				probeNotes += QStringLiteral( "  %1\n" ).arg( probeRelightCensusText( relOps ) );
+				ProbeRelightState open, shut;
+				shut.doorClosed.assign( relOps.doorRefs.size(), 1 );
+				ProbeRelightOut co, cs, go, gsh;
+				QString why;
+				const bool cok = probeRelightCpu( relOps, open, &co, &why ) && probeRelightCpu( relOps, shut, &cs, &why );
+				ProbeRelightGpu gpu;
+				const bool gok = cok && gpu.init( &why ) && gpu.upload( relOps, &why ) && gpu.run( open, &go, &why )
+					&& gpu.run( shut, &gsh, &why ) && gpu.run( open, &go, &why ) && gpu.run( shut, &gsh, &why );   // warm, then timed
+				auto rel = []( const std::vector<float> & a, const std::vector<float> & b ) {
+					double m = 0, d = 0;
+					for ( size_t i = 0; i < a.size() && i < b.size(); i++ ) {
+						m = std::max( m, std::fabs( double( b[i] ) ) );
+						d = std::max( d, std::fabs( double( a[i] ) - double( b[i] ) ) );
+					}
+					return m > 0 ? d / m : d;
+				};
+				auto sum = []( const std::vector<float> & a ) {
+					double s = 0;
+					for ( float v : a )
+						s += v;
+					return s;
+				};
+				if ( !cok || !gok )
+					probeNotes += QStringLiteral( "  gi relight FAILED: %1\n" ).arg( why );
+				else
+					probeNotes += QStringLiteral( "  gi relight (GPURELIGHT1, %1): doors open CPU %2 ms %3 passes, GPU %4 ms %5 passes "
+						"(gather %6 ms; upload once %7 ms), GPU vs CPU B %8; all %9 doors closed CPU %10 ms, GPU %11 ms, GPU vs CPU B %12, "
+						"slots emptied %13, sum B closed / open %14\n" )
+						.arg( gpu.renderer() ).arg( co.ms, 0, 'f', 1 ).arg( co.passes ).arg( go.ms, 0, 'f', 1 ).arg( go.passes )
+						.arg( go.msKernel[1], 0, 'f', 1 ).arg( gpu.msUpload(), 0, 'f', 1 ).arg( rel( go.B, co.B ), 0, 'g', 3 )
+						.arg( relOps.doorRefs.size() ).arg( cs.ms, 0, 'f', 1 ).arg( gsh.ms, 0, 'f', 1 ).arg( rel( gsh.B, cs.B ), 0, 'g', 3 )
+						.arg( cs.slotsEmptied ).arg( sum( cs.B ) / std::max( sum( co.B ), 1e-30 ), 0, 'f', 4 );
+				const QString recDir = QString::fromLocal8Bit( qgetenv( "WW_CELL_GI_RECORDS" ) );
+				if ( !recDir.isEmpty() ) {
+					QString rerr, rcensus;
+					probeNotes += probeRelightWriteRecords( relOps, recDir, relPlugins, &rerr, &rcensus )
+						? QStringLiteral( "  %1\n" ).arg( rcensus ) : QStringLiteral( "  gi records FAILED: %1\n" ).arg( rerr );
+				}
+			}
 			if ( ok ) {
 				WwCellGi gi;
 				for ( int k = 0; k < 3; k++ ) {
