@@ -1460,6 +1460,51 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
 		f.write( reinterpret_cast<const char *>( vn.data() ), qint64( vn.size() * sizeof( qint16 ) ) );
 	}
+	/* lane GPURELIGHT1: the doors' real geometry (written only when any door has some): u32 glass count, the solid
+	 * triangles (9 f32 + u32 door), the glass triangles (9 f32 + 3 u8 transmittance + u8 0 + u32 door), then the
+	 * doors' masks as AMK1's body (maps, models), u32 masked count, masked triangles numbered over the solid ones */
+	if ( !soup.doorGeom.empty() ) {
+		const ProbeSoup::DoorGeom & g = soup.doorGeom;
+		auto u32 = [&]( quint32 v ) { f.write( reinterpret_cast<const char *>( &v ), 4 ); };
+		auto str = [&]( const std::string & s ) {
+			u32( quint32( s.size() ) );
+			f.write( s.data(), qint64( s.size() ) );
+		};
+		const quint32 tail[2] = { 0x31475244u /* 'DRG1' */, quint32( g.tris.size() / 9 ) };
+		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		u32( quint32( g.glass.size() / 9 ) );
+		for ( size_t i = 0; i * 9 < g.tris.size(); i++ ) {
+			f.write( reinterpret_cast<const char *>( &g.tris[i * 9] ), 36 );
+			u32( quint32( g.door[i] ) );
+		}
+		for ( size_t i = 0; i * 9 < g.glass.size(); i++ ) {
+			f.write( reinterpret_cast<const char *>( &g.glass[i * 9] ), 36 );
+			const quint8 t4[4] = { g.glassT[i * 3], g.glassT[i * 3 + 1], g.glassT[i * 3 + 2], 0 };
+			f.write( reinterpret_cast<const char *>( t4 ), 4 );
+			u32( quint32( g.glassDoor[i] ) );
+		}
+		u32( quint32( g.amask.maps.size() ) );
+		for ( size_t m = 0; m < g.amask.maps.size(); m++ ) {
+			str( m < g.amask.mapNames.size() ? g.amask.mapNames[m] : std::string() );
+			u32( quint32( g.amask.maps[m].w ) );
+			u32( quint32( g.amask.maps[m].h ) );
+			f.write( reinterpret_cast<const char *>( g.amask.maps[m].a.data() ), qint64( g.amask.maps[m].a.size() ) );
+		}
+		u32( quint32( g.amask.models.size() ) );
+		for ( const std::string & s : g.amask.models )
+			str( s );
+		u32( quint32( g.amask.tris.size() ) );
+		for ( size_t i = 0; i < g.amask.triOf.size(); i++ ) {
+			if ( g.amask.triOf[i] < 0 )
+				continue;
+			const probebvh::AlphaMask::Tri & t = g.amask.tris[size_t( g.amask.triOf[i] )];
+			u32( quint32( i ) );
+			u32( quint32( t.map ) );
+			u32( quint32( t.model ) );
+			u32( t.thr );
+			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
+		}
+	}
 	return true;
 }
 
@@ -1654,6 +1699,95 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		if ( f.read( reinterpret_cast<char *>( soup->vn.data() ), vw ) != vw )
 			soup->vn.clear();
 		more = f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+	}
+	// lane GPURELIGHT1: the doors' optional real geometry (a short or broken tail leaves the doors without any)
+	soup->doorGeom = ProbeSoup::DoorGeom();
+	if ( more && tail[0] == 0x31475244u ) {
+		ProbeSoup::DoorGeom g;
+		bool ok = true;
+		auto u32 = [&]( quint32 * v ) { ok = ok && f.read( reinterpret_cast<char *>( v ), 4 ) == 4; return *v; };
+		auto str = [&]( std::string * s ) {
+			quint32 n = 0;
+			u32( &n );
+			if ( !ok || n > 4096 ) {
+				ok = false;
+				return;
+			}
+			s->resize( n );
+			ok = f.read( s->data(), qint64( n ) ) == qint64( n );
+		};
+		quint32 ng = 0;
+		u32( &ng );
+		ok = ok && tail[1] < ( 1u << 24 ) && ng < ( 1u << 24 );
+		for ( quint32 i = 0; ok && i < tail[1]; i++ ) {
+			float p[9];
+			quint32 d = 0;
+			ok = f.read( reinterpret_cast<char *>( p ), 36 ) == 36;
+			u32( &d );
+			ok = ok && d < head[2];
+			g.tris.insert( g.tris.end(), p, p + 9 );
+			g.door.push_back( int( d ) );
+		}
+		for ( quint32 i = 0; ok && i < ng; i++ ) {
+			float p[9];
+			quint8 t4[4];
+			quint32 d = 0;
+			ok = f.read( reinterpret_cast<char *>( p ), 36 ) == 36 && f.read( reinterpret_cast<char *>( t4 ), 4 ) == 4;
+			u32( &d );
+			ok = ok && d < head[2];
+			g.glass.insert( g.glass.end(), p, p + 9 );
+			g.glassT.insert( g.glassT.end(), t4, t4 + 3 );
+			g.glassDoor.push_back( int( d ) );
+		}
+		quint32 nm = 0;
+		u32( &nm );
+		for ( quint32 m = 0; ok && m < nm; m++ ) {
+			std::string name;
+			str( &name );
+			quint32 w = 0, h = 0;
+			u32( &w );
+			u32( &h );
+			if ( !ok || !w || !h || w > 16384 || h > 16384 ) {
+				ok = false;
+				break;
+			}
+			probebvh::AlphaMask::Map mp;
+			mp.w = int( w );
+			mp.h = int( h );
+			mp.a.resize( size_t( w ) * h );
+			ok = f.read( reinterpret_cast<char *>( mp.a.data() ), qint64( mp.a.size() ) ) == qint64( mp.a.size() );
+			g.amask.maps.push_back( std::move( mp ) );
+			g.amask.mapNames.push_back( name );
+		}
+		quint32 nmod = 0;
+		u32( &nmod );
+		for ( quint32 m = 0; ok && m < nmod; m++ ) {
+			std::string name;
+			str( &name );
+			g.amask.models.push_back( name );
+		}
+		quint32 nmk = 0;
+		u32( &nmk );
+		g.amask.triOf.assign( size_t( tail[1] ), -1 );
+		for ( quint32 i = 0; ok && i < nmk; i++ ) {
+			quint32 tri = 0, map = 0, model = 0, thr = 0;
+			u32( &tri );
+			u32( &map );
+			u32( &model );
+			u32( &thr );
+			probebvh::AlphaMask::Tri t;
+			ok = ok && f.read( reinterpret_cast<char *>( t.uv ), 24 ) == 24 && tri < tail[1] && map < nm;
+			if ( !ok )
+				break;
+			t.map = int( map );
+			t.model = int( model );
+			t.thr = quint8( std::min( thr, 255u ) );
+			g.amask.triOf[tri] = int( g.amask.tris.size() );
+			g.amask.tris.push_back( t );
+		}
+		if ( ok )
+			soup->doorGeom = std::move( g );
+		more = ok && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
 	}
 	return true;
 }

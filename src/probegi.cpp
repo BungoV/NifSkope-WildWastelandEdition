@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "probebvh.h"
 #include "probebake.h"
+#include "proberelight.h"
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -265,6 +266,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 {
 	ProbeGiResult & R = *out;
 	R = ProbeGiResult();
+	if ( spec.record )   // lane GPURELIGHT1
+		*spec.record = ProbeRelightOps();
 	QElapsedTimer clock;
 	clock.start();
 	const bool redNoShadow = spec.red == QLatin1String( "noshadow" );
@@ -347,6 +350,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			if ( it == uniq.end() ) {
 				idx = int( us.size() );
 				uniq.emplace( k, idx );
+				if ( spec.record )   // lane GPURELIGHT1: the surfel id, its first file's order (front, then the back)
+					spec.record->sid.insert( spec.record->sid.end(), { int( f ), int( si ) } );
 				US u;
 				double nl = 0.0;
 				for ( int c = 0; c < 3; c++ ) {
@@ -390,13 +395,28 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	std::atomic<int> lit( 0 );
 	std::atomic<qint64> sunRays( 0 ), sunBlocked( 0 );
 	std::atomic<int> sunLit( 0 );
+	/* lane GPURELIGHT1: the record (src/proberelight.h). Every light the shadow ray reached is a pair (and the lights
+	 * off at the start, spec.recordExtra, are traced for the record only); the doors' real geometry re-traces each
+	 * pair's ray where it crosses a door's box. Nothing below changes what the relight itself computes. */
+	ProbeRelightOps * const REC = spec.record;
+	ProbeDoorTracer doorTr;
+	if ( REC )
+		doorTr.build( soup, O );
+	struct RecPair { int light; double d, nl, dl; int door[2]; float T[8]; };
+	std::vector<std::vector<RecPair>> recPairs( REC ? us.size() : 0 );
+	std::vector<double> recDirK( REC ? us.size() : 0, 0.0 ), recSunK( REC ? us.size() : 0, 0.0 );
+	std::atomic<qint64> recOver( 0 );
+	const int nLive = lights.size();
+	const int nAll = nLive + ( REC ? spec.recordExtra.size() : 0 );
 	parallelFor( us.size(), [&]( size_t i ) {
 		US & u = us[i];
 		const double o[3] = { u.p[0] + u.n[0] * 2.0, u.p[1] + u.n[1] * 2.0, u.p[2] + u.n[2] * 2.0 };
 		double E[3] = { 0, 0, 0 };
 		qint64 nr = 0, nb = 0;
 		bool any = false;
-		for ( const WwCellLight & l : lights ) {
+		for ( int li = 0; li < nAll; li++ ) {
+			const bool live = li < nLive;
+			const WwCellLight & l = live ? lights[li] : spec.recordExtra[li - nLive];
 			const double Lv[3] = { l.pos[0] - u.p[0], l.pos[1] - u.p[1], l.pos[2] - u.p[2] };
 			const double d = std::sqrt( Lv[0] * Lv[0] + Lv[1] * Lv[1] + Lv[2] * Lv[2] );
 			if ( d >= l.radius || !wwCellLightShapeIn( l, u.p[0], u.p[1], u.p[2] ) )	// lane HEMI1: the volume
@@ -407,8 +427,10 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			if ( nl <= 0.0 )
 				continue;
 			double a = radial( d, l.radius, l );
+			double dlRec = 0.0;
 			if ( l.spot ) {
 				const double dl = -( L[0] * l.dir[0] + L[1] * l.dir[1] + L[2] * l.dir[2] );
+				dlRec = dl;
 				const double base = std::min( std::max( 1.0 - ( 1.0 - dl ) / std::max( 1.0 - l.cosOuter, 1e-4 ), 0.0 ), 1.0 );
 				a *= std::min( std::pow( base, std::max( double( l.cone ), 1e-3 ) ), 1.0 );
 			}
@@ -416,12 +438,29 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				continue;
 			if ( !redNoShadow ) {
 				const double q[3] = { l.pos[0], l.pos[1], l.pos[2] };
-				nr++;
+				if ( live )
+					nr++;
 				if ( blocked( o, q, spec.fixtureClear ) ) {
-					nb++;
+					if ( live )
+						nb++;
 					continue;
 				}
 			}
+			if ( REC ) {
+				RecPair rp;
+				rp.light = li;
+				rp.d = d;
+				rp.nl = nl;
+				rp.dl = dlRec;
+				const double q[3] = { l.pos[0], l.pos[1], l.pos[2] };
+				int over = 0;
+				doorTr.crossed( o, q, spec.fixtureClear, rp.door, rp.T, &over );
+				if ( over )
+					recOver += over;
+				recPairs[i].push_back( rp );
+			}
+			if ( !live )
+				continue;
 			any = true;
 			for ( int c = 0; c < 3; c++ )
 				E[c] += l.color[c] * a * nl;
@@ -430,9 +469,12 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			double dl = std::sqrt( double( lighting.dirTo[0] ) * lighting.dirTo[0] + double( lighting.dirTo[1] ) * lighting.dirTo[1]
 				+ double( lighting.dirTo[2] ) * lighting.dirTo[2] );
 			const double nl = ( u.n[0] * lighting.dirTo[0] + u.n[1] * lighting.dirTo[1] + u.n[2] * lighting.dirTo[2] ) / std::max( dl, 1e-9 );
-			if ( nl > 0.0 )
+			if ( nl > 0.0 ) {
+				if ( REC )
+					recDirK[i] = nl;
 				for ( int c = 0; c < 3; c++ )
 					E[c] += lighting.dirColor[c] * nl;
+			}
 		}
 		// lane SKY1: the sun, behind one ray through the soup (to beyond anything loaded)
 		if ( sunOn ) {
@@ -450,6 +492,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				}
 				if ( !hit ) {
 					sunLit++;
+					if ( REC )
+						recSunK[i] = nl;
 					for ( int c = 0; c < 3; c++ ) {
 						u.S[c] = u.a[c] * spec.sky.sun[c] * nl;
 						E[c] += spec.sky.sun[c] * nl;
@@ -946,6 +990,20 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	}
 	std::atomic<qint64> vr( 0 ), vb( 0 );
 	std::atomic<int> valid( 0 );
+	// lane GPURELIGHT1: every slot's id, and the probes each slot's blend summed (with their door crossings)
+	struct RecBlend { int probe; double w; int door[2]; float T[8]; };
+	std::vector<int> recSlotId( REC ? nVox * 2 : 0, -1 );
+	std::vector<std::vector<RecBlend>> recBlend;
+	if ( REC ) {
+		for ( size_t i : todo )
+			for ( int slot = 0; slot < 2; slot++ )
+				if ( slotOf[i][size_t( slot )] >= 0 ) {
+					recSlotId[i * 2 + size_t( slot )] = int( REC->slotVox.size() );
+					REC->slotVox.push_back( int( i ) );
+					REC->slotWhich.push_back( quint8( slot ) );
+				}
+		recBlend.resize( REC->slotVox.size() );
+	}
 	parallelFor( todo.size(), [&]( size_t k ) {
 		const size_t i = todo[k];
 		const int x = int( i % size_t( dims[0] ) ), y = int( ( i / size_t( dims[0] ) ) % size_t( dims[1] ) ),
@@ -995,6 +1053,16 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 								const double t = 1.0 - d2 / ( r * r );
 								const double w = t * t;
 								wsum += w;
+								if ( REC ) {
+									RecBlend rb;
+									rb.probe = j;
+									rb.w = w;
+									int over = 0;
+									doorTr.crossed( o, P.p, 0.0, rb.door, rb.T, &over );
+									if ( over )
+										recOver += over;
+									recBlend[size_t( recSlotId[i * 2 + size_t( slot )] )].push_back( rb );
+								}
 								for ( int a = 0; a < 6; a++ ) {
 									for ( int ch = 0; ch < 3; ch++ )
 										acc[a][ch] += w * P.E[a][ch];
@@ -1057,7 +1125,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	// lane ROOMCLAMP1: a slot whose eye sees no probe either (a pocket: a beam's top under the ceiling) takes the
 	// mean of the valid slots of its room among its neighbours, two rings at most
 	for ( int ring = 0; ring < 2 && !redNoEye; ring++ ) {
-		struct GW { size_t i; int slot; float val[6][4]; };
+		struct GW { size_t i; int slot; float val[6][4]; std::vector<int> src; };
 		std::vector<GW> grow;
 		for ( size_t i : todo ) {
 			for ( int slot = 0; slot < 2; slot++ ) {
@@ -1072,6 +1140,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 					z = int( i / ( size_t( dims[0] ) * size_t( dims[1] ) ) );
 				double s[6][4] = {};
 				int n = 0;
+				std::vector<int> src;
 				for ( int dz = -1; dz <= 1; dz++ )
 					for ( int dy = -1; dy <= 1; dy++ )
 						for ( int dx = -1; dx <= 1; dx++ ) {
@@ -1088,6 +1157,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 								if ( G[j * 4 + 3] <= 0.0f )
 									continue;
 								n++;
+								if ( REC )   // lane GPURELIGHT1: the grown slot's sources, in the order summed
+									src.push_back( recSlotId[j * 2 + size_t( sj )] );
 								for ( int a = 0; a < 6; a++ ) {
 									const size_t o = ( size_t( a ) * nVox + j ) * 4;
 									for ( int ch = 0; ch < 3; ch++ )
@@ -1101,6 +1172,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				GW w;
 				w.i = i;
 				w.slot = slot;
+				w.src.swap( src );
 				for ( int a = 0; a < 6; a++ )
 					for ( int ch = 0; ch < 4; ch++ )
 						w.val[a][ch] = float( s[a][ch] / n );
@@ -1118,6 +1190,13 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				GS[o] = GS[o + 1] = GS[o + 2] = w.val[a][3];
 				GS[o + 3] = 1.0f;
 			}
+			if ( REC ) {
+				if ( REC->growStart.empty() )
+					REC->growStart.push_back( 0 );
+				REC->growSlot.push_back( recSlotId[w.i * 2 + size_t( w.slot )] );
+				REC->growSrc.insert( REC->growSrc.end(), w.src.begin(), w.src.end() );
+				REC->growStart.push_back( int( REC->growSrc.size() ) );
+			}
 			if ( w.slot == 0 ) {
 				R.voxelsGrown++;
 				R.voxelsValid++;
@@ -1125,6 +1204,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			} else
 				nTwoBare--;
 		}
+		if ( REC && ring == 0 )
+			REC->growRing0 = int( REC->growSlot.size() );
 	}
 	R.voxelsBare = nBare;
 	R.voxelsTwoBare = nTwoBare;
@@ -1156,6 +1237,168 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		for ( const US & u : us )
 			for ( int c = 0; c < 3; c++ )
 				R.surfelSun.push_back( float( u.S[c] ) );
+	}
+	// ---- lane GPURELIGHT1: the record, assembled (src/proberelight.h's layouts)
+	if ( REC ) {
+		QElapsedTimer rclock;
+		rclock.start();
+		ProbeRelightOps & X = *REC;
+		X.surfels = int( us.size() );
+		X.probes = int( up.size() );
+		X.files = names;
+		for ( const US & u : us )
+			for ( int c = 0; c < 3; c++ ) {
+				X.nrm.push_back( u.n[c] );
+				X.alb.push_back( u.a[c] );
+				X.pos.push_back( u.p[c] );
+				X.le.push_back( u.emits ? u.Le[c] : 0.0 );
+			}
+		for ( int li = 0; li < nAll; li++ ) {
+			const WwCellLight & l = li < nLive ? lights[li] : spec.recordExtra[li - nLive];
+			ProbeRelightOps::Light L;
+			for ( int c = 0; c < 3; c++ ) {
+				L.pos[c] = l.pos[c];
+				L.color[c] = l.color[c];
+				L.dir[c] = l.dir[c];
+			}
+			L.radius = l.radius;
+			L.bias = l.bias;
+			L.scale = l.scale;
+			L.exponent = l.exponent;
+			L.cone = l.cone;
+			L.cosOuter = l.cosOuter;
+			L.spot = l.spot;
+			L.onAtStart = li < nLive;
+			L.ref = size_t( li ) < spec.recordRef.size() ? spec.recordRef[size_t( li )] : 0u;
+			L.groupKey = size_t( li ) < spec.recordGroup.size() ? spec.recordGroup[size_t( li )] : 0u;
+			L.flags = size_t( li ) < spec.recordFlags.size() ? spec.recordFlags[size_t( li )] : quint16( l.spot ? 1 : 0 );
+			X.lights.push_back( L );
+		}
+		auto census = [&X]( int kind, const int door[2], const float * T, int stride, bool vis ) {
+			if ( door[0] < 0 )
+				return;
+			X.doorEntries[kind]++;
+			bool zero = true, part = false;
+			for ( int s = 0; s < 2; s++ ) {
+				if ( door[s] < 0 )
+					continue;
+				const int nc = vis ? 1 : 3;
+				for ( int c = 0; c < nc; c++ ) {
+					const float t = vis ? ( T[s * stride] > 0.0f || T[s * stride + 1] > 0.0f || T[s * stride + 2] > 0.0f ? 1.0f : 0.0f )
+										: T[s * stride + c];
+					zero = zero && t <= 0.0f;
+					part = part || ( t > 0.0f && t < 1.0f );
+				}
+			}
+			if ( zero )
+				X.doorStopped[kind]++;
+			else if ( part )
+				X.doorTinted[kind]++;
+		};
+		// 1. the pairs, by surfel
+		X.pairStart.assign( 1, 0 );
+		for ( size_t i = 0; i < us.size(); i++ ) {
+			for ( const RecPair & p : recPairs[i] ) {
+				X.pairLight.push_back( p.light );
+				X.pairD.push_back( p.d );
+				X.pairNL.push_back( p.nl );
+				X.pairDL.push_back( p.dl );
+				X.pairDoor.insert( X.pairDoor.end(), p.door, p.door + 2 );
+				X.pairT.insert( X.pairT.end(), p.T, p.T + 8 );
+				census( 0, p.door, p.T, 4, false );
+			}
+			X.pairStart.push_back( int( X.pairLight.size() ) );
+		}
+		X.hasDir = lighting.interior && lighting.hasDirectional;
+		for ( int c = 0; c < 3; c++ ) {
+			X.dirTo[c] = lighting.dirTo[c];
+			X.dirColor[c] = lighting.dirColor[c];
+			X.sun[c] = spec.sky.sun[c];
+		}
+		X.dirK = recDirK;
+		X.sunOn = sunOn;
+		X.sunK = recSunK;
+		// 2. the links, by probe (lks, probeLinks: the gathers' own order), each re-traced over its surfel's cell
+		X.linkStart = R.probeLinkStart;
+		X.linkSurf = R.probeLinks;
+		X.linkOmega.resize( lks.size() );
+		X.linkTint.resize( lks.size() * 3 );
+		X.linkCos.resize( lks.size() * 6 );
+		for ( size_t k = 0; k < lks.size(); k++ ) {
+			X.linkOmega[k] = lks[k].omega;
+			for ( int c = 0; c < 3; c++ )
+				X.linkTint[k * 3 + size_t( c )] = lks[k].tint[c];
+			for ( int a = 0; a < 6; a++ )
+				X.linkCos[k * 6 + size_t( a )] = lks[k].cosA[a];
+		}
+		X.linkDoor.assign( lks.size() * 2, -1 );
+		X.linkT.assign( lks.size() * 8, 1.0f );
+		if ( doorTr.any() ) {
+			const double cs = R.surfelCell;
+			parallelFor( up.size(), [&]( size_t j ) {
+				for ( int k = R.probeLinkStart[j]; k < R.probeLinkStart[j + 1]; k++ ) {
+					const US & u = us[size_t( R.probeLinks[size_t( k )] )];
+					doorTr.linkMean( up[j].p, u.p, u.n, cs, &X.linkDoor[size_t( k ) * 2], &X.linkT[size_t( k ) * 8] );
+				}
+			} );
+		}
+		for ( size_t k = 0; k < lks.size(); k++ )
+			census( 1, &X.linkDoor[k * 2], &X.linkT[k * 8], 4, false );
+		for ( const UP & P : up ) {
+			X.kUnl.push_back( P.kUnl );
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					X.skyE.push_back( skyOn ? P.S[a][c] : 0.0 );
+		}
+		X.skyOn = skyOn;
+		// 3. the feed (BOUNCE2's lists), each entry's ray re-traced
+		X.feedStart = R.feedStart;
+		X.feedProbe = R.feedProbe;
+		X.feedW.assign( R.feedWeight.begin(), R.feedWeight.end() );
+		X.feedDoor.assign( R.feedProbe.size() * 2, -1 );
+		X.feedT.assign( R.feedProbe.size() * 8, 1.0f );
+		if ( doorTr.any() )
+			parallelFor( us.size(), [&]( size_t i ) {
+				const US & u = us[i];
+				const double o[3] = { u.p[0] + u.n[0] * 2.0, u.p[1] + u.n[1] * 2.0, u.p[2] + u.n[2] * 2.0 };
+				for ( int k = R.feedStart[i]; k < R.feedStart[i + 1]; k++ ) {
+					int over = 0;
+					doorTr.crossed( o, up[size_t( R.feedProbe[size_t( k )] )].p, 0.0, &X.feedDoor[size_t( k ) * 2],
+						&X.feedT[size_t( k ) * 8], &over );
+					if ( over )
+						recOver += over;
+				}
+			} );
+		for ( size_t k = 0; k < R.feedProbe.size(); k++ )
+			census( 2, &X.feedDoor[k * 2], &X.feedT[k * 8], 4, true );
+		X.passes = R.passes;
+		X.fixedPasses = spec.passes > 0;
+		X.maxPasses = spec.passes > 0 ? spec.passes : std::max( 1, spec.maxPasses );
+		X.settle = spec.settle;
+		X.redGrow = redGrow;
+		// 4. the grid's slots
+		for ( int c = 0; c < 3; c++ )
+			X.dims[c] = dims[c];
+		X.nVox = nVox;
+		X.blendStart.assign( 1, 0 );
+		for ( const std::vector<RecBlend> & sl : recBlend ) {
+			for ( const RecBlend & b : sl ) {
+				X.blendProbe.push_back( b.probe );
+				X.blendW.push_back( b.w );
+				X.blendDoor.insert( X.blendDoor.end(), b.door, b.door + 2 );
+				X.blendT.insert( X.blendT.end(), b.T, b.T + 8 );
+				census( 3, b.door, b.T, 4, true );
+			}
+			X.blendStart.push_back( int( X.blendProbe.size() ) );
+		}
+		if ( X.growStart.empty() )
+			X.growStart.push_back( 0 );
+		for ( const ProbeSoup::Door & d : soup.doors )
+			X.doorRefs.push_back( d.ref );
+		X.doorOver2 = recOver;
+		X.doorGeometry = doorTr.geometry();
+		X.msRecord = rclock.nsecsElapsed() / 1e6;
+		X.built = true;
 	}
 	R.ok = true;
 	return true;

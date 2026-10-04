@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "lodgen.h"
 #include "lodgengpu.h"
+#include "proberelight.h"
 #include "nifcli.h"
 #include "nifskope.h"
 #include "version.h"
@@ -80,7 +81,7 @@ QCoreApplication * createApplication( int &argc, char *argv[] )
 			 * its offscreen OpenGL context (src/lodgengpu.h); it still opens no
 			 * window, and a QGuiApplication is not a QApplication, so main()
 			 * below still takes the headless path. */
-			if ( lodgenGpuWantedForArgs( argc, argv ) )
+			if ( lodgenGpuWantedForArgs( argc, argv ) || probeRelightGpuWantedForArgs( argc, argv ) )
 				return new QGuiApplication( argc, argv );
 			return new QCoreApplication( argc, argv );
 		}

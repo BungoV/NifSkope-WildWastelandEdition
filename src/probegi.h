@@ -27,6 +27,7 @@
 #include "probeplace.h"
 #include "proberooms.h"
 #include "probesky.h"
+#include "gl/celllights.h"
 
 #include <QString>
 #include <QStringList>
@@ -128,6 +129,17 @@ struct ProbeGiSpec
 	int passes = 0;
 	int maxPasses = 64;
 	double settle = 1e-3;
+	/*! lane GPURELIGHT1 (src/proberelight.h): set, the relight also records its operators there (the pairs, links,
+	 *  feed and blend lists, each entry's door crossings re-traced against the doors' real geometry) for the
+	 *  relight without rays. Its own result is unchanged bit for bit. recordExtra: lights off at the start (a
+	 *  switch's, a script's) whose pairs are recorded but which light nothing here; recordRef / recordGroup /
+	 *  recordFlags: per light (lights, then recordExtra), the placed reference, its group key and its light flags
+	 *  (FARVIEW1b 3.2 / 3.6), empty = 0. */
+	struct ProbeRelightOps * record = nullptr;
+	QVector<WwCellLight> recordExtra;
+	std::vector<quint32> recordRef;
+	std::vector<quint64> recordGroup;
+	std::vector<quint16> recordFlags;
 };
 
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.
