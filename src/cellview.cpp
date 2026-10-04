@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include "probealbedo.h"		// lane PRTPBAKE
 #include "probefar.h"		// lane BAKEBLOCK1: the far soup beyond the loaded block
 #include "proberelight.h"	// lane GPURELIGHT1: the relight from recorded operators (CPU + GPU)
+#include "farlight.h"		// lane FARVIEW1: distant light from the surfels
 #include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
 #include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
 #include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
@@ -3798,9 +3799,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			 * with its FARVIEW1b group key), then relights from them on the CPU and on the GPU, doors open and every
 			 * door closed, and states the timings; WW_CELL_GI_RECORDS=<folder> writes the shared light record */
 			const bool giGpu = !qgetenv( "WW_CELL_GI_GPU" ).isEmpty();
+			/* lane FARVIEW1: WW_CELL_FARLIGHT=<folder> records the operators too, writes the light record and the far light's
+			 * layers there (src/farlight.h), and publishes the far tables for the Far light row */
+			const QString farDir = QString::fromLocal8Bit( qgetenv( "WW_CELL_FARLIGHT" ) );
+			const bool giRec = giGpu || !farDir.isEmpty();
+			bool farBaked = false;
 			ProbeRelightOps relOps;
 			QStringList relPlugins;
-			if ( giGpu ) {
+			if ( giRec ) {
 				for ( const QString & pl : world.pluginList().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
 					relPlugins << QFileInfo( pl.trimmed() ).fileName();
 				QHash<quint32, const EsmRefr *> refOf;
@@ -3887,6 +3893,25 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 						? QStringLiteral( "  %1\n" ).arg( rcensus ) : QStringLiteral( "  gi records FAILED: %1\n" ).arg( rerr );
 				}
 			}
+			if ( !farDir.isEmpty() && ok && relOps.built ) {	// lane FARVIEW1: the dots, the light record, the layers
+				relOps.interior = spec.interior;
+				QString fc, ferr;
+				farLightDots( probeSoup, relOps, 48.0f, &fc );
+				probeNotes += QStringLiteral( "  %1\n" ).arg( fc );
+				QDir().mkpath( farDir );
+				QString rc;
+				if ( !probeRelightWriteRecords( relOps, farDir, relPlugins, &ferr, &rc ) ) {
+					probeNotes += QStringLiteral( "  far light record FAILED: %1\n" ).arg( ferr );
+				} else {
+					probeNotes += QStringLiteral( "  %1\n" ).arg( rc );
+					FarLightBakeSpec fs;
+					fs.red = QString::fromLatin1( qgetenv( "WW_CELL_FARLIGHT_RED" ) ).trimmed();
+					fs.dump = !qgetenv( "WW_CELL_FARLIGHT_DUMP" ).isEmpty();
+					FarLightBakeOut fo;
+					farBaked = farLightBake( relOps, farDir, fs, &fo, &ferr );
+					probeNotes += farBaked ? QStringLiteral( "  %1\n" ).arg( fo.census ) : QStringLiteral( "  far light bake FAILED: %1\n" ).arg( ferr );
+				}
+			}
 			if ( ok ) {
 				WwCellGi gi;
 				for ( int k = 0; k < 3; k++ ) {
@@ -3906,6 +3931,60 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
 				probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1: the second slots and the rooms
 				wwCellGiPublish( nif, gi );
+				if ( farBaked ) {	// lane FARVIEW1: the far tables for the group state, and the GI's placed share
+					FarLightSet set;
+					QString ferr;
+					if ( !farLightLoad( farDir, &set, &ferr ) ) {
+						probeNotes += QStringLiteral( "  far light load FAILED: %1\n" ).arg( ferr );
+					} else {
+						// WW_CELL_FARLIGHT_STATE: start (each group as the game starts it; the default) | all | none
+						const QByteArray st = qgetenv( "WW_CELL_FARLIGHT_STATE" ).trimmed();
+						auto on = [&]( quint64, bool onAtStart ) { return st == "all" ? true : st == "none" ? false : onAtStart; };
+						std::vector<float> E;
+						farLightSum( set, on, E );
+						WwCellFar fr;
+						farLightTables( set, E, fr.slotTab, fr.recs, &fr.bits, &fr.maxProbe );
+						fr.cell = set.cell;
+						fr.records = int( set.recs.size() );
+						const QStringList band = QString::fromLatin1( qgetenv( "WW_CELL_FAR_BAND" ) ).split( QLatin1Char( ',' ) );
+						if ( band.size() == 2 && band[0].toFloat() > 0.0f && band[1].toFloat() > band[0].toFloat() ) {
+							fr.band[0] = band[0].toFloat();
+							fr.band[1] = band[1].toFloat();
+						}
+						for ( const FarLightSet::Dot & d : set.dots )
+							if ( on( d.group, d.onAtStart ) )
+								fr.dots.insert( fr.dots.end(), { d.pos[0], d.pos[1], d.pos[2], 0.0f, d.I[0], d.I[1], d.I[2], 0.0f } );
+						// the GI grid relit by the placed lights alone, at the grid's own pass count: no sky, sun, directional or glow
+						ProbeGiSpec gp = gs;
+						gp.record = nullptr;
+						gp.recordExtra.clear();
+						gp.recordRef.clear();
+						gp.recordGroup.clear();
+						gp.sky = ProbeSkyLight();
+						gp.skyRed.clear();
+						gp.interiorSky = gp.interiorSun = false;
+						gp.noGlow = true;
+						gp.passes = gr.passes;
+						WwCellLighting lp = *L;
+						lp.hasDirectional = false;
+						ProbeGiResult gq;
+						if ( probeGiRelight( probeSoup, giBakeDir, lp, gp, &gq ) && !gq.grid.empty() ) {
+							fr.placed = std::move( gq.grid );
+							for ( int k = 0; k < 3; k++ ) {
+								fr.placedOrigin[k] = gq.origin[k];
+								fr.placedDims[k] = gq.dims[k];
+							}
+							fr.placedVoxel = gq.voxel;
+						}
+						fr.summary = QStringLiteral( "%1 records, table 2^%2 (walk %3), %4 dots, band %5-%6, placed grid %7 (%8 passes), state %9" )
+							.arg( fr.records ).arg( fr.bits ).arg( fr.maxProbe ).arg( fr.dots.size() / 8 ).arg( double( fr.band[0] ) )
+							.arg( double( fr.band[1] ) ).arg( fr.placed.empty() ? QStringLiteral( "none" ) : QStringLiteral( "%1x%2x%3" )
+							.arg( fr.placedDims[0] ).arg( fr.placedDims[1] ).arg( fr.placedDims[2] ) ).arg( gq.passes )
+							.arg( st.isEmpty() ? QStringLiteral( "start" ) : QString::fromLatin1( st ) );
+						probeNotes += QStringLiteral( "  far light published: %1; %2\n" ).arg( fr.summary, set.census );
+						wwCellFarPublish( nif, fr );
+					}
+				}
 				if ( !spec.interior || gs.interiorSky )
 					probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather relights it
 				WwCellProbeView pv;	// lane PROBEVIEW1: the surfel and probe previews

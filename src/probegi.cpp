@@ -376,6 +376,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	 * Read once into B after the direct light, never inside the bounce passes (they rebuild from B: counted once). */
 	for ( size_t f = 0; f < tbks.size(); f++ )
 		for ( const TbkEmit & e : tbks[f].emits ) {
+			if ( spec.noGlow )	// lane FARVIEW1
+				break;
 			const bool back = ( e.surfel & 0x80000000u ) != 0;
 			const size_t i = size_t( e.surfel & 0x7fffffffu );
 			const std::vector<int> & fs = ( back ? fileBack : fileSurfel )[f];

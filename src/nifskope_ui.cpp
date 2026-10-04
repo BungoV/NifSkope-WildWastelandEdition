@@ -23043,6 +23043,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					} else {
 						shotImage.save( out );
 					}
+					// lane FARVIEW1: WW_RENDER_GPUMS=<frames> times that many repaints of the view just grabbed
+					if ( const int gpuFrames = qEnvironmentVariableIntValue( "WW_RENDER_GPUMS" ); gpuFrames > 0 ) {
+						QFile gf( out + QStringLiteral( ".gpums.txt" ) );
+						if ( gf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+							QTextStream( &gf ) << skope->ogl->wwGpuMs( gpuFrames ) << "\n";
+					}
 					// TEMP DIAGNOSTIC (WW_GRID_PROBE): bracket the grab so the log
 					// shows which paintGL frames precede it, and whether any grid
 					// draw belongs to the frame actually captured.

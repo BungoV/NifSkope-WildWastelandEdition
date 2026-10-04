@@ -207,6 +207,7 @@ private:
 	QCheckBox * probesShow = nullptr;
 	QCheckBox * cellLights = nullptr;   // lane PRTP3: light the view with the cell's own lights
 	QCheckBox * cellGi = nullptr;       // lane PRTPGI: add the bake's bounce of those lights
+	QCheckBox * cellFar = nullptr;      // lane FARVIEW1: past the band, the surfels' baked light in place of the lights
 	QCheckBox * cellIs = nullptr;       // lane IMGS1: the cell's imagespace (exposure, curve, grade, LUT)
 	QComboBox * cellPass = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
 	QPushButton * probesPlace = nullptr;

@@ -69,6 +69,20 @@ uniform vec4 cellIsBloomRect;
 uniform bool cellShadowOn;
 uniform samplerCubeArrayShadow cellShadow;
 uniform float cellShadowTexel;
+// lane FARVIEW1 (src/farlight.h): distant light from the surfels, set by celllights.cpp
+uniform bool cellFarOn;
+uniform samplerBuffer cellFarSlots;	// a slot: x, y, z x 8 + side, record + 1 (0 empty); exact integers
+uniform samplerBuffer cellFarRecs;	// 2 texels a record: pos, E (the shader's diff units)
+uniform int cellFarBits;
+uniform int cellFarProbe;			// the longest walk any record's key needs
+uniform float cellFarCell;
+uniform vec2 cellFarBand;			// D0, D1: w = smoothstep(D0, D1, the camera distance)
+uniform int cellFarRed;				// WW_CELL_FAR_RED: 1 nosurfel, 2 noblend, 4 flipside
+uniform bool cellFarPlacedOn;
+uniform sampler3D cellFarPlaced;	// the GI grid relit by the placed lights alone: slot 0's six slabs
+uniform vec3 cellFarPlacedOrigin;
+uniform float cellFarPlacedVoxel;
+uniform vec3 cellFarPlacedDims;
 
 // sqrt-of-linear in (this program's convention), display out. Shaders011.fxp, the tonemap PS and the LUT PS.
 vec3 cellImageSpace( vec3 sqrtColor )
@@ -397,9 +411,135 @@ vec3 cellLightE( int i, vec3 P, vec3 N, out vec3 L, out bool noSpec )
 	return t1.rgb * a;
 }
 
+/* lane FARVIEW1: the far blend at world point P, 0 near, 1 far (red noblend: a hard switch at the band's middle) */
+float cellFarW( vec3 P )
+{
+	if ( !cellFarOn )
+		return 0.0;
+	float d = length( P - vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) );
+	if ( ( cellFarRed & 2 ) != 0 )
+		return step( 0.5 * ( cellFarBand.x + cellFarBand.y ), d );
+	return smoothstep( cellFarBand.x, cellFarBand.y, d );
+}
+
+// the hash farLightHash (src/farlight.h) uses: an int's bits as uint, products wrap
+uint cellFarHash( ivec3 k, int side )
+{
+	return ( uint( k.x ) * 73856093u ) ^ ( uint( k.y ) * 19349663u ) ^ ( uint( k.z ) * 83492791u ) ^ ( uint( side ) * 2654435761u );
+}
+
+int cellFarIters = 0;	// probe 94: table slots walked
+/* F: the lit surfels on P's side in the 27 cells round P's key cell, w = (1 - d^2 / R^2)^2, R = 1.5 cells
+ * (FARVIEW1_DESIGN.md section 3; the bake's sideOf and keyOf). Red flipside: the opposite side's. */
+vec3 cellFarF( vec3 P, vec3 N )
+{
+	vec3 a = abs( N );
+	int ax = 0;
+	if ( a.y > a.x )
+		ax = 1;
+	if ( a.z > a[ax] )
+		ax = 2;
+	int side = 2 * ax + ( N[ax] >= 0.0 ? 0 : 1 );
+	vec3 nudge = vec3( 0.0 );
+	nudge[ax] = ( side & 1 ) != 0 ? -0.5 : 0.5;
+	ivec3 k0 = ivec3( floor( ( P - nudge ) / cellFarCell ) );
+	if ( ( cellFarRed & 4 ) != 0 )
+		side ^= 1;
+	uint mask = ( 1u << uint( cellFarBits ) ) - 1u;
+	float R2 = 2.25 * cellFarCell * cellFarCell;
+	vec3 s = vec3( 0.0 );
+	float ws = 0.0;
+	for ( int dz = -1; dz <= 1; dz++ )
+	for ( int dy = -1; dy <= 1; dy++ )
+	for ( int dx = -1; dx <= 1; dx++ ) {
+		ivec3 k = k0 + ivec3( dx, dy, dz );
+		uint h = cellFarHash( k, side ) & mask;
+		vec3 key = vec3( float( k.x ), float( k.y ), float( k.z * 8 + side ) );
+		for ( int j = 0; j < cellFarProbe && j < 64; j++ ) {
+			cellFarIters++;
+			vec4 t = texelFetch( cellFarSlots, int( h ) );
+			if ( t.w == 0.0 )
+				break;
+			if ( t.xyz == key ) {
+				int r = int( t.w ) - 1;
+				vec3 d = P - texelFetch( cellFarRecs, r * 2 ).xyz;
+				float q = 1.0 - dot( d, d ) / R2;
+				if ( q > 0.0 ) {
+					q *= q;
+					s += q * texelFetch( cellFarRecs, r * 2 + 1 ).rgb;
+					ws += q;
+				}
+			}
+			h = ( h + 1u ) & mask;
+		}
+	}
+	return ws > 0.0 ? s / ws : vec3( 0.0 );
+}
+
+// the GI grid's placed share at P (its E, read as cellGiE reads the grid: the sky grid's rgb carries its share)
+vec3 cellFarPlacedE( vec3 P, vec3 N )
+{
+	if ( !cellFarPlacedOn )
+		return vec3( 0.0 );
+	vec3 g = ( P + N * ( 0.5 * cellFarPlacedVoxel ) - cellFarPlacedOrigin ) / cellFarPlacedVoxel;
+	vec2 xy = g.xy / cellFarPlacedDims.xy;
+	float z = clamp( g.z, 0.5, cellFarPlacedDims.z - 0.5 );
+	float depth = 6.0 * cellFarPlacedDims.z;
+	vec3 n2 = N * N;
+	vec4 s = n2.x * texture( cellFarPlaced, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellFarPlacedDims.z ) / depth ) )
+	       + n2.y * texture( cellFarPlaced, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellFarPlacedDims.z ) / depth ) )
+	       + n2.z * texture( cellFarPlaced, vec3( xy, ( z + ( N.z >= 0.0 ? 4.0 : 5.0 ) * cellFarPlacedDims.z ) / depth ) );
+	if ( cellGiSky )
+		return max( s.rgb, vec3( 0.0 ) );
+	return s.a > 0.01 ? max( s.rgb / s.a, vec3( 0.0 ) ) : vec3( 0.0 );
+}
+
+/* the far terms at P: returns w; F (red nosurfel: 0) and the GI's placed share / pi (gP, the caller takes w x gP
+ * out of its GI). The caller's placed diffuse: (1 - w) x real (cellSumLights fades it) + w x F. */
+float cellFarTerms( vec3 P, vec3 N, out vec3 F, out vec3 gP )
+{
+	F = vec3( 0.0 );
+	gP = vec3( 0.0 );
+	float w = cellFarW( P );
+	if ( w <= 0.0 )
+		return 0.0;
+	if ( ( cellFarRed & 1 ) == 0 )
+		F = cellFarF( P, N );
+	gP = cellFarPlacedE( P, N ) * 0.31830989;
+	return w;
+}
+
+/* the far gate's probes, sqrt( clamp( E / 4 ) ) so a dim far town keeps its bits: 91 F, 92 the real placed
+ * irradiance (Lambert, unfaded) + the GI's placed share / pi, 93 w, 94 (lights the shading loops + table slots
+ * walked) / 256 */
+vec3 cellFarProbeOut( vec3 P, vec3 N )
+{
+	float w = cellFarW( P );
+	if ( cellProbe == 93 )
+		return vec3( w );
+	if ( cellProbe == 91 )
+		return sqrt( clamp( ( cellFarOn ? cellFarF( P, N ) : vec3( 0.0 ) ) * 0.25, 0.0, 1.0 ) );
+	if ( cellProbe == 94 ) {
+		if ( w > 0.0 && ( cellFarRed & 1 ) == 0 )
+			cellFarF( P, N );
+		return vec3( float( ( w >= 1.0 ? 0 : cellLightCount ) + cellFarIters ) / 256.0 );
+	}
+	vec3 E = vec3( 0.0 );
+	for ( int i = 0; i < cellLightCount; i++ ) {
+		vec3 L;
+		bool ns;
+		vec3 c = cellLightE( i, P, N, L, ns );
+		E += c * max( dot( N, L ), 0.0 );
+	}
+	E += cellFarPlacedE( P, N ) * 0.31830989;
+	return sqrt( clamp( E * 0.25, 0.0, 1.0 ) );
+}
+
 // the harness probes for a program without the legacy BRDF helpers (pbrm_cell)
 vec3 cellProbeRaw( vec3 P, vec3 N )
 {
+	if ( cellProbe >= 91 && cellProbe <= 94 )	// lane FARVIEW1
+		return cellFarProbeOut( P, N );
 	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
 		return vec3( 0.0 );
 	if ( cellProbe == 5 )
@@ -509,12 +649,16 @@ float cellRim( vec3 N, vec3 L, vec3 V, float gloss )
 /* the placed lights at world point P, world normal N: the irradiance (Lambert, what the GI, the reflection and
  * probe 1 read), the game's Oren-Nayar diffuse (what the albedo takes) and the specular sum */
 vec3 cellRimSum;	// lane RIM1: the rim part of diffOn alone, for probe 10 (set by cellSumLights)
+bool cellFarFade = true;	// lane FARVIEW1: false = the lights unfaded
 void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec3 diffOn, out vec3 spec )
 {
 	diff = vec3( 0.0 );
 	diffOn = vec3( 0.0 );
 	cellRimSum = vec3( 0.0 );
 	spec = vec3( 0.0 );
+	float fw = cellFarFade ? cellFarW( P ) : 0.0;	// lane FARVIEW1: the real lights fade out over the band
+	if ( fw >= 1.0 )
+		return;
 	for ( int i = 0; i < cellLightCount; i++ ) {
 		vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 		vec3 Lv = t0.xyz - P;
@@ -548,6 +692,12 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 		// lane POOL1: Non Specular (1) has no specular in the game's light shaders either
 		if ( ( fl & 1 ) == 0 || ( cellRed & 65536 ) != 0 )	// WW_CELL_SPEC_RED=nonspec
 			spec += E * cellSpecGame( N, L, Vw, gloss );
+	}
+	if ( fw > 0.0 ) {
+		diff *= 1.0 - fw;
+		diffOn *= 1.0 - fw;
+		cellRimSum *= 1.0 - fw;
+		spec *= 1.0 - fw;
 	}
 }
 
@@ -662,6 +812,13 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	cellSumLights( P, N, Vw, gloss, diff, diffOn, spec );
 	vec3 alb = albedo * albedo;
 	vec3 gi = cellGiOn ? cellGiE( P, N ) * 0.31830989 : vec3( 0.0 );
+	vec3 farF, farGP;	// lane FARVIEW1: the far placed light (diffuse only); the GI's placed share out x w
+	float farW = cellFarTerms( P, N, farF, farGP );
+	if ( farW > 0.0 ) {
+		gi = max( gi - farW * farGP, vec3( 0.0 ) );
+		diff += farW * farF;
+		diffOn += farW * farF;
+	}
 	vec3 add = alb * ( diffOn + gi ) + spec * specMask * specCol;	// albedo x the game's diffuse; the GI stays Lambert
 	if ( !cellInterior )
 		return sqrt( color * color + add );
@@ -699,6 +856,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
 	if ( cellProbe == 90 )	// lane SKY1 (60-74 are other lanes'): the share of the weather's ambient the grid's sky replaced
 		return vec3( cellGiSkyK( P, N ) );
+	if ( cellProbe >= 91 && cellProbe <= 94 )	// lane FARVIEW1
+		return cellFarProbeOut( P, N );
 	if ( cellProbe == 1 || cellProbe == 8 || cellProbe == 10 || cellProbe == 30 ) {
 		// 1: the irradiance / 4; 8 (lanes ON1, RIM1): the game's diffuse (Oren-Nayar + rim) / 4, seen from the camera;
 		// 10 (lane RIM1): the rim alone x 4, sixteen times probe 8's reach, so the per-light rim flags show

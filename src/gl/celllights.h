@@ -177,6 +177,39 @@ const WwCellGi * wwCellGiFor( const void * nif );
 bool wwCellGiOn();
 void wwCellGiSetOn( bool on );
 
+/*! lane FARVIEW1 (src/farlight.h, docs/cloud/FARVIEW1_DESIGN.md): DISTANT LIGHT FROM THE SURFELS. Past the band's
+ *  near end D0 a surface's placed-light diffuse fades from the real lights to the bake's surfels (w = smoothstep(D0, D1,
+ *  the camera distance)): (1 - w)(real + the GI grid's placed share) + w x albedo x F, F the 27-cell same-side lookup.
+ *  slotTab: 4 floats a slot (x, y, z x 8 + side, record + 1; 0 empty: exact integers, one sampler type), 2^bits slots; recs: 8 floats a record (pos, 0, E, 0); placed = the GI grid relit by the placed
+ *  lights alone (slot 0's six slabs, the GI grid's origin, voxel and dims), subtracted x w so the far bounce is not
+ *  counted twice. dots: 8 floats a bulb (pos, 0, I, 0) for the skyline pass. */
+struct WwCellFar
+{
+	std::vector<float> slotTab;	// (Qt reserves "slots")
+	std::vector<float> recs;
+	int bits = 0, maxProbe = 0, records = 0;
+	float cell = 70.0f;
+	float band[2] = { 1024.0f, 5120.0f };
+	std::vector<float> placed;
+	float placedOrigin[3] = { 0, 0, 0 };
+	float placedVoxel = 64.0f;
+	int placedDims[3] = { 0, 0, 0 };
+	std::vector<float> dots;
+	QString summary;
+};
+void wwCellFarPublish( const void * nif, const WwCellFar & far );
+const WwCellFar * wwCellFarFor( const void * nif );
+//! the Far light row (ships off); the pin WW_CELL_FAR wins. Draws only while the Cell lights row is on.
+bool wwCellFarOn();
+void wwCellFarSetOn( bool on );
+//! WW_CELL_FAR_RED: 1 nosurfel (the far term dropped, the real lights still fade), 2 noblend (a hard switch at the
+//! band's middle), 4 flipside (the lookup reads the surfels facing the other way)
+int wwCellFarRed();
+/*! lane FARVIEW1: the far bulbs as dots on the skyline, added into the linear frame after the scene draw (between
+ *  wwCellHdrBegin and wwCellHdrEnd; the frame's depth hides them behind nearer surfaces). Nothing when the Far light
+ *  row is off, the cell lights are not drawn, or no bulbs were published. Returns the dots drawn. */
+int wwCellFarDotsDraw( Scene * scene );
+
 //! the Cell lights row (ships off); the pin WW_CELL_LIT wins
 bool wwCellLightsOn();
 void wwCellLightsSetOn( bool on );

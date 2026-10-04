@@ -348,6 +348,7 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 	const size_t nS = size_t( X.surfels ), nP = size_t( X.probes ), nL = X.lights.size();
 	const int red = redMode( st.red );
 	const bool glassClear = hasToken( st.red, "glassclear" );   // the D1 gate's knob (its reference merges no panes)
+	const bool placed = st.placedOnly;   // lane FARVIEW1: the placed lights alone
 	// the live lights
 	std::vector<double> col( nL * 3 ), rad( nL );
 	std::vector<quint8> on( nL, 1 );
@@ -380,6 +381,7 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 	// 1. direct
 	O.B1.resize( nS * 3 );
 	std::vector<double> B1( nS * 3 ), Bk( nS * 3 );
+	std::vector<double> Ed( st.wantE ? nS * 3 : 0 ), Ef( st.wantE ? nS * 3 : 0 );   // lane FARVIEW1: direct E, the last feed / pi
 	parallelFor( nS, [&]( size_t i ) {
 		double E[3] = { 0, 0, 0 };
 		for ( int k = X.pairStart[i]; k < X.pairStart[i + 1]; k++ ) {
@@ -407,15 +409,19 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 				for ( int c = 0; c < 3; c++ )
 					E[c] += col[li * 3 + size_t( c )] * a * nl;
 		}
-		if ( X.hasDir && X.dirK[i] > 0.0 )
+		if ( X.hasDir && X.dirK[i] > 0.0 && !placed )
 			for ( int c = 0; c < 3; c++ )
 				E[c] += X.dirColor[c] * X.dirK[i];
-		if ( X.sunOn && X.sunK[i] > 0.0 )
+		if ( X.sunOn && X.sunK[i] > 0.0 && !placed )
 			for ( int c = 0; c < 3; c++ )
 				E[c] += sun[c] * X.sunK[i];
+		if ( st.wantE )
+			for ( int c = 0; c < 3; c++ )
+				Ed[i * 3 + size_t( c )] = E[c];
 		for ( int c = 0; c < 3; c++ ) {
 			double b = X.alb[i * 3 + size_t( c )] * E[c];
-			b += X.le[i * 3 + size_t( c )];
+			if ( !placed )
+				b += X.le[i * 3 + size_t( c )];
 			B1[i * 3 + size_t( c )] = b;
 			Bk[i * 3 + size_t( c )] = b;
 			O.B1[i * 3 + size_t( c )] = float( b );
@@ -448,7 +454,7 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 			if ( X.kUnl[j] != 1.0 )
 				for ( double & c : E )
 					c *= X.kUnl[j];
-			if ( X.skyOn )
+			if ( X.skyOn && !placed )
 				for ( int k = 0; k < 18; k++ )
 					E[k] += X.skyE[j * 18 + size_t( k )];
 			std::memcpy( &PE[j * 18], E, sizeof E );
@@ -495,6 +501,8 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 			for ( int c = 0; c < 3; c++ ) {
 				const double a = X.redGrow ? 1.5 : X.alb[i * 3 + size_t( c )];
 				Bn[i * 3 + size_t( c )] = B1[i * 3 + size_t( c )] + ( ws > 0.0 ? a * ( E[c] / ws ) / kPi : 0.0 );
+				if ( st.wantE )
+					Ef[i * 3 + size_t( c )] = ws > 0.0 ? ( E[c] / ws ) / kPi : 0.0;
 			}
 		} );
 		double ch = 0.0, sum = 0.0, mx = 0.0;
@@ -514,6 +522,11 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 	}
 	O.B.assign( Bk.begin(), Bk.end() );
 	O.E.assign( PE.begin(), PE.end() );
+	if ( st.wantE ) {
+		O.Es.resize( nS * 3 );
+		for ( size_t k = 0; k < nS * 3; k++ )
+			O.Es[k] = Ed[k] + Ef[k];
+	}
 	// 4. the grid
 	const size_t nVox = X.nVox;
 	O.grid.assign( nVox * 24, 0.0f );
@@ -1287,6 +1300,37 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 
 // ======================================================================== the shared light record
 
+/* lane FARVIEW1: RGB9E5 (the shared-exponent HDR of EXT_texture_shared_exponent: 9-bit mantissas, a 5-bit exponent,
+ * bias 15), r in bits 0-8, g 9-17, b 18-26, the exponent 27-31. Negative and NaN read as 0. */
+quint32 probeRgb9e5( const float c[3] )
+{
+	const double maxv = 65408.0;   // (511 / 512) x 2^16
+	double v[3];
+	for ( int k = 0; k < 3; k++ )
+		v[k] = c[k] > 0.0f ? std::min( double( c[k] ), maxv ) : 0.0;
+	const double m = std::max( v[0], std::max( v[1], v[2] ) );
+	if ( m <= 0.0 )
+		return 0u;
+	int e = std::max( -16, int( std::floor( std::log2( m ) ) ) ) + 1 + 15;
+	e = std::min( std::max( e, 0 ), 31 );
+	double den = std::ldexp( 1.0, e - 15 - 9 );
+	if ( std::floor( m / den + 0.5 ) >= 512.0 && e < 31 ) {
+		e++;
+		den *= 2.0;
+	}
+	quint32 out = quint32( e ) << 27;
+	for ( int k = 0; k < 3; k++ )
+		out |= quint32( std::min( std::floor( v[k] / den + 0.5 ), 511.0 ) ) << ( 9 * k );
+	return out;
+}
+
+void probeRgb9e5Decode( quint32 p, float c[3] )
+{
+	const double s = std::ldexp( 1.0, int( p >> 27 ) - 15 - 9 );
+	for ( int k = 0; k < 3; k++ )
+		c[k] = float( double( ( p >> ( 9 * k ) ) & 511u ) * s );
+}
+
 namespace {
 
 struct Bytes
@@ -1433,8 +1477,9 @@ bool probeRelightWriteRecords( const ProbeRelightOps & X, const QString & dir, c
 			lights.f16( L.cosOuter );
 			lights.f16( L.cone );
 			lights.u16( quint16( gOf( l ) ) );
-			lights.u16( L.flags );
-			lights.u32( 0 );   // dot RGB9E5: no dot here (flag 32 unset)
+			const bool dot = L.dot[0] > 0.0f || L.dot[1] > 0.0f || L.dot[2] > 0.0f;   // lane FARVIEW1: the bulb dot
+			lights.u16( quint16( L.flags | ( dot ? 32 : 0 ) ) );
+			lights.u32( dot ? probeRgb9e5( L.dot ) : 0u );
 		}
 		for ( const QString & p : plugins ) {
 			QByteArray n = p.toUtf8().left( 63 );
@@ -1452,7 +1497,7 @@ bool probeRelightWriteRecords( const ProbeRelightOps & X, const QString & dir, c
 		wlt.u32( quint32( plugins.size() ) );
 		wlt.u32( quint32( 64 + groups.b.size() + lights.b.size() ) );
 		wlt.u64( hash );
-		wlt.u32( 1u );   // interior (the relight runs interiors)
+		wlt.u32( X.interior ? 1u : 0u );   // lane FARVIEW1: bit 0 interior (the cell view says; the gate scenes are interiors)
 		wlt.zero( 20 );
 		wlt.b += groups.b + lights.b + table.b;
 		// the pairs, by .wlt light, then surfel id

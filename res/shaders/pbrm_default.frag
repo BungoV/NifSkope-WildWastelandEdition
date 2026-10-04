@@ -574,7 +574,10 @@ void main()
 		sw.N = cellWorldDir( s.N );
 		vec3 Vw = cellWorldDir( V );
 		vec3 cDiff = vec3( 0.0 ), cSpec = vec3( 0.0 ), cE = vec3( 0.0 );
-		for ( int i = 0; i < cellLightCount; i++ ) {
+		vec3 farF, farGP;	// lane FARVIEW1: the real lights fade over the band, the surfels take over (diffuse only)
+		float farW = cellFarTerms( Pw, sw.N, farF, farGP );
+		int farN = farW >= 1.0 ? 0 : cellLightCount;
+		for ( int i = 0; i < farN; i++ ) {
 			vec3 Lw;
 			bool noSpec;
 			vec3 E = cellLightE( i, Pw, sw.N, Lw, noSpec );
@@ -588,6 +591,12 @@ void main()
 				cSpec += dS * E * M_PI;
 		}
 		vec3 giE = cellGiOn ? cellGiE( Pw, sw.N ) / M_PI : vec3( 0.0 );
+		if ( farW > 0.0 ) {
+			cDiff = cDiff * ( 1.0 - farW ) + farW * rho * farF;
+			cSpec *= 1.0 - farW;
+			cE = cE * ( 1.0 - farW ) + farW * farF;
+			giE = max( giE - farW * farGP, vec3( 0.0 ) );
+		}
 		vec3 giDiff = rho * keepInd * giE;
 		if ( cellInterior ) {
 			outDiff = cDiff + giDiff;

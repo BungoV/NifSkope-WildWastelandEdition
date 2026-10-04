@@ -1,0 +1,4 @@
+# lane FARVIEW1: the far bulbs as dots on the skyline (src/gl/celllights.cpp wwCellFarDotsDraw). Points in the
+# cell view's linear frame. No conditions: never picked for a shape; celllights.cpp selects it by name.
+
+shaders cell_fardots.vert cell_fardots.frag

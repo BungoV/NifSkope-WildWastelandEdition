@@ -424,6 +424,9 @@ void CellWorkspacePanel::buildUi()
 	cellGi = new QCheckBox( tr( "GI" ), prtpRow );
 	cellGi->setObjectName( QStringLiteral( "CellWorkspaceCellGi" ) );
 	cellGi->setChecked( wwCellGiOn() );
+	cellFar = new QCheckBox( tr( "Far light" ), prtpRow );
+	cellFar->setObjectName( QStringLiteral( "CellWorkspaceCellFar" ) );
+	cellFar->setChecked( wwCellFarOn() );
 	cellIs = new QCheckBox( tr( "Imagespace" ), prtpRow );
 	cellIs->setObjectName( QStringLiteral( "CellWorkspaceCellImageSpace" ) );
 	cellIs->setChecked( wwCellImageSpaceOn() );
@@ -435,6 +438,7 @@ void CellWorkspacePanel::buildUi()
 	cellPass->setEnabled( false );
 	pl->addWidget( cellLights );
 	pl->addWidget( cellGi );
+	pl->addWidget( cellFar );
 	pl->addWidget( cellPass );
 	pl->addWidget( cellIs );
 	pl->addStretch( 1 );
@@ -471,6 +475,12 @@ void CellWorkspacePanel::buildUi()
 	// lane PRTPGI: the bounce of the last bake, drawn while Cell lights is on
 	connect( cellGi, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwCellGiSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	// lane FARVIEW1: a shader switch (the far sectors load with the cell)
+	connect( cellFar, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellFarSetOn( on );
 		if ( glView )
 			glView->update();
 	} );

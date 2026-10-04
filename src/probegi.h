@@ -129,6 +129,8 @@ struct ProbeGiSpec
 	int passes = 0;
 	int maxPasses = 64;
 	double settle = 1e-3;
+	//! lane FARVIEW1: the glowing surfels left dark (the placed-only relight the far light takes out of the GI)
+	bool noGlow = false;
 	/*! lane GPURELIGHT1 (src/proberelight.h): set, the relight also records its operators there (the pairs, links,
 	 *  feed and blend lists, each entry's door crossings re-traced against the doors' real geometry) for the
 	 *  relight without rays. Its own result is unchanged bit for bit. recordExtra: lights off at the start (a
