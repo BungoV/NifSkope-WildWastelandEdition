@@ -6006,6 +6006,9 @@ int cmdConvex( const QStringList & args )
 		<< " volume " << vol << " shift " << shift[0] << " " << shift[1] << " " << shift[2]
 		<< " mass " << mass << " layer " << layer << " material 0x" << QString::number( material, 16 ).toUpper()
 		<< " radius " << radius << Qt::endl;
+	// the recentred geometry's bounds in game units: a record's OBND (MAGDROP1's MISC)
+	out() << "convex bounds " << ( bmin - shift )[0] << " " << ( bmin - shift )[1] << " " << ( bmin - shift )[2]
+		<< " " << ( bmax - shift )[0] << " " << ( bmax - shift )[1] << " " << ( bmax - shift )[2] << Qt::endl;
 	return saveNif( nif, outPath ) ? 0 : 1;
 }
 

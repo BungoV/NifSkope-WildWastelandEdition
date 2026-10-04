@@ -7,7 +7,8 @@
 - **Batch magazine collision (MAGDROP1).** Two new command-line tools for CORE's dropped magazines:
   `convex F -o OUT [--mass M] [--layer L] [--material CRC] [--radius R] [--center com|bounds|none]` gives a loose
   part one convex collision with its root on the centre of mass, set up like a vanilla loose item (clutter layer,
-  dynamic, inertia from the hull, vanilla damping), and compiles it.
+  dynamic, inertia from the hull, vanilla damping), and compiles it. It also prints the recentred part's bounds
+  (`convex bounds ...`), which CORE copies into each dropped magazine's record.
   `settle F [--height M] [--seconds S] [--spin x,y,z] [--frames DIR]` drops a loose item on a floor and reports
   whether it comes to rest without sinking, jittering or rocking (`--frames` writes one posed file per frame).
   Harness pictures can now force collision drawing (`WW_RENDER_COLLISION=1`), a background colour
