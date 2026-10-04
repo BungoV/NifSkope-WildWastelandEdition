@@ -9,6 +9,10 @@ resolve again from the game's law as the lane notes trace it -- not from the GLS
   J  jitter     the projection the frame drew with (proj_uploaded) is the unjittered one with
                 clip.xy += (offX, offY) * clip.w, offsets from THIS file's Halton -- and nothing else moved
   V  vectors    the motion vectors = the camera's reprojection of the dumped depth (reproj, double here)
+  B  filter     (when the dump has hist_tap.bin) the history sample the filtering hardware returned is within
+                2e-3 of the exact bilinear on 99.9% of pixels; R and C then take the history from it, since the
+                hardware's sub-texel weights are not specified to the bit and the resolve amplifies them
+                through thin brackets and the 0.01 history threshold
   R  resolve    the picture (8-bit) and the next history (luma, motion length) rebuilt per pixel
   C  clamp      the same agreement over the pixels where the neighbourhood clamp moves the history luma by
                 more than 2/255 while the history carries weight (at least 100 such pixels, else REFUSED)
@@ -165,6 +169,16 @@ def main():
     Y0, Y1 = np.clip(y0, 0, H - 1).astype(int), np.clip(y0 + 1, 0, H - 1).astype(int)
     h = (hin[Y0, X0] * ((1 - ax) * (1 - ay))[..., None] + hin[Y0, X1] * (ax * (1 - ay))[..., None]
          + hin[Y1, X0] * ((1 - ax) * ay)[..., None] + hin[Y1, X1] * (ax * ay)[..., None])
+    tapf = os.path.join(D, 'hist_tap.bin')
+    if os.path.exists(tapf):
+        # B: the filtering hardware's own history sample (8-bit sub-texel weights, half-float results: not
+        # specified to the bit) against the exact bilinear; then the resolve is judged on the hardware's sample
+        tap_ = load_bin(tapf).astype(np.float64)
+        eB = np.maximum(np.abs(tap_[..., 0] - h[..., 0]), np.abs(tap_[..., 2] - h[..., 2]))
+        res['B'] = float(np.mean(eB <= 2e-3)) >= 0.999
+        print('B %s  the hardware history sample within 2e-3 of the exact bilinear on %.4f%% (worst %.3g)' % (
+            'PASS' if res['B'] else 'FAIL', 100 * np.mean(eB <= 2e-3), float(eB.max())))
+        h = tap_
     Yh, vh = h[..., 0], h[..., 2]
     col = {k: tap(cur, *o) for k, o in offs.items()}
     Y = {k: 0.5 * c[..., 1] + 0.25 * c[..., 0] + 0.25 * c[..., 2] for k, c in col.items()}
@@ -197,14 +211,39 @@ def main():
     k = np.maximum(1.0 - np.abs(vlen - vhP) * 20.0, 0.0)
     w = np.minimum(k, wf)
     Yn = np.where(np.abs(dY * w) < 0.01, YZ, w * dY + YZ)
-    histC = loC2 + tt[..., None] * (upC2 - loC2)
-    histC = np.where(offscreen[..., None], cZ, histC)
     Rr = np.where(offscreen[..., None], cZ, R)
     curC = k[..., None] * (cZ - Rr) + Rr
-    o1 = np.clip(w[..., None] * (histC - curC) + curC, 0, 1)
-    o1 = np.clip((o1 - Rr) * c4[2] + o1, 0, 1)
-    o1 = np.clip(c4[3] * (Rr - o1) + o1, 0, 1)
+
+    def picture(upC_, loC_):
+        lo2 = np.where(noLo[..., None], upC_, loC_)
+        up2 = np.where(noUp[..., None], lo2, upC_)
+        histC = lo2 + tt[..., None] * (up2 - lo2)
+        histC = np.where(offscreen[..., None], cZ, histC)
+        o = np.clip(w[..., None] * (histC - curC) + curC, 0, 1)
+        o = np.clip((o - Rr) * c4[2] + o, 0, 1)
+        return np.clip(c4[3] * (Rr - o) + o, 0, 1)
+    o1 = picture(upC, loC)
     errO = np.max(np.abs(np.round(o1 * 255) - np.round(out * 255)), -1)
+    # TIES: two neighbours of the same luma but different colour can both be the bracket's end; which one the
+    # hardware keeps depends on how its dot product rounds the luma (not specified to the bit, the game's GPU
+    # alike). Where such a tie exists, the picture made with the LAST tied neighbour in the game's order is
+    # lawful too; the share of tie pixels is reported and the bar on the rest is unchanged.
+    upL, loL = upC.copy(), loC.copy()
+    tie = np.zeros((H, W), bool)
+    for kk in 'ZGHEFCDAB':
+        y = Y[kk]
+        tu = (y >= Yh) & (np.abs(y - upY) < 1e-6) & (np.abs(col[kk] - upC).max(-1) > 1e-6)
+        tl = (y < Yh) & (np.abs(y - loY) < 1e-6) & (np.abs(col[kk] - loC).max(-1) > 1e-6)
+        upL = np.where(tu[..., None], col[kk], upL)
+        loL = np.where(tl[..., None], col[kk], loL)
+        tie |= tu | tl
+    errAlt = np.full((H, W), 99.0)
+    for uc, lc in ((upL, loC), (upC, loL), (upL, loL)):
+        errAlt = np.minimum(errAlt, np.max(np.abs(np.round(picture(uc, lc) * 255) - np.round(out * 255)), -1))
+    tookAlt = tie & (errO > 1) & (errAlt <= 1)
+    errO = np.where(tie, np.minimum(errO, errAlt), errO)
+    print('ties: %.3f%% of pixels have an equal-luma bracket tie; on %d of them the viewer kept the other neighbour' % (
+        100 * np.mean(tie), int(tookAlt.sum())))
     errY = np.abs(np.clip(Yn, 0, 1) - hout[..., 0])
     errL = np.abs(vlen - hout[..., 2])
     okPix = (errO <= 1) & (errY <= 2e-3) & (errL <= 2e-3)

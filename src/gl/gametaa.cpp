@@ -316,7 +316,8 @@ void wwGameTaaSetFrame( int index )
 void wwGameTaaArmJitter( bool armed )
 {
 	ts().armed = armed;
-	ts().jittered = false;	// a frame that never reached its resolve leaves nothing behind
+	if ( armed )
+		ts().jittered = false;	// a frame that never reached its resolve leaves nothing behind (disarming keeps it)
 }
 
 void wwGameTaaJitterProjection( Scene * scene, Matrix4 & proj )
@@ -562,17 +563,12 @@ void wwGameTaaResolve( Scene * scene )
 		}
 	}
 
-	// 3. the resolve: o0 the next history, o1 the picture
-	if ( ok ) {
-		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.outFbo );
-		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.hist[wr], 0 );
-		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.out, 0 );
-		const GLenum two[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
-		fn->glDrawBuffers( 2, two );
+	// 3. the resolve: o0 the next history, o1 the picture (tap 1: o0 the filtered history sample, for the dump)
+	auto resolvePass = [&]( int tap ) -> bool {
 		auto prog = r->useProgram( "game_taa.prog" );
-		if ( !prog ) {
-			ok = false;
-		} else {
+		if ( !prog )
+			return false;
+		{
 			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitCur ) );
 			fn->glBindTexture( GL_TEXTURE_2D, g.cur );
 			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitHist ) );
@@ -591,15 +587,39 @@ void wwGameTaaResolve( Scene * scene )
 			prog->uni4f( "c4", c4 );
 			prog->uni4f( "c5", c5 );
 			prog->uni1i( "taaRed", s.redNoClamp ? 1 : 0 );
+			prog->uni1i( "taaTap", tap );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			r->stopProgram();
 		}
+		return true;
+	};
+	if ( ok ) {
+		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.outFbo );
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.hist[wr], 0 );
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.out, 0 );
+		const GLenum two[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+		fn->glDrawBuffers( 2, two );
+		ok = resolvePass( 0 );
 	}
 
 	// the dump: every input and output of this frame's resolve, before the picture goes back
 	if ( ok && !s.dumpDir.isEmpty() && s.frame == s.dumpFrame ) {
 		QDir().mkpath( s.dumpDir );
 		const QString d = s.dumpDir + QLatin1Char( '/' );
+		// the history as the filtering hardware returned it to this resolve (its sub-texel weights are the
+		// hardware's, not specified to the bit): the checker takes the luma from here and judges the filter apart
+		{
+			const GLuint tapTex = makeTex( r, GL_RGBA32F, GL_RGBA, GL_FLOAT, W, H, GL_NEAREST );
+			fn->glBindFramebuffer( GL_FRAMEBUFFER, g.outFbo );
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tapTex, 0 );
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0 );
+			const GLenum one = GL_COLOR_ATTACHMENT0;
+			fn->glDrawBuffers( 1, &one );
+			if ( resolvePass( 1 ) )
+				dumpFloat( d + "hist_tap.bin", W, H, 4, readFloat( r, g.outFbo, GL_COLOR_ATTACHMENT0, GL_RGBA, 4, W, H ) );
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0 );
+			fn->glDeleteTextures( 1, &tapTex );
+		}
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.outFbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.cur, 0 );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.hist[rd], 0 );

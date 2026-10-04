@@ -22,6 +22,7 @@ uniform vec4 c3;
 uniform vec4 c4;
 uniform vec4 c5;
 uniform int taaRed;	// 1: the red control "noclamp", the history luma used unclamped
+uniform int taaTap;	// 1 (the gate's dump only): o0 = the history exactly as the filtering hardware returned it
 
 layout ( location = 0 ) out vec4 o0;
 layout ( location = 1 ) out vec4 o1;
@@ -81,6 +82,11 @@ void main()
 	vec4 h = texture( histTex, huv );
 	float Yh = h.x;
 	float vh = h.z;
+	if ( taaTap == 1 ) {
+		o0 = h;
+		o1 = vec4( 0.0 );
+		return;
+	}
 
 	// the nine colours and their lumas
 	vec3 cA = texture( curTex, tA ).rgb, cB = texture( curTex, tB ).rgb, cC = texture( curTex, tC ).rgb;

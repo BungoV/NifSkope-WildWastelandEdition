@@ -7,8 +7,8 @@ echo and wwSunShadowSummary()) and judges every frame with lane CSM1's own indep
   F  per frame   the splits and blend zones (zn, zf of each slice), the texel, the viewport, the snapped light
                  origin and window (pb, l, b) = the spec's, and the UPLOADED matrices put the judge's world
                  points within 0.02 texel / 0.05 units of where the spec puts them
-  S  snapping    a world point lands at the SAME sub-texel phase in every frame whose cascade kept its texel
-                 and viewport: the shadow-map grid is nailed to the world while the camera moves, which is
+  S  snapping    a world point lands at the SAME sub-texel phase in every frame whose cascade kept its texel size
+                 (l, b snap to it; the viewport may change): the shadow-map grid is nailed to the world while the camera moves, which is
                  what stops shadow edges crawling (worst phase change <= 0.02 texel; needs >= 2 frames per
                  cascade sharing a texel, else REFUSED)
   M  moving      the camera did move (else S proves nothing): the eye travelled >= 100 units
@@ -96,7 +96,7 @@ def main():
         bykey = {}
         for k, c, tex, vw, vh, ph in per:
             if c == i:
-                bykey.setdefault((tex, vw, vh), []).append(ph)
+                bykey.setdefault(tex, []).append(ph)  # the grid is nailed by the texel alone: l, b snap to it
         for key, phs in bykey.items():
             if len(phs) < 2:
                 continue
