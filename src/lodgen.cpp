@@ -1448,6 +1448,11 @@ struct LodSrcShape
 	Color3 emitColor = Color3( 0.0f, 0.0f, 0.0f );
 	float emitMult = 1.0f;
 	bool ownEmit = false;
+	/* lane EMISSIVEGI1: the glow map, as the renderer picks it (glproperty.cpp "case 2: // Glow"): the BGSM's
+	 * bGlowmap and its glow slot, else the NIF's glow shader type + SLSF2 Glow_Map + texture slot 2. Off = the
+	 * whole surface glows; on with an empty path = black. Read by the probe bake only. */
+	bool glowFlag = false;
+	QString glowTex;
 	bool hasAlpha = false;
 	quint16 alphaFlags = 4844;
 	quint8 alphaThreshold = 128;
@@ -2434,6 +2439,16 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				s.emitMult = src.get<float>( iShader, "Emissive Multiple" );
 				s.ownEmit = ( src.get<quint32>( iShader, "Shader Flags 1" )
 					& LOD_OWN_EMIT ) != 0;
+				if ( src.blockInherits( iShader, "BSLightingShaderProperty" )
+					&& ( src.get<quint32>( iShader, "Shader Flags 2" ) & ( 1U << 6 ) )   // lane EMISSIVEGI1: SLSF2 Glow_Map
+					&& src.get<quint32>( iShader, "Shader Type" ) == 2u ) {        // ST_GlowShader
+					QModelIndex iGts = src.getBlockIndex( src.getLink( iShader, "Texture Set" ) );
+					QModelIndex iGa = iGts.isValid() ? src.getIndex( iGts, "Textures" ) : QModelIndex();
+					if ( iGa.isValid() && src.get<int>( iGts, "Num Textures" ) > 2 ) {
+						s.glowTex = src.get<QString>( src.getIndex( iGa, 2 ) );
+						s.glowFlag = !s.glowTex.isEmpty();
+					}
+				}
 				s.vcFlag = ( src.get<quint32>( iShader, "Shader Flags 2" ) & ( 1U << 5 ) ) != 0;
 				s.vaFlag = ( src.get<quint32>( iShader, "Shader Flags 1" ) & ( 1U << 3 ) ) != 0;
 				{
@@ -2516,6 +2531,9 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.emitColor = sm.emittanceColor();
 							s.emitMult = sm.emittanceMultiple();
 							s.ownEmit = sm.emitEnabled();
+							// lane EMISSIVEGI1: glproperty.cpp's slot rule (9 entries: slot 5; 10: slot 4)
+							s.glowFlag = sm.glowmapEnabled();
+							s.glowTex = t.size() == 9 ? t[5] : t.size() == 10 ? t[4] : QString();
 							/* The road pass's own operands. Nothing else reads
 							 * them, so no gated output moves. */
 							s.matDecal = sm.hasDecal();
@@ -2821,6 +2839,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.smoothness = s.smoothness; n.specMult = s.specMult;
 		n.emitColor[0] = s.emitColor.red(); n.emitColor[1] = s.emitColor.green(); n.emitColor[2] = s.emitColor.blue();
 		n.emitMult = s.emitMult; n.ownEmit = s.ownEmit;
+		n.glowFlag = s.glowFlag; n.glowTex = s.glowTex;   // lane EMISSIVEGI1
 		n.hasAlpha = s.hasAlpha; n.alphaThreshold = s.alphaThreshold;
 		n.nearFacts = s.nearFacts;
 		/* `.lodo` v5: the colour goes in ONLY where the game applies it -- a

@@ -97,6 +97,13 @@ struct TbkRoomBox
 };
 static_assert( sizeof( TbkRoomBox ) == 32, "tbk room box" );
 
+struct TbkEmit   // lane EMISSIVEGI1 (probebake.cpp): surfel index (top bit = back list), linear Le
+{
+	quint32 surfel;
+	float le[3];
+};
+static_assert( sizeof( TbkEmit ) == 16, "tbk emit" );
+
 struct Tbk
 {
 	QString name;
@@ -108,6 +115,7 @@ struct Tbk
 	std::vector<TbkLinkExt> lext;     //!< v4: one per link
 	std::vector<TbkProbeExt> pext;    //!< v4: one per probe (lane SKY1 reads its sky tint)
 	std::vector<TbkRoomBox> boxes;    //!< v4: the rooms' air (lane BOUNCE2)
+	std::vector<TbkEmit> emits;       //!< v4: the surfels that glow (lane EMISSIVEGI1; header reserved[3])
 };
 
 bool readTbk( const QString & path, Tbk & t, QString * err )
@@ -132,7 +140,7 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 	const bool v4 = t.h.version == 4u;
 	const qint64 need = body
 		+ ( v4 ? 32 * qint64( t.h.reserved[0] ) + 8 * qint64( t.h.linkCount ) + 32 * qint64( t.h.probeCount )
-				+ 32 * qint64( t.h.reserved[1] )
+				+ 32 * qint64( t.h.reserved[1] ) + 16 * qint64( t.h.reserved[3] )
 			   : 0 );
 	if ( b.size() != need ) {
 		*err = QStringLiteral( "%1: %2 bytes, the counts say %3" ).arg( path ).arg( b.size() ).arg( need );
@@ -152,6 +160,7 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 	t.lext.clear();
 	t.pext.clear();
 	t.boxes.clear();
+	t.emits.clear();
 	if ( v4 ) {
 		t.back.resize( t.h.reserved[0] );
 		std::memcpy( t.back.data(), p, t.back.size() * 32 );
@@ -164,6 +173,9 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 		p += t.pext.size() * 32;
 		t.boxes.resize( t.h.reserved[1] );
 		std::memcpy( t.boxes.data(), p, t.boxes.size() * 32 );
+		p += t.boxes.size() * 32;
+		t.emits.resize( t.h.reserved[3] );   // lane EMISSIVEGI1
+		std::memcpy( t.emits.data(), p, t.emits.size() * 16 );
 	}
 	t.name = QFileInfo( path ).fileName();
 	return true;
@@ -300,6 +312,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		bvh.t[i + 2] = soup.tris[i + 2];
 	}
 	bvh.build();
+	bvh.mask = &soup.amask;   // lane ALPHATEST1: light passes an alpha-test hole
 	auto blocked = [&]( const double p[3], const double q[3], double clearEnd ) -> bool {
 		double d[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] };
 		const double len = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
@@ -316,7 +329,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	// ---- 1. the surfels, one per position + normal across the files, lit
 	std::unordered_map<SurfKey, int, SurfKeyHash> uniq;
 	std::vector<std::vector<int>> fileSurfel( tbks.size() ), fileBack( tbks.size() );   // lane BAKE4: + v4 back surfels
-	struct US { double p[3], n[3], a[3]; double B[3]; double S[3] = { 0, 0, 0 }; };   // S: the sun's part of B (lane SKY1)
+	// S: the sun's part of B (lane SKY1); Le: the surfel's own emitted light, added once to B (lane EMISSIVEGI1)
+	struct US { double p[3], n[3], a[3]; double B[3]; double S[3] = { 0, 0, 0 }; bool emits = false; double Le[3] = { 0, 0, 0 }; };
 	std::vector<US> us;
 	for ( size_t f = 0; f < tbks.size(); f++ ) {
 		for ( size_t si = 0; si < tbks[f].surfels.size() + tbks[f].back.size(); si++ ) {
@@ -352,6 +366,22 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 	}
 	R.surfels = int( us.size() );
+	/* lane EMISSIVEGI1: the glowing surfels (each file names its own; a surfel in two files glows the same in both).
+	 * Read once into B after the direct light, never inside the bounce passes (they rebuild from B: counted once). */
+	for ( size_t f = 0; f < tbks.size(); f++ )
+		for ( const TbkEmit & e : tbks[f].emits ) {
+			const bool back = ( e.surfel & 0x80000000u ) != 0;
+			const size_t i = size_t( e.surfel & 0x7fffffffu );
+			const std::vector<int> & fs = ( back ? fileBack : fileSurfel )[f];
+			if ( i >= fs.size() )
+				continue;
+			US & u = us[size_t( fs[i] )];
+			if ( !u.emits )
+				R.surfelsEmit++;
+			u.emits = true;
+			for ( int c = 0; c < 3; c++ )
+				u.Le[c] = e.le[c];
+		}
 	if ( !tbks.empty() )
 		R.surfelCell = tbks[0].h.surfelCellSize;	// lane PROBEVIEW1
 	const QVector<WwCellLight> & lights = lighting.lights;
@@ -428,6 +458,9 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 		for ( int c = 0; c < 3; c++ )
 			u.B[c] = u.a[c] * E[c];
+		if ( u.emits )   // lane EMISSIVEGI1: guarded, so a surfel that does not glow keeps every bit
+			for ( int c = 0; c < 3; c++ )
+				u.B[c] += u.Le[c];
 		rays += nr;
 		shadowed += nb;
 		if ( any )
@@ -1175,7 +1208,9 @@ QString probeGiCensusText( const ProbeGiResult & r )
 				.arg( r.voxelsCentreElsewhere ).arg( r.probesRoomless )
 			: QStringLiteral( "gi rooms: off (red noclamp: one value a voxel)" ) )
 		+ ( r.skyLit ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() )
-		+ QStringLiteral( "\n  " ) + bounceCensusText( r );
+		+ QStringLiteral( "\n  " ) + bounceCensusText( r )
+		+ ( r.surfelsEmit ? QStringLiteral( "\n  gi emissive: %1 of %2 surfels glow (their Le added once to B)" )
+			.arg( r.surfelsEmit ).arg( r.surfels ) : QString() );   // lane EMISSIVEGI1
 }
 
 /* The dump (little-endian):

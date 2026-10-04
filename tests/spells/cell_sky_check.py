@@ -297,6 +297,13 @@ class SunShade:
                 th = a[None, :, 2] + uu * e1[None, :, 2] + vv * e2[None, :, 2]
                 dt = th - q[r, 2][:, None]
                 hit = good[None, :] & (uu >= 0) & (vv >= 0) & (uu + vv <= 1) & (dt > 1e-4) & (dt <= SUN_REACH)
+                sp = getattr(self, 'soup', None)
+                if sp is not None and sp.am is not None and hit.any():   # lane ALPHATEST1
+                    ti = self.tris[self.first[p]:self.first[p + 1]]
+                    rr, cc = np.nonzero(hit & (sp.amOf[ti] >= 0)[None, :])
+                    if len(rr):
+                        h = sp.holes(ti[cc], uu[rr, cc], vv[rr, cc])
+                        hit[rr[h], cc[h]] = False
                 out[r] = hit.any(1)
         return out
 
@@ -310,6 +317,7 @@ def own_sun(S, soup, W):
     shade = np.zeros(len(S), bool)
     if W['sunTo'][2] > 0 and W['sun'].max() > 0:
         sh = SunShade(soup.t, W['sunTo'])
+        sh.soup = soup   # lane ALPHATEST1: hits on an alpha-test hole pass
         idx = np.nonzero(faces)[0]
         shade[idx] = sh.blocked(p[idx] + n[idx] * SURF_OFF)
         lit = faces & ~shade
@@ -517,15 +525,17 @@ def tris_near(soup, lo, hi):
     pos = pos[soup.keys[pos] == kk]
     if not len(pos):
         return None
-    return soup.t[np.unique(np.concatenate([soup.tris[soup.first[p]:soup.first[p + 1]] for p in pos]))]
+    ti = np.unique(np.concatenate([soup.tris[soup.first[p]:soup.first[p + 1]] for p in pos]))
+    return soup.t[ti], ti
 
 
 def segs_blocked(soup, c, Q):
     """c -> each row of Q: is a triangle in the way (double-sided, hits in (1e-4, length])"""
     out = np.zeros(len(Q), bool)
-    T = tris_near(soup, np.minimum(c, Q.min(0)), np.maximum(c, Q.max(0)))
-    if T is None:
+    near = tris_near(soup, np.minimum(c, Q.min(0)), np.maximum(c, Q.max(0)))
+    if near is None:
         return out
+    T, ti = near
     p0, e1, e2 = T[:, 0], T[:, 1] - T[:, 0], T[:, 2] - T[:, 0]
     tv = c[None, :] - p0
     qv = np.cross(tv, e1)
@@ -542,6 +552,11 @@ def segs_blocked(soup, c, Q):
         v = (d @ qv.T) * idt
         tt = np.einsum('tk,tk->t', e2, qv)[None, :] * idt
         hit = good & (u >= 0) & (u <= 1) & (v >= 0) & (u + v <= 1) & (tt > 1e-4) & (tt <= L[:, None])
+        if soup.am is not None and hit.any():   # lane ALPHATEST1: a hit on an alpha-test hole passes
+            rr, cc = np.nonzero(hit & (soup.amOf[ti] >= 0)[None, :])
+            if len(rr):
+                h = soup.holes(ti[cc], u[rr, cc], v[rr, cc])
+                hit[rr[h], cc[h]] = False
         out[r] = hit.any(1) & (L > 1e-3)
     return out
 

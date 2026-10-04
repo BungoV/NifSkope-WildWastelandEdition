@@ -79,6 +79,7 @@ struct ProbeGiResult
 	bool skyLit = false;                //!< the relight took them (the grid's sky then stands in for the weather's ambient)
 	QString skyLabel;
 	int surfelsSun = 0;                 //!< surfels the sun reaches
+	int surfelsEmit = 0;                //!< lane EMISSIVEGI1: surfels that glow (the .tbk emissive tail)
 	qint64 sunRays = 0, sunBlocked = 0;
 	int probesSky = 0;                  //!< probes that see any sky
 	double skyVisMean = 0;              //!< over probes: the mean of the eight octants' sky share

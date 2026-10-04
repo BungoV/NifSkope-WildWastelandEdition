@@ -128,6 +128,9 @@ struct NativeSrcShape
 	bool ownEmit = false;
 	float emitColor[3] = { 0.0f, 0.0f, 0.0f };
 	float emitMult = 1.0f;
+	//! lane EMISSIVEGI1: the glow map flag and path (LodSrcShape); the probe bake only, never materialKey()
+	bool glowFlag = false;
+	QString glowTex;
 	float smoothness = 1.0f, specMult = 1.0f;
 	NearShapeFacts nearFacts;   //!< lane NEAR1: read by src/nearlib.cpp only
 };
