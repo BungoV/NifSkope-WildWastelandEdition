@@ -338,7 +338,17 @@ vec4 cellGiSample( vec3 P, vec3 N )
 	return s;
 }
 
-vec3 cellGiE( vec3 P, vec3 N )
+// lane AODECAL1 (src/gl/cellaodecalgl.h): the baked AO decals of the big movable statics, one texel per pixel,
+// multiplied into the probe term only (the grid was rebuilt without those copies' blocked sky)
+uniform bool cellAoDecalOn;
+uniform sampler2D cellAoDecal;
+uniform vec4 cellAoDecalRect;		// the viewport's x, y
+float cellAoDecalAt()
+{
+	return texelFetch( cellAoDecal, ivec2( gl_FragCoord.xy - cellAoDecalRect.xy ), 0 ).r;
+}
+
+vec3 cellGiE0( vec3 P, vec3 N )
 {
 	vec4 s = cellGiSample( P, N );
 	// lane SKY1: with the sky in the grid the sample keeps its valid share (E x share), the other
@@ -346,6 +356,12 @@ vec3 cellGiE( vec3 P, vec3 N )
 	if ( cellGiSky )
 		return max( s.rgb, vec3( 0.0 ) );
 	return s.a > 0.01 ? max( s.rgb / s.a, vec3( 0.0 ) ) : vec3( 0.0 );
+}
+
+vec3 cellGiE( vec3 P, vec3 N )
+{
+	vec3 e = cellGiE0( P, N );
+	return ( cellAoDecalOn && cellPass < 2 ) ? e * cellAoDecalAt() : e;
 }
 // lane SKY1: the share of the weather's ambient the grid's sky replaces at P (0: not a sky grid)
 float cellGiSkyK( vec3 P, vec3 N )

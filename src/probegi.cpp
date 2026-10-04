@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "probebvh.h"
 #include "probebake.h"
+#include "cellaodecal.h"	// lane AODECAL1
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -442,7 +443,10 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.msLight = clock.nsecsElapsed() / 1e6;
 
 	// ---- 2. every probe's ambient cube from its links
-	struct UP { double p[3]; double E[6][3]; double sky[6]; double S[6][3]; double kUnl = 1.0; quint32 room[2] = { 0, 0xFFFFFFFFu }; };   // S: the sky's part of E (lane SKY1)
+	struct UP { double p[3]; double E[6][3]; double sky[6]; double S[6][3]; double kUnl = 1.0; quint32 room[2] = { 0, 0xFFFFFFFFu };
+		double dS[6][3] = {}; };   // S: the sky's part of E (lane SKY1); dS: the decal copies' sky put back (lane AODECAL1)
+	const bool aoOn = spec.aoDecals && !spec.aoDecals->copies.empty();
+	double aoDsSum = 0.0;
 	std::vector<UP> up;
 	struct LK { double omega, cosA[6], tint[3]; };   // lane BOUNCE2: a resolved link, for the later passes' gathers
 	std::vector<LK> lks;
@@ -537,6 +541,19 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				const size_t pi = size_t( &pr - t.probes.data() );
 				const TbkProbeExt * px = pi < t.pext.size() ? &t.pext[pi] : nullptr;
 				probeSkyCube( pr.skyVis, px ? px->skyTint : nullptr, spec.sky, redSkyNoVis, redSkyNoTint, P.S );
+				/* lane AODECAL1 (design section 4): the copies' own volumes say how much of each octant they took;
+				 * the sky this probe would see without them, so the AO decal does not darken twice */
+				float sf[8];
+				if ( aoOn && spec.aoDecals->skyFree( P.p, pr.skyVis, sf ) ) {
+					double Sf[6][3] = {};	// probeSkyCube ADDS into E (the 05:32 census run: mean dE nan)
+					probeSkyCube( sf, px ? px->skyTint : nullptr, spec.sky, redSkyNoVis, redSkyNoTint, Sf );
+					for ( int a = 0; a < 6; a++ )
+						for ( int c = 0; c < 3; c++ ) {
+							P.dS[a][c] = Sf[a][c] - P.S[a][c];
+							aoDsSum += P.dS[a][c] / 18.0;
+						}
+					R.aoProbes++;
+				}
 				double vs = 0.0;
 				bool tinted = false;
 				for ( int o = 0; o < 8; o++ ) {
@@ -557,6 +574,23 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	}
 	R.probes = int( up.size() );
 	R.skyVisMean = up.empty() ? 0.0 : skyVisSum / double( up.size() );
+	R.aoDsMean = R.aoProbes ? aoDsSum / R.aoProbes : 0.0;
+	if ( aoOn )
+		R.aoGate = QStringLiteral( "aodecal relight: %1 probes inside a copy's footprint, mean dE %2" )
+			.arg( R.aoProbes ).arg( R.aoDsMean, 0, 'g', 4 );
+	// lane AODECAL1 gate D: WW_CELL_AODECAL_GATE=<file>, the probes near a copy traced with and without the copies
+	if ( aoOn && !qgetenv( "WW_CELL_AODECAL_GATE" ).isEmpty() ) {
+		std::vector<float> pp, pv;
+		for ( const Tbk & t : tbks )
+			for ( const TbkProbe & pr : t.probes ) {
+				pp.insert( pp.end(), pr.position, pr.position + 3 );
+				pv.insert( pv.end(), pr.skyVis, pr.skyVis + 8 );
+			}
+		QString gl;
+		if ( !aoDecalProbeGate( *spec.aoDecals, soup, pp, pv, QString::fromLocal8Bit( qgetenv( "WW_CELL_AODECAL_GATE" ) ), &gl ) )
+			gl = QStringLiteral( "aodecal gate: the table could not be written" );
+		R.aoGate += QStringLiteral( "; " ) + gl;
+	}
 	R.msGather = clock.nsecsElapsed() / 1e6 - R.msLight;
 
 	// ---- 3. the voxel grid, each voxel blending the probes it can see
@@ -895,6 +929,11 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.voxelsNear = int( todo.size() );
 	R.grid.assign( nVox * 6 * 4, 0.0f );
 	R.gridSky.assign( nVox * 6 * 4, 0.0f );	// lane PROBEVIEW1: the same voxels, the same weights
+	if ( aoOn ) {	// lane AODECAL1: the copy-free grid, the same voxels and weights
+		R.gridFree.assign( nVox * 6 * 4, 0.0f );
+		if ( R.roomsOn )
+			R.gridFree2.assign( nVox * 6 * 4, 0.0f );
+	}
 	if ( R.roomsOn ) {
 		R.grid2.assign( nVox * 6 * 4, 0.0f );
 		R.gridSky2.assign( nVox * 6 * 4, 0.0f );
@@ -922,6 +961,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			if ( slot == 1 )
 				nTwo++;
 			double acc[6][3] = {}, accSky[6] = {}, wsum = 0.0;
+			double accD[6][3] = {};	// lane AODECAL1
 			// the probes of room `lab` (any: -1) within r of o that o sees, weighted (1 - d^2/r^2)^2
 			auto gather = [&]( const double o[3], double r ) {
 				const Key3 ck { floorDiv( float( o[0] ), float( rad ) ), floorDiv( float( o[1] ), float( rad ) ), floorDiv( float( o[2] ), float( rad ) ) };
@@ -956,6 +996,10 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 										acc[a][ch] += w * P.E[a][ch];
 									accSky[a] += w * P.sky[a];
 								}
+								if ( aoOn )
+									for ( int a = 0; a < 6; a++ )
+										for ( int ch = 0; ch < 3; ch++ )
+											accD[a][ch] += w * P.dS[a][ch];
 							}
 						}
 			};
@@ -997,6 +1041,15 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				GS[o] = GS[o + 1] = GS[o + 2] = float( accSky[a] / wsum );
 				GS[o + 3] = 1.0f;
 			}
+			if ( aoOn ) {
+				std::vector<float> & GF = slot == 0 ? R.gridFree : R.gridFree2;
+				for ( int a = 0; a < 6; a++ ) {
+					const size_t o = ( size_t( a ) * nVox + i ) * 4;
+					for ( int ch = 0; ch < 3; ch++ )
+						GF[o + size_t( ch )] = float( ( acc[a][ch] + accD[a][ch] ) / wsum );
+					GF[o + 3] = 1.0f;
+				}
+			}
 		}
 		vr += nr;
 		vb += nb;
@@ -1013,7 +1066,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	// lane ROOMCLAMP1: a slot whose eye sees no probe either (a pocket: a beam's top under the ceiling) takes the
 	// mean of the valid slots of its room among its neighbours, two rings at most
 	for ( int ring = 0; ring < 2 && !redNoEye; ring++ ) {
-		struct GW { size_t i; int slot; float val[6][4]; };
+		struct GW { size_t i; int slot; float val[6][4]; float valF[6][3]; };
 		std::vector<GW> grow;
 		for ( size_t i : todo ) {
 			for ( int slot = 0; slot < 2; slot++ ) {
@@ -1026,7 +1079,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				const int lab = vs[i].lab[si];
 				const int x = int( i % size_t( dims[0] ) ), y = int( ( i / size_t( dims[0] ) ) % size_t( dims[1] ) ),
 					z = int( i / ( size_t( dims[0] ) * size_t( dims[1] ) ) );
-				double s[6][4] = {};
+				double s[6][4] = {}, sF[6][3] = {};
 				int n = 0;
 				for ( int dz = -1; dz <= 1; dz++ )
 					for ( int dy = -1; dy <= 1; dy++ )
@@ -1050,6 +1103,12 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 										s[a][ch] += G[o + size_t( ch )];
 									s[a][3] += GS[o];
 								}
+								if ( aoOn ) {
+									const std::vector<float> & GF = sj == 0 ? R.gridFree : R.gridFree2;
+									for ( int a = 0; a < 6; a++ )
+										for ( int ch = 0; ch < 3; ch++ )
+											sF[a][ch] += GF[( size_t( a ) * nVox + j ) * 4 + size_t( ch )];
+								}
 							}
 						}
 				if ( !n )
@@ -1060,6 +1119,9 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				for ( int a = 0; a < 6; a++ )
 					for ( int ch = 0; ch < 4; ch++ )
 						w.val[a][ch] = float( s[a][ch] / n );
+				for ( int a = 0; a < 6; a++ )
+					for ( int ch = 0; ch < 3; ch++ )
+						w.valF[a][ch] = float( sF[a][ch] / n );
 				grow.push_back( w );
 			}
 		}
@@ -1073,6 +1135,15 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				G[o + 3] = 1.0f;
 				GS[o] = GS[o + 1] = GS[o + 2] = w.val[a][3];
 				GS[o + 3] = 1.0f;
+			}
+			if ( aoOn ) {
+				std::vector<float> & GF = w.slot == 0 ? R.gridFree : R.gridFree2;
+				for ( int a = 0; a < 6; a++ ) {
+					const size_t o = ( size_t( a ) * nVox + w.i ) * 4;
+					for ( int ch = 0; ch < 3; ch++ )
+						GF[o + size_t( ch )] = w.valF[a][ch];
+					GF[o + 3] = 1.0f;
+				}
 			}
 			if ( w.slot == 0 ) {
 				R.voxelsGrown++;
@@ -1136,6 +1207,15 @@ static QString bounceCensusText( const ProbeGiResult & r )
 		.arg( n >= 3 ? r.passLog[n - 3] : 0.0, 0, 'g', 4 ).arg( n >= 3 ? r.passLog[n - 1] : 0.0, 0, 'g', 4 )
 		.arg( r.gain, 0, 'f', 4 ).arg( r.surfelsFed ).arg( r.surfels ).arg( r.fedClosest ).arg( r.surfelsRoomed )
 		.arg( r.feedRays ).arg( r.feedBlocked ).arg( r.feedOtherRoom ).arg( r.msBounce, 0, 'f', 0 );
+}
+
+void probeGiAoFreeSwap( ProbeGiResult & r )
+{
+	if ( r.gridFree.size() == r.grid.size() && !r.gridFree.empty() ) {
+		r.grid.swap( r.gridFree );
+		if ( r.gridFree2.size() == r.grid2.size() && !r.gridFree2.empty() )
+			r.grid2.swap( r.gridFree2 );
+	}
 }
 
 void probeGiRoomsInto( ProbeGiResult & r, WwCellGi & gi )

@@ -11,6 +11,7 @@ See the LICENSE.md file for the full license text.
 
 #include "nifcli.h"
 #include "probeplace.h"
+#include "cellaodecal.h"	// lane AODECAL1: aobake
 #include "probebake.h"
 #include "probefar.h"		// lane PRTPFAR
 #include "probegi.h"		// lane ROOMCLAMP1: probegi
@@ -7354,6 +7355,14 @@ int nifskopeCliMain( const QStringList & args )
 	// layer (lane PBRR2B, the W1 gates; src/esmweather.cpp)
 	// `probeplace` places PRTP probes over a dumped soup: no NIF, no model layer
 	// (lane PRTPPLACE; src/probeplace.cpp)
+	// `aobake` reads or bakes one model's AO decal volume; gate A's lookup vs brute force (lane AODECAL1)
+	if ( cmd == QLatin1String( "aobake" ) ) {
+		if ( !initModelLayer() ) { err().flush(); return 1; }	// it loads the model's NIF
+		const int rc = aoDecalCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	if ( cmd == QLatin1String( "probeplace" ) ) {
 		const int rc = probePlaceCli( a );
 		out().flush();

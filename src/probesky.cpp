@@ -110,6 +110,7 @@ void relightKept()
 	gi.skyLit = gr.skyLit && !L->interior && k.spec.skyRed != QLatin1String( "keepamb" );
 	gi.summary = QStringLiteral( "grid %1x%2x%3 voxel %4" ).arg( gr.dims[0] ).arg( gr.dims[1] ).arg( gr.dims[2] )
 		.arg( double( gr.voxel ), 0, 'f', 1 );
+	probeGiAoFreeSwap( gr );	// lane AODECAL1: the kept spec carries the decal copies
 	gi.rgba = std::move( gr.grid );
 	gi.sky = std::move( gr.gridSky );	// the Pass drop-down's sky share (weather-free, carried over)
 	probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1

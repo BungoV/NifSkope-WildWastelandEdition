@@ -1,0 +1,5 @@
+# The cell view's baked AO decals (lane AODECAL1; src/gl/cellaodecalgl.h). A copy's own triangles (the stencil
+# self-mask), then its footprint box multiplying the decal target. No conditions: never picked for a shape;
+# cellaodecalgl.cpp selects it by name.
+
+shaders cell_aodecal.vert cell_aodecal.frag
