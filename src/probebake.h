@@ -60,7 +60,7 @@ struct ProbeBakeSpec
 	 *  sky tint per octant and rooms, and the room boxes. FO4CS's reader takes v3 only
 	 *  (it refuses any other version and size), so 3 writes its file exactly (the second
 	 *  side spilled next door, as above). */
-	int tbkVersion = 4;
+	int tbkVersion = 5;   //!< lane SIDES6: 5 (default) = v4 with up to six surfels a cell, one per facing bin
 	/*! A deliberate defect for the gate's refuters: "octant" swaps the octant
 	 *  bits (x negative -> bit 2), "normal" stores the triangle normal unflipped;
 	 *  lane BAKE4 (v4): "oneside" drops the back surfels (their links refused, the
@@ -131,6 +131,11 @@ struct ProbeBakeResult
 	qint64 emitHits = 0;                    //!< pass-1 hits on a glowing triangle
 	double emitLeSum[3] = { 0, 0, 0 };      //!< the written surfels' Le, summed
 	double msRays = 0, msWrite = 0;
+	// lane SIDES6: v5 sides, and the corner measure (every version)
+	int sideSurfels = 0;                    //!< v5: surfels beyond each cell's first
+	int cellsSampled = 0, cornerCells = 0;  //!< cells with a hit; whose v4 front merges faces over 45 deg apart
+	std::vector<int> sideHist;              //!< cells by the number of facing bins they were seen on (index 1..6)
+	double hitW = 0, offW = 0, cornerW = 0; //!< v4+: ray weight on a surfel; on one over 45 deg off its face; on a corner cell
 	// lane ROOMCLAMP1: probes outside the shell
 	bool backRule = false;
 	float backMax = 0.25f;

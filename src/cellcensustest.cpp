@@ -79,8 +79,8 @@ BSD License - see nifskope.h
  *   WW_CELL_CENSUS_SLICE     i/N: walk slice i of N (default 1/1)
  *   WW_CELL_CENSUS_STEPS     what a visit does: `census` or `census,bake`
  *   WW_CELL_CENSUS_BAKE      the bake's folder (required by the bake step)
- *   WW_CELL_CENSUS_TBK       the `.tbk` version the bake step asks for: 4
- *                            (default) or 3. The builder is handed it as
+ *   WW_CELL_CENSUS_TBK       the `.tbk` version the bake step asks for: 5
+ *                            (default, lane SIDES6), 4 or 3. The builder is handed it as
  *                            WW_CELL_PROBE_BAKE_TBK, and every file a visit
  *                            wrote is read back: another version fails the
  *                            visit. On 2026-10-02 the cell view's bake does not
@@ -238,7 +238,7 @@ struct Walk
 	QString stepNames;          //!< `census` or `census+bake`
 	bool needScene = false;     //!< some step needs the scene even where nothing is placed
 	QString bakeDir;            //!< the bake step's folder
-	int tbk = 4;                //!< the `.tbk` version the bake step asks for (WW_CELL_CENSUS_TBK)
+	int tbk = 5;                //!< lane SIDES6: 5; the `.tbk` version the bake step asks for (WW_CELL_CENSUS_TBK)
 	qint64 loadStartMs = 0;     //!< wall clock when the load was opened (the bake step's files are newer)
 	QVector<CensusCell> plan;   //!< every cell of the walk, plugin order
 	QVector<CensusUnit> units;  //!< every unit, in the order its first cell is planned
@@ -577,7 +577,7 @@ void stepBakeBefore( const CensusLoad & ld )
 	qputenv( "WW_CELL_PROBE_BAKE", QDir::toNativeSeparators( dir ).toLocal8Bit() );
 	qputenv( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );     // the load's own cells, never the ring
 	qputenv( "WW_CELL_PROBES_HIDE", "1" );      // the markers are not part of the cell: the frame stays the check-up's
-	// the file version is the run's choice (WW_CELL_CENSUS_TBK, default 4). The builder is told here; whether it
+	// the file version is the run's choice (WW_CELL_CENSUS_TBK, default 5). The builder is told here; whether it
 	// listened is read from the files in stepBakeAfter, so a run never says one version and writes another.
 	qputenv( "WW_CELL_PROBE_BAKE_TBK", QByteArray::number( g.tbk ) );
 }
@@ -1307,8 +1307,8 @@ void startWalk()
 		err = QStringLiteral( "WW_CELL_CENSUS_SLICE must be i/N with 1 <= i <= N; got %1/%2" ).arg( g.sliceI ).arg( g.sliceN );
 	else if ( g.margin < 0 || g.margin > 4 )
 		err = QStringLiteral( "the ring must be 0 to 4 cells; got %1" ).arg( g.margin );
-	else if ( g.tbk != 3 && g.tbk != 4 )
-		err = QStringLiteral( "the bake's file version must be 3 or 4; got %1" ).arg( g.tbk );
+	else if ( g.tbk < 3 || g.tbk > 5 )
+		err = QStringLiteral( "the bake's file version must be 3, 4 or 5; got %1" ).arg( g.tbk );
 	else if ( !stepsFromNames( envStr( "WW_CELL_CENSUS_STEPS", QStringLiteral( "census" ) ), &err ) )
 		;   // err says which step is not one
 	else
@@ -1499,7 +1499,7 @@ void wwCellCensusHarness( NifSkope * skope )
 	g.refsMax = envInt( "WW_CELL_CENSUS_REFS_MAX", 12000 );
 	g.margin = envInt( "WW_CELL_CENSUS_MARGIN", 0 );
 	g.bakeDir = QDir::fromNativeSeparators( envStr( "WW_CELL_CENSUS_BAKE" ) );
-	g.tbk = envInt( "WW_CELL_CENSUS_TBK", 4 );
+	g.tbk = envInt( "WW_CELL_CENSUS_TBK", 5 );
 	QFile::remove( g.logPath );
 
 	QObject::connect( skope, &NifSkope::completeLoading, skope,

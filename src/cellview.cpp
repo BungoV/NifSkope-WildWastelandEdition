@@ -3451,6 +3451,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				if ( br.toInt() > 0 )
 					bs.rays = br.toInt();
 				bs.red = QString::fromLatin1( qgetenv( "WW_PROBE_BAKE_RED" ) );
+				// lane SIDES6: the file version a gate asks for (the census's, and the two-sides red: 4)
+				if ( qgetenv( "WW_CELL_PROBE_BAKE_TBK" ).toInt() >= 3 && qgetenv( "WW_CELL_PROBE_BAKE_TBK" ).toInt() <= 5 )
+					bs.tbkVersion = qgetenv( "WW_CELL_PROBE_BAKE_TBK" ).toInt();
 				if ( roomclampPin && bs.red.isEmpty() )
 					bs.red = QStringLiteral( "backface" );   // lane ROOMCLAMP1 pin: no probe moved
 				// lane ROOMCLAMP1: the outside-the-shell threshold (gate red: 1 = off) and the gate's list

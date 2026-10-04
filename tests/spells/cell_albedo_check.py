@@ -228,7 +228,7 @@ def bake_maps(run):
     for f in files(os.path.join(run, 'bake')):
         t = read_tbk(os.path.join(run, 'bake', f))
         cell = t['cell']
-        for side, arr in ((0, t['surfels']), (1, t['back'])):
+        for side, arr in enumerate(t['bysides']):   # lane SIDES6: v5 = six sides
             for s in arr:
                 k = (side,) + tuple(floordiv(s['pos'][i], cell) for i in range(3))
                 surf.setdefault(k, s.tobytes())

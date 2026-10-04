@@ -132,12 +132,13 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 	}
 	std::memcpy( &t.h, b.constData(), 64 );
 	// lane BAKE4: v4 = the v3 body + a tail (back surfels, link and probe extensions, room boxes)
-	if ( t.h.magic != 0x314B4254u || ( t.h.version != 3u && t.h.version != 4u ) || t.h.recordKind != 1u ) {
-		*err = QStringLiteral( "%1: not a v3 or v4 resolved-albedo .tbk" ).arg( path );
+	// lane SIDES6: v5 = v4's tail; up to six surfels a cell in the one table (pad0 = the bin, a link's side = the bin)
+	if ( t.h.magic != 0x314B4254u || t.h.version < 3u || t.h.version > 5u || t.h.recordKind != 1u ) {
+		*err = QStringLiteral( "%1: not a v3, v4 or v5 resolved-albedo .tbk" ).arg( path );
 		return false;
 	}
 	const qint64 body = 64 + 32 * qint64( t.h.surfelCount ) + 144 * qint64( t.h.probeCount ) + 12 * qint64( t.h.linkCount );
-	const bool v4 = t.h.version == 4u;
+	const bool v4 = t.h.version >= 4u;
 	const qint64 need = body
 		+ ( v4 ? 32 * qint64( t.h.reserved[0] ) + 8 * qint64( t.h.linkCount ) + 32 * qint64( t.h.probeCount )
 				+ 32 * qint64( t.h.reserved[1] ) + 16 * qint64( t.h.reserved[3] )
@@ -485,9 +486,17 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		const Tbk & t = tbks[f];
 		const float cs = t.h.surfelCellSize;
 		std::unordered_map<Key3, int, Key3Hash> keys, keysBack;   // lane BAKE4: the back side's own map
+		const bool six = t.h.version >= 5u;   // lane SIDES6: a cell's sides by bin, all in the one table
+		std::unordered_map<Key3, int, Key3Hash> keysSide[6];
 		for ( size_t i = 0; i < t.surfels.size(); i++ ) {
 			const TbkSurfel & s = t.surfels[i];
-			keys.emplace( Key3 { floorDiv( s.position[0], cs ), floorDiv( s.position[1], cs ), floorDiv( s.position[2], cs ) }, int( i ) );
+			const Key3 k { floorDiv( s.position[0], cs ), floorDiv( s.position[1], cs ), floorDiv( s.position[2], cs ) };
+			if ( six ) {
+				if ( s.pad0 < 6 )
+					keysSide[s.pad0].emplace( k, int( i ) );
+				continue;
+			}
+			keys.emplace( k, int( i ) );
 		}
 		for ( size_t i = 0; i < t.back.size(); i++ ) {
 			const TbkSurfel & s = t.back[i];
@@ -516,8 +525,10 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				R.links++;
 				// lane BAKE4: a v4 link names its side and carries the glass tint on its way
 				const size_t li = size_t( pr.linkOffset + j );
-				const bool sideBack = li < t.lext.size() && t.lext[li].side;
-				const auto & km = sideBack ? keysBack : keys;
+				const bool sideBack = !six && li < t.lext.size() && t.lext[li].side;
+				const int sd = six && li < t.lext.size() ? int( t.lext[li].side ) : -1;
+				static const std::unordered_map<Key3, int, Key3Hash> kNone;
+				const auto & km = six ? ( sd >= 0 && sd < 6 ? keysSide[sd] : kNone ) : sideBack ? keysBack : keys;
 				auto it = km.find( Key3 { pk.x + lk.cellDelta[0], pk.y + lk.cellDelta[1], pk.z + lk.cellDelta[2] } );
 				if ( it == km.end() ) {
 					R.linksUnresolved++;

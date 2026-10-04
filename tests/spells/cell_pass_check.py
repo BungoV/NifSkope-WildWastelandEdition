@@ -84,8 +84,8 @@ def own_probes(tbks):
     pos, sky, linked = [], [], []
     for _, t in tbks:
         cs = float(t['cell'])
-        keys = ({}, {})
-        for side, arr in enumerate((t['surfels'], t['back'])):
+        keys = tuple({} for _ in t['bysides'])
+        for side, arr in enumerate(t['bysides']):
             for j, s in enumerate(arr):
                 keys[side].setdefault(tuple(floordiv(s['pos'][a], cs) for a in range(3)), j)
         for pr in t['probes']:
@@ -101,7 +101,7 @@ def own_probes(tbks):
                 side = int(t['lext'][int(pr['off']) + li]['side'])
                 j = keys[side].get(tuple(int(pk[a]) + int(lk['delta'][a]) for a in range(3)))
                 if j is not None:
-                    s = (t['surfels'], t['back'])[side][j]
+                    s = t['bysides'][side][j]
                     mine.append((np.float32(s['pos']).tobytes(), tuple(int(c) for c in s['nrm'])))
             pos.append(np.array(pr['pos'], float))
             sky.append(share)
