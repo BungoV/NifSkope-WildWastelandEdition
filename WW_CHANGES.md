@@ -44,6 +44,25 @@
 - Unchanged: PBRM materials (they already handled the tag and stay byte-identical), environment cube maps, and solid-colour placeholder textures.
 - New gate: tests/spells/srgbtag_legacy.sh. It renders the same texture blocks with the untagged and tagged headers on a vanilla duct, plus his undersuit against a copy retagged untagged. Both pairs are pixel-identical. The red arm is the old build, or WW_SRGBTAG1_RED=1.
 
+## Probe bake: decals now darken the bounce light; GI gaps filled; ambient pin (lane GICAL1, 2026-10-03)
+
+- Decals and see-through overlays now count in the bounce light. The bake used to skip them, so it took
+  its color from the clean wall underneath. Grime decals, blood and dirt placed in the cell (and blended
+  overlay meshes) now cover the wall's color by their own coverage, the same way the cell view draws them.
+  Vault 111 cryo: 921 decals and overlays, 31% of what the probes see lies under one. The bake's color now
+  matches the drawn color within 7% (it was 15% too bright in red before). Nothing to switch on: rebake.
+  WW_CELL_BAKE_DECALS=0 bakes as before, byte for byte.
+- A surface that read a hole in the GI grid used to get no bounce light at all. It now takes the average of
+  the nearby grid cells of its own room (interiors only). Vault 111 cryo: black samples 1.58% -> 1.40%.
+  WW_CELL_GI_FILL=0 turns it off.
+- New test switch WW_CELL_GI_AMB = keep (default, unchanged) | replace | off | max. It sets how the cell's own
+  ambient (DALC) and the bounce light add up indoors, so the two can be measured apart. The default stays the
+  same: measured, the bounce and the cell ambient overlap by at most 9% (Vault 111 cryo), and in a hall lit
+  only by the ambient (Museum of Freedom) "replace" and "off" go black.
+- Fixed: a surface in a grid cell next to another room now picks the NEAREST air cell of its room, not the first
+  one found.
+- The gap fill is for interiors only (an exterior gap keeps the weather's ambient, also in the keepamb check view).
+
 ## Probe bake: drip splashes no longer bake as solid swirls; two more ways to take a surface's color (lane CAPTURE1, 2026-10-03)
 
 - The water drips on the Vault 111 walkway (and other glass and water that only bends what is behind it) are no

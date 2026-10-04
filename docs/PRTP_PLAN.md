@@ -1768,6 +1768,37 @@ buildings stand. Ruled 2026-09-30 (item 5): the 5x5 block at full detail and LOD
   Green: Concord 0 px (floor 0), Sanctuary 0 px (floor 8 px, 1 level). `--red level1` (+1 level over 160x160)
   FAILS (25600 px).
 
+### 2aq. GICAL1 (2026-10-03): GI calibration -- decals in the albedo, the gap fill, the ambient measure
+
+Done
+- Bake albedo: dropped blend/decal shapes AND placed TXST decals (projected after the weld) fold into the surfel
+  albedo. Decal triangles go into their own BVH; each surfel hit looks from t-2 to t+0.25 along its ray;
+  albedo = base x (1-a) + decal x a (a = mean texture alpha x vertex alpha over 10 points a triangle). Pin
+  WW_CELL_BAKE_DECALS=0 = old bake byte for byte. Reference: GPU probe 81 (albedo with blends composited);
+  probe 80 = blends skipped. Cryo w1 bake/GPU 1.065/1.048/1.025 (old 1.150/1.134/1.081).
+- Gap fill (cellGiFillAt): where the room blend has no valid weight, the weighted mean ((1 - d/2.5)^2) of the
+  4x4x4 block's valid slots of the surface's own room; GI grid of an interior only (cellGiFill && !skyDraw;
+  never with cellGiSky). Pin WW_CELL_GI_FILL=0. Twin: cell_rooms_check.gi_sample(fill=).
+- WW_CELL_GI_AMB keep|replace|off|max|asgi (cellAmbGi, legacy and PBR interior paths). Default keep.
+- Room sample: nearest air candidate tracked with a separate "direct" flag (it kept the first before).
+
+Measured
+- Energy (imagespace off): GI and DALC add linearly (sum test <= 3.5%). Cryo share gi/(gi+amb) 0.94-0.97 (GI 16-24x
+  DALC); Museum 0 (GI 0). Red asgi reads share 0.47-0.49. No cell is a double count by construction.
+- Museum hall ~0 GI: no placed light reaches it; the DALC is 87% of its light and the bake does not bounce the
+  DALC. Not a grid defect.
+- Goodneighbor street darker with GI on: exterior SKY1 replaces the open-sky weather ambient by the grid
+  (share 1.000 round the camera); the grid's sky is occluded by the street walls.
+- Cryo yellow: a yellow-tan albedo (GPU r/b ~2.1) bounced (GI added r/b 3.0) plus the imagespace's eye
+  adaptation, which lowers the exposure as the GI brightens the frame.
+- Leaks: room clamp on vs off 0.0031/0.0007 vs 0.0139/0.0021; no depth map needed.
+
+Open
+- 6.2 step 3 (the game capture) decides any non-keep ambient rule; "max" is the only candidate safe for DALC-lit halls.
+- The fill reaches ~11% of Cryo's gaps (most have no valid voxel of their room within the block).
+- Cryo inside/outside its three Ambient Only spheres not reported separately.
+- The DALC is not bounced by the bake (lights, sun, sky only).
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
