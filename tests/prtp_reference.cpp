@@ -105,51 +105,58 @@ bool readSoup( const char * path, Soup & s )
 		std::fseek( f, long( tail[1] ), SEEK_CUR );
 		more = std::fread( tail, 4, 2, f ) == 2;
 	}
-	if ( more && tail[0] == 0x314B4D41u ) {   // 'AMK1' (lane ALPHATEST1): its own reader of the masks
-		bool ok = true;
-		auto u32 = [&]() { uint32_t x = 0; ok = ok && std::fread( &x, 4, 1, f ) == 1; return x; };
-		const uint32_t nm = u32();
-		for ( uint32_t m = 0; ok && m < nm; m++ ) {
-			std::fseek( f, long( u32() ), SEEK_CUR );   // the name
-			Soup::Map mp;
-			mp.w = int( u32() );
-			mp.h = int( u32() );
-			ok = ok && mp.w > 0 && mp.h > 0 && mp.w <= 16384 && mp.h <= 16384;
-			if ( !ok )
-				break;
-			mp.a.resize( size_t( mp.w ) * size_t( mp.h ) );
-			ok = std::fread( mp.a.data(), 1, mp.a.size(), f ) == mp.a.size();
-			s.maps.push_back( std::move( mp ) );
+	/* lane LAND5: every tail after TWO1 is sized (magic, count, u32 body bytes), order AMK1, EMT1, VNM1, DRG1;
+	 * a tail this reader does not use (EMT1, DRG1, any newer one) is skipped by its byte count */
+	while ( more ) {
+		uint32_t bytes = 0;
+		if ( std::fread( &bytes, 4, 1, f ) != 1 )
+			break;
+		const long long body = _ftelli64( f );
+		if ( tail[0] == 0x314B4D41u ) {   // 'AMK1' (lane ALPHATEST1): its own reader of the masks
+			bool ok = true;
+			auto u32 = [&]() { uint32_t x = 0; ok = ok && std::fread( &x, 4, 1, f ) == 1; return x; };
+			const uint32_t nm = u32();
+			for ( uint32_t m = 0; ok && m < nm; m++ ) {
+				std::fseek( f, long( u32() ), SEEK_CUR );   // the name
+				Soup::Map mp;
+				mp.w = int( u32() );
+				mp.h = int( u32() );
+				ok = ok && mp.w > 0 && mp.h > 0 && mp.w <= 16384 && mp.h <= 16384;
+				if ( !ok )
+					break;
+				mp.a.resize( size_t( mp.w ) * size_t( mp.h ) );
+				ok = std::fread( mp.a.data(), 1, mp.a.size(), f ) == mp.a.size();
+				s.maps.push_back( std::move( mp ) );
+			}
+			const uint32_t nmod = u32();
+			for ( uint32_t m = 0; ok && m < nmod; m++ )
+				std::fseek( f, long( u32() ), SEEK_CUR );
+			s.maskOf.assign( n, -1 );
+			for ( uint32_t i = 0; ok && i < tail[1]; i++ ) {
+				const uint32_t tri = u32(), map = u32();
+				u32();   // model
+				Soup::Masked mk;
+				mk.thr = u32();
+				mk.map = int( map );
+				ok = ok && std::fread( mk.uv, 4, 6, f ) == 6 && tri < n && map < nm;
+				if ( !ok )
+					break;
+				s.maskOf[tri] = int( s.masked.size() );
+				s.masked.push_back( mk );
+			}
+			if ( !ok || _ftelli64( f ) != body + bytes ) {
+				std::fprintf( stderr, "soup %s: AMK1 tail unreadable\n", path );
+				std::fclose( f );
+				return false;
+			}
 		}
-		const uint32_t nmod = u32();
-		for ( uint32_t m = 0; ok && m < nmod; m++ )
-			std::fseek( f, long( u32() ), SEEK_CUR );
-		s.maskOf.assign( n, -1 );
-		for ( uint32_t i = 0; ok && i < tail[1]; i++ ) {
-			const uint32_t tri = u32(), map = u32();
-			u32();   // model
-			Soup::Masked mk;
-			mk.thr = u32();
-			mk.map = int( map );
-			ok = ok && std::fread( mk.uv, 4, 6, f ) == 6 && tri < n && map < nm;
-			if ( !ok )
-				break;
-			s.maskOf[tri] = int( s.masked.size() );
-			s.masked.push_back( mk );
+		// lane SMOOTHN1: 'VNM1', the vertex normals (9 snorm16 a triangle): the field's normal is their blend
+		if ( tail[0] == 0x314D4E56u && tail[1] == n && bytes == n * 18 ) {
+			s.vn.resize( n * 9 );
+			if ( std::fread( s.vn.data(), 2, s.vn.size(), f ) != s.vn.size() )
+				s.vn.clear();
 		}
-		if ( !ok ) {
-			std::fprintf( stderr, "soup %s: AMK1 tail unreadable\n", path );
-			std::fclose( f );
-			return false;
-		}
-		more = std::fread( tail, 4, 2, f ) == 2;
-	}
-	// lane SMOOTHN1: 'VNM1', the vertex normals (9 snorm16 a triangle): the field's normal is their blend
-	if ( more && tail[0] == 0x314D4E56u && tail[1] == n ) {
-		s.vn.resize( n * 9 );
-		if ( std::fread( s.vn.data(), 2, s.vn.size(), f ) != s.vn.size() )
-			s.vn.clear();
-		more = std::fread( tail, 4, 2, f ) == 2;
+		more = _fseeki64( f, body + bytes, SEEK_SET ) == 0 && std::fread( tail, 4, 2, f ) == 2;
 	}
 	std::fclose( f );
 	if ( a.empty() )

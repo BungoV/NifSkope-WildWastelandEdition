@@ -1390,6 +1390,21 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
 		f.write( reinterpret_cast<const char *>( ts.data() ), qint64( ts.size() ) );
 	}
+	/* lane LAND5: every tail after TWO1 is SIZED -- u32 magic, u32 count, u32 body bytes, then the body -- so a
+	 * reader skips a tail it does not know by its byte count. Fixed order: AMK1, EMT1, VNM1, DRG1 (a new one last). */
+	qint64 sizedAt = -1;
+	auto sizedBegin = [&]( quint32 magic, quint32 count ) {
+		const quint32 h[3] = { magic, count, 0 };
+		f.write( reinterpret_cast<const char *>( h ), sizeof h );
+		sizedAt = f.pos();
+	};
+	auto sizedEnd = [&]() {
+		const qint64 end = f.pos();
+		const quint32 bytes = quint32( end - sizedAt );
+		f.seek( sizedAt - 4 );
+		f.write( reinterpret_cast<const char *>( &bytes ), 4 );
+		f.seek( end );
+	};
 	/* lane ALPHATEST1: the alpha-test masks (written only when any triangle has one): the maps (name, w, h,
 	 * w*h alpha bytes), the model names, then 40 bytes a masked triangle (u32 triangle, i32 map, i32 model,
 	 * u32 threshold, 6 f32 uv) */
@@ -1399,8 +1414,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( s.size() ) );
 			f.write( s.data(), qint64( s.size() ) );
 		};
-		const quint32 tail[2] = { 0x314B4D41u /* 'AMK1' */, quint32( soup.amask.tris.size() ) };
-		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		sizedBegin( 0x314B4D41u /* 'AMK1' */, quint32( soup.amask.tris.size() ) );
 		u32( quint32( soup.amask.maps.size() ) );
 		for ( size_t m = 0; m < soup.amask.maps.size(); m++ ) {
 			str( m < soup.amask.mapNames.size() ? soup.amask.mapNames[m] : std::string() );
@@ -1421,14 +1435,14 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( t.thr );
 			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
 		}
+		sizedEnd();
 	}
 	/* lane EMISSIVEGI1: the glowing triangles (written only when any glows): the glow maps (name, w, h, w*h*3 RGB
 	 * bytes as stored), the emitters (3 f32 glowColor x glowMult, i32 map or -1 = the whole surface), then 32 bytes
 	 * a glowing triangle (u32 triangle, i32 emitter, 6 f32 uv) */
 	if ( !soup.glow.empty() ) {
 		auto u32 = [&]( quint32 v ) { f.write( reinterpret_cast<const char *>( &v ), 4 ); };
-		const quint32 tail[2] = { 0x31544D45u /* 'EMT1' */, quint32( soup.glow.tris.size() ) };
-		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		sizedBegin( 0x31544D45u /* 'EMT1' */, quint32( soup.glow.tris.size() ) );
 		u32( quint32( soup.glow.maps.size() ) );
 		for ( size_t m = 0; m < soup.glow.maps.size(); m++ ) {
 			const std::string nm = m < soup.glow.mapNames.size() ? soup.glow.mapNames[m] : std::string();
@@ -1451,14 +1465,15 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( t.emitter ) );
 			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
 		}
+		sizedEnd();
 	}
 	// lane SMOOTHN1: the vertex normals, 9 snorm16 a triangle (written only when any triangle has them)
 	if ( !soup.vn.empty() ) {
 		std::vector<qint16> vn( soup.tris.size(), 0 );
 		std::copy( soup.vn.begin(), soup.vn.begin() + qMin( soup.vn.size(), vn.size() ), vn.begin() );
-		const quint32 tail[2] = { 0x314D4E56u /* 'VNM1' */, quint32( soup.tris.size() / 9 ) };
-		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		sizedBegin( 0x314D4E56u /* 'VNM1' */, quint32( soup.tris.size() / 9 ) );
 		f.write( reinterpret_cast<const char *>( vn.data() ), qint64( vn.size() * sizeof( qint16 ) ) );
+		sizedEnd();
 	}
 	/* lane GPURELIGHT1: the doors' real geometry (written only when any door has some): u32 glass count, the solid
 	 * triangles (9 f32 + u32 door), the glass triangles (9 f32 + 3 u8 transmittance + u8 0 + u32 door), then the
@@ -1470,8 +1485,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( s.size() ) );
 			f.write( s.data(), qint64( s.size() ) );
 		};
-		const quint32 tail[2] = { 0x31475244u /* 'DRG1' */, quint32( g.tris.size() / 9 ) };
-		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		sizedBegin( 0x31475244u /* 'DRG1' */, quint32( g.tris.size() / 9 ) );
 		u32( quint32( g.glass.size() / 9 ) );
 		for ( size_t i = 0; i * 9 < g.tris.size(); i++ ) {
 			f.write( reinterpret_cast<const char *>( &g.tris[i * 9] ), 36 );
@@ -1504,6 +1518,7 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( t.thr );
 			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
 		}
+		sizedEnd();
 	}
 	return true;
 }
@@ -1569,8 +1584,33 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			soup->twoSided.clear();
 		more = f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
 	}
-	// lane ALPHATEST1: the optional alpha-test masks (a short or broken tail leaves every face solid)
 	soup->amask = probebvh::AlphaMask();
+	soup->glow = ProbeEmit();
+	soup->vn.clear();
+	soup->doorGeom = ProbeSoup::DoorGeom();
+	/* lane LAND5: the sized tails (u32 magic, u32 count, u32 body bytes, body) in the order AMK1, EMT1, VNM1, DRG1.
+	 * sized() reads the byte count and skips every tail this reader does not know by it; next() goes to the end of
+	 * the current one (a known tail that does not fill its bytes exactly is dropped). */
+	quint32 bytes = 0;
+	qint64 end = 0;
+	auto sized = [&]() {
+		while ( more ) {
+			if ( f.read( reinterpret_cast<char *>( &bytes ), 4 ) != 4 || qint64( bytes ) > f.size() - f.pos() ) {
+				more = false;
+				return;
+			}
+			end = f.pos() + qint64( bytes );
+			if ( tail[0] == 0x314B4D41u || tail[0] == 0x31544D45u || tail[0] == 0x314D4E56u || tail[0] == 0x31475244u )
+				return;
+			more = f.seek( end ) && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+		}
+	};
+	auto next = [&]() {
+		more = f.seek( end ) && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+		sized();
+	};
+	sized();
+	// lane ALPHATEST1: the optional alpha-test masks (a short or broken tail leaves every face solid)
 	if ( more && tail[0] == 0x314B4D41u ) {
 		probebvh::AlphaMask am;
 		bool ok = true;
@@ -1629,12 +1669,11 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			am.triOf[tri] = int( am.tris.size() );
 			am.tris.push_back( t );
 		}
-		if ( ok )
+		if ( ok && f.pos() == end )
 			soup->amask = std::move( am );
-		more = ok && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+		next();
 	}
 	// lane EMISSIVEGI1: the optional glowing triangles (a short or broken tail leaves nothing glowing)
-	soup->glow = ProbeEmit();
 	if ( more && tail[0] == 0x31544D45u ) {
 		ProbeEmit ge;
 		bool ok = true;
@@ -1685,23 +1724,23 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 				break;
 			ge.markLast( tri, int( emi ), uv );
 		}
-		if ( ok ) {
+		if ( ok && f.pos() == end ) {
 			ge.triOf.resize( size_t( head[1] ), -1 );
 			soup->glow = std::move( ge );
 		}
-		more = ok && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+		next();
 	}
 	// lane SMOOTHN1: the optional vertex-normal tail
-	soup->vn.clear();
-	if ( more && tail[0] == 0x314D4E56u && tail[1] == head[1] ) {
-		soup->vn.resize( size_t( tail[1] ) * 9 );
-		const qint64 vw = qint64( soup->vn.size() * sizeof( qint16 ) );
-		if ( f.read( reinterpret_cast<char *>( soup->vn.data() ), vw ) != vw )
-			soup->vn.clear();
-		more = f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+	if ( more && tail[0] == 0x314D4E56u ) {
+		if ( tail[1] == head[1] && qint64( bytes ) == qint64( tail[1] ) * 18 ) {
+			soup->vn.resize( size_t( tail[1] ) * 9 );
+			const qint64 vw = qint64( soup->vn.size() * sizeof( qint16 ) );
+			if ( f.read( reinterpret_cast<char *>( soup->vn.data() ), vw ) != vw )
+				soup->vn.clear();
+		}
+		next();
 	}
 	// lane GPURELIGHT1: the doors' optional real geometry (a short or broken tail leaves the doors without any)
-	soup->doorGeom = ProbeSoup::DoorGeom();
 	if ( more && tail[0] == 0x31475244u ) {
 		ProbeSoup::DoorGeom g;
 		bool ok = true;
@@ -1785,9 +1824,9 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			g.amask.triOf[tri] = int( g.amask.tris.size() );
 			g.amask.tris.push_back( t );
 		}
-		if ( ok )
+		if ( ok && f.pos() == end )
 			soup->doorGeom = std::move( g );
-		more = ok && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+		next();
 	}
 	return true;
 }

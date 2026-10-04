@@ -65,32 +65,40 @@ def read_soup(path):
             p += n * 39
         elif m == TWO:
             p += n
-        elif m == AMK:
-            am = {'maps': []}
-            nm, = struct.unpack_from('<I', b, p); p += 4
-            for _ in range(nm):
-                s32()
-                w, h = struct.unpack_from('<II', b, p); p += 8
-                am['maps'].append(np.frombuffer(b, 'u1', w * h, p).reshape(h, w)); p += w * h
-            nmod, = struct.unpack_from('<I', b, p); p += 4
-            for _ in range(nmod):
-                s32()
-            am['rec'] = np.frombuffer(b, np.dtype([('tri', '<u4'), ('map', '<i4'), ('model', '<i4'), ('thr', '<u4'),
-                                                   ('uv', '<f4', 6)]), n, p)
-            p += n * 40
-        elif m == EMT:
-            em = {'maps': [], 'names': []}
-            nm, = struct.unpack_from('<I', b, p); p += 4
-            for _ in range(nm):
-                em['names'].append(s32())
-                w, h = struct.unpack_from('<II', b, p); p += 8
-                em['maps'].append(np.frombuffer(b, 'u1', w * h * 3, p).reshape(h, w, 3)); p += w * h * 3
-            ne, = struct.unpack_from('<I', b, p); p += 4
-            em['emitters'] = np.frombuffer(b, np.dtype([('e', '<f4', 3), ('map', '<i4')]), ne, p); p += 16 * ne
-            em['rec'] = np.frombuffer(b, np.dtype([('tri', '<u4'), ('emitter', '<i4'), ('uv', '<f4', 6)]), n, p)
-            p += 32 * n
         else:
-            break
+            # lane LAND5: every tail after TWO1 is sized (u32 body bytes); one this reader does not use is skipped
+            nb, = struct.unpack_from('<I', b, p)
+            p += 4
+            end = p + nb
+            if end > len(b):
+                break
+            if m == AMK:
+                am = {'maps': []}
+                nm, = struct.unpack_from('<I', b, p); p += 4
+                for _ in range(nm):
+                    s32()
+                    w, h = struct.unpack_from('<II', b, p); p += 8
+                    am['maps'].append(np.frombuffer(b, 'u1', w * h, p).reshape(h, w)); p += w * h
+                nmod, = struct.unpack_from('<I', b, p); p += 4
+                for _ in range(nmod):
+                    s32()
+                am['rec'] = np.frombuffer(b, np.dtype([('tri', '<u4'), ('map', '<i4'), ('model', '<i4'), ('thr', '<u4'),
+                                                       ('uv', '<f4', 6)]), n, p)
+                p += n * 40
+                assert p == end, 'AMK1 tail does not fill its %d bytes' % nb
+            elif m == EMT:
+                em = {'maps': [], 'names': []}
+                nm, = struct.unpack_from('<I', b, p); p += 4
+                for _ in range(nm):
+                    em['names'].append(s32())
+                    w, h = struct.unpack_from('<II', b, p); p += 8
+                    em['maps'].append(np.frombuffer(b, 'u1', w * h * 3, p).reshape(h, w, 3)); p += w * h * 3
+                ne, = struct.unpack_from('<I', b, p); p += 4
+                em['emitters'] = np.frombuffer(b, np.dtype([('e', '<f4', 3), ('map', '<i4')]), ne, p); p += 16 * ne
+                em['rec'] = np.frombuffer(b, np.dtype([('tri', '<u4'), ('emitter', '<i4'), ('uv', '<f4', 6)]), n, p)
+                p += 32 * n
+                assert p == end, 'EMT1 tail does not fill its %d bytes' % nb
+            p = end
     return tris, am, em
 
 

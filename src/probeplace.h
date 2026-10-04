@@ -131,7 +131,9 @@ struct ProbeSoup
 	bool isTwoSided( size_t tri ) const { return tri < twoSided.size() && twoSided[tri]; }
 	/*! lane ALPHATEST1: the alpha-tested triangles' masks (probemask.h): a ray through a texel under the
 	 *  material's threshold passes on. Empty = none (every trace as before). The soup file carries it as an
-	 *  optional 'AMK1' tail after 'TWO1' (the maps as bytes, so a soup read back traces the same). */
+	 *  optional 'AMK1' tail after 'TWO1' (the maps as bytes, so a soup read back traces the same).
+	 *  lane LAND5: the tails after TWO1 are SIZED (magic, count, body bytes) in the order AMK1, EMT1, VNM1, DRG1;
+	 *  a reader skips one it does not know by its byte count. */
 	probebvh::AlphaMask amask;
 	void markLastMasked( int map, quint8 thr, const float uv[6], int model )
 	{
@@ -151,7 +153,7 @@ struct ProbeSoup
 	/*! lane SMOOTHN1: the vertex normals, 9 snorm16 a triangle (world, unit), every albedo way's hit normal
 	 *  (the barycentric blend, renormalized, on the face normal's side). Shorter than 9 x the triangle count,
 	 *  or a zero vertex, = the face normal there. Terrain from LAND VNML, models from their NIF normals.
-	 *  The soup file carries it as an optional 'VNM1' tail after 'TWO1'. */
+	 *  The soup file carries it as an optional 'VNM1' tail after 'EMT1'. */
 	std::vector<qint16> vn;
 	void setLastNormals( const float n[9] )
 	{
@@ -175,7 +177,7 @@ struct ProbeSoup
 	 *  `doors` only tags the openings); the GPU relight re-traces the rays that cross a door's box against it, so a
 	 *  closed door stops light by its faces, lets it through its alpha-test holes and tints it through its panes.
 	 *  9 floats a triangle (world), `door` = into `doors`; `amask` numbers these triangles; glass as the soup's
-	 *  (1 - a (1 - c) x 255). Written as the optional 'DRG1' tail after 'EMT1', only when any door has geometry. */
+	 *  (1 - a (1 - c) x 255). Written as the optional 'DRG1' tail after 'VNM1', only when any door has geometry. */
 	struct DoorGeom
 	{
 		std::vector<float> tris;

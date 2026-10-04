@@ -46,24 +46,31 @@ def read_soup(path, want_tris=None):
             p += n * 39
         elif m == TWO:
             p += n
-        elif m == AMK:
-            am = {'maps': [], 'names': [], 'models': []}
-            nm, = struct.unpack_from('<I', b, p); p += 4
-            for _ in range(nm):
-                ln, = struct.unpack_from('<I', b, p); p += 4
-                am['names'].append(b[p:p + ln].decode()); p += ln
-                w, h = struct.unpack_from('<II', b, p); p += 8
-                am['maps'].append(np.frombuffer(b, 'u1', w * h, p).reshape(h, w)); p += w * h
-            nmod, = struct.unpack_from('<I', b, p); p += 4
-            for _ in range(nmod):
-                ln, = struct.unpack_from('<I', b, p); p += 4
-                am['models'].append(b[p:p + ln].decode()); p += ln
-            rec = np.frombuffer(b, np.dtype([('tri', '<u4'), ('map', '<i4'), ('model', '<i4'), ('thr', '<u4'),
-                                             ('uv', '<f4', 6)]), n, p)
-            p += n * 40
-            am['rec'] = rec
         else:
-            break
+            # lane LAND5: every tail after TWO1 is sized (u32 body bytes); one this reader does not use is skipped
+            nb, = struct.unpack_from('<I', b, p)
+            p += 4
+            end = p + nb
+            if end > len(b):
+                break
+            if m == AMK:
+                am = {'maps': [], 'names': [], 'models': []}
+                nm, = struct.unpack_from('<I', b, p); p += 4
+                for _ in range(nm):
+                    ln, = struct.unpack_from('<I', b, p); p += 4
+                    am['names'].append(b[p:p + ln].decode()); p += ln
+                    w, h = struct.unpack_from('<II', b, p); p += 8
+                    am['maps'].append(np.frombuffer(b, 'u1', w * h, p).reshape(h, w)); p += w * h
+                nmod, = struct.unpack_from('<I', b, p); p += 4
+                for _ in range(nmod):
+                    ln, = struct.unpack_from('<I', b, p); p += 4
+                    am['models'].append(b[p:p + ln].decode()); p += ln
+                rec = np.frombuffer(b, np.dtype([('tri', '<u4'), ('map', '<i4'), ('model', '<i4'), ('thr', '<u4'),
+                                                 ('uv', '<f4', 6)]), n, p)
+                p += n * 40
+                am['rec'] = rec
+                assert p == end, 'AMK1 tail does not fill its %d bytes' % nb
+            p = end
     return ntri, tris, am
 
 
