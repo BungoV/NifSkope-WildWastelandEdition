@@ -1364,8 +1364,12 @@ QByteArray hknpEncodeConvexPolytopeShape( const HknpPolytopeInput & in )
 	 */
 	const int realVerts = highest + 1;
 	const int nv = roundUp( realVerts, 4 );
-	if ( nv > in.verts.size() )
-		return QByteArray();
+	/* lane MAGDROP1: no refusal when the input holds fewer than nv vertices.
+	 * Padding slots repeat the last real vertex (the loop below never reads past
+	 * realVerts - 1), so a FRESH hull whose count is not a multiple of four --
+	 * Create Convex Shapes makes them every time -- was refused here for nothing,
+	 * and Compile fell back to a triangle mesh on a dynamic body. A decoded
+	 * polytope always arrives padded, which is why no vanilla file ever hit it. */
 	const int np = std::max( roundUp( nf, 4 ), int( in.planes.size() ) );
 	const qsizetype vertsAt = 0x50;
 	const qsizetype planesAt = vertsAt + nv * 16;

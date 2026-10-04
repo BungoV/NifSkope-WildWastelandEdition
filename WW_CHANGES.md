@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+- **Fresh convex hulls compile as convex (MAGDROP1).** Create Convex Shapes followed by Compile Collision fell
+  back to a triangle mesh whenever the new hull's corner count was not a multiple of four (most hulls), so a
+  dynamic prop got a mesh body. It now writes the convex shape vanilla uses. Files decompiled from the game were
+  never affected.
+- **Batch magazine collision (MAGDROP1).** Two new command-line tools for CORE's dropped magazines:
+  `convex F -o OUT [--mass M] [--layer L] [--material CRC] [--radius R] [--center com|bounds|none]` gives a loose
+  part one convex collision with its root on the centre of mass, set up like a vanilla loose item (clutter layer,
+  dynamic, inertia from the hull, vanilla damping), and compiles it.
+  `settle F [--height M] [--seconds S] [--spin x,y,z] [--frames DIR]` drops a loose item on a floor and reports
+  whether it comes to rest without sinking, jittering or rocking (`--frames` writes one posed file per frame).
+  Harness pictures can now force collision drawing (`WW_RENDER_COLLISION=1`), a background colour
+  (`WW_RENDER_BG=r,g,b`) and a selected block (`WW_RENDER_SELECT=n`); `WW_UI_SHOT` now shows the viewport
+  instead of a black rectangle. Gate `tests/spells/collision_convex_cli.sh` (12 checks).
+
 - Interiors that show the sky in the game (the cell's Show Sky flag, e.g. the Museum of Freedom) now get
   daylight from the sky in the bounce light: rays that leave through windows and holes count as sky, and in
   Lookdev the weather's sky colors light them, on top of the cell's own ambient. Closed interiors (vaults,
