@@ -60,7 +60,7 @@ RED=""
 [ "${1:-}" = "--red" ] && RED="${2:-}"
 case "$RED" in ""|off|wrongsrc|noshadow|gioff|flat) ;; *) echo "unknown red: $RED"; exit 2 ;; esac
 OUT="${OUT:-$REPO/scratchpad/volfog1_20261004/gate${RED:+_red_$RED}}"
-GREEN="$REPO/scratchpad/volfog1_20261004/gate"
+GREEN="${GREEN:-$REPO/scratchpad/volfog1_20261004/gate}"	# the green run a red copies its other shots from
 PORT="${PORT:-14933}"
 SIZE="${SIZE:-960x600}"
 PLACES="${PLACES:-sanctuary concord Vault111Cryo}"
