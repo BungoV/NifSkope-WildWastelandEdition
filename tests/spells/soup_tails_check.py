@@ -81,14 +81,24 @@ def main():
     if not pb.same_files(outs['B'], outs['C']):
         fails.append('unknown sized tails changed the bake (C != B): not skipped by length')
     # the Python readers the cell gates use
+    # D = C with an AMK1 tail (no maps, every record unmasked) between the first unknown tail and VNM1: the readers
+    # must walk past the unknown tail to find it
+    amk = sized(0x314B4D41, n, struct.pack('<II', 0, 0) + b''.join(
+        struct.pack('<IiiI6f', t, -1, -1, 0, *([0.0] * 6)) for t in range(n)))
+    paths['D'] = os.path.join(work, 'tails_D.psp')
+    open(paths['D'], 'wb').write(base + junk1 + amk + vnm_tail(n) + junk2)
     try:
         import alphatest_check
         import emissive_cell_check
-        r1 = alphatest_check.read_soup(paths['C'])
-        r2 = emissive_cell_check.read_soup(paths['C'])
-        if len(r1[0]) != n or len(r2[0]) != n:
-            fails.append('python reader triangle count wrong')
-        print('python readers: alphatest_check + emissive_cell_check parse C (%d tris)' % n)
+        for k in 'CD':
+            _, t1, am1 = alphatest_check.read_soup(paths[k])
+            t2, am2, _ = emissive_cell_check.read_soup(paths[k])
+            if len(t1) != n or len(t2) != n:
+                fails.append('python reader on %s: triangle count wrong' % k)
+            got = [am is not None and len(am['rec']) == n for am in (am1, am2)]
+            if got != [k == 'D'] * 2:
+                fails.append('python readers on %s: AMK1 found %s, want %s' % (k, got, k == 'D'))
+        print('python readers: alphatest_check + emissive_cell_check parse C, and find AMK1 past the unknown tail in D')
     except Exception as e:   # noqa: BLE001
         fails.append('python reader on C: %r' % (e,))
     if prtp:
