@@ -1530,7 +1530,12 @@ void Node::drawHavok()
 			const HknpSystem & sys = hknpDecodeCached( hkData );
 			if ( sys.valid ) {
 				QSettings collisionSettings;
-				const bool solidCollision = collisionSettings.value( "CollisionManager/Solid", true ).toBool();
+				/* lane MAGDROP1: WW_RENDER_HULL_THIN=1 draws the hull as a thin
+				 * wire only (no fill), so a render shows the textured mesh under
+				 * its collision. Render harness only; his Solid setting is not
+				 * read or written. */
+				static const bool hullThin = qEnvironmentVariableIntValue( "WW_RENDER_HULL_THIN" ) != 0;
+				const bool solidCollision = !hullThin && collisionSettings.value( "CollisionManager/Solid", true ).toBool();
 				const bool xrayCollision = collisionSettings.value( "CollisionManager/XRay", false ).toBool();
 				const int colourMode = collisionSettings.value( "CollisionManager/ColourBy", 0 ).toInt();
 				const int labelsMode = collisionSettings.value( "CollisionManager/Labels", 1 ).toInt();
@@ -1618,6 +1623,8 @@ void Node::drawHavok()
 					}
 					FloatVector4 wire = selectedCollision ? scene->highlightColor : wireColour( shp );
 					wire[3] = 1.0f;
+					if ( hullThin )
+						scene->setGLLineWidth( 1.0f );
 					scene->setGLColor( wire );
 					glDepthMask( GL_TRUE );
 					scene->drawTriangles( pos.constData(), size_t( nv ), nullptr, false,

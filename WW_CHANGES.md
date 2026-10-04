@@ -14,6 +14,8 @@
   Harness pictures can now force collision drawing (`WW_RENDER_COLLISION=1`), a background colour
   (`WW_RENDER_BG=r,g,b`) and a selected block (`WW_RENDER_SELECT=n`); `WW_UI_SHOT` now shows the viewport
   instead of a black rectangle. Gate `tests/spells/collision_convex_cli.sh` (12 checks).
+  `WW_RENDER_HULL_THIN=1` draws the collision as a thin wire with no fill, so the textured part shows under
+  its hull (your own Solid collision setting is untouched).
 
 - Interiors that show the sky in the game (the cell's Show Sky flag, e.g. the Museum of Freedom) now get
   daylight from the sky in the bounce light: rays that leave through windows and holes count as sky, and in
