@@ -162,6 +162,14 @@ def sample(img, u, v):
     return img[y, x]
 
 
+def key_of(s, ver):
+    """a surfel's key: position, stored normal, facing bin. Lane LAND6: on v5 (SIDES6) the bin is the record's pad0
+    (axis * 2 + negative of the hit FACE normal turned toward the probe). The stored normal is not it: SMOOTHN1 stores
+    the mean smooth normal, whose dominant axis differs from the bin on ~4% of Goodneighbor's surfels. v3/v4: -1 (the
+    bin is read from the normal, as before)."""
+    return (tuple(np.round(s['pos'], 2)), tuple(int(x) for x in s['nrm']), int(s['pad0']) if ver >= 5 else -1)
+
+
 def surfels_of(run, every=False):
     """the glowing surfels (deduplicated by position + normal); every=True: every surfel, Le 0 where none glowed"""
     glow = {}
@@ -170,11 +178,11 @@ def surfels_of(run, every=False):
         if every:
             for lst in (t['surfels'], t['back']):
                 for s in lst:
-                    glow[(tuple(np.round(s['pos'], 2)), tuple(int(x) for x in s['nrm']))] = np.zeros(3)
+                    glow[key_of(s, t['ver'])] = np.zeros(3)
         for e in t['emits']:
             lst = t['back'] if e['surfel'] & 0x80000000 else t['surfels']
             s = lst[e['surfel'] & 0x7fffffff]
-            k = (tuple(np.round(s['pos'], 2)), tuple(int(x) for x in s['nrm']))
+            k = key_of(s, t['ver'])
             glow[k] = np.array(e['le'], np.float64)
     return glow
 
@@ -320,7 +328,7 @@ def main():
         bake_sum = np.zeros(3)
         twin_sum = np.zeros(3)
         orphan = judged = 0
-        for (pos, nq), le in glow.items():
+        for (pos, nq, sbin), le in glow.items():
             key = np.floor(np.array(pos) / CELL).astype(np.int64)
             n = np.array(nq, np.float64)
             n /= max(np.linalg.norm(n), 1e-9)
@@ -338,6 +346,8 @@ def main():
             # hits fall on a point as a probe's uniform rays do: |cos| / d^2 from each probe (no occlusion here)
             ax = int(np.argmax(np.abs(n)))
             sg = 1.0 if n[ax] >= 0 else -1.0
+            if sbin >= 0 and os.environ.get('EMC_BIN') != 'normal':   # lane LAND6: v5's own bin (red: EMC_BIN=normal)
+                ax, sg = sbin // 2, (-1.0 if sbin % 2 else 1.0)
             tax = np.argmax(np.abs(tn), axis=1)
             Wp = np.zeros(P.shape[:2])
             dq = np.linalg.norm(Q - np.array(pos), axis=1)
