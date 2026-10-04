@@ -34,6 +34,8 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1
 #include "gl/cellfxlit.h"
+#include "gl/cellwater.h"	// lane WATER1
+#include "esmwater.h"
 #include "gamemanager.h"	// lane IMGS1: the imagespace LUT
 
 #include <QBuffer>
@@ -146,6 +148,10 @@ struct Bucket
 	//! Lane FXLIT1: one placement's lit effect shapes; the placed model's serial in src/gl/cellfxlit.h, -1 = none.
 	int fxLit = -1;
 	bool decal = false;   // lane PLACED1: a placed decal's pieces (src/celldecal.h): Decal flag, no depth write
+	/* Lane WATER1: a water surface of one WATR record (the cell's plane or a placed water mesh); its shapes are
+	 * registered with src/gl/cellwater.h, which draws them the game's way while the Cell lights row is on. */
+	bool water = false;
+	WwWaterRecord waterRec;
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
 };
@@ -392,6 +398,8 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
 		if ( b.fxLit >= 0 )   // lane FXLIT1: the renderer asks for this shape's four lights by block
 			wwCellFxLitShape( nif, nif->getBlockNumber( iShape ), b.fxLit );
+		if ( b.water )        // lane WATER1: the renderer draws this shape with the game's water terms
+			wwCellWaterShape( nif, nif->getBlockNumber( iShape ), b.waterRec );
 		nif->set<QString>( iShape, "Name", part > 1
 			? QString( "%1 #%2" ).arg( b.name ).arg( part ) : b.name );
 		nif->set<quint32>( iShape, "Flags", 14 );
@@ -1729,6 +1737,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	int fxLitModels = 0, fxLitShapes = 0;
 	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
 	wwCellFxLitBegin( nif );
+	wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
+	QHash<quint32, WwWaterRecord> placedWaterRecs;   // lane WATER1: WNAM form -> its record (form 0 = unreadable)
+	int placedWaterShapes = 0;
 	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors
 	int placementsSwapped = 0;              //!< lane PRTPPLACE: drawn with a material swap
 	int skyCardsHidden = 0;                 //!< lane PRTPPLACE: sky cards left to the sky layer
@@ -1863,6 +1874,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 * They, and the placed decals (TXST, projected below), are folded into the surfel albedo (ProbeSoup::decal).
  * WW_CELL_BAKE_DECALS=0 leaves them out, as before. */
 	const bool decalFold = qEnvironmentVariable( "WW_CELL_BAKE_DECALS" ) != QLatin1String( "0" );
+	/* lane WATER1: the water surfaces in the placer and the bake (src/probebake.cpp, the water split). The pin
+	 * WW_CELL_BAKE_WATER=0 leaves them out, as before (and prints nothing new); WW_CELL_WATER_BAKEDUMP=<file> +
+	 * WW_CELL_WATER_BAKEDUMP_PROBES=x,y,z;... (the nearest probes) dumps every ray's split for the gate. */
+	const bool bakeWater = qEnvironmentVariable( "WW_CELL_BAKE_WATER" ) != QLatin1String( "0" );
+	int soupWaterCells = 0;
 	int soupDecalShapes = 0, soupPlacedDecals = 0, soupPlacedDecalTris = 0;
 	int soupRefractShapes = 0, soupRefractTris = 0;
 	QMap<QString, int> soupRefractModels;
@@ -2509,7 +2525,28 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			}
 			if ( isActor )
 				bbOwn += QLatin1String( "|ACTOR" );   // lane PLACED1: own buckets; no decal lands on an actor
+			/* Lane WATER1: a placed water mesh (an ACTI whose WNAM names a WATR; its shape carries the water
+			 * shader) gets a bucket per record, drawn by src/gl/cellwater.h with that record's terms. */
+			const WwWaterRecord * placedWater = nullptr;
+			if ( !isActor && lb.waterType != 0 && s.nearFacts.waterShader && !s.nearFacts.effectShader ) {
+				auto pw = placedWaterRecs.find( lb.waterType );
+				if ( pw == placedWaterRecs.end() ) {
+					WwWaterRecord rec;
+					if ( !world.waterRecord( lb.waterType, rec ) )
+						rec.form = 0;
+					pw = placedWaterRecs.insert( lb.waterType, rec );
+				}
+				if ( pw.value().form != 0 ) {
+					placedWater = &pw.value();
+					bbOwn += QStringLiteral( "|W%1" ).arg( lb.waterType, 8, 16, QLatin1Char( '0' ) );
+					placedWaterShapes++;
+				}
+			}
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
+			if ( placedWater ) {
+				b.water = true;
+				b.waterRec = *placedWater;
+			}
 			if ( fxLitSerial >= 0 && bbOwn.contains( QLatin1String( "|FL|" ) ) )
 				b.fxLit = fxLitSerial;
 			if ( bb ) {
@@ -2607,6 +2644,18 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		Bucket waterB;
 		waterB.name = QStringLiteral( "water" );
 		waterB.withColour = true;
+		/* Lane WATER1: one water bucket per WATR record, so each surface draws with its own record's
+		 * terms. The worldspace default (and a record that does not read) stays in waterB under the
+		 * old key; an override (XCWT: the rivers, the marshes, the Glowing Sea) gets its own. */
+		QMap<quint32, Bucket> waterByForm;
+		QHash<quint32, bool> waterReadable;
+		WwWaterRecord waterDefaultRec;
+		if ( world.defaultWaterType() != 0 && world.waterRecord( world.defaultWaterType(), waterDefaultRec ) ) {
+			waterB.water = true;
+			waterB.waterRec = waterDefaultRec;
+		}
+		Bucket waterAll;                       // every cell's water quad, in the old bucket's order
+		std::vector<quint32> waterQuadOwner;   // per quad: 0 = waterB, else the WATR form of its bucket
 		Bucket gridB;
 		gridB.name = QStringLiteral( "cell grid" );
 		gridB.withColour = true;
@@ -2851,12 +2900,33 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 					}
 				}
 				float wh = 0.0f;
-				if ( spec.water && world.cellWater( x, y, wh ) ) {
+				quint32 waterForm = 0;
+				if ( spec.water && world.cellWater( x, y, wh, &waterForm ) ) {
 					waterCells++;
 					const float ox = float( x ) * CELL_UNITS - origin[0];
 					const float oy = float( y ) * CELL_UNITS - origin[1];
 					const float rgb[3] = { 0.18f, 0.32f, 0.42f };
-					appendQuad( waterB,
+					Bucket * wb = &waterB;   // lane WATER1: the bucket of the cell's own WATR record
+					if ( waterForm != 0 && waterForm != world.defaultWaterType() ) {
+						auto rd = waterReadable.find( waterForm );
+						if ( rd == waterReadable.end() ) {
+							WwWaterRecord rec;
+							const bool ok = world.waterRecord( waterForm, rec );
+							rd = waterReadable.insert( waterForm, ok );
+							if ( ok ) {
+								Bucket & nb = waterByForm[waterForm];
+								nb.name = QStringLiteral( "water %1" )
+									.arg( waterForm, 8, 16, QLatin1Char( '0' ) ).toUpper();
+								nb.withColour = true;
+								nb.water = true;
+								nb.waterRec = rec;
+							}
+						}
+						if ( rd.value() )
+							wb = &waterByForm[waterForm];
+					}
+					waterQuadOwner.push_back( wb == &waterB ? 0u : waterForm );
+					appendQuad( waterAll,
 						Vector3( ox, oy, wh ),
 						Vector3( ox + CELL_UNITS, oy, wh ),
 						Vector3( ox + CELL_UNITS, oy + CELL_UNITS, wh ),
@@ -2903,8 +2973,34 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			buckets.insert( QStringLiteral( "\x01land%1" )
 				.arg( bi, 3, 10, QLatin1Char( '0' ) ), groundBuckets[bi] );
 		}
-		if ( !waterB.verts.empty() )
+		/* lane WATER1: every water bucket carries ALL the water quads' vertices, in the one order the single
+		 * water bucket had before the lane; a quad of another record keeps its four vertices through two
+		 * zero-area triangles (no fragment). Each shape's bounding sphere is then the old water shape's, bit
+		 * for bit, so the scene's bounds -- and with them the view's near/far planes and the sun cascades --
+		 * do not move when the water splits by record (the Cell lights row off renders as before the lane). */
+		auto waterFill = [&]( Bucket & wb, quint32 owner ) {
+			wb.verts = waterAll.verts;
+			wb.tris.clear();
+			bool owns = false;
+			for ( size_t q = 0; q < waterQuadOwner.size(); q++ ) {
+				const quint32 b = quint32( q * 4 );
+				if ( waterQuadOwner[q] == owner ) {
+					wb.tris.push_back( waterAll.tris[q * 2] );
+					wb.tris.push_back( waterAll.tris[q * 2 + 1] );
+					owns = true;
+				} else {
+					wb.tris.push_back( BucketTri{ { b, b + 1, b + 1 } } );
+					wb.tris.push_back( BucketTri{ { b + 2, b + 3, b + 3 } } );
+				}
+			}
+			return owns;
+		};
+		if ( waterFill( waterB, 0u ) )
 			buckets.insert( QStringLiteral( "\x01water" ), waterB );
+		for ( auto wf = waterByForm.begin(); wf != waterByForm.end(); ++wf )   // lane WATER1
+			if ( waterFill( wf.value(), wf.key() ) )
+				buckets.insert( QStringLiteral( "\x01water|%1" )
+					.arg( wf.key(), 8, 16, QLatin1Char( '0' ) ), wf.value() );
 		if ( !gridB.verts.empty() )
 			buckets.insert( QStringLiteral( "\x01grid" ), gridB );
 	}
@@ -2926,7 +3022,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			const Bucket & b = it.value();
 			if ( b.blend || b.hasAlpha || b.billboard || b.refract || !b.effectMat.isEmpty()
 				|| !b.effectBlock.isEmpty() || b.verts.empty() || b.tris.empty()
-				|| it.key() == QLatin1String( "\x01water" ) || it.key() == QLatin1String( "\x01grid" )
+				|| it.key().startsWith( QLatin1String( "\x01water" ) ) || it.key() == QLatin1String( "\x01grid" )
 				|| it.key().contains( QLatin1String( "|ACTOR" ) ) )
 				continue;
 			CellDecalReceiver rc;
@@ -3073,6 +3169,55 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 							}
 						}
 				}
+			/* lane WATER1: the cells' water planes, apart from the triangles (they stop no ray): the placer splits a
+			 * column at the line, the bake splits a ray at the surface. Kind 0 = the worldspace default record (the
+			 * far ring's water takes it); one kind per other WATR the cells name. Pin WW_CELL_BAKE_WATER=0: none. */
+			if ( bakeWater ) {
+				auto typeOf = [&]( quint32 form, const WwWaterRecord & r ) {
+					ProbeSoup::WaterType w;
+					w.form = form;
+					w.fresnel = r.fresnel;
+					w.reflectivity = r.reflectivity;
+					for ( int k = 0; k < 3; k++ )
+						w.uw[k] = wwWaterLin( r.underwater[k] );
+					w.fogAmount = r.uwFogAmount;
+					w.fogNear = r.uwFogNear;
+					w.fogFar = r.uwFogFar;
+					return w;
+				};
+				WwWaterRecord def;
+				const quint32 defForm = world.defaultWaterType();
+				if ( defForm && world.waterRecord( defForm, def ) )
+					probeSoup.waterTypes.push_back( typeOf( defForm, def ) );
+				else
+					probeSoup.waterTypes.push_back( ProbeSoup::WaterType() );
+				QHash<quint32, quint16> kindOf;
+				kindOf.insert( defForm, 0 );
+				for ( int y = y0; y <= y1; y++ )
+					for ( int x = x0; x <= x1; x++ ) {
+						float wh = 0.0f;
+						quint32 form = 0;
+						if ( !world.cellWater( x, y, wh, &form ) )
+							continue;
+						auto kt = kindOf.find( form );
+						if ( kt == kindOf.end() ) {
+							WwWaterRecord r;
+							quint16 k = 0;   // an unreadable record: the default's terms
+							if ( world.waterRecord( form, r ) ) {
+								k = quint16( probeSoup.waterTypes.size() );
+								probeSoup.waterTypes.push_back( typeOf( form, r ) );
+							}
+							kt = kindOf.insert( form, k );
+						}
+						const float ox = float( x ) * CELL_UNITS, oy = float( y ) * CELL_UNITS;
+						const float a[3] = { ox, oy, wh }, b[3] = { ox + CELL_UNITS, oy, wh };
+						const float c[3] = { ox + CELL_UNITS, oy + CELL_UNITS, wh }, d[3] = { ox, oy + CELL_UNITS, wh };
+						probeSoup.addWater( a, b, c, kt.value() );
+						probeSoup.addWater( a, c, d, kt.value() );
+						soupWaterCells++;
+					}
+				probeSoup.waterApart = baking;   // the far ring's water, kind 0
+			}
 		}
 		ProbePlaceSpec ps;
 		if ( spec.interior ) {
@@ -3141,6 +3286,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			if ( bakeLean )   // lane SPEED1
 				t << "  headless bake: " << leanSkipped << " placements the soup leaves out were not loaded\n";
 			if ( baking ) {   // lane BAKE4
+				if ( soupWaterCells > 0 )   // lane WATER1 (the pin WW_CELL_BAKE_WATER=0 prints nothing new)
+					t << "  bake water: " << soupWaterCells << " cell planes, " << int( probeSoup.waterTypes.size() )
+					  << " records, " << int( probeSoup.water.size() / 9 ) << " triangles before the far ring\n";
 				t << "  bake glass: " << soupGlassShapes << " panes, " << int( probeSoup.glassT.size() / 3 )
 				  << " triangles\n";
 				if ( decalFold )   // lane GICAL1 (the pin WW_CELL_BAKE_DECALS=0 prints nothing new)
@@ -3183,6 +3331,25 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				if ( qEnvironmentVariableIsSet( "WW_CELL_PROBE_BACKMAX" ) )
 					bs.backMax = qEnvironmentVariable( "WW_CELL_PROBE_BACKMAX" ).toFloat();
 				bs.backDump = qEnvironmentVariable( "WW_CELL_PROBE_BACKDUMP" );
+				bs.waterDump = qEnvironmentVariable( "WW_CELL_WATER_BAKEDUMP" );   // lane WATER1
+				for ( const QString & q : qEnvironmentVariable( "WW_CELL_WATER_BAKEDUMP_PROBES" ).split( ';', Qt::SkipEmptyParts ) ) {
+					const QStringList c = q.split( ',' );
+					if ( c.size() != 3 )
+						continue;
+					int best = -1;
+					double bd = 1e300;
+					for ( size_t i = 0; i < pr.probes.size(); i++ ) {
+						double dd = 0;
+						for ( int k = 0; k < 3; k++ )
+							dd += std::pow( double( pr.probes[i].pos[k] ) - c[k].toDouble(), 2 );
+						if ( dd < bd ) {
+							bd = dd;
+							best = int( i );
+						}
+					}
+					if ( best >= 0 )
+						bs.waterDumpProbes.push_back( best );
+				}
 				// an interior's misses are void, never sky -- unless its cell shows the sky (lane SKYINT1, the deck's
 				// rule: a ray that meets nothing sees the sky)
 				bs.noSky = spec.interior && !( cellInteriorFlags( world.interior() ) & 0x0080u );
@@ -3537,6 +3704,25 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			s << "  " << groundNote << "\n";
 		}
 		s << "  water: " << waterCells << " cells\n";
+		// lane WATER1: the surfaces the game's water terms draw, and the placed water meshes among them
+		s << "  " << wwCellWaterEcho( nif ) << "; placed water shapes " << placedWaterShapes << "\n";
+		/* lane WATER1: the reader gate's records -- WW_CELL_WATER_DUMP_FORMS=<hex,hex,...> describes each into
+		 * WW_CELL_WATER_DUMP + ".forms" (a form that is no WATR: "WATR <form> NONE") */
+		const QString dumpForms = qEnvironmentVariable( "WW_CELL_WATER_DUMP_FORMS" );
+		if ( !dumpForms.isEmpty() && qEnvironmentVariableIsSet( "WW_CELL_WATER_DUMP" ) ) {
+			QFile ff( qEnvironmentVariable( "WW_CELL_WATER_DUMP" ) + QStringLiteral( ".forms" ) );
+			if ( ff.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+				QTextStream fo( &ff );
+				for ( const QString & h : dumpForms.split( ',', Qt::SkipEmptyParts ) ) {
+					const quint32 form = h.trimmed().toUInt( nullptr, 16 );
+					WwWaterRecord r;
+					if ( world.waterRecord( form, r ) )
+						fo << wwWaterDescribe( r ) << "\n";
+					else
+						fo << "WATR " << QString::number( form, 16 ).rightJustified( 8, QLatin1Char( '0' ) ) << " NONE\n";
+				}
+			}
+		}
 		if ( !identityCensus.path.isEmpty() || !identityError.isEmpty() ) {   // lane CELLVIEW2
 			s << "  " << cellIdentityLegend( identityCensus );
 			if ( !identityError.isEmpty() )

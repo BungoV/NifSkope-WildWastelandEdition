@@ -87,6 +87,9 @@ struct ProbeBakeSpec
 	 *  sphere stands outside the shell: moved to the nearest clear point under it, or dropped (>= 1: off). */
 	float backMax = 0.25f;
 	QString backDump;   //!< the gate's list of every probe's share and fate (empty: none)
+	//! lane WATER1: every ray of these probes (index into the probes), its water split, is written to waterDump
+	QString waterDump;
+	std::vector<int> waterDumpProbes;
 };
 
 struct ProbeBakeResult
@@ -117,6 +120,10 @@ struct ProbeBakeResult
 	qint64 linksBack = 0, linksDoor = 0, linksTinted = 0;   //!< v4 links: to a back surfel, through a door, through glass
 	int doors = 0, glassTris = 0;           //!< the soup's door boxes and glass triangles
 	int decalTris = 0;                      //!< lane GICAL1: decal triangles folded into the albedo
+	// lane WATER1: the water surfaces the rays split at
+	int waterTris = 0, waterTypes = 0, waterUnder = 0;   //!< triangles, WATR records; probes under the water
+	qint64 waterRays = 0, waterMirrorHits = 0, waterMirrorSky = 0;   //!< rays split; their mirror legs' hits, sky
+	double waterReflMean = 0;               //!< over probes: the sphere share the mirror legs took
 	qint64 decalHits = 0, surfelHits = 0;   //!< lane GICAL1: surfel hits a decal covered; all surfel hits
 	double glassMean = 0;                   //!< over probes: the sphere share seen through glass
 	int probesRoomed = 0, boxesWritten = 0; //!< probes standing in an enclosed room; room boxes written (summed over files)

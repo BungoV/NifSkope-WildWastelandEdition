@@ -534,8 +534,13 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 					if ( c.water && std::min( { z00, z10, z01, z11 } ) < c.waterH ) {
 						const float w00[3] = { wx0, wy0, c.waterH }, w10[3] = { wx0 + qs, wy0, c.waterH };
 						const float w01[3] = { wx0, wy0 + qs, c.waterH }, w11[3] = { wx0 + qs, wy0 + qs, c.waterH };
-						soup.addTri( w00, w10, w11, kWater );
-						soup.addTri( w00, w11, w01, kWater );
+						if ( soup.waterApart ) {   // lane WATER1: a water surface the bake splits rays at
+							soup.addWater( w00, w10, w11, 0 );
+							soup.addWater( w00, w11, w01, 0 );
+						} else {
+							soup.addTri( w00, w10, w11, kWater );
+							soup.addTri( w00, w11, w01, kWater );
+						}
 						R.waterQuads++;
 					}
 				}

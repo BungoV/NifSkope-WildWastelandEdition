@@ -38,6 +38,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "io/material.h"
 #include "gl/renderer.h"
 #include "gl/celllights.h"
+#include "gl/cellwater.h"	// lane WATER1
 #include "gl/glmesh.h"
 #include "glview.h"
 
@@ -613,6 +614,12 @@ bool Shape::wwDecalDrawsFirst() const
 	// lane FXD1: the game draws its decals before its sorted blended pass. Red control WW_CELL_FXD_RED=late: never
 	static const bool late = qgetenv( "WW_CELL_FXD_RED" ) == "late";
 	return surfaceDecal && drawInSecondPass && !late && wwCellLightsWanted( scene );
+}
+
+bool Shape::wwWaterDraws() const
+{
+	// lane WATER1: a registered water surface, drawn by src/gl/cellwater.h while the Cell lights row is on
+	return wwCellWaterWanted( scene, id() );
 }
 
 void Shape::updateShader()

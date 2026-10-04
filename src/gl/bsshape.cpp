@@ -2,6 +2,7 @@
 
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
+#include "gl/cellwater.h"	// lane WATER1
 #include "cellmesh.h"
 #include "cellspeed.h"
 #include "gl/glnode.h"
@@ -289,6 +290,11 @@ void BSShape::drawShapes( NodeList * secondPass )
 
 	// Draw translucent meshes in second pass
 	if ( secondPass && drawInSecondPass ) {
+		secondPass->add( this );
+		return;
+	}
+	// lane WATER1: a cell water surface draws after the opaque frame it refracts (src/gl/cellwater.h)
+	if ( secondPass && wwCellWaterWanted( scene, id() ) ) {
 		secondPass->add( this );
 		return;
 	}

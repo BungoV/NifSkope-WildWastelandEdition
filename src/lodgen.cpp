@@ -2442,6 +2442,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					s.shaderSF1 = sf1;
 					s.shaderSF2 = sf2;
 					nf.effectShader = src.blockInherits( iShader, "BSEffectShaderProperty" );
+					nf.waterShader = src.blockInherits( iShader, "BSWaterShaderProperty" );   // lane WATER1
 					if ( !nf.effectShader && ( sf1 & ( 1U << 15 ) ) )
 						s.refractStrength = src.get<float>( iShader, "Refraction Strength" );
 					nf.decal = ( sf1 & ( ( 1U << 26 ) | ( 1U << 27 ) ) ) != 0;

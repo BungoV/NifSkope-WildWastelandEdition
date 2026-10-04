@@ -1567,3 +1567,19 @@ void wwLookdevDrawGround( Scene * scene )
 	glDisable( GL_BLEND );
 	glDepthMask( GL_TRUE );
 }
+
+/* lane WATER1: the game's water reflects a 3-colour sky (its water shader's horizon, lower and upper colours),
+ * not the dome. The same rows the dome takes at the same hour, linear, without the dome's sky scale (INFERRED:
+ * the scale is the sky shader's own). */
+bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] )
+{
+	if ( !st().haveWeather )
+		return false;
+	const SkyFrame f = skyFrame();
+	for ( int c = 0; c < 3; c++ ) {
+		horizon[c] = f.hz[c];
+		lower[c] = f.lo[c];
+		upper[c] = f.up[c];
+	}
+	return true;
+}
