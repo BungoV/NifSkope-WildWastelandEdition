@@ -16,6 +16,10 @@
   instead of a black rectangle. Gate `tests/spells/collision_convex_cli.sh` (12 checks).
   `WW_RENDER_HULL_THIN=1` draws the collision as a thin wire with no fill, so the textured part shows under
   its hull (your own Solid collision setting is untouched).
+  `settle` now stops a landed item turning in place: the physics preview has no twisting friction where an item
+  touches the floor, so a dropped magazine spun like a top for ever. `--torsion K` (default 6 per second, 0 =
+  the old behaviour) slows that spin while it touches the floor. Only the `settle` tool; Physics Sim is
+  unchanged.
 
 - Interiors that show the sky in the game (the cell's Show Sky flag, e.g. the Museum of Freedom) now get
   daylight from the sky in the bounce light: rays that leave through windows and holes count as sky, and in

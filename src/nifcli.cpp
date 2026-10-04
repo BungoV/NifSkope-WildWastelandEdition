@@ -5585,17 +5585,22 @@ int cmdSet( const QString & file, int block, const QString & path,
  *    sink   = how far the lowest hull point is below the floor (worst of the last second)
  *    jitter = the largest per-frame move of the centre of mass in the last second
  *    tilt   = the largest per-frame swing in the last second (degrees): rocking or rolling
- *    yaw    = the largest per-frame turn about the vertical, REPORTED only: the sim has
- *             no torsional contact friction, so a spun item keeps turning in place
+ *    yaw    = the largest per-frame turn about the vertical, REPORTED only
  *    settledAt = the first time after which the centre never moves faster than
  *                1 game unit per second again
  *  --frames DIR writes the input file once per output frame with the root node posed
  *  where the body is, for a frame-by-frame NifSkope render of the drop.
+ *  --torsion K (default 6, per second; 0 = off): RagdollSim has no torsional contact
+ *  friction, so an item lying on the floor kept turning in place for ever (MAGDROP1's
+ *  first clips: a 10mm magazine at 400 deg/s after it landed). Havok's contact patch
+ *  stops that; this stand-in decays the vertical spin by K per second while the item
+ *  touches the floor (lowest point within 5 mm). Settle command only, not the Physics
+ *  Sim mode.
  */
 int cmdSettle( const QStringList & args )
 {
 	QString in, framesDir;
-	float height = 0.6f, seconds = 5.0f, fps = 30.0f;
+	float height = 0.6f, seconds = 5.0f, fps = 30.0f, torsion = 6.0f;
 	Vector3 spin( 2.0f, 3.0f, 0.0f );
 	for ( int i = 0; i < args.size(); i++ ) {
 		const QString & t = args.at( i );
@@ -5604,6 +5609,7 @@ int cmdSettle( const QStringList & args )
 		else if ( t == QLatin1String( "--seconds" ) ) seconds = next().toFloat();
 		else if ( t == QLatin1String( "--fps" ) ) fps = next().toFloat();
 		else if ( t == QLatin1String( "--frames" ) ) framesDir = next();
+		else if ( t == QLatin1String( "--torsion" ) ) torsion = next().toFloat();
 		else if ( t == QLatin1String( "--spin" ) ) {
 			const QStringList c = next().split( QLatin1Char( ',' ) );
 			if ( c.size() == 3 ) spin = Vector3( c[0].toFloat(), c[1].toFloat(), c[2].toFloat() );
@@ -5611,7 +5617,7 @@ int cmdSettle( const QStringList & args )
 		else { err() << "error: settle: unknown argument " << t << Qt::endl; return 2; }
 	}
 	if ( in.isEmpty() || !( fps > 0.0f ) || !( seconds > 1.0f ) ) {
-		err() << "usage: settle F [--height M] [--seconds S>1] [--spin x,y,z] [--fps N] [--frames DIR]" << Qt::endl;
+		err() << "usage: settle F [--height M] [--seconds S>1] [--spin x,y,z] [--fps N] [--frames DIR] [--torsion K]" << Qt::endl;
 		return 2;
 	}
 	NifModel nif;
@@ -5680,6 +5686,10 @@ int cmdSettle( const QStringList & args )
 	writeFrame();
 	for ( int s = 1; s <= total; s++ ) {
 		sim.step( dt, 8 );
+		if ( torsion > 0.0f && sim.lowestPoint() <= 0.005f ) {
+			SimBody & tb = sim.bodies()[0];	// w is world space: [2] is the spin about the floor normal
+			tb.w[2] *= std::max( 0.0f, 1.0f - torsion * dt );
+		}
 		const SimBody & sb = sim.bodies()[0];
 		if ( !std::isfinite( sb.x[0] ) || !std::isfinite( sb.x[2] ) ) {
 			out() << "settle FAIL diverged at step " << s << Qt::endl;
