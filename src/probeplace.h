@@ -31,6 +31,9 @@
 #include <QtGlobal>
 #include <vector>
 
+#include "probeemit.h"
+#include "probemask.h"
+
 //! The triangles the probes see, plus the door boxes that only tag apertures.
 struct ProbeSoup
 {
@@ -120,6 +123,25 @@ struct ProbeSoup
 		twoSided.back() = 1;
 	}
 	bool isTwoSided( size_t tri ) const { return tri < twoSided.size() && twoSided[tri]; }
+	/*! lane ALPHATEST1: the alpha-tested triangles' masks (probemask.h): a ray through a texel under the
+	 *  material's threshold passes on. Empty = none (every trace as before). The soup file carries it as an
+	 *  optional 'AMK1' tail after 'TWO1' (the maps as bytes, so a soup read back traces the same). */
+	probebvh::AlphaMask amask;
+	void markLastMasked( int map, quint8 thr, const float uv[6], int model )
+	{
+		amask.triOf.resize( size_t( triCount() ), -1 );
+		probebvh::AlphaMask::Tri t;
+		t.map = map;
+		t.thr = thr;
+		t.model = model;
+		for ( int k = 0; k < 6; k++ )
+			t.uv[k] = uv[k];
+		amask.triOf.back() = int( amask.tris.size() );
+		amask.tris.push_back( t );
+	}
+	/*! lane EMISSIVEGI1: the triangles that glow (probeemit.h). Written as the optional 'EMT1' tail (only when any
+	 *  triangle glows), so a soup with nothing glowing stays byte for byte as before. */
+	ProbeEmit glow;   // not "emit": a Qt macro
 };
 
 //! Lane BAKE4: one box of an enclosed room's air (world units), what `.tbk` v4 writes for the

@@ -75,6 +75,18 @@ const DDSTexture16 * ProbeAlbedo::load( const QString & texIn, int cap )
 	const auto it = cache.constFind( key );
 	if ( it != cache.constEnd() )
 		return *it;
+	DDSTexture16 * tex = decode( texIn, cap );
+	if ( cap > 64 )
+		finesRead += tex ? 1 : 0;
+	else
+		( tex ? texturesRead : texturesMissing )++;
+	cache.insert( key, tex );
+	return tex;
+}
+
+// the map at its largest mip of at most `cap` texels across (a material path: its diffuse slot); null = unread
+DDSTexture16 * ProbeAlbedo::decode( const QString & texIn, int cap )
+{
 	QString path = texIn;
 	path.replace( QChar( '\\' ), QChar( '/' ) );
 	if ( path.endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive ) ) {
@@ -108,17 +120,57 @@ const DDSTexture16 * ProbeAlbedo::load( const QString & texIn, int cap )
 			tex = nullptr;
 		}
 	}
-	if ( cap > 64 )
-		finesRead += tex ? 1 : 0;
-	else
-		( tex ? texturesRead : texturesMissing )++;
-	cache.insert( key, tex );
 	return tex;
 }
 
 const DDSTexture16 * ProbeAlbedo::loadFine( const QString & tex )
 {
 	return tex.isEmpty() ? nullptr : load( tex, 512 );
+}
+
+bool ProbeAlbedo::alphaBytes( const QString & tex, int * w, int * h, std::vector<unsigned char> * a, int * minA )
+{
+	if ( tex.isEmpty() )
+		return false;
+	DDSTexture16 * t = decode( tex, 1024 );
+	if ( !t )
+		return false;
+	*w = t->getWidth();
+	*h = t->getHeight();
+	a->assign( size_t( *w ) * size_t( *h ), 255 );
+	int mn = 255;
+	for ( int y = 0; y < *h; y++ )
+		for ( int x = 0; x < *w; x++ ) {
+			// RGBA float16, alpha in the top 16 bits; alpha is never sRGB
+			const float af = FloatVector4::convertFloat16( t->getPixelN( x, y, 0 ) )[3];
+			const int v = int( std::lround( std::clamp( af, 0.0f, 1.0f ) * 255.0f ) );
+			( *a )[size_t( y ) * size_t( *w ) + size_t( x )] = (unsigned char)( v );
+			mn = std::min( mn, v );
+		}
+	delete t;
+	*minA = mn;
+	return true;
+}
+
+bool ProbeAlbedo::rgbBytes( const QString & tex, int * w, int * h, std::vector<unsigned char> * rgb )
+{
+	if ( tex.isEmpty() )
+		return false;
+	DDSTexture16 * t = decode( tex, 1024 );
+	if ( !t )
+		return false;
+	*w = t->getWidth();
+	*h = t->getHeight();
+	rgb->assign( size_t( *w ) * size_t( *h ) * 3, 0 );
+	for ( int y = 0; y < *h; y++ )
+		for ( int x = 0; x < *w; x++ ) {
+			const FloatVector4 c = FloatVector4::convertFloat16( t->getPixelN( x, y, 0 ) );
+			for ( int k = 0; k < 3; k++ )
+				( *rgb )[( size_t( y ) * size_t( *w ) + size_t( x ) ) * 3 + size_t( k )]
+					= (unsigned char)( std::lround( std::clamp( c[k], 0.0f, 1.0f ) * 255.0f ) );
+		}
+	delete t;
+	return true;
 }
 
 void ProbeAlbedo::sizeOf( const DDSTexture16 * t, int * w, int * h )

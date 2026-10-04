@@ -189,9 +189,11 @@ struct Bin
 	quint32 n = 0;
 	double alb2[3] = { 0, 0, 0 }, nrm2[3] = { 0, 0, 0 };   // lane CAPTURE1: the hit way's samples
 	quint32 n2 = 0;
+	double le[3] = { 0, 0, 0 };   // lane EMISSIVEGI1: the summed emitted light (linear) of the hits that glowed
 	void add( const Bin & o )
 	{
 		for ( int k = 0; k < 3; k++ ) {
+			le[k] += o.le[k];
 			pos[k] += o.pos[k];
 			nrm[k] += o.nrm[k];
 			alb[k] += o.alb[k];
@@ -217,7 +219,19 @@ struct Final
 {
 	TbkSurfel rec;
 	double n[3];    //!< the stored (quantized) normal, what the facing rule tests
+	bool emits = false;               //!< lane EMISSIVEGI1: some hit in the cell's side glowed
+	float le[3] = { 0, 0, 0 };        //!< the mean emitted light over the side's hits (linear)
 };
+
+/* lane EMISSIVEGI1: the `.tbk` v4 emissive tail, after the room boxes, only when a surfel glows (header
+ * reserved[3] = its count; reserved[2] already holds what was modelled): the surfel's index in its list
+ * (top bit = the back surfels' list) and its mean emitted light, linear. */
+struct TbkEmit
+{
+	quint32 surfel;
+	float le[3];
+};
+static_assert( sizeof( TbkEmit ) == 16, "tbk emit" );
 typedef std::unordered_map<Key, Final, KeyHash> FinalMap;
 
 inline void unpackDir( const qint16 in[2], double v[3] )
@@ -280,6 +294,7 @@ struct Chunk
 	qint64 turned = 0;          // links refused by the facing rule
 	qint64 back = 0, door = 0, tinted = 0;   // v4 links: to a back surfel, through a door, through glass
 	qint64 decal = 0, surfHits = 0;          // lane GICAL1: surfel hits under a decal; all surfel hits
+	qint64 emitHits = 0;        // lane EMISSIVEGI1: pass-1 hits on a glowing triangle
 };
 
 } // namespace
@@ -314,6 +329,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	// lane GICAL1: decals folded into the albedo (the tri way's)
 	const bool decalOn = albKnown && !soup.decal.empty() && soup.decalA.size() * 9 == soup.decal.size() * 4;
 	R.decalTris = decalOn ? int( soup.decal.size() / 9 ) : 0;
+	const bool glowOn = !soup.glow.empty();   // lane EMISSIVEGI1: no glowing triangle = every byte as before
+	R.emitTris = int( soup.glow.tris.size() );
 	R.doors = int( soup.doors.size() );
 	// lane CAPTURE1: the albedo way (tri = today; hit and cube need the soup's per-triangle material)
 	const bool matOk = albKnown && qint64( soup.mat.size() ) == soup.triCount();
@@ -345,6 +362,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		bvh.t[i + 2] = soup.tris[i + 2];
 	}
 	bvh.build();
+	bvh.mask = &soup.amask;   // lane ALPHATEST1: a ray through an alpha-test hole passes on (no surfel there)
 	// lane BAKE4: the glass in its own tree (it holds no surfel and stops no ray), the doors local
 	probebvh::Bvh gbvh;
 	if ( glassOn ) {
@@ -746,6 +764,28 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					s.alb[k] += dA > 0 ? a0 * ( 1.0 - dA ) + soup.decalA[size_t( dt ) * 4 + size_t( k )] / 255.0 * dA : a0;
 				}
 				s.n++;
+				if ( glowOn && soup.glow.emits( tri ) ) {   // lane EMISSIVEGI1: the hit's own emitted light
+					const float * T = &bvh.t[size_t( tri ) * 9];
+					const double e1[3] = { double( T[3] ) - T[0], double( T[4] ) - T[1], double( T[5] ) - T[2] };
+					const double e2[3] = { double( T[6] ) - T[0], double( T[7] ) - T[1], double( T[8] ) - T[2] };
+					const double v[3] = { o[0] + d[0] * t - T[0], o[1] + d[1] * t - T[1], o[2] + d[2] * t - T[2] };
+					const double d00 = e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2];
+					const double d01 = e1[0] * e2[0] + e1[1] * e2[1] + e1[2] * e2[2];
+					const double d11 = e2[0] * e2[0] + e2[1] * e2[1] + e2[2] * e2[2];
+					const double d20 = v[0] * e1[0] + v[1] * e1[1] + v[2] * e1[2];
+					const double d21 = v[0] * e2[0] + v[1] * e2[1] + v[2] * e2[2];
+					const double den = d00 * d11 - d01 * d01;
+					double b1 = 1.0 / 3, b2 = 1.0 / 3;
+					if ( std::fabs( den ) > 0 ) {
+						b1 = std::clamp( ( d11 * d20 - d01 * d21 ) / den, 0.0, 1.0 );
+						b2 = std::clamp( ( d00 * d21 - d01 * d20 ) / den, 0.0, 1.0 - b1 );
+					}
+					double L[3];
+					soup.glow.le( tri, b1, b2, L );
+					for ( int k = 0; k < 3; k++ )
+						s.le[k] += L[k];
+					ch.emitHits++;
+				}
 				if ( wayHit ) {   // lane CAPTURE1: the hit's own point
 					const double p[3] = { o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t };
 					double a2[3], n2[3];
@@ -1000,6 +1040,11 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			sr.albedo[c] = quint8( std::lround( std::clamp( a.alb[c] / a.n, 0.0, 1.0 ) * 255.0 ) );
 		}
 		sr.samples = a.n;
+		if ( a.le[0] > 0 || a.le[1] > 0 || a.le[2] > 0 ) {   // lane EMISSIVEGI1
+			f.emits = true;
+			for ( int c = 0; c < 3; c++ )
+				f.le[c] = float( a.le[c] / a.n );
+		}
 		const double ql = std::sqrt( double( sr.normal[0] ) * sr.normal[0] + double( sr.normal[1] ) * sr.normal[1]
 			+ double( sr.normal[2] ) * sr.normal[2] );
 		for ( int c = 0; c < 3; c++ )
@@ -1104,6 +1149,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	runAll( probeChunk );
 	for ( const Chunk & ch : chunks ) {
 		R.hits += ch.hits;
+		R.emitHits += ch.emitHits;
 		R.misses += ch.misses;
 		R.linksTurned += ch.turned;
 		R.linksSpilled += ch.spilled;
@@ -1445,15 +1491,35 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			}
 		}
 		std::vector<TbkSurfel> sfs, bks;
+		std::vector<TbkEmit> ems;   // lane EMISSIVEGI1
+		auto emitOf = [&]( const Final & fl, quint32 idx ) {
+			if ( !fl.emits )
+				return;
+			TbkEmit e;
+			e.surfel = idx;
+			for ( int c = 0; c < 3; c++ ) {
+				e.le[c] = fl.le[c];
+				R.emitLeSum[c] += fl.le[c];
+			}
+			ems.push_back( e );
+		};
 		for ( const auto & u : used ) {
 			const auto it = fin.find( u.first );
-			if ( it != fin.end() )
+			if ( it != fin.end() ) {
+				emitOf( it->second, quint32( sfs.size() ) );
 				sfs.push_back( it->second.rec );
+			}
 		}
 		for ( const auto & u : usedBack ) {
 			const auto it = backFin.find( u.first );
-			if ( it != backFin.end() )
+			if ( it != backFin.end() ) {
+				emitOf( it->second, quint32( bks.size() ) | 0x80000000u );
 				bks.push_back( it->second.rec );
+			}
+		}
+		if ( !v4 ) {   // v3 (FO4CS's file) has no place for it
+			R.emitDropped += int( ems.size() );
+			ems.clear();
 		}
 		std::vector<TbkRoomBox> bxs;
 		if ( v4 && roomBoxes && !redRooms )
@@ -1475,6 +1541,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			h.reserved[1] = quint32( bxs.size() );
 			h.reserved[2] = ( redOneSide ? 0u : 1u ) | ( roomBoxes && !redRooms ? 2u : 0u ) | ( doorBoxes.empty() ? 0u : 4u )
 				| ( glassOn ? 8u : 0u );
+			h.reserved[3] = quint32( ems.size() );   // lane EMISSIVEGI1 (0: no tail)
 		}
 		h.cellX = sec.first.first;
 		h.cellY = sec.first.second;
@@ -1500,7 +1567,10 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			f.write( reinterpret_cast<const char *>( lex.data() ), qint64( lex.size() * sizeof( TbkLinkExt ) ) );
 			f.write( reinterpret_cast<const char *>( pex.data() ), qint64( pex.size() * sizeof( TbkProbeExt ) ) );
 			f.write( reinterpret_cast<const char *>( bxs.data() ), qint64( bxs.size() * sizeof( TbkRoomBox ) ) );
+			if ( !ems.empty() )   // lane EMISSIVEGI1
+				f.write( reinterpret_cast<const char *>( ems.data() ), qint64( ems.size() * sizeof( TbkEmit ) ) );
 		}
+		R.emitSurfels += int( ems.size() );
 		f.close();
 		R.files.append( path );
 		R.sectors++;
@@ -1541,6 +1611,12 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 	if ( r.decalTris > 0 )   // lane GICAL1
 		t << "bake: decals folded into the albedo: " << r.decalTris << " triangles, " << r.decalHits << " of " << r.surfelHits
 		  << " surfel hits under one\n";
+	if ( r.emitTris )   // lane EMISSIVEGI1
+		t << "bake: emissive: glowing triangles " << r.emitTris << ", pass-1 hits on them " << r.emitHits
+		  << ", surfels that glow (written) " << r.emitSurfels << ", their Le summed (linear) "
+		  << QString::number( r.emitLeSum[0], 'g', 6 ) << "," << QString::number( r.emitLeSum[1], 'g', 6 ) << ","
+		  << QString::number( r.emitLeSum[2], 'g', 6 ) << ( r.emitDropped ? ", DROPPED by v3 " : "" )
+		  << ( r.emitDropped ? QString::number( r.emitDropped ) : QString() ) << "\n";
 	// lane ROOMCLAMP1: probes outside the shell
 	t << "bake: outside the shell (back-face share over " << QString::number( r.backMax, 'f', 2 )
 	  << ( r.backRule ? "" : ", RULE OFF" ) << "): moved " << r.backMoved << ", dropped " << r.backDropped

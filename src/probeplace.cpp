@@ -216,6 +216,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 		zMax = std::max( zMax, soup.tris[i + 2] );
 	}
 	bvh.build();
+	bvh.mask = &soup.amask;   // lane ALPHATEST1: a ray through an alpha-test hole passes on
 	R.msBvh = double( tm.nsecsElapsed() ) / 1e6;
 
 	// local-space ray, from -> to; distance along it on a hit
@@ -1389,6 +1390,68 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
 		f.write( reinterpret_cast<const char *>( ts.data() ), qint64( ts.size() ) );
 	}
+	/* lane ALPHATEST1: the alpha-test masks (written only when any triangle has one): the maps (name, w, h,
+	 * w*h alpha bytes), the model names, then 40 bytes a masked triangle (u32 triangle, i32 map, i32 model,
+	 * u32 threshold, 6 f32 uv) */
+	if ( !soup.amask.empty() ) {
+		auto u32 = [&]( quint32 v ) { f.write( reinterpret_cast<const char *>( &v ), 4 ); };
+		auto str = [&]( const std::string & s ) {
+			u32( quint32( s.size() ) );
+			f.write( s.data(), qint64( s.size() ) );
+		};
+		const quint32 tail[2] = { 0x314B4D41u /* 'AMK1' */, quint32( soup.amask.tris.size() ) };
+		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		u32( quint32( soup.amask.maps.size() ) );
+		for ( size_t m = 0; m < soup.amask.maps.size(); m++ ) {
+			str( m < soup.amask.mapNames.size() ? soup.amask.mapNames[m] : std::string() );
+			u32( quint32( soup.amask.maps[m].w ) );
+			u32( quint32( soup.amask.maps[m].h ) );
+			f.write( reinterpret_cast<const char *>( soup.amask.maps[m].a.data() ), qint64( soup.amask.maps[m].a.size() ) );
+		}
+		u32( quint32( soup.amask.models.size() ) );
+		for ( const std::string & s : soup.amask.models )
+			str( s );
+		for ( size_t i = 0; i < soup.amask.triOf.size(); i++ ) {
+			if ( soup.amask.triOf[i] < 0 )
+				continue;
+			const probebvh::AlphaMask::Tri & t = soup.amask.tris[size_t( soup.amask.triOf[i] )];
+			u32( quint32( i ) );
+			u32( quint32( t.map ) );
+			u32( quint32( t.model ) );
+			u32( t.thr );
+			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
+		}
+	}
+	/* lane EMISSIVEGI1: the glowing triangles (written only when any glows): the glow maps (name, w, h, w*h*3 RGB
+	 * bytes as stored), the emitters (3 f32 glowColor x glowMult, i32 map or -1 = the whole surface), then 32 bytes
+	 * a glowing triangle (u32 triangle, i32 emitter, 6 f32 uv) */
+	if ( !soup.glow.empty() ) {
+		auto u32 = [&]( quint32 v ) { f.write( reinterpret_cast<const char *>( &v ), 4 ); };
+		const quint32 tail[2] = { 0x31544D45u /* 'EMT1' */, quint32( soup.glow.tris.size() ) };
+		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		u32( quint32( soup.glow.maps.size() ) );
+		for ( size_t m = 0; m < soup.glow.maps.size(); m++ ) {
+			const std::string nm = m < soup.glow.mapNames.size() ? soup.glow.mapNames[m] : std::string();
+			u32( quint32( nm.size() ) );
+			f.write( nm.data(), qint64( nm.size() ) );
+			u32( quint32( soup.glow.maps[m].w ) );
+			u32( quint32( soup.glow.maps[m].h ) );
+			f.write( reinterpret_cast<const char *>( soup.glow.maps[m].rgb.data() ), qint64( soup.glow.maps[m].rgb.size() ) );
+		}
+		u32( quint32( soup.glow.emitters.size() ) );
+		for ( const ProbeEmit::Emitter & em : soup.glow.emitters ) {
+			f.write( reinterpret_cast<const char *>( em.e ), 12 );
+			u32( quint32( em.map ) );
+		}
+		for ( size_t i = 0; i < soup.glow.triOf.size(); i++ ) {
+			if ( soup.glow.triOf[i] < 0 )
+				continue;
+			const ProbeEmit::Tri & t = soup.glow.tris[size_t( soup.glow.triOf[i] )];
+			u32( quint32( i ) );
+			u32( quint32( t.emitter ) );
+			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
+		}
+	}
 	return true;
 }
 
@@ -1451,6 +1514,128 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		soup->twoSided.resize( size_t( tail[1] ) );
 		if ( f.read( reinterpret_cast<char *>( soup->twoSided.data() ), qint64( tail[1] ) ) != qint64( tail[1] ) )
 			soup->twoSided.clear();
+		more = f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+	}
+	// lane ALPHATEST1: the optional alpha-test masks (a short or broken tail leaves every face solid)
+	soup->amask = probebvh::AlphaMask();
+	if ( more && tail[0] == 0x314B4D41u ) {
+		probebvh::AlphaMask am;
+		bool ok = true;
+		auto u32 = [&]( quint32 * v ) { ok = ok && f.read( reinterpret_cast<char *>( v ), 4 ) == 4; return *v; };
+		auto str = [&]( std::string * s ) {
+			quint32 n = 0;
+			u32( &n );
+			if ( !ok || n > 4096 ) {
+				ok = false;
+				return;
+			}
+			s->resize( n );
+			ok = f.read( s->data(), qint64( n ) ) == qint64( n );
+		};
+		quint32 nm = 0;
+		u32( &nm );
+		for ( quint32 m = 0; ok && m < nm; m++ ) {
+			std::string name;
+			str( &name );
+			quint32 w = 0, h = 0;
+			u32( &w );
+			u32( &h );
+			if ( !ok || !w || !h || w > 16384 || h > 16384 ) {
+				ok = false;
+				break;
+			}
+			probebvh::AlphaMask::Map mp;
+			mp.w = int( w );
+			mp.h = int( h );
+			mp.a.resize( size_t( w ) * h );
+			ok = f.read( reinterpret_cast<char *>( mp.a.data() ), qint64( mp.a.size() ) ) == qint64( mp.a.size() );
+			am.maps.push_back( std::move( mp ) );
+			am.mapNames.push_back( name );
+		}
+		quint32 nmod = 0;
+		u32( &nmod );
+		for ( quint32 m = 0; ok && m < nmod; m++ ) {
+			std::string name;
+			str( &name );
+			am.models.push_back( name );
+		}
+		am.triOf.assign( size_t( head[1] ), -1 );
+		for ( quint32 i = 0; ok && i < tail[1]; i++ ) {
+			quint32 tri = 0, map = 0, model = 0, thr = 0;
+			u32( &tri );
+			u32( &map );
+			u32( &model );
+			u32( &thr );
+			probebvh::AlphaMask::Tri t;
+			ok = ok && f.read( reinterpret_cast<char *>( t.uv ), 24 ) == 24 && tri < head[1] && map < nm;
+			if ( !ok )
+				break;
+			t.map = int( map );
+			t.model = int( model );
+			t.thr = quint8( std::min( thr, 255u ) );
+			am.triOf[tri] = int( am.tris.size() );
+			am.tris.push_back( t );
+		}
+		if ( ok )
+			soup->amask = std::move( am );
+		more = ok && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+	}
+	// lane EMISSIVEGI1: the optional glowing triangles (a short or broken tail leaves nothing glowing)
+	soup->glow = ProbeEmit();
+	if ( more && tail[0] == 0x31544D45u ) {
+		ProbeEmit ge;
+		bool ok = true;
+		auto u32 = [&]( quint32 * v ) { ok = ok && f.read( reinterpret_cast<char *>( v ), 4 ) == 4; return *v; };
+		quint32 nm = 0;
+		u32( &nm );
+		for ( quint32 m = 0; ok && m < nm; m++ ) {
+			quint32 n = 0, w = 0, h = 0;
+			u32( &n );
+			if ( !ok || n > 4096 ) {
+				ok = false;
+				break;
+			}
+			std::string name( n, '\0' );
+			ok = f.read( name.data(), qint64( n ) ) == qint64( n );
+			u32( &w );
+			u32( &h );
+			if ( !ok || !w || !h || w > 16384 || h > 16384 ) {
+				ok = false;
+				break;
+			}
+			ProbeEmit::Map mp;
+			mp.w = int( w );
+			mp.h = int( h );
+			mp.rgb.resize( size_t( w ) * h * 3 );
+			ok = f.read( reinterpret_cast<char *>( mp.rgb.data() ), qint64( mp.rgb.size() ) ) == qint64( mp.rgb.size() );
+			ge.maps.push_back( std::move( mp ) );
+			ge.mapNames.push_back( name );
+		}
+		quint32 ne = 0;
+		u32( &ne );
+		for ( quint32 i = 0; ok && i < ne; i++ ) {
+			ProbeEmit::Emitter em;
+			quint32 map = 0;
+			ok = f.read( reinterpret_cast<char *>( em.e ), 12 ) == 12;
+			u32( &map );
+			em.map = int( map );
+			ok = ok && em.map < int( nm );
+			ge.emitters.push_back( em );
+		}
+		for ( quint32 i = 0; ok && i < tail[1]; i++ ) {
+			quint32 tri = 0, emi = 0;
+			u32( &tri );
+			u32( &emi );
+			float uv[6];
+			ok = ok && f.read( reinterpret_cast<char *>( uv ), 24 ) == 24 && tri < head[1] && emi < ne;
+			if ( !ok )
+				break;
+			ge.markLast( tri, int( emi ), uv );
+		}
+		if ( ok ) {
+			ge.triOf.resize( size_t( head[1] ), -1 );
+			soup->glow = std::move( ge );
+		}
 	}
 	return true;
 }
