@@ -41,11 +41,36 @@ Reds (each must FAIL its targets):
 """
 import math
 import os
-import resource
 import sys
 import time
 
 import numpy as np
+
+try:
+    import resource  # Unix: peak RSS from getrusage (KB on Linux)
+
+    def peak_mb():
+        return peak_mb()
+except ImportError:  # Windows (lane FARVIEW1): no 'resource'; the peak working set from the process' own counters
+    import ctypes
+    import ctypes.wintypes as _wt
+
+    class _PMC(ctypes.Structure):
+        _fields_ = [('cb', _wt.DWORD), ('PageFaultCount', _wt.DWORD), ('PeakWorkingSetSize', ctypes.c_size_t),
+                    ('WorkingSetSize', ctypes.c_size_t), ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
+                    ('QuotaPagedPoolUsage', ctypes.c_size_t), ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
+                    ('QuotaNonPagedPoolUsage', ctypes.c_size_t), ('PagefileUsage', ctypes.c_size_t),
+                    ('PeakPagefileUsage', ctypes.c_size_t)]
+
+    def peak_mb():
+        c = _PMC()
+        c.cb = ctypes.sizeof(c)
+        k32 = ctypes.windll.kernel32
+        k32.GetCurrentProcess.restype = ctypes.c_void_p   # the pseudo-handle -1: an int return would truncate it
+        k32.K32GetProcessMemoryInfo.argtypes = [ctypes.c_void_p, ctypes.POINTER(_PMC), _wt.DWORD]
+        if not k32.K32GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(c), c.cb):
+            return 0.0
+        return c.PeakWorkingSetSize / (1024 * 1024)
 
 # ---------------------------------------------------------------- the camera, the lamp, the band (parameters)
 F_PX = 960.0 / math.tan(math.radians(35.0))   # 1920 px across 70 degrees
@@ -373,7 +398,7 @@ def main():
     verdict = green_ok and reds_ok
     print('\nFARVIEW1b dots %s: green %s, reds %s; %.0f s, peak memory %.0f MB'
           % ('PASS' if verdict else 'FAIL', 'PASS' if green_ok else 'FAIL', 'all fail' if reds_ok else 'NOT all fail',
-             time.time() - t_start, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024))
+             time.time() - t_start, peak_mb()))
     sys.exit(0 if verdict else 1)
 
 
