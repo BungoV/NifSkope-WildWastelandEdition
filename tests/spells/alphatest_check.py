@@ -23,7 +23,12 @@ hole test is map alpha x the interpolated scale < threshold, as the renderer's. 
 green scales, must FAIL it wherever a scaled texel decides.
 
 usage: python alphatest_check.py <run dir> [--masks <soup.psp>] [--data <data root>] [--front S --front-behind S
-       --front-gap G --corner S --corner-reach R] [--expect green|red]
+       --front-gap G --corner S --corner-reach R] [--expect green|red] [--p-digits N]
+
+Lane EDGEGAP1 (2026-10-04): the cube dump's .txt now prints each probe at 9 significant digits (the float itself).
+At the old 6 a probe at z 6302.564 read back as 6302.56: the re-trace crossed the solid StreetClock triangle
+beside the hole the bake's ray had passed (Concord, PASSSOLID 2). The red --p-digits 6 rounds the positions the
+old way and must FAIL.
 """
 import os, struct, sys
 import numpy as np
@@ -180,7 +185,7 @@ def cube_dirs(F):
     return q / np.linalg.norm(q, axis=1)[:, None]
 
 
-def read_dump(run):
+def read_dump(run, digits=None):
     meta = [l.split('\t') for l in open(os.path.join(run, 'cube.dump.txt')).read().split('\n') if l.strip()]
     b = open(os.path.join(run, 'cube.dump'), 'rb').read()
     out, p = [], 0
@@ -189,7 +194,10 @@ def read_dump(run):
         rgb = np.frombuffer(b, 'u1', NP * 3, p).reshape(NP, 3); p += NP * 3
         dist = np.frombuffer(b, '<f4', NP, p).astype(np.float64); p += NP * 4
         p += NP * 4 + NP * 12
-        out.append((int(m[0]), np.array([float(m[1]), float(m[2]), float(m[3])]), F, rgb, dist))
+        P = [float(m[1]), float(m[2]), float(m[3])]
+        if digits:   # lane EDGEGAP1's red: the probe as the old 6-digit dump printed it
+            P = [float('%.*g' % (digits, x)) for x in P]
+        out.append((int(m[0]), np.array(P), F, rgb, dist))
     return out
 
 
@@ -270,7 +278,10 @@ def main(argv):
     FACES = [((1, 0, 0), (0, -1, 0), (0, 0, 1)), ((0, -1, 0), (-1, 0, 0), (0, 0, 1)),
              ((-1, 0, 0), (0, 1, 0), (0, 0, 1)), ((0, 1, 0), (1, 0, 0), (0, 0, 1)),
              ((0, 0, 1), (0, -1, 0), (-1, 0, 0)), ((0, 0, -1), (0, -1, 0), (1, 0, 0))]
-    for pi, P, F, rgb, dist in read_dump(run):
+    digits = int(opt['--p-digits']) if '--p-digits' in opt else None
+    if digits:
+        say('RED --p-digits %d: probe positions rounded to %d significant digits' % (digits, digits))
+    for pi, P, F, rgb, dist in read_dump(run, digits):
         D = cube_dirs(F)
         hitd = np.where(dist > 0, dist, np.inf)
         first_t = np.full(len(D), np.inf); first_k = np.full(len(D), -1)

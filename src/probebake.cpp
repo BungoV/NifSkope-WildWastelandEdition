@@ -1647,6 +1647,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			QFile tf( spec.cubeDump + QStringLiteral( ".txt" ) );
 			if ( tf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
 				QTextStream ts( &tf );
+				/* lane EDGEGAP1: 9 significant digits = the float itself. At the default 6 a probe at z 6302.564 read
+				 * back as 6302.56 and the gate's re-trace crossed the triangle next to the one the bake's ray met */
+				ts.setRealNumberPrecision( 9 );
 				for ( const int pi : cubeDumpProbes )
 					if ( pi >= 0 && size_t( pi ) < probes.size() )
 						ts << pi << "\t" << probes[size_t( pi )].pos[0] << "\t" << probes[size_t( pi )].pos[1] << "\t"
