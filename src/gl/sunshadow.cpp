@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "sunshadow.h"
+#include "gametaa.h"
 
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -369,7 +370,16 @@ static void sunShadowPassImpl( Scene * scene )
 		return;
 	}
 	Renderer * r = scene->renderer;
-	const auto & P = r->globalUniforms->projectionMatrix;
+	// lane MOTION1: the fit reads the UNJITTERED projection, so the temporal AA's sub-pixel jitter never moves a cascade
+	const auto & Pg = r->globalUniforms->projectionMatrix;
+	FloatVector4 Pfit[4] = { Pg[0], Pg[1], Pg[2], Pg[3] };
+	Matrix4 Pu;
+	if ( wwGameTaaUnjittered( Pu ) ) {
+		const float * u = Pu.data();	// column-major, as uploaded
+		for ( int c = 0; c < 4; c++ )
+			Pfit[c] = FloatVector4( u[c * 4 + 0], u[c * 4 + 1], u[c * 4 + 2], u[c * 4 + 3] );
+	}
+	const auto & P = Pfit;
 	if ( P[3][3] == 1.0f ) {
 		s.last = QStringLiteral( "refused(orthographic view)" );
 		return;

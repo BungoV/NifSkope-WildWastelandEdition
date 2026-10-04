@@ -223,6 +223,8 @@ HEADERS += \
 	src/gl/scenelighting.h \
 	src/gl/lookdevstage.h \
 	src/gl/sunshadow.h \
+	src/gl/gametaa.h \
+	src/gl/campath.h \
 	src/gl/celllights.h \
 	src/gl/cellfxlit.h \
 	src/gl/cellhdr.h \
@@ -440,6 +442,8 @@ SOURCES += \
 	src/gl/scenelighting.cpp \
 	src/gl/lookdevstage.cpp \
 	src/gl/sunshadow.cpp \
+	src/gl/gametaa.cpp \
+	src/gl/campath.cpp \
 	src/gl/celllights.cpp \
 	src/gl/cellfxlit.cpp \
 	src/gl/cellhdr.cpp \

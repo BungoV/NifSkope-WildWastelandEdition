@@ -45,6 +45,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
+#include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA
 #include "impostorchunk.h"
 #include "impostorpreviewtest.h"
 #include "gl/glshape.h"
@@ -3551,7 +3552,7 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 	GLdouble nr = std::fabs( bs.center[2] ) - bounds * 1.5;
 	GLdouble fr = std::fabs( bs.center[2] ) + bounds * 1.5;
 
-	if ( perspectiveMode || (view == ViewWalk) ) {
+	if ( perspectiveMode || (view == ViewWalk) || wwPathActive ) {
 		// Perspective View
 		if ( nr > fr ) {
 			// add: swap them when needed
@@ -3561,14 +3562,20 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		// ensure distance
 		fr = std::max< GLdouble >( fr, nr + scale() );
 
-		GLdouble h2 = std::tan( ( cfg.fov / Zoom ) / 360 * M_PI ) * nr;
+		// lane MOTION1: the path camera's own fov
+		const GLdouble fovDeg = wwPathActive ? GLdouble( wwPathFov ) : GLdouble( cfg.fov / Zoom );
+		GLdouble h2 = std::tan( fovDeg / 360 * M_PI ) * nr;
 		GLdouble w2 = h2 * aspect;
-		scene->renderer->setProjectionMatrix( Matrix4::fromFrustum( -w2, +w2, -h2, +h2, nr, fr ) );
+		Matrix4 P = Matrix4::fromFrustum( -w2, +w2, -h2, +h2, nr, fr );
+		wwGameTaaJitterProjection( scene, P );	// lane MOTION1: inert unless the TAA row is on and paintGL armed it
+		scene->renderer->setProjectionMatrix( P );
 	} else {
 		// Orthographic View
 		GLdouble h2 = Dist / Zoom;
 		GLdouble w2 = h2 * aspect;
-		scene->renderer->setProjectionMatrix( Matrix4::fromOrtho( -w2, +w2, -h2, +h2, nr, fr ) );
+		Matrix4 P = Matrix4::fromOrtho( -w2, +w2, -h2, +h2, nr, fr );
+		wwGameTaaJitterProjection( scene, P );
+		scene->renderer->setProjectionMatrix( P );
 	}
 }
 
@@ -3835,8 +3842,10 @@ void GLView::paintGL()
 	applyWorkspaceSkeleton( viewTrans );
 	scene->transform( viewTrans, time );
 
-	// Setup projection mode
+	// Setup projection mode (lane MOTION1: the one projection a frame the temporal AA jitters)
+	wwGameTaaArmJitter( true );
 	glProjection();
+	wwGameTaaArmJitter( false );
 
 	cx->setViewTransform( scene->view, int( cfg.upAxis ), envMapRotation );
 	auto &	globalUniforms = *( cx->globalUniforms );
@@ -4061,6 +4070,9 @@ void GLView::paintGL()
 			scene->draw();
 			if ( hdr )
 				wwCellHdrEnd( scene );
+			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
+			if ( workspaceDrawScenes.isEmpty() )
+				wwGameTaaResolve( scene );
 			for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
 				ws->draw();
 		}
@@ -5838,6 +5850,9 @@ void GLView::paintGL()
 		postCompileRepaints--;
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 	}
+	// lane MOTION1: the temporal AA converges over a few still frames after the camera moves (never in a harness)
+	if ( wwGameTaaWantsSettle() )
+		QTimer::singleShot( 16, this, [this]() { update(); } );
 
 	emit paintUpdate();
 }
@@ -7174,9 +7189,41 @@ void GLView::drawCursorOverlay( QPainter & painter )
 	painter.drawLine( sp - QPointF( 0, t0 ), sp - QPointF( 0, t1 ) );
 }
 
+void GLView::wwSetPathCamera( bool on, const Vector3 & eye, const Vector3 & at, float fov )
+{
+	wwPathActive = on;
+	wwPathEye = eye;
+	wwPathAt = at;
+	wwPathFov = fov;
+}
+
 Transform GLView::viewTransform() const
 {
 	Transform vt;
+	if ( wwPathActive ) {
+		// lane MOTION1: look-at from the path's eye to its target, world +Z up, no roll; rows = right, up, back
+		const double e[3] = { wwPathEye[0], wwPathEye[1], wwPathEye[2] };
+		double f[3] = { wwPathAt[0] - e[0], wwPathAt[1] - e[1], wwPathAt[2] - e[2] };
+		auto norm = []( double * v ) {
+			const double l = std::sqrt( v[0] * v[0] + v[1] * v[1] + v[2] * v[2] );
+			if ( l > 0.0 ) { v[0] /= l; v[1] /= l; v[2] /= l; }
+			return l;
+		};
+		if ( norm( f ) <= 0.0 ) { f[0] = 0.0; f[1] = 1.0; f[2] = 0.0; }
+		double up[3] = { 0.0, 0.0, 1.0 };
+		if ( std::fabs( f[2] ) > 0.9999 ) { up[0] = 0.0; up[1] = 1.0; up[2] = 0.0; }	// straight up or down
+		double r[3] = { f[1] * up[2] - f[2] * up[1], f[2] * up[0] - f[0] * up[2], f[0] * up[1] - f[1] * up[0] };
+		norm( r );
+		const double u[3] = { r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0] };
+		const double b[3] = { -f[0], -f[1], -f[2] };
+		const double * rows[3] = { r, u, b };
+		for ( int i = 0; i < 3; i++ ) {
+			for ( int j = 0; j < 3; j++ )
+				vt.rotation( i, j ) = float( rows[i][j] );
+			vt.translation[i] = float( -( rows[i][0] * e[0] + rows[i][1] * e[1] + rows[i][2] * e[2] ) );
+		}
+		return vt;
+	}
 	vt.rotation.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
 	vt.translation = vt.rotation * Pos;
 	if ( cfg.upAxis != ZAxis ) {

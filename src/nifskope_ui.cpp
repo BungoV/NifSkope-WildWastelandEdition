@@ -44,6 +44,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifskope.h"
 #include "starterscene.h"
 #include "harnesswindow.h"
+#include "gl/campath.h"		// lane MOTION1: WW_RENDER_PATH
+#include "gl/gametaa.h"
+#include "gl/sunshadow.h"
 #include "ui_nifskope.h"
 
 #include "bakegeom.h"
@@ -2030,6 +2033,92 @@ QStringList wwPbrmRetargetScene( Scene * sc, const QString & looseRoot )
 	return lines;
 }
 
+
+/* lane MOTION1: WW_RENDER_PATH=<file> (main.cpp maps --path <file> to it). The camera follows the path file
+ * (gl/campath.h) one fixed step a frame; the scene's own time is held where WW_RENDER_TIME put it, so only the
+ * camera moves (the temporal AA's motion vectors are the camera's alone). Frames go to <out>_000.<ext> ..;
+ * an out ending .mp4/.webm/.gif renders PNG frames and hands them to ffmpeg ($WW_FFMPEG, else ffmpeg on PATH).
+ * <out>_path.txt holds, per frame, the camera as drawn, the temporal AA's echo and the sun cascades' echo.
+ * With the temporal AA on, 16 still frames at the path's first camera run first so frame 0 is converged, and
+ * the TAA frame index is pinned (pre-roll + k), so frame k is the same picture on every run. */
+static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QString & out, float shotT )
+{
+	QFile side( QFileInfo( out ).path() + QLatin1Char( '/' ) + QFileInfo( out ).completeBaseName() + QStringLiteral( "_path.txt" ) );
+	const bool sideOk = side.open( QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate );
+	QTextStream log( &side );
+	WwCamPath path;
+	QString err;
+	if ( !path.load( pathFile, &err ) ) {
+		if ( sideOk )
+			log << "refused " << err << "\n";
+		qWarning() << "WW_RENDER_PATH:" << err;
+		return;
+	}
+	const QFileInfo fi( out );
+	const QString ext = fi.suffix().toLower();
+	const bool video = ext == QLatin1StringView( "mp4" ) || ext == QLatin1StringView( "webm" ) || ext == QLatin1StringView( "gif" );
+	const QString frameExt = video ? QStringLiteral( "png" ) : fi.suffix();
+	auto frameName = [&fi, &frameExt]( int k ) {
+		return fi.path() + QLatin1Char( '/' ) + fi.completeBaseName() + QString::asprintf( "_%03d.", k ) + frameExt;
+	};
+	int ss = qEnvironmentVariableIntValue( "WW_RENDER_SS" );
+	if ( ss > 0 && wwGameTaaOn() ) {
+		// the supersampled grab draws into its own target at another size: the history would start again
+		if ( sideOk )
+			log << "ss refused (temporal AA on: the supersampled grab is another viewport) -> 0\n";
+		ss = 0;
+	}
+	const int frames = path.frameCount();
+	const int preroll = wwGameTaaOn() ? 16 : 0;
+	if ( sideOk )
+		log << "path " << pathFile << " frames " << frames << " fps " << path.fps() << " preroll " << preroll
+			<< " taa " << ( wwGameTaaOn() ? 1 : 0 ) << "\n";
+	ogl->setSceneTime( shotT );
+	auto pump = [ogl]() {
+		for ( int i = 0; i < 2; i++ ) {
+			ogl->update();
+			qApp->processEvents();
+		}
+	};
+	Vector3 eye, at;
+	float fov = 70.0f;
+	path.sample( 0, eye, at, fov );
+	ogl->wwSetPathCamera( true, eye, at, fov );
+	for ( int k = 0; k < preroll; k++ ) {
+		wwGameTaaSetFrame( k );
+		pump();
+	}
+	for ( int k = 0; k < frames; k++ ) {
+		path.sample( k, eye, at, fov );
+		ogl->wwSetPathCamera( true, eye, at, fov );
+		wwGameTaaSetFrame( preroll + k );
+		pump();
+		const QImage img = ss > 0 ? ogl->grabSupersampled( ss ) : ogl->grabFramebuffer();
+		img.save( frameName( k ) );
+		if ( sideOk )
+			log << "frame " << k << " eye " << QString::asprintf( "%.6f %.6f %.6f", eye[0], eye[1], eye[2] )
+				<< " at " << QString::asprintf( "%.6f %.6f %.6f", at[0], at[1], at[2] )
+				<< " fov " << QString::asprintf( "%.6f", fov ) << " | taa " << wwGameTaaEcho()
+				<< " | " << wwSunShadowSummary() << "\n";
+	}
+	wwGameTaaSetFrame( -1 );
+	ogl->wwSetPathCamera( false );
+	if ( video ) {
+		QString ff = qEnvironmentVariable( "WW_FFMPEG" );
+		if ( ff.isEmpty() )
+			ff = QStringLiteral( "ffmpeg" );
+		const QString pattern = fi.path() + QLatin1Char( '/' ) + fi.completeBaseName() + QStringLiteral( "_%03d.png" );
+		QStringList args { QStringLiteral( "-y" ), QStringLiteral( "-loglevel" ), QStringLiteral( "error" ),
+			QStringLiteral( "-framerate" ), QString::number( path.fps() ), QStringLiteral( "-i" ), pattern };
+		if ( ext == QLatin1StringView( "mp4" ) )
+			args << QStringLiteral( "-c:v" ) << QStringLiteral( "libx264" ) << QStringLiteral( "-crf" ) << QStringLiteral( "16" )
+				 << QStringLiteral( "-pix_fmt" ) << QStringLiteral( "yuv420p" );
+		args << out;
+		const int rc = QProcess::execute( ff, args );
+		if ( sideOk )
+			log << "video " << out << " ffmpeg rc " << rc << "\n";
+	}
+}
 
 NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 {
@@ -23020,6 +23109,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * Logged at the grab, which is the only moment that can be
 					 * quoted -- anything logged earlier is a claim about intent. */
 					skope->ogl->wwLogCameraCensus( "grab" );
+					// lane MOTION1: a camera path renders its own frames (wwRenderPathRun above)
+					const QString renderPath = qEnvironmentVariable( "WW_RENDER_PATH" );
+					if ( !renderPath.isEmpty() ) {
+						wwRenderPathRun( skope->ogl, renderPath, out, shotT );
+						qApp->quit();
+						return;
+					}
 					const int renderSS = qEnvironmentVariableIntValue( "WW_RENDER_SS" );
 					const QImage shotImage = renderSS > 0
 						? skope->ogl->grabSupersampled( renderSS )

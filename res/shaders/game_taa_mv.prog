@@ -1,0 +1,4 @@
+# The game's temporal AA: the camera's motion vectors from the frame's depth (lane MOTION1; src/gl/gametaa.h).
+# No conditions: never picked for a shape; gametaa.cpp selects it by name.
+
+shaders cell_ao.vert game_taa_mv.frag

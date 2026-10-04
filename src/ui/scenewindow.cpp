@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
+#include "gl/gametaa.h"
 #include "esmweather.h"
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
@@ -171,6 +172,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveCheck( fogBox, "lookdevFog", tr( "Fog" ), wwLookdevFog() );	// lane FOG1
 	heading( tr( "Effects" ) );
 	liveCheck( shadowsBox, "lookdevShadows", tr( "Cascaded Shadows" ), wwLookdevShadows() );	// lane CSM1
+	liveCheck( taaBox, "gameTaa", tr( "Temporal AA" ), wwGameTaaOn() );	// lane MOTION1: every mode, ships off
 	placeholderCheck( tr( "Contact Shadows" ) );
 	placeholderCheck( tr( "SSAO" ) );
 	placeholderCheck( tr( "SSGI" ) );
@@ -266,6 +268,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( moonBox, &wwLookdevSetMoon );
 	liveToggle( fogBox, &wwLookdevSetFog );
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
+	liveToggle( taaBox, &wwGameTaaSetOn );
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
 		if ( live )
 			wwLookdevSetGameDay( d );

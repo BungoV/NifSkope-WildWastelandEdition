@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 
 #include "cellview.h"
 #include "gl/celllights.h"
+#include "gl/gametaa.h"
 
 #include <QAction>
 #include <QCheckBox>
@@ -427,6 +428,10 @@ void CellWorkspacePanel::buildUi()
 	cellIs = new QCheckBox( tr( "Imagespace" ), prtpRow );
 	cellIs->setObjectName( QStringLiteral( "CellWorkspaceCellImageSpace" ) );
 	cellIs->setChecked( wwCellImageSpaceOn() );
+	// lane MOTION1: the game's temporal AA, the same state as the Scene popup's Temporal AA row; ships off
+	cellTaa = new QCheckBox( tr( "Temporal AA" ), prtpRow );
+	cellTaa->setObjectName( QStringLiteral( "CellWorkspaceTemporalAa" ) );
+	cellTaa->setChecked( wwGameTaaOn() );
 	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
 	cellPass = new QComboBox( prtpRow );
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
@@ -437,6 +442,7 @@ void CellWorkspacePanel::buildUi()
 	pl->addWidget( cellGi );
 	pl->addWidget( cellPass );
 	pl->addWidget( cellIs );
+	pl->addWidget( cellTaa );
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
@@ -465,6 +471,11 @@ void CellWorkspacePanel::buildUi()
 	// a shader switch, not a rebuild: the next frame draws with (or without) the cell's lights
 	connect( cellLights, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwCellLightsSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellTaa, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwGameTaaSetOn( on );
 		if ( glView )
 			glView->update();
 	} );

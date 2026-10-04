@@ -534,7 +534,12 @@ public:
 	//! Return the exact axis view represented by the current rotation, or
 	//! ViewDefault when the camera is at an arbitrary user angle.
 	ViewState axisAlignedViewState() const;
-	inline bool isPerspectiveProjection() const { return perspectiveMode || view == ViewWalk; }
+	inline bool isPerspectiveProjection() const { return perspectiveMode || view == ViewWalk || wwPathActive; }
+	//! lane MOTION1: a scripted camera path (gl/campath.h) owns the eye while on -- viewTransform() is the
+	//! look-at from eye to at (world +Z up, no roll) and the projection a perspective one of vertical fov
+	//! degrees. Off gives the camera back untouched (the orbit state was never written).
+	void wwSetPathCamera( bool on, const Vector3 & eye = Vector3(), const Vector3 & at = Vector3(), float fov = 70.0f );
+	bool wwPathCameraActive() const { return wwPathActive; }
 	inline float orthographicHalfHeight() const { return float( Dist / Zoom ); }
 
 	/*! THE PINNED CAMERA -- WW_RENDER_CENTER / _DIST / _VIEW / _FOV / _ORTHO.
@@ -1975,6 +1980,10 @@ private:
 	//! camera back -- see WwCameraPin above.
 	WwCameraPin wwPin;
 	void wwApplyCameraPinNow();
+	// lane MOTION1: the path camera (wwSetPathCamera)
+	bool wwPathActive = false;
+	Vector3 wwPathEye, wwPathAt;
+	float wwPathFov = 70.0f;
 	unsigned char updatePending = 0;
 	//! Extra repaints scheduled after a scene compile: the first frame after
 	//! a compile renders the streaming line geometry (grid / origin axes)

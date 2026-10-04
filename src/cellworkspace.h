@@ -208,6 +208,7 @@ private:
 	QCheckBox * cellLights = nullptr;   // lane PRTP3: light the view with the cell's own lights
 	QCheckBox * cellGi = nullptr;       // lane PRTPGI: add the bake's bounce of those lights
 	QCheckBox * cellIs = nullptr;       // lane IMGS1: the cell's imagespace (exposure, curve, grade, LUT)
+	QCheckBox * cellTaa = nullptr;      // lane MOTION1: the game's temporal AA (one state with the Scene popup's row)
 	QComboBox * cellPass = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
 	QPushButton * probesPlace = nullptr;
 	QPushButton * probesBake = nullptr;
