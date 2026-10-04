@@ -71,6 +71,7 @@ struct WwCellLight
 	int shape = 0;                  //!< lane HEMI1: 0 omni (or spot), 1 hemisphere (dir = its plane normal), 2 box
 	float box[3][4] = {};           //!< lane HEMI1: box local coordinate k = dot(box[k].xyz, P) + box[k].w, inside |k| <= 1
 	quint32 ref = 0;                //!< lane GPURELIGHT1: the placed reference (0: none, an effect's light)
+	float godRay = 0.0f;            //!< lane VOLFOG1: a shaft emitter (a shadow flag AND a WGDR): its GDRY's intensity; 0 none
 };
 
 //! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
@@ -134,6 +135,10 @@ struct WwCellLighting
 	float clipDist = 0.0f;              //!< lane SSR1: an interior's clip distance (XCLL offset 32; Inherits 0x80), 0 = none
 	float fogK[6][4] = {};
 	QString fogNote;
+	/* lane VOLFOG1: the interior's god-ray medium (esmweather.h WwGodRayMedium: air rgb, fwd rgb, back rgb, fwd g,
+	 * back g, post), from XGDR, else the lighting template's WGDR, else the engine's fallback */
+	float godRay[12] = { 0.60f, 1.52f, 3.31f, 2, 2, 2, 1, 1, 1, 0.75f, 0, 1 };
+	QString godRayNote = QStringLiteral( "fallback" );
 	QString summary;                    //!< one census line
 };
 

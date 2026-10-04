@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "celllights.h"
 
 #include "gl/cellssr.h"
+#include "gl/cellvolfog.h"	// lane VOLFOG1
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -841,7 +842,8 @@ QString wwCellLightsEcho( Scene * scene )
 	if ( s.pass > 0 )	// lane PROBEVIEW1
 		o += QStringLiteral( " pass=%1(asked=%2 %3, sky=%4, pvred=%5)" ).arg( scene ? wwCellPassFor( scene->nifModel ) : 0 )
 			.arg( s.pass ).arg( wwCellPassNames().value( s.pass ) ).arg( G && !G->sky.empty() ? 1 : 0 ).arg( s.passRed );
-	return o + QLatin1Char( ' ' ) + wwCellShadowEcho( scene );
+	return o + QLatin1Char( ' ' ) + wwCellShadowEcho( scene )
+		+ ( wwVolFogOn() ? QStringLiteral( " " ) + wwVolFogSummary() : QString() );	// lane VOLFOG1
 }
 
 //! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change (the gate's light list)

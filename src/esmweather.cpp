@@ -638,7 +638,7 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 	out.nam0Rows = out.formVersion >= 119 ? 19 : 17;
 	out.nam0Tods = out.formVersion >= 111 ? 8 : 4;
 	QVector<QByteArray> dalcs;
-	QByteArray pnam, jnam, qnam, rnam, onam, imsp;
+	QByteArray pnam, jnam, qnam, rnam, onam, imsp, wgdr;
 	quint32 present = 0;
 	for ( int i = 0; i < 32; i++ )
 		out.cloudSpeedX[i] = out.cloudSpeedY[i] = 127;
@@ -656,6 +656,8 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 				out.sunGlare = quint8( f.data()[4] );
 			else if ( f == "IMSP" )
 				imsp = bytes();
+			else if ( f == "WGDR" )	// lane VOLFOG1
+				wgdr = bytes();
 			else if ( f == "PNAM" )
 				pnam = bytes();
 			else if ( f == "JNAM" )
@@ -798,8 +800,89 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 			}
 		}
 	}
+	// lane VOLFOG1: WGDR -> GDRY per ToD, the medium each builds (a missing link: the engine's fallback)
+	for ( int i = 0; i < 8 && i < wgdr.size() / 4; i++ ) {
+		quint32 raw = 0;
+		std::memcpy( &raw, wgdr.constData() + i * 4, 4 );
+		out.wgdr[i] = raw ? esm->mapFormID( *r, raw ) : 0;
+		WwGodRays g;
+		if ( out.wgdr[i] && wwGodRaysRead( *esm, out.wgdr[i], g ) ) {
+			out.godRay[i] = wwGodRayMediumOf( g );
+			out.godRayFound++;
+		}
+	}
 	if ( why )
 		why->clear();
+	return true;
+}
+
+/* ---- lane VOLFOG1: the GDRY record and the medium the engine builds from it (esmweather.h) ---- */
+WwGodRayMedium wwGodRayMediumOf( const WwGodRays & g )
+{
+	WwGodRayMedium m;
+	static const float kAir[3] = { 0.18f, 0.46f, 1.0f };	// the engine's literals; the record's air colour is never read
+	for ( int c = 0; c < 3; c++ ) {
+		m.air[c] = kAir[c] * g.airScale;
+		m.fwd[c] = g.fwd[c] * g.fwdScale;
+		m.back[c] = g.back[c] * g.backScale;
+	}
+	m.gFwd = g.fwdPhase;
+	m.gBack = g.backPhase;
+	m.post = g.intensity;
+	m.fallback = false;
+	return m;
+}
+
+WwGodRayMedium wwGodRayMix( const WwGodRayMedium & a, const WwGodRayMedium & b, float t )
+{
+	WwGodRayMedium m;
+	const float s = 1.0f - t;
+	for ( int c = 0; c < 3; c++ ) {
+		m.air[c] = a.air[c] * s + b.air[c] * t;
+		m.fwd[c] = a.fwd[c] * s + b.fwd[c] * t;
+		m.back[c] = a.back[c] * s + b.back[c] * t;
+	}
+	m.gFwd = a.gFwd * s + b.gFwd * t;
+	m.gBack = a.gBack * s + b.gBack * t;
+	m.post = a.post * s + b.post * t;
+	m.fallback = ( a.fallback || t >= 1.0f ) && ( b.fallback || t <= 0.0f );
+	return m;
+}
+
+bool wwGodRaysRead( ESMFile & esm, quint32 formID, WwGodRays & out )
+{
+	out = WwGodRays();
+	const ESMFile::ESMRecord * r = esm.findRecord( formID );
+	if ( !r || r->type == GRUP || !( *r == "GDRY" ) )
+		return false;
+	out.formID = formID;
+	try {
+		ESMFile::ESMField f( esm, *r );
+		while ( f.next() ) {
+			if ( f == "EDID" ) {
+				out.edid = fieldString( f );
+			} else if ( f == "DATA" ) {
+				float d[15];
+				const size_t n = std::min<size_t>( f.size() / 4, 15 );
+				std::memcpy( d, f.data(), n * 4 );
+				if ( n >= 11 ) {	// the 44 bytes every version stores
+					for ( int c = 0; c < 3; c++ ) {
+						out.back[c] = d[c];
+						out.fwd[c] = d[3 + c];
+					}
+					out.intensity = d[6];
+					out.airScale = d[7];
+					out.backScale = d[8];
+					out.fwdScale = d[9];
+					out.backPhase = d[10];
+				}
+				if ( n >= 15 )		// 0x3C bytes: the fwd phase after the (unread) air colour
+					out.fwdPhase = d[14];
+			}
+		}
+	} catch ( std::exception & ) {
+		return false;
+	}
 	return true;
 }
 

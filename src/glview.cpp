@@ -136,6 +136,7 @@ private:
 #include "gl/celllights.h"	// lane IMGS1: the imagespace measure
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
 #include "gl/cellssr.h"
+#include "gl/cellvolfog.h"	// lane VOLFOG1
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -4041,6 +4042,7 @@ void GLView::paintGL()
 	// lane AO1: the obscurance first; the measure reads the obscured light, as the game's adaptation does
 	wwCellAoPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );
 	wwCellSsrPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );	// lane SSR1: needs that pass's depth
+	wwVolFogPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );	// lane VOLFOG1: the lit medium's froxels
 	if ( !scene->selecting && workspaceDrawScenes.isEmpty() )
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
 

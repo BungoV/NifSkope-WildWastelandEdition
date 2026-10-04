@@ -1,0 +1,4 @@
+# The lit medium's froxel passes (lane VOLFOG1; src/gl/cellvolfog.cpp). One layer of the froxel volume a draw.
+# No conditions: never picked for a shape; cellvolfog.cpp selects it by name.
+
+shaders cell_volfog.vert cell_volfog.frag

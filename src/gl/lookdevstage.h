@@ -142,5 +142,8 @@ void wwLookdevFogUniforms( Scene * scene );
  *  swaps fo4_default.prog for fo4_fog.prog -- the same shader with WW_FOG defined --
  *  so with Fog off the driver compiles exactly the pre-fog shader */
 bool wwLookdevFogWanted( Scene * scene );
+/*! lane VOLFOG1: the weather's god-ray medium at the Lookdev hour (esmweather.h WwGodRayMedium packed as air rgb,
+ *  fwd rgb, back rgb, fwd g, back g, post); false with no weather */
+bool wwLookdevGodRays( float m[12], QString * note );
 
 #endif
