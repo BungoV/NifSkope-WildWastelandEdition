@@ -18,8 +18,8 @@ the plugin is read here, every ray is traced here through the run's own soup.psp
         R  roof tops: probes with nothing above and a one-sided face's back straight below = 0.
         The run before the lane (--ref) is classified the same way against this run's soup, for the report.
         A probe whose re-traced share differs past SHARE_TOL is let off by its tied rays (coincident faces).
-  synth <exe> <work> [--red noclamp|conn26|boxes|glasswall]
-        Room labels (part C): five scenes built here (SCENES), each through `<exe> -no-gui probegi`; the labels
+  synth <exe> <work> [--red noclamp|conn26|boxes|glasswall|nomask|noscale]
+        Room labels (part C): seven scenes built here (SCENES; fence and fade: lane ALPHATEST2), each through `<exe> -no-gui probegi`; the labels
         (gi_rooms.bin) against each scene's own rooms (same room one label, rooms apart, outdoors 0), the panes and
         the hatch naming both sides; the 2-unit wall: cellGiRoomSample redone here (gi_sample) on the dark side
         reads no more than the dark room's own brightest probe face, and every sample has weight.
@@ -729,7 +729,49 @@ def sc_glass():
     return dict(T=T, glass=G, rect=(-100, -100, 1300, 700), light='300,300,220,900,1,1,1', pts=pts, panes=panes)
 
 
-SCENES = [('wall', sc_wall), ('lroom', sc_l), ('church', sc_church), ('lighthouse', sc_lighthouse), ('glass', sc_glass)]
+def masked_plane(x, y0, y1, z0, z1, tile, mp, model, scale=None):
+    """lane ALPHATEST2: a two-sided plane at x, its UVs (y, z) / tile; returns tris and records for write_soup's amask
+    (tri index filled in by the scene)"""
+    T = QUAD((x, y0, z0), (x, y1, z0), (x, y1, z1), (x, y0, z1))
+    recs = []
+    for t in T:
+        uv = [c for p in t for c in (p[1] / tile, p[2] / tile)]
+        recs.append((mp, model, 128, uv, scale))
+    return T, recs
+
+
+def sc_fence():
+    """lane ALPHATEST2: one hall 1800 long; at x 601 a chain-link fence (alpha-tested, 77% holes: the wires every 8th
+    texel), at x 1201 boards with 4-unit gaps (6% holes). The fence must not close a room (A and B one room); the
+    boards still do (C its own). Red "nomask": the fence closes, A and B split."""
+    T = box(0, 0, 0, 1802, 600, 300)
+    link = bytes(255 if (i % 8 == 0 or j % 8 == 0) else 0 for j in range(32) for i in range(32))
+    board = bytes(0 if j == 0 else 255 for j in range(16) for i in range(16))
+    F, fr = masked_plane(601, 0, 600, 0, 300, 16.0, 0, 0)
+    Bd, br = masked_plane(1201, 0, 600, 0, 300, 64.0, 1, 1)
+    recs = [(len(T) + k,) + r for k, r in enumerate(fr)] + [(len(T) + len(F) + k,) + r for k, r in enumerate(br)]
+    T = T + F + Bd
+    am = dict(maps=[('synth/chainlink', 32, 32, link), ('synth/boards', 16, 16, board)], models=['fence', 'boards'], recs=recs)
+    pts = [('AB', (300, 300, 150)), ('AB', (900, 300, 150)), ('AB', (560, 100, 40)), ('AB', (640, 500, 260)),
+           ('C', (1500, 300, 150)), ('out', (-60, 300, 150)), ('out', (1860, 300, 150))]
+    return dict(T=T, amask=am, rect=(-100, -100, 1900, 700), light='300,300,220,900,1,1,1', pts=pts)
+
+
+def sc_fade():
+    """lane ALPHATEST2: two rooms A | B behind a wall whose map is opaque (alpha 200 against 128) but whose vertex
+    alpha x material alpha is 0.5: the renderer draws it all holes (200 x 0.5 < 128), so A and B are one room.
+    Red "noscale" (the soup written without its scales, the ALPHATEST1 test): the wall stands, A and B split."""
+    T = box(0, 0, 0, 1202, 600, 300)
+    W, wr = masked_plane(601, 0, 600, 0, 300, 64.0, 0, 0, scale=(0.5, 0.5, 0.5))
+    recs = [(len(T) + k,) + r for k, r in enumerate(wr)]
+    T = T + W
+    am = dict(maps=[('synth/opaque200', 4, 4, bytes([200] * 16))], models=['fadewall'], recs=recs)
+    pts = [('AB', (300, 300, 150)), ('AB', (900, 300, 150)), ('out', (-60, 300, 150))]
+    return dict(T=T, amask=am, rect=(-100, -100, 1300, 700), light='300,300,220,900,1,1,1', pts=pts)
+
+
+SCENES = [('wall', sc_wall), ('lroom', sc_l), ('church', sc_church), ('lighthouse', sc_lighthouse), ('glass', sc_glass),
+          ('fence', sc_fence), ('fade', sc_fade)]
 
 
 def synth_cmd(exe, work, red):
@@ -744,13 +786,16 @@ def synth_cmd(exe, work, red):
     for name, fn in SCENES:
         s = fn()
         soup = os.path.join(work, name + '.psp')
-        write_soup(soup, s['T'], [(160, 160, 160)] * len(s['T']), glass=s.get('glass'))
+        am = s.get('amask')
+        if am and red == 'noscale':   # lane ALPHATEST2's scale red: the masks without their scales (AMK1)
+            am = dict(am, recs=[r[:5] + (None,) for r in am['recs']])
+        write_soup(soup, s['T'], [(160, 160, 160)] * len(s['T']), glass=s.get('glass'), amask=am)
         out = os.path.join(work, name)
         cmd = [exe, '-no-gui', 'probegi', '--soup', soup, '--rect', ','.join('%g' % v for v in s['rect']), '--out', out,
                '--light', s['light'], '--spacing', '140', '--rays', '512']
         if red == 'noclamp':
             cmd += ['--red', 'noclamp']
-        elif red:
+        elif red and red != 'noscale':
             cmd += ['--rooms-red', red]
         t0 = time.time()
         p = subprocess.run(cmd, capture_output=True, text=True)

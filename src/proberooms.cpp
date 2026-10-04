@@ -219,6 +219,11 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 	const bool red26 = spec.red == QLatin1String( "conn26" );
 	const bool redBoxes = spec.red == QLatin1String( "boxes" );
 	const bool redGlass = spec.red == QLatin1String( "glasswall" );
+	const bool redNoMask = spec.red == QLatin1String( "nomask" );   // lane ALPHATEST2: masks ignored (ALPHATEST1 rooms)
+	const bool useMask = !redNoMask && !soup.amask.empty();
+	auto masked = [&]( size_t k ) {
+		return useMask && k < soup.amask.triOf.size() && soup.amask.triOf[k] >= 0;
+	};
 	double lo[3] = { 1e30, 1e30, 1e30 }, hi[3] = { -1e30, -1e30, -1e30 };
 	for ( const std::vector<float> * t : { &soup.tris, &soup.glass } )
 		for ( size_t i = 0; i + 2 < t->size(); i += 3 )
@@ -267,6 +272,8 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 		roomsParallel( size_t( Z ), [&]( size_t zs ) {
 			const int z = int( zs );
 			for ( int k : bySlab[zs] ) {
+				if ( val == 1 && masked( size_t( k ) ) )
+					continue;   // lane ALPHATEST2: below
 				const float * p = &t[size_t( k ) * 9];
 				int g0[2], g1[2];
 				for ( int c = 0; c < 2; c++ ) {
@@ -289,6 +296,102 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 	};
 	mark( soup.glass, 2 );
 	mark( soup.tris, 1 );   // a cell both touch is solid
+	/* lane ALPHATEST2: the masked triangles. Per cell, the samples that land in it and the holes among them; a
+	 * cell with samples is solid when holes x 2 < samples, one without takes the triangle's overall share */
+	if ( useMask ) {
+		std::vector<quint32> nSam( N, 0 ), nHole( N, 0 );
+		std::vector<quint8> touch( N, 0 );   // 1 touched, 2 touched by a triangle mostly solid overall
+		const size_t nt = soup.tris.size() / 9;
+		const double step = double( cell ) / 8.0;
+		std::vector<std::vector<int>> bySlab( static_cast<size_t>( Z ) );
+		std::vector<quint8> triSolid( nt, 0 );
+		for ( size_t k = 0; k < nt; k++ ) {
+			if ( !masked( k ) )
+				continue;
+			const float * p = &soup.tris[k * 9];
+			const float zl = std::min( { p[2], p[5], p[8] } ), zh = std::max( { p[2], p[5], p[8] } );
+			const int z0 = std::max( 0, int( std::floor( ( zl - R.origin[2] ) / cell - 0.001f ) ) );
+			const int z1 = std::min( Z - 1, int( std::floor( ( zh - R.origin[2] ) / cell + 0.001f ) ) );
+			for ( int z = z0; z <= z1; z++ )
+				bySlab[size_t( z )].push_back( int( k ) );
+			// the triangle's overall share: a 16 x 16 subdivision's centroids
+			int nh = 0, ns = 0;
+			for ( int i = 0; i < 16; i++ )
+				for ( int j = 0; i + j < 16; j++ ) {
+					ns++;
+					nh += soup.amask.hole( int( k ), ( i + 1.0 / 3 ) / 16, ( j + 1.0 / 3 ) / 16 ) ? 1 : 0;
+					if ( i + j < 15 ) {
+						ns++;
+						nh += soup.amask.hole( int( k ), ( i + 2.0 / 3 ) / 16, ( j + 2.0 / 3 ) / 16 ) ? 1 : 0;
+					}
+				}
+			triSolid[k] = nh * 2 < ns ? 1 : 0;
+		}
+		roomsParallel( size_t( Z ), [&]( size_t zs ) {
+			const int z = int( zs );
+			for ( int k : bySlab[zs] ) {
+				const float * p = &soup.tris[size_t( k ) * 9];
+				// the touched cells (the SAT, as any triangle)
+				int g0[2], g1[2];
+				for ( int c = 0; c < 2; c++ ) {
+					const float l = std::min( { p[c], p[c + 3], p[c + 6] } ), u = std::max( { p[c], p[c + 3], p[c + 6] } );
+					g0[c] = std::max( 0, int( std::floor( ( l - R.origin[c] ) / cell - 0.001f ) ) );
+					g1[c] = std::min( R.dims[c] - 1, int( std::floor( ( u - R.origin[c] ) / cell + 0.001f ) ) );
+				}
+				for ( int y = g0[1]; y <= g1[1]; y++ )
+					for ( int x = g0[0]; x <= g1[0]; x++ ) {
+						const float c[3] = { R.origin[0] + ( x + 0.5f ) * cell, R.origin[1] + ( y + 0.5f ) * cell,
+							R.origin[2] + ( z + 0.5f ) * cell };
+						if ( triBoxRooms( c, h, p ) ) {
+							quint8 & tc = touch[R.index( x, y, z )];
+							tc = std::max( tc, quint8( triSolid[size_t( k )] ? 2 : 1 ) );
+						}
+					}
+				// the samples: M x M subtriangles, one jittered point in each (a hash of triangle and subtriangle)
+				double e = 0;
+				for ( int a = 0; a < 3; a++ ) {
+					const int b = ( a + 1 ) % 3;
+					e = std::max( e, std::sqrt( std::pow( double( p[a * 3] ) - p[b * 3], 2 ) + std::pow( double( p[a * 3 + 1] ) - p[b * 3 + 1], 2 )
+						+ std::pow( double( p[a * 3 + 2] ) - p[b * 3 + 2], 2 ) ) );
+				}
+				const int M = std::clamp( int( std::ceil( e / step ) ), 1, 1024 );
+				for ( int i = 0; i < M; i++ )
+					for ( int j = 0; i + j < M; j++ )
+						for ( int up = 0; up < ( i + j < M - 1 ? 2 : 1 ); up++ ) {
+							quint32 hsh = quint32( k ) * 2654435761u ^ quint32( i * 40503 + j * 9973 + up * 7 );
+							hsh ^= hsh >> 15; hsh *= 2246822519u; hsh ^= hsh >> 13; hsh *= 3266489917u; hsh ^= hsh >> 16;
+							double ju = ( hsh & 0xFFFF ) / 65536.0, jv = ( hsh >> 16 ) / 65536.0;
+							if ( ju + jv > 1.0 ) {
+								ju = 1.0 - ju;
+								jv = 1.0 - jv;
+							}
+							const double b1 = up ? ( i + 1 - ju ) / M : ( i + ju ) / M;
+							const double b2 = up ? ( j + 1 - jv ) / M : ( j + jv ) / M;
+							const double b0 = 1.0 - b1 - b2;
+							double q[3];
+							for ( int c = 0; c < 3; c++ )
+								q[c] = b0 * p[c] + b1 * p[3 + c] + b2 * p[6 + c];
+							const int cz = int( std::floor( ( q[2] - R.origin[2] ) / cell ) );
+							if ( cz != z )
+								continue;
+							const int cx = std::clamp( int( std::floor( ( q[0] - R.origin[0] ) / cell ) ), 0, X - 1 );
+							const int cy = std::clamp( int( std::floor( ( q[1] - R.origin[1] ) / cell ) ), 0, Y - 1 );
+							const size_t ci = R.index( cx, cy, z );
+							nSam[ci]++;
+							nHole[ci] += soup.amask.hole( k, b1, b2 ) ? 1u : 0u;
+						}
+			}
+		} );
+		for ( size_t i = 0; i < N; i++ ) {
+			if ( !touch[i] || st[i] == 1 )
+				continue;
+			const bool solid = nSam[i] ? nHole[i] * 2 < nSam[i] : touch[i] == 2;
+			if ( solid )
+				st[i] = 1;
+			R.cellsMaskSolid += solid ? 1 : 0;
+			R.cellsMaskOpen += solid ? 0 : 1;
+		}
+	}
 	// the door boxes (an opening's frame): no core grows through one
 	std::vector<quint8> door( N, 0 );
 	for ( const ProbeSoup::Door & d : soup.doors ) {
@@ -550,7 +653,10 @@ QString probeRoomsCensusText( const ProbeRooms & r )
 		.arg( r.cellsAir ).arg( r.cellsSolid ).arg( r.cellsGlass ).arg( r.cellsDoor )
 		.arg( r.cores ).arg( r.coresOutdoors ).arg( r.cellsCore ).arg( r.rooms ).arg( r.pockets ).arg( r.cellsLeft )
 		.arg( r.cellsOpening ).arg( r.glassBoth )
-		.arg( r.folded ? QStringLiteral( ", %1 cells folded past 4094 rooms" ).arg( r.folded ) : QString() )
+		.arg( ( r.folded ? QStringLiteral( ", %1 cells folded past 4094 rooms" ).arg( r.folded ) : QString() )
+			+ ( r.cellsMaskOpen + r.cellsMaskSolid   // lane ALPHATEST2 (no masked triangle: the line as before)
+				? QStringLiteral( "; alpha-tested cells open %1, solid %2" ).arg( r.cellsMaskOpen ).arg( r.cellsMaskSolid )
+				: QString() ) )
 		.arg( qRound( r.ms ) );
 }
 

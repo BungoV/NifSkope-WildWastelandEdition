@@ -1399,7 +1399,10 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( s.size() ) );
 			f.write( s.data(), qint64( s.size() ) );
 		};
-		const quint32 tail[2] = { 0x314B4D41u /* 'AMK1' */, quint32( soup.amask.tris.size() ) };
+		/* lane ALPHATEST2: 'AMK2' = AMK1 with 3 f32 more a triangle (each corner's vertex alpha x material alpha),
+		 * written only when some triangle's scale is not 1: otherwise the AMK1 bytes exactly */
+		const bool amk2 = soup.amask.anyScaled();
+		const quint32 tail[2] = { amk2 ? 0x324B4D41u /* 'AMK2' */ : 0x314B4D41u /* 'AMK1' */, quint32( soup.amask.tris.size() ) };
 		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
 		u32( quint32( soup.amask.maps.size() ) );
 		for ( size_t m = 0; m < soup.amask.maps.size(); m++ ) {
@@ -1420,6 +1423,8 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( t.model ) );
 			u32( t.thr );
 			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
+			if ( amk2 )
+				f.write( reinterpret_cast<const char *>( t.as ), 12 );
 		}
 	}
 	/* lane EMISSIVEGI1: the glowing triangles (written only when any glows): the glow maps (name, w, h, w*h*3 RGB
@@ -1518,7 +1523,8 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 	}
 	// lane ALPHATEST1: the optional alpha-test masks (a short or broken tail leaves every face solid)
 	soup->amask = probebvh::AlphaMask();
-	if ( more && tail[0] == 0x314B4D41u ) {
+	if ( more && ( tail[0] == 0x314B4D41u || tail[0] == 0x324B4D41u ) ) {   // AMK1, or AMK2 (lane ALPHATEST2)
+		const bool amk2 = tail[0] == 0x324B4D41u;
 		probebvh::AlphaMask am;
 		bool ok = true;
 		auto u32 = [&]( quint32 * v ) { ok = ok && f.read( reinterpret_cast<char *>( v ), 4 ) == 4; return *v; };
@@ -1568,6 +1574,8 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			u32( &thr );
 			probebvh::AlphaMask::Tri t;
 			ok = ok && f.read( reinterpret_cast<char *>( t.uv ), 24 ) == 24 && tri < head[1] && map < nm;
+			if ( amk2 )
+				ok = ok && f.read( reinterpret_cast<char *>( t.as ), 12 ) == 12;
 			if ( !ok )
 				break;
 			t.map = int( map );

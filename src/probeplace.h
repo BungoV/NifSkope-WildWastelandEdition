@@ -127,7 +127,8 @@ struct ProbeSoup
 	 *  material's threshold passes on. Empty = none (every trace as before). The soup file carries it as an
 	 *  optional 'AMK1' tail after 'TWO1' (the maps as bytes, so a soup read back traces the same). */
 	probebvh::AlphaMask amask;
-	void markLastMasked( int map, quint8 thr, const float uv[6], int model )
+	//! lane ALPHATEST2: `as` = each corner's vertex alpha x material alpha (null = 1, 1, 1); any != 1 -> 'AMK2'
+	void markLastMasked( int map, quint8 thr, const float uv[6], int model, const float * as = nullptr )
 	{
 		amask.triOf.resize( size_t( triCount() ), -1 );
 		probebvh::AlphaMask::Tri t;
@@ -136,6 +137,9 @@ struct ProbeSoup
 		t.model = model;
 		for ( int k = 0; k < 6; k++ )
 			t.uv[k] = uv[k];
+		if ( as )
+			for ( int k = 0; k < 3; k++ )
+				t.as[k] = as[k];
 		amask.triOf.back() = int( amask.tris.size() );
 		amask.tris.push_back( t );
 	}

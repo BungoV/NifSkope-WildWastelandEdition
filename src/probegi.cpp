@@ -1352,7 +1352,7 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 }
 
 // lane ROOMCLAMP1: `probegi --soup <f> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b [--light ...]
-// [--spacing s] [--rays n] [--passes n] [--red noclamp|...] [--rooms-red conn26|boxes|glasswall] [--pinch u]
+// [--spacing s] [--rays n] [--passes n] [--red noclamp|...] [--rooms-red conn26|boxes|glasswall|nomask] [--pinch u]
 // [--cell u]`: place, bake (<dir>/bake), relight as an interior lit by the lights given, dump into <dir>
 int probeGiCli( const QStringList & args )
 {
@@ -1393,7 +1393,7 @@ int probeGiCli( const QStringList & args )
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() ) {
 		std::fprintf( stderr, "usage: probegi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b "
 			"[--light ...] [--spacing s] [--rays n] [--passes n] [--red noclamp|noeye|novis|...] "
-			"[--rooms-red conn26|boxes|glasswall] [--pinch u] [--cell u]\n" );
+			"[--rooms-red conn26|boxes|glasswall|nomask] [--pinch u] [--cell u]\n" );
 		return 2;
 	}
 	ps.minX = rc[0].toFloat();
