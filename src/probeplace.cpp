@@ -1452,6 +1452,14 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
 		}
 	}
+	// lane SMOOTHN1: the vertex normals, 9 snorm16 a triangle (written only when any triangle has them)
+	if ( !soup.vn.empty() ) {
+		std::vector<qint16> vn( soup.tris.size(), 0 );
+		std::copy( soup.vn.begin(), soup.vn.begin() + qMin( soup.vn.size(), vn.size() ), vn.begin() );
+		const quint32 tail[2] = { 0x314D4E56u /* 'VNM1' */, quint32( soup.tris.size() / 9 ) };
+		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		f.write( reinterpret_cast<const char *>( vn.data() ), qint64( vn.size() * sizeof( qint16 ) ) );
+	}
 	return true;
 }
 
@@ -1636,6 +1644,16 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			ge.triOf.resize( size_t( head[1] ), -1 );
 			soup->glow = std::move( ge );
 		}
+		more = ok && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+	}
+	// lane SMOOTHN1: the optional vertex-normal tail
+	soup->vn.clear();
+	if ( more && tail[0] == 0x314D4E56u && tail[1] == head[1] ) {
+		soup->vn.resize( size_t( tail[1] ) * 9 );
+		const qint64 vw = qint64( soup->vn.size() * sizeof( qint16 ) );
+		if ( f.read( reinterpret_cast<char *>( soup->vn.data() ), vw ) != vw )
+			soup->vn.clear();
+		more = f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
 	}
 	return true;
 }

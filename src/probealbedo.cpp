@@ -199,6 +199,17 @@ void ProbeAlbedo::sampleLod( const DDSTexture16 * t, const DDSTexture16 * pal, f
 	}
 }
 
+void ProbeAlbedo::sampleNormal( const DDSTexture16 * t, float u, float v, float lod, float out[3] )
+{
+	u -= std::floor( u );
+	v -= std::floor( v );
+	lod = std::clamp( lod, 0.0f, float( t->getMaxMipLevel() ) );
+	const FloatVector4 c = t->getPixelT( u, v, lod );
+	for ( int k = 0; k < 2; k++ )
+		out[k] = std::clamp( ( t->isSRGBTexture() ? linearToSrgb( c[size_t( k )] ) : c[size_t( k )] ) * 2.0f - 1.0f, -1.0f, 1.0f );
+	out[2] = std::sqrt( std::max( 0.0f, 1.0f - out[0] * out[0] - out[1] * out[1] ) );
+}
+
 bool ProbeAlbedo::sample( const QString & tex, float u, float v, const float vc[3], float out[3], float * alpha )
 {
 	const DDSTexture16 * t = tex.isEmpty() ? nullptr : load( tex );

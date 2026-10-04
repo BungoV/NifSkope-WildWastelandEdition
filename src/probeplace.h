@@ -29,6 +29,8 @@
 
 #include <QString>
 #include <QtGlobal>
+#include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include "probeemit.h"
@@ -99,6 +101,10 @@ struct ProbeSoup
 		float uv[6] = { 0, 0, 0, 0, 0, 0 };
 		quint8 vc[9] = { 255, 255, 255, 255, 255, 255, 255, 255, 255 };   //!< vertex colors, gamma
 		qint16 n[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };   //!< world vertex normals, snorm16
+		/*! lane SMOOTHN1: the normal map (_n, into matTex; -1 = none) and the vertices' world tangents
+		 *  (snorm16), the frame the cell view draws it in: normal = x (n x t) + y t + z n */
+		qint32 ntex = -1;
+		qint16 t[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 	};
 	std::vector<TriMat> mat;
 	std::vector<QString> matTex;
@@ -142,6 +148,29 @@ struct ProbeSoup
 	/*! lane EMISSIVEGI1: the triangles that glow (probeemit.h). Written as the optional 'EMT1' tail (only when any
 	 *  triangle glows), so a soup with nothing glowing stays byte for byte as before. */
 	ProbeEmit glow;   // not "emit": a Qt macro
+	/*! lane SMOOTHN1: the vertex normals, 9 snorm16 a triangle (world, unit), every albedo way's hit normal
+	 *  (the barycentric blend, renormalized, on the face normal's side). Shorter than 9 x the triangle count,
+	 *  or a zero vertex, = the face normal there. Terrain from LAND VNML, models from their NIF normals.
+	 *  The soup file carries it as an optional 'VNM1' tail after 'TWO1'. */
+	std::vector<qint16> vn;
+	void setLastNormals( const float n[9] )
+	{
+		vn.resize( size_t( triCount() - 1 ) * 9, 0 );
+		for ( int i = 0; i < 3; i++ ) {
+			const float l = std::sqrt( n[i * 3] * n[i * 3] + n[i * 3 + 1] * n[i * 3 + 1] + n[i * 3 + 2] * n[i * 3 + 2] );
+			for ( int k = 0; k < 3; k++ )
+				vn.push_back( l > 1e-6f ? qint16( std::lround( std::clamp( n[i * 3 + k] / l, -1.0f, 1.0f ) * 32767.0f ) ) : 0 );
+		}
+	}
+	bool hasNormals( size_t tri ) const
+	{
+		if ( ( tri + 1 ) * 9 > vn.size() )
+			return false;
+		for ( int k = 0; k < 9; k++ )
+			if ( vn[tri * 9 + size_t( k )] )
+				return true;
+		return false;
+	}
 };
 
 //! Lane BAKE4: one box of an enclosed room's air (world units), what `.tbk` v4 writes for the

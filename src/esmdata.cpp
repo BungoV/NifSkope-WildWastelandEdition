@@ -459,6 +459,21 @@ bool EsmWorld::land( int cx, int cy, EsmLand & out ) const
 					for ( int k = 0; k < 3; k++ )
 						out.colors[row][col][k] = d[( row * 33 + col ) * 3 + k];
 			out.hasColors = true;
+		} else if ( f == "VNML" && f.size() >= 33 * 33 * 3 ) {
+			/* lane SMOOTHN1: the vertex normals the game lights the ground with, 3 bytes a vertex on the VHGT
+			 * grid, x east, y north, z up. Each byte is a SIGNED component (measured on the shipped LAND
+			 * records against the heights: notes/smoothn1 STATUS); normalized here, a zero vector reads up. */
+			const unsigned char * d = f.data();
+			std::memcpy( out.normalsRaw, d, sizeof out.normalsRaw );
+			for ( int row = 0; row < 33; row++ )
+				for ( int col = 0; col < 33; col++ ) {
+					const signed char * v = reinterpret_cast<const signed char *>( d + ( row * 33 + col ) * 3 );
+					const float n[3] = { float( v[0] ), float( v[1] ), float( v[2] ) };
+					const float l = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+					for ( int k = 0; k < 3; k++ )
+						out.normals[row][col][k] = l > 0.0f ? n[k] / l : ( k == 2 ? 1.0f : 0.0f );
+				}
+			out.hasNormals = true;
 		}
 	}
 	return out.valid;

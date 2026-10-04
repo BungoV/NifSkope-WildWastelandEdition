@@ -762,6 +762,8 @@ def rooms_check(tbks, tris, rooms, openings, fails):
 def run_bake(exe, soup, out, rays, threads, red, extra=(), rect=RECT):
     cmd = [os.path.abspath(exe), '-no-gui', 'probebake', '--soup', soup, '--rect', ','.join('%g' % v for v in rect),
            '--out', out, '--rays', str(rays), '--threads', str(threads)] + list(extra)
+    if '--adapt' not in extra:   # lane SMOOTHN1: the exact re-trace is of the base ray set (the old bake)
+        cmd += ['--adapt', '1']
     if red:
         cmd += ['--red', red]
     return subprocess.run(cmd, capture_output=True, text=True, timeout=900)
@@ -807,6 +809,48 @@ def v3_leg(exe, base, soup, work, tag, rays, rect, tris, alb, physics, fails):
             fails.append('--tbk 3 differs from the base exe\'s files')
         same = ', byte-identical to the base exe' if ok else ', NOT the base exe\'s bytes'
     return 'v3 leg %d files re-traced%s' % (len(tb), same)
+
+
+def adapt_leg(exe, soup, work, tbks, fails):
+    """lane SMOOTHN1: the default bake (noise-driven extra batches, turned at random, up to 16 x the base set).
+    Not re-traced ray by ray (the turns are the bake's own); held to what must still be true: one thread and all
+    threads write the same bytes, the files parse and keep the budget, the same probes in the same places, a sealed
+    room's probe sees no sky through any extra batch, and every probe's sky per octant within 0.05 of the base set's.
+    A quiet synthetic scene may raise no probe (then the bytes are the base set's); the real-cell check is prtp_reference.py."""
+    outs = []
+    for th in (1, 0):
+        out = fresh(os.path.join(work, 'bake_synth_adapt_t%d' % th))
+        rc = run_bake(exe, soup, out, 1024, th, '', ['--adapt', '16'])
+        if rc.returncode != 0:
+            fails.append('adapt: rc %d' % rc.returncode)
+            return 'adapt not run'
+        outs.append(out)
+    fa = []
+    if not same_files(outs[0], outs[1]):
+        fa.append('1 thread and all threads wrote different files')
+    ta = structure(files_in(outs[0]), fa)
+    budget_and_facing(ta, fa)
+    moved = room_sky = 0
+    worst = 0.0
+    if len(ta) != len(tbks):
+        fa.append('files %d vs %d' % (len(ta), len(tbks)))
+    for (_, t0), (_, t1) in zip(tbks, ta):
+        if t0['probes']['pos'].tobytes() != t1['probes']['pos'].tobytes():
+            fa.append('the probes moved')
+            break
+        s0, s1 = t0['probes']['sky'].astype(np.float64), t1['probes']['sky'].astype(np.float64)
+        worst = max(worst, float(np.abs(s1 - s0).max()) if len(s0) else 0.0)
+        moved += int(np.any(t0['links'].tobytes() != t1['links'].tobytes()))
+        for pr in t1['probes']:
+            if in_room(np.array(pr['pos'], np.float64)) and np.any(pr['sky'] != 0):
+                room_sky += 1
+    if room_sky:
+        fa.append('%d room probes see sky' % room_sky)
+    if worst > 0.05:
+        fa.append('sky per octant moved %.3f from the base set' % worst)
+    raised = not same_files(outs[0], os.path.join(work, 'bake_synth_t0'))
+    fails += ['adapt: ' + f for f in fa]
+    return 'adapt leg %d files (16x cap): threads byte-identical %s, sky per octant worst %.3f of the base set, '         'room probes with sky %d, %s' % (len(ta), 'yes' if not any('threads' in f for f in fa) else 'NO', worst, room_sky, 'some probes took extra batches' if raised else 'no probe took an extra batch (a quiet scene)')
 
 
 def synth(exe, work, red, base):
@@ -869,6 +913,7 @@ def synth(exe, work, red, base):
                 nbad.append('no probe had sky to move')
             fails += ['--no-sky: ' + b for b in nbad]
         v3 = '; ' + v3_leg(exe, base, soup, work, 'bake_synth', rays, RECT, t32, alb, True, fails)
+        v3 += '; ' + adapt_leg(exe, soup, work, tbks, fails)
     unl = float(np.mean([float(pr['unl']) for _, t in tbks for pr in t['probes']])) if tbks else 0.0
     verdict = 'PASS' if not fails else 'FAIL'
     print('synth %s%s: v4 %d files, %d probes (%d ground, %d room) re-traced at %d rays, %d links (to a back side %d), '

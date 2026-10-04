@@ -779,6 +779,8 @@ int probeFarCli( const QStringList & args )
 			i++;
 		}
 		else if ( a == QLatin1String( "--rays" ) ) { bs.rays = nx.toInt(); i++; }
+		// lane SMOOTHN1: the noise-driven extra batches, at most n x the base set (1 = the base set alone, the old bake)
+		else if ( a == QLatin1String( "--adapt" ) ) { bs.adaptMax = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--threads" ) ) { bs.threads = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--sector" ) ) { bs.sector = std::max( 4096.0f, nx.toFloat() ); i++; }
 		else if ( a == QLatin1String( "--surfel-cell" ) ) { bs.surfelCell = nx.toFloat(); i++; }
@@ -786,7 +788,7 @@ int probeFarCli( const QStringList & args )
 	}
 	if ( fs.lodl.isEmpty() || ( outDir.isEmpty() && soupOut.isEmpty() ) ) {
 		std::fprintf( stderr, "usage: probefar --lodl <world.lodl> [--lodi <world.lodi>] --out <dir> [--cells x0,y0,x1,y1] "
-			"[--step n] [--hoist u] [--sheet-dim n] [--sector u] [--rays n] [--threads n] [--surfel-cell u] [--max-links n] "
+			"[--step n] [--hoist u] [--sheet-dim n] [--sector u] [--rays n] [--adapt n] [--threads n] [--surfel-cell u] [--max-links n] "
 			"[--soup-out f.psp] [--probes-out f.txt] [--red shift|notrees|treebox|treeshift|canopy]\n" );
 		return 2;
 	}
