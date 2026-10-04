@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
+#include "gl/cellaodecalgl.h"	// lane AODECAL1
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -1174,6 +1175,8 @@ struct AoGpu
 	const void * doc = nullptr;
 	bool ready = false;
 	int unit = -1;
+	GLuint decal = 0;		// lane AODECAL1: this frame's AO decal target (0: none)
+	int decalUnit = -1;		// 20, or -1 on a GPU with 20 units or fewer
 };
 
 QHash<const void *, AoGpu> & aoGpus()
@@ -1228,7 +1231,9 @@ void wwCellAoPass( Scene * scene, bool run )
 		GLint units = 0;
 		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
 		g.unit = units > kAoUnit ? kAoUnit : 9;
+		g.decalUnit = units > 20 ? 20 : -1;
 	}
+	g.decal = 0;
 	GLint prevFbo = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 }, prevActive = 0;
 	GLboolean depthMask = GL_TRUE, colorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
@@ -1300,6 +1305,9 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glDepthMask( GL_TRUE );
 	fn->glDisable( GL_STENCIL_TEST );
 	fn->glDisable( GL_POLYGON_OFFSET_FILL );
+	// lane AODECAL1 (src/gl/cellaodecalgl.h): the decal copies over this opaque pass, into their own target
+	if ( g.decalUnit >= 0 && wwCellAoDecalHas( scene->nifModel ) )
+		g.decal = GLuint( wwCellAoDecalRun( scene, g.gbuf.tex, g.gbufDepth, W, H ) );
 
 	// 2. the full-screen passes (cell_ao.frag)
 	prog = r->useProgram( "cell_ao.prog" );
@@ -1443,6 +1451,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		if ( cellProgram ) {
 			prog->uni1i( "cellProbe", 20 );
 			prog->uni1b( "cellAoOn", false );
+			prog->uni1b( "cellAoDecalOn", false );	// lane AODECAL1
 		}
 		return;
 	}
@@ -1459,6 +1468,23 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	r->fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellAo", std::max( g.unit, 0 ) );
 	prog->uni1b( "cellAoOn", on );
+	/* lane AODECAL1: the decal target multiplies the probe term (cellGiE). Opaque draws only, like the obscurance:
+	 * a blended draw is not in the opaque pass the target was made over. */
+	const bool decalOn = g.ready && g.doc == scene->nifModel && g.decal && g.decalUnit >= 0 && !glIsEnabled( GL_BLEND );
+	{
+		const int du = g.decalUnit >= 0 ? g.decalUnit : std::max( g.unit, 0 );
+		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + du ) );
+		if ( g.decalUnit >= 0 )
+			r->fn->glBindTexture( GL_TEXTURE_2D, decalOn ? g.decal : 0 );
+		r->fn->glActiveTexture( GLenum( prevActive ) );
+		prog->uni1i( "cellAoDecal", du );
+		prog->uni1b( "cellAoDecalOn", decalOn );
+		if ( decalOn ) {
+			GLint dvp[4] = { 0, 0, 1, 1 };
+			glGetIntegerv( GL_VIEWPORT, dvp );
+			prog->uni4f_l( prog->uniLocation( "cellAoDecalRect" ), FloatVector4( float( dvp[0] ), float( dvp[1] ), 0.0f, 0.0f ) );
+		}
+	}
 	if ( on ) {
 		GLint vp[4] = { 0, 0, 1, 1 };
 		glGetIntegerv( GL_VIEWPORT, vp );

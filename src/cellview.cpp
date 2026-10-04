@@ -27,6 +27,7 @@ BSD License - see nifskope.h
 #include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
 #include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
 #include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
+#include "cellaodecal.h"		// lane AODECAL1: baked AO decals under big movable statics
 
 #include <limits>
 
@@ -35,6 +36,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1
 #include "gl/cellfxlit.h"
+#include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gamemanager.h"	// lane IMGS1: the imagespace LUT
 
 #include <QBuffer>
@@ -2067,6 +2069,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			modelsAhead.want( world, p.base, p.swap );
 	modelsAhead.load();
 	CellSpeed::mark( "models read ahead" );
+	AoDecalBuilder aoBuild;	// lane AODECAL1: the copies that get a decal (off: the row's switch)
 	for ( const Placement & p : placements ) {
 		const EsmLodBase & lb = world.lodBase( p.base );
 		const bool isActor = !p.actorKey.isEmpty();   // lane PLACED1
@@ -2331,6 +2334,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				soupRefList += QStringLiteral( "%1\t%2\t%3\n" ).arg( p.ref, 8, 16, QLatin1Char( '0' ) ).arg( role ).arg( tn );
 		}
 
+		const size_t aoTri0 = probeSoup.tris.size() / 9;	// lane AODECAL1: this placement's share of the soup
 		for ( size_t si = 0; si < mit.value().size(); si++ ) {
 			const NativeSrcShape & s = mit.value()[si];
 			const size_t nv = s.geom.pos.size() / 3;
@@ -2870,6 +2874,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			pick.triangles += quint32( s.geom.tris.size() / 3 );
 			srcTris += qint64( s.geom.tris.size() / 3 );
 		}
+		// lane AODECAL1: a copy in the probe soup (its triangles are the sky the probes saw it take)
+		if ( aoBuild.on() && role == 1 && !isActor )
+			aoBuild.consider( CellPickTable::typeName( lb.type ), model, mit.value(), p.pos, p.rot, p.scale, p.ref,
+				aoTri0, probeSoup.tris.size() / 9 );
 		if ( pick.triangles ) {
 			for ( int k = 0; k < 3; k++ ) {
 				pick.bmin[k] = lo[k];
@@ -3843,6 +3851,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 						gs.recordGroup.push_back( keyOf( l.ref ) );
 					}
 			}
+			// lane AODECAL1: the copies' volumes (read or baked), so the relight also builds the copy-free grid
+			std::shared_ptr<const AoDecalSet> aoSet;
+			if ( aoBuild.on() ) {
+				aoSet = aoBuild.finish( dataRoot );
+				probeNotes += aoBuild.census();
+				if ( aoSet && !aoSet->copies.empty() )
+					gs.aoDecals = aoSet;
+			}
 			ProbeGiResult gr;
 			const bool ok = probeGiRelight( probeSoup, giBakeDir, *L, gs, &gr );
 			probeNotes += QStringLiteral( "  %1\n" ).arg( probeGiCensusText( gr ) );
@@ -3900,12 +3916,16 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				QString derr;
 				if ( !dump.isEmpty() && !probeGiDump( gr, gs, dump, &derr ) )
 					probeNotes += QStringLiteral( "  gi dump FAILED: %1\n" ).arg( derr );
+				if ( !gr.aoGate.isEmpty() )
+					probeNotes += QStringLiteral( "  %1\n" ).arg( gr.aoGate );
+				probeGiAoFreeSwap( gr );	// lane AODECAL1: the decals darken; the grid no longer does it twice
 				gi.rgba = std::move( gr.grid );
 				// lane SKY1; lane SKYINT1: an interior keeps its own ambient, so its grid never stands in for the weather's
 				gi.skyLit = gr.skyLit && !spec.interior && gs.skyRed != QLatin1String( "keepamb" );
 				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
 				probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1: the second slots and the rooms
 				wwCellGiPublish( nif, gi );
+				wwCellAoDecalPublish( nif, gs.aoDecals );	// lane AODECAL1 (null: no decals)
 				if ( !spec.interior || gs.interiorSky )
 					probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather relights it
 				WwCellProbeView pv;	// lane PROBEVIEW1: the surfel and probe previews

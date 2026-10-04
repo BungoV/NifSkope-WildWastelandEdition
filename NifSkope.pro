@@ -228,6 +228,7 @@ HEADERS += \
 	src/gl/cellhdr.h \
 	src/gl/cellprobeview.h \
 	src/gl/cellssr.h \
+	src/gl/cellaodecalgl.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
 	src/impostoroct.h \
@@ -347,6 +348,8 @@ HEADERS += \
 	src/cellrefs.h \
 	src/cellactor.h \
 	src/celldecal.h \
+	src/aovolume.h \
+	src/cellaodecal.h \
 	src/esmplaced.h \
 	src/cellworkspace.h \
 	src/lodinative.h \
@@ -448,6 +451,7 @@ SOURCES += \
 	src/gl/cellhdr.cpp \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellssr.cpp \
+	src/gl/cellaodecalgl.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \
@@ -592,6 +596,8 @@ SOURCES += \
 	src/cellrefs.cpp \
 	src/cellactor.cpp \
 	src/celldecal.cpp \
+	src/aovolume.cpp \
+	src/cellaodecal.cpp \
 	src/esmplaced.cpp \
 	src/cellworkspace.cpp \
 	src/cellworkspacetest.cpp \

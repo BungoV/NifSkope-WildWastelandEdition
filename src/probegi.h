@@ -28,6 +28,7 @@
 #include "proberooms.h"
 #include "probesky.h"
 #include "gl/celllights.h"
+#include <memory>
 
 #include <QString>
 #include <QStringList>
@@ -35,6 +36,7 @@
 #include <vector>
 
 struct WwCellLighting;
+struct AoDecalSet;	// lane AODECAL1 (src/cellaodecal.h)
 
 struct ProbeGiResult
 {
@@ -67,6 +69,12 @@ struct ProbeGiResult
 	/*! six slabs (+X -X +Y -Y +Z -Z), each dims[2] deep, x fastest: (r, g, b, valid) a voxel; rgb is
 	 *  E x valid, so a filtered sample divides by its own valid (the renderer's 3D texture as is) */
 	std::vector<float> grid;
+	/*! lane AODECAL1 (src/cellaodecal.h): with decal copies in the spec, the same grid (and grid2) built from the
+	 *  probes with the copies taken out of their sky (E + dE, design section 4); empty without copies */
+	std::vector<float> gridFree, gridFree2;
+	int aoProbes = 0;                   //!< probes a copy's footprint reached
+	double aoDsMean = 0.0;              //!< their mean dE (all axes and channels)
+	QString aoGate;                     //!< WW_CELL_AODECAL_GATE's line
 	std::vector<float> probeCube;       //!< per probe: pos[3] + 6 x rgb
 	std::vector<float> surfelOut;       //!< per unique surfel: pos[3] nrm[3] albedo[3] B[3]
 	// lane PROBEVIEW1: the Pass drop-down's data
@@ -140,6 +148,8 @@ struct ProbeGiSpec
 	std::vector<quint32> recordRef;
 	std::vector<quint64> recordGroup;
 	std::vector<quint16> recordFlags;
+	//! lane AODECAL1: the placed decal copies (null: none; the result is then byte for byte as before)
+	std::shared_ptr<const AoDecalSet> aoDecals;
 };
 
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.
@@ -147,6 +157,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	const ProbeGiSpec & spec, ProbeGiResult * out );
 //! lane ROOMCLAMP1: after gi.rgba / gi.sky took grid / gridSky, append slot 1 and hand the rooms over (none: no-op)
 void probeGiRoomsInto( ProbeGiResult & r, struct WwCellGi & gi );
+//! lane AODECAL1: when the relight built the copy-free grids, they take the grids' place (before probeGiRoomsInto)
+void probeGiAoFreeSwap( ProbeGiResult & r );
 //! One census line.
 QString probeGiCensusText( const ProbeGiResult & r );
 //! The gate's dump: gi_surfels.bin, gi_probes.bin, gi_grid.bin in `dir` (layouts in probegi.cpp).
