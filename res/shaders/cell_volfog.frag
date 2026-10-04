@@ -27,7 +27,7 @@ uniform ivec3 volDims;			// columns, rows, slices
 uniform vec2 volProj;			// the projection's [0][0], [1][1]
 uniform sampler3D volInject;	// stage 2 reads stage 1's volume
 uniform bool volCsm;			// the sun's cascades are drawn this frame
-uniform int volRed;				// 2 gioff, 4 flat, 8 noshadow, 16 wrongsrc (1 off is the CPU's: computed, not applied)
+uniform int volRed;				// 2 gioff, 4 flat, 8 noshadow, 16 wrongsrc, 32 sixreads (1 off is the CPU's: computed, not applied)
 uniform vec4 volPhase[3];		// rgb: the weight of the air (Rayleigh), forward and back terms; w: the HG g (0 for air)
 uniform vec4 volGi;				// rgb: the GI's tint (the three weights summed), w: the GI's L1 g
 uniform float volK;				// the record's intensity (GDRY Intensity, 1 without a record)
@@ -74,6 +74,57 @@ vec3 volCube( vec3 P, int a )
 	return cellGiE( P, axes[a] );
 }
 
+/* lane VOLFOG1b: the six axes in ONE room lookup (VOLFOG1 read each axis as a surface: a room read and an 8-voxel
+ * blend per axis, and where the blend had no weight the 16-cell air search and the 64-voxel gap fill -- 19.2 ms on
+ * Vault111Cryo). A froxel is a point in the air, not a surface: no half-voxel step off it, the room read at P itself,
+ * and one pass over the 8 voxels fetches all six slabs of the room's slot (an empty slab: no weight on that axis).
+ * An axis with no weight, or no room at P, takes the grid's plain trilinear (the surfaces' last resort). The surface
+ * path (cell_lights.glsl) is not touched; the red sixreads keeps the VOLFOG1 reads (volCube) for the cost's before. */
+void volCubeAll( vec3 P, out vec3 E[6] )
+{
+	vec4 s[6];
+	float ws[6];
+	for ( int a = 0; a < 6; a++ ) {
+		s[a] = vec4( 0.0 );
+		ws[a] = 0.0;
+	}
+	ivec3 dm = ivec3( cellGiDims );
+	if ( cellGiRooms && ( cellPassRed & 8 ) == 0 ) {
+		ivec2 L = cellRoomAt( P );
+		if ( L.x >= 0 ) {
+			vec3 g = ( P - cellGiOrigin ) / cellGiVoxel - 0.5;
+			ivec3 i0 = ivec3( floor( g ) );
+			vec3 f = g - vec3( i0 );
+			for ( int k = 0; k < 8; k++ ) {
+				ivec3 o = ivec3( k & 1, ( k >> 1 ) & 1, ( k >> 2 ) & 1 );
+				ivec3 c = clamp( i0 + o, ivec3( 0 ), dm - 1 );
+				vec3 t = mix( 1.0 - f, f, vec3( o ) );
+				float w = t.x * t.y * t.z;
+				ivec2 S = cellRoomUnpack( texelFetch( cellGiSlots, c, 0 ).r );
+				int base = ( S.x >= 0 && ( S.x == L.x || S.x == L.y ) ) ? 0 : ( S.y >= 0 && ( S.y == L.x || S.y == L.y ) ) ? 6 * dm.z : -1;
+				if ( base < 0 || w <= 0.0 )
+					continue;
+				for ( int a = 0; a < 6; a++ ) {
+					vec4 v = texelFetch( cellGi, ivec3( c.xy, c.z + base + a * dm.z ), 0 );
+					if ( v.a > 0.0 ) {
+						s[a] += w * v;
+						ws[a] += w;
+					}
+				}
+			}
+		}
+	}
+	vec3 g = ( P - cellGiOrigin ) / cellGiVoxel;
+	vec2 xy = g.xy / cellGiDims.xy;
+	float z = clamp( g.z, 0.5, cellGiDims.z - 0.5 );
+	float depth = ( cellGiRooms ? 12.0 : 6.0 ) * cellGiDims.z;
+	for ( int a = 0; a < 6; a++ ) {
+		vec4 r = ws[a] > 0.0 ? s[a] / ws[a] : texture( cellGi, vec3( xy, ( z + float( a ) * cellGiDims.z ) / depth ) );
+		// as cellGiE0: a sky grid keeps the valid share, else the mean over the valid share
+		E[a] = cellGiSky ? max( r.rgb, vec3( 0.0 ) ) : ( r.a > 0.01 ? max( r.rgb / r.a, vec3( 0.0 ) ) : vec3( 0.0 ) );
+	}
+}
+
 // the light the medium at posView scatters toward the eye (display units, before the record's intensity)
 vec3 volScatter( vec3 posView, vec3 dirView )
 {
@@ -117,8 +168,14 @@ vec3 volGiScatter( vec3 posView, vec3 dirView )
 	vec3 P = cellWorldPos( posView );
 	vec3 dW = cellWorldDir( dirView );
 	vec3 E[6];
-	for ( int a = 0; a < 6; a++ )
-		E[a] = volCube( P, a ) * ( 1.0 / PI );
+	if ( ( volRed & 4 ) == 0 && !volAirOn && ( volRed & 32 ) == 0 ) {
+		volCubeAll( P, E );	// lane VOLFOG1b: one room lookup for the six axes
+		for ( int a = 0; a < 6; a++ )
+			E[a] *= 1.0 / PI;
+	} else {
+		for ( int a = 0; a < 6; a++ )
+			E[a] = volCube( P, a ) * ( 1.0 / PI );
+	}
 	vec3 fl = ( 2.0 / 3.0 ) * ( E[0] + E[1] + E[2] + E[3] + E[4] + E[5] );
 	vec3 l1 = ( E[0] - E[1] ) * dW.x + ( E[2] - E[3] ) * dW.y + ( E[4] - E[5] ) * dW.z;
 	return 0.25 * max( fl + 3.0 * volGi.w * l1, vec3( 0.0 ) ) * volGi.rgb;

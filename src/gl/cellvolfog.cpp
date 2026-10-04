@@ -37,7 +37,7 @@ struct VfState
 {
 	bool loaded = false;
 	bool on = false, pinned = false;
-	int red = 0;			// 1 off (computed, not applied), 2 gioff, 4 flat, 8 noshadow, 16 wrongsrc
+	int red = 0;			// 1 off (computed, not applied), 2 gioff, 4 flat, 8 noshadow, 16 wrongsrc, 32 sixreads (VOLFOG1b)
 	int terms = 7;
 	int probe = 0;
 	QString dump;
@@ -59,7 +59,7 @@ VfState & vs()
 		}
 		for ( const QByteArray & t : qgetenv( "WW_VOLFOG_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
-			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "wrongsrc" ? 16 : 0;
+			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "wrongsrc" ? 16 : r == "sixreads" ? 32 : 0;
 		}
 		const QByteArray terms = qgetenv( "WW_VOLFOG_TERMS" ).trimmed();
 		if ( !terms.isEmpty() )

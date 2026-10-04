@@ -27,6 +27,8 @@
 #   --red noshadow  the cascades ignored in the medium            S
 #   --red gioff     the medium takes no GI                        G
 #   --red flat      one GI cube for every froxel                  F
+# Lane VOLFOG1b: Vault111Cryo also shoots time6 = time with WW_VOLFOG_RED=sixreads (the VOLFOG1 GI reads); stage K
+# needs the one-lookup read cheaper than that on the same camera, same exe.
 #
 # USAGE  bash tests/spells/volfog1_cell.sh [--red off|wrongsrc|noshadow|gioff|flat]   RECHECK=1 judges again
 # Run under the nifskope lock (withlock.sh nifskope ...).
@@ -140,6 +142,8 @@ if [ "$RECHECK" != 1 ]; then
 				shoot "$EXE" "$p" giflat WW_CELL_GI=1 "${from[@]}" WW_VOLFOG=1 WW_VOLFOG_TERMS=4 \
 					WW_VOLFOG_RED=flat "$(dumpenv "$p" giflat)"
 				shoot "$EXE" "$p" time WW_VOLFOG=1 WW_VOLFOG_TIME=1 WW_CELL_GI=1 "${from[@]}" "$(dumpenv "$p" time)"
+				# lane VOLFOG1b: the same camera with the VOLFOG1 six surface reads (red sixreads): the cost's before
+				shoot "$EXE" "$p" time6 WW_VOLFOG=1 WW_VOLFOG_TIME=1 WW_CELL_GI=1 "${from[@]}" WW_VOLFOG_RED=sixreads 					"$(dumpenv "$p" time6)"
 			fi
 		fi
 	done

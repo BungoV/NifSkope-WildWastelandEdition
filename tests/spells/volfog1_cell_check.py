@@ -31,6 +31,8 @@ Stages (bars fixed before the first run):
   F  follows   (interiors) the GI's per-column chromaticity spread (std of r - g over the lit columns) >= 1.5 x the
                spread of the red flat comparator (one cube everywhere)
   C  cost      time.bin.txt's ms (glFinish to glFinish around the pass, all terms); reported against the GPURELIGHT1 budget (no bar here: the report)
+  K  read cost (lane VOLFOG1b, interiors) time.bin.txt's ms under time6.bin.txt's (the same camera, red sixreads: the
+               VOLFOG1 six surface reads a froxel)
 Reds: off -> P A; wrongsrc -> R; noshadow -> S; gioff -> G; flat -> F.
 """
 import os
@@ -315,6 +317,11 @@ def main():
             ms = float(t2['ms'][0])
             G.put('C', ms > 0, 'cost: %.3f ms for %s x %s x %s froxels, all terms (%d emitters, cascades %d), against the GPURELIGHT1 GPU relight, 13.5 ms'
                   % (ms, *(int(x) for x in t2['dims']), int(t2['emitters'][0]), int(t2['csm'][0])))
+            t6 = os.path.join(run, 'time6.bin.txt')
+            if os.path.exists(t6):   # lane VOLFOG1b: the same camera with the VOLFOG1 six surface reads
+                ms6 = float(read_txt(t6)['ms'][0])
+                G.put('K', 0 < ms < ms6, 'GI read cost: one room lookup %.3f ms, VOLFOG1 six reads %.3f ms (%.2fx)'
+                      % (ms, ms6, ms6 / ms if ms > 0 else float('inf')))
     want = {'off': ['P', 'A'], 'wrongsrc': ['R'], 'noshadow': ['S'], 'gioff': ['G'], 'flat': ['F']}
     failed = sorted(k for k, v in G.res.items() if not all(v))
     if red:

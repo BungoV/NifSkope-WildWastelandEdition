@@ -32,7 +32,8 @@ class Scene;
  *  (1e-4 x the record's scattering per unit), here the fog records' (his call); the volume is added under an
  *  over-blended card rather than over it (exact for the additive beams).
  *  The row "Volumetric Fog" (Scene window, under Fog; ships OFF; QSettings WW/VolFog); the pin WW_VOLFOG=0|1 wins.
- *  Pins: WW_VOLFOG_RED=off (computed, not applied) | gioff | flat | noshadow | wrongsrc (comma list),
+ *  Pins: WW_VOLFOG_RED=off (computed, not applied) | gioff | flat | noshadow | wrongsrc | sixreads (comma list;
+ *  sixreads, lane VOLFOG1b: the GI cube read the VOLFOG1 way, six surface reads a froxel -- the cost's before),
  *  WW_VOLFOG_TERMS=<mask> (1 directional, 2 placed lights, 4 GI; the gates' stable subsets),
  *  WW_VOLFOG_PROBE=1 (the volume term alone, raw), WW_VOLFOG_DUMP=<file> (the volumes and the numbers). */
 void wwVolFogPass( Scene * scene, bool run );
