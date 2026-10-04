@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
+#include "gl/cellvolfog.h"	// lane VOLFOG1
 #include "esmweather.h"
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
@@ -169,6 +170,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	row( tr( "Ground Plane" ), groundBox, true );
 	heading( tr( "Fog" ) );
 	liveCheck( fogBox, "lookdevFog", tr( "Fog" ), wwLookdevFog() );	// lane FOG1
+	liveCheck( volFogBox, "volFog", tr( "Volumetric Fog" ), wwVolFogOn() );	// lane VOLFOG1: every mode (interiors fog outside Lookdev)
 	heading( tr( "Effects" ) );
 	liveCheck( shadowsBox, "lookdevShadows", tr( "Cascaded Shadows" ), wwLookdevShadows() );	// lane CSM1
 	placeholderCheck( tr( "Contact Shadows" ) );
@@ -265,6 +267,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( sunBox, &wwLookdevSetSun );
 	liveToggle( moonBox, &wwLookdevSetMoon );
 	liveToggle( fogBox, &wwLookdevSetFog );
+	liveToggle( volFogBox, &wwVolFogSetOn );
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
 		if ( live )

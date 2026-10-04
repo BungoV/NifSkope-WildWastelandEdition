@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "lookdevstage.h"
 
 #include "esmweather.h"
+#include "gl/cellvolfog.h"	// lane VOLFOG1
 #include "gl/celllights.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -378,6 +379,25 @@ QString fogSummary()
 
 } // namespace
 
+bool wwLookdevGodRays( float m[12], QString * note )
+{
+	// lane VOLFOG1: the weather's WGDR, the two ToD slots of the colour keys blended linearly (GetGodraysSettings
+	// 0x64cb30 sums every term weight-linearly; a slot without a GDRY adds the fallback constants)
+	resolve();
+	const LdState & s = st();
+	if ( !s.haveWeather )
+		return false;
+	const WwFog f = currentFog();
+	const WwGodRayMedium g = wwGodRayMix( s.w.godRay[f.keys.a], s.w.godRay[f.keys.b], float( f.keys.t ) );
+	const float v[12] = { g.air[0], g.air[1], g.air[2], g.fwd[0], g.fwd[1], g.fwd[2], g.back[0], g.back[1], g.back[2],
+		g.gFwd, g.gBack, g.post };
+	std::copy( v, v + 12, m );
+	if ( note )
+		*note = QStringLiteral( "WTHR %1 WGDR %2,%3 t=%4 found=%5/8%6" ).arg( s.w.edid, QString::fromLatin1( wwTodName( f.keys.a ) ), QString::fromLatin1( wwTodName( f.keys.b ) ) )
+			.arg( double( f.keys.t ), 0, 'f', 3 ).arg( s.w.godRayFound ).arg( g.fallback ? QStringLiteral( " fallback" ) : QString() );
+	return true;
+}
+
 bool wwLookdevFogWanted( Scene * scene )
 {
 	if ( !scene || !scene->renderer )
@@ -404,6 +424,7 @@ void wwLookdevFogUniforms( Scene * scene )
 	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
 	if ( !prog || prog->uniLocation( "fogOn" ) < 0 )
 		return;
+	wwVolFogUniforms( scene );	// lane VOLFOG1: every program that holds the fog holds the volume's sampler
 	LdState & s = st();
 	const bool on = wwLookdevFogWanted( scene );
 	prog->uni1b( "fogOn", on );
@@ -716,7 +737,8 @@ QString wwLookdevSummary()
 				.arg( s.gameDay, 0, 'f', 2 ).arg( wwLookdevCloudSeconds(), 0, 'f', 2 ).arg( s.skyLast )
 			: QString() )
 		+ ( s.fog ? QString( " fog=on %1 drew=%2" ).arg( fogSummary(), s.fogLast ) : QString() )
-		+ ( ( s.shadows || !qEnvironmentVariable( "WW_CSM_RED" ).isEmpty() ) ? QStringLiteral( " " ) + wwSunShadowSummary() : QString() );
+		+ ( ( s.shadows || !qEnvironmentVariable( "WW_CSM_RED" ).isEmpty() ) ? QStringLiteral( " " ) + wwSunShadowSummary() : QString() )
+		+ ( wwVolFogOn() ? QStringLiteral( " " ) + wwVolFogSummary() : QString() );	// lane VOLFOG1
 }
 
 QString wwLookdevEcho()

@@ -100,6 +100,8 @@ struct EsmLight
 	bool hasAttenuation = false;
 	float fade = 1.0f;              //!< FNAM
 	QString gobo;                   //!< NAM0
+	quint32 godRays = 0;            //!< lane VOLFOG1: WGDR, the light's GDRY (0 = none: the light casts no shafts)
+	float godRayNear = 0.0f;        //!< lane VOLFOG1: DATA "God Rays - Near Clip" (offset 52)
 	//! "omni", "spot", "hemi", "box", with "shadow " in front when it casts one
 	QString typeName() const;
 };
@@ -115,6 +117,7 @@ struct EsmInteriorCell
 	QString edid;
 	quint32 lightingTemplate = 0;   //!< LTMP, 0 when absent
 	quint32 imageSpace = 0;         //!< XCIM, the cell's IMGS (lane IMGS1), 0 when absent
+	quint32 godRays = 0;            //!< XGDR, the cell's GDRY (lane VOLFOG1), 0 when absent
 	QByteArray xcll;                //!< raw, empty when absent
 	quint8 ambient[3] = { 0, 0, 0 };
 	quint8 directional[3] = { 0, 0, 0 };
@@ -555,6 +558,8 @@ public:
 	 *  the Light Fade distances), `dalc` = its DALC (6 axis colours, specular, scale). False when
 	 *  the form is not an LGTM. */
 	bool lightingTemplate( quint32 formID, QByteArray & data, QByteArray & dalc ) const;
+	//! lane VOLFOG1: an LGTM's WGDR (its GDRY), 0 when absent or not an LGTM
+	quint32 lightingTemplateGodRays( quint32 formID ) const;
 	//! lane IMGS1: an IMGS record's EDID, HNAM (HDR, 9 floats), CNAM (cinematic, 3), TNAM (tint, 4) raw and its
 	//! TX00 LUT path; false when not an IMGS
 	bool imageSpace( quint32 formID, QString & edid, QByteArray & hnam, QByteArray & cnam, QByteArray & tnam,

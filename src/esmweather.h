@@ -203,6 +203,35 @@ struct WwWeatherEntry
 	bool override() const { return srcFile.compare( ownerFile, Qt::CaseInsensitive ) != 0; }
 };
 
+/* lane VOLFOG1: one GDRY "God Rays" record (wbDefinitionsFO4 GDRY; the engine's GodRaysData::LoadFrom 0x373c10,
+ * MEASURED): DATA = back rgb, fwd rgb, intensity, air / back / fwd scale, back phase, air rgb (never read by the
+ * engine), fwd phase; a shorter DATA keeps the engine's defaults for its tail. */
+struct WwGodRays
+{
+	quint32 formID = 0;
+	QString edid;
+	float back[3] = { 1.0f, 1.0f, 1.0f };
+	float fwd[3] = { 1.0f, 0.5f, 0.25f };
+	float intensity = 1.0f, airScale = 3.0f, backScale = 2.0f, fwdScale = 4.0f, backPhase = 0.0f, fwdPhase = 0.75f;
+};
+
+/* lane VOLFOG1: the god-ray medium the engine builds from a GDRY (Sky::GetGodraysSettings 0x64cb30, MEASURED):
+ * air = (0.18, 0.46, 1) x air scale (Rayleigh), fwd = fwd colour x fwd scale (HG g = fwd phase), back = back colour
+ * x back scale (HG g = back phase); post = the intensity. Without a GDRY the engine's fallback constants. */
+struct WwGodRayMedium
+{
+	float air[3] = { 0.60f, 1.52f, 3.31f };
+	float fwd[3] = { 2.0f, 2.0f, 2.0f };
+	float back[3] = { 1.0f, 1.0f, 1.0f };
+	float gFwd = 0.75f, gBack = 0.0f, post = 1.0f;
+	bool fallback = true;
+};
+WwGodRayMedium wwGodRayMediumOf( const WwGodRays & g );
+//! a weighted sum of two media (the engine's blend: every term linear in the weights)
+WwGodRayMedium wwGodRayMix( const WwGodRayMedium & a, const WwGodRayMedium & b, float t );
+//! read one GDRY; false when `formID` is not one
+bool wwGodRaysRead( ESMFile & esm, quint32 formID, WwGodRays & out );
+
 struct WwWeatherData
 {
 	quint32 formID = 0;
@@ -245,6 +274,11 @@ struct WwWeatherData
 	float fogScale[4][8] = { { 1, 1, 1, 1, 1, 1, 1, 1 }, { 1, 1, 1, 1, 1, 1, 1, 1 },
 		{ 1, 1, 1, 1, 1, 1, 1, 1 }, { 1, 1, 1, 1, 1, 1, 1, 1 } };
 	bool hasNam4 = false;
+
+	// lane VOLFOG1: WGDR, the GDRY per ToD (the WGDR order = the IMSP order), and the medium each builds
+	quint32 wgdr[8] = {};
+	WwGodRayMedium godRay[8];
+	int godRayFound = 0;	// slots whose link resolved to a GDRY
 };
 
 /*! The engine fog at one hour (lane FOG1, spec_fog.md 2.1-2.3): the FNAM floats

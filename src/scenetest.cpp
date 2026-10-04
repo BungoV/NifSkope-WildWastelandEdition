@@ -65,6 +65,7 @@ BSD License - see nifskope.h
 #include "gl/gltex.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
+#include "gl/cellvolfog.h"	// lane VOLFOG1
 #include "model/nifmodel.h"
 #include "ui/scenewindow.h"
 
@@ -630,6 +631,11 @@ void fogLeg( NifSkope * skope, WwScState & st )
 	if ( !all )
 		return;
 	check( st, QStringLiteral( "(ship) the Fog row starts OFF in a fresh scope" ), !fog->isChecked() && !wwLookdevFog() );
+	{	// lane VOLFOG1: the Volumetric Fog row, under Fog, ships OFF
+		auto * vol = w->findChild<QCheckBox *>( QStringLiteral( "volFog" ) );
+		check( st, QStringLiteral( "(ship) the Volumetric Fog row exists and starts OFF in a fresh scope" ),
+			vol && !vol->isChecked() && !wwVolFogOn() );
+	}
 	if ( !w->isVisible() ) {
 		w->show();
 		pump();

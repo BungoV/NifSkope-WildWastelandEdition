@@ -228,6 +228,7 @@ HEADERS += \
 	src/gl/cellhdr.h \
 	src/gl/cellprobeview.h \
 	src/gl/cellssr.h \
+	src/gl/cellvolfog.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
 	src/impostoroct.h \
@@ -445,6 +446,7 @@ SOURCES += \
 	src/gl/cellhdr.cpp \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellssr.cpp \
+	src/gl/cellvolfog.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \

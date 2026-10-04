@@ -921,6 +921,13 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		l.spot = !( b.flags & 0x800 ) && ( b.flags & ( 0x400 | 0x4000 ) ) != 0;	// lane HEMI1: the hemisphere flag wins
 		// lane SHADOW1: the shadow kind, near clip (DATA + XLIG delta) and XLIG Shadow Depth Bias
 		l.shadow = ( b.flags & 0x400 ) ? 1 : ( b.flags & 0x800 ) ? 2 : ( b.flags & 0x1000 ) ? 3 : 0;
+		// lane VOLFOG1: a shaft emitter is a shadowed light with a GDRY (GenDynamic 0x320a50 + AddLight, MEASURED); its
+		// volume intensity is that GDRY's
+		if ( l.shadow && b.godRays && world.plugin() ) {
+			WwGodRays gr;
+			if ( wwGodRaysRead( *world.plugin(), b.godRays, gr ) )
+				l.godRay = gr.intensity;
+		}
 		l.nearClip = std::max( b.nearClip + ( r.xligCount >= 5 ? r.xlig[4] : 0.0f ), 0.0f );
 		l.shadowBias = r.xligCount >= 4 ? r.xlig[3] : 0.0f;
 		if ( l.spot || ( b.flags & 0x800 ) ) {
@@ -967,6 +974,22 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		const EsmInteriorCell & ic = world.interior();
 		QByteArray tData, tDalc;
 		const bool haveT = ic.lightingTemplate && world.lightingTemplate( ic.lightingTemplate, tData, tDalc );
+		// lane VOLFOG1: the god-ray medium: XGDR, else the template's WGDR, else the engine's fallback (GetGodraysSettings)
+		{
+			const quint32 tg = ic.lightingTemplate ? world.lightingTemplateGodRays( ic.lightingTemplate ) : 0;
+			const quint32 gform = ic.godRays ? ic.godRays : tg;
+			WwGodRays gr;
+			if ( gform && world.plugin() && wwGodRaysRead( *world.plugin(), gform, gr ) ) {
+				const WwGodRayMedium m = wwGodRayMediumOf( gr );
+				const float v[12] = { m.air[0], m.air[1], m.air[2], m.fwd[0], m.fwd[1], m.fwd[2], m.back[0], m.back[1], m.back[2],
+					m.gFwd, m.gBack, m.post };
+				std::copy( v, v + 12, L.godRay );
+				L.godRayNote = QStringLiteral( "%1 %2 (%3)" ).arg( ic.godRays ? QStringLiteral( "XGDR" ) : QStringLiteral( "LGTM WGDR" ) )
+					.arg( gform, 8, 16, QLatin1Char( '0' ) ).arg( gr.edid );
+			} else {
+				L.godRayNote = QStringLiteral( "fallback (no GDRY)" );
+			}
+		}
 		const QByteArray & x = ic.xcll;
 		// a field comes from the template when the cell has no XCLL or inherits it
 		auto fromT = [&]( quint32 flag ) { return haveT && ( x.isEmpty() || ( ic.inherits & flag ) ); };
@@ -1140,7 +1163,9 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		+ QStringLiteral( " shapes=hemisphere %1 box %2 (box link unresolved %3) ambientboxes=%4" ).arg( hemi ).arg( box )
 			.arg( boxLost ).arg( ambientBox )	// lane HEMI1
 		+ QStringLiteral( " imagespace=%1" ).arg( isNote )
-		+ QStringLiteral( " fog=%1" ).arg( L.fogNote.isEmpty() ? QStringLiteral( "none (exterior: the Lookdev weather fog)" ) : L.fogNote );
+		+ QStringLiteral( " fog=%1" ).arg( L.fogNote.isEmpty() ? QStringLiteral( "none (exterior: the Lookdev weather fog)" ) : L.fogNote )
+		+ QStringLiteral( " godrays=%1 emitters=%2" ).arg( L.godRayNote )	// lane VOLFOG1
+			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.godRay > 0.0f; } ) );
 	wwCellLightsPublish( nif, L );
 }
 

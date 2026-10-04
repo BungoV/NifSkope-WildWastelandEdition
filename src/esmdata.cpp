@@ -1497,10 +1497,14 @@ const EsmLight & EsmWorld::light( quint32 formID ) const
 					L.exponent = f.readFloat();
 					L.hasAttenuation = true;
 				}
+				if ( f.size() >= 56 )
+					L.godRayNear = f.readFloat();       // lane VOLFOG1: God Rays - Near Clip
 			} else if ( f == "FNAM" && f.size() >= 4 ) {
 				L.fade = f.readFloat();
 			} else if ( f == "NAM0" ) {
 				L.gobo = fieldString( f );
+			} else if ( f == "WGDR" && f.size() >= 4 ) {
+				L.godRays = esm->mapFormID( *r, f.readUInt32() );	// lane VOLFOG1
 			}
 		}
 	}
@@ -1523,6 +1527,18 @@ bool EsmWorld::lightingTemplate( quint32 formID, QByteArray & data, QByteArray &
 			dalc = QByteArray( d, int( f.size() ) );
 	}
 	return true;
+}
+
+quint32 EsmWorld::lightingTemplateGodRays( quint32 formID ) const
+{
+	const ESMFile::ESMRecord * r = esm ? esm->findRecord( formID ) : nullptr;
+	if ( !r || r->type == GRUP || !( *r == "LGTM" ) )
+		return 0;
+	ESMFile::ESMField f( *esm, *r );
+	while ( f.next() )
+		if ( f == "WGDR" && f.size() >= 4 )
+			return esm->mapFormID( *r, f.readUInt32() );
+	return 0;
 }
 
 bool EsmWorld::imageSpace( quint32 formID, QString & edid, QByteArray & hnam, QByteArray & cnam, QByteArray & tnam,
@@ -1651,6 +1667,8 @@ bool EsmWorld::loadInterior( const QString & esmPath, const QString & cell, QStr
 				ic.lightingTemplate = esm->mapFormID( *found, f.readUInt32() );
 			} else if ( f == "XCIM" && f.size() >= 4 ) {
 				ic.imageSpace = esm->mapFormID( *found, f.readUInt32() );
+			} else if ( f == "XGDR" && f.size() >= 4 ) {
+				ic.godRays = esm->mapFormID( *found, f.readUInt32() );	// lane VOLFOG1
 			} else if ( f == "DATA" && f.size() >= 1 ) {   // lane SKYINT1: the cell's flags (one byte in old records)
 				const unsigned char * d = f.data();
 				ic.flags = quint16( d[0] | ( f.size() >= 2 ? d[1] << 8 : 0 ) );
