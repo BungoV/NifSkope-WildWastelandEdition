@@ -249,10 +249,15 @@ def stage_b(dirpath, tag):
     P = lambda k: img(os.path.join(dirpath, '%s.p%d.png' % (tag, k)))
     final = img(os.path.join(dirpath, tag + '.png')) / 255.0
     p = {k: P(k) for k in range(1, 11)}
+    # lane WATER2's probes (11-24): the SSR read and the distances; a WATER1-era green run has none
+    w2 = os.path.exists(os.path.join(dirpath, '%s.p24.png' % tag))
+    if w2:
+        p.update({k: P(k) for k in range(15, 25)})
     # the water mask: only the water's pixels change from one probe picture to the next (every other pixel is the
     # same scene each time, up to run-to-run noise); N against V, the depth terms' two bytes, the constants against N
     ne = lambda a, b: (np.abs(p[a] - p[b]).max(2) > 0)
-    mask = ne(1, 3) & ne(5, 6) & ne(9, 1) & ne(10, 2)
+    # lane WATER2: no ne(5, 6): far or deep water reads rz = rw = 0 in both, and was left out (half the creek)
+    mask = ne(1, 3) & ne(9, 1) & ne(10, 2)
     # the frame constants: per column x % 4
     H, W = mask.shape
     xs = np.arange(W)[None, :].repeat(H, 0)
@@ -294,6 +299,24 @@ def stage_b(dirpath, tag):
         return untonemap(t, Aa, Da)
 
     refr, refrOff = to_lin(texIn), to_lin(texOff)
+    ssr = None
+    if w2 and not under:
+        u24 = lambda a, b, c: (np.round(a) * 65536.0 + np.round(b) * 256.0 + np.round(c)) / 16777215.0
+        dav = u24(p[19], p[20], p[21])
+        off = u24(p[22], p[23], p[24])
+
+        def dfog(c, along, vert):   # the game's depth-colour pass (02146), drawn into the copy before the water
+            rzF = sat(1.0 - vert / P1[3])
+            xf = sat((sat(1.0 - along / P1[3]) - P3[1]) / (P3[0] - P3[1]))
+            a = np.power(np.maximum(1.0 - (3.0 - 2.0 * xf) * xf * xf, 0.0), 0.33) * (P3[3] - P3[2]) + P3[2]
+            xc = sat((rzF - P4[1]) / (P4[0] - P4[1]))
+            xc = xc * xc * (3.0 - 2.0 * xc)
+            col = M[1][:3] + (M[0][:3] - M[1][:3]) * xc[..., None]
+            return c + (col - c) * a[..., None]
+        refr = dfog(refr, dav[..., 1] * 4096.0, dav[..., 2] * 4096.0)
+        hit = (off[..., 2] > 0.5)[..., None]
+        refrOff = np.where(hit, dfog(refrOff, off[..., 0] * 4096.0, off[..., 1] * 4096.0), refrOff)
+        ssr = np.concatenate([u16(p[15], p[16]), u16(p[17], p[18])[..., :1]], 2)
     x = sat((rw - P3[1]) / (P3[0] - P3[1]))
     alphaV = np.power(np.maximum(1.0 - (3.0 - 2.0 * x) * x * x, 0.0), 0.33) * (P3[3] - P3[2]) + P3[2]
     sx = sat((rz - P2[0]) / (1.0 - P2[0]))
@@ -305,6 +328,8 @@ def stage_b(dirpath, tag):
     Rz = R[..., 2:3]
     skyc = sky[0] + (sky[1] - sky[0]) * sat(Rz + 0.75)
     skyc = skyc + (sky[2] - skyc) * sat(Rz * 1.9 + 0.35)
+    if ssr is not None:   # lane WATER2: the screen-space reflection over the sky
+        skyc = skyc + (ssr[..., :3] - skyc) * ssr[..., 3:4]
     silted = refr + M[4][3] * (1.0 - alphaV)[..., None] * ((M[5][:3] + (M[4][:3] - M[5][:3]) * refr) - refr)
     sunc = sun
     spec = sunc * (sat(np.sum(R * Ldir, 2)) ** Var[0])[..., None] * M[1][3] \

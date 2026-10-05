@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "cellssr.h"
 
 #include "gl/celllights.h"
+#include "gl/cellwater.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -36,6 +37,8 @@ struct SsrState
 	int probe = 0;			// WW_CELL_LIT_PROBE: another lane's probe reads its own term, without the reflection
 	QString dump;			// WW_CELL_SSR_DUMP
 	bool pass = false;		// the scene pass is drawing
+	bool waterRay = false;	// lane WATER2: the water ray pass is drawing
+	unsigned int gbuf = 0;
 	bool flagged = false;	// the draw being set up carries the flag
 };
 
@@ -63,8 +66,11 @@ struct SsrGpu
 	SsrTarget scene;			// full size: the lit color without the reflection, alpha the flag (RGBA32F, bilinear)
 	SsrTarget ray;				// half size: u0, v0, start depth
 	SsrTarget raw, across, fin;	// half size: rgb the reflected color, a the confidence (bilinear)
+	SsrTarget wray;				// lane WATER2: full size, bottom row first: the water's ray in the view, view depth
 	const void * doc = nullptr;
 	bool ready = false;
+	bool waterOnly = false;		// an exterior: the pass ran for the water alone
+	bool haveWater = false;		// the water ray pass drew
 	int unit = -1;
 };
 
@@ -120,8 +126,11 @@ void wwCellSsrPass( Scene * scene, bool run )
 		return;
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
 	WwCellAoTargets ao;
-	if ( !L || !L->interior || !wwCellAoTargets( scene, ao ) )
+	const bool waterSsr = wwCellWaterSsrWanted( scene );	// lane WATER2
+	if ( !L || !( L->interior || waterSsr ) || !wwCellAoTargets( scene, ao ) )
 		return;
+	g.waterOnly = !L->interior;
+	g.haveWater = false;
 	QElapsedTimer timer;
 	timer.start();
 	auto fn = r->fn;
@@ -198,6 +207,33 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glDisable( GL_STENCIL_TEST );
 	fn->glDisable( GL_POLYGON_OFFSET_FILL );
 
+	// 1b. lane WATER2: the water's rays (the game's pass 02100), depth-tested against the opaque depth just drawn
+	if ( waterSsr ) {
+		ssrAlloc( fn, g.wray, W, H, false );
+		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.wray.fbo );
+		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ao.depthRb );
+		if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE ) {
+			fn->glViewport( 0, 0, W, H );
+			fn->glClearBufferfv( GL_COLOR, 0, none4 );
+			fn->glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );	// wwCellSsrDraw opens it for the water
+			s.pass = true;
+			s.waterRay = true;
+			s.gbuf = ao.gbuf;
+			{
+				NodeList second;
+				scene->collectShapes( second );
+				Scene::drawDeferredShapes( second );
+			}
+			s.pass = false;
+			s.waterRay = false;
+			g.haveWater = true;
+			fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+			fn->glDepthMask( GL_TRUE );
+			fn->glDisable( GL_STENCIL_TEST );
+			fn->glDisable( GL_POLYGON_OFFSET_FILL );
+		}
+	}
+
 	// 2. the full-screen passes (cell_ssr.frag)
 	prog = r->useProgram( "cell_ssr.prog" );
 	fn->glDisable( GL_DEPTH_TEST );
@@ -205,8 +241,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glDisable( GL_BLEND );
 	fn->glDepthMask( GL_FALSE );
 	fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-	const GLuint bound[6] = { ao.gbuf, ao.mip[1], ao.mip[2], ao.mip[3], ao.mip[4], g.scene.tex };
-	for ( int u = 0; u < 6; u++ ) {
+	const GLuint bound[8] = { ao.gbuf, ao.mip[1], ao.mip[2], ao.mip[3], ao.mip[4], g.scene.tex, 0,
+		g.haveWater ? g.wray.tex : 0 };
+	for ( int u = 0; u < 8; u++ ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
 		fn->glBindTexture( GL_TEXTURE_2D, bound[u] );
 	}
@@ -217,6 +254,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 	prog->uni1i( "zMip4", 4 );
 	prog->uni1i( "scene", 5 );
 	prog->uni1i( "src", 6 );
+	prog->uni1i( "waterRay", 7 );
+	prog->uni1b( "haveWaterRay", g.haveWater );
+	prog->uni1b( "opaqueRays", !g.waterOnly );
 	fn->glUniform2i( prog->uniLocation( "fullSize" ), W, H );
 	fn->glUniform2i( prog->uniLocation( "halfSize" ), hw, hh );
 	fn->glUniform2i( prog->uniLocation( "mipSize[%d]", 0 ), W, H );
@@ -252,7 +292,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 	pass( 3, g.across, &g.raw );
 	pass( 4, g.fin, &g.across );
 	r->stopProgram();
-	for ( int u = 0; u < 7; u++ ) {
+	for ( int u = 0; u < 8; u++ ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	}
@@ -297,10 +337,12 @@ void wwCellSsrPass( Scene * scene, bool run )
 		fn->glDeleteFramebuffers( 1, &gbFbo );
 		QFile t( s.dump + QStringLiteral( ".txt" ) );
 		if ( t.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
-			QString o = QStringLiteral( "ssr: on %1x%2 half %3x%4 near %5 far %6 k %7 %8 %9 %10 p00 %11 p11 %12 unit %13 red %14" )
+			QString o = QStringLiteral( "ssr: on %1x%2 half %3x%4 near %5 far %6 k %7 %8 %9 %10 p00 %11 p11 %12 unit %13 red %14"
+				" water %15 waterOnly %16" )
 				.arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( kSsrNear ), 0, 'f', 2 ).arg( double( farZ ), 0, 'f', 2 )
 				.arg( double( kSsrK[0] ) ).arg( double( kSsrK[1] ) ).arg( double( kSsrK[2] ) ).arg( double( kSsrK[3] ) )
-				.arg( double( p00 ), 0, 'f', 6 ).arg( double( p11 ), 0, 'f', 6 ).arg( g.unit ).arg( s.red );
+				.arg( double( p00 ), 0, 'f', 6 ).arg( double( p11 ), 0, 'f', 6 ).arg( g.unit ).arg( s.red )
+				.arg( g.haveWater ? 1 : 0 ).arg( g.waterOnly ? 1 : 0 );
 			o += QStringLiteral( " rot" );
 			for ( float v : rot )
 				o += QStringLiteral( " %1" ).arg( double( v ), 0, 'f', 7 );
@@ -321,6 +363,18 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 	Renderer * r = scene->renderer;
 	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
 	cellProgram = cellProgram && ssrIsCellProgram( prog );
+	if ( s.pass && s.waterRay ) {
+		// lane WATER2: the water ray pass: the water alone writes, behind the opaque depth, writing no depth
+		const bool water = prog && prog->name == std::string_view( "fo4_water.prog" );
+		glColorMask( water, water, water, water );
+		glDepthMask( GL_FALSE );
+		if ( water ) {
+			glDisable( GL_BLEND );
+			glEnable( GL_DEPTH_TEST );
+			glDepthFunc( GL_LEQUAL );
+		}
+		return;
+	}
 	if ( s.pass ) {
 		// the game's opaque (deferred) pass: no blended draw, no effect, nothing that is not cell-lit
 		const bool opaque = cellProgram && !glIsEnabled( GL_BLEND );
@@ -338,7 +392,7 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 	if ( !cellProgram || prog->uniLocation( "cellSsrOn" ) < 0 )
 		return;
 	SsrGpu & g = ssrGpus()[r];
-	const bool on = g.ready && g.doc == scene->nifModel && g.unit > 0 && !( s.red & 1 ) && s.flagged
+	const bool on = g.ready && g.doc == scene->nifModel && g.unit > 0 && !( s.red & 1 ) && s.flagged && !g.waterOnly
 		&& !glIsEnabled( GL_BLEND ) && wwCellLightsWanted( scene ) && ( s.probe == 0 || s.probe == 61 );
 	prog->uni1b( "cellSsrOn", on );
 	prog->uni1b( "cellSsrMat", s.flagged );
@@ -357,4 +411,30 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 		prog->uni4f_l( prog->uniLocation( "cellSsrRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}
+}
+
+bool wwCellSsrWaterRayPass( unsigned int * gbufTex )
+{
+	const SsrState & s = ssr();
+	if ( gbufTex )
+		*gbufTex = s.waterRay ? s.gbuf : 0;
+	return s.pass && s.waterRay;
+}
+
+bool wwCellSsrInPass()
+{
+	return ssr().pass;
+}
+
+bool wwCellSsrWaterTextures( Scene * scene, unsigned int & raw, unsigned int & fin )
+{
+	raw = fin = 0;
+	if ( !scene || !scene->renderer )
+		return false;
+	const auto it = ssrGpus().constFind( scene->renderer );
+	if ( it == ssrGpus().constEnd() || !it->ready || !it->haveWater || it->doc != scene->nifModel )
+		return false;
+	raw = it->raw.tex;
+	fin = it->fin.tex;
+	return raw && fin;
 }

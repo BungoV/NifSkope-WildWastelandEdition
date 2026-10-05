@@ -1,6 +1,7 @@
 #include "cellwater.h"
 
 #include "celllights.h"
+#include "cellssr.h"
 #include "lookdevstage.h"
 #include "esmwater.h"
 #include "gl/glscene.h"
@@ -12,6 +13,8 @@
 #include <QSet>
 #include <QTextStream>
 #include <QVector>
+
+#include <algorithm>
 
 namespace
 {
@@ -34,7 +37,8 @@ struct WaterState
 {
 	QHash<const void *, WaterDoc> docs;
 	bool pinOff = false;
-	int red = 0;		// 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 noshore, 32 nonormal
+	int red = 0;		// 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 noshore, 32 nonormal,
+				// 64 nodepthfog, 128 nofar, 256 nossr, 512 fogunits (lane WATER2)
 	int probe = 0;
 	QString dump;
 	QSet<QString> missing;	// noise textures that did not bind (the census says so)
@@ -49,7 +53,8 @@ WaterState & st()
 		s->pinOff = qgetenv( "WW_CELL_WATER" ) == "0";
 		const QByteArray r = qgetenv( "WW_CELL_WATER_RED" );
 		s->red = r == "norefl" ? 1 : r == "nofresnel" ? 2 : r == "nosilt" ? 4 : r == "nospec" ? 8
-			: r == "noshore" ? 16 : r == "nonormal" ? 32 : 0;
+			: r == "noshore" ? 16 : r == "nonormal" ? 32 : r == "nodepthfog" ? 64 : r == "nofar" ? 128
+			: r == "nossr" ? 256 : r == "fogunits" ? 512 : 0;
 		s->probe = qEnvironmentVariableIntValue( "WW_CELL_WATER_PROBE" );
 		s->dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_WATER_DUMP" ) );
 	}
@@ -125,6 +130,20 @@ bool wwCellWaterWanted( Scene * scene, int block )
 	return it != s.docs.constEnd() && it->shapeBody.contains( block );
 }
 
+bool wwCellWaterSsrWanted( Scene * scene )
+{
+	const WaterState & s = st();
+	if ( s.pinOff || !scene || scene->selecting || !wwCellLightsWanted( scene ) || wwCellProbePass( scene ) )
+		return false;
+	const auto it = s.docs.constFind( scene->nifModel );
+	if ( it == s.docs.constEnd() || it->shapeBody.isEmpty() )
+		return false;
+	for ( const WaterBody & b : it->bodies )
+		if ( b.rec.ssr )
+			return true;
+	return false;
+}
+
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 {
 	WaterState & s = st();
@@ -177,18 +196,46 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 				s.missing.insert( b.noise[k] );
 			scene->textures->bind( QStringView( u"#FF8080FF" ), scene->nifModel );	// a flat normal
 		}
+		/* lane WATER2: the game's sampler for the noise slots 4..6 (SetupGeometry): WRAP_S_WRAP_T, filter
+		 * TEXTURE_FILTER_MODE_ANISO at the INI's iMaxAnisotropy (16). The cache leaves its default (nearest
+		 * within the mip, no anisotropy): the distant ripples average flat and the far glints die. */
+		static GLfloat maxAniso = -1.0f;
+		if ( maxAniso < 0.0f ) {
+			maxAniso = 1.0f;
+			glGetFloatv( GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso );
+		}
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+		glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, ( s.red & 128 ) ? 1.0f : std::min( 16.0f, maxAniso ) );
 		prog->uni1i_l( prog->uniLocation( noiseUni[k] ), unit++ );
 	}
-	// the scene behind the water (the second pass's copy) and the opaque frame's depth
-	const bool haveScene = scene->grabRefractionSource();
+	// the scene behind the water (the second pass's copy) and the opaque frame's depth; in the reflections' scene
+	// passes (lane WATER2) no copy: the ray pass reads the obscurance pass's linear depth instead
+	unsigned int gbuf = 0;
+	const bool rayPass = wwCellSsrWaterRayPass( &gbuf );
+	const bool inSsr = wwCellSsrInPass();
+	const bool haveScene = !inSsr && scene->grabRefractionSource();
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, haveScene ? scene->refractionTexId : 0 );
 	prog->uni1i_l( prog->uniLocation( "waterScene" ), unit++ );
-	const bool haveDepth = scene->grabEffectDepth();
+	const bool haveDepth = !inSsr && scene->grabEffectDepth();
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
-	fn->glBindTexture( GL_TEXTURE_2D, haveDepth ? scene->fxDepthTexId : 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, rayPass ? gbuf : haveDepth ? scene->fxDepthTexId : 0 );
 	prog->uni1i_l( prog->uniLocation( "waterDepth" ), unit++ );
 	prog->uni1b( "waterHaveDepth", haveDepth );
+	prog->uni1i( "waterSslr", rayPass ? 1 : 0 );
+	// lane WATER2: this frame's reflections (the game reads them only when its WATR's SSR flag is set)
+	unsigned int ssrRaw = 0, ssrFin = 0;
+	const bool ssrOn = !inSsr && b.rec.ssr && wwCellSsrWaterTextures( scene, ssrRaw, ssrFin );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
+	fn->glBindTexture( GL_TEXTURE_2D, ssrOn ? ssrRaw : 0 );
+	prog->uni1i_l( prog->uniLocation( "waterSsrRaw" ), unit++ );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
+	fn->glBindTexture( GL_TEXTURE_2D, ssrOn ? ssrFin : 0 );
+	prog->uni1i_l( prog->uniLocation( "waterSsrFin" ), unit++ );
+	prog->uni1b( "waterSsrOn", ssrOn );
 	fn->glActiveTexture( GL_TEXTURE0 );
 
 	// an opaque surface: it composites the scene behind it itself
