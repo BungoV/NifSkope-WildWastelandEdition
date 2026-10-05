@@ -225,6 +225,7 @@ HEADERS += \
 	src/gl/sunshadow.h \
 	src/gl/celllights.h \
 	src/gl/cellfxlit.h \
+	src/gl/cellwater.h \
 	src/gl/cellhdr.h \
 	src/gl/cellprobeview.h \
 	src/gl/cellssr.h \
@@ -310,6 +311,7 @@ HEADERS += \
 	src/starterscene.h \
 	src/btdterrain.h \
 	src/esmdata.h \
+	src/esmwater.h \
 	src/esmweather.h \
 	src/lodgen.h \
 	src/lodgenao.h \
@@ -449,6 +451,7 @@ SOURCES += \
 	src/gl/sunshadow.cpp \
 	src/gl/celllights.cpp \
 	src/gl/cellfxlit.cpp \
+	src/gl/cellwater.cpp \
 	src/gl/cellhdr.cpp \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellssr.cpp \

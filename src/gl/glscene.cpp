@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
+#include "gl/cellwater.h"	// lane WATER1
 #include "gl/gltex.h"
 #include "gl/glcontroller.h"
 #include "gl/controllers.h"
@@ -678,6 +679,16 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 		if ( isDecal( node ) )
 			node->drawShapes();
 	}
+	/* lane WATER1: then the water (src/gl/cellwater.h), as the game draws its water after the opaque frame and
+	 * its decals and before the blended pass: the water refracts the bed, and the haze over it blends on top */
+	auto isWater = [&isDecal]( Node * node ) {
+		Shape * s = dynamic_cast<Shape *>( node );
+		return s && !isDecal( node ) && s->wwWaterDraws();
+	};
+	for ( Node * node : secondPass.list() ) {
+		if ( isWater( node ) )
+			node->drawShapes();
+	}
 
 	// Particle systems are additive VFX: draw them after every other transparent
 	// shape, including transparent shapes from other workspace documents.
@@ -685,7 +696,7 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 	for ( Node * node : secondPass.list() ) {
 		if ( dynamic_cast<Particles *>( node ) )
 			deferredParticles.append( node );
-		else if ( !isDecal( node ) )
+		else if ( !isDecal( node ) && !isWater( node ) )
 			node->drawShapes();
 	}
 	for ( Node * node : deferredParticles )

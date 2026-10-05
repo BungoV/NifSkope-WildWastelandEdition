@@ -1,0 +1,4 @@
+# The game's water in the cell view (lane WATER1; src/gl/cellwater.h). No conditions: the condition scan never
+# picks it; Renderer::setupProgram selects it by name for a registered water shape while the draw is cell-lit.
+
+shaders fo4_default.vert fo4_water.frag

@@ -129,6 +129,9 @@ QString wwLookdevEcho();
 void wwLookdevLight( float lightDirWorld[3], float diffuse[4], float ambient[4] );
 //! the DALC ambient (linear) the PBR program's Lookdev branch reads: [X+,X-,Y+,Y-,Z+,Z-]
 bool wwLookdevDalc( float rgb[6][3] );
+//! lane WATER1: the water's sky (linear): the weather's Horizon, Sky-Lower and Sky-Upper rows at the dome's hour;
+//! false (the outputs untouched) when no weather is loaded
+bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] );
 
 //! cube background (replaces drawSkyBox in Lookdev); true = the colour buffer is written
 bool wwLookdevDrawBackground( Scene * scene );

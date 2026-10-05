@@ -137,6 +137,8 @@ public:
 	bool wwDoubleSided() const { return isDoubleSided; }
 	//! lane FXD1: with Cell lights on, a second-pass decal of the lighting shader draws before the blended shapes
 	bool wwDecalDrawsFirst() const;
+	//! lane WATER1: a cell water surface; with Cell lights on it draws after the decals, before the blended shapes
+	bool wwWaterDraws() const;
 	//! lane SHADOW1: the shape alpha-tests (its depth-only caster would cast a solid card)
 	bool wwAlphaTested() const;
 	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)

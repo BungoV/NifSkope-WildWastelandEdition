@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "esmdata.h"
+#include "esmwater.h"
 
 #include <cstdio>
 
@@ -276,6 +277,115 @@ bool EsmWorld::cellWater( int cx, int cy, float & height,
 		}
 	}
 	return hasWater;
+}
+
+/* lane WATER1: the WATR record, field for field (xEdit wbRecord(WATR): DNAM fog / physical / specular /
+ * noise / silt / SSR, then NAM2-4 the noise textures). A short DNAM keeps the defaults past its end. */
+bool EsmWorld::waterRecord( quint32 form, WwWaterRecord & r ) const
+{
+	r = WwWaterRecord();
+	r.form = form;
+	const ESMFile::ESMRecord * wr = form ? esm->findRecord( form ) : nullptr;
+	if ( !wr || wr->type != 0x52544157U )	// "WATR"
+		return false;
+	ESMFile::ESMField f( *esm, *wr );
+	while ( f.next() ) {
+		const unsigned char * p = reinterpret_cast<const unsigned char *>( f.data() );
+		const int n = int( f.size() );
+		auto str = [&]() {
+			int k = n;
+			while ( k > 0 && p[k - 1] == 0 )
+				k--;
+			return QString::fromLatin1( reinterpret_cast<const char *>( p ), k );
+		};
+		if ( f == "EDID" ) {
+			r.editorId = str();
+		} else if ( f == "ANAM" && n >= 1 ) {
+			r.opacity = p[0];
+		} else if ( f == "NAM2" || f == "NAM3" || f == "NAM4" ) {
+			r.noise[f == "NAM2" ? 0 : f == "NAM3" ? 1 : 2] = str();
+		} else if ( f == "DNAM" ) {
+			r.dnamBytes = n;
+			int o = 0;
+			auto fl = [&]( float & v ) {
+				if ( o + 4 <= n )
+					std::memcpy( &v, p + o, 4 );
+				o += 4;
+			};
+			auto col = [&]( quint8 c[4] ) {
+				if ( o + 4 <= n )
+					std::memcpy( c, p + o, 4 );
+				o += 4;
+			};
+			fl( r.depthAmount );
+			col( r.shallow );
+			col( r.deep );
+			fl( r.colorShallowRange );
+			fl( r.colorDeepRange );
+			fl( r.shallowAlpha );
+			fl( r.deepAlpha );
+			fl( r.alphaShallowRange );
+			fl( r.alphaDeepRange );
+			col( r.underwater );
+			fl( r.uwFogAmount );
+			fl( r.uwFogNear );
+			fl( r.uwFogFar );
+			fl( r.normalMagnitude );
+			fl( r.shallowNormalFalloff );
+			fl( r.deepNormalFalloff );
+			fl( r.reflectivity );
+			fl( r.fresnel );
+			fl( r.surfaceEffectFalloff );
+			for ( float & d : r.displacement )
+				fl( d );
+			col( r.reflection );
+			fl( r.sunSpecPower );
+			fl( r.sunSpecMagnitude );
+			fl( r.sparklePower );
+			fl( r.sparkleMagnitude );
+			fl( r.interiorRadius );
+			fl( r.interiorBrightness );
+			fl( r.interiorPower );
+			for ( float & v : r.windDirection )
+				fl( v );
+			for ( float & v : r.windSpeed )
+				fl( v );
+			for ( float & v : r.amplitude )
+				fl( v );
+			for ( float & v : r.uvScale )
+				fl( v );
+			for ( float & v : r.noiseFalloff )
+				fl( v );
+			fl( r.siltAmount );
+			col( r.lightSilt );
+			col( r.darkSilt );
+			if ( o < n )
+				r.ssr = p[o] != 0;
+		}
+	}
+	return true;
+}
+
+QString wwWaterDescribe( const WwWaterRecord & r )
+{
+	const WwWaterMaterial m = wwWaterMaterial( r );
+	QString s = QStringLiteral( "WATR %1 %2" ).arg( r.form, 8, 16, QLatin1Char( '0' ) )
+		.arg( r.editorId.isEmpty() ? QStringLiteral( "-" ) : r.editorId );
+	const float * blocks[] = { m.shallow, m.deep, m.reflection, m.underwater, m.lightSilt, m.darkSilt,
+		m.varAmounts, m.params1, m.params2, m.params3, m.params4, m.amplitude, m.uvScale };
+	for ( const float * b : blocks )
+		for ( int i = 0; i < 4; i++ )
+			s += QStringLiteral( " %1" ).arg( double( b[i] ), 0, 'g', 6 );
+	s += QStringLiteral( " uw %1 %2 %3 wind %4 %5 %6 speed %7 %8 %9" )
+		.arg( double( r.uwFogAmount ), 0, 'g', 6 ).arg( double( r.uwFogNear ), 0, 'g', 6 )
+		.arg( double( r.uwFogFar ), 0, 'g', 6 )
+		.arg( double( r.windDirection[0] ), 0, 'g', 6 ).arg( double( r.windDirection[1] ), 0, 'g', 6 )
+		.arg( double( r.windDirection[2] ), 0, 'g', 6 )
+		.arg( double( r.windSpeed[0] ), 0, 'g', 6 ).arg( double( r.windSpeed[1] ), 0, 'g', 6 )
+		.arg( double( r.windSpeed[2] ), 0, 'g', 6 );
+	for ( const QString & t : r.noise )
+		s += QLatin1Char( ' ' ) + ( t.isEmpty() ? QStringLiteral( "-" ) : t );
+	return s;
 }
 
 /* Reproduces FO4CS FarFieldPluginReader.h WalkGroup / FarFieldHeightmapBake.h

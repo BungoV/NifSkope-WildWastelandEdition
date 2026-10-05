@@ -446,6 +446,9 @@ public:
 	//! The worldspace's default water type (WRLD NAM2), 0 when absent.
 	quint32 defaultWaterType() const { return defWaterType; }
 
+	//! lane WATER1: the WATR record `form` (src/esmwater.h), false when it is no WATR
+	bool waterRecord( quint32 form, struct WwWaterRecord & out ) const;
+
 	//! Grid extent of indexed exterior cells (inclusive).
 	void cellBounds( int & minX, int & minY, int & maxX, int & maxY ) const;
 

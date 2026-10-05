@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/sunshadow.h"
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
+#include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellssr.h"
 #include "esmweather.h"
 #include "io/material.h"
@@ -341,6 +342,17 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		}
 	}
 
+	/* lane WATER1: a cell water surface (src/gl/cellwater.h) takes fo4_water.prog by name while the draw is
+	 * cell-lit: the matrices, the cell's uniforms and the fog through the lighting setup, then the record's */
+	if ( mesh->bslsp && wwLodChannelView == 0 && wwCellWaterWanted( mesh->scene, mesh->id() ) ) {
+		if ( Program * program = useProgram( "fo4_water.prog" ) ) {
+			if ( setupProgramCE1( nif, program, mesh ) && wwCellWaterUniforms( mesh->scene, mesh->id(), 0 ) )
+				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
+				globalUniforms->lightSourcePosition[0] );
+			stopProgram();
+		}
+	}
+
 	const int lightingMode = pbrmMode();
 	/* The LOD channel preview is a DATA view, not a shading mode: it draws one
 	 * generated vertex channel flat. Routing it through the PBRM program shows
@@ -406,7 +418,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	const bool stalePbrmHint = hint
 		&& ( ( pbrmProgramSeen && hint == pbrmProgramSeen ) || ( routeProgramSeen && hint == routeProgramSeen )
 			|| hint->name == std::string_view( "pbrm_csm.prog" )	// lane CSM1: the shadow variant is never a hint
-			|| hint->name == std::string_view( "pbrm_cell.prog" ) );	// lane PRTPGI: nor the cell-lit one
+			|| hint->name == std::string_view( "pbrm_cell.prog" )	// lane PRTPGI: nor the cell-lit one
+			|| hint->name == std::string_view( "fo4_water.prog" ) );	// lane WATER1: nor the water's
 	/* Weather fog (lane FOG1) has its own program, fo4_fog.prog: the same
 	 * fo4_default.frag with WW_FOG defined. With the fog code merely present and
 	 * fogOn false, the driver compiled fo4_default differently -- 783 px of the

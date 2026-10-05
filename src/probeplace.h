@@ -81,6 +81,29 @@ struct ProbeSoup
 	 *  its mean coverage (x 255). Bake only, in memory: the soup file does not carry them. */
 	std::vector<float> decal;
 	std::vector<quint8> decalA;
+	/*! Lane WATER1: the water surfaces (the cells' planes; the far ring's water quads when waterApart), 9 floats a
+	 *  triangle, kept apart from `tris`: they stop no ray and hold no surfel. waterKind indexes waterTypes, one a
+	 *  triangle. The bake splits a ray that crosses one (Fresnel share reflected, the rest on to the bed through
+	 *  the record's underwater fog); the placer splits a column at the water line. In memory only. */
+	struct WaterType
+	{
+		quint32 form = 0;
+		float fresnel = 0.025f;       //!< F0 (WATR Fresnel amount)
+		float reflectivity = 0.5f;    //!< the reflection's share of F above water (WATR Reflectivity)
+		float uw[3] = { 0, 0, 0 };    //!< the underwater fog color, linear (pow 2.2, as the shader's)
+		float fogAmount = 1.0f, fogNear = 0.0f, fogFar = 1000.0f;
+	};
+	std::vector<float> water;
+	std::vector<quint16> waterKind;
+	std::vector<WaterType> waterTypes;
+	bool waterApart = false;   //!< the far ring puts its water quads into `water` (kind 0), not `tris`
+	void addWater( const float a[3], const float b[3], const float c[3], quint16 kind )
+	{
+		water.insert( water.end(), a, a + 3 );
+		water.insert( water.end(), b, b + 3 );
+		water.insert( water.end(), c, c + 3 );
+		waterKind.push_back( kind );
+	}
 	void addGlass( const float a[3], const float b[3], const float c[3], const quint8 t[3] )
 	{
 		glass.insert( glass.end(), a, a + 3 );
@@ -274,6 +297,7 @@ struct ProbePlaceResult
 	std::vector<ProbePoint> probes;
 	int columns = 0, columnsEmpty = 0;
 	int firstHit = 0, interior = 0, wall = 0;
+	int waterColumns = 0, waterUnder = 0;   //!< lane WATER1: columns split at the water line; probes under it
 	int gapsRejected = 0, levelsCapped = 0, wallRefused = 0, wallColumns = 0;
 	int doorway = 0, window = 0, breach = 0, doored = 0, roomToRoom = 0;
 	int apComponents = 0, apRejectedUnroofed = 0, apRejectedShape = 0, apRejectedPocket = 0, apMerged = 0;

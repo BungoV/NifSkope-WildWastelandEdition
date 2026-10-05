@@ -47,6 +47,7 @@ struct NearShapeFacts
 	int block = -1;                 //!< the BSTriShape's block number in the NIF
 	QString name;                   //!< its Name
 	bool effectShader = false;      //!< BSEffectShaderProperty (a BGEM or its own effect fields)
+	bool waterShader = false;       //!< BSWaterShaderProperty (lane WATER1: a placed water mesh's surface)
 	bool alphaBlend = false;        //!< NiAlphaProperty flags bit 0, or BGSM bAlphaBlend
 	bool alphaTest = false;         //!< NiAlphaProperty flags bit 9, or BGSM bAlphaTest
 	quint8 alphaRef = 128;          //!< the test's cutoff: BGSM ref when it tests, else the property's own
