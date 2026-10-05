@@ -3057,10 +3057,11 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		LodlFarRing & r = rings[ri];
 		r.built = false;
 		// the cut: the loaded block for ring 0, the ring inside it as BUILT for every other
-		const int cx0 = havePrev ? px0 : r.cx0;
-		const int cy0 = havePrev ? py0 : r.cy0;
-		const int cx1 = havePrev ? px1 : r.cx1;
-		const int cy1 = havePrev ? py1 : r.cy1;
+		const bool chain = havePrev && !r.cutGiven;
+		const int cx0 = chain ? px0 : r.cx0;
+		const int cy0 = chain ? py0 : r.cy0;
+		const int cx1 = chain ? px1 : r.cx1;
+		const int cy1 = chain ? py1 : r.cy1;
 		// the outer rectangle never ends inside the cut
 		int x0 = qMin( r.x0, cx0 ), y0 = qMin( r.y0, cy0 );
 		int x1 = qMax( r.x1, cx1 ), y1 = qMax( r.y1, cy1 );
@@ -3117,6 +3118,21 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 			x1 = qMin( x1, info.cellMaxX );
 			y1 = qMin( y1, info.cellMaxY );
 		}
+		// lane FARLOD1: our coverage limit (a mixed run), on whole sheet tiles
+		if ( r.lx1 >= r.lx0 && r.ly1 >= r.ly0 ) {
+			if ( haveSheets ) {
+				const int w = sheets->west(), sth = sheets->south();
+				x0 = qMax( x0, w - floorDiv( w - r.lx0, dim ) * dim );
+				y0 = qMax( y0, sth - floorDiv( sth - r.ly0, dim ) * dim );
+				x1 = qMin( x1, w + floorDiv( r.lx1 - w + 1, dim ) * dim - 1 );
+				y1 = qMin( y1, sth + floorDiv( r.ly1 - sth + 1, dim ) * dim - 1 );
+			} else {
+				x0 = qMax( x0, r.lx0 );
+				y0 = qMax( y0, r.ly0 );
+				x1 = qMin( x1, r.lx1 );
+				y1 = qMin( y1, r.ly1 );
+			}
+		}
 		if ( x1 < x0 || y1 < y0 ) {
 			r.notes << QStringLiteral( "empty after clipping to the file" );
 			continue;
@@ -3161,8 +3177,9 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		 * whose vertices sit on a coarser lattice. Every off-lattice height on the
 		 * edge is the lerp of its two lattice neighbours, so the two edges are the
 		 * same line and no crack opens between rings. */
-		if ( ri + 1 < rings.size() ) {
-			const int nNext = lodtRate( info, rings[ri + 1].lod );
+		const int nextLod = ri + 1 < rings.size() ? rings[ri + 1].lod : r.nextLod;
+		if ( nextLod > 0 ) {
+			const int nNext = lodtRate( info, nextLod );
 			if ( nNext > 0 && n > nNext && n % nNext == 0 ) {
 				const int rr = n / nNext;
 				for ( int e = 0; e < 2; e++ ) {

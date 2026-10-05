@@ -225,6 +225,12 @@ struct LodlFarRing
 	//! world x, y -> the loaded LAND's height there; false = no LAND
 	std::function<bool( float, float, float * )> innerZ;
 	QString prefix = QStringLiteral( "FarLOD terrain" );
+	/*! Rings built one call each (the vanilla fill needs each ring's footprint before the next): the cut
+	 *  is cx* even after an earlier ring of the call, and the next ring's level (its seam lerp) is given. */
+	bool cutGiven = false;
+	int nextLod = 0;            //!< 0 = no next ring
+	//! Our coverage limit (a mixed run, WW_CELL_FARLOD_OURS): whole sheet tiles inside it; none when lx1 < lx0.
+	int lx0 = 0, ly0 = 0, lx1 = -1, ly1 = -1;
 
 	// ---- out, read back from what was built
 	bool built = false;

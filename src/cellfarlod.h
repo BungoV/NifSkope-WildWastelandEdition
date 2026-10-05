@@ -41,6 +41,15 @@ class Vector3;
 bool cellFarLodWanted();
 void cellFarLodSetWanted( bool on );
 
+/*! The LOD type (the row's drop-down): Vanilla = only the game's .btr/.bto; FO4CS = our .lodl/.lodi/cards,
+ *  the game's chunks filling any we do not have (cellfarvanilla.h). QSettings CellView/FarLodType
+ *  ("vanilla" | "fo4cs"; absent = FO4CS when our files exist for the worldspace, else Vanilla);
+ *  WW_CELL_FARLOD_TYPE=vanilla|fo4cs pins it for a measuring run. */
+enum WwCellFarLodType { WwFarLodAuto = 0, WwFarLodVanilla = 1, WwFarLodFo4cs = 2 };
+int cellFarLodTypePinned();                  //!< the setting: auto, vanilla or fo4cs
+void cellFarLodSetType( int type );
+int cellFarLodLastType();                    //!< what the last build resolved to (the drop-down shows it on auto)
+
 /*! Appends the far field under `iRoot` (the caller holds updates and runs
  *  updateModel). `origin` is the cell scene's own origin (it is origin-relative).
  *  Returns the census, one "  far lod: ..." line each, for the cell's notes. */

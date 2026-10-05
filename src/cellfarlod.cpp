@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "cellfarlod.h"
 
 #include "btdterrain.h"
+#include "cellfarvanilla.h"
 #include "esmdata.h"
 #include "esmwater.h"
 #include "impostorchunk.h"
@@ -28,6 +29,7 @@ BSD License - see nifskope.h
 #include <QStringList>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 #include <memory>
@@ -140,6 +142,53 @@ void cellFarLodSetWanted( bool on )
 	QSettings().setValue( QStringLiteral( "CellView/FarLod" ), on );
 }
 
+namespace
+{
+int & farlod1LastType()
+{
+	static int t = WwFarLodFo4cs;
+	return t;
+}
+
+//! The type this build takes, and why (env pin, his setting, or auto on whether our files exist).
+int farlod1TypeFor( bool oursFound, QString * why )
+{
+	const QByteArray env = qgetenv( "WW_CELL_FARLOD_TYPE" ).toLower();
+	if ( env == "vanilla" || env == "fo4cs" ) {
+		*why = QStringLiteral( "WW_CELL_FARLOD_TYPE" );
+		return env == "vanilla" ? WwFarLodVanilla : WwFarLodFo4cs;
+	}
+	const int pinned = cellFarLodTypePinned();
+	if ( pinned != WwFarLodAuto ) {
+		*why = QStringLiteral( "setting" );
+		return pinned;
+	}
+	*why = oursFound ? QStringLiteral( "auto, our files found" ) : QStringLiteral( "auto, no FO4CSLOD files" );
+	return oursFound ? WwFarLodFo4cs : WwFarLodVanilla;
+}
+} // namespace
+
+int cellFarLodTypePinned()
+{
+	const QString v = QSettings().value( QStringLiteral( "CellView/FarLodType" ) ).toString().toLower();
+	return v == QLatin1String( "vanilla" ) ? WwFarLodVanilla : v == QLatin1String( "fo4cs" ) ? WwFarLodFo4cs : WwFarLodAuto;
+}
+
+void cellFarLodSetType( int type )
+{
+	QSettings cfg;
+	if ( type == WwFarLodVanilla || type == WwFarLodFo4cs )
+		cfg.setValue( QStringLiteral( "CellView/FarLodType" ),
+			type == WwFarLodVanilla ? QStringLiteral( "vanilla" ) : QStringLiteral( "fo4cs" ) );
+	else
+		cfg.remove( QStringLiteral( "CellView/FarLodType" ) );
+}
+
+int cellFarLodLastType()
+{
+	return farlod1LastType();
+}
+
 QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWorld & world,
 	const QString & ws, int cx, int cy, int n, const QString & lodlPath, const Vector3 & origin )
 {
@@ -159,6 +208,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const bool noSnap = red == "nosnap";
 	const bool waterCut = red == "watercut";
 	const bool noWater = red == "nowater";
+	const bool vanBoth = red == "vanboth";   // the vanilla fill drawn over our chunks too (the mixed gate's red)
 	const int h = std::max( 0, ( n - 1 ) / 2 );
 	const int bx0 = cx - h, by0 = cy - h, bx1 = cx + h, by1 = cy + h;
 
@@ -180,10 +230,16 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		return L.join( QLatin1Char( '\n' ) ) + QLatin1Char( '\n' );
 	}
 
-	if ( lodlPath.isEmpty() ) {
-		say( QStringLiteral( "far lod: NONE -- no FO4CSLOD/%1/%1.lodl found" ).arg( ws ) );
-		return L.join( QLatin1Char( '\n' ) ) + QLatin1Char( '\n' );
-	}
+	/* THE TYPE: FO4CS (ours, the game's chunks filling any we lack) or Vanilla (the game's alone) */
+	QString typeWhy;
+	const int type = farlod1TypeFor( !lodlPath.isEmpty(), &typeWhy );
+	farlod1LastType() = type;
+	const bool ours = type == WwFarLodFo4cs && !lodlPath.isEmpty();
+	const QString typeName = type == WwFarLodVanilla ? QStringLiteral( "vanilla" ) : QStringLiteral( "fo4cs" );
+	say( QStringLiteral( "far lod: source type %1 (%2): %3" ).arg( typeName ).arg( typeWhy )
+		.arg( lodlPath.isEmpty() ? QStringLiteral( "no FO4CSLOD/%1/%1.lodl found, the game's LOD everywhere" ).arg( ws )
+			: ours ? QStringLiteral( "ours from %1, the game's where we have no chunk" ).arg( QDir::toNativeSeparators( lodlPath ) )
+				: QStringLiteral( "our files found and NOT used" ) ) );
 	if ( !nif || !iRoot.isValid() ) {
 		say( QStringLiteral( "far lod: NONE -- no cell document" ) );
 		return L.join( QLatin1Char( '\n' ) ) + QLatin1Char( '\n' );
@@ -255,8 +311,53 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		return true;
 	};
 
-	// ---- terrain rings
+	// the LAND anywhere: the vanilla fill's seam (its clip lines stand on it)
+	auto landZ = [lands, W]( float wx, float wy, float * z ) -> bool {
+		const int lx = int( std::floor( wx / kCell ) ), ly = int( std::floor( wy / kCell ) );
+		auto key = std::make_pair( lx, ly );
+		auto it = lands->find( key );
+		if ( it == lands->end() ) {
+			auto land = std::make_shared<EsmLand>();
+			if ( !W->land( lx, ly, *land ) || !land->valid )
+				land.reset();
+			it = lands->emplace( key, land ).first;
+		}
+		if ( !it->second )
+			return false;
+		const EsmLand & Ld = *it->second;
+		const float fx = qBound( 0.0f, ( wx - float( lx ) * kCell ) / 128.0f, 32.0f );
+		const float fy = qBound( 0.0f, ( wy - float( ly ) * kCell ) / 128.0f, 32.0f );
+		const int i0 = std::min( int( fx ), 31 ), j0 = std::min( int( fy ), 31 );
+		const float tx = fx - float( i0 ), ty = fy - float( j0 );
+		const float a = Ld.heights[j0][i0] * ( 1.0f - tx ) + Ld.heights[j0][i0 + 1] * tx;
+		const float b = Ld.heights[j0 + 1][i0] * ( 1.0f - tx ) + Ld.heights[j0 + 1][i0 + 1] * tx;
+		*z = a * ( 1.0f - ty ) + b * ty;
+		return true;
+	};
+
+	/* our coverage limit for a MIXED run (WW_CELL_FARLOD_OURS=x0,y0,x1,y1 cells): our files cover that
+	 * rectangle only, the game's chunks the rest -- the boundary gate's arm */
+	int lim[4] = { 0, 0, -1, -1 };
+	{
+		const QStringList p = qEnvironmentVariable( "WW_CELL_FARLOD_OURS" ).split( QLatin1Char( ',' ) );
+		if ( p.size() == 4 )
+			for ( int k = 0; k < 4; k++ )
+				lim[k] = p[k].trimmed().toInt();
+	}
+	const bool haveLim = lim[2] >= lim[0] && lim[3] >= lim[1];
+
+	/* ---- terrain rings, one call each: ring i's FOOTPRINT is what it was asked, what we built of it and the
+	 * footprint inside; the next ring cuts the whole footprint, so ours and the game's chunks of one ring
+	 * stand side by side and never under the next ring */
 	std::vector<LodlFarRing> rings( defs.size() );
+	std::vector<std::array<int, 4>> foot( defs.size() );
+	std::vector<WwFarVanRing> van;
+	const float shift[3] = { origin[0], origin[1], origin[2] };
+	QString terr;
+	bool terrOk = true;
+	qint64 runVerts = 0;
+	static const int kVanLevel[5] = { 4, 4, 8, 16, 32 };   // the game's authored level a ring's distance takes
+	int fx0 = bx0, fy0 = by0, fx1 = bx1, fy1 = by1;
 	for ( size_t i = 0; i < defs.size(); i++ ) {
 		LodlFarRing & r = rings[i];
 		r.lod = defs[i].lod;
@@ -265,25 +366,114 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		r.y0 = cy - defs[i].reach;
 		r.x1 = cx + defs[i].reach;
 		r.y1 = cy + defs[i].reach;
-		r.cx0 = bx0;
-		r.cy0 = by0;
-		r.cx1 = bx1;
-		r.cy1 = by1;
+		r.cx0 = fx0;
+		r.cy0 = fy0;
+		r.cx1 = fx1;
+		r.cy1 = fy1;
+		r.cutGiven = true;
+		r.nextLod = i + 1 < defs.size() ? defs[i + 1].lod : 0;
+		if ( haveLim ) {
+			r.lx0 = lim[0];
+			r.ly0 = lim[1];
+			r.lx1 = lim[2];
+			r.ly1 = lim[3];
+		}
 		r.noCut = noCut && i == 0;
 		r.snapInner = !noSnap;
 		if ( i == 0 )
 			r.innerZ = innerZ;
 		r.prefix = QStringLiteral( "FarLOD terrain r%1" ).arg( int( i ) );
+		if ( ours && terrOk ) {
+			std::vector<LodlFarRing> one( 1, r );
+			const qint64 left = maxVerts > 0 ? std::max<qint64>( 1, maxVerts - runVerts ) : 0;
+			if ( !nifAppendLodlFarRings( nif, iFar, lodlPath, shift, one, left, &terr ) ) {
+				terrOk = false;
+				say( QStringLiteral( "far lod: terrain REFUSED -- %1" ).arg( terr ) );
+			} else {
+				r = one[0];
+				if ( r.built )
+					runVerts += r.verts;
+			}
+		}
+		int nx0 = std::min( r.x0, fx0 ), ny0 = std::min( r.y0, fy0 );
+		int nx1 = std::max( r.x1, fx1 ), ny1 = std::max( r.y1, fy1 );
+		if ( r.built ) {
+			nx0 = std::min( nx0, r.ox0 );
+			ny0 = std::min( ny0, r.oy0 );
+			nx1 = std::max( nx1, r.ox1 );
+			ny1 = std::max( ny1, r.oy1 );
+		}
+		WwFarVanRing v;
+		v.level = kVanLevel[std::min( i, size_t( 4 ) )];
+		v.x0 = nx0;
+		v.y0 = ny0;
+		v.x1 = nx1;
+		v.y1 = ny1;
+		v.cx0 = fx0;
+		v.cy0 = fy0;
+		v.cx1 = fx1;
+		v.cy1 = fy1;
+		if ( r.built ) {
+			v.ux0 = r.ox0;
+			v.uy0 = r.oy0;
+			v.ux1 = r.ox1;
+			v.uy1 = r.oy1;
+		}
+		v.noOursCut = vanBoth;
+		v.noCut = noCut && i == 0;
+		v.tag = QStringLiteral( "r%1" ).arg( int( i ) );
+		van.push_back( v );
+		foot[i] = { nx0, ny0, nx1, ny1 };
+		fx0 = nx0;
+		fy0 = ny0;
+		fx1 = nx1;
+		fy1 = ny1;
 	}
-	const float shift[3] = { origin[0], origin[1], origin[2] };
-	QString terr;
-	const bool terrOk = nifAppendLodlFarRings( nif, iFar, lodlPath, shift, rings, maxVerts, &terr );
-	if ( !terrOk )
-		say( QStringLiteral( "far lod: terrain REFUSED -- %1" ).arg( terr ) );
+
+	// ---- the game's chunks where ours are not (all of them for the Vanilla type)
+	{
+		auto overBudget = [ws0, budgetMB]() {
+			double w = 0, p = 0;
+			memNow( w, p );
+			return w - ws0 > budgetMB;
+		};
+		QString verr;
+		if ( !wwFarVanAppend( nif, iFar, ws, shift, van, landZ, overBudget, &verr ) )
+			say( QStringLiteral( "far lod: vanilla REFUSED -- %1" ).arg( verr ) );
+		WwWaterRecord vdef;
+		const bool haveVdef = world.defaultWaterType() != 0 && world.waterRecord( world.defaultWaterType(), vdef );
+		qint64 sOurs = 0, sVan = 0, sNone = 0, sBoth = 0;
+		for ( size_t i = 0; i < van.size(); i++ ) {
+			const WwFarVanRing & v = van[i];
+			int wReg = 0;
+			if ( haveVdef )
+				for ( int b : v.waterBlocks ) {
+					wwCellWaterShape( nif, b, vdef );
+					wReg++;
+				}
+			say( QStringLiteral( "far lod: source ring %1 level %2 type %3 cells %4: chunks ours %5, vanilla %6, none %7, both %8" )
+				.arg( int( i ) ).arg( v.level ).arg( typeName )
+				.arg( QStringLiteral( "%1,%2..%3,%4" ).arg( v.x0 ).arg( v.y0 ).arg( v.x1 ).arg( v.y1 ) )
+				.arg( v.chunksOurs ).arg( v.chunksVanilla ).arg( v.chunksNone ).arg( v.chunksBoth )
+				+ QStringLiteral( " -- vanilla %1 shapes, %2 terrain tris (%3 from clips), %4 object tris, %5 dropped, "
+					"%6 seam vertices to the LAND (max step %7), %8 water shapes (%9 as the cell's water)" )
+					.arg( v.shapes ).arg( v.terrainTris ).arg( v.clipTris ).arg( v.objectTris ).arg( v.droppedTris )
+					.arg( v.snapped ).arg( v.snapMax, 0, 'f', 1 ).arg( int( v.waterBlocks.size() ) ).arg( wReg )
+				+ ( v.notes.isEmpty() ? QString() : QStringLiteral( " -- " ) + v.notes.join( QLatin1String( "; " ) ) ) );
+			sOurs += v.chunksOurs;
+			sVan += v.chunksVanilla;
+			sNone += v.chunksNone;
+			sBoth += v.chunksBoth;
+		}
+		say( QStringLiteral( "far lod: source total type %1: chunks ours %2, vanilla %3, none %4, both %5%6" )
+			.arg( typeName ).arg( sOurs ).arg( sVan ).arg( sNone ).arg( sBoth )
+			.arg( haveLim ? QStringLiteral( " (ours limited to %1,%2..%3,%4, WW_CELL_FARLOD_OURS)" )
+				.arg( lim[0] ).arg( lim[1] ).arg( lim[2] ).arg( lim[3] ) : QString() )
+			+ ( vanBoth ? QStringLiteral( " (RED vanboth: the game's drawn over ours)" ) : QString() ) );
+	}
 
 	qint64 tVerts = 0, tTris = 0, tCut = 0, tShapes = 0, tEst = 0;
-	int outer = -1;
-	for ( size_t i = 0; i < rings.size(); i++ ) {
+	for ( size_t i = 0; ours && i < rings.size(); i++ ) {
 		const LodlFarRing & r = rings[i];
 		say( QStringLiteral( "far lod: ring %1 lod %2 (%3 a cell) %4 cells %5,%6..%7,%8: %9" )
 			.arg( int( i ) ).arg( r.lod ).arg( r.n ).arg( r.built ? QStringLiteral( "built" ) : QStringLiteral( "NOT BUILT" ) )
@@ -298,10 +488,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			tCut += r.cutTris;
 			tShapes += r.shapes;
 			tEst += r.estVerts;
-			outer = int( i );
 		}
 	}
-	if ( !rings.empty() ) {
+	if ( ours && !rings.empty() ) {
 		const LodlFarRing & r0 = rings[0];
 		say( QStringLiteral( "far lod: seam before max %1 mean %2, after max %3 mean %4 (%5 samples, snap %6)" )
 			.arg( r0.seamBeforeMax, 0, 'f', 2 ).arg( r0.seamBeforeMean, 0, 'f', 2 )
@@ -316,14 +505,19 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	QSet<quint16> wBodies;
 	if ( noWater ) {
 		say( QStringLiteral( "far lod: water NONE (RED nowater)" ) );
-	} else if ( terrOk ) {
+	} else if ( ours && terrOk ) {
 		static const int kWaterTexels[5] = { 8, 4, 2, 2, 1 };
 		std::vector<LodlFarWater> wr;
 		int hx0 = bx0, hy0 = by0, hx1 = bx1, hy1 = by1;
 		for ( size_t i = 0; i < rings.size(); i++ ) {
 			const LodlFarRing & r = rings[i];
-			if ( !r.built )
+			if ( !r.built ) {
+				hx0 = foot[i][0];
+				hy0 = foot[i][1];
+				hx1 = foot[i][2];
+				hy1 = foot[i][3];
 				continue;
+			}
 			LodlFarWater w;
 			w.x0 = r.ox0;
 			w.y0 = r.oy0;
@@ -336,10 +530,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			w.noCut = waterCut && i == 0;
 			w.texels = kWaterTexels[std::min( i, size_t( 4 ) )];
 			wr.push_back( w );
-			hx0 = r.ox0;
-			hy0 = r.oy0;
-			hx1 = r.ox1;
-			hy1 = r.oy1;
+			hx0 = foot[i][0];
+			hy0 = foot[i][1];
+			hx1 = foot[i][2];
+			hy1 = foot[i][3];
 		}
 		QString werr;
 		if ( !nifAppendLodlFarWater( nif, iFar, lodlPath, shift, wr, &werr ) ) {
@@ -390,19 +584,41 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	/* THE DOUBLE GROUND, read back from the document: far terrain triangles whose centre lies over the loaded
 	 * block. 0 is the cut working; the red (WW_CELL_FARLOD_RED=nocut) must count them. The far water the same
 	 * way (red watercut). */
-	qint64 doubleGround = 0, readTris = 0, waterOver = 0, waterTris = 0;
+	qint64 doubleGround = 0, readTris = 0, waterOver = 0, waterTris = 0, vanOver = 0, vanTris = 0;
 	{
+		// where OUR terrain draws, ring by ring: our built rect minus the footprint inside
+		auto oursDraws = [&]( float x, float y ) {
+			for ( size_t j = 0; j < rings.size(); j++ ) {
+				const LodlFarRing & r = rings[j];
+				if ( !r.built )
+					continue;
+				const bool inO = x > float( r.ox0 ) * kCell && x < float( r.ox1 + 1 ) * kCell
+					&& y > float( r.oy0 ) * kCell && y < float( r.oy1 + 1 ) * kCell;
+				const int p0 = j ? foot[j - 1][0] : bx0, q0 = j ? foot[j - 1][1] : by0;
+				const int p1 = j ? foot[j - 1][2] : bx1, q1 = j ? foot[j - 1][3] : by1;
+				const bool inP = x > float( p0 ) * kCell && x < float( p1 + 1 ) * kCell
+					&& y > float( q0 ) * kCell && y < float( q1 + 1 ) * kCell;
+				if ( inO && !inP )
+					return true;
+			}
+			return false;
+		};
 		const float wx0 = float( bx0 ) * kCell, wy0 = float( by0 ) * kCell;
 		const float wx1 = float( bx1 + 1 ) * kCell, wy1 = float( by1 + 1 ) * kCell;
 		for ( int b = firstFarBlock + 1; b < nif->getBlockCount(); b++ ) {
 			const QModelIndex iB = nif->getBlockIndex( b );
-			if ( !nif->isNiBlock( iB, "BSTriShape" ) )
+			if ( !nif->blockInherits( iB, "BSTriShape" ) )
 				continue;
 			const QString bn = nif->get<QString>( iB, "Name" );
 			const bool isWater = bn.startsWith( QLatin1String( "FarLOD water" ) );
+			if ( nif->get<quint32>( iB, "Flags" ) & 1u )
+				continue;   // hidden (a game chunk's shape dropped whole)
+			// the game's chunks keep their own vertex layout (half precision is possible)
+			const bool fullPrec = ( ( nif->get<BSVertexDesc>( iB, "Vertex Desc" ).Value() >> 44 ) & VF_FULLPREC ) != 0;
 			if ( !isWater && !bn.startsWith( QLatin1String( "FarLOD terrain" ) ) )
 				continue;
-			const Vector3 t = nif->get<Vector3>( iB, "Translation" ) + origin;
+			const Transform xf( nif, iB );   // FarLOD's own transform is the identity
+			const bool isVan = bn.startsWith( QLatin1String( "FarLOD terrain v " ) );
 			const QModelIndex iVD = nif->getIndex( iB, "Vertex Data" );
 			const QModelIndex iTri = nif->getIndex( iB, "Triangles" );
 			if ( !iVD.isValid() || !iTri.isValid() )
@@ -411,14 +627,20 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			const int nv = nif->rowCount( iVD );
 			std::vector<Vector3> p( size_t( std::max( nv, 0 ) ) );
 			for ( int v = 0; v < nv; v++ )
-				p[size_t( v )] = nif->get<Vector3>( nif->index( v, 0, iVD ), "Vertex" );
+				p[size_t( v )] = fullPrec ? nif->get<Vector3>( nif->index( v, 0, iVD ), "Vertex" )
+					: Vector3( nif->get<HalfVector3>( nif->index( v, 0, iVD ), "Vertex" ) );
 			for ( const Triangle & tr : tris ) {
 				if ( tr.v1() >= nv || tr.v2() >= nv || tr.v3() >= nv )
 					continue;
 				( isWater ? waterTris : readTris )++;
-				const Vector3 c = ( p[tr.v1()] + p[tr.v2()] + p[tr.v3()] ) / 3.0f + t;
+				const Vector3 c = xf * ( ( p[tr.v1()] + p[tr.v2()] + p[tr.v3()] ) / 3.0f ) + origin;
 				if ( c[0] > wx0 && c[0] < wx1 && c[1] > wy0 && c[1] < wy1 )
 					( isWater ? waterOver : doubleGround )++;
+				if ( isVan ) {
+					vanTris++;
+					if ( oursDraws( c[0], c[1] ) )
+						vanOver++;
+				}
 			}
 		}
 	}
@@ -427,6 +649,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		.arg( noCut ? QStringLiteral( " (RED nocut)" ) : QString() ) );
 	say( QStringLiteral( "far lod: water over block %1 of %2 far water triangles%3" ).arg( waterOver ).arg( waterTris )
 		.arg( waterCut ? QStringLiteral( " (RED watercut)" ) : QString() ) );
+	say( QStringLiteral( "far lod: vanilla over ours %1 of %2 vanilla terrain triangles%3" ).arg( vanOver ).arg( vanTris )
+		.arg( vanBoth ? QStringLiteral( " (RED vanboth)" ) : QString() ) );
 
 	double ws1 = 0, pk1 = 0;
 	memNow( ws1, pk1 );
@@ -440,7 +664,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const float ctrX = origin[0], ctrY = origin[1];
 	QSet<quint32> cardRefs;
 	int cards = 0;
-	{
+	if ( ours ) {
 		const int R = cellsTo( treeDist ) + 1;
 		const int dim = 8;
 		QStringList chunks;
@@ -461,14 +685,21 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	// ---- objects, ring by ring: the authored slot of each, the ring inside cut out
 	const QString lodi = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodi" ) );
 	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0;
-	if ( !QFileInfo( lodi ).isFile() ) {
+	if ( !ours ) {
+		say( QStringLiteral( "far lod: objects ours off (type %1): the game's .bto only" ).arg( typeName ) );
+	} else if ( !QFileInfo( lodi ).isFile() ) {
 		say( QStringLiteral( "far lod: objects NONE -- no %1" ).arg( QDir::toNativeSeparators( lodi ) ) );
 	} else {
 		int hx0 = bx0, hy0 = by0, hx1 = bx1, hy1 = by1;
 		for ( size_t i = 0; i < rings.size(); i++ ) {
 			const LodlFarRing & r = rings[i];
-			if ( !r.built )
+			if ( !r.built ) {
+				hx0 = foot[i][0];
+				hy0 = foot[i][1];
+				hx1 = foot[i][2];
+				hy1 = foot[i][3];
 				continue;
+			}
 			double wsR = 0, pkR = 0;
 			memNow( wsR, pkR );
 			if ( wsR - ws0 > budgetMB ) {
@@ -517,10 +748,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			oSway += oc.swayVerts;
 			oDropped += oc.treesDropped;
 			oRefs += oc.refsSkipped;
-			hx0 = r.ox0;
-			hy0 = r.oy0;
-			hx1 = r.ox1;
-			hy1 = r.oy1;
+			hx0 = foot[i][0];
+			hy0 = foot[i][1];
+			hx1 = foot[i][2];
+			hy1 = foot[i][3];
 		}
 	}
 
@@ -534,12 +765,16 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	fd.bx1 = bx1;
 	fd.by1 = by1;
 	fd.cards = cards;
+	int outer = -1;
+	for ( size_t i = 0; i < rings.size(); i++ )
+		if ( rings[i].built || van[i].chunksVanilla + van[i].chunksBoth > 0 )
+			outer = int( i );
 	if ( outer >= 0 ) {
-		const LodlFarRing & r = rings[size_t( outer )];
+		const std::array<int, 4> & r = foot[size_t( outer )];
 		float m = 0.0f;
 		for ( int c = 0; c < 4; c++ ) {
-			const float x = float( ( c & 1 ) ? r.ox1 + 1 : r.ox0 ) * kCell - origin[0];
-			const float y = float( ( c & 2 ) ? r.oy1 + 1 : r.oy0 ) * kCell - origin[1];
+			const float x = float( ( c & 1 ) ? r[2] + 1 : r[0] ) * kCell - origin[0];
+			const float y = float( ( c & 2 ) ? r[3] + 1 : r[1] ) * kCell - origin[1];
 			m = std::max( m, std::sqrt( x * x + y * y ) );
 		}
 		fd.reach = m;
