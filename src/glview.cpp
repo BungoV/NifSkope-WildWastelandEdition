@@ -4052,16 +4052,33 @@ void GLView::paintGL()
 	// Loaded NIFs behind it had been drawn. In a workspace, collect every opaque
 	// node first and use one globally sorted transparent/refraction pass.
 	// lane AO1: the obscurance first; the measure reads the obscured light, as the game's adaptation does
-	wwCellAoPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );
-	wwCellSsrPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );	// lane SSR1: needs that pass's depth
-	wwVolFogPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );	// lane VOLFOG1: the lit medium's froxels
-	if ( !scene->selecting && workspaceDrawScenes.isEmpty() )
+	/* lane CELLALL1: Loaded NIFs beside a cell no longer switch the cell's passes off (obscurance, reflections, fog,
+	 * the measure, HDR, TAA). A cell primary draws first with all of them, the Loaded NIFs after it into the finished
+	 * frame (depth back from the HDR frame); the globally sorted pass stays for a primary that is not a cell.
+	 * WW_CELL_WSGATE_RED=old: the gate as it was (every pass off while a Loaded NIF draws). */
+	static const bool wsGateOld = qgetenv( "WW_CELL_WSGATE_RED" ).trimmed() == "old";
+	const bool cellFirst = !scene->selecting && !wsGateOld && !workspaceDrawScenes.isEmpty() && wwCellLightsWanted( scene );
+	const bool cellPasses = !scene->selecting && ( workspaceDrawScenes.isEmpty() || cellFirst );
+	{
+		static int lastWs = -1;
+		const int ws = scene->selecting ? lastWs : ( workspaceDrawScenes.isEmpty() ? 0 : cellFirst ? 1 : 2 );
+		if ( ws != lastWs && ( ws != 0 || lastWs > 0 ) ) {
+			std::fprintf( stderr, "cell view: %d loaded NIF(s) beside the scene: %s%s\n", int( workspaceDrawScenes.size() ),
+				ws == 1 ? "cell passes kept, the NIFs drawn after the cell" : ws == 2 ? "cell passes off, one sorted pass"
+				: "none", wsGateOld ? " (RED=old)" : "" );
+			lastWs = ws;
+		}
+	}
+	wwCellAoPass( scene, cellPasses );
+	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
+	wwVolFogPass( scene, cellPasses );	// lane VOLFOG1: the lit medium's froxels
+	if ( cellPasses )
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
 
 	glDisable( GL_BLEND );
 	const bool collisionOnly = Scene::collisionOnlySetting
 		&& scene->hasOption( Scene::ShowCollision );
-	if ( workspaceDrawScenes.isEmpty() || collisionOnly ) {
+	if ( workspaceDrawScenes.isEmpty() || collisionOnly || cellFirst ) {
 		// lane IMPOSTORSHOW 2026-09-19: the octahedral impostor card, when one
 		// is armed. Inert in every ordinary session -- see impostorpreviewtest.h.
 		wwImpostorPreviewDraw( scene );
@@ -4071,14 +4088,14 @@ void GLView::paintGL()
 		ImpostorChunk::draw( scene, ImpostorDraw::Options() );
 		if ( !wwImpostorPreviewSuppressScene() ) {
 			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
-			const bool hdr = workspaceDrawScenes.isEmpty() && wwCellHdrBegin( scene );
+			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );	// lane CELLALL1
 			scene->draw();
 			if ( hdr ) {
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
 				wwCellHdrEnd( scene );
 			}
 			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
-			if ( workspaceDrawScenes.isEmpty() )
+			if ( workspaceDrawScenes.isEmpty() || cellFirst )	// lane CELLALL1
 				wwGameTaaResolve( scene );
 			for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
 				ws->draw();
