@@ -15,8 +15,10 @@ BSD License - see nifskope.h
 #include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
+#include <QSettings>
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <vector>
 
@@ -37,6 +39,8 @@ struct SsrState
 	QString dump;			// WW_CELL_SSR_DUMP
 	bool pass = false;		// the scene pass is drawing
 	bool flagged = false;	// the draw being set up carries the flag
+	bool on = true, ext = false, pinOn = false, pinExt = false;	// lane CELLALL1: the rows (cellssr.h)
+	int lastVerdict = -1;	// lane CELLALL1: the telemetry line prints when it changes
 };
 
 SsrState & ssr()
@@ -48,6 +52,11 @@ SsrState & ssr()
 		s.red = red == "off" ? 1 : red == "nogap" ? 2 : red == "nofade" ? 4 : 0;
 		s.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_SSR_DUMP" ) );
 		s.probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
+		const QByteArray pinOn = qgetenv( "WW_CELL_SSR" ).trimmed(), pinExt = qgetenv( "WW_CELL_SSR_EXT" ).trimmed();
+		s.pinOn = !pinOn.isEmpty();
+		s.pinExt = !pinExt.isEmpty();
+		s.on = s.pinOn ? pinOn != "0" : QSettings().value( QStringLiteral( "WW/CellSsr" ), true ).toBool();
+		s.ext = s.pinExt ? pinExt != "0" : QSettings().value( QStringLiteral( "WW/CellSsrExterior" ), false ).toBool();
 	}
 	return s;
 }
@@ -103,6 +112,34 @@ bool ssrIsCellProgram( const NifSkopeOpenGLContext::Program * p )
 
 }	// namespace
 
+bool wwCellSsrOn()
+{
+	return ssr().on;
+}
+
+void wwCellSsrSetOn( bool on )
+{
+	SsrState & s = ssr();
+	if ( s.pinOn )
+		return;
+	s.on = on;
+	QSettings().setValue( QStringLiteral( "WW/CellSsr" ), on );
+}
+
+bool wwCellSsrExteriorOn()
+{
+	return ssr().ext;
+}
+
+void wwCellSsrExteriorSetOn( bool on )
+{
+	SsrState & s = ssr();
+	if ( s.pinExt )
+		return;
+	s.ext = on;
+	QSettings().setValue( QStringLiteral( "WW/CellSsrExterior" ), on );
+}
+
 void wwCellSsrNote( bool flagged )
 {
 	ssr().flagged = flagged;
@@ -120,7 +157,15 @@ void wwCellSsrPass( Scene * scene, bool run )
 		return;
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
 	WwCellAoTargets ao;
-	if ( !L || !L->interior || !wwCellAoTargets( scene, ao ) )
+	// lane CELLALL1: the rows; an exterior only with "SSR outdoors" (before: interiors only)
+	const int verdict = !L ? 0 : !s.on ? 1 : ( !L->interior && !s.ext ) ? 2 : !wwCellAoTargets( scene, ao ) ? 3 : 4;
+	if ( verdict != s.lastVerdict ) {
+		static const char * const words[5] = { "no cell", "off (row)", "off (exterior, SSR outdoors row off)",
+			"off (no obscurance pass)", "on" };
+		std::fprintf( stderr, "cell ssr: %s %s\n", words[verdict], L ? ( L->interior ? "interior" : "exterior" ) : "-" );
+		s.lastVerdict = verdict;
+	}
+	if ( verdict != 4 )
 		return;
 	QElapsedTimer timer;
 	timer.start();

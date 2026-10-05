@@ -17,6 +17,9 @@ BSD License - see nifskope.h
 #include "cellview.h"
 #include "gl/celllights.h"
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
+#include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
+#include "gl/cellwater.h"	// lane CELLALL1: the Water row
+#include "cellaodecal.h"	// lane CELLALL1: the AO decals row
 #include "gl/gametaa.h"
 
 #include <QAction>
@@ -457,6 +460,26 @@ void CellWorkspacePanel::buildUi()
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
 	page->addWidget( prtpRow );
+	// lane CELLALL1: the second row -- label + control only
+	QWidget * fxRow = new QWidget( this );
+	QHBoxLayout * fl = new QHBoxLayout( fxRow );
+	fl->setContentsMargins( 0, 0, 0, 0 );
+	fl->setSpacing( 4 );
+	auto fxBox = [&]( QCheckBox *& box, const QString & label, const char * name, bool on ) {
+		box = new QCheckBox( label, fxRow );
+		box->setObjectName( QLatin1String( name ) );
+		box->setChecked( on );
+		fl->addWidget( box );
+	};
+	fxBox( cellAo, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
+	fxBox( cellShadow, tr( "Light shadows" ), "CellWorkspaceLightShadows", wwCellShadowOn() );
+	fxBox( cellWater, tr( "Water" ), "CellWorkspaceWater", wwCellWaterOn() );
+	fxBox( cellSsr, tr( "SSR" ), "CellWorkspaceSsr", wwCellSsrOn() );
+	fxBox( cellSsrExt, tr( "SSR outdoors" ), "CellWorkspaceSsrOutdoors", wwCellSsrExteriorOn() );
+	fxBox( cellAoDecal, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
+	fxBox( cellGiGpu, tr( "GPU relight" ), "CellWorkspaceGpuRelight", wwCellGiGpuOn() );
+	fl->addStretch( 1 );
+	page->addWidget( fxRow );
 
 	probeKinds = new QTreeWidget( this );
 	probeKinds->setObjectName( QStringLiteral( "CellWorkspaceProbeKinds" ) );
@@ -484,6 +507,32 @@ void CellWorkspacePanel::buildUi()
 		if ( glView )
 			glView->update();
 	} );
+	// lane CELLALL1: the second row. A shader or pass switch repaints; a switch read when the cell opens reopens it.
+	auto fxLive = [this]( QCheckBox * box, void ( *set )( bool ) ) {
+		connect( box, &QCheckBox::toggled, this, [this, set]( bool on ) {
+			set( on );
+			if ( glView )
+				glView->update();
+		} );
+	};
+	fxLive( cellAo, &wwCellAoSetOn );
+	fxLive( cellShadow, &wwCellShadowSetOn );
+	fxLive( cellWater, &wwCellWaterSetOn );
+	fxLive( cellSsr, &wwCellSsrSetOn );
+	fxLive( cellSsrExt, &wwCellSsrExteriorSetOn );
+	auto fxReopen = [this]( QCheckBox * box, void ( *set )( bool ) ) {
+		connect( box, &QCheckBox::toggled, this, [this, set]( bool on ) {
+			set( on );
+			if ( syncing || g_path.isEmpty() )
+				return;	// nothing open: the next open reads it
+			g_over = g_spec;
+			g_haveOverrides = true;
+			say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+			emit reopenRequested( g_path );
+		} );
+	};
+	fxReopen( cellAoDecal, &aoDecalSetOn );
+	fxReopen( cellGiGpu, &wwCellGiGpuSetOn );
 	connect( cellCull, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwCellCullSetOn( on );
 		if ( glView )

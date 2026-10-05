@@ -37,6 +37,13 @@ class Scene;
  *  hit), WW_CELL_SSR_DUMP=<file> (the inputs, the ray, the march, the blurred result, the numbers;
  *  tests/spells/cell_ssr.sh). Probe 61: the reflection as a draw read it. */
 void wwCellSsrPass( Scene * scene, bool run );
+/*! Lane CELLALL1: the rows. "SSR" (WW/CellSsr, env pin WW_CELL_SSR, default on: the interiors' reflections as
+ *  they were) and "SSR outdoors" (WW/CellSsrExterior, env pin WW_CELL_SSR_EXT, ships OFF): an exterior marches
+ *  the same pass (its far = the cell's clip distance, else the ceiling). Water is lane WATER2's. */
+bool wwCellSsrOn();
+void wwCellSsrSetOn( bool on );
+bool wwCellSsrExteriorOn();
+void wwCellSsrExteriorSetOn( bool on );
 //! the draw setupProgram is about to bind: does its material carry the reflection flag
 void wwCellSsrNote( bool flagged );
 //! called with every program setupProgram binds: the scene pass's masks, and the reflection a flagged draw reads

@@ -190,6 +190,16 @@ const WwCellGi * wwCellGiFor( const void * nif );
 //! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
 bool wwCellGiOn();
 void wwCellGiSetOn( bool on );
+/*! Lane CELLALL1: the rows for features that were env-only. Each env pin wins over its row; the defaults are what
+ *  the features did before (AO and the lights' shadows on, the GPU relight off).
+ *  AO: WW/CellAo, pin WW_CELL_AO. Light shadows: WW/CellShadow, pin WW_CELL_SHADOW. GPU relight: WW/CellGiGpu, pin
+ *  WW_CELL_GI_GPU (read when a cell opens: the row reopens it). */
+bool wwCellAoOn();
+void wwCellAoSetOn( bool on );
+bool wwCellShadowOn();
+void wwCellShadowSetOn( bool on );
+bool wwCellGiGpuOn();
+void wwCellGiGpuSetOn( bool on );
 
 /*! lane FARVIEW1 (src/farlight.h, docs/cloud/FARVIEW1_DESIGN.md): DISTANT LIGHT FROM THE SURFELS. Past the band's
  *  near end D0 a surface's placed-light diffuse fades from the real lights to the bake's surfels (w = smoothstep(D0, D1,

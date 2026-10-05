@@ -82,6 +82,7 @@ struct ClState
 	QHash<const void *, ClBloom> bloom;     // lane BLOOM1: the last measure's bloom per document
 	int nextBloomVersion = 1;
 	bool shadowOn = true;   // lane SHADOW1: WW_CELL_SHADOW=0 turns the maps off (the harness's unshadowed pass)
+	bool shadowPinned = false;	// lane CELLALL1: the Light shadows row (WW/CellShadow); the pin wins
 	bool shadowRed = false; // WW_CELL_SHADOW_RED=noshadow: the maps rendered, every factor read as 1
 	QString shadowLast = QStringLiteral( "none yet" );
 	int fogProbe = 0;       // lane FOG2: WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog colour ^ 1/2.2) | 8 (its d, z), per fragment
@@ -131,7 +132,9 @@ ClState & st()
 		const QByteArray isRed = qgetenv( "WW_CELL_IS_RED" ).trimmed();
 		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : isRed == "nobloom" ? 8
 			: isRed == "nofx" ? 16 : 0;
-		s.shadowOn = qgetenv( "WW_CELL_SHADOW" ).trimmed() != "0";
+		const QByteArray shPin = qgetenv( "WW_CELL_SHADOW" ).trimmed();
+		s.shadowPinned = !shPin.isEmpty();
+		s.shadowOn = s.shadowPinned ? shPin != "0" : QSettings().value( QStringLiteral( "WW/CellShadow" ), true ).toBool();
 		s.shadowRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
 		s.fogProbe = qEnvironmentVariableIntValue( "WW_CELL_FOG_PROBE" );
 		const QByteArray giAmb = qgetenv( "WW_CELL_GI_AMB" ).trimmed();	// lane GICAL1
@@ -990,6 +993,35 @@ bool wwCellImageSpaceOn()
 	return st().isOn;
 }
 
+bool wwCellShadowOn()
+{
+	return st().shadowOn;
+}
+
+void wwCellShadowSetOn( bool on )
+{
+	ClState & s = st();
+	if ( s.shadowPinned )
+		return;
+	s.shadowOn = on;
+	QSettings().setValue( QStringLiteral( "WW/CellShadow" ), on );
+}
+
+bool wwCellGiGpuOn()
+{
+	const QByteArray pin = qgetenv( "WW_CELL_GI_GPU" ).trimmed();
+	if ( !pin.isEmpty() )
+		return pin != "0";
+	return QSettings().value( QStringLiteral( "WW/CellGiGpu" ), false ).toBool();
+}
+
+void wwCellGiGpuSetOn( bool on )
+{
+	if ( !qgetenv( "WW_CELL_GI_GPU" ).trimmed().isEmpty() )
+		return;
+	QSettings().setValue( QStringLiteral( "WW/CellGiGpu" ), on );
+}
+
 void wwCellImageSpaceSetOn( bool on )
 {
 	ClState & s = st();
@@ -1223,7 +1255,7 @@ void wwCellShadowPass( Scene * scene )
 		g.shStamp++;
 	}
 	if ( !s.shadowOn ) {
-		s.shadowLast = QStringLiteral( "off(WW_CELL_SHADOW=0)" );
+		s.shadowLast = s.shadowPinned ? QStringLiteral( "off(WW_CELL_SHADOW=0)" ) : QStringLiteral( "off(row)" );
 		return;
 	}
 	// the camera in the world (the view's inverse, as cellRow)
@@ -1489,6 +1521,7 @@ struct AoState
 {
 	bool loaded = false;
 	bool on = true;			// WW_CELL_AO=0: none computed
+	bool pinned = false;	// lane CELLALL1: the AO row (WW/CellAo); the pin wins
 	int red = 0;			// 1 off (computed, not applied), 2 radius (halved), 4 noblur, 8 noreset
 	QString dump;			// WW_CELL_AO_DUMP
 	bool pass = false;		// the opaque pass is drawing
@@ -1500,7 +1533,9 @@ AoState & ao()
 	static AoState a;
 	if ( !a.loaded ) {
 		a.loaded = true;
-		a.on = qgetenv( "WW_CELL_AO" ).trimmed() != "0";
+		const QByteArray aoPin = qgetenv( "WW_CELL_AO" ).trimmed();
+		a.pinned = !aoPin.isEmpty();
+		a.on = a.pinned ? aoPin != "0" : QSettings().value( QStringLiteral( "WW/CellAo" ), true ).toBool();
 		const QByteArray red = qgetenv( "WW_CELL_AO_RED" ).trimmed();
 		a.red = red == "off" ? 1 : red == "radius" ? 2 : red == "noblur" ? 4 : red == "noreset" ? 8 : 0;
 		a.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AO_DUMP" ) );
@@ -1561,6 +1596,20 @@ bool aoIsCellProgram( const NifSkopeOpenGLContext::Program * p )
 }
 
 }	// namespace
+
+bool wwCellAoOn()
+{
+	return ao().on;
+}
+
+void wwCellAoSetOn( bool on )
+{
+	AoState & a = ao();
+	if ( a.pinned )
+		return;
+	a.on = on;
+	QSettings().setValue( QStringLiteral( "WW/CellAo" ), on );
+}
 
 void wwCellAoPass( Scene * scene, bool run )
 {

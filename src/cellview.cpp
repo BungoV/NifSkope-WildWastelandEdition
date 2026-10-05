@@ -909,7 +909,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		}
 	};
 	// lane GPURELIGHT1: WW_CELL_GI_GPU keeps the lights that start off in L.offLights (the relight's record)
-	const bool giKeepOff = !qgetenv( "WW_CELL_GI_GPU" ).isEmpty();
+	const bool giKeepOff = wwCellGiGpuOn();	// lane CELLALL1: the GPU relight row (the pin wins)
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
@@ -1997,7 +1997,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	const bool alphaPin = qgetenv( "WW_CELL_ALPHATEST_PIN" ).trimmed() == "off";
 	/* lane GPURELIGHT1: WW_CELL_GI_GPU or WW_CELL_GI_DOORS: the doors' own triangles go into the soup's doorGeom (a
 	 * closed door stops light by its faces, lets it through its alpha-test holes, tints it through its panes) */
-	const bool giDoorGeom = baking && ( !qgetenv( "WW_CELL_GI_GPU" ).isEmpty() || !qgetenv( "WW_CELL_GI_DOORS" ).isEmpty() );
+	const bool giDoorGeom = baking && ( wwCellGiGpuOn() || !qgetenv( "WW_CELL_GI_DOORS" ).isEmpty() );
 	int dgShapes = 0, dgMasked = 0, dgGlass = 0, dgGlassUnread = 0, dgDropped = 0;
 	// Measurement pin only: WW_CELL_ALPHATEST_FOLIAGE=keep puts landscape\ alpha-tested cards in the soup with their mask.
 	const bool foliageKeep = qgetenv( "WW_CELL_ALPHATEST_FOLIAGE" ).trimmed() == "keep";
@@ -4079,7 +4079,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			/* lane GPURELIGHT1: WW_CELL_GI_GPU=1 records the relight's operators (the lights that start off too, each
 			 * with its FARVIEW1b group key), then relights from them on the CPU and on the GPU, doors open and every
 			 * door closed, and states the timings; WW_CELL_GI_RECORDS=<folder> writes the shared light record */
-			const bool giGpu = !qgetenv( "WW_CELL_GI_GPU" ).isEmpty();
+			const bool giGpu = wwCellGiGpuOn();
 			/* lane FARVIEW1: WW_CELL_FARLIGHT=<folder> records the operators too, writes the light record and the far light's
 			 * layers there (src/farlight.h), and publishes the far tables for the Far light row */
 			const QString farDir = QString::fromLocal8Bit( qgetenv( "WW_CELL_FARLIGHT" ) );
