@@ -22,7 +22,9 @@ struct WwCellLight;
  *  so in an interior it gives every lit effect shape a bucket per placement (src/cellview.cpp) and tells this
  *  table which model each written shape belongs to; the renderer asks it for the shape's lights per draw
  *  (src/gl/renderer.cpp, fo4_effectcell.prog). Part of the Cell lights row: no setting of its own. Exteriors
- *  keep the self-lit path: their base term (the weather's effect-lighting colour) is not read yet.
+ *  too (lane SUNCELL1 final): the base term outdoors is the weather's sun x the imagespace Sunlight Scale
+ *  (src/gl/celllights.cpp); no ambient, as the game's lit asm has none. No weather loaded = self-lit, as before.
+ *  Red WW_CELL_FXLIT_EXT_RED=indoors keeps exteriors self-lit.
  *
  *  Pins (harness only):
  *    WW_CELL_FXLIT_PICK=strong   the four strongest lights at the bound's centre instead of the game's rule

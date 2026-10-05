@@ -408,6 +408,19 @@ void Particles::drawShapes( NodeList * secondPass )
 				litRedSaid = true;
 				fprintf( stderr, "cell particles lit: off (red WW_CELL_PARTICLES_RED=unlit)\n" );
 			}
+			/* lane SUNCELL1 final: the vertex ALPHA takes the 2.2 too. Every particle pixel shader of the game (lit
+			 * Ptcl|Lit|Pma asm 00613, unlit 00604 / 00903) opens with log/mul 2.2/exp on v2.xyzw, so the colour AND
+			 * the alpha of the vertex colour are raised to 2.2 before the texture multiply. Red
+			 * WW_CELL_PARTICLES_RED=linalpha keeps the vertex alpha as written, as before. */
+			static const bool alphaRed = qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "linalpha";
+			prog->uni1b( "pfxAlphaRed", alphaRed );
+			static bool alphaSaid = false;
+			if ( !alphaSaid ) {
+				alphaSaid = true;
+				fprintf( stderr, "cell particles alpha: %s\n", alphaRed
+					? "vertex alpha as written (red WW_CELL_PARTICLES_RED=linalpha)"
+					: "texture alpha x vertex alpha^2.2, as the game's particle shaders" );
+			}
 		}
 
 		// setup vertex colors

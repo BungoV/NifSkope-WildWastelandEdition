@@ -924,8 +924,8 @@ void wwCellLightsUniforms( Scene * scene )
 				FloatVector4( a.box[k][0], a.box[k][1], a.box[k][2], a.box[k][3] ) );
 	}
 	/* lane SUNCELL1: an exterior's directional is the weather's sun (or moon at night): Lookdev's light, TO it,
-	 * world, linear, the numbers the viewport light already carries. Only the cell programs take it (a lit effect
-	 * and the volumetric fog keep the old exterior law); Lookdev off (no weather) = the old path, unchanged. */
+	 * world, linear, the numbers the viewport light already carries. Only the cell programs take it (the volumetric
+	 * fog keeps the old exterior law; a lit effect takes it x Sunlight Scale below); Lookdev off (no weather) = the old path, unchanged. */
 	bool hasDir = L->hasDirectional;
 	float dirTo[3] = { L->dirTo[0], L->dirTo[1], L->dirTo[2] }, dirColor[3] = { L->dirColor[0], L->dirColor[1], L->dirColor[2] };
 	if ( !L->interior && wwLookdevActive() && wwIsCellProgramName( prog->name ) ) {
@@ -946,6 +946,43 @@ void wwCellLightsUniforms( Scene * scene )
 		if ( line != sunLast ) {
 			fprintf( stderr, "%s\n", qPrintable( line ) );
 			sunLast = line;
+		}
+	}
+	/* lane SUNCELL1 final: a lit effect or lit particle outdoors (fo4_effectcell / particles_cell) takes the game's
+	 * base term: BSEffectShader::SetupGeometry's lit branch puts pow(directional colour, 2.2) x the light's fade x
+	 * the imagespace Sunlight Scale (ImageSpaceManager+0x98 = kCurrentEOFData fHDRDataA[6], HNAM's 7th float) in
+	 * cb2[12]; the scene's directional outdoors is the sun. No ambient: the lit asm reads cb2 rows 0..14 only
+	 * (lights 0..11, base 12, alpha 13..14). Red WW_CELL_FXLIT_EXT_RED=indoors leaves exteriors self-lit. */
+	{
+		static const bool fxExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
+		const bool fxProg = prog->name == std::string_view( "fo4_effectcell.prog" )
+			|| prog->name == std::string_view( "particles_cell.prog" );
+		float dalc[6][3];
+		if ( !L->interior && fxProg && !fxExtRed && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
+			float dif[4] = {}, amb[4] = {};
+			wwLookdevLight( dirTo, dif, amb );
+			WwLookdevIs is;
+			const bool haveIs = wwLookdevImageSpace( is );
+			const float sunScale = haveIs ? is.hdr[6] : 1.0f;
+			for ( int c = 0; c < 3; c++ )
+				dirColor[c] = std::max( dif[c], 0.0f ) * sunScale;
+			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
+			static QString fxSunLast;
+			const QString line = QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (sun %4,%5,%6 x Sunlight Scale %7%8)" )
+				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
+				.arg( double( dif[0] ), 0, 'f', 5 ).arg( double( dif[1] ), 0, 'f', 5 ).arg( double( dif[2] ), 0, 'f', 5 )
+				.arg( double( sunScale ), 0, 'f', 3 ).arg( haveIs ? QString() : QStringLiteral( ", no imagespace: 1" ) );
+			if ( line != fxSunLast ) {
+				fprintf( stderr, "%s\n", qPrintable( line ) );
+				fxSunLast = line;
+			}
+		} else if ( !L->interior && fxProg ) {
+			static bool fxSunSaid = false;
+			if ( !fxSunSaid ) {
+				fprintf( stderr, "cell fx sun: exterior lit effects take no sun (%s)\n",
+					fxExtRed ? "RED WW_CELL_FXLIT_EXT_RED=indoors" : "no weather loaded" );
+				fxSunSaid = true;
+			}
 		}
 	}
 	/* lane SUNCELL1: an exterior's ambient is the weather's directional ambient (the 6 DALC colours blended over

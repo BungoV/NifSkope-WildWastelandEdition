@@ -45,6 +45,9 @@ uniform float lightingInfluence;
 uniform int fxLitMode;			// 0 unlit; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
 uniform vec4 fxLit;				// indices into cellLights, -1 = none
 uniform vec4 fxLitScale;		// 1 (a red control's per-light ratio)
+/* lane SUNCELL1 final: the game's particle shaders raise the WHOLE vertex colour to 2.2, alpha too (log / mul 2.2 /
+ * exp on v2.xyzw, asm 00613 / 00604 / 00903); true = the red WW_CELL_PARTICLES_RED=linalpha (alpha as written) */
+uniform bool pfxAlphaRed;
 
 vec3 cellFxLight( int i, vec3 P )
 {
@@ -67,7 +70,8 @@ vec3 cellFxLight( int i, vec3 P )
 
 vec3 cellFxLit( vec3 P )
 {
-	if ( ( fxLitMode & 8 ) != 0 )
+	// lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
+	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir ) )
 		return vec3( 1.0 );
 	vec3 E = cellHasDir ? cellDirColor : vec3( 0.0 );
 	if ( ( fxLitMode & 2 ) != 0 ) {
@@ -192,6 +196,8 @@ void main()
 	if ( cellOn ) {
 		if ( cellProbe != 0 && cellProbe != 6 )
 			discard;	// the probe passes read surfaces; a particle is none
+		if ( !pfxAlphaRed )
+			color.a = baseMap.a * pow( max( C.a, 0.0 ), 2.2 );	// texture alpha (falloff folded in) x vertex alpha^2.2
 		vec3 lin = pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
 		if ( fxLitMode != 0 )
 			lin *= cellFxLit( cellWorldPos( -ViewDir ) );	// a lit particle, before the fog

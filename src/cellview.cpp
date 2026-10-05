@@ -1963,7 +1963,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	int billboardShapes = 0, billboardFlat = 0;
 	/* Lane FXLIT1: in an interior a lit effect shape (the effect-lighting flag) takes a bucket per placement,
 	 * because the game lights it with its MODEL's four placed lights (src/gl/cellfxlit.h). */
-	const bool fxLitOn = spec.interior && spec.overlay == CellOverlay::None;
+	/* lane SUNCELL1 final: exteriors too. The game's lit effect constants (BSEffectShader::SetupGeometry, lit branch)
+	 * take the scene's directional (the sun outdoors) and the placed lights near the model, inside or out. Red
+	 * WW_CELL_FXLIT_EXT_RED=indoors keeps exteriors self-lit, as before. */
+	static const bool fxLitExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
+	const bool fxLitOn = ( spec.interior || !fxLitExtRed ) && spec.overlay == CellOverlay::None;
 	const int fxLitCap = 4096;
 	int fxLitModels = 0, fxLitShapes = 0;
 	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
@@ -4469,7 +4473,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				pfxSystems, pfxCopies, pfxModels, pfxRefused, pfxWhy.isEmpty() ? "" : ": last ",
 				qPrintable( pfxWhy ), pfxCapped, cap );
 			fprintf( stderr, "cell particles lit: %d systems of %d placed models registered with their placed lights%s (%d past the lit cap)\n",
-				pfxLitSystems, pfxLitModels, fxLitOn ? "" : " (off: exteriors keep the self-lit path, as FXLIT1)", pfxLitCapped );
+				pfxLitSystems, pfxLitModels, fxLitOn ? ( spec.interior ? " (interior)" : " (exterior: the sun is the base)" )
+					: " (off: exterior self-lit, red WW_CELL_FXLIT_EXT_RED=indoors)", pfxLitCapped );
 		} else {
 			fprintf( stderr, "cell particles: off (the Particles row)\n" );
 		}
@@ -4852,7 +4857,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		  << billboardFlat << " welded flat" << ( glowRed ? " (WW_CELL_GLOW_RED)" : "" ) << "\n";
 		// lane FXLIT1
 		s << "  lit effects: " << fxLitShapes << " shapes of " << fxLitModels
-		  << " placed models take their four placed lights\n";
+		  << " placed models take their four placed lights"
+		  << ( spec.interior ? "" : fxLitOn ? " (exterior: the sun is the base)" : " (exterior off: RED=indoors)" ) << "\n";
 		if ( groundNote.isEmpty() ) {   // lane CELLVIEW2
 			s << "  ground: " << landsDrawn << " LAND cells, vertex colour only"
 			  << " (the splat layers are NOT sampled -- that is the terrain bake's compositor)\n";
