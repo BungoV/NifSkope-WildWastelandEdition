@@ -769,6 +769,38 @@ bool wwLookdevDalc( float rgb[6][3] )
 	return L.fromWeather;
 }
 
+bool wwLookdevImageSpace( WwLookdevIs & o )
+{
+	const LdLight L = currentLight();	// resolves the weather; the keys of the hour
+	const LdState & s = st();
+	if ( !L.fromWeather || !s.haveWeather )
+		return false;
+	int a = std::clamp( L.keys.a, 0, 7 ), b = std::clamp( L.keys.b, 0, 7 );
+	float t = std::clamp( L.keys.t, 0.0f, 1.0f );
+	if ( !s.w.isFound[a] && !s.w.isFound[b] )
+		return false;
+	if ( !s.w.isFound[a] ) {	// one key without an IMGS: the other alone
+		a = b;
+		t = 0.0f;
+	} else if ( !s.w.isFound[b] ) {
+		b = a;
+		t = 0.0f;
+	}
+	for ( int k = 0; k < 9; k++ )
+		o.hdr[k] = s.w.isHdr[a][k] + ( s.w.isHdr[b][k] - s.w.isHdr[a][k] ) * t;
+	for ( int k = 0; k < 3; k++ )
+		o.cine[k] = s.w.isCine[a][k] + ( s.w.isCine[b][k] - s.w.isCine[a][k] ) * t;
+	for ( int k = 0; k < 4; k++ )
+		o.tint[k] = s.w.isTint[a][k] + ( s.w.isTint[b][k] - s.w.isTint[a][k] ) * t;
+	o.lutA = s.w.isLut[a];
+	o.lutB = s.w.isLut[b];
+	o.t = ( o.lutA == o.lutB ) ? 0.0f : t;
+	o.name = ( a == b || t <= 0.0f ) ? s.w.isEdid[a]
+		: QStringLiteral( "%1->%2 %3%" ).arg( s.w.isEdid[a], s.w.isEdid[b] ).arg( int( t * 100.0f + 0.5f ) );
+	o.key = QStringLiteral( "%1|%2|%3|%4" ).arg( s.weatherKey ).arg( a ).arg( b ).arg( double( t ), 0, 'g', 6 );
+	return true;
+}
+
 /* ------------------------------------------------------------------------
  * The weather preview passes (lane PBRWX1): dome, moon, sun disc, clouds,
  * glare, in that order (INFERRED from the RenderDoc sequence, spec_clouds.md

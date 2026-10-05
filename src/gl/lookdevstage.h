@@ -129,6 +129,16 @@ QString wwLookdevEcho();
 void wwLookdevLight( float lightDirWorld[3], float diffuse[4], float ambient[4] );
 //! the DALC ambient (linear) the PBR program's Lookdev branch reads: [X+,X-,Y+,Y-,Z+,Z-]
 bool wwLookdevDalc( float rgb[6][3] );
+/*! Lane SUNCELL1: the weather's imagespace at the hour: the IMSP slots of the two colour keys, their HNAM /
+ *  CNAM / TNAM blended linearly at the keys' t (as the Sky Scale), and both LUT paths with that t. False when
+ *  no weather is loaded or neither key's IMGS read. `key` changes whenever any of it does. */
+struct WwLookdevIs
+{
+	float hdr[9] = {}, cine[3] = {}, tint[4] = {};
+	QString name, lutA, lutB, key;
+	float t = 0.0f;	// 0 = all lutA
+};
+bool wwLookdevImageSpace( WwLookdevIs & out );
 //! lane WATER1: the water's sky (linear): the weather's Horizon, Sky-Lower and Sky-Upper rows at the dome's hour;
 //! false (the outputs untouched) when no weather is loaded
 bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] );

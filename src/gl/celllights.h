@@ -134,6 +134,7 @@ struct WwCellLighting
 	float isTint[4] = { 0, 1, 1, 1 };
 	QString isName, isLutPath;
 	std::vector<unsigned char> isLut;
+	QString dataRoot;	//!< lane SUNCELL1: the loose Data folder (an exterior's weather LUT is looked up there too)
 	/* lane FOG2: the interior's fog, packed as the weather fog (esmweather.h wwFogPackK, lookdev_fog.glsl):
 	 * each field from XCLL or, by its Inherits flag, the lighting template (0x4 colours, scales, heights and
 	 * high density; 0x8 near; 0x10 far; 0x100 power; 0x200 max). The game's clamps: far <= 0 or > 163840

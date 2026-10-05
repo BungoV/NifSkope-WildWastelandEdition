@@ -868,6 +868,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 {
 	WwCellLighting L;
 	L.interior = spec.interior;
+	L.dataRoot = spec.dataRoot;	// lane SUNCELL1: an exterior's weather LUT is looked up there too
 	L.showSky = spec.interior && ( cellInteriorFlags( world.interior() ) & 0x0080u );	// lane SKYFULL1
 	for ( int k = 0; k < 3; k++ )
 		L.center[k] = center[k];

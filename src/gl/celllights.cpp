@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "gl/cellhdr.h"
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/lookdevstage.h"	// lane SUNCELL1
+#include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -24,6 +25,7 @@ BSD License - see nifskope.h
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace
@@ -202,6 +204,7 @@ struct Gpu
 	GLuint lutTex = 0;
 	const void * lutDoc = nullptr;
 	int lutVersion = 0;
+	int lutStamp = -1;	// lane SUNCELL1: the exterior imagespace's stamp the LUT was uploaded at
 	GLuint bloomTex = 0;
 	GLuint farSlotBuf = 0, farSlotTex = 0, farRecBuf = 0, farRecTex = 0, farPlacedTex = 0;	// lane FARVIEW1
 	const void * farDoc = nullptr;
@@ -221,6 +224,103 @@ QHash<const void *, Gpu> & gpus()
 {
 	static QHash<const void *, Gpu> g;
 	return g;
+}
+
+/* lane SUNCELL1: AN EXTERIOR'S IMAGESPACE IS THE WEATHER'S. An interior keeps its XCIM imagespace (lane IMGS1); an
+ * exterior has none of its own, the game uses the weather's IMSP at the hour (the two colour keys, blended).
+ * isLighting() hands the imagespace sites the document's lighting with those fields filled from the Lookdev
+ * weather (wwLookdevImageSpace), re-filled when the weather or the hour's keys move. No Lookdev weather: the
+ * document's own lighting, so the exterior draws as before (no imagespace). */
+struct ExIs
+{
+	QString key;
+	WwCellLighting L;
+	int stamp = 0;
+};
+
+QHash<const void *, ExIs> & exIs()
+{
+	static QHash<const void *, ExIs> m;
+	return m;
+}
+
+//! the 256x16 B8G8R8 strip -> 16^3 RGB8, r fastest (src/cellview.cpp's reader, lane IMGS1)
+bool decodeLutStrip( const QByteArray & dds, std::vector<unsigned char> & out )
+{
+	auto u32 = [&]( int o ) { quint32 v = 0; std::memcpy( &v, dds.constData() + o, 4 ); return v; };
+	if ( !( dds.size() >= 128 + 256 * 16 * 3 && dds.startsWith( "DDS " ) && u32( 12 ) == 16 && u32( 16 ) == 256
+		&& ( u32( 80 ) & 0x40 ) && u32( 88 ) == 24 && u32( 92 ) == 0xff0000 ) )
+		return false;
+	const unsigned char * px = reinterpret_cast<const unsigned char *>( dds.constData() ) + 128;
+	out.resize( 16 * 16 * 16 * 3 );
+	for ( int b = 0; b < 16; b++ )
+		for ( int g = 0; g < 16; g++ )
+			for ( int r = 0; r < 16; r++ ) {
+				const unsigned char * q = px + ( g * 256 + b * 16 + r ) * 3;
+				unsigned char * o = &out[size_t( ( ( b * 16 + g ) * 16 + r ) * 3 )];
+				o[0] = q[2];
+				o[1] = q[1];
+				o[2] = q[0];
+			}
+	return true;
+}
+
+bool loadLut( const QString & lut, const QString & dataRoot, std::vector<unsigned char> & out )
+{
+	if ( lut.isEmpty() )
+		return false;
+	QByteArray dds;
+	bool got = Game::GameManager::get_file( dds, Game::FALLOUT_4, lut, "textures", ".dds" );
+	if ( !got && !dataRoot.isEmpty() ) {
+		QFile lf( dataRoot + QStringLiteral( "/Textures/" ) + QString( lut ).replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) ) );
+		got = lf.open( QIODevice::ReadOnly ) && !( dds = lf.readAll() ).isEmpty();
+	}
+	return got && decodeLutStrip( dds, out );
+}
+
+const WwCellLighting * isLighting( const void * nif, int * stamp = nullptr )
+{
+	if ( stamp )
+		*stamp = 0;
+	const WwCellLighting * L = nif ? wwCellLightsFor( nif ) : nullptr;
+	if ( !L || L->interior || !wwLookdevActive() )
+		return L;
+	WwLookdevIs w;
+	if ( !wwLookdevImageSpace( w ) )
+		return L;
+	ExIs & e = exIs()[nif];
+	if ( e.key != w.key ) {
+		e.key = w.key;
+		e.L = *L;
+		e.L.hasImageSpace = true;
+		e.L.isName = QStringLiteral( "weather:" ) + w.name;
+		std::copy( w.hdr, w.hdr + 9, e.L.isHdr );
+		std::copy( w.cine, w.cine + 3, e.L.isCine );
+		std::copy( w.tint, w.tint + 4, e.L.isTint );
+		e.L.isLut.clear();
+		e.L.isLutPath.clear();
+		std::vector<unsigned char> a, b;
+		const bool gotA = loadLut( w.lutA, L->dataRoot, a );
+		const bool gotB = w.t > 0.0f && loadLut( w.lutB, L->dataRoot, b );
+		if ( gotA && gotB ) {	// the two keys' LUTs blended: the same as blending their outputs (linear sampling)
+			e.L.isLut.resize( a.size() );
+			for ( size_t i = 0; i < a.size(); i++ )
+				e.L.isLut[i] = (unsigned char) std::lround( float( a[i] ) + ( float( b[i] ) - float( a[i] ) ) * w.t );
+			e.L.isLutPath = w.lutA + QStringLiteral( "->" ) + w.lutB;
+		} else if ( gotA ) {
+			e.L.isLut = a;
+			e.L.isLutPath = w.lutA;
+		}
+		e.stamp++;
+		std::fprintf( stderr, "cell imagespace: exterior=%s hdr=%g,%g,%g,%g,%g,%g,%g,%g,%g lut=%s%s\n",
+			e.L.isName.toLocal8Bit().constData(), double( w.hdr[0] ), double( w.hdr[1] ), double( w.hdr[2] ),
+			double( w.hdr[3] ), double( w.hdr[4] ), double( w.hdr[5] ), double( w.hdr[6] ), double( w.hdr[7] ),
+			double( w.hdr[8] ), e.L.isLutPath.isEmpty() ? "none" : e.L.isLutPath.toLocal8Bit().constData(),
+			( !w.lutA.isEmpty() && !gotA ) ? " (LUT NOT FOUND)" : "" );
+	}
+	if ( stamp )
+		*stamp = e.stamp;
+	return &e.L;
 }
 
 }	// namespace
@@ -697,9 +797,11 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	// lane IMGS1: the imagespace, once this document has a measure; its LUT bound like the grid above
 	const float adapted = s.adapted.value( scene->nifModel, -1.0f );
-	const bool isDraw = L && !s.measuring && adapted >= 0.0f && wwCellImageSpaceWanted( scene );
-	if ( isDraw && L->isLut.size() == 16 * 16 * 16 * 3
-		&& ( g.lutDoc != scene->nifModel || g.lutVersion != s.version.value( scene->nifModel ) ) ) {
+	int isStamp = 0;	// lane SUNCELL1: an exterior's imagespace is the weather's (isLighting)
+	const WwCellLighting * LI = isLighting( scene->nifModel, &isStamp );
+	const bool isDraw = L && LI && !s.measuring && adapted >= 0.0f && wwCellImageSpaceWanted( scene );
+	if ( isDraw && LI->isLut.size() == 16 * 16 * 16 * 3
+		&& ( g.lutDoc != scene->nifModel || g.lutVersion != s.version.value( scene->nifModel ) || g.lutStamp != isStamp ) ) {
 		if ( !g.lutTex )
 			fn->glGenTextures( 1, &g.lutTex );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kLutUnit ) );
@@ -710,12 +812,13 @@ void wwCellLightsUniforms( Scene * scene )
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
-		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGB8, 16, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, L->isLut.data() );
+		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGB8, 16, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, LI->isLut.data() );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
 		g.lutDoc = scene->nifModel;
 		g.lutVersion = s.version.value( scene->nifModel );
+		g.lutStamp = isStamp;
 	}
-	const bool lutDraw = isDraw && g.lutTex && g.lutDoc == scene->nifModel && L->isLut.size() == 16 * 16 * 16 * 3;
+	const bool lutDraw = isDraw && g.lutTex && g.lutDoc == scene->nifModel && LI->isLut.size() == 16 * 16 * 16 * 3;
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kLutUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
@@ -766,14 +869,14 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1b( "cellIsLinear", isDraw && wwCellHdrActive() );	// lane HDR1: write linear light, tone-mapped once
 	prog->uni1b( "cellIsLutOn", lutDraw );
 	if ( isDraw ) {
-		const float * h = L->isHdr;
+		const float * h = LI->isHdr;
 		// the tonemap PS: max( mid / (lum + 0.001), cb.y ) then min( .., cb.x ); cb (x, y) = HNAM (max, min)
 		const float e = std::min( std::max( h[8] / ( adapted + 0.001f ), h[5] ), h[4] );
 		prog->uni1f( "cellIsExposure", e );
 		prog->uni1f( "cellIsE", h[1] );
 		prog->uni1f( "cellIsAdapted", adapted );
-		prog->uni3f( "cellIsCine", L->isCine[0], L->isCine[1], L->isCine[2] );
-		prog->uni4f_l( prog->uniLocation( "cellIsTint" ), FloatVector4( L->isTint[0], L->isTint[1], L->isTint[2], L->isTint[3] ) );
+		prog->uni3f( "cellIsCine", LI->isCine[0], LI->isCine[1], LI->isCine[2] );
+		prog->uni4f_l( prog->uniLocation( "cellIsTint" ), FloatVector4( LI->isTint[0], LI->isTint[1], LI->isTint[2], LI->isTint[3] ) );
 		prog->uni1i( "cellIsRed", s.isRed );
 	}
 	prog->uni1i( "cellLights", kTextureUnit );
@@ -900,7 +1003,7 @@ bool wwCellImageSpaceWanted( Scene * scene )
 {
 	if ( !st().isOn || !scene || wwCellPassFor( scene->nifModel ) > 0 || !wwCellLightsWanted( scene ) )
 		return false;	// lane PROBEVIEW1: a Pass shows the probes' own values, not the imagespace's grade
-	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	const WwCellLighting * L = isLighting( scene->nifModel );	// lane SUNCELL1: an exterior's is the weather's
 	return L && L->hasImageSpace;
 }
 
@@ -942,7 +1045,7 @@ void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, 
 {
 	if ( !scene || !scene->nifModel || !rgba || w <= 0 || h <= 0 || step < 1 )
 		return;
-	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	const WwCellLighting * L = isLighting( scene->nifModel );	// lane SUNCELL1
 	if ( !L || !L->hasImageSpace )
 		return;
 	ClState & s = st();
@@ -1013,7 +1116,7 @@ void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, 
 QString wwCellImageSpaceEcho( Scene * scene )
 {
 	ClState & s = st();
-	const WwCellLighting * L = scene && scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
+	const WwCellLighting * L = scene && scene->nifModel ? isLighting( scene->nifModel ) : nullptr;	// lane SUNCELL1
 	QString o = QStringLiteral( "imagespace=%1(asked=%2)" ).arg( wwCellImageSpaceWanted( scene ) ? "on" : "off" ).arg( s.isOn ? 1 : 0 );
 	if ( !L || !L->hasImageSpace )
 		return o + QStringLiteral( " (the cell has none)" );

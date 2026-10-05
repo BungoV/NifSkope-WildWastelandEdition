@@ -798,6 +798,33 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 				}
 			} catch ( std::exception & ) {
 			}
+			// lane SUNCELL1: the rest of the IMGS (a separate walk, so the Sky Scale read above is untouched)
+			const float hdrDef[9] = { 3, 7, 0.6f, 0.5f, 0.15f, 0.15f, 1.8f, 1.5f, 3 };
+			std::copy( hdrDef, hdrDef + 9, out.isHdr[tod] );
+			for ( int c = 0; c < 3; c++ )
+				out.isCine[tod][c] = 1.0f;
+			out.isTint[tod][0] = 0.0f;
+			for ( int c = 1; c < 4; c++ )
+				out.isTint[tod][c] = 1.0f;
+			try {
+				ESMFile::ESMField g( *esm, *ig );
+				while ( g.next() ) {
+					if ( g == "HNAM" && g.size() >= 36 ) {
+						std::memcpy( out.isHdr[tod], g.data(), 36 );
+						out.isFound[tod] = true;
+					} else if ( g == "CNAM" && g.size() >= 12 ) {
+						std::memcpy( out.isCine[tod], g.data(), 12 );
+					} else if ( g == "TNAM" && g.size() >= 16 ) {
+						std::memcpy( out.isTint[tod], g.data(), 16 );
+					} else if ( g == "EDID" ) {
+						out.isEdid[tod] = fieldString( g );
+					} else if ( g == "TX00" ) {
+						out.isLut[tod] = fieldString( g );
+					}
+				}
+			} catch ( std::exception & ) {
+				out.isFound[tod] = false;
+			}
 		}
 	}
 	// lane VOLFOG1: WGDR -> GDRY per ToD, the medium each builds (a missing link: the engine's fallback)

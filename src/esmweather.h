@@ -255,6 +255,13 @@ struct WwWeatherData
 	quint32 imsp[8] = {};	// IMSP: the IMGS per ToD (mapped FormIDs; 4-slot records mapped to 8)
 	float skyScale[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };	// IMGS HNAM[7] per ToD (1.0 where absent)
 	int skyScaleFound = 0;	// how many ToD slots had an IMGS with HNAM
+	/* lane SUNCELL1: the whole IMGS per ToD, for the cell view's exterior imagespace (celllights.h's isHdr
+	 * layout: HNAM 9 floats, CNAM saturation/brightness/contrast, TNAM amount/r/g/b, TX00 the LUT strip) */
+	bool isFound[8] = {};
+	float isHdr[8][9] = {};
+	float isCine[8][3] = {};
+	float isTint[8][4] = {};
+	QString isEdid[8], isLut[8];
 	QString cloudTex[32];	// x0TX, as stored (relative to Textures\)
 	quint32 cloudLayers = 16;	// LNAM
 	bool hasLnam = false;
