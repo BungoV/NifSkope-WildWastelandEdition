@@ -28,6 +28,15 @@ struct Texture {
 };
 
 #include "uniforms.glsl"
+#ifdef WW_CELLLIGHTS
+/* lane SUNCELL1 (particles_cell.frag): the game draws its particles with the effect shader, so in the cell view a
+ * particle takes the cell effect's output law (fo4_effectshader.frag, lane EFX2): the colour decoded to linear,
+ * fogged (an additive one dimmed, a blended one fogged toward the fog colour), then linear into the HDR frame,
+ * or the cell's imagespace, or encoded again. */
+#include "lookdev_fog.glsl"
+#include "cell_lights.glsl"
+uniform bool fxAdditive;
+#endif
 
 uniform sampler2D textureUnits[10];
 uniform Texture textures[10];
@@ -135,5 +144,24 @@ void main()
 		color.rgb += cube * envReflection * falloff * coverage;
 	}
 
+#ifdef WW_CELLLIGHTS
+	if ( cellOn ) {
+		if ( cellProbe != 0 && cellProbe != 6 )
+			discard;	// the probe passes read surfaces; a particle is none
+		vec3 lin = pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
+		if ( fogOn ) {
+			vec3 posView = -ViewDir;
+			float hb;
+			vec3 fogCol;
+			float f = wwFogEval( length( posView ) * fogDistScale, dot( fogView.xyz, posView ) + fogView.w, hb, fogCol );
+			lin = fxAdditive ? lin * ( 1.0 - f ) : mix( lin, fogCol, f );
+		}
+		if ( cellProbe == 6 )
+			fragColor = vec4( lin, color.a );	// the imagespace's measure: the linear value, blended as drawn
+		else
+			fragColor = vec4( cellIsLinear ? lin : cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, vec3( 1.0 / 2.2 ) ), color.a );
+		return;
+	}
+#endif
 	fragColor = color;
 }

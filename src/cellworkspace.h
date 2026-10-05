@@ -219,6 +219,7 @@ private:
 	QCheckBox * cellSsrExt = nullptr;
 	QCheckBox * cellAoDecal = nullptr;
 	QCheckBox * cellGiGpu = nullptr;
+	QCheckBox * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off
 	QComboBox * cellPass = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
 	QPushButton * probesPlace = nullptr;
 	QPushButton * probesBake = nullptr;

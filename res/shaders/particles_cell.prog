@@ -1,0 +1,5 @@
+# particles.prog with the game's cell-view effect law compiled in (lane SUNCELL1; the law is lane EFX2's,
+# fo4_effectshader.frag). No conditions: the condition scan never picks it; Particles::drawShapes uses it by name
+# while the draw is cell-lit (src/gl/glparticles.cpp).
+
+shaders particles.vert particles.geom particles_cell.frag

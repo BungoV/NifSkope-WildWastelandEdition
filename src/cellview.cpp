@@ -59,7 +59,9 @@ BSD License - see nifskope.h
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <map>
+#include <memory>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -1303,6 +1305,90 @@ static QString cellBakeFarSoup( const CellSceneSpec & spec, const QString & data
 		"trees %7, triangles +%8, %9 ms" ).arg( QDir::toNativeSeparators( lodl ) ).arg( radius ).arg( r.quads )
 		.arg( r.albedoQuads ).arg( r.waterQuads ).arg( r.boxes ).arg( r.trees ).arg( soup.triCount() - before )
 		.arg( t.elapsed() );
+}
+
+/* lane SUNCELL1: the Particles row (WW/CellParticles, env pin WW_CELL_PARTICLES, ships OFF). Read when a cell
+ * opens: the row reopens the cell. */
+bool wwCellParticlesOn()
+{
+	const QByteArray pin = qgetenv( "WW_CELL_PARTICLES" ).trimmed();
+	if ( !pin.isEmpty() )
+		return pin != "0";
+	return QSettings().value( QStringLiteral( "WW/CellParticles" ), false ).toBool();
+}
+
+void wwCellParticlesSetOn( bool on )
+{
+	QSettings().setValue( QStringLiteral( "WW/CellParticles" ), on );
+}
+
+// Copy / Paste Branch's per-block strings (src/spells/blocks.cpp)
+QStringList serializeStrings( NifModel * nif, const QModelIndex & iBlock, const QString & type );
+void deserializeStrings( NifModel * nif, const QModelIndex & iBlock, const QString & type, QStringList & strings );
+
+/*! lane SUNCELL1: one placed model's particle systems, copied into the cell's document the way Paste Branch
+ *  copies a branch: the root's branch, without its triangle shapes (the weld has them already), its collision
+ *  and its lights, every link out of the copy mapped to none, the root's own transform replaced by the
+ *  reference's (lane MISS1's rule). Returns the particle systems copied (0: none in the branch, -1: a block
+ *  would not copy; `why` says which). */
+static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, NifModel & src,
+	const Vector3 & at, const Matrix & rot, float scale, QString * why )
+{
+	const QList<int> roots = src.getRootLinks();
+	if ( roots.isEmpty() || !src.blockInherits( src.getBlockIndex( roots.first() ), "NiNode" ) ) {
+		*why = QStringLiteral( "no NiNode root" );
+		return -1;
+	}
+	QList<qint32> order;
+	QSet<qint32> seen;
+	int systems = 0;
+	std::function<void( qint32 )> walk = [&]( qint32 b ) {
+		if ( b < 0 || seen.contains( b ) )
+			return;
+		seen.insert( b );
+		const QModelIndex ib = src.getBlockIndex( b );
+		if ( !ib.isValid() || src.blockInherits( ib, "BSTriShape" ) || src.blockInherits( ib, "NiCollisionObject" )
+			|| src.blockInherits( ib, "NiLight" ) )
+			return;
+		order.append( b );
+		systems += src.blockInherits( ib, "NiParticleSystem" ) ? 1 : 0;
+		for ( const int c : src.getChildLinks( b ) )
+			walk( c );
+	};
+	walk( roots.first() );
+	if ( !systems )
+		return 0;
+	const qint32 base = nif->getBlockCount();
+	QMap<qint32, qint32> map;	// every source block named: a link to one left out becomes none
+	for ( qint32 b = 0; b < src.getBlockCount(); b++ )
+		map.insert( b, -1 );
+	for ( int i = 0; i < order.size(); i++ )
+		map.insert( order.at( i ), base + i );
+	for ( const qint32 b : order ) {
+		const QModelIndex ib = src.getBlockIndex( b );
+		const QString type = src.createRTTIName( ib );
+		QStringList strings = serializeStrings( &src, ib, type );
+		QByteArray data;
+		QBuffer buf( &data );
+		if ( !buf.open( QIODevice::WriteOnly ) || !src.saveIndex( buf, ib ) ) {
+			*why = QStringLiteral( "%1 %2 would not save" ).arg( type ).arg( b );
+			return -1;
+		}
+		buf.close();
+		const QModelIndex nb = buf.open( QIODevice::ReadOnly ) ? nif->insertNiBlock( type ) : QModelIndex();
+		if ( !nb.isValid() || !nif->loadAndMapLinks( buf, nb, map ) ) {
+			*why = QStringLiteral( "%1 %2 would not load" ).arg( type ).arg( b );
+			return -1;
+		}
+		deserializeStrings( nif, nb, type, strings );
+	}
+	Transform t;
+	t.rotation = rot;
+	t.translation = at;
+	t.scale = scale;
+	t.writeBack( nif, nif->getBlockIndex( base ) );
+	addLink( nif, iParent, QStringLiteral( "Children" ), base );
+	return systems;
 }
 
 bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
@@ -4028,6 +4114,78 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		if ( !emitBucket( nif, iParent, bk, origin, shapes, verts, tris, error ) ) {
 			ok = false;
 			break;
+		}
+	}
+
+	/* lane SUNCELL1: THE PARTICLES. The weld takes triangle shapes only (lodgen.cpp), so a placed model's
+	 * particle systems (steam, smoke, fire, sparks, dust) never reached the cell, and a model of particles alone
+	 * was a failed model. With the Particles row on, each placed model whose parse found one has its systems
+	 * copied in under the reference's transform (cellCopyParticleBranch); the viewer's simulation runs them and
+	 * Particles::drawShapes draws them with the cell's effect law (linear light, the fog, the HDR frame or the
+	 * imagespace), as the game draws its particles with the effect shader. A disabled reference and an actor
+	 * carry none. WW_CELL_PARTICLES_MAX (512) caps the copies. */
+	if ( ok && !bakeLean ) {
+		if ( wwCellParticlesOn() ) {
+			static const int cap = qEnvironmentVariableIsSet( "WW_CELL_PARTICLES_MAX" )
+				? qEnvironmentVariableIntValue( "WW_CELL_PARTICLES_MAX" ) : 512;
+			QHash<QString, std::shared_ptr<NifModel>> pfxSrc;	// one parse a model; null = unusable
+			QPersistentModelIndex iPfx;
+			int pfxCopies = 0, pfxSystems = 0, pfxModels = 0, pfxRefused = 0, pfxCapped = 0;
+			QString pfxWhy;
+			for ( const Placement & p : placements ) {
+				if ( !p.actorKey.isEmpty() || p.disabled )
+					continue;
+				const QString model = world.lodBase( p.base ).model;
+				if ( model.isEmpty() || !lodgenModelHasParticles( model ) )
+					continue;
+				if ( pfxCopies >= cap ) {
+					pfxCapped++;
+					continue;
+				}
+				const QString key = model.toLower();
+				auto it = pfxSrc.find( key );
+				if ( it == pfxSrc.end() ) {
+					auto m = std::make_shared<NifModel>();
+					QByteArray bytes;
+					QBuffer dev( &bytes );
+					bool good = lodgenReadModelBytes( dataRoot, model, bytes ) && dev.open( QIODevice::ReadOnly )
+						&& m->load( dev, model.toLocal8Bit().constData() );
+					if ( good ) {
+						m->resetState();
+						good = m->getVersionNumber() == nif->getVersionNumber() && m->getBSVersion() == nif->getBSVersion();
+					}
+					if ( !good ) {
+						m.reset();
+						pfxRefused++;
+						pfxWhy = QStringLiteral( "%1 unreadable or not this version" ).arg( model );
+					} else {
+						pfxModels++;
+					}
+					it = pfxSrc.insert( key, m );
+				}
+				if ( !it.value() )
+					continue;
+				if ( !iPfx.isValid() ) {
+					QModelIndex iP = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+					nif->set<QString>( iP, "Name", QStringLiteral( "particles" ) );
+					nif->set<quint32>( iP, "Flags", 14 );
+					nif->set<float>( iP, "Scale", 1.0f );
+					addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iP ) );
+					iPfx = iP;
+				}
+				const int n = cellCopyParticleBranch( nif, QModelIndex( iPfx ), *it.value(), p.pos - origin, p.rot, p.scale, &pfxWhy );
+				if ( n > 0 ) {
+					pfxCopies++;
+					pfxSystems += n;
+				} else if ( n < 0 ) {
+					pfxRefused++;
+				}
+			}
+			fprintf( stderr, "cell particles: %d systems in %d copies of %d models (%d refused%s%s, %d past the cap of %d)\n",
+				pfxSystems, pfxCopies, pfxModels, pfxRefused, pfxWhy.isEmpty() ? "" : ": last ",
+				qPrintable( pfxWhy ), pfxCapped, cap );
+		} else {
+			fprintf( stderr, "cell particles: off (the Particles row)\n" );
 		}
 	}
 

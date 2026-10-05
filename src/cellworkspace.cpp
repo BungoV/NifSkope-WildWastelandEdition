@@ -478,6 +478,7 @@ void CellWorkspacePanel::buildUi()
 	fxBox( cellSsrExt, tr( "SSR outdoors" ), "CellWorkspaceSsrOutdoors", wwCellSsrExteriorOn() );
 	fxBox( cellAoDecal, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
 	fxBox( cellGiGpu, tr( "GPU relight" ), "CellWorkspaceGpuRelight", wwCellGiGpuOn() );
+	fxBox( cellParticles, tr( "Particles" ), "CellWorkspaceParticles", wwCellParticlesOn() );	// lane SUNCELL1
 	fl->addStretch( 1 );
 	page->addWidget( fxRow );
 
@@ -533,6 +534,7 @@ void CellWorkspacePanel::buildUi()
 	};
 	fxReopen( cellAoDecal, &aoDecalSetOn );
 	fxReopen( cellGiGpu, &wwCellGiGpuSetOn );
+	fxReopen( cellParticles, &wwCellParticlesSetOn );	// lane SUNCELL1: the systems are copied in when the cell opens
 	connect( cellCull, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwCellCullSetOn( on );
 		if ( glView )

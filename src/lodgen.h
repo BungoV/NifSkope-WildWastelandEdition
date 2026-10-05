@@ -70,6 +70,11 @@ bool lodgenProbeAsset( const QString & dataRoot, const QString & relPath,
 int lodgenEditorMarkerCount( int add, const QString & model = QString() );
 //! lane FXREST1: the models (data-relative, lower case, backslashes) that lost a shape to the inside-name rule
 QStringList lodgenEditorMarkerInsideModels();
+/*! lane SUNCELL1: did this model's parse (lodgenLoadModel, this process) find a particle system? The cell view
+ *  copies those systems into its document (the welded load takes triangle shapes only). */
+bool lodgenModelHasParticles( const QString & model );
+//! lane SUNCELL1: a model's file bytes, found the way the model loader finds them (loose, then the archives)
+bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByteArray & bytes );
 /*! Up to `limit` of the paths the stack's index holds, sorted. For a harness
  *  that has to name a file inside an archive without guessing one. */
 QStringList lodgenListResourceFiles( int limit );

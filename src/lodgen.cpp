@@ -2238,6 +2238,36 @@ QStringList lodgenEditorMarkerInsideModels()
 	return l;
 }
 
+// lane SUNCELL1: the models whose one parse found a particle system (the cell view copies those in, cellview.cpp)
+static QMutex particleModelMutex;
+static QSet<QString> particleModels;
+static QString lodgenParticleKey( const QString & model )
+{
+	QString k = model.toLower();
+	k.replace( QChar( '\\' ), QChar( '/' ) );
+	if ( k.startsWith( QLatin1String( "meshes/" ) ) )
+		k = k.mid( 7 );
+	return k;
+}
+bool lodgenModelHasParticles( const QString & model )
+{
+	QMutexLocker lock( &particleModelMutex );
+	return particleModels.contains( lodgenParticleKey( model ) );
+}
+static void lodgenNoteParticleModel( const QString & model )
+{
+	QMutexLocker lock( &particleModelMutex );
+	particleModels.insert( lodgenParticleKey( model ) );
+}
+bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByteArray & bytes )
+{
+	QString path = model;
+	path.replace( QChar( '\\' ), QChar( '/' ) );
+	if ( !path.startsWith( QStringLiteral( "meshes/" ), Qt::CaseInsensitive ) )
+		path.prepend( QStringLiteral( "meshes/" ) );
+	return lodgenReadAsset( dataRoot, path, "meshes", ".nif", bytes );
+}
+
 namespace
 {
 
@@ -2309,12 +2339,17 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	 * so; the near bake leaves such a base to the engine. Counted here, on the
 	 * one parse, and read by nobody else. */
 	int modelControllers = 0;
+	bool modelParticles = false;	// lane SUNCELL1: a particle system rides the same scan
 	if ( loaded )
 		for ( int b = 0; b < src.getBlockCount(); b++ ) {
 			const QModelIndex ib = src.getBlockIndex( b );
 			if ( src.blockInherits( ib, "NiTimeController" ) || src.blockInherits( ib, "NiSequence" ) )
 				modelControllers++;
+			if ( !modelParticles && src.blockInherits( ib, "NiParticleSystem" ) )
+				modelParticles = true;
 		}
+	if ( modelParticles )
+		lodgenNoteParticleModel( meshPath );
 	if ( loaded ) {
 		for ( int b = 0; b < src.getBlockCount(); b++ ) {
 			QModelIndex iShape = src.getBlockIndex( b );
