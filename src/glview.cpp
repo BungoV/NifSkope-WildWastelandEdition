@@ -134,6 +134,7 @@ private:
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include <QOpenGLFramebufferObject>
+#include <QOpenGLExtraFunctions>	// lane FARVIEW1: the GPU timer
 #include "gl/celllights.h"	// lane IMGS1: the imagespace measure
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
 #include "gl/cellssr.h"
@@ -4070,8 +4071,10 @@ void GLView::paintGL()
 			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
 			const bool hdr = workspaceDrawScenes.isEmpty() && wwCellHdrBegin( scene );
 			scene->draw();
-			if ( hdr )
+			if ( hdr ) {
+				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
 				wwCellHdrEnd( scene );
+			}
 			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
 			if ( workspaceDrawScenes.isEmpty() )
 				wwGameTaaResolve( scene );
@@ -22126,6 +22129,45 @@ void GLView::advanceGears()
  *  This is that path, factored out so the WW_RENDER_SHOT harness can reach it;
  *  the alternative was a second copy, and the copy is the one that drifts.
  */
+/* lane FARVIEW1: the far light's flat-cost gate times the frame on the GPU (the CPU's wall clock would time the
+ * driver's queue). Each repaint is bracketed by its own GL_TIME_ELAPSED query and finished before the next. */
+QString GLView::wwGpuMs( int frames )
+{
+	if ( frames <= 0 || !context() )
+		return QStringLiteral( "gpums refused: no frames or no context" );
+	makeCurrent();
+	QOpenGLExtraFunctions * xf = context()->extraFunctions();
+	if ( !xf )
+		return QStringLiteral( "gpums refused: no GL 3 functions" );
+	constexpr GLenum kTimeElapsed = 0x88BF;	// GL_TIME_ELAPSED (GL 3.3, ARB_timer_query)
+	GLuint q = 0;
+	xf->glGenQueries( 1, &q );
+	std::vector<double> gpu, cpu;
+	for ( int k = 0; k < frames + 2; k++ ) {
+		QElapsedTimer t;
+		t.start();
+		xf->glBeginQuery( kTimeElapsed, q );
+		paintGL();
+		xf->glEndQuery( kTimeElapsed );
+		xf->glFinish();
+		GLuint ns = 0;	// 32 bits of ns: 4.29 s a frame, plenty
+		xf->glGetQueryObjectuiv( q, GL_QUERY_RESULT, &ns );
+		if ( k >= 2 ) {
+			gpu.push_back( double( ns ) * 1e-6 );
+			cpu.push_back( double( t.nsecsElapsed() ) * 1e-6 );
+		}
+	}
+	xf->glDeleteQueries( 1, &q );
+	doneCurrent();
+	auto med = []( std::vector<double> v ) {
+		std::sort( v.begin(), v.end() );
+		return v[v.size() / 2];
+	};
+	const auto mm = std::minmax_element( gpu.begin(), gpu.end() );
+	return QStringLiteral( "gpums median=%1 min=%2 max=%3 frames=%4 cpums median=%5" ).arg( med( gpu ), 0, 'f', 3 )
+		.arg( *mm.first, 0, 'f', 3 ).arg( *mm.second, 0, 'f', 3 ).arg( frames ).arg( med( cpu ), 0, 'f', 3 );
+}
+
 QImage GLView::grabSupersampled( int shift )
 {
 	shift = qBound( 0, shift, 3 );

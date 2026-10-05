@@ -98,7 +98,8 @@ struct ProbeRelightOps
 		bool onAtStart = true;              //!< false: switched off at the start (its pairs are still recorded)
 		quint32 ref = 0;                    //!< the placed reference (0: a synthetic light)
 		quint64 groupKey = 0;               //!< FARVIEW1b 3.2: kind (62-63) | parity (40) | plugin (24-39) | local form (0-23)
-		quint16 flags = 0;                  //!< FARVIEW1b light flags: 1 spot, 4 negative, 8 flicker, 16 ambient only
+		quint16 flags = 0;                  //!< FARVIEW1b light flags: 1 spot, 4 negative, 8 flicker, 16 ambient only, 32 has a dot
+		float dot[3] = { 0, 0, 0 };         //!< lane FARVIEW1: the bulb dot's intensity I_dot (FARVIEW1b 5.1), linear; 0 = no dot
 	};
 	std::vector<Light> lights;
 	// ---- 1. direct: the pairs, by surfel
@@ -156,6 +157,7 @@ struct ProbeRelightOps
 	qint64 doorOver2 = 0;                   //!< entries crossing more than two door boxes (the third on is ignored)
 	bool doorGeometry = false;              //!< the soup carried the doors' real geometry (else a closed door = a blanket cut)
 	double msRecord = 0;
+	bool interior = true;                   //!< lane FARVIEW1: the .wlt's flag bit 0 (the cell view sets it; the gate scenes are interiors)
 };
 
 //! The live state of one relight
@@ -170,6 +172,10 @@ struct ProbeRelightState
 	 *  that crosses its box (its holes and panes ignored), "glassopaque" a pane stops light like wood, "dooropen" a
 	 *  closed door is ignored */
 	QString red;
+	/*! lane FARVIEW1: the placed lights alone -- no sun, no interior directional, no glow (Le), no sky. The far term's
+	 *  layers (src/farlight.h) are linear in the placed lights only with these out; false = as before */
+	bool placedOnly = false;
+	bool wantE = false;                     //!< lane FARVIEW1: fill ProbeRelightOut::Es
 };
 
 struct ProbeRelightOut
@@ -180,6 +186,9 @@ struct ProbeRelightOut
 	int passes = 0;
 	bool settled = false;
 	std::vector<double> passLog;            //!< per pass: change, sum B, max B
+	/*! lane FARVIEW1 (wantE): 3 a surfel, the surfel's irradiance E = E_direct + E_feed / pi of the last pass
+	 *  (FARVIEW1 design section 3: E, not B = albedo x E, so a far texture's own albedo multiplies it) */
+	std::vector<double> Es;
 	int slotsEmptied = 0;                   //!< slots a closed door left with no visible probe (valid 0)
 	int radiusClamped = 0;
 	double ms = 0;                          //!< wall time of the run
@@ -205,6 +214,10 @@ private:
 	struct Impl;
 	Impl * d;
 };
+
+//! lane FARVIEW1: RGB9E5 pack / unpack (EXT_texture_shared_exponent's rounding; negative = 0)
+quint32 probeRgb9e5( const float c[3] );
+void probeRgb9e5Decode( quint32 packed, float c[3] );
 
 //! One census line
 QString probeRelightCensusText( const ProbeRelightOps & ops );

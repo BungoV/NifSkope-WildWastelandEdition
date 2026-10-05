@@ -631,6 +631,10 @@ public:
 	 */
 	QImage grabSupersampled( int shift );
 
+	/*! lane FARVIEW1: the GPU time of `frames` repaints of the current view (GL_TIME_ELAPSED around paintGL, after
+	 *  two warm-up repaints): "gpums median=.. min=.. max=.. frames=.. cpums median=..", or why not */
+	QString wwGpuMs( int frames );
+
 	//! Where the timeline is parked right now.
 	/*! The freeze dialog seeds itself from this, so "scrub until it looks right,
 	 *  then freeze this file there" needs no second guess at the number. */

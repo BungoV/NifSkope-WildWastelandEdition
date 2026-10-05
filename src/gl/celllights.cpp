@@ -33,6 +33,9 @@ constexpr int kTexelsPerLight = 8;		// lane SHADOW1 added the 5th: shadow slot, 
 constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
 constexpr int kGiSlotUnit = 18;		// lane ROOMCLAMP1: the grid's slot rooms, the fine rooms (sampler3D, R32F); off
 constexpr int kRoomUnit = 19;		// on a GPU with fewer than 20 units (the blend before the lane)
+constexpr int kFarSlotUnit = 20;	// lane FARVIEW1: the far table's slots (usamplerBuffer), records (samplerBuffer) and the
+constexpr int kFarRecUnit = 21;		// GI grid's placed share (sampler3D); off on a GPU with fewer than 23 units
+constexpr int kFarPlacedUnit = 22;
 constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
 constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
 constexpr int kShadowUnit = 10;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
@@ -63,6 +66,11 @@ struct ClState
 	bool giOn = false, giPinned = false;
 	QHash<const void *, WwCellGi> gi;
 	QHash<const void *, int> giVersion;
+	bool farOn = false, farPinned = false;	// lane FARVIEW1
+	int dotsLast = -1;	// lane FARVIEW1: the dots the last frame drew (-1 none tried)
+	int farRed = 0;
+	QHash<const void *, WwCellFar> far;
+	QHash<const void *, int> farVersion;
 	bool isOn = false, isPinned = false, measuring = false;
 	int isRed = 0;          // 1 nolut, 2 noexp, 4 nograde, 8 nobloom, 16 nofx
 	QHash<const void *, float> adapted;     // lane IMGS1: the last measure per document
@@ -99,6 +107,15 @@ ClState & st()
 		} else {
 			s.giOn = QSettings().value( QStringLiteral( "WW/CellGi" ), false ).toBool();
 		}
+		const QByteArray farPin = qgetenv( "WW_CELL_FAR" );	// lane FARVIEW1
+		if ( !farPin.isEmpty() ) {
+			s.farPinned = true;
+			s.farOn = farPin.trimmed() != "0";
+		} else {
+			s.farOn = QSettings().value( QStringLiteral( "WW/CellFar" ), false ).toBool();
+		}
+		const QByteArray farRed = qgetenv( "WW_CELL_FAR_RED" ).trimmed();
+		s.farRed = farRed == "nosurfel" ? 1 : farRed == "noblend" ? 2 : farRed == "flipside" ? 4 : 0;
 		s.probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
 		const QByteArray isPin = qgetenv( "WW_CELL_IS" );
 		if ( !isPin.isEmpty() ) {
@@ -184,6 +201,9 @@ struct Gpu
 	const void * lutDoc = nullptr;
 	int lutVersion = 0;
 	GLuint bloomTex = 0;
+	GLuint farSlotBuf = 0, farSlotTex = 0, farRecBuf = 0, farRecTex = 0, farPlacedTex = 0;	// lane FARVIEW1
+	const void * farDoc = nullptr;
+	int farVersion = 0;
 	const void * bloomDoc = nullptr;
 	int bloomVersion = 0;
 	// lane SHADOW1: the depth cube array, the light each slot holds (-1 free), and a stamp the light
@@ -243,6 +263,117 @@ void wwCellGiSetOn( bool on )
 		return;
 	s.giOn = on;
 	QSettings().setValue( QStringLiteral( "WW/CellGi" ), on );
+}
+
+void wwCellFarPublish( const void * nif, const WwCellFar & far )
+{
+	ClState & s = st();
+	s.far.insert( nif, far );
+	s.farVersion.insert( nif, s.nextVersion++ );
+}
+
+const WwCellFar * wwCellFarFor( const void * nif )
+{
+	ClState & s = st();
+	auto it = s.far.constFind( nif );
+	return it == s.far.constEnd() ? nullptr : &*it;
+}
+
+bool wwCellFarOn()
+{
+	return st().farOn;
+}
+
+void wwCellFarSetOn( bool on )
+{
+	ClState & s = st();
+	if ( s.farPinned )
+		return;
+	s.farOn = on;
+	QSettings().setValue( QStringLiteral( "WW/CellFar" ), on );
+}
+
+int wwCellFarRed()
+{
+	return st().farRed;
+}
+
+/* lane FARVIEW1: the bulb dots. A bulb's intensity I = Le x area / 4 (farLightDots); seen from d it covers
+ * (area / 4) / d^2 sr, a pixel (1 / f)^2 sr, so the frame value it adds, spread over a normalised Gaussian, is
+ * I (f / d)^2 G / (2 pi sigma^2): the summed dot equals the bulb's own emissive the near view draws, at any size.
+ * The hardware depth test (the frame's depth, not written) hides a dot behind a nearer surface; the stencil marks
+ * its pixels as linear light (tone-mapped once, as the cell programs' are). */
+int wwCellFarDotsDraw( Scene * scene )
+{
+	ClState & s = st();
+	if ( !s.farOn || !scene || !wwCellLightsWanted( scene ) || !wwCellHdrActive() )
+		return 0;
+	const WwCellFar * Fr = wwCellFarFor( scene->nifModel );
+	if ( !Fr || Fr->dots.size() < 8 )
+		return 0;
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_fardots.prog" );
+	if ( !prog ) {
+		s.dotsLast = 0;
+		return 0;
+	}
+	auto fn = r->fn;
+	const size_t n = Fr->dots.size() / 8;
+	std::vector<float> pos( n * 3 ), I( n * 3 );
+	std::vector<quint32> idx( n );
+	for ( size_t i = 0; i < n; i++ ) {
+		for ( int k = 0; k < 3; k++ ) {
+			pos[i * 3 + k] = Fr->dots[i * 8 + k];
+			I[i * 3 + k] = Fr->dots[i * 8 + 4 + k];
+		}
+		idx[i] = quint32( i );
+	}
+	// world -> view: posView = sc R world + t (the inverse of cellRow)
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	float cam[3];
+	for ( int j = 0; j < 3; j++ ) {
+		prog->uni4f_l( prog->uniLocation( "dotRow[%d]", j ), FloatVector4( vt.rotation( j, 0 ) * sc, vt.rotation( j, 1 ) * sc,
+			vt.rotation( j, 2 ) * sc, vt.translation[j] ) );
+		float w = 0.0f;
+		for ( int k = 0; k < 3; k++ )
+			w -= vt.rotation( k, j ) * vt.translation[k];
+		cam[j] = w / sc;
+	}
+	const auto & pm = r->globalUniforms->projectionMatrix;
+	fn->glUniformMatrix4fv( prog->uniLocation( "dotProj" ), 1, GL_FALSE, &pm[0][0] );
+	GLint vp[4] = { 0, 0, 1, 1 };
+	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	prog->uni3f( "dotCam", cam[0], cam[1], cam[2] );
+	prog->uni2f( "dotBand", Fr->band[0], Fr->band[1] );
+	prog->uni1f( "dotFocal", pm[1][1] * 0.5f * float( vp[3] ) );
+	prog->uni1f( "dotBulb", 4.0f );	// a bulb's radius, game units (a household bulb is ~3-5)
+	prog->uni1i( "dotRed", 0 );
+	GLboolean depthMask = GL_TRUE;
+	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasCull = fn->glIsEnabled( GL_CULL_FACE );
+	fn->glEnable( GL_PROGRAM_POINT_SIZE );
+	fn->glEnable( GL_DEPTH_TEST );
+	fn->glDepthFunc( GL_LEQUAL );
+	fn->glDepthMask( GL_FALSE );
+	fn->glDisable( GL_CULL_FACE );
+	fn->glEnable( GL_BLEND );
+	fn->glBlendFunc( GL_ONE, GL_ONE );
+	fn->glEnable( GL_STENCIL_TEST );
+	fn->glStencilMask( 0x03 );
+	fn->glStencilFunc( GL_ALWAYS, 1, 0xFF );
+	fn->glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	const float * attrs[2] = { pos.data(), I.data() };
+	r->drawShape( unsigned( n ), 0x33, unsigned( n ), GL_POINTS, GL_UNSIGNED_INT, attrs, idx.data() );
+	r->stopProgram();
+	fn->glDisable( GL_PROGRAM_POINT_SIZE );
+	fn->glDepthMask( depthMask );
+	if ( !wasBlend )
+		fn->glDisable( GL_BLEND );
+	if ( wasCull )
+		fn->glEnable( GL_CULL_FACE );
+	s.dotsLast = int( n );
+	return int( n );
 }
 
 bool wwCellLightsOn()
@@ -357,6 +488,18 @@ void wwCellLightsUniforms( Scene * scene )
 				l.box[2][0], l.box[2][1], l.box[2][2], l.box[2][3] };
 			t.insert( t.end(), tex, tex + kTexelsPerLight * 4 );
 		}
+		/* lane FARVIEW1: WW_CELL_LIGHT_COPIES=n (the flat-cost gate's knob): every light n times at 1/n its colour, the
+		 * picture unchanged, the light loop n times as long */
+		static const int copies = std::clamp( qEnvironmentVariableIntValue( "WW_CELL_LIGHT_COPIES" ), 1, 64 );
+		if ( copies > 1 && !t.empty() ) {
+			const size_t one = t.size();
+			t.reserve( one * size_t( copies ) );
+			for ( size_t o = 0; o < one; o += kTexelsPerLight * 4 )
+				for ( int k = 4; k < 7; k++ )
+					t[o + size_t( k )] /= float( copies );
+			for ( int c = 1; c < copies; c++ )
+				t.insert( t.end(), t.begin(), t.begin() + std::ptrdiff_t( one ) );
+		}
 		g.bufShStamp = g.shStamp;
 		if ( t.empty() )
 			t.assign( kTexelsPerLight * 4, 0.0f );	// a buffer texture must have a store
@@ -369,7 +512,7 @@ void wwCellLightsUniforms( Scene * scene )
 		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		g.doc = scene->nifModel;
 		g.version = s.version.value( scene->nifModel );
-		g.count = int( L->lights.size() );
+		g.count = int( t.size() / ( kTexelsPerLight * 4 ) ) - ( L->lights.isEmpty() ? 1 : 0 );
 	}
 	/* The sampler is bound whether or not this draw lights: a samplerBuffer left on unit 0
 	 * beside BaseMap's sampler2D is a draw-time INVALID_OPERATION. */
@@ -469,6 +612,73 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni3f( "cellRoomsOrigin", G->roomsOrigin[0], G->roomsOrigin[1], G->roomsOrigin[2] );
 		prog->uni1f( "cellRoomsCell", G->roomsCell );
 		prog->uni3f( "cellRoomsDims", float( G->roomsDims[0] ), float( G->roomsDims[1] ), float( G->roomsDims[2] ) );
+	}
+	/* lane FARVIEW1: the far tables and the GI grid's placed share, bound (the sampler types fixed) whether or not
+	 * this draw uses them; a GPU with fewer than 23 units never draws far light */
+	const WwCellFar * Fr = on && s.farOn && pass == 0 && g.units > kFarPlacedUnit ? wwCellFarFor( scene->nifModel ) : nullptr;
+	if ( Fr && !Fr->slotTab.empty() && ( g.farDoc != scene->nifModel || g.farVersion != s.farVersion.value( scene->nifModel ) ) ) {
+		auto upBuf = [&]( GLuint & buf, GLuint & tex, const void * data, size_t bytes ) {
+			if ( !buf ) {
+				fn->glGenBuffers( 1, &buf );
+				fn->glGenTextures( 1, &tex );
+			}
+			fn->glBindBuffer( GL_TEXTURE_BUFFER, buf );
+			fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( bytes ), data, GL_STATIC_DRAW );
+			fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
+		};
+		upBuf( g.farSlotBuf, g.farSlotTex, Fr->slotTab.data(), Fr->slotTab.size() * sizeof( float ) );
+		upBuf( g.farRecBuf, g.farRecTex, Fr->recs.data(), Fr->recs.size() * sizeof( float ) );
+		if ( !Fr->placed.empty() ) {
+			if ( !g.farPlacedTex )
+				fn->glGenTextures( 1, &g.farPlacedTex );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kFarPlacedUnit ) );
+			fn->glBindTexture( GL_TEXTURE_3D, g.farPlacedTex );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+			fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+			fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, Fr->placedDims[0], Fr->placedDims[1], Fr->placedDims[2] * 6, 0,
+				GL_RGBA, GL_FLOAT, Fr->placed.data() );
+		}
+		g.farDoc = scene->nifModel;
+		g.farVersion = s.farVersion.value( scene->nifModel );
+	}
+	const bool farDraw = Fr && !Fr->slotTab.empty() && g.farSlotTex && g.farDoc == scene->nifModel;
+	const bool farPlacedDraw = farDraw && giDraw && !Fr->placed.empty() && g.farPlacedTex;
+	if ( g.units > kFarPlacedUnit ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kFarSlotUnit ) );
+		fn->glBindTexture( GL_TEXTURE_BUFFER, g.farSlotTex );
+		if ( g.farSlotTex )
+			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.farSlotBuf );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kFarRecUnit ) );
+		fn->glBindTexture( GL_TEXTURE_BUFFER, g.farRecTex );
+		if ( g.farRecTex )
+			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.farRecBuf );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kFarPlacedUnit ) );
+		fn->glBindTexture( GL_TEXTURE_3D, farPlacedDraw ? g.farPlacedTex : 0 );
+		prog->uni1i( "cellFarSlots", kFarSlotUnit );
+		prog->uni1i( "cellFarRecs", kFarRecUnit );
+		prog->uni1i( "cellFarPlaced", kFarPlacedUnit );
+	} else {	// never read (cellFarOn false): the far samplers ride units of their own types (two samplers of one type may share)
+		prog->uni1i( "cellFarSlots", kTextureUnit );
+		prog->uni1i( "cellFarRecs", kTextureUnit );
+		prog->uni1i( "cellFarPlaced", kGiUnit );
+	}
+	prog->uni1b( "cellFarOn", farDraw );
+	prog->uni1b( "cellFarPlacedOn", farPlacedDraw );
+	prog->uni1i( "cellFarRed", s.farRed );
+	if ( farDraw ) {
+		prog->uni1i( "cellFarBits", Fr->bits );
+		prog->uni1i( "cellFarProbe", Fr->maxProbe );
+		prog->uni1f( "cellFarCell", Fr->cell );
+		prog->uni2f( "cellFarBand", Fr->band[0], Fr->band[1] );
+	}
+	if ( farPlacedDraw ) {
+		prog->uni3f( "cellFarPlacedOrigin", Fr->placedOrigin[0], Fr->placedOrigin[1], Fr->placedOrigin[2] );
+		prog->uni1f( "cellFarPlacedVoxel", Fr->placedVoxel );
+		prog->uni3f( "cellFarPlacedDims", float( Fr->placedDims[0] ), float( Fr->placedDims[1] ), float( Fr->placedDims[2] ) );
 	}
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellGi", kGiUnit );
@@ -833,6 +1043,12 @@ QString wwCellLightsEcho( Scene * scene )
 	const WwCellGi * G = scene && scene->nifModel ? wwCellGiFor( scene->nifModel ) : nullptr;
 	o += QStringLiteral( " gi=%1(asked=%2%3)" ).arg( wwCellLightsWanted( scene ) && s.giOn && G ? "on" : "off" )
 		.arg( s.giOn ? 1 : 0 ).arg( G ? QStringLiteral( ", %1" ).arg( G->summary ) : QStringLiteral( ", none published" ) );
+	const WwCellFar * Fr = scene && scene->nifModel ? wwCellFarFor( scene->nifModel ) : nullptr;	// lane FARVIEW1
+	if ( s.farOn || Fr )
+		o += QStringLiteral( " far=%1(asked=%2%3, red=%4)" ).arg( wwCellLightsWanted( scene ) && s.farOn && Fr ? "on" : "off" )
+			.arg( s.farOn ? 1 : 0 ).arg( Fr ? QStringLiteral( ", %1" ).arg( Fr->summary ) : QStringLiteral( ", none published" ) ).arg( s.farRed );
+	if ( s.dotsLast >= 0 )	// lane FARVIEW1: the bulb dots the last frame drew
+		o += QStringLiteral( " fardots=%1" ).arg( s.dotsLast );
 	if ( s.probe )
 		o += QStringLiteral( " probe=%1" ).arg( s.probe );
 	o += QStringLiteral( " giamb=%1 gifill=%2" ).arg( QStringList{ "keep", "replace", "off", "max", "asgi" }.value( s.giAmb ) )
