@@ -102,6 +102,26 @@ int main( int argc, char * argv[] )
 	// constructed. No-op unless WW_RDC_FRAMES is set.
 	rdcInit();
 
+	/* lane CELLALL1: WW_ALL_ON=1, the "all on" preset for his sheets: every cell-view feature's pin set to on before
+	 * anything reads one (each feature reads its pin once, lazily). A pin already set wins (WW_CELL_SSR_EXT=0 beside
+	 * WW_ALL_ON=1 keeps that one off). Not in it: the GPU relight (a measurement run: it relights twice and times
+	 * it) and Scene mode Lookdev itself (WW_LOOKDEV, the weather that lights an exterior). */
+	if ( qEnvironmentVariableIntValue( "WW_ALL_ON" ) == 1 ) {
+		static const char * const kAllOn[] = { "WW_CELL_LIT", "WW_CELL_GI", "WW_CELL_FAR", "WW_CELL_IS", "WW_TAA",
+			"WW_CELL_CULL", "WW_CELL_AO", "WW_CELL_SHADOW", "WW_CELL_WATER", "WW_CELL_SSR", "WW_CELL_SSR_EXT",
+			"WW_CELL_AODECAL", "WW_LOOKDEV_SHADOWS", "WW_LOOKDEV_FOG", "WW_VOLFOG" };
+		QByteArray set, kept;
+		for ( const char * k : kAllOn ) {
+			if ( qEnvironmentVariableIsSet( k ) ) {
+				kept += QByteArray( " " ) + k + "=" + qgetenv( k );
+				continue;
+			}
+			qputenv( k, "1" );
+			set += QByteArray( " " ) + k;
+		}
+		fprintf( stderr, "all on: set%s | kept%s\n", set.constData(), kept.isEmpty() ? " none" : kept.constData() );
+	}
+
 	QScopedPointer<QCoreApplication> app( createApplication( argc, argv ) );
 
 	if ( auto a = qobject_cast<QApplication *>(app.data()) ) {
