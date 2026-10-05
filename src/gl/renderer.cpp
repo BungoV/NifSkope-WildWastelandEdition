@@ -1217,7 +1217,12 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	}
 	// -1 = the NIF alpha property: derived (non-.pbrm) shapes, and the red "nocomp"
 	const int r4Red = wwR4RedBits();
-	const int composition = ( lsp->pbrmValid && !( r4Red & 16 ) ) ? std::clamp( m.composition, 0, 7 ) : -1;
+	/* lane TERRBLEND1: a blended-ground pass keeps its OWN blend, whatever the .pbrm
+	 * says: the base opaque (scaled by its share in the shader), every layer ADDED at
+	 * its share. A landscape .pbrm's composition (opaque) would draw each layer over
+	 * the base and bring the hard squares back the moment PBR lighting is on. */
+	const bool wwLandSplat = scene && wwCellLandIs( scene->nifModel, mesh->id() );
+	const int composition = ( lsp->pbrmValid && !( r4Red & 16 ) && !wwLandSplat ) ? std::clamp( m.composition, 0, 7 ) : -1;
 	prog->uni1i( "pbrComposition", composition );
 	prog->uni1f( "pbrGlobalOpacity", m.globalOpacity );
 	prog->uni1f( "pbrAlphaThreshold", m.alphaThreshold );
@@ -1359,6 +1364,11 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		} else {
 			glDisable( GL_BLEND );
 		}
+	} else if ( wwLandSplat ) {
+		/* lane TERRBLEND1: the NiAlphaProperty the cell build wrote (4109 = SRC_ALPHA, ONE
+		 * for a layer; none for a base), as the CE1 path applies it. The PBR route used
+		 * to force alpha-over on every translucent shape. */
+		AlphaProperty::glProperty( mesh->alphaProperty, prog );
 	} else if ( mesh->translucent && scene->hasOption( Scene::DoBlending ) ) {
 		glEnable( GL_BLEND );
 		fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
