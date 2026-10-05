@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gl/cellhdr.h"	// lane SUNCELL1: the HDR frame's stencil
 #include "gl/celllights.h"	// lane SUNCELL1: the cell effect law
+#include "gl/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"	// lane SUNCELL1: the weather fog
 #include "gl/glproperty.h"
@@ -355,6 +356,18 @@ void Particles::drawShapes( NodeList * secondPass )
 			wwLookdevFogUniforms( scene );
 			wwCellLightsUniforms( scene );
 			prog->uni1b( "fxAdditive", additive );
+			/* lane SUNCELL1 (last round): A LIT PARTICLE. The game's technique sets Lit from the property's
+			 * lighting flag beside Ptcl, so a system the cell registered as a lit effect (src/cellview.cpp, the
+			 * particles) takes its model's four placed lights, as a lit effect card does (FXLIT1). fxLitMode stays 0
+			 * for any other system. Red WW_CELL_PARTICLES_RED=unlit draws every particle unlit, as before. */
+			static const bool litRed = qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "unlit";
+			const int litBlock = scene->nifModel->getBlockNumber( iBlock );
+			const auto * espLit = dynamic_cast<const BSEffectShaderProperty *>( shaderProp );
+			wwCellFxLitUniforms( scene, litBlock );
+			prog->uni1f( "lightingInfluence", espLit ? espLit->lightingInfluence : 0.0f );
+			if ( litRed )
+				prog->uni1i( "fxLitMode", 0 );
+			const bool litNow = !litRed && wwCellFxLitFor( scene->nifModel, litBlock ) != nullptr;
 			const char * frame = "plain";
 			if ( wwCellImageSpaceIsMeasuring() ) {
 				const bool fx = wwCellImageSpaceMeasuresEffects();
@@ -380,6 +393,20 @@ void Particles::drawShapes( NodeList * secondPass )
 				if ( ( n & ( n - 1 ) ) == 0 )
 					fprintf( stderr, "cell particles drawn: %d systems so far with particles_cell.prog (latest %s: %d live, %s, %s frame)\n",
 						n, qPrintable( getName() ), active, additive ? "additive" : "blended", frame );
+			}
+			// telemetry: the lit systems drawn, said at 1, 2, 4, 8, ... (or the red, once)
+			static QSet<const void *> litDrawn;
+			if ( litNow && !litDrawn.contains( this ) ) {
+				litDrawn.insert( this );
+				const int n = int( litDrawn.size() );
+				if ( ( n & ( n - 1 ) ) == 0 )
+					fprintf( stderr, "cell particles lit: %d systems so far take their model's placed lights (latest %s, influence %.3f)\n",
+						n, qPrintable( getName() ), espLit ? double( espLit->lightingInfluence ) : 0.0 );
+			}
+			static bool litRedSaid = false;
+			if ( litRed && !litRedSaid ) {
+				litRedSaid = true;
+				fprintf( stderr, "cell particles lit: off (red WW_CELL_PARTICLES_RED=unlit)\n" );
 			}
 		}
 

@@ -2264,6 +2264,22 @@ bool lodgenReadVisFile( const QString & dataRoot, const QString & relPath, QByte
 	return lodgenReadAsset( dataRoot, relPath, "vis", ".uvd", bytes );
 }
 
+bool lodgenEffectMaterialLit( const QString & dataRoot, const QString & matName )
+{
+	QString mp = matName;
+	mp.replace( QChar( '\\' ), QChar( '/' ) );
+	const int mmi = mp.lastIndexOf( QStringLiteral( "materials/" ), -1, Qt::CaseInsensitive );
+	if ( mmi > 0 )
+		mp.remove( 0, mmi );
+	else if ( !mp.startsWith( QStringLiteral( "materials/" ), Qt::CaseInsensitive ) )
+		mp.prepend( QStringLiteral( "materials/" ) );
+	QByteArray bytes;
+	if ( !lodgenReadAsset( dataRoot, mp, "materials", ".bgem", bytes ) )
+		return false;
+	const EffectMaterial em( bytes );
+	return em.isValid() && ( em.effectShaderFlags2() & 0x0004U ) && em.lightingInfluence() > 0.0f;
+}
+
 bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByteArray & bytes )
 {
 	QString path = model;

@@ -77,6 +77,10 @@ bool lodgenModelHasParticles( const QString & model );
 bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByteArray & bytes );
 //! lane SUNCELL1: a previs file (`vis/<plugin>/<form>.uvd`), loose or from the archives
 bool lodgenReadVisFile( const QString & dataRoot, const QString & relPath, QByteArray & bytes );
+/*! lane SUNCELL1: is this BGEM (a material path as an effect property names it) lit by the placed lights in the
+ *  game -- Effect Lighting set and a lighting influence above 0, the rule the welded shapes take (lane FXLIT1)?
+ *  False when it cannot be read. */
+bool lodgenEffectMaterialLit( const QString & dataRoot, const QString & matName );
 /*! Up to `limit` of the paths the stack's index holds, sorted. For a harness
  *  that has to name a file inside an archive without guessing one. */
 QStringList lodgenListResourceFiles( int limit );

@@ -1366,8 +1366,18 @@ static quint32 cellLe32( const QByteArray & b, int at )
 	return v;
 }
 
+/* lane SUNCELL1 (last round): one copied particle system -- its block in the document, its bounding sphere in the
+ * placed model's space (the root's own transform is the placement's), and its shader property in the source. */
+struct CellPfxSystem
+{
+	qint32 block = -1;
+	Vector3 center;
+	float radius = 0.0f;
+	qint32 srcShader = -1;
+};
+
 static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, NifModel & src,
-	const Vector3 & at, const Matrix & rot, float scale, QString * why )
+	const Vector3 & at, const Matrix & rot, float scale, QString * why, QVector<CellPfxSystem> * copied = nullptr )
 {
 	const QList<int> roots = src.getRootLinks();
 	if ( roots.isEmpty() || !src.blockInherits( src.getBlockIndex( roots.first() ), "NiNode" ) ) {
@@ -1377,7 +1387,8 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
 	QList<qint32> order;
 	QSet<qint32> seen;
 	int systems = 0;
-	std::function<void( qint32 )> walk = [&]( qint32 b ) {
+	QVector<CellPfxSystem> found;	// block = the index in `order` until the copy's base is known
+	std::function<void( qint32, const Transform & )> walk = [&]( qint32 b, const Transform & up ) {
 		if ( b < 0 || seen.contains( b ) )
 			return;
 		seen.insert( b );
@@ -1386,11 +1397,29 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
 			|| src.blockInherits( ib, "NiLight" ) )
 			return;
 		order.append( b );
-		systems += src.blockInherits( ib, "NiParticleSystem" ) ? 1 : 0;
-		for ( const int c : src.getChildLinks( b ) )
-			walk( c );
+		// the model's frame: the root's own transform is replaced by the placement's, its children keep theirs
+		const bool av = src.blockInherits( ib, "NiAVObject" );
+		const Transform here = ( av && b != roots.first() ) ? up * Transform( &src, ib ) : up;
+		if ( src.blockInherits( ib, "NiParticleSystem" ) ) {
+			systems++;
+			CellPfxSystem f;
+			f.block = order.size() - 1;
+			const QModelIndex iBound = src.getIndex( ib, "Bounding Sphere" );
+			const Vector3 c = iBound.isValid() ? src.get<Vector3>( iBound, "Center" ) : Vector3();
+			const float r = iBound.isValid() ? src.get<float>( iBound, "Radius" ) : 0.0f;
+			f.center = here * c;
+			f.radius = std::max( r, 0.0f ) * here.scale;
+			f.srcShader = src.getLink( ib, "Shader Property" );
+			found.append( f );
+		}
+		if ( av )
+			for ( const int c : src.getChildLinks( b ) )
+				walk( c, here );
+		else
+			for ( const int c : src.getChildLinks( b ) )
+				walk( c, up );
 	};
-	walk( roots.first() );
+	walk( roots.first(), Transform() );
 	if ( !systems )
 		return 0;
 	const qint32 base = nif->getBlockCount();
@@ -1423,6 +1452,11 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
 	t.scale = scale;
 	t.writeBack( nif, nif->getBlockIndex( base ) );
 	addLink( nif, iParent, QStringLiteral( "Children" ), base );
+	if ( copied )
+		for ( CellPfxSystem f : found ) {
+			f.block += base;
+			copied->append( f );
+		}
 	return systems;
 }
 
@@ -4304,6 +4338,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			QHash<QString, std::shared_ptr<NifModel>> pfxSrc;	// one parse a model; null = unusable
 			QPersistentModelIndex iPfx;
 			int pfxCopies = 0, pfxSystems = 0, pfxModels = 0, pfxRefused = 0, pfxCapped = 0;
+			int pfxLitSystems = 0, pfxLitModels = 0, pfxLitCapped = 0;
+			QHash<QString, bool> pfxBgemLit;	// a BGEM path (lower case) -> lit
 			QString pfxWhy;
 			for ( const Placement & p : placements ) {
 				if ( !p.actorKey.isEmpty() || p.disabled )
@@ -4346,7 +4382,60 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 					addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iP ) );
 					iPfx = iP;
 				}
-				const int n = cellCopyParticleBranch( nif, QModelIndex( iPfx ), *it.value(), p.pos - origin, p.rot, p.scale, &pfxWhy );
+				QVector<CellPfxSystem> copied;
+				const int n = cellCopyParticleBranch( nif, QModelIndex( iPfx ), *it.value(), p.pos - origin, p.rot, p.scale,
+					&pfxWhy, &copied );
+				/* lane SUNCELL1 (last round): A LIT PARTICLE. In the game the effect technique's Lit bit comes from the
+				 * property's lighting flag alone, beside Ptcl (Todd's treat: BSEffectShaderProperty::DetermineTechniqueID),
+				 * and the lit particle pixel shader sums the same four placed lights as a lit effect card. So a copied
+				 * system whose effect property is lit (the BGEM's Effect Lighting and influence, or Shader Flags 2 bit 30
+				 * and Lighting Influence, the welded shapes' rule) joins FXLIT1's table as one more placed model: its
+				 * bound is the merge of its lit systems' spheres, placed by the reference. Interiors only, as FXLIT1. */
+				if ( n > 0 && fxLitOn ) {
+					NifModel & sm = *it.value();
+					int serial = -1;
+					float all[4] = { 0.0f, 0.0f, 0.0f, -1.0f };
+					QVector<qint32> litBlocks;
+					for ( const CellPfxSystem & f : copied ) {
+						const QModelIndex iSh = sm.getBlockIndex( f.srcShader );
+						if ( !iSh.isValid() || !sm.blockInherits( iSh, "BSEffectShaderProperty" ) )
+							continue;
+						const QString mat = sm.get<QString>( iSh, "Name" );
+						bool lit;
+						if ( mat.endsWith( QStringLiteral( ".bgem" ), Qt::CaseInsensitive ) ) {
+							const QString mk = mat.toLower();
+							auto bl = pfxBgemLit.constFind( mk );
+							if ( bl == pfxBgemLit.constEnd() )
+								bl = pfxBgemLit.insert( mk, lodgenEffectMaterialLit( dataRoot, mat ) );
+							lit = bl.value();
+						} else {
+							lit = ( sm.get<quint32>( iSh, "Shader Flags 2" ) & 0x40000000U )
+								&& sm.get<quint8>( iSh, "Lighting Influence" ) > 0;
+						}
+						if ( !lit )
+							continue;
+						const float one[4] = { f.center[0], f.center[1], f.center[2], f.radius };
+						wwCellFxLitMerge( all, one );
+						litBlocks.append( f.block );
+					}
+					if ( !litBlocks.isEmpty() && fxLitModels >= fxLitCap ) {
+						pfxLitCapped++;
+					} else if ( !litBlocks.isEmpty() ) {
+						const Vector3 wc = p.pos + p.rot * ( Vector3( all[0], all[1], all[2] ) * p.scale );
+						WwFxLitModel m;
+						for ( int k = 0; k < 3; k++ )
+							m.center[k] = wc[k];
+						m.radius = std::max( all[3], 0.0f ) * p.scale;
+						m.ref = p.ref;
+						m.model = model;
+						serial = wwCellFxLitModel( nif, m );
+						fxLitModels++;
+						pfxLitModels++;
+						for ( const qint32 b : litBlocks )
+							wwCellFxLitShape( nif, b, serial );
+						pfxLitSystems += litBlocks.size();
+					}
+				}
 				if ( n > 0 ) {
 					pfxCopies++;
 					pfxSystems += n;
@@ -4357,6 +4446,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			fprintf( stderr, "cell particles: %d systems in %d copies of %d models (%d refused%s%s, %d past the cap of %d)\n",
 				pfxSystems, pfxCopies, pfxModels, pfxRefused, pfxWhy.isEmpty() ? "" : ": last ",
 				qPrintable( pfxWhy ), pfxCapped, cap );
+			fprintf( stderr, "cell particles lit: %d systems of %d placed models registered with their placed lights%s (%d past the lit cap)\n",
+				pfxLitSystems, pfxLitModels, fxLitOn ? "" : " (off: exteriors keep the self-lit path, as FXLIT1)", pfxLitCapped );
 		} else {
 			fprintf( stderr, "cell particles: off (the Particles row)\n" );
 		}

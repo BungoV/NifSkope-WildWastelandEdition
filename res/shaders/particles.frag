@@ -36,6 +36,50 @@ struct Texture {
 #include "lookdev_fog.glsl"
 #include "cell_lights.glsl"
 uniform bool fxAdditive;
+/* lane SUNCELL1 (last round): A LIT PARTICLE. The game's effect technique sets Lit from the property's lighting
+ * flag alone, beside Ptcl (Todd's treat: BSEffectShaderProperty::DetermineTechniqueID), so a particle whose
+ * effect shader is lit takes the same placed lights as a lit effect card (lane FXLIT1, fo4_effectshader.frag):
+ * mix( 1, directional + the model's four lights, lighting influence ), in linear light, before the fog.
+ * glparticles.cpp sets these from src/gl/cellfxlit.h; fxLitMode 0 = unlit, as before. */
+uniform float lightingInfluence;
+uniform int fxLitMode;			// 0 unlit; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
+uniform vec4 fxLit;				// indices into cellLights, -1 = none
+uniform vec4 fxLitScale;		// 1 (a red control's per-light ratio)
+
+vec3 cellFxLight( int i, vec3 P )
+{
+	vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
+	vec4 t1 = texelFetch( cellLights, i * CELL_TPL + 1 );
+	vec3 Lv = t0.xyz - P;
+	float d = length( Lv );
+	float q = clamp( d / max( t0.w, 0.001 ), 0.0, 1.0 );
+	float a = 1.0 - q * q;
+	if ( ( fxLitMode & 4 ) == 0 )
+		a = pow( a, 2.2 );
+	if ( t1.w > -1.5 ) {	// a spot: the game's cone, its cosine + 0.001
+		vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
+		float c = clamp( dot( -Lv / max( d, 0.001 ), t2.xyz ), 0.0, 1.0 );
+		float base = clamp( 1.0 - ( 1.0 - c ) / max( 1.0 - ( t1.w + 0.001 ), 1e-4 ), 0.0, 1.0 );
+		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
+	}
+	return t1.rgb * a;
+}
+
+vec3 cellFxLit( vec3 P )
+{
+	if ( ( fxLitMode & 8 ) != 0 )
+		return vec3( 1.0 );
+	vec3 E = cellHasDir ? cellDirColor : vec3( 0.0 );
+	if ( ( fxLitMode & 2 ) != 0 ) {
+		for ( int i = 0; i < cellLightCount; i++ )
+			E += cellFxLight( i, P );
+	} else {
+		for ( int k = 0; k < 4; k++ )
+			if ( fxLit[k] > -0.5 )
+				E += cellFxLight( int( fxLit[k] + 0.5 ), P ) * fxLitScale[k];
+	}
+	return mix( vec3( 1.0 ), E, lightingInfluence );
+}
 #endif
 
 uniform sampler2D textureUnits[10];
@@ -149,6 +193,8 @@ void main()
 		if ( cellProbe != 0 && cellProbe != 6 )
 			discard;	// the probe passes read surfaces; a particle is none
 		vec3 lin = pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
+		if ( fxLitMode != 0 )
+			lin *= cellFxLit( cellWorldPos( -ViewDir ) );	// a lit particle, before the fog
 		if ( fogOn ) {
 			vec3 posView = -ViewDir;
 			float hb;
