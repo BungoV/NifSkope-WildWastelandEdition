@@ -388,11 +388,14 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 						proto.v[k].p[2] = land.heights[rr[k]][cc[k]];
 						/* WORLD-SPACE UVs, so the paint does not swim when the
 						 * block grows: a texel belongs to a place, not to a quad.
-						 * v is flipped because a NIF's V runs down. Every pass on
+						 * v GROWS NORTHWARD, as the game's: InitSDM (0x3a7180)
+						 * writes uv = (col, row) * 0.375 with row running north,
+						 * and the Landscape VS passes it through.  The old -y
+						 * mirrored every texture north-south.  Every pass on
 						 * the quad shares them, which is what makes the layers
 						 * line up with the base instead of sliding over it. */
 						proto.v[k].uv[0] = xx[k] / T;
-						proto.v[k].uv[1] = -yy[k] / T;
+						proto.v[k].uv[1] = yy[k] / T;
 						if ( land.hasColors ) {
 							for ( int c = 0; c < 3; c++ )
 								proto.v[k].rgb[c] = float( land.colors[rr[k]][cc[k]][c] ) / 255.0f;

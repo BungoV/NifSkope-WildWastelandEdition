@@ -197,9 +197,11 @@ bool cellBuildGround( EsmWorld & world, int x0, int y0, int x1, int y1,
 						qq.v[k].p[2] = land.heights[rr[k]][cc[k]];
 						/* WORLD-SPACE UVs, so the paint does not swim when the
 						 * block grows: a texel belongs to a place, not to a
-						 * quad.  v is flipped because a NIF's V runs down. */
+						 * quad.  v GROWS NORTHWARD, as the game's (InitSDM
+						 * 0x3a7180: uv = (col, row) * 0.375); the old -y
+						 * mirrored every texture north-south. */
 						qq.v[k].uv[0] = xx[k] / T;
-						qq.v[k].uv[1] = -yy[k] / T;
+						qq.v[k].uv[1] = yy[k] / T;
 						if ( land.hasColors ) {
 							for ( int c = 0; c < 3; c++ )
 								qq.v[k].rgb[c] = float( land.colors[rr[k]][cc[k]][c] ) / 255.0f;
