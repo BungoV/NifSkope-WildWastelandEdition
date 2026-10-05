@@ -33,6 +33,9 @@ uniform mat3 viewToWorld;
 uniform vec4 ssrK;			// the game's four: color scale 1, angle gate 0.2, normal z scale 2, confidence scale 1
 uniform vec2 ssrClip;		// the game camera's near (15) and far (the cell's clip distance), game units
 uniform int ssrRed;			// WW_CELL_SSR_RED: 2 nogap (no 50-unit refusal), 4 nofade (confidence 1 on a hit)
+uniform sampler2D waterRay;	// lane WATER2: full size, bottom row first: the water's ray in the view, its view depth
+uniform bool haveWaterRay;
+uniform bool opaqueRays;	// false in an exterior: the water's rays alone
 
 out vec4 fragColor;
 
@@ -68,20 +71,32 @@ void main()
 	if ( ssrStage == 1 ) {
 		ivec2 t = min( ( ( 2 * q + 1 ) * fullSize ) / ( 2 * halfSize ), fullSize - 1 );
 		t.y = fullSize.y - 1 - t.y;
-		if ( texelFetch( scene, t, 0 ).a * ssrK.w - 0.01 < 0.0 )
-			return;
-		vec4 g = texelFetch( gbuf, t, 0 );
-		float z = g.a;
-		vec3 P = vec3( ( 2.0 * uv.x - 1.0 ) * z / proj.x, ( 1.0 - 2.0 * uv.y ) * z / proj.y, -z );
-		vec3 V = -normalize( P );
-		if ( dot( g.xyz, V ) < 0.0 )
-			return;
-		vec3 Nw = viewToWorld * g.xyz;
-		Nw.z *= ssrK.z;
-		vec3 N = normalize( Nw ) * viewToWorld;	// back into the view
-		vec3 R = reflect( -V, N );
-		if ( !( -R.z > ssrK.y ) )
-			return;
+		vec3 P, R;
+		float z;
+		vec4 wr = haveWaterRay ? texelFetch( waterRay, t, 0 ) : vec4( 0.0 );
+		if ( wr.a > 0.0 ) {
+			// lane WATER2: the water lies in front here; its pass (02100) gated and wrote the ray already
+			if ( dot( wr.xyz, wr.xyz ) == 0.0 )
+				return;
+			z = wr.a;
+			P = vec3( ( 2.0 * uv.x - 1.0 ) * z / proj.x, ( 1.0 - 2.0 * uv.y ) * z / proj.y, -z );
+			R = wr.xyz;
+		} else {
+			if ( !opaqueRays || texelFetch( scene, t, 0 ).a * ssrK.w - 0.01 < 0.0 )
+				return;
+			vec4 g = texelFetch( gbuf, t, 0 );
+			z = g.a;
+			P = vec3( ( 2.0 * uv.x - 1.0 ) * z / proj.x, ( 1.0 - 2.0 * uv.y ) * z / proj.y, -z );
+			vec3 V = -normalize( P );
+			if ( dot( g.xyz, V ) < 0.0 )
+				return;
+			vec3 Nw = viewToWorld * g.xyz;
+			Nw.z *= ssrK.z;
+			vec3 N = normalize( Nw ) * viewToWorld;	// back into the view
+			R = reflect( -V, N );
+			if ( !( -R.z > ssrK.y ) )
+				return;
+		}
 		vec3 Q = P + 1000.0 * R;
 		float zq = -Q.z;
 		vec2 uvq = vec2( 0.5 + 0.5 * proj.x * Q.x / zq, 0.5 - 0.5 * proj.y * Q.y / zq );

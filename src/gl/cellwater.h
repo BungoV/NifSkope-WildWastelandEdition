@@ -21,7 +21,9 @@ struct WwWaterRecord;
  *
  *  Part of the Cell lights row: no setting of its own. Harness only:
  *    WW_CELL_WATER=0            the water draws as before this lane (the off identity's pin)
- *    WW_CELL_WATER_RED=<term>   norefl | nofresnel | nosilt | nospec | noshore | nonormal: that term left out
+ *    WW_CELL_WATER_RED=<term>   norefl | nofresnel | nosilt | nospec | noshore | nonormal: that term left out;
+ *                               lane WATER2: nodepthfog (the second pass), nofar (the noise sampler's anisotropy),
+ *                               nossr (the reflections computed, not read), fogunits (that pass's distances in metres)
  *    WW_CELL_WATER_PROBE=<n>    raw values instead of the colour (res/shaders/fo4_water.frag lists them)
  *    WW_CELL_WATER_DUMP=<file>  the records, the sky and the sun the draw used, one line each */
 
@@ -33,6 +35,8 @@ void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec );
 bool wwCellWaterWanted( Scene * scene, int block );
 //! With fo4_water.prog bound for `block`: the record, the sky, the textures. False = draw it the old way.
 bool wwCellWaterUniforms( Scene * scene, int block, int firstTextureUnit );
+//! Lane WATER2: a water surface of this scene draws as water and its WATR's SSR flag is set (cellssr.h).
+bool wwCellWaterSsrWanted( Scene * scene );
 //! One census line: how many shapes and records this document registered.
 QString wwCellWaterEcho( const void * nif );
 

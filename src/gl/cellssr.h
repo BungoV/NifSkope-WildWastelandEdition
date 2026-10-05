@@ -42,6 +42,18 @@ void wwCellSsrNote( bool flagged );
 //! called with every program setupProgram binds: the scene pass's masks, and the reflection a flagged draw reads
 void wwCellSsrDraw( Scene * scene, bool cellProgram );
 
+/*! Lane WATER2: THE WATER'S REFLECTIONS (the game's water ray pass, asm 02100; the water reads them in 02102).
+ *  When a cell water surface draws (src/gl/cellwater.h) and its WATR's SSR flag is set, wwCellSsrPass also
+ *  draws the water once more into a full-size ray target (fo4_water.frag with waterSslr = 1: the ray into the
+ *  view and the view depth), behind the opaque depth, and the ray stage takes that ray where the water lies in
+ *  front. In an exterior the pass then runs for the water alone: no opaque draw reads the reflections there. */
+//! true while the water ray pass draws; gbufTex = the obscurance pass's target (its .a the opaque view depth)
+bool wwCellSsrWaterRayPass( unsigned int * gbufTex );
+//! true while either of the reflections' scene passes draws (the water then grabs no frame copy)
+bool wwCellSsrInPass();
+//! this frame's march and its blurred result for the water (half the view, top row first, bilinear)
+bool wwCellSsrWaterTextures( Scene * scene, unsigned int & raw, unsigned int & fin );
+
 //! lane AO1's targets of this frame (src/gl/celllights.cpp); false unless its opaque pass ran for this scene
 struct WwCellAoTargets
 {

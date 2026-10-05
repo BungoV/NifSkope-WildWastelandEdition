@@ -6,8 +6,11 @@
 #   A reader   the renderer describes every WATR of the master (WW_CELL_WATER_DUMP_FORMS); the checker parses the
 #              same records itself and builds the shader constants by its own rule
 #   B rebuild  the picture with Cell lights on, the imagespace and the fog off (the water's own output, tone-mapped
-#              by the shader), then probes 1-10 (WW_CELL_WATER_PROBE: N, V, the depth terms, the scene texels
-#              behind, the frame constants); the checker rebuilds every water pixel from them
+#              by the shader), then probes 1-24 (WW_CELL_WATER_PROBE: N, V, the depth terms, the scene texels
+#              behind, the frame constants, the SSR read, the distances); the checker rebuilds every water pixel
+#   G asm      (lane WATER2) the game's own water asm (02146 the depth-colour pass, then 02102 the water), interpreted
+#              op for op by notes/water2/tools/dxbc_water.py on the probes' inputs: within 2 levels on >= 99.9%
+#   F glints   (lane WATER2) the far half's glint pixels (the shot against its nospec shot) within 10% of the asm's
 #   C off      the Cell lights row off, and the row on with WW_CELL_WATER=0, each against the before-lane exe
 #              (two before-lane runs give the noise floor)
 #   P placer   the bake's probes: a column over the water stands an eye above the line, one more under it
@@ -19,6 +22,9 @@
 #
 # RED CONTROLS (each must FAIL its stage):
 #   --red norefl|nofresnel|nosilt|nospec|noshore|nonormal   WW_CELL_WATER_RED: the renderer drops one term   B
+#   --red norefl                                             also G
+#   --red nodepthfog|fogunits|nossr                          WW_CELL_WATER_RED (lane WATER2)                 G
+#   --red nofar                                              the far glints' noise taps dropped               F
 #   --red nogamma|noclamp                                    the judge's rule broken (WATER_JUDGE_RED)       A
 #   --red bake_water|bake_waterfog|bake_waterfresnel         WW_PROBE_BAKE_RED=water|waterfog|waterfresnel  D
 #   --red place_water                                        WW_PROBE_RED=water: no column split            P
@@ -32,7 +38,11 @@ set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 EXE="${EXE:-$REPO/release/NifSkope.exe}"
-BEFORE="${BEFORE:-$REPO/release/NifSkope.before_water1.exe}"
+# the before-lane exe in a folder of its own with its own shaders (lane WATER2: release/shaders is this lane's)
+BEFORE="${BEFORE:-$REPO/scratchpad/water2_20261005/release_before/NifSkope.exe}"
+# lane WATER2's game-asm interpreter and its asm (notes, outside the repo: the asm is extracted from the game)
+W2TOOLS="${W2TOOLS:-/e/Projects/Claude/notes/water2/tools}"
+ASM="${ASM:-E:/Projects/Claude/notes/expo1/asm}"
 SCOPE="${SCOPE:-cell_water}"
 REGKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
 wipe_scope() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
@@ -112,7 +122,9 @@ if [ "$RECHECK" != 1 ]; then
 	case "$RED" in
 	"")
 		shoot "$EXE" rb "${NOFOG[@]}" WW_CELL_WATER_DUMP="$(winpath "$OUT/rb.dump")" WW_CELL_WATER_DUMP_FORMS="$FORMS"
-		for p in 1 2 3 4 5 6 7 8 9 10; do shoot "$EXE" rb.p$p "${NOFOG[@]}" WW_CELL_WATER_PROBE=$p; done
+		for p in $(seq 1 24); do shoot "$EXE" rb.p$p "${NOFOG[@]}" WW_CELL_WATER_PROBE=$p; done
+		shoot "$EXE" rb_nospec "${NOFOG[@]}" WW_CELL_WATER_RED=nospec
+		shoot "$BEFORE" before_rb "${NOFOG[@]}"   # lane WATER2: the sheet's before (notes/water2/sheet.sh)
 		shoot "$EXE" off_row "${STABLE[@]}" WW_CELL_LIT=0
 		shoot "$BEFORE" rung_row "${STABLE[@]}" WW_CELL_LIT=0
 		shoot "$BEFORE" rung2_row "${STABLE[@]}" WW_CELL_LIT=0
@@ -124,7 +136,8 @@ if [ "$RECHECK" != 1 ]; then
 		bake "$EXE" bake_pin0 WW_CELL_BAKE_WATER=0
 		bake "$BEFORE" bake_before
 		;;
-	norefl|nofresnel|nosilt|nospec|noshore|nonormal)
+	norefl|nofresnel|nosilt|nospec|noshore|nonormal|nodepthfog|fogunits|nossr|nofar)
+		cp "$GREEN/rb_nospec.png" "$OUT/"
 		for f in "$GREEN"/rb.p*.png "$GREEN"/rb.dump; do cp "$f" "$OUT/"; done
 		shoot "$EXE" rb "${NOFOG[@]}" WW_CELL_WATER_RED="$RED" ;;
 	bake_water|bake_waterfog|bake_waterfresnel)
@@ -137,6 +150,10 @@ if [ "$RECHECK" != 1 ]; then
 fi
 
 fails=0
+judge_g() { local t; t="$(python "$W2TOOLS/dxbc_water.py" "$ASM" "$(winpath "$OUT")" rb 2>&1 | tail -2)"
+	echo "$t" | sed 's/^/  /'; echo "$t" | tail -1 | grep -q PASS; }
+judge_f() { local line; line="$(python "$W2TOOLS/glints.py" "$(winpath "$OUT")" shot=rb.png:rb_nospec.png --gate shot 2>&1 | tail -1)"
+	echo "  $line"; case "$line" in PASS*) return 0 ;; *) return 1 ;; esac; }
 judge() {   # judge <stage letter> <args...>: green must PASS; a red aimed at it must FAIL
 	local line; line="$(python "$CHECK" "$@" 2>&1 | tail -1)"
 	echo "  $line"
@@ -147,6 +164,8 @@ case "$RED" in
 	"")
 		judge A "$ESM" "$OUT/rb.dump.forms" || fails=$((fails+1))
 		judge B "$OUT" rb || fails=$((fails+1))
+		judge_g || fails=$((fails+1))
+		judge_f || fails=$((fails+1))
 		judge C "$OUT/off_row.png" "$OUT/rung_row.png" "$OUT/rung2_row.png" || fails=$((fails+1))
 		judge C "$OUT/off_pin.png" "$OUT/rung_pin.png" "$OUT/rung2_pin.png" || fails=$((fails+1))
 		judge P "$ESM" "$OUT/bake/probes.tsv" "$OUT/bake_pin0/probes.tsv" || fails=$((fails+1))
@@ -162,7 +181,10 @@ case "$RED" in
 			|| { echo "  FAIL I bake off ($n files)"; fails=$((fails+1)); }
 		;;
 	nogamma|noclamp) WATER_JUDGE_RED="$RED" judge A "$ESM" "$GREEN/rb.dump.forms" && want_fail=no ;;
-	norefl|nofresnel|nosilt|nospec|noshore|nonormal) judge B "$OUT" rb && want_fail=no ;;
+	norefl) judge B "$OUT" rb && want_fail=no; judge_g && want_fail=no ;;
+	nofresnel|nosilt|nospec|noshore|nonormal) judge B "$OUT" rb && want_fail=no ;;
+	nodepthfog|fogunits|nossr) judge_g && want_fail=no ;;
+	nofar) judge_f && want_fail=no ;;
 	bake_*) judge D "$ESM" "$OUT/bake/rays.txt" && want_fail=no ;;
 	place_water) judge P "$ESM" "$OUT/bake/probes.tsv" "$GREEN/bake_pin0/probes.tsv" && want_fail=no ;;
 esac
