@@ -484,14 +484,14 @@ void CellWorkspacePanel::buildUi()
 	page->addWidget( prtpRow );
 	// lane CELLALL1: the second row -- label + control only
 	QWidget * fxRow = new QWidget( this );
-	QHBoxLayout * fl = new QHBoxLayout( fxRow );
-	fl->setContentsMargins( 0, 0, 0, 0 );
-	fl->setSpacing( 4 );
+	QHBoxLayout * xl = new QHBoxLayout( fxRow );
+	xl->setContentsMargins( 0, 0, 0, 0 );
+	xl->setSpacing( 4 );
 	auto fxBox = [&]( QCheckBox *& box, const QString & label, const char * name, bool on ) {
 		box = new QCheckBox( label, fxRow );
 		box->setObjectName( QLatin1String( name ) );
 		box->setChecked( on );
-		fl->addWidget( box );
+		xl->addWidget( box );
 	};
 	fxBox( cellAo, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
 	fxBox( cellShadow, tr( "Light shadows" ), "CellWorkspaceLightShadows", wwCellShadowOn() );
@@ -511,10 +511,10 @@ void CellWorkspacePanel::buildUi()
 	cellMblur = new QCheckBox( tr( "Motion blur" ), fxRow );
 	cellMblur->setObjectName( QStringLiteral( "CellWorkspaceCellMotionBlur" ) );
 	cellMblur->setChecked( wwCellMotionBlurOn() );
-	fl->addWidget( cellGrass );
-	fl->addWidget( cellDof );
-	fl->addWidget( cellMblur );
-	fl->addStretch( 1 );
+	xl->addWidget( cellGrass );
+	xl->addWidget( cellDof );
+	xl->addWidget( cellMblur );
+	xl->addStretch( 1 );
 	page->addWidget( fxRow );
 
 	probeKinds = new QTreeWidget( this );
