@@ -652,8 +652,16 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 				out.nam0 = bytes();
 			else if ( f == "DALC" )
 				dalcs << bytes();
-			else if ( f == "DATA" && f.size() >= 5 )
+			else if ( f == "DATA" && f.size() >= 5 ) {
 				out.sunGlare = quint8( f.data()[4] );
+				if ( f.size() >= 20 ) {	// lane GRASSMB1: the wind (Sky::UpdateWind reads these four)
+					out.windSpeed = quint8( f.data()[0] );
+					out.windDir = quint8( f.data()[17] );
+					out.windDirRange = quint8( f.data()[18] );
+					out.windTurb = quint8( f.data()[19] );
+					out.hasWind = true;
+				}
+			}
 			else if ( f == "IMSP" )
 				imsp = bytes();
 			else if ( f == "WGDR" )	// lane VOLFOG1
@@ -793,7 +801,9 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 					if ( g == "HNAM" && g.size() >= 32 ) {
 						std::memcpy( &out.skyScale[tod], g.data() + 28, 4 );
 						out.skyScaleFound++;
-						break;
+					} else if ( g == "DNAM" && g.size() >= 16 ) {	// lane GRASSMB1: the depth of field
+						std::memcpy( out.dof[tod], g.data(), 16 );
+						out.hasDof[tod] = true;
 					}
 				}
 			} catch ( std::exception & ) {

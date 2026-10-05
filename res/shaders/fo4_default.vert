@@ -28,6 +28,14 @@ uniform vec4 vertexColorOverride;	// components greater than zero replace the ve
 uniform float farSwayAmp;
 uniform float farSwayTime;
 uniform bool lodTreeAnim;
+/* lane GRASSMB1: the game's grass wind, op for op from its grass vertex shader (Shaders011 entry 02183, the deferred
+ * prepass's grass technique; src/gl/cellgrass.h). wwGrassWind = cb2[11] = (angle, 0, previous phase, phase),
+ * wwGrassWind2 = cb2[12] = (min speed * 300, max speed * 300, frequency) with .w = 1 on a grass shape, 0 on
+ * every other (where nothing below runs). The blade's (h0 + h1) * 0.0078125 rides in the bitangent's length
+ * (1024 + it). The game's world position  is the bucket's model position plus its translation, so the offset
+ * adds here in model space. */
+uniform vec4 wwGrassWind;
+uniform vec4 wwGrassWind2;
 
 layout ( location = 0 ) in vec3	vertexPosition;
 layout ( location = 1 ) in vec4	vertexColor;
@@ -47,6 +55,32 @@ void main()
 
 	if ( boneWeights[0].x > 0.0 && doSkinning )
 		boneTransform( v, n, t, b );
+
+	vec4 vc = vertexColor;
+	if ( wwGrassWind2.w > 0.5 ) {
+		float L = length( b );
+		float off = L > 2.0 ? L - 1024.0 : 0.0;
+		b = b * inversesqrt( dot( b, b ) );				// dp3, rsq, mul
+		n = n * inversesqrt( dot( n, n ) );
+		t = t * inversesqrt( dot( t, t ) );
+		float p = ( wwGrassWind.w - off ) * wwGrassWind2.z;	// mad -(v5.x + v5.y), 0.0078125, cb2[11].w; mul cb2[12].z
+		float half_range = ( wwGrassWind2.y - wwGrassWind2.x ) * 0.5;
+		float sp = sin( p ), cp = cos( p );				// sincos
+		float w = sin( sp * 3.14159274 ) + sin( sp * 6.28318548 );
+		w = w * 0.3 + cos( cp * 3.14159274 ) * 0.2;
+		w = w + 1.0;
+		w = w * half_range + wwGrassWind2.x;
+		w = w * ( vertexColor.a * vertexColor.a * 0.5 );
+		vec3 d = vec3( cos( wwGrassWind.x ), sin( wwGrassWind.x ), 0.0 );	// sincos cb2[11].x
+		n = n + d * w;
+		n = n * inversesqrt( dot( n, n ) );
+		t = t + d * w;
+		t = t * inversesqrt( dot( t, t ) );
+		b = b + d * w;
+		b = b * inversesqrt( dot( b, b ) );
+		v.xyz = d * w + v.xyz;
+		vc.rgb = exp2( log2( vertexColor.rgb ) * 2.2 );		// log, mul 2.2, exp: o6.rgb = (v4.rgb * v5.w)^2.2
+	}
 
 	v = modelViewMatrix * v;
 	if ( farSwayAmp > 0.0 && lodTreeAnim ) {
@@ -74,7 +108,7 @@ void main()
 	LightDir = lightSourcePosition[0].xyz;
 
 	A = vec4( sqrt(lightSourceAmbient.rgb) * 0.375, toneMapScale );
-	C = mix( vertexColor, vertexColorOverride, greaterThan( vertexColorOverride, vec4( 0.0 ) ) );
+	C = mix( vc, vertexColorOverride, greaterThan( vertexColorOverride, vec4( 0.0 ) ) );
 	rawVertexAlpha = vertexColor.a;
 	D = vec4( sqrt(lightSourceDiffuse[0].rgb), brightnessScale );
 }

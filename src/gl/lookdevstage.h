@@ -142,6 +142,14 @@ bool wwLookdevImageSpace( WwLookdevIs & out );
 //! lane WATER1: the water's sky (linear): the weather's Horizon, Sky-Lower and Sky-Upper rows at the dome's hour;
 //! false (the outputs untouched) when no weather is loaded
 bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] );
+/*! lane GRASSMB1: the depth of field of the weather's two ImageSpace (IMGS) records around the dome's hour: each
+ *  DNAM as stored (strength, distance, range, the flags float), the blend t (0 = a, 1 = b) and whether each key
+ *  has one; false (the outputs untouched) when no weather is loaded */
+bool wwLookdevImageSpaceDof( float a[4], float b[4], float & t, bool & haveA, bool & haveB );
+
+/*! Lane GRASSMB1: the loaded weather's wind bytes (DATA 0 speed, 17 direction, 18 direction range, 19 turbulence);
+ *  false (out untouched) when no weather is loaded or its DATA is short */
+bool wwLookdevWind( quint8 out[4] );
 
 //! cube background (replaces drawSkyBox in Lookdev); true = the colour buffer is written
 bool wwLookdevDrawBackground( Scene * scene );

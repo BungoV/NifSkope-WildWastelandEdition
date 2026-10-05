@@ -223,6 +223,9 @@ private:
 	QCheckBox * cellAoDecal = nullptr;
 	QCheckBox * cellGiGpu = nullptr;
 	QCheckBox * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off
+	QCheckBox * cellGrass = nullptr;    // lane GRASSMB1: the game's grass (placed at cell open)
+	QCheckBox * cellDof = nullptr;      // lane GRASSMB1: the game's depth of field
+	QCheckBox * cellMblur = nullptr;    // lane GRASSMB1: the game's motion blur
 	QComboBox * cellPass = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
 	QPushButton * probesPlace = nullptr;
 	QPushButton * probesBake = nullptr;

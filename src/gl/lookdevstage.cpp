@@ -1637,3 +1637,34 @@ bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] )
 	}
 	return true;
 }
+
+bool wwLookdevImageSpaceDof( float a[4], float b[4], float & t, bool & haveA, bool & haveB )
+{
+	if ( !st().haveWeather )
+		return false;
+	const SkyFrame f = skyFrame();
+	const LdState & s = st();
+	const int ka = f.c.keys.a, kb = f.c.keys.b;
+	if ( ka < 0 || ka >= 8 || kb < 0 || kb >= 8 )
+		return false;
+	for ( int i = 0; i < 4; i++ ) {
+		a[i] = s.w.dof[ka][i];
+		b[i] = s.w.dof[kb][i];
+	}
+	haveA = s.w.hasDof[ka];
+	haveB = s.w.hasDof[kb];
+	t = f.c.keys.t;
+	return true;
+}
+
+bool wwLookdevWind( quint8 out[4] )
+{
+	const LdState & s = st();
+	if ( !s.haveWeather || !s.w.hasWind )
+		return false;
+	out[0] = s.w.windSpeed;
+	out[1] = s.w.windDir;
+	out[2] = s.w.windDirRange;
+	out[3] = s.w.windTurb;
+	return true;
+}

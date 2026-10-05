@@ -47,6 +47,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
 #include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA
+#include "gl/cellpost.h"	// lane GRASSMB1: the game's depth of field + motion blur
+#include "gl/cellgrass.h"	// lane GRASSMB1: the grass wind's clock
 #include "impostorchunk.h"
 #include "cellfarlod.h"		// lane FARLOD1: the far field's planes, sway and cards
 #include "impostorpreviewtest.h"
@@ -4155,8 +4157,13 @@ void GLView::paintGL()
 			wwCellFarLodCards( scene, false, hdr );
 			wwCellFarLodSkyCensus( scene );
 			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
-			if ( workspaceDrawScenes.isEmpty() || cellFirst )	// lane CELLALL1
+			if ( workspaceDrawScenes.isEmpty() || cellFirst ) {	// lane CELLALL1
+				// lane GRASSMB1: the game's depth of field + motion blur BEFORE the temporal AA, as DrawWorld::Imagespace
+				// runs them (3 HDR/tone map, 6 DoF, 10 motion blur, then 17/18 FXAA/TAA); inert when off
+				wwCellPostApply( scene );
 				wwGameTaaResolve( scene );
+				wwCellGrassFrameEnd();	// lane GRASSMB1: the grass wind's clock steps once per frame
+			}
 			for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
 				ws->draw();
 		}
@@ -5936,6 +5943,9 @@ void GLView::paintGL()
 	}
 	// lane MOTION1: the temporal AA converges over a few still frames after the camera moves (never in a harness)
 	if ( wwGameTaaWantsSettle() )
+		QTimer::singleShot( 16, this, [this]() { update(); } );
+	// lane GRASSMB1: the game's grass waves while the weather blows (never in a harness)
+	else if ( wwCellGrassWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 
 	emit paintUpdate();

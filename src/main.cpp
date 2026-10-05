@@ -109,7 +109,8 @@ int main( int argc, char * argv[] )
 	if ( qEnvironmentVariableIntValue( "WW_ALL_ON" ) == 1 ) {
 		static const char * const kAllOn[] = { "WW_CELL_LIT", "WW_CELL_GI", "WW_CELL_FAR", "WW_CELL_IS", "WW_TAA",
 			"WW_CELL_CULL", "WW_CELL_AO", "WW_CELL_SHADOW", "WW_CELL_WATER", "WW_CELL_SSR", "WW_CELL_SSR_EXT",
-			"WW_CELL_AODECAL", "WW_LOOKDEV_SHADOWS", "WW_LOOKDEV_FOG", "WW_VOLFOG", "WW_CELL_PARTICLES", "WW_CELL_PREVIS" };
+			"WW_CELL_AODECAL", "WW_LOOKDEV_SHADOWS", "WW_LOOKDEV_FOG", "WW_VOLFOG", "WW_CELL_PARTICLES", "WW_CELL_PREVIS",
+			"WW_CELL_FARLOD", "WW_CELL_GRASS", "WW_CELL_DOF", "WW_CELL_MBLUR" };	// final merge: FARLOD1 + GRASSMB1
 		QByteArray set, kept;
 		for ( const char * k : kAllOn ) {
 			if ( qEnvironmentVariableIsSet( k ) ) {

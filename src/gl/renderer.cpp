@@ -45,6 +45,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
+#include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellssr.h"
 #include "esmweather.h"
 #include "io/material.h"
@@ -1334,6 +1335,7 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	wwCellLightsUniforms( scene );	// lane PRTPGI: a no-op unless this is pbrm_cell.prog
 	if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
 		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
+	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 
 	// Per-draw GL state, same as the spec/gloss path ends with. Omitting it made
 	// the shape inherit whatever blend/depth state the previous program left
@@ -1949,6 +1951,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
 		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
 	wwSunShadowUniforms( scene );	// lane SUNCELL1: a no-op unless this is a cascade program (fo4_cellcsm, fo4_csm, fo4_fogcsm)
+	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 	if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 		// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
 		GLint dst = 0;

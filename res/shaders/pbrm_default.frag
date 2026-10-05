@@ -10,6 +10,7 @@
 #include "cell_lights.glsl"
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
+#include "cell_grass.glsl"
 #define WW_CELL_FOGGED cellOn	// lane FOG2: a cell-lit draw fogged before its imagespace
 uniform sampler2D CellSpecMap;	// lane CUBE1: a legacy material's specular map (R scale, G smoothness), for the cube term
 #else
@@ -433,8 +434,17 @@ void main()
 			opacity = 1.0;
 		}
 		color.a = opacity;
+#ifdef WW_CELLLIGHTS
+		if ( wwGrassFadeK( ViewDir ) <= 0.0 )	// lane GRASSMB1: a composed grass material past its fade
+			discard;
+#endif
 	} else if ( alphaFlags > 0 ) {
+#ifdef WW_CELLLIGHTS
+		float a = wwGrassVertexA( C.a ) * op * alpha;
+		a *= wwGrassFadeK( ViewDir );	// lane GRASSMB1: exactly 1.0 on every non-grass shape
+#else
 		float a = C.a * op * alpha;
+#endif
 		int m = ( a < alphaThreshold ? 0x2B2B : ( a > alphaThreshold ? 0x7171 : 0x4D4D ) );
 		if ( ( m & ( 1 << alphaFlags ) ) == 0 )
 			discard;

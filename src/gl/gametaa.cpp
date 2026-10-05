@@ -362,6 +362,16 @@ bool wwGameTaaUnjittered( Matrix4 & proj )
 	return true;
 }
 
+bool wwGameTaaJitter( float & offX, float & offY )
+{
+	const TaaState & s = ts();
+	if ( !s.jittered )
+		return false;
+	offX = s.offX;
+	offY = s.offY;
+	return true;
+}
+
 bool wwGameTaaWantsSettle()
 {
 	TaaState & s = ts();
