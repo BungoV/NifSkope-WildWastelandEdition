@@ -2105,6 +2105,28 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				cellLe32( u, 8 ), vm.hasMatch() ? qPrintable( vm.captured( 1 ) ) : "unknown", bb[0], bb[1], bb[2], bb[3], bb[4],
 				bb[5], ( bb[3] - bb[0] ) / CELL_UNITS, ( bb[4] - bb[1] ) / CELL_UNITS,
 				spec.interior ? "n/a (interior)" : covers ? "yes" : "NO" );
+			/* lane SUNCELL1 (last round): THE TOME'S HEADER AND OBJECT TABLE, as the game's Umbra 3.3.17 runtime reads
+			 * them (Todd's treat: the Umbra::ImpTome / Umbra::Tome getters; every offset is a getter's displacement,
+			 * self-relative offsets from the tome's start, 0 = absent). The object user IDs are form IDs: placed
+			 * references, or 0xFD...... ids (the combined meshes'). The body the game's query walks (tiles, their
+			 * KD trees, cells, portals, the occlusion raster of Umbra::Query::queryPortalVisibility) is NOT decoded,
+			 * so nothing is culled by it; the occluder / room path stays the cull. */
+			{
+				const auto u32At = [&u]( qint64 o ) -> quint32 { return o >= 0 && o + 4 <= u.size() ? cellLe32( u, int( o ) ) : 0U; };
+				const bool magicOk = ( u32At( 0x00 ) & 0xFFFF0000U ) == 0xD6000000U && u32At( 0x08 ) == quint32( u.size() );
+				const quint32 nObj = u32At( 0x40 ), oUid = u32At( 0x50 ), oStarts = u32At( 0x4c );
+				const quint32 nTiles = u32At( 0x90 ), oCellStarts = u32At( 0x88 );
+				quint32 refs = 0, combined = 0;
+				bool uidsOk = magicOk && oStarts == 0 && oUid != 0 && qint64( oUid ) + 4 * qint64( nObj ) <= u.size();
+				if ( uidsOk )
+					for ( quint32 i = 0; i < nObj; i++ )
+						( ( u32At( qint64( oUid ) + 4 * i ) >> 24 ) == 0xFDU ? combined : refs )++;
+				const quint32 nCells = oCellStarts ? u32At( qint64( oCellStarts ) + 4 * qint64( nTiles ) ) : 0U;
+				fprintf( stderr, "cell previs tome %08X: %s objects %u (%u reference ids, %u combined ids), clusters %u, tiles %u "
+					"(%u leaf), cells %u, gates %u; body not decoded (tiles, KD trees, portals)\n", f,
+					magicOk ? "header read," : "header NOT a 3.x tome,", nObj, refs, combined, u32At( 0x7c ), nTiles,
+					u32At( 0x8c ), nCells, u32At( 0x68 ) );
+			}
 		}
 	}
 	wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
