@@ -62,6 +62,7 @@ public:
 	QCheckBox * volFogBox = nullptr;	// lane VOLFOG1
 	// the cascaded sun shadows row (lane CSM1)
 	QCheckBox * shadowsBox = nullptr;
+	QCheckBox * taaBox = nullptr;	// lane MOTION1
 
 	//! re-read the Data folder's plugins / the loaded weathers / the status line
 	void refreshPlugins();

@@ -1,0 +1,4 @@
+# The game's temporal AA resolve (lane MOTION1; src/gl/gametaa.h). A full-screen pass, two targets.
+# No conditions: never picked for a shape; gametaa.cpp selects it by name.
+
+shaders cell_ao.vert game_taa.frag

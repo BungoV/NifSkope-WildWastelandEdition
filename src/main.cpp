@@ -234,6 +234,9 @@ int main( int argc, char * argv[] )
 		// Add port option
 		QCommandLineOption portOption( {"p", "port"}, "Port NifSkope listens on", "port" );
 		parser.addOption( portOption );
+		// lane MOTION1: --path <file> renders a scripted camera path (gl/campath.h) through the render hook
+		QCommandLineOption pathOption( "path", "Render the camera path in <file> to numbered frames or a video (WW_RENDER_SHOT names the output; default <file>.png)", "file" );
+		parser.addOption( pathOption );
 
 		// Process options
 		parser.process( *a );
@@ -241,6 +244,14 @@ int main( int argc, char * argv[] )
 		// Override port value
 		if ( parser.isSet( portOption ) )
 			port = parser.value( portOption ).toInt();
+		if ( parser.isSet( pathOption ) ) {
+			const QString pf = QFileInfo( parser.value( pathOption ) ).absoluteFilePath();
+			qputenv( "WW_RENDER_PATH", pf.toLocal8Bit() );
+			if ( !qEnvironmentVariableIsSet( "WW_RENDER_SHOT" ) ) {
+				const QFileInfo fi( pf );
+				qputenv( "WW_RENDER_SHOT", ( fi.path() + QLatin1Char( '/' ) + fi.completeBaseName() + QStringLiteral( ".png" ) ).toLocal8Bit() );
+			}
+		}
 
 		// Files were passed to NifSkope
 		for ( const QString & arg : parser.positionalArguments() ) {
