@@ -101,6 +101,7 @@ shoot() {   # shoot <exe> <tag> [env...]   -- the river camera
 bake() {   # bake <exe> <tag> [env...]   -- places + bakes the 5x5, then shoots the bank with GI on
 	local exe="$1" tag="$2"; shift 2
 	local run="$OUT/$tag"
+	[ "${KEEP:-0}" = 1 ] && [ -s "$run/shot.png" ] && { echo "  $tag kept"; return 0; }
 	rm -rf "$run"; mkdir -p "$run"
 	XAT="$GI_AT" OUT="$run" shoot "$exe" shot "$@" WW_CELL_GI=1 \
 		WW_CELL_PROBES="$(winpath "$run/probes.tsv")" WW_CELL_PROBES_HIDE=1 \
@@ -129,12 +130,14 @@ if [ "$RECHECK" != 1 ]; then
 		shoot "$BEFORE" rung_row "${STABLE[@]}" WW_CELL_LIT=0
 		shoot "$BEFORE" rung2_row "${STABLE[@]}" WW_CELL_LIT=0
 		shoot "$EXE" off_pin "${STABLE[@]}" WW_CELL_WATER=0
-		shoot "$BEFORE" rung_pin "${STABLE[@]}"
-		shoot "$BEFORE" rung2_pin "${STABLE[@]}"
+		# lane WATER2: the before-lane exe (WATER1) has the water too: its own pin is the reference
+		shoot "$BEFORE" rung_pin "${STABLE[@]}" WW_CELL_WATER=0
+		shoot "$BEFORE" rung2_pin "${STABLE[@]}" WW_CELL_WATER=0
 		shoot "$EXE" sheet_after
 		bake "$EXE" bake
 		bake "$EXE" bake_pin0 WW_CELL_BAKE_WATER=0
-		bake "$BEFORE" bake_before
+		bake "$BEFORE" bake_before WW_CELL_BAKE_WATER=0
+		bake "$BEFORE" bake_before_on   # lane WATER2 touches no bake: the water-on bake equals WATER1's
 		;;
 	norefl|nofresnel|nosilt|nospec|noshore|nonormal|nodepthfog|fogunits|nossr|nofar)
 		cp "$GREEN/rb_nospec.png" "$OUT/"
@@ -179,6 +182,13 @@ case "$RED" in
 		done
 		[ "$n" -ge 1 ] && [ "$same" = 1 ] && echo "  PASS I bake off: $n bake files byte-identical to the before-lane exe's" \
 			|| { echo "  FAIL I bake off ($n files)"; fails=$((fails+1)); }
+		# I on: the water-on bake against the before-lane exe's water-on bake (lane WATER2 changes no bake)
+		same=1; n=0
+		for f in "$OUT/bake_before_on/bake/"*; do
+			[ -f "$f" ] || continue
+			n=$((n+1)); cmp -s "$f" "$OUT/bake/bake/${f##*/}" || { echo "  differs (on): ${f##*/}"; same=0; }
+		done
+		[ "$n" -ge 1 ] && [ "$same" = 1 ] && echo "  PASS I bake on: $n bake files byte-identical to the before-lane exe's" 			|| { echo "  FAIL I bake on ($n files)"; fails=$((fails+1)); }
 		;;
 	nogamma|noclamp) WATER_JUDGE_RED="$RED" judge A "$ESM" "$GREEN/rb.dump.forms" && want_fail=no ;;
 	norefl) judge B "$OUT" rb && want_fail=no; judge_g && want_fail=no ;;
