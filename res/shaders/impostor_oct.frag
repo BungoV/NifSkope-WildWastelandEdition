@@ -34,6 +34,15 @@
  * ------------------------------------------------------------------------- */
 
 #include "uniforms.glsl"
+/* lane FARLOD1: impostor_cell.frag defines these and includes this whole file, so a far card in the
+ * cell view takes the cell's own lights, the Lookdev fog and the cell's imagespace (fo4_cell.frag's
+ * pattern). impostor_oct.prog defines neither and runs exactly the shader it always ran. */
+#ifdef WW_FOG
+#include "lookdev_fog.glsl"
+#endif
+#ifdef WW_CELLLIGHTS
+#include "cell_lights.glsl"
+#endif
 
 uniform mat4 modelViewMatrix;      // the same one the vertex stage used
 
@@ -706,6 +715,25 @@ void main()
 	 * Verbatim `fo4_default.frag`'s curve, with `A.a` = toneMapScale and
 	 * `D.a` = brightnessScale, which is what its vertex stage packs there. */
 	vec3 lc = colour.rgb * ( lit + ambient );
+	/* lane FARLOD1: the cell path, in fo4_default.frag's order -- the cell's lights on the sqrt-of-linear
+	 * colour, the fog on its square, then the cell's imagespace (linear into the HDR frame) in place of
+	 * the viewer's curve. Roughness 1, no specular and no cube: the card carries no gloss it shades. */
+#if defined( WW_FOG ) || defined( WW_CELLLIGHTS )
+	vec3 cardPosView = ( modelViewMatrix * vec4( cardPosModel, 1.0 ) ).xyz;
+#endif
+#ifdef WW_CELLLIGHTS
+	if ( cellOn )
+		lc = cellLit( lc, colour.rgb, nView, cardPosView, V, 0.0, vec3( 0.0 ), 1.0, 0.5, vec3( 0.0 ), vec3( 0.0 ) );
+#endif
+#ifdef WW_FOG
+	if ( fogOn )
+		lc = sqrt( max( wwFog( lc * lc, cardPosView ), vec3( 0.0 ) ) );
+#endif
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && cellIsOn )
+		lc = cellIsLinear ? lc * lc : cellImageSpace( lc );
+	else
+#endif
 	{
 		const float a = 0.15, b = 0.50, c = 0.10, d = 0.20, e = 0.02, f = 0.30;
 		vec3 z = lc * lc * brightnessScale * ( toneMapScale * 4.22978723 );

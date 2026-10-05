@@ -85,6 +85,12 @@ public:
 	 *  refuses by name when no level has it. */
 	bool openForRole( const QString & lodlPath, int role, QString * why );
 
+	/*! The same open, for ONE named level (lane FARLOD1): the cell view's far
+	 *  rings take a coarser sheet level the farther out they are, the way the
+	 *  game's LOD blocks do. `dim` wins over `WW_LODL_SHEET_DIM`; a level that
+	 *  is not on disk is a refusal by name and the caller falls back to `open`. */
+	bool openDim( const QString & lodlPath, int dim, QString * why );
+
 	bool isOpen() const;
 
 	int levelDim() const;

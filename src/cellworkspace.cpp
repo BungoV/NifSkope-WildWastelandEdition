@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 
 #include "cellview.h"
+#include "cellfarlod.h"
 #include "gl/celllights.h"
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
@@ -439,6 +440,7 @@ void CellWorkspacePanel::buildUi()
 	cellTaa = new QCheckBox( tr( "Temporal AA" ), prtpRow );
 	cellTaa->setObjectName( QStringLiteral( "CellWorkspaceTemporalAa" ) );
 	cellTaa->setChecked( wwGameTaaOn() );
+<<<<<<< HEAD
 	// lane SUNCELL1: draw only the placements the camera (or a sun cascade) sees; ships off
 	cellCull = new QCheckBox( tr( "Culling" ), prtpRow );
 	cellCull->setObjectName( QStringLiteral( "CellWorkspaceCulling" ) );
@@ -447,6 +449,20 @@ void CellWorkspacePanel::buildUi()
 	cellPrevis = new QCheckBox( tr( "Previs" ), prtpRow );
 	cellPrevis->setObjectName( QStringLiteral( "CellWorkspacePrevis" ) );
 	cellPrevis->setChecked( wwCellPrevisOn() );
+=======
+	// lane FARLOD1: the worldspace's LOD past the loaded block, read at cell open; ships off
+	cellFarLod = new QCheckBox( tr( "Far LOD" ), prtpRow );
+	cellFarLod->setObjectName( QStringLiteral( "CellWorkspaceFarLod" ) );
+	cellFarLod->setChecked( cellFarLodWanted() );
+	// lane FARLOD1: the LOD type -- index 0 Vanilla, 1 FO4CS; unset, it shows what the last build resolved to
+	cellFarLodType = new QComboBox( prtpRow );
+	cellFarLodType->setObjectName( QStringLiteral( "CellWorkspaceFarLodType" ) );
+	cellFarLodType->addItems( { tr( "Vanilla" ), tr( "FO4CS" ) } );
+	{
+		const int t = cellFarLodTypePinned() != WwFarLodAuto ? cellFarLodTypePinned() : cellFarLodLastType();
+		cellFarLodType->setCurrentIndex( t == WwFarLodVanilla ? 0 : 1 );
+	}
+>>>>>>> farlod1-20261005
 	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
 	cellPass = new QComboBox( prtpRow );
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
@@ -459,8 +475,13 @@ void CellWorkspacePanel::buildUi()
 	pl->addWidget( cellPass );
 	pl->addWidget( cellIs );
 	pl->addWidget( cellTaa );
+<<<<<<< HEAD
 	pl->addWidget( cellCull );
 	pl->addWidget( cellPrevis );
+=======
+	pl->addWidget( cellFarLod );
+	pl->addWidget( cellFarLodType );
+>>>>>>> farlod1-20261005
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
@@ -577,6 +598,25 @@ void CellWorkspacePanel::buildUi()
 		wwCellImageSpaceSetOn( on );
 		if ( glView )
 			glView->update();
+	} );
+	// lane FARLOD1: the far field is document geometry, so the cell is built again with (or without) it
+	connect( cellFarLodType, qOverload<int>( &QComboBox::currentIndexChanged ), this, [this]( int i ) {
+		cellFarLodSetType( i == 0 ? WwFarLodVanilla : WwFarLodFo4cs );
+		if ( syncing || g_path.isEmpty() || !cellFarLodWanted() )
+			return;
+		g_over = g_spec;
+		g_haveOverrides = true;
+		say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+		emit reopenRequested( g_path );
+	} );
+	connect( cellFarLod, &QCheckBox::toggled, this, [this]( bool on ) {
+		cellFarLodSetWanted( on );
+		if ( syncing || g_path.isEmpty() )
+			return;
+		g_over = g_spec;
+		g_haveOverrides = true;
+		say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+		emit reopenRequested( g_path );
 	} );
 	connect( probesShow, &QCheckBox::toggled, this, [this]( bool on ) {
 		QSettings().setValue( QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), on );

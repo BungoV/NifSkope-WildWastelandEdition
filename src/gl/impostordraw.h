@@ -170,6 +170,12 @@ struct Options
 	float swayAmplitude = 0.0f;
 	float swayPhase = 0.0f;
 
+	//! lane FARLOD1: draw with impostor_cell.prog -- the cell's own lights, the
+	//! Lookdev fog and the cell's imagespace, set by the cell view's own uniform
+	//! setters. Only the cell view's far cards ask for it; false is the program
+	//! every other card always ran.
+	bool cellLit = false;
+
 	//! THE RED CONTROL. Frame indices are permuted before the lookup, so the
 	//! card draws the wrong view of itself. The silhouette IoU must collapse;
 	//! if it does not, the IoU was never measuring frame selection and step 5

@@ -48,6 +48,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellhdr.h"
 #include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA
 #include "impostorchunk.h"
+#include "cellfarlod.h"		// lane FARLOD1: the far field's planes, sway and cards
 #include "impostorpreviewtest.h"
 #include "gl/glshape.h"
 #include "gl/gltex.h"
@@ -3564,6 +3565,15 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		nr = std::max< GLdouble >( nr, scale() );
 		// ensure distance
 		fr = std::max< GLdouble >( fr, nr + scale() );
+		// lane FARLOD1: the far field is outside the bounds; the far plane reaches it, the near plane
+		// rises to the game's own order (fNearDistance 15) so the depth holds 250000 units. 0 = no far field.
+		if ( const float farReach = wwCellFarLodReach( scene ); farReach > 0.0f ) {
+			const Vector3 o = scene->view * Vector3();
+			fr = std::max< GLdouble >( fr, GLdouble( o.length() ) + GLdouble( farReach ) * 1.05 );
+			nr = wwCellFarLodNear( nr );
+			fr = std::max< GLdouble >( fr, nr + scale() );
+			wwCellFarLodPlanes( nr, fr );	// the near gate reads these
+		}
 
 		// lane MOTION1: the path camera's own fov
 		const GLdouble fovDeg = wwPathActive ? GLdouble( wwPathFov ) : GLdouble( cfg.fov / Zoom );
@@ -4088,12 +4098,22 @@ void GLView::paintGL()
 		ImpostorChunk::draw( scene, ImpostorDraw::Options() );
 		if ( !wwImpostorPreviewSuppressScene() ) {
 			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
+<<<<<<< HEAD
 			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );	// lane CELLALL1
+=======
+			const bool hdr = workspaceDrawScenes.isEmpty() && wwCellHdrBegin( scene );
+			wwCellFarLodFrame( scene );	// lane FARLOD1: the far sway's uniforms; no GL call while off
+>>>>>>> farlod1-20261005
 			scene->draw();
 			if ( hdr ) {
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
+				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame
 				wwCellHdrEnd( scene );
 			}
+			// lane FARLOD1: the cards when the frame is not HDR (lit and toned by their own program), then the
+			// census a gate reads
+			wwCellFarLodCards( scene, false, hdr );
+			wwCellFarLodSkyCensus( scene );
 			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
 			if ( workspaceDrawScenes.isEmpty() || cellFirst )	// lane CELLALL1
 				wwGameTaaResolve( scene );

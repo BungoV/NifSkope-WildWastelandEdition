@@ -7,8 +7,14 @@ BSD License - see nifskope.h
 #ifndef BTDTERRAIN_H
 #define BTDTERRAIN_H
 
+#include <QModelIndex>
+#include <QSet>
 #include <QString>
 #include <QStringList>
+
+#include <functional>
+#include <utility>
+#include <vector>
 
 class NifModel;
 class QWidget;
@@ -195,5 +201,80 @@ bool lodtQueryRegion( QWidget * parent, const QString & path,
 //! The view a bare open uses when no dialog ran: the whole worldspace, heights,
 //! at the coarsest level that fits the budget from 8 samples a cell down.
 LodtRegionSpec lodtDefaultRegion( const LodtWorldInfo & info );
+
+/* -------------------------------------------------------------------------
+ * lane FARLOD1 -- the cell view's far terrain: rings of `.lodl` ground around
+ * the loaded block, APPENDED under a node of the cell document (the same
+ * meshing as the `.lodl` view, buildTerrainSurface, not a second one).
+ *
+ * Ring i's cut is ring i-1's outer rectangle as built (ring 0's is the
+ * caller's: the loaded block), so no cell is drawn twice. Each ring snaps its
+ * outer rectangle OUTWARD to whole tiles of its own sheet level and is clipped
+ * to what the sheets and the `.lodl` hold. A ring's outer edge is stitched to
+ * the next ring's lattice (off-lattice heights lerped), and ring 0's inner edge
+ * can be snapped to the loaded LAND through `innerZ`.
+ * ------------------------------------------------------------------------- */
+struct LodlFarRing
+{
+	int lod = 2;                //!< `.lodl` level: samples a cell = file rate >> lod
+	int sheetDim = 0;           //!< VT level (cells a sheet tile); 0 = the finest on disk
+	int x0 = 0, y0 = 0, x1 = -1, y1 = -1;     //!< asked outer rectangle, inclusive cells
+	int cx0 = 0, cy0 = 0, cx1 = -1, cy1 = -1; //!< ring 0 only: the cut (the loaded block)
+	bool noCut = false;         //!< red control: draw the cut cells too
+	bool snapInner = false;     //!< ring 0: inner-edge heights from innerZ
+	//! world x, y -> the loaded LAND's height there; false = no LAND
+	std::function<bool( float, float, float * )> innerZ;
+	QString prefix = QStringLiteral( "FarLOD terrain" );
+	/*! Rings built one call each (the vanilla fill needs each ring's footprint before the next): the cut
+	 *  is cx* even after an earlier ring of the call, and the next ring's level (its seam lerp) is given. */
+	bool cutGiven = false;
+	int nextLod = 0;            //!< 0 = no next ring
+	//! Our coverage limit (a mixed run, WW_CELL_FARLOD_OURS): whole sheet tiles inside it; none when lx1 < lx0.
+	int lx0 = 0, ly0 = 0, lx1 = -1, ly1 = -1;
+
+	// ---- out, read back from what was built
+	bool built = false;
+	int ox0 = 0, oy0 = 0, ox1 = -1, oy1 = -1;
+	int n = 0;
+	qint64 estVerts = 0, shapes = 0, verts = 0, tris = 0, cutTris = 0;
+	int sheetTiles = 0;
+	QString sheetFile;
+	qint64 seamSamples = 0;
+	double seamBeforeMax = 0, seamBeforeMean = 0, seamAfterMax = 0, seamAfterMean = 0;
+	QStringList notes;
+};
+
+//! Appends every ring under `parent` (the caller holds updates and runs updateModel).
+//! `shift` is subtracted from each shape's Translation. A ring whose estimated
+//! vertices take the running total past `maxVerts` (> 0) is not built, and says so.
+bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QString & lodlPath,
+	const float shift[3], std::vector<LodlFarRing> & rings, qint64 maxVerts, QString * error );
+
+/*! Lane FARLOD1: the far field's WATER, one ring of it. The `.lodl`'s water bodies (lane WATER1's
+ *  body plane, its surface plane and each body's WATR form) as flat sheets at the body's height,
+ *  `texels` body-plane samples a cell edge (coarser farther out), the cut left dry. Grown one texel
+ *  onto dry ground below a neighbour's surface, so the terrain's depth draws the shore (the game's
+ *  plane-cut-by-ground). Built per WATR form so each shape takes its own record. */
+struct LodlFarWater
+{
+	int x0 = 0, y0 = 0, x1 = -1, y1 = -1;     //!< the ring, inclusive cells
+	int cx0 = 0, cy0 = 0, cx1 = -1, cy1 = -1; //!< the cut, inclusive cells (none when cx1 < cx0)
+	bool noCut = false;         //!< red control: the cut cells get water too
+	int texels = 4;             //!< body-plane samples a cell edge, wanted (clamped to the file's)
+	QString prefix = QStringLiteral( "FarLOD water" );
+
+	// ---- out
+	int rate = 0;               //!< the samples a cell edge it took
+	qint64 quads = 0, wetTexels = 0, grownTexels = 0;
+	int shapes = 0;
+	QSet<quint16> bodies;
+	std::vector<std::pair<int, quint32>> blocks;   //!< each shape's block and WATR form
+	QStringList notes;
+};
+
+//! Appends every water ring under `parent` (the caller holds updates and runs updateModel).
+//! False (with `error`) when the file has no body plane; nothing is appended then.
+bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QString & lodlPath,
+	const float shift[3], std::vector<LodlFarWater> & rings, QString * error );
 
 #endif // BTDTERRAIN_H

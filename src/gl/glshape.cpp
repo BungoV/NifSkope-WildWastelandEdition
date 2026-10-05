@@ -691,6 +691,12 @@ void Shape::setUniforms( NifSkopeOpenGLContext::Program * prog ) const
 	const Transform &	v = viewTrans();
 	prog->uni3m( "normalMatrix", v.rotation );
 	prog->uni4m( "modelViewMatrix", v.toMatrix4() );
+	/* lane FARLOD1: the tree-animation flag the far field's sway reads (fo4_default.vert), for every program
+	 * that has it -- the PBR path (pbrm_*) never set it, so its far trees stood still. The legacy path sets
+	 * the same value again in its own setup. WW_CELL_FARLOD_RED=pbrnosway is the old path, the red control. */
+	static const bool farlod1PbrNoSway = qgetenv( "WW_CELL_FARLOD_RED" ) == "pbrnosway";
+	if ( const int l = farlod1PbrNoSway ? -1 : prog->uniLocation( "lodTreeAnim" ); l >= 0 )
+		prog->uni1i_l( l, isVertexAlphaAnimation ? 1 : 0 );
 }
 
 bool Shape::bindShape() const

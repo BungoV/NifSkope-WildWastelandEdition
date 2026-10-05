@@ -336,6 +336,8 @@ HEADERS += \
 	src/cellpanel.h \
 	src/cellpicktest.h \
 	src/cellview.h \
+	src/cellfarlod.h \
+	src/cellfarvanilla.h \
 	src/cellmesh.h \
 	src/cellspeed.h \
 	src/celltexahead.h \
@@ -593,6 +595,8 @@ SOURCES += \
 	src/cellpanel.cpp \
 	src/cellpicktest.cpp \
 	src/cellview.cpp \
+	src/cellfarlod.cpp \
+	src/cellfarvanilla.cpp \
 	src/cellmesh.cpp \
 	src/cellspeed.cpp \
 	src/celltexahead.cpp \

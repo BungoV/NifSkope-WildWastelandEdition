@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include <QFile>
 #include <QFileInfo>
 #include <QGridLayout>
+#include <QHash>
 #include <QLabel>
 #include <QMap>
 #include <QPushButton>
@@ -34,6 +35,7 @@ BSD License - see nifskope.h
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -161,6 +163,18 @@ struct TerrainSurface
 	//! Indexed `sty * sheetTilesX + stx`, `sty` = 0 the NORTH row. Empty = no sheets.
 	std::vector<QString> tileDiffuse;
 	std::vector<QString> tileNormal;
+
+	/* ---- lane FARLOD1, all inert at their defaults ----
+	 *  `appendRoot` valid: no createNew, no root of its own, no hold/updateModel
+	 *  (the caller's document). `shift` is subtracted from every Translation.
+	 *  A cell inside the cut rectangle draws no triangles; a tile wholly inside
+	 *  it is not written at all. `cutTris` / `shapesOut` / `vertsOut` / `trisOut`
+	 *  count what happened. */
+	QModelIndex appendRoot;
+	Vector3 shift = Vector3( 0.0f, 0.0f, 0.0f );
+	bool haveCut = false;
+	int cutX0 = 0, cutY0 = 0, cutX1 = -1, cutY1 = -1;
+	qint64 cutTris = 0, shapesOut = 0, vertsOut = 0, trisOut = 0;
 };
 
 bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
@@ -213,15 +227,22 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 
 	/* Fallout 4 document, the same header the starter scene and every other
 	 * generated document here uses; BS version 130 conditions the BSTriShape
-	 * vertex layout below. */
-	if ( !nif->createNew( 0x14020007, 12, 130 ) )
-		return fail( QStringLiteral( "could not create a Fallout 4 document" ) );
+	 * vertex layout below. lane FARLOD1: an append goes under the caller's node. */
+	const bool appending = s.appendRoot.isValid();
+	QModelIndex iRoot = s.appendRoot;
+	if ( !appending ) {
+		if ( !nif->createNew( 0x14020007, 12, 130 ) )
+			return fail( QStringLiteral( "could not create a Fallout 4 document" ) );
 
-	nif->holdUpdates( true );
-	QModelIndex iRoot = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
-	nif->set<QString>( iRoot, "Name", s.rootName );
-	nif->set<quint32>( iRoot, "Flags", 14 );
-	nif->set<float>( iRoot, "Scale", 1.0f );
+		nif->holdUpdates( true );
+		iRoot = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+		nif->set<QString>( iRoot, "Name", s.rootName );
+		nif->set<quint32>( iRoot, "Flags", 14 );
+		nif->set<float>( iRoot, "Scale", 1.0f );
+	}
+	auto inCut = [&s]( int cellX, int cellY ) {
+		return s.haveCut && cellX >= s.cutX0 && cellX <= s.cutX1 && cellY >= s.cutY0 && cellY <= s.cutY1;
+	};
 
 	/* Full-precision layout, 28 bytes a vertex -- the same descriptor the
 	 * starter cube and the collision proxy use, known to load and render. A
@@ -250,6 +271,15 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 			const int wV = wCells * n + 1;
 			const int gx0 = tx * k * n;
 			const int gy0 = ty * k * n;
+
+			// lane FARLOD1: a tile wholly inside the cut is not written
+			if ( s.haveCut ) {
+				const int tcx0 = s.cellX0 + tx * k, tcy0 = s.cellY0 + ty * k;
+				if ( inCut( tcx0, tcy0 ) && inCut( tcx0 + wCells - 1, tcy0 + hCells - 1 ) ) {
+					s.cutTris += qint64( wCells ) * hCells * n * n * 2;
+					continue;
+				}
+			}
 
 			/* Which sheet tile this mesh tile sits in, and where inside it.
 			 * `sty` is flipped because the sheet grid's row 0 is the NORTH
@@ -303,11 +333,22 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 			for ( int j = 0; j < hV - 1; j++ ) {
 				for ( int i = 0; i < wV - 1; i++ ) {
 					const int a = j * wV + i;
+					// lane FARLOD1: a quad of a cut cell is the loaded block's ground, not ours
+					if ( s.haveCut && inCut( s.cellX0 + tx * k + i / n, s.cellY0 + ty * k + j / n ) ) {
+						s.cutTris += 2;
+						continue;
+					}
 					// CCW seen from above, the outward (+Z) winding
 					tris.append( Triangle( quint16( a ), quint16( a + 1 ), quint16( a + wV + 1 ) ) );
 					tris.append( Triangle( quint16( a ), quint16( a + wV + 1 ), quint16( a + wV ) ) );
 				}
 			}
+
+			if ( tris.isEmpty() )
+				continue;   // lane FARLOD1: every quad was cut (never true without a cut)
+			s.shapesOut++;
+			s.vertsOut += verts.size();
+			s.trisOut += tris.size();
 
 			QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
 			nif->set<QString>( iShape, "Name",
@@ -317,7 +358,7 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 			nif->set<float>( iShape, "Scale", 1.0f );
 			nif->set<Vector3>( iShape, "Translation",
 				Vector3( float( s.cellX0 + tx * k ) * 4096.0f,
-					float( s.cellY0 + ty * k ) * 4096.0f, 0.0f ) );
+					float( s.cellY0 + ty * k ) * 4096.0f, 0.0f ) - s.shift );
 
 			nif->set<BSVertexDesc>( iShape, "Vertex Desc", vertexDesc );
 			nif->set<quint32>( iShape, "Num Vertices", quint32( verts.size() ) );
@@ -421,8 +462,10 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 		}
 	}
 
-	nif->holdUpdates( false );
-	nif->updateModel();
+	if ( !appending ) {
+		nif->holdUpdates( false );
+		nif->updateModel();
+	}
 
 	if ( error )
 		error->clear();
@@ -1171,14 +1214,18 @@ struct WaterQuad
 /*! The quads as BSTriShapes under the document's root, at most 16,000 quads
  *  (64,000 vertices) a shape. `readZ` gets every vertex's z READ BACK from the
  *  document after it was written, four a quad, in quad order -- what the
- *  flatness number is taken from. */
+ *  flatness number is taken from.
+ *  Lane FARLOD1: `parent` appends under that node instead of the root, inside the
+ *  caller's own held updates (no hold, no updateModel here); `name` prefixes the
+ *  shapes ("Water" = as before); `blocks` gets each shape's block number. */
 int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool blend,
-	std::vector<float> & readZ )
+	std::vector<float> & readZ, const QModelIndex * parent = nullptr, const QString & name = QStringLiteral( "Water" ),
+	std::vector<int> * blocks = nullptr )
 {
 	readZ.assign( quads.size() * 4, 0.0f );
 	if ( quads.empty() )
 		return 0;
-	const QModelIndex iRoot = nif->getBlockIndex( 0 );
+	const QModelIndex iRoot = parent ? *parent : nif->getBlockIndex( 0 );
 	if ( !iRoot.isValid() )
 		return 0;
 	BSVertexDesc desc( 0x0041B00000650407ULL );
@@ -1188,7 +1235,8 @@ int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool b
 	const int stride = int( desc.GetVertexSize() );
 	const size_t perShape = 16000;
 	int shapes = 0;
-	nif->holdUpdates( true );
+	if ( !parent )
+		nif->holdUpdates( true );
 	for ( size_t q0 = 0; q0 < quads.size(); q0 += perShape ) {
 		const size_t q1 = qMin( quads.size(), q0 + perShape );
 		const int nq = int( q1 - q0 );
@@ -1210,7 +1258,9 @@ int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool b
 			hi = Vector3( qMax( hi[0], w.x1 ), qMax( hi[1], w.y1 ), qMax( hi[2], zHi ) );
 		}
 		QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
-		nif->set<QString>( iShape, "Name", QString( "Water %1" ).arg( shapes ) );
+		nif->set<QString>( iShape, "Name", QString( "%1 %2" ).arg( name ).arg( shapes ) );
+		if ( blocks )
+			blocks->push_back( nif->getBlockNumber( iShape ) );
 		nif->set<quint32>( iShape, "Flags", 14 );
 		nif->set<float>( iShape, "Scale", 1.0f );
 		nif->set<Vector3>( iShape, "Translation", Vector3( 0.0f, 0.0f, 0.0f ) );
@@ -1280,8 +1330,10 @@ int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool b
 		addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iShape ) );
 		shapes++;
 	}
-	nif->holdUpdates( false );
-	nif->updateModel();
+	if ( !parent ) {
+		nif->holdUpdates( false );
+		nif->updateModel();
+	}
 	return shapes;
 }
 
@@ -2968,5 +3020,467 @@ bool lodtQueryRegion( QWidget * parent, const QString & path,
 
 	spec = currentSpec();
 	spec.valid = true;
+	return true;
+}
+
+
+/* ---- lane FARLOD1: the cell view's far terrain rings (see btdterrain.h) ---- */
+bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QString & lodlPath,
+	const float shift[3], std::vector<LodlFarRing> & rings, qint64 maxVerts, QString * error )
+{
+	auto fail = [error]( const QString & message ) {
+		if ( error )
+			*error = message;
+		return false;
+	};
+	if ( !nif || !parent.isValid() )
+		return fail( QStringLiteral( "no document to append the far rings to" ) );
+
+	LodtFile f;
+	if ( !f.open( lodlPath, error ) )
+		return false;
+	LodtWorldInfo info;
+	lodtInfoFrom( f, info );
+	// the same progressive-walk cache the .lodl view takes (nifCreateLodtTerrainScene)
+	f.setBlockCacheSize( 256 );
+
+	const int spc = info.samplesPerCell;
+	auto floorDiv = []( int a, int b ) {
+		return ( a >= 0 ) ? a / b : -( ( -a + b - 1 ) / b );
+	};
+	const Vector3 shiftV( shift[0], shift[1], shift[2] );
+
+	qint64 runningVerts = 0;
+	bool havePrev = false;
+	int px0 = 0, py0 = 0, px1 = -1, py1 = -1;
+	for ( size_t ri = 0; ri < rings.size(); ri++ ) {
+		LodlFarRing & r = rings[ri];
+		r.built = false;
+		// the cut: the loaded block for ring 0, the ring inside it as BUILT for every other
+		const bool chain = havePrev && !r.cutGiven;
+		const int cx0 = chain ? px0 : r.cx0;
+		const int cy0 = chain ? py0 : r.cy0;
+		const int cx1 = chain ? px1 : r.cx1;
+		const int cy1 = chain ? py1 : r.cy1;
+		// the outer rectangle never ends inside the cut
+		int x0 = qMin( r.x0, cx0 ), y0 = qMin( r.y0, cy0 );
+		int x1 = qMax( r.x1, cx1 ), y1 = qMax( r.y1, cy1 );
+
+		/* The ring's own sheet level (coarser farther out), the finest on disk
+		 * when that level is not there; a fresh reader for the fallback so a
+		 * failed open leaves nothing half-read behind. */
+		std::unique_ptr<LodtSheets> sheets( new LodtSheets );
+		QString why;
+		bool haveSheets = r.sheetDim > 0 && sheets->openDim( lodlPath, r.sheetDim, &why );
+		if ( !haveSheets ) {
+			if ( r.sheetDim > 0 )
+				r.notes << QString( "sheet level %1 refused (%2); the finest level instead" )
+					.arg( r.sheetDim ).arg( why );
+			sheets.reset( new LodtSheets );
+			haveSheets = sheets->open( lodlPath, &why );
+			if ( !haveSheets )
+				r.notes << QString( "no sheets (%1): grey ground" ).arg( why );
+		}
+		int dim = 0;
+		if ( haveSheets ) {
+			dim = qMax( 1, sheets->levelDim() );
+			const int w = sheets->west(), sth = sheets->south();
+			int sx0 = w + floorDiv( x0 - w, dim ) * dim;
+			int sx1 = w + ( floorDiv( x1 - w, dim ) + 1 ) * dim - 1;
+			int sy0 = sth + floorDiv( y0 - sth, dim ) * dim;
+			int sy1 = sth + ( floorDiv( y1 - sth, dim ) + 1 ) * dim - 1;
+			// clipped to the sheets and to the file, staying on whole tiles
+			sx0 = qMax( sx0, w );
+			sy0 = qMax( sy0, sth );
+			sx1 = qMin( sx1, sheets->east() );
+			sy1 = qMin( sy1, sheets->north() );
+			if ( sx0 < info.cellMinX )
+				sx0 = w + ( ( info.cellMinX - w + dim - 1 ) / dim ) * dim;
+			if ( sy0 < info.cellMinY )
+				sy0 = sth + ( ( info.cellMinY - sth + dim - 1 ) / dim ) * dim;
+			if ( sx1 > info.cellMaxX )
+				sx1 = w + floorDiv( info.cellMaxX - w + 1, dim ) * dim - 1;
+			if ( sy1 > info.cellMaxY )
+				sy1 = sth + floorDiv( info.cellMaxY - sth + 1, dim ) * dim - 1;
+			if ( sx1 < sx0 || sy1 < sy0 ) {
+				r.notes << QStringLiteral( "the sheets do not reach this ring: grey ground" );
+				haveSheets = false;
+			} else {
+				x0 = sx0;
+				y0 = sy0;
+				x1 = sx1;
+				y1 = sy1;
+			}
+		}
+		if ( !haveSheets ) {
+			x0 = qMax( x0, info.cellMinX );
+			y0 = qMax( y0, info.cellMinY );
+			x1 = qMin( x1, info.cellMaxX );
+			y1 = qMin( y1, info.cellMaxY );
+		}
+		// lane FARLOD1: our coverage limit (a mixed run), on whole sheet tiles
+		if ( r.lx1 >= r.lx0 && r.ly1 >= r.ly0 ) {
+			if ( haveSheets ) {
+				const int w = sheets->west(), sth = sheets->south();
+				x0 = qMax( x0, w - floorDiv( w - r.lx0, dim ) * dim );
+				y0 = qMax( y0, sth - floorDiv( sth - r.ly0, dim ) * dim );
+				x1 = qMin( x1, w + floorDiv( r.lx1 - w + 1, dim ) * dim - 1 );
+				y1 = qMin( y1, sth + floorDiv( r.ly1 - sth + 1, dim ) * dim - 1 );
+			} else {
+				x0 = qMax( x0, r.lx0 );
+				y0 = qMax( y0, r.ly0 );
+				x1 = qMin( x1, r.lx1 );
+				y1 = qMin( y1, r.ly1 );
+			}
+		}
+		if ( x1 < x0 || y1 < y0 ) {
+			r.notes << QStringLiteral( "empty after clipping to the file" );
+			continue;
+		}
+
+		const int n = lodtRate( info, r.lod );
+		const int step = qMax( 1, spc / n );
+		const int cellsXr = x1 - x0 + 1;
+		const int cellsYr = y1 - y0 + 1;
+		const int gridW = cellsXr * n + 1;
+		const int gridH = cellsYr * n + 1;
+		const int ovW = qMax( 0, qMin( x1, cx1 ) - qMax( x0, cx0 ) + 1 );
+		const int ovH = qMax( 0, qMin( y1, cy1 ) - qMax( y0, cy0 ) + 1 );
+		r.n = n;
+		r.ox0 = x0;
+		r.oy0 = y0;
+		r.ox1 = x1;
+		r.oy1 = y1;
+		r.estVerts = qint64( gridW ) * gridH - ( r.noCut ? 0 : qint64( ovW ) * ovH * n * n );
+		if ( maxVerts > 0 && runningVerts + r.estVerts > maxVerts ) {
+			r.notes << QString( "NOT BUILT: %L1 vertices would take the far field past its budget "
+					"of %L2" ).arg( r.estVerts ).arg( maxVerts );
+			continue;
+		}
+
+		const int lastX = ( ( f.cellsX() * spc - 1 ) / step ) * step;
+		const int lastY = ( ( f.cellsY() * spc - 1 ) / step ) * step;
+		const int baseX = ( x0 - info.cellMinX ) * spc;
+		const int baseY = ( y0 - info.cellMinY ) * spc;
+		std::vector<float> z( size_t( gridW ) * size_t( gridH ), 0.0f );
+		for ( int j = 0; j < gridH; j++ ) {
+			const int gy = qMin( baseY + j * step, lastY );
+			for ( int i = 0; i < gridW; i++ )
+				z[size_t( j ) * gridW + i] = f.height( qMin( baseX + i * step, lastX ), gy );
+		}
+		auto zAt = [&z, gridW]( int i, int j ) -> float & {
+			return z[size_t( j ) * size_t( gridW ) + size_t( i )];
+		};
+		const float sp = 4096.0f / float( n );
+
+		/* THE RING SEAM: this ring's outer edge meets the next ring's inner edge,
+		 * whose vertices sit on a coarser lattice. Every off-lattice height on the
+		 * edge is the lerp of its two lattice neighbours, so the two edges are the
+		 * same line and no crack opens between rings. */
+		const int nextLod = ri + 1 < rings.size() ? rings[ri + 1].lod : r.nextLod;
+		if ( nextLod > 0 ) {
+			const int nNext = lodtRate( info, nextLod );
+			if ( nNext > 0 && n > nNext && n % nNext == 0 ) {
+				const int rr = n / nNext;
+				for ( int e = 0; e < 2; e++ ) {
+					const int i = e ? gridW - 1 : 0;
+					for ( int j = 0; j < gridH; j++ ) {
+						if ( j % rr == 0 )
+							continue;
+						const int j0 = j - j % rr, j1 = qMin( j0 + rr, gridH - 1 );
+						const float t = float( j - j0 ) / float( rr );
+						zAt( i, j ) = zAt( i, j0 ) * ( 1.0f - t ) + zAt( i, j1 ) * t;
+					}
+					const int jj = e ? gridH - 1 : 0;
+					for ( int i2 = 0; i2 < gridW; i2++ ) {
+						if ( i2 % rr == 0 )
+							continue;
+						const int i0 = i2 - i2 % rr, i1 = qMin( i0 + rr, gridW - 1 );
+						const float t = float( i2 - i0 ) / float( rr );
+						zAt( i2, jj ) = zAt( i0, jj ) * ( 1.0f - t ) + zAt( i1, jj ) * t;
+					}
+				}
+			}
+		}
+
+		/* THE BLOCK SEAM (ring 0): the four edges of the loaded block, walked at the
+		 * LAND's own 128-unit spacing. Measured on the raw heights, then the edge
+		 * vertices take the LAND's height where they stand, then measured again --
+		 * between two edge vertices the LAND has vertices of its own the ring does not,
+		 * so "after" is honest and not zero by construction. */
+		if ( !havePrev && r.innerZ && !r.noCut ) {
+			const int ix0 = ( cx0 - x0 ) * n, ix1 = ( cx1 + 1 - x0 ) * n;
+			const int iy0 = ( cy0 - y0 ) * n, iy1 = ( cy1 + 1 - y0 ) * n;
+			if ( ix0 >= 0 && iy0 >= 0 && ix1 < gridW && iy1 < gridH ) {
+				struct Edge { int i, j, di, dj, len; };
+				const Edge edges[4] = {
+					{ ix0, iy0, 0, 1, iy1 - iy0 }, { ix1, iy0, 0, 1, iy1 - iy0 },
+					{ ix0, iy0, 1, 0, ix1 - ix0 }, { ix0, iy1, 1, 0, ix1 - ix0 } };
+				const int q = qMax( 1, 32 / n );
+				auto measure = [&]( double & mx, double & mean, qint64 & cnt ) {
+					mx = 0.0;
+					double sum = 0.0;
+					cnt = 0;
+					for ( const Edge & e : edges ) {
+						for ( int v = 0; v < e.len; v++ ) {
+							const int ia = e.i + e.di * v, ja = e.j + e.dj * v;
+							for ( int s = 0; s < q; s++ ) {
+								const float t = float( s ) / float( q );
+								const float zb = zAt( ia, ja ) * ( 1.0f - t ) + zAt( ia + e.di, ja + e.dj ) * t;
+								const float wx = float( x0 ) * 4096.0f + ( float( ia ) + float( e.di ) * t ) * sp;
+								const float wy = float( y0 ) * 4096.0f + ( float( ja ) + float( e.dj ) * t ) * sp;
+								float zl = 0.0f;
+								if ( !r.innerZ( wx, wy, &zl ) )
+									continue;
+								const double d = std::fabs( double( zb ) - double( zl ) );
+								mx = qMax( mx, d );
+								sum += d;
+								cnt++;
+							}
+						}
+					}
+					mean = cnt ? sum / double( cnt ) : 0.0;
+				};
+				measure( r.seamBeforeMax, r.seamBeforeMean, r.seamSamples );
+				if ( r.snapInner ) {
+					for ( const Edge & e : edges ) {
+						for ( int v = 0; v <= e.len; v++ ) {
+							const int ia = e.i + e.di * v, ja = e.j + e.dj * v;
+							float zl = 0.0f;
+							if ( r.innerZ( float( x0 ) * 4096.0f + float( ia ) * sp,
+									float( y0 ) * 4096.0f + float( ja ) * sp, &zl ) )
+								zAt( ia, ja ) = zl;
+						}
+					}
+				}
+				qint64 after = 0;
+				measure( r.seamAfterMax, r.seamAfterMean, after );
+			}
+		}
+
+		TerrainSurface s;
+		s.rootName = r.prefix;
+		s.shapePrefix = r.prefix;
+		s.cellX0 = x0;
+		s.cellY0 = y0;
+		s.cellsX = cellsXr;
+		s.cellsY = cellsYr;
+		s.n = n;
+		s.spacing = sp;
+		s.z.swap( z );
+		s.appendRoot = parent;
+		s.shift = shiftV;
+		s.haveCut = !r.noCut;
+		s.cutX0 = cx0;
+		s.cutY0 = cy0;
+		s.cutX1 = cx1;
+		s.cutY1 = cy1;
+		if ( haveSheets ) {
+			const int tilesX = cellsXr / dim, tilesY = cellsYr / dim;
+			s.sheetDim = dim;
+			s.sheetTilesX = tilesX;
+			s.sheetTilesY = tilesY;
+			s.uvBias = sheets->uvBias();
+			s.uvScale = sheets->uvScale();
+			s.tileDiffuse.assign( size_t( tilesX ) * size_t( tilesY ), QString() );
+			s.tileNormal.assign( s.tileDiffuse.size(), QString() );
+			for ( int sty = 0; sty < tilesY; sty++ ) {
+				const int cellY = y1 - sty * dim;   // sty 0 = the NORTH row, the sheets' order
+				for ( int stx = 0; stx < tilesX; stx++ ) {
+					const int cellX = x0 + stx * dim;
+					// a tile wholly inside the cut is never drawn: do not unpack it
+					if ( !r.noCut && cellX >= cx0 && cellX + dim - 1 <= cx1
+						&& cellY - dim + 1 >= cy0 && cellY <= cy1 )
+						continue;
+					int gx = 0, gy = 0;
+					if ( !sheets->tileOfCell( cellX, cellY, &gx, &gy ) )
+						continue;
+					LodtSheetTile t;
+					QString tw;
+					if ( !sheets->tile( gx, gy, t, &tw ) )
+						continue;
+					const size_t at = size_t( sty ) * size_t( tilesX ) + size_t( stx );
+					s.tileDiffuse[at] = t.colour;
+					s.tileNormal[at] = t.msn;
+					r.sheetTiles++;
+				}
+			}
+			r.sheetFile = QFileInfo( sheets->containerPath() ).fileName();
+		}
+		QString berr;
+		if ( !buildTerrainSurface( nif, s, &berr ) )
+			return fail( QString( "far ring %1: %2" ).arg( int( ri ) ).arg( berr ) );
+		r.built = true;
+		r.shapes = s.shapesOut;
+		r.verts = s.vertsOut;
+		r.tris = s.trisOut;
+		r.cutTris = s.cutTris;
+		runningVerts += s.vertsOut;
+		havePrev = true;
+		px0 = x0;
+		py0 = y0;
+		px1 = x1;
+		py1 = y1;
+	}
+	if ( error )
+		error->clear();
+	return true;
+}
+
+/* Lane FARLOD1: the far field's water (btdterrain.h, LodlFarWater). One texel grid a ring over the ring's
+ * rectangle at its rate; a texel is wet where the body plane names a body (sampled at the texel's first body
+ * sample), dry inside the cut; then one growth step onto dry ground below a wet neighbour's surface; then each
+ * texel row's runs of one body at one surface become one quad. */
+bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QString & lodlPath,
+	const float shift[3], std::vector<LodlFarWater> & rings, QString * error )
+{
+	auto fail = [error]( const QString & message ) {
+		if ( error )
+			*error = message;
+		return false;
+	};
+	if ( !nif || !parent.isValid() )
+		return fail( QStringLiteral( "no document to append the far water to" ) );
+	LodtFile f;
+	if ( !f.open( lodlPath, error ) )
+		return false;
+	if ( f.bodyCount() <= 0 || f.bodyIdSamples() <= 0 )
+		return fail( QStringLiteral( "the .lodl has no water bodies (no body plane): no far water" ) );
+	f.setBlockCacheSize( 256 );
+
+	const int bodyS = f.bodyIdSamples();
+	const int spc = f.samplesPerCell();
+	const int minX = f.cellMinX(), minY = f.cellMinY(), maxX = f.cellMaxX(), maxY = f.cellMaxY();
+	QHash<quint16, LodtWaterBody> table;
+	auto bodyOf = [&]( quint16 id, LodtWaterBody & B ) -> bool {
+		auto it = table.constFind( id );
+		if ( it != table.constEnd() ) {
+			B = *it;
+			return true;
+		}
+		if ( !f.waterBody( id, B ) )
+			return false;
+		table.insert( id, B );
+		return true;
+	};
+
+	for ( size_t ri = 0; ri < rings.size(); ri++ ) {
+		LodlFarWater & r = rings[ri];
+		r.quads = r.wetTexels = r.grownTexels = 0;
+		r.shapes = 0;
+		r.bodies.clear();
+		r.blocks.clear();
+		// the rate: a power-of-two divisor of the file's, at most the wanted
+		int rate = bodyS;
+		while ( rate > 1 && rate > r.texels )
+			rate /= 2;
+		r.rate = rate;
+		const int stepT = std::max( 1, bodyS / rate );
+		const int x0 = std::max( r.x0, minX ), y0 = std::max( r.y0, minY );
+		const int x1 = std::min( r.x1, maxX ), y1 = std::min( r.y1, maxY );
+		if ( x1 < x0 || y1 < y0 )
+			continue;
+		const int W = ( x1 - x0 + 1 ) * rate, H = ( y1 - y0 + 1 ) * rate;
+		std::vector<quint16> ids( size_t( W ) * size_t( H ), 0 );
+		std::vector<float> surf( ids.size(), 0.0f );
+		std::vector<quint8> cut( ids.size(), 0 );
+		auto texelBody = [&]( int u, int v, int & bx, int & by ) {
+			bx = ( x0 - minX ) * bodyS + u * stepT;
+			by = ( y0 - minY ) * bodyS + v * stepT;
+		};
+		for ( int v = 0; v < H; v++ ) {
+			const int cy = y0 + v / rate;
+			for ( int u = 0; u < W; u++ ) {
+				const int cx = x0 + u / rate;
+				const size_t i = size_t( v ) * size_t( W ) + size_t( u );
+				if ( !r.noCut && r.cx1 >= r.cx0 && cx >= r.cx0 && cx <= r.cx1 && cy >= r.cy0 && cy <= r.cy1 ) {
+					cut[i] = 1;
+					continue;
+				}
+				int bx = 0, by = 0;
+				texelBody( u, v, bx, by );
+				const quint16 id = f.bodyIdAt( bx, by );
+				LodtWaterBody B;
+				if ( !id || !bodyOf( id, B ) )
+					continue;
+				ids[i] = id;
+				surf[i] = B.waterHeight + f.surfaceDeltaAt( bx, by );
+				r.wetTexels++;
+				r.bodies.insert( id );
+			}
+		}
+		// one growth step onto dry ground below a wet neighbour's surface (the shore the depth test draws)
+		{
+			std::vector<quint16> gid( ids );
+			std::vector<float> gs( surf );
+			static const int N4[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+			const int fullStep = std::max( 1, spc / bodyS );
+			for ( int v = 0; v < H; v++ )
+				for ( int u = 0; u < W; u++ ) {
+					const size_t i = size_t( v ) * size_t( W ) + size_t( u );
+					if ( ids[i] || cut[i] )
+						continue;
+					int bx = 0, by = 0;
+					texelBody( u, v, bx, by );
+					const float ground = f.height( bx * fullStep, by * fullStep );
+					for ( const auto & d : N4 ) {
+						const int uu = u + d[0], vv = v + d[1];
+						if ( uu < 0 || vv < 0 || uu >= W || vv >= H )
+							continue;
+						const size_t j = size_t( vv ) * size_t( W ) + size_t( uu );
+						if ( ids[j] && ground < surf[j] ) {
+							gid[i] = ids[j];
+							gs[i] = surf[j];
+							r.grownTexels++;
+							break;
+						}
+					}
+				}
+			ids.swap( gid );
+			surf.swap( gs );
+		}
+		// the quads, by WATR form: each row's runs of one body at one surface
+		const float texel = 4096.0f / float( rate );
+		std::map<quint32, std::vector<WaterQuad>> byForm;
+		for ( int v = 0; v < H; v++ ) {
+			int u = 0;
+			while ( u < W ) {
+				const size_t i = size_t( v ) * size_t( W ) + size_t( u );
+				const quint16 id = ids[i];
+				if ( !id ) {
+					u++;
+					continue;
+				}
+				int e = u + 1;
+				while ( e < W && ids[size_t( v ) * size_t( W ) + size_t( e )] == id
+					&& surf[size_t( v ) * size_t( W ) + size_t( e )] == surf[i] )
+					e++;
+				WaterQuad q;
+				q.x0 = float( x0 ) * 4096.0f + float( u ) * texel - shift[0];
+				q.x1 = float( x0 ) * 4096.0f + float( e ) * texel - shift[0];
+				q.y0 = float( y0 ) * 4096.0f + float( v ) * texel - shift[1];
+				q.y1 = q.y0 + texel;
+				q.z = surf[i] - shift[2];
+				q.rgba = 0xFF6B522Eu;   // the cell view's water colour (0.18, 0.32, 0.42), opaque
+				q.body = id;
+				LodtWaterBody B;
+				bodyOf( id, B );
+				byForm[B.watrForm].push_back( q );
+				r.quads++;
+				u = e;
+			}
+		}
+		for ( const auto & [form, quads] : byForm ) {
+			std::vector<float> readZ;
+			std::vector<int> blocks;
+			const QString name = QStringLiteral( "%1 r%2 %3" ).arg( r.prefix ).arg( int( ri ) )
+				.arg( QString::number( form, 16 ).toUpper().rightJustified( 8, QLatin1Char( '0' ) ) );
+			r.shapes += addWaterShapes( nif, quads, false, readZ, &parent, name, &blocks );
+			for ( int b : blocks )
+				r.blocks.emplace_back( b, form );
+		}
+	}
+	if ( error )
+		error->clear();
 	return true;
 }

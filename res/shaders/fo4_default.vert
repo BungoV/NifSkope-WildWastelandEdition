@@ -23,6 +23,12 @@ uniform mat4 modelViewMatrix;
 
 uniform vec4 vertexColorOverride;	// components greater than zero replace the vertex color
 
+// lane FARLOD1: the far field's wind. 0 (the default, and whenever the Far LOD row is off) = no sway;
+// a tree-animation shape's vertex alpha is the weight, as in the game
+uniform float farSwayAmp;
+uniform float farSwayTime;
+uniform bool lodTreeAnim;
+
 layout ( location = 0 ) in vec3	vertexPosition;
 layout ( location = 1 ) in vec4	vertexColor;
 layout ( location = 2 ) in vec3	normalVector;
@@ -43,6 +49,12 @@ void main()
 		boneTransform( v, n, t, b );
 
 	v = modelViewMatrix * v;
+	if ( farSwayAmp > 0.0 && lodTreeAnim ) {
+		// world-horizontal offset, phase by the vertex's own place so a forest does not move as one
+		float ph = dot( vertexPosition.xy, vec2( 0.0021, 0.0017 ) );
+		vec3 w = vec3( sin( farSwayTime * 1.3 + ph ), cos( farSwayTime * 0.9 + ph * 1.7 ) * 0.6, 0.0 );
+		v.xyz += viewMatrix * ( w * ( farSwayAmp * vertexColor.a ) );
+	}
 	gl_Position = projectionMatrix * v;
 	texCoord = multiTexCoord0;
 
