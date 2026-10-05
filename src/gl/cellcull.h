@@ -3,6 +3,7 @@
 
 #include "data/niftypes.h"
 
+#include <QByteArray>
 #include <QString>
 
 #include <cstdint>
@@ -28,8 +29,8 @@ class Shape;
  *  them, and indoors the rooms and portals (RoomMarker boxes, PortalMarker planes, XPOD / XLRM links) hide a room
  *  the camera's room cannot reach through a portal in the frustum. Casters always cast: no shadow pass asks it.
  *  The worldspace's precombined / previs data is READ (cellview.cpp: CELL RVIS, VISI, PCMB, XCRI, XPRI and the
- *  previs file's header) and reported; the previs file's body is an Umbra tome whose visibility query is not
- *  decoded, so the tome itself culls nothing here.
+ *  previs file's header) and reported; the previs file's body is an Umbra tome, decoded by lane UMBRA1, whose
+ *  visibility query culls the camera pass for the runs it governs (wwCellUmbraSet, below).
  *
  *  Row: Culling (cell workspace; ships OFF). Pins (harness only):
  *    WW_CELL_CULL=0|1             the row, pinned
@@ -49,6 +50,7 @@ struct WwCullRun
 	std::uint32_t first = 0, count = 0;	//!< triangles [first, first + count) of the shape
 	Vector3 center;				//!< bounding sphere, the shape's own space
 	float radius = 0.0f;
+	std::uint32_t ref = 0;			//!< lane UMBRA1: the placed reference's form id (0 = none)
 };
 
 /*! lane SUNCELL1: one primitive of the previs scene, in the cell document's space: centre, unit axes, half
@@ -69,6 +71,41 @@ struct WwPrevisScene
 };
 //! The document's previs scene (replaced whole; wwCellCullBegin forgets it).
 void wwCellPrevisSet( const void * nif, WwPrevisScene && sc );
+
+/*! Lane UMBRA1 (2026-10-05): THE PREVIS TOME CULLS THE CAMERA PASS (src/gl/cellumbra.h). One loaded previs block:
+ *  its .uvd bytes and the precombined refs of its loaded cells (XCRI: ref form id, and the 0xFD id's cell code
+ *  (x mod 32) << 19 | (y mod 32) << 14 of the cell that lists it; 0 for an interior).
+ *
+ *  Which runs the tome governs: a run whose ref is a tome object id (the full id, else its low 24 bits when that is
+ *  unique) is drawn when that object is visible; a run whose ref went into a precombined mesh is drawn when any
+ *  visible 0xFD object of its cell code overlaps the run's world sphere. Every other run (dynamic refs, LAND, a block
+ *  whose tome is missing, failed to decode, or holds no start cell for this camera) keeps the frustum and the
+ *  occluder / room path. Casters always cast: no shadow pass asks the tome.
+ *
+ *  Rides the Previs row (ships OFF). Pins (harness only):
+ *    WW_CELL_UMBRA=0              the tome path off (the occluder / room path culls every run) -- gate 5
+ *    WW_CELL_UMBRA_RED=casters    RED: the tome's hidden runs dropped from the sun cascades too (the casters-kept
+ *                                 gate must fail)
+ *    WW_CELL_UMBRA_DUMP=<dir>     tome_<block>.txt (structure, the Python `dump` twin) once per build, and
+ *                                 query_<block>.txt (camera, start cells, cell coverage hashes, visible objects) on
+ *                                 every camera change; the query runs while this is set even with the row off
+ *    WW_CELL_UMBRA_DEPTH=1        with _DUMP: depth.txt, world points of a culling-off depth readback (gate 2)
+ *  Telemetry: "cell umbra: on|off blocks=.. decoded=.. queried=.. noStart=.. cells=.. visible=../.. governed=..
+ *  (uid .., combined ..) tomeCulled=.. ungoverned=.." once per change; "cell umbra tome <block>: decoded|FAILED"
+ *  once per build. */
+struct WwUmbraBlockIn
+{
+	std::uint32_t block = 0;	//!< the RVIS form
+	QByteArray tome;		//!< the .uvd file
+	std::vector<std::pair<std::uint32_t, std::uint32_t>> combined;	//!< (XCRI ref form id, 0xFD cell code)
+};
+void wwCellUmbraSet( const void * nif, std::vector<WwUmbraBlockIn> && blocks );
+//! The depth probe (gate 2) wants a culling-off depth readback of this frame.
+bool wwCellUmbraDepthWanted( Scene * scene );
+//! While set, the camera pass draws every run whole and counts nothing (the depth probe's own draw).
+void wwCellUmbraProbing( bool on );
+//! The probe's depth (GL window depth, `w` x `h`, bottom row first) unprojected to world points into depth.txt.
+void wwCellUmbraDepthWrite( Scene * scene, const float * depth, int w, int h );
 bool wwCellPrevisOn();
 void wwCellPrevisSetOn( bool on );
 //! 1 = the red control `casters`
