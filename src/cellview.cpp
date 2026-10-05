@@ -991,7 +991,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		L.lights.append( l );
 		wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // lane FXLIT1: a red control's data
 	}
-	QString amb = QStringLiteral( "none (exterior: the viewport light)" ), dir = QStringLiteral( "none" );
+	QString amb = QStringLiteral( "none (exterior: the viewport light)" ), dir = QStringLiteral( "none (exterior: the Lookdev weather sun or moon)" );
 	if ( spec.interior ) {
 		const EsmInteriorCell & ic = world.interior();
 		QByteArray tData, tDalc;

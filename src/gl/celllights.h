@@ -48,9 +48,17 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <cmath>
+#include <string_view>
 #include <vector>
 
 class Scene;
+
+/*! lane SUNCELL1: a cell-lit program by name -- fo4_cell / pbrm_cell, and their cascade variants fo4_cellcsm /
+ *  pbrm_cellcsm (the same shaders with the Lookdev sun shadows compiled in, chosen while the map is built) */
+inline bool wwIsCellProgramName( std::string_view n )
+{
+	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog";
+}
 
 struct WwCellLight
 {

@@ -98,7 +98,7 @@ void ssrAlloc( NifSkopeOpenGLContext::GLFunctions * fn, SsrTarget & t, int w, in
 
 bool ssrIsCellProgram( const NifSkopeOpenGLContext::Program * p )
 {
-	return p && ( p->name == std::string_view( "fo4_cell.prog" ) || p->name == std::string_view( "pbrm_cell.prog" ) );
+	return p && ( wwIsCellProgramName( p->name ) );
 }
 
 }	// namespace

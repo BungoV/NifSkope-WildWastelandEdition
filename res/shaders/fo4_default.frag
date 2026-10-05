@@ -4,6 +4,10 @@
 #ifdef WW_FOG
 #include "lookdev_fog.glsl"
 #endif
+#ifdef WW_SUNSHADOW
+// lane SUNCELL1: the cascades (fo4_cellcsm, fo4_csm, fo4_fogcsm); the loader takes nothing after an include's quote
+#include "ww_sunshadow.glsl"
+#endif
 
 uniform sampler2D BaseMap;
 uniform sampler2D NormalMap;
@@ -263,6 +267,17 @@ vec3 tonemap(vec3 x)
 void main()
 {
 	vec2 offset = texCoord.st * uvScale + uvOffset;
+#ifdef WW_SUNSHADOW
+	/* lane SUNCELL1: the cascades on the SUN only (CSM1 spec 2.8). Every D.rgb below is the sun: D = sqrt(the
+	 * linear sun), so D x sqrt(f) is the sun x f in the linear light the tonemap squares back. The macro takes
+	 * every later D; tonemap() above still reads the varying (D.a only, unchanged). */
+	float csmF = wwSunShadow( -ViewDir );
+	vec4 Dcsm = vec4( D.rgb * sqrt( csmF ), D.a );
+#define D Dcsm
+#ifdef WW_CELLLIGHTS
+	cellDirVis = csmF;	// the exterior cell sun (cellLit) takes the same cascades
+#endif
+#endif
 
 	vec4 baseMap = texture( BaseMap, offset );
 
@@ -488,6 +503,7 @@ void main()
 	                  * G1( NdotL0, kSmith ) * G1( NdotV, kSmith )
 	                  * F / max( 4.0 * NdotL0 * NdotV, 0.001 ) )
 	            * specMask * NdotL0 * D.rgb * specColor;
+	vec3 specSun = spec;	// lane SUNCELL1: the sun's specular before the cube (the exterior cell sun keeps it)
 
 	// Environment
 	vec4 cube = textureLod( CubeMap, reflectedWS, 8.0 - smoothness * 8.0 );
@@ -565,6 +581,14 @@ void main()
 	color.rgb += emissive * glowScaleSRGB;
 #ifdef WW_CELLLIGHTS
 	// lane SKY1: outdoors the bounce grid's sky stands in for the weather's unshadowed ambient (0 elsewhere)
+	/* lane SUNCELL1: an exterior with the weather's sun (cellHasDir) hands cellLit the ambient alone; the sun's
+	 * diffuse and the cube are the game's terms there, its specular the viewport's (cellExtSpec, linear) */
+	if ( cellOn && !cellInterior && cellHasDir ) {
+		vec3 sx = specSun + A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * ( 1.0 - NdotV ) * D.rgb;
+		cellExtSpec = sx * sx;
+		cellExtAmb = A.rgb * A.rgb;
+		color.rgb = A.rgb * albedo;
+	}
 	if ( cellOn && cellGiSky )
 		color.rgb -= cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ) * A.rgb * albedo;
 	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
@@ -656,6 +680,11 @@ void main()
 	vec3 fogProbeOut;
 	if ( wwFogProbe( -ViewDir, fogProbeOut ) )
 		fragColor = vec4( fogProbeOut, 1.0 );
+#endif
+#ifdef WW_SUNSHADOW
+	vec3 csmProbeOut;	// lane SUNCELL1: the CSM1 probe views (WW_CSM_PROBE) on the cell-lit legacy draw
+	if ( wwSunShadowProbe( -ViewDir, fragColor.rgb, csmProbeOut ) )
+		fragColor = vec4( csmProbeOut, 1.0 );
 #endif
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 )

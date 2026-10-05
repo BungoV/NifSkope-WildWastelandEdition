@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
+#include "gl/lookdevstage.h"	// lane SUNCELL1
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -22,6 +23,7 @@ BSD License - see nifskope.h
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace
@@ -814,9 +816,34 @@ void wwCellLightsUniforms( Scene * scene )
 			prog->uni4f_l( prog->uniLocation( "cellAmboBox[%d]", i * 3 + k ),
 				FloatVector4( a.box[k][0], a.box[k][1], a.box[k][2], a.box[k][3] ) );
 	}
-	prog->uni1b( "cellHasDir", L->hasDirectional );
-	prog->uni3f( "cellDirColor", L->dirColor[0], L->dirColor[1], L->dirColor[2] );
-	prog->uni3f( "cellDirTo", L->dirTo[0], L->dirTo[1], L->dirTo[2] );
+	/* lane SUNCELL1: an exterior's directional is the weather's sun (or moon at night): Lookdev's light, TO it,
+	 * world, linear, the numbers the viewport light already carries. Only the cell programs take it (a lit effect
+	 * and the volumetric fog keep the old exterior law); Lookdev off (no weather) = the old path, unchanged. */
+	bool hasDir = L->hasDirectional;
+	float dirTo[3] = { L->dirTo[0], L->dirTo[1], L->dirTo[2] }, dirColor[3] = { L->dirColor[0], L->dirColor[1], L->dirColor[2] };
+	if ( !L->interior && wwLookdevActive() && wwIsCellProgramName( prog->name ) ) {
+		float dalc[6][3], dif[4] = {}, amb[4] = {};
+		if ( wwLookdevDalc( dalc ) ) {
+			wwLookdevLight( dirTo, dif, amb );
+			std::copy( dif, dif + 3, dirColor );
+			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
+		}
+		// telemetry: what the exterior sun uploaded (or why not), once per change
+		static QString sunLast;
+		const QString line = hasDir
+			? QStringLiteral( "cell sun: exterior directional=weather to=%1,%2,%3 color=%4,%5,%6 (linear) shadows=%7" )
+				.arg( double( dirTo[0] ), 0, 'f', 5 ).arg( double( dirTo[1] ), 0, 'f', 5 ).arg( double( dirTo[2] ), 0, 'f', 5 )
+				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
+				.arg( prog->uniLocation( "csmMap" ) >= 0 ? 1 : 0 )
+			: QStringLiteral( "cell sun: exterior refused (no weather loaded, or a black sun)" );
+		if ( line != sunLast ) {
+			fprintf( stderr, "%s\n", qPrintable( line ) );
+			sunLast = line;
+		}
+	}
+	prog->uni1b( "cellHasDir", hasDir );
+	prog->uni3f( "cellDirColor", dirColor[0], dirColor[1], dirColor[2] );
+	prog->uni3f( "cellDirTo", dirTo[0], dirTo[1], dirTo[2] );
 	prog->uni1b( "cellInterior", L->interior );
 	prog->uni3f( "cellCenter", L->center[0], L->center[1], L->center[2] );
 	prog->uni1i( "cellProbe", s.measuring ? 6 : s.probe );
@@ -1427,7 +1454,7 @@ void aoAlloc( NifSkopeOpenGLContext::GLFunctions * fn, AoTarget & t, int w, int 
 
 bool aoIsCellProgram( const NifSkopeOpenGLContext::Program * p )
 {
-	return p && ( p->name == std::string_view( "fo4_cell.prog" ) || p->name == std::string_view( "pbrm_cell.prog" ) );
+	return p && ( wwIsCellProgramName( p->name ) );
 }
 
 }	// namespace
