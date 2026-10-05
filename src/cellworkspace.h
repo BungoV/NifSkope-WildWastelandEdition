@@ -210,6 +210,9 @@ private:
 	QCheckBox * cellFar = nullptr;      // lane FARVIEW1: past the band, the surfels' baked light in place of the lights
 	QCheckBox * cellIs = nullptr;       // lane IMGS1: the cell's imagespace (exposure, curve, grade, LUT)
 	QCheckBox * cellTaa = nullptr;      // lane MOTION1: the game's temporal AA (one state with the Scene popup's row)
+	QCheckBox * cellGrass = nullptr;    // lane GRASSMB1: the game's grass (placed at cell open)
+	QCheckBox * cellDof = nullptr;      // lane GRASSMB1: the game's depth of field
+	QCheckBox * cellMblur = nullptr;    // lane GRASSMB1: the game's motion blur
 	QComboBox * cellPass = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
 	QPushButton * probesPlace = nullptr;
 	QPushButton * probesBake = nullptr;

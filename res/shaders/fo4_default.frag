@@ -258,10 +258,16 @@ vec3 tonemap(vec3 x)
 #include "cell_lights.glsl"
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
+#include "cell_grass.glsl"
 #endif
 
 void main()
 {
+#ifdef WW_CELLLIGHTS
+	float wwGrassK = wwGrassFadeK( ViewDir );	// lane GRASSMB1: exactly 1.0 on every non-grass shape
+	if ( wwGrassK <= 0.0 )
+		discard;
+#endif
 	vec2 offset = texCoord.st * uvScale + uvOffset;
 
 	vec4 baseMap = texture( BaseMap, offset );
@@ -274,6 +280,9 @@ void main()
 		 * silhouette, the thing you are looking at, is gone. Hence the preview
 		 * early-out sits AFTER this and not at the top of main(). */
 		float	a = C.a * baseMap.a * alpha;
+#ifdef WW_CELLLIGHTS
+		a *= wwGrassK;	// lane GRASSMB1: the grass fades out through its own alpha test
+#endif
 		// 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
 		int	m = ( a < alphaThreshold ? 0x2B2B : ( a > alphaThreshold ? 0x7171 : 0x4D4D ) );
 		if ( ( m & ( 1 << alphaFlags ) ) == 0 )

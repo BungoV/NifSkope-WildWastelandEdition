@@ -46,6 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
 #include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA
+#include "gl/cellpost.h"	// lane GRASSMB1: the game's depth of field + motion blur
 #include "impostorchunk.h"
 #include "impostorpreviewtest.h"
 #include "gl/glshape.h"
@@ -4076,8 +4077,10 @@ void GLView::paintGL()
 				wwCellHdrEnd( scene );
 			}
 			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
-			if ( workspaceDrawScenes.isEmpty() )
+			if ( workspaceDrawScenes.isEmpty() ) {
 				wwGameTaaResolve( scene );
+				wwCellPostApply( scene );	// lane GRASSMB1: the game's depth of field + motion blur; inert when off
+			}
 			for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
 				ws->draw();
 		}

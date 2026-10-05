@@ -255,6 +255,8 @@ struct WwWeatherData
 	quint32 imsp[8] = {};	// IMSP: the IMGS per ToD (mapped FormIDs; 4-slot records mapped to 8)
 	float skyScale[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };	// IMGS HNAM[7] per ToD (1.0 where absent)
 	int skyScaleFound = 0;	// how many ToD slots had an IMGS with HNAM
+	float dof[8][4] = {};	// lane GRASSMB1: IMGS DNAM per ToD (strength, distance, range, the flags float); 0 = none
+	bool hasDof[8] = {};
 	QString cloudTex[32];	// x0TX, as stored (relative to Textures\)
 	quint32 cloudLayers = 16;	// LNAM
 	bool hasLnam = false;

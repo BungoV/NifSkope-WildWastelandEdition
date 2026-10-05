@@ -17,6 +17,8 @@ BSD License - see nifskope.h
 #include "cellview.h"
 #include "gl/celllights.h"
 #include "gl/gametaa.h"
+#include "gl/cellgrass.h"	// lane GRASSMB1
+#include "gl/cellpost.h"	// lane GRASSMB1
 
 #include <QAction>
 #include <QCheckBox>
@@ -451,6 +453,25 @@ void CellWorkspacePanel::buildUi()
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
 	page->addWidget( prtpRow );
+	// lane GRASSMB1: the game's grass, depth of field and motion blur; each ships off
+	QWidget * fxRow = new QWidget( this );
+	QHBoxLayout * fl = new QHBoxLayout( fxRow );
+	fl->setContentsMargins( 0, 0, 0, 0 );
+	fl->setSpacing( 4 );
+	cellGrass = new QCheckBox( tr( "Grass" ), fxRow );
+	cellGrass->setObjectName( QStringLiteral( "CellWorkspaceCellGrass" ) );
+	cellGrass->setChecked( wwCellGrassOn() );
+	cellDof = new QCheckBox( tr( "Depth of field" ), fxRow );
+	cellDof->setObjectName( QStringLiteral( "CellWorkspaceCellDof" ) );
+	cellDof->setChecked( wwCellDofOn() );
+	cellMblur = new QCheckBox( tr( "Motion blur" ), fxRow );
+	cellMblur->setObjectName( QStringLiteral( "CellWorkspaceCellMotionBlur" ) );
+	cellMblur->setChecked( wwCellMotionBlurOn() );
+	fl->addWidget( cellGrass );
+	fl->addWidget( cellDof );
+	fl->addWidget( cellMblur );
+	fl->addStretch( 1 );
+	page->addWidget( fxRow );
 
 	probeKinds = new QTreeWidget( this );
 	probeKinds->setObjectName( QStringLiteral( "CellWorkspaceProbeKinds" ) );
@@ -480,6 +501,27 @@ void CellWorkspacePanel::buildUi()
 	} );
 	connect( cellTaa, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwGameTaaSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	// lane GRASSMB1: the grass is placed when the cell opens, so the switch rebuilds the cell
+	connect( cellGrass, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellGrassSetOn( on );
+		if ( syncing || g_path.isEmpty() )
+			return;
+		g_over = g_spec;
+		g_haveOverrides = true;
+		say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+		emit reopenRequested( g_path );
+	} );
+	// lane GRASSMB1: passes on the finished frame, no rebuild
+	connect( cellDof, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellDofSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellMblur, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellMotionBlurSetOn( on );
 		if ( glView )
 			glView->update();
 	} );

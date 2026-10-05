@@ -793,7 +793,9 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 					if ( g == "HNAM" && g.size() >= 32 ) {
 						std::memcpy( &out.skyScale[tod], g.data() + 28, 4 );
 						out.skyScaleFound++;
-						break;
+					} else if ( g == "DNAM" && g.size() >= 16 ) {	// lane GRASSMB1: the depth of field
+						std::memcpy( out.dof[tod], g.data(), 16 );
+						out.hasDof[tod] = true;
 					}
 				}
 			} catch ( std::exception & ) {

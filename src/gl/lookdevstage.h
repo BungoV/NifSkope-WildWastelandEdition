@@ -132,6 +132,10 @@ bool wwLookdevDalc( float rgb[6][3] );
 //! lane WATER1: the water's sky (linear): the weather's Horizon, Sky-Lower and Sky-Upper rows at the dome's hour;
 //! false (the outputs untouched) when no weather is loaded
 bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] );
+/*! lane GRASSMB1: the depth of field of the weather's two ImageSpace (IMGS) records around the dome's hour: each
+ *  DNAM as stored (strength, distance, range, the flags float), the blend t (0 = a, 1 = b) and whether each key
+ *  has one; false (the outputs untouched) when no weather is loaded */
+bool wwLookdevImageSpaceDof( float a[4], float b[4], float & t, bool & haveA, bool & haveB );
 
 //! cube background (replaces drawSkyBox in Lookdev); true = the colour buffer is written
 bool wwLookdevDrawBackground( Scene * scene );

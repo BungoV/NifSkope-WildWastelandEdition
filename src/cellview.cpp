@@ -39,6 +39,8 @@ BSD License - see nifskope.h
 #include "gl/cellfxlit.h"
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellwater.h"	// lane WATER1
+#include "gl/cellgrass.h"
+#include "gl/cellpost.h"	// lane GRASSMB1
 #include "esmwater.h"
 #include "gamemanager.h"	// lane IMGS1: the imagespace LUT
 
@@ -157,6 +159,7 @@ struct Bucket
 	 * registered with src/gl/cellwater.h, which draws them the game's way while the Cell lights row is on. */
 	bool water = false;
 	WwWaterRecord waterRec;
+	bool grass = false;   // lane GRASSMB1: blades of the game's grass (src/gl/cellgrass.h): the fade applies
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
 };
@@ -405,6 +408,8 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			wwCellFxLitShape( nif, nif->getBlockNumber( iShape ), b.fxLit );
 		if ( b.water )        // lane WATER1: the renderer draws this shape with the game's water terms
 			wwCellWaterShape( nif, nif->getBlockNumber( iShape ), b.waterRec );
+		if ( b.grass )        // lane GRASSMB1: the renderer fades this shape the game's grass way
+			wwCellGrassShape( nif, nif->getBlockNumber( iShape ) );
 		nif->set<QString>( iShape, "Name", part > 1
 			? QString( "%1 #%2" ).arg( b.name ).arg( part ) : b.name );
 		nif->set<quint32>( iShape, "Flags", 14 );
@@ -1124,6 +1129,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	/* lane IMGS1: the cell's imagespace (XCIM -> IMGS) and its LUT strip. The strip is a 256x16 B8G8R8
 	 * DDS: x = r + 16 b, y = g (MEASURED: ColorLUT_BaseInteriorAdjusted sits 19/255 off the identity in
 	 * that order, 63 with g flipped, 71 with r and b swapped); the shaders sample it as a 16^3 3D LUT. */
+	wwCellPostSetCell( world, spec.interior );	// lane GRASSMB1: the depth of field's record (XCIM indoors)
 	QString isNote = QStringLiteral( "none" );
 	if ( spec.interior && world.interior().imageSpace ) {
 		QByteArray h, c, t;
@@ -1777,6 +1783,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
 	wwCellFxLitBegin( nif );
 	wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
+	wwCellGrassBegin( nif );   // lane GRASSMB1: and its grass shapes
 	QHash<quint32, WwWaterRecord> placedWaterRecs;   // lane WATER1: WNAM form -> its record (form 0 = unreadable)
 	int placedWaterShapes = 0;
 	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors
@@ -3018,6 +3025,138 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		}
 	}
 	CellSpeed::mark( "models loaded and placements welded" );
+
+	/* ---- lane GRASSMB1: THE GAME'S GRASS (src/gl/cellgrass.h). Every exterior cell's blades, placed the engine's
+	 * way, each a copy of its GRAS model welded into the cell's own "|GRASS" buckets and drawn by the cell
+	 * programs (one lighting and fog path) with the grass fade. Row off: nothing here runs, nothing is added. */
+	if ( wwCellGrassOn() ) {
+		QString gWhy;
+		qint64 gBlades = 0, gDrawn = 0, gVerts = 0, gTris = 0, gCells = 0, gNoModel = 0, gNeed = 0, gRoom = 0;
+		QSet<quint32> gTypes;
+		QElapsedTimer gClock;
+		gClock.start();
+		if ( spec.interior )
+			gWhy = QStringLiteral( "interior" );
+		else if ( !spec.terrain )
+			gWhy = QStringLiteral( "no terrain" );
+		else if ( spec.overlay != CellOverlay::None )
+			gWhy = QStringLiteral( "overlay view" );
+		if ( gWhy.isEmpty() ) {
+			std::vector<WwGrassBlade> blades;
+			for ( int y = y0; y <= y1; y++ )
+				for ( int x = x0; x <= x1; x++ )
+					if ( wwCellGrassPlace( world, x, y, blades ) )
+						gCells++;
+			gBlades = qint64( blades.size() );
+			// each grass's model, loaded once (copied out: a later cache insert may rehash the cache)
+			QHash<quint32, std::vector<NativeSrcShape>> gShapes;
+			QHash<quint32, bool> gUniform;
+			for ( const WwGrassBlade & bl : blades ) {
+				if ( gUniform.contains( bl.form ) )
+					continue;
+				gUniform.insert( bl.form, false );
+				EsmGrass g;
+				if ( !world.grass( bl.form, g ) || g.model.isEmpty() )
+					continue;
+				gUniform[bl.form] = ( g.flags & 2 ) != 0;
+				auto mit = modelCache.find( g.model );
+				if ( mit == modelCache.end() && !modelsFailed.contains( g.model ) ) {
+					std::vector<NativeSrcShape> shapes;
+					if ( lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), g.model, &shapes ) && !shapes.empty() )
+						mit = modelCache.insert( g.model, shapes );
+					else
+						modelsFailed.insert( g.model );
+				}
+				if ( mit != modelCache.end() )
+					gShapes.insert( bl.form, mit.value() );
+			}
+			// the vertex bill first: a field that would break the block's cap is refused whole, not cut in half
+			qint64 have = 0;
+			for ( auto bit = buckets.cbegin(); bit != buckets.cend(); ++bit )
+				have += qint64( bit.value().verts.size() );
+			gRoom = qint64( CELL_MAX_TOTAL_VERTS ) - have - 1000000;   // the ground and water still to come
+			for ( const WwGrassBlade & bl : blades ) {
+				const auto sit = gShapes.constFind( bl.form );
+				if ( sit == gShapes.constEnd() )
+					continue;
+				for ( const NativeSrcShape & s : sit.value() )
+					gNeed += qint64( s.geom.pos.size() / 3 );
+			}
+			if ( gNeed > gRoom ) {
+				gWhy = QStringLiteral( "REFUSED: %1 vertices, room for %2 under the block cap" ).arg( gNeed ).arg( gRoom );
+			} else {
+				for ( const WwGrassBlade & bl : blades ) {
+					const auto sit = gShapes.constFind( bl.form );
+					if ( sit == gShapes.constEnd() ) {
+						gNoModel++;
+						continue;
+					}
+					float t[3], R[9], sc[3], shade = 1.0f;
+					wwCellGrassTransform( bl, gUniform.value( bl.form ), t, R, sc, &shade );
+					gTypes.insert( bl.form );
+					gDrawn++;
+					for ( const NativeSrcShape & s : sit.value() ) {
+						const size_t nv = s.geom.pos.size() / 3;
+						if ( !nv || s.geom.tris.size() < 3 )
+							continue;
+						Bucket & b = bucketFor( s, true, QStringLiteral( "|GRASS" ) );
+						b.grass = true;
+						const int base = int( b.verts.size() );
+						const bool haveN = s.geom.nrm.size() >= nv * 3, haveT = s.geom.tan.size() >= nv * 3;
+						for ( size_t v = 0; v < nv; v++ ) {
+							const float p[3] = { s.geom.pos[v * 3 + 0] * sc[0], s.geom.pos[v * 3 + 1] * sc[1],
+								s.geom.pos[v * 3 + 2] * sc[2] };
+							const float ln[3] = { haveN ? s.geom.nrm[v * 3 + 0] : 0.0f, haveN ? s.geom.nrm[v * 3 + 1] : 0.0f,
+								haveN ? s.geom.nrm[v * 3 + 2] : 1.0f };
+							const float lt[3] = { haveT ? s.geom.tan[v * 3 + 0] : 1.0f, haveT ? s.geom.tan[v * 3 + 1] : 0.0f,
+								haveT ? s.geom.tan[v * 3 + 2] : 0.0f };
+							OutVert o;
+							const Vector3 wp( t[0] + R[0] * p[0] + R[1] * p[1] + R[2] * p[2],
+								t[1] + R[3] * p[0] + R[4] * p[1] + R[5] * p[2],
+								t[2] + R[6] * p[0] + R[7] * p[1] + R[8] * p[2] );
+							o.pos = wp - origin;
+							o.nrm = Vector3( R[0] * ln[0] + R[1] * ln[1] + R[2] * ln[2],
+								R[3] * ln[0] + R[4] * ln[1] + R[5] * ln[2], R[6] * ln[0] + R[7] * ln[1] + R[8] * ln[2] );
+							if ( o.nrm.length() > 1.0e-6f )
+								o.nrm.normalize();
+							else
+								o.nrm = Vector3( 0.0f, 0.0f, 1.0f );
+							o.tan = Vector3( R[0] * lt[0] + R[1] * lt[1] + R[2] * lt[2],
+								R[3] * lt[0] + R[4] * lt[1] + R[5] * lt[2], R[6] * lt[0] + R[7] * lt[1] + R[8] * lt[2] );
+							if ( o.tan.length() > 1.0e-6f )
+								o.tan.normalize();
+							else
+								o.tan = Vector3( 1.0f, 0.0f, 0.0f );
+							o.bit = Vector3::crossproduct( o.nrm, o.tan );
+							if ( o.bit.length() < 1.0e-6f )
+								o.bit = Vector3( 0.0f, 0.0f, 1.0f );
+							o.uv = s.geom.uv.size() >= ( v + 1 ) * 2
+								? Vector2( s.geom.uv[v * 2 + 0], s.geom.uv[v * 2 + 1] ) : Vector2( 0.0f, 0.0f );
+							for ( int c = 0; c < 3; c++ )
+								o.chan[c] = shade;   // the blade's shade: the stand-in shader's tint
+							b.verts.push_back( o );
+						}
+						for ( size_t tt = 0; tt + 2 < s.geom.tris.size(); tt += 3 )
+							b.tris.push_back( BucketTri{ { quint32( base + int( s.geom.tris[tt + 0] ) ),
+								quint32( base + int( s.geom.tris[tt + 1] ) ),
+								quint32( base + int( s.geom.tris[tt + 2] ) ) } } );
+						gVerts += qint64( nv );
+						gTris += qint64( s.geom.tris.size() / 3 );
+					}
+				}
+			}
+		}
+		const double gMb = double( gVerts * qint64( sizeof( OutVert ) ) + gTris * qint64( sizeof( BucketTri ) ) )
+			/ ( 1024.0 * 1024.0 );
+		wwCellGrassNote( nif, gWhy.isEmpty()
+			? QStringLiteral( "cell grass: on, %1 blades placed in %2 cells, %3 drawn of %4 grass types (%5 without a "
+			                  "model), verts %6, tris %7, weld %8 MB, place+weld %9 ms" )
+				.arg( gBlades ).arg( gCells ).arg( gDrawn ).arg( gTypes.size() ).arg( gNoModel ).arg( gVerts )
+				.arg( gTris ).arg( gMb, 0, 'f', 1 ).arg( gClock.elapsed() )
+			: QStringLiteral( "cell grass: on, nothing drawn (%1); %2 blades placed in %3 cells" )
+				.arg( gWhy ).arg( gBlades ).arg( gCells ) );
+		CellSpeed::mark( "grass placed and welded" );
+	}
 
 	// ---- the ground, the water and the grid
 	int landsDrawn = 0, waterCells = 0;
@@ -4379,6 +4518,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		s << "  water: " << waterCells << " cells\n";
 		// lane WATER1: the surfaces the game's water terms draw, and the placed water meshes among them
 		s << "  " << wwCellWaterEcho( nif ) << "; placed water shapes " << placedWaterShapes << "\n";
+		s << "  " << wwCellGrassEcho( nif ) << "\n";   // lane GRASSMB1
 		/* lane WATER1: the reader gate's records -- WW_CELL_WATER_DUMP_FORMS=<hex,hex,...> describes each into
 		 * WW_CELL_WATER_DUMP + ".forms" (a form that is no WATR: "WATR <form> NONE") */
 		const QString dumpForms = qEnvironmentVariable( "WW_CELL_WATER_DUMP_FORMS" );
