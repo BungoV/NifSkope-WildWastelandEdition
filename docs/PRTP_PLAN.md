@@ -1799,6 +1799,90 @@ Open
 - Cryo inside/outside its three Ambient Only spheres not reported separately.
 - The DALC is not bounced by the bake (lights, sun, sky only).
 
+### 2?. WATER2: the cell water proved against the game's asm (murky depth, far glints, water SSR)
+- The game's depth-colour pass (deep/shallow colour by the distance through the water) is drawn into the scene
+  before the water; the viewer applies it to the water's refraction texels the same way. The creek is murky.
+- The noise layers sample WRAP + anisotropic 16, as the game binds them: the far sun glints survive.
+- SSR1 feeds the water: the game's own water ray pass, sky gradient with SSR mixed over it by confidence;
+  no cubemap (the game reads none); SSR off = sky only, as the game's fallback shader.
+- Gate: stage G runs the game's water asm (02146 then 02102) op for op on the viewer's inputs: 99.997% of
+  307645 water pixels within 2 levels. Stage F: far-half glints 179 vs the game's 181.
+- Owed: one in-game RenderDoc capture at the creek (camera + checklist in notes/water2/STATUS.md) to confirm the
+  draw order, blend states, cb1 and the anisotropic sampler; noise scroll animation; underwater scene fog.
+
+### 2?. TERRBLEND1: cell ground as the engine's weighted sum (2026-10-05, BUILD PENDING)
+The PRTP bake's land albedo (PRTPBAKE landAlb) now sums share * texture mean * VCLR per
+128-unit quad, as the engine blends. Before, it composited alpha-over. Bakes made before
+TERRBLEND1 used the old ground albedo, which was darker under form-0 layers and missing on
+quads without a base. Rebake the probes after the merge.
+
+### 2?. SUNCELL1 + CELLALL1 -- the cell view outdoors: weather sun, cascades, imagespace, culling, rows (2026-10-05)
+Status: BUILD PENDING (8 commits on suncell1-20261005, 004083ee..73fbf962; gates.sh + sheet.sh ready).
+- Sun: an exterior cell-lit draw takes wwLookdevLight's sun/moon (TO-light dir, NAM0 Sunlight linear) as the cell
+  directional; the cascades (CSM1) receive through fo4_cellcsm / pbrm_cellcsm / fo4_csm / fo4_fogcsm; water casts
+  no sun shadow. Rides Lookdev + Shadows (off = Lookdev off, byte-identical by gate g1).
+- Culling (row, off): camera cull per placement run; each cascade culls casters against its own ortho box. Gate:
+  on == off on 3 cameras; red WW_CELL_CULL_RED=casters must differ.
+- Imagespace: the hour's key IMGS from the weather's IMSP (HNAM 9 floats, cine, tint, TX00 LUT strip).
+- Rows: AO, Light shadows, Water, SSR, SSR outdoors (off), AO decals, GPU relight; WW_ALL_ON=1 preset.
+- Loaded NIFs beside a cell keep the cell's passes (cellFirst in glview); red WW_CELL_WSGATE_RED=old.
+- For the probe plan: nothing here changes the bake; the relight reads the same sun (Clock.light) the view now uses.
+- Next (proposals): particles into the cell view; previs/occlusion; exterior ambient from DALC; water out of the
+  cell-light cube shadows.
+SUNCELL1 (second order): the game's previs file (vis/<plugin>/<form>.uvd) is an Umbra 3.3.17 tome; only its header
+is read. The plugin's occlusion planes/boxes, rooms and portals are what the cell view culls with (camera pass only,
+casters always cast). Probe bakes must keep culling off: the probe passes never call the cell cull.
+SUNCELL1 (last round): lit particles join the lit-effect table (FXLIT1's four placed lights). The previs tome's
+header and object table are read (object user IDs are form IDs: refs, or 0xFD combined ids); its body (tiles, KD
+trees, portals) is not decoded, so the game's visibility answer is not used yet. STATUS.md lists the offsets and
+the game functions a continuation would read.
+SUNCELL1 (final round): particle vertex alpha^2.2 (asm 00613/00604/00903 power v2.xyzw). Lit effects and lit
+particles outdoors: base cb2[12] = pow(sun, 2.2) x fade x ImageSpaceManager+0x98 (fHDRDataA[6] = HNAM Sunlight
+Scale); the 337 lit effect pixel shaders read cb2 rows 0..14 only (no ambient row), so no DALC term. Interiors take
+the cell's XCIM Sunlight Scale in the base too (the decomp multiplies it unconditionally).
+
+### 2?. FARLOD1 -- the far LOD around the cell block (2026-10-05)
+Status: BUILD PENDING (f81c60ed on farlod1-20261005; gates.sh + sheet.sh ready, judge farlod1_check.py).
+- Master: "Far LOD" row (CellView/FarLod, off); WW_CELL_FARLOD=1/0 pins it. Read at cell open: the far field is
+  document geometry under NiNode "FarLOD" (cellfarlod.cpp), appended before updateModel.
+- Terrain: nifAppendLodlFarRings (btdterrain) = buildTerrainSurface in append mode; rings lod 1..5, sheets 8/8/16/
+  16/32, reach max(h+1,3) / 60000 / 90000 / 110000 / 250000; each ring cuts the built ring inside it; outer edge
+  lerped to the next lattice; ring 0 inner edge snapped to LAND (seam measured before/after).
+- Objects: nifAppendLodiObjects with hole, slot 0/0/1/2/3, shift, tree drop at 75000, REFR skip for carded trees.
+- Cards: ImpostorChunk::armCellFar over dim-8 manifests (own state); drawn after the HDR resolve (owed: linear).
+- Sway: Tree_Anim + vertex alpha = .lodo sway weight; fo4_default.vert farSwayAmp/farSwayTime.
+- Probes/GI: the far field is outside the probe volume; it takes the cell lights + fog only. Owed: far water,
+  PBRM-path sway, cards in the linear frame, interaction with SUNCELL1 cascades/culling.
+- Gates: g1 off == before (byte), g2 sky census 0 below horizon (red: off > 0), g3 double ground 0 (red nocut),
+  g4 seam <= 32 units (red nosnap), g5 memory <= budget, peak <= 10 GB (red 64 MB budget refuses).
+
+### Previs tome visibility (lane UMBRA1, 2026-10-05) -- BUILD PENDING
+- The viewer now decodes the game's previs tomes and runs a careful reconstruction of the game's portal-raster
+  visibility query (src/gl/cellumbra). The cell view culls camera draws by it; casters are never culled.
+- For the probe system (PRTP): the tome's cells and portals are a ready-made graph of the cell's open spaces. They
+  can (1) place and group probes per tome cell, (2) restrict which probes a surface may blend to the cells the
+  tome connects to its own, stopping light leaks through walls, and (3) skip relighting probes in cells the
+  camera's query does not reach.
+- Not yet: door state (all gates are treated as open), the game's coarse-tile choice for far areas, and the
+  multi-block merge (each block is queried on its own).
+- Gates: notes/umbra1/gates.sh (u1..u5). Python twin: notes/umbra1/umbra_query.py.
+
+### 2?. GRASSMB1 -- the game's grass, depth of field and motion blur in the cell view (2026-10-05)
+Status: BUILD PENDING (round 1 229c18cf + round 2 on grassmb1-20261005; gates.sh + sheet.sh ready).
+- Grass (row, off): blades placed at cell open from LAND/LTEX/GRAS by the game's placement rules, proven by an
+  independent numpy rebuild of the blade list (gate g2; red = wrong seed). Welded per model, distance-faded.
+- Depth of field (row, off): IMGS DNAM (weather keys outdoors, cell XCIM indoors) through the game's composite
+  (asm 03664 / 03676 rebuilt op for op; gate g3 on synthetic data, g4 on a viewer dump; red = no CoC).
+- Motion blur (row, off): the game's 4-tap blur (asm 03866) along camera vectors from the TAA vector pass;
+  gate g5 rebuilds the vectors from the dumped depth + reprojection; red = zero vectors.
+- For the probe plan: grass is real geometry in the cell, so a probe bake with Grass on sees it (occlusion and
+  bounce from grass). Bakes should pin Grass off until the overseer decides; DoF and MB are screen passes on the
+  finished frame and never reach a probe pass.
+- Round 2: the game's DoF blur chain (downsample + Blur3..15, gates g3-blur / g4-blurdump, red = wrong weight
+  row), DoF/MB moved before the TAA (the game's order), vectors free of the TAA jitter (g5-still, red = jittered
+  frames), and the game's grass wind in the vertex shader (g3-wind, g7-wind). The probe bake is not touched:
+  grass stays bake foliage; the wind is a draw-time vertex offset that no bake pass reads.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

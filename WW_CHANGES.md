@@ -1,5 +1,118 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## WATER2 (2026-10-05, branch water2-20261005 from water1 cb5d33ba): murky water, far glints, water SSR
+
+Proved against the game's own water asm: the viewer's water pixels at the Sanctuary creek now match an
+op-for-op interpretation of the game's two water shaders (the depth-colour pass, then the water) on 99.997% of
+307645 pixels (within 2 levels). Still rides "Cell lights"; no new menu row or INI key.
+
+- Murky depth: the game draws a depth-colour pass (deep/shallow colour by the distance through the water) into
+  the scene BEFORE the water, so the water refracts an already-murky bottom. The viewer now applies it to its
+  refraction texels: at the pixel's own distances and, for the ripple-offset tap, at that texel's own distances.
+  The creek goes from clear (bed plainly visible) to the game's murky olive.
+- Far glints: the three noise layers are now sampled WRAP + anisotropic 16, like the game (iMaxAnisotropy 16).
+  Without it the distant ripples averaged flat and the sun glints died past mid-distance. Far-half glint
+  pixels: 179 vs the game reference's 181 (WATER1: 93).
+- Water SSR: SSR1's march now runs a water ray pass (the game's: half-flattened normal, rays only above 0.2 up)
+  and feeds the water its two reflection sources exactly as the game blends them: the sky gradient, with the
+  SSR colour mixed over it by the march's confidence (raw/blurred lerp 0.9). No cubemap: the game never reads
+  one for water. With SSR off the water falls back to the sky gradient, as the game's no-SSR shader does.
+- Red controls (WW_CELL_WATER_RED): nodepthfog, fogunits, nossr, nofar, each proven to fail its gate.
+- Gate tests/spells/cell_water.sh: probes 1-24, new stage G (game asm parity) and F (far glints); the water
+  mask no longer drops far/deep water (it judged only ~2/3 of the creek before).
+
+### TERRBLEND1: the cell ground blends like the game (2026-10-05, BUILD PENDING)
+- Cell land layers are now the engine's weighted sum. The base is the BTXT, or the default
+  set (CommonwealthDefault01) when there is none. Opacities are bytes, matching layers merge,
+  and the first five layers are drawn. Colour = sum(share * texture) * vertex colour.
+- This replaces alpha-over. The hard 128-unit squares and the sky holes are gone (top-down
+  count: 619 px of holes before, 0 after).
+- ATXT layers naming form 0 draw the default set instead of nothing.
+- Layer passes are added (alpha flags 4109) in the opaque pass, so they no longer add over
+  water.
+- The PBR lighting route keeps the same blend.
+- Red control: WW_TERRBLEND_RED=nearest.
+- Ground textures are no longer mirrored north-south: v now grows northward, as in the game
+  (cell splat and the old ground mosaic).
+
+- **Cell view outdoors: the weather's sun, its shadows, its imagespace; culling; the effects rows (lanes SUNCELL1 +
+  CELLALL1, 2026-10-05). BUILD PENDING: written, committed, not built (the overseer builds once).**
+  An exterior cell in Scene mode Lookdev now takes the weather's sun (or moon) as its direct light, specular and
+  fog light, and the sun cascades cast and receive in the cell view (Shadows row, off as shipped). A cell's water
+  casts no sun shadow. The exterior's imagespace is the weather's own for the hour (HDR, cinematic, tint, LUT).
+  New "Culling" row (off as shipped): each placement is culled against the camera, and each shadow cascade culls
+  its casters against its own box, so culling never takes away a shadow. Second row in the cell workspace: AO,
+  Light shadows, Water, SSR, SSR outdoors (new, off), AO decals, GPU relight (each was env-only before; defaults
+  kept). A NIF loaded beside a cell no longer switches off the cell's AO, reflections, fog, HDR and TAA.
+  WW_ALL_ON=1 turns every cell-view feature on for a sheet (an explicit pin wins).
+  Measured on the pre-merge exe: the sun at 12:00 is 0.0001 degrees off the game's arc, colour 225 vs 225 of 255.
+  The gates (gates.sh: 12 gates, 7 must-fail reds) and sheets (sheet.sh) wait for the merge build.
+  Particles row (ships off): placed models' particle systems now reach the cell view, lit and fogged by the cell
+  as the game does. Exterior ambient now comes from the weather's DALC. Water casts no lamp (cube) shadows.
+  Previs row (ships off): reads each cell's previs/precombined data and previs file header, and culls placements
+  behind the plugin's occlusion planes/boxes and, indoors, in rooms no portal reaches. Shadows are never culled.
+  Particles with a lit effect shader now take their model's placed lights indoors, as the game's lit particle
+  shader does (they drew unlit). The previs file's Umbra tome header and object table are read and reported; the
+  tome's body is not decoded, so nothing culls by it yet.
+  Particle vertex alpha is now raised to the power 2.2, as every game particle shader does (particles faded out
+  too slowly). Lit effect cards and lit particles are now lit outdoors too: the weather's sun times the
+  imagespace's Sunlight Scale, plus their placed lights; no ambient, as in the game. Indoors their base now takes
+  the cell imagespace's Sunlight Scale too, as the game does.
+  The gates (gates.sh: g1-g22 with their reds) and sheets (sheet.sh: 16) wait for the merge build.
+
+- **Cell view: the worldspace's far LOD past the loaded block (lane FARLOD1, 2026-10-05). BUILD PENDING: written,
+  committed (f81c60ed), not built (the overseer builds once).**
+  A cell opened outdoors drew its 5x5 block and then only sky. The new "Far LOD" row in the cell workspace (off as
+  shipped) adds the worldspace's LOD around the block at cell open: terrain rings out to the game's distances
+  (60000 / 90000 / 110000 / 250000 units, coarser outward), the LOD objects of each ring at their authored level,
+  and tree cards out to 75000. The loaded cells are cut out of every ring, so nothing is drawn twice; the first
+  ring's inner edge sits on the loaded ground, and ring edges are stitched so no cracks open. Being part of the
+  cell document, the far field takes the cell's own lighting, fog and weather. Far trees sway with the LOD's own
+  sway weight. A memory budget (2 GB by default) refuses a ring that would pass it and says so; every step logs
+  a "far lod:" line (rings, seam, double ground, cards, objects, memory).
+  Second pass (6399b15f, 2afed345, ae1af913, still BUILD PENDING): the tree cards are now drawn inside the lit,
+  toned frame with the cell's sun, ambient and fog; far water is drawn on the LOD water level; far trees sway on
+  the PBR path too; the near plane's change is measured by a gate. The Far LOD row gets a drop-down, "Vanilla" or
+  "FO4CS": Vanilla draws only the game's own .btr/.bto LOD; FO4CS draws ours and fills every chunk we lack with
+  the game's, clipped exactly at the meeting line so there is no overlap and no gap (default: FO4CS when our
+  files exist for the worldspace). When SUNCELL1's culling is in the build, the far shapes join its cull table.
+
+### Cell view: camera culling by the game's own previs visibility (lane UMBRA1, 2026-10-05) -- BUILD PENDING
+- The previs files' visibility data (Umbra 3.3.17 tomes, vis/<plugin>/<block>.uvd) is now read in full: tiles,
+  KD trees, cells, portals, gates and objects (src/gl/cellumbra.h/.cpp).
+- With the Previs row on, the camera pass asks each loaded block's tome what the camera can see (portal raster,
+  64x64, every door open) and skips the placed meshes the tome says are hidden. Meshes the tome does not name,
+  blocks that fail to read and cameras outside a block keep the old occluder/room culling.
+- Shadow casters are never culled by it.
+- WW_CELL_UMBRA=0 turns the tome off (old path only). WW_CELL_UMBRA_RED=casters is the must-fail control.
+  WW_CELL_UMBRA_DUMP=<dir> (+ WW_CELL_UMBRA_DEPTH=1) writes the gate files.
+- New log lines: "cell umbra tome <block>: decoded|FAILED ...", "cell umbra: on|off ... tomeDrawn= tomeCulled=".
+- This is a careful reconstruction of the game's query, not op for op: it may show more than the game, not less
+  (details in cellumbra.h).
+
+- **Cell view: the game's grass, depth of field and motion blur (lane GRASSMB1, 2026-10-05). BUILD PENDING:
+  written, committed (229c18cf), not built (the overseer builds once).**
+  New row in the cell workspace: Grass | Depth of field | Motion blur, each off as shipped.
+  Grass: an exterior cell places its grass blades from the ground's textures the way the game does (the same
+  patches, density grid, seeded draws, water and slope tests, fit to slope), welded into one draw per grass
+  model and faded with distance (3500 + 1000 units). Sanctuary's cell -17,23 places 296 blades, and an
+  independent rebuild places the same 296.
+  Depth of field: the imagespace's depth of field (the weather's for the hour outdoors, the cell's indoors)
+  through the game's own composite, near+far or far only.
+  Motion blur: the game's 4-tap blur along the camera's motion, timed by the --path frame rate.
+  Round 2 (same lane, BUILD PENDING too):
+  - Depth of field blur: the game's own chain now -- its quarter-size downsample, then its Blur3..Blur15 kernels
+    with the game's weight table, columns then rows -- instead of our Gaussian.
+  - Order: depth of field and motion blur now run before the temporal AA, right after the tone map, which is
+    the game's order (proven from Todd's treat).
+  - Motion blur under temporal AA: the motion vectors no longer read the AA's sub-pixel jitter as camera motion.
+  - Grass wind: the game's grass vertex shader, op for op -- blades sway with the weather's wind speed,
+    direction and turbulence, each grass type at its own wave period. Harness runs fix the wind clock.
+  Still not ported (stated): the game's deferred grass lighting (grass shades through the cell shader), the
+  wind direction's random offset, actor grass bending, grass motion in the motion blur.
+  Env pins WW_CELL_GRASS / WW_CELL_DOF / WW_CELL_MBLUR (+ WW_CELL_GRASS_WIND_T); gates.sh (12 gates, 6 must-fail
+  reds) and sheet.sh (5 sheets) wait for the merge build.
+
 - Interiors that show the sky in the game (the cell's Show Sky flag, e.g. the Museum of Freedom) now get
   daylight from the sky in the bounce light: rays that leave through windows and holes count as sky, and in
   Lookdev the weather's sky colors light them, on top of the cell's own ambient. Closed interiors (vaults,

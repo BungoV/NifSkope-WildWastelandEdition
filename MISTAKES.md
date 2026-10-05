@@ -5,6 +5,90 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+- 2026-10-05 FINAL merge: the FARLOD1 merge was committed with conflict markers: the resolver got a /tmp path
+  Python could not open, and the `&&` chain still ran git add. Fixed in b46858e0. Count markers = 0 before git add.
+
+## WATER2 (2026-10-05)
+- A self-rebuild gate is not a parity gate. WATER1's stage B rebuilt the viewer's water from the viewer's own
+  probes with the viewer's own formula and passed, while the water was visibly too clear: it proved the shader
+  matched its author's reading, not the game. Parity needs the game's asm run on the same inputs (stage G).
+- The water mask carried ne(5, 6) (two probe shots must differ). Far or deep water reads rz = rw = 0 in both, so
+  every gate silently judged only the near ~2/3 of the creek. Count the mask against the water you can see on
+  the sheet before trusting a pass percentage.
+- I first placed the game's depth-colour pass AFTER the water (blended over it) from the pass's blend state
+  alone; the decomp's frame order puts it in the deferred composite, before the water. Read the frame order,
+  not just the technique's state.
+- The before-lane exe in release/ reads release/shaders, which are this lane's. A before shot needs its own
+  folder with the before shaders (git show <base>:res/shaders/...).
+- The interpreter's first run was all NaN: D3D min/max return the non-NaN operand (np.fmin/fmax, not
+  np.minimum), and log2(0) * 0 is NaN, so fog-off constants need finite exponents.
+- MSAA water edges resolve blended probe bytes; exclude them with an 8-neighbour erosion rather than loosening
+  the tolerance.
+- A heredoc'd Python bytes literal turned "\a" in a Windows path into a BEL byte in STATUS.md. Write paths with
+  forward slashes.
+### TERRBLEND1 (2026-10-05)
+- A null form was read as "paints nothing". In the engine, LTEX form 0 loads pDefText, the
+  default set. Check what the engine does with a null form before treating it as empty.
+- The additive layers were left in the transparent pass. They sorted after the water and added
+  pale blotches on the banks. Additive passes that belong to an opaque surface draw in the
+  opaque pass.
+- Edits through a tool converted three mixed-ending files to all-CRLF (diffs of 5000 lines).
+  Unchanged lines were restored with their original bytes before the commit. Diff with
+  --stat before every commit.
+- The rebuild gate was first scored by error medians, which did not tell before from after
+  (7.6 vs 7.6). Correlation did (0.79 vs 0.72). Try more than one metric against the red before
+  trusting a threshold.
+- SUNCELL1 (2026-10-05): `#include "ww_sunshadow.glsl"  // comment` -- the shader loader takes nothing after the
+  closing quote, so every legacy program failed and the first shots came out untextured. Rule: no trailing comment
+  on a shader #include line.
+- SUNCELL1: the "before" exe copied into this worktree's release\ reads THIS tree's res/shaders, so it was not a
+  before at all once shaders changed. A true before runs from the other worktree's release folder (previewall).
+- SUNCELL1: the shot script inherited from previewall built REGKEY from SCOPE before SCOPE was set, so wipe_scope
+  deleted the wrong registry key. Set SCOPE first, then REGKEY.
+- SUNCELL1: the shared scratchpad ed.py was overwritten by another lane mid-session (edit2 vanished -> ImportError).
+  Keep lane helpers under a lane-unique name (sc1_ed.py).
+- SUNCELL1: judged the sun against the TNAM key ramp first and it looked off; the engine's arc (Clock.light) is the
+  reference and matches to 0.0001 deg. Pick the reference from the engine, not the nearest-looking data.
+- SUNCELL1: read the previs block of cell -17,23 from the prewar Sanctuary worldspace (same cell coordinates exist
+  in two worlds) and got the wrong RVIS. Filter every CELL walk by its worldspace group before trusting a number.
+- SUNCELL1: a Python edit normalised a mixed-ending source file (cellview.cpp: 1954 CRLF of 4960 lines) to all
+  CRLF, so the diff showed the whole file. Rebuilt the endings from HEAD line by line (difflib) before committing.
+  Never write a whole file back with one line ending when the original mixes them.
+- FARLOD1 (2026-10-05): the Edit tool rewrote every line ending of a mixed CRLF/LF file (glview.cpp: a 175-line
+  diff for a 13-line change). Rule: after editing a mixed-ending file, restore the untouched lines' endings from
+  git HEAD (a per-line EOL restore script) and check `git diff --stat` against `--ignore-space-at-eol`.
+- FARLOD1: a Python edit passed through a bash heredoc lost its backslashes and a newline (NifSkope.pro broke).
+  Rule: any script holding quotes or backslashes is written with the Write tool to a file, then run.
+- FARLOD1: a shared scratchpad ed.py was rewritten for this lane (mixed-EOL tolerant); other lanes use that name.
+  Rule (again): lane helpers get lane-unique names (farlod1_ed.py), never edit a shared helper.
+## 2026-10-05 lane UMBRA1
+- Bash heredocs in this shell mangled backslashes (a "\\" in a Python edit script reached Python as "\"), and one
+  long quoted heredoc failed to parse at all. Fix: write edit scripts with the Write tool, then run them.
+- First C++ tile cell count printed cells.size(), which is 0 when the cell nodes are absent, while Python printed
+  the tile's +0x34 count. The struct check would have flagged it; fixed with a separate numCells field.
+- Almost reworded the "cell previs tome" log line; SUNCELL1's g19 compares it verbatim with umbra_tome.py.
+  Lesson: grep other lanes' gates.sh before rewording any log line.
+- Found, not fixed (SUNCELL1): WwPrevisBox centres are stored as pos - origin, but previsBuild maps them with
+  scene->view, which takes world points (cell shapes carry the origin as translation). The occluder/room boxes are
+  probably shifted by -origin. Needs a check in a build session.
+- GRASSMB1 (2026-10-05): Fallout4.esm holds TWO top-level GRAS groups; reading only the first missed grass
+  types. Walk every top group of a type, not the first.
+- GRASSMB1: a backslash-newline inside a Python triple-quote in a bash heredoc joined two NifSkope.pro lines
+  (the .pro uses "\" continuations). Twice. Any edit script that holds a backslash goes through the Write tool
+  (or chr(92)), never a heredoc.
+- GRASSMB1: files in this tree mix CRLF and LF line by line; a whole-file rewrite flipped the endings. Edit by
+  line and keep each kept line's own ending (measure with Python byte counts first).
+- GRASSMB1: ESMFile::ESMField takes a non-const ESMFile&; a const ESMFile * from EsmWorld would not compile.
+  Caught by hand (no build); EsmWorld::plugin() returns ESMFile *.
+- GRASSMB1: an asm interpreter borrowed from WATER2 had no `not` op and returned for all lanes at the first
+  `ret` inside an `if`; the DoF asm needs both. Count the asm's op set before trusting a borrowed interpreter.
+- GRASSMB1 round 2: the first agent died mid-round with 19 files uncommitted and no STATUS line for round 2.
+  Write STATUS before each step, not after the round.
+- GRASSMB1 round 2: the grass wind clock read the wall clock even in a harness -- two runs of one gate would
+  differ. Every clock a picture depends on gets pinned when wwHarnessRun().
+- GRASSMB1 round 2: a "jitter compensated" vector check against the dumped reprojection could not fail -- on a
+  moving camera the NDC jitter cancels to second order. The jitter's real fault is building the frames from the
+  jittered projection; only a STILL camera shows it (vectors must be 0). Prove a red fails before trusting it.
 - 2026-10-03 SKYINT1: `bs.noSky = spec.interior` assumed every interior is closed; 91 of 1412 vanilla
   interiors show the sky. Read the record's flags before deciding a class of cell has no X.
 - 2026-10-03 SKYINT1: `CELLS=""` on a harness command line did not mean "no cells": `${CELLS:-default}`
