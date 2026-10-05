@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"
 #include "gl/sunshadow.h"
+#include "gl/cellcull.h"	// lane SUNCELL1
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
@@ -3933,6 +3934,7 @@ void GLView::paintGL()
 	/* Lookdev (lane CSM1): the three sun-shadow cascade maps, rendered before
 	 * anything else this frame so the ground and the PBR shapes can receive.
 	 * A no-op with the Shadows row off (the default): no map, no program swap. */
+	wwCellCullFrame();	// lane SUNCELL1: the last frame's culling counts, printed when they change
 	if ( wwLookdevActive() )
 		wwSunShadowPass( scene );
 	// lane SHADOW1: the cell lights' depth cubes (a no-op unless the document draws cell-lit)

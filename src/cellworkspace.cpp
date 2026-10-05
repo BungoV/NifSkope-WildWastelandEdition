@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 
 #include "cellview.h"
 #include "gl/celllights.h"
+#include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/gametaa.h"
 
 #include <QAction>
@@ -435,6 +436,10 @@ void CellWorkspacePanel::buildUi()
 	cellTaa = new QCheckBox( tr( "Temporal AA" ), prtpRow );
 	cellTaa->setObjectName( QStringLiteral( "CellWorkspaceTemporalAa" ) );
 	cellTaa->setChecked( wwGameTaaOn() );
+	// lane SUNCELL1: draw only the placements the camera (or a sun cascade) sees; ships off
+	cellCull = new QCheckBox( tr( "Culling" ), prtpRow );
+	cellCull->setObjectName( QStringLiteral( "CellWorkspaceCulling" ) );
+	cellCull->setChecked( wwCellCullOn() );
 	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
 	cellPass = new QComboBox( prtpRow );
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
@@ -447,6 +452,7 @@ void CellWorkspacePanel::buildUi()
 	pl->addWidget( cellPass );
 	pl->addWidget( cellIs );
 	pl->addWidget( cellTaa );
+	pl->addWidget( cellCull );
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
@@ -475,6 +481,11 @@ void CellWorkspacePanel::buildUi()
 	// a shader switch, not a rebuild: the next frame draws with (or without) the cell's lights
 	connect( cellLights, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwCellLightsSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellCull, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellCullSetOn( on );
 		if ( glView )
 			glView->update();
 	} );

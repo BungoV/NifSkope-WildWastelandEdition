@@ -227,6 +227,7 @@ HEADERS += \
 	src/gl/campath.h \
 	src/gl/celllights.h \
 	src/gl/cellfxlit.h \
+	src/gl/cellcull.h \
 	src/gl/cellwater.h \
 	src/gl/cellhdr.h \
 	src/gl/cellprobeview.h \
@@ -456,6 +457,7 @@ SOURCES += \
 	src/gl/campath.cpp \
 	src/gl/celllights.cpp \
 	src/gl/cellfxlit.cpp \
+	src/gl/cellcull.cpp \
 	src/gl/cellwater.cpp \
 	src/gl/cellhdr.cpp \
 	src/gl/cellprobeview.cpp \

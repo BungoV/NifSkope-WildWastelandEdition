@@ -39,6 +39,7 @@ BSD License - see nifskope.h
 #include "gl/cellfxlit.h"
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellwater.h"	// lane WATER1
+#include "gl/cellcull.h"	// lane SUNCELL1: the per-placement culling runs
 #include "esmwater.h"
 #include "gamemanager.h"	// lane IMGS1: the imagespace LUT
 
@@ -159,6 +160,8 @@ struct Bucket
 	WwWaterRecord waterRec;
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
+	//! Lane SUNCELL1: where each placed shape's triangles start in `tris` (the culling runs, src/gl/cellcull.h)
+	std::vector<quint32> runStart;
 };
 
 /*! IS THIS STRING SOMETHING THE SHADER PROPERTY'S **Name** CAN RESOLVE?
@@ -362,6 +365,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 	size_t first = 0;
 	int part = 0;
 	while ( first < b.tris.size() ) {
+		const size_t p0 = first;   // lane SUNCELL1: this part's first bucket triangle
 		QHash<int, quint16> remap;
 		std::vector<OutVert> pv;
 		std::vector<Triangle> pt;
@@ -403,6 +407,38 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
 		if ( b.fxLit >= 0 )   // lane FXLIT1: the renderer asks for this shape's four lights by block
 			wwCellFxLitShape( nif, nif->getBlockNumber( iShape ), b.fxLit );
+		if ( !b.billboard && !b.runStart.empty() ) {   // lane SUNCELL1: the part's culling runs, spheres in its own space
+			std::vector<WwCullRun> runs;
+			auto rb = std::upper_bound( b.runStart.begin(), b.runStart.end(), quint32( p0 ) );
+			size_t s0 = p0;
+			while ( s0 < i ) {
+				size_t s1 = i;
+				if ( rb != b.runStart.end() && size_t( *rb ) < i )
+					s1 = size_t( *rb++ );
+				if ( s1 <= s0 )
+					continue;
+				Vector3 rlo( 3.4e38f, 3.4e38f, 3.4e38f ), rhi( -3.4e38f, -3.4e38f, -3.4e38f );
+				for ( size_t t = s0 - p0; t < s1 - p0; t++ )
+					for ( unsigned int k = 0; k < 3; k++ ) {
+						const Vector3 & q = pv[pt[t][k]].pos;
+						for ( int a = 0; a < 3; a++ ) {
+							rlo[a] = qMin( rlo[a], q[a] );
+							rhi[a] = qMax( rhi[a], q[a] );
+						}
+					}
+				WwCullRun r;
+				r.first = std::uint32_t( s0 - p0 );
+				r.count = std::uint32_t( s1 - s0 );
+				r.center = ( rlo + rhi ) / 2.0f;
+				for ( size_t t = s0 - p0; t < s1 - p0; t++ )
+					for ( unsigned int k = 0; k < 3; k++ )
+						r.radius = qMax( r.radius, ( pv[pt[t][k]].pos - r.center ).length() );
+				r.radius *= 1.001f;
+				runs.push_back( r );
+				s0 = s1;
+			}
+			wwCellCullShape( nif, nif->getBlockNumber( iShape ), std::move( runs ) );
+		}
 		if ( b.water )        // lane WATER1: the renderer draws this shape with the game's water terms
 			wwCellWaterShape( nif, nif->getBlockNumber( iShape ), b.waterRec );
 		nif->set<QString>( iShape, "Name", part > 1
@@ -1776,6 +1812,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	int fxLitModels = 0, fxLitShapes = 0;
 	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
 	wwCellFxLitBegin( nif );
+	wwCellCullBegin( nif );   // lane SUNCELL1
 	wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
 	QHash<quint32, WwWaterRecord> placedWaterRecs;   // lane WATER1: WNAM form -> its record (form 0 = unreadable)
 	int placedWaterShapes = 0;
@@ -2987,6 +3024,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 					hi[k] = qMax( hi[k], wp[k] );
 				}
 			}
+			b.runStart.push_back( quint32( b.tris.size() ) );   // lane SUNCELL1: one culling run per placed shape
 			for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 				b.tris.push_back( BucketTri{ { quint32( base + int( s.geom.tris[t + 0] ) ),
 					quint32( base + int( s.geom.tris[t + 1] ) ),

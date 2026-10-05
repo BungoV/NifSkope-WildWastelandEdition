@@ -3,6 +3,7 @@
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
+#include "gl/cellcull.h"	// lane SUNCELL1
 #include "cellmesh.h"
 #include "cellspeed.h"
 #include "gl/glnode.h"
@@ -365,7 +366,14 @@ void BSShape::drawShapes( NodeList * secondPass )
 			hiddenT = &( *ith );
 	}
 
-	if ( numTriangles > 0 && !hiddenT ) {
+	// lane SUNCELL1: a welded cell shape draws only the placements that touch the camera's frustum (gl/cellcull.h)
+	static std::vector<std::uint32_t> cullRanges;
+	if ( numTriangles > 0 && !hiddenT && !selectionFlags && !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene )
+		&& wwCellCullCamera( scene, this, id(), std::int64_t( numTriangles ), cullRanges ) ) {
+		for ( size_t k = 0; k + 1 < cullRanges.size(); k += 2 )
+			context->fn->glDrawElements( GL_TRIANGLES, GLsizei( cullRanges[k + 1] * 3 ), GL_UNSIGNED_SHORT,
+				(void *) ( size_t( cullRanges[k] ) * 6 ) );
+	} else if ( numTriangles > 0 && !hiddenT ) {
 		context->fn->glDrawElements( GL_TRIANGLES, GLsizei( numTriangles * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
 	} else if ( numTriangles > 0 ) {
 		qsizetype runStart = 0;
