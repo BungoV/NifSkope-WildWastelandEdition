@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "lodgengpu.h"
 #include "nifcli.h"
 #include "nifskope.h"
+#include "hkxanimui.h"
 #include "version.h"
 #include "harnesswindow.h"
 #include "data/nifvalue.h"
@@ -350,5 +351,20 @@ void IPCsocket::openNif( const QUrl & url )
 
 void IPCsocket::openNif( const QString & url )
 {
+	/* A CLIP SENT TO A RUNNING NIFSKOPE PLAYS ON THE MODEL ALREADY OPEN
+	 * (bungo 2026-10-05: "give me an animation in nifskope to preview").
+	 * `NifSkope.exe --port N clip.hkx`, or a UDP open to that port, used to make
+	 * a new empty window, where a clip has nothing to play on. It now goes to
+	 * the visible window's Animation list, the same loader as a drop. */
+	if ( !WwHkxAnimHub::animationFilesIn( { url } ).isEmpty() ) {
+		for ( NifSkope * doc : NifSkope::openDocuments() ) {
+			if ( doc && doc->isVisible() && doc->getGLView() ) {
+				doc->showTransientMessage(
+					WwHkxAnimHub::instance()->loadFiles( doc->getGLView(), { url }, true ), 12000 );
+				doc->playAnimationLooped();
+				return;
+			}
+		}
+	}
 	NifSkope::createWindow( url );
 }

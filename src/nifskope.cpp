@@ -10959,3 +10959,10 @@ bool NifSkope::batchProcessFiles(
 
 	return noErrors;
 }
+
+void NifSkope::playAnimationLooped()
+{
+	for ( QAction * a : { ui->aAnimate, ui->aAnimLoop, ui->aAnimPlay } )
+		if ( a && a->isCheckable() && !a->isChecked() )
+			a->trigger();
+}

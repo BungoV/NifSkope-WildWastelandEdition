@@ -65,6 +65,10 @@
 - Unchanged: PBRM materials (they already handled the tag and stay byte-identical), environment cube maps, and solid-colour placeholder textures.
 - New gate: tests/spells/srgbtag_legacy.sh. It renders the same texture blocks with the untagged and tagged headers on a vanilla duct, plus his undersuit against a copy retagged untagged. Both pairs are pixel-identical. The red arm is the old build, or WW_SRGBTAG1_RED=1.
 
+## A clip opened from outside plays on the model already open (2026-10-05)
+
+Opening a .hkx in a running NifSkope (`NifSkope.exe --port N clip.hkx`, or the same open sent to its port) used to make a new, empty window, where the clip had nothing to play on. It now goes into the open window's Animation list, the same way as dropping it there, and Animate, Loop and Play switch on, so it plays right away. Any other file still opens its own window.
+
 ## Probe bake: decals now darken the bounce light; GI gaps filled; ambient pin (lane GICAL1, 2026-10-03)
 
 - Decals and see-through overlays now count in the bounce light. The bake used to skip them, so it took
