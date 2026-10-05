@@ -586,8 +586,13 @@ void main()
 	if ( cellOn && !cellInterior && cellHasDir ) {
 		vec3 sx = specSun + A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * ( 1.0 - NdotV ) * D.rgb;
 		cellExtSpec = sx * sx;
-		cellExtAmb = A.rgb * A.rgb;
-		color.rgb = A.rgb * albedo;
+		/* lane SUNCELL1: the ambient is the weather's directional ambient (DALC, the hour's keys) through the
+		 * interior's law (cellAmbient), not the flat NAM0 Ambient the viewport carries */
+		vec3 Ax = A.rgb;
+		if ( cellExtDalc )
+			Ax = sqrt( cellAmbient( cellWorldDir( normal ), cellWorldPos( -ViewDir ) ) );
+		cellExtAmb = Ax * Ax;
+		color.rgb = Ax * albedo;
 	}
 	if ( cellOn && cellGiSky )
 		color.rgb -= cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ) * A.rgb * albedo;

@@ -14,6 +14,7 @@ uniform int cellGiAmb;				// lane GICAL1: WW_CELL_GI_AMB, the interior ambient b
 uniform bool cellGiFill;			// lane GICAL1: a GI gap takes the weighted mean round it (WW_CELL_GI_FILL=0: off, black as before)
 uniform vec4 cellDalc[3];			// per channel: (p - n) / 2 per axis, mean of the six (byte / 255)
 uniform bool cellHasDir;
+uniform bool cellExtDalc;			// lane SUNCELL1: an exterior's ambient is the weather's DALC, in cellDalc (the same law as indoors)
 // lane SUNCELL1: set by the caller before cellLit (exterior sun only): the cascades' light, the viewport ambient, the sun's specular (linear)
 float cellDirVis = 1.0;
 vec3 cellExtAmb = vec3( 0.0 );

@@ -948,6 +948,51 @@ void wwCellLightsUniforms( Scene * scene )
 			sunLast = line;
 		}
 	}
+	/* lane SUNCELL1: an exterior's ambient is the weather's directional ambient (the 6 DALC colours blended over
+	 * the hour's keys, Lookdev's wwLookdevDalc), uploaded in the interior's form (byte/255, (a - b) / 2 per axis,
+	 * the mean) so cellAmbient is one law indoors and out. The axis is the light's TRAVEL direction (Lookdev's
+	 * convention: the weathers store the bright sky blue in Z-, so Z- lights an up-facing normal). Only with the
+	 * weather's sun (the exterior branch of cellLit). Red WW_CELL_EXTAMB_RED=flat keeps the flat NAM0 Ambient;
+	 * =flip swaps the axis convention. */
+	bool extDalc = false;
+	if ( !L->interior && hasDir && wwLookdevActive() && wwIsCellProgramName( prog->name ) ) {
+		static const QByteArray extRed = qgetenv( "WW_CELL_EXTAMB_RED" ).trimmed();
+		float w[6][3];
+		if ( extRed != "flat" && wwLookdevDalc( w ) ) {
+			const bool flip = extRed == "flip";
+			float g[6][3];
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					g[a][c] = std::pow( std::max( w[a][c], 0.0f ), 1.0f / 2.2f );
+			for ( int c = 0; c < 3; c++ ) {
+				float mean = 0.0f;
+				for ( int a = 0; a < 6; a++ )
+					mean += g[a][c] / 6.0f;
+				const float sgn = flip ? 0.5f : -0.5f;	// travel: n.z = +1 takes Z- (index 5)
+				prog->uni4f_l( prog->uniLocation( "cellDalc[%d]", c ), FloatVector4(
+					( g[0][c] - g[1][c] ) * sgn, ( g[2][c] - g[3][c] ) * sgn, ( g[4][c] - g[5][c] ) * sgn, mean ) );
+			}
+			extDalc = true;
+			static QString ambLast;
+			const QString line = QStringLiteral( "cell ambient: exterior=weather DALC up=%1,%2,%3 down=%4,%5,%6 (byte/255)%7" )
+				.arg( double( flip ? g[4][0] : g[5][0] ), 0, 'f', 4 ).arg( double( flip ? g[4][1] : g[5][1] ), 0, 'f', 4 )
+				.arg( double( flip ? g[4][2] : g[5][2] ), 0, 'f', 4 ).arg( double( flip ? g[5][0] : g[4][0] ), 0, 'f', 4 )
+				.arg( double( flip ? g[5][1] : g[4][1] ), 0, 'f', 4 ).arg( double( flip ? g[5][2] : g[4][2] ), 0, 'f', 4 )
+				.arg( flip ? QStringLiteral( " RED=flip" ) : QString() );
+			if ( line != ambLast ) {
+				fprintf( stderr, "%s\n", qPrintable( line ) );
+				ambLast = line;
+			}
+		} else {
+			static bool saidFlat = false;
+			if ( !saidFlat ) {
+				fprintf( stderr, "cell ambient: exterior=flat NAM0 Ambient (%s)\n",
+					extRed == "flat" ? "RED=flat" : "no weather DALC" );
+				saidFlat = true;
+			}
+		}
+	}
+	prog->uni1b( "cellExtDalc", extDalc );
 	prog->uni1b( "cellHasDir", hasDir );
 	prog->uni3f( "cellDirColor", dirColor[0], dirColor[1], dirColor[2] );
 	prog->uni3f( "cellDirTo", dirTo[0], dirTo[1], dirTo[2] );
