@@ -39,6 +39,7 @@ BSD License - see nifskope.h
 #include "gl/cellfxlit.h"
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellwater.h"	// lane WATER1
+#include "gl/cellcull.h"	// lane SUNCELL1: the per-placement culling runs
 #include "esmwater.h"
 #include "gamemanager.h"	// lane IMGS1: the imagespace LUT
 
@@ -58,7 +59,9 @@ BSD License - see nifskope.h
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <map>
+#include <memory>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -163,6 +166,8 @@ struct Bucket
 	WwWaterRecord waterRec;
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
+	//! Lane SUNCELL1: where each placed shape's triangles start in `tris` (the culling runs, src/gl/cellcull.h)
+	std::vector<quint32> runStart;
 };
 
 /*! IS THIS STRING SOMETHING THE SHADER PROPERTY'S **Name** CAN RESOLVE?
@@ -366,6 +371,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 	size_t first = 0;
 	int part = 0;
 	while ( first < b.tris.size() ) {
+		const size_t p0 = first;   // lane SUNCELL1: this part's first bucket triangle
 		QHash<int, quint16> remap;
 		std::vector<OutVert> pv;
 		std::vector<Triangle> pt;
@@ -407,6 +413,38 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
 		if ( b.fxLit >= 0 )   // lane FXLIT1: the renderer asks for this shape's four lights by block
 			wwCellFxLitShape( nif, nif->getBlockNumber( iShape ), b.fxLit );
+		if ( !b.billboard && !b.runStart.empty() ) {   // lane SUNCELL1: the part's culling runs, spheres in its own space
+			std::vector<WwCullRun> runs;
+			auto rb = std::upper_bound( b.runStart.begin(), b.runStart.end(), quint32( p0 ) );
+			size_t s0 = p0;
+			while ( s0 < i ) {
+				size_t s1 = i;
+				if ( rb != b.runStart.end() && size_t( *rb ) < i )
+					s1 = size_t( *rb++ );
+				if ( s1 <= s0 )
+					continue;
+				Vector3 rlo( 3.4e38f, 3.4e38f, 3.4e38f ), rhi( -3.4e38f, -3.4e38f, -3.4e38f );
+				for ( size_t t = s0 - p0; t < s1 - p0; t++ )
+					for ( unsigned int k = 0; k < 3; k++ ) {
+						const Vector3 & q = pv[pt[t][k]].pos;
+						for ( int a = 0; a < 3; a++ ) {
+							rlo[a] = qMin( rlo[a], q[a] );
+							rhi[a] = qMax( rhi[a], q[a] );
+						}
+					}
+				WwCullRun r;
+				r.first = std::uint32_t( s0 - p0 );
+				r.count = std::uint32_t( s1 - s0 );
+				r.center = ( rlo + rhi ) / 2.0f;
+				for ( size_t t = s0 - p0; t < s1 - p0; t++ )
+					for ( unsigned int k = 0; k < 3; k++ )
+						r.radius = qMax( r.radius, ( pv[pt[t][k]].pos - r.center ).length() );
+				r.radius *= 1.001f;
+				runs.push_back( r );
+				s0 = s1;
+			}
+			wwCellCullShape( nif, nif->getBlockNumber( iShape ), std::move( runs ) );
+		}
 		if ( b.water )        // lane WATER1: the renderer draws this shape with the game's water terms
 			wwCellWaterShape( nif, nif->getBlockNumber( iShape ), b.waterRec );
 		if ( b.landSplat )    // lane TERRBLEND1: the renderer tells the shader the alpha is a share
@@ -838,6 +876,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 {
 	WwCellLighting L;
 	L.interior = spec.interior;
+	L.dataRoot = spec.dataRoot;	// lane SUNCELL1: an exterior's weather LUT is looked up there too
 	L.showSky = spec.interior && ( cellInteriorFlags( world.interior() ) & 0x0080u );	// lane SKYFULL1
 	for ( int k = 0; k < 3; k++ )
 		L.center[k] = center[k];
@@ -878,7 +917,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		}
 	};
 	// lane GPURELIGHT1: WW_CELL_GI_GPU keeps the lights that start off in L.offLights (the relight's record)
-	const bool giKeepOff = !qgetenv( "WW_CELL_GI_GPU" ).isEmpty();
+	const bool giKeepOff = wwCellGiGpuOn();	// lane CELLALL1: the GPU relight row (the pin wins)
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
@@ -997,7 +1036,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		L.lights.append( l );
 		wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // lane FXLIT1: a red control's data
 	}
-	QString amb = QStringLiteral( "none (exterior: the viewport light)" ), dir = QStringLiteral( "none" );
+	QString amb = QStringLiteral( "none (exterior: the viewport light)" ), dir = QStringLiteral( "none (exterior: the Lookdev weather sun or moon)" );
 	if ( spec.interior ) {
 		const EsmInteriorCell & ic = world.interior();
 		QByteArray tData, tDalc;
@@ -1272,6 +1311,159 @@ static QString cellBakeFarSoup( const CellSceneSpec & spec, const QString & data
 		"trees %7, triangles +%8, %9 ms" ).arg( QDir::toNativeSeparators( lodl ) ).arg( radius ).arg( r.quads )
 		.arg( r.albedoQuads ).arg( r.waterQuads ).arg( r.boxes ).arg( r.trees ).arg( soup.triCount() - before )
 		.arg( t.elapsed() );
+}
+
+/* lane SUNCELL1: the Particles row (WW/CellParticles, env pin WW_CELL_PARTICLES, ships OFF). Read when a cell
+ * opens: the row reopens the cell. */
+bool wwCellParticlesOn()
+{
+	const QByteArray pin = qgetenv( "WW_CELL_PARTICLES" ).trimmed();
+	if ( !pin.isEmpty() )
+		return pin != "0";
+	return QSettings().value( QStringLiteral( "WW/CellParticles" ), false ).toBool();
+}
+
+void wwCellParticlesSetOn( bool on )
+{
+	QSettings().setValue( QStringLiteral( "WW/CellParticles" ), on );
+}
+
+// Copy / Paste Branch's per-block strings (src/spells/blocks.cpp)
+QStringList serializeStrings( NifModel * nif, const QModelIndex & iBlock, const QString & type );
+void deserializeStrings( NifModel * nif, const QModelIndex & iBlock, const QString & type, QStringList & strings );
+
+/*! lane SUNCELL1: one placed model's particle systems, copied into the cell's document the way Paste Branch
+ *  copies a branch: the root's branch, without its triangle shapes (the weld has them already), its collision
+ *  and its lights, every link out of the copy mapped to none, the root's own transform replaced by the
+ *  reference's (lane MISS1's rule). Returns the particle systems copied (0: none in the branch, -1: a block
+ *  would not copy; `why` says which). */
+/*! lane SUNCELL1: a primitive ref's axes in the world, the rotation lane HEMI1 measured for light boxes:
+ *  Rz(-z) Rx(-x) Ry(-y) of the ref's stored angles, axis k = column k. */
+static void cellPrimAxes( const float r[3], Vector3 ax[3] )
+{
+	auto rot = []( int a, double ang, double m[3][3] ) {
+		const double c = std::cos( ang ), s = std::sin( ang );
+		const int i = ( a + 1 ) % 3, j = ( a + 2 ) % 3;
+		for ( int u = 0; u < 3; u++ )
+			for ( int v = 0; v < 3; v++ )
+				m[u][v] = u == v ? 1.0 : 0.0;
+		m[i][i] = c; m[i][j] = -s; m[j][i] = s; m[j][j] = c;
+	};
+	auto mul = []( const double a[3][3], const double b[3][3], double o[3][3] ) {
+		for ( int u = 0; u < 3; u++ )
+			for ( int v = 0; v < 3; v++ )
+				o[u][v] = a[u][0] * b[0][v] + a[u][1] * b[1][v] + a[u][2] * b[2][v];
+	};
+	double rz[3][3], rx[3][3], ry[3][3], t[3][3], m[3][3];
+	rot( 2, -r[2], rz );
+	rot( 0, -r[0], rx );
+	rot( 1, -r[1], ry );
+	mul( rz, rx, t );
+	mul( t, ry, m );
+	for ( int k = 0; k < 3; k++ )
+		ax[k] = Vector3( float( m[0][k] ), float( m[1][k] ), float( m[2][k] ) );
+}
+
+static quint32 cellLe32( const QByteArray & b, int at )
+{
+	quint32 v = 0;
+	if ( at >= 0 && at + 4 <= b.size() )
+		std::memcpy( &v, b.constData() + at, 4 );
+	return v;
+}
+
+/* lane SUNCELL1 (last round): one copied particle system -- its block in the document, its bounding sphere in the
+ * placed model's space (the root's own transform is the placement's), and its shader property in the source. */
+struct CellPfxSystem
+{
+	qint32 block = -1;
+	Vector3 center;
+	float radius = 0.0f;
+	qint32 srcShader = -1;
+};
+
+static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, NifModel & src,
+	const Vector3 & at, const Matrix & rot, float scale, QString * why, QVector<CellPfxSystem> * copied = nullptr )
+{
+	const QList<int> roots = src.getRootLinks();
+	if ( roots.isEmpty() || !src.blockInherits( src.getBlockIndex( roots.first() ), "NiNode" ) ) {
+		*why = QStringLiteral( "no NiNode root" );
+		return -1;
+	}
+	QList<qint32> order;
+	QSet<qint32> seen;
+	int systems = 0;
+	QVector<CellPfxSystem> found;	// block = the index in `order` until the copy's base is known
+	std::function<void( qint32, const Transform & )> walk = [&]( qint32 b, const Transform & up ) {
+		if ( b < 0 || seen.contains( b ) )
+			return;
+		seen.insert( b );
+		const QModelIndex ib = src.getBlockIndex( b );
+		if ( !ib.isValid() || src.blockInherits( ib, "BSTriShape" ) || src.blockInherits( ib, "NiCollisionObject" )
+			|| src.blockInherits( ib, "NiLight" ) )
+			return;
+		order.append( b );
+		// the model's frame: the root's own transform is replaced by the placement's, its children keep theirs
+		const bool av = src.blockInherits( ib, "NiAVObject" );
+		const Transform here = ( av && b != roots.first() ) ? up * Transform( &src, ib ) : up;
+		if ( src.blockInherits( ib, "NiParticleSystem" ) ) {
+			systems++;
+			CellPfxSystem f;
+			f.block = order.size() - 1;
+			const QModelIndex iBound = src.getIndex( ib, "Bounding Sphere" );
+			const Vector3 c = iBound.isValid() ? src.get<Vector3>( iBound, "Center" ) : Vector3();
+			const float r = iBound.isValid() ? src.get<float>( iBound, "Radius" ) : 0.0f;
+			f.center = here * c;
+			f.radius = std::max( r, 0.0f ) * here.scale;
+			f.srcShader = src.getLink( ib, "Shader Property" );
+			found.append( f );
+		}
+		if ( av )
+			for ( const int c : src.getChildLinks( b ) )
+				walk( c, here );
+		else
+			for ( const int c : src.getChildLinks( b ) )
+				walk( c, up );
+	};
+	walk( roots.first(), Transform() );
+	if ( !systems )
+		return 0;
+	const qint32 base = nif->getBlockCount();
+	QMap<qint32, qint32> map;	// every source block named: a link to one left out becomes none
+	for ( qint32 b = 0; b < src.getBlockCount(); b++ )
+		map.insert( b, -1 );
+	for ( int i = 0; i < order.size(); i++ )
+		map.insert( order.at( i ), base + i );
+	for ( const qint32 b : order ) {
+		const QModelIndex ib = src.getBlockIndex( b );
+		const QString type = src.createRTTIName( ib );
+		QStringList strings = serializeStrings( &src, ib, type );
+		QByteArray data;
+		QBuffer buf( &data );
+		if ( !buf.open( QIODevice::WriteOnly ) || !src.saveIndex( buf, ib ) ) {
+			*why = QStringLiteral( "%1 %2 would not save" ).arg( type ).arg( b );
+			return -1;
+		}
+		buf.close();
+		const QModelIndex nb = buf.open( QIODevice::ReadOnly ) ? nif->insertNiBlock( type ) : QModelIndex();
+		if ( !nb.isValid() || !nif->loadAndMapLinks( buf, nb, map ) ) {
+			*why = QStringLiteral( "%1 %2 would not load" ).arg( type ).arg( b );
+			return -1;
+		}
+		deserializeStrings( nif, nb, type, strings );
+	}
+	Transform t;
+	t.rotation = rot;
+	t.translation = at;
+	t.scale = scale;
+	t.writeBack( nif, nif->getBlockIndex( base ) );
+	addLink( nif, iParent, QStringLiteral( "Children" ), base );
+	if ( copied )
+		for ( CellPfxSystem f : found ) {
+			f.block += base;
+			copied->append( f );
+		}
+	return systems;
 }
 
 bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
@@ -1777,11 +1969,176 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	int billboardShapes = 0, billboardFlat = 0;
 	/* Lane FXLIT1: in an interior a lit effect shape (the effect-lighting flag) takes a bucket per placement,
 	 * because the game lights it with its MODEL's four placed lights (src/gl/cellfxlit.h). */
-	const bool fxLitOn = spec.interior && spec.overlay == CellOverlay::None;
+	/* lane SUNCELL1 final: exteriors too. The game's lit effect constants (BSEffectShader::SetupGeometry, lit branch)
+	 * take the scene's directional (the sun outdoors) and the placed lights near the model, inside or out. Red
+	 * WW_CELL_FXLIT_EXT_RED=indoors keeps exteriors self-lit, as before. */
+	static const bool fxLitExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
+	const bool fxLitOn = ( spec.interior || !fxLitExtRed ) && spec.overlay == CellOverlay::None;
 	const int fxLitCap = 4096;
 	int fxLitModels = 0, fxLitShapes = 0;
 	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
 	wwCellFxLitBegin( nif );
+	wwCellCullBegin( nif );   // lane SUNCELL1
+
+	/* lane SUNCELL1: PREVIS AND OCCLUSION, READ. The plugin's own visibility data for the loaded cells:
+	 *  - each CELL's RVIS (the cell whose previs file covers it: an exterior 3x3 block shares one), its VISI / PCMB
+	 *    build stamps, XCRI (the precombined meshes and the refs they replace) and XPRI (the refs previs took in);
+	 *  - each block's previs file `vis/<plugin>/<RVIS>.uvd`: its header (magic, size, bounds) and the build string
+	 *    (an Umbra tome; its body, the visibility itself, is not decoded -- so it culls nothing here);
+	 *  - the occlusion primitives the game culls with (PlaneMarker planes and boxes) and, indoors, the rooms
+	 *    (RoomMarker boxes, XLRM linked rooms) and portals (PortalMarker planes, XPOD rooms): handed to gl/cellcull,
+	 *    which the Previs row applies to the camera pass only (casters always cast). */
+	{
+		WwPrevisScene pv;
+		int planes = 0, boxes = 0, linked = 0, toOutside = 0, prevDisabled = 0;
+		QList<quint32> primKeys = primRefs.keys();
+		std::sort( primKeys.begin(), primKeys.end() );
+		for ( const quint32 key : primKeys ) {
+			const EsmRefr & r = primRefs[key];
+			const bool occ = r.base == 0x17U && ( r.primType == 1 || r.primType == 3 );	// PlaneMarker
+			const bool room = r.base == 0x1FU && r.primType == 1;					// RoomMarker
+			const bool portal = r.base == 0x20U && r.primType == 3;				// PortalMarker
+			if ( !occ && !room && !portal )
+				continue;
+			if ( startsDisabled( r ) ) {
+				prevDisabled++;	// a disabled marker culls nothing in game
+				continue;
+			}
+			WwPrevisBox x;
+			x.c = Vector3( r.pos[0], r.pos[1], r.pos[2] ) - origin;
+			cellPrimAxes( r.rot, x.ax );
+			for ( int k = 0; k < 3; k++ )
+				x.half[k] = std::max( std::abs( r.primHalf[k] ) * r.scale, 1.0f );
+			x.type = int( r.primType );
+			x.ref = r.formID;
+			x.from = r.portalFrom;
+			x.to = r.portalTo;
+			for ( const quint32 l : r.linkedRooms )
+				x.linked.push_back( l );
+			if ( occ ) {
+				( r.primType == 3 ? planes : boxes )++;
+				pv.occluders.push_back( std::move( x ) );
+			} else if ( room ) {
+				linked += int( x.linked.size() );
+				pv.rooms.push_back( std::move( x ) );
+			} else {
+				toOutside += ( !x.from || !x.to ) ? 1 : 0;
+				pv.portals.push_back( std::move( x ) );
+			}
+		}
+		fprintf( stderr, "cell previs scene: occluders %d (planes %d, boxes %d), rooms %d (linked %d), portals %d "
+			"(to outside %d), %d disabled markers left out; Previs row %s%s\n", int( pv.occluders.size() ), planes,
+			boxes, int( pv.rooms.size() ), linked, int( pv.portals.size() ), toOutside, prevDisabled,
+			wwCellPrevisOn() ? "on" : "off", wwCellPrevisRed() == 1 ? " RED=casters" : "" );
+		wwCellPrevisSet( nif, std::move( pv ) );
+
+		// the cells' previs fields, grouped by the block that holds their visibility
+		std::map<quint32, std::vector<std::pair<int, int>>> blocks;
+		int cellsRead = 0, cellsRvis = 0, cellsVisi = 0, cellsPcmb = 0;
+		quint64 combRefs = 0, combMeshes = 0, previsRefs = 0;
+		auto readCell = [&]( quint32 form, int cx, int cy ) {
+			const EsmCellPrevis c = world.cellPrevis( form );
+			if ( !c.exists )
+				return;
+			cellsRead++;
+			cellsVisi += c.hasVisi ? 1 : 0;
+			cellsPcmb += c.hasPcmb ? 1 : 0;
+			combRefs += c.combinedRefs;
+			combMeshes += c.combinedMeshes;
+			previsRefs += c.previsRefs;
+			if ( c.rvis ) {
+				cellsRvis++;
+				blocks[c.rvis].push_back( { cx, cy } );
+			} else if ( spec.interior ) {
+				blocks[form].push_back( { cx, cy } );	// an interior with no RVIS: its own file, if any
+			}
+		};
+		if ( spec.interior ) {
+			readCell( world.interior().cellForm, 0, 0 );
+		} else {
+			for ( int y = y0; y <= y1; y++ )
+				for ( int x = x0; x <= x1; x++ )
+					if ( world.hasCell( x, y ) )
+						readCell( world.cellForm( x, y ), x, y );
+		}
+		fprintf( stderr, "cell previs: %d cells read, %d with RVIS in %d previs blocks, VISI %d, PCMB %d; precombined %llu refs "
+			"in %llu meshes; previs refs %llu\n", cellsRead, cellsRvis, int( blocks.size() ), cellsVisi, cellsPcmb,
+			(unsigned long long)combRefs, (unsigned long long)combMeshes, (unsigned long long)previsRefs );
+		const QStringList plugs = spec.plugins.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+		static const QRegularExpression verRx( QStringLiteral( "(\\d+\\.\\d+\\.\\d+)" ) );
+		for ( const auto & b : blocks ) {
+			const quint32 f = b.first;
+			const int idx = int( f >> 24 );
+			const QString plugin = idx < plugs.size() ? QFileInfo( plugs.at( idx ).trimmed() ).fileName()
+				: QStringLiteral( "Fallout4.esm" );
+			QByteArray u;
+			QString path;
+			for ( const quint32 name : { f, f & 0x00FFFFFFU } ) {
+				path = QStringLiteral( "vis/%1/%2.uvd" ).arg( plugin ).arg( name, 8, 16, QLatin1Char( '0' ) );
+				if ( lodgenReadVisFile( dataRoot, path, u ) && u.size() >= 44 )
+					break;
+				u.clear();
+			}
+			if ( u.isEmpty() ) {
+				fprintf( stderr, "cell previs block %08X: %d loaded cells; file %s not found\n", f, int( b.second.size() ),
+					qPrintable( path ) );
+				continue;
+			}
+			float bb[6];
+			for ( int k = 0; k < 6; k++ ) {
+				const quint32 w = cellLe32( u, 20 + 4 * k );
+				std::memcpy( &bb[k], &w, 4 );
+			}
+			// the build string: the first printable run of 16+ bytes in the header
+			QString build;
+			const int lim = std::min<int>( int( u.size() ), 2048 );
+			for ( int i = 44, run = 0; i < lim; i++ ) {
+				const unsigned char ch = uchar( u.at( i ) );
+				if ( ch >= 32 && ch < 127 ) {
+					run++;
+					continue;
+				}
+				if ( run >= 16 ) {
+					build = QString::fromLatin1( u.constData() + i - run, run );
+					break;
+				}
+				run = 0;
+			}
+			const QRegularExpressionMatch vm = verRx.match( build );
+			bool covers = !spec.interior;
+			for ( const auto & c : b.second )
+				covers = covers && bb[0] <= float( c.first ) * CELL_UNITS + 1.0f && bb[3] >= float( c.first + 1 ) * CELL_UNITS - 1.0f
+					&& bb[1] <= float( c.second ) * CELL_UNITS + 1.0f && bb[4] >= float( c.second + 1 ) * CELL_UNITS - 1.0f;
+			fprintf( stderr, "cell previs block %08X: %d loaded cells; file %s %d bytes, magic %08X, size field %u, "
+				"tome %s, bounds %.0f,%.0f,%.0f..%.0f,%.0f,%.0f = %.2fx%.2f cells, covers its cells %s; visibility not decoded "
+				"(Umbra tome body)\n", f, int( b.second.size() ), qPrintable( path ), int( u.size() ), cellLe32( u, 0 ),
+				cellLe32( u, 8 ), vm.hasMatch() ? qPrintable( vm.captured( 1 ) ) : "unknown", bb[0], bb[1], bb[2], bb[3], bb[4],
+				bb[5], ( bb[3] - bb[0] ) / CELL_UNITS, ( bb[4] - bb[1] ) / CELL_UNITS,
+				spec.interior ? "n/a (interior)" : covers ? "yes" : "NO" );
+			/* lane SUNCELL1 (last round): THE TOME'S HEADER AND OBJECT TABLE, as the game's Umbra 3.3.17 runtime reads
+			 * them (Todd's treat: the Umbra::ImpTome / Umbra::Tome getters; every offset is a getter's displacement,
+			 * self-relative offsets from the tome's start, 0 = absent). The object user IDs are form IDs: placed
+			 * references, or 0xFD...... ids (the combined meshes'). The body the game's query walks (tiles, their
+			 * KD trees, cells, portals, the occlusion raster of Umbra::Query::queryPortalVisibility) is NOT decoded,
+			 * so nothing is culled by it; the occluder / room path stays the cull. */
+			{
+				const auto u32At = [&u]( qint64 o ) -> quint32 { return o >= 0 && o + 4 <= u.size() ? cellLe32( u, int( o ) ) : 0U; };
+				const bool magicOk = ( u32At( 0x00 ) & 0xFFFF0000U ) == 0xD6000000U && u32At( 0x08 ) == quint32( u.size() );
+				const quint32 nObj = u32At( 0x40 ), oUid = u32At( 0x50 ), oStarts = u32At( 0x4c );
+				const quint32 nTiles = u32At( 0x90 ), oCellStarts = u32At( 0x88 );
+				quint32 refs = 0, combined = 0;
+				bool uidsOk = magicOk && oStarts == 0 && oUid != 0 && qint64( oUid ) + 4 * qint64( nObj ) <= u.size();
+				if ( uidsOk )
+					for ( quint32 i = 0; i < nObj; i++ )
+						( ( u32At( qint64( oUid ) + 4 * i ) >> 24 ) == 0xFDU ? combined : refs )++;
+				const quint32 nCells = oCellStarts ? u32At( qint64( oCellStarts ) + 4 * qint64( nTiles ) ) : 0U;
+				fprintf( stderr, "cell previs tome %08X: %s objects %u (%u reference ids, %u combined ids), clusters %u, tiles %u "
+					"(%u leaf), cells %u, gates %u; body not decoded (tiles, KD trees, portals)\n", f,
+					magicOk ? "header read," : "header NOT a 3.x tome,", nObj, refs, combined, u32At( 0x7c ), nTiles,
+					u32At( 0x8c ), nCells, u32At( 0x68 ) );
+			}
+		}
+	}
 	wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
 	wwCellLandBegin( nif );    // lane TERRBLEND1: forget the last cell's blended-ground shapes
 	QHash<quint32, WwWaterRecord> placedWaterRecs;   // lane WATER1: WNAM form -> its record (form 0 = unreadable)
@@ -1966,7 +2323,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	const bool alphaPin = qgetenv( "WW_CELL_ALPHATEST_PIN" ).trimmed() == "off";
 	/* lane GPURELIGHT1: WW_CELL_GI_GPU or WW_CELL_GI_DOORS: the doors' own triangles go into the soup's doorGeom (a
 	 * closed door stops light by its faces, lets it through its alpha-test holes, tints it through its panes) */
-	const bool giDoorGeom = baking && ( !qgetenv( "WW_CELL_GI_GPU" ).isEmpty() || !qgetenv( "WW_CELL_GI_DOORS" ).isEmpty() );
+	const bool giDoorGeom = baking && ( wwCellGiGpuOn() || !qgetenv( "WW_CELL_GI_DOORS" ).isEmpty() );
 	int dgShapes = 0, dgMasked = 0, dgGlass = 0, dgGlassUnread = 0, dgDropped = 0;
 	// Measurement pin only: WW_CELL_ALPHATEST_FOLIAGE=keep puts landscape\ alpha-tested cards in the soup with their mask.
 	const bool foliageKeep = qgetenv( "WW_CELL_ALPHATEST_FOLIAGE" ).trimmed() == "keep";
@@ -2994,6 +3351,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 					hi[k] = qMax( hi[k], wp[k] );
 				}
 			}
+			b.runStart.push_back( quint32( b.tris.size() ) );   // lane SUNCELL1: one culling run per placed shape
 			for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 				b.tris.push_back( BucketTri{ { quint32( base + int( s.geom.tris[t + 0] ) ),
 					quint32( base + int( s.geom.tris[t + 1] ) ),
@@ -3999,6 +4357,136 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		}
 	}
 
+	/* lane SUNCELL1: THE PARTICLES. The weld takes triangle shapes only (lodgen.cpp), so a placed model's
+	 * particle systems (steam, smoke, fire, sparks, dust) never reached the cell, and a model of particles alone
+	 * was a failed model. With the Particles row on, each placed model whose parse found one has its systems
+	 * copied in under the reference's transform (cellCopyParticleBranch); the viewer's simulation runs them and
+	 * Particles::drawShapes draws them with the cell's effect law (linear light, the fog, the HDR frame or the
+	 * imagespace), as the game draws its particles with the effect shader. A disabled reference and an actor
+	 * carry none. WW_CELL_PARTICLES_MAX (512) caps the copies. */
+	if ( ok && !bakeLean ) {
+		if ( wwCellParticlesOn() ) {
+			static const int cap = qEnvironmentVariableIsSet( "WW_CELL_PARTICLES_MAX" )
+				? qEnvironmentVariableIntValue( "WW_CELL_PARTICLES_MAX" ) : 512;
+			QHash<QString, std::shared_ptr<NifModel>> pfxSrc;	// one parse a model; null = unusable
+			QPersistentModelIndex iPfx;
+			int pfxCopies = 0, pfxSystems = 0, pfxModels = 0, pfxRefused = 0, pfxCapped = 0;
+			int pfxLitSystems = 0, pfxLitModels = 0, pfxLitCapped = 0;
+			QHash<QString, bool> pfxBgemLit;	// a BGEM path (lower case) -> lit
+			QString pfxWhy;
+			for ( const Placement & p : placements ) {
+				if ( !p.actorKey.isEmpty() || p.disabled )
+					continue;
+				const QString model = world.lodBase( p.base ).model;
+				if ( model.isEmpty() || !lodgenModelHasParticles( model ) )
+					continue;
+				if ( pfxCopies >= cap ) {
+					pfxCapped++;
+					continue;
+				}
+				const QString key = model.toLower();
+				auto it = pfxSrc.find( key );
+				if ( it == pfxSrc.end() ) {
+					auto m = std::make_shared<NifModel>();
+					QByteArray bytes;
+					QBuffer dev( &bytes );
+					bool good = lodgenReadModelBytes( dataRoot, model, bytes ) && dev.open( QIODevice::ReadOnly )
+						&& m->load( dev, model.toLocal8Bit().constData() );
+					if ( good ) {
+						m->resetState();
+						good = m->getVersionNumber() == nif->getVersionNumber() && m->getBSVersion() == nif->getBSVersion();
+					}
+					if ( !good ) {
+						m.reset();
+						pfxRefused++;
+						pfxWhy = QStringLiteral( "%1 unreadable or not this version" ).arg( model );
+					} else {
+						pfxModels++;
+					}
+					it = pfxSrc.insert( key, m );
+				}
+				if ( !it.value() )
+					continue;
+				if ( !iPfx.isValid() ) {
+					QModelIndex iP = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+					nif->set<QString>( iP, "Name", QStringLiteral( "particles" ) );
+					nif->set<quint32>( iP, "Flags", 14 );
+					nif->set<float>( iP, "Scale", 1.0f );
+					addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iP ) );
+					iPfx = iP;
+				}
+				QVector<CellPfxSystem> copied;
+				const int n = cellCopyParticleBranch( nif, QModelIndex( iPfx ), *it.value(), p.pos - origin, p.rot, p.scale,
+					&pfxWhy, &copied );
+				/* lane SUNCELL1 (last round): A LIT PARTICLE. In the game the effect technique's Lit bit comes from the
+				 * property's lighting flag alone, beside Ptcl (Todd's treat: BSEffectShaderProperty::DetermineTechniqueID),
+				 * and the lit particle pixel shader sums the same four placed lights as a lit effect card. So a copied
+				 * system whose effect property is lit (the BGEM's Effect Lighting and influence, or Shader Flags 2 bit 30
+				 * and Lighting Influence, the welded shapes' rule) joins FXLIT1's table as one more placed model: its
+				 * bound is the merge of its lit systems' spheres, placed by the reference. Interiors only, as FXLIT1. */
+				if ( n > 0 && fxLitOn ) {
+					NifModel & sm = *it.value();
+					int serial = -1;
+					float all[4] = { 0.0f, 0.0f, 0.0f, -1.0f };
+					QVector<qint32> litBlocks;
+					for ( const CellPfxSystem & f : copied ) {
+						const QModelIndex iSh = sm.getBlockIndex( f.srcShader );
+						if ( !iSh.isValid() || !sm.blockInherits( iSh, "BSEffectShaderProperty" ) )
+							continue;
+						const QString mat = sm.get<QString>( iSh, "Name" );
+						bool lit;
+						if ( mat.endsWith( QStringLiteral( ".bgem" ), Qt::CaseInsensitive ) ) {
+							const QString mk = mat.toLower();
+							auto bl = pfxBgemLit.constFind( mk );
+							if ( bl == pfxBgemLit.constEnd() )
+								bl = pfxBgemLit.insert( mk, lodgenEffectMaterialLit( dataRoot, mat ) );
+							lit = bl.value();
+						} else {
+							lit = ( sm.get<quint32>( iSh, "Shader Flags 2" ) & 0x40000000U )
+								&& sm.get<quint8>( iSh, "Lighting Influence" ) > 0;
+						}
+						if ( !lit )
+							continue;
+						const float one[4] = { f.center[0], f.center[1], f.center[2], f.radius };
+						wwCellFxLitMerge( all, one );
+						litBlocks.append( f.block );
+					}
+					if ( !litBlocks.isEmpty() && fxLitModels >= fxLitCap ) {
+						pfxLitCapped++;
+					} else if ( !litBlocks.isEmpty() ) {
+						const Vector3 wc = p.pos + p.rot * ( Vector3( all[0], all[1], all[2] ) * p.scale );
+						WwFxLitModel m;
+						for ( int k = 0; k < 3; k++ )
+							m.center[k] = wc[k];
+						m.radius = std::max( all[3], 0.0f ) * p.scale;
+						m.ref = p.ref;
+						m.model = model;
+						serial = wwCellFxLitModel( nif, m );
+						fxLitModels++;
+						pfxLitModels++;
+						for ( const qint32 b : litBlocks )
+							wwCellFxLitShape( nif, b, serial );
+						pfxLitSystems += litBlocks.size();
+					}
+				}
+				if ( n > 0 ) {
+					pfxCopies++;
+					pfxSystems += n;
+				} else if ( n < 0 ) {
+					pfxRefused++;
+				}
+			}
+			fprintf( stderr, "cell particles: %d systems in %d copies of %d models (%d refused%s%s, %d past the cap of %d)\n",
+				pfxSystems, pfxCopies, pfxModels, pfxRefused, pfxWhy.isEmpty() ? "" : ": last ",
+				qPrintable( pfxWhy ), pfxCapped, cap );
+			fprintf( stderr, "cell particles lit: %d systems of %d placed models registered with their placed lights%s (%d past the lit cap)\n",
+				pfxLitSystems, pfxLitModels, fxLitOn ? ( spec.interior ? " (interior)" : " (exterior: the sun is the base)" )
+					: " (off: exterior self-lit, red WW_CELL_FXLIT_EXT_RED=indoors)", pfxLitCapped );
+		} else {
+			fprintf( stderr, "cell particles: off (the Particles row)\n" );
+		}
+	}
+
 	/* THE PICK HIGHLIGHT (lane CELLVIEW2) -- created ONCE, here, and MOVED on
 	 * every click (src/cellclick.h). The scene WELDS, so the picked reference
 	 * is a few hundred vertices inside a shape holding a hundred thousand and
@@ -4047,7 +4535,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			/* lane GPURELIGHT1: WW_CELL_GI_GPU=1 records the relight's operators (the lights that start off too, each
 			 * with its FARVIEW1b group key), then relights from them on the CPU and on the GPU, doors open and every
 			 * door closed, and states the timings; WW_CELL_GI_RECORDS=<folder> writes the shared light record */
-			const bool giGpu = !qgetenv( "WW_CELL_GI_GPU" ).isEmpty();
+			const bool giGpu = wwCellGiGpuOn();
 			/* lane FARVIEW1: WW_CELL_FARLIGHT=<folder> records the operators too, writes the light record and the far light's
 			 * layers there (src/farlight.h), and publishes the far tables for the Far light row */
 			const QString farDir = QString::fromLocal8Bit( qgetenv( "WW_CELL_FARLIGHT" ) );
@@ -4376,7 +4864,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		  << billboardFlat << " welded flat" << ( glowRed ? " (WW_CELL_GLOW_RED)" : "" ) << "\n";
 		// lane FXLIT1
 		s << "  lit effects: " << fxLitShapes << " shapes of " << fxLitModels
-		  << " placed models take their four placed lights\n";
+		  << " placed models take their four placed lights"
+		  << ( spec.interior ? "" : fxLitOn ? " (exterior: the sun is the base)" : " (exterior off: RED=indoors)" ) << "\n";
 		if ( groundNote.isEmpty() ) {   // lane CELLVIEW2
 			s << "  ground: " << landsDrawn << " LAND cells, vertex colour only"
 			  << " (the splat layers are NOT sampled -- that is the terrain bake's compositor)\n";

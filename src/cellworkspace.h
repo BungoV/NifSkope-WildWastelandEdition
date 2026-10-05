@@ -209,7 +209,18 @@ private:
 	QCheckBox * cellGi = nullptr;       // lane PRTPGI: add the bake's bounce of those lights
 	QCheckBox * cellFar = nullptr;      // lane FARVIEW1: past the band, the surfels' baked light in place of the lights
 	QCheckBox * cellIs = nullptr;       // lane IMGS1: the cell's imagespace (exposure, curve, grade, LUT)
+	QCheckBox * cellCull = nullptr;     // lane SUNCELL1: per-placement culling (gl/cellcull.h); ships off
+	QCheckBox * cellPrevis = nullptr;   // lane SUNCELL1: occlusion planes / boxes, rooms and portals (gl/cellcull.h); ships off
 	QCheckBox * cellTaa = nullptr;      // lane MOTION1: the game's temporal AA (one state with the Scene popup's row)
+	// lane CELLALL1: the second row, the features that were env-only (their defaults unchanged; new ones ship off)
+	QCheckBox * cellAo = nullptr;
+	QCheckBox * cellShadow = nullptr;
+	QCheckBox * cellWater = nullptr;
+	QCheckBox * cellSsr = nullptr;
+	QCheckBox * cellSsrExt = nullptr;
+	QCheckBox * cellAoDecal = nullptr;
+	QCheckBox * cellGiGpu = nullptr;
+	QCheckBox * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off
 	QComboBox * cellPass = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
 	QPushButton * probesPlace = nullptr;
 	QPushButton * probesBake = nullptr;

@@ -28,6 +28,63 @@ struct Texture {
 };
 
 #include "uniforms.glsl"
+#ifdef WW_CELLLIGHTS
+/* lane SUNCELL1 (particles_cell.frag): the game draws its particles with the effect shader, so in the cell view a
+ * particle takes the cell effect's output law (fo4_effectshader.frag, lane EFX2): the colour decoded to linear,
+ * fogged (an additive one dimmed, a blended one fogged toward the fog colour), then linear into the HDR frame,
+ * or the cell's imagespace, or encoded again. */
+#include "lookdev_fog.glsl"
+#include "cell_lights.glsl"
+uniform bool fxAdditive;
+/* lane SUNCELL1 (last round): A LIT PARTICLE. The game's effect technique sets Lit from the property's lighting
+ * flag alone, beside Ptcl (Todd's treat: BSEffectShaderProperty::DetermineTechniqueID), so a particle whose
+ * effect shader is lit takes the same placed lights as a lit effect card (lane FXLIT1, fo4_effectshader.frag):
+ * mix( 1, directional + the model's four lights, lighting influence ), in linear light, before the fog.
+ * glparticles.cpp sets these from src/gl/cellfxlit.h; fxLitMode 0 = unlit, as before. */
+uniform float lightingInfluence;
+uniform int fxLitMode;			// 0 unlit; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
+uniform vec4 fxLit;				// indices into cellLights, -1 = none
+uniform vec4 fxLitScale;		// 1 (a red control's per-light ratio)
+/* lane SUNCELL1 final: the game's particle shaders raise the WHOLE vertex colour to 2.2, alpha too (log / mul 2.2 /
+ * exp on v2.xyzw, asm 00613 / 00604 / 00903); true = the red WW_CELL_PARTICLES_RED=linalpha (alpha as written) */
+uniform bool pfxAlphaRed;
+
+vec3 cellFxLight( int i, vec3 P )
+{
+	vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
+	vec4 t1 = texelFetch( cellLights, i * CELL_TPL + 1 );
+	vec3 Lv = t0.xyz - P;
+	float d = length( Lv );
+	float q = clamp( d / max( t0.w, 0.001 ), 0.0, 1.0 );
+	float a = 1.0 - q * q;
+	if ( ( fxLitMode & 4 ) == 0 )
+		a = pow( a, 2.2 );
+	if ( t1.w > -1.5 ) {	// a spot: the game's cone, its cosine + 0.001
+		vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
+		float c = clamp( dot( -Lv / max( d, 0.001 ), t2.xyz ), 0.0, 1.0 );
+		float base = clamp( 1.0 - ( 1.0 - c ) / max( 1.0 - ( t1.w + 0.001 ), 1e-4 ), 0.0, 1.0 );
+		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
+	}
+	return t1.rgb * a;
+}
+
+vec3 cellFxLit( vec3 P )
+{
+	// lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
+	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir ) )
+		return vec3( 1.0 );
+	vec3 E = cellHasDir ? cellDirColor : vec3( 0.0 );
+	if ( ( fxLitMode & 2 ) != 0 ) {
+		for ( int i = 0; i < cellLightCount; i++ )
+			E += cellFxLight( i, P );
+	} else {
+		for ( int k = 0; k < 4; k++ )
+			if ( fxLit[k] > -0.5 )
+				E += cellFxLight( int( fxLit[k] + 0.5 ), P ) * fxLitScale[k];
+	}
+	return mix( vec3( 1.0 ), E, lightingInfluence );
+}
+#endif
 
 uniform sampler2D textureUnits[10];
 uniform Texture textures[10];
@@ -135,5 +192,28 @@ void main()
 		color.rgb += cube * envReflection * falloff * coverage;
 	}
 
+#ifdef WW_CELLLIGHTS
+	if ( cellOn ) {
+		if ( cellProbe != 0 && cellProbe != 6 )
+			discard;	// the probe passes read surfaces; a particle is none
+		if ( !pfxAlphaRed )
+			color.a = baseMap.a * pow( max( C.a, 0.0 ), 2.2 );	// texture alpha (falloff folded in) x vertex alpha^2.2
+		vec3 lin = pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
+		if ( fxLitMode != 0 )
+			lin *= cellFxLit( cellWorldPos( -ViewDir ) );	// a lit particle, before the fog
+		if ( fogOn ) {
+			vec3 posView = -ViewDir;
+			float hb;
+			vec3 fogCol;
+			float f = wwFogEval( length( posView ) * fogDistScale, dot( fogView.xyz, posView ) + fogView.w, hb, fogCol );
+			lin = fxAdditive ? lin * ( 1.0 - f ) : mix( lin, fogCol, f );
+		}
+		if ( cellProbe == 6 )
+			fragColor = vec4( lin, color.a );	// the imagespace's measure: the linear value, blended as drawn
+		else
+			fragColor = vec4( cellIsLinear ? lin : cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, vec3( 1.0 / 2.2 ) ), color.a );
+		return;
+	}
+#endif
 	fragColor = color;
 }

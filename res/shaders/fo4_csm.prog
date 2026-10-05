@@ -1,0 +1,4 @@
+# fo4_default with the Lookdev sun cascades compiled in (lane SUNCELL1). No conditions:
+# Renderer::setupProgram swaps it in by name for fo4_default.prog while the cascades are wanted.
+
+shaders fo4_default.vert fo4_csm.frag

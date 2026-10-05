@@ -35,8 +35,15 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cmath>
 
 #include <QRegularExpression>
+#include <QSet>
 
+#include <cstdio>
+
+#include "gl/cellhdr.h"	// lane SUNCELL1: the HDR frame's stencil
+#include "gl/celllights.h"	// lane SUNCELL1: the cell effect law
+#include "gl/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights
 #include "gl/controllers.h"
+#include "gl/lookdevstage.h"	// lane SUNCELL1: the weather fog
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -283,7 +290,13 @@ void Particles::drawShapes( NodeList * secondPass )
 		return;
 	}
 
-	auto	prog = scene->renderer->useProgram( !scene->selecting ? "particles.prog" : "selection.prog" );
+	/* lane SUNCELL1: in the cell view a particle draws with the cell's effect law (particles_cell.prog: linear, the
+	 * fog, the HDR frame or the imagespace), as the game draws its particles with the effect shader. Red
+	 * WW_CELL_PARTICLES_RED=viewer keeps the viewer's program (sRGB as written, no fog, no stencil). */
+	static const bool cellPfxRed = qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "viewer";
+	const bool cellPfx = !scene->selecting && !cellPfxRed && wwCellLightsWanted( scene );
+	auto	prog = scene->renderer->useProgram( scene->selecting ? "selection.prog"
+		: cellPfx ? "particles_cell.prog" : "particles.prog" );
 	if ( !prog )
 		return;
 
@@ -332,6 +345,82 @@ void Particles::drawShapes( NodeList * secondPass )
 				glBlendFunc( blendMap[( flags >> 1 ) & 0xf], blendMap[( flags >> 5 ) & 0xf] );
 			else
 				glBlendFunc( GL_SRC_ALPHA, GL_ONE );
+		}
+
+		if ( cellPfx ) {
+			// lane SUNCELL1: the cell's uniforms (fog first: the cell's own fog indoors overrides the weather's),
+			// additive from the blend just set, and the frame's stencil as Renderer::setupProgram marks an effect
+			GLint dst = 0;
+			glGetIntegerv( GL_BLEND_DST_RGB, &dst );
+			const bool additive = glIsEnabled( GL_BLEND ) && dst == GL_ONE;
+			wwLookdevFogUniforms( scene );
+			wwCellLightsUniforms( scene );
+			prog->uni1b( "fxAdditive", additive );
+			/* lane SUNCELL1 (last round): A LIT PARTICLE. The game's technique sets Lit from the property's
+			 * lighting flag beside Ptcl, so a system the cell registered as a lit effect (src/cellview.cpp, the
+			 * particles) takes its model's four placed lights, as a lit effect card does (FXLIT1). fxLitMode stays 0
+			 * for any other system. Red WW_CELL_PARTICLES_RED=unlit draws every particle unlit, as before. */
+			static const bool litRed = qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "unlit";
+			const int litBlock = scene->nifModel->getBlockNumber( iBlock );
+			const auto * espLit = dynamic_cast<const BSEffectShaderProperty *>( shaderProp );
+			wwCellFxLitUniforms( scene, litBlock );
+			prog->uni1f( "lightingInfluence", espLit ? espLit->lightingInfluence : 0.0f );
+			if ( litRed )
+				prog->uni1i( "fxLitMode", 0 );
+			const bool litNow = !litRed && wwCellFxLitFor( scene->nifModel, litBlock ) != nullptr;
+			const char * frame = "plain";
+			if ( wwCellImageSpaceIsMeasuring() ) {
+				const bool fx = wwCellImageSpaceMeasuresEffects();
+				glColorMask( fx, fx, fx, fx );
+				glDepthMask( GL_FALSE );
+				glEnable( GL_STENCIL_TEST );
+				glStencilMask( 0x02 );
+				glStencilFunc( GL_ALWAYS, 2, 0xFF );
+				glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+				frame = "measure";
+			} else if ( wwCellHdrActive() ) {
+				glEnable( GL_STENCIL_TEST );
+				glStencilMask( 0x03 );
+				glStencilFunc( GL_ALWAYS, 1, 0xFF );
+				glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+				frame = "hdr linear";
+			}
+			// telemetry: the systems drawn this way, said at 1, 2, 4, 8, ... distinct systems
+			static QSet<const void *> drawn;
+			if ( !drawn.contains( this ) ) {
+				drawn.insert( this );
+				const int n = int( drawn.size() );
+				if ( ( n & ( n - 1 ) ) == 0 )
+					fprintf( stderr, "cell particles drawn: %d systems so far with particles_cell.prog (latest %s: %d live, %s, %s frame)\n",
+						n, qPrintable( getName() ), active, additive ? "additive" : "blended", frame );
+			}
+			// telemetry: the lit systems drawn, said at 1, 2, 4, 8, ... (or the red, once)
+			static QSet<const void *> litDrawn;
+			if ( litNow && !litDrawn.contains( this ) ) {
+				litDrawn.insert( this );
+				const int n = int( litDrawn.size() );
+				if ( ( n & ( n - 1 ) ) == 0 )
+					fprintf( stderr, "cell particles lit: %d systems so far take their model's placed lights (latest %s, influence %.3f)\n",
+						n, qPrintable( getName() ), espLit ? double( espLit->lightingInfluence ) : 0.0 );
+			}
+			static bool litRedSaid = false;
+			if ( litRed && !litRedSaid ) {
+				litRedSaid = true;
+				fprintf( stderr, "cell particles lit: off (red WW_CELL_PARTICLES_RED=unlit)\n" );
+			}
+			/* lane SUNCELL1 final: the vertex ALPHA takes the 2.2 too. Every particle pixel shader of the game (lit
+			 * Ptcl|Lit|Pma asm 00613, unlit 00604 / 00903) opens with log/mul 2.2/exp on v2.xyzw, so the colour AND
+			 * the alpha of the vertex colour are raised to 2.2 before the texture multiply. Red
+			 * WW_CELL_PARTICLES_RED=linalpha keeps the vertex alpha as written, as before. */
+			static const bool alphaRed = qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "linalpha";
+			prog->uni1b( "pfxAlphaRed", alphaRed );
+			static bool alphaSaid = false;
+			if ( !alphaSaid ) {
+				alphaSaid = true;
+				fprintf( stderr, "cell particles alpha: %s\n", alphaRed
+					? "vertex alpha as written (red WW_CELL_PARTICLES_RED=linalpha)"
+					: "texture alpha x vertex alpha^2.2, as the game's particle shaders" );
+			}
 		}
 
 		// setup vertex colors

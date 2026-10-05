@@ -33,6 +33,11 @@ void wwCellWaterBegin( const void * nif );
 void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec );
 //! True when `block` draws as water this frame (the row on, not pinned off, a registered water shape).
 bool wwCellWaterWanted( Scene * scene, int block );
+//! Lane SUNCELL1: `block` is a registered water surface (row or not): it never casts a sun shadow, as in the game.
+bool wwCellWaterIsShape( const void * nif, int block );
+//! lane CELLALL1: the Water row (WW/CellWater, default on as before); the pin WW_CELL_WATER wins
+bool wwCellWaterOn();
+void wwCellWaterSetOn( bool on );
 //! With fo4_water.prog bound for `block`: the record, the sky, the textures. False = draw it the old way.
 bool wwCellWaterUniforms( Scene * scene, int block, int firstTextureUnit );
 //! Lane WATER2: a water surface of this scene draws as water and its WATR's SSR flag is set (cellssr.h).

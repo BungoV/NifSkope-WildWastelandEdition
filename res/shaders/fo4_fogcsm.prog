@@ -1,0 +1,4 @@
+# fo4_default with the Lookdev weather fog and the sun cascades compiled in (lane SUNCELL1).
+# Renderer::setupProgram swaps it in by name while a draw fogs and the cascades are wanted.
+
+shaders fo4_default.vert fo4_fogcsm.frag

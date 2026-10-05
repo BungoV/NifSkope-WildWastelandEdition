@@ -14,6 +14,9 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
+#include "gl/lookdevstage.h"	// lane SUNCELL1
+#include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
+#include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -22,6 +25,8 @@ BSD License - see nifskope.h
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace
@@ -78,6 +83,7 @@ struct ClState
 	QHash<const void *, ClBloom> bloom;     // lane BLOOM1: the last measure's bloom per document
 	int nextBloomVersion = 1;
 	bool shadowOn = true;   // lane SHADOW1: WW_CELL_SHADOW=0 turns the maps off (the harness's unshadowed pass)
+	bool shadowPinned = false;	// lane CELLALL1: the Light shadows row (WW/CellShadow); the pin wins
 	bool shadowRed = false; // WW_CELL_SHADOW_RED=noshadow: the maps rendered, every factor read as 1
 	QString shadowLast = QStringLiteral( "none yet" );
 	int fogProbe = 0;       // lane FOG2: WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog colour ^ 1/2.2) | 8 (its d, z), per fragment
@@ -127,7 +133,9 @@ ClState & st()
 		const QByteArray isRed = qgetenv( "WW_CELL_IS_RED" ).trimmed();
 		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : isRed == "nobloom" ? 8
 			: isRed == "nofx" ? 16 : 0;
-		s.shadowOn = qgetenv( "WW_CELL_SHADOW" ).trimmed() != "0";
+		const QByteArray shPin = qgetenv( "WW_CELL_SHADOW" ).trimmed();
+		s.shadowPinned = !shPin.isEmpty();
+		s.shadowOn = s.shadowPinned ? shPin != "0" : QSettings().value( QStringLiteral( "WW/CellShadow" ), true ).toBool();
 		s.shadowRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
 		s.fogProbe = qEnvironmentVariableIntValue( "WW_CELL_FOG_PROBE" );
 		const QByteArray giAmb = qgetenv( "WW_CELL_GI_AMB" ).trimmed();	// lane GICAL1
@@ -200,6 +208,7 @@ struct Gpu
 	GLuint lutTex = 0;
 	const void * lutDoc = nullptr;
 	int lutVersion = 0;
+	int lutStamp = -1;	// lane SUNCELL1: the exterior imagespace's stamp the LUT was uploaded at
 	GLuint bloomTex = 0;
 	GLuint farSlotBuf = 0, farSlotTex = 0, farRecBuf = 0, farRecTex = 0, farPlacedTex = 0;	// lane FARVIEW1
 	const void * farDoc = nullptr;
@@ -219,6 +228,103 @@ QHash<const void *, Gpu> & gpus()
 {
 	static QHash<const void *, Gpu> g;
 	return g;
+}
+
+/* lane SUNCELL1: AN EXTERIOR'S IMAGESPACE IS THE WEATHER'S. An interior keeps its XCIM imagespace (lane IMGS1); an
+ * exterior has none of its own, the game uses the weather's IMSP at the hour (the two colour keys, blended).
+ * isLighting() hands the imagespace sites the document's lighting with those fields filled from the Lookdev
+ * weather (wwLookdevImageSpace), re-filled when the weather or the hour's keys move. No Lookdev weather: the
+ * document's own lighting, so the exterior draws as before (no imagespace). */
+struct ExIs
+{
+	QString key;
+	WwCellLighting L;
+	int stamp = 0;
+};
+
+QHash<const void *, ExIs> & exIs()
+{
+	static QHash<const void *, ExIs> m;
+	return m;
+}
+
+//! the 256x16 B8G8R8 strip -> 16^3 RGB8, r fastest (src/cellview.cpp's reader, lane IMGS1)
+bool decodeLutStrip( const QByteArray & dds, std::vector<unsigned char> & out )
+{
+	auto u32 = [&]( int o ) { quint32 v = 0; std::memcpy( &v, dds.constData() + o, 4 ); return v; };
+	if ( !( dds.size() >= 128 + 256 * 16 * 3 && dds.startsWith( "DDS " ) && u32( 12 ) == 16 && u32( 16 ) == 256
+		&& ( u32( 80 ) & 0x40 ) && u32( 88 ) == 24 && u32( 92 ) == 0xff0000 ) )
+		return false;
+	const unsigned char * px = reinterpret_cast<const unsigned char *>( dds.constData() ) + 128;
+	out.resize( 16 * 16 * 16 * 3 );
+	for ( int b = 0; b < 16; b++ )
+		for ( int g = 0; g < 16; g++ )
+			for ( int r = 0; r < 16; r++ ) {
+				const unsigned char * q = px + ( g * 256 + b * 16 + r ) * 3;
+				unsigned char * o = &out[size_t( ( ( b * 16 + g ) * 16 + r ) * 3 )];
+				o[0] = q[2];
+				o[1] = q[1];
+				o[2] = q[0];
+			}
+	return true;
+}
+
+bool loadLut( const QString & lut, const QString & dataRoot, std::vector<unsigned char> & out )
+{
+	if ( lut.isEmpty() )
+		return false;
+	QByteArray dds;
+	bool got = Game::GameManager::get_file( dds, Game::FALLOUT_4, lut, "textures", ".dds" );
+	if ( !got && !dataRoot.isEmpty() ) {
+		QFile lf( dataRoot + QStringLiteral( "/Textures/" ) + QString( lut ).replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) ) );
+		got = lf.open( QIODevice::ReadOnly ) && !( dds = lf.readAll() ).isEmpty();
+	}
+	return got && decodeLutStrip( dds, out );
+}
+
+const WwCellLighting * isLighting( const void * nif, int * stamp = nullptr )
+{
+	if ( stamp )
+		*stamp = 0;
+	const WwCellLighting * L = nif ? wwCellLightsFor( nif ) : nullptr;
+	if ( !L || L->interior || !wwLookdevActive() )
+		return L;
+	WwLookdevIs w;
+	if ( !wwLookdevImageSpace( w ) )
+		return L;
+	ExIs & e = exIs()[nif];
+	if ( e.key != w.key ) {
+		e.key = w.key;
+		e.L = *L;
+		e.L.hasImageSpace = true;
+		e.L.isName = QStringLiteral( "weather:" ) + w.name;
+		std::copy( w.hdr, w.hdr + 9, e.L.isHdr );
+		std::copy( w.cine, w.cine + 3, e.L.isCine );
+		std::copy( w.tint, w.tint + 4, e.L.isTint );
+		e.L.isLut.clear();
+		e.L.isLutPath.clear();
+		std::vector<unsigned char> a, b;
+		const bool gotA = loadLut( w.lutA, L->dataRoot, a );
+		const bool gotB = w.t > 0.0f && loadLut( w.lutB, L->dataRoot, b );
+		if ( gotA && gotB ) {	// the two keys' LUTs blended: the same as blending their outputs (linear sampling)
+			e.L.isLut.resize( a.size() );
+			for ( size_t i = 0; i < a.size(); i++ )
+				e.L.isLut[i] = (unsigned char) std::lround( float( a[i] ) + ( float( b[i] ) - float( a[i] ) ) * w.t );
+			e.L.isLutPath = w.lutA + QStringLiteral( "->" ) + w.lutB;
+		} else if ( gotA ) {
+			e.L.isLut = a;
+			e.L.isLutPath = w.lutA;
+		}
+		e.stamp++;
+		std::fprintf( stderr, "cell imagespace: exterior=%s hdr=%g,%g,%g,%g,%g,%g,%g,%g,%g lut=%s%s\n",
+			e.L.isName.toLocal8Bit().constData(), double( w.hdr[0] ), double( w.hdr[1] ), double( w.hdr[2] ),
+			double( w.hdr[3] ), double( w.hdr[4] ), double( w.hdr[5] ), double( w.hdr[6] ), double( w.hdr[7] ),
+			double( w.hdr[8] ), e.L.isLutPath.isEmpty() ? "none" : e.L.isLutPath.toLocal8Bit().constData(),
+			( !w.lutA.isEmpty() && !gotA ) ? " (LUT NOT FOUND)" : "" );
+	}
+	if ( stamp )
+		*stamp = e.stamp;
+	return &e.L;
 }
 
 }	// namespace
@@ -695,9 +801,11 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	// lane IMGS1: the imagespace, once this document has a measure; its LUT bound like the grid above
 	const float adapted = s.adapted.value( scene->nifModel, -1.0f );
-	const bool isDraw = L && !s.measuring && adapted >= 0.0f && wwCellImageSpaceWanted( scene );
-	if ( isDraw && L->isLut.size() == 16 * 16 * 16 * 3
-		&& ( g.lutDoc != scene->nifModel || g.lutVersion != s.version.value( scene->nifModel ) ) ) {
+	int isStamp = 0;	// lane SUNCELL1: an exterior's imagespace is the weather's (isLighting)
+	const WwCellLighting * LI = isLighting( scene->nifModel, &isStamp );
+	const bool isDraw = L && LI && !s.measuring && adapted >= 0.0f && wwCellImageSpaceWanted( scene );
+	if ( isDraw && LI->isLut.size() == 16 * 16 * 16 * 3
+		&& ( g.lutDoc != scene->nifModel || g.lutVersion != s.version.value( scene->nifModel ) || g.lutStamp != isStamp ) ) {
 		if ( !g.lutTex )
 			fn->glGenTextures( 1, &g.lutTex );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kLutUnit ) );
@@ -708,12 +816,13 @@ void wwCellLightsUniforms( Scene * scene )
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
-		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGB8, 16, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, L->isLut.data() );
+		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGB8, 16, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, LI->isLut.data() );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
 		g.lutDoc = scene->nifModel;
 		g.lutVersion = s.version.value( scene->nifModel );
+		g.lutStamp = isStamp;
 	}
-	const bool lutDraw = isDraw && g.lutTex && g.lutDoc == scene->nifModel && L->isLut.size() == 16 * 16 * 16 * 3;
+	const bool lutDraw = isDraw && g.lutTex && g.lutDoc == scene->nifModel && LI->isLut.size() == 16 * 16 * 16 * 3;
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kLutUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
@@ -764,14 +873,14 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1b( "cellIsLinear", isDraw && wwCellHdrActive() );	// lane HDR1: write linear light, tone-mapped once
 	prog->uni1b( "cellIsLutOn", lutDraw );
 	if ( isDraw ) {
-		const float * h = L->isHdr;
+		const float * h = LI->isHdr;
 		// the tonemap PS: max( mid / (lum + 0.001), cb.y ) then min( .., cb.x ); cb (x, y) = HNAM (max, min)
 		const float e = std::min( std::max( h[8] / ( adapted + 0.001f ), h[5] ), h[4] );
 		prog->uni1f( "cellIsExposure", e );
 		prog->uni1f( "cellIsE", h[1] );
 		prog->uni1f( "cellIsAdapted", adapted );
-		prog->uni3f( "cellIsCine", L->isCine[0], L->isCine[1], L->isCine[2] );
-		prog->uni4f_l( prog->uniLocation( "cellIsTint" ), FloatVector4( L->isTint[0], L->isTint[1], L->isTint[2], L->isTint[3] ) );
+		prog->uni3f( "cellIsCine", LI->isCine[0], LI->isCine[1], LI->isCine[2] );
+		prog->uni4f_l( prog->uniLocation( "cellIsTint" ), FloatVector4( LI->isTint[0], LI->isTint[1], LI->isTint[2], LI->isTint[3] ) );
 		prog->uni1i( "cellIsRed", s.isRed );
 	}
 	prog->uni1i( "cellLights", kTextureUnit );
@@ -814,9 +923,136 @@ void wwCellLightsUniforms( Scene * scene )
 			prog->uni4f_l( prog->uniLocation( "cellAmboBox[%d]", i * 3 + k ),
 				FloatVector4( a.box[k][0], a.box[k][1], a.box[k][2], a.box[k][3] ) );
 	}
-	prog->uni1b( "cellHasDir", L->hasDirectional );
-	prog->uni3f( "cellDirColor", L->dirColor[0], L->dirColor[1], L->dirColor[2] );
-	prog->uni3f( "cellDirTo", L->dirTo[0], L->dirTo[1], L->dirTo[2] );
+	/* lane SUNCELL1: an exterior's directional is the weather's sun (or moon at night): Lookdev's light, TO it,
+	 * world, linear, the numbers the viewport light already carries. Only the cell programs take it (the volumetric
+	 * fog keeps the old exterior law; a lit effect takes it x Sunlight Scale below); Lookdev off (no weather) = the old path, unchanged. */
+	bool hasDir = L->hasDirectional;
+	float dirTo[3] = { L->dirTo[0], L->dirTo[1], L->dirTo[2] }, dirColor[3] = { L->dirColor[0], L->dirColor[1], L->dirColor[2] };
+	if ( !L->interior && wwLookdevActive() && wwIsCellProgramName( prog->name ) ) {
+		float dalc[6][3], dif[4] = {}, amb[4] = {};
+		if ( wwLookdevDalc( dalc ) ) {
+			wwLookdevLight( dirTo, dif, amb );
+			std::copy( dif, dif + 3, dirColor );
+			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
+		}
+		// telemetry: what the exterior sun uploaded (or why not), once per change
+		static QString sunLast;
+		const QString line = hasDir
+			? QStringLiteral( "cell sun: exterior directional=weather to=%1,%2,%3 color=%4,%5,%6 (linear) shadows=%7" )
+				.arg( double( dirTo[0] ), 0, 'f', 5 ).arg( double( dirTo[1] ), 0, 'f', 5 ).arg( double( dirTo[2] ), 0, 'f', 5 )
+				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
+				.arg( prog->uniLocation( "csmMap" ) >= 0 ? 1 : 0 )
+			: QStringLiteral( "cell sun: exterior refused (no weather loaded, or a black sun)" );
+		if ( line != sunLast ) {
+			fprintf( stderr, "%s\n", qPrintable( line ) );
+			sunLast = line;
+		}
+	}
+	/* lane SUNCELL1 final: a lit effect or lit particle outdoors (fo4_effectcell / particles_cell) takes the game's
+	 * base term: BSEffectShader::SetupGeometry's lit branch puts pow(directional colour, 2.2) x the light's fade x
+	 * the imagespace Sunlight Scale (ImageSpaceManager+0x98 = kCurrentEOFData fHDRDataA[6], HNAM's 7th float) in
+	 * cb2[12]; the scene's directional outdoors is the sun. No ambient: the lit asm reads cb2 rows 0..14 only
+	 * (lights 0..11, base 12, alpha 13..14). Red WW_CELL_FXLIT_EXT_RED=indoors leaves exteriors self-lit. */
+	{
+		static const bool fxExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
+		const bool fxProg = prog->name == std::string_view( "fo4_effectcell.prog" )
+			|| prog->name == std::string_view( "particles_cell.prog" );
+		float dalc[6][3];
+		if ( !L->interior && fxProg && !fxExtRed && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
+			float dif[4] = {}, amb[4] = {};
+			wwLookdevLight( dirTo, dif, amb );
+			WwLookdevIs is;
+			const bool haveIs = wwLookdevImageSpace( is );
+			const float sunScale = haveIs ? is.hdr[6] : 1.0f;
+			for ( int c = 0; c < 3; c++ )
+				dirColor[c] = std::max( dif[c], 0.0f ) * sunScale;
+			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
+			static QString fxSunLast;
+			const QString line = QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (sun %4,%5,%6 x Sunlight Scale %7%8)" )
+				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
+				.arg( double( dif[0] ), 0, 'f', 5 ).arg( double( dif[1] ), 0, 'f', 5 ).arg( double( dif[2] ), 0, 'f', 5 )
+				.arg( double( sunScale ), 0, 'f', 3 ).arg( haveIs ? QString() : QStringLiteral( ", no imagespace: 1" ) );
+			if ( line != fxSunLast ) {
+				fprintf( stderr, "%s\n", qPrintable( line ) );
+				fxSunLast = line;
+			}
+		} else if ( !L->interior && fxProg ) {
+			static bool fxSunSaid = false;
+			if ( !fxSunSaid ) {
+				fprintf( stderr, "cell fx sun: exterior lit effects take no sun (%s)\n",
+					fxExtRed ? "RED WW_CELL_FXLIT_EXT_RED=indoors" : "no weather loaded" );
+				fxSunSaid = true;
+			}
+		}
+		/* lane SUNCELL1 final: indoors too the base takes the imagespace Sunlight Scale -- SetupGeometry multiplies
+		 * ImageSpaceManager+0x98 (fHDRDataA[6]) in unconditionally; indoors that is the cell's XCIM imagespace HNAM[6].
+		 * A cell with no imagespace read keeps the base as it was. Red WW_CELL_FXLIT_INT_RED=noscale leaves it out. */
+		static const bool fxIntRed = qgetenv( "WW_CELL_FXLIT_INT_RED" ).trimmed() == "noscale";
+		if ( L->interior && fxProg ) {
+			const bool scaled = !fxIntRed && L->hasImageSpace;
+			if ( scaled )
+				for ( int c = 0; c < 3; c++ )
+					dirColor[c] *= L->isHdr[6];
+			static QString fxIntLast;
+			const QString line = scaled
+				? QStringLiteral( "cell fx sun: interior lit effects base x Sunlight Scale %1 (%2)" )
+					.arg( double( L->isHdr[6] ), 0, 'f', 3 ).arg( L->isName )
+				: QStringLiteral( "cell fx sun: interior lit effects base unscaled (%1)" )
+					.arg( fxIntRed ? QStringLiteral( "RED WW_CELL_FXLIT_INT_RED=noscale" ) : QStringLiteral( "no imagespace read" ) );
+			if ( line != fxIntLast ) {
+				fprintf( stderr, "%s\n", qPrintable( line ) );
+				fxIntLast = line;
+			}
+		}
+	}
+	/* lane SUNCELL1: an exterior's ambient is the weather's directional ambient (the 6 DALC colours blended over
+	 * the hour's keys, Lookdev's wwLookdevDalc), uploaded in the interior's form (byte/255, (a - b) / 2 per axis,
+	 * the mean) so cellAmbient is one law indoors and out. The axis is the light's TRAVEL direction (Lookdev's
+	 * convention: the weathers store the bright sky blue in Z-, so Z- lights an up-facing normal). Only with the
+	 * weather's sun (the exterior branch of cellLit). Red WW_CELL_EXTAMB_RED=flat keeps the flat NAM0 Ambient;
+	 * =flip swaps the axis convention. */
+	bool extDalc = false;
+	if ( !L->interior && hasDir && wwLookdevActive() && wwIsCellProgramName( prog->name ) ) {
+		static const QByteArray extRed = qgetenv( "WW_CELL_EXTAMB_RED" ).trimmed();
+		float w[6][3];
+		if ( extRed != "flat" && wwLookdevDalc( w ) ) {
+			const bool flip = extRed == "flip";
+			float g[6][3];
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					g[a][c] = std::pow( std::max( w[a][c], 0.0f ), 1.0f / 2.2f );
+			for ( int c = 0; c < 3; c++ ) {
+				float mean = 0.0f;
+				for ( int a = 0; a < 6; a++ )
+					mean += g[a][c] / 6.0f;
+				const float sgn = flip ? 0.5f : -0.5f;	// travel: n.z = +1 takes Z- (index 5)
+				prog->uni4f_l( prog->uniLocation( "cellDalc[%d]", c ), FloatVector4(
+					( g[0][c] - g[1][c] ) * sgn, ( g[2][c] - g[3][c] ) * sgn, ( g[4][c] - g[5][c] ) * sgn, mean ) );
+			}
+			extDalc = true;
+			static QString ambLast;
+			const QString line = QStringLiteral( "cell ambient: exterior=weather DALC up=%1,%2,%3 down=%4,%5,%6 (byte/255)%7" )
+				.arg( double( flip ? g[4][0] : g[5][0] ), 0, 'f', 4 ).arg( double( flip ? g[4][1] : g[5][1] ), 0, 'f', 4 )
+				.arg( double( flip ? g[4][2] : g[5][2] ), 0, 'f', 4 ).arg( double( flip ? g[5][0] : g[4][0] ), 0, 'f', 4 )
+				.arg( double( flip ? g[5][1] : g[4][1] ), 0, 'f', 4 ).arg( double( flip ? g[5][2] : g[4][2] ), 0, 'f', 4 )
+				.arg( flip ? QStringLiteral( " RED=flip" ) : QString() );
+			if ( line != ambLast ) {
+				fprintf( stderr, "%s\n", qPrintable( line ) );
+				ambLast = line;
+			}
+		} else {
+			static bool saidFlat = false;
+			if ( !saidFlat ) {
+				fprintf( stderr, "cell ambient: exterior=flat NAM0 Ambient (%s)\n",
+					extRed == "flat" ? "RED=flat" : "no weather DALC" );
+				saidFlat = true;
+			}
+		}
+	}
+	prog->uni1b( "cellExtDalc", extDalc );
+	prog->uni1b( "cellHasDir", hasDir );
+	prog->uni3f( "cellDirColor", dirColor[0], dirColor[1], dirColor[2] );
+	prog->uni3f( "cellDirTo", dirTo[0], dirTo[1], dirTo[2] );
 	prog->uni1b( "cellInterior", L->interior );
 	prog->uni3f( "cellCenter", L->center[0], L->center[1], L->center[2] );
 	prog->uni1i( "cellProbe", s.measuring ? 6 : s.probe );
@@ -860,6 +1096,35 @@ bool wwCellImageSpaceOn()
 	return st().isOn;
 }
 
+bool wwCellShadowOn()
+{
+	return st().shadowOn;
+}
+
+void wwCellShadowSetOn( bool on )
+{
+	ClState & s = st();
+	if ( s.shadowPinned )
+		return;
+	s.shadowOn = on;
+	QSettings().setValue( QStringLiteral( "WW/CellShadow" ), on );
+}
+
+bool wwCellGiGpuOn()
+{
+	const QByteArray pin = qgetenv( "WW_CELL_GI_GPU" ).trimmed();
+	if ( !pin.isEmpty() )
+		return pin != "0";
+	return QSettings().value( QStringLiteral( "WW/CellGiGpu" ), false ).toBool();
+}
+
+void wwCellGiGpuSetOn( bool on )
+{
+	if ( !qgetenv( "WW_CELL_GI_GPU" ).trimmed().isEmpty() )
+		return;
+	QSettings().setValue( QStringLiteral( "WW/CellGiGpu" ), on );
+}
+
 void wwCellImageSpaceSetOn( bool on )
 {
 	ClState & s = st();
@@ -873,7 +1138,7 @@ bool wwCellImageSpaceWanted( Scene * scene )
 {
 	if ( !st().isOn || !scene || wwCellPassFor( scene->nifModel ) > 0 || !wwCellLightsWanted( scene ) )
 		return false;	// lane PROBEVIEW1: a Pass shows the probes' own values, not the imagespace's grade
-	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	const WwCellLighting * L = isLighting( scene->nifModel );	// lane SUNCELL1: an exterior's is the weather's
 	return L && L->hasImageSpace;
 }
 
@@ -915,7 +1180,7 @@ void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, 
 {
 	if ( !scene || !scene->nifModel || !rgba || w <= 0 || h <= 0 || step < 1 )
 		return;
-	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	const WwCellLighting * L = isLighting( scene->nifModel );	// lane SUNCELL1
 	if ( !L || !L->hasImageSpace )
 		return;
 	ClState & s = st();
@@ -986,7 +1251,7 @@ void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, 
 QString wwCellImageSpaceEcho( Scene * scene )
 {
 	ClState & s = st();
-	const WwCellLighting * L = scene && scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
+	const WwCellLighting * L = scene && scene->nifModel ? isLighting( scene->nifModel ) : nullptr;	// lane SUNCELL1
 	QString o = QStringLiteral( "imagespace=%1(asked=%2)" ).arg( wwCellImageSpaceWanted( scene ) ? "on" : "off" ).arg( s.isOn ? 1 : 0 );
 	if ( !L || !L->hasImageSpace )
 		return o + QStringLiteral( " (the cell has none)" );
@@ -1093,7 +1358,7 @@ void wwCellShadowPass( Scene * scene )
 		g.shStamp++;
 	}
 	if ( !s.shadowOn ) {
-		s.shadowLast = QStringLiteral( "off(WW_CELL_SHADOW=0)" );
+		s.shadowLast = s.shadowPinned ? QStringLiteral( "off(WW_CELL_SHADOW=0)" ) : QStringLiteral( "off(row)" );
 		return;
 	}
 	// the camera in the world (the view's inverse, as cellRow)
@@ -1185,12 +1450,20 @@ void wwCellShadowPass( Scene * scene )
 		Matrix4 mv;
 	};
 	std::vector<ShCaster> casters;
+	// lane SUNCELL1: a cell's water surface casts no light shadow either (the game's water is no caster; a pond's
+	// plane under a lamp shadowed its own bed). Red WW_CELL_SHADOW_RED=watercasts keeps it.
+	static const bool waterCastsRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts";
+	int waterSkipped = 0;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
 		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || sh->wwAlphaTested() )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
+		if ( !waterCastsRed && wwCellWaterIsShape( scene->nifModel, sh->id() ) ) {
+			waterSkipped++;
+			continue;
+		}
 		const BoundSphere b = sh->bounds();
 		casters.push_back( { sh, b.center, b.radius, sh->viewTrans().toMatrix4() } );
 	}
@@ -1312,8 +1585,9 @@ void wwCellShadowPass( Scene * scene )
 		s.shadowLast = QStringLiteral( "refused(shadow framebuffer incomplete)" );
 		return;
 	}
-	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6" )
-		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( kShadowFace );
+	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6 water=%7" )
+		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( kShadowFace )
+		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) );	// lane SUNCELL1
 	shadowDump( scene );
 }
 
@@ -1359,6 +1633,7 @@ struct AoState
 {
 	bool loaded = false;
 	bool on = true;			// WW_CELL_AO=0: none computed
+	bool pinned = false;	// lane CELLALL1: the AO row (WW/CellAo); the pin wins
 	int red = 0;			// 1 off (computed, not applied), 2 radius (halved), 4 noblur, 8 noreset
 	QString dump;			// WW_CELL_AO_DUMP
 	bool pass = false;		// the opaque pass is drawing
@@ -1370,7 +1645,9 @@ AoState & ao()
 	static AoState a;
 	if ( !a.loaded ) {
 		a.loaded = true;
-		a.on = qgetenv( "WW_CELL_AO" ).trimmed() != "0";
+		const QByteArray aoPin = qgetenv( "WW_CELL_AO" ).trimmed();
+		a.pinned = !aoPin.isEmpty();
+		a.on = a.pinned ? aoPin != "0" : QSettings().value( QStringLiteral( "WW/CellAo" ), true ).toBool();
 		const QByteArray red = qgetenv( "WW_CELL_AO_RED" ).trimmed();
 		a.red = red == "off" ? 1 : red == "radius" ? 2 : red == "noblur" ? 4 : red == "noreset" ? 8 : 0;
 		a.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AO_DUMP" ) );
@@ -1427,10 +1704,24 @@ void aoAlloc( NifSkopeOpenGLContext::GLFunctions * fn, AoTarget & t, int w, int 
 
 bool aoIsCellProgram( const NifSkopeOpenGLContext::Program * p )
 {
-	return p && ( p->name == std::string_view( "fo4_cell.prog" ) || p->name == std::string_view( "pbrm_cell.prog" ) );
+	return p && ( wwIsCellProgramName( p->name ) );
 }
 
 }	// namespace
+
+bool wwCellAoOn()
+{
+	return ao().on;
+}
+
+void wwCellAoSetOn( bool on )
+{
+	AoState & a = ao();
+	if ( a.pinned )
+		return;
+	a.on = on;
+	QSettings().setValue( QStringLiteral( "WW/CellAo" ), on );
+}
 
 void wwCellAoPass( Scene * scene, bool run )
 {

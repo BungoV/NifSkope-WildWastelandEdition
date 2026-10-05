@@ -208,4 +208,9 @@ const CellProbeKind * cellProbeKinds( int * count );
 bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	QString * error, QString * notes = nullptr );
 
+/*! lane SUNCELL1: the Particles row (WW/CellParticles, env pin WW_CELL_PARTICLES, ships OFF): a placed model's
+ *  particle systems are copied into the cell (read when the cell opens). */
+bool wwCellParticlesOn();
+void wwCellParticlesSetOn( bool on );
+
 #endif // CELLVIEW_H

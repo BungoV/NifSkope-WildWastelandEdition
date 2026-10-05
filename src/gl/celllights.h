@@ -48,9 +48,17 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <cmath>
+#include <string_view>
 #include <vector>
 
 class Scene;
+
+/*! lane SUNCELL1: a cell-lit program by name -- fo4_cell / pbrm_cell, and their cascade variants fo4_cellcsm /
+ *  pbrm_cellcsm (the same shaders with the Lookdev sun shadows compiled in, chosen while the map is built) */
+inline bool wwIsCellProgramName( std::string_view n )
+{
+	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog";
+}
 
 struct WwCellLight
 {
@@ -126,6 +134,7 @@ struct WwCellLighting
 	float isTint[4] = { 0, 1, 1, 1 };
 	QString isName, isLutPath;
 	std::vector<unsigned char> isLut;
+	QString dataRoot;	//!< lane SUNCELL1: the loose Data folder (an exterior's weather LUT is looked up there too)
 	/* lane FOG2: the interior's fog, packed as the weather fog (esmweather.h wwFogPackK, lookdev_fog.glsl):
 	 * each field from XCLL or, by its Inherits flag, the lighting template (0x4 colours, scales, heights and
 	 * high density; 0x8 near; 0x10 far; 0x100 power; 0x200 max). The game's clamps: far <= 0 or > 163840
@@ -181,6 +190,16 @@ const WwCellGi * wwCellGiFor( const void * nif );
 //! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
 bool wwCellGiOn();
 void wwCellGiSetOn( bool on );
+/*! Lane CELLALL1: the rows for features that were env-only. Each env pin wins over its row; the defaults are what
+ *  the features did before (AO and the lights' shadows on, the GPU relight off).
+ *  AO: WW/CellAo, pin WW_CELL_AO. Light shadows: WW/CellShadow, pin WW_CELL_SHADOW. GPU relight: WW/CellGiGpu, pin
+ *  WW_CELL_GI_GPU (read when a cell opens: the row reopens it). */
+bool wwCellAoOn();
+void wwCellAoSetOn( bool on );
+bool wwCellShadowOn();
+void wwCellShadowSetOn( bool on );
+bool wwCellGiGpuOn();
+void wwCellGiGpuSetOn( bool on );
 
 /*! lane FARVIEW1 (src/farlight.h, docs/cloud/FARVIEW1_DESIGN.md): DISTANT LIGHT FROM THE SURFELS. Past the band's
  *  near end D0 a surface's placed-light diffuse fades from the real lights to the bake's surfels (w = smoothstep(D0, D1,

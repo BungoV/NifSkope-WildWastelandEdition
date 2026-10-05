@@ -101,7 +101,8 @@ vec3 cellFxLight( int i, vec3 P )
 // what a lit effect's colour is multiplied by at P: mix( 1, directional + its lights, lighting influence )
 vec3 cellFxLit( vec3 P )
 {
-	if ( ( fxLitMode & 8 ) != 0 )
+	// lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
+	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir ) )
 		return vec3( 1.0 );
 	vec3 E = cellHasDir ? cellDirColor : vec3( 0.0 );
 	if ( ( fxLitMode & 2 ) != 0 ) {

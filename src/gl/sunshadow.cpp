@@ -6,6 +6,8 @@ BSD License - see nifskope.h
 
 #include "sunshadow.h"
 #include "gametaa.h"
+#include "gl/cellwater.h"	// lane SUNCELL1: water never casts
+#include "gl/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -437,6 +439,10 @@ static void sunShadowPassImpl( Scene * scene )
 		const Shape * sh = dynamic_cast<const Shape *>( node );
 		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
 			continue;
+		// lane SUNCELL1: a cell's water surface is no caster (the game's water casts no sun shadow; a creek's plane
+		// shadowed its whole bed). Red WW_CSM_RED=watercasts keeps it.
+		if ( !red( "watercasts" ) && wwCellWaterIsShape( scene->nifModel, sh->id() ) )
+			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
 		Caster c { sh, sh->wwDoubleSided(), {} };
@@ -502,6 +508,8 @@ static void sunShadowPassImpl( Scene * scene )
 
 	const int lMvp = prog->uniLocation( "csmClipFromView" );
 	bool complete = true;
+	std::vector<std::uint32_t> cullRanges;	// lane SUNCELL1
+	std::vector<std::uint16_t> cullIdx;
 	for ( int i = 0; i < kCascades && complete; i++ ) {
 		const Cascade & c = s.c[i];
 		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, s.tex, 0, i );
@@ -522,6 +530,18 @@ static void sunShadowPassImpl( Scene * scene )
 				fn->glEnable( GL_CULL_FACE );
 			prog->uni4m( "modelViewMatrix", k.sh->viewTrans().toMatrix4() );
 			const float * attrs = k.skinned.empty() ? &( k.sh->verts.constFirst()[0] ) : &( k.skinned.front()[0] );
+			// lane SUNCELL1: a welded cell shape gives this cascade only the placements inside its own window
+			if ( wwCellCullCaster( scene, k.sh, k.sh->id(), i, c.clipFromView, cullRanges ) ) {
+				cullIdx.clear();
+				const std::uint16_t * src = reinterpret_cast<const std::uint16_t *>( k.sh->triangles.constData() );
+				for ( size_t q = 0; q + 1 < cullRanges.size(); q += 2 )
+					cullIdx.insert( cullIdx.end(), src + size_t( cullRanges[q] ) * 3,
+						src + ( size_t( cullRanges[q] ) + size_t( cullRanges[q + 1] ) ) * 3 );
+				if ( !cullIdx.empty() )
+					r->drawShape( (unsigned int) ( k.sh->verts.size() ), 3, (unsigned int) cullIdx.size(),
+						GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, cullIdx.data() );
+				continue;
+			}
 			r->drawShape( (unsigned int) ( k.sh->verts.size() ), 3, (unsigned int) ( k.sh->triangles.size() * 3 ),
 				GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, k.sh->triangles.constData() );
 		}

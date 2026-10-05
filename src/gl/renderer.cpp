@@ -145,8 +145,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	 * as the game draws its effects into the HDR target its adaptation and bloom read (INFERRED from the
 	 * glows blooming in game). Measured on the walkway, see docs/PRTP_PLAN.md 2p. */
 	if ( wwCellImageSpaceIsMeasuring() ) {
-		const bool cell = program && ( program->name == std::string_view( "fo4_cell.prog" )
-			|| program->name == std::string_view( "pbrm_cell.prog" ) );
+		const bool cell = program && ( wwIsCellProgramName( program->name ) );
 		const bool fx = program && ( program->name == std::string_view( "fo4_effectshader.prog" )
 			|| program->name == std::string_view( "fo4_effectcell.prog" ) ) && wwCellImageSpaceMeasuresEffects();
 		glColorMask( cell || fx, cell || fx, cell || fx, cell || fx );
@@ -159,8 +158,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	} else if ( wwCellHdrActive() ) {
 		// lane HDR1: the linear frame (cellhdr.h). The stencil keeps who wrote a pixel last: 1 a cell program or a
 		// cell effect (linear light, tone-mapped once at the end), 2 any other program (its value as written)
-		const bool lin = program && ( program->name == std::string_view( "fo4_cell.prog" )
-			|| program->name == std::string_view( "pbrm_cell.prog" ) || program->name == std::string_view( "fo4_effectcell.prog" ) );
+		const bool lin = program && ( wwIsCellProgramName( program->name ) || program->name == std::string_view( "fo4_effectcell.prog" ) );
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( 0x03 );
 		glStencilFunc( GL_ALWAYS, lin ? 1 : 2, 0xFF );
@@ -169,12 +167,10 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	// lane AO1: the obscurance's opaque pass (normal + depth from the opaque cell-lit draws only), and every
 	// other cell-lit draw reads this frame's obscurance (celllights.h)
 	if ( mesh && wwAoScene )
-		wwCellAoDraw( wwAoScene, program && ( program->name == std::string_view( "fo4_cell.prog" )
-			|| program->name == std::string_view( "pbrm_cell.prog" ) ) );
+		wwCellAoDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	// lane SSR1: the reflections' scene pass, and the reflection a flagged opaque draw reads (cellssr.h)
 	if ( mesh && wwAoScene )
-		wwCellSsrDraw( wwAoScene, program && ( program->name == std::string_view( "fo4_cell.prog" )
-			|| program->name == std::string_view( "pbrm_cell.prog" ) ) );
+		wwCellSsrDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	/* WW_PBRM_CENSUS (lane PBRR0) rides the same exits: every return of
 	 * setupProgram passes through here with the program it actually bound,
 	 * so the route it prints is the served one. Pick renders (wwKind null) are skipped. */
@@ -186,7 +182,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		// f0= is what the GPU holds, not what the law says it should be.
 		float	f0 = std::numeric_limits<float>::quiet_NaN();
 		if ( program && ( served == QLatin1StringView( "pbrm_default.prog" ) || served == QLatin1StringView( "pbrm_csm.prog" )
-			|| served == QLatin1StringView( "pbrm_cell.prog" ) ) ) {
+			|| served == QLatin1StringView( "pbrm_cell.prog" ) || served == QLatin1StringView( "pbrm_cellcsm.prog" ) ) ) {
 			const int	l = program->uniLocation( "pbrF0" );
 			if ( l >= 0 ) {
 				GLfloat	v = -1.0f;
@@ -368,7 +364,9 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		 * same pbrm_default.frag with WW_SUNSHADOW defined, chosen only while the
 		 * shadow map was built this frame -- Shadows off runs the pre-CSM shader. */
 		/* lane PRTPGI: a cell-lit draw takes pbrm_cell.prog (the cell's lights + the bounce) */
-		const char * pbrmWant = wwCellLightsWanted( mesh->scene ) ? "pbrm_cell.prog"
+		/* lane SUNCELL1: and pbrm_cellcsm.prog while that draw also receives the cascades (the Shadows row on) */
+		const char * pbrmWant = wwCellLightsWanted( mesh->scene )
+			? ( wwSunShadowWanted( mesh->scene ) ? "pbrm_cellcsm.prog" : "pbrm_cell.prog" )
 			: wwSunShadowWanted( mesh->scene ) ? "pbrm_csm.prog" : "pbrm_default.prog";
 		if ( Program * program = useProgram( pbrmWant ) ) {
 			pbrmProgramSeen = program;
@@ -420,6 +418,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		&& ( ( pbrmProgramSeen && hint == pbrmProgramSeen ) || ( routeProgramSeen && hint == routeProgramSeen )
 			|| hint->name == std::string_view( "pbrm_csm.prog" )	// lane CSM1: the shadow variant is never a hint
 			|| hint->name == std::string_view( "pbrm_cell.prog" )	// lane PRTPGI: nor the cell-lit one
+			|| hint->name == std::string_view( "pbrm_cellcsm.prog" )	// lane SUNCELL1: nor its cascade variant
 			|| hint->name == std::string_view( "fo4_water.prog" ) );	// lane WATER1: nor the water's
 	/* Weather fog (lane FOG1) has its own program, fo4_fog.prog: the same
 	 * fo4_default.frag with WW_FOG defined. With the fog code merely present and
@@ -439,13 +438,16 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			return q ? q : p;
 		}
 		if ( p->name != std::string_view( "fo4_fog.prog" ) && p->name != std::string_view( "fo4_default.prog" )
-			&& p->name != std::string_view( "fo4_cell.prog" ) )
+			&& p->name != std::string_view( "fo4_cell.prog" ) && p->name != std::string_view( "fo4_cellcsm.prog" )
+			&& p->name != std::string_view( "fo4_csm.prog" ) && p->name != std::string_view( "fo4_fogcsm.prog" ) )
 			return p;
 		// red fognoswap: never swap, so the legacy path cannot fog
 		const bool fog = wwLookdevFogWanted( mesh->scene ) && !wwLookdevRed( "fognoswap" );
 		/* lane PRTP3: a cell-lit draw takes fo4_cell.prog (the same shader with the cell's lights,
 		 * and the fog, compiled in); the row off never reaches it */
-		const char * want = wwCellLightsWanted( mesh->scene ) ? "fo4_cell.prog"
+		const char * want = wwCellLightsWanted( mesh->scene )
+			? ( wwSunShadowWanted( mesh->scene ) ? "fo4_cellcsm.prog" : "fo4_cell.prog" )	// lane SUNCELL1: + the cascades
+			: wwSunShadowWanted( mesh->scene ) ? ( fog ? "fo4_fogcsm.prog" : "fo4_csm.prog" )	// lane SUNCELL1: Lookdev, not cell-lit
 			: fog ? "fo4_fog.prog" : "fo4_default.prog";
 		if ( p->name == std::string_view( want ) )
 			return p;
@@ -1946,6 +1948,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	wwCellLightsUniforms( scene );	// lane PRTP3: a no-op unless this is fo4_cell.prog
 	if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
 		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
+	wwSunShadowUniforms( scene );	// lane SUNCELL1: a no-op unless this is a cascade program (fo4_cellcsm, fo4_csm, fo4_fogcsm)
 	if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 		// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
 		GLint dst = 0;

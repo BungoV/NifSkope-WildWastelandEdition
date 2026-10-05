@@ -16,6 +16,10 @@ BSD License - see nifskope.h
 
 #include "cellview.h"
 #include "gl/celllights.h"
+#include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
+#include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
+#include "gl/cellwater.h"	// lane CELLALL1: the Water row
+#include "cellaodecal.h"	// lane CELLALL1: the AO decals row
 #include "gl/gametaa.h"
 
 #include <QAction>
@@ -435,6 +439,14 @@ void CellWorkspacePanel::buildUi()
 	cellTaa = new QCheckBox( tr( "Temporal AA" ), prtpRow );
 	cellTaa->setObjectName( QStringLiteral( "CellWorkspaceTemporalAa" ) );
 	cellTaa->setChecked( wwGameTaaOn() );
+	// lane SUNCELL1: draw only the placements the camera (or a sun cascade) sees; ships off
+	cellCull = new QCheckBox( tr( "Culling" ), prtpRow );
+	cellCull->setObjectName( QStringLiteral( "CellWorkspaceCulling" ) );
+	cellCull->setChecked( wwCellCullOn() );
+	// lane SUNCELL1: the occlusion planes / boxes and the rooms and portals, camera pass only; ships off
+	cellPrevis = new QCheckBox( tr( "Previs" ), prtpRow );
+	cellPrevis->setObjectName( QStringLiteral( "CellWorkspacePrevis" ) );
+	cellPrevis->setChecked( wwCellPrevisOn() );
 	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
 	cellPass = new QComboBox( prtpRow );
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
@@ -447,10 +459,33 @@ void CellWorkspacePanel::buildUi()
 	pl->addWidget( cellPass );
 	pl->addWidget( cellIs );
 	pl->addWidget( cellTaa );
+	pl->addWidget( cellCull );
+	pl->addWidget( cellPrevis );
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
 	page->addWidget( prtpRow );
+	// lane CELLALL1: the second row -- label + control only
+	QWidget * fxRow = new QWidget( this );
+	QHBoxLayout * fl = new QHBoxLayout( fxRow );
+	fl->setContentsMargins( 0, 0, 0, 0 );
+	fl->setSpacing( 4 );
+	auto fxBox = [&]( QCheckBox *& box, const QString & label, const char * name, bool on ) {
+		box = new QCheckBox( label, fxRow );
+		box->setObjectName( QLatin1String( name ) );
+		box->setChecked( on );
+		fl->addWidget( box );
+	};
+	fxBox( cellAo, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
+	fxBox( cellShadow, tr( "Light shadows" ), "CellWorkspaceLightShadows", wwCellShadowOn() );
+	fxBox( cellWater, tr( "Water" ), "CellWorkspaceWater", wwCellWaterOn() );
+	fxBox( cellSsr, tr( "SSR" ), "CellWorkspaceSsr", wwCellSsrOn() );
+	fxBox( cellSsrExt, tr( "SSR outdoors" ), "CellWorkspaceSsrOutdoors", wwCellSsrExteriorOn() );
+	fxBox( cellAoDecal, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
+	fxBox( cellGiGpu, tr( "GPU relight" ), "CellWorkspaceGpuRelight", wwCellGiGpuOn() );
+	fxBox( cellParticles, tr( "Particles" ), "CellWorkspaceParticles", wwCellParticlesOn() );	// lane SUNCELL1
+	fl->addStretch( 1 );
+	page->addWidget( fxRow );
 
 	probeKinds = new QTreeWidget( this );
 	probeKinds->setObjectName( QStringLiteral( "CellWorkspaceProbeKinds" ) );
@@ -475,6 +510,43 @@ void CellWorkspacePanel::buildUi()
 	// a shader switch, not a rebuild: the next frame draws with (or without) the cell's lights
 	connect( cellLights, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwCellLightsSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	// lane CELLALL1: the second row. A shader or pass switch repaints; a switch read when the cell opens reopens it.
+	auto fxLive = [this]( QCheckBox * box, void ( *set )( bool ) ) {
+		connect( box, &QCheckBox::toggled, this, [this, set]( bool on ) {
+			set( on );
+			if ( glView )
+				glView->update();
+		} );
+	};
+	fxLive( cellAo, &wwCellAoSetOn );
+	fxLive( cellShadow, &wwCellShadowSetOn );
+	fxLive( cellWater, &wwCellWaterSetOn );
+	fxLive( cellSsr, &wwCellSsrSetOn );
+	fxLive( cellSsrExt, &wwCellSsrExteriorSetOn );
+	auto fxReopen = [this]( QCheckBox * box, void ( *set )( bool ) ) {
+		connect( box, &QCheckBox::toggled, this, [this, set]( bool on ) {
+			set( on );
+			if ( syncing || g_path.isEmpty() )
+				return;	// nothing open: the next open reads it
+			g_over = g_spec;
+			g_haveOverrides = true;
+			say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+			emit reopenRequested( g_path );
+		} );
+	};
+	fxReopen( cellAoDecal, &aoDecalSetOn );
+	fxReopen( cellGiGpu, &wwCellGiGpuSetOn );
+	fxReopen( cellParticles, &wwCellParticlesSetOn );	// lane SUNCELL1: the systems are copied in when the cell opens
+	connect( cellCull, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellCullSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellPrevis, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellPrevisSetOn( on );
 		if ( glView )
 			glView->update();
 	} );

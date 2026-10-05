@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QHash>
 #include <QSet>
+#include <QSettings>
 #include <QTextStream>
 #include <QVector>
 
@@ -36,7 +37,8 @@ struct WaterDoc
 struct WaterState
 {
 	QHash<const void *, WaterDoc> docs;
-	bool pinOff = false;
+	bool pinOff = false;	// lane CELLALL1: off (the Water row, or the pin)
+	bool pinned = false;
 	int red = 0;		// 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 noshore, 32 nonormal,
 				// 64 nodepthfog, 128 nofar, 256 nossr, 512 fogunits (lane WATER2)
 	int probe = 0;
@@ -50,7 +52,9 @@ WaterState & st()
 	static WaterState * s = nullptr;
 	if ( !s ) {
 		s = new WaterState;
-		s->pinOff = qgetenv( "WW_CELL_WATER" ) == "0";
+		const QByteArray pin = qgetenv( "WW_CELL_WATER" ).trimmed();
+		s->pinned = !pin.isEmpty();
+		s->pinOff = s->pinned ? pin == "0" : !QSettings().value( QStringLiteral( "WW/CellWater" ), true ).toBool();
 		const QByteArray r = qgetenv( "WW_CELL_WATER_RED" );
 		s->red = r == "norefl" ? 1 : r == "nofresnel" ? 2 : r == "nosilt" ? 4 : r == "nospec" ? 8
 			: r == "noshore" ? 16 : r == "nonormal" ? 32 : r == "nodepthfog" ? 64 : r == "nofar" ? 128
@@ -121,6 +125,20 @@ void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec )
 	d.shapeBody.insert( block, i );
 }
 
+bool wwCellWaterOn()
+{
+	return !st().pinOff;
+}
+
+void wwCellWaterSetOn( bool on )
+{
+	WaterState & s = st();
+	if ( s.pinned )
+		return;
+	s.pinOff = !on;
+	QSettings().setValue( QStringLiteral( "WW/CellWater" ), on );
+}
+
 bool wwCellWaterWanted( Scene * scene, int block )
 {
 	const WaterState & s = st();
@@ -142,6 +160,13 @@ bool wwCellWaterSsrWanted( Scene * scene )
 		if ( b.rec.ssr )
 			return true;
 	return false;
+}
+
+bool wwCellWaterIsShape( const void * nif, int block )
+{
+	const WaterState & s = st();
+	const auto it = s.docs.constFind( nif );
+	return it != s.docs.constEnd() && it->shapeBody.contains( block );
 }
 
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
@@ -263,5 +288,6 @@ QString wwCellWaterEcho( const void * nif )
 		names << QStringLiteral( "%1 %2" ).arg( b.rec.form, 8, 16, QLatin1Char( '0' ) ).arg( b.rec.editorId );
 	return QStringLiteral( "water: %1 shape(s), %2 record(s) [%3]%4" ).arg( it->shapeBody.size() )
 		.arg( it->bodies.size() ).arg( names.join( QLatin1String( ", " ) ) )
-		.arg( s.pinOff ? QStringLiteral( ", pinned off (WW_CELL_WATER=0)" ) : QString() );
+		.arg( s.pinOff ? ( s.pinned ? QStringLiteral( ", pinned off (WW_CELL_WATER=0)" ) : QStringLiteral( ", off (row)" ) )
+			: QString() );
 }
