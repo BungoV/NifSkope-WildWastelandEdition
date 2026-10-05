@@ -10510,6 +10510,16 @@ void NifSkope::load()
 			qWarning() << "cell view:" << cverr;
 		if ( loaded ) {
 			cellWorkspaceNoteOpened( fname, cvspec, cvnotes );
+			/* lane CELLALL1 (harness only): WW_CELL_ALSO_LOAD=<nif> adds that NIF to Loaded NIFs beside the cell once
+			 * the load returns, so a gate can show the cell's passes survive a Loaded NIF (glview.cpp, cellFirst) */
+			const QString alsoLoad = qEnvironmentVariable( "WW_CELL_ALSO_LOAD" ).trimmed();
+			if ( !alsoLoad.isEmpty() ) {
+				QTimer::singleShot( 0, this, [this, alsoLoad]() {
+					const bool ok = addWorkspaceDocumentFromFile( alsoLoad );
+					fprintf( stderr, "cell view: also loaded %s: %s\n", qPrintable( QFileInfo( alsoLoad ).fileName() ),
+						ok ? "ok" : "FAILED" );
+				} );
+			}
 			/* OPENING A CELL OPENS THE CELL WORKSPACE (bungo 2026-09-19 20:40:
 			 * "Cell viewing will be a new workspace btw"). Through the one door,
 			 * so the docks, the NIF column and the pick master all move together
