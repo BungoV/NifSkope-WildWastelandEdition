@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "gl/cellhdr.h"
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/lookdevstage.h"	// lane SUNCELL1
+#include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 
 #include <QElapsedTimer>
@@ -1347,12 +1348,20 @@ void wwCellShadowPass( Scene * scene )
 		Matrix4 mv;
 	};
 	std::vector<ShCaster> casters;
+	// lane SUNCELL1: a cell's water surface casts no light shadow either (the game's water is no caster; a pond's
+	// plane under a lamp shadowed its own bed). Red WW_CELL_SHADOW_RED=watercasts keeps it.
+	static const bool waterCastsRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts";
+	int waterSkipped = 0;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
 		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || sh->wwAlphaTested() )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
+		if ( !waterCastsRed && wwCellWaterIsShape( scene->nifModel, sh->id() ) ) {
+			waterSkipped++;
+			continue;
+		}
 		const BoundSphere b = sh->bounds();
 		casters.push_back( { sh, b.center, b.radius, sh->viewTrans().toMatrix4() } );
 	}
@@ -1474,8 +1483,9 @@ void wwCellShadowPass( Scene * scene )
 		s.shadowLast = QStringLiteral( "refused(shadow framebuffer incomplete)" );
 		return;
 	}
-	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6" )
-		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( kShadowFace );
+	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6 water=%7" )
+		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( kShadowFace )
+		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) );	// lane SUNCELL1
 	shadowDump( scene );
 }
 
