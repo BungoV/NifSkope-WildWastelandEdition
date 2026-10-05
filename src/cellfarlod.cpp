@@ -13,6 +13,10 @@ BSD License - see nifskope.h
 #include "impostorchunk.h"
 #include "lodinative.h"
 #include "gl/cellhdr.h"
+#if __has_include( "gl/cellcull.h" )
+#include "gl/cellcull.h"   // lane SUNCELL1's culling, when merged
+#define FARLOD1_HAVE_CULL 1
+#endif
 #include "gl/cellwater.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -165,6 +169,92 @@ int farlod1TypeFor( bool oursFound, QString * why )
 	}
 	*why = oursFound ? QStringLiteral( "auto, our files found" ) : QStringLiteral( "auto, no FO4CSLOD files" );
 	return oursFound ? WwFarLodFo4cs : WwFarLodVanilla;
+}
+
+/* THE FAR SHAPES IN SUNCELL1'S CULL TABLE. Every far shape (ours and the game's) is one big weld, so a
+ * whole-shape test culls nothing: cut each into runs of <= 256 consecutive triangles, a new run as soon as a
+ * triangle's centre lies over 2048 units from the run's first, each with a bounding sphere in the shape's own
+ * space. The camera pass then skips the runs outside the frustum; the cascades cull their casters themselves. */
+QString farlod1CullRegister( NifModel * nif, int firstBlock )
+{
+#ifdef FARLOD1_HAVE_CULL
+	int shapes = 0, runsAll = 0;
+	for ( int b = firstBlock + 1; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex iB = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( iB, "BSTriShape" ) )
+			continue;
+		if ( !nif->get<QString>( iB, "Name" ).startsWith( QLatin1String( "FarLOD" ) ) )
+			continue;
+		if ( nif->get<quint32>( iB, "Flags" ) & 1u )
+			continue;
+		const QModelIndex iVD = nif->getIndex( iB, "Vertex Data" );
+		const QModelIndex iTri = nif->getIndex( iB, "Triangles" );
+		if ( !iVD.isValid() || !iTri.isValid() )
+			continue;
+		const bool fullPrec = ( ( nif->get<BSVertexDesc>( iB, "Vertex Desc" ).Value() >> 44 ) & VF_FULLPREC ) != 0;
+		const int nv = nif->rowCount( iVD );
+		std::vector<Vector3> p( size_t( std::max( nv, 0 ) ) );
+		for ( int v = 0; v < nv; v++ )
+			p[size_t( v )] = fullPrec ? nif->get<Vector3>( nif->index( v, 0, iVD ), "Vertex" )
+				: Vector3( nif->get<HalfVector3>( nif->index( v, 0, iVD ), "Vertex" ) );
+		const QVector<Triangle> tris = nif->getArray<Triangle>( iTri );
+		std::vector<WwCullRun> runs;
+		Vector3 first, lo, hi;
+		std::vector<std::uint32_t> member;   // the triangles of the open run, for its radius
+		auto close = [&]() {
+			if ( member.empty() )
+				return;
+			WwCullRun r;
+			r.first = member.front();
+			r.count = std::uint32_t( member.size() );
+			r.center = ( lo + hi ) * 0.5f;
+			float rad = 0.0f;
+			for ( std::uint32_t t : member ) {
+				const Triangle & tr = tris[int( t )];
+				for ( int k = 0; k < 3; k++ ) {
+					const int vi = k == 0 ? tr.v1() : ( k == 1 ? tr.v2() : tr.v3() );
+					if ( vi < nv )
+						rad = std::max( rad, ( p[size_t( vi )] - r.center ).length() );
+				}
+			}
+			r.radius = rad;
+			runs.push_back( r );
+			member.clear();
+		};
+		for ( int t = 0; t < tris.size(); t++ ) {
+			const Triangle & tr = tris[t];
+			const bool ok = tr.v1() < nv && tr.v2() < nv && tr.v3() < nv;
+			const Vector3 c = ok ? ( p[tr.v1()] + p[tr.v2()] + p[tr.v3()] ) / 3.0f : Vector3();
+			if ( !member.empty() && ( member.size() >= 256 || ( ok && ( c - first ).length() > 2048.0f ) ) )
+				close();
+			if ( member.empty() ) {
+				first = c;
+				lo = hi = c;
+			}
+			member.push_back( std::uint32_t( t ) );
+			if ( ok ) {
+				for ( const Vector3 & q : { p[tr.v1()], p[tr.v2()], p[tr.v3()] } ) {
+					for ( int a = 0; a < 3; a++ ) {
+						lo[a] = std::min( lo[a], q[a] );
+						hi[a] = std::max( hi[a], q[a] );
+					}
+				}
+			}
+		}
+		close();
+		if ( runs.size() < 2 )
+			continue;   // one run: nothing to cull inside the shape
+		shapes++;
+		runsAll += int( runs.size() );
+		wwCellCullShape( nif, b, std::move( runs ) );
+	}
+	return QStringLiteral( "far lod: cull runs %1 over %2 shapes (camera cull + cascade casters, SUNCELL1)" )
+		.arg( runsAll ).arg( shapes );
+#else
+	Q_UNUSED( nif );
+	Q_UNUSED( firstBlock );
+	return QStringLiteral( "far lod: cull not registered (no SUNCELL1 culling in this build)" );
+#endif
 }
 } // namespace
 
@@ -779,6 +869,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		}
 		fd.reach = m;
 	}
+	say( farlod1CullRegister( nif, firstFarBlock ) );   // lane SUNCELL1's cull table, when merged
 	docs().insert( nif, fd );
 	if ( !hooked().contains( nif ) ) {
 		hooked().insert( nif );
