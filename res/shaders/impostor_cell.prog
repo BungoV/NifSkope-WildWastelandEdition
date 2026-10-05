@@ -1,0 +1,5 @@
+# The octahedral impostor card with the cell's own lights, the Lookdev fog and the cell's imagespace
+# compiled in (lane FARLOD1). No conditions: it is selected BY NAME in ImpostorDraw::drawCard when the
+# draw asks for the cell path (the cell view's far tree cards), exactly as impostor_oct.prog is.
+
+shaders impostor_oct.vert impostor_cell.frag

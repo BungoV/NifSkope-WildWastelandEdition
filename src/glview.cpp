@@ -3569,8 +3569,9 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		if ( const float farReach = wwCellFarLodReach( scene ); farReach > 0.0f ) {
 			const Vector3 o = scene->view * Vector3();
 			fr = std::max< GLdouble >( fr, GLdouble( o.length() ) + GLdouble( farReach ) * 1.05 );
-			nr = std::max< GLdouble >( nr, 16.0 );
+			nr = wwCellFarLodNear( nr );
 			fr = std::max< GLdouble >( fr, nr + scale() );
+			wwCellFarLodPlanes( nr, fr );	// the near gate reads these
 		}
 
 		// lane MOTION1: the path camera's own fov
@@ -4083,10 +4084,12 @@ void GLView::paintGL()
 			scene->draw();
 			if ( hdr ) {
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
+				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame
 				wwCellHdrEnd( scene );
 			}
-			// lane FARLOD1: the far tree cards into the finished frame, then the census a gate reads
-			wwCellFarLodCards( scene );
+			// lane FARLOD1: the cards when the frame is not HDR (lit and toned by their own program), then the
+			// census a gate reads
+			wwCellFarLodCards( scene, false, hdr );
 			wwCellFarLodSkyCensus( scene );
 			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
 			if ( workspaceDrawScenes.isEmpty() )

@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include <QFile>
 #include <QFileInfo>
 #include <QGridLayout>
+#include <QHash>
 #include <QLabel>
 #include <QMap>
 #include <QPushButton>
@@ -34,6 +35,7 @@ BSD License - see nifskope.h
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -1212,14 +1214,18 @@ struct WaterQuad
 /*! The quads as BSTriShapes under the document's root, at most 16,000 quads
  *  (64,000 vertices) a shape. `readZ` gets every vertex's z READ BACK from the
  *  document after it was written, four a quad, in quad order -- what the
- *  flatness number is taken from. */
+ *  flatness number is taken from.
+ *  Lane FARLOD1: `parent` appends under that node instead of the root, inside the
+ *  caller's own held updates (no hold, no updateModel here); `name` prefixes the
+ *  shapes ("Water" = as before); `blocks` gets each shape's block number. */
 int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool blend,
-	std::vector<float> & readZ )
+	std::vector<float> & readZ, const QModelIndex * parent = nullptr, const QString & name = QStringLiteral( "Water" ),
+	std::vector<int> * blocks = nullptr )
 {
 	readZ.assign( quads.size() * 4, 0.0f );
 	if ( quads.empty() )
 		return 0;
-	const QModelIndex iRoot = nif->getBlockIndex( 0 );
+	const QModelIndex iRoot = parent ? *parent : nif->getBlockIndex( 0 );
 	if ( !iRoot.isValid() )
 		return 0;
 	BSVertexDesc desc( 0x0041B00000650407ULL );
@@ -1229,7 +1235,8 @@ int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool b
 	const int stride = int( desc.GetVertexSize() );
 	const size_t perShape = 16000;
 	int shapes = 0;
-	nif->holdUpdates( true );
+	if ( !parent )
+		nif->holdUpdates( true );
 	for ( size_t q0 = 0; q0 < quads.size(); q0 += perShape ) {
 		const size_t q1 = qMin( quads.size(), q0 + perShape );
 		const int nq = int( q1 - q0 );
@@ -1251,7 +1258,9 @@ int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool b
 			hi = Vector3( qMax( hi[0], w.x1 ), qMax( hi[1], w.y1 ), qMax( hi[2], zHi ) );
 		}
 		QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
-		nif->set<QString>( iShape, "Name", QString( "Water %1" ).arg( shapes ) );
+		nif->set<QString>( iShape, "Name", QString( "%1 %2" ).arg( name ).arg( shapes ) );
+		if ( blocks )
+			blocks->push_back( nif->getBlockNumber( iShape ) );
 		nif->set<quint32>( iShape, "Flags", 14 );
 		nif->set<float>( iShape, "Scale", 1.0f );
 		nif->set<Vector3>( iShape, "Translation", Vector3( 0.0f, 0.0f, 0.0f ) );
@@ -1321,8 +1330,10 @@ int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool b
 		addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iShape ) );
 		shapes++;
 	}
-	nif->holdUpdates( false );
-	nif->updateModel();
+	if ( !parent ) {
+		nif->holdUpdates( false );
+		nif->updateModel();
+	}
 	return shapes;
 }
 
@@ -3293,6 +3304,164 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		py0 = y0;
 		px1 = x1;
 		py1 = y1;
+	}
+	if ( error )
+		error->clear();
+	return true;
+}
+
+/* Lane FARLOD1: the far field's water (btdterrain.h, LodlFarWater). One texel grid a ring over the ring's
+ * rectangle at its rate; a texel is wet where the body plane names a body (sampled at the texel's first body
+ * sample), dry inside the cut; then one growth step onto dry ground below a wet neighbour's surface; then each
+ * texel row's runs of one body at one surface become one quad. */
+bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QString & lodlPath,
+	const float shift[3], std::vector<LodlFarWater> & rings, QString * error )
+{
+	auto fail = [error]( const QString & message ) {
+		if ( error )
+			*error = message;
+		return false;
+	};
+	if ( !nif || !parent.isValid() )
+		return fail( QStringLiteral( "no document to append the far water to" ) );
+	LodtFile f;
+	if ( !f.open( lodlPath, error ) )
+		return false;
+	if ( f.bodyCount() <= 0 || f.bodyIdSamples() <= 0 )
+		return fail( QStringLiteral( "the .lodl has no water bodies (no body plane): no far water" ) );
+	f.setBlockCacheSize( 256 );
+
+	const int bodyS = f.bodyIdSamples();
+	const int spc = f.samplesPerCell();
+	const int minX = f.cellMinX(), minY = f.cellMinY(), maxX = f.cellMaxX(), maxY = f.cellMaxY();
+	QHash<quint16, LodtWaterBody> table;
+	auto bodyOf = [&]( quint16 id, LodtWaterBody & B ) -> bool {
+		auto it = table.constFind( id );
+		if ( it != table.constEnd() ) {
+			B = *it;
+			return true;
+		}
+		if ( !f.waterBody( id, B ) )
+			return false;
+		table.insert( id, B );
+		return true;
+	};
+
+	for ( size_t ri = 0; ri < rings.size(); ri++ ) {
+		LodlFarWater & r = rings[ri];
+		r.quads = r.wetTexels = r.grownTexels = 0;
+		r.shapes = 0;
+		r.bodies.clear();
+		r.blocks.clear();
+		// the rate: a power-of-two divisor of the file's, at most the wanted
+		int rate = bodyS;
+		while ( rate > 1 && rate > r.texels )
+			rate /= 2;
+		r.rate = rate;
+		const int stepT = std::max( 1, bodyS / rate );
+		const int x0 = std::max( r.x0, minX ), y0 = std::max( r.y0, minY );
+		const int x1 = std::min( r.x1, maxX ), y1 = std::min( r.y1, maxY );
+		if ( x1 < x0 || y1 < y0 )
+			continue;
+		const int W = ( x1 - x0 + 1 ) * rate, H = ( y1 - y0 + 1 ) * rate;
+		std::vector<quint16> ids( size_t( W ) * size_t( H ), 0 );
+		std::vector<float> surf( ids.size(), 0.0f );
+		std::vector<quint8> cut( ids.size(), 0 );
+		auto texelBody = [&]( int u, int v, int & bx, int & by ) {
+			bx = ( x0 - minX ) * bodyS + u * stepT;
+			by = ( y0 - minY ) * bodyS + v * stepT;
+		};
+		for ( int v = 0; v < H; v++ ) {
+			const int cy = y0 + v / rate;
+			for ( int u = 0; u < W; u++ ) {
+				const int cx = x0 + u / rate;
+				const size_t i = size_t( v ) * size_t( W ) + size_t( u );
+				if ( !r.noCut && r.cx1 >= r.cx0 && cx >= r.cx0 && cx <= r.cx1 && cy >= r.cy0 && cy <= r.cy1 ) {
+					cut[i] = 1;
+					continue;
+				}
+				int bx = 0, by = 0;
+				texelBody( u, v, bx, by );
+				const quint16 id = f.bodyIdAt( bx, by );
+				LodtWaterBody B;
+				if ( !id || !bodyOf( id, B ) )
+					continue;
+				ids[i] = id;
+				surf[i] = B.waterHeight + f.surfaceDeltaAt( bx, by );
+				r.wetTexels++;
+				r.bodies.insert( id );
+			}
+		}
+		// one growth step onto dry ground below a wet neighbour's surface (the shore the depth test draws)
+		{
+			std::vector<quint16> gid( ids );
+			std::vector<float> gs( surf );
+			static const int N4[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+			const int fullStep = std::max( 1, spc / bodyS );
+			for ( int v = 0; v < H; v++ )
+				for ( int u = 0; u < W; u++ ) {
+					const size_t i = size_t( v ) * size_t( W ) + size_t( u );
+					if ( ids[i] || cut[i] )
+						continue;
+					int bx = 0, by = 0;
+					texelBody( u, v, bx, by );
+					const float ground = f.height( bx * fullStep, by * fullStep );
+					for ( const auto & d : N4 ) {
+						const int uu = u + d[0], vv = v + d[1];
+						if ( uu < 0 || vv < 0 || uu >= W || vv >= H )
+							continue;
+						const size_t j = size_t( vv ) * size_t( W ) + size_t( uu );
+						if ( ids[j] && ground < surf[j] ) {
+							gid[i] = ids[j];
+							gs[i] = surf[j];
+							r.grownTexels++;
+							break;
+						}
+					}
+				}
+			ids.swap( gid );
+			surf.swap( gs );
+		}
+		// the quads, by WATR form: each row's runs of one body at one surface
+		const float texel = 4096.0f / float( rate );
+		std::map<quint32, std::vector<WaterQuad>> byForm;
+		for ( int v = 0; v < H; v++ ) {
+			int u = 0;
+			while ( u < W ) {
+				const size_t i = size_t( v ) * size_t( W ) + size_t( u );
+				const quint16 id = ids[i];
+				if ( !id ) {
+					u++;
+					continue;
+				}
+				int e = u + 1;
+				while ( e < W && ids[size_t( v ) * size_t( W ) + size_t( e )] == id
+					&& surf[size_t( v ) * size_t( W ) + size_t( e )] == surf[i] )
+					e++;
+				WaterQuad q;
+				q.x0 = float( x0 ) * 4096.0f + float( u ) * texel - shift[0];
+				q.x1 = float( x0 ) * 4096.0f + float( e ) * texel - shift[0];
+				q.y0 = float( y0 ) * 4096.0f + float( v ) * texel - shift[1];
+				q.y1 = q.y0 + texel;
+				q.z = surf[i] - shift[2];
+				q.rgba = 0xFF6B522Eu;   // the cell view's water colour (0.18, 0.32, 0.42), opaque
+				q.body = id;
+				LodtWaterBody B;
+				bodyOf( id, B );
+				byForm[B.watrForm].push_back( q );
+				r.quads++;
+				u = e;
+			}
+		}
+		for ( const auto & [form, quads] : byForm ) {
+			std::vector<float> readZ;
+			std::vector<int> blocks;
+			const QString name = QStringLiteral( "%1 r%2 %3" ).arg( r.prefix ).arg( int( ri ) )
+				.arg( QString::number( form, 16 ).toUpper().rightJustified( 8, QLatin1Char( '0' ) ) );
+			r.shapes += addWaterShapes( nif, quads, false, readZ, &parent, name, &blocks );
+			for ( int b : blocks )
+				r.blocks.emplace_back( b, form );
+		}
 	}
 	if ( error )
 		error->clear();

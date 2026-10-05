@@ -8,10 +8,12 @@ BSD License - see nifskope.h
 #define BTDTERRAIN_H
 
 #include <QModelIndex>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
 #include <functional>
+#include <utility>
 #include <vector>
 
 class NifModel;
@@ -241,5 +243,32 @@ struct LodlFarRing
 //! vertices take the running total past `maxVerts` (> 0) is not built, and says so.
 bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QString & lodlPath,
 	const float shift[3], std::vector<LodlFarRing> & rings, qint64 maxVerts, QString * error );
+
+/*! Lane FARLOD1: the far field's WATER, one ring of it. The `.lodl`'s water bodies (lane WATER1's
+ *  body plane, its surface plane and each body's WATR form) as flat sheets at the body's height,
+ *  `texels` body-plane samples a cell edge (coarser farther out), the cut left dry. Grown one texel
+ *  onto dry ground below a neighbour's surface, so the terrain's depth draws the shore (the game's
+ *  plane-cut-by-ground). Built per WATR form so each shape takes its own record. */
+struct LodlFarWater
+{
+	int x0 = 0, y0 = 0, x1 = -1, y1 = -1;     //!< the ring, inclusive cells
+	int cx0 = 0, cy0 = 0, cx1 = -1, cy1 = -1; //!< the cut, inclusive cells (none when cx1 < cx0)
+	bool noCut = false;         //!< red control: the cut cells get water too
+	int texels = 4;             //!< body-plane samples a cell edge, wanted (clamped to the file's)
+	QString prefix = QStringLiteral( "FarLOD water" );
+
+	// ---- out
+	int rate = 0;               //!< the samples a cell edge it took
+	qint64 quads = 0, wetTexels = 0, grownTexels = 0;
+	int shapes = 0;
+	QSet<quint16> bodies;
+	std::vector<std::pair<int, quint32>> blocks;   //!< each shape's block and WATR form
+	QStringList notes;
+};
+
+//! Appends every water ring under `parent` (the caller holds updates and runs updateModel).
+//! False (with `error`) when the file has no body plane; nothing is appended then.
+bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QString & lodlPath,
+	const float shift[3], std::vector<LodlFarWater> & rings, QString * error );
 
 #endif // BTDTERRAIN_H

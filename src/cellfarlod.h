@@ -53,8 +53,18 @@ float wwCellFarLodReach( const Scene * scene );
 //! Before the scene draws: the far sway uniforms (zeroed once when no far field is active).
 void wwCellFarLodFrame( Scene * scene );
 
-//! After the scene (and its HDR resolve): the far tree cards. Returns the cards drawn.
-int wwCellFarLodCards( Scene * scene );
+/*! The far tree cards, drawn with the cell's lights, fog and imagespace (impostor_cell.prog). Called
+ *  twice a frame: inside the HDR frame before its resolve (`insideHdr`), and after it; they draw in the
+ *  first call when the frame is HDR (`hdrFrame`), else in the second. WW_CELL_FARLOD_RED=cardsafter is
+ *  the old path, the red control: after the resolve, unlit by the cell. Returns the cards drawn. */
+int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame );
+
+//! The near plane while the far field is on: the view's own near `nr`, raised to 16 (the game's
+//! fNearDistance 15, rounded up); WW_CELL_FARLOD_NEAR forces one for a measuring run (the near gate's reds).
+double wwCellFarLodNear( double nr );
+
+//! The planes the projection took with the far field on, logged on change with their depth step.
+void wwCellFarLodPlanes( double nearPlane, double farPlane );
 
 //! WW_CELL_FARLOD_SKYCENSUS=1: counts the finished frame's below-horizon pixels no surface reached.
 void wwCellFarLodSkyCensus( Scene * scene );

@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "impostorchunk.h"
 
 #include "gl/glscene.h"
+#include "gl/renderer.h"
 #include "model/nifmodel.h"
 
 #include <QDebug>
@@ -457,11 +458,49 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			if ( set.ok )
 				ImpostorDraw::registerLooseSheets( scene, set );
 	}
-	static int saidDrawn = -1;
-	int drawn = 0;
+	static int saidDrawn = -1, saidOut = -1;
+	int drawn = 0, outside = 0;
+	/* THE CAMERA'S CULL (lane FARLOD1): a card whose bounding sphere is outside one of the four side planes
+	 * is not drawn, the game's per-object test (SUNCELL1's cellcull uses the same planes for the document's
+	 * shapes). Cards cast no sun shadow (they are no document shape), so no cascade asks for them.
+	 * WW_CELL_FARLOD_RED=nocardcull draws every card: the picture must not change, the count must. */
+	float pl[4][4];
+	bool cull = qgetenv( "WW_CELL_FARLOD_RED" ) != "nocardcull" && scene->renderer
+		&& scene->renderer->globalUniforms->projectionMatrix[3][3] != 1.0f;
+	if ( cull ) {
+		const auto & pm = scene->renderer->globalUniforms->projectionMatrix;	// pm[column][row]
+		for ( int i = 0; i < 4; i++ ) {
+			const int axis = i >> 1;
+			const float sg = ( i & 1 ) ? -1.0f : 1.0f;
+			float l = 0.0f;
+			for ( int c = 0; c < 4; c++ ) {
+				pl[i][c] = pm[c][3] + sg * pm[c][axis];
+				if ( c < 3 )
+					l += pl[i][c] * pl[i][c];
+			}
+			l = std::sqrt( l );
+			if ( l > 0.0f )
+				for ( int c = 0; c < 4; c++ )
+					pl[i][c] /= l;
+		}
+	}
 	for ( const Placed & p : std::as_const( s.placed ) ) {
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() )
 			continue;
+		if ( cull ) {
+			const float sc = std::fabs( p.scale );
+			const Vector3 cw( p.world[0] - F.shift[0] + p.c.center[0] * sc, p.world[1] - F.shift[1] + p.c.center[1] * sc,
+				p.world[2] - F.shift[2] + p.c.center[2] * sc );
+			const Vector3 v = scene->view * cw;
+			const float r = sc * std::sqrt( p.c.halfW * p.c.halfW + p.c.halfH * p.c.halfH ) * 1.5f + 64.0f;
+			bool in = true;
+			for ( int i = 0; i < 4 && in; i++ )
+				in = pl[i][0] * v[0] + pl[i][1] * v[1] + pl[i][2] * v[2] + pl[i][3] >= -r;
+			if ( !in ) {
+				outside++;
+				continue;
+			}
+		}
 		ImpostorDraw::Options o = opt;
 		o.worldScale = p.scale;
 		if ( o.swayAmplitude != 0.0f )   // a forest does not sway as one
@@ -471,9 +510,13 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 				Vector3( p.world[0] - F.shift[0], p.world[1] - F.shift[1], p.world[2] - F.shift[2] ), o, &why ) )
 			drawn++;
 	}
-	if ( drawn != saidDrawn ) {
+	if ( drawn != saidDrawn || outside != saidOut ) {
 		saidDrawn = drawn;
-		qInfo().noquote() << QStringLiteral( "far lod: drew %1 cards of %2 placed" ).arg( drawn ).arg( s.placed.size() );
+		saidOut = outside;
+		qInfo().noquote() << QStringLiteral( "far lod: drew %1 cards of %2 placed, %3 outside the camera%4" )
+			.arg( drawn ).arg( s.placed.size() ).arg( outside )
+			.arg( cull ? QString() : QStringLiteral( " (cull off%1)" )
+				.arg( qgetenv( "WW_CELL_FARLOD_RED" ) == "nocardcull" ? QStringLiteral( ", RED nocardcull" ) : QString() ) );
 	}
 	return drawn;
 }

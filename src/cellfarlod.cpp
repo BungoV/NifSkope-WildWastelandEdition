@@ -8,8 +8,11 @@ BSD License - see nifskope.h
 
 #include "btdterrain.h"
 #include "esmdata.h"
+#include "esmwater.h"
 #include "impostorchunk.h"
 #include "lodinative.h"
+#include "gl/cellhdr.h"
+#include "gl/cellwater.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "model/nifmodel.h"
@@ -150,11 +153,32 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	docs().remove( nif );
 	ImpostorChunk::forgetCellFar();
 
-	const QByteArray red = qgetenv( "WW_CELL_FARLOD_RED" );   // nocut | nosnap: the gates' red controls
+	// the gates' red controls: nocut | nosnap | watercut | nowater (cardsafter, nocardcull, pbrnosway act at draw)
+	const QByteArray red = qgetenv( "WW_CELL_FARLOD_RED" );
 	const bool noCut = red == "nocut";
 	const bool noSnap = red == "nosnap";
+	const bool waterCut = red == "watercut";
+	const bool noWater = red == "nowater";
 	const int h = std::max( 0, ( n - 1 ) / 2 );
 	const int bx0 = cx - h, by0 = cy - h, bx1 = cx + h, by1 = cy + h;
+
+	/* THE NEAR GATE'S ARM (WW_CELL_FARLOD_NEARONLY=1): the far field's planes and nothing else -- no shape,
+	 * no card -- so a picture against the off path shows exactly what the planes alone change. */
+	if ( qEnvironmentVariableIntValue( "WW_CELL_FARLOD_NEARONLY" ) != 0 && nif ) {
+		FarDoc fd;
+		fd.origin[0] = origin[0];
+		fd.origin[1] = origin[1];
+		fd.origin[2] = origin[2];
+		fd.bx0 = bx0;
+		fd.by0 = by0;
+		fd.bx1 = bx1;
+		fd.by1 = by1;
+		fd.reach = envFloat( "WW_CELL_FARLOD_MAX", 250000.0f );
+		docs().insert( nif, fd );
+		say( QStringLiteral( "far lod: NEARONLY -- the planes alone, reach %1 units, near %2" )
+			.arg( double( fd.reach ), 0, 'f', 0 ).arg( wwCellFarLodNear( 0.0 ), 0, 'f', 2 ) );
+		return L.join( QLatin1Char( '\n' ) ) + QLatin1Char( '\n' );
+	}
 
 	if ( lodlPath.isEmpty() ) {
 		say( QStringLiteral( "far lod: NONE -- no FO4CSLOD/%1/%1.lodl found" ).arg( ws ) );
@@ -285,9 +309,88 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			.arg( r0.seamSamples ).arg( noSnap ? QStringLiteral( "off (RED nosnap)" ) : QStringLiteral( "on" ) ) );
 	}
 
+	/* ---- the far WATER: the .lodl's water bodies over each built ring, the ring inside (the block for ring 0)
+	 * left dry, each shape registered with its WATR record so the cell's water program draws it (lane WATER1's
+	 * fo4_water.prog, the Cell lights row on) -- the game's LOD water, a plane the ground cuts. */
+	qint64 wQuads = 0, wShapes = 0, wRegistered = 0;
+	QSet<quint16> wBodies;
+	if ( noWater ) {
+		say( QStringLiteral( "far lod: water NONE (RED nowater)" ) );
+	} else if ( terrOk ) {
+		static const int kWaterTexels[5] = { 8, 4, 2, 2, 1 };
+		std::vector<LodlFarWater> wr;
+		int hx0 = bx0, hy0 = by0, hx1 = bx1, hy1 = by1;
+		for ( size_t i = 0; i < rings.size(); i++ ) {
+			const LodlFarRing & r = rings[i];
+			if ( !r.built )
+				continue;
+			LodlFarWater w;
+			w.x0 = r.ox0;
+			w.y0 = r.oy0;
+			w.x1 = r.ox1;
+			w.y1 = r.oy1;
+			w.cx0 = hx0;
+			w.cy0 = hy0;
+			w.cx1 = hx1;
+			w.cy1 = hy1;
+			w.noCut = waterCut && i == 0;
+			w.texels = kWaterTexels[std::min( i, size_t( 4 ) )];
+			wr.push_back( w );
+			hx0 = r.ox0;
+			hy0 = r.oy0;
+			hx1 = r.ox1;
+			hy1 = r.oy1;
+		}
+		QString werr;
+		if ( !nifAppendLodlFarWater( nif, iFar, lodlPath, shift, wr, &werr ) ) {
+			say( QStringLiteral( "far lod: water NONE -- %1" ).arg( werr ) );
+		} else {
+			WwWaterRecord def;
+			const bool haveDef = world.defaultWaterType() != 0 && world.waterRecord( world.defaultWaterType(), def );
+			QHash<quint32, int> recOk;   // 1 its own record, 0 the default's, -1 none
+			QHash<quint32, WwWaterRecord> recs;
+			for ( size_t i = 0; i < wr.size(); i++ ) {
+				const LodlFarWater & w = wr[i];
+				for ( const auto & [block, form] : w.blocks ) {
+					if ( !recOk.contains( form ) ) {
+						WwWaterRecord rec;
+						if ( form != 0 && world.waterRecord( form, rec ) ) {
+							recs.insert( form, rec );
+							recOk.insert( form, 1 );
+						} else {
+							recOk.insert( form, haveDef ? 0 : -1 );
+						}
+					}
+					const int how = recOk.value( form );
+					if ( how < 0 )
+						continue;
+					wwCellWaterShape( nif, block, how > 0 ? recs.value( form ) : def );
+					wRegistered++;
+				}
+				say( QStringLiteral( "far lod: water ring %1 (%2 a cell) cells %3,%4..%5,%6: %7 quads, %8 shapes, %9" )
+					.arg( int( i ) ).arg( w.rate ).arg( w.x0 ).arg( w.y0 ).arg( w.x1 ).arg( w.y1 ).arg( w.quads ).arg( w.shapes )
+					.arg( QStringLiteral( "%1 bodies, %2 wet texels, %3 grown onto the shore, cut %4,%5..%6,%7%8" )
+						.arg( w.bodies.size() ).arg( w.wetTexels ).arg( w.grownTexels )
+						.arg( w.cx0 ).arg( w.cy0 ).arg( w.cx1 ).arg( w.cy1 )
+						.arg( w.noCut ? QStringLiteral( " (RED watercut: not cut)" ) : QString() ) ) );
+				wQuads += w.quads;
+				wShapes += w.shapes;
+				wBodies.unite( w.bodies );
+			}
+			int own = 0, viaDef = 0, none = 0;
+			for ( auto it = recOk.cbegin(); it != recOk.cend(); ++it )
+				( it.value() > 0 ? own : it.value() == 0 ? viaDef : none )++;
+			say( QStringLiteral( "far lod: water %1 quads, %2 shapes (%3 drawn as the cell's water), %4 bodies, "
+				"%5 WATR forms: %6 their own record, %7 the worldspace default, %8 none" )
+				.arg( wQuads ).arg( wShapes ).arg( wRegistered ).arg( wBodies.size() )
+				.arg( recOk.size() ).arg( own ).arg( viaDef ).arg( none ) );
+		}
+	}
+
 	/* THE DOUBLE GROUND, read back from the document: far terrain triangles whose centre lies over the loaded
-	 * block. 0 is the cut working; the red (WW_CELL_FARLOD_RED=nocut) must count them. */
-	qint64 doubleGround = 0, readTris = 0;
+	 * block. 0 is the cut working; the red (WW_CELL_FARLOD_RED=nocut) must count them. The far water the same
+	 * way (red watercut). */
+	qint64 doubleGround = 0, readTris = 0, waterOver = 0, waterTris = 0;
 	{
 		const float wx0 = float( bx0 ) * kCell, wy0 = float( by0 ) * kCell;
 		const float wx1 = float( bx1 + 1 ) * kCell, wy1 = float( by1 + 1 ) * kCell;
@@ -295,7 +398,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			const QModelIndex iB = nif->getBlockIndex( b );
 			if ( !nif->isNiBlock( iB, "BSTriShape" ) )
 				continue;
-			if ( !nif->get<QString>( iB, "Name" ).startsWith( QLatin1String( "FarLOD terrain" ) ) )
+			const QString bn = nif->get<QString>( iB, "Name" );
+			const bool isWater = bn.startsWith( QLatin1String( "FarLOD water" ) );
+			if ( !isWater && !bn.startsWith( QLatin1String( "FarLOD terrain" ) ) )
 				continue;
 			const Vector3 t = nif->get<Vector3>( iB, "Translation" ) + origin;
 			const QModelIndex iVD = nif->getIndex( iB, "Vertex Data" );
@@ -310,16 +415,18 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			for ( const Triangle & tr : tris ) {
 				if ( tr.v1() >= nv || tr.v2() >= nv || tr.v3() >= nv )
 					continue;
-				readTris++;
+				( isWater ? waterTris : readTris )++;
 				const Vector3 c = ( p[tr.v1()] + p[tr.v2()] + p[tr.v3()] ) / 3.0f + t;
 				if ( c[0] > wx0 && c[0] < wx1 && c[1] > wy0 && c[1] < wy1 )
-					doubleGround++;
+					( isWater ? waterOver : doubleGround )++;
 			}
 		}
 	}
 	say( QStringLiteral( "far lod: double ground %1 of %2 far terrain triangles over the loaded block %3,%4..%5,%6%7" )
 		.arg( doubleGround ).arg( readTris ).arg( bx0 ).arg( by0 ).arg( bx1 ).arg( by1 )
 		.arg( noCut ? QStringLiteral( " (RED nocut)" ) : QString() ) );
+	say( QStringLiteral( "far lod: water over block %1 of %2 far water triangles%3" ).arg( waterOver ).arg( waterTris )
+		.arg( waterCut ? QStringLiteral( " (RED watercut)" ) : QString() ) );
 
 	double ws1 = 0, pk1 = 0;
 	memNow( ws1, pk1 );
@@ -485,29 +592,92 @@ void wwCellFarLodFrame( Scene * scene )
 		return;   // nothing ever set: not one GL call (the off path)
 	Renderer * r = scene->renderer;
 	const float t = swayTime();
-	for ( const char * name : { "fo4_cell.prog", "fo4_default.prog", "fo4_fog.prog" } ) {
+	/* every program on fo4_default.vert a far shape can draw with: the legacy path, the PBR path, and SUNCELL1's
+	 * cascade variants (absent before that merge: useProgram returns null and the name is skipped) */
+	QStringList set;
+	for ( const char * name : { "fo4_cell.prog", "fo4_default.prog", "fo4_fog.prog", "pbrm_cell.prog", "pbrm_default.prog",
+			"pbrm_csm.prog", "fo4_cellcsm.prog", "fo4_csm.prog", "fo4_fogcsm.prog", "pbrm_cellcsm.prog" } ) {
 		if ( auto prog = r->useProgram( name ) ) {
 			prog->uni1f( "farSwayAmp", amp );
 			prog->uni1f( "farSwayTime", t );
+			if ( prog->uniLocation( "farSwayAmp" ) >= 0 )
+				set << QString::fromLatin1( name );
 		}
 	}
 	r->stopProgram();
 	wasSet = amp > 0.0f;
+	static QString said;
+	const QString line = QStringLiteral( "far lod: sway amp %1 on %2 programs: %3" ).arg( double( amp ), 0, 'f', 1 )
+		.arg( set.size() ).arg( set.join( QLatin1Char( ' ' ) ) );
+	if ( line != said ) {
+		said = line;
+		qInfo().noquote() << line;
+	}
 }
 
-int wwCellFarLodCards( Scene * scene )
+int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame )
 {
 	const FarDoc * f = farFor( scene );
 	if ( !f || f->cards <= 0 )
 		return 0;
+	// the red control: the Phase 1 path, after the resolve and lit by the viewer alone
+	const bool redAfter = qgetenv( "WW_CELL_FARLOD_RED" ) == "cardsafter";
+	if ( redAfter ? insideHdr : ( insideHdr != hdrFrame ) )
+		return 0;
 	ImpostorDraw::Options o;
+	o.cellLit = !redAfter;
 	const float amp = swayAmp();
 	if ( amp > 0.0f ) {
 		// the card's own sway is a UV shear (impostordraw.h), a fraction, not units
 		o.swayAmplitude = std::min( 0.05f, amp * 0.002f );
 		o.swayPhase = swayTime() * 1.3f;
 	}
-	return ImpostorChunk::drawCellFar( scene, o );
+	if ( insideHdr && wwCellHdrActive() && scene->renderer ) {
+		/* the HDR frame sorts its pixels by the stencil (gl/cellhdr.h): 1 = linear light from a cell program, toned
+		 * once at the resolve. The cards write linear light (cellIsLinear), so they mark 1, as the far bulbs do. */
+		auto fn = scene->renderer->fn;
+		fn->glEnable( GL_STENCIL_TEST );
+		fn->glStencilMask( 0x03 );
+		fn->glStencilFunc( GL_ALWAYS, 1, 0xFF );
+		fn->glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	}
+	const int drawn = ImpostorChunk::drawCellFar( scene, o );
+	static QString said;
+	const QString line = QStringLiteral( "far lod: cards pass %1 -- %2 drawn, %3, %4" )
+		.arg( redAfter ? QStringLiteral( "AFTER the frame (RED cardsafter)" ) : QStringLiteral( "lit" ) )
+		.arg( drawn )
+		.arg( o.cellLit ? QStringLiteral( "impostor_cell (cell lights, fog, imagespace)" ) : QStringLiteral( "impostor_oct (viewer light)" ) )
+		.arg( insideHdr ? QStringLiteral( "inside the HDR frame" ) : ( hdrFrame ? QStringLiteral( "after the HDR resolve" )
+			: QStringLiteral( "no HDR frame" ) ) );
+	if ( line != said ) {
+		said = line;
+		qInfo().noquote() << line;
+	}
+	return drawn;
+}
+
+double wwCellFarLodNear( double nr )
+{
+	const float forced = envFloat( "WW_CELL_FARLOD_NEAR", 0.0f );
+	return forced > 0.0f ? double( forced ) : std::max( nr, 16.0 );
+}
+
+void wwCellFarLodPlanes( double nearPlane, double farPlane )
+{
+	static QString said;
+	/* The depth step of a 24-bit buffer at distance d under this perspective: d^2 (f - n) / (n f 2^24).
+	 * The near gate holds it under 1 unit at 1000 (z-fight free where the cell's decals and contacts are);
+	 * the red near (WW_CELL_FARLOD_NEAR=0.01) puts it at 6. */
+	auto step = [nearPlane, farPlane]( double d ) {
+		return d * d * ( farPlane - nearPlane ) / ( nearPlane * farPlane * 16777216.0 );
+	};
+	const QString line = QStringLiteral( "far lod: planes near %1 far %2, depth step %3 at 1000, %4 at 10000, %5 at 100000" )
+		.arg( nearPlane, 0, 'f', 2 ).arg( farPlane, 0, 'f', 0 )
+		.arg( step( 1000.0 ), 0, 'f', 4 ).arg( step( 10000.0 ), 0, 'f', 3 ).arg( step( 100000.0 ), 0, 'f', 1 );
+	if ( line != said ) {
+		said = line;
+		qInfo().noquote() << line;
+	}
 }
 
 void wwCellFarLodSkyCensus( Scene * scene )

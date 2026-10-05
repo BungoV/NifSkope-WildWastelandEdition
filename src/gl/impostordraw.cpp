@@ -7,6 +7,8 @@ BSD License - see nifskope.h
 #include "gl/impostordraw.h"
 
 #include "gamemanager.h"
+#include "gl/celllights.h"
+#include "gl/lookdevstage.h"
 #include "gl/glscene.h"
 #include "gl/gltex.h"
 #include "gl/renderer.h"
@@ -380,10 +382,17 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 		return refuse( QStringLiteral( "the set was refused at load: %1" ).arg( set.error ) );
 
 	wwImpostorTrace( "A enter" );
-	NifSkopeOpenGLContext::Program * prog = scene->renderer->useProgram( "impostor_oct.prog" );
+	// lane FARLOD1: the cell view's far cards take the cell variant (the cell's lights, fog, imagespace)
+	const char * progName = opt.cellLit ? "impostor_cell.prog" : "impostor_oct.prog";
+	NifSkopeOpenGLContext::Program * prog = scene->renderer->useProgram( progName );
 	wwImpostorTrace( prog ? "B useProgram ok" : "B useProgram null" );
 	if ( !prog )
-		return refuse( QStringLiteral( "res/shaders/impostor_oct.prog did not compile or was not found" ) );
+		return refuse( QStringLiteral( "res/shaders/%1 did not compile or was not found" ).arg( progName ) );
+	if ( opt.cellLit ) {
+		// both act on the bound program and do nothing where it lacks their uniforms
+		wwLookdevFogUniforms( scene );
+		wwCellLightsUniforms( scene );
+	}
 
 	// ---- the sheets ------------------------------------------------------
 	const bool haveColour = bindSheet( scene, prog, "ColourSheet", set.colour, 0 );
