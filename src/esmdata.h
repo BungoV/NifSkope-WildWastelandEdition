@@ -97,6 +97,8 @@ struct EsmCellPrevis
 	quint16 visi = 0, pcmb = 0;
 	bool hasVisi = false, hasPcmb = false;
 	quint32 combinedMeshes = 0, combinedRefs = 0, previsRefs = 0;
+	//! lane UMBRA1: XCRI's refs (each pair's first word, mapped to the load order): the refs a precombined mesh replaced
+	QVector<quint32> combinedRefIds;
 };
 
 /* Lane PRTP1: one LIGH record (wbDefinitionsFO4 LIGH DATA + FNAM). The

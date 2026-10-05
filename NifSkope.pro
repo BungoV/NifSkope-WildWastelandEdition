@@ -228,6 +228,7 @@ HEADERS += \
 	src/gl/celllights.h \
 	src/gl/cellfxlit.h \
 	src/gl/cellcull.h \
+	src/gl/cellumbra.h \
 	src/gl/cellwater.h \
 	src/gl/cellhdr.h \
 	src/gl/cellprobeview.h \
@@ -460,6 +461,7 @@ SOURCES += \
 	src/gl/celllights.cpp \
 	src/gl/cellfxlit.cpp \
 	src/gl/cellcull.cpp \
+	src/gl/cellumbra.cpp \
 	src/gl/cellwater.cpp \
 	src/gl/cellhdr.cpp \
 	src/gl/cellprobeview.cpp \

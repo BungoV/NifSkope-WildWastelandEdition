@@ -169,6 +169,8 @@ struct Bucket
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
 	//! Lane SUNCELL1: where each placed shape's triangles start in `tris` (the culling runs, src/gl/cellcull.h)
 	std::vector<quint32> runStart;
+	//! Lane UMBRA1: the placed reference of each run (parallel to `runStart`; 0 = none)
+	std::vector<quint32> runRef;
 };
 
 /*! IS THIS STRING SOMETHING THE SHADER PROPERTY'S **Name** CAN RESOLVE?
@@ -436,6 +438,12 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 				WwCullRun r;
 				r.first = std::uint32_t( s0 - p0 );
 				r.count = std::uint32_t( s1 - s0 );
+				{	// lane UMBRA1: the run's placed reference, for the previs tome's visible set
+					const auto rr = std::upper_bound( b.runStart.begin(), b.runStart.end(), quint32( s0 ) );
+					const size_t ri = size_t( rr - b.runStart.begin() );
+					if ( ri > 0 && ri - 1 < b.runRef.size() )
+						r.ref = b.runRef[ri - 1];
+				}
 				r.center = ( rlo + rhi ) / 2.0f;
 				for ( size_t t = s0 - p0; t < s1 - p0; t++ )
 					for ( unsigned int k = 0; k < 3; k++ )
@@ -1985,7 +1993,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 *  - each CELL's RVIS (the cell whose previs file covers it: an exterior 3x3 block shares one), its VISI / PCMB
 	 *    build stamps, XCRI (the precombined meshes and the refs they replace) and XPRI (the refs previs took in);
 	 *  - each block's previs file `vis/<plugin>/<RVIS>.uvd`: its header (magic, size, bounds) and the build string
-	 *    (an Umbra tome; its body, the visibility itself, is not decoded -- so it culls nothing here);
+	 *    (an Umbra tome; lane UMBRA1 decodes it and queries it in gl/cellumbra, see gl/cellcull.h);
 	 *  - the occlusion primitives the game culls with (PlaneMarker planes and boxes) and, indoors, the rooms
 	 *    (RoomMarker boxes, XLRM linked rooms) and portals (PortalMarker planes, XPOD rooms): handed to gl/cellcull,
 	 *    which the Previs row applies to the camera pass only (casters always cast). */
@@ -2035,6 +2043,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 
 		// the cells' previs fields, grouped by the block that holds their visibility
 		std::map<quint32, std::vector<std::pair<int, int>>> blocks;
+		// lane UMBRA1: each block's XCRI refs with their cell's code (bits 14..23 of a combined id; interiors 0)
+		std::map<quint32, std::vector<std::pair<std::uint32_t, std::uint32_t>>> blockComb;
+		std::vector<WwUmbraBlockIn> umbraIn;
 		int cellsRead = 0, cellsRvis = 0, cellsVisi = 0, cellsPcmb = 0;
 		quint64 combRefs = 0, combMeshes = 0, previsRefs = 0;
 		auto readCell = [&]( quint32 form, int cx, int cy ) {
@@ -2052,6 +2063,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				blocks[c.rvis].push_back( { cx, cy } );
 			} else if ( spec.interior ) {
 				blocks[form].push_back( { cx, cy } );	// an interior with no RVIS: its own file, if any
+			}
+			const quint32 owner = c.rvis ? c.rvis : ( spec.interior ? form : 0U );
+			if ( owner ) {	// lane UMBRA1
+				const std::uint32_t code = spec.interior ? 0U
+					: ( ( std::uint32_t( cx ) & 31U ) << 19 ) | ( ( std::uint32_t( cy ) & 31U ) << 14 );
+				for ( const quint32 cr : c.combinedRefIds )
+					blockComb[owner].push_back( { std::uint32_t( cr ), code } );
 			}
 		};
 		if ( spec.interior ) {
@@ -2111,8 +2129,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				covers = covers && bb[0] <= float( c.first ) * CELL_UNITS + 1.0f && bb[3] >= float( c.first + 1 ) * CELL_UNITS - 1.0f
 					&& bb[1] <= float( c.second ) * CELL_UNITS + 1.0f && bb[4] >= float( c.second + 1 ) * CELL_UNITS - 1.0f;
 			fprintf( stderr, "cell previs block %08X: %d loaded cells; file %s %d bytes, magic %08X, size field %u, "
-				"tome %s, bounds %.0f,%.0f,%.0f..%.0f,%.0f,%.0f = %.2fx%.2f cells, covers its cells %s; visibility not decoded "
-				"(Umbra tome body)\n", f, int( b.second.size() ), qPrintable( path ), int( u.size() ), cellLe32( u, 0 ),
+				"tome %s, bounds %.0f,%.0f,%.0f..%.0f,%.0f,%.0f = %.2fx%.2f cells, covers its cells %s; visibility: the "
+				"cell umbra lines\n", f, int( b.second.size() ), qPrintable( path ), int( u.size() ), cellLe32( u, 0 ),
 				cellLe32( u, 8 ), vm.hasMatch() ? qPrintable( vm.captured( 1 ) ) : "unknown", bb[0], bb[1], bb[2], bb[3], bb[4],
 				bb[5], ( bb[3] - bb[0] ) / CELL_UNITS, ( bb[4] - bb[1] ) / CELL_UNITS,
 				spec.interior ? "n/a (interior)" : covers ? "yes" : "NO" );
@@ -2134,11 +2152,22 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 						( ( u32At( qint64( oUid ) + 4 * i ) >> 24 ) == 0xFDU ? combined : refs )++;
 				const quint32 nCells = oCellStarts ? u32At( qint64( oCellStarts ) + 4 * qint64( nTiles ) ) : 0U;
 				fprintf( stderr, "cell previs tome %08X: %s objects %u (%u reference ids, %u combined ids), clusters %u, tiles %u "
-					"(%u leaf), cells %u, gates %u; body not decoded (tiles, KD trees, portals)\n", f,
+					"(%u leaf), cells %u, gates %u; body not decoded (tiles, KD trees, portals)\n", f,	// the SUNCELL1 g19 text; lane UMBRA1 decodes the body (cell umbra lines)
 					magicOk ? "header read," : "header NOT a 3.x tome,", nObj, refs, combined, u32At( 0x7c ), nTiles,
 					u32At( 0x8c ), nCells, u32At( 0x68 ) );
 			}
+			{	// lane UMBRA1: the whole tome, decoded and queried in gl/cellumbra
+				WwUmbraBlockIn ui;
+				ui.block = f;
+				ui.tome = u;
+				auto bc = blockComb.find( f );
+				if ( bc != blockComb.end() )
+					ui.combined = std::move( bc->second );
+				umbraIn.push_back( std::move( ui ) );
+			}
 		}
+		if ( !umbraIn.empty() )
+			wwCellUmbraSet( nif, std::move( umbraIn ) );	// lane UMBRA1
 	}
 	wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
 	wwCellLandBegin( nif );    // lane TERRBLEND1: forget the last cell's blended-ground shapes
@@ -3353,6 +3382,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				}
 			}
 			b.runStart.push_back( quint32( b.tris.size() ) );   // lane SUNCELL1: one culling run per placed shape
+			b.runRef.push_back( p.ref );   // lane UMBRA1
 			for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 				b.tris.push_back( BucketTri{ { quint32( base + int( s.geom.tris[t + 0] ) ),
 					quint32( base + int( s.geom.tris[t + 1] ) ),

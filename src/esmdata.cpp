@@ -707,7 +707,18 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 			out.hasPcmb = true;
 		} else if ( f == "XCRI" && f.size() >= 8 ) {
 			out.combinedMeshes = f.readUInt32();
-			out.combinedRefs = f.readUInt32() / 2;
+			const quint32 words = f.readUInt32();
+			out.combinedRefs = words / 2;
+			/* lane UMBRA1: then the mesh keys, then `words` u32s as (ref, value) pairs (the game's ExtraDataList load,
+			 * read from Todd's treat) */
+			if ( quint64( f.size() ) >= 8ULL + 4ULL * ( quint64( out.combinedMeshes ) + quint64( words ) ) ) {
+				for ( quint32 k = 0; k < out.combinedMeshes; k++ )
+					(void)f.readUInt32();
+				for ( quint32 k = 0; k + 1 < words; k += 2 ) {
+					out.combinedRefIds.append( esm->mapFormID( *cr, f.readUInt32() ) );
+					(void)f.readUInt32();
+				}
+			}
 		} else if ( f == "XPRI" ) {
 			out.previsRefs = quint32( f.size() / 4 );
 		}
