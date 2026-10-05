@@ -9,6 +9,8 @@ BSD License - see nifskope.h
 #include "esmdata.h"
 
 #include <QHash>
+#include <QMutex>
+#include <QSet>
 
 #include <algorithm>
 #include <cmath>
@@ -39,27 +41,6 @@ void quadrantOf( int row, int col, int & q, int & lrow, int & lcol )
 	lcol = col - right * ( QUAD_GRID - 1 );
 	lrow = qBound( 0, lrow, QUAD_GRID - 1 );
 	lcol = qBound( 0, lcol, QUAD_GRID - 1 );
-}
-
-/*! The opacity one layer OF QUADRANT `q` carries at a 33x33 grid point.
- *
- *  THE QUADRANT IS THE CALLER'S, NOT THE POINT'S, and that distinction is the
- *  whole correctness of the blend. `quadrantOf` answers "which quadrant OWNS
- *  this point", and on the shared middle row and column it answers with the
- *  top/right one. But a quad in quadrant 0 has corners at row 16 and col 16,
- *  and those corners' weights must come from QUADRANT 0's grid -- where they
- *  are the last row and column -- not from quadrant 2's, whose layer list is a
- *  different list of different textures in a different order. Asking the point
- *  would silently index layer 2 of the wrong quadrant along every quad that
- *  touches the cell's centre lines: 124 of the 1024 quads of every cell. */
-float weightAt( const EsmLand & land, int q, int row, int col, int layerSlot )
-{
-	const QVector<EsmLandLayer> & ls = land.layers[q];
-	if ( layerSlot < 0 || layerSlot >= ls.size() )
-		return 0.0f;
-	const int lrow = qBound( 0, row - ( q >= 2 ? QUAD_GRID - 1 : 0 ), QUAD_GRID - 1 );
-	const int lcol = qBound( 0, col - ( ( q & 1 ) ? QUAD_GRID - 1 : 0 ), QUAD_GRID - 1 );
-	return ls.at( layerSlot ).opacity[lrow][lcol];
 }
 
 /*! THE PAINT ORDER, or an honest admission that it is not known.
@@ -101,75 +82,165 @@ struct Pass
 	float w[4] = { 1, 1, 1, 1 };
 };
 
-/*! Every pass one 128-unit quad needs, in draw order.
+/*! THE RED CONTROL (lane TERRBLEND1). Set WW_TERRBLEND_RED=nearest and every
+ *  pass takes ONE weight for the whole 128-unit quad -- its SW corner's --
+ *  instead of the four stored corners. That is the per-quad switching this
+ *  lane removes, put back on purpose, so the ground-rebuild gate is shown to
+ *  FAIL on it. It forces the state a measurement needs; it is not a feature. */
+bool redNearest()
+{
+	static const bool on = qgetenv( "WW_TERRBLEND_RED" ) == "nearest";
+	return on;
+}
+
+/*! One quadrant's layers as the ENGINE builds them (lane TERRBLEND1, read out
+ *  of Todd's treat, 1.10.155, and cross-checked against Nomad's 1.10.163
+ *  decompile -- notes/terrblend1/STATUS.md has the addresses):
  *
- *  The base first when the quadrant has a BTXT; then each layer that has any
- *  weight at any of the four corners, ascending by paint order. A quadrant
- *  with NO BTXT has no opaque base, and the void would show through every
- *  layer's transparency -- so the FIRST layer with weight is promoted to
- *  opaque there, which is the same thing the simulation does and the reason
- *  its blended picture has no holes. */
-int passesFor( const EsmLand & land, int row, int col, Pass * out, int maxOut,
-	bool & promoted )
+ *   - LoadVerticesIntoArrays: an ATXT's slot is its LAYER INDEX, clamped to
+ *     11; each VTXT opacity is stored as a BYTE, (int)(opacity * 255),
+ *     truncated.
+ *   - CreateGeometry: the base is the BTXT, or -- when the quadrant has none --
+ *     the engine's default land texture set (CommonwealthDefault01, here
+ *     ESM_LTEX_ENGINE_DEFAULT). It is NEVER "no base". Null slots are
+ *     compacted away (RemoveTextureFromArrays).
+ *   - MergeMatchingTextures: two slots with the same texture have their bytes
+ *     summed into the first; a slot equal to the base is dropped (its weight
+ *     goes to the base). Then the base weight is clamp(255 - sum(layers), 0,
+ *     255).
+ *   - The vertex carries the base and the FIRST FIVE layers; a sixth is read
+ *     into the base sum and then not drawn (the ground goes darker there, as
+ *     in the game).
+ *   - The pixel shader (Landscape PS) is colour = sum(w_i * tex_i), NOT
+ *     normalised, then times VCLR.
+ *
+ *  So the weights are SHARES of one sum, not alpha-over opacities. Nothing
+ *  here composites "over" anything. */
+struct QuadLayers
+{
+	quint32 base = 0;
+	bool defaultBase = false;
+	int n = 0;                          //!< layers kept (<= 5)
+	quint32 ltex[5] = {};
+	int order[5] = {};
+	float b[6][QUAD_GRID][QUAD_GRID];   //!< [0] = base bytes, [1..n] = layer bytes, 0..255
+	int dropped = 0;                    //!< layers past the fifth
+	int merged = 0;                     //!< slots folded into another or into the base
+	int formZero = 0;                   //!< ATXT layers naming form 0 = the default set
+};
+
+void buildQuadLayers( const EsmLand & land, int q, QuadLayers & out )
+{
+	out = QuadLayers();
+	out.base = land.baseTex[q] ? land.baseTex[q] : ESM_LTEX_ENGINE_DEFAULT;
+	out.defaultBase = !land.baseTex[q];
+
+	// slots by layer index (clamped to 11); a later ATXT on the same slot replaces it
+	const QVector<EsmLandLayer> & ls = land.layers[q];
+	int slotOf[12];
+	for ( int s = 0; s < 12; s++ )
+		slotOf[s] = -1;
+	for ( int li = 0; li < ls.size(); li++ ) {
+		const int s = qBound( 0, layerOrder( ls.at( li ), li ), 11 );
+		slotOf[s] = li;
+	}
+
+	struct L { quint32 ltex; int order; float b[QUAD_GRID][QUAD_GRID]; };
+	std::vector<L> merged;
+	for ( int s = 0; s < 12; s++ ) {
+		if ( slotOf[s] < 0 )
+			continue;
+		const EsmLandLayer & l = ls.at( slotOf[s] );
+		/* AN ATXT WITH LTEX 0 IS THE DEFAULT TEXTURE, NOT "NOTHING". The engine
+		 * loads form 0 as pDefText (LoadVerticesIntoArrays), which is a real
+		 * texture set and survives RemoveTextureFromArrays. Read as "paints
+		 * nothing" (this file until TERRBLEND1) its share went missing and the
+		 * quads it covered came out as dark, hard-edged squares: measured on
+		 * Sanctuary -17,23, where 3 of 4 quadrants carry a form-0 layer. */
+		const quint32 lt = l.ltex ? l.ltex : ESM_LTEX_ENGINE_DEFAULT;
+		if ( !l.ltex )
+			out.formZero++;
+		if ( lt == out.base ) {
+			out.merged++;               // its weight is the base's, implicitly
+			continue;
+		}
+		L * into = nullptr;
+		for ( L & m : merged ) {
+			if ( m.ltex == lt )
+				into = &m;
+		}
+		if ( into )
+			out.merged++;
+		else {
+			merged.push_back( L() );
+			into = &merged.back();
+			into->ltex = lt;
+			into->order = s;
+			for ( int r = 0; r < QUAD_GRID; r++ )
+				for ( int c = 0; c < QUAD_GRID; c++ )
+					into->b[r][c] = 0.0f;
+		}
+		for ( int r = 0; r < QUAD_GRID; r++ )
+			for ( int c = 0; c < QUAD_GRID; c++ )
+				into->b[r][c] += std::floor( qBound( 0.0f, l.opacity[r][c], 1.0f ) * 255.0f );
+	}
+
+	for ( int r = 0; r < QUAD_GRID; r++ ) {
+		for ( int c = 0; c < QUAD_GRID; c++ ) {
+			float sum = 0.0f;
+			for ( const L & m : merged )
+				sum += m.b[r][c];
+			out.b[0][r][c] = qBound( 0.0f, 255.0f - sum, 255.0f );
+		}
+	}
+	out.n = int( qMin<size_t>( merged.size(), 5 ) );
+	out.dropped = int( merged.size() ) - out.n;
+	for ( int i = 0; i < out.n; i++ ) {
+		out.ltex[i] = merged[size_t( i )].ltex;
+		out.order[i] = merged[size_t( i )].order;
+		for ( int r = 0; r < QUAD_GRID; r++ )
+			for ( int c = 0; c < QUAD_GRID; c++ )
+				out.b[i + 1][r][c] = qMin( merged[size_t( i )].b[r][c], 255.0f );
+	}
+}
+
+/*! Every pass one 128-unit quad needs: the base ALWAYS (opaque -- it writes
+ *  the depth and carries its own share, w0, in the vertex alpha), then each
+ *  kept layer with any share at any of the four corners. The shares sum to 1
+ *  at every corner (less where a sixth layer was dropped), so the passes are
+ *  ADDED (src/gl: landSplat), and the order they are drawn in does not
+ *  matter. */
+int passesFor( const QuadLayers ql[4], int row, int col, Pass * out, int maxOut )
 {
 	/* The quadrant is the one the quad's OWN SW corner falls in, and every one
-	 * of its four corners is then read out of THAT quadrant's grids -- see
-	 * weightAt. A 128-unit quad never straddles two quadrants: the quadrant
-	 * boundary runs along grid line 16, which is a quad EDGE, not a quad. */
+	 * of its four corners is then read out of THAT quadrant's grids. A 128-unit
+	 * quad never straddles two quadrants: the boundary runs along grid line 16,
+	 * which is a quad EDGE, not a quad. */
 	int q = 0, lrow = 0, lcol = 0;
 	quadrantOf( row, col, q, lrow, lcol );
-	(void) lrow;
-	(void) lcol;
-	const QVector<EsmLandLayer> & ls = land.layers[q];
-	promoted = false;
+	const QuadLayers & L = ql[q];
+	const int r0 = row - ( q >= 2 ? QUAD_GRID - 1 : 0 );
+	const int c0 = col - ( ( q & 1 ) ? QUAD_GRID - 1 : 0 );
+	// the quad's four corners in the quadrant grid, SW CCW, as the geometry below
+	const int rr[4] = { r0, r0, r0 + 1, r0 + 1 };
+	const int cc[4] = { c0, c0 + 1, c0 + 1, c0 };
+	const bool red = redNearest();
 
 	int n = 0;
-	if ( land.baseTex[q] && n < maxOut ) {
+	for ( int i = 0; i <= L.n && n < maxOut; i++ ) {
 		Pass p;
-		p.ltex = land.baseTex[q];
-		p.order = -1;
-		p.blend = false;
-		out[n++] = p;
-	}
-
-	// the quad's four corners on the 33x33 grid, SW CCW, as the geometry below
-	const int rr[4] = { row, row, row + 1, row + 1 };
-	const int cc[4] = { col, col + 1, col + 1, col };
-
-	// collect, then sort by the engine's paint order
-	struct Cand { int order; int slot; float w[4]; };
-	std::vector<Cand> cand;
-	cand.reserve( size_t( ls.size() ) );
-	for ( int li = 0; li < ls.size(); li++ ) {
-		if ( !ls.at( li ).ltex )
-			continue;               // a null form paints nothing
-		Cand c;
-		c.order = layerOrder( ls.at( li ), li );
-		c.slot = li;
+		p.ltex = i ? L.ltex[i - 1] : L.base;
+		p.order = i ? L.order[i - 1] : -1;
+		p.blend = i > 0;
 		float top = 0.0f;
 		for ( int k = 0; k < 4; k++ ) {
-			c.w[k] = weightAt( land, q, rr[k], cc[k], li );
-			top = qMax( top, c.w[k] );
+			const int kr = red ? rr[0] : rr[k];
+			const int kc = red ? cc[0] : cc[k];
+			p.w[k] = L.b[i][qBound( 0, kr, QUAD_GRID - 1 )][qBound( 0, kc, QUAD_GRID - 1 )] / 255.0f;
+			top = qMax( top, p.w[k] );
 		}
-		if ( top < CELL_SPLAT_WEIGHT_MIN )
-			continue;               // contributes nothing anywhere on this quad
-		cand.push_back( c );
-	}
-	std::stable_sort( cand.begin(), cand.end(),
-		[]( const Cand & a, const Cand & b ) { return a.order < b.order; } );
-
-	for ( size_t i = 0; i < cand.size() && n < maxOut; i++ ) {
-		Pass p;
-		p.ltex = ls.at( cand[i].slot ).ltex;
-		p.order = cand[i].order;
-		/* The promotion: with no BTXT the first pass on this quad has nothing
-		 * underneath it, so it is drawn opaque. Its own weights are kept for
-		 * the census but the pass writes 1.0 -- see the emit below. */
-		p.blend = !( n == 0 );
-		if ( n == 0 && !land.baseTex[q] )
-			promoted = true;
-		for ( int k = 0; k < 4; k++ )
-			p.w[k] = cand[i].w[k];
+		if ( i && top < CELL_SPLAT_WEIGHT_MIN )
+			continue;                   // a layer with no share on this quad adds nothing
 		out[n++] = p;
 	}
 	return n;
@@ -178,12 +249,14 @@ int passesFor( const EsmLand & land, int row, int col, Pass * out, int maxOut,
 //! The passes a cell would emit, without building any of them.
 qint64 countCell( const EsmLand & land )
 {
+	QuadLayers ql[4];
+	for ( int q = 0; q < 4; q++ )
+		buildQuadLayers( land, q, ql[q] );
 	qint64 n = 0;
-	Pass passes[16];
-	bool promoted = false;
+	Pass passes[8];
 	for ( int row = 0; row + 1 < LAND_GRID; row++ ) {
 		for ( int col = 0; col + 1 < LAND_GRID; col++ )
-			n += passesFor( land, row, col, passes, 16, promoted );
+			n += passesFor( ql, row, col, passes, 8 );
 	}
 	return n;
 }
@@ -272,8 +345,16 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 			out.cells++;
 			if ( land.hasColors )
 				out.cellsWithColour++;
-			for ( int q = 0; q < 4; q++ )
+			QuadLayers ql[4];
+			for ( int q = 0; q < 4; q++ ) {
 				out.layersRead += land.layers[q].size();
+				buildQuadLayers( land, q, ql[q] );
+				out.layersDropped += ql[q].dropped;
+				out.layersMerged += ql[q].merged;
+				out.layersFormZero += ql[q].formZero;
+				if ( ql[q].defaultBase )
+					out.quadrantsDefaultBase++;
+			}
 
 			const float ox = float( x ) * CELL_UNITS;
 			const float oy = float( y ) * CELL_UNITS;
@@ -283,16 +364,13 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 				for ( int col = 0; col + 1 < LAND_GRID; col++ ) {
 					out.quadsTotal++;
 
-					Pass passes[16];
-					bool promoted = false;
-					const int np = passesFor( land, row, col, passes, 16, promoted );
-					if ( promoted )
-						out.quadsPromotedBase++;
-					if ( !np ) {
-						out.quadsBare++;
-						out.quadsBareUnpainted++;
-						out.buckets[0].quads++;
-						continue;
+					Pass passes[8];
+					const int np = passesFor( ql, row, col, passes, 8 );
+					{
+						int q = 0, lr = 0, lc = 0;
+						quadrantOf( row, col, q, lr, lc );
+						if ( ql[q].defaultBase )
+							out.quadsDefaultBase++;
 					}
 
 					// the geometry, shared by every pass on this quad
@@ -339,13 +417,25 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 					int emitted = 0;
 					for ( int pi = 0; pi < np; pi++ ) {
 						const Pass & p = passes[pi];
-						const int bucket = bucketFor( p.ltex, p.order, p.blend );
+						int bucket = bucketFor( p.ltex, p.order, p.blend );
+						if ( !bucket && !p.blend ) {
+							/* A base whose LTEX names no texture still has to be drawn:
+							 * it is the opaque pass every layer is added onto, and
+							 * without it the sky shows through (the holes). The
+							 * engine's default set stands in, and is counted. */
+							bucket = bucketFor( ESM_LTEX_ENGINE_DEFAULT, p.order, false );
+							if ( bucket )
+								out.quadsBaseFallback++;
+						}
 						if ( !bucket )
 							continue;   // the LTEX named no texture: not drawn, counted
 						CellSplatQuad qq = proto;
 						qq.bucket = bucket;
+						/* The SHARE, on the base pass too: the base is opaque (it writes
+						 * the depth) and the shader scales it by its own share, then
+						 * every layer is ADDED at its share (src/gl landSplat). */
 						for ( int k = 0; k < 4; k++ )
-							qq.v[k].w = p.blend ? qBound( 0.0f, p.w[k], 1.0f ) : 1.0f;
+							qq.v[k].w = qBound( 0.0f, p.w[k], 1.0f );
 						out.quads.push_back( qq );
 						out.buckets[bucket].quads++;
 						out.quadsEmitted++;
@@ -415,11 +505,19 @@ QString cellSplatLegend( const CellSplatBuild & b )
 		.arg( b.quadsEmitted ).arg( used ).arg( b.quadsBase ).arg( b.quadsBlended )
 		.arg( b.quadsBare ).arg( b.layersRead );
 	s += QString( "; %1 passes per land quad" ).arg( mult, 0, 'f', 2 );
-		s += QString( "; of the bare quads %L1 are unpainted and %L2 chose an LTEX "
-		"that named no texture" ).arg( b.quadsBareUnpainted ).arg( b.quadsBareNoTexture );
-	if ( b.quadsPromotedBase )
-		s += QString( "; %L1 quads had no BTXT on the quadrant and the first layer "
-			"with any weight was drawn opaque under the rest" ).arg( b.quadsPromotedBase );
+	/* lane TERRBLEND1: the game's sum, said in the legend so a census line tells
+	 * the two builds apart -- the base is never missing, a quadrant without a
+	 * BTXT takes the engine's default set, the layers are ADDED at their shares */
+	s += QString( "; weighted sum as the engine (base share = 1 - layer shares, layers "
+		"added): %L1 quads on %L2 quadrants with no BTXT took the engine default "
+		"base, %L3 bases fell back to it because their LTEX named no texture, "
+		"%L4 layers named form 0 and drew the default set, %L5 layers merged into a "
+		"matching one or the base, %L6 layers past the fifth not drawn" )
+		.arg( b.quadsDefaultBase ).arg( b.quadrantsDefaultBase ).arg( b.quadsBaseFallback )
+		.arg( b.layersFormZero ).arg( b.layersMerged ).arg( b.layersDropped );
+	if ( redNearest() )
+		s += QStringLiteral( "; RED CONTROL WW_TERRBLEND_RED=nearest: one share per quad "
+			"(its SW corner), the per-quad switching put back on purpose" );
 	if ( b.ltexUnresolved )
 		s += QString( "; %1 LTEX forms named no texture" ).arg( b.ltexUnresolved );
 	/* THE ONE THING A READER MUST NOT HAVE TO ASK. Without the ATXT layer index
@@ -435,4 +533,40 @@ QString cellSplatLegend( const CellSplatBuild & b )
 	else
 		s += QStringLiteral( "; layers composited in the ATXT paint order" );
 	return s;
+}
+
+
+/* lane TERRBLEND1: which blocks of which document are blended-ground shapes.
+ * Same keying as the water registry (src/gl/cellwater.cpp): the NifModel
+ * pointer the cell build wrote into, the block number the renderer draws. */
+namespace {
+QMutex & landMutex()
+{
+	static QMutex m;
+	return m;
+}
+QHash<const void *, QSet<int>> & landDocs()
+{
+	static QHash<const void *, QSet<int>> d;
+	return d;
+}
+} // namespace
+
+void wwCellLandBegin( const void * nif )
+{
+	QMutexLocker lock( &landMutex() );
+	landDocs().remove( nif );
+}
+
+void wwCellLandShape( const void * nif, int block )
+{
+	QMutexLocker lock( &landMutex() );
+	landDocs()[nif].insert( block );
+}
+
+bool wwCellLandIs( const void * nif, int block )
+{
+	QMutexLocker lock( &landMutex() );
+	const auto it = landDocs().constFind( nif );
+	return it != landDocs().constEnd() && it->contains( block );
 }
