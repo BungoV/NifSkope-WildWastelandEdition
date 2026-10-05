@@ -4184,9 +4184,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
 				probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1: the second slots and the rooms
 				wwCellGiPublish( nif, gi );
-<<<<<<< HEAD
 				wwCellAoDecalPublish( nif, gs.aoDecals );	// lane AODECAL1 (null: no decals)
-=======
 				if ( farBaked ) {	// lane FARVIEW1: the far tables for the group state, and the GI's placed share
 					FarLightSet set;
 					QString ferr;
@@ -4241,7 +4239,6 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 						wwCellFarPublish( nif, fr );
 					}
 				}
->>>>>>> farview1-20261004
 				if ( !spec.interior || gs.interiorSky )
 					probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather relights it
 				WwCellProbeView pv;	// lane PROBEVIEW1: the surfel and probe previews
