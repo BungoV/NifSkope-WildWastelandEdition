@@ -437,9 +437,11 @@ void main()
 			discard;
 #endif
 	} else if ( alphaFlags > 0 ) {
-		float a = C.a * op * alpha;
 #ifdef WW_CELLLIGHTS
+		float a = wwGrassVertexA( C.a ) * op * alpha;
 		a *= wwGrassFadeK( ViewDir );	// lane GRASSMB1: exactly 1.0 on every non-grass shape
+#else
+		float a = C.a * op * alpha;
 #endif
 		int m = ( a < alphaThreshold ? 0x2B2B : ( a > alphaThreshold ? 0x7171 : 0x4D4D ) );
 		if ( ( m & ( 1 << alphaFlags ) ) == 0 )

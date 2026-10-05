@@ -160,6 +160,7 @@ struct Bucket
 	bool water = false;
 	WwWaterRecord waterRec;
 	bool grass = false;   // lane GRASSMB1: blades of the game's grass (src/gl/cellgrass.h): the fade applies
+	float grassWave = 0.0f;   // lane GRASSMB1: its GRAS wave period (one bucket per grass type), the wind's phase
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
 };
@@ -409,7 +410,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		if ( b.water )        // lane WATER1: the renderer draws this shape with the game's water terms
 			wwCellWaterShape( nif, nif->getBlockNumber( iShape ), b.waterRec );
 		if ( b.grass )        // lane GRASSMB1: the renderer fades this shape the game's grass way
-			wwCellGrassShape( nif, nif->getBlockNumber( iShape ) );
+			wwCellGrassShape( nif, nif->getBlockNumber( iShape ), b.grassWave );
 		nif->set<QString>( iShape, "Name", part > 1
 			? QString( "%1 #%2" ).arg( b.name ).arg( part ) : b.name );
 		nif->set<quint32>( iShape, "Flags", 14 );
@@ -3051,6 +3052,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			// each grass's model, loaded once (copied out: a later cache insert may rehash the cache)
 			QHash<quint32, std::vector<NativeSrcShape>> gShapes;
 			QHash<quint32, bool> gUniform;
+			QHash<quint32, float> gWave;   // the GRAS wave period: the wind's phase is per grass type
 			for ( const WwGrassBlade & bl : blades ) {
 				if ( gUniform.contains( bl.form ) )
 					continue;
@@ -3059,6 +3061,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				if ( !world.grass( bl.form, g ) || g.model.isEmpty() )
 					continue;
 				gUniform[bl.form] = ( g.flags & 2 ) != 0;
+				gWave[bl.form] = g.wavePeriod;
 				auto mit = modelCache.find( g.model );
 				if ( mit == modelCache.end() && !modelsFailed.contains( g.model ) ) {
 					std::vector<NativeSrcShape> shapes;
@@ -3093,14 +3096,19 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 					}
 					float t[3], R[9], sc[3], shade = 1.0f;
 					wwCellGrassTransform( bl, gUniform.value( bl.form ), t, R, sc, &shade );
+					// the wind's per-blade phase offset rides in the bitangent's length (fo4_default.vert reads it back);
+					// only the side mesh keeps float bitangents (document rows store Y and Z as bytes: offset 0 there)
+					const float bitLen = cellMeshOn() ? 1024.0f + wwCellGrassPhaseOffset( bl ) : 1.0f;
 					gTypes.insert( bl.form );
 					gDrawn++;
 					for ( const NativeSrcShape & s : sit.value() ) {
 						const size_t nv = s.geom.pos.size() / 3;
 						if ( !nv || s.geom.tris.size() < 3 )
 							continue;
-						Bucket & b = bucketFor( s, true, QStringLiteral( "|GRASS" ) );
+						Bucket & b = bucketFor( s, true, QStringLiteral( "|GRASS|%1" ).arg( bl.form, 8, 16, QLatin1Char( '0' ) ) );
 						b.grass = true;
+						b.grassWave = gWave.value( bl.form, 0.0f );
+						const bool haveC = s.geom.rgba.size() >= nv * 4;
 						const int base = int( b.verts.size() );
 						const bool haveN = s.geom.nrm.size() >= nv * 3, haveT = s.geom.tan.size() >= nv * 3;
 						for ( size_t v = 0; v < nv; v++ ) {
@@ -3130,10 +3138,15 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 							o.bit = Vector3::crossproduct( o.nrm, o.tan );
 							if ( o.bit.length() < 1.0e-6f )
 								o.bit = Vector3( 0.0f, 0.0f, 1.0f );
+							o.bit.normalize();
+							o.bit *= bitLen;
 							o.uv = s.geom.uv.size() >= ( v + 1 ) * 2
 								? Vector2( s.geom.uv[v * 2 + 0], s.geom.uv[v * 2 + 1] ) : Vector2( 0.0f, 0.0f );
+							// the game's v4.rgb * v5.w: the model's vertex colour times the blade's shade; A = the model's
+							// vertex alpha, the wind's weight (no colours: (1,1,1,1))
 							for ( int c = 0; c < 3; c++ )
-								o.chan[c] = shade;   // the blade's shade: the stand-in shader's tint
+								o.chan[c] = ( haveC ? float( s.geom.rgba[v * 4 + size_t( c )] ) / 255.0f : 1.0f ) * shade;
+							o.chan[3] = haveC ? float( s.geom.rgba[v * 4 + 3] ) / 255.0f : 1.0f;
 							b.verts.push_back( o );
 						}
 						for ( size_t tt = 0; tt + 2 < s.geom.tris.size(); tt += 3 )

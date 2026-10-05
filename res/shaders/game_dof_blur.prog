@@ -1,4 +1,4 @@
-# The depth of field's blur, a separable Gaussian (lane GRASSMB1; src/gl/cellpost.h).
+# The game's depth of field blur, Blur3..Blur15 (lane GRASSMB1; src/gl/cellpost.h).
 # No conditions: never picked for a shape; cellpost.cpp selects it by name.
 
 shaders cell_ao.vert game_dof_blur.frag

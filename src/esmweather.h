@@ -252,6 +252,9 @@ struct WwWeatherData
 
 	// lane PBRWX1: the sky, sun glare and cloud fields
 	quint8 sunGlare = 0;	// DATA byte 4 (/255 = the glare strength)
+	// lane GRASSMB1: the wind, DATA bytes 0 (speed), 17 (direction), 18 (direction range), 19 (turbulence); /255 each
+	quint8 windSpeed = 0, windDir = 0, windDirRange = 0, windTurb = 0;
+	bool hasWind = false;
 	quint32 imsp[8] = {};	// IMSP: the IMGS per ToD (mapped FormIDs; 4-slot records mapped to 8)
 	float skyScale[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };	// IMGS HNAM[7] per ToD (1.0 where absent)
 	int skyScaleFound = 0;	// how many ToD slots had an IMGS with HNAM

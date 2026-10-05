@@ -137,6 +137,10 @@ bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] );
  *  has one; false (the outputs untouched) when no weather is loaded */
 bool wwLookdevImageSpaceDof( float a[4], float b[4], float & t, bool & haveA, bool & haveB );
 
+/*! Lane GRASSMB1: the loaded weather's wind bytes (DATA 0 speed, 17 direction, 18 direction range, 19 turbulence);
+ *  false (out untouched) when no weather is loaded or its DATA is short */
+bool wwLookdevWind( quint8 out[4] );
+
 //! cube background (replaces drawSkyBox in Lookdev); true = the colour buffer is written
 bool wwLookdevDrawBackground( Scene * scene );
 //! the ground quad at the lowest visible vertex; no-op when the Ground row is off

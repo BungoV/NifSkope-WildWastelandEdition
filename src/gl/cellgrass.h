@@ -29,9 +29,26 @@ class Scene;
  *   - the cos table is filled at run time: cos(k 2 pi / 512); a layer byte is trunc(opacity * 255);
  *   - no water: the water height is -3.4e38; the ground colour is the nearest triangle corner's VCLR;
  *   - a blade that lands past its cell reads the neighbour's LAND; no quadrant culling (the viewer draws all);
- *   - the grass vertex shader is not in the shader pack: the blade is placed as
- *     (X0 + h0, Y0 + h1, h2) + V1 x + V2 y + V3 z, the model scaled by 1 + h13 (z only unless uniform),
- *     tinted by the shade, NO wind; the fade is fGrassStartFadeDistance 3500 + fGrassFadeRange 1000.
+ *   - the wind angle: the game adds the nearest of 4 BSRandom draws within +- the direction range / 2; here 0;
+ *     one weather (no transition blend); the clock runs from the first grass frame, and an interactive window
+ *     repaints while grass waves (never in a harness);
+ *   - the bitangent is cross(normal, tangent), not the model's own; a model without vertex colours reads (1,1,1,1);
+ *   - the colour times the shade passes through a byte (the game multiplies in the shader: a shade above 1 clips);
+ *   - the per-blade phase offset rides only in the side mesh's float bitangents (cellmesh); with the side mesh
+ *     off the document rows hold bytes and the offset is 0 (every blade of a type waves in phase);
+ *   - the game lights grass deferred (its prepass's grass pixel output, then the deferred lights): not ported, the
+ *     blades shade through fo4_cell / pbrm_cell (forward);
+ *   - no actor benders (cb2[13..16]), and the motion blur's vectors are the camera's only (no grass motion).
+ *
+ *  The grass vertex shader IS the game's (Shaders011 entry 02183, the deferred prepass's grass technique 0x80):
+ *  the blade is (X0 + h0, Y0 + h1, h2) + V1 x + V2 y + V3 z, the model scaled by 1 + h13 (z only unless uniform),
+ *  coloured by the model's vertex colour times the shade; the wind (fo4_default.vert, uniforms from
+ *  wwCellGrassUniforms): p = (phase - (h0 + h1) / 128) * frequency, w = ((sin(pi sin p) + sin(2 pi sin p)) 0.3 +
+ *  cos(pi cos p) 0.2 + 1) (max - min) / 2 + min, times alpha^2 / 2, along (cos angle, sin angle, 0), added to the
+ *  position and to the normal, tangent and bitangent (each renormalised). phase = timer / 600 * 2 pi * the GRAS
+ *  wave period; min / max = fWindMin/MaxSpeed * 300 and the frequency from the weather's DATA (Sky::UpdateWind).
+ *  The blade's (h0 + h1) / 128 rides in the welded bitangent's length (1024 + it), read back and renormalised by
+ *  the vertex shader. The fade is fGrassStartFadeDistance 3500 + fGrassFadeRange 1000.
  *
  *  Row "Grass" in the Cell workspace; ships OFF; read at cell open (a switch reopens the cell). OFF adds
  *  nothing: no bucket, no uniform value but zero, so an OFF frame is the before-lane frame byte for byte.
@@ -39,6 +56,8 @@ class Scene;
  *   WW_CELL_GRASS=0|1            the row
  *   WW_CELL_GRASS_RED=seed       the jitter seed is off by one (the placement gate's red)
  *   WW_CELL_GRASS_DUMP=<file>    every blade: "B cx cy quadrant col row form j i h0..h15" (hex halves)
+ *   WW_CELL_GRASS_WIND_T=<s>     the wind's clock fixed at s seconds (the previous frame 1/60 s before);
+ *                                a harness run without it is fixed at 0 (never the wall clock)
  */
 
 bool wwCellGrassOn();
@@ -66,11 +85,23 @@ void wwCellGrassBlockOrigin( int cx, int cy, float & x0, float & y0 );
 
 //! Cell open: forget the last document's grass shapes; register one; the open's census line.
 void wwCellGrassBegin( const void * nif );
-void wwCellGrassShape( const void * nif, int block );
+void wwCellGrassShape( const void * nif, int block, float wavePeriod );
 void wwCellGrassNote( const void * nif, const QString & line );
 QString wwCellGrassEcho( const void * nif );
 
 //! Per draw (fo4_cell / pbrm_cell): the fade on a grass shape, zero on every other (a no-op without the uniform).
 void wwCellGrassUniforms( Scene * scene, int block );
+
+//! The wind constants from the loaded weather (Sky::UpdateWind): wind = (angle, 0, 0, 0), wind2 = (min * 300,
+//! max * 300, frequency, 1); false without a weather.
+bool wwCellGrassWind( float wind[4], float wind2[4] );
+//! The blade's phase offset, (h0 + h1) * 0.0078125: the weld carries it in the bitangent's length (1024 + it).
+float wwCellGrassPhaseOffset( const WwGrassBlade & b );
+//! One shape's phase at time t: ((t * 0.0016666667) * 6.2831802) * the GRAS wave period, float32.
+float wwCellGrassPhase( double t, float wavePeriod );
+//! After the cell view's frame: the wind's clock steps (prev = cur, cur = now) unless pinned.
+void wwCellGrassFrameEnd();
+//! True once after a frame that drew waving grass: an interactive window paints again (never in a harness).
+bool wwCellGrassWantsRepaint();
 
 #endif

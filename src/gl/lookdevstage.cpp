@@ -1624,3 +1624,15 @@ bool wwLookdevImageSpaceDof( float a[4], float b[4], float & t, bool & haveA, bo
 	t = f.c.keys.t;
 	return true;
 }
+
+bool wwLookdevWind( quint8 out[4] )
+{
+	const LdState & s = st();
+	if ( !s.haveWeather || !s.w.hasWind )
+		return false;
+	out[0] = s.w.windSpeed;
+	out[1] = s.w.windDir;
+	out[2] = s.w.windDirRange;
+	out[3] = s.w.windTurb;
+	return true;
+}

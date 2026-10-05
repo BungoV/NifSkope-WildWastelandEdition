@@ -279,9 +279,11 @@ void main()
 		 * colour -- otherwise a tree card previews as a solid quad and its
 		 * silhouette, the thing you are looking at, is gone. Hence the preview
 		 * early-out sits AFTER this and not at the top of main(). */
-		float	a = C.a * baseMap.a * alpha;
 #ifdef WW_CELLLIGHTS
+		float	a = wwGrassVertexA( C.a ) * baseMap.a * alpha;
 		a *= wwGrassK;	// lane GRASSMB1: the grass fades out through its own alpha test
+#else
+		float	a = C.a * baseMap.a * alpha;
 #endif
 		// 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
 		int	m = ( a < alphaThreshold ? 0x2B2B : ( a > alphaThreshold ? 0x7171 : 0x4D4D ) );

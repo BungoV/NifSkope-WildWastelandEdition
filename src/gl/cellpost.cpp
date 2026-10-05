@@ -1,6 +1,7 @@
 #include "cellpost.h"
 
 #include "esmdata.h"
+#include "gl/gametaa.h"
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
@@ -34,6 +35,20 @@ const char * const kMblurKey = "WW/CellMotionBlur";
 constexpr float kMbScale = 50.0f;
 constexpr float kMbMax = 0.01f;
 constexpr float kMbThreshold = 70.0f;
+
+// the game's blur weights (aBlurWeights, filled by its static initializer: a Gaussian of sigma r / 2 over its
+// sum), row r - 1 for radius r, tap k at offset k - 7; the bits as the game holds them (a float recompute misses
+// by up to 3e-7, so the table is the data, not the formula)
+constexpr int kBlurMaxRadius = 7;
+const float kBlurWeights[kBlurMaxRadius][15] = {
+	{ 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.106506713f, 0.786985755f, 0.106506713f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f },
+	{ 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0544885658f, 0.244201481f, 0.402619928f, 0.244201481f, 0.0544885658f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f },
+	{ 0.0f, 0.0f, 0.0f, 0.0f, 0.0366327688f, 0.111280687f, 0.216745228f, 0.270682156f, 0.216745228f, 0.111280687f, 0.0366327688f, 0.0f, 0.0f, 0.0f, 0.0f },
+	{ 0.0f, 0.0f, 0.0f, 0.0276304893f, 0.0662821382f, 0.1238316f, 0.180173829f, 0.204163671f, 0.180173829f, 0.1238316f, 0.0662821382f, 0.0276304893f, 0.0f, 0.0f, 0.0f },
+	{ 0.0f, 0.0f, 0.0221905038f, 0.0455889553f, 0.0798113719f, 0.119064637f, 0.151360765f, 0.163967222f, 0.151360765f, 0.119064637f, 0.0798113719f, 0.0455889553f, 0.0221905038f, 0.0f, 0.0f },
+	{ 0.0f, 0.018543981f, 0.0341669098f, 0.0563317239f, 0.0831085816f, 0.109719239f, 0.129617959f, 0.137022808f, 0.129617959f, 0.109719239f, 0.0831085816f, 0.0563317239f, 0.0341669098f, 0.018543981f, 0.0f },
+	{ 0.0159283616f, 0.0270778015f, 0.0424232148f, 0.0612547807f, 0.0815124661f, 0.0999668092f, 0.112988554f, 0.117695801f, 0.112988554f, 0.0999668092f, 0.0815124661f, 0.0612547807f, 0.0424232148f, 0.0270778015f, 0.0159283616f },
+};
 
 constexpr int kUnitCur = 12, kUnitBlur = 13, kUnitDepth = 14, kUnitMv = 15;
 
@@ -127,8 +142,9 @@ Matrix4 toMatrix4( const Dmat & d )
 struct PostGpu
 {
 	GLuint inFbo = 0, fbo = 0, mvFbo = 0;
-	GLuint cur = 0, depth = 0, blur[2] = { 0, 0 }, mv = 0, out = 0;
+	GLuint cur = 0, depth = 0, blur[2] = { 0, 0 }, mv = 0, out = 0;	// blur[0] = the game's tex2, blur[1] its tex3
 	int w = 0, h = 0;
+	int qw[2] = { 0, 0 }, qh[2] = { 0, 0 };	// tex2 = (ceil(W / 4), ceil(H / 4)), tex3 = (W >> 2, H >> 2)
 	GLenum dsFormat = 0;
 	GLbitfield depthBits = 0;
 };
@@ -137,7 +153,7 @@ struct PostState
 {
 	bool init = false;
 	bool dof = false, dofPinned = false, mb = false, mbPinned = false;
-	bool redNoCoc = false, redNoVelocity = false;
+	bool redNoCoc = false, redNoVelocity = false, redNoJitter = false, redBlurRow = false;
 	QString dumpDir;
 	int dumpFrame = 2;
 
@@ -183,7 +199,9 @@ PostState & ps()
 		s.dof = readPin( "WW_CELL_DOF", kDofKey, s.dofPinned );
 		s.mb = readPin( "WW_CELL_MBLUR", kMblurKey, s.mbPinned );
 		s.redNoCoc = qEnvironmentVariable( "WW_CELL_DOF_RED" ).contains( QLatin1StringView( "nococ" ) );
+		s.redBlurRow = qEnvironmentVariable( "WW_CELL_DOF_RED" ).contains( QLatin1StringView( "blurrow" ) );
 		s.redNoVelocity = qEnvironmentVariable( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "novelocity" ) );
+		s.redNoJitter = qEnvironmentVariable( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "nojitter" ) );
 		s.dumpDir = qEnvironmentVariable( "WW_CELL_POST_DUMP" ).trimmed();
 		bool ok = false;
 		const int df = qEnvironmentVariable( "WW_CELL_POST_DUMP_FRAME" ).toInt( &ok );
@@ -453,15 +471,15 @@ void wwCellPostApply( Scene * scene )
 			const quint32 flags = ( std::isfinite( fl ) && fl > 0.0f && fl < 4294967296.0f ) ? quint32( fl ) : 0U;
 			const quint32 mode = flags & 3U;
 			radius = int( flags >> 3 ) ? int( flags >> 3 ) : 3;
-			radius = std::min( radius, 64 );
+			radius = std::min( radius, kBlurMaxRadius );	// Blur3..Blur15: the longest kernel is 15 taps
 			farOnly = mode == 2U;
-			dc0 = FloatVector4( d - ( d - rg ), ( rg + d ) - d, d, 0.0f );
+			dc0 = FloatVector4( d - ( d - rg ), ( rg + d ) - d, d, 10000.0f );	// .w: the game's, unread by the composite
 			dc1 = FloatVector4( strength, mode > 1U ? 0.0f : 1.0f, ( flags & 1U ) ? 0.0f : 1.0f, ( flags & 4U ) ? 1.0f : 0.0f );
 			dc2 = FloatVector4( -1e8f, zNear, zFar - zNear, zFar * zNear );
 			const QString what = QStringLiteral( "strength %1 distance %2 range %3 flags %4 radius %5 %6 from %7%8" )
 				.arg( f9( strength ), f9( d ), f9( rg ) ).arg( flags ).arg( radius )
 				.arg( farOnly ? QStringLiteral( "far-only" ) : QStringLiteral( "near+far" ), src,
-					s.redNoCoc ? QStringLiteral( " RED nococ" ) : QString() );
+					s.redNoCoc ? QStringLiteral( " RED nococ" ) : s.redBlurRow ? QStringLiteral( " RED blurrow" ) : QString() );
 			if ( !( strength > 0.0f ) ) {
 				noteDof( s, QStringLiteral( "refused (strength 0: %1)" ).arg( what ) );
 			} else {
@@ -472,7 +490,16 @@ void wwCellPostApply( Scene * scene )
 	}
 
 	// the motion vectors' frames: the next index continues the path, the same index repeats it
-	const Dmat curVP = fromColumnMajor( P ) * fromTransform( scene->view );
+	// the camera without the temporal AA's jitter, as the game draws its vector target (RT 0x20); the jitter itself
+	// goes to the vector pass, which takes it out of the pixel's NDC. The red (WW_CELL_MBLUR_RED=nojitter) builds the
+	// frames from the jittered projection, round 1's way: a still camera's vectors then carry the jitter's change
+	Matrix4 unjittered;
+	float jitX = 0.0f, jitY = 0.0f;
+	const bool jittered = wwGameTaaUnjittered( unjittered ) && wwGameTaaJitter( jitX, jitY );
+	if ( !jittered )
+		jitX = jitY = 0.0f;
+	const Dmat curVP = ( jittered && !s.redNoJitter ? fromColumnMajor( unjittered.data() ) : fromColumnMajor( P ) )
+		* fromTransform( scene->view );
 	bool runMb = false;
 	Dmat reproj = Dmat::identity();
 	FloatVector4 mc0( 0.0f ), mc1( 0.0f );
@@ -507,8 +534,9 @@ void wwCellPostApply( Scene * scene )
 			// c0 = (scale x 0.001 x (1 / dt), max blur, fThreshold, 0); c1 = (1, 1, (W - 1) / W, (H - 1) / H)
 			mc0 = FloatVector4( kMbScale * 0.001f * ( 1.0f / float( dt ) ), kMbMax, kMbThreshold, 0.0f );
 			mc1 = FloatVector4( 1.0f, 1.0f, float( W - 1 ) / float( W ), float( H - 1 ) / float( H ) );
-			const QString line = QStringLiteral( "on frame %1 dt %2 c0 %3%4" ).arg( frame ).arg( f9( dt ), v4( mc0 ),
-				s.redNoVelocity ? QStringLiteral( " RED novelocity" ) : QString() );
+			const QString line = QStringLiteral( "on frame %1 dt %2 c0 %3 jitter %4 %5%6" ).arg( frame ).arg( f9( dt ), v4( mc0 ),
+				f9( jitX ), f9( jitY ), s.redNoVelocity ? QStringLiteral( " RED novelocity" )
+				: s.redNoJitter ? QStringLiteral( " RED nojitter" ) : QString() );
 			// the key: a path's fixed frame time, never an interactive window's measured one (no line per paint)
 			noteMb( s, line, QStringLiteral( "on %1 %2" ).arg( s.pathFrame >= 0 ? f9( dt ) : QStringLiteral( "measured" ) )
 				.arg( s.redNoVelocity ? 1 : 0 ) );
@@ -554,12 +582,17 @@ void wwCellPostApply( Scene * scene )
 			fn->glGenFramebuffers( 1, &g.fbo );
 			fn->glGenFramebuffers( 1, &g.mvFbo );
 		}
-		g.cur = makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, GL_LINEAR );			// t0
+		g.qw[0] = ( W + 3 ) / 4;
+		g.qh[0] = ( H + 3 ) / 4;
+		g.qw[1] = std::max( W >> 2, 1 );
+		g.qh[1] = std::max( H >> 2, 1 );
+		// half floats between the passes, as the game's targets: the frame's values pass through unclamped
+		g.cur = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );				// t0
 		g.depth = makeTex( r, dsFormat, dsFmt, dsType, W, H, GL_NEAREST );					// the DoF's t2
-		g.blur[0] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );
-		g.blur[1] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );			// the DoF's t1
+		g.blur[0] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, g.qw[0], g.qh[0], GL_NEAREST );	// tex2, the DoF's t1
+		g.blur[1] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, g.qw[1], g.qh[1], GL_NEAREST );	// tex3
 		g.mv = makeTex( r, GL_RG32F, GL_RG, GL_FLOAT, W, H, GL_LINEAR );					// the blur's t1
-		g.out = makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, GL_LINEAR );
+		g.out = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.inFbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.cur, 0 );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, dsFmt == GL_DEPTH_STENCIL ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
@@ -620,24 +653,65 @@ void wwCellPostApply( Scene * scene )
 		dumpFloat( dd + "depth.bin", W, H, 1, readTex( r, g.inFbo, 0, true, GL_DEPTH_COMPONENT, 1, W, H ) );
 	}
 
-	// 2. the depth of field: the blur (two separable passes), then the game's composite into out, out back to cur
+	// 2. the depth of field, the game's passes: the downsample (03706) of the frame into the quarter-size tex2, the
+	// blur (Blur3..Blur15) down the columns tex2 -> tex3 then along the rows tex3 -> tex2, both reading by point,
+	// then the composite (03664 / 03676) into out reading tex2 linearly; out back to cur
+	auto filter = [&]( GLuint tex, GLenum f ) {
+		fn->glBindTexture( GL_TEXTURE_2D, tex );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint( f ) );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint( f ) );
+	};
 	if ( ok && runDof ) {
-		const float sigma = float( radius ) * 0.5f;
-		for ( int pass = 0; pass < 2 && ok; pass++ ) {
-			target( g.blur[pass] );
-			auto prog = r->useProgram( "game_dof_blur.prog" );
-			if ( !prog ) {
-				ok = false;
-				break;
-			}
-			bind( kUnitCur, pass == 0 ? g.cur : g.blur[0] );
-			prog->uni1i( "srcTex", kUnitCur );
-			prog->uni2f( "stepUv", pass == 0 ? 1.0f / float( W ) : 0.0f, pass == 0 ? 0.0f : 1.0f / float( H ) );
-			prog->uni1i( "radius", radius );
-			prog->uni1f( "sigma", sigma );
+		target( g.blur[0] );
+		fn->glViewport( 0, 0, g.qw[0], g.qh[0] );
+		auto prog = r->useProgram( "game_dof_down.prog" );
+		if ( !prog ) {
+			ok = false;
+		} else {
+			bind( kUnitCur, g.cur );
+			prog->uni1i( "t0", kUnitCur );
+			prog->uni4f( "c4", FloatVector4( 1.0f, 1.0f, 2.0f / float( W ), 2.0f / float( H ) ) );
+			prog->uni4f( "c7", FloatVector4( 1.0f / float( W ), 1.0f / float( H ), 0.0f, 0.0f ) );
+			const FloatVector4 taps[4] = { FloatVector4( -1.0f, -1.0f, 0.25f, 0.0f ), FloatVector4( 1.0f, -1.0f, 0.25f, 0.0f ),
+				FloatVector4( -1.0f, 1.0f, 0.25f, 0.0f ), FloatVector4( 1.0f, 1.0f, 0.25f, 0.0f ) };
+			prog->uni4fv( "taps", taps, 4 );
+			prog->uni2f( "dstSize", float( g.qw[0] ), float( g.qh[0] ) );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			r->stopProgram();
 		}
+		if ( ok && dump )
+			dumpFloat( dd + "dof_down.bin", g.qw[0], g.qh[0], 4, readTex( r, g.fbo, g.blur[0], false, GL_RGBA, 4, g.qw[0], g.qh[0] ) );
+		const int taps = 2 * radius + 1;
+		// the weight row: radius - 1; the red (WW_CELL_DOF_RED=blurrow) reads the next radius's row (Blur15 reads Blur13's)
+		const int row = s.redBlurRow ? ( radius < kBlurMaxRadius ? radius : radius - 2 ) : radius - 1;
+		for ( int pass = 0; pass < 2 && ok; pass++ ) {	// pass 0: the columns (y), pass 1: the rows (x)
+			const GLuint src = g.blur[pass], dst = g.blur[1 - pass];
+			const int sw = g.qw[pass], sh = g.qh[pass], dw = g.qw[1 - pass], dh = g.qh[1 - pass];
+			target( dst );
+			fn->glViewport( 0, 0, dw, dh );
+			auto bprog = r->useProgram( "game_dof_blur.prog" );
+			if ( !bprog ) {
+				ok = false;
+				break;
+			}
+			bind( kUnitBlur, src );
+			filter( src, GL_NEAREST );
+			FloatVector4 o[15];
+			for ( int i = 0; i < taps; i++ ) {
+				const int k = 7 - radius + i;
+				o[i] = FloatVector4( pass == 1 ? float( k - 7 ) / float( sw ) : 0.0f, pass == 0 ? float( k - 7 ) / float( sh ) : 0.0f,
+					kBlurWeights[row][k], 0.0f );
+			}
+			bprog->uni1i( "t0", kUnitBlur );
+			bprog->uni4fv( "o", o, size_t( taps ) );
+			bprog->uni1i( "taps", taps );
+			bprog->uni2f( "dstSize", float( dw ), float( dh ) );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			r->stopProgram();
+		}
+		fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
+		if ( ok )
+			filter( g.blur[0], GL_LINEAR );
 		if ( ok ) {
 			target( g.out );
 			auto prog = r->useProgram( "game_dof.prog" );
@@ -645,7 +719,7 @@ void wwCellPostApply( Scene * scene )
 				ok = false;
 			} else {
 				bind( kUnitCur, g.cur );
-				bind( kUnitBlur, g.blur[1] );
+				bind( kUnitBlur, g.blur[0] );
 				bind( kUnitDepth, g.depth );
 				prog->uni1i( "t0", kUnitCur );
 				prog->uni1i( "t1", kUnitBlur );
@@ -661,7 +735,7 @@ void wwCellPostApply( Scene * scene )
 			}
 		}
 		if ( ok && dump ) {
-			dumpFloat( dd + "dof_blur.bin", W, H, 4, readTex( r, g.fbo, g.blur[1], false, GL_RGBA, 4, W, H ) );
+			dumpFloat( dd + "dof_blur.bin", g.qw[0], g.qh[0], 4, readTex( r, g.fbo, g.blur[0], false, GL_RGBA, 4, g.qw[0], g.qh[0] ) );
 			dumpFloat( dd + "dof_out.bin", W, H, 4, readTex( r, g.fbo, g.out, false, GL_RGBA, 4, W, H ) );
 		}
 		if ( ok ) {	// the motion blur reads the depth of field's picture
@@ -689,7 +763,8 @@ void wwCellPostApply( Scene * scene )
 				bind( kUnitDepth, g.depth );
 				prog->uni1i( "depthTex", kUnitDepth );
 				prog->uni4m( "reproj", toMatrix4( reproj ) );
-				prog->uni2f( "jitterNdc", 0.0f, 0.0f );
+				// 0 when the temporal AA is off; 0 in the red (its frames keep the jitter; post.txt still records it)
+				prog->uni2f( "jitterNdc", s.redNoJitter ? 0.0f : jitX, s.redNoJitter ? 0.0f : jitY );
 				prog->uni2f( "invSize", 1.0f / float( W ), 1.0f / float( H ) );
 				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 				r->stopProgram();
@@ -724,6 +799,8 @@ void wwCellPostApply( Scene * scene )
 		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
 			QTextStream t( &f );
 			t << "frame " << frame << "\nW " << W << "\nH " << H << "\ndt " << f9( dt )
+			  << "\njitter " << ( jittered ? 1 : 0 ) << ' ' << f9( jitX ) << ' ' << f9( jitY )
+			  << "\nq2 " << g.qw[0] << ' ' << g.qh[0] << "\nq3 " << g.qw[1] << ' ' << g.qh[1]
 			  << "\ndof " << ( runDof ? 1 : 0 ) << "\nfarOnly " << ( farOnly ? 1 : 0 ) << "\nradius " << radius
 			  << "\ndc0 " << v4( dc0 ) << "\ndc1 " << v4( dc1 ) << "\ndc2 " << v4( dc2 ) << "\ndc3 " << v4( dc3 )
 			  << "\nmb " << ( runMb ? 1 : 0 ) << "\nmc0 " << v4( mc0 ) << "\nmc1 " << v4( mc1 )
@@ -731,7 +808,7 @@ void wwCellPostApply( Scene * scene )
 			const Matrix4 rp = toMatrix4( reproj );
 			for ( int i = 0; i < 16; i++ )
 				t << ' ' << f9( rp.data()[i] );
-			t << "\nred " << ( s.redNoCoc ? "nococ" : s.redNoVelocity ? "novelocity" : "none" ) << '\n';
+			t << "\nred " << ( s.redNoCoc ? "nococ" : s.redNoVelocity ? "novelocity" : s.redNoJitter ? "nojitter" : s.redBlurRow ? "blurrow" : "none" ) << '\n';
 		}
 		qInfo().noquote() << "cell post: dumped frame" << frame << "to" << s.dumpDir;
 	}

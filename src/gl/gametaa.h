@@ -50,6 +50,8 @@ void wwGameTaaArmJitter( bool armed );
 void wwGameTaaJitterProjection( Scene * scene, Matrix4 & proj );
 //! The projection without the jitter (the shadow fit reads the camera's frustum, not the jittered one).
 bool wwGameTaaUnjittered( Matrix4 & proj );
+//! Lane GRASSMB1: this frame's jitter in NDC (the offsets the projection got); false when not jittered.
+bool wwGameTaaJitter( float & offX, float & offY );
 
 //! After the scene's draw (and the cell view's one tone map): the vectors, the resolve, the frame back.
 void wwGameTaaResolve( Scene * scene );

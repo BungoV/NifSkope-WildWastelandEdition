@@ -3,10 +3,12 @@
 
 #include "esmdata.h"
 #include "gl/glscene.h"
+#include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
 
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
 #include <QPair>
@@ -43,6 +45,13 @@ struct GrassState
 	bool init = false, on = false, pinned = false, redSeed = false;
 	QString dump;
 	QHash<const void *, QSet<int>> shapes;
+	QHash<const void *, QHash<int, float>> wave;	// block -> its GRAS wave period (the property's +0xf4)
+	// the wind's clock: the game's accumulated frame seconds (St+0x3c), here the time since the first grass frame;
+	// cur at this frame, prev at the last (the vertex shader's two phases)
+	QElapsedTimer clock;
+	bool timePinned = false, windDrawn = false;
+	double tCur = 0.0, tPrev = 0.0;
+	QString saidWind;
 	QHash<const void *, QString> notes;
 	QSet<QString> dumpedDocs;
 };
@@ -64,6 +73,17 @@ GrassState & gs()
 		}
 		s.redSeed = qEnvironmentVariable( "WW_CELL_GRASS_RED" ).contains( QLatin1StringView( "seed" ) );
 		s.dump = qEnvironmentVariable( "WW_CELL_GRASS_DUMP" ).trimmed();
+		bool ok = false;
+		const double t = qEnvironmentVariable( "WW_CELL_GRASS_WIND_T" ).toDouble( &ok );
+		if ( ok ) {	// a fixed clock: the frame at t, its previous frame 1/60 s before
+			s.timePinned = true;
+			s.tCur = t;
+			s.tPrev = t - 1.0 / 60.0;
+		} else if ( wwHarnessRun() ) {	// a harness never reads the wall clock: t = 0, run to run identical
+			s.timePinned = true;
+			s.tCur = 0.0;
+			s.tPrev = -1.0 / 60.0;
+		}
 	}
 	return s;
 }
@@ -619,13 +639,79 @@ void wwCellGrassTransform( const WwGrassBlade & b, bool uniformScale, float t[3]
 void wwCellGrassBegin( const void * nif )
 {
 	gs().shapes.remove( nif );
+	gs().wave.remove( nif );
 	gs().notes.remove( nif );
 	gs().dumpedDocs.clear();
 }
 
-void wwCellGrassShape( const void * nif, int block )
+void wwCellGrassShape( const void * nif, int block, float wavePeriod )
 {
 	gs().shapes[nif].insert( block );
+	gs().wave[nif].insert( block, wavePeriod );
+}
+
+bool wwCellGrassWind( float wind[4], float wind2[4] )
+{
+	quint8 w[4] = { 0, 0, 0, 0 };
+	if ( !wwLookdevWind( w ) )
+		return false;
+	// Sky::UpdateWind, float32 in its order (one weather: no transition blend)
+	const float k255 = 1.0f / 255.0f;	// 0x3b808081
+	const float M = float( w[0] ) * k255;
+	const float T = float( w[3] ) * k255;
+	const float freq = ( 1.0f - T ) * 0.5f + T * 4.0f;	// fWindLowestFrequency, fWindHighestFrequency
+	const float minSpeed = ( ( 1.0f - T ) + T * 0.0f ) * M;	// fWindSpeedLowestLowMultiplier
+	const float maxSpeed = ( ( 1.0f - T ) + T * 1.5f ) * M;	// fWindSpeedHighestHighMultiplier
+	const float dir = float( w[1] ) * k255 * 360.0f;
+	// the game adds the nearest of 4 BSRandom draws within +- range / 2 (not reproducible): offset 0 here
+	const float twoPi = 6.28318548f;
+	float angle = ( 0.0f + dir ) * 0.0174532924f;
+	if ( !( angle < twoPi ) )
+		angle -= twoPi;
+	else if ( angle < 0.0f )
+		angle += twoPi;
+	wind[0] = angle;
+	wind[1] = 0.0f;
+	wind[2] = 0.0f;	// the phases are per shape (wwCellGrassUniforms)
+	wind[3] = 0.0f;
+	// BSDFPrePassShader::SetupGeometry: (fWindMinSpeed * 300, fWindMaxSpeed * 300, fWindFrequency)
+	wind2[0] = minSpeed * 300.0f;
+	wind2[1] = maxSpeed * 300.0f;
+	wind2[2] = freq;
+	wind2[3] = 1.0f;
+	return true;
+}
+
+float wwCellGrassPhaseOffset( const WwGrassBlade & b )
+{
+	// the vertex shader's add v5.y, v5.x then * 0.0078125 (the blade's block-relative position halves)
+	const float sum = fromHalf( b.h[1] ) + fromHalf( b.h[0] );
+	return sum * 0.0078125f;
+}
+
+float wwCellGrassPhase( double t, float wavePeriod )
+{
+	// ((timer * 0.0016666667) * 6.2831802) * the GRAS wave period, float32
+	return ( ( float( t ) * 0.0016666667f ) * 6.2831802f ) * wavePeriod;
+}
+
+void wwCellGrassFrameEnd()
+{
+	GrassState & s = gs();
+	if ( s.timePinned )
+		return;
+	if ( !s.clock.isValid() )
+		s.clock.start();
+	s.tPrev = s.tCur;
+	s.tCur = double( s.clock.nsecsElapsed() ) * 1e-9;
+}
+
+bool wwCellGrassWantsRepaint()
+{
+	GrassState & s = gs();
+	const bool want = s.windDrawn && !s.timePinned && !wwHarnessRun();
+	s.windDrawn = false;
+	return want;
 }
 
 void wwCellGrassNote( const void * nif, const QString & line )
@@ -655,9 +741,36 @@ void wwCellGrassUniforms( Scene * scene, int block )
 	const auto it = s.shapes.constFind( scene->nifModel );
 	if ( it == s.shapes.constEnd() || !it->contains( block ) ) {
 		prog->uni3f( "wwGrassFade", 0.0f, 0.0f, 0.0f );
+		if ( prog->uniLocation( "wwGrassWind2" ) >= 0 )
+			prog->uni4f( "wwGrassWind2", FloatVector4( 0.0f ) );
 		return;
 	}
 	// fGrassStartFadeDistance 3500, fGrassFadeRange 1000 (the INI defaults), in view units
 	const float k = scene->view.scale;
 	prog->uni3f( "wwGrassFade", 3500.0f * k, 1000.0f * k, 1.0f );
+	// the wind (the game's grass vertex shader, Shaders011 entry 02183): cb2[11] = (angle, 0, prev phase, phase),
+	// cb2[12] = (min speed * 300, max speed * 300, frequency); .w = 1 = a grass shape (the game's grass vertex shader
+	// runs: renormalised frame, colour ^ 2.2); no weather loaded = no wind (speeds 0: the blade stays put)
+	float wind[4] = { 0, 0, 0, 0 }, wind2[4] = { 0, 0, 0, 1 };
+	GrassState & ws = gs();
+	const bool haveWind = wwCellGrassWind( wind, wind2 );
+	if ( haveWind ) {
+		const auto wit = ws.wave.constFind( scene->nifModel );
+		const float wave = wit != ws.wave.constEnd() ? wit->value( block, 0.0f ) : 0.0f;
+		wind[2] = wwCellGrassPhase( ws.tPrev, wave );
+		wind[3] = wwCellGrassPhase( ws.tCur, wave );
+		ws.windDrawn = ws.windDrawn || wind2[1] > 0.0f;
+	}
+	const QString said = haveWind
+		? QStringLiteral( "cell grass wind: angle %1 min %2 max %3 freq %4%5" ).arg( double( wind[0] ) ).arg( double( wind2[0] ) )
+			.arg( double( wind2[1] ) ).arg( double( wind2[2] ) ).arg( ws.timePinned ? QStringLiteral( " (clock pinned)" ) : QString() )
+		: QStringLiteral( "cell grass wind: none (no weather loaded)" );
+	if ( said != ws.saidWind ) {
+		ws.saidWind = said;
+		qInfo().noquote() << said;
+	}
+	if ( prog->uniLocation( "wwGrassWind" ) >= 0 ) {
+		prog->uni4f( "wwGrassWind", FloatVector4( wind[0], wind[1], wind[2], wind[3] ) );
+		prog->uni4f( "wwGrassWind2", FloatVector4( wind2[0], wind2[1], wind2[2], wind2[3] ) );
+	}
 }
