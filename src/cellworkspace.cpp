@@ -440,7 +440,6 @@ void CellWorkspacePanel::buildUi()
 	cellTaa = new QCheckBox( tr( "Temporal AA" ), prtpRow );
 	cellTaa->setObjectName( QStringLiteral( "CellWorkspaceTemporalAa" ) );
 	cellTaa->setChecked( wwGameTaaOn() );
-<<<<<<< HEAD
 	// lane SUNCELL1: draw only the placements the camera (or a sun cascade) sees; ships off
 	cellCull = new QCheckBox( tr( "Culling" ), prtpRow );
 	cellCull->setObjectName( QStringLiteral( "CellWorkspaceCulling" ) );
@@ -449,7 +448,6 @@ void CellWorkspacePanel::buildUi()
 	cellPrevis = new QCheckBox( tr( "Previs" ), prtpRow );
 	cellPrevis->setObjectName( QStringLiteral( "CellWorkspacePrevis" ) );
 	cellPrevis->setChecked( wwCellPrevisOn() );
-=======
 	// lane FARLOD1: the worldspace's LOD past the loaded block, read at cell open; ships off
 	cellFarLod = new QCheckBox( tr( "Far LOD" ), prtpRow );
 	cellFarLod->setObjectName( QStringLiteral( "CellWorkspaceFarLod" ) );
@@ -462,7 +460,6 @@ void CellWorkspacePanel::buildUi()
 		const int t = cellFarLodTypePinned() != WwFarLodAuto ? cellFarLodTypePinned() : cellFarLodLastType();
 		cellFarLodType->setCurrentIndex( t == WwFarLodVanilla ? 0 : 1 );
 	}
->>>>>>> farlod1-20261005
 	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
 	cellPass = new QComboBox( prtpRow );
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
@@ -475,13 +472,10 @@ void CellWorkspacePanel::buildUi()
 	pl->addWidget( cellPass );
 	pl->addWidget( cellIs );
 	pl->addWidget( cellTaa );
-<<<<<<< HEAD
 	pl->addWidget( cellCull );
 	pl->addWidget( cellPrevis );
-=======
 	pl->addWidget( cellFarLod );
 	pl->addWidget( cellFarLodType );
->>>>>>> farlod1-20261005
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );

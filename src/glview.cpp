@@ -4098,12 +4098,8 @@ void GLView::paintGL()
 		ImpostorChunk::draw( scene, ImpostorDraw::Options() );
 		if ( !wwImpostorPreviewSuppressScene() ) {
 			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
-<<<<<<< HEAD
 			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );	// lane CELLALL1
-=======
-			const bool hdr = workspaceDrawScenes.isEmpty() && wwCellHdrBegin( scene );
 			wwCellFarLodFrame( scene );	// lane FARLOD1: the far sway's uniforms; no GL call while off
->>>>>>> farlod1-20261005
 			scene->draw();
 			if ( hdr ) {
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
