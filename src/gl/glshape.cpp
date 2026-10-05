@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glshape.h"
+#include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 
 #include "gl/controllers.h"
 #include "gl/glscene.h"
@@ -652,6 +653,14 @@ void Shape::updateShader()
 			}
 		}
 	}
+
+	/* lane TERRBLEND1: a blended-ground layer is ADDED onto its own opaque base
+	 * (src/cellsplat.h), so it draws in the OPAQUE pass, straight after the bases
+	 * in the ground BSOrderedNode's block order. In the transparent pass it was
+	 * sorted against the water, and a layer drawn after the water surface added
+	 * itself on top of the water: pale blotches along every bank. */
+	if ( drawInSecondPass && scene && wwCellLandIs( scene->nifModel, id() ) )
+		drawInSecondPass = false;
 
 	// lane FXD1: a decal of the lighting shader, by its flags or by its material file
 	surfaceDecal = bslsp && !bslsp->hasRefraction

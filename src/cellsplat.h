@@ -30,10 +30,22 @@ class EsmWorld;
  *
  * A quadrant has one `BTXT` base texture and any number of `ATXT` layers.
  * Each layer carries a `VTXT` grid of 17x17 opacities and an `ATXT` LAYER
- * INDEX -- the int16 at payload offset 6 -- which is the engine's PAINT ORDER.
- * The engine composites them in that order, ordinary alpha-over:
+ * INDEX -- the int16 at payload offset 6 -- which is its SLOT.
  *
- *     result = mix( result, layer, opacity )
+ * CORRECTED BY LANE TERRBLEND1 (2026-10-05), out of Todd's treat (1.10.155:
+ * LoadVerticesIntoArrays, CreateGeometry, MergeMatchingTextures) and the
+ * shipped Landscape pixel shader: the engine does NOT composite alpha-over.
+ * The opacities are SHARES of one sum,
+ *
+ *     colour = ( w0 * base + sum( w_i * layer_i ) ) * VCLR,  w0 = 1 - sum( w_i )
+ *
+ * with each w a truncated byte, the base the engine's default set when the
+ * quadrant has no BTXT, matching layers merged, and only the first five
+ * layers drawn. Read as alpha-over (this file until TERRBLEND1) a quadrant
+ * with no BTXT had nothing under its first layer, so that layer was promoted
+ * to opaque per quad -- the hard squares -- and a quad with no layer either
+ * was not drawn at all -- the sky-coloured holes. cellsplat.cpp has the
+ * engine's rules line by line.
  *
  * The 17x17 grid is not a texture to be sampled: the cell's 33x33 land vertex
  * grid maps ONE-TO-ONE onto the four 17x17 quadrant grids, with the middle row
@@ -59,22 +71,22 @@ class EsmWorld;
  * BTXT at all; of the 32 pairs where both sides have a BTXT, ZERO change.  The
  * quadrant arithmetic is clean; the seam is in the data.
  *
- * That is why this needs no new texture units and no second render pass. One
- * quad per contributing layer, the weight in the vertex colour's ALPHA byte
- * (`ByteColor4` already has one -- src/cellview.cpp writes 1.0 into it today),
- * the base pass opaque and every layer pass alpha-blended over it in paint
- * order.  The existing draw path carries all of it:
+ * That is why this needs no new texture units. One quad per contributing
+ * layer, the share in the vertex colour's ALPHA byte:
  *
  *   - ONE texture unit per shape, as now; the layering is in the geometry.
- *   - The transparent pass already sorts by block number when the root is a
- *     `BSOrderedNode` (Scene::drawDeferredShapes -> secondPass.alphaSort ->
- *     compareNodesAlpha, which returns id order when both nodes are
- *     presorted).  Emitting the buckets in paint order therefore DRAWS them in
- *     paint order.
- *   - A translucent shape does not write depth (src/gl/renderer.cpp ~890
- *     `glDepthMask(!depthWrite || translucent ? GL_FALSE : GL_TRUE)`), so the
- *     layers cannot occlude one another, and all of them depth-TEST against
- *     the opaque base with `GL_LEQUAL`.
+ *   - The base pass is OPAQUE (it writes the depth) and the shader scales it
+ *     by its own share; every layer pass is ADDED (SRC_ALPHA, ONE) at its
+ *     share. A sum does not care about draw order, and the rasteriser's
+ *     linear interpolation of each share IS the engine's per-pixel weight --
+ *     exact, where an alpha-over opacity a_i / (w0 + .. + a_i) interpolated
+ *     per vertex is not (measured: up to 255 of 255 off, p99 79).
+ *   - The shapes are registered (wwCellLandShape) so the renderer tells the
+ *     shader `landSplat`: the share is the vertex alpha alone, never times the
+ *     diffuse texture's alpha.
+ *   - A translucent shape does not write depth, so the layers cannot occlude
+ *     one another, and all of them depth-TEST against the opaque base with
+ *     `GL_LEQUAL`.
  *
  * ===========================================================================
  * THE VERTEX BUDGET
@@ -99,14 +111,9 @@ class EsmWorld;
  *   composite in RECORD ORDER, which is the order they happen to sit in the
  *   file.  That is a guess and is counted as one -- `layersInRecordOrder` is
  *   non-zero exactly when the build did not know the paint order.
- * * A quadrant with no BTXT has no opaque base.  The first layer that has any
- *   weight at a corner is promoted to opaque THERE, which is what keeps the
- *   void from showing through; `quadsPromotedBase` counts it.
- * * Quads that no layer and no base covers stay bare and are counted, not
- *   filled with an invented texture: the Commonwealth WRLD names no default
- *   landscape texture (measured -- its subrecords are CNAM DATA DNAM EDID FULL
- *   ICON MNAM NAM0 NAM2 NAM3 NAM4 NAM9 NAMA ONAM WLEV XLCN XWEM ZNAM, and
- *   `DNAM` is the 8-byte land/water HEIGHT pair, not a texture).
+ * * A quadrant with no BTXT is NOT bare: the engine draws its default land
+ *   texture set there (ESM_LTEX_ENGINE_DEFAULT, CommonwealthDefault01), and
+ *   so does this. `quadsDefaultBase` counts it.
  * --------------------------------------------------------------------------- */
 
 //! A layer whose weight is below this at every corner of a quad contributes nothing.
@@ -160,9 +167,13 @@ struct CellSplatBuild
 	 * whose halves cannot be told apart cannot fail on a broken LTEX reader:
 	 * a resolver that returned nothing for every texture in the game would
 	 * report the same `quadsBare` as a genuinely unpainted cell. */
-	int quadsBareUnpainted = 0;     //!< the record paints nothing on this quad
 	int quadsBareNoTexture = 0;     //!< every pass named an LTEX that resolved to no texture
-	int quadsPromotedBase = 0;      //!< a layer made opaque because the quadrant has no BTXT
+	int quadsDefaultBase = 0;       //!< quads whose quadrant has no BTXT: the engine default base
+	int quadrantsDefaultBase = 0;   //!< quadrants with no BTXT
+	int quadsBaseFallback = 0;      //!< a BTXT whose LTEX named no texture: default drawn instead
+	int layersMerged = 0;           //!< slots summed into a matching layer or dropped into the base
+	int layersDropped = 0;          //!< layers past the fifth (read into the base sum, not drawn)
+	int layersFormZero = 0;         //!< ATXT layers naming form 0: the engine's default set
 	int layersRead = 0;
 	int ltexUnresolved = 0;
 	int layersInRecordOrder = 0;    //!< layers composited WITHOUT a known paint order
@@ -180,6 +191,13 @@ qint64 cellSplatCountVerts( EsmWorld & world, int x0, int y0, int x1, int y1 );
  *  an error, it is a cell with no LAND. */
 bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 	float originX, float originY, float tiling, CellSplatBuild & out, QString * error );
+
+/*! lane TERRBLEND1: the blended ground's shapes, by block, so the renderer can
+ *  tell the shader `landSplat` (the share is the vertex alpha; an opaque base
+ *  is scaled by it, a layer is added at it). Begin clears one document. */
+void wwCellLandBegin( const void * nif );
+void wwCellLandShape( const void * nif, int block );
+bool wwCellLandIs( const void * nif, int block );
 
 //! The one-line summary for the scene notes, in the shape cellGroundLegend uses.
 QString cellSplatLegend( const CellSplatBuild & b );

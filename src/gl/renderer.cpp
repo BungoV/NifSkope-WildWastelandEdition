@@ -44,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
+#include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 #include "gl/cellssr.h"
 #include "esmweather.h"
 #include "io/material.h"
@@ -1216,7 +1217,12 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	}
 	// -1 = the NIF alpha property: derived (non-.pbrm) shapes, and the red "nocomp"
 	const int r4Red = wwR4RedBits();
-	const int composition = ( lsp->pbrmValid && !( r4Red & 16 ) ) ? std::clamp( m.composition, 0, 7 ) : -1;
+	/* lane TERRBLEND1: a blended-ground pass keeps its OWN blend, whatever the .pbrm
+	 * says: the base opaque (scaled by its share in the shader), every layer ADDED at
+	 * its share. A landscape .pbrm's composition (opaque) would draw each layer over
+	 * the base and bring the hard squares back the moment PBR lighting is on. */
+	const bool wwLandSplat = scene && wwCellLandIs( scene->nifModel, mesh->id() );
+	const int composition = ( lsp->pbrmValid && !( r4Red & 16 ) && !wwLandSplat ) ? std::clamp( m.composition, 0, 7 ) : -1;
 	prog->uni1i( "pbrComposition", composition );
 	prog->uni1f( "pbrGlobalOpacity", m.globalOpacity );
 	prog->uni1f( "pbrAlphaThreshold", m.alphaThreshold );
@@ -1324,6 +1330,8 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	wwLookdevFogUniforms( scene );	// lane FOG1: fogOn is false outside Lookdev
 	wwSunShadowUniforms( scene );	// lane CSM1: a no-op unless this is pbrm_csm.prog
 	wwCellLightsUniforms( scene );	// lane PRTPGI: a no-op unless this is pbrm_cell.prog
+	if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
+		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
 
 	// Per-draw GL state, same as the spec/gloss path ends with. Omitting it made
 	// the shape inherit whatever blend/depth state the previous program left
@@ -1356,6 +1364,11 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		} else {
 			glDisable( GL_BLEND );
 		}
+	} else if ( wwLandSplat ) {
+		/* lane TERRBLEND1: the NiAlphaProperty the cell build wrote (4109 = SRC_ALPHA, ONE
+		 * for a layer; none for a base), as the CE1 path applies it. The PBR route used
+		 * to force alpha-over on every translucent shape. */
+		AlphaProperty::glProperty( mesh->alphaProperty, prog );
 	} else if ( mesh->translucent && scene->hasOption( Scene::DoBlending ) ) {
 		glEnable( GL_BLEND );
 		fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
@@ -1931,6 +1944,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 
 	wwLookdevFogUniforms( scene );	// lane FOG1: fo4_default reads it; fogOn is false outside Lookdev
 	wwCellLightsUniforms( scene );	// lane PRTP3: a no-op unless this is fo4_cell.prog
+	if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
+		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
 	if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 		// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
 		GLint dst = 0;
