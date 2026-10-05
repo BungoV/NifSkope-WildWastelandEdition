@@ -984,6 +984,26 @@ void wwCellLightsUniforms( Scene * scene )
 				fxSunSaid = true;
 			}
 		}
+		/* lane SUNCELL1 final: indoors too the base takes the imagespace Sunlight Scale -- SetupGeometry multiplies
+		 * ImageSpaceManager+0x98 (fHDRDataA[6]) in unconditionally; indoors that is the cell's XCIM imagespace HNAM[6].
+		 * A cell with no imagespace read keeps the base as it was. Red WW_CELL_FXLIT_INT_RED=noscale leaves it out. */
+		static const bool fxIntRed = qgetenv( "WW_CELL_FXLIT_INT_RED" ).trimmed() == "noscale";
+		if ( L->interior && fxProg ) {
+			const bool scaled = !fxIntRed && L->hasImageSpace;
+			if ( scaled )
+				for ( int c = 0; c < 3; c++ )
+					dirColor[c] *= L->isHdr[6];
+			static QString fxIntLast;
+			const QString line = scaled
+				? QStringLiteral( "cell fx sun: interior lit effects base x Sunlight Scale %1 (%2)" )
+					.arg( double( L->isHdr[6] ), 0, 'f', 3 ).arg( L->isName )
+				: QStringLiteral( "cell fx sun: interior lit effects base unscaled (%1)" )
+					.arg( fxIntRed ? QStringLiteral( "RED WW_CELL_FXLIT_INT_RED=noscale" ) : QStringLiteral( "no imagespace read" ) );
+			if ( line != fxIntLast ) {
+				fprintf( stderr, "%s\n", qPrintable( line ) );
+				fxIntLast = line;
+			}
+		}
 	}
 	/* lane SUNCELL1: an exterior's ambient is the weather's directional ambient (the 6 DALC colours blended over
 	 * the hour's keys, Lookdev's wwLookdevDalc), uploaded in the interior's form (byte/255, (a - b) / 2 per axis,
