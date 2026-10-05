@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "impostorcard.h"
 #include "gl/impostordraw.h"
 
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -57,6 +58,7 @@ struct Placed
 	float scale = 1.0f;				//!< the object row's scale
 	QString formId;					//!< for the log, so a card names its tree
 	int setIndex = -1;				//!< into `sets()`; -1 = its set did not load
+	QString ref;					//!< lane FARLOD1: the row's REFR (manifest column `ref`), hex
 };
 
 //! THE MASTER. False unless the person turned it on, or `WW_IMPOSTOR_CHUNK` is
@@ -102,6 +104,22 @@ QStringList report();
 
 //! The placements, for a harness or a gate that wants to count them.
 const QVector<Placed> & placements();
+
+/* ---- lane FARLOD1: the cell view's far tree cards ----
+ * A state of their own: `arm()` runs after every load (the cell document too) and
+ * resets the chunk state, so the cards around a cell block live apart from it.
+ * `armCellFar` reads each chunk's manifest (the path WITHOUT ".manifest.txt", as
+ * `arm` takes it), keeps a card whose cell is outside the hole and whose distance
+ * from (cx, cy) is at most rMax, and adds its REFR to `refs` (the `.lodi` rows the
+ * cards stand in for). `shift` is the cell scene's origin: cards draw at world minus
+ * it. The chunk state is left exactly as it was found. Drawn by `drawCellFar` with
+ * the chunk master's gate NOT applied (the Far LOD row is the gate). */
+int armCellFar( NifModel * nif, const QStringList & chunkPaths, const float shift[3],
+	float cx, float cy, float rMax, int hx0, int hy0, int hx1, int hy1,
+	QSet<quint32> * refs, QStringList * notes );
+int drawCellFar( Scene * scene, const ImpostorDraw::Options & opt );
+void forgetCellFar();
+int cellFarCount();
 
 } // namespace ImpostorChunk
 

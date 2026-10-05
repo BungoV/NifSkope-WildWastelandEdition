@@ -943,7 +943,9 @@ BoundSphere Scene::bounds() const
 	if ( !sceneBoundsValid ) {
 		bndSphere = BoundSphere();
 		for ( Node * node : nodes.list() ) {
-			if ( node->isVisible() )
+			// lane FARLOD1: the far field is scenery, not the scene -- framing, zoom and the
+			// near/far planes stay the loaded block's (glview reaches the far plane out on its own)
+			if ( node->isVisible() && !node->getName().startsWith( QLatin1String( "FarLOD" ) ) )
 				bndSphere |= node->bounds();
 		}
 		sceneBoundsValid = true;

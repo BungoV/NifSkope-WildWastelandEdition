@@ -209,6 +209,7 @@ private:
 	QCheckBox * cellGi = nullptr;       // lane PRTPGI: add the bake's bounce of those lights
 	QCheckBox * cellFar = nullptr;      // lane FARVIEW1: past the band, the surfels' baked light in place of the lights
 	QCheckBox * cellIs = nullptr;       // lane IMGS1: the cell's imagespace (exposure, curve, grade, LUT)
+	QCheckBox * cellFarLod = nullptr;   // lane FARLOD1: the far field around the block (cellfarlod.h)
 	QCheckBox * cellTaa = nullptr;      // lane MOTION1: the game's temporal AA (one state with the Scene popup's row)
 	QComboBox * cellPass = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
 	QPushButton * probesPlace = nullptr;

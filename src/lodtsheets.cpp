@@ -55,6 +55,7 @@ struct LodtSheets::Impl
 	std::vector<LodvTileEntry> table;
 	int colourSheet = -1, msnSheet = -1, maskSheet = -1;
 	QStringList notes;
+	int forceDim = 0;           //!< openDim's level for the one call; 0 = none
 };
 
 LodtSheets::LodtSheets() : d( new Impl ) {}
@@ -95,6 +96,14 @@ bool LodtSheets::openForRole( const QString & lodlPath, int role, QString * why 
 	return openFiltered( lodlPath, role, why );
 }
 
+bool LodtSheets::openDim( const QString & lodlPath, int dim, QString * why )
+{
+	d->forceDim = qMax( 0, dim );
+	const bool ok = openFiltered( lodlPath, -1, why );
+	d->forceDim = 0;
+	return ok;
+}
+
 bool LodtSheets::openFiltered( const QString & lodlPath, int wantRole, QString * why )
 {
 	auto no = [why]( const QString & m ) {
@@ -119,7 +128,8 @@ bool LodtSheets::openFiltered( const QString & lodlPath, int wantRole, QString *
 	/* WW_LODL_SHEET_DIM names a level, and is IGNORED when a role was asked
 	 * for: the horizon is on the level the bake authored it on, and a dial
 	 * pointing elsewhere would turn "here it is" into "absent". */
-	const int wantDim = ( wantRole >= 0 ) ? 0 : qEnvironmentVariableIntValue( "WW_LODL_SHEET_DIM" );
+	const int wantDim = ( wantRole >= 0 ) ? 0
+		: d->forceDim > 0 ? d->forceDim : qEnvironmentVariableIntValue( "WW_LODL_SHEET_DIM" );
 	QDir qd( dir );
 	const QStringList found = qd.entryList(
 		QStringList() << ( stem + QStringLiteral( ".VT.*.lodt" ) ), QDir::Files, QDir::Name );

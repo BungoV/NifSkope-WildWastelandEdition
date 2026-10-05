@@ -47,6 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellhdr.h"
 #include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA
 #include "impostorchunk.h"
+#include "cellfarlod.h"		// lane FARLOD1: the far field's planes, sway and cards
 #include "impostorpreviewtest.h"
 #include "gl/glshape.h"
 #include "gl/gltex.h"
@@ -3563,6 +3564,14 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		nr = std::max< GLdouble >( nr, scale() );
 		// ensure distance
 		fr = std::max< GLdouble >( fr, nr + scale() );
+		// lane FARLOD1: the far field is outside the bounds; the far plane reaches it, the near plane
+		// rises to the game's own order (fNearDistance 15) so the depth holds 250000 units. 0 = no far field.
+		if ( const float farReach = wwCellFarLodReach( scene ); farReach > 0.0f ) {
+			const Vector3 o = scene->view * Vector3();
+			fr = std::max< GLdouble >( fr, GLdouble( o.length() ) + GLdouble( farReach ) * 1.05 );
+			nr = std::max< GLdouble >( nr, 16.0 );
+			fr = std::max< GLdouble >( fr, nr + scale() );
+		}
 
 		// lane MOTION1: the path camera's own fov
 		const GLdouble fovDeg = wwPathActive ? GLdouble( wwPathFov ) : GLdouble( cfg.fov / Zoom );
@@ -4070,11 +4079,15 @@ void GLView::paintGL()
 		if ( !wwImpostorPreviewSuppressScene() ) {
 			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
 			const bool hdr = workspaceDrawScenes.isEmpty() && wwCellHdrBegin( scene );
+			wwCellFarLodFrame( scene );	// lane FARLOD1: the far sway's uniforms; no GL call while off
 			scene->draw();
 			if ( hdr ) {
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
 				wwCellHdrEnd( scene );
 			}
+			// lane FARLOD1: the far tree cards into the finished frame, then the census a gate reads
+			wwCellFarLodCards( scene );
+			wwCellFarLodSkyCensus( scene );
 			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
 			if ( workspaceDrawScenes.isEmpty() )
 				wwGameTaaResolve( scene );

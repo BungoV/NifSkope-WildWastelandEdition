@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 
 #include "cellview.h"
+#include "cellfarlod.h"
 #include "gl/celllights.h"
 #include "gl/gametaa.h"
 
@@ -435,6 +436,10 @@ void CellWorkspacePanel::buildUi()
 	cellTaa = new QCheckBox( tr( "Temporal AA" ), prtpRow );
 	cellTaa->setObjectName( QStringLiteral( "CellWorkspaceTemporalAa" ) );
 	cellTaa->setChecked( wwGameTaaOn() );
+	// lane FARLOD1: the worldspace's LOD past the loaded block, read at cell open; ships off
+	cellFarLod = new QCheckBox( tr( "Far LOD" ), prtpRow );
+	cellFarLod->setObjectName( QStringLiteral( "CellWorkspaceFarLod" ) );
+	cellFarLod->setChecked( cellFarLodWanted() );
 	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
 	cellPass = new QComboBox( prtpRow );
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
@@ -447,6 +452,7 @@ void CellWorkspacePanel::buildUi()
 	pl->addWidget( cellPass );
 	pl->addWidget( cellIs );
 	pl->addWidget( cellTaa );
+	pl->addWidget( cellFarLod );
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
@@ -505,6 +511,16 @@ void CellWorkspacePanel::buildUi()
 		wwCellImageSpaceSetOn( on );
 		if ( glView )
 			glView->update();
+	} );
+	// lane FARLOD1: the far field is document geometry, so the cell is built again with (or without) it
+	connect( cellFarLod, &QCheckBox::toggled, this, [this]( bool on ) {
+		cellFarLodSetWanted( on );
+		if ( syncing || g_path.isEmpty() )
+			return;
+		g_over = g_spec;
+		g_haveOverrides = true;
+		say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+		emit reopenRequested( g_path );
 	} );
 	connect( probesShow, &QCheckBox::toggled, this, [this]( bool on ) {
 		QSettings().setValue( QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), on );

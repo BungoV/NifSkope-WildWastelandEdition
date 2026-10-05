@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #define LODINATIVE_H
 
 #include <QModelIndex>
+#include <QSet>
 #include <QString>
 
 class NifModel;
@@ -53,6 +54,33 @@ struct LodiSceneSpec
 	//! Occluder boxes are drawn ONLY when this is set, and then as wire boxes.
 	bool boxes = false;
 	bool valid = false;
+
+	/* ---- lane FARLOD1: the cell view's far rings. Every field is inert at its
+	 *  default, so the `.lodi` views and the BAKEBLOCK soup build what they built. */
+	//! placements whose cell is inside this inclusive rectangle are skipped (the loaded block / inner ring)
+	bool haveHole = false;
+	int hx0 = 0, hy0 = 0, hx1 = -1, hy1 = -1;
+	//! 0..3 = draw only this AUTHORED slot (wins over WW_LODI_SLOT); -1 = as before
+	int slot = -1;
+	//! put in front of every bucket's shape name
+	QString namePrefix;
+	//! subtracted from every shape's Translation: the cell scene's own origin (it is origin-relative)
+	float shift[3] = { 0.0f, 0.0f, 0.0f };
+	//! > 0: a placement whose materials are all TREE materials is dropped past this many units
+	//! from (dropX, dropY) -- the game's fTreeLoadDistance
+	float dropTreesBeyond = 0.0f;
+	float dropX = 0.0f, dropY = 0.0f;
+	//! TREE materials carry the `.lodo` sway weight as vertex alpha and SLSF2 Tree_Anim
+	bool sway = false;
+	//! REFR form ids drawn by somebody else (the impostor cards); skipped here
+	const QSet<quint32> * skipRefs = nullptr;
+};
+
+//! lane FARLOD1: what one append put in, counted at the push.
+struct LodiAppendCounts
+{
+	qint64 placed = 0, holeSkipped = 0, treesDropped = 0, refsSkipped = 0;
+	qint64 tris = 0, swayVerts = 0;
 };
 
 //! `WW_LODI_REGION="x0,y0,x1,y1"` (cells), `WW_LODI_LEVEL=n`, `WW_LODI_BOXES=1`.
@@ -148,6 +176,6 @@ bool nifCreateLodiObjectScene( NifModel * nif, const QString & lodiPath,
  *  already does. */
 bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	const QString & lodiPath, const LodiSceneSpec & spec,
-	QString * error, QString * notes = nullptr );
+	QString * error, QString * notes = nullptr, LodiAppendCounts * counts = nullptr );
 
 #endif // LODINATIVE_H

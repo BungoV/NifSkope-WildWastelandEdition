@@ -16,6 +16,8 @@ BSD License - see nifskope.h
 #include <QSettings>
 #include <QTextStream>
 
+#include <cmath>
+
 /* ---------------------------------------------------------------------------
  * See impostorchunk.h for what this is and why it ships OFF.
  *
@@ -50,6 +52,18 @@ struct ChunkState
 ChunkState & st()
 {
 	static ChunkState s;
+	return s;
+}
+
+//! lane FARLOD1: the cell view's far cards (see impostorchunk.h)
+struct CellFarState
+{
+	ChunkState cards;
+	float shift[3] = { 0.0f, 0.0f, 0.0f };
+};
+CellFarState & farSt()
+{
+	static CellFarState s;
 	return s;
 }
 
@@ -150,7 +164,7 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 	int rowIndex = -1;
 	float rowPos[3] = { 0.0f, 0.0f, 0.0f };
 	float rowScale = 1.0f;
-	QString rowForm;
+	QString rowForm, rowRef;
 	int cLines = 0, refused = 0;
 
 	while ( !in.atEnd() ) {
@@ -180,6 +194,7 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 			p.world[0] = rowPos[0]; p.world[1] = rowPos[1]; p.world[2] = rowPos[2];
 			p.scale = rowScale;
 			p.formId = rowForm;
+			p.ref = rowRef;
 			s.placed.append( p );
 			continue;
 		}
@@ -200,6 +215,7 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 		rowPos[0] = x; rowPos[1] = y; rowPos[2] = z;
 		rowScale = ( sc > 0.0f ) ? sc : 1.0f;
 		rowForm = t.at( 1 );
+		rowRef = t.size() > 9 ? t.at( 9 ) : QString();
 	}
 
 	// The distinct sets, loaded once each. A chunk of a hundred maples names
@@ -351,4 +367,123 @@ int ImpostorChunk::draw( Scene * scene, const ImpostorDraw::Options & opt )
 				.arg( drawn ).arg( s.placed.size() );
 	}
 	return drawn;
+}
+
+/* ---- lane FARLOD1: the cell view's far tree cards (impostorchunk.h) ---- */
+int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, const float shift[3],
+	float cx, float cy, float rMax, int hx0, int hy0, int hx1, int hy1,
+	QSet<quint32> * refs, QStringList * notes )
+{
+	CellFarState & F = farSt();
+	F = CellFarState();
+	F.shift[0] = shift[0];
+	F.shift[1] = shift[1];
+	F.shift[2] = shift[2];
+
+	// the chunk state is borrowed per manifest and put back as it was found
+	const ChunkState saved = st();
+	int read = 0, kept = 0, inHole = 0, beyond = 0;
+	for ( const QString & chunk : chunkPaths ) {
+		const int got = arm( nif, chunk );
+		if ( got <= 0 ) {
+			if ( notes )
+				for ( const QString & n : std::as_const( st().notes ) )
+					if ( n.contains( QLatin1String( "cannot" ) ) )
+						*notes << n;
+			continue;
+		}
+		read += got;
+		ChunkState & s = st();
+		for ( const Placed & p0 : std::as_const( s.placed ) ) {
+			const int cellX = int( std::floor( p0.world[0] / 4096.0f ) );
+			const int cellY = int( std::floor( p0.world[1] / 4096.0f ) );
+			if ( cellX >= hx0 && cellX <= hx1 && cellY >= hy0 && cellY <= hy1 ) {
+				inHole++;
+				continue;
+			}
+			const float dx = p0.world[0] - cx, dy = p0.world[1] - cy;
+			if ( rMax > 0.0f && dx * dx + dy * dy > rMax * rMax ) {
+				beyond++;
+				continue;
+			}
+			Placed p = p0;
+			if ( p0.setIndex >= 0 && p0.setIndex < s.sets.size() ) {
+				// one set per distinct .lodm across every chunk
+				const QString key = s.lodmKeys.at( p0.setIndex );
+				int at = F.cards.lodmKeys.indexOf( key );
+				if ( at < 0 ) {
+					F.cards.lodmKeys << key;
+					F.cards.sets << s.sets.at( p0.setIndex );
+					at = F.cards.sets.size() - 1;
+				}
+				p.setIndex = at;
+			} else {
+				p.setIndex = -1;
+			}
+			F.cards.placed << p;
+			kept++;
+			if ( refs && !p.ref.isEmpty() ) {
+				bool ok = false;
+				const quint32 id = p.ref.toUInt( &ok, 16 );
+				if ( ok )
+					refs->insert( id );
+			}
+		}
+		if ( F.cards.chunkDir.isEmpty() )
+			F.cards.chunkDir = s.chunkDir;
+		if ( notes )
+			for ( const QString & n : std::as_const( s.notes ) )
+				if ( n.contains( QLatin1String( "refused" ) ) || n.contains( QLatin1String( "not found" ) )
+					|| n.contains( QLatin1String( "cannot" ) ) )
+					*notes << n;
+	}
+	st() = saved;
+	if ( notes )
+		*notes << QStringLiteral( "far lod: cards %1 read from %2 chunk manifests, %3 kept, %4 in the hole, "
+			"%5 past %6 units, %7 sets" ).arg( read ).arg( chunkPaths.size() ).arg( kept ).arg( inHole )
+			.arg( beyond ).arg( double( rMax ), 0, 'f', 0 ).arg( F.cards.sets.size() );
+	return kept;
+}
+
+int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt )
+{
+	CellFarState & F = farSt();
+	ChunkState & s = F.cards;
+	if ( !scene || s.placed.isEmpty() )
+		return 0;
+	if ( !s.sheetsRegistered ) {
+		s.sheetsRegistered = true;
+		for ( const ImpostorCardSet & set : std::as_const( s.sets ) )
+			if ( set.ok )
+				ImpostorDraw::registerLooseSheets( scene, set );
+	}
+	static int saidDrawn = -1;
+	int drawn = 0;
+	for ( const Placed & p : std::as_const( s.placed ) ) {
+		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() )
+			continue;
+		ImpostorDraw::Options o = opt;
+		o.worldScale = p.scale;
+		if ( o.swayAmplitude != 0.0f )   // a forest does not sway as one
+			o.swayPhase += 0.0021f * p.world[0] + 0.0017f * p.world[1];
+		QString why;
+		if ( ImpostorDraw::drawCard( scene, s.sets.at( p.setIndex ),
+				Vector3( p.world[0] - F.shift[0], p.world[1] - F.shift[1], p.world[2] - F.shift[2] ), o, &why ) )
+			drawn++;
+	}
+	if ( drawn != saidDrawn ) {
+		saidDrawn = drawn;
+		qInfo().noquote() << QStringLiteral( "far lod: drew %1 cards of %2 placed" ).arg( drawn ).arg( s.placed.size() );
+	}
+	return drawn;
+}
+
+void ImpostorChunk::forgetCellFar()
+{
+	farSt() = CellFarState();
+}
+
+int ImpostorChunk::cellFarCount()
+{
+	return farSt().cards.placed.size();
 }

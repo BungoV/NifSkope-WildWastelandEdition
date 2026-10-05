@@ -86,6 +86,8 @@ struct Bucket
 	 *  they write `chan`, and this multiplies into it. */
 	bool libColour = false;
 	bool vertexAlpha = false;
+	//! lane FARLOD1: a TREE material of a far ring -- alpha = the sway weight, SLSF2 Tree_Anim
+	bool sway = false;
 	std::vector<OutVert> verts;
 	std::vector<Triangle> tris;
 };
@@ -210,9 +212,9 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 	if ( b.layer >= 0 )
 		desc.SetFlag( VertexFlags::VF_UV_2 );
 	// `.lodo` v5: the library colour needs the field too, or its values are written to nothing
-	if ( b.withColour || b.libColour )
+	if ( b.withColour || b.libColour || b.sway )
 		desc.SetFlag( VertexFlags::VF_COLORS );
-	if ( b.layer >= 0 || b.withColour || b.libColour )
+	if ( b.layer >= 0 || b.withColour || b.libColour || b.sway )
 		desc.ResetAttributeOffsets( 130 );
 	const std::uint64_t vertexDesc = desc.Value();
 	const int stride = int( desc.GetVertexSize() );
@@ -292,10 +294,10 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 				if ( iUv2.isValid() )
 					nif->set<HalfVector2>( row, "UV 2", HalfVector2( Vector2( 0.0f, o.uv2y ) ) );
 			}
-			if ( b.withColour || b.libColour )
+			if ( b.withColour || b.libColour || b.sway )
 				nif->set<ByteColor4>( row, "Vertex Colors",
 					ByteColor4( FloatVector4( o.chan[0] * o.rgba[0], o.chan[1] * o.rgba[1], o.chan[2] * o.rgba[2],
-						b.vertexAlpha ? o.rgba[3] : 1.0f ) ) );
+						b.sway ? o.sway : b.vertexAlpha ? o.rgba[3] : 1.0f ) ) );
 			for ( int k = 0; k < 3; k++ ) {
 				lo[k] = qMin( lo[k], o.pos[k] );
 				hi[k] = qMax( hi[k], o.pos[k] );
@@ -330,6 +332,10 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) );
 		// 0x20 = vertex colours, the same bit the terrain route sets for its plane views
 		nif->set<quint32>( iShader, "Shader Flags 2", ( b.withColour || b.libColour ) ? 0x25U : 5U );
+		// lane FARLOD1: SLSF2 Tree_Anim (bit 29) + vertex colours, so the colour's A is the wind weight
+		if ( b.sway )
+			nif->set<quint32>( iShader, "Shader Flags 2",
+				nif->get<quint32>( iShader, "Shader Flags 2" ) | 0x20U | ( 1U << 29 ) );
 		// `.lodo` v5: SLSF1 bit 3 Vertex_Alpha, only where the source shader set it
 		if ( b.vertexAlpha )
 			nif->set<quint32>( iShader, "Shader Flags 1", nif->get<quint32>( iShader, "Shader Flags 1" ) | 0x8U );
@@ -485,8 +491,10 @@ QString lodlChannelNames()
 
 bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	const QString & lodiPath, const LodiSceneSpec & specIn,
-	QString * error, QString * notes )
+	QString * error, QString * notes, LodiAppendCounts * counts )
 {
+	LodiAppendCounts countsLocal;
+	LodiAppendCounts & cnt = counts ? *counts : countsLocal;
 	auto fail = [error]( const QString & message ) {
 		if ( error )
 			*error = message;
@@ -547,6 +555,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 		.arg( spec.level );
 
 	const Vector3 origin( float( spec.x0 ) * 4096.0f, float( spec.y0 ) * 4096.0f, 0.0f );
+	// lane FARLOD1: the Translation each shape carries; `origin` itself unless a caller shifts it
+	const Vector3 shapeOrigin = origin - Vector3( spec.shift[0], spec.shift[1], spec.shift[2] );
 
 	// the census the gates read; written by the code that PLACES the instances
 	const QString dumpPath = qEnvironmentVariable( "WW_LODI_DUMP" );
@@ -575,7 +585,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 		std::vector<Triangle> tris;
 	};
 	QHash<quint32, std::vector<MeshPart>> meshCache;
-	const int wantSlot = qEnvironmentVariableIsSet( "WW_LODI_SLOT" )
+	const int wantSlot = spec.slot >= 0 ? qBound( 0, spec.slot, 3 )
+		: qEnvironmentVariableIsSet( "WW_LODI_SLOT" )
 		? qBound( 0, qEnvironmentVariableIntValue( "WW_LODI_SLOT" ), 3 ) : -1;
 	QHash<quint16, int> levelUsed;
 	/* WW_LODL_AO=1 (bungo 2026-09-18, "AO overlaid on the terrain and objects /
@@ -771,6 +782,16 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				outsideRegion++;
 				continue;
 			}
+			// lane FARLOD1: the loaded block (or the inner ring) draws this cell itself
+			if ( spec.haveHole && cellX >= spec.hx0 && cellX <= spec.hx1 && cellY >= spec.hy0 && cellY <= spec.hy1 ) {
+				cnt.holeSkipped++;
+				continue;
+			}
+			if ( spec.skipRefs && !spec.skipRefs->isEmpty() && ii < table.cold.size()
+				&& spec.skipRefs->contains( table.cold[ii].refFormId ) ) {
+				cnt.refsSkipped++;
+				continue;
+			}
 			if ( inst.baseId >= lib.bases.size() ) {
 				noMesh++;
 				continue;
@@ -799,6 +820,19 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			if ( parts.empty() ) {
 				noGeometry++;
 				continue;
+			}
+			// lane FARLOD1: a tree past the tree distance is not drawn (fTreeLoadDistance)
+			if ( spec.dropTreesBeyond > 0.0f ) {
+				bool allTree = true;
+				for ( const MeshPart & p : parts )
+					if ( p.materialId >= lib.materials.size()
+						|| !( lib.materials[p.materialId].flags & LODO_MAT_TREE ) )
+						allTree = false;
+				const float dx = xyz[0] - spec.dropX, dy = xyz[1] - spec.dropY;
+				if ( allTree && dx * dx + dy * dy > spec.dropTreesBeyond * spec.dropTreesBeyond ) {
+					cnt.treesDropped++;
+					continue;
+				}
 			}
 
 			float quat[4], m[9];
@@ -992,7 +1026,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					nb.baseId = inst.baseId;
 					nb.materialId = p.materialId;
 					const QString model = lib.stringAt( base.modelStringOffset );
-					nb.name = QString( "%1 %2 m%3" )
+					nb.name = spec.namePrefix + QString( "%1 %2 m%3" )
 						.arg( QString::number( base.formId, 16 ).rightJustified( 8, QChar( '0' ) ) )
 						.arg( model.isEmpty() ? QStringLiteral( "?" )
 							: QFileInfo( QString( model ).replace( QChar( '\\' ), QChar( '/' ) ) )
@@ -1021,6 +1055,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 						nb.emits = ( mat.flags & LODO_MAT_EMITS ) != 0;
 						nb.emissiveScale = mat.emissiveScale;
 						nb.layer = ( mat.layer == LODO_NO_LAYER ) ? -1 : int( mat.layer );
+						nb.sway = spec.sway && ( mat.flags & LODO_MAT_TREE );
 					}
 					nb.withColour = wantAo || objectChannel || streamPerVertex;
 					bit = buckets.insert( bkey, nb );
@@ -1058,6 +1093,9 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					o.uv2y = bk.layer >= 0 ? float( bk.layer ) : 0.0f;
 					for ( int k = 0; k < 4; k++ )
 						o.rgba[k] = sv.rgba[k];
+					o.sway = sv.sway;   // lane FARLOD1: read only by a sway bucket
+					if ( bk.sway )
+						cnt.swayVerts++;
 					if ( channel == LodlChannel::Sway ) {
 						o.chan[0] = o.chan[1] = o.chan[2] = sv.sway;
 						chanSeen( int( sv.sway * 255.0f + 0.5f ) );
@@ -1098,6 +1136,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 
 			basesSeen.insert( inst.baseId );
 			placed++;
+			cnt.placed++;
 			if ( dump.device() ) {
 				const LodiCold cold = ( ii < table.cold.size() ) ? table.cold[ii] : LodiCold();
 				dump << QString::number( cold.refFormId, 16 ).rightJustified( 8, QChar( '0' ) )
@@ -1121,9 +1160,12 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	std::sort( keys.begin(), keys.end() );
 	for ( quint32 key : keys ) {
 		bool ok = true;
-		for ( const Bucket & full : spilled.value( key ) )
-			ok = ok && emitBucket( nif, iRoot, full, origin, shapes, verts, error );
-		if ( !ok || !emitBucket( nif, iRoot, buckets[key], origin, shapes, verts, error ) ) {
+		for ( const Bucket & full : spilled.value( key ) ) {
+			ok = ok && emitBucket( nif, iRoot, full, shapeOrigin, shapes, verts, error );
+			cnt.tris += qint64( full.tris.size() );
+		}
+		cnt.tris += qint64( buckets[key].tris.size() );
+		if ( !ok || !emitBucket( nif, iRoot, buckets[key], shapeOrigin, shapes, verts, error ) ) {
 			if ( dump.device() ) {
 				dump.flush();
 				dumpFile.close();
