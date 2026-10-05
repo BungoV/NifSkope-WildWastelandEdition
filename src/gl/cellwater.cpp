@@ -125,6 +125,13 @@ bool wwCellWaterWanted( Scene * scene, int block )
 	return it != s.docs.constEnd() && it->shapeBody.contains( block );
 }
 
+bool wwCellWaterIsShape( const void * nif, int block )
+{
+	const WaterState & s = st();
+	const auto it = s.docs.constFind( nif );
+	return it != s.docs.constEnd() && it->shapeBody.contains( block );
+}
+
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 {
 	WaterState & s = st();

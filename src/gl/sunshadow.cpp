@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "sunshadow.h"
 #include "gametaa.h"
+#include "gl/cellwater.h"	// lane SUNCELL1: water never casts
 #include "gl/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 
 #include "gl/glnode.h"
@@ -437,6 +438,10 @@ static void sunShadowPassImpl( Scene * scene )
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
 		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
+			continue;
+		// lane SUNCELL1: a cell's water surface is no caster (the game's water casts no sun shadow; a creek's plane
+		// shadowed its whole bed). Red WW_CSM_RED=watercasts keeps it.
+		if ( !red( "watercasts" ) && wwCellWaterIsShape( scene->nifModel, sh->id() ) )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
