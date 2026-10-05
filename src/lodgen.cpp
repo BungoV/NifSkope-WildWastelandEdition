@@ -2259,6 +2259,11 @@ static void lodgenNoteParticleModel( const QString & model )
 	QMutexLocker lock( &particleModelMutex );
 	particleModels.insert( lodgenParticleKey( model ) );
 }
+bool lodgenReadVisFile( const QString & dataRoot, const QString & relPath, QByteArray & bytes )
+{
+	return lodgenReadAsset( dataRoot, relPath, "vis", ".uvd", bytes );
+}
+
 bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByteArray & bytes )
 {
 	QString path = model;

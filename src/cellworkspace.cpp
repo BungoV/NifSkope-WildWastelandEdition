@@ -443,6 +443,10 @@ void CellWorkspacePanel::buildUi()
 	cellCull = new QCheckBox( tr( "Culling" ), prtpRow );
 	cellCull->setObjectName( QStringLiteral( "CellWorkspaceCulling" ) );
 	cellCull->setChecked( wwCellCullOn() );
+	// lane SUNCELL1: the occlusion planes / boxes and the rooms and portals, camera pass only; ships off
+	cellPrevis = new QCheckBox( tr( "Previs" ), prtpRow );
+	cellPrevis->setObjectName( QStringLiteral( "CellWorkspacePrevis" ) );
+	cellPrevis->setChecked( wwCellPrevisOn() );
 	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
 	cellPass = new QComboBox( prtpRow );
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
@@ -456,6 +460,7 @@ void CellWorkspacePanel::buildUi()
 	pl->addWidget( cellIs );
 	pl->addWidget( cellTaa );
 	pl->addWidget( cellCull );
+	pl->addWidget( cellPrevis );
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
@@ -537,6 +542,11 @@ void CellWorkspacePanel::buildUi()
 	fxReopen( cellParticles, &wwCellParticlesSetOn );	// lane SUNCELL1: the systems are copied in when the cell opens
 	connect( cellCull, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwCellCullSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellPrevis, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellPrevisSetOn( on );
 		if ( glView )
 			glView->update();
 	} );

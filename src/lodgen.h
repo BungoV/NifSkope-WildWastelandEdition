@@ -75,6 +75,8 @@ QStringList lodgenEditorMarkerInsideModels();
 bool lodgenModelHasParticles( const QString & model );
 //! lane SUNCELL1: a model's file bytes, found the way the model loader finds them (loose, then the archives)
 bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByteArray & bytes );
+//! lane SUNCELL1: a previs file (`vis/<plugin>/<form>.uvd`), loose or from the archives
+bool lodgenReadVisFile( const QString & dataRoot, const QString & relPath, QByteArray & bytes );
 /*! Up to `limit` of the paths the stack's index holds, sorted. For a harness
  *  that has to name a file inside an archive without guessing one. */
 QStringList lodgenListResourceFiles( int limit );

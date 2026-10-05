@@ -1331,6 +1331,41 @@ void deserializeStrings( NifModel * nif, const QModelIndex & iBlock, const QStri
  *  and its lights, every link out of the copy mapped to none, the root's own transform replaced by the
  *  reference's (lane MISS1's rule). Returns the particle systems copied (0: none in the branch, -1: a block
  *  would not copy; `why` says which). */
+/*! lane SUNCELL1: a primitive ref's axes in the world, the rotation lane HEMI1 measured for light boxes:
+ *  Rz(-z) Rx(-x) Ry(-y) of the ref's stored angles, axis k = column k. */
+static void cellPrimAxes( const float r[3], Vector3 ax[3] )
+{
+	auto rot = []( int a, double ang, double m[3][3] ) {
+		const double c = std::cos( ang ), s = std::sin( ang );
+		const int i = ( a + 1 ) % 3, j = ( a + 2 ) % 3;
+		for ( int u = 0; u < 3; u++ )
+			for ( int v = 0; v < 3; v++ )
+				m[u][v] = u == v ? 1.0 : 0.0;
+		m[i][i] = c; m[i][j] = -s; m[j][i] = s; m[j][j] = c;
+	};
+	auto mul = []( const double a[3][3], const double b[3][3], double o[3][3] ) {
+		for ( int u = 0; u < 3; u++ )
+			for ( int v = 0; v < 3; v++ )
+				o[u][v] = a[u][0] * b[0][v] + a[u][1] * b[1][v] + a[u][2] * b[2][v];
+	};
+	double rz[3][3], rx[3][3], ry[3][3], t[3][3], m[3][3];
+	rot( 2, -r[2], rz );
+	rot( 0, -r[0], rx );
+	rot( 1, -r[1], ry );
+	mul( rz, rx, t );
+	mul( t, ry, m );
+	for ( int k = 0; k < 3; k++ )
+		ax[k] = Vector3( float( m[0][k] ), float( m[1][k] ), float( m[2][k] ) );
+}
+
+static quint32 cellLe32( const QByteArray & b, int at )
+{
+	quint32 v = 0;
+	if ( at >= 0 && at + 4 <= b.size() )
+		std::memcpy( &v, b.constData() + at, 4 );
+	return v;
+}
+
 static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, NifModel & src,
 	const Vector3 & at, const Matrix & rot, float scale, QString * why )
 {
@@ -1900,6 +1935,144 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
 	wwCellFxLitBegin( nif );
 	wwCellCullBegin( nif );   // lane SUNCELL1
+
+	/* lane SUNCELL1: PREVIS AND OCCLUSION, READ. The plugin's own visibility data for the loaded cells:
+	 *  - each CELL's RVIS (the cell whose previs file covers it: an exterior 3x3 block shares one), its VISI / PCMB
+	 *    build stamps, XCRI (the precombined meshes and the refs they replace) and XPRI (the refs previs took in);
+	 *  - each block's previs file `vis/<plugin>/<RVIS>.uvd`: its header (magic, size, bounds) and the build string
+	 *    (an Umbra tome; its body, the visibility itself, is not decoded -- so it culls nothing here);
+	 *  - the occlusion primitives the game culls with (PlaneMarker planes and boxes) and, indoors, the rooms
+	 *    (RoomMarker boxes, XLRM linked rooms) and portals (PortalMarker planes, XPOD rooms): handed to gl/cellcull,
+	 *    which the Previs row applies to the camera pass only (casters always cast). */
+	{
+		WwPrevisScene pv;
+		int planes = 0, boxes = 0, linked = 0, toOutside = 0, prevDisabled = 0;
+		QList<quint32> primKeys = primRefs.keys();
+		std::sort( primKeys.begin(), primKeys.end() );
+		for ( const quint32 key : primKeys ) {
+			const EsmRefr & r = primRefs[key];
+			const bool occ = r.base == 0x17U && ( r.primType == 1 || r.primType == 3 );	// PlaneMarker
+			const bool room = r.base == 0x1FU && r.primType == 1;					// RoomMarker
+			const bool portal = r.base == 0x20U && r.primType == 3;				// PortalMarker
+			if ( !occ && !room && !portal )
+				continue;
+			if ( startsDisabled( r ) ) {
+				prevDisabled++;	// a disabled marker culls nothing in game
+				continue;
+			}
+			WwPrevisBox x;
+			x.c = Vector3( r.pos[0], r.pos[1], r.pos[2] ) - origin;
+			cellPrimAxes( r.rot, x.ax );
+			for ( int k = 0; k < 3; k++ )
+				x.half[k] = std::max( std::abs( r.primHalf[k] ) * r.scale, 1.0f );
+			x.type = int( r.primType );
+			x.ref = r.formID;
+			x.from = r.portalFrom;
+			x.to = r.portalTo;
+			for ( const quint32 l : r.linkedRooms )
+				x.linked.push_back( l );
+			if ( occ ) {
+				( r.primType == 3 ? planes : boxes )++;
+				pv.occluders.push_back( std::move( x ) );
+			} else if ( room ) {
+				linked += int( x.linked.size() );
+				pv.rooms.push_back( std::move( x ) );
+			} else {
+				toOutside += ( !x.from || !x.to ) ? 1 : 0;
+				pv.portals.push_back( std::move( x ) );
+			}
+		}
+		fprintf( stderr, "cell previs scene: occluders %d (planes %d, boxes %d), rooms %d (linked %d), portals %d "
+			"(to outside %d), %d disabled markers left out; Previs row %s%s\n", int( pv.occluders.size() ), planes,
+			boxes, int( pv.rooms.size() ), linked, int( pv.portals.size() ), toOutside, prevDisabled,
+			wwCellPrevisOn() ? "on" : "off", wwCellPrevisRed() == 1 ? " RED=casters" : "" );
+		wwCellPrevisSet( nif, std::move( pv ) );
+
+		// the cells' previs fields, grouped by the block that holds their visibility
+		std::map<quint32, std::vector<std::pair<int, int>>> blocks;
+		int cellsRead = 0, cellsRvis = 0, cellsVisi = 0, cellsPcmb = 0;
+		quint64 combRefs = 0, combMeshes = 0, previsRefs = 0;
+		auto readCell = [&]( quint32 form, int cx, int cy ) {
+			const EsmCellPrevis c = world.cellPrevis( form );
+			if ( !c.exists )
+				return;
+			cellsRead++;
+			cellsVisi += c.hasVisi ? 1 : 0;
+			cellsPcmb += c.hasPcmb ? 1 : 0;
+			combRefs += c.combinedRefs;
+			combMeshes += c.combinedMeshes;
+			previsRefs += c.previsRefs;
+			if ( c.rvis ) {
+				cellsRvis++;
+				blocks[c.rvis].push_back( { cx, cy } );
+			} else if ( spec.interior ) {
+				blocks[form].push_back( { cx, cy } );	// an interior with no RVIS: its own file, if any
+			}
+		};
+		if ( spec.interior ) {
+			readCell( world.interior().cellForm, 0, 0 );
+		} else {
+			for ( int y = y0; y <= y1; y++ )
+				for ( int x = x0; x <= x1; x++ )
+					if ( world.hasCell( x, y ) )
+						readCell( world.cellForm( x, y ), x, y );
+		}
+		fprintf( stderr, "cell previs: %d cells read, %d with RVIS in %d previs blocks, VISI %d, PCMB %d; precombined %llu refs "
+			"in %llu meshes; previs refs %llu\n", cellsRead, cellsRvis, int( blocks.size() ), cellsVisi, cellsPcmb,
+			(unsigned long long)combRefs, (unsigned long long)combMeshes, (unsigned long long)previsRefs );
+		const QStringList plugs = spec.plugins.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+		static const QRegularExpression verRx( QStringLiteral( "(\\d+\\.\\d+\\.\\d+)" ) );
+		for ( const auto & b : blocks ) {
+			const quint32 f = b.first;
+			const int idx = int( f >> 24 );
+			const QString plugin = idx < plugs.size() ? QFileInfo( plugs.at( idx ).trimmed() ).fileName()
+				: QStringLiteral( "Fallout4.esm" );
+			QByteArray u;
+			QString path;
+			for ( const quint32 name : { f, f & 0x00FFFFFFU } ) {
+				path = QStringLiteral( "vis/%1/%2.uvd" ).arg( plugin ).arg( name, 8, 16, QLatin1Char( '0' ) );
+				if ( lodgenReadVisFile( dataRoot, path, u ) && u.size() >= 44 )
+					break;
+				u.clear();
+			}
+			if ( u.isEmpty() ) {
+				fprintf( stderr, "cell previs block %08X: %d loaded cells; file %s not found\n", f, int( b.second.size() ),
+					qPrintable( path ) );
+				continue;
+			}
+			float bb[6];
+			for ( int k = 0; k < 6; k++ ) {
+				const quint32 w = cellLe32( u, 20 + 4 * k );
+				std::memcpy( &bb[k], &w, 4 );
+			}
+			// the build string: the first printable run of 16+ bytes in the header
+			QString build;
+			const int lim = std::min<int>( int( u.size() ), 2048 );
+			for ( int i = 44, run = 0; i < lim; i++ ) {
+				const unsigned char ch = uchar( u.at( i ) );
+				if ( ch >= 32 && ch < 127 ) {
+					run++;
+					continue;
+				}
+				if ( run >= 16 ) {
+					build = QString::fromLatin1( u.constData() + i - run, run );
+					break;
+				}
+				run = 0;
+			}
+			const QRegularExpressionMatch vm = verRx.match( build );
+			bool covers = !spec.interior;
+			for ( const auto & c : b.second )
+				covers = covers && bb[0] <= float( c.first ) * CELL_UNITS + 1.0f && bb[3] >= float( c.first + 1 ) * CELL_UNITS - 1.0f
+					&& bb[1] <= float( c.second ) * CELL_UNITS + 1.0f && bb[4] >= float( c.second + 1 ) * CELL_UNITS - 1.0f;
+			fprintf( stderr, "cell previs block %08X: %d loaded cells; file %s %d bytes, magic %08X, size field %u, "
+				"tome %s, bounds %.0f,%.0f,%.0f..%.0f,%.0f,%.0f = %.2fx%.2f cells, covers its cells %s; visibility not decoded "
+				"(Umbra tome body)\n", f, int( b.second.size() ), qPrintable( path ), int( u.size() ), cellLe32( u, 0 ),
+				cellLe32( u, 8 ), vm.hasMatch() ? qPrintable( vm.captured( 1 ) ) : "unknown", bb[0], bb[1], bb[2], bb[3], bb[4],
+				bb[5], ( bb[3] - bb[0] ) / CELL_UNITS, ( bb[4] - bb[1] ) / CELL_UNITS,
+				spec.interior ? "n/a (interior)" : covers ? "yes" : "NO" );
+		}
+	}
 	wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
 	QHash<quint32, WwWaterRecord> placedWaterRecs;   // lane WATER1: WNAM form -> its record (form 0 = unreadable)
 	int placedWaterShapes = 0;

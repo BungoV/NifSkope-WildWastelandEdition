@@ -78,6 +78,25 @@ struct EsmRefr
 	bool hasPrim = false;
 	quint32 primType = 0;
 	float primHalf[3] = { 0, 0, 0 };
+	/* lane SUNCELL1: the game's rooms and portals (wbDefinitionsFO4 REFR). A portal (PortalMarker) carries XPOD,
+	 * its origin and destination ROOM refs (0 = outside); a room (RoomMarker) carries XRMR and its XLRM linked
+	 * rooms, the rooms it always sees without a portal. */
+	quint32 portalFrom = 0, portalTo = 0;
+	bool roomBound = false;
+	QVector<quint32> linkedRooms;
+};
+
+/*! lane SUNCELL1: one CELL's precombined / previs fields (wbDefinitionsFO4 CELL). `rvis` = RVIS, the cell whose
+ *  previs file holds this cell's visibility (an exterior block of 3x3 cells shares one); `visi` / `pcmb` = the
+ *  2-byte stamps of the previs and precombined builds; XCRI = the precombined meshes and the refs they replace
+ *  (the second count is in u32s, measured: two per ref); XPRI = the refs the previs build took in. */
+struct EsmCellPrevis
+{
+	bool exists = false;
+	quint32 rvis = 0;
+	quint16 visi = 0, pcmb = 0;
+	bool hasVisi = false, hasPcmb = false;
+	quint32 combinedMeshes = 0, combinedRefs = 0, previsRefs = 0;
 };
 
 /* Lane PRTP1: one LIGH record (wbDefinitionsFO4 LIGH DATA + FNAM). The
@@ -487,6 +506,8 @@ public:
 	 *  worldspace has no cell there or the record carries none (lane
 	 *  CELLWORK1). The DISPLAY name (FULL) is not available: see CellEntry. */
 	QString cellEditorId( int cx, int cy ) const;
+	//! lane SUNCELL1: the CELL record `cellForm`'s previs / precombined fields (exists false: no such CELL)
+	EsmCellPrevis cellPrevis( quint32 cellForm ) const;
 	//! The cell record's form id at this grid position, or 0.
 	quint32 cellForm( int cx, int cy ) const;
 	//! The worldspace's persistent-cell REFRs, grid-filtered by world position.
