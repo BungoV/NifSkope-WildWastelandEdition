@@ -58,6 +58,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 
 //! How far (scene units, from the scene origin) the far field of the scene's document reaches; 0 = none.
 float wwCellFarLodReach( const Scene * scene );
+//! the far field's centre in scene units (the reach is measured from it)
+Vector3 wwCellFarLodOrigin( const Scene * scene );
 
 //! Before the scene draws: the far sway uniforms (zeroed once when no far field is active).
 void wwCellFarLodFrame( Scene * scene );

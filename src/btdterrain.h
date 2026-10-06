@@ -229,6 +229,8 @@ struct LodlFarRing
 	 *  is cx* even after an earlier ring of the call, and the next ring's level (its seam lerp) is given. */
 	bool cutGiven = false;
 	int nextLod = 0;            //!< 0 = no next ring
+	//! FINALFIX: write only the asked rectangle (and the cut), not the whole sheet tiles around it.
+	bool exact = false;
 	//! Our coverage limit (a mixed run, WW_CELL_FARLOD_OURS): whole sheet tiles inside it; none when lx1 < lx0.
 	int lx0 = 0, ly0 = 0, lx1 = -1, ly1 = -1;
 

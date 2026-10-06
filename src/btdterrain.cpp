@@ -174,6 +174,9 @@ struct TerrainSurface
 	Vector3 shift = Vector3( 0.0f, 0.0f, 0.0f );
 	bool haveCut = false;
 	int cutX0 = 0, cutY0 = 0, cutX1 = -1, cutY1 = -1;
+	/* FINALFIX: only the cells inside `keep` are written (a mesh tile is clipped to it, its UV still the
+	 * sheet tile's own); the grid and the sheets stay on whole sheet tiles. None when keepX1 < keepX0. */
+	int keepX0 = 0, keepY0 = 0, keepX1 = -1, keepY1 = -1;
 	qint64 cutTris = 0, shapesOut = 0, vertsOut = 0, trisOut = 0;
 };
 
@@ -263,18 +266,33 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 	QVector<TerrainVert> verts;
 	QVector<Triangle> tris;
 
+	const bool haveKeep = s.keepX1 >= s.keepX0 && s.keepY1 >= s.keepY0;
 	for ( int ty = 0; ty < tilesY; ty++ ) {
-		const int hCells = qMin( k, s.cellsY - ty * k );
-		const int hV = hCells * n + 1;
+		const int hCellsTile = qMin( k, s.cellsY - ty * k );
 		for ( int tx = 0; tx < tilesX; tx++ ) {
-			const int wCells = qMin( k, s.cellsX - tx * k );
+			const int wCellsTile = qMin( k, s.cellsX - tx * k );
+			// FINALFIX: the tile clipped to `keep`; ox / oy = the cells dropped at its west / south edge
+			int ox = 0, oy = 0, wCells = wCellsTile, hCells = hCellsTile;
+			if ( haveKeep ) {
+				const int a0 = s.cellX0 + tx * k, b0 = s.cellY0 + ty * k;
+				const int kx0 = qMax( a0, s.keepX0 ), kx1 = qMin( a0 + wCellsTile - 1, s.keepX1 );
+				const int ky0 = qMax( b0, s.keepY0 ), ky1 = qMin( b0 + hCellsTile - 1, s.keepY1 );
+				if ( kx1 < kx0 || ky1 < ky0 )
+					continue;
+				ox = kx0 - a0;
+				oy = ky0 - b0;
+				wCells = kx1 - kx0 + 1;
+				hCells = ky1 - ky0 + 1;
+			}
+			const int hV = hCells * n + 1;
 			const int wV = wCells * n + 1;
-			const int gx0 = tx * k * n;
-			const int gy0 = ty * k * n;
+			const int gx0 = ( tx * k + ox ) * n;
+			const int gy0 = ( ty * k + oy ) * n;
+			const int tileX = tx * k + ox, tileY = ty * k + oy;   // cells from the grid's south-west
 
 			// lane FARLOD1: a tile wholly inside the cut is not written
 			if ( s.haveCut ) {
-				const int tcx0 = s.cellX0 + tx * k, tcy0 = s.cellY0 + ty * k;
+				const int tcx0 = s.cellX0 + tileX, tcy0 = s.cellY0 + tileY;
 				if ( inCut( tcx0, tcy0 ) && inCut( tcx0 + wCells - 1, tcy0 + hCells - 1 ) ) {
 					s.cutTris += qint64( wCells ) * hCells * n * n * 2;
 					continue;
@@ -288,13 +306,13 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 			int sheetIndex = -1;
 			int sxCells = 0, syCellsFromSouth = 0;
 			if ( s.sheetDim > 0 && !s.tileDiffuse.empty() ) {
-				const int stx = ( tx * k ) / s.sheetDim;
-				const int styFromSouth = ( ty * k ) / s.sheetDim;
+				const int stx = tileX / s.sheetDim;
+				const int styFromSouth = tileY / s.sheetDim;
 				const int sty = s.sheetTilesY - 1 - styFromSouth;
 				if ( stx >= 0 && stx < s.sheetTilesX && sty >= 0 && sty < s.sheetTilesY ) {
 					sheetIndex = sty * s.sheetTilesX + stx;
-					sxCells = ( tx * k ) % s.sheetDim;
-					syCellsFromSouth = ( ty * k ) % s.sheetDim;
+					sxCells = tileX % s.sheetDim;
+					syCellsFromSouth = tileY % s.sheetDim;
 				}
 			}
 
@@ -334,7 +352,7 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 				for ( int i = 0; i < wV - 1; i++ ) {
 					const int a = j * wV + i;
 					// lane FARLOD1: a quad of a cut cell is the loaded block's ground, not ours
-					if ( s.haveCut && inCut( s.cellX0 + tx * k + i / n, s.cellY0 + ty * k + j / n ) ) {
+					if ( s.haveCut && inCut( s.cellX0 + tileX + i / n, s.cellY0 + tileY + j / n ) ) {
 						s.cutTris += 2;
 						continue;
 					}
@@ -353,12 +371,12 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 			QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
 			nif->set<QString>( iShape, "Name",
 				QString( "%1 %2,%3" ).arg( s.shapePrefix )
-					.arg( s.cellX0 + tx * k ).arg( s.cellY0 + ty * k ) );
+					.arg( s.cellX0 + tileX ).arg( s.cellY0 + tileY ) );
 			nif->set<quint32>( iShape, "Flags", 14 );
 			nif->set<float>( iShape, "Scale", 1.0f );
 			nif->set<Vector3>( iShape, "Translation",
-				Vector3( float( s.cellX0 + tx * k ) * 4096.0f,
-					float( s.cellY0 + ty * k ) * 4096.0f, 0.0f ) - s.shift );
+				Vector3( float( s.cellX0 + tileX ) * 4096.0f,
+					float( s.cellY0 + tileY ) * 4096.0f, 0.0f ) - s.shift );
 
 			nif->set<BSVertexDesc>( iShape, "Vertex Desc", vertexDesc );
 			nif->set<quint32>( iShape, "Num Vertices", quint32( verts.size() ) );
@@ -3137,6 +3155,20 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 			r.notes << QStringLiteral( "empty after clipping to the file" );
 			continue;
 		}
+		/* FINALFIX: an exact ring writes only what it was asked (the cut and its reach), not the whole sheet
+		 * tiles around it -- ring 0 at the LAND's rate on whole 8-cell tiles was 16x16 cells, 266k vertices,
+		 * and left the objects no budget. The grid and the sheets stay on whole tiles; the mesh is clipped. */
+		int kx0 = x0, ky0 = y0, kx1 = x1, ky1 = y1;
+		if ( r.exact ) {
+			kx0 = qMax( x0, qMin( r.x0, cx0 ) );
+			ky0 = qMax( y0, qMin( r.y0, cy0 ) );
+			kx1 = qMin( x1, qMax( r.x1, cx1 ) );
+			ky1 = qMin( y1, qMax( r.y1, cy1 ) );
+			if ( kx1 < kx0 || ky1 < ky0 ) {
+				r.notes << QStringLiteral( "empty after clipping to the asked rectangle" );
+				continue;
+			}
+		}
 
 		const int n = lodtRate( info, r.lod );
 		const int step = qMax( 1, spc / n );
@@ -3144,14 +3176,15 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		const int cellsYr = y1 - y0 + 1;
 		const int gridW = cellsXr * n + 1;
 		const int gridH = cellsYr * n + 1;
-		const int ovW = qMax( 0, qMin( x1, cx1 ) - qMax( x0, cx0 ) + 1 );
-		const int ovH = qMax( 0, qMin( y1, cy1 ) - qMax( y0, cy0 ) + 1 );
+		const int ovW = qMax( 0, qMin( kx1, cx1 ) - qMax( kx0, cx0 ) + 1 );
+		const int ovH = qMax( 0, qMin( ky1, cy1 ) - qMax( ky0, cy0 ) + 1 );
 		r.n = n;
-		r.ox0 = x0;
-		r.oy0 = y0;
-		r.ox1 = x1;
-		r.oy1 = y1;
-		r.estVerts = qint64( gridW ) * gridH - ( r.noCut ? 0 : qint64( ovW ) * ovH * n * n );
+		r.ox0 = kx0;
+		r.oy0 = ky0;
+		r.ox1 = kx1;
+		r.oy1 = ky1;
+		r.estVerts = qint64( ( kx1 - kx0 + 1 ) * n + 1 ) * ( ( ky1 - ky0 + 1 ) * n + 1 )
+			- ( r.noCut ? 0 : qint64( ovW ) * ovH * n * n );
 		if ( maxVerts > 0 && runningVerts + r.estVerts > maxVerts ) {
 			r.notes << QString( "NOT BUILT: %L1 vertices would take the far field past its budget "
 					"of %L2" ).arg( r.estVerts ).arg( maxVerts );
@@ -3182,17 +3215,20 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 			const int nNext = lodtRate( info, nextLod );
 			if ( nNext > 0 && n > nNext && n % nNext == 0 ) {
 				const int rr = n / nNext;
+				// the WRITTEN rectangle's edges (the keep rectangle of an exact ring), whole cells from x0, y0
+				const int ei0 = ( kx0 - x0 ) * n, ei1 = ( kx1 + 1 - x0 ) * n;
+				const int ej0 = ( ky0 - y0 ) * n, ej1 = ( ky1 + 1 - y0 ) * n;
 				for ( int e = 0; e < 2; e++ ) {
-					const int i = e ? gridW - 1 : 0;
-					for ( int j = 0; j < gridH; j++ ) {
+					const int i = e ? ei1 : ei0;
+					for ( int j = ej0; j <= ej1; j++ ) {
 						if ( j % rr == 0 )
 							continue;
 						const int j0 = j - j % rr, j1 = qMin( j0 + rr, gridH - 1 );
 						const float t = float( j - j0 ) / float( rr );
 						zAt( i, j ) = zAt( i, j0 ) * ( 1.0f - t ) + zAt( i, j1 ) * t;
 					}
-					const int jj = e ? gridH - 1 : 0;
-					for ( int i2 = 0; i2 < gridW; i2++ ) {
+					const int jj = e ? ej1 : ej0;
+					for ( int i2 = ei0; i2 <= ei1; i2++ ) {
 						if ( i2 % rr == 0 )
 							continue;
 						const int i0 = i2 - i2 % rr, i1 = qMin( i0 + rr, gridW - 1 );
@@ -3275,6 +3311,12 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		s.cutY0 = cy0;
 		s.cutX1 = cx1;
 		s.cutY1 = cy1;
+		if ( r.exact ) {
+			s.keepX0 = kx0;
+			s.keepY0 = ky0;
+			s.keepX1 = kx1;
+			s.keepY1 = ky1;
+		}
 		if ( haveSheets ) {
 			const int tilesX = cellsXr / dim, tilesY = cellsYr / dim;
 			s.sheetDim = dim;
@@ -3291,6 +3333,9 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 					// a tile wholly inside the cut is never drawn: do not unpack it
 					if ( !r.noCut && cellX >= cx0 && cellX + dim - 1 <= cx1
 						&& cellY - dim + 1 >= cy0 && cellY <= cy1 )
+						continue;
+					// nor one wholly outside the written rectangle
+					if ( cellX > kx1 || cellX + dim - 1 < kx0 || cellY < ky0 || cellY - dim + 1 > ky1 )
 						continue;
 					int gx = 0, gy = 0;
 					if ( !sheets->tileOfCell( cellX, cellY, &gx, &gy ) )
@@ -3317,10 +3362,10 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		r.cutTris = s.cutTris;
 		runningVerts += s.vertsOut;
 		havePrev = true;
-		px0 = x0;
-		py0 = y0;
-		px1 = x1;
-		py1 = y1;
+		px0 = kx0;
+		py0 = ky0;
+		px1 = kx1;
+		py1 = ky1;
 	}
 	if ( error )
 		error->clear();

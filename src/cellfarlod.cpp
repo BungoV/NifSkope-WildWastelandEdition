@@ -26,8 +26,10 @@ BSD License - see nifskope.h
 #include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QMap>
 #include <QSet>
 #include <QSettings>
 #include <QStringList>
@@ -59,6 +61,7 @@ struct FarDoc
 	float origin[3] = { 0.0f, 0.0f, 0.0f };
 	int bx0 = 0, by0 = 0, bx1 = -1, by1 = -1;
 	int cards = 0;
+	int fx0 = 0, fy0 = 0, fx1 = -1, fy1 = -1;   //!< the outermost built ring's footprint, cells (the far field's edge)
 };
 
 QHash<const void *, FarDoc> & docs()
@@ -347,7 +350,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 
 	struct RingDef { int lod, sheetDim, reach, slot; };
 	std::vector<RingDef> defs = {
-		{ 1, 8, std::max( h + 1, 3 ), 0 },            // the band at the block: 16 samples a cell
+		/* the band at the block: 32 samples a cell, the LAND's own 128-unit lattice. FINALFIX: at 16 a cell the
+		 * ring's edge already sat on the LAND at its vertices, but the LAND has a vertex between each pair, so the
+		 * seam stood open 140 units (measured, snap on and off alike). The RED nosnap keeps the old 16 a cell. */
+		{ noSnap ? 1 : 0, 8, std::max( h + 1, 3 ), 0 },
 		{ 2, 8, std::max( h + 2, cellsTo( d0 ) ), 0 },   // LOD4 objects
 		{ 3, 16, cellsTo( d1 ), 1 },                     // LOD8
 		{ 4, 16, cellsTo( d2 ), 2 },                     // LOD16
@@ -442,7 +448,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	std::vector<LodlFarRing> rings( defs.size() );
 	std::vector<std::array<int, 4>> foot( defs.size() );
 	std::vector<WwFarVanRing> van;
-	const float shift[3] = { origin[0], origin[1], origin[2] };
+	/* FINALFIX: no shift. The cell scene is in WORLD units -- every welded shape carries Translation = origin
+	 * (cellview.cpp, "Translation", origin) -- so far content placed at world - origin landed 67584 / 96256
+	 * units off (over the block, the measured double ground and water lines added origin back and read 0). */
+	const float shift[3] = { 0.0f, 0.0f, 0.0f };
 	QString terr;
 	bool terrOk = true;
 	qint64 runVerts = 0;
@@ -469,6 +478,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			r.ly1 = lim[3];
 		}
 		r.noCut = noCut && i == 0;
+		r.exact = i == 0;	// FINALFIX: ring 0 at the LAND's rate only as far as its reach
 		r.snapInner = !noSnap;
 		if ( i == 0 )
 			r.innerZ = innerZ;
@@ -495,6 +505,17 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		}
 		WwFarVanRing v;
 		v.level = kVanLevel[std::min( i, size_t( 4 ) )];
+		/* FINALFIX: a ring we did not build is the game's -- whole chunks of its level, as the game draws
+		 * them (ours snap to whole sheet tiles the same way). Measured: the Vanilla type's last ring stopped
+		 * at cells -79..45 where ours reach -96..63, and the over view showed sky below the horizon there. */
+		if ( !r.built ) {
+			const int L = v.level;
+			auto fl = [L]( int a ) { return ( a >= 0 ? a / L : -( ( -a + L - 1 ) / L ) ) * L; };
+			nx0 = fl( nx0 );
+			ny0 = fl( ny0 );
+			nx1 = fl( nx1 ) + L - 1;
+			ny1 = fl( ny1 ) + L - 1;
+		}
 		v.x0 = nx0;
 		v.y0 = ny0;
 		v.x1 = nx1;
@@ -549,6 +570,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					"%6 seam vertices to the LAND (max step %7), %8 water shapes (%9 as the cell's water)" )
 					.arg( v.shapes ).arg( v.terrainTris ).arg( v.clipTris ).arg( v.objectTris ).arg( v.droppedTris )
 					.arg( v.snapped ).arg( v.snapMax, 0, 'f', 1 ).arg( int( v.waterBlocks.size() ) ).arg( wReg )
+					+ QStringLiteral( ", %1 land shaders LOD landscape -> default, %2 skirt tris on the clip lines" ).arg( v.landRetyped ).arg( v.skirtTris )
 				+ ( v.notes.isEmpty() ? QString() : QStringLiteral( " -- " ) + v.notes.join( QLatin1String( "; " ) ) ) );
 			sOurs += v.chunksOurs;
 			sVan += v.chunksVanilla;
@@ -675,6 +697,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	 * block. 0 is the cut working; the red (WW_CELL_FARLOD_RED=nocut) must count them. The far water the same
 	 * way (red watercut). */
 	qint64 doubleGround = 0, readTris = 0, waterOver = 0, waterTris = 0, vanOver = 0, vanTris = 0;
+	QMap<QString, QString> vanWhere;   // the shapes a vanilla-over-ours count comes from, with their centres' box
+	QHash<QString, std::array<float, 5>> vanBox;
 	{
 		// where OUR terrain draws, ring by ring: our built rect minus the footprint inside
 		auto oursDraws = [&]( float x, float y ) {
@@ -695,6 +719,68 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		};
 		const float wx0 = float( bx0 ) * kCell, wy0 = float( by0 ) * kCell;
 		const float wx1 = float( bx1 + 1 ) * kCell, wy1 = float( by1 + 1 ) * kCell;
+		/* THE PLAN CRACKS: an 8-unit grid over the block grown by one cell; every far terrain triangle marks
+		 * the grid points it covers seen from straight above, the block itself counts as covered. A point
+		 * left bare is a crack the top view's sky census can only hit by chance (Vanilla top, 2 px). */
+		const float gs = 8.0f, gx0 = wx0 - kCell, gy0 = wy0 - kCell;
+		const int gw = int( ( wx1 - wx0 + 2.0f * kCell ) / gs ), gh = int( ( wy1 - wy0 + 2.0f * kCell ) / gs );
+		std::vector<quint8> cover( size_t( gw ) * size_t( gh ), 0 );
+		/* and finer along every cell line (chunk seams and clip lines lie on them): points 0.25, 1 and 3 units
+		 * either side, every 2 units along */
+		const float seamOff[6] = { -3.0f, -1.0f, -0.25f, 0.25f, 1.0f, 3.0f };
+		const int nLx = int( ( wx1 - wx0 ) / kCell ) + 3, nLy = int( ( wy1 - wy0 ) / kCell ) + 3;
+		const int alongX = int( ( wy1 - wy0 + 2.0f * kCell ) / 2.0f ), alongY = int( ( wx1 - wx0 + 2.0f * kCell ) / 2.0f );
+		std::vector<quint8> seamX( size_t( nLx ) * 6 * size_t( alongX ), 0 ), seamY( size_t( nLy ) * 6 * size_t( alongY ), 0 );
+		auto planMark = [&]( const Vector3 & a, const Vector3 & b2, const Vector3 & c2 ) {
+			const float area = ( b2[0] - a[0] ) * ( c2[1] - a[1] ) - ( c2[0] - a[0] ) * ( b2[1] - a[1] );
+			if ( std::fabs( area ) < 1e-3f )
+				return;
+			{
+				const float sg0 = area > 0.0f ? 1.0f : -1.0f, tol0 = -1e-3f * std::fabs( area );
+				auto inTri = [&]( float x, float y ) {
+					const float e0 = sg0 * ( ( b2[0] - a[0] ) * ( y - a[1] ) - ( x - a[0] ) * ( b2[1] - a[1] ) );
+					const float e1 = sg0 * ( ( c2[0] - b2[0] ) * ( y - b2[1] ) - ( x - b2[0] ) * ( c2[1] - b2[1] ) );
+					const float e2 = sg0 * ( ( a[0] - c2[0] ) * ( y - c2[1] ) - ( x - c2[0] ) * ( a[1] - c2[1] ) );
+					return e0 >= tol0 && e1 >= tol0 && e2 >= tol0;
+				};
+				const float mnx = std::min( { a[0], b2[0], c2[0] } ), mxx = std::max( { a[0], b2[0], c2[0] } );
+				const float mny = std::min( { a[1], b2[1], c2[1] } ), mxy = std::max( { a[1], b2[1], c2[1] } );
+				for ( int l = 0; l < nLx; l++ ) {
+					const float lx = gx0 + float( l ) * kCell;
+					if ( lx < mnx - 4.0f || lx > mxx + 4.0f )
+						continue;
+					const int k0 = std::max( 0, int( ( mny - gy0 ) / 2.0f ) - 1 ), k1 = std::min( alongX - 1, int( ( mxy - gy0 ) / 2.0f ) + 1 );
+					for ( int o = 0; o < 6; o++ )
+						for ( int k = k0; k <= k1; k++ )
+							if ( inTri( lx + seamOff[o], gy0 + ( float( k ) + 0.5f ) * 2.0f ) )
+								seamX[( size_t( l ) * 6 + size_t( o ) ) * size_t( alongX ) + size_t( k )] = 1;
+				}
+				for ( int l = 0; l < nLy; l++ ) {
+					const float ly = gy0 + float( l ) * kCell;
+					if ( ly < mny - 4.0f || ly > mxy + 4.0f )
+						continue;
+					const int k0 = std::max( 0, int( ( mnx - gx0 ) / 2.0f ) - 1 ), k1 = std::min( alongY - 1, int( ( mxx - gx0 ) / 2.0f ) + 1 );
+					for ( int o = 0; o < 6; o++ )
+						for ( int k = k0; k <= k1; k++ )
+							if ( inTri( gx0 + ( float( k ) + 0.5f ) * 2.0f, ly + seamOff[o] ) )
+								seamY[( size_t( l ) * 6 + size_t( o ) ) * size_t( alongY ) + size_t( k )] = 1;
+				}
+			}
+			const int i0 = std::max( 0, int( std::floor( ( std::min( { a[0], b2[0], c2[0] } ) - gx0 ) / gs - 0.5f ) ) );
+			const int i1 = std::min( gw - 1, int( std::ceil( ( std::max( { a[0], b2[0], c2[0] } ) - gx0 ) / gs - 0.5f ) ) );
+			const int j0 = std::max( 0, int( std::floor( ( std::min( { a[1], b2[1], c2[1] } ) - gy0 ) / gs - 0.5f ) ) );
+			const int j1 = std::min( gh - 1, int( std::ceil( ( std::max( { a[1], b2[1], c2[1] } ) - gy0 ) / gs - 0.5f ) ) );
+			const float sg = area > 0.0f ? 1.0f : -1.0f, tol = -1e-3f * std::fabs( area );
+			for ( int j = j0; j <= j1; j++ )
+				for ( int i = i0; i <= i1; i++ ) {
+					const float x = gx0 + ( float( i ) + 0.5f ) * gs, y = gy0 + ( float( j ) + 0.5f ) * gs;
+					const float e0 = sg * ( ( b2[0] - a[0] ) * ( y - a[1] ) - ( x - a[0] ) * ( b2[1] - a[1] ) );
+					const float e1 = sg * ( ( c2[0] - b2[0] ) * ( y - b2[1] ) - ( x - b2[0] ) * ( c2[1] - b2[1] ) );
+					const float e2 = sg * ( ( a[0] - c2[0] ) * ( y - c2[1] ) - ( x - c2[0] ) * ( a[1] - c2[1] ) );
+					if ( e0 >= tol && e1 >= tol && e2 >= tol )
+						cover[size_t( j ) * size_t( gw ) + size_t( i )] = 1;
+				}
+		};
 		for ( int b = firstFarBlock + 1; b < nif->getBlockCount(); b++ ) {
 			const QModelIndex iB = nif->getBlockIndex( b );
 			if ( !nif->blockInherits( iB, "BSTriShape" ) )
@@ -723,24 +809,83 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				if ( tr.v1() >= nv || tr.v2() >= nv || tr.v3() >= nv )
 					continue;
 				( isWater ? waterTris : readTris )++;
-				const Vector3 c = xf * ( ( p[tr.v1()] + p[tr.v2()] + p[tr.v3()] ) / 3.0f ) + origin;
+				const Vector3 c = xf * ( ( p[tr.v1()] + p[tr.v2()] + p[tr.v3()] ) / 3.0f );   // world units (no shift)
+				if ( !isWater )
+					planMark( xf * p[tr.v1()], xf * p[tr.v2()], xf * p[tr.v3()] );
 				if ( c[0] > wx0 && c[0] < wx1 && c[1] > wy0 && c[1] < wy1 )
 					( isWater ? waterOver : doubleGround )++;
 				if ( isVan ) {
 					vanTris++;
-					if ( oursDraws( c[0], c[1] ) )
+					if ( oursDraws( c[0], c[1] ) ) {
 						vanOver++;
+						if ( vanWhere.contains( bn ) || vanWhere.size() < 6 ) {
+							std::array<float, 5> & e = vanBox[bn];
+							if ( e[4] == 0.0f )
+								e = { c[0], c[1], c[0], c[1], 0.0f };
+							e[0] = std::min( e[0], c[0] );
+							e[1] = std::min( e[1], c[1] );
+							e[2] = std::max( e[2], c[0] );
+							e[3] = std::max( e[3], c[1] );
+							e[4] += 1.0f;
+							vanWhere.insert( bn, QStringLiteral( "%1 x%2 centres in cells %3,%4..%5,%6" ).arg( bn ).arg( double( e[4] ), 0, 'f', 0 )
+								.arg( double( e[0] / kCell ), 0, 'f', 3 ).arg( double( e[1] / kCell ), 0, 'f', 3 )
+								.arg( double( e[2] / kCell ), 0, 'f', 3 ).arg( double( e[3] / kCell ), 0, 'f', 3 ) );
+						}
+					}
 				}
 			}
 		}
+		qint64 bare = 0, pts = 0;
+		QStringList bareAt;
+		for ( int j = 0; j < gh; j++ )
+			for ( int i = 0; i < gw; i++ ) {
+				const float x = gx0 + ( float( i ) + 0.5f ) * gs, y = gy0 + ( float( j ) + 0.5f ) * gs;
+				if ( x > wx0 && x < wx1 && y > wy0 && y < wy1 )
+					continue;   // the loaded block draws its own LAND
+				pts++;
+				if ( cover[size_t( j ) * size_t( gw ) + size_t( i )] )
+					continue;
+				bare++;
+				if ( bareAt.size() < 8 )
+					bareAt << QStringLiteral( "(%1,%2)" ).arg( double( x / kCell ), 0, 'f', 4 ).arg( double( y / kCell ), 0, 'f', 4 );
+			}
+		auto inBlock = [&]( float x, float y ) { return x > wx0 && x < wx1 && y > wy0 && y < wy1; };
+		auto bareSeam = [&]( float x, float y ) {
+			bare++;
+			if ( bareAt.size() < 8 )
+				bareAt << QStringLiteral( "(%1,%2)" ).arg( double( x / kCell ), 0, 'f', 5 ).arg( double( y / kCell ), 0, 'f', 5 );
+		};
+		for ( int l = 0; l < nLx; l++ )
+			for ( int o = 0; o < 6; o++ )
+				for ( int k = 0; k < alongX; k++ ) {
+					const float x = gx0 + float( l ) * kCell + seamOff[o], y = gy0 + ( float( k ) + 0.5f ) * 2.0f;
+					if ( inBlock( x, y ) || x < gx0 || x > gx0 + float( gw ) * gs )
+						continue;
+					pts++;
+					if ( !seamX[( size_t( l ) * 6 + size_t( o ) ) * size_t( alongX ) + size_t( k )] )
+						bareSeam( x, y );
+				}
+		for ( int l = 0; l < nLy; l++ )
+			for ( int o = 0; o < 6; o++ )
+				for ( int k = 0; k < alongY; k++ ) {
+					const float x = gx0 + ( float( k ) + 0.5f ) * 2.0f, y = gy0 + float( l ) * kCell + seamOff[o];
+					if ( inBlock( x, y ) || y < gy0 || y > gy0 + float( gh ) * gs )
+						continue;
+					pts++;
+					if ( !seamY[( size_t( l ) * 6 + size_t( o ) ) * size_t( alongY ) + size_t( k )] )
+						bareSeam( x, y );
+				}
+		say( QStringLiteral( "far lod: plan cracks %1 of %2 grid points within a cell of the block (8 units, and 0.25-3 units either side of each cell line; far terrain seen from above)%3" )
+			.arg( bare ).arg( pts ).arg( bareAt.isEmpty() ? QString() : QStringLiteral( "; at cells %1" ).arg( bareAt.join( QLatin1Char( ' ' ) ) ) ) );
 	}
 	say( QStringLiteral( "far lod: double ground %1 of %2 far terrain triangles over the loaded block %3,%4..%5,%6%7" )
 		.arg( doubleGround ).arg( readTris ).arg( bx0 ).arg( by0 ).arg( bx1 ).arg( by1 )
 		.arg( noCut ? QStringLiteral( " (RED nocut)" ) : QString() ) );
 	say( QStringLiteral( "far lod: water over block %1 of %2 far water triangles%3" ).arg( waterOver ).arg( waterTris )
 		.arg( waterCut ? QStringLiteral( " (RED watercut)" ) : QString() ) );
-	say( QStringLiteral( "far lod: vanilla over ours %1 of %2 vanilla terrain triangles%3" ).arg( vanOver ).arg( vanTris )
-		.arg( vanBoth ? QStringLiteral( " (RED vanboth)" ) : QString() ) );
+	say( QStringLiteral( "far lod: vanilla over ours %1 of %2 vanilla terrain triangles%3%4" ).arg( vanOver ).arg( vanTris )
+		.arg( vanBoth ? QStringLiteral( " (RED vanboth)" ) : QString() )
+		.arg( vanWhere.isEmpty() ? QString() : QStringLiteral( "; from %1" ).arg( QStringList( vanWhere.values() ).join( QStringLiteral( ", " ) ) ) ) );
 
 	double ws1 = 0, pk1 = 0;
 	memNow( ws1, pk1 );
@@ -820,10 +965,23 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.dropY = ctrY;
 			os.sway = swayAmp() > 0.0f;
 			os.skipRefs = &cardRefs;
+			/* FINALFIX: the ring's triangles are counted before the document grows; a ring that would take the
+			 * far field past its budget is not written. Measured on the merged build (g3, Commonwealth -17,23):
+			 * ring 0 636345 tris +1514 MB, ring 1 1282884 tris +3131 MB -- 2.4 KB a triangle, rounded up. */
+			constexpr double kBytesPerTri = 2560.0;
+			const double leftMB = budgetMB - ( wsR - ws0 );
+			os.maxTris = std::max<qint64>( 1, qint64( leftMB * 1024.0 * 1024.0 / kBytesPerTri ) );
 			LodiAppendCounts oc;
 			QString oerr, onotes;
 			if ( !nifAppendLodiObjects( nif, iFar, lodi, os, &oerr, &onotes, &oc ) ) {
 				say( QStringLiteral( "far lod: objects ring %1 REFUSED -- %2" ).arg( int( i ) ).arg( oerr ) );
+				break;
+			}
+			if ( oc.overBudget ) {
+				say( QStringLiteral( "far lod: objects ring %1 NOT BUILT -- %2 tris (about %3 MB) would take the far "
+					"field past its budget of %4 MB (%5 MB left)" ).arg( int( i ) ).arg( oc.tris )
+					.arg( double( oc.tris ) * kBytesPerTri / ( 1024.0 * 1024.0 ), 0, 'f', 0 )
+					.arg( budgetMB, 0, 'f', 0 ).arg( leftMB, 0, 'f', 0 ) );
 				break;
 			}
 			double wsA = 0, pkA = 0;
@@ -868,6 +1026,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			m = std::max( m, std::sqrt( x * x + y * y ) );
 		}
 		fd.reach = m;
+		fd.fx0 = r[0];
+		fd.fy0 = r[1];
+		fd.fx1 = r[2];
+		fd.fy1 = r[3];
 	}
 	say( farlod1CullRegister( nif, firstFarBlock ) );   // lane SUNCELL1's cull table, when merged
 	docs().insert( nif, fd );
@@ -907,6 +1069,12 @@ float wwCellFarLodReach( const Scene * scene )
 	return f ? f->reach : 0.0f;
 }
 
+Vector3 wwCellFarLodOrigin( const Scene * scene )
+{
+	const FarDoc * f = farFor( scene );
+	return f ? Vector3( f->origin[0], f->origin[1], f->origin[2] ) : Vector3();
+}
+
 void wwCellFarLodFrame( Scene * scene )
 {
 	static bool wasSet = false;
@@ -920,12 +1088,22 @@ void wwCellFarLodFrame( Scene * scene )
 	const float t = swayTime();
 	/* every program on fo4_default.vert a far shape can draw with: the legacy path, the PBR path, and SUNCELL1's
 	 * cascade variants (absent before that merge: useProgram returns null and the name is skipped) */
+	/* the loaded block, in view space: the sway is the FAR field's, so the cell's own tree-animation shapes inside
+	 * the block stand as they did with the row off (g10 measured them swaying: 68,366 sky-band px on the eye view) */
+	float blk[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	if ( f ) {
+		const float kC = 4096.0f;
+		const Vector3 c = scene->view * Vector3( float( f->bx0 + f->bx1 + 1 ) * 0.5f * kC, float( f->by0 + f->by1 + 1 ) * 0.5f * kC, 0.0f );
+		blk[0] = c[0]; blk[1] = c[1]; blk[2] = c[2];
+		blk[3] = float( std::max( f->bx1 - f->bx0, f->by1 - f->by0 ) + 1 ) * 0.5f * kC * scene->view.scale;
+	}
 	QStringList set;
 	for ( const char * name : { "fo4_cell.prog", "fo4_default.prog", "fo4_fog.prog", "pbrm_cell.prog", "pbrm_default.prog",
 			"pbrm_csm.prog", "fo4_cellcsm.prog", "fo4_csm.prog", "fo4_fogcsm.prog", "pbrm_cellcsm.prog" } ) {
 		if ( auto prog = r->useProgram( name ) ) {
 			prog->uni1f( "farSwayAmp", amp );
 			prog->uni1f( "farSwayTime", t );
+			prog->uni4f( "farSwayBlock", FloatVector4( blk[0], blk[1], blk[2], blk[3] ) );
 			if ( prog->uniLocation( "farSwayAmp" ) >= 0 )
 				set << QString::fromLatin1( name );
 		}
@@ -952,7 +1130,9 @@ int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame )
 		return 0;
 	ImpostorDraw::Options o;
 	o.cellLit = !redAfter;
-	const float amp = swayAmp();
+	/* WW_CELL_FARLOD_CARDSWAY=0 (harness only): the cards stand still, so the PBR sway gate (g9) sees the
+	 * mesh trees alone -- the cards sway on their own path and would move both its arms. */
+	const float amp = qgetenv( "WW_CELL_FARLOD_CARDSWAY" ) == "0" ? 0.0f : swayAmp();
 	if ( amp > 0.0f ) {
 		// the card's own sway is a UV shear (impostordraw.h), a fraction, not units
 		o.swayAmplitude = std::min( 0.05f, amp * 0.002f );
@@ -1079,8 +1259,25 @@ void wwCellFarLodSkyCensus( Scene * scene )
 
 	// a pixel is below the horizon when its view ray points down in the world (more than 1 degree)
 	const Matrix toWorld = scene->view.rotation.inverted();
+	/* FINALFIX: WHERE an empty ray goes. A ray that reaches sea level (z 0) past the far field's footprint passed
+	 * over all of it: the footprint is the last ring's square, which holds the game's fBlockMaximumDistance
+	 * (250000) circle, so the game draws no LOD there either -- sky, not a hole. One that reaches z 0 inside the
+	 * footprint crossed where ground should be and is a hole. Counted apart so the gate can tell them (the far
+	 * field off has no footprint: every pixel counts). Measured 10-06: the over view's 2058 (FO4CS) and 2001
+	 * (Vanilla) empty pixels all land at cells x 7.5..104, y -140.9..-62.9: past the footprint (x to 63, y from -64). */
+	const FarDoc * fdoc = farFor( scene );
+	const float vs = scene->view.scale != 0.0f ? scene->view.scale : 1.0f;
+	const Vector3 eye = toWorld * ( Vector3( 0, 0, 0 ) - scene->view.translation ) / vs;
+	const bool haveFoot = fdoc && fdoc->fx1 >= fdoc->fx0 && fdoc->fy1 >= fdoc->fy0;
+	const float kC = 4096.0f;
+	qint64 pastEdge = 0;
+	QStringList inside;
+	float px0 = 1e30f, py0 = 1e30f, px1 = -1e30f, py1 = -1e30f;
 	const float down = -std::sin( 3.14159265f / 180.0f );
 	qint64 below = 0, empty = 0, emptyAbove = 0;
+	int bx0 = vp[2], by0 = vp[3], bx1 = -1, by1 = -1;	// where the empty below-horizon pixels are (top-left origin)
+	const QByteArray maskPath = qgetenv( "WW_CELL_FARLOD_SKYMASK" );
+	std::vector<unsigned char> mask( maskPath.isEmpty() ? 0 : size_t( vp[2] ) * size_t( vp[3] ), 0 );
 	for ( int y = 0; y < vp[3]; y++ ) {
 		const float ndcY = ( float( y ) + 0.5f ) / float( vp[3] ) * 2.0f - 1.0f;
 		for ( int x = 0; x < vp[2]; x++ ) {
@@ -1090,14 +1287,75 @@ void wwCellFarLodSkyCensus( Scene * scene )
 			const bool isEmpty = depth[size_t( y ) * size_t( vp[2] ) + size_t( x )] >= clearDepth;
 			if ( len > 0.0f && d[2] / len < down ) {
 				below++;
-				if ( isEmpty )
+				if ( isEmpty ) {
 					empty++;
+					if ( haveFoot && d[2] < 0.0f ) {
+						const float tz = -eye[2] / d[2];
+						const float hx = eye[0] + d[0] * tz, hy = eye[1] + d[1] * tz;
+						if ( tz > 0.0f && ( hx < float( fdoc->fx0 ) * kC || hx >= float( fdoc->fx1 + 1 ) * kC
+								|| hy < float( fdoc->fy0 ) * kC || hy >= float( fdoc->fy1 + 1 ) * kC ) ) {
+							pastEdge++;
+							px0 = std::min( px0, hx / kC ); px1 = std::max( px1, hx / kC );
+							py0 = std::min( py0, hy / kC ); py1 = std::max( py1, hy / kC );
+						} else if ( tz > 0.0f && inside.size() < 6 ) {	// a hole: where (sea-level cells, to locate it)
+							/* FINALFIX: and where the ground AROUND it is -- the nearest drawn pixel within 3,
+							 * unprojected (world cells x, y and z units): a hole's own ray meets nothing. */
+							QString around;
+							const float P22 = r->globalUniforms->projectionMatrix[2][2];
+							const float P32 = r->globalUniforms->projectionMatrix[3][2];
+							for ( int rad = 1; rad <= 3 && around.isEmpty(); rad++ )
+								for ( int oy = -rad; oy <= rad && around.isEmpty(); oy++ )
+									for ( int ox = -rad; ox <= rad && around.isEmpty(); ox++ ) {
+										const int qx = x + ox, qy = y + oy;
+										if ( qx < 0 || qy < 0 || qx >= vp[2] || qy >= vp[3] )
+											continue;
+										const float dd = depth[size_t( qy ) * size_t( vp[2] ) + size_t( qx )];
+										if ( dd >= clearDepth )
+											continue;
+										const float ze = -P32 / ( 2.0f * dd - 1.0f + P22 );
+										const float qnx = ( float( qx ) + 0.5f ) / float( vp[2] ) * 2.0f - 1.0f;
+										const float qny = ( float( qy ) + 0.5f ) / float( vp[3] ) * 2.0f - 1.0f;
+										const Vector3 w = eye + toWorld * ( Vector3( qnx / P00, qny / P11, -1.0f ) * -ze ) / vs;
+										around = QStringLiteral( " by ground at %1,%2 z %3" ).arg( double( w[0] / kC ), 0, 'f', 4 )
+											.arg( double( w[1] / kC ), 0, 'f', 4 ).arg( double( w[2] ), 0, 'f', 1 );
+									}
+							inside << QStringLiteral( "(%1,%2%3)" ).arg( double( hx / kC ), 0, 'f', 3 ).arg( double( hy / kC ), 0, 'f', 3 ).arg( around );
+						}
+					}
+					const int ty = vp[3] - 1 - y;
+					bx0 = std::min( bx0, x ); bx1 = std::max( bx1, x );
+					by0 = std::min( by0, ty ); by1 = std::max( by1, ty );
+					if ( !mask.empty() )
+						mask[size_t( ty ) * size_t( vp[2] ) + size_t( x )] = 255;
+				}
 			} else if ( isEmpty ) {
 				emptyAbove++;
 			}
 		}
 	}
 	const FarDoc * f = farFor( scene );
-	say( QStringLiteral( "far lod: sky census %1 empty below-horizon pixels of %2 below (%3 empty above), far field %4" )
-		.arg( empty ).arg( below ).arg( emptyAbove ).arg( f ? QStringLiteral( "ON" ) : QStringLiteral( "off" ) ) );
+	if ( !mask.empty() ) {	// a harness picture of WHERE: white = empty below the horizon (binary PGM)
+		// whole or not at all: the shot's exit can land mid-write, so a temp file renamed over the last one
+		const QString maskFile = QString::fromLocal8Bit( maskPath ), tmp = maskFile + QStringLiteral( ".part" );
+		QFile mf( tmp );
+		if ( mf.open( QIODevice::WriteOnly ) ) {
+			mf.write( QStringLiteral( "P5 %1 %2 255\n" ).arg( vp[2] ).arg( vp[3] ).toLatin1() );
+			mf.write( reinterpret_cast<const char *>( mask.data() ), qint64( mask.size() ) );
+			if ( mf.flush() ) {
+				mf.close();
+				QFile::remove( maskFile );
+				QFile::rename( tmp, maskFile );
+			}
+		}
+	}
+	say( QStringLiteral( "far lod: sky census %1 empty below-horizon pixels of %2 below (%3 empty above), far field %4%5" )
+		.arg( empty ).arg( below ).arg( emptyAbove ).arg( f ? QStringLiteral( "ON" ) : QStringLiteral( "off" ) )
+		.arg( empty ? QStringLiteral( "; empty box x %1..%2 y %3..%4 of %5x%6" ).arg( bx0 ).arg( bx1 ).arg( by0 ).arg( by1 )
+				.arg( vp[2] ).arg( vp[3] ) : QString() )
+		+ ( haveFoot ? QStringLiteral( "; %1 of them meet sea level past the far field's edge (footprint cells %2,%3..%4,%5%6)" )
+				.arg( pastEdge ).arg( fdoc->fx0 ).arg( fdoc->fy0 ).arg( fdoc->fx1 ).arg( fdoc->fy1 )
+				.arg( pastEdge ? QStringLiteral( "; they land at cells x %1..%2 y %3..%4" ).arg( double( px0 ), 0, 'f', 1 )
+					.arg( double( px1 ), 0, 'f', 1 ).arg( double( py0 ), 0, 'f', 1 ).arg( double( py1 ), 0, 'f', 1 ) : QString() )
+				+ ( inside.isEmpty() ? QString() : QStringLiteral( "; inside at cells %1" ).arg( inside.join( QLatin1Char( ' ' ) ) ) )
+			: QString() ) );
 }

@@ -1158,6 +1158,23 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	qint64 shapes = 0, verts = 0;
 	QList<quint32> keys = buckets.keys();
 	std::sort( keys.begin(), keys.end() );
+	if ( spec.maxTris > 0 ) {	// lane FARLOD1 (FINALFIX): the budget is checked BEFORE the document grows
+		qint64 want = 0;
+		for ( quint32 key : keys ) {
+			for ( const Bucket & full : spilled.value( key ) )
+				want += qint64( full.tris.size() );
+			want += qint64( buckets[key].tris.size() );
+		}
+		if ( want > spec.maxTris ) {
+			cnt.tris = want;
+			cnt.overBudget = true;
+			if ( dump.device() ) {
+				dump.flush();
+				dumpFile.close();
+			}
+			return true;
+		}
+	}
 	for ( quint32 key : keys ) {
 		bool ok = true;
 		for ( const Bucket & full : spilled.value( key ) ) {

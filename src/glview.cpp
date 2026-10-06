@@ -3570,7 +3570,7 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		// lane FARLOD1: the far field is outside the bounds; the far plane reaches it, the near plane
 		// rises to the game's own order (fNearDistance 15) so the depth holds 250000 units. 0 = no far field.
 		if ( const float farReach = wwCellFarLodReach( scene ); farReach > 0.0f ) {
-			const Vector3 o = scene->view * Vector3();
+			const Vector3 o = scene->view * wwCellFarLodOrigin( scene );	// the reach is measured from the far centre
 			fr = std::max< GLdouble >( fr, GLdouble( o.length() ) + GLdouble( farReach ) * 1.05 );
 			nr = wwCellFarLodNear( nr );
 			fr = std::max< GLdouble >( fr, nr + scale() );

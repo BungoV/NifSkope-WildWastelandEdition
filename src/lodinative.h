@@ -74,6 +74,9 @@ struct LodiSceneSpec
 	bool sway = false;
 	//! REFR form ids drawn by somebody else (the impostor cards); skipped here
 	const QSet<quint32> * skipRefs = nullptr;
+	//! > 0: when the placements come to more triangles than this, nothing is written to the document
+	//! (LodiAppendCounts::overBudget; tris = what it would have been) -- the far field's memory budget
+	qint64 maxTris = 0;
 };
 
 //! lane FARLOD1: what one append put in, counted at the push.
@@ -81,6 +84,7 @@ struct LodiAppendCounts
 {
 	qint64 placed = 0, holeSkipped = 0, treesDropped = 0, refsSkipped = 0;
 	qint64 tris = 0, swayVerts = 0;
+	bool overBudget = false;   //!< spec.maxTris refused the write
 };
 
 //! `WW_LODI_REGION="x0,y0,x1,y1"` (cells), `WW_LODI_LEVEL=n`, `WW_LODI_BOXES=1`.

@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 
 #include "gl/glscene.h"
 #include "gl/renderer.h"
+#include "lodgen.h"
 #include "model/nifmodel.h"
 
 #include <QDebug>
@@ -97,6 +98,28 @@ QString resolveLodm( NifModel * nif, const QString & chunkDir, const QString & g
 	for ( const QString & t : tries ) {
 		if ( !t.isEmpty() && QFileInfo::exists( t ) )
 			return QFileInfo( t ).absoluteFilePath();
+	}
+	/* FINALFIX: the generator's resource stack (WW_LODGEN_RESOURCES / the LOD panel), each root taken as a
+	 * Data folder -- the far field's cards live where the chunks' authored game path says, under any root */
+	{
+		QString inData = rel;
+		if ( inData.startsWith( QLatin1String( "Data/" ), Qt::CaseInsensitive ) )
+			inData = inData.mid( 5 );
+		// the stack's own entries, the LAST one wins (Mod Organizer's order); a search path is an entry's
+		// Meshes/Textures/... folder, so its parent is a Data root too
+		QStringList roots;
+		const QStringList stack = lodgenResources();
+		for ( int i = stack.size() - 1; i >= 0; i-- )
+			roots << QDir::cleanPath( stack.at( i ) );
+		for ( const QString & p : lodgenResourceSearchPaths() )
+			roots << QDir::cleanPath( p + QStringLiteral( "/.." ) );
+		for ( const QString & root : roots ) {
+			if ( !QFileInfo( root ).isDir() )
+				continue;
+			const QString t = QDir( root ).filePath( inData );
+			if ( QFileInfo::exists( t ) )
+				return QFileInfo( t ).absoluteFilePath();
+		}
 	}
 	if ( nif ) {
 		const QString found = nif->findResourceFile( gamePath, "", ".lodm" );

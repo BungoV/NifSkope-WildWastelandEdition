@@ -50,7 +50,7 @@ struct WwFarVanRing
 	// ---- out
 	int chunksOurs = 0, chunksVanilla = 0, chunksBoth = 0, chunksNone = 0;
 	qint64 terrainTris = 0, objectTris = 0, clipTris = 0, droppedTris = 0, shapes = 0;
-	qint64 snapped = 0;
+	qint64 snapped = 0, landRetyped = 0, skirtTris = 0;          //!< landRetyped: .btr LOD-landscape shaders drawn as the default type
 	double snapMax = 0.0;
 	std::vector<int> waterBlocks;                 //!< document blocks of water shapes (BSWaterShaderProperty)
 	bool stopped = false;                         //!< the budget stopped it

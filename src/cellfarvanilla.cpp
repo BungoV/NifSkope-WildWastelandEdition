@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 
 #include <algorithm>
 #include <array>
@@ -185,7 +186,8 @@ enum FvKind { FvTerrain, FvObjects };
 
 //! One shape's triangles against the ring's region. Terrain: exact clip + seam snap; objects: by centre.
 void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect & outer, const FvRect & cut,
-	const FvRect & ours, const std::function<bool( float, float, float * )> & landZ, WwFarVanRing & ring )
+	const FvRect & ours, const std::function<bool( float, float, float * )> & landZ, WwFarVanRing & ring,
+	int skirt )   // 0 none (water, objects), 1 the cut and ours lines, 2 also the ring's own rim
 {
 	const quint32 nv = src.get<quint32>( iS, "Num Vertices" );
 	const QModelIndex iVD = src.getIndex( iS, "Vertex Data" );
@@ -264,6 +266,14 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 	}
 	QVector<Triangle> out;
 	bool changed = false;
+	/* FINALFIX: one vertex per clip point. Two triangles sharing an edge each cut it where a clip line
+	 * crosses it, from their own barycentrics -- a float apart, and the hairline between them showed the clear
+	 * colour (single-pixel holes in the sky census of the Vanilla top view). Welded on a 1/8-unit lattice. */
+	QHash<quint64, quint16> weld;
+	auto weldKey = []( const Vector3 & p ) {
+		return ( quint64( quint32( qint32( std::lround( p[0] * 8.0f ) ) ) ) << 32 )
+			| quint64( quint32( qint32( std::lround( p[1] * 8.0f ) ) ) );
+	};
 	for ( const Triangle & t : tris ) {
 		const quint16 id[3] = { t.v1(), t.v2(), t.v3() };
 		if ( id[0] >= nv || id[1] >= nv || id[2] >= nv )
@@ -320,35 +330,61 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 				o.c = V[id[0]].c * c.b[0] + V[id[1]].c * c.b[1] + V[id[2]].c * c.b[2];
 				o.n.normalize();
 				o.t.normalize();
+				Vector3 wo = xf * o.p;
+				/* FINALFIX: a clip point on a cell line (every clip line is one: the block, our chunks, the ring)
+				 * lands on the line exactly. From barycentrics it sat a float off, so where two chunks' cut edges
+				 * meet the LAND (x -16 on the block's north and south edges) each chunk had its own corner -- the
+				 * 2 px pinholes of the Vanilla top view (sky census, 10-06 run8). */
+				if ( xf.scale > 0.0f ) {
+					bool moved = false;
+					for ( int a = 0; a < 2; a++ ) {
+						const float line = std::round( wo[a] / kFvCell ) * kFvCell;
+						if ( wo[a] != line && std::fabs( wo[a] - line ) < 0.5f ) {
+							wo[a] = line;
+							moved = true;
+						}
+					}
+					if ( moved )
+						o.p = xf.inverted() * wo;
+				}
+				const quint64 wk = weldKey( wo );
+				const auto hit = weld.constFind( wk );
+				if ( hit != weld.constEnd() && std::fabs( w[hit.value()][2] - wo[2] ) < 1.0f ) {
+					ids.push_back( hit.value() );
+					continue;
+				}
 				if ( V.size() >= 65535 )
 					break;
 				V.push_back( o );
-				w.push_back( xf * o.p );
+				w.push_back( wo );
 				ids.push_back( quint16( V.size() - 1 ) );
+				weld.insert( wk, ids.back() );
 			}
 			for ( size_t k = 1; k + 1 < ids.size(); k++ ) {
+				if ( ids[0] == ids[k] || ids[k] == ids[k + 1] || ids[0] == ids[k + 1] )
+					continue;
 				out << Triangle( ids[0], ids[k], ids[k + 1] );
 				ring.clipTris++;
 			}
 		}
 	}
 	ring.terrainTris += out.size();
-	if ( !changed )
-		return;
+
+	const bool upright = std::fabs( xf.rotation( 0, 0 ) - 1.0f ) < 1e-4f && std::fabs( xf.rotation( 1, 1 ) - 1.0f ) < 1e-4f
+		&& std::fabs( xf.rotation( 2, 2 ) - 1.0f ) < 1e-4f && xf.scale > 0.0f;
+	auto onEdge = [&]( const FvRect & r, float x, float y ) {
+		if ( r.empty() )
+			return false;
+		const float e = 0.5f;
+		const bool inX = x >= r.x0 - e && x <= r.x1 + e, inY = y >= r.y0 - e && y <= r.y1 + e;
+		return ( inY && ( std::fabs( x - r.x0 ) < e || std::fabs( x - r.x1 ) < e ) )
+			|| ( inX && ( std::fabs( y - r.y0 ) < e || std::fabs( y - r.y1 ) < e ) );
+	};
 
 	/* THE SEAM: every vertex on a clip line (the footprint's edge, the cut's, our coverage's) to the LAND's
 	 * height there -- the line our ring's or the block's edge stands on */
-	const bool upright = std::fabs( xf.rotation( 0, 0 ) - 1.0f ) < 1e-4f && std::fabs( xf.rotation( 1, 1 ) - 1.0f ) < 1e-4f
-		&& std::fabs( xf.rotation( 2, 2 ) - 1.0f ) < 1e-4f && xf.scale > 0.0f;
-	if ( upright && landZ ) {
-		auto onEdge = [&]( const FvRect & r, float x, float y ) {
-			if ( r.empty() )
-				return false;
-			const float e = 0.5f;
-			const bool inX = x >= r.x0 - e && x <= r.x1 + e, inY = y >= r.y0 - e && y <= r.y1 + e;
-			return ( inY && ( std::fabs( x - r.x0 ) < e || std::fabs( x - r.x1 ) < e ) )
-				|| ( inX && ( std::fabs( y - r.y0 ) < e || std::fabs( y - r.y1 ) < e ) );
-		};
+	std::vector<char> snappedV( V.size(), 0 );   // moved to the LAND by the seam below (the skirt reads it)
+	if ( changed && upright && landZ ) {
 		std::vector<char> used( V.size(), 0 );
 		for ( const Triangle & t : out )
 			used[t.v1()] = used[t.v2()] = used[t.v3()] = 1;
@@ -363,9 +399,114 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 				continue;
 			ring.snapMax = std::max( ring.snapMax, double( std::fabs( z - w[v][2] ) ) );
 			V[v].p[2] = ( z - xf.translation[2] ) / xf.scale;
+			snappedV[v] = std::fabs( z - w[v][2] ) > 0.5f;
 			ring.snapped++;
 		}
 	}
+
+	/* FINALFIX THE SKIRT: a clip line is a T-junction -- the LAND's 32 a cell, or the next ring's coarser
+	 * level, bends between this chunk's edge vertices, and the sliver between the two edges showed the clear
+	 * colour (sky census on the Vanilla type: cracks along the block edge, top 13 px, and along ring edges).
+	 * Every open edge lying on a clip line gets a wall, both faces: on the LAND (where landZ answers) from
+	 * the higher of the two edges down past the lower, sampled at the LAND's rate; elsewhere straight down,
+	 * deep enough for the next level's step. The wall's foot leans 2 units to the kept side so it never
+	 * reads as ground over the cut. The outermost ring's rim gets none (nothing lies beyond it). */
+	const bool skirtOuter = skirt >= 2;
+	if ( skirt > 0 && upright && !out.isEmpty() ) {
+		QHash<quint32, int> uses;
+		auto key = []( quint16 a, quint16 b ) { return a < b ? ( quint32( a ) << 16 ) | b : ( quint32( b ) << 16 ) | a; };
+		for ( const Triangle & t : out ) {
+			uses[key( t.v1(), t.v2() )]++;
+			uses[key( t.v2(), t.v3() )]++;
+			uses[key( t.v3(), t.v1() )]++;
+		}
+		const float depth = 512.0f + 128.0f * float( std::max( 1, ring.level ) );
+		const float sLand = kFvCell / 32.0f;
+		auto clipLine = [&]( float x, float y ) {
+			return onEdge( cut, x, y ) || onEdge( ours, x, y ) || ( skirtOuter && onEdge( outer, x, y ) );
+		};
+		QVector<Triangle> walls;
+		const QVector<Triangle> base = out;
+		for ( const Triangle & t : base ) {
+			const quint16 id[3] = { t.v1(), t.v2(), t.v3() };
+			for ( int k = 0; k < 3; k++ ) {
+				const quint16 a = id[k], b = id[( k + 1 ) % 3], c = id[( k + 2 ) % 3];
+				if ( uses.value( key( a, b ) ) != 1 )
+					continue;
+				const Vector3 wa = xf * V[a].p, wb = xf * V[b].p, wc = xf * V[c].p;
+				const float dx = wb[0] - wa[0], dy = wb[1] - wa[1];
+				const float len = std::sqrt( dx * dx + dy * dy );
+				if ( len < 1.0f || ( std::fabs( dx ) > 0.5f && std::fabs( dy ) > 0.5f ) )
+					continue;   // a clip line is axis-aligned
+				/* FINALFIX: and a chunk's own open edge (a seam with the next chunk) that leaves a snapped
+				 * corner: the snap lifted or dropped that corner to the LAND, the neighbour's seam edge runs to
+				 * its own next vertex, and the tear between the two edges showed sky through the slanted
+				 * rays of the Vanilla top view (2 px at x -16 beside the block, census 10-06). */
+				const bool tear = ( size_t( a ) < snappedV.size() && snappedV[a] ) || ( size_t( b ) < snappedV.size() && snappedV[b] );
+				if ( !tear && ( !clipLine( wa[0], wa[1] ) || !clipLine( wb[0], wb[1] ) ) )
+					continue;
+				// the kept side: toward the triangle's third corner, across the edge
+				float nx = -dy / len, ny = dx / len;
+				/* FINALFIX: the kept side from the clip rects first, the third corner only when they cannot tell
+				 * -- a clipped sliver's third corner can lie on (or a float hair across) the line, and its wall
+				 * then leaned INTO the cut (census g13: a 16-cell wall of commonwealth.16.-16.-16 counted as
+				 * vanilla over ours, all 2048 of its triangles). */
+				const float mx = 0.5f * ( wa[0] + wb[0] ), my = 0.5f * ( wa[1] + wb[1] );
+				auto removed = [&]( float px, float py ) {
+					return cut.has( px, py ) || ours.has( px, py ) || ( skirtOuter && !outer.has( px, py ) );
+				};
+				const bool goneP = removed( mx + 4.0f * nx, my + 4.0f * ny ), goneN = removed( mx - 4.0f * nx, my - 4.0f * ny );
+				if ( goneP != goneN ? goneP : ( wc[0] - wa[0] ) * nx + ( wc[1] - wa[1] ) * ny < 0.0f ) {
+					nx = -nx;
+					ny = -ny;
+				}
+				float z0 = 0.0f;
+				const bool land = landZ && landZ( 0.5f * ( wa[0] + wb[0] ), 0.5f * ( wa[1] + wb[1] ), &z0 );
+				const int steps = land ? std::max( 1, int( std::ceil( len / sLand - 0.01f ) ) ) : 1;
+				if ( V.size() + size_t( 2 * ( steps + 1 ) ) >= 65535 )
+					break;
+				std::vector<quint16> top, foot;
+				for ( int s = 0; s <= steps; s++ ) {
+					const float f = float( s ) / float( steps );
+					FvVert o;
+					o.p = V[a].p * ( 1.0f - f ) + V[b].p * f;
+					o.uv = V[a].uv * ( 1.0f - f ) + V[b].uv * f;
+					o.n = V[a].n * ( 1.0f - f ) + V[b].n * f;
+					o.t = V[a].t * ( 1.0f - f ) + V[b].t * f;
+					o.c = V[a].c * ( 1.0f - f ) + V[b].c * f;
+					o.n.normalize();
+					o.t.normalize();
+					const Vector3 wp = xf * o.p;
+					float hi = wp[2], lo = wp[2], lz = 0.0f;
+					if ( land && landZ( wp[0], wp[1], &lz ) ) {
+						hi = std::max( hi, lz );
+						lo = std::min( lo, lz );
+					}
+					FvVert u = o, d = o;
+					u.p[2] = ( hi - xf.translation[2] ) / xf.scale;
+					d.p = Vector3( ( wp[0] + 2.0f * nx - xf.translation[0] ) / xf.scale,
+						( wp[1] + 2.0f * ny - xf.translation[1] ) / xf.scale, ( lo - depth - xf.translation[2] ) / xf.scale );
+					V.push_back( u );
+					top.push_back( quint16( V.size() - 1 ) );
+					V.push_back( d );
+					foot.push_back( quint16( V.size() - 1 ) );
+				}
+				for ( int s = 0; s < steps; s++ ) {
+					const quint16 t0 = top[size_t( s )], t1 = top[size_t( s + 1 )];
+					const quint16 f0 = foot[size_t( s )], f1 = foot[size_t( s + 1 )];
+					walls << Triangle( t0, t1, f1 ) << Triangle( t0, f1, f0 )
+						<< Triangle( t0, f1, t1 ) << Triangle( t0, f0, f1 );
+				}
+				ring.skirtTris += 4 * steps;
+			}
+		}
+		if ( !walls.isEmpty() ) {
+			out += walls;
+			changed = true;
+		}
+	}
+	if ( !changed )
+		return;
 
 	// rewritten in the cell view's own full-precision layout (the shader, textures and alpha stay)
 	BSVertexDesc nd( 0x0041B00000650407ULL );
@@ -421,9 +562,15 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 	}
 	const QString wsl = ws.toLower();
 	const Vector3 shiftV( shift[0], shift[1], shift[2] );
+	/* FINALFIX: two passes -- the terrain (.btr) of EVERY ring first, then the objects (.bto) ring by ring
+	 * under the budget. One pass let ring 1's objects spend the budget and the outer rings' ground was never
+	 * built (sky below the horizon). A chunk is counted in the terrain pass; "any" is its .btr. */
+	for ( int pass = 0; pass < 2; pass++ )
 	for ( WwFarVanRing & r : rings ) {
 		if ( r.x1 < r.x0 || r.y1 < r.y0 )
 			continue;
+		if ( pass == 1 )
+			r.stopped = false;
 		const FvRect outer = FvRect::cells( r.x0, r.y0, r.x1, r.y1 );
 		const FvRect cut = r.noCut ? FvRect() : FvRect::cells( r.cx0, r.cy0, r.cx1, r.cy1 );
 		const FvRect ours = r.noOursCut ? FvRect() : FvRect::cells( r.ux0, r.uy0, r.ux1, r.uy1 );
@@ -445,25 +592,39 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 				if ( need == 0 )
 					continue;
 				if ( mine == need && !r.noOursCut ) {
-					r.chunksOurs++;
+					if ( pass == 0 )
+						r.chunksOurs++;
 					continue;
 				}
 				if ( overBudget && overBudget() ) {
 					r.stopped = true;
-					r.notes << QStringLiteral( "NOT BUILT past chunk %1,%2: the far field's budget" ).arg( x ).arg( y );
+					r.notes << QStringLiteral( "%1 NOT BUILT past chunk %2,%3: the far field's budget" )
+						.arg( pass == 0 ? QStringLiteral( "terrain" ) : QStringLiteral( "objects" ) ).arg( x ).arg( y );
 					break;
 				}
 				const QString stem = QStringLiteral( "%1.%2.%3.%4" ).arg( wsl ).arg( L ).arg( x ).arg( y );
 				bool any = false;
-				for ( int kind = 0; kind < 2; kind++ ) {
+				for ( int kind = pass; kind == pass; kind++ ) {
 					const QString path = kind == 0
 						? QStringLiteral( "meshes/terrain/%1/%2.btr" ).arg( wsl, stem )
 						: QStringLiteral( "meshes/terrain/%1/objects/%2.bto" ).arg( wsl, stem );
 					NifModel src;
 					QString why;
-					if ( !fvLoad( path, src, &why ) )
+					if ( !fvLoad( path, src, &why ) ) {
+						if ( why != QLatin1String( "missing" ) )
+							r.notes << QStringLiteral( "%1: %2" ).arg( path, why );
 						continue;
+					}
 					any = true;
+					/* FINALFIX: a .btr is chunk-local (0..4096 at Scale L, the root at 0): the game places it at
+					 * the chunk's corner. Measured: Commonwealth.4.-20.24.btr 'Land' x 0..4096, Scale 4, no
+					 * Translation -- so every terrain triangle fell outside the ring and was dropped. */
+					if ( kind == 0 && src.getBlockCount() > 0 && src.blockInherits( src.getBlockIndex( 0 ), "NiAVObject" ) ) {
+						const QModelIndex i0 = src.getBlockIndex( 0 );
+						const Vector3 t0 = src.get<Vector3>( i0, "Translation" );
+						src.set<Vector3>( i0, "Translation",
+							t0 + Vector3( float( x ) * kFvCell, float( y ) * kFvCell, 0.0f ) );
+					}
 					// clip / filter, then flatten every node's transform into its shapes (shift taken off)
 					QList<int> shapes;
 					for ( int b = 0; b < src.getBlockCount(); b++ ) {
@@ -471,11 +632,24 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 						if ( src.blockInherits( i, "BSTriShape" ) )
 							shapes << b;
 					}
+					/* FINALFIX: a .btr's water is the shape 'WATER' on a BSEffectShaderProperty (measured,
+					 * Commonwealth.4.-20.20.btr: 'Land' + 'WATER'); drawn as the effect it was a white sheet.
+					 * It goes to the cell's water like a BSWaterShaderProperty shape, and its edge is never
+					 * snapped to the LAND (a sheet at the body's height). */
+					std::vector<bool> water( size_t( shapes.size() ), false );
+					for ( int k = 0; k < shapes.size(); k++ ) {
+						const QModelIndex iSh = src.getBlockIndex( src.getLink( src.getBlockIndex( shapes[k] ), "Shader Property" ) );
+						water[size_t( k )] = iSh.isValid() && ( src.isNiBlock( iSh, "BSWaterShaderProperty" )
+							|| ( kind == 0 && src.isNiBlock( iSh, "BSEffectShaderProperty" ) ) );
+					}
+					const std::function<bool( float, float, float * )> noLand;
 					std::vector<Transform> world;
-					for ( int b : shapes ) {
-						const QModelIndex i = src.getBlockIndex( b );
+					for ( int k = 0; k < shapes.size(); k++ ) {
+						const QModelIndex i = src.getBlockIndex( shapes[k] );
 						world.push_back( fvWorldOf( src, i ) );
-						fvShape( src, i, kind == 0 ? FvTerrain : FvObjects, outer, cut, ours, landZ, r );
+						fvShape( src, i, kind == 0 ? FvTerrain : FvObjects, outer, cut, ours,
+							water[size_t( k )] ? noLand : landZ, r,
+							kind != 0 || water[size_t( k )] ? 0 : ( &r == &rings.back() ? 1 : 2 ) );
 					}
 					for ( int b = 0; b < src.getBlockCount(); b++ ) {
 						const QModelIndex i = src.getBlockIndex( b );
@@ -487,10 +661,41 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 						t.translation = t.translation - shiftV;
 						t.writeBack( &src, src.getBlockIndex( shapes[k] ) );
 					}
-					std::vector<bool> water( size_t( shapes.size() ), false );
+					/* FINALFIX: the .btr 'Land' is Shader Type 18 (LOD landscape), which no cell-lit program
+					 * takes (fo4_default.prog: "Shader Type != 18"); it fell to default.prog / sk_msn.prog and
+					 * drew WHITE (WW_PROGRAM_CENSUS on g12_over_van: 91 default + 45 sk_msn, ours fo4_cellcsm).
+					 * It is drawn the way our own tiles are (btdterrain.cpp): the default type with the
+					 * model-space normal bit, no specular, LOD landscape in Shader Flags 2. */
 					for ( int k = 0; k < shapes.size(); k++ ) {
-						const QModelIndex iSh = src.getBlockIndex( src.getLink( src.getBlockIndex( shapes[k] ), "Shader Property" ) );
-						water[size_t( k )] = iSh.isValid() && src.isNiBlock( iSh, "BSWaterShaderProperty" );
+						if ( kind != 0 || water[size_t( k )] )
+							continue;
+						const QModelIndex iSh = src.getBlockIndex(
+							src.getLink( src.getBlockIndex( shapes[k] ), "Shader Property" ) );
+						if ( !iSh.isValid() || !src.isNiBlock( iSh, "BSLightingShaderProperty" )
+							|| src.get<quint32>( iSh, "Shader Type" ) != 18u )
+							continue;
+						src.set<quint32>( iSh, "Shader Type", 0u );
+						src.set<quint32>( iSh, "Shader Flags 1", ( src.get<quint32>( iSh, "Shader Flags 1" ) | 0x1000u ) & ~0x1u );
+						src.set<quint32>( iSh, "Shader Flags 2", src.get<quint32>( iSh, "Shader Flags 2" ) | 0x2u );
+						r.landRetyped++;
+					}
+					// the cell's water draws a lighting-shader shape (renderer.cpp, fo4_water.prog): the effect goes
+					for ( int k = 0; k < shapes.size(); k++ ) {
+						if ( !water[size_t( k )] )
+							continue;
+						const QModelIndex iShape = src.getBlockIndex( shapes[k] );
+						const QModelIndex iOld = src.getBlockIndex( src.getLink( iShape, "Shader Property" ) );
+						if ( !iOld.isValid() || !src.isNiBlock( iOld, "BSEffectShaderProperty" ) )
+							continue;
+						const QModelIndex iShader = src.insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
+						const QModelIndex iTextures = src.insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
+						src.setLink( iShader, "Texture Set", src.getBlockNumber( iTextures ) );
+						src.set<uint>( iTextures, "Num Textures", 10 );
+						src.updateArraySize( iTextures, "Textures" );
+						const QModelIndex iTexArray = src.getIndex( iTextures, "Textures" );
+						src.set<QString>( src.getIndex( iTexArray, 0 ), QStringLiteral( "#FFFFFFFF" ) );
+						src.set<QString>( src.getIndex( iTexArray, 1 ), QStringLiteral( "#FFFF8080" ) );
+						src.setLink( src.getBlockIndex( shapes[k] ), "Shader Property", src.getBlockNumber( iShader ) );
 					}
 					const QMap<qint32, qint32> map = src.moveAllNiBlocks( nif, false );
 					const int root = map.value( 0, -1 );
@@ -516,6 +721,8 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 						r.shapes++;
 					}
 				}
+				if ( pass == 1 )
+					continue;
 				if ( !any )
 					r.chunksNone++;
 				else if ( mine > 0 && !r.noOursCut )
