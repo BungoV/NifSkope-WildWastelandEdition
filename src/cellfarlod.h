@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 
 #include <QModelIndex>
 #include <QString>
+#include <QStringList>
 
 class EsmWorld;
 class NifModel;
@@ -49,6 +50,26 @@ enum WwCellFarLodType { WwFarLodAuto = 0, WwFarLodVanilla = 1, WwFarLodFo4cs = 2
 int cellFarLodTypePinned();                  //!< the setting: auto, vanilla or fo4cs
 void cellFarLodSetType( int type );
 int cellFarLodLastType();                    //!< what the last build resolved to (the drop-down shows it on auto)
+
+/*! lane FARLOD2: ONE STACK FOR NEAR AND FAR. The FO4CS far LOD was baked from a load order and a resource
+ *  stack, and the bake recorded both (`<ws>.lodb` beside the `.lodl`: one `plugin` line a plugin, one
+ *  `resource` line a root -- lane BAKEREC1). With the FO4CS type the near cells must load from the same stack,
+ *  or the block shows vanilla trees under a far field of the mod's. Called BEFORE the worldspace loads:
+ *  `adopt` = the near cells take `plugins` (comma list, the bake's order) and `resources` (the bake's stack,
+ *  last wins). `line` is the telemetry ("far lod: stack ..."), always set when the far field is wanted:
+ *  a match, an adoption with what moved, or a refusal with its reason. The Vanilla type never adopts.
+ *  WW_CELL_FARLOD_RED=ownstack keeps the caller's load order and says MISMATCH (the gate's red control). */
+struct CellFarStack
+{
+	bool adopt = false;
+	QString plugins;
+	QStringList resources;
+	QString line;
+};
+CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, const QString & nearPlugins );
+//! Make `resources` the session's resource stack (the generator's and the texture folders), as main.cpp
+//! does for WW_LODGEN_RESOURCES. Nothing when it already is.
+void cellFarLodAdoptResources( const QStringList & resources );
 
 /*! Appends the far field under `iRoot` (the caller holds updates and runs
  *  updateModel). `origin` is the cell scene's own origin (it is origin-relative).

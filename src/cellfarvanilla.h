@@ -64,4 +64,9 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 	std::vector<WwFarVanRing> & rings, const std::function<bool( float, float, float * )> & landZ,
 	const std::function<bool()> & overBudget, QString * error );
 
+//! lane FARLOD2: the game's .bto object triangles at `level` whose centroid is inside cells x0..x1, y0..y1 and
+//! outside hx0..hx1, hy0..hy1 -- counted, nothing appended. `chunksRead` = the chunk files found.
+qint64 wwFarVanObjectCensus( const QString & ws, int level, int x0, int y0, int x1, int y1,
+	int hx0, int hy0, int hx1, int hy1, int * chunksRead );
+
 #endif // CELLFARVANILLA_H

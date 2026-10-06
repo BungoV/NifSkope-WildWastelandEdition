@@ -736,3 +736,57 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 		error->clear();
 	return true;
 }
+
+/* lane FARLOD2: THE GAME'S OBJECT LOD IN A RING, COUNTED AND NOT DRAWN -- the census our rings are read against.
+ * The game's chunks at its level for the ring (meshes/terrain/<ws>/objects/<ws>.L.X.Y.bto), each triangle kept
+ * by its world centroid when it is inside the ring's rectangle and outside its hole: the same region our ring
+ * draws, so "ours 0 where the game has N" is a missing ring and not a different region. */
+qint64 wwFarVanObjectCensus( const QString & ws, int level, int x0, int y0, int x1, int y1,
+	int hx0, int hy0, int hx1, int hy1, int * chunksRead )
+{
+	const QString wsl = ws.toLower();
+	const FvRect outer = FvRect::cells( x0, y0, x1, y1 );
+	const FvRect hole = FvRect::cells( hx0, hy0, hx1, hy1 );
+	const int L = std::max( 1, level );
+	qint64 tris = 0;
+	int read = 0;
+	for ( int y = fvFloorDiv( y0, L ) * L; y <= y1; y += L )
+		for ( int x = fvFloorDiv( x0, L ) * L; x <= x1; x += L ) {
+			if ( x >= hx0 && x + L - 1 <= hx1 && y >= hy0 && y + L - 1 <= hy1 )
+				continue;   // wholly inside the hole
+			NifModel src;
+			QString why;
+			if ( !fvLoad( QStringLiteral( "meshes/terrain/%1/objects/%1.%2.%3.%4.bto" ).arg( wsl ).arg( L ).arg( x ).arg( y ),
+					src, &why ) )
+				continue;
+			read++;
+			for ( int b = 0; b < src.getBlockCount(); b++ ) {
+				const QModelIndex iS = src.getBlockIndex( b );
+				if ( !src.blockInherits( iS, "BSTriShape" ) )
+					continue;
+				const quint32 nv = src.get<quint32>( iS, "Num Vertices" );
+				const QModelIndex iVD = src.getIndex( iS, "Vertex Data" );
+				const QModelIndex iTri = src.getIndex( iS, "Triangles" );
+				if ( !nv || !iVD.isValid() || !iTri.isValid() )
+					continue;
+				const QVector<Triangle> tv = src.getArray<Triangle>( iTri );
+				const Transform xf = fvWorldOf( src, iS );
+				const bool fullPrec = ( ( src.get<BSVertexDesc>( iS, "Vertex Desc" ).Value() >> 44 ) & VF_FULLPREC ) != 0;
+				std::vector<Vector3> w( nv );
+				for ( quint32 v = 0; v < nv; v++ ) {
+					const QModelIndex row = src.index( int( v ), 0, iVD );
+					w[v] = xf * ( fullPrec ? src.get<Vector3>( row, "Vertex" ) : Vector3( src.get<HalfVector3>( row, "Vertex" ) ) );
+				}
+				for ( const Triangle & t : tv ) {
+					if ( t.v1() >= nv || t.v2() >= nv || t.v3() >= nv )
+						continue;
+					const Vector3 c = ( w[t.v1()] + w[t.v2()] + w[t.v3()] ) / 3.0f;
+					if ( outer.has( c[0], c[1] ) && !hole.has( c[0], c[1] ) )
+						tris++;
+				}
+			}
+		}
+	if ( chunksRead )
+		*chunksRead = read;
+	return tris;
+}

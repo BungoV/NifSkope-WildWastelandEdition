@@ -1512,6 +1512,24 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	CellSpeed::begin();   // lane SPEED1
 	cellMeshClear( nif );
 
+	/* lane FARLOD2: ONE STACK FOR NEAR AND FAR (cellfarlod.h). With the FO4CS far LOD the near cells load the
+	 * load order and resources the far LOD was baked from (its .lodb record), so a mod's trees are the mod's
+	 * trees on both sides of the block edge. Decided before the worldspace loads; the line goes in the notes. */
+	QString farStackNote;
+	if ( !spec.interior && cellFarLodWanted() ) {
+		QString preRoot = spec.dataRoot;
+		if ( preRoot.isEmpty() && !lodgenResourceSearchPaths().isEmpty() )
+			preRoot = lodgenResourceSearchPaths().first();
+		QStringList preSearched;
+		const CellFarStack fs = cellFarLodStackFor( spec.world, cellFarLodl( spec.world, preRoot, preSearched ), spec.plugins );
+		farStackNote = QStringLiteral( "  " ) + fs.line + QLatin1Char( '\n' );
+		qInfo().noquote() << fs.line;
+		if ( fs.adopt ) {
+			spec.plugins = fs.plugins;
+			cellFarLodAdoptResources( fs.resources );
+		}
+	}
+
 	// ---- the worldspace, or (lane PRTP1) one interior cell
 	EsmWorld world;
 	QString loadError;
@@ -4710,7 +4728,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	if ( !spec.interior && cellFarLodWanted() ) {
 		QStringList farSearched;
 		const QString farLodl = cellFarLodl( spec.world, dataRoot, farSearched );
-		farLodNotes = cellFarLodAppend( nif, iRoot, world, spec.world, spec.cx, spec.cy, spec.n, farLodl, origin );
+		farLodNotes = farStackNote + cellFarLodAppend( nif, iRoot, world, spec.world, spec.cx, spec.cy, spec.n, farLodl, origin );
 		CellSpeed::mark( "far LOD appended" );
 	}
 

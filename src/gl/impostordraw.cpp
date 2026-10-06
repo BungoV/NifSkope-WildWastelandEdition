@@ -19,7 +19,11 @@ BSD License - see nifskope.h
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
+#include <QOpenGLContext>
 #include <QTextStream>
+
+#include <gli.hpp>
 
 #include <cmath>
 
@@ -94,15 +98,107 @@ Vector3 eyeWorld( const Scene * scene )
 	return e;
 }
 
+/*! ONE LAYER OF A `cardArray`'s SHEETS AS A 2D TEXTURE (lane FARLOD2).
+ *
+ *  A cardArray's sheets are DX10 texture arrays (`legacy.256x1024` holds 8
+ *  layers), and the texture cache cannot serve one: `GLI_create_texture`
+ *  handles 2D and cube targets only, and the sheet's game path
+ *  ("data\FO4CSLOD\...") is not a `textures/` name the stack can answer. So the
+ *  far LOD's atlas-served cards loaded and then drew 0 -- every card refused at
+ *  "the colour sheet did not bind". The shaders sample `sampler2D`, so the
+ *  layer the set names is uploaded on its own as a 2D texture with its whole
+ *  stored mip chain (the shader's `cardMipCap` still caps it): the same texels
+ *  the game samples from that layer, nothing resampled.
+ *
+ *  Cached per GL context, file and layer -- a refusal too, so 19,705 cards a
+ *  frame do not re-read a file that failed once. */
+GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QString * err )
+{
+	struct Entry { GLuint id = 0; QString err; };
+	static QHash< QString, Entry > cache;
+	const QString key = QStringLiteral( "%1|%2|%3" )
+			.arg( quintptr( QOpenGLContext::currentContext() ) ).arg( file.toLower() ).arg( layer );
+	const auto it = cache.constFind( key );
+	if ( it != cache.constEnd() ) {
+		if ( err )
+			*err = it->err;
+		return it->id;
+	}
+	Entry e;
+	do {
+		QFile f( file );
+		if ( !f.open( QIODevice::ReadOnly ) ) {
+			e.err = QStringLiteral( "cannot open %1" ).arg( file );
+			break;
+		}
+		const QByteArray bytes = f.readAll();
+		gli::texture t = gli::load_dds( bytes.constData(), std::size_t( bytes.size() ) );
+		if ( t.empty() ) {
+			e.err = QStringLiteral( "%1 is not a DDS this build reads" ).arg( file );
+			break;
+		}
+		if ( layer < 0 || std::size_t( layer ) >= t.layers() || t.faces() != 1 ) {
+			e.err = QStringLiteral( "%1 has %2 layers and %3 faces, layer %4 asked for" )
+					.arg( file ).arg( t.layers() ).arg( t.faces() ).arg( layer );
+			break;
+		}
+		gli::gl glp( gli::gl::PROFILE_GL33 );
+		const gli::gl::format fmt = glp.translate( t.format(), t.swizzles() );
+		auto * fn = scene->renderer->fn;
+		fn->glGenTextures( 1, &e.id );
+		fn->glBindTexture( GL_TEXTURE_2D, e.id );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0 );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, GLint( t.levels() ) - 1 );
+		const bool one = gli::component_count( t.format() ) == 1;
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, fmt.Swizzles[0] );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, one ? fmt.Swizzles[0] : fmt.Swizzles[1] );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, one ? fmt.Swizzles[0] : fmt.Swizzles[2] );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, one ? GLint( GL_ONE ) : fmt.Swizzles[3] );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		for ( std::size_t level = 0; level < t.levels(); level++ ) {
+			const auto ext = t.extent( level );
+			if ( gli::is_compressed( t.format() ) )
+				fn->glCompressedTexImage2D( GL_TEXTURE_2D, GLint( level ), GLenum( fmt.Internal ), ext.x, ext.y, 0,
+						GLsizei( t.size( level ) ), t.data( std::size_t( layer ), 0, level ) );
+			else
+				fn->glTexImage2D( GL_TEXTURE_2D, GLint( level ), GLint( fmt.Internal ), ext.x, ext.y, 0,
+						GLenum( fmt.External ), GLenum( fmt.Type ), t.data( std::size_t( layer ), 0, level ) );
+		}
+	} while ( false );
+	cache.insert( key, e );
+	if ( err )
+		*err = e.err;
+	return e.id;
+}
+
 //! Bind one sheet to `unit` and tell the program. Returns false when the
 //! texture cache could not produce it, which the caller REPORTS.
+//! `layer` >= 0: the sheet is a cardArray's texture array (lane FARLOD2).
 bool bindSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog,
-				const char * uniform, const ImpostorSheet & sheet, int unit )
+				const char * uniform, const ImpostorSheet & sheet, int unit, int layer = -1 )
 {
 	const GLint loc = prog->uniLocation( uniform );
 	if ( loc < 0 )
 		return false;
 	scene->renderer->fn->glActiveTexture( GL_TEXTURE0 + GLenum( unit ) );
+
+	if ( layer >= 0 ) {
+		// the file itself: the sibling beside the .lodm, else an absolute resolved path
+		QString file = sheet.localPath;
+		if ( file.isEmpty() || !QFileInfo::exists( file ) )
+			file = ( !sheet.resolved.isEmpty() && QFileInfo( sheet.resolved ).isAbsolute() ) ? sheet.resolved : QString();
+		if ( file.isEmpty() )
+			return false;
+		const GLuint id = arrayLayerTexture( scene, file, layer, nullptr );
+		if ( !id )
+			return false;
+		scene->renderer->fn->glBindTexture( GL_TEXTURE_2D, id );
+		scene->renderer->fn->glUniform1i( loc, unit );
+		return true;
+	}
 
 	/* THE TEXTURE CACHE HAS NO ABSOLUTE-PATH ROUTE, so an absolute `resolved`
 	 * is not merely second choice -- it CANNOT succeed and is not asked first.
@@ -395,17 +491,23 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	}
 
 	// ---- the sheets ------------------------------------------------------
-	const bool haveColour = bindSheet( scene, prog, "ColourSheet", set.colour, 0 );
+	const bool haveColour = bindSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer );
 	wwImpostorTrace( "C colour bound" );
-	const bool haveNormal = bindSheet( scene, prog, "NormalSheet", set.normal, 1 );
+	const bool haveNormal = bindSheet( scene, prog, "NormalSheet", set.normal, 1, set.layer );
 	wwImpostorTrace( "D normal bound" );
-	const bool haveMask   = bindSheet( scene, prog, "MaskSheet",   set.mask,   2 );
-	const bool haveEmiss  = bindSheet( scene, prog, "EmissiveSheet", set.emissive, 3 );
+	const bool haveMask   = bindSheet( scene, prog, "MaskSheet",   set.mask,   2, set.layer );
+	const bool haveEmiss  = bindSheet( scene, prog, "EmissiveSheet", set.emissive, 3, set.layer );
 	wwImpostorTrace( "E aux bound" );
 
 	if ( !haveColour ) {
 		scene->renderer->stopProgram();
-		return refuse( QStringLiteral( "the colour sheet did not bind: %1"
+		QString arrayWhy;
+		if ( set.layer >= 0 )
+			arrayLayerTexture( scene, set.colour.localPath.isEmpty() ? set.colour.resolved : set.colour.localPath,
+					set.layer, &arrayWhy );
+		return refuse( set.layer >= 0
+				? QStringLiteral( "the colour sheet's array layer %1 did not bind: %2" ).arg( set.layer ).arg( arrayWhy )
+				: QStringLiteral( "the colour sheet did not bind: %1"
 				"  (a loose set outside a data folder is unreachable by the texture cache --"
 				" see ImpostorDraw::registerLooseSheets)" ).arg( set.colour.resolved ) );
 	}

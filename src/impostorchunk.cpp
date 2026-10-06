@@ -99,6 +99,18 @@ QString resolveLodm( NifModel * nif, const QString & chunkDir, const QString & g
 		if ( !t.isEmpty() && QFileInfo::exists( t ) )
 			return QFileInfo( t ).absoluteFilePath();
 	}
+	/* lane FARLOD2: a Data-rooted game path ("data\FO4CSLOD\Commonwealth\Objects\<atlas>.lodm", the C line's array
+	 * atlas) resolves against the Data root the chunk itself sits in: the chunk folder's ancestors, nearest first.
+	 * His FO4CSLOD is found through the mods folder, not the profile's stack, so the stack alone never has it. */
+	if ( rel.startsWith( QLatin1String( "Data/" ), Qt::CaseInsensitive ) ) {
+		const QString inData = rel.mid( 5 );
+		QDir up( chunkDir );
+		for ( int i = 0; i < 4 && up.cdUp(); i++ ) {
+			const QString t = up.filePath( inData );
+			if ( QFileInfo::exists( t ) )
+				return QFileInfo( t ).absoluteFilePath();
+		}
+	}
 	/* FINALFIX: the generator's resource stack (WW_LODGEN_RESOURCES / the LOD panel), each root taken as a
 	 * Data folder -- the far field's cards live where the chunks' authored game path says, under any root */
 	{
@@ -248,7 +260,18 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 		const QString key = p.c.lodm.toLower();
 		int at = s.lodmKeys.indexOf( key );
 		if ( at < 0 ) {
-			const QString path = resolveLodm( nif, s.chunkDir, p.c.lodm );
+			QString path = resolveLodm( nif, s.chunkDir, p.c.lodm );
+			/* lane FARLOD2: the C line names the model's own octahedral set AND the array atlas the same bake
+			 * wrote with the model's layer in it. An install that carries the atlas and not the per-model set
+			 * (his FO4CSLOD: 79 sets named, no Cards folder) draws the atlas layer -- the same bake's card --
+			 * and says which one served. WW_CELL_FARLOD_RED=noatlas keeps the old refusal. */
+			static const bool noAtlas = qgetenv( "WW_CELL_FARLOD_RED" ) == "noatlas";
+			if ( path.isEmpty() && !p.c.arrayLodm.isEmpty() && !noAtlas ) {
+				path = resolveLodm( nif, s.chunkDir, p.c.arrayLodm );
+				if ( !path.isEmpty() )
+					s.notes << QStringLiteral( "impostor chunk: %1 not installed -- served by the bake's array atlas %2 layer %3" )
+						.arg( p.c.lodm, QFileInfo( path ).fileName() ).arg( p.c.layer );
+			}
 			ImpostorCardSet set;
 			if ( path.isEmpty() ) {
 				set.ok = false;
@@ -407,6 +430,7 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 	// the chunk state is borrowed per manifest and put back as it was found
 	const ChunkState saved = st();
 	int read = 0, kept = 0, inHole = 0, beyond = 0;
+	QSet<QString> said;   // lane FARLOD2: a set's note once, not once a chunk
 	for ( const QString & chunk : chunkPaths ) {
 		const int got = arm( nif, chunk );
 		if ( got <= 0 ) {
@@ -457,9 +481,12 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 			F.cards.chunkDir = s.chunkDir;
 		if ( notes )
 			for ( const QString & n : std::as_const( s.notes ) )
-				if ( n.contains( QLatin1String( "refused" ) ) || n.contains( QLatin1String( "not found" ) )
-					|| n.contains( QLatin1String( "cannot" ) ) )
+				if ( ( n.contains( QLatin1String( "refused" ) ) || n.contains( QLatin1String( "not found" ) )
+					|| n.contains( QLatin1String( "cannot" ) ) || n.contains( QLatin1String( "served by" ) ) )
+					&& !said.contains( n ) ) {
+					said.insert( n );
 					*notes << n;
+				}
 	}
 	st() = saved;
 	if ( notes )
@@ -482,7 +509,8 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 				ImpostorDraw::registerLooseSheets( scene, set );
 	}
 	static int saidDrawn = -1, saidOut = -1;
-	int drawn = 0, outside = 0;
+	int drawn = 0, outside = 0, refused = 0;
+	QString firstWhy;	// lane FARLOD2: a card the drawer refuses says why, once (was thrown away)
 	/* THE CAMERA'S CULL (lane FARLOD1): a card whose bounding sphere is outside one of the four side planes
 	 * is not drawn, the game's per-object test (SUNCELL1's cellcull uses the same planes for the document's
 	 * shapes). Cards cast no sun shadow (they are no document shape), so no cascade asks for them.
@@ -532,14 +560,17 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		if ( ImpostorDraw::drawCard( scene, s.sets.at( p.setIndex ),
 				Vector3( p.world[0] - F.shift[0], p.world[1] - F.shift[1], p.world[2] - F.shift[2] ), o, &why ) )
 			drawn++;
+		else if ( refused++ == 0 )
+			firstWhy = QFileInfo( s.sets.at( p.setIndex ).lodmPath ).fileName() + QStringLiteral( ": " ) + why;
 	}
 	if ( drawn != saidDrawn || outside != saidOut ) {
 		saidDrawn = drawn;
 		saidOut = outside;
-		qInfo().noquote() << QStringLiteral( "far lod: drew %1 cards of %2 placed, %3 outside the camera%4" )
+		qInfo().noquote() << QStringLiteral( "far lod: drew %1 cards of %2 placed, %3 outside the camera%4%5" )
 			.arg( drawn ).arg( s.placed.size() ).arg( outside )
 			.arg( cull ? QString() : QStringLiteral( " (cull off%1)" )
-				.arg( qgetenv( "WW_CELL_FARLOD_RED" ) == "nocardcull" ? QStringLiteral( ", RED nocardcull" ) : QString() ) );
+				.arg( qgetenv( "WW_CELL_FARLOD_RED" ) == "nocardcull" ? QStringLiteral( ", RED nocardcull" ) : QString() ) )
+			.arg( refused ? QStringLiteral( ", %1 refused by the drawer (first: %2)" ).arg( refused ).arg( firstWhy ) : QString() );
 	}
 	return drawn;
 }

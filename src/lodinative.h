@@ -77,6 +77,9 @@ struct LodiSceneSpec
 	//! > 0: when the placements come to more triangles than this, nothing is written to the document
 	//! (LodiAppendCounts::overBudget; tris = what it would have been) -- the far field's memory budget
 	qint64 maxTris = 0;
+	/*! lane FARLOD2: the shapes keep their vertex and triangle arrays BESIDE the document (src/cellmesh.h)
+	 *  instead of as rows -- the far rings' representation. Ignored under WW_CELL_SPEED_RED=slow. */
+	bool sideMesh = false;
 };
 
 //! lane FARLOD1: what one append put in, counted at the push.

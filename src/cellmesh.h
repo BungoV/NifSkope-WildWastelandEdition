@@ -38,6 +38,8 @@ struct CellMesh
 	QVector<Color4> colors;        //!< always one per vertex; (0,0,0,1) when the shape has no color stream
 	QVector<Vector2> coords;
 	QVector<Triangle> triangles;
+	//! lane FARLOD2: the far objects' UV 2 (0, layer); empty = the shape has no UV 2 stream
+	QVector<float> uv2y;
 	bool withColour = false;       //!< the shape's vertex format carries the color stream
 };
 

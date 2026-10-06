@@ -68,6 +68,11 @@ void writeRows( NifModel * nif, const QModelIndex & iShape, const CellMesh & m )
 		nif->set<float>( row, "Bitangent X", m.bitangents[v][0] );
 		nif->set<float>( row, "Bitangent Y", m.bitangents[v][1] );
 		nif->set<float>( row, "Bitangent Z", m.bitangents[v][2] );
+		if ( v < m.uv2y.size() ) {   // lane FARLOD2: the far objects' array layer
+			const QModelIndex iUv2 = nif->getIndex( row, "UV 2" );
+			if ( iUv2.isValid() )
+				nif->set<HalfVector2>( row, "UV 2", HalfVector2( Vector2( 0.0f, m.uv2y[v] ) ) );
+		}
 		if ( m.withColour ) {
 			const Color4 & c = m.colors[v];
 			nif->set<ByteColor4>( row, "Vertex Colors", ByteColor4( FloatVector4( c[0], c[1], c[2], c[3] ) ) );

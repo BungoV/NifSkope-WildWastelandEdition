@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "lodifile.h"
 #include "lodofile.h"
 
+#include "cellmesh.h"
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 
@@ -198,7 +199,7 @@ void appendWireBox( std::vector<OutVert> & verts, std::vector<Triangle> & tris,
 /*! Write one bucket's geometry as one or more BSTriShapes under `iRoot`.
  *  Splits at MAX_SHAPE_VERTS, because a BSTriShape counts vertices in a u16. */
 bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
-	const Vector3 & origin, qint64 & shapesOut, qint64 & vertsOut, QString * error )
+	const Vector3 & origin, qint64 & shapesOut, qint64 & vertsOut, QString * error, bool side = false )
 {
 	auto fail = [error]( const QString & m ) {
 		if ( error )
@@ -275,10 +276,49 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			quint32( qint64( pv.size() ) * stride + qint64( pt.size() ) * 6 ) );
 
 		nif->setState( BaseModel::Processing );
-		QModelIndex iVertexData = nif->getIndex( iShape, "Vertex Data" );
-		nif->updateArraySize( iVertexData );
 		Vector3 lo( 3.4e38f, 3.4e38f, 3.4e38f ), hi( -3.4e38f, -3.4e38f, -3.4e38f );
-		for ( size_t v = 0; v < pv.size(); v++ ) {
+		/* lane FARLOD2: the far rings' objects keep their arrays BESIDE the document (src/cellmesh.h), the
+		 * cell view's own welded path. Rows cost about 1.7 kB a vertex; the arrays are what the scene reads.
+		 * The values are the ones the rows would have handed back, so the picture is the same picture. */
+		if ( side ) {
+			QSharedPointer<CellMesh> m( new CellMesh );
+			const int nv = int( pv.size() );
+			const bool col = b.withColour || b.libColour || b.sway;
+			m->withColour = col;
+			m->verts.resize( nv );
+			m->norms.resize( nv );
+			m->tangents.resize( nv );
+			m->bitangents.resize( nv );
+			m->coords.resize( nv );
+			m->colors.fill( Color4( 0.0f, 0.0f, 0.0f, 1.0f ), nv );
+			if ( b.layer >= 0 )
+				m->uv2y.resize( nv );
+			for ( int v = 0; v < nv; v++ ) {
+				const OutVert & o = pv[size_t( v )];
+				m->verts[v] = o.pos;
+				m->norms[v] = o.nrm;
+				m->tangents[v] = o.tan;
+				m->bitangents[v] = o.bit;
+				m->coords[v] = o.uv;
+				if ( b.layer >= 0 )
+					m->uv2y[v] = o.uv2y;
+				if ( col )
+					m->colors[v] = ByteColor4( FloatVector4( o.chan[0] * o.rgba[0], o.chan[1] * o.rgba[1],
+						o.chan[2] * o.rgba[2], b.sway ? o.sway : b.vertexAlpha ? o.rgba[3] : 1.0f ) );
+				for ( int k = 0; k < 3; k++ ) {
+					lo[k] = qMin( lo[k], o.pos[k] );
+					hi[k] = qMax( hi[k], o.pos[k] );
+				}
+			}
+			m->triangles.reserve( int( pt.size() ) );
+			for ( const Triangle & t : pt )
+				m->triangles.append( t );
+			cellMeshPut( nif, iShape, m );
+		}
+		QModelIndex iVertexData = side ? QModelIndex() : nif->getIndex( iShape, "Vertex Data" );
+		if ( !side )
+			nif->updateArraySize( iVertexData );
+		for ( size_t v = 0; !side && v < pv.size(); v++ ) {
 			QModelIndex row = nif->index( int( v ), 0, iVertexData );
 			const OutVert & o = pv[v];
 			nif->set<Vector3>( row, "Vertex", o.pos );
@@ -303,9 +343,9 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 				hi[k] = qMax( hi[k], o.pos[k] );
 			}
 		}
-		QModelIndex iTriangles = nif->getIndex( iShape, "Triangles" );
-		nif->updateArraySize( iTriangles );
-		{
+		QModelIndex iTriangles = side ? QModelIndex() : nif->getIndex( iShape, "Triangles" );
+		if ( !side ) {
+			nif->updateArraySize( iTriangles );
 			QVector<Triangle> qt;
 			qt.reserve( int( pt.size() ) );
 			for ( const Triangle & t : pt )
@@ -1156,6 +1196,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	const qint64 msRead = timer.elapsed();
 
 	qint64 shapes = 0, verts = 0;
+	const bool side = spec.sideMesh && cellMeshOn();   // lane FARLOD2
 	QList<quint32> keys = buckets.keys();
 	std::sort( keys.begin(), keys.end() );
 	if ( spec.maxTris > 0 ) {	// lane FARLOD1 (FINALFIX): the budget is checked BEFORE the document grows
@@ -1178,11 +1219,11 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	for ( quint32 key : keys ) {
 		bool ok = true;
 		for ( const Bucket & full : spilled.value( key ) ) {
-			ok = ok && emitBucket( nif, iRoot, full, shapeOrigin, shapes, verts, error );
+			ok = ok && emitBucket( nif, iRoot, full, shapeOrigin, shapes, verts, error, side );
 			cnt.tris += qint64( full.tris.size() );
 		}
 		cnt.tris += qint64( buckets[key].tris.size() );
-		if ( !ok || !emitBucket( nif, iRoot, buckets[key], shapeOrigin, shapes, verts, error ) ) {
+		if ( !ok || !emitBucket( nif, iRoot, buckets[key], shapeOrigin, shapes, verts, error, side ) ) {
 			if ( dump.device() ) {
 				dump.flush();
 				dumpFile.close();

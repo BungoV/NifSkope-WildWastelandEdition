@@ -11,7 +11,10 @@ BSD License - see nifskope.h
 #include "esmdata.h"
 #include "esmwater.h"
 #include "impostorchunk.h"
+#include "cellmesh.h"
 #include "lodinative.h"
+#include "lodgen.h"
+#include "gamemanager.h"
 #include "gl/cellhdr.h"
 #if __has_include( "gl/cellcull.h" )
 #include "gl/cellcull.h"   // lane SUNCELL1's culling, when merged
@@ -53,6 +56,10 @@ namespace
 {
 
 constexpr float kCell = 4096.0f;
+/* lane FARLOD2: what one far-object triangle costs when its ring keeps its arrays beside the document
+ * (src/cellmesh.h) instead of as rows. Rows were 2.4 KB a triangle (FINALFIX g3). MEASURED: see the
+ * "B a triangle measured" telemetry and notes/finalfix/farlod2.md; the largest ring's figure, rounded up. */
+constexpr double kSideBytesPerTri = 560.0;	// measured 10-06 a1: 545 / 238 / 498 / 81 B rings 0-3 (Sanctuary), largest rounded up
 
 //! What one cell document's far field is, for the draw (keyed by the document).
 struct FarDoc
@@ -190,17 +197,28 @@ QString farlod1CullRegister( NifModel * nif, int firstBlock )
 			continue;
 		if ( nif->get<quint32>( iB, "Flags" ) & 1u )
 			continue;
-		const QModelIndex iVD = nif->getIndex( iB, "Vertex Data" );
-		const QModelIndex iTri = nif->getIndex( iB, "Triangles" );
-		if ( !iVD.isValid() || !iTri.isValid() )
-			continue;
-		const bool fullPrec = ( ( nif->get<BSVertexDesc>( iB, "Vertex Desc" ).Value() >> 44 ) & VF_FULLPREC ) != 0;
-		const int nv = nif->rowCount( iVD );
-		std::vector<Vector3> p( size_t( std::max( nv, 0 ) ) );
-		for ( int v = 0; v < nv; v++ )
-			p[size_t( v )] = fullPrec ? nif->get<Vector3>( nif->index( v, 0, iVD ), "Vertex" )
-				: Vector3( nif->get<HalfVector3>( nif->index( v, 0, iVD ), "Vertex" ) );
-		const QVector<Triangle> tris = nif->getArray<Triangle>( iTri );
+		/* lane FARLOD2: a far object shape keeps its arrays beside the document (src/cellmesh.h); read them there.
+		 * Looking its rows up by name would WRITE them (the cellmesh net) and undo the representation. */
+		int nv = 0;
+		std::vector<Vector3> p;
+		QVector<Triangle> tris;
+		if ( const QSharedPointer<CellMesh> cm = cellMeshFor( nif, iB ) ) {
+			nv = cm->verts.size();
+			p.assign( cm->verts.cbegin(), cm->verts.cend() );
+			tris = cm->triangles;
+		} else {
+			const QModelIndex iVD = nif->getIndex( iB, "Vertex Data" );
+			const QModelIndex iTri = nif->getIndex( iB, "Triangles" );
+			if ( !iVD.isValid() || !iTri.isValid() )
+				continue;
+			const bool fullPrec = ( ( nif->get<BSVertexDesc>( iB, "Vertex Desc" ).Value() >> 44 ) & VF_FULLPREC ) != 0;
+			nv = nif->rowCount( iVD );
+			p.resize( size_t( std::max( nv, 0 ) ) );
+			for ( int v = 0; v < nv; v++ )
+				p[size_t( v )] = fullPrec ? nif->get<Vector3>( nif->index( v, 0, iVD ), "Vertex" )
+					: Vector3( nif->get<HalfVector3>( nif->index( v, 0, iVD ), "Vertex" ) );
+			tris = nif->getArray<Triangle>( iTri );
+		}
 		std::vector<WwCullRun> runs;
 		Vector3 first, lo, hi;
 		std::vector<std::uint32_t> member;   // the triangles of the open run, for its radius
@@ -345,7 +363,13 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const float d1 = envFloat( "WW_CELL_FARLOD_L1", 90000.0f );
 	const float d2 = envFloat( "WW_CELL_FARLOD_L2", 110000.0f );
 	const float dMax = envFloat( "WW_CELL_FARLOD_MAX", 250000.0f );
-	const float treeDist = envFloat( "WW_CELL_FARLOD_TREE_DIST", 75000.0f );
+	/* lane FARLOD2: NO tree cut by default. fTreeLoadDistance is the FULL trees' reach; the game's tree LOD
+	 * lives inside the .bto and is drawn with the object LOD out to fBlockMaximumDistance (FARLOD1 measured:
+	 * FO4 has no .btt). The 75000 cut dropped 2558 cards at the FARLOD1 eye. WW_CELL_FARLOD_TREE_DIST=<units>
+	 * puts a cut back (the gate's red control and a measuring run); 0 = none. */
+	const float treeDist = std::max( 0.0f, envFloat( "WW_CELL_FARLOD_TREE_DIST", 0.0f ) );
+	const QString treeCut = treeDist > 0.0f ? QStringLiteral( "past %1" ).arg( double( treeDist ), 0, 'f', 0 )
+		: QStringLiteral( "cut (none: the game's reach)" );
 	auto cellsTo = []( float d ) { return int( std::ceil( d / kCell ) ); };
 
 	struct RingDef { int lod, sheetDim, reach, slot; };
@@ -900,7 +924,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	QSet<quint32> cardRefs;
 	int cards = 0;
 	if ( ours ) {
-		const int R = cellsTo( treeDist ) + 1;
+		const int R = cellsTo( treeDist > 0.0f ? treeDist : dMax ) + 1;
 		const int dim = 8;
 		QStringList chunks;
 		for ( int y = floorDiv( cy - R, dim ) * dim; y <= cy + R; y += dim )
@@ -920,6 +944,21 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	// ---- objects, ring by ring: the authored slot of each, the ring inside cut out
 	const QString lodi = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodi" ) );
 	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0;
+	// lane FARLOD2: per ring, for the census against the game's object LOD in the same region
+	std::vector<qint64> ringTris( rings.size(), 0 ), ringPlaced( rings.size(), 0 );
+	std::vector<QString> ringState( rings.size(), QStringLiteral( "not reached" ) );
+	std::vector<std::array<int, 8>> ringRegion( rings.size(), std::array<int, 8>{ { 0, 0, -1, -1, 0, 0, -1, -1 } } );
+	{	// every ring's rectangle and hole, whether or not its objects get built (the hole chain of the loop below)
+		int gx0 = bx0, gy0 = by0, gx1 = bx1, gy1 = by1;
+		for ( size_t i = 0; i < rings.size(); i++ ) {
+			if ( rings[i].built )
+				ringRegion[i] = { { rings[i].ox0, rings[i].oy0, rings[i].ox1, rings[i].oy1, gx0, gy0, gx1, gy1 } };
+			gx0 = foot[i][0];
+			gy0 = foot[i][1];
+			gx1 = foot[i][2];
+			gy1 = foot[i][3];
+		}
+	}
 	if ( !ours ) {
 		say( QStringLiteral( "far lod: objects ours off (type %1): the game's .bto only" ).arg( typeName ) );
 	} else if ( !QFileInfo( lodi ).isFile() ) {
@@ -940,6 +979,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			if ( wsR - ws0 > budgetMB ) {
 				say( QStringLiteral( "far lod: objects ring %1 NOT BUILT -- working set +%2 MB is past the far "
 					"field's budget of %3 MB" ).arg( int( i ) ).arg( wsR - ws0, 0, 'f', 0 ).arg( budgetMB, 0, 'f', 0 ) );
+				ringState[i] = QStringLiteral( "NOT BUILT (budget)" );
 				break;
 			}
 			LodiSceneSpec os;
@@ -960,7 +1000,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.shift[0] = shift[0];
 			os.shift[1] = shift[1];
 			os.shift[2] = shift[2];
-			os.dropTreesBeyond = treeDist;
+			os.dropTreesBeyond = treeDist;   // 0 = no cut (lane FARLOD2)
+			os.sideMesh = true;              // lane FARLOD2: arrays beside the document, not rows
 			os.dropX = ctrX;
 			os.dropY = ctrY;
 			os.sway = swayAmp() > 0.0f;
@@ -968,13 +1009,15 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			/* FINALFIX: the ring's triangles are counted before the document grows; a ring that would take the
 			 * far field past its budget is not written. Measured on the merged build (g3, Commonwealth -17,23):
 			 * ring 0 636345 tris +1514 MB, ring 1 1282884 tris +3131 MB -- 2.4 KB a triangle, rounded up. */
-			constexpr double kBytesPerTri = 2560.0;
+			const bool sideMesh = cellMeshOn();
+			const double kBytesPerTri = sideMesh ? kSideBytesPerTri : 2560.0;
 			const double leftMB = budgetMB - ( wsR - ws0 );
 			os.maxTris = std::max<qint64>( 1, qint64( leftMB * 1024.0 * 1024.0 / kBytesPerTri ) );
 			LodiAppendCounts oc;
 			QString oerr, onotes;
 			if ( !nifAppendLodiObjects( nif, iFar, lodi, os, &oerr, &onotes, &oc ) ) {
 				say( QStringLiteral( "far lod: objects ring %1 REFUSED -- %2" ).arg( int( i ) ).arg( oerr ) );
+				ringState[i] = QStringLiteral( "REFUSED" );
 				break;
 			}
 			if ( oc.overBudget ) {
@@ -982,15 +1025,22 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					"field past its budget of %4 MB (%5 MB left)" ).arg( int( i ) ).arg( oc.tris )
 					.arg( double( oc.tris ) * kBytesPerTri / ( 1024.0 * 1024.0 ), 0, 'f', 0 )
 					.arg( budgetMB, 0, 'f', 0 ).arg( leftMB, 0, 'f', 0 ) );
+				ringState[i] = QStringLiteral( "NOT BUILT (budget)" );
 				break;
 			}
 			double wsA = 0, pkA = 0;
 			memNow( wsA, pkA );
-			say( QStringLiteral( "far lod: objects ring %1 slot %2: %3 placed, %4 in the hole, %5 trees past %6, "
+			say( QStringLiteral( "far lod: objects ring %1 slot %2: %3 placed, %4 in the hole, %5 trees %6, "
 				"%7 drawn as cards, %8 tris, %9" ).arg( int( i ) ).arg( os.slot ).arg( oc.placed ).arg( oc.holeSkipped )
-				.arg( oc.treesDropped ).arg( double( treeDist ), 0, 'f', 0 ).arg( oc.refsSkipped ).arg( oc.tris )
-				.arg( QStringLiteral( "%1 sway verts, working set %2 -> %3 MB" ).arg( oc.swayVerts )
-					.arg( wsR, 0, 'f', 0 ).arg( wsA, 0, 'f', 0 ) ) );
+				.arg( oc.treesDropped ).arg( treeCut ).arg( oc.refsSkipped ).arg( oc.tris )
+				.arg( QStringLiteral( "%1 sway verts, working set %2 -> %3 MB (%4 B a triangle measured, %5 %6)" )
+					.arg( oc.swayVerts ).arg( wsR, 0, 'f', 0 ).arg( wsA, 0, 'f', 0 )
+					.arg( oc.tris > 0 ? ( wsA - wsR ) * 1024.0 * 1024.0 / double( oc.tris ) : 0.0, 0, 'f', 0 )
+					.arg( sideMesh ? QStringLiteral( "arrays beside the document" ) : QStringLiteral( "document rows" ) )
+					.arg( QStringLiteral( "estimate %1" ).arg( kBytesPerTri, 0, 'f', 0 ) ) ) );
+			ringTris[i] = oc.tris;
+			ringPlaced[i] = oc.placed;
+			ringState[i] = QStringLiteral( "built" );
 			oPlaced += oc.placed;
 			oTris += oc.tris;
 			oSway += oc.swayVerts;
@@ -1000,6 +1050,24 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			hy0 = foot[i][1];
 			hx1 = foot[i][2];
 			hy1 = foot[i][3];
+		}
+	}
+
+	/* lane FARLOD2: THE CENSUS. Every object ring against the game's own object LOD (.bto, the game's level for
+	 * that ring) over the same rectangle minus the same hole. A ring the game fills and we leave empty is the
+	 * defect this lane exists to end; the line says which by name. */
+	if ( ours && QFileInfo( lodi ).isFile() ) {
+		static const int kGameLevel[5] = { 4, 4, 8, 16, 32 };
+		for ( size_t i = 0; i < rings.size(); i++ ) {
+			const std::array<int, 8> & g = ringRegion[i];
+			int chunksRead = 0;
+			const qint64 game = g[2] < g[0] ? 0 : wwFarVanObjectCensus( ws, kGameLevel[std::min( i, size_t( 4 ) )],
+				g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], &chunksRead );
+			say( QStringLiteral( "far lod: census ring %1: ours %2 tris %3 placed (%4) | the game's .bto %5 tris from %6 chunks "
+				"at level %7, same region%8" ).arg( int( i ) ).arg( ringTris[i] ).arg( ringPlaced[i] ).arg( ringState[i] )
+				.arg( game ).arg( chunksRead ).arg( kGameLevel[std::min( i, size_t( 4 ) )] )
+				.arg( game > 0 && ringTris[i] == 0 ? QStringLiteral( " -- MISSING: the game draws objects here, we draw none" )
+					: QString() ) );
 		}
 	}
 
@@ -1061,6 +1129,98 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	for ( const QString & l : std::as_const( L ) )
 		out += QStringLiteral( "  " ) + l + QLatin1Char( '\n' );
 	return out;
+}
+
+CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, const QString & nearPlugins )
+{
+	CellFarStack r;
+	QString why;
+	const int type = farlod1TypeFor( !lodlPath.isEmpty(), &why );
+	const QStringList nearList = nearPlugins.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+	if ( type != WwFarLodFo4cs || lodlPath.isEmpty() ) {
+		r.line = QStringLiteral( "far lod: stack not checked -- type %1 (%2): the near cells keep their load order (%3 plugins)" )
+			.arg( type == WwFarLodVanilla ? QStringLiteral( "vanilla" ) : QStringLiteral( "fo4cs, no %1.lodl" ).arg( ws ) )
+			.arg( why ).arg( nearList.size() );
+		return r;
+	}
+	const QFileInfo li( lodlPath );
+	const QString lodb = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodb" ) );
+	LodgenLedger led;
+	QString lerr;
+	if ( !QFileInfo( lodb ).isFile() || !lodgenReadLedger( lodb, &led, &lerr ) || led.plugins.isEmpty() ) {
+		r.line = QStringLiteral( "far lod: stack MISMATCH UNKNOWN -- NOT adopted: the bake records no load order (%1%2); "
+			"the near cells keep theirs (%3 plugins)" ).arg( QDir::toNativeSeparators( lodb ) )
+			.arg( lerr.isEmpty() ? QString() : QStringLiteral( ": " ) + lerr ).arg( nearList.size() );
+		return r;
+	}
+	// what moved: names in order (cheap -- the byte hashes are the bake record's own business)
+	QStringList nearNames, bakeNames;
+	for ( const QString & p : nearList )
+		nearNames << QFileInfo( p.trimmed() ).fileName().toLower();
+	for ( const LodbPlugin & p : std::as_const( led.plugins ) )
+		bakeNames << p.name.toLower();
+	QStringList moved;
+	for ( const QString & n : bakeNames )
+		if ( !nearNames.contains( n ) )
+			moved << QStringLiteral( "%1 missing from the near cells" ).arg( n );
+	for ( const QString & n : nearNames )
+		if ( !bakeNames.contains( n ) )
+			moved << QStringLiteral( "%1 not in the bake" ).arg( n );
+	if ( moved.isEmpty() && nearNames != bakeNames )
+		moved << QStringLiteral( "the same plugins in another order" );
+	QStringList bakeRes;
+	for ( const LodbResource & res : std::as_const( led.resources ) )
+		bakeRes << res.path;
+	const QStringList nowRes = lodgenResources();
+	const bool resSame = bakeRes.isEmpty() || nowRes == bakeRes;
+	if ( moved.isEmpty() && resSame ) {
+		r.line = QStringLiteral( "far lod: stack match -- near and far from one load order: %1 plugins, %2 resource roots "
+			"(the bake's record %3)" ).arg( bakeNames.size() ).arg( nowRes.size() ).arg( QDir::toNativeSeparators( lodb ) );
+		return r;
+	}
+	const QString what = QStringLiteral( "the near cells load %1 plugins, the far LOD was baked from %2 (%3%4)%5" )
+		.arg( nearNames.size() ).arg( bakeNames.size() ).arg( moved.size() ).arg( moved.isEmpty() ? QString()
+			: QStringLiteral( " differences: " ) + QStringList( moved.mid( 0, 4 ) ).join( QStringLiteral( "; " ) )
+				+ ( moved.size() > 4 ? QStringLiteral( "; ..." ) : QString() ) )
+		.arg( resSame ? QString() : QStringLiteral( "; resource stack %1 roots now, %2 in the bake" ).arg( nowRes.size() ).arg( bakeRes.size() ) );
+	if ( qgetenv( "WW_CELL_FARLOD_RED" ) == "ownstack" ) {
+		r.line = QStringLiteral( "far lod: stack MISMATCH -- %1; NOT adopted (RED ownstack)" ).arg( what );
+		return r;
+	}
+	// refuse rather than half-adopt: every recorded plugin and every recorded folder must still be on disk
+	QStringList paths, missing;
+	for ( const LodbPlugin & p : std::as_const( led.plugins ) ) {
+		if ( !QFileInfo( p.path ).isFile() )
+			missing << QDir::toNativeSeparators( p.path );
+		paths << p.path;
+	}
+	for ( const LodbResource & res : std::as_const( led.resources ) )
+		if ( !QFileInfo::exists( res.path ) )
+			missing << QDir::toNativeSeparators( res.path );
+	if ( !missing.isEmpty() ) {
+		r.line = QStringLiteral( "far lod: stack MISMATCH -- %1; NOT adopted: %2 of the bake's files are gone (%3)" )
+			.arg( what ).arg( missing.size() ).arg( QStringList( missing.mid( 0, 3 ) ).join( QStringLiteral( "; " ) ) );
+		return r;
+	}
+	r.adopt = true;
+	r.plugins = paths.join( QLatin1Char( ',' ) );
+	r.resources = bakeRes;
+	r.line = QStringLiteral( "far lod: stack ADOPTED -- %1; the near cells now load the bake's %2 plugins and %3 resource "
+		"roots (%4)" ).arg( what ).arg( paths.size() ).arg( bakeRes.size() ).arg( QDir::toNativeSeparators( lodb ) );
+	return r;
+}
+
+void cellFarLodAdoptResources( const QStringList & resources )
+{
+	if ( resources.isEmpty() || lodgenResources() == resources )
+		return;
+	lodgenSetResources( resources );
+	QStringList view = lodgenResourceSearchPaths();
+	for ( const QString & f : Game::GameManager::folders( Game::FALLOUT_4 ) )
+		if ( !view.contains( f, Qt::CaseInsensitive ) )
+			view.append( f );
+	Game::GameManager::update_folders( Game::FALLOUT_4, view );
+	Game::GameManager::close_resources();
 }
 
 float wwCellFarLodReach( const Scene * scene )
