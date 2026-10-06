@@ -40,6 +40,9 @@ bool wwCellWaterOn();
 void wwCellWaterSetOn( bool on );
 //! With fo4_water.prog bound for `block`: the record, the sky, the textures. False = draw it the old way.
 bool wwCellWaterUniforms( Scene * scene, int block, int firstTextureUnit );
+//! WATERHDR1: the water just set up writes linear light into the cell view's HDR frame (the renderer marks its
+//! pixels for the one tone map, cellhdr.h). False for its probes and its reflection-ray pass (raw data).
+bool wwCellWaterWritesLinear();
 //! Lane WATER2: a water surface of this scene draws as water and its WATR's SSR flag is set (cellssr.h).
 bool wwCellWaterSsrWanted( Scene * scene );
 //! One census line: how many shapes and records this document registered.

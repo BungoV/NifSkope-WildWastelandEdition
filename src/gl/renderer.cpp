@@ -159,7 +159,9 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	} else if ( wwCellHdrActive() ) {
 		// lane HDR1: the linear frame (cellhdr.h). The stencil keeps who wrote a pixel last: 1 a cell program or a
 		// cell effect (linear light, tone-mapped once at the end), 2 any other program (its value as written)
-		const bool lin = program && ( wwIsCellProgramName( program->name ) || program->name == std::string_view( "fo4_effectcell.prog" ) );
+		// WATERHDR1: and the water, which writes linear light too (it was written back raw: the creek ~6/255)
+		const bool lin = program && ( wwIsCellProgramName( program->name ) || program->name == std::string_view( "fo4_effectcell.prog" )
+			|| ( program->name == std::string_view( "fo4_water.prog" ) && wwCellWaterWritesLinear() ) );
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( 0x03 );
 		glStencilFunc( GL_ALWAYS, lin ? 1 : 2, 0xFF );

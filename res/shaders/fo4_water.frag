@@ -34,7 +34,8 @@
  *   under the surface), 3 (cellIsOn, cellIsLinear, fogOn)
  *   11/12 the noise taps (t0.x, t0.y, t1.x)  13/14 (t1.y, t2.x, t2.y)  15/16 the SSR read (rgb)  17/18 (a, 0, 0)
  *   19/20/21 the three bytes (high first) of 24-bit fixed ( dist / 16384, along / 4096, vertical / 4096 )
- *   22/23/24 likewise ( the offset texel's along / 4096, vertical / 4096, 1 where the depth pass covered it ) */
+ *   22/23/24 likewise ( the offset texel's along / 4096, vertical / 4096, 1 where the depth pass covered it )
+ *   25/26 (WATERHDR1) the linear light the water writes ( lin / 4 )  27 the water's pixels, magenta */
 
 #define WW_FOG 1
 #define WW_CELLLIGHTS 1
@@ -329,6 +330,10 @@ void main()
 			o = fix24( vec3( dist / 16384.0, along / 4096.0, vert / 4096.0 ), waterProbe - 19 );
 		else if ( waterProbe >= 22 && waterProbe <= 24 )
 			o = fix24( vec3( offAlong / 4096.0, offVert / 4096.0, offHit ), waterProbe - 22 );
+		else if ( waterProbe == 25 || waterProbe == 26 )	// WATERHDR1: the linear light this pixel writes, / 4
+			o = waterProbe == 25 ? hi16( lin * 0.25 ) : lo16( lin * 0.25 );
+		else if ( waterProbe == 27 )	// WATERHDR1: the water's pixels, magenta
+			o = vec3( 1.0, 0.0, 1.0 );
 		fragColor = vec4( o, 1.0 );
 	}
 }

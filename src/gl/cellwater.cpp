@@ -1,5 +1,6 @@
 #include "cellwater.h"
 
+#include "cellhdr.h"
 #include "celllights.h"
 #include "cellssr.h"
 #include "lookdevstage.h"
@@ -41,7 +42,9 @@ struct WaterState
 	bool pinned = false;
 	int red = 0;		// 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 noshore, 32 nonormal,
 				// 64 nodepthfog, 128 nofar, 256 nossr, 512 fogunits (lane WATER2)
+				// 1024 hdrraw (WATERHDR1: the water's linear light written back untone-mapped, the old defect)
 	int probe = 0;
+	bool linear = false;	// WATERHDR1: the last water draw wrote linear light into the HDR frame
 	QString dump;
 	QSet<QString> missing;	// noise textures that did not bind (the census says so)
 	quint64 dumped = 0;
@@ -58,7 +61,7 @@ WaterState & st()
 		const QByteArray r = qgetenv( "WW_CELL_WATER_RED" );
 		s->red = r == "norefl" ? 1 : r == "nofresnel" ? 2 : r == "nosilt" ? 4 : r == "nospec" ? 8
 			: r == "noshore" ? 16 : r == "nonormal" ? 32 : r == "nodepthfog" ? 64 : r == "nofar" ? 128
-			: r == "nossr" ? 256 : r == "fogunits" ? 512 : 0;
+			: r == "nossr" ? 256 : r == "fogunits" ? 512 : r == "hdrraw" ? 1024 : 0;
 		s->probe = qEnvironmentVariableIntValue( "WW_CELL_WATER_PROBE" );
 		s->dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_WATER_DUMP" ) );
 	}
@@ -251,6 +254,10 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	prog->uni1i_l( prog->uniLocation( "waterDepth" ), unit++ );
 	prog->uni1b( "waterHaveDepth", haveDepth );
 	prog->uni1i( "waterSslr", rayPass ? 1 : 0 );
+	/* WATERHDR1: in the linear frame (cellhdr.h) the water writes linear light (fo4_water.frag, cellIsLinear) and
+	 * must be sorted with the cell programs, tone-mapped once at the resolve; its probes and its reflection-ray
+	 * pass write raw data and are written back as drawn */
+	s.linear = wwCellHdrActive() && s.probe == 0 && !rayPass && !( s.red & 1024 );
 	// lane WATER2: this frame's reflections (the game reads them only when its WATR's SSR flag is set)
 	unsigned int ssrRaw = 0, ssrFin = 0;
 	const bool ssrOn = !inSsr && b.rec.ssr && wwCellSsrWaterTextures( scene, ssrRaw, ssrFin );
@@ -275,6 +282,11 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		writeDump( *dit, sky, fromWeather, sun );
 	}
 	return true;
+}
+
+bool wwCellWaterWritesLinear()
+{
+	return st().linear;
 }
 
 QString wwCellWaterEcho( const void * nif )

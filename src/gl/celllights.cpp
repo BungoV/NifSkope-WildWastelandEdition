@@ -316,11 +316,15 @@ const WwCellLighting * isLighting( const void * nif, int * stamp = nullptr )
 			e.L.isLutPath = w.lutA;
 		}
 		e.stamp++;
-		std::fprintf( stderr, "cell imagespace: exterior=%s hdr=%g,%g,%g,%g,%g,%g,%g,%g,%g lut=%s%s\n",
+		// WATERHDR1: + the grade (cine, tint) and the LUT blend, the whole chain for a gate to rebuild
+		std::fprintf( stderr, "cell imagespace: exterior=%s hdr=%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g lut=%s%s"
+			" cine=%.9g,%.9g,%.9g tint=%.9g,%.9g,%.9g,%.9g lutT=%.9g\n",
 			e.L.isName.toLocal8Bit().constData(), double( w.hdr[0] ), double( w.hdr[1] ), double( w.hdr[2] ),
 			double( w.hdr[3] ), double( w.hdr[4] ), double( w.hdr[5] ), double( w.hdr[6] ), double( w.hdr[7] ),
 			double( w.hdr[8] ), e.L.isLutPath.isEmpty() ? "none" : e.L.isLutPath.toLocal8Bit().constData(),
-			( !w.lutA.isEmpty() && !gotA ) ? " (LUT NOT FOUND)" : "" );
+			( !w.lutA.isEmpty() && !gotA ) ? " (LUT NOT FOUND)" : "", double( w.cine[0] ), double( w.cine[1] ),
+			double( w.cine[2] ), double( w.tint[0] ), double( w.tint[1] ), double( w.tint[2] ), double( w.tint[3] ),
+			double( ( gotA && gotB ) ? w.t : 0.0f ) );
 	}
 	if ( stamp )
 		*stamp = e.stamp;
