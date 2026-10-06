@@ -4383,6 +4383,25 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				if ( qEnvironmentVariableIsSet( "WW_CELL_PROBE_BACKMAX" ) )
 					bs.backMax = qEnvironmentVariable( "WW_CELL_PROBE_BACKMAX" ).toFloat();
 				bs.backDump = qEnvironmentVariable( "WW_CELL_PROBE_BACKDUMP" );
+				bs.waterDump = qEnvironmentVariable( "WW_CELL_WATER_BAKEDUMP" );   // lane WATER1
+				for ( const QString & q : qEnvironmentVariable( "WW_CELL_WATER_BAKEDUMP_PROBES" ).split( ';', Qt::SkipEmptyParts ) ) {
+					const QStringList c = q.split( ',' );
+					if ( c.size() != 3 )
+						continue;
+					int best = -1;
+					double bd = 1e300;
+					for ( size_t i = 0; i < pr.probes.size(); i++ ) {
+						double dd = 0;
+						for ( int k = 0; k < 3; k++ )
+							dd += std::pow( double( pr.probes[i].pos[k] ) - c[k].toDouble(), 2 );
+						if ( dd < bd ) {
+							bd = dd;
+							best = int( i );
+						}
+					}
+					if ( best >= 0 )
+						bs.waterDumpProbes.push_back( best );
+				}
 				// lane SMOOTHN1: the most batches a noisy probe takes (1 = the base set alone: the gate's pin)
 				if ( qEnvironmentVariableIntValue( "WW_CELL_PROBE_BAKE_ADAPT" ) > 0 )
 					bs.adaptMax = qEnvironmentVariableIntValue( "WW_CELL_PROBE_BAKE_ADAPT" );

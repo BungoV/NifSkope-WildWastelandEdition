@@ -713,7 +713,13 @@ void main()
 	 * is this pass's SHARE of the engine's weighted sum: an opaque base is scaled
 	 * by it, a layer is ADDED at it (SRC_ALPHA, ONE). Never the texture's alpha, and
 	 * the RAW vertex alpha: vertexColorOverride may force C.a to 1. */
-	if ( landSplat ) {
+	/* water2fix: never over the data passes -- the obscurance pass (20: normal + view depth) and the
+	 * reflections' scene pass (60/61): the ground wrote depth 1 there and the water SSR march died on it */
+	bool splatData = false;
+#ifdef WW_CELLLIGHTS
+	splatData = cellOn && ( cellProbe == 20 || cellProbe == 60 || cellProbe == 61 );
+#endif
+	if ( landSplat && !splatData ) {
 		if ( ( alphaFlags & 8 ) != 0 )
 			fragColor.a = clamp( rawVertexAlpha, 0.0, 1.0 );
 		else

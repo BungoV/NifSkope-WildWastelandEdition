@@ -306,6 +306,10 @@ struct Chunk
 	qint64 rays = 0;                         // lane SMOOTHN1: rays cast in pass 2 (the base set plus the extra batches)
 	int raised = 0, multMax = 1;             // lane SMOOTHN1: probes given extra batches; the largest multiple
 	double hitW = 0, offW = 0, cornerW = 0;   // lane SIDES6 measure: ray weight on a surfel; > 45 deg off it; on a corner
+	qint64 waterRays = 0, waterMirrorHits = 0, waterMirrorSky = 0;   // lane WATER1: rays split; their mirror legs
+	int waterUnder = 0;                      // lane WATER1: probes under the water
+	double waterReflW = 0;                   // lane WATER1: the sphere the mirror legs took
+	QString waterDump;                       // lane WATER1: the gate's rays (spec.waterDumpProbes)
 };
 
 } // namespace
@@ -344,6 +348,16 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	R.decalTris = decalOn ? int( soup.decal.size() / 9 ) : 0;
 	const bool glowOn = !soup.glow.empty();   // lane EMISSIVEGI1: no glowing triangle = every byte as before
 	R.emitTris = int( soup.glow.tris.size() );
+	/* lane WATER1: the water surfaces (v4 only: v3 is FO4CS's file exactly). Reds: "water" bakes as if no water,
+	 * "waterfog" drops the underwater fog, "waterfresnel" keeps F at F0 (no angle) */
+	bool waterOn = v4 && spec.red != QLatin1String( "water" ) && !soup.water.empty()
+		&& soup.waterKind.size() * 9 == soup.water.size() && !soup.waterTypes.empty();
+	for ( size_t i = 0; waterOn && i < soup.waterKind.size(); i++ )
+		waterOn = soup.waterKind[i] < soup.waterTypes.size();
+	const bool redWaterFog = spec.red == QLatin1String( "waterfog" );
+	const bool redWaterFresnel = spec.red == QLatin1String( "waterfresnel" );
+	R.waterTris = waterOn ? int( soup.water.size() / 9 ) : 0;
+	R.waterTypes = waterOn ? int( soup.waterTypes.size() ) : 0;
 	R.doors = int( soup.doors.size() );
 	// lane CAPTURE1: the albedo way (tri = today; hit and cube need the soup's per-triangle material)
 	const bool matOk = albKnown && qint64( soup.mat.size() ) == soup.triCount();
@@ -400,6 +414,16 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			gbvh.t[i + 2] = soup.glass[i + 2];
 		}
 		gbvh.build();
+	}
+	probebvh::Bvh wbvh;   // lane WATER1: the water in its own tree
+	if ( waterOn ) {
+		wbvh.t.resize( soup.water.size() );
+		for ( size_t i = 0; i < soup.water.size(); i += 3 ) {
+			wbvh.t[i + 0] = float( double( soup.water[i + 0] ) - O[0] );
+			wbvh.t[i + 1] = float( double( soup.water[i + 1] ) - O[1] );
+			wbvh.t[i + 2] = soup.water[i + 2];
+		}
+		wbvh.build();
 	}
 	probebvh::Bvh dbvh;   // lane GICAL1: the decals in their own tree
 	if ( decalOn ) {
@@ -879,6 +903,72 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		return best;
 	};
 
+	/* lane WATER1: THE WATER SPLIT. A ray that crosses a water surface (soup.water, its own tree: it stops no
+	 * ray and holds no surfel) splits there. The Fresnel share F = F0 + (1 - F0)(1 - |cos|)^5 -- times the
+	 * record's Reflectivity from above, as the draw weighs its reflection by F x Reflectivity; from below the
+	 * draw mixes by F alone -- goes on along the mirror direction; the rest goes on to whatever the ray meets.
+	 * Every length a leg runs under the water passes the record's underwater fog read as a filter (the glass
+	 * rule, BAKE4): 1 - f (1 - uw), f = amount x sat( (L - near) / (far - near) ). A probe under the water (its
+	 * up ray meets the water before any surface) sees its legs up to the surface through the same fog. */
+	struct WaterHit { double s = 0; int kind = 0; bool above = false; double n[3] = { 0, 0, 1 }; };
+	auto waterFirst = [&]( const double o[3], const double * d, double tEnd, WaterHit & w ) -> bool {
+		double tw = 0;
+		int wt = -1;
+		if ( !waterOn || !( tEnd > 1.0e-3 ) || !wbvh.ray( o, d, tEnd, &tw, &wt ) || wt < 0 || !( tw > 1.0e-3 ) )
+			return false;
+		const float * p = &wbvh.t[size_t( wt ) * 9];
+		const double e1[3] = { double( p[3] ) - p[0], double( p[4] ) - p[1], double( p[5] ) - p[2] };
+		const double e2[3] = { double( p[6] ) - p[0], double( p[7] ) - p[1], double( p[8] ) - p[2] };
+		double n[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+		const double nl = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+		if ( !( nl > 0 ) )
+			return false;
+		const double sg = n[2] < 0 ? -1.0 / nl : 1.0 / nl;   // the surface faces up, whatever its winding
+		for ( int k = 0; k < 3; k++ )
+			w.n[k] = n[k] * sg;
+		w.s = tw;
+		w.kind = soup.waterKind[size_t( wt )];
+		w.above = d[0] * w.n[0] + d[1] * w.n[1] + d[2] * w.n[2] < 0;   // going down through it
+		return true;
+	};
+	auto waterFog = [&]( int kind, double L, double f[3] ) {
+		const ProbeSoup::WaterType & wt = soup.waterTypes[size_t( kind )];
+		const double span = std::max( double( wt.fogFar ) - wt.fogNear, 1.0e-3 );
+		const double a = std::clamp( double( wt.fogAmount ) * std::clamp( ( L - wt.fogNear ) / span, 0.0, 1.0 ), 0.0, 1.0 );
+		for ( int c = 0; c < 3; c++ )
+			f[c] = redWaterFog ? 1.0 : 1.0 - a * ( 1.0 - double( wt.uw[c] ) );
+	};
+	auto waterRefl = [&]( const WaterHit & w, const double * d ) -> double {
+		const ProbeSoup::WaterType & wt = soup.waterTypes[size_t( w.kind )];
+		const double c = std::fabs( d[0] * w.n[0] + d[1] * w.n[1] + d[2] * w.n[2] );
+		const double m = 1.0 - std::min( c, 1.0 );
+		const double F = redWaterFresnel ? double( wt.fresnel ) : wt.fresnel + ( 1.0 - wt.fresnel ) * m * m * m * m * m;
+		return std::clamp( w.above ? F * wt.reflectivity : F, 0.0, 1.0 );
+	};
+	// the mirror leg: from a hundredth past the surface, on the ray's own side
+	auto waterMirror = [&]( const double o[3], const double * d, const WaterHit & w, double ro[3], double rd[3] ) {
+		const double dn = d[0] * w.n[0] + d[1] * w.n[1] + d[2] * w.n[2];
+		for ( int k = 0; k < 3; k++ )
+			rd[k] = d[k] - 2.0 * dn * w.n[k];
+		for ( int k = 0; k < 3; k++ )
+			ro[k] = o[k] + d[k] * w.s + rd[k] * 0.01;
+	};
+	// a probe under the water: its up ray meets the water before any surface, going out through it
+	auto probeUnder = [&]( const double o[3], int * kind ) -> bool {
+		if ( !waterOn )
+			return false;
+		const double up[3] = { 0.0, 0.0, 1.0 };
+		WaterHit w;
+		if ( !waterFirst( o, up, double( spec.rayMax ), w ) || w.above )
+			return false;
+		double t = 0;
+		int tri = -1;
+		if ( bvh.ray( o, up, w.s, &t, &tri ) && tri >= 0 && t < w.s )
+			return false;
+		*kind = w.kind;
+		return true;
+	};
+
 	// pass 1: the surfels, from every probe's hits
 	auto surfelChunk = [&]( Chunk & ch ) {
 		for ( int pi = ch.first; pi < ch.first + ch.count; pi++ ) {
@@ -902,75 +992,93 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					ps[i & 7][oc] += val;
 					pc[i & 7][oc] += 1.0;
 				}
-				if ( !hitAny || !( t > 1.0e-3 ) )
-					continue;
-				float hw[3];
-				hitPoint( o, d, t, hw );
-				double n[3];
-				const int bin = binOf( tri, d, n );
-				if ( bin < 0 )
-					continue;
-				Bin & s = ch.surfels[keyFor( hw, cellS )].b[bin];
-				{   // lane SMOOTHN1: the smooth normal at the hit (the face normal where the soup has none)
-					const double p[3] = { o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t };
-					double ns[3];
-					const bool sm = smoothAt( tri, p, n, ns );
-					ch.smoothHits += sm ? 1 : 0;
-					for ( int k = 0; k < 3; k++ )
-						s.nrmS[k] += sm ? ns[k] : n[k];
-				}
-				/* lane GICAL1: a decal lying on the hit surface (within 2 units in front of it, 0.25 behind) covers it
-				 * by its mean coverage, over its own albedo (the game blends it over the surface) */
-				double dA = 0;
-				int dt = -1;
-				double td = 0;
-				const double ts = std::max( t - 2.0, 1.0e-3 );
-				const double o2[3] = { o[0] + d[0] * ts, o[1] + d[1] * ts, o[2] + d[2] * ts };
-				if ( decalOn && dbvh.ray( o2, d, t + 0.25 - ts, &td, &dt ) && dt >= 0 ) {
-					dA = soup.decalA[size_t( dt ) * 4 + 3] / 255.0;
-					ch.decal++;
-				}
-				ch.surfHits++;
-				for ( int k = 0; k < 3; k++ ) {
-					s.pos[k] += hw[k];
-					s.nrm[k] += n[k];
-					const double a0 = albKnown ? soup.alb[size_t( tri ) * 3 + size_t( k )] / 255.0 : 0.5;
-					s.alb[k] += dA > 0 ? a0 * ( 1.0 - dA ) + soup.decalA[size_t( dt ) * 4 + size_t( k )] / 255.0 * dA : a0;
-				}
-				s.n++;
-				if ( glowOn && soup.glow.emits( tri ) ) {   // lane EMISSIVEGI1: the hit's own emitted light
-					const float * T = &bvh.t[size_t( tri ) * 9];
-					const double e1[3] = { double( T[3] ) - T[0], double( T[4] ) - T[1], double( T[5] ) - T[2] };
-					const double e2[3] = { double( T[6] ) - T[0], double( T[7] ) - T[1], double( T[8] ) - T[2] };
-					const double v[3] = { o[0] + d[0] * t - T[0], o[1] + d[1] * t - T[1], o[2] + d[2] * t - T[2] };
-					const double d00 = e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2];
-					const double d01 = e1[0] * e2[0] + e1[1] * e2[1] + e1[2] * e2[2];
-					const double d11 = e2[0] * e2[0] + e2[1] * e2[1] + e2[2] * e2[2];
-					const double d20 = v[0] * e1[0] + v[1] * e1[1] + v[2] * e1[2];
-					const double d21 = v[0] * e2[0] + v[1] * e2[1] + v[2] * e2[2];
-					const double den = d00 * d11 - d01 * d01;
-					double b1 = 1.0 / 3, b2 = 1.0 / 3;
-					if ( std::fabs( den ) > 0 ) {
-						b1 = std::clamp( ( d11 * d20 - d01 * d21 ) / den, 0.0, 1.0 );
-						b2 = std::clamp( ( d00 * d21 - d01 * d20 ) / den, 0.0, 1.0 - b1 );
+				/* lane WATER1 (ported onto the land6 bake, water2fix): a ray that crosses the water also leaves a surfel
+				 * where its mirror leg lands. Leg 0 is the ray itself, exactly as without water. */
+				double ro[3], rd[3];
+				bool mirror = false;
+				if ( waterOn ) {
+					WaterHit w;
+					if ( waterFirst( o, d, hitAny ? t : double( spec.rayMax ), w ) && waterRefl( w, d ) > 0.0 ) {
+						waterMirror( o, d, w, ro, rd );
+						mirror = true;
 					}
-					double L[3];
-					soup.glow.le( tri, b1, b2, L );
-					for ( int k = 0; k < 3; k++ )
-						s.le[k] += L[k];
-					ch.emitHits++;
 				}
-				if ( wayHit ) {   // lane CAPTURE1: the hit's own point
-					const double p[3] = { o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t };
-					double a2[3], n2[3];
-					const int used = matAt( &bvh.t[size_t( tri ) * 9], soup.mat[size_t( tri )], &soup.alb[size_t( tri ) * 3], p, t,
-						omega, n, d, a2, n2, tri );
-					ch.nmapHits += ( used & 2 ) ? 1 : 0;
+				for ( int leg = 0; leg < ( mirror ? 2 : 1 ); leg++ ) {
+					const double * oL = leg ? ro : o;
+					const double * dL = leg ? rd : d;
+					double tL = t;
+					int triL = tri;
+					const bool hitL = leg ? cast( oL, dL, &tL, &triL ) : hitAny;
+					if ( !hitL || !( tL > 1.0e-3 ) )
+						continue;
+					float hw[3];
+					hitPoint( oL, dL, tL, hw );
+					double n[3];
+					const int bin = binOf( triL, dL, n );
+					if ( bin < 0 )
+						continue;
+					Bin & s = ch.surfels[keyFor( hw, cellS )].b[bin];
+					{   // lane SMOOTHN1: the smooth normal at the hit (the face normal where the soup has none)
+						const double p[3] = { oL[0] + dL[0] * tL, oL[1] + dL[1] * tL, oL[2] + dL[2] * tL };
+						double ns[3];
+						const bool sm = smoothAt( triL, p, n, ns );
+						ch.smoothHits += sm ? 1 : 0;
+						for ( int k = 0; k < 3; k++ )
+							s.nrmS[k] += sm ? ns[k] : n[k];
+					}
+					/* lane GICAL1: a decal lying on the hit surface (within 2 units in front of it, 0.25 behind) covers it
+					 * by its mean coverage, over its own albedo (the game blends it over the surface) */
+					double dA = 0;
+					int dt = -1;
+					double td = 0;
+					const double ts = std::max( tL - 2.0, 1.0e-3 );
+					const double o2[3] = { oL[0] + dL[0] * ts, oL[1] + dL[1] * ts, oL[2] + dL[2] * ts };
+					if ( decalOn && dbvh.ray( o2, dL, tL + 0.25 - ts, &td, &dt ) && dt >= 0 ) {
+						dA = soup.decalA[size_t( dt ) * 4 + 3] / 255.0;
+						ch.decal++;
+					}
+					ch.surfHits++;
 					for ( int k = 0; k < 3; k++ ) {
-						s.alb2[k] += a2[k];
-						s.nrm2[k] += n2[k];
+						s.pos[k] += hw[k];
+						s.nrm[k] += n[k];
+						const double a0 = albKnown ? soup.alb[size_t( triL ) * 3 + size_t( k )] / 255.0 : 0.5;
+						s.alb[k] += dA > 0 ? a0 * ( 1.0 - dA ) + soup.decalA[size_t( dt ) * 4 + size_t( k )] / 255.0 * dA : a0;
 					}
-					s.n2++;
+					s.n++;
+					if ( glowOn && soup.glow.emits( triL ) ) {   // lane EMISSIVEGI1: the hit's own emitted light
+						const float * T = &bvh.t[size_t( triL ) * 9];
+						const double e1[3] = { double( T[3] ) - T[0], double( T[4] ) - T[1], double( T[5] ) - T[2] };
+						const double e2[3] = { double( T[6] ) - T[0], double( T[7] ) - T[1], double( T[8] ) - T[2] };
+						const double v[3] = { oL[0] + dL[0] * tL - T[0], oL[1] + dL[1] * tL - T[1], oL[2] + dL[2] * tL - T[2] };
+						const double d00 = e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2];
+						const double d01 = e1[0] * e2[0] + e1[1] * e2[1] + e1[2] * e2[2];
+						const double d11 = e2[0] * e2[0] + e2[1] * e2[1] + e2[2] * e2[2];
+						const double d20 = v[0] * e1[0] + v[1] * e1[1] + v[2] * e1[2];
+						const double d21 = v[0] * e2[0] + v[1] * e2[1] + v[2] * e2[2];
+						const double den = d00 * d11 - d01 * d01;
+						double b1 = 1.0 / 3, b2 = 1.0 / 3;
+						if ( std::fabs( den ) > 0 ) {
+							b1 = std::clamp( ( d11 * d20 - d01 * d21 ) / den, 0.0, 1.0 );
+							b2 = std::clamp( ( d00 * d21 - d01 * d20 ) / den, 0.0, 1.0 - b1 );
+						}
+						double L[3];
+						soup.glow.le( triL, b1, b2, L );
+						for ( int k = 0; k < 3; k++ )
+							s.le[k] += L[k];
+						ch.emitHits++;
+					}
+					if ( wayHit ) {   // lane CAPTURE1: the hit's own point
+						const double p[3] = { oL[0] + dL[0] * tL, oL[1] + dL[1] * tL, oL[2] + dL[2] * tL };
+						double a2[3], n2[3];
+						const int used = matAt( &bvh.t[size_t( triL ) * 9], soup.mat[size_t( triL )], &soup.alb[size_t( triL ) * 3], p, tL,
+							omega, n, dL, a2, n2, triL );
+						ch.nmapHits += ( used & 2 ) ? 1 : 0;
+						for ( int k = 0; k < 3; k++ ) {
+							s.alb2[k] += a2[k];
+							s.nrm2[k] += n2[k];
+						}
+						s.n2++;
+					}
 				}
 			}
 			// lane SMOOTHN1: still noisy after this batch: one more (never fewer than the base set)
@@ -1013,6 +1121,12 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			cells.clear();
 			double oSky[8] = {}, oSurf[8] = {}, oD[8] = {}, oD2[8] = {}, total = 0, voidW = 0;
 			double skyT[8][3] = {}, glassW = 0;
+			// lane WATER1: a probe under the water sees its legs up to the surface through the fog
+			int underKind = 0;
+			const bool under = probeUnder( o, &underKind );
+			ch.waterUnder += under ? 1 : 0;
+			const bool dumpThis = !spec.waterDump.isEmpty()
+				&& std::find( spec.waterDumpProbes.begin(), spec.waterDumpProbes.end(), pi ) != spec.waterDumpProbes.end();
 			// lane SMOOTHN1: the probe's batches (pass 1 chose how many), each ray 4 pi / (N x batches)
 			const int mult = multOf[size_t( pi )];
 			const double om = kFourPi / ( double( N ) * mult );
@@ -1029,53 +1143,115 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				double T[3] = { 1.0, 1.0, 1.0 };
 				if ( glassOn && transmit( o, d, hit ? t : double( spec.rayMax ), T ) )
 					glassW += om;
-				if ( !hit ) {
-					if ( spec.noSky )
-						voidW += om;   // an interior: out through an opening, into nothing
-					else {
-						oSky[oc] += om;
-						for ( int c = 0; c < 3; c++ )
-							skyT[oc][c] += om * T[c];
-					}
-					total += om;
+				if ( hit )
+					ch.hits++;
+				else
 					ch.misses++;
-					continue;
-				}
-				ch.hits++;
-				if ( !( t > 1.0e-3 ) )
-					continue;
-				float hw[3];
-				hitPoint( o, d, t, hw );
-				LKey lk{ keyFor( hw, cellS ), 0u, quint8( 0 ) };
-				if ( v4 ) {
-					// the side this ray sees: its face's bin, as pass 1 sorted it (lane SIDES6: v5 = the bin itself)
-					double n[3];
-					const int bin = binOf( tri, d, n );
-					const int slot = slotOf( lk.k, bin );
-					lk.side = quint8( slot );
-					if ( !doorBoxes.empty() )
-						lk.door = doorOn( o, d, t );
-					/* lane SIDES6 measure: the ray weight whose surfel's normal is over 45 degrees off the face
-					 * it hit (a corner's blend), and the weight landing on a corner cell (counters only) */
-					if ( bin >= 0 && slot < 6 ) {
-						ch.hitW += omega;
-						const auto f = sideFin[slot].find( lk.k );
-						if ( f != sideFin[slot].end() && n[0] * f->second.n[0] + n[1] * f->second.n[1] + n[2] * f->second.n[2] < 0.70710678 )
-							ch.offW += omega;
-						if ( cornerKeys.count( lk.k ) )
-							ch.cornerW += omega;
+				/* lane WATER1 (ported onto the land6 bake, water2fix): the ray's legs. Without water there is one, the
+				 * ray itself, weighed and summed exactly as before; a crossing weighs it by 1 - R and adds the mirror leg
+				 * at R (arriving from the ray's own direction: the octant, the link direction and the distance are the
+				 * probe's) */
+				struct Leg { const double * lo; const double * ld; double t; int tri; bool hit; double w; double T[3]; double off, doorT; };
+				Leg legs[2];
+				int nLeg = 1;
+				legs[0] = Leg{ o, d, t, tri, hit, om, { T[0], T[1], T[2] }, 0.0, t };
+				double ro[3], rd[3];
+				WaterHit wh;
+				const bool cross = waterOn && waterFirst( o, d, hit ? t : double( spec.rayMax ), wh );
+				double wR = 0.0;
+				if ( cross ) {
+					wR = waterRefl( wh, d );
+					double f[3];
+					waterFog( wh.kind, wh.above ? ( hit ? t - wh.s : double( spec.rayMax ) ) : wh.s, f );
+					legs[0].w = om * ( 1.0 - wR );
+					for ( int c = 0; c < 3; c++ )
+						legs[0].T[c] *= f[c];
+					if ( wR > 0.0 ) {
+						waterMirror( o, d, wh, ro, rd );
+						double tr = 0;
+						int trr = -1;
+						const bool rh = cast( ro, rd, &tr, &trr );
+						Leg & m = legs[nLeg++];
+						m = Leg{ ro, rd, tr, trr, rh, om * wR, { T[0], T[1], T[2] }, wh.s, wh.s };
+						if ( !wh.above ) {   // from below, the mirror leg runs back down under the water
+							waterFog( wh.kind, wh.s + ( rh ? tr : double( spec.rayMax ) ), f );
+							for ( int c = 0; c < 3; c++ )
+								m.T[c] *= f[c];
+						}
+						ch.waterMirrorHits += rh ? 1 : 0;
+						ch.waterMirrorSky += rh ? 0 : 1;
 					}
+					ch.waterRays++;
+					ch.waterReflW += om * wR;
+				} else if ( under ) {
+					double f[3];
+					waterFog( underKind, hit ? t : double( spec.rayMax ), f );
+					for ( int c = 0; c < 3; c++ )
+						legs[0].T[c] *= f[c];
 				}
-				Cell & cl = cells[lk];
-				cl.w += om;
-				for ( int a = 0; a < 3; a++ ) {
-					cl.dir[a] += d[a] * om;
-					cl.tw[a] += T[a] * om;
+				if ( dumpThis ) {
+					const Leg & a = legs[0];
+					ch.waterDump += QStringLiteral( "ray %1 %2 %3 %4 %5 %6 %7 %8 %9" ).arg( pi ).arg( i )
+						.arg( pp.pos[0], 0, 'g', 9 ).arg( pp.pos[1], 0, 'g', 9 ).arg( pp.pos[2], 0, 'g', 9 )
+						.arg( d[0], 0, 'g', 17 ).arg( d[1], 0, 'g', 17 ).arg( d[2], 0, 'g', 17 ).arg( hit ? t : -1.0, 0, 'g', 12 );
+					ch.waterDump += QStringLiteral( " under %1 cross %2 s %3 above %4 kind %5 R %6 T0 %7 %8 %9" )
+						.arg( under ? 1 : 0 ).arg( cross ? 1 : 0 ).arg( cross ? wh.s : -1.0, 0, 'g', 12 ).arg( cross && wh.above ? 1 : 0 )
+						.arg( cross ? wh.kind : under ? underKind : -1 ).arg( wR, 0, 'g', 12 )
+						.arg( a.T[0] / T[0], 0, 'g', 12 ).arg( a.T[1] / T[1], 0, 'g', 12 ).arg( a.T[2] / T[2], 0, 'g', 12 );
+					if ( nLeg > 1 )
+						ch.waterDump += QStringLiteral( " mirror %1 %2 %3 %4" ).arg( legs[1].hit ? legs[1].t : -1.0, 0, 'g', 12 )
+							.arg( legs[1].T[0] / T[0], 0, 'g', 12 ).arg( legs[1].T[1] / T[1], 0, 'g', 12 ).arg( legs[1].T[2] / T[2], 0, 'g', 12 );
+					ch.waterDump += QLatin1Char( '\n' );
 				}
-				oSurf[oc] += om;
-				oD[oc] += t * om;
-				oD2[oc] += t * t * om;
-				total += om;
+				for ( int li = 0; li < nLeg; li++ ) {
+					const Leg & L = legs[li];
+					if ( !L.hit ) {
+						if ( spec.noSky )
+							voidW += L.w;   // an interior: out through an opening, into nothing
+						else {
+							oSky[oc] += L.w;
+							for ( int c = 0; c < 3; c++ )
+								skyT[oc][c] += L.w * L.T[c];
+						}
+						total += L.w;
+						continue;
+					}
+					if ( !( L.t > 1.0e-3 ) )
+						continue;
+					float hw[3];
+					hitPoint( L.lo, L.ld, L.t, hw );
+					LKey lk{ keyFor( hw, cellS ), 0u, quint8( 0 ) };
+					if ( v4 ) {
+						// the side this leg sees: its face's bin, as pass 1 sorted it (lane SIDES6: v5 = the bin itself)
+						double n[3];
+						const int bin = binOf( L.tri, L.ld, n );
+						const int slot = slotOf( lk.k, bin );
+						lk.side = quint8( slot );
+						if ( !doorBoxes.empty() )
+							lk.door = doorOn( o, d, L.doorT );
+						/* lane SIDES6 measure: the ray weight whose surfel's normal is over 45 degrees off the face
+						 * it hit (a corner's blend), and the weight landing on a corner cell (counters only) */
+						if ( bin >= 0 && slot < 6 ) {
+							ch.hitW += omega;
+							const auto f = sideFin[slot].find( lk.k );
+							if ( f != sideFin[slot].end() && n[0] * f->second.n[0] + n[1] * f->second.n[1] + n[2] * f->second.n[2] < 0.70710678 )
+								ch.offW += omega;
+							if ( cornerKeys.count( lk.k ) )
+								ch.cornerW += omega;
+						}
+					}
+					Cell & cl = cells[lk];
+					cl.w += L.w;
+					for ( int a = 0; a < 3; a++ ) {
+						cl.dir[a] += d[a] * L.w;
+						cl.tw[a] += L.T[a] * L.w;
+					}
+					const double dist = L.off + L.t;
+					oSurf[oc] += L.w;
+					oD[oc] += dist * L.w;
+					oD2[oc] += dist * dist * L.w;
+					total += L.w;
+				}
 			}
 			}
 			// the record, as the reader's accumulator emits it
@@ -1436,6 +1612,22 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		R.hitW += ch.hitW;   // lane SIDES6 measure
 		R.offW += ch.offW;
 		R.cornerW += ch.cornerW;
+		R.waterRays += ch.waterRays;   // lane WATER1
+		R.waterMirrorHits += ch.waterMirrorHits;
+		R.waterMirrorSky += ch.waterMirrorSky;
+		R.waterUnder += ch.waterUnder;
+		R.waterReflMean += ch.waterReflW;
+	}
+	R.waterReflMean /= kFourPi * double( qMax<size_t>( 1, probes.size() ) );
+	if ( !spec.waterDump.isEmpty() ) {   // lane WATER1: the gate's rays, in probe order
+		QFile wf( spec.waterDump );
+		if ( wf.open( QIODevice::WriteOnly ) ) {
+			for ( size_t k = 0; k < soup.waterTypes.size(); k++ )   // which record each kind is (the checker reads it)
+				wf.write( QStringLiteral( "kind %1 form %2 raymax %3\n" ).arg( k )
+					.arg( soup.waterTypes[k].form, 8, 16, QLatin1Char( '0' ) ).arg( double( spec.rayMax ), 0, 'g', 9 ).toUtf8() );
+			for ( const Chunk & ch : chunks )
+				wf.write( ch.waterDump.toUtf8() );
+		}
 	}
 	R.msRays = double( tm.nsecsElapsed() ) / 1e6;
 	tm.restart();
@@ -1909,6 +2101,11 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 			  << ", on a surfel over 45 deg off its face " << QString::number( r.offW / r.hitW, 'f', 4 );
 		t << "\n";
 	}
+	if ( r.waterTris > 0 )   // lane WATER1
+		t << "bake: water " << r.waterTris << " triangles of " << r.waterTypes << " records; rays split at the surface "
+		  << r.waterRays << " (mirror legs to a surface " << r.waterMirrorHits << ", to the sky " << r.waterMirrorSky
+		  << "), mirror share mean " << QString::number( r.waterReflMean, 'f', 4 ) << " of the sphere, probes under the water "
+		  << r.waterUnder << "\n";
 	if ( r.decalTris > 0 )   // lane GICAL1
 		t << "bake: decals folded into the albedo: " << r.decalTris << " triangles, " << r.decalHits << " of " << r.surfelHits
 		  << " surfel hits under one\n";

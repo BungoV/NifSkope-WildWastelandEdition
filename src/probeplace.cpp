@@ -217,6 +217,21 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 	}
 	bvh.build();
 	bvh.mask = &soup.amask;   // lane ALPHATEST1: a ray through an alpha-test hole passes on
+	/* lane WATER1: the water surfaces in their own tree (they stop no ray): a column whose first floor lies under
+	 * the water is split at the line -- one probe an eye above the surface, one under it where the water is at
+	 * least minAirGap deep (half the depth up from the bed, at most an eye) -- so no probe straddles the surface */
+	Bvh wbvh;
+	const bool waterOn = !soup.water.empty() && spec.red != QLatin1String( "water" );
+	if ( waterOn ) {
+		wbvh.t.resize( soup.water.size() );
+		for ( size_t i = 0; i < soup.water.size(); i += 3 ) {
+			wbvh.t[i + 0] = float( double( soup.water[i + 0] ) - O[0] );
+			wbvh.t[i + 1] = float( double( soup.water[i + 1] ) - O[1] );
+			wbvh.t[i + 2] = soup.water[i + 2];
+			zMax = std::max( zMax, soup.water[i + 2] );
+		}
+		wbvh.build();
+	}
 	R.msBvh = double( tm.nsecsElapsed() ) / 1e6;
 
 	// local-space ray, from -> to; distance along it on a hit
@@ -305,8 +320,32 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			point.pos[2] = surfaces[0] + spec.eye;
 			point.cls = ProbeClass::FirstHit;
 			std::vector<ProbePoint> origins;
+			// lane WATER1: the water line over the first floor, if any
+			double wz = -1e300;
+			if ( waterOn ) {
+				const double f[3] = { x, y, top }, down[3] = { 0.0, 0.0, -1.0 };
+				double dist = 0;
+				int wt = -1;
+				if ( wbvh.ray( f, down, top - bottom, &dist, &wt ) && wt >= 0 )
+					wz = top - dist;
+			}
 			if ( surfBack[0] ) {
 				R.backColumnHits++;
+			} else if ( wz > double( surfaces[0] ) ) {
+				const float depth = float( wz - double( surfaces[0] ) );
+				ProbePoint above = point;
+				above.pos[2] = float( wz ) + spec.eye;
+				origins.push_back( above );
+				addProbe( above );
+				R.firstHit++;
+				R.waterColumns++;
+				if ( depth >= spec.minAirGap ) {
+					ProbePoint under = point;
+					under.pos[2] = surfaces[0] + std::min( spec.eye, depth * 0.5f );
+					addProbe( under );
+					R.firstHit++;
+					R.waterUnder++;
+				}
 			} else {
 				origins.push_back( point );
 				addProbe( point );
@@ -1301,6 +1340,9 @@ QString probeCensusText( const ProbePlaceResult & r )
 	t << "probe columns: " << r.columns << " (" << r.columnsEmpty << " hit nothing), gaps under 140 "
 	  << r.gapsRejected << ", level cap " << r.levelsCapped << ", wall levels refused " << r.wallRefused
 	  << ", columns with a wall " << r.wallColumns << "\n";
+	if ( r.waterColumns > 0 )   // lane WATER1
+		t << "probe columns split at the water line: " << r.waterColumns << " (a probe under the water in " << r.waterUnder
+		  << ")\n";
 	t << "openings: doorway " << r.doorway << ", window " << r.window << ", breach " << r.breach
 	  << " (door standing in it " << r.doored << ", room to room " << r.roomToRoom << "); pieces found "
 	  << r.apComponents << ", wrong shape " << r.apRejectedShape << ", no roof either side "
