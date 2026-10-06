@@ -165,14 +165,18 @@ void wwCellSsrPass( Scene * scene, bool run )
 	WwCellAoTargets ao;
 	const bool waterSsr = wwCellWaterSsrWanted( scene );	// lane WATER2
 	// lane CELLALL1: the rows; an exterior only with "SSR outdoors" (before: interiors only)
-	const int verdict = !L ? 0 : !s.on ? 1 : ( !L->interior && !s.ext && !waterSsr ) ? 2 : !wwCellAoTargets( scene, ao ) ? 3 : 4;
+	/* finalfix: an exterior with the SSR outdoors row off runs the pass for the water alone (WATER2): it says so,
+	 * as verdict 5, rather than "on" -- the row still ships off and the line has to show it */
+	int verdict = !L ? 0 : !s.on ? 1 : ( !L->interior && !s.ext && !waterSsr ) ? 2 : !wwCellAoTargets( scene, ao ) ? 3 : 4;
+	if ( verdict == 4 && !L->interior && !s.ext )
+		verdict = 5;
 	if ( verdict != s.lastVerdict ) {
-		static const char * const words[5] = { "no cell", "off (row)", "off (exterior, SSR outdoors row off)",
-			"off (no obscurance pass)", "on" };
+		static const char * const words[6] = { "no cell", "off (row)", "off (exterior, SSR outdoors row off)",
+			"off (no obscurance pass)", "on", "water only (exterior, SSR outdoors row off)" };
 		std::fprintf( stderr, "cell ssr: %s %s\n", words[verdict], L ? ( L->interior ? "interior" : "exterior" ) : "-" );
 		s.lastVerdict = verdict;
 	}
-	if ( verdict != 4 )
+	if ( verdict != 4 && verdict != 5 )
 		return;
 	g.waterOnly = !L->interior && !s.ext;	// merge: SSR outdoors runs the full pass, else water only (WATER2)
 	g.haveWater = false;

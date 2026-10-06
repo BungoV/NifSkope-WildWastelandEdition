@@ -370,9 +370,18 @@ void BSShape::drawShapes( NodeList * secondPass )
 	static std::vector<std::uint32_t> cullRanges;
 	if ( numTriangles > 0 && !hiddenT && !selectionFlags && !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene )
 		&& wwCellCullCamera( scene, this, id(), std::int64_t( numTriangles ), cullRanges ) ) {
-		for ( size_t k = 0; k + 1 < cullRanges.size(); k += 2 )
-			context->fn->glDrawElements( GL_TRIANGLES, GLsizei( cullRanges[k + 1] * 3 ), GL_UNSIGNED_SHORT,
-				(void *) ( size_t( cullRanges[k] ) * 6 ) );
+		// finalfix: the kept ranges go down as ONE multi-draw, so culling never costs more calls than drawing it all
+		static std::vector<GLsizei> cullCounts;
+		static std::vector<const void *> cullOffsets;
+		cullCounts.clear();
+		cullOffsets.clear();
+		for ( size_t k = 0; k + 1 < cullRanges.size(); k += 2 ) {
+			cullCounts.push_back( GLsizei( cullRanges[k + 1] * 3 ) );
+			cullOffsets.push_back( (const void *) ( size_t( cullRanges[k] ) * 6 ) );
+		}
+		if ( !cullCounts.empty() )
+			context->fn->glMultiDrawElements( GL_TRIANGLES, cullCounts.data(), GL_UNSIGNED_SHORT, cullOffsets.data(),
+				GLsizei( cullCounts.size() ) );
 	} else if ( numTriangles > 0 && !hiddenT ) {
 		context->fn->glDrawElements( GL_TRIANGLES, GLsizei( numTriangles * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
 	} else if ( numTriangles > 0 ) {

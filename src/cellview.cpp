@@ -2021,7 +2021,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				continue;
 			}
 			WwPrevisBox x;
-			x.c = Vector3( r.pos[0], r.pos[1], r.pos[2] ) - origin;
+			x.c = Vector3( r.pos[0], r.pos[1], r.pos[2] );	// finalfix: world units -- scene->view takes world points (cell shapes carry the origin as their translation)
 			cellPrimAxes( r.rot, x.ax );
 			for ( int k = 0; k < 3; k++ )
 				x.half[k] = std::max( std::abs( r.primHalf[k] ) * r.scale, 1.0f );

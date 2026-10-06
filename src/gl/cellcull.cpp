@@ -59,6 +59,9 @@ struct PrevisCache
 	std::vector<char> roomSeen;
 	bool roomsActive = false;
 	int roomsSeen = 0, portalsPassed = 0;
+	Vector3 eye;	// finalfix: the camera in world units (telemetry)
+	std::vector<std::uint32_t> occRef;	// finalfix: each occluder's ref, and the runs it hid this frame (telemetry)
+	mutable std::vector<int> occHits;
 };
 
 /*! lane UMBRA1: one previs block's decoded tome and this camera's query of it */
@@ -280,8 +283,12 @@ void previsBuild( CullState & s, Scene * scene, const float pl[4][4] )
 		return;
 	const WwPrevisScene & sc = *it;
 	const Transform & view = scene->view;
-	for ( const WwPrevisBox & b : sc.occluders )
+	for ( const WwPrevisBox & b : sc.occluders ) {
 		pc.occ.push_back( toView( view, b ) );
+		pc.occRef.push_back( b.ref );
+	}
+	pc.occHits.assign( pc.occ.size(), 0 );
+	pc.eye = view.inverted() * Vector3( 0.0f, 0.0f, 0.0f );
 	QHash<std::uint32_t, int> roomAt;
 	for ( const WwPrevisBox & b : sc.rooms ) {
 		roomAt.insert( b.ref, int( pc.rooms.size() ) );
@@ -344,9 +351,11 @@ int previsHidden( const PrevisCache & pc, const Vector3 & v, float r )
 				return 2;
 		}
 	}
-	for ( const ViewBox & o : pc.occ )
-		if ( occluderHides( o, v, r ) )
+	for ( size_t i = 0; i < pc.occ.size(); i++ )
+		if ( occluderHides( pc.occ[i], v, r ) ) {
+			pc.occHits[i]++;
 			return 1;
+		}
 	return 0;
 }
 
@@ -871,7 +880,7 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	s.cur.tomeCulled += tomeCulled;
 	s.cur.ungoverned += ungoverned;
 	s.cur.drawn += std::int64_t( runs->size() ) - culled;
-	s.cur.calls += std::int64_t( out.size() / 2 );
+	s.cur.calls += out.empty() ? 0 : 1;	// finalfix: the kept ranges are one glMultiDrawElements (bsshape.cpp)
 	s.cur.tris += drawnTris;
 	s.cur.trisAll += numTris;
 	return true;
@@ -883,6 +892,15 @@ bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, 
 	CullState & s = st();
 	/* lane SUNCELL1: casters always cast -- the Previs row never reaches this pass. Its red control `casters`
 	 * hides the casters the camera pass found occluded or roomed off (this frame's camera view, or none). */
+	/* finalfix: a cell load (wwCellCullBegin / wwCellPrevisSet) clears the previs scene, and the shadow pass runs before
+	 * the camera pass, so the first frame after a load hid no caster (the gate's shot is often that frame). The red
+	 * builds this frame's scene itself: scene->view and the projection are still the camera's here (the cascade fit
+	 * reads the same projection), so it is the scene the camera pass would build. RED only. */
+	if ( s.previsOn && s.previsRed == 1 && scene && scene->renderer && s.previs.contains( scene->nifModel ) ) {
+		float cpl[4][4];
+		cameraPlanes( scene, cpl );
+		previsBuild( s, scene, cpl );
+	}
 	const bool previsRed = s.previsOn && s.previsRed == 1 && s.pc.valid && scene && s.pc.nif == scene->nifModel;
 	/* lane UMBRA1: casters always cast -- the tome never reaches this pass either. Its red control `casters` drops
 	 * the casters the camera pass's tome query hid (the last camera's answer). */
@@ -983,6 +1001,13 @@ void wwCellCullFrame()
 				"roomCulled=%lld casterHidden=%lld%s\n", s.previsOn ? "on" : "off", occ, rooms, pc.roomsSeen,
 				pc.portalsPassed, (long long)s.cur.occluded, (long long)s.cur.roomCulled, (long long)s.cur.casterHidden,
 				s.previsRed == 1 ? " RED=casters" : "" );
+			// finalfix: where the camera stood and which occluder hid how many runs (a real cull vs a bad box)
+			QString hits;
+			for ( size_t i = 0; i < pc.occHits.size(); i++ )
+				if ( pc.occHits[i] > 0 )
+					hits += QStringLiteral( " %1:%2" ).arg( pc.occRef[i], 8, 16, QChar( '0' ) ).arg( pc.occHits[i] );
+			std::fprintf( stderr, "cell previs eye: %.0f,%.0f,%.0f occluder hits:%s\n", pc.eye[0], pc.eye[1], pc.eye[2],
+				hits.isEmpty() ? " none" : qPrintable( hits ) );
 		}
 	}
 	if ( s.umbraLast ) {	// lane UMBRA1: printed when it changes

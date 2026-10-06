@@ -117,7 +117,10 @@ bool wwCellHdrBegin( Scene * scene )
 			fn->glDeleteTextures( 1, &g.color );
 		fn->glGenTextures( 1, &g.color );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
-		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, GL_RGBA16F, W, H, GL_TRUE );
+		/* finalfix (SUNCELL1): the linear frame is RGBA32F, not RGBA16F. Multisampled additive blending into fp16
+		 * (the blended ground layers, SRC_ALPHA/ONE) rounded +-1 step differently run to run on the same inputs
+		 * (every draw's state, uniforms and textures traced identical); fp32 measured 0 of 7 frames differing. */
+		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, GL_RGBA32F, W, H, GL_TRUE );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 		if ( !g.ds )
 			fn->glGenRenderbuffers( 1, &g.ds );

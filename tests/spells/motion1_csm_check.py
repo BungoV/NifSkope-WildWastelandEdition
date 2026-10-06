@@ -15,7 +15,8 @@ echo and wwSunShadowSummary()) and judges every frame with lane CSM1's own indep
 
 RED CONTROLS: WW_CSM_RED=nosnap must fail S; WW_CSM_RED=wrongsplit must fail F.
 
-usage: python motion1_csm_check.py <path sidecar> <lookdev hour> [--expect-red nosnap|wrongsplit]
+usage: python motion1_csm_check.py <path sidecar> <lookdev hour> [--expect-red nosnap|wrongsplit] [--sun-arc]
+       --sun-arc: the light is the weather's engine arc (a cell exterior under Lookdev; SUNCELL1)
 """
 import os, sys, tempfile
 
@@ -46,7 +47,15 @@ def main():
     if not frames:
         print('csm FAIL  no frames in %s' % side)
         return 1
-    L = -g.sun_to(hour)
+    if '--sun-arc' in args:
+        # finalfix (SUNCELL1): a Lookdev exterior with a weather lights by the ENGINE ARC (pbr_wx1_gates Clock), not
+        # the R2b TNAM ramp sun_to() models; the cascades are fitted to that light, so the judge must use it too
+        import pbr_wx1_gates as wx
+        esm = os.environ.get('ESM', 'X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm')
+        L = -np.array(wx.Clock(wx.Weather(esm, 'CommonwealthClear')).light(hour), dtype=float)
+        L = L / np.linalg.norm(L)
+    else:
+        L = -g.sun_to(hour)
     right, up = g.basis(L)
     res = {}
 
