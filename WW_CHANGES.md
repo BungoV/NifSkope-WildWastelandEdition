@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Branch prtpnext (2026-10-07, lane BRICK1): not on main yet
+
+- **Probe bricks, the Division deck's 4 m grid between the probes and the surfels (BRICK1).** Every relight now
+  groups the surfels into 4 m bricks by facing (the brick's light is the mean of its surfels') and records how much
+  each probe would gather from each brick. `WW_CELL_GI_BRICKS=1` makes the probes gather the bricks instead of every
+  surfel (4.7x fewer gather terms on Vault 111); it ships off, and off is byte for byte as before. New Pass view
+  "Brick light". Measured on Vault 111: the 4 m bricks change the probes' light by 29.6% against gathering every
+  surfel (1 m bricks: 2.5%), so the brick size is left to bungo. Gate: tests/spells/cell_brick.sh (PASS; the
+  independent rebuild agrees on every brick and probe; both red controls fail).
+
 ## Landed on main (2026-10-07, lane LAND-FINAL): the final-20261005 branch
 
 This list and the WATER2 to GRASSMB1 entries below the MAGDROP1 entry came onto main together, as one merge of

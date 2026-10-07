@@ -1359,7 +1359,7 @@ The Division deck shows its probe system through debug views: the GI result alon
 
 What this proves for FO4CS: the sky grid is the same 6-slab layout as the GI grid and needs no new sampler. The links resolve per probe from the stored deltas.
 
-Still open (proposals only; the ranked list is in notes/deck1/DECK_MATRIX.md section F): BOUNCE2 (multi-bounce), ROOMCLAMP1 (doorways), BRICK1, SKYPIC1, FOGGI1, GPURELIGHT1 and STATICCACHE1. Each one is judged in a Pass view.
+Of the proposals listed here on 2026-10-03 (DECK_MATRIX section F), BOUNCE2 (2aj), ROOMCLAMP1 (2am), FOGGI1 (built as VOLFOG1/VOLFOG1b, the air grid), GPURELIGHT1 and BRICK1 (2ar) are built. Still open on 2026-10-07: SKYPIC1 and STATICCACHE1. Each one is judged in a Pass view.
 
 ### 2ag. Lit effects and the one tone map (lanes FXLIT1 + HDR1, 2026-10-03)
 
@@ -1883,10 +1883,49 @@ Status: BUILD PENDING (round 1 229c18cf + round 2 on grassmb1-20261005; gates.sh
   frames), and the game's grass wind in the vertex shader (g3-wind, g7-wind). The probe bake is not touched:
   grass stays bake foliage; the wind is a draw-time vertex offset that no bake pass reads.
 
+### 2ar. The deck's 4 m bricks between the probes and the surfels (lane BRICK1, 2026-10-07)
+
+The Division deck (s25, s38): surfels are combined into 4 m irradiance bricks, one per facing; a brick's light is
+the mean of its surfels' light; a probe gathers bricks through six stored weights per probe-brick pair. Our relight
+gathered every link (one per surfel). BRICK1 builds the bricks and the brick gather in `src/probegi.cpp`:
+
+- **Bricks**: key = floor(position / 280 units) per axis x facing (the dominant axis of the surfel normal, with
+  its sign). Built on every relight (4 ms on Vault111Cryo) for the preview and the census.
+- **Factors**: per probe-brick pair, W[6] = sum over the probe's links into that brick of omega x max(axis . dir, 0);
+  the glass tint is the omega-weighted mean of those links' tints (our addition: the deck has no glass).
+  E = sum W x brick light x tint, then the unlinked renormalisation and the sky, as the link gather.
+- **Switch**: `WW_CELL_GI_BRICKS=1` makes the probes gather bricks (after step 2 and after every bounce
+  re-gather). Off = the link gather, byte for byte as before. It ships OFF.
+- **Pass view**: Pass 5 "Brick light" paints each surfel tile with its brick's light (Pass 4 = its own).
+- **Census**: `gi bricks: N bricks (edge 280, by facing), S surfels a brick, F factors for L links (Nx fewer gather
+  terms); brick against link gather X% of the light (95th percentile a probe Y%); the probes gather ...`.
+- **Dump**: gi_bricks.bin, gi_brickcube.bin, gi_linkcube.bin beside the others.
+
+Gate `tests/spells/cell_brick.sh` (exe 85ac4b3a against the rung cfc90155, both built from this branch), PASS:
+
+- bricks off: all 11 dump files byte-identical to the rung's, and the picture identical;
+- bricks on: the probes' cubes are the brick cube byte for byte, and differ from the links';
+- `tests/spells/cell_brick_check.py` rebuilds the bricks and factors from the .tbk files with its own reader:
+  K bricks 3863 of 3863 agree; W the exe's brick cube agrees on 100% of 574 probes; G bricks of edge 1 give the link
+  gather back to 0.00000%, and the exe's brick-against-link figure equals the checker's; T 79,834 factors for
+  375,838 links (4.71x fewer gather terms). On the rung's dump: FAIL (no bricks). Reds `WW_CELL_GI_BRICK_RED=noface`
+  (one brick for every facing) and `=first` (a brick's light = its first surfel's) both FAIL K.
+
+**The deck's 2% bar is NOT met at 4 m on Vault111Cryo** (line D of the checker, a measurement, not part of the
+verdict): bricks against links = 29.56% of the light (per probe median 22%, 95th percentile 135%). By brick edge:
+4 m 29.56%, 2 m 17.89%, 1 m 2.51%, 0.5 m 0.96%. The code is exact (edge 1 = 0.00000%); the error is the 4 m mean
+itself: a probe that sees only the dark half of a brick is lit by its bright half too. With bricks on, the picture
+moves by a mean of 1 level (largest 43; 92,382 pixels over 2 levels at 960 wide).
+
+Open, bungo's call: keep the deck's 4 m (deck wins), or a smaller brick; and whether bricks become the default gather
+with a brick table in the `.tbk` (a v6 layout). The GPU relight (GPURELIGHT1) still replays links, not bricks.
+Previews: scratchpad/brick1_20261007/gate/brick1_floors.png (floors from above: surfel light | brick light) and
+brick1_sheet.png (Pass 4 | Pass 5 | GI links | GI bricks | difference x8, two cameras).
+
 ## 3. Open
 
-- `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
-- Glass tint in the bake.
+- `.tbk` v4 sides, room ids and glass tint: built (2y, BAKE4; six sides a cell in v5, SIDES6).
+- BRICK1 (2ar): the brick size and whether bricks become the default gather (bungo's call; numbers in 2ar).
 - Ambient Only lights: done in 2r. Optional: compare in game at Vault 111's west end.
 - Save names for the PRTP4 capture flights.
 - FraternalPost11501 seen from straight above (center 553,2170,400, distance 600) and PickmanGallery01 (562,440,150):

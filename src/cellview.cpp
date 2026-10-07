@@ -4748,6 +4748,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			gs.red = QString::fromLatin1( qgetenv( "WW_CELL_GI_RED" ) ).trimmed();
 			if ( gs.red.isEmpty() && qgetenv( "WW_CELL_ROOMCLAMP_PIN" ).trimmed() == "off" )
 				gs.red = QStringLiteral( "prelane" );   // lane ROOMCLAMP1 pin: no rooms, no eye fallbacks
+			// lane BRICK1: the probes gather the deck's 4 m bricks (off: their links, as before); WW_CELL_GI_BRICK_RED its refuters
+			gs.bricks = qEnvironmentVariableIntValue( "WW_CELL_GI_BRICKS" ) == 1;
+			gs.brickRed = QString::fromLatin1( qgetenv( "WW_CELL_GI_BRICK_RED" ) ).trimmed();
 			gs.passes = qEnvironmentVariableIntValue( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
 			gs.rooms.red = QString::fromLatin1( qgetenv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
@@ -4969,6 +4972,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				pv.surfelCell = gr.surfelCell;
 				pv.probesShown = spec.probesShow;
 				pv.surfels = std::move( gr.surfelOut );
+				pv.surfelBrick = std::move( gr.surfelBrick );	// lane BRICK1
 				pv.probes = std::move( gr.probeCube );
 				pv.probeSky = std::move( gr.probeSky );
 				pv.linkStart = std::move( gr.probeLinkStart );

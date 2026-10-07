@@ -522,6 +522,82 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.sunBlocked = sunBlocked;
 	R.msLight = clock.nsecsElapsed() / 1e6;
 
+	/* ---- lane BRICK1: the deck's second surfel level (s25): 4 m bricks, one per cell and facing. A brick's light is
+	 * the mean of its surfels' B (s38); the probes' factors are gathered with the links below. Built every run (the
+	 * Pass view, the census, the gate's dump); the probes read them only with spec.bricks. */
+	const double msBricks0 = clock.nsecsElapsed() / 1e6;
+	const bool brickNoFace = spec.brickRed == QLatin1String( "noface" );
+	const bool brickFirst = spec.brickRed == QLatin1String( "first" );
+	std::vector<int> brickOf( us.size(), 0 );
+	std::vector<int> brickN;
+	{
+		std::unordered_map<Key3, int, Key3Hash> bmap;
+		const float be = std::max( spec.brickEdge, 1.0f );
+		for ( size_t i = 0; i < us.size(); i++ ) {
+			const US & u = us[i];
+			// the facing on the normal as the dump stores it (float), so a reader of the dump keys it the same
+			const float nf[3] = { float( u.n[0] ), float( u.n[1] ), float( u.n[2] ) };
+			int ax = 0;
+			for ( int a = 1; a < 3; a++ )
+				if ( std::fabs( nf[a] ) > std::fabs( nf[ax] ) )
+					ax = a;
+			const int face = brickNoFace ? 0 : 2 * ax + ( nf[ax] >= 0.0f ? 0 : 1 );
+			const qint32 bx = floorDiv( float( u.p[0] ), be ), by = floorDiv( float( u.p[1] ), be ), bz = floorDiv( float( u.p[2] ), be );
+			auto it = bmap.find( Key3 { bx, by, bz * 8 + face } );
+			int b;
+			if ( it == bmap.end() ) {
+				b = int( brickN.size() );
+				bmap.emplace( Key3 { bx, by, bz * 8 + face }, b );
+				brickN.push_back( 0 );
+				R.brickKeys.insert( R.brickKeys.end(), { bx, by, bz, face, 0 } );
+			} else {
+				b = it->second;
+			}
+			brickOf[i] = b;
+			brickN[size_t( b )]++;
+		}
+		for ( size_t b = 0; b < brickN.size(); b++ )
+			R.brickKeys[b * 5 + 4] = brickN[b];
+	}
+	R.bricks = int( brickN.size() );
+	R.brickEdge = std::max( spec.brickEdge, 1.0f );
+	// a brick's light from a per-surfel B (stride 3): the mean (red "first": the first surfel's)
+	auto brickLights = [&]( const std::function<const double *( size_t )> & B, std::vector<double> & Lb ) {
+		Lb.assign( brickN.size() * 3, 0.0 );
+		std::vector<quint8> seen( brickN.size(), 0 );
+		for ( size_t i = 0; i < us.size(); i++ ) {
+			const size_t b = size_t( brickOf[i] );
+			const double * s = B( i );
+			if ( brickFirst ) {
+				if ( !seen[b] )
+					for ( int c = 0; c < 3; c++ )
+						Lb[b * 3 + size_t( c )] = s[c];
+				seen[b] = 1;
+				continue;
+			}
+			for ( int c = 0; c < 3; c++ )
+				Lb[b * 3 + size_t( c )] += s[c];
+		}
+		if ( !brickFirst )
+			for ( size_t b = 0; b < brickN.size(); b++ )
+				for ( int c = 0; c < 3; c++ )
+					Lb[b * 3 + size_t( c )] /= double( brickN[b] );
+	};
+	{	// the Pass view's colors: each surfel shows its brick's light of pass 1
+		std::vector<double> Lb1;
+		brickLights( [&]( size_t i ) { return us[i].B; }, Lb1 );
+		R.surfelBrick.resize( us.size() * 3 );
+		for ( size_t i = 0; i < us.size(); i++ )
+			for ( int c = 0; c < 3; c++ )
+				R.surfelBrick[i * 3 + size_t( c )] = float( Lb1[size_t( brickOf[i] ) * 3 + size_t( c )] );
+	}
+	// the factors: per probe, per brick its links reach, six weights + the omega-weighted tint (filled in step 2)
+	struct BF { int brick; double W[6]; double T[3]; double O; };
+	std::vector<BF> bfac;
+	std::vector<int> bfStart( 1, 0 );
+	std::unordered_map<int, int> bfIdx;
+	R.msBricks = clock.nsecsElapsed() / 1e6 - msBricks0;
+
 	// ---- 2. every probe's ambient cube from its links
 	struct UP { double p[3]; double E[6][3]; double sky[6]; double S[6][3]; double kUnl = 1.0; quint32 room[2] = { 0, 0xFFFFFFFFu };
 		double dS[6][3] = {}; };   // S: the sky's part of E (lane SKY1); dS: the decal copies' sky put back (lane AODECAL1)
@@ -610,6 +686,20 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 						P.E[a][c] += u.B[c] * tint[c] * omega * cosA;
 				}
 				lks.push_back( rec );
+				{	// lane BRICK1: the link's share of its brick's factor
+					const int b = brickOf[size_t( ui )];
+					auto fi = bfIdx.find( b );
+					if ( fi == bfIdx.end() ) {
+						fi = bfIdx.emplace( b, int( bfac.size() ) ).first;
+						bfac.push_back( BF { b, { 0, 0, 0, 0, 0, 0 }, { 0, 0, 0 }, 0.0 } );
+					}
+					BF & F = bfac[size_t( fi->second )];
+					for ( int a = 0; a < 6; a++ )
+						F.W[a] += omega * rec.cosA[a];
+					for ( int c = 0; c < 3; c++ )
+						F.T[c] += omega * tint[c];
+					F.O += omega;
+				}
 			}
 			// the unlinked share (void, dropped links) sees what the linked surfaces see on average
 			if ( linked > 0.0 && pr.unlinkedWeight > 0.0f ) {
@@ -660,10 +750,48 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			}
 			up.push_back( P );
 			R.probeLinkStart.push_back( int( R.probeLinks.size() ) );
+			// lane BRICK1: this probe's factors done; the tint becomes the omega-weighted mean
+			for ( size_t k = size_t( bfStart.back() ); k < bfac.size(); k++ )
+				for ( int c = 0; c < 3; c++ )
+					bfac[k].T[c] = bfac[k].O > 0.0 ? bfac[k].T[c] / bfac[k].O : 1.0;
+			bfStart.push_back( int( bfac.size() ) );
+			bfIdx.clear();
 		}
 	}
+	/* lane BRICK1: a probe's cube from the bricks (s38: E[dir] += brick light x weight[dir]), in step 2's frame: the
+	 * unlinked share renormalized, then the sky added */
+	auto brickGather = [&]( size_t j, const std::vector<double> & Lb, double E[6][3] ) {
+		const UP & P = up[j];
+		for ( int a = 0; a < 6; a++ )
+			for ( int c = 0; c < 3; c++ )
+				E[a][c] = 0.0;
+		for ( int k = bfStart[j]; k < bfStart[j + 1]; k++ ) {
+			const BF & F = bfac[size_t( k )];
+			const double * L = &Lb[size_t( F.brick ) * 3];
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					E[a][c] += L[c] * F.T[c] * F.W[a];
+		}
+		if ( P.kUnl != 1.0 )
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					E[a][c] *= P.kUnl;
+		if ( skyOn )
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					E[a][c] += P.S[a][c];
+	};
+	R.bricksGather = spec.bricks;
+	R.brickFactors = int( bfac.size() );
+	R.brickLinks = int( R.probeLinks.size() );
+	if ( spec.bricks ) {
+		std::vector<double> Lb;
+		brickLights( [&]( size_t i ) { return us[i].B; }, Lb );
+		for ( size_t j = 0; j < up.size(); j++ )
+			brickGather( j, Lb, up[j].E );
+	}
 	R.probes = int( up.size() );
-	R.skyVisMean = up.empty() ? 0.0 : skyVisSum / double( up.size() );
+	R.skyVisMean =up.empty() ? 0.0 : skyVisSum / double( up.size() );
 	R.aoDsMean = R.aoProbes ? aoDsSum / R.aoProbes : 0.0;
 	if ( aoOn )
 		R.aoGate = QStringLiteral( "aodecal relight: %1 probes inside a copy's footprint, mean dE %2" )
@@ -897,6 +1025,12 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 					for ( int c = 0; c < 3; c++ )
 						P.E[a][c] += P.S[a][c];
 		}
+		if ( spec.bricks ) {	// lane BRICK1: the bricks' light of this pass, gathered instead
+			std::vector<double> Lb;
+			brickLights( [&]( size_t i ) { return &Bk[i * 3]; }, Lb );
+			for ( size_t j = 0; j < up.size(); j++ )
+				brickGather( j, Lb, up[j].E );
+		}
 		R.passes = pass;
 		R.passLog.insert( R.passLog.end(), { ch, sum, mx } );
 		if ( spec.passes <= 0 && ch <= spec.settle * mx ) {
@@ -907,6 +1041,58 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.gain = sum1 > 0.0 ? R.passLog[R.passLog.size() - 2] / sum1 : 1.0;
 	R.surfelBounce.assign( Bk.begin(), Bk.end() );
 	R.msBounce = clock.nsecsElapsed() / 1e6 - msBefore;
+	{	/* lane BRICK1: both gathers from the last pass's B, side by side (the census, the gate's dump). The probes keep
+		 * what spec.bricks chose; these are copies. */
+		const double t0 = clock.nsecsElapsed() / 1e6;
+		std::vector<double> Lb;
+		brickLights( [&]( size_t i ) { return &Bk[i * 3]; }, Lb );
+		R.brickLight.assign( Lb.begin(), Lb.end() );
+		R.brickCube.reserve( up.size() * 21 );
+		R.linkCube.reserve( up.size() * 21 );
+		double num = 0.0, den = 0.0;
+		std::vector<double> per;
+		size_t li = 0;
+		for ( size_t j = 0; j < up.size(); j++ ) {
+			const UP & P = up[j];
+			double Eb[6][3], El[6][3] = {};
+			brickGather( j, Lb, Eb );
+			for ( int k = R.probeLinkStart[j]; k < R.probeLinkStart[j + 1]; k++, li++ ) {
+				const LK & L = lks[li];
+				const double * B = &Bk[size_t( R.probeLinks[size_t( k )] ) * 3];
+				for ( int a = 0; a < 6; a++ )
+					for ( int c = 0; c < 3; c++ )
+						El[a][c] += B[c] * L.tint[c] * L.omega * L.cosA[a];
+			}
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ ) {
+					El[a][c] *= P.kUnl;
+					if ( skyOn )
+						El[a][c] += P.S[a][c];
+				}
+			double pn = 0.0, pd = 0.0;
+			for ( int c = 0; c < 3; c++ ) {
+				R.brickCube.push_back( float( P.p[c] ) );
+				R.linkCube.push_back( float( P.p[c] ) );
+			}
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ ) {
+					R.brickCube.push_back( float( Eb[a][c] ) );
+					R.linkCube.push_back( float( El[a][c] ) );
+					pn += std::fabs( Eb[a][c] - El[a][c] );
+					pd += El[a][c];
+				}
+			num += pn;
+			den += pd;
+			if ( pd > 1e-3 )
+				per.push_back( pn / pd );
+		}
+		R.brickRel = den > 0.0 ? num / den : 0.0;
+		if ( !per.empty() ) {
+			std::sort( per.begin(), per.end() );
+			R.brickP95 = per[std::min( per.size() - 1, size_t( std::ceil( 0.95 * double( per.size() ) ) ) - 1 )];
+		}
+		R.msBricks += clock.nsecsElapsed() / 1e6 - t0;
+	}
 
 	// the voxels a fragment on a surfel's surface samples (the shader's normal offset, then +-1)
 	const size_t nVox = size_t( dims[0] ) * size_t( dims[1] ) * size_t( dims[2] );
@@ -1545,6 +1731,14 @@ QString probeGiCensusText( const ProbeGiResult & r )
 			: QStringLiteral( "gi rooms: off (red noclamp: one value a voxel)" ) )
 		+ ( r.skyLit ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() )
 		+ QStringLiteral( "\n  " ) + bounceCensusText( r )
+		// lane BRICK1
+		+ QStringLiteral( "\n  gi bricks: %1 bricks (edge %2, by facing), %3 surfels a brick, %4 factors for %5 links (%6x fewer "
+			"gather terms); brick against link gather %7% of the light (95th percentile a probe %8%); the probes gather "
+			"%9; ms %10" ).arg( r.bricks ).arg( double( r.brickEdge ), 0, 'f', 0 )
+			.arg( r.bricks ? double( r.surfels ) / r.bricks : 0.0, 0, 'f', 1 ).arg( r.brickFactors ).arg( r.brickLinks )
+			.arg( r.brickFactors ? double( r.brickLinks ) / r.brickFactors : 0.0, 0, 'f', 2 ).arg( 100.0 * r.brickRel, 0, 'f', 3 )
+			.arg( 100.0 * r.brickP95, 0, 'f', 2 ).arg( r.bricksGather ? QStringLiteral( "the BRICKS" ) : QStringLiteral( "their links" ) )
+			.arg( r.msBricks, 0, 'f', 0 )
 		+ ( r.surfelsEmit ? QStringLiteral( "\n  gi emissive: %1 of %2 surfels glow (their Le added once to B)" )
 			.arg( r.surfelsEmit ).arg( r.surfels ) : QString() );   // lane EMISSIVEGI1
 }
@@ -1678,6 +1872,27 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 		}
 		pr.write( i32( qint32( r.probeRooms.size() / 2 ) ) );
 		pr.write( reinterpret_cast<const char *>( r.probeRooms.data() ), qint64( r.probeRooms.size() * 4 ) );
+	}
+	/* lane BRICK1:
+	 *   gi_bricks.bin     float32 edge, int32 n, then n x (int32 cell x, y, z, facing, surfel count, float32 rgb light)
+	 *                     (light = the mean of the brick's surfels' last-pass B, gi_bounce.bin)
+	 *   gi_brickcube.bin  gi_probes.bin's layout, each probe gathered from the bricks (last pass)
+	 *   gi_linkcube.bin   the same, gathered from the links (gi_probes.bin itself when the probes gather links) */
+	{
+		QFile f( QDir( dir ).filePath( QStringLiteral( "gi_bricks.bin" ) ) );
+		if ( !f.open( QIODevice::WriteOnly ) ) {
+			*err = QStringLiteral( "cannot write %1" ).arg( f.fileName() );
+			return false;
+		}
+		f.write( f32( r.brickEdge ) + i32( r.bricks ) );
+		for ( int b = 0; b < r.bricks; b++ ) {
+			f.write( reinterpret_cast<const char *>( &r.brickKeys[size_t( b ) * 5] ), 20 );
+			f.write( reinterpret_cast<const char *>( &r.brickLight[size_t( b ) * 3] ), 12 );
+		}
+		if ( !put( QStringLiteral( "gi_brickcube.bin" ), i32( r.probes ), r.brickCube ) )
+			return false;
+		if ( !put( QStringLiteral( "gi_linkcube.bin" ), i32( r.probes ), r.linkCube ) )
+			return false;
 	}
 	QFile m( QDir( dir ).filePath( QStringLiteral( "gi_meta.txt" ) ) );
 	if ( m.open( QIODevice::WriteOnly ) )

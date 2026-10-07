@@ -536,7 +536,8 @@ int wwCellPassFor( const void * nif )
 QStringList wwCellPassNames()
 {
 	return { QStringLiteral( "Combined" ), QStringLiteral( "GI" ), QStringLiteral( "Sky visibility" ),
-		QStringLiteral( "Surfel color" ), QStringLiteral( "Surfel light" ) };
+		QStringLiteral( "Surfel color" ), QStringLiteral( "Surfel light" ),
+		QStringLiteral( "Brick light" ) };	// lane BRICK1: each surfel tile shows its 4 m brick's light
 }
 
 int wwCellPass()
