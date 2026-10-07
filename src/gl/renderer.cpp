@@ -1111,6 +1111,12 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		bindPath( "SpecColorMap", QString(), white, false );
 		bindPath( "TintMaskMap", QString(), black, false );
 	}
+	/* lane FARLOD3: a legacy material's NormalMap that Shader Flags 1 bit 12 calls MODEL space (an `_msn`: the
+	 * far LOD terrain's sheets, btdterrain.cpp) is read in model axes, as fo4_default.frag reads it
+	 * (hasModelSpaceNormals). Without it the PBR far ground read near black. An authored PBRM's normal is
+	 * tangent space by contract, so only the legacy fallback asks. WW_R2A_RED=nomsn: the old tangent read. */
+	prog->uni1b( "pbrModelSpaceNormals", !lsp->pbrmValid && lsp->hasSF1( ShaderFlags::SLSF1_Model_Space_Normals )
+		&& !wwR2aRed( "nomsn" ) );
 	// lane CUBE1: the cell's cube term reads a legacy material's specular map as the game does (the legacy slot;
 	// white = the scalars alone). Only the cell program declares it; the PBR shading keeps its own derivation
 	prog->uniSampler( lsp, "CellSpecMap", 7, texunit, white, lsp->clampMode );

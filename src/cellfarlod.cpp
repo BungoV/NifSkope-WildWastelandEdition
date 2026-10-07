@@ -1200,6 +1200,10 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 	if ( !missing.isEmpty() ) {
 		r.line = QStringLiteral( "far lod: stack MISMATCH -- %1; NOT adopted: %2 of the bake's files are gone (%3)" )
 			.arg( what ).arg( missing.size() ).arg( QStringList( missing.mid( 0, 3 ) ).join( QStringLiteral( "; " ) ) );
+		// lane FARLOD3: the near cells keep their stack, but the far field still needs its own assets
+		for ( const LodbResource & res : std::as_const( led.resources ) )
+			if ( QFileInfo( res.path ).isDir() )
+				r.bakeRoots << res.path;
 		return r;
 	}
 	r.adopt = true;
@@ -1221,6 +1225,40 @@ void cellFarLodAdoptResources( const QStringList & resources )
 			view.append( f );
 	Game::GameManager::update_folders( Game::FALLOUT_4, view );
 	Game::GameManager::close_resources();
+}
+
+QString cellFarLodLendRoots( const QStringList & bakeRoots )
+{
+	if ( bakeRoots.isEmpty() )
+		return QString();
+	if ( qgetenv( "WW_CELL_FARLOD_RED" ) == "nobakeroots" )
+		return QStringLiteral( "far lod: resources -- lent NONE of the bake's %1 roots on disk (RED nobakeroots): the far "
+			"field's own materials resolve only through the session's stack" ).arg( bakeRoots.size() );
+	if ( !Game::GameManager::status( Game::FALLOUT_4 ) )
+		return QStringLiteral( "far lod: resources -- lent 0: Fallout 4 resources are switched off in the settings" );
+	QStringList view = Game::GameManager::folders( Game::FALLOUT_4 );
+	auto norm = []( const QString & p ) { return QDir::cleanPath( QDir::fromNativeSeparators( p ) ).toLower(); };
+	QStringList have;
+	for ( const QString & f : std::as_const( view ) )
+		have << norm( f );
+	QStringList lent;
+	for ( const QString & r : bakeRoots ) {
+		const QString n = norm( r );
+		if ( have.contains( n ) )
+			continue;
+		have << n;
+		lent << QDir::toNativeSeparators( r );
+	}
+	if ( lent.isEmpty() )
+		return QStringLiteral( "far lod: resources -- lent 0: the bake's %1 roots on disk are all on the session's stack" )
+			.arg( bakeRoots.size() );
+	const int before = view.size();
+	view.append( lent );
+	Game::GameManager::update_folders( Game::FALLOUT_4, view );
+	Game::GameManager::close_resources();
+	return QStringLiteral( "far lod: resources -- lent %1 of the bake's %2 roots on disk to the far field's own assets, "
+		"AFTER the session's %3 (the near cells' files still win; first lent: %4)" )
+		.arg( lent.size() ).arg( bakeRoots.size() ).arg( before ).arg( lent.first() );
 }
 
 float wwCellFarLodReach( const Scene * scene )

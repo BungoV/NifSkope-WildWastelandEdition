@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FARLOD3 (2026-10-07): two far LOD defects found by TERRBLENDFIX
+
+- **Far LOD trees no longer draw magenta or white when the bake's stack does not match (FARLOD3).** When the near
+  cells load a different plugin list than the far LOD bake (a stale bake, or a Fallout4.esm-only session) nothing
+  from the bake is adopted, but the far field's own tree LOD models still need their mod's materials (Boston Natural
+  Surroundings' tree LOD .bgsm files). They were not found (230 warnings), so the legacy route drew them magenta and
+  the PBR route white. The bake's resource folders that still exist are now added to the END of the search list, so
+  the near cells' files always win and the far trees find theirs; a "far lod: resources -- lent N ..." line says so.
+  These were the tree LOD meshes in the object rings, not the impostor cards. Gate (seam camera, legacy): magenta
+  0 px on the LOD half (main's exe 57569), 0 warnings; PBR white 3 px (main 19377). Red WW_CELL_FARLOD_RED=nobakeroots
+  brings the magenta back (57516).
+- **The far LOD ground is no longer near black in PBR mode (FARLOD3).** The far terrain's normal maps are
+  model-space maps (_msn), which the legacy shader already read correctly; the PBR shader read them as ordinary
+  tangent-space maps and tilted the far ground away from the sun. Legacy materials in PBR mode now read a model-space
+  map in the model's own axes, as the legacy shader does; authored PBR materials are unchanged. Gate: near-black
+  share of the LOD half 0.022 (main 0.459), LOD ground at 0.79 of the cell ground's brightness (main 0.46).
+  Red WW_R2A_RED=nomsn: 0.525 and 0.32.
+
 ## Landed on main (2026-10-07, lane LAND-FINAL): the final-20261005 branch
 
 This list and the WATER2 to GRASSMB1 entries below the MAGDROP1 entry came onto main together, as one merge of

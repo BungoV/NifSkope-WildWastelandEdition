@@ -1527,6 +1527,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		if ( fs.adopt ) {
 			spec.plugins = fs.plugins;
 			cellFarLodAdoptResources( fs.resources );
+		} else if ( !fs.bakeRoots.isEmpty() ) {
+			// lane FARLOD3: not adopted, but the far field's own models still need the bake's roots
+			const QString lend = cellFarLodLendRoots( fs.bakeRoots );
+			farStackNote += QStringLiteral( "  " ) + lend + QLatin1Char( '\n' );
+			qInfo().noquote() << lend;
 		}
 	}
 
