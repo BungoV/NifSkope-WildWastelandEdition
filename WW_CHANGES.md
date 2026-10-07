@@ -1,5 +1,84 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Landed on main (2026-10-07, lane LAND-FINAL): the final-20261005 branch
+
+This list and the WATER2 to GRASSMB1 entries below the MAGDROP1 entry came onto main together, as one merge of
+branch final-20261005 (main's MAGDROP1 work and the outside-clip fix were merged into it first). Each lane's own gates were
+run on one build of the merged code (exe sha1 35c5b908) against a BEFORE built from that same code minus the lane:
+notes in the Claude notes folder, finalfix\finalgate_b.md and terrblendfix.md. Two items are left for bungo:
+FARLOD1's low near camera (g10-near, the camera sits inside the game's near plane over water) and TERRBLEND1's
+legacy ground seam against the LOD terrain (4.94 against 2.04, a question of which LOD tone is right).
+The entries below marked BUILD PENDING are now built and gated.
+
+### Lanes in this landing that had no entry yet
+- **Probe bake sees through alpha-tested holes (ALPHATEST1, ALPHATEST2).** Fences, foliage cards and grates carry
+  their alpha mask into the probe bake, so light and sky pass through their holes; the mask is vertex alpha x map
+  alpha x material alpha, as the renderer draws it, and a chain-link fence no longer closes a room. Gate: no ray
+  hits a hole (0; with the mask pin off, 3933).
+- **Glowing materials light the probe bake (EMISSIVEGI1).** Neon and other glowing surfaces add light where the
+  bake's rays hit them (near the Goodneighbor neon probes gain a mean +2.8%); Vault 111 is unchanged byte for byte
+  with the glow pinned off.
+- **Smooth and normal-mapped hit normals (SMOOTHN1).** The bake's surfaces use the mesh's own smooth normals and
+  normal maps instead of flat triangle normals (terrain: the LAND normals), and noisy probes get extra rays.
+  Cube median error 0.001 degrees (with smoothing off: 3.056).
+- **Six surfels a cell (SIDES6, probe file .tbk v5).** A 1 m cell in a room corner keeps one surfel per facing side
+  instead of one blended surfel whose normal pointed into the corner. Synthetic corners 96/96; --tbk 3 and 4 still
+  write the old files byte for byte.
+- **GPU relight (GPURELIGHT1).** A baked cell can be relit on the GPU from recorded steps (agrees with the CPU within
+  1.04e-6), closed doors block light by their real shape, and per-light records are shared with the far light.
+  Off = byte for byte as before.
+- **Soup file tails sized (LAND5).** The extra data blocks in the bake's scene file now carry their byte length, so
+  every reader skips what it does not know instead of stopping there.
+- **Baked AO decals (AODECAL1).** Cars, dumpsters, crates and furniture get a baked darkening under and around them
+  that moves with them; small clutter is skipped. Switch: WW_CELL_AODECAL.
+- **Volumetric fog (VOLFOG1, VOLFOG1b).** A lit fog volume on top of the game's distance fog: sun shafts through the
+  cascades, shafts from the lights the game gives shafts, and the bounce light as haze. Row "Volumetric Fog" under
+  Fog, ships OFF; off = byte for byte as before. VOLFOG1b reads the bounce light once per fog cell (cheaper).
+- **Cube dump at full precision (EDGEGAP1).** The probe dump text is written at 9 digits; the "gap" between two
+  triangles was the dump's rounding, not the bake.
+- **Camera paths and the game's temporal AA (MOTION1).** `--path <file>` renders a camera move frame by frame (or to
+  a video); the game's temporal anti-aliasing is rebuilt (row "Temporal AA", ships OFF).
+- **Far light (FARVIEW1).** Distant lights come from the baked surfels, in switchable layers, with bulb dots past the
+  real lights' range. Row "Far light", ships OFF.
+- **Cell-view water from its WATR record (WATER1, cell view).** The cell's water draws from its water record, and
+  water enters the probe bake (restored on the merged build by WATER2FIX).
+- **The cell water is tone-mapped (WATERHDR1).** With the imagespace on, the creek reached the screen as raw linear
+  light (about 7 of 255); it now goes through the same tone map as the ground beside it. Gate: 100.00% of the water's
+  307,852 pixels within 3/255 of the game's chain (the old exe: 0.37%).
+- **Water reflections and bake water back on the merged build (WATER2FIX).** The ground-blend change had overwritten
+  the depth the water reflections read (4 reflection hits instead of 5880); fixed, and WATER1's bake water was put
+  back. WATER2's gates: green and all 12 reds as the lane measured.
+- **Far LOD from one stack (FARLOD2).** The cell view checks that the near cells and the FO4CS far bake come from the
+  same plugins (and loads the bake's when it can), builds far object rings 1-4 within the memory limit (ring 1 used
+  to be refused at about 4499 MB), draws trees to the block's reach, and draws cards from the bake's atlas sheets
+  (they loaded but drew 0 before). 8/8 gates, 5/5 reds.
+- **Run-to-run identical pictures (finalfix, SUNCELL1).** The cell's linear frame is 32-bit float and the sky backdrop
+  and blended draws outside it draw single-sample, so two runs on the same input give the same picture (before:
+  5-7 of 7 frames differed by one step). The FARLOD1 finalfix closed the far LOD's sky holes and chunk seams.
+
+## Magazine collision tools (lane MAGDROP1, on main 2026-10-05/06)
+
+- **Fresh convex hulls compile as convex (MAGDROP1).** Create Convex Shapes followed by Compile Collision fell
+  back to a triangle mesh whenever the new hull's corner count was not a multiple of four (most hulls), so a
+  dynamic prop got a mesh body. It now writes the convex shape vanilla uses. Files decompiled from the game were
+  never affected.
+- **Batch magazine collision (MAGDROP1).** Two new command-line tools for CORE's dropped magazines:
+  `convex F -o OUT [--mass M] [--layer L] [--material CRC] [--radius R] [--center com|bounds|none]` gives a loose
+  part one convex collision with its root on the centre of mass, set up like a vanilla loose item (clutter layer,
+  dynamic, inertia from the hull, vanilla damping), and compiles it. It also prints the recentred part's bounds
+  (`convex bounds ...`), which CORE copies into each dropped magazine's record.
+  `settle F [--height M] [--seconds S] [--spin x,y,z] [--frames DIR]` drops a loose item on a floor and reports
+  whether it comes to rest without sinking, jittering or rocking (`--frames` writes one posed file per frame).
+  Harness pictures can now force collision drawing (`WW_RENDER_COLLISION=1`), a background colour
+  (`WW_RENDER_BG=r,g,b`) and a selected block (`WW_RENDER_SELECT=n`); `WW_UI_SHOT` now shows the viewport
+  instead of a black rectangle. Gate `tests/spells/collision_convex_cli.sh` (12 checks).
+  `WW_RENDER_HULL_THIN=1` draws the collision as a thin wire with no fill, so the textured part shows under
+  its hull (your own Solid collision setting is untouched).
+  `settle` now stops a landed item turning in place: the physics preview has no twisting friction where an item
+  touches the floor, so a dropped magazine spun like a top for ever. `--torsion K` (default 6 per second, 0 =
+  the old behaviour) slows that spin while it touches the floor. Only the `settle` tool; Physics Sim is
+  unchanged.
+
 ## WATER2 (2026-10-05, branch water2-20261005 from water1 cb5d33ba): murky water, far glints, water SSR
 
 Proved against the game's own water asm: the viewer's water pixels at the Sanctuary creek now match an
@@ -156,6 +235,10 @@ op-for-op interpretation of the game's two water shaders (the depth-colour pass,
 - NifSkope now reads a Fallout 4 file texture tagged sRGB exactly as it reads the untagged one. Because of that, the tag stops mattering in NifSkope too. This covers the ordinary, cell and effect shaders.
 - Unchanged: PBRM materials (they already handled the tag and stay byte-identical), environment cube maps, and solid-colour placeholder textures.
 - New gate: tests/spells/srgbtag_legacy.sh. It renders the same texture blocks with the untagged and tagged headers on a vanilla duct, plus his undersuit against a copy retagged untagged. Both pairs are pixel-identical. The red arm is the old build, or WW_SRGBTAG1_RED=1.
+
+## A clip opened from outside plays on the model already open (2026-10-05)
+
+Opening a .hkx in a running NifSkope (`NifSkope.exe --port N clip.hkx`, or the same open sent to its port) used to make a new, empty window, where the clip had nothing to play on. It now goes into the open window's Animation list, the same way as dropping it there, and Animate, Loop and Play switch on, so it plays right away. Any other file still opens its own window.
 
 ## Probe bake: decals now darken the bounce light; GI gaps filled; ambient pin (lane GICAL1, 2026-10-03)
 

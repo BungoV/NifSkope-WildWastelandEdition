@@ -21245,6 +21245,29 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						qApp->processEvents();
 					}
 				}
+				// lane MAGDROP1: WW_RENDER_SELECT=<block> selects that block first, so
+				// Block Details and the Collision panel show it.
+				if ( qEnvironmentVariableIsSet( "WW_RENDER_SELECT" ) && skope->nif ) {
+					const int sb = qEnvironmentVariableIntValue( "WW_RENDER_SELECT" );
+					if ( sb >= 0 && sb < skope->nif->getBlockCount() ) {
+						// the Blocks page holds Block List + Block Details
+						if ( skope->leftColumnSelector )
+							skope->leftColumnSelector->setCurrentIndex( 1 );
+						skope->select( skope->nif->getBlockIndex( sb ) );
+						qApp->processEvents();
+					}
+				}
+				// WW_UI_SHOT_SIZE=WxH resizes the window (and WW_UI_SHOT_LEFT=px widens
+				// the left column) so Block Details fits beside the viewport.
+				{
+					const QStringList wh = qEnvironmentVariable( "WW_UI_SHOT_SIZE" ).split( QLatin1Char( 'x' ) );
+					if ( wh.size() == 2 && wh[0].toInt() > 0 && wh[1].toInt() > 0 )
+						skope->resize( wh[0].toInt(), wh[1].toInt() );
+					const int lw = qEnvironmentVariableIntValue( "WW_UI_SHOT_LEFT" );
+					if ( lw > 0 && skope->dLeft )
+						skope->resizeDocks( { skope->dLeft }, { lw }, Qt::Horizontal );
+					qApp->processEvents();
+				}
 				// WW_UI_SHOT_POSE=1 flips the viewport into Pose Mode first.
 				if ( qEnvironmentVariableIsSet( "WW_UI_SHOT_POSE" ) ) {
 					skope->ogl->setPoseMode( true );
@@ -21252,7 +21275,32 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->ogl->update();
 					qApp->processEvents();
 				}
-				skope->grab().save( QApplication::applicationDirPath() + "/ww_ui_shot.png" );
+				/* lane MAGDROP1: the viewport is a native window, so the widget grab
+				 * leaves it black. Draw the GL framebuffer over that rectangle, and
+				 * honour WW_RENDER_COLLISION / WW_RENDER_BG first, so a block-view
+				 * capture shows the model and its collision next to the details. */
+				if ( Scene * sc = skope->ogl ? skope->ogl->getScene() : nullptr ) {
+					if ( qEnvironmentVariableIsSet( "WW_RENDER_COLLISION" ) && qEnvironmentVariableIntValue( "WW_RENDER_COLLISION" ) != 0 ) {
+						sc->options |= Scene::ShowCollision;
+						Scene::collisionOnlySetting = false;
+					}
+					if ( qEnvironmentVariableIsSet( "WW_RENDER_BG" ) ) {
+						const QStringList c = qEnvironmentVariable( "WW_RENDER_BG" ).split( QLatin1Char( ',' ) );
+						if ( c.size() >= 3 )
+							skope->ogl->setBackground( Color4( c[0].toFloat(), c[1].toFloat(), c[2].toFloat(), 1.0f ) );
+					}
+				}
+				QImage uiShot = skope->grab().toImage();
+				if ( skope->ogl && skope->getGraphicsView() && skope->getGraphicsView()->isVisible() ) {
+					skope->ogl->update();
+					qApp->processEvents();
+					const QImage fb = skope->ogl->grabFramebuffer();
+					const QPoint at = skope->getGraphicsView()->mapTo( skope, QPoint( 0, 0 ) );
+					QPainter pt( &uiShot );
+					pt.drawImage( QRect( at, skope->getGraphicsView()->size() ), fb );
+					pt.end();
+				}
+				uiShot.save( QApplication::applicationDirPath() + "/ww_ui_shot.png" );
 				qApp->quit();
 			} );
 		} );
@@ -22923,6 +22971,33 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						if ( qEnvironmentVariableIntValue( "WW_RENDER_CLEAN" ) != 0 ) {
 							sc->options &= ~( Scene::ShowGrid | Scene::ShowAxes | Scene::ShowNodes );
 							skope->ogl->showCursor = false;
+						}
+
+						/* lane MAGDROP1: a picture that must show collision forces it,
+						 * rather than inheriting the person's View > Collision toggle;
+						 * WW_RENDER_COLLISION=1 also turns "collision only" off so the
+						 * mesh is drawn under it. Scene::options directly, not the menu
+						 * action, so nothing is written back to his settings.
+						 * WW_RENDER_BG=r,g,b (0..1) pins the clear colour (a grey
+						 * backdrop, never his black). WW_RENDER_SELECT=<block> selects
+						 * that block, which the viewport draws highlighted. */
+						if ( qEnvironmentVariableIsSet( "WW_RENDER_COLLISION" ) ) {
+							if ( qEnvironmentVariableIntValue( "WW_RENDER_COLLISION" ) != 0 ) {
+								sc->options |= Scene::ShowCollision;
+								Scene::collisionOnlySetting = false;
+							} else {
+								sc->options &= ~Scene::ShowCollision;
+							}
+						}
+						if ( qEnvironmentVariableIsSet( "WW_RENDER_BG" ) ) {
+							const QStringList c = qEnvironmentVariable( "WW_RENDER_BG" ).split( QLatin1Char( ',' ) );
+							if ( c.size() >= 3 )
+								skope->ogl->setBackground( Color4( c[0].toFloat(), c[1].toFloat(), c[2].toFloat(), 1.0f ) );
+						}
+						if ( qEnvironmentVariableIsSet( "WW_RENDER_SELECT" ) && skope->nif ) {
+							const int sb = qEnvironmentVariableIntValue( "WW_RENDER_SELECT" );
+							if ( sb >= 0 && sb < skope->nif->getBlockCount() )
+								skope->select( skope->nif->getBlockIndex( sb ) );
 						}
 
 						/* WW_RENDER_FLAT=1: photograph the VERTEX COLOURS and nothing

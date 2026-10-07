@@ -89,6 +89,21 @@ See the LICENSE.md file for the full license text.
 #include <QSettings>
 #include <QTextStream>
 
+// lane MAGDROP1: `convex` reuses the GUI's collision create + compile path
+#include <functional>
+#include <tuple>
+#include "lib/qhull.h"
+#include "gl/gltools.h"
+#include "spells/blocks.h"
+class QWidget;
+QModelIndex tlCreateCollisionBody( NifModel * nif, const QModelIndex & targetNode );
+QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
+	const QModelIndex & object, bool confirmed );
+bool tlCollHullLoops( const QVector<Vector3> & verts, const QVector<Vector4> & planes,
+	QVector<QVector<int>> & loops, QVector<Vector4> & keptPlanes );
+void tlCollHullMassProperties( const QVector<Vector3> & verts, const QVector<QVector<int>> & loops,
+	float radius, float * volume, Vector3 * com, Vector3 * inertiaRaw );
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <cstdio>
@@ -5560,6 +5575,455 @@ int cmdSet( const QString & file, int block, const QString & path,
 	return saveNif( nif, outFile ) ? 0 : 1;
 }
 
+/*! lane MAGDROP1: drop a LOOSE item (one dynamic body, no joints) on a floor and say
+ *  whether it settles, sinks or jitters. `simulate` only takes jointed systems.
+ *
+ *  `settle F [--height M] [--seconds S] [--spin x,y,z] [--fps N] [--frames DIR]`
+ *
+ *  The floor is the plane z = 0 (the viewport grid). The item starts with its lowest
+ *  point --height metres (Havok) above it, spinning at --spin rad/s, and falls under
+ *  gravity through the same RagdollSim the Physics Sim mode uses (60 Hz, 8 substeps).
+ *  Measured in GAME units:
+ *    sink   = how far the lowest hull point is below the floor (worst of the last second)
+ *    jitter = the largest per-frame move of the centre of mass in the last second
+ *    tilt   = the largest per-frame swing in the last second (degrees): rocking or rolling
+ *    yaw    = the largest per-frame turn about the vertical, REPORTED only
+ *    settledAt = the first time after which the centre never moves faster than
+ *                1 game unit per second again
+ *  --frames DIR writes the input file once per output frame with the root node posed
+ *  where the body is, for a frame-by-frame NifSkope render of the drop.
+ *  --torsion K (default 6, per second; 0 = off): RagdollSim has no torsional contact
+ *  friction, so an item lying on the floor kept turning in place for ever (MAGDROP1's
+ *  first clips: a 10mm magazine at 400 deg/s after it landed). Havok's contact patch
+ *  stops that; this stand-in decays the vertical spin by K per second while the item
+ *  touches the floor (lowest point within 5 mm). Settle command only, not the Physics
+ *  Sim mode.
+ */
+int cmdSettle( const QStringList & args )
+{
+	QString in, framesDir;
+	float height = 0.6f, seconds = 5.0f, fps = 30.0f, torsion = 6.0f;
+	Vector3 spin( 2.0f, 3.0f, 0.0f );
+	for ( int i = 0; i < args.size(); i++ ) {
+		const QString & t = args.at( i );
+		auto next = [&]() { return i + 1 < args.size() ? args.at( ++i ) : QString(); };
+		if ( t == QLatin1String( "--height" ) ) height = next().toFloat();
+		else if ( t == QLatin1String( "--seconds" ) ) seconds = next().toFloat();
+		else if ( t == QLatin1String( "--fps" ) ) fps = next().toFloat();
+		else if ( t == QLatin1String( "--frames" ) ) framesDir = next();
+		else if ( t == QLatin1String( "--torsion" ) ) torsion = next().toFloat();
+		else if ( t == QLatin1String( "--spin" ) ) {
+			const QStringList c = next().split( QLatin1Char( ',' ) );
+			if ( c.size() == 3 ) spin = Vector3( c[0].toFloat(), c[1].toFloat(), c[2].toFloat() );
+		} else if ( !t.startsWith( QLatin1String( "-" ) ) && in.isEmpty() ) in = t;
+		else { err() << "error: settle: unknown argument " << t << Qt::endl; return 2; }
+	}
+	if ( in.isEmpty() || !( fps > 0.0f ) || !( seconds > 1.0f ) ) {
+		err() << "usage: settle F [--height M] [--seconds S>1] [--spin x,y,z] [--fps N] [--frames DIR] [--torsion K]" << Qt::endl;
+		return 2;
+	}
+	NifModel nif;
+	if ( !loadNif( nif, in ) )
+		return 1;
+	int sysBlock = -1;
+	for ( int b = 0; b < nif.getBlockCount() && sysBlock < 0; b++ )
+		if ( nif.blockInherits( nif.getBlockIndex( b ), "bhkPhysicsSystem" ) )
+			sysBlock = b;
+	if ( sysBlock < 0 ) {
+		out() << "settle FAIL no bhkPhysicsSystem" << Qt::endl;
+		return 1;
+	}
+	const HknpSystem sys = hknpDecode( nif.get<QByteArray>( nif.getBlockIndex( sysBlock ), "Binary Data" ) );
+	RagdollSim sim;
+	QString error;
+	if ( !sys.valid || !sim.build( sys, &error ) ) {
+		out() << "settle FAIL " << ( sys.valid ? error : QStringLiteral( "packfile did not decode" ) ) << Qt::endl;
+		return 1;
+	}
+	if ( sim.bodies().size() != 1 || !sys.constraints.isEmpty() || !( sim.bodies()[0].invMass > 0.0f ) ) {
+		out() << "settle FAIL expected one loose body, found " << sim.bodies().size() << " bodies and "
+			<< sys.constraints.size() << " joints" << ( sim.bodies().size() == 1 ? " (a static body)" : "" ) << Qt::endl;
+		return 1;
+	}
+	const float HS = 69.99125f;
+	sim.ground = true;
+	sim.groundZ = 0.0f;
+	{
+		const float lift = height - sim.lowestPoint();
+		SimBody & sb = sim.bodies()[0];
+		sb.x[2] += lift;
+		sb.v = Vector3( 0, 0, 0 );
+		sb.w = spin;
+	}
+	int rootBlock = -1;
+	{
+		const QList<int> roots = nif.getRootLinks();
+		if ( !roots.isEmpty() )
+			rootBlock = roots.first();
+	}
+	if ( !framesDir.isEmpty() )
+		QDir().mkpath( framesDir );
+
+	const float dt = 1.0f / 60.0f;
+	const int total = int( seconds * 60.0f + 0.5f );
+	const int lastSecond = total - 60;
+	float sink = 0.0f, jitter = 0.0f, turn = 0.0f, yaw = 0.0f, settledAt = -1.0f, maxSinkAll = 0.0f;
+	Vector3 prevX = sim.bodies()[0].x;
+	Quat prevQ = sim.bodies()[0].q;
+	float frameClock = 0.0f;
+	int frame = 0;
+	auto writeFrame = [&]() {
+		if ( framesDir.isEmpty() || rootBlock < 0 )
+			return;
+		const SimBody & sb = sim.bodies()[0];
+		Matrix r;
+		r.fromQuat( sb.q );
+		const Vector3 tr = ( sb.x - r * sb.com ) * HS;
+		const QModelIndex iRoot = nif.getBlockIndex( rootBlock );
+		nif.set<Matrix>( iRoot, "Rotation", r );
+		nif.set<Vector3>( iRoot, "Translation", tr );
+		saveNif( nif, QDir( framesDir ).filePath( QString::asprintf( "f%04d.nif", frame ) ) );
+		frame++;
+	};
+	writeFrame();
+	for ( int s = 1; s <= total; s++ ) {
+		sim.step( dt, 8 );
+		if ( torsion > 0.0f && sim.lowestPoint() <= 0.005f ) {
+			SimBody & tb = sim.bodies()[0];	// w is world space: [2] is the spin about the floor normal
+			tb.w[2] *= std::max( 0.0f, 1.0f - torsion * dt );
+		}
+		const SimBody & sb = sim.bodies()[0];
+		if ( !std::isfinite( sb.x[0] ) || !std::isfinite( sb.x[2] ) ) {
+			out() << "settle FAIL diverged at step " << s << Qt::endl;
+			return 1;
+		}
+		const float below = std::max( 0.0f, -sim.lowestPoint() ) * HS;
+		maxSinkAll = std::max( maxSinkAll, below );
+		const float moved = ( sb.x - prevX ).length() * HS;
+		/* The frame's turn r = q * conj( prevQ ), split into the twist about the
+		 * floor normal (world Z) and the swing that tips the item. The sim has no
+		 * torsional friction at a contact, so an item spun about the vertical keeps
+		 * turning in place for ever -- vanilla GaussRifleAmmo does the same -- and
+		 * that is reported as yaw, not counted as failing to rest. A swing that
+		 * keeps going is rocking or rolling, and is. Swing = 2 atan2( |r.xy|, |r.wz| ). */
+		const float aw = sb.q[0], ax = sb.q[1], ay = sb.q[2], az = sb.q[3];
+		const float bw = prevQ[0], bx = -prevQ[1], by = -prevQ[2], bz = -prevQ[3];
+		const float rw = aw * bw - ax * bx - ay * by - az * bz;
+		const float rx = aw * bx + ax * bw + ay * bz - az * by;
+		const float ry = aw * by - ax * bz + ay * bw + az * bx;
+		const float rz = aw * bz + ax * by - ay * bx + az * bw;
+		const float twistLen = std::sqrt( rw * rw + rz * rz );
+		// atan2, not acos: acos of a float a hair under 1 floors at 0.04 deg
+		const float ang = 2.0f * std::atan2( std::sqrt( rx * rx + ry * ry ), twistLen ) * 57.29578f;
+		const float yawStep = 2.0f * std::atan2( std::fabs( rz ), std::fabs( rw ) ) * 57.29578f;
+		if ( s > lastSecond ) {
+			sink = std::max( sink, below );
+			jitter = std::max( jitter, moved );
+			turn = std::max( turn, ang );
+			yaw = std::max( yaw, yawStep );
+		}
+		if ( moved * 60.0f > 1.0f )
+			settledAt = -1.0f;
+		else if ( settledAt < 0.0f )
+			settledAt = float( s ) * dt;
+		prevX = sb.x;
+		prevQ = sb.q;
+		frameClock += dt;
+		if ( frameClock + 1e-4f >= 1.0f / fps ) {
+			frameClock -= 1.0f / fps;
+			writeFrame();
+		}
+	}
+	const SimBody & sb = sim.bodies()[0];
+	const bool ok = settledAt >= 0.0f && settledAt < seconds - 1.0f && sink < 0.25f && jitter < 0.02f && turn < 0.05f;
+	out() << "settle " << ( ok ? "PASS" : "FAIL" ) << " " << QFileInfo( in ).fileName()
+		<< " settledAt " << settledAt << " s, sink " << sink << " (worst in flight " << maxSinkAll
+		<< "), jitter " << jitter << ", tilt " << turn << " deg, yaw " << yaw << " deg, rest com z " << sb.x[2] * HS
+		<< ", mass " << ( sb.invMass > 0.0f ? 1.0f / sb.invMass : 0.0f )
+		<< ( framesDir.isEmpty() ? QString() : QStringLiteral( ", frames %1" ).arg( frame ) ) << Qt::endl;
+	return ok ? 0 : 1;
+}
+
+/*! lane MAGDROP1: give a loose part (a magazine) its own dynamic convex collision.
+ *
+ *  `convex F -o OUT [--mass M] [--layer L] [--material CRC] [--radius R] [--center com|bounds|none]`
+ *
+ *  The batch twin of Havok > Create Convex Shapes (which needs a GL scene, so it
+ *  cannot run headless) followed by Compile Collision:
+ *   1. drop the file's existing collision (compiled or editable) from the root;
+ *   2. gather every BSTriShape vertex in ROOT-LOCAL space;
+ *   3. recentre: shift the root's children so the root sits on the hull's
+ *      centre of mass (or the bounds centre), the point a dropped item spins about;
+ *   4. one qhull convex hull in Havok units -> bhkConvexVerticesShape (Radius,
+ *      Material) under a dynamic bhkRigidBody whose fields are set explicitly
+ *      (motion 3, quality 4, solver 2, deactivator 1, penetration 0.15 and the
+ *      template dampings/velocities -- what a vanilla loose ammo item carries);
+ *   5. tlCompileCollision -> bhkNPCollisionObject + bhkPhysicsSystem; BSXFlags Havok.
+ *  Prints the hull's vertex count, the shift applied and the volume.
+ */
+int cmdConvex( const QStringList & args )
+{
+	QString in, outPath, center = QStringLiteral( "com" );
+	float mass = 0.5f, radius = 0.01f;
+	quint32 layer = 4, material = 0xE538F7DBu;	// L_CLUTTER, MaterialMetalLight
+	for ( int i = 0; i < args.size(); i++ ) {
+		const QString & t = args.at( i );
+		auto next = [&]() { return i + 1 < args.size() ? args.at( ++i ) : QString(); };
+		if ( t == QLatin1String( "-o" ) || t == QLatin1String( "--out" ) ) outPath = next();
+		else if ( t == QLatin1String( "--mass" ) ) mass = next().toFloat();
+		else if ( t == QLatin1String( "--radius" ) ) radius = next().toFloat();
+		else if ( t == QLatin1String( "--layer" ) ) layer = next().toUInt();
+		else if ( t == QLatin1String( "--center" ) ) center = next();
+		else if ( t == QLatin1String( "--material" ) ) {
+			bool ok = false;
+			const QString v = next();
+			material = v.startsWith( QLatin1String( "0x" ), Qt::CaseInsensitive )
+				? v.mid( 2 ).toUInt( &ok, 16 ) : v.toUInt( &ok, 10 );
+			if ( !ok ) { err() << "error: --material wants a CRC (0x... or decimal)" << Qt::endl; return 2; }
+		} else if ( !t.startsWith( QLatin1String( "-" ) ) && in.isEmpty() ) in = t;
+		else { err() << "error: convex: unknown argument " << t << Qt::endl; return 2; }
+	}
+	if ( in.isEmpty() || outPath.isEmpty() || mass <= 0.0f ) {
+		err() << "usage: convex F -o OUT [--mass M>0] [--layer L] [--material CRC] [--radius R] [--center com|bounds|none]" << Qt::endl;
+		return 2;
+	}
+	NifModel nif;
+	if ( !loadNif( nif, in ) )
+		return 1;
+	const QList<int> roots = nif.getRootLinks();
+	if ( roots.isEmpty() || !nif.blockInherits( nif.getBlockIndex( roots.first() ), "NiNode" ) ) {
+		err() << "error: convex: root is not a NiNode" << Qt::endl;
+		return 1;
+	}
+	QPersistentModelIndex iRoot = nif.getBlockIndex( roots.first() );
+
+	// 1. existing collision off the root
+	if ( int c = nif.getLink( iRoot, "Collision Object" ); nif.isValidBlockNumber( c ) ) {
+		spRemoveBranch().cast( &nif, nif.getBlockIndex( c ) );
+		out() << "convex removed old collision block " << c << Qt::endl;
+	}
+
+	// 2. vertices in root-local space
+	const float HS = 69.99125f;
+	QVector<Vector3> pts;
+	std::function<void( int, const Transform & )> walk = [&]( int b, const Transform & parent ) {
+		const QModelIndex iB = nif.getBlockIndex( b );
+		if ( !nif.blockInherits( iB, "NiAVObject" ) )
+			return;
+		const Transform t = parent * Transform( &nif, iB );
+		if ( nif.blockInherits( iB, "BSTriShape" ) ) {
+			QModelIndex iVerts = nif.getIndex( iB, "Vertex Data" );
+			const int n = int( nif.get<quint32>( iB, "Num Vertices" ) );
+			const BSVertexDesc desc( nif.get<BSVertexDesc>( iB, "Vertex Desc" ) );
+			const bool full = ( desc.GetFlags() & VertexFlags::VF_FULLPREC );
+			for ( int v = 0; iVerts.isValid() && v < n; v++ ) {
+				QModelIndex row = nif.index( v, 0, iVerts );
+				const Vector3 p = full ? nif.get<Vector3>( row, "Vertex" )
+					: Vector3( nif.get<HalfVector3>( row, "Vertex" ) );
+				pts.append( t * p );
+			}
+		}
+		if ( nif.blockInherits( iB, "NiNode" ) )
+			for ( int c : nif.getLinkArray( iB, "Children" ) )
+				if ( nif.isValidBlockNumber( c ) )
+					walk( c, t );
+	};
+	for ( int c : nif.getLinkArray( iRoot, "Children" ) )
+		if ( nif.isValidBlockNumber( c ) )
+			walk( c, Transform() );
+	{
+		// coincident vertices (UV seams, the duplicated bullets) make qhull merge
+		// facets wide and give up; one point per 0.01 game unit is plenty
+		QMap<std::tuple<qint64, qint64, qint64>, Vector3> uniq;
+		for ( const Vector3 & p : pts )
+			uniq.insert( { qint64( std::llround( p[0] * 100.0f ) ), qint64( std::llround( p[1] * 100.0f ) ),
+				qint64( std::llround( p[2] * 100.0f ) ) }, p );
+		pts = uniq.values();
+	}
+	if ( pts.size() < 4 ) {
+		err() << "error: convex: " << pts.size() << " vertices, need 4" << Qt::endl;
+		return 1;
+	}
+
+	// hull once in game units to find the centre of mass (tetrahedra from one point)
+	QVector<Vector4> hv, hn;
+	const QVector<Triangle> tris = compute_convex_hull( pts, hv, hn, 0.01f );
+	double vol = 0.0;
+	Vector3 com( 0, 0, 0 );
+	{
+		const Vector3 o = pts.first();
+		double cx = 0, cy = 0, cz = 0;
+		for ( const Triangle & tr : tris ) {
+			const Vector3 a = pts[tr[0]] - o, b = pts[tr[1]] - o, c = pts[tr[2]] - o;
+			const double v6 = Vector3::dotproduct( a, Vector3::crossproduct( b, c ) );
+			vol += v6;
+			cx += v6 * ( a[0] + b[0] + c[0] );
+			cy += v6 * ( a[1] + b[1] + c[1] );
+			cz += v6 * ( a[2] + b[2] + c[2] );
+		}
+		if ( std::fabs( vol ) > 1e-12 )
+			com = o + Vector3( float( cx / ( 4.0 * vol ) ), float( cy / ( 4.0 * vol ) ), float( cz / ( 4.0 * vol ) ) );
+		vol = std::fabs( vol ) / 6.0;
+	}
+	Vector3 bmin = pts.first(), bmax = pts.first();
+	for ( const Vector3 & p : pts )
+		for ( int k = 0; k < 3; k++ ) {
+			bmin[k] = std::min( bmin[k], p[k] );
+			bmax[k] = std::max( bmax[k], p[k] );
+		}
+	Vector3 shift( 0, 0, 0 );
+	if ( center == QLatin1String( "com" ) )
+		shift = com;
+	else if ( center == QLatin1String( "bounds" ) )
+		shift = ( bmin + bmax ) * 0.5f;
+	else if ( center != QLatin1String( "none" ) ) {
+		err() << "error: --center com|bounds|none" << Qt::endl;
+		return 2;
+	}
+
+	// 3. recentre the root's children
+	for ( int c : nif.getLinkArray( iRoot, "Children" ) ) {
+		const QModelIndex iC = nif.getBlockIndex( c );
+		if ( !nif.blockInherits( iC, "NiAVObject" ) )
+			continue;
+		Transform t( &nif, iC );
+		t.translation = t.translation - shift;
+		t.writeBack( &nif, iC );
+	}
+	QVector<Vector3> hk;
+	hk.reserve( pts.size() );
+	for ( const Vector3 & p : pts )
+		hk.append( ( p - shift ) / HS );
+
+	// 4. hull in Havok units -> CVS (sorted, de-duplicated, as Create Convex Shapes does)
+	QVector<Vector4> hullVerts, hullNorms, cvsVerts, cvsNorms;
+	compute_convex_hull( hk, hullVerts, hullNorms, 0.01f / HS );
+	{
+		QMap<Vector4, bool> sv, sn;
+		for ( const Vector4 & v : hullVerts ) sv.insert( v, false );
+		for ( const Vector4 & v : hullNorms ) sn.insert( v, false );
+		for ( auto i = sv.constBegin(); i != sv.constEnd(); i++ ) cvsVerts.append( i.key() );
+		for ( auto i = sn.constBegin(); i != sn.constEnd(); i++ ) cvsNorms.append( i.key() );
+	}
+	if ( cvsVerts.size() < 4 ) {
+		err() << "error: convex: degenerate hull" << Qt::endl;
+		return 1;
+	}
+	/* Second pass on the centre: Havok's centre of mass is the hull GROWN by its
+	 * convex radius (tlCollHullMassProperties, the figure Compile stores), not the
+	 * bare hull's, and the two differ by millimetres on a thin magazine. Move the
+	 * meshes and the hull together onto Havok's own figure. A plane n.v + d = 0
+	 * moved by -h becomes n.v + ( d + n.h ) = 0. */
+	if ( center == QLatin1String( "com" ) ) {
+		QVector<Vector3> hv3;
+		for ( const Vector4 & v : cvsVerts ) hv3.append( Vector3( v[0], v[1], v[2] ) );
+		QVector<QVector<int>> loops;
+		QVector<Vector4> kept;
+		float hvol = 0.0f;
+		Vector3 hcom, hI;
+		if ( tlCollHullLoops( hv3, cvsNorms, loops, kept ) ) {
+			tlCollHullMassProperties( hv3, loops, radius, &hvol, &hcom, &hI );
+			for ( Vector4 & v : cvsVerts )
+				v = Vector4( v[0] - hcom[0], v[1] - hcom[1], v[2] - hcom[2], v[3] );
+			for ( Vector4 & n : cvsNorms )
+				n[3] += n[0] * hcom[0] + n[1] * hcom[1] + n[2] * hcom[2];
+			for ( int c : nif.getLinkArray( iRoot, "Children" ) ) {
+				const QModelIndex iC = nif.getBlockIndex( c );
+				if ( !nif.blockInherits( iC, "NiAVObject" ) )
+					continue;
+				Transform t( &nif, iC );
+				t.translation = t.translation - hcom * HS;
+				t.writeBack( &nif, iC );
+			}
+			shift = shift + hcom * HS;
+		}
+	}
+	const QModelIndex body = tlCreateCollisionBody( &nif, iRoot );
+	if ( !body.isValid() ) {
+		err() << "error: convex: could not create a body on the root" << Qt::endl;
+		return 1;
+	}
+	QPersistentModelIndex pBody( body );
+	QModelIndex iCVS = nif.insertNiBlock( "bhkConvexVerticesShape" );
+	nif.set<uint>( iCVS, "Num Vertices", uint( cvsVerts.count() ) );
+	nif.updateArraySize( iCVS, "Vertices" );
+	nif.setArray<Vector4>( iCVS, "Vertices", cvsVerts );
+	nif.set<uint>( iCVS, "Num Normals", uint( cvsNorms.count() ) );
+	nif.updateArraySize( iCVS, "Normals" );
+	nif.setArray<Vector4>( iCVS, "Normals", cvsNorms );
+	nif.set<float>( iCVS, "Radius", radius );
+	nif.set<quint32>( iCVS, "Material", material );
+	nif.setLink( pBody, "Shape", nif.getBlockNumber( iCVS ) );
+
+	// the body: every field explicit, nothing from this machine's QSettings
+	bhkSetFilterField( &nif, pBody, QStringLiteral( "Layer" ), layer );
+	const QModelIndex info = nif.getIndex( pBody, "Rigid Body Info" );
+	nif.set<quint32>( info, "Motion System", 3u );
+	nif.set<quint32>( info, "Quality Type", 4u );
+	nif.set<quint32>( info, "Solver Deactivation", 2u );
+	nif.set<quint32>( info, "Deactivator Type", 1u );
+	nif.set<float>( info, "Penetration Depth", 0.15f );
+	nif.set<float>( info, "Mass", mass );
+	nif.set<float>( info, "Friction", 0.5f );
+	nif.set<float>( info, "Restitution", 0.4f );
+	nif.set<float>( info, "Linear Damping", 0.1f );
+	nif.set<float>( info, "Angular Damping", 0.05f );
+	nif.set<float>( info, "Max Linear Velocity", 104.4f );
+	nif.set<float>( info, "Max Angular Velocity", 31.57f );
+	/* The inertia tensor. Compile takes the body's tensor as given, and a fresh
+	 * body's is zero (the engine then sees invInertia 1,1,1). Vanilla loose items
+	 * carry 1.5 x the inertia the collision report prints for their polytope,
+	 * scaled to the body's mass (GaussRifleAmmo: 1.499 on all three axes). The
+	 * hull code's raw figure is already the stored 1.5 x form, so it goes in
+	 * scaled by mass / volume only (measured: an extra 1.5 gave 2.249). */
+	{
+		QVector<Vector3> hv3;
+		for ( const Vector4 & v : cvsVerts ) hv3.append( Vector3( v[0], v[1], v[2] ) );
+		QVector<QVector<int>> loops;
+		QVector<Vector4> kept;
+		float hvol = 0.0f;
+		Vector3 hcom, hI;
+		if ( !tlCollHullLoops( hv3, cvsNorms, loops, kept ) ) {
+			err() << "error: convex: the hull planes do not close" << Qt::endl;
+			return 1;
+		}
+		tlCollHullMassProperties( hv3, loops, radius, &hvol, &hcom, &hI );
+		if ( !( hvol > 0.0f ) ) {
+			err() << "error: convex: zero hull volume" << Qt::endl;
+			return 1;
+		}
+		const QModelIndex iI = nif.getIndex( info, "Inertia Tensor" );
+		static const char * const nm[3][3] = { { "m11", "m12", "m13" },
+			{ "m21", "m22", "m23" }, { "m31", "m32", "m33" } };
+		for ( int r = 0; r < 3; r++ )
+			for ( int c = 0; c < 3; c++ )
+				nif.set<float>( iI, QLatin1String( nm[r][c] ), r == c ? hI[r] * mass / hvol : 0.0f );
+		// Center stays zero: the system adds the shape's own centre on top of it
+		// (measured: Center = shape com reported the body's at twice the offset)
+		nif.set<Vector4>( info, "Center", Vector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+		out() << "convex inertia " << hI[0] * mass / hvol << " " << hI[1] * mass / hvol << " "
+			<< hI[2] * mass / hvol << " loops " << loops.size() << " hull com " << hcom[0] << " "
+			<< hcom[1] << " " << hcom[2] << Qt::endl;
+	}
+
+	// 5. compile
+	const int objBlock = nif.getLink( iRoot, "Collision Object" );
+	const QModelIndex compiled = tlCompileCollision( &nif, nullptr, nif.getBlockIndex( objBlock ), true );
+	if ( !compiled.isValid() ) {
+		err() << "error: convex: compile refused (see the warning above)" << Qt::endl;
+		return 1;
+	}
+	wwEnsureRootBSXFlags( &nif, BSXF_Havok, nullptr, nullptr );
+	out() << "convex verts " << pts.size() << " hull " << cvsVerts.size() << " planes " << cvsNorms.size()
+		<< " volume " << vol << " shift " << shift[0] << " " << shift[1] << " " << shift[2]
+		<< " mass " << mass << " layer " << layer << " material 0x" << QString::number( material, 16 ).toUpper()
+		<< " radius " << radius << Qt::endl;
+	// the recentred geometry's bounds in game units: a record's OBND (MAGDROP1's MISC)
+	out() << "convex bounds " << ( bmin - shift )[0] << " " << ( bmin - shift )[1] << " " << ( bmin - shift )[2]
+		<< " " << ( bmax - shift )[0] << " " << ( bmax - shift )[1] << " " << ( bmax - shift )[2] << Qt::endl;
+	return saveNif( nif, outPath ) ? 0 : 1;
+}
+
 int cmdCast( const QString & file, const QString & spellId, int block,
 			 const QString & path, const QString & outFile )
 {
@@ -7344,6 +7808,21 @@ int nifskopeCliMain( const QStringList & args )
 	}
 
 	const QString cmd = a.takeFirst();
+	// lane MAGDROP1: `settle` and `convex` take their own arguments
+	if ( cmd == QLatin1String( "settle" ) ) {	// lane MAGDROP1
+		if ( !initModelLayer() ) { err().flush(); return 1; }
+		const int rc = cmdSettle( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	if ( cmd == QLatin1String( "convex" ) ) {	// lane MAGDROP1
+		if ( !initModelLayer() ) { err().flush(); return 1; }
+		const int rc = cmdConvex( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	// `nifx` reads and writes a sidecar, never a NIF: its own arguments, no
 	// model layer (lane PBRR1, gate d).
 	if ( cmd == QLatin1String( "nifx" ) ) {

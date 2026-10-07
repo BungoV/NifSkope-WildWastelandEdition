@@ -881,6 +881,8 @@ public:
 	 *  `ms` <= 0 shows the line until the next message or `clearTransientMessage`.
 	 */
 	void showTransientMessage( const QString & text, int ms = 5000 );
+	//! Animate + Loop + Play on, as the transport's buttons set them (a clip opened from outside plays at once).
+	void playAnimationLooped();
 	void clearTransientMessage();
 	QString transientMessage() const;
 	//! The load progress bar, hosted by the transient line (was the status bar).
