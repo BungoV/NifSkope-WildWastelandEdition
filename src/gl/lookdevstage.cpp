@@ -885,6 +885,13 @@ bool loadSkyNif( Scene * scene, const QString & path, NifModel & src, QString * 
 		found = scene->nifModel->getResourceFile( bytes, path, "meshes", ".nif" );
 	if ( !found )
 		found = Game::GameManager::get_file( bytes, Game::FALLOUT_4, path, "meshes", ".nif" );
+	/* lane ALLON1: the resource stack's ARCHIVES (WW_LODGEN_RESOURCES / his MO2 profile). A cell view opened on the
+	 * stack has no Fallout 4 archive index in the game manager, and the loose pass below never opens a .ba2, so the
+	 * dome and the clouds (Fallout4 - Meshes.ba2) were "not found" and every all-on cell shot fell back to the cube.
+	 * The cell's own models are read this way (lodgenReadModelBytes): the sky now resolves where they do.
+	 * WW_LOOKDEV_RED=nostacksky skips it (the gate's refuter). */
+	if ( !found && !wwLookdevRed( "nostacksky" ) )
+		found = lodgenReadModelBytes( QString(), path, bytes ) && !bytes.isEmpty();
 	if ( !found ) {
 		// the archive index only exists while Fallout 4 is enabled in the Resources settings; a loose
 		// data folder is read directly: the game manager's list (empty while that status is off) and

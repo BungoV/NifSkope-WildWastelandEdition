@@ -9,6 +9,13 @@
   "Brick light". Measured on Vault 111: the 4 m bricks change the probes' light by 29.6% against gathering every
   surfel (1 m bricks: 2.5%), so the brick size is left to bungo. Gate: tests/spells/cell_brick.sh (PASS; the
   independent rebuild agrees on every brick and probe; both red controls fail).
+## Lane ALLON1 (2026-10-07, branch allon1): all-on cell view -- BUILD PENDING (gates not run)
+
+- **The real sky in a cell view opened on his MO2 stack.** The Lookdev sky's dome and clouds
+  (meshes/sky/atmosphere.nif, clouds.nif, inside Fallout4 - Meshes.ba2) are now also read from the resource
+  stack's archives, the way the cell's own models are read. Before, a cell view on the stack could not find them
+  and every all-on shot drew the fallback cube map instead of the sky. Refuter: WW_LOOKDEV_RED=nostacksky.
+  Built (exe sha1 94b51f6c); the gate and the feature bisect of the other all-on defects wait for the game to close.
 
 ## Landed on main (2026-10-07, lane LAND-FINAL): the final-20261005 branch
 
