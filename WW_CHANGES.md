@@ -25,6 +25,19 @@
   from the new exe has 0 magenta from the marker. The remaining census hits (probe3 2775 px, probe4 13 px) are hues
   inside the false-colour direction views; they match main's pixel for pixel. Stage Z (the combined picture against
   the older before_main exe) fails on both exes alike (about 16,000 pixels), so it is not part of this change.
+- **FARLOD3's two reds break the current fixes again (REDFIX1).** Both had gone inert: run on main 8a99897f, each
+  still passed every FARLOD3 bar. `WW_CELL_FARLOD_RED=nobakeroots` only skipped the old root lending, and since
+  stack adoption the near cells take the bake's roots anyway. It now also clears the adopted stack's resource
+  roots (`cellFarLodStackFor`, `src/cellfarlod.cpp`) and writes "far lod: stack RED nobakeroots" to the notes.
+  `WW_R2A_RED=nomsn` sat in pbrm_default.frag, which no vanilla material reaches since LEGACYROUTE1. It now
+  clears `hasModelSpaceNormals` in the legacy program (`setupProgramCE1`, `src/gl/renderer.cpp`), so the far
+  ground's model-space normal sheet reads as tangent space again. Gate: FARLOD3's seam camera, default renderer
+  mode (fixpack1/redfix/gates.sh). With no red: magenta 0, BNS misses 0, dark 0.002, LOD/cell ratio 0.902, PASS.
+  nobakeroots: magenta 57,347 px and 230 BNS misses (the real missing-texture control), FAIL as wanted. nomsn:
+  dark blotches on the LOD half; 29.7 % of its pixels end up 25 %+ darker than with no red, against 1.7 % for
+  main + the old red. The ratio falls to 0.639, but that stays above FARLOD3's pre-set 0.60 bar, so the bar does
+  not count it as a fail. The bar was calibrated on PBR-mode blotches; this red needs a sharper bar. Main + old
+  reds: both PASS, so the old reds were inert.
 
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 

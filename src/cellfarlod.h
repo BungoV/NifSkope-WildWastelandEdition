@@ -77,7 +77,8 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 /*! lane FARLOD3: append the roots the session's FO4 resource folders lack, LAST -- the archive index keeps
  *  the FIRST copy of a path (libfo76utils ba2file.cpp), so every file the near cells' stack already has still
  *  comes from it; only paths nothing else answers (the far field's own) are served by the bake's roots.
- *  Returns the "far lod: resources ..." line. WW_CELL_FARLOD_RED=nobakeroots lends nothing. */
+ *  Returns the "far lod: resources ..." line. WW_CELL_FARLOD_RED=nobakeroots lends nothing (and, lane
+ *  FIXPACK1, cellFarLodStackFor then adopts the bake's plugins without its resource roots). */
 QString cellFarLodLendRoots( const QStringList & bakeRoots );
 //! Make `resources` the session's resource stack (the generator's and the texture folders), as main.cpp
 //! does for WW_LODGEN_RESOURCES. Nothing when it already is.

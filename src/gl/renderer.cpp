@@ -1487,8 +1487,12 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		 * switched off the substitute is default_n, a flat TANGENT-space
 		 * texel, and reading that as model-space would read it as "north" and
 		 * tilt the whole surface over. */
+		/* lane FIXPACK1 (REDFIX1): WW_R2A_RED=nomsn now breaks the _msn read where it lives since LEGACYROUTE1
+		 * (this legacy program, every renderer mode): the far ground's model-space sheet is read as tangent
+		 * space again. FARLOD3's red sat in pbrm_default.frag, which no vanilla material reaches any more. */
+		static const bool redNoMsn = qgetenv( "WW_R2A_RED" ) == "nomsn";
 		prog->uni1i( "hasModelSpaceNormals",
-			int( forced == &emptyString
+			int( !redNoMsn && forced == &emptyString
 				&& lsp->hasSF1( ShaderFlags::SLSF1_Model_Space_Normals ) ) );
 
 		prog->uniSampler( lsp, "GlowMap", 2, texunit, black, clamp );

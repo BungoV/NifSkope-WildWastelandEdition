@@ -1217,12 +1217,22 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 	r.adopt = true;
 	r.plugins = paths.join( QLatin1Char( ',' ) );
 	r.resources = keptRes;
+	/* lane FIXPACK1 (REDFIX1): WW_CELL_FARLOD_RED=nobakeroots now bites in the adopt regime too: the bake's
+	 * plugins are adopted but NOT its resource roots, so the far field's (and the near cells') mod assets
+	 * resolve through the session's stack alone. FARLOD3's red only stopped the lending, which an adopted
+	 * stack never reaches. */
+	const bool redNoRoots = qgetenv( "WW_CELL_FARLOD_RED" ) == "nobakeroots";
+	if ( redNoRoots )
+		r.resources.clear();
 	r.line = QStringLiteral( "far lod: stack ADOPTED -- %1; the near cells now load the bake's %2 plugins and %3 resource "
-		"roots (%4)%5" ).arg( what ).arg( paths.size() ).arg( keptRes.size() ).arg( QDir::toNativeSeparators( lodb ) )
+		"roots (%4)%5" ).arg( what ).arg( paths.size() ).arg( redNoRoots ? 0 : keptRes.size() ).arg( QDir::toNativeSeparators( lodb ) )
 		.arg( missing.isEmpty() ? QString() : QStringLiteral( "; skipped %1 of the bake's files that are gone, "
 			"each on a \"far lod: stack skips\" line" ).arg( missing.size() ) );
 	for ( const QString & m : std::as_const( missing ) )
 		r.line += QStringLiteral( "\n  far lod: stack skips %1 (gone from disk)" ).arg( m );
+	if ( redNoRoots )
+		r.line += QStringLiteral( "\n  far lod: stack RED nobakeroots -- the bake's %1 resource roots NOT adopted" )
+			.arg( keptRes.size() );
 	return r;
 }
 
