@@ -74,6 +74,49 @@ defineReplace(getRevision) {
 
 	!isEmpty(_REVISION):return($$_REVISION)
 
+	# LAND-REV (FIXPACK1): ask git first. A lane worktree's .git is a FILE
+	# ("gitdir: ..."), and main's branch refs can sit in packed-refs, so the
+	# file reads below found nothing there and the exe carried no revision:
+	# the gated worktree exe and the deployed main exe of ONE commit differed.
+	GIT_HEAD = $$system(git -C $$shell_quote($$PWD) rev-parse HEAD, lines, GIT_EC)
+	equals(GIT_EC, 0):count(GIT_HEAD, 1) {
+		GIT_HEAD ~= s/^(.......).*/\\1/
+		_REVISION = $$GIT_HEAD
+		export(_REVISION)
+		return($$_REVISION)
+	}
+
+	# No git on the PATH: read the files, following a worktree's gitdir and
+	# commondir and falling back to packed-refs.
+	GIT_DIR = $$PWD/.git
+	!exists($$GIT_DIR/HEAD) {
+		GIT_LINK = $$cat($$PWD/.git)
+		contains(GIT_LINK, "gitdir:"):GIT_DIR = $$member(GIT_LINK, 1)
+	}
+	GIT_COMMON = $$GIT_DIR
+	exists($$GIT_DIR/commondir):GIT_COMMON = $$GIT_DIR/$$cat($$GIT_DIR/commondir)
+	GIT_HEAD = $$cat($$GIT_DIR/HEAD)
+	contains(GIT_HEAD, "ref:") {
+		GIT_REF = $$member(GIT_HEAD, 1)
+		clear(GIT_HEAD)
+		exists($$GIT_COMMON/$$GIT_REF) {
+			GIT_HEAD = $$cat($$GIT_COMMON/$$GIT_REF)
+		} else:exists($$GIT_COMMON/packed-refs) {
+			GIT_PACKED = $$cat($$GIT_COMMON/packed-refs, lines)
+			for(GIT_LINE, GIT_PACKED) {
+				GIT_PAIR = $$split(GIT_LINE, " ")
+				equals(GIT_REF, $$member(GIT_PAIR, 1)):GIT_HEAD = $$member(GIT_PAIR, 0)
+			}
+		}
+		count(GIT_HEAD, 1) {
+			GIT_HEAD ~= s/^(.......).*/\\1/
+			_REVISION = $$GIT_HEAD
+			export(_REVISION)
+			return($$_REVISION)
+		}
+		return()
+	}
+
 	GIT_HEAD = $$cat(.git/HEAD)
 	# At this point GIT_HEAD either contains commit hash, or symbolic ref:
 	#	GIT_HEAD = 303c05416ecceb3368997c86676a6e63e968bc9b

@@ -799,6 +799,11 @@ win32 {
 		}
 		QMAKE_CXXFLAGS *= -mtune=generic
 	}
+
+	# LAND-REV (FIXPACK1): no link-time stamp in the PE header, so two builds of
+	# one commit (a lane worktree's gated exe, main's deployed exe) are the same
+	# bytes. ld stamps TimeDateStamp + CheckSum by default; nothing reads them.
+	win32:QMAKE_LFLAGS *= -Wl,--no-insert-timestamp
 }
 
 win32 {

@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FIXPACK1 (2026-10-12, branch fixpack1): queued defects in one lane
+
+- **A lane's gated exe and the deployed exe of the same commit are now the same file (LAND-REV).** Two things
+  made them differ. First, a lane worktree's exe carried no revision string: qmake read `.git/HEAD` as a folder,
+  and in a worktree `.git` is a file. `getRevision` (NifSkope_functions.pri) now asks `git rev-parse HEAD` first.
+  If git is not on the PATH, it falls back to the files, following the worktree's gitdir and commondir and
+  checking packed-refs. Second, the linker stamped the build time into the exe header; `-Wl,--no-insert-timestamp`
+  (NifSkope.pro, win32 g++) drops the stamp. Also, `tools/ww_build.sh` now keeps the Makefiles' NIFSKOPE_REVISION
+  on HEAD at every build and drops the three objects that compile it in (main, lodbfile, about_dialog). Before
+  this, a revision baked at the lane's first qmake went stale once the lane committed. Gate
+  (notes/fixpack1/pe_compare.py): a worktree build of 78f87254 equals main's deployed 8a99897f byte for byte,
+  except the two stamp fields. LAND3's gated exe a4b01b48 differed from it on 17.8 M bytes.
+
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
 - Three finished branches merged into main in this order: farlod3 (922b04fb), legacyroute1 (7bead0f1), skypic1
