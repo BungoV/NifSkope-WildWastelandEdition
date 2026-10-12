@@ -47,6 +47,15 @@
   Gate (fixpack1/yellow/diag2.sh, SKYPIC1's pic_12 regime: one bake, then relights, default renderer mode,
   yellow = lit grid colour ratio): main 8a99 78,132 yellow px (the same count as SKYPIC1's pic_12_before),
   fixed exe 2, fixed exe + WW_CELL_GRID=1 78,132 and byte-identical to main's picture. Magenta 0 in all.
+- **The probe bake reads a .pbrm's diffuse albedo (PBRALBEDO1) -- NOT GATED, BUILD PENDING.** In the default (tri)
+  albedo way, a surface whose material the renderer serves from a .pbrm gives the bake base x (1 - metallic),
+  through the renderer's own resolve (`pbrmResolveForMaterial`, `src/gl/glproperty.cpp`) and texture handling
+  (`ProbeAlbedo::samplePbrm`); a vanilla surface still reads its legacy diffuse. The Legacy menu mode bakes
+  legacy. lodgen's asset lookup now maps `.pbrm` to materials/ (it fell to textures/*.dds).
+  `WW_CELL_BAKE_PBRALBEDO_RED=diffuse` is the red. Gate (fixpack1/pbralb/gates.sh, DmndSolomonsHouse01, default
+  mode): vanilla bake byte-identical to main 8a99 (2 .tbk, 2013 surfels) PASS; magenta 0 in 6 pictures. The
+  fixture check FAILS: 0 of 26 materials resolved to the fixture's .pbrm, and the drawn view did not change
+  either, so the fixture is not reaching the resolve (cause not found; the diagnosis run was dropped for time).
 
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
