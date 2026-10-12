@@ -29,6 +29,7 @@ BSD License - see nifskope.h
 #include "nifskope.h"
 #include "model/nifmodel.h"
 
+#include <QAbstractButton>
 #include <QAction>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -42,6 +43,7 @@ BSD License - see nifskope.h
 #include <QTextStream>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QWidgetAction>
 
 namespace {
 
@@ -441,10 +443,12 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		QStringList layout;
 		QString section;
 		for ( QAction * a : sm->actions() ) {
-			if ( a->isSeparator() ) {
+			if ( qobject_cast<QWidgetAction *>( a ) ) {
 				section = a->text();
 				continue;
 			}
+			if ( a->isSeparator() )
+				continue;
 			layout << section + QLatin1Char( '/' ) + a->text().remove( QLatin1Char( '&' ) );
 		}
 		const QStringList want = {
@@ -554,8 +558,215 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 
 } // namespace
 
+/* ---------------------------------------------------------------------------
+ * lane SHOWMENU1: THE SHOW DROPDOWN GATE (WW_SHOWMENU_GATE=<out dir>).
+ *
+ * Runs the steps in WW_SHOWMENU_GATE_STEPS (comma separated) once the cell has opened,
+ * each after the last has settled, and writes what it saw as files for an outside
+ * script to judge (tests/spells/cell_showmenu.py) -- the driver measures nothing itself:
+ *   dump:<file>          the Show menu as drawn (SECTION / TICK / SUBMENU / SUBITEM lines)
+ *                        and every checkbox and drop-down left in the Cell dock (BOX lines)
+ *   panel / menu         PNG of the Cell dock, and of the Show menu popped up under its button
+ *   window               PNG of the whole window with the viewport composed in
+ *   shot:<name>          the viewport's own framebuffer, PNG
+ *   flip:<objectName>    trigger() the menu tick (the path a click takes); a trailing
+ *                        ":reopen" waits for the cell to be built again before settling
+ *   other:<objectName>   tick the unticked entry of that submenu
+ *   quit                 close the window (settings are written as they change)
+ * --------------------------------------------------------------------------- */
+namespace {
+
+struct ShowMenuGate
+{
+	NifSkope * skope = nullptr;
+	QString dir;
+	QStringList steps;
+	int at = 0;
+	int loads = 0;
+	bool started = false;
+};
+ShowMenuGate g_sm;
+
+QMenu * smMenu()
+{
+	return g_sm.skope ? g_sm.skope->findChild<QMenu *>( QStringLiteral( "CellWorkspaceShowMenu" ) ) : nullptr;
+}
+
+void smNote( const QString & line )
+{
+	QFile f( g_sm.dir + QStringLiteral( "/gate_steps.log" ) );
+	if ( f.open( QIODevice::Append | QIODevice::Text ) )
+		QTextStream( &f ) << line << "\n";
+}
+
+void smDump( const QString & name )
+{
+	QFile f( g_sm.dir + QLatin1Char( '/' ) + name );
+	if ( !f.open( QIODevice::WriteOnly | QIODevice::Text ) )
+		return;
+	QTextStream s( &f );
+	QString section;
+	if ( QMenu * m = smMenu() ) {
+		for ( QAction * a : m->actions() ) {
+			if ( qobject_cast<QWidgetAction *>( a ) || ( a->isSeparator() && !a->text().isEmpty() ) ) {
+				section = a->text();
+				s << "SECTION\t" << section << "\n";
+				continue;
+			}
+			if ( a->isSeparator() )
+				continue;
+			s << ( a->menu() ? "SUBMENU\t" : "TICK\t" ) << section << "\t" << a->text() << "\t"
+			  << ( a->menu() ? a->menu()->objectName() : a->objectName() ) << "\t"
+			  << ( a->isCheckable() ? ( a->isChecked() ? "1" : "0" ) : "-" ) << "\n";
+			if ( a->menu() )
+				for ( QAction * b : a->menu()->actions() )
+					s << "SUBITEM\t" << a->text() << "\t" << b->text() << "\t" << ( b->isChecked() ? "1" : "0" ) << "\n";
+		}
+	} else {
+		s << "NOMENU\n";
+	}
+	if ( QDockWidget * d = g_sm.skope->findChild<QDockWidget *>( QStringLiteral( "CellWorkspaceDock" ) ) ) {
+		for ( QWidget * w : d->findChildren<QWidget *>() ) {
+			if ( !w->inherits( "QCheckBox" ) && !w->inherits( "QComboBox" ) )
+				continue;
+			QString text;
+			if ( auto * b = qobject_cast<QAbstractButton *>( w ) )
+				text = b->text();
+			else if ( auto * c = qobject_cast<QComboBox *>( w ) )
+				text = c->currentText();
+			s << "BOX\t" << w->metaObject()->className() << "\t" << w->objectName() << "\t" << text << "\n";
+		}
+	}
+}
+
+void smNext();
+
+//! Repaint a few frames, then run the next step.
+void smSettle( int ms )
+{
+	if ( GLView * ogl = g_sm.skope->getGLView() )
+		ogl->update();
+	QTimer::singleShot( ms, g_sm.skope, []() {
+		if ( GLView * ogl = g_sm.skope->getGLView() )
+			ogl->update();
+		qApp->processEvents();
+		smNext();
+	} );
+}
+
+void smWaitLoad( int before, int waited )
+{
+	if ( g_sm.loads > before ) {
+		smSettle( 1500 );
+		return;
+	}
+	if ( waited > 240000 ) {
+		smNote( QStringLiteral( "TIMEOUT waiting for the rebuild" ) );
+		smSettle( 100 );
+		return;
+	}
+	QTimer::singleShot( 250, g_sm.skope, [before, waited]() { smWaitLoad( before, waited + 250 ); } );
+}
+
+void smNext()
+{
+	if ( g_sm.at >= g_sm.steps.size() )
+		return;
+	const QString step = g_sm.steps.at( g_sm.at++ ).trimmed();
+	const QString arg = step.section( QLatin1Char( ':' ), 1, 1 );
+	smNote( QStringLiteral( "step %1" ).arg( step ) );
+	if ( step.startsWith( QLatin1String( "dump:" ) ) ) {
+		smDump( arg );
+		smNext();
+	} else if ( step == QLatin1String( "panel" ) ) {
+		if ( QDockWidget * d = g_sm.skope->findChild<QDockWidget *>( QStringLiteral( "CellWorkspaceDock" ) ) )
+			d->grab().save( g_sm.dir + QStringLiteral( "/panel.png" ) );
+		smNext();
+	} else if ( step == QLatin1String( "window" ) ) {
+		composeWindowShot( g_sm.skope, g_sm.dir + QStringLiteral( "/window.png" ) );
+		smNext();
+	} else if ( step == QLatin1String( "menu" ) ) {
+		QMenu * m = smMenu();
+		QWidget * button = g_sm.skope->findChild<QWidget *>( QStringLiteral( "CellWorkspaceShowButton" ) );
+		if ( !m || !button ) {
+			smNote( QStringLiteral( "no Show menu" ) );
+			smNext();
+			return;
+		}
+		m->popup( button->mapToGlobal( QPoint( 0, button->height() ) ) );
+		QTimer::singleShot( 600, g_sm.skope, [m]() {
+			m->grab( QRect( QPoint( 0, 0 ), m->sizeHint() ) ).save( g_sm.dir + QStringLiteral( "/menu.png" ) );
+			m->hide();
+			smSettle( 300 );
+		} );
+	} else if ( step.startsWith( QLatin1String( "shot:" ) ) ) {
+		if ( GLView * ogl = g_sm.skope->getGLView() )
+			ogl->grabFramebuffer().save( g_sm.dir + QLatin1Char( '/' ) + arg + QStringLiteral( ".png" ) );
+		smNext();
+	} else if ( step.startsWith( QLatin1String( "flip:" ) ) || step.startsWith( QLatin1String( "other:" ) ) ) {
+		QMenu * m = smMenu();
+		QAction * a = nullptr;
+		if ( m && step.startsWith( QLatin1String( "flip:" ) ) ) {
+			a = m->findChild<QAction *>( arg );
+		} else if ( m ) {
+			if ( QMenu * sub = m->findChild<QMenu *>( arg ) )
+				for ( QAction * b : sub->actions() )
+					if ( !b->isChecked() )
+						a = b;
+		}
+		if ( !a ) {
+			smNote( QStringLiteral( "MISSING %1" ).arg( arg ) );
+			smNext();
+			return;
+		}
+		const int before = g_sm.loads;
+		a->trigger();
+		smNote( QStringLiteral( "  %1 now %2" ).arg( a->text() ).arg( a->isChecked() ? 1 : 0 ) );
+		if ( step.endsWith( QLatin1String( ":reopen" ) ) )
+			smWaitLoad( before, 0 );
+		else
+			smSettle( 1500 );
+	} else if ( step == QLatin1String( "quit" ) ) {
+		smNote( QStringLiteral( "quit" ) );
+		g_sm.skope->close();
+		QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
+	} else {
+		smNote( QStringLiteral( "UNKNOWN step" ) );
+		smNext();
+	}
+}
+
+void wwShowMenuGate( NifSkope * skope, const QString & dir )
+{
+	g_sm.skope = skope;
+	g_sm.dir = dir;
+	QDir().mkpath( dir );
+	g_sm.steps = QString::fromLocal8Bit( qgetenv( "WW_SHOWMENU_GATE_STEPS" ) ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+	QObject::connect( skope, &NifSkope::completeLoading, skope, []( bool, QString & ) {
+		g_sm.loads++;
+		smNote( QStringLiteral( "load %1" ).arg( g_sm.loads ) );
+		if ( g_sm.started )
+			return;
+		g_sm.started = true;
+		const GLView::WwCameraPin pin = GLView::wwCameraPinFromEnvironment();
+		if ( pin.active && g_sm.skope->getGLView() ) {
+			g_sm.skope->getGLView()->wwApplyCameraPin( pin );
+			smNote( QStringLiteral( "camera pinned" ) );
+		}
+		smSettle( 3000 );
+	} );
+}
+
+} // namespace
+
 void wwCellWorkspaceHarness( NifSkope * skope )
 {
+	// lane SHOWMENU1: the Show dropdown gate takes the run when it is asked for
+	const QString showMenuDir = QString::fromLocal8Bit( qgetenv( "WW_SHOWMENU_GATE" ) );
+	if ( !showMenuDir.isEmpty() && skope ) {
+		wwShowMenuGate( skope, showMenuDir );
+		return;
+	}
 	const QString reportPath = QString::fromLocal8Bit( qgetenv( "WW_CELLWS_TEST" ) );
 	if ( reportPath.isEmpty() || !skope )
 		return;

@@ -48,6 +48,7 @@ BSD License - see nifskope.h
 #include <QStringList>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 
 #include <algorithm>
 
@@ -402,7 +403,20 @@ void CellWorkspacePanel::buildUi()
 		a->setChecked( on );
 		return a;
 	};
-	showMenu->addSection( tr( "World" ) );
+	/* A heading row per section. QMenu::addSection's text is not drawn by this style (measured: a bare
+	 * line), so the heading is the panel's own band heading in a widget action, after a separator. */
+	auto section = [&]( const QString & name, const char * id ) {
+		if ( !showMenu->actions().isEmpty() )
+			showMenu->addSeparator();
+		QLabel * h = wwHeading( name, showMenu );
+		h->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; padding: 4px 8px 2px 8px; }" ) );
+		auto * wa = new QWidgetAction( showMenu );
+		wa->setDefaultWidget( h );
+		wa->setText( name );
+		wa->setObjectName( QStringLiteral( "CellWorkspaceShowSection_" ) + QLatin1String( id ) );
+		showMenu->addAction( wa );
+	};
+	section( tr( "World" ), "world" );
 	QSettings showSettings;
 	for ( int i = 0; i < g_showRowCount; i++ ) {
 		const CellShowRow & row = g_showRows[i];
@@ -443,7 +457,7 @@ void CellWorkspacePanel::buildUi()
 			cellFarLodTypeGroup->addAction( a );
 		}
 	}
-	showMenu->addSection( tr( "Lighting" ) );
+	section( tr( "Lighting" ), "lighting" );
 	cellLights = tick( showMenu, tr( "Cell lights" ), "CellWorkspaceCellLights", wwCellLightsOn() );
 	cellGi = tick( showMenu, tr( "GI" ), "CellWorkspaceCellGi", wwCellGiOn() );
 	cellFar = tick( showMenu, tr( "Far light" ), "CellWorkspaceCellFar", wwCellFarOn() );
@@ -467,7 +481,7 @@ void CellWorkspacePanel::buildUi()
 	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
 	cellAoDecal = tick( showMenu, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
 	cellGiGpu = tick( showMenu, tr( "GPU relight" ), "CellWorkspaceGpuRelight", wwCellGiGpuOn() );
-	showMenu->addSection( tr( "Effects" ) );
+	section( tr( "Effects" ), "effects" );
 	cellIs = tick( showMenu, tr( "Imagespace" ), "CellWorkspaceCellImageSpace", wwCellImageSpaceOn() );
 	// lane MOTION1: the game's temporal AA, the same state as the Scene popup's Temporal AA row; ships off
 	cellTaa = tick( showMenu, tr( "Temporal AA" ), "CellWorkspaceTemporalAa", wwGameTaaOn() );
