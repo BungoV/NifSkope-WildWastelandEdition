@@ -93,6 +93,13 @@ bool redNearest()
 	return on;
 }
 
+//! lane ALLON2: the red for the vertex normals -- every corner lit with its quad's face normal, as before
+bool redFaceNormal()
+{
+	static const bool on = qgetenv( "WW_TERRBLEND_RED" ) == "facenormal";
+	return on;
+}
+
 /*! One quadrant's layers as the ENGINE builds them (lane TERRBLEND1, read out
  *  of Todd's treat, 1.10.155, and cross-checked against Nomad's 1.10.163
  *  decompile -- notes/terrblend1/STATUS.md has the addresses):
@@ -415,6 +422,30 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 					} else {
 						proto.nrm[0] = proto.nrm[1] = 0.0f;
 						proto.nrm[2] = 1.0f;
+					}
+					/* lane ALLON2: EACH CORNER IS LIT WITH THE GAME'S VERTEX NORMAL (the LAND's VNML; a LAND
+					 * without one, the heights' central differences), never the quad's face normal. One flat
+					 * normal per 128-unit quad stepped the light at every quad edge: light and dark squares on
+					 * the ground grid. Red WW_TERRBLEND_RED=facenormal puts the face normal back. */
+					for ( int k = 0; k < 4; k++ ) {
+						float * vn = proto.v[k].n;
+						if ( redFaceNormal() ) {
+							for ( int c = 0; c < 3; c++ )
+								vn[c] = proto.nrm[c];
+						} else if ( land.hasNormals ) {
+							for ( int c = 0; c < 3; c++ )
+								vn[c] = land.normals[rr[k]][cc[k]][c];
+						} else {
+							const int r = rr[k], c = cc[k];
+							const int c0 = qMax( c - 1, 0 ), c1 = qMin( c + 1, LAND_GRID - 1 );
+							const int r0 = qMax( r - 1, 0 ), r1 = qMin( r + 1, LAND_GRID - 1 );
+							const float gx = ( land.heights[r][c1] - land.heights[r][c0] ) / ( float( c1 - c0 ) * step );
+							const float gy = ( land.heights[r1][c] - land.heights[r0][c] ) / ( float( r1 - r0 ) * step );
+							const float m = std::sqrt( gx * gx + gy * gy + 1.0f );
+							vn[0] = -gx / m;
+							vn[1] = -gy / m;
+							vn[2] = 1.0f / m;
+						}
 					}
 
 					int emitted = 0;

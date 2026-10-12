@@ -11,6 +11,14 @@
   Exterior Lighting, + BNS Trees all 0.000 black in bungo's circled region; + BNS Landscape 0.178. Gate
   (notes/allon2/gate1.sh, seam camera, default mode): circled region black share 0.185 on 8a99897f, 0.000 on the
   fix (0.000 with water on too); red WW_TERRBLEND_RED=matalpha puts the material back in charge, 0.185. 0 magenta.
+- **The faint squares and triangles on the ground are gone (ALLON2 #1b).** The cell build gave every 128-unit
+  ground quad ONE flat face normal, so the light stepped at every quad edge: a grid of faint squares, split into
+  triangles along the build's diagonal. The game lights the ground with the cell's own per-vertex normals (VNML).
+  Each ground vertex now carries its VNML normal, with central differences of the heights where a cell has none
+  (src/cellsplat.cpp, src/cellsplat.h, src/cellview.cpp). Gate (notes/allon2/tools/quadstep.py, seam camera: the tone
+  step across quad edges divided by the step across mid-quad lines, 1.0 = no grid): band y555-640 1.83 on 8a99897f,
+  1.22 on the fix; bungo's loop 3.42 on 8a99897f, 1.16 on the fix. Red WW_TERRBLEND_RED=facenormal (the flat normal
+  back): 1.67 and 1.36. The same steps show on a vanilla-only stack (1.87), so they were ours, not a mod's. 0 magenta.
 
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
