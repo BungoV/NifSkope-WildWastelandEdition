@@ -24,6 +24,7 @@
 #include <QString>
 
 class QWindow;
+class Scene;
 struct ProbeSoup;
 struct ProbeGiSpec;
 
@@ -34,6 +35,13 @@ struct ProbeSkyLight
 	float sunTo[3] = { 0, 0, 1 };      //!< unit, toward the sun (or the moon at night)
 	float sun[3] = { 0, 0, 0 };        //!< its color (linear)
 	QString label;                     //!< weather and hour, for the notes
+	/* lane SKYPIC1 (WW_CELL_SKYPIC=1, ships off): the sky per direction from the sky the view DRAWS (the dome, the
+	 * stars, the clouds; probeSkyPictureQ). picQ[axis][octant] = the integral over that octant of the drawn
+	 * radiance x max(axis . dir, 0), so a probe's sky on an axis = sum over octants of visibility x tint x picQ.
+	 * A sky of one colour C gives C x pi / 4 on the four octants of the axis's side: SKY1's flat result. */
+	bool pic = false;
+	double picQ[6][8][3] = {};
+	QString picNote;                   //!< what the probes' sky came from, for the notes
 	bool same( const ProbeSkyLight & o ) const;
 };
 
@@ -48,7 +56,15 @@ void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const P
 
 //! The cell view hands over the exterior it just relit, so a later change of weather relights it.
 void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec );
-//! One call a frame: relights the kept bake when the view's weather light has changed.
-void probeSkyTick( const void * nif, QWindow * view );
+//! One call a frame: relights the kept bake when the view's weather light has changed. Lane SKYPIC1: with
+//! WW_CELL_SKYPIC=1 it also captures the drawn sky (the view's GL context is current here) when it has changed,
+//! and the first capture relights at once (the cell opened before any frame was drawn).
+void probeSkyTick( Scene * scene, const void * nif, QWindow * view );
+
+//! lane SKYPIC1: per axis and octant, the integral of the captured sky's radiance x max(axis . dir, 0) d(solid
+//! angle) (exact texel solid angles, the cosine at the texel's centre). Reds: "flipz" reads the picture upside
+//! down, "nocos" drops the cosine.
+struct WwSkyPicture;
+void probeSkyPictureQ( const WwSkyPicture & pic, const QString & red, double Q[6][8][3] );
 
 #endif // PROBESKY_H

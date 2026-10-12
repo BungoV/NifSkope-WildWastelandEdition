@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "proberelight.h"
 #include "cellaodecal.h"	// lane AODECAL1
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -262,6 +263,29 @@ const double kAxes[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 
 
 }	// namespace
 
+/* lane STATICCACHE1 (deck C6, s42: "lights marked static are cached separately"; WW_CELL_GI_STATICCACHE=1, ships
+ * off). The placed lights' direct light on every surfel (and an interior's directional) does not change when only
+ * the weather or the hour does, so a relight keeps it: the next relight with the same surfels, soup, lights and
+ * shadow settings takes each surfel's sum from here and adds only the sun on top, in the order the full relight adds
+ * it (so the result is the full relight's, bit for bit). Red WW_CELL_GI_STATICCACHE_RED=withsun: the cache keeps the
+ * sum AFTER the sun, so the next hour's relight carries the old sun too. */
+namespace
+{
+struct StaticLightCache
+{
+	QByteArray key;
+	std::vector<double> E;          //!< 3 a surfel
+	std::vector<qint64> nr, nb;     //!< the shadow rays (the census counts them as if traced)
+	std::vector<char> any;
+};
+
+StaticLightCache & staticLightCache()
+{
+	static StaticLightCache c;
+	return c;
+}
+}	// namespace
+
 bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCellLighting & lighting,
 	const ProbeGiSpec & spec, ProbeGiResult * out )
 {
@@ -411,13 +435,76 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	std::atomic<qint64> recOver( 0 );
 	const int nLive = lights.size();
 	const int nAll = nLive + ( REC ? spec.recordExtra.size() : 0 );
+	// lane STATICCACHE1: the key of what the placed lights' stage reads (never with the GPU record: it wants the pairs)
+	const bool scOn = qEnvironmentVariableIntValue( "WW_CELL_GI_STATICCACHE" ) == 1 && !REC;
+	const bool scRedWithSun = scOn && qgetenv( "WW_CELL_GI_STATICCACHE_RED" ).trimmed() == "withsun";
+	StaticLightCache & SC = staticLightCache();
+	QByteArray scKey;
+	bool scHit = false;
+	std::vector<double> scE;
+	std::vector<qint64> scNr, scNb;
+	std::vector<char> scAny;
+	QElapsedTimer scClock;
+	scClock.start();
+	if ( scOn ) {
+		QCryptographicHash h( QCryptographicHash::Sha1 );
+		auto add = [&h]( const void * p, size_t n ) { h.addData( QByteArrayView( static_cast<const char *>( p ), qsizetype( n ) ) ); };
+		const QByteArray bd = bakeDir.toUtf8();
+		add( bd.constData(), size_t( bd.size() ) );
+		const quint64 nus = us.size();
+		add( &nus, 8 );
+		for ( const US & u : us ) {
+			add( u.p, sizeof u.p );
+			add( u.n, sizeof u.n );
+		}
+		add( soup.tris.data(), soup.tris.size() * sizeof( float ) );
+		add( soup.amask.triOf.data(), soup.amask.triOf.size() * sizeof( int ) );
+		for ( const WwCellLight & l : lights ) {
+			add( l.pos, sizeof l.pos );
+			add( &l.radius, 4 );
+			add( l.color, sizeof l.color );
+			const char sp = l.spot ? 1 : 0;
+			add( &sp, 1 );
+			add( l.dir, sizeof l.dir );
+			add( &l.cosOuter, 4 );
+			add( &l.bias, 4 );
+			add( &l.scale, 4 );
+			add( &l.exponent, 4 );
+			add( &l.cone, 4 );
+			add( &l.shape, 4 );
+			add( l.box, sizeof l.box );
+		}
+		const char flags[2] = { char( lighting.interior ? 1 : 0 ), char( lighting.hasDirectional ? 1 : 0 ) };
+		add( flags, 2 );
+		add( lighting.dirTo, sizeof lighting.dirTo );
+		add( lighting.dirColor, sizeof lighting.dirColor );
+		add( &spec.fixtureClear, 4 );
+		const char ns = redNoShadow ? 1 : 0;
+		add( &ns, 1 );
+		scKey = h.result();
+		scHit = SC.key == scKey && SC.E.size() == us.size() * 3;
+		if ( !scHit ) {
+			scE.assign( us.size() * 3, 0.0 );
+			scNr.assign( us.size(), 0 );
+			scNb.assign( us.size(), 0 );
+			scAny.assign( us.size(), 0 );
+		}
+	}
+	const double scKeyMs = scClock.nsecsElapsed() / 1e6;
 	parallelFor( us.size(), [&]( size_t i ) {
 		US & u = us[i];
 		const double o[3] = { u.p[0] + u.n[0] * 2.0, u.p[1] + u.n[1] * 2.0, u.p[2] + u.n[2] * 2.0 };
 		double E[3] = { 0, 0, 0 };
 		qint64 nr = 0, nb = 0;
 		bool any = false;
-		for ( int li = 0; li < nAll; li++ ) {
+		if ( scHit ) {   // lane STATICCACHE1: the placed lights' sum as the full relight would make it
+			for ( int c = 0; c < 3; c++ )
+				E[c] = SC.E[i * 3 + size_t( c )];
+			nr = SC.nr[i];
+			nb = SC.nb[i];
+			any = SC.any[i] != 0;
+		}
+		for ( int li = 0; li < ( scHit ? 0 : nAll ); li++ ) {
 			const bool live = li < nLive;
 			const WwCellLight & l = live ? lights[li] : spec.recordExtra[li - nLive];
 			const double Lv[3] = { l.pos[0] - u.p[0], l.pos[1] - u.p[1], l.pos[2] - u.p[2] };
@@ -468,7 +555,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			for ( int c = 0; c < 3; c++ )
 				E[c] += l.color[c] * a * nl;
 		}
-		if ( lighting.interior && lighting.hasDirectional ) {
+		if ( !scHit && lighting.interior && lighting.hasDirectional ) {
 			double dl = std::sqrt( double( lighting.dirTo[0] ) * lighting.dirTo[0] + double( lighting.dirTo[1] ) * lighting.dirTo[1]
 				+ double( lighting.dirTo[2] ) * lighting.dirTo[2] );
 			const double nl = ( u.n[0] * lighting.dirTo[0] + u.n[1] * lighting.dirTo[1] + u.n[2] * lighting.dirTo[2] ) / std::max( dl, 1e-9 );
@@ -478,6 +565,13 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				for ( int c = 0; c < 3; c++ )
 					E[c] += lighting.dirColor[c] * nl;
 			}
+		}
+		if ( scOn && !scHit && !scRedWithSun ) {
+			for ( int c = 0; c < 3; c++ )
+				scE[i * 3 + size_t( c )] = E[c];
+			scNr[i] = nr;
+			scNb[i] = nb;
+			scAny[i] = any ? 1 : 0;
 		}
 		// lane SKY1: the sun, behind one ray through the soup (to beyond anything loaded)
 		if ( sunOn ) {
@@ -504,6 +598,13 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				}
 			}
 		}
+		if ( scOn && !scHit && scRedWithSun ) {   // the red: the sun kept with the placed lights
+			for ( int c = 0; c < 3; c++ )
+				scE[i * 3 + size_t( c )] = E[c];
+			scNr[i] = nr;
+			scNb[i] = nb;
+			scAny[i] = any ? 1 : 0;
+		}
 		for ( int c = 0; c < 3; c++ )
 			u.B[c] = u.a[c] * E[c];
 		if ( u.emits )   // lane EMISSIVEGI1: guarded, so a surfel that does not glow keeps every bit
@@ -514,6 +615,19 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		if ( any )
 			lit++;
 	} );
+	if ( scOn ) {
+		const double ms = scClock.nsecsElapsed() / 1e6;
+		std::fprintf( stderr, "gi staticcache: %s; the surfels' direct light %.1f ms (the key %.1f ms of it); %zu surfels, %d placed lights\n",
+			scHit ? "HIT, the placed lights from the cache, the sun traced" : "miss, every light traced and kept",
+			ms, scKeyMs, us.size(), nLive );
+		if ( !scHit ) {
+			SC.key = scKey;
+			SC.E = std::move( scE );
+			SC.nr = std::move( scNr );
+			SC.nb = std::move( scNb );
+			SC.any = std::move( scAny );
+		}
+	}
 	R.shadowRays = rays;
 	R.shadowBlocked = shadowed;
 	R.surfelsLit = lit;

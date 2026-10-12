@@ -71,6 +71,7 @@ BSD License - see nifskope.h
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <vector>
 
 class Scene;
 struct WwWeatherEntry;
@@ -166,5 +167,23 @@ bool wwLookdevFogWanted( Scene * scene );
 /*! lane VOLFOG1: the weather's god-ray medium at the Lookdev hour (esmweather.h WwGodRayMedium packed as air rgb,
  *  fwd rgb, back rgb, fwd g, back g, post); false with no weather */
 bool wwLookdevGodRays( float m[12], QString * note );
+
+//! lane SKYPIC1: the sky the Lookdev background draws (the dome, the stars, the cloud layers; not the sun, the moon
+//! or the glare: the probes take those as the sun term), captured as light (exposure 1, no view transform) into six
+//! n x n float faces. rgb: face (+X -X +Y -Y +Z -Z), row from the bottom, texel from the left, 3 floats. A texel's
+//! direction is F + sx R + sy U, sx = 2 (i + 0.5) / n - 1, sy the same for the row (wwSkyPictureFace). Below the
+//! dome's rim: 0.
+struct WwSkyPicture
+{
+	int n = 0;
+	std::vector<float> rgb;
+	QString key, drew;
+	double ms = 0.0;
+};
+void wwSkyPictureFace( int face, float F[3], float R[3], float U[3] );
+//! what the capture depends on: plugin, weather, hour, day, the Sky and Clouds rows (not the cloud clock)
+QString wwLookdevSkyPictureKey();
+//! needs the view's GL context current. flatRgb (a control): a sky of that one colour, nothing drawn.
+bool wwLookdevCaptureSky( Scene * scene, int n, const float * flatRgb, WwSkyPicture & out, QString * why );
 
 #endif

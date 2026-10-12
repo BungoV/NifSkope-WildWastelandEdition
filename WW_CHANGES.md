@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Branch skypic1 (2026-10-11/12, lanes SKYPIC1 + STATICCACHE1, from prtpnext c00ab356 + ALLON1 771d67dc): not on main yet
+
+- **The probes' sky per direction, taken from the sky NifSkope draws (SKYPIC1, deck C9).** With
+  `WW_CELL_SKYPIC=1` the cell view captures the Lookdev sky it draws (the dome, the stars, the cloud layers; not
+  the sun or the moon, which stay the sun term) into six 64x64 linear faces, turns them into a per-direction table
+  and lights each probe's open-sky share from it, instead of the weather's six flat ambient colours. Below the
+  horizon the probes take the weather's ground-facing colour (NifSkope's dome went on below the horizon in one pale
+  colour, 23.5x too bright). Recaptured when the weather, hour, day or the Sky/Clouds rows change (about 0.2 s).
+  Ships OFF; off is byte for byte as before. Gate tests/spells/cell_skypic.sh + cell_skypic_check.py: PASS.
+- **Brick size review knob.** `WW_CELL_GI_BRICK_EDGE=<units>` sets BRICK1's brick edge (default 280 = 4 m), for
+  the per-surfel / 1 m / 4 m review sheet. Nothing default changes.
+- **Placed lights kept between relights (STATICCACHE1, deck C6).** With `WW_CELL_GI_STATICCACHE=1` a relight keeps
+  each surfel's direct light from the placed lights; the next relight with the same lights and surfels (a new hour
+  or weather) reuses it and traces only the sun. The result is the full relight's, byte for byte. Ships OFF.
+  Gate tests/spells/cell_staticcache.sh: PASS (byte for byte; Vault 111 direct light 76.6 -> 45.1 ms, the exterior no win).
+
 ## Branch prtpnext (2026-10-07, lane BRICK1): not on main yet
 
 - **Probe bricks, the Division deck's 4 m grid between the probes and the surfels (BRICK1).** Every relight now
@@ -9,6 +25,7 @@
   "Brick light". Measured on Vault 111: the 4 m bricks change the probes' light by 29.6% against gathering every
   surfel (1 m bricks: 2.5%), so the brick size is left to bungo. Gate: tests/spells/cell_brick.sh (PASS; the
   independent rebuild agrees on every brick and probe; both red controls fail).
+
 ## Lane ALLON1 (2026-10-07, branch allon1): all-on cell view -- BUILD PENDING (gates not run)
 
 - **The real sky in a cell view opened on his MO2 stack.** The Lookdev sky's dome and clouds

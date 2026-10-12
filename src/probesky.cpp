@@ -9,18 +9,110 @@
 #include "gl/scenelighting.h"
 #include "probegi.h"
 
+#include <QDir>
+#include <QFile>
 #include <QPointer>
 #include <QTimer>
 #include <QWindow>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 bool ProbeSkyLight::same( const ProbeSkyLight & o ) const
 {
 	return on == o.on && std::memcmp( amb, o.amb, sizeof amb ) == 0 && std::memcmp( sunTo, o.sunTo, sizeof sunTo ) == 0
-		&& std::memcmp( sun, o.sun, sizeof sun ) == 0;
+		&& std::memcmp( sun, o.sun, sizeof sun ) == 0 && pic == o.pic && ( !pic || std::memcmp( picQ, o.picQ, sizeof picQ ) == 0 );
+}
+
+/* ---- lane SKYPIC1: the drawn sky ---- */
+namespace
+{
+bool skyPicOn()
+{
+	return qEnvironmentVariableIntValue( "WW_CELL_SKYPIC" ) == 1;
+}
+
+//! WW_CELL_SKYPIC_FLAT=r,g,b (the known-answer control): the capture is that one colour; with the switch off the
+//! weather's six colours are all that colour, so the two runs must agree
+bool skyPicFlat( float rgb[3] )
+{
+	const QStringList p = QString::fromLatin1( qgetenv( "WW_CELL_SKYPIC_FLAT" ) ).split( QLatin1Char( ',' ) );
+	if ( p.size() != 3 )
+		return false;
+	for ( int c = 0; c < 3; c++ )
+		rgb[c] = p[c].toFloat();
+	return true;
+}
+
+struct PicNow
+{
+	QString key;            //!< the capture's key (wwLookdevSkyPictureKey + the flat control); empty = none tried
+	bool ok = false;
+	WwSkyPicture pic;
+	double Q[6][8][3] = {};
+	QString why;
+	float below[3] = { 0, 0, 0 };   //!< what stands below the horizon (the weather's ground-facing colour)
+};
+
+PicNow & picNow()
+{
+	static PicNow p;
+	return p;
+}
+
+QString picKeyNow()
+{
+	float f[3];
+	return wwLookdevSkyPictureKey() + ( skyPicFlat( f ) ? QStringLiteral( "|flat %1 %2 %3" ).arg( double( f[0] ) )
+		.arg( double( f[1] ) ).arg( double( f[2] ) ) : QString() );
+}
+}	// namespace
+
+void probeSkyPictureQ( const WwSkyPicture & pic, const QString & red, double Q[6][8][3] )
+{
+	std::memset( Q, 0, sizeof( double ) * 6 * 8 * 3 );
+	const int n = pic.n;
+	if ( n <= 0 || pic.rgb.size() != size_t( 6 ) * size_t( n ) * size_t( n ) * 3 )
+		return;
+	const bool flipz = red == QLatin1String( "flipz" ), nocos = red == QLatin1String( "nocos" );
+	auto A = []( double x, double y ) { return std::atan2( x * y, std::sqrt( x * x + y * y + 1.0 ) ); };
+	for ( int face = 0; face < 6; face++ ) {
+		float F[3], R[3], U[3];
+		wwSkyPictureFace( face, F, R, U );
+		// red flipz: every texel is read from the face mirrored in z (the picture upside down)
+		int src = face;
+		if ( flipz && face >= 4 )
+			src = face ^ 1;
+		const float * img = pic.rgb.data() + size_t( src ) * size_t( n ) * size_t( n ) * 3;
+		for ( int j = 0; j < n; j++ ) {
+			const double y0 = 2.0 * j / n - 1.0, y1 = 2.0 * ( j + 1 ) / n - 1.0, sy = 0.5 * ( y0 + y1 );
+			for ( int i = 0; i < n; i++ ) {
+				const double x0 = 2.0 * i / n - 1.0, x1 = 2.0 * ( i + 1 ) / n - 1.0, sx = 0.5 * ( x0 + x1 );
+				const double om = A( x0, y0 ) - A( x0, y1 ) - A( x1, y0 ) + A( x1, y1 );	// the texel's solid angle
+				double d[3];
+				for ( int c = 0; c < 3; c++ )
+					d[c] = F[c] + sx * R[c] + sy * U[c];
+				const double l = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
+				for ( double & c : d )
+					c /= l;
+				int row = j;
+				if ( flipz && face < 4 )
+					row = n - 1 - j;	// the side faces: up is +Z, so the mirror is the row
+				const float * L = img + ( size_t( row ) * size_t( n ) + size_t( i ) ) * 3;
+				const int o = ( d[0] < 0 ? 1 : 0 ) | ( d[1] < 0 ? 2 : 0 ) | ( d[2] < 0 ? 4 : 0 );	// the bake's octant
+				for ( int a = 0; a < 6; a++ ) {
+					const double cosA = ( a & 1 ) ? -d[a >> 1] : d[a >> 1];
+					if ( cosA <= 0.0 )
+						continue;
+					const double w = om * ( nocos ? 1.0 : cosA );
+					for ( int c = 0; c < 3; c++ )
+						Q[a][o][c] += w * double( L[c] );
+				}
+			}
+		}
+	}
 }
 
 ProbeSkyLight probeSkyLightNow()
@@ -46,6 +138,24 @@ ProbeSkyLight probeSkyLightNow()
 	s.label = QStringLiteral( "%1 hour %2%3" ).arg( wwLookdevWeatherKey() ).arg( wwLookdevHour(), 0, 'f', 2 )
 		.arg( fromWeather ? QString() : QStringLiteral( " (no weather record: the neutral light)" ) );
 	s.on = true;
+	// lane SKYPIC1: the drawn sky per direction, once a frame has captured it for this weather and hour
+	float flat[3];
+	const bool haveFlat = skyPicFlat( flat );
+	if ( skyPicOn() ) {
+		const PicNow & p = picNow();
+		if ( p.ok && p.key == picKeyNow() ) {
+			s.pic = true;
+			std::memcpy( s.picQ, p.Q, sizeof s.picQ );
+			s.picNote = QStringLiteral( "the drawn sky (%1x%1 a face; %2)" ).arg( p.pic.n ).arg( p.pic.drew );
+		} else {
+			s.picNote = p.key == picKeyNow() ? QStringLiteral( "refused (%1): the weather's six colours" ).arg( p.why )
+				: QStringLiteral( "no frame has drawn this sky yet: the weather's six colours until one does" );
+		}
+	} else if ( haveFlat ) {
+		for ( int a = 0; a < 6; a++ )   // the known-answer control's other arm: SKY1's flat sky in that colour
+			for ( int c = 0; c < 3; c++ )
+				s.amb[a][c] = flat[c];
+	}
 	return s;
 }
 
@@ -53,6 +163,15 @@ void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const P
 	bool redNoTint, double E[6][3] )
 {
 	const double kPi = 3.14159265358979323846;
+	if ( sky.pic ) {   // lane SKYPIC1: each octant's own drawn sky on this axis
+		for ( int a = 0; a < 6; a++ )
+			for ( int o = 0; o < 8; o++ ) {
+				const double s = redNoVis ? 1.0 : std::min( std::max( double( vis[o] ), 0.0 ), 1.0 );
+				for ( int c = 0; c < 3; c++ )
+					E[a][c] += s * ( tint && !redNoTint ? tint[o][c] / 255.0 : 1.0 ) * sky.picQ[a][o][c];
+			}
+		return;
+	}
 	for ( int a = 0; a < 6; a++ ) {
 		const int ax = a >> 1;
 		const bool neg = ( a & 1 ) != 0;
@@ -91,6 +210,59 @@ Kept & kept()
 	return k;
 }
 
+//! lane SKYPIC1: the relight that took the drawn sky states it, and a gate's dump folder gets it beside the bake's
+void skyPicRelit( const ProbeGiResult & gr, const ProbeGiSpec & spec )
+{
+	const ProbeSkyLight & s = spec.sky;
+	QString open;
+	for ( int a = 0; a < 6; a++ ) {
+		double q[3] = { 0, 0, 0 };
+		for ( int o = 0; o < 8; o++ )
+			for ( int c = 0; c < 3; c++ )
+				q[c] += s.picQ[a][o][c];
+		const double w = ( double( s.amb[a][0] ) + s.amb[a][1] + s.amb[a][2] ) * 3.14159265358979323846;
+		open += QStringLiteral( " %1 %2" ).arg( QStringLiteral( "+X,-X,+Y,-Y,+Z,-Z" ).split( QLatin1Char( ',' ) )[a] )
+			.arg( w > 0 ? ( q[0] + q[1] + q[2] ) / w : 0.0, 0, 'f', 3 );
+	}
+	const PicNow & p = picNow();
+	std::fprintf( stderr, "gi skypic: %s; relit %s; captured in %.1f ms; open sky drawn / weather per axis:%s\n",
+		qPrintable( s.picNote ), qPrintable( s.label ), p.pic.ms, qPrintable( open ) );
+	std::fprintf( stderr, "gi skypic census: %s\n", qPrintable( probeGiCensusText( gr ).replace( QLatin1Char( '\n' ), QStringLiteral( " / " ) ) ) );
+	const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_GI_DUMP" ) );
+	if ( dump.isEmpty() )
+		return;
+	QString err;
+	if ( !probeGiDump( gr, spec, dump, &err ) ) {
+		std::fprintf( stderr, "gi skypic dump FAILED: %s\n", qPrintable( err ) );
+		return;
+	}
+	// gi_skypic.bin: "SKYPIC1\0", int32 n, then 6 x n x n x 3 float32 (face +X -X +Y -Y +Z -Z, row from the bottom)
+	QFile b( QDir( dump ).filePath( QStringLiteral( "gi_skypic.bin" ) ) );
+	if ( b.open( QIODevice::WriteOnly ) ) {
+		b.write( "SKYPIC1", 8 );
+		const qint32 n = p.pic.n;
+		b.write( reinterpret_cast<const char *>( &n ), 4 );
+		b.write( reinterpret_cast<const char *>( p.pic.rgb.data() ), qint64( p.pic.rgb.size() * sizeof( float ) ) );
+	}
+	QFile t( QDir( dump ).filePath( QStringLiteral( "gi_skypic.txt" ) ) );
+	if ( t.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+		QString x = QStringLiteral( "key %1\ndrew %2\nn %3\nms %4\nnote %5\nbelow %6 %7 %8\n" ).arg( p.key, p.pic.drew )
+			.arg( p.pic.n ).arg( p.pic.ms, 0, 'f', 2 ).arg( s.picNote ).arg( double( p.below[0] ), 0, 'g', 9 )
+			.arg( double( p.below[1] ), 0, 'g', 9 ).arg( double( p.below[2] ), 0, 'g', 9 );
+		for ( int f = 0; f < 6; f++ ) {
+			float F[3], R[3], U[3];
+			wwSkyPictureFace( f, F, R, U );
+			x += QStringLiteral( "face %1 F %2 %3 %4 R %5 %6 %7 U %8 %9 %10\n" ).arg( f ).arg( F[0] ).arg( F[1] ).arg( F[2] )
+				.arg( R[0] ).arg( R[1] ).arg( R[2] ).arg( U[0] ).arg( U[1] ).arg( U[2] );
+		}
+		for ( int a = 0; a < 6; a++ )
+			for ( int o = 0; o < 8; o++ )
+				x += QStringLiteral( "q %1 %2 %3 %4 %5\n" ).arg( a ).arg( o ).arg( s.picQ[a][o][0], 0, 'g', 12 )
+					.arg( s.picQ[a][o][1], 0, 'g', 12 ).arg( s.picQ[a][o][2], 0, 'g', 12 );
+		t.write( x.toUtf8() );
+	}
+}
+
 void relightKept()
 {
 	Kept & k = kept();
@@ -101,6 +273,8 @@ void relightKept()
 	ProbeGiResult gr;
 	if ( !probeGiRelight( k.soup, k.bakeDir, *L, k.spec, &gr ) )
 		return;
+	if ( k.spec.sky.pic )
+		skyPicRelit( gr, k.spec );
 	WwCellGi gi;
 	for ( int c = 0; c < 3; c++ ) {
 		gi.origin[c] = gr.origin[c];
@@ -142,14 +316,59 @@ void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bak
 	k.wanted = spec.sky;
 }
 
-void probeSkyTick( const void * nif, QWindow * view )
+void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 {
 	Kept & k = kept();
 	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
 		return;
+	bool firstPic = false;
+	if ( skyPicOn() && wwLookdevActive() ) {   // lane SKYPIC1: capture the drawn sky when it changed
+		PicNow & p = picNow();
+		const QString key = picKeyNow();
+		if ( p.key != key ) {
+			float flat[3];
+			const bool haveFlat = skyPicFlat( flat );
+			const int n = qEnvironmentVariableIsSet( "WW_CELL_SKYPIC_N" ) ? qEnvironmentVariableIntValue( "WW_CELL_SKYPIC_N" ) : 64;
+			p.key = key;
+			p.why.clear();
+			p.ok = wwLookdevCaptureSky( scene, n, haveFlat ? flat : nullptr, p.pic, &p.why );
+			if ( p.ok ) {
+				/* below the horizon the game shows ground (the far terrain), never sky; NifSkope's dome goes on below it
+				 * only because the cell's ground ends. There the probes take the weather's ground-facing colour, as SKY1
+				 * did (a surface facing down in the open takes pi x that colour, as before); the flat control: its colour */
+				const ProbeSkyLight w = probeSkyLightNow();
+				for ( int c = 0; c < 3; c++ )
+					p.below[c] = haveFlat ? flat[c] : w.amb[5][c];
+				const int m = p.pic.n;
+				for ( int face = 0; face < 6; face++ ) {
+					float F[3], R[3], U[3];
+					wwSkyPictureFace( face, F, R, U );
+					for ( int j = 0; j < m; j++ )
+						for ( int i = 0; i < m; i++ ) {
+							const double sx = 2.0 * ( i + 0.5 ) / m - 1.0, sy = 2.0 * ( j + 0.5 ) / m - 1.0;
+							if ( F[2] + sx * R[2] + sy * U[2] >= 0.0 )
+								continue;
+							float * t = p.pic.rgb.data() + ( ( size_t( face ) * size_t( m ) + size_t( j ) ) * size_t( m ) + size_t( i ) ) * 3;
+							for ( int c = 0; c < 3; c++ )
+								t[c] = p.below[c];
+						}
+				}
+			}
+			if ( p.ok )
+				probeSkyPictureQ( p.pic, QString::fromLatin1( qgetenv( "WW_CELL_SKYPIC_RED" ) ).trimmed(), p.Q );
+			else
+				std::fprintf( stderr, "gi skypic: capture refused (%s)\n", qPrintable( p.why ) );
+			firstPic = p.ok && !k.wanted.pic;
+		}
+	}
 	const ProbeSkyLight now = probeSkyLightNow();
 	if ( now.same( k.wanted ) )
 		return;
+	if ( firstPic && now.pic ) {   // the cell opened before any frame: take the drawn sky now, not 0.4 s later
+		k.wanted = now;
+		relightKept();
+		return;
+	}
 	// the light moved: relight once it has stood still (an hour slider drags through many values)
 	k.wanted = now;
 	if ( !k.timer || k.view != view ) {

@@ -1922,6 +1922,79 @@ with a brick table in the `.tbk` (a v6 layout). The GPU relight (GPURELIGHT1) st
 Previews: scratchpad/brick1_20261007/gate/brick1_floors.png (floors from above: surfel light | brick light) and
 brick1_sheet.png (Pass 4 | Pass 5 | GI links | GI bricks | difference x8, two cameras).
 
+### 2as. The drawn sky per direction, the brick-size sheet, the placed-light cache (lanes SKYPIC1 + STATICCACHE1, 2026-10-11/12)
+
+Branch skypic1 from prtpnext c00ab356, with ALLON1's sky-from-the-stack fix cherry-picked (352ba8a0 -> 771d67dc).
+Rung exe 08589470 (before the lane); final exe 274eb52e (release/snap_skypic1_a4).
+
+**SKYPIC1 (deck C9).** SKY1 (2ak) lit a probe's open-sky share from the weather's six ambient colours. With
+`WW_CELL_SKYPIC=1`:
+
+- **Capture** (`src/gl/lookdevstage.cpp` wwLookdevCaptureSky): the Lookdev dome, stars and cloud layers are drawn
+  into six 64x64 RGBA32F faces (+X -X +Y -Y +Z -Z; up +Z for the sides, +Y for the poles), exposure 1 and a new
+  linear view transform (`viewTransform == 3` in lookdev_output.glsl), only while the capture runs. The sun, moon
+  and glare are left out: the probes take them as the sun term. Key: plugin, weather, hour, day, Sky and Clouds rows
+  (not the cloud clock); recaptured on a key change, then the kept bake is relit at once.
+- **Below the horizon**: NifSkope's dome continues below the horizon in one pale colour (0.518 0.714 0.969); a probe
+  would read it as a sky under the ground (drawn/weather on -Z 23.5x). Texels below the horizon take the weather's
+  ground-facing colour (amb[-Z]), so a downward surface in the open is lit as under SKY1 (drawn/weather on -Z 1.000).
+- **Table**: Q[axis][octant][rgb] = sum over texels of L x max(0, axis . dir) x the texel's exact solid angle; the
+  probe's sky E[axis] = sum over octants of its visibility x glass tint x Q. A one-colour sky C gives C x pi/4 per
+  axis side: SKY1's formula, which is the gate's known-answer control.
+- **Dump**: gi_skypic.bin (`SKYPIC1\0`, n, the faces) + gi_skypic.txt (key, drew, ms, below, the table).
+  Notes: `gi skypic:` (what was drawn, capture ms, open sky drawn/weather per axis) and `gi skypic census:`.
+- **Reds**: `WW_CELL_SKYPIC_RED=flipz` (poles swapped, side rows mirrored) and `=nocos` (no cosine).
+- Ships OFF.
+
+Gate tests/spells/cell_skypic.sh (exe 274eb52e against the rung 08589470), exterior Commonwealth -17,23 and the
+Show-Sky interior ConcordMuseum01, PASS:
+
+- off: 16 dump files byte for byte the rung's, both cells; pictures identical (0 pixels over 2 levels);
+- on: tests/spells/cell_skypic_check.py rebuilds the table from the dumped faces with its own cube geometry:
+  Q largest difference 1.11e-12 (bar 1e-4), solid angles sum to 4 pi x 1.00000000; S the probes agree 100.00%
+  (exterior 340 of 340 see sky, museum 536 of 901), totals 1.00000;
+- K (one-colour sky 0.3 0.45 0.6, drawn and integrated, against SKY1's flat): 8.01e-05 (bar 1e-3); the real sky
+  fails K;
+- reds: flipz Q 0.939 / S agree 0% (exterior), 40.5% (museum); nocos Q 1.09 / S ratio 2.02: both FAIL, as they must;
+- D zenith: the capture's +Z within 0.4 levels of the view's own zenith (bar 3).
+- Measured: the drawn sky against the weather ambient per axis, noon CommonwealthClear: +X 1.73 -X 1.12 +Y 1.16
+  -Y 1.70 +Z 0.99 -Z 1.00 (the horizon band is brighter than the weather's side colours). Capture 200-250 ms.
+- Pictures (before = off, after = on, hour 12 and 19): exterior moves a mean 1.9 / 2.8 levels (largest 33 / 43);
+  the museum 0.01 / 0.02 levels (its sky comes through few openings). E:/Projects/Claude/notes/skypic1/sky/ and
+  skypic1_sky_sheet.png. Magenta census: 0 pixels in every picture.
+
+**Brick-size review (Part B).** `WW_CELL_GI_BRICK_EDGE=<units>` (default 280). Sheet
+E:/Projects/Claude/notes/skypic1/skypic1_bricks_sheet.png, Vault111Cryo, BRICK1's main + door cameras: per-surfel
+(the default), 1 m, 4 m, and the differences x4. Each probe's total light against per-surfel: 1 m mean 3.20%
+(95th percentile 8.71%), 370,326 gather terms; 4 m mean 45.09% (95th 186.6%), 79,834 terms; 375,838 links.
+Pictures: 1 m 0.07 / 0.14 levels mean, 0 pixels over 8; 4 m 0.97 / 1.80 levels, 11,923 / 577 pixels over 8.
+Default unchanged (per-surfel); the brick size stays bungo's call.
+
+**STATICCACHE1 (deck C6).** With `WW_CELL_GI_STATICCACHE=1` (`src/probegi.cpp`) a relight
+keeps each surfel's direct light from the placed lights (and an interior's directional), keyed by a SHA1 over the
+bake folder, the surfels, the soup, the lights and the shadow settings. The next relight with the same key (a new
+hour or weather) takes that sum from the cache and traces only the sun on top, in the order the full relight adds it,
+so the result is the full relight's bit for bit. Not with the GPU record (it wants the pairs). Red
+`WW_CELL_GI_STATICCACHE_RED=withsun` keeps the sum after the sun. `WW_CELL_GI_STATICCACHE_WARM=1` (the gate's
+helper): the cell view relights once under another sun (turned 90 degrees, half as bright) first. Ships OFF.
+
+Gate tests/spells/cell_staticcache.sh (exe 274eb52e against the rung 08589470), PASS: off 14 (Vault111Cryo) and 16
+(exterior -17,23) dump files byte for byte the rung's; the warm-up alone leaves the dump the full relight's; on: the
+warm-up misses, the dumped relight hits, and every .bin is the full relight's byte for byte, pictures 0 pixels
+different; red withsun differs on the exterior (the interior has no sun, so nothing to keep wrong).
+
+Time (the surfels' direct-light stage, one run): Vault111Cryo, 840 placed lights, 51,522 surfels: 76.6 ms miss ->
+45.1 ms hit (-31.5 ms, 41%); of the hit, 42.0 ms is the key itself (hashing every surfel and the soup), so the
+tracing went 33.3 -> 3.1 ms. Exterior, 12 placed lights: 84.5 -> 84.0 ms (no win; the key is 77.7 ms of it).
+Measured only; nothing traded. The next win is the key: hash the soup once per bake instead of per relight.
+Pictures E:/Projects/Claude/notes/skypic1/staticcache/ (cryo/ext full and cache), magenta census 0.
+
+**Magenta (bungo's rule 2026-10-11).** BRICK1's Pass 4/5 magenta is the cell-view shader's own "no probe / no surfel
+here" marker (cell_lights.glsl cellPassOut, `none = vec3(1,0,1)`, deck s65), not a missing texture: the bake
+reported one missing albedo map. Under the new rule that marker reads as a defect; recolouring it touches a dozen
+gates that test for it (cell_pass_check.py, cell_rooms*, cell_pick, cell_water_hdr, cell_workspace), so it is left
+for bungo. In GI-links Pass views the "111" vault sign is magenta: no probe reaches it.
+
 ## 3. Open
 
 - `.tbk` v4 sides, room ids and glass tint: built (2y, BAKE4; six sides a cell in v5, SIDES6).

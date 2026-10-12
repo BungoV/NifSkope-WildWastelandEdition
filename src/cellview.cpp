@@ -4751,6 +4751,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			// lane BRICK1: the probes gather the deck's 4 m bricks (off: their links, as before); WW_CELL_GI_BRICK_RED its refuters
 			gs.bricks = qEnvironmentVariableIntValue( "WW_CELL_GI_BRICKS" ) == 1;
 			gs.brickRed = QString::fromLatin1( qgetenv( "WW_CELL_GI_BRICK_RED" ) ).trimmed();
+			// lane SKYPIC1 (part B, the review sheet): WW_CELL_GI_BRICK_EDGE=<game units> sizes the bricks (unset: 4 m)
+			if ( qEnvironmentVariableIsSet( "WW_CELL_GI_BRICK_EDGE" ) )
+				gs.brickEdge = qEnvironmentVariable( "WW_CELL_GI_BRICK_EDGE" ).toFloat();
 			gs.passes = qEnvironmentVariableIntValue( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
 			gs.rooms.red = QString::fromLatin1( qgetenv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
@@ -4825,6 +4828,18 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				probeNotes += aoBuild.census();
 				if ( aoSet && !aoSet->copies.empty() )
 					gs.aoDecals = aoSet;
+			}
+			if ( qEnvironmentVariableIntValue( "WW_CELL_GI_STATICCACHE_WARM" ) == 1 ) {
+				/* lane STATICCACHE1's gate: one relight first under another sun (turned 90 degrees, half as bright), so
+				 * the relight below is a second hour's: it takes the placed lights from the cache */
+				ProbeGiSpec gw = gs;
+				const float x = gw.sky.sunTo[0], y = gw.sky.sunTo[1];
+				gw.sky.sunTo[0] = -y;
+				gw.sky.sunTo[1] = x;
+				for ( float & c : gw.sky.sun )
+					c *= 0.5f;
+				ProbeGiResult grw;
+				probeGiRelight( probeSoup, giBakeDir, *L, gw, &grw );
 			}
 			ProbeGiResult gr;
 			const bool ok = probeGiRelight( probeSoup, giBakeDir, *L, gs, &gr );
