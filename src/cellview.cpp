@@ -28,6 +28,7 @@ BSD License - see nifskope.h
 #include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
 #include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
 #include "cellfarlod.h"		// lane FARLOD1: the far field around the block
+#include "cellmodpick.h"	// lane MODPICK1
 #include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
 #include "cellaodecal.h"		// lane AODECAL1: baked AO decals under big movable statics
 
@@ -1516,6 +1517,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 * load order and resources the far LOD was baked from (its .lodb record), so a mod's trees are the mod's
 	 * trees on both sides of the block edge. Decided before the worldspace loads; the line goes in the notes. */
 	QString farStackNote;
+	QString modLodb;               // lane MODPICK1: the shown bake's record, empty when none
+	QStringList modBakePresent;    // lane MODPICK1: its plugins still on disk
 	if ( !spec.interior && cellFarLodWanted() ) {
 		QString preRoot = spec.dataRoot;
 		if ( preRoot.isEmpty() && !lodgenResourceSearchPaths().isEmpty() )
@@ -1523,6 +1526,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		QStringList preSearched;
 		const CellFarStack fs = cellFarLodStackFor( spec.world, cellFarLodl( spec.world, preRoot, preSearched ), spec.plugins );
 		farStackNote = QStringLiteral( "  " ) + fs.line + QLatin1Char( '\n' );
+		modLodb = fs.lodb;
+		modBakePresent = fs.bakePresent;
 		qInfo().noquote() << fs.line;
 		if ( fs.adopt ) {
 			spec.plugins = fs.plugins;
@@ -1533,6 +1538,20 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			farStackNote += QStringLiteral( "  " ) + lend + QLatin1Char( '\n' );
 			qInfo().noquote() << lend;
 		}
+	}
+
+	/* lane MODPICK1: the mod picker's saved choice for this worldspace (cellmodpick.h). Untouched, the plugin
+	 * list stays exactly what the cell asked (after the FARLOD stack step); the line goes in the notes, and
+	 * the view's note is set once the document is built. */
+	QString modPickNote, modPickViewNote;
+	cellModPickSetViewNote( nif, QString() );
+	if ( !spec.interior ) {
+		const CellModApplied mp = cellModPickApply( spec.world, spec.plugins, modLodb, modBakePresent );
+		spec.plugins = mp.plugins;
+		cellFarLodAdoptResources( mp.resources );	// the MO2 profile's stack when the choice came from it
+		modPickNote = QStringLiteral( "  " ) + mp.line + QLatin1Char( '\n' );
+		modPickViewNote = mp.viewNote;
+		qInfo().noquote() << mp.line;
 	}
 
 	// ---- the worldspace, or (lane PRTP1) one interior cell
@@ -4740,6 +4759,23 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	nif->holdUpdates( false );
 	nif->updateModel();
 	CellSpeed::mark( "document updateModel" );
+	// lane MODPICK1: "Mods differ from the far LOD bake", over the view, for as long as this document is the cell
+	cellModPickSetViewNote( nif, modPickViewNote );
+	{
+		static QSet<const void *> hooked;
+		if ( !hooked.contains( nif ) ) {
+			hooked.insert( nif );
+			const void * key = nif;
+			QObject::connect( nif, &QAbstractItemModel::modelReset, nif, [nif, key]() {
+				if ( nif->getBlockCount() == 0 )
+					cellModPickSetViewNote( key, QString() );
+			} );
+			QObject::connect( nif, &QObject::destroyed, [key]() {
+				cellModPickSetViewNote( key, QString() );
+				hooked.remove( key );
+			} );
+		}
+	}
 
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
 	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin );
@@ -5208,6 +5244,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		  << refModel.countOfFate( CellRefFate::NoBase ) << ")\n";
 		s << probeNotes;   // lane PRTPPLACE, empty unless WW_CELL_PROBES
 		s << farLodNotes;  // lane FARLOD1, empty unless the Far LOD row
+		s << modPickNote;  // lane MODPICK1, exteriors
 		s << "  built in " << clock.elapsed() << " ms\n";
 #ifndef ESM_HAS_CELL_FIELDS
 		s << "  NOTE: built without the esmdata cell fields (XLYR, XESP, editor ids and "

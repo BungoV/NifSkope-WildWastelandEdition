@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 
 #include "cellview.h"
 #include "cellfarlod.h"
+#include "cellmodpickbox.h"	// lane MODPICK1: the Mods band
 #include "gl/celllights.h"
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
@@ -659,6 +660,20 @@ void CellWorkspacePanel::buildUi()
 		emit reopenRequested( g_path );
 	} );
 
+	/* ---- lane MODPICK1: which mods the cells load (bungo 10-12). The list, the saved choice per worldspace
+	 * and the one-stack rule live in cellmodpick.h; Apply or Reset rebuilds the cell like the Far LOD row. */
+	page->addWidget( wwHeading( tr( "Mods" ), this ) );
+	modPick = new CellModPickBox( this );
+	modPick->onChoiceChanged = [this]() {
+		if ( g_path.isEmpty() )
+			return;	// nothing open: the next open reads it
+		g_over = g_spec;
+		g_haveOverrides = true;
+		say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+		emit reopenRequested( g_path );
+	};
+	page->addWidget( modPick );
+
 	// ---- band 4: the legend
 	page->addWidget( wwHeading( tr( "Legend" ), this ) );
 	legend = new QTreeWidget( this );
@@ -774,6 +789,13 @@ void CellWorkspacePanel::onSceneChanged()
 	rebuildLegendAndCensus();
 	if ( cellPass )	// lane PROBEVIEW1: a Pass needs this document's bake relit
 		cellPass->setEnabled( nif && wwCellGiFor( nif ) );
+	if ( modPick )	// lane MODPICK1: the open exterior's mods
+		modPick->refresh( g_path.isEmpty() || g_spec.interior ? QString() : g_spec.world );
+}
+
+CellModPickBox * CellWorkspacePanel::modPicker() const
+{
+	return modPick;
 }
 
 void CellWorkspacePanel::rebuildList()

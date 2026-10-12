@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include <QWidget>
 
 class GLView;
+class CellModPickBox;
 class NifModel;
 class NifSkope;
 class QAction;
@@ -145,6 +146,8 @@ public:
 	//! Click Bake (lane PRTPBAKE): place, then write the `.tbk` sector files.
 	void bakeProbes();
 	void setProbesShown( bool on );
+	//! lane MODPICK1: the Mods band (the harness drives it through its own clicks).
+	CellModPickBox * modPicker() const;
 
 public slots:
 	//! A cell scene was built, or the document changed: rebuild everything.
@@ -231,6 +234,7 @@ private:
 	QPushButton * probesBake = nullptr;
 	QTreeWidget * probeKinds = nullptr;
 	void rebuildProbeKinds();
+	CellModPickBox * modPick = nullptr;	// lane MODPICK1: the Mods band
 	QLabel * census = nullptr;
 	QLabel * note = nullptr;
 	bool noteRefusal = false;

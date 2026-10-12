@@ -72,6 +72,10 @@ struct CellFarStack
 	 *  materials/bns/lod/... in "BNS Trees - Main.ba2"); without them the far trees drew magenta (legacy) or
 	 *  white (PBR). `cellFarLodLendRoots` appends them AFTER the session's stack. Empty on match/adopt/red. */
 	QStringList bakeRoots;
+	/*! lane MODPICK1: the bake record read (empty: none -- not FO4CS, or no readable .lodb) and its plugins still on
+	 *  disk in the bake's order, so the mod picker can list the bake and say when the near cells differ from it. */
+	QString lodb;
+	QStringList bakePresent;
 };
 CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, const QString & nearPlugins );
 /*! lane FARLOD3: append the roots the session's FO4 resource folders lack, LAST -- the archive index keeps

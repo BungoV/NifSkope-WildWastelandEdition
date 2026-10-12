@@ -51,6 +51,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellgrass.h"	// lane GRASSMB1: the grass wind's clock
 #include "impostorchunk.h"
 #include "cellfarlod.h"		// lane FARLOD1: the far field's planes, sway and cards
+#include "cellmodpick.h"	// lane MODPICK1: "Mods differ from the far LOD bake" over the view
 #include "impostorpreviewtest.h"
 #include "gl/glshape.h"
 #include "gl/gltex.h"
@@ -5520,7 +5521,9 @@ void GLView::paintGL()
 	// 2D overlays drawn over the GL scene with QPainter: the Blender-style
 	// navigation gizmo and the 3D cursor (constant screen size, like Blender)
 	bool drawSnapMarker = snapIndicator && ( gizmoMode != 0 || elemTransform );
-	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode ) {
+	// lane MODPICK1: the near cells load other mods than the far LOD bake shows -- said in the view, never silent
+	const QString modPickNote = model ? cellModPickViewNote( model ) : QString();
+	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() ) {
 		// The scene passes (esp. collision wireframe) leave GL state that
 		// QPainter inherits: depth test on (so filled overlay shapes get
 		// depth-rejected against the geometry, while text glyphs survive - the
@@ -5667,6 +5670,15 @@ void GLView::paintGL()
 				label( poseHoverBone, true );   // always, and under the cursor
 		}
 		paintSkeletonOverlayNames( painter );
+		if ( !modPickNote.isEmpty() ) {
+			// one plain line, top left: accent ink on a dark shadow, as the other view notes
+			painter.setRenderHint( QPainter::TextAntialiasing, true );
+			const QPointF at( 12, 22 );
+			painter.setPen( QColor( 0, 0, 0, 210 ) );
+			painter.drawText( at + QPointF( 1, 1 ), modPickNote );
+			painter.setPen( QColor( wwSkinColor( "accent" ) ) );
+			painter.drawText( at, modPickNote );
+		}
 		if ( model && showCursor )
 			drawCursorOverlay( painter );
 		if ( scene->hasOption( Scene::ShowAxes ) )

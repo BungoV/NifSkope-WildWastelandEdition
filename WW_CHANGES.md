@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane MODPICK1 (2026-10-12): choose which mods the cell view loads
+
+- **The Cell panel has a Mods list (MODPICK1).** Between PRTP and Legend, a list of the plugins in load order, each
+  with a tick and the mod folder it comes from. It is seeded from the shown far LOD bake (its .lodb record); with no
+  bake shown, from the MO2 profile (the LOD panel's Profile field, else his Default profile). A plugin gone from disk
+  is greyed with "gone from disk" and cannot be ticked; the worldspace's master always loads. Untick, then Apply:
+  the choice is saved per worldspace (settings key CellView/ModPick/<worldspace>) and the cell re-opens with it, with
+  no restart. Reset forgets it. Blender's add-on list is the model; unlike Blender, a tick waits for Apply, because
+  every apply rebuilds the whole cell.
+- **Near and far never differ silently.** The far LOD is a bake and cannot drop a mod. When the near cells' plugins
+  are not the bake's, the view shows one line, top left, "Mods differ from the far LOD bake: <what>", and the notes
+  say "mods: DIFFER from the far LOD bake". An untouched picker changes nothing (the cell loads exactly what it
+  loaded before).
+- Gates (notes/modpick1/gates.sh, Fallout4.esm-only session at -17,23, his real bake with 46 plugins and 2 gone):
+  an untouched picker is pixel-identical to main's exe (0 px). With BNS Trees.esp unticked, near Boston Natural
+  Surroundings trees go from 294 to 0 and the note shows. The in-process GUI harness WW_MODPICK_TEST passes 17 of 17
+  rows: bake-seeded, 2 gone rows greyed, master locked, choice saved across the re-open, note set. Red
+  WW_MODPICK_RED=inert reads the choice but does not apply it: 294 trees and no note, so the untick gate fails.
+  0 magenta pixels in all 7 pictures.
+
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
 - Three finished branches merged into main in this order: farlod3 (922b04fb), legacyroute1 (7bead0f1), skypic1
