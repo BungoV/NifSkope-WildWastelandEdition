@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellpicktest.h"	// lane CELLVIEW2
 #include "cellrefs.h"		// lane CELLWORK1
 #include "cellworkspace.h"	// lane CELLWORK1
+#include "cellmodpick.h"
 #include "nifskope.h"
 #include "starterscene.h"
 #include "harnesswindow.h"
@@ -29823,6 +29824,8 @@ void NifSkope::initDockWidgets()
 		// the switch, the dock hiding and the layout round trip from inside the
 		// running window. It forces every state it measures.
 		wwCellWorkspaceHarness( this );
+		// lane MODPICK1: the Mods band gate (WW_MODPICK_TEST).
+		wwCellModPickHarness( this );
 		// lane WSRESTORE1: switch, close, relaunch -- the left column after a close.
 		wwWorkspaceRestoreHarness( this );
 	}

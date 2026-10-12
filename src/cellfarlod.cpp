@@ -1153,6 +1153,10 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 			.arg( lerr.isEmpty() ? QString() : QStringLiteral( ": " ) + lerr ).arg( nearList.size() );
 		return r;
 	}
+	r.lodb = lodb;	// lane MODPICK1
+	for ( const LodbPlugin & p : std::as_const( led.plugins ) )
+		if ( QFileInfo( p.path ).isFile() )
+			r.bakePresent << p.path;
 	// what moved: names in order (cheap -- the byte hashes are the bake record's own business)
 	QStringList nearNames, bakeNames;
 	for ( const QString & p : nearList )

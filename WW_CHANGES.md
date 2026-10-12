@@ -78,6 +78,46 @@
   WW_CELL_PARENTLAND_RED=1 (no parent land) 0.440. 0 magenta. The floating trash decals (TrashDecal01 at z 592) now
   sit under the parent ground (600..608 there); the game draws the same LAND, not yet checked in game.
 
+## Lane MODPICK1 (2026-10-12): choose which mods the cell view loads
+
+- **The Cell panel has a Mods list (MODPICK1).** Between PRTP and Legend, a list of the plugins in load order, each
+  with a tick and the mod folder it comes from. It is seeded from the shown far LOD bake (its .lodb record); with no
+  bake shown, from the first source found (below). A plugin gone from disk is greyed with "gone from disk" and
+  cannot be ticked; Fallout4.esm and the DLC masters stay at the top and always load. Untick, then Apply:
+  the choice is saved per worldspace (settings key CellView/ModPick/<worldspace>) and the cell re-opens with it, with
+  no restart. Reset forgets it. Blender's add-on list is the model; unlike Blender, a tick waits for Apply, because
+  every apply rebuilds the whole cell.
+- **Near and far never differ silently.** The far LOD is a bake and cannot drop a mod. When the near cells' plugins
+  are not the bake's, the view shows one line, top left, "Mods differ from the far LOD bake: <what>", and the notes
+  say "mods: DIFFER from the far LOD bake". An untouched picker changes nothing (the cell loads exactly what it
+  loaded before).
+- Gates (notes/modpick1/gates.sh, Fallout4.esm-only session at -17,23, his real bake with 46 plugins and 2 gone):
+  an untouched picker is pixel-identical to main's exe (0 px). With BNS Trees.esp unticked, near Boston Natural
+  Surroundings trees go from 294 to 0 and the note shows. The in-process GUI harness WW_MODPICK_TEST passes 17 of 17
+  rows: bake-seeded, 2 gone rows greyed, master locked, choice saved across the re-open, note set. Red
+  WW_MODPICK_RED=inert reads the choice but does not apply it: 294 trees and no note, so the untick gate fails.
+  0 magenta pixels in all 7 pictures.
+- **Works without Mod Organizer (MODPICK1, phase 2).** With no bake shown the list comes from, first hit wins: the LOD
+  panel's MO2 profile; an MO2 install found on the machine (%LOCALAPPDATA%\ModOrganizer\<instance>, or a portable one
+  beside the game; with several, the one whose game folder is NifSkope's Fallout 4 folder); else the game's own Data
+  folder and plugins.txt (Fallout4.esm, the DLC in engine order, Fallout4.ccc, then the `*` lines; archives from the
+  INI lists, then each plugin's own BA2s; loose files beat archives); else the masters in Data, with a note saying
+  where it looked. Without MO2, Fallout4.ccc's Creation Club files in Data always load, as in the game: they are
+  ticked, locked under the DLC and read "Data -- always loads". The header names the source used, for example "from the MO2 profile Default (found: ...)". The
+  hard-coded profile path is gone (src/cellmodsource.*).
+- **Drag to reorder, as in MO2's plugin pane.** Drag one or several selected rows; a line shows where they land. A
+  plugin cannot go above one of its own masters (read from its header); the status bar and the band say why. The
+  order is saved per worldspace with the ticks (CellView/ModPickOrder) and applies on Apply; Reset restores the
+  source order. Once the order is changed, each plugin's own BA2s stack in plugin order, and the view note says
+  "order changed".
+- **Drop mods in from Explorer.** A plugin file is added where it is dropped, and its folder becomes a resource root at
+  that point; a mod folder is added as a root (its loose files and archives, like an MO2 mod folder) with every plugin
+  in it. Several items keep their dropped order. A plugin whose master is not in the list is refused with a note
+  naming it. Added rows read "added: <folder>", are saved per worldspace (CellView/ModPickAdded), and Delete or
+  right-click Remove takes them out; Reset removes them all. NifSkope only reads the dropped paths; nothing is copied
+  or written anywhere. The view note names hand-added mods.
+- Gates (notes/modpick1/gates2.sh): on the final exe: detect (his Default found by detection), nomo2 / nomo2b / masters (17 = 17 of a hand-built list, order and count; all 17 ticked "always loads"), RED nofallback and RED noccc fail as required. On exe 20505d67 (same drag/drop code): untouched 0 px vs main; untick; drag (refused above VRPShared.esp; TrueGrass moved, grass 22 -> 25 types; RED noorder = untouched); drop harness (saved additions, missing master named, RED noadded). The drop picture rerun after the root-on-top fix is still owed: the far-LOD launches were starved of memory.
+
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
 - Three finished branches merged into main in this order: farlod3 (922b04fb), legacyroute1 (7bead0f1), skypic1
