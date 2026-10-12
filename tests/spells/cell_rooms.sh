@@ -28,7 +28,7 @@
 #          --red backface   the bake keeps probes whose rays mostly meet backs (WW_PROBE_BAKE_RED=backface)
 #          --red backmax    the bar at 1 (WW_CELL_PROBE_BACKMAX=1): the same
 #          --red floor      the placer stands probes on backs (WW_PROBE_RED=floor)
-#          --red emptyslot  the shader's twin weighs a room's empty slots (stage H: pipes black, magenta)
+#          --red emptyslot  the shader's twin weighs a room's empty slots (stage H: pipes black, no-probe marker)
 #
 # USAGE  bash tests/spells/cell_rooms.sh [synth|cells] [--red <name>]     OUT= the run folder; CELLS= to pick
 #        cells ("museum:ConcordMuseum01 cryo:Vault111Cryo ...")

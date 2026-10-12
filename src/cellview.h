@@ -156,7 +156,8 @@ struct CellSceneSpec
 	bool showMarkers = false;
 	bool terrain = true;
 	bool water = true;
-	bool grid = true;       //!< the cell grid overlay
+	bool grid = false;      //!< the cell grid overlay (lane FIXPACK1 YELLOWSLAB1: off, as the "Cell borders" row ships;
+	                        //!< on, its 512-unit yellow curtains stood in every opened block as flat slabs)
 	/* Lane PRTP1 (2026-09-30): an INTERIOR cell instead of an exterior block.
 	 * Spec line `plugins|interior|<EDID or hex form>[|overlay]`. No LAND, no
 	 * grid, no worldspace water; `world` holds the word "interior". */

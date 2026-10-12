@@ -15,13 +15,13 @@ gi_skygrid, gi_probesky, gi_links) and the pictures cell_pass.sh shot. Every val
                      rooms (gi_slots.bin; lane ROOMCLAMP1) both slots by cell_gi_check's stage C rule (a slot
                      gathers its room's probes only, the eye / twice the radius / neighbour fallbacks)
   G  GI pass         pass1.png at every clean pixel (position from probes 2 + 3, normal from probe 4)
-                     against this file's sample of gi_grid.bin: (E / pi) clamped, ^ (1 / 2.2); magenta
+                     against this file's sample of gi_grid.bin: (E / pi) clamped, ^ (1 / 2.2); cyan
                      where no probe reaches. With rooms, cell_rooms_check's gi_sample (the shader's room
                      blend) on 20000 of the pixels instead of the plain trilinear
   K  Sky visibility  pass2.png the same against gi_skygrid.bin (an interior: no sky anywhere it is valid)
   F  Surfel color    pass3id.png (WW_CELL_PV_ID=1) names the surfel under each pixel; pass3.png carries that
                      surfel's own albedo (this file's read of the bake) ^ (1 / 2.2) on every splat-interior
-                     pixel, magenta exactly where no splat is, the splats sit on their surfels, every surfel drawn
+                     pixel, cyan exactly where no splat is, the splats sit on their surfels, every surfel drawn
   L  Surfel light    pass4.png the same with each surfel's outgoing light B / pi (gi_surfels.bin's B)
   N  links           the picked probe's linked surfels (links.pv.txt) are exactly the ones this file resolves
                      from the bake's links, and the picture shows them (green line pixels)
@@ -45,7 +45,9 @@ from probe_bake import read_tbk, floordiv  # noqa: E402
 import cell_gi_check  # noqa: E402  (lane ROOMCLAMP1: stage C's rooms rule, rebuilt for the sky grid)
 import cell_rooms_check  # noqa: E402  (lane ROOMCLAMP1: the shader's room blend)
 
-MAGENTA = np.array([1.0, 0.0, 1.0])
+# FIXPACK1 NOCOVER-COLOR: the shader's "no probe / no surfel" marker is cyan (magenta means a missing texture).
+# WW_PASS_MARKER=magenta judges a pre-FIXPACK1 exe's pictures.
+NOCOVER = np.array([1.0, 0.0, 1.0]) if os.environ.get('WW_PASS_MARKER') == 'magenta' else np.array([0.0, 1.0, 1.0])
 
 
 def shown(x):
@@ -252,7 +254,7 @@ def judge_pass(run, tag, label, what, G, srf, scale, interior_black=False, rooms
         s = np.array([cell_rooms_check.gi_sample(GG, rooms['R'], Pw[i], Nw[i], fill=fill) for i in range(len(Pw))])
     valid = s[:, 3] > 0.01
     v = np.where(valid[:, None], np.maximum(s[:, 0:3] / np.maximum(s[:, 3:4], 1e-9), 0), 0) * scale
-    exp = np.where(valid[:, None], shown(v), MAGENTA[None, :])
+    exp = np.where(valid[:, None], shown(v), NOCOVER[None, :])
     good = np.all(np.abs(got - exp) <= 4.0 / 255 + 0.06 * exp, axis=1)
     lit = valid & (exp.max(1) > 0.08)
     share = good.mean()
@@ -293,9 +295,9 @@ def judge_surfels(run, tag, label, what, srf, S, colors, cell):
     row = ids[ys, xs] - 1
     exp = shown(colors[row])
     good = np.all(np.abs(img[ys, xs] - exp) <= 2.0 / 255, axis=1)
-    # the same geometry: a pixel is magenta in the picture exactly where no splat covers it
+    # the same geometry: a pixel is the marker in the picture exactly where no splat covers it
     # (judged where the id is the same over the 3 x 3 around the pixel: splat edges are antialiased)
-    mag = np.all(np.abs(img - MAGENTA) < 1.0 / 255, axis=2)
+    mag = np.all(np.abs(img - NOCOVER) < 1.0 / 255, axis=2)
     uni = np.ones_like(splat)
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
@@ -312,7 +314,7 @@ def judge_surfels(run, tag, label, what, srf, S, colors, cell):
     tiles = int(m.group(1)) if m else -1
     drawn = len(np.unique(row))
     ok = len(ys) >= 5000 and good.mean() >= 0.99 and geo >= 0.99 and near.mean() >= 0.8 and tiles == n
-    return ('%s %s %s: %d splat pixels (%d surfels in view), %.2f%% carry their surfel\'s value; magenta exactly off the '
+    return ('%s %s %s: %d splat pixels (%d surfels in view), %.2f%% carry their surfel\'s value; marker exactly off the '
             'splats %.2f%%; on their surfel %.1f%%; the overlay drew %d of %d surfels'
             % (label, 'PASS' if ok else 'FAIL', what, len(ys), drawn, 100 * good.mean(), 100 * geo, 100 * near.mean(),
                tiles, n))

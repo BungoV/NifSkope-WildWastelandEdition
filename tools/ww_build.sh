@@ -60,6 +60,26 @@ else
 fi
 [ "${WW_BUILD_LOCK_ONLY:-0}" = "1" ] && exit 0
 
+# LAND-REV (FIXPACK1): the revision define is baked when qmake runs, and a lane
+# commits after its first qmake (a landing worktree, then main, build the SAME
+# commit). Keep the Makefiles' NIFSKOPE_REVISION on HEAD at every build, and
+# drop the three objects that compile it in, so the gated exe and the deployed
+# exe of one commit are one exe (the link carries no timestamp: NifSkope.pro).
+HEADREV="$(PATH="$PATH:/e/Tools/GIT/cmd" git -C "$ROOT" rev-parse HEAD 2>/dev/null | cut -c1-7)"
+if [ -n "$HEADREV" ] && [ -f Makefile.Release ]; then
+	MKREV="$(grep -m1 -oE 'NIFSKOPE_REVISION=\\"[0-9a-f]*\\"' Makefile.Release | grep -oE '[0-9a-f]{7}')"
+	if [ "$MKREV" != "$HEADREV" ]; then
+		for mk in Makefile.Release Makefile.Debug; do
+			[ -f "$mk" ] || continue
+			sed -i -E -e 's/ -DNIFSKOPE_REVISION=\\"[0-9a-f]*\\"//' \
+				-e 's/(-DNIFSKOPE_VERSION=\\"[^"\]*\\")/\1 -DNIFSKOPE_REVISION=\\"'"$HEADREV"'\\"/' "$mk"
+		done
+		rm -f GeneratedFiles/.obj/main.o GeneratedFiles/.obj/lodbfile.o GeneratedFiles/.obj/about_dialog.o
+		echo "revision: Makefiles said '${MKREV:-none}', HEAD is $HEADREV: define set, its 3 objects dropped"
+	else
+		echo "revision: $HEADREV (Makefiles on HEAD)"
+	fi
+fi
 MSYSTEM=UCRT64 CHERE_INVOKING=1 /c/msys64/usr/bin/bash -lc 'export PATH="$PATH:/e/Tools/GIT/cmd"; cd "$1" || exit 2; make -j2 > release/ww_build.log 2>&1; rc=$?; grep -E "error:|Error [0-9]" release/ww_build.log | head -20; echo BUILD-RC=$rc; exit $rc' _ "$ROOT"
 rc=$?
 ls -l --time-style=+%H:%M:%S release/NifSkope.exe

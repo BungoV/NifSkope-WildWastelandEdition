@@ -1,5 +1,53 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FIXPACK1 (2026-10-12, branch fixpack1): queued defects in one lane
+
+- **A lane's gated exe and the deployed exe of the same commit are now the same file (LAND-REV).** Two things
+  made them differ. First, a lane worktree's exe carried no revision string: qmake read `.git/HEAD` as a folder,
+  and in a worktree `.git` is a file. `getRevision` (NifSkope_functions.pri) now asks `git rev-parse HEAD` first.
+  If git is not on the PATH, it falls back to the files, following the worktree's gitdir and commondir and
+  checking packed-refs. Second, the linker stamped the build time into the exe header; `-Wl,--no-insert-timestamp`
+  (NifSkope.pro, win32 g++) drops the stamp. Also, `tools/ww_build.sh` now keeps the Makefiles' NIFSKOPE_REVISION
+  on HEAD at every build and drops the three objects that compile it in (main, lodbfile, about_dialog). Before
+  this, a revision baked at the lane's first qmake went stale once the lane committed. Gate
+  (notes/fixpack1/pe_compare.py): a worktree build of 78f87254 equals main's deployed 8a99897f byte for byte,
+  except the two stamp fields. LAND3's gated exe a4b01b48 differed from it on 17.8 M bytes.
+- **The probe views' "no probe reaches here" marker is now cyan, not magenta (NOCOVER-COLOR).** Magenta always means a
+  missing texture, so a pass picture full of magenta read as a defect. `res/shaders/cell_lights.glsl` paints the
+  no-cover marker `vec3(0, 1, 1)`; the doc comments in `src/gl/cellprobeview.h` and `src/gl/celllights.h` follow.
+  Tests that look for the marker: `tests/spells/cell_pass_check.py` (stages F and L: the marker exactly off the
+  splats; `WW_PASS_MARKER=magenta` judges an older exe's pictures), `tests/spells/cell_rooms_check.py` and
+  `tests/spells/cell_rooms.sh` (wording only; stage H judges weights, not the colour). Outside the repo,
+  `notes/skypic1/bricks2_sheet.py` and `magenta.py` count magenta, and now see none from this view. Other debug
+  colours stay: the water probe view's mode 27, the PBR route "swap" tint, the viewport's pink selection, and
+  cell_fxdepth_check's mark. Gate (cell_pass.sh, Vault111Cryo): the new exe passes F and L with the cyan marker and
+  fails them when judged with magenta; main's 8a99897f passes with magenta and fails with cyan. Every Pass picture
+  from the new exe has 0 magenta from the marker. The remaining census hits (probe3 2775 px, probe4 13 px) are hues
+  inside the false-colour direction views; they match main's pixel for pixel. Stage Z (the combined picture against
+  the older before_main exe) fails on both exes alike (about 16,000 pixels), so it is not part of this change.
+- **FARLOD3's two reds break the current fixes again (REDFIX1).** Both had gone inert: run on main 8a99897f, each
+  still passed every FARLOD3 bar. `WW_CELL_FARLOD_RED=nobakeroots` only skipped the old root lending, and since
+  stack adoption the near cells take the bake's roots anyway. It now also clears the adopted stack's resource
+  roots (`cellFarLodStackFor`, `src/cellfarlod.cpp`) and writes "far lod: stack RED nobakeroots" to the notes.
+  `WW_R2A_RED=nomsn` sat in pbrm_default.frag, which no vanilla material reaches since LEGACYROUTE1. It now
+  clears `hasModelSpaceNormals` in the legacy program (`setupProgramCE1`, `src/gl/renderer.cpp`), so the far
+  ground's model-space normal sheet reads as tangent space again. Gate: FARLOD3's seam camera, default renderer
+  mode (fixpack1/redfix/gates.sh). With no red: magenta 0, BNS misses 0, dark 0.002, LOD/cell ratio 0.902, PASS.
+  nobakeroots: magenta 57,347 px and 230 BNS misses (the real missing-texture control), FAIL as wanted. nomsn:
+  dark blotches on the LOD half; 29.7 % of its pixels end up 25 %+ darker than with no red, against 1.7 % for
+  main + the old red. The ratio falls to 0.639, but that stays above FARLOD3's pre-set 0.60 bar, so the bar does
+  not count it as a fail. The bar was calibrated on PBR-mode blotches; this red needs a sharper bar. Main + old
+  reds: both PASS, so the old reds were inert.
+- **The flat yellow slabs in the -17,23 pictures were the cell borders (YELLOWSLAB1).** The cell grid draws a
+  512-unit curtain in flat 0.85,0.75,0.25 along every cell edge of the opened block. `CellSceneSpec::grid`
+  defaulted ON while the Show menu's "Cell borders" row ships OFF, so every cell opened from a file or
+  `WW_CELL_OPEN`, and the GUI's first open, drew them in the picture. In a 5x5 block they stand as yellow walls
+  across the far bank. The spec now defaults OFF like the row (`src/cellview.h`); `WW_CELL_GRID=1` forces them on
+  (the gate's red), and `WW_CELL_NOGRID` is unchanged. Not the same cause as ALLON2's defects (no shared code).
+  Gate (fixpack1/yellow/diag2.sh, SKYPIC1's pic_12 regime: one bake, then relights, default renderer mode,
+  yellow = lit grid colour ratio): main 8a99 78,132 yellow px (the same count as SKYPIC1's pic_12_before),
+  fixed exe 2, fixed exe + WW_CELL_GRID=1 78,132 and byte-identical to main's picture. Magenta 0 in all.
+
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
 - Three finished branches merged into main in this order: farlod3 (922b04fb), legacyroute1 (7bead0f1), skypic1

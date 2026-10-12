@@ -589,11 +589,11 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 
 /* lane PROBEVIEW1: a probe pass's picture on a white surface (the deck's s40 / s18): no albedo, no direct light,
  * no fog, no imagespace. GI = E(N) / pi, the GI row's own sample; Sky visibility = the sky grid read the same way.
- * Display: pow(clamp(x), 1 / 2.2), a fixed curve so two bakes compare. Magenta = no probe reaches here (s65);
- * in the surfel passes every surface is magenta and the surfel tiles draw over it (src/gl/cellprobeview.h). */
+ * Display: pow(clamp(x), 1 / 2.2), a fixed curve so two bakes compare. Cyan = no probe reaches here (s65; FIXPACK1: was magenta, which means a missing texture);
+ * in the surfel passes every surface is cyan and the surfel tiles draw over it (src/gl/cellprobeview.h). */
 vec3 cellPassOut( vec3 P, vec3 N )
 {
-	const vec3 none = vec3( 1.0, 0.0, 1.0 );
+	const vec3 none = vec3( 0.0, 1.0, 1.0 );	// FIXPACK1 NOCOVER-COLOR: cyan, never magenta (magenta = missing texture)
 	if ( cellPass >= 3 || !cellGiOn )
 		return none;
 	vec4 s = cellGiSample( P, ( cellPassRed & 2 ) != 0 ? vec3( 0.0, 0.0, 1.0 ) : N );
