@@ -38,6 +38,15 @@
   main + the old red. The ratio falls to 0.639, but that stays above FARLOD3's pre-set 0.60 bar, so the bar does
   not count it as a fail. The bar was calibrated on PBR-mode blotches; this red needs a sharper bar. Main + old
   reds: both PASS, so the old reds were inert.
+- **The flat yellow slabs in the -17,23 pictures were the cell borders (YELLOWSLAB1).** The cell grid draws a
+  512-unit curtain in flat 0.85,0.75,0.25 along every cell edge of the opened block. `CellSceneSpec::grid`
+  defaulted ON while the Show menu's "Cell borders" row ships OFF, so every cell opened from a file or
+  `WW_CELL_OPEN`, and the GUI's first open, drew them in the picture. In a 5x5 block they stand as yellow walls
+  across the far bank. The spec now defaults OFF like the row (`src/cellview.h`); `WW_CELL_GRID=1` forces them on
+  (the gate's red), and `WW_CELL_NOGRID` is unchanged. Not the same cause as ALLON2's defects (no shared code).
+  Gate (fixpack1/yellow/diag2.sh, SKYPIC1's pic_12 regime: one bake, then relights, default renderer mode,
+  yellow = lit grid colour ratio): main 8a99 78,132 yellow px (the same count as SKYPIC1's pic_12_before),
+  fixed exe 2, fixed exe + WW_CELL_GRID=1 78,132 and byte-identical to main's picture. Magenta 0 in all.
 
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 

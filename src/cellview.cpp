@@ -802,6 +802,8 @@ void cellApplyEnvModifiers( CellSceneSpec & spec )
 		spec.water = false;
 	if ( !qgetenv( "WW_CELL_NOGRID" ).isEmpty() )
 		spec.grid = false;
+	if ( qEnvironmentVariableIntValue( "WW_CELL_GRID" ) != 0 )
+		spec.grid = true;     // lane FIXPACK1 (YELLOWSLAB1): the borders forced on, the gate's red
 	const QByteArray dr = qgetenv( "WW_CELL_DATAROOT" );
 	if ( !dr.isEmpty() )
 		spec.dataRoot = QString::fromLocal8Bit( dr );
