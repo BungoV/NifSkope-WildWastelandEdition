@@ -1864,7 +1864,17 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 
 	// setup blending
 
-	if ( mat ) {
+	/* lane ALLON2: A BLENDED-GROUND PASS TAKES THE CELL BUILD'S ALPHA PROPERTY, NEVER ITS MATERIAL'S. A landscape
+	 * set whose TXST carries no TX00 hands its .bgsm through as the bucket's name (esmdata ltexTextureSet), and the
+	 * BGSM's blend then won here: no blend, so every LAYER pass was drawn OPAQUE at its share over the base -- black
+	 * where the layer's share is small, hard-edged where its quads stop (bungo's circled ground at -19,23, on his
+	 * stack: Boston Natural Surroundings' material-backed sets). The game's landscape shader never reads the BGSM's
+	 * alpha. WW_TERRBLEND_RED=matalpha puts the material back in charge, so the gate is shown to fail on it. */
+	static const bool landMatAlphaRed = qgetenv( "WW_TERRBLEND_RED" ) == "matalpha";
+	const bool landSplatPass = !landMatAlphaRed && scene && wwCellLandIs( scene->nifModel, mesh->id() );
+	if ( landSplatPass ) {
+		AlphaProperty::glProperty( mesh->alphaProperty, prog );
+	} else if ( mat ) {
 		static const GLenum blendMap[11] = {
 			GL_ONE, GL_ZERO, GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR,
 			GL_DST_COLOR, GL_ONE_MINUS_DST_COLOR, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,

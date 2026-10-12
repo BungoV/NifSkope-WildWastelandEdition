@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane ALLON2 (2026-10-12): all-on defects at -17,23
+
+- **Black blocks on the ground where two terrain textures blend are gone (ALLON2 #1).** On bungo's stack, Boston
+  Natural Surroundings' Landscape plugin points 24 landscape texture sets at a material file instead of a texture.
+  The cell build then names those blend layers after the .bgsm, and the legacy renderer let the material's blend
+  ("none") override the layer's own alpha property, so each layer drew solid at its weight over the base: black where
+  the weight is small, square steps where its quads stop. A blended-ground pass now always takes the cell build's
+  alpha property (src/gl/renderer.cpp, setupProgramCE1). Attribution on the old exe 8a99897f: Fallout4 + DLC, + Ultra
+  Exterior Lighting, + BNS Trees all 0.000 black in bungo's circled region; + BNS Landscape 0.178. Gate
+  (notes/allon2/gate1.sh, seam camera, default mode): circled region black share 0.185 on 8a99897f, 0.000 on the
+  fix (0.000 with water on too); red WW_TERRBLEND_RED=matalpha puts the material back in charge, 0.185. 0 magenta.
+
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
 - Three finished branches merged into main in this order: farlod3 (922b04fb), legacyroute1 (7bead0f1), skypic1
