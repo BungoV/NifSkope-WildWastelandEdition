@@ -97,7 +97,7 @@ const char * wwTodName( int slot );
 
 //! NAM0 row names (xEdit wbWeatherColors, wbDefinitionsCommon.pas:9707-9757)
 enum WwNam0Row { WwRowSkyUpper = 0, WwRowFogNear = 1, WwRowAmbient = 3, WwRowSunlight = 4, WwRowSun = 5,
-	WwRowStars = 6, WwRowSkyLower = 7, WwRowHorizon = 8, WwRowSunGlare = 15, WwRowMoonGlare = 16,
+	WwRowStars = 6, WwRowSkyLower = 7, WwRowHorizon = 8, WwRowEffectLighting = 9, WwRowSunGlare = 15, WwRowMoonGlare = 16,
 	WwRowFogFar = 12, WwRowFogNearHigh = 17, WwRowFogFarHigh = 18 };
 
 //! true when WW_LOOKDEV_RED names this red control

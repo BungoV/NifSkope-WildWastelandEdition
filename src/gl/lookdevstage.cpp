@@ -271,6 +271,7 @@ struct LdLight
 	float sunDir[3];	// TO the light, world
 	float discPos[3];	// the tent-arc disc, world, not normalised
 	float sun[3];		// linear
+	float effect[3];	// linear (NAM0 Effect Lighting, lane EFFECTPARITY1)
 	float amb[3];		// linear (NAM0 Ambient)
 	float dalc[6][3];	// linear
 	bool fromWeather = false;
@@ -294,6 +295,7 @@ LdLight currentLight()
 	}
 	if ( !s.haveWeather ) {
 		neutral( L.sun, L.amb, L.dalc );
+		std::copy( L.sun, L.sun + 3, L.effect );
 		return L;
 	}
 	L.fromWeather = true;
@@ -304,6 +306,12 @@ LdLight currentLight()
 		EsmWeather::blendRow( s.w, WwRowSunlight, L.keys, rgb );
 	for ( int c = 0; c < 3; c++ )
 		L.sun[c] = lin( rgb[c] );
+	if ( s.sun )
+		EsmWeather::blendRowLab( s.w, WwRowEffectLighting, L.keys, rgb );
+	else
+		EsmWeather::blendRow( s.w, WwRowEffectLighting, L.keys, rgb );
+	for ( int c = 0; c < 3; c++ )
+		L.effect[c] = lin( rgb[c] );
 	if ( s.sun )
 		EsmWeather::blendRowLab( s.w, WwRowAmbient, L.keys, rgb );
 	else
@@ -758,6 +766,13 @@ void wwLookdevLight( float lightDirWorld[3], float diffuse[4], float ambient[4] 
 		// legacy shapes: A = sqrt(amb) * 0.375, so A^2 = amb * 0.140625 = the linear ambient
 		ambient[c] = L.amb[c] / 0.140625f;
 	}
+}
+
+bool wwLookdevEffectLight( float rgb[3] )
+{
+	const LdLight L = currentLight();
+	std::copy( L.effect, L.effect + 3, rgb );
+	return L.fromWeather;
 }
 
 bool wwLookdevDalc( float rgb[6][3] )
