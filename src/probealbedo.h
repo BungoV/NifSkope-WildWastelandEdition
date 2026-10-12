@@ -46,6 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 
 class DDSTexture16;
+struct PbrmMaterial;
 
 class ProbeAlbedo
 {
@@ -63,6 +64,14 @@ public:
 	 *  row of `palette`; the palette color replaces the albedo (no vertex color on top). Linear
 	 *  0..1. False = either map unread. */
 	bool samplePalette( const QString & tex, const QString & palette, float u, float v, float row, float out[3] );
+	/*! lane FIXPACK1 (PBRALBEDO1): a surface a .pbrm serves, the diffuse albedo pbrm_default.frag shades
+	 *  with: base = the base map (sRGB-decoded as the shader decodes it, the same 64-texel cap) x the base
+	 *  colour, else the base colour; x the vertex colour (the shader's base *= C.rgb); metallic = RMAOS
+	 *  green where the material samples it, else the constant; out = base x (1 - metallic), linear 0..1.
+	 *  Specular is not the albedo's (out of scope); the tint mask is not modelled. False = a map the
+	 *  material samples did not read: the renderer then aborts the PBR binding and draws the shape the
+	 *  legacy way, so the caller reads the legacy diffuse. */
+	bool samplePbrm( const PbrmMaterial & m, float u, float v, const float vc[3], float out[3] );
 	//! The map's mean, GAMMA space (its coarsest mip). False = no map read.
 	bool meanGamma( const QString & tex, float out[3] );
 

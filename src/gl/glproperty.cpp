@@ -1239,6 +1239,45 @@ void pbrmRouteColor( PbrmRoute r, float rgb[3] )
 	rgb[2] = c[2];
 }
 
+/* lane FIXPACK1 (PBRALBEDO1): resolvePbrm()'s input-building, moved here unchanged so the cell bake's albedo
+ * resolves a surface through the same steps as the drawn property (see glproperty.h). */
+PbrmResolveResult pbrmResolveForMaterial( const QString & material, const QString & shapeName,
+	const QString & nifAbsPath, bool fo76, const PbrmReader & reader )
+{
+	PbrmResolveInput in;
+	in.material = material;
+	in.shapeName = shapeName;
+
+	if ( !in.shapeName.isEmpty() && !nifAbsPath.isEmpty() )
+		in.nifxPbrm = nifxMaterialFor( nifAbsPath, in.shapeName, &in.nifxNote );
+
+	const QHash<QString, QString> & swaps = wwPbrmSwapPin();
+	if ( !swaps.isEmpty() && !material.isEmpty() ) {
+		QString key;
+		if ( pbrmNormaliseMaterialPath( material, { QStringLiteral( ".bgsm" ), QStringLiteral( ".bgem" ) }, key ) ) {
+			const auto it = swaps.constFind( key.toLower() );
+			if ( it != swaps.constEnd() ) {
+				QByteArray b;
+				if ( !reader( it.value(), b ) ) {
+					in.swapNote = QStringLiteral( "swap material %1 not found" ).arg( it.value() );
+				} else {
+					const ShaderMaterial sm( b );
+					if ( sm.isValid() && !sm.textures().isEmpty() && !sm.textures().at( 0 ).isEmpty() )
+						in.swapDiffuse = sm.textures().at( 0 );
+					else
+						in.swapNote = QStringLiteral( "swap material %1 has no diffuse" ).arg( it.value() );
+				}
+			}
+		}
+	}
+
+	in.sibling = pbrmAutoReplaceEnabled();
+	in.fo76 = fo76;
+	in.order = wwPbrmOrderPin().order;
+
+	return pbrmResolve( in, reader );
+}
+
 /*! Resolve a PBRM for this property (lane PBRR1).
  *
  * Walks THE ONE candidate function, pbrmResolve() in src/io/pbrmresolve.h --
@@ -1279,43 +1318,17 @@ void BSShaderLightingProperty::resolvePbrm( const NifModel * nif, const QModelIn
 		return !out.isEmpty();
 	};
 
-	PbrmResolveInput in;
-	in.material = name;
+	QString shapeName;
 	if ( index.isValid() ) {
 		const int parent = nif->getParent( nif->getBlockNumber( index ) );
 		if ( parent >= 0 )
-			in.shapeName = nif->get<QString>( nif->getBlockIndex( parent ), "Name" );
+			shapeName = nif->get<QString>( nif->getBlockIndex( parent ), "Name" );
 	}
-	pbrmShapeName = in.shapeName;
+	pbrmShapeName = shapeName;
 
-	if ( !in.shapeName.isEmpty() && !nif->getFilename().isEmpty() )
-		in.nifxPbrm = nifxMaterialFor( nif->getFileInfo().absoluteFilePath(), in.shapeName, &in.nifxNote );
-
-	const QHash<QString, QString> & swaps = wwPbrmSwapPin();
-	if ( !swaps.isEmpty() && !name.isEmpty() ) {
-		QString key;
-		if ( pbrmNormaliseMaterialPath( name, { QStringLiteral( ".bgsm" ), QStringLiteral( ".bgem" ) }, key ) ) {
-			const auto it = swaps.constFind( key.toLower() );
-			if ( it != swaps.constEnd() ) {
-				QByteArray b;
-				if ( !reader( it.value(), b ) ) {
-					in.swapNote = QStringLiteral( "swap material %1 not found" ).arg( it.value() );
-				} else {
-					const ShaderMaterial sm( b );
-					if ( sm.isValid() && !sm.textures().isEmpty() && !sm.textures().at( 0 ).isEmpty() )
-						in.swapDiffuse = sm.textures().at( 0 );
-					else
-						in.swapNote = QStringLiteral( "swap material %1 has no diffuse" ).arg( it.value() );
-				}
-			}
-		}
-	}
-
-	in.sibling = pbrmAutoReplaceEnabled();
-	in.fo76 = ( bsVersion >= 130 && bsVersion < 140 );
-	in.order = wwPbrmOrderPin().order;
-
-	const PbrmResolveResult r = pbrmResolve( in, reader );
+	const PbrmResolveResult r = pbrmResolveForMaterial( name, shapeName,
+		nif->getFilename().isEmpty() ? QString() : nif->getFileInfo().absoluteFilePath(),
+		bsVersion >= 130 && bsVersion < 140, reader );
 	pbrmRoute = r.route;
 	pbrmEnvelope = r.envelope;
 	pbrmRefusal = r.refusal;

@@ -1950,6 +1950,8 @@ void lodgenAssetKind( const QString & relPath, const char *& folder, const char 
 		folder = "materials"; ext = ".bgsm";
 	} else if ( p.endsWith( QLatin1String( ".bgem" ) ) ) {
 		folder = "materials"; ext = ".bgem";
+	} else if ( p.endsWith( QLatin1String( ".pbrm" ) ) ) {
+		folder = "materials"; ext = ".pbrm";   // lane FIXPACK1 (PBRALBEDO1): the bake resolves .pbrm materials
 	} else if ( p.endsWith( QLatin1String( ".lodm" ) ) ) {
 		folder = "materials"; ext = ".lodm";
 	} else {
