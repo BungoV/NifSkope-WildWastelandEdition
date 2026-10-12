@@ -27,6 +27,7 @@ struct WwCellProbeView
 	float surfelCell = 32.0f;	// the bake's surfel cell size (a tile's side)
 	bool probesShown = true;	// the PRTP band's Show probes
 	std::vector<float> surfels;	// per surfel: pos[3] nrm[3] albedo[3] (linear) B[3]
+	std::vector<float> surfelBrick;	// lane BRICK1: per surfel: its brick's light (rgb, the mean of pass 1's B)
 	std::vector<float> probes;	// per probe: pos[3] + E on +X -X +Y -Y +Z -Z (rgb each)
 	std::vector<float> probeSky;	// per probe: the sky share on the six axes
 	std::vector<int> linkStart;	// probe i links surfels links[linkStart[i] .. linkStart[i + 1])

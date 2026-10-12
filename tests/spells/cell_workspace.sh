@@ -158,7 +158,7 @@ list, the two selection doors, the Show popover and the layout bytes)" \
 		"PRTP: the folder holds .tbk sector files, each starting TBK1" \
 		"PRTP: the note's file count is the folder's" \
 		"PRTP: Bake keeps the kind rows" \
-		"PRTP: the Pass drop-down holds Combined, GI, Sky visibility, Surfel color, Surfel light" \
+		"PRTP: the Pass drop-down holds Combined, GI, Sky visibility, Surfel color, Surfel light, Brick light" \
 		"PRTP: Pass is off before a bake" \
 		"PRTP: Pass is on after Bake"; do
 		check "report row present and green: $want" \

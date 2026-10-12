@@ -139,6 +139,10 @@ void wwCellProbeViewDraw( Scene * scene, const Transform & viewTrans )
 				col = FloatVector4( float( id & 255 ) / 255.0f, float( ( id >> 8 ) & 255 ) / 255.0f, float( ( id >> 16 ) & 255 ) / 255.0f, 1.0f );
 			else if ( pass == 3 )
 				col = FloatVector4( shown( f[6] ), shown( f[7] ), shown( f[8] ), 1.0f );
+			else if ( pass == 5 && ( i / 12 ) * 3 + 2 < v->surfelBrick.size() ) {	// lane BRICK1: the brick's light, B / pi
+				const float * k = &v->surfelBrick[( i / 12 ) * 3];
+				col = FloatVector4( shown( k[0] * 0.31830989f ), shown( k[1] * 0.31830989f ), shown( k[2] * 0.31830989f ), 1.0f );
+			}
 			else
 				col = FloatVector4( shown( f[9] * 0.31830989f ), shown( f[10] * 0.31830989f ), shown( f[11] * 0.31830989f ), 1.0f );
 			for ( int k : { 0, 1, 2, 0, 2, 3 } ) {

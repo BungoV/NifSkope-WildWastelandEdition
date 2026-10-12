@@ -109,6 +109,22 @@ struct ProbeGiResult
 	std::vector<float> feedWeight;
 	std::vector<int> surfelRoom;        //!< per unique surfel: its room, -1 = not known
 	double msBounce = 0;
+	/*! lane BRICK1 (the deck's s25 + s38, docs/PRTP_PLAN.md 2ar): the surfels grouped into bricks of spec.brickEdge
+	 *  units (4 m), one brick per cell and facing (the dominant axis of the normal, with its sign); a brick's light
+	 *  is the mean of its surfels' B; each probe keeps, per brick its links reach, six weights (sum of the links'
+	 *  omega x max(axis . dir, 0)) and the links' omega-weighted glass tint. Always built (the Pass "Brick light"
+	 *  and the census); the probes GATHER through them only with spec.bricks. */
+	bool bricksGather = false;          //!< the probes' cubes (and so the grid) come from the bricks
+	int bricks = 0, brickFactors = 0, brickLinks = 0;
+	float brickEdge = 0.0f;
+	double brickRel = 0.0;              //!< sum |E_brick - E_link| / sum E_link, the last pass's B, every probe
+	double brickP95 = 0.0;              //!< the per-probe 95th percentile of the same ratio (lit probes)
+	double msBricks = 0;
+	std::vector<qint32> brickKeys;      //!< per brick: cell x, y, z, facing (0..5 = +X -X +Y -Y +Z -Z), surfel count
+	std::vector<float> brickLight;      //!< per brick: rgb, the mean of its surfels' last-pass B
+	std::vector<float> brickCube;       //!< per probe: probeCube's layout, gathered from the bricks (last pass)
+	std::vector<float> linkCube;        //!< per probe: the same, gathered from the links
+	std::vector<float> surfelBrick;     //!< per unique surfel: rgb, its brick's mean of pass 1's B (the Pass view)
 };
 
 struct ProbeGiSpec
@@ -152,6 +168,13 @@ struct ProbeGiSpec
 	std::vector<quint16> recordFlags;
 	//! lane AODECAL1: the placed decal copies (null: none; the result is then byte for byte as before)
 	std::shared_ptr<const AoDecalSet> aoDecals;
+	/*! lane BRICK1: the probes gather the deck's 4 m bricks instead of their links (WW_CELL_GI_BRICKS=1; off = the
+	 *  links, byte for byte as before). brickEdge: 4 m in game units (1 unit = 1.428 cm). brickRed, the gate's
+	 *  refuters (WW_CELL_GI_BRICK_RED): "noface" (a brick mixes every facing), "first" (a brick's light is its first
+	 *  surfel's, not the mean). */
+	bool bricks = false;
+	float brickEdge = 280.0f;
+	QString brickRed;
 };
 
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.

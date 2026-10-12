@@ -811,6 +811,19 @@ namespace
 
 bool drawCube( Scene * scene, bool glow );
 
+/* lane SKYPIC1: while the sky is captured for the probes (wwLookdevCaptureSky) the dome, star and cloud passes
+ * write light, not a display picture: exposure 1 and view transform 3 (lookdev_output.glsl: linear, unclamped).
+ * Otherwise these are the view's own, so every drawn frame is unchanged. */
+bool g_skyCapture = false;
+float skyExposure()
+{
+	return g_skyCapture ? 1.0f : wwSceneExposureScale();
+}
+int skyViewTransform()
+{
+	return g_skyCapture ? 3 : wwSceneViewTransform();
+}
+
 struct SkyFrame
 {
 	WwSkyClock c;
@@ -885,6 +898,13 @@ bool loadSkyNif( Scene * scene, const QString & path, NifModel & src, QString * 
 		found = scene->nifModel->getResourceFile( bytes, path, "meshes", ".nif" );
 	if ( !found )
 		found = Game::GameManager::get_file( bytes, Game::FALLOUT_4, path, "meshes", ".nif" );
+	/* lane ALLON1: the resource stack's ARCHIVES (WW_LODGEN_RESOURCES / his MO2 profile). A cell view opened on the
+	 * stack has no Fallout 4 archive index in the game manager, and the loose pass below never opens a .ba2, so the
+	 * dome and the clouds (Fallout4 - Meshes.ba2) were "not found" and every all-on cell shot fell back to the cube.
+	 * The cell's own models are read this way (lodgenReadModelBytes): the sky now resolves where they do.
+	 * WW_LOOKDEV_RED=nostacksky skips it (the gate's refuter). */
+	if ( !found && !wwLookdevRed( "nostacksky" ) )
+		found = lodgenReadModelBytes( QString(), path, bytes ) && !bytes.isEmpty();
 	if ( !found ) {
 		// the archive index only exists while Fallout 4 is enabled in the Resources settings; a loose
 		// data folder is read directly: the game manager's list (empty while that status is off) and
@@ -1124,8 +1144,8 @@ bool drawDome( Scene * scene, const SkyFrame & f, float mul, QStringList & drew 
 	prog->uni3f( "skyU", f.up[0], f.up[1], f.up[2] );
 	prog->uni1f( "skyScale", f.skyScale );
 	prog->uni1f( "alphaMul", full ? 1.0f : mul );
-	prog->uni1f( "sceneExposure", wwSceneExposureScale() );
-	prog->uni1i( "viewTransform", wwSceneViewTransform() );
+	prog->uni1f( "sceneExposure", skyExposure() );
+	prog->uni1i( "viewTransform", skyViewTransform() );
 	const float * attrs[2] = { m->pos.constData(), m->col.constData() };
 	r->drawShape( m->nv, 0x43, unsigned( m->idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, m->idx.constData() );
 	r->stopProgram();
@@ -1272,8 +1292,8 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		prog->uni1f( "alpha", alpha < 0.0f ? a : alpha );
 		prog->uni2f( "uvOffset", wwCloudOffset( sx, secs ), wwCloudOffset( sy, secs ) );
 		prog->uni1f( "skyScale", f.skyScale );
-		prog->uni1f( "sceneExposure", wwSceneExposureScale() );
-		prog->uni1i( "viewTransform", wwSceneViewTransform() );
+		prog->uni1f( "sceneExposure", skyExposure() );
+		prog->uni1i( "viewTransform", skyViewTransform() );
 		return a;
 	};
 	auto bindLayer = [&]( int i ) {
@@ -1419,8 +1439,8 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 	prog->uni1f( "alpha", a );
 	prog->uni2f( "uvOffset", 0.0f, 0.0f );
 	prog->uni1f( "skyScale", f.skyScale );
-	prog->uni1f( "sceneExposure", wwSceneExposureScale() );
-	prog->uni1i( "viewTransform", wwSceneViewTransform() );
+	prog->uni1f( "sceneExposure", skyExposure() );
+	prog->uni1i( "viewTransform", skyViewTransform() );
 	const float * attrs[8] = { pos.constData(), m->col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
 		m->uv.constData() };
 	r->drawShape( m->nv, 0x20000043ULL, unsigned( m->idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, m->idx.constData() );
@@ -1674,5 +1694,163 @@ bool wwLookdevWind( quint8 out[4] )
 	out[1] = s.w.windDir;
 	out[2] = s.w.windDirRange;
 	out[3] = s.w.windTurb;
+	return true;
+}
+
+/* ------------------------------------------------------------------------
+ * lane SKYPIC1 (2026-10-11): the drawn sky, captured for the probes.
+ * ---------------------------------------------------------------------- */
+void wwSkyPictureFace( int f, float F[3], float R[3], float U[3] )
+{
+	// forward per face +X -X +Y -Y +Z -Z; up = +Z for the four sides, +Y for the two poles; right = forward x up
+	static const float fw[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+	static const float up[6][3] = { { 0, 0, 1 }, { 0, 0, 1 }, { 0, 0, 1 }, { 0, 0, 1 }, { 0, 1, 0 }, { 0, 1, 0 } };
+	const int k = std::clamp( f, 0, 5 );
+	for ( int c = 0; c < 3; c++ ) {
+		F[c] = fw[k][c];
+		U[c] = up[k][c];
+	}
+	R[0] = F[1] * U[2] - F[2] * U[1];
+	R[1] = F[2] * U[0] - F[0] * U[2];
+	R[2] = F[0] * U[1] - F[1] * U[0];
+}
+
+QString wwLookdevSkyPictureKey()
+{
+	resolve();
+	const LdState & s = st();
+	// the cloud clock is left out: in the window it runs, and the probes would never stand still (the capture
+	// follows the weather, the hour, the day and the rows; the clouds are where they were at that moment)
+	return QStringLiteral( "%1|%2|%3|day %4|sky %5 clouds %6|%7" ).arg( s.plugin, s.weatherKey ).arg( s.hour, 0, 'f', 4 )
+		.arg( s.gameDay, 0, 'f', 2 ).arg( int( s.sky ) ).arg( int( s.clouds ) ).arg( s.haveWeather ? 1 : 0 );
+}
+
+bool wwLookdevCaptureSky( Scene * scene, int n, const float * flatRgb, WwSkyPicture & out, QString * why )
+{
+	auto fail = [why]( const QString & w ) {
+		if ( why )
+			*why = w;
+		return false;
+	};
+	if ( !scene || !scene->renderer )
+		return fail( QStringLiteral( "no renderer" ) );
+	if ( !wwLookdevActive() )
+		return fail( QStringLiteral( "not in Scene mode Lookdev" ) );
+	resolve();
+	LdState & sx = st();
+	if ( !flatRgb ) {
+		if ( !sx.haveWeather )
+			return fail( QStringLiteral( "no weather (%1)" ).arg( sx.weatherRefusal ) );
+		if ( !sx.sky )
+			return fail( QStringLiteral( "the Sky row is off (the view draws the cube, not the sky)" ) );
+	}
+	n = std::clamp( n, 8, 512 );
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	QElapsedTimer clock;
+	clock.start();
+
+	GLint prevRead = 0, prevDraw = 0, vp[4], prevTex = 0, prevActive = 0;
+	GLfloat clearWas[4];
+	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GL_TEXTURE0 );
+	fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
+	fn->glGetFloatv( GL_COLOR_CLEAR_VALUE, clearWas );
+	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasDepth = fn->glIsEnabled( GL_DEPTH_TEST );
+	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	const bool wasMs = fn->glIsEnabled( GL_MULTISAMPLE ), wasSrgb = fn->glIsEnabled( GL_FRAMEBUFFER_SRGB );
+	GLboolean depthMask = GL_TRUE;
+	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+	const NifSkopeOpenGLContext::GlobalUniforms guWas = *r->globalUniforms;
+
+	GLuint tex = 0, fbo = 0;
+	fn->glGenTextures( 1, &tex );
+	fn->glBindTexture( GL_TEXTURE_2D, tex );
+	fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, n, n, 0, GL_RGBA, GL_FLOAT, nullptr );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	fn->glGenFramebuffers( 1, &fbo );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0 );
+	fn->glDrawBuffer( GL_COLOR_ATTACHMENT0 );
+	fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
+	const bool complete = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	QStringList drew;
+	std::vector<float> px( size_t( n ) * size_t( n ) * 4 );
+	if ( complete ) {
+		out.n = n;
+		out.rgb.assign( size_t( 6 ) * size_t( n ) * size_t( n ) * 3, 0.0f );
+		fn->glDisable( GL_SCISSOR_TEST );
+		fn->glDisable( GL_MULTISAMPLE );
+		fn->glViewport( 0, 0, n, n );
+		g_skyCapture = true;
+		const SkyFrame f = skyFrame();
+		for ( int face = 0; face < 6; face++ ) {
+			float F[3], R[3], U[3];
+			wwSkyPictureFace( face, F, R, U );
+			auto & gu = *r->globalUniforms;
+			for ( int c = 0; c < 3; c++ )
+				gu.viewMatrix[c] = FloatVector4( R[c], U[c], -F[c], 0.0f );	// columns: the world axes in view space
+			// 90 degrees, square: clip x = view x, y = view y, w = -view z (the sky passes park z themselves)
+			const float zn = 1.0f, zf = 1.0e6f;
+			gu.projectionMatrix[0] = FloatVector4( 1.0f, 0.0f, 0.0f, 0.0f );
+			gu.projectionMatrix[1] = FloatVector4( 0.0f, 1.0f, 0.0f, 0.0f );
+			gu.projectionMatrix[2] = FloatVector4( 0.0f, 0.0f, ( zf + zn ) / ( zn - zf ), -1.0f );
+			gu.projectionMatrix[3] = FloatVector4( 0.0f, 0.0f, 2.0f * zf * zn / ( zn - zf ), 0.0f );
+			r->setGlobalUniforms();
+			// below the dome's rim nothing is drawn: no light (the view shows its clear colour there, not sky)
+			if ( flatRgb )
+				fn->glClearColor( flatRgb[0], flatRgb[1], flatRgb[2], 1.0f );
+			else
+				fn->glClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
+			fn->glClear( GL_COLOR_BUFFER_BIT );
+			if ( !flatRgb ) {
+				QStringList d;
+				if ( drawDome( scene, f, 1.0f, d ) ) {
+					drawStars( scene, f, d );
+					if ( sx.clouds )
+						drawClouds( scene, f, 1.0f, d );
+				}
+				if ( face == 0 )
+					drew = d;
+			}
+			fn->glFinish();
+			fn->glReadPixels( 0, 0, n, n, GL_RGBA, GL_FLOAT, px.data() );
+			float * o = out.rgb.data() + size_t( face ) * size_t( n ) * size_t( n ) * 3;
+			for ( size_t t = 0; t < size_t( n ) * size_t( n ); t++ )
+				for ( int c = 0; c < 3; c++ )
+					o[t * 3 + size_t( c )] = std::max( px[t * 4 + size_t( c )], 0.0f );
+		}
+		g_skyCapture = false;
+	}
+	// restore
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+	fn->glDeleteFramebuffers( 1, &fbo );
+	fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+	fn->glDeleteTextures( 1, &tex );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
+	fn->glClearColor( clearWas[0], clearWas[1], clearWas[2], clearWas[3] );
+	wasBlend ? fn->glEnable( GL_BLEND ) : fn->glDisable( GL_BLEND );
+	wasDepth ? fn->glEnable( GL_DEPTH_TEST ) : fn->glDisable( GL_DEPTH_TEST );
+	wasCull ? fn->glEnable( GL_CULL_FACE ) : fn->glDisable( GL_CULL_FACE );
+	wasScissor ? fn->glEnable( GL_SCISSOR_TEST ) : fn->glDisable( GL_SCISSOR_TEST );
+	wasMs ? fn->glEnable( GL_MULTISAMPLE ) : fn->glDisable( GL_MULTISAMPLE );
+	wasSrgb ? fn->glEnable( GL_FRAMEBUFFER_SRGB ) : fn->glDisable( GL_FRAMEBUFFER_SRGB );
+	fn->glDepthMask( depthMask );
+	*r->globalUniforms = guWas;
+	r->setGlobalUniforms();
+	if ( !complete )
+		return fail( QStringLiteral( "the float target was refused (framebuffer incomplete)" ) );
+	out.key = wwLookdevSkyPictureKey();
+	out.drew = flatRgb ? QStringLiteral( "flat(%1,%2,%3)" ).arg( double( flatRgb[0] ) ).arg( double( flatRgb[1] ) )
+		.arg( double( flatRgb[2] ) ) : drew.join( QChar( '|' ) );
+	out.ms = double( clock.nsecsElapsed() ) / 1.0e6;
+	if ( !flatRgb && !out.drew.contains( QStringLiteral( "sky:dome(" ) ) )
+		return fail( QStringLiteral( "the dome did not draw (%1)" ).arg( out.drew ) );
 	return true;
 }

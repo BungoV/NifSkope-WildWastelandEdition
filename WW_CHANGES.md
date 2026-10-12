@@ -1,5 +1,13 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
+
+- Three finished branches merged into main in this order: farlod3 (922b04fb), legacyroute1 (7bead0f1), skypic1
+  (ac12d188, which carries prtpnext's BRICK1 and ALLON1's stack-sky fix). Their entries follow. LEGACYROUTE1's
+  pbrm_default.frag wins over FARLOD3's model-space-normal fix (vanilla far ground draws through the legacy program).
+  SKYPIC1, STATICCACHE1 and BRICK1 ship off. Two old gates were pinned to the near-cell stack they measure
+  (WW_CELL_FARLOD_RED=refusemissing): TERRBLEND1's seam shot and FARLOD1's g10-near.
+
 ## Lane LEGACYROUTE1 (2026-10-11): legacy materials draw with legacy math in every renderer mode
 
 - **In the PBR renderer mode, vanilla materials now draw exactly as in Legacy (LEGACYROUTE1).** bungo's rule: legacy
@@ -43,6 +51,40 @@
   map in the model's own axes, as the legacy shader does; authored PBR materials are unchanged. Gate: near-black
   share of the LOD half 0.022 (main 0.459), LOD ground at 0.79 of the cell ground's brightness (main 0.46).
   Red WW_R2A_RED=nomsn: 0.525 and 0.32.
+
+## Branch skypic1 (2026-10-11/12, lanes SKYPIC1 + STATICCACHE1, from prtpnext c00ab356 + ALLON1 771d67dc): landed by LAND3 (2026-10-12)
+
+- **The probes' sky per direction, taken from the sky NifSkope draws (SKYPIC1, deck C9).** With
+  `WW_CELL_SKYPIC=1` the cell view captures the Lookdev sky it draws (the dome, the stars, the cloud layers; not
+  the sun or the moon, which stay the sun term) into six 64x64 linear faces, turns them into a per-direction table
+  and lights each probe's open-sky share from it, instead of the weather's six flat ambient colours. Below the
+  horizon the probes take the weather's ground-facing colour (NifSkope's dome went on below the horizon in one pale
+  colour, 23.5x too bright). Recaptured when the weather, hour, day or the Sky/Clouds rows change (about 0.2 s).
+  Ships OFF; off is byte for byte as before. Gate tests/spells/cell_skypic.sh + cell_skypic_check.py: PASS.
+- **Brick size review knob.** `WW_CELL_GI_BRICK_EDGE=<units>` sets BRICK1's brick edge (default 280 = 4 m), for
+  the per-surfel / 1 m / 4 m review sheet. Nothing default changes.
+- **Placed lights kept between relights (STATICCACHE1, deck C6).** With `WW_CELL_GI_STATICCACHE=1` a relight keeps
+  each surfel's direct light from the placed lights; the next relight with the same lights and surfels (a new hour
+  or weather) reuses it and traces only the sun. The result is the full relight's, byte for byte. Ships OFF.
+  Gate tests/spells/cell_staticcache.sh: PASS (byte for byte; Vault 111 direct light 76.6 -> 45.1 ms, the exterior no win).
+
+## Branch prtpnext (2026-10-07, lane BRICK1): landed by LAND3 (2026-10-12)
+
+- **Probe bricks, the Division deck's 4 m grid between the probes and the surfels (BRICK1).** Every relight now
+  groups the surfels into 4 m bricks by facing (the brick's light is the mean of its surfels') and records how much
+  each probe would gather from each brick. `WW_CELL_GI_BRICKS=1` makes the probes gather the bricks instead of every
+  surfel (4.7x fewer gather terms on Vault 111); it ships off, and off is byte for byte as before. New Pass view
+  "Brick light". Measured on Vault 111: the 4 m bricks change the probes' light by 29.6% against gathering every
+  surfel (1 m bricks: 2.5%), so the brick size is left to bungo. Gate: tests/spells/cell_brick.sh (PASS; the
+  independent rebuild agrees on every brick and probe; both red controls fail).
+
+## Lane ALLON1 (2026-10-07, branch allon1): all-on cell view -- BUILD PENDING (gates not run)
+
+- **The real sky in a cell view opened on his MO2 stack.** The Lookdev sky's dome and clouds
+  (meshes/sky/atmosphere.nif, clouds.nif, inside Fallout4 - Meshes.ba2) are now also read from the resource
+  stack's archives, the way the cell's own models are read. Before, a cell view on the stack could not find them
+  and every all-on shot drew the fallback cube map instead of the sky. Refuter: WW_LOOKDEV_RED=nostacksky.
+  Built (exe sha1 94b51f6c); the gate and the feature bisect of the other all-on defects wait for the game to close.
 
 ## Landed on main (2026-10-07, lane LAND-FINAL): the final-20261005 branch
 

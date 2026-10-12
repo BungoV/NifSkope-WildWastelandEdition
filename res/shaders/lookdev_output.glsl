@@ -63,6 +63,8 @@ vec3 pbrNeutral( vec3 color )
 vec3 studioOutput( vec3 c )
 {
 	c = max( c, vec3( 0.0 ) ) * sceneExposure;
+	if ( viewTransform == 3 )
+		return c;	// lane SKYPIC1: the sky captured for the probes, light into a float target (never a view setting)
 	if ( viewTransform == 1 )
 		return agxDisplay( c );
 	if ( viewTransform == 2 )
