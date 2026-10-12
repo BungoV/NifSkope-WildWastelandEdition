@@ -245,6 +245,8 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
  * at the start of the next shape's program setup -- back to the state the
  * texture had (lane SRGBTAG1: a Fallout 4 file texture already loads SKIPPED,
  * TexCache::wwFo4SrgbTagAsUnorm, and must stay so; other textures decode). */
+bool wwLegacyRouteRed();	// lane LEGACYROUTE1, defined beside setupProgramPBRM
+
 namespace {
 struct WwDecodeChange { const void * ctx; GLuint tex; GLint prevMode; };
 QVector<WwDecodeChange> & wwSkippedDecode()
@@ -326,9 +328,15 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	// the condition scan below. Checked before the hint so switching modes cannot
 	// leave a shape on a cached program.
 	//   Legacy         : never
-	//   PBR            : always — shapes without a PBRM are driven from their
-	//                    legacy material so the whole scene sits under one BRDF
-	//   Legacy and PBR : only where a PBRM resolved; PBR overrides legacy there
+	//   PBR            : only where a real PBR material resolved (pbrmValid)
+	//   Legacy and PBR : the same
+	/* lane LEGACYROUTE1 (bungo's rule: legacy materials draw with legacy math, PBR materials with PBR math).
+	 * The game has no PBR materials, so a vanilla material must look the same in every renderer mode: it now
+	 * draws exactly the program the Legacy mode picks, with the same uniforms. The PBR renderer mode used to
+	 * drive it through pbrm_default with a material derived from its spec/gloss slots (the "legacy fallback"),
+	 * which misread what the legacy shaders read (the far terrain's _msn read near black, FARLOD3).
+	 * WW_LEGACYROUTE_RED=oldroute: the PBR renderer mode sends every lit shape to the PBR program again --
+	 * the planted red of the parity gate (notes/legacyroute1/gates.sh). */
 	/* PBR route view (lane PBRR1): a DATA view, chosen by name ahead of every
 	 * shading route, for FO4 lighting and effect shapes only. */
 	if ( pbrmRouteView() && wwSp && wwLodChannelView == 0
@@ -359,9 +367,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * PBR shading instead, because that program has no preview branch -- which
 	 * is why every terrain channel rendered byte-identical while the object
 	 * ones differed: terrain LOD resolves a baked PBRM and objects do not. */
-	const bool wantPbrm = mesh->bslsp && wwLodChannelView == 0
-		&& ( lightingMode == PbrmModePBR
-			|| ( lightingMode == PbrmModeLegacyAndPBR && mesh->bslsp->pbrmValid ) );
+	const bool wantPbrm = mesh->bslsp && wwLodChannelView == 0 && lightingMode != PbrmModeLegacy
+		&& ( mesh->bslsp->pbrmValid || ( lightingMode == PbrmModePBR && wwLegacyRouteRed() ) );
 	if ( wantPbrm ) {
 		/* Cascaded sun shadows (lane CSM1) are their own program, pbrm_csm.prog: the
 		 * same pbrm_default.frag with WW_SUNSHADOW defined, chosen only while the
@@ -984,6 +991,25 @@ bool Renderer::setupProgramCE2( const NifModel * nif, Program * prog, Shape * me
  * channel is real: a clear bit means "use the constant", which is exactly the
  * override semantics the reader already resolved.
  */
+/*! lane LEGACYROUTE1: the planted red of the vanilla parity gate. WW_LEGACYROUTE_RED=oldroute restores the
+ * pre-LEGACYROUTE1 ROUTE (the PBR renderer mode sends every lit shape to the PBR program); any other value is
+ * refused by name on stderr and changes nothing. Echoed once, so a picture under it can be told apart. */
+bool wwLegacyRouteRed()
+{
+	static const bool v = []() {
+		const QString s = qEnvironmentVariable( "WW_LEGACYROUTE_RED" ).trimmed().toLower();
+		if ( s.isEmpty() )
+			return false;
+		const bool on = ( s == QLatin1StringView( "oldroute" ) );
+		fprintf( stderr, "WW_LEGACYROUTE_RED=%s: %s\n", qPrintable( s ),
+			on ? "RED: the PBR renderer mode sends every lit shape to the PBR program (the old route)"
+			   : "REFUSED: unknown value (known: oldroute); legacy materials draw their legacy program" );
+		fflush( stderr );
+		return on;
+	}();
+	return v;
+}
+
 bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * mesh )
 {
 	auto scene = mesh->scene;
@@ -995,31 +1021,14 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	// the units the base and emissive textures landed on, for the sRGB-tag query
 	int baseUnit = -1, emissiveUnit = -1, specUnit = -1;
 
-	// PBR mode renders EVERYTHING through this program, so a shape with no PBRM
-	// has to be driven from its legacy material instead. Spec/gloss maps onto
-	// metallic/roughness the same way the conversion pipeline does it: gloss is
-	// inverted to roughness, FO4 carries no metallicity so metal is 0, and F0 is
-	// the dielectric constant. Not a substitute for an authored PBRM — it is what
-	// "show me the whole scene under one BRDF" can honestly mean.
-	PbrmMaterial derived;
-	if ( !lsp->pbrmValid ) {
-		derived.roughness = std::clamp( 1.0f - lsp->specularGloss, 0.02f, 1.0f );
-		derived.metallic = 0.0f;
-		derived.ao = 1.0f;
-		derived.f0 = 0.04f;
-		derived.normalStrength = 1.0f;
-		derived.opacity = 1.0f;
-		// Diffuse and normal exist in the legacy slots, so tell the shader to
-		// sample them; there is no legacy RMAOS or emissive-intensity map, so
-		// those bits stay clear and the constants above apply.
-		derived.features = PbrmMaterial::BaseColorTexture | PbrmMaterial::NormalTexture;
-		// The diffuse alpha is coverage exactly where the legacy program reads it: the alpha
-		// property's test/blend (alphaFlags), which the shader still gates on. Without the bit a
-		// vanilla grate drew solid in PBR mode (lane PRTPGI, 2026-10-01). Red "noopacity" drops it.
-		if ( !wwR2aRed( "noopacity" ) )
-			derived.features |= PbrmMaterial::OpacityTexture;
-	}
-	const PbrmMaterial & m = lsp->pbrmValid ? lsp->pbrm : derived;
+	/* lane LEGACYROUTE1: only a real PBR material reaches this program -- setupProgram sends a legacy
+	 * material to its legacy program in every renderer mode. The derived "legacy fallback" that drove a
+	 * vanilla material from its spec/gloss slots here is retired. Under the planted red
+	 * (WW_LEGACYROUTE_RED=oldroute) such a shape binds an empty material's neutral defaults: a vanilla
+	 * shape drawn by the PBR program, which the parity gate must catch. */
+	if ( !lsp->pbrmValid && !wwLegacyRouteRed() )
+		return false;
+	const PbrmMaterial & m = lsp->pbrm;
 
 	lsp->pbrmBindRefusal.clear();
 
@@ -1043,7 +1052,7 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		return true;
 	};
 
-	if ( lsp->pbrmValid ) {
+	{
 		/* THE WHOLE-BINDING ABORT (lane PBRR1, docs s2.1 "texture failure"): a
 		 * texture the material samples that fails to load aborts the PBR
 		 * binding -- the shape falls back to legacy and the census names the
@@ -1093,30 +1102,9 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 				return false;
 			}
 		}
-	} else {
-		// Legacy fallback: pull diffuse and normal from the property's own slots
-		// via uniSampler, which is what resolves them for the spec/gloss path.
-		TexClampMode clamp = lsp->clampMode;
-		QString emptyString;
-		baseUnit = texunit;
-		prog->uniSampler( lsp, "BaseMap", 0, texunit, white, clamp, emptyString );
-		if ( texunit == baseUnit )
-			baseUnit = -1;
-		prog->uniSampler( lsp, "NormalMap", 1, texunit, ::default_n, clamp, emptyString );
-		bindPath( "RmaosMap", QString(), white, false );
-		emissiveUnit = texunit;
-		bindPath( "EmissiveMap", QString(), black, false );
-		if ( texunit == emissiveUnit )
-			emissiveUnit = -1;
-		bindPath( "SpecColorMap", QString(), white, false );
-		bindPath( "TintMaskMap", QString(), black, false );
 	}
-	/* lane FARLOD3: a legacy material's NormalMap that Shader Flags 1 bit 12 calls MODEL space (an `_msn`: the
-	 * far LOD terrain's sheets, btdterrain.cpp) is read in model axes, as fo4_default.frag reads it
-	 * (hasModelSpaceNormals). Without it the PBR far ground read near black. An authored PBRM's normal is
-	 * tangent space by contract, so only the legacy fallback asks. WW_R2A_RED=nomsn: the old tangent read. */
-	prog->uni1b( "pbrModelSpaceNormals", !lsp->pbrmValid && lsp->hasSF1( ShaderFlags::SLSF1_Model_Space_Normals )
-		&& !wwR2aRed( "nomsn" ) );
+	/* lane FARLOD3's pbrModelSpaceNormals (a legacy _msn read in model axes by the fallback) went with the
+	 * fallback (lane LEGACYROUTE1): the far terrain's _msn is now read by fo4_default.frag, as Legacy reads it. */
 	// lane CUBE1: the cell's cube term reads a legacy material's specular map as the game does (the legacy slot;
 	// white = the scalars alone). Only the cell program declares it; the PBR shading keeps its own derivation
 	prog->uniSampler( lsp, "CellSpecMap", 7, texunit, white, lsp->clampMode );
@@ -1185,10 +1173,9 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	 *   pbrIorMax     the IOR map's ceiling (bit 30: ior = A x iorMax)
 	 * so pbrSpecWeight x pbrF0 is pbrmDielectricF0 (the census level) in every case. The red
 	 * law V5 (WW_PBRM_F0_LAW=v5) is uploaded as a v5 reading: weight 1, the scalar as F0. */
-	const bool specV6 = lsp->pbrmValid && m.specularV6 && wwPbrmF0Law() == PbrmF0Law::Auto;
+	const bool specV6 = m.specularV6 && wwPbrmF0Law() == PbrmF0Law::Auto;
 	const float specWeight = specV6 ? m.specularWeight : 1.0f;
-	const float specF0 = !lsp->pbrmValid ? m.f0
-		: specV6 ? std::min( pbrmIorF0( m.specularIor ), 1.0f ) : pbrmDielectricF0( m, wwPbrmF0Law() );
+	const float specF0 = specV6 ? std::min( pbrmIorF0( m.specularIor ), 1.0f ) : pbrmDielectricF0( m, wwPbrmF0Law() );
 	auto srgbDecode = []( float c ) {
 		return c <= 0.04045f ? c / 12.92f : std::pow( ( c + 0.055f ) / 1.055f, 2.4f );
 	};
@@ -1226,14 +1213,14 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 				m.tintColor[c][2] );
 		prog->uni1i( "pbrTintMode", m.tintOverlap );
 	}
-	// -1 = the NIF alpha property: derived (non-.pbrm) shapes, and the red "nocomp"
+	// -1 = the NIF alpha property: a blended-ground pass, and the red "nocomp"
 	const int r4Red = wwR4RedBits();
 	/* lane TERRBLEND1: a blended-ground pass keeps its OWN blend, whatever the .pbrm
 	 * says: the base opaque (scaled by its share in the shader), every layer ADDED at
 	 * its share. A landscape .pbrm's composition (opaque) would draw each layer over
 	 * the base and bring the hard squares back the moment PBR lighting is on. */
 	const bool wwLandSplat = scene && wwCellLandIs( scene->nifModel, mesh->id() );
-	const int composition = ( lsp->pbrmValid && !( r4Red & 16 ) && !wwLandSplat ) ? std::clamp( m.composition, 0, 7 ) : -1;
+	const int composition = ( !( r4Red & 16 ) && !wwLandSplat ) ? std::clamp( m.composition, 0, 7 ) : -1;
 	prog->uni1i( "pbrComposition", composition );
 	prog->uni1f( "pbrGlobalOpacity", m.globalOpacity );
 	prog->uni1f( "pbrAlphaThreshold", m.alphaThreshold );
@@ -1272,18 +1259,15 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	}
 	prog->uni1i( "hasCubeMap", hasCubeMap );
 	prog->uni1f( "envReflection", lsp->environmentReflection );
-	/* lane CUBE1: as the legacy program's (res/shaders/cell_lights.glsl cellCubeGame); a .pbrm shape is no legacy
-	 * material, so mode 2 keeps its own PBR cube law there. PBR mode reads no specular map: the scalars stand */
+	/* lane CUBE1: a .pbrm shape is no legacy material, so mode 2 keeps its own PBR cube law there (the legacy
+	 * material's game term, cell_lights.glsl cellCubeGame, is the legacy program's since LEGACYROUTE1) */
 	if ( prog->uniLocation( "cellCubeMat" ) >= 0 ) {
 		Material * cm = lsp->getMaterial();
 		const bool specOn = ( cm && cm->isShaderMaterial() ) ? static_cast<ShaderMaterial *>( cm )->specularEnabled()
 			: lsp->hasSF1( ShaderFlags::SLSF1_Specular );
 		const bool specView = scene->hasOption( Scene::DoSpecular ) && scene->hasOption( Scene::DoLighting );
-		if ( hasCubeMap && uniCubeMap >= 0 && !lsp->pbrmValid )
-			fn->glActiveTexture( GL_TEXTURE0 + GLenum( texunit - 1 ) );	// the cube's unit, for the decode query
-		const float mode = !hasCubeMap ? 0.0f : lsp->pbrmValid ? 2.0f : wwCellCubeDecodeMode();
 		prog->uni4f( "cellCubeMat", FloatVector4( specOn && specView ? lsp->specularStrength : 0.0f, lsp->specularGloss,
-			mode, float( mode == 1.0f || mode == 3.0f ? wwCellCubeTag( lsp->getName() ) : 0 ) ) );
+			hasCubeMap ? 2.0f : 0.0f, 0.0f ) );
 	}
 
 	/* Scene lighting (lane PBRR2A, docs s5.2). Studio binds the SFCubeMapCache
@@ -1399,16 +1383,10 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	 * 3807-3828), the depth subset (lane PBRR1): a shape a .pbrm serves gets
 	 * ZBufferTest, and ZBufferWrite unless it alpha-blends. TwoSided and
 	 * AlphaTest from the .pbrm are not read by this reader yet (owed). */
-	const bool pbrmDepthTest = lsp->pbrmValid || mesh->depthTest;
 	// lane PBRR4: a .pbrm composition's Transparency/Depth depthWrite (default: composition <= 1)
-	const bool pbrmDepthWrite = composition >= 0 ? m.depthWrite
-		: lsp->pbrmValid ? !mesh->translucent : ( mesh->depthWrite && !mesh->translucent );
-	if ( !pbrmDepthTest ) {
-		glDisable( GL_DEPTH_TEST );
-	} else {
-		glEnable( GL_DEPTH_TEST );
-		glDepthFunc( GL_LEQUAL );
-	}
+	const bool pbrmDepthWrite = composition >= 0 ? m.depthWrite : !mesh->translucent;
+	glEnable( GL_DEPTH_TEST );
+	glDepthFunc( GL_LEQUAL );
 	glDepthMask( pbrmDepthWrite ? GL_TRUE : GL_FALSE );
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 

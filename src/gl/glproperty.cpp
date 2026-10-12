@@ -1434,8 +1434,8 @@ QString BSShaderLightingProperty::wwPbrmCensusFields( const QString & servedProg
 			path = QStringLiteral( "(embedded; material not loaded)" );
 
 		// Why PBR did not serve it: the first gate that said no ...
-		if ( pbrServed )
-			refusal = QStringLiteral( "no pbrm resolved: the PBR program drew the legacy material (mode pbr)" );
+		if ( pbrServed )	// lane LEGACYROUTE1: only under WW_LEGACYROUTE_RED=oldroute
+			refusal = QStringLiteral( "no pbrm resolved: the PBR program drew the legacy material (red oldroute)" );
 		else if ( !pbrmFeatureEnabled )
 			refusal = QStringLiteral( "pbr display off: pbrmFeatureEnabled=false" );
 		else if ( wwLodChannelView != 0 )
@@ -1448,6 +1448,8 @@ QString BSShaderLightingProperty::wwPbrmCensusFields( const QString & servedProg
 			refusal = QStringLiteral( "mode legacy" );
 		else if ( pbrmMode() == PbrmModeLegacyAndPBR && !pbrmValid )
 			refusal = QStringLiteral( "mode both, no pbrm resolved" );
+		else if ( pbrmMode() == PbrmModePBR && !pbrmValid )	// lane LEGACYROUTE1: a legacy material draws legacy
+			refusal = QStringLiteral( "mode pbr, no pbrm resolved: the legacy program draws the legacy material" );
 		else
 			refusal = QStringLiteral( "pbr program refused the shape" );
 
