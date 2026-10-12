@@ -1187,17 +1187,25 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 		r.line = QStringLiteral( "far lod: stack MISMATCH -- %1; NOT adopted (RED ownstack)" ).arg( what );
 		return r;
 	}
-	// refuse rather than half-adopt: every recorded plugin and every recorded folder must still be on disk
-	QStringList paths, missing;
+	/* lane FARLOD3 (bungo 10-12: "the loaded cells display the same modded trees" as the far LOD): the near
+	 * cells load the BAKE's stack -- the one the displayed far field was baked from, never the live profile --
+	 * minus only the files that are gone, each one logged ("far lod: stack skips ..."). FARLOD2 refused the
+	 * whole stack when one file was gone, so a stale bake drew vanilla near trees beside modded far ones.
+	 * WW_CELL_FARLOD_RED=refusemissing: that old rule (no adoption; the far field's roots are lent instead). */
+	QStringList paths, missing, keptRes;
 	for ( const LodbPlugin & p : std::as_const( led.plugins ) ) {
 		if ( !QFileInfo( p.path ).isFile() )
 			missing << QDir::toNativeSeparators( p.path );
-		paths << p.path;
+		else
+			paths << p.path;
 	}
-	for ( const LodbResource & res : std::as_const( led.resources ) )
+	for ( const LodbResource & res : std::as_const( led.resources ) ) {
 		if ( !QFileInfo::exists( res.path ) )
 			missing << QDir::toNativeSeparators( res.path );
-	if ( !missing.isEmpty() ) {
+		else
+			keptRes << res.path;
+	}
+	if ( !missing.isEmpty() && ( qgetenv( "WW_CELL_FARLOD_RED" ) == "refusemissing" || paths.isEmpty() ) ) {
 		r.line = QStringLiteral( "far lod: stack MISMATCH -- %1; NOT adopted: %2 of the bake's files are gone (%3)" )
 			.arg( what ).arg( missing.size() ).arg( QStringList( missing.mid( 0, 3 ) ).join( QStringLiteral( "; " ) ) );
 		// lane FARLOD3: the near cells keep their stack, but the far field still needs its own assets
@@ -1208,9 +1216,13 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 	}
 	r.adopt = true;
 	r.plugins = paths.join( QLatin1Char( ',' ) );
-	r.resources = bakeRes;
+	r.resources = keptRes;
 	r.line = QStringLiteral( "far lod: stack ADOPTED -- %1; the near cells now load the bake's %2 plugins and %3 resource "
-		"roots (%4)" ).arg( what ).arg( paths.size() ).arg( bakeRes.size() ).arg( QDir::toNativeSeparators( lodb ) );
+		"roots (%4)%5" ).arg( what ).arg( paths.size() ).arg( keptRes.size() ).arg( QDir::toNativeSeparators( lodb ) )
+		.arg( missing.isEmpty() ? QString() : QStringLiteral( "; skipped %1 of the bake's files that are gone, "
+			"each on a \"far lod: stack skips\" line" ).arg( missing.size() ) );
+	for ( const QString & m : std::as_const( missing ) )
+		r.line += QStringLiteral( "\n  far lod: stack skips %1 (gone from disk)" ).arg( m );
 	return r;
 }
 

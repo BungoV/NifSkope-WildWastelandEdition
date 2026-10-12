@@ -2,6 +2,14 @@
 
 ## Lane FARLOD3 (2026-10-07): two far LOD defects found by TERRBLENDFIX
 
+- **The loaded cells now show the same modded trees as the far LOD (FARLOD3).** When the near cells were opened
+  with a different plugin list than the far LOD bake, and some of the bake's files had since been removed, the
+  cell view refused the bake's list and drew vanilla near trees beside the modded far trees. Now the near cells
+  load the bake's own plugins and resource folders (the ones recorded with the bake, not the live mod profile),
+  skipping only the files that are gone; each skipped file gets its own "far lod: stack skips" line. Gate
+  (Fallout4.esm-only session at cell -17,23, his real bake with 6 files gone): stack adopted, 294 near Boston
+  Natural Surroundings trees drawn (main's exe: 0), magenta 0 px on a camera that shows near and far (main's exe:
+  24858). Red WW_CELL_FARLOD_RED=refusemissing brings the old refusal back (0 near BNS trees).
 - **Far LOD trees no longer draw magenta or white when the bake's stack does not match (FARLOD3).** When the near
   cells load a different plugin list than the far LOD bake (a stale bake, or a Fallout4.esm-only session) nothing
   from the bake is adopted, but the far field's own tree LOD models still need their mod's materials (Boston Natural

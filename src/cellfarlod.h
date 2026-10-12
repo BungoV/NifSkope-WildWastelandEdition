@@ -58,14 +58,16 @@ int cellFarLodLastType();                    //!< what the last build resolved t
  *  `adopt` = the near cells take `plugins` (comma list, the bake's order) and `resources` (the bake's stack,
  *  last wins). `line` is the telemetry ("far lod: stack ..."), always set when the far field is wanted:
  *  a match, an adoption with what moved, or a refusal with its reason. The Vanilla type never adopts.
- *  WW_CELL_FARLOD_RED=ownstack keeps the caller's load order and says MISMATCH (the gate's red control). */
+ *  WW_CELL_FARLOD_RED=ownstack keeps the caller's load order and says MISMATCH (the gate's red control).
+ *  lane FARLOD3: a bake file that is gone no longer refuses the adoption -- it is skipped and logged ("far lod:
+ *  stack skips <path>"), the rest of the bake's stack is adopted. WW_CELL_FARLOD_RED=refusemissing: the old rule. */
 struct CellFarStack
 {
 	bool adopt = false;
 	QString plugins;
 	QStringList resources;
 	QString line;
-	/*! lane FARLOD3: on a MISMATCH that is not adopted, the bake's recorded resource roots that are still on
+	/*! lane FARLOD3: on a MISMATCH that is not adopted (only the refusemissing red, or no bake plugin left), the bake's recorded resource roots that are still on
 	 *  disk. The far field's OWN models name materials and textures that live there (his BNS tree LOD:
 	 *  materials/bns/lod/... in "BNS Trees - Main.ba2"); without them the far trees drew magenta (legacy) or
 	 *  white (PBR). `cellFarLodLendRoots` appends them AFTER the session's stack. Empty on match/adopt/red. */
