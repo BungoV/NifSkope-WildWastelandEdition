@@ -126,6 +126,7 @@ struct CellSplatVert
 	float uv[2] = { 0, 0 };
 	float rgb[3] = { 1, 1, 1 };     //!< VCLR, or neutral when the cell has none
 	float w = 1.0f;                 //!< 1.0 on a base pass; the VTXT opacity on a layer
+	float n[3] = { 0, 0, 1 };       //!< lane ALLON2: the vertex normal (the LAND's VNML), what the ground is lit with
 };
 
 //! One 128-unit quad of one pass, corners counter-clockwise from SW.

@@ -609,6 +609,13 @@ private:
 	float defLandH = 0.0f;
 	float defWaterH = 0.0f;
 	quint32 defWaterType = 0;
+	/*! lane ALLON2 (2026-10-12, the Rexford street hole): a child worldspace that takes its parent's land (WRLD
+	 *  WNAM parent + PNAM bit 0 "Use Land Data": in Fallout4.esm only Goodneighbor) holds no LAND of its own; the game
+	 *  draws the PARENT's LAND at the same cell grid. Cell grid -> the parent cell's type-6 group, indexed cells only. */
+	quint32 landParent = 0;
+	QHash<QPair<int, int>, quint32> parentLandGroups;
+	quint32 landFormInGroup( quint32 group ) const;
+	void indexParentLand();
 	struct CellEntry
 	{
 		quint32 cellForm = 0;

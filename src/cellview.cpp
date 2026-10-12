@@ -3745,7 +3745,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 						for ( int k = 0; k < 4; k++ ) {
 							OutVert o;
 							o.pos = Vector3( q.v[k].p[0], q.v[k].p[1], q.v[k].p[2] );
-							o.nrm = Vector3( q.nrm[0], q.nrm[1], q.nrm[2] );
+							o.nrm = Vector3( q.v[k].n[0], q.v[k].n[1], q.v[k].n[2] );	// lane ALLON2: the vertex's VNML
 							o.tan = Vector3( 1.0f, 0.0f, 0.0f );
 							o.bit = Vector3::crossproduct( o.nrm, o.tan );
 							if ( o.bit.length() < 1.0e-6f )

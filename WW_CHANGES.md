@@ -48,6 +48,36 @@
   yellow = lit grid colour ratio): main 8a99 78,132 yellow px (the same count as SKYPIC1's pic_12_before),
   fixed exe 2, fixed exe + WW_CELL_GRID=1 78,132 and byte-identical to main's picture. Magenta 0 in all.
 
+## Lane ALLON2 (2026-10-12): all-on defects at -17,23
+
+- **Black blocks on the ground where two terrain textures blend are gone (ALLON2 #1).** On bungo's stack, Boston
+  Natural Surroundings' Landscape plugin points 24 landscape texture sets at a material file instead of a texture.
+  The cell build then names those blend layers after the .bgsm, and the legacy renderer let the material's blend
+  ("none") override the layer's own alpha property, so each layer drew solid at its weight over the base: black where
+  the weight is small, square steps where its quads stop. A blended-ground pass now always takes the cell build's
+  alpha property (src/gl/renderer.cpp, setupProgramCE1). Attribution on the old exe 8a99897f: Fallout4 + DLC, + Ultra
+  Exterior Lighting, + BNS Trees all 0.000 black in bungo's circled region; + BNS Landscape 0.178. Gate
+  (notes/allon2/gate1.sh, seam camera, default mode): circled region black share 0.185 on 8a99897f, 0.000 on the
+  fix (0.000 with water on too); red WW_TERRBLEND_RED=matalpha puts the material back in charge, 0.185. 0 magenta.
+- **The faint squares and triangles on the ground are gone (ALLON2 #1b).** The cell build gave every 128-unit
+  ground quad ONE flat face normal, so the light stepped at every quad edge: a grid of faint squares, split into
+  triangles along the build's diagonal. The game lights the ground with the cell's own per-vertex normals (VNML).
+  Each ground vertex now carries its VNML normal, with central differences of the heights where a cell has none
+  (src/cellsplat.cpp, src/cellsplat.h, src/cellview.cpp). Gate (notes/allon2/tools/quadstep.py, seam camera: the tone
+  step across quad edges divided by the step across mid-quad lines, 1.0 = no grid): band y555-640 1.83 on 8a99897f,
+  1.22 on the fix; bungo's loop 3.42 on 8a99897f, 1.16 on the fix. Red WW_TERRBLEND_RED=facenormal (the flat normal
+  back): 1.67 and 1.36. The same steps show on a vanilla-only stack (1.87), so they were ours, not a mod's. 0 magenta.
+- **The holes in Goodneighbor's streets are filled (ALLON2 Rexford hole).** Goodneighbor is its own worldspace, but
+  it owns no ground: its WRLD record names the Commonwealth as parent (WNAM) with "Use Land Data" set (PNAM bit 0),
+  and the game draws the Commonwealth's LAND under it. The cell build read LAND only from the open worldspace, so
+  every gap between Goodneighbor's street meshes showed the sky dome (the blue patch by the Rexford, under floating
+  trash decals). The worldspace load now reads WNAM and PNAM and, with Use Land Data, takes each cell's LAND from
+  the parent's cell at the same grid (src/esmdata.cpp, src/esmdata.h); telemetry line "esm world: <edid> parent ..
+  use land data .. -> parent land for N of M cells". Gate (notes/allon2/tools/holegate.py, Rexford street camera:
+  sky-blue share of the hole region): 0.353 in bungo's shot (cand5_rexford_a), 0.000 on the fix; red
+  WW_CELL_PARENTLAND_RED=1 (no parent land) 0.440. 0 magenta. The floating trash decals (TrashDecal01 at z 592) now
+  sit under the parent ground (600..608 there); the game draws the same LAND, not yet checked in game.
+
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
 - Three finished branches merged into main in this order: farlod3 (922b04fb), legacyroute1 (7bead0f1), skypic1
