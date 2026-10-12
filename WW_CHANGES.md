@@ -102,6 +102,11 @@
 
 ## Branch skypic1 (2026-10-11/12, lanes SKYPIC1 + STATICCACHE1, from prtpnext c00ab356 + ALLON1 771d67dc): landed by LAND3 (2026-10-12)
 
+- **A light-off pin for the brick review (SKYPIC1, measurement only).** `WW_CELL_LIGHT_OFF=all` or a list of placed
+  light ref ids (hex) starts those lights off, as if initially disabled, in the frame and in the probe relight, so a
+  gate can show the surfels lose exactly that light. The lights line in the run notes echoes it (`lightoff=... (N placed
+  lights pinned off)`). Unset: nothing changes. Not a user toggle.
+
 - **The probes' sky per direction, taken from the sky NifSkope draws (SKYPIC1, deck C9).** With
   `WW_CELL_SKYPIC=1` the cell view captures the Lookdev sky it draws (the dome, the stars, the cloud layers; not
   the sun or the moon, which stay the sun term) into six 64x64 linear faces, turns them into a per-direction table

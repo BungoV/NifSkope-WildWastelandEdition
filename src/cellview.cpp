@@ -935,11 +935,25 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	};
 	// lane GPURELIGHT1: WW_CELL_GI_GPU keeps the lights that start off in L.offLights (the relight's record)
 	const bool giKeepOff = wwCellGiGpuOn();	// lane CELLALL1: the GPU relight row (the pin wins)
+	/* lane SKYPIC1 (the brick review's light gate; a measurement pin, never a user toggle): WW_CELL_LIGHT_OFF =
+	 * all | <ref form id hex>[,<id>...] starts those placed lights off, as if initially disabled, so the frame and the
+	 * probe relight both lose them. Unset: no change. */
+	const QByteArray lightOffPin = qgetenv( "WW_CELL_LIGHT_OFF" ).trimmed().toLower();
+	QSet<quint32> lightOffRefs;
+	for ( const QByteArray & t : lightOffPin.split( ',' ) ) {
+		bool ok = false;
+		const quint32 id = t.trimmed().toUInt( &ok, 16 );
+		if ( ok )
+			lightOffRefs.insert( id );
+	}
+	int lightOffHit = 0;
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
 			continue;
-		const bool startOff = r.initiallyDisabled || ( b.flags & 0x20 );
+		const bool pinOff = lightOffPin == "all" || lightOffRefs.contains( r.formID );
+		lightOffHit += pinOff ? 1 : 0;
+		const bool startOff = r.initiallyDisabled || ( b.flags & 0x20 ) || pinOff;
 		if ( startOff ) {
 			off++;
 			if ( !giKeepOff || ( b.flags & 0x100000 ) )
@@ -1240,6 +1254,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	L.summary = QStringLiteral( "lights=%1 (omni %2, spot %3; skipped: off %4, no radius %5, black %6) ambient=%7 directional=%8 center=%9" )
 		.arg( L.lights.size() ).arg( omni ).arg( spot ).arg( off ).arg( noRadius ).arg( dark ).arg( amb, dir )
 		.arg( QStringLiteral( "%1,%2,%3" ).arg( center[0], 0, 'f', 1 ).arg( center[1], 0, 'f', 1 ).arg( center[2], 0, 'f', 1 ) )
+		+ ( lightOffPin.isEmpty() ? QString() : QStringLiteral( " lightoff=%1 (%2 placed lights pinned off)" )	// lane SKYPIC1
+			.arg( QString::fromLatin1( lightOffPin ) ).arg( lightOffHit ) )
 		+ QStringLiteral( " norim=%1 ignorerough=%2" )	// lane RIM1: the lights whose shader drops the back-light
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.noRim; } ) )
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )
