@@ -117,6 +117,20 @@
   right-click Remove takes them out; Reset removes them all. NifSkope only reads the dropped paths; nothing is copied
   or written anywhere. The view note names hand-added mods.
 - Gates (notes/modpick1/gates2.sh): on the final exe: detect (his Default found by detection), nomo2 / nomo2b / masters (17 = 17 of a hand-built list, order and count; all 17 ticked "always loads"), RED nofallback and RED noccc fail as required. On exe 20505d67 (same drag/drop code): untouched 0 px vs main; untick; drag (refused above VRPShared.esp; TrueGrass moved, grass 22 -> 25 types; RED noorder = untouched); drop harness (saved additions, missing master named, RED noadded). The drop picture rerun after the root-on-top fix is still owed: the far-LOD launches were starved of memory.
+- **Creation Club files always load under MO2 too (MODPICK1, phase 3).** MO2 forces every plugin named in
+  Fallout4.ccc on and never writes it to plugins.txt. Before this fix, the MO2 list showed them as unticked rows (his Default:
+  "8 of 45 load"). They are now ticked, locked and read "Data -- always loads", right after the masters in .ccc
+  order, the same as without MO2 (his Default: "17 of 46 load", 8 masters + 9 CC files).
+- **The sTestFile exception, with and without MO2.** When sTestFile1..10 is set under [General] in the MO2
+  profile's own Fallout4.ini/Fallout4Custom.ini (when the profile has them), or else in Documents\My Games\Fallout4's,
+  the game loads neither Fallout4.ccc nor plugins.txt. The list is then the masters plus the test files, all locked,
+  and the header says "test files only (sTestFile in <ini>)". A test file not found is named in the note
+  (src/cellmodsource.*).
+- Gates (notes/modpick1/gates3.sh, exe 45861c92; reds on 89478e4f's exe c4c2ad0c): detect 17 of 17 locked/ticked/"always
+  loads" (RED: 8 of 17); fixture MO2 profile (notes/modpick1/mo2tf, sTestFile1/2) 10 = 10 of a hand-built list (RED:
+  18 rows, the list check fails); no-MO2 sTestFile fixture 9 = 9 (RED fails); no-MO2 regression 17 = 17. 0 magenta
+  in all 6 pictures. The drop picture owed from phase 2 is still owed: the memory guard killed that run again
+  (rc 127).
 
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
