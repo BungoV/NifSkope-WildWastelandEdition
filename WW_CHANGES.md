@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane EFFECTPARITY1 (2026-10-12, branch effectparity1-20261012): particles and effects drawn as in the game
+
+- **Ground steam no longer draws near-white: lit effects take the surfaces' sun scale (ALLON2's cause, ported).**
+  The cell view multiplied lit effects (BSEffectShader with lighting on) by the image space's Sunlight Scale (4.5 in
+  CommonwealthClear) while surfaces took 1. The game applies the same scale to both (checked in Todd's treat:
+  BSEffectShader::SetupGeometry and BSLightingShader's directional setup read the same image space field).
+  `src/gl/celllights.cpp` now gives lit effects the surfaces' scale, outdoors and indoors. Red:
+  `WW_CELL_FXLIT_SCALE_RED=game`.
+- **Lit effects take the weather's Effect Lighting colour, not the Sunlight colour.** Sun::Update copies the
+  weather's Sunlight row into the sun light's diffuse and its Effect Lighting row (NAM0 row 9) into the light's
+  effect colour; the effect shader reads the effect colour. CommonwealthClear's day Effect Lighting is 0.41x the
+  Sunlight in linear terms. `src/esmweather.h` names the row (`WwRowEffectLighting`); `src/gl/lookdevstage.*`
+  blends it across the hour like the Sunlight (`wwLookdevEffectLight`); `celllights.cpp` uses it and the
+  "cell fx sun" telemetry line names it. Red: `WW_CELL_FXLIT_COLOR_RED=sun`.
+- **An alpha-tested, unblended material clears the NIF's blend bit (Third Rail posters, fire barrel stickers).**
+  The game rewrites a shape's NiAlphaProperty from its BGSM when the material has alpha test or blend on, so a
+  test-only material makes the shape opaque. The cell view kept the NIF's blend bit, sorted these shapes into the
+  blended pass and drew them over the haze as dark spots with the haze cut out around them. `Shape::wwMaterialClearsBlend`
+  (`src/gl/glshape.cpp`) applies the game's rule for FO4 materials (BSLightingShaderProperty, bsVersion < 170) and
+  logs each path once ("material alpha: ... alpha-tested, not blended"). Red: `WW_MATALPHA_RED=nif`.
+- **Gate** (notes/effectparity1: gate.sh, tools/epgate.py; memden, thirdrail and rexford cameras in Diamond City
+  and its market, CommonwealthClear at 12:00 and 23:00, depth of field and motion blur off). Steam box on memden at
+  noon: mean luma 76.9 after, 131.4 with all reds; the fx/surface sun ratio is 0.410 after (Effect Lighting / Sunlight)
+  and 4.500 with the reds. Third Rail posters at noon, mat fix alone (redfx vs before): 1680 pixels change, 1356 of
+  them in the poster and barrel boxes, luma 61.1 vs 39.4. Memden fire barrel: 13 pixels change, all in its box.
+  At 23:00: steam luma 48.0 after vs 50.4 (ratio 0.353 vs 1.000); posters 144 pixels change, all in the boxes,
+  luma 36.8 vs 26.9; barrel 29 pixels, all in its box. Magenta 0 in every picture.
+
 ## Lane FIXPACK1 (2026-10-12, branch fixpack1): queued defects in one lane
 
 - **A lane's gated exe and the deployed exe of the same commit are now the same file (LAND-REV).** Two things
