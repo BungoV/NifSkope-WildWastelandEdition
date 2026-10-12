@@ -5,7 +5,7 @@
  *
  *  Surfel color / Surfel light   every surfel of the bake as a splat (0.6 of a surfel cell) on its own surface, colored by its albedo
  *                                (sRGB) or by its outgoing light B / pi (the GI pass's curve); the frame under
- *                                them is magenta, so a surface no surfel covers reads as a hole.
+ *                                them is cyan, so a surface no surfel covers reads as a hole.
  *  probes                        with Show probes on, in any Pass but Combined, each probe as a box whose six
  *                                faces carry its own value on that axis (GI: E / pi, Sky visibility: the share).
  *  links                         a probe picked by a click (or the pin WW_CELL_PV_PROBE=<index>, the bake's

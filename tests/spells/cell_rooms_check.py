@@ -416,7 +416,7 @@ def door_cmd(esm, run, cell, eye=''):
 # relights it and dumps the labels (gi_rooms.bin) and the two-slot grid (gi_grid.bin, gi_slots.bin). The shader's
 # blend (res/shaders/cell_lights.glsl cellGiRoomSample, and the plain trilinear one without rooms) is redone here.
 LEAK_TOL = 1.02      # the dark side of a shared wall reads no more than the dark room's own brightest probe face
-COVER_MIN = 0.01     # cellGiE's own floor: a sample with less weight paints magenta in the pass view
+COVER_MIN = 0.01     # cellGiE's own floor: a sample with less weight paints the no-probe marker (cyan since FIXPACK1) in the pass view
 QUAD = lambda a, b, c, d: [(a, b, c), (a, c, d)]
 
 
@@ -585,7 +585,7 @@ def gi_fill(G, L, P, N, rooms):
     return s / ws if ws > 0 else np.zeros(4)
 
 
-RED_EMPTY = [False]   # red emptyslot: the twin weighs a room's empty slots (the old shader: black, magenta)
+RED_EMPTY = [False]   # red emptyslot: the twin weighs a room's empty slots (the old shader: black, the no-probe marker)
 GI_PLAIN = [0]     # samples that found rooms but no room with weight: the shader's plain (unclamped) trilinear
 GI_FILL = [os.environ.get('GI_CHECK_FILL', '1') != '0']   # lane GICAL1: the gap fill (GI_CHECK_FILL=0: the shader pin WW_CELL_GI_FILL=0)
 GI_FILLED = [0]    # samples the fill answered
@@ -884,7 +884,7 @@ def synth_cmd(exe, work, red):
             if pr is not None and len({int(pr[i, 0]) for i in pB}) != 1:
                 fails.append('wall: the dark room\'s probes in rooms %s' % sorted({int(pr[i, 0]) for i in pB}))
             if holes:
-                fails.append('wall: %d samples with no weight (magenta)' % holes)
+                fails.append('wall: %d samples with no weight (no-probe marker)' % holes)
             if GI_PLAIN[0]:
                 fails.append('wall: %d samples with no room with weight (the unclamped blend)' % GI_PLAIN[0])
     for l in lines:
@@ -897,7 +897,7 @@ def synth_cmd(exe, work, red):
 def holes_cmd(run, sample, red):
     """H (lane ROOMCLAMP1): the clamp makes no hole. On the dump's own surfels (a fixed sample), the shader's twin with
     the rooms against the plain trilinear: a surface the plain grid covers must stay covered (a room's slot no probe of
-    that room reached is empty: weighing it painted pipes black in the lit view, magenta in the pass). Red emptyslot:
+    that room reached is empty: weighing it painted pipes black in the lit view, the no-probe marker in the pass). Red emptyslot:
     the twin weighs empty slots (the old shader)."""
     d = os.path.join(run, 'dump')
     RED_EMPTY[0] = red == 'emptyslot'

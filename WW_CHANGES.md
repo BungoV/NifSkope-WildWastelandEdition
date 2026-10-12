@@ -12,6 +12,19 @@
   this, a revision baked at the lane's first qmake went stale once the lane committed. Gate
   (notes/fixpack1/pe_compare.py): a worktree build of 78f87254 equals main's deployed 8a99897f byte for byte,
   except the two stamp fields. LAND3's gated exe a4b01b48 differed from it on 17.8 M bytes.
+- **The probe views' "no probe reaches here" marker is now cyan, not magenta (NOCOVER-COLOR).** Magenta always means a
+  missing texture, so a pass picture full of magenta read as a defect. `res/shaders/cell_lights.glsl` paints the
+  no-cover marker `vec3(0, 1, 1)`; the doc comments in `src/gl/cellprobeview.h` and `src/gl/celllights.h` follow.
+  Tests that look for the marker: `tests/spells/cell_pass_check.py` (stages F and L: the marker exactly off the
+  splats; `WW_PASS_MARKER=magenta` judges an older exe's pictures), `tests/spells/cell_rooms_check.py` and
+  `tests/spells/cell_rooms.sh` (wording only; stage H judges weights, not the colour). Outside the repo,
+  `notes/skypic1/bricks2_sheet.py` and `magenta.py` count magenta, and now see none from this view. Other debug
+  colours stay: the water probe view's mode 27, the PBR route "swap" tint, the viewport's pink selection, and
+  cell_fxdepth_check's mark. Gate (cell_pass.sh, Vault111Cryo): the new exe passes F and L with the cyan marker and
+  fails them when judged with magenta; main's 8a99897f passes with magenta and fails with cyan. Every Pass picture
+  from the new exe has 0 magenta from the marker. The remaining census hits (probe3 2775 px, probe4 13 px) are hues
+  inside the false-colour direction views; they match main's pixel for pixel. Stage Z (the combined picture against
+  the older before_main exe) fails on both exes alike (about 16,000 pixels), so it is not part of this change.
 
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
