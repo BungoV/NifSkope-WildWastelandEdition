@@ -75,10 +75,15 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 				*error = QString( "form %1 is not a WRLD record" ).arg( wsForm, 8, 16, QChar( '0' ) );
 			return false;
 		}
+		quint32 wnam = 0, pnam = 0;	// lane ALLON2: the parent worldspace and its use flags
 		{
 			ESMFile::ESMField f( *esm, w );
 			while ( f.next() ) {
-				if ( f == "EDID" ) {
+				if ( f == "WNAM" && f.size() >= 4 ) {
+					wnam = f.readUInt32();
+				} else if ( f == "PNAM" && f.size() >= 2 ) {
+					pnam = f.readUInt16();
+				} else if ( f == "EDID" ) {
 					wsEdid = fieldString( f );
 				} else if ( f == "DNAM" && f.size() >= 8 ) {
 					defLandH = f.readFloat();
@@ -93,6 +98,13 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 		tr( "load: header fields read, indexing cells" );
 		indexWorldspace();
 		tr( "load: cells indexed" );
+		if ( wnam && ( pnam & 1 ) && !qEnvironmentVariableIsSet( "WW_CELL_PARENTLAND_RED" ) ) {	// lane ALLON2 (esmdata.h)
+			landParent = esm->mapFormID( w, wnam );
+			indexParentLand();
+		}
+		std::fprintf( stderr, "esm world: %s parent %08X use land data %d -> parent land for %d of %d cells%s\n",
+			qPrintable( wsEdid ), wnam, int( pnam & 1 ), int( parentLandGroups.size() ), int( cellIndex.size() ),
+			wnam && ( pnam & 1 ) && !landParent ? " (RED WW_CELL_PARENTLAND_RED: none)" : "" );
 		if ( cellIndex.isEmpty() ) {
 			if ( error )
 				*error = QStringLiteral( "worldspace has no indexed exterior cells" );
@@ -480,27 +492,8 @@ bool EsmWorld::land( int cx, int cy, EsmLand & out ) const
 	out = EsmLand();
 	out.cellX = cx;
 	out.cellY = cy;
-	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
-	if ( it == cellIndex.constEnd() || !it->childGroup )
-		return false;
-	// find the LAND record in the cell's child group subtree
-	quint32 landForm = 0;
-	std::function<void( unsigned int )> walk = [&]( unsigned int id ) {
-		while ( id && !landForm ) {
-			const ESMFile::ESMRecord * r = esm->findRecord( id );
-			if ( !r )
-				return;
-			if ( r->type != GRUP && *r == "LAND" )
-				landForm = r->formID;
-			if ( r->children )
-				walk( r->children );
-			id = r->next;
-		}
-	};
-	const ESMFile::ESMRecord * cg = esm->findRecord( it->childGroup );
-	if ( !cg )
-		return false;
-	walk( cg->children );
+	// the LAND record in the cell's child group subtree, else its parent worldspace's (lane ALLON2)
+	const quint32 landForm = landFormOf( cx, cy );
 	if ( !landForm )
 		return false;
 
@@ -1000,8 +993,18 @@ QVector<QPair<int, int>> EsmWorld::cellsAscending() const
 quint32 EsmWorld::landFormOf( int cx, int cy ) const
 {
 	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
-	if ( it == cellIndex.constEnd() || !it->childGroup )
-		return 0;
+	quint32 landForm = ( it != cellIndex.constEnd() && it->childGroup ) ? landFormInGroup( it->childGroup ) : 0;
+	if ( !landForm ) {	// lane ALLON2: a child worldspace that uses its parent's land (esmdata.h)
+		const quint32 pg = parentLandGroups.value( qMakePair( cx, cy ), 0 );
+		if ( pg )
+			landForm = landFormInGroup( pg );
+	}
+	return landForm;
+}
+
+//! The first LAND record in a cell's type-6 group subtree, 0 when none.
+quint32 EsmWorld::landFormInGroup( quint32 group ) const
+{
 	quint32 landForm = 0;
 	std::function<void( unsigned int )> walk = [&]( unsigned int id ) {
 		while ( id && !landForm ) {
@@ -1015,10 +1018,50 @@ quint32 EsmWorld::landFormOf( int cx, int cy ) const
 			id = r->next;
 		}
 	};
-	const ESMFile::ESMRecord * cg = esm->findRecord( it->childGroup );
+	const ESMFile::ESMRecord * cg = esm->findRecord( group );
 	if ( cg )
 		walk( cg->children );
 	return landForm;
+}
+
+/*! lane ALLON2: the parent worldspace's cells at this worldspace's indexed grid: walk the parent's world-children
+ *  group (the first file's tree, as indexWorldspace walks its own), CELL with XCLC -> its type-6 group. */
+void EsmWorld::indexParentLand()
+{
+	parentLandGroups.clear();
+	const ESMFile::ESMRecord * pw = landParent ? esm->findRecord( landParent ) : nullptr;
+	if ( !pw || !( *pw == "WRLD" ) )
+		return;
+	const ESMFile::ESMRecord * wg = pw->next ? esm->findRecord( pw->next ) : nullptr;
+	if ( !wg || wg->type != GRUP || wg->flags != landParent )
+		return;
+	std::function<void( unsigned int )> walk = [&]( unsigned int id ) {
+		while ( id ) {
+			const ESMFile::ESMRecord * r = esm->findRecord( id );
+			if ( !r )
+				return;
+			if ( r->type != GRUP && *r == "CELL" ) {
+				ESMFile::ESMField f( *esm, *r );
+				while ( f.next() ) {
+					if ( f == "XCLC" && f.size() >= 8 ) {
+						const int cx = int( f.readInt32() ), cy = int( f.readInt32() );
+						const QPair<int, int> k( cx, cy );
+						const ESMFile::ESMRecord * cg = r->next ? esm->findRecord( r->next ) : nullptr;
+						if ( cellIndex.contains( k ) && cg && cg->type == GRUP && cg->flags == r->formID )
+							parentLandGroups.insert( k, r->next );
+						break;
+					}
+				}
+			} else if ( r->type == GRUP && r->formID == 6 ) {
+				id = r->next;	// a cell's own children: no CELL inside
+				continue;
+			}
+			if ( r->children )
+				walk( r->children );
+			id = r->next;
+		}
+	};
+	walk( wg->children );
 }
 
 quint64 EsmWorld::vhgtCorpusHashSorted( int * landsHashed ) const

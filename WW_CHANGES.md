@@ -19,6 +19,16 @@
   step across quad edges divided by the step across mid-quad lines, 1.0 = no grid): band y555-640 1.83 on 8a99897f,
   1.22 on the fix; bungo's loop 3.42 on 8a99897f, 1.16 on the fix. Red WW_TERRBLEND_RED=facenormal (the flat normal
   back): 1.67 and 1.36. The same steps show on a vanilla-only stack (1.87), so they were ours, not a mod's. 0 magenta.
+- **The holes in Goodneighbor's streets are filled (ALLON2 Rexford hole).** Goodneighbor is its own worldspace, but
+  it owns no ground: its WRLD record names the Commonwealth as parent (WNAM) with "Use Land Data" set (PNAM bit 0),
+  and the game draws the Commonwealth's LAND under it. The cell build read LAND only from the open worldspace, so
+  every gap between Goodneighbor's street meshes showed the sky dome (the blue patch by the Rexford, under floating
+  trash decals). The worldspace load now reads WNAM and PNAM and, with Use Land Data, takes each cell's LAND from
+  the parent's cell at the same grid (src/esmdata.cpp, src/esmdata.h); telemetry line "esm world: <edid> parent ..
+  use land data .. -> parent land for N of M cells". Gate (notes/allon2/tools/holegate.py, Rexford street camera:
+  sky-blue share of the hole region): 0.353 in bungo's shot (cand5_rexford_a), 0.000 on the fix; red
+  WW_CELL_PARENTLAND_RED=1 (no parent land) 0.440. 0 magenta. The floating trash decals (TrashDecal01 at z 592) now
+  sit under the parent ground (600..608 there); the game draws the same LAND, not yet checked in game.
 
 ## Landed on main (2026-10-12, lane LAND3): FARLOD3, LEGACYROUTE1, SKYPIC1
 
