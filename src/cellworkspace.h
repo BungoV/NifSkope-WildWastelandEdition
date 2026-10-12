@@ -19,6 +19,8 @@ class CellModPickBox;
 class NifModel;
 class NifSkope;
 class QAction;
+class QActionGroup;
+class QMenu;
 class QCheckBox;
 class QPushButton;
 class QToolButton;
@@ -208,28 +210,29 @@ private:
 	 *  for PRTP6. Bake (lane PRTPBAKE) places and bakes in one rebuild; the band's
 	 *  note line then says what was written and where. */
 	QCheckBox * probesShow = nullptr;
-	QCheckBox * cellLights = nullptr;   // lane PRTP3: light the view with the cell's own lights
-	QCheckBox * cellGi = nullptr;       // lane PRTPGI: add the bake's bounce of those lights
-	QCheckBox * cellFar = nullptr;      // lane FARVIEW1: past the band, the surfels' baked light in place of the lights
-	QCheckBox * cellIs = nullptr;       // lane IMGS1: the cell's imagespace (exposure, curve, grade, LUT)
-	QCheckBox * cellCull = nullptr;     // lane SUNCELL1: per-placement culling (gl/cellcull.h); ships off
-	QCheckBox * cellPrevis = nullptr;   // lane SUNCELL1: occlusion planes / boxes, rooms and portals (gl/cellcull.h); ships off
-	QCheckBox * cellFarLod = nullptr;   // lane FARLOD1: the far field around the block (cellfarlod.h)
-	QComboBox * cellFarLodType = nullptr;   // lane FARLOD1: Vanilla | FO4CS
-	QCheckBox * cellTaa = nullptr;      // lane MOTION1: the game's temporal AA (one state with the Scene popup's row)
+	QAction * cellLights = nullptr;   // lane PRTP3: light the view with the cell's own lights
+	QAction * cellGi = nullptr;       // lane PRTPGI: add the bake's bounce of those lights
+	QAction * cellFar = nullptr;      // lane FARVIEW1: past the band, the surfels' baked light in place of the lights
+	QAction * cellIs = nullptr;       // lane IMGS1: the cell's imagespace (exposure, curve, grade, LUT)
+	QAction * cellCull = nullptr;     // lane SUNCELL1: per-placement culling (gl/cellcull.h); ships off
+	QAction * cellPrevis = nullptr;   // lane SUNCELL1: occlusion planes / boxes, rooms and portals (gl/cellcull.h); ships off
+	QAction * cellFarLod = nullptr;   // lane FARLOD1: the far field around the block (cellfarlod.h)
+	QMenu * cellFarLodType = nullptr;
+	QActionGroup * cellFarLodTypeGroup = nullptr;   // lane FARLOD1: Vanilla | FO4CS
+	QAction * cellTaa = nullptr;      // lane MOTION1: the game's temporal AA (one state with the Scene popup's row)
 	// lane CELLALL1: the second row, the features that were env-only (their defaults unchanged; new ones ship off)
-	QCheckBox * cellAo = nullptr;
-	QCheckBox * cellShadow = nullptr;
-	QCheckBox * cellWater = nullptr;
-	QCheckBox * cellSsr = nullptr;
-	QCheckBox * cellSsrExt = nullptr;
-	QCheckBox * cellAoDecal = nullptr;
-	QCheckBox * cellGiGpu = nullptr;
-	QCheckBox * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off
-	QCheckBox * cellGrass = nullptr;    // lane GRASSMB1: the game's grass (placed at cell open)
-	QCheckBox * cellDof = nullptr;      // lane GRASSMB1: the game's depth of field
-	QCheckBox * cellMblur = nullptr;    // lane GRASSMB1: the game's motion blur
-	QComboBox * cellPass = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
+	QAction * cellAo = nullptr;
+	QAction * cellShadow = nullptr;
+	QAction * cellSsr = nullptr;
+	QAction * cellSsrExt = nullptr;
+	QAction * cellAoDecal = nullptr;
+	QAction * cellGiGpu = nullptr;
+	QAction * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off
+	QAction * cellGrass = nullptr;    // lane GRASSMB1: the game's grass (placed at cell open)
+	QAction * cellDof = nullptr;      // lane GRASSMB1: the game's depth of field
+	QAction * cellMblur = nullptr;    // lane GRASSMB1: the game's motion blur
+	QMenu * cellPass = nullptr;
+	QActionGroup * cellPassGroup = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
 	QPushButton * probesPlace = nullptr;
 	QPushButton * probesBake = nullptr;
 	QTreeWidget * probeKinds = nullptr;
