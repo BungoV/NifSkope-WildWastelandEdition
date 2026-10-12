@@ -28360,8 +28360,8 @@ void NifSkope::initDockWidgets()
 			{ PbrmModeLegacy, tr( "Legacy" ),
 			  tr( "Render only spec/gloss lighting. A resolved .pbrm is ignored." ) },
 			{ PbrmModePBR, tr( "PBR" ),
-			  tr( "Render only PBR lighting. Shapes without a .pbrm are driven from their "
-			      "legacy material, so the whole scene sits under one BRDF." ) },
+			  tr( "PBR lighting wherever a .pbrm is available. Legacy materials (every vanilla "
+			      "material) draw with the legacy spec/gloss lighting, exactly as in Legacy." ) },
 			{ PbrmModeLegacyAndPBR, tr( "Legacy and PBR" ),
 			  tr( "Render both: PBR wherever a .pbrm is available, spec/gloss everywhere else. "
 			      "PBR always overrides a legacy material when one is available." ) },

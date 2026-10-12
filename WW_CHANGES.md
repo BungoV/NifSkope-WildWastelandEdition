@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LEGACYROUTE1 (2026-10-11): legacy materials draw with legacy math in every renderer mode
+
+- **In the PBR renderer mode, vanilla materials now draw exactly as in Legacy (LEGACYROUTE1).** bungo's rule: legacy
+  materials draw with the legacy (FO4) math, materials with a resolved .pbrm draw with the PBR math. The PBR program
+  used to take every lit shape in PBR mode and draw a vanilla material through a "derived" fallback inside
+  pbrm_default.frag, which looked different from Legacy (pale armor, grey near-black cells, a dark far LOD ground).
+  The program choice now keys on the .pbrm alone: no .pbrm, the same legacy program, uniforms and lights that the
+  Legacy mode uses. The derived fallback branches in setupProgramPBRM are retired; the debug views stay. FARLOD3's
+  model-space-normal read in pbrm_default.frag is superseded (the far terrain's _msn now goes through the legacy
+  shader, which always read it correctly) and is reverted, so the PBR shader is byte-for-byte the cdbab115 one.
+  "PBR" and "Legacy and PBR" now draw the same. The census says "mode pbr, no pbrm resolved: the legacy program draws
+  the legacy material". Gates (notes/legacyroute1/gates.sh): PBR mode vs Legacy pixel-identical (0 px) on a weapon,
+  an armor, the -17,23 cell and the far LOD seam (cells opened on bungo's MO2 profile stack); the previous exe
+  differed on 2.7%, 6.3%, 99.0% and 99.8% of pixels. Legacy mode unchanged (0 px). Every PBRM fixture case
+  (tests/fixtures/pbr_data) byte-identical in modes pbr and both, each still served by the PBR program. Red
+  WW_LEGACYROUTE_RED=oldroute sends every lit shape back to the PBR program (fails parity on all four).
+  0 magenta pixels in all 58 pictures.
+
 ## Lane FARLOD3 (2026-10-07): two far LOD defects found by TERRBLENDFIX
 
 - **The loaded cells now show the same modded trees as the far LOD (FARLOD3).** When the near cells were opened

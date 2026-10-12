@@ -121,8 +121,6 @@ uniform int r4Red;					// WW_R4_RED: 1 nodiv, 2 emitmul, 4 notintmask, 8 emitraw
 uniform float alpha;
 uniform int alphaFlags;
 uniform bool landSplat;		// lane TERRBLEND1: vertex alpha = this blended-ground pass's share
-uniform bool pbrModelSpaceNormals;	// lane FARLOD3: the legacy NormalMap is an _msn (Shader Flags 1 bit 12)
-uniform mat3 normalMatrix;			// fo4_default.vert's, row-major (model -> view as v * M)
 uniform float alphaThreshold;
 
 uniform vec2 uvScale;
@@ -458,24 +456,10 @@ void main()
 	// (s*255 - 128)/127 like the game's unpack (docs s3.2 item 3), Z rebuilt (B is
 	// height when the material says so, never a normal component)
 	vec3 normal = vec3( 0.0, 0.0, 1.0 );
-	/* lane FARLOD3: A MODEL-SPACE MAP (an `_msn`: the far LOD terrain's sheets, Shader Flags 1 bit 12) is the
-	 * surface normal in the model's own axes -- R east, B north, G up, measured on the game's sheets (see
-	 * fo4_default.frag hasModelSpaceNormals) -- and needs model -> view and nothing else. Read through the
-	 * tangent frame below (T = n x up, arbitrary on a terrain tile) it tilted the LOD ground away from the sun:
-	 * PBR far ground luma 9-30 against 40-50 on the cell side (TERRBLENDFIX 10-07). Only a legacy material in PBR
-	 * mode sets it (setupProgramPBRM); an authored PBRM's normal is tangent space by contract. */
-	bool msn = false;
-	vec3 msnN = vec3( 0.0, 0.0, 1.0 );
 	if ( hasFeature( F_NORMAL ) ) {
 		vec4 nm = texture( NormalMap, offset );
-		if ( pbrModelSpaceNormals ) {
-			vec3 m = nm.rgb * 2.0 - 1.0;
-			msnN = normalize( vec3( m.r, m.b, m.g ) * normalMatrix );
-			msn = true;
-		} else {
-			normal.rg = clamp( ( nm.rg * 255.0 - 128.0 ) / 127.0, -1.0, 1.0 ) * pbrNormalStrength;
-			normal.b = sqrt( max( 1.0 - dot( normal.rg, normal.rg ), 0.0 ) );
-		}
+		normal.rg = clamp( ( nm.rg * 255.0 - 128.0 ) / 127.0, -1.0, 1.0 ) * pbrNormalStrength;
+		normal.b = sqrt( max( 1.0 - dot( normal.rg, normal.rg ), 0.0 ) );
 	}
 	// back faces: the GEOMETRIC normal flips before the tangent frame is applied
 	mat3 tbn = btnMatrix_norm;
@@ -485,7 +469,7 @@ void main()
 	// --- evalSurface ---
 	Surface s;
 	s.base = base;
-	s.N = msn ? ( gl_FrontFacing ? msnN : -msnN ) : normalize( tbn * normal );
+	s.N = normalize( tbn * normal );
 	s.rough = pbrRoughness;
 	s.metal = pbrMetallic;
 	s.ao = pbrAo;
