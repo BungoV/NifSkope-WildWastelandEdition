@@ -180,10 +180,10 @@ bool runPrtpStage( NifSkope * skope, int stage )
 		QWidget * bake = dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesBake" ) );
 		add( "PRTP: Bake is on", bake && bake->isEnabled() );
 		// lane PROBEVIEW1: the Pass drop-down, its five entries, off until a bake is relit
-		QComboBox * pass = dCell->findChild<QComboBox *>( QStringLiteral( "CellWorkspaceCellPass" ) );
+		QMenu * pass = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceCellPass" ) );	// SHOWMENU1: a Show submenu
 		QStringList items;
-		for ( int i = 0; pass && i < pass->count(); i++ )
-			items << pass->itemText( i );
+		for ( QAction * a : pass ? pass->actions() : QList<QAction *>() )
+			items << a->text();
 		add( "PRTP: the Pass drop-down holds Combined, GI, Sky visibility, Surfel color, Surfel light, Brick light",
 			items == QStringList{ "Combined", "GI", "Sky visibility", "Surfel color", "Surfel light", "Brick light" }, items.join( QLatin1Char( '|' ) ) );
 		add( "PRTP: Pass is off before a bake", pass && !pass->isEnabled() );
@@ -264,7 +264,7 @@ bool runPrtpStage( NifSkope * skope, int stage )
 			baked.join( QLatin1Char( '|' ) ) + QStringLiteral( " vs Place All %1" ).arg( allKept ) );
 	}
 	{	// lane PROBEVIEW1: the bake relit, the Pass drop-down is live
-		QComboBox * pass = dCell->findChild<QComboBox *>( QStringLiteral( "CellWorkspaceCellPass" ) );
+		QMenu * pass = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceCellPass" ) );
 		add( "PRTP: Pass is on after Bake", pass && pass->isEnabled() );
 	}
 	const QString shotDir = QString::fromLocal8Bit( qgetenv( "WW_CELLWS_SHOTS" ) );
@@ -434,6 +434,52 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 			"Disabled references" } ), showLabels.join( QLatin1Char( '|' ) ) );
 	add( "none of the Show rows is in the Workspaces menu",
 		!skope->workspaceNamesInOrder().contains( QLatin1String( "Cell borders" ) ) );
+
+	/* lane SHOWMENU1: the Show dropdown is the one home of every viewport switch. Walk the menu
+	 * as drawn: section -> ticks (submenus by title), and each label exactly once in the window. */
+	if ( QMenu * sm = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceShowMenu" ) ) ) {
+		QStringList layout;
+		QString section;
+		for ( QAction * a : sm->actions() ) {
+			if ( a->isSeparator() ) {
+				section = a->text();
+				continue;
+			}
+			layout << section + QLatin1Char( '/' ) + a->text().remove( QLatin1Char( '&' ) );
+		}
+		const QStringList want = {
+			"World/Cell borders", "World/Ground", "World/Water", "World/Markers", "World/Disabled references",
+			"World/Grass", "World/Particles", "World/Previs", "World/Culling", "World/Far LOD", "World/Far LOD source",
+			"Lighting/Cell lights", "Lighting/GI", "Lighting/Far light", "Lighting/Far light mode",
+			"Lighting/Light shadows", "Lighting/AO", "Lighting/AO decals", "Lighting/GPU relight",
+			"Effects/Imagespace", "Effects/Temporal AA", "Effects/SSR", "Effects/SSR outdoors",
+			"Effects/Depth of field", "Effects/Motion blur" };
+		add( "SHOWMENU1: the Show dropdown holds every viewport switch in its section, in order",
+			layout == want, layout.join( QLatin1Char( '|' ) ) );
+		int waters = 0, boxes = 0;
+		for ( QAction * a : dCell->findChildren<QAction *>() )
+			if ( a->text() == QLatin1String( "Water" ) )
+				waters++;
+		for ( QWidget * w : dCell->findChildren<QWidget *>() )
+			if ( w->inherits( "QCheckBox" ) || w->inherits( "QComboBox" ) )
+				if ( w->objectName() != QLatin1String( "CellWorkspaceProbesShow" )
+					&& w->objectName() != QLatin1String( "CellWorkspaceOverlay" )
+					&& w->objectName() != QLatin1String( "CellWorkspaceTypeFilter" )
+					&& !w->objectName().startsWith( QLatin1String( "CellModPick" ) ) )
+					boxes++;
+		add( "SHOWMENU1: Water is one switch", waters == 1, QString::number( waters ) );
+		add( "SHOWMENU1: no viewport checkbox or drop-down is left in the panel", boxes == 0,
+			QString::number( boxes ) );
+		QMenu * src = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceFarLodType" ) );
+		QStringList srcItems;
+		for ( QAction * a : src ? src->actions() : QList<QAction *>() )
+			srcItems << a->text() + ( a->isChecked() ? QStringLiteral( "*" ) : QString() );
+		add( "SHOWMENU1: Far LOD source is a submenu of Vanilla and FO4CS, one ticked",
+			srcItems.size() == 2 && srcItems.filter( QLatin1String( "*" ) ).size() == 1,
+			srcItems.join( QLatin1Char( '|' ) ) );
+	} else {
+		add( "SHOWMENU1: the Show dropdown exists", false );
+	}
 
 	// ---- 6. the round trip, as bytes
 	const QByteArray beforeCell = skope->saveState( 0x074 );

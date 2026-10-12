@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SHOWMENU1 (2026-10-12, branch showmenu1): the Show dropdown holds every viewport switch
+
+- **One home for the viewport switches (bungo: "Tidy that up").** The Cell panel's Show dropdown now has three
+  sections: World (Cell borders, Ground, Water, Markers, Disabled references, Grass, Particles, Previs, Culling,
+  Far LOD, Far LOD source), Lighting (Cell lights, GI, Far light, Far light mode, Light shadows, AO, AO decals,
+  GPU relight) and Effects (Imagespace, Temporal AA, SSR, SSR outdoors, Depth of field, Motion blur). Each tick
+  keeps its old checkbox's settings key, default, objectName and live path. The two drop-downs (Far LOD source,
+  Far light mode) are submenus of exclusive ticks. The PRTP band keeps only Show probes, Place and Bake.
+- **Water is one tick.** The Show row (CellEditor/Show/water, default on) now also sets the water shader switch
+  (WW/CellWater), so the second Water checkbox is gone.
+- Self-test (src/cellworkspacetest.cpp): the Pass rows read the submenu; new SHOWMENU1 rows check the menu
+  layout, Water once, and no viewport checkbox or drop-down left in the panel.
+
 ## Lane FIXPACK1 (2026-10-12, branch fixpack1): queued defects in one lane
 
 - **A lane's gated exe and the deployed exe of the same commit are now the same file (LAND-REV).** Two things
