@@ -170,16 +170,130 @@ bool fromMo2( const QString & profile, const QString & mods, const QString & dat
 		s->pluginFrom << ( f.isEmpty() || f == QLatin1String( "data" ) ? QStringLiteral( "Data" ) : f );
 	}
 	s->stack = lo.stack;
+	/* Fallout4.ccc's files load under MO2 too: MO2 forces them on and never
+	 * writes them to plugins.txt; the reader puts them after the masters. */
+	s->alwaysLoads = lo.masters;
+	if ( qgetenv( "WW_MODPICK_RED" ) == "noccc" )
+		s->alwaysLoads = 0;  // red: 89478e4f's MO2 list (the Creation Club files unticked)
+	return true;
+}
+
+//! the folder the game's own Fallout4.ini and Fallout4Custom.ini sit in
+QString myGames()
+{
+	const QString o = clean( QString::fromLocal8Bit( qgetenv( "WW_MODPICK_MYGAMES" ) ) );  // a test fixture
+	if ( !o.isEmpty() )
+		return o;
+	return clean( QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) ) + QStringLiteral( "/My Games/Fallout4" );
+}
+
+/* sTestFile1..10 in [General]: when any is set the game loads neither
+ * Fallout4.ccc nor plugins.txt, only the masters and these files. A later ini
+ * overrides a key; `from` names the last ini that set one. */
+QStringList testFiles( const QStringList & inis, QString * from )
+{
+	QStringList val( 10 );
+	for ( const QString & ini : inis ) {
+		bool general = false;
+		for ( const QString & raw : readLines( ini ) ) {
+			const QString l = raw.trimmed();
+			if ( l.startsWith( QLatin1Char( '[' ) ) ) {
+				general = l.compare( QLatin1String( "[General]" ), Qt::CaseInsensitive ) == 0;
+				continue;
+			}
+			if ( !general || !l.startsWith( QLatin1String( "sTestFile" ), Qt::CaseInsensitive ) )
+				continue;
+			const int eq = l.indexOf( QLatin1Char( '=' ) );
+			bool ok = false;
+			const int n = eq > 9 ? l.mid( 9, eq - 9 ).trimmed().toInt( &ok ) : 0;
+			if ( !ok || n < 1 || n > 10 )
+				continue;
+			val[n - 1] = l.mid( eq + 1 ).trimmed();
+			*from = clean( ini );
+		}
+	}
+	QStringList out;
+	for ( const QString & v : val )
+		if ( !v.isEmpty() && !out.contains( v, Qt::CaseInsensitive ) )
+			out << v;
+	return out;
+}
+
+//! the inis the game reads sTestFile from: the profile's own when it has them (MO2), else My Games
+QStringList gameInis( const QString & profile )
+{
+	if ( !profile.isEmpty() ) {
+		const QStringList p{ profile + QStringLiteral( "/Fallout4.ini" ), profile + QStringLiteral( "/Fallout4Custom.ini" ) };
+		if ( QFileInfo( p.at( 0 ) ).isFile() || QFileInfo( p.at( 1 ) ).isFile() )
+			return p;
+	}
+	return { myGames() + QStringLiteral( "/Fallout4.ini" ), myGames() + QStringLiteral( "/Fallout4Custom.ini" ) };
+}
+
+/* The sTestFile exception: the list becomes the masters (no Creation Club
+ * files) plus the test files, all forced on. `dirs` = where a file is looked
+ * for, highest priority first. */
+void applyTestFiles( CellModSource * s, const QStringList & inis, const QStringList & dirs, const QString & data )
+{
+	QString from;
+	const QStringList names = testFiles( inis, &from );
+	if ( names.isEmpty() || qgetenv( "WW_MODPICK_RED" ) == "notestfile" )
+		return;  // red notestfile: 89478e4f, the ini ignored
+	static const char * masters[] = { "Fallout4.esm", "DLCRobot.esm", "DLCworkshop01.esm", "DLCCoast.esm",
+		"DLCworkshop02.esm", "DLCworkshop03.esm", "DLCNukaWorld.esm", "DLCUltraHighResolution.esm" };
+	QStringList plugins, pluginFrom, missing;
+	for ( const char * m : masters )
+		for ( const QString & p : std::as_const( s->plugins ) )
+			if ( QFileInfo( p ).fileName().compare( QLatin1String( m ), Qt::CaseInsensitive ) == 0 ) {
+				plugins << p;
+				pluginFrom << QStringLiteral( "Data" );
+			}
+	for ( const QString & n : names ) {
+		bool have = false;
+		for ( const QString & p : std::as_const( plugins ) )
+			have = have || QFileInfo( p ).fileName().compare( n, Qt::CaseInsensitive ) == 0;
+		if ( have )
+			continue;
+		QString found;
+		for ( const QString & d : dirs )
+			if ( found.isEmpty() && QFileInfo( d + QLatin1Char( '/' ) + n ).isFile() )
+				found = QDir::cleanPath( d + QLatin1Char( '/' ) + n );
+		if ( found.isEmpty() ) {
+			missing << n;
+			continue;
+		}
+		const QString dir = QFileInfo( found ).absolutePath();
+		plugins << found;
+		pluginFrom << ( sameDir( dir, data ) ? QStringLiteral( "Data" ) : QFileInfo( dir ).fileName() );
+	}
+	s->plugins = plugins;
+	s->pluginFrom = pluginFrom;
+	s->alwaysLoads = int( plugins.size() );
+	s->label += QStringLiteral( " -- test files only (sTestFile in %1): no Fallout4.ccc, no plugins.txt" )
+		.arg( QDir::toNativeSeparators( from ) );
+	if ( !missing.isEmpty() )
+		s->note = QStringLiteral( "%1 sTestFile entries not found: %2" ).arg( missing.size() )
+			.arg( missing.join( QStringLiteral( ", " ) ) );
+}
+
+//! fromMo2, then the profile's sTestFile exception
+bool fromMo2Tested( const QString & profile, const QString & mods, const QString & dataDir, const QString & label,
+	CellModSource * s )
+{
+	if ( !fromMo2( profile, mods, dataDir, label, s ) )
+		return false;
+	QStringList dirs;
+	for ( int i = int( s->stack.size() ) - 1; i >= 0; i-- )
+		dirs << s->stack.at( i );
+	applyTestFiles( s, gameInis( s->from ), dirs, s->stack.isEmpty() ? QString() : s->stack.first() );
 	return true;
 }
 
 //! [Archive] values of the game's inis, the later file overriding a key
 QStringList iniArchives( const QString & game )
 {
-	const QString docs = clean( QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) );
 	const QStringList inis{ game + QStringLiteral( "/Fallout4_Default.ini" ),
-		docs + QStringLiteral( "/My Games/Fallout4/Fallout4.ini" ),
-		docs + QStringLiteral( "/My Games/Fallout4/Fallout4Custom.ini" ) };
+		myGames() + QStringLiteral( "/Fallout4.ini" ), myGames() + QStringLiteral( "/Fallout4Custom.ini" ) };
 	const char * keys[] = { "sResourceIndexFileList", "sResourceStartUpArchiveList", "sResourceArchiveList",
 		"sResourceArchiveList2" };
 	QStringList val( 4 );
@@ -253,7 +367,7 @@ CellModSource cellModSource()
 		looked << QStringLiteral( "MO2 hidden (WW_MODPICK_NOMO2)" );
 	} else if ( !set.isEmpty() ) {
 		const QString mods = QSettings().value( QStringLiteral( "LodGeneration/mo2Mods" ) ).toString().trimmed();
-		if ( fromMo2( set, mods, QString(), QStringLiteral( "the MO2 profile %1 (the LOD panel's)" )
+		if ( fromMo2Tested( set, mods, QString(), QStringLiteral( "the MO2 profile %1 (the LOD panel's)" )
 				.arg( QFileInfo( clean( set ) ).fileName() ), &s ) )
 			return s;
 		looked << s.error;
@@ -269,7 +383,7 @@ CellModSource cellModSource()
 		if ( pick >= 0 ) {
 			const Mo2Instance & m = found.at( pick );
 			const QString data = m.game.isEmpty() ? QString() : m.game + QStringLiteral( "/Data" );
-			if ( fromMo2( m.profile, m.mods, data, QStringLiteral( "the MO2 profile %1 (found: %2%3)" )
+			if ( fromMo2Tested( m.profile, m.mods, data, QStringLiteral( "the MO2 profile %1 (found: %2%3)" )
 					.arg( QFileInfo( m.profile ).fileName(), QDir::toNativeSeparators( m.ini ) )
 					.arg( found.size() > 1 ? QStringLiteral( ", 1 of %1 Fallout 4 instances" ).arg( found.size() ) : QString() ),
 					&s ) )
@@ -332,6 +446,7 @@ CellModSource cellModSource()
 	}
 	for ( int i = 0; i < s.plugins.size(); i++ )
 		s.pluginFrom << QStringLiteral( "Data" );
+	applyTestFiles( &s, gameInis( QString() ), { data }, data );
 	s.stack = cellModDataStack( data, s.plugins );
 	return s;
 }

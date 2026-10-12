@@ -38,8 +38,20 @@ BSD License - see nifskope.h
  *                and `note` says where it looked. No Data at all: an empty list
  *                whose `note` names every place looked.
  *
+ * Every step: the masters and Fallout4.ccc's files present in Data load
+ * whatever plugins.txt says (MO2 forces them on too and never writes them to
+ * plugins.txt), so they are the first `alwaysLoads` rows: ticked and locked.
+ * The one exception, every step: sTestFile1..10 in [General] of the MO2
+ * profile's own Fallout4.ini/Fallout4Custom.ini (when it has them), else of
+ * Documents/My Games/Fallout4's. The game then loads neither Fallout4.ccc nor
+ * plugins.txt: the list is the masters plus the test files, all locked, and
+ * the label says "test files only".
+ *
  * WW_MODPICK_NOMO2=1 hides MO2 (steps 1 and 2) for the no-MO2 gate.
+ * WW_MODPICK_MYGAMES=<folder> stands in for Documents/My Games/Fallout4 (a gate fixture).
  * WW_MODPICK_RED=nofallback: steps 3 and 4 refuse (the old "no MO2 profile" error).
+ * WW_MODPICK_RED=noccc: alwaysLoads 0 (the Creation Club files as ordinary rows).
+ * WW_MODPICK_RED=notestfile: sTestFile ignored.
  * ------------------------------------------------------------------------- */
 
 struct CellModSource
@@ -49,8 +61,8 @@ struct CellModSource
 	QString from;           //!< the profile folder or the Data folder
 	QStringList plugins;    //!< full paths, load order
 	QStringList pluginFrom; //!< parallel: the mod folder's name, "Data" or "overwrite"
-	int alwaysLoads = 0;    //!< "data"/"masters": the first N plugins (masters + Fallout4.ccc in Data) load whatever
-	                        //!< plugins.txt says, as in the game; MO2 lists them as rows he can untick (0)
+	int alwaysLoads = 0;    //!< the first N plugins (masters + Fallout4.ccc in Data, or masters + sTestFile)
+	                        //!< load whatever plugins.txt says, under MO2 too: locked rows
 	QStringList stack;      //!< the resource stack, lowest first (last wins), as lodgenSetResources takes it
 	QString note;           //!< what was skipped, or where it looked
 	QString error;          //!< why the list is empty
