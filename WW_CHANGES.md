@@ -1,5 +1,31 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FARLOD3 (2026-10-07): two far LOD defects found by TERRBLENDFIX
+
+- **The loaded cells now show the same modded trees as the far LOD (FARLOD3).** When the near cells were opened
+  with a different plugin list than the far LOD bake, and some of the bake's files had since been removed, the
+  cell view refused the bake's list and drew vanilla near trees beside the modded far trees. Now the near cells
+  load the bake's own plugins and resource folders (the ones recorded with the bake, not the live mod profile),
+  skipping only the files that are gone; each skipped file gets its own "far lod: stack skips" line. Gate
+  (Fallout4.esm-only session at cell -17,23, his real bake with 6 files gone): stack adopted, 294 near Boston
+  Natural Surroundings trees drawn (main's exe: 0), magenta 0 px on a camera that shows near and far (main's exe:
+  24858). Red WW_CELL_FARLOD_RED=refusemissing brings the old refusal back (0 near BNS trees).
+- **Far LOD trees no longer draw magenta or white when the bake's stack does not match (FARLOD3).** When the near
+  cells load a different plugin list than the far LOD bake (a stale bake, or a Fallout4.esm-only session) nothing
+  from the bake is adopted, but the far field's own tree LOD models still need their mod's materials (Boston Natural
+  Surroundings' tree LOD .bgsm files). They were not found (230 warnings), so the legacy route drew them magenta and
+  the PBR route white. The bake's resource folders that still exist are now added to the END of the search list, so
+  the near cells' files always win and the far trees find theirs; a "far lod: resources -- lent N ..." line says so.
+  These were the tree LOD meshes in the object rings, not the impostor cards. Gate (seam camera, legacy): magenta
+  0 px on the LOD half (main's exe 57569), 0 warnings; PBR white 3 px (main 19377). Red WW_CELL_FARLOD_RED=nobakeroots
+  brings the magenta back (57516).
+- **The far LOD ground is no longer near black in PBR mode (FARLOD3).** The far terrain's normal maps are
+  model-space maps (_msn), which the legacy shader already read correctly; the PBR shader read them as ordinary
+  tangent-space maps and tilted the far ground away from the sun. Legacy materials in PBR mode now read a model-space
+  map in the model's own axes, as the legacy shader does; authored PBR materials are unchanged. Gate: near-black
+  share of the LOD half 0.022 (main 0.459), LOD ground at 0.79 of the cell ground's brightness (main 0.46).
+  Red WW_R2A_RED=nomsn: 0.525 and 0.32.
+
 ## Landed on main (2026-10-07, lane LAND-FINAL): the final-20261005 branch
 
 This list and the WATER2 to GRASSMB1 entries below the MAGDROP1 entry came onto main together, as one merge of

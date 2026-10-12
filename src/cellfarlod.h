@@ -58,15 +58,27 @@ int cellFarLodLastType();                    //!< what the last build resolved t
  *  `adopt` = the near cells take `plugins` (comma list, the bake's order) and `resources` (the bake's stack,
  *  last wins). `line` is the telemetry ("far lod: stack ..."), always set when the far field is wanted:
  *  a match, an adoption with what moved, or a refusal with its reason. The Vanilla type never adopts.
- *  WW_CELL_FARLOD_RED=ownstack keeps the caller's load order and says MISMATCH (the gate's red control). */
+ *  WW_CELL_FARLOD_RED=ownstack keeps the caller's load order and says MISMATCH (the gate's red control).
+ *  lane FARLOD3: a bake file that is gone no longer refuses the adoption -- it is skipped and logged ("far lod:
+ *  stack skips <path>"), the rest of the bake's stack is adopted. WW_CELL_FARLOD_RED=refusemissing: the old rule. */
 struct CellFarStack
 {
 	bool adopt = false;
 	QString plugins;
 	QStringList resources;
 	QString line;
+	/*! lane FARLOD3: on a MISMATCH that is not adopted (only the refusemissing red, or no bake plugin left), the bake's recorded resource roots that are still on
+	 *  disk. The far field's OWN models name materials and textures that live there (his BNS tree LOD:
+	 *  materials/bns/lod/... in "BNS Trees - Main.ba2"); without them the far trees drew magenta (legacy) or
+	 *  white (PBR). `cellFarLodLendRoots` appends them AFTER the session's stack. Empty on match/adopt/red. */
+	QStringList bakeRoots;
 };
 CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, const QString & nearPlugins );
+/*! lane FARLOD3: append the roots the session's FO4 resource folders lack, LAST -- the archive index keeps
+ *  the FIRST copy of a path (libfo76utils ba2file.cpp), so every file the near cells' stack already has still
+ *  comes from it; only paths nothing else answers (the far field's own) are served by the bake's roots.
+ *  Returns the "far lod: resources ..." line. WW_CELL_FARLOD_RED=nobakeroots lends nothing. */
+QString cellFarLodLendRoots( const QStringList & bakeRoots );
 //! Make `resources` the session's resource stack (the generator's and the texture folders), as main.cpp
 //! does for WW_LODGEN_RESOURCES. Nothing when it already is.
 void cellFarLodAdoptResources( const QStringList & resources );
