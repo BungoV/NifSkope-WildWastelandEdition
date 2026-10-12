@@ -962,31 +962,42 @@ void wwCellLightsUniforms( Scene * scene )
 	 * SURFACES' sun too (BSLightingShader::GeometrySetupConstantDirectionalLight +0xfc and BSDFLightShader::
 	 * SetupGeometry +0xc33 multiply ImageSpaceManager+0x98 in, 1.10.155), so effect and wall keep a 1:1 sun. This
 	 * viewer's surfaces take the sun unscaled, so a lit effect takes the surfaces' scale (1): with x4.5 it drew 4.5x
-	 * brighter than the wall behind it. Red WW_CELL_FXLIT_SCALE_RED=game puts the Sunlight Scale back (in and out). */
+	 * brighter than the wall behind it. Red WW_CELL_FXLIT_SCALE_RED=game puts the Sunlight Scale back (in and out).
+	 * lane EFFECTPARITY1: the colour is not the sunlight. Sun::Update copies the Sky's colours into the sun light:
+	 * the diffuse (+0x12c, what the surfaces read) from the weather's Sunlight row, and a second colour (+0x17c,
+	 * NiDirectionalLight::SetEffectColor) from its Effect Lighting row (NAM0 row 9, Sky+0x114); the effect
+	 * shader's lit branch reads +0x17c. CommonwealthClear at noon: Sunlight 225 grey, Effect Lighting 150 grey
+	 * (0.41x linear); at night 53,70,87 vs 33,51,67. Red WW_CELL_FXLIT_COLOR_RED=sun takes the sunlight again. */
 	{
 		static const bool fxExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
 		static const bool fxScaleRed = qgetenv( "WW_CELL_FXLIT_SCALE_RED" ).trimmed() == "game";
+		static const bool fxColorRed = qgetenv( "WW_CELL_FXLIT_COLOR_RED" ).trimmed() == "sun";
 		const bool fxProg = prog->name == std::string_view( "fo4_effectcell.prog" )
 			|| prog->name == std::string_view( "particles_cell.prog" );
 		float dalc[6][3];
 		if ( !L->interior && fxProg && !fxExtRed && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
 			float dif[4] = {}, amb[4] = {};
 			wwLookdevLight( dirTo, dif, amb );
+			float fxCol[3] = { dif[0], dif[1], dif[2] };
+			if ( !fxColorRed )
+				wwLookdevEffectLight( fxCol );	// lane EFFECTPARITY1: the Effect Lighting row
 			WwLookdevIs is;
 			const bool haveIs = wwLookdevImageSpace( is );
 			const float isScale = haveIs ? is.hdr[6] : 1.0f;
 			const float sunScale = fxScaleRed ? isScale : 1.0f;	// lane ALLON2: the surfaces' scale (above)
 			for ( int c = 0; c < 3; c++ )
-				dirColor[c] = std::max( dif[c], 0.0f ) * sunScale;
+				dirColor[c] = std::max( fxCol[c], 0.0f ) * sunScale;
 			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
 			static QString fxSunLast;
-			const QString line = QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (sun %4,%5,%6 x %7; "
+			const QString line = QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (%10 %4,%5,%6 x %7; "
 					"imagespace Sunlight Scale %8%9, surfaces' sun scale 1)" )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
-				.arg( double( dif[0] ), 0, 'f', 5 ).arg( double( dif[1] ), 0, 'f', 5 ).arg( double( dif[2] ), 0, 'f', 5 )
+				.arg( double( fxCol[0] ), 0, 'f', 5 ).arg( double( fxCol[1] ), 0, 'f', 5 ).arg( double( fxCol[2] ), 0, 'f', 5 )
 				.arg( double( sunScale ), 0, 'f', 3 ).arg( double( isScale ), 0, 'f', 3 )
 				.arg( haveIs ? ( fxScaleRed ? QStringLiteral( ", RED WW_CELL_FXLIT_SCALE_RED=game" ) : QString() )
-					: QStringLiteral( ", no imagespace: 1" ) );
+					: QStringLiteral( ", no imagespace: 1" ) )
+				.arg( fxColorRed ? QStringLiteral( "sunlight, RED WW_CELL_FXLIT_COLOR_RED=sun," )
+					: QStringLiteral( "effect lighting" ) );
 			if ( line != fxSunLast ) {
 				fprintf( stderr, "%s\n", qPrintable( line ) );
 				fxSunLast = line;
