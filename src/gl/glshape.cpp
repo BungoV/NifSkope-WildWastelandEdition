@@ -45,8 +45,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QSet>
 
 #include <cmath>
+#include <cstdio>
 
 Shape::Shape( Scene * s, const QModelIndex & b ) : Node( s, b )
 {
@@ -623,6 +625,33 @@ bool Shape::wwWaterDraws() const
 	return wwCellWaterWanted( scene, id() );
 }
 
+bool Shape::wwMaterialClearsBlend() const
+{
+	/* lane EFFECTPARITY1: the game's material apply rewrites a shape's NiAlphaProperty from its
+	 * BGSM when the material has alpha blend or alpha test on (blend bit, factors, test bit and
+	 * threshold all come from the material). A material that is alpha-tested but not blended
+	 * therefore clears the NIF's blend bit: the shape is opaque and draws in the first pass,
+	 * before the haze cards. Theater posters (SignsTheater01.BGSM) and the fire barrels
+	 * (MetalBarrel01Alpha.BGSM) carry NIF alpha 0x12ED / 0x10ED; in the second pass they painted
+	 * over the steam: dark spots with the haze cut out at their outline.
+	 * The lighting-shader draw already takes its blend state from the material (renderer.cpp).
+	 * Red control WW_MATALPHA_RED=nif: the NIF blend bit wins again. */
+	static const bool red = qgetenv( "WW_MATALPHA_RED" ) == "nif";
+	if ( red || !bslsp || bslsp->bsVersion >= 170 )
+		return false;
+	Material * mat = bslsp->getMaterial();
+	if ( !mat || !mat->hasAlphaTest() || mat->hasAlphaBlend() )
+		return false;
+	static QSet<QString> told;
+	const QString path = bslsp->materialFileName();
+	if ( !told.contains( path ) ) {
+		told.insert( path );
+		fprintf( stderr, "material alpha: %s alpha-tested, not blended (NIF blend bit yields to the material)\n",
+			qPrintable( path ) );
+	}
+	return true;
+}
+
 void Shape::updateShader()
 {
 	if ( bslsp )
@@ -635,7 +664,7 @@ void Shape::updateShader()
 	drawInSecondPass = false;
 	if ( translucent )
 		drawInSecondPass = true;
-	else if ( alphaProperty && alphaProperty->hasAlphaBlend() )
+	else if ( alphaProperty && alphaProperty->hasAlphaBlend() && !wwMaterialClearsBlend() )
 		drawInSecondPass = true;
 	else if ( bssp ) {
 		if ( bssp->bsVersion >= 170 ) {

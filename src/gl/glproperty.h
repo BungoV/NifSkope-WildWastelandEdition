@@ -806,6 +806,9 @@ public:
 	//! route that served the shape, its file, the .pbrm envelope, the refusal.
 	QString wwPbrmCensusFields( const QString & servedProgram ) const;
 
+	//! The material file name the NIF names (lane EFFECTPARITY1 telemetry).
+	const QString & materialFileName() const { return materialPath; }
+
 protected:
 	ShaderFlags::SF1 flags1 = ShaderFlags::SLSF1_ZBuffer_Test;
 	ShaderFlags::SF2 flags2 = ShaderFlags::SLSF2_ZBuffer_Write;
