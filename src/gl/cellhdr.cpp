@@ -201,6 +201,13 @@ void wwCellHdrEnd( Scene * scene )
 	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
 	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
 	const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	GLint prevDepthFunc = GL_LESS;
+	fn->glGetIntegerv( GL_DEPTH_FUNC, &prevDepthFunc );
+	GLint prevBlend[4] = { GL_ONE, GL_ZERO, GL_ONE, GL_ZERO };
+	fn->glGetIntegerv( GL_BLEND_SRC_RGB, &prevBlend[0] );
+	fn->glGetIntegerv( GL_BLEND_DST_RGB, &prevBlend[1] );
+	fn->glGetIntegerv( GL_BLEND_SRC_ALPHA, &prevBlend[2] );
+	fn->glGetIntegerv( GL_BLEND_DST_ALPHA, &prevBlend[3] );
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDepthMask( GL_FALSE );
 	fn->glDisable( GL_BLEND );
@@ -225,8 +232,35 @@ void wwCellHdrEnd( Scene * scene )
 	} else {
 		fn->glDisable( GL_STENCIL_TEST );
 	}
+	/* lane SKYHOLE1: a cell effect over the sky (no opaque draw under it, the depth still at the far plane) blended
+	 * over 0 in the linear frame, and mode 0 laid its tone-mapped value over the backdrop: the Memory Den's steam
+	 * (MistGroundWaterSteam01LongHalf) as a black patch. Mode 0 now takes only the pixels an opaque draw reached
+	 * (the quad at the far plane passes GL_GREATER there), mode 2 the rest (GL_LEQUAL), composited by coverage.
+	 * WW_CELL_SKYHOLE_RED=old: mode 0 over every 1 pixel, as before. */
+	static const bool skyholeOld = qgetenv( "WW_CELL_SKYHOLE_RED" ).trimmed() == "old";
+	static bool skyholeSaid = false;
+	if ( !skyholeSaid ) {
+		skyholeSaid = true;
+		qInfo().noquote() << "cell hdr: effects over the sky" << ( skyholeOld
+			? "replace the backdrop (RED=old)" : "composite over the backdrop by their coverage (lane SKYHOLE1)" );
+	}
+	const bool splitSky = sorted && !skyholeOld;
+	if ( splitSky ) {
+		fn->glEnable( GL_DEPTH_TEST );
+		fn->glDepthFunc( GL_GREATER );	// an opaque draw's depth is nearer than the quad's 1.0
+	}
 	prog->uni1i( "hdrMode", 0 );
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	if ( splitSky ) {
+		fn->glDepthFunc( GL_LEQUAL );	// the depth still at the far plane: only effects (or nothing) drew there
+		fn->glEnable( GL_BLEND );
+		fn->glBlendFunc( GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
+		prog->uni1i( "hdrMode", 2 );
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		fn->glDisable( GL_BLEND );
+		fn->glDisable( GL_DEPTH_TEST );
+		fn->glDepthFunc( GLenum( prevDepthFunc ) );
+	}
 	if ( sorted ) {
 		fn->glStencilFunc( GL_EQUAL, 2, 0x03 );	// any other program: its value as written
 		prog->uni1i( "hdrMode", 1 );
@@ -240,6 +274,7 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glStencilFunc( GL_ALWAYS, 0, 0xFF );
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
 	if ( wasDepth ) fn->glEnable( GL_DEPTH_TEST ); else fn->glDisable( GL_DEPTH_TEST );
+	fn->glBlendFuncSeparate( GLenum( prevBlend[0] ), GLenum( prevBlend[1] ), GLenum( prevBlend[2] ), GLenum( prevBlend[3] ) );
 	if ( wasBlend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
 	if ( wasCull ) fn->glEnable( GL_CULL_FACE ); else fn->glDisable( GL_CULL_FACE );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST );
