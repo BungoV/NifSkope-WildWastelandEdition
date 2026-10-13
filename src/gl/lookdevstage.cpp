@@ -816,6 +816,15 @@ bool wwLookdevImageSpace( WwLookdevIs & o )
 	return true;
 }
 
+float wwLookdevSunlightScale()
+{
+	static const bool red = qgetenv( "WW_CELL_SUNSCALE_RED" ).trimmed() == "one";
+	WwLookdevIs is;
+	if ( red || !wwLookdevImageSpace( is ) || !( is.hdr[6] > 0.0f ) )
+		return 1.0f;
+	return is.hdr[6];
+}
+
 /* ------------------------------------------------------------------------
  * The weather preview passes (lane PBRWX1): dome, moon, sun disc, clouds,
  * glare, in that order (INFERRED from the RenderDoc sequence, spec_clouds.md

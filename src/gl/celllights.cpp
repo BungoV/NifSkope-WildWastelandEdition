@@ -933,20 +933,26 @@ void wwCellLightsUniforms( Scene * scene )
 	 * fog keeps the old exterior law; a lit effect takes it x Sunlight Scale below); Lookdev off (no weather) = the old path, unchanged. */
 	bool hasDir = L->hasDirectional;
 	float dirTo[3] = { L->dirTo[0], L->dirTo[1], L->dirTo[2] }, dirColor[3] = { L->dirColor[0], L->dirColor[1], L->dirColor[2] };
+	/* lane BOUNCE1: the game's lit surfaces take the sun x the imagespace Sunlight Scale (wwLookdevSunlightScale;
+	 * CommonwealthClear noon 4.5), so the sun against the weather's ambient -- and the bounce the probes carry -- is
+	 * the game's ratio; the cell imagespace's exposure (adapted luminance) takes the brighter frame. 1 indoors. */
+	const float sunScale = ( !L->interior && wwLookdevActive() ) ? wwLookdevSunlightScale() : 1.0f;
+	prog->uni1f( "cellSunScale", sunScale );
 	if ( !L->interior && wwLookdevActive() && wwIsCellProgramName( prog->name ) ) {
 		float dalc[6][3], dif[4] = {}, amb[4] = {};
 		if ( wwLookdevDalc( dalc ) ) {
 			wwLookdevLight( dirTo, dif, amb );
-			std::copy( dif, dif + 3, dirColor );
+			for ( int c = 0; c < 3; c++ )
+				dirColor[c] = dif[c] * sunScale;
 			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
 		}
 		// telemetry: what the exterior sun uploaded (or why not), once per change
 		static QString sunLast;
 		const QString line = hasDir
-			? QStringLiteral( "cell sun: exterior directional=weather to=%1,%2,%3 color=%4,%5,%6 (linear) shadows=%7" )
+			? QStringLiteral( "cell sun: exterior directional=weather to=%1,%2,%3 color=%4,%5,%6 (linear) shadows=%7 sunlight scale=%8" )
 				.arg( double( dirTo[0] ), 0, 'f', 5 ).arg( double( dirTo[1] ), 0, 'f', 5 ).arg( double( dirTo[2] ), 0, 'f', 5 )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
-				.arg( prog->uniLocation( "csmMap" ) >= 0 ? 1 : 0 )
+				.arg( prog->uniLocation( "csmMap" ) >= 0 ? 1 : 0 ).arg( double( sunScale ), 0, 'f', 3 )
 			: QStringLiteral( "cell sun: exterior refused (no weather loaded, or a black sun)" );
 		if ( line != sunLast ) {
 			fprintf( stderr, "%s\n", qPrintable( line ) );
@@ -984,20 +990,20 @@ void wwCellLightsUniforms( Scene * scene )
 			WwLookdevIs is;
 			const bool haveIs = wwLookdevImageSpace( is );
 			const float isScale = haveIs ? is.hdr[6] : 1.0f;
-			const float sunScale = fxScaleRed ? isScale : 1.0f;	// lane ALLON2: the surfaces' scale (above)
+			const float fxScale = fxScaleRed ? isScale : sunScale;	// lane ALLON2: the surfaces' scale (lane BOUNCE1: the game's)
 			for ( int c = 0; c < 3; c++ )
-				dirColor[c] = std::max( fxCol[c], 0.0f ) * sunScale;
+				dirColor[c] = std::max( fxCol[c], 0.0f ) * fxScale;
 			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
 			static QString fxSunLast;
 			const QString line = QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (%10 %4,%5,%6 x %7; "
-					"imagespace Sunlight Scale %8%9, surfaces' sun scale 1)" )
+					"imagespace Sunlight Scale %8%9, surfaces' sun scale %11)" )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
 				.arg( double( fxCol[0] ), 0, 'f', 5 ).arg( double( fxCol[1] ), 0, 'f', 5 ).arg( double( fxCol[2] ), 0, 'f', 5 )
-				.arg( double( sunScale ), 0, 'f', 3 ).arg( double( isScale ), 0, 'f', 3 )
+				.arg( double( fxScale ), 0, 'f', 3 ).arg( double( isScale ), 0, 'f', 3 )
 				.arg( haveIs ? ( fxScaleRed ? QStringLiteral( ", RED WW_CELL_FXLIT_SCALE_RED=game" ) : QString() )
 					: QStringLiteral( ", no imagespace: 1" ) )
 				.arg( fxColorRed ? QStringLiteral( "sunlight, RED WW_CELL_FXLIT_COLOR_RED=sun," )
-					: QStringLiteral( "effect lighting" ) );
+					: QStringLiteral( "effect lighting" ) ).arg( double( sunScale ), 0, 'f', 3 );
 			if ( line != fxSunLast ) {
 				fprintf( stderr, "%s\n", qPrintable( line ) );
 				fxSunLast = line;

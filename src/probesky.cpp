@@ -130,7 +130,9 @@ ProbeSkyLight probeSkyLightNow()
 		for ( int c = 0; c < 3; c++ )
 			s.amb[a][c] = dalc[flip ? a : ( a ^ 1 )][c];
 	const double dl = std::sqrt( double( dir[0] ) * dir[0] + double( dir[1] ) * dir[1] + double( dir[2] ) * dir[2] );
-	const float sunScale = wwStudioSunScale();   // the PBR program's sun strength in a scene mode
+	/* the PBR program's sun strength in a scene mode; lane BOUNCE1: x the imagespace Sunlight Scale, the sun the
+	 * cell view's exterior surfaces draw (celllights.cpp), so the bounce is the sun the game lights with */
+	const float sunScale = wwStudioSunScale() * wwLookdevSunlightScale();
 	for ( int c = 0; c < 3; c++ ) {
 		s.sunTo[c] = float( dir[c] / std::max( dl, 1e-9 ) );
 		s.sun[c] = dif[c] * sunScale;

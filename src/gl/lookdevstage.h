@@ -144,6 +144,12 @@ struct WwLookdevIs
 	float t = 0.0f;	// 0 = all lutA
 };
 bool wwLookdevImageSpace( WwLookdevIs & out );
+/*! Lane BOUNCE1: the hour's imagespace Sunlight Scale (HNAM[6], wwLookdevImageSpace's hdr[6]): the game multiplies it
+ *  into the lit surfaces' sun (1.10.155: BSLightingShader::GeometrySetupConstantDirectionalLight +0xfc,
+ *  BSDFLightShader::SetupGeometry +0xc33 read ImageSpaceManager+0x98; lane SUNCELL1's decomp), so the cell view's
+ *  exterior surfaces and the probe GI's sun take it too. 1 without a weather or an imagespace. Red
+ *  WW_CELL_SUNSCALE_RED=one keeps the sun unscaled (the viewer before lane BOUNCE1). */
+float wwLookdevSunlightScale();
 //! lane WATER1: the water's sky (linear): the weather's Horizon, Sky-Lower and Sky-Upper rows at the dome's hour;
 //! false (the outputs untouched) when no weather is loaded
 bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] );
