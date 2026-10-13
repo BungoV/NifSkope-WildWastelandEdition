@@ -48,6 +48,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/campath.h"		// lane MOTION1: WW_RENDER_PATH
 #include "gl/gametaa.h"
 #include "gl/cellpost.h"	// lane GRASSMB1
+#include "gl/cellbloom.h"	// lane BLOOM1b
 #include "gl/sunshadow.h"
 #include "ui_nifskope.h"
 
@@ -2103,7 +2104,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 			log << "frame " << k << " eye " << QString::asprintf( "%.6f %.6f %.6f", eye[0], eye[1], eye[2] )
 				<< " at " << QString::asprintf( "%.6f %.6f %.6f", at[0], at[1], at[2] )
 				<< " fov " << QString::asprintf( "%.6f", fov ) << " | taa " << wwGameTaaEcho()
-				<< " | " << wwSunShadowSummary() << " | " << wwCellPostEcho() << "\n";
+				<< " | " << wwSunShadowSummary() << " | " << wwCellPostEcho() << " | " << wwCellBloomEcho() << "\n";
 	}
 	wwGameTaaSetFrame( -1 );
 	wwCellPostSetPath( -1, 0.0f );

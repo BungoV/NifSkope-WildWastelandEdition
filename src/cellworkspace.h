@@ -231,6 +231,9 @@ private:
 	QAction * cellGrass = nullptr;    // lane GRASSMB1: the game's grass (placed at cell open)
 	QAction * cellDof = nullptr;      // lane GRASSMB1: the game's depth of field
 	QAction * cellMblur = nullptr;    // lane GRASSMB1: the game's motion blur
+	QMenu * cellBloom = nullptr;      // lane BLOOM1b: Vanilla | FO4CS, FO4CS's rows and its physical glare
+	QActionGroup * cellBloomGroup = nullptr;
+	QAction * cellBloomGlare = nullptr;
 	QMenu * cellPass = nullptr;
 	QActionGroup * cellPassGroup = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
 	QPushButton * probesPlace = nullptr;

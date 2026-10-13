@@ -233,6 +233,7 @@ HEADERS += \
 	src/gl/cellgrass.h \
 	src/gl/cellpost.h \
 	src/gl/cellhdr.h \
+	src/gl/cellbloom.h \
 	src/gl/cellprobeview.h \
 	src/gl/cellssr.h \
 	src/gl/cellaodecalgl.h \
@@ -471,6 +472,7 @@ SOURCES += \
 	src/gl/cellgrass.cpp \
 	src/gl/cellpost.cpp \
 	src/gl/cellhdr.cpp \
+	src/gl/cellbloom.cpp \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellssr.cpp \
 	src/gl/cellaodecalgl.cpp \

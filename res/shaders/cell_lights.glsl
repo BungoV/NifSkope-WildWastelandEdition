@@ -89,6 +89,15 @@ uniform sampler3D cellFarPlaced;	// the GI grid relit by the placed lights alone
 uniform vec3 cellFarPlacedOrigin;
 uniform float cellFarPlacedVoxel;
 uniform vec3 cellFarPlacedDims;
+// lane BLOOM1b (src/gl/cellbloom.h): the FO4CS bloom, the tone map's final combine (cell_hdr.frag sets
+// cellFoBloomHere to tent(the chain's top) x the bloom weight, exposed light, before it calls cellImageSpace)
+#if defined( WW_CELL_HDR )
+uniform bool cellIsFoBloomOn;
+uniform sampler2D cellIsFoBloom;
+uniform vec4 cellIsFoBloomParams;	// radius (pixels), bloom weight, dispersion, 0
+uniform vec2 cellIsFoBloomFrame;	// the frame's size: the combine's uv
+vec3 cellFoBloomHere = vec3( 0.0 );
+#endif
 
 // sqrt-of-linear in (this program's convention), display out. Shaders011.fxp, the tonemap PS and the LUT PS.
 vec3 cellImageSpace( vec3 sqrtColor )
@@ -101,6 +110,10 @@ vec3 cellImageSpace( vec3 sqrtColor )
 		x += texture( cellIsBloom, ( gl_FragCoord.xy - cellIsBloomRect.xy ) * cellIsBloomRect.zw ).rgb;
 #endif
 	x = x * ( ( cellIsRed & 2 ) != 0 ? 1.0 : cellIsExposure ) * 2.0;
+#if defined( WW_CELL_HDR )
+	if ( cellIsFoBloomOn )	// lane BLOOM1b: FO4CS adds its bloom to the exposed light, before the curve (x 2: the curve's input)
+		x += 2.0 * cellFoBloomHere;
+#endif
 	float E = cellIsE;
 	vec3 c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
 	c /= ( 0.2 * E + 19.376 ) * 0.040856 - E / 0.3;		// the curve at W 11.2

@@ -8,6 +8,8 @@
  *   hdrMode 1  the pixels any other program wrote last: the value as it was written
  *   hdrMode 2  (lane SKYHOLE1) the pixels of mode 0 no opaque draw reached (depth at the far plane): a cell
  *              effect over the sky, composited over the backdrop by its coverage instead of replacing it
+ *   hdrMode 3  (lane BLOOM1b, the FO4CS bloom only) every pixel mode 0 does not take: the glow the bloom spreads
+ *              there, added in display space (blend ONE, ONE) as the tone-mapped difference it makes
  * The stencil (copied back before this pass) picks the pixels for each mode. */
 
 #define WW_CELLLIGHTS 1
@@ -16,6 +18,7 @@
 #define WW_CELL_HDR 1
 #include "uniforms.glsl"
 #include "cell_lights.glsl"
+#include "cell_bloom.glsl"
 
 uniform sampler2DMS hdrSrc;
 uniform int hdrMode;
@@ -27,6 +30,21 @@ void main()
 	vec4 x = texelFetch( hdrSrc, ivec2( gl_FragCoord.xy ), gl_SampleID );
 	// lane SKYHOLE1: the passes sort the pixels by depth too (the far plane = no opaque draw reached them)
 	gl_FragDepth = 1.0;
+	/* lane BLOOM1b: the FO4CS bloom at this pixel, exposed light (cell_bloom.glsl): the tent of the chain's top, red
+	 * and blue pushed by the glare's dispersion, times the bloom weight. cellImageSpace adds it before its curve. */
+	vec3 foBloom = vec3( 0.0 );
+	if ( cellIsFoBloomOn )
+		foBloom = bloomTentDispersed( cellIsFoBloom, ( floor( gl_FragCoord.xy ) + 0.5 ) / cellIsFoBloomFrame,
+			cellIsFoBloomParams.x, cellIsFoBloomParams.z ) * cellIsFoBloomParams.y;
+	if ( hdrMode == 3 ) {
+		cellFoBloomHere = foBloom;
+		vec3 lit = cellImageSpace( vec3( 0.0 ) );
+		cellFoBloomHere = vec3( 0.0 );
+		fragColor = vec4( max( lit - cellImageSpace( vec3( 0.0 ) ), vec3( 0.0 ) ), 0.0 );
+		return;
+	}
+	// mode 2 (the effects over the sky) takes the glow from mode 3, as every pixel mode 0 does not take
+	cellFoBloomHere = hdrMode == 0 ? foBloom : vec3( 0.0 );
 	if ( hdrMode == 2 ) {
 		/* lane SKYHOLE1: a cell effect over the backdrop (the sky). The game draws its sky into the HDR target and
 		 * blends the effect over it; here the sky is in the view, not the linear frame, so the effect went over 0.

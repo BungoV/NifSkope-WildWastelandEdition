@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
+#include "gl/cellbloom.h"	// lane BLOOM1b
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/lookdevstage.h"	// lane SUNCELL1
 #include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
@@ -853,7 +854,8 @@ void wwCellLightsUniforms( Scene * scene )
 		g.bloomDoc = scene->nifModel;
 		g.bloomVersion = B->version;
 	}
-	const bool bloomDraw = B && B->w > 0 && g.bloomTex && g.bloomDoc == scene->nifModel && !( s.isRed & 8 );
+	// lane BLOOM1b: the FO4CS bloom stands in for it this frame (FO4CS suppresses the engine bloom the same way)
+	const bool bloomDraw = B && B->w > 0 && g.bloomTex && g.bloomDoc == scene->nifModel && !( s.isRed & 8 ) && !wwCellBloomReplacing();
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kBloomUnit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, bloomDraw ? g.bloomTex : 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );

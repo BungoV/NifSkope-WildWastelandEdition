@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BLOOM1 (2026-10-13, branch bloom1): FO4CS bloom and Physical Glare in the cell view
+
+- **The cell view can now draw FO4CS's bloom instead of the game's, with its Physical Glare.** Show > Effects >
+  Bloom: Vanilla (the default, the imagespace's own bloom, drawn exactly as before) or FO4CS. FO4CS rows:
+  Threshold, Soft knee, Intensity, Radius, Mip levels, then Physical glare with Strength, F-number and Dispersion.
+  Every row is saved (`WW/CellBloom*`, `WW/CellGlare*`) and applies on the next paint; FO4CS's rows grey under
+  Vanilla, the glare's while it is off.
+- The maths is FO4CS's, ported to GLSL 4.1 fragment passes over a half-float mip chain (`src/gl/cellbloom.*`,
+  `res/shaders/cell_bloom*.{glsl,frag,prog}`): the (d + 1) / 2 mip plan, the soft-knee threshold and Karis
+  average on level 0, NaN / FP16 sanitising, the 9-tap tent upsample, the glare's diffraction bands (width from
+  the F-number) and the red / blue dispersion. Exposure, then bloom, then the tone map, as FO4CS orders them; the
+  vanilla bloom stands down while FO4CS's draws (`src/gl/celllights.cpp`, `src/gl/cellhdr.cpp`, `cell_hdr.frag`).
+- Deliberate differences: only the cell-lit pixels feed the bloom (the other programs' values are display values);
+  its glow over the sky and those pixels is added as the tone-mapped difference it makes there; the glare's display
+  peak is FO4CS's SDR 250 nits.
+- Telemetry: `cell bloom: fo4cs mips=N (WxH..wxh) threshold= knee= intensity= radius= weight= glare=off|on
+  strength= f= dispersion= bands=[..] (checks 17/17)` in the notes and on every path-log frame line.
+- Pins: `WW_CELL_BLOOM=vanilla|fo4cs`, `WW_CELL_BLOOM_THRESHOLD/_KNEE/_INTENSITY/_RADIUS/_MIPS`, `WW_CELL_GLARE`,
+  `WW_CELL_GLARE_STRENGTH/_FNUMBER/_DISPERSION`; gate switches `WW_CELL_BLOOM_DUMP=<dir>`,
+  `WW_CELL_BLOOM_IMPULSE=<value>`, `WW_CELL_BLOOM_RED=nokaris` (environment only).
+- Gates: Vanilla is byte-identical to the rung at Concord Hardware (sha1 1d7b7707...); FO4CS's own bloom tests,
+  ported, 17/17; a numpy rebuild of FO4CS's chain from the GPU's source matches every mip, every up level and the
+  final combine within 2% of the frame peak (night scene, glare off and on; most stages under 0.4%); the red (a plain box on level 0) is refused.
+
 ## Lane BOUNCE1 (2026-10-13, branch bounce1): outdoors the sun is the game's (x the imagespace Sunlight Scale), so the bounce shows
 
 - **Daylight colour bleed now reads like the Division deck: a sunlit wall throws its colour onto the shaded walls

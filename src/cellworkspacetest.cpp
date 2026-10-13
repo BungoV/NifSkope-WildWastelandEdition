@@ -43,6 +43,7 @@ BSD License - see nifskope.h
 #include <QTextStream>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QDoubleSpinBox>
 #include <QWidgetAction>
 
 namespace {
@@ -457,7 +458,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 			"Lighting/Cell lights", "Lighting/GI", "Lighting/Far light", "Lighting/Far light mode",
 			"Lighting/Light shadows", "Lighting/AO", "Lighting/AO decals", "Lighting/GPU relight",
 			"Effects/Imagespace", "Effects/Temporal AA", "Effects/SSR", "Effects/SSR outdoors",
-			"Effects/Depth of field", "Effects/Motion blur" };
+			"Effects/Depth of field", "Effects/Motion blur", "Effects/Bloom" };
 		add( "SHOWMENU1: the Show dropdown holds every viewport switch in its section, in order",
 			layout == want, layout.join( QLatin1Char( '|' ) ) );
 		int waters = 0, boxes = 0;
@@ -481,6 +482,20 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		add( "SHOWMENU1: Far LOD source is a submenu of Vanilla and FO4CS, one ticked",
 			srcItems.size() == 2 && srcItems.filter( QLatin1String( "*" ) ).size() == 1,
 			srcItems.join( QLatin1Char( '|' ) ) );
+		// lane BLOOM1b: Bloom is a submenu of Vanilla and FO4CS (one ticked), its eight rows and the glare tick
+		QMenu * bm = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceBloom" ) );
+		QStringList bloomItems;
+		for ( QAction * a : bm ? bm->actions() : QList<QAction *>() )
+			if ( a->isCheckable() )
+				bloomItems << a->text() + ( a->isChecked() ? QStringLiteral( "*" ) : QString() );
+		int bloomRows = 0;
+		for ( QAction * a : bm ? bm->actions() : QList<QAction *>() )
+			if ( auto * wa = qobject_cast<QWidgetAction *>( a ) )
+				if ( wa->defaultWidget() )
+					bloomRows += wa->defaultWidget()->findChildren<QDoubleSpinBox *>().size();
+		add( "BLOOM1b: Bloom is Vanilla | FO4CS (one ticked), Physical glare, and eight value rows",
+			bloomItems.size() == 3 && bloomItems.mid( 0, 2 ).filter( QLatin1String( "*" ) ).size() == 1 && bloomRows == 8,
+			bloomItems.join( QLatin1Char( '|' ) ) + QStringLiteral( " rows=" ) + QString::number( bloomRows ) );
 	} else {
 		add( "SHOWMENU1: the Show dropdown exists", false );
 	}

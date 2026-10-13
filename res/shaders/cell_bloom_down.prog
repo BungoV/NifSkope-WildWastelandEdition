@@ -1,0 +1,4 @@
+# lane BLOOM1b (src/gl/cellbloom.h): the FO4CS bloom's down pass, full-screen quad.
+# No conditions: never picked for a shape; cellbloom.cpp selects it by name.
+
+shaders cell_ao.vert cell_bloom_down.frag

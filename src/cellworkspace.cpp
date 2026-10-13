@@ -25,6 +25,8 @@ BSD License - see nifskope.h
 #include "gl/gametaa.h"
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellpost.h"	// lane GRASSMB1
+#include "gl/cellbloom.h"	// lane BLOOM1b
+#include "ui/widgets/wwnumberfield.h"	// lane BLOOM1b: the Bloom rows
 
 #include <QAction>
 #include <QActionGroup>
@@ -38,6 +40,7 @@ BSD License - see nifskope.h
 #include <QToolButton>
 #include <QColor>
 #include <QComboBox>
+#include <QGridLayout>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -49,6 +52,8 @@ BSD License - see nifskope.h
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidgetAction>
+
+#include <cmath>
 
 #include <algorithm>
 
@@ -489,6 +494,152 @@ void CellWorkspacePanel::buildUi()
 	cellSsrExt = tick( showMenu, tr( "SSR outdoors" ), "CellWorkspaceSsrOutdoors", wwCellSsrExteriorOn() );
 	cellDof = tick( showMenu, tr( "Depth of field" ), "CellWorkspaceCellDof", wwCellDofOn() );
 	cellMblur = tick( showMenu, tr( "Motion blur" ), "CellWorkspaceCellMotionBlur", wwCellMotionBlurOn() );
+	// lane BLOOM1b: the bloom -- Vanilla (the imagespace's own, the default) | FO4CS, then FO4CS's settings, one per
+	// row, and its physical glare. Every change applies on the next paint (gl/cellbloom.h)
+	cellBloom = showMenu->addMenu( tr( "Bloom" ) );
+	cellBloom->setObjectName( QStringLiteral( "CellWorkspaceBloom" ) );
+	cellBloom->setToolTipsVisible( true );
+	cellBloomGroup = new QActionGroup( cellBloom );
+	cellBloomGroup->setExclusive( true );
+	{
+		const WwCellBloomSettings b = wwCellBloomSettings();
+		const QStringList names = { tr( "Vanilla" ), tr( "FO4CS" ) };
+		const QStringList tips = {
+			tr( "The imagespace's own bloom: the blurred bright pass, added once before the exposure" ),
+			tr( "Community Shaders' bloom: a threshold, a mip pyramid and a tent upsample on the exposed light" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = cellBloom->addAction( names.at( k ) );
+			a->setObjectName( k ? QStringLiteral( "CellWorkspaceBloomFo4cs" ) : QStringLiteral( "CellWorkspaceBloomVanilla" ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setToolTip( tips.at( k ) );
+			a->setChecked( k == ( b.fo4cs ? 1 : 0 ) );
+			a->setEnabled( !wwCellBloomPinned( "mode" ) );
+			cellBloomGroup->addAction( a );
+		}
+		// one label | field grid per block, one label width for both so the value edge is one line
+		struct Row { const char * id; const char * name; QString label; QString tip; double lo, hi, step; int dec; QString prefix; };
+		auto grid = [this]( const char * name, const QList<Row> & rows, QList<QWidget *> & out ) {
+			QWidget * panel = new QWidget( cellBloom );
+			panel->setObjectName( QLatin1String( name ) );
+			QGridLayout * gl = new QGridLayout( panel );
+			gl->setContentsMargins( 8, 2, 8, 2 );
+			gl->setHorizontalSpacing( 8 );
+			gl->setVerticalSpacing( 2 );
+			gl->setColumnMinimumWidth( 0, 96 );
+			gl->setColumnStretch( 1, 1 );
+			for ( int i = 0; i < rows.size(); i++ ) {
+				const Row & r = rows.at( i );
+				QLabel * l = new QLabel( r.label, panel );
+				WwNumberField * f = new WwNumberField( panel );
+				f->setObjectName( QLatin1String( r.name ) );
+				f->setDecimals( r.dec );
+				f->setRange( r.lo, r.hi );
+				f->setSingleStep( r.step );
+				f->setPrefix( r.prefix );
+				f->setMinimumWidth( 96 );
+				const bool pinned = wwCellBloomPinned( r.id );
+				const QString tip = pinned ? r.tip + tr( " (pinned by the environment)" ) : r.tip;
+				l->setToolTip( tip );
+				f->setToolTip( tip );
+				f->setProperty( "wwPinned", pinned );
+				gl->addWidget( l, i, 0 );
+				gl->addWidget( f, i, 1 );
+				out << l << f;
+			}
+			auto * wa = new QWidgetAction( cellBloom );
+			wa->setDefaultWidget( panel );
+			cellBloom->addAction( wa );
+		};
+		cellBloom->addSeparator();
+		QList<QWidget *> fo, gw;
+		grid( "CellWorkspaceBloomPanel", {
+			{ "threshold", "CellWorkspaceBloomThreshold", tr( "Threshold" ),
+				tr( "Exposed light below this does not bloom (FO4CS fBloomThreshold)" ), 0.0, 64.0, 0.05, 2, QString() },
+			{ "knee", "CellWorkspaceBloomSoftKnee", tr( "Soft knee" ),
+				tr( "How gently light crosses the threshold, as a share of it (fBloomSoftKnee)" ), 0.0, 1.0, 0.05, 2, QString() },
+			{ "intensity", "CellWorkspaceBloomIntensity", tr( "Intensity" ),
+				tr( "The bloom added to the frame (fBloomIntensity)" ), 0.0, 10.0, 0.05, 2, QString() },
+			{ "radius", "CellWorkspaceBloomRadius", tr( "Radius" ),
+				tr( "The upsample tent's reach in pixels of each level (fBloomUpsampleRadius)" ), 0.5, 4.0, 0.1, 2, QString() },
+			{ "mips", "CellWorkspaceBloomMips", tr( "Mip levels" ),
+				tr( "Halvings of the pyramid: more spreads the glow wider (iBloomMipLevels)" ), 0.0, 12.0, 1.0, 0, QString() },
+		}, fo );
+		cellBloom->addSeparator();
+		cellBloomGlare = cellBloom->addAction( tr( "Physical glare" ) );
+		cellBloomGlare->setObjectName( QStringLiteral( "CellWorkspaceBloomGlare" ) );
+		cellBloomGlare->setCheckable( true );
+		cellBloomGlare->setChecked( b.glare );
+		cellBloomGlare->setToolTip( tr( "A lens's diffraction: each pyramid level weighted by the aperture's spread (bPhysicalGlareEnabled)" ) );
+		grid( "CellWorkspaceBloomGlarePanel", {
+			{ "strength", "CellWorkspaceBloomGlareStrength", tr( "Strength" ),
+				tr( "The glare's energy, added to the intensity (fPhysicalGlareStrength)" ), 0.0, 4.0, 0.05, 2, QString() },
+			{ "fnumber", "CellWorkspaceBloomGlareFNumber", tr( "F-number" ),
+				tr( "The aperture: a higher f-number spreads the glare over wider levels (fPhysicalGlareFNumber)" ), 1.0, 22.0, 0.1, 1,
+				QStringLiteral( "f/" ) },
+			{ "dispersion", "CellWorkspaceBloomGlareDispersion", tr( "Dispersion" ),
+				tr( "Red and blue pulled apart along the radius, in bloom pixels (fPhysicalGlareDispersion)" ), 0.0, 2.0, 0.05, 2, QString() },
+		}, gw );
+		auto field = []( const QList<QWidget *> & l, int i ) { return static_cast<WwNumberField *>( l.at( 2 * i + 1 ) ); };
+		field( fo, 0 )->setValue( b.threshold );
+		field( fo, 1 )->setValue( b.softKnee );
+		field( fo, 2 )->setValue( b.intensity );
+		field( fo, 3 )->setValue( b.radius );
+		field( fo, 4 )->setValue( b.mips );
+		field( gw, 0 )->setValue( b.glareStrength );
+		field( gw, 1 )->setValue( b.glareFNumber );
+		field( gw, 2 )->setValue( b.glareDispersion );
+		// the rows grey with what they belong to: FO4CS's under Vanilla, the glare's while it is off; a pin greys its own
+		auto greys = [this, fo, gw]() {
+			const WwCellBloomSettings s = wwCellBloomSettings();
+			for ( int i = 0; i < fo.size(); i += 2 ) {
+				const bool on = s.fo4cs && !fo.at( i + 1 )->property( "wwPinned" ).toBool();
+				fo.at( i )->setEnabled( on );
+				fo.at( i + 1 )->setEnabled( on );
+			}
+			cellBloomGlare->setEnabled( s.fo4cs && !wwCellBloomPinned( "glare" ) );
+			for ( int i = 0; i < gw.size(); i += 2 ) {
+				const bool on = s.fo4cs && s.glare && !gw.at( i + 1 )->property( "wwPinned" ).toBool();
+				gw.at( i )->setEnabled( on );
+				gw.at( i + 1 )->setEnabled( on );
+			}
+		};
+		greys();
+		auto apply = [this, greys]( auto change ) {
+			WwCellBloomSettings s = wwCellBloomSettings();
+			change( s );
+			wwCellBloomSet( s );
+			greys();
+			if ( glView )
+				glView->update();
+		};
+		connect( cellBloomGroup, &QActionGroup::triggered, this, [apply]( QAction * a ) {
+			const bool fo4cs = a->data().toInt() == 1;
+			apply( [fo4cs]( WwCellBloomSettings & s ) { s.fo4cs = fo4cs; } );
+		} );
+		connect( cellBloomGlare, &QAction::toggled, this, [apply]( bool on ) {
+			apply( [on]( WwCellBloomSettings & s ) { s.glare = on; } );
+		} );
+		float WwCellBloomSettings::* const floats[] = { &WwCellBloomSettings::threshold, &WwCellBloomSettings::softKnee,
+			&WwCellBloomSettings::intensity, &WwCellBloomSettings::radius };
+		for ( int i = 0; i < 4; i++ ) {
+			float WwCellBloomSettings::* m = floats[i];
+			connect( field( fo, i ), qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [apply, m]( double v ) {
+				apply( [m, v]( WwCellBloomSettings & s ) { s.*m = float( v ); } );
+			} );
+		}
+		connect( field( fo, 4 ), qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [apply]( double v ) {
+			apply( [v]( WwCellBloomSettings & s ) { s.mips = int( std::lround( v ) ); } );
+		} );
+		float WwCellBloomSettings::* const gfloats[] = { &WwCellBloomSettings::glareStrength, &WwCellBloomSettings::glareFNumber,
+			&WwCellBloomSettings::glareDispersion };
+		for ( int i = 0; i < 3; i++ ) {
+			float WwCellBloomSettings::* m = gfloats[i];
+			connect( field( gw, i ), qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [apply, m]( double v ) {
+				apply( [m, v]( WwCellBloomSettings & s ) { s.*m = float( v ); } );
+			} );
+		}
+	}
 	showButton->setMenu( showMenu );
 	vl->addWidget( showButton );
 

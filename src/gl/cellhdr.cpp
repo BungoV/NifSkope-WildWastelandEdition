@@ -1,5 +1,6 @@
 #include "cellhdr.h"
 
+#include "gl/cellbloom.h"
 #include "gl/celllights.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -15,6 +16,7 @@
 namespace {
 
 constexpr int kSrcUnit = 8;		// the linear frame (sampler2DMS) in cell_hdr.prog; the cell units are 10..16
+constexpr int kFoBloomUnit = 11;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
 
 struct HdrGpu
 {
@@ -187,9 +189,12 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glBlitFramebuffer( 0, 0, s.w, s.h, 0, 0, s.w, s.h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST );
 	const GLenum blitErr = fn->glGetError();
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+	// lane BLOOM1b: the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
+	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat );
 
 	auto prog = r->useProgram( "cell_hdr.prog" );
 	if ( !prog ) {
+		wwCellBloomDone( r, kFoBloomUnit );
 		note( s, QStringLiteral( "lost (cell_hdr.prog went away mid-frame)" ) );
 		return;
 	}
@@ -219,6 +224,7 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
 	prog->uni1i( "hdrSrc", kSrcUnit );
+	wwCellBloomFinal( r, kFoBloomUnit );	// lane BLOOM1b: the final combine's uniforms (off: cellIsFoBloomOn false)
 
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -266,7 +272,27 @@ void wwCellHdrEnd( Scene * scene )
 		prog->uni1i( "hdrMode", 1 );
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	}
+	/* lane BLOOM1b: the FO4CS glow over every pixel mode 0 did not take (the sky, the other programs, the effects over
+	 * the sky), added in display space: FO4CS spreads it over its whole HDR target, the sky included; here only the
+	 * cell-lit pixels are light, so the rest take the tone-mapped difference the bloom makes (cell_hdr.frag mode 3) */
+	if ( foBloom && sorted ) {
+		fn->glEnable( GL_BLEND );
+		fn->glBlendFunc( GL_ONE, GL_ONE );
+		prog->uni1i( "hdrMode", 3 );
+		fn->glStencilFunc( GL_NOTEQUAL, 1, 0x03 );
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		if ( splitSky ) {	// the 1s at the far plane: mode 2's pixels
+			fn->glStencilFunc( GL_EQUAL, 1, 0x03 );
+			fn->glEnable( GL_DEPTH_TEST );
+			fn->glDepthFunc( GL_LEQUAL );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			fn->glDisable( GL_DEPTH_TEST );
+			fn->glDepthFunc( GLenum( prevDepthFunc ) );
+		}
+		fn->glDisable( GL_BLEND );
+	}
 	r->stopProgram();
+	wwCellBloomDone( r, kFoBloomUnit );
 
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
