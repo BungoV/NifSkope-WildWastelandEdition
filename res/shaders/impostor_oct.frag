@@ -701,6 +701,11 @@ void main()
 		float diff = OrenNayarFull( NdotL, dot( nView, V ), dot( L, V ), 1.0 - smoothness )
 		             * ( 1.0 - fresnelSchlick5( max( dot( V, normalize( L + V ) ), FLT_EPSILON ), 0.04 ) );
 		lit = sqrt( max( lightSourceDiffuse[0].rgb, vec3( 0.0 ) ) ) * diff;
+#ifdef WW_CELLLIGHTS
+		// lane BOUNCE1: the far card takes the near surfaces' sun, x the imagespace Sunlight Scale outdoors
+		if ( cellOn && !cellInterior && cellSunScale > 0.0 )
+			lit *= sqrt( cellSunScale );
+#endif
 	}
 
 	/* CLAUSE C25 (spec 293..295): the AO the bake measured from the height

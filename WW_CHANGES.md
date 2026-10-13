@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BOUNCE1 (2026-10-13, branch bounce1): outdoors the sun is the game's (x the imagespace Sunlight Scale), so the bounce shows
+
+- **Daylight colour bleed now reads like the Division deck: a sunlit wall throws its colour onto the shaded walls
+  around it, and turning the probe GI on no longer makes a sunny street darker.** The bake was not weak: an
+  independent brute-force one-bounce tracer (`tests/bounce_reference.cpp`) agrees with the probe GI within 8% in a
+  colour-bleed box (`tests/spells/bounce_bleed.py`) and within ~25% at Goodneighbor's probes. The cause was the
+  sun: the game multiplies the hour's imagespace Sunlight Scale (CommonwealthClear noon 4.5) into its lit
+  surfaces' sun (1.10.155 BSLightingShader / BSDFLightShader read ImageSpaceManager+0x98), the viewer used x1. The
+  sun bounce therefore sat 4.5x low against the weather ambient it replaces.
+- `wwLookdevSunlightScale()` (`src/gl/lookdevstage.*`) now scales, outdoors under a weather: the cell programs'
+  sun (`src/gl/celllights.cpp`, telemetry `sunlight scale=`), the lit effects' sun (they took it already, now the
+  same as the surfaces), the probe bake's sun (`src/probesky.cpp`), the sun's specular and the far cards
+  (`cellSunScale`, `res/shaders/*`). Interiors are unchanged. The cell imagespace's exposure takes the brighter frame
+  as the game's does. Red pin `WW_CELL_SUNSCALE_RED=one` (environment only, no menu row) draws byte for byte as
+  the pre-lane exe.
+- `probegi` CLI: `--sun tx,ty,tz,r,g,b` and `--sky r,g,b` (or 18 values) drive a sun and a sky bake without a weather.
+- Gate: bleed box sun arm (E 1.08/1.05/0.95 of the reference, hue within 11%) and night-lamp arm (1.07/1.03/0.91)
+  PASS at 15%; Goodneighbor glass storefront, noon, one bounce: the sun bounce added on 63 wall pixels is
+  0.97/0.98/1.00 of (4.5 - 1) x the reference (bar 30%), RED snap_land7 adds 0 (FAIL). DOF/blur off, sky dome drawn.
+
 ## Lane GIAMB1 (2026-10-13, branch giamb1): indoors the probe light replaces the cell's ambient where probes reach
 
 - **Interiors now match the Division deck: where the probe bake reaches, the baked probe light replaces the

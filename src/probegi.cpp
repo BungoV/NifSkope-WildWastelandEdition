@@ -2019,6 +2019,8 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 // lane ROOMCLAMP1: `probegi --soup <f> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b [--light ...]
 // [--spacing s] [--rays n] [--passes n] [--red noclamp|...] [--rooms-red conn26|boxes|glasswall|nomask] [--pinch u]
 // [--cell u]`: place, bake (<dir>/bake), relight as an interior lit by the lights given, dump into <dir>
+// lane BOUNCE1: [--sun tx,ty,tz,r,g,b] [--sky r,g,b | 18 values +X -X +Y -Y +Z -Z]: an exterior lit by that sun (toward
+// it, its linear colour) and that weather ambient instead, the lights then optional (the colour-bleed fixture)
 int probeGiCli( const QStringList & args )
 {
 	QString soupPath, outDir, rect;
@@ -2042,6 +2044,26 @@ int probeGiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--rooms-red" ) ) { gs.rooms.red = nx; i++; }
 		else if ( a == QLatin1String( "--pinch" ) ) { gs.rooms.pinch = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--cell" ) ) { gs.rooms.cell = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--sun" ) || a == QLatin1String( "--sky" ) ) {
+			const QStringList v = nx.split( ',' );
+			const bool sun = a == QLatin1String( "--sun" );
+			if ( sun && v.size() == 6 ) {
+				const double l = std::sqrt( double( v[0].toFloat() ) * v[0].toFloat() + double( v[1].toFloat() ) * v[1].toFloat()
+					+ double( v[2].toFloat() ) * v[2].toFloat() );
+				for ( int c = 0; c < 3 && l > 0.0; c++ ) {
+					gs.sky.sunTo[c] = float( v[c].toFloat() / l );
+					gs.sky.sun[c] = v[3 + c].toFloat();
+				}
+			} else if ( !sun && ( v.size() == 3 || v.size() == 18 ) ) {
+				for ( int f = 0; f < 6; f++ )
+					for ( int c = 0; c < 3; c++ )
+						gs.sky.amb[f][c] = v[v.size() == 3 ? c : f * 3 + c].toFloat();
+			}
+			gs.sky.on = true;
+			gs.sky.label = QStringLiteral( "cli" );
+			L.interior = false;
+			i++;
+		}
 		else if ( a == QLatin1String( "--light" ) ) {
 			const QStringList v = nx.split( ',' );
 			if ( v.size() == 7 ) {
@@ -2057,10 +2079,10 @@ int probeGiCli( const QStringList & args )
 		}
 	}
 	const QStringList rc = rect.split( ',' );
-	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() ) {
+	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || ( L.lights.isEmpty() && !gs.sky.on ) ) {
 		std::fprintf( stderr, "usage: probegi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b "
 			"[--light ...] [--spacing s] [--rays n] [--adapt n] [--passes n] [--red noclamp|noeye|novis|...] "
-			"[--rooms-red conn26|boxes|glasswall|nomask] [--pinch u] [--cell u]\n" );
+			"[--rooms-red conn26|boxes|glasswall|nomask] [--pinch u] [--cell u] [--sun tx,ty,tz,r,g,b] [--sky r,g,b]\n" );
 		return 2;
 	}
 	ps.minX = rc[0].toFloat();

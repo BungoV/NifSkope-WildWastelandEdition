@@ -596,7 +596,8 @@ void main()
 	/* lane SUNCELL1: an exterior with the weather's sun (cellHasDir) hands cellLit the ambient alone; the sun's
 	 * diffuse and the cube are the game's terms there, its specular the viewport's (cellExtSpec, linear) */
 	if ( cellOn && !cellInterior && cellHasDir ) {
-		vec3 sx = specSun + A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * ( 1.0 - NdotV ) * D.rgb;
+		// lane BOUNCE1: the sun's specular x the imagespace Sunlight Scale, as its diffuse (cellDirColor); sqrt space here
+		vec3 sx = specSun * sqrt( max( cellSunScale, 0.0 ) ) + A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * ( 1.0 - NdotV ) * D.rgb;
 		cellExtSpec = sx * sx;
 		/* lane SUNCELL1: the ambient is the weather's directional ambient (DALC, the hour's keys) through the
 		 * interior's law (cellAmbient), not the flat NAM0 Ambient the viewport carries */
