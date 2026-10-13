@@ -90,7 +90,7 @@ struct ClState
 	int pass = 0;           // lane PROBEVIEW1: the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
 	bool passPinned = false;
 	int passRed = 0;        // WW_CELL_PV_RED: 1 direct, 2 nonormal (the shader), 4 open (every sky direction open)
-	int giAmb = 0;          // lane GICAL1: WW_CELL_GI_AMB = keep (0) | replace | off | max | asgi (the measure's red)
+	int giAmb = 1;          // lane GICAL1: WW_CELL_GI_AMB = keep (0) | replace | off | max | asgi (the measure's red); lane GIAMB1: replace by default (his ruling), keep = the gate's red
 	bool giFill = true;     // lane GICAL1: WW_CELL_GI_FILL=0 leaves the GI's gaps black (as before the lane)
 };
 
@@ -139,7 +139,7 @@ ClState & st()
 		s.shadowRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
 		s.fogProbe = qEnvironmentVariableIntValue( "WW_CELL_FOG_PROBE" );
 		const QByteArray giAmb = qgetenv( "WW_CELL_GI_AMB" ).trimmed();	// lane GICAL1
-		s.giAmb = giAmb == "replace" ? 1 : giAmb == "off" ? 2 : giAmb == "max" ? 3 : giAmb == "asgi" ? 4 : 0;
+		s.giAmb = giAmb == "keep" ? 0 : giAmb == "off" ? 2 : giAmb == "max" ? 3 : giAmb == "asgi" ? 4 : 1;	// lane GIAMB1: unset = replace
 		s.giFill = qgetenv( "WW_CELL_GI_FILL" ).trimmed() != "0";
 		const QByteArray red = qgetenv( "WW_CELL_LIT_RED" ).trimmed();
 		if ( red == "linear" )

@@ -1779,7 +1779,7 @@ Done
 - Gap fill (cellGiFillAt): where the room blend has no valid weight, the weighted mean ((1 - d/2.5)^2) of the
   4x4x4 block's valid slots of the surface's own room; GI grid of an interior only (cellGiFill && !skyDraw;
   never with cellGiSky). Pin WW_CELL_GI_FILL=0. Twin: cell_rooms_check.gi_sample(fill=).
-- WW_CELL_GI_AMB keep|replace|off|max|asgi (cellAmbGi, legacy and PBR interior paths). Default keep.
+- WW_CELL_GI_AMB keep|replace|off|max|asgi (cellAmbGi, legacy and PBR interior paths). Default replace since lane GIAMB1 (keep = its gate red).
 - Room sample: nearest air candidate tracked with a separate "direct" flag (it kept the first before).
 
 Measured

@@ -10,7 +10,7 @@ uniform samplerBuffer cellLights;	// 8 texels a light: pos+radius, color+cosOute
 uniform int cellLightCount;
 uniform vec4 cellRow[3];			// world = (dot(row.xyz, posView) + row.w), the view's inverse
 uniform bool cellHasDalc;
-uniform int cellGiAmb;				// lane GICAL1: WW_CELL_GI_AMB, the interior ambient beside the GI: 0 keep, 1 replace, 2 off, 3 max, 4 asgi (red)
+uniform int cellGiAmb;				// lane GICAL1: WW_CELL_GI_AMB, the interior ambient beside the GI: 0 keep (lane GIAMB1: the red), 1 replace (lane GIAMB1: the default), 2 off, 3 max, 4 asgi (red)
 uniform bool cellGiFill;			// lane GICAL1: a GI gap takes the weighted mean round it (WW_CELL_GI_FILL=0: off, black as before)
 uniform vec4 cellDalc[3];			// per channel: (p - n) / 2 per axis, mean of the six (byte / 255)
 uniform bool cellHasDir;
@@ -389,6 +389,16 @@ float cellGiSkyK( vec3 P, vec3 N )
 		return 0.0;
 	return clamp( cellGiSample( P, N ).a, 0.0, 1.0 );
 }
+/* lane GIAMB1: probe 90 indoors, the share of the cell's ambient (DALC) the probe light replaced at P, under the
+ * rule in force (cellAmbGi): the grid's valid share with replace (the default), 0 with keep or without the GI */
+float cellAmbShare( vec3 P, vec3 N )
+{
+	if ( !cellInterior )
+		return cellGiSkyK( P, N );
+	if ( !cellGiOn || !cellHasDalc || cellGiAmb != 1 )
+		return 0.0;
+	return clamp( cellGiSample( P, N ).a, 0.0, 1.0 );
+}
 
 /* lane HEMI1: the game draws a hemisphere or box light as an omni light clipped by its volume (celllights.h):
  * true when P lies inside light i's. shape = texel 1.w (-3 hemisphere, -4 box; anything else has none). */
@@ -565,8 +575,8 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 		return vec3( 0.0 );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
-	if ( cellProbe == 90 )	// lane SKY1: the share of the weather's ambient the grid's sky replaced
-		return vec3( cellGiSkyK( P, N ) );
+	if ( cellProbe == 90 )	// lane SKY1: the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
+		return vec3( cellAmbShare( P, N ) );
 	if ( cellProbe == 1 ) {
 		vec3 E = vec3( 0.0 );
 		for ( int i = 0; i < cellLightCount; i++ ) {
@@ -757,8 +767,8 @@ vec3 cellAmbient( vec3 N, vec3 P )
 }
 
 /* lane GICAL1 (item 2, docs/cloud/GICAL1_DESIGN.md 6.3): the interior ambient beside our GI, as WW_CELL_GI_AMB asks.
- * gi = the GI's irradiance / pi, the ambient's own units. keep (0, the default: both, as before), replace (1: the
- * ambient x (1 - the grid's valid share), as SKY1 does outdoors), off (2), max (3: the larger of the two), asgi
+ * gi = the GI's irradiance / pi, the ambient's own units. keep (0: both, as before lane GIAMB1), replace (1, the default
+ * since lane GIAMB1: the ambient x (1 - the grid's valid share), as SKY1 does outdoors), off (2), max (3: the larger of the two), asgi
  * (4, the measure's red: the ambient := the GI). Without the GI every rule but off keeps the ambient. */
 vec3 cellAmbGi( vec3 amb, vec3 gi, vec3 P, vec3 N )
 {
@@ -889,8 +899,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 		return vec3( 0.0 );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
-	if ( cellProbe == 90 )	// lane SKY1 (60-74 are other lanes'): the share of the weather's ambient the grid's sky replaced
-		return vec3( cellGiSkyK( P, N ) );
+	if ( cellProbe == 90 )	// lane SKY1 (60-74 are other lanes'): the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
+		return vec3( cellAmbShare( P, N ) );
 	if ( cellProbe >= 91 && cellProbe <= 94 )	// lane FARVIEW1
 		return cellFarProbeOut( P, N );
 	if ( cellProbe == 1 || cellProbe == 8 || cellProbe == 10 || cellProbe == 30 ) {

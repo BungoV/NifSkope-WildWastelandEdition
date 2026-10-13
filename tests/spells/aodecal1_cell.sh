@@ -105,8 +105,8 @@ if has clutter; then
 fi
 if has off; then
 	rm -rf "$OUT/gi_new" "$OUT/gi_rung"
-	a=$(shoot off_new WW_CELL_GI=1 WW_CELL_GI_DUMP="$(winpath "$OUT/gi_new")")
-	b=$(XE="$BEFORE" shoot off_rung WW_CELL_GI=1 WW_CELL_GI_DUMP="$(winpath "$OUT/gi_rung")")
+	a=$(shoot off_new WW_CELL_GI=1 WW_CELL_GI_AMB=keep WW_CELL_GI_DUMP="$(winpath "$OUT/gi_new")")   # lane GIAMB1: the ambient kept (the rung's rule)
+	b=$(XE="$BEFORE" shoot off_rung WW_CELL_GI=1 WW_CELL_GI_AMB=keep WW_CELL_GI_DUMP="$(winpath "$OUT/gi_rung")")
 	same=1
 	cmp -s "$OUT/off_new.png" "$OUT/off_rung.png" || { say "        the shots differ"; same=0; }
 	# every binary byte for byte; gi_meta.txt with its stage timings ("ms N", "ms light N gather N grid N") taken out

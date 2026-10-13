@@ -85,8 +85,8 @@ check "the bake ran and shot" "$(shoot lit "$CAM" WW_CELL_GI=1 WW_CELL_PROBE_SOU
 	WW_CELL_PROBE_BAKE="$(winpath "$OUT/bake")" WW_CELL_GI_DUMP="$(winpath "$OUT/dump")")"
 grep -h "gi bricks:\|  gi: " "$OUT/lit.notes" | cut -c1-400 | tee -a "$LOG"
 say "== off against the rung (links both)"
-o1="$(shoot off "$CAM" WW_CELL_GI=1 "${from[@]}" WW_CELL_GI_DUMP="$(winpath "$OUT/dump_off")")"
-o2="$(XE="$RUNG" shoot rung "$CAM" WW_CELL_GI=1 "${from[@]}" WW_CELL_GI_DUMP="$(winpath "$OUT/dump_rung")")"
+o1="$(shoot off "$CAM" WW_CELL_GI=1 WW_CELL_GI_AMB=keep "${from[@]}" WW_CELL_GI_DUMP="$(winpath "$OUT/dump_off")")"   # lane GIAMB1: the ambient kept (the rung's rule)
+o2="$(XE="$RUNG" shoot rung "$CAM" WW_CELL_GI=1 WW_CELL_GI_AMB=keep "${from[@]}" WW_CELL_GI_DUMP="$(winpath "$OUT/dump_rung")")"
 check "both relit and shot" "$([ "$o1$o2" = 11 ] && echo 1 || echo 0)"
 same=1; n=0
 for f in "$OUT"/dump_rung/*.bin; do
