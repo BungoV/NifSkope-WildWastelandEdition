@@ -26,6 +26,8 @@ struct AoDecalSet;
 //! the cell document's decal copies (null: none); the relight that built the copy-free grid publishes them
 void wwCellAoDecalPublish( const void * nif, std::shared_ptr<const AoDecalSet> set );
 bool wwCellAoDecalHas( const void * nif );
+//! lane AOOFF1: the document has decal copies AND the AO decals row is on (the shared opaque pass is then needed)
+bool wwCellAoDecalWanted( const void * nif );
 /*! called by wwCellAoPass after the opaque pass, its framebuffer still bound: gbufTex (view normal, linear depth),
  *  depthRb (its depth-stencil), W x H. Returns the R32F target's texture, 0 when no decal ran this frame. */
 unsigned wwCellAoDecalRun( Scene * scene, unsigned gbufTex, unsigned depthRb, int W, int H );

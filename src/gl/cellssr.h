@@ -70,5 +70,8 @@ struct WwCellAoTargets
 	int w = 0, h = 0, mipW[5] = {}, mipH[5] = {};
 };
 bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out );
+/*! lane AOOFF1: will this frame's reflections (the full pass or the water's) read those targets? The obscurance's
+ *  opaque pass is the SHARED g-buffer: it runs while the AO row is off whenever this says yes */
+bool wwCellSsrWantsTargets( Scene * scene );
 
 #endif

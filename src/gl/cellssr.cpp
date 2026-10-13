@@ -146,6 +146,16 @@ void wwCellSsrExteriorSetOn( bool on )
 	QSettings().setValue( QStringLiteral( "WW/CellSsrExterior" ), on );
 }
 
+bool wwCellSsrWantsTargets( Scene * scene )
+{
+	if ( !scene || !scene->renderer || !wwCellLightsWanted( scene ) )
+		return false;
+	const SsrState & s = ssr();
+	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	// the same verdict as wwCellSsrPass, before its "no obscurance pass" step
+	return L && s.on && ( L->interior || s.ext || wwCellWaterSsrWanted( scene ) );
+}
+
 void wwCellSsrNote( bool flagged )
 {
 	ssr().flagged = flagged;

@@ -176,6 +176,11 @@ bool wwCellAoDecalHas( const void * nif )
 	return sets().contains( nif );
 }
 
+bool wwCellAoDecalWanted( const void * nif )
+{
+	return sets().contains( nif ) && aoDecalOn();
+}
+
 QString wwCellAoDecalEcho()
 {
 	return st().last;
