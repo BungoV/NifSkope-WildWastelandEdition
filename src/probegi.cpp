@@ -926,34 +926,12 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.msGather = clock.nsecsElapsed() / 1e6 - R.msLight;
 
 	// ---- 3. the voxel grid, each voxel blending the probes it can see
-	double mn[3] = { 1e300, 1e300, 1e300 }, mx[3] = { -1e300, -1e300, -1e300 };
-	for ( const US & u : us )
-		for ( int c = 0; c < 3; c++ ) {
-			mn[c] = std::min( mn[c], u.p[c] );
-			mx[c] = std::max( mx[c], u.p[c] );
-		}
 	if ( us.empty() || up.empty() ) {
 		R.error = QStringLiteral( "the bake holds %1 surfels and %2 probes" ).arg( us.size() ).arg( up.size() );
 		return false;
 	}
-	double v = spec.voxelMin;
-	int dims[3];
-	for ( ;; ) {
-		qint64 total = 6;
-		for ( int c = 0; c < 3; c++ ) {
-			dims[c] = int( std::ceil( ( mx[c] - mn[c] ) / v ) ) + 4;
-			total *= dims[c];
-		}
-		if ( total / 6 <= spec.maxVoxels && dims[2] * 6 <= 2048 && dims[0] <= 2048 && dims[1] <= 2048 )
-			break;
-		v *= 1.1;
-	}
-	R.voxel = float( v );
-	for ( int c = 0; c < 3; c++ ) {
-		R.dims[c] = dims[c];
-		R.origin[c] = float( std::floor( mn[c] - 2.0 * v ) );
-	}
-	// the blend radius from the probes' spacing
+	// the probes' spacing (the blend radius below; the grid's box first)
+	double med = 256.0;
 	{
 		std::vector<double> nn;
 		const size_t step = std::max<size_t>( 1, up.size() / 4000 );
@@ -971,9 +949,55 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				nn.push_back( std::sqrt( best ) );
 		}
 		std::sort( nn.begin(), nn.end() );
-		const double med = nn.empty() ? 256.0 : nn[nn.size() / 2];
-		R.radius = float( std::max( med * spec.radiusScale, 2.0 * v ) );
+		if ( !nn.empty() )
+			med = nn[nn.size() / 2];
 	}
+	/* lane GISHADE1: the grid spans the surfels the probes can reach (the probes' box grown by the blend radius), not
+	 * every surfel. An exterior bake carries the far soup's surfels too (lane BAKEBLOCK1: the whole worldspace), and
+	 * their box made Concord's voxel 1349 units (radius 2698): one voxel held a whole shop, its inside read the
+	 * street's sky (tracer 0.006, the grid 0.59). Beyond the probes' reach a voxel holds nothing either way; kPad
+	 * more voxels each side keep the clamped edge (the shader's CLAMP_TO_EDGE) out of reach of the grow and fill rings */
+	double mn[3] = { 1e300, 1e300, 1e300 }, mx[3] = { -1e300, -1e300, -1e300 };
+	double pmn[3] = { 1e300, 1e300, 1e300 }, pmx[3] = { -1e300, -1e300, -1e300 };
+	for ( const UP & q : up )
+		for ( int c = 0; c < 3; c++ ) {
+			pmn[c] = std::min( pmn[c], q.p[c] );
+			pmx[c] = std::max( pmx[c], q.p[c] );
+		}
+	const double reach = med * spec.radiusScale;
+	for ( const US & u : us )
+		for ( int c = 0; c < 3; c++ ) {
+			mn[c] = std::min( mn[c], u.p[c] );
+			mx[c] = std::max( mx[c], u.p[c] );
+		}
+	for ( int c = 0; c < 3; c++ ) {
+		mn[c] = std::max( mn[c], pmn[c] - reach );
+		mx[c] = std::min( mx[c], pmx[c] + reach );
+		if ( mx[c] < mn[c] ) {   // no surfel within the probes' reach on this axis: the probes' own box
+			mn[c] = pmn[c] - reach;
+			mx[c] = pmx[c] + reach;
+		}
+	}
+	const int kPad = 5;
+	double v = spec.voxelMin;
+	int dims[3];
+	for ( ;; ) {
+		qint64 total = 6;
+		for ( int c = 0; c < 3; c++ ) {
+			dims[c] = int( std::ceil( ( mx[c] - mn[c] ) / v ) ) + 4 + 2 * kPad;
+			total *= dims[c];
+		}
+		if ( total / 6 <= spec.maxVoxels && dims[2] * 6 <= 2048 && dims[0] <= 2048 && dims[1] <= 2048 )
+			break;
+		v *= 1.1;
+	}
+	R.voxel = float( v );
+	for ( int c = 0; c < 3; c++ ) {
+		R.dims[c] = dims[c];
+		R.origin[c] = float( std::floor( mn[c] - ( 2.0 + kPad ) * v ) );
+	}
+	// the blend radius from the probes' spacing
+	R.radius = float( std::max( reach, 2.0 * v ) );
 	const double rad = R.radius;
 	std::unordered_map<Key3, std::vector<int>, Key3Hash> ph;
 	for ( size_t i = 0; i < up.size(); i++ )

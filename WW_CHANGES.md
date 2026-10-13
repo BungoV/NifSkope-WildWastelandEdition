@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GISHADE1 (2026-10-13, branch gishade1): the probe sky shades by what each spot sees of the sky
+
+- **Under an awning, in a door recess and inside a shop the outdoor probe GI now gives the share of the sky the spot
+  really sees; open ground and roofs keep their light.** Two defects, both measured against an independent tracer's
+  cosine sky share (bounce_reference on the bake's soup) before any change.
+- The legacy shader (`res/shaders/fo4_default.frag`) took the grid's sky share k of the weather's flat ambient off in
+  sqrt space. At k = 1 it left (DALC - flat)^2 lit and unoccluded (up to +23% blue on CommonwealthClear's day, the same
+  under an awning as on the street), and it did not reduce the cube term's ambient at all. It now replaces linearly as
+  the PBR program does: the ambient keeps sqrt(1 - k) of its colour, the cube's ambient (1 - k). Red pin
+  `WW_CELL_GISHADE_RED=sqrt` (environment only, no menu row) restores the old law.
+- The GI voxel grid (`src/probegi.cpp`) was sized from every surfel of the bake, and an exterior bake carries the far
+  soup's surfels across the whole worldspace. At Concord the voxel grew to 1349 units (blend radius 2698), so one voxel
+  held a whole shop and its inside read the street's sky. The grid now spans the surfels the probes can reach (the
+  probes' box grown by the blend radius), padded 5 voxels each side. Concord's voxel is 70 units, Goodneighbor's 103
+  (was 182). No setting: the grid follows the bake.
+- Gates (DOF/blur off, sky dome drawn, magenta 0). Goodneighbor glass storefront, 16:00: canopy/open sky fill 0.54
+  against the tracer's 0.61 (bar 0.12), door recess 0.014 of the flat ambient against the tracer's 0.005 (bar 0.04);
+  the pre-lane exe (snap_land8) 0.84 and 0.052, both FAIL. Concord Hardware (grid sky minus tracer share): inside the
+  shop +0.007 (was +0.582), awning -0.08 (was +0.28), recess -0.04 (was +0.38). Museum of Freedom roof (tracer share
+  0.94), 16:00: GI on/off 1.007/0.998/0.991. BOUNCE1's noon gate 2 still passes (sun bounce 1.00/1.02/1.03 of the
+  reference).
+
 ## Lane BOUNCE1 (2026-10-13, branch bounce1): outdoors the sun is the game's (x the imagespace Sunlight Scale), so the bounce shows
 
 - **Daylight colour bleed now reads like the Division deck: a sunlit wall throws its colour onto the shaded walls
