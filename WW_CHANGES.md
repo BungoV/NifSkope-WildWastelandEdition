@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GIAMB1 (2026-10-13, branch giamb1): indoors the probe light replaces the cell's ambient where probes reach
+
+- **Interiors now match the Division deck: where the probe bake reaches, the baked probe light replaces the
+  interior's ambient (the cell's DALC) instead of adding to it.** The ambient stays only as the fallback where no
+  probe reaches, faded by the GI grid's valid share, so there is no seam between the two (the same rule SKY1 uses
+  outdoors for the weather ambient). The rule was already written by lane GICAL1 (`cellAmbGi`, keep | replace |
+  off | max | asgi); this lane makes replace the default (`src/gl/celllights.cpp`). Without a GI bake, or with the
+  GI row off, the ambient draws as before; the rule is a uniform, so it follows the GI row live.
+- Probe 90 (`WW_CELL_LIT_PROBE=90`) now shows indoors the share of the ambient the probe light replaced
+  (`cellAmbShare`, `res/shaders/cell_lights.glsl`); outdoors it is SKY1's weather share as before.
+- `WW_CELL_GI_AMB=keep` stays as an environment pin only (no menu row, so no fix-only toggle): it is this lane's
+  gate red and pins the older gates that compare against pre-lane exes (`cell_gi`, `cell_pass`, `cell_sky`,
+  `cell_brick`, `aodecal1_cell`).
+- Gate (Hotel Rexford x2, Memory Den x2, Concord Museum; DOF/blur off): with the ambient removed
+  (`WW_CELL_LIT_RED=nodalc`) no covered pixel changes by more than 1 level; under keep 11k-370k covered pixels do
+  (red); keep draws byte for byte as the pre-lane exe; after is never brighter where probes reach; magenta 0.
+  Mean frame luminance drops 0.2-0.95 levels. Where no probe reaches (Memory Den with the gap fill off, 105 px)
+  the ambient still acts and replace draws them exactly as keep did.
+- Known risk (found by GICAL1): a hall lit almost only by the DALC (ConcordMuseum01's hallway) goes darker,
+  because the bake does not bounce the DALC.
+
 ## Lane BAKENEIGH1 (2026-10-13, branch bakeneigh1): a probe bake never rewrites a neighbour cell's file
 
 - **Baking tiles one after another into one folder no longer wipes a neighbour tile's probes.** A cell bake also
