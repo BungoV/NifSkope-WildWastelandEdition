@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 /* ---- lane VOLAIR1: the air (cellvolair.h, res/shaders/cell_volair.frag) ---- */
@@ -39,6 +40,7 @@ struct VaState
 	int red = 0;
 	int terms = 15;
 	int probe = 0;
+	int fogBlend = 0;	// WW_CELL_VOLAIR_FOGBLEND=1 (option B, test only): the game's fog drawn over the lit air
 	QString dump;
 	bool inPass = false;
 	QString last = QStringLiteral( "off" );
@@ -59,12 +61,15 @@ VaState & vs()
 		for ( const QByteArray & t : qgetenv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
-				: r == "wrongmed" ? 32 : 0;
+				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : 0;
 		}
 		const QByteArray terms = qgetenv( "WW_CELL_AIR_TERMS" ).trimmed();
 		if ( !terms.isEmpty() )
 			s.terms = terms.toInt() & 15;
 		s.probe = qEnvironmentVariableIntValue( "WW_CELL_AIR_PROBE" );
+		s.fogBlend = qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_FOGBLEND" ) == 1 ? 1 : 0;
+		if ( s.fogBlend && ( s.red & 64 ) )
+			s.fogBlend = 2;	// red blendnear: the fog colour by the air's own 1 - T, no start distance (must fail B)
 		s.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AIR_DUMP" ) );
 	}
 	return s;
@@ -180,7 +185,28 @@ QString wwVolAirSummary()
 	return QStringLiteral( "volair=" ) + vs().last;
 }
 
+// the air's state on stderr whenever it changes (a shot's notes say whether the air was drawn, and why not)
+static void vaEcho()
+{
+	static QString said;
+	const VaState & s = vs();
+	const QString now = QStringLiteral( "volair=%1 fogblend=%2" ).arg( s.last ).arg( s.fogBlend );
+	if ( now != said ) {
+		said = now;
+		std::fprintf( stderr, "cell air: %s\n", qPrintable( now ) );
+	}
+}
+
+static void vaPassInner( Scene * scene, bool run );
+
 void wwVolAirPass( Scene * scene, bool run )
+{
+	vaPassInner( scene, run );
+	if ( vs().on && run )
+		vaEcho();
+}
+
+static void vaPassInner( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )
 		return;
@@ -501,4 +527,5 @@ void wwVolAirUniforms( Scene * scene )
 		1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	prog->uni4f( "volSlices", FloatVector4( g.near, g.logRatio, float( g.slices ), ( s.red & 1 ) ? 0.0f : 1.0f ) );
 	prog->uni1i( "volProbe", s.probe );
+	prog->uni1i( "volFogBlend", s.fogBlend );
 }

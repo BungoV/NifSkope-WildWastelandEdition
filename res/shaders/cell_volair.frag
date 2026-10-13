@@ -268,8 +268,10 @@ void main()
 		}
 		T *= exp( -tau );
 	}
-	// the uniforms the CPU's setters look for must stay live
-	if ( !fogOn )
+	// the uniforms the CPU reads back must stay live: fogK all six (the pass fits the medium to them; a stripped
+	// fogK reads back as zeros and the pass refused with "fog scale 0", lane VOLAIR1 10-13)
+	float keep = fogK[0].x + fogK[1].x + fogK[2].x + fogK[3].x + fogK[4].x + fogK[5].x;
+	if ( !fogOn || keep < -1e30 )
 		acc = vec3( 0.0 );
 	fragColor = vec4( acc, T );
 }

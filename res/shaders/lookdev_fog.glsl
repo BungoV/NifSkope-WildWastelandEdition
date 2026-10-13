@@ -45,6 +45,8 @@ uniform sampler3D volTex;
 uniform vec4 volRect;		// the viewport's origin, 1 / its size
 uniform vec4 volSlices;		// near, ln(far / near), slices, 1 = applied (0 under the red "off": the game's fog drawn)
 uniform int volProbe;		// gates only: 1 the light term L alone, raw; 2 the transmittance T, grey
+uniform int volFogBlend;	// test only (WW_CELL_VOLAIR_FOGBLEND=1, option B): the game's fog drawn over the lit air
+				// with its own alpha (0 nearer than its start distance); 0 = option A, the real light only
 
 // (L, T) of the air between the eye and posView
 vec4 wwVolAirAt( vec3 posView )
@@ -73,7 +75,16 @@ vec3 wwFog( vec3 preFog, vec3 posView )
 		return preFog;
 	if ( volOn && volSlices.w > 0.5 ) {
 		vec4 a = wwVolAirAt( posView );
-		return preFog * a.a + a.rgb;
+		vec3 lit = preFog * a.a + a.rgb;
+		if ( volFogBlend == 1 )
+			return wwFogBase( lit, posView );
+		if ( volFogBlend == 2 ) {	// red blendnear (gates only): weighted by the air's 1 - T, which has no start distance
+			float hb;
+			vec3 fc;
+			wwFogEval( length( posView ) * fogDistScale, dot( fogView.xyz, posView ) + fogView.w, hb, fc );
+			return mix( lit, fc, 1.0 - a.a );
+		}
+		return lit;
 	}
 	return wwFogBase( preFog, posView );
 }

@@ -45,7 +45,9 @@ class Scene;
  *  Gates only: WW_CELL_AIR_RED=off (computed, not applied) | gioff | flat | noshadow | nolights | wrongmed (comma
  *  list), WW_CELL_AIR_TERMS=<mask> (1 directional, 2 placed lights, 4 GI, 8 ambient), WW_CELL_AIR_PROBE=1 (the light
  *  term L alone, raw) | 2 (the transmittance T, grey), WW_CELL_AIR_DUMP=<file> (the volumes and the numbers),
- *  WW_CELL_AIR_TIME=1 (the pass's ms in the census). */
+ *  WW_CELL_AIR_TIME=1 (the pass's ms in the census).
+ *  Test only, until bungo picks: WW_CELL_VOLAIR_FOGBLEND=1 (option B) draws the game's fog over the lit air with its
+ *  own alpha, so it adds only past the fog's start distance; unset or 0 = option A (the real light only). */
 void wwVolAirPass( Scene * scene, bool run );
 //! the uniforms of the renderer's CURRENT program (a no-op without `volOn`); the sampler is bound always
 void wwVolAirUniforms( Scene * scene );
