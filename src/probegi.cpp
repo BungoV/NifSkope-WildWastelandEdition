@@ -1934,6 +1934,8 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 				.arg( double( spec.sky.sunTo[2] ), 0, 'g', 9 ).arg( double( spec.sky.sun[0] ), 0, 'g', 9 )
 				.arg( double( spec.sky.sun[1] ), 0, 'g', 9 ).arg( double( spec.sky.sun[2] ), 0, 'g', 9 )
 				.arg( spec.sky.label, spec.skyRed.isEmpty() ? QStringLiteral( "-" ) : spec.skyRed );
+			if ( spec.sky.vis < 1.0f )	// lane SKYSTR1: the Sky visibility row below 100 % (a full row writes as before)
+				t += QStringLiteral( "skyVis %1\n" ).arg( double( spec.sky.vis ), 0, 'g', 9 );
 			s.write( t.toUtf8() );
 		}
 	}

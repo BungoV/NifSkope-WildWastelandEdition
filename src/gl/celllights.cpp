@@ -799,6 +799,7 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1i( "cellGi", kGiUnit );
 	prog->uni1b( "cellGiOn", giDraw );
 	prog->uni1b( "cellGiSky", giDraw && !skyDraw && G->skyLit );	// lane SKY1 (never on the sky-share grid)
+	prog->uni1f( "cellSkyVis", wwCellSkyVis() );	// lane SKYSTR1: the Sky visibility row, for the AO decals
 	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
 	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
 	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
@@ -1161,6 +1162,45 @@ void wwCellGiGpuSetOn( bool on )
 	if ( !qgetenv( "WW_CELL_GI_GPU" ).trimmed().isEmpty() )
 		return;
 	QSettings().setValue( QStringLiteral( "WW/CellGiGpu" ), on );
+}
+
+// lane SKYSTR1: the Sky visibility row (celllights.h)
+namespace
+{
+int & skyVisCache()
+{
+	static int pct = -1;
+	if ( pct < 0 ) {
+		const QByteArray pin = qgetenv( "WW_CELL_SKYSTR" ).trimmed();
+		pct = pin.isEmpty() ? QSettings().value( QStringLiteral( "WW/CellSkyVis" ), 100 ).toInt() : pin.toInt();
+		pct = std::clamp( pct, 0, 100 );
+	}
+	return pct;
+}
+}
+
+bool wwCellSkyVisPinned()
+{
+	return !qgetenv( "WW_CELL_SKYSTR" ).trimmed().isEmpty();
+}
+
+int wwCellSkyVisPercent()
+{
+	return skyVisCache();
+}
+
+float wwCellSkyVis()
+{
+	static const bool ignore = qgetenv( "WW_CELL_SKYSTR_RED" ).trimmed() == "ignore";
+	return ignore ? 1.0f : float( skyVisCache() ) / 100.0f;
+}
+
+void wwCellSkyVisSetPercent( int pct )
+{
+	if ( wwCellSkyVisPinned() )
+		return;
+	skyVisCache() = std::clamp( pct, 0, 100 );
+	QSettings().setValue( QStringLiteral( "WW/CellSkyVis" ), skyVisCache() );
 }
 
 void wwCellImageSpaceSetOn( bool on )

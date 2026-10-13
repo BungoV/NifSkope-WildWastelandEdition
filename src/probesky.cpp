@@ -23,7 +23,7 @@
 bool ProbeSkyLight::same( const ProbeSkyLight & o ) const
 {
 	return on == o.on && std::memcmp( amb, o.amb, sizeof amb ) == 0 && std::memcmp( sunTo, o.sunTo, sizeof sunTo ) == 0
-		&& std::memcmp( sun, o.sun, sizeof sun ) == 0 && pic == o.pic && ( !pic || std::memcmp( picQ, o.picQ, sizeof picQ ) == 0 );
+		&& std::memcmp( sun, o.sun, sizeof sun ) == 0 && vis == o.vis && pic == o.pic && ( !pic || std::memcmp( picQ, o.picQ, sizeof picQ ) == 0 );
 }
 
 /* ---- lane SKYPIC1: the drawn sky ---- */
@@ -140,6 +140,7 @@ ProbeSkyLight probeSkyLightNow()
 	s.label = QStringLiteral( "%1 hour %2%3" ).arg( wwLookdevWeatherKey() ).arg( wwLookdevHour(), 0, 'f', 2 )
 		.arg( fromWeather ? QString() : QStringLiteral( " (no weather record: the neutral light)" ) );
 	s.on = true;
+	s.vis = wwCellSkyVis();	// lane SKYSTR1: a change of the row relights as a change of weather does
 	// lane SKYPIC1: the drawn sky per direction, once a frame has captured it for this weather and hour
 	float flat[3];
 	const bool haveFlat = skyPicFlat( flat );
@@ -161,6 +162,18 @@ ProbeSkyLight probeSkyLightNow()
 	return s;
 }
 
+/* lane SKYSTR1: an octant's sky visibility as the relight takes it -- the stored share, opened toward the free sky by
+ * the Sky visibility row as FO4CS's Skylighting strength does (lerp(1, v, strength)); a full row leaves it bit for bit */
+static double octantVis( float v, const ProbeSkyLight & sky, bool redNoVis )
+{
+	if ( redNoVis )
+		return 1.0;
+	const double s = std::min( std::max( double( v ), 0.0 ), 1.0 );
+	if ( sky.vis >= 1.0f )
+		return s;
+	return 1.0 + double( std::max( sky.vis, 0.0f ) ) * ( s - 1.0 );
+}
+
 void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const ProbeSkyLight & sky, bool redNoVis,
 	bool redNoTint, double E[6][3] )
 {
@@ -168,7 +181,7 @@ void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const P
 	if ( sky.pic ) {   // lane SKYPIC1: each octant's own drawn sky on this axis
 		for ( int a = 0; a < 6; a++ )
 			for ( int o = 0; o < 8; o++ ) {
-				const double s = redNoVis ? 1.0 : std::min( std::max( double( vis[o] ), 0.0 ), 1.0 );
+				const double s = octantVis( vis[o], sky, redNoVis );
 				for ( int c = 0; c < 3; c++ )
 					E[a][c] += s * ( tint && !redNoTint ? tint[o][c] / 255.0 : 1.0 ) * sky.picQ[a][o][c];
 			}
@@ -182,7 +195,7 @@ void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const P
 			// the bake's octant: bit 0 x < 0, bit 1 y < 0, bit 2 z < 0
 			if ( ( ( ( o >> ax ) & 1 ) != 0 ) != neg )
 				continue;
-			const double s = redNoVis ? 1.0 : std::min( std::max( double( vis[o] ), 0.0 ), 1.0 );
+			const double s = octantVis( vis[o], sky, redNoVis );
 			for ( int c = 0; c < 3; c++ )
 				v[c] += s * ( tint && !redNoTint ? tint[o][c] / 255.0 : 1.0 );
 		}

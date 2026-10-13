@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SKYSTR1 (2026-10-13, branch skystr1-20261013): Sky visibility slider
+
+- **Sky visibility slider.** Show > Lighting has a new "Sky visibility" row (0-100 %, default 100 %) next to GI.
+  It sets how much the baked sky shadowing counts outdoors, as Community Shaders' Skylighting strength does:
+  100 % is the bake as it was, 0 % lights everything as if nothing blocked the sky. It works at once, with no
+  re-bake and no restart, and it is remembered (`WW/CellSkyVis`).
+- How: each probe octant's stored sky visibility v becomes lerp(1, v, s) in the relight (`src/probesky.cpp`;
+  100 % returns v untouched); the AO decals follow the same blend (`res/shaders/cell_lights.glsl`).
+  Pin `WW_CELL_SKYSTR=<0..100>`; red `WW_CELL_SKYSTR_RED=ignore` (environment only).
+- Gate `tests/spells/skystr1_cell.sh` (Concord, cameras hcorner2 + stairA, both in-bounds by camcheck): 100 % is
+  byte for byte the exe before the lane (5 pairs, 0 px); 0 % equals the sky-visibility-off picture on 100 % of
+  pixels (worst 0 levels); 50 % lies strictly between on 100 % of the moved pixels; the relight's sky at 674
+  probes matches an independent rebuild at 0/50/100 %; live in a running window and kept across a relaunch; the
+  red (slider ignored) fails K, Z and H.
+
 ## Lane BLOOM1 (2026-10-13, branch bloom1): FO4CS bloom and Physical Glare in the cell view
 
 - **The cell view can now draw FO4CS's bloom instead of the game's, with its Physical Glare.** Show > Effects >

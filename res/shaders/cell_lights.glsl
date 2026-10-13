@@ -474,6 +474,7 @@ vec4 cellGiSample( vec3 P, vec3 N )
 uniform bool cellAoDecalOn;
 uniform sampler2D cellAoDecal;
 uniform vec4 cellAoDecalRect;		// the viewport's x, y
+uniform float cellSkyVis;		// lane SKYSTR1: the Sky visibility row, 0..1 (src/gl/celllights.h)
 float cellAoDecalAt()
 {
 	return texelFetch( cellAoDecal, ivec2( gl_FragCoord.xy - cellAoDecalRect.xy ), 0 ).r;
@@ -492,7 +493,13 @@ vec3 cellGiE0( vec3 P, vec3 N )
 vec3 cellGiE( vec3 P, vec3 N )
 {
 	vec3 e = cellGiE0( P, N );
-	return ( cellAoDecalOn && cellPass < 2 ) ? e * cellAoDecalAt() : e;
+	if ( !( cellAoDecalOn && cellPass < 2 ) )
+		return e;
+	float d = cellAoDecalAt();
+	// lane SKYSTR1: outdoors the decal is blocked sky; the Sky visibility row opens it as the relight opens the grid's
+	if ( cellGiSky && cellSkyVis < 1.0 )
+		d = 1.0 + cellSkyVis * ( d - 1.0 );
+	return e * d;
 }
 // lane SKY1: the share of the weather's ambient the grid's sky replaces at P (0: not a sky grid)
 float cellGiSkyK( vec3 P, vec3 N )

@@ -200,6 +200,14 @@ bool wwCellShadowOn();
 void wwCellShadowSetOn( bool on );
 bool wwCellGiGpuOn();
 void wwCellGiGpuSetOn( bool on );
+/*! Lane SKYSTR1: the Sky visibility row, 0-100 % (WW/CellSkyVis, default 100; pin WW_CELL_SKYSTR=<percent>). As
+ *  FO4CS's Skylighting strength: each sky visibility v the GI takes becomes 1 + s (v - 1), so 0 % is the open sky
+ *  everywhere (the weather's unshadowed ambient), 100 % the bake as it is (bit for bit). The relight takes it
+ *  (probesky.cpp, live), the AO decals per pixel. Red WW_CELL_SKYSTR_RED=ignore: the row is ignored (100 %). */
+int wwCellSkyVisPercent();
+float wwCellSkyVis();
+bool wwCellSkyVisPinned();
+void wwCellSkyVisSetPercent( int pct );
 
 /*! lane FARVIEW1 (src/farlight.h, docs/cloud/FARVIEW1_DESIGN.md): DISTANT LIGHT FROM THE SURFELS. Past the band's
  *  near end D0 a surface's placed-light diffuse fades from the real lights to the bake's surfels (w = smoothstep(D0, D1,
