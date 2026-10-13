@@ -1568,6 +1568,18 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		}
 		sizedEnd();
 	}
+	// lane NEONGI1: the glowing effect surfaces (written only when any): 9 f32 + 3 f32 Le + u8 two-sided + 3 u8 0 a triangle
+	if ( !soup.veil.empty() ) {
+		const ProbeSoup::Veil & v = soup.veil;
+		sizedBegin( 0x31564D45u /* 'EMV1' */, quint32( v.count() ) );
+		for ( size_t i = 0; i < v.count(); i++ ) {
+			f.write( reinterpret_cast<const char *>( &v.tris[i * 9] ), 36 );
+			f.write( reinterpret_cast<const char *>( &v.le[i * 3] ), 12 );
+			const quint8 b4[4] = { quint8( i < v.two.size() && v.two[i] ? 1 : 0 ), 0, 0, 0 };
+			f.write( reinterpret_cast<const char *>( b4 ), 4 );
+		}
+		sizedEnd();
+	}
 	return true;
 }
 
@@ -1649,7 +1661,7 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			}
 			end = f.pos() + qint64( bytes );
 			if ( tail[0] == 0x314B4D41u || tail[0] == 0x324B4D41u || tail[0] == 0x31544D45u || tail[0] == 0x314D4E56u
-				|| tail[0] == 0x31475244u )
+				|| tail[0] == 0x31475244u || tail[0] == 0x31564D45u )
 				return;
 			more = f.seek( end ) && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
 		}
@@ -1878,6 +1890,27 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		}
 		if ( ok && f.pos() == end )
 			soup->doorGeom = std::move( g );
+		next();
+	}
+	// lane NEONGI1: the glowing effect surfaces (a short or broken tail leaves none)
+	if ( more && tail[0] == 0x31564D45u ) {
+		const qint64 n = qint64( tail[1] );
+		if ( n * 52 == qint64( bytes ) ) {
+			ProbeSoup::Veil v;
+			v.tris.resize( size_t( n ) * 9 );
+			v.le.resize( size_t( n ) * 3 );
+			v.two.resize( size_t( n ) );
+			bool ok = true;
+			for ( qint64 i = 0; i < n && ok; i++ ) {
+				quint8 b4[4];
+				ok = f.read( reinterpret_cast<char *>( &v.tris[size_t( i ) * 9] ), 36 ) == 36
+					&& f.read( reinterpret_cast<char *>( &v.le[size_t( i ) * 3] ), 12 ) == 12
+					&& f.read( reinterpret_cast<char *>( b4 ), 4 ) == 4;
+				v.two[size_t( i )] = b4[0] ? 1 : 0;
+			}
+			if ( ok && f.pos() == end )
+				soup->veil = std::move( v );
+		}
 		next();
 	}
 	return true;

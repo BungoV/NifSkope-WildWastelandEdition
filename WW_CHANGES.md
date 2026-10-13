@@ -24,6 +24,41 @@
   ported, 17/17; a numpy rebuild of FO4CS's chain from the GPU's source matches every mip, every up level and the
   final combine within 2% of the frame peak (night scene, glare off and on; most stages under 0.4%); the red (a plain box on level 0) is refused.
 
+## Lane NEONGI1 (2026-10-13, branch neongi1): neon signs now feed the probe GI
+
+- **The neon signs' glow now reaches the probe light.** Goodneighbor's neon (Hotel Rexford, Memory Den, Third Rail,
+  Guns Guns Guns, the Goodneighbor and "Open" signs) is drawn by the effect shader from `NeonRed01.BGEM` /
+  `NeonBlue01.BGEM`: additive, untextured, base colour x 2. The probe soup dropped every effect shape, so the
+  bake never saw the neon at all: GI on vs off at 22:00 added about 2 levels near the signs.
+- The soup now keeps the additive effect surfaces as glowing triangles in a new sized tail `'EMV1'`
+  (`src/probeplace.*`, 52 bytes a triangle: corners, linear Le, two-sided flag). Le is what the effect shader
+  draws: the mean over the triangle of pow(vertex colour x base colour x scale, 2.2) (x the texture where there is
+  one, x alpha when the blend is SRC_ALPHA/ONE). They stay out of the soup's geometry: they block nothing and
+  bounce nothing, as in the game.
+- Which effects qualify (`src/cellview.cpp`): additive (dst ONE), unlit, not soft (glow cards, mist and beams
+  stay out), not a billboard, not a palette, not a decal, material read. The census line "probe soup emissive
+  effects" lists each one and why the others were left out.
+- The bake (`src/probebake.cpp`, pass 1): a ray that crosses a front-facing glowing triangle on its way to a surface
+  adds that triangle's Le to the surface behind it, when that surface is within one surfel cell (70 units); the
+  relight then carries it as emission. The notes count the crossings, those from behind and those too far in front.
+- Placed lights near the neon are kept. All 7 neon placements in Goodneighbor have a lit placed light within 256
+  units (20 lights); the game uses those for the near light and the bake adds the neon's own glow. That is what the
+  game shows with both on, so neither is removed.
+- `tests/bounce_reference.cpp` gains an emitter arm: the direct light of the `'EMV1'` triangles, area-sampled
+  with shadow rays (columns 8-11). It matches an exact square-emitter answer within 0.01%.
+- Gate (Goodneighbor, 22:00, one bounce, against the reference; in-bounds cameras; probe-mode renders only):
+  - At the probes within 700 of the Rexford sign, the emissive light the bake adds is 0.94 of the reference
+    (r/g/b and luminance; per-axis correlation 0.95; bar 0.67-1.5). PASS.
+  - On the sidewalk pixels within 700 of the sign it is 0.81 red / 0.72 luminance (bar 0.67-1.5). PASS.
+  - On the walls and the sign housing within 450 of the sign it is 0.10 (FAIL). Those pixels are 100-450 units from
+    the tubes and their light falls off as 1/d^2. Probes stand about 280 apart, so the grid cannot hold that near
+    field; the pixels read exactly what the probes hold. In the game the placed lights draw that near light.
+  - The red rung `release/snap_land8` adds 0.
+- The pin `WW_CELL_EMISSIVE_RED=noeffects` (environment only, gates) leaves the effects out. With it the soup and
+  the bake match the pre-lane exe byte for byte.
+- Noon is unchanged except near the neon: the grids only gain light, and 99.9% of the pixels that change by more
+  than 2 levels are within 600 units of a neon tube.
+
 ## Lane BOUNCE1 (2026-10-13, branch bounce1): outdoors the sun is the game's (x the imagespace Sunlight Scale), so the bounce shows
 
 - **Daylight colour bleed now reads like the Division deck: a sunlit wall throws its colour onto the shaded walls
