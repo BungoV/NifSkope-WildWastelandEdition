@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BAKENEIGH1 (2026-10-13, branch bakeneigh1): a probe bake never rewrites a neighbour cell's file
+
+- **Baking tiles one after another into one folder no longer wipes a neighbour tile's probes.** A cell bake also
+  wrote a few probes into the sector files (`.tbk`) of the cells around the probed block, and opened those files
+  for truncation: a probe that the placer stood up to one spacing past the block's edge (the openings pass looks
+  one spacing outside, rooms and moved probes too) was filed by its position into the neighbour cell. In a
+  whole-worldspace bake every tile shares one folder, so the next tile's bake cut a neighbour's full file (hundreds
+  of probes) down to those 1-11 edge probes. Fix (`src/probebake.*`, `src/cellview.cpp`): the bake is told which
+  cells it was asked for, leaves out the probes standing outside them, and writes no file for any other cell. The
+  neighbour's own bake places that edge strip itself, and a bake of the two tiles together would also place it
+  once, so nothing is lost; merging into the existing file instead would have put two near-copies of the strip in
+  one file and made the result depend on the order of the bakes. The asked cells' files are byte for byte what
+  they were. The command-line bake tools and interiors keep every file, as before. The bake notes say "bake: own
+  cells N: files written only for them; probes over their edge left to the neighbour's own bake P (in M neighbour
+  cells, no file written)".
+- **Gate** (notes/bakeneigh1: gate.sh, compare.py; the cell census runner, 3x3 tiles with a 1-cell ring). Tile
+  -17,16 then tile -14,16 into one folder: the first tile's 9 files are byte-identical after the second bakes, the
+  second tile's 9 files equal its bake alone, no other file is written, and both tiles' files equal the old exe's
+  byte for byte. The old exe (snap_land4) fails: the second tile cut cells -16,15/-16,16/-16,17 from 231/212/453
+  probes to 2/1/4, and wrote 4 files outside the two tiles. Tiles -26,19 then -29,19: same result (old exe: 2
+  outside files). Collision 12/12.
+
 ## Lane AOOFF1 (2026-10-13, branch aooff1): AO off changes only the AO term
 
 - **Turning cell AO off no longer drops the sun and halves the frame (AO-OFF).** With the AO row off, the cell
