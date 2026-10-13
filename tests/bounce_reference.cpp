@@ -23,7 +23,16 @@
 // Constant 0, Scalar 1, Exponent 2): a = (1 - clamp((d / radius)^2, 0, 1))^2.2 (PRTP2 section 1), so a hit adds
 // albedo x colour x a x max(0, n_hit . l) when a ray from the hit to the lamp meets no triangle.
 //
-// out.tsv: index, E r g b, sky share, hit share, sunlit-hit share, triangles kept.
+// out.tsv: index, E r g b, sky share, hit share, sunlit-hit share, triangles kept, then (lane NEONGI1) Eem r g b and
+// the emitting triangles within the cull distance.
+//
+// Eem (lane NEONGI1, 2026-10-13): the DIRECT light of the soup's glowing effect surfaces (the 'EMV1' tail: neon
+// tubes, 9 f32 + 3 f32 Le + u8 two-sided + 3 pad a triangle), by area sampling, not by the strata (a tube is far
+// too thin for a hemisphere of rays): each triangle cut into 9 by a 3 x 3 split, each piece's centroid x carrying
+//     Le x (A / 9) x max(0, n . w) x cosE / d^2 x V,   w = (x - p) / d,
+// cosE = the emitter's face toward p (one-sided: only its front, the face (v1 - v0) x (v2 - v0) points to; two-sided:
+// |cos|), V = no soup triangle between (the tubes themselves never occlude: the renderer draws them additive with
+// no depth write). Same unit as E. Kept apart from E, so a sun-bounce run reads exactly as before.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -46,6 +55,8 @@ struct Soup
 	std::vector<Map> maps;
 	std::vector<int> maskOf;
 	std::vector<Masked> masked;
+	std::vector<float> em, emLe;          // lane NEONGI1: 'EMV1' glowing effect triangles (9 each), Le (3 each)
+	std::vector<uint8_t> emTwo;
 	bool hole( size_t tri, double b1, double b2 ) const
 	{
 		if ( maskOf.empty() || maskOf[tri] < 0 )
@@ -146,6 +157,22 @@ bool readSoup( const char * path, Soup & s )
 			if ( !ok ) {
 				std::fclose( f );
 				return false;
+			}
+		}
+		if ( tail[0] == 0x31564D45u && uint64_t( tail[1] ) * 52 == bytes ) {   // 'EMV1'
+			s.em.resize( size_t( tail[1] ) * 9 );
+			s.emLe.resize( size_t( tail[1] ) * 3 );
+			s.emTwo.resize( size_t( tail[1] ) );
+			for ( uint32_t i = 0; i < tail[1]; i++ ) {
+				uint8_t b4[4];
+				if ( std::fread( &s.em[size_t( i ) * 9], 4, 9, f ) != 9 || std::fread( &s.emLe[size_t( i ) * 3], 4, 3, f ) != 3
+					|| std::fread( b4, 1, 4, f ) != 4 ) {
+					s.em.clear();
+					s.emLe.clear();
+					s.emTwo.clear();
+					break;
+				}
+				s.emTwo[i] = b4[0];
 			}
 		}
 		more = _fseeki64( f, body + bytes, SEEK_SET ) == 0 && std::fread( tail, 4, 2, f ) == 2;
@@ -391,7 +418,79 @@ int main( int argc, char ** argv )
 			hit += kind[r] >= 2 ? cosN * w / 3.14159265358979323846 : 0.0;
 			lit += kind[r] == 3 ? cosN * w / 3.14159265358979323846 : 0.0;
 		}
-		std::fprintf( out, "%zu\t%.6f\t%.6f\t%.6f\t%.5f\t%.5f\t%.5f\t%zu\n", p, E[0], E[1], E[2], sky, hit, lit, T.size() );
+		// lane NEONGI1: the glowing effect surfaces' direct light, by area (see the head)
+		std::vector<size_t> emNear;
+		for ( size_t i = 0; i * 9 < s.em.size(); i++ ) {
+			const float * v = &s.em[i * 9];
+			bool nearE = false;
+			for ( int k = 0; k < 3 && !nearE; k++ ) {
+				const double dx = v[k * 3] - pt[0], dy = v[k * 3 + 1] - pt[1], dz = v[k * 3 + 2] - pt[2];
+				nearE = dx * dx + dy * dy + dz * dz < cull * cull;
+			}
+			if ( nearE )
+				emNear.push_back( i );
+		}
+		std::vector<double> eacc( emNear.size() * 3, 0.0 );
+		std::atomic<size_t> enext( 0 );
+		auto ework = [&]() {
+			const double o[3] = { pt[0] + n[0] * 0.5, pt[1] + n[1] * 0.5, pt[2] + n[2] * 0.5 };
+			for ( ;; ) {
+				const size_t j = enext.fetch_add( 1 );
+				if ( j >= emNear.size() )
+					return;
+				const size_t i = emNear[j];
+				const float * v = &s.em[i * 9];
+				const double e1[3] = { double( v[3] ) - v[0], double( v[4] ) - v[1], double( v[5] ) - v[2] };
+				const double e2[3] = { double( v[6] ) - v[0], double( v[7] ) - v[1], double( v[8] ) - v[2] };
+				double ne[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+				const double l2 = std::sqrt( ne[0] * ne[0] + ne[1] * ne[1] + ne[2] * ne[2] );
+				if ( !( l2 > 0 ) )
+					continue;
+				for ( double & c : ne )
+					c /= l2;
+				const double piece = 0.5 * l2 / 9.0;
+				// the 3 x 3 split: 6 upright and 3 inverted sub-triangles, their centroids in barycentric thirds
+				for ( int a = 0; a < 3; a++ )
+					for ( int b = 0; a + b < 3; b++ )
+						for ( int inv = 0; inv < 2; inv++ ) {
+							if ( inv && a + b > 1 )
+								continue;
+							const double u = inv ? ( a + 2.0 / 3.0 ) / 3.0 : ( a + 1.0 / 3.0 ) / 3.0;
+							const double w2 = inv ? ( b + 2.0 / 3.0 ) / 3.0 : ( b + 1.0 / 3.0 ) / 3.0;
+							const double x[3] = { v[0] + e1[0] * u + e2[0] * w2, v[1] + e1[1] * u + e2[1] * w2, v[2] + e1[2] * u + e2[2] * w2 };
+							double wv[3] = { x[0] - o[0], x[1] - o[1], x[2] - o[2] };
+							const double d = std::sqrt( wv[0] * wv[0] + wv[1] * wv[1] + wv[2] * wv[2] );
+							if ( !( d > 1.0 ) )
+								continue;
+							for ( double & c : wv )
+								c /= d;
+							const double cosR = wv[0] * n[0] + wv[1] * n[1] + wv[2] * n[2];
+							double cosE = -( wv[0] * ne[0] + wv[1] * ne[1] + wv[2] * ne[2] );
+							if ( s.emTwo[i] )
+								cosE = std::fabs( cosE );
+							if ( cosR <= 0.0 || cosE <= 0.0 )
+								continue;
+							if ( trace( s, T, o, wv, d - 0.5, true, nullptr, nullptr, nullptr ) >= 0 )
+								continue;
+							const double g = piece * cosR * cosE / ( d * d );
+							for ( int c = 0; c < 3; c++ )
+								eacc[j * 3 + size_t( c )] += s.emLe[i * 3 + size_t( c )] * g;
+						}
+			}
+		};
+		{
+			std::vector<std::thread> eth;
+			for ( unsigned k = 0; k < nth; k++ )
+				eth.emplace_back( ework );
+			for ( auto & t : eth )
+				t.join();
+		}
+		double Eem[3] = { 0, 0, 0 };
+		for ( size_t j = 0; j < emNear.size(); j++ )
+			for ( int c = 0; c < 3; c++ )
+				Eem[c] += eacc[j * 3 + size_t( c )];
+		std::fprintf( out, "%zu\t%.6f\t%.6f\t%.6f\t%.5f\t%.5f\t%.5f\t%zu\t%.6f\t%.6f\t%.6f\t%zu\n", p, E[0], E[1], E[2], sky, hit,
+			lit, T.size(), Eem[0], Eem[1], Eem[2], emNear.size() );
 		std::fflush( out );
 	}
 	std::fclose( out );

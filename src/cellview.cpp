@@ -53,6 +53,7 @@ BSD License - see nifskope.h
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QMap>
 #include <QSet>
 #include <QStringList>
 #include <QCoreApplication>
@@ -2435,6 +2436,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	int emShapes = 0, emShapesBlack = 0, emShapesUnread = 0, emShapesNoUv = 0, emOffShapes = 0;
 	QSet<quint32> emRefs, emRefsNearLight, emNearLights;
 	QString emModels;   // census: model, material, map, color x mult, lights within 256 units
+	/* lane NEONGI1: the effect surfaces that glow (the soup's veils). WW_CELL_EMISSIVE_RED=noeffects (gates only) lists
+	 * none: the soup as before the lane. Census as EMISSIVEGI1's, plus the effect shapes left out and why. */
+	int veilShapes = 0;
+	QSet<quint32> veilRefs, veilRefsNearLight, veilNearLights;
+	QMap<QString, int> veilLeftOut;   // why -> shapes
+	QString veilModels;
 	auto glowMapIdx = [&]( const QString & tex ) -> int {
 		const QString k = tex.toLower();
 		auto it = glowMapOf.constFind( k );
@@ -3010,6 +3017,125 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				if ( refractOnly || s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
 					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest && !foliageKeep ) ) {
 					soupShapesDropped++;
+					/* lane NEONGI1: an ADDITIVE effect surface (neon tubes: NeonRed01.BGEM, blend source alpha / one) can only
+					 * add light, so it is light; with no face in the soup it lit nothing. Its triangles go into the soup's veils
+					 * with the colour the renderer draws (fo4_effectshader.frag in the cell view: map x vertex colour x base
+					 * colour x scale, powered 2.2, times its alpha when the blend reads it), the mean of 10 points a triangle. */
+					if ( baking && !emitPin && emitRed != "noeffects" && s.nearFacts.effectShader && !refractOnly ) {
+						const char * why = nullptr;
+						if ( !s.effectMatRead )
+							why = "no material read";
+						else if ( !s.bakeBlend || s.bakeBlendDst != 0 || !( s.bakeBlendSrc == 6 || s.bakeBlendSrc == 0 ) )
+							why = "not additive";
+						else if ( s.bakeSoft )
+							why = "soft (glow card, mist, beam)";
+						else if ( s.effectLit )
+							why = "lit effect";
+						else if ( s.billboard || s.g2p )
+							why = "billboard or palette";
+						else if ( s.nearFacts.decal )
+							why = "decal";
+						const bool srcA = s.bakeBlendSrc == 6;
+						const size_t vFirst = probeSoup.veil.count();
+						double vArea = 0, vPow[3] = { 0, 0, 0 };
+						bool unread = false;
+						for ( size_t t = 0; !why && t + 2 < s.geom.tris.size(); t += 3 ) {
+							size_t vi[3];
+							bool okTri = true;
+							float w[9];
+							for ( int k = 0; k < 3 && okTri; k++ ) {
+								vi[k] = size_t( s.geom.tris[t + size_t( k )] );
+								okTri = vi[k] < nv;
+								if ( !okTri )
+									break;
+								const Vector3 wp = p.pos + p.rot * ( Vector3( s.geom.pos[vi[k] * 3], s.geom.pos[vi[k] * 3 + 1],
+									s.geom.pos[vi[k] * 3 + 2] ) * p.scale );
+								for ( int c = 0; c < 3; c++ )
+									w[k * 3 + c] = wp[c];
+							}
+							if ( !okTri )
+								continue;
+							double sum[3] = { 0, 0, 0 };
+							int got = 0;
+							for ( int i = 0; i < 4 && !unread; i++ )
+								for ( int j = 0; i + j < 4; j++ ) {
+									const float b1 = ( float( i ) + 1.0f / 3.0f ) / 4.0f, b2 = ( float( j ) + 1.0f / 3.0f ) / 4.0f;
+									const float bw[3] = { 1.0f - b1 - b2, b1, b2 };
+									float uv[2] = { 0.5f, 0.5f }, vc[3] = { 1, 1, 1 }, va = 1.0f, lin[3], ta = 1.0f;
+									if ( s.geom.uv.size() >= nv * 2 )
+										for ( int k = 0; k < 2; k++ )
+											uv[k] = bw[0] * s.geom.uv[vi[0] * 2 + size_t( k )] + bw[1] * s.geom.uv[vi[1] * 2 + size_t( k )]
+												+ bw[2] * s.geom.uv[vi[2] * 2 + size_t( k )];
+									if ( s.geom.rgba.size() == nv * 4 ) {
+										for ( int k = 0; k < 3; k++ )
+											vc[k] = ( bw[0] * s.geom.rgba[vi[0] * 4 + size_t( k )] + bw[1] * s.geom.rgba[vi[1] * 4 + size_t( k )]
+												+ bw[2] * s.geom.rgba[vi[2] * 4 + size_t( k )] ) / 255.0f;
+										va = ( bw[0] * s.geom.rgba[vi[0] * 4 + 3] + bw[1] * s.geom.rgba[vi[1] * 4 + 3]
+											+ bw[2] * s.geom.rgba[vi[2] * 4 + 3] ) / 255.0f;
+									}
+									if ( s.effectTex0.isEmpty() ) {   // no map: the shader's white
+										for ( int k = 0; k < 3; k++ )
+											lin[k] = std::pow( std::max( vc[k] * s.bakeColor[k], 0.0f ), 2.2f );
+									} else if ( probeAlb.sample( s.effectTex0, uv[0], uv[1], vc, lin, &ta ) ) {
+										for ( int k = 0; k < 3; k++ )
+											lin[k] *= std::pow( std::max( s.bakeColor[k], 0.0f ), 2.2f );
+									} else {
+										unread = true;
+										break;
+									}
+									const double a = srcA ? double( std::clamp( ta * va * s.matAlpha * s.matAlpha, 0.0f, 1.0f ) ) : 1.0;
+									for ( int k = 0; k < 3; k++ )
+										sum[k] += double( lin[k] ) * a;
+									got++;
+								}
+							if ( unread ) {
+								why = "map unread";
+								break;
+							}
+							if ( !got || !( sum[0] + sum[1] + sum[2] > 0 ) )
+								continue;
+							const double e1[3] = { double( w[3] ) - w[0], double( w[4] ) - w[1], double( w[5] ) - w[2] };
+							const double e2[3] = { double( w[6] ) - w[0], double( w[7] ) - w[1], double( w[8] ) - w[2] };
+							const double cx = e1[1] * e2[2] - e1[2] * e2[1], cy = e1[2] * e2[0] - e1[0] * e2[2], cz = e1[0] * e2[1] - e1[1] * e2[0];
+							const double ar = 0.5 * std::sqrt( cx * cx + cy * cy + cz * cz );
+							if ( !( ar > 0 ) )
+								continue;
+							probeSoup.veil.tris.insert( probeSoup.veil.tris.end(), w, w + 9 );
+							for ( int k = 0; k < 3; k++ ) {
+								probeSoup.veil.le.push_back( float( sum[k] / got ) );
+								vPow[k] += sum[k] / got * ar;
+							}
+							probeSoup.veil.two.push_back( s.nearFacts.twoSided ? 1 : 0 );
+							vArea += ar;
+						}
+						if ( why ) {   // nothing of this shape stays
+							probeSoup.veil.tris.resize( vFirst * 9 );
+							probeSoup.veil.le.resize( vFirst * 3 );
+							probeSoup.veil.two.resize( vFirst );
+							veilLeftOut[QString::fromLatin1( why )]++;
+						} else if ( probeSoup.veil.count() == vFirst ) {
+							veilLeftOut[QStringLiteral( "black" )]++;
+						} else {
+							veilShapes++;
+							veilRefs.insert( p.ref );
+							// the double-count census: placed lights within 256 units of this placement (EMISSIVEGI1's)
+							int near = 0;
+							for ( const EsmRefr & lr : lightRefs ) {
+								const float dx = lr.pos[0] - p.pos[0], dy = lr.pos[1] - p.pos[1], dz = lr.pos[2] - p.pos[2];
+								if ( dx * dx + dy * dy + dz * dz <= 256.0f * 256.0f && !startsDisabled( lr ) ) {
+									near++;
+									veilNearLights.insert( lr.formID );
+								}
+							}
+							if ( near )
+								veilRefsNearLight.insert( p.ref );
+							if ( veilShapes <= 200 )
+								veilModels += QStringLiteral( "    %1 | %2 | ref %3 | triangles %4, area %5 | Le mean %6,%7,%8 | lights within 256: %9\n" )
+								.arg( model, s.matName ).arg( p.ref, 8, 16, QLatin1Char( '0' ) ).arg( int( probeSoup.veil.count() - vFirst ) )
+								.arg( vArea, 0, 'f', 0 ).arg( vPow[0] / vArea, 0, 'f', 3 ).arg( vPow[1] / vArea, 0, 'f', 3 )
+								.arg( vPow[2] / vArea, 0, 'f', 3 ).arg( near );
+						}
+					}
 					if ( baking && decalFold && !refractOnly && !s.nearFacts.effectShader && s.effectTex0.isEmpty()
 						&& ( s.nearFacts.alphaBlend || s.nearFacts.decal ) && !( soupFoliage && s.nearFacts.alphaTest ) ) {
 						soupDecalShapes++;   // lane GICAL1: its albedo and coverage, the mean of 10 points a triangle
@@ -4391,6 +4517,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			  << ", emitters " << int( probeSoup.glow.emitters.size() ) << ", glow maps " << int( probeSoup.glow.maps.size() )
 			  << "; left dark: glow flag with no map " << emShapesBlack << ", map unread " << emShapesUnread << ", no UVs "
 			  << emShapesNoUv << "; a color without Own-Emit " << emOffShapes << "\n" << emModels;
+			// lane NEONGI1: the effect surfaces that glow
+			t << "  probe soup emissive effects" << ( emitPin || emitRed == "noeffects" ? " OFF" : "" ) << ": shapes " << veilShapes
+			  << " (placements " << veilRefs.size() << ", with a placed light lit within 256 units " << veilRefsNearLight.size()
+			  << ", those lights " << veilNearLights.size() << "), triangles " << int( probeSoup.veil.count() ) << "; effect shapes left out:";
+			for ( auto it = veilLeftOut.constBegin(); it != veilLeftOut.constEnd(); ++it )
+				t << " " << it.key() << " " << it.value() << ";";
+			t << "\n" << veilModels;
 			// lane CAPTURE1: refraction-only shapes left out of the soup, per model
 			t << "  probe soup refraction-only shapes left out " << soupRefractShapes << " (" << soupRefractTris
 			  << " triangles)" << ( refractKeepRed ? " RED keep: kept as surfaces" : "" );

@@ -302,6 +302,7 @@ struct Chunk
 	qint64 back = 0, door = 0, tinted = 0;   // v4 links: to a back surfel, through a door, through glass
 	qint64 decal = 0, surfHits = 0;          // lane GICAL1: surfel hits under a decal; all surfel hits
 	qint64 emitHits = 0;        // lane EMISSIVEGI1: pass-1 hits on a glowing triangle
+	qint64 veilHits = 0, veilBack = 0, veilFar = 0;   // lane NEONGI1: pass-1 crossings of a glowing effect surface
 	qint64 smoothHits = 0, nmapHits = 0;     // lane SMOOTHN1: hits given a smooth normal; bent by a normal map
 	qint64 rays = 0;                         // lane SMOOTHN1: rays cast in pass 2 (the base set plus the extra batches)
 	int raised = 0, multMax = 1;             // lane SMOOTHN1: probes given extra batches; the largest multiple
@@ -424,6 +425,21 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			wbvh.t[i + 2] = soup.water[i + 2];
 		}
 		wbvh.build();
+	}
+	/* lane NEONGI1: the glowing effect surfaces (neon) in their own tree. They have no face in the soup (a ray goes
+	 * through), so a ray that crosses one adds its Le to the surface it meets behind it, when that is within a surfel
+	 * cell: the cell's mean then carries the tube's light (its share of the cell, as seen from the probes). */
+	const bool veilOn = !soup.veil.empty();
+	R.veilTris = int( soup.veil.count() );
+	probebvh::Bvh vbvh;
+	if ( veilOn ) {
+		vbvh.t.resize( soup.veil.tris.size() );
+		for ( size_t i = 0; i < soup.veil.tris.size(); i += 3 ) {
+			vbvh.t[i + 0] = float( double( soup.veil.tris[i + 0] ) - O[0] );
+			vbvh.t[i + 1] = float( double( soup.veil.tris[i + 1] ) - O[1] );
+			vbvh.t[i + 2] = soup.veil.tris[i + 2];
+		}
+		vbvh.build();
 	}
 	probebvh::Bvh dbvh;   // lane GICAL1: the decals in their own tree
 	if ( decalOn ) {
@@ -1067,6 +1083,32 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 							s.le[k] += L[k];
 						ch.emitHits++;
 					}
+					if ( veilOn ) {   // lane NEONGI1: the glowing effect surfaces this leg crossed, front first (additive: each adds)
+						double s0 = 0;
+						for ( int it = 0; it < 16 && s0 < tL; it++ ) {
+							const double o3[3] = { oL[0] + dL[0] * s0, oL[1] + dL[1] * s0, oL[2] + dL[2] * s0 };
+							double tc = 0;
+							int vt = -1;
+							if ( !vbvh.ray( o3, dL, tL - s0, &tc, &vt ) || vt < 0 )
+								break;
+							s0 += tc + 1.0e-2;
+							const float * V = &vbvh.t[size_t( vt ) * 9];
+							const double e1[3] = { double( V[3] ) - V[0], double( V[4] ) - V[1], double( V[5] ) - V[2] };
+							const double e2[3] = { double( V[6] ) - V[0], double( V[7] ) - V[1], double( V[8] ) - V[2] };
+							const double nn[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+							if ( nn[0] * dL[0] + nn[1] * dL[1] + nn[2] * dL[2] > 0 && !soup.veil.two[size_t( vt )] ) {
+								ch.veilBack++;   // its back face: the renderer culls it
+								continue;
+							}
+							if ( tL - s0 > double( cellS ) ) {
+								ch.veilFar++;
+								continue;
+							}
+							for ( int k = 0; k < 3; k++ )
+								s.le[k] += soup.veil.le[size_t( vt ) * 3 + size_t( k )];
+							ch.veilHits++;
+						}
+					}
 					if ( wayHit ) {   // lane CAPTURE1: the hit's own point
 						const double p[3] = { oL[0] + dL[0] * tL, oL[1] + dL[1] * tL, oL[2] + dL[2] * tL };
 						double a2[3], n2[3];
@@ -1596,6 +1638,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	for ( const Chunk & ch : chunks ) {
 		R.hits += ch.hits;
 		R.emitHits += ch.emitHits;
+		R.veilHits += ch.veilHits;
+		R.veilBack += ch.veilBack;
+		R.veilFar += ch.veilFar;
 		R.misses += ch.misses;
 		R.linksTurned += ch.turned;
 		R.linksSpilled += ch.spilled;
@@ -2123,12 +2168,16 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 	if ( r.decalTris > 0 )   // lane GICAL1
 		t << "bake: decals folded into the albedo: " << r.decalTris << " triangles, " << r.decalHits << " of " << r.surfelHits
 		  << " surfel hits under one\n";
-	if ( r.emitTris )   // lane EMISSIVEGI1
+	if ( r.emitTris || r.veilTris )   // lane EMISSIVEGI1 (NEONGI1: or effect surfaces)
 		t << "bake: emissive: glowing triangles " << r.emitTris << ", pass-1 hits on them " << r.emitHits
 		  << ", surfels that glow (written) " << r.emitSurfels << ", their Le summed (linear) "
 		  << QString::number( r.emitLeSum[0], 'g', 6 ) << "," << QString::number( r.emitLeSum[1], 'g', 6 ) << ","
 		  << QString::number( r.emitLeSum[2], 'g', 6 ) << ( r.emitDropped ? ", DROPPED by v3 " : "" )
 		  << ( r.emitDropped ? QString::number( r.emitDropped ) : QString() ) << "\n";
+	if ( r.veilTris )   // lane NEONGI1
+		t << "bake: emissive effects (neon): triangles " << r.veilTris << ", pass-1 crossings added to the surface behind "
+		  << r.veilHits << ", crossed from behind (one-sided, not drawn) " << r.veilBack
+		  << ", crossed over a surfel cell in front of the surface (left out) " << r.veilFar << "\n";
 	// lane ROOMCLAMP1: probes outside the shell
 	t << "bake: outside the shell (back-face share over " << QString::number( r.backMax, 'f', 2 )
 	  << ( r.backRule ? "" : ", RULE OFF" ) << "): moved " << r.backMoved << ", dropped " << r.backDropped

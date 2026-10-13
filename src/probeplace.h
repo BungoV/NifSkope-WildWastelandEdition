@@ -177,6 +177,19 @@ struct ProbeSoup
 	/*! lane EMISSIVEGI1: the triangles that glow (probeemit.h). Written as the optional 'EMT1' tail (only when any
 	 *  triangle glows), so a soup with nothing glowing stays byte for byte as before. */
 	ProbeEmit glow;   // not "emit": a Qt macro
+	/*! lane NEONGI1: the effect surfaces that glow (neon tubes: an additive BGEM, no face of its own in the soup, so a
+	 *  ray goes through). The bake adds their light to the surface a ray meets just behind one. `tris` 9 floats a
+	 *  triangle (world), `le` 3 floats a triangle (linear, its mean as the renderer draws it, alpha in), `two` 1 = it
+	 *  shows from both sides. Written as the optional 'EMV1' tail after 'DRG1', only when any. */
+	struct Veil
+	{
+		std::vector<float> tris;
+		std::vector<float> le;
+		std::vector<quint8> two;
+		bool empty() const { return tris.empty(); }
+		size_t count() const { return tris.size() / 9; }
+	};
+	Veil veil;
 	/*! lane SMOOTHN1: the vertex normals, 9 snorm16 a triangle (world, unit), every albedo way's hit normal
 	 *  (the barycentric blend, renormalized, on the face normal's side). Shorter than 9 x the triangle count,
 	 *  or a zero vertex, = the face normal there. Terrain from LAND VNML, models from their NIF normals.

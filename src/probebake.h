@@ -143,6 +143,10 @@ struct ProbeBakeResult
 	// lane EMISSIVEGI1: glowing surfaces
 	int emitTris = 0, emitSurfels = 0, emitDropped = 0;   //!< the soup's glowing triangles; surfels written with Le; lost to v3
 	qint64 emitHits = 0;                    //!< pass-1 hits on a glowing triangle
+	// lane NEONGI1: glowing effect surfaces (the soup's veils): triangles; pass-1 crossings added to the surface behind,
+	// crossed from behind (one-sided), crossed over a surfel cell in front of the surface
+	int veilTris = 0;
+	qint64 veilHits = 0, veilBack = 0, veilFar = 0;
 	double emitLeSum[3] = { 0, 0, 0 };      //!< the written surfels' Le, summed
 	double msRays = 0, msWrite = 0;
 	// lane SIDES6: v5 sides, and the corner measure (every version)
