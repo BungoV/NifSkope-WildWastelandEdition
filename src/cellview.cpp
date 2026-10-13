@@ -4264,6 +4264,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			}
 		}
 		ProbePlaceSpec ps;
+		int ownCells[4] = { 0, 0, -1, -1 };   // lane BAKENEIGH1: the probed cells x0, y0, x1, y1 (exterior only)
 		if ( spec.interior ) {
 			float mn[2] = { 3.4e38f, 3.4e38f }, mx[2] = { -3.4e38f, -3.4e38f };
 			for ( size_t i = 0; i < probeSoup.tris.size(); i += 3 )
@@ -4285,6 +4286,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			ps.maxX = float( spec.cx + ph + 1 ) * CELL_UNITS;
 			ps.minY = float( spec.cy - ph ) * CELL_UNITS;
 			ps.maxY = float( spec.cy + ph + 1 ) * CELL_UNITS;
+			ownCells[0] = spec.cx - ph;
+			ownCells[1] = spec.cy - ph;
+			ownCells[2] = spec.cx + ph;
+			ownCells[3] = spec.cy + ph;
 		}
 		const QByteArray sp = qgetenv( "WW_CELL_PROBES_SPACING" );
 		if ( !sp.isEmpty() && sp.toFloat() > 1.0f )
@@ -4430,6 +4435,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 						+ ( name.isEmpty() ? QStringLiteral( "cell" ) : name );
 				}
 				ProbeBakeSpec bs;
+				// lane BAKENEIGH1: write only the probed cells' files (a sector is one cell); never a neighbour's
+				bs.ownX0 = ownCells[0];
+				bs.ownY0 = ownCells[1];
+				bs.ownX1 = ownCells[2];
+				bs.ownY1 = ownCells[3];
 				const QByteArray br = qgetenv( "WW_CELL_PROBE_BAKE_RAYS" );
 				if ( br.toInt() > 0 )
 					bs.rays = br.toInt();

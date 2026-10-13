@@ -96,6 +96,13 @@ struct ProbeBakeSpec
 	//! lane WATER1: every ray of these probes (index into the probes), its water split, is written to waterDump
 	QString waterDump;
 	std::vector<int> waterDumpProbes;
+	/*! lane BAKENEIGH1: the cells this bake was asked for, as sector squares [ownX0..ownX1] x [ownY0..ownY1].
+	 *  A probe that stands outside them (the placer's grid closes ON the far edge, so its last column and row
+	 *  fall in the next cell) is left out of the files, and no file of a cell outside the set is written:
+	 *  that cell's own bake places the same edge itself. So tiles baked one after another into one folder
+	 *  never rewrite each other's cells. Unset (ownX1 < ownX0, the CLI tools and interiors): every sector
+	 *  the probes reach is written. */
+	int ownX0 = 0, ownY0 = 0, ownX1 = -1, ownY1 = -1;
 };
 
 struct ProbeBakeResult
@@ -154,6 +161,9 @@ struct ProbeBakeResult
 	qint64 smoothHits = 0, nmapHits = 0;    //!< surfel hits given a smooth normal; samples a normal map bent
 	qint64 raysCast = 0;                    //!< pass 2's rays: the base set plus every extra batch
 	int baseRays = 0, adaptMax = 1, probesRaised = 0, multMax = 1;
+	// lane BAKENEIGH1: probes outside the asked cells, left to their own cell's bake
+	bool ownSet = false;
+	int ownCells = 0, outsideProbes = 0, outsideSectors = 0;
 	QStringList files;
 	QString error;
 };
