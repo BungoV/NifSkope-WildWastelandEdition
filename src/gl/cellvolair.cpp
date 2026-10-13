@@ -4,7 +4,7 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-#include "cellvolfog.h"
+#include "cellvolair.h"
 
 #include "gl/celllights.h"
 #include "gl/glscene.h"
@@ -21,58 +21,58 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <vector>
 
-/* ---- lane VOLFOG1: the lit medium (cellvolfog.h, res/shaders/cell_volfog.frag) ---- */
+/* ---- lane VOLAIR1: the air (cellvolair.h, res/shaders/cell_volair.frag) ---- */
 namespace
 {
 
 constexpr int kVolTexUnit = 21;		// the integrated volume the surfaces read (sampler3D); 8, 10..19 are taken
 constexpr int kInjectUnit = 22;		// stage 2 reads stage 1
-constexpr int kEmitUnit = 23;		// the placed lights' shaft intensities (samplerBuffer)
-constexpr int kAirUnit = 20;		// reserved: the air grid (unbound today: the surface grid serves)
 constexpr int kColumnPx = 12;		// a froxel column: 12 x 12 pixels
 constexpr int kSlices = 64;
 constexpr float kNearMin = 16.0f;	// game units
 
-struct VfState
+// the reds (gates only): 1 off (computed, not applied), 2 gioff, 4 flat, 8 noshadow, 16 nolights, 32 wrongmed
+struct VaState
 {
 	bool loaded = false;
 	bool on = false, pinned = false;
-	int red = 0;			// 1 off (computed, not applied), 2 gioff, 4 flat, 8 noshadow, 16 wrongsrc, 32 sixreads (VOLFOG1b)
-	int terms = 7;
+	int red = 0;
+	int terms = 15;
 	int probe = 0;
 	QString dump;
 	bool inPass = false;
 	QString last = QStringLiteral( "off" );
 };
 
-VfState & vs()
+VaState & vs()
 {
-	static VfState s;
+	static VaState s;
 	if ( !s.loaded ) {
 		s.loaded = true;
-		const QByteArray pin = qgetenv( "WW_VOLFOG" );
+		const QByteArray pin = qgetenv( "WW_CELL_AIR" );
 		if ( !pin.isEmpty() ) {
 			s.pinned = true;
 			s.on = pin.trimmed() != "0";
 		} else {
-			s.on = QSettings().value( QStringLiteral( "WW/VolFog" ), false ).toBool();
+			s.on = QSettings().value( QStringLiteral( "WW/VolAir" ), false ).toBool();
 		}
-		for ( const QByteArray & t : qgetenv( "WW_VOLFOG_RED" ).split( ',' ) ) {
+		for ( const QByteArray & t : qgetenv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
-			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "wrongsrc" ? 16 : r == "sixreads" ? 32 : 0;
+			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
+				: r == "wrongmed" ? 32 : 0;
 		}
-		const QByteArray terms = qgetenv( "WW_VOLFOG_TERMS" ).trimmed();
+		const QByteArray terms = qgetenv( "WW_CELL_AIR_TERMS" ).trimmed();
 		if ( !terms.isEmpty() )
-			s.terms = terms.toInt() & 7;
-		s.probe = qEnvironmentVariableIntValue( "WW_VOLFOG_PROBE" );
-		s.dump = QString::fromLocal8Bit( qgetenv( "WW_VOLFOG_DUMP" ) );
+			s.terms = terms.toInt() & 15;
+		s.probe = qEnvironmentVariableIntValue( "WW_CELL_AIR_PROBE" );
+		s.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AIR_DUMP" ) );
 	}
 	return s;
 }
 
-struct VfGpu
+struct VaGpu
 {
-	GLuint inject = 0, integ = 0, fbo = 0, emitBuf = 0, emitTex = 0;
+	GLuint inject = 0, integ = 0, fbo = 0;
 	int cols = 0, rows = 0, slices = 0;
 	const void * doc = nullptr;
 	bool ready = false;
@@ -80,13 +80,13 @@ struct VfGpu
 	int unitsOk = -1;
 };
 
-QHash<const void *, VfGpu> & vfGpus()
+QHash<const void *, VaGpu> & vaGpus()
 {
-	static QHash<const void *, VfGpu> g;
+	static QHash<const void *, VaGpu> g;
 	return g;
 }
 
-void vfAlloc3D( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & tex, int w, int h, int d, bool linear )
+void vaAlloc3D( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & tex, int w, int h, int d, bool linear )
 {
 	if ( !tex )
 		fn->glGenTextures( 1, &tex );
@@ -101,17 +101,16 @@ void vfAlloc3D( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & tex, int w, in
 	fn->glBindTexture( GL_TEXTURE_3D, 0 );
 }
 
-// the medium's phase uniforms from a packed WwGodRayMedium (air rgb, fwd rgb, back rgb, fwd g, back g, post)
-struct VfPhase
+// the phase uniforms from a packed god-ray record (air rgb, fwd rgb, back rgb, fwd g, back g, intensity)
+struct VaPhase
 {
 	float w[3][4] = {};	// rgb weight, w = g
 	float gi[4] = {};	// rgb tint (the three weights summed), w = the luminance-weighted g
-	float post = 1.0f;
 };
 
-VfPhase vfPhase( const float m[12] )
+VaPhase vaPhase( const float m[12] )
 {
-	VfPhase p;
+	VaPhase p;
 	const float lumK[3] = { 0.2126f, 0.7152f, 0.0722f };
 	float tot[3];
 	for ( int c = 0; c < 3; c++ )
@@ -128,38 +127,66 @@ VfPhase vfPhase( const float m[12] )
 	for ( int c = 0; c < 3; c++ )
 		p.gi[c] = p.w[0][c] + p.w[1][c] + p.w[2][c];
 	p.gi[3] = lumOf( 1 ) * m[9] + lumOf( 2 ) * m[10];	// the air's g is 0; the lobes' luminances sum to 1
-	p.post = m[11];
 	return p;
+}
+
+/* the medium fitted to the fog records in force (cellvolair.h): sigma0 (per game unit), zb, 1 / H (0: uniform), the
+ * full distance. The red wrongmed: twice the density and no height falloff (the "one exponential" law). */
+struct VaMedium
+{
+	float sigma0 = 0.0f, zb = 0.0f, invH = 0.0f, dFull = 0.0f;
+	bool band = false;
+};
+
+VaMedium vaFit( const float K[6][4], bool wrong )
+{
+	VaMedium m;
+	m.dFull = ( 1.0f + K[0][2] ) / K[0][0];
+	const float mx = std::min( std::max( K[2][3], 0.0f ), 0.99f );
+	m.sigma0 = mx > 0.0f && m.dFull > 0.0f ? -std::log( 1.0f - mx ) / m.dFull : 0.0f;
+	const float k5y = K[5][1], k5w = K[5][3], top = K[3][3];
+	if ( k5y > 1e-9f && top > 0.0f && top < 1.0f ) {
+		const float z0 = k5w / k5y, z1 = ( 1.0f + k5w ) / k5y;
+		m.zb = z0;
+		m.invH = -std::log( std::max( top, 1e-3f ) ) / std::max( z1 - z0, 1e-3f );
+		m.band = true;
+	}
+	if ( wrong ) {
+		m.sigma0 *= 2.0f;
+		m.invH = 0.0f;
+		m.band = false;
+	}
+	return m;
 }
 
 }	// namespace
 
-bool wwVolFogOn()
+bool wwVolAirOn()
 {
 	return vs().on;
 }
 
-void wwVolFogSetOn( bool on )
+void wwVolAirSetOn( bool on )
 {
-	VfState & s = vs();
+	VaState & s = vs();
 	if ( s.pinned )
 		return;
 	s.on = on;
-	QSettings().setValue( QStringLiteral( "WW/VolFog" ), on );
+	QSettings().setValue( QStringLiteral( "WW/VolAir" ), on );
 }
 
-QString wwVolFogSummary()
+QString wwVolAirSummary()
 {
-	return QStringLiteral( "volfog=" ) + vs().last;
+	return QStringLiteral( "volair=" ) + vs().last;
 }
 
-void wwVolFogPass( Scene * scene, bool run )
+void wwVolAirPass( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )
 		return;
-	VfState & s = vs();
+	VaState & s = vs();
 	Renderer * r = scene->renderer;
-	VfGpu & g = vfGpus()[r];
+	VaGpu & g = vaGpus()[r];
 	g.ready = false;
 	if ( !s.on ) {
 		s.last = QStringLiteral( "off" );
@@ -175,14 +202,14 @@ void wwVolFogPass( Scene * scene, bool run )
 	if ( g.unitsOk < 0 ) {
 		GLint units = 0;
 		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
-		g.unitsOk = units > kEmitUnit ? 1 : 0;
+		g.unitsOk = units > kInjectUnit ? 1 : 0;
 	}
 	if ( !g.unitsOk ) {
 		s.last = QStringLiteral( "refused(texture units)" );
 		return;
 	}
 	QElapsedTimer timer;
-	const bool timed = !s.dump.isEmpty() || qEnvironmentVariableIsSet( "WW_VOLFOG_TIME" );
+	const bool timed = !s.dump.isEmpty() || qEnvironmentVariableIsSet( "WW_CELL_AIR_TIME" );
 	if ( timed ) {
 		fn->glFinish();
 		timer.start();
@@ -213,13 +240,14 @@ void wwVolFogPass( Scene * scene, bool run )
 		fn->glActiveTexture( GLenum( prevActive ) );
 	};
 
-	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_volfog.prog" );
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_volair.prog" );
 	if ( !prog ) {
-		s.last = QStringLiteral( "refused(cell_volfog.prog did not link)" );
+		s.last = QStringLiteral( "refused(cell_volair.prog did not link)" );
 		restore();
 		return;
 	}
-	// the setters the surfaces get, on this program: the fog (weather or, indoors, the cell's), the cascades, the lights
+	// the setters the surfaces get, on this program: the fog records (weather or, indoors, the cell's), the cascades,
+	// the cell's lights, its GI and its ambient
 	s.inPass = true;
 	wwLookdevFogUniforms( scene );
 	wwSunShadowUniforms( scene );
@@ -234,7 +262,7 @@ void wwVolFogPass( Scene * scene, bool run )
 	};
 	if ( !uniI( "fogOn" ) ) {
 		r->stopProgram();
-		s.last = QStringLiteral( "refused(no fog: the Fog row, Lookdev's weather or the interior's fog)" );
+		s.last = QStringLiteral( "refused(no fog records: the Fog row, Lookdev's weather or the interior's fog)" );
 		restore();
 		return;
 	}
@@ -251,13 +279,22 @@ void wwVolFogPass( Scene * scene, bool run )
 		restore();
 		return;
 	}
-	// the slices: from where the fog starts (ramp 0) to its full distance (ramp 1), exponential
-	const float fogStart = K[0][2] / K[0][0], fogFull = ( 1.0f + K[0][2] ) / K[0][0];
-	const float farD = std::max( fogFull, kNearMin * 4.0f );
-	const float nearD = std::min( std::max( kNearMin, fogStart ), farD * 0.25f );
+	const VaMedium M = vaFit( K, ( s.red & 32 ) != 0 );
+	// the slices: exponential from 16 units to the fog's full distance
+	const float farD = std::max( M.dFull, kNearMin * 4.0f );
+	const float nearD = kNearMin;
 	const float logRatio = std::log( farD / nearD );
+	// the medium's top: the scene's highest point, in the fog's height frame (world z - the frame's ground)
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	float camZw = 0.0f;
+	for ( int j = 0; j < 3; j++ )
+		camZw -= vt.rotation( j, 2 ) * vt.translation[j] / sc;
+	const BoundSphere bs = scene->bounds();
+	const float topW = bs.center[2] + bs.radius;
+	const float zTop = topW + fogView[3] - camZw;
 
-	// the medium: indoors the cell's (XGDR, LGTM WGDR, fallback), outdoors the weather's WGDR, else the fallback
+	// the phase: indoors the cell's god-ray record, outdoors the weather's, else the fallback
 	const WwCellLighting * L = wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	float med[12] = { 0.60f, 1.52f, 3.31f, 2, 2, 2, 1, 1, 1, 0.75f, 0, 1 };
 	QString medNote = QStringLiteral( "fallback" );
@@ -267,42 +304,19 @@ void wwVolFogPass( Scene * scene, bool run )
 	} else if ( !wwLookdevGodRays( med, &medNote ) ) {
 		medNote = QStringLiteral( "fallback (no weather)" );
 	}
-	const VfPhase ph = vfPhase( med );
+	const VaPhase ph = vaPhase( med );
 
 	const int W = std::max( vp[2], 1 ), H = std::max( vp[3], 1 );
 	const int cols = ( W + kColumnPx - 1 ) / kColumnPx, rows = ( H + kColumnPx - 1 ) / kColumnPx;
 	if ( g.cols != cols || g.rows != rows || g.slices != kSlices || !g.inject ) {
-		vfAlloc3D( fn, g.inject, cols, rows, kSlices, false );
-		vfAlloc3D( fn, g.integ, cols, rows, kSlices, true );
+		vaAlloc3D( fn, g.inject, cols, rows, kSlices, false );
+		vaAlloc3D( fn, g.integ, cols, rows, kSlices, true );
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
 		g.cols = cols;
 		g.rows = rows;
 		g.slices = kSlices;
 	}
-
-	// the placed lights that draw shafts, compacted: (the light's index in the cell's light buffer, its shaft
-	// intensity) pairs; the rest (0: the game draws no shaft for them) never enter the shader's loop
-	std::vector<float> emitK;
-	int emitters = 0;
-	if ( L )
-		for ( int i = 0; i < int( L->lights.size() ); i++ )
-			if ( L->lights[i].godRay > 0.0f ) {
-				emitK.push_back( float( i ) );
-				emitK.push_back( L->lights[i].godRay );
-				emitters++;
-			}
-	if ( emitK.empty() ) {
-		emitK.push_back( 0.0f );
-		emitK.push_back( 0.0f );
-	}
-	if ( !g.emitBuf ) {
-		fn->glGenBuffers( 1, &g.emitBuf );
-		fn->glGenTextures( 1, &g.emitTex );
-	}
-	fn->glBindBuffer( GL_TEXTURE_BUFFER, g.emitBuf );
-	fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( emitK.size() * sizeof( float ) ), emitK.data(), GL_DYNAMIC_DRAW );
-	fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 
 	// red flat: one cube for every froxel, the GI grid's mean per axis
 	float flat[6][3] = {};
@@ -336,31 +350,21 @@ void wwVolFogPass( Scene * scene, bool run )
 	fn->glDepthMask( GL_FALSE );
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 	fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-	// every sampler on its own unit (the setters above bound theirs)
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kEmitUnit ) );
-	fn->glBindTexture( GL_TEXTURE_BUFFER, g.emitTex );
-	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RG32F, g.emitBuf );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kAirUnit ) );
-	fn->glBindTexture( GL_TEXTURE_3D, 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kVolTexUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, 0 );
-	prog->uni1i( "volEmit", kEmitUnit );
-	prog->uni1i( "volEmitCount", emitters );
-	prog->uni1i( "volAir", kAirUnit );
 	prog->uni1i( "volInject", kInjectUnit );
 	prog->uni1i( "volTex", kVolTexUnit );
 	prog->uni1b( "volOn", false );
-	prog->uni1b( "volAirOn", false );
 	fn->glUniform3i( prog->uniLocation( "volDims" ), cols, rows, kSlices );
 	prog->uni2f( "volProj", p00, p11 );
 	prog->uni4f( "volSlices", FloatVector4( nearD, logRatio, float( kSlices ), 1.0f ) );
+	prog->uni4f( "airMed", FloatVector4( M.sigma0, M.zb, M.invH, zTop ) );
 	prog->uni1b( "volCsm", csm );
 	prog->uni1i( "volRed", s.red & ~1 );
 	prog->uni1i( "volTerms", s.terms );
 	for ( int k = 0; k < 3; k++ )
 		prog->uni4f_l( prog->uniLocation( "volPhase[%d]", k ), FloatVector4( ph.w[k][0], ph.w[k][1], ph.w[k][2], ph.w[k][3] ) );
 	prog->uni4f( "volGi", FloatVector4( ph.gi[0], ph.gi[1], ph.gi[2], ph.gi[3] ) );
-	prog->uni1f( "volK", ph.post );
 	for ( int a = 0; a < 6; a++ )
 		prog->uni3f_l( prog->uniLocation( "volFlat[%d]", a ), flat[a][0], flat[a][1], flat[a][2] );
 
@@ -384,11 +388,17 @@ void wwVolFogPass( Scene * scene, bool run )
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 		}
 	}
+	// the numbers the dump echoes, read before the program stops
+	float cellRowV[3][4], cellDirColV[3] = { 0, 0, 0 }, cellDirToV[3] = { 0, 0, 0 };
+	for ( int k = 0; k < 3; k++ )
+		uniF( "cellRow[%d]", k, cellRowV[k], 4 );
+	uniF( "cellDirColor", -1, cellDirColV, 3 );
+	uniF( "cellDirTo", -1, cellDirToV, 3 );
+	const int cellOnV = uniI( "cellOn" ), cellHasDirV = uniI( "cellHasDir" ), cellLightCountV = uniI( "cellLightCount" );
+	const int cellGiOnV = uniI( "cellGiOn" ), cellHasDalcV = uniI( "cellHasDalc" ), cellExtDalcV = uniI( "cellExtDalc" );
 	r->stopProgram();
-	for ( int u : { kInjectUnit, kEmitUnit } ) {
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
-		fn->glBindTexture( u == kEmitUnit ? GL_TEXTURE_BUFFER : GL_TEXTURE_3D, 0 );
-	}
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
+	fn->glBindTexture( GL_TEXTURE_3D, 0 );
 	if ( !complete ) {
 		s.last = QStringLiteral( "refused(froxel framebuffer incomplete)" );
 		restore();
@@ -403,13 +413,16 @@ void wwVolFogPass( Scene * scene, bool run )
 		fn->glFinish();
 		ms = double( timer.nsecsElapsed() ) / 1.0e6;
 	}
-	s.last = QStringLiteral( "on(%1x%2x%3 near=%4 far=%5 medium=%6 w=%7,%8,%9 g=%10,%11 post=%12 emitters=%13 csm=%14 terms=%15 red=%16 ms=%17)" )
-		.arg( cols ).arg( rows ).arg( kSlices ).arg( double( nearD ), 0, 'f', 1 ).arg( double( farD ), 0, 'f', 1 ).arg( medNote )
+	s.last = QStringLiteral( "on(%1x%2x%3 near=%4 far=%5 sigma0=%6 zb=%7 H=%8 top=%9 phase=%10 tint=%11,%12,%13 lights=%14 "
+		"gi=%15 csm=%16 terms=%17 red=%18 ms=%19)" )
+		.arg( cols ).arg( rows ).arg( kSlices ).arg( double( nearD ), 0, 'f', 1 ).arg( double( farD ), 0, 'f', 1 )
+		.arg( double( M.sigma0 ), 0, 'g', 6 ).arg( double( M.zb ), 0, 'f', 1 )
+		.arg( M.invH > 0.0f ? QString::number( double( 1.0f / M.invH ), 'f', 1 ) : QStringLiteral( "uniform" ) )
+		.arg( double( zTop ), 0, 'f', 1 ).arg( medNote )
 		.arg( double( ph.gi[0] ), 0, 'f', 4 ).arg( double( ph.gi[1] ), 0, 'f', 4 ).arg( double( ph.gi[2] ), 0, 'f', 4 )
-		.arg( double( med[9] ), 0, 'f', 3 ).arg( double( med[10] ), 0, 'f', 3 ).arg( double( ph.post ), 0, 'f', 3 )
-		.arg( emitters ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 );
+		.arg( cellLightCountV ).arg( cellGiOnV ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 );
 
-	/* WW_VOLFOG_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
+	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */
 	if ( !s.dump.isEmpty() ) {
 		QFile f( s.dump );
@@ -429,34 +442,27 @@ void wwVolFogPass( Scene * scene, bool run )
 		QFile t( s.dump + QStringLiteral( ".txt" ) );
 		if ( t.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
 			auto v = [&]( const float * a, int n ) { QStringList l; for ( int i = 0; i < n; i++ ) l << QString::number( double( a[i] ), 'g', 9 ); return l.join( ' ' ); };
+			const float airV[4] = { M.sigma0, M.zb, M.invH, zTop };
+			const float sl[2] = { nearD, logRatio }, pr[2] = { p00, p11 };
 			QString o;
 			o += QStringLiteral( "dims %1 %2 %3\nviewport %4 %5 %6 %7\n" ).arg( cols ).arg( rows ).arg( kSlices ).arg( vp[0] ).arg( vp[1] ).arg( W ).arg( H );
-			o += QStringLiteral( "slices %1 %2\nproj %3\n" ).arg( v( &nearD, 1 ), v( &logRatio, 1 ) ).arg( v( std::vector<float>{ p00, p11 }.data(), 2 ) );
+			o += QStringLiteral( "slices %1\nproj %2\n" ).arg( v( sl, 2 ), v( pr, 2 ) );
 			for ( int k = 0; k < 6; k++ )
 				o += QStringLiteral( "fogK%1 %2\n" ).arg( k ).arg( v( K[k], 4 ) );
 			o += QStringLiteral( "fogView %1\nfogSun %2\nfogSunColour %3\nfogDistScale %4\n" ).arg( v( fogView, 4 ), v( fogSun, 4 ), v( fogSunCol, 4 ), v( &distScale, 1 ) );
+			o += QStringLiteral( "airMed %1\nband %2\nsceneTopW %3\ncamZw %4\n" ).arg( v( airV, 4 ) ).arg( M.band ? 1 : 0 )
+				.arg( double( topW ), 0, 'g', 9 ).arg( double( camZw ), 0, 'g', 9 );
 			o += QStringLiteral( "medium %1\n" ).arg( v( med, 12 ) );
 			for ( int k = 0; k < 3; k++ )
 				o += QStringLiteral( "phase%1 %2\n" ).arg( k ).arg( v( ph.w[k], 4 ) );
-			o += QStringLiteral( "gi %1\npost %2\n" ).arg( v( ph.gi, 4 ), v( &ph.post, 1 ) );
-			o += QStringLiteral( "cellOn %1\ncellInterior %2\ncellHasDir %3\n" ).arg( uniI( "cellOn" ) ).arg( L && L->interior ? 1 : 0 )
-				.arg( L && L->hasDirectional ? 1 : 0 );
-			for ( int k = 0; k < 3; k++ ) {
-				float row[4];
-				uniF( "cellRow[%d]", k, row, 4 );
-				o += QStringLiteral( "cellRow%1 %2\n" ).arg( k ).arg( v( row, 4 ) );
-			}
-			if ( L ) {
-				o += QStringLiteral( "cellDirColor %1\ncellDirTo %2\n" ).arg( v( L->dirColor, 3 ), v( L->dirTo, 3 ) );
-				const Transform & vt = scene->view;
-				float rot[9];
-				for ( int j = 0; j < 3; j++ )
-					for ( int k = 0; k < 3; k++ )
-						rot[j * 3 + k] = vt.rotation( j, k );
-				o += QStringLiteral( "viewRot %1\nviewT %2\nviewScale %3\n" ).arg( v( rot, 9 ) )
-					.arg( v( std::vector<float>{ vt.translation[0], vt.translation[1], vt.translation[2] }.data(), 3 ) ).arg( double( vt.scale ), 0, 'g', 9 );
-			}
-			o += QStringLiteral( "emitters %1\ncsm %2\nterms %3\nred %4\nmedNote %5\nms %6\n" ).arg( emitters ).arg( csm ? 1 : 0 )
+			o += QStringLiteral( "gi %1\n" ).arg( v( ph.gi, 4 ) );
+			o += QStringLiteral( "cellOn %1\ncellInterior %2\ncellHasDir %3\ncellLightCount %4\ncellGiOn %5\ncellHasDalc %6\ncellExtDalc %7\n" )
+				.arg( cellOnV ).arg( L && L->interior ? 1 : 0 ).arg( cellHasDirV ).arg( cellLightCountV ).arg( cellGiOnV )
+				.arg( cellHasDalcV ).arg( cellExtDalcV );
+			for ( int k = 0; k < 3; k++ )
+				o += QStringLiteral( "cellRow%1 %2\n" ).arg( k ).arg( v( cellRowV[k], 4 ) );
+			o += QStringLiteral( "cellDirColor %1\ncellDirTo %2\n" ).arg( v( cellDirColV, 3 ), v( cellDirToV, 3 ) );
+			o += QStringLiteral( "csm %1\nterms %2\nred %3\nmedNote %4\nms %5\n" ).arg( csm ? 1 : 0 )
 				.arg( s.terms ).arg( s.red ).arg( medNote ).arg( ms, 0, 'f', 3 );
 			t.write( o.toUtf8() );
 		}
@@ -464,18 +470,18 @@ void wwVolFogPass( Scene * scene, bool run )
 	restore();
 }
 
-void wwVolFogUniforms( Scene * scene )
+void wwVolAirUniforms( Scene * scene )
 {
 	if ( !scene || !scene->renderer )
 		return;
-	VfState & s = vs();
+	VaState & s = vs();
 	if ( s.inPass )
 		return;
 	Renderer * r = scene->renderer;
 	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
 	if ( !prog || prog->uniLocation( "volOn" ) < 0 )
 		return;
-	VfGpu & g = vfGpus()[r];
+	VaGpu & g = vaGpus()[r];
 	const bool on = s.on && g.ready && g.doc == scene->nifModel && g.unitsOk > 0;
 	prog->uni1b( "volOn", on );
 	if ( g.unitsOk <= 0 )

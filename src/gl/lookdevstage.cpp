@@ -7,7 +7,7 @@ BSD License - see nifskope.h
 #include "lookdevstage.h"
 
 #include "esmweather.h"
-#include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/celllights.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -432,7 +432,7 @@ void wwLookdevFogUniforms( Scene * scene )
 	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
 	if ( !prog || prog->uniLocation( "fogOn" ) < 0 )
 		return;
-	wwVolFogUniforms( scene );	// lane VOLFOG1: every program that holds the fog holds the volume's sampler
+	wwVolAirUniforms( scene );	// lane VOLAIR1: every program that holds the fog holds the air's sampler
 	LdState & s = st();
 	const bool on = wwLookdevFogWanted( scene );
 	prog->uni1b( "fogOn", on );
@@ -746,7 +746,7 @@ QString wwLookdevSummary()
 			: QString() )
 		+ ( s.fog ? QString( " fog=on %1 drew=%2" ).arg( fogSummary(), s.fogLast ) : QString() )
 		+ ( ( s.shadows || !qEnvironmentVariable( "WW_CSM_RED" ).isEmpty() ) ? QStringLiteral( " " ) + wwSunShadowSummary() : QString() )
-		+ ( wwVolFogOn() ? QStringLiteral( " " ) + wwVolFogSummary() : QString() );	// lane VOLFOG1
+		+ ( wwVolAirOn() ? QStringLiteral( " " ) + wwVolAirSummary() : QString() );	// lane VOLAIR1
 }
 
 QString wwLookdevEcho()

@@ -36,25 +36,32 @@ float wwFogEval( float d, float z, out float hb, out vec3 fogCol )
 	return weight * I * escape;
 }
 
-/* lane VOLFOG1 (src/gl/cellvolfog.h): the lit medium, ADDED to the fog's result (the game draws its fog and its
- * god rays both). volTex holds, per froxel column, the in-scatter summed from the near plane to the far edge of
- * slice k (layer k); the slices are exponential from volSlices.x over ln(far / near) = volSlices.y. Linear light. */
+/* lane VOLAIR1 (src/gl/cellvolair.h): the air IN PLACE of the game's fog. volTex holds, per froxel column, the
+ * light the air sends toward the eye from the near plane to the far edge of slice k (rgb) and the transmittance
+ * over the same stretch (a); the slices are exponential from volSlices.x over ln(far / near) = volSlices.y. A
+ * surface at distance d shows colour x T(d) + L(d), linear in log-depth. Linear light. */
 uniform bool volOn;
 uniform sampler3D volTex;
 uniform vec4 volRect;		// the viewport's origin, 1 / its size
-uniform vec4 volSlices;		// near, ln(far / near), slices, the apply's scale (0 under the red "off")
-uniform int volProbe;		// gates only: 1 the volume term alone, raw
+uniform vec4 volSlices;		// near, ln(far / near), slices, 1 = applied (0 under the red "off": the game's fog drawn)
+uniform int volProbe;		// gates only: 1 the light term L alone, raw; 2 the transmittance T, grey
 
-vec3 wwVolFogAt( vec3 posView )
+// (L, T) of the air between the eye and posView
+vec4 wwVolAirAt( vec3 posView )
 {
 	float d = length( posView ) * fogDistScale;
 	if ( d <= volSlices.x )
-		return vec3( 0.0 );
+		return vec4( 0.0, 0.0, 0.0, 1.0 );
 	float f = log( d / volSlices.x ) / volSlices.y * volSlices.z;
 	vec2 uv = ( gl_FragCoord.xy - volRect.xy ) * volRect.zw;
-	vec3 v = f < 1.0 ? texture( volTex, vec3( uv, 0.5 / volSlices.z ) ).rgb * f
-		: texture( volTex, vec3( uv, ( min( f, volSlices.z ) - 0.5 ) / volSlices.z ) ).rgb;
-	return max( v, vec3( 0.0 ) ) * volSlices.w;
+	vec4 v;
+	if ( f < 1.0 ) {
+		v = texture( volTex, vec3( uv, 0.5 / volSlices.z ) );
+		v = vec4( v.rgb * f, 1.0 - ( 1.0 - v.a ) * f );
+	} else {
+		v = texture( volTex, vec3( uv, ( min( f, volSlices.z ) - 0.5 ) / volSlices.z ) );
+	}
+	return vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
 }
 
 vec3 wwFogBase( vec3 preFog, vec3 posView );
@@ -64,8 +71,10 @@ vec3 wwFog( vec3 preFog, vec3 posView )
 {
 	if ( !fogOn )
 		return preFog;
-	if ( volOn )
-		return wwFogBase( preFog, posView ) + wwVolFogAt( posView );
+	if ( volOn && volSlices.w > 0.5 ) {
+		vec4 a = wwVolAirAt( posView );
+		return preFog * a.a + a.rgb;
+	}
 	return wwFogBase( preFog, posView );
 }
 
@@ -89,8 +98,9 @@ vec3 wwFogBase( vec3 preFog, vec3 posView )
 bool wwFogProbe( vec3 posView, out vec3 o )
 {
 	o = vec3( 0.0 );
-	if ( fogOn && volOn && volProbe == 1 ) {	// lane VOLFOG1: the volume term this fragment adds
-		o = wwVolFogAt( posView );
+	if ( fogOn && volOn && ( volProbe == 1 || volProbe == 2 ) ) {	// lane VOLAIR1: the air's L or T at this fragment
+		vec4 a = wwVolAirAt( posView );
+		o = volProbe == 1 ? a.rgb : vec3( a.a );
 		return true;
 	}
 	if ( !fogOn || fogProbe.z < 0.5 )

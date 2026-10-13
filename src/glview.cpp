@@ -143,7 +143,7 @@ private:
 #include "gl/celllights.h"	// lane IMGS1: the imagespace measure
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
 #include "gl/cellssr.h"
-#include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/cellvolair.h"	// lane VOLAIR1
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -4126,7 +4126,7 @@ void GLView::paintGL()
 	}
 	wwCellAoPass( scene, cellPasses );
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
-	wwVolFogPass( scene, cellPasses );	// lane VOLFOG1: the lit medium's froxels
+	wwVolAirPass( scene, cellPasses );	// lane VOLAIR1: the air's froxels
 	if ( cellPasses )
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
 	if ( cellPasses )

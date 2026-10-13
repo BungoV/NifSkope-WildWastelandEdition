@@ -59,7 +59,7 @@ public:
 	QDoubleSpinBox * gameDayBox = nullptr;
 	// the weather fog row (lane FOG1)
 	QCheckBox * fogBox = nullptr;
-	QCheckBox * volFogBox = nullptr;	// lane VOLFOG1
+	QCheckBox * volAirBox = nullptr;	// lane VOLAIR1
 	// the cascaded sun shadows row (lane CSM1)
 	QCheckBox * shadowsBox = nullptr;
 	QCheckBox * taaBox = nullptr;	// lane MOTION1
