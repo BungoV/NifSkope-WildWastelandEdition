@@ -674,7 +674,7 @@ bool wwCellGrassWind( float wind[4], float wind2[4] )
 	wind[1] = 0.0f;
 	wind[2] = 0.0f;	// the phases are per shape (wwCellGrassUniforms)
 	wind[3] = 0.0f;
-	// BSDFPrePassShader::SetupGeometry: (fWindMinSpeed * 300, fWindMaxSpeed * 300, fWindFrequency)
+	// the game's grass pre-pass setup: (fWindMinSpeed * 300, fWindMaxSpeed * 300, fWindFrequency)
 	wind2[0] = minSpeed * 300.0f;
 	wind2[1] = maxSpeed * 300.0f;
 	wind2[2] = freq;

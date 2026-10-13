@@ -224,7 +224,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 				s.missing.insert( b.noise[k] );
 			scene->textures->bind( QStringView( u"#FF8080FF" ), scene->nifModel );	// a flat normal
 		}
-		/* lane WATER2: the game's sampler for the noise slots 4..6 (SetupGeometry): WRAP_S_WRAP_T, filter
+		/* lane WATER2: the game's sampler for the noise slots 4..6 (its geometry setup): WRAP_S_WRAP_T, filter
 		 * TEXTURE_FILTER_MODE_ANISO at the INI's iMaxAnisotropy (16). The cache leaves its default (nearest
 		 * within the mip, no anisotropy): the distant ripples average flat and the far glints die. */
 		static GLfloat maxAniso = -1.0f;
