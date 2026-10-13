@@ -606,8 +606,23 @@ void main()
 			Ax = sqrt( cellAmbient( cellWorldDir( normal ), cellWorldPos( -ViewDir ) ) );
 		cellExtAmb = Ax * Ax;
 		color.rgb = Ax * albedo;
+		/* lane GISHADE1: the grid's sky replaces the share k of THIS ambient (the weather's DALC) in linear light, as
+		 * the PBR program does: the ambient keeps (1 - k) of itself, so its colour here (sqrt of linear) takes
+		 * sqrt(1 - k), and the cube's ambient (cellExtAmb) keeps (1 - k) too. The old law (red WW_CELL_GISHADE_RED=sqrt)
+		 * took k x the flat NAM0 A off in sqrt space: (Ax - k A)^2 stayed lit beside the grid's sky (k = 1, open sky
+		 * facing up: +23% blue on CommonwealthClear's day), (1 - k)^2 where the grid fades out */
+		if ( cellGiSky && ( cellRed & 131072 ) == 0 ) {
+			float k = cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) );
+			color.rgb *= sqrt( 1.0 - k );
+			cellExtAmb *= 1.0 - k;
+		}
 	}
-	if ( cellOn && cellGiSky )
+	if ( cellOn && cellGiSky && ( cellRed & 131072 ) == 0 && !( !cellInterior && cellHasDir ) ) {
+		// lane GISHADE1: without the weather's sun the colour carries the flat A x albedo among its other terms: keep
+		// sqrt(1 - k) of that ambient (linear (1 - k)), the rest as drawn
+		float k = cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) );
+		color.rgb -= ( 1.0 - sqrt( 1.0 - k ) ) * A.rgb * albedo;
+	} else if ( cellOn && cellGiSky && ( cellRed & 131072 ) != 0 )
 		color.rgb -= cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ) * A.rgb * albedo;
 	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
 	if ( cellOn )

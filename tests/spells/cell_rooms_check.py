@@ -516,8 +516,9 @@ def gi_sample(G, R, P, N, fill=None):
         # wall, which no voxel there holds; a pocket behind a pipe no voxel holds); none: the plain trilinear
         L, cand = surface_reads(R, P, N)
         out, Ls = None, L
+        frm = see_from(R, P, N)
         if L is not None:
-            s, ws = gi_blend(G, L, i0, f, sl, n2)
+            s, ws = gi_blend(G, L, i0, f, sl, n2, R, frm)
             if ws > 0:
                 out = s / ws
         if out is None:
@@ -527,7 +528,7 @@ def gi_sample(G, R, P, N, fill=None):
                     best_any, Ls = d, c   # lane GICAL1: the nearest air cell, with weight or not (the fill's room)
                 if d >= best:
                     continue
-                s, ws = gi_blend(G, c, i0, f, sl, n2)
+                s, ws = gi_blend(G, c, i0, f, sl, n2, R, frm)
                 if ws > 0:
                     best, out = d, s / ws
         if out is not None and (out[3] > 0.01 or not fill):
@@ -539,6 +540,10 @@ def gi_sample(G, R, P, N, fill=None):
                 return fo
             if out is not None:
                 return out
+        if not SEE_RED[0]:
+            so = gi_seen_fill(G, R, P, N, frm)
+            if so[3] > 0.01:
+                return so
         GI_PLAIN[0] += 1
     s, ws = gi_blend(G, None, i0, f, sl, n2)
     if fill and R is None and s[3] <= 0.01:
@@ -586,13 +591,87 @@ def gi_fill(G, L, P, N, rooms):
 
 
 RED_EMPTY = [False]   # red emptyslot: the twin weighs a room's empty slots (the old shader: black, the no-probe marker)
+SEE_RED = [os.environ.get('GI_CHECK_SEE', '1') == '0']   # lane GISHADE1: red nosee (the shader's WW_CELL_PV_RED=nosee)
 GI_PLAIN = [0]     # samples that found rooms but no room with weight: the shader's plain (unclamped) trilinear
 GI_FILL = [os.environ.get('GI_CHECK_FILL', '1') != '0']   # lane GICAL1: the gap fill (GI_CHECK_FILL=0: the shader pin WW_CELL_GI_FILL=0)
 GI_FILLED = [0]    # samples the fill answered
 
 
-def gi_blend(G, L, i0, f, sl, n2):
-    """The 8 voxels' slots of room L (None: the one grid, the hardware trilinear). Returns (sum, weight)."""
+def room_solid(R, q):
+    """cellRoomSolid: the fine room grid's cell at q is solid (no name); outside the grid: not."""
+    c = np.floor((np.asarray(q, float) - R['origin']) / R['cell']).astype(int)
+    if (c < 0).any() or (c >= np.array(R['dims'])).any():
+        return False
+    return int(R['ab'][c[2], c[1], c[0]][0]) < 0
+
+
+def see_from(R, P, N):
+    """cellGiSeeFrom (lane GISHADE1): where a surface's view of the voxels starts: its room read (P + N x 0.75 cell,
+    else 1.75) when that is air, else the centre of the air cell beside either read nearest it (surface_reads' rule)."""
+    P, N = np.asarray(P, float), np.asarray(N, float)
+    for k in (0.75, 1.75):
+        q = P + N * k * R['cell']
+        if not room_solid(R, q):
+            return q
+    m = int(np.argmax(np.abs(N)))
+    ta, tb = [t for t in range(3) if t != m]
+    best, bq = 3.0, None
+    for k in (0.75, 1.75):
+        q = P + N * k * R['cell']
+        u = (q - R['origin']) / R['cell']
+        f = u - np.floor(u)
+        for sa in (-1, 0, 1):
+            for sb in (-1, 0, 1):
+                if sa == 0 and sb == 0:
+                    continue
+                e = np.zeros(3)
+                e[ta], e[tb] = sa, sb
+                qq = q + e * R['cell']
+                if room_solid(R, qq):
+                    continue
+                d = sum((1.0 - f[t] if s_ > 0 else f[t]) if s_ else 0.0 for t, s_ in ((ta, sa), (tb, sb)))
+                if d < best:
+                    best, bq = d, R['origin'] + (np.floor((qq - R['origin']) / R['cell']) + 0.5) * R['cell']
+    return bq if bq is not None else P + N * 0.75 * R['cell']
+
+
+def gi_seen(R, frm, C):
+    """cellGiSeen (lane GISHADE1): no solid fine cell on the segment from the surface's view point to a voxel's centre,
+    tapped every half cell, the centre itself left out (a voxel's centre may sit in the wall it straddles)."""
+    if SEE_RED[0] or R is None or frm is None:
+        return True
+    d = np.asarray(C, float) - frm
+    nt = min(max(int(math.ceil(float(np.linalg.norm(d)) / (0.5 * R['cell']))), 1), 12)
+    return not any(room_solid(R, frm + d * (j / (nt + 1.0))) for j in range(1, nt + 1))
+
+
+def gi_seen_fill(G, R, P, N, frm):
+    """cellGiSeenFill (lane GISHADE1): no room's blend has weight: the voxels of the 4x4x4 block the surface sees
+    (any room), weight (1 - d / 2.5)^2 in voxels, before the plain trilinear (which sees through walls)."""
+    dm = np.array(G['dims'])
+    g = (P + N * 0.5 * G['voxel'] - G['origin']) / G['voxel'] - 0.5
+    i0 = np.floor(g).astype(int)
+    sl = (0 if N[0] >= 0 else 1, 2 if N[1] >= 0 else 3, 4 if N[2] >= 0 else 5)
+    n2 = N * N
+    s, ws = np.zeros(4), 0.0
+    for k in range(64):
+        c = i0 + np.array([k & 3, (k >> 2) & 3, (k >> 4) & 3]) - 1
+        if (c < 0).any() or (c >= dm).any():
+            continue
+        w = 1.0 - float(np.linalg.norm(c - g)) / 2.5
+        if w <= 0 or not gi_seen(R, frm, G['origin'] + (c + 0.5) * G['voxel']):
+            continue
+        v = sum(n2[a] * G['g'][sl[a], c[2], c[1], c[0]] for a in range(3))
+        if v[3] <= 0:
+            continue
+        s += w * w * v
+        ws += w * w
+    return s / ws if ws > 0 else np.zeros(4)
+
+
+def gi_blend(G, L, i0, f, sl, n2, R=None, frm=None):
+    """The 8 voxels' slots of room L (None: the one grid, the hardware trilinear). Returns (sum, weight).
+    R, frm (lane GISHADE1): only the voxels the surface sees from frm (gi_seen)."""
     dm = G['dims']
     s, ws = np.zeros(4), 0.0
     for k in range(8):
@@ -610,6 +689,8 @@ def gi_blend(G, L, i0, f, sl, n2):
                 continue
         if w <= 0:
             continue
+        if L is not None and not gi_seen(R, frm, G['origin'] + (c + 0.5) * G['voxel']):
+            continue   # lane GISHADE1: a wall between the surface and the voxel's centre
         v = sum(n2[a] * src[sl[a], c[2], c[1], c[0]] for a in range(3))
         if L is not None and v[3] <= 0 and not RED_EMPTY[0]:
             continue   # lane ROOMCLAMP1: a slot no probe of its room reached (empty): no weight

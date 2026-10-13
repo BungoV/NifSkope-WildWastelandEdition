@@ -59,6 +59,41 @@
 - Noon is unchanged except near the neon: the grids only gain light, and 99.9% of the pixels that change by more
   than 2 levels are within 600 units of a neon tube.
 
+## Lane GISHADE1 (2026-10-13, branch gishade1): the probe sky shades by what each spot sees of the sky
+
+- **Under an awning, in a door recess and inside a shop the outdoor probe GI now gives the share of the sky the spot
+  really sees; open ground and roofs keep their light.** Two defects, both measured against an independent tracer's
+  cosine sky share (bounce_reference on the bake's soup) before any change.
+- The legacy shader (`res/shaders/fo4_default.frag`) took the grid's sky share k of the weather's flat ambient off in
+  sqrt space. At k = 1 it left (DALC - flat)^2 lit and unoccluded (up to +23% blue on CommonwealthClear's day, the same
+  under an awning as on the street), and it did not reduce the cube term's ambient at all. It now replaces linearly as
+  the PBR program does: the ambient keeps sqrt(1 - k) of its colour, the cube's ambient (1 - k). Red pin
+  `WW_CELL_GISHADE_RED=sqrt` (environment only, no menu row) restores the old law.
+- The GI voxel grid (`src/probegi.cpp`) was sized from every surfel of the bake, and an exterior bake carries the far
+  soup's surfels across the whole worldspace. At Concord the voxel grew to 1349 units (blend radius 2698), so one voxel
+  held a whole shop and its inside read the street's sky. The grid now spans the surfels the probes can reach (the
+  probes' box grown by the blend radius), padded 5 voxels each side. Concord's voxel is 70 units, Goodneighbor's 103
+  (was 182). No setting: the grid follows the bake.
+- Gates (DOF/blur off, sky dome drawn, magenta 0). Goodneighbor glass storefront, 16:00: canopy/open sky fill 0.54
+  against the tracer's 0.61 (bar 0.12), door recess 0.014 of the flat ambient against the tracer's 0.005 (bar 0.04);
+  the pre-lane exe (snap_land8) 0.84 and 0.052, both FAIL. Concord Hardware (grid sky minus tracer share): inside the
+  shop +0.007 (was +0.582), awning -0.08 (was +0.28), recess -0.04 (was +0.38). Museum of Freedom roof (tracer share
+  0.94), 16:00: GI on/off 1.007/0.998/0.991. BOUNCE1's noon gate 2 still passes (sun bounce 1.00/1.02/1.03 of the
+  reference).
+- **No more sunlit patch on the Concord Hardware ceiling.** Near the shop's diagonal front wall the GI blend took
+  voxels whose centres sit outside the wall, in the sunlit street. The shop's ground floor is open to the street, so
+  the room clamp labels both sides outdoors and could not reject them. A voxel now counts only when the fine room
+  grid shows no solid cell between the surface and the voxel's centre (`cellGiSeen`, `res/shaders/cell_lights.glsl`).
+  When nothing seen remains, a 4x4x4 fill of seen voxels comes before the plain blend. Red pin
+  `WW_CELL_PV_RED=nosee` (environment only, no menu row). The Python mirror (`tests/spells/cell_rooms_check.py`,
+  `GI_CHECK_SEE=0` for the old blend) agrees.
+- New `tests/irradiance_reference.cpp`: the full-irradiance tracer (sun and sky, every bounce, kept apart by order).
+  It showed that Concord's bake is not weak (1.0-1.12x the tracer once the reference sun is not scaled twice).
+- Gates (numeric only). Ceiling picks against the tracer: median 5.92x to 1.29x, sum 1.176 to 0.150 (tracer 0.0965).
+  The ceiling patch's gi/pi drops from 2.7 to 0.5 (8-bit). Shop interior vs the tracer: median 1.14x. Goodneighbor
+  canopy share 0.64 (tracer 0.61, PASS). Concord open roof, GI on/off: noon 1.001/0.997/0.995, 16:00
+  1.002/0.995/0.991. BOUNCE1 gate 2: 0.95/0.97/0.98 PASS. Collision 12/12.
+
 ## Lane BOUNCE1 (2026-10-13, branch bounce1): outdoors the sun is the game's (x the imagespace Sunlight Scale), so the bounce shows
 
 - **Daylight colour bleed now reads like the Division deck: a sunlit wall throws its colour onto the shaded walls
