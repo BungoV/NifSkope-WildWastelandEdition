@@ -22,6 +22,27 @@
   probes to 2/1/4, and wrote 4 files outside the two tiles. Tiles -26,19 then -29,19: same result (old exe: 2
   outside files). Collision 12/12.
 
+## Lane SKYHOLE1 (2026-10-13, branch skyhole1): steam over the sky no longer draws black
+
+- **A cell effect seen against the sky now lies over the sky instead of replacing it with black (SKY-HOLE).** In
+  Goodneighbor, the Memory Den camera showed a solid black patch in the upper right where sky should be. Owner,
+  located with `WW_CELL_FX_RED=hide` (patch gone) and `WW_CELL_LIT_PROBE=70/71/72` (the effect's model and world
+  position): the ground-steam plane of REFR 0x00115C75 (`Effects\Ambient\MistGroundWaterSteam01LongHalf.nif`,
+  shape `:2`, a blended BSEffectShader plane at z about 1090), seen from below with only sky behind it. It is real
+  game steam, so the defect was ours. Cause: lane HDR1's linear frame (`src/gl/cellhdr.cpp`) starts at 0 and the sky
+  backdrop is drawn in the view, not in that frame; the steam blended over 0, marked its pixels as cell-lit, and
+  the tone-map pass then wrote its tone-mapped value (near black) over the sky. The game draws its sky into the HDR
+  target and blends effects over it. Fix: the tone-map pass now also sorts by depth. Pixels an opaque draw reached
+  (depth nearer than the far plane) take the tone map exactly as before; pixels only effects reached take a new
+  mode 2 in `res/shaders/cell_hdr.frag`: the effect value un-premultiplied by its coverage (the frame's alpha),
+  tone-mapped, and laid over the backdrop by that coverage (additive glows with no coverage add their light). The
+  notes say "cell hdr: effects over the sky composite over the backdrop by their coverage (lane SKYHOLE1)". Red:
+  `WW_CELL_SKYHOLE_RED=old` (byte-identical to the exe before the fix). Gate (notes/skyhole1, DoF and motion blur
+  off): black pixels in the fixed box 11006 before, 0 after, mean (89.6, 129.3, 173.7) against the sky's
+  (88.8, 124.9, 165.2) with effects hidden; every pixel the fix changed was dark before and is sky now, the rest of
+  the frame byte-identical; the current deployed exe still shows 10990; magenta 0; sky dome loaded.
+
+
 ## Lane AOOFF1 (2026-10-13, branch aooff1): AO off changes only the AO term
 
 - **Turning cell AO off no longer drops the sun and halves the frame (AO-OFF).** With the AO row off, the cell
