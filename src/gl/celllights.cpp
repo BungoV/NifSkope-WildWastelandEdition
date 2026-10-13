@@ -1695,7 +1695,8 @@ struct AoGpu
 	AoTarget mip[5];		// 1..4: the min-of-2x2 depth (R32F)
 	AoTarget raw, across, fin;	// half size: (A, key) RG32F, then the blurs; fin R32F, bilinear
 	const void * doc = nullptr;
-	bool ready = false;
+	bool ready = false;		// the opaque pass + depth pyramid of this frame (the shared g-buffer: SSR, the AO decal)
+	bool aoReady = false;	// lane AOOFF1: and the obscurance computed from it (false while the AO row is off)
 	int unit = -1;
 	GLuint decal = 0;		// lane AODECAL1: this frame's AO decal target (0: none)
 	int decalUnit = -1;		// 20, or -1 on a GPU with 20 units or fewer
@@ -1734,6 +1735,29 @@ bool aoIsCellProgram( const NifSkopeOpenGLContext::Program * p )
 	return p && ( wwIsCellProgramName( p->name ) );
 }
 
+/* lane AOOFF1: the units, resolved whether or not the pass ever runs. They were resolved inside the pass only, after
+ * its "AO off" return: with the row off every cell-lit draw then bound texture 0 on unit max(-1, 0) = 0, which is
+ * BaseMap -- black albedo, the sun "gone", the frame half as bright. */
+void aoUnits( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g )
+{
+	if ( g.unit >= 0 )
+		return;
+	GLint units = 0;
+	fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
+	g.unit = units > kAoUnit ? kAoUnit : 9;
+	g.decalUnit = units > 20 ? 20 : -1;
+}
+
+//! lane AOOFF1: the telemetry line, printed when it changes
+void aoEcho( const QString & line )
+{
+	static QString last;
+	if ( line == last )
+		return;
+	last = line;
+	std::fprintf( stderr, "cell ao: %s\n", qPrintable( line ) );
+}
+
 }	// namespace
 
 bool wwCellAoOn()
@@ -1758,18 +1782,30 @@ void wwCellAoPass( Scene * scene, bool run )
 	Renderer * r = scene->renderer;
 	AoGpu & g = aoGpus()[r];
 	g.ready = false;
-	if ( !run || !a.on || !wwCellLightsWanted( scene ) )
+	g.aoReady = false;
+	if ( !run || !wwCellLightsWanted( scene ) )
 		return;
+	auto fn = r->fn;
+	aoUnits( fn, g );
+	g.decal = 0;
+	/* lane AOOFF1: the opaque pass below is the frame's SHARED g-buffer (view normal + linear depth, the depth
+	 * pyramid): the reflections march it and the AO decal projects into it. The AO row switches off only the
+	 * obscurance computed from it (step 2's raw, blurs, final) and its apply, never the pass the others read. */
+	const bool forSsr = wwCellSsrWantsTargets( scene );
+	const bool forDecal = g.decalUnit >= 0 && wwCellAoDecalWanted( scene->nifModel );
+	if ( !a.on ) {
+		aoEcho( ( forSsr || forDecal ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2" )
+			.arg( forSsr ? QStringLiteral( " ssr" ) : QString() ).arg( forDecal ? QStringLiteral( " aodecal" ) : QString() )
+			: QStringLiteral( "off (row); no opaque pass (nothing reads it)" ) );
+		if ( !forSsr && !forDecal ) {
+			a.last = QStringLiteral( "off" );
+			return;
+		}
+	} else {
+		aoEcho( ( a.red & 1 ) ? QStringLiteral( "computed, not applied (RED=off)" ) : QStringLiteral( "on" ) );
+	}
 	QElapsedTimer timer;
 	timer.start();
-	auto fn = r->fn;
-	if ( g.unit < 0 ) {
-		GLint units = 0;
-		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
-		g.unit = units > kAoUnit ? kAoUnit : 9;
-		g.decalUnit = units > 20 ? 20 : -1;
-	}
-	g.decal = 0;
 	GLint prevFbo = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 }, prevActive = 0;
 	GLboolean depthMask = GL_TRUE, colorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
@@ -1890,9 +1926,11 @@ void wwCellAoPass( Scene * scene, bool run )
 		prog->uni1i( "mipLevel", m );
 		pass( 1, g.mip[m], m > 1 ? &g.mip[m - 1] : nullptr );
 	}
-	pass( 2, g.raw, nullptr );
-	pass( 3, g.across, &g.raw );
-	pass( 4, g.fin, &g.across );
+	if ( a.on ) {	// lane AOOFF1: the obscurance itself; the pyramid above is shared
+		pass( 2, g.raw, nullptr );
+		pass( 3, g.across, &g.raw );
+		pass( 4, g.fin, &g.across );
+	}
 	r->stopProgram();
 	for ( int u = 0; u < 6; u++ ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
@@ -1901,16 +1939,21 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glActiveTexture( GLenum( prevActive ) );
 
 	g.ready = true;
+	g.aoReady = a.on;
 	g.doc = scene->nifModel;
-	a.last = QStringLiteral( "on %1x%2 half %3x%4 radius %5 bias %6 intensity %7 angles %8 p00 %9 p11 %10 p20 %11 p21 %12 "
-		"unit %13 red %14 ms %15" ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( radius ), 0, 'f', 2 )
-		.arg( double( kAoBias ), 0, 'f', 2 ).arg( double( kAoIntensity ), 0, 'f', 2 ).arg( kAoAngles )
-		.arg( double( p00 ), 0, 'f', 6 ).arg( double( p11 ), 0, 'f', 6 ).arg( double( pm[2][0] ), 0, 'f', 6 )
-		.arg( double( pm[2][1] ), 0, 'f', 6 ).arg( g.unit ).arg( a.red ).arg( timer.elapsed() );
+	if ( !a.on ) {
+		a.last = QStringLiteral( "off (opaque pass %1x%2 kept, ms %3)" ).arg( W ).arg( H ).arg( timer.elapsed() );
+	} else {
+		a.last = QStringLiteral( "on %1x%2 half %3x%4 radius %5 bias %6 intensity %7 angles %8 p00 %9 p11 %10 p20 %11 p21 %12 "
+			"unit %13 red %14 ms %15" ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( radius ), 0, 'f', 2 )
+			.arg( double( kAoBias ), 0, 'f', 2 ).arg( double( kAoIntensity ), 0, 'f', 2 ).arg( kAoAngles )
+			.arg( double( p00 ), 0, 'f', 6 ).arg( double( p11 ), 0, 'f', 6 ).arg( double( pm[2][0] ), 0, 'f', 6 )
+			.arg( double( pm[2][1] ), 0, 'f', 6 ).arg( g.unit ).arg( a.red ).arg( timer.elapsed() );
+	}
 
 	// WW_CELL_AO_DUMP=<file>: int32 W H hw hh, the opaque pass (W x H RGBA float, bottom row first), the raw
 	// (A, key) and the final obscurance (hw x hh, top row first); <file>.txt the numbers
-	if ( !a.dump.isEmpty() ) {
+	if ( !a.dump.isEmpty() && g.aoReady ) {
 		std::vector<float> gb( size_t( W ) * size_t( H ) * 4 ), raw( size_t( hw ) * size_t( hh ) * 2 ),
 			fin( size_t( hw ) * size_t( hh ) );
 		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
@@ -1994,21 +2037,22 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	if ( !cellProgram || prog->uniLocation( "cellAoOn" ) < 0 )
 		return;
 	AoGpu & g = aoGpus()[r];
-	const bool on = g.ready && g.doc == scene->nifModel && g.unit >= 0 && !( a.red & 1 ) && !glIsEnabled( GL_BLEND )
+	aoUnits( r->fn, g );	// lane AOOFF1: never unit 0 (BaseMap), even when the pass has not run
+	const bool on = g.aoReady && g.doc == scene->nifModel && !( a.red & 1 ) && !glIsEnabled( GL_BLEND )
 		&& wwCellLightsWanted( scene );
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
 	GLint prevActive = 0;
 	r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + std::max( g.unit, 0 ) ) );
+	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + g.unit ) );
 	r->fn->glBindTexture( GL_TEXTURE_2D, on ? g.fin.tex : 0 );
 	r->fn->glActiveTexture( GLenum( prevActive ) );
-	prog->uni1i( "cellAo", std::max( g.unit, 0 ) );
+	prog->uni1i( "cellAo", g.unit );
 	prog->uni1b( "cellAoOn", on );
 	/* lane AODECAL1: the decal target multiplies the probe term (cellGiE). Opaque draws only, like the obscurance:
 	 * a blended draw is not in the opaque pass the target was made over. */
 	const bool decalOn = g.ready && g.doc == scene->nifModel && g.decal && g.decalUnit >= 0 && !glIsEnabled( GL_BLEND );
 	{
-		const int du = g.decalUnit >= 0 ? g.decalUnit : std::max( g.unit, 0 );
+		const int du = g.decalUnit >= 0 ? g.decalUnit : g.unit;
 		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + du ) );
 		if ( g.decalUnit >= 0 )
 			r->fn->glBindTexture( GL_TEXTURE_2D, decalOn ? g.decal : 0 );

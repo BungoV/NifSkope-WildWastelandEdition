@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane AOOFF1 (2026-10-13, branch aooff1): AO off changes only the AO term
+
+- **Turning cell AO off no longer drops the sun and halves the frame (AO-OFF).** With the AO row off, the cell
+  view lost its sun and went about half as dark (Rexford noon mean 75.5 on, 37.0 off), and SSR said "no obscurance
+  pass". Cause: the AO texture units were picked only inside the AO pass, after its "AO off" early return, so every
+  draw then bound the AO texture on unit 0, which is the base colour map, and the albedo went black. Fix
+  (`src/gl/celllights.cpp`): the units are picked before any early return, in one place used by both the pass and
+  the draw hook, with no unit-0 fallback. The opaque pass is a shared g-buffer, so with AO off it still runs
+  whenever SSR (`wwCellSsrWantsTargets`, cellssr.cpp) or the AO decal (`wwCellAoDecalWanted`, cellaodecalgl.cpp)
+  reads it; only the AO stages and their apply are skipped. The notes echo it: "cell ao: off (row); the shared
+  opaque pass kept for ssr aodecal". Gate (notes/aooff1, DoF and motion blur off): AO off equals AO_RED=off to
+  0.000 mean; AO on is 0.4% darker in the mean, darkens 10.8% of pixels, brightens 0.002%; sunlit share 12.3% in
+  both; SSR on; magenta 0. The same gate fails on the old exe.
+
+
 ## Lane EFFECTPARITY1 (2026-10-12, branch effectparity1-20261012): particles and effects drawn as in the game
 
 - **Ground steam no longer draws near-white: lit effects take the surfaces' sun scale (ALLON2's cause, ported).**
