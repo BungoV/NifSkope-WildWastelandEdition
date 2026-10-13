@@ -154,7 +154,7 @@ check "a two-shape convex body compiles to two polytopes under a compound" \
 #
 # This is the check that was missing when a compound shipped with its BVH intact
 # and no pointer to it: Fallout 4 dereferenced null in
-# hknpDynamicCompoundShape::updateAabb on the first mesh it loaded. Every check
+# the compound shape's bounding-box update on the first mesh it loaded. Every check
 # here passed, --roundtrip included, because our own decoder carries an
 # unreadable array through verbatim and re-encodes it byte for byte. A round trip
 # cannot see a pointer neither end needs; hkcompound.py follows it or fails.
@@ -204,10 +204,10 @@ check "...to VANILLA's own AABB, to six decimals" \
 # --- the header word the ENGINE dispatches on ---------------------------------
 #
 # +0x10 is u16 m_flags, +0x12 is u8 m_numShapeKeyBits, +0x13 is the dispatch
-# type -- read straight off Fallout 4's own symbols, where asConvexShape is
-# `test byte ptr [rcx+0x10], 1`. A compound that sets bit 0 is handed to the
+# type -- read straight off Fallout 4's own Havok code (checked in Todd's treat),
+# whose convex test reads bit 0 at +0x10. A compound that sets bit 0 is handed to the
 # convex path and read as a vertex cloud: access violation inside
-# hknpScaledConvexShapeBase::calcAabb the first time a scaled reference loads
+# the scaled shape's bounding-box step the first time a scaled reference loads
 # one. That shipped, and nothing in our own files could see it, because our
 # reader never dispatches on the word it wrote. Vanilla's word can.
 ourflags=$(python "$ROOT/tools/hkcompound.py" "$W/p.nif" --flags 2>/dev/null)

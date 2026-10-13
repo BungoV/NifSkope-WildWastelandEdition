@@ -651,7 +651,7 @@ identity gate provable.
 - whether `iDirShadowSplits` = 2 means 2 or 3 cascades (his atlas has 3);
 - what `uiShadowFilter` = 3 selects;
 - the SAO sample pattern;
-- the slice-to-box fit of `UpdateCamerasI` (RVA 0x28CACB0), which the texel-size match approximates until it is read.
+- the game's shadow-cascade slice-to-box fit, which the texel-size match approximates until it is read.
 
 ---
 
@@ -802,7 +802,7 @@ changes the lit legacy fixtures). Each gate kind proves once, with a red control
 - Vanilla handling of cb2[1] / cSpecularColor; the greyscale palette maths; whether the spec flag gates the `_s`
   map on the CPU.
 - FO4CS runtime handling of tint masks (not read); whether NifSkope's reader divides luminance by 100 (`pbrmfile.h`).
-- Shadow presets, cascade count, `uiShadowFilter`, SAO pattern, and the `UpdateCamerasI` fit (§10).
+- Shadow presets, cascade count, `uiShadowFilter`, SAO pattern, and the game's cascade fit (§10).
 - `.pbrmset` file naming in the editor.
 
 ## RULINGS 2026-09-23 23:0x (bungo, asked with explanations; director splice)

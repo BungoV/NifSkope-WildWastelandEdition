@@ -7,6 +7,12 @@
 #   .\capture.ps1 -Mode baseline      # capture the reference set (before a change)
 #   .\capture.ps1 -Mode compare       # re-render and diff against the baseline
 #
+# The reference PNGs and the two repo-made fixture NIFs are made from vanilla
+# game assets, so they are NOT in the public repo. They live in the gitignored
+# local folder tests/local_fixtures/ (render_regression_baseline/*.png,
+# render/refraction_fixture.nif, rigging/donor.nif). A case whose file is
+# missing there prints SKIP; a run with no baseline prints NEW for each case.
+#
 # Each NIF is rendered by its own NifSkope process via WW_RENDER_SHOT, which
 # pins the camera (setOrientation) and the scene clock (setSceneTime) so the
 # pixels are reproducible — the particle sim is time-driven, so without a pinned
@@ -24,6 +30,8 @@ $root  = $PSScriptRoot
 $repo  = Split-Path (Split-Path $root -Parent) -Parent
 $exe   = Join-Path $repo 'release\NifSkope.exe'
 $fo4   = 'E:\Tools\Fallout 4\DataUnpacked\Data'
+$local = Join-Path $repo 'tests\local_fixtures'   # gitignored, local only
+$baseDir = Join-Path $local 'render_regression_baseline'
 
 # WW_RENDER_SHOT still puts a REAL window on screen for a couple of seconds per
 # capture, and this walks a seven-file corpus, so without this a run takes over
@@ -50,12 +58,12 @@ $corpus = @(
     @{ name = 'particles_glow';   path = "$fo4\Meshes\Effects\BlackGlowFill01.nif";             why = 'BSEffectShaderProperty particle shading' }
     @{ name = 'glass_visor';      path = "$fo4\Meshes\Effects\CA-PowerArmorVisorGlass01.nif";   why = 'glass / alpha-blended lighting shader' }
     @{ name = 'glass_shader';     path = "$fo4\Meshes\Effects\GlassShader01.nif";               why = 'glass effect shader' }
-    @{ name = 'refraction_fixed'; path = "$repo\tests\render\refraction_fixture.nif";           why = 'SLSF1_Refraction forced on — screen-space refraction path' }
+    @{ name = 'refraction_fixed'; path = "$local\render\refraction_fixture.nif";              why = 'SLSF1_Refraction forced on — screen-space refraction path' }
     @{ name = 'lit_setdressing';  path = "$fo4\Meshes\SetDressing\ACDucts\ACDuctConnector01.nif"; why = 'standard FO4 spec/gloss lighting (_s map)' }
-    @{ name = 'lit_head';         path = "$repo\tests\rigging\fixtures\donor.nif";              why = 'skinned mesh, subsurface/softlight path' }
+    @{ name = 'lit_head';         path = "$local\rigging\donor.nif";                           why = 'skinned mesh, subsurface/softlight path' }
 )
 
-$outDir  = Join-Path $root $(if ($Mode -eq 'baseline') { 'baseline' } else { 'current' })
+$outDir  = $(if ($Mode -eq 'baseline') { $baseDir } else { Join-Path $root 'current' })
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 Add-Type -AssemblyName System.Drawing
@@ -112,9 +120,9 @@ foreach ($c in $corpus) {
         continue
     }
 
-    $ref = Join-Path $root "baseline\$($c.name).png"
+    $ref = Join-Path $baseDir "$($c.name).png"
     if (-not (Test-Path $ref)) {
-        Write-Host ("NEW   {0,-16} no baseline to compare against" -f $c.name) -ForegroundColor DarkYellow
+        Write-Host ("NEW   {0,-16} no baseline in tests\local_fixtures\render_regression_baseline (local only)" -f $c.name) -ForegroundColor DarkYellow
         $results += @{ name = $c.name; status = 'no-baseline' }
         continue
     }

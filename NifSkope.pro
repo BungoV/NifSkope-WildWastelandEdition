@@ -860,8 +860,12 @@ build_pass|!debug_and_release {
 	XML += \
 		build/nif.xml \
 		build/docsys/kfmxml/kfm.xml \
-		res/hkclasses_fo4.json \
 		res/hkx_annotation_vocabulary.txt
+
+	# The Havok class database is not shipped: each user builds it from their own
+	# Fallout4.exe (python tools/hkclassdb_extract.py --exe <Fallout4.exe>).
+	# Copy it beside the exe only when it has been made.
+	exists(res/hkclasses_fo4.json): XML += res/hkclasses_fo4.json
 
 	QSS += \
 		res/style.qss

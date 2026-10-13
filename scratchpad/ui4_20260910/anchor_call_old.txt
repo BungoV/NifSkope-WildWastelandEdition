@@ -1,2 +1,0 @@
-	if ( leftColumnSelector && wwBarRowHeight() > 0 )
-		leftColumnSelector->setStyleSheet( wwSegmentedTabBarQss( wwBarRowHeight() ) );

@@ -216,7 +216,7 @@ int namedAttachNode( const NifModel & donor, int donorTop,
 /*! Split one `AttachT` entry into its technique tag and argument.
  *
  *  The engine's split is one `strchr(entry, '&')`
- *  (`BGSAttachTechniquesUtil::ProcessAttachTechniques`, 1.10.155 `0x171a1b`):
+ *  (checked in Todd's treat, 1.10.155):
  *  everything before the ampersand is the tag, everything after is the argument,
  *  handed to the technique verbatim. An entry with no ampersand is all tag and
  *  no argument — which is why `MultiTechnique` on its own is a valid entry and
@@ -243,7 +243,7 @@ static QString attachTag( const QString & entry, QString * arg = nullptr )
  *
  *  Vanilla arguments are usually a bare node name, but not always: FO4 ships
  *  `NamedNode&C-ArmsTypeA1|0` on the Mr Handy arm assets, and the engine passes
- *  the whole thing through to `BSUtilities::GetObjectByName` without stripping
+ *  the whole thing through to its node-by-name lookup without stripping
  *  the suffix. No engine code seen strips it, so what `|0` selects is not
  *  settled here — but a node called `C-ArmsTypeA1|0` does not exist in those
  *  files either, so matching the argument whole finds nothing at all.

@@ -16,8 +16,8 @@ entry off by a row, taking Bone ID, User Index and Cut Offsets from the parent.
 That is why the first run of the .ssf writer reported 18 subsegments and no
 owners on MaleBody.
 
-The engine does not read the field for this. `BSGeometrySegmentFlagData::ApplyTo`'s
-lambda addresses shared entries as `SegmentStarts[segment] + 1 + ordinal`, and
+The engine does not read the field for this. Its segment-flag code addresses
+shared entries as `SegmentStarts[segment] + 1 + ordinal`, and
 the .ssf writer uses that rule, which is why it is correct under either
 convention.
 
@@ -423,8 +423,8 @@ convex radius, and `hknpStaticCompoundShape` is a class Elric never writes (71
 of 71 are dynamic, 45 of them in bodies that do not simulate) - which is why its
 type hash was never in our table. See WW_CHANGES 2026-08-21c and 2026-08-21g;
 `tests/spells/collision_convex.sh` checks 9-11 are the guard, the last two added
-after this shipped WITHOUT the pointer and crashed Fallout 4 in
-`hknpDynamicCompoundShape::updateAabb`.
+after this shipped WITHOUT the pointer and crashed Fallout 4 while it updated
+the dynamic compound shape's bounding box.
 
 **3c. Compounds MIXING a triangle mesh with convex shapes.** A body whose leaves
 are all convex compiles to a compound of convex shapes; a body with one triangle
@@ -1296,19 +1296,19 @@ reader agreeing with our own writer.
 with the Todd's treat tooling (kept outside this repo) — Todd's treat FIRST
 for vanilla engine research):
 
-- **`BSClothExtraData::LoadBinary` and `::SaveBinary`** — the engine's own reader
-  and writer for the blob. Disassemble `LoadBinary` and the field order and sizes
-  fall out, instead of being inferred from a corpus. Also `LinkObject`,
-  `RegisterStreamables`, `CreateClone`, `IsEqual`.
-- The Havok Cloth types by name: `hclClothData` (`getClothState`, `getOperator`,
+- **`BSClothExtraData`'s own load and save code** — the engine's own reader
+  and writer for the blob. Read the loader and the field order and sizes
+  fall out, instead of being inferred from a corpus. Also its link, clone and
+  compare steps.
+- The Havok Cloth types by name: `hclClothData` (cloth states, operators,
   a `Platform` enum), `hclSimClothData`, `hclSimClothInstance`, `hclSimClothPose`,
   `hclCollidable`.
-- **`BSClothUtils::BSTransformSet`** accessors, which name the runtime knobs:
-  `QBoneMap`, `QRootIdx`, `QSimulationOffset`, `QTargetLODLevel`,
-  `QSettleOnTransitionToSim`, `QAnimateStateIndex`, `QSimulateStateIndex`,
-  `QFirstFrame`, `QFirstStep`, `QTransitionToSimulateStage`.
+- **The cloth transform set's runtime knobs**: a bone map, a root index, a
+  simulation offset, a target LOD level, settle-on-transition-to-sim, the
+  animate and simulate state indices, first frame, first step, and the
+  transition-to-simulate stage.
 
-`QBoneMap` and `QRootIdx` are the pair worth reading first: cloth-to-skeleton
+The bone map and root index are the pair worth reading first: cloth-to-skeleton
 binding is the part that cannot be guessed from bytes, and it is what a compiler
 has to get right.
 
@@ -2176,11 +2176,10 @@ hug the coil. Parked with what is already known, so it is not re-derived:
   UVs and texture-aspect tiling that the engine's does not — a visual change with
   no placement benefit.
 - **ANSWERED 2026-08-01 — the engine applies no transform at all.**
-  `BGSNamedNodeAttach::AttachPolicy::Process` (1.10.155 `0x175710`), reached
-  through `AttachPolicy::vftable+8`, is the whole placement rule and it is four
-  steps: resolve the argument with `BSUtilities::GetObjectByName`, fall back to
-  the root if that finds nothing, `parent->AttachObject( obj, true )`, then
-  `BSShaderUtil::InvalidateRenderPasses`. It is a plain scene-graph re-parent —
+  The named-node attach (checked in Todd's treat, 1.10.155) is the whole
+  placement rule and it is four steps: resolve the argument as a node name,
+  fall back to the root if that finds nothing, attach the object to that
+  parent, then invalidate its render passes. It is a plain scene-graph re-parent —
   nothing is offset, aligned or zeroed, so an attached ArtObject sits exactly
   where its own local transform puts it relative to the named node.
 

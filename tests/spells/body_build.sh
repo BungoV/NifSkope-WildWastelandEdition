@@ -16,7 +16,7 @@
 #        FILES BETHESDA SHIPPED:
 #        Meshes/Actors/Character/CharacterAssets/HumanRaceBoneScales{Male,
 #        Female}{Thin,Muscular,Fat,Default}.txt, which is what
-#        TESRace::ImportBodyMorphBoneBaseScales reads at CK time. That is the
+#        the CK imports into the RACE record. That is the
 #        game's own answer, written down by the game's own tools.
 #   C++  the panel, driven inside a real NifSkope on a real character, dumping
 #        its applied per-bone scale through WW_BODY_BUILD_DUMP.

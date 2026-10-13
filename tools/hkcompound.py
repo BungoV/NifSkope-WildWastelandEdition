@@ -6,7 +6,7 @@ WHY THIS EXISTS
 
 A compound written from scratch shipped with its BVH intact and no POINTER to it:
 the local fixup at +0x10 was never emitted, so Fallout 4 dereferenced null inside
-hknpDynamicCompoundShape::updateAabb the first time it loaded one. Every check we
+the compound shape's bounding-box update the first time it loaded one. Every check we
 had passed. `--roundtrip` passed too, because our own decoder carries an
 unreadable array through verbatim and re-encodes it byte for byte — a round trip
 cannot see a pointer neither end needs.
@@ -149,11 +149,9 @@ def aabb(path):
 def flags(path):
     """Print every shape's header word at +0x10, so ours can be held against theirs.
 
-    Fallout 4's symbols give the layout in three instructions:
-
-        hknpShape::asConvexShape        test byte ptr [rcx+0x10], 1
-        hknpShape::getFlags             movzx eax, word ptr [rcx+0x10]
-        hknpShape::getNumShapeKeyBits   movzx eax, byte ptr [rcx+0x12]
+    Fallout 4's own Havok code gives the layout (checked in Todd's treat): the
+    "is it convex" test reads bit 0 of the byte at +0x10, the flags are the
+    u16 at +0x10, and the shape-key-bit count is the byte at +0x12:
 
     u16 m_flags, u8 m_numShapeKeyBits, u8 dispatch type -- and BIT 0 OF THE FLAGS
     MEANS CONVEX. A compound that sets it is handed to the convex path and read

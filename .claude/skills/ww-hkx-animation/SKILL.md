@@ -1,12 +1,12 @@
 ---
 name: ww-hkx-animation
-description: Work on Fallout 4 Havok ANIMATION files (.hkx clips, skeleton.hkx) in the NifSkope Wild Wasteland tree -- where the clips actually live (the animations BA2, not the unpacked corpus), pulling and unpacking a fixture, reading a packfile's section table without the 0x40 trap, reading a Havok class layout straight out of the exe's hkClass reflection, resolving a disassembly's rip-relative float constant, the whole-archive census, the fixture set and the gate commands of lane HKX1, and what the contract already settles so it is not re-derived. Use for HKX2 (playback/mapping), HKX3 (UI), any later animation lane, and any question of the form "what does FO4 store for bone/track/frame X".
+description: Work on Fallout 4 Havok ANIMATION files (.hkx clips, skeleton.hkx) in the NifSkope Wild Wasteland tree -- where the clips actually live (the animations BA2, not the unpacked corpus), pulling and unpacking a fixture, reading a packfile's section table without the 0x40 trap, reading a Havok class layout from the locally generated class database, the whole-archive census, the fixture set and the gate commands of lane HKX1, and what the contract already settles so it is not re-derived. Use for HKX2 (playback/mapping), HKX3 (UI), any later animation lane, and any question of the form "what does FO4 store for bone/track/frame X".
 ---
 
 # FO4 .hkx animation work in the WW tree
 
 The contract is `docs/HKX_ANIMATION_FORMAT.md` (read it IN FULL before
-touching `src/hkxanim.cpp`; CONSTITUTION rule 3). The reader is
+touching `src/hkxanim.cpp`; the project's private rules require it). The reader is
 `src/hkxanim.{h,cpp}` (`hkxAnimLoad(path)`: `.xml` = HKXPACK route,
 anything else = packfile route, one `HkxAnimFile` either way). The
 independent oracle is `tests/spells/hkxanim_decode.py`. Lane report:
@@ -55,26 +55,17 @@ and `src/gl/hknpdecode.cpp` hardcode 0x40 and REFUSE animation files; the
 walkers in `census.py` / `hkxanim_decode.py` / `hkxanim.cpp` read the u16.
 Copy from those.
 
-## 4. A Havok class layout from the exe, in one read
+## 4. A Havok class layout, in one lookup
 
-```bash
-cd scratchpad/hkx1_20260910 && python hkclass_reflect.py hkaSkeletonClass_Members "hkaSplineCompressedAnimation::Members" hkaAnimationBindingBlendHintEnumItems
-```
+Look the class up in the class database (section 13): it lists every member
+as `+offset name type subtype`, plus each enum's items. This is REFL
+provenance; the packfile offset equals the in-memory offset.
 
-Symbol names are `<Class>Class_Members`, `<Class>::Members` or
-`<Class><Enum>EnumItems` in Todd's treat's symbol list; some `_Members` arrays
-live in `.data` with a dynamic initializer and still read back (the const
-bytes are there). Prints `+offset name type subtype` per member. This is
-REFL provenance; the packfile offset equals the in-memory offset.
+## 5. The decoder's constants
 
-## 5. A rip-relative constant from a disassembly line
-
-The Todd's treat tooling's disassembly prints `movss xmm0, dword ptr [rip + 0xNNN] ; rip->_real`
-without the value. Resolve it: target RVA = instruction RVA + instruction
-length (bytes column / 2) + displacement; read 4 bytes there with
-its `PEImage(exe).read(rva, 4)` and `struct.unpack('<f')`. The three
-constants of the quaternion unpackers were resolved this way (2047.0,
-0.000345435663, 16383.0, 4.3161006e-05, 1/65535).
+The constants of the quaternion unpackers and the 16-bit scalar decode were
+checked in Todd's treat: 2047.0, 0.000345435663, 16383.0, 4.3161006e-05,
+1/65535. Do not re-derive them.
 
 ## 6. The census
 
@@ -125,52 +116,45 @@ resolution below 0.03 deg).
 
 ## 9. The class set FO4 actually ships (lane HKXCLASS, 2026-09-10, measured)
 
-Havok version, from `hkHavokCurrentClasses::VersionString` rva `0x02dbd038`:
-**`hk_2014.1.0-r1`**. Do not re-derive any of the following.
+Havok version (also in every packfile header): **`hk_2014.1.0-r1`**. Do not
+re-derive any of the following.
 
-`hkaAnimationAnimationTypeEnumItems` rva `0x02de49c0` holds exactly 7 items:
+`hkaAnimation`'s `AnimationType` enum holds exactly 7 items:
 0 UNKNOWN, 1 INTERLEAVED, 2 MIRRORED, 3 SPLINE_COMPRESSED,
 4 QUANTIZED_COMPRESSED, 5 PREDICTIVE_COMPRESSED, 6 REFERENCE_POSE.
-**No delta, no wavelet** -- `DeltaCompressed` and `Wavelet` return 0 symbols in
-the whole 1.10.155 symbol table; never emit those class names.
+**No delta, no wavelet** -- no `DeltaCompressed` or `Wavelet` class exists in
+1.10.155 (checked in Todd's treat); never emit those class names.
 `HK_MIRRORED_ANIMATION` keeps an enum slot with **no class**.
 `hkaLosslessCompressedAnimation` is the reverse: a real registered class with
 **no** enum value (FO4's 1st-person clips carry it by class name).
 
-Present, registered and fully implemented (member array rva / objectSize /
+Present, registered and fully implemented (member count / objectSize /
 loader index / HKXPACK signature):
 
-| class | Members rva | objectSize | registry idx | signature |
+| class | members | objectSize | registry idx | signature |
 |---|---|---|---|---|
-| hkaSplineCompressedAnimation | 0x02e46140 (13 members) | 0xb0 | 145 | 0x8c3b5f7e |
-| hkaInterleavedUncompressedAnimation | 0x02e988e0 (2: `transforms` hkArray<hkQsTransform> +0x38, `floats` hkArray<hkReal> +0x48) | 0x58 | 136 | 0xa5eff3f2 |
-| hkaLosslessCompressedAnimation | 0x02e98a70 (11) | 0xe0 | 137 | 0x278bffe8 |
-| hkaPredictiveCompressedAnimation | 0x02e99030 (11) | 0xc0 | 140 | - |
-| hkaQuantizedAnimation | 0x02e998d0 (3) | 0x58 | 141 | 0x3158d9ce |
-| hkaReferencePoseAnimation | 0x02e99b30 (1) | 0x40 | 142 | 0x9e1c3a1c |
+| hkaSplineCompressedAnimation | 13 | 0xb0 | 145 | 0x8c3b5f7e |
+| hkaInterleavedUncompressedAnimation | 2: `transforms` hkArray<hkQsTransform> +0x38, `floats` hkArray<hkReal> +0x48 | 0x58 | 136 | 0xa5eff3f2 |
+| hkaLosslessCompressedAnimation | 11 | 0xe0 | 137 | 0x278bffe8 |
+| hkaPredictiveCompressedAnimation | 11 | 0xc0 | 140 | - |
+| hkaQuantizedAnimation | 3 | 0x58 | 141 | 0x3158d9ce |
+| hkaReferencePoseAnimation | 1 | 0x40 | 142 | 0x9e1c3a1c |
 
-Base `hkaAnimation::Members` rva `0x038395e0` (in `.data`, raw-backed):
+Base `hkaAnimation` members:
 `type` +0x10, `duration` +0x14, `numberOfTransformTracks` +0x18,
 `numberOfFloatTracks` +0x1c, `extractedMotion*` +0x20, `annotationTracks[]` +0x28.
-`hkclass_reflect.py`'s member walker OVERRUNS this one by one row (its
-name-plausibility break) -- the true count is 6, read from the class-object
-initializer's `mov dword ptr [rsp+0x48], N`.
+The true member count is 6 (the old `hkclass_reflect.py` walker over-read this
+one by a row).
 
-**The loader does NOT switch on `m_type` or on a signature.** It hashes the
-class-NAME string: `hkTypeInfoRegistry::finishLoadedObject` rva `0x01504610`
-does `hkCachedHashMap<hkStringMapOperations>::getWithDefault`, then the
-per-class leaf (e.g. `finishLoadedObjecthkaInterleavedUncompressedAnimation`
-rva `0x01e131b0`) writes the vtable pointer into the loaded object. The case
-list is two null-terminated arrays built by the initializer at rva `0x02adfe80`:
-`hkBuiltinTypeRegistry::StaticLinkedClasses` rva `0x02e40880` (908 entries,
-name->hkClass*) and `...StaticLinkedTypeInfos` rva `0x02e3edf0` (849 entries,
-name->vtable), indices matching one-for-one. Walk them with
-`scratchpad/hkxclass_20260910/registry.py`.
-After load, sampling is pure virtual dispatch: `hkaAnimationControl::sampleTracks`
-rva `0x019ab940` ends `jmp qword ptr [rax + 0x20]` = vtable slot 4. Interleaved
-and spline vftables (rva `0x02e98938` / `0x02e46528`) have identical 14-slot
-layouts, every slot a class-specific body. A byte scan of all of `.text` for
-`cmp dword ptr [reg+0x10], 1..6` found no type test in any animation code.
+**The loader does NOT switch on `type` or on a signature.** It looks the
+class-NAME string up in a hash map, and a per-class finisher writes the vtable
+pointer into the loaded object. The name list is the game's built-in class
+registry (908 entries, name -> class) beside its type-info list (849 entries,
+name -> vtable), indices matching one-for-one.
+After load, sampling is pure virtual dispatch through vtable slot 4. The
+interleaved and spline vtables have identical 14-slot layouts, every slot a
+class-specific body. No test of the `type` field was found in any animation
+code (checked in Todd's treat).
 
 **Writing uncompressed is possible and was proven.** HKXPACK's `classxml/`
 carries all six classes at the same offsets the exe declares, and its
@@ -185,10 +169,6 @@ the object list and the `__classnames__` table, which agree): 15,320 `.hkx`
 scanned, 15,320 parsed, 0 refused. `hkaSplineCompressedAnimation` 13,514 files,
 `hkaLosslessCompressedAnimation` 856, everything else **zero**; the remaining
 950 files carry no animation object at all (skeletons, ragdolls, behaviours).
-
-**Trap:** a linear capstone sweep of the 46 MB `.text` to find rip-relative
-xrefs desynchronises and returns 0 hits. Use `callscan.py` (E8 callers) or
-disassemble the one named function; see root `MISTAKES.md` 2026-09-10.
 
 ## 10. A third-party clip may carry an EMPTY binding (lane FIXTURE, 2026-09-10)
 
@@ -328,20 +308,20 @@ between two different clips' sheets -- which is the camera pin's own proof.
 Any .hkx -- clip, skeleton, ragdoll, behaviour graph -- is now a typed object
 graph in C++ (`src/hkxfile.{h,cpp}`, `Hkx::File::read` / `write`) and in
 Python (`tests/spells/hkxfile_oracle.py`), both driven by
-`res/hkclasses_fo4.json`. Contract: `docs/HKX_PACKFILE_MODEL.md`. Do not
-re-derive any of this.
+`res/hkclasses_fo4.json` (built locally, see below). Contract:
+`docs/HKX_PACKFILE_MODEL.md`. Do not re-derive any of this.
 
-* **The class database is the exe's, extracted, not typed.**
-  `python tools/hkclassdb_extract.py` (1 s) rebuilds `res/hkclasses_fo4.json`
-  from the 1.10.155 exe + symbol TSV: 908 registered classes (+35 variants /
-  unregistered), every member's offset / type / subtype / flags / class /
-  enum, every enum's items, and the class SIGNATURE computed from
-  `hkClass::writeSignature` -- 908/908 equal to HKXPACK's. The hkClass
-  OBJECTS are not on disk: the tool emulates each `dynamic initializer for
-  'XClass''` with capstone; the member `enum*` slots are zero on disk and
-  patched by `... 'XClass_Members''` initializers, emulated too. A class
-  layout question is one JSON lookup now, never a fresh `hkclass_reflect.py`
-  run; `hkclass_reflect.py`'s plausibility break over-reads by one row (s9).
+* **The class database is the game's, extracted, not typed -- and it is
+  NOT shipped in the repo.** It is built locally from the user's own
+  installed game: `python tools/hkclassdb_extract.py --exe <path to
+  Fallout4.exe>` (1 s) writes `res/hkclasses_fo4.json`: 908 registered
+  classes (+35 variants / unregistered), every member's offset / type /
+  subtype / flags / class / enum, every enum's items, and the class SIGNATURE
+  computed the way Havok computes it -- 908/908 equal to HKXPACK's. The
+  class objects are built by the game at start-up, so the tool emulates that
+  start-up code, enum patches included. A class layout question is one JSON
+  lookup now, never a fresh `hkclass_reflect.py` run; `hkclass_reflect.py`'s
+  plausibility break over-reads by one row (s9).
 * **Read / write / edit any file without the exe:** `release/hkxfile_gate.exe
   --db res/hkclasses_fo4.json dump|roundtrip|census|edit|get FILE` (built by
   `scratchpad/hkxedit1_20260910/build_gate.sh`, Qt6Core only, run from the
@@ -366,7 +346,7 @@ re-derive any of this.
 * **A shipped file's shell-facing path is a bash comment when it starts with
   `#`.** The gate binary addresses fields as `#2.numFrames`; quote every
   argument you pass through `bash -lc`, or the edit silently applies nothing
-  and the "wrote" line reads as success (MISTAKES.md 2026-09-10 entry 3).
+  and the "wrote" line reads as success (private notes, 2026-09-10).
 * **The Blocks tab:** `HkxModel : BaseModel` (`src/hkxmodel.{h,cpp}`), the
   KfmModel idiom; `animFile()` hands the document's bytes to
   `hkxAnimLoadPackfile` -- the workspace's reader on the saved bytes, no

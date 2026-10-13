@@ -1,5 +1,0 @@
-# Procedural lightning bolt preview strip
-
-# never enabled on models by default
-
-shaders boltstrip.vert boltstrip.frag

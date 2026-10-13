@@ -12,8 +12,10 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $release = Join-Path $root 'release'
 $executable = Join-Path $release 'RiggingIntegration.exe'
 $out = Join-Path $PSScriptRoot 'out'
-$target = Join-Path $PSScriptRoot 'fixtures\target.nif'
-$donor = Join-Path $PSScriptRoot 'fixtures\donor.nif'
+# The two fixtures are cut from vanilla game meshes, so they are not in the
+# public repo: they live in the gitignored local folder tests/local_fixtures/rigging/.
+$target = Join-Path $root 'tests\local_fixtures\rigging\target.nif'
+$donor = Join-Path $root 'tests\local_fixtures\rigging\donor.nif'
 $result = Join-Path $out 'result.nif'
 $stdout = Join-Path $out 'stdout.log'
 $stderr = Join-Path $out 'stderr.log'
@@ -63,6 +65,11 @@ if ($Build) {
     finally {
         Pop-Location
     }
+}
+
+if (-not $realMode -and (-not (Test-Path $target) -or -not (Test-Path $donor))) {
+    Write-Host 'SKIP rigging integration: tests\local_fixtures\rigging\target.nif and donor.nif are not here (local only, not in the public repo). Pass -RealTarget/-RealDonor/-RealReference to run on your own meshes.' -ForegroundColor DarkYellow
+    exit 0
 }
 
 if (-not (Test-Path $executable)) {

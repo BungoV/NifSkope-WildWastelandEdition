@@ -81,11 +81,12 @@ GATEKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
 ps() { powershell.exe -NoProfile -NonInteractive -Command "$1"; }
 
 # A fixture the exe can open. Any NIF will do -- the SCENE is not what is
-# measured here, only the window around it. Taken from IN THE TREE, so the gate
-# does not depend on bungo's unpacked Fallout data being present
-# (ww-test-harness-add 6). tests/fixtures/ holds no .nif, which is what the
-# first draft assumed and is why this fell over before its first run.
-FIX="${FIX:-$ROOT/tests/render/refraction_fixture.nif}"
+# measured here, only the window around it. Taken from the gitignored local
+# folder tests/local_fixtures/ (the fixture is cut from a vanilla mesh, so it is
+# not in the public repo), else any .nif under tests/. tests/fixtures/ holds no
+# .nif, which is what the first draft assumed and is why this fell over before
+# its first run.
+FIX="${FIX:-$ROOT/tests/local_fixtures/render/refraction_fixture.nif}"
 if [ ! -f "$FIX" ]; then
 	FIX="$(find "$ROOT/tests" -name '*.nif' 2>/dev/null | head -1)"
 fi
@@ -185,7 +186,7 @@ field()   { echo "$1" | sed -n "s/.* $2=\([^ ]*\).*/\1/p"; }
 echo "harness_window: a harness forces its own window (NOT RUN -- see the head comment)"
 echo "  exe    $EXE"
 echo "  scope  $GATEKEY"
-[ -n "${FIX:-}" ] && [ -f "$FIX" ] || { echo "FAIL: no fixture NIF"; exit 1; }
+[ -n "${FIX:-}" ] && [ -f "$FIX" ] || { echo "SKIP: no fixture NIF (put one at tests/local_fixtures/render/refraction_fixture.nif, local only, or pass FIX=<any .nif>)"; exit 0; }
 
 # ===========================================================================
 echo

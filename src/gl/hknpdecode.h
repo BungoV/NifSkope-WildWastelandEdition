@@ -256,19 +256,19 @@ struct HknpShape
 
 /*! `hknpBodyCinfo::flags` bits this decoder and writer both name.
  *
- * The field is at cinfo +0x18 and `hknpBody::initialize` (1.10.155 @0x14daaf0)
- * copies it into `hknpBody::m_flags` untouched apart from the low four bits,
- * which the static/dynamic initialiser recomputes. `NVFlex::printHknpBodyInfo`
- * @0x27afa4 is a debug printer that names every bit, which is where these two
+ * The field is at cinfo +0x18 and the game's body set-up (checked in Todd's treat)
+ * copies it into the live body's flags untouched apart from the low four bits,
+ * which the static/dynamic initialiser recomputes. A debug printer in the game
+ * names every bit, which is where these two
  * names come from rather than a guess.
  */
 enum HknpBodyFlag : quint32
 {
 	/*! Without this the body raises no contact-impulse event, and Fallout 4
 	 * never asks what it is made of -- so it makes NO IMPACT SOUND, whatever its
-	 * materials say. `FOCollisionListener::OnContactImpulseEvent` @0x630c60 is
-	 * the handler; it calls `bhkUtilFunctions::GetMaterialForShape` once per body
-	 * and hands both materials to `BGSImpactManager::ProcessEvent` @0xd19e00,
+	 * materials say. The game's contact-impulse listener is
+	 * the handler; it looks up the shape's material once per body
+	 * and hands both materials to the impact manager,
 	 * which needs BOTH to resolve or neither surface makes a sound.
 	 *
 	 * Vanilla sets it on 1,408 of 1,408 dynamic bodies and on none of the 12,456
@@ -280,10 +280,10 @@ enum HknpBodyFlag : quint32
 	HKNP_RAISE_CONTACT_IMPULSE_EVENTS = 0x00000080u,
 	/*! USER_FLAG_0, which Fallout 4 reads as "add me to the world KEYFRAMED".
 	 *
-	 * `bhkNPCollisionObject::AccessBody` -> `test [body+0x40], 0x10000` ->
-	 * `SetMotionType(obj, 2)` -> `and [body+0x40], 0xfffeffff`, in the add-to-world
-	 * path at @0x1d73cfa; `SetMotionType` @0x1d7ebd0 with 2 runs
-	 * `hknpMotionCinfo::initializeAsKeyFramed`. So it is a one-shot: convert on
+	 * When the game adds a body to the world it tests this bit, and if set
+	 * switches the body to keyframed motion and clears the bit again
+	 * (checked in Todd's treat); switching to keyframed runs Havok's
+	 * keyframed motion set-up. So it is a one-shot: convert on
 	 * add, then clear.
 	 *
 	 * That is how a destructible ships. The body carries real mass and inertia
@@ -376,14 +376,14 @@ struct HknpBodyPhys
 	//! carried because a rewrite cannot invent it. See HknpConstraint::rawData.
 	quint32 positionW = 0;
 	/*! cinfo +0x18 -- `hknpBodyCinfo::flags`, named by Havok's own reflection
-	 * (hknpBodyCinfoClass_Members in Fallout4.exe 1.10.155 @0x383e9a0).
+	 * (the class's member list in the game's Havok reflection).
 	 *
-	 * `hknpBody::initialize` @0x14daaf0 does `body->m_flags = (cinfo->flags &
+	 * The game's body set-up does `body flags = (cinfo->flags &
 	 * ~0xF) | 0x400`, then the static/dynamic initialiser ORs in IS_STATIC or
 	 * IS_DYNAMIC -- so the low four bits are recomputed and EVERY OTHER BIT
-	 * reaches the live body verbatim. `NVFlex::printHknpBodyInfo` @0x27afa4 names
+	 * reaches the live body verbatim. A debug printer in the game names
 	 * them all; the one that matters here is bit 7, RAISE_CONTACT_IMPULSE_EVENTS,
-	 * which is what makes Fallout 4 fire FOCollisionListener::OnContactImpulseEvent
+	 * which is what makes Fallout 4 fire its contact-impulse listener
 	 * and therefore what makes a collision play an impact sound at all.
 	 *
 	 * Over 13,889 vanilla bodies in 11,820 files the word takes exactly four
@@ -414,7 +414,7 @@ struct HknpBodyPhys
 	 */
 	float mass = 0.0f;                  //!< 1 / (dyn_inertia +0x04)
 	//! dyn_inertia +0x08. Havok calls it `hknpMotionCinfo::massFactor`
-	//! (hknpMotionCinfoClass_Members @0x2dff9a0), not a density.
+	//! (in its reflected member list), not a density.
 	float density = 0.0f;
 	/*! dyn_inertia +0x20/24/28: the diagonal of the INVERSE inertia tensor.
 	 *

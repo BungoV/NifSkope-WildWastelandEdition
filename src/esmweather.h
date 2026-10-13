@@ -215,7 +215,7 @@ struct WwGodRays
 	float intensity = 1.0f, airScale = 3.0f, backScale = 2.0f, fwdScale = 4.0f, backPhase = 0.0f, fwdPhase = 0.75f;
 };
 
-/* lane VOLFOG1: the god-ray medium the engine builds from a GDRY (Sky::GetGodraysSettings 0x64cb30, MEASURED):
+/* lane VOLFOG1: the god-ray medium the engine builds from a GDRY (checked in Todd's treat, MEASURED):
  * air = (0.18, 0.46, 1) x air scale (Rayleigh), fwd = fwd colour x fwd scale (HG g = fwd phase), back = back colour
  * x back scale (HG g = back phase); post = the intensity. Without a GDRY the engine's fallback constants. */
 struct WwGodRayMedium

@@ -352,7 +352,9 @@ const ClassDb * ClassDb::instance( QString * error )
 			tried << p + QLatin1String( " (" ) + e + QLatin1Char( ')' );
 		}
 		if ( !db )
-			err = QStringLiteral( "no class database found; tried %1" ).arg( tried.join( QLatin1String( ", " ) ) );
+			err = QStringLiteral( "no Havok class database (hkclasses_fo4.json) found; make it once from your own game with: "
+			                      "python tools/hkclassdb_extract.py --exe \"<Fallout 4 folder>/Fallout4.exe\" "
+			                      "(writes res/hkclasses_fo4.json). Tried %1" ).arg( tried.join( QLatin1String( ", " ) ) );
 	}
 	if ( error ) *error = err;
 	return db;

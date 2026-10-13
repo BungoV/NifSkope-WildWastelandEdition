@@ -960,19 +960,19 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 	}
 	/* lane SUNCELL1 final: a lit effect or lit particle outdoors (fo4_effectcell / particles_cell) takes the game's
-	 * base term: BSEffectShader::SetupGeometry's lit branch puts pow(directional colour, 2.2) x the light's fade x
-	 * the imagespace Sunlight Scale (ImageSpaceManager+0x98 = kCurrentEOFData fHDRDataA[6], HNAM's 7th float) in
+	 * base term: the game's lit-effect setup puts pow(directional colour, 2.2) x the light's fade x
+	 * the imagespace Sunlight Scale (the imagespace HDR data's 7th float, HNAM's 7th float) in
 	 * cb2[12]; the scene's directional outdoors is the sun. No ambient: the lit asm reads cb2 rows 0..14 only
 	 * (lights 0..11, base 12, alpha 13..14). Red WW_CELL_FXLIT_EXT_RED=indoors leaves exteriors self-lit.
 	 * lane ALLON2 (2026-10-12, the Goodneighbor steam drew near-white): the game puts that same Sunlight Scale on the
-	 * SURFACES' sun too (BSLightingShader::GeometrySetupConstantDirectionalLight +0xfc and BSDFLightShader::
-	 * SetupGeometry +0xc33 multiply ImageSpaceManager+0x98 in, 1.10.155), so effect and wall keep a 1:1 sun. This
+	 * SURFACES' sun too (the lit-surface and deferred-light setups both multiply the imagespace Sunlight Scale
+	 * in; checked in Todd's treat), so effect and wall keep a 1:1 sun. This
 	 * viewer's surfaces take the sun unscaled, so a lit effect takes the surfaces' scale (1): with x4.5 it drew 4.5x
 	 * brighter than the wall behind it. Red WW_CELL_FXLIT_SCALE_RED=game puts the Sunlight Scale back (in and out).
-	 * lane EFFECTPARITY1: the colour is not the sunlight. Sun::Update copies the Sky's colours into the sun light:
-	 * the diffuse (+0x12c, what the surfaces read) from the weather's Sunlight row, and a second colour (+0x17c,
-	 * NiDirectionalLight::SetEffectColor) from its Effect Lighting row (NAM0 row 9, Sky+0x114); the effect
-	 * shader's lit branch reads +0x17c. CommonwealthClear at noon: Sunlight 225 grey, Effect Lighting 150 grey
+	 * lane EFFECTPARITY1: the colour is not the sunlight. The game's per-frame sun update copies the sky's colours into the sun light:
+	 * the diffuse (what the surfaces read) from the weather's Sunlight row, and a second colour (the light's
+	 * effect colour) from its Effect Lighting row (NAM0 row 9); the effect
+	 * shader's lit branch reads that effect colour. CommonwealthClear at noon: Sunlight 225 grey, Effect Lighting 150 grey
 	 * (0.41x linear); at night 53,70,87 vs 33,51,67. Red WW_CELL_FXLIT_COLOR_RED=sun takes the sunlight again. */
 	{
 		static const bool fxExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
@@ -1016,8 +1016,8 @@ void wwCellLightsUniforms( Scene * scene )
 				fxSunSaid = true;
 			}
 		}
-		/* lane SUNCELL1 final: indoors too the base takes the imagespace Sunlight Scale -- SetupGeometry multiplies
-		 * ImageSpaceManager+0x98 (fHDRDataA[6]) in unconditionally; indoors that is the cell's XCIM imagespace HNAM[6].
+		/* lane SUNCELL1 final: indoors too the base takes the imagespace Sunlight Scale -- the lit-effect setup multiplies
+		 * the imagespace Sunlight Scale in unconditionally; indoors that is the cell's XCIM imagespace HNAM[6].
 		 * A cell with no imagespace read keeps the base as it was. Red WW_CELL_FXLIT_INT_RED=noscale leaves it out. */
 		static const bool fxIntRed = qgetenv( "WW_CELL_FXLIT_INT_RED" ).trimmed() == "noscale";
 		if ( L->interior && fxProg ) {

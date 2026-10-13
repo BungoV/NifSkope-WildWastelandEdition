@@ -1,6 +1,6 @@
 ---
 name: nifskope-ww-crash-diagnose
-description: Name a crash in NifSkope Wild Wasteland Edition's own release exe (E:\Projects\NifskopeWildWastelandEdition) instead of guessing at it -- the one-minute diagnostic relink that puts the symbol table back, the gdb batch that catches a timing-dependent fault, reading a Windows NTSTATUS exit code, the crash-dialog rule that keeps a headless run off bungo's desktop, and the bisect shape that narrows a stage before any of it. Use the MOMENT release/NifSkope.exe faults, before writing a single fix.
+description: Name a crash in NifSkope Wild Wasteland Edition's own release exe (E:\Projects\NifskopeWildWastelandEdition) instead of guessing at it -- the one-minute diagnostic relink that puts NifSkope's own function names back, the gdb batch that catches a timing-dependent fault, reading a Windows NTSTATUS exit code, the crash-dialog rule that keeps a headless run off bungo's desktop, and the bisect shape that narrows a stage before any of it. Use the MOMENT release/NifSkope.exe faults, before writing a single fix.
 ---
 
 # Diagnosing a crash in the release exe
@@ -12,7 +12,7 @@ stack, once it existed, answered in one run.
 ## 0. FIRST: no dialog reaches his desktop
 
 A crashing `-no-gui` run raises a Windows "Application Error" box. It is on the
-primary monitor and it takes focus, so it breaks CONSTITUTION 6 twice. **Six of
+primary monitor and it takes focus, so it breaks the project's private rules twice. **Six of
 them reached bungo in three minutes** during that lane's bisect.
 
 * The exe arms itself: `SetErrorMode(SEM_FAILCRITICALERRORS |

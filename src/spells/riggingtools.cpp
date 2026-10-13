@@ -429,8 +429,8 @@ struct RigSegmentDefinition
 /*! Flat Per-Segment-Data row of each segment's OWN shared entry.
  *
  *  This is Segment Starts, and it is the only sound way to reach a shared entry
- *  because it is what the ENGINE uses: BSGeometrySegmentFlagData::ApplyTo's
- *  lambda (1.10.155 @0x1b9eb50) resolves a segment id as
+ *  because it is what the ENGINE uses: when it applies segment flags it
+ *  (checked in Todd's treat) resolves a segment id as
  *  `SegmentStarts[segment] + 1 + subsegmentOrdinal`.
  *
  *  "Parent Array Index" is NOT that row and must not be used for it. In every
@@ -7758,21 +7758,21 @@ QDockWidget * tlCreateVertexPaintManagerDock( NifModel * nif, QMainWindow * mw, 
  * Two JSON files the engine loads from beside the .nif. Neither can be built
  * from anything this fork had, and neither is derivable from the other: the
  * .ssf says which triangles belong to which bone, the .sclp says how thick the
- * wearer's body becomes. Both readers were disassembled out of 1.10.155 rather
- * than guessed at, and the RVAs below are that build's.
+ * wearer's body becomes. Both readers were checked in Todd's treat (1.10.155)
+ * rather than guessed at.
  *
- * .ssf — BSGeometrySegmentSharedData::LoadSSF (@0x1b9b9c0) opens the path in
+ * .ssf — the engine's .ssf loader opens the path in
  *   the shape's "Segment Data / SSF File" field, looks the SHAPE UP BY NAME
  *   among the top-level keys, and hands that object to
- *   BSGeometrySegmentFlagData::ReadFromJson (@0x1b9a9f0). What it builds is a
+ *   its JSON reader. What it builds is a
  *   map from a segment ADDRESS to a BONE NAME, and the name doubles as the
- *   visibility flag: GetEnabled (@0x1ed2b0) is literally
- *   `GetSegmentBoneName(id) != "DISABLED"`, and DisableSegment (@0x1ed2a0) is
- *   `SetSegmentBoneName(id, "DISABLED")`.
+ *   visibility flag: a segment is enabled exactly when its bone name is not
+ *   "DISABLED", and disabling a segment sets its bone name to
+ *   "DISABLED".
  *
- *   The address is BSGeometrySegmentID::GetSegmentID (@0x1289b30), six
+ *   The address is computed in six
  *   instructions: `((segment << 8) | subsegment) << 8`. Its consumer, the
- *   ApplyTo lambda @0x1b9eb50, resolves it as
+ *   engine's segment-flag apply step, resolves it as
  *   `SegmentStarts[segment] + 1 + subsegment` — so the second byte is the
  *   subsegment's ORDINAL WITHIN ITS SEGMENT, not its User Index, and 0xFF in
  *   that byte addresses the segment itself. Ordinal and User Index agree on
@@ -7788,12 +7788,12 @@ QDockWidget * tlCreateVertexPaintManagerDock( NifModel * nif, QMainWindow * mw, 
  *   vanilla's two attested forms: "DISABLED" where there is dismemberment data
  *   (634 of the 693 shapes in the shipped corpus) and "Generic" where there is
  *   none — the name headgear1.ssf's `bAllSegmentsAreEnabled: true` resolves to
- *   through ReadFromJson's legacy branch.
+ *   through the JSON reader's legacy branch.
  *
- * .sclp — TESObjectARMA::ImportBoneScaleModifiers (@0x32f3a0) swaps the model
+ * .sclp — the armor addon's bone-scale import swaps the model
  *   path's extension for .sclp, reads the JSON, and fills a
- *   BSFixedString -> NiPoint3 map that reaches the skeleton through
- *   TESNPC::FillBoneScaleMap and BSFlattenedBoneTree::SetBoneScale. It is the
+ *   bone name -> scale map that reaches the skeleton through
+ *   the NPC's bone-scale map and the skeleton's per-bone scale. It is the
  *   body shape an outfit imposes on whoever wears it. All 54 shipped files
  *   carry the same 48 *_skin tri-scale bones, and 2551 of their 2592 entries
  *   leave x at exactly 1 — these bones thicken a limb, they do not lengthen it.
@@ -8349,7 +8349,7 @@ static const char * const riggingSclpBones[] = {
 /*! World-to-bone frames, by bone name, taken from the BONE NODES.
  *
  *  Not from BSSkin::BoneData, which was the first thing tried. What the engine
- *  scales is the skeleton bone -- BSFlattenedBoneTree::SetBoneScale, reached
+ *  scales is the skeleton bone -- the skeleton's per-bone scale, reached
  *  from the ARMA's map -- so the frame that gives x, y and z their meaning is
  *  the bone's own node frame, and the file's job is to describe a scale in it.
  *  BSSkinBoneTrans is a different transform: for RArm_UpperFat_skin in vanilla

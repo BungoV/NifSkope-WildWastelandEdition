@@ -2045,7 +2045,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	int billboardShapes = 0, billboardFlat = 0;
 	/* Lane FXLIT1: in an interior a lit effect shape (the effect-lighting flag) takes a bucket per placement,
 	 * because the game lights it with its MODEL's four placed lights (src/gl/cellfxlit.h). */
-	/* lane SUNCELL1 final: exteriors too. The game's lit effect constants (BSEffectShader::SetupGeometry, lit branch)
+	/* lane SUNCELL1 final: exteriors too. The game's lit effect constants (its lit-effect setup, lit branch)
 	 * take the scene's directional (the sun outdoors) and the placed lights near the model, inside or out. Red
 	 * WW_CELL_FXLIT_EXT_RED=indoors keeps exteriors self-lit, as before. */
 	static const bool fxLitExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
@@ -4691,7 +4691,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				const int n = cellCopyParticleBranch( nif, QModelIndex( iPfx ), *it.value(), p.pos - origin, p.rot, p.scale,
 					&pfxWhy, &copied );
 				/* lane SUNCELL1 (last round): A LIT PARTICLE. In the game the effect technique's Lit bit comes from the
-				 * property's lighting flag alone, beside Ptcl (Todd's treat: BSEffectShaderProperty::DetermineTechniqueID),
+				 * property's lighting flag alone, beside Ptcl (checked in Todd's treat),
 				 * and the lit particle pixel shader sums the same four placed lights as a lit effect card. So a copied
 				 * system whose effect property is lit (the BGEM's Effect Lighting and influence, or Shader Flags 2 bit 30
 				 * and Lighting Influence, the welded shapes' rule) joins FXLIT1's table as one more placed model: its

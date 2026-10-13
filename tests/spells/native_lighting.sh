@@ -92,7 +92,11 @@ PORT="${PORT:-42937}"
 S="$ROOT/scratchpad/showcase1_20260912/out"
 R1="$ROOT/scratchpad/nativeview1_20260912"
 R2="$ROOT/scratchpad/nativeview2_20260912"
-BASE="$ROOT/tests/baselines/native_lighting"
+# the four legacy baselines are renders of vanilla meshes, so they are not in
+# the public repo: they live in the gitignored local folder below. Without them
+# gate (a) prints SKIP for each frame and the other gates still run.
+BASE="$ROOT/tests/local_fixtures/native_lighting"
+[ -f "$BASE/legacy_bto_top.png" ] || echo "SKIP gate (a): no legacy baselines in tests/local_fixtures/native_lighting/ (local only, not in the public repo)"
 OUT="${OUT:-$R2/work/gate}"
 LOG="$ROOT/release/ww_native_lighting.log"
 

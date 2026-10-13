@@ -1,5 +1,5 @@
 /* RACE Bone Scale Data + the game's own combination. See src/bodybuild.h for
-   where every number and every RVA comes from. Lane GLTFEXPORT1, 2026-09-19.
+   where every number comes from. Lane GLTFEXPORT1, 2026-09-19.
 
    The record walk goes through ESMFile (lib/libfo76utils), the same reader
    src/esmdata.cpp uses, so there is one .esm parser in this tree and not two
@@ -187,7 +187,7 @@ bool bodyBuildListRaces( const QString & esmPath,
 }
 
 // ---------------------------------------------------------------------------
-// The combination. Every constant is quoted to its RVA in src/bodybuild.h.
+// The combination. Every constant is explained in src/bodybuild.h.
 
 float bodyBuildCentroidK( float wThin, float wMuscular, float wFat )
 {
@@ -205,7 +205,7 @@ float bodyBuildCentroidK( float wThin, float wMuscular, float wFat )
 	// The normaliser is R and NOT h. With h the corners come out at k = 1/3,
 	// and the corners are the half of this that the shipped corpus MEASURES:
 	// see the header. Anything that is 0 at a corner and 1 at the centre fits
-	// the evidence; this is the one the disassembly reads as, and the interior
+	// the evidence; this is the one the engine reads as, and the interior
 	// is the part that is still unproven.
 	double k = ( R - d ) / R;
 	if ( k < 0.0 )
@@ -220,7 +220,7 @@ Vector3 bodyBuildScale( const BodyBuildBone & b, float wThin, float wMuscular, f
 	double s = double( wThin ) + double( wMuscular ) + double( wFat );
 	double a, m, f;
 	if ( !( s > 0.0 ) ) {
-		a = m = f = 1.0 / 3.0;                     // kDefaultMorphWeight @ 0x3715478
+		a = m = f = 1.0 / 3.0;                     // the game's default morph weight
 	} else {
 		a = double( wThin ) / s;
 		m = double( wMuscular ) / s;

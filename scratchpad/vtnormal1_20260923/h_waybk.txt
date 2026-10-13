@@ -1,4 +1,0 @@
-region A: -24 16 -13 27
-rung rc=0
-new rc=0
-waybk: 56 file(s) compared (the .lodb excluded), 0 differ

@@ -1,4 +1,4 @@
-# The Havok packfile object model (src/hkxfile, src/hkxmodel, res/hkclasses_fo4.json)
+# The Havok packfile object model (src/hkxfile, src/hkxmodel, the class database)
 
 **Status: MEASURED and GATED, 2026-09-10, lane HKXEDIT1.** This page is the
 contract for the generic `.hkx` layer: every FO4 packfile the game's own class
@@ -10,8 +10,8 @@ what a GENERIC model needs: where the class layouts come from, how a field of
 each type is read, and the layout rules of a written file, each traced to the
 file that taught it.
 
-Authorities: **EXE** (the 1.10.155 exe's hkClass reflection and the code that
-builds it, rvas of that build), **HKXPACK** (0.1.6-beta's `classxml/`, the
+Authorities: **EXE** (the hkClass reflection in the user's own 1.10.155
+`Fallout4.exe`, checked in Todd's treat), **HKXPACK** (0.1.6-beta's `classxml/`, the
 second oracle), **CENSUS** (every `.hkx` in `Fallout4 - Animations.ba2`:
 15,320 files), **FILE** (a byte offset read in a named shipped file).
 
@@ -19,12 +19,10 @@ Provenance stamps (step 1 of `ww-contract-provenance`; re-derived at the end):
 
 | file | sha256 (16) | bytes | lines |
 |---|---|---|---|
-| `res/hkclasses_fo4.json` | `d1ae65608fb37280` | 1,511,662 | 73,745 |
 | `src/hkxfile.h` | `77bb498a9649a858` | 10,433 | 244 |
 | `src/hkxfile.cpp` | `82f22b12266063bb` | 54,306 | 1,522 |
 | `src/hkxmodel.h` | `79801bd14b1a2183` | 5,570 | 117 |
 | `src/hkxmodel.cpp` | `d389bb0c8cc3f161` | 26,715 | 788 |
-| `tools/hkclassdb_extract.py` | `4867772b3f3fc694` | 31,805 | 674 |
 | `tests/spells/hkxfile_oracle.py` | `7efba5383ca37874` | 40,498 | 915 |
 
 ---
@@ -35,21 +33,21 @@ A packfile stores, per object, only a CLASS NAME (the `__classnames__`
 section) and the object's bytes. What the bytes mean -- which member sits at
 which offset with which type -- comes from the class definition, and the only
 class definitions that matter are the ones the game LOADS WITH. FO4 1.10.155
-links **908** classes (`hkBuiltinTypeRegistry::StaticLinkedClasses`, rva
-`0x02e40880`, a null-terminated `hkClass*` array) [EXE]. `tools/hkclassdb_extract.py`
-reads them into `res/hkclasses_fo4.json` (format `ww-hkclassdb-1`):
+links **908** classes into its built-in class registry [EXE]. The class
+database is **not shipped in this repo**: it is generated on the user's machine
+from their own installed `Fallout4.exe` by
+`python tools/hkclassdb_extract.py --exe <path to Fallout4.exe>`, which writes
+`res/hkclasses_fo4.json` (format `ww-hkclassdb-1`):
 
 * An `hkClass` object is 0x50 bytes (`name*` +0, `parent*` +8, `objectSize`
   +0x10, `numImplementedInterfaces` +0x14, `declaredEnums*` +0x18, `numEnums`
   +0x20, `declaredMembers*` +0x28, `numMembers` +0x30, `defaults*` +0x38,
   `attributes*` +0x40, `flags` +0x48, `describedVersion` +0x4c) but it is
   **built at run time**: the on-disk `.data` page has no bytes for it. Each
-  has a `dynamic initializer for 'XClass''` that fills the constructor's
-  thirteen arguments and calls `hkClass::hkClass` (rva `0x014ff340`, which
-  stores them in that order); the extractor EMULATES the initializer with
-  capstone (a register and absolute-address stack tracker; the shape with
-  `mov rax, rsp` before `sub rsp, 0x78` and `[rax - 0x10]` stores is the one
-  that hid 30 classes' enums until it was tracked by absolute address).
+  is filled in by start-up code that passes the class constructor its
+  thirteen arguments, stored in that order; the extractor EMULATES that
+  start-up code (one stack-addressing shape hid 30 classes' enums until the
+  emulation tracked it).
   952 initializers, 950 constructor calls, 943 distinct names: the four Havok
   meta classes are built 2-4 times and the REGISTERED object is the class
   (its signature is the one shipped files carry), the others `variants`.
@@ -57,21 +55,19 @@ reads them into `res/hkclasses_fo4.json` (format `ww-hkclassdb-1`):
   `hkClassMember` records (`name*` +0, `class*` +8, `enum*` +0x10, `type` u8
   +0x18, `subtype` u8 +0x19, `cArraySize` u16 +0x1a, `flags` u16 +0x1c,
   `offset` u16 +0x1e). The `enum*` slot is zero on disk and patched by a
-  second initializer (`... 'XClass_Members''`: 178 `mov rax,[rip+p]; mov
-  [rip+slot], rax` pairs), emulated too. Enum objects are const (`.rdata`,
+  second piece of start-up code (178 enum-pointer patches), emulated too. Enum objects are const (`.rdata`,
   0x28 bytes: `name*`, `items*`, `numItems` +0x10, `attributes*`, `flags`;
   items 16 bytes `{int value; pad; const char* name}`).
-* **The signature is computed** from `hkClass::getSignature` (rva `0x014fff50`)
-  and `hkClass::writeSignature` (`0x014fffe0`), `hkClassEnum::writeSignature`
-  (`0x017c5480`): `~crc32` over -- numImplementedInterfaces (int32), each
+* **The signature is computed** the way Havok computes a class signature:
+  `~crc32` over -- numImplementedInterfaces (int32), each
   declared enum (name bytes, then per item name bytes + int32 value, then
-  the item count), each member (the member's class chain's writeSignature
-  unless the member is a pointer; its enum's writeSignature; the name bytes;
+  the item count), each member (the member's class chain's signature bytes
+  unless the member is a pointer; its enum's signature bytes; the name bytes;
   type u16; subtype u16 -- for ENUM/FLAGS the subtype's width `<< 3` is XORed
   into the flags and 0 is written; a SERIALIZE_IGNORED member is written as
   type ZERO with the type as subtype and an extra u16 for a non-zero
   subtype; cArraySize u16; flags u16), the member count (int32); then the
-  parent's writeSignature, and so on up. Standard CRC-32 (init ~0, final ~).
+  parent's signature bytes, and so on up. Standard CRC-32 (init ~0, final ~).
   It reproduces HKXPACK's stored signature for **908 of 908** classes both
   know [HKXPACK] -- every field entering the hash was read right.
 
@@ -83,7 +79,7 @@ signature still agreeing -- the exe wins); 35 exe-only (`hkx*` scene classes);
 parents resolve, no cycles): 0 problems once the empty-base-class rule was
 read off the header (layout byte 3 `emptyBaseClassOpt = 1`).
 
-The JSON carries, per class: name, rva, registryIndex, parent, objectSize,
+The JSON carries, per class: name, registryIndex, parent, objectSize,
 version, flags, signature (computed) and `signatureHkxpack`, enums with
 items, members with name / offset / type / subtype / cArraySize / flags /
 class / enum / `enumClass` (the class DECLARING the enum -- a member may use
@@ -221,23 +217,19 @@ a refusal (gate (e)'s stated limit).
 
 | file | sha256 (16) | bytes | lines | role |
 |---|---|---|---|---|
-| Todd's treat: `Fallout4.exe` (1.10.155) | `886d67fc955be02d` | -- | -- | EXE; every rva above is this build's |
+| Todd's treat: `Fallout4.exe` (1.10.155) | `886d67fc955be02d` | -- | -- | EXE; the build every claim above was checked on |
 | `E:\Tools\Fallout 4\HKXPACK\hkxpack-core.jar` (`classxml/`, 908 files) | -- | -- | -- | HKXPACK |
 | `Fallout4 - Animations.ba2` (15,320 `.hkx`) | -- | 359,787,743 | -- | CENSUS; `scratchpad/hkxedit1_20260910/census_manifest.tsv` has each file's size and sha256 |
-| `res/hkclasses_fo4.json` | `d1ae65608fb37280` | 1,511,662 | 73,745 | this page's source |
+| `res/hkclasses_fo4.json` | -- | -- | -- | generated locally from the user's own `Fallout4.exe` by `tools/hkclassdb_extract.py`; not shipped |
 | `src/hkxfile.h` | `77bb498a9649a858` | 10,433 | 244 | this page's source |
 | `src/hkxfile.cpp` | `82f22b12266063bb` | 54,306 | 1,522 | this page's source |
 | `src/hkxmodel.h` | `79801bd14b1a2183` | 5,570 | 117 | this page's source |
 | `src/hkxmodel.cpp` | `d389bb0c8cc3f161` | 26,715 | 788 | this page's source |
-| `tools/hkclassdb_extract.py` | `4867772b3f3fc694` | 31,805 | 674 | this page's source |
+| `tools/hkclassdb_extract.py` | -- | -- | -- | run locally: `python tools/hkclassdb_extract.py --exe <path to Fallout4.exe>` |
 | `tests/spells/hkxfile_oracle.py` | `7efba5383ca37874` | 40,498 | 915 | this page's source |
 
 | claim | line | anchor |
 |---|---|---|
-| the registry rva | `tools/hkclassdb_extract.py` | `REGISTRY_RVA = 0x02E40880` |
-| the initializer emulation | `tools/hkclassdb_extract.py` | `def emulate_initializer(self, rva, maxlen=0x200):` |
-| the enum patches | `tools/hkclassdb_extract.py` | `member enum patches: %d` |
-| the signature | `tools/hkclassdb_extract.py` | `def crc32_signature(classes_by_rva, enums_by_rva):` |
 | the hole bytes | `src/hkxfile.cpp` | `v.bytes = blob.mid( atOff, size );` |
 | hkRelArray read | `src/hkxfile.cpp` | `const int rel = qFromLittleEndian<quint16>( at( p + 2 ) );` |
 | the depth-first object walk | `src/hkxfile.cpp` | `const QVector<int> pointees = flush( rest );` |

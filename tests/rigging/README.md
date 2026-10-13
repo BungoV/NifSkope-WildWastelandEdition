@@ -1,7 +1,9 @@
 # Rigging integration test
 
 This native Qt integration test exercises the complete Fallout 4 Rigging workflow
-against the small fixtures in `fixtures/`. It covers the four advanced operations,
+against the small fixtures in `tests/local_fixtures/rigging/` (target.nif, donor.nif).
+They are cut from vanilla game meshes, so they are local only and not in the public
+repo; `run.ps1` prints SKIP when they are absent. It covers the four advanced operations,
 the atomic one-dialog operation, Undo/Redo, save/reload, byte-exact rollback,
 cancellation (including the progress dialog during geometry mapping), a multi-shape
 donor, mismatched target/donor vertex counts, the atomic pre-transfer summary, and

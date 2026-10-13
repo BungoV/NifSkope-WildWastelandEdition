@@ -68,7 +68,7 @@ public:
 
 	/*! Flags bit 4 — play the animation backwards.
 	 *
-	 * `NiTimeController::GetPlayBackwards` (1.10.155 `0x1ba7140`) is
+	 * In the game (checked in Todd's treat) this bit reads as
 	 * `(flags >> 4) & 1`. Mirrors the resolved time about the middle of
 	 * [start, stop] after the cycle type has been applied.
 	 */
@@ -76,9 +76,9 @@ public:
 
 	/*! Flags bit 6 — compute scaled time.
 	 *
-	 * The engine calls `NiTimeController::ComputeScaledTime` (`0x1ba6d30`) —
+	 * The engine runs its scaled-time step —
 	 * which is what applies frequency, phase and the cycle type — **only** when
-	 * this bit is set; `BSProceduralLightningController::Update+0x93` shows the
+	 * this bit is set; the lightning controller's update shows the
 	 * gate. When it is clear the controller is driven with the time it is handed,
 	 * unscaled. Every one of the 160 controllers sampled across FO4's effects,
 	 * actors, architecture and setdressing meshes has it set, so this changes

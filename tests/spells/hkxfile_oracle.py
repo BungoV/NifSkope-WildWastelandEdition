@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """The INDEPENDENT Havok packfile oracle for lane HKXEDIT1 (2026-09-10):
 a generic reader and writer for FO4 `hk_2014.1.0-r1` binary packfiles driven
-by the class database `res/hkclasses_fo4.json` (extracted from the 1.10.155
-exe by tools/hkclassdb_extract.py). It shares no code with src/hkxfile.cpp;
+by the class database `res/hkclasses_fo4.json` (built from the user's own
+Fallout4.exe by tools/hkclassdb_extract.py; not shipped). It shares no code with src/hkxfile.cpp;
 it is written from docs/HKX_PACKFILE_MODEL.md and holds the C++ against
 itself and against the shipped bytes.
 

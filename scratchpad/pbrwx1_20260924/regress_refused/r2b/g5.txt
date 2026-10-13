@@ -1,3 +1,0 @@
-# WW_WEATHER data=x:/Programs/Steam/steamapps/common/Fallout 4/Data red=none
-load refused reason="FO4CSPhysicalWeathers.esp needs master DLCNukaWorld.esm, which is not loaded" records=0
-rc=3

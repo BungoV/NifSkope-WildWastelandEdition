@@ -1,4 +1,4 @@
-"""Read or set hknpBodyCinfo::flags -- the word that carries
+"""Read or set hknpBodyCinfo.flags -- the word that carries
 RAISE_CONTACT_IMPULSE_EVENTS -- in a NIF's compiled collision.
 
     python tools/hkbodyflags.py <file.nif> ...            report
@@ -7,21 +7,20 @@ RAISE_CONTACT_IMPULSE_EVENTS -- in a NIF's compiled collision.
 WHY THIS EXISTS
 
 Fallout 4 only plays a collision impact sound for a body that RAISES the
-contact-impulse event, and that is a bit in hknpBody::m_flags:
+contact-impulse event, and that is a bit in the live body's flags
+(all checked in Todd's treat):
 
-    FOCollisionListener::OnContactImpulseEvent   1.10.155 @0x630c60
-        matA = bhkUtilFunctions::GetMaterialForShape(bodyA->m_shape, keyA)
-        matB = ... bodyB ...
-        BGSImpactManager::ProcessEvent({matA, matB, position, velocity})
+    the game's contact-impulse listener looks up each body's shape material
+        and hands both materials, the contact position and the velocity to
+        the impact manager
 
-    hknpBody::initialize                         1.10.155 @0x14daaf0
-        body->m_flags = (cinfo->flags & ~0xF) | 0x400
-        (initializeStaticBody / initializeDynamicBody then OR in IS_STATIC /
+    the game's body set-up does
+        body flags = (cinfo->flags & ~0xF) | 0x400
+        (the static / dynamic set-up then ORs in IS_STATIC /
          IS_DYNAMIC, which is why the low four bits are dropped -- every OTHER
          bit of cinfo.flags reaches the live body verbatim)
 
-    NVFlex::printHknpBodyInfo                    1.10.155 @0x27afa4
-        the engine's own debug printer, naming each bit:
+    the engine's own debug printer names each bit:
           0x0001 IS_STATIC   0x0002 IS_DYNAMIC   0x0004 IS_KEYFRAMED
           0x0008 IS_ACTIVE   0x0010 RAISE_TRIGGER_EVENTS
           0x0020 RAISE_MANIFOLD_STATUS_EVENTS

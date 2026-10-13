@@ -5,8 +5,8 @@
 #
 # WHY THIS EXISTS
 #
-# The engine resolves every Controlled Block with
-# NiDefaultAVObjectPalette::GetAVObject (1.10.155 0x1bc1d20) on the palette the
+# The engine resolves every Controlled Block through a name lookup
+# (checked in Todd's treat) on the palette the
 # manager was loaded with, and never searches the tree. NifSkope used to call
 # Node::findChild and take the first name match. On a file where each node name
 # is unique the two agree on every row, so nothing observable separates the old

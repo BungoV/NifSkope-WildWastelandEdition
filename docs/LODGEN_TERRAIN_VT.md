@@ -341,7 +341,7 @@ against an independent top-down projection of the placed road meshes
 ### 1a.3 The mesh test
 
 `lodgenIsRoadModel()` plus the caller's `STAT` requirement. **Component
-equality, never a substring** -- `MISTAKES.md`'s "sTREEt" lesson has a live
+equality, never a substring** -- the private notes' "sTREEt" lesson has a live
 counter-example in Sanctuary, where twelve `SetDressing\RailRoad\
 WaxCandle02Off.nif` are placed and the letters `road` are in every one of their
 paths:

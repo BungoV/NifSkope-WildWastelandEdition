@@ -155,7 +155,7 @@ composition is owed this change** -- it is the reader half of the same ruling.
 | `Data\FO4CSLOD\<WS>\<WS>.lodl` | the whole-worldspace LANDSCAPE file: heights, per-texel LTEX opacities, per-cell water, AO, and (v3) water bodies | BTD Header, BTD Blocks | **yes**. ~~and FO4CS already reads it~~ (struck 2026-09-23) FO4CS's shipped parser reads only a v1 file at the OLD name and folder, `Data\Terrain\<EDID>.lodt`, so it reads no file a bake writes today — see §1.5 |
 | `Data\FO4CSLOD\<EDID>\<EDID>.VT.<dim>.lodt` | one terrain-texture PYRAMID container per level: colour, model-space normal, mask, optional height, optional emissive | VT 3.1, VT 2.2 | ~~**no** — VT 7: nothing has ever been written to disk~~ (struck 2026-09-23) **The first whole-Commonwealth pyramid was written 2026-09-23 08:17 by lane VTBAKE1**, into `scratchpad/vtbake1_20260923/bake/FO4CSLOD/Commonwealth/`: 5 levels, 12,276 tiles, about 4.0 GB, height sheet ON, cover OFF. Its validation is still running, and it is not in any mod folder |
 | `Data\FO4CSLOD\<EDID>\<EDID>.VT.lodm` | the pyramid INDEX: which containers, which sheets, the corpus hashes, the cover normalisation | VT 4, LODM 5 | ~~**no** — VT 7~~ (struck 2026-09-23) yes, from the same VTBAKE1 bake: `Commonwealth.VT.lodm`, 2,505 B. VT 4 still prints the old `Data\Terrain\` path. The writer uses this one |
-| `Data\FO4CSLOD\Cards\<formid8hex>_oct*.DDS` + `.lodm` | per-base octahedral impostor CARD sets | CARDS 1.1, LODM 3 | four libraries of 19 Sanctuary trees exist (CARDS 9). **All four were baked 2026-09-09, before the orthographic camera, the coverage contract and the 2026-09-19 azimuth repair, so every one is owed a re-bake** (HANDOFF 2026-09-19 09:5x; §5 row 22; found 2026-09-23); **no worldspace bake has ever written a card layer** — NATIVE 11, Deviation 5 |
+| `Data\FO4CSLOD\Cards\<formid8hex>_oct*.DDS` + `.lodm` | per-base octahedral impostor CARD sets | CARDS 1.1, LODM 3 | four libraries of 19 Sanctuary trees exist (CARDS 9). **All four were baked 2026-09-09, before the orthographic camera, the coverage contract and the 2026-09-19 azimuth repair, so every one is owed a re-bake** (private notes 2026-09-19 09:5x; §5 row 22; found 2026-09-23); **no worldspace bake has ever written a card layer** — NATIVE 11, Deviation 5 |
 | `<ws>.LodgenCards.<family>.<SW>x<SH>_*.DDS` + `.lodm` | CARD ARRAYS, one per (family, sheet size) | CARDS 1.2, LODM 4 | no |
 | `<ws>.LodgenArrays[PBR].<W>x<H>_*.DDS` + `.lodm` | mesh LOD TEXTURE ARRAYS, one per (family, texture size class) | ARRAYS 1, LODM 4 | **no** — ARRAYS 10 |
 | `<chunk>.bto.manifest.txt` | the per-placement manifest beside each stock `.BTO` | MANIFEST 1 | v2 has never been written to disk — MANIFEST 10 |
@@ -782,7 +782,7 @@ only the trees get baked for the cards"* (WW_CHANGES 2026-09-17, "Authored LOD m
    *"Dithered cross fade is good"*). FO4CS's own standing rule applies: a
    no-temporal-filter arm must be smooth within a single frame, so raw dither is
    only ever input to a temporal filter, never a shipped look (FO4CS
-   CONSTITUTION 8, amended 2026-09-01).
+   private rules, amended 2026-09-01).
 
 6. **The far shadow pass, as bungo ruled it on 2026-09-11 14:4x -> 15:0x.**
 
@@ -969,7 +969,7 @@ and multiplies its emissive by `emissiveScale` at night (bungo 2026-09-11 08:3x,
 verbatim: *"Yeah"*).
 
 **THE CARD LAW AS THE GENERATOR WRITES IT, 2026-09-23.** Sources: CARDS 2, 3.1-3.5, 3.7 and 4; IMPOSTOR_SPEC;
-HANDOFF 2026-09-19 to 2026-09-23. Where IMPOSTOR_SPEC and CARDS disagree, CARDS wins, by SPEC's own rule.
+the private notes of 2026-09-19 to 2026-09-23. Where IMPOSTOR_SPEC and CARDS disagree, CARDS wins, by SPEC's own rule.
 
 * **Grid.** N x N hemi-octahedral, `oct = N`, N squared views.
   * The bake accepts N = 2..16. The panel offers 4 / 6 / 8; the default is 8, with card tile 128.
@@ -1250,9 +1250,9 @@ itself draw. Apply the fade to AI, script or persistence distances.
 
 **RE CANDIDATES, named as candidates and not as facts.** The engine's fade
 compare site (shared with R3). The per-object draw-suppression site for a placed
-REFR inside a loaded cell. Both need the Todd's treat-first treatment FO4CS's own
-CONSTITUTION rule 5 requires for vanilla-engine research, with an RVA quoted per
-build for every fact relied on.
+REFR inside a loaded cell. Both need the Todd's treat-first treatment FO4CS's
+private rules require for vanilla-engine research, with every fact relied on
+checked in Todd's treat per build.
 
 ---
 
@@ -1395,7 +1395,7 @@ this table is a blocker for the rung it sits against unless the row says so.
 | 19 | ~~**a stale pair cannot name the plugin that went stale**~~ — **DONE 2026-09-17, lane BAKEREC1**: every bake now writes `Data\FO4CSLOD\<ws>\<ws>.lodb`, a plain-text bake record carrying the load order with a per-file FNV-1a 64 over each plugin's BYTES. `lodgen --native-verify` reads it beside the pair and a `loadOrderHash` / `pluginCorpusHash` refusal now names the file and says ADDED / REMOVED / REORDERED / RESIZED / **EDITED at the same byte size** — the last being the case `loadOrderHash` is structurally blind to. `lodgen --bake-record <ws.lodb> [<plugins>]` prints the whole record as keyword lines and exits 1 when a listed plugin moved. Format: `docs/LODGEN_BAKE_RECORD.md`; gate: `tests/spells/lodgen_bakerec.sh` | an operator handed *this pair is stale* had to guess which of thirty plugins to re-bake for, and a same-size in-place edit did not fire the refusal at all | BAKEREC1 | nothing; it unblocks lane INCR1, which reads this record to decide which chunks to re-bake |
 | 20 | **PENDING: IMPOSTORPBRM1.** Card specular weight, colour and IOR, and the TintMask applied in the bake. The scope was RULED 2026-09-23 07:5x and the lane is QUEUED. Where these live in the card sheets or the `.lodm` is not written yet (added 2026-09-23) | R4's pbr family cannot light a card the way its mesh is lit | IMPOSTORPBRM1 | R4's pbr look |
 | 21 | **PENDING: IMPOSTORWIND1.** Sway from the tree model's own wind weights (bungo 2026-09-23: *"sway from the tree's model's own wind weights would be neat"*). The lane is QUEUED: research first, then the sheet layout for his ruling (added 2026-09-23) | R4's sway reads the baked `h^2 x (0.35 + 0.65 r)` weight | IMPOSTORWIND1 | nothing; a look gap |
-| 22 | **PENDING: re-bake every card set older than 2026-09-19** (the azimuth repair; HANDOFF 2026-09-19 09:5x). That includes CARDS-AGG's sources and the four CARDS 9 libraries (added 2026-09-23) | R4 has no current-convention fixture at Commonwealth scale | a generator lane, or bungo's bake | R4's gate 1 fixture |
+| 22 | **PENDING: re-bake every card set older than 2026-09-19** (the azimuth repair; private notes 2026-09-19 09:5x). That includes CARDS-AGG's sources and the four CARDS 9 libraries (added 2026-09-23) | R4 has no current-convention fixture at Commonwealth scale | a generator lane, or bungo's bake | R4's gate 1 fixture |
 | 23 | **CANDIDATE, not ruled: the instance's MNAM slot is not stored.** The emitter knows which slot each instance drew (`LodiSrcInstance::mnamSlot`, `src/lodifile.h`), but the file only counts them (`slotInstances`). The vertex-AO and vertex-sky slices are matched to a mesh by LENGTH alone, and the viewer counts the mismatches (added 2026-09-23) | a reader cannot prove it picked the slot the AO was baked for when two slots' meshes share a vertex count | unowned | R1's AO and sky on a default (MNAM-slot) bake |
 | 24 | **the census `version` word still reads `lodo3/lodi3`** with refusals `refused:v1` / `refused:v2`, and it has no slot for the `.lodl` or `.lodt` version (CENSUS 2) (added 2026-09-23) | R0's `version` word has no correct spelling to copy | a census-page lane | R0's census row |
 | 25 | ~~**the census checker's 59 / 0 / 31 has not been re-run on a v4 pair**, and the cited pairs are v3, which the decoder refuses (added 2026-09-23)~~ — **DONE 2026-09-24, lane INCRGATE1**: re-run on row 26's default pair (`.lodo` 4 / `.lodi` 7) by `tests/spells/lodgen_sanctuary_pair.sh`: **38 ok / 0 RED / 32 not-derivable**, its own floor caught (2 of 3; the third, `level1.triangles`, is skipped by name because an authored-only pair has no level 1). The first run read 37 / **1 RED** / 31: `lodo.ladderGroup` 4 against 0. The file was right. The ladder is OFF by default, the census line prints the target a ladder would be built at, and the file writes 0 by contract (NATIVE 3, 0xCD). The checker is fixed, and a red leg shows ladderGroup doctored to 4 is still caught. The fall from 59 is the ladder's own words; the v3 figure stays historical | §4.5's figure cannot be reproduced today | a small generator lane | nothing; weakens §4.5 |
@@ -1542,7 +1542,7 @@ decided here.**
 * The cut: stipple, average or strongest frame.
 * The slider's default value. He ruled "the crisp side" but gave no number.
 
-HANDOFF 2026-09-23 07:2x: "open: his pick of grid + cut default, slider lane owed". The IMPOSTOR16 N8 measurement
+Private notes 2026-09-23 07:2x: "open: his pick of grid + cut default, slider lane owed". The IMPOSTOR16 N8 measurement
 is in R4.
 
 **(p) The coverage-cut domain FO4CS tests in.** Either:
@@ -1552,7 +1552,7 @@ is in R4.
 No ruling for FO4CS was found.
 
 **(q) Card lighting and layout:**
-* **Gloss and AO default.** HANDOFF 2026-09-23 05:5x: "open: gloss/AO default = his call".
+* **Gloss and AO default.** Private notes 2026-09-23 05:5x: "open: gloss/AO default = his call".
 * **The `_n` height <-> sway swap.** It is PREPARED and not applied. If ruled, it adds `"nlayout": 2` and older
   sets are refused by name (WW_CHANGES 2026-09-22).
 * **Whether to keep the lit card** (WW_CHANGES 2026-09-22).
@@ -1570,7 +1570,7 @@ No ruling for FO4CS was found.
 * The source accepts up to 10 sheets and role 7.
 * VT 3.4 rule 13 says 1-6 sheets and refuses any role above 6.
 
-**(t) `cardCorpusHash` is zero on every bake.** HANDOFF 2026-09-17 AUDIT1, "ROWS FOR BUNGO".
+**(t) `cardCorpusHash` is zero on every bake.** Private notes 2026-09-17 AUDIT1, "ROWS FOR BUNGO".
 
 **(u) Store the instance's MNAM slot in the `.lodi`, or keep matching AO and sky slices by length?** (§5 row 23.)
 This is a candidate question from this lane, not one bungo has been asked.
@@ -1606,7 +1606,7 @@ was written, and the FO4CS tree is another project's live worktree. **Since 2026
 2026-09-23 (this footer's version table), the page also cites source by ANCHOR**, with the
 quoted text beside each cite, re-derived at the end of lane PLANSYNC1. Every other claim
 above is anchored to a contract SECTION, which is stable across edits, or to a
-ruling paragraph in `HANDOFF.md` quoted verbatim.
+ruling paragraph in the private notes, quoted verbatim.
 
 ### The contract pages this plan is written against
 
@@ -1756,18 +1756,15 @@ edit (steps 1 and 5):
 
 ### The rulings quoted, and where they live
 
-Every bungo quotation above is from `HANDOFF.md` in this tree. **That file moved
+Every bungo quotation above is from the project's private notes. **They moved
 while this lane was writing** — the director appended the shadow rulings of
-2026-09-11 14:4x -> 15:0x during the lane — so its hash is stated as two values
-rather than one: **`81fdc08dfa8b7707`** (297,028 bytes, 4,452 lines) when this
-lane started and **`8a7fce2f67c7f898`** (302,554 bytes, 4,531 lines) when it
-finished. The shadow rulings arrived in that difference and were read in full from
-the file, not from a summary; they are quoted in R1, in R3 and in §3 item 3.
+2026-09-11 14:4x -> 15:0x during the lane. The shadow rulings were read in full,
+not from a summary; they are quoted in R1, in R3 and in §3 item 3.
 
 ### The FO4CS tree, read READ-ONLY
 
-`E:\Projects\Fo4CommunityShaders`, 2026-09-11: `wt-fixfirst/CONSTITUTION.md`,
-`wt-fixfirst/ROADMAP.md` (the LOD campaign block), `Codex/HANDOFF.md` (the
+`E:\Projects\Fo4CommunityShaders`, 2026-09-11: its private rules,
+`wt-fixfirst/ROADMAP.md` (the LOD campaign block), its private notes (the
 2026-09-09 15:34 and 15:35 rulings), `Codex/lod-fo4-vs-fo76-comparison.md`,
 and the FarField module as the worked example of a loader plus a draw path
 (`src/FeatureModule.h`, `src/FarField/FarFieldShadowsSettings.h`,
@@ -1804,7 +1801,7 @@ Phases as understood, each its own brief later:
    their XLIG/XRDS data. Draws the cell in the viewport as placed NIFs. Fallback:
    the current one-NIF document. Module-level switch, ships OFF by default.
 2. **Vanilla lighting 1:1**: the BSLightingShaderProperty model as the shipped
-   game evaluates it. VANILLA research = Todd's treat FIRST (RVA per build), ground truth =
+   game evaluates it. VANILLA research = Todd's treat FIRST (checked per build), ground truth =
    RenderDoc captures of the stock game, plus the stock shader bytecode
    (`Fallout4 - Shaders.ba2`) and FO4CS's own ported vanilla HLSL. Inputs from
    the ESM: WTHR/CLMT sun + ambient (DALC directional ambient), LGTM/XCLL

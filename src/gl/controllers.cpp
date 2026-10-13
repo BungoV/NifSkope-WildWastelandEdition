@@ -121,17 +121,17 @@ void SeqBind::reset()
 
 /*! Name -> block number, read out of the manager's `NiDefaultAVObjectPalette`.
  *
- *  This is the map the game uses. `NiControllerSequence::StoreTargets`
- *  (1.10.155 `0x1c14ff0`) resolves every Controlled Block's Node Name with
- *  `NiDefaultAVObjectPalette::GetAVObject` (`0x1bc1d20`) — a CRC32 hash of the
+ *  This is the map the game uses. When a sequence binds its targets, the game
+ *  resolves every Controlled Block's Node Name through
+ *  the palette (checked in Todd's treat) — a CRC32 hash of the
  *  name into a table — and never searches the scene graph. The palette it uses
- *  is the one **in the file**: `NiControllerManager::LoadBinary` (`0x1c0c260`)
+ *  is the one **in the file**: loading the controller manager
  *  resolves the link straight into the manager and nothing rebuilds it at load.
  *
  *  So the file, not the tree, decides which node a name means. That matters
  *  whenever two nodes share a name — which merged files produce constantly.
  *  `Node::findChild` returns the FIRST match in pre-order; when the engine does
- *  rebuild a palette it overwrites (`SetAVObject`, `0x1bc25b0`, calls `SetAt`),
+ *  rebuild a palette it overwrites existing entries,
  *  so the LAST match in the same pre-order wins. Same traversal, opposite
  *  answer, and nothing in a name search can tell which one the author meant.
  *
@@ -1935,7 +1935,7 @@ static float tlBoltRandom( quint32 & state, float range )
 	return float( double( state ) * ( 1.0 / 4294967296.0 ) ) * range;
 }
 
-//! Uniform integer in [lo, hi), the shape of the engine's BSRandom::UnsignedInt
+//! Uniform integer in [lo, hi), the shape of the engine's uniform integer draw
 static int tlBoltRandInt( quint32 & state, int lo, int hi )
 {
 	if ( hi <= lo )
@@ -1943,15 +1943,15 @@ static int tlBoltRandInt( quint32 & state, int lo, int hi )
 	return lo + int( tlBoltRandom( state, float( hi - lo ) ) );
 }
 
-/*! The engine's displacement, `BSProceduralGeometry::Lightning::OffsetHelper`
- *  (1.10.155 `0x1cdc820`), on the v/w components of an (axial, v, w) polyline.
+/*! The engine's lightning displacement (checked in Todd's treat),
+ *  on the v/w components of an (axial, v, w) polyline.
  *
  *  It is NOT midpoint displacement. One random direction is drawn for the whole
- *  span — `BSRandom::FloatTwoPi` then cos/sin times the amplitude — and applied
+ *  span — a random angle in [0, 2pi) then cos/sin times the amplitude — and applied
  *  across it under a tent weight `1 - |t - 0.5| * 2`, which is zero at both ends
  *  and one in the middle. The span is then halved and each half redrawn with a
- *  fresh direction at half the amplitude. The three constants are read out of the
- *  exe at `0x2c48d60`, `0x2c4b1a0` and `0x2c49180`: 1.0, 0.5, 2.0.
+ *  fresh direction at half the amplitude. The three constants, read out of the
+ *  game: 1.0, 0.5, 2.0.
  *
  *  The difference from per-vertex jitter is what it looks like: a tent bends the
  *  whole span one way, so the bolt is a chain of smooth arcs, where independent
@@ -2172,8 +2172,8 @@ void ProcLightningController::regenerate( quint32 tick, quint32 offsetTick )
 
 	/* Subdivisions is a RECURSION DEPTH: a branch has 2^Subdivisions segments.
 	 *
-	 * `GetBranchVerts(s) = (1 << s) * 4 + 4` and `GetBranchTris(s) = (1 << s) * 4`
-	 * (1.10.155 `0x1cdc670`, `0x1cdc690`) — four verts a ring, four triangles a
+	 * The engine's vertex count is `(1 << s) * 4 + 4` and its triangle count `(1 << s) * 4`
+	 * (checked in Todd's treat) — four verts a ring, four triangles a
 	 * segment, so 2^s segments and 2^s + 1 rings. This used to be read as a
 	 * segment count rounded to a power of two, on the evidence that a depth
 	 * reading looked wrong on screen; it did, but that test predates the span fix
@@ -2189,11 +2189,11 @@ void ProcLightningController::regenerate( quint32 tick, quint32 offsetTick )
 	 *
 	 * `tick` seeds the branch STRUCTURE — how many branches, how deep, how long.
 	 * That only changes when the file says so, on a Generation or Mutation
-	 * toggle, which is the full-regenerate path at `0x1cf5ce5`.
+	 * toggle, which is the engine's full-regenerate path.
 	 *
 	 * `offsetTick` seeds the DISPLACEMENT alone. When `Animate Arc Offset` is
-	 * set, the engine re-runs Process every update on the cheaper path at
-	 * `0x1cf5c32`, keeping the branches and re-offsetting them — which is what a
+	 * set, the engine re-runs its geometry pass every update on the cheaper path,
+	 * keeping the branches and re-offsetting them — which is what a
 	 * bolt crawling in place looks like. Feeding both from one seed would put the
 	 * whole tree back in the blender every frame; feeding only the first is what
 	 * left these bolts frozen.
@@ -2206,7 +2206,7 @@ void ProcLightningController::regenerate( quint32 tick, quint32 offsetTick )
 		rngState = 1;	// xorshift cannot escape zero
 
 	/* The branch tree first, geometry after — the engine's own split, and the
-	 * reason the two halves are separable at all: `CreateBranches` (`0x1cdc6d0`)
+	 * reason the two halves are separable at all: the engine's branch step
 	 * only decides how many branches exist and how each is shaped.
 	 *
 	 *     count = rand[ max(A - B, 0), A + B + 1 )        A = Num Branches
@@ -2243,7 +2243,7 @@ void ProcLightningController::regenerate( quint32 tick, quint32 offsetTick )
 			spawn( at, childSubdiv, A, B, parent.gen + 1 );
 	}
 
-	/* Geometry, per branch, from `Lightning::Process` (`0x1cdb2c0`):
+	/* Geometry, per branch, from the engine's geometry pass:
 	 *
 	 *     len       = Length * 0.5^gen + rand(-1,1) * LengthVar * 0.25^gen
 	 *     amplitude = Arc Offset * 0.5^gen
@@ -2274,7 +2274,7 @@ void ProcLightningController::regenerate( quint32 tick, quint32 offsetTick )
 		b.length = effLength * genHalf
 			+ ( tlBoltRandom( rngState, 2.0f ) - 1.0f ) * effLengthVar * genQuarter;
 
-		/* Where a child starts: `GetRandomBranchPos` (`0x1cdc9c0`) picks a ring
+		/* Where a child starts: the engine picks a ring
 		 * uniformly in [0, 2^(subdiv-1)) — the FIRST HALF of the parent's rings —
 		 * and takes the midpoint of two of that ring's four verts, which is the
 		 * ring's centre on the axis. Branches therefore leave the parent low down
@@ -2338,12 +2338,12 @@ void ProcLightningController::updateTime( float time )
 	 * This used to hunt for a `<name>_Start` ancestor and a `<name>_End` node of
 	 * the same stem, and stretch the bolt between them — a convention read off the
 	 * shieldtesla and edison_pa rigs, i.e. a guess. The engine does no such thing.
-	 * Walked in Todd's treat (1.10.155): BSProceduralLightningController::Update ->
-	 * UpdateGenerationParams / UpdateProcessParams / AddTasklet ->
-	 * BSProceduralGeometry::Lightning::CreateInstance / Process. Not one of them
+	 * Walked in Todd's treat (1.10.155): the controller update, its parameter
+	 * updates, and the lightning geometry's build and per-frame pass.
+	 * Not one of them
 	 * touches a BSFixedString or searches the scene; the whole path takes the NIF's
-	 * own fields and writes into the target's geometry. Process starts at
-	 * NiPoint3::ZERO and lays each ring at Y = segment * (length / segments), with
+	 * own fields and writes into the target's geometry. The geometry pass starts at
+	 * the origin and lays each ring at Y = segment * (length / segments), with
 	 * the four verts of the ring at +-width in X and +-width in Z — so the axis is
 	 * local +Y, the origin is the target, and Length is what Length says.
 	 *
@@ -2426,13 +2426,13 @@ void ProcLightningController::updateTime( float time )
 
 	/* When the bolt re-rolls.
 	 *
-	 * There is no cadence in the engine. `Lightning::Process` holds three float
+	 * There is no cadence in the engine. Its lightning geometry pass holds three float
 	 * constants — 1.0, 0.5, 0.25 — and none of them is a rate; the 1/24 s that
 	 * used to be here was invented and only looked right because the shieldtesla
 	 * Mutation keys happen to be dense. What actually happens
-	 * (`BSProceduralLightningController::Update`, 1.10.155 `0x1cf5bea`) is that
-	 * Generation and Mutation are BOOL curves whose values are cached at `+0x1a0`
-	 * and `+0x1a1`, and a full regenerate is forced on the frame either one
+	 * (the controller's update, checked in Todd's treat) is that
+	 * Generation and Mutation are BOOL curves whose last values the controller caches,
+	 * and a full regenerate is forced on the frame either one
 	 * CHANGES. Between changes the branch structure is kept. So the rate a bolt
 	 * reshapes at is authored, per asset, in the Mutation curve.
 	 *
@@ -2447,9 +2447,9 @@ void ProcLightningController::updateTime( float time )
 
 	/* ...and when it wobbles between those re-rolls.
 	 *
-	 * `Animate Arc Offset` is the engine's gate for running Process at all
-	 * between structure changes (`0x1cf5c04`: if the flag is clear it returns
-	 * without touching the geometry). With it set, Process runs EVERY update and
+	 * `Animate Arc Offset` is the engine's gate for running the geometry pass at all
+	 * between structure changes (if the flag is clear it returns
+	 * without touching the geometry). With it set, the pass runs EVERY update and
 	 * re-offsets the existing branches. The X-01 bolts set it, and they are
 	 * driven by their own interpolators rather than by a sequence — so
 	 * `mutKeys` and `genKeys` are both empty, the tick above never moves, and
@@ -2460,7 +2460,7 @@ void ProcLightningController::updateTime( float time )
 	 * The engine's cadence here is "once per rendered frame", which is not a
 	 * function of time and so cannot be reproduced when scrubbing. This quantises
 	 * it. 30 Hz is a PREVIEW CHOICE, not a constant from the engine — there is no
-	 * rate anywhere in Process — chosen because it is the key spacing FO4's own
+	 * rate anywhere in that pass — chosen because it is the key spacing FO4's own
 	 * effect curves are authored at.
 	 */
 	const quint32 offsetTick = animateArc
@@ -2547,7 +2547,7 @@ bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vec
 	}
 
 	/* Every branch shares ONE frame. The engine has no per-branch direction:
-	 * `Lightning::Process` lays each branch's rings along +Y from its own origin
+	 * The engine's lightning geometry pass lays each branch's rings along +Y from its own origin
 	 * and the forking look comes entirely from the displacement. So a point is
 	 * just the axis frame applied to the (axial, v, w) the generator produced,
 	 * and the per-bolt frames, parent tangents and root parameters this used to
@@ -2681,8 +2681,8 @@ bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vec
 		for ( int i = 0; i < b.pts.size(); i++ )
 			wpts.append( boltPoint( b, i ) );
 
-		/* halfWidth = Width * ChildWidthMult^gen * 0.5, straight out of Process
-		 * (`0x1cdb46b`-`0x1cdb4ad`: powf(ChildWidthMult, gen), times params+0x8,
+		/* halfWidth = Width * ChildWidthMult^gen * 0.5, straight out of the engine's geometry pass
+		 * (powf(ChildWidthMult, gen), times the Width,
 		 * times 0.5). The old two-level tree open-coded the same rule as
 		 * childWidthMult and childWidthMult squared; this is it for any depth.
 		 */

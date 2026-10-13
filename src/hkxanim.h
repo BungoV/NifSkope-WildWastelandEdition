@@ -4,7 +4,7 @@
    motion (hkaDefaultAnimatedReferenceFrame).
 
    The format contract, every offset traced to the 1.10.155 exe's hkClass
-   reflection and to the engine's own decoder disassembly, is
+   reflection and to the engine's own decoder (checked in Todd's treat), is
    docs/HKX_ANIMATION_FORMAT.md. This reader implements exactly what that page
    states and refuses, by name, everything it does not (lane HKX1, 2026-09-10).
 

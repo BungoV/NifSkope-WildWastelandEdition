@@ -77,7 +77,7 @@ while IFS=$'\t' read -r places rel; do
 	# and vanilla never does that -- 1,334 of 1,334 corpus files with collision
 	# carry exactly one hknpPhysicsSystemData, with each bhkNPCollisionObject
 	# naming its own body through Body ID. OfficeFileCabinet01 shipped with two
-	# and crashed the game inside bhkNPCollisionObject::CreateInstance. Merge
+	# and crashed the game inside its collision-object creation. Merge
 	# first, THEN reorder, because the merge appends its own blocks.
 	"$NS" -no-gui cast "$W/a.nif" -s "Havok/Merge Physics Systems" -o "$W/g.nif" >/dev/null 2>&1
 	[ -s "$W/g.nif" ] && mv -f "$W/g.nif" "$W/a.nif"

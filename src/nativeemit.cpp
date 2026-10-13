@@ -2218,7 +2218,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	int swapPairsHit = 0, swapVariantMeshes = 0, swapVariantRows = 0, swapVariantLoadFailed = 0;
 	int swapMissingRecord = 0, swapCnamRows = 0, swapUnreadable = 0, swapRefusedLoader = 0;
 	/* Lane FIX1: the CNAM rows as the GAME applies them. The engine (1.10.155,
-	 * the MSWP lambda of BGSModelMaterialSwap::Apply) takes a row's colour-remap
+	 * when it applies an MSWP material swap) takes a row's colour-remap
 	 * index only when it is below FLT_MAX, and writes it to the material's
 	 * fLookupScale (the grayscale-to-palette row) only on a property with
 	 * SLSF1 Greyscale_To_PaletteColor. So a CNAM on a material without that

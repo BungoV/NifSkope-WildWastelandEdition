@@ -7,7 +7,7 @@
   independent brute-force one-bounce tracer (`tests/bounce_reference.cpp`) agrees with the probe GI within 8% in a
   colour-bleed box (`tests/spells/bounce_bleed.py`) and within ~25% at Goodneighbor's probes. The cause was the
   sun: the game multiplies the hour's imagespace Sunlight Scale (CommonwealthClear noon 4.5) into its lit
-  surfaces' sun (1.10.155 BSLightingShader / BSDFLightShader read ImageSpaceManager+0x98), the viewer used x1. The
+  surfaces' sun (checked in Todd's treat), the viewer used x1. The
   sun bounce therefore sat 4.5x low against the weather ambient it replaces.
 - `wwLookdevSunlightScale()` (`src/gl/lookdevstage.*`) now scales, outdoors under a weather: the cell programs'
   sun (`src/gl/celllights.cpp`, telemetry `sunlight scale=`), the lit effects' sun (they took it already, now the
@@ -104,10 +104,10 @@
 - **Ground steam no longer draws near-white: lit effects take the surfaces' sun scale (ALLON2's cause, ported).**
   The cell view multiplied lit effects (BSEffectShader with lighting on) by the image space's Sunlight Scale (4.5 in
   CommonwealthClear) while surfaces took 1. The game applies the same scale to both (checked in Todd's treat:
-  BSEffectShader::SetupGeometry and BSLightingShader's directional setup read the same image space field).
+  the game's lit-effect setup and its surface directional-light setup read the same image space field).
   `src/gl/celllights.cpp` now gives lit effects the surfaces' scale, outdoors and indoors. Red:
   `WW_CELL_FXLIT_SCALE_RED=game`.
-- **Lit effects take the weather's Effect Lighting colour, not the Sunlight colour.** Sun::Update copies the
+- **Lit effects take the weather's Effect Lighting colour, not the Sunlight colour.** The game's per-frame sun update copies the
   weather's Sunlight row into the sun light's diffuse and its Effect Lighting row (NAM0 row 9) into the light's
   effect colour; the effect shader reads the effect colour. CommonwealthClear's day Effect Lighting is 0.41x the
   Sunlight in linear terms. `src/esmweather.h` names the row (`WwRowEffectLighting`); `src/gl/lookdevstage.*`
@@ -1671,7 +1671,7 @@ Committed and pushed to origin main the same evening, by path list:
 
 Documentation only; no code behaviour changed. References to where our engine research comes
 from now use one stand-in name, "Todd's treat", and its query tools are described as kept
-outside this repo. Every function name, RVA, offset and finding is unchanged.
+outside this repo. Every finding is unchanged.
 
 - The engine comparison doc is now `docs/WW_ENGINE_COMPARISON.md`; every citation of it
   follows.
@@ -1969,7 +1969,7 @@ uncompressed.
 
 **The element order was measured, not assumed.** Lane HKXCLASS's proof clip has
 one track, on which frame-major and track-major are the same bytes. The engine's
-own `hkaInterleavedUncompressedAnimation::transformTrack` (rva `0x01fa1ac0`)
+own per-track transform read for interleaved animations
 computes `data + 48 * (frame * numberOfTransformTracks + track)` and derives the
 frame count by dividing `transforms.size` by the track count — both are now
 laws the writer obeys and the decoder gates on.
@@ -2144,18 +2144,17 @@ Python decoder, both routes), `tests/spells/hkxanim_gates.py` /
 `.claude/skills/ww-hkx-animation/SKILL.md` (NEW), `MISTAKES.md` (5 entries),
 `scratchpad/hkx1_20260910/`, `scratchpad/lane_hkx1_report.md`.
 
-**The format, from the exe.** The `hkClass` reflection arrays of the 1.10.155
-exe name every serialised member and its offset (`hkaSplineCompressedAnimation::Members`
-at RVA 0x2e46140: numFrames +0x38, numBlocks +0x3c, maxFramesPerBlock +0x40,
+**The format, from the game.** The `hkClass` reflection arrays the game ships
+name every serialised member and its offset (`hkaSplineCompressedAnimation`:
+numFrames +0x38, numBlocks +0x3c, maxFramesPerBlock +0x40,
 maskAndQuantizationSize +0x44, blockDuration +0x48, frameDuration +0x50,
 blockOffsets +0x58, floatBlockOffsets +0x68, data +0x98; `hkaSkeleton`: name
 +0x10, parentIndices +0x18, bones +0x28, referencePose +0x38;
 `hkaAnimationBinding`: originalSkeletonName +0x10, transformTrackToBoneIndices
 +0x20, blendHint +0x50). The block layout, which reflection does not describe,
-is read off the engine's own decoder (`samplePartialTracks` 0x1ec4140,
-`readNURBSCurve<1>` 0x1ec5e50, `readKnots` 0x1ec55e0,
-`hkaSignedQuaternion::unpackSignedQuaternion40` 0x1fbfa00 / `48` 0x1fbfc30,
-`hkaDefaultAnimatedReferenceFrame::getReferenceFrame` 0x1f9ea20): 4-byte masks
+is read off the engine's own decoder (its track sampler, its spline-curve and
+knot readers, its 40- and 48-bit packed-quaternion unpackers and its root-motion
+reader, checked in Todd's treat): 4-byte masks
 per track, per-axis static/spline vector channels with (min,max) ranges and
 16-bit control points, packed quaternion splines (THREECOMP40 = 3x12 bits +
 missing index + sign, scale (sqrt2/2)/2047; THREECOMP48 = 3x15 bits, scale
@@ -4094,7 +4093,7 @@ are right; the hex beside them is not.
 | `OBJ_VERTEX_DESC` | 474,989,027,590,661 | `0x1B00000650405` | `0x0001B00000430205` |
 | `OBJ_VERTEX_DESC_COLORS` | 1,037,939,064,898,054 | `0x3B00000650406` | `0x0003B00005430206` |
 
-Decoded through `BSVertexDesc::ResetAttributeOffsets( 130 )`, the old object
+Decoded with the game's own vertex-attribute offset rule, the old object
 value puts UV at +16, the normal at +20 and **no colour channel at all** - a
 reader trusting it samples normal and tangent bytes as an object id, which is
 the exact failure the terrain harness once had. The old terrain value puts UV at
@@ -6633,7 +6632,7 @@ New checker `Outfit Sidecars` (`spCheckOutfitSidecars`), six findings:
 | subsegments but no `SSF File` | nothing hides when a limb comes off | Generate Segment File (.ssf) |
 | `SSF File` names another mesh's file | a copied outfit loads the ORIGINAL's dismemberment data, or none | same |
 | `SSF File` set, file not beside the mesh | same silence as having no file | same |
-| a shape is not a key in the .ssf | LoadSSF matches BY NAME, so renaming a shape orphans it — the bug Bethesda shipped in `mcoatpostwar.ssf` | same |
+| a shape is not a key in the .ssf | the game's .ssf loader matches BY NAME, so renaming a shape orphans it — the bug Bethesda shipped in `mcoatpostwar.ssf` | same |
 | a sidecar will not parse | the reader gives up on the whole file | none |
 | .sclp names a bone outside the 48 | that entry is ignored in game; usually a typo | none |
 
@@ -6679,8 +6678,8 @@ Shape keys are matched case-insensitively, for the same reason the comparison
 is: BSFixedString identity.
 
 An authored id whose subsegment the mesh no longer has is **dropped and
-reported**. It addressed nothing the engine could reach either — `ApplyTo`'s
-lambda bails when the segment holds fewer subsegments than the id names — but
+reported**. It addressed nothing the engine could reach either — the game's segment-flag
+apply step bails when the segment holds fewer subsegments than the id names — but
 it is still someone's decision going missing, so it is counted out loud rather
 than in silence.
 
@@ -6725,7 +6724,7 @@ subsegments and no owners on MaleBody and sidestepped the field entirely.
 **The fix is to stop reading that field for this.** Both readers now resolve
 shared entries the way the ENGINE does — `SegmentStarts[segment]` for the
 segment, `+ 1 + ordinal` for its subsegments, which is
-`BSGeometrySegmentFlagData::ApplyTo`'s lambda at 1.10.155 `@0x1b9eb50`. That is
+how the game applies segment flags to a shape (checked in Todd's treat). That is
 convention-independent, so files this fork already wrote read correctly too and
 no migration is owed. The writer now emits vanilla's convention as well.
 
@@ -6762,28 +6761,28 @@ either way.
 ## 2026-09-03 — Outfit sidecars: NifSkope writes .ssf and .sclp
 
 Two JSON files ship beside Fallout 4's outfit meshes, and nothing in this fork
-could make either. Both readers were disassembled out of 1.10.155 rather than
+could make either. Both readers were checked in Todd's treat rather than
 inferred, and both writers are now spells on the Rigging page, castable
 headlessly (`nifskope-cli cast -s "Rigging/Generate Segment File (.ssf)"`).
 Harness `tests/spells/outfit_sidecars.sh`, 8 of 8.
 
 ### What a .ssf is
 
-`BSGeometrySegmentSharedData::LoadSSF` (@0x1b9b9c0) opens the path in a
+The game's .ssf loader opens the path in a
 `BSSubIndexTriShape`'s "Segment Data / SSF File" field, looks the SHAPE UP BY
 NAME among the top-level keys, and hands that object to
-`BSGeometrySegmentFlagData::ReadFromJson` (@0x1b9a9f0). What it builds is a map
+its JSON segment-flag reader. What it builds is a map
 from a segment ADDRESS to a BONE NAME, and **the bone name doubles as the
-visibility flag**: `GetEnabled` (@0x1ed2b0) is literally
-`GetSegmentBoneName(id) != "DISABLED"`, and `DisableSegment` (@0x1ed2a0) is
-`SetSegmentBoneName(id, "DISABLED")`. It is the dismemberment table: which
+visibility flag**: a segment is enabled exactly when its bone name is not
+`"DISABLED"`, and disabling a segment sets its bone name to
+`"DISABLED"`. It is the dismemberment table: which
 triangles vanish with which limb, and which caps appear in their place.
 
-- **The address is six instructions.** `BSGeometrySegmentID::GetSegmentID`
-  (@0x1289b30) is `((segment << 8) | subsegment) << 8`, so `131840` is
+- **The address is a one-line formula.** The game builds a segment id as
+  `((segment << 8) | subsegment) << 8`, so `131840` is
   `0x020300` — segment 2, subsegment 3 — and the low byte is always zero.
 - **The second byte is an ORDINAL, not a User Index.** The consumer, the
-  `ApplyTo` lambda @0x1b9eb50, resolves it as
+  game's segment-flag apply step, resolves it as
   `SegmentStarts[segment] + 1 + subsegment`, with `0xFF` addressing the segment
   itself. The two readings agree on most of the corpus and disagree on
   OutfitM's left arm, whose User Indices run 1, 2, 3, 160, 60 — which is what
@@ -6832,10 +6831,10 @@ docs/TO_BE_IMPLEMENTED.md.
 
 ### What a .sclp is
 
-`TESObjectARMA::ImportBoneScaleModifiers` (@0x32f3a0) swaps the model path's
-extension for `.sclp`, reads the JSON, and fills a `BSFixedString -> NiPoint3`
-map that reaches the skeleton through `TESNPC::FillBoneScaleMap` and
-`BSFlattenedBoneTree::SetBoneScale`. It is the body shape an outfit imposes on
+The game's armor-addon load swaps the model path's
+extension for `.sclp`, reads the JSON, and fills a bone-name -> (x, y, z)
+scale map that reaches the skeleton through the NPC's bone-scale map and
+the skeleton's per-bone scale. It is the body shape an outfit imposes on
 whoever wears it — how a raider looks beefy in armour and slim in a dress with
 one body mesh. All 54 shipped files carry the same 48 `*_skin` tri-scale bones,
 52 of them in the same order, and **2551 of their 2592 entries leave x at
@@ -6905,7 +6904,7 @@ sample had not.
   feral ghoul skeleton's node name "HEAD".
 
 **The numbers, with the comparison done case-insensitively** — which it must be,
-because `LoadSSF` matches a shape by BSFixedString identity and that pool is
+because the game's .ssf loader matches a shape by interned-string identity and that pool is
 case-insensitive, which is how vanilla's `fatiguesm.ssf` keys
 `BaseMaleBody_fitted:0` against a shape the NIF calls `BaseMaleBody_Fitted:0`:
 
@@ -7342,11 +7341,11 @@ those 66 bytes were this.
 
 The wider miss is the ORDER. This project's rule is Todd's treat first for vanilla engine
 behaviour — through the Todd's treat tooling (kept outside this repo) — and every in-game collision
-defect before this one was found by disassembling the engine, not by diffing
+defect before this one was found by reading what the engine does, not by diffing
 bytes. Byte diffs answer "is our file the same"; they cannot answer "what does
 the engine do with it". Asked properly, Todd's treat gave straight answers in minutes:
-`hknpRagdollData::checkConsistency` is `ret 0`, so nothing validates our data,
-and `hkbnpRagdollInterface::getOriginalMassOfBody` reads mass through
+the ragdoll consistency check is an empty stub, so nothing validates our data,
+and the ragdoll's original-mass read goes through
 cinfo +0x0c → dyn_inertia stride 0x70, +0x04 — exactly where we write it, so that
 path was never the problem.
 
@@ -7965,16 +7964,10 @@ is one of exactly four things, and the rule above reproduces all four:
 ### What USER_FLAG_0 means, which decided how to handle it
 
 08-22j filed it as unknown and leaned towards dropping it. It is not droppable.
-The add-to-world path reads it (@0x1d73cfa):
-
-    call bhkNPCollisionObject::AccessBody
-    test dword ptr [rax + 0x40], 0x10000     ; USER_FLAG_0
-    je   skip
-    mov  edx, 2 ; call bhkNPCollisionObject::SetMotionType
-    and  dword ptr [rbx + 0x40], 0xfffeffff  ; and clear it
-
-and `SetMotionType` @0x1d7ebd0 with 2 bails if the body is already keyframed,
-then runs `hknpMotionCinfo::initializeAsKeyFramed`. So the flag is a one-shot:
+The engine's add-to-world step reads it: when a body's flags carry
+USER_FLAG_0 (0x10000), it switches the body to keyframed and then clears the
+bit. The switch does nothing if the body is already keyframed, and otherwise
+sets it up as a keyframed motion. So the flag is a one-shot:
 **enter the world KEYFRAMED, then forget you were asked.**
 
 Which is exactly how a destructible ships. The body carries real mass and inertia
@@ -7990,9 +7983,9 @@ ours entered the world dynamic and got pushed. With the flag carried they hold
 when walked into and break when shot, which is vanilla's behaviour. So both
 symptoms had ONE cause: a word Compile wrote as zero.
 
-The reading was derived from four instructions and a corpus split before any of
+The reading was derived from the engine's own handling and a corpus split before any of
 it was tested, and the test agreed. Worth noting which order that happened in:
-the disassembly said what the bit DOES, the corpus said WHICH bodies carry it,
+the engine said what the bit DOES, the corpus said WHICH bodies carry it,
 and the two together made a prediction specific enough to be wrong. It was not.
 
 ### The lane
@@ -8036,22 +8029,21 @@ by hand-patching a shipped railing back to vanilla's value and changed nothing.
 So the question stopped being "which material do we get wrong" and became "what
 does the engine read to choose an impact sound at all".
 
-Three functions, and the answer is in the name of the first one:
+Three steps, and the answer is in the name of the first one:
 
-    FOCollisionListener::OnContactImpulseEvent          1.10.155 @0x630c60
-        matA = bhkUtilFunctions::GetMaterialForShape(bodyA->m_shape, keyA)
-        matB = bhkUtilFunctions::GetMaterialForShape(bodyB->m_shape, keyB)
-        BGSImpactManager::ProcessEvent({matA, matB, contactPos, velocity})
+    the game's contact-impulse listener (it only runs on a contact IMPULSE event)
+        looks up a material for each body's shape at the contact's shape key
+        hands both materials, the contact point and the velocity to the impact system
 
-    bhkUtilFunctions::GetMaterialForShape              @0x1d8c300
-        shapeKey == 0xffffffff  -> shape->m_userData, the u32 at +0x18
-        !(shape->m_flags & 4)   -> 0, no material at all (bit 2 is COMPOSITE)
+    the material lookup for a shape
+        shape key 0xffffffff    -> the shape's userData, the u32 at +0x18
+        shape flags without bit 2 (COMPOSITE) -> no material at all
         otherwise decode the leaf for that key, falling back to +0x18 if it is 0
 
-    BGSImpactManager::ProcessEvent                     @0xd19e00
-        GetMaterialFromID(matA); GetMaterialFromID(matB)
-        EITHER null and it returns -- silence for BOTH surfaces, not one
-        then PlayCollisionSound(A,B) and PlayCollisionSound(B,A)
+    the impact system
+        resolves both material ids
+        EITHER missing and it returns -- silence for BOTH surfaces, not one
+        then plays the collision sound both ways round
 
 That also explains why patching the header changed nothing. For a composite shape
 +0x18 is only the fallback, and the leaf resolves first; the hypothesis was right
@@ -8064,7 +8056,7 @@ it, and we do not set the flag.
 
 The exe carries Havok's own reflection tables -- `<Class>Class_Members`, arrays
 of `hkClassMember` at 0x28 bytes each, each with a name pointer and an offset.
-They are const data, readable straight out of the 1.10.155 image, and they settle
+They are const data in the game itself, and they settle
 layouts we had been deriving by signature scan:
 
     hknpBodyCinfo   +0x00 shape        +0x08 reservedBodyId  +0x0c motionId
@@ -8093,17 +8085,14 @@ the permuted body order never was a difference in that word. And
 
 ### The flag
 
-`hknpBody::initialize` @0x14daaf0 ends:
-
-    mov eax, [cinfo+0x14] ; mov [body+0x44], eax     collisionFilterInfo
-    mov eax, [cinfo+0x18] ; and eax, 0xfffffff0      cinfo.flags, low 4 bits dropped
-    or  eax, 0x400        ; mov [body+0x40], eax
-
-`initializeStaticBody` / `initializeDynamicBody` then OR in IS_STATIC or
-IS_DYNAMIC, which is why the low four bits are discarded. **Every other bit of
+When the engine builds a live body from a cinfo, it copies
+`collisionFilterInfo` straight across, and takes `flags` with the low four
+bits dropped and 0x400 (TEMP_REBUILD_COLLISION_CACHES) added. The static and
+dynamic setup then OR in IS_STATIC or IS_DYNAMIC, which is why the low four
+bits are discarded. **Every other bit of
 `hknpBodyCinfo::flags` reaches the live body verbatim.**
 
-`NVFlex::printHknpBodyInfo` @0x27afa4 walks `hknpBody::m_flags` bit by bit with a
+A debug printer in the game walks the body's `m_flags` bit by bit with a
 string literal for each, so the engine names the whole word itself:
 
     0x0001 IS_STATIC        0x0002 IS_DYNAMIC       0x0004 IS_KEYFRAMED
@@ -8121,8 +8110,8 @@ string literal for each, so the engine names the whole word itself:
     0x1000000 ENABLE_SOFT_CONTACTS   0x2000000 ENABLE_SURFACE_VELOCITY
     0x4000000 USER_FLAG_4 .. 0x10000000 USER_FLAG_6
 
-`hknpBody::isStaticOrKeyframed` @0xde6e0 is four instructions, `flags & 5`, and
-that is the same mask `OnContactImpulseEvent` applies before it will compute an
+The engine's static-or-keyframed test is `flags & 5`, and
+that is the same mask the contact-impulse listener applies before it will compute an
 impact velocity at all -- a static or keyframed body contributes nothing, and two
 of them together are silent by design. That part we already get right.
 
@@ -8163,22 +8152,19 @@ the derived rule reproduces vanilla exactly on the files this is about. The two
 railings bungo tested are patched and waiting for him to walk into them. If they
 sound, the writer change follows. If they do not, the field is ruled out and the
 next suspect is the shape key the contact reports, which is what
-`GetMaterialForShape` indexes the leaf with.
+the material lookup indexes the leaf with.
 
 Tools added: `tools/hkbodyflags.py`.
 
-## 2026-08-22i — hknpShapeInstance::m_flags, named by the engine
+## 2026-08-22i — hknpShapeInstance m_flags, named by the engine
 
 The museum doors had no collision, and after the compound child size went in they
 still had none. The remaining difference was one word per instance, which the
-engine named itself:
+engine named itself: its shape-instance accessors read the flags from +0x0c
+(masked with 0xc0ffffff), the scale mode from bit 5 of that same word, the
+child shape pointer from +0x50 and the shape tag as a u16 at +0x58.
 
-    hknpShapeInstance::getFlags      mov eax, [rcx+0x0c];  and eax, 0xc0ffffff
-    hknpShapeInstance::getScaleMode  mov eax, [rcx+0x0c];  shr eax,5; not eax; and eax,1
-    hknpShapeInstance::getShape      mov rax, [rcx+0x50]
-    hknpShapeInstance::getShapeTag   movzx eax, word ptr [rcx+0x58]
-
-**+0x0c is `m_flags`**, and `getFlags` masks with `0xc0ffffff` -- exactly the bits
+**+0x0c is `m_flags`**, and the flags read masks with `0xc0ffffff` -- exactly the bits
 the `0x3f000000` float pattern occupies -- so the low 24 bits are flag data, not
 padding. Bit 5 selects the scale mode.
 
@@ -8195,9 +8181,9 @@ what most vanilla compounds carry, so that is what is written now. Bits 1 and 2
 vary between children identical in class, size, material and radius; nothing
 measured explains them and they are left clear rather than guessed.
 
-The same disassembly confirmed the rest of the instance layout we already write:
-stride 0x80 (`getInstance` shifts by 7), the child pointer at +0x50, and
-`getInstanceAabb` reading the leaf index as a **u16 at +0x3c** then indexing the
+The engine's own handling confirmed the rest of the instance layout we already write:
+stride 0x80, the child pointer at +0x50, and
+the instance bounding-box read taking the leaf index as a **u16 at +0x3c** then indexing the
 node array through the shape data's +0x10 pointer at 32 bytes a node -- which is
 the same +0x40 array whose missing pointer crashed the game on 2026-08-21.
 
@@ -8294,19 +8280,13 @@ inside the **dyn_inertia record**:
     +0x2c  ours 1.0          vanilla 0
 
 **That low u16 is the record's own motion index, and the engine tests it.** The
-symbol in the crash log said `BShkNonTransformController::FindTarget`, which is
-wrong -- the logger's symbol names are 1.10.155 and the address is 1.11.221, so the name is the
-nearest preceding symbol and nothing more. Disassembling the LIVE build at the
-faulting RVA gives the real thing:
-
-    0x127c56c   cmp   dx, r9w          ; the index against the sentinel
-    0x127c570   je    skip
-    0x127c576   movzx esi, dx
-    0x127c579   shl   rsi, 6           ; index * 0x40, the dyn_motion stride
-    0x127c57d   add   rsi, [r8+0x20]   ; + the dyn_motion array pointer
-    0x127c5af   mov   r8, rsi
-    0x127c5bc   call  0x1385bf0        ; motion-properties lookup
-    0x1385bfa   cmp   dword ptr [r8], 0   ; <- dereferences it on entry
+function the crash log named was wrong -- the logger's names come from an older
+game version than the one running, so the name was only the nearest one before
+the address. Reading the LIVE build at the faulting spot gives the real thing:
+the engine compares the index against the 0xffff sentinel; if it is not the
+sentinel, it multiplies it by 0x40 (the dyn_motion stride), adds the
+dyn_motion array pointer, and passes the result to a motion-properties lookup
+that dereferences it on entry.
 
 A KEYFRAMED body has no dyn_motion array. Writing a real index into the inertia
 record makes the engine compute `null + index*0x40` and hand it to a function
@@ -8334,13 +8314,13 @@ build. 22 keyframed records ship in the Museum set and all 22 carry the sentinel
 
 Three test rounds went to a theory that was wrong, and the reason it looked right
 was that our file DID differ from vanilla in the way the theory named. Structural
-identity is not a diagnosis. The disassembly of the faulting address was the only
+identity is not a diagnosis. Reading what the engine does at the faulting address was the only
 thing that produced an answer, and it took ten minutes -- it should have come
 first, before the 46 files were pulled from the mod on a hypothesis.
 
 ## 2026-08-22f — One system per file, the way vanilla has always done it
 
-`OfficeFileCabinet01` crashed the game inside `bhkNPCollisionObject::CreateInstance`.
+`OfficeFileCabinet01` crashed the game while it was creating the collision object's physics instance.
 Everything about the file matched vanilla -- node names, collision-to-node
 bindings, ANIM_TARGETED flags, animation blocks byte-identical, both physics
 systems internally complete -- except that there were TWO of them.
@@ -8580,29 +8560,25 @@ strings. `tools/hkbodypos.py` prints the field in game units.
 
 ## 2026-08-22 — A compound that told the engine it was convex
 
-Second crash from the Museum test set, and the symbols named it outright:
+Second crash from the Museum test set, and the crash log named it outright:
 
     EXCEPTION_ACCESS_VIOLATION reading 0xFFFFFFFFFFFFFFFF
-    hknpScaledConvexShapeBase::calcAabb
-      <- hknpWorld::rebuildMotionMassProperties <- hknpWorld::createBody
-      <- bhkPhysicsSystem::CreateInstance
+    in the scaled-convex-shape bounding-box step, while the world
+    created a body for a physics system being instanced
     BSFadeNode "TrashcanMetalOffice01", a BGSMovableStatic
 
 A scaled CONVEX shape — on a mesh whose root shape is a compound. The engine
 wraps a shape in `hknpScaledConvexShape` when the reference carries a scale, and
-it decides what a shape IS from one word. Fallout 4's own symbols give that word
-in three instructions:
-
-    hknpShape::asConvexShape        test byte ptr [rcx+0x10], 1
-    hknpShape::getFlags             movzx eax, word ptr [rcx+0x10]
-    hknpShape::getNumShapeKeyBits   movzx eax, byte ptr [rcx+0x12]
+it decides what a shape IS from one word. The engine's own shape accessors give
+that word: the convex test checks bit 0 of the u16 at +0x10, the flags read is
+that same u16, and the shape-key-bit count is the byte at +0x12.
 
 **+0x10 is u16 `m_flags`, +0x12 is u8 `m_numShapeKeyBits`, +0x13 is the dispatch
 type — and BIT 0 OF THE FLAGS MEANS CONVEX.**
 
 Compile wrote the literal `0x01000001` into every compound it built. Flags = 1,
-bit 0 set. So `asConvexShape` returned non-null for a compound, the engine
-wrapped it, and `calcAabb` walked a vertex array that was never there.
+bit 0 set. So the convex test said yes for a compound, the engine
+wrapped it, and the bounding-box step walked a vertex array that was never there.
 
 The value was a placeholder that had never been measured. Over 1,500 SetDressing
 files, 155 compounds:
@@ -8708,9 +8684,8 @@ First in-game test of compiled collision. Fallout 4 crashed within minutes, and
 the crash was ours:
 
     EXCEPTION_ACCESS_VIOLATION reading 0x30
-    hknpDynamicCompoundShape::updateAabb
-      <- bhkThreadPool::processJobQueue
-      <- bhkPhysicsSystem::LoadBinary
+    in the dynamic compound shape's bounding-box update,
+    on a worker thread, while a physics system was loading
     loading ...\WW Concord Collision Test\Meshes\props\nukacolabottleempty.nif
 
 **A Havok packfile binds pointers through its fixup tables, not through the
@@ -8756,7 +8731,7 @@ a `--damage` mode that reproduces exactly what shipped.
 `tools/fo4_crash_triage.sh` reads the newest Addictol log, prints the exception,
 the objects the logger could name, every Havok frame in the stack, and
 cross-references the mesh paths against a rebuilt-mesh manifest. Addictol's logger
-symbolises its stacks, so the stack names `hknpDynamicCompoundShape::updateAabb`
+names its stack frames, so the stack names the compound bounding-box update
 outright and the log quotes `"__data__"` and `"k_2014.1.0-r1"` straight out of our
 own blob.
 
@@ -15912,8 +15887,8 @@ now in 3d viewport preview, only their visibility gets toggled."*
 Rebuilding the generator on the engine's rules (07-31/08-01a) tied regeneration
 to the Generation and Mutation bool curves, which is right — but only half the
 engine's behaviour. The other half is `Animate Arc Offset`: with it set,
-`Lightning::Process` runs on EVERY update and re-offsets the branches it already
-has (`0x1cf5c04` returns without touching the geometry when the flag is clear).
+the engine's lightning step runs on EVERY update and re-offsets the branches it already
+has (it returns without touching the geometry when the flag is clear).
 I knew about that path and skipped it.
 
 It bites exactly the assets bungo named. Those bolts are driven by their own
@@ -15966,7 +15941,7 @@ under the filter is empty and hidden and the tree starts that much higher.
 
 bungo: *"Time to fix 1 2 3 4 and 5."* Area 6 is a fact about the game, not about
 this code, so it stays a note in `LOADING_SCREEN_BAKE_PLAN.md`. Details of each
-rule and its RVA are in `WW_ENGINE_COMPARISON.md`; what follows is what changed and
+rule are in `WW_ENGINE_COMPARISON.md`; what follows is what changed and
 what it was measured against.
 
 **1 — Sequence binding.** `ControllerManager::setSequence` resolves each
@@ -16019,18 +15994,18 @@ baked the same 62 vertices either way. §3 of that test says plainly what is not
 pinned and why, rather than leaving a check that cannot fail.
 
 **4 — `AttachT`.** Split at the first `&` and dispatch on the tag, as
-`ProcessAttachTechniques` does, instead of matching the `NamedNode&` prefix. That
+the game's attach-technique step does, instead of matching the `NamedNode&` prefix. That
 turned up a real parsing bug: FO4 ships arguments with a `|n` suffix
 (`NamedNode&C-ArmsTypeA1|0`) that match no node, so the merge refused those
 donors outright. Exact match first, then without the suffix.
 
 Also decoded, and it closes the parked leg-arc question:
-`BGSNamedNodeAttach::AttachPolicy::Process` is a plain re-parent with **no
+the game's named-node attach is a plain re-parent with **no
 transform**, falling back to the root when the name does not resolve. The X-01
 arcs run inside the calf because the asset puts `BoltGeo_01` there — an authoring
 change, not a merge bug.
 
-**5 — Controller flags.** Bit 4 is PlayBackwards, bit 6 is ComputeScaledTime —
+**5 — Controller flags.** Bit 4 means play backwards, bit 6 means compute scaled time —
 the "unknown function" TODO — so `ctrlTime` returns the raw time when bit 6 is
 clear and mirrors about the interval when bit 4 is set. Sampled 160 controllers
 across four asset trees: bit 6 set in all of them, bit 4 in none, so this changes
@@ -16041,14 +16016,14 @@ four only govern when the engine bothers to call a controller.
 
 bungo asked for a comparison check on the six areas where Todd's treat could
 settle something NifSkope currently guesses. No code changed; the findings are
-in **`WW_ENGINE_COMPARISON.md`**, one section per area, every claim cited by RVA in
-1.10.155 so it can be re-read rather than re-argued.
+in **`WW_ENGINE_COMPARISON.md`**, one section per area, every claim cited to Todd's treat
+so it can be re-read rather than re-argued.
 
 1. **Sequence binding differs, and it is the bug class we hit.**
-   `NiControllerSequence::StoreTargets` resolves each Controlled Block through
-   `NiDefaultAVObjectPalette::GetAVObject` — a CRC32 hash map — and that palette
-   is the one **in the file**: `NiControllerManager::LoadBinary` resolves it
-   straight into `+0xC0` and nothing rebuilds it at load. NifSkope uses
+   The game resolves each sequence's Controlled Block through the
+   controller manager's object palette — a CRC32 hash map — and that palette
+   is the one **in the file**: loading the controller manager links it
+   straight in and nothing rebuilds it at load. NifSkope uses
    `Node::findChild`, a pre-order scene search, and ignores the palette entirely
    for playback. On duplicate names the two disagree by construction: when the
    engine *does* rebuild a palette it overwrites, so the **last** node in
@@ -16056,7 +16031,7 @@ in **`WW_ENGINE_COMPARISON.md`**, one section per area, every claim cited by RVA
 
 2. **Lightning: two guesses right, four rules wrong.** Amplitude decay 0.5 is
    correct, and `Child Width Mult` compounding per generation is correct. The
-   1/24 s cadence does not exist — `Lightning::Process` holds three float
+   1/24 s cadence does not exist — the engine's lightning step holds three float
    constants and none of them is a cadence; the rate is authored in interpolator
    2 (Mutation), which NifSkope does not read. Subdivisions **is** a recursion
    depth and branches **do** use the authored `Length`, both of which §12 had
@@ -16070,21 +16045,21 @@ in **`WW_ENGINE_COMPARISON.md`**, one section per area, every claim cited by RVA
    plus every collider, all six field modifiers, and the whole emitter-parameter
    controller family whose fields NifSkope already parses.
 
-4. **`AttachT` is modelled correctly.** `ProcessAttachTechniques` reads exactly
+4. **`AttachT` is modelled correctly.** The game's attach-technique step reads exactly
    the `NiStringsExtraData` we assume. Three more technique tags exist
    (`HavokGeometry`, `MultiTechnique`, `BGSParticleArrayAttach`), and an attach is
    dropped unless the object has children or a `NiControllerManager`. It does
    **not** settle the leg-arc placement: that transform lives behind
-   `AttachPolicy::vftable+8`, one step further in.
+   the attach policy's own handler, one step further in.
 
 5. **The controller flag bits are settled.** All three `glcontroller.cpp` TODOs
-   are answerable from named accessors; bit 6 — "unknown function" — is
-   **ComputeScaledTime**, which decides whether a controller is evaluated at raw
+   are answerable from the engine's own handling; bit 6 — "unknown function" — is
+   **compute scaled time**, which decides whether a controller is evaluated at raw
    or scaled time. `BSXFlags` yields only bit 11, confirming `nif.xml`'s `bLights`.
 
 6. **Loading screens never animate.** `LoadingMenu` activates no sequence and
-   ticks no controller in `InitModel`, `AdvanceMovie`, `Render`, `RotateModel` or
-   `SetForegroundModel`; the per-frame work is spin, pan and zoom from INI
+   ticks no controller in any of its model setup, movie, render or model-rotation
+   steps; the per-frame work is spin, pan and zoom from INI
    settings. The corpus agrees — of 173 vanilla `LoadScreenArt` NIFs, 0 have a
    particle system and 1 has a controller manager, and neither `autoPlay`,
    `autoLoop` nor that file's `CharFXOn` appears as a literal in the exe. The
@@ -16357,22 +16332,21 @@ label for a guess.
 
 ### What the engine does
 
-`BSProceduralLightningController::Update` → `UpdateGenerationParams` /
-`UpdateProcessParams` / `AddTasklet` / `GetPropertyHolder` →
-`BSProceduralGeometry::Lightning::CreateInstance` / `Process`. Not one of them
-touches a `BSFixedString` or walks the scene. The parameters are the NIF's own
-fields — `GenerationParams::LoadBinary` reads three `u16` (Subdivisions, Branches,
-BranchVar), `ProcessParams::LoadBinary` five floats and three bools (Length,
+The controller's update refreshes its generation and process parameters, queues
+a task, and the procedural-lightning geometry is created and processed from
+those. Not one of these steps touches a `BSFixedString` or walks the scene. The parameters are the NIF's own
+fields — the generation parameters are three `u16` (Subdivisions, Branches,
+BranchVar), the process parameters five floats and three bools (Length,
 LengthVar, Width, ChildWidthMult, ArcOffset, the three fades) — and the controller
-keeps its evaluated copy at `+0x178`, which is exactly what it hands `Process`.
+keeps an evaluated copy, which is exactly what it hands the geometry step.
 
-`Process` starts at `NiPoint3::ZERO` and writes, per segment, four vertices:
+That step starts at the origin and writes, per segment, four vertices:
 
     X = jag.x ± width      Y = segment * (length / segments)      Z = jag.z ± width
 
 So the bolt runs **from the target's own origin, along its local +Y, for Length**,
-jagging laterally in X and Z. The counts agree: `GetBranchSubdivisions(n) = n-1`,
-`GetBranchVerts(s) = 4·2ˢ + 4`, `GetBranchTris(s) = 4·2ˢ` — 2ˢ segments, four
+jagging laterally in X and Z. The counts agree: branch subdivisions = n-1,
+branch vertices = 4·2ˢ + 4, branch triangles = 4·2ˢ — 2ˢ segments, four
 verts a ring, i.e. two crossed strips rather than anything camera-facing.
 
 ### Checked before believing it

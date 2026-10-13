@@ -2,8 +2,9 @@
    (lane HKXEDIT1, 2026-09-10): any packfile the game's own class registry
    describes -- animation clips, skeletons, ragdolls, behaviour graphs -- read
    into a graph of typed objects whose fields are driven by the hkClass
-   reflection extracted from the 1.10.155 exe (res/hkclasses_fo4.json, made by
-   tools/hkclassdb_extract.py), and written back BYTE-IDENTICALLY when nothing
+   reflection read out of the user's own installed Fallout4.exe
+   (res/hkclasses_fo4.json -- not shipped; build it once with
+   `python tools/hkclassdb_extract.py --exe <path to Fallout4.exe>`), and written back BYTE-IDENTICALLY when nothing
    was changed.
 
    The contract is docs/HKX_PACKFILE_MODEL.md. There is no per-class code

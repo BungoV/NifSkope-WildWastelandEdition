@@ -1,3 +1,0 @@
-GATE cube (cube): FAIL  FAIL |   FAIL (cube) every prefiltered texel of every level = L within 1/255 (max 0.23539)
-pictures: 
-RED CONTROL cubedecode -> gate cube BITES

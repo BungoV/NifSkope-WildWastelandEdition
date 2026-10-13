@@ -4,15 +4,14 @@
 to one of three authorities, named in the provenance table at the end:
 
 * **REFL** -- the Havok `hkClass` reflection arrays read out of the FO4
-  1.10.155 exe (`<Class>Class_Members` / `<Class>::Members`, `hkClassMember`
+  1.10.155 exe (each class's member table; `hkClassMember`
   = 0x28 bytes: name* +0x00, class* +0x08, enum* +0x10, type u8 +0x18,
   subtype u8 +0x19, cArraySize u16 +0x1a, flags u16 +0x1c, **offset u16
   +0x1e**), via `scratchpad/hkx1_20260910/hkclass_reflect.py`. The
   reflection names every SERIALISED member and its in-memory offset, which is
   also its packfile offset (a packfile is a memory image plus fixup tables).
-* **DISASM** -- the engine's own decoder, disassembled from the same exe with
-  the Todd's treat tooling (RVAs are 1.10.155; the files are under
-  `scratchpad/hkx1_20260910/disasm/`). This is the only authority on the
+* **DISASM** -- the engine's own decoder in the same exe, checked in Todd's
+  treat (1.10.155; notes under `scratchpad/hkx1_20260910/disasm/`). This is the only authority on the
   spline block layout, which reflection does not describe (it is an opaque
   `hkArray<hkUint8> data`).
 * **XML** -- HKXPACK 0.1.6-beta's unpack of real FO4 clips (paths and hashes
@@ -124,18 +123,18 @@ The `w` of translation and scale is padding (0 or 1, meaningless).
 
 ## 3. hkaAnimation base + hkaSplineCompressedAnimation
 
-### hkaAnimation [REFL `hkaAnimation::Members`, .data -- filled by a dynamic initializer, the const bytes read back fine]
+### hkaAnimation [REFL]
 
 | off | member | type | value in FO4 clips |
 |---|---|---|---|
-| +0x10 | type | hkEnum<AnimationType, int32> | 3 = `HK_SPLINE_COMPRESSED_ANIMATION` (enum: 0 UNKNOWN, 1 INTERLEAVED, 2 MIRRORED, 3 SPLINE_COMPRESSED, 4 QUANTIZED_COMPRESSED, 5 PREDICTIVE_COMPRESSED, 6 REFERENCE_POSE -- REFL `hkaAnimationAnimationTypeEnumItems`) |
+| +0x10 | type | hkEnum<AnimationType, int32> | 3 = `HK_SPLINE_COMPRESSED_ANIMATION` (enum: 0 UNKNOWN, 1 INTERLEAVED, 2 MIRRORED, 3 SPLINE_COMPRESSED, 4 QUANTIZED_COMPRESSED, 5 PREDICTIVE_COMPRESSED, 6 REFERENCE_POSE -- REFL) |
 | +0x14 | duration | float | seconds; `= (numFrames-1) * frameDuration` (CENSUS: 0 of 13,514 differ by > 1e-3) |
 | +0x18 | numberOfTransformTracks | int32 | 94 or 95 on the player (95 = with the "Camera"-side 95th bone) |
 | +0x1c | numberOfFloatTracks | int32 | 0 in 13,510 of 13,514; 1 in 4 furniture/animobject clips |
 | +0x20 | extractedMotion | hkaAnimatedReferenceFrame* (global fixup) | `hkaDefaultAnimatedReferenceFrame` in 12,799, null in 715 |
 | +0x28 | annotationTracks | hkArray<hkaAnnotationTrack> | one per transform track; hkaAnnotationTrack = 0x18 bytes: `hkStringPtr trackName` +0 (empty on FO4), `hkArray<Annotation> annotations` +8; Annotation = 16 bytes: `float time` +0, `hkStringPtr text` +8. 43,521 annotations in 8,652 tracks, e.g. "FootLeft"/"SyncLeft" at 0.0333 s on track 0 of JogForward. |
 
-### hkaSplineCompressedAnimation [REFL `hkaSplineCompressedAnimation::Members`, .rdata]
+### hkaSplineCompressedAnimation [REFL]
 
 | off | member | type | value / law |
 |---|---|---|---|
@@ -148,13 +147,12 @@ The `w` of translation and scale is padding (0 or 1, meaningless).
 | +0x50 | frameDuration | float | 1/30 s on every player clip seen; a 2-frame pose clip stores duration/1 (0.3333 for a 0.3333 s pose) |
 | +0x58 | blockOffsets | hkArray<hkUint32> | one per block: offset of the block's mask table within `data` (block 0 = 0; two-block clip: `0 56016`) |
 | +0x68 | floatBlockOffsets | hkArray<hkUint32> | one per block: offset of the float-track data **relative to that block's blockOffset** (`56004 12248` on the two-block clip; block 1 = 56016 + 12248 = 68264 of 68272 bytes) |
-| +0x78 | transformOffsets | hkArray<hkUint32> | EMPTY in every FO4 clip (CENSUS); when present it is per (block, track) random-access offsets read by `sampleIndividualTransformTracks` at `transformOffsets[block * numberOfTransformTracks + track]` [DISASM 0x1ec48cb-0x1ec48e9] |
+| +0x78 | transformOffsets | hkArray<hkUint32> | EMPTY in every FO4 clip (CENSUS); when present it is per (block, track) random-access offsets read by the engine's per-track sampler at `transformOffsets[block * numberOfTransformTracks + track]` [DISASM] |
 | +0x88 | floatOffsets | hkArray<hkUint32> | EMPTY in every FO4 clip |
 | +0x98 | data | hkArray<hkUint8> | the blocks, section 4 |
 | +0xa8 | endian | int32 | 0 = little in every FO4 clip |
 
-`hkaSplineCompressedAnimation::TrackCompressionParams` enums [REFL
-`...RotationQuantizationEnumItems`, `...ScalarQuantizationEnumItems`]:
+The track-compression enums (`RotationQuantization`, `ScalarQuantization`) [REFL]:
 
 | RotationQuantization | value | bytes per quaternion | FO4 use (CENSUS, per track per block) |
 |---|---|---|---|
@@ -171,29 +169,25 @@ The `w` of translation and scale is padding (0 or 1, meaningless).
 | **BITS16** | **1** | **2** | **1,291,826** |
 
 So a FO4 reader needs THREECOMP40, THREECOMP48 and BITS16. The exe carries
-decoders for the other five (`hkaSignedQuaternion::unpackSignedQuaternion16/24/32`
-at 0x1fbf4d0 / 0x1fbf570 / 0x1fbf6c0, `readNURBSCurve<0>` 8-bit at 0x1ec6240);
-they are documented as present and NOT decoded here (a reader must refuse them
+decoders for the other five (the 16/24/32-bit quaternion unpackers and the
+8-bit curve reader); they are documented as present and NOT decoded here (a reader must refuse them
 by name, not guess).
 
 ---
 
 ## 4. The block layout [DISASM]
 
-The engine's read path is `samplePartialTracks` (0x1ec4140) -> per track
-`sampleTranslation<Q>` (0x1ec7610 / 0x1ec7680), `sampleRotation<R>`
-(0x1ec7370 .. 0x1ec7500), `sampleScale<Q>` (0x1ec7550 / 0x1ec75b0) ->
-`readNURBSCurve<Q>` (0x1ec5e50 / 0x1ec6240), `readNURBSQuaternion<R>`
-(0x1ec6610 ..), `readKnots` (0x1ec55e0), `readPackedQuaternions<R>`,
-`hkaSignedQuaternion::unpackSignedQuaternion40/48` (0x1fbfa00 / 0x1fbfc30),
-`evaluateSimple{1,2,3}` (0x1ec5920 / 0x1ec5990 / 0x1ec5ac0). Template
-parameter Q = ScalarQuantization value, R = RotationQuantization value.
+The engine's read path samples a block, then per track reads the
+translation, rotation and scale curves (each specialised on its quantization:
+Q = ScalarQuantization value, R = RotationQuantization value), which read the
+knots, the control points and the packed quaternions, and evaluate the spline
+at degree 1, 2 or 3.
 
 ### 4.1 Block addressing
 
-`hkaCompression::computePackedNurbsOffsets(data, blockOffsets, block, off)`
-(0x1fbeb50) returns `data + blockOffsets[block] + (off & 0x7fffffff)`.
-`samplePartialTracks` calls it twice [0x1ec42fd, 0x1ec4321]: with
+The engine's block-address helper returns
+`data + blockOffsets[block] + (off & 0x7fffffff)`, and the block sampler calls
+it twice: with
 `off = maskAndQuantizationSize` for the TRACK DATA pointer and with
 `off = 0x80000000` for the MASK pointer. Hence:
 
@@ -203,17 +197,17 @@ block b:   masks = data + blockOffsets[b]                       (4 bytes x numbe
            float data = data + blockOffsets[b] + floatBlockOffsets[b]
 ```
 
-### 4.2 Time -> block and local frame [DISASM samplePartialTracks 0x1ec41ba-0x1ec42f8, sampleIndividualTransformTracks 0x1ec4760-0x1ec488d]
+### 4.2 Time -> block and local frame [DISASM]
 
 ```
-lastFrame  = getNumOriginalFrames() - 1                    (vtable +0x48; = numFrames - 1)
-f          = time * lastFrame / duration                   (rcpps + one Newton step; clamped >= 0)
+lastFrame  = getNumOriginalFrames() - 1                    (= numFrames - 1)
+f          = time * lastFrame / duration                   (clamped >= 0)
 frame      = trunc(f);  frac = f - frame
-if frame > lastFrame: frame = lastFrame; frac = 1.0        (const _real at 0x2c48d60 = 1.0)
-block      = clamp(frame / (maxFramesPerBlock - 1), 0, numBlocks - 1)     (unsigned div; 0x1ec4846)
+if frame > lastFrame: frame = lastFrame; frac = 1.0
+block      = clamp(frame / (maxFramesPerBlock - 1), 0, numBlocks - 1)     (unsigned div)
 local      = frame - block * (maxFramesPerBlock - 1)
-u_seconds  = (local + frac) * frameDuration                 (xmm6)
-u_frames   = trunc(u_seconds * blockInverseDuration * (maxFramesPerBlock - 1))   (rbp; the u8 that readKnots compares against the knot bytes)
+u_seconds  = (local + frac) * frameDuration
+u_frames   = trunc(u_seconds * blockInverseDuration * (maxFramesPerBlock - 1))   (the u8 compared against the knot bytes)
 ```
 
 Blocks therefore hold `maxFramesPerBlock` frames with **one frame of overlap**:
@@ -224,10 +218,9 @@ evaluates frame F in block `min(F div 255, numBlocks-1)` at local
 get the same pose (this is gate (g) below). The knots and the spline parameter
 are in the same units, so evaluating with integer local-frame knots at
 `u = local` is the engine's evaluation up to float rounding (the engine
-multiplies both by frameDuration: readKnots' `xmm1` scale = `[rcx+0x50]`
-frameDuration, 0x1ec7380).
+multiplies both by frameDuration).
 
-### 4.3 The 4-byte track mask [DISASM samplePartialTracks 0x1ec4360-0x1ec4378, sampleIndividualTransformTracks 0x1ec4914-0x1ec4927]
+### 4.3 The 4-byte track mask [DISASM]
 
 ```
 byte 0  quantization:   bits 0-1  = ScalarQuantization for translation
@@ -241,15 +234,14 @@ byte 3  scale mask
 Every FO4 track has byte 0 = 0x45 (16-bit, THREECOMP40, 16-bit) or 0x49
 (16-bit, THREECOMP48, 16-bit). [CENSUS]
 
-Vector masks (translation, scale) are read PER AXIS by `readNURBSCurve`
-[0x1ec5eee-0x1ec5fa7]: bit 0/1/2 = X/Y/Z is STATIC (one float stored), bit
+Vector masks (translation, scale) are read PER AXIS by the curve reader: bit 0/1/2 = X/Y/Z is STATIC (one float stored), bit
 4/5/6 = X/Y/Z is a SPLINE channel, neither = the default (0 for translation, 1
-for scale: `sampleScale` passes `g_vectorfConstants+0x30` = (1,1,1,1) as the
-default, 0x1ec7565; `sampleTranslation` passes zero, 0x1ec7626). A track may
+for scale: the scale sampler passes (1,1,1,1) as the default, the
+translation sampler passes zero). A track may
 mix static and spline axes (`posMask=0x34` = static Z + spline Y: 13,958 such
 tracks in the CENSUS). Bits 3 and 7 are unused for vectors.
 
-The rotation mask is read WHOLE by `readNURBSQuaternion` [0x1ec662d, 0x1ec6728]:
+The rotation mask is read WHOLE by the quaternion curve reader:
 any bit of 0xF0 set -> a quaternion SPLINE; else any bit of 0x0F set -> ONE
 static packed quaternion; else identity `(0,0,0,1)` and no bytes. The
 individual bits carry no meaning to the reader (the compressor sets them to
@@ -261,38 +253,37 @@ and decode as splines).
 For each transform track t = 0 .. numberOfTransformTracks-1, from
 `track data` onward, with `p` the running pointer:
 
-**Translation** (`sampleTranslation<Q>`, 0x1ec7610):
-* if mask byte 1 == 0: nothing is read, the result is (0,0,0) [0x1ec7629-0x1ec7631].
-* else `readNURBSCurve<Q>` [0x1ec5e50]:
-  1. if `mask & 0xF0`: `readKnots` [0x1ec55e0]: `u16 n` (= number of control
+**Translation**:
+* if mask byte 1 == 0: nothing is read, the result is (0,0,0).
+* else the curve is read:
+  1. if `mask & 0xF0`: the knots: `u16 n` (= number of control
      points - 1; the u16 is called "numItems"), `u8 degree`, then
      `n + degree + 2` knot bytes (frame numbers within the block, 0-255)
-     [0x1ec5605-0x1ec5617, 0x1ec5700-0x1ec5713: `p += n + degree + 2`].
-  2. **align p up to 4** [0x1ec5ed0-0x1ec5ed8] -- unconditionally, spline or not.
+     (`p += n + degree + 2`).
+  2. **align p up to 4** -- unconditionally, spline or not.
   3. for axis in X, Y, Z: if the static bit: `float value`; else if the spline
-     bit: `float min, float max`; else nothing. [0x1ec5eee-0x1ec5fa7]
-  4. if any spline bit: **align p up to 2** for Q=BITS16 [0x1ec602b-0x1ec6040]
-     (no alignment for BITS8, `readNURBSCurve<0>` 0x1ec6404-0x1ec640f: same
-     `inc; and ~1`... the 8-bit path also rounds to 2), then `(n + 1)` control
-     points, each = one u16 (or u8) per SPLINE axis in X, Y, Z order
-     [0x1ec6100-0x1ec612d]. `value = min + q * (1/65535) * (max - min)`
-     (`_real` at 0x2c92198 = 1.5259022e-05 = 1/65535; the 8-bit constant is
-     1/255). `p += (n + 1) * 2 * (#spline axes)` [0x1ec620c-0x1ec6217].
-* then **align p up to 4** [0x1ec765f-0x1ec766a].
+     bit: `float min, float max`; else nothing.
+  4. if any spline bit: **align p up to 2** for Q=BITS16
+     (the 8-bit path also rounds to 2), then `(n + 1)` control
+     points, each = one u16 (or u8) per SPLINE axis in X, Y, Z order.
+     `value = min + q * (1/65535) * (max - min)`
+     (1.5259022e-05 = 1/65535; the 8-bit constant is
+     1/255). `p += (n + 1) * 2 * (#spline axes)`.
+* then **align p up to 4**.
 
-**Rotation** (`sampleRotation<R>`, R=1 at 0x1ec7370, R=2 at 0x1ec73c0):
-* `readNURBSQuaternion<R>`:
-  * if `mask & 0xF0`: `readKnots` as above, then `readPackedQuaternions<R>`:
-    for THREECOMP48 **align p up to 2** first [0x1ec6f54-0x1ec6f57]; for
-    THREECOMP40 no alignment [0x1ec6eb0-0x1ec6f36]; then `(n + 1)` packed
+**Rotation** (R=1 or R=2):
+* the quaternion curve:
+  * if `mask & 0xF0`: the knots as above, then the packed quaternions:
+    for THREECOMP48 **align p up to 2** first; for
+    THREECOMP40 no alignment; then `(n + 1)` packed
     quaternions of 5 (R=1) or 6 (R=2) bytes; `p += (n + 1) * size`.
-  * else if `mask & 0x0F`: one packed quaternion (THREECOMP48: align 2 first
-    [0x1ec689f-0x1ec68a2]); `p += 5` [0x1ec673c] or `6` [0x1ec68b6].
-  * else: identity, nothing read [0x1ec6751-0x1ec6768].
-* then **align p up to 4** [0x1ec739d-0x1ec73a8, 0x1ec73f4].
+  * else if `mask & 0x0F`: one packed quaternion (THREECOMP48: align 2 first);
+    `p += 5` or `6`.
+  * else: identity, nothing read.
+* then **align p up to 4**.
 
-**Scale**: exactly the translation law with default (1,1,1) [`sampleScale<Q>`
-0x1ec7550 / 0x1ec75b0; mask byte 3 == 0 -> (1,1,1), nothing read].
+**Scale**: exactly the translation law with default (1,1,1) [mask byte 3 ==
+0 -> (1,1,1), nothing read].
 
 The T-pose clip (`Furniture\Tpose\PoseA_Idle1.hkx`, 94 tracks, 2 frames)
 walks exactly like this: masks 0..375; track 1 (COM, pos 0x05 = static X and
@@ -301,44 +292,43 @@ pad to 392; track 3 (LLeg_Thigh, pos 0x04, rot 0x0F) = float at 392, 5 bytes
 at 396, pad to 404; ... and the walk ends at floatBlockOffsets[0] = 1440 =
 the data length. [XML + this law; gate (f)]
 
-### 4.5 The NURBS evaluation [DISASM readKnots, evaluateSimple]
+### 4.5 The NURBS evaluation [DISASM]
 
-`readKnots` finds the knot span for the integer local frame `u` (the u8
-passed in `r9b`): if `u >= knots[n+1]` span = n; else if `u <= knots[0]` span
+The knot reader finds the knot span for the integer local frame `u` (a u8):
+if `u >= knots[n+1]` span = n; else if `u <= knots[0]` span
 = degree; else binary search for `k` with `knots[k] <= u < knots[k+1]`
-(lo = degree, hi = n+1) [0x1ec5626-0x1ec5764]. Only the control points
-`span-degree .. span` are read [readNURBSCurve 0x1ec6010-0x1ec608b: start =
-`(span - degree) * stride`] and `evaluateSimple<degree>` is de Boor's
+(lo = degree, hi = n+1). Only the control points
+`span-degree .. span` are read (start = `(span - degree) * stride`) and the
+evaluation is de Boor's
 algorithm on those `degree+1` points with the knots `span-degree+1 ..
 span+degree`. FO4 clips use degree 1 (every spline seen; the T-pose and
 JogForward headers read `n=22, degree=1, knots 0 0 1 2 ... 22 22`) and the
-reader handles degree 1..3 as the engine does (`evaluateSimple1/2/3`; the
-engine has no degree-4 path).
+reader handles degree 1..3 as the engine does (the engine has no degree-4
+path).
 
 The quaternion spline is de Boor on the four raw components of the unpacked
-control quaternions [readNURBSQuaternion 0x1ec6683-0x1ec6721 calls the same
-evaluateSimple], then the result is used as-is by the engine (no normalisation
-in `sampleRotation<R>`; the decoder normalises before handing out a rotation,
+control quaternions (the same evaluation), then the result is used as-is by
+the engine (no normalisation in the rotation sampler; the decoder normalises before handing out a rotation,
 and reports the pre-normalisation length as a diagnostic). With degree 1 this
 is component-wise LERP between the two nearest control quaternions -- and at
 an integer frame that is exactly one control point, so per-frame decoding
 never interpolates at all on a degree-1 clip.
 
-### 4.6 Packed quaternions [DISASM hkaSignedQuaternion::unpackSignedQuaternion40 0x1fbfa00, ...48 0x1fbfc30]
+### 4.6 Packed quaternions [DISASM]
 
 **THREECOMP40** (5 bytes, read as a 40-bit little-endian integer `v`):
 
 ```
-a = (v      ) & 0xFFF          (the byte gather at 0x1fbfa90-0x1fbfacc builds lanes from bytes {0,1}, {1,2}>>4, {3,4})
+a = (v      ) & 0xFFF          (lanes built from bytes {0,1}, {1,2}>>4, {3,4})
 b = (v >> 12) & 0xFFF
 c = (v >> 24) & 0xFFF
-missing = (v >> 36) & 3        (byte 4 & 0x30, 0x1fbfb83-0x1fbfb94, switch at 0x1fbfb98)
-negate  = (v >> 38) & 1        (byte 4 & 0x40, 0x1fbfb47-0x1fbfb91)
-x_i = (a - 2047) * 0.00034543566    (constants at 0x2dbe784 = 2047.0 and 0x2eab31c = 0.000345435663 = (sqrt(2)/2)/2047)
-d   = sqrt(max(0, 1 - x0^2 - x1^2 - x2^2))    (engine: rsqrtps * value, i.e. a 12-bit-mantissa approximation; the decoder uses exact sqrt, the difference is < 2.5e-4 in the component and < 0.03 deg)
+missing = (v >> 36) & 3        (byte 4 & 0x30)
+negate  = (v >> 38) & 1        (byte 4 & 0x40)
+x_i = (a - 2047) * 0.00034543566    (constants 2047.0 and 0.000345435663 = (sqrt(2)/2)/2047)
+d   = sqrt(max(0, 1 - x0^2 - x1^2 - x2^2))    (engine: a fast reciprocal-sqrt approximation with a 12-bit mantissa; the decoder uses exact sqrt, the difference is < 2.5e-4 in the component and < 0.03 deg)
 if negate: d = -d
 result quaternion (x, y, z, w) = the three decoded values in order with `d` inserted at index `missing`
-      missing=0 -> (d, a, b, c);  1 -> (a, d, b, c);  2 -> (a, b, d, c);  3 -> (a, b, c, d)    (the four shuffle tails 0x1fbfbab-0x1fbfc12)
+      missing=0 -> (d, a, b, c);  1 -> (a, d, b, c);  2 -> (a, b, d, c);  3 -> (a, b, c, d)
 ```
 
 Byte 4's bit 7 (bit 39 of `v`) is not read by the decoder.
@@ -347,10 +337,10 @@ Byte 4's bit 7 (bit 39 of `v`) is not read by the decoder.
 
 ```
 a = w0 & 0x7FFF;  b = w1 & 0x7FFF;  c = w2 & 0x7FFF
-missing = (w0 >> 15) | ((w1 >> 15) << 1)      (0x1fbfcac-0x1fbfcb9: ((w1 & 0x8000) | (w0 >> 1)) >> 14)
-negate  = w2 >> 15                            (0x1fbfd38: test bp(0x8000), bx)
-x_i = (a - 16383) * 4.3161006e-05             (0x2eab334 = 16383.0, 0x2eab314 = 4.31610060e-05 = (sqrt(2)/2)/16383)
-d as above; insertion as above (the sete chain at 0x1fbfcc0-0x1fbfcf3 skips slot `missing`, the mask select at 0x1fbfd4f-0x1fbfd6f fills it)
+missing = (w0 >> 15) | ((w1 >> 15) << 1)
+negate  = w2 >> 15
+x_i = (a - 16383) * 4.3161006e-05             (constants 16383.0 and 4.31610060e-05 = (sqrt(2)/2)/16383)
+d as above; insertion as above
 ```
 
 Quaternion component order is Havok's (x, y, z, w) throughout; NifSkope's
@@ -359,7 +349,7 @@ Quaternion component order is Havok's (x, y, z, w) throughout; NifSkope's
 
 ---
 
-## 5. hkaAnimationBinding [REFL `hkaAnimationBindingClass_Members`, .data]
+## 5. hkaAnimationBinding [REFL]
 
 | off | member | type | FO4 |
 |---|---|---|---|
@@ -368,11 +358,11 @@ Quaternion component order is Havok's (x, y, z, w) throughout; NifSkope's
 | +0x20 | transformTrackToBoneIndices | hkArray<hkInt16> | track i drives bone `[i]` of the skeleton named above. Identity `0..n-1` in 13,322 clips, a permutation/subset in 192 -- the reader MUST apply it. |
 | +0x30 | floatTrackToFloatSlotIndices | hkArray<hkInt16> | empty except the 4 float-track clips |
 | +0x40 | partitionIndices | hkArray<hkInt16> | empty in every FO4 clip |
-| +0x50 | blendHint | hkEnum<BlendHint, int8> | 0 NORMAL (13,255), 1 ADDITIVE_DEPRECATED (29), 2 ADDITIVE (230) [REFL `hkaAnimationBindingBlendHintEnumItems`]. An additive clip's decoded transforms are deltas, not poses; the reader carries the hint and the playback lane decides. |
+| +0x50 | blendHint | hkEnum<BlendHint, int8> | 0 NORMAL (13,255), 1 ADDITIVE_DEPRECATED (29), 2 ADDITIVE (230) [REFL]. An additive clip's decoded transforms are deltas, not poses; the reader carries the hint and the playback lane decides. |
 
 ---
 
-## 6. Extracted motion: hkaDefaultAnimatedReferenceFrame [REFL, DISASM getReferenceFrame 0x1f9ea20]
+## 6. Extracted motion: hkaDefaultAnimatedReferenceFrame [REFL, DISASM]
 
 | off | member | type | FO4 |
 |---|---|---|---|
@@ -382,11 +372,11 @@ Quaternion component order is Havok's (x, y, z, w) throughout; NifSkope's
 | +0x40 | duration | float | = the animation's duration |
 | +0x48 | referenceFrameSamples | hkArray<hkVector4> | numFrames samples: `(tx, ty, tz, angle)` |
 
-`getReferenceFrame(time)`: `i = time / duration * (numSamples - 1)`, lerp
-samples `i` and `i+1` component-wise (clamped to the first/last sample)
-[0x1f9ea99-0x1f9eafd]; the output transform is translation = lerped xyz,
-rotation = `hkQuaternionf::setAxisAngle(up, lerped w)` [0x1f9eb04-0x1f9eb1a],
-scale = (1,1,1) [0x1f9eb1f-0x1f9eb2b]. So sample `w` is the yaw about `up` in
+Sampling the reference frame at `time`: `i = time / duration * (numSamples - 1)`, lerp
+samples `i` and `i+1` component-wise (clamped to the first/last sample);
+the output transform is translation = lerped xyz,
+rotation = an axis-angle quaternion about `up` by the lerped w,
+scale = (1,1,1). So sample `w` is the yaw about `up` in
 radians, and the root motion of frame F is sample F. JogForward's 23 samples
 run 0 -> 143.6 units in Y with w = 0; the T-pose's two samples are zero.
 
@@ -456,8 +446,7 @@ the NiNode as-is.
 
 | source | sha256 (16) | bytes | role |
 |---|---|---|---|
-| Todd's treat: `Fallout4.exe` (1.10.155) | `886d67fc955be02d` | -- | REFL arrays, DISASM bodies; every RVA above is this build's |
-| Todd's treat: symbol table | `6c5db527eaa981c1` | 452,201,472 | symbol -> RVA (its symbol list) |
+| Todd's treat: `Fallout4.exe` (1.10.155) | `886d67fc955be02d` | -- | REFL arrays, DISASM bodies; the build every claim above was checked on |
 | `E:\Tools\Fallout 4\HKXPACK\hkxpack-cli.jar` 0.1.6-beta | `393abbbdac009624` | 2,962,934 | XML route |
 | `Meshes\Actors\Character\CharacterAssets\skeleton.hkx` | `c6f795a7615cfa6d` | 43,296 | the player skeleton (from `Fallout4 - Animations.ba2`) |
 | `Meshes\Actors\Character\Animations\Furniture\Tpose\PoseA_Idle1.hkx` | `07406db13fd1107a` | 7,792 | the T-pose clip, 94 tracks, 2 frames, all static |
@@ -466,12 +455,11 @@ the NiNode as-is.
 | `Meshes\Actors\Character\Animations\MT\Irritated\PoseA_Idle1.hkx` | -- | 79,600 | 311 frames, 2 blocks (the overlap gate) |
 | `scratchpad/hkx1_20260910/hkclass_reflect.py` | -- | -- | the REFL reader; its output is reproduced in section 2, 3, 5, 6 |
 | `scratchpad/hkx1_20260910/census.py`, `census_all.txt`, `census_rows.tsv` | -- | -- | CENSUS, 15,320 `.hkx`, 6 s |
-| `scratchpad/hkx1_20260910/disasm/*.txt` | -- | -- | DISASM, one file per function named above |
+| `scratchpad/hkx1_20260910/disasm/*.txt` | -- | -- | DISASM notes |
 | `src/hkxanim.h` | `b606db5c8fbaf87b` | 4,692 | the reader (this contract implemented) |
 | `src/hkxanim.cpp` | `dfb2347143dad6dc` | 38,319 | the reader (this contract implemented) |
 | `tests/spells/hkxanim_decode.py` | `2e0011d380080899` | 27,559 | the independent decoder, written from this page |
 
-Anchors for the DISASM claims are the function names (Todd's treat) and the RVAs
-quoted inline; a different exe build moves every RVA and none of the names.
+The DISASM claims were checked in Todd's treat (1.10.155).
 The XML anchors are `<hkparam name="...">` element names, identical to the
 reflection member names.

@@ -163,8 +163,8 @@ fi
 # --- 4. an AttachT argument with FO4's "|n" suffix ---------------------------
 #
 # The engine splits an AttachT entry at the first '&' and hands everything after
-# it to the technique verbatim -- BGSAttachTechniquesUtil::ProcessAttachTechniques
-# (1.10.155 0x171a1b) is one strchr and no further parsing. Vanilla ships
+# it to the technique verbatim -- the engine's split (checked in Todd's treat)
+# is one strchr and no further parsing. Vanilla ships
 # arguments that carry a trailing "|n": MrHandyArmDest00.nif says
 # NamedNode&C-ArmsTypeA1|0, and no node of that literal name exists in the file.
 #

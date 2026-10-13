@@ -1,1 +1,0 @@
-DONE -- DOCFIX2 2026-09-24. Job 1 applied with 6 source corrections, job 2 5/5 fixed (+2 extra stale defaults), job 3 skill updated. Both files LF-only. Nothing committed; no src/tests/res touched. See DELIVERABLE_TEXT.md.

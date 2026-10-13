@@ -1,5 +1,0 @@
-set pagination off
-set confirm off
-run
-bt 40
-quit

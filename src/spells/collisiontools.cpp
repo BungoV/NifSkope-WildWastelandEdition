@@ -1328,18 +1328,16 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 		compound.bodyId = 0;
 		/* THE WORD AT +0x10 IS A STRUCT, AND BIT 0 MEANS "I AM CONVEX".
 		 *
-		 * Fallout 4's own symbols say so in four instructions:
-		 *
-		 *   hknpShape::asConvexShape        test byte ptr [rcx+0x10], 1
-		 *   hknpShape::getFlags             movzx eax, word ptr [rcx+0x10]
-		 *   hknpShape::getNumShapeKeyBits   movzx eax, byte ptr [rcx+0x12]
+		 * Fallout 4's own Havok code says so (checked in Todd's treat): the
+		 * "is it convex" test reads bit 0 of the byte at +0x10, the flags read
+		 * is the u16 at +0x10, and the shape-key-bit count is the byte at +0x12,
 		 *
 		 * so +0x10 is u16 m_flags, +0x12 is u8 m_numShapeKeyBits, +0x13 is the
 		 * dispatch type. This was the literal 0x01000001 -- flags 1, bit 0 SET --
 		 * which told the engine a COMPOUND was a convex shape. It called
-		 * asConvexShape, got a non-null answer, wrapped it in an
+		 * its "as convex shape" step, got a non-null answer, wrapped it in an
 		 * hknpScaledConvexShape because the reference was scaled, and
-		 * hknpScaledConvexShapeBase::calcAabb read a vertex array that was never
+		 * the scaled shape's bounding-box step read a vertex array that was never
 		 * there: access violation at 0xFFFFFFFFFFFFFFFF on TrashcanMetalOffice01,
 		 * the second crash this mod found.
 		 *
@@ -1432,7 +1430,7 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 	 * dynamic body its RAISE_CONTACT_IMPULSE_EVENTS bit -- and without that the
 	 * engine never raises the contact event, so it never asks what the body is
 	 * made of and it makes no impact sound at all. See HknpBodyFlag, which
-	 * carries the disassembly and the corpus counts. `in.dynamic` is exactly the
+	 * carries the engine reading and the corpus counts. `in.dynamic` is exactly the
 	 * measured predicate: it is what decides whether a motionProperties record
 	 * gets written (sys.motionCount below), and vanilla sets the bit on every
 	 * body that has one and no body that does not.
@@ -1457,7 +1455,7 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 	if ( in.keyframed && !in.dynamic ) {
 		/* The inertia record's own index must say NO MOTION RECORD, or the engine
 		 * indexes a dyn_motion array that is not there -- see dynamicInertia,
-		 * which carries the disassembly. 28 of 28 vanilla keyframed records:
+		 * which carries the engine reading. 28 of 28 vanilla keyframed records:
 		 * 0x0001ffff, inverse mass 0, density 1.0, scale word 0.
 		 */
 		phys.inertiaTag = 0x0001ffffu;
@@ -7549,7 +7547,7 @@ QVector<QPersistentModelIndex> tlCollCaptureRagdollNodes( const NifModel * nif )
  * bhkNPCollisionObjects that share it name their own body through Body ID. A NIF
  * with two systems is a thing the engine has never been asked to load, and
  * OfficeFileCabinet01 -- two systems, an animated drawer -- crashed inside
- * `bhkNPCollisionObject::CreateInstance` on 2026-08-22.
+ * the engine's collision-object creation on 2026-08-22.
  *
  * This is index arithmetic, not byte surgery. Each system decodes; its shapes
  * and compounds move into one list with their child indices rebased; its bodies

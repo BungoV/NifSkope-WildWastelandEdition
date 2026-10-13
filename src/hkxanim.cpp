@@ -1076,8 +1076,8 @@ HkxAnimFile hkxAnimLoadPackfile( const QByteArray & blob, const QString & name )
 				 * element = data + 48 * (frame * numberOfTransformTracks + track).
 				 * The object states its frame count NOWHERE -- the engine
 				 * divides transforms.size by numberOfTransformTracks
-				 * (hkaInterleavedUncompressedAnimation::transformTrack, rva
-				 * 0x01fa1ac0; docs/HKX_WRITE_FORMAT.md section 3.1), and so
+				 * (its interleaved-track sampler, checked in Todd's treat;
+				 * docs/HKX_WRITE_FORMAT.md section 3.1), and so
 				 * does this. */
 				if ( a.numTransformTracks < 1 )
 					refuse( QString( "animation %1 has %2 transform tracks" ).arg( i ).arg( a.numTransformTracks ) );

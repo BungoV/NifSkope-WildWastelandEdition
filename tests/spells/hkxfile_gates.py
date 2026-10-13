@@ -356,6 +356,10 @@ def main():
     ap.add_argument("--no-census", action="store_true")
     ap.add_argument("--no-hkxpack", action="store_true")
     a = ap.parse_args()
+    if not os.path.exists(DB):
+        print("SKIP: no %s -- it is not shipped; make it from your own game with "
+              "python tools/hkclassdb_extract.py --exe \"<Fallout 4 folder>/Fallout4.exe\"" % DB)
+        return 0
     os.makedirs(OUT, exist_ok=True)
     db = H.ClassDb(DB)
     if not os.path.exists(GATE):

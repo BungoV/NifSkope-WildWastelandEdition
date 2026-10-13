@@ -48,7 +48,7 @@ struct BodyBuildBone
 	Vector3 muscular = Vector3( 1, 1, 1 );
 	Vector3 fat = Vector3( 1, 1, 1 );
 	//! True when all three corners are (1,1,1) -- the game stores nothing for
-	//! such a bone either (Fallout4.exe 1.10.155 @ 0x5b1cd9 skips them).
+	//! such a bone either (checked in Todd's treat: it skips them).
 	bool neutral() const;
 };
 
@@ -95,21 +95,15 @@ bool bodyBuildListRaces( const QString & esmPath,
  *  THE COMBINATION, MEASURED -- Fallout4.exe 1.10.155 (Todd's treat).
  *
  *
- *  TESNPC::FillBoneScaleMap @ RVA 0x5b18f0, its per-bone lambda @ 0x5c24e0:
+ *  The game's NPC bone-scale step, per bone:
  *
  *      s = w.x*thin + w.y*muscular + w.z*fat  -  k * ( (thin+musc+fat)/3 - 1 )
  *
- *  quoted from 0x5c2597..0x5c264c:
- *      movss xmm0,[rip+0x26f8e7d]  ; 0.333333343
- *      mulss xmm10,xmm0            ; (V0.x+V1.x+V2.x)/3
- *      subss xmm10,[rip+0x328621a] ; NiPoint3::UNIT_ALL  -> mean - 1
- *      mulss xmm13,xmm0 / mulss xmm7,xmm1 / mulss xmm4,xmm0   ; the three w*V
- *      mulss xmm10,xmm0            ; k * (mean - 1)
- *      subss xmm13,xmm10           ; the correction
+ *  i.e. the three weighted corners, minus k times (the corners' mean - 1).
  *
- *  The weights are BARYCENTRIC and sum to 1 (TESNPC::ConvertFloatToMorphWeight
- *  @ 0x5bac60 maps one 0..100 slider to a two-corner lerp (1-t,0,t) or
- *  (0,t,1-t); kDefaultMorphWeight @ 0x3715478 is (1/3,1/3,1/3)). Because they
+ *  The weights are BARYCENTRIC and sum to 1 (the game maps one 0..100 slider
+ *  to a two-corner lerp (1-t,0,t) or (0,t,1-t), and its default morph weight
+ *  is (1/3,1/3,1/3)). Because they
  *  sum to 1, "weighted sum of the corners" and "1 + sum of the corners'
  *  deviations from 1" are the SAME expression -- the two candidates the brief
  *  named are algebraically identical, and the corpus below refutes BOTH: at
@@ -123,10 +117,10 @@ bool bodyBuildListRaces( const QString & esmPath,
  *
  *  ---- WHAT IS PROVEN, AND BY WHAT ---------------------------------------
  *
- *  Not by the disassembly. Bethesda ships the game's own answer as loose JSON:
+ *  Not by the engine reading alone. Bethesda ships the game's own answer as loose JSON:
  *  HumanRaceBoneScales{Male,Female}{Thin,Muscular,Fat,Default}.txt beside the
  *  meshes, each a list of {Name, Position, Rotation, Scale} -- which is what
- *  TESRace::ImportBodyMorphBoneBaseScales reads at CK time to FILL the RACE
+ *  the CK imports at edit time to FILL the RACE
  *  record this header parses. Evaluating the expression above at the four
  *  states and comparing, bone for bone and axis for axis, against those eight
  *  files (scratchpad/gltfexport1_20260919/body_build_table.py and
@@ -159,7 +153,7 @@ bool bodyBuildListRaces( const QString & esmPath,
  *
  *  UNPROVEN: the SHAPE of k between the centre and a corner. The corpus pins
  *  k at both ends and says nothing in between, and any function that is 1 at
- *  the centre and 0 at the corners fits it. The one above is the disassembly's
+ *  the centre and 0 at the corners fits it. The one above is the engine's
  *  reading; a rival that fits the same two ends exactly as well is
  *  k = 3 * min(w.x, w.y, w.z). The two separate immediately off the corners:
  *  at the midpoint of an edge, w = (0.5, 0, 0.5), this file says k = 0.5 and

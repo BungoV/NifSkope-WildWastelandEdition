@@ -1,9 +1,7 @@
 # What the engine does with a ragdoll
 
 Findings from Todd's treat (1.10.155), queried with the Todd's treat tooling (kept outside this repo).
-**Every RVA below is 1.10.155.** The live game
-is 1.11.221; bodies match closely, addresses do not — re-find with the Todd's treat tooling before
-trusting an address against the running build.
+The live game is 1.11.221; the behaviour described matches it closely.
 
 Written after a rebuilt human ragdoll misbehaved in game while every offline
 comparison of the file said it matched vanilla. The rule this exists to serve:
@@ -11,46 +9,39 @@ a byte diff answers "is our file the same", never "what does the engine do with 
 
 ## Closed: nothing validates our data on load
 
-`hknpRagdollData::checkConsistency` @0x18dbed0 is `ret 0` — a no-op in release.
+The ragdoll data's consistency check does nothing in the release game.
 There is no gate to fail, so "the engine rejected the ragdoll" is not a
 hypothesis.
 
 ## Closed: the mass the engine reads is the mass we write
 
-`hkbnpRagdollInterface::getOriginalMassOfBody` @0x1737450:
-
-    r10 = [this+0x18]              the ragdoll data
-    search [r10+0x20] (count [r10+0x28]) for the argument -> index
-    r8  = [r10+0x10]               the physics system data
-    bounds-check index against [r8+0x48]
-    rax = [r8+0x40]                bodyCinfos, stride 0x60  (idx*3 << 5)
-    rdx = [cinfo+0x0c]             the MOTION INDEX
-    rax = [r8+0x30]                dyn_inertia, stride 0x70
-    xmm1 = [inertia+0x04]          inverse mass
+When the behaviour graph asks for a ragdoll body's original mass, the engine
+finds the bone's body index in the ragdoll data, takes that body's
+`hknpBodyCinfo` (stride 0x60 in the file), reads its motion index (`+0x0c`),
+and returns the inverse mass stored at `+0x04` of that motion's entry in the
+dynamic-inertia array (stride 0x70).
 
 Exactly the fields we write, resolved *through* the motion index — so the index
 being a permutation of vanilla's is harmless.
 
 ## Closed: the grab weight is a scene-graph SUM, and ours equals vanilla's
 
-`PlayerCharacter::StartGrabObject` @0xeadaa0 → `TESHavokUtilities::GetSceneGraphMass`
-@0x63b850 → traversal @0x63f280, which for every collision object in the graph:
+When the player grabs an object, the engine walks the object's scene graph and,
+for every collision object in it:
 
-  * skips it if `byte [target+0x108] & 1` is set;
-  * else adds `bhkNPCollisionObject::GetMass`.
+  * skips it if the target object carries a "skip" flag;
+  * else adds that collision object's mass.
 
 The total is compared against the game setting `fGrabMaxWeightWalking`.
 
-`bhkNPCollisionObject::GetMass` @0x1d803d0 returns **0** when:
+A `bhkNPCollisionObject`'s mass is **0** when:
 
-  * the system has no physics world (`bhkPhysicsSystem::getWorld` null), or
-  * `[motion+0x28] != resolvedBodyId` — the body must be the FIRST attached to
-    its motion, which is how Havok avoids counting a shared motion twice.
+  * the system has no physics world, or
+  * the body is not the FIRST body attached to its motion — which is how Havok
+    avoids counting a shared motion twice.
 
-Otherwise it takes `hknpBody+0x68` (motion id), indexes the world's motion array
-at `[world+0xe0]` with stride **128**, unpacks a **16-bit half-float** inverse
-mass from `motion+0x20` (punpcklwd + shufps 0xff), and reciprocates it with a
-Newton step, returning 0 for a zero inverse mass.
+Otherwise it is the reciprocal of the motion's inverse mass, which the live
+physics world stores as a **16-bit half-float**; a zero inverse mass gives 0.
 
 Measured on the human skeleton, vanilla vs our rebuild: 18 bodies with a motion,
 18 distinct motions, **sum 93.5000 kg on both**. The grab path is identical, so it
@@ -159,31 +150,24 @@ still resolves to the identical capsule**, radius and length, body for body.
 
 ## Engine paths traced, and what each ruled out
 
-    hknpRagdollData::checkConsistency        @0x18dbed0   ret 0 -- no load validation
-    hkbnpRagdollInterface::getOriginalMassOfBody @0x1737450 mass via cinfo +0x0c ->
-                                                           dyn_inertia 0x70, +0x04
-    PlayerCharacter::StartGrabObject         @0xeadaa0    grab entry
-    TESHavokUtilities::GetSceneGraphMass     @0x63b850    sums the scene graph
-    BSVisit::TraverseScenegraphNPCollision   @0x63f280    skips [target+0x108]&1
-    bhkNPCollisionObject::GetMass            @0x1d803d0   0 if no world, 0 if
-                                                           [motion+0x28] != bodyId;
-                                                           else 1/half-float at
-                                                           motion+0x20
-    BShkbAnimationGraph::RestoreOriginalMassInRagdollImpl @0x16277c0
-    BShkbAnimationGraph::EaseInConstraintsImpl @0x1627960  loosens then restores the
-                                                           ragdoll constraints over a
-                                                           duration -- this is the
-                                                           vanilla "settle" and the
-                                                           reason a ragdoll is briefly
-                                                           loose after death
-    hknpEaseConstraintsAction::loosenConstraints @0x1884700
-    hkpConstraintDataUtils::loosenConstraintLimits @0x17bfe20
+    ragdoll consistency check     does nothing -- no load validation
+    original mass of a body       read via the body cinfo's motion index ->
+                                  dynamic inertia entry, inverse mass
+    player grab                   sums the scene graph's collision masses,
+                                  skipping flagged targets
+    collision object mass         0 if no world, 0 if not the motion's first
+                                  body; else 1 / the half-float inverse mass
+    restore original ragdoll mass
+    ease-in constraints           loosens then restores the ragdoll constraints
+                                  over a duration -- this is the vanilla
+                                  "settle" and the reason a ragdoll is briefly
+                                  loose after death
 
 Measured consequence: the grab weight is the SUM over the scene graph, and both
 files give **18 bodies, 18 distinct motions, 93.5000 kg** on the human skeleton.
 Identical, so the grab path cannot produce a different result.
 
-`EaseInConstraintsImpl` is worth remembering: the engine deliberately loosens a
+The ease-in step is worth remembering: the engine deliberately loosens a
 ragdoll's constraints on death and eases them back over a duration. A ragdoll that
 looks loose for a moment after death and then firms up is vanilla behaviour, not a
 defect -- and its input is constraint data that matches vanilla in every scalar.

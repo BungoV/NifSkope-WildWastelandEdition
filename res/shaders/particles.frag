@@ -37,7 +37,7 @@ struct Texture {
 #include "cell_lights.glsl"
 uniform bool fxAdditive;
 /* lane SUNCELL1 (last round): A LIT PARTICLE. The game's effect technique sets Lit from the property's lighting
- * flag alone, beside Ptcl (Todd's treat: BSEffectShaderProperty::DetermineTechniqueID), so a particle whose
+ * flag alone, beside Ptcl (checked in Todd's treat), so a particle whose
  * effect shader is lit takes the same placed lights as a lit effect card (lane FXLIT1, fo4_effectshader.frag):
  * mix( 1, directional + the model's four lights, lighting influence ), in linear light, before the fog.
  * glparticles.cpp sets these from src/gl/cellfxlit.h; fxLitMode 0 = unlit, as before. */

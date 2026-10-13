@@ -13,7 +13,7 @@ produced by HKXPACK. The one unmeasured step is the game itself; the flight is
 in `scratchpad/lane_hkx5_report.md` section 8.
 
 Authorities, as `docs/HKX_ANIMATION_FORMAT.md` uses them: **REFL** (the exe's
-`hkClass` reflection), **DISASM** (the exe's own code, RVAs are 1.10.155),
+`hkClass` reflection), **DISASM** (the exe's own code, 1.10.155, checked in Todd's treat),
 **XML** (HKXPACK 0.1.6-beta), **CENSUS** (the whole animations BA2), and
 **RT** — read back out of a file this writer produced, by the independent
 decoder `scratchpad/hkx5_20260910/interleaved_decode.py` and by HKXPACK.
@@ -26,18 +26,16 @@ Lane HKXCLASS measured the class registry of the shipped exe (skill
 `ww-hkx-animation` section 9, `scratchpad/hkxclass_20260910/`):
 
 * `hkaInterleavedUncompressedAnimation` is a **registered, fully implemented**
-  class — reflection `0x02e988e0`, `objectSize` 0x58, vtable `0x02e98938`,
-  `hkBuiltinTypeRegistry::StaticLinkedClasses` slot 136, HKXPACK signature
-  `0xa5eff3f2`. [REFL]
+  class — it has reflection, `objectSize` 0x58, a vtable, a slot in the
+  game's built-in class registry, and HKXPACK signature `0xa5eff3f2`. [REFL]
 * The loader **dispatches on the class NAME**, never on `hkaAnimation::type`
-  and never on a signature: `hkTypeInfoRegistry::finishLoadedObject`
-  (`0x01504610`) hashes the name string, and the leaf
-  `finishLoadedObjecthkaInterleavedUncompressedAnimation` (`0x01e131b0`)
-  writes the vtable pointer in. A byte scan of the whole `.text` for a
-  `cmp dword ptr [reg+0x10], 1..6` type test found none. [DISASM]
-* After load, sampling is a virtual call: `hkaAnimationControl::sampleTracks`
-  (`0x019ab940`) ends `jmp qword ptr [rax + 0x20]` — vtable slot 4. The
-  interleaved and spline vtables have identical 14-slot layouts. [DISASM]
+  and never on a signature: the post-load fix-up hashes the class name
+  string and calls the per-class finisher, which writes the vtable pointer
+  in. A scan of the whole game code for a test of the `type` field found
+  none. [DISASM]
+* After load, sampling is a virtual call through the animation's vtable
+  (slot 4). The interleaved and spline vtables have identical 14-slot
+  layouts. [DISASM]
 
 So a clip of this class is loaded and sampled by the same code path a shipped
 spline clip is. No FO4 file uses it (CENSUS: 13,514 spline + 856 lossless, and
@@ -72,8 +70,8 @@ signature) of `hkRootLevelContainer` inside that section. [XML, RT]
 
 ## 3. The interleaved animation object
 
-`objectSize` 0x58, laid out at the reflection's offsets [REFL `0x02e988e0`
-plus the `hkaAnimation` base at `0x038395e0`]:
+`objectSize` 0x58, laid out at the reflection's offsets [REFL, the class
+plus its `hkaAnimation` base]:
 
 | off | member | written |
 |---|---|---|
@@ -92,21 +90,9 @@ plus the `hkaAnimation` base at `0x038395e0`]:
 A one-track clip cannot tell `frame * tracks + track` from
 `track * frames + frame`, and `scratchpad/hkxclass_20260910/interleaved.hkx`
 (lane HKXCLASS's proof) has exactly one track. So the order was read out of the
-engine's own accessor,
-`hkaInterleavedUncompressedAnimation::transformTrack` **rva `0x01fa1ac0`**
-[DISASM]:
-
-```
-0x001fa1aca  mov  eax, [rcx + 0x40]     ; transforms.size  (the hkArray size at +0x38+8)
-0x001fa1ada  idiv dword ptr [rcx + 0x18]; / numberOfTransformTracks  =>  THE FRAME COUNT
-0x001fa1b05  movsxd rcx, [r9 + 0x18]    ; rcx = numberOfTransformTracks
-0x001fa1b09  mov  rdx, [r9 + 0x38]      ; rdx = transforms.data
-0x001fa1b21  imul rax, rdi              ; rax = numberOfTransformTracks * frame
-0x001fa1b29  add  rax, r11              ;     + track
-0x001fa1b2c  lea  rax, [rax + rax*2]    ; * 3
-0x001fa1b30  add  rax, rax              ; * 6   (so *8 below gives 48 bytes)
-0x001fa1b33  movaps xmm6, [rdx + rax*8] ; element = data + 48 * (frame * tracks + track)
-```
+engine's own per-track accessor for this class [DISASM]: it divides
+`transforms.size` by `numberOfTransformTracks` to get the frame count, and
+reads the element at `transforms.data + 48 * (frame * tracks + track)`.
 
 Two facts follow, and the writer obeys both:
 
@@ -185,7 +171,7 @@ Read off HKXPACK's own output and off the shipped `jog.hkx`, and reproduced:
 **0x18** — `name` +0, `className` +8, `variant` +0x10. Measured on the shipped
 `jog.hkx` and on HKXPACK's output alike: both files' local fixups run
 `0x10→0x40, 0x18→0x60, 0x28→0x80, 0x30→0x90`, so the second entry's `name`
-sits at +0x18 from the first's. (Root MISTAKES.md, 2026-09-10.)
+sits at +0x18 from the first's. (Private notes, 2026-09-10.)
 
 ## 6. Route A and route B agree
 
@@ -215,7 +201,7 @@ without writing a file.
 
 | source | sha256 (16) | bytes | role |
 |---|---|---|---|
-| Todd's treat: `Fallout4.exe` (1.10.155) | `886d67fc955be02d` | — | REFL, DISASM; every RVA on this page is this build's |
+| Todd's treat: `Fallout4.exe` (1.10.155) | `886d67fc955be02d` | — | REFL, DISASM; the build every claim on this page was checked on |
 | `E:\Tools\Fallout 4\HKXPACK\hkxpack-cli.jar` 0.1.6-beta | `393abbbdac009624` | 2,962,934 | route A, and the layout that route B mirrors |
 | `scratchpad/hkxclass_20260910/interleaved.hkx` | `4ad71f2d1d5de5d9` | 2,160 | lane HKXCLASS's one-track interleaved proof; the byte template |
 | `scratchpad/hkx1_20260910/clips/jog.hkx` | `f7f74a00f23e87c6` | 12,288 | the shipped clip of round trip 1, and the vanilla layout reference |
@@ -225,8 +211,6 @@ without writing a file.
 | `scratchpad/hkx5_20260910/dump_packfile.py` | `fb685f5fcc97133e` | 4,197 | the structural dump behind sections 2 and 5 |
 | `scratchpad/hkx5_20260910/interleaved_decode.py` | `62279896fc3deefd` | 10,688 | the independent decoder (written from this page's inputs, not from the writer) |
 | `scratchpad/hkx5_20260910/make_flight_files.py` | see the report | — | the flight pair: the exact rewrite and the 45-degree head marker |
-| `scratchpad/hkx5_20260910/interleaved_order.py` | — | — | the symbol list behind section 3.1 |
 | `tests/spells/hkxwrite_gates.py` | `4ca1dc6bd7d8dac2` | 10,199 | the gate suite, 23/23 |
 
-The DISASM anchors are the function names in Todd's treat plus the RVAs quoted
-inline; a different exe build moves every RVA and none of the names.
+The DISASM claims were checked in Todd's treat (1.10.155).

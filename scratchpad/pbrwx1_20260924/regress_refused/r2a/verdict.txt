@@ -1,2 +1,0 @@
-pictures: pic_legacy pic_studio pic_studio_agx
-R2A GATES: FAIL ()

@@ -11,8 +11,8 @@
 # readings -- the subsegment's User Index, or its ordinal within the segment --
 # which agree on most of the corpus and disagree on OutfitM's left arm, whose
 # User Indices run 1, 2, 3, 160, 60. Only the ordinal is what
-# BSGeometrySegmentFlagData::ApplyTo's lambda computes
-# (SegmentStarts[segment] + 1 + ordinal, 1.10.155 @0x1b9eb50), so the shipped
+# the engine's segment-flag apply step computes
+# (SegmentStarts[segment] + 1 + ordinal, checked in Todd's treat), so the shipped
 # .ssf files are the external authority and this harness holds our output
 # against them.
 #

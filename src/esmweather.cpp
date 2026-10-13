@@ -654,7 +654,7 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 				dalcs << bytes();
 			else if ( f == "DATA" && f.size() >= 5 ) {
 				out.sunGlare = quint8( f.data()[4] );
-				if ( f.size() >= 20 ) {	// lane GRASSMB1: the wind (Sky::UpdateWind reads these four)
+				if ( f.size() >= 20 ) {	// lane GRASSMB1: the wind (the game's sky wind update reads these four)
 					out.windSpeed = quint8( f.data()[0] );
 					out.windDir = quint8( f.data()[17] );
 					out.windDirRange = quint8( f.data()[18] );

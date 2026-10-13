@@ -256,17 +256,17 @@ bool Controller::update( const NifModel * nif, const QModelIndex & index )
 		playBackwards = flags & 0x10;
 		computeScaledTime = flags & 0x40;
 
-		/* The whole word, decoded out of Todd's treat (1.10.155) from named accessors
-		 * on NiTimeController's flags at +0x10 (see WW_ENGINE_COMPARISON.md §5):
+		/* The whole word, decoded out of Todd's treat (1.10.155) from the engine's
+		 * readers of the controller's Flags field (see WW_ENGINE_COMPARISON.md §5):
 		 *
-		 *   bit 0    AnimType         GetAnimType        0x1ba7100
-		 *   bits 1-2 CycleType        GetCycleType       0x1ba7110   -> extrapolation
-		 *   bit 3    Active           SetActive          0x13f0b0    -> active
-		 *   bit 4    PlayBackwards    GetPlayBackwards   0x1ba7140   -> playBackwards
+		 *   bit 0    AnimType
+		 *   bits 1-2 CycleType                                       -> extrapolation
+		 *   bit 3    Active                                          -> active
+		 *   bit 4    PlayBackwards                                   -> playBackwards
 		 *   bit 5    manager-controlled                              (see below)
-		 *   bit 6    ComputeScaledTime                   0x1ba6d30   -> computeScaledTime
-		 *   bit 7    ForceUpdate      SetForceUpdate     0x1ba7190
-		 *   bit 8    MandatoryUpdate  QMandatoryUpdate   0x1ba4aa0
+		 *   bit 6    ComputeScaledTime                               -> computeScaledTime
+		 *   bit 7    ForceUpdate
+		 *   bit 8    MandatoryUpdate
 		 *
 		 * The four not read here are all about *when the engine bothers to call
 		 * a controller*, which is a question a viewport does not have:
@@ -275,7 +275,7 @@ bool Controller::update( const NifModel * nif, const QModelIndex & index )
 		 *   the controller started rather than from the app clock. The scene time
 		 *   here is already relative, so it would be a no-op.
 		 * - Bit 5 says a NiControllerSequence owns this controller;
-		 *   NiControllerSequence::StoreTargets sets it when it installs a blend
+		 *   the sequence sets it when it binds its targets and installs a blend
 		 *   interpolator. Selecting a sequence is what does the equivalent here.
 		 * - Bits 7 and 8 (ForceUpdate, MandatoryUpdate) suppress the engine's
 		 *   "the time did not change, skip it" early-out. Nothing is skipped here.

@@ -13,7 +13,7 @@ had to leave NifSkope to do — rig a mesh to a skeleton, edit topology, unwrap
 UVs, pose a skeleton, author collision, keyframe an animation, find out why a
 file is broken — are in the program.
 
-**[What this fork adds, in full →](WW_FEATURES.md)** · **[Change history →](WW_CHANGES.md)** · **[Handoff / project state →](HANDOFF.md)**
+**[What this fork adds, in full →](WW_FEATURES.md)** · **[Change history →](WW_CHANGES.md)**
 
 ---
 
@@ -79,6 +79,18 @@ By default the compiler targets Intel Haswell / AMD Zen or newer. `qmake6
 noavx2=1` drops that to Ivy Bridge, `nof16c=1` to Sandy Bridge, `noavx=1`
 lower still. `debug=1` builds a debug binary.
 
+**Havok class database (needed to open and save `.hkx` files).** It is not
+shipped: it is read out of your own copy of the game. Make it once, from the
+source folder (needs Python 3 and `pip install capstone`):
+
+```
+python tools/hkclassdb_extract.py --exe "<Fallout 4 folder>/Fallout4.exe"
+```
+
+That writes `res/hkclasses_fo4.json`, which the build copies beside the exe.
+For a downloaded build, put the file next to `NifSkope.exe` (or point
+`WW_HKCLASSDB` at it).
+
 Using MSYS2-CLANG64 instead of UCRT64 works; replace **ucrt** with **clang** in
 the package names. For Qt 5, replace **qt6** with **qt5** and run `qmake-qt5`.
 
@@ -122,7 +134,6 @@ Vendored third-party code keeps its own license, in its own directory:
 | | |
 |---|---|
 | [WW_FEATURES.md](WW_FEATURES.md) | Everything this fork adds, vs. upstream |
-| [HANDOFF.md](HANDOFF.md) | Project state, build commands, where things live |
 | [WW_CHANGES.md](WW_CHANGES.md) | Dated change history, in detail |
 | [docs/CLI.md](docs/CLI.md) | The headless command line |
 | [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md) | The backlog |

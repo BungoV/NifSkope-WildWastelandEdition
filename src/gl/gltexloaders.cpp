@@ -1229,9 +1229,9 @@ static void extract_pbr_lut_data( QByteArray & data )
 }
 
 /* lane SRGBTAG1 (2026-10-03): in Fallout 4 the _SRGB tag in a DDS header makes no difference to a lighting
- * material's diffuse. Todd's treat (1.10.155): BSLightingShaderMaterialBase::LoadBaseTextures asks for the diffuse slot
- * with the sRGB flag SET (normal and smoothness/spec slots with it clear); BSShaderManager::GetTexture carries
- * it to NiTexture::CreateStreaming, and BSGraphics::CreateTexture( desc, srgb ) runs MakeSRGB on the format
+ * material's diffuse. Todd's treat (1.10.155): the lighting material's texture load asks for the diffuse slot
+ * with the sRGB flag SET (normal and smoothness/spec slots with it clear); the texture manager carries
+ * it to the streaming texture, and the renderer's texture creation switches the format to its sRGB twin
  * (BC7_UNORM 98 -> BC7_UNORM_SRGB 99, and so on). A 98 diffuse is therefore viewed as 99 anyway, and a file
  * already tagged 99 gets the same view: 98 and 99 render identically in game, which is why the BoS armor
  * looks right there. NifSkope's legacy programs (fo4_default, fo4_cell, the effect shaders, ...) read an

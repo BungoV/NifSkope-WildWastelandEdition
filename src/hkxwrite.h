@@ -9,8 +9,8 @@
 
    WHY INTERLEAVED AND NOT SPLINE.  Lane HKXCLASS measured the 1.10.155 exe:
    `hkaInterleavedUncompressedAnimation` is a registered, fully implemented
-   class (reflection 0x02e988e0, vtable 0x02e98938, static-linked-classes slot
-   136, HKXPACK signature 0xa5eff3f2), and the loader dispatches on the class
+   class (it has reflection data and a vtable in the game, and is one of its
+   statically linked classes; HKXPACK signature 0xa5eff3f2), and the loader dispatches on the class
    NAME -- never on `hkaAnimation::type` and never on a signature -- so a clip
    of this class loads and samples through the same virtual call a spline clip
    does.  Writing spline-compressed instead would need our own NURBS

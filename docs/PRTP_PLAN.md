@@ -42,7 +42,7 @@ the `.loda` AO map. Probes happen here.
    interiors / 3,945 lights PASS, red control fails. Still open: the ground
    through the terrain splat.
 2. **PRTP2 -- vanilla light model, research.** How the stock game lights a
-   pixel: point/spot falloff, DALC, interior ambient, fog. Todd's treat FIRST, RVA per
+   pixel: point/spot falloff, DALC, interior ambient, fog. Todd's treat FIRST, checked per
    build, plus the stock shader bytecode. Written down per term before any
    renderer edit. (DeepSeek never sees Todd's treat.)
    WRITTEN 2026-09-30: docs/PRTP2_LIGHT_MODEL.md (point, spot, sun, DALC, fog,
@@ -72,10 +72,10 @@ the `.loda` AO map. Probes happen here.
    BAKE WRITTEN 2026-09-30 (lane PRTPBAKE): section 2g. The band's Bake writes
    `.tbk` v3 sector files; gate tests/spells/probe_bake.py (independent re-trace).
 
-## 2b. Inherited from FO4CS's in-game bake (read 2026-09-30; MISTAKES: this plan was first written without it)
+## 2b. Inherited from FO4CS's in-game bake (read 2026-09-30; this plan was first written without it)
 
 FO4CS ran the Division bake in game, 2026-08-03..08-07: code fallout4-community-shaders/src/TransportBake +
-WorldProbes, reports Codex/division-bake-b1..b2o-*.md, rulings Codex/HANDOFF.md ~17350-18680, gap list
+WorldProbes, reports Codex/division-bake-b1..b2o-*.md, rulings in FO4CS's private notes, gap list
 Codex/division-deck-coverage-matrix.md (M-01..M-22). Its rulings bind PRTP:
 - The deck is authoritative; diverge only if it does not work in FO4 or a divergence measurably wins.
 - Statics only. Actors, havok clutter, projectiles, movables, FX: receivers only. Workshop builds: receivers only.
@@ -249,7 +249,7 @@ the Museum interior (975, sky 0) pass.
 
 bungo: "the top down bakes from the division games for far areas ... so that GI works on areas far from you".
 The Division's distant shading (slide 57) and FO4CS's own charter for its far tier ("one sky-lit probe hoisted
-above each sector's roofline ... stored per sector ... relit with the same live sun/sky feeds", Codex HANDOFF):
+above each sector's roofline ... stored per sector ... relit with the same live sun/sky feeds", FO4CS private notes):
 a place with no near probes loaded still gets measured bounce light.
 
 `NifSkope -no-gui probefar --lodl <world>.lodl --lodi <world>.lodi --out <dir>` (src/probefar.cpp). Built from
@@ -370,7 +370,7 @@ Gate: `tests/spells/cell_fog.sh` + `cell_fog_check.py`: its own plugin walk and 
 against fog probe 6 (alpha, height blend) and 7 (colour) at positions from probes 2 + 3, the camera from
 WW_CELL_CAM_DUMP. Fog probe 8 echoes the distance and height each fragment's fog read; only pixels where that
 matches the position probes count (at least 60% must), since some surface over Solomon's house and the Vault
-served the fog probes and not the position ones (named in MISTAKES.md). Found in lane EFX1: the effect shapes
+served the fog probes and not the position ones (named in the private notes). Found in lane EFX1: the effect shapes
 (the Vault's steam), which take no cell uniforms; probe passes now skip them (2o) and the same-surface share is
 100% in all three cells (was 74-83%).
 Reds noclamp / nogamma / noinherit must each FAIL in at least one of the three cells.
@@ -1493,7 +1493,7 @@ How (src/probefar.cpp, class FarTrees + the tree loop in probeFarBuild):
   one BC3 array DDS read per layer. Each alpha-tested triangle keeps the share of its texels that pass (cover),
   shrunk about its centroid by sqrt(cover), in the mean linear color of the passing texels.
 - Canopy: each cell's roofline is raised by every authored vertex (all slots) of the trees in it AND by every
-  tree vertex that went into the soup (a shrunk leaf can cross into the next cell; MISTAKES 2026-10-02).
+  tree vertex that went into the soup (a shrunk leaf can cross into the next cell; found 2026-10-02).
 - Census: `far: trees N of M ... (T triangles from soup triangle F, keeping A of their area), tree materials K
   (without a texture 0), cells a canopy raised C`. Tree triangles are soup[F:].
 - Reds (`--red`): notrees, treebox (a solid box per tree), treeshift (every tree one cell east), canopy (roofline
@@ -1837,9 +1837,9 @@ header and object table are read (object user IDs are form IDs: refs, or 0xFD co
 trees, portals) is not decoded, so the game's visibility answer is not used yet. STATUS.md lists the offsets and
 the game functions a continuation would read.
 SUNCELL1 (final round): particle vertex alpha^2.2 (asm 00613/00604/00903 power v2.xyzw). Lit effects and lit
-particles outdoors: base cb2[12] = pow(sun, 2.2) x fade x ImageSpaceManager+0x98 (fHDRDataA[6] = HNAM Sunlight
-Scale); the 337 lit effect pixel shaders read cb2 rows 0..14 only (no ambient row), so no DALC term. Interiors take
-the cell's XCIM Sunlight Scale in the base too (the decomp multiplies it unconditionally).
+particles outdoors: base cb2[12] = pow(sun, 2.2) x fade x the imagespace Sunlight Scale (HNAM's 7th float);
+the 337 lit effect pixel shaders read cb2 rows 0..14 only (no ambient row), so no DALC term. Interiors take
+the cell's XCIM Sunlight Scale in the base too (the game multiplies it in unconditionally).
 
 ### 2?. FARLOD1 -- the far LOD around the cell block (2026-10-05)
 Status: BUILD PENDING (f81c60ed on farlod1-20261005; gates.sh + sheet.sh ready, judge farlod1_check.py).
