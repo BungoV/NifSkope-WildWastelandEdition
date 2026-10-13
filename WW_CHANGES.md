@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLAIR1 (2026-10-13, branch volair1-20261013): Volumetric Air, one lit medium in the cell view
+
+- **The cell view can draw the air as one lit medium instead of the game's distance fog.** Scene window fold
+  "Volumetric Air" (ships OFF, `WW/VolAir`; pin `WW_CELL_AIR=0|1`). The medium is fitted to the fog records in force
+  (the weather's outdoors, the interior's fog indoors; height falloff over the fog's band), so it hides the scene as
+  the game's fog does, and it glows only with light that is really there: the sun through its cascade shadows (the
+  light shafts), every placed light with its shadow cube, the probe GI (neon emitters included) and the ambient,
+  with the air's transmittance on every path. Replaces lane VOLFOG1's Volumetric Fog and its switches.
+- Passes (`src/gl/cellvolair.*`, `res/shaders/cell_volair.*`, `lookdev_fog.glsl`): froxels of 12 x 12 pixels x 64
+  exponential slices, inject (4 sub-steps) then front-to-back integrate, applied as colour x T + L. No temporal
+  history (NifSkope redraws on demand).
+- Telemetry: `volair=on(dims near far sigma0 zb H top phase ...)` in the census, and `cell air: volair=... fogblend=N`
+  in the notes whenever it changes; `WW_CELL_AIR_TIME=1` adds the pass's ms.
+- Test only, no menu row, until bungo picks: `WW_CELL_VOLAIR_FOGBLEND=1` (option B) draws the game's fog colour over
+  the lit air with the game's own alpha (nothing nearer than the fog's start distance); unset or 0 = option A, the
+  real light only.
+- Gate switches (environment only): `WW_CELL_AIR_RED=off|gioff|flat|noshadow|nolights|wrongmed|blendnear`,
+  `WW_CELL_AIR_TERMS=<mask>`, `WW_CELL_AIR_PROBE=1|2`, `WW_CELL_AIR_DUMP=<file>`.
+- Gates: `tests/spells/volair1_check.py` (maths twin); `tests/spells/volair1_cell.sh` (a numpy rebuild of the
+  medium, inject and integrate from the dump, applied in place of the fog, shadows, placed lights, GI) green at
+  Sanctuary and Vault111Cryo, its six reds fail; its Goodneighbor neon stage is not yet proven (its first run drew no
+  picture); `tests/spells/volair1_fogblend.sh` (B=0 is A byte for byte, B=1 differs only past the fog's start)
+  green, its red fails.
+- Known, open: the medium's density is fitted at the fog's full distance (175000-250000 units outdoors), so within a
+  street the air is very thin (about 1/10 of the game fog's opacity at 3000 units): lamp halos and sun shafts are
+  computed but too faint to see. The weather's phase record's back lobe is drawn with +g (to be checked).
+
 ## Lane BLOOM1 (2026-10-13, branch bloom1): FO4CS bloom and Physical Glare in the cell view
 
 - **The cell view can now draw FO4CS's bloom instead of the game's, with its Physical Glare.** Show > Effects >
