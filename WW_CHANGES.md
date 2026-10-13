@@ -21,6 +21,19 @@
   shop +0.007 (was +0.582), awning -0.08 (was +0.28), recess -0.04 (was +0.38). Museum of Freedom roof (tracer share
   0.94), 16:00: GI on/off 1.007/0.998/0.991. BOUNCE1's noon gate 2 still passes (sun bounce 1.00/1.02/1.03 of the
   reference).
+- **No more sunlit patch on the Concord Hardware ceiling.** Near the shop's diagonal front wall the GI blend took
+  voxels whose centres sit outside the wall, in the sunlit street. The shop's ground floor is open to the street, so
+  the room clamp labels both sides outdoors and could not reject them. A voxel now counts only when the fine room
+  grid shows no solid cell between the surface and the voxel's centre (`cellGiSeen`, `res/shaders/cell_lights.glsl`).
+  When nothing seen remains, a 4x4x4 fill of seen voxels comes before the plain blend. Red pin
+  `WW_CELL_PV_RED=nosee` (environment only, no menu row). The Python mirror (`tests/spells/cell_rooms_check.py`,
+  `GI_CHECK_SEE=0` for the old blend) agrees.
+- New `tests/irradiance_reference.cpp`: the full-irradiance tracer (sun and sky, every bounce, kept apart by order).
+  It showed that Concord's bake is not weak (1.0-1.12x the tracer once the reference sun is not scaled twice).
+- Gates (numeric only). Ceiling picks against the tracer: median 5.92x to 1.29x, sum 1.176 to 0.150 (tracer 0.0965).
+  The ceiling patch's gi/pi drops from 2.7 to 0.5 (8-bit). Shop interior vs the tracer: median 1.14x. Goodneighbor
+  canopy share 0.64 (tracer 0.61, PASS). Concord open roof, GI on/off: noon 1.001/0.997/0.995, 16:00
+  1.002/0.995/0.991. BOUNCE1 gate 2: 0.95/0.97/0.98 PASS. Collision 12/12.
 
 ## Lane BOUNCE1 (2026-10-13, branch bounce1): outdoors the sun is the game's (x the imagespace Sunlight Scale), so the bounce shows
 
