@@ -1913,8 +1913,18 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 
 	// group by sector: each file = its probes, their links, and every surfel they link
 	std::map<std::pair<int, int>, std::vector<const ProbeOut *>> sectors;
+	// lane BAKENEIGH1: only the asked cells' files; a probe over their edge belongs to its own cell's bake
+	const bool ownSet = spec.ownX1 >= spec.ownX0 && spec.ownY1 >= spec.ownY0;
+	std::map<std::pair<int, int>, int> outside;
+	R.ownSet = ownSet;
+	R.ownCells = ownSet ? ( spec.ownX1 - spec.ownX0 + 1 ) * ( spec.ownY1 - spec.ownY0 + 1 ) : 0;
 	for ( const Chunk & ch : chunks )
 		for ( const ProbeOut & po : ch.probes ) {
+			if ( ownSet && ( po.sx < spec.ownX0 || po.sx > spec.ownX1 || po.sy < spec.ownY0 || po.sy > spec.ownY1 ) ) {
+				R.outsideProbes++;
+				outside[{ po.sx, po.sy }]++;
+				continue;
+			}
 			sectors[{ po.sx, po.sy }].push_back( &po );
 			R.probes++;
 			R.skyMean += po.sky;
@@ -1925,6 +1935,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			R.glassMean += po.glassShare;
 			R.probesRoomed += po.pext.room[0] ? 1 : 0;
 		}
+	R.outsideSectors = int( outside.size() );
 	R.glassMean /= qMax( 1, R.probes );
 	R.skyMean /= qMax( 1, R.probes );
 	R.unlinkedMean /= qMax( 1, R.probes );
@@ -2077,6 +2088,9 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 	t << "\n";
 	t << "bake: surfels " << r.surfels << ", links " << r.links << ", probes over the link cap " << r.probesCapped
 	  << ", unlinked mean " << QString::number( r.unlinkedMean, 'f', 4 ) << ", sectors " << r.sectors << "\n";
+	if ( r.ownSet )   // lane BAKENEIGH1
+		t << "bake: own cells " << r.ownCells << ": files written only for them; probes over their edge left to the "
+		  << "neighbour's own bake " << r.outsideProbes << " (in " << r.outsideSectors << " neighbour cells, no file written)\n";
 	t << "bake: two-sided cells " << r.twoSided << " (second side housed next door " << r.spilled
 	  << ", links to it " << r.linksSpilled << "), links refused as turned away " << r.linksTurned
 	  << " (mean " << QString::number( r.turnedMean, 'f', 4 ) << " of the sphere)"
