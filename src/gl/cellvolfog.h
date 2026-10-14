@@ -13,14 +13,14 @@ class Scene;
 
 /*! THE LIT MEDIUM (lane VOLFOG1, docs/cloud/VOLFOG1_DESIGN.md, docs/PRTP_PLAN.md "volumetric fog"): the light the
  *  fog scatters toward the eye, ADDED on top of the game's own distance fog (the game draws its fog and then its god
- *  rays over everything, DrawWorld::Render_PreUI 0x2857470).
+ *  rays over everything, the engine's pre-UI render pass).
  *  The density is the game's fog records' (his call): along a view ray the medium's opacity IS the fog alpha
  *  alpha(t) = wwFogEval(t, z(t)) (the weather's or, indoors, the cell's), so a slice's in-scatter is
  *  S x (alpha(end) - alpha(start)) -- the cloud design's exact slice integral with sigma_t read from the records.
  *  The light S (display units, pi x radiance): the directional light (outdoors the weather's sun -- at night the same
  *  light, the game has no moon light -- times its cascade shadow; indoors the lighting template's), the placed lights
  *  that emit shafts in the game (a shadow flag AND a GDRY: GenDynamic 0x320a50), and the probe GI read as L0 + L1.
- *  The phase is the god-ray record's medium (GDRY: Sky::GetGodraysSettings 0x64cb30): Rayleigh air, forward and back
+ *  The phase is the god-ray record's medium (GDRY, the engine's god-ray settings): Rayleigh air, forward and back
  *  Henyey-Greenstein lobes, the three weighted by their scattering colours normalised to a luminance of 1; the GDRY
  *  intensity scales the result. Outdoors the weather's WGDR (two ToD slots), indoors CELL XGDR, else the lighting
  *  template's WGDR, else the engine's fallback medium.

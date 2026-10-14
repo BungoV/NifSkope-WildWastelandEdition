@@ -121,7 +121,7 @@ Matrix4 toMatrix4( const Dmat & d )
 	return Matrix4( f );
 }
 
-/* BSGraphics::State::Halton, step for step in float: 1/base, then while index > 0: r += fmodf(index, base) * f,
+/* the engine's Halton step, step for step in float: 1/base, then while index > 0: r += fmodf(index, base) * f,
  * index = floor(index / base) (as index * (1/base)), f *= 1/base. */
 float gameHalton( float base, float index )
 {
@@ -336,7 +336,7 @@ void wwGameTaaJitterProjection( Scene * scene, Matrix4 & proj )
 		s.autoFrame++;
 		s.frame = s.autoFrame;
 	}
-	// BSGraphics::State::UpdateTemporalData: iCurrentFrame = (iCurrentFrame + 1) & 7, n = iCurrentFrame + 1;
+	// the engine's temporal-data update: iCurrentFrame = (iCurrentFrame + 1) & 7, n = iCurrentFrame + 1;
 	// frame index k here IS that counter after its increment
 	s.n = ( s.frame & 7 ) + 1;
 	const float bx = s.redWrongJitter ? 3.0f : 2.0f, by = s.redWrongJitter ? 2.0f : 3.0f;

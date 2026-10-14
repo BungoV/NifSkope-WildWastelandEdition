@@ -32,7 +32,7 @@ class Scene;
  *     the camera path's frame time (1 / --path fps); an interactive window measures it between paints.
  *   - the vectors' frames are the camera WITHOUT the temporal AA's jitter, and the jitter comes out of the
  *     pixel's NDC (round 2), so a still camera under a jittering projection has zero vectors.
- *  The order is the game's (DrawWorld::Imagespace renders its effects 0..13 then 15..21): the tone map (3), the
+ *  The order is the game's (the engine's image-space pass renders its effects 0..13 then 15..21): the tone map (3), the
  *  depth of field (6), the motion blur (10), then the temporal AA (18) -- so both run on the tone-mapped frame
  *  BEFORE the temporal AA; the targets between the passes are half floats as the game's.
  *

@@ -46,7 +46,7 @@ class Scene;
  *  wwCellGrassUniforms): p = (phase - (h0 + h1) / 128) * frequency, w = ((sin(pi sin p) + sin(2 pi sin p)) 0.3 +
  *  cos(pi cos p) 0.2 + 1) (max - min) / 2 + min, times alpha^2 / 2, along (cos angle, sin angle, 0), added to the
  *  position and to the normal, tangent and bitangent (each renormalised). phase = timer / 600 * 2 pi * the GRAS
- *  wave period; min / max = fWindMin/MaxSpeed * 300 and the frequency from the weather's DATA (Sky::UpdateWind).
+ *  wave period; min / max = fWindMin/MaxSpeed * 300 and the frequency from the weather's DATA (the engine's wind update).
  *  The blade's (h0 + h1) / 128 rides in the welded bitangent's length (1024 + it), read back and renormalised by
  *  the vertex shader. The fade is fGrassStartFadeDistance 3500 + fGrassFadeRange 1000.
  *
@@ -92,7 +92,7 @@ QString wwCellGrassEcho( const void * nif );
 //! Per draw (fo4_cell / pbrm_cell): the fade on a grass shape, zero on every other (a no-op without the uniform).
 void wwCellGrassUniforms( Scene * scene, int block );
 
-//! The wind constants from the loaded weather (Sky::UpdateWind): wind = (angle, 0, 0, 0), wind2 = (min * 300,
+//! The wind constants from the loaded weather (the engine's wind update): wind = (angle, 0, 0, 0), wind2 = (min * 300,
 //! max * 300, frequency, 1); false without a weather.
 bool wwCellGrassWind( float wind[4], float wind2[4] );
 //! The blade's phase offset, (h0 + h1) * 0.0078125: the weld carries it in the bitangent's length (1024 + it).

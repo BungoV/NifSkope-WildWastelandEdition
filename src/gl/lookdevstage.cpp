@@ -389,8 +389,8 @@ QString fogSummary()
 
 bool wwLookdevGodRays( float m[12], QString * note )
 {
-	// lane VOLFOG1: the weather's WGDR, the two ToD slots of the colour keys blended linearly (GetGodraysSettings
-	// 0x64cb30 sums every term weight-linearly; a slot without a GDRY adds the fallback constants)
+	// lane VOLFOG1: the weather's WGDR, the two ToD slots of the colour keys blended linearly (the engine's god-ray settings
+	// the engine sums every term weight-linearly; a slot without a GDRY adds the fallback constants)
 	resolve();
 	const LdState & s = st();
 	if ( !s.haveWeather )

@@ -1074,7 +1074,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		const EsmInteriorCell & ic = world.interior();
 		QByteArray tData, tDalc;
 		const bool haveT = ic.lightingTemplate && world.lightingTemplate( ic.lightingTemplate, tData, tDalc );
-		// lane VOLFOG1: the god-ray medium: XGDR, else the template's WGDR, else the engine's fallback (GetGodraysSettings)
+		// lane VOLFOG1: the god-ray medium: XGDR, else the template's WGDR, else the engine's fallback
 		{
 			const quint32 tg = ic.lightingTemplate ? world.lightingTemplateGodRays( ic.lightingTemplate ) : 0;
 			const quint32 gform = ic.godRays ? ic.godRays : tg;
