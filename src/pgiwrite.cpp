@@ -42,12 +42,17 @@ constexpr double kPi = 3.14159265358979323846;
 
 /*! The self-plane horizon of a surfel side (HORZ source 1): per azimuth, the elevation of the surfel's own plane.
  *  Up-facing: atan(-t / nz) with t the normal's component along the azimuth; a vertical side: -90 where it faces
- *  the azimuth, +90 behind; a down-facing side: +90 (no sky above it). tests/spells/pgi_read.py computes the same. */
+ *  the azimuth, +90 behind; a down-facing side: +90 (no sky above it). tests/spells/pgi_read.py computes the same.
+ *  |t| below 1e-6 counts as 0: cos/sin at 90/180/270 deg are not exact, and the sign of that residue would
+ *  otherwise pick 127 or 128 (and -90 or +90 for a vertical side) differently per maths library. An int16 normal
+ *  never gives a real |t| that small (the least nonzero is about 3e-5). */
 void selfPlane( const int16_t n[3], int azimuths, uint8_t * elev, uint8_t * open )
 {
 	for ( int k = 0; k < azimuths; k++ ) {
 		const double a = double( k ) * ( 2.0 * kPi / double( azimuths ) );
-		const double t = double( n[0] ) * std::cos( a ) + double( n[1] ) * std::sin( a );
+		double t = double( n[0] ) * std::cos( a ) + double( n[1] ) * std::sin( a );
+		if ( std::fabs( t ) < 1e-6 )
+			t = 0.0;
 		double deg;
 		if ( n[2] > 0 )
 			deg = std::atan( -t / double( n[2] ) ) * ( 180.0 / kPi );

@@ -164,8 +164,9 @@ def self_plane(nrm):
     for k in range(AZ):
         a = k * (2.0 * math.pi / AZ)
         t = n[:, 0] * math.cos(a) + n[:, 1] * math.sin(a)
+        t = np.where(np.abs(t) < 1e-6, 0.0, t)      # cos/sin residue at 90/180/270 deg counts as 0 (format rule)
         with np.errstate(divide='ignore', invalid='ignore'):
-            up = np.degrees(np.arctan(-t / n[:, 2])) if len(n) else np.zeros(0)
+            up = np.arctan(-t / n[:, 2]) * (180.0 / math.pi) if len(n) else np.zeros(0)
         deg = np.where(n[:, 2] > 0, up, np.where(n[:, 2] < 0, 90.0, np.where(t > 0, -90.0, 90.0)))
         v = np.floor((deg + 90.0) * (255.0 / 180.0) + 0.5)
         out[:, k] = np.clip(v, 0, 255).astype(np.uint8)
