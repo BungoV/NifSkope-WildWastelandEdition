@@ -36,8 +36,15 @@ def main():
     on = np.asarray(Image.open(a.on).convert('RGB')).astype(float)
     off = np.asarray(Image.open(a.off).convert('RGB')).astype(float)
     if on.shape != off.shape:
-        print('FAIL  the two shots differ in size %s %s' % (on.shape, off.shape))
-        return 1
+        # the window can come up a few rows short of the size asked for (the screen's work area): the camera's
+        # vertical field spans each frame's height, so a centre crop to the common height lines the two up
+        if on.shape[1] != off.shape[1] or abs(on.shape[0] - off.shape[0]) > 8:
+            print('FAIL  the two shots differ in size %s %s' % (on.shape, off.shape))
+            return 1
+        h, d = min(on.shape[0], off.shape[0]), abs(on.shape[0] - off.shape[0])
+        on = on[(on.shape[0] - h) // 2:][:h]
+        off = off[(off.shape[0] - h) // 2:][:h]
+        print('  heights differ by %d rows: both centre-cropped to %d' % (d, h))
     k = on.shape[1] / 1920.0
     x0, y0, x1, y1 = [int(round(int(v) * k)) for v in a.rect.split(',')]
     ro, rf = on[y0:y1, x0:x1], off[y0:y1, x0:x1]

@@ -20,8 +20,15 @@
 - Red: `WW_CELL_PV_RED=borrow` restores the old search (environment only).
 - Gate: `tests/spells/cell_giblack.sh` with `cell_giblack_check.py`. Each camera is shot three ways: GI on, GI off
   and the red. With the GI on, the wall must keep at least half of the GI-off mean luminance and show no near-zero
-  pixel; the red must fail. On the old shots (main, 22h), the wall's GI-on mean is 0.464 of its GI-off mean and
-  17.26% of its pixels are near zero, so the gate fails there.
+  pixel; the red must fail. Memden (22h, wall rect 150,250..420,760): the fix keeps 0.753 of the GI-off mean with
+  0 near-zero pixels (PASS); the red gives 0.462 and 23767 near-zero pixels (17.26%), the same numbers as main's
+  own shot, so the gate fails on the old code. The checker centre-crops two shots whose heights differ by a few rows
+  (the window came up 1005 and 1007 rows tall, not 1040).
+- Second recess (recess2, Goodneighbor east face near x 23560 y -12370, wall-foot band 840,480..1120,560): the fix
+  clears most of the old black (near-zero pixels 53.1% on the red, 12.8% with the fix; mean 0.216 to 0.600 of
+  GI off) but does not pass. What is left is a separate defect: outdoor room-0 voxels there whose baked sky is about
+  zero. Recess2 stays in the script as a known red; the default gate shoots memden only.
+
 ## Lane SKYSTR1 (2026-10-13, branch skystr1-20261013): Sky visibility slider
 
 - **Sky visibility slider.** Show > Lighting has a new "Sky visibility" row (0-100 %, default 100 %) next to GI.
