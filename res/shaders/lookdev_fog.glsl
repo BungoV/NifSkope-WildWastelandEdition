@@ -48,14 +48,14 @@ uniform int volProbe;		// gates only: 1 the light term L alone, raw; 2 the trans
 uniform int volFogBlend;	// test only (WW_CELL_VOLAIR_FOGBLEND=1, option B): the game's fog drawn over the lit air
 				// with its own alpha (0 nearer than its start distance); 0 = option A, the real light only
 
-// (L, T) of the air between the eye and posView
-vec4 wwVolAirAt( vec3 posView )
+// (L, T) of the air between the eye and posView, its column at uv (0..1 over the viewport; lane VOLPART1: a
+// particle's probe reads the column its centre projects to)
+vec4 wwVolAirAtUv( vec3 posView, vec2 uv )
 {
 	float d = length( posView ) * fogDistScale;
 	if ( d <= volSlices.x )
 		return vec4( 0.0, 0.0, 0.0, 1.0 );
 	float f = log( d / volSlices.x ) / volSlices.y * volSlices.z;
-	vec2 uv = ( gl_FragCoord.xy - volRect.xy ) * volRect.zw;
 	vec4 v;
 	if ( f < 1.0 ) {
 		v = texture( volTex, vec3( uv, 0.5 / volSlices.z ) );
@@ -64,6 +64,12 @@ vec4 wwVolAirAt( vec3 posView )
 		v = texture( volTex, vec3( uv, ( min( f, volSlices.z ) - 0.5 ) / volSlices.z ) );
 	}
 	return vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
+}
+
+// (L, T) of the air between the eye and posView, at this fragment's column
+vec4 wwVolAirAt( vec3 posView )
+{
+	return wwVolAirAtUv( posView, ( gl_FragCoord.xy - volRect.xy ) * volRect.zw );
 }
 
 vec3 wwFogBase( vec3 preFog, vec3 posView );

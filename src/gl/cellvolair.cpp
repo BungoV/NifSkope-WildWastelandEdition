@@ -83,6 +83,11 @@ struct VaGpu
 	bool ready = false;
 	float near = kNearMin, logRatio = 1.0f;
 	int unitsOk = -1;
+	// lane VOLPART1: the frame's medium and phase, for the particles lit by the same law (wwVolPartUniforms)
+	float med[4] = { 0, 0, 0, 0 };
+	float phase[3][4] = {};
+	float gi[4] = {};
+	bool csm = false;
 };
 
 QHash<const void *, VaGpu> & vaGpus()
@@ -233,8 +238,16 @@ static void vaEcho()
 
 static void vaPassInner( Scene * scene, bool run );
 
+static int vaFrameSerial = 0;
+
+int wwVolAirFrameSerial()
+{
+	return vaFrameSerial;
+}
+
 void wwVolAirPass( Scene * scene, bool run )
 {
+	vaFrameSerial++;
 	vaPassInner( scene, run );
 	if ( vs().on && run )
 		vaEcho();
@@ -468,6 +481,13 @@ static void vaPassInner( Scene * scene, bool run )
 	g.doc = scene->nifModel;
 	g.near = nearD;
 	g.logRatio = logRatio;
+	g.med[0] = M.sigma0;
+	g.med[1] = M.zb;
+	g.med[2] = M.invH;
+	g.med[3] = zTop;
+	std::copy( &ph.w[0][0], &ph.w[0][0] + 12, &g.phase[0][0] );
+	std::copy( ph.gi, ph.gi + 4, g.gi );
+	g.csm = csm;
 	double ms = -1.0;
 	if ( timed ) {
 		fn->glFinish();
@@ -562,4 +582,102 @@ void wwVolAirUniforms( Scene * scene )
 	prog->uni4f( "volSlices", FloatVector4( g.near, g.logRatio, float( g.slices ), ( s.red & 1 ) ? 0.0f : 1.0f ) );
 	prog->uni1i( "volProbe", s.probe );
 	prog->uni1i( "volFogBlend", s.fogBlend );
+}
+
+/* ---- lane VOLPART1: volumetric particles (cellvolair.h, res/shaders/particles.frag) ---- */
+namespace
+{
+struct VpState
+{
+	bool loaded = false;
+	bool on = false, pinned = false;
+	int red = 0;
+};
+
+VpState & vps()
+{
+	static VpState s;
+	if ( !s.loaded ) {
+		s.loaded = true;
+		const QByteArray pin = qgetenv( "WW_CELL_VOLPART" );
+		if ( !pin.isEmpty() ) {
+			s.pinned = true;
+			s.on = pin.trimmed() != "0";
+		} else {
+			s.on = QSettings().value( QStringLiteral( "WW/VolPart" ), false ).toBool();
+		}
+		for ( const QByteArray & t : qgetenv( "WW_CELL_VOLPART_RED" ).split( ',' ) ) {
+			const QByteArray r = t.trimmed();
+			s.red |= r == "flat" ? 1 : r == "nothick" ? 2 : r == "nosoft" ? 4 : r == "nolights" ? 8 : r == "white" ? 16
+				: r == "nofog" ? 32 : r == "noshadow" ? 64 : 0;
+		}
+	}
+	return s;
+}
+}	// namespace
+
+bool wwVolPartOn()
+{
+	return vps().on;
+}
+
+void wwVolPartSetOn( bool on )
+{
+	VpState & s = vps();
+	if ( s.pinned )
+		return;
+	s.on = on;
+	QSettings().setValue( QStringLiteral( "WW/VolPart" ), on );
+}
+
+int wwVolPartRed()
+{
+	return vps().red;
+}
+
+bool wwVolPartUniforms( Scene * scene )
+{
+	if ( !scene || !scene->renderer )
+		return false;
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
+	if ( !prog || prog->uniLocation( "volPart" ) < 0 )
+		return false;
+	const VpState & s = vps();
+	prog->uni1i( "volPart", s.on ? 1 : 0 );
+	prog->uni1i( "volPartDump", 0 );
+	if ( !s.on )
+		return false;
+	// the air's medium and phase this frame; no air drawn: a clear medium (the light alone) and the phase the air
+	// would take (the cell's god-ray record indoors, the weather's outdoors, else the fallback)
+	const VaGpu & g = vaGpus()[r];
+	const bool air = vs().on && g.ready && g.doc == scene->nifModel;
+	VaPhase fb;
+	if ( !air ) {
+		const WwCellLighting * L = wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr;
+		float med[12] = { 0.60f, 1.52f, 3.31f, 2, 2, 2, 1, 1, 1, 0.75f, 0, 1 };
+		if ( L && L->interior )
+			std::copy( L->godRay, L->godRay + 12, med );
+		else
+			wwLookdevGodRays( med, nullptr );
+		fb = vaPhase( med );
+	}
+	prog->uni4f( "airMed", air ? FloatVector4( g.med[0], g.med[1], g.med[2], g.med[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 1e30f ) );
+	for ( int k = 0; k < 3; k++ ) {
+		const float * w = air ? g.phase[k] : fb.w[k];
+		prog->uni4f_l( prog->uniLocation( "volPhase[%d]", k ), FloatVector4( w[0], w[1], w[2], w[3] ) );
+	}
+	const float * gi = air ? g.gi : fb.gi;
+	prog->uni4f( "volGi", FloatVector4( gi[0], gi[1], gi[2], gi[3] ) );
+	prog->uni1b( "volCsm", air ? g.csm : wwSunShadowWanted( scene ) );
+	prog->uni1i( "volTerms", vs().terms );
+	prog->uni1i( "volPartRed", s.red );
+	return true;
+}
+
+QString wwVolPartSummary()
+{
+	const VpState & s = vps();
+	return QStringLiteral( "volpart=%1%2 red=%3" ).arg( s.on ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
+		.arg( s.pinned ? QStringLiteral( "(pinned)" ) : QString() ).arg( s.red );
 }

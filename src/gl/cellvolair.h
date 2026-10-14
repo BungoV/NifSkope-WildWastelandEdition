@@ -59,4 +59,27 @@ void wwVolAirSetOn( bool on );
 //! census echo: "volair=on(...)" or why none was drawn
 QString wwVolAirSummary();
 
+/*! VOLUMETRIC PARTICLES (lane VOLPART1): a particle system the cell lights (steam, smoke, fog puffs) is a little
+ *  piece of the air. In particles_cell.prog (res/shaders/particles.frag, the law written out there):
+ *    lit    DIRECTLY per pixel at the sprite's own point from the very list the air reads (the directional light x its
+ *           cascade shadow, every placed light x its cone x its shadow cube x the air's transmittance to it, the GI
+ *           and the ambient as six-axis cubes): thin = the air's phase (per unit opacity the air's own J), thick = a
+ *           wrapped diffuse at the puff's normal (its normal map turned by the sprite's rotation, else a sphere);
+ *           alpha as thickness: single-scatter share 1 - a, wrap 1 - a. Never lit from the integrated volume.
+ *    seen   through the INTEGRATED froxel volume between it and the eye (colour x T + L, as every surface), so steam
+ *           and air fade alike (the game's fog as before while the air is off)
+ *    soft   a ball round the sprite's plane against the opaque pass's depth: no hard line where it meets a surface
+ *  The row "Volumetric Particles" (Scene window) ships OFF (QSettings WW/VolPart); the pin WW_CELL_VOLPART=0|1 wins.
+ *  Off, the particles draw exactly as before. Gates only: WW_CELL_VOLPART_RED=flat | nothick | nosoft | nolights |
+ *  white | nofog | noshadow (comma list), WW_CELL_VOLPART_DUMP=<file> (each lit system's per-particle probe, appended:
+ *  glparticles.cpp), WW_CELL_VOLPART_HIDE=1 (no particle drawn: the gates' plate). */
+bool wwVolPartOn();
+void wwVolPartSetOn( bool on );
+int wwVolPartRed();
+//! the uniforms of the renderer's CURRENT program (particles_cell.prog); true while on
+bool wwVolPartUniforms( Scene * scene );
+QString wwVolPartSummary();
+//! gates only: counts the air's pass calls (one a frame); the particle probe keeps the last frame's alone
+int wwVolAirFrameSerial();
+
 #endif

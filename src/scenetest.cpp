@@ -635,6 +635,9 @@ void fogLeg( NifSkope * skope, WwScState & st )
 		auto * vol = w->findChild<QCheckBox *>( QStringLiteral( "volAir" ) );
 		check( st, QStringLiteral( "(ship) the Volumetric Air row exists and starts OFF in a fresh scope" ),
 			vol && !vol->isChecked() && !wwVolAirOn() );
+		auto * part = w->findChild<QCheckBox *>( QStringLiteral( "volPart" ) );	// lane VOLPART1
+		check( st, QStringLiteral( "(ship) the Volumetric Particles row exists and starts OFF in a fresh scope" ),
+			part && !part->isChecked() && !wwVolPartOn() );
 	}
 	if ( !w->isVisible() ) {
 		w->show();
