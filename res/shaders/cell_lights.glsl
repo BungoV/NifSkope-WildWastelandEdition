@@ -434,7 +434,126 @@ vec4 cellGiSeenFill( vec3 P, vec3 N, vec3 from )
 	return ws > 0.0 ? s / ws : vec4( 0.0 );
 }
 
-int cellGiPath = 0;	// lane GIBLACK1: probe 95, the branch cellGiSample took (1 room blend, 2 room fill, 3 seen fill, 4 trilinear, 5 lend: none)
+/* lane GIBLACK2: the stranded surface's evidence. Outdoors (a sky-lit grid; also an interior that shows the sky), a
+ * surface whose own reads are both solid (cellGiSample's lend rule) sits in air the room grid could not resolve. The
+ * outdoors is no safe guess for it: a building's inside in an exterior cell (a shop, the Memory Den's rooms, Concord's
+ * hardware store) drew the sky's light where the tracer gives none (Goodneighbor: 25 of 42 such indoor spots drew the
+ * open sky). It searches the air cells at P + N x (0.75, 1.75, 2.75) cell, each with up to 2 cells round it in the
+ * plane of the two axes off the normal's largest (75 cells, those whose centre is in front of the surface), and keeps
+ * the nearest indoor and the nearest outdoors (room 0) one by the distance from P to the cell's box. */
+void cellGiStrandSearch( vec3 P, vec3 N, out float dIn, out ivec2 LIn, out vec3 CIn, out float dOut, out ivec2 LOut, out vec3 COut )
+{
+	dIn = 1e9;
+	dOut = 1e9;
+	LIn = ivec2( -1 );
+	LOut = ivec2( -1 );
+	CIn = P;
+	COut = P;
+	vec3 aN = abs( N );
+	int m = ( aN.x >= aN.y && aN.x >= aN.z ) ? 0 : ( aN.y >= aN.z ? 1 : 2 );
+	int ta = m == 0 ? 1 : 0, tb = m == 2 ? 1 : 2;
+	for ( int t = 0; t < 3; t++ ) {
+		vec3 q0 = P + N * ( ( float( t ) + 0.75 ) * cellRoomsCell );
+		for ( int sa = -2; sa <= 2; sa++ ) {
+			for ( int sb = -2; sb <= 2; sb++ ) {
+				vec3 e = vec3( 0.0 );
+				e[ta] = float( sa );
+				e[tb] = float( sb );
+				vec3 q = q0 + e * cellRoomsCell;
+				ivec2 L = cellRoomAt( q );
+				if ( L.x < 0 )
+					continue;
+				vec3 lo = cellRoomsOrigin + floor( ( q - cellRoomsOrigin ) / cellRoomsCell ) * cellRoomsCell;
+				vec3 c = lo + 0.5 * cellRoomsCell;
+				if ( dot( c - P, N ) <= 0.0 )
+					continue;
+				float d = length( max( max( lo - P, P - lo - cellRoomsCell ), vec3( 0.0 ) ) );
+				if ( L.x == 0 || L.y == 0 ) {
+					if ( d < dOut ) {
+						dOut = d;
+						LOut = L;
+						COut = c;
+					}
+				} else if ( d < dIn ) {
+					dIn = d;
+					LIn = L;
+					CIn = c;
+				}
+			}
+		}
+	}
+}
+/* lane GIBLACK2: a stranded surface's answer from room L seen from the air cell's centre C: its blend (path 6),
+ * indoors the room's own fill (7), the seen fill from C (8), indoors with no light in reach the sealed room's dark
+ * (9: sky 0, the ambient replaced; the tracer gives such spots 0 to 0.005 of the sky, the trilinear up to 0.9);
+ * outdoors with nothing: .a < 0 (the plain trilinear). */
+vec4 cellGiStrandAnswer( vec3 P, vec3 N, ivec2 L, vec3 C, out int path )
+{
+	bool indoor = L.x != 0 && L.y != 0;
+	float ws;
+	vec4 s = cellGiRoomBlend( P, N, L, C, ws );
+	path = 6;
+	if ( ws > 0.0 )
+		return s / ws;
+	if ( indoor ) {
+		path = 7;
+		vec4 f = cellGiFillAt( P, N, L );
+		if ( f.a > 0.01 )
+			return f;
+	}
+	path = 8;
+	if ( ( cellPassRed & 16 ) == 0 ) {
+		vec4 f = cellGiSeenFill( P, N, C );
+		if ( f.a > 0.01 )
+			return f;
+	}
+	path = indoor ? 9 : 5;
+	return indoor ? vec4( 0.0, 0.0, 0.0, 1.0 ) : vec4( -1.0 );
+}
+// the hardware trilinear of the one grid (slot 0): the bake's own light at P, walls not seen
+vec4 cellGiTrilinear( vec3 P, vec3 N )
+{
+	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;
+	vec2 xy = g.xy / cellGiDims.xy;
+	float z = clamp( g.z, 0.5, cellGiDims.z - 0.5 );
+	float depth = ( cellGiRooms ? 12.0 : 6.0 ) * cellGiDims.z;
+	vec3 n2 = N * N;
+	return n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
+	     + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )
+	     + n2.z * texture( cellGi, vec3( xy, ( z + ( N.z >= 0.0 ? 4.0 : 5.0 ) * cellGiDims.z ) / depth ) );
+}
+/* lane GIBLACK2: every reached cell indoors: the indoor room; only the outdoors: room 0; both: the nearer, and when
+ * they lie within a cell of each other (the room grid cannot tell which side of a thin wall the surface is on: the
+ * Memory Den recess's corner, the building's room a cell to the side) the answer whose light is nearer the surface's
+ * own baked light (the plain trilinear). Nothing reached: .a < 0 (the plain trilinear). */
+vec4 cellGiStrandPick( vec3 P, vec3 N, out int path )
+{
+	float dIn, dOut;
+	ivec2 LIn, LOut;
+	vec3 CIn, COut;
+	cellGiStrandSearch( P, N, dIn, LIn, CIn, dOut, LOut, COut );
+	path = 5;
+	if ( LIn.x < 0 && LOut.x < 0 )
+		return vec4( -1.0 );
+	if ( LIn.x < 0 || LOut.x < 0 || abs( dIn - dOut ) >= cellRoomsCell ) {
+		bool useIn = LOut.x < 0 || ( LIn.x >= 0 && dIn < dOut );
+		return cellGiStrandAnswer( P, N, useIn ? LIn : LOut, useIn ? CIn : COut, path );
+	}
+	int pi, po;
+	vec4 a = cellGiStrandAnswer( P, N, LIn, CIn, pi );
+	vec4 o = cellGiStrandAnswer( P, N, LOut, COut, po );
+	if ( o.a < 0.0 ) {
+		path = pi;
+		return a;
+	}
+	const vec3 Y = vec3( 0.2126, 0.7152, 0.0722 );
+	float t = dot( cellGiTrilinear( P, N ).rgb, Y );
+	bool useIn = abs( dot( a.rgb, Y ) - t ) <= abs( dot( o.rgb, Y ) - t );
+	path = useIn ? pi : po;
+	return useIn ? a : o;
+}
+
+int cellGiPath = 0;	// lane GIBLACK1: probe 95, the branch cellGiSample took (1 room blend, 2 room fill, 3 seen fill, 4 trilinear, 5 stranded: nothing reached, the trilinear; lane GIBLACK2: stranded 6 room blend, 7 room fill, 8 seen fill, 9 sealed dark)
 vec4 cellGiSample( vec3 P, vec3 N )
 {
 	bool fill = cellGiFill && cellInterior && !cellGiSky;	// interiors only: an exterior's gap keeps the weather's ambient (cellGiSkyK), also under the keepamb red
@@ -447,13 +566,26 @@ vec4 cellGiSample( vec3 P, vec3 N )
 		 * (a shaft, a building's hollow) whose probes see 1e-5 of the street's light. Its voxels are valid (a = 1),
 		 * so k = 1 and the weather's ambient was replaced by black (the Memory Den recess). Such a surface borrows
 		 * only the outdoors (room 0): its neighbour search keeps outdoors cells, its seen fill runs only from an
-		 * outdoors view point, and with neither it has no answer (a = 0: the weather's ambient, the exterior gap
-		 * rule). The same when the 0.75 read is solid and the 1.75 read lands in an indoors room (a normal turned
+		 * outdoors view point, and with neither it takes the plain trilinear (lane GIBLACK2; it was a = 0, the weather's
+		 * flat ambient). The same when the 0.75 read is solid and the 1.75 read lands in an indoors room (a normal turned
 		 * a little toward the pocket reads it straight through the unresolved air: the strip at the recess's corner),
 		 * and that indoors read is not taken either. Red WW_CELL_PV_RED=borrow: the old search. */
 		ivec2 L2 = cellRoomAt( P + N * ( 1.75 * cellRoomsCell ) );
 		bool lend = cellGiSky && ( cellPassRed & 32 ) == 0 && cellRoomSolid( P + N * ( 0.75 * cellRoomsCell ) )
 		         && ( L2.x < 0 || ( L2.x != 0 && L2.y != 0 ) );
+		/* lane GIBLACK2: such a stranded surface takes the room its evidence search reaches (cellGiStrandPick), indoors
+		 * or out, never a guess at the outdoors; nothing reached: the plain trilinear (path 5), never the weather's flat
+		 * ambient. Red WW_CELL_PV_RED=strand: GIBLACK1's law (the outdoors-only borrow below, then the flat ambient). */
+		if ( lend && ( cellPassRed & 128 ) == 0 ) {
+			int sp;
+			vec4 sr = cellGiStrandPick( P, N, sp );
+			cellGiPath = sp;
+			if ( sr.a >= 0.0 )
+				return sr;
+			if ( ( cellPassRed & 64 ) != 0 )
+				return vec4( 0.0 );	// red WW_CELL_PV_RED=lendamb: the flat ambient
+			return cellGiTrilinear( P, N );
+		}
 		vec4 r = cellGiRoomSample( P, N, from, lend, Ls );
 		cellGiPath = 1;
 		if ( r.a > 0.01 || ( r.a >= 0.0 && !fill ) )
@@ -471,19 +603,16 @@ vec4 cellGiSample( vec3 P, vec3 N )
 			if ( f.a > 0.01 )
 				return f;
 		}
-		cellGiPath = 5;
-		if ( lend )
-			return vec4( 0.0 );	// lane GIBLACK1: nothing outdoors to borrow: the weather's ambient (not the trilinear, which sees through walls)
-	}
-	cellGiPath = 4;
-	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;
-	vec2 xy = g.xy / cellGiDims.xy;
-	float z = clamp( g.z, 0.5, cellGiDims.z - 0.5 );
-	float depth = ( cellGiRooms ? 12.0 : 6.0 ) * cellGiDims.z;
-	vec3 n2 = N * N;
-	vec4 s = n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
-	       + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )
-	       + n2.z * texture( cellGi, vec3( xy, ( z + ( N.z >= 0.0 ? 4.0 : 5.0 ) * cellGiDims.z ) / depth ) );
+		/* lane GIBLACK2: a lent surface with nothing outdoors to borrow takes the plain trilinear (probe 95 path 5), never the
+		 * weather's flat ambient: that is the open sky's light, and such a surface sits in a recess (the tracer gives it
+		 * 0 to 0.07 of the sky where the flat ambient drew 1). The room grid now resolves the recess (clipped to the GI
+		 * grid's box), so few surfaces get here; the trilinear blends the probes around them, neither black nor open sky. Red WW_CELL_PV_RED=lendamb. */
+		cellGiPath = lend ? 5 : 4;
+		if ( lend && ( cellPassRed & ( 64 | 128 ) ) != 0 )
+			return vec4( 0.0 );	// reds WW_CELL_PV_RED=lendamb, strand: GIBLACK1's flat ambient
+	} else
+		cellGiPath = 4;
+	vec4 s = cellGiTrilinear( P, N );
 	if ( fill && !cellGiRooms && s.a <= 0.01 ) {	// lane GICAL1: a gap in a grid without rooms
 		vec4 f = cellGiFillAt( P, N, Ls );
 		if ( f.a > 0.01 )
@@ -719,9 +848,9 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
 	if ( cellProbe == 90 )	// lane SKY1: the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
 		return vec3( cellAmbShare( P, N ) );
-	if ( cellProbe == 95 ) {	// lane GIBLACK1: r = the branch cellGiSample took / 4, g = its .a, b = its E luminance / pi (sqrt)
+	if ( cellProbe == 95 ) {	// lane GIBLACK1: r = the branch cellGiSample took / 16 (lane GIBLACK2; it was / 4), g = its .a, b = its E luminance / pi (sqrt)
 		vec4 s = cellGiOn ? cellGiSample( P, N ) : vec4( 0.0 );
-		return vec3( float( cellGiPath ) * 0.25, clamp( s.a, 0.0, 1.0 ),
+		return vec3( float( cellGiPath ) * 0.0625, clamp( s.a, 0.0, 1.0 ),
 		             sqrt( clamp( dot( max( s.rgb, vec3( 0.0 ) ), vec3( 0.2126, 0.7152, 0.0722 ) ) * 0.31830989, 0.0, 1.0 ) ) );
 	}
 	if ( cellProbe == 1 ) {

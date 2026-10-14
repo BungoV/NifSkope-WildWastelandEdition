@@ -235,6 +235,27 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 		R.error = QStringLiteral( "rooms: the soup is empty" );
 		return false;
 	}
+	// lane GIBLACK2: the clip box (proberooms.h ProbeRoomSpec::clipLo). A face it cuts is not the open border.
+	bool openFace[6] = { true, true, true, true, true, true };   // -x +x -y +y -z +z
+	if ( spec.red != QLatin1String( "soupbox" ) )
+		for ( int c = 0; c < 3; c++ ) {
+			if ( spec.clipLo[c] > spec.clipHi[c] )
+				continue;
+			if ( spec.clipLo[c] > lo[c] ) {
+				lo[c] = spec.clipLo[c];
+				openFace[2 * c] = false;
+				R.clippedFaces |= 1 << ( 2 * c );
+			}
+			if ( spec.clipHi[c] < hi[c] ) {
+				hi[c] = spec.clipHi[c];
+				openFace[2 * c + 1] = false;
+				R.clippedFaces |= 1 << ( 2 * c + 1 );
+			}
+			if ( hi[c] <= lo[c] ) {
+				R.error = QStringLiteral( "rooms: the clip box misses the soup" );
+				return false;
+			}
+		}
 	// the cell, raised until the padded grid fits
 	float cell = std::max( 1.0f, spec.cell );
 	int pad = 0;
@@ -374,8 +395,10 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 							const int cz = int( std::floor( ( q[2] - R.origin[2] ) / cell ) );
 							if ( cz != z )
 								continue;
-							const int cx = std::clamp( int( std::floor( ( q[0] - R.origin[0] ) / cell ) ), 0, X - 1 );
-							const int cy = std::clamp( int( std::floor( ( q[1] - R.origin[1] ) / cell ) ), 0, Y - 1 );
+							const int cx = int( std::floor( ( q[0] - R.origin[0] ) / cell ) );
+							const int cy = int( std::floor( ( q[1] - R.origin[1] ) / cell ) );
+							if ( cx < 0 || cy < 0 || cx >= X || cy >= Y )
+								continue;   // lane GIBLACK2: a sample beyond a clipped face (unclipped: never)
 							const size_t ci = R.index( cx, cy, z );
 							nSam[ci]++;
 							nHole[ci] += soup.amask.hole( k, b1, b2 ) ? 1u : 0u;
@@ -447,7 +470,10 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 				if ( m == 1 || ( red26 && m > 1 ) )
 					nb.push_back( { dx, dy, dz } );
 			}
-	auto border = [&]( int x, int y, int z ) { return x == 0 || y == 0 || z == 0 || x == X - 1 || y == Y - 1 || z == Z - 1; };
+	auto border = [&]( int x, int y, int z ) {   // lane GIBLACK2: only the faces the clip left open
+		return ( openFace[0] && x == 0 ) || ( openFace[2] && y == 0 ) || ( openFace[4] && z == 0 )
+			|| ( openFace[1] && x == X - 1 ) || ( openFace[3] && y == Y - 1 ) || ( openFace[5] && z == Z - 1 );
+	};
 	std::vector<qint32> lab( N, -1 );
 	int next = 1;
 	// flood the cells `in` admits from i with label l (l < 0: a new one, 0 when the flood meets the border)
@@ -656,7 +682,8 @@ QString probeRoomsCensusText( const ProbeRooms & r )
 		.arg( ( r.folded ? QStringLiteral( ", %1 cells folded past 4094 rooms" ).arg( r.folded ) : QString() )
 			+ ( r.cellsMaskOpen + r.cellsMaskSolid   // lane ALPHATEST2 (no masked triangle: the line as before)
 				? QStringLiteral( "; alpha-tested cells open %1, solid %2" ).arg( r.cellsMaskOpen ).arg( r.cellsMaskSolid )
-				: QString() ) )
+				: QString() )
+			+ ( r.clippedFaces ? QStringLiteral( "; clipped to the GI grid's box (faces %1)" ).arg( r.clippedFaces ) : QString() ) )
 		.arg( qRound( r.ms ) );
 }
 

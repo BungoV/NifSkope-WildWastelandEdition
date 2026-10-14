@@ -1237,8 +1237,17 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	std::vector<quint8> near( nVox, 0 );
 	// lane ROOMCLAMP1: the rooms (src/proberooms.h), rebuilt from the soup; red "noclamp": none (every surface,
 	// probe and slot then has the room -1 and the blend is the one before the lane)
+	/* lane GIBLACK2: the rooms span the GI grid's box (sides and bottom; the top stays the soup's, the open sky), not
+	 * the whole soup: over Goodneighbor's 5 x 5 cells the cell had grown to 95 units and the Memory Den recess's air
+	 * (134 units deep) came out solid; its probes took the room behind the wall. Over the grid's box the same cell
+	 * budget gives about a third of that. Red WW_CELL_ROOMS_RED=soupbox: the soup's box. */
+	ProbeRoomSpec roomSpec = spec.rooms;
+	for ( int c = 0; c < 3; c++ ) {
+		roomSpec.clipLo[c] = R.origin[c];
+		roomSpec.clipHi[c] = c == 2 ? 1e30f : R.origin[c] + float( dims[c] ) * float( v );
+	}
 	R.roomsOn = spec.red != QLatin1String( "noclamp" ) && spec.red != QLatin1String( "prelane" )
-		&& probeRoomsBuild( soup, spec.rooms, &R.rooms );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
+		&& probeRoomsBuild( soup, roomSpec, &R.rooms );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
 	const ProbeRooms & RM = R.rooms;
 	// every probe's rooms: its cell's, or in a solid cell the nearest air cell's within two cells
 	std::vector<std::array<int, 2>> probeRoom( up.size(), { { -1, -1 } } );

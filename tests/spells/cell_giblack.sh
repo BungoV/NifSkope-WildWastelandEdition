@@ -8,25 +8,56 @@
 # probes): a valid voxel that says "no sky here", and the wall went black. The fix: on the exterior sky-lit grid a
 # surface whose both reads are solid borrows only outdoor answers; with none it keeps the weather's ambient.
 #
-# Each camera is shot three ways at 22h (DOF and motion blur off, volumetric fog off):
-#   on    the probe GI on (the fix)
-#   off   WW_CELL_GI=0: the weather's flat ambient, the reference
-#   red   WW_CELL_PV_RED=borrow: the old search (borrows any room's answer)
-# then cell_giblack_check.py over the camera's wall rect: on must PASS (mean luminance not below (1-bar) of off, no
-# near-zero pixel), red must FAIL (run with --expect fail).
+# Lane GIBLACK2 (2026-10-14): the root cause. The rooms grid spanned the soup's whole box (the 5x5 cells, ~21000
+# units), so its cell grew to 95.4 units and the recess's 134-unit air came out solid; the lend rule then gave the wall
+# the weather's full flat ambient (open-sky bright where the tracer says 0.07 of the sky). The rooms grid now spans the
+# GI grid's box (src/probegi.cpp; the top stays the soup's: open sky): ~34-unit cells, the recess air is outdoors (0),
+# the recess probes join room 0 and the wall takes the room blend of the probes that see it. The lend rule stays as a
+# safety net only, and a lent surface with no outdoors answer now takes the plain trilinear, never the flat ambient
+# (red WW_CELL_PV_RED=lendamb).
+#
+# Lane GIBLACK2, stranded surfaces (both reads solid; 43% of the memden block's area, most of it inside buildings):
+# GIBLACK1's law gave them outdoors-only answers, else the flat ambient: sky leaking indoors (drawn 0.70 against the
+# tracer's 0.002 indoors). They now search the rooms 0.75/1.75/2.75 cells along the normal and 2 cells around it: only
+# indoor cells -> that room (blend, fill, seen fill, else a sealed room's dark), only outdoor -> room 0, both -> the
+# nearer (within a cell: the answer nearer the trilinear), none -> the plain trilinear; never the flat ambient. Red
+# WW_CELL_PV_RED=strand restores GIBLACK1's law; the twin's GI_CHECK_STRAND=1 mirrors it. Gate: cell_rooms_check.py
+# strand on the on dump against tests/fixtures/giblack2_strand_gn.tsv (the tracer at stranded points): PASS, and FAIL
+# under GI_CHECK_STRAND=1.
+#
+# Each camera is shot at 22h (DOF and motion blur off, volumetric fog off):
+#   on     the probe GI on (the fix); memden also dumps the GI (WW_CELL_GI_DUMP) for the twin
+#   off    WW_CELL_GI=0: the weather's flat ambient, the reference
+#   red    WW_CELL_PV_RED=borrow WW_CELL_ROOMS_RED=soupbox: GIBLACK1's defect (borrows any room's answer, coarse rooms)
+#   box    WW_CELL_ROOMS_RED=soupbox WW_CELL_PV_RED=lendamb,strand (memden): GIBLACK1's state (the rooms over the soup's
+#          box, a lent surface without an answer takes the flat ambient); its probe 95 picture and its GI dump
+#   p95    the fix's probe 95 picture (r = path / 16: 1 room blend ... 9; cell_giblack_check.py): the wall's path
+# then cell_giblack_check.py over the camera's wall rect: on must PASS (no near-zero pixel; the mean is no longer held
+# to the GI-off frame: a recess is darker than the open sky, the tracer decides how much), red must FAIL (black);
+# memden: cell_rooms_check.py recess on the on dump against tests/fixtures/giblack2_memden.tsv (the tracer: the drawn
+# sky's mean within 0.5..2x the tracer's, no point open-sky bright or black, at most a tenth lent), the box dump must
+# FAIL it, and so must the on dump under the twin's GIBLACK1 law (GI_CHECK_STRAND=1 GI_CHECK_LENDAMB=1); the strand
+# gate above; and the p95 picture's wall rect must be mostly a room's blend (path 1 or 6), the box's must not.
 #
 #   memden   Goodneighbor, the Memory Den street: the recess left of the pillar
 #   recess2  Goodneighbor, a second recessed wall (east face, about x 23560 y -12370), chosen by the twin's scan;
 #            the rect is the wall-foot band the old borrow blacks out. KNOWN RED (2026-10-14): on still FAILs here
 #            (ratio 0.600 ok, 12.8% near-zero vs 53.1% on the old borrow): outdoor room-0 voxels whose baked sky is
 #            about zero, a separate defect from the lend rule. Shoot memden alone (CAMS=memden) for the pass gate.
+#            GIBLACK2: 56.3% near-zero. The rect is a covered passage under the building (tracer sky share 0.049 at
+#            its stranded pixels, cast from this camera): every voxel round it holds no sky (the indoor and the
+#            outdoor answer and the trilinear all read 0), so the evidence law draws 0.008 there; GIBLACK1's law lit
+#            it 0.53 (10x the tracer) and so kept it off the near-zero count. Still the voxel-bake defect above.
 #
 # USAGE  bash tests/spells/cell_giblack.sh            needs:
 #          PLUGINS  the plugin list for WW_CELL_OPEN (comma separated, the profile's order)
 #          RES      the resource archives (WW_LODGEN_RESOURCES, ';' separated)
 #          BAKE     a probe bake folder of the Goodneighbor 5x5 (holds bake/ and probes.tsv)
 #        optional: EXE, OUT, SIZE (1920x1040), PORT, LAUNCH (a launcher script "launch <notes> <exe> args...";
-#        without it the exe is run straight), CAMS (names to shoot), BAR (0.5),
+#        without it the exe is run straight), CAMS (names to shoot), BAR (1: the mean is reported, not held),
+#        STRAND_DUMP (a Concord exterior GI dump: the Concord Hardware strand gate),
+#        MUSEUM_DUMP (a fresh ConcordMuseum01 dump: its strand check, reported),
+#        PATHMIN (0.8: the share of the wall rect on the room blend), ZSHARE (0.001: near-zero pixels allowed),
 #        WAITFREE_KB (wait for that much free RAM before each launch)
 
 set -u
@@ -37,9 +68,12 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 EXE="${EXE:-$REPO/release/NifSkope.exe}"
 ESM="${ESM:-X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm}"
 OUT="${OUT:-$REPO/scratchpad/giblack1_20261014/gate}"
-SIZE="${SIZE:-1920x1040}"; PORT="${PORT:-14851}"; BAR="${BAR:-0.5}"
+SIZE="${SIZE:-1920x1040}"; PORT="${PORT:-14851}"; BAR="${BAR:-1}"; PATHMIN="${PATHMIN:-0.8}"; ZSHARE="${ZSHARE:-0.001}"
 CAMS="${CAMS:-memden}"
 CHECK="$REPO/tests/spells/cell_giblack_check.py"
+TWIN="$REPO/tests/spells/cell_rooms_check.py"
+FIX="$REPO/tests/fixtures/giblack2_memden.tsv"
+SFIX="$REPO/tests/fixtures/giblack2_strand_gn.tsv"
 SPEC="$REPO/tests/fixtures/empty.wwcell"
 : "${PLUGINS:?PLUGINS= the plugin list}" "${RES:?RES= the resource archives}" "${BAKE:?BAKE= the bake folder}"
 mkdir -p "$OUT"
@@ -105,16 +139,57 @@ shoot() {	# shoot <cam> <tag> [env...]
 fails=0
 for cam in $CAMS; do
 	mkpath "$cam"
-	shoot "$cam" "${cam}_on" || fails=$((fails+1))
+	dump=(); [ "$cam" = memden ] && dump=( WW_CELL_GI_DUMP="$(winpath "$OUT/${cam}_dump")" )
+	shoot "$cam" "${cam}_on" "${dump[@]}" || fails=$((fails+1))
 	shoot "$cam" "${cam}_off" WW_CELL_GI=0 || fails=$((fails+1))
-	shoot "$cam" "${cam}_red" WW_CELL_PV_RED=borrow || fails=$((fails+1))
+	shoot "$cam" "${cam}_red" WW_CELL_PV_RED=borrow WW_CELL_ROOMS_RED=soupbox || fails=$((fails+1))
+	shoot "$cam" "${cam}_p95" WW_CELL_LIT_PROBE=95 || fails=$((fails+1))
+	if [ "$cam" = memden ]; then
+		shoot "$cam" "${cam}_box" WW_CELL_ROOMS_RED=soupbox WW_CELL_PV_RED=lendamb,strand WW_CELL_LIT_PROBE=95 WW_CELL_GI_DUMP="$(winpath "$OUT/${cam}_boxdump")" 			|| fails=$((fails+1))
+		python "$CHECK" "$(winpath "$OUT/${cam}_box.png")" --path --rect "$(rect_of "$cam")" --pathmin "$PATHMIN" 			--expect fail --label "$cam box p95" 2>&1 | tee -a "$LOG"
+		[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
+		python "$TWIN" recess "$(winpath "$OUT/${cam}_dump")" "$(winpath "$FIX")" 2>&1 | tee -a "$LOG"
+		[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
+		GI_CHECK_LENDAMB=1 python "$TWIN" recess "$(winpath "$OUT/${cam}_boxdump")" "$(winpath "$FIX")" --expect fail 2>&1 | tee -a "$LOG"
+		[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
+		GI_CHECK_STRAND=1 GI_CHECK_LENDAMB=1 python "$TWIN" recess "$(winpath "$OUT/${cam}_dump")" "$(winpath "$FIX")" --expect fail 2>&1 | tee -a "$LOG"
+		[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
+		python "$TWIN" strand "$(winpath "$OUT/${cam}_dump")" "$(winpath "$SFIX")" 2>&1 | tee -a "$LOG"
+		[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
+		GI_CHECK_STRAND=1 python "$TWIN" strand "$(winpath "$OUT/${cam}_dump")" "$(winpath "$SFIX")" --expect fail 2>&1 | tee -a "$LOG"
+		[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
+	fi
+	if [ -s "$OUT/${cam}_p95.png" ]; then
+		python "$CHECK" "$(winpath "$OUT/${cam}_p95.png")" --path --rect "$(rect_of "$cam")" --pathmin "$PATHMIN" 			--label "$cam p95" 2>&1 | tee -a "$LOG"
+		[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
+	fi
 	[ -s "$OUT/${cam}_on.png" ] && [ -s "$OUT/${cam}_off.png" ] && [ -s "$OUT/${cam}_red.png" ] || continue
 	python "$CHECK" "$(winpath "$OUT/${cam}_on.png")" "$(winpath "$OUT/${cam}_off.png")" --rect "$(rect_of "$cam")" \
-		--bar "$BAR" --label "$cam on" 2>&1 | tee -a "$LOG"
+		--bar "$BAR" --zeroshare "$ZSHARE" --label "$cam on" 2>&1 | tee -a "$LOG"
 	[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
 	python "$CHECK" "$(winpath "$OUT/${cam}_red.png")" "$(winpath "$OUT/${cam}_off.png")" --rect "$(rect_of "$cam")" \
-		--bar "$BAR" --expect fail --label "$cam red borrow" 2>&1 | tee -a "$LOG"
+		--bar "$BAR" --zeroshare "$ZSHARE" --expect fail --label "$cam red borrow" 2>&1 | tee -a "$LOG"
 	[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
 done
+# Concord Hardware's stranded surfaces (ground floor, upper floor, attic voids): STRAND_DUMP= a GI dump of the Concord
+# exterior (Commonwealth -15,17 radius 3, the sky1 concord bake) made by this exe; its points are in
+# tests/fixtures/giblack2_strand_concord.tsv (the tracer at 239 stranded points)
+if [ -n "${STRAND_DUMP:-}" ]; then
+	python "$TWIN" strand "$(winpath "$STRAND_DUMP")" "$(winpath "$REPO/tests/fixtures/giblack2_strand_concord.tsv")" 2>&1 | tee -a "$LOG"
+	[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
+	GI_CHECK_STRAND=1 python "$TWIN" strand "$(winpath "$STRAND_DUMP")" "$(winpath "$REPO/tests/fixtures/giblack2_strand_concord.tsv")" 		--expect fail 2>&1 | tee -a "$LOG"
+	[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
+fi
+# ConcordMuseum01 (flags 0x1181: Show Sky + Use Sky Lighting, so the sky-lit grid runs the stranded law there too):
+# MUSEUM_DUMP= the dump of a fresh bake by this exe (tests/spells/cell_rooms.sh cells, CELLS=museum:ConcordMuseum01);
+# points in tests/fixtures/giblack2_strand_museum.tsv. REPORTED, NOT COUNTED (2026-10-14): the closed rooms pass
+# (open set indoors +0.008), but the tight set's roof voids (a ceiling with the roof about 25 units above it: one
+# rooms cell, so the search reads the open air over the roof; GIBLACK1's law drew them at the full flat ambient) and
+# two skylight-side spots stay over the bars. The red must still fail it.
+if [ -n "${MUSEUM_DUMP:-}" ]; then
+	python "$TWIN" strand "$(winpath "$MUSEUM_DUMP")" "$(winpath "$REPO/tests/fixtures/giblack2_strand_museum.tsv")" 2>&1 		| sed 's/^/  [reported] /' | tee -a "$LOG"
+	GI_CHECK_STRAND=1 python "$TWIN" strand "$(winpath "$MUSEUM_DUMP")" "$(winpath "$REPO/tests/fixtures/giblack2_strand_museum.tsv")" 		--expect fail 2>&1 | tee -a "$LOG"
+	[ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
+fi
 if [ $fails = 0 ]; then say "PASS  cell_giblack: $CAMS"; exit 0; fi
 say "FAIL  cell_giblack: $fails failed"; exit 1
