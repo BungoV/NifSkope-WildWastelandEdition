@@ -1,0 +1,4 @@
+# fo4_effectdecal with the Lookdev cascaded sun shadows compiled in (lane DECALLIT1), chosen while the cascade map
+# was built this frame (the Shadows row on).
+
+shaders fo4_default.vert fo4_effectdecalcsm.frag

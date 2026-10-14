@@ -146,7 +146,8 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	 * as the game draws its effects into the HDR target its adaptation and bloom read (INFERRED from the
 	 * glows blooming in game). Measured on the walkway, see docs/PRTP_PLAN.md 2p. */
 	if ( wwCellImageSpaceIsMeasuring() ) {
-		const bool cell = program && ( wwIsCellProgramName( program->name ) );
+		// lane DECALLIT1: an effect decal is part of the surface it lies on (the game's deferred decal groups)
+		const bool cell = program && ( wwIsCellProgramName( program->name ) || wwIsCellDecalProgramName( program->name ) );
 		const bool fx = program && ( program->name == std::string_view( "fo4_effectshader.prog" )
 			|| program->name == std::string_view( "fo4_effectcell.prog" ) ) && wwCellImageSpaceMeasuresEffects();
 		glColorMask( cell || fx, cell || fx, cell || fx, cell || fx );
@@ -161,6 +162,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		// cell effect (linear light, tone-mapped once at the end), 2 any other program (its value as written)
 		// WATERHDR1: and the water, which writes linear light too (it was written back raw: the creek ~6/255)
 		const bool lin = program && ( wwIsCellProgramName( program->name ) || program->name == std::string_view( "fo4_effectcell.prog" )
+			|| wwIsCellDecalProgramName( program->name )	// lane DECALLIT1
 			|| ( program->name == std::string_view( "fo4_water.prog" ) && wwCellWaterWritesLinear() ) );
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( 0x03 );
@@ -439,9 +441,15 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	auto fogVariant = [&]( Program * p ) -> Program * {
 		/* lane EFX2: a cell-lit effect draw takes fo4_effectcell.prog (the effect shader the game's way: unlit,
 		 * linear, soft and near fades, fog, the cell's imagespace); red legacy keeps the viewer's effect shader */
-		if ( p->name == std::string_view( "fo4_effectshader.prog" ) || p->name == std::string_view( "fo4_effectcell.prog" ) ) {
-			const char * want = wwCellLightsWanted( mesh->scene ) && !( wwCellFxRed() & 1 )
-				? "fo4_effectcell.prog" : "fo4_effectshader.prog";
+		/* lane DECALLIT1: an effect decal takes fo4_effectdecal.prog (the game draws it into the surface under it, lit as that
+		 * surface; + the cascades while the map is built); red WW_CELL_DECALLIT_RED=unlit keeps it a self-lit effect */
+		if ( p->name == std::string_view( "fo4_effectshader.prog" ) || p->name == std::string_view( "fo4_effectcell.prog" )
+			|| wwIsCellDecalProgramName( p->name ) ) {
+			const bool cellFx = wwCellLightsWanted( mesh->scene ) && !( wwCellFxRed() & 1 );
+			const char * want = !cellFx ? "fo4_effectshader.prog"
+				: ( mesh->effectDecal && !wwCellDecalLitRed() )
+					? ( wwSunShadowWanted( mesh->scene ) ? "fo4_effectdecalcsm.prog" : "fo4_effectdecal.prog" )
+				: "fo4_effectcell.prog";
 			if ( p->name == std::string_view( want ) )
 				return p;
 			Program * q = useProgram( want );
@@ -1957,6 +1965,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		GLint dst = 0;
 		glGetIntegerv( GL_BLEND_DST_RGB, &dst );
 		prog->uni1b( "fxAdditive", glIsEnabled( GL_BLEND ) && dst == GL_ONE );
+		if ( prog->uniLocation( "fxDecalProbe" ) >= 0 )	// lane DECALLIT1: the gate's light probe
+			prog->uni1b( "fxDecalProbe", wwCellDecalLitProbe() && mesh->effectDecal && wwCellProbePass( scene ) );
 		if ( wwCellFxLitProbeShape( scene, mesh->id() ) ) {
 			// lane FXLIT1: its probes write the lit effects opaque, the nearest card winning: layered cards drawn
 			// without a depth write leave the last one drawn, which differed between the five probe runs

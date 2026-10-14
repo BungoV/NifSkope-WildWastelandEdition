@@ -64,7 +64,13 @@ out vec4 fragColor;
  * then the cell's imagespace on its own (an effect blends over a surface that already took the bloom). */
 #include "uniforms.glsl"
 #include "lookdev_fog.glsl"
+#ifdef WW_SUNSHADOW
+#include "ww_sunshadow.glsl"
+#endif
 #include "cell_lights.glsl"
+#ifdef WW_FX_DECALLIT
+#include "cell_ao.glsl"
+#endif
 
 uniform bool fxSoft;
 uniform sampler2D fxDepth;		// the opaque pass's depth, the viewport's corner at texel 0
@@ -72,6 +78,9 @@ uniform float fxSoftDepth;		// game units
 uniform float fxDistScale;		// view units -> game units
 uniform bool fxAdditive;
 uniform int fxRed;				// 2 nosoft, 4 nolin, 8 hide
+// lane DECALLIT1 (WW_CELL_DECALLIT_PROBE, gates only): an effect decal in a probe pass draws a white colour, opaque
+// where it shows, so probe 6 holds the light it takes (lit as the wall, or self-lit under the red)
+uniform bool fxDecalProbe;
 // lane FXLIT1: this shape's model's placed lights (src/gl/cellfxlit.h)
 uniform int fxLitMode;			// 0 an unlit effect; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
 uniform vec4 fxLit;				// indices into cellLights, -1 = none
@@ -130,6 +139,45 @@ float cellFxFade()
 	float t = clamp( ( fragW * k - 0.075 ) * 2.352941, 0.0, 1.0 );
 	return soft * t * t * ( 3.0 - 2.0 * t );
 }
+
+#ifdef WW_FX_DECALLIT
+/* lane DECALLIT1 (fo4_effectdecal.frag, src/gl/celllights.h wwIsCellDecalProgramName): an effect shader with the Decal flag is
+ * not an effect to the game: it goes to the decal groups the deferred prepass draws, so its colour lands in the
+ * surface's albedo and the deferred lights, ambient, sky, obscurance and fog take it exactly as they take the wall
+ * under it. Here: the colour is the albedo of fo4_default's cell path (sqrt of linear), lit by the same laws with no
+ * specular of its own (the wall's shows through its alpha), then the same fog. */
+
+vec3 fxDecalLin( vec3 albedo, vec3 normal )
+{
+	vec3 Pv = -ViewDir;
+	vec3 Vv = normalize( ViewDir );
+	vec3 Pw = cellWorldPos( Pv );
+	vec3 Nw = cellWorldDir( normal );
+	vec3 color;
+	if ( !cellInterior && cellHasDir ) {
+		vec3 Ax = A.rgb;
+		if ( cellExtDalc )
+			Ax = sqrt( cellAmbient( Nw, Pw ) );
+		cellExtAmb = Ax * Ax;
+		color = Ax * albedo;
+		if ( cellGiSky && ( cellRed & 131072 ) == 0 ) {
+			float k = cellGiSkyK( Pw, Nw );
+			color *= sqrt( 1.0 - k );
+			cellExtAmb *= 1.0 - k;
+		}
+	} else {
+		color = albedo * ( A.rgb + D.rgb * max( dot( normal, normalize( LightDir ) ), 0.0 ) );
+		if ( cellGiSky && ( cellRed & 131072 ) == 0 )
+			color -= ( 1.0 - sqrt( 1.0 - cellGiSkyK( Pw, Nw ) ) ) * A.rgb * albedo;
+		else if ( cellGiSky )
+			color -= cellGiSkyK( Pw, Nw ) * A.rgb * albedo;
+	}
+	cellExtSpec = vec3( 0.0 );
+	vec3 lit = cellLit( color, albedo, normal, Pv, Vv, 0.0, vec3( 0.0 ), 1.0, 0.0, vec3( 0.0 ), vec3( 0.0 ) );
+	lit *= sqrt( cellAoFactor() );
+	return lit * lit;
+}
+#endif
 #endif
 
 vec3 ViewDir_norm = normalize( ViewDir );
@@ -244,7 +292,37 @@ void main()
 		color.rgb += cube.rgb * falloff;
 	}
 
+#ifdef WW_FX_DECALLIT
+	if ( cellOn ) {
+		vec3 alb = max( color.rgb, vec3( 0.0 ) );
+		if ( fxDecalProbe ) {
+			if ( color.a < 0.1 )
+				discard;
+			alb = vec3( 1.0 );
+		}
+		vec3 Ng = normalize( btnMatrix[2] );	// the decal's plane: the surface it lies on
+		if ( !gl_FrontFacing )
+			Ng = -Ng;
+#ifdef WW_SUNSHADOW
+		cellDirVis = wwSunShadow( -ViewDir );
+#endif
+		vec3 lin = fxDecalLin( alb, Ng );
+		if ( fogOn )
+			lin = max( wwFog( lin, -ViewDir ), vec3( 0.0 ) );
+		float a = fxDecalProbe ? 1.0 : color.a;
+		if ( cellProbe == 6 )
+			fragColor = vec4( lin * cellProbeGain, a );
+		else
+			fragColor = vec4( cellIsLinear ? lin : cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, vec3( 1.0 / 2.2 ) ), a );
+		return;
+	}
+#endif
 #ifdef WW_CELLLIGHTS
+	if ( cellOn && fxDecalProbe ) {
+		if ( color.a < 0.1 )
+			discard;
+		color = vec4( 1.0 );
+	}
 	if ( cellOn ) {
 		vec3 lin = ( fxRed & 4 ) != 0 ? max( color.rgb, vec3( 0.0 ) ) : pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
 		if ( fxLitMode != 0 ) {	// lane FXLIT1: a lit effect, in linear light, before the fog
@@ -269,7 +347,7 @@ void main()
 		}
 		// probe 6 (the imagespace's measure): the linear value, blended as drawn
 		if ( cellProbe == 6 )
-			fragColor = vec4( lin, color.a );
+			fragColor = vec4( lin * cellProbeGain, color.a );
 		else
 			fragColor = vec4( cellIsLinear ? lin	// lane HDR1: linear, summed in the HDR frame, tone-mapped once
 				: cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, vec3( 1.0 / 2.2 ) ), color.a );

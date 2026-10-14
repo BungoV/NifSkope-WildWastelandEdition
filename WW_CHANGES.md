@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane DECALLIT1 (2026-10-14, branch decallit1-20261014): effect decals take the light of the wall they lie on
+
+- **The white drip stains on the shaded brick wall at Goodneighbor (18:00 foggy) no longer glow.** The drips are
+  effect-shader statics (the DecoStain wall meshes with BldStreaks01.BGEM: decal flag on, alpha blended, effect
+  lighting off). The cell view drew them self-lit, at their texture colour, so on a dim wall they showed as bright
+  white streaks. The game draws an effect shader with the Decal flag into the deferred decal groups of the surface
+  under it, so the surface's lighting lights it.
+- The fix: in the cell view, an effect draw with the Decal flag uses the new `fo4_effectdecal` / `fo4_effectdecalcsm`
+  programs (`res/shaders/fo4_effectshader.frag` built with `WW_FX_DECALLIT`). They treat the decal colour as an albedo
+  under the wall's lights, ambient, sky, obscurance and sun shadow, then fog, as the wall does. Other effect shaders
+  are unchanged.
+- Red: `WW_CELL_DECALLIT_RED=unlit` restores the old self-lit draw (environment only).
+- Harness switches: `WW_CELL_LIT_PROBE_GAIN` scales the probe-6 light picture (8-bit, so dim light needs gain);
+  `WW_CELL_DECALLIT_PROBE=1` lets effect decals draw in the probe passes; `WW_CELL_DECALLIT_HIDE=1` hides every decal,
+  `=2` only the effect decals. These switches are for harnesses only.
+- Gate: `tests/spells/decallit1_cell.sh` with `decallit1_check.py`, rev1 camera, CommonwealthFoggy 18, gain 4. It
+  takes three shots: the decal's light alone (probe 6), the wall under it with the effect decals hidden (probe 6), and
+  the wall's albedo (probe 81). The region is wherever the first two differ, so it comes from the geometry, not a
+  hand mask. Fix: 30841 px region (30594 readable), median decal / wall light 1.001 (quartiles 0.927 .. 1.058),
+  0.50 % clipped: PASS. Red unlit: median 4.527 (quartiles 3.437 .. 5.289), 83.55 % clipped: FAIL, as required.
+  The clip count leaves out pixels where the wall's own light times the gain is already past white (the Third Rail
+  neon).
+- Beauty shots, before = main 83eff728, after = this branch, rev1 camera, DOF 0, MBLUR 0, sky dome loaded, 0 magenta
+  pixels: `notes/decallit1/shots/{before,after}_rev1_sun18{foggy,clear}.png`. Foggy, drip at (505,230): 116,92,80
+  before, 127,95,84 after, against the wall beside it at 126,95,84 / 130,97,85. The drip now sits in the wall's
+  light and the fog over it, instead of a lighter streak under the fog. Clear 18:00, same drip: 76,67,60 before,
+  61,49,47 after (wall 75,58,56 / 69,52,49). It reads as darker grime, as in the game.
+
 ## Lane GIBLACK1 (2026-10-14, branch giblack1-20261013): a recessed outdoor wall no longer goes black with the probe GI
 
 - **The recessed wall left of the pillar on the Memory Den street (Goodneighbor) no longer draws pitch black with

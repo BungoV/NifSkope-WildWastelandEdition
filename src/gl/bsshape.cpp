@@ -314,10 +314,17 @@ void BSShape::drawShapes( NodeList * secondPass )
 	}
 
 	if ( !selectionFlags && ( bsesp || ( bslsp && bslsp->hasRefraction ) ) && wwCellProbePass( scene )
-		&& !( bsesp && wwCellFxLitProbeShape( scene, id() ) ) )	// lane FXLIT1: its own probes (70..74) draw the lit effects alone
+		&& !( bsesp && wwCellFxLitProbeShape( scene, id() ) )	// lane FXLIT1: its own probes (70..74) draw the lit effects alone
+		&& !( effectDecal && wwCellDecalLitProbe() ) )	// lane DECALLIT1: the gate's probe draws the effect decals' light
 		return;	// lane EFX1: a harness probe pass measures the surfaces, not the effects or glass over them
 	if ( !selectionFlags && drawInSecondPass && wwCellAlbedoProbePass( scene ) )
 		return;	// lane GICAL1: probe 80 compares the surfaces with the bake's, which leaves blends and decals out
+	/* lane DECALLIT1: WW_CELL_DECALLIT_HIDE=1 draws no decal (of the lighting shader or the effect shader), =2 no effect
+	 * decal only (the surface's own decals stay, as the wall the effect decal lies on), so a harness reads the wall under
+	 * them at the same pixels (tests/spells/decallit1_cell.sh); never set in a picture bungo looks at */
+	static const int decalHide = qEnvironmentVariableIntValue( "WW_CELL_DECALLIT_HIDE" );
+	if ( decalHide && !selectionFlags && ( effectDecal || ( decalHide == 1 && surfaceDecal ) ) )
+		return;
 
 	// Render polygon fill slightly behind alpha transparency and wireframe
 	glEnable( GL_POLYGON_OFFSET_FILL );

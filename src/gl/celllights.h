@@ -60,6 +60,23 @@ inline bool wwIsCellProgramName( std::string_view n )
 	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog";
 }
 
+/*! lane DECALLIT1: an effect decal's program by name -- fo4_effectdecal and its cascade variant fo4_effectdecalcsm.
+ *  The game puts an effect shader with the Decal flag (flags or material) in its decal groups, which the deferred
+ *  prepass draws into the surface under it: its colour is lit by the surface's lights, ambient, sky, obscurance and
+ *  fog, not drawn self-lit like an effect. A cell-lit effect decal takes fo4_effectdecal (Renderer::setupProgram):
+ *  the surface's laws (cellLit) on the decal's colour, no specular of its own, the same fog. Red
+ *  WW_CELL_DECALLIT_RED=unlit draws them as other effects again (fo4_effectcell, self-lit: the white drips on
+ *  Goodneighbor's brick in the fog). Gate tests/spells/decallit1_cell.sh. */
+inline bool wwIsCellDecalProgramName( std::string_view n )
+{
+	return n == "fo4_effectdecal.prog" || n == "fo4_effectdecalcsm.prog";
+}
+//! lane DECALLIT1: WW_CELL_DECALLIT_RED=unlit, the effect decals self-lit as before
+bool wwCellDecalLitRed();
+//! lane DECALLIT1: WW_CELL_DECALLIT_PROBE=1 (gates only): the probe passes draw the effect decals, white and opaque
+//! where they show, so probe 6 holds the light they take
+bool wwCellDecalLitProbe();
+
 struct WwCellLight
 {
 	float pos[3] = { 0, 0, 0 };     //!< world

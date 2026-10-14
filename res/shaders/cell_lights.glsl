@@ -25,6 +25,8 @@ uniform vec3 cellDirTo;				// world, TO the light
 uniform bool cellInterior;
 uniform vec3 cellCenter;
 uniform int cellProbe;
+// lane DECALLIT1: probe 6 written x this (WW_CELL_LIT_PROBE_GAIN, a harness probe only; 1 when the imagespace measures)
+uniform float cellProbeGain;
 // lane AMBO2: the Ambient Only volumes (src/gl/celllights.h): world centre + 1.22077 x radius, and the
 // per-channel scale of the ambient's affine sum; the first in plugin order that holds a point wins
 uniform int cellAmboCount;
@@ -771,7 +773,7 @@ vec3 cellPassOut( vec3 P, vec3 N )
 	return pow( clamp( v, 0.0, 1.0 ), vec3( 1.0 / 2.2 ) );
 }
 
-#if !defined( WW_CELL_PBR ) && !defined( WW_CELL_FX )	// lane EFX2: the effect program takes none of the surface lobes
+#if !defined( WW_CELL_PBR ) && ( !defined( WW_CELL_FX ) || defined( WW_FX_DECALLIT ) )	// lane EFX2: the effect program takes none of the surface lobes (lane DECALLIT1: a decal takes them)
 /* The game's own light specular (the shipped deferred point/spot light shaders, read op for op):
  * normalized Blinn-Phong, n = 2^(gloss x 10 + 1), D = NdotH^n (n + 2) / 2pi, Schlick Fresnel with
  * F0 = 0.2, a Cook-Torrance geometry select with the 1/NdotV folded in, x 1/4, clamped at 15, x pi.
@@ -974,7 +976,7 @@ vec3 cellCubeProbe( vec2 uv, vec3 normalView )
 }
 #endif
 
-#if !defined( WW_CELL_PBR ) && !defined( WW_CELL_FX )
+#if !defined( WW_CELL_PBR ) && ( !defined( WW_CELL_FX ) || defined( WW_FX_DECALLIT ) )
 
 /* The lit colour, in the program's sqrt-of-linear space. Interior: the cell's ambient, directional
  * and placed lights replace the viewport light. Exterior: the placed lights add to what the

@@ -944,7 +944,7 @@ void wwCellLightsUniforms( Scene * scene )
 	 * the game's ratio; the cell imagespace's exposure (adapted luminance) takes the brighter frame. 1 indoors. */
 	const float sunScale = ( !L->interior && wwLookdevActive() ) ? wwLookdevSunlightScale() : 1.0f;
 	prog->uni1f( "cellSunScale", sunScale );
-	if ( !L->interior && wwLookdevActive() && wwIsCellProgramName( prog->name ) ) {
+	if ( !L->interior && wwLookdevActive() && ( wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) ) ) {
 		float dalc[6][3], dif[4] = {}, amb[4] = {};
 		if ( wwLookdevDalc( dalc ) ) {
 			wwLookdevLight( dirTo, dif, amb );
@@ -1051,7 +1051,7 @@ void wwCellLightsUniforms( Scene * scene )
 	 * weather's sun (the exterior branch of cellLit). Red WW_CELL_EXTAMB_RED=flat keeps the flat NAM0 Ambient;
 	 * =flip swaps the axis convention. */
 	bool extDalc = false;
-	if ( !L->interior && hasDir && wwLookdevActive() && wwIsCellProgramName( prog->name ) ) {
+	if ( !L->interior && hasDir && wwLookdevActive() && ( wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) ) ) {
 		static const QByteArray extRed = qgetenv( "WW_CELL_EXTAMB_RED" ).trimmed();
 		float w[6][3];
 		if ( extRed != "flat" && wwLookdevDalc( w ) ) {
@@ -1095,6 +1095,10 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1b( "cellInterior", L->interior );
 	prog->uni3f( "cellCenter", L->center[0], L->center[1], L->center[2] );
 	prog->uni1i( "cellProbe", s.measuring ? 6 : s.probe );
+	// lane DECALLIT1: a harness reads a dark linear frame through 8 bits; the imagespace's own measure stays x 1
+	static const float probeGain = qEnvironmentVariableIsSet( "WW_CELL_LIT_PROBE_GAIN" )
+		? std::max( qgetenv( "WW_CELL_LIT_PROBE_GAIN" ).toFloat(), 0.0f ) : 1.0f;
+	prog->uni1f( "cellProbeGain", s.measuring ? 1.0f : probeGain );
 	prog->uni1i( "cellRed", s.red );
 	// WW_CELL_CAM_DUMP=<file>: the camera in world units, rewritten when it moves (the fog and diffuse gates measure from it)
 	static const QString camDump = QString::fromLocal8Bit( qgetenv( "WW_CELL_CAM_DUMP" ) );
@@ -1233,6 +1237,18 @@ bool wwCellImageSpaceIsMeasuring()
 bool wwCellImageSpaceMeasuresEffects()
 {
 	return !( st().isRed & 16 );
+}
+
+bool wwCellDecalLitRed()
+{
+	static const bool red = qgetenv( "WW_CELL_DECALLIT_RED" ).trimmed() == "unlit";
+	return red;
+}
+
+bool wwCellDecalLitProbe()
+{
+	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_DECALLIT_PROBE" ) == 1;
+	return on;
 }
 
 int wwCellFxRed()
@@ -1783,7 +1799,7 @@ void aoAlloc( NifSkopeOpenGLContext::GLFunctions * fn, AoTarget & t, int w, int 
 
 bool aoIsCellProgram( const NifSkopeOpenGLContext::Program * p )
 {
-	return p && ( wwIsCellProgramName( p->name ) );
+	return p && ( wwIsCellProgramName( p->name ) || wwIsCellDecalProgramName( p->name ) );	// lane DECALLIT1: a decal reads it
 }
 
 /* lane AOOFF1: the units, resolved whether or not the pass ever runs. They were resolved inside the pass only, after
@@ -2089,7 +2105,9 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		return;
 	AoGpu & g = aoGpus()[r];
 	aoUnits( r->fn, g );	// lane AOOFF1: never unit 0 (BaseMap), even when the pass has not run
-	const bool on = g.aoReady && g.doc == scene->nifModel && !( a.red & 1 ) && !glIsEnabled( GL_BLEND )
+	// lane DECALLIT1: an effect decal is blended, but the game draws it into the opaque surface it lies on
+	const bool decalProg = wwIsCellDecalProgramName( prog->name );
+	const bool on = g.aoReady && g.doc == scene->nifModel && !( a.red & 1 ) && ( !glIsEnabled( GL_BLEND ) || decalProg )
 		&& wwCellLightsWanted( scene );
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
 	GLint prevActive = 0;
@@ -2101,7 +2119,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	prog->uni1b( "cellAoOn", on );
 	/* lane AODECAL1: the decal target multiplies the probe term (cellGiE). Opaque draws only, like the obscurance:
 	 * a blended draw is not in the opaque pass the target was made over. */
-	const bool decalOn = g.ready && g.doc == scene->nifModel && g.decal && g.decalUnit >= 0 && !glIsEnabled( GL_BLEND );
+	const bool decalOn = g.ready && g.doc == scene->nifModel && g.decal && g.decalUnit >= 0 && ( !glIsEnabled( GL_BLEND ) || decalProg );
 	{
 		const int du = g.decalUnit >= 0 ? g.decalUnit : g.unit;
 		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + du ) );
