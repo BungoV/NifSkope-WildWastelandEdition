@@ -20,9 +20,11 @@ fog formula (the FOG1-gated transcription, re-typed here):
   A4 phase          pi x the phase (Rayleigh + two Henyey-Greenstein lobes, colours over their summed luminance)
                     integrates to a luminance of pi over the sphere, 20 random records    |lum / pi - 1| <= 1e-4
                     and the six-axis L0 + L1 read of a uniform cube E returns E x the tint  rel <= 1e-9
-  A5 fit            random fog records: the fitted air hides max at the full distance (1 - T = min(max, 0.99),
+  A5 fit            random fog records: the fitted air hides max at the slices' far edge (1 - T = min(max, 0.99),
                     T by quadrature), and its density above the height band over below it equals the game's
                     alpha there over below it (the game formula at both heights)        rel <= 1e-3 each
+  A6 street haze    two made-up outdoor-shaped records: the air's 1 - T below the band within 0.10 of the game's
+                    alpha at 2000, 3000 and 5000 units                                   |diff| <= 0.10
 
 Reds (each must make its check FAIL; the default run proves it):
   flatod    the density at the segment's start taken for the whole segment             -> A1 FAIL
@@ -30,6 +32,7 @@ Reds (each must make its check FAIL; the default run proves it):
   additive  the air ADDED on top of the surface, no extinction (lane VOLFOG1's law)     -> A3 FAIL
   no4pi     the Henyey-Greenstein lobes without their 1 / (4 pi)                        -> A4 FAIL
   wrongmed  the fit with twice the density and no height falloff                       -> A5 FAIL
+  farfit    the density fitted at the full distance alone (the old fit)                 -> A6 FAIL
 """
 import math
 import os
@@ -38,7 +41,7 @@ import sys
 import numpy as np
 
 LUM = np.array([0.2126, 0.7152, 0.0722])
-REDS = {'flatod': 'A1', 'nochain': 'A2', 'additive': 'A3', 'no4pi': 'A4', 'wrongmed': 'A5'}
+REDS = {'flatod': 'A1', 'nochain': 'A2', 'additive': 'A3', 'no4pi': 'A4', 'wrongmed': 'A5', 'farfit': 'A6'}
 
 
 # ---------------------------------------------------------------- the estimate: ports of the shader / the CPU
@@ -74,20 +77,32 @@ def one_minus_e(tau):
 
 
 def est_fit(K, red=''):
-    """src/gl/cellvolair.cpp vaFit: sigma0, zb, 1/H (0 uniform), dFull"""
+    """src/gl/cellvolair.cpp vaFit: sigma0, zb, 1/H (0 uniform), dFull, farD -- the street-range least squares in
+    optical depth (64 log-spaced distances 500..5000 below the band), never thinner than the far-end fit"""
     dFull = (1.0 + K[0][2]) / K[0][0]
     mx = min(max(K[2][3], 0.0), 0.99)
-    sigma0 = -math.log(1.0 - mx) / dFull if mx > 0 and dFull > 0 else 0.0
-    zb, invH = 0.0, 0.0
+    tauMax = -math.log(1.0 - mx) if mx > 0 else 0.0
+    sFar = tauMax / dFull if dFull > 0 else 0.0
+    zb, invH, band = 0.0, 0.0, False
     k5y, k5w, top = K[5][1], K[5][3], K[3][3]
     if k5y > 1e-9 and 0.0 < top < 1.0:
         z0, z1 = k5w / k5y, (1.0 + k5w) / k5y
         zb = z0
         invH = -math.log(max(top, 1e-3)) / max(z1 - z0, 1e-3)
+        band = True
+    zlow = zb - 10.0 if band else 0.0
+    num = den = 0.0
+    for i in range(64):
+        d = 500.0 * 10.0 ** (i / 63.0)
+        a = min(max(game_alpha(K, d, zlow), 0.0), 0.9999)
+        num += d * -math.log(1.0 - a)
+        den += d * d
+    sigma0 = sFar if red == 'farfit' else max(sFar, num / den)
+    farD = min(dFull, tauMax / sigma0) if sigma0 > sFar and sigma0 > 0 else dFull
     if red == 'wrongmed':
         sigma0 *= 2.0
         invH = 0.0
-    return sigma0, zb, invH, dFull
+    return sigma0, zb, invH, dFull, farD
 
 
 def froxel_column(m, z0, dzdt, J, near, far, N=64, red=''):
@@ -258,10 +273,10 @@ def run(red):
         top = rng.uniform(0.02, 0.9)
         K = [[k0x, 0, k0z, 0], [0.5, 0.5, 0.5, rng.uniform(0.5, 2.0)], [0.5, 0.5, 0.5, mx], [0.5, 0.5, 0.5, top],
              [0.5, 0.5, 0.5, 0], [k5y * 0.5, k5y, k5w * 0.5, k5w]]
-        sigma0, zb, invH, dFull = est_fit(K, red)
+        sigma0, zb, invH, dFull, farD = est_fit(K, red)
         m = (sigma0, zb, invH, 1e9)
         zlow = z0 - 50.0
-        Tfull = math.exp(-ref_od(m, zlow, zlow, dFull))
+        Tfull = math.exp(-ref_od(m, zlow, zlow, farD))
         worst_a = max(worst_a, abs((1.0 - Tfull) - min(mx, 0.99)) / min(mx, 0.99))
         # the game at its full distance (ramp 1: the height blend is the far pair's alone): its alpha at the band's
         # top over its alpha below the band
@@ -272,6 +287,24 @@ def run(red):
     G.put('A5', worst_a <= 1e-3 and worst_h <= 1e-3,
           'fit: 1 - T(full) vs the game\'s max, worst rel %.3g; density above / below the band vs the game\'s alpha ratio, worst rel %.3g (40 records)'
           % (worst_a, worst_h))
+    # A6 -----------------------------------------------------------------------------------------------------------
+    # two made-up records shaped like an outdoor fog (a near start, a far full distance, a low power that front-loads
+    # the opacity): the air's haze 1 - T over a horizontal ray below the band (quadrature) within 0.10 of the game's
+    # alpha at 2000, 3000 and 5000 units. The far-end fit leaves it ~1/10 of the game's there.
+    worst6, txt = 0.0, []
+    for start, full, pw, mx in ((550.0, 175000.0, 0.13, 1.0), (1200.0, 250000.0, 0.31, 0.85)):
+        k0x = 1.0 / (full - start)
+        K = [[k0x, 0, start * k0x, 0], [0.5, 0.5, 0.5, pw], [0.5, 0.5, 0.5, mx], [0.5, 0.5, 0.5, 0.97],
+             [0.5, 0.5, 0.5, 0], [4.0e-5, 4.6e-5, -0.497, -0.497]]
+        sigma0, zb, invH, dFull, farD = est_fit(K, red)
+        m = (sigma0, zb, invH, 1e9)
+        zlow = zb - 50.0
+        for d in (2000.0, 3000.0, 5000.0):
+            air = 1.0 - math.exp(-ref_od(m, zlow, zlow, d))
+            game = game_alpha(K, d, zlow)
+            worst6 = max(worst6, abs(air - game))
+            txt.append('%.0f/%.0f: %.3f vs %.3f' % (start, d, air, game))
+    G.put('A6', worst6 <= 0.10, 'street haze, air vs game alpha (start/d): %s; worst |diff| %.3f (bar 0.10)' % ('; '.join(txt), worst6))
     return G
 
 

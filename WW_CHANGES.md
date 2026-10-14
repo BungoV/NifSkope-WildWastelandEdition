@@ -16,16 +16,22 @@
 - Test only, no menu row, until bungo picks: `WW_CELL_VOLAIR_FOGBLEND=1` (option B) draws the game's fog colour over
   the lit air with the game's own alpha (nothing nearer than the fog's start distance); unset or 0 = option A, the
   real light only.
-- Gate switches (environment only): `WW_CELL_AIR_RED=off|gioff|flat|noshadow|nolights|wrongmed|blendnear`,
+- Gate switches (environment only): `WW_CELL_AIR_RED=off|gioff|flat|noshadow|nolights|wrongmed|blendnear|farfit`,
   `WW_CELL_AIR_TERMS=<mask>`, `WW_CELL_AIR_PROBE=1|2`, `WW_CELL_AIR_DUMP=<file>`.
 - Gates: `tests/spells/volair1_check.py` (maths twin); `tests/spells/volair1_cell.sh` (a numpy rebuild of the
   medium, inject and integrate from the dump, applied in place of the fog, shadows, placed lights, GI) green at
-  Sanctuary and Vault111Cryo, its six reds fail; its Goodneighbor neon stage is not yet proven (its first run drew no
+  Sanctuary and Vault111Cryo, its reds fail; its Goodneighbor neon stage is not yet proven (its first run drew no
   picture); `tests/spells/volair1_fogblend.sh` (B=0 is A byte for byte, B=1 differs only past the fog's start)
   green, its red fails.
-- Known, open: the medium's density is fitted at the fog's full distance (175000-250000 units outdoors), so within a
-  street the air is very thin (about 1/10 of the game fog's opacity at 3000 units): lamp halos and sun shafts are
-  computed but too faint to see. The weather's phase record's back lobe is drawn with +g (to be checked).
+- Density fit (10-14): sigma0 is a least-squares fit of the game fog's optical depth over the street range (500-5000
+  units, below the height band), never thinner than the old full-distance fit; the froxels end where the air reaches
+  min(max, 0.99). Foggy record 2.05e-4 (was 2.63e-5), clear night 4.28e-5 (was 7.59e-6). Red `farfit` keeps the old
+  full-distance fit. New gates: twin A6 and cell H (air haze within 0.10 of the game fog alpha at 2000/3000/5000
+  units, foggy and clear night; `farfit` fails), cell X (every place's picture and dump files present and non-empty;
+  an empty neon stage now FAILS).
+- Back lobe kept at +g: the record names Back Phase / Fwd Phase with no sign, the reader copies it as is, all 61
+  vanilla records hold 0.000-0.744 (none negative) and the game uses it unflipped; -g would make the air brighter
+  away from the sun (toward/away ratio 0.77 vs 10.6 as drawn).
 
 ## Lane BLOOM1 (2026-10-13, branch bloom1): FO4CS bloom and Physical Glare in the cell view
 

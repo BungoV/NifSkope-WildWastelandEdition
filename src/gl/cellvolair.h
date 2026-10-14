@@ -17,8 +17,10 @@ class Scene;
  *
  *  The medium: sigma_t(z) = sigma0 x rho(z), rho(z) = min(1, exp(-(z - zb) / H)), single-scatter albedo 1. Fitted to
  *  the fog records in force (the weather's outdoors, the cell's indoors), no hand dial:
- *    sigma0: the air hides as much at the fog's full distance dFull as the game's fog does there:
- *            1 - exp(-sigma0 x dFull) = min(max, 0.99)
+ *    sigma0: least squares in optical depth against the game's fog over the street range (64 log-spaced
+ *            distances, 500 to 5000 units, below the band): sigma0 = sum(d tau) / sum(d^2), tau = -ln(1 - alpha);
+ *            never thinner than the far-end fit 1 - exp(-sigma0 x dFull) = min(max, 0.99) (the red farfit keeps
+ *            that fit alone: the street-range air ~1/10 of the game's, halos and shafts too faint to see)
  *    height: the game's fog weight runs from 1 below its height band (the far pair, z0..z1) to K3.w above it; the
  *            air falls off over the same band: zb = z0, H = (z1 - z0) / -ln(K3.w); no band: uniform (H infinite).
  *  The optical depth of any straight segment is closed form (flat below zb, exponential above).
@@ -33,7 +35,7 @@ class Scene;
  *  normalised to a luminance of 1).
  *
  *  The passes (portable: same terms in FO4CS): a froxel volume, columns of 12 x 12 pixels x 64 slices exponential
- *  from 16 units to dFull.
+ *  from 16 units to farD, where the air reaches min(max, 0.99) (tau_max / sigma0, at most dFull).
  *    inject     per froxel: 4 equal sub-steps; each adds T x J x (1 - exp(-tau)) and multiplies T by exp(-tau) (exact
  *               for J constant over the sub-step, any density). The sun is evaluated per sub-step, the rest once a
  *               froxel. rgb = the slice's light from its near edge, a = the slice's transmittance.
@@ -42,7 +44,7 @@ class Scene;
  *  DEVIATION: no temporal history (NifSkope redraws on demand); the 4 stratified sub-steps stand in for it.
  *
  *  The fold "Volumetric Air" (Scene window): the row ships OFF (QSettings WW/VolAir); the pin WW_CELL_AIR=0|1 wins.
- *  Gates only: WW_CELL_AIR_RED=off (computed, not applied) | gioff | flat | noshadow | nolights | wrongmed | blendnear (with FOGBLEND=1) (comma
+ *  Gates only: WW_CELL_AIR_RED=off (computed, not applied) | gioff | flat | noshadow | nolights | wrongmed | blendnear (with FOGBLEND=1) | farfit (comma
  *  list), WW_CELL_AIR_TERMS=<mask> (1 directional, 2 placed lights, 4 GI, 8 ambient), WW_CELL_AIR_PROBE=1 (the light
  *  term L alone, raw) | 2 (the transmittance T, grey), WW_CELL_AIR_DUMP=<file> (the volumes and the numbers),
  *  WW_CELL_AIR_TIME=1 (the pass's ms in the census).

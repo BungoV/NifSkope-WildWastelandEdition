@@ -10,9 +10,12 @@ directional light, the god-ray record, the scene's top): the medium's fit, the s
 four-sub-step inject, the front-to-back integrate and the apply are re-done in numpy (float64).
 
 Stages (bars fixed before the first run):
-  M  medium    sigma0, zb, 1/H re-fitted from fogK (1 - exp(-sigma0 dFull) = the records' max alpha; the height band
+  M  medium    sigma0, zb, 1/H re-fitted from fogK (least squares in optical depth against the game's fog over
+               500..5000 units below the band, never thinner than 1 - exp(-sigma0 dFull) = max; the height band
                K5's pair-0 edges, the density at its top = the records' top weight) equal the dumped airMed within
-               1e-4 relative; the top = the scene's top in the fog's frame; the far slice = the full distance
+               1e-4 relative; the top = the scene's top in the fog's frame; the far slice = where the air reaches max
+  H  haze      the dumped density's 1 - exp(-sigma0 d) within 0.10 of the game's alpha at 2000, 3000, 5000 units
+  X  present   every shot the place needs exists and is non-empty (a run that drew nothing FAILS)
   R  rebuild   the injected volume: alpha (the slice's transmittance) within 1e-4 on >= 99% of the voxels; at terms
                1 without the cascades also rgb within 1% (+ 1e-5 x max) on >= 99% of the lit voxels, total within 1%
                (terms 2 / 4: alpha alone -- the placed lights and the GI are judged by L G F N and by the twins)
@@ -31,7 +34,7 @@ Stages (bars fixed before the first run):
   N  neon      (goodneighbor) the bake WITH the neon emitters against the bake WITHOUT: the air's summed light
                >= 1.02 x, and >= 1% of the columns gain >= 5%
   C  cost      time.bin.txt's ms at 1920 x 1080 (glFinish to glFinish around the pass, all terms): reported
-Reds: off -> P; wrongmed -> M; noshadow -> S; nolights -> L; gioff -> G (and N when run); flat -> F.
+Reds: off -> P; wrongmed -> M; farfit -> H; noshadow -> S; nolights -> L; gioff -> G (and N when run); flat -> F.
 """
 import os
 import sys
@@ -68,18 +71,40 @@ def read_vol(p):
     return v[0].astype(np.float64), v[1].astype(np.float64)
 
 
+def game_alpha(K, d, z):
+    """the game's fog alpha (lookdev_fog.glsl wwFogEval, re-typed)"""
+    ramp = d * K[0][0] - K[0][2]
+    f = min(max(ramp, 0.0), 1.0)
+    p0 = min(max(z * K[5][0] - K[5][2], 0.0), 1.0)
+    p1 = min(max(z * K[5][1] - K[5][3], 0.0), 1.0)
+    hb = p0 + (p1 - p0) * f
+    mx = K[2][3]
+    clampT = min((f - 0.75) * 4.0 * (1.0 - mx) + mx, 1.0) if ramp > 0.75 else mx
+    escape = f * 66.666672 if ramp < 0.015 else 1.0
+    I = min(clampT, f ** K[1][3]) if f > 0 else 0.0
+    return (hb * K[3][3] + (1.0 - hb)) * I * escape
+
+
 def fit(t):
-    """the medium from the fog records, re-derived: (sigma0, zb, invH, dFull)"""
+    """the medium from the fog records, re-derived: (sigma0, zb, invH, dFull, farD); sigma0 by least squares in
+    optical depth against the game's fog over 500..5000 units below the band, never thinner than the far-end fit"""
     K = [t['fogK%d' % k] for k in range(6)]
     dfull = (1.0 + K[0][2]) / K[0][0]
     mx = min(max(K[2][3], 0.0), 0.99)
-    sigma0 = -np.log(1.0 - mx) / dfull if mx > 0 and dfull > 0 else 0.0
-    zb, invh = 0.0, 0.0
+    taumax = -np.log(1.0 - mx) if mx > 0 else 0.0
+    sfar = taumax / dfull if dfull > 0 else 0.0
+    zb, invh, band = 0.0, 0.0, False
     if K[5][1] > 1e-9 and 0.0 < K[3][3] < 1.0:
         z0, z1 = K[5][3] / K[5][1], (1.0 + K[5][3]) / K[5][1]
         zb = z0
         invh = -np.log(max(K[3][3], 1e-3)) / max(z1 - z0, 1e-3)
-    return sigma0, zb, invh, dfull
+        band = True
+    zlow = zb - 10.0 if band else 0.0
+    ds = 500.0 * 10.0 ** (np.arange(64) / 63.0)
+    tau = np.array([-np.log(1.0 - min(max(game_alpha(K, d, zlow), 0.0), 0.9999)) for d in ds])
+    sigma0 = max(sfar, float((ds * tau).sum() / (ds * ds).sum()))
+    fard = min(dfull, taumax / sigma0) if sigma0 > sfar and sigma0 > 0 else dfull
+    return sigma0, zb, invh, dfull, fard
 
 
 def rho(z, zb, invh, top):
@@ -124,7 +149,7 @@ def rebuild(t, with_rgb):
     near, logR = t['slices']
     p00, p11 = t['proj']
     fv, ds = t['fogView'], float(t['fogDistScale'][0])
-    sigma0, zb, invh, _ = fit(t)
+    sigma0, zb, invh, _, _ = fit(t)
     top = float(t['airMed'][3])
     med = t['medium']
     jj, ii = np.meshgrid(np.arange(rows), np.arange(cols), indexing='ij')
@@ -260,6 +285,17 @@ def main():
         run = os.path.join(out, p)
         has = lambda *fs: all(os.path.exists(os.path.join(run, f)) for f in fs)
         print('== %s' % p)
+        # X: the shots this place must have left; a run that drew nothing must not pass by having nothing to check
+        need = []
+        if p == 'goodneighbor':
+            if red in ('', 'gioff'):
+                need = ['neon_veil.png', 'neon_veil.bin', 'neon_veil.bin.txt', 'neon_off.png', 'neon_off.bin', 'neon_off.bin.txt']
+        elif not red:
+            need = ['vol.bin', 'vol.bin.txt', 'time.bin', 'time.bin.txt']
+        if need:
+            miss = [f for f in need if not (os.path.exists(os.path.join(run, f)) and os.path.getsize(os.path.join(run, f)) > 0)]
+            G.put('X', not miss, 'the shots present and non-empty: %d of %d%s'
+                  % (len(need) - len(miss), len(need), (' (missing: %s)' % ', '.join(miss)) if miss else ''))
         vb = os.path.join(run, 'vol.bin')
         t = None
         if has('vol.bin', 'vol.bin.txt'):
@@ -267,15 +303,22 @@ def main():
             inj, integ = read_vol(vb)
             terms, csm = int(t['terms'][0]), int(t['csm'][0])
             # M
-            s0, zb, invh, dfull = fit(t)
+            s0, zb, invh, dfull, fard = fit(t)
             am = t['airMed']
             rel = lambda a, b: abs(a - b) <= 1e-4 * max(abs(b), 1e-9) + 1e-9
             top = float(t['sceneTopW'][0]) + t['fogView'][3] - float(t['camZw'][0])
             far = t['slices'][0] * np.exp(t['slices'][1])
             okm = rel(am[0], s0) and abs(am[1] - zb) <= 1e-3 * max(1.0, abs(zb)) and rel(am[2], invh) \
-                and abs(am[3] - top) <= 1e-3 * max(1.0, abs(top)) and abs(far - max(dfull, 64.0)) <= 1e-3 * far
-            G.put('M', okm, 'fit sigma0 %.6g (dump %.6g) zb %.1f (%.1f) 1/H %.6g (%.6g) top %.1f (%.1f) far %.1f (dFull %.1f; red %d)'
-                  % (s0, am[0], zb, am[1], invh, am[2], top, am[3], far, dfull, int(t['red'][0])))
+                and abs(am[3] - top) <= 1e-3 * max(1.0, abs(top)) and abs(far - max(fard, 64.0)) <= 1e-3 * far
+            G.put('M', okm, 'fit sigma0 %.6g (dump %.6g) zb %.1f (%.1f) 1/H %.6g (%.6g) top %.1f (%.1f) far %.1f (fit %.1f, dFull %.1f; red %d)'
+                  % (s0, am[0], zb, am[1], invh, am[2], top, am[3], far, fard, dfull, int(t['red'][0])))
+            # H: the dumped air's haze along a horizontal ray below the band against the game's alpha there
+            K = [t['fogK%d' % k] for k in range(6)]
+            zl = (am[1] - 10.0) if am[2] > 0 else 0.0
+            hs = [(d, 1.0 - np.exp(-am[0] * d), game_alpha(K, d, zl)) for d in (2000.0, 3000.0, 5000.0)]
+            hw = max(abs(a - g) for _, a, g in hs)
+            G.put('H', hw <= 0.10, 'street haze, air vs the game fog alpha: %s; worst |diff| %.3f (bar 0.10)'
+                  % ('; '.join('%.0f: %.3f vs %.3f' % h for h in hs), hw))
             # R
             with_rgb = terms == 1 and csm == 0
             rinj = rebuild(t, with_rgb)
@@ -407,7 +450,7 @@ def main():
             G.put('C', ms > 0, 'cost: %.3f ms for %d x %d x %d froxels at %d x %d, all terms (%d lights, GI %d, cascades %d)'
                   % (ms, *(int(x) for x in t2['dims']), int(t2['viewport'][2]), int(t2['viewport'][3]),
                      int(t2['cellLightCount'][0]), int(t2['cellGiOn'][0]), int(t2['csm'][0])))
-    want = {'off': ['P'], 'wrongmed': ['M'], 'noshadow': ['S'], 'nolights': ['L'], 'gioff': ['G', 'N'], 'flat': ['F']}
+    want = {'off': ['P'], 'wrongmed': ['M'], 'farfit': ['H'], 'noshadow': ['S'], 'nolights': ['L'], 'gioff': ['G', 'N'], 'flat': ['F']}
     failed = sorted(k for k, v in G.res.items() if not all(v))
     if red:
         hit = [k for k in want[red] if k in failed]

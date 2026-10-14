@@ -61,7 +61,7 @@ VaState & vs()
 		for ( const QByteArray & t : qgetenv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
-				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : 0;
+				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : 0;
 		}
 		const QByteArray terms = qgetenv( "WW_CELL_AIR_TERMS" ).trimmed();
 		if ( !terms.isEmpty() )
@@ -136,19 +136,40 @@ VaPhase vaPhase( const float m[12] )
 }
 
 /* the medium fitted to the fog records in force (cellvolair.h): sigma0 (per game unit), zb, 1 / H (0: uniform), the
- * full distance. The red wrongmed: twice the density and no height falloff (the "one exponential" law). */
+ * full distance, the far edge of the slices. The red wrongmed: twice the density and no height falloff (the "one
+ * exponential" law); the red farfit: the density fitted at the full distance alone (the street-range air too thin). */
 struct VaMedium
 {
-	float sigma0 = 0.0f, zb = 0.0f, invH = 0.0f, dFull = 0.0f;
+	float sigma0 = 0.0f, zb = 0.0f, invH = 0.0f, dFull = 0.0f, farD = 0.0f;
 	bool band = false;
 };
 
-VaMedium vaFit( const float K[6][4], bool wrong )
+// the game's fog alpha at distance d and fog-frame height z (lookdev_fog.glsl wwFogEval, the same formula)
+double vaGameAlpha( const float K[6][4], double d, double z )
+{
+	const double ramp = d * K[0][0] - K[0][2];
+	const double f = std::min( std::max( ramp, 0.0 ), 1.0 );
+	const double p0 = std::min( std::max( z * K[5][0] - K[5][2], 0.0 ), 1.0 );
+	const double p1 = std::min( std::max( z * K[5][1] - K[5][3], 0.0 ), 1.0 );
+	const double hb = p0 + ( p1 - p0 ) * f;
+	const double mx = K[2][3];
+	const double clampT = ramp > 0.75 ? std::min( ( f - 0.75 ) * 4.0 * ( 1.0 - mx ) + mx, 1.0 ) : mx;
+	const double escape = ramp < 0.015 ? f * 66.666672 : 1.0;
+	const double I = f > 0.0 ? std::min( clampT, std::pow( f, double( K[1][3] ) ) ) : 0.0;
+	return ( hb * K[3][3] + ( 1.0 - hb ) ) * I * escape;
+}
+
+/* the density: least squares in optical depth against the game's fog over the street range (64 log-spaced distances
+ * from 500 to 5000 units, below the height band), sigma0 = sum(d tau) / sum(d^2) with tau = -ln(1 - alpha), never
+ * thinner than the far-end fit (1 - exp(-sigma0 dFull) = min(max, 0.99)). The slices end where the air reaches that
+ * opacity (tau_max / sigma0, at most dFull), so what lies beyond keeps the game's 1 - max showing through. */
+VaMedium vaFit( const float K[6][4], bool wrong, bool farFit )
 {
 	VaMedium m;
 	m.dFull = ( 1.0f + K[0][2] ) / K[0][0];
 	const float mx = std::min( std::max( K[2][3], 0.0f ), 0.99f );
-	m.sigma0 = mx > 0.0f && m.dFull > 0.0f ? -std::log( 1.0f - mx ) / m.dFull : 0.0f;
+	const float tauMax = mx > 0.0f ? -std::log( 1.0f - mx ) : 0.0f;
+	const float sFar = m.dFull > 0.0f ? tauMax / m.dFull : 0.0f;
 	const float k5y = K[5][1], k5w = K[5][3], top = K[3][3];
 	if ( k5y > 1e-9f && top > 0.0f && top < 1.0f ) {
 		const float z0 = k5w / k5y, z1 = ( 1.0f + k5w ) / k5y;
@@ -156,6 +177,19 @@ VaMedium vaFit( const float K[6][4], bool wrong )
 		m.invH = -std::log( std::max( top, 1e-3f ) ) / std::max( z1 - z0, 1e-3f );
 		m.band = true;
 	}
+	double num = 0.0, den = 0.0;
+	const double zLow = m.band ? double( m.zb ) - 10.0 : 0.0;
+	for ( int i = 0; i < 64; i++ ) {
+		const double d = 500.0 * std::pow( 10.0, i / 63.0 );
+		const double a = std::min( std::max( vaGameAlpha( K, d, zLow ), 0.0 ), 0.9999 );
+		num += d * -std::log( 1.0 - a );
+		den += d * d;
+	}
+	const float sStreet = float( num / den );
+	m.sigma0 = farFit ? sFar : std::max( sFar, sStreet );
+	m.farD = m.dFull;
+	if ( m.sigma0 > sFar && m.sigma0 > 0.0f )
+		m.farD = std::min( m.dFull, tauMax / m.sigma0 );
 	if ( wrong ) {
 		m.sigma0 *= 2.0f;
 		m.invH = 0.0f;
@@ -305,9 +339,9 @@ static void vaPassInner( Scene * scene, bool run )
 		restore();
 		return;
 	}
-	const VaMedium M = vaFit( K, ( s.red & 32 ) != 0 );
-	// the slices: exponential from 16 units to the fog's full distance
-	const float farD = std::max( M.dFull, kNearMin * 4.0f );
+	const VaMedium M = vaFit( K, ( s.red & 32 ) != 0, ( s.red & 128 ) != 0 );
+	// the slices: exponential from 16 units to where the air reaches the records' max opacity (vaFit)
+	const float farD = std::max( M.farD, kNearMin * 4.0f );
 	const float nearD = kNearMin;
 	const float logRatio = std::log( farD / nearD );
 	// the medium's top: the scene's highest point, in the fog's height frame (world z - the frame's ground)
