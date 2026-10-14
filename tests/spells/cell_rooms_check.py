@@ -497,11 +497,16 @@ def surface_reads(R, P, N):
     return L, cand
 
 
-def gi_sample(G, R, P, N, fill=None):
+def gi_sample(G, R, P, N, fill=None, sky=False):
     """cellGiSample: with rooms the blend of the 8 voxels' slots of the surface's room (renormalized); without
     (R None) the hardware trilinear of the one grid. Returns rgba (cellGiE divides by a).
     fill (lane GICAL1; None = GI_FILL[0]): the gap fill (gi_fill) where the blend has no valid weight. The shader
-    fills the GI grid of a grid that is not sky lit only: pass fill=False for a sky grid or the sky-share grid."""
+    fills the GI grid of a grid that is not sky lit only: pass fill=False for a sky grid or the sky-share grid.
+    sky (lane GIBLACK1): the grid is sky lit (an exterior; the shader's cellGiSky): the lend rule. A surface whose own
+    reads (0.75 and 1.75 cell) are both solid borrows only the outdoors (room 0): its neighbour search keeps outdoors
+    cells, its seen fill runs only from an outdoors view point, and with neither it has no answer (zeros: the weather's
+    ambient). The same when the 0.75 read is solid and the 1.75 read lands in an indoors room (a normal turned toward
+    the pocket), whose direct read is then not taken either. GI_CHECK_BORROW=1: the old search (the shader's red WW_CELL_PV_RED=borrow)."""
     P, N = np.asarray(P, float), np.asarray(N, float)
     fill = GI_FILL[0] if fill is None else fill
     dm = G['dims']
@@ -517,7 +522,9 @@ def gi_sample(G, R, P, N, fill=None):
         L, cand = surface_reads(R, P, N)
         out, Ls = None, L
         frm = see_from(R, P, N)
-        if L is not None:
+        L2 = room_at(R, P + N * 1.75 * R['cell'])
+        lend = sky and not BORROW_RED[0] and room_solid(R, P + N * 0.75 * R['cell']) and (L2[0] < 0 or (L2[0] != 0 and L2[1] != 0))
+        if L is not None and not (lend and L[0] != 0 and L[1] != 0):
             s, ws = gi_blend(G, L, i0, f, sl, n2, R, frm)
             if ws > 0:
                 out = s / ws
@@ -526,7 +533,7 @@ def gi_sample(G, R, P, N, fill=None):
             for d, c in cand:
                 if L is None and d < best_any:
                     best_any, Ls = d, c   # lane GICAL1: the nearest air cell, with weight or not (the fill's room)
-                if d >= best:
+                if d >= best or (lend and c[0] != 0 and c[1] != 0):
                     continue
                 s, ws = gi_blend(G, c, i0, f, sl, n2, R, frm)
                 if ws > 0:
@@ -540,10 +547,13 @@ def gi_sample(G, R, P, N, fill=None):
                 return fo
             if out is not None:
                 return out
-        if not SEE_RED[0]:
+        if not SEE_RED[0] and (not lend or 0 in room_at(R, frm)):
             so = gi_seen_fill(G, R, P, N, frm)
             if so[3] > 0.01:
                 return so
+        if lend:
+            GI_LENT[0] += 1
+            return np.zeros(4)
         GI_PLAIN[0] += 1
     s, ws = gi_blend(G, None, i0, f, sl, n2)
     if fill and R is None and s[3] <= 0.01:
@@ -595,6 +605,8 @@ SEE_RED = [os.environ.get('GI_CHECK_SEE', '1') == '0']   # lane GISHADE1: red no
 GI_PLAIN = [0]     # samples that found rooms but no room with weight: the shader's plain (unclamped) trilinear
 GI_FILL = [os.environ.get('GI_CHECK_FILL', '1') != '0']   # lane GICAL1: the gap fill (GI_CHECK_FILL=0: the shader pin WW_CELL_GI_FILL=0)
 GI_FILLED = [0]    # samples the fill answered
+BORROW_RED = [os.environ.get('GI_CHECK_BORROW', '0') == '1']   # lane GIBLACK1: red borrow (the shader's WW_CELL_PV_RED=borrow)
+GI_LENT = [0]      # lane GIBLACK1: samples the lend rule left with no answer (the weather's ambient)
 
 
 def room_solid(R, q):

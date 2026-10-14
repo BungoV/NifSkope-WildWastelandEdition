@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GIBLACK1 (2026-10-14, branch giblack1-20261013): a recessed outdoor wall no longer goes black with the probe GI
+
+- **The recessed wall left of the pillar on the Memory Den street (Goodneighbor) no longer draws pitch black with
+  the probe GI on.** The recess is narrow (about 134 units) and the rooms grid marks its air solid for three cells,
+  so both of the wall's own reads were solid. The search then borrowed the read of the nearest air cell, which
+  belonged to a sealed shaft room beside the recess (32 cells, no sky in any of its probes: their light is about
+  1e-5 of the street's). Its voxels are valid and say "no sky here", so the sky-lit grid turned the wall's ambient off.
+- The fix (`res/shaders/cell_lights.glsl`, `cellGiSample` and `cellGiRoomSample`), on the exterior sky-lit grid only:
+  a surface whose 0.75 cell read is solid and whose 1.75 cell read is solid or an indoors room borrows only outdoor
+  answers. Its indoors direct read is not taken, its neighbour search skips indoors cells, and its seen fill runs only
+  from an outdoors view point. With no outdoor answer it keeps the weather's ambient, as a spot with no GI does.
+  The second half of the rule covers the recess's corner, where a normal turned a little toward the shaft read it
+  straight through the unresolved air. Interiors, and surfaces whose 0.75 read is air, are unchanged.
+- Python twin: `tests/spells/cell_rooms_check.py` (`gi_sample`) carries the same rule. Over the Memory Den wall
+  (2392 samples), the old code gives 423 black and the fix 0 (lowest 0.019, mean 0.037; the flat ambient is 0.03).
+  With normals turned 15 degrees, the old code gives 661 black and the fix 0. Over the whole frame (1123 samples),
+  the old code gives 14 black and the fix 0.
+- Red: `WW_CELL_PV_RED=borrow` restores the old search (environment only).
+- Gate: `tests/spells/cell_giblack.sh` with `cell_giblack_check.py`. Each camera is shot three ways: GI on, GI off
+  and the red. With the GI on, the wall must keep at least half of the GI-off mean luminance and show no near-zero
+  pixel; the red must fail. On the old shots (main, 22h), the wall's GI-on mean is 0.464 of its GI-off mean and
+  17.26% of its pixels are near zero, so the gate fails there.
 ## Lane SKYSTR1 (2026-10-13, branch skystr1-20261013): Sky visibility slider
 
 - **Sky visibility slider.** Show > Lighting has a new "Sky visibility" row (0-100 %, default 100 %) next to GI.
