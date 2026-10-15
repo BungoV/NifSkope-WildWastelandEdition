@@ -51,6 +51,25 @@
   GIBLACK2's memden gates all pass.
 - The twin (`tests/spells/cell_rooms_check.py`) mirrors every law: `GI_CHECK_TIE=0`, `GI_CHECK_BOTH=0`,
   `GI_CHECK_LONE=0`; new subcommand `points` against `tests/fixtures/gidark1_recess2.tsv` / `gidark1_hinside.tsv`.
+## Lane LODP1 (2026-10-15, branch lodp1-20261015): LOD PRTP step 1 -- light patches placed on the distant LOD
+
+- **New: `.lodp` sector files** (`src/lodpfile.*`, contract `docs/LODGEN_NATIVE_LODO_LODI.md` section 13). One
+  file per 16 x 16 cells holds small surface patches (about one every 512 units) placed on the faces the far
+  view really draws: the `.lodo` meshes where the `.lodi` puts them, one patch per tree, and an 8 x 8 grid on
+  every land cell of the `.lodl`. Step 1 writes geometry; the light words (horizon, openness, albedo, links)
+  are zero for step 2. Reader refuses wrong versions, flags, reserved bytes and both CRCs by name.
+- **`.lodo` v8 patch-chart stream** (section 3.10): one byte per cluster triangle naming the chart it belongs to,
+  so a far pixel finds its patch without a search. Written ONLY with `--patch-charts`; without it a bake is
+  byte-identical to before (gated on a real region against the rung exe). Both readers refuse 9 doctored
+  files by name.
+- **CLI:** `lodgen ... --native <dir> --patch-charts`; `lodgen --lodp <pair dir> [<out>] [--lodp-region X0 Y0 X1 Y1]
+  [--lodp-census]` (no plugin read); `lodgen --lodp-verify <dir>`; `lodgen --lodp-fixture <dir> [--lodp-red 1|2]`.
+- **Placement rules** (`src/lodpplace.*`): a chart is the run of triangles within 45 degrees of a seed (an exact
+  45-degree bevel joins); slots are cubes of one patch edge; empty slots fall back to the chart's largest patch.
+  The `.lodp` units compile with `fp-contract=off` so the stored floats equal the independent twin's bit for bit.
+- **Measured:** region (-20 24 .. -9 35): 46,215 patches, 4.07 MiB, twin `--real` 33,828 checks 0 failures. Whole
+  Commonwealth: 4,184,387 patches in 144 sectors, **315 MiB**, placed in 7.2 s; 597 cells over the 800-patch cap.
+- Independent reader + twin: `tests/spells/lodp_decode.py` (`--fixture`, `--expect-red`, `--stream`, `--real`).
 
 ## Lane GIBLACK2 (2026-10-14, branch giblack2-20261014): the Memory Den recess takes its measured sky, not the open sky's
 

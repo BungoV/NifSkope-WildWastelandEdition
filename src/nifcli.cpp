@@ -40,6 +40,8 @@ See the LICENSE.md file for the full license text.
 #include "nearlib.h"
 #include "lodifile.h"
 #include "lodofile.h"
+#include "lodpbake.h"
+#include "lodpplace.h"
 #include "lodbfile.h"
 #include "io/loddecal.h"
 #include "terrainpreview.h"
@@ -2740,6 +2742,20 @@ static bool gLgKeepBto = false;
  *  A branch of its own: no other output of the run is written. */
 static QString gLgNearLibrary;
 
+/*! LOD PRTP step 1 (lane LODP1, 2026-10-15). `--patch-charts` writes the
+ *  `.lodo` v8 chart stream in a `--native` bake (OFF by default; off is the
+ *  `.lodo` as before, byte for byte). `--lodp <bake dir> <out dir>` places
+ *  the `.lodp` patch sectors from a finished native bake, `--lodp-census`
+ *  measures them without writing, `--lodp-region X0 Y0 X1 Y1` limits both to
+ *  a cell rectangle, `--lodp-verify <dir>` reads every sector back with every
+ *  check on, `--lodp-fixture <dir>` writes the known-answer fixture
+ *  (`--lodp-red N` = the gates' red controls). No plugin is read by any of
+ *  the `--lodp*` modes. */
+static bool gLgPatchCharts = false;
+static QString gLgLodpBake, gLgLodpOut, gLgLodpVerify, gLgLodpFixture;
+static bool gLgLodpCensus = false, gLgLodpRegion = false;
+static int gLgLodpRed = 0, gLgLodpX0 = 0, gLgLodpY0 = 0, gLgLodpX1 = -1, gLgLodpY1 = -1;
+
 //! `lodgen <file.esm>` — the LOD generation campaign's ESM record layer
 //! (docs/LODGEN_PLAN.md rung 0). --list-worldspaces enumerates WRLD records;
 //! --worldspace/--cell inspect one cell: LAND corner heights, REFR counts,
@@ -2798,6 +2814,53 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		QStringList rep; QString nerr;
 		if ( !lodNativeFixtureWrite( nativeFixture, &rep, &nerr ) ) { err() << "error: " << nerr << Qt::endl; return 1; }
 		for ( const QString & l : rep ) out() << l << Qt::endl;
+		return 0;
+	}
+	// ===== LOD PRTP step 1 (lane LODP1): the `.lodp` modes, no plugin read =====
+	if ( !gLgLodpFixture.isEmpty() ) {
+		QStringList rep; QString perr;
+		if ( !QDir().mkpath( gLgLodpFixture ) || !lodpFixtureWrite( gLgLodpFixture, gLgLodpRed, &rep, &perr ) ) {
+			err() << "error: --lodp-fixture: " << perr << Qt::endl;
+			return 1;
+		}
+		for ( const QString & l : rep ) out() << l << Qt::endl;
+		return 0;
+	}
+	if ( !gLgLodpVerify.isEmpty() ) {
+		QStringList rep; QString perr;
+		const bool ok = lodpVerifyDir( gLgLodpVerify, &rep, &perr );
+		for ( const QString & l : rep ) out() << l << Qt::endl;
+		if ( !ok ) { out() << "lodp REFUSED " << perr << Qt::endl; return 1; }
+		return 0;
+	}
+	if ( !gLgLodpBake.isEmpty() ) {
+		/* The bake dir is the folder holding the pair (`<mod>/FO4CSLOD/<ws>/`):
+		 * exactly one `*.lodo` and its `.lodi`, and the `.lodl` when present. */
+		const QDir bd( gLgLodpBake );
+		const QStringList lodos = bd.entryList( { QStringLiteral( "*.lodo" ) }, QDir::Files );
+		if ( lodos.size() != 1 ) {
+			err() << "error: --lodp: " << gLgLodpBake << " holds " << lodos.size() << " .lodo files, not one" << Qt::endl;
+			return 1;
+		}
+		const QString stem = bd.filePath( QFileInfo( lodos[0] ).completeBaseName() );
+		LodpBakeOptions po;
+		po.lodoPath = stem + QStringLiteral( ".lodo" );
+		po.lodiPath = stem + QStringLiteral( ".lodi" );
+		if ( QFileInfo::exists( stem + QStringLiteral( ".lodl" ) ) )
+			po.lodlPath = stem + QStringLiteral( ".lodl" );
+		po.outDir = gLgLodpOut;
+		po.writeFiles = !gLgLodpCensus;
+		po.region = gLgLodpRegion;
+		po.x0 = gLgLodpX0; po.y0 = gLgLodpY0; po.x1 = gLgLodpX1; po.y1 = gLgLodpY1;
+		if ( po.writeFiles && po.outDir.isEmpty() ) {
+			err() << "error: --lodp needs an output directory (or --lodp-census)" << Qt::endl;
+			return 2;
+		}
+		out() << "lodp-bake: ground " << ( po.lodlPath.isEmpty() ? QStringLiteral( "none (no .lodl beside the pair): objects only" ) : po.lodlPath ) << Qt::endl;
+		QStringList rep; QString perr;
+		const bool ok = lodpBake( po, &rep, &perr );
+		for ( const QString & l : rep ) out() << l << Qt::endl;
+		if ( !ok ) { err() << "error: --lodp: " << perr << Qt::endl; return 1; }
 		return 0;
 	}
 	/* ===== `--bake-record <ws.lodb>` (lane BAKEREC1, 2026-09-17) =========
@@ -4037,6 +4100,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			lodgenNativeVertexAoOption( vertexAo );
 			lodgenNativeLodiV7Option( lodiV7 );
 			lodgenNativeScrappableOption( scrappable );
+			lodgenNativePatchChartsOption( gLgPatchCharts );
 			lodgenNativeIdentityJoinOption( identityJoinLegacy, identityJoinGap );
 			lodgenNativeIdentityContactOption( identityJoinContact, occluderBuilding );
 			/* `--native` NAMES A MOD FOLDER from today (lane LAYOUT1,
@@ -7096,6 +7160,11 @@ int usage()
 	  << "  lodgen ... --native <dir> --lodi-v6\n"
 	  << "  lodgen ... --native <dir> --lodi-v7\n"
 	  << "  lodgen ... --native <dir> --scrappable  (off by default; .lodi v9 instance bit 6)\n"
+	  << "  lodgen ... --native <dir> --patch-charts  (off by default; .lodo v8 patch-chart stream)\n"
+	  << "  lodgen --lodp <bake dir> <out dir>      place the .lodp patch sectors from a native bake\n"
+	  << "        [--lodp-census] [--lodp-region X0 Y0 X1 Y1]  measure only / limit to cells\n"
+	  << "  lodgen --lodp-verify <dir>              read every lodp_*.lodp back, every check on\n"
+	  << "  lodgen --lodp-fixture <dir> [--lodp-red N]  write the .lodp known-answer fixture\n"
 	  << "  lodgen ... --native <dir> --identity-join contact | proximity | legacy\n"
 	  << "                                          v7 GROUPING: `contact` (the default,\n"
 	  << "                                          lane IDENT1) joins pieces whose placed\n"
@@ -8787,6 +8856,17 @@ int nifskopeCliMain( const QStringList & args )
 		 * The bit says which ones those are; the three-clause rule is read out
 		 * of the plugin (src/esmdata.h, EsmScrapIndex). */
 		else if ( t == QLatin1String( "--scrappable" ) ) lgScrappable = true;
+		else if ( t == QLatin1String( "--patch-charts" ) ) gLgPatchCharts = true;
+		else if ( t == QLatin1String( "--lodp" ) ) { gLgLodpBake = next(); if ( i + 1 < a.size() && !a[i + 1].startsWith( QLatin1String( "--" ) ) ) gLgLodpOut = next(); }
+		else if ( t == QLatin1String( "--lodp-census" ) ) gLgLodpCensus = true;
+		else if ( t == QLatin1String( "--lodp-verify" ) ) gLgLodpVerify = next();
+		else if ( t == QLatin1String( "--lodp-fixture" ) ) gLgLodpFixture = next();
+		else if ( t == QLatin1String( "--lodp-red" ) ) gLgLodpRed = next().toInt();
+		else if ( t == QLatin1String( "--lodp-region" ) ) {
+			gLgLodpRegion = true;
+			gLgLodpX0 = next().toInt(); gLgLodpY0 = next().toInt();
+			gLgLodpX1 = next().toInt(); gLgLodpY1 = next().toInt();
+		}
 		/* v7 GROUPING. The MEASURE is not a knob and the GAP is: lane IDENTPROX
 		 * measured that a box gap of any size bridges a street, so `legacy` gets
 		 * the whole old rule (measure and number together) and there is no way to
@@ -9125,7 +9205,9 @@ int nifskopeCliMain( const QStringList & args )
 				 * with none it prints the record and says `diff n/a`, which is
 				 * the useful answer when all you have is the bake's output
 				 * folder (lane BAKEREC1, 2026-09-17). */
-				|| !gLgBakeRecord.isEmpty() ) ) ) {
+				|| !gLgBakeRecord.isEmpty()
+				/* the `.lodp` modes read a bake folder, never a plugin (lane LODP1) */
+				|| !gLgLodpFixture.isEmpty() || !gLgLodpVerify.isEmpty() || !gLgLodpBake.isEmpty() ) ) ) {
 		err() << "error: '" << cmd << "' needs a <file>" << Qt::endl;
 		err().flush();
 		return 2;

@@ -105,7 +105,9 @@ def read_lodo(path):
     # v6 (lane SWAP1) = v5 + material-swap variant base rows (the base row's last u32 = materialSwap)
     # v7 (lane NEAR1) = v6 + header flag bit 4 NEAR (set exactly on v7) + the material row's
     #   reserved byte as `features` (bits 0..4: parallax, env map, greyscale, vertex colour, MSN)
-    if h['version'] not in (4, 5, 6, 7):
+    # v8 (lane LODP1) = v6 or v7 + the per-cluster-triangle CHART stream (u64 offset at 0xE0, the last
+    #   payload, clusterCount x 16 bytes); NEAR is now 'v7 is NEAR, NEAR is v7 or v8'
+    if h['version'] not in (4, 5, 6, 7, 8):
         raise Refusal('version %d' % h['version'])
     if crc32(b[0x10:0x100]) != h['headerCrc32']:
         raise Refusal('headerCrc32 mismatch')
@@ -113,9 +115,10 @@ def read_lodo(path):
         raise Refusal('flags bit0 clear')
     if h['flags'] & ~31:
         raise Refusal('reserved flag bits set')
-    if bool(h['flags'] & 16) != (h['version'] == 7):
-        raise Refusal('the NEAR flag (16) and version 7 come together or not at all (version %d, flags 0x%x)'
-                      % (h['version'], h['flags']))
+    if h['version'] == 7 and not h['flags'] & 16:
+        raise Refusal('version 7 without the NEAR flag (16) (flags 0x%x)' % h['flags'])
+    if h['flags'] & 16 and h['version'] not in (7, 8):
+        raise Refusal('the NEAR flag (16) on version %d: it is set only on version 7 or 8' % h['version'])
     (h['pluginCorpusHash'], h['objectCorpusHash'], h['modelCorpusHash'],
      h['cardCorpusHash']) = le('QQQQ', b, 0x10)
     edid = b[0x30:0x50]
@@ -153,7 +156,10 @@ def read_lodo(path):
     # v5: colourVertexCount u32 at 0xD4, offColours u64 at 0xD8; the pad is 0xCE..0xCF and 0xE0..0xFF
     h['cardCount'] = le('I', b, 0xD0)[0]
     h['colourVertexCount'], h['offColours'] = (le('IQ', b, 0xD4) if h['version'] >= 5 else (0, 0))
-    padFrom = 0xE0 if h['version'] >= 5 else 0xD4
+    h['offChartStream'] = le('Q', b, 0xE0)[0] if h['version'] == 8 else 0
+    if h['version'] == 8 and not h['offChartStream']:
+        raise Refusal('version 8 with no chart stream (0xE0 is 0)')
+    padFrom = 0xE8 if h['version'] == 8 else (0xE0 if h['version'] >= 5 else 0xD4)
     if any(b[0xCE:0xD0]) or any(b[padFrom:0x100]):
         raise Refusal('reserved bytes 0xCE..0xCF / 0x%02X..0xFF not zero' % padFrom)
     if bool(h['colourVertexCount']) != bool(h['offColours']):
@@ -176,6 +182,9 @@ def read_lodo(path):
     if h['colourVertexCount']:
         # v5: the colour blob is written LAST, and is in indexCrc32 only when present
         tabs.append(('colours', h['offColours'], h['colourVertexCount'] * 4))
+    if h['offChartStream']:
+        # v8: the chart stream after everything, in indexCrc32 only when present
+        tabs.append(('chartStream', h['offChartStream'], h['clusterCount'] * 16))
     prev = 256
     crc = 0
     for name, off, size in tabs:
@@ -256,6 +265,38 @@ def read_lodo(path):
         row += n
     if row != h['colourVertexCount']:
         raise Refusal('colourVertexCount %d but the flagged meshes hold %d' % (h['colourVertexCount'], row))
+
+    # v8: the chart stream -- 0xFF past a cluster's triangles, 0xFD never, a mesh's level-0 chart ids
+    # dense from 0 and no coarser triangle past them
+    L['chartStream'] = None
+    if h['offChartStream']:
+        cs = b[h['offChartStream']:h['offChartStream'] + h['clusterCount'] * 16]
+        L['chartStream'] = cs
+        for i, m in enumerate(L['meshes']):
+            seen, maxAny = set(), -1
+            for c in range(m['clusterFirst'], min(m['clusterFirst'] + m['clusterCount'], h['clusterCount'])):
+                tc = L['clusters'][c]['triangleCount']
+                l0 = L['clusterLods'][c]['level'] == 0
+                for t in range(16):
+                    v = cs[c * 16 + t]
+                    if t >= tc:
+                        if v != 0xFF:
+                            raise Refusal('chart stream: cluster %d slot %d past its %d triangles holds 0x%02x'
+                                          % (c, t, tc, v))
+                        continue
+                    if v == 0xFD:
+                        raise Refusal('chart stream: cluster %d triangle %d holds 0xfd' % (c, t))
+                    if v >= 0xFE:
+                        continue
+                    maxAny = max(maxAny, v)
+                    if l0:
+                        seen.add(v)
+            maxL0 = max(seen, default=-1)
+            if len(seen) != maxL0 + 1:
+                raise Refusal('chart stream: mesh %d level-0 chart ids are not dense' % i)
+            if maxAny > maxL0:
+                raise Refusal('chart stream: mesh %d coarser triangle in chart %d past level-0 %d'
+                              % (i, maxAny, maxL0))
 
     # row rules
     for i, m in enumerate(L['meshes']):
@@ -343,7 +384,7 @@ def read_lodo(path):
         elif not 0.0 < cl['coneCos'] <= 1.0:
             raise Refusal('cluster %d cone cosine %r outside (0, 1]' % (i, cl['coneCos']))
     for i, m in enumerate(L['materials']):
-        if m['reserved'] and h['version'] < 7:
+        if m['reserved'] and not h['flags'] & 16:
             raise Refusal('material %d reserved not zero' % i)
         if m['reserved'] & ~0x1F:
             raise Refusal('material %d features 0x%x set reserved bits 5..7' % (i, m['reserved']))

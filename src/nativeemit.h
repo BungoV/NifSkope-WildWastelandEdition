@@ -196,6 +196,9 @@ void lodgenNativeLodiV7Option( bool on );
  *  flown and bungo's rule of 2026-09-17 is that an owed ruling never ships as
  *  a default. */
 void lodgenNativeScrappableOption( bool scrappable );
+/*! LOD PRTP step 1 (lane LODP1): write the `.lodo` v8 chart stream (`--patch-charts`).
+ *  OFF by default; off is the exact way back (no stream, the `.lodo` as before). */
+void lodgenNativePatchChartsOption( bool on );
 
 /*! v7 grouping, THE PROXIMITY JOIN (bungo's ruling of 2026-09-19, measured by
  *  lane IDENTPROX). `legacy` restores the shipped rule exactly -- only a
