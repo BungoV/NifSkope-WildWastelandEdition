@@ -20,7 +20,15 @@
 # RED CONTROL (WW_CELL_DECALLIT_RED=unlit: the effect decals self-lit, as before): --red unlit shoots the light
 # picture with the defect on; the check must FAIL (the white decal reads 1, several times the wall's light).
 #
+# CAMERAS (CAM=, one per run):
+#   rev1    (default) bungo's rev1 camera, CommonwealthFoggy 18, gain 4: the white DecoStain drips (BldStreaks01.BGEM)
+#   memden  the Memory Den front (bungo's night frame), CommonwealthClear 22, gain 8: the orange Hightech rust streaks
+#           above the curved street lamp (HitExtAStainsWall2x2.nif, HitTechStain.BGEM: decal, blended, orange texture
+#           and base colour), which glowed orange in the dark; at night they must read no more than a lit albedo there,
+#           judged again inside their own rect (gain 32 saturated the lamp-lit wall: the red read only 1.4x)
+#
 # USAGE  bash tests/spells/decallit1_cell.sh [--red unlit]     RECHECK=1 judges the pictures already there.
+#        CAM=memden bash tests/spells/decallit1_cell.sh [--red unlit]
 #        Needs the profile's plugins (PROFILE) and a Goodneighbor GI bake (BAKE); both default to bungo's notes.
 
 set -u
@@ -31,13 +39,23 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 EXE="${EXE:-$REPO/release/NifSkope.exe}"
 RED=""
 [ "${1:-}" = "--red" ] && RED="${2:-}"
-OUT="${OUT:-$REPO/scratchpad/decallit1_20261014/gate}"
+CAM="${CAM:-rev1}"
+case "$CAM" in
+	rev1)   CAMLINE="23300 -9700 745 22300 -10150 800 55"; DW=CommonwealthFoggy; DH=18; DG=4;  DMIN=5000; DRECT="";
+	        DOUT=gate;;
+	memden) CAMLINE="22600 -10050 740 23600 -9500 760 55"; DW=CommonwealthClear; DH=22; DG=8;  DMIN=1000; DRECT=1380,100,1480,320;
+	        DOUT=gate_memden;;
+	*) echo "unknown CAM $CAM (rev1, memden)"; exit 2;;
+esac
+OUT="${OUT:-$REPO/scratchpad/decallit1_20261014/$DOUT}"
 LOG="$OUT/decallit1${RED:+_red_$RED}.log"
 PORT="${PORT:-14953}"
 SIZE="${SIZE:-1920x1040}"
-GAIN="${GAIN:-4}"
-WEATHER="${WEATHER:-CommonwealthFoggy}"
-HOUR="${HOUR:-18}"
+GAIN="${GAIN:-$DG}"
+WEATHER="${WEATHER:-$DW}"
+HOUR="${HOUR:-$DH}"
+MINPX="${MINPX:-$DMIN}"
+RECT="${RECT-$DRECT}"	# memden: the streaks' pixels (HitExtAStainsWall2x2.nif, ref 0x00206F72)
 RECHECK="${RECHECK:-0}"
 NOTES="${NOTES:-/e/Projects/Claude/notes}"
 PROFILE="${PROFILE:-$NOTES/allon2/shots/profile.txt}"
@@ -66,7 +84,7 @@ mkdir -p "$OUT"
 say() { echo "$@" | tee -a "$LOG"; }
 fails=0
 check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails=$((fails+1)); fi; }
-say "decallit1_cell.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}   $WEATHER $HOUR   gain $GAIN"
+say "decallit1_cell.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}   camera $CAM   $WEATHER $HOUR   gain $GAIN"
 
 if [ "$RECHECK" != 1 ]; then
 	[ -x "$EXE" ] || { say "no NifSkope.exe at $EXE"; exit 2; }
@@ -84,10 +102,10 @@ if [ "$RECHECK" != 1 ]; then
 
 	PLUGINS="$(grep -E '^plugin [0-9]+: ' "$PROFILE" | sed 's/^plugin [0-9]*: //' | tr -d '\r' | paste -sd, -)"
 	RES="$(grep -E '^resource [0-9]+: ' "$PROFILE" | sed 's/^resource [0-9]*: //' | tr -d '\r' | paste -sd';' -)"
-	# bungo's rev1 camera in Goodneighbor (5,-3), held still over a 19-frame path; frame 17 is kept
+	# the camera in Goodneighbor (5,-3), held still over a 19-frame path; frame 17 is kept
 	printf 'fps 16\nframes 19\n' > "$OUT/rev1.path"
 	for k in 0 1 17 18; do
-		printf 'key %s %s\n' "$(python -c "print('%.6f' % ($k / 16))")" "23300 -9700 745 22300 -10150 800 55" >> "$OUT/rev1.path"
+		printf 'key %s %s\n' "$(python -c "print('%.6f' % ($k / 16))")" "$CAMLINE" >> "$OUT/rev1.path"
 	done
 
 	room() {	# the lanes' memory guard kills a run under 3 GB free: wait (up to an hour) for 8.5 GB and no compiler
@@ -134,7 +152,7 @@ if [ "$RECHECK" != 1 ]; then
 	check "no shader compile error in the light shot's notes (${errs:-0})" "$([ "${errs:-0}" = 0 ] && echo 1 || echo 0)"
 fi
 
-python "$(dirname "$0")/decallit1_check.py" "$OUT" "light${RED:+_red_$RED}" "$GAIN" 2>&1 | tee -a "$LOG"
+python "$(dirname "$0")/decallit1_check.py" "$OUT" "light${RED:+_red_$RED}" "$GAIN" "$MINPX" "$RECT" 2>&1 | tee -a "$LOG"
 [ "${PIPESTATUS[0]}" = 0 ] || fails=$((fails+1))
 say "decallit1_cell.sh: $fails failure(s)${RED:+ (RED CONTROL $RED: a failure is the expected result)}"
 [ "$fails" = 0 ]

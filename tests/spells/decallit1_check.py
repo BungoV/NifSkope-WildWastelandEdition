@@ -1,4 +1,4 @@
-"""decallit1_check.py <dir> <lighttag> <gain>: judges the DECALLIT1 gate pictures (tests/spells/decallit1_cell.sh).
+"""decallit1_check.py <dir> <lighttag> <gain> [minpx] [x0,y0,x1,y1]: judges the DECALLIT1 gate pictures (tests/spells/decallit1_cell.sh).
 
   <lighttag>.png  probe 6 x gain with every effect decal drawn white and opaque: the decal's light alone
   wall.png        probe 6 x gain with the effect decals hidden: the wall's lit colour at the same pixels
@@ -6,12 +6,16 @@
 
 The region is where the decals drew: the light picture differs from the wall picture (geometry, not a hand mask).
 Per pixel the wall's light is wall / alb^2; the decal's light over it must be the same: median ratio within
-0.8..1.25, under 1 % of the readable region clipped where the wall's light is below white, and a region of at least 5000 pixels. Exit 0 on pass, 1 on fail."""
+0.8..1.25, under 1 % of the readable region clipped where the wall's light is below white, and a region of at least minpx (5000) readable pixels.
+With a rect (one named decal, e.g. bungo's Memory Den streaks), the same ratio bar is judged again on the region's
+readable pixels inside it (at least 300). Exit 0 on pass, 1 on fail."""
 import sys
 import numpy as np
 from PIL import Image
 
 D, TAG, GAIN = sys.argv[1], sys.argv[2], float(sys.argv[3])
+MINPX = int(sys.argv[4]) if len(sys.argv) > 4 else 5000
+RECT = [int(v) for v in sys.argv[5].split(',')] if len(sys.argv) > 5 and sys.argv[5] else None
 
 
 def ld(n):
@@ -42,7 +46,7 @@ def check(msg, good):
     fails += 0 if good else 1
 
 
-check(f'decal region {n} px ({nok} readable) >= 5000', nok >= 5000)
+check(f'decal region {n} px ({nok} readable) >= {MINPX}', nok >= MINPX)
 if nok:
     wl = Lw[ok] / La[ok]
     ratio = Ll[ok] / np.maximum(wl, 1e-6)
@@ -53,6 +57,17 @@ if nok:
     print(f'  wall light (linear, /gain) median {np.median(wl) / GAIN:.4f}   decal light median {np.median(Ll[ok]) / GAIN:.4f}')
     print(f'  ratio decal / wall light: median {med:.3f}  quartiles {q1:.3f} .. {q3:.3f}')
     check(f'decal light / wall light median {med:.3f} within 0.8 .. 1.25', 0.8 <= med <= 1.25)
+if RECT:
+    x0, y0, x1, y1 = RECT
+    inr = np.zeros_like(ok); inr[y0:y1, x0:x1] = True
+    rk = ok & inr
+    nr = int(rk.sum())
+    check(f'rect {x0},{y0}..{x1},{y1}: {nr} readable px >= 300', nr >= 300)
+    if nr:
+        rr = Ll[rk] / np.maximum(Lw[rk] / La[rk], 1e-6)
+        rm = float(np.median(rr))
+        print(f'  rect light median {np.median(Ll[rk]) / GAIN:.4f}   wall light median {np.median(Lw[rk] / La[rk]) / GAIN:.4f}')
+        check(f'rect decal light / wall light median {rm:.3f} within 0.8 .. 1.25', 0.8 <= rm <= 1.25)
 frac = clip.sum() / max(nok, 1)
 check(f'clipped {100 * frac:.2f} % of the readable region (wall light below white) < 1 %', frac < 0.01)
 m = np.zeros((H, W, 3), np.uint8)

@@ -28,6 +28,23 @@
   light and the fog over it, instead of a lighter streak under the fog. Clear 18:00, same drip: 76,67,60 before,
   61,49,47 after (wall 75,58,56 / 69,52,49). It reads as darker grime, as in the game.
 
+- **The orange rust streaks on the Memory Den wall behind the curved street lamp no longer glow at night.** They
+  are `Architecture\Buildings\Hightech\Stains\HitExtAStainsWall2x2.nif` with
+  `Materials\Architecture\Buildings\Hightech\HitTechStain.BGEM`: an effect shader (decal and decal-no-fade on,
+  alpha blended, no z-write, texture HitTechStreaks01_d, base colour 0.906,0.784,0.549). It is not an emissive BGSM
+  and has no glow map. It glowed because the old path drew it self-lit at texture times base colour, so it stayed
+  orange in the dark. The 4x1 and 3x1 Hightech stain meshes share this material.
+- Second gate camera: `CAM=memden` (Memory Den front, CommonwealthClear 22:00, gain 8, region of at least 1000 px,
+  and a streak rect 1380,100 .. 1480,320 that must read on its own). Fix: 4028 px region (3821 readable), median
+  0.882 (quartiles 0.842 .. 0.931), rect median 0.882, 0.29 % clipped: PASS. Red unlit: median 5.432, rect 5.626,
+  81.81 % clipped: FAIL. The rev1 run with the clip rule, from the script: fix median 1.001, 0.50 % clipped, PASS;
+  red 4.527, 83.55 % clipped, FAIL. Gain 32 saturated the night probe (the red read white on the streak), so the
+  memden camera uses gain 8.
+- Memden beauty shots, night, WW_CELL_BLOOM=fo4cs, WW_CELL_GLARE=1, GI on, DOF 0, MBLUR 0, sky dome loaded, 0 magenta
+  pixels: `notes/decallit1/shots/{before,after,red_unlit,fxdecals_hidden}_memden_n22.png`. On the 2516 streak pixels:
+  before 175,104,49; red identical to before; after 29,33,39; with the effect decals hidden 27,37,50. So the stain is
+  still drawn (2051 pixels differ from the hidden frame) and reads as a darker, warmer grime on the wall, not a glow.
+
 ## Lane GIBLACK1 (2026-10-14, branch giblack1-20261013): a recessed outdoor wall no longer goes black with the probe GI
 
 - **The recessed wall left of the pillar on the Memory Den street (Goodneighbor) no longer draws pitch black with
