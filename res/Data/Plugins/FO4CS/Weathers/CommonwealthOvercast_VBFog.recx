@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthOvercast_VBFog",
+			"weather": "Fallout4.esm|0x002486A5",
+			"groundFog": {
+				"thickness": 588,
+				"strength": 2.68
+			}
+		}
+	]
+}

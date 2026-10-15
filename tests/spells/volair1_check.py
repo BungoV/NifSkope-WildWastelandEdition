@@ -92,12 +92,17 @@ def est_fit(K, red=''):
         band = True
     zlow = zb - 10.0 if band else 0.0
     num = den = 0.0
+    knee = (0.75 + K[0][2]) / K[0][0]    # past it the game's own end ramp to 1, not the air
     for i in range(64):
         d = 500.0 * 10.0 ** (i / 63.0)
-        a = min(max(game_alpha(K, d, zlow), 0.0), 0.9999)
+        if d > knee and i > 0:
+            break
+        a = min(max(game_alpha(K, d, zlow), 0.0), max(mx, 1e-4))
         num += d * -math.log(1.0 - a)
         den += d * d
-    sigma0 = sFar if red == 'farfit' else max(sFar, num / den)
+    sStreet = num / den if den > 0 else sFar
+    # the record's curve ends inside the street range (an interior): the street fit alone; else never thinner than the far end
+    sigma0 = sFar if red == 'farfit' else (sStreet if knee <= 5000.0 else max(sFar, sStreet))
     farD = min(dFull, tauMax / sigma0) if sigma0 > sFar and sigma0 > 0 else dFull
     if red == 'wrongmed':
         sigma0 *= 2.0
@@ -259,7 +264,7 @@ def run(red):
     cube = float(np.max(np.abs(cs - E[0] * tint) / (E[0] * tint)))
     G.put('A4', worst <= 1e-4 and cube <= 1e-9, 'phase over the sphere: worst |lum / pi - 1| %.3g (bar 1e-4); uniform cube read: rel %.3g' % (worst, cube))
     # A5 -----------------------------------------------------------------------------------------------------------
-    worst_a, worst_h = 0.0, 0.0
+    worst_a, worst_h, worst_t, n_thin = 0.0, 0.0, 0.0, 0
     for _ in range(40):
         start, full = rng.uniform(0, 3000), 0
         full = start + rng.uniform(2000, 60000)
@@ -277,29 +282,39 @@ def run(red):
         m = (sigma0, zb, invH, 1e9)
         zlow = z0 - 50.0
         Tfull = math.exp(-ref_od(m, zlow, zlow, farD))
-        worst_a = max(worst_a, abs((1.0 - Tfull) - min(mx, 0.99)) / min(mx, 0.99))
+        if farD < dFull * (1.0 - 1e-6):
+            worst_a = max(worst_a, abs((1.0 - Tfull) - min(mx, 0.99)) / min(mx, 0.99))
+        else:
+            # the street fit thinner than the far end: the air at the full distance within the street bar of max
+            n_thin += 1
+            worst_t = max(worst_t, abs((1.0 - Tfull) - min(mx, 0.99)))
         # the game at its full distance (ramp 1: the height blend is the far pair's alone): its alpha at the band's
         # top over its alpha below the band
         ga = game_alpha(K, dFull, z1) / game_alpha(K, dFull, z0 - 10.0)
         # the air: its density at the same two heights, from the optical depth of 1-unit vertical pieces (quadrature)
         ra = ref_od(m, z1 - 0.5, z1 + 0.5, 1.0, 2001) / ref_od(m, z0 - 10.5, z0 - 9.5, 1.0, 2001)
         worst_h = max(worst_h, abs(ra - ga) / ga)
-    G.put('A5', worst_a <= 1e-3 and worst_h <= 1e-3,
-          'fit: 1 - T(full) vs the game\'s max, worst rel %.3g; density above / below the band vs the game\'s alpha ratio, worst rel %.3g (40 records)'
-          % (worst_a, worst_h))
+    G.put('A5', worst_a <= 1e-3 and worst_t <= 0.10 and worst_h <= 1e-3,
+          'fit: 1 - T(far edge) vs the game\'s max, worst rel %.3g; %d records thinner than the far end, 1 - T(full) vs max worst |diff| %.3f (bar 0.10); density above / below the band vs the game\'s alpha ratio, worst rel %.3g (40 records)'
+          % (worst_a, n_thin, worst_t, worst_h))
     # A6 -----------------------------------------------------------------------------------------------------------
     # two made-up records shaped like an outdoor fog (a near start, a far full distance, a low power that front-loads
     # the opacity): the air's haze 1 - T over a horizontal ray below the band (quadrature) within 0.10 of the game's
     # alpha at 2000, 3000 and 5000 units. The far-end fit leaves it ~1/10 of the game's there.
     worst6, txt = 0.0, []
-    for start, full, pw, mx in ((550.0, 175000.0, 0.13, 1.0), (1200.0, 250000.0, 0.31, 0.85)):
+    # A third, shaped like an interior's (Vault111Cryo: start 500, full 4600, power 1.2, max 0.7, no band): judged only
+    # up to the curve's end ramp (ramp 0.75), past which the game ramps to 1 on its own
+    for start, full, pw, mx, top in ((550.0, 175000.0, 0.13, 1.0, 0.97), (1200.0, 250000.0, 0.31, 0.85, 0.97),
+                                     (500.0, 4600.0, 1.2, 0.7, 1.0)):
         k0x = 1.0 / (full - start)
-        K = [[k0x, 0, start * k0x, 0], [0.5, 0.5, 0.5, pw], [0.5, 0.5, 0.5, mx], [0.5, 0.5, 0.5, 0.97],
+        K = [[k0x, 0, start * k0x, 0], [0.5, 0.5, 0.5, pw], [0.5, 0.5, 0.5, mx], [0.5, 0.5, 0.5, top],
              [0.5, 0.5, 0.5, 0], [4.0e-5, 4.6e-5, -0.497, -0.497]]
         sigma0, zb, invH, dFull, farD = est_fit(K, red)
         m = (sigma0, zb, invH, 1e9)
         zlow = zb - 50.0
         for d in (2000.0, 3000.0, 5000.0):
+            if d > (0.75 + K[0][2]) / K[0][0]:
+                continue
             air = 1.0 - math.exp(-ref_od(m, zlow, zlow, d))
             game = game_alpha(K, d, zlow)
             worst6 = max(worst6, abs(air - game))

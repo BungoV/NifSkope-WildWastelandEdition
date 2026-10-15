@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DLC03_ClearWeather",
+			"weather": "DLCCoast.esm|0x00009962",
+			"groundFog": {
+				"thickness": 561,
+				"strength": 2.37,
+				"hours": {
+					"2": {
+						"thickness": 660,
+						"strength": 3.58
+					},
+					"14": {
+						"thickness": 561,
+						"strength": 2.37
+					}
+				}
+			}
+		}
+	]
+}

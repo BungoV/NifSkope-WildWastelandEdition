@@ -19,8 +19,10 @@ class Scene;
  *  the fog records in force (the weather's outdoors, the cell's indoors), no hand dial:
  *    sigma0: least squares in optical depth against the game's fog over the street range (64 log-spaced
  *            distances, 500 to 5000 units, below the band): sigma0 = sum(d tau) / sum(d^2), tau = -ln(1 - alpha);
- *            never thinner than the far-end fit 1 - exp(-sigma0 x dFull) = min(max, 0.99) (the red farfit keeps
- *            that fit alone: the street-range air ~1/10 of the game's, halos and shafts too faint to see)
+ *            never thinner than the far-end fit 1 - exp(-sigma0 x dFull) = min(max, 0.99), except where the
+ *            record's curve ends inside the street range (its knee, ramp 0.75, under 5000 units: an interior's
+ *            short steep curve), where the street fit alone holds (the red farfit keeps the far-end fit alone: the
+ *            street-range air ~1/10 of the game's, halos and shafts too faint to see)
  *    height: the game's fog weight runs from 1 below its height band (the far pair, z0..z1) to K3.w above it; the
  *            air falls off over the same band: zb = z0, H = (z1 - z0) / -ln(K3.w); no band: uniform (H infinite).
  *  The optical depth of any straight segment is closed form (flat below zb, exponential above).
@@ -33,6 +35,9 @@ class Scene;
  *    8 the ambient (sky outdoors, the cell's indoors) read as L0 + L1, on the share the GI grid does not cover
  *  The phase: the god-ray record in force (air Rayleigh + forward and back Henyey-Greenstein lobes, their colours
  *  normalised to a luminance of 1).
+ *  The colour of the sky's share (1, 4, 8): the records' (owner's ruling 10-14) -- the game's own fog colour at the
+ *  froxel's distance and height (near / far / high colours by hour) mixed toward the fog-sun colour as the game mixes
+ *  it, at unit luminance; the physics gives its brightness and direction. The placed lights keep their own colours.
  *
  *  The passes (portable: same terms in FO4CS): a froxel volume, columns of 12 x 12 pixels x 64 slices exponential
  *  from 16 units to farD, where the air reaches min(max, 0.99) (tau_max / sigma0, at most dFull).
@@ -41,11 +46,25 @@ class Scene;
  *               froxel. rgb = the slice's light from its near edge, a = the slice's transmittance.
  *    integrate  front to back: L_k = L_(k-1) + T_(k-1) x inj_k.rgb, T_k = T_(k-1) x inj_k.a.
  *    apply      a surface at distance d: colour x T(d) + L(d) (lookdev_fog.glsl wwFog), linear in log-depth.
+ *    far tail   past farD (mountains, the far LOD): closed form, no new number. The light per unit optical depth J
+ *               of the last slices, held; T_tail = exp(-sigma0 x col(z0, z1) / |dz|) along the rest of the ray (flat:
+ *               sigma0 x length), L += T(farD) x J x (1 - T_tail), J recoloured by the record colour's ratio there.
+ *               Continuous at farD; a mountain top (thinner air above the band) hazes less than its foot.
+ *  The surfaces' sun (FOGSUN1): the directional light on every lit surface outdoors x the air's transmittance up the
+ *  sun ray, exp(-sigma0 x col(z, top) / max(mu, 0.02)), mu = the sun's height (lookdev_fog.glsl wwVolAirSunT).
  *  DEVIATION: no temporal history (NifSkope redraws on demand); the 4 stratified sub-steps stand in for it.
+ *  Cost (coordinator 10-14), both on by default, the picture unchanged: clustered lights (per 8 x 8 columns x 8
+ *  slices the lights whose sphere can reach one of its froxel points, ascending: the inject walks that list, not every
+ *  light) and the conservative depth skip (stage 0: per column the farthest opaque ray distance from lane AO1's
+ *  g-buffer; a froxel whose previous slice starts past the farthest of the column and its neighbours is never read
+ *  by the apply and holds (0, 1)); no opaque pass that frame: no skip.
  *
  *  The fold "Volumetric Air" (Scene window): the row ships OFF (QSettings WW/VolAir); the pin WW_CELL_AIR=0|1 wins.
- *  Gates only: WW_CELL_AIR_RED=off (computed, not applied) | gioff | flat | noshadow | nolights | wrongmed | blendnear (with FOGBLEND=1) | farfit (comma
- *  list), WW_CELL_AIR_TERMS=<mask> (1 directional, 2 placed lights, 4 GI, 8 ambient), WW_CELL_AIR_PROBE=1 (the light
+ *  Gates only: WW_CELL_AIR_RED=off (computed, not applied) | gioff | flat | noshadow | nolights | wrongmed | blendnear
+ *  (with FOGBLEND=1) | farfit | physcol | nosunt (surfaces keep the full sun) | froxonly (no far tail) | nosky (the sky without the air) | fxfog (effects and particles keep the game's fog alone) | lightmid (placed lights taken once at the slice middle) (comma
+ *  list; also oldsun (the air lit by the fog-sun glare, no sky DALC), dropcluster (every cluster list loses its
+ *  nearest light), nearskip (the skip behind the column's nearest surface)), WW_CELL_AIR_OPT=0..3 (1 clusters, 2 the
+ *  depth skip; 0 the unoptimised path), WW_CELL_AIR_TERMS=<mask> (1 directional, 2 placed lights, 4 GI, 8 ambient), WW_CELL_AIR_PROBE=1 (the light
  *  term L alone, raw) | 2 (the transmittance T, grey), WW_CELL_AIR_DUMP=<file> (the volumes and the numbers),
  *  WW_CELL_AIR_TIME=1 (the pass's ms in the census).
  *  Test only, until bungo picks: WW_CELL_VOLAIR_FOGBLEND=1 (option B) draws the game's fog over the lit air with its
@@ -53,6 +72,13 @@ class Scene;
 void wwVolAirPass( Scene * scene, bool run );
 //! the uniforms of the renderer's CURRENT program (a no-op without `volOn`); the sampler is bound always
 void wwVolAirUniforms( Scene * scene );
+/*! the sky through the air (bungo 10-14: the far tower stood out against a sky the air never touched). The sky is a
+ *  surface at infinite distance: the froxels, then the far tail run to the end of the air (lookdev_fog.glsl
+ *  wwVolAirSky). probes false: before the scene draw, into the linear frame (cell_volsky.prog under everything; the
+ *  resolve lays the fog colour at infinity over the backdrop by 1 - T). probes true: after the scene draw, in a probe
+ *  frame (WW_CELL_AIR_PROBE 1 / 2, WW_LOOKDEV_FOGPROBE 9 / 10) the raw probe on the far-plane pixels (the far gates' sky
+ *  marker (1, 1, 1)). Gates only: WW_CELL_AIR_RED=nosky (the sky without the air, as before). */
+void wwVolAirSkyDraw( Scene * scene, bool probes );
 //! the row (ships off); the pin WW_CELL_AIR wins
 bool wwVolAirOn();
 void wwVolAirSetOn( bool on );

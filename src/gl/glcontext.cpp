@@ -36,11 +36,16 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifmodel.h"
 #include "gltex.h"
 #include "glproperty.h"
+#include "harnesswindow.h"
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QOpenGLContext>
 #include <QTextStream>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -273,6 +278,25 @@ void NifSkopeOpenGLContext::Shader::printCompileError( const QString & err )
 	QString	tmp( QString::fromUtf8( name.data(), qsizetype( name.length() ) ) );
 	tmp.append( QLatin1StringView( ":\r\n\r\n" ) );
 	tmp.append( err );
+	// lane VOLAIR1 (10-15): also into the log, where a headless run's notes see it (the box alone hid a
+	// program that failed to link, and every draw that wanted it fell back)
+	qWarning().noquote() << "shader compile/link error:" << tmp;
+	/* THE SHADER GUARD (lane VOLAIR1, 10-15, coordinator ruling: no silent grey pictures ever again).
+	 *
+	 * A program that fails to compile or link leaves every draw that wanted it on a fallback: the
+	 * picture comes out untextured or grey and still LOOKS like a measurement. In a harness run
+	 * (wwHarnessRun(): any WW_* key or -no-gui, the predicate saveUi() already uses) the run stops
+	 * here, before any picture can be written: the error text goes to the notes after a fixed
+	 * "SHADER REFUSED:" prefix and the exe exits 87. Every gate then fails on the missing picture
+	 * and tests/spells/_harness.sh ww_notes_shader_refusal prints why. A user session (no WW_* key)
+	 * keeps the message box and goes on. There is no switch to turn this off; the red that proves
+	 * it trips is WW_SHADER_RED=<shader file> (Shader::load), run by tests/spells/shader_guard.sh. */
+	if ( wwHarnessRun() ) {
+		const QByteArray line = ( QStringLiteral( "SHADER REFUSED: " ) + QString( tmp ).simplified() ).toUtf8();
+		std::fprintf( stderr, "%s\n", line.constData() );
+		std::fflush( stderr );
+		std::_Exit( 87 );
+	}
 	Message::append( QObject::tr( "There were errors during shader compilation" ), tmp );
 }
 
@@ -351,6 +375,12 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 	try
 	{
 		QByteArray	data = loadShaderFile( filepath );
+		// red for the shader guard (printCompileError): WW_SHADER_RED=<file name> breaks that one shader
+		if ( const QString red = qEnvironmentVariable( "WW_SHADER_RED" );
+			!red.isEmpty() && QFileInfo( filepath ).fileName().compare( red, Qt::CaseInsensitive ) == 0 ) {
+			const qsizetype eol = data.startsWith( "#version" ) ? data.indexOf( '\n' ) + 1 : 0;
+			data.insert( eol, "#error WW_SHADER_RED broke this shader on purpose\n" );
+		}
 
 		if ( name.ends_with( "frag" ) ) {
 			if ( qsizetype n = data.indexOf( "NUM_TEXTURE_UNITS" ); n >= 0 )

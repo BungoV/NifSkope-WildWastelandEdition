@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "DLC05CommonwealthRainFastTransition",
+			"weather": "DLCworkshop02.esm|0x00000A4E",
+			"groundFog": {
+				"thickness": 626,
+				"strength": 3.14
+			}
+		}
+	]
+}

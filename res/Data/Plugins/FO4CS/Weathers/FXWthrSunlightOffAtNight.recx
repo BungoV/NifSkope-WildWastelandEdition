@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "FXWthrSunlightOffAtNight",
+			"weather": "Fallout4.esm|0x00029BB8",
+			"groundFog": {
+				"thickness": 300,
+				"strength": 0.25
+			}
+		}
+	]
+}

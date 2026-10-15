@@ -530,6 +530,23 @@ QString wwLookdevWeatherKey()
 	return st().weatherKey;
 }
 
+bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStringList & files, QString & dataDir )
+{
+	resolve();
+	const LdState & s = st();
+	if ( !s.haveWeather )
+		return false;
+	formID = s.w.formID;
+	edid = s.w.edid;
+	owner.clear();
+	for ( const WwWeatherEntry & e : s.list )
+		if ( e.formID == s.w.formID )
+			owner = e.ownerFile;
+	files = s.esm.files();
+	dataDir = EsmWeather::gameDataDir();
+	return true;
+}
+
 void wwLookdevSetWeather( const QString & key )
 {
 	LdState & s = st();

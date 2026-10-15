@@ -1,4 +1,5 @@
 #include "cellhdr.h"
+#include "cellunits.h"
 
 #include "gl/cellbloom.h"
 #include "gl/celllights.h"
@@ -6,17 +7,19 @@
 #include "gl/renderer.h"
 
 #include <QDebug>
+#include <QFile>
 #include <QHash>
 
 #include <algorithm>
 #include <cstdint>
+#include <vector>
 
 // lane HDR1: the cell view's linear frame and its one tone map (cellhdr.h)
 
 namespace {
 
 constexpr int kSrcUnit = 8;		// the linear frame (sampler2DMS) in cell_hdr.prog; the cell units are 10..16
-constexpr int kFoBloomUnit = 11;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
+constexpr int kFoBloomUnit = WwCellUnit::Bloom;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
 
 struct HdrGpu
 {
@@ -189,6 +192,41 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glBlitFramebuffer( 0, 0, s.w, s.h, 0, 0, s.w, s.h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST );
 	const GLenum blitErr = fn->glGetError();
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+	// lane VOLAIR1 (gates only): WW_CELL_HDR_DUMP=<file> writes the linear frame before the bloom and the tone map,
+	// samples resolved: int32 W H, then W x H x RGBA float32, bottom row first. Every frame (a still path: the last).
+	static const QByteArray hdrDump = qgetenv( "WW_CELL_HDR_DUMP" );
+	if ( !hdrDump.isEmpty() ) {
+		GLuint tex = 0, fbo = 0;
+		fn->glGenTextures( 1, &tex );
+		fn->glBindTexture( GL_TEXTURE_2D, tex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, s.w, s.h, 0, GL_RGBA, GL_FLOAT, nullptr );
+		fn->glGenFramebuffers( 1, &fbo );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, fbo );
+		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0 );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
+		fn->glBlitFramebuffer( 0, 0, s.w, s.h, 0, 0, s.w, s.h, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, fbo );
+		std::vector<float> px( size_t( s.w ) * size_t( s.h ) * 4 );
+		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+		fn->glReadPixels( 0, 0, s.w, s.h, GL_RGBA, GL_FLOAT, px.data() );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( s.prevDraw ) );
+		fn->glDeleteFramebuffers( 1, &fbo );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		fn->glDeleteTextures( 1, &tex );
+		QFile f( QString::fromLocal8Bit( hdrDump ) );
+		if ( f.open( QIODevice::WriteOnly ) ) {
+			const int32_t wh[2] = { s.w, s.h };
+			f.write( reinterpret_cast<const char *>( wh ), sizeof( wh ) );
+			f.write( reinterpret_cast<const char *>( px.data() ), qint64( px.size() * sizeof( float ) ) );
+		}
+		static bool said = false;
+		if ( !said ) {
+			said = true;
+			qInfo().noquote() << QStringLiteral( "cell hdr: dump of the linear frame %1x%2 to %3 (every frame)" ).arg( s.w ).arg( s.h )
+				.arg( QString::fromLocal8Bit( hdrDump ) );
+		}
+	}
 	// lane BLOOM1b: the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat );
 

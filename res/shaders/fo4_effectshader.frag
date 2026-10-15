@@ -60,7 +60,8 @@ out vec4 fragColor;
  *              per pixel, no N.L and no shadow
  *   Soft     = saturate( (scene w - w) / soft depth ) x smoothstep( 0.075, 0.5, w / soft depth ), w the view
  *              depth; on alpha, or on the palette's row for a greyscale-to-palette effect
- *   fog      = mix( c, fog colour, f ) for a blended effect, c x (1 - f) for an additive one
+ *   fog      = mix( c, fog colour, f ) for a blended effect, c x (1 - f) for an additive one; with the cell air on,
+ *              the air as the surfaces take it, c T + L, or c T for an additive one (lane VOLAIR1, wwFogFx)
  * then the cell's imagespace on its own (an effect blends over a surface that already took the bloom). */
 #include "uniforms.glsl"
 #include "lookdev_fog.glsl"
@@ -260,13 +261,7 @@ void main()
 			}
 			lin *= m;
 		}
-		if ( fogOn ) {
-			vec3 posView = -ViewDir;
-			float hb;
-			vec3 fogCol;
-			float f = wwFogEval( length( posView ) * fogDistScale, dot( fogView.xyz, posView ) + fogView.w, hb, fogCol );
-			lin = fxAdditive ? lin * ( 1.0 - f ) : mix( lin, fogCol, f );
-		}
+		lin = wwFogFx( lin, -ViewDir, fxAdditive );	// lane VOLAIR1: the air, as the surfaces take it (red fxfog: the game's fog alone)
 		// probe 6 (the imagespace's measure): the linear value, blended as drawn
 		if ( cellProbe == 6 )
 			fragColor = vec4( lin, color.a );

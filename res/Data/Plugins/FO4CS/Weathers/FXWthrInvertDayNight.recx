@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "FXWthrInvertDayNight",
+			"weather": "Fallout4.esm|0x0006ED5A",
+			"groundFog": {
+				"thickness": 300,
+				"strength": 0.25
+			}
+		}
+	]
+}

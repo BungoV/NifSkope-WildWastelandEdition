@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "NeutralWeather",
+			"weather": "Fallout4.esm|0x000A1588",
+			"groundFog": {
+				"thickness": 396,
+				"strength": 0.77,
+				"hours": {
+					"2": {
+						"thickness": 461,
+						"strength": 1.35
+					},
+					"14": {
+						"thickness": 396,
+						"strength": 0.77
+					}
+				}
+			}
+		}
+	]
+}

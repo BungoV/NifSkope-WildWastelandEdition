@@ -10,7 +10,8 @@
  *              1 the directional light x its cascade shadow x the air's transmittance up to the top x pi x phase
  *              2 every placed light (colour x radial x cone x its shadow cube) x the air's transmittance to it x pi x phase
  *              4 the probe GI and 8 the ambient (the share the GI grid leaves), each read as L0 + L1 of a six-axis cube
- *            The directional light is evaluated per sub-step (the shafts), the rest once at the slice's middle.
+ *            The directional light is evaluated per sub-step (the shafts), the placed lights over the slice's stretch
+ *            of the ray inside each light's sphere (four samples), the rest once at the slice's middle.
  *            rgb = the slice's light from its near edge, a = the slice's transmittance.
  *   stage 2  integrate: L_k = L_(k-1) + T_(k-1) x inj_k.rgb, T_k = T_(k-1) x inj_k.a. */
 
@@ -25,12 +26,21 @@ uniform ivec3 volDims;			// columns, rows, slices
 uniform vec2 volProj;			// the projection's [0][0], [1][1]
 uniform sampler3D volInject;	// stage 2 reads stage 1's volume
 uniform vec4 airMed;			// sigma0 (per game unit), zb, 1 / H (0: uniform), the top (the fog's height frame)
+uniform vec4 airLayer;			// the near band's share w, zn, 1 / Hn, the ground layer's strength s (cellvolair.cpp VaLayer)
+uniform vec4 airGround;			// the ground layer's anchor zg, 1 / its thickness
 uniform bool volCsm;			// the sun's cascades are drawn this frame
-uniform int volRed;				// 2 gioff, 4 flat, 8 noshadow, 16 nolights (1 off and 32 wrongmed are the CPU's)
+uniform int volRed;				// 2 gioff, 4 flat, 8 noshadow, 16 nolights, 256 physcol, 262144 lightmid (1 off, 32 wrongmed, 128 farfit: the CPU's)
 uniform vec4 volPhase[3];		// rgb: the weight of the air (Rayleigh), forward and back terms; w: the HG g (0 for air)
 uniform vec4 volGi;				// rgb: the phase's tint (the three weights summed), w: its L1 g
 uniform vec3 volFlat[6];		// red flat: one cube for every froxel (the grid's mean)
 uniform int volTerms;			// gates only: 1 the directional light, 2 the placed lights, 4 the GI, 8 the ambient
+// the optimisation (coordinator 10-14, cellvolair.cpp): the clustered lights and the conservative depth skip
+uniform isamplerBuffer volClusters;	// per cluster (offset, count), then the light indices (ascending)
+uniform ivec4 volClusterDims;		// clusters across, down; froxel columns a cluster side; slices a cluster (x 0: every light)
+uniform int volDepthSkip;			// 0 off, 1 behind the farthest opaque distance (3 x 3 columns), 2 red nearskip
+uniform sampler2D volGbuf;			// stage 0: lane AO1's g-buffer (a: linear depth, game units; 1e6 empty)
+uniform ivec2 volGbufSize;
+uniform sampler2D volTile;			// stage 1: stage 0's per-column (farthest, nearest) ray distance (game units)
 
 out vec4 fragColor;
 
@@ -62,11 +72,24 @@ float airF( float z )
 	return e / airMed.z;
 }
 
+// the density per unit sigma0 (lookdev_fog.glsl wwAirRhoLaw: the far band, the near band's share, the ground layer)
 float airRho( float z )
 {
-	if ( z > airMed.w )
-		return 0.0;
-	return airMed.z > 0.0 ? min( 1.0, exp( -( z - airMed.y ) * airMed.z ) ) : 1.0;
+	return wwAirRhoLaw( z, airMed, airLayer, airGround );
+}
+
+// (1 - exp(-u)) / u, precise for small u
+float airE1( float u )
+{
+	return u < 1e-3 ? 1.0 - u * ( 0.5 - u / 6.0 ) : ( 1.0 - exp( -u ) ) / u;
+}
+
+// the column of air between heights lo < hi, per unit sigma0, without the cancellation of F(hi) - F(lo): F is a
+// large number (the column from zb, up to H ~ 1e6 units), its difference over a few units lost to float precision
+// near the horizon (the gate's R found it at Sanctuary's foggy band)
+float airCol( float lo, float hi )
+{
+	return wwAirColLaw( lo, hi, airMed, airLayer, airGround );
 }
 
 // the optical depth of a straight segment of length len (game units) from height za to height zb
@@ -75,7 +98,7 @@ float airOd( float za, float zb, float len )
 	float dz = zb - za;
 	if ( abs( dz ) < 0.5 )
 		return airMed.x * len * airRho( 0.5 * ( za + zb ) );
-	return airMed.x * len * ( airF( zb ) - airF( za ) ) / dz;
+	return airMed.x * len * airCol( min( za, zb ), max( za, zb ) ) / abs( dz );
 }
 
 // 1 - exp(-tau), precise for small tau
@@ -90,7 +113,7 @@ float airTup( float z, float mu )
 	if ( z >= airMed.w )
 		return 1.0;
 	mu = max( mu, 0.02 );
-	return exp( -airMed.x * ( airF( airMed.w ) - airF( z ) ) / mu );
+	return exp( -airMed.x * airCol( z, airMed.w ) / mu );
 }
 
 /* the six-axis cube at P, axis a = +X -X +Y -Y +Z -Z, in the surfaces' GI unit, with ONE room lookup (lane VOLFOG1b):
@@ -173,27 +196,83 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 	return vec3( 0.0 );
 }
 
-// the rest of the light at posView (height z): the placed lights, the GI and the ambient, once a froxel
-vec3 airRest( vec3 posView, vec3 dirView, float z )
+/* the haze's colour from the records (owner's ruling 10-14): the game's own fog colour at this distance and height
+ * (the WTHR / lighting template near, far and high colours by hour, wwFogEval) mixed toward the fog-sun colour as the
+ * game mixes it (fDirectionalFogPower), at unit luminance; the physical light keeps its brightness and direction.
+ * Applied to the sky's share (the directional light, the GI, the ambient); the placed lights keep their own records'
+ * colours. Red physcol (256): the physical colour (the phase's tint x the light's). */
+vec3 airEnvColour( vec3 J, float t, float z, vec3 dirView )
 {
+	if ( ( volRed & 256 ) != 0 )
+		return J;
+	bool ok;
+	vec3 c = wwAirRecordColour( t, z, dirView, ok );	// lookdev_fog.glsl, at unit luminance
+	return ok ? dot( J, vec3( 0.2126, 0.7152, 0.0722 ) ) * c : J;
+}
+
+// the rest of the light at posView (height z), once a froxel: the placed lights (returned) and the sky's share, the
+// GI and the ambient (Jenv)
+vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 Jenv )
+{
+	Jenv = vec3( 0.0 );
 	if ( !cellOn )
 		return vec3( 0.0 );
 	vec3 J = vec3( 0.0 );
 	vec3 P = cellWorldPos( posView );
 	vec3 dW = cellWorldDir( dirView );
 	float zOff = z - P.z;	// the fog's height frame minus world z
+	vec3 Dw = cellWorldPos( dirView * ( 1.0 / fogDistScale ) ) - cellWorldPos( vec3( 0.0 ) );	// world per game unit along the ray
 	if ( ( volTerms & 2 ) != 0 && ( volRed & 16 ) == 0 ) {
-		for ( int i = 0; i < cellLightCount; i++ ) {
+		// clustered: only the lights whose sphere can reach this cluster, in the same ascending order (a light left out
+		// would add exactly nothing below: d >= radius)
+		int n = cellLightCount, base = -1;
+		if ( volClusterDims.x > 0 ) {
+			ivec2 c = ivec2( gl_FragCoord.xy ) / volClusterDims.z;
+			int ci = ( ( volLayer / volClusterDims.w ) * volClusterDims.y + c.y ) * volClusterDims.x + c.x;
+			base = texelFetch( volClusters, 2 * ci ).r;
+			n = texelFetch( volClusters, 2 * ci + 1 ).r;
+		}
+		for ( int j = 0; j < n; j++ ) {
+			int i = base < 0 ? j : texelFetch( volClusters, base + j ).r;
 			vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
-			float d = length( t0.xyz - P );
-			if ( d >= t0.w || d < 0.001 )
+			if ( ( volRed & 262144 ) != 0 ) {	// red lightmid: the light at the slice's middle only (a small light
+				float d = length( t0.xyz - P );	// between two middles adds nothing)
+				if ( d >= t0.w || d < 0.001 )
+					continue;
+				vec3 L = ( t0.xyz - P ) / d, Lo;
+				bool noSpec;
+				vec3 e = cellLightE( i, P, L, Lo, noSpec );	// N = L: no N.L, the shadow lifted toward the light
+				if ( all( equal( e, vec3( 0.0 ) ) ) )
+					continue;
+				J += e * exp( -airOd( z, t0.z + zOff, d ) ) * volPhasePi( dot( L, dW ) );
 				continue;
-			vec3 L = ( t0.xyz - P ) / d, Lo;
-			bool noSpec;
-			vec3 e = cellLightE( i, P, L, Lo, noSpec );	// N = L: no N.L, the shadow lifted toward the light
-			if ( all( equal( e, vec3( 0.0 ) ) ) )
+			}
+			// lane VOLAIR1 (LAMPAIR2): the light's mean over the slice's stretch of the ray. The stretch inside the
+			// light's sphere, [s0, s1] game units from the middle, is sampled at four midpoints and weighted by its
+			// share of the slice: a lamp smaller than a slice is caught wherever it sits in it.
+			vec3 m = P - t0.xyz;
+			float qa = dot( Dw, Dw ), qb = dot( Dw, m ), qc = dot( m, m ) - t0.w * t0.w;
+			float disc = qb * qb - qa * qc;
+			if ( disc <= 0.0 || qa <= 0.0 )
 				continue;
-			J += e * exp( -airOd( z, t0.z + zOff, d ) ) * volPhasePi( dot( L, dW ) );
+			float sq = sqrt( disc );
+			float s0 = max( ( -qb - sq ) / qa, sA ), s1 = min( ( -qb + sq ) / qa, sB );
+			if ( s1 <= s0 )
+				continue;
+			vec3 Ji = vec3( 0.0 );
+			for ( int k = 0; k < 4; k++ ) {
+				vec3 Pk = P + Dw * mix( s0, s1, ( float( k ) + 0.5 ) * 0.25 );
+				float d = length( t0.xyz - Pk );
+				if ( d >= t0.w || d < 0.001 )
+					continue;
+				vec3 L = ( t0.xyz - Pk ) / d, Lo;
+				bool noSpec;
+				vec3 e = cellLightE( i, Pk, L, Lo, noSpec );	// N = L: no N.L, the shadow lifted toward the light
+				if ( all( equal( e, vec3( 0.0 ) ) ) )
+					continue;
+				Ji += e * exp( -airOd( Pk.z + zOff, t0.z + zOff, d ) ) * volPhasePi( dot( L, dW ) );
+			}
+			J += Ji * ( 0.25 * ( s1 - s0 ) / max( sB - sA, 1e-6 ) );
 		}
 	}
 	bool wantGi = ( volTerms & 4 ) != 0 && cellGiOn && ( volRed & 2 ) == 0;
@@ -219,7 +298,7 @@ vec3 airRest( vec3 posView, vec3 dirView, float z )
 		vec3 Eg[6];
 		for ( int a = 0; a < 6; a++ )
 			Eg[a] = E[a] * ( 1.0 / PI );	// the surfaces' GI unit -> the ambient's (cellLit: gi = cellGiE / pi)
-		J += volCubeScatter( Eg, dW );
+		Jenv += volCubeScatter( Eg, dW );
 	}
 	if ( wantAmb ) {
 		// the share the GI replaced: indoors under the rule replace (the default), outdoors where the grid holds the sky
@@ -228,7 +307,7 @@ vec3 airRest( vec3 posView, vec3 dirView, float z )
 		vec3 A[6];
 		for ( int a = 0; a < 6; a++ )
 			A[a] = cellAmbient( axes[a], P ) * ( replace ? 1.0 - share[a] : 1.0 );
-		J += volCubeScatter( A, dW );
+		Jenv += volCubeScatter( A, dW );
 	}
 	return J;
 }
@@ -247,6 +326,47 @@ void main()
 		fragColor = vec4( L, T );
 		return;
 	}
+	if ( volStage == 0 ) {
+		// the column's opaque ray distances: its pixels (the column's share of the g-buffer, one pixel of margin)
+		ivec2 p0 = max( ivec2( floor( vec2( col ) * vec2( volGbufSize ) / vec2( volDims.xy ) ) ) - 1, ivec2( 0 ) );
+		ivec2 p1 = min( ivec2( ceil( vec2( col + 1 ) * vec2( volGbufSize ) / vec2( volDims.xy ) ) ) + 1, volGbufSize );
+		float far = 0.0, near = 3.0e38;
+		float k = fogDistScale / max( length( cellRow[0].xyz ), 1e-30 );
+		for ( int y = p0.y; y < p1.y; y++ ) {
+			for ( int x = p0.x; x < p1.x; x++ ) {
+				float a = texelFetch( volGbuf, ivec2( x, y ), 0 ).a;
+				float t = 3.0e38;
+				if ( a < 5.0e5 ) {
+					vec2 n = ( vec2( x, y ) + 0.5 ) / vec2( volGbufSize ) * 2.0 - 1.0;
+					t = max( a, 0.0 ) * k * length( vec3( n.x / volProj.x, n.y / volProj.y, 1.0 ) );
+				}
+				far = max( far, t );
+				near = min( near, t );
+			}
+		}
+		fragColor = vec4( far, near, 0.0, 1.0 );
+		return;
+	}
+	if ( volDepthSkip != 0 && volLayer > 0 ) {
+		// the conservative skip: no pixel's apply reads this froxel when the PREVIOUS slice already starts past the
+		// farthest surface of the column and its neighbours (the bilinear's reach); (0, 1) keeps the integrate whole.
+		// Red nearskip: behind the column's own nearest surface, from this slice (visible froxels skipped)
+		float lim = 0.0, edge;
+		if ( volDepthSkip == 2 ) {
+			lim = texelFetch( volTile, col, 0 ).g;
+			edge = volSlices.x * exp( volSlices.y * float( volLayer ) / volSlices.z );
+		} else {
+			for ( int dy = -1; dy <= 1; dy++ )
+				for ( int dx = -1; dx <= 1; dx++ )
+					lim = max( lim, texelFetch( volTile, clamp( col + ivec2( dx, dy ), ivec2( 0 ), volDims.xy - 1 ), 0 ).r );
+			edge = volSlices.x * exp( volSlices.y * float( volLayer - 1 ) / volSlices.z );
+			lim = lim * 1.001 + 1.0;
+		}
+		if ( edge > lim ) {
+			fragColor = vec4( 0.0, 0.0, 0.0, 1.0 );
+			return;
+		}
+	}
 	vec2 ndc = ( vec2( col ) + 0.5 ) / vec2( volDims.xy ) * 2.0 - 1.0;
 	vec3 dirView = normalize( vec3( ndc.x / volProj.x, ndc.y / volProj.y, -1.0 ) );
 	float t0 = volSlices.x * exp( volSlices.y * float( volLayer ) / volSlices.z );
@@ -255,7 +375,8 @@ void main()
 	float zc = fogView.w;
 	float dzdt = dot( fogView.xyz, dirView ) / fogDistScale;
 	float tm = 0.5 * ( t0 + t1 );
-	vec3 Jrest = airRest( dirView * ( tm / fogDistScale ), dirView, zc + dzdt * tm );
+	vec3 Jenv;
+	vec3 Jrest = airRest( dirView * ( tm / fogDistScale ), dirView, zc + dzdt * tm, t0 - tm, t1 - tm, Jenv );
 	vec3 acc = vec3( 0.0 );
 	float T = 1.0;
 	for ( int q = 0; q < 4; q++ ) {
@@ -264,7 +385,8 @@ void main()
 		float w = air1mE( tau );
 		if ( w > 0.0 ) {
 			float t = 0.5 * ( ta + tb );
-			acc += T * w * ( Jrest + airSun( dirView * ( t / fogDistScale ), dirView, zc + dzdt * t ) );
+			float zt = zc + dzdt * t;
+			acc += T * w * ( Jrest + airEnvColour( Jenv + airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) );
 		}
 		T *= exp( -tau );
 	}

@@ -10,7 +10,7 @@
 #   vol      WW_CELL_AIR=1, outdoors WW_CELL_AIR_TERMS=1 (the directional light alone, no cascades: rebuilt here
 #            exactly), indoors 2 (the placed lights: their light is judged present, the medium rebuilt) +
 #            WW_CELL_AIR_DUMP (the injected and integrated volumes and every number a rebuild needs)
-#   probe / probet   the same with WW_CELL_AIR_PROBE=1 (L, raw) / 2 (T, grey)
+#   probe / probet   the same with WW_CELL_AIR_PROBE=1 (L, raw) / 2 (T, grey); outdoors probesun =3 (the sun's T to the surface)
 #   geo      the air off, the fog's geometry probe (8: d / 16384 per fragment)
 #   off      the air off (the row's shipped state)        before / rung2   the exe from before the lane, twice
 # Sanctuary also:  shad / shadref  the sun's cascades on, terms 1, with and without WW_CELL_AIR_RED=noshadow
@@ -20,13 +20,18 @@
 # Goodneighbor (NEON_DIR set: a folder holding lane NEONGI1's bake_veil and bake_off, NEON_PROFILE its plugin
 # profile): the Rexford camera (in-bounds), 22:00 CommonwealthClear, terms 4 (the GI alone), the bake WITH the
 # neon emitters (veil) and WITHOUT them (noneon): the air near the signs must glow with their light.
-# Then tests/spells/volair1_cell_check.py (stages M R I P O S L G F N C; its header says what each is) and the
+# Then tests/spells/volair1_cell_check.py (stages M H X D R K I P W U O S L G F N C; its header says what each is) and the
 # twins: tests/spells/volair1_check.py (the air's identities) and tests/spells/volfog1_check.py (the coloured
 # bounce in a red room, the shafts; the GI read they model is unchanged).
 #
 # RED CONTROLS (each must FAIL its stage):
 #   --red off       computed, not applied (the game's fog drawn)   P
 #   --red wrongmed  twice the density, no height falloff           M
+#   --red farfit    the density fitted at the full distance alone  H
+#   --red physcol   the physical colour, not the records'          K
+#   --red oldsun    the air lit by the fog-sun colour, no sky DALC  D
+#   --red nosunt    the surfaces' sun not dimmed by the air          U
+#   --red froxonly  no far tail past the froxels (the old far edge)   W
 #   --red noshadow  the cascades ignored in the air                S
 #   --red nolights  the placed lights put nothing in the air       L
 #   --red gioff     the air takes no GI                            G N
@@ -60,13 +65,13 @@ ESM="${ESM:-X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm}"
 DATA="${DATA:-E:/Tools/Fallout 4/DataUnpacked/Data}"
 RED=""
 [ "${1:-}" = "--red" ] && RED="${2:-}"
-case "$RED" in ""|off|wrongmed|noshadow|nolights|gioff|flat) ;; *) echo "unknown red: $RED"; exit 2 ;; esac
+case "$RED" in ""|off|wrongmed|farfit|physcol|oldsun|nosunt|froxonly|noshadow|nolights|gioff|flat) ;; *) echo "unknown red: $RED"; exit 2 ;; esac
 OUT="${OUT:-$REPO/scratchpad/volair1_20261013/gate${RED:+_red_$RED}}"
 GREEN="${GREEN:-$REPO/scratchpad/volair1_20261013/gate}"	# the green run a red copies its other shots from
 PORT="${PORT:-14934}"
 SIZE="${SIZE:-960x600}"
 BIG="${BIG:-1920x1080}"
-PLACES="${PLACES:-sanctuary Vault111Cryo}"
+PLACES="${PLACES:-sanctuary sanctfar Vault111Cryo}"
 NEON_DIR="${NEON_DIR:-}"
 NEON_PROFILE="${NEON_PROFILE:-}"
 [ -n "$NEON_DIR" ] && PLACES="$PLACES goodneighbor"
@@ -119,6 +124,16 @@ shoot() {	# shoot <exe> <place> <tag> [env...]
 			WW_LOOKDEV_PLUGINS="$ESM" WW_LODGEN_RESOURCES="$res" WW_CELL_NOGRID=1 WW_CELL_BAKE_REFRACT_RED=keep
 			WW_CELL_OPEN="$plugins|Goodneighbor|5,-3|1" )
 		cam=( WW_RENDER_PATH="$(winpath "$run/rexford.path")" )
+	elif [ "$place" = sanctfar ]; then
+		# the far tail's camera: Sanctuary, the far LOD on, eye 128 above the navmesh (notes/volair1/cam/nav_sanct.npz,
+		# ground 7835.8 at -75808.9,92148.8), looking south-east over the Commonwealth
+		printf 'fps 16
+frames 3
+' > "$run/far.path"
+		for k in 0 1 2; do printf 'key %s -75809 92149 7964 -72809 89149 7864 70
+' "$(python -c "print($k/16)")" >> "$run/far.path"; done
+		open=( "${LD[@]}" WW_CELL_OPEN="$ESM|Commonwealth|-19,22|1" WW_CELL_DATAROOT="$DATA" WW_LODGEN_RESOURCES="$DATA" WW_CELL_FARLOD=1 )
+		cam=( WW_RENDER_PATH="$(winpath "$run/far.path")" )
 	elif [ -n "${XY[$place]:-}" ]; then
 		open=( "${LD[@]}" WW_CELL_OPEN="$ESM|Commonwealth|${XY[$place]}|1" WW_CELL_DATAROOT="$DATA" WW_LODGEN_RESOURCES="$DATA" )
 		cam=( WW_RENDER_VIEW="${VW[$place]}" WW_RENDER_CENTER="${AT[$place]}" WW_RENDER_DIST="${DI[$place]}" WW_RENDER_FOV=70 )
@@ -132,7 +147,7 @@ shoot() {	# shoot <exe> <place> <tag> [env...]
 			WW_RENDER_SHOT="$(winpath "$run/$tag.png")" WW_RENDER_SIZE="$size" WW_RENDER_CLEAN=1 WW_SETTINGS_SCOPE="$scope"
 		launch "$run/$tag.notes" "$exe" --port "$PORT" "$(winpath "$REPO/tests/fixtures/empty.wwcell")"
 	)
-	if [ "$place" = goodneighbor ]; then
+	if [ "$place" = goodneighbor ] || [ "$place" = sanctfar ]; then
 		[ -s "$run/${tag}_002.png" ] && mv "$run/${tag}_002.png" "$run/$tag.png"
 		rm -f "$run/${tag}"_[0-9][0-9][0-9].png
 	fi
@@ -163,16 +178,33 @@ if [ "$RECHECK" != 1 ]; then
 			esac
 			continue
 		fi
+		if [ "$p" = sanctfar ]; then
+			# the far tail (W): T past the froxels' far edge, the 16-bit geometry (log d, z)
+			case "$RED" in ""|froxonly)
+				shoot "$EXE" "$p" vol WW_CELL_AIR=1 WW_CELL_AIR_TERMS=1 "${R[@]}" "$(dumpenv "$p" vol)"
+				shoot "$EXE" "$p" probet WW_CELL_AIR=1 WW_CELL_AIR_TERMS=1 WW_CELL_AIR_PROBE=2 "${R[@]}" ;;
+			esac
+			if [ -z "$RED" ]; then
+				shoot "$EXE" "$p" geod WW_CELL_AIR=1 WW_CELL_AIR_TERMS=1 WW_LOOKDEV_FOGPROBE=0,0,9
+				shoot "$EXE" "$p" geoz WW_CELL_AIR=1 WW_CELL_AIR_TERMS=1 WW_LOOKDEV_FOGPROBE=0,0,10
+			fi
+			continue
+		fi
 		ext=0; [ -n "${XY[$p]:-}" ] && ext=1
 		geo=( WW_CELL_FOG_PROBE=8 ); [ $ext = 1 ] && geo=( WW_LOOKDEV_FOGPROBE=0,0,8 )
 		tm=1; [ $ext = 0 ] && tm=2
-		case "$RED" in ""|off|wrongmed|nolights)
+		case "$RED" in ""|off|wrongmed|farfit|physcol|oldsun|nolights)
 			shoot "$EXE" "$p" vol WW_CELL_AIR=1 WW_CELL_AIR_TERMS=$tm "${R[@]}" "$(dumpenv "$p" vol)" ;;
 		esac
 		case "$RED" in ""|off)
 			shoot "$EXE" "$p" probe WW_CELL_AIR=1 WW_CELL_AIR_TERMS=$tm WW_CELL_AIR_PROBE=1 "${R[@]}"
 			shoot "$EXE" "$p" probet WW_CELL_AIR=1 WW_CELL_AIR_TERMS=$tm WW_CELL_AIR_PROBE=2 "${R[@]}" ;;
 		esac
+		if [ $ext = 1 ]; then
+			case "$RED" in ""|nosunt)
+				shoot "$EXE" "$p" probesun WW_CELL_AIR=1 WW_CELL_AIR_TERMS=$tm WW_CELL_AIR_PROBE=3 "${R[@]}" "$(dumpenv "$p" probesun)" ;;
+			esac
+		fi
 		if [ -z "$RED" ]; then
 			shoot "$EXE" "$p" geo WW_CELL_AIR=0 "${geo[@]}"
 			shoot "$EXE" "$p" off WW_CELL_AIR=0

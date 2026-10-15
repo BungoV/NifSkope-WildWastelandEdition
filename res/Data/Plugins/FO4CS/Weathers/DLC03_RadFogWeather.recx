@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DLC03_RadFogWeather",
+			"weather": "DLCCoast.esm|0x00007FBA",
+			"groundFog": {
+				"thickness": 800,
+				"strength": 5.89,
+				"hours": {
+					"2": {
+						"thickness": 985,
+						"strength": 8.0
+					},
+					"14": {
+						"thickness": 800,
+						"strength": 5.89
+					}
+				}
+			}
+		}
+	]
+}

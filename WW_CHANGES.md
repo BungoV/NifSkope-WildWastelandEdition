@@ -16,7 +16,8 @@
 - Test only, no menu row, until bungo picks: `WW_CELL_VOLAIR_FOGBLEND=1` (option B) draws the game's fog colour over
   the lit air with the game's own alpha (nothing nearer than the fog's start distance); unset or 0 = option A, the
   real light only.
-- Gate switches (environment only): `WW_CELL_AIR_RED=off|gioff|flat|noshadow|nolights|wrongmed|blendnear|farfit`,
+- Gate switches (environment only): `WW_CELL_AIR_RED=off|gioff|flat|noshadow|nolights|wrongmed|blendnear|farfit`
+  (more below),
   `WW_CELL_AIR_TERMS=<mask>`, `WW_CELL_AIR_PROBE=1|2`, `WW_CELL_AIR_DUMP=<file>`.
 - Gates: `tests/spells/volair1_check.py` (maths twin); `tests/spells/volair1_cell.sh` (a numpy rebuild of the
   medium, inject and integrate from the dump, applied in place of the fog, shadows, placed lights, GI) green at
@@ -32,6 +33,99 @@
 - Back lobe kept at +g: the record names Back Phase / Fwd Phase with no sign, the reader copies it as is, all 61
   vanilla records hold 0.000-0.744 (none negative) and the game uses it unflipped; -g would make the air brighter
   away from the sun (toward/away ratio 0.77 vs 10.6 as drawn).
+- Fit (10-14, later): an interior's short steep fog curve (its end ramp inside 5000 units) takes the street fit alone
+  (the far-end floor made Vault111Cryo far too thick).
+- Haze colour from the records (owner's ruling 10-14): the air lit by the sky (sun, GI, ambient) takes the game's own
+  fog colour at its distance and height (near / far / high colours by hour, mixed toward the fog-sun colour as the
+  game mixes it); the light only sets its brightness. Placed lights keep their own colours. Red `physcol`; cell
+  gate K.
+- Far tail: past the last froxel (mountains, the far LOD) the air goes on in closed form with the same light and
+  colour, continuous at the edge; mountain tops haze less than their feet. Red `froxonly`; cell gate W at the new
+  Sanctuary far camera (`sanctfar`, far LOD on).
+- Sun through the air (FOGSUN1): outdoors the sun on every surface is dimmed by the air's transmittance up the sun
+  ray (both shaders). Red `nosunt`; cell gate U.
+- Gate switches now also: `physcol`, `nosunt`, `froxonly`, `nosky`, `fxfog`, `lightmid`; `WW_CELL_AIR_PROBE=3` (the surfaces' sun transmittance).
+- Outdoors the air is lit by the same sun and sky the surfaces get (the weather's light x Sunlight Scale, the sky's
+  DALC), not the fog-sun glare colour with no sky. Red `oldsun`; cell gate D.
+- Cost: the air walks only the lights that can reach each block of froxels (clustered lists), and skips the froxels
+  behind the farthest opaque surface of their screen tile; the picture is the same as before. `WW_CELL_AIR_OPT=0`
+  turns both off for the gate; reds `dropcluster`, `nearskip`; gate `tests/spells/volair1_opt_check.py`.
+- Ground fog from .recx files (10-14): outdoors the air gains a layer of denser air that hugs the ground, read from
+  record extension files (`docs/RECX.md`): `Data\Plugins\<Provider>\Weathers\<EditorID>.recx`, block `groundFog`
+  (`thickness`, `strength`, optional `hours`). Every provider is read and merged block by block (form > EditorID >
+  wildcard; a later provider wins a block; overrides and conflicts logged); files reload when they change.
+  NifSkope ships `Plugins\FO4CS\Weathers\` with one file for each of the 107 weathers of the base game and the
+  official add-ons, written by `tools/recx_weathers.py` from each weather's own fog distances (none tuned by hand).
+  The near height band is now its own share of the air (fitted to the game's fog over height and distance), and
+  the column stays closed-form, so the far tail and mountains keep the same law with no seam. No file: the
+  record-derived air alone.
+- Telemetry: `cell air recx: ...` when the layer changes, `recx census:` one line per loaded weather (file and rung
+  matched, then the count), `nearw= ground= thick= zg= recx=` in the census line, `recx: override|CONFLICT` lines.
+- Gate switches: `WW_CELL_AIR_RED=noground|nosidecar`, `WW_RECX_ROOT=<folder>` (one root, for tests). Gates
+  `tests/spells/volair1_ground.sh` (rungs, values, hours, merge, the ground term's optical depth vs the closed
+  form) and `tests/spells/volair1_census.sh` (all masters loaded: every weather matched by its own file); the cell
+  gate's rebuild now carries the layered law.
+- The sky through the air (10-14): the sky is a surface at infinite distance, so in fog it fades to the same colour
+  far buildings fade to (the air's light run to the end of the air: to its top when the ray climbs, endless when
+  level or down). Drawn under the scene into the linear frame (`cell_volsky.prog`); needs the image space on. Notes
+  line `cell air sky: ...`. Red `nosky`.
+- Effects, particles and the far bulb dots now fade through the air like every surface (they used the game's fog
+  alone, so small marks on far walls kept their contrast in fog; the far dots had no fog at all). Additive draws
+  are dimmed by the air's transmittance. Red `fxfog`.
+- Placed lights in the air are now taken over each froxel slice's whole stretch of the ray (four samples inside the
+  light's sphere), not once at the slice's middle: a street lamp smaller than a slice lit nothing in the air when it
+  sat between two middles. Red `lightmid`.
+- Gates only: `WW_CELL_HDR_DUMP=<file>` writes the linear frame (before bloom and the tone map) every frame
+  (int32 width, height, then RGBA float32 rows, bottom first). Gates `tests/spells/volair1_sky_check.py` (every
+  pixel's contrast against its same-depth neighbours follows the transmittance, no draw class exempt; the sky and
+  the far geometry meet in one fog colour at infinity) and `tests/spells/volair1_lamp_check.py` (each placed light's
+  in-scatter against an independent single-scatter integral; under half fails).
+- The cell view's texture units now live in one table, `src/gl/cellunits.h`, and a compile-time check refuses two
+  samplers on one unit. With every row on, two units each carried two kinds of texture, which can leave the cell
+  surfaces untextured. On unit 20, the AO decals sat beside the far table's slots. On unit 21, the air's volume
+  sat beside the far table's records. The AO decals move to 23 and the air's units to 24..28. Gate
+  `tests/spells/cell_units_check.py` checks the table and refuses a literal unit number anywhere else in `src/gl`.
+- Sunlight now comes through alpha-tested windows into the air. The sun's shadow map drew every alpha-tested shape
+  (a window's GlassWindows01 glass, a leaf card) as a solid card. The air reads that map, so no sun reached the air
+  behind a window. Alpha-tested casters now go through `lookdev_csmdepth_at`, which keeps only what the shape's
+  own alpha test keeps. Reds: `WW_CSM_RED=atsolid` casts them solid again; `WW_CSM_RED=atnone` leaves them out.
+  `WW_CSM_DUMP` writes the cascade map for judges. Gate `tests/spells/volair1_window_check.py`, at Concord
+  Hardware at noon: the air's froxels follow the map's own predicted factor, and the room's lit air reaches 60% of
+  the glass-gone ceiling.
+- No more silent grey pictures. A shader that failed to compile or link showed only in a message box, which a
+  headless run never sees. Every draw that wanted that program fell back, so the picture came out grey or
+  untextured and still looked like a result. Now a harness run (any `WW_*` key) stops at the first such error, before
+  any picture is written: it writes `SHADER REFUSED: <error>` to its notes and exits 87. A normal session still
+  shows the message box and carries on. `tests/spells/_harness.sh` gains `ww_notes_shader_refusal <notes>`, which
+  prints every refused program and shader error in a run's notes. Red: `WW_SHADER_RED=<shader file>` breaks
+  one shader on purpose. Gate: `tests/spells/shader_guard.sh`, where the shipped shaders must give a picture and
+  the broken one must give exit 87, no picture, and the error named.
+- Two shader faults behind the grey and untextured cell pictures, both found by the guard above. (1) The
+  sky-ray helper in the shared fog include read the camera block, which the volumetric-air program does not
+  include, so that program never linked. The helper now lives in `cell_volsky.frag`, the one shader that uses it.
+  (2) `fo4_default.frag` called the air sun-transmittance helper in its no-fog variants (`fo4_default.prog`,
+  `fo4_csm.prog`), which do not get the fog include, so both programs failed. A `WW_AIR_SUN_T` macro now gives
+  1.0 when there is no fog.
+- A harness `WW_CELL_OPEN` line that does not parse now stops the run (`CELL OPEN REFUSED: <why>` in the notes,
+  exit 88, no picture). It used to be dropped without a word, and the run opened the spec file instead (for a harness,
+  the empty fixture), so the pictures showed sky only and still looked like a result. Example: the Concord window
+  gate asked for block size 2 (only odd sizes are allowed).
+- Clustered lights: each cluster's depth range now runs from its first slice's near edge to its last slice's far
+  edge. It used the slice middles, so a light that reached only the outer half of a boundary slice was left out of
+  that cluster's list. At Memory Den this lost lights on slices 16, 23-24 and 31-32 (the opt gate's Q stage).
+- `tests/spells/volair1_lamp_check.py` reads the shot's whole load order (a comma-separated plugin list), maps each
+  plugin's own form ids to load-order ids, and lets a later plugin's record win, as the cell loader does. Reading
+  `Fallout4.esm` alone gave a wrong radius for a lamp a later plugin edits, and no record at all for a light a
+  plugin adds.
+- The lamp check also needs the median ratio over the judged lamps within 0.8..1.25. The per-lamp band alone
+  (0.5..2) let a lamp law about 1.8x too bright pass on most lamps. It is judged on unoptimized frames: the depth
+  skip leaves the air behind walls uncomputed, which the check would count as missing light.
+- The sky gate judges its L stage (the fog color at infinity across the skyline) on the lamps-off frame when the
+  view has one; the lamps' own glow brightens the buildings beside the skyline and belongs to the lamp check. The
+  lamps-on value is printed as information.
+- `tests/spells/volair1_window_check.py`: the sun through windows and open shop fronts
+  lights the air inside. Alpha-tested casters (window panes, leaf cards) are tested against a red that makes them
+  solid.
 
 ## Lane BLOOM1 (2026-10-13, branch bloom1): FO4CS bloom and Physical Glare in the cell view
 

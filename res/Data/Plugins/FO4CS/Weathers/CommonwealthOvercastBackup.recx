@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthOvercastBackup",
+			"weather": "Fallout4.esm|0x0020F46C",
+			"groundFog": {
+				"thickness": 488,
+				"strength": 1.6,
+				"hours": {
+					"2": {
+						"thickness": 501,
+						"strength": 1.74
+					},
+					"14": {
+						"thickness": 488,
+						"strength": 1.6
+					}
+				}
+			}
+		}
+	]
+}

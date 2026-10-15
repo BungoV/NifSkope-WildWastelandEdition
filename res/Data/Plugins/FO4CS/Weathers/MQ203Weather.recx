@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "MQ203Weather",
+			"weather": "Fallout4.esm|0x000DB2A1",
+			"groundFog": {
+				"thickness": 416,
+				"strength": 0.94
+			}
+		}
+	]
+}

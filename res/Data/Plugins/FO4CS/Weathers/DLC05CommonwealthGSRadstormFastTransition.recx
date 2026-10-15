@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "DLC05CommonwealthGSRadstormFastTransition",
+			"weather": "DLCworkshop02.esm|0x00000A4F",
+			"groundFog": {
+				"thickness": 864,
+				"strength": 7.32
+			}
+		}
+	]
+}

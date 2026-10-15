@@ -535,6 +535,10 @@ void main()
 	if ( ( csmRed & 4 ) == 0 )
 		outSpec *= csmF;
 #endif
+	// FOGSUN1: the sun through the air (1 where the air is off)
+	float airSunT = wwVolAirSunT( -ViewDir );
+	outDiff *= airSunT;
+	outSpec *= airSunT;
 
 	// --- ambient + environment ---
 	// AO belongs on ambient, not on direct light: occlusion describes what the
@@ -629,9 +633,10 @@ void main()
 			if ( cellHasDir ) {
 				vec3 dD, dS;
 				directLight( sw, normalize( cellDirTo ), Vw, ms, dD, dS );
-				outDiff += dD * cellDirColor * M_PI;
-				outSpec += dS * cellDirColor * M_PI;
-				cE += cellDirColor * max( dot( sw.N, normalize( cellDirTo ) ), 0.0 );
+				vec3 sunC = cellDirColor * ( cellInterior ? 1.0 : airSunT );	// FOGSUN1: outdoors the sun through the air
+				outDiff += dD * sunC * M_PI;
+				outSpec += dS * sunC * M_PI;
+				cE += sunC * max( dot( sw.N, normalize( cellDirTo ) ), 0.0 );
 			}
 			// the material's cubemap, lit by the light reaching this point (a dark corner reflects dark)
 			// lane CUBE1: a legacy material takes the game's term (with its own specular map, CellSpecMap);

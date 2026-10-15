@@ -242,6 +242,9 @@ void wwCellLightsSetOn( bool on );
 bool wwCellLightsWanted( Scene * scene );
 //! the uniforms of the renderer's CURRENT program (a no-op for a program without `cellOn`)
 void wwCellLightsUniforms( Scene * scene );
+//! lane VOLAIR1: the uploaded light buffer as spheres (world x, y, z, radius per light, the buffer's order, copies
+//! included; cellLightCount of them), or null when it is not this scene's; valid after wwCellLightsUniforms
+const std::vector<float> * wwCellLightSpheres( Scene * scene );
 //! a harness probe pass (WW_CELL_LIT_PROBE or WW_CELL_FOG_PROBE) on a cell-lit scene: effect shapes are not drawn
 bool wwCellProbePass( Scene * scene );
 //! lane GICAL1: probe 80 (the albedo as drawn) on that pass -- it leaves out the second-pass shapes too (alpha

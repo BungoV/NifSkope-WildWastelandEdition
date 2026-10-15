@@ -253,6 +253,11 @@ bool Shape::wwAlphaTested() const
 	return alphaProperty && alphaProperty->hasAlphaTest();
 }
 
+float Shape::wwAlphaThreshold() const
+{
+	return alphaProperty ? float( alphaProperty->alphaThreshold ) : 0.0f;
+}
+
 Vector3 Shape::skinVertex( int vertexIndex, const Vector3 & local ) const
 {
 	Matrix4 m;

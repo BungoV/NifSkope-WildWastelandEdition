@@ -4147,7 +4147,10 @@ void GLView::paintGL()
 			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
 			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );	// lane CELLALL1
 			wwCellFarLodFrame( scene );	// lane FARLOD1: the far sway's uniforms; no GL call while off
+			if ( hdr )
+				wwVolAirSkyDraw( scene, false );	// lane VOLAIR1: the sky through the air, under the scene
 			scene->draw();
+			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)
 			if ( hdr ) {
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
 				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame

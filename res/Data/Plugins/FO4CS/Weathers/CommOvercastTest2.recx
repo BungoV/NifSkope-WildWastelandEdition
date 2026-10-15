@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "CommOvercastTest2",
+			"weather": "Fallout4.esm|0x001F2529",
+			"groundFog": {
+				"thickness": 387,
+				"strength": 0.69,
+				"hours": {
+					"2": {
+						"thickness": 568,
+						"strength": 2.45
+					},
+					"14": {
+						"thickness": 387,
+						"strength": 0.69
+					}
+				}
+			}
+		}
+	]
+}

@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "GoodneighborWeatherBase",
+			"weather": "Fallout4.esm|0x00115C64",
+			"groundFog": {
+				"thickness": 382,
+				"strength": 0.65,
+				"hours": {
+					"2": {
+						"thickness": 700,
+						"strength": 4.16
+					},
+					"14": {
+						"thickness": 382,
+						"strength": 0.65
+					}
+				}
+			}
+		}
+	]
+}

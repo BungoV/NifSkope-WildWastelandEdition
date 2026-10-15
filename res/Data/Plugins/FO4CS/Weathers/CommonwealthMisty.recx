@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthMisty",
+			"weather": "Fallout4.esm|0x001CC186",
+			"groundFog": {
+				"thickness": 721,
+				"strength": 4.48,
+				"hours": {
+					"2": {
+						"thickness": 804,
+						"strength": 5.97
+					},
+					"14": {
+						"thickness": 721,
+						"strength": 4.48
+					}
+				}
+			}
+		}
+	]
+}

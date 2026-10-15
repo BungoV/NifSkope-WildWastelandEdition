@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "TCommonwealthMarshOvercast",
+			"weather": "Fallout4.esm|0x0010F781",
+			"groundFog": {
+				"thickness": 635,
+				"strength": 3.26
+			}
+		}
+	]
+}

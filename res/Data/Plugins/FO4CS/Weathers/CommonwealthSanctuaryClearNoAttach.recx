@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthSanctuaryClearNoAttach",
+			"weather": "Fallout4.esm|0x00225922",
+			"groundFog": {
+				"thickness": 465,
+				"strength": 1.39,
+				"hours": {
+					"2": {
+						"thickness": 690,
+						"strength": 4.0
+					},
+					"14": {
+						"thickness": 465,
+						"strength": 1.39
+					}
+				}
+			}
+		}
+	]
+}
