@@ -9,6 +9,8 @@ BSD License - see nifskope.h
 
 #include <QString>
 
+#include <functional>
+
 class Scene;
 
 /*! VOLUMETRIC AIR (lane VOLAIR1, absorbs lane VOLFOG1's lit fog): ONE participating medium, "air", that both hides
@@ -71,14 +73,25 @@ QString wwVolAirSummary();
  *    soft   a ball round the sprite's plane against the opaque pass's depth: no hard line where it meets a surface
  *  The row "Volumetric Particles" (Scene window) ships OFF (QSettings WW/VolPart); the pin WW_CELL_VOLPART=0|1 wins.
  *  Off, the particles draw exactly as before. Gates only: WW_CELL_VOLPART_RED=flat | nothick | nosoft | nolights |
- *  white | nofog | noshadow (comma list), WW_CELL_VOLPART_DUMP=<file> (each lit system's per-particle probe, appended:
- *  glparticles.cpp), WW_CELL_VOLPART_HIDE=1 (no particle drawn: the gates' plate). */
+ *  white | nofog | noshadow | noedge |
+ *  nophase | nonear (comma list), WW_CELL_VOLPART_DUMP=<file> (each lit system's per-particle probe, appended:
+ *  glparticles.cpp), WW_CELL_VOLPART_HIDE=1 (no particle or volumetric card
+ *  drawn: the gates' plate). */
 bool wwVolPartOn();
 void wwVolPartSetOn( bool on );
 int wwVolPartRed();
 //! the uniforms of the renderer's CURRENT program (particles_cell.prog); true while on
 bool wwVolPartUniforms( Scene * scene );
 QString wwVolPartSummary();
+//! the effect card the renderer just set up (fo4_effectcell.prog, read by BSShape's draw): 0 not volumetric, else
+//! 1 a volumetric lit card | 2 its soft fade is on (drawn with no depth test: the fade is the occlusion)
+void wwVolPartFxSet( int flags );
+int wwVolPartFx();
+//! gates only: WW_CELL_VOLPART_HIDE=1, no volumetric particle or card drawn (the plate)
+bool wwVolPartHidden();
+//! gates only (WW_CELL_VOLPART_DUMP): a volumetric effect card's probe, drawn again by draw() with the CURRENT
+//! program (fo4_effectcell.prog); appended to the dump as system "fx:<name>"
+void wwVolPartFxDump( Scene * scene, const std::function<void()> & draw, int block, const QString & name );
 //! gates only: counts the air's pass calls (one a frame); the particle probe keeps the last frame's alone
 int wwVolAirFrameSerial();
 

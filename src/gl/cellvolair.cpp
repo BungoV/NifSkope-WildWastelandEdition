@@ -609,7 +609,7 @@ VpState & vps()
 		for ( const QByteArray & t : qgetenv( "WW_CELL_VOLPART_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
 			s.red |= r == "flat" ? 1 : r == "nothick" ? 2 : r == "nosoft" ? 4 : r == "nolights" ? 8 : r == "white" ? 16
-				: r == "nofog" ? 32 : r == "noshadow" ? 64 : 0;
+				: r == "nofog" ? 32 : r == "noshadow" ? 64 : r == "noedge" ? 128 : r == "nophase" ? 256 : r == "nonear" ? 512 : 0;
 		}
 	}
 	return s;
@@ -619,6 +619,27 @@ VpState & vps()
 bool wwVolPartOn()
 {
 	return vps().on;
+}
+
+namespace
+{
+int vpFxFlags = 0;	// the effect card being set up: 1 a volumetric card, 2 its soft fade on (depth ALWAYS)
+}
+
+void wwVolPartFxSet( int flags )
+{
+	vpFxFlags = flags;
+}
+
+int wwVolPartFx()
+{
+	return vpFxFlags;
+}
+
+bool wwVolPartHidden()
+{
+	static const bool hide = qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1;
+	return hide;
 }
 
 void wwVolPartSetOn( bool on )

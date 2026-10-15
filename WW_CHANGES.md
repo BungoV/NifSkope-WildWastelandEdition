@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLPART1 (2026-10-14/15, branch volpart1-20261014): Volumetric Particles, steam and fog cards lit as volumes
+
+- **Steam and fog in the cell view can be drawn as lit volumes instead of flat cards.** Scene window row "Volumetric
+  Particles" (ships OFF, `WW/VolPart`; pin `WW_CELL_VOLPART=0|1`). Goodneighbor's street steam is mostly effect
+  cards (MistGroundWaterSteam, MistLargeRoundDusty, the lamp beams), so both the particle systems and the lit effect
+  cards take the law. Each card or puff is lit at its own point from the same light list as the Volumetric Air: the
+  sun through its cascades, every placed light with its shadow, the probe GI and the sky ambient; tinted by each
+  light's colour; turned by its normal map (else the card's own normal); its alpha is its thickness (thin = single
+  scatter with the air's phase, thick = wrapped diffuse); and it is seen through the integrated froxel air.
+- Fake-volume features on the cards (`res/shaders/cell_volpart.glsl`, `fo4_effectshader.frag`): the edge-on fade
+  (opacity x smoothstep(0.05, 0.35, |N.V|)); the puff (the path through a ball: alpha 1 - (1 - a)^(1.5 sqrt(1 - r^2)),
+  thicker at the centre, thin at the rim); the phase backlight (the air's own three-lobe phase, so steam with a lamp
+  behind it glows); the near-camera fade (gone at 16 units, whole from 128); the soft slab (a card is a slab of its
+  soft depth, or 64 units, against the opaque depth, drawn with no depth test: no hard line where it meets the ground
+  or a wall).
+- Telemetry: `cell particles volumetric: ...` and `cell effects volumetric: volpart=on|off red=N soft=0|1` in the notes
+  whenever it changes.
+- Gate switches (environment only): `WW_CELL_VOLPART_RED=flat|nothick|nosoft|nolights|white|nofog|noshadow|noedge|
+  nophase|nonear`, `WW_CELL_VOLPART_HIDE=1` (no volumetric particle or card drawn), `WW_CELL_VOLPART_DUMP=<file>`
+  (probes per particle and per sampled card pixel, 13 slots).
+- Gates: `tests/spells/volpart1_cell.sh` + `volpart1_check.py`, rev1 (Foggy 18:00) and memden (Clear 22:00): a numpy
+  rebuild of the light law (A L T N K), the fog-over vs the integrated volume (F), the particle's light vs the air's at
+  its froxel (G), edge (V), puff (P), phase (H), near (M), soft slab (E), off == the exe before the lane (O); each red
+  fails its stage.
+- Not done (follow-up): the cards' density is not injected into the Volumetric Air's froxels (they do not shadow or
+  thicken the air around them).
+
 ## Lane VOLAIR1 (2026-10-13, branch volair1-20261013): Volumetric Air, one lit medium in the cell view
 
 - **The cell view can draw the air as one lit medium instead of the game's distance fog.** Scene window fold

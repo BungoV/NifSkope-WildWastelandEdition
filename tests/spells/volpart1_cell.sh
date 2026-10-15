@@ -12,18 +12,21 @@
 #            (WW_CELL_SHADOW=0, WW_LOOKDEV_SHADOWS=0): every probe rebuilt in numpy  + the particle and air dumps
 #   full     WW_CELL_VOLPART=1, every term, the shadows on (the shipped look on): the "after" picture + dumps
 #   nosoftp  full + WW_CELL_VOLPART_RED=nosoft (the plate the hard-edge stage compares)
-#   hide     WW_CELL_VOLPART_HIDE=1: no particle drawn (the plate the steam is measured against)
+#   hide     WW_CELL_VOLPART_HIDE=1: no volumetric particle or effect card drawn (the plate the steam is measured against)
 #   off      the row off (WW_CELL_VOLPART=0)        before / rung2   the exe from before the lane, twice
 # Then tests/spells/volpart1_check.py (its header says what each stage is).
 #
-# RED CONTROLS (rev1 only; each must FAIL its stage):
+# RED CONTROLS (rev1 only, where every stage's population is met; each must FAIL its stage):
 #   --red nolights  the placed lights put nothing on a puff        A L
 #   --red white     every light grey                                 T
 #   --red flat      every pixel faces the eye                        N
-#   --red nothick   alpha ignored (all single scatter)               K
+#   --red nothick   alpha ignored (all single scatter, no puff)      K P
 #   --red nofog     no air between the puff and the eye              F
 #   --red nosoft    no depth fade                                    E
-#   --red noshadow  the sun's cascades and the shadow cubes ignored  S
+#   --red noshadow  the sun's cascades and the shadow cubes ignored  G
+#   --red noedge    no edge-on fade                                  V
+#   --red nophase   the phase flat (isotropic)                       H A
+#   --red nonear    no near-camera fade                              M
 #
 # USAGE  bash tests/spells/volpart1_cell.sh [--red NAME]   RECHECK=1 judges again; CAMS="rev1" limits the cameras;
 #        a shot already there is kept (a run the memory guard stopped resumes), FRESH=1 shoots everything again
@@ -54,7 +57,7 @@ wipe_scope
 trap wipe_scope EXIT
 RED=""
 [ "${1:-}" = "--red" ] && RED="${2:-}"
-case "$RED" in ""|nolights|white|flat|nothick|nofog|nosoft|noshadow) ;; *) echo "unknown red: $RED"; exit 2 ;; esac
+case "$RED" in ""|nolights|white|flat|nothick|nofog|nosoft|noshadow|noedge|nophase|nonear) ;; *) echo "unknown red: $RED"; exit 2 ;; esac
 OUT="${OUT:-$NOTES/volpart1/gate${RED:+_red_$RED}}"
 GREEN="${GREEN:-$NOTES/volpart1/gate}"
 PORT="${PORT:-14941}"
@@ -111,6 +114,7 @@ shoot1() {	# shoot1 <exe> <cam> <tag> [env...]
 	rm -f "$run/${tag}"_[0-9][0-9][0-9].png
 	say "  $cam/$tag $([ -s "$run/$tag.png" ] && echo shot || echo NO-PICTURE) sky:$(grep -c 'lookdev sky: sky:dome' "$run/$tag.notes" 2>/dev/null)" \
 		"$(grep -o 'cell particles volumetric: .*' "$run/$tag.notes" | tail -1)" \
+		"$(grep -o 'cell effects volumetric: .*' "$run/$tag.notes" | tail -1)" \
 		"$(grep -ci 'errors during shader compilation' "$run/$tag.notes" 2>/dev/null) shader-errors  $(date +%T)"
 }
 shoot() {	# a floored window is refused by the exe (no picture): up to 3 tries
@@ -134,7 +138,7 @@ if [ "$RECHECK" != 1 ]; then
 	R=(); [ -n "$RED" ] && R=( WW_CELL_VOLPART_RED="$RED" )
 	for c in $CAMS; do
 		say "== $c"
-		case "$RED" in ""|nolights|white|flat|nothick|nofog)
+		case "$RED" in ""|nolights|white|flat|nothick|nofog|noedge|nophase|nonear)
 			shoot "$EXE" "$c" ana WW_CELL_VOLPART=1 WW_CELL_AIR_TERMS=3 "${NOSH[@]}" "${R[@]}" $(dumps "$c" ana) ;;
 		esac
 		case "$RED" in ""|nolights|noshadow|nosoft)
