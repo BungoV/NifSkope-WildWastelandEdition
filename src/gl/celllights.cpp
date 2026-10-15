@@ -187,7 +187,7 @@ ClState & st()
 			s.pass = 0;
 		for ( const QByteArray & r : qgetenv( "WW_CELL_PV_RED" ).split( ',' ) ) {
 			const QByteArray t = r.trimmed();
-			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : 0;   // lane ROOMCLAMP1: noclamp; lane GISHADE1: nosee; lane GIBLACK1: borrow; lane GIBLACK2: lendamb, strand
+			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : t == "firstslot" ? 256 : t == "tiepick" ? 512 : t == "lonesky" ? 1024 : 0;	// lane GIDARK1: firstslot, tiepick, lonesky   // lane ROOMCLAMP1: noclamp; lane GISHADE1: nosee; lane GIBLACK1: borrow; lane GIBLACK2: lendamb, strand
 		}
 	}
 	return s;
@@ -803,7 +803,7 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
 	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
 	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
-	prog->uni1i( "cellPassRed", s.passRed & 251 );	// lane ROOMCLAMP1: + 8 noclamp; lane GISHADE1: + 16 nosee; lane GIBLACK1: + 32 borrow; lane GIBLACK2: + 64 lendamb, 128 strand
+	prog->uni1i( "cellPassRed", s.passRed & ~4 );	// lane ROOMCLAMP1: + 8 noclamp; lane GISHADE1: + 16 nosee; lane GIBLACK1: + 32 borrow; lane GIBLACK2: + 64 lendamb, 128 strand
 	if ( giDraw ) {
 		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
 		prog->uni1f( "cellGiVoxel", G->voxel );
@@ -986,7 +986,24 @@ void wwCellLightsUniforms( Scene * scene )
 		static const bool fxColorRed = qgetenv( "WW_CELL_FXLIT_COLOR_RED" ).trimmed() == "sun";
 		const bool fxProg = prog->name == std::string_view( "fo4_effectcell.prog" )
 			|| prog->name == std::string_view( "particles_cell.prog" );
+		// lane GIDARK1: the decal programs keep the surfaces' sun and take the lit-effect base as cellFxBase (fxRoomLit)
+		const bool roomProg = wwIsCellDecalProgramName( prog->name );
 		float dalc[6][3];
+		if ( !L->interior && roomProg ) {
+			float base[3] = { 0.0f, 0.0f, 0.0f };
+			if ( !fxExtRed && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
+				float dif[4] = {}, amb[4] = {};
+				wwLookdevLight( dirTo, dif, amb );
+				float fxCol[3] = { dif[0], dif[1], dif[2] };
+				if ( !fxColorRed )
+					wwLookdevEffectLight( fxCol );
+				WwLookdevIs is;
+				const float fxScale = fxScaleRed ? ( wwLookdevImageSpace( is ) ? is.hdr[6] : 1.0f ) : sunScale;
+				for ( int c = 0; c < 3; c++ )
+					base[c] = std::max( fxCol[c], 0.0f ) * fxScale;
+			}
+			prog->uni3f( "cellFxBase", base[0], base[1], base[2] );
+		}
 		if ( !L->interior && fxProg && !fxExtRed && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
 			float dif[4] = {}, amb[4] = {};
 			wwLookdevLight( dirTo, dif, amb );

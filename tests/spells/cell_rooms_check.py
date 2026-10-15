@@ -40,6 +40,11 @@ the plugin is read here, every ray is traced here through the run's own soup.psp
         over), the rest no black (drawn < 0.01 where the tracer gives 0.03+) and no open-sky bright (drawn 0.5+
         where it gives under 0.25); set 1 (tight) the indoors rule only, mean within margin1. Red
         GI_CHECK_STRAND=1 (the shader's WW_CELL_PV_RED=strand: GIBLACK1's law) FAILS.
+  points <dump> <fixture> [--box x0,y0,x1,y1] [--maxx X] [--darkshare S] [--expect fail]
+        Lane GIDARK1: surfaces against the tracer's GI term (tests/fixtures/gidark1_*.tsv: px py x y z nx ny nz tracer).
+        recess2 (Goodneighbor, 22h): --darkshare 0.1; reds GI_CHECK_TIE=0 (tiepick) and GI_CHECK_BOTH=0 (firstslot)
+        FAIL. hinside corner (Concord Hardware, noon) --box 945,200,1055,410 --maxx 5; red GI_CHECK_LONE=0 (lonesky) FAILS.
+        hinside floor by the open front: --upshare 0.01 --minmed 0.5; the red dump (WW_CELL_GI_RED=noskyfloor) FAILS.
 One verdict line per subcommand last; exit 0 on PASS, 1 on FAIL.
 """
 import math
@@ -632,6 +637,9 @@ def gi_fill(G, L, P, N, rooms):
     return s / ws if ws > 0 else np.zeros(4)
 
 
+TIE_RED = [os.environ.get('GI_CHECK_TIE', '1') == '0']   # lane GIDARK1: red tiepick (WW_CELL_PV_RED=tiepick): a tie takes the answer nearer the plain trilinear (GIBLACK2)
+LONE_RED = [os.environ.get('GI_CHECK_LONE', '1') == '0']   # lane GIDARK1: red lonesky (WW_CELL_PV_RED=lonesky): a buried surface with only outdoor evidence takes the outdoor answer
+BOTH_RED = [os.environ.get('GI_CHECK_BOTH', '1') == '0']   # lane GIDARK1: red firstslot (WW_CELL_PV_RED=firstslot): a two-room read takes the voxel's first matching slot alone
 RED_EMPTY = [False]   # red emptyslot: the twin weighs a room's empty slots (the old shader: black, the no-probe marker)
 SEE_RED = [os.environ.get('GI_CHECK_SEE', '1') == '0']   # lane GISHADE1: red nosee (the shader's WW_CELL_PV_RED=nosee)
 GI_PLAIN = [0]     # samples that found rooms but no room with weight: the shader's plain (unclamped) trilinear
@@ -708,6 +716,16 @@ def strand_pick(G, R, P, N, i0, f, sl, n2):
     a, o = strand_evidence(R, P, N)
     if a is None and o is None:
         return None, 5
+    if a is None and not LONE_RED[0] and all(room_solid(R, P + N * k * R['cell']) for k in (0.75, 1.75, 2.75)):
+        # lane GIDARK1: buried three cells deep with only the outdoors in reach, the search may have gone round a
+        # building's corner (Concord Hardware's front pillar, 6.5x the tracer): the darker of the outdoor answer and
+        # the plain trilinear (the sealed dark blacked out Goodneighbor's recess walls)
+        vo, co = strand_answer(G, R, P, N, i0, f, sl, n2, o[1], o[2])
+        t, w = gi_blend(G, None, i0, f, sl, n2)
+        lum = lambda v: float(v[:3] @ (0.2126, 0.7152, 0.0722)) / max(float(v[3]), 1e-6)
+        if vo is not None and w > 0 and t[3] > 0 and lum(t) < lum(vo):
+            return t / w, 4
+        return vo, co
     if a is None or o is None:
         d, L, Ce = a if a is not None else o
         return strand_answer(G, R, P, N, i0, f, sl, n2, L, Ce)
@@ -725,6 +743,11 @@ def strand_pick(G, R, P, N, i0, f, sl, n2):
     ho, _ = strand_answer(H, R, P, N, i0, f, sl, n2, o[1], o[2])
     t, _ = gi_blend(H, None, i0, f, sl, n2)
     lum = lambda v: float(v[:3] @ (0.2126, 0.7152, 0.0722))
+    if not TIE_RED[0] and ho is not None:
+        # lane GIDARK1: a tie is the room grid saying it cannot tell the sides apart, and the plain trilinear reads the
+        # voxels' first slot only (the indoor room beside a doorway: Goodneighbor's recess2 took the sealed room's
+        # dark, 0.0001 where the tracer says 0.007-0.01): the mean of both answers
+        return 0.5 * (va + vo), 20
     if ho is None or abs(lum(ha) - lum(t)) <= abs(lum(ho) - lum(t)):
         return va, ca + 10
     return vo, co + 10
@@ -825,6 +848,14 @@ def gi_blend(G, L, i0, f, sl, n2, R=None, frm=None):
         if L is not None and not gi_seen(R, frm, G['origin'] + (c + 0.5) * G['voxel']):
             continue   # lane GISHADE1: a wall between the surface and the voxel's centre
         v = sum(n2[a] * src[sl[a], c[2], c[1], c[0]] for a in range(3))
+        if L is not None and not BOTH_RED[0] and L[0] >= 0 and L[1] >= 0 and L[0] != L[1] and S[0] in L and S[1] in L:
+            # lane GIDARK1: the read cell holds both rooms (an opening's cell: it sees both) and so does the voxel: the
+            # mean of both slots that hold light (the first slot alone left a recess beside a doorway on the dark room)
+            v2 = sum(n2[a] * G['g2'][sl[a], c[2], c[1], c[0]] for a in range(3))
+            if v[3] > 0 and v2[3] > 0:
+                v = 0.5 * (v + v2)
+            elif v2[3] > 0:
+                v = v2
         if L is not None and v[3] <= 0 and not RED_EMPTY[0]:
             continue   # lane ROOMCLAMP1: a slot no probe of its room reached (empty): no weight
         s += w * v
@@ -1256,6 +1287,54 @@ def strand_cmd(dump, fixture, margin, margin1, expect):
     return 0 if good else 1
 
 
+def points_cmd(dump, fixture, box, max_x, dark_share, expect, up_share=-1.0, min_med=0.0):
+    """Lane GIDARK1: surface points against the tracer's GI term, from a run's GI dump (WW_CELL_GI_DUMP). The drawn term
+    is what the shader composes on a lit surface: the grid (sky + bounce, store units) + pi x DALC(N) x (1 - k).
+    In the box (fixture px py; empty: every point): R the drawn mean is at most max_x times the tracer's mean (0: no
+    bar); D at most dark_share of the points draw under a tenth of their tracer value (no bar when dark_share < 0).
+    up_share >= 0: only up-facing points (N.z > 0.9) whose tracer sky share (fixture column 10) is at least that
+    (the floor the open front lights); M the median drawn/tracer ratio is at least min_med."""
+    G = read_grid(dump + '/gi_grid.bin', dump + '/gi_slots.bin')
+    R = read_rooms(dump + '/gi_rooms.bin')
+    amb = {int(l.split()[1]): np.array(list(map(float, l.split()[2:5]))) for l in open(dump + '/gi_sky.txt') if l.startswith('amb')}
+    F = np.loadtxt(fixture, comments='#')
+    Y = np.array([0.2125, 0.7154, 0.0721])
+    if box:
+        x0, y0, x1, y1 = box
+        F = F[(F[:, 0] >= x0) & (F[:, 0] < x1) & (F[:, 1] >= y0) & (F[:, 1] < y1)]
+    if up_share >= 0:
+        F = F[(F[:, 7] / np.linalg.norm(F[:, 5:8], axis=1) > 0.9) & (F[:, 9] >= up_share)]
+    drawn = []
+    for row in F:
+        P, N = row[2:5], row[5:8] / np.linalg.norm(row[5:8])
+        STRAND_LAST[0] = None
+        s = gi_sample(G, R, P, N, fill=False, sky=True)
+        k = float(np.clip(s[3], 0.0, 1.0))
+        dalc = sum(N[i] ** 2 * amb[2 * i + (0 if N[i] >= 0 else 1)] for i in range(3))
+        drawn.append(float((s[:3] + np.pi * dalc * (1.0 - k)) @ Y))
+    drawn, tr = np.array(drawn), F[:, 8]
+    x = drawn.mean() / max(tr.mean(), 1e-9)
+    dark = int((drawn < 0.1 * tr).sum())
+    okR = max_x <= 0 or x <= max_x
+    okD = dark_share < 0 or dark <= dark_share * len(F)
+    print('R  %d points: tracer %.4f drawn %.4f (x%.2f, bar %s) median ratio %.2f: %s'
+          % (len(F), tr.mean(), drawn.mean(), x, ('<= %.2f' % max_x) if max_x > 0 else 'none',
+             float(np.median(drawn / np.maximum(tr, 1e-9))), 'ok' if okR else 'OVER'))
+    print('D  under a tenth of the tracer: %d (%.1f%%, bar %s): %s'
+          % (dark, 100.0 * dark / max(len(F), 1), ('%.0f%%' % (100 * dark_share)) if dark_share >= 0 else 'none',
+             'ok' if okD else 'DARK'))
+    med = float(np.median(drawn / np.maximum(tr, 1e-9)))
+    okM = min_med <= 0 or med >= min_med
+    if min_med > 0:
+        print('M  median drawn/tracer %.2f (bar >= %.2f), under half the tracer %d: %s' % (med, min_med, int((drawn < 0.5 * tr).sum()), 'ok' if okM else 'LOW'))
+    good = okR and okD and okM
+    if expect == 'fail':
+        print('%s  points (red): %s' % ('PASS' if not good else 'FAIL', 'the old law misses the bar' if not good else 'the red passes the bar'))
+        return 0 if not good else 1
+    print('%s  points: the surfaces draw their measured GI' % ('PASS' if good else 'FAIL'))
+    return 0 if good else 1
+
+
 if __name__ == '__main__':
     a = sys.argv[1:]
     opt = (lambda k, d='': a[a.index(k) + 1] if k in a else d)
@@ -1269,6 +1348,11 @@ if __name__ == '__main__':
         sys.exit(back_cmd(a[1], opt('--ref'), int(opt('--sample', '24'))))
     if a and a[0] == 'strand':
         sys.exit(strand_cmd(a[1], a[2], float(opt('--margin', '0.03')), float(opt('--margin1', '0.05')), opt('--expect', 'pass')))
+    if a and a[0] == 'points':
+        bx = opt('--box')
+        sys.exit(points_cmd(a[1], a[2], [float(v) for v in bx.split(',')] if bx else None, float(opt('--maxx', '0')),
+                            float(opt('--darkshare', '-1')), opt('--expect', 'pass'), float(opt('--upshare', '-1')),
+                            float(opt('--minmed', '0'))))
     if a and a[0] == 'recess':
         sys.exit(recess_cmd(a[1], a[2], float(opt('--lo', '0.5')), float(opt('--hi', '2.0')), opt('--expect', 'pass')))
     print(__doc__)
