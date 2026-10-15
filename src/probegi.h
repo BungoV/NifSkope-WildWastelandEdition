@@ -56,6 +56,18 @@ struct ProbeGiResult
 	 *  (voxelsEye), within twice it (voxelsFar); the mean of valid neighbours, two rings (voxelsGrown); still
 	 *  none (voxelsBare). Red "noeye": the old hole. */
 	int voxelsEye = 0, voxelsFar = 0, voxelsGrown = 0, voxelsBare = 0;
+	/*! lane GIDARK1: outdoor (room 0) slots still empty after the grow rings (past the probed rect, where no outdoor
+	 *  probe stands), lit by the sky their eye sees (8 octants x 32 rays): slot 0 / slot 1, the mean sky share, and
+	 *  "on" / "red noedge" / "recording: left empty" */
+	int edgeSky0 = 0, edgeSky1 = 0;
+	double edgeSkyShare = 0.0;
+	QString edgeSkyNote;
+	/*! lane GIDARK1: the own-sky floor. An outdoor (room 0) slot the probes did fill still reads at least the sky its
+	 *  eye sees, per axis (the grid blends only the probes of its room, and a voxel just inside a shop's open front
+	 *  holds the dark interior probes while its eye sees the street's sky): slots looked at, slots raised, axes raised,
+	 *  and "on" / "red noskyfloor" / "recording: left as blended" */
+	int skyFloorSlots = 0, skyFloorRaised = 0, skyFloorAxes = 0;
+	QString skyFloorNote;
 	/*! lane ROOMCLAMP1 (src/proberooms.h): the rooms. Each near voxel keeps two slots, the two rooms the surfaces
 	 *  reading it stand in most; a slot gathers only the probes of its room, from the voxel's centre when the
 	 *  centre is in that room, else from the slot's eye. grid / gridSky then hold slot 0 and grid2 / gridSky2

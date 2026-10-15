@@ -1613,6 +1613,152 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		if ( REC && ring == 0 )
 			REC->growRing0 = int( REC->growSlot.size() );
 	}
+	/* lane GIDARK1: an outdoor (room 0) slot that neither its centre, its eye, twice the radius nor the grow rings gave a
+	 * probe stands where no outdoor probe was placed: past the probed rect (the grid box reaches a radius and five
+	 * voxels beyond it), the strip of street behind the last row of buildings. Left empty it reads 0, and a surface
+	 * there takes the indoor room's slot or the plain trilinear: black (Goodneighbor south edge, 22h: 0.005 of the
+	 * full tracer). It takes what a probe at its eye would hold of the sky instead: 8 octants x 32 rays from the eye,
+	 * a ray that meets nothing within the bake's reach is sky, the share per octant through probeSkyCube, the same law
+	 * as a probe's sky arm. Its bounce is not known (no links): sky only, the low side of the tracer. Exterior sky only;
+	 * a recording relight leaves them empty (its operators have no such slot). Red WW_CELL_GI_RED=noedge: left empty. */
+	if ( skyOn && R.roomsOn ) {
+		if ( spec.red == QLatin1String( "noedge" ) )
+			R.edgeSkyNote = QStringLiteral( "red noedge: left empty" );
+		else if ( REC )
+			R.edgeSkyNote = QStringLiteral( "recording: left empty" );
+		else {
+			R.edgeSkyNote = QStringLiteral( "on" );
+			// 256 directions, a Fibonacci sphere, by the bake's octant (bit 0 x < 0, bit 1 y < 0, bit 2 z < 0)
+			constexpr int kDirs = 256;
+			double dirs[kDirs][3];
+			int dirOct[kDirs], octN[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+			const double ga = 3.14159265358979323846 * ( 3.0 - std::sqrt( 5.0 ) );
+			for ( int k = 0; k < kDirs; k++ ) {
+				const double zz = 1.0 - ( k + 0.5 ) * 2.0 / kDirs, rr = std::sqrt( std::max( 0.0, 1.0 - zz * zz ) );
+				dirs[k][0] = std::cos( ga * k ) * rr;
+				dirs[k][1] = std::sin( ga * k ) * rr;
+				dirs[k][2] = zz;
+				dirOct[k] = ( dirs[k][0] < 0.0 ? 1 : 0 ) | ( dirs[k][1] < 0.0 ? 2 : 0 ) | ( dirs[k][2] < 0.0 ? 4 : 0 );
+				octN[dirOct[k]]++;
+			}
+			/* the own-sky floor (lane GIDARK1, Concord Hardware's open front at noon): a filled outdoor slot keeps the
+			 * probes' blend, but no axis reads below the sky its eye sees (the same 256 rays and law). The grid blends
+			 * only the probes of the slot's room; a voxel just inside a shop's open front holds the shop's dark
+			 * interior probes (the street's probes stand outside its blend) while its eye sees the street: the floor
+			 * within 2 m of the front read 0.12-0.4 of the full tracer. Red WW_CELL_GI_RED=noskyfloor: the blend alone. */
+			const bool floorOn = spec.red != QLatin1String( "noskyfloor" );
+			R.skyFloorNote = floorOn ? QStringLiteral( "on" ) : QStringLiteral( "red noskyfloor: the blend alone" );
+			struct ES { size_t i; int slot; bool bare; };
+			std::vector<ES> edge;
+			for ( size_t i : todo )
+				for ( int slot = 0; slot < 2; slot++ ) {
+					const int si = slotOf[i][size_t( slot )];
+					if ( si < 0 || vs[i].lab[si] != 0 )
+						continue;
+					const std::vector<float> & G0 = slot == 0 ? R.grid : R.grid2;
+					if ( G0[i * 4 + 3] <= 0.0f )
+						edge.push_back( { i, slot, true } );
+					else if ( floorOn )
+						edge.push_back( { i, slot, false } );
+				}
+			std::vector<double> shareOf( edge.size(), 0.0 );
+			std::vector<int> raisedOf( edge.size(), 0 );
+			parallelFor( edge.size(), [&]( size_t k ) {
+				const ES & e = edge[k];
+				const VS & V = vs[e.i];
+				const int si = slotOf[e.i][size_t( e.slot )];
+				const double o[3] = { double( V.eye[si][0] ) - O[0], double( V.eye[si][1] ) - O[1], double( V.eye[si][2] ) };
+				int open[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+				for ( int d = 0; d < kDirs; d++ ) {
+					double tHit;
+					if ( !bvh.ray( o, dirs[d], 131072.0, &tHit ) )
+						open[dirOct[d]]++;
+				}
+				float vis[8];
+				double vsum = 0.0;
+				for ( int q = 0; q < 8; q++ ) {
+					vis[q] = octN[q] > 0 ? float( double( open[q] ) / octN[q] ) : 0.0f;
+					vsum += vis[q];
+				}
+				shareOf[k] = vsum / 8.0;
+				double S[6][3] = {};
+				probeSkyCube( vis, nullptr, spec.sky, redSkyNoVis, redSkyNoTint, S );
+				std::vector<float> & G = e.slot == 0 ? R.grid : R.grid2;
+				std::vector<float> & GS = e.slot == 0 ? R.gridSky : R.gridSky2;
+				if ( !e.bare ) {	// the own-sky floor: raise only the axes whose blend reads below the eye's sky
+					std::vector<float> & GF = e.slot == 0 ? R.gridFree : R.gridFree2;
+					int raised = 0;
+					for ( int a = 0; a < 6; a++ ) {
+						const size_t ox = ( size_t( a ) * nVox + e.i ) * 4;
+						const double lS = 0.2125 * S[a][0] + 0.7154 * S[a][1] + 0.0721 * S[a][2];
+						const double lG = 0.2125 * G[ox] + 0.7154 * G[ox + 1] + 0.0721 * G[ox + 2];
+						if ( !( lS > lG ) )
+							continue;
+						raised++;
+						const int bit = 1 << ( a / 2 ), want = ( a & 1 ) ? bit : 0;
+						double sh = 0.0;
+						for ( int q = 0; q < 8; q++ )
+							if ( ( q & bit ) == want )
+								sh += double( vis[q] );
+						for ( int ch = 0; ch < 3; ch++ )
+							G[ox + size_t( ch )] = float( S[a][ch] );
+						const float s = float( std::min( std::max( sh * 0.25, 0.0 ), 1.0 ) ) * GS[ox + 3];
+						for ( int ch = 0; ch < 3; ch++ )
+							GS[ox + size_t( ch )] = std::max( GS[ox + size_t( ch )], s );
+						if ( aoOn )
+							for ( int ch = 0; ch < 3; ch++ )
+								GF[ox + size_t( ch )] = std::max( GF[ox + size_t( ch )], float( S[a][ch] ) );
+					}
+					raisedOf[k] = raised;
+					return;
+				}
+				for ( int a = 0; a < 6; a++ ) {
+					const int bit = 1 << ( a / 2 ), want = ( a & 1 ) ? bit : 0;
+					double sh = 0.0;
+					for ( int q = 0; q < 8; q++ )
+						if ( ( q & bit ) == want )
+							sh += double( vis[q] );
+					const size_t ox = ( size_t( a ) * nVox + e.i ) * 4;
+					for ( int ch = 0; ch < 3; ch++ )
+						G[ox + size_t( ch )] = float( S[a][ch] );
+					G[ox + 3] = 1.0f;
+					GS[ox] = GS[ox + 1] = GS[ox + 2] = float( std::min( std::max( sh * 0.25, 0.0 ), 1.0 ) );
+					GS[ox + 3] = 1.0f;
+				}
+				if ( aoOn ) {
+					std::vector<float> & GF = e.slot == 0 ? R.gridFree : R.gridFree2;
+					for ( int a = 0; a < 6; a++ ) {
+						const size_t ox = ( size_t( a ) * nVox + e.i ) * 4;
+						for ( int ch = 0; ch < 3; ch++ )
+							GF[ox + size_t( ch )] = float( S[a][ch] );
+						GF[ox + 3] = 1.0f;
+					}
+				}
+			} );
+			double shSum = 0.0;
+			size_t nEdge = 0;
+			for ( size_t k = 0; k < edge.size(); k++ ) {
+				if ( !edge[k].bare ) {
+					R.skyFloorSlots++;
+					R.skyFloorAxes += raisedOf[k];
+					if ( raisedOf[k] > 0 )
+						R.skyFloorRaised++;
+					continue;
+				}
+				nEdge++;
+				shSum += shareOf[k];
+				if ( edge[k].slot == 0 ) {
+					R.edgeSky0++;
+					R.voxelsValid++;
+					nBare--;
+				} else {
+					R.edgeSky1++;
+					nTwoBare--;
+				}
+			}
+			R.edgeSkyShare = nEdge == 0 ? 0.0 : shSum / double( nEdge );
+		}
+	}
 	R.voxelsBare = nBare;
 	R.voxelsTwoBare = nTwoBare;
 	R.msGrid = clock.nsecsElapsed() / 1e6 - R.msLight - R.msGather - R.msBounce;
@@ -1871,6 +2017,12 @@ QString probeGiCensusText( const ProbeGiResult & r )
 		+ QStringLiteral( "\n  gi grid: voxels blocked at their centre filled from their eye: within the radius %1, "
 			"within twice it %2; from valid neighbours %3; left empty %4" ).arg( r.voxelsEye ).arg( r.voxelsFar )
 			.arg( r.voxelsGrown ).arg( r.voxelsBare )   // lane ROOMCLAMP1
+		+ ( r.skyLit ? QStringLiteral( "\n  gi edge: outdoor slots no probe reached, lit by the sky their eye sees %1 "
+			"(slot 0 %2, slot 1 %3; mean sky share %4; %5)" ).arg( r.edgeSky0 + r.edgeSky1 ).arg( r.edgeSky0 ).arg( r.edgeSky1 )
+			.arg( r.edgeSkyShare, 0, 'f', 3 ).arg( r.edgeSkyNote ) : QString() )   // lane GIDARK1
+		+ ( r.skyLit ? QStringLiteral( "\n  gi sky floor: outdoor slots held at least at the sky their eye sees: looked at %1, "
+			"raised %2 (axes %3; %4)" ).arg( r.skyFloorSlots ).arg( r.skyFloorRaised ).arg( r.skyFloorAxes )
+			.arg( r.skyFloorNote.isEmpty() ? QStringLiteral( "off" ) : r.skyFloorNote ) : QString() )   // lane GIDARK1
 		+ QStringLiteral( "\n  " ) + ( r.roomsOn ? probeRoomsCensusText( r.rooms )
 			+ QStringLiteral( "\n  gi rooms: voxels with a second room %1 (left empty %2), slots gathered from their eye "
 				"(the centre in another room) %3, probes in no room %4" ).arg( r.voxelsTwoRooms ).arg( r.voxelsTwoBare )

@@ -81,6 +81,11 @@ uniform int fxRed;				// 2 nosoft, 4 nolin, 8 hide
 // lane DECALLIT1 (WW_CELL_DECALLIT_PROBE, gates only): an effect decal in a probe pass draws a white colour, opaque
 // where it shows, so probe 6 holds the light it takes (lit as the wall, or self-lit under the red)
 uniform bool fxDecalProbe;
+// lane GIDARK1: a lit effect outdoors drawn by this program (fo4_effectdecal / csm) takes the light of the spot it
+// stands in (fxRoomLitMul); cellFxBase = the game's lit-effect base (the weather's Effect Lighting x the sun scale)
+uniform bool fxRoomLit;
+uniform vec3 cellFxBase;
+vec3 fxRoomShare = vec3( 1.0 );	// probe 75
 // lane FXLIT1: this shape's model's placed lights (src/gl/cellfxlit.h)
 uniform int fxLitMode;			// 0 an unlit effect; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
 uniform vec4 fxLit;				// indices into cellLights, -1 = none
@@ -176,6 +181,39 @@ vec3 fxDecalLin( vec3 albedo, vec3 normal )
 	vec3 lit = cellLit( color, albedo, normal, Pv, Vv, 0.0, vec3( 0.0 ), 1.0, 0.0, vec3( 0.0 ), vec3( 0.0 ) );
 	lit *= sqrt( cellAoFactor() );
 	return lit * lit;
+}
+
+/* lane GIDARK1 (Concord Hardware's counter at noon): the game's lit effect outdoors takes the weather's Effect Lighting x
+ * the sun scale as its base, with no shadow and no ambient (cellFxLit), so a glass lens deep inside a shop shone as it
+ * would in the open street while the room around it read six times darker. Here that base is scaled by the share of
+ * the open-air light that reaches the spot, taken the way a white surface there takes it (the same terms as cellLit's
+ * exterior branch, Lambert only):
+ *   ( sun x N.L x the cascades' shadow + the weather's ambient x ( 1 - k ) + the probe GI ) / ( sun x N.L + the weather's ambient )
+ * Under open sky that is about 1 (the game's base); in a shaded room it follows the room: GI on or off, day or night.
+ * The model's placed lights add as before. Red WW_CELL_FXROOM_RED=game draws the game's base (fo4_effectcell). */
+vec3 fxRoomLitMul( vec3 Pv, vec3 normal )
+{
+	if ( ( fxLitMode & 8 ) != 0 || !cellHasDir )
+		return vec3( 1.0 );
+	vec3 Pw = cellWorldPos( Pv );
+	vec3 Nw = cellWorldDir( normal );
+	float nl = max( dot( Nw, normalize( cellDirTo ) ), 0.0 );
+	vec3 amb = cellExtDalc ? cellAmbient( Nw, Pw ) : A.rgb * A.rgb;
+	float k = cellGiSkyK( Pw, Nw );
+	vec3 gi = cellGiOn ? cellGiE( Pw, Nw ) * 0.31830989 : vec3( 0.0 );
+	vec3 open = cellDirColor * nl + amb;
+	vec3 here = cellDirColor * nl * cellDirVis + amb * ( 1.0 - k ) + gi;
+	fxRoomShare = clamp( here / max( open, vec3( 1e-5 ) ), vec3( 0.0 ), vec3( 4.0 ) );
+	vec3 E = cellFxBase * fxRoomShare;
+	if ( ( fxLitMode & 2 ) != 0 ) {
+		for ( int i = 0; i < cellLightCount; i++ )
+			E += cellFxLight( i, Pw );
+	} else {
+		for ( int j = 0; j < 4; j++ )
+			if ( fxLit[j] > -0.5 )
+				E += cellFxLight( int( fxLit[j] + 0.5 ), Pw ) * fxLitScale[j];
+	}
+	return mix( vec3( 1.0 ), E, lightingInfluence );
 }
 #endif
 #endif
@@ -293,6 +331,39 @@ void main()
 	}
 
 #ifdef WW_FX_DECALLIT
+	if ( cellOn && fxRoomLit ) {	// lane GIDARK1: a lit effect outdoors, lit by the spot it stands in (fxRoomLitMul)
+		vec3 lin = ( fxRed & 4 ) != 0 ? max( color.rgb, vec3( 0.0 ) ) : pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
+		vec3 Ng = normalize( btnMatrix[2] );	// the face the eye sees
+		if ( !gl_FrontFacing )
+			Ng = -Ng;
+#ifdef WW_SUNSHADOW
+		cellDirVis = wwSunShadow( -ViewDir );
+#endif
+		vec3 m = fxRoomLitMul( -ViewDir, Ng );
+		if ( cellProbe >= 70 && cellProbe <= 75 ) {
+			// FXLIT1's probes (70 the model, 71 / 72 the position, 73 / 74 the multiplier / 4) and 75: the room share / 4
+			vec3 P = cellWorldPos( -ViewDir );
+			vec3 v = cellProbe == 75 ? fxRoomShare : m;
+			vec3 q = cellProbe >= 73 ? floor( clamp( v * 0.25, 0.0, 1.0 ) * 65535.0 + 0.5 )
+				: clamp( floor( P - cellCenter + 32768.0 ), 0.0, 65535.0 );
+			bool high = cellProbe == 71 || cellProbe == 73 || cellProbe == 75;
+			fragColor = vec4( cellProbe == 70 ? fxLitId : high ? floor( q / 256.0 ) / 255.0 : mod( q, 256.0 ) / 255.0, 1.0 );
+			return;
+		}
+		lin *= m;
+		if ( fogOn ) {
+			vec3 posView = -ViewDir;
+			float hb;
+			vec3 fogCol;
+			float f = wwFogEval( length( posView ) * fogDistScale, dot( fogView.xyz, posView ) + fogView.w, hb, fogCol );
+			lin = fxAdditive ? lin * ( 1.0 - f ) : mix( lin, fogCol, f );
+		}
+		if ( cellProbe == 6 )
+			fragColor = vec4( lin * cellProbeGain, color.a );
+		else
+			fragColor = vec4( cellIsLinear ? lin : cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, vec3( 1.0 / 2.2 ) ), color.a );
+		return;
+	}
 	if ( cellOn ) {
 		vec3 alb = max( color.rgb, vec3( 0.0 ) );
 		if ( fxDecalProbe ) {

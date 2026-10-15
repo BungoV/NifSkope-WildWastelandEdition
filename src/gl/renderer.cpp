@@ -446,8 +446,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		if ( p->name == std::string_view( "fo4_effectshader.prog" ) || p->name == std::string_view( "fo4_effectcell.prog" )
 			|| wwIsCellDecalProgramName( p->name ) ) {
 			const bool cellFx = wwCellLightsWanted( mesh->scene ) && !( wwCellFxRed() & 1 );
+			/* lane GIDARK1: an exterior's lit effect takes the same program, lit by the spot it stands in (fxRoomLit) */
+			const bool roomLit = cellFx && !mesh->effectDecal && wwCellFxRoomLit( mesh->scene, mesh->id() );
 			const char * want = !cellFx ? "fo4_effectshader.prog"
-				: ( mesh->effectDecal && !wwCellDecalLitRed() )
+				: ( ( mesh->effectDecal && !wwCellDecalLitRed() ) || roomLit )
 					? ( wwSunShadowWanted( mesh->scene ) ? "fo4_effectdecalcsm.prog" : "fo4_effectdecal.prog" )
 				: "fo4_effectcell.prog";
 			if ( p->name == std::string_view( want ) )
@@ -1967,6 +1969,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		prog->uni1b( "fxAdditive", glIsEnabled( GL_BLEND ) && dst == GL_ONE );
 		if ( prog->uniLocation( "fxDecalProbe" ) >= 0 )	// lane DECALLIT1: the gate's light probe
 			prog->uni1b( "fxDecalProbe", wwCellDecalLitProbe() && mesh->effectDecal && wwCellProbePass( scene ) );
+		if ( prog->uniLocation( "fxRoomLit" ) >= 0 )	// lane GIDARK1: an exterior's lit effect, lit by its spot
+			prog->uni1b( "fxRoomLit", !mesh->effectDecal && wwCellFxRoomLit( scene, mesh->id() ) );
 		if ( wwCellFxLitProbeShape( scene, mesh->id() ) ) {
 			// lane FXLIT1: its probes write the lit effects opaque, the nearest card winning: layered cards drawn
 			// without a depth write leave the last one drawn, which differed between the five probe runs
