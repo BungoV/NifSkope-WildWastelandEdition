@@ -3,7 +3,7 @@
 # THE PROBES' SKY FROM THE SKY THE VIEW DRAWS (lane SKYPIC1, 2026-10-11; src/probesky.h, PRTP_PLAN 2as, deck C9).
 #
 # SKY1 gave each probe the weather's six ambient colours, weighed by what of the sky each octant sees. With
-# WW_CELL_SKYPIC=1 (ships OFF) the view captures the sky it draws (the Lookdev dome, the stars, the cloud layers;
+# WW_CELL_SKYPIC (default ON since 10-15; =0 off) the view captures the sky it draws (the Lookdev dome, the stars, the cloud layers;
 # not the sun, the moon or the glare: those are the sun term) as light into six float faces, and each probe's sky
 # on an axis becomes sum over octants of (visibility x tint x that octant's drawn light x cosine x solid angle).
 #
@@ -104,7 +104,7 @@ for cell in $CELLS; do
 			WW_CELL_GI_DUMP="$(winpath "$run/dump")")"
 		grep -h "  gi: \|gi sky\|interior" "$run/lit.notes" | head -4 | cut -c1-300 | tee -a "$LOG"
 		say "== $cell: off against the rung"
-		o1="$(PITCH=${TILT[$cell]} shoot $cell off "$cam" "${from[@]}" WW_CELL_GI_DUMP="$(winpath "$run/dump_off")")"
+		o1="$(PITCH=${TILT[$cell]} shoot $cell off "$cam" "${from[@]}" WW_CELL_SKYPIC=0 WW_CELL_GI_DUMP="$(winpath "$run/dump_off")")"
 		o2="$(XE="$RUNG" PITCH=${TILT[$cell]} shoot $cell rung "$cam" "${from[@]}" WW_CELL_GI_DUMP="$(winpath "$run/dump_rung")")"
 		check "$cell: both relit and shot" "$([ "$o1$o2" = 11 ] && echo 1 || echo 0)"
 		same=1; n=0
@@ -132,7 +132,7 @@ for cell in $CELLS; do
 		say "== $cell: the known-answer control (one colour)"
 		f1="$(PITCH=${TILT[$cell]} shoot $cell flat_on "$cam" "${from[@]}" WW_CELL_SKYPIC=1 WW_CELL_SKYPIC_FLAT=0.3,0.45,0.6 \
 			WW_CELL_GI_DUMP="$(winpath "$run/dump_flat_on")")"
-		f2="$(PITCH=${TILT[$cell]} shoot $cell flat_off "$cam" "${from[@]}" WW_CELL_SKYPIC_FLAT=0.3,0.45,0.6 \
+		f2="$(PITCH=${TILT[$cell]} shoot $cell flat_off "$cam" "${from[@]}" WW_CELL_SKYPIC=0 WW_CELL_SKYPIC_FLAT=0.3,0.45,0.6 \
 			WW_CELL_GI_DUMP="$(winpath "$run/dump_flat_off")")"
 		check "$cell: both flat runs shot" "$([ "$f1$f2" = 11 ] && echo 1 || echo 0)"
 		grep -h "gi skypic:" "$run/flat_on.notes" | cut -c1-300 | tee -a "$LOG"
@@ -163,7 +163,7 @@ for cell in $CELLS; do
 		say "== $cell: pictures (the full sky rows on)"
 		for h in 12 $DUSK; do
 			for arm in before after; do
-				sw=(); [ $arm = after ] && sw=( WW_CELL_SKYPIC=1 )
+				sw=( WW_CELL_SKYPIC=0 ); [ $arm = after ] && sw=( WW_CELL_SKYPIC=1 )
 				PITCH=${TILT[$cell]} shoot $cell pic_${h}_$arm "$cam" "${from[@]}" "${sw[@]}" WW_LOOKDEV_HOUR=$h \
 					WW_LOOKDEV_SUN=1 WW_LOOKDEV_MOON=1 WW_LOOKDEV_SHADOWS=1 > /dev/null
 			done

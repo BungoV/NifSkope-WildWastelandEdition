@@ -27173,3 +27173,5 @@ _Known gaps / backlog: see `TO_BE_IMPLEMENTED.md`._
 - The three viewport shading icons are consolidated into one dropdown with
   Flat, Solid, Shaded, and Normal + Spec/Gloss modes; the diagnostic mode
   removes diffuse colour while retaining authored normal and gloss response.
+## 2026-10-15: SKYPIC1 on by default (bungo)
+- The probes' sky now comes from the sky the view draws (dome, stars, clouds) per direction, not the weather's flat ambient. WW_CELL_SKYPIC=0 restores the flat sky (SKY1). tests/spells/cell_skypic.sh pins its off arms with WW_CELL_SKYPIC=0.
