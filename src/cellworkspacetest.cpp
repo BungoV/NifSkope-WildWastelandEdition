@@ -187,8 +187,8 @@ bool runPrtpStage( NifSkope * skope, int stage )
 		QStringList items;
 		for ( QAction * a : pass ? pass->actions() : QList<QAction *>() )
 			items << a->text();
-		add( "PRTP: the Pass drop-down holds Combined, GI, Sky visibility, Surfel color, Surfel light, Brick light",
-			items == QStringList{ "Combined", "GI", "Sky visibility", "Surfel color", "Surfel light", "Brick light" }, items.join( QLatin1Char( '|' ) ) );
+		add( "PRTP: the Pass drop-down holds Combined, GI, Sky visibility, Surfel color, Surfel light, Brick light, Probe coverage",
+			items == QStringList{ "Combined", "GI", "Sky visibility", "Surfel color", "Surfel light", "Brick light", "Probe coverage" }, items.join( QLatin1Char( '|' ) ) );
 		add( "PRTP: Pass is off before a bake", pass && !pass->isEnabled() );
 		add( "PRTP: no kind rows before Place", panel->probeKindRows().isEmpty(),
 			panel->probeKindRows().join( QLatin1Char( '|' ) ) );

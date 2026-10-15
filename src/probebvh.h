@@ -233,6 +233,41 @@ struct Bvh
 			*triOut = hitTri;
 		return hit;
 	}
+
+	/* lane WALLSTACK1: is any triangle hit at a distance in [tLo, tHi] along the unit direction (alpha-test holes
+	 * pass, as in ray) one that `pick` accepts? ray() keeps one of several faces at the same distance (back to back
+	 * walls: a shell's back and a room's face on one plane), whichever the tree visits last; a rule that reads the
+	 * face's side asks this instead. */
+	template<class Pick> bool anyHitIn( const double o[3], const double d[3], double tLo, double tHi, Pick pick ) const
+	{
+		if ( nodes.empty() )
+			return false;
+		double inv[3];
+		for ( int k = 0; k < 3; k++ )
+			inv[k] = std::fabs( d[k] ) > 1e-300 ? 1.0 / d[k] : 0.0;
+		const bool useMask = mask && !mask->empty();
+		int stack[128];
+		int sp = 0;
+		stack[sp++] = 0;
+		while ( sp ) {
+			const Node & nd = nodes[size_t( stack[--sp] )];
+			if ( !slab( nd, o, inv, tHi ) )
+				continue;
+			if ( nd.left < 0 ) {
+				for ( int i = nd.first; i < nd.first + nd.count; i++ ) {
+					double tt, bu, bv;
+					const int k = idx[size_t( i )];
+					if ( tri( &t[size_t( k ) * 9], o, d, tt, bu, bv ) && tt > 1e-4 && tt >= tLo && tt <= tHi
+						&& !( useMask && mask->hole( k, bu, bv ) ) && pick( k ) )
+						return true;
+				}
+			} else if ( sp < 126 ) {
+				stack[sp++] = nd.first;
+				stack[sp++] = nd.left;
+			}
+		}
+		return false;
+	}
 };
 
 } // namespace probebvh

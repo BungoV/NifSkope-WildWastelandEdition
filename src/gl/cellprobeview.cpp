@@ -119,7 +119,7 @@ void wwCellProbeViewDraw( Scene * scene, const Transform & viewTrans )
 	std::vector<FloatVector4> tc;
 	size_t tiles = 0, boxes = 0;
 	// the surfels, as tiles a hair off their surface
-	if ( pass >= 3 ) {
+	if ( pass >= 3 && pass <= 5 ) {	// lane WALLSTACK1: 6 (Probe coverage) draws no surfels
 		// a splat 0.6 of the surfel cell: the surfels read apart, and a curved surface keeps few cards in the air
 		const float h = v->surfelCell * 0.3f;
 		// WW_CELL_PV_ID=1: each tile carries its surfel's index + 1 as 24-bit color (the gate's exact map)

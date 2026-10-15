@@ -200,6 +200,9 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 	const bool redWall = spec.red == QLatin1String( "wall" );
 	const bool redAp = spec.red == QLatin1String( "aperture" );
 	const bool redFrames = spec.red == QLatin1String( "frames" );
+	const bool redWallCap = spec.red == QLatin1String( "wallcap" );   // lane WALLSTACK1
+	const bool redBuried = spec.red == QLatin1String( "buried" );
+	const int maxLevels = spec.red == QLatin1String( "levels" ) ? 6 : spec.maxLevels;
 
 	// local origin: the rect's center, z 0
 	const double O[3] = { 0.5 * ( double( spec.minX ) + spec.maxX ), 0.5 * ( double( spec.minY ) + spec.maxY ), 0.0 };
@@ -261,13 +264,14 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 	tm.restart();
 	const double top = double( zMax ) + 16.0;
 	const double bottom = double( zMin ) - 16.0;
-	const size_t maxSurfaces = size_t( std::min( spec.maxLevels * 2 + 2, 64 ) );
+	const size_t maxSurfaces = size_t( std::min( maxLevels * 2 + 2, 64 ) );
 	const float kWallDirs[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
 	float lowestFloor = 3.4e38f;
 	std::vector<float> surfaces;
 	/* lane ROOMCLAMP1: a probe never stands on the back of a one-sided face (an interior shell's roof seen from
 	 * above: outside the building). The surface still bounds the gaps below it. Red "floor": the old rule. */
 	std::vector<quint8> surfBack;
+	std::vector<int> surfTri;   // lane WALLSTACK1: the triangle each surface was hit on
 	const bool redFloor = spec.red == QLatin1String( "floor" );
 	auto backFacingDown = [&]( int tri ) -> bool {
 		if ( redFloor || tri < 0 || soup.isTwoSided( size_t( tri ) ) )
@@ -279,6 +283,49 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 		const double nz = e1[0] * e2[1] - e1[1] * e2[0];
 		const double nl = std::sqrt( nx * nx + ny * ny + nz * nz );
 		return nl > 0 && nz / nl < -0.05;
+	};
+	// lane WALLSTACK1: the triangle's unit face normal (stored winding); false = degenerate
+	auto faceNormal = [&]( int tri, double n[3] ) -> bool {
+		const float * q = &bvh.t[size_t( tri ) * 9];
+		const double e1[3] = { double( q[3] ) - q[0], double( q[4] ) - q[1], double( q[5] ) - q[2] };
+		const double e2[3] = { double( q[6] ) - q[0], double( q[7] ) - q[1], double( q[8] ) - q[2] };
+		n[0] = e1[1] * e2[2] - e1[2] * e2[1];
+		n[1] = e1[2] * e2[0] - e1[0] * e2[2];
+		n[2] = e1[0] * e2[1] - e1[1] * e2[0];
+		const double nl = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+		if ( !( nl > 0 ) )
+			return false;
+		n[0] /= nl;
+		n[1] /= nl;
+		n[2] /= nl;
+		return true;
+	};
+	/* lane WALLSTACK1: is the gap under the surface hit on triangle `above` soil? Only when that face is one-sided
+	 * and faces up (the point is behind it, as under the terrain) and the point sees fewer than 2 faces from their
+	 * front along the 4 level rays out to buriedReach (a room under a one-sided roof still sees its own walls from
+	 * inside). A two-sided face has no back: the gap stays air, as before. */
+	auto buriedGap = [&]( double x, double y, double z, int above ) -> bool {
+		if ( redBuried || above < 0 || soup.isTwoSided( size_t( above ) ) )
+			return false;
+		double n[3];
+		if ( !faceNormal( above, n ) || !( n[2] > 0.05 ) )
+			return false;
+		int fronts = 0;
+		for ( int d = 0; d < 4; d++ ) {
+			const double f[3] = { x, y, z }, u[3] = { kWallDirs[d][0], kWallDirs[d][1], 0.0 };
+			double dist = 0;
+			int tri = -1;
+			if ( !bvh.ray( f, u, spec.buriedReach, &dist, &tri ) || tri < 0 )
+				continue;
+			// a face met from its front, or two-sided; of back to back faces at the nearest distance, any one
+			auto front = [&]( int k ) -> bool {
+				double m[3];
+				return soup.isTwoSided( size_t( k ) ) || !faceNormal( k, m ) || m[0] * u[0] + m[1] * u[1] < 0.0;
+			};
+			if ( front( tri ) || bvh.anyHitIn( f, u, dist - 0.05, dist + 0.05, front ) )
+				fronts++;
+		}
+		return fronts < 2;
 	};
 	const qint64 i0 = qint64( std::ceil( spec.minX / spec.spacing ) );
 	const qint64 j0 = qint64( std::ceil( spec.minY / spec.spacing ) );
@@ -295,6 +342,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			// the column descent
 			surfaces.clear();
 			surfBack.clear();
+			surfTri.clear();
 			double cursor = top;
 			while ( surfaces.size() < maxSurfaces && cursor > bottom ) {
 				const double f[3] = { x, y, cursor }, down[3] = { 0.0, 0.0, -1.0 };
@@ -307,6 +355,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 					break;
 				surfaces.push_back( hitZ );
 				surfBack.push_back( backFacingDown( tri ) ? 1 : 0 );
+				surfTri.push_back( tri );
 				cursor = double( hitZ ) - spec.pierceStep;
 			}
 			if ( surfaces.empty() ) {
@@ -362,13 +411,18 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 					R.backColumnHits++;
 					continue;
 				}
-				if ( level + 1 >= spec.maxLevels ) {
+				const float inZ = surfaces[s] + std::min( spec.eye, gap * 0.5f );
+				if ( buriedGap( x, y, double( inZ ), surfTri[s - 1] ) ) {
+					R.buriedGaps++;
+					continue;
+				}
+				if ( level + 1 >= maxLevels ) {
 					R.levelsCapped++;
 					break;
 				}
 				++level;
 				ProbePoint in = point;
-				in.pos[2] = surfaces[s] + std::min( spec.eye, gap * 0.5f );
+				in.pos[2] = inZ;
 				in.cls = ProbeClass::Interior;
 				in.level = level;
 				origins.push_back( in );
@@ -391,7 +445,18 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 					columnFoundWall = true;
 					double last[3] = { eye[0] + dx * standoff, eye[1] + dy * standoff, eye[2] };
 					int stack = 0;
-					for ( const float hgt : spec.wallHeights ) {
+					const int nNear = int( spec.wallNearTop / spec.wallStepNear + 0.5f );
+					for ( int step = 0;; step++ ) {
+						/* lane WALLSTACK1: up the wall until it ends -- wallStepNear apart up to wallNearTop (the old
+						 * 240..960, as before), wallStepFar apart above it, at most wallMaxSteps levels */
+						if ( redWallCap && step >= nNear )
+							break;
+						if ( step >= spec.wallMaxSteps ) {
+							R.wallCapped++;
+							break;
+						}
+						const float hgt = step < nNear ? spec.wallStepNear * float( step + 1 )
+							: spec.wallNearTop + spec.wallStepFar * float( step + 1 - nNear );
 						const double cand[3] = { last[0], last[1], double( og.pos[2] ) + hgt };
 						if ( !( cand[2] - last[2] > 0.0 ) )
 							break;
@@ -413,6 +478,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 						w.nrm[0] = float( dx );   // toward the wall it hangs off
 						w.nrm[1] = float( dy );
 						w.level = ++stack;
+						R.wallTop = std::max( R.wallTop, stack );
 						addProbe( w );
 						R.wall++;
 						std::memcpy( last, cand, sizeof last );
@@ -977,7 +1043,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			}
 		return false;
 	};
-	auto place = [&]( const WCell & c, ProbeClass cls, int roomId ) {
+	auto place = [&]( const WCell & c, ProbeClass cls, int roomId ) -> bool {   // lane WALLSTACK1: false = refused
 		double p[3];
 		standAt( c, p );
 		/* lane ROOMCLAMP1: a room or cover probe with the back of a one-sided face within 200 straight below stands
@@ -989,7 +1055,18 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			int tri = -1;
 			if ( bvh.ray( p, dn, 200.0, &t, &tri ) && backFacingDown( tri ) ) {
 				R.backPlaced++;
-				return;
+				return false;
+			}
+		}
+		/* lane WALLSTACK1: a room or cover probe under a one-sided up face (the terrain) that sees fewer than 2
+		 * faces from their front stands in the soil (the void past an open tunnel end): no probe. Red "buried". */
+		{
+			const double up[3] = { 0, 0, 1 };
+			double t = 0;
+			int tri = -1;
+			if ( bvh.ray( p, up, top - p[2], &t, &tri ) && buriedGap( p[0], p[1], p[2], tri ) ) {
+				R.buriedPlaced++;
+				return false;
 			}
 		}
 		indexProbe( p );
@@ -1000,6 +1077,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 		pp.cls = cls;
 		pp.level = roomId;
 		addProbe( pp );
+		return true;
 	};
 	/* each room: enclosed or open; then, per cell, its clearance measured at EYE HEIGHT by 8
 	 * horizontal rays (the nearest wall), and whether it is a hallway (the narrowest
@@ -1082,8 +1160,8 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			R.roomNear++;
 			continue;
 		}
-		place( W[size_t( best )], ProbeClass::Room, roomNo[id] );
-		R.room++;
+		if ( place( W[size_t( best )], ProbeClass::Room, roomNo[id] ) )
+			R.room++;   // lane WALLSTACK1: placed ones only
 	}
 	// the blind spots, widest cells first
 	std::vector<int> order;
@@ -1108,8 +1186,8 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 			R.blindLeft++;
 			continue;
 		}
-		place( c, ProbeClass::Cover, roomNo[size_t( c.comp )] );
-		R.cover++;
+		if ( place( c, ProbeClass::Cover, roomNo[size_t( c.comp )] ) )
+			R.cover++;   // lane WALLSTACK1: placed ones only
 	}
 
 	/* ---- lane BAKE4: ROOM IDS (`.tbk` v4, docs/PRTP_PLAN.md 2f). A room's air is its
@@ -1340,6 +1418,9 @@ QString probeCensusText( const ProbePlaceResult & r )
 	t << "probe columns: " << r.columns << " (" << r.columnsEmpty << " hit nothing), gaps under 140 "
 	  << r.gapsRejected << ", level cap " << r.levelsCapped << ", wall levels refused " << r.wallRefused
 	  << ", columns with a wall " << r.wallColumns << "\n";
+	// lane WALLSTACK1
+	t << "probe walls: highest stack level " << r.wallTop << ", stacks at the step cap " << r.wallCapped
+	  << "; soil gaps refused " << r.buriedGaps << ", room/cover cells in the soil " << r.buriedPlaced << "\n";
 	if ( r.waterColumns > 0 )   // lane WATER1
 		t << "probe columns split at the water line: " << r.waterColumns << " (a probe under the water in " << r.waterUnder
 		  << ")\n";
@@ -1934,7 +2015,7 @@ int probePlaceCli( const QStringList & args )
 	const QStringList rc = rect.split( ',' );
 	if ( soupPath.isEmpty() || outPath.isEmpty() || rc.size() != 4 ) {
 		std::fprintf( stderr, "usage: probeplace --soup <file> --rect minX,minY,maxX,maxY --out <tsv> "
-			"[--spacing s] [--red wall|aperture|frames|coverage] [--no-openings] [--no-rooms]\n" );
+			"[--spacing s] [--red wall|aperture|frames|coverage|wallcap|buried|levels] [--no-openings] [--no-rooms]\n" );
 		return 2;
 	}
 	spec.minX = rc[0].toFloat();

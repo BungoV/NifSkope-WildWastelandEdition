@@ -882,9 +882,19 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 vec3 cellPassOut( vec3 P, vec3 N )
 {
 	const vec3 none = vec3( 0.0, 1.0, 1.0 );	// FIXPACK1 NOCOVER-COLOR: cyan, never magenta (magenta = missing texture)
-	if ( cellPass >= 3 || !cellGiOn )
-		return none;
-	vec4 s = cellGiSample( P, ( cellPassRed & 2 ) != 0 ? vec3( 0.0, 0.0, 1.0 ) : N );
+	/* lane WALLSTACK1: Probe coverage (bungo 10-15, the deck's s-placement slide: empty upper floors in pink). Magenta
+	 * where the probe term lights nothing: the valid share k of the GI row's own sample (cellGiSample: rooms, seen
+	 * fill, lend rule, gap fill) is 0 (<= 0.01, the GI pass's own test); elsewhere grey 0.25 + 0.5 k. The pass draws no
+	 * texture, so its magenta is never a missing one. Red WW_CELL_PV_RED=nofilter: the plain trilinear's k. It shares
+	 * the one cellGiSample call below: each call site inlines the whole chain, and one more takes fo4_cell past what
+	 * the driver links (GIDARK1: the surfaces then fall back to the legacy program, silently). */
+	const vec3 hole = vec3( 1.0, 0.0, 1.0 );
+	if ( ( cellPass >= 3 && cellPass != 6 ) || !cellGiOn )
+		return cellPass == 6 ? hole : none;
+	vec4 s = cellPass == 6 && ( cellPassRed & 256 ) != 0 ? cellGiTrilinear( P, N )
+	       : cellGiSample( P, cellPass != 6 && ( cellPassRed & 2 ) != 0 ? vec3( 0.0, 0.0, 1.0 ) : N );
+	if ( cellPass == 6 )
+		return s.a <= 0.01 ? hole : vec3( 0.25 + 0.5 * clamp( s.a, 0.0, 1.0 ) );
 	if ( s.a <= 0.01 )
 		return none;
 	vec3 v = max( s.rgb / s.a, vec3( 0.0 ) );

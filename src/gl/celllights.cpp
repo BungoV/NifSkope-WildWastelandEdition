@@ -187,7 +187,7 @@ ClState & st()
 			s.pass = 0;
 		for ( const QByteArray & r : qgetenv( "WW_CELL_PV_RED" ).split( ',' ) ) {
 			const QByteArray t = r.trimmed();
-			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : 0;   // lane ROOMCLAMP1: noclamp; lane GISHADE1: nosee; lane GIBLACK1: borrow; lane GIBLACK2: lendamb, strand
+			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : t == "nofilter" ? 256 : 0;   // lane ROOMCLAMP1: noclamp; lane GISHADE1: nosee; lane GIBLACK1: borrow; lane GIBLACK2: lendamb, strand
 		}
 	}
 	return s;
@@ -541,7 +541,8 @@ QStringList wwCellPassNames()
 {
 	return { QStringLiteral( "Combined" ), QStringLiteral( "GI" ), QStringLiteral( "Sky visibility" ),
 		QStringLiteral( "Surfel color" ), QStringLiteral( "Surfel light" ),
-		QStringLiteral( "Brick light" ) };	// lane BRICK1: each surfel tile shows its 4 m brick's light
+		QStringLiteral( "Brick light" ),	// lane BRICK1: each surfel tile shows its 4 m brick's light
+		QStringLiteral( "Probe coverage" ) };	// lane WALLSTACK1: magenta where no probe reaches (the deck's s-placement view)
 }
 
 int wwCellPass()
@@ -803,7 +804,7 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
 	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
 	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
-	prog->uni1i( "cellPassRed", s.passRed & 251 );	// lane ROOMCLAMP1: + 8 noclamp; lane GISHADE1: + 16 nosee; lane GIBLACK1: + 32 borrow; lane GIBLACK2: + 64 lendamb, 128 strand
+	prog->uni1i( "cellPassRed", s.passRed & ~4 );	// lane WALLSTACK1: + 256 nofilter (was & 251, which dropped it)	// lane ROOMCLAMP1: + 8 noclamp; lane GISHADE1: + 16 nosee; lane GIBLACK1: + 32 borrow; lane GIBLACK2: + 64 lendamb, 128 strand
 	if ( giDraw ) {
 		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
 		prog->uni1f( "cellGiVoxel", G->voxel );
