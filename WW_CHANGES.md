@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WALLSTACK1 (2026-10-15, branch wallstack1-20261015): wall stacks reach the top of tall buildings; soil gaps get no probe; Probe coverage view
+
+- **Wall probe stacks no longer stop at 960 units.** A stack climbs its wall until the wall ends (the way up is
+  blocked, or the wall is no longer within 2 x the standoff). Steps are 240 apart up to 960 above the origin, as
+  before, so a stack below 960 is unchanged. Above that they are 480 apart, at most 64 levels (`src/probeplace.h`
+  `wallStepNear`, `wallNearTop`, `wallStepFar`, `wallMaxSteps`; the old `wallHeights` list is gone). Column levels are
+  capped at 24 (was 6), so a tower's floors no longer hide its basements.
+- **Soil is not air.** A gap between two column hits is soil when the face above it is one-sided and faces up, and
+  fewer than 2 of 4 level rays out to 2048 units meet a face from its front. Such a gap gets no level probe and starts
+  no wall stack. The same test refuses room and cover probes standing in soil. Of several faces at one distance
+  (back-to-back walls), any one met from its front counts (`Bvh::anyHitIn`, `src/probebvh.h`).
+- The census line `probe walls: highest stack level N, stacks at the step cap N; soil gaps refused N, room/cover cells
+  in the soil N` says whether a cap was hit. The `room` and `cover` counts now count placed probes only.
+- Reds (`ProbePlaceSpec::red`): `wallcap` (stop at 960), `buried` (every gap is air), `levels` (6 levels).
+- **Probe coverage view.** Show > Pass > "Probe coverage" (or `WW_CELL_PASS="Probe coverage"`) paints magenta where
+  the GI grid's valid share k is 0 after the room and seen filters, and grey by k elsewhere. It draws no textures. It
+  shares `cellGiSample`'s one call site in `cellPassOut` (a second inlined call broke the cell program's link and fell
+  back to the legacy program: identical pictures). Red: `WW_CELL_PV_RED=nofilter`.
+- Gates:
+  - `tests/spells/probe_place.py` synth: green PASS 263 and tall PASS 384 (walls to 6010, roof 6050, no level capped).
+    Reds FAIL: wallcap (112 missing), buried (4 soil), levels (8 capped), wall (824 above the roof).
+  - Retrace (twin vs placer): Mass Fusion PASS. Financial and Concord show the same column mismatches as main's own
+    placer output (pre-existing, not this lane's).
+  - Concord against main with `--red buried`: identical below 960 (2 extra wall probes at z 7760).
+  - Coverage (`tests/spells/cell_coverage.sh`, Vault111Cryo): judge B PASS (0 magenta with the probes, 98.17% with the
+    probes dropped, 99.92% agreement with the offline recount). Judge A FAILs on 1 pixel of the full bake (a 0.0002%
+    hole the shader samples near k 0.007). The nofilter red FAILs judge B as it should.
+- Cost (probebake on the Mass Fusion soup, cell 4,-2): baked probes 1456 to 1713 (+18%), surfels 147286 to 163741,
+  links 827631 to 979160 (+18%). Peak working set 1273 to 1374 MB, peak private 1149 to 1138 MB. Wall time 26.7 to
+  13.4 s, but the old run went first on a cold cache, so the time is not a like-for-like comparison. The placer on the
+  whole downtown soups gives Mass Fusion 9682 to 8797 probes, with the highest stack level 10 (Financial: 14).
+- Pictures (GI on, sky loaded, DOF 0, MBLUR 0; Mass Fusion facade, cell 4,-2 only, street eye height):
+  - The Probe coverage pass paints magenta on 854 pixels (0.10%) on the old bake: a band of the tower above the old
+    960 stop. The new bake paints none. In beauty the old bake draws that band flat and unlit; the new bake shades it.
+  - The 3x3 load with the relight's soup passes the 12 GB memory guard, so the pair loads one cell.
+
 ## Lane GIBLACK2 (2026-10-14, branch giblack2-20261014): the Memory Den recess takes its measured sky, not the open sky's
 
 - **The recessed wall on the Memory Den street (Goodneighbor, 22h) and the second spot to its right now draw the sky
