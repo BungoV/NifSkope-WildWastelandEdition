@@ -29,7 +29,7 @@ uniform vec4 airMed;			// sigma0 (per game unit), zb, 1 / H (0: uniform), the to
 uniform vec4 airLayer;			// the near band's share w, zn, 1 / Hn, the ground layer's strength s (cellvolair.cpp VaLayer)
 uniform vec4 airGround;			// the ground layer's anchor zg, 1 / its thickness
 uniform bool volCsm;			// the sun's cascades are drawn this frame
-uniform int volRed;				// 2 gioff, 4 flat, 8 noshadow, 16 nolights, 256 physcol, 262144 lightmid (1 off, 32 wrongmed, 128 farfit: the CPU's)
+uniform int volRed;				// 2 gioff, 4 flat, 8 noshadow, 16 nolights, 256 physcol, 262144 lightmid, 524288 bluescatter (1 off, 32 wrongmed, 128 farfit: the CPU's)
 uniform vec4 volPhase[3];		// rgb: the weight of the air (Rayleigh), forward and back terms; w: the HG g (0 for air)
 uniform vec4 volGi;				// rgb: the phase's tint (the three weights summed), w: its L1 g
 uniform vec3 volFlat[6];		// red flat: one cube for every froxel (the grid's mean)

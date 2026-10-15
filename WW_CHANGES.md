@@ -120,6 +120,20 @@
 - The lamp check also needs the median ratio over the judged lamps within 0.8..1.25. The per-lamp band alone
   (0.5..2) let a lamp law about 1.8x too bright pass on most lamps. It is judged on unoptimized frames: the depth
   skip leaves the air behind walls uncomputed, which the check would count as missing light.
+- The lamp check's reference multiplies a light's color by the air's scatter weights channel by channel before
+  taking the brightness. The weights are colored (the air scatters blue more than red), so the old brightness-times-
+  brightness reference read warm lamps about 15% too bright; on the Memory Den frame the median goes 0.85 to 0.98.
+- The air's scatter weights are now neutral: each part of the scatter keeps its brightness but is the same on all
+  three channels. The fog's color comes only from the weather and lighting records, as in the game, and a lamp's
+  glow in the air keeps the lamp's own color (a burning barrel glows orange, not grey-blue). The old colored weights
+  stay as the red `WW_CELL_AIR_RED=bluescatter`.
+- New hue check (`tests/spells/volair1_hue_check.py`), on frames with bloom and glare off. Stage H: where the haze
+  outweighs the scene, the haze's color matches the game's own fog (the air off) within 10%. Stage P: the glow in a
+  20..80 px ring round each lamp matches, within 15%, the color of a single-scatter reference built from the light
+  records. The reference counts every lamp whose range the ring's rays cross, stops each ray at the scene depth (an
+  AO dump of the same view), and never reads the air's weights. Reds: `bluescatter` must fail stage P (the old
+  weights turned the barrel's glow from red-to-green 2.3 into 1.2), and `physcol` (the haze in the physical light's
+  color) must fail stage H.
 - The sky gate judges its L stage (the fog color at infinity across the skyline) on the lamps-off frame when the
   view has one; the lamps' own glow brightens the buildings beside the skyline and belongs to the lamp check. The
   lamps-on value is printed as information.

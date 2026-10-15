@@ -13,7 +13,8 @@ For every light of the dump's 'light' lines whose sphere centre is in the view a
           plugin's own records (this script's walk of the ESM: DATA radius + XRDS, colour (byte / 255)^2.2 x (FNAM +
           XLIG fade), the bias / scale / exponent radial curve, the spot cone) sigma0 x rho(z) x colour x radial x
           cone x pi x phase(cos to the eye) x exp(-sigma0 rho d), unshadowed; rho is the dump's fitted law
-          (airMed, airLayer, airGround), the phase the dump's record weights (phase0..2)
+          (airMed, airLayer, airGround), the phase the dump's record weights (phase0..2), colour x phase per
+          channel, then luminance (the weights are coloured: a warm lamp scatters less than its luminance says)
   ratio = ours / ref. Only samples inside the frustum and the slices count (coverage = their share of the ball).
 
 A light FAILS when ratio < 0.5 (bungo's bar) or > 2 (the gate is two-sided); SKIP when coverage < 0.5 or the
@@ -80,12 +81,15 @@ def rho_law(t, z):
 
 
 def phase_pi(t, c):
+    """the phase x pi per colour channel, shape c.shape + (3,): the record's weights are coloured (the air term is
+    Rayleigh-blue), so a light's luminance is taken AFTER the product. 10-15: lum(colour) x lum(weights) read a warm
+    lamp ~15% high, which was the whole 'lamp shortfall' (median 0.848)."""
     def hg(g):
         d = 1.0 + g * g - 2.0 * g * c
         return (1.0 - g * g) / (4.0 * math.pi * d * np.sqrt(d))
     p0, p1, p2 = t['phase0'], t['phase1'], t['phase2']
-    return math.pi * ((p0[:3] @ LUM) * 3.0 / (16.0 * math.pi) * (1.0 + c * c) + (p1[:3] @ LUM) * hg(p1[3])
-                      + (p2[:3] @ LUM) * hg(p2[3]))
+    return math.pi * (np.multiply.outer(3.0 / (16.0 * math.pi) * (1.0 + c * c), p0[:3])
+                      + np.multiply.outer(hg(p1[3]), p1[:3]) + np.multiply.outer(hg(p2[3]), p2[:3]))
 
 
 def plugin_lights(esm, forms):
@@ -166,7 +170,7 @@ def ref_J(L, W, eye_dir, t, s0, zoff):
     za, zl = W[:, 2] + zoff, L['pos'][2] + zoff
     od = s0 * 0.5 * (rho_law(t, za) + rho_law(t, np.full_like(za, zl))) * d
     c = np.einsum('ij,ij->i', Ld, eye_dir)	# the light's travel is -Ld; the scattered ray goes to the eye (-eye_dir)
-    return L['lum'] * a * np.exp(-od) * phase_pi(t, c)
+    return a * np.exp(-od) * (phase_pi(t, c) @ (L['c'] * LUM))
 
 
 def main(esm, d, tag, red, maxd=4000.0, label=''):

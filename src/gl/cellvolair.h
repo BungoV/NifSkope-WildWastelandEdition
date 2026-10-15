@@ -61,7 +61,7 @@ class Scene;
  *
  *  The fold "Volumetric Air" (Scene window): the row ships OFF (QSettings WW/VolAir); the pin WW_CELL_AIR=0|1 wins.
  *  Gates only: WW_CELL_AIR_RED=off (computed, not applied) | gioff | flat | noshadow | nolights | wrongmed | blendnear
- *  (with FOGBLEND=1) | farfit | physcol | nosunt (surfaces keep the full sun) | froxonly (no far tail) | nosky (the sky without the air) | fxfog (effects and particles keep the game's fog alone) | lightmid (placed lights taken once at the slice middle) (comma
+ *  (with FOGBLEND=1) | farfit | physcol | nosunt (surfaces keep the full sun) | froxonly (no far tail) | nosky (the sky without the air) | fxfog (effects and particles keep the game's fog alone) | lightmid (placed lights taken once at the slice middle) | bluescatter (the records' coloured scatter weights: the air adds a blue hue) (comma
  *  list; also oldsun (the air lit by the fog-sun glare, no sky DALC), dropcluster (every cluster list loses its
  *  nearest light), nearskip (the skip behind the column's nearest surface)), WW_CELL_AIR_OPT=0..3 (1 clusters, 2 the
  *  depth skip; 0 the unoptimised path), WW_CELL_AIR_TERMS=<mask> (1 directional, 2 placed lights, 4 GI, 8 ambient), WW_CELL_AIR_PROBE=1 (the light

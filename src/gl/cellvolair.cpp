@@ -78,7 +78,7 @@ VaState & vs()
 			const QByteArray r = t.trimmed();
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
-				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : 0;
+				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : 0;
 		}
 		const QByteArray opt = qgetenv( "WW_CELL_AIR_OPT" ).trimmed();
 		if ( !opt.isEmpty() )
@@ -283,14 +283,18 @@ void vaAlloc3D( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & tex, int w, in
 	fn->glBindTexture( GL_TEXTURE_3D, 0 );
 }
 
-// the phase uniforms from a packed god-ray record (air rgb, fwd rgb, back rgb, fwd g, back g, intensity)
+/* the phase uniforms from a packed god-ray record (air rgb, fwd rgb, back rgb, fwd g, back g, intensity). Lane VOLAIR1
+ * 10-15 (bungo: "our fog is what vanilla has as the color"): the air adds no hue of its own. Each lobe's weight is
+ * its luminance on all three channels, so the haze's colour comes from the fog records alone (airEnvColour) and a
+ * placed light keeps its own colour in the air. The records' coloured weights (the air lobe is blue) took a warm
+ * lamp's hue out of its halo. Red bluescatter (coloured = true): the records' coloured weights, as before. */
 struct VaPhase
 {
 	float w[3][4] = {};	// rgb weight, w = g
 	float gi[4] = {};	// rgb tint (the three weights summed), w = the luminance-weighted g
 };
 
-VaPhase vaPhase( const float m[12] )
+VaPhase vaPhase( const float m[12], bool coloured )
 {
 	VaPhase p;
 	const float lumK[3] = { 0.2126f, 0.7152f, 0.0722f };
@@ -302,6 +306,11 @@ VaPhase vaPhase( const float m[12] )
 	for ( int k = 0; k < 3; k++ )
 		for ( int c = 0; c < 3; c++ )
 			p.w[k][c] = m[k * 3 + c] * inv;
+	if ( !coloured )
+		for ( int k = 0; k < 3; k++ ) {
+			const float l = p.w[k][0] * lumK[0] + p.w[k][1] * lumK[1] + p.w[k][2] * lumK[2];
+			p.w[k][0] = p.w[k][1] = p.w[k][2] = l;
+		}
 	p.w[0][3] = 0.0f;
 	p.w[1][3] = m[9];
 	p.w[2][3] = m[10];
@@ -725,7 +734,7 @@ static void vaPassInner( Scene * scene, bool run )
 	} else if ( !wwLookdevGodRays( med, &medNote ) ) {
 		medNote = QStringLiteral( "fallback (no weather)" );
 	}
-	const VaPhase ph = vaPhase( med );
+	const VaPhase ph = vaPhase( med, ( s.red & 524288 ) != 0 );
 	// the ground layer (vaNearShare, vaGround); red noground: the far band alone, as before it
 	VaLayer G;
 	if ( !( s.red & 16384 ) ) {
