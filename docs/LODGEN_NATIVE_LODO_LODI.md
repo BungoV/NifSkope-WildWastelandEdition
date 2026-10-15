@@ -1,4 +1,4 @@
-# `.lodo` v6 (v4..v7) + `.lodi` v12 (v3..v12) — the FO4CS-native far field (and the v7/v11 near library)
+# `.lodo` v6 (v4..v8) + `.lodi` v12 (v3..v12) — the FO4CS-native far field (and the v7/v11 near library)
 
 > **NEAR LIBRARY (lane NEAR1, 2026-09-26).** `lodgen --near-library <dir>` writes
 > `<ws>.near.lodo` at **version 7** (§3.9: header flag `NEAR` 16 + the material
@@ -11,6 +11,8 @@
 > **VERSIONS TODAY (re-read 2026-09-23 against `src/lodofile.h`,
 > `src/lodifile.h`, `src/nifcli.cpp`; `.lodo` re-read 2026-09-25, lanes SEAM1 and SWAP1).**
 > The library is `.lodo` **version 6** (§3.8, material-swap variant base rows);
+> `--patch-charts` writes **version 8** (§3.10, the LOD PRTP chart stream, lane LODP1
+> 2026-10-15), and the `.lodp` patch sectors placed on it are §13;
 > a version-5 file is read as a v6 file with no variant rows, and a version-4 file
 > as one with no colour stream either (§3.7). A default bake writes `.lodi` **version 7** (§4.9, §4.10);
 > `--scrappable` writes **version 9** (§4.12); a placement scaled above 7.99988
@@ -247,7 +249,8 @@ a refusal that names the instance, the ref and the two numbers.
 | **0xD0** | **u32** | **`cardCount` (v4) — bases whose `cardLayer` is not `LODO_NO_CARD`. A reader sizes its card-draw pass from the header alone; `cardCount > baseCount` is refused by name, and (CARDLINK1) the reader RECOUNTS it over the base rows and refuses a mismatch by name, §4.13** |
 | **0xD4** | **u32** | **`colourVertexCount` (v5) — rows in the colour blob; 0 = the file carries no colour. Never more than `vertexCount`, and zero exactly when `offColours` is zero** |
 | **0xD8** | **u64** | **offset: colour blob (v5), 4 B per row, written LAST (after the strings), 4096-aligned, and in `indexCrc32` only when present** |
-| 0xE0…0xFF | — | reserved, zero (on a version-4 file 0xD4…0xFF) |
+| **0xE0** | **u64** | **offset: chart stream (v8, §3.10), `clusterCount` × 16 B, the LAST payload, in `indexCrc32`; zero exactly below v8, and a v8 file with zero here is refused** |
+| 0xE8…0xFF | — | reserved, zero (on a version-4 file 0xD4…0xFF; below v8 0xE0…0xFF) |
 
 The ladder table sits **between the cluster table and the material table** in
 file order, which is what makes a v2 file's `indexCrc32` arithmetic different
@@ -815,6 +818,42 @@ placements, 38,622 (mesh, material) pairs, 12,160,169 triangles, 777,824 cluster
 
 **The FO4CS reader is owed** (standing order). A v6 reader refuses a v7 file by
 version, which is the right answer: a near library is not a far field.
+
+
+### 3.10 Version 8: the patch-chart stream (lane LODP1, 2026-10-15)
+
+LOD PRTP step 1 (`notes/lodprtp1/PLAN.md`). A far pixel finds its `.lodp` patch
+(§13) through the CHART its triangle belongs to, so the library says which chart
+every triangle is in. Written ONLY with `--patch-charts` (OFF by default); without
+it the library is the v6/v7 file it was, byte for byte.
+
+| where | v8 meaning |
+|---|---|
+| header 0x04 | version 8 — only when the stream is written; a NEAR library may carry it too ("v7 is NEAR, and NEAR is v7 or v8") |
+| header 0xE0 (`u64`) | offset of the chart stream; zero exactly below v8, and a v8 file with zero here is refused by name |
+| payload, LAST | `clusterCount` × 16 bytes, one byte a cluster triangle in cluster order; inside `indexCrc32` |
+
+The byte is the triangle's chart id, `0..0xFC`, or `0xFE` (FOLIAGE: an
+alpha-tested tree material, the instance's tree patch) or `0xFF` (NONE: a
+degenerate triangle, or a slot past the cluster's `triangleCount`). `0xFD` is
+never valid. **The chart rule** lives in `src/lodpplace.h` (one implementation;
+`tests/spells/lodp_decode.py` is its independent twin): over a mesh's level-0
+triangles in cluster order, the first triangle not yet in a chart seeds a new
+one and every later triangle whose face normal is within 45° of the seed's
+joins it (the test is `dot ≥ cos 45° − 1e-9`, so an exact 45° bevel always joins: the
+first region bake found 5 meshes whose bevels sat within 1e-16 of the threshold, where
+rounding noise had split them differently in the writer and the twin). A coarser level's triangle takes the level-0 chart whose area-weighted
+normal is closest, so it never names a chart past the level-0 maximum.
+
+**Refusals, both readers** (`lodofile.cpp`, `lodgen_native_decode.py`, mutation
+controls in `lodgen_native_mutate.py` / `lodp_decode.py --lodo-controls`): a byte
+past `triangleCount` that is not `0xFF`; `0xFD`; level-0 chart ids not dense from
+0; a coarser triangle naming a chart past the level-0 max; v8 with offset 0; v6
+with an offset; v7 without the NEAR flag. 9 controls, 0 wrong verdicts on either
+reader.
+
+**Way back:** leave `--patch-charts` off. Gate: a region bake without it is
+byte-identical to the rung exe's (§13.6).
 
 
 ---
@@ -2869,6 +2908,116 @@ and conditionally only when the old file read by the new reader is unambiguous
 (`.lodi` v5) — Deviations 14 and 15.
 
 ---
+
+## 13. `.lodp` v1 — LOD PRTP patch sectors (lane LODP1, 2026-10-15)
+
+Precomputed light for the distant LOD (`notes/lodprtp1/PLAN.md`). Small surface
+patches, about one every 512 units, placed ON the faces the far view draws: the
+`.lodo` meshes the `.lodi` places, and the `.lodl` ground. Step 1 (this lane)
+places them and writes their geometry; step 2 fills the light words (horizon,
+openness, albedo, links) by tracing full detail. Code: `src/lodpfile.*` (format),
+`src/lodpplace.*` (chart rule, slot rule, placer), `src/lodpfixture.cpp`
+(known answer), `src/lodpbake.*` (the CLI bake). Independent reader and twin:
+`tests/spells/lodp_decode.py`.
+
+One file per SECTOR of 16 × 16 cells, `lodp_X_Y.lodp`, X = floor(x / 65536),
+written only when the sector holds a patch. Little-endian, fixed strides, every
+table straight after the one before, every reserved byte zero and refused when
+it is not. CRC-32 is zlib's.
+
+### 13.1 Header, 256 bytes
+
+| off | type | field |
+|---|---|---|
+| 0x00 | u32 | magic `LODP` |
+| 0x04 | u32 | version 1 (any other refused) |
+| 0x08 | u32 | flags: bit0 `BOUND` (the `.lodo` carried the v8 chart stream and it agreed with a recompute); others refused |
+| 0x0C | u32 | `headerCrc32` over 0x10..0xFF |
+| 0x10 | u64 | worldspace hash (FNV-1a 64 of the EDID) |
+| 0x18 | u64 | LOD input hash (the `.lodo` and `.lodi` header CRCs and the `.lodl`'s first 4 KiB) |
+| 0x20 | u64 | the paired `.lodo`'s `lodoIdentity` |
+| 0x28 | u64 | options hash (patch units, terrain grid, crease, version) |
+| 0x30 / 0x34 | i32 | sector X / Y |
+| 0x38 | f32 | patch units (512) |
+| 0x3C | u16 | azimuths (16) |
+| 0x3E | u8 | terrain grid G (8: G × G patches a land cell) |
+| 0x3F | u8 | reserved 0 |
+| 0x40..0x54 | u32 × 6 | counts: cells (256), instances, charts, slots, patches, links |
+| 0x58 | u32 | `indexCrc32` over 0x100..end |
+| 0x5C | u32 | reserved 0 |
+| 0x60..0x88 | u64 × 6 | offsets of the six tables |
+| 0x90 | u64 | file bytes |
+| 0x98..0xFF | — | reserved 0 |
+
+### 13.2 Tables
+
+* **Cell, 32 B × 256**, index = ly × 16 + lx from the sector's south-west cell:
+  firstPatch, patchCount, firstChart, chartCount (u32), inputHash (u64, step 6's
+  incremental key, 0 today), zBase (f32, every patch z is stored from it), flags
+  (u16, bit0 TERRAIN), reserved u16.
+* **Instance, 16 B**, sorted by `.lodi` index: lodiIndex, firstChart, chartCount
+  (u16), reserved, lodoMesh (the base's FIRST PRESENT rep).
+* **Chart, 64 B**: firstSlot, nu/nv/nw (u16), meshChart (the stream's id, `0xFE`
+  for the tree chart), kind (0 surface, 1 tree), step (f32, mesh units = patch
+  units / placement scale), origin, axisU, axisN (mesh-local f32 × 3 each),
+  instance row, fallbackPatch (the chart's largest), reserved.
+* **Slot, u32**: nu × nv × nw a chart, `(k × nv + j) × nu + i`, a patch index or
+  `0xFFFFFFFF`.
+* **Patch, 64 B**: pos i16 × 3 at 0.5 u (x, y from the cell's south-west corner,
+  z from zBase), normal (octahedral 8:8), albedo rgb8, flags (bit0 BURIED, bit1
+  SUBMERGED), area (f16 in 4096 u², so a 512 u patch reads 64), sampleCount, kind (0 terrain, 1 object,
+  3 tree), horizon u8 × 16, openness u8 × 16, firstLink, linkCount, push,
+  lodSource (object: the chart row; terrain: j × G + i), reserved.
+* **Link, 8 B**: target, formFactor (f16), flags. Step 1 writes none.
+
+### 13.3 The draw binding (no search)
+
+The pixel's `.lodi` instance → its instance row → `firstChart`; the triangle's
+chart id from the `.lodo` v8 stream (§3.10) → chart `firstChart + id`; the
+pixel's mesh-local position into the chart frame → slot (i, j, k) =
+floor(((p − origin) · U | V | N) / step), clamped → the slot's patch, or the
+chart's `fallbackPatch` when the slot is empty. Terrain needs none of that: a
+land cell's first G × G patches are its grid, row-major from the south-west.
+
+### 13.4 The slot rule
+
+A chart's frame: N = its area-weighted normal; U = normalise(up × N) with up = Z
+unless |N.z| ≥ 0.9 (then X); V = N × U; origin = the minimum over its vertices.
+Slots are cubes of edge `step`, ceil(extent / step) along each axis (at least
+one); a point goes to clamp(floor(d / step), 0, n − 1). Each triangle is clipped
+against the slot boxes; a slot with more than 1e-6 step² of area holds a patch,
+at the area-weighted centroid of its pieces (moved onto the nearest piece when
+the centroid is off them), with their area-weighted normal and their area.
+A tree (foliage material) gets ONE tree patch for the instance.
+
+### 13.5 The CLI
+
+`lodgen ... --native <dir> --patch-charts` writes the v8 stream;
+`lodgen --lodp <pair dir> <out dir> [--lodp-region X0 Y0 X1 Y1] [--lodp-census]`
+places the sectors (no plugin read; ground from `<ws>.lodl` beside the pair);
+`lodgen --lodp-verify <dir>` reads every sector back; `lodgen --lodp-fixture <dir>
+[--lodp-red 1|2]` writes the known answer and the red controls.
+
+### 13.6 Measured (lane LODP1, exe sha1 645703b6, 2026-10-15)
+
+* **Fixture** (`--lodp-fixture`): 5 sectors, 190,212 bytes; the twin 2383 checks, 0 failures
+  (worst on-face 0.279 u, area rel 0.00024). Red 1 (patches pushed 8 u off their faces) fails
+  gate F 40 times; red 2 (areas wrong) fails gates A/E. Both must fail and do.
+* **Way back:** a region bake (cells -20 24 .. -9 35, dim 4, `--road-detail 1`) without
+  `--patch-charts` is byte-identical to the rung exe's, `.lodo`, `.lodi` and all nine `.lodj`.
+* **The stream:** with `--patch-charts` the same region's `.lodo` v8 carries 4,561 meshes,
+  14,029 charts (at most 15 a mesh), 203,840 stream bytes; the twin's recompute differs in 0.
+* **Placement on that region:** 3,523 placements, 46,215 patches (34,567 object, 2,432 tree,
+  9,216 terrain), 4 sectors, 4.07 MiB, placed in 0.26 s. `--real`: 33,828 checks, 0 failures
+  (400 rows / 3,935 patches sampled: on-face 0.382 u, area rel 0.00045, slot 0.194 u). The census
+  arm (no stream) writes the same files past the 256-byte header.
+* **Whole Commonwealth** (from the shipped pair, census run): 184,431 placements, 4,184,387
+  patches (1,768,168 object, 56,923 tree, 2,359,296 terrain), 144 sectors, **315.4 MiB**,
+  placed in 7.2 s. Busiest cell 4,409 patches; 597 cells over the 800 cap.
+* **Two things the real data taught:** exact 45° bevels need the `− 1e-9` tie rule (§3.10), and
+  the `.lodp` units compile with `fp-contract=off` (the release `-O3 -march=haswell` FMA gave
+  1e-17 noise the twin does not have); and the area unit is 4096 u², because the largest LOD tree
+  (10.8M u² of cards) overflowed f16 at 256 u² on 11 placements.
 
 ## Source, as built
 

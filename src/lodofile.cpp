@@ -55,6 +55,8 @@ constexpr int H_RESERVED_CE = 0xCE, H_CARDCOUNT = 0xD0, H_RESERVED_D4 = 0xD4;
  *  coloured mesh, so a v4 file is a v5 file without colour. The pad is now
  *  0xCE..0xCF plus 0xE0..0xFF. */
 constexpr int H_COLOURCOUNT = 0xD4, H_OFF_COLOURS = 0xD8, H_RESERVED_E0 = 0xE0;
+//! v8 (lane LODP1): the chart stream's offset takes 0xE0..0xE7; the pad is now 0xE8..0xFF.
+constexpr int H_OFF_CHARTS = 0xE0, H_RESERVED_E8 = 0xE8;
 
 template <typename T> void putLE( QByteArray & b, int off, T v )
 {
@@ -1757,6 +1759,9 @@ bool lodoWrite( const QString & path, const LodoLibrary & lib, LodoHeader * head
 	QByteArray strings = lib.strings;
 	if ( strings.isEmpty() )
 		strings.append( '\0' );
+	if ( !lib.chartStream.empty() && lib.chartStream.size() != lib.clusters.size() * LODO_CHART_STRIDE )
+		return fail( QString( "the v8 chart stream has %1 bytes for %2 clusters; it is %3 a cluster" )
+			.arg( lib.chartStream.size() ).arg( lib.clusters.size() ).arg( LODO_CHART_STRIDE ) );
 	if ( !lib.colours.empty() && lib.colours.size() != lib.vertices.size() )
 		return fail( QString( "the v5 colour array has %1 entries for %2 vertices; it is PARALLEL, one a vertex" )
 			.arg( lib.colours.size() ).arg( lib.vertices.size() ) );
@@ -1813,6 +1818,10 @@ bool lodoWrite( const QString & path, const LodoLibrary & lib, LodoHeader * head
 	/* v7 (lane NEAR1): the version follows the NEAR flag and nothing else, so a
 	 * far-field library -- which never sets it -- is written as v6, unchanged. */
 	h.version = ( lib.flags & LODO_FLAG_NEAR ) ? LODO_VERSION_NEAR : LODO_VERSION;
+	/* v8 (lane LODP1): the chart stream raises the version and nothing else does,
+	 * so a bake without `--patch-charts` writes the v6/v7 file it always did. */
+	if ( !lib.chartStream.empty() )
+		h.version = LODO_VERSION_CHARTS;
 	for ( size_t i = 0; i < lib.materials.size(); i++ ) {
 		if ( lib.materials[i].features & ~LODO_MAT_FEATURES_KNOWN )
 			return fail( QString( "material %1: features 0x%2 set reserved bits" ).arg( i ).arg( lib.materials[i].features, 0, 16 ) );
@@ -1876,6 +1885,13 @@ bool lodoWrite( const QString & path, const LodoLibrary & lib, LodoHeader * head
 		h.offColours = payload( colourBlob.data(), quint64( colourBlob.size() ) );
 		crcOver( colourBlob.data(), quint64( colourBlob.size() ) );
 	}
+	/* v8: the chart stream after everything, so no earlier offset moves, and
+	 * inside indexCrc32 only when it exists. */
+	h.offChartStream = 0;
+	if ( !lib.chartStream.empty() ) {
+		h.offChartStream = payload( lib.chartStream.data(), quint64( lib.chartStream.size() ) );
+		crcOver( lib.chartStream.data(), quint64( lib.chartStream.size() ) );
+	}
 	h.indexCrc32 = icrc;
 	h.fileBytes = quint64( file.size() );
 
@@ -1913,6 +1929,7 @@ bool lodoWrite( const QString & path, const LodoLibrary & lib, LodoHeader * head
 	putLE<quint32>( file, H_CARDCOUNT, h.cardCount );
 	putLE<quint32>( file, H_COLOURCOUNT, h.colourVertexCount );
 	putLE<quint64>( file, H_OFF_COLOURS, h.offColours );
+	putLE<quint64>( file, H_OFF_CHARTS, h.offChartStream );
 	h.headerCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( file.constData() ) + H_PLUGIN,
 		LODO_HEADER_BYTES - H_PLUGIN );
 	putLE<quint32>( file, H_HCRC, h.headerCrc32 );
@@ -1978,9 +1995,9 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 	 * names the base row's last word `materialSwap`; a v4/v5 file is read as v6
 	 * with no variant rows (that word forced to 0 below). */
 	if ( h.version != LODO_VERSION && h.version != LODO_VERSION_NO_SWAP && h.version != LODO_VERSION_NO_COLOUR
-		&& h.version != LODO_VERSION_NEAR )
+		&& h.version != LODO_VERSION_NEAR && h.version != LODO_VERSION_CHARTS )
 		return refuse( QString( "version %1; this reader knows %2 to %3" ).arg( h.version )
-			.arg( LODO_VERSION_NO_COLOUR ).arg( LODO_VERSION_NEAR ) );
+			.arg( LODO_VERSION_NO_COLOUR ).arg( LODO_VERSION_CHARTS ) );
 	h.headerCrc32 = getLE<quint32>( p + H_HCRC );
 	const quint32 hcrc = lodvCrc32( p + H_PLUGIN, LODO_HEADER_BYTES - H_PLUGIN );
 	if ( hcrc != h.headerCrc32 )
@@ -1991,9 +2008,13 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		return refuse( QStringLiteral( "flags bit0 (vertex layout v1) is clear" ) );
 	if ( h.flags & ~LODO_FLAGS_KNOWN )
 		return refuse( QString( "flags 0x%1 has reserved bits set" ).arg( h.flags, 0, 16 ) );
-	/* v7 (lane NEAR1): the NEAR flag and version 7 come together or not at all */
-	if ( ( ( h.flags & LODO_FLAG_NEAR ) != 0 ) != ( h.version == LODO_VERSION_NEAR ) )
-		return refuse( QString( "version %1 with flags 0x%2: the NEAR flag (16) is set exactly on a version-7 file" )
+	/* v7 (lane NEAR1): a version-7 file carries the NEAR flag; v8 (lane LODP1)
+	 * may carry it too, since the chart stream rides on either library. */
+	if ( h.version == LODO_VERSION_NEAR && !( h.flags & LODO_FLAG_NEAR ) )
+		return refuse( QString( "version 7 with flags 0x%1: a version-7 file carries the NEAR flag (16)" )
+			.arg( h.flags, 0, 16 ) );
+	if ( ( h.flags & LODO_FLAG_NEAR ) && h.version != LODO_VERSION_NEAR && h.version != LODO_VERSION_CHARTS )
+		return refuse( QString( "version %1 with flags 0x%2: the NEAR flag (16) is set only on a version-7 or -8 file" )
 			.arg( h.version ).arg( h.flags, 0, 16 ) );
 	h.pluginCorpusHash = getLE<quint64>( p + H_PLUGIN );
 	h.objectCorpusHash = getLE<quint64>( p + H_OBJECT );
@@ -2064,10 +2085,20 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 			return refuse( QString( "colourVertexCount %1 is above the file's %2 vertices" )
 				.arg( h.colourVertexCount ).arg( h.vertexCount ) );
 	}
+	/* v8: the chart stream's offset at 0xE0, never zero on v8 (the stream is
+	 * what makes a file v8); below v8 those bytes are pad and the sweep refuses them. */
+	const bool v8 = h.version == LODO_VERSION_CHARTS;
+	if ( v8 ) {
+		h.offChartStream = getLE<quint64>( p + H_OFF_CHARTS );
+		if ( h.offChartStream == 0 )
+			return refuse( QStringLiteral( "version 8 with no chart stream (offset 0 at 0xE0): v8 is written only with one" ) );
+	}
 	for ( int i = H_RESERVED_CE; i < int( LODO_HEADER_BYTES ); i++ ) {
 		if ( i >= H_CARDCOUNT && i < H_RESERVED_D4 )
 			continue;
 		if ( v5 && i >= H_COLOURCOUNT && i < H_RESERVED_E0 )
+			continue;
+		if ( v8 && i >= H_OFF_CHARTS && i < H_RESERVED_E8 )
 			continue;
 		if ( p[i] != 0 )
 			return refuse( QString( "reserved header byte at 0x%1 is not zero" ).arg( i, 2, 16, QChar( '0' ) ) );
@@ -2076,8 +2107,9 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		return refuse( QString( "fileBytes %1 but the file is %2 bytes" ).arg( h.fileBytes ).arg( file.size() ) );
 
 	struct Tab { const char * name; quint64 off; quint64 bytes; };
-	const int nTabs = h.colourVertexCount ? 9 : 8;
-	const Tab tabs[9] = {
+	/* v8: the chart stream is the last table when present; the colour stream
+	 * keeps its place before it (an absent colour stream has no entry). */
+	Tab tabs[10] = {
 		{ "base table", h.offBases, quint64( h.baseCount ) * sizeof( LodoBase ) },
 		{ "mesh table", h.offMeshes, quint64( h.meshCount ) * sizeof( LodoMesh ) },
 		{ "cluster table", h.offClusters, quint64( h.clusterCount ) * sizeof( LodoCluster ) },
@@ -2086,7 +2118,11 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		{ "local-index blob", h.offLocalIndices, quint64( h.clusterCount ) * LODO_LOCAL_INDEX_BYTES },
 		{ "vertex blob", h.offVertices, quint64( h.vertexCount ) * sizeof( LodoVertex ) },
 		{ "string blob", h.offStrings, quint64( h.stringBytes ) },
-		{ "colour stream (v5)", h.offColours, quint64( h.colourVertexCount ) * LODO_COLOUR_STRIDE } };
+		{ "colour stream (v5)", h.offColours, quint64( h.colourVertexCount ) * LODO_COLOUR_STRIDE },
+		{ "chart stream (v8)", h.offChartStream, quint64( h.clusterCount ) * LODO_CHART_STRIDE } };
+	int nTabs = h.colourVertexCount ? 9 : 8;
+	if ( v8 )
+		tabs[nTabs++] = tabs[9];
 	quint64 prevEnd = LODO_HEADER_BYTES;
 	for ( int ti = 0; ti < nTabs; ti++ ) {
 		const Tab & t = tabs[ti];
@@ -2205,6 +2241,51 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		if ( row != h.colourVertexCount )
 			return refuse( QString( "colourVertexCount %1 but the colour-flagged meshes hold %2 vertices" )
 				.arg( h.colourVertexCount ).arg( row ) );
+	}
+	/* v8: the chart stream. Checked with or without the payload check, like
+	 * the colours, because a consumer indexes patch tables with these bytes:
+	 * a slot past a cluster's triangleCount holds 0xFF; an id is a chart
+	 * (0..252), 0xFE (foliage) or 0xFF (none); and a mesh's level-0 chart ids
+	 * are DENSE from 0, since the `.lodp` gives a placement exactly that many
+	 * chart rows and the draw side indexes firstChart + id. */
+	if ( v8 ) {
+		const unsigned char * cs = p + h.offChartStream;
+		L.chartStream.assign( cs, cs + size_t( h.clusterCount ) * LODO_CHART_STRIDE );
+		for ( size_t mi = 0; mi < L.meshes.size(); mi++ ) {
+			const LodoMesh & m = L.meshes[mi];
+			int maxL0 = -1, maxAny = -1;
+			std::vector<bool> seen;
+			for ( quint64 c = m.clusterFirst; c < quint64( m.clusterFirst ) + m.clusterCount && c < L.clusters.size(); c++ ) {
+				const bool l0 = L.clusterLods[size_t( c )].level == 0;
+				for ( quint32 t = 0; t < LODO_CHART_STRIDE; t++ ) {
+					const quint8 id = cs[c * LODO_CHART_STRIDE + t];
+					if ( t >= L.clusters[size_t( c )].triangleCount ) {
+						if ( id != 0xFF )
+							return refuse( QString( "chart stream: cluster %1 slot %2 is past its %3 triangles but holds 0x%4, not 0xff" )
+								.arg( c ).arg( t ).arg( L.clusters[size_t( c )].triangleCount ).arg( id, 2, 16, QChar( '0' ) ) );
+						continue;
+					}
+					if ( id == 0xFD )
+						return refuse( QString( "chart stream: cluster %1 triangle %2 holds 0xfd, which is no chart id" ).arg( c ).arg( t ) );
+					if ( id >= 0xFE )
+						continue;
+					maxAny = std::max( maxAny, int( id ) );
+					if ( l0 ) {
+						if ( seen.size() <= id )
+							seen.resize( size_t( id ) + 1, false );
+						seen[id] = true;
+						maxL0 = std::max( maxL0, int( id ) );
+					}
+				}
+			}
+			for ( int k = 0; k <= maxL0; k++ )
+				if ( !seen[size_t( k )] )
+					return refuse( QString( "chart stream: mesh %1's level-0 chart ids are not dense (no triangle of chart %2, "
+						"highest %3)" ).arg( mi ).arg( k ).arg( maxL0 ) );
+			if ( maxAny > maxL0 )
+				return refuse( QString( "chart stream: mesh %1 has a coarser-level triangle in chart %2, past its level-0 "
+					"charts (highest %3)" ).arg( mi ).arg( maxAny ).arg( maxL0 ) );
+		}
 	}
 
 	if ( payloadCheck ) {
@@ -2360,7 +2441,7 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		}
 		for ( size_t i = 0; i < L.materials.size(); i++ ) {
 			const LodoMaterial & m = L.materials[i];
-			if ( m.features && h.version < LODO_VERSION_NEAR )
+			if ( m.features && !( h.flags & LODO_FLAG_NEAR ) )
 				return refuse( QString( "material %1: reserved byte is not zero" ).arg( i ) );
 			if ( m.features & ~LODO_MAT_FEATURES_KNOWN )
 				return refuse( QString( "material %1: features 0x%2 set reserved bits (5..7)" ).arg( i ).arg( m.features, 0, 16 ) );
@@ -2481,6 +2562,18 @@ QStringList lodoDescribe( const LodoHeader & h, const LodoLibrary * lib )
 		<< QString( "offColours %1" ).arg( h.offColours )
 		<< QString( "indexCrc32 0x%1" ).arg( h.indexCrc32, 8, 16, QChar( '0' ) )
 		<< QString( "fileBytes %1" ).arg( h.fileBytes );
+	if ( h.version == LODO_VERSION_CHARTS )
+		out << QString( "offChartStream %1" ).arg( h.offChartStream );
+	if ( lib && !lib->chartStream.empty() ) {
+		quint64 charted = 0, foliage = 0, none = 0;
+		for ( size_t c = 0; c < lib->clusters.size(); c++ )
+			for ( quint32 t = 0; t < lib->clusters[c].triangleCount; t++ ) {
+				const quint8 id = lib->chartStream[c * LODO_CHART_STRIDE + t];
+				( id == 0xFE ? foliage : id == 0xFF ? none : charted )++;
+			}
+		out << QString( "chartTriangles %1" ).arg( charted ) << QString( "chartFoliageTriangles %1" ).arg( foliage )
+			<< QString( "chartNoneTriangles %1" ).arg( none );
+	}
 	if ( lib ) {
 		quint64 tris = 0;
 		for ( const LodoCluster & c : lib->clusters )

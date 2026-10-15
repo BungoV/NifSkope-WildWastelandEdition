@@ -71,6 +71,9 @@ def resign_lodo(b):
         # v5: the colour blob is written LAST and joins indexCrc32 only when present
         # (the fixture has none; a real baked library does)
         table.append((offColours, colourCount * 4))
+    if get(b, 0x04, 'I')[0] == 8:
+        # v8 (lane LODP1): the chart stream after everything, clusterCount x 16 bytes
+        table.append((get(b, 0xE0, 'Q')[0], clusterCount * 16))
     crc = 0
     for off, size in table:
         crc = crc32(bytes(b[off:off + size]), crc)

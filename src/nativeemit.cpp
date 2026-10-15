@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "nativeemit.h"
 #include "lodbfile.h"
 #include "lodifile.h"
+#include "lodpplace.h"
 #include "lodgen.h"
 #include "esmdata.h"
 #include "lodgenlayout.h"
@@ -114,6 +115,7 @@ struct State
 	 *  back: the `.lodi` stays at version 6, byte for byte, with a 256-byte
 	 *  header block and nothing at 0x100. */
 	bool lodiV7 = true;
+	bool patchCharts = false;     //!< LODP1: write the .lodo v8 chart stream
 	/*! v9 (lane HORIZON3, 2026-09-19; kept by lane HORIZONOUT when the rest of
 	 *  that lane's work was dropped): mark the placements a player can scrap at
 	 *  a workshop, `LODI_INST_SCRAPPABLE`. It is what excludes a workshop-owned
@@ -176,6 +178,7 @@ struct NativeLadderOptions
 	bool vertexAo = true;
 	bool lodiV7 = true;
 	bool scrappable = false;            //!< v9: mark workshop-scrappable placements; off = .lodi v7
+	bool patchCharts = false;          //!< LODP1: the .lodo v8 chart stream; off = the .lodo as before, byte for byte
 	bool identityJoinLegacy = false;    //!< v7 grouping: the pre-2026-09-19 architecture/box rule
 	float identityJoinGap = 64.0f;      //!< v7 grouping: the MESH-to-MESH gap two placements join at
 	bool identityJoinContact = true;    //!< IDENT1: the contact join (off = the proximity rule above)
@@ -1077,6 +1080,7 @@ void lodgenNativeBegin( const EsmWorld * world, const QString & outDir, NativeMo
 	s.vertexAo = o.vertexAo;
 	s.lodiV7 = o.lodiV7;
 	s.scrappable = o.scrappable;
+	s.patchCharts = o.patchCharts;
 	s.identityJoinLegacy = o.identityJoinLegacy;
 	s.identityJoinGap = o.identityJoinGap;
 	s.identityJoinContact = o.identityJoinContact && !o.identityJoinLegacy;
@@ -1111,6 +1115,15 @@ void lodgenNativeLodiV7Option( bool on )
 void lodgenNativeScrappableOption( bool scrappable )
 {
 	ladderOpts().scrappable = scrappable;
+}
+
+/*! LOD PRTP step 1 (lane LODP1, 2026-10-15): the `.lodo` v8 CHART STREAM,
+ *  one byte a cluster triangle naming the patch chart it belongs to
+ *  (src/lodpplace.h). OFF by default and off is the exact way back: no
+ *  stream, the `.lodo` stays v6/v7 byte for byte. */
+void lodgenNativePatchChartsOption( bool on )
+{
+	ladderOpts().patchCharts = on;
 }
 
 void lodgenNativeIdentityJoinOption( bool legacy, float gapWorld )
@@ -2272,6 +2285,9 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			libraryWhy = QStringLiteral( "the previous .lodo's own header disagrees with the record" );
 		else if ( lh.cardCorpusHash != ( s.cardsLinked ? s.cardHash : 0 ) )
 			libraryWhy = QStringLiteral( "the card arrays moved" );
+		else if ( lib.chartStream.empty() == s.patchCharts )
+			libraryWhy = s.patchCharts ? QStringLiteral( "--patch-charts is on and the previous .lodo has no chart stream" )
+				: QStringLiteral( "--patch-charts is off and the previous .lodo carries a chart stream" );
 		else
 			libraryReused = true;
 		if ( libraryReused ) {
@@ -3073,6 +3089,35 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	 * touched, not even opened again -- `lh` is the header the reuse read
 	 * gave back, so every census clause below reads the same numbers it
 	 * would have read from a fresh write. */
+	/* LODP1: the chart stream, cut from the finished library just before it
+	 * is written. Under reuse the read file already carries it (the reuse
+	 * chain refused a file that disagrees with the switch). */
+	quint64 pcMeshes = 0, pcCharts = 0, pcTreeMeshes = 0, pcMaxCharts = 0;
+	if ( s.patchCharts && !libraryReused ) {
+		std::vector<quint8> meshCharts;
+		if ( !lodpChartStream( lib, &lib.chartStream, &meshCharts, &err ) )
+			return fail( QStringLiteral( "patch charts: " ) + err );
+	}
+	if ( s.patchCharts ) {
+		for ( quint32 mi = 0; mi < lib.meshes.size(); mi++ ) {
+			const LodoMesh & m = lib.meshes[mi];
+			int top = -1;
+			bool tree = false;
+			for ( quint32 c = m.clusterFirst; c < m.clusterFirst + m.clusterCount; c++ )
+				for ( int t = 0; t < lib.clusters[c].triangleCount; t++ ) {
+					quint8 v = lib.chartStream[size_t( c ) * LODO_CHART_STRIDE + size_t( t )];
+					if ( v == LODP_CHART_FOLIAGE )
+						tree = true;
+					else if ( v <= LODP_CHART_MAX )
+						top = std::max( top, int( v ) );
+				}
+			pcMeshes++;
+			pcCharts += quint64( top + 1 );
+			pcMaxCharts = std::max( pcMaxCharts, quint64( top + 1 ) );
+			if ( tree )
+				pcTreeMeshes++;
+		}
+	}
 	if ( !libraryReused && !lodoWrite( lodoPath, lib, &lh, &err ) )
 		return fail( err );
 	g_nativeStage.lodo = stageTimer.restart();
@@ -5649,6 +5694,11 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				.arg( int( stats.instances ) - paoUnmeasured ).arg( paoUnmeasured )
 				.arg( LODI_PLACEMENT_AO_UNMEASURED, 2, 16, QChar( '0' ) )
 				: QStringLiteral( "OFF (--native-no-placement-ao)" ) );
+		if ( s.patchCharts )
+			ladderLine += QString( "; patch charts ON (.lodo v8): %1 meshes, %2 charts (at most %3 a mesh), %4 meshes with foliage, "
+				"stream %5 bytes" )
+				.arg( pcMeshes ).arg( pcCharts ).arg( pcMaxCharts ).arg( pcTreeMeshes )
+				.arg( quint64( lib.chartStream.size() ) );
 		ladderLine += QString( "; vertex AO %1" )
 			.arg( s.vertexAo && s.placementAo ? QString( "ON: %1 instances streamed (%2 bytes, mean %3, %4 below 128), %5 empty, %6 chunk(s) cast, %7 without land" )
 				.arg( vaoInstances ).arg( vaoBytes ).arg( vaoBytes ? vaoSum / double( vaoBytes ) : 0.0, 0, 'f', 1 ).arg( vaoDark )
