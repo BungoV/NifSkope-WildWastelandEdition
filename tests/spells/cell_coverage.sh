@@ -8,13 +8,15 @@
 #   drop       the same on a copy of the bake whose probes inside a box (DROP: half size round the camera's look-at)
 #              stand on the nearest probe outside it (indices, links and the grid's box unchanged): a made gap
 #   red        --red nofilter: the drop picture with WW_CELL_PV_RED=nofilter (the plain trilinear's k)
+#              --red nolastfill: the bake as is with WW_CELL_PV_RED=nolastfill (no last fill: a pocket no probe
+#              reached whose seen fill finds nothing takes the plain trilinear, black in a wall's empty voxels)
 # tests/spells/cell_coverage_check.py judges:
 #   A  the made gap: the drop picture paints >= 500 magenta pixels inside the box, the bake as is paints 0 there
 #   B  each picture's magenta pixels are the pixels where its own dump's k (cell_rooms_check.gi_sample, rebuilt
 #      offline) is <= 0.01, on 20000 clean pixels, agree >= 99.5% and the counts within 1% (+ 20)
-# RED CONTROL: --red nofilter must FAIL B.
+# RED CONTROLS: --red nofilter must FAIL B; --red nolastfill must FAIL A (Vault 111's room-65 pixel turns magenta).
 #
-# USAGE  bash tests/spells/cell_coverage.sh [--red nofilter]      (one NifSkope at a time: withlock.sh nifskope)
+# USAGE  bash tests/spells/cell_coverage.sh [--red nofilter|nolastfill]      (one NifSkope at a time: withlock.sh nifskope)
 #        BAKES=<folder with Vault111Cryo/bake + soup.psp> OUT=<absolute dir>
 
 set -u
@@ -44,7 +46,7 @@ ESM="${ESM:-X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm}"
 DATA="${DATA:-E:/Tools/Fallout 4/DataUnpacked/Data}"
 RED=""
 [ "${1:-}" = "--red" ] && RED="${2:-}"
-case "$RED" in ""|nofilter) ;; *) echo "unknown red $RED"; exit 2 ;; esac
+case "$RED" in ""|nofilter|nolastfill) ;; *) echo "unknown red $RED"; exit 2 ;; esac
 OUT="${OUT:-$REPO/scratchpad/wallstack1_coverage}"
 CELL=Vault111Cryo
 CAM="${CAM:-350,-512,40}"; VIEW="${VIEW:-4}"; DIST="${DIST:-450}"
@@ -95,6 +97,12 @@ if [ -z "$RED" ]; then
 	python "$(dirname "$0")/cell_coverage_check.py" "$run" cov drop "$CAM" "$DROP" > "$run/check.txt" 2>&1
 	sed 's/^/  /' "$run/check.txt" | tee -a "$LOG"
 	check "A and B hold" "$(grep -q "^coverage PASS" "$run/check.txt" && echo 1 || echo 0)"
+elif [ "$RED" = nolastfill ]; then
+	[ "$(shoot "$run/bake" red_$RED WW_CELL_LIT=0 WW_CELL_GI=0 WW_CELL_PASS="Probe coverage" WW_CELL_PV_RED="$RED")" = 1 ] || ok=0
+	check "the red picture written" "$ok"
+	python "$(dirname "$0")/cell_coverage_check.py" "$run" red_$RED drop "$CAM" "$DROP" > "$run/check_red_$RED.txt" 2>&1
+	sed 's/^/  /' "$run/check_red_$RED.txt" | tee -a "$LOG"
+	check "the red control FAILS A" "$(grep -q "^A FAIL" "$run/check_red_$RED.txt" && echo 1 || echo 0)"
 else
 	[ "$(shoot "$run/bake_drop" red_$RED WW_CELL_LIT=0 WW_CELL_GI=0 WW_CELL_PASS="Probe coverage" WW_CELL_PV_RED="$RED")" = 1 ] || ok=0
 	check "the red picture written" "$ok"

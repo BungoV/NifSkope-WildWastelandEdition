@@ -198,7 +198,7 @@ void wwCellGiPublish( const void * nif, const WwCellGi & gi );
  *  normal), 3 Surfel color, 4 Surfel light, 5 Brick light (lane BRICK1) (src/gl/cellprobeview.h draws the surfels over a cyan frame),
  *  6 Probe coverage (lane WALLSTACK1: magenta where the GI grid's valid share k, after the rooms and seen filtering, is 0,
  *  so exactly where the probe term lights nothing; grey 0.25 + 0.5 k elsewhere).
- *  Stored as WW/CellPass; the pin WW_CELL_PASS (number or entry name) wins. WW_CELL_PV_RED=direct|nonormal|open|noclamp|nosee|borrow|lendamb|strand|nofilter. */
+ *  Stored as WW/CellPass; the pin WW_CELL_PASS (number or entry name) wins. WW_CELL_PV_RED=direct|nonormal|open|noclamp|nosee|borrow|lendamb|strand|firstslot|tiepick|lonesky|nofilter|nolastfill. */
 QStringList wwCellPassNames();
 int wwCellPass();
 //! the Pass this document draws: the stored one once its bake is relit (a GI grid published), else Combined

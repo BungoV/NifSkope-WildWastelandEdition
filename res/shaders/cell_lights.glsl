@@ -385,6 +385,7 @@ vec4 cellGiRoomSample( vec3 P, vec3 N, vec3 from, bool outdoorsOnly, out ivec2 L
  * black, or with rooms the plain trilinear, which ignores walls) takes the weighted mean of the valid voxels within
  * 2 voxels (the 4x4x4 block round the sample), of the surface's own room (L) when the grid has rooms; weight
  * (1 - d / 2.5)^2 in voxels. Returns rgba / the weight (cellGiE divides by .a); .a = 0: nothing in reach. */
+const ivec2 cellGiAnyRoom = ivec2( -2 );	// lane WALLSTACK1: cellGiFillAt's L for the last fill (every voxel's first slot, as the trilinear reads)
 vec4 cellGiFillAt( vec3 P, vec3 N, ivec2 L )
 {
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel - 0.5;
@@ -402,7 +403,7 @@ vec4 cellGiFillAt( vec3 P, vec3 N, ivec2 L )
 		if ( w <= 0.0 )
 			continue;
 		int base = 0;
-		if ( cellGiRooms ) {
+		if ( cellGiRooms && L != cellGiAnyRoom ) {
 			if ( L.x < 0 )
 				return vec4( 0.0 );	// rooms but no room here: nothing safe to borrow
 			ivec2 S = cellRoomUnpack( texelFetch( cellGiSlots, c, 0 ).r );
@@ -598,7 +599,7 @@ vec4 cellGiStrandPick( vec3 P, vec3 N, out int path )
 	return useIn ? a : o;
 }
 
-int cellGiPath = 0;	// lane GIBLACK1: probe 95, the branch cellGiSample took (1 room blend, 2 room fill, 3 seen fill, 4 trilinear, 5 stranded: nothing reached, the trilinear; lane GIBLACK2: stranded 6 room blend, 7 room fill, 8 seen fill, 9 sealed dark)
+int cellGiPath = 0;	// lane GIBLACK1: probe 95, the branch cellGiSample took (1 room blend, 2 room fill, 3 seen fill, 4 trilinear, 5 stranded: nothing reached, the trilinear; lane GIBLACK2: stranded 6 room blend, 7 room fill, 8 seen fill, 9 sealed dark; lane WALLSTACK1: 10 the last fill)
 vec4 cellGiSample( vec3 P, vec3 N )
 {
 	bool fill = cellGiFill && cellInterior && !cellGiSky;	// interiors only: an exterior's gap keeps the weather's ambient (cellGiSkyK), also under the keepamb red
@@ -658,10 +659,20 @@ vec4 cellGiSample( vec3 P, vec3 N )
 	} else
 		cellGiPath = 4;
 	vec4 s = cellGiTrilinear( P, N );
-	if ( fill && !cellGiRooms && s.a <= 0.01 ) {	// lane GICAL1: a gap in a grid without rooms
-		vec4 f = cellGiFillAt( P, N, Ls );
-		if ( f.a > 0.01 )
+	/* lane GICAL1: a gap in a grid without rooms. Lane WALLSTACK1: with rooms too, the last fill (probe 95 path 10). A surface
+	 * whose room no probe reached (a pocket: Vault 111's 30-cell room 65 by the cryo pods) and whose seen fill finds no
+	 * lit voxel (its view line to the one lit voxel grazes a wall cell, sub-pixel by sub-pixel) gets here; the plain
+	 * trilinear then sits on a layer of empty voxels inside the wall (a 0.0009) and the surface drew black: the coverage
+	 * gate's judge A pixel. The last fill is the trilinear's own reach and rule (every voxel's first slot, through walls),
+	 * weighted over the valid voxels only. Red WW_CELL_PV_RED=nolastfill: the plain trilinear's black. One call site:
+	 * the program's size (see cellPassOut). */
+	if ( fill && s.a <= 0.01 && ( !cellGiRooms || ( cellPassRed & ( 8 | 4096 ) ) == 0 ) ) {	// the noclamp red keeps its old tail
+		vec4 f = cellGiFillAt( P, N, cellGiRooms ? cellGiAnyRoom : Ls );
+		if ( f.a > 0.01 ) {
+			if ( cellGiRooms )
+				cellGiPath = 10;
 			return f;
+		}
 	}
 	return s;
 }

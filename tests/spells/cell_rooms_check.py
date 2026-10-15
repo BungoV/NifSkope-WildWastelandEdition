@@ -593,7 +593,10 @@ def gi_sample(G, R, P, N, fill=None, sky=False):
         else:
             GI_PLAIN[0] += 1
     s, ws = gi_blend(G, None, i0, f, sl, n2)
-    if fill and R is None and s[3] <= 0.01:
+    # lane WALLSTACK1: with rooms too, the last fill (the shader's probe 95 path 10): a pocket no probe reached whose seen
+    # fill finds nothing; the trilinear's reach and rule (every voxel's first slot), weighted over the valid voxels only.
+    # GI_CHECK_LASTFILL=0: the plain trilinear's black (the shader's red WW_CELL_PV_RED=nolastfill)
+    if fill and (R is None or not LASTFILL_RED[0]) and s[3] <= 0.01:
         fo = gi_fill(G, None, P, N, False)
         if fo[3] > 0.01:
             GI_FILLED[0] += 1
@@ -642,6 +645,7 @@ LONE_RED = [os.environ.get('GI_CHECK_LONE', '1') == '0']   # lane GIDARK1: red l
 BOTH_RED = [os.environ.get('GI_CHECK_BOTH', '1') == '0']   # lane GIDARK1: red firstslot (WW_CELL_PV_RED=firstslot): a two-room read takes the voxel's first matching slot alone
 RED_EMPTY = [False]   # red emptyslot: the twin weighs a room's empty slots (the old shader: black, the no-probe marker)
 SEE_RED = [os.environ.get('GI_CHECK_SEE', '1') == '0']   # lane GISHADE1: red nosee (the shader's WW_CELL_PV_RED=nosee)
+LASTFILL_RED = [os.environ.get('GI_CHECK_LASTFILL', '1') == '0']   # lane WALLSTACK1: red nolastfill (the shader's WW_CELL_PV_RED=nolastfill)
 GI_PLAIN = [0]     # samples that found rooms but no room with weight: the shader's plain (unclamped) trilinear
 GI_FILL = [os.environ.get('GI_CHECK_FILL', '1') != '0']   # lane GICAL1: the gap fill (GI_CHECK_FILL=0: the shader pin WW_CELL_GI_FILL=0)
 GI_FILLED = [0]    # samples the fill answered
