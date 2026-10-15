@@ -23,6 +23,23 @@ the plugin is read here, every ray is traced here through the run's own soup.psp
         (gi_rooms.bin) against each scene's own rooms (same room one label, rooms apart, outdoors 0), the panes and
         the hatch naming both sides; the 2-unit wall: cellGiRoomSample redone here (gi_sample) on the dark side
         reads no more than the dark room's own brightest probe face, and every sample has weight.
+        Lane GIBLACK2: scene "recess" (a 130-unit recess open to the sky, a far triangle that makes the soup's box
+        huge): the recess air is outdoors (0). Red --red soupbox (the rooms grid over the soup's box) FAILS.
+  recess <dump> <fixture> [--lo 0.5] [--hi 2.0] [--expect fail]
+        Lane GIBLACK2: a run's GI dump (WW_CELL_GI_DUMP) at a recess against the tracer (tests/fixtures/giblack2_memden.tsv:
+        world points, normals, bounce_reference cosine sky share). C the rooms grid spans the GI grid's box, not the
+        soup's; S per point set: the sky the frame draws (the twin's sky-share sample: sky x k + 1 - k, cellGiSample's
+        exterior path) has a mean within lo..hi times the tracer's, no point is lent the flat ambient and no 0.75 read
+        lands in an indoor room. Red WW_CELL_ROOMS_RED=soupbox FAILS (run with --expect fail).
+  strand <dump> <fixture> [--margin 0.03] [--margin1 0.05] [--expect fail]
+        Lane GIBLACK2: stranded surfaces (both room reads solid: the lend rule) in a sky-lit grid against the tracer
+        (tests/fixtures/giblack2_strand_*.tsv: set px py x y z nx ny nz tracer; set 0 surfaces a viewer can stand
+        before, set 1 tight spaces). Their answer comes from the evidence search (strand_pick): the nearest indoor
+        or outdoors air within 3 cells, never a guess at the outdoors. Per set: the points the tracer puts indoors
+        (sky share <= 0.02) gain no sky (mean drawn - tracer <= margin, none drawn 0.5+, at most a twentieth 0.1+
+        over), the rest no black (drawn < 0.01 where the tracer gives 0.03+) and no open-sky bright (drawn 0.5+
+        where it gives under 0.25); set 1 (tight) the indoors rule only, mean within margin1. Red
+        GI_CHECK_STRAND=1 (the shader's WW_CELL_PV_RED=strand: GIBLACK1's law) FAILS.
 One verdict line per subcommand last; exit 0 on PASS, 1 on FAIL.
 """
 import math
@@ -504,8 +521,8 @@ def gi_sample(G, R, P, N, fill=None, sky=False):
     fills the GI grid of a grid that is not sky lit only: pass fill=False for a sky grid or the sky-share grid.
     sky (lane GIBLACK1): the grid is sky lit (an exterior; the shader's cellGiSky): the lend rule. A surface whose own
     reads (0.75 and 1.75 cell) are both solid borrows only the outdoors (room 0): its neighbour search keeps outdoors
-    cells, its seen fill runs only from an outdoors view point, and with neither it has no answer (zeros: the weather's
-    ambient). The same when the 0.75 read is solid and the 1.75 read lands in an indoors room (a normal turned toward
+    cells, its seen fill runs only from an outdoors view point, and with neither it takes the plain trilinear (lane
+    GIBLACK2; it was zeros, the weather's flat ambient: the open sky's light in a recess). The same when the 0.75 read is solid and the 1.75 read lands in an indoors room (a normal turned toward
     the pocket), whose direct read is then not taken either. GI_CHECK_BORROW=1: the old search (the shader's red WW_CELL_PV_RED=borrow)."""
     P, N = np.asarray(P, float), np.asarray(N, float)
     fill = GI_FILL[0] if fill is None else fill
@@ -524,6 +541,19 @@ def gi_sample(G, R, P, N, fill=None, sky=False):
         frm = see_from(R, P, N)
         L2 = room_at(R, P + N * 1.75 * R['cell'])
         lend = sky and not BORROW_RED[0] and room_solid(R, P + N * 0.75 * R['cell']) and (L2[0] < 0 or (L2[0] != 0 and L2[1] != 0))
+        if lend and not STRAND_RED[0]:
+            # lane GIBLACK2: a stranded surface takes the room its evidence search reaches (strand_pick), never a
+            # guess at the outdoors; nothing reached: the plain trilinear
+            GI_STRAND[0] += 1
+            v, code = strand_pick(G, R, P, N, i0, f, sl, n2)
+            STRAND_LAST[0] = code
+            if v is not None:
+                return v
+            GI_LENT[0] += 1
+            if LENDAMB_RED[0]:
+                return np.zeros(4)
+            s, ws = gi_blend(G, None, i0, f, sl, n2)
+            return s
         if L is not None and not (lend and L[0] != 0 and L[1] != 0):
             s, ws = gi_blend(G, L, i0, f, sl, n2, R, frm)
             if ws > 0:
@@ -552,9 +582,11 @@ def gi_sample(G, R, P, N, fill=None, sky=False):
             if so[3] > 0.01:
                 return so
         if lend:
-            GI_LENT[0] += 1
-            return np.zeros(4)
-        GI_PLAIN[0] += 1
+            GI_LENT[0] += 1   # lane GIBLACK2: the plain trilinear below, never the flat ambient (zeros)
+            if LENDAMB_RED[0] or STRAND_RED[0]:
+                return np.zeros(4)
+        else:
+            GI_PLAIN[0] += 1
     s, ws = gi_blend(G, None, i0, f, sl, n2)
     if fill and R is None and s[3] <= 0.01:
         fo = gi_fill(G, None, P, N, False)
@@ -606,7 +638,96 @@ GI_PLAIN = [0]     # samples that found rooms but no room with weight: the shade
 GI_FILL = [os.environ.get('GI_CHECK_FILL', '1') != '0']   # lane GICAL1: the gap fill (GI_CHECK_FILL=0: the shader pin WW_CELL_GI_FILL=0)
 GI_FILLED = [0]    # samples the fill answered
 BORROW_RED = [os.environ.get('GI_CHECK_BORROW', '0') == '1']   # lane GIBLACK1: red borrow (the shader's WW_CELL_PV_RED=borrow)
-GI_LENT = [0]      # lane GIBLACK1: samples the lend rule left with no answer (the weather's ambient)
+LENDAMB_RED = [os.environ.get('GI_CHECK_LENDAMB', '0') == '1']   # lane GIBLACK2: red lendamb (WW_CELL_PV_RED=lendamb): a lent surface with no answer takes the flat ambient
+GI_LENT = [0]      # lane GIBLACK1: samples the lend rule left with no answer (lane GIBLACK2: they take the plain trilinear)
+STRAND_RED = [os.environ.get('GI_CHECK_STRAND', '0') == '1']   # lane GIBLACK2: red strand (WW_CELL_PV_RED=strand): GIBLACK1's whole law (the outdoors-only borrow, then the flat ambient) instead of the evidence search
+STRAND_LAST = [0]  # lane GIBLACK2: the stranded branch of the last sample (5 trilinear, 6 blend, 7 room fill, 8 seen fill, 9 indoor no data)
+GI_STRAND = [0]    # lane GIBLACK2: samples of stranded surfaces (the evidence search ran)
+STRAND_T = (0.75, 1.75, 2.75)   # the evidence search: along the normal (cells) ...
+STRAND_S = 2                    # ... and up to 2 cells round it in the plane of the two axes off the normal's largest
+STRAND_TIE = 1.0                # indoor and outdoor cells within this many cells of each other: the tie rule (strand_pick)
+
+
+def strand_evidence(R, P, N):
+    """cellGiStrandSearch (lane GIBLACK2): a stranded surface (both its reads solid, or the 1.75 read indoors) in a
+    sky-lit grid: the air cells at P + N x (0.75, 1.75, 2.75) cell, each with up to 2 cells round it in the plane of
+    the two axes off the normal's largest (75 cells, only those whose centre is in front of the surface). Returns the
+    nearest indoor and the nearest outdoor (room 0) cell, each (distance from P to the cell's box, room, the cell's
+    centre) or None."""
+    c = R['cell']
+    m = int(np.argmax(np.abs(N)))
+    ta, tb = [t for t in range(3) if t != m]
+    best = [None, None]
+    for t in STRAND_T:
+        q0 = P + N * t * c
+        for sa in range(-STRAND_S, STRAND_S + 1):
+            for sb in range(-STRAND_S, STRAND_S + 1):
+                e = np.zeros(3)
+                e[ta], e[tb] = sa, sb
+                q = q0 + e * c
+                L = room_at(R, q)
+                if L[0] < 0:
+                    continue
+                lo = R['origin'] + np.floor((q - R['origin']) / c) * c
+                Cc = lo + 0.5 * c
+                if float((Cc - P) @ N) <= 0.0:
+                    continue
+                d = float(np.linalg.norm(np.maximum(np.maximum(lo - P, P - lo - c), 0.0)))
+                k = 1 if (L[0] == 0 or L[1] == 0) else 0
+                if best[k] is None or d < best[k][0]:
+                    best[k] = (d, L, Cc)
+    return best[0], best[1]
+
+
+def strand_answer(G, R, P, N, i0, f, sl, n2, L, Ce):
+    """A stranded surface's answer from room L seen from the air cell's centre Ce: its blend (6), indoors the room's
+    fill (7), the seen fill from Ce (8), indoors with no light in reach the sealed room's dark (9: sky 0, the ambient
+    replaced); outdoors with nothing: (None, 5)."""
+    indoor = L[0] != 0 and L[1] != 0
+    s, ws = gi_blend(G, L, i0, f, sl, n2, R, Ce)
+    if ws > 0:
+        return s / ws, 6
+    if indoor:
+        fo = gi_fill(G, L, P, N, True)
+        if fo[3] > 0.01:
+            return fo, 7
+    if not SEE_RED[0]:
+        so = gi_seen_fill(G, R, P, N, Ce)
+        if so[3] > 0.01:
+            return so, 8
+    if indoor:
+        return np.array([0.0, 0.0, 0.0, 1.0]), 9
+    return None, 5
+
+
+def strand_pick(G, R, P, N, i0, f, sl, n2):
+    """Lane GIBLACK2: every reached cell indoors: the indoor room; only the outdoors: room 0; both: the nearer, and
+    when they lie within STRAND_TIE cell of each other (the room grid cannot tell which side of a thin wall the
+    surface is on) the answer whose light is nearer the surface's own baked light (the plain trilinear, which sees
+    through walls but is the bake's own visibility there); nothing reached: (None, 5), the plain trilinear."""
+    a, o = strand_evidence(R, P, N)
+    if a is None and o is None:
+        return None, 5
+    if a is None or o is None:
+        d, L, Ce = a if a is not None else o
+        return strand_answer(G, R, P, N, i0, f, sl, n2, L, Ce)
+    if abs(a[0] - o[0]) >= STRAND_TIE * R['cell']:
+        d, L, Ce = a if a[0] < o[0] else o
+        return strand_answer(G, R, P, N, i0, f, sl, n2, L, Ce)
+    va, ca = strand_answer(G, R, P, N, i0, f, sl, n2, a[1], a[2])
+    vo, co = strand_answer(G, R, P, N, i0, f, sl, n2, o[1], o[2])
+    if vo is None:
+        return va, ca
+    # the shader decides on the grid it samples (the light, sky and bounce): with a dump's full grid beside the sky
+    # grid (G['full']) the twin decides there too and answers from G
+    H = G.get('full', G)
+    ha, _ = strand_answer(H, R, P, N, i0, f, sl, n2, a[1], a[2])
+    ho, _ = strand_answer(H, R, P, N, i0, f, sl, n2, o[1], o[2])
+    t, _ = gi_blend(H, None, i0, f, sl, n2)
+    lum = lambda v: float(v[:3] @ (0.2126, 0.7152, 0.0722))
+    if ho is None or abs(lum(ha) - lum(t)) <= abs(lum(ho) - lum(t)):
+        return va, ca + 10
+    return vo, co + 10
 
 
 def room_solid(R, q):
@@ -863,8 +984,21 @@ def sc_fade():
     return dict(T=T, amask=am, rect=(-100, -100, 1300, 700), light='300,300,220,900,1,1,1', pts=pts)
 
 
+def sc_recess():
+    """lane GIBLACK2: a 130-unit recess between two closed blocks on a street, open to the sky; and a far triangle
+    (x 40000, z 8000, a far soup's reach) that makes the soup's box huge. Over the soup's box the rooms grid's cell grows
+    to ~119 units and the recess air is solid (red "soupbox"); clipped to the GI grid's box the cell stays fine and
+    the recess is outdoors (0), the same as the street."""
+    T = box(-800, -200, -10, 800, 1200, 0)
+    T += box(-600, 0, 0, 0, 400, 400) + box(-600, 530, 0, 0, 1000, 400) + box(-600, 400, 0, -130, 530, 400)
+    T.append(((40000.0, 40000.0, 8000.0), (40001.0, 40000.0, 8000.0), (40000.0, 40001.0, 8000.0)))
+    pts = [('out', (-65, 465, 60)), ('out', (-65, 465, 200)), ('out', (-100, 440, 330)), ('out', (300, 465, 150)),
+           ('blockA', (-300, 200, 200)), ('blockB', (-300, 760, 200))]
+    return dict(T=T, rect=(-700, -100, 700, 1100), light='300,465,220,900,1,1,1', pts=pts)
+
+
 SCENES = [('wall', sc_wall), ('lroom', sc_l), ('church', sc_church), ('lighthouse', sc_lighthouse), ('glass', sc_glass),
-          ('fence', sc_fence), ('fade', sc_fade)]
+          ('fence', sc_fence), ('fade', sc_fade), ('recess', sc_recess)]
 
 
 def synth_cmd(exe, work, red):
@@ -1018,6 +1152,110 @@ def holes_cmd(run, sample, red):
     return 0 if ok else 1
 
 
+def recess_cmd(dump, fixture, lo_x, hi_x, expect):
+    """Lane GIBLACK2: a recess's sky share against the tracer, from a run's GI dump (WW_CELL_GI_DUMP)."""
+    R = read_rooms(dump + '/gi_rooms.bin')
+    G = read_grid(dump + '/gi_skygrid.bin', dump + '/gi_slots.bin')
+    nv, d = G['nv'], G['dims']
+    # the sky part of gi_slots.bin: slot 1's grid, then slot 1's sky grid (the shader's sky lookup reads that one)
+    G['g2'] = np.frombuffer(open(dump + '/gi_slots.bin', 'rb').read(), '<f4', 6 * nv * 4,
+                            32 + 8 * nv + 6 * nv * 4 * 4).reshape(6, d[2], d[1], d[0], 4)
+    G['full'] = read_grid(dump + '/gi_grid.bin', dump + '/gi_slots.bin')   # the grid the shader samples (strand_pick's tie)
+    F = np.loadtxt(fixture, comments='#')
+    rlo, rhi = R['origin'], R['origin'] + np.array(R['dims']) * R['cell']
+    glo, ghi = G['origin'], G['origin'] + np.array(d) * G['voxel']
+    tol = (np.ceil(48.0 / R['cell']) + 4) * R['cell']   # the rooms grid's pad (ceil(pinch / cell) + 2 cells), its rounding up
+    okC = bool((rlo[:2] >= glo[:2] - tol).all() and (rhi[:2] <= ghi[:2] + tol).all())
+    print('C  rooms grid cell %.1f box x %.0f..%.0f y %.0f..%.0f; GI grid voxel %.1f box x %.0f..%.0f y %.0f..%.0f: %s'
+          % (R['cell'], rlo[0], rhi[0], rlo[1], rhi[1], G['voxel'], glo[0], ghi[0], glo[1], ghi[1],
+             'ok (clipped to the GI grid)' if okC else 'WIDER (the soup box: coarse cells)'))
+    good = okC
+    for s, name in ((0, 'wall'), (1, 'spot2'), (2, 'open')):
+        A = F[F[:, 0] == s]
+        if not len(A):
+            continue
+        solid, indoor, lent, drawn = 0, 0, 0, []
+        for row in A:
+            P, N = row[3:6], row[6:9]
+            a = room_at(R, P + N * 0.75 * R['cell'])
+            solid += a[0] < 0
+            indoor += a[0] > 0 and a[1] != 0
+            GI_LENT[0] = 0
+            v = gi_sample(G, R, P, N, fill=False, sky=True)
+            lent += GI_LENT[0] > 0
+            k = min(max(float(v[3]), 0.0), 1.0)
+            drawn.append(float(v[:3].mean()) + 1.0 - k)   # the frame's sky in units of the flat ambient (linear law)
+        drawn, tr = np.array(drawn), A[:, 9]
+        r = drawn.mean() / max(tr.mean(), 1e-6)
+        # the lend rule stays a safety net only: it may not decide the set (at most a tenth of its points lent, a tenth
+        # reading an indoors room at 0.75 cell)
+        # per point: none open-sky bright (drawn 0.5+ where the tracer gives under 0.25: the flat ambient) and none black
+        # (drawn under 0.01 where the tracer gives 0.02+)
+        bright = int(((drawn >= 0.5) & (tr < 0.25)).sum())
+        black = int(((drawn < 0.01) & (tr >= 0.02)).sum())
+        okS = lo_x <= r <= hi_x and lent <= 0.1 * len(A) and indoor <= 0.1 * len(A) and bright == 0 and black == 0
+        good = good and okS
+        print('S  %-5s %3d points: tracer sky %.3f  drawn sky %.3f (x%.2f, band %.2f..%.2f)  0.75 read solid %d indoor %d  '
+              'lent %d  open-sky bright %d black %d: %s' % (name, len(A), tr.mean(), drawn.mean(), r, lo_x, hi_x, solid, indoor, lent, bright, black,
+                                              'ok' if okS else 'OFF'))
+    if expect == 'fail':
+        print('%s  red recess: %s' % ('PASS' if not good else 'FAIL', 'the recess reads off the tracer' if not good else 'the recess still matches'))
+        return 0 if not good else 1
+    print('%s  recess: the recess takes its measured sky share' % ('PASS' if good else 'FAIL'))
+    return 0 if good else 1
+
+
+def strand_cmd(dump, fixture, margin, margin1, expect):
+    """Lane GIBLACK2: stranded surfaces' sky against the tracer (see the head)."""
+    R = read_rooms(dump + '/gi_rooms.bin')
+    G = read_grid(dump + '/gi_skygrid.bin', dump + '/gi_slots.bin')
+    nv, d = G['nv'], G['dims']
+    G['g2'] = np.frombuffer(open(dump + '/gi_slots.bin', 'rb').read(), '<f4', 6 * nv * 4,
+                            32 + 8 * nv + 6 * nv * 4 * 4).reshape(6, d[2], d[1], d[0], 4)
+    G['full'] = read_grid(dump + '/gi_grid.bin', dump + '/gi_slots.bin')
+    F = np.loadtxt(fixture, comments='#', ndmin=2)
+    good = True
+    print('rooms grid cell %.1f, %d rooms; GI grid voxel %.1f; %s' % (R['cell'], R['rooms'], G['voxel'], os.path.basename(fixture)))
+    for s, name in ((0, 'open'), (1, 'tight')):
+        A = F[F[:, 0] == s]
+        if not len(A):
+            continue
+        st, drawn, codes = 0, [], []
+        for row in A:
+            P, N = row[3:6], row[6:9]
+            st += room_solid(R, P + N * 0.75 * R['cell']) and (lambda L2: L2[0] < 0 or (L2[0] != 0 and L2[1] != 0))(room_at(R, P + N * 1.75 * R['cell']))
+            STRAND_LAST[0] = 0
+            v = gi_sample(G, R, P, N, fill=False, sky=True)
+            codes.append(STRAND_LAST[0])
+            k = min(max(float(v[3]), 0.0), 1.0)
+            drawn.append(float(v[:3].mean()) + 1.0 - k)
+        drawn, tr, codes = np.array(drawn), A[:, 9], np.array(codes)
+        ind = tr <= 0.02
+        gi = drawn[ind] - tr[ind]
+        mg = margin if s == 0 else margin1
+        # tight spaces (attic and wall voids): the mean, and at most 1% open-sky bright (a rooms-grid leak to room 0 there,
+        # e.g. the Concord Hardware attic at -58744 69998 6973: GIBLACK1's law draws it the same)
+        okI = (not ind.any()) or (gi.mean() <= mg and (drawn[ind] >= 0.5).sum() <= (0 if s == 0 else 0.01 * ind.sum())
+                                  and (s == 1 or (gi > 0.1).sum() <= 0.05 * ind.sum()))
+        black = int(((drawn < 0.01) & (tr >= 0.03)).sum())
+        bright = int(((drawn >= 0.5) & (tr < 0.25)).sum())
+        okR = s == 1 or (black == 0 and bright == 0)   # tight spaces: the indoors rule only, the rest reported
+        good = good and okI and okR
+        print('S  %-5s %3d points (%d stranded here): indoors by the tracer %d: tracer %.3f drawn %.3f gain %+.3f (margin %.3f), '
+              'drawn 0.5+ %d, 0.1+ over %d; the rest %d: tracer %.3f drawn %.3f, black %d open-sky bright %d: %s'
+              % (name, len(A), st, ind.sum(), tr[ind].mean() if ind.any() else 0, drawn[ind].mean() if ind.any() else 0,
+                 gi.mean() if ind.any() else 0, mg, (drawn[ind] >= 0.5).sum(), (gi > 0.1).sum(), (~ind).sum(),
+                 tr[~ind].mean() if (~ind).any() else 0, drawn[~ind].mean() if (~ind).any() else 0, black, bright,
+                 'ok' if okI and okR else 'OFF'))
+        print('   branches %s (5 trilinear, 6 room blend, 7 room fill, 8 seen fill, 9 sealed dark; +10 tie; 0 not stranded)'
+              % {int(c): int((codes == c).sum()) for c in sorted(set(codes))})
+    if expect == 'fail':
+        print('%s  red strand: %s' % ('PASS' if not good else 'FAIL', 'stranded indoor surfaces take sky' if not good else 'the stranded surfaces still match'))
+        return 0 if not good else 1
+    print('%s  strand: stranded surfaces take their measured sky (indoors none)' % ('PASS' if good else 'FAIL'))
+    return 0 if good else 1
+
+
 if __name__ == '__main__':
     a = sys.argv[1:]
     opt = (lambda k, d='': a[a.index(k) + 1] if k in a else d)
@@ -1029,5 +1267,9 @@ if __name__ == '__main__':
         sys.exit(holes_cmd(a[1], int(opt('--sample', '3000')), opt('--red')))
     if a and a[0] == 'back':
         sys.exit(back_cmd(a[1], opt('--ref'), int(opt('--sample', '24'))))
+    if a and a[0] == 'strand':
+        sys.exit(strand_cmd(a[1], a[2], float(opt('--margin', '0.03')), float(opt('--margin1', '0.05')), opt('--expect', 'pass')))
+    if a and a[0] == 'recess':
+        sys.exit(recess_cmd(a[1], a[2], float(opt('--lo', '0.5')), float(opt('--hi', '2.0')), opt('--expect', 'pass')))
     print(__doc__)
     sys.exit(2)

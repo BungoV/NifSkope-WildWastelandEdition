@@ -1,5 +1,59 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GIBLACK2 (2026-10-14, branch giblack2-20261014): the Memory Den recess takes its measured sky, not the open sky's
+
+- **The recessed wall on the Memory Den street (Goodneighbor, 22h) and the second spot to its right now draw the sky
+  share a path tracer measures for them.** After GIBLACK1 the wall no longer went black, but it drew the weather's
+  full flat ambient: open-sky bright where the tracer gives it 0.07 of the sky.
+- Root cause (`src/probegi.cpp`, `src/proberooms.cpp`): the rooms grid spanned the soup's whole box (the 5x5 cells,
+  about 21000 units), so its cell grew to 95.4 units and the recess's 134-unit air came out solid. The wall's reads
+  were then solid and the lend rule decided it. The rooms grid now spans the GI grid's box (sides and bottom; the top
+  stays the soup's, open sky). A clipped face is not an outdoors border. At Goodneighbor the cell is 39.1 units, the
+  recess air is outdoors (room 0) and the wall takes the room blend of the probes that see it. No re-bake: the rooms
+  are rebuilt at relight and the bake already holds probes inside the recess.
+- The lend rule (`res/shaders/cell_lights.glsl`, `cellGiSample`) stays as a safety net. A lent surface with no
+  outdoors answer now takes the plain trilinear instead of the flat ambient (the open sky's light).
+- Reds (environment only): `WW_CELL_ROOMS_RED=soupbox` (the rooms over the soup's box) and `WW_CELL_PV_RED=lendamb`
+  (a lent surface without an answer takes the flat ambient).
+- **Stranded indoor surfaces in exterior cells no longer take sky.** A stranded surface has both room reads
+  solid (0.75 and 1.75 cells), or the 1.75 read lands indoors. GIBLACK1's lend rule sent all of them to the outdoors,
+  which lit attic voids and back rooms like the open sky. The Concord Hardware is the clearest case: indoor stranded
+  points (the tracer gives 0.001) drew 0.63 of the sky.
+- Now (`cell_lights.glsl`, `cellGiStrandSearch`) the surface searches for evidence in front of itself: air cells at
+  0.75, 1.75 and 2.75 cells along its normal, each with up to 2 cells round it in the plane. It keeps the nearest
+  indoor cell and the nearest outdoor cell.
+  - Only one kind found: it takes that room.
+  - Both found: it takes the nearer one. If they are within one cell of each other, it takes the answer whose light is
+    nearer the bake's own trilinear.
+  - The answer is, in order: that room's blend seen from the air cell, the room's fill, the seen fill, and indoors
+    with no light in reach the sealed room's dark. Nothing found: the plain trilinear.
+  - It never falls back to a flat open-sky default. It runs wherever the grid is sky lit, so in the Museum of Freedom
+    as well (Show Sky and Use Sky Lighting on).
+- Probe 95 now writes r = path / 16, with stranded paths 6 to 9. Red: `WW_CELL_PV_RED=strand` (GIBLACK1's whole law
+  for stranded surfaces). Twin: `GI_CHECK_STRAND=1`.
+- Gates (numeric only; tracer = bounce_reference cosine sky share, 256 rays). Memden recess (22h) against the tracer:
+  - wall x0.64, spot2 x1.05, open x0.72, nothing open-sky bright or black: PASS.
+  - Reds: the soupbox rooms FAIL (wall black 31). GIBLACK1's law on the fixed dump FAILs too (spot2 x1.52, 6
+    open-sky bright).
+  - Probe 95: a room blend decides 92.0% of the wall (box red 33.7%). Near-zero pixels 0.05% (borrow red 17.26%).
+- Stranded gate (`cell_rooms_check.py strand`): the open set's indoor points gain at most 0.03, none drawn 0.5+; the
+  tight set's mean is at most 0.05 and at most 1% of points drawn 0.5+.
+  - Goodneighbor (188 points): PASS; GIBLACK1's law FAILs (indoor 0.61 / 0.75).
+  - Concord Hardware (239 points, 31.2-unit cells, 16h): indoor 0.633 to 0.030 (131 points to 1 at 0.5+): PASS;
+    GIBLACK1's law FAILs.
+  - Museum of Freedom (fresh bake, 178 points, reported): closed rooms 0.508 to 0.041; skylight spots (tracer 0.239)
+    0.317 to 0.268. GIBLACK1's law FAILs. The museum's own check still fails on 2 skylight/facade spots and 5 roof
+    voids under a slab one cell thick.
+- No harm:
+  - ROOMCLAMP1 synth PASS (its red FAILs). Museum and Vault 111 cells gate PASS.
+  - Concord open roof at 16h: GI on/off 1.006 / 0.998 / 0.991: PASS.
+  - Hardware interior, noon: GIBLACK1's law draws 3.6% of the frame 20+ levels brighter.
+  - Concord ceiling picks: median 1.35x, p90 4.18 (GISHADE1: 1.29x, 3.55). The finer rooms grid (48.8 to 31.2 units)
+    moves one point to 57x. The strand law does not touch these points.
+- Known red: Goodneighbor recess2 is still black, with 56% near-zero (GIBLACK1's 12.8% came from lighting it 10x the
+  tracer). It is a covered passage, tracer sky 0.049, and every voxel round it holds no sky. This is the voxel-bake
+  defect, not the law.
+
 ## Lane DECALLIT1 (2026-10-14, branch decallit1-20261014): effect decals take the light of the wall they lie on
 
 - **The white drip stains on the shaded brick wall at Goodneighbor (18:00 foggy) no longer glow.** The drips are
