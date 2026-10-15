@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include "cellsplat.h"		// lane CELLVIEW4
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
+#include "cellcable.h"		// lane CABLES1
 #include "celldecal.h"		// lane PLACED1
 #include "esmdata.h"
 #include "esmweather.h"		// lane FOG2: the fog packing
@@ -171,6 +172,7 @@ struct Bucket
 	WwWaterRecord waterRec;
 	bool grass = false;   // lane GRASSMB1: blades of the game's grass (src/gl/cellgrass.h): the fade applies
 	float grassWave = 0.0f;   // lane GRASSMB1: its GRAS wave period (one bucket per grass type), the wind's phase
+	bool grassNoFade = false;   // lane CABLES1: a swaying cable: the grass wind, never the grass fade
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
 	//! Lane SUNCELL1: where each placed shape's triangles start in `tris` (the culling runs, src/gl/cellcull.h)
@@ -465,7 +467,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		if ( b.landSplat )    // lane TERRBLEND1: the renderer tells the shader the alpha is a share
 			wwCellLandShape( nif, nif->getBlockNumber( iShape ) );
 		if ( b.grass )        // lane GRASSMB1: the renderer fades this shape the game's grass way
-			wwCellGrassShape( nif, nif->getBlockNumber( iShape ), b.grassWave );
+			wwCellGrassShape( nif, nif->getBlockNumber( iShape ), b.grassWave, !b.grassNoFade );
 		nif->set<QString>( iShape, "Name", part > 1
 			? QString( "%1 #%2" ).arg( b.name ).arg( part ) : b.name );
 		nif->set<quint32>( iShape, "Flags", 14 );
@@ -1662,11 +1664,15 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		 *  real defect cannot hide inside the expected one. */
 		bool expectLod = false;
 		QString actorKey;   //!< lane PLACED1: a placed actor (src/cellactor.h); its shapes come from there
+		bool cable = false;   //!< lane CABLES1: a placed cable (BNDS base); its tube is built (src/cellcable.h)
+		WwCableSpec cableSpec;
 		bool loadDoor = false;   //!< lane ROOMCLAMP1: a door with a teleport (XTEL)
 	};
 	QVector<Placement> placements;
 	QHash<QString, int> skippedByType;
 	int refsRead = 0, refsDeleted = 0, refsHidden = 0, refsMarker = 0, refsNoBase = 0;
+	// lane CABLES1: references carrying XBSD, on a BNDS base, placed as cables, detached, XBSD on another base
+	int cableXbsd = 0, cableBnds = 0, cablePlaced = 0, cableDetached = 0, cableOtherBase = 0;
 	QSet<quint32> seenRefs;
 
 	/* lane CELLWORK1: the reference model is emptied HERE, immediately before
@@ -1777,6 +1783,45 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		}
 		const EsmLodBase & lb = world.lodBase( r.base );
 		const bool isScol = std::memcmp( &r.baseType, "SCOL", 4 ) == 0;
+		/* lane CABLES1: A CABLE. Its base (BNDS) has no model: the tube is built from the reference's XBSD and
+		 * the base's look, in the reference's frame, and then placed like any static. WW_CELL_CABLES_RED=off
+		 * leaves it to the "no model" row below, as before the lane. */
+		if ( r.hasSpline )
+			cableXbsd++;
+		if ( std::memcmp( &r.baseType, "BNDS", 4 ) == 0 ) {
+			cableBnds++;
+			if ( wwCellCablesOn() && r.hasSpline && world.bendable( r.base ).exists ) {
+				Placement out;
+				out.base = r.base;
+				out.pos = Vector3( r.pos[0], r.pos[1], r.pos[2] );
+				out.rot.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+				out.scale = r.scale;
+				out.ref = r.formID;
+				out.cellX = cellX;
+				out.cellY = cellY;
+				out.persistent = persistent;
+				out.disabled = disabled;
+				for ( int k = 0; k < 3; k++ ) {
+					out.storedRot[k] = r.rot[k];
+					out.cableSpec.half[k] = r.splineHalf[k];
+				}
+#ifdef ESM_HAS_CELL_FIELDS
+				out.layerForm = r.layer;
+				out.enableParentForm = r.enableParent;
+				out.enableParentOppositeFlag = r.enableParentOpposite;
+#endif
+				out.cable = true;
+				out.cableSpec.slack = r.splineSlack;
+				out.cableSpec.thickness = r.splineThickness;
+				out.cableSpec.detached = r.splineDetached;
+				cablePlaced++;
+				cableDetached += r.splineDetached ? 1 : 0;
+				placements.append( out );
+				return;
+			}
+		} else if ( r.hasSpline ) {
+			cableOtherBase++;   // an XBSD on a base that is not a BNDS (vanilla: STATs with zero extents): its own model
+		}
 		if ( std::memcmp( &r.baseType, "TXST", 4 ) == 0 ) {   // lane PLACED1: a decal; its fate is set after the weld
 			CellDecalRef d;
 			d.form = r.formID;
@@ -2514,7 +2559,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		static const QSet<QString> in { QStringLiteral( "STAT" ), QStringLiteral( "MSTT" ),
 			QStringLiteral( "TREE" ), QStringLiteral( "FURN" ), QStringLiteral( "CONT" ),
 			QStringLiteral( "ACTI" ), QStringLiteral( "TERM" ), QStringLiteral( "FLOR" ),
-			QStringLiteral( "LIGH" ) };
+			QStringLiteral( "LIGH" ), QStringLiteral( "BNDS" ) };   // lane CABLES1: a cable is a static to the bake
 		if ( t == QLatin1String( "DOOR" ) )
 			return 2;
 		// lane BAKE4: the bake sees the fixed world only. WW_CELL_PROBE_SOUP_RED=items is the gate's red
@@ -2541,6 +2586,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				soupSkippedTypes[CellPickTable::typeName( lb.type )]++;
 			return true;
 		}
+		if ( p.cable )
+			return p.disabled;   // lane CABLES1: a cable is in the soup as a static is
 		if ( lb.model.isEmpty() )
 			return false;   // the loop's own row counts it
 		if ( p.disabled || isMarkerModel( lb.model ) )
@@ -2597,15 +2644,63 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	// lane SPEED1: every model the loop below will ask for, read and parsed on worker threads first
 	CellModelAhead modelsAhead( dataRoot, refsRed != "root" );
 	for ( const Placement & p : placements )
-		if ( p.actorKey.isEmpty() && ( !bakeLean || !soupLeavesOut( p, false ) ) )   // an actor is built, not read
+		if ( p.actorKey.isEmpty() && !p.cable && ( !bakeLean || !soupLeavesOut( p, false ) ) )   // an actor or cable is built, not read
 			modelsAhead.want( world, p.base, p.swap );
 	modelsAhead.load();
 	CellSpeed::mark( "models read ahead" );
 	AoDecalBuilder aoBuild;	// lane AODECAL1: the copies that get a decal (off: the row's switch)
+	/* lane CABLES1: a cable's tube, built once per reference, and its geometry gate: the ends against the
+	 * reference's position -/+ its rotated half extents, the sag against 0.7 * L * slack. Every cable is
+	 * checked; WW_CELL_CABLES_DUMP=<tsv> writes one row per cable (world ends, lowest centre, sag) for the
+	 * independent reader to compare against the plugin's own bytes. */
+	int cableBuilt = 0, cableWind = 0, cableEndBad = 0, cableSagBad = 0, cableVerts = 0, cableTris = 0;
+	float cableEndWorst = 0.0f, cableSagWorst = 0.0f;
+	QString cableDump;
+	const QString cableDumpPath = qEnvironmentVariable( "WW_CELL_CABLES_DUMP" );
+	auto cableBuild = [&]( const Placement & p, std::vector<NativeSrcShape> * shapes ) -> bool {
+		const EsmBendable & look = world.bendable( p.base );
+		NativeSrcShape s;
+		WwCableBuilt cb;
+		if ( !wwCellCableShape( look, p.cableSpec, &s, &cb ) || cb.rings < 2 )
+			return false;
+		cableBuilt++;
+		cableWind += cb.wind ? 1 : 0;
+		cableVerts += int( s.geom.pos.size() / 3 );
+		cableTris += int( s.geom.tris.size() / 3 );
+		auto world3 = [&]( size_t i ) {
+			return p.pos + p.rot * ( Vector3( cb.centres[i * 3], cb.centres[i * 3 + 1], cb.centres[i * 3 + 2] ) * p.scale );
+		};
+		const Vector3 he( p.cableSpec.half[0], p.cableSpec.half[1], p.cableSpec.half[2] );
+		const Vector3 wantA = p.pos - p.rot * ( he * p.scale ), wantB = p.pos + p.rot * ( he * p.scale );
+		const Vector3 gotA = world3( 0 ), gotB = world3( size_t( cb.rings - 1 ) );
+		const float endErr = qMax( ( gotA - wantA ).length(), ( gotB - wantB ).length() );
+		const float sagErr = std::fabs( cb.sagMeasured - cb.sagExpected );
+		const float sagTol = qMax( 0.5f, 0.01f * cb.sagExpected );
+		cableEndWorst = qMax( cableEndWorst, endErr );
+		cableSagWorst = qMax( cableSagWorst, sagErr );
+		cableEndBad += endErr > 0.01f ? 1 : 0;
+		cableSagBad += sagErr > sagTol ? 1 : 0;
+		if ( !cableDumpPath.isEmpty() ) {
+			float lowZ = 3.4e38f;
+			for ( int i = 0; i < cb.rings; i++ )
+				lowZ = qMin( lowZ, world3( size_t( i ) )[2] );
+			cableDump += QStringLiteral( "%1\t%2\t%3\t%4 %5 %6\t%7 %8 %9\t%10\t%11\t%12\t%13\t%14\t%15\n" )
+				.arg( p.ref, 8, 16, QLatin1Char( '0' ) ).arg( look.edid ).arg( cb.wind ? 1 : 0 )
+				.arg( double( gotA[0] ), 0, 'f', 3 ).arg( double( gotA[1] ), 0, 'f', 3 ).arg( double( gotA[2] ), 0, 'f', 3 )
+				.arg( double( gotB[0] ), 0, 'f', 3 ).arg( double( gotB[1] ), 0, 'f', 3 ).arg( double( gotB[2] ), 0, 'f', 3 )
+				.arg( double( lowZ ), 0, 'f', 3 ).arg( double( cb.sagMeasured ), 0, 'f', 3 )
+				.arg( double( cb.sagExpected ), 0, 'f', 3 ).arg( cb.rings ).arg( cb.slices )
+				.arg( double( cb.tiles ), 0, 'f', 4 );
+		}
+		shapes->push_back( std::move( s ) );
+		return true;
+	};
 	for ( const Placement & p : placements ) {
 		const EsmLodBase & lb = world.lodBase( p.base );
 		const bool isActor = !p.actorKey.isEmpty();   // lane PLACED1
-		const QString model = isActor ? p.actorKey : lb.model;
+		// lane CABLES1: each cable's tube is its own (the key names the reference)
+		const QString model = isActor ? p.actorKey
+			: p.cable ? QStringLiteral( "cable|%1" ).arg( p.ref, 8, 16, QLatin1Char( '0' ) ) : lb.model;
 		if ( model.isEmpty() ) {
 			skippedByType[CellPickTable::typeName( lb.type )]++;
 			continue;
@@ -2669,7 +2764,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			// WW_CELL_REFS_RED=root is the gate's red control: the old load, root transform composed.
 			// lane PLACED1: a placed actor's shapes come posed from src/cellactor.cpp, not from a model file.
 			bool okAhead = false;   // lane SPEED1: the answer read ahead, else the load as before
-			const bool okLoad = isActor ? actors.shapes( model, &shapes )
+			const bool okLoad = p.cable ? cableBuild( p, &shapes )
+				: isActor ? actors.shapes( model, &shapes )
 				: modelsAhead.take( model, subst, &shapes, &okAhead ) ? okAhead : refsRed != "root"
 				? lodgenNativeLoadModelPlaced( const_cast<QString *>( &dataRoot ), model, subst, &shapes )
 				: subst
@@ -2679,7 +2775,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				modelsFailed.insert( mkey );
 				continue;
 			}
-			modelLoads += isActor ? 0 : 1;
+			modelLoads += ( isActor || p.cable ) ? 0 : 1;
 			mit = modelCache.insert( mkey, shapes );
 		}
 		placementsSwapped += subst ? 1 : 0;
@@ -3494,6 +3590,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			}
 			if ( isActor )
 				bbOwn += QLatin1String( "|ACTOR" );   // lane PLACED1: own buckets; no decal lands on an actor
+			/* lane CABLES1: a cable whose base has wind sensibility sways: the game draws it with its grass shader
+			 * (the wind, the colour's 2.2 power) and its wave period is the base's wind flexibility. One bucket per
+			 * base; the vertex alpha is the weight. The grass FADE is not applied (not measured for cables). */
+			const EsmBendable * cableLook = p.cable ? &world.bendable( p.base ) : nullptr;
+			const bool cableSway = cableLook && cableLook->windSensibility > 0.0f;
+			if ( cableSway )
+				bbOwn += QStringLiteral( "|CABLEWIND|%1" ).arg( p.base, 8, 16, QLatin1Char( '0' ) );
 			/* Lane WATER1: a placed water mesh (an ACTI whose WNAM names a WATR; its shape carries the water
 			 * shader) gets a bucket per record, drawn by src/gl/cellwater.h with that record's terms. */
 			const WwWaterRecord * placedWater = nullptr;
@@ -3512,6 +3615,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				}
 			}
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
+			if ( cableSway ) {
+				b.grass = true;
+				b.grassWave = cableLook->windFlexibility;
+				b.grassNoFade = true;
+			}
 			if ( placedWater ) {
 				b.water = true;
 				b.waterRec = *placedWater;
@@ -3567,8 +3675,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 					o.chan[c] = ownColor ? float( s.geom.rgba[v * 4 + size_t( c )] ) / 255.0f : rgb[c];
 				if ( repaint )
 					o.chan[0] *= paletteR;
-				if ( ownColor && ( !b.effectMat.isEmpty() || !b.effectBlock.isEmpty() ) )
-					o.chan[3] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f;   // the effect shader's vertex alpha
+				if ( ownColor && ( !b.effectMat.isEmpty() || !b.effectBlock.isEmpty() || cableSway ) )
+					o.chan[3] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f;   // the effect shader's vertex alpha; a cable's wind weight
 				b.verts.push_back( o );
 				for ( int k = 0; k < 3; k++ ) {
 					lo[k] = qMin( lo[k], wp[k] );
@@ -3608,6 +3716,25 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		}
 	}
 	CellSpeed::mark( "models loaded and placements welded" );
+	/* lane CABLES1: the cables' census. "XBSD refs" counts every reference read that carries one and is not
+	 * deleted or hidden; "placed" those on a BNDS base that reached the placements; "built" those the
+	 * generator made a tube for. */
+	const QString cableLine = wwCellCablesOn()
+		? QStringLiteral( "cables: on, XBSD refs %1 (on a BNDS base %2, on another base %3, drawn as its model), placed %4"
+		                  " (detached %5), built %6, swaying %7, verts %8, tris %9; geometry gate: ends off %10 (worst %11),"
+		                  " sag off %12 (worst %13)" )
+			.arg( cableXbsd ).arg( cableBnds ).arg( cableOtherBase ).arg( cablePlaced ).arg( cableDetached )
+			.arg( cableBuilt ).arg( cableWind ).arg( cableVerts ).arg( cableTris ).arg( cableEndBad )
+			.arg( double( cableEndWorst ), 0, 'f', 4 ).arg( cableSagBad ).arg( double( cableSagWorst ), 0, 'f', 4 )
+		: QStringLiteral( "cables: off (WW_CELL_CABLES_RED=off), XBSD refs %1 (on a BNDS base %2), placed 0" )
+			.arg( cableXbsd ).arg( cableBnds );
+	qInfo().noquote() << cableLine;
+	if ( !cableDumpPath.isEmpty() ) {
+		QFile df( cableDumpPath );
+		if ( df.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+			df.write( ( QStringLiteral( "ref\tbase\twind\tendA\tendB\tlowZ\tsag\tsagWant\trings\tslices\ttiles\n" )
+				+ cableDump ).toUtf8() );
+	}
 
 	/* ---- lane GRASSMB1: THE GAME'S GRASS (src/gl/cellgrass.h). Every exterior cell's blades, placed the engine's
 	 * way, each a copy of its GRAS model welded into the cell's own "|GRASS" buckets and drawn by the cell
@@ -5281,6 +5408,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		  << ", CNAMs on a material with no palette " << cnamNoPalette
 		  << ", shapes painted by their base's MODC " << modcShapes
 		  << ", sky cards hidden " << skyCardsHidden << "\n";
+		s << "  " << cableLine << "\n";   // lane CABLES1
 		s << "  distinct models loaded " << modelLoads << ", failed to load "
 		  << modelsFailed.size() << "\n";
 		if ( !modelsFailed.isEmpty() ) {   // lane PRTP5: their names, for the cell census

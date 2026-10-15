@@ -634,6 +634,14 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 						const quint32 to = esm->mapFormID( *r, f.readUInt32() );
 						if ( kw == 0x00115705U )
 							ref.lightBox = to;
+					} else if ( f == "XBSD" && f.size() >= 20 ) {
+						// lane CABLES1: slack, thickness, half extents (3), then the detached-end byte
+						ref.splineSlack = f.readFloat();
+						ref.splineThickness = f.readFloat();
+						for ( int i = 0; i < 3; i++ )
+							ref.splineHalf[i] = f.readFloat();
+						ref.splineDetached = f.size() >= 21 && f.readUInt8() != 0;
+						ref.hasSpline = true;
 					} else if ( f == "XPRM" && f.size() >= 32 ) {
 						// lane HEMI1: Bounds (half extents) 3 floats, Color 3, Unknown, Type
 						for ( int i = 0; i < 3; i++ )
@@ -845,6 +853,46 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 	}
 	auto ins = lodBaseCache.insert( baseFormID, b );
 	return *ins;
+}
+
+const EsmBendable & EsmWorld::bendable( quint32 bndsForm ) const
+{
+	auto it = bendableCache.constFind( bndsForm );
+	if ( it != bendableCache.constEnd() )
+		return *it;
+	EsmBendable b;
+	const ESMFile::ESMRecord * r = esm ? esm->findRecord( bndsForm ) : nullptr;
+	if ( r && r->type != GRUP && *r == "BNDS" ) {
+		b.exists = true;
+		quint32 txst = 0;
+		ESMFile::ESMField f( *esm, *r );
+		while ( f.next() ) {
+			if ( f == "EDID" ) {
+				b.edid = fieldString( f );
+			} else if ( f == "DNAM" && f.size() >= 28 ) {
+				b.tiles = f.readFloat();
+				b.slices = f.readUInt16();
+				b.tilesRelative = f.readUInt16() != 0;
+				for ( int i = 0; i < 3; i++ )
+					b.color[i] = f.readFloat();
+				b.windSensibility = f.readFloat();
+				b.windFlexibility = f.readFloat();
+			} else if ( f == "TNAM" && f.size() >= 4 ) {
+				txst = esm->mapFormID( *r, f.readUInt32() );
+			}
+		}
+		const ESMFile::ESMRecord * tr = txst ? esm->findRecord( txst ) : nullptr;
+		if ( tr && tr->type != GRUP && *tr == "TXST" ) {
+			ESMFile::ESMField t( *esm, *tr );
+			while ( t.next() ) {
+				if ( t == "TX00" )
+					b.diffuse = fieldString( t );
+				else if ( t == "TX01" )
+					b.normal = fieldString( t );
+			}
+		}
+	}
+	return *bendableCache.insert( bndsForm, b );
 }
 
 const EsmMaterialSwap & EsmWorld::materialSwap( quint32 mswpForm ) const

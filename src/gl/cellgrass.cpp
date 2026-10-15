@@ -46,6 +46,7 @@ struct GrassState
 	QString dump;
 	QHash<const void *, QSet<int>> shapes;
 	QHash<const void *, QHash<int, float>> wave;	// block -> its GRAS wave period (the property's +0xf4)
+	QHash<const void *, QSet<int>> noFade;	// lane CABLES1: blocks that sway but never fade (cables)
 	// the wind's clock: the game's accumulated frame seconds (St+0x3c), here the time since the first grass frame;
 	// cur at this frame, prev at the last (the vertex shader's two phases)
 	QElapsedTimer clock;
@@ -640,14 +641,17 @@ void wwCellGrassBegin( const void * nif )
 {
 	gs().shapes.remove( nif );
 	gs().wave.remove( nif );
+	gs().noFade.remove( nif );
 	gs().notes.remove( nif );
 	gs().dumpedDocs.clear();
 }
 
-void wwCellGrassShape( const void * nif, int block, float wavePeriod )
+void wwCellGrassShape( const void * nif, int block, float wavePeriod, bool fade )
 {
 	gs().shapes[nif].insert( block );
 	gs().wave[nif].insert( block, wavePeriod );
+	if ( !fade )
+		gs().noFade[nif].insert( block );
 }
 
 bool wwCellGrassWind( float wind[4], float wind2[4] )
@@ -747,7 +751,12 @@ void wwCellGrassUniforms( Scene * scene, int block )
 	}
 	// fGrassStartFadeDistance 3500, fGrassFadeRange 1000 (the INI defaults), in view units
 	const float k = scene->view.scale;
-	prog->uni3f( "wwGrassFade", 3500.0f * k, 1000.0f * k, 1.0f );
+	// lane CABLES1: a swaying cable keeps the grass path (z = 1: its vertex alpha is the wind's weight) and no fade
+	const auto nf = s.noFade.constFind( scene->nifModel );
+	if ( nf != s.noFade.constEnd() && nf->contains( block ) )
+		prog->uni3f( "wwGrassFade", 1.0e30f, 1.0f, 1.0f );
+	else
+		prog->uni3f( "wwGrassFade", 3500.0f * k, 1000.0f * k, 1.0f );
 	// the wind (the game's grass vertex shader, Shaders011 entry 02183): cb2[11] = (angle, 0, prev phase, phase),
 	// cb2[12] = (min speed * 300, max speed * 300, frequency); .w = 1 = a grass shape (the game's grass vertex shader
 	// runs: renormalised frame, colour ^ 2.2); no weather loaded = no wind (speeds 0: the blade stays put)

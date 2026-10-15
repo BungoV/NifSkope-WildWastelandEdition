@@ -366,6 +366,7 @@ HEADERS += \
 	src/probeplace.h \
 	src/cellrefs.h \
 	src/cellactor.h \
+	src/cellcable.h \
 	src/celldecal.h \
 	src/aovolume.h \
 	src/cellaodecal.h \
@@ -634,6 +635,7 @@ SOURCES += \
 	src/probeplace.cpp \
 	src/cellrefs.cpp \
 	src/cellactor.cpp \
+	src/cellcable.cpp \
 	src/celldecal.cpp \
 	src/aovolume.cpp \
 	src/cellaodecal.cpp \

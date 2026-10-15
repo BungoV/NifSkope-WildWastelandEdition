@@ -84,6 +84,30 @@ struct EsmRefr
 	quint32 portalFrom = 0, portalTo = 0;
 	bool roomBound = false;
 	QVector<quint32> linkedRooms;
+	/* lane CABLES1: XBSD, a placed cable (its base is a BNDS bendable spline). Slack, thickness, the half
+	 * extents (the cable's ends sit at the ref's position minus / plus these, in the ref's own frame), and
+	 * the detached-end byte (absent in a 20-byte XBSD = attached at both ends; any nonzero byte = detached). */
+	bool hasSpline = false;
+	float splineSlack = 0.0f;
+	float splineThickness = 0.0f;
+	float splineHalf[3] = { 0, 0, 0 };
+	bool splineDetached = false;
+};
+
+/*! lane CABLES1: a BNDS (bendable spline) base, the look of a cable. DNAM: default tile count, slices round
+ *  the tube, whether the tiles count per unit of length, the default colour, wind sensibility and wind
+ *  flexibility; TNAM: a texture set (TXST TX00 / TX01), empty when none. */
+struct EsmBendable
+{
+	bool exists = false;
+	QString edid;
+	float tiles = 1.0f;
+	int slices = 3;
+	bool tilesRelative = false;
+	float color[3] = { 1, 1, 1 };
+	float windSensibility = 0.0f;
+	float windFlexibility = 0.0f;
+	QString diffuse, normal;
 };
 
 /*! lane SUNCELL1: one CELL's precombined / previs fields (wbDefinitionsFO4 CELL). `rvis` = RVIS, the cell whose
@@ -524,6 +548,9 @@ public:
 	 *  load order, as for every other record). Layout: wbDefinitionsFO4 MSWP. */
 	const EsmMaterialSwap & materialSwap( quint32 mswpForm ) const;
 
+	//! lane CABLES1: a BNDS base's cable look, cached. Never null; `exists` false when the form is not a BNDS.
+	const EsmBendable & bendable( quint32 bndsForm ) const;
+
 	/*! Lane SWAP1: a placed REFR's XMSP and NAME, read from the record by its
 	 *  form id (the winning version). False when the form is not a REFR. The
 	 *  native writer asks this per placement, because its placements carry the
@@ -636,6 +663,7 @@ private:
 	int extraCellGroups = 0;                  //!< later plugins' cell-children groups joined (BAKE1)
 	mutable QHash<quint32, EsmLodBase> lodBaseCache;
 	mutable QHash<quint32, EsmMaterialSwap> mswpCache;   //!< lane SWAP1
+	mutable QHash<quint32, EsmBendable> bendableCache;   //!< lane CABLES1
 	mutable QHash<quint32, QVector<EsmScolPart>> scolCache;
 	mutable EsmScrapIndex scrapIdx;     //!< v9, built on first scrappable() call
 	mutable QHash<quint32, EsmLtexTextureSet> ltexCache;

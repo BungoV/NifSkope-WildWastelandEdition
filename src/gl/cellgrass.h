@@ -85,7 +85,8 @@ void wwCellGrassBlockOrigin( int cx, int cy, float & x0, float & y0 );
 
 //! Cell open: forget the last document's grass shapes; register one; the open's census line.
 void wwCellGrassBegin( const void * nif );
-void wwCellGrassShape( const void * nif, int block, float wavePeriod );
+//! lane CABLES1: `fade` false = the wind without the grass fade (a swaying cable)
+void wwCellGrassShape( const void * nif, int block, float wavePeriod, bool fade = true );
 void wwCellGrassNote( const void * nif, const QString & line );
 QString wwCellGrassEcho( const void * nif );
 
