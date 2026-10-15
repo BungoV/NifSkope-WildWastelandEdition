@@ -1,0 +1,4 @@
+# The Lookdev ground lit by the placed cell lights too (lane LIGHTBOOTH1, the light booth). Selected by name
+# from gl/lookdevstage.cpp while WW_LOOKDEV_GROUND_CELL=1 (a harness pin) and the cell lights are on.
+
+shaders lookdev_ground.vert lookdev_ground_cell.frag

@@ -709,7 +709,27 @@ static void vaPassInner( Scene * scene, bool run )
 		restore();
 		return;
 	}
-	const VaMedium M = vaFit( K, ( s.red & 32 ) != 0, ( s.red & 128 ) != 0 );
+	VaMedium M = vaFit( K, ( s.red & 32 ) != 0, ( s.red & 128 ) != 0 );
+	/* lane LIGHTBOOTH1 (the light test booth; a harness pin, never a user toggle): WW_CELL_BOOTH_AIR = <sigma0 per
+	 * unit> replaces the fitted medium with EVEN air of that density at every height (no band, no ground layer), so a
+	 * fixture's glow is measured in the same air wherever it stands. The slices end where the air reaches 99%
+	 * opacity (4.6 / sigma0, held between 2000 and 20000 units), or at <far> when given as "<sigma0>,<far>": a short
+	 * far end makes the 64 slices thin near the fixture (the booth's measuring runs). Unset: the fitted medium. */
+	const QStringList boothArg = qEnvironmentVariable( "WW_CELL_BOOTH_AIR" ).split( QLatin1Char( ',' ) );
+	const float boothAir = boothArg.value( 0 ).toFloat();
+	if ( boothAir > 0.0f ) {
+		M.sigma0 = boothAir;
+		M.invH = 0.0f;
+		M.band = false;
+		const float boothFar = boothArg.value( 1 ).toFloat();
+		M.farD = boothFar > 0.0f ? std::min( std::max( boothFar, 256.0f ), 20000.0f )
+								 : std::min( std::max( 4.6f / boothAir, 2000.0f ), 20000.0f );
+		static bool said = false;
+		if ( !said ) {
+			said = true;
+			std::fprintf( stderr, "cell air booth: even air sigma0 %g, slices to %g\n", double( boothAir ), double( M.farD ) );
+		}
+	}
 	// the slices: exponential from 16 units to where the air reaches the records' max opacity (vaFit)
 	const float farD = std::max( M.farD, kNearMin * 4.0f );
 	const float nearD = kNearMin;
@@ -722,7 +742,8 @@ static void vaPassInner( Scene * scene, bool run )
 		camZw -= vt.rotation( j, 2 ) * vt.translation[j] / sc;
 	const BoundSphere bs = scene->bounds();
 	const float topW = bs.center[2] + bs.radius;
-	const float zTop = topW + fogView[3] - camZw;
+	// the booth's even air has no top: a lone fixture would otherwise end the air at its own crown (lane LIGHTBOOTH1)
+	const float zTop = boothAir > 0.0f ? 1.0e6f : topW + fogView[3] - camZw;
 
 	// the phase: indoors the cell's god-ray record, outdoors the weather's, else the fallback
 	const WwCellLighting * L = wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr;
@@ -737,7 +758,9 @@ static void vaPassInner( Scene * scene, bool run )
 	const VaPhase ph = vaPhase( med, ( s.red & 524288 ) != 0 );
 	// the ground layer (vaNearShare, vaGround); red noground: the far band alone, as before it
 	VaLayer G;
-	if ( !( s.red & 16384 ) ) {
+	if ( boothAir > 0.0f ) {
+		G.recx = QStringLiteral( "none(booth even air)" );
+	} else if ( !( s.red & 16384 ) ) {
 		vaNearShare( K, M, G );
 		vaGround( K, M, L && L->interior, ( s.red & 32768 ) != 0, G );
 	} else {

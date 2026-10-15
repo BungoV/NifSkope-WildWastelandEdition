@@ -1738,7 +1738,28 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 #endif
 		return off;
 	};
+	/* lane LIGHTBOOTH1 (the light test booth; a harness pin, never a user toggle): WW_CELL_BOOTH = <ref form id
+	 * hex>[,...] keeps ONLY those references of the opened cell -- meshes and lights alike -- so one fixture and its
+	 * own lights stand alone (the booth adds the flat ground and the even air: WW_LOOKDEV_GROUND, WW_CELL_BOOTH_AIR).
+	 * Every other reference is dropped before anything reads it: no row, no light, no shadow caster, no GI soup.
+	 * Unset: no change. */
+	QSet<quint32> boothRefs;
+	for ( const QByteArray & t : qgetenv( "WW_CELL_BOOTH" ).split( ',' ) ) {
+		bool ok = false;
+		const quint32 id = t.trimmed().toUInt( &ok, 16 );
+		if ( ok && id )
+			boothRefs.insert( id );
+	}
+	int boothDropped = 0;
+	QSet<quint32> boothSeen;
 	auto pushRefr = [&]( const EsmRefr & r, int cellX, int cellY, bool persistent ) {
+		if ( !boothRefs.isEmpty() ) {
+			if ( !boothRefs.contains( r.formID ) ) {
+				boothDropped++;
+				return;
+			}
+			boothSeen.insert( r.formID );
+		}
 		refsRead++;
 		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 )
 			lightRefs.append( r );
@@ -5269,6 +5290,16 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		  << ", drawn " << drawn << "\n";
 		s << "  hidden: disabled " << refsHidden << ", markers " << refsMarker
 		  << ", deleted " << refsDeleted << ", no base " << refsNoBase << "\n";
+		if ( !boothRefs.isEmpty() ) {	// lane LIGHTBOOTH1: what the booth kept, and every asked id it never met
+			QStringList kept, missing;
+			for ( quint32 id : std::as_const( boothRefs ) )
+				( boothSeen.contains( id ) ? kept : missing ).append( QStringLiteral( "%1" ).arg( id, 8, 16, QLatin1Char( '0' ) ) );
+			kept.sort();
+			missing.sort();
+			s << "  booth: kept " << kept.size() << " of " << boothRefs.size() << " asked (" << kept.join( QLatin1Char( ',' ) )
+			  << "), missing " << missing.size() << ( missing.isEmpty() ? QString() : QStringLiteral( " (%1)" ).arg( missing.join( QLatin1Char( ',' ) ) ) )
+			  << ", dropped " << boothDropped << " other references\n";
+		}
 		{
 			// lane PRTP1: the lights census -- read, not yet lit (PRTP3 lights them)
 			QMap<QString, int> byType;

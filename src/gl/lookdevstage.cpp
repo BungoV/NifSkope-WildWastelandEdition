@@ -1635,7 +1635,12 @@ void wwLookdevDrawGround( Scene * scene )
 	// lane CSM1: the shadow-receiving ground is its own program (WW_SUNSHADOW defined),
 	// swapped in only while the map was built this frame, so Shadows off draws the pre-CSM ground
 	const bool receives = wwSunShadowWanted( scene );
-	NifSkopeOpenGLContext::Program * prog = r->useProgram( receives ? "lookdev_ground_csm.prog" : "lookdev_ground.prog" );
+	/* lane LIGHTBOOTH1 (the light booth; a harness pin, never a user toggle): WW_LOOKDEV_GROUND_CELL=1 draws the ground
+	 * lit by the placed cell lights too (no sun cascades on it), so a fixture's pool of light shows on the booth floor */
+	static const bool cellGround = qEnvironmentVariableIntValue( "WW_LOOKDEV_GROUND_CELL" ) == 1;
+	const bool litByCell = cellGround && wwCellLightsWanted( scene );
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( litByCell ? "lookdev_ground_cell.prog"
+		: receives ? "lookdev_ground_csm.prog" : "lookdev_ground.prog" );
 	if ( !prog )
 		return;
 	const LdLight L = currentLight();
@@ -1663,8 +1668,10 @@ void wwLookdevDrawGround( Scene * scene )
 	prog->uni1i( "viewTransform", wwSceneViewTransform() );
 	prog->uni4m( "modelViewMatrix", scene->view.toMatrix4() );
 	wwLookdevFogUniforms( scene );
-	if ( receives )
+	if ( receives && !litByCell )
 		wwSunShadowUniforms( scene );
+	if ( litByCell )
+		wwCellLightsUniforms( scene );
 
 	if ( leak ) {
 		glEnable( GL_BLEND );
