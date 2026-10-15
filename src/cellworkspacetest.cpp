@@ -444,7 +444,8 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		QStringList layout;
 		QString section;
 		for ( QAction * a : sm->actions() ) {
-			if ( qobject_cast<QWidgetAction *>( a ) ) {
+			// a heading is a widget row named CellWorkspaceShowSection_*; lane SKYSTR1: any other widget row is a value row
+			if ( qobject_cast<QWidgetAction *>( a ) && a->objectName().startsWith( QLatin1String( "CellWorkspaceShowSection_" ) ) ) {
 				section = a->text();
 				continue;
 			}
@@ -455,7 +456,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		const QStringList want = {
 			"World/Cell borders", "World/Ground", "World/Water", "World/Markers", "World/Disabled references",
 			"World/Grass", "World/Particles", "World/Previs", "World/Culling", "World/Far LOD", "World/Far LOD source",
-			"Lighting/Cell lights", "Lighting/GI", "Lighting/Far light", "Lighting/Far light mode",
+			"Lighting/Cell lights", "Lighting/GI", "Lighting/Sky visibility", "Lighting/Far light", "Lighting/Far light mode",
 			"Lighting/Light shadows", "Lighting/AO", "Lighting/AO decals", "Lighting/GPU relight",
 			"Effects/Imagespace", "Effects/Temporal AA", "Effects/SSR", "Effects/SSR outdoors",
 			"Effects/Depth of field", "Effects/Motion blur", "Effects/Bloom" };
@@ -623,7 +624,15 @@ void smDump( const QString & name )
 	QString section;
 	if ( QMenu * m = smMenu() ) {
 		for ( QAction * a : m->actions() ) {
-			if ( qobject_cast<QWidgetAction *>( a ) || ( a->isSeparator() && !a->text().isEmpty() ) ) {
+			auto * wa = qobject_cast<QWidgetAction *>( a );
+			if ( wa && !a->objectName().startsWith( QLatin1String( "CellWorkspaceShowSection_" ) ) ) {
+				// lane SKYSTR1: a value row (label | field): its field's name and value
+				QDoubleSpinBox * sb = wa->defaultWidget() ? wa->defaultWidget()->findChild<QDoubleSpinBox *>() : nullptr;
+				s << "VALUE\t" << section << "\t" << a->text() << "\t" << ( sb ? sb->objectName() : QString() ) << "\t"
+				  << ( sb ? QString::number( sb->value() ) : QStringLiteral( "-" ) ) << "\n";
+				continue;
+			}
+			if ( wa || ( a->isSeparator() && !a->text().isEmpty() ) ) {
 				section = a->text();
 				s << "SECTION\t" << section << "\n";
 				continue;
@@ -741,6 +750,40 @@ void smNext()
 			smWaitLoad( before, 0 );
 		else
 			smSettle( 1500 );
+	} else if ( step.startsWith( QLatin1String( "set:" ) ) ) {
+		/* lane SKYSTR1: set:<field objectName>=<value>[:<settle ms>] -- types a value into a menu row's field as a
+		 * user would (valueChanged fires), then repaints for the settle time (default 6000: a relight's wait) */
+		const QString name = arg.section( QLatin1Char( '=' ), 0, 0 );
+		const double v = arg.section( QLatin1Char( '=' ), 1, 1 ).toDouble();
+		const int ms = step.section( QLatin1Char( ':' ), 2, 2 ).isEmpty() ? 6000 : step.section( QLatin1Char( ':' ), 2, 2 ).toInt();
+		QDoubleSpinBox * sb = g_sm.skope->findChild<QDoubleSpinBox *>( name );
+		if ( !sb ) {
+			smNote( QStringLiteral( "MISSING %1" ).arg( name ) );
+			smNext();
+			return;
+		}
+		sb->setValue( v );
+		smNote( QStringLiteral( "  %1 now %2" ).arg( name ).arg( sb->value() ) );
+		// repaint through the wait: the relight starts from a frame's tick and asks for its own frame when done
+		for ( int t = 250; t < ms; t += 250 )
+			QTimer::singleShot( t, g_sm.skope, []() {
+				if ( GLView * ogl = g_sm.skope->getGLView() )
+					ogl->update();
+			} );
+		smSettle( ms );
+	} else if ( step.startsWith( QLatin1String( "cam:" ) ) ) {
+		/* lane SKYSTR1: cam:<ex ey ez ax ay az fov> -- holds the view on that eye and target (the path camera), so
+		 * a live run is shot from the same in-bounds player-eye camera as the headless shots */
+		const QStringList w = arg.split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+		GLView * ogl = g_sm.skope->getGLView();
+		if ( w.size() == 7 && ogl ) {
+			ogl->wwSetPathCamera( true, Vector3( w[0].toFloat(), w[1].toFloat(), w[2].toFloat() ),
+				Vector3( w[3].toFloat(), w[4].toFloat(), w[5].toFloat() ), w[6].toFloat() );
+			smNote( QStringLiteral( "  camera %1" ).arg( arg ) );
+		} else {
+			smNote( QStringLiteral( "BAD camera %1" ).arg( arg ) );
+		}
+		smSettle( 2000 );
 	} else if ( step == QLatin1String( "quit" ) ) {
 		smNote( QStringLiteral( "quit" ) );
 		g_sm.skope->close();

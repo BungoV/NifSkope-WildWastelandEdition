@@ -202,6 +202,7 @@ protected:
 	bool drawInSecondPass = false;
 	bool translucent = false;
 	bool surfaceDecal = false;	// lane FXD1
+	bool effectDecal = false;	// lane DECALLIT1: an effect shader with the Decal flag (the game draws it into the surface)
 
 	void updateShader();
 

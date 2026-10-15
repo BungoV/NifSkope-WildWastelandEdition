@@ -35,6 +35,9 @@ struct ProbeSkyLight
 	float sunTo[3] = { 0, 0, 1 };      //!< unit, toward the sun (or the moon at night)
 	float sun[3] = { 0, 0, 0 };        //!< its color (linear)
 	QString label;                     //!< weather and hour, for the notes
+	/* lane SKYSTR1: the Sky visibility row (wwCellSkyVis, 0..1): each octant's visibility v counts as 1 + vis (v - 1),
+	 * FO4CS's Skylighting strength; 1 leaves v as stored, 0 is the open sky (the red "novis") */
+	float vis = 1.0f;
 	/* lane SKYPIC1 (WW_CELL_SKYPIC=1, ships off): the sky per direction from the sky the view DRAWS (the dome, the
 	 * stars, the clouds; probeSkyPictureQ). picQ[axis][octant] = the integral over that octant of the drawn
 	 * radiance x max(axis . dir, 0), so a probe's sky on an axis = sum over octants of visibility x tint x picQ.

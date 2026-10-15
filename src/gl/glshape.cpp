@@ -700,6 +700,10 @@ void Shape::updateShader()
 	surfaceDecal = bslsp && !bslsp->hasRefraction
 		&& ( bslsp->hasSF1( ShaderFlags::SF1( ShaderFlags::SLSF1_Decal | ShaderFlags::SLSF1_Dynamic_Decal ) )
 			|| ( bslsp->getMaterial() && bslsp->getMaterial()->hasDecal() ) );
+	// lane DECALLIT1: an effect shader with the Decal flag, by its flags or by its material file (src/gl/celllights.h)
+	effectDecal = bsesp
+		&& ( bsesp->hasSF1( ShaderFlags::SF1( ShaderFlags::SLSF1_Decal | ShaderFlags::SLSF1_Dynamic_Decal ) )
+			|| ( bsesp->getMaterial() && bsesp->getMaterial()->hasDecal() ) );
 
 	if ( bssp ) {
 		depthTest = bssp->depthTest;

@@ -203,7 +203,7 @@ struct WwWeatherEntry
 	bool override() const { return srcFile.compare( ownerFile, Qt::CaseInsensitive ) != 0; }
 };
 
-/* lane VOLFOG1: one GDRY "God Rays" record (wbDefinitionsFO4 GDRY; the engine's GodRaysData::LoadFrom 0x373c10,
+/* lane VOLFOG1: one GDRY "God Rays" record (wbDefinitionsFO4 GDRY; the engine's GDRY loader,
  * MEASURED): DATA = back rgb, fwd rgb, intensity, air / back / fwd scale, back phase, air rgb (never read by the
  * engine), fwd phase; a shorter DATA keeps the engine's defaults for its tail. */
 struct WwGodRays

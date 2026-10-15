@@ -60,6 +60,23 @@ inline bool wwIsCellProgramName( std::string_view n )
 	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog";
 }
 
+/*! lane DECALLIT1: an effect decal's program by name -- fo4_effectdecal and its cascade variant fo4_effectdecalcsm.
+ *  The game puts an effect shader with the Decal flag (flags or material) in its decal groups, which the deferred
+ *  prepass draws into the surface under it: its colour is lit by the surface's lights, ambient, sky, obscurance and
+ *  fog, not drawn self-lit like an effect. A cell-lit effect decal takes fo4_effectdecal (Renderer::setupProgram):
+ *  the surface's laws (cellLit) on the decal's colour, no specular of its own, the same fog. Red
+ *  WW_CELL_DECALLIT_RED=unlit draws them as other effects again (fo4_effectcell, self-lit: the white drips on
+ *  Goodneighbor's brick in the fog). Gate tests/spells/decallit1_cell.sh. */
+inline bool wwIsCellDecalProgramName( std::string_view n )
+{
+	return n == "fo4_effectdecal.prog" || n == "fo4_effectdecalcsm.prog";
+}
+//! lane DECALLIT1: WW_CELL_DECALLIT_RED=unlit, the effect decals self-lit as before
+bool wwCellDecalLitRed();
+//! lane DECALLIT1: WW_CELL_DECALLIT_PROBE=1 (gates only): the probe passes draw the effect decals, white and opaque
+//! where they show, so probe 6 holds the light they take
+bool wwCellDecalLitProbe();
+
 struct WwCellLight
 {
 	float pos[3] = { 0, 0, 0 };     //!< world
@@ -179,7 +196,7 @@ void wwCellGiPublish( const void * nif, const WwCellGi & gi );
 /*! lane PROBEVIEW1: the PRTP band's Pass (Division deck, s18/s40/s65 views). 0 Combined (the frame as drawn),
  *  1 GI (the probe grid's E / pi on the surface's normal), 2 Sky visibility (the probes' open-sky share on the
  *  normal), 3 Surfel color, 4 Surfel light, 5 Brick light (lane BRICK1) (src/gl/cellprobeview.h draws the surfels over a cyan frame).
- *  Stored as WW/CellPass; the pin WW_CELL_PASS (number or entry name) wins. WW_CELL_PV_RED=direct|nonormal|open|noclamp|nosee. */
+ *  Stored as WW/CellPass; the pin WW_CELL_PASS (number or entry name) wins. WW_CELL_PV_RED=direct|nonormal|open|noclamp|nosee|borrow|lendamb|strand. */
 QStringList wwCellPassNames();
 int wwCellPass();
 //! the Pass this document draws: the stored one once its bake is relit (a GI grid published), else Combined
@@ -200,6 +217,14 @@ bool wwCellShadowOn();
 void wwCellShadowSetOn( bool on );
 bool wwCellGiGpuOn();
 void wwCellGiGpuSetOn( bool on );
+/*! Lane SKYSTR1: the Sky visibility row, 0-100 % (WW/CellSkyVis, default 100; pin WW_CELL_SKYSTR=<percent>). As
+ *  FO4CS's Skylighting strength: each sky visibility v the GI takes becomes 1 + s (v - 1), so 0 % is the open sky
+ *  everywhere (the weather's unshadowed ambient), 100 % the bake as it is (bit for bit). The relight takes it
+ *  (probesky.cpp, live), the AO decals per pixel. Red WW_CELL_SKYSTR_RED=ignore: the row is ignored (100 %). */
+int wwCellSkyVisPercent();
+float wwCellSkyVis();
+bool wwCellSkyVisPinned();
+void wwCellSkyVisSetPercent( int pct );
 
 /*! lane FARVIEW1 (src/farlight.h, docs/cloud/FARVIEW1_DESIGN.md): DISTANT LIGHT FROM THE SURFELS. Past the band's
  *  near end D0 a surface's placed-light diffuse fades from the real lights to the bake's surfels (w = smoothstep(D0, D1,

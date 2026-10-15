@@ -4162,7 +4162,7 @@ void GLView::paintGL()
 			wwCellFarLodSkyCensus( scene );
 			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
 			if ( workspaceDrawScenes.isEmpty() || cellFirst ) {	// lane CELLALL1
-				// lane GRASSMB1: the game's depth of field + motion blur BEFORE the temporal AA, as DrawWorld::Imagespace
+				// lane GRASSMB1: the game's depth of field + motion blur BEFORE the temporal AA, as the engine's image-space pass
 				// runs them (3 HDR/tone map, 6 DoF, 10 motion blur, then 17/18 FXAA/TAA); inert when off
 				wwCellPostApply( scene );
 				wwGameTaaResolve( scene );

@@ -465,6 +465,49 @@ void CellWorkspacePanel::buildUi()
 	section( tr( "Lighting" ), "lighting" );
 	cellLights = tick( showMenu, tr( "Cell lights" ), "CellWorkspaceCellLights", wwCellLightsOn() );
 	cellGi = tick( showMenu, tr( "GI" ), "CellWorkspaceCellGi", wwCellGiOn() );
+	/* lane SKYSTR1 (bungo 10-13, FO4CS's Skylighting strength): how much the GI's sky visibility darkens, 0-100 %.
+	 * A label | field row as the Bloom rows; live (the grid relights 0.4 s after the value stands still) */
+	{
+		QWidget * panel = new QWidget( showMenu );
+		panel->setObjectName( QStringLiteral( "CellWorkspaceSkyVisPanel" ) );
+		QGridLayout * gl = new QGridLayout( panel );
+		gl->setContentsMargins( 8, 2, 8, 2 );
+		gl->setHorizontalSpacing( 8 );
+		gl->setColumnMinimumWidth( 0, 96 );
+		gl->setColumnStretch( 1, 1 );
+		QLabel * l = new QLabel( tr( "Sky visibility" ), panel );
+		WwNumberField * f = new WwNumberField( panel );
+		f->setObjectName( QStringLiteral( "CellWorkspaceSkyVis" ) );
+		f->setDecimals( 0 );
+		f->setRange( 0.0, 100.0 );
+		f->setSingleStep( 5.0 );
+		f->setSuffix( QStringLiteral( " %" ) );
+		f->setMinimumWidth( 96 );
+		f->setValue( wwCellSkyVisPercent() );
+		const bool pinned = wwCellSkyVisPinned();
+		const QString tip = tr( "How much the sky the GI sees is blocked: 0 % the open sky everywhere, 100 % as baked "
+			"(FO4CS Skylighting fStrength)" ) + ( pinned ? tr( " (pinned by the environment)" ) : QString() );
+		l->setToolTip( tip );
+		f->setToolTip( tip );
+		gl->addWidget( l, 0, 0 );
+		gl->addWidget( f, 0, 1 );
+		auto greys = [l, f, pinned]( bool giOn ) {
+			l->setEnabled( giOn && !pinned );
+			f->setEnabled( giOn && !pinned );
+		};
+		greys( wwCellGiOn() );
+		connect( cellGi, &QAction::toggled, this, greys );
+		connect( f, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( double v ) {
+			wwCellSkyVisSetPercent( int( std::lround( v ) ) );
+			if ( glView )
+				glView->update();
+		} );
+		auto * wa = new QWidgetAction( showMenu );
+		wa->setDefaultWidget( panel );
+		wa->setText( tr( "Sky visibility" ) );
+		wa->setObjectName( QStringLiteral( "CellWorkspaceSkyVisRow" ) );
+		showMenu->addAction( wa );
+	}
 	cellFar = tick( showMenu, tr( "Far light" ), "CellWorkspaceCellFar", wwCellFarOn() );
 	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
 	cellPass = showMenu->addMenu( tr( "Far light mode" ) );

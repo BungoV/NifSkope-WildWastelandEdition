@@ -38,6 +38,13 @@ struct ProbeRoomSpec
 	int maxCells = 8000000;
 	float pinch = 48.0f;        //!< a room's core is the air deeper than this
 	QString red;
+	/*! lane GIBLACK2: the box the grid may span (world; lo > hi on an axis: that axis is not clipped). The relight
+	 *  passes the GI grid's box (the probes' reach): the soup's own box spans the whole loaded block (Goodneighbor
+	 *  5 x 5 cells, 21000 units), so the cell was raised from 16 to 95 units to fit maxCells and a narrow recess's
+	 *  air came out solid. A face of the soup's box the clip cuts is not the open border: a flood that meets it is
+	 *  not outdoors for that (only the faces the clip leaves, as before). Red "soupbox": the soup's box. */
+	float clipLo[3] = { 1.0f, 1.0f, 1.0f };
+	float clipHi[3] = { 0.0f, 0.0f, 0.0f };
 };
 
 struct ProbeRooms
@@ -53,6 +60,7 @@ struct ProbeRooms
 	qint64 cellsOpening = 0, glassBoth = 0;
 	qint64 cellsMaskOpen = 0, cellsMaskSolid = 0;   //!< lane ALPHATEST2: cells masked triangles touch, left air / solid
 	int cores = 0, coresOutdoors = 0, pockets = 0, folded = 0;
+	int clippedFaces = 0;           //!< lane GIBLACK2: the soup box's faces the clip cut (bits -x +x -y +y -z +z)
 	double ms = 0;
 
 	size_t index( int x, int y, int z ) const

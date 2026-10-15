@@ -1995,6 +1995,14 @@ reported one missing albedo map. Under the new rule that marker reads as a defec
 gates that test for it (cell_pass_check.py, cell_rooms*, cell_pick, cell_water_hdr, cell_workspace), so it is left
 for bungo. In GI-links Pass views the "111" vault sign is magenta: no probe reaches it.
 
+### 2at. Sky visibility strength (lane SKYSTR1, 2026-10-13)
+
+Per probe octant v' = lerp(1, v, s) in probeSkyCube (s >= 1 bit-exact); ProbeSkyLight.vis joins same(), so
+probeSkyTick relights live. AO decals d' = lerp(1, d, s). The grid alpha is the valid share, not the sky
+visibility, so the blend sits on the stored octant visibility, not the final mix (a per-pixel mix would scale the
+bounce too). Matches FO4CS `[Skylighting] fStrength` (visibility blended toward 1, not a brightness multiplier).
+Gate skystr1_cell.sh: K (dump vs own rebuild), E (100 % = main), Z (0 % = novis), H (50 % between), live, red ignore.
+
 ## 3. Open
 
 - `.tbk` v4 sides, room ids and glass tint: built (2y, BAKE4; six sides a cell in v5, SIDES6).

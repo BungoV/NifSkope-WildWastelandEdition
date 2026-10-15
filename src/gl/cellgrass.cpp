@@ -655,7 +655,7 @@ bool wwCellGrassWind( float wind[4], float wind2[4] )
 	quint8 w[4] = { 0, 0, 0, 0 };
 	if ( !wwLookdevWind( w ) )
 		return false;
-	// Sky::UpdateWind, float32 in its order (one weather: no transition blend)
+	// the engine's wind update, float32 in its order (one weather: no transition blend)
 	const float k255 = 1.0f / 255.0f;	// 0x3b808081
 	const float M = float( w[0] ) * k255;
 	const float T = float( w[3] ) * k255;

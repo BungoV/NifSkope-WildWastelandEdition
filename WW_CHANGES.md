@@ -127,6 +127,201 @@
   lights the air inside. Alpha-tested casters (window panes, leaf cards) are tested against a red that makes them
   solid.
 
+## Lane GIDARK1 (2026-10-15, branch gidark1-20261015): Concord Hardware's dark interior measured; the shop front, recess2, glass and corner
+
+- **Concord Hardware's interior at noon is dark because the light there is low.** The full irradiance tracer (sun as the
+  notes give it, never x4.5) puts the GI term at 0.0188 mean over 880 surface points. The grid draws 0.0170 (0.90x,
+  median 0.72x, 6 points under a tenth). With the GI off the flat ambient draws about 22x the tracer. No brightness
+  was added for it.
+- **The open shop front lets the street's sky in** (`src/probegi.cpp`, the own-sky floor). A room-0 voxel just inside
+  the open front blended only the shop's dark probes. Now no axis of an outdoor slot reads below the sky its own eye
+  sees (256 rays, the probes' own sky law). Red `WW_CELL_GI_RED=noskyfloor`.
+  - Floor within 2 m of the front (36 up-facing tracer points with sky share >= 0.01): 0.96x the tracer, median 0.65x,
+    12 under half (red: 0.71x, median 0.38x, 28 under half). In the frame the front floor reads 10.45 against 8.56
+    under the red. There is no clean falloff yet: partial.
+- **Outdoor slots past the probed rect take their eye's sky** (the edge sky, `src/probegi.cpp`). Before, they were
+  empty and read black. Red `WW_CELL_GI_RED=noedge`.
+- **Goodneighbor recess2 (the covered passage): the grid follows the tracer on the open part; the deep passage is
+  still under it.** (`res/shaders/cell_lights.glsl`)
+  - A stranded tie (indoor and outdoor evidence within a cell) takes the mean of both answers. Red
+    `WW_CELL_PV_RED=tiepick`.
+  - A cell that holds two rooms reads both of the voxel's slots that hold light, not the first. Red
+    `WW_CELL_PV_RED=firstslot`.
+  - GIBLACK2's frame gate still fails: 38.3% near-zero pixels with the GI on (bar 0.10%). With both reds it is
+    55.1%, as on main. The tracer over
+    182 points of the rect: the lit part draws 0.0201 against 0.0196. The 57 points under black pixels draw 0.0004
+    against a tracer of 0.0020 (the passage's back wall reads about 3e-5, 10-60x under). Drawn at the tracer, 48 of
+    those 57 would still read 3 or less of 255 at 22h. So the black is mostly physical at night, but the grid there
+    is wrong and stays an open item.
+- **The corner leak at the shop's front pillar is reduced, not gone.** A surface buried three cells deep whose only
+  evidence is outdoors takes the darker of the outdoor answer and the plain trilinear. Red `WW_CELL_PV_RED=lonesky`.
+  In the twin the corner box goes from 6.48x to 4.52x the tracer. In the frame the box reads 17.76 against 18.14
+  under the red (2% darker, 852 pixels change); the bright sliver at the pillar edge remains.
+  Answering sealed dark instead blacked out Goodneighbor's recess walls (GIBLACK2's gates failed), so it was not used.
+- **Glass on the counter tracks the room's light** (DECALLIT1's law for lit effects, `fo4_effectshader.frag`,
+  `src/gl/cellfxlit.cpp`). Red `WW_CELL_FXROOM_RED=game`. Frame luminance over the lens
+  pixels (the id probe's mask), counter lens A / B:
+  - Noon: ours 17.0 / 10.9 with the GI on and 60.7 / 50.9 with it off. The game law gives 120.7 / 66.8, the shine.
+  - Night: ours 6.1 / 7.2 with the GI on, 24.0 / 22.1 with it off.
+  - The room around them reads 13.7 on / 65.2 off at noon and 3.8 / 22.8 at night. So the lenses follow the GI
+    switch about as the room does (on/off 0.28 / 0.21 against the room's 0.21).
+  - Day to night is weaker than the room's: 2.8x / 1.5x against 3.6x.
+  - The sunlit effect right of the counter keeps the sun (189.5 ours, 188.2 game at noon).
+  - The effect probes 73-75 now blend over the cell surfaces' probe output, so their absolute values carry the
+    lens alpha; only ratios from them are used.
+- The back-left wall step (x 385-510) is the crown molding's geometry and draws the same in vanilla: no change.
+- **The shader link limit.** `cellGiSample`'s chain is inlined at every call site, and two first drafts of the slot
+  and strand code made `fo4_cell(csm).prog` fail to link on the GPU. The surfaces then silently fell back to the
+  legacy program. glslangValidator passed it. The code was rewritten with fewer call sites. After any edit to
+  `cell_lights.glsl`, shoot probe 5 first: it must be dark (mean about 1; now 1.21).
+- No harm: Concord open roof 16h GI on/off 0.996. Goodneighbor sky vis (b)/(a) 0.639 against the tracer's 0.611 (PASS).
+  GIBLACK2's memden gates all pass.
+- The twin (`tests/spells/cell_rooms_check.py`) mirrors every law: `GI_CHECK_TIE=0`, `GI_CHECK_BOTH=0`,
+  `GI_CHECK_LONE=0`; new subcommand `points` against `tests/fixtures/gidark1_recess2.tsv` / `gidark1_hinside.tsv`.
+
+## Lane GIBLACK2 (2026-10-14, branch giblack2-20261014): the Memory Den recess takes its measured sky, not the open sky's
+
+- **The recessed wall on the Memory Den street (Goodneighbor, 22h) and the second spot to its right now draw the sky
+  share a path tracer measures for them.** After GIBLACK1 the wall no longer went black, but it drew the weather's
+  full flat ambient: open-sky bright where the tracer gives it 0.07 of the sky.
+- Root cause (`src/probegi.cpp`, `src/proberooms.cpp`): the rooms grid spanned the soup's whole box (the 5x5 cells,
+  about 21000 units), so its cell grew to 95.4 units and the recess's 134-unit air came out solid. The wall's reads
+  were then solid and the lend rule decided it. The rooms grid now spans the GI grid's box (sides and bottom; the top
+  stays the soup's, open sky). A clipped face is not an outdoors border. At Goodneighbor the cell is 39.1 units, the
+  recess air is outdoors (room 0) and the wall takes the room blend of the probes that see it. No re-bake: the rooms
+  are rebuilt at relight and the bake already holds probes inside the recess.
+- The lend rule (`res/shaders/cell_lights.glsl`, `cellGiSample`) stays as a safety net. A lent surface with no
+  outdoors answer now takes the plain trilinear instead of the flat ambient (the open sky's light).
+- Reds (environment only): `WW_CELL_ROOMS_RED=soupbox` (the rooms over the soup's box) and `WW_CELL_PV_RED=lendamb`
+  (a lent surface without an answer takes the flat ambient).
+- **Stranded indoor surfaces in exterior cells no longer take sky.** A stranded surface has both room reads
+  solid (0.75 and 1.75 cells), or the 1.75 read lands indoors. GIBLACK1's lend rule sent all of them to the outdoors,
+  which lit attic voids and back rooms like the open sky. The Concord Hardware is the clearest case: indoor stranded
+  points (the tracer gives 0.001) drew 0.63 of the sky.
+- Now (`cell_lights.glsl`, `cellGiStrandSearch`) the surface searches for evidence in front of itself: air cells at
+  0.75, 1.75 and 2.75 cells along its normal, each with up to 2 cells round it in the plane. It keeps the nearest
+  indoor cell and the nearest outdoor cell.
+  - Only one kind found: it takes that room.
+  - Both found: it takes the nearer one. If they are within one cell of each other, it takes the answer whose light is
+    nearer the bake's own trilinear.
+  - The answer is, in order: that room's blend seen from the air cell, the room's fill, the seen fill, and indoors
+    with no light in reach the sealed room's dark. Nothing found: the plain trilinear.
+  - It never falls back to a flat open-sky default. It runs wherever the grid is sky lit, so in the Museum of Freedom
+    as well (Show Sky and Use Sky Lighting on).
+- Probe 95 now writes r = path / 16, with stranded paths 6 to 9. Red: `WW_CELL_PV_RED=strand` (GIBLACK1's whole law
+  for stranded surfaces). Twin: `GI_CHECK_STRAND=1`.
+- Gates (numeric only; tracer = bounce_reference cosine sky share, 256 rays). Memden recess (22h) against the tracer:
+  - wall x0.64, spot2 x1.05, open x0.72, nothing open-sky bright or black: PASS.
+  - Reds: the soupbox rooms FAIL (wall black 31). GIBLACK1's law on the fixed dump FAILs too (spot2 x1.52, 6
+    open-sky bright).
+  - Probe 95: a room blend decides 92.0% of the wall (box red 33.7%). Near-zero pixels 0.05% (borrow red 17.26%).
+- Stranded gate (`cell_rooms_check.py strand`): the open set's indoor points gain at most 0.03, none drawn 0.5+; the
+  tight set's mean is at most 0.05 and at most 1% of points drawn 0.5+.
+  - Goodneighbor (188 points): PASS; GIBLACK1's law FAILs (indoor 0.61 / 0.75).
+  - Concord Hardware (239 points, 31.2-unit cells, 16h): indoor 0.633 to 0.030 (131 points to 1 at 0.5+): PASS;
+    GIBLACK1's law FAILs.
+  - Museum of Freedom (fresh bake, 178 points, reported): closed rooms 0.508 to 0.041; skylight spots (tracer 0.239)
+    0.317 to 0.268. GIBLACK1's law FAILs. The museum's own check still fails on 2 skylight/facade spots and 5 roof
+    voids under a slab one cell thick.
+- No harm:
+  - ROOMCLAMP1 synth PASS (its red FAILs). Museum and Vault 111 cells gate PASS.
+  - Concord open roof at 16h: GI on/off 1.006 / 0.998 / 0.991: PASS.
+  - Hardware interior, noon: GIBLACK1's law draws 3.6% of the frame 20+ levels brighter.
+  - Concord ceiling picks: median 1.35x, p90 4.18 (GISHADE1: 1.29x, 3.55). The finer rooms grid (48.8 to 31.2 units)
+    moves one point to 57x. The strand law does not touch these points.
+- Known red: Goodneighbor recess2 is still black, with 56% near-zero (GIBLACK1's 12.8% came from lighting it 10x the
+  tracer). It is a covered passage, tracer sky 0.049, and every voxel round it holds no sky. This is the voxel-bake
+  defect, not the law.
+
+## Lane DECALLIT1 (2026-10-14, branch decallit1-20261014): effect decals take the light of the wall they lie on
+
+- **The white drip stains on the shaded brick wall at Goodneighbor (18:00 foggy) no longer glow.** The drips are
+  effect-shader statics (the DecoStain wall meshes with BldStreaks01.BGEM: decal flag on, alpha blended, effect
+  lighting off). The cell view drew them self-lit, at their texture colour, so on a dim wall they showed as bright
+  white streaks. The game draws an effect shader with the Decal flag into the deferred decal groups of the surface
+  under it, so the surface's lighting lights it.
+- The fix: in the cell view, an effect draw with the Decal flag uses the new `fo4_effectdecal` / `fo4_effectdecalcsm`
+  programs (`res/shaders/fo4_effectshader.frag` built with `WW_FX_DECALLIT`). They treat the decal colour as an albedo
+  under the wall's lights, ambient, sky, obscurance and sun shadow, then fog, as the wall does. Other effect shaders
+  are unchanged.
+- Red: `WW_CELL_DECALLIT_RED=unlit` restores the old self-lit draw (environment only).
+- Harness switches: `WW_CELL_LIT_PROBE_GAIN` scales the probe-6 light picture (8-bit, so dim light needs gain);
+  `WW_CELL_DECALLIT_PROBE=1` lets effect decals draw in the probe passes; `WW_CELL_DECALLIT_HIDE=1` hides every decal,
+  `=2` only the effect decals. These switches are for harnesses only.
+- Gate: `tests/spells/decallit1_cell.sh` with `decallit1_check.py`, rev1 camera, CommonwealthFoggy 18, gain 4. It
+  takes three shots: the decal's light alone (probe 6), the wall under it with the effect decals hidden (probe 6), and
+  the wall's albedo (probe 81). The region is wherever the first two differ, so it comes from the geometry, not a
+  hand mask. Fix: 30841 px region (30594 readable), median decal / wall light 1.001 (quartiles 0.927 .. 1.058),
+  0.50 % clipped: PASS. Red unlit: median 4.527 (quartiles 3.437 .. 5.289), 83.55 % clipped: FAIL, as required.
+  The clip count leaves out pixels where the wall's own light times the gain is already past white (the Third Rail
+  neon).
+- Beauty shots, before = main 83eff728, after = this branch, rev1 camera, DOF 0, MBLUR 0, sky dome loaded, 0 magenta
+  pixels: `notes/decallit1/shots/{before,after}_rev1_sun18{foggy,clear}.png`. Foggy, drip at (505,230): 116,92,80
+  before, 127,95,84 after, against the wall beside it at 126,95,84 / 130,97,85. The drip now sits in the wall's
+  light and the fog over it, instead of a lighter streak under the fog. Clear 18:00, same drip: 76,67,60 before,
+  61,49,47 after (wall 75,58,56 / 69,52,49). It reads as darker grime, as in the game.
+
+- **The orange rust streaks on the Memory Den wall behind the curved street lamp no longer glow at night.** They
+  are `Architecture\Buildings\Hightech\Stains\HitExtAStainsWall2x2.nif` with
+  `Materials\Architecture\Buildings\Hightech\HitTechStain.BGEM`: an effect shader (decal and decal-no-fade on,
+  alpha blended, no z-write, texture HitTechStreaks01_d, base colour 0.906,0.784,0.549). It is not an emissive BGSM
+  and has no glow map. It glowed because the old path drew it self-lit at texture times base colour, so it stayed
+  orange in the dark. The 4x1 and 3x1 Hightech stain meshes share this material.
+- Second gate camera: `CAM=memden` (Memory Den front, CommonwealthClear 22:00, gain 8, region of at least 1000 px,
+  and a streak rect 1380,100 .. 1480,320 that must read on its own). Fix: 4028 px region (3821 readable), median
+  0.882 (quartiles 0.842 .. 0.931), rect median 0.882, 0.29 % clipped: PASS. Red unlit: median 5.432, rect 5.626,
+  81.81 % clipped: FAIL. The rev1 run with the clip rule, from the script: fix median 1.001, 0.50 % clipped, PASS;
+  red 4.527, 83.55 % clipped, FAIL. Gain 32 saturated the night probe (the red read white on the streak), so the
+  memden camera uses gain 8.
+- Memden beauty shots, night, WW_CELL_BLOOM=fo4cs, WW_CELL_GLARE=1, GI on, DOF 0, MBLUR 0, sky dome loaded, 0 magenta
+  pixels: `notes/decallit1/shots/{before,after,red_unlit,fxdecals_hidden}_memden_n22.png`. On the 2516 streak pixels:
+  before 175,104,49; red identical to before; after 29,33,39; with the effect decals hidden 27,37,50. So the stain is
+  still drawn (2051 pixels differ from the hidden frame) and reads as a darker, warmer grime on the wall, not a glow.
+
+## Lane GIBLACK1 (2026-10-14, branch giblack1-20261013): a recessed outdoor wall no longer goes black with the probe GI
+
+- **The recessed wall left of the pillar on the Memory Den street (Goodneighbor) no longer draws pitch black with
+  the probe GI on.** The recess is narrow (about 134 units) and the rooms grid marks its air solid for three cells,
+  so both of the wall's own reads were solid. The search then borrowed the read of the nearest air cell, which
+  belonged to a sealed shaft room beside the recess (32 cells, no sky in any of its probes: their light is about
+  1e-5 of the street's). Its voxels are valid and say "no sky here", so the sky-lit grid turned the wall's ambient off.
+- The fix (`res/shaders/cell_lights.glsl`, `cellGiSample` and `cellGiRoomSample`), on the exterior sky-lit grid only:
+  a surface whose 0.75 cell read is solid and whose 1.75 cell read is solid or an indoors room borrows only outdoor
+  answers. Its indoors direct read is not taken, its neighbour search skips indoors cells, and its seen fill runs only
+  from an outdoors view point. With no outdoor answer it keeps the weather's ambient, as a spot with no GI does.
+  The second half of the rule covers the recess's corner, where a normal turned a little toward the shaft read it
+  straight through the unresolved air. Interiors, and surfaces whose 0.75 read is air, are unchanged.
+- Python twin: `tests/spells/cell_rooms_check.py` (`gi_sample`) carries the same rule. Over the Memory Den wall
+  (2392 samples), the old code gives 423 black and the fix 0 (lowest 0.019, mean 0.037; the flat ambient is 0.03).
+  With normals turned 15 degrees, the old code gives 661 black and the fix 0. Over the whole frame (1123 samples),
+  the old code gives 14 black and the fix 0.
+- Red: `WW_CELL_PV_RED=borrow` restores the old search (environment only).
+- Gate: `tests/spells/cell_giblack.sh` with `cell_giblack_check.py`. Each camera is shot three ways: GI on, GI off
+  and the red. With the GI on, the wall must keep at least half of the GI-off mean luminance and show no near-zero
+  pixel; the red must fail. Memden (22h, wall rect 150,250..420,760): the fix keeps 0.753 of the GI-off mean with
+  0 near-zero pixels (PASS); the red gives 0.462 and 23767 near-zero pixels (17.26%), the same numbers as main's
+  own shot, so the gate fails on the old code. The checker centre-crops two shots whose heights differ by a few rows
+  (the window came up 1005 and 1007 rows tall, not 1040).
+- Second recess (recess2, Goodneighbor east face near x 23560 y -12370, wall-foot band 840,480..1120,560): the fix
+  clears most of the old black (near-zero pixels 53.1% on the red, 12.8% with the fix; mean 0.216 to 0.600 of
+  GI off) but does not pass. What is left is a separate defect: outdoor room-0 voxels there whose baked sky is about
+  zero. Recess2 stays in the script as a known red; the default gate shoots memden only.
+
+## Lane SKYSTR1 (2026-10-13, branch skystr1-20261013): Sky visibility slider
+
+- **Sky visibility slider.** Show > Lighting has a new "Sky visibility" row (0-100 %, default 100 %) next to GI.
+  It sets how much the baked sky shadowing counts outdoors, as Community Shaders' Skylighting strength does:
+  100 % is the bake as it was, 0 % lights everything as if nothing blocked the sky. It works at once, with no
+  re-bake and no restart, and it is remembered (`WW/CellSkyVis`).
+- How: each probe octant's stored sky visibility v becomes lerp(1, v, s) in the relight (`src/probesky.cpp`;
+  100 % returns v untouched); the AO decals follow the same blend (`res/shaders/cell_lights.glsl`).
+  Pin `WW_CELL_SKYSTR=<0..100>`; red `WW_CELL_SKYSTR_RED=ignore` (environment only).
+- Gate `tests/spells/skystr1_cell.sh` (Concord, cameras hcorner2 + stairA, both in-bounds by camcheck): 100 % is
+  byte for byte the exe before the lane (5 pairs, 0 px); 0 % equals the sky-visibility-off picture on 100 % of
+  pixels (worst 0 levels); 50 % lies strictly between on 100 % of the moved pixels; the relight's sky at 674
+  probes matches an independent rebuild at 0/50/100 %; live in a running window and kept across a relaunch; the
+  red (slider ignored) fails K, Z and H.
+
 ## Lane BLOOM1 (2026-10-13, branch bloom1): FO4CS bloom and Physical Glare in the cell view
 
 - **The cell view can now draw FO4CS's bloom instead of the game's, with its Physical Glare.** Show > Effects >
@@ -27157,3 +27352,5 @@ _Known gaps / backlog: see `TO_BE_IMPLEMENTED.md`._
 - The three viewport shading icons are consolidated into one dropdown with
   Flat, Solid, Shaded, and Normal + Spec/Gloss modes; the diagnostic mode
   removes diffuse colour while retaining authored normal and gloss response.
+## 2026-10-15: SKYPIC1 on by default (bungo)
+- The probes' sky now comes from the sky the view draws (dome, stars, clouds) per direction, not the weather's flat ambient. WW_CELL_SKYPIC=0 restores the flat sky (SKY1). tests/spells/cell_skypic.sh pins its off arms with WW_CELL_SKYPIC=0.
