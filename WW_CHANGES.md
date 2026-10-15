@@ -17,16 +17,27 @@
 - **Probe coverage view.** Show > Pass > "Probe coverage" (or `WW_CELL_PASS="Probe coverage"`) paints magenta where
   the GI grid's valid share k is 0 after the room and seen filters, and grey by k elsewhere. It draws no textures. It
   shares `cellGiSample`'s one call site in `cellPassOut` (a second inlined call broke the cell program's link and fell
-  back to the legacy program: identical pictures). Red: `WW_CELL_PV_RED=nofilter`.
+  back to the legacy program: identical pictures). Red: `WW_CELL_PV_RED=nofilter` (bit 2048; GIDARK1 took 256).
+  - **The colour stays magenta.** bungo asked for magenta for this view (ledger 10-15 13:41), so FIXPACK1's cyan
+    does not apply to it.
+- **The last fill (GI).** A surface facing a pocket no probe reached (Vault 111's 30-cell room 65 by the cryo pods)
+  has no room blend and no room fill. Its seen fill then hangs on one lit voxel whose view line grazes a wall cell,
+  so it fails between pixel centres. The plain trilinear behind it sits on a layer of empty voxels inside the wall
+  (k 0.0009), and the surface drew black: the coverage gate's judge A pixel. Now, in a grid with rooms too, a
+  trilinear with k <= 0.01 takes the gap fill over every voxel's first slot (the trilinear's own reach, weighted
+  over the valid voxels only); probe 95 path 10. Same in the offline twin (`cell_rooms_check.gi_sample`). Red
+  `WW_CELL_PV_RED=nolastfill` (twin `GI_CHECK_LASTFILL=0`).
 - Gates:
   - `tests/spells/probe_place.py` synth: green PASS 263 and tall PASS 384 (walls to 6010, roof 6050, no level capped).
     Reds FAIL: wallcap (112 missing), buried (4 soil), levels (8 capped), wall (824 above the roof).
   - Retrace (twin vs placer): Mass Fusion PASS. Financial and Concord show the same column mismatches as main's own
     placer output (pre-existing, not this lane's).
   - Concord against main with `--red buried`: identical below 960 (2 extra wall probes at z 7760).
-  - Coverage (`tests/spells/cell_coverage.sh`, Vault111Cryo): judge B PASS (0 magenta with the probes, 98.17% with the
-    probes dropped, 99.92% agreement with the offline recount). Judge A FAILs on 1 pixel of the full bake (a 0.0002%
-    hole the shader samples near k 0.007). The nofilter red FAILs judge B as it should.
+  - Coverage (`tests/spells/cell_coverage.sh`, Vault111Cryo, on main a79722c3 merged): PASS. Judge A: 0 magenta with
+    the probes, 382822 in the box with them dropped. Judge B: 0 magenta (100% agreement) and 80.28% (99.73%); the
+    last fill now lights part of the made gap (98.17% before it). Reds: nofilter FAILs B (80.03%); nolastfill FAILs
+    A (the room-65 pixel, 1 magenta). Offline, the twin at 437914 points between neighbouring pixels: 0 holes, 1
+    with `GI_CHECK_LASTFILL=0`. `cell_rooms_check.py synth` PASS.
 - Cost (probebake on the Mass Fusion soup, cell 4,-2): baked probes 1456 to 1713 (+18%), surfels 147286 to 163741,
   links 827631 to 979160 (+18%). Peak working set 1273 to 1374 MB, peak private 1149 to 1138 MB. Wall time 26.7 to
   13.4 s, but the old run went first on a cold cache, so the time is not a like-for-like comparison. The placer on the
@@ -34,7 +45,7 @@
 - Pictures (GI on, sky loaded, DOF 0, MBLUR 0; Mass Fusion facade, cell 4,-2 only, street eye height):
   - The Probe coverage pass paints magenta on 854 pixels (0.10%) on the old bake: a band of the tower above the old
     960 stop. The new bake paints none. In beauty the old bake draws that band flat and unlit; the new bake shades it.
-  - The 3x3 load with the relight's soup passes the 12 GB memory guard, so the pair loads one cell.
+  - The 3x3 load with the relight's soup exceeds the 12 GB memory guard, so the pair loads one cell.
 
 ## Lane GIDARK1 (2026-10-15, branch gidark1-20261015): Concord Hardware's dark interior measured; the shop front, recess2, glass and corner
 
