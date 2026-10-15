@@ -193,7 +193,16 @@ void wwCellFxLitUniforms( Scene * scene, int block )
 bool wwCellFxLitProbeShape( Scene * scene, int block )
 {
 	const int p = st().probe;
-	return p >= 70 && p <= 74 && scene && wwCellFxLitFor( scene->nifModel, block ) != nullptr;
+	return p >= 70 && p <= 75 && scene && wwCellFxLitFor( scene->nifModel, block ) != nullptr;	// lane GIDARK1: + 75
+}
+
+bool wwCellFxRoomLit( Scene * scene, int block )
+{
+	static const bool red = qgetenv( "WW_CELL_FXROOM_RED" ).trimmed() == "game";
+	if ( red || !scene || !wwCellLightsWanted( scene ) )
+		return false;
+	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	return L && !L->interior && wwCellFxLitFor( scene->nifModel, block ) != nullptr;
 }
 
 void wwCellFxLitSphere( const float * xyz, size_t count, float out[4] )

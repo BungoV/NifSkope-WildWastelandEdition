@@ -90,7 +90,7 @@ struct ClState
 	int fogProbe = 0;       // lane FOG2: WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog colour ^ 1/2.2) | 8 (its d, z), per fragment
 	int pass = 0;           // lane PROBEVIEW1: the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
 	bool passPinned = false;
-	int passRed = 0;        // WW_CELL_PV_RED: 1 direct, 2 nonormal (the shader), 4 open (every sky direction open), 8 noclamp, 16 nosee, 32 borrow, 64 lendamb, 128 strand
+	int passRed = 0;        // WW_CELL_PV_RED: 1 direct, 2 nonormal (the shader), 4 open (every sky direction open), 8 noclamp, 16 nosee, 32 borrow, 64 lendamb, 128 strand, 256 firstslot, 512 tiepick, 1024 lonesky, 2048 nofilter, 4096 nolastfill
 	int giAmb = 1;          // lane GICAL1: WW_CELL_GI_AMB = keep (0) | replace | off | max | asgi (the measure's red); lane GIAMB1: replace by default (his ruling), keep = the gate's red
 	bool giFill = true;     // lane GICAL1: WW_CELL_GI_FILL=0 leaves the GI's gaps black (as before the lane)
 };
@@ -187,7 +187,7 @@ ClState & st()
 			s.pass = 0;
 		for ( const QByteArray & r : qgetenv( "WW_CELL_PV_RED" ).split( ',' ) ) {
 			const QByteArray t = r.trimmed();
-			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : t == "nofilter" ? 256 : 0;   // lane ROOMCLAMP1: noclamp; lane GISHADE1: nosee; lane GIBLACK1: borrow; lane GIBLACK2: lendamb, strand
+			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : t == "firstslot" ? 256 : t == "tiepick" ? 512 : t == "lonesky" ? 1024 : t == "nofilter" ? 2048 : t == "nolastfill" ? 4096 : 0;	// lane GIDARK1: firstslot, tiepick, lonesky; lane WALLSTACK1: nofilter, nolastfill   // lane ROOMCLAMP1: noclamp; lane GISHADE1: nosee; lane GIBLACK1: borrow; lane GIBLACK2: lendamb, strand
 		}
 	}
 	return s;
@@ -804,7 +804,7 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
 	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
 	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
-	prog->uni1i( "cellPassRed", s.passRed & ~4 );	// lane WALLSTACK1: + 256 nofilter (was & 251, which dropped it)	// lane ROOMCLAMP1: + 8 noclamp; lane GISHADE1: + 16 nosee; lane GIBLACK1: + 32 borrow; lane GIBLACK2: + 64 lendamb, 128 strand
+	prog->uni1i( "cellPassRed", s.passRed & ~4 );	// lane WALLSTACK1: + 2048 nofilter, 4096 nolastfill (was & 251, which dropped them)	// lane ROOMCLAMP1: + 8 noclamp; lane GISHADE1: + 16 nosee; lane GIBLACK1: + 32 borrow; lane GIBLACK2: + 64 lendamb, 128 strand
 	if ( giDraw ) {
 		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
 		prog->uni1f( "cellGiVoxel", G->voxel );
@@ -987,7 +987,24 @@ void wwCellLightsUniforms( Scene * scene )
 		static const bool fxColorRed = qgetenv( "WW_CELL_FXLIT_COLOR_RED" ).trimmed() == "sun";
 		const bool fxProg = prog->name == std::string_view( "fo4_effectcell.prog" )
 			|| prog->name == std::string_view( "particles_cell.prog" );
+		// lane GIDARK1: the decal programs keep the surfaces' sun and take the lit-effect base as cellFxBase (fxRoomLit)
+		const bool roomProg = wwIsCellDecalProgramName( prog->name );
 		float dalc[6][3];
+		if ( !L->interior && roomProg ) {
+			float base[3] = { 0.0f, 0.0f, 0.0f };
+			if ( !fxExtRed && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
+				float dif[4] = {}, amb[4] = {};
+				wwLookdevLight( dirTo, dif, amb );
+				float fxCol[3] = { dif[0], dif[1], dif[2] };
+				if ( !fxColorRed )
+					wwLookdevEffectLight( fxCol );
+				WwLookdevIs is;
+				const float fxScale = fxScaleRed ? ( wwLookdevImageSpace( is ) ? is.hdr[6] : 1.0f ) : sunScale;
+				for ( int c = 0; c < 3; c++ )
+					base[c] = std::max( fxCol[c], 0.0f ) * fxScale;
+			}
+			prog->uni3f( "cellFxBase", base[0], base[1], base[2] );
+		}
 		if ( !L->interior && fxProg && !fxExtRed && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
 			float dif[4] = {}, amb[4] = {};
 			wwLookdevLight( dirTo, dif, amb );

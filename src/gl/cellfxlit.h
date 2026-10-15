@@ -78,6 +78,10 @@ const WwFxLitModel * wwCellFxLitFor( const void * nif, int block, int * serial =
 void wwCellFxLitUniforms( Scene * scene, int block );
 //! True when this shape draws in the running probe pass (a lit effect, probe 70..74).
 bool wwCellFxLitProbeShape( Scene * scene, int block );
+/*! lane GIDARK1: true when this lit effect draws through fo4_effectdecal(csm) with fxRoomLit: an exterior's lit effect
+ *  (glass, lenses) whose base is scaled by the share of the open-air light reaching its spot (fo4_effectshader.frag
+ *  fxRoomLitMul), so a lens inside a dark shop follows the room. Red WW_CELL_FXROOM_RED=game: the game's base. */
+bool wwCellFxRoomLit( Scene * scene, int block );
 
 //! Bounding sphere of `count` points (xyz, stride 3 floats): the box centre, the farthest point.
 void wwCellFxLitSphere( const float * xyz, size_t count, float out[4] );

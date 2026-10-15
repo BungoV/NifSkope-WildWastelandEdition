@@ -31,7 +31,8 @@ namespace
 {
 bool skyPicOn()
 {
-	return qEnvironmentVariableIntValue( "WW_CELL_SKYPIC" ) == 1;
+	// on by default since 2026-10-15 (bungo); WW_CELL_SKYPIC=0 gives the weather's flat ambient (SKY1)
+	return !qEnvironmentVariableIsSet( "WW_CELL_SKYPIC" ) || qEnvironmentVariableIntValue( "WW_CELL_SKYPIC" ) == 1;
 }
 
 //! WW_CELL_SKYPIC_FLAT=r,g,b (the known-answer control): the capture is that one colour; with the switch off the

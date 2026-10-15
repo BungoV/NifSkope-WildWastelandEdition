@@ -36,6 +36,77 @@
     960 stop. The new bake paints none. In beauty the old bake draws that band flat and unlit; the new bake shades it.
   - The 3x3 load with the relight's soup passes the 12 GB memory guard, so the pair loads one cell.
 
+## Lane GIDARK1 (2026-10-15, branch gidark1-20261015): Concord Hardware's dark interior measured; the shop front, recess2, glass and corner
+
+- **Concord Hardware's interior at noon is dark because the light there is low.** The full irradiance tracer (sun as the
+  notes give it, never x4.5) puts the GI term at 0.0188 mean over 880 surface points. The grid draws 0.0170 (0.90x,
+  median 0.72x, 6 points under a tenth). With the GI off the flat ambient draws about 22x the tracer. No brightness
+  was added for it.
+- **The open shop front lets the street's sky in** (`src/probegi.cpp`, the own-sky floor). A room-0 voxel just inside
+  the open front blended only the shop's dark probes. Now no axis of an outdoor slot reads below the sky its own eye
+  sees (256 rays, the probes' own sky law). Red `WW_CELL_GI_RED=noskyfloor`.
+  - Floor within 2 m of the front (36 up-facing tracer points with sky share >= 0.01): 0.96x the tracer, median 0.65x,
+    12 under half (red: 0.71x, median 0.38x, 28 under half). In the frame the front floor reads 10.45 against 8.56
+    under the red. There is no clean falloff yet: partial.
+- **Outdoor slots past the probed rect take their eye's sky** (the edge sky, `src/probegi.cpp`). Before, they were
+  empty and read black. Red `WW_CELL_GI_RED=noedge`.
+- **Goodneighbor recess2 (the covered passage): the grid follows the tracer on the open part; the deep passage is
+  still under it.** (`res/shaders/cell_lights.glsl`)
+  - A stranded tie (indoor and outdoor evidence within a cell) takes the mean of both answers. Red
+    `WW_CELL_PV_RED=tiepick`.
+  - A cell that holds two rooms reads both of the voxel's slots that hold light, not the first. Red
+    `WW_CELL_PV_RED=firstslot`.
+  - GIBLACK2's frame gate still fails: 38.3% near-zero pixels with the GI on (bar 0.10%). With both reds it is
+    55.1%, as on main. The tracer over
+    182 points of the rect: the lit part draws 0.0201 against 0.0196. The 57 points under black pixels draw 0.0004
+    against a tracer of 0.0020 (the passage's back wall reads about 3e-5, 10-60x under). Drawn at the tracer, 48 of
+    those 57 would still read 3 or less of 255 at 22h. So the black is mostly physical at night, but the grid there
+    is wrong and stays an open item.
+- **The corner leak at the shop's front pillar is reduced, not gone.** A surface buried three cells deep whose only
+  evidence is outdoors takes the darker of the outdoor answer and the plain trilinear. Red `WW_CELL_PV_RED=lonesky`.
+  In the twin the corner box goes from 6.48x to 4.52x the tracer. In the frame the box reads 17.76 against 18.14
+  under the red (2% darker, 852 pixels change); the bright sliver at the pillar edge remains.
+  Answering sealed dark instead blacked out Goodneighbor's recess walls (GIBLACK2's gates failed), so it was not used.
+- **Glass on the counter tracks the room's light** (DECALLIT1's law for lit effects, `fo4_effectshader.frag`,
+  `src/gl/cellfxlit.cpp`). Red `WW_CELL_FXROOM_RED=game`. Frame luminance over the lens
+  pixels (the id probe's mask), counter lens A / B:
+  - Noon: ours 17.0 / 10.9 with the GI on and 60.7 / 50.9 with it off. The game law gives 120.7 / 66.8, the shine.
+  - Night: ours 6.1 / 7.2 with the GI on, 24.0 / 22.1 with it off.
+  - The room around them reads 13.7 on / 65.2 off at noon and 3.8 / 22.8 at night. So the lenses follow the GI
+    switch about as the room does (on/off 0.28 / 0.21 against the room's 0.21).
+  - Day to night is weaker than the room's: 2.8x / 1.5x against 3.6x.
+  - The sunlit effect right of the counter keeps the sun (189.5 ours, 188.2 game at noon).
+  - The effect probes 73-75 now blend over the cell surfaces' probe output, so their absolute values carry the
+    lens alpha; only ratios from them are used.
+- The back-left wall step (x 385-510) is the crown molding's geometry and draws the same in vanilla: no change.
+- **The shader link limit.** `cellGiSample`'s chain is inlined at every call site, and two first drafts of the slot
+  and strand code made `fo4_cell(csm).prog` fail to link on the GPU. The surfaces then silently fell back to the
+  legacy program. glslangValidator passed it. The code was rewritten with fewer call sites. After any edit to
+  `cell_lights.glsl`, shoot probe 5 first: it must be dark (mean about 1; now 1.21).
+- No harm: Concord open roof 16h GI on/off 0.996. Goodneighbor sky vis (b)/(a) 0.639 against the tracer's 0.611 (PASS).
+  GIBLACK2's memden gates all pass.
+- The twin (`tests/spells/cell_rooms_check.py`) mirrors every law: `GI_CHECK_TIE=0`, `GI_CHECK_BOTH=0`,
+  `GI_CHECK_LONE=0`; new subcommand `points` against `tests/fixtures/gidark1_recess2.tsv` / `gidark1_hinside.tsv`.
+## Lane LODP1 (2026-10-15, branch lodp1-20261015): LOD PRTP step 1 -- light patches placed on the distant LOD
+
+- **New: `.lodp` sector files** (`src/lodpfile.*`, contract `docs/LODGEN_NATIVE_LODO_LODI.md` section 13). One
+  file per 16 x 16 cells holds small surface patches (about one every 512 units) placed on the faces the far
+  view really draws: the `.lodo` meshes where the `.lodi` puts them, one patch per tree, and an 8 x 8 grid on
+  every land cell of the `.lodl`. Step 1 writes geometry; the light words (horizon, openness, albedo, links)
+  are zero for step 2. Reader refuses wrong versions, flags, reserved bytes and both CRCs by name.
+- **`.lodo` v8 patch-chart stream** (section 3.10): one byte per cluster triangle naming the chart it belongs to,
+  so a far pixel finds its patch without a search. Written ONLY with `--patch-charts`; without it a bake is
+  byte-identical to before (gated on a real region against the rung exe). Both readers refuse 9 doctored
+  files by name.
+- **CLI:** `lodgen ... --native <dir> --patch-charts`; `lodgen --lodp <pair dir> [<out>] [--lodp-region X0 Y0 X1 Y1]
+  [--lodp-census]` (no plugin read); `lodgen --lodp-verify <dir>`; `lodgen --lodp-fixture <dir> [--lodp-red 1|2]`.
+- **Placement rules** (`src/lodpplace.*`): a chart is the run of triangles within 45 degrees of a seed (an exact
+  45-degree bevel joins); slots are cubes of one patch edge; empty slots fall back to the chart's largest patch.
+  The `.lodp` units compile with `fp-contract=off` so the stored floats equal the independent twin's bit for bit.
+- **Measured:** region (-20 24 .. -9 35): 46,215 patches, 4.07 MiB, twin `--real` 33,828 checks 0 failures. Whole
+  Commonwealth: 4,184,387 patches in 144 sectors, **315 MiB**, placed in 7.2 s; 597 cells over the 800-patch cap.
+- Independent reader + twin: `tests/spells/lodp_decode.py` (`--fixture`, `--expect-red`, `--stream`, `--real`).
+
 ## Lane GIBLACK2 (2026-10-14, branch giblack2-20261014): the Memory Den recess takes its measured sky, not the open sky's
 
 - **The recessed wall on the Memory Den street (Goodneighbor, 22h) and the second spot to its right now draw the sky
@@ -27209,3 +27280,5 @@ _Known gaps / backlog: see `TO_BE_IMPLEMENTED.md`._
 - The three viewport shading icons are consolidated into one dropdown with
   Flat, Solid, Shaded, and Normal + Spec/Gloss modes; the diagnostic mode
   removes diffuse colour while retaining authored normal and gloss response.
+## 2026-10-15: SKYPIC1 on by default (bungo)
+- The probes' sky now comes from the sky the view draws (dome, stars, clouds) per direction, not the weather's flat ambient. WW_CELL_SKYPIC=0 restores the flat sky (SKY1). tests/spells/cell_skypic.sh pins its off arms with WW_CELL_SKYPIC=0.

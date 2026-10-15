@@ -293,11 +293,27 @@ vec4 cellGiRoomBlend( vec3 P, vec3 N, ivec2 L, vec3 from, out float ws )
 		int base = ( S.x >= 0 && ( S.x == L.x || S.x == L.y ) ) ? 0 : ( S.y >= 0 && ( S.y == L.x || S.y == L.y ) ) ? 6 * dm.z : -1;
 		if ( base < 0 || w <= 0.0 || !cellGiSeen( from, c ) )
 			continue;
-		vec4 v = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.x ), 0 )
-		       + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.y ), 0 )
-		       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.z ), 0 );
-		if ( v.a <= 0.0 )
+		/* lane GIDARK1: the read cell holds two rooms (an opening's cell sees both) and so does the voxel: the mean of
+		 * both slots that hold light. The first slot alone left Goodneighbor's recess2, beside a doorway, on the sealed
+		 * room's dark. Red WW_CELL_PV_RED=firstslot. One loop for both slots: a second copy of the reads, inlined at
+		 * every cellGiSample, took fo4_cell past what the driver links (the surfaces fell back to the legacy program). */
+		bool two = ( cellPassRed & 256 ) == 0 && L.x >= 0 && L.y >= 0 && L.x != L.y && base == 0
+			&& S.y >= 0 && ( S.y == L.x || S.y == L.y );
+		vec4 v = vec4( 0.0 );
+		float nv = 0.0;
+		for ( int q = 0; q < ( two ? 2 : 1 ); q++ ) {
+			int bq = q == 0 ? base : 6 * dm.z;
+			vec4 u = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + bq + sl.x ), 0 )
+			       + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + bq + sl.y ), 0 )
+			       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + bq + sl.z ), 0 );
+			if ( u.a > 0.0 ) {
+				v += u;
+				nv += 1.0;
+			}
+		}
+		if ( nv <= 0.0 )
 			continue;   // lane ROOMCLAMP1: an empty slot (no probe of its room reached the voxel): no weight
+		v /= nv;
 		s += w * v;
 		ws += w;
 	}
@@ -537,19 +553,46 @@ vec4 cellGiStrandPick( vec3 P, vec3 N, out int path )
 	path = 5;
 	if ( LIn.x < 0 && LOut.x < 0 )
 		return vec4( -1.0 );
-	if ( LIn.x < 0 || LOut.x < 0 || abs( dIn - dOut ) >= cellRoomsCell ) {
-		bool useIn = LOut.x < 0 || ( LIn.x >= 0 && dIn < dOut );
-		return cellGiStrandAnswer( P, N, useIn ? LIn : LOut, useIn ? CIn : COut, path );
-	}
-	int pi, po;
-	vec4 a = cellGiStrandAnswer( P, N, LIn, CIn, pi );
-	vec4 o = cellGiStrandAnswer( P, N, LOut, COut, po );
-	if ( o.a < 0.0 ) {
-		path = pi;
-		return a;
-	}
+	/* lane GIDARK1: buried three cells deep (the reads at 0.75, 1.75 and 2.75 cells all solid) with only the outdoors in
+	 * reach, the search may have gone round a building's corner (Concord Hardware's front pillar took the street's
+	 * light, 6.5x the tracer's 0.001-0.007): the darker of the outdoor answer and the plain trilinear (the bake's own
+	 * visibility there). The sealed dark instead blacked out Goodneighbor's recess walls. Red WW_CELL_PV_RED=lonesky.
+	 * A tie (both within a cell) is the room grid saying it cannot tell the two sides apart, and the plain trilinear
+	 * reads the voxels' first slot only (beside a doorway the indoor room: Goodneighbor's recess2 took the sealed room's
+	 * dark, 0.0001 where the tracer gives 0.007-0.01): the mean of both answers. Red WW_CELL_PV_RED=tiepick (GIBLACK2's
+	 * pick, the answer nearer the trilinear). Two answer sites and one trilinear site: every one is inlined at each
+	 * cellGiSample, and more took fo4_cell past what the driver links. */
 	const vec3 Y = vec3( 0.2126, 0.7152, 0.0722 );
-	float t = dot( cellGiTrilinear( P, N ).rgb, Y );
+	bool lone = LIn.x < 0 && ( cellPassRed & 1024 ) == 0 && cellRoomSolid( P + N * ( 0.75 * cellRoomsCell ) )
+		&& cellRoomSolid( P + N * ( 1.75 * cellRoomsCell ) ) && cellRoomSolid( P + N * ( 2.75 * cellRoomsCell ) );
+	bool tie = LIn.x >= 0 && LOut.x >= 0 && abs( dIn - dOut ) < cellRoomsCell;
+	bool wantIn = LIn.x >= 0 && ( tie || LOut.x < 0 || dIn < dOut );
+	bool wantOut = LOut.x >= 0 && ( tie || !wantIn );
+	int pi = 5, po = 5;
+	vec4 a = vec4( -1.0 ), o = vec4( -1.0 );
+	if ( wantIn )
+		a = cellGiStrandAnswer( P, N, LIn, CIn, pi );
+	if ( wantOut )
+		o = cellGiStrandAnswer( P, N, LOut, COut, po );
+	bool needT = lone || ( tie && o.a >= 0.0 && ( cellPassRed & 512 ) != 0 );
+	vec4 tr = needT ? cellGiTrilinear( P, N ) : vec4( 0.0 );
+	if ( lone ) {
+		if ( o.a >= 0.0 && tr.a > 0.0 && dot( tr.rgb, Y ) / tr.a < dot( o.rgb, Y ) / max( o.a, 1e-6 ) ) {
+			path = 4;
+			return tr;
+		}
+		path = po;
+		return o;
+	}
+	if ( !tie || o.a < 0.0 ) {
+		path = wantIn ? pi : po;
+		return wantIn ? a : o;
+	}
+	if ( ( cellPassRed & 512 ) == 0 ) {
+		path = ( pi == 6 || po == 6 ) ? 6 : pi;
+		return 0.5 * ( a + o );
+	}
+	float t = dot( tr.rgb, Y );
 	bool useIn = abs( dot( a.rgb, Y ) - t ) <= abs( dot( o.rgb, Y ) - t );
 	path = useIn ? pi : po;
 	return useIn ? a : o;
@@ -885,13 +928,13 @@ vec3 cellPassOut( vec3 P, vec3 N )
 	/* lane WALLSTACK1: Probe coverage (bungo 10-15, the deck's s-placement slide: empty upper floors in pink). Magenta
 	 * where the probe term lights nothing: the valid share k of the GI row's own sample (cellGiSample: rooms, seen
 	 * fill, lend rule, gap fill) is 0 (<= 0.01, the GI pass's own test); elsewhere grey 0.25 + 0.5 k. The pass draws no
-	 * texture, so its magenta is never a missing one. Red WW_CELL_PV_RED=nofilter: the plain trilinear's k. It shares
+	 * texture, so its magenta is never a missing one. Red WW_CELL_PV_RED=nofilter (bit 2048): the plain trilinear's k. It shares
 	 * the one cellGiSample call below: each call site inlines the whole chain, and one more takes fo4_cell past what
 	 * the driver links (GIDARK1: the surfaces then fall back to the legacy program, silently). */
 	const vec3 hole = vec3( 1.0, 0.0, 1.0 );
 	if ( ( cellPass >= 3 && cellPass != 6 ) || !cellGiOn )
 		return cellPass == 6 ? hole : none;
-	vec4 s = cellPass == 6 && ( cellPassRed & 256 ) != 0 ? cellGiTrilinear( P, N )
+	vec4 s = cellPass == 6 && ( cellPassRed & 2048 ) != 0 ? cellGiTrilinear( P, N )
 	       : cellGiSample( P, cellPass != 6 && ( cellPassRed & 2 ) != 0 ? vec3( 0.0, 0.0, 1.0 ) : N );
 	if ( cellPass == 6 )
 		return s.a <= 0.01 ? hole : vec3( 0.25 + 0.5 * clamp( s.a, 0.0, 1.0 ) );

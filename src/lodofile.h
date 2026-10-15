@@ -121,6 +121,17 @@ constexpr quint32 LODO_VERSION = 6;
  *  v6 row's reserved byte and must be 0 below v7. A v7 file without the flag, or
  *  a NEAR flag on any other version, is refused. */
 constexpr quint32 LODO_VERSION_NEAR = 7;
+/*! v8 (lane LODP1, 2026-10-15): the CHART STREAM for LOD PRTP (`.lodp`,
+ *  src/lodpfile.h) -- one byte a cluster triangle, 16 a cluster (a slot past
+ *  the cluster's triangleCount holds LODP_CHART_NONE), the chart each
+ *  triangle belongs to by the rule in src/lodpplace.h. Written ONLY when the
+ *  bake asks for it (`--patch-charts`); without it a library is the v6/v7
+ *  file it was, byte for byte. The stream is the LAST payload, its offset at
+ *  header 0xE0 (zero exactly below v8). v8 carries the NEAR flag or not: the
+ *  rule is now "v7 is NEAR, and NEAR is v7 or v8". */
+constexpr quint32 LODO_VERSION_CHARTS = 8;
+//! v8: chart-stream bytes a cluster.
+constexpr quint32 LODO_CHART_STRIDE = 16;
 //! v5: the layout with the colour stream and no variant rows (read as v6 without swaps).
 constexpr quint32 LODO_VERSION_NO_SWAP = 5;
 //! The earliest version this reader accepts: v5's layout with no colour stream.
@@ -428,6 +439,8 @@ struct LodoHeader
 	quint32 colourVertexCount = 0;
 	//! v5, 0xD8: offset of the colour stream, the LAST payload; 0 exactly when the count is 0.
 	quint64 offColours = 0;
+	//! v8, 0xE0: offset of the chart stream (clusterCount x 16 bytes, after the colours); 0 below v8.
+	quint64 offChartStream = 0;
 	quint32 indexCrc32 = 0;
 	quint64 fileBytes = 0;
 	/*! v2, file offset 0xB8. FNV-1a 64 over the LOAD ORDER that produced this
@@ -466,6 +479,10 @@ struct LodoLibrary
 	 *  the rest with LODO_COLOUR_NONE. Empty is accepted by the writer as "all
 	 *  none" for libraries built by hand. */
 	std::vector<quint32> colours;
+	/*! v8: the chart stream, clusters x LODO_CHART_STRIDE bytes, or EMPTY --
+	 *  empty is the exact way back (no stream, the v6/v7 file). Filled by
+	 *  lodpChartStream (src/lodpplace.h) when the bake asks for it. */
+	std::vector<quint8> chartStream;
 	QByteArray strings;                 //!< NUL-terminated UTF-8, offset 0 = ""
 
 	//! Append a string, returning its offset; "" is always offset 0.
