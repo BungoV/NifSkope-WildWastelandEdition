@@ -134,6 +134,10 @@
   AO dump of the same view), and never reads the air's weights. Reds: `bluescatter` must fail stage P (the old
   weights turned the barrel's glow from red-to-green 2.3 into 1.2), and `physcol` (the haze in the physical light's
   color) must fail stage H.
+- **A light-boost pin for look tests (measurement only).** `WW_CELL_LIGHT_BOOST=<ref id hex>:<color x>:<radius x>`
+  (comma-separated for several) scales those placed lights' color and radius where the cell reads them, so walls,
+  the probe relight and the air all see the same light. The lights line in the run notes echoes it
+  (`lightboost=... (N placed lights boosted)`). Unset: nothing changes. Not a user toggle, never a default.
 - The sky gate judges its L stage (the fog color at infinity across the skyline) on the lamps-off frame when the
   view has one; the lamps' own glow brightens the buildings beside the skyline and belongs to the lamp check. The
   lamps-on value is printed as information.
