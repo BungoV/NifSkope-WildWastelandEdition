@@ -458,9 +458,11 @@ def main():
     # GROUND1 (2026-09-27): a far .lodi is v12 when it carries the per-vertex ground-contact stream
     # (the default); 11 stays the near library's alone. IDENT2 (2026-09-29): 13 when the group table is
     # FILE-WIDE (the default since then), decided last, keeping every bit and stream of 7..12
-    ck.check('j0 the .lodo is at version 6 (SWAP1) and the .lodi at 3, 4, 5, 6, 7, 8, 9, 10, 12 or 13 (%d / %d)'
-             % (h['version'], ih['version']),
-             h['version'] == 6 and ih['version'] in (3, 4, 5, 6, 7, 8, 9, 10, 12, 13))
+    # LODP1 (2026-10-15): .lodo v8 exactly when the bake wrote the chart stream (--patch-charts)
+    ck.check('j0 the .lodo is at version 6 (SWAP1), or 8 with a chart stream (LODP1), and the .lodi at 3, 4, 5, 6, '
+             '7, 8, 9, 10, 12 or 13 (%d / %d)' % (h['version'], ih['version']),
+             (h['version'] == 6 or (h['version'] == 8 and L.get('chartStream') is not None))
+             and ih['version'] in (3, 4, 5, 6, 7, 8, 9, 10, 12, 13))
     if ih['version'] == 13:
         ck.check('j0e a v13 .lodi carries the file-wide group table (u32, stride 4, %d groups)'
                  % ih['groupCount'], bool(T.get('groupFileWide')) and ih['groupStride'] == 4)

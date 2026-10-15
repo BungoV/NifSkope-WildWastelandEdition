@@ -145,6 +145,53 @@
   lights the air inside. Alpha-tested casters (window panes, leaf cards) are tested against a red that makes them
   solid.
 
+## Lane WALLSTACK1 (2026-10-15, branch wallstack1-20261015): wall stacks reach the top of tall buildings; soil gaps get no probe; Probe coverage view
+
+- **Wall probe stacks no longer stop at 960 units.** A stack climbs its wall until the wall ends (the way up is
+  blocked, or the wall is no longer within 2 x the standoff). Steps are 240 apart up to 960 above the origin, as
+  before, so a stack below 960 is unchanged. Above that they are 480 apart, at most 64 levels (`src/probeplace.h`
+  `wallStepNear`, `wallNearTop`, `wallStepFar`, `wallMaxSteps`; the old `wallHeights` list is gone). Column levels are
+  capped at 24 (was 6), so a tower's floors no longer hide its basements.
+- **Soil is not air.** A gap between two column hits is soil when the face above it is one-sided and faces up, and
+  fewer than 2 of 4 level rays out to 2048 units meet a face from its front. Such a gap gets no level probe and starts
+  no wall stack. The same test refuses room and cover probes standing in soil. Of several faces at one distance
+  (back-to-back walls), any one met from its front counts (`Bvh::anyHitIn`, `src/probebvh.h`).
+- The census line `probe walls: highest stack level N, stacks at the step cap N; soil gaps refused N, room/cover cells
+  in the soil N` says whether a cap was hit. The `room` and `cover` counts now count placed probes only.
+- Reds (`ProbePlaceSpec::red`): `wallcap` (stop at 960), `buried` (every gap is air), `levels` (6 levels).
+- **Probe coverage view.** Show > Pass > "Probe coverage" (or `WW_CELL_PASS="Probe coverage"`) paints magenta where
+  the GI grid's valid share k is 0 after the room and seen filters, and grey by k elsewhere. It draws no textures. It
+  shares `cellGiSample`'s one call site in `cellPassOut` (a second inlined call broke the cell program's link and fell
+  back to the legacy program: identical pictures). Red: `WW_CELL_PV_RED=nofilter` (bit 2048; GIDARK1 took 256).
+  - **The colour stays magenta.** bungo asked for magenta for this view (ledger 10-15 13:41), so FIXPACK1's cyan
+    does not apply to it.
+- **The last fill (GI).** A surface facing a pocket no probe reached (Vault 111's 30-cell room 65 by the cryo pods)
+  has no room blend and no room fill. Its seen fill then hangs on one lit voxel whose view line grazes a wall cell,
+  so it fails between pixel centres. The plain trilinear behind it sits on a layer of empty voxels inside the wall
+  (k 0.0009), and the surface drew black: the coverage gate's judge A pixel. Now, in a grid with rooms too, a
+  trilinear with k <= 0.01 takes the gap fill over every voxel's first slot (the trilinear's own reach, weighted
+  over the valid voxels only); probe 95 path 10. Same in the offline twin (`cell_rooms_check.gi_sample`). Red
+  `WW_CELL_PV_RED=nolastfill` (twin `GI_CHECK_LASTFILL=0`).
+- Gates:
+  - `tests/spells/probe_place.py` synth: green PASS 263 and tall PASS 384 (walls to 6010, roof 6050, no level capped).
+    Reds FAIL: wallcap (112 missing), buried (4 soil), levels (8 capped), wall (824 above the roof).
+  - Retrace (twin vs placer): Mass Fusion PASS. Financial and Concord show the same column mismatches as main's own
+    placer output (pre-existing, not this lane's).
+  - Concord against main with `--red buried`: identical below 960 (2 extra wall probes at z 7760).
+  - Coverage (`tests/spells/cell_coverage.sh`, Vault111Cryo, on main a79722c3 merged): PASS. Judge A: 0 magenta with
+    the probes, 382822 in the box with them dropped. Judge B: 0 magenta (100% agreement) and 80.28% (99.73%); the
+    last fill now lights part of the made gap (98.17% before it). Reds: nofilter FAILs B (80.03%); nolastfill FAILs
+    A (the room-65 pixel, 1 magenta). Offline, the twin at 437914 points between neighbouring pixels: 0 holes, 1
+    with `GI_CHECK_LASTFILL=0`. `cell_rooms_check.py synth` PASS.
+- Cost (probebake on the Mass Fusion soup, cell 4,-2): baked probes 1456 to 1713 (+18%), surfels 147286 to 163741,
+  links 827631 to 979160 (+18%). Peak working set 1273 to 1374 MB, peak private 1149 to 1138 MB. Wall time 26.7 to
+  13.4 s, but the old run went first on a cold cache, so the time is not a like-for-like comparison. The placer on the
+  whole downtown soups gives Mass Fusion 9682 to 8797 probes, with the highest stack level 10 (Financial: 14).
+- Pictures (GI on, sky loaded, DOF 0, MBLUR 0; Mass Fusion facade, cell 4,-2 only, street eye height):
+  - The Probe coverage pass paints magenta on 854 pixels (0.10%) on the old bake: a band of the tower above the old
+    960 stop. The new bake paints none. In beauty the old bake draws that band flat and unlit; the new bake shades it.
+  - The 3x3 load with the relight's soup exceeds the 12 GB memory guard, so the pair loads one cell.
+
 ## Lane GIDARK1 (2026-10-15, branch gidark1-20261015): Concord Hardware's dark interior measured; the shop front, recess2, glass and corner
 
 - **Concord Hardware's interior at noon is dark because the light there is low.** The full irradiance tracer (sun as the
@@ -196,6 +243,25 @@
   GIBLACK2's memden gates all pass.
 - The twin (`tests/spells/cell_rooms_check.py`) mirrors every law: `GI_CHECK_TIE=0`, `GI_CHECK_BOTH=0`,
   `GI_CHECK_LONE=0`; new subcommand `points` against `tests/fixtures/gidark1_recess2.tsv` / `gidark1_hinside.tsv`.
+## Lane LODP1 (2026-10-15, branch lodp1-20261015): LOD PRTP step 1 -- light patches placed on the distant LOD
+
+- **New: `.lodp` sector files** (`src/lodpfile.*`, contract `docs/LODGEN_NATIVE_LODO_LODI.md` section 13). One
+  file per 16 x 16 cells holds small surface patches (about one every 512 units) placed on the faces the far
+  view really draws: the `.lodo` meshes where the `.lodi` puts them, one patch per tree, and an 8 x 8 grid on
+  every land cell of the `.lodl`. Step 1 writes geometry; the light words (horizon, openness, albedo, links)
+  are zero for step 2. Reader refuses wrong versions, flags, reserved bytes and both CRCs by name.
+- **`.lodo` v8 patch-chart stream** (section 3.10): one byte per cluster triangle naming the chart it belongs to,
+  so a far pixel finds its patch without a search. Written ONLY with `--patch-charts`; without it a bake is
+  byte-identical to before (gated on a real region against the rung exe). Both readers refuse 9 doctored
+  files by name.
+- **CLI:** `lodgen ... --native <dir> --patch-charts`; `lodgen --lodp <pair dir> [<out>] [--lodp-region X0 Y0 X1 Y1]
+  [--lodp-census]` (no plugin read); `lodgen --lodp-verify <dir>`; `lodgen --lodp-fixture <dir> [--lodp-red 1|2]`.
+- **Placement rules** (`src/lodpplace.*`): a chart is the run of triangles within 45 degrees of a seed (an exact
+  45-degree bevel joins); slots are cubes of one patch edge; empty slots fall back to the chart's largest patch.
+  The `.lodp` units compile with `fp-contract=off` so the stored floats equal the independent twin's bit for bit.
+- **Measured:** region (-20 24 .. -9 35): 46,215 patches, 4.07 MiB, twin `--real` 33,828 checks 0 failures. Whole
+  Commonwealth: 4,184,387 patches in 144 sectors, **315 MiB**, placed in 7.2 s; 597 cells over the 800-patch cap.
+- Independent reader + twin: `tests/spells/lodp_decode.py` (`--fixture`, `--expect-red`, `--stream`, `--real`).
 
 ## Lane GIBLACK2 (2026-10-14, branch giblack2-20261014): the Memory Den recess takes its measured sky, not the open sky's
 

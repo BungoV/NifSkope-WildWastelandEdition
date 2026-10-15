@@ -334,6 +334,9 @@ HEADERS += \
 	src/lodtfile.h \
 	src/lodofile.h \
 	src/lodifile.h \
+	src/lodpfile.h \
+	src/lodpplace.h \
+	src/lodpbake.h \
 	src/cellpick.h \
 	src/cellclick.h \
 	src/cellground.h \
@@ -601,6 +604,10 @@ SOURCES += \
 	src/nifparsestress.cpp \
 	src/lodofile.cpp \
 	src/lodifile.cpp \
+	src/lodpfile.cpp \
+	src/lodpplace.cpp \
+	src/lodpfixture.cpp \
+	src/lodpbake.cpp \
 	src/cellpick.cpp \
 	src/cellclick.cpp \
 	src/cellground.cpp \

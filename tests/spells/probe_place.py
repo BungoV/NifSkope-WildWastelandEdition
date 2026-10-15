@@ -14,10 +14,18 @@
 Both print one verdict line and exit 0 on PASS, 1 on FAIL. Run each once more
 with the placer's deliberate defect on (`--red wall|aperture|frames|coverage` for synth; the
 cell view's WW_PROBE_RED=wall for retrace): the gate must then FAIL.
+
+Lane WALLSTACK1 (2026-10-15): synth also builds a second block (`tall`): a 6000-high tower with a
+setback at 3000, a ledge at 4000 on one face, floors, and two basements under a one-sided terrain sheet,
+plus two tunnels under the terrain (an open shell of inner faces, and a closed one with outer faces too).
+Bars from the plan, not the tracer: every outdoor wall stack climbs to the top of its face (240 apart to
+960, 480 above), none above a roof, none past the setback or the ledge; a probe at eye height in every
+underground air space; no probe in the soil. Reds `--red wallcap|buried|levels` must FAIL.
 """
 import math
 import os
 import random
+import re
 import struct
 import subprocess
 import sys
@@ -42,7 +50,106 @@ def read_soup(path):
     return tris, doors
 
 
-def write_soup(path, tris, doors):
+def read_two(path):
+    """Lane WALLSTACK1: the soup's TWO1 tail (1 = two-sided), zeros when absent (the placer's own default:
+    every face one-sided, its front the stored winding). Walks ALB1 and GLS1 before it."""
+    with open(path, 'rb') as f:
+        magic, ntri, ndoor = struct.unpack('<III', f.read(12))
+        f.seek(12 + ntri * 36 + ndoor * 28)
+        two = np.zeros(ntri, dtype=np.uint8)
+        while True:
+            h = f.read(8)
+            if len(h) < 8:
+                return two
+            tag, n = struct.unpack('<II', h)
+            if tag == 0x31424C41 and n == ntri:      # ALB1
+                f.seek(n * 3, 1)
+            elif tag == 0x31534C47:                    # GLS1
+                f.seek(n * 36 + n * 3, 1)
+            elif tag == 0x314F5754 and n == ntri:      # TWO1
+                two = np.frombuffer(f.read(n), dtype=np.uint8).copy()
+                return two
+            else:
+                return two
+
+
+def read_amask(path):
+    """Lane WALLSTACK1: the soup's alpha-test masks (lane ALPHATEST1's AMK1, ALPHATEST2's AMK2 tail), or None.
+    The placer's rays pass through a hole (src/probemask.h AlphaMask::hole); a twin blind to them disagrees on
+    every column a fence, grate or leaf card decides (Mass Fusion's soup: 1,104,669 of 4,851,678 triangles)."""
+    with open(path, 'rb') as f:
+        magic, ntri, ndoor = struct.unpack('<III', f.read(12))
+        f.seek(12 + ntri * 36 + ndoor * 28)
+        while True:
+            h = f.read(8)
+            if len(h) < 8:
+                return None
+            tag, n = struct.unpack('<II', h)
+            if tag == 0x31424C41:                      # ALB1
+                f.seek(n * 3, 1)
+            elif tag == 0x31534C47:                    # GLS1
+                f.seek(n * 39, 1)
+            elif tag == 0x314F5754:                    # TWO1
+                f.seek(n, 1)
+            elif tag in (0x314B4D41, 0x324B4D41):      # AMK1, AMK2 (sized: a u32 byte count follows)
+                f.read(4)
+                maps = []
+                nm, = struct.unpack('<I', f.read(4))
+                for _ in range(nm):
+                    ln, = struct.unpack('<I', f.read(4))
+                    f.seek(ln, 1)
+                    w, hh = struct.unpack('<II', f.read(8))
+                    maps.append(np.frombuffer(f.read(w * hh), dtype=np.uint8).reshape(hh, w))
+                nmod, = struct.unpack('<I', f.read(4))
+                for _ in range(nmod):
+                    ln, = struct.unpack('<I', f.read(4))
+                    f.seek(ln, 1)
+                amk2 = tag == 0x324B4D41
+                dt = np.dtype([('tri', '<u4'), ('map', '<i4'), ('model', '<i4'), ('thr', '<u4'), ('uv', '<f4', 6)]
+                              + ([('as', '<f4', 3)] if amk2 else []))
+                rec = np.frombuffer(f.read(n * dt.itemsize), dtype=dt)
+                tri_of = np.full(ntri, -1, dtype=np.int64)
+                tri_of[rec['tri'].astype(np.int64)] = np.arange(n)
+                return dict(maps=maps, tri_of=tri_of, map=rec['map'].astype(np.int64),
+                            thr=rec['thr'].astype(np.float64), uv=rec['uv'].astype(np.float64),
+                            as_=rec['as'].astype(np.float64) if amk2 else np.ones((n, 3)))
+            else:
+                return None
+
+
+def mask_holes(mask, tri, b1, b2):
+    """AlphaMask::hole over arrays (soup triangle, barycentrics b1 b2): True where the hit lands on a hole
+    (the nearest texel, wrapped; alpha x the corners' scale when the triangle has one, below the threshold)."""
+    out = np.zeros(len(tri), dtype=bool)
+    if mask is None:
+        return out
+    j = mask['tri_of'][tri]
+    sel = np.nonzero(j >= 0)[0]
+    if not len(sel):
+        return out
+    j = j[sel]
+    b1 = b1[sel]
+    b2 = b2[sel]
+    b0 = 1.0 - b1 - b2
+    uv = mask['uv'][j]
+    u = b0 * uv[:, 0] + b1 * uv[:, 2] + b2 * uv[:, 4]
+    v = b0 * uv[:, 1] + b1 * uv[:, 3] + b2 * uv[:, 5]
+    u = u - np.floor(u)
+    v = v - np.floor(v)
+    a = np.empty(len(j))
+    for k in range(len(j)):
+        mp = mask['maps'][mask['map'][j[k]]]
+        hh, w = mp.shape
+        x = min(max(int(u[k] * w), 0), w - 1)
+        y = min(max(int(v[k] * hh), 0), hh - 1)
+        a[k] = mp[y, x]
+    s3 = mask['as_'][j]
+    s = b0 * s3[:, 0] + b1 * s3[:, 1] + b2 * s3[:, 2]
+    scaled = np.any(s3 != 1.0, axis=1)
+    out[sel] = np.where(scaled, a * s < mask['thr'][j], a < mask['thr'][j])
+    return out
+
+def write_soup(path, tris, doors, two=None):
     t = np.asarray(tris, dtype='<f4').reshape(-1, 9)
     with open(path, 'wb') as f:
         f.write(struct.pack('<III', MAGIC, len(t), len(doors)))
@@ -52,7 +159,7 @@ def write_soup(path, tris, doors):
         # lane ROOMCLAMP1: these boxes are wound inward (winding was never the placer's business here);
         # every face two-sided keeps this gate on the rules it was written for (cell_rooms gates winding)
         f.write(struct.pack('<II', 0x314F5754, len(t)))
-        f.write(b'\x01' * len(t))
+        f.write(b'\x01' * len(t) if two is None else bytes(bytearray(int(v) for v in two)))
 
 
 def read_tsv(path):
@@ -79,14 +186,20 @@ class Tracer:
     """Moller-Trumbore, double-sided, nearest hit in (1e-4, len], every
     triangle whose box the segment's box touches. Independent of the C++ BVH."""
 
-    def __init__(self, tris):
+    def __init__(self, tris, mask=None):
         self.t = tris
+        self.mask = mask   # lane WALLSTACK1: the soup's alpha-test holes (read_amask), as the placer's BVH
         self.lo = tris.min(axis=1)
         self.hi = tris.max(axis=1)
         self.e1 = tris[:, 1] - tris[:, 0]
         self.e2 = tris[:, 2] - tris[:, 0]
 
     def ray(self, a, b):
+        h = self.hit(a, b)
+        return None if h is None else h[0]
+
+    def hit(self, a, b):
+        """(t, triangle index) of the nearest hit, or None (lane WALLSTACK1: the buried rule needs the face)."""
         a = np.asarray(a, dtype=np.float64)
         b = np.asarray(b, dtype=np.float64)
         d = b - a
@@ -121,43 +234,130 @@ class Tracer:
         hit = ok & (u >= 0) & (u <= 1) & (v >= 0) & (u + v <= 1) & (t > 1e-4) & (t <= ln)
         if not hit.any():
             return None
-        return float(t[hit].min())
+        if self.mask is not None:
+            hit &= ~mask_holes(self.mask, idx, u, v)
+            if not hit.any():
+                return None
+        k = np.nonzero(hit)[0]
+        j = k[np.argmin(t[k])]
+        return float(t[j]), int(idx[j])
+
+    def hits_in(self, a, b, lo, hi):
+        """Lane WALLSTACK1: every triangle hit at a distance in [lo, hi] along a -> b (alpha-test holes pass):
+        the back to back faces at one distance that Bvh::anyHitIn asks about."""
+        a = np.asarray(a, dtype=np.float64)
+        b = np.asarray(b, dtype=np.float64)
+        d = b - a
+        ln = math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2])
+        if ln < 1e-9:
+            return []
+        d = np.array([d[0] / ln, d[1] / ln, d[2] / ln])
+        slo = np.minimum(a, b) - 1e-3
+        shi = np.maximum(a, b) + 1e-3
+        idx = np.nonzero(np.all((self.hi >= slo) & (self.lo <= shi), axis=1))[0]
+        if not len(idx):
+            return []
+        e1, e2, p0 = self.e1[idx], self.e2[idx], self.t[idx, 0]
+        D = np.broadcast_to(d, e2.shape)
+        pv = np.cross(D, e2)
+        det = np.einsum('ij,ij->i', e1, pv)
+        ok = np.abs(det) >= 1e-12
+        inv = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
+        tv = a - p0
+        u = np.einsum('ij,ij->i', tv, pv) * inv
+        qv = np.cross(tv, e1)
+        v = np.einsum('ij,ij->i', D, qv) * inv
+        t = np.einsum('ij,ij->i', e2, qv) * inv
+        hit = ok & (u >= 0) & (u <= 1) & (v >= 0) & (u + v <= 1) & (t > 1e-4) & (t >= lo) & (t <= hi)
+        if self.mask is not None:
+            hit &= ~mask_holes(self.mask, idx, u, v)
+        return [int(k) for k in idx[hit]]
+
+    def normal(self, i):
+        n = np.cross(self.e1[i], self.e2[i])
+        ln = math.sqrt(float(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]))
+        return None if not ln > 0 else n / ln
 
 
 # ------------------------------------------------- FO4CS rules, re-derived
-SPACING, EYE, STEP, GAP, LEVELS = 280.0, 120.0, 4.0, 140.0, 6
-SEARCH, STANDOFF, HEIGHTS = 280.0, 96.0, (240.0, 480.0, 720.0, 960.0)
+SPACING, EYE, STEP, GAP, LEVELS = 280.0, 120.0, 4.0, 140.0, 24   # LEVELS was 6 before lane WALLSTACK1
+SEARCH, STANDOFF = 280.0, 96.0
+# lane WALLSTACK1: the wall stack climbs until its wall ends: 240 apart up to 960 above its origin (the old
+# fixed list), then 480 apart, at most 64 levels
+HEIGHTS = tuple(240.0 * (k + 1) for k in range(4)) + tuple(960.0 + 480.0 * (k + 1) for k in range(60))
+BURIED_REACH = 2048.0
 COVER_R, HALL_R = 200.0, 70.0   # the interior rule's radii (probeplace.h)
 DIRS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
 
-def column(tr, x, y, top, bottom):
-    """Every probe this column places: [(class, level, x, y, z)]."""
+def buried(tr, two, x, y, z, above):
+    """Lane WALLSTACK1: the gap under the face `above` is soil when that face is one-sided and faces up and
+    fewer than 2 of the 4 level rays (out to 2048) meet a face from its front (or a two-sided one)."""
+    if two is None or two[above]:
+        return False
+    n = tr.normal(above)
+    if n is None or not n[2] > 0.05:
+        return False
+    fronts = 0
+    for dx, dy in DIRS:
+        h = tr.hit((x, y, z), (x + dx * BURIED_REACH, y + dy * BURIED_REACH, z))
+        if h is None:
+            continue
+
+        def front(k):
+            m = tr.normal(k)
+            return bool(two[k]) or m is None or m[0] * dx + m[1] * dy < 0.0
+        # of back to back faces at the nearest distance, any one (Bvh::anyHitIn, 0.05 either side)
+        if front(h[1]) or any(front(k) for k in tr.hits_in((x, y, z), (x + dx * BURIED_REACH, y + dy * BURIED_REACH, z),
+                                                           h[0] - 0.05, h[0] + 0.05)):
+            fronts += 1
+    return fronts < 2
+
+
+def column(tr, x, y, top, bottom, two=None):
+    """Every probe this column places: [(class, level, x, y, z)]. `two` = the soup's two-sided flags
+    (None: every face two-sided, as the first synth block is written: no face has a back)."""
     out = []
     surf = []
+    stri = []
     cur = top
-    while len(surf) < LEVELS * 2 + 2 and cur > bottom:
-        t = tr.ray((x, y, cur), (x, y, bottom))
-        if t is None:
+    while len(surf) < min(LEVELS * 2 + 2, 64) and cur > bottom:
+        h = tr.hit((x, y, cur), (x, y, bottom))
+        if h is None:
             break
-        hz = cur - t
+        hz = cur - h[0]
         if surf and not (hz < surf[-1] - 1e-3):
             break
         surf.append(hz)
+        stri.append(h[1])
         cur = hz - STEP
     if not surf:
         return out
-    origins = [(x, y, surf[0] + EYE)]
-    out.append(('first-hit', 0, x, y, surf[0] + EYE))
+
+    def back_down(i):
+        # lane ROOMCLAMP1's rule, mirrored here by lane WALLSTACK1 (the tall block has one-sided faces): no probe
+        # stands on the back of a one-sided face seen from above
+        if two is None or two[i]:
+            return False
+        n = tr.normal(i)
+        return n is not None and n[2] < -0.05
+    origins = []
+    if not back_down(stri[0]):
+        origins.append((x, y, surf[0] + EYE))
+        out.append(('first-hit', 0, x, y, surf[0] + EYE))
     level = 0
     for s in range(1, len(surf)):
         gap = surf[s - 1] - surf[s]
         if not gap >= GAP:
             continue
+        if back_down(stri[s]):
+            continue
+        z = float(np.float32(surf[s] + min(EYE, gap * 0.5)))
+        if buried(tr, two, x, y, z, stri[s - 1]):
+            continue
         if level + 1 >= LEVELS:
             break
         level += 1
-        z = surf[s] + min(EYE, gap * 0.5)
         origins.append((x, y, z))
         out.append(('interior', level, x, y, z))
     for ox, oy, oz in origins:
@@ -447,11 +647,266 @@ def synth(exe, work, red):
               verdict, ' [RED %s]' % red if red else '', len(rows), n['first-hit'], n['interior'], n['wall'],
               n['aperture'], n['room'], n['cover'], len(expect), len(traps), len(inner), ninner, len(rooms),
               '; '.join(fails[:6]) if fails else 'all as built'))
+    # lane WALLSTACK1: the tall block (wall stacks to the top, setback, ledge, places under the ground)
+    tall = synth_tall(exe, work, red)
+    return 0 if not fails and not tall else 1
+
+
+# ------------------------------------------------ the tall block (lane WALLSTACK1)
+def obox(x0, y0, z0, x1, y1, z1, inward=False):
+    """A closed box wound so every face's front points out of it (inward=True: into it)."""
+    c = np.array([(x0 + x1) * 0.5, (y0 + y1) * 0.5, (z0 + z1) * 0.5])
+    out = []
+    for tri in box(x0, y0, z0, x1, y1, z1):
+        a, b, cc = (np.array(p, dtype=np.float64) for p in tri)
+        n = np.cross(b - a, cc - a)
+        away = float(np.dot(n, (a + b + cc) / 3.0 - c)) > 0
+        out.append(tri if away != inward else (tri[0], tri[2], tri[1]))
+    return out
+
+
+def quad(p0, p1, p2, p3, up):
+    """Two triangles over the quad p0..p3 whose front faces `up` (a unit axis vector)."""
+    out = []
+    for tri in ((p0, p1, p2), (p0, p2, p3)):
+        a, b, c = (np.array(p, dtype=np.float64) for p in tri)
+        n = np.cross(b - a, c - a)
+        out.append(tri if float(np.dot(n, up)) > 0 else (tri[0], tri[2], tri[1]))
+    return out
+
+
+# the plan (world units; no face on a 280 lattice line, no lattice column inside a wall)
+TW = dict(x0=437.0, x1=1437.0, xu=937.0, y0=441.0, y1=1441.0, zb=-840.0, zp=3010.0, zt=6050.0, t=20.0,
+          ledge=(287.0, 437.0, 4000.0, 4040.0))
+TUN_A = (1950.0, 2750.0, 300.0, 600.0, -620.0, -320.0)     # x0 x1 y0 y1 z0 z1 of the air
+TUN_B = (1950.0, 2750.0, 1000.0, 1300.0, -620.0, -320.0)
+SHED = (2000.0, 2700.0, 1360.0, 1660.0, 0.0, 300.0)        # walls' outer box; one-sided roof on top
+TALL_RECT = (0.0, 0.0, 2800.0, 1680.0)
+
+
+def tall_scene():
+    """Returns tris, two-sided flags (all 0: every face one-sided, wound as built), and the rect."""
+    T = []
+    t = TW['t']
+    x0, x1, xu, y0, y1 = TW['x0'], TW['x1'], TW['xu'], TW['y0'], TW['y1']
+    zb, zp, zt = TW['zb'], TW['zp'], TW['zt']
+    # the terrain: one sheet, front up, through the tower's ground slab and over the tunnels
+    T += quad((-1400, -1400, 0), (4200, -1400, 0), (4200, 3100, 0), (-1400, 3100, 0), (0, 0, 1))
+    # the podium (basements to the setback) and the tower above it, walls as closed boxes
+    T += obox(x0, y0, zb, x0 + t, y1, zp) + obox(x1 - t, y0, zb, x1, y1, zp)
+    T += obox(x0 + t, y0, zb, x1 - t, y0 + t, zp) + obox(x0 + t, y1 - t, zb, x1 - t, y1, zp)
+    T += obox(x0, y0, zp, x0 + t, y1, zt) + obox(xu - t, y0, zp, xu, y1, zt)
+    T += obox(x0 + t, y0, zp, xu - t, y0 + t, zt) + obox(x0 + t, y1 - t, zp, xu - t, y1, zt)
+    for za, zc in ((zb, zb + t), (-420, -400), (-20, 20), (1000, 1020), (2000, 2020), (zp - t, zp)):
+        T += obox(x0 + t, y0 + t, za, x1 - t, y1 - t, zc)                 # podium floors (the last: its roof)
+    for za, zc in ((4000, 4020), (5000, 5020), (zt - t, zt)):
+        T += obox(x0 + t, y0 + t, za, xu - t, y1 - t, zc)                 # the tower's floors and roof
+    lx0, lx1, lz0, lz1 = TW['ledge']
+    T += obox(lx0, y0, lz0, lx1, y1, lz1)                                   # a ledge out of the west face
+    # tunnel A: an open shell, inner faces only (ceiling front down, floor up, sides inward; ends open)
+    ax0, ax1, ay0, ay1, az0, az1 = TUN_A
+    T += quad((ax0, ay0, az1), (ax1, ay0, az1), (ax1, ay1, az1), (ax0, ay1, az1), (0, 0, -1))
+    T += quad((ax0, ay0, az0), (ax1, ay0, az0), (ax1, ay1, az0), (ax0, ay1, az0), (0, 0, 1))
+    T += quad((ax0, ay0, az0), (ax1, ay0, az0), (ax1, ay0, az1), (ax0, ay0, az1), (0, 1, 0))
+    T += quad((ax0, ay1, az0), (ax1, ay1, az0), (ax1, ay1, az1), (ax0, ay1, az1), (0, -1, 0))
+    # tunnel B: closed, the inner box faces in and a 20-thick outer box faces out (its top faces up, in the soil)
+    bx0, bx1, by0, by1, bz0, bz1 = TUN_B
+    T += obox(bx0, by0, bz0, bx1, by1, bz1, inward=True)
+    T += obox(bx0 - t, by0 - t, bz0 - t, bx1 + t, by1 + t, bz1 + t)
+    # a shed under a ONE-SIDED roof (front up, nothing under it): the room still sees its walls from inside
+    sx0, sx1, sy0, sy1, sz0, sz1 = SHED
+    T += obox(sx0, sy0, sz0, sx0 + t, sy1, sz1) + obox(sx1 - t, sy0, sz0, sx1, sy1, sz1)
+    T += obox(sx0 + t, sy0, sz0, sx1 - t, sy0 + t, sz1) + obox(sx0 + t, sy1 - t, sz0, sx1 - t, sy1, sz1)
+    T += quad((sx0, sy0, sz1), (sx1, sy0, sz1), (sx1, sy1, sz1), (sx0, sy1, sz1), (0, 0, 1))
+    return T, np.zeros(len(T), dtype=np.uint8), TALL_RECT
+
+
+def tall_faces():
+    """The tower's outer faces from the plan: (axis, plane, d toward it (+1/-1), lateral lo, hi, z lo, hi)."""
+    x0, x1, xu, y0, y1 = TW['x0'], TW['x1'], TW['xu'], TW['y0'], TW['y1']
+    zb, zp, zt = TW['zb'], TW['zp'], TW['zt']
+    return [('x', x0, 1, y0, y1, zb, zt), ('x', x1, -1, y0, y1, zb, zp), ('x', xu, -1, y0, y1, zp, zt),
+            ('y', y0, 1, x0, x1, zb, zp), ('y', y0, 1, x0, xu, zp, zt),
+            ('y', y1, -1, x0, x1, zb, zp), ('y', y1, -1, x0, xu, zp, zt)]
+
+
+def tall_expected_stacks():
+    """Every OUTDOOR wall stack against the tower, from the plan alone (no tracer): origins on the terrain
+    (z 120) around it and on the podium roof east of the setback (zp + 120); each climbs while the path up
+    misses the ledge and a face of the plan stands within 2 x standoff ahead at the candidate's height."""
+    faces = tall_faces()
+    lx0, lx1, lz0, lz1 = TW['ledge']
+    x0, x1, xu, y0, y1 = TW['x0'], TW['x1'], TW['xu'], TW['y0'], TW['y1']
+    out = []
+    for cx, cy in lattice(*TALL_RECT):
+        if cx > 1800:
+            continue                                   # the tunnels and the shed: re-traced only
+        inside = x0 < cx < x1 and y0 < cy < y1
+        if inside and not (xu < cx < x1):
+            continue                                   # the tower's own floors: re-traced only
+        oz = TW['zp'] + EYE if inside else EYE
+        for dx, dy in DIRS:
+            best = None
+            for ax, plane, d, lo, hi, zlo, zhi in faces:
+                if (ax == 'x' and (dx != d or dy)) or (ax == 'y' and (dy != d or dx)):
+                    continue
+                lat = cy if ax == 'x' else cx
+                dist = (plane - cx) * d if ax == 'x' else (plane - cy) * d
+                if lo <= lat <= hi and zlo <= oz <= zhi and 0 < dist <= SEARCH and (best is None or dist < best):
+                    best = dist
+            if best is None or not best - STANDOFF > 16.0:
+                continue
+            px, py = cx + dx * (best - STANDOFF), cy + dy * (best - STANDOFF)
+            lastz, k = oz, 0
+            for h in HEIGHTS:
+                z = oz + h
+                if lx0 <= px <= lx1 and y0 <= py <= y1 and lastz < lz1 and z > lz0:
+                    break                              # the ledge is over the path up
+                seen = False
+                for ax, plane, d, lo, hi, zlo, zhi in faces:
+                    if (ax == 'x' and (dx != d or dy)) or (ax == 'y' and (dy != d or dx)):
+                        continue
+                    lat = py if ax == 'x' else px
+                    dist = (plane - px) * d if ax == 'x' else (plane - py) * d
+                    if lo <= lat <= hi and zlo <= z <= zhi and 0 < dist <= 2 * STANDOFF:
+                        seen = True
+                if not seen:
+                    break
+                k += 1
+                out.append(('wall', k, px, py, z))
+                lastz = z
+    return out
+
+
+def soil(x, y, z):
+    """True where the plan has solid ground: under the terrain and outside every underground air space."""
+    if z >= 0:
+        return False
+    for bx0, bx1, by0, by1, bz0, bz1 in (TUN_A, TUN_B):
+        if bx0 < x < bx1 and by0 < y < by1 and bz0 < z < bz1:
+            return False
+    t = TW['t']
+    if TW['x0'] + t < x < TW['x1'] - t and TW['y0'] + t < y < TW['y1'] - t and TW['zb'] + t < z < -20:
+        return False                                   # the basements
+    return True
+
+
+def synth_tall(exe, work, red):
+    tris, two, rect = tall_scene()
+    soup = os.path.join(work, 'synth_tall.psp')
+    tsv = os.path.join(work, 'synth_tall%s.tsv' % ('_red_' + red if red else ''))
+    write_soup(soup, tris, [], two)
+    cmd = [os.path.abspath(exe), '-no-gui', 'probeplace', '--soup', soup, '--rect', ','.join('%g' % v for v in rect), '--out', tsv]
+    if red:
+        cmd += ['--red', red]
+    rc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if rc.returncode != 0 or not os.path.exists(tsv):
+        print('synth-tall FAIL: probeplace rc %d %s' % (rc.returncode, rc.stderr.strip()[:300]))
+        return 1
+    rows = read_tsv(tsv)
+    census = ''
+    with open(tsv) as f:
+        for line in f:
+            if line.startswith('# probe columns') or line.startswith('# probe walls'):
+                census += line[2:].strip() + '; '
+    capped = re.search(r'level cap (\d+)', census)
+    capped = int(capped.group(1)) if capped else -1
+    fails = []
+    # 1. the whole lattice re-traced by the independent twin (one-sided faces: the buried and back rules on)
+    tr = Tracer(np.asarray(tris, dtype=np.float32).astype(np.float64))
+    allz = np.asarray(tris, dtype=np.float64)[:, :, 2]
+    top, bottom = float(allz.max()) + 16.0, float(allz.min()) - 16.0
+    expected = []
+    for x, y in lattice(*rect):
+        expected += column(tr, x, y, top, bottom, two)
+    got = [(r['class'], r['level'], r['x'], r['y'], r['z']) for r in rows if r['class'] in ('first-hit', 'interior', 'wall')]
+    missing, extra = match(expected, got)
+    if missing or extra:
+        fails.append('re-trace: %d missing, %d extra of %d lattice probes' % (len(missing), len(extra), len(expected)))
+    # 2. the tower's outdoor wall stacks against the plan
+    x0, x1, xu, y0, y1 = TW['x0'], TW['x1'], TW['xu'], TW['y0'], TW['y1']
+    exp_st = tall_expected_stacks()
+
+    def outdoor_stack(r):
+        if r['class'] != 'wall' or r['x'] > 1800:
+            return False
+        inside = x0 < r['x'] < x1 and y0 < r['y'] < y1
+        return not inside or (xu < r['x'] < x1 and r['z'] > TW['zp'])
+    got_st = [(r['class'], r['level'], r['x'], r['y'], r['z']) for r in rows if outdoor_stack(r)]
+    m2, e2 = match(exp_st, got_st)
+    if m2 or e2:
+        fails.append('plan stacks: %d missing, %d extra of %d (first missing %s)' % (
+            len(m2), len(e2), len(exp_st), ('%.0f,%.0f,%.0f' % m2[0][2:]) if m2 else '-'))
+    tops = {}
+    for w in got_st:
+        tops[(round(w[2]), round(w[3]))] = max(tops.get((round(w[2]), round(w[3])), -1e9), w[4])
+    above_roof = [w for w in got_st if w[4] > TW['zt']]
+    past_setback = [w for w in got_st if w[2] > x1 and w[4] > TW['zp']]
+    past_ledge = [w for w in got_st if TW['ledge'][0] <= w[2] <= TW['ledge'][1] and w[4] > TW['ledge'][2]]
+    south_full = [v for (x, y), v in tops.items() if y < y0 and x0 < x < xu]
+    if above_roof:
+        fails.append('%d wall probes above the roof' % len(above_roof))
+    if past_setback:
+        fails.append('%d wall probes past the setback' % len(past_setback))
+    if past_ledge:
+        fails.append('%d wall probes past the ledge' % len(past_ledge))
+    if not south_full or min(south_full) < TW['zt'] - 480:
+        fails.append('south facade stacks top out at %s (roof %g)' % (sorted(round(v) for v in south_full), TW['zt']))
+    steps_bad = 0
+    stacks = {}
+    for w in got_st:
+        stacks.setdefault((round(w[2], 1), round(w[3], 1)), []).append(w[4])
+    for zs in stacks.values():
+        zs.sort()
+        oz = zs[0] - 240.0
+        for a, b in zip([oz] + zs, zs):
+            want = 240.0 if b - oz <= 960.0 + 0.1 else 480.0
+            if abs((b - a) - want) > 0.1:
+                steps_bad += 1
+    if steps_bad:
+        fails.append('%d wall steps not 240 below 960 / 480 above' % steps_bad)
+    # 3. under the ground: a probe at eye height in every underground air space, none in the soil
+    in_soil = [r for r in rows if soil(r['x'], r['y'], r['z'])]
+    if in_soil:
+        r = in_soil[0]
+        fails.append('%d probes in the soil (first %s %.0f,%.0f,%.0f)' % (len(in_soil), r['class'], r['x'], r['y'], r['z']))
+    spaces = 0
+    for name, (bx0, bx1, by0, by1, bz0, bz1) in (('tunnel A (open shell)', TUN_A), ('tunnel B (closed)', TUN_B)):
+        for x, y in lattice(*rect):
+            if bx0 < x < bx1 and by0 < y < by1:
+                spaces += 1
+                if not any(abs(r['x'] - x) < .01 and abs(r['y'] - y) < .01 and abs(r['z'] - (bz0 + EYE)) < 0.5
+                           and r['class'] == 'interior' for r in rows):
+                    fails.append('%s column %g,%g: no probe at eye height inside' % (name, x, y))
+    for x, y in lattice(*rect):
+        if x0 + 20 < x < x1 - 20 and y0 + 20 < y < y1 - 20:
+            want = [140.0, -280.0, -700.0]               # ground floor, B1, B2
+            for z in want:
+                spaces += 1
+                if not any(abs(r['x'] - x) < .01 and abs(r['y'] - y) < .01 and abs(r['z'] - z) < 0.5
+                           and r['class'] == 'interior' for r in rows):
+                    fails.append('tower column %g,%g: no level probe at z %g' % (x, y, z))
+                    break
+    sx0, sx1, sy0, sy1 = SHED[:4]
+    for x, y in lattice(*rect):
+        if sx0 + 20 < x < sx1 - 20 and sy0 + 20 < y < sy1 - 20:
+            spaces += 1
+            if not any(abs(r['x'] - x) < .01 and abs(r['y'] - y) < .01 and abs(r['z'] - EYE) < 0.5 for r in rows):
+                fails.append('shed column %g,%g (one-sided roof): no probe inside' % (x, y))
+    n = {k: sum(1 for r in rows if r['class'] == k) for k in ('first-hit', 'interior', 'wall', 'aperture', 'room', 'cover')}
+    verdict = 'PASS' if not fails else 'FAIL'
+    print('synth-tall %s%s: %d probes (first-hit %d, interior %d, wall %d, opening %d, room %d, cover %d); '
+          '%d plan wall probes on the tower, highest %.0f (roof %g); %d air spaces checked; levels capped %d; %s'
+          % (verdict, ' [RED %s]' % red if red else '', len(rows), n['first-hit'], n['interior'], n['wall'], n['aperture'],
+             n['room'], n['cover'], len(exp_st), max([w[4] for w in got_st] or [0]), TW['zt'], spaces, capped,
+             '; '.join(fails[:6]) if fails else 'all as planned'))
     return 0 if not fails else 1
+
 
 
 def retrace(soup, tsv, n):
     tris, _ = read_soup(soup)
+    two = read_two(soup)   # lane WALLSTACK1: the placer's one-sided rules need the faces' sides
     rows = read_tsv(tsv)
     rect = None
     with open(tsv) as f:
@@ -466,7 +921,7 @@ def retrace(soup, tsv, n):
     # re-trace works in that same frame
     ox, oy = 0.5 * (rect[0] + rect[2]), 0.5 * (rect[1] + rect[3])
     tris = (tris - np.array([ox, oy, 0.0])).astype(np.float32).astype(np.float64)
-    tr = Tracer(tris)
+    tr = Tracer(tris, read_amask(soup))   # lane WALLSTACK1: the placer's rays pass alpha-test holes
     top, bottom = float(tris[:, :, 2].max()) + 16.0, float(tris[:, :, 2].min()) - 16.0
     rnd = random.Random(20260930)
     cols = lattice(*rect)
@@ -488,7 +943,7 @@ def retrace(soup, tsv, n):
         # placer exactly; a real defect does not vanish under a nudge that small.
         for k, (nx_, ny_) in enumerate(((0, 0), (0.01, 0), (-0.01, 0), (0, 0.01), (0, -0.01))):
             exp = [(e[0], e[1], e[2] - nx_ + ox, e[3] - ny_ + oy, e[4])
-                   for e in column(tr, x - ox + nx_, y - oy + ny_, top, bottom)]
+                   for e in column(tr, x - ox + nx_, y - oy + ny_, top, bottom, two)]
             e_lv = [e for e in exp if e[0] != 'wall']
             m, ex = match(e_lv, list(g_lv))
             if not (m or ex):

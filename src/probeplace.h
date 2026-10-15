@@ -273,10 +273,22 @@ struct ProbePlaceSpec
 	float eye = 120.0f;
 	float pierceStep = 4.0f;
 	float minAirGap = 140.0f;
-	int maxLevels = 6;
+	int maxLevels = 24;         //!< lane WALLSTACK1: was 6, so a tower's floors hid its basements; red "levels" = 6
 	float wallSearch = 280.0f;
 	float wallStandoff = 96.0f;
-	std::vector<float> wallHeights { 240.0f, 480.0f, 720.0f, 960.0f };
+	/*! Lane WALLSTACK1: a wall stack climbs its wall until the wall ends (the path up is blocked, or the wall is
+	 *  no longer within 2 x wallStandoff): every wallStepNear up to wallNearTop above its origin (the old fixed
+	 *  240/480/720/960, so a stack below there is as before), then every wallStepFar, at most wallMaxSteps
+	 *  levels (64: 960 + 60 x 480 = 29,760 above the origin). Red "wallcap": the old stop at wallNearTop. */
+	float wallStepNear = 240.0f;
+	float wallNearTop = 960.0f;
+	float wallStepFar = 480.0f;
+	int wallMaxSteps = 64;
+	/*! Lane WALLSTACK1: a gap between two column hits is soil, not air, when the face above it is one-sided and
+	 *  faces up (a probe there stands behind it, as under the terrain) AND fewer than 2 of the 4 level rays out
+	 *  to buriedReach meet a face from its front (a room under a one-sided roof still sees its own walls). Such
+	 *  a gap gets no level probe and starts no wall stack. Red "buried": the old rule (every gap is air). */
+	float buriedReach = 2048.0f;
 	bool apertures = true;
 	float voxel = 35.0f;
 	int maxVoxelLayers = 320;
@@ -300,7 +312,8 @@ struct ProbePlaceSpec
 	/*! A deliberate defect for the gates' refuters: "wall" drops the stack's
 	 *  horizontal re-check, "aperture" drops the thin-jamb and straight-through
 	 *  tests, "frames" searches openings at the first wall angle only,
-	 *  "coverage" places room probes but skips the blind-spot fill. Empty in
+	 *  "coverage" places room probes but skips the blind-spot fill; lane WALLSTACK1: "wallcap" stops wall
+	 *  stacks at wallNearTop, "buried" places a level in every gap, "levels" caps at 6 levels. Empty in
 	 *  every real run. */
 	QString red;
 };
@@ -312,6 +325,8 @@ struct ProbePlaceResult
 	int firstHit = 0, interior = 0, wall = 0;
 	int waterColumns = 0, waterUnder = 0;   //!< lane WATER1: columns split at the water line; probes under it
 	int gapsRejected = 0, levelsCapped = 0, wallRefused = 0, wallColumns = 0;
+	int buriedGaps = 0, wallCapped = 0, wallTop = 0;   //!< lane WALLSTACK1: soil gaps refused; stacks at wallMaxSteps; highest stack level
+	int buriedPlaced = 0;       //!< lane WALLSTACK1: room / cover candidates refused by the soil rule (each cell of a void room tries)
 	int doorway = 0, window = 0, breach = 0, doored = 0, roomToRoom = 0;
 	int apComponents = 0, apRejectedUnroofed = 0, apRejectedShape = 0, apRejectedPocket = 0, apMerged = 0;
 	int gridX = 0, gridY = 0, gridZ = 0;
