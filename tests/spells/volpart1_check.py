@@ -31,7 +31,10 @@ Stages (bars fixed before the first run; "lit" = particles whose rebuilt thin lu
   G  air       (ana, full) the particle's light vs the air's at its froxel: J = inject.rgb / (1 - inject.a) at the
                particle's column (bilinear), trilinear in depth between the froxel centres (k + 0.5), over the
                particles nearer than 1000 units (>= 100; farther, a slice is deeper than a lamp's falloff: counted only); per-particle luminance ratio in [0.8, 1.25] on >= 90% of the
-               particles whose J is >= 1e-3 x the largest; median chromaticity distance <= 0.02; log-correlation >= 0.9
+               particles whose J is >= 1e-3 x the largest; median chromaticity distance <= 0.02; log-correlation >= 0.9.
+               G's shadow (ana + full, every distance): the particle's full / ana light against the air's full / ana at
+               its froxel (the lamps' falloff cancels): over the particles where the air is shadowed (its ratio <= half
+               its median; >= 20, else not judged), the median of the particle's over the air's in [0.67, 1.5]
   E  edge      the hard line where a card meets a surface: q12 (the soft cards' scene depth, card depth, half-depth h,
                the fade drawn; the dump reads the depth at the full-size pixel) = clamp((scene - (card - h)) / 2h) within
                2e-3 on >= 99%; >= 20 px on the ramp (a surface within h of the card: where the hard line was); the
@@ -52,8 +55,8 @@ Stages (bars fixed before the first run; "lit" = particles whose rebuilt thin lu
   M  near      q8 near fade = smoothstep(16, 128, depth) within 2e-3 on >= 99%; the depth = the view point's x
                fxDistScale; >= 20 px nearer than 128 (required at memden, whose camera stands in the steam)
   The thick rebuild (N, K) carries the phase normalised to its sphere average, as the shader does.
-Reds: nolights -> A L G; white -> T; flat -> N; nothick -> K P; nofog -> F; nosoft -> E; noshadow -> G (full, if a
-particle is in a shadow); noedge -> V; nophase -> H A; nonear -> M (memden).
+Reds: nolights -> A L G; white -> T; flat -> N; nothick -> K P; nofog -> F; nosoft -> E; noshadow -> G (its shadow:
+the far particles under the sun's cascades); noedge -> V; nophase -> H A; nonear -> M (memden).
 """
 import os
 import sys
@@ -297,6 +300,21 @@ def vol_at(integ, t, d, u, v):
     return out
 
 
+def air_J(b, q, inj, atxt):
+    """the air's J (inject.rgb / (1 - inject.a)) at the particle's column (bilinear), trilinear in depth between the
+    froxel centres (slice k + 0.5); None where the froxel is opaque"""
+    near, logR = atxt['slices']
+    N = inj.shape[0]
+    f = np.log(max(q[4][3], 1e-6) / near) / logR * N
+    z = float(np.clip(f - 0.5, 0, N - 1))
+    z0 = int(z)
+    z1, fz = min(z0 + 1, N - 1), z - int(z)
+    s0, s1 = trilinear2(inj, *proj_uv(b, q[7][:3]), z0), trilinear2(inj, *proj_uv(b, q[7][:3]), z1)
+    if 1.0 - s0[3] < 1e-6 or 1.0 - s1[3] < 1e-6:
+        return None
+    return s0[:3] / (1.0 - s0[3]) * (1.0 - fz) + s1[:3] / (1.0 - s1[3]) * fz
+
+
 def proj_uv(b, pv):
     pr = b['proj']
     w = -pv[2]
@@ -476,7 +494,7 @@ def main():
         print('== %s' % cam)
         need = {'': ['ana', 'full', 'nosoftp', 'hide', 'off', 'before', 'rung2'], 'nolights': ['ana', 'full'],
                 'white': ['ana'], 'flat': ['ana'], 'nothick': ['ana'], 'nofog': ['ana'], 'nosoft': ['full'],
-                'noshadow': ['full'], 'noedge': ['ana'], 'nophase': ['ana'], 'nonear': ['ana']}[red]
+                'noshadow': ['ana', 'full'], 'noedge': ['ana'], 'nophase': ['ana'], 'nonear': ['ana']}[red]
         miss = [t for t in need if not os.path.exists(os.path.join(d, t + '.png')) or os.path.getsize(os.path.join(d, t + '.png')) == 0]
         errs = 0
         for t in need:
@@ -576,22 +594,12 @@ def main():
                       '%s: the air the draw applies vs the integrated volume, %d particles: T ok %d, L ok %d; T <= 0.98: %d'
                       % (t, n, okT, okL, fogged))
             if red in ('', 'nolights', 'noshadow') and not (red == 'noshadow' and t != 'full') and not (red == 'nolights' and t != 'ana'):
-                near, logR = atxt['slices']
-                N = inj.shape[0]
                 rs, cd, lg = [], [], []
                 Js = []
                 for b, q in ps:
-                    dd = q[4][3]
-                    f = np.log(max(dd, 1e-6) / near) / logR * N
-                    # the froxel centres sit at slice k + 0.5: J trilinear in depth between the two nearest
-                    z = float(np.clip(f - 0.5, 0, N - 1))
-                    z0 = int(z)
-                    z1, fz = min(z0 + 1, N - 1), z - int(z)
-                    s0, s1 = trilinear2(inj, *proj_uv(b, q[7][:3]), z0), trilinear2(inj, *proj_uv(b, q[7][:3]), z1)
-                    if 1.0 - s0[3] < 1e-6 or 1.0 - s1[3] < 1e-6:
-                        continue
-                    J = s0[:3] / (1.0 - s0[3]) * (1.0 - fz) + s1[:3] / (1.0 - s1[3]) * fz
-                    Js.append((J, q[0][:3], dd))
+                    J = air_J(b, q, inj, atxt)
+                    if J is not None:
+                        Js.append((J, q[0][:3], q[4][3]))
                 top = max([lum(J) for J, _, _ in Js] or [0])
                 far = 0
                 for J, th, dd in Js:
@@ -612,6 +620,28 @@ def main():
                 judge('G', ok, '%s: particle J vs the air\'s J at its froxel over %d particles nearer than %d (%d farther, not '
                       'judged): median ratio %.4f, in [0.8, 1.25] %.3f, median chromaticity distance %.4f, log-correlation %.3f'
                       % (t, rs.size, G_RESOLVED, far, float(np.median(rs)) if rs.size else float('nan'), within, cm, corr))
+
+        # ---- G's shadow: where the air is in a shadow, the particle is too (the ratio full / ana cancels the lamps'
+        # falloff the far froxels cannot resolve; the ana red copy is the green's: ana draws no shadow anyway)
+        if red in ('', 'noshadow') and 'ana' in dumps and 'full' in dumps:
+            pa, pf = particles(dumps['ana'][0]), particles(dumps['full'][0])
+            if len(pa) == len(pf) and all(np.allclose(a[1][3][:3], f[1][3][:3]) for a, f in zip(pa, pf)):
+                rw = []
+                for (ba, qa), (bf, qf) in zip(pa, pf):
+                    Ja = air_J(ba, qa, dumps['ana'][3][0], dumps['ana'][4])
+                    Jf = air_J(bf, qf, dumps['full'][3][0], dumps['full'][4])
+                    if Ja is not None and Jf is not None:
+                        rw.append((lum(qf[0][:3]), lum(qa[0][:3]), lum(Jf), lum(Ja)))
+                a = np.array(rw).reshape(-1, 4)
+                a = a[(a[:, 1] > 1e-3 * max(a[:, 1].max(initial=0), 1e-30)) & (a[:, 3] > 1e-3 * max(a[:, 3].max(initial=0), 1e-30))]
+                Pr, Ar = a[:, 0] / a[:, 1], a[:, 2] / a[:, 3]
+                dark = Ar <= 0.5 * np.median(Ar) if Ar.size else Ar > 0
+                md = float(np.median(Pr[dark] / Ar[dark])) if dark.sum() else float('nan')
+                judge('G', dark.sum() < 20 or 0.67 <= md <= 1.5, pop=dark.sum() >= 20,  # a median of < 20 is no law
+                      msg='%s shadow: of %d particles, %d sit where the air is shadowed (full / ana <= half the median); '
+                      'their own full / ana over the air\'s: median %.3f' % (cam, len(a), int(dark.sum()), md))
+            else:
+                judge('G', False, pop=False, msg='%s shadow: ana and full dumped different particles' % cam)
 
         # ---- the card volume stages (every dump with card pixels)
         for t, v in dumps.items():
