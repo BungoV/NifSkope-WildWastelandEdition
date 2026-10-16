@@ -195,7 +195,12 @@ def main():
         files = [f for f in git('diff', '--name-only', *rng).decode().split('\n') if f]
     bad = 0
     for f in files:
-        old = git('show', '%s:%s' % (o.base, f))
+        try:
+            old = git('show', '%s:%s' % (o.base, f))
+        except subprocess.CalledProcessError:
+            print('FAIL %s: not in %s (a new file is not a comment edit)' % (f, o.base))
+            bad += 1
+            continue
         new = git('show', '%s:%s' % (o.head, f)) if o.head else open(f, 'rb').read()
         probs = compare(f, old, new)
         print('%s %s%s' % ('PASS' if not probs else 'FAIL', f, '' if not probs else ': ' + '; '.join(probs)))
