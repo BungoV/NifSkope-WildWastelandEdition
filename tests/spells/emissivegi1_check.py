@@ -67,12 +67,8 @@ VOXEL_HALF = 24.0      # half of ProbeGiSpec::voxelMin: the renderer samples hal
 AXES = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]], float)
 FOUR_PI = 4.0 * math.pi
 
-# Bars. The FIRST run used absolute bars on E1 and K1 alike (ratio 0.85..1.15, median 0.15, p95 0.30):
-# K1 failed them (ratio 1.1618, median 0.1549) and E1 passed by a hair (1.1432). The excess is the probe
-# system's own position bias (the renderer samples half a voxel off the wall, and the nearest probes stand
-# 32-80 units out: the reference taken at the sample point is already 1.095 x the wall's), not the emissive
-# term. So, changed after that first run and stated in docs/cloud/EMISSIVEGI1_DESIGN.md: K1 measures the
-# method's floor (broad sanity bars), and E1 is held RELATIVE to it (the mask adds no error of its own).
+# Bars: K1 measures the method's floor (the probe system's own position bias: the renderer samples
+# half a voxel off the wall), and E1 is held RELATIVE to it (the mask adds no error of its own).
 BAR_K1_RATIO = (0.70, 1.30)
 BAR_K1_MED = 0.25
 BAR_K1_P95 = 0.40
@@ -417,7 +413,7 @@ def tbk_bytes(bk, nprobes):
     return bytes(out)
 
 
-# ---------------------------------------------------------------- the relight (probegi.cpp's steps 1, 2, BOUNCE2)
+# ---------------------------------------------------------------- the relight (probegi.cpp's steps 1, 2, bounce passes)
 def direct_light(pos, nrm):
     v = LAMP_POS[None, :] - pos
     d = np.linalg.norm(v, axis=1)

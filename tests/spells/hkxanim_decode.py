@@ -571,12 +571,8 @@ def validate(result):
         anim = [x for x in result["animations"] if x["ref"] == b["animation"]]
         if not anim:
             raise Refusal("binding refers to animation %s which is not in the container" % b["animation"])
-        # An EMPTY transformTrackToBoneIndices is the IDENTITY map, not a
-        # missing one (lane FIXTURE, 2026-09-10, measured on the Mixamo clip
-        # Running_To_Slide_And_Back_To_Running.hkx: 95 tracks, binding count 0
-        # with no local fixup). src/hkxanim.cpp holds the same rule, so the two
-        # decoders stay a matched pair. A non-empty vector of the wrong length
-        # is still refused by name.
+        # An empty transformTrackToBoneIndices is the identity map, not a missing one (as in src/hkxanim.cpp);
+        # a non-empty one of the wrong length is still refused.
         if b["transformTrackToBoneIndices"] and \
                 len(b["transformTrackToBoneIndices"]) != anim[0]["numberOfTransformTracks"]:
             raise Refusal("binding maps %d tracks, the animation has %d"

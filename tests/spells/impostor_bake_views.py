@@ -43,9 +43,8 @@ def main(argv):
     raw = open(argv[1], 'rb').read()
     j = json.loads(raw[raw.index(b'{'):].decode('utf-8'))['card']
     v = views(int(j['oct']))
-    # duplicates are real: the hemi-octahedron folds its four corners onto the
-    # same direction, and a list with them removed would not be "one view per
-    # frame" any more. The caller asserts the COUNT, so keep every one.
+    # duplicates are real: the hemi-octahedron folds its four corners onto one direction,
+    # and the caller asserts the COUNT ("one view per frame"), so keep every one.
     sys.stdout.write(','.join(v))
     return 0
 

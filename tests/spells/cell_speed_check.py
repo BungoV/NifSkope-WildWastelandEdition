@@ -25,17 +25,13 @@ import sys
 import numpy as np
 from PIL import Image
 
-# The floors the gate holds (fractions of the reference). Measured 2026-10-02 on three cells (the lane's
-# table in WW_CHANGES.md): 63-70% fewer seconds, 41-49% less peak memory. Set under the measured gain so
-# machine noise does not trip them and far over zero so the old path (--red slow, 0%) cannot pass.
+# The floors the gate holds (fractions of the reference): set under the measured gain so machine noise
+# does not trip them, and far over zero so the old slow path cannot pass.
 FLOOR_S = 0.50
 FLOOR_MB = 0.33
 
-# The picture's margin over the two reference runs' own difference. Measured 2026-10-02 with exes that
-# draw the same thing: Vault111Cryo references differ by 30-47 pixels of step 1, a third run by 42; the 3x3
-# block's by 24, a third run by 67 of step 2; the shelter's by 0. Two samples under-read a range, so the
-# count is allowed 4 x the references' own + 64 and the step 2 x + 2. A fault is far outside both: one
-# model's placements moved = tens of thousands of pixels at steps over 100.
+# The picture's margin over the two reference runs' own difference: 4x the references' count + 64 and
+# 2x their step + 2; a real fault moves tens of thousands of pixels.
 MARGIN_PX_TIMES, MARGIN_PX = 4, 64
 MARGIN_STEP_TIMES, MARGIN_STEP = 2, 2
 

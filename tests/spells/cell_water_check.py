@@ -249,14 +249,14 @@ def stage_b(dirpath, tag):
     P = lambda k: img(os.path.join(dirpath, '%s.p%d.png' % (tag, k)))
     final = img(os.path.join(dirpath, tag + '.png')) / 255.0
     p = {k: P(k) for k in range(1, 11)}
-    # lane WATER2's probes (11-24): the SSR read and the distances; a WATER1-era green run has none
+    # the SSR and distance probes (11-24); an older run has none
     w2 = os.path.exists(os.path.join(dirpath, '%s.p24.png' % tag))
     if w2:
         p.update({k: P(k) for k in range(15, 25)})
     # the water mask: only the water's pixels change from one probe picture to the next (every other pixel is the
     # same scene each time, up to run-to-run noise); N against V, the depth terms' two bytes, the constants against N
     ne = lambda a, b: (np.abs(p[a] - p[b]).max(2) > 0)
-    # lane WATER2: no ne(5, 6): far or deep water reads rz = rw = 0 in both, and was left out (half the creek)
+    # no ne(5, 6): far or deep water reads rz = rw = 0 in both
     mask = ne(1, 3) & ne(9, 1) & ne(10, 2)
     # the frame constants: per column x % 4
     H, W = mask.shape
@@ -328,7 +328,7 @@ def stage_b(dirpath, tag):
     Rz = R[..., 2:3]
     skyc = sky[0] + (sky[1] - sky[0]) * sat(Rz + 0.75)
     skyc = skyc + (sky[2] - skyc) * sat(Rz * 1.9 + 0.35)
-    if ssr is not None:   # lane WATER2: the screen-space reflection over the sky
+    if ssr is not None:   # the screen-space reflection over the sky
         skyc = skyc + (ssr[..., :3] - skyc) * ssr[..., 3:4]
     silted = refr + M[4][3] * (1.0 - alphaV)[..., None] * ((M[5][:3] + (M[4][:3] - M[5][:3]) * refr) - refr)
     sunc = sun

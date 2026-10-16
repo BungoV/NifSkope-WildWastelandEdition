@@ -66,13 +66,13 @@ def read_soup(path):
         elif m == TWO:
             p += n
         else:
-            # lane LAND5: every tail after TWO1 is sized (u32 body bytes); one this reader does not use is skipped
+            # every tail after TWO1 is sized (u32 body bytes); one this reader does not use is skipped
             nb, = struct.unpack_from('<I', b, p)
             p += 4
             end = p + nb
             if end > len(b):
                 break
-            if m in (AMK, 0x324B4D41):   # AMK1, or lane ALPHATEST2's AMK2 in its slot (LAND6)
+            if m in (AMK, 0x324B4D41):   # AMK1, or AMK2 in its slot
                 am = {'maps': []}
                 nm, = struct.unpack_from('<I', b, p); p += 4
                 for _ in range(nm):
@@ -266,7 +266,7 @@ def main():
                 uv = ar['uv'].astype(np.float64)
                 u = B0 * uv[0] + B1 * uv[2] + B2 * uv[4]
                 v = B0 * uv[1] + B1 * uv[3] + B2 * uv[5]
-                sc = B0 * float(ar['as'][0]) + B1 * float(ar['as'][1]) + B2 * float(ar['as'][2])   # lane ALPHATEST2
+                sc = B0 * float(ar['as'][0]) + B1 * float(ar['as'][1]) + B2 * float(ar['as'][2])   # per-corner alpha scales
                 solid[j] = sample(am['maps'][ar['map']], u, v) * sc >= ar['thr']
         return P, area / len(B0), L, solid, nrm
 
@@ -310,7 +310,7 @@ def main():
                     hole = np.zeros(len(r), bool)
                     for mi in np.unique(ar['map']):
                         g = ar['map'] == mi
-                        sc = b0 * ar['as'][:, 0] + b1 * ar['as'][:, 1] + b2 * ar['as'][:, 2]   # lane ALPHATEST2
+                        sc = b0 * ar['as'][:, 0] + b1 * ar['as'][:, 1] + b2 * ar['as'][:, 2]   # per-corner alpha scales
                         hole[g] = sample(am['maps'][mi], uu[g], vv[g]) * sc[g] < ar['thr'][g]
                     h[r[hole], c[hole]] = False
             out[k:k + 512] = h.any(1)
@@ -346,7 +346,7 @@ def main():
             # hits fall on a point as a probe's uniform rays do: |cos| / d^2 from each probe (no occlusion here)
             ax = int(np.argmax(np.abs(n)))
             sg = 1.0 if n[ax] >= 0 else -1.0
-            if sbin >= 0 and os.environ.get('EMC_BIN') != 'normal':   # lane LAND6: v5's own bin (red: EMC_BIN=normal)
+            if sbin >= 0 and os.environ.get('EMC_BIN') != 'normal':   # v5's own bin (red: EMC_BIN=normal)
                 ax, sg = sbin // 2, (-1.0 if sbin % 2 else 1.0)
             tax = np.argmax(np.abs(tn), axis=1)
             Wp = np.zeros(P.shape[:2])

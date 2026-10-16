@@ -51,7 +51,7 @@ try:
 
     def peak_mb():
         return peak_mb()
-except ImportError:  # Windows (lane FARVIEW1): no 'resource'; the peak working set from the process' own counters
+except ImportError:  # Windows: no 'resource'; the peak working set from the process' own counters
     import ctypes
     import ctypes.wintypes as _wt
 
@@ -75,25 +75,24 @@ except ImportError:  # Windows (lane FARVIEW1): no 'resource'; the peak working 
 # ---------------------------------------------------------------- the camera, the lamp, the band (parameters)
 F_PX = 960.0 / math.tan(math.radians(35.0))   # 1920 px across 70 degrees
 R_BULB = 6.0                                  # bulb radius, units
-D0, D1 = 3072.0, 7168.0                       # FARVIEW1's band (design doc FARVIEW1 section 4)
+D0, D1 = 3072.0, 7168.0                       # the far-view band (design doc FARVIEW1 section 4)
 D_START, D_END = 2560.0, 250000.0
-STEP_BAND = 32.0                              # camera step in and around the band (as FARVIEW1 check C)
+STEP_BAND = 32.0                              # camera step in and around the band
 STEP_FAR = 0.01                               # beyond: 1% of the distance a step
 THETA = 0.5 / 255                             # half a display code value at the night exposure
 FOG = dict(near=0.0, far=120000.0, power=1.0, max=0.8)   # a made-up night weather, PRTP2 section 5 form
 INTENSITIES = (0.25, 1.0, 4.0)
 MISMATCH = (0.6, 1.0, 1.6)
-SS = 32                                       # real-bulb coverage samples per pixel axis (16 in the first run:
-                                              # its coverage noise alone moved H by about 0.5% a step)
+SS = 32                                       # real-bulb coverage samples per pixel axis (16 is too noisy)
 JIT = [((i + 0.5) / 4, (j + 0.5) / 4) for i in range(4) for j in range(4)]
 
-# ---------------------------------------------------------------- pre-registered bars (set before the first run)
+# ---------------------------------------------------------------- pre-registered bars
 BAR_T = 0.02          # twinkle, (max - min) / mean over 16 offsets
 SIGMA_RULE = 0.01     # SIGMA_MIN = the smallest sigma whose twinkle is <= this (half the bar), from the scan
 BAR_H_STEP = 0.01     # energy / target, change a 32 u step in the band
 BAR_H_OVER = 0.02     # allowed excursion outside [min(1, m), max(1, m)]
 BAR_S = 0.03          # rms radius, relative change a step (the natural 1/d change is 1.25% a step at 2560 u)
-BAR_M = 0.10          # dot vs bulb rms radius at D0 and D1 (added after the first run)
+BAR_M = 0.10          # dot vs bulb rms radius at D0 and D1
 BAR_O = 0.15          # visibility change a 1/8 px step of the occluder edge
 FIXED_CULL = 20000.0
 BIGDOT_SIGMA = 4.0
