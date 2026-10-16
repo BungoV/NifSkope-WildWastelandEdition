@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "opencelldialog.h"
 
+#include <QApplication>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -240,8 +241,11 @@ void OpenCellDialog::readNow()
 	const QStringList order = openCellWithMasters( ticked, sources, &missing );
 	QString err;
 	catalog = OpenCellCatalog();
-	if ( !order.isEmpty() )
+	if ( !order.isEmpty() ) {
+		QApplication::setOverrideCursor( Qt::WaitCursor );   // a full master takes seconds to index
 		openCellReadCatalog( loadOrderPaths(), catalog, &err );
+		QApplication::restoreOverrideCursor();
+	}
 	const int added = int( order.size() - ticked.size() ) + int( missing.size() );
 	if ( !missing.isEmpty() )
 		status->setText( tr( "Missing master: %1" ).arg( missing.join( QStringLiteral( ", " ) ) ) );
