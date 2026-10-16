@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gltex.h"
 #include "glproperty.h"
 #include "harnesswindow.h"
+#include "cellpasstime.h"	// lane PERF1
 
 #include <chrono>
 #include <cstdio>
@@ -1234,6 +1235,11 @@ void NifSkopeOpenGLContext::bindShape(
 	geometryCache[i] = d;
 	cacheShapeCnt++;
 	cacheBytesUsed += d->h.getBufferDataSize() + 24576;
+	PassTime::CacheCounts & pc = PassTime::cacheCounts();	// lane PERF1: the cache's traffic for the frame timers
+	pc.made++;
+	pc.madeBytes += qint64( d->h.getBufferDataSize() );
+	pc.usedBytes = qint64( cacheBytesUsed );
+	pc.maxBytes = qint64( cacheMaxBytes );
 }
 
 void NifSkopeOpenGLContext::setCacheSize( size_t maxBytes )
@@ -1269,7 +1275,9 @@ void NifSkopeOpenGLContext::shrinkCache( bool deleteAll )
 			d->next->prev = d->prev;
 		}
 		delete d;
+		PassTime::cacheCounts().evicted++;	// lane PERF1
 	}
+	PassTime::cacheCounts().usedBytes = qint64( cacheBytesUsed );
 
 	if ( rehashNeeded )
 		rehashCache();

@@ -52,6 +52,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QAction>
 #include <QOpenGLContext>
+#include "gl/cellpasstime.h"	// lane PERF1
+
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
 #include <QFile>
@@ -546,16 +548,22 @@ void Scene::drawShapes()
 {
 	NodeList secondPass;
 	wwCellDrawProbe( this, QStringLiteral( "before the scene" ) );	// lane VOLAIR1 (gates only)
+	PassTime::begin( PassTime::Opaque );	// lane PERF1
 	collectShapes( secondPass );
+	PassTime::end( PassTime::Opaque );
 	wwCellDrawProbe( this, QStringLiteral( "after the first pass" ) );
 	drawGrid();
 
 	if ( !secondPass.list().isEmpty() )
 		drawSelection(); // preserve the legacy highlight beneath transparency
 
+	PassTime::begin( PassTime::Sorted );
 	drawDeferredShapes( secondPass );
+	PassTime::end( PassTime::Sorted );
 	wwCellDrawProbe( this, QStringLiteral( "after the second pass" ) );
+	PassTime::begin( PassTime::Effects );
 	drawShapeEffects();
+	PassTime::end( PassTime::Effects );
 	wwCellDrawProbe( this, QStringLiteral( "after the shape effects" ) );
 }
 

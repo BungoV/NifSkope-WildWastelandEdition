@@ -1,6 +1,7 @@
 /*! Lane SUNCELL1: the cell view's per-placement culling (see cellcull.h). */
 #include "cellcull.h"
 
+#include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellumbra.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -810,6 +811,7 @@ int wwCellCullRed()
 bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t numTris,
 	std::vector<std::uint32_t> & out )
 {
+	PassTime::CpuScope pt( PassTime::CullCamera );	// lane PERF1
 	CullState & s = st();
 	if ( !scene || !sh || !scene->renderer || numTris <= 0 || s.docs.isEmpty() || s.probing )
 		return false;	// lane UMBRA1: the depth probe draws everything and counts nothing
@@ -889,6 +891,7 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, const float * m,
 	std::vector<std::uint32_t> & out )
 {
+	PassTime::CpuScope pt( PassTime::CullCascades );	// lane PERF1
 	CullState & s = st();
 	/* lane SUNCELL1: casters always cast -- the Previs row never reaches this pass. Its red control `casters`
 	 * hides the casters the camera pass found occluded or roomed off (this frame's camera view, or none). */

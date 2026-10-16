@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
+#include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/gametaa.h"
 #include "esmweather.h"
 #include "harnesswindow.h"
@@ -180,6 +181,8 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	placeholderCheck( tr( "SSAO" ) );
 	placeholderCheck( tr( "SSGI" ) );
 	placeholderCheck( tr( "Bloom" ) );
+	heading( tr( "Diagnostics" ) );
+	liveCheck( frameTimersBox, "frameTimers", tr( "Frame Timers" ), PassTime::on() );	// lane PERF1: ships off
 
 	/* ---- live: every enabled row applies on change ----
 	 * red "nolive": the rows change but never reach the state, which the
@@ -273,6 +276,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( volAirBox, &wwVolAirSetOn );
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	liveToggle( taaBox, &wwGameTaaSetOn );
+	liveToggle( frameTimersBox, &PassTime::setOn );	// lane PERF1
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
 		if ( live )
 			wwLookdevSetGameDay( d );
