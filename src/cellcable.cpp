@@ -204,18 +204,37 @@ bool wwCellCableShape( const EsmBendable & look, const WwCableSpec & spec, Nativ
 	if ( built ) {
 		built->centres.clear();
 		built->centres.reserve( size_t( rings ) * 3 );
-		float lowest = 3.4e38f;
-		for ( const V3 & p : c ) {
+		for ( const V3 & p : c )
 			built->centres.insert( built->centres.end(), { p.x, p.y, p.z } );
-			lowest = std::min( lowest, p.z );
-		}
 		built->rings = rings;
 		built->slices = slices;
 		built->length = curveLen;
 		built->tiles = tiles;
 		built->wind = wind;
 		built->sagExpected = vertical ? 0.0f : 0.7f * L * spec.slack;
-		built->sagMeasured = vertical ? 0.0f : ( A.z + B.z ) * 0.5f - lowest;
+		built->sagMeasured = vertical ? 0.0f : wwCableDropAtMiddle( built->centres );
 	}
 	return true;
+}
+
+float wwCableDropAtMiddle( const std::vector<float> & c )
+{
+	const size_t n = c.size() / 3;
+	if ( n < 2 )
+		return 0.0f;
+	const float ax = c[0], ay = c[1], az = c[2];
+	const float bx = c[n * 3 - 3], by = c[n * 3 - 2], bz = c[n * 3 - 1];
+	const float dx = bx - ax, dy = by - ay, dd = dx * dx + dy * dy;
+	if ( !( dd > 0.0f ) )
+		return 0.0f;
+	auto share = [&]( size_t i ) { return ( ( c[i * 3] - ax ) * dx + ( c[i * 3 + 1] - ay ) * dy ) / dd; };
+	for ( size_t i = 1; i < n; i++ ) {
+		const float s0 = share( i - 1 ), s1 = share( i );
+		if ( s0 <= 0.5f && s1 >= 0.5f ) {
+			const float f = s1 > s0 ? ( 0.5f - s0 ) / ( s1 - s0 ) : 0.0f;
+			const float z = c[i * 3 - 1] + ( c[i * 3 + 2] - c[i * 3 - 1] ) * f;
+			return ( az + bz ) * 0.5f - z;
+		}
+	}
+	return 0.0f;
 }

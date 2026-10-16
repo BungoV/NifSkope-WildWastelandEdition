@@ -2651,7 +2651,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	AoDecalBuilder aoBuild;	// lane AODECAL1: the copies that get a decal (off: the row's switch)
 	/* lane CABLES1: a cable's tube, built once per reference, and its geometry gate: the ends against the
 	 * reference's position -/+ its rotated half extents, the sag against 0.7 * L * slack. Every cable is
-	 * checked; WW_CELL_CABLES_DUMP=<tsv> writes one row per cable (world ends, lowest centre, sag) for the
+	 * checked; WW_CELL_CABLES_DUMP=<tsv> writes one row per cable (world ends, the curve's z under the chord's
+	 * middle, sag) for the
 	 * independent reader to compare against the plugin's own bytes. */
 	int cableBuilt = 0, cableWind = 0, cableEndBad = 0, cableSagBad = 0, cableVerts = 0, cableTris = 0;
 	float cableEndWorst = 0.0f, cableSagWorst = 0.0f;
@@ -2681,9 +2682,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		cableEndBad += endErr > 0.01f ? 1 : 0;
 		cableSagBad += sagErr > sagTol ? 1 : 0;
 		if ( !cableDumpPath.isEmpty() ) {
-			float lowZ = 3.4e38f;
-			for ( int i = 0; i < cb.rings; i++ )
-				lowZ = qMin( lowZ, world3( size_t( i ) )[2] );
+			std::vector<float> wc;
+			wc.reserve( size_t( cb.rings ) * 3 );
+			for ( int i = 0; i < cb.rings; i++ ) {
+				const Vector3 q = world3( size_t( i ) );
+				wc.insert( wc.end(), { q[0], q[1], q[2] } );
+			}
+			const float lowZ = ( gotA[2] + gotB[2] ) * 0.5f - wwCableDropAtMiddle( wc );   // the curve under the chord's middle
 			cableDump += QStringLiteral( "%1\t%2\t%3\t%4 %5 %6\t%7 %8 %9\t%10\t%11\t%12\t%13\t%14\t%15\n" )
 				.arg( p.ref, 8, 16, QLatin1Char( '0' ) ).arg( look.edid ).arg( cb.wind ? 1 : 0 )
 				.arg( double( gotA[0] ), 0, 'f', 3 ).arg( double( gotA[1] ), 0, 'f', 3 ).arg( double( gotA[2] ), 0, 'f', 3 )
@@ -3732,7 +3737,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	if ( !cableDumpPath.isEmpty() ) {
 		QFile df( cableDumpPath );
 		if ( df.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-			df.write( ( QStringLiteral( "ref\tbase\twind\tendA\tendB\tlowZ\tsag\tsagWant\trings\tslices\ttiles\n" )
+			df.write( ( QStringLiteral( "ref\tbase\twind\tendA\tendB\tmidZ\tsag\tsagWant\trings\tslices\ttiles\n" )
 				+ cableDump ).toUtf8() );
 	}
 

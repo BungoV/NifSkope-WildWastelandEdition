@@ -12,8 +12,9 @@
  *   ends      A = -half, B = +half, in the reference's frame (its position is the cable's middle)
  *   sag       M = (A + B) / 2, lowered by |B - A| * 1.4 * slack (1.4 is the game's sag setting); no sag when
  *             A and B share x and y (a vertical cable)
- *   curve     the quadratic Bezier A, M, B, sampled at 48 points; its lowest point is 0.7 * L * slack under
- *             the chord's middle
+ *   curve     the quadratic Bezier A, M, B, sampled at 48 points; its point under the chord's middle (t = 0.5,
+ *             since M shares the middle's x and y) is 0.7 * L * slack under it. On a sloped cable that is NOT
+ *             the lowest point, which can even be the low end
  *   rings     one every 4 % of the curve's length (at least 8 segments), at equal distance along it; the last
  *             ring is B. Each ring has `slices` sides (3 or 4) plus a seam copy; normals are radial
  *   radius    thickness / 2
@@ -52,8 +53,13 @@ struct WwCableBuilt
 	float tiles = 0.0f;
 	bool wind = false;            //!< the base sways (wind sensibility > 0)
 	float sagExpected = 0.0f;     //!< 0.7 * L * slack (0 for a vertical cable)
-	float sagMeasured = 0.0f;     //!< the chord middle's z minus the lowest ring centre's z, measured on the rings
+	float sagMeasured = 0.0f;     //!< the chord middle's z minus the ring polyline's z under it, measured on the rings
 };
+
+//! The drop of a ring polyline (3 floats per ring, first and last = the ends) under its chord's middle: the
+//! chord middle's z minus the polyline's z where its x/y projection onto the chord reaches one half. 0 when the
+//! ends share x and y.
+float wwCableDropAtMiddle( const std::vector<float> & centres );
 
 //! Cables on (false under WW_CELL_CABLES_RED=off).
 bool wwCellCablesOn();
