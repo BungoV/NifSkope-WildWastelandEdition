@@ -1,6 +1,6 @@
 #version 410 core
 
-// lane SSR1: a full-screen quad (the reflections' passes, cell_ssr.frag)
+// a full-screen quad (the reflections' passes, cell_ssr.frag)
 
 layout ( location = 0 ) in vec3 vertexPosition;
 

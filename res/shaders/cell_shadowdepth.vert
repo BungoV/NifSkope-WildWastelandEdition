@@ -1,8 +1,7 @@
 #version 410 core
 
-/* The cell lights' shadow caster pass (lane SHADOW1), vertex stage: the shape's own model-view matrix
- * (as the renderer draws it), view space -> world relative to the light (shRelFromView), then the cube
- * face's projection (shClipFromRel: GL's face axes, 90 degrees). */
+/* Shadow caster vertex stage: model-view, then view -> light-relative world (shRelFromView), then the
+ * cube face's projection (shClipFromRel: GL's face axes, 90 degrees). */
 
 uniform mat4 shRelFromView;
 uniform mat4 shClipFromRel;

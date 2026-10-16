@@ -1,20 +1,9 @@
 #version 410 core
 
-/* lane VOLFOG1: the lit medium, froxel by froxel (src/gl/cellvolfog.h, docs/cloud/VOLFOG1_DESIGN.md).
- * One draw writes one layer k of a (columns x rows x slices) volume; the slices are exponential from
- * volSlices.x (near) over ln(far / near) = volSlices.y in volSlices.z steps (game units along the view ray).
- *   stage 1  inject: four equal steps across slice k; each step adds  S(mid) x max(alpha(end) - alpha(start), 0)
- *            where alpha is the game's own fog alpha along this ray (wwFogEval: the density comes from the fog
- *            records) and S is the light the medium scatters toward the eye, in display units (pi x radiance):
- *              the directional light (the weather's sun outdoors, x its cascade shadow; the lighting template's
- *              indoors) x pi x phase, the cell's shaft-emitting lights (a shadow flag and a GDRY, as the game:
- *              colour x radial x cone x their shadow cubes x the GDRY's intensity, no N.L) x pi x phase, and the probe GI read as L0 + L1:  1/4 x max(0, (2/3) sum E + 3 g (E+ - E-).d)
- *              with E = the six-axis cube / pi (the surfaces' GI unit), from the air grid where one was built.
- *            The phase is the god-ray record's (GDRY): air (Rayleigh), forward and back Henyey-Greenstein terms,
- *            their colours normalised to a luminance of 1. rgb = the slice's in-scatter, a = alpha at its far edge.
- *   stage 2  integrate: layer k = the sum of the injected layers 0..k (rgb), a = alpha at slice k's far edge.
- * ( S - S e^{-sigma_t D} ) / sigma_t x T_before (the cloud design's exact slice integral) is S x (alpha1 - alpha0)
- * when T = 1 - alpha: the same formula with sigma_t read from the fog records. */
+/* The lit medium, froxel by froxel (src/gl/cellvolfog.h). One draw writes layer k; slices are exponential from
+ * volSlices.x over ln(far / near) = volSlices.y in volSlices.z steps. Stage 1 injects S(mid) x d(alpha) over four
+ * sub-steps (alpha = the game's fog alpha, S = scattered light x pi x GDRY phase); stage 2 sums layers 0..k.
+ * S x (alpha1 - alpha0) is the exact slice integral (S - S e^{-sigma_t D}) / sigma_t x T when T = 1 - alpha. */
 
 #define WW_CELL_FX 1
 #include "lookdev_fog.glsl"
@@ -27,7 +16,7 @@ uniform ivec3 volDims;			// columns, rows, slices
 uniform vec2 volProj;			// the projection's [0][0], [1][1]
 uniform sampler3D volInject;	// stage 2 reads stage 1's volume
 uniform bool volCsm;			// the sun's cascades are drawn this frame
-uniform int volRed;				// 2 gioff, 4 flat, 8 noshadow, 16 wrongsrc, 32 sixreads (1 off is the CPU's: computed, not applied)
+uniform int volRed;				// debug: 2 gioff, 4 flat, 8 noshadow, 16 wrongsrc, 32 sixreads
 uniform vec4 volPhase[3];		// rgb: the weight of the air (Rayleigh), forward and back terms; w: the HG g (0 for air)
 uniform vec4 volGi;				// rgb: the GI's tint (the three weights summed), w: the GI's L1 g
 uniform float volK;				// the record's intensity (GDRY Intensity, 1 without a record)
@@ -36,10 +25,10 @@ uniform sampler3D volAir;
 uniform vec3 volAirOrigin;
 uniform float volAirVoxel;
 uniform vec3 volAirDims;
-uniform vec3 volFlat[6];		// red flat: one cube for every froxel (the grid's mean)
+uniform vec3 volFlat[6];		// debug flat: one cube for every froxel (the grid's mean)
 uniform samplerBuffer volEmit;	// the placed lights that draw shafts (a shadow flag AND a WGDR): (light index, its GDRY intensity)
 uniform int volEmitCount;
-uniform int volTerms;			// gates only: 1 the directional light, 2 the placed lights, 4 the GI (7 = all)
+uniform int volTerms;			// test only: 1 the directional light, 2 the placed lights, 4 the GI (7 = all)
 
 out vec4 fragColor;
 
@@ -74,12 +63,8 @@ vec3 volCube( vec3 P, int a )
 	return cellGiE( P, axes[a] );
 }
 
-/* lane VOLFOG1b: the six axes in ONE room lookup (VOLFOG1 read each axis as a surface: a room read and an 8-voxel
- * blend per axis, and where the blend had no weight the 16-cell air search and the 64-voxel gap fill -- 19.2 ms on
- * Vault111Cryo). A froxel is a point in the air, not a surface: no half-voxel step off it, the room read at P itself,
- * and one pass over the 8 voxels fetches all six slabs of the room's slot (an empty slab: no weight on that axis).
- * An axis with no weight, or no room at P, takes the grid's plain trilinear (the surfaces' last resort). The surface
- * path (cell_lights.glsl) is not touched; the red sixreads keeps the VOLFOG1 reads (volCube) for the cost's before. */
+/* The six axes in ONE room lookup: a froxel is a point in the air, so the room is read at P itself and one pass over
+ * the 8 voxels fetches all six slabs (much cheaper than six surface reads). No weight: the grid's plain trilinear. */
 void volCubeAll( vec3 P, out vec3 E[6] )
 {
 	vec4 s[6];
@@ -159,8 +144,8 @@ vec3 volScatter( vec3 posView, vec3 dirView )
 	return S;
 }
 
-// the probe GI the medium at posView scatters toward the eye, read as L0 + L1 from the six-axis cube: once a froxel
-// (at the slice's middle, as the cloud twin's froxel S), not per sub-step -- six room-blended reads are the cost
+// the probe GI the medium scatters toward the eye, as L0 + L1 from the six-axis cube; once per froxel, not per
+// sub-step, since six room-blended reads are the cost
 vec3 volGiScatter( vec3 posView, vec3 dirView )
 {
 	if ( !cellOn || !cellGiOn || ( volRed & 2 ) != 0 || ( volTerms & 4 ) == 0 )
@@ -169,7 +154,7 @@ vec3 volGiScatter( vec3 posView, vec3 dirView )
 	vec3 dW = cellWorldDir( dirView );
 	vec3 E[6];
 	if ( ( volRed & 4 ) == 0 && !volAirOn && ( volRed & 32 ) == 0 ) {
-		volCubeAll( P, E );	// lane VOLFOG1b: one room lookup for the six axes
+		volCubeAll( P, E );	// one room lookup for the six axes
 		for ( int a = 0; a < 6; a++ )
 			E[a] *= 1.0 / PI;
 	} else {
@@ -183,7 +168,7 @@ vec3 volGiScatter( vec3 posView, vec3 dirView )
 
 float volAlpha( vec3 dirView, float t )
 {
-	if ( ( volRed & 16 ) != 0 )	// red wrongsrc: a fixed medium (0.02 / m) in place of the fog records
+	if ( ( volRed & 16 ) != 0 )	// debug wrongsrc: a fixed medium (0.02 / m) in place of the fog records
 		return 1.0 - exp( -t * 0.02 / 70.0 );
 	vec3 posView = dirView * ( t / fogDistScale );
 	float hb;

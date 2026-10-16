@@ -1,21 +1,10 @@
 #version 410 core
 
-/* lane SSR1: the game's screen-space reflections for the cell view (src/gl/cellssr.cpp, docs/PRTP_PLAN.md
- * "screen-space reflections"), read from the game's shader. Every target here is half the view and stored top
- * row first (the game's pixel order). Inputs: gbuf (lane AO1's opaque pass: view normal, GL axes, and the linear
- * depth in game units; full size, bottom row first), its min-of-2x2 depth mips 1..4 (top row first), and scene:
- * this frame's opaque lit color WITHOUT the reflection term, the obscurance and the fog (linear, full size,
- * bottom row first, bilinear), alpha = the material's reflection flag.
- *   stage 1  the ray: for a flagged pixel facing the eye, the reflection of the view ray about the normal (its
- *            world z doubled first), kept when it points more than ssrK.y into the view; the screen line through
- *            the pixel is run back to the near plane: (u0, v0, start depth)
- *   stage 2  the march: at most 32 steps over the depth mips (4 = coarsest), crossing one cell a step, going a
- *            level down where the ray is behind the depth and up where it is not; at level 1 a ray 50 units or
- *            more behind the surface is refused (it passes behind a thin thing). A hit samples scene there;
- *            alpha = the confidence squared (screen edge, travelled distance, depth gained)
- *   stage 3  the 5-tap blur across, stage 4 down: taps without confidence hand their weight to the others
- * ASSUMED (not read from the game): stage 1 point-samples its inputs (the full-size texel under the half pixel's
- * centre). Deviation: float targets (the game stores the march and the blurs in 8 bits, sRGB). */
+/* The game's screen-space reflections for the cell view (src/gl/cellssr.cpp). Targets are half size, top row
+ * first; gbuf and scene (opaque lit color without reflection, obscurance and fog; alpha = reflection flag) are
+ * full size, bottom row first. Stages: 1 the reflected ray run back to the near plane, 2 a hierarchical march over
+ * depth mips 1..4 (max 32 steps; alpha = confidence squared), 3 and 4 a 5-tap blur across and down.
+ * Deviation from the game: float targets (the game stores the march and blurs as 8-bit sRGB). */
 
 uniform int ssrStage;
 uniform sampler2D gbuf;
@@ -33,7 +22,7 @@ uniform mat3 viewToWorld;
 uniform vec4 ssrK;			// the game's four: color scale 1, angle gate 0.2, normal z scale 2, confidence scale 1
 uniform vec2 ssrClip;		// the game camera's near (15) and far (the cell's clip distance), game units
 uniform int ssrRed;			// WW_CELL_SSR_RED: 2 nogap (no 50-unit refusal), 4 nofade (confidence 1 on a hit)
-uniform sampler2D waterRay;	// lane WATER2: full size, bottom row first: the water's ray in the view, its view depth
+uniform sampler2D waterRay;	// full size, bottom row first: the water's ray in the view, its view depth
 uniform bool haveWaterRay;
 uniform bool opaqueRays;	// false in an exterior: the water's rays alone
 
@@ -75,7 +64,7 @@ void main()
 		float z;
 		vec4 wr = haveWaterRay ? texelFetch( waterRay, t, 0 ) : vec4( 0.0 );
 		if ( wr.a > 0.0 ) {
-			// lane WATER2: the water lies in front here; its pass (02100) gated and wrote the ray already
+			// the water lies in front here; its pass already gated and wrote the ray
 			if ( dot( wr.xyz, wr.xyz ) == 0.0 )
 				return;
 			z = wr.a;
