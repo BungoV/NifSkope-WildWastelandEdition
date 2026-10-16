@@ -178,7 +178,36 @@ GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QStrin
 //! texture cache could not produce it, which the caller REPORTS.
 //! `layer` >= 0: the sheet is a cardArray's texture array (lane FARLOD2).
 bool bindSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog,
-				const char * uniform, const ImpostorSheet & sheet, int unit, int layer = -1 )
+				const char * uniform, const ImpostorSheet & sheet, int unit, int layer = -1 );
+
+/* lane PERF1: the card pass's state, bound once (ImpostorDraw::batchBegin). A street frame drew ~5,000
+ * cards at ~40 us each, mostly re-binding the same program, uniforms and sheets (four file checks and a
+ * key string per card for an array-layer sheet). */
+struct CardBatch
+{
+	bool on = false;
+	NifSkopeOpenGLContext::Program * prog = nullptr;	// bound, with the pass-wide uniforms and state set
+	const char * progName = nullptr;
+	const ImpostorCardSet * set = nullptr;				// whose sheets are bound now
+	bool haveColour = false, haveNormal = false;
+	Vector3 eye;
+	QHash< const ImpostorSheet *, GLuint > layerIds;	// an array-layer sheet's texture, resolved once
+};
+
+CardBatch & cardBatch()
+{
+	static CardBatch b;
+	return b;
+}
+
+bool batchRedPerDraw()
+{
+	static const bool v = qgetenv( "WW_IMPOSTOR_RED" ) == "perdraw";
+	return v;
+}
+
+bool bindSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog,
+				const char * uniform, const ImpostorSheet & sheet, int unit, int layer )
 {
 	const GLint loc = prog->uniLocation( uniform );
 	if ( loc < 0 )
@@ -186,13 +215,24 @@ bool bindSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog,
 	scene->renderer->fn->glActiveTexture( GL_TEXTURE0 + GLenum( unit ) );
 
 	if ( layer >= 0 ) {
+		CardBatch & b = cardBatch();
+		if ( b.on ) {
+			const auto it = b.layerIds.constFind( &sheet );
+			if ( it != b.layerIds.constEnd() ) {
+				if ( !*it )
+					return false;
+				scene->renderer->fn->glBindTexture( GL_TEXTURE_2D, *it );
+				scene->renderer->fn->glUniform1i( loc, unit );
+				return true;
+			}
+		}
 		// the file itself: the sibling beside the .lodm, else an absolute resolved path
 		QString file = sheet.localPath;
 		if ( file.isEmpty() || !QFileInfo::exists( file ) )
 			file = ( !sheet.resolved.isEmpty() && QFileInfo( sheet.resolved ).isAbsolute() ) ? sheet.resolved : QString();
-		if ( file.isEmpty() )
-			return false;
-		const GLuint id = arrayLayerTexture( scene, file, layer, nullptr );
+		const GLuint id = file.isEmpty() ? 0 : arrayLayerTexture( scene, file, layer, nullptr );
+		if ( b.on )
+			b.layerIds.insert( &sheet, id );
 		if ( !id )
 			return false;
 		scene->renderer->fn->glBindTexture( GL_TEXTURE_2D, id );
@@ -256,7 +296,7 @@ void selectFrames( const Scene * scene, const ImpostorCardSet & set,
 {
 	const Vector3 centre = worldOffset + Vector3( set.center[0], set.center[1], set.center[2] )
 			* ( ( opt.worldScale > 0.0f ) ? opt.worldScale : 1.0f );
-	Vector3 d = eyeWorld( scene ) - centre;
+	Vector3 d = ( cardBatch().prog ? cardBatch().eye : eyeWorld( scene ) ) - centre;
 	const float len = d.length();
 	if ( len > 1e-6f )
 		d = d / len;
@@ -333,6 +373,24 @@ void selectFrames( const Scene * scene, const ImpostorCardSet & set,
 }
 
 } // namespace
+
+void ImpostorDraw::batchBegin()
+{
+	CardBatch & b = cardBatch();
+	b = CardBatch();
+	b.on = !batchRedPerDraw();
+}
+
+void ImpostorDraw::batchEnd( Scene * scene )
+{
+	CardBatch & b = cardBatch();
+	const bool bound = b.on && b.prog;
+	b = CardBatch();
+	if ( bound && scene && scene->renderer ) {
+		scene->renderer->stopProgram();
+		scene->renderer->fn->glActiveTexture( GL_TEXTURE0 );
+	}
+}
 
 QString ImpostorDraw::registerLooseSheets( Scene * scene, const ImpostorCardSet & set )
 {
@@ -480,25 +538,51 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	wwImpostorTrace( "A enter" );
 	// lane FARLOD1: the cell view's far cards take the cell variant (the cell's lights, fog, imagespace)
 	const char * progName = opt.cellLit ? "impostor_cell.prog" : "impostor_oct.prog";
-	NifSkopeOpenGLContext::Program * prog = scene->renderer->useProgram( progName );
+	CardBatch & batch = cardBatch();
+	// lane PERF1: in a batch the program, its pass-wide uniforms and the state stay from the card before
+	const bool fresh = !batch.on || !batch.prog || batch.progName != progName;
+	NifSkopeOpenGLContext::Program * prog = fresh ? scene->renderer->useProgram( progName ) : batch.prog;
 	wwImpostorTrace( prog ? "B useProgram ok" : "B useProgram null" );
 	if ( !prog )
 		return refuse( QStringLiteral( "res/shaders/%1 did not compile or was not found" ).arg( progName ) );
-	if ( opt.cellLit ) {
+	if ( fresh && opt.cellLit ) {
 		// both act on the bound program and do nothing where it lacks their uniforms
 		wwLookdevFogUniforms( scene );
 		wwCellLightsUniforms( scene );
 	}
+	if ( batch.on && fresh ) {
+		batch.prog = prog;
+		batch.progName = progName;
+		batch.set = nullptr;
+		batch.eye = eyeWorld( scene );
+	}
 
 	// ---- the sheets ------------------------------------------------------
-	const bool haveColour = bindSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer );
-	wwImpostorTrace( "C colour bound" );
-	const bool haveNormal = bindSheet( scene, prog, "NormalSheet", set.normal, 1, set.layer );
-	wwImpostorTrace( "D normal bound" );
-	const bool haveMask   = bindSheet( scene, prog, "MaskSheet",   set.mask,   2, set.layer );
-	const bool haveEmiss  = bindSheet( scene, prog, "EmissiveSheet", set.emissive, 3, set.layer );
-	wwImpostorTrace( "E aux bound" );
+	const bool sameSet = batch.on && !fresh && batch.set == &set;
+	bool haveColour = sameSet && batch.haveColour, haveNormal = sameSet && batch.haveNormal;
+	if ( !sameSet ) {
+		haveColour = bindSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer );
+		wwImpostorTrace( "C colour bound" );
+		haveNormal = bindSheet( scene, prog, "NormalSheet", set.normal, 1, set.layer );
+		wwImpostorTrace( "D normal bound" );
+		const bool haveMask   = bindSheet( scene, prog, "MaskSheet",   set.mask,   2, set.layer );
+		const bool haveEmiss  = bindSheet( scene, prog, "EmissiveSheet", set.emissive, 3, set.layer );
+		wwImpostorTrace( "E aux bound" );
+		if ( haveColour && haveNormal ) {
+			prog->uni1b( "hasMaskSheet", haveMask );
+			prog->uni1b( "hasEmissiveSheet", haveEmiss );
+			prog->uni1b( "familyPbr", set.pbr );
+			prog->uni1f( "emissiveScale", set.emissiveScale );
+		}
+		if ( batch.on ) {
+			batch.set = &set;
+			batch.haveColour = haveColour;
+			batch.haveNormal = haveNormal;
+		}
+	}
 
+	if ( !haveColour || !haveNormal )
+		batch.prog = nullptr;	// a refusal unbinds the program: the next card binds it again
 	if ( !haveColour ) {
 		scene->renderer->stopProgram();
 		QString arrayWhy;
@@ -517,11 +601,6 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 				"  (without it there is no height channel, so no depth and no blend)" )
 				.arg( set.normal.resolved ) );
 	}
-
-	prog->uni1b( "hasMaskSheet", haveMask );
-	prog->uni1b( "hasEmissiveSheet", haveEmiss );
-	prog->uni1b( "familyPbr", set.pbr );
-	prog->uni1f( "emissiveScale", set.emissiveScale );
 
 	// ---- which frames ----------------------------------------------------
 	float camDir[3], w[3];
@@ -664,7 +743,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 
 	const Vector3 centre = worldOffset
 			+ Vector3( set.center[0], set.center[1], set.center[2] ) * sc;
-	const Vector3 eye = eyeWorld( scene );
+	const Vector3 eye = batch.on ? batch.eye : eyeWorld( scene );
 
 	prog->uni3f( "cardCenter", centre[0], centre[1], centre[2] );
 	prog->uni2f( "cardHalf", set.halfW * sc, set.halfH * sc );
@@ -716,28 +795,32 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	prog->uni1f( "swayPhase", opt.swayPhase );
 
 	wwImpostorTrace( "H card uniforms" );
-	prog->uni4m( "modelViewMatrix", scene->view.toMatrix4() );
-	wwImpostorTrace( "I modelview" );
+	if ( fresh ) {
+		prog->uni4m( "modelViewMatrix", scene->view.toMatrix4() );
+		wwImpostorTrace( "I modelview" );
 
-	// ---- state and draw --------------------------------------------------
-	/* Alpha TEST, not alpha blend: the card's coverage is a cut-out (spec
-	 * 311..316) and it writes depth. Blending it would put it in the
-	 * transparent pass, where it could not write the depth the pixel offset
-	 * exists to write, and two cards would fight over order. */
-	glDisable( GL_BLEND );
-	glEnable( GL_DEPTH_TEST );
-	glDepthFunc( GL_LEQUAL );
-	glDepthMask( GL_TRUE );
-	glDisable( GL_CULL_FACE );
-	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+		// ---- state -------------------------------------------------------
+		/* Alpha TEST, not alpha blend: the card's coverage is a cut-out (spec
+		 * 311..316) and it writes depth. Blending it would put it in the
+		 * transparent pass, where it could not write the depth the pixel offset
+		 * exists to write, and two cards would fight over order. */
+		glDisable( GL_BLEND );
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( GL_LEQUAL );
+		glDepthMask( GL_TRUE );
+		glDisable( GL_CULL_FACE );
+		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+		wwImpostorTrace( "J state set" );
+	}
 
-	wwImpostorTrace( "J state set" );
 	const float * attrs[8] = { kQuadPos, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, kQuadUv };
 	scene->renderer->drawShape( 4, kQuadAttrMask, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, kQuadIdx );
 	wwImpostorTrace( "K drawShape returned" );
 
-	scene->renderer->stopProgram();
-	scene->renderer->fn->glActiveTexture( GL_TEXTURE0 );
+	if ( !batch.on ) {
+		scene->renderer->stopProgram();
+		scene->renderer->fn->glActiveTexture( GL_TEXTURE0 );
+	}
 	wwImpostorTrace( "L done" );
 
 	if ( why )
