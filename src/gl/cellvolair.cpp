@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
+#include <QRegularExpression>
 #include <QSettings>
 
 #include <algorithm>
@@ -79,7 +80,8 @@ VaState & vs()
 			const QByteArray r = t.trimmed();
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
-				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : 0;
+				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152
+				: r == "echoall" ? 4194304 : 0;
 		}
 		const QByteArray opt = qgetenv( "WW_CELL_AIR_OPT" ).trimmed();
 		if ( !opt.isEmpty() )
@@ -598,8 +600,13 @@ static void vaEcho()
 	static QString said;
 	const VaState & s = vs();
 	const QString now = QStringLiteral( "volair=%1 fogblend=%2" ).arg( s.last ).arg( s.fogBlend );
-	if ( now != said ) {
-		said = now;
+	/* lane PERF1: said again only when more than the frame's own timings changed (buildms, ms): a line to a redirected
+	 * stderr every frame stalled the frame ~280 ms (measured). Red echoall: every frame, as before. */
+	static const QRegularExpression timings( QStringLiteral( " (buildms|ms)=[-0-9.]+" ) );
+	QString key = now;
+	key.remove( timings );
+	if ( key != said || ( s.red & 4194304 ) ) {
+		said = key;
 		std::fprintf( stderr, "cell air: %s\n", qPrintable( now ) );
 	}
 }
@@ -608,9 +615,15 @@ static void vaPassInner( Scene * scene, bool run );
 
 void wwVolAirPass( Scene * scene, bool run )
 {
+	static const bool prof = qEnvironmentVariableIntValue( "WW_CELL_AIR_PROF" ) == 1;	// lane PERF1: where the pass's CPU goes
+	QElapsedTimer pt;
+	pt.start();
 	vaPassInner( scene, run );
+	const qint64 tInner = pt.nsecsElapsed();
 	if ( vs().on && run )
 		vaEcho();
+	if ( prof )
+		std::fprintf( stderr, "air prof: inner %.3f ms echo %.3f ms\n", double( tInner ) * 1e-6, double( pt.nsecsElapsed() - tInner ) * 1e-6 );
 }
 
 static void vaPassInner( Scene * scene, bool run )
