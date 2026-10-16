@@ -32,7 +32,6 @@ from lodgen_native_cut import read_lodo  # noqa: E402
 
 #: The reference projection the plan and `lodgen_native_cut.py` both use:
 #: a 1,920 x 1,080 display at a 70-degree horizontal field of view.
-#: A reference constant, not a format constant.
 PROJECTION_SCALE = 960.0 / math.tan(math.radians(35.0))
 
 

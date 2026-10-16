@@ -62,15 +62,8 @@ import sys
 MAGIC = b'LODM'
 VERSION = 1
 FAMILIES = ('legacy', 'pbr')
-# FIVE kinds are written, not three (lane AUDIT1, 2026-09-17, measured by
-# grepping every `root.insert( "kind" )` in src/): card (lodgen.cpp:3071),
-# array (:5091), terrainVT (:11804), cardArray (:13479) and aggregate
-# (lodgenaggregate.cpp:643), plus `source` as io/lodmfile.cpp:56's default
-# when the object carries no kind at all. This reader knew three of them and
-# so reported a FAIL against a legitimate aggregate sidecar; the list is the
-# reader's bug, not the writer's. An unknown word is still refused -- the
-# refuter below proves it -- because a kind nobody writes is how a typo in
-# the writer would look.
+# Five kinds are written (card, array, terrainVT, cardArray, aggregate), plus `source` as the default
+# when the object has no kind. An unknown word is refused: it is how a writer typo would look.
 KINDS = ('source', 'card', 'array', 'terrainVT', 'cardArray', 'aggregate')
 
 
@@ -159,13 +152,8 @@ class Checker(object):
         kind = root.get('kind', 'source')
         if kind not in KINDS:
             bad.append('kind %r is not one of %s' % (kind, '/'.join(KINDS)))
-        # A terrainVT sidecar carries a `terrain` object and NO texture table:
-        # the pyramid's sheets live in the .lodt container beside it (measured
-        # on the two written by --vt, lane AUDIT1, 2026-09-17). Requiring
-        # `textures` of every kind made this reader report two FAILs against
-        # legitimate files. The requirement is per kind now, and the terrainVT
-        # branch is what stops that from being a hole: the kind still has to
-        # carry something, and three of its fields have to be there.
+        # A terrainVT sidecar carries a `terrain` object and no texture table (its sheets live in the .lodt);
+        # the terrainVT branch still requires that object and its fields.
         tex = root.get('textures')
         if kind == 'terrainVT':
             if isinstance(tex, dict) and tex:
@@ -331,9 +319,7 @@ def refute(path):
         open(tmp, 'wb').write(out)
         try:
             c = Checker()
-            # The doctored file's own FAIL line is the thing being PROVOKED, not
-            # a failure of this run, so it is held back and the verdict printed
-            # in its place.
+            # The doctored file's FAIL line is provoked, not a failure of this run: hold it back, print the verdict.
             keep, sys.stdout = sys.stdout, open(os.devnull, 'w')
             try:
                 c.file(tmp, quiet=True)
@@ -363,10 +349,8 @@ def refute(path):
                        lambda d: d['card'].__setitem__(
                            'gap', [d['card']['gap'][0] + 1, d['card']['gap'][1]]))
     if root.get('kind') == 'terrainVT':
-        # The per-kind textures rule above is only as good as this: a terrainVT
-        # sidecar that lost its terrain object, or a field of it, must still be
-        # refused, or "no textures required here" would be a hole rather than a
-        # rule (lane AUDIT1, 2026-09-17).
+        # The per-kind textures rule depends on this: a terrainVT sidecar missing its terrain object or a field
+        # of it must still be refused.
         bad += payload('the terrain object removed',
                        lambda d: d.pop('terrain'))
         bad += payload('terrain.cellUnits removed',

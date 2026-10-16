@@ -28,12 +28,8 @@ from impostor_bc_decode import load_dds
 FULL = 250          # "the object covers this texel whole", in encoded alpha
 FLOOR = 16          # the spec's coverage floor
 PLANE = 128         # the card plane
-SLACK = 12          # BC3 interpolates the blue in a shared 4x4 palette; this is
-                    # the measured headroom, not a number chosen to pass
-NEAR = 8            # rings. THE SAME NUMBER as lodgenRepairOctHeight's
-                    # kOutRings, and the same metric: 8-connected passes, so a
-                    # square of radius 8 and not a disc. If one moves the other
-                    # must, and this row is where a disagreement shows up.
+SLACK = 12          # BC3 palette headroom, measured, not chosen to pass
+NEAR = 8            # rings; must equal lodgenRepairOctHeight's kOutRings (8-connected, so a square)
 
 
 def rings(mask, n):
@@ -101,41 +97,11 @@ def main(argv):
             # (a) every texel the object covers sits in the band
             inked = af >= FLOOR
             off = inked & ((hf < lo) | (hf > hi))
-            # (b) THE HEIGHT FIELD IS CONTINUOUS ACROSS THE SILHOUETTE. A
-            #     neighbouring frame's ray lands just outside this frame's
-            #     coverage constantly, and out there the only honest answer is
-            #     the depth the object had at the edge -- so an uncovered texel
-            #     TOUCHING an inked one must carry a height within SLACK of the
-            #     mean of its inked neighbours.
-            #
-            #     THE CLAUSE WRITTEN HERE FIRST WAS "those texels lie in the
-            #     band the frame's whole texels occupy", AND IT COULD NOT FAIL:
-            #     on exe af457755's sheets, where every one of them is the card
-            #     plane, it failed 0 frames of 16 on four of the five fixture
-            #     subjects, because that band is the object's FULL depth range
-            #     and an object centred on its own card straddles the plane by
-            #     construction. It was measured, found unable to convict, and
-            #     replaced. Continuity separates them on all five:
-            #       frames failing at the 10% fraction, af457755 -> this bake
-            #       blast_n4 4/16 -> 0/16, blast_n8 17/64 -> 0/64,
-            #       maple_n4 3/16 -> 2/16, dead_n4 6/16 -> 0/16,
-            #       rock_n4 16/16 -> 1/16.
-            #     The maple and the rock still fail frames after the repair and
-            #     that is reported rather than tuned away: the maple has 297
-            #     whole texels in 32,768, so there is nearly nothing for the
-            #     dilation to carry outward.
-            #
-            # (c) BEYOND 8 RINGS the card plane, unchanged, so the parallax step
-            #     is an exact no-op out where nothing samples.
-            #
-            #     BOTH HALVES ARE FRACTIONS, NOT ABSOLUTES, and the reason is
-            #     BC3: the height shares one 4x4 palette with normal X and
-            #     normal Y, so a block straddling either boundary carries its
-            #     value a few levels off however the bake wrote it. A repaired
-            #     blast_n4 frame has 7..136 such texels of about four thousand
-            #     (under 4%); the same frames before the repair had 2360..3790,
-            #     which is 60% to 95%. Ten percent separates them by a factor of
-            #     six in both directions.
+            # (b) the height field is continuous across the silhouette: an uncovered texel touching an inked
+            #     one must carry a height within SLACK of its inked neighbours' mean.
+            # (c) beyond 8 rings the card plane, unchanged, so the parallax step is an exact no-op.
+            # Both are fractions, not absolutes: BC3 shares the height's palette with normal X/Y, so
+            # boundary blocks are a few levels off however the bake wrote them.
             uncov = af < FLOOR
             near = uncov & rings(full, NEAR)
             far = uncov & ~near

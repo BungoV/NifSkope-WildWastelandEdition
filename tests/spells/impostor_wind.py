@@ -130,8 +130,8 @@ def same(a, b, fid):
             diff.append(f)
 
     def meta(d):
-        # 'specular none' is the legacy card's line from CARDFIX1 step 7 (1f0368d, the .pbrm card bake); the
-        # previous exe predates it. Only that exact line is dropped: '_s' on a legacy model still DIFFERS.
+        # 'specular none' is the legacy card's line from the .pbrm card bake, which the previous exe predates;
+        # only that exact line is dropped: '_s' on a legacy model still DIFFERS.
         return [l for l in open(os.path.join(d, fid + '.txt')).read().split('\n')
                 if not l.startswith('sway ') and l != 'specular none']
     side = meta(a) == meta(b)

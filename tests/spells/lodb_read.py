@@ -1,89 +1,14 @@
 #!/usr/bin/env python
-# lodb_read.py -- THE ONE PYTHON READER FOR THE BAKE RECORD (.lodb)
-#
-# Lane BAKEREC1, 2026-09-17.
-#
-# WHY THIS FILE EXISTS
-#   Before this lane four harnesses each carried their own parser for the
-#   record, and every one of them parsed the v1 BINARY container by hand:
-#
-#     tests/spells/lodgen_defaults.sh      b[b.index(b'{'):]      -> json.loads
-#     tests/spells/lodgen_layout.sh        json.loads(raw[16:])
-#     tests/spells/lodgen_btofree_ledger.py
-#     tests/spells/lodgen_native.sh        check 5
-#
-#   Four parsers is four places a format change has to be found, and the lane
-#   that changed the format would have discovered the fourth one by watching a
-#   harness fail on a Tuesday. There is one reader now and the harnesses import
-#   it. A format change lands here and nowhere else.
-#
-# WHAT IT READS
-#   The version 2 record: plain text, UTF-8, LF, `key<TAB>fields`. The full
-#   format is docs/LODGEN_BAKE_RECORD.md; the writer is `lodgenWriteLedger` in
-#   src/lodbfile.cpp and this reader is deliberately a SECOND implementation of
-#   it -- an independent reader is the only thing that can catch a writer that
-#   agrees with itself.
-#
-#   It also recognises the v1 binary container ('LODB' + a 16-byte header +
-#   compact JSON) and refuses it BY NAME, exactly the way the C++ reader does,
-#   rather than limping on with half the fields missing.
-#
-# WHAT IT RETURNS
-#   A dict whose v1 keys are spelled exactly as the old JSON spelled them, so a
-#   harness that used to do `json.loads(...)` keeps working after swapping one
-#   line:
-#
-#     worldspace  int        the worldspace form id
-#     worldEdid   str
-#     dim         int
-#     region      [x0,y0,x1,y1]
-#     switches    str        sha1 hex over the argument vector
-#     loadOrder   str        16 hex digits
-#     chunks      [ {cx, cy, dim, inputs, out:["<rel> <sha1>"],
-#                    outFiles:[...], outDigests:[...]} ]
-#
-#   plus the v2 block:
-#
-#     version     int        2
-#     exe         str        the WW edition stamp the bake ran from
-#     exeBytes    int
-#     baked       str        ISO-8601 UTC -- THE ONE VOLATILE FIELD
-#     target      'fo4cs'|'stock'
-#     alg         {chunk,file,plugin,switches}
-#     hashes      {loadOrderHash, pluginCorpusHash, objectCorpusHash,
-#                  modelCorpusHash, cardCorpusHash}   (absent keys mean the
-#                                                      bake wrote no pair)
-#     plugins     [ {index, name, bytes, hash, hashHex, path} ]
-#     resources   [ {kind, path, bytes, mtime} ]
-#     switchTokens [str]     the argument vector, verbatim
-#     census      [str]      every census line the bake printed
-#     endFiles    int
-#     endBytes    int
-#     products    [ {path, sha1} ]  region products, lane INCR2
-#     unknown     [str]      every line kind this reader did not know
-#
-# USAGE
-#   as a module:   import lodb_read; rec = lodb_read.read(path)
-#   from a shell:  python tests/spells/lodb_read.py <ws.lodb> [key]
-#                  -- with no key it prints the whole record as JSON; with a
-#                     key it prints that one field, which is what a `.sh`
-#                     wants inside a `$( )`.
-#
-#   Two more helpers the harnesses need:
-#     outputs(rec)     -> {relative path: sha1}  over every chunk
-#     normalise(text)  -> the record's text with the volatile FIELDS masked to
-#                         the literal <volatile>, matching the C++
-#                         `lodbNormalise` line for line, so two bakes of one
-#                         tree can be compared with `cmp`.
+# lodb_read.py -- the one Python reader for the bake record (.lodb); harnesses import it.
+# A second, independent reader of the v2 text format (docs/LODGEN_BAKE_RECORD.md); v1 binary is refused by name.
+# Usage: lodb_read.read(path), outputs(rec), normalise(text); CLI: lodb_read.py <ws.lodb> [key]
 
 import json
 import sys
 
 V1_MAGIC = b'LODB'
 
-#: The four volatile things, named here and in src/lodbfile.h and nowhere
-#: else. They are MASKED, never dropped: a dropped line would also hide a
-#: record that lost one.
+#: The volatile fields, named here and in src/lodbfile.h; masked, never dropped, so a lost line still shows.
 VOLATILE_FIELDS = ('baked value', 'resource path/size/mtime', 'plugin path',
                    'the census stage-times line',
                    'the peak-working-set clause of the census bake-census line')
@@ -119,9 +44,7 @@ def reads(raw, path='<bytes>'):
 
     for line in raw.decode('utf-8').split(chr(10)):
         if line.endswith(chr(13)):
-            # A CR is not written by us. It is tolerated here so that a record
-            # mangled by an editor still reads, and the gate that counts CR
-            # bytes stays the one thing that reports it.
+            # A CR is not written by us; tolerated so an editor-mangled record still reads.
             line = line[:-1]
         if not line:
             continue
@@ -189,8 +112,7 @@ def reads(raw, path='<bytes>'):
             ch['outDigests'].append(f[4])
             ch['out'].append('%s %s' % (f[3], f[4]))
         elif k == 'product' and len(f) > 2:
-            # lane INCR2: a region product -- a file under the record folder
-            # that no chunk row claims -- with its sha1
+            # a region product -- a file under the record folder no chunk row claims -- with its sha1
             rec['products'].append({'path': f[1], 'sha1': f[2]})
         elif k == 'census' and len(f) > 1:
             rec['census'].append(f[1])
@@ -198,9 +120,7 @@ def reads(raw, path='<bytes>'):
             rec['endFiles'] = int(f[1])
             rec['endBytes'] = int(f[2])
         else:
-            # An unknown kind is KEPT rather than dropped, so a harness can say
-            # "this record has a line I do not understand" instead of quietly
-            # measuring a record it only half read.
+            # An unknown kind is kept so a harness can report a line it does not understand.
             rec['unknown'].append(line)
 
     if not saw_version:
@@ -247,20 +167,10 @@ def normalise(text):
             keep.append('resource' + TAB + (f[1] if len(f) > 1 else '')
                         + TAB + '<volatile>')
         elif f[0] == 'census' and len(f) > 1 and f[1].startswith('stage times:'):
-            # THE FOURTH VOLATILE THING: `stage times:` is a wall clock, so it
-            # is recorded and masked rather than dropped. See lodbNormalise in
-            # src/lodbfile.cpp for why it is not simply left out of the record.
+            # `stage times:` is a wall clock: recorded and masked, not dropped (see lodbNormalise).
             keep.append('census' + TAB + 'stage times: <volatile>')
         elif f[0] == 'census' and 'peak working set: ' in line:
-            # THE FIFTH VOLATILE THING (lane INCR1, 2026-09-17, handed over by
-            # ARCHLOCK1): the chunk-pass census line carries this process's
-            # PEAK WORKING SET, a measurement of the machine at that moment
-            # rather than of the inputs. It is the only one that is INLINE --
-            # the rest of that line (thread counts, chunk jobs, the bto
-            # disposition, the layout root and its counts) is CONTENT -- so
-            # exactly the clause is masked, from `peak working set: ` to the
-            # next comma or the end of the line. Neither spelling
-            # lodgenPeakWorkingSetLine() produces contains a comma.
+            # The peak working set is the one inline volatile clause: mask from `peak working set: ` to the next comma or EOL.
             # Mirrors lodbNormalise() in src/lodbfile.cpp.
             at = line.index('peak working set: ') + len('peak working set: ')
             to = line.find(',', at)
@@ -284,10 +194,7 @@ def main(argv):
         sys.stderr.write('usage: lodb_read.py <ws.lodb> [key|--normalise]\n')
         return 2
     if len(argv) > 2 and argv[2] == '--normalise':
-        # BYTES, not text. On Windows a text-mode stdout turns every LF into
-        # CRLF, so a caller that hashes this pipe hashes a DIFFERENT file than
-        # the one lodbNormalise() hashed -- same 77 lines, different sha1. That
-        # is exactly how this cross-check first came up red (lane INCR1).
+        # Bytes, not text: a Windows text-mode stdout turns LF into CRLF and changes the sha1.
         sys.stdout.buffer.write(normalise_file(argv[1]).encode('utf-8'))
         return 0
     try:

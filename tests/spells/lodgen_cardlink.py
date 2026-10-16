@@ -39,8 +39,7 @@ def contract_hash(pairdir):
     for n in names:
         m = lodm(os.path.join(objs, n))
         t = m['textures']
-        # a set whose emissive is black everywhere names no emissive sheet (lane TIDY1,
-        # 2026-09-27): it contributes four files, not five
+        # a set whose emissive is black everywhere names no emissive sheet: four files, not five
         files = [n, t.get('diffuse') or t.get('baseColor'), t['normal'], t.get('gsaos') or t.get('rmaos')]
         if t.get('emissive'):
             files.append(t['emissive'])

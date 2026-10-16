@@ -368,9 +368,8 @@ def main():
 	print('  C11 mean tint delta over the 256 highest-cover texels: %.2f/255 (bar > 3)'
 		  % meanDelta)
 	c.check('C11 the tint actually moves the albedo where cover is high', meanDelta > 3.0)
-	# C11b: the implied grass colour must be the SAME on dark ground as on
-	# bright. Applied before the VCLR multiply it would scale with the vertex
-	# colour, and the two groups would disagree.
+	# C11b: the implied grass color must be the SAME on dark ground as on bright; applied
+	# before the VCLR multiply it would scale with the vertex color.
 	if len(tEst) >= 32:
 		half = len(tEst) // 2
 		byBright = sorted(range(len(tEst)),

@@ -112,15 +112,11 @@ def canon_doc(doc, ws="Commonwealth"):
     is still `==` and still fails on anything else"""
     d = json.loads(json.dumps(doc))
     for ch in d.get('chunks', []):
-        # SORTED, because the order two bakes happen to write their outputs in
-        # is not a property of the bytes. It is a multiset, so a duplicated or
-        # a dropped row still fails.
+        # SORTED: the order two bakes write their outputs in is not a property of the bytes;
+        # as a multiset a duplicated or dropped row still fails.
         ch['out'] = sorted(canon(o, ws) for o in ch.get('out', []))
-        # AND THE PARALLEL LISTS GO (lane AUDIT1, 2026-09-17). lodb_read hands
-        # back `outFiles` and `outDigests` beside `out`, carrying the same rows
-        # UN-canonicalised; leaving them in a dict that is then compared with
-        # `==` silently undoes every reduction above, which is exactly what
-        # standing red 1 turned out to be.
+        # and the parallel lists go: lodb_read's `outFiles` / `outDigests` carry the same rows
+        # UN-canonicalised, and comparing them with `==` would undo every reduction above.
         ch.pop('outFiles', None)
         ch.pop('outDigests', None)
     return d
@@ -186,10 +182,8 @@ def strip_digests(doc):
     return d
 
 
-# WHAT A LEDGER COMPARISON IS ABOUT, BY NAME (lane AUDIT1, 2026-09-17).
-# Everything the reader returns is in exactly one of these three groups, and
-# shape() FAILS on a key that is in none, so a key added to the record later
-# forces a decision here instead of being swept into the comparison or out of it.
+# What a ledger comparison is about, by name: every key the reader returns is in exactly one group,
+# and shape() FAILS on a key in none, so a new record key forces a decision here.
 RUN_KEYS = ('baked', 'bytes', 'lineCount', 'exe', 'exeBytes', 'version',
             'switches', 'switchTokens')
 """per-RUN bookkeeping: the clock, the file's own size and line count, which
@@ -300,11 +294,8 @@ def without_inputs(doc):
 
 def main(argv):
     fo4cs_vs_stock = '--fo4cs-vs-stock' in argv
-    # THE GENERATOR WORD (lane VTFIX1, 2026-09-24; flag added by GATEFIX1). Every
-    # chunk's inputs digest starts with the sha1 of the exe that baked it, so two
-    # DIFFERENT exes never record the same inputs, by design. The caller says
-    # when the two exes' bytes differ; the inputs are then CHECKED to have moved,
-    # chunk by chunk, and only after that left out of the comparison below.
+    # Every chunk's inputs digest starts with the sha1 of the exe that baked it; when the caller says
+    # the exes differ, the inputs are CHECKED to have moved, then left out of the comparison.
     generators_differ = '--generators-differ' in argv
     argv = [a for a in argv if a not in ('--fo4cs-vs-stock', '--generators-differ')]
     if len(argv) not in (3, 5) or argv[0] not in ('keep', 'drop', 'same'):
@@ -337,7 +328,7 @@ def main(argv):
     b2 = dict(b); b2.pop('switches', None)
 
     if fo4cs_vs_stock:
-        # THE ONE DIFFERENCE THAT IS ALLOWED, AND IT IS CHECKED, NOT EXCUSED.
+        # the one difference that is allowed, and it is checked, not excused
         ja, jb = cache_rows(a), cache_rows(b)
         check('the FO4CS record carries the per-chunk native cache it wrote '
               '(%d .lodj row(s))' % len(jb), len(jb) > 0)
@@ -355,11 +346,8 @@ def main(argv):
               '(unaccounted: %s)' % ', '.join(sorted(set(ua) | set(ub))), False)
 
     if mode == 'same':
-        # THE SAME COMMAND LINE ON BOTH SIDES (lane AUDIT1, 2026-09-17), which
-        # is lodgen_btofree.sh leg (c): the rung's stock bake and this exe's
-        # stock bake are spelled identically, so the digest must NOT move, and
-        # the recorded outputs must be the same rows with the same digests.
-        # `keep` cannot ask this: it REQUIRES the digest to have moved.
+        # the same command line on both sides: the digest must NOT move, and the recorded outputs
+        # must be the same rows with the same digests (`keep` cannot ask this: it requires a move).
         check('the two records name the same outputs, digest for digest',
               ca == cb and explained(out_a, out_b, root_a, root_b))
         check('and the command-line digest did NOT move, because the command line did not '
@@ -383,20 +371,11 @@ def main(argv):
               len(bto_a) > 0)
         check('the default bake records NO .BTO row (it is not an output any more)',
               len(bto_b) == 0)
-        # WHAT A DROP MOVES IN THE RECORD, ASKED BY NAME (lane GATEFIX1,
-        # 2026-09-24). This comparison used to hand shape()'s TEXT to
-        # strip_digests() and died with an AttributeError on every run since
-        # AUDIT1 made shape() return text; the rung wrote a version 1 record
-        # until the re-pin, so leg (a) skipped before reaching it and nobody
-        # saw. A drop bake moves exactly three things besides the .BTO row,
-        # and each is checked here rather than left out:
-        #   * the census gains one `bto scratch:` row, and the `bake census:`
-        #     row's bto clause says scratch/dropped/freed where the rung's says
-        #     the mod folder/0/0. The NUMBERS are leg (d)'s; here the clause is
-        #     reduced to its chunk count and every other census byte is ==.
-        #   * the manifest moves into the record's own folder, so the `end`
-        #   line counts it: the file and byte deltas must be exactly the
-        #   out rows that entered the record folder, sized on disk.
+        # A drop bake moves exactly three things besides the .BTO row, each checked here:
+        #   * the census gains one `bto scratch:` row, and the `bake census:` row's bto clause is
+        #     reduced to its chunk count; every other census byte is ==.
+        #   * the manifest moves into the record's own folder, so the `end` line's file and byte
+        #     deltas must be exactly the out rows that entered the record folder.
         import re
         disp = re.compile(r'bto built in (the mod folder|scratch [^,]*), '
                           r'(\d+) chunk\(s\), \d+ dropped, \d+ bytes freed')
