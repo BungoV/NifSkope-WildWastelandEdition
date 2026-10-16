@@ -44,13 +44,11 @@ from probe_bake import files_in, floordiv, structure, surfel_of, unpack_dir  # n
 
 SUN = np.array([0.3, -0.5, 0.81])
 SUN /= np.linalg.norm(SUN)
-# Gates, as set before the first real run: sky 0.01 of the sphere (about 4 sigma of an
-# 8192-ray octant share), total 10% median / 25% p95, dir 0.15 median / 0.35 p95.
+# Gates: sky 0.01 of the sphere (about 4 sigma of an 8192-ray octant share),
+# total 10% median / 25% p95, dir 0.15 median / 0.35 p95.
 SKY_MAX, TOT_MED, TOT_P95, DIR_MED, DIR_P95 = 0.01, 0.10, 0.25, 0.15, 0.35
-# The relight stores band-2 SH and a surface reads it as cosine-convolved irradiance, so
-# the directional gate is that irradiance over 26 normals: mean |bake - ref| / mean ref.
-# Set 2026-10-01 before its first run: 0.10 median / 0.25 p95. The octant split (dir) is
-# reported, not gated: a 70-unit surfel near a probe lands whole in one octant.
+# The relight stores band-2 SH read as cosine-convolved irradiance, so the directional gate is that
+# irradiance over 26 normals: mean |bake - ref| / mean ref. The octant split (dir) is reported only.
 IRR_MED, IRR_P95 = 0.10, 0.25
 A_BAND = np.array([np.pi] + [2 * np.pi / 3] * 3 + [np.pi / 4] * 5)
 NORMALS = np.array([(x, y, z) for x in (-1, 0, 1) for y in (-1, 0, 1) for z in (-1, 0, 1) if (x, y, z) != (0, 0, 0)],
@@ -163,7 +161,7 @@ def main(a):
     k = int(a[a.index('--probes') + 1]) if '--probes' in a else 32
     rays = int(a[a.index('--rays') + 1]) if '--rays' in a else 8192
     red = a[a.index('--red') + 1] if '--red' in a else ''
-    # lane SIDES6: --corners picks the K probes with the most link weight on corner cells (of the v5 bake: this
+    # --corners picks the K probes with the most link weight on corner cells (of the v5 bake: this
     # one, or --compare's); --compare <bakedir> evaluates a second bake of the same probes and gates that THIS
     # bake's irradiance error is below the other's (median and p95)
     corners = '--corners' in a

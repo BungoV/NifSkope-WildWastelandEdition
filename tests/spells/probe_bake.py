@@ -60,7 +60,7 @@ LINK = np.dtype([('delta', '<i2', 3), ('dir', '<i2', 2), ('w', '<u2')])
 LINKEXT = np.dtype([('side', 'u1'), ('tint', 'u1', 3), ('door', '<u4')])
 PROBEEXT = np.dtype([('skytint', 'u1', (8, 3)), ('room', '<u4', 2)])
 ROOMBOX = np.dtype([('room', '<u4'), ('lo', '<f4', 3), ('hi', '<f4', 3), ('res', '<u4')])
-EMIT = np.dtype([('surfel', '<u4'), ('le', '<f4', 3)])   # lane EMISSIVEGI1: top bit of surfel = the back list
+EMIT = np.dtype([('surfel', '<u4'), ('le', '<f4', 3)])   # top bit of surfel = the back list
 assert SURFEL.itemsize == 32 and PROBE.itemsize == 144 and LINK.itemsize == 12
 assert LINKEXT.itemsize == 8 and PROBEEXT.itemsize == 32 and ROOMBOX.itemsize == 32
 
@@ -86,8 +86,8 @@ def read_tbk(path):
         raise ValueError('magic/version/kind %x %d %d' % (magic & 0xffffffff, ver, kind))
     need = 64 + 32 * ns + 144 * np_ + 12 * nl
     nb = nbox = nem = 0
-    if ver >= 4:   # lane SIDES6: v5 = v4's tail (no back list; a surfel's pad0 = its facing bin, a link's side = that bin)
-        nb, nbox, nem = res[0], res[1], res[3]   # lane EMISSIVEGI1: res[3] = the emissive tail's count
+    if ver >= 4:   # v5 = v4's tail (no back list; a surfel's pad0 = its facing bin, a link's side = that bin)
+        nb, nbox, nem = res[0], res[1], res[3]   # res[3] = the emissive tail's count
         need += 32 * nb + 8 * nl + 32 * np_ + 32 * nbox + 16 * nem
     if len(b) != need:
         raise ValueError('size %d, the counts say %d' % (len(b), need))
@@ -110,7 +110,7 @@ def read_tbk(path):
         px['room'][:, 1] = ROOM_NONE
         bx = np.zeros(0, ROOMBOX)
         em = np.zeros(0, EMIT)
-    # lane SIDES6: the surfel table a link side names. v3/v4: (front, back); v5: the six bins (pad0), each
+    # the surfel table a link side names. v3/v4: (front, back); v5: the six bins (pad0), each
     # its own array, so `bysides[side][j]` and a per-side key map read every version the same way
     bysides = tuple(s[s['pad0'] == b] for b in range(6)) if ver >= 5 else (s, back)
     return dict(emits=em, ver=ver, content=res[2] if ver >= 4 else 0, cx=cx, cy=cy, cell=cs, flags=flags, surfels=s,
@@ -262,15 +262,15 @@ def write_soup(path, tris, alb, doors=(), glass=None, amask=None):
             f.write(struct.pack('<II', GLS_MAGIC, len(g)))
             f.write(g.tobytes())
             f.write(bytes([c for _, tr in glass for c in tr]))
-        # lane ROOMCLAMP1: the ground is wound down on purpose (facing is the bake's job); every face
+        # the ground is wound down on purpose (facing is the bake's job); every face
         # two-sided keeps these gates off the outside-the-shell rule (cell_rooms gates winding)
         f.write(struct.pack('<II', 0x314F5754, len(t)))
         f.write(b'\x01' * len(t))
-        # lane ALPHATEST2: amask = dict(maps=[(name, w, h, alpha bytes)], models=[name],
+        # amask = dict(maps=[(name, w, h, alpha bytes)], models=[name],
         # recs=[(tri, map, model, thr, uv6, as3 or None)]); 'AMK2' when any scale is not 1, else 'AMK1'
         if amask:
             amk2 = any(r[5] is not None and tuple(r[5]) != (1.0, 1.0, 1.0) for r in amask['recs'])
-            # LAND6: sized like every tail after TWO1 (LAND5): u32 magic, u32 count, u32 body bytes, body
+            # sized like every tail after TWO1: u32 magic, u32 count, u32 body bytes, body
             body = struct.pack('<I', len(amask['maps']))
             for name, w, h, a in amask['maps']:
                 nb = name.encode()
@@ -370,7 +370,7 @@ def structure(files, fails):
         want = (1 if len(lk) else 0) | (2 if len(p) else 0)
         if t['flags'] != want:
             fails.append('%s: flags %d, want %d' % (name, t['flags'], want))
-        t['keys_side'] = []   # lane SIDES6: per side (v3/v4 front, back; v5 the six bins), cell -> index
+        t['keys_side'] = []   # per side (v3/v4 front, back; v5 the six bins), cell -> index
         for si, arr in enumerate(t['bysides']):
             keys = {}
             for i, sp in enumerate(arr):
@@ -428,7 +428,7 @@ def surfel_of(t, pk, l, x, ignore_side=False):
     """The surfel a link names: its cell, on its side (v4); None if the file lacks it."""
     k = tuple(int(pk[a]) + int(l['delta'][a]) for a in range(3))
     side = 0 if ignore_side else int(x['side'])
-    if ignore_side and t['ver'] >= 5:   # lane SIDES6: the red reads the cell's first side (its most-seen is not marked)
+    if ignore_side and t['ver'] >= 5:   # the red reads the cell's first side (its most-seen is not marked)
         for si in range(6):
             if k in t['keys_side'][si]:
                 side = si
@@ -508,7 +508,7 @@ def model_surfels(tris, alb, probes, dirs, cell, mode='spill'):
         return (nv / np.linalg.norm(nv), tuple(int(round(min(max(x / n, 0), 1) * 255)) for x in al), n)
 
     out, backs, back, mask = {}, [], {}, {}
-    if mode == 'v5':   # lane SIDES6: every facing bin its own surfel; keyed (cell, bin) in `back`
+    if mode == 'v5':   # every facing bin its own surfel; keyed (cell, bin) in `back`
         for key, bs in bins.items():
             for i, b in enumerate(bs):
                 if b[0]:
@@ -563,7 +563,7 @@ def retrace(tbks, tris, alb, n, fails, v4=True, doors=(), glass=None, physics=Tr
               tint_bad=0, tint_n=0, skytint_bad=0, skytint_n=0, door_n=0, side_n=0, glass_share=0.0)
     cell = tbks[0][1]['cell'] if tbks else 70.0
     allp = [pr['pos'].astype(np.float64) for _, t in tbks for pr in t['probes']]
-    if v5 is None:   # lane SIDES6: the files say which model they must match
+    if v5 is None:   # the files say which model they must match
         v5 = bool(tbks) and all(t['ver'] >= 5 for _, t in tbks)
     model, alt, back, mask = model_surfels(tris, alb, allp, dirs, cell, 'v5' if v5 else 'v4' if v4 else 'spill')
     st['six'] = v5
@@ -806,7 +806,7 @@ def rooms_check(tbks, tris, rooms, openings, fails):
 def run_bake(exe, soup, out, rays, threads, red, extra=(), rect=RECT):
     cmd = [os.path.abspath(exe), '-no-gui', 'probebake', '--soup', soup, '--rect', ','.join('%g' % v for v in rect),
            '--out', out, '--rays', str(rays), '--threads', str(threads)] + list(extra)
-    if '--adapt' not in extra:   # lane SMOOTHN1: the exact re-trace is of the base ray set (the old bake)
+    if '--adapt' not in extra:   # the exact re-trace is of the base ray set
         cmd += ['--adapt', '1']
     if red:
         cmd += ['--red', red]
@@ -846,7 +846,7 @@ def v3_leg(exe, base, soup, work, tag, rays, rect, tris, alb, physics, fails):
     fails += ['v3: ' + f for f in f3]
     same = ''
     if base:
-        # lane SIDES6: v3 AND v4 from this exe are the base exe's bytes (v5 is new; the old versions untouched)
+        # v3 AND v4 from this exe are the base exe's bytes (v5 is new; the old versions untouched)
         oks = []
         for v in ('3', '4'):
             ob = fresh(os.path.join(work, tag + '_base_v' + v))

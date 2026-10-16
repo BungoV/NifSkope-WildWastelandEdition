@@ -47,7 +47,7 @@ G1 = None
 if DEPTH_WANT in ('auto', 'gical1'):
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import gical1_check as G1      # noqa: E402  (lane GICAL1, origin/cloud-GICAL1 30201d7, copied byte for byte)
+        import gical1_check as G1      # noqa: E402  (copied byte for byte)
     except ImportError:
         if DEPTH_WANT == 'gical1':
             raise
@@ -55,7 +55,7 @@ if DEPTH_WANT in ('auto', 'gical1'):
 DEPTH_MODE = 'gical1' if G1 is not None else 'standin'
 UNIT_M = 0.0142875       # one game unit in meters (1.42875 cm): GICAL1's LIFT and normal bias are 1 unit
 
-# ---------------------------------------------------------------- pre-registered constants (set before the first run)
+# ---------------------------------------------------------------- pre-registered constants
 F = 256                 # the floor: today's fixed count, scaled (2048 / 8)
 CAP = 16 * F            # hard cap
 BATCH = F               # extra rays come in batches of F
