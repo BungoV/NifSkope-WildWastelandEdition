@@ -67,12 +67,8 @@ def main():
             why.append('%d rows in the dump, expected %d'
                        % (len(rows), w['rows']))
         if w['type'] == 'SCOL':
-            # A collection's row carries the PART's base and the PART's record
-            # type, and the part is placed relative to the reference, so the
-            # only things the dump can be held to here are the ROW COUNT above
-            # and that every row is a numbered part. Comparing the collection's
-            # own base and type against a part's is how this checker reported
-            # TreeCluster05 WRONG while the expansion was working correctly.
+            # A collection's row carries the PART's base and record type, placed relative to the
+            # reference, so only the row count and the numbered-part names can be checked here.
             if any(x['part'] < 0 for x in rows):
                 why.append('a row is not numbered as a collection part')
         else:

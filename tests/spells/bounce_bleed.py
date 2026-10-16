@@ -63,7 +63,7 @@ def run_pipe(exe, soup, out, passes, sun, sky, lamp=None):
         sys.exit('probegi exit %d: %s %s' % (p.returncode, p.stdout[-400:], p.stderr[-400:]))
     G = read_grid(os.path.join(out, 'gi_grid.bin'), os.path.join(out, 'gi_slots.bin'))
     rp = os.path.join(out, 'gi_rooms.bin')
-    R = read_rooms(rp) if os.path.exists(rp) else None   # the shader reads the surface's room (lane ROOMCLAMP1)
+    R = read_rooms(rp) if os.path.exists(rp) else None   # the shader reads the surface's room
     E = []
     for q in points():
         s = gi_sample(G, R, q[:3], q[3:], fill=False)

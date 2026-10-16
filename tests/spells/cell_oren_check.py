@@ -59,7 +59,7 @@ def oren_sum(lights, P, N, V, gloss, normalised=False, flags=True, rim_only=Fals
             oren = np.ones_like(oren)
         if rim_only:        # probe 10
             oren = np.zeros_like(oren)
-        # lane RIM1: the back-light term every light adds to the legacy diffuse, unless the light opts out
+        # the back-light term every light adds to the legacy diffuse, unless the light opts out
         if not (flags and (L['norim'] or L['rough'])):
             oren = oren + np.clip(-np.einsum('ij,ij->i', V, Ld), 0, 1) * np.clip(1 - nv, 0, 1) ** 0.01 * (1 - gloss)
         w = np.where((d < L['r']) & (nl > 0), a * nl * oren, 0.0)
@@ -102,9 +102,7 @@ def main(esm, cell, shots, label=None):
     for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0)):
         ok &= np.linalg.norm(P - np.roll(P, (dy, dx), (0, 1)), axis=2) < 40
         # a smooth normal and gloss too: an 8-bit normal on a crease is not the fragment's normal. The gloss
-        # step is 12/255, not 2: a gloss map varies texel to texel, and at 2 only flat-gloss surfaces were left
-        # (Vault view 2 kept 443 lit pixels once the steam stopped covering the probes; lane EFX1). Measured on
-        # those shots: with no gloss limit at all the pixels still agree 99.9%; 12 still drops material seams.
+        # step is 12/255, not 2: a gloss map varies texel to texel, and 2 leaves only flat-gloss surfaces
         ok &= np.linalg.norm(N - np.roll(N, (dy, dx), (0, 1)), axis=2) < 0.06
         ok &= np.abs(img[9][..., 0] - np.roll(img[9][..., 0], (dy, dx), (0, 1))) <= 12
     ok[0, :] = ok[-1, :] = ok[:, 0] = ok[:, -1] = False
@@ -126,7 +124,7 @@ def main(esm, cell, shots, label=None):
     lit = exp.max(axis=1) > 0.02
     share = good.mean()
     lit_share = good[lit].mean() if lit.any() else 0.0
-    # how far the game's diffuse sits from Lambert here (the red's lever): the A term alone
+    # how far the game's diffuse sits from Lambert here: the A term alone
     s2 = (1 - gloss[lit]) ** 2
     a_mean = float(np.mean(1 - 0.5 * s2 / (s2 + 0.57))) if lit.any() else 1.0
     if lit.sum() < 500:
@@ -138,7 +136,7 @@ def main(esm, cell, shots, label=None):
     quirk = lit & np.any(np.abs(exp - expn) > 2 * tol, axis=1)
     quirk_share = good[quirk].mean() if quirk.any() else 1.0
     quirk_ok = quirk.sum() < 200 or quirk_share >= 0.95
-    # lane RIM1: the rim alone (probe 10), judged where either side shows one, so a rim the flags should have
+    # the rim alone (probe 10), judged where either side shows one, so a rim the flags should have
     # dropped counts against it
     exp_r = np.clip(oren_sum(lights, Pp, Np, V, gloss, rim_only=True) * 4.0, 0, 1)
     got_r = img[10][ys, xs] / 255.0

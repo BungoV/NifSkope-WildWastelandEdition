@@ -26,7 +26,7 @@ usage: python cell_skyfull_check.py OUT_DIR
 import math, os, re, struct, sys, zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pbr_wx1_gates import Weather, Clock, TI  # noqa: E402  (the PBRWX1 judge's own plugin reader + clock)
+from pbr_wx1_gates import Weather, Clock, TI  # noqa: E402  (the shared plugin reader + clock)
 
 ESM = os.environ.get("ESM", r"X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm")
 DAY = 4.0
@@ -127,7 +127,7 @@ def main():
         if a is None or b is None:
             rec("%s: the pinned-off and before pictures" % c, False, "missing")
             continue
-        # lane BAKEBLOCK1: byte for byte flaked (9 px on Sanctuary, rerun PASS); judged against the old exe's own noise
+        # byte for byte flaked once (9 px), so it is judged against the old exe's own noise
         if os.environ.get("SKYFULL_RED") == "level1":
             a = a.copy()
             px = a.load()

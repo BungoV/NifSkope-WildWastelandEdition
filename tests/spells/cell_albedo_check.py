@@ -228,7 +228,7 @@ def bake_maps(run):
     for f in files(os.path.join(run, 'bake')):
         t = read_tbk(os.path.join(run, 'bake', f))
         cell = t['cell']
-        for side, arr in enumerate(t['bysides']):   # lane SIDES6: v5 = six sides
+        for side, arr in enumerate(t['bysides']):   # v5 = six sides
             for s in arr:
                 k = (side,) + tuple(floordiv(s['pos'][i], cell) for i in range(3))
                 surf.setdefault(k, s.tobytes())
@@ -300,10 +300,8 @@ def stage_refract(main_run, new_run):
     keys = set(surf_m) | set(surf_n)
     diff_s = [k for k in keys if surf_m.get(k) != surf_n.get(k)]
     out_s = [k for k in diff_s if k[1:] not in reach]
-    # 5. a cell left over that keeps its surfel's place, normal and sample count byte for byte had the same
-    # rays hit the same points: only the triangle taken there changed. The soup's tree is rebuilt without
-    # the lost triangles, so where two triangles meet a ray at the same distance (coincident surfaces, a
-    # shared edge) it may take the other one, with its own albedo bytes
+    # 5. a leftover cell whose surfel keeps place, normal and sample count byte for byte only changed the
+    # triangle taken on a tie (the rebuilt tree may pick a coincident one, with its own albedo bytes)
     def tie(k):
         a, b = surf_m.get(k), surf_n.get(k)
         if a is None or b is None:

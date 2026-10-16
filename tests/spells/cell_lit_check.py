@@ -123,7 +123,7 @@ def lights_of(esm, cell_edid):
         radius, = struct.unpack_from('<I', d, 4)
         col = np.array(list(d[8:11]), float)
         lf, = struct.unpack_from('<I', d, 12)
-        if lf & 0x20 or lf & 0x100000:  # off; Ambient Only (no direct light in game, lane AMBO1)
+        if lf & 0x20 or lf & 0x100000:  # off; Ambient Only (no direct light in game)
             continue
         falloff, fov = struct.unpack_from('<2f', d, 16) if len(d) >= 28 else (1.0, 90.0)
         bse = struct.unpack_from('<3f', d, 40) if len(d) >= 52 else (0.0, 1.0, 2.0)
@@ -144,7 +144,7 @@ def lights_of(esm, cell_edid):
         box = None
         if not hemi and not spot:
             box = light_box(buf, roff, byform, struct.unpack_from('<f', f[b'XSCL'])[0] if b'XSCL' in f else 1.0)
-        # lane RIM1: No Rim Lighting (0x80000) drops the back-light; Ignore Roughness (0x40000) also turns the
+        # No Rim Lighting (0x80000) drops the back-light; Ignore Roughness (0x40000) also turns the
         # diffuse to Lambert
         out.append(dict(pos=np.array(pos), r=r, c=c, spot=spot, cos=cos_outer, aim=aim, cone=falloff, bse=bse,
                         norim=bool(lf & 0x80000), rough=bool(lf & 0x40000), flags=lf, hemi=hemi, box=box))
@@ -309,7 +309,7 @@ def main_ambient(esm, cell, shots):
     k = np.ones((len(ys), 3))
     which = np.full(len(ys), -1)
     near_edge = np.zeros(len(ys), bool)
-    # lane HEMI1: the pixels the box decides: inside a box light's sphere and outside its box, or the reverse
+    # the pixels the box decides: inside a box light's sphere and outside its box, or the reverse
     which_ball = np.full(len(ys), -1)
     for i, S in enumerate(spheres):
         ball = np.linalg.norm(Pp - S['pos'], axis=1) - S['R']     # signed distance to the volume's face
@@ -343,7 +343,7 @@ def main_ambient(esm, cell, shots):
     # both sides of a volume's edge in frame: the scale must stop where the volume stops
     verdict = (n_in >= 2000 and n_out >= 1000 and moved.sum() >= 1000 and ag_in >= 0.97 and ag_out >= 0.97
                and ag_moved >= 0.97)
-    # lane HEMI1: with a box light in the cell, the pixels its box decides must be in frame and agree
+    # with a box light in the cell, the pixels its box decides must be in frame and agree
     ag_box = good[by_box].mean() if by_box.any() else 0.0
     if n_box:
         verdict = verdict and by_box.sum() >= 1000 and ag_box >= 0.97
@@ -384,7 +384,7 @@ def main(esm, cell, shots):
         spot_share = good[spot_lit].mean()
         verdict = verdict and spot_share >= 0.95
         spot_txt = '%d spot-lit, agree %.1f%%' % (spot_lit.sum(), 100 * spot_share)
-    # lane HEMI1: the pixels the shapes decide -- where the unclipped (all omni) sum differs from the shaped one
+    # the pixels the shapes decide -- where the unclipped (all omni) sum differs from the shaped one
     omni = np.clip(irradiance(lights, Pp, Np, shapes=False) / 4.0, 0, 1)
     decided = np.abs(omni - exp).max(axis=1) > 3.0 / 255 + 0.05 * exp.max(axis=1)
     hemis = [L for L in lights if L['hemi']]

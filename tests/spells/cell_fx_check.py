@@ -41,10 +41,8 @@ def main():
         print("R FAIL  the effects reach under 2000 pixels: nothing to judge")
         ok = False
 
-    # lane FXLIT1: the bare pixels stand 3 px clear of any pixel nosoft touches. Lit effects are dimmer, so a
-    # card's faint rim rounds to nothing in nosoft while on (faded against the depth, not clipped by it) still
-    # darkens it (INFERRED cause): measured 2026-10-03 at camera 1, all 94 failing pixels within 3 px of an effect. Without the
-    # margin the exe before the lane left 102 bare pixels there (N skipped); with it the lane leaves 99
+    # the bare pixels stand 3 px clear of any pixel nosoft touches: a lit card's faint rim rounds to nothing
+    # in nosoft while on (faded against depth) still darkens it.
     touched = d_ns > 0
     near = touched.copy()
     for dy in range(-3, 4):

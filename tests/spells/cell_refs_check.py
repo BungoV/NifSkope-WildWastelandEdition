@@ -104,10 +104,8 @@ def main():
     esm = Esm(esm_path)
     target, pcell, refs, grid = cell_children(esm, world, cx, cy)
     own = set(refs.get(target, ()))
-    # Lane BAKEBLOCK1: a bake loads the 5x5 around the asked cell, and the dump
-    # then lists every loaded cell ('# cell <name> (x,y) form ...'). The list is
-    # judged against the plugin's own children of EVERY cell the dump names; the
-    # asked cell must be one of them, and every named cell must exist.
+    # A bake loads the 5x5 around the asked cell and the dump lists every loaded cell; each is judged
+    # against the plugin's own children, and the asked cell must be one of them.
     named = set()
     for line in open(dump_path):
         m = re.match(r'^# cell .*\((-?\d+),(-?\d+)\) form ', line)

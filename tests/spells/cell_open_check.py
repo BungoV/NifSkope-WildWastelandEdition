@@ -50,19 +50,11 @@ FLAG_INITIALLY_DISABLED = 0x00000800
 
 # BSTriShape vertex descriptor: the low nibble x 4 is the stride, and bit 54
 # says the position is float32 rather than float16.
-#
-# Reading a half-float vertex as a float32 does not give a slightly wrong
-# number, it gives 1e14 -- which is how this checker first "found" that all 74
-# placements in a wilderness cell had moved. Nothing about the shape of that
-# failure said "the reader is wrong"; the MAGNITUDE did. A disagreement of
-# 3,986,846,973,645 units is not a rotation convention.
+# Reading half floats as float32 gives ~1e14, not a slightly wrong number.
 VF_FULL_PRECISION = 1 << 54
 
 # Every base record type that can be placed as a REFR and carries a MODL.
-# src/esmdata.cpp:495 reads MODL out of ANY base record, so the viewer is not
-# limited to the ten types the brief named, and downtown 5,-11 holds nine pool
-# balls (MISC) and a terminal (TERM) that the CK shows and this checker used to
-# call INVENTED.
+# src/esmdata.cpp reads MODL out of any base record, so MISC, TERM etc. count too.
 DRAWABLE_TYPES = cc.MODEL_TYPES | {
     b'MISC', b'TERM', b'ALCH', b'AMMO', b'ARMO', b'BOOK', b'WEAP', b'KEYM',
     b'NOTE', b'INGR', b'TACT', b'IDLM', b'GRAS', b'PROJ', b'HAZD', b'BNDS',
@@ -85,7 +77,7 @@ def is_marker_model(model):
     of this function can no longer pass quietly.
     """
     m = model.lower().replace('/', '\\')
-    if m.endswith('\\blackplane01.nif'):    # lane MISS1: no marker, the game draws it
+    if m.endswith('\\blackplane01.nif'):    # no marker, the game draws it
         return False
     return ('\\marker' in m or 'marker_' in m
             or m.endswith('markerx.nif') or m.startswith('marker')
@@ -236,11 +228,7 @@ def model_points(data_root, model, cache):
             for i, tname, start, size in blocks:
                 if tname not in ctb.SHAPES:
                     continue
-                # EDITOR MARKERS ARE NOT THE OBJECT, and the loader the viewer
-                # uses drops them (src/lodgen.cpp 2128-2143: the game hides
-                # every node named EditorMarker*). Keeping them here made four
-                # GlowingSeaMirageEffect01 placements "disagree by 85.5 units"
-                # -- the size of a marker, not of a rotation.
+                # Editor markers are not the object: the viewer's loader drops every node named EditorMarker*.
                 blk, marker = i, False
                 for _ in range(64):
                     if block_name(blk).lower().startswith('editormarker'):
@@ -256,14 +244,7 @@ def model_points(data_root, model, cache):
                 ne = struct.unpack_from('<I', data, o)[0]
                 o += 4 + 4 * ne                     # extra data list
                 o += 8                              # controller, flags
-                # The shape's OWN transform. Skipping it cost this checker a
-                # false 16-to-170 unit disagreement on 73 of 74 wilderness
-                # placements: a NIF's vertices are in the shape's local space,
-                # and the loader the viewer uses composes this before handing
-                # the geometry over. A tens-of-units error is exactly what a
-                # dropped local transform looks like, and exactly what a wrong
-                # rotation convention looks like too -- which is why the red
-                # control has to be run on a GREEN checker to mean anything.
+                # The shape's own transform: vertices are in shape-local space and the viewer's loader composes it.
                 st = list(struct.unpack_from('<fff', data, o))
                 sr = list(struct.unpack_from('<9f', data, o + 12))
                 ss = struct.unpack_from('<f', data, o + 48)[0]
@@ -453,7 +434,7 @@ def main():
     ap.add_argument('--cell', nargs=2, type=int, required=True)
     ap.add_argument('--n', type=int, default=1)
     ap.add_argument('--dump', required=True)
-    # the viewer's own census, for the accounting row (lane CELLVIEW4B)
+    # the viewer's own census, for the accounting row
     ap.add_argument('--notes')
     ap.add_argument('--red', action='store_true')
     a = ap.parse_args()
@@ -585,13 +566,8 @@ def main():
     unexplained = []
     for ref in missing:
         w = want[ref]
-        # A reference is legitimately absent when the scene had nothing to
-        # draw for it. Three ways that happens, all VERIFIED here rather than
-        # assumed: the model is not in the loose tree at all; it is a MARKER
-        # and markers are hidden by default; or it parses but yields no
-        # geometry, which is what every StaticCollectionPivotDummy and
-        # InvisibleGeneric01 does -- their only shapes sit under an
-        # EditorMarker node that the loader drops.
+        # A reference may legitimately be absent (verified, not assumed): no loose model, a hidden marker, or
+        # a model whose only shapes sit under a dropped EditorMarker node.
         loose = []
         for m in w['models']:
             if not os.path.isfile(os.path.join(a.data, 'meshes',
@@ -616,20 +592,8 @@ def main():
         print('  %d references absent, every one with no loose model (BA2-only)'
               ' -- not counted against the scene' % len(missing))
 
-    # THE ACCOUNTING IDENTITY (lane CELLVIEW4B). The row above explains one
-    # reference at a time and its last excuse -- "no loose model" -- is open
-    # ended: a reference that vanished for a reason nobody has thought of also
-    # has no loose model some of the time. The viewer publishes a census of
-    # every reference it deliberately did not draw, by NAMED category:
-    #
-    #   hidden: disabled 0, markers 12, deleted 0, no base 0
-    #
-    # so the honest question is whether those named categories account for the
-    # whole gap, exactly. They did on 2026-09-19 for downtown 5,-11: plugin
-    # 1438 drawable, scene 1426, gap 12, census 12. A reference dropped for an
-    # unnamed reason moves the two apart and this fails; widening or narrowing
-    # the marker rule moves a reference between two NAMED categories and leaves
-    # the sum alone, so this row cannot be satisfied by editing the rule.
+    # The accounting identity: the viewer's named "hidden:" census must equal the plugin-vs-scene gap
+    # exactly, so an unnamed drop fails and editing the marker rule cannot satisfy it.
     if getattr(a, 'notes', None) and os.path.isfile(a.notes):
         with open(a.notes, 'r', errors='replace') as fh:
             hid = re.search(r'hidden: disabled ([0-9]+), markers ([0-9]+), '
