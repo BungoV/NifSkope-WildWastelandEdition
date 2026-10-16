@@ -21,7 +21,7 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <vector>
 
-/* ---- lane VOLFOG1: the lit medium (cellvolfog.h, res/shaders/cell_volfog.frag) ---- */
+/* ---- the lit medium (cellvolfog.h, res/shaders/cell_volfog.frag) ---- */
 namespace
 {
 
@@ -37,7 +37,7 @@ struct VfState
 {
 	bool loaded = false;
 	bool on = false, pinned = false;
-	int red = 0;			// 1 off (computed, not applied), 2 gioff, 4 flat, 8 noshadow, 16 wrongsrc, 32 sixreads (VOLFOG1b)
+	int red = 0;			// 1 off (computed, not applied), 2 gioff, 4 flat, 8 noshadow, 16 wrongsrc, 32 sixreads
 	int terms = 7;
 	int probe = 0;
 	QString dump;
@@ -410,7 +410,7 @@ void wwVolFogPass( Scene * scene, bool run )
 		.arg( emitters ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 );
 
 	/* WW_VOLFOG_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
-	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */
+	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers */
 	if ( !s.dump.isEmpty() ) {
 		QFile f( s.dump );
 		if ( f.open( QIODevice::WriteOnly ) ) {

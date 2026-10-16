@@ -1,5 +1,5 @@
-/*! Lane UMBRA1: the previs tome's visibility query (see cellumbra.h). Every float operation below is written in the
- *  order of notes/umbra1/umbra_query.py, one float32 rounding per operation, so the two agree bit for bit. */
+/*! The previs tome's visibility query (cellumbra.h). Float ops follow umbra_query.py's order, one float32
+ *  rounding each, so the two agree bit for bit. */
 #if defined( __clang__ )
 #pragma clang fp contract( off )
 #elif defined( __GNUC__ )
