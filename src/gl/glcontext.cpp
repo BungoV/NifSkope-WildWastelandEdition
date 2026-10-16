@@ -1215,6 +1215,7 @@ void NifSkopeOpenGLContext::bindShape(
 				d->next->prev = d;
 			}
 			cacheLastItem = d;
+			d->usedEpoch = cacheEpoch;
 			f.glBindVertexArray( d->vao );
 			return;
 		}
@@ -1231,6 +1232,7 @@ void NifSkopeOpenGLContext::bindShape(
 		d->prev->next = d;
 		d->next->prev = d;
 	}
+	d->usedEpoch = cacheEpoch;
 	cacheLastItem = d;
 	geometryCache[i] = d;
 	cacheShapeCnt++;
@@ -1240,6 +1242,13 @@ void NifSkopeOpenGLContext::bindShape(
 	pc.madeBytes += qint64( d->h.getBufferDataSize() );
 	pc.usedBytes = qint64( cacheBytesUsed );
 	pc.maxBytes = qint64( cacheMaxBytes );
+}
+
+//! WW_GEOCACHE_RED=thrash: the old strict size limit, evicting shapes the frame still draws (the gate's red)
+static bool geoCacheThrashRed()
+{
+	static const bool v = qgetenv( "WW_GEOCACHE_RED" ) == "thrash";
+	return v;
 }
 
 void NifSkopeOpenGLContext::setCacheSize( size_t maxBytes )
@@ -1259,6 +1268,10 @@ void NifSkopeOpenGLContext::shrinkCache( bool deleteAll )
 			cacheBytesUsed = 0;
 		} else {
 			if ( cacheBytesUsed < cacheMaxBytes )
+				break;
+			// lane PERF1: the oldest shape was drawn this frame, so all are: evicting it would re-upload
+			// the frame's whole working set every frame once it outgrows the size (a cell frame did)
+			if ( d->usedEpoch == cacheEpoch && !geoCacheThrashRed() )
 				break;
 			cacheShapeCnt--;
 			cacheBytesUsed -= d->h.getBufferDataSize() + 24576;
@@ -1281,6 +1294,7 @@ void NifSkopeOpenGLContext::shrinkCache( bool deleteAll )
 
 	if ( rehashNeeded )
 		rehashCache();
+	cacheEpoch++;
 }
 
 void NifSkopeOpenGLContext::rehashCache()

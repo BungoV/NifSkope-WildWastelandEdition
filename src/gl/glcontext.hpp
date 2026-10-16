@@ -275,6 +275,7 @@ public:
 		unsigned int	vao;					// vertex array object
 		unsigned int	ebo;					// element buffer object
 		unsigned int	vbo;					// vertex buffer object
+		std::uint32_t	usedEpoch = 0;			// the shrinkCache period that last drew it (lane PERF1)
 		ShapeData( NifSkopeOpenGLContext & context, const ShapeDataHash & dataHash,
 					const float * const * attrData, const void * elementData );
 		~ShapeData();
@@ -398,6 +399,7 @@ protected:
 	size_t	cacheShapeCnt = 0;
 	size_t	cacheBytesUsed = 0;
 	size_t	cacheMaxBytes = 0x08000000;
+	std::uint32_t	cacheEpoch = 1;			// lane PERF1: shapes drawn since the last shrink are never evicted
 
 	Program *	currentProgram = nullptr;
 	Program *	programsLinked = nullptr;
