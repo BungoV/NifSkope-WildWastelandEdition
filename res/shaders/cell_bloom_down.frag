@@ -1,13 +1,13 @@
 #version 410 core
 
-// lane BLOOM1b (src/gl/cellbloom.h): FO4CS's BloomDownCS as a fragment pass, one mip of the pyramid
+// FO4CS's BloomDownCS as a fragment pass, one mip of the pyramid (src/gl/cellbloom.h)
 
 #include "cell_bloom.glsl"
 
 uniform sampler2D bloomSrc;		// the resolved source (level 0) or the previous mip, linear, clamped
 uniform vec2 bloomDst;			// this mip's size
 uniform vec4 bloomParams;		// threshold, soft knee, prefilter (level 0), scale (1)
-uniform int bloomRed;			// 1 nokaris: level 0 a plain box (the dump gate's red)
+uniform int bloomRed;			// 1: level 0 a plain box, no Karis average
 
 out vec4 fragColor;
 

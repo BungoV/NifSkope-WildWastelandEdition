@@ -1,10 +1,9 @@
-// lane BLOOM1b (src/gl/cellbloom.h): FO4CS's bloom helpers, as res/Post/BloomDownCS.hlsl and BloomUpCS.hlsl
-// write them, shared by the chain's passes and the tone map's final combine (cell_hdr.frag)
+// FO4CS's bloom helpers (res/Post/BloomDownCS.hlsl, BloomUpCS.hlsl), shared by the bloom passes and cell_hdr.frag
 
 // FP16 maximum: the pyramid is half float, as FO4CS forces it
 const float kBloomMaxFinite = 65504.0;
 
-// F4FX_SanitizeBloomSample: a NaN tap reads 0 (by its bits, as FO4CS reads them), anything else clamps to 0..65504
+// F4FX_SanitizeBloomSample: a NaN tap reads 0 (tested by its bits), anything else clamps to 0..65504
 vec3 bloomSanitize( vec3 c )
 {
 	uvec3 bits = floatBitsToUint( c );
@@ -38,7 +37,7 @@ vec3 bloomTent( sampler2D m, vec2 uv, vec2 texel, float radiusPixels )
 	return c * ( 1.0 / 16.0 );
 }
 
-// BloomUpCS's dispersion: red and blue tents pushed apart along the radial from the frame's centre, green the anchor
+// BloomUpCS's dispersion: red and blue tents pushed apart along the radial from the frame's center, green the anchor
 vec3 bloomTentDispersed( sampler2D m, vec2 uv, float radiusPixels, float dispersion )
 {
 	vec2 texel = 1.0 / vec2( max( textureSize( m, 0 ), ivec2( 1 ) ) );

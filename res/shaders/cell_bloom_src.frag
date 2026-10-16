@@ -1,8 +1,7 @@
 #version 410 core
 
-/* lane BLOOM1b (src/gl/cellbloom.h): the FO4CS bloom's source. The linear frame's cell-lit samples (the stencil
- * passes only 1s) times the imagespace's exposure -- FO4CS's order: exposure, bloom, the tone map. The target is
- * multisampled beside the frame's own depth / stencil; a blit resolves it for the chain. */
+/* The bloom's source: the linear frame's cell-lit samples times the imagespace exposure (FO4CS order: exposure,
+ * bloom, tone map). Multisampled beside the frame's depth / stencil; a blit resolves it for the chain. */
 
 #define WW_CELLLIGHTS 1
 #define WW_CELL_FX 1
@@ -12,8 +11,8 @@
 #include "cell_lights.glsl"
 
 uniform sampler2DMS hdrSrc;
-uniform vec3 bloomImpulse;	// the gate's probe: x, y, value (value > 0: only the 2x2 block holding x, y, at that value --
-							// one level-0 texel's footprint; a lone pixel is what FO4CS's Karis average is built to drop)
+uniform vec3 bloomImpulse;	// test probe: x, y, value (value > 0: only the 2x2 block holding x, y, at that value;
+							// a lone pixel would be dropped by the Karis average)
 
 out vec4 fragColor;
 

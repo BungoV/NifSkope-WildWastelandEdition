@@ -1,14 +1,9 @@
 #version 410 core
 
-/* lane AO1: the game's screen-space ambient obscurance for the cell view (src/gl/celllights.h,
- * docs/PRTP_PLAN.md "ambient obscurance"), read from the game's shader. Every buffer here is half the view and stored top row
- * first (the game's pixel order), except gbuf: the full-size opaque pass, bottom row first, holding the view
- * normal (GL view axes) and the linear depth in game units.
- *   stage 1  a depth mip: the min of 2x2 of the level above (mip 1 reads gbuf)
- *   stage 2  the raw obscurance: 5 taps over 2 turns, the radius in pixels = radius x 100 / depth, the mip by
- *            the tap's reach; a still view's value = the time average of the game's history over aoAngles
- *            of its per-frame angles
- *   stage 3  the bilateral blur across, stage 4 down: 7 taps 2 pixels apart, cut by the depth key */
+/* The game's screen-space ambient obscurance for the cell view (src/gl/celllights.h). Buffers are half size, top
+ * row first, except gbuf (full size, bottom row first: view normal and linear depth in game units).
+ * Stages: 1 depth mip (min of 2x2), 2 raw obscurance (5 taps over 2 turns, averaged over aoAngles angles),
+ * 3 and 4 the bilateral blur across and down (7 taps 2 pixels apart, cut by the depth key). */
 
 uniform int aoStage;
 uniform sampler2D gbuf;
@@ -49,7 +44,7 @@ float zAt( int m, ivec2 t )
 	return texelFetch( zMip4, t, 0 ).r;
 }
 
-// the texel of mip m a point sample at the centre of half-size pixel q reads ((q + 0.5) / halfSize x mip size)
+// the texel of mip m a point sample at the center of half-size pixel q reads ((q + 0.5) / halfSize x mip size)
 ivec2 texelOf( int m, ivec2 q )
 {
 	ivec2 n = 2 * q + 1;
@@ -123,10 +118,8 @@ void main()
 			}
 		}
 		A /= float( K );
-		// the game's history starts over from the frame's value when that is 0.95 or more and the history is
-		// under 0.7. Where the mean is under 0.7 and some angle reaches 0.95, the history saws between the two:
-		// the fall from the restart to 0.7 (t1 frames at 0.99 a frame), then the wait for the next such angle
-		// (chance p a frame). Its time average:
+		// the game restarts its history from a frame value >= 0.95 when the history is under 0.7, so it saws
+		// between the two; this is that sawtooth's time average (fall at 0.99 a frame, restart chance p a frame)
 		if ( !aoNoReset && topN > 0 && A < 0.7 ) {
 			const float lam = 0.01005034;	// -ln 0.99
 			float p = float( topN ) / float( K ), top = topSum / float( topN );

@@ -1,6 +1,6 @@
 #version 410 core
 
-// lane FARVIEW1: a bulb's Gaussian, added into the linear frame (cell_fardots.vert)
+// a far bulb's Gaussian, added into the linear frame (cell_fardots.vert)
 
 in vec3 dotValue;
 in float dotSigma;
