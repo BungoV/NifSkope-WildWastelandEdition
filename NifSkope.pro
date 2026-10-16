@@ -297,6 +297,9 @@ HEADERS += \
 	src/ui/widgets/wwnumberfield.h \
 	src/ui/widgets/xmlcheck.h \
 	src/ui/about_dialog.h \
+	src/ui/opencellcatalog.h \
+	src/ui/opencelldialog.h \
+	src/ui/opencellmenu.h \
 	src/ui/checkablemessagebox.h \
 	src/ui/settingsdialog.h \
 	src/ui/settingspane.h \
@@ -563,6 +566,9 @@ SOURCES += \
 	src/ui/widgets/wwnumberfield.cpp \
 	src/ui/widgets/xmlcheck.cpp \
 	src/ui/about_dialog.cpp \
+	src/ui/opencellcatalog.cpp \
+	src/ui/opencelldialog.cpp \
+	src/ui/opencellmenu.cpp \
 	src/ui/checkablemessagebox.cpp \
 	src/ui/settingsdialog.cpp \
 	src/ui/settingspane.cpp \
