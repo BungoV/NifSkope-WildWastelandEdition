@@ -38,9 +38,10 @@ uniform int volTerms;			// gates only: 1 the directional light, 2 the placed lig
 uniform isamplerBuffer volClusters;	// per cluster (offset, count), then the light indices (ascending)
 uniform ivec4 volClusterDims;		// clusters across, down; froxel columns a cluster side; slices a cluster (x 0: every light)
 uniform int volDepthSkip;			// 0 off, 1 behind the farthest opaque distance (3 x 3 columns), 2 red nearskip
-uniform sampler2D volGbuf;			// stage 0: lane AO1's g-buffer (a: linear depth, game units; 1e6 empty)
+uniform sampler2D volGbuf;			// stage 0: lane AO1's depth buffer (volGbufZ 1: window depth) or g-buffer (a: linear depth, game units; 1e6 empty)
+uniform int volGbufZ;
+uniform vec2 volProjZ;			// the projection's [2][2], [3][2] (the window depth back to the view distance)
 uniform ivec2 volGbufSize;
-uniform sampler2D volTile;			// stage 1: stage 0's per-column (farthest, nearest) ray distance (game units)
 
 out vec4 fragColor;
 
@@ -334,11 +335,18 @@ void main()
 		float k = fogDistScale / max( length( cellRow[0].xyz ), 1e-30 );
 		for ( int y = p0.y; y < p1.y; y++ ) {
 			for ( int x = p0.x; x < p1.x; x++ ) {
-				float a = texelFetch( volGbuf, ivec2( x, y ), 0 ).a;
 				float t = 3.0e38;
-				if ( a < 5.0e5 ) {
-					vec2 n = ( vec2( x, y ) + 0.5 ) / vec2( volGbufSize ) * 2.0 - 1.0;
-					t = max( a, 0.0 ) * k * length( vec3( n.x / volProj.x, n.y / volProj.y, 1.0 ) );
+				vec2 n = ( vec2( x, y ) + 0.5 ) / vec2( volGbufSize ) * 2.0 - 1.0;
+				if ( volGbufZ != 0 ) {
+					// two 24-bit steps farther: the stored depth is rounded, the fragments' own distances are not
+					float z = texelFetch( volGbuf, ivec2( x, y ), 0 ).r + 2.0 / 16777215.0;
+					if ( z < 1.0 )
+						t = max( volProjZ.y / ( 2.0 * z - 1.0 + volProjZ.x ), 0.0 ) * fogDistScale
+							* length( vec3( n.x / volProj.x, n.y / volProj.y, 1.0 ) );
+				} else {
+					float a = texelFetch( volGbuf, ivec2( x, y ), 0 ).a;
+					if ( a < 5.0e5 )
+						t = max( a, 0.0 ) * k * length( vec3( n.x / volProj.x, n.y / volProj.y, 1.0 ) );
 				}
 				far = max( far, t );
 				near = min( near, t );

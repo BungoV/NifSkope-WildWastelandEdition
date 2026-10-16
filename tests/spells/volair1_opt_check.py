@@ -9,6 +9,8 @@ with .bin.txt, and the launch's .notes), all from one exe, one camera, one weath
   full   WW_CELL_AIR_OPT=0 (every light, every froxel)   full2  the same again (the launches' own flake)
   cl     OPT=1 (clustered lights alone)                  both   OPT=3 (clusters + depth skip, the shipped default)
   dropcl OPT=3 + WW_CELL_AIR_RED=dropcluster (red)       nearskip OPT=3 + WW_CELL_AIR_RED=nearskip (red)
+  zcolour OPT=3 + WW_CELL_AIR_RED=zcolour (red, 10-16: the skip's columns from the obscurance pass's colour, as before)
+  nofarclamp OPT=3 + WW_CELL_AIR_RED=nofarclamp (red, 10-16: the surfaces' lookup not clamped to the column's farthest)
 
 Stages (bars fixed before the first run):
   Q  clusters   cl's injected and integrated volumes equal full's bit for bit, and cl.png == full.png byte for byte
@@ -17,7 +19,9 @@ Stages (bars fixed before the first run):
                 (0, 0, 0, 1); both.png == cl.png byte for byte (or within full vs full2). The skip must have been on
                 (depthskip=1) and have skipped >= 1% of the froxels for the stage to have teeth.
   C  cost       the pass's ms (glFinish to glFinish, the median over the launch's frames) full vs both: reported.
-Reds (each must FAIL its stage): dropcl -> Q (the volume differs from full's), nearskip -> Z (the picture differs).
+Reds (each must FAIL its stage): dropcl -> Q (the volume differs from full's), nearskip -> Z (the picture differs),
+zcolour -> Z (the picture differs: a fragment behind a draw that writes no depth reads a skipped froxel),
+nofarclamp -> Z (a sliver's fragment shaded past its own depth reads a skipped froxel).
 A missing shot fails its stage (X). Exit 0 when the greens pass and every red fails.
 """
 import os
@@ -100,7 +104,7 @@ def main():
         f = lambda tag, ext: os.path.join(root, '%s_%s%s' % (pre, tag, ext))
         print('== %s' % pre)
         shots = {}
-        for tag in ('full', 'full2', 'cl', 'both', 'dropcl', 'nearskip'):
+        for tag in ('full', 'full2', 'cl', 'both', 'dropcl', 'nearskip', 'zcolour', 'nofarclamp'):
             if os.path.exists(f(tag, '.bin')) and os.path.exists(f(tag, '.png')):
                 try:
                     shots[tag] = load_bin(f(tag, '.bin'))
@@ -112,7 +116,7 @@ def main():
             print('  X  FAIL missing %s' % ' '.join(miss))
             ok_all = False
             continue
-        P = {t: png(f(t, '.png')) for t in ('full', 'full2', 'cl', 'both', 'dropcl', 'nearskip')}
+        P = {t: png(f(t, '.png')) for t in ('full', 'full2', 'cl', 'both', 'dropcl', 'nearskip', 'zcolour', 'nofarclamp')}
         T = {t: load_txt(f(t, '.bin.txt')) for t in shots}
         flake = pic_diff(P['full'], P['full2'])
         print('  launch flake full vs full2: %s' % ('(no full2)' if flake is None else 'max %d, %d px' % flake))
@@ -171,6 +175,14 @@ def main():
             fails = pd is None or pd[0] > floor
             print('  red nearskip -> Z %s (must FAIL)  %s' % ('FAIL' if fails else 'PASS', rwhy))
             ok_all &= fails
+        if 'zcolour' in shots:
+            rok, rfrac, rwhy = z_pass('zcolour')
+            print('  red zcolour -> Z %s (must FAIL)  %s' % ('PASS' if rok else 'FAIL', rwhy))
+            ok_all &= not rok
+        if 'nofarclamp' in shots:
+            rok, rfrac, rwhy = z_pass('nofarclamp')
+            print('  red nofarclamp -> Z %s (must FAIL)  %s' % ('PASS' if rok else 'FAIL', rwhy))
+            ok_all &= not rok
         mf, nf = ms_of(f('full', '.notes'), T['full'])
         mb, nb = ms_of(f('both', '.notes'), T['both'])
         mc, nc = ms_of(f('cl', '.notes'), T['cl'])

@@ -47,7 +47,8 @@ constexpr float kNearMin = 16.0f;	// game units
 // the reds (gates only): 1 off (computed, not applied), 2 gioff, 4 flat, 8 noshadow, 16 nolights, 32 wrongmed,
 // 64 blendnear, 128 farfit, 256 physcol, 512 nosunt, 1024 froxonly, 2048 oldsun (celllights.cpp reads it: the air off the exterior sun and sky),
 // 4096 dropcluster (every cluster list drops its nearest light), 8192 nearskip (the depth skip behind the column's NEAREST
-// surface, undilated)
+// surface, undilated), 1048576 zcolour (the depth skip's columns from the obscurance pass's colour, as before 10-16),
+// 2097152 nofarclamp (the surfaces' lookup not clamped to their column's farthest opaque distance, as before 10-16)
 struct VaState
 {
 	bool loaded = false;
@@ -78,7 +79,7 @@ VaState & vs()
 			const QByteArray r = t.trimmed();
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
-				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : 0;
+				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : 0;
 		}
 		const QByteArray opt = qgetenv( "WW_CELL_AIR_OPT" ).trimmed();
 		if ( !opt.isEmpty() )
@@ -108,6 +109,9 @@ struct VaGpu
 	bool optUnitsOk = false;
 	GLuint clBuf = 0, clTex = 0, tile = 0;	// the clusters' lists; stage 0's per-column distances (RG32F)
 	int tileCols = 0, tileRows = 0;
+	bool tileValid = false;	// stage 0 wrote this frame's column distances (the surfaces clamp to them)
+	GLuint zTex = 0, zFbo = 0, zSrc = 0;	// stage 0's depth: a copy of the obscurance pass's depth buffer (10-16)
+	int zW = 0, zH = 0;
 };
 
 /* THE CLUSTERED LIGHTS (coordinator 10-14). The inject evaluates the placed lights once per froxel, at the middle of
@@ -851,8 +855,13 @@ static void vaPassInner( Scene * scene, bool run )
 		fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_R32I, g.clBuf );
 	fn->glUniform4i( prog->uniLocation( "volClusterDims" ), clOn ? cl.ncx : 0, cl.ncy, kClusterCols, kClusterSlices );
 	WwCellAoTargets ao;
-	const bool depthOn = ( s.opt & 2 ) && g.optUnitsOk && wwCellAoTargets( scene, ao ) && ao.gbuf && ao.w > 0 && ao.h > 0;
-	if ( depthOn && ( g.tileCols != cols || g.tileRows != rows || !g.tile ) ) {
+	/* 10-16: stage 0 runs whenever the obscurance pass is there, the skip or not: the surfaces clamp their lookup to the
+	 * column's farthest opaque distance (lookdev_fog.glsl wwVolAirAt), so every mode reads the same froxels. */
+	const bool tileOn = ( ( s.opt & 2 ) || !( s.red & 2097152 ) ) && g.optUnitsOk && wwCellAoTargets( scene, ao ) && ao.gbuf
+		&& ao.w > 0 && ao.h > 0;
+	const bool depthOn = tileOn && ( s.opt & 2 );
+	g.tileValid = false;
+	if ( tileOn && ( g.tileCols != cols || g.tileRows != rows || !g.tile ) ) {
 		if ( !g.tile )
 			fn->glGenTextures( 1, &g.tile );
 		fn->glBindTexture( GL_TEXTURE_2D, g.tile );
@@ -865,12 +874,48 @@ static void vaPassInner( Scene * scene, bool run )
 		g.tileCols = cols;
 		g.tileRows = rows;
 	}
+	/* 10-16: stage 0 bounds the columns by the obscurance pass's DEPTH buffer, not its colour. Every depth-tested
+	 * fragment of the frame lies at or before that depth (the pass writes depth for the opaque cell-lit draws only, a
+	 * subset of the frame's depth writers), while its colour also takes draws that write no depth: a lamp's edge, a
+	 * trim drawn over the wall behind it. The wall's fragment, past the colour's distance, read froxels the skip had
+	 * left empty (the Z gate's 3 px). Red zcolour: the colour's alpha, as before. */
+	const bool zDepth = tileOn && !( s.red & 1048576 ) && ao.depthRb;
+	if ( zDepth ) {
+		if ( !g.zTex || g.zW != ao.w || g.zH != ao.h ) {
+			if ( !g.zTex )
+				fn->glGenTextures( 1, &g.zTex );
+			fn->glBindTexture( GL_TEXTURE_2D, g.zTex );
+			// the obscurance pass's own format (celllights.cpp): a depth blit needs the same on both sides
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, ao.w, ao.h, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_DEPTH_COMPONENT );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+			if ( !g.zFbo )
+				fn->glGenFramebuffers( 1, &g.zFbo );
+			fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.zFbo );
+			fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, g.zTex, 0 );
+			g.zW = ao.w;
+			g.zH = ao.h;
+		}
+		if ( !g.zSrc )
+			fn->glGenFramebuffers( 1, &g.zSrc );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.zSrc );
+		fn->glFramebufferRenderbuffer( GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, GLuint( ao.depthRb ) );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.zFbo );
+		fn->glBlitFramebuffer( 0, 0, ao.w, ao.h, 0, 0, ao.w, ao.h, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0 );
+	}
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGbufUnit ) );
-	fn->glBindTexture( GL_TEXTURE_2D, depthOn ? GLuint( ao.gbuf ) : 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, zDepth ? g.zTex : tileOn ? GLuint( ao.gbuf ) : 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
-	fn->glBindTexture( GL_TEXTURE_2D, depthOn ? g.tile : 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, tileOn ? g.tile : 0 );
+	prog->uni1i( "volGbufZ", zDepth ? 1 : 0 );
+	prog->uni2f( "volProjZ", pm[2][2], pm[3][2] );
 	prog->uni1i( "volDepthSkip", depthOn ? ( ( s.red & 8192 ) ? 2 : 1 ) : 0 );
-	if ( depthOn )
+	if ( tileOn )
 		fn->glUniform2i( prog->uniLocation( "volGbufSize" ), ao.w, ao.h );
 	for ( int k = 0; k < 3; k++ )
 		prog->uni4f_l( prog->uniLocation( "volPhase[%d]", k ), FloatVector4( ph.w[k][0], ph.w[k][1], ph.w[k][2], ph.w[k][3] ) );
@@ -884,7 +929,7 @@ static void vaPassInner( Scene * scene, bool run )
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
 	fn->glViewport( 0, 0, cols, rows );
 	bool complete = true;
-	if ( depthOn ) {
+	if ( tileOn ) {
 		// stage 0: the columns' opaque distances (the tile off its unit while it is the target)
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
@@ -895,6 +940,7 @@ static void vaPassInner( Scene * scene, bool run )
 			prog->uni1i( "volStage", 0 );
 			prog->uni1i( "volLayer", 0 );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			g.tileValid = true;
 		}
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0 );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
@@ -962,10 +1008,12 @@ static void vaPassInner( Scene * scene, bool run )
 		.arg( cellLightCountV ).arg( cellGiOnV ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 );
 	// the optimisation's echo: the mode, the clusters (all / non-empty / mean list over the non-empty), the CPU build,
 	// the depth skip (0 off, 1 on, 2 the red)
-	const QString optNote = QStringLiteral( "opt=%1 clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6" )
+	const QString optNote = QStringLiteral( "opt=%1 clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8" )
 		.arg( s.opt ).arg( clOn ? cl.ncx * cl.ncy * cl.ncz : 0 ).arg( clOn ? cl.nonEmpty : 0 )
 		.arg( clOn && cl.nonEmpty ? double( cl.refs ) / double( cl.nonEmpty ) : 0.0, 0, 'f', 2 ).arg( clMs, 0, 'f', 3 )
-		.arg( depthOn ? ( ( s.red & 8192 ) ? 2 : 1 ) : 0 );
+		.arg( depthOn ? ( ( s.red & 8192 ) ? 2 : 1 ) : 0 )
+		.arg( !tileOn ? QStringLiteral( "none" ) : zDepth ? QStringLiteral( "depth" ) : QStringLiteral( "colour" ) )
+		.arg( g.tileValid && !( s.red & 2097152 ) ? 1 : 0 );
 	// the ground layer's echo: what was applied (the near share, the strength, thickness and anchor) and its source
 	const QString groundNote = QStringLiteral( "nearw=%1 ground=%2 thick=%3 zg=%4 recx=%5%6" )
 		.arg( double( G.w ), 0, 'f', 2 ).arg( double( G.s ), 0, 'g', 4 )
@@ -1057,8 +1105,14 @@ void wwVolAirUniforms( Scene * scene )
 	r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + kVolTexUnit ) );
 	r->fn->glBindTexture( GL_TEXTURE_3D, on ? g.integ : 0 );
+	// 10-16: and stage 0's column distances, the lookup's clamp (red nofarclamp: none)
+	const bool clamp = on && g.tileValid && !( s.red & 2097152 );
+	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
+	r->fn->glBindTexture( GL_TEXTURE_2D, clamp ? g.tile : 0 );
 	r->fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "volTex", kVolTexUnit );
+	prog->uni1i( "volTile", kTileUnit );
+	prog->uni1i( "volFarClamp", clamp ? 1 : 0 );
 	if ( !on )
 		return;
 	GLint vp[4] = { 0, 0, 1, 1 };

@@ -29,6 +29,8 @@ bool wwCellHdrBegin( Scene * scene );
 void wwCellHdrEnd( Scene * scene );
 //! True between wwCellHdrBegin and wwCellHdrEnd (the renderer marks the stencil, the cell programs write linear).
 bool wwCellHdrActive();
+//! Lane VOLAIR1 (gates only, WW_CELL_DRAW_PROBE): after a draw, logs which watched pixels it changed.
+void wwCellDrawProbe( Scene * scene, const QString & what );
 //! One line for the notes: what the last frame did (or why it did not).
 QString wwCellHdrEcho();
 

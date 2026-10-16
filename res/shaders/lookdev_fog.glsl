@@ -44,6 +44,8 @@ float wwFogEval( float d, float z, out float hb, out vec3 fogCol )
 uniform bool volOn;
 uniform sampler3D volTex;
 uniform vec4 volRect;		// the viewport's origin, 1 / its size
+uniform sampler2D volTile;	// the air pass's stage 0: per froxel column the farthest, nearest opaque ray distance (game units)
+uniform int volFarClamp;	// 1: the lookup clamped to its column's farthest (red nofarclamp, and the programs without it: 0)
 uniform vec4 volSlices;		// near, ln(far / near), slices, 1 = applied (0 under the red "off": the game's fog drawn)
 uniform int volProbe;		// gates only: 1 the light term L alone, raw; 2 the transmittance T, grey; 3 the sun's T to the surface
 uniform int volFogBlend;	// test only (WW_CELL_VOLAIR_FOGBLEND=1, option B): the game's fog drawn over the lit air
@@ -122,10 +124,15 @@ vec3 wwAirRecordColour( float d, float z, vec3 dirView, out bool ok );
 vec4 wwVolAirAt( vec3 posView )
 {
 	float d = length( posView ) * fogDistScale;
+	vec2 uv = ( gl_FragCoord.xy - volRect.xy ) * volRect.zw;
+	/* 10-16: no farther than the column's farthest opaque surface (the obscurance pass's depth). At a thin sliver's
+	 * edge the interpolated position can lie far past the depth the same fragment writes (a trim at 596 shaded as 763):
+	 * that read the froxels the depth skip had left empty, and an air no surface there sits behind. */
+	if ( volFarClamp != 0 )
+		d = min( d, texture( volTile, uv ).r );
 	if ( d <= volSlices.x )
 		return vec4( 0.0, 0.0, 0.0, 1.0 );
 	float f = log( d / volSlices.x ) / volSlices.y * volSlices.z;
-	vec2 uv = ( gl_FragCoord.xy - volRect.xy ) * volRect.zw;
 	vec4 v;
 	if ( f < 1.0 ) {
 		v = texture( volTex, vec3( uv, 0.5 / volSlices.z ) );
