@@ -12,6 +12,12 @@
   - `WW_LOOKDEV_GROUND_CELL=1` draws the lookdev ground lit by the placed cell lights too (colour x radial curve x
     cone x shadow cube x N.L on the ground's albedo; new `lookdev_ground_cell.prog`), so a fixture's pool of light
     shows on the booth floor. Without it the ground takes only the sun and the ambient, as before.
+  - In the cell view that ground never reached the picture: the cell draws into its own HDR frame and paints the
+    sky into it, over the ground drawn before (a front shot with and without the ground pass differed in 1 pixel of
+    2 million). With `WW_LOOKDEV_GROUND_CELL=1` the ground is now drawn again INSIDE that frame, right after the sky:
+    linear light like the cell's own programs, depth written, so the air and the fixture composite against it.
+    `WW_LOOKDEV_GROUND_CELL_AT=x,y,z` centres it on the fixture's foot (otherwise: the scene's lowest vertex). Notes:
+    `lookdev ground cell: drawn in the HDR frame (hdr 1) at x y z (...)`. Unset: no extra draw, no GL call.
 - The booth itself (cell open, cameras, froxel-dump measurement) is a harness outside the repo; it reads the
   existing `WW_CELL_AIR_TERMS` / `WW_CELL_AIR_OPT` / `WW_CELL_AIR_DUMP` switches. No light was changed.
 

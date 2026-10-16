@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "esmweather.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/celllights.h"
+#include "gl/cellhdr.h"	// lane LIGHTBOOTH1
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -31,6 +32,7 @@ BSD License - see nifskope.h
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 namespace
@@ -1615,6 +1617,37 @@ bool drawCube( Scene * scene, bool glow )
 }
 } // namespace
 
+/* lane LIGHTBOOTH1 (the light booth; harness pins, never a user toggle): the cell view draws into its own HDR frame and
+ * draws the sky into it, so the ground drawn before that frame never reaches the picture. wwLookdevDrawGroundCellFrame
+ * draws it again INSIDE the frame (WW_LOOKDEV_GROUND_CELL=1: lit by the placed lights, linear, depth written, so the
+ * air and the fixture composite against it); WW_LOOKDEV_GROUND_CELL_AT=x,y,z centres it on the fixture's foot */
+static bool sGroundInFrame = false;
+
+static bool groundCellAt( float xy[2], float & z )
+{
+	static const QList<QByteArray> p = qgetenv( "WW_LOOKDEV_GROUND_CELL_AT" ).split( ',' );
+	if ( p.size() != 3 )
+		return false;
+	bool ok[3];
+	const float v[3] = { p[0].trimmed().toFloat( &ok[0] ), p[1].trimmed().toFloat( &ok[1] ), p[2].trimmed().toFloat( &ok[2] ) };
+	if ( !ok[0] || !ok[1] || !ok[2] )
+		return false;
+	xy[0] = v[0];
+	xy[1] = v[1];
+	z = v[2];
+	return true;
+}
+
+void wwLookdevDrawGroundCellFrame( Scene * scene )
+{
+	static const bool cellGround = qEnvironmentVariableIntValue( "WW_LOOKDEV_GROUND_CELL" ) == 1;
+	if ( !cellGround || !wwLookdevActive() || !scene || !wwCellLightsWanted( scene ) )
+		return;
+	sGroundInFrame = true;
+	wwLookdevDrawGround( scene );
+	sGroundInFrame = false;
+}
+
 void wwLookdevDrawGround( Scene * scene )
 {
 	// harness reference: WW_LOOKDEV_GROUNDPASS=0 -> the ground pass never runs at
@@ -1686,9 +1719,20 @@ void wwLookdevDrawGround( Scene * scene )
 	glDisable( GL_CULL_FACE );
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
-	const float x0 = s.groundXY[0] - s.groundHalf, x1 = s.groundXY[0] + s.groundHalf;
-	const float y0 = s.groundXY[1] - s.groundHalf, y1 = s.groundXY[1] + s.groundHalf;
-	const float z = s.groundZ;
+	float gxy[2] = { s.groundXY[0], s.groundXY[1] };
+	float z = s.groundZ;
+	const bool at = litByCell && groundCellAt( gxy, z );	// lane LIGHTBOOTH1
+	if ( sGroundInFrame ) {
+		static bool told = false;
+		if ( !told ) {
+			told = true;
+			std::fprintf( stderr, "lookdev ground cell: drawn in the HDR frame (hdr %d) at %.1f %.1f %.1f (%s) half %.0f, lit by the placed lights %d\n",
+				int( wwCellHdrActive() ), double( gxy[0] ), double( gxy[1] ), double( z ), at ? "WW_LOOKDEV_GROUND_CELL_AT" : "the scene's lowest vertex",
+				double( s.groundHalf ), int( litByCell ) );
+		}
+	}
+	const float x0 = gxy[0] - s.groundHalf, x1 = gxy[0] + s.groundHalf;
+	const float y0 = gxy[1] - s.groundHalf, y1 = gxy[1] + s.groundHalf;
 	const float quad[12] = { x0, y0, z, x1, y0, z, x0, y1, z, x1, y1, z };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;

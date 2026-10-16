@@ -80,6 +80,13 @@ void main()
 	}
 #endif
 	color = wwFog( color, viewPos );	// lane FOG1: linear, before the exposure
+#ifdef WW_GROUND_CELL
+	// lane LIGHTBOOTH1: inside the cell's HDR frame, linear light like the cell's own programs (tone-mapped once)
+	if ( cellOn && cellIsLinear ) {
+		fragColor = vec4( max( color, vec3( 0.0 ) ), 1.0 );
+		return;
+	}
+#endif
 	if ( groundLeak >= 0.0 )
 		color = mix( vec3( 0.0 ), color, groundLeak );
 	fragColor = vec4( studioOutput( color ), 1.0 );

@@ -170,6 +170,9 @@ bool wwLookdevWind( quint8 out[4] );
 bool wwLookdevDrawBackground( Scene * scene );
 //! the ground quad at the lowest visible vertex; no-op when the Ground row is off
 void wwLookdevDrawGround( Scene * scene );
+/*! lane LIGHTBOOTH1 (harness pin WW_LOOKDEV_GROUND_CELL=1): the ground again inside the cell's HDR frame, after its sky;
+ *  no GL call when the pin is unset */
+void wwLookdevDrawGroundCellFrame( Scene * scene );
 /*! the fog uniforms of the renderer's CURRENT program (lane FOG1): a no-op for a
  *  program without `fogOn`; fogOn = false outside Lookdev, under an orthographic
  *  camera, with the Fog row off, or with no weather */
