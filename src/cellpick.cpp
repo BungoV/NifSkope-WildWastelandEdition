@@ -39,11 +39,8 @@ int CellPickTable::pick( const CellRay & ray, int * candidates, float * tOut ) c
 
 	for ( int i = 0; i < entries.size(); i++ ) {
 		const CellPickEntry & e = entries.at( i );
-		/* Slab test. A zero component of the direction is not a special case
-		 * with IEEE division -- it yields +/-inf and the min/max below reject
-		 * or accept correctly -- EXCEPT when the origin is exactly on the slab,
-		 * where it is 0 * inf = NaN. That is rare and it is also the one case a
-		 * comparison chain silently gets wrong, so it is handled by hand. */
+		/* Slab test: a zero direction component yields +/-inf, which is fine, except with the origin exactly
+		 * on the slab (0 * inf = NaN), handled by hand. */
 		float t0 = -3.0e38f, t1 = 3.0e38f;
 		bool miss = false;
 		for ( int k = 0; k < 3; k++ ) {
@@ -79,9 +76,8 @@ int CellPickTable::pick( const CellRay & ray, int * candidates, float * tOut ) c
 		hits++;
 		const float vol = ( e.bmax[0] - e.bmin[0] ) * ( e.bmax[1] - e.bmin[1] )
 			* ( e.bmax[2] - e.bmin[2] );
-		/* Nearest entry wins; a tie goes to the SMALLER box, so a bottle inside
-		 * a building is reachable. "Tie" is a real tolerance because both boxes
-		 * being entered at the same face is exactly the ray-starts-inside case. */
+		/* Nearest entry wins; a tie (a real tolerance: a ray starting inside enters both at once) goes to
+		 * the smaller box. */
 		const bool better = best < 0
 			|| t < bestT - 1.0e-3f
 			|| ( t <= bestT + 1.0e-3f && vol < bestVol );
@@ -158,8 +154,7 @@ QVector<QPair<QString, QString>> CellPickTable::rowsFor( int i ) const
 	add( rows, "Marker", e.marker ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) );
 	add( rows, "Precombined", e.precombined ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) );
 	{
-		// NOT `slots`: that is a Qt keyword macro, and a variable named after it
-		// stops declaring anything at all. The compiler says so; nothing else does.
+		// NOT `slots`: that is a Qt keyword macro
 		QStringList lodSlots;
 		for ( int k = 0; k < 4; k++ ) {
 			if ( !e.lodModels[k].isEmpty() )

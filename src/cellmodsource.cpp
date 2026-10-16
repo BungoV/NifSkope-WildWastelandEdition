@@ -15,7 +15,7 @@ BSD License - see nifskope.h
 #include <QSettings>
 #include <QStandardPaths>
 
-// lane MODPICK1 -- see cellmodsource.h
+// see cellmodsource.h
 
 namespace {
 
@@ -174,7 +174,7 @@ bool fromMo2( const QString & profile, const QString & mods, const QString & dat
 	 * writes them to plugins.txt; the reader puts them after the masters. */
 	s->alwaysLoads = lo.masters;
 	if ( qgetenv( "WW_MODPICK_RED" ) == "noccc" )
-		s->alwaysLoads = 0;  // red: 89478e4f's MO2 list (the Creation Club files unticked)
+		s->alwaysLoads = 0;  // WW_MODPICK_RED=noccc: the Creation Club files unticked
 	return true;
 }
 
@@ -238,7 +238,7 @@ void applyTestFiles( CellModSource * s, const QStringList & inis, const QStringL
 	QString from;
 	const QStringList names = testFiles( inis, &from );
 	if ( names.isEmpty() || qgetenv( "WW_MODPICK_RED" ) == "notestfile" )
-		return;  // red notestfile: 89478e4f, the ini ignored
+		return;  // WW_MODPICK_RED=notestfile: the ini ignored
 	static const char * masters[] = { "Fallout4.esm", "DLCRobot.esm", "DLCworkshop01.esm", "DLCCoast.esm",
 		"DLCworkshop02.esm", "DLCworkshop03.esm", "DLCNukaWorld.esm", "DLCUltraHighResolution.esm" };
 	QStringList plugins, pluginFrom, missing;
@@ -411,7 +411,7 @@ CellModSource cellModSource()
 	s.plugins = lodgenLoadOrderMasters( data );
 	s.alwaysLoads = int( s.plugins.size() );  // the game loads Fallout4.ccc's files like the DLC masters
 	if ( qgetenv( "WW_MODPICK_RED" ) == "noccc" )
-		s.alwaysLoads = 0;  // red: the Creation Club files become ordinary rows again
+		s.alwaysLoads = 0;  // WW_MODPICK_RED=noccc: the Creation Club files become ordinary rows again
 	const QString ptxt = clean( QString::fromLocal8Bit( qgetenv( "LOCALAPPDATA" ) ) ) + QStringLiteral( "/Fallout4/plugins.txt" );
 	const QStringList lines = readLines( ptxt );
 	if ( !lines.isEmpty() ) {

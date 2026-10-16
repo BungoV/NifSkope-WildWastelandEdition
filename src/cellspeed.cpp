@@ -16,7 +16,7 @@
 #include <psapi.h>
 #endif
 
-// lane SPEED1: see cellspeed.h
+// see cellspeed.h
 
 namespace CellSpeed
 {

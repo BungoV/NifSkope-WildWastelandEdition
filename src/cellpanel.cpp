@@ -31,8 +31,7 @@ CellPickPanel::CellPickPanel( QWidget * parent )
 	rows->setObjectName( QStringLiteral( "CellPickRows" ) );
 	rows->setColumnCount( 2 );
 	rows->setHeaderLabels( { tr( "Name" ), tr( "Value" ) } );
-	// FLAT: no tree, no root decoration, no expanding -- the rows are a record,
-	// not a hierarchy, and every panel in this fork shows a record this way
+	// flat: the rows are a record, not a hierarchy
 	rows->setRootIsDecorated( false );
 	rows->setUniformRowHeights( true );
 	rows->setAlternatingRowColors( false );
@@ -43,9 +42,7 @@ CellPickPanel::CellPickPanel( QWidget * parent )
 	rows->setStyleSheet( wwSelectionTreeQss() );
 	page->addWidget( rows, 1 );
 
-	/* The summary line is PINNED under the tree and never scrolls away: the
-	 * action bar's rule from the panel style, for a panel whose only action is
-	 * clicking in the viewport. */
+	/* the summary line is pinned under the tree and never scrolls away */
 	summary = new QLabel( this );
 	summary->setObjectName( QStringLiteral( "CellPickSummary" ) );
 	summary->setWordWrap( true );
@@ -96,10 +93,8 @@ void CellPickPanel::showPick( int index, int candidates )
 		item->setText( 1, r.second );
 	}
 
-	/* HOW MANY BOXES THE RAY ENTERED, always.  The pick is by world AABB and
-	 * ties go to the smaller box (src/cellpick.h); a panel that showed one row
-	 * and said nothing would be claiming an unambiguous hit that this test
-	 * cannot promise. */
+	/* always say how many boxes the ray entered: the pick is by world AABB, so one row alone would claim
+	 * an unambiguous hit */
 	summary->setStyleSheet( QString( "color: %1;" ).arg(
 		candidates > 1 ? wwSkinColor( "textMuted" ) : wwSkinColor( "text" ) ) );
 	if ( candidates > 1 ) {

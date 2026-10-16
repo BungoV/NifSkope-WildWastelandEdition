@@ -19,7 +19,7 @@ BSD License - see nifskope.h
 
 #include <algorithm>
 
-// lane MODPICK1 -- see cellmodpick.h
+// see cellmodpick.h
 
 namespace {
 

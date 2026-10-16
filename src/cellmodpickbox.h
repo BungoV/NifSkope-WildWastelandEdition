@@ -19,19 +19,9 @@ class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
-/* lane MODPICK1 -- the Cell workspace's Mods band (cellmodpick.h holds the list, the saved choice and the
- * rules; this is only the widget). A checkable list of plugins in load order, each with the mod folder it
- * comes from; a file gone from disk is greyed with a note and cannot be ticked; Fallout4.esm and the DLC
- * masters stay at the top and always load.
- *
- * Reordering follows MO2's plugin pane: drag one or several selected rows, a line shows where they land; a
- * plugin cannot go above one of its own masters (the status bar says why). Files and folders dragged in from
- * Explorer are added at the drop point ("added: <folder>"), refused when a master is missing; Delete or the
- * right-click Remove takes an added row out again. Nothing is written into the dropped folders.
- *
- * Apply saves the ticks, the order and the additions for the worldspace and rebuilds the cell; Reset forgets
- * them all (the source order, no additions). Blender's add-on list is the reference for the ticks; it applies
- * a tick at once, this waits for Apply because every apply re-opens the whole cell. */
+/* The Cell workspace's Mods band (the widget only; cellmodpick.h holds the list and rules): a checkable,
+ * MO2-style draggable plugin list that also takes dropped files and folders. Apply waits for a click
+ * because every apply re-opens the whole cell. */
 class CellModPickBox final : public QWidget
 {
 public:
@@ -42,7 +32,7 @@ public:
 	//! Called after Apply or Reset changed the saved choice: the owner rebuilds the cell.
 	std::function<void()> onChoiceChanged;
 
-	// ---- the harness's readers and clicks (the same paths the mouse takes)
+	// ---- readers and clicks for the harness (the same paths the mouse takes)
 	int rowCount() const;
 	QString rowFile( int i ) const;
 	QString rowMod( int i ) const;

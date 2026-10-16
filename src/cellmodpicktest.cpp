@@ -4,36 +4,9 @@ BSD License - see nifskope.h
 
 ***** END LICENSE BLOCK *****/
 
-/* ---------------------------------------------------------------------------
- * WW_MODPICK_TEST=<report path> -- lane MODPICK1's GUI gate, run INSIDE the
- * running application. It drives the Cell workspace's Mods band through the
- * same calls a click makes, and drags and drops through real Qt drag events
- * sent to the list:
- *
- *   stage 1 (after the cell opens)  the list is read row by row (source, rows,
- *           gone rows greyed with their note, the masters locked), a picture of
- *           the band is saved (WW_MODPICK_SHOT). Then, each when its variable is
- *           set, in this order:
- *             WW_MODPICK_DRAG_BAD="A>B"  drag A below B; must be refused (a master)
- *             WW_MODPICK_DRAG="A>B"      drag A below B (B empty: to the end)
- *             WW_MODPICK_DROP_BAD=<path> an Explorer drop; must be refused
- *             WW_MODPICK_DROP=<p1;p2..>  an Explorer drop (QMimeData file URLs) at the end
- *             WW_MODPICK_UNTICK=<plugin> untick one row
- *           and Apply is clicked -- which saves the choice and re-opens the cell.
- *           Nothing set: the run ends after the reading (a source-only gate).
- *   stage 2 (after the re-open)     the saved keys read back as the choice, the
- *           rows keep the order, the view's note holds WW_MODPICK_EXPECT_NOTE
- *           ('|'-separated parts), and a second picture of the band plus the
- *           view's own framebuffer are saved.
- *
- * WW_MODPICK_EXPECT = bake | mo2 | data | masters (the list's source);
- * WW_MODPICK_EXPECT_LABEL = words the header must hold; WW_MODPICK_EXPECT_LIST =
- * a file of plugin names, one a line, the list must equal (count and order).
- *
- * WW_CELL_REFDUMP is copied to <refdump>.stage1.txt after stage 1, so the
- * script counts references before and after from the builder's own model.
- * The run needs a scratch WW_SETTINGS_SCOPE: Apply writes it.
- * --------------------------------------------------------------------------- */
+/* WW_MODPICK_TEST=<report path>: an in-app test of the Cell workspace's Mods band, driven through the same
+ * calls and real Qt drag events as the mouse. Stage 1 reads the list and applies WW_MODPICK_DRAG/DROP/UNTICK;
+ * stage 2 checks the choice after the cell re-opens. Needs a scratch WW_SETTINGS_SCOPE (Apply writes it). */
 
 #include "cellmodpick.h"
 #include "cellmodpickbox.h"

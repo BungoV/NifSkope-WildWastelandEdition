@@ -12,24 +12,9 @@ BSD License - see nifskope.h
 #include <QString>
 #include <QVector>
 
-/* ---------------------------------------------------------------------------
- * THE PICK TABLE -- what the cell view knows about each thing it drew.
- *
- * The scene welds (src/cellview.h 1), so the geometry itself cannot answer
- * "which ref is this".  The builder therefore WRITES DOWN every placement as it
- * welds it, with its world AABB, and picking is a ray against that table.  Two
- * consequences worth stating rather than discovering:
- *
- *   - the pick is by BOX, not by triangle.  Nearest box entered along the ray
- *     wins.  A small ref inside a big ref's box (a bottle on a shelf inside a
- *     building's box) is reachable only because ties are broken by the SMALLER
- *     box: without that rule every click in a downtown cell would hit the same
- *     building.  `pick()` returns the candidates it considered, so the panel can
- *     say "3 under the cursor" instead of pretending there was one.
- *   - the table is pure data.  No Qt widget, no GL, no NifModel: a harness can
- *     build a cell, ask for a formID, and check a world position, without a
- *     window and without a screenshot.  That is what makes the gate honest.
- * --------------------------------------------------------------------------- */
+/* The pick table: the scene welds, so the builder records every placement with its world AABB and picking
+ * is a ray against the table. Pure data (no widget, GL or NifModel). The pick is by box; ties go to the
+ * smaller box so a bottle inside a building's box stays reachable. */
 
 //! One drawn placement, and everything the panel shows for it.
 struct CellPickEntry
@@ -83,10 +68,8 @@ public:
 	//! Index of the first entry with this REFR form id, or -1.
 	int indexOfForm( quint32 refForm ) const;
 
-	/*! Nearest box the ray enters, or -1. `candidates`, when given, receives how
-	 *  many boxes the ray entered at all -- the number the panel reports so a
-	 *  pick never implies it was unambiguous. Ties on entry distance are broken
-	 *  by the SMALLER box (see the header comment). */
+/*! Nearest box the ray enters, or -1. `candidates` receives how many boxes the ray entered at all; ties
+ *  on entry distance go to the smaller box. */
 	int pick( const CellRay & ray, int * candidates = nullptr, float * tOut = nullptr ) const;
 
 	//! The flat Name | Value rows for one entry, in panel order.
@@ -102,8 +85,7 @@ private:
 	QHash<quint32, int> byForm;
 };
 
-/*! THE TABLE OF THE SCENE THAT IS OPEN. The builder fills it; the panel and the
- *  harness read it. One at a time, like the document itself. */
+/*! The table of the open scene: the builder fills it, the panel and the harness read it. */
 const CellPickTable & cellPickTable();
 CellPickTable & cellPickTableMutable();
 
