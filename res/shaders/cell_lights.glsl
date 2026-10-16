@@ -8,6 +8,7 @@ uniform samplerBuffer cellLights;	// 8 texels a light: pos+radius, color+cosOute
 									// kind near-clip xlig-bias, then the box's three rows (lane HEMI1)
 #define CELL_TPL 8					// texels a light (celllights.cpp kTexelsPerLight)
 uniform int cellLightCount;
+#include "cell_cluster.glsl"
 uniform vec4 cellRow[3];			// world = (dot(row.xyz, posView) + row.w), the view's inverse
 uniform bool cellHasDalc;
 uniform int cellGiAmb;				// lane GICAL1: WW_CELL_GI_AMB, the interior ambient beside the GI: 0 keep (lane GIAMB1: the red), 1 replace (lane GIAMB1: the default), 2 off, 3 max, 4 asgi (red)
@@ -183,7 +184,10 @@ float cellShadowF( int i, vec3 P, vec3 N )
 vec3 cellShadowProbe( vec3 P, vec3 N )
 {
 	vec3 o = vec3( 0.0 );
-	for ( int i = 0; i < cellLightCount; i++ ) {
+	int nL;
+	int bL = cellLightsBegin( P, nL );
+	for ( int k = 0; k < nL; k++ ) {
+		int i = cellLightAt( bL, k );
 		float slot = texelFetch( cellLights, i * CELL_TPL + 4 ).x;
 		if ( slot < -0.5 || slot > 2.5 )
 			continue;
@@ -880,10 +884,15 @@ vec3 cellFarProbeOut( vec3 P, vec3 N )
 	if ( cellProbe == 94 ) {
 		if ( w > 0.0 && ( cellFarRed & 1 ) == 0 )
 			cellFarF( P, N );
-		return vec3( float( ( w >= 1.0 ? 0 : cellLightCount ) + cellFarIters ) / 256.0 );
+		int nW;
+		cellLightsBegin( P, nW );
+		return vec3( float( ( w >= 1.0 ? 0 : nW ) + cellFarIters ) / 256.0 );
 	}
 	vec3 E = vec3( 0.0 );
-	for ( int i = 0; i < cellLightCount; i++ ) {
+	int nL;
+	int bL = cellLightsBegin( P, nL );
+	for ( int k = 0; k < nL; k++ ) {
+		int i = cellLightAt( bL, k );
 		vec3 L;
 		bool ns;
 		vec3 c = cellLightE( i, P, N, L, ns );
@@ -911,7 +920,10 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 	}
 	if ( cellProbe == 1 ) {
 		vec3 E = vec3( 0.0 );
-		for ( int i = 0; i < cellLightCount; i++ ) {
+		int nL;
+		int bL = cellLightsBegin( P, nL );
+		for ( int k = 0; k < nL; k++ ) {
+			int i = cellLightAt( bL, k );
 			vec3 L;
 			bool ns;
 			vec3 c = cellLightE( i, P, N, L, ns );
@@ -955,7 +967,10 @@ vec3 cellPassOut( vec3 P, vec3 N )
 	if ( cellPass == 1 ) {
 		v *= 0.31830989;
 		if ( ( cellPassRed & 1 ) != 0 ) {	// red "direct": the cell's lights leak into the pass
-			for ( int i = 0; i < cellLightCount; i++ ) {
+			int nL;
+			int bL = cellLightsBegin( P, nL );
+			for ( int k = 0; k < nL; k++ ) {
+				int i = cellLightAt( bL, k );
 				vec3 L;
 				bool ns;
 				vec3 c = cellLightE( i, P, N, L, ns );
@@ -1032,7 +1047,10 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 	float fw = cellFarFade ? cellFarW( P ) : 0.0;	// lane FARVIEW1: the real lights fade out over the band
 	if ( fw >= 1.0 )
 		return;
-	for ( int i = 0; i < cellLightCount; i++ ) {
+	int nL;
+	int bL = cellLightsBegin( P, nL );
+	for ( int k = 0; k < nL; k++ ) {
+		int i = cellLightAt( bL, k );
 		vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 		vec3 Lv = t0.xyz - P;
 		float d = length( Lv );

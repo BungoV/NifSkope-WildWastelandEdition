@@ -226,6 +226,8 @@ HEADERS += \
 	src/gl/gametaa.h \
 	src/gl/campath.h \
 	src/gl/celllights.h \
+	src/gl/cellcluster.h \
+	src/gl/cellclustergl.h \
 	src/gl/cellfxlit.h \
 	src/gl/cellcull.h \
 	src/gl/cellumbra.h \
@@ -468,6 +470,8 @@ SOURCES += \
 	src/gl/gametaa.cpp \
 	src/gl/campath.cpp \
 	src/gl/celllights.cpp \
+	src/gl/cellcluster.cpp \
+	src/gl/cellclustergl.cpp \
 	src/gl/cellfxlit.cpp \
 	src/gl/cellcull.cpp \
 	src/gl/cellumbra.cpp \

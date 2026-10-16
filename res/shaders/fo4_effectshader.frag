@@ -120,6 +120,7 @@ vec3 cellFxLit( vec3 P )
 		return vec3( 1.0 );
 	vec3 E = cellHasDir ? cellDirColor : vec3( 0.0 );
 	if ( ( fxLitMode & 2 ) != 0 ) {
+		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
 		for ( int i = 0; i < cellLightCount; i++ )
 			E += cellFxLight( i, P );
 	} else {
@@ -206,6 +207,7 @@ vec3 fxRoomLitMul( vec3 Pv, vec3 normal )
 	fxRoomShare = clamp( here / max( open, vec3( 1e-5 ) ), vec3( 0.0 ), vec3( 4.0 ) );
 	vec3 E = cellFxBase * fxRoomShare;
 	if ( ( fxLitMode & 2 ) != 0 ) {
+		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
 		for ( int i = 0; i < cellLightCount; i++ )
 			E += cellFxLight( i, Pw );
 	} else {
