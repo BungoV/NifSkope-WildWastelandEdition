@@ -19,10 +19,8 @@ constexpr float CELL_UNITS = 4096.0f;
 constexpr int LAND_GRID = 33;       //!< heights per side
 constexpr int QUAD_GRID = 17;       //!< a quadrant's opacity grid per side
 
-/*! Which quadrant a 33x33 grid point falls in, and where inside it.
- *  docs/LODGEN_ESM_LAYOUTS.md: 0 BL, 1 BR, 2 TL, 3 TR, each 17x17 with the
- *  middle row and column SHARED, which is why the local index is the grid
- *  index minus 16 and not minus 17. */
+/*! Which quadrant a 33x33 grid point falls in, and where inside it (docs/LODGEN_ESM_LAYOUTS.md).
+ *  The middle row and column are SHARED, so the local index is the grid index minus 16, not 17. */
 void quadrantOf( int row, int col, int & q, int & lrow, int & lcol )
 {
 	const int top = row >= QUAD_GRID - 1 ? 1 : 0;
@@ -104,51 +102,9 @@ bool cellBuildGround( EsmWorld & world, int x0, int y0, int x1, int y1,
 
 			for ( int row = 0; row + 1 < LAND_GRID; row++ ) {
 				for ( int col = 0; col + 1 < LAND_GRID; col++ ) {
-					/* THE LAYER CHOICE, at this quad's own SW corner.  Highest
-					 * opacity wins, and only above CELL_GROUND_LAYER_MIN; the
-					 * quadrant's BTXT is what everything else falls back to.
-					 * Ties go to the LATER layer, which is the one the engine
-					 * would paint last.
-					 *
-					 * TWO REPAIRS, 2026-09-19, lane CELLVIEW3, both measured on
-					 * Sanctuary -20,7 with an independent LAND decoder
-					 * (scratchpad/cellview3_20260919/ground_probe.py) before a
-					 * line of this was written.  133 of that cell's 1024 quads
-					 * came out bare, and they were bare for two DIFFERENT
-					 * reasons that the single rule above could not tell apart.
-					 *
-					 * (1) A LAYER WHOSE LTEX IS THE NULL FORM MAY NOT WIN.
-					 * Quadrants 0, 1 and 2 of that cell each carry an ATXT whose
-					 * LTEX is formid 00000000 -- no record, therefore no TXST,
-					 * therefore no texture.  Wherever such a layer's opacity
-					 * reached 0.5 it WON, replaced a perfectly good BTXT
-					 * (0001F78C on all three quadrants) with nothing, and the
-					 * quad went bare: 7 + 13 + 39 = 59 of the 133.  A layer that
-					 * names no texture is not a choice, so it is no longer
-					 * offered as one; the quad falls back to the BTXT that was
-					 * there all along.
-					 *
-					 * (2) WITH NO BTXT, THE FLOOR IS ANY PAINT AT ALL.
-					 * Quadrant 3 of that cell has NO BTXT subrecord, and 74
-					 * quads there had no layer reaching 0.5.  The 0.5 floor is
-					 * only meaningful as "beat the base": it decides whether a
-					 * layer is dominant enough to replace the base texture.
-					 * Where there is no base there is nothing to beat, and the
-					 * strongest layer present IS the best answer the data has.
-					 * There is also nothing else to inherit -- the Commonwealth
-					 * WRLD record names no default landscape texture at all
-					 * (every subrecord dumped in
-					 * scratchpad/mountains_20260907/report_mountains.md R6: DNAM
-					 * is two floats, land and water height, not formids), so
-					 * "what the game does there" cannot be "use the worldspace
-					 * default"; there is none.
-					 *
-					 * What survives both repairs is a quad whose quadrant has no
-					 * BTXT and whose every layer is at ZERO opacity at its
-					 * corner -- genuinely unpainted in the plugin.  Those are
-					 * counted separately (`quadsUnpainted`) and are the whole of
-					 * the remaining bare count; that identity is what the gate
-					 * now asserts, and it is an invariant, not a threshold. */
+					/* The layer choice at this quad's SW corner: highest opacity above CELL_GROUND_LAYER_MIN wins
+					 * (ties to the later layer, painted last), else the BTXT. A null-form layer names no texture and
+					 * cannot win; with no BTXT there is nothing to beat, so any paint wins. */
 					int qd = 0, lrow = 0, lcol = 0;
 					quadrantOf( row, col, qd, lrow, lcol );
 					const quint32 baseLtex = land.baseTex[qd];
@@ -176,10 +132,8 @@ bool cellBuildGround( EsmWorld & world, int x0, int y0, int x1, int y1,
 						out.quadsFromLayer++;
 					if ( !baseLtex && !anyPaint )
 						out.quadsUnpainted++;
-					/* The OTHER way a quad can end up bare: it chose a real
-					 * LTEX form and that form named no texture.  Counted apart
-					 * so the two reasons add up to the bare count exactly --
-					 * see the gate's invariant. */
+					/* the other way a quad ends up bare: a real LTEX that names no texture; counted apart so
+					 * the two reasons add up to the bare count */
 					if ( ltex && !bucket )
 						out.quadsLtexNoTexture++;
 
@@ -195,11 +149,8 @@ bool cellBuildGround( EsmWorld & world, int x0, int y0, int x1, int y1,
 						qq.v[k].p[0] = xx[k] - originX;
 						qq.v[k].p[1] = yy[k] - originY;
 						qq.v[k].p[2] = land.heights[rr[k]][cc[k]];
-						/* WORLD-SPACE UVs, so the paint does not swim when the
-						 * block grows: a texel belongs to a place, not to a
-						 * quad.  v GROWS NORTHWARD, as the game's (InitSDM
-						 * 0x3a7180: uv = (col, row) * 0.375); the old -y
-						 * mirrored every texture north-south. */
+						/* world-space UVs, so the paint does not swim when the block grows; v grows northward,
+						 * as the game's */
 						qq.v[k].uv[0] = xx[k] / T;
 						qq.v[k].uv[1] = yy[k] / T;
 						if ( land.hasColors ) {
@@ -256,10 +207,8 @@ QString cellGroundLegend( const CellGroundBuild & b )
 		.arg( b.layersRead );
 	if ( b.ltexUnresolved )
 		s += QString( "; %1 LTEX forms named no texture" ).arg( b.ltexUnresolved );
-	/* WHY EACH BARE QUAD IS BARE (lane CELLVIEW3). Without this the number
-	 * "133 bare" was unreadable: it mixed quads the plugin never painted with
-	 * quads a null-form layer had blanked, and only the second kind was a
-	 * defect. The two numbers must sum to the bare count. */
+	/* why each bare quad is bare: never painted vs. a chosen LTEX naming no texture; the two sum to the
+	 * bare count */
 	s += QString( "; of the bare quads %1 are unpainted in the plugin (no BTXT on "
 		"the quadrant and no layer opacity at the corner -- and the worldspace "
 		"names no default landscape texture to inherit) and %2 chose an LTEX that "

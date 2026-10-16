@@ -1,5 +1,5 @@
-/* lane PLACED1: placed actors, built at rest on the CPU. See cellactor.h for the rule. Record
- * layouts follow the published plugin format notes (the xEdit definitions). */
+/* Placed actors, built at rest on the CPU (see cellactor.h). Record layouts follow the
+ * published plugin format notes (the xEdit definitions). */
 
 #include "cellactor.h"
 
@@ -24,7 +24,7 @@ namespace
 
 constexpr unsigned int GRUP_TYPE = 0x50555247U;
 constexpr int CHAIN_DEPTH = 12;           // template / leveled list hops before giving up
-constexpr float RED_SHIFT = 96.0f;        // the "shift" red control moves every actor this far along +X
+constexpr float RED_SHIFT = 96.0f;        // the "shift" debug mode moves every actor this far along +X
 
 QString zString( const ESMFile::ESMField & f )
 {

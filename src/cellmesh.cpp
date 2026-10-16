@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <cstdio>
 
-// lane SPEED1 (2026-10-02): see cellmesh.h. Main thread only: the document and the scene live there.
+// see cellmesh.h. Main thread only: the document and the scene live there.
 
 namespace
 {
@@ -47,12 +47,12 @@ bool offMainThread()
 	return !qApp || QThread::currentThread() != qApp->thread();
 }
 
-/* The rows, exactly as the cell view wrote them before this lane (cellview.cpp emitBucket, the slow path):
- * the same fields in the same order, so a saved file is the same file. */
+/* The rows exactly as the slow path writes them (cellview.cpp emitBucket): same fields, same order, so a
+ * saved file is the same file. */
 void writeRows( NifModel * nif, const QModelIndex & iShape, const CellMesh & m )
 {
 	CellSpeed::Acc speedAcc( "welded rows written on demand" );
-	// the gate's red control for the saved file: the rows come back without their normals
+	// WW_CELL_SPEED_RED=rows debug mode: the rows come back without their normals
 	static const bool redRows = qgetenv( "WW_CELL_SPEED_RED" ) == "rows";
 	nif->setState( BaseModel::Processing );
 	QModelIndex iVertexData = nif->getIndex( iShape, "Vertex Data" );
@@ -68,7 +68,7 @@ void writeRows( NifModel * nif, const QModelIndex & iShape, const CellMesh & m )
 		nif->set<float>( row, "Bitangent X", m.bitangents[v][0] );
 		nif->set<float>( row, "Bitangent Y", m.bitangents[v][1] );
 		nif->set<float>( row, "Bitangent Z", m.bitangents[v][2] );
-		if ( v < m.uv2y.size() ) {   // lane FARLOD2: the far objects' array layer
+		if ( v < m.uv2y.size() ) {   // the far objects' array layer
 			const QModelIndex iUv2 = nif->getIndex( row, "UV 2" );
 			if ( iUv2.isValid() )
 				nif->set<HalfVector2>( row, "UV 2", HalfVector2( Vector2( 0.0f, m.uv2y[v] ) ) );
@@ -93,7 +93,7 @@ CellMeshQuiet::~CellMeshQuiet() { quietDepth--; }
 
 void cellMeshRowsAsked( const BaseModel * model, const NifItem * block, const NifItem * array )
 {
-	// the gate's red control for this net: the reader gets the empty array, as it would without it
+	// WW_CELL_SPEED_RED=nonet debug mode: the reader gets the empty array, as it would without this net
 	static const bool redNoNet = qgetenv( "WW_CELL_SPEED_RED" ) == "nonet";
 	if ( quietDepth > 0 || redNoNet || offMainThread() || table().isEmpty() )
 		return;

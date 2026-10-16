@@ -55,7 +55,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace {
 
-constexpr float kMinSide = 64.0f;	// small clutter: a longest side under this is skipped (his call)
+constexpr float kMinSide = 64.0f;	// small clutter: a longest side under this is skipped
 constexpr float kMaxSide = 1600.0f;	// past this (or kMaxHeight tall) it is a building, not a movable static
 constexpr float kMaxHeight = 600.0f;
 
@@ -89,8 +89,8 @@ QString aoDecalKind( const QString & model )
 				return true;
 		return false;
 	};
-	/* refined on Concord's census (2026-10-04): set pieces that never move (a crashed vertibird, the molerat
-	 * mounds, the power armor stand) and flat things that cast nothing (a sleeping bag) are not his kind */
+	/* set pieces that never move (a crashed vertibird, molerat mounds, the power armor stand) and flat
+	 * things that cast nothing (a sleeping bag) are not a decal kind */
 	if ( any( m, { "vertibird", "molerat", "powerarmorfurniture", "sleepingbag", "landscape\\", "architecture\\" } ) )
 		return QString();
 	if ( any( m, { "dumpster", "trashbin\\" } ) )	// FO4's dumpsters are SetDressing\TrashBin\TrashBin*
@@ -188,7 +188,7 @@ void AoDecalBuilder::consider( const QString & baseType, const QString & model, 
 					if ( !ok )
 						break;
 					float v[3] = { sh.geom.pos[vi * 3], sh.geom.pos[vi * 3 + 1], sh.geom.pos[vi * 3 + 2] };
-					if ( sh.billboard ) {	// lane GLOW1's node transform (model = R * local * scale + pos)
+					if ( sh.billboard ) {	// the node transform (model = R * local * scale + pos)
 						float o[3];
 						for ( int a = 0; a < 3; a++ )
 							o[a] = sh.bbPos[a] + sh.bbScale * ( sh.bbRot[a * 3] * v[0] + sh.bbRot[a * 3 + 1] * v[1] + sh.bbRot[a * 3 + 2] * v[2] );
@@ -276,7 +276,7 @@ std::shared_ptr<const AoDecalSet> AoDecalBuilder::finish( const QString & dataRo
 			aovol::readIndex( f.readAll(), &index, &why );
 	}
 	bool indexDirty = false;
-	const quint64 salt = qgetenv( "WW_CELL_AODECAL_FPSALT" ).toULongLong();	// a gate's "the model changed"
+	const quint64 salt = qgetenv( "WW_CELL_AODECAL_FPSALT" ).toULongLong();	// test hook: forces "the model changed"
 	const bool redStale = S.red == QLatin1String( "stale" );
 	for ( size_t mi = 0; mi < S.models.size(); mi++ ) {
 		AoDecalSet::Model & M = S.models[mi];
@@ -340,7 +340,7 @@ std::shared_ptr<const AoDecalSet> AoDecalBuilder::finish( const QString & dataRo
 		if ( f.open( QIODevice::WriteOnly ) )
 			f.write( b );
 	}
-	// the copies whose model has a volume; the red "frozen" leaves every copy on its model's first copy
+	// the copies whose model has a volume; the "frozen" debug mode leaves every copy on its model's first copy
 	std::vector<AoDecalSet::Copy> keep;
 	QHash<int, int> firstOf;
 	for ( AoDecalSet::Copy c : S.copies ) {
@@ -410,7 +410,7 @@ QString AoDecalBuilder::census() const
 	return set_ ? set_->census : QString();
 }
 
-// ---------------------------------------------------------------- gate D on a real cell
+// ---------------------------------------------------------------- probe check on a real cell
 bool aoDecalProbeGate( const AoDecalSet & set, const ProbeSoup & soup, const std::vector<float> & probePos,
 	const std::vector<float> & probeVis, const QString & file, QString * summary )
 {
@@ -504,7 +504,7 @@ bool aoDecalProbeGate( const AoDecalSet & set, const ProbeSoup & soup, const std
 	return true;
 }
 
-// ---------------------------------------------------------------- gate A on a real model (nifcli aobake)
+// ---------------------------------------------------------------- nifcli aobake on a real model
 bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<NativeSrcShape> * out );
 
 int aoDecalCli( const QStringList & args )
@@ -608,7 +608,7 @@ int aoDecalCli( const QStringList & args )
 	probebvh::Bvh bvh;
 	bvh.t = tris;
 	bvh.build();
-	if ( !trisFile.isEmpty() ) {	// the placed bake triangles (world), for the gate's near / far split
+	if ( !trisFile.isEmpty() ) {	// the placed bake triangles (world), for a near / far split
 		QFile tf( trisFile );
 		if ( tf.open( QIODevice::WriteOnly ) )
 			tf.write( reinterpret_cast<const char *>( tris.data() ), qint64( tris.size() * sizeof( float ) ) );
@@ -627,7 +627,7 @@ int aoDecalCli( const QStringList & args )
 	std::vector<double> D( size_t( NR ) * 3 );
 	for ( int i = 0; i < NR; i++ )
 		aovol::fib( i, NR, &D[size_t( i ) * 3] );
-	// the red "worlddown": the projected decal (the copy's yaw only, every receiver facing world up)
+	// the "worlddown" debug mode: the projected decal (the copy's yaw only, every receiver facing world up)
 	AoDecalSet::Copy cl = c;
 	const bool worlddown = red == QLatin1String( "worlddown" );
 	if ( worlddown ) {

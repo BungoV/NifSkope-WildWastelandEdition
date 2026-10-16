@@ -4,111 +4,31 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
-/* ---------------------------------------------------------------------------
- * WW_CELL_CENSUS_TEST=<census file> -- lane PRTP5 (docs/PRTP_PLAN.md step 5,
- * "render each cell"), run INSIDE the running application.
- *
- * THE WALK. Every interior of the plugin and every exterior cell of the named
- * worldspace(s), in this one window, through the same `.wwcell` door
- * File > Open uses (a scratch spec file and NifSkope::openFile). The Cell
- * lights row is forced on, the frame is drawn and grabbed, the census rows are
- * appended, the texture cache is flushed, and the next load replaces this one.
- * The whole world is never loaded.
- *
- * ONE LOAD, ONE ROW PER CELL. An interior is a load of its own. The exterior
- * grid is cut into TILES that do not overlap (WW_CELL_CENSUS_BLOCK cells a
- * side, 5; a tile's cells are x in [k*5, k*5+4], so its centre is k*5+2): a
- * tile is loaded ONCE, as the block around its centre cell, and every cell in
- * it gets its own row from that one load. The cell a placed object belongs to
- * comes from the plugin (the reference model keeps it per reference). Before
- * this (v1) each cell was opened as the block around itself, so every cell was
- * loaded 25 times.
- *
- * WHAT A ROW HOLDS. `refs`, `refs_drawn` and `lights_cell` are the CELL's own.
- * Everything from `refs_block` to `rss_mb` is the LOAD's (what the builder
- * said about the tile, what the texture cache was asked for, the frame, the
- * times): it is written on the load's first row and is `^` on the load's
- * other rows, so a column summed over the census is a true total.
- *
- * A VISIT IS A LIST OF STEPS (WW_CELL_CENSUS_STEPS, default `census`). The
- * game is gone through ONCE, and each visit of a load does every step asked
- * for: a step says what the builder must do while the load is built (`before`)
- * and reads what that left behind into the row (`after`). Two steps today:
- *   census  the per-cell check-up: the frame, the builder's counts, what could
- *           not be loaded. Always on -- its rows are also what makes the pass
- *           resumable.
- *   bake    the probe bake as the cell view's headless path does it
- *           (WW_CELL_PROBES + WW_CELL_PROBE_BAKE, set here per load): the
- *           probes of the tile's own cells are placed and baked into
- *           WW_CELL_CENSUS_BAKE/<worldspace or I_<form>>/, and the row carries
- *           the probes, the files written and the bake's milliseconds.
- *
- * THE RING (WW_CELL_CENSUS_MARGIN, default 0). A probe sees only what is
- * loaded in its visit: a ray that meets nothing is sky. So a bake of exterior
- * cells needs their neighbors loaded around them, and the check-up does not.
- * With a ring of M cells a tile of T is opened as the block of T + 2M around
- * its centre; rows and probes are still the tile's own cells only, so cells
- * are loaded more than once but never probed or counted twice.
- *
- * A TILE THAT IS TOO BIG SPLITS. A tile holding more references than
- * WW_CELL_CENSUS_REFS_MAX is opened cell by cell, each alone, and each row
- * says so; so is a tile the walk died on (it is named in `<census>.split`).
- *
- * A TILE WITH NOTHING PLACED IS NOT BUILT, when the check-up is the only step.
- * Its rows are counts (all zero) and need no scene: they are written from the
- * plugin and say `count only`. A bake needs the ground, so with the bake step
- * on every tile is built.
- *
- * RESUMABLE. Rows are APPENDED; a cell whose key is already in the file is
- * skipped. The keys of the load in progress sit in `<census>.pending`, so a
- * walk that died names what it died on: the next run writes a lone cell a
- * `crashed` row, and marks a tile to be opened cell by cell.
- *
- * SEVERAL WALKERS. WW_CELL_CENSUS_SLICE=i/N: the walk's units (an interior, a
- * tile) are numbered in plan order and unit u belongs to slice (u mod N) + 1.
- * Walker i walks only its slice and writes its own part file
- * (`<census>.part<i>of<N>.tsv`, with its own pending, split, spec and log
- * files), so N windows can run at once; tests/spells/cell_census_merge.py
- * joins the parts.
+/* WW_CELL_CENSUS_TEST=<census file>: an in-app harness that walks every interior and exterior cell of a
+ * plugin through the `.wwcell` open path with the Cell lights row forced on, and appends one TSV row per
+ * cell. Exteriors load as non-overlapping tiles (one load, one row per cell); rows are appended and the walk
+ * resumes by key. A visit runs a list of steps (`census`, optionally `bake`).
  *
  *   WW_CELL_CENSUS_PLUGINS   the load order, as a `.wwcell` names it (required)
- *   WW_CELL_CENSUS_WORLD     worldspace EDIDs, comma separated; `all`; `none`
- *                            (default Commonwealth)
+ *   WW_CELL_CENSUS_WORLD     worldspace EDIDs, comma separated; `all`; `none` (default Commonwealth)
  *   WW_CELL_CENSUS_NOINTERIORS=1   exteriors only
  *   WW_CELL_CENSUS_BLOCK     cells a side of an exterior tile, odd (default 5)
- *   WW_CELL_CENSUS_SLICE     i/N: walk slice i of N (default 1/1)
+ *   WW_CELL_CENSUS_SLICE     i/N: walk slice i of N into its own part file (default 1/1)
  *   WW_CELL_CENSUS_STEPS     what a visit does: `census` or `census,bake`
  *   WW_CELL_CENSUS_BAKE      the bake's folder (required by the bake step)
- *   WW_CELL_CENSUS_TBK       the `.tbk` version the bake step asks for: 5
- *                            (default, lane SIDES6), 4 or 3. The builder is handed it as
- *                            WW_CELL_PROBE_BAKE_TBK, and every file a visit
- *                            wrote is read back: another version fails the
- *                            visit. On 2026-10-02 the cell view's bake does not
- *                            read that variable yet and writes its default (4),
- *                            so a run that asks for 3 FAILS here, on purpose,
- *                            instead of handing a v3 reader v4 files
- *   WW_CELL_CENSUS_MARGIN    cells of ring loaded around an exterior tile (0)
- *   WW_CELL_CENSUS_PLAN      write the whole walk plan here (key, form, EDID,
- *                            unit, place among the units walked, slice)
+ *   WW_CELL_CENSUS_TBK       the `.tbk` version the bake step asks for and reads back: 5 (default), 4 or 3
+ *   WW_CELL_CENSUS_MARGIN    cells of ring loaded around an exterior tile so its probes see neighbors (0)
+ *   WW_CELL_CENSUS_PLAN      write the whole walk plan here
  *   WW_CELL_CENSUS_ONLY      a file of keys: walk only the units these are in
  *   WW_CELL_CENSUS_BUDGET    seconds after which no new load is started (480)
  *   WW_CELL_CENSUS_MAX       at most this many units this run
- *   WW_CELL_CENSUS_RSS_MAX   MB of memory held after which no new load is
- *                            started (8000; 0 = no ceiling)
- *   WW_CELL_CENSUS_REFS_MAX  a tile holding more references than this is
- *                            opened cell by cell (12000; 0 = never split)
+ *   WW_CELL_CENSUS_RSS_MAX   MB of memory held after which no new load is started (8000; 0 = no ceiling)
+ *   WW_CELL_CENSUS_REFS_MAX  a tile with more references is opened cell by cell (12000; 0 = never split)
  *   WW_CELL_CENSUS_SETTLE_MS wait between the load and the frame (250)
  *   WW_CELL_CENSUS_SHOTS     a folder: `<key>.png` and `<key>.notes` per load
- *   WW_CELL_CENSUS_RED       stale | dropcell | dropslice | doubleslice |
- *                            nobake -- the gate's red controls
- *   WW_CELL_DATAROOT         as for any cell (the builder reads it)
+ *   WW_CELL_CENSUS_RED       stale | dropcell | dropslice | doubleslice | nobake (harness controls)
  *
- * WW_CELL_OPEN must NOT be set: it overrides every spec file, so every load
- * of the walk would be the same cell. The harness refuses to start if it is.
- *
- * A harness FORCES the state it measures: the Cell lights row is switched on
- * here for every load, and a load whose lights were not on fails its check.
- * --------------------------------------------------------------------------- */
+ * WW_CELL_OPEN must NOT be set (it overrides every spec file); the harness refuses to start if it is. */
 
 #include "cellrefs.h"
 #include "cellview.h"
@@ -214,10 +134,8 @@ struct CensusRow
 	QString note;
 };
 
-/*! ONE STEP OF A VISIT. `before` runs before the load is opened and says what
- *  the builder must do while it builds; `after` runs once the load is built
- *  and reads what the step left behind into the row. A new product of the
- *  whole-game pass is a new entry in kSteps, not a second pass. */
+/*! One step of a visit: `before` sets up the builder before the load opens, `after` reads its result into
+ *  the row. A new whole-game product is a new entry in kSteps, not a second pass. */
 struct VisitStep
 {
 	const char * name;
@@ -238,7 +156,7 @@ struct Walk
 	QString stepNames;          //!< `census` or `census+bake`
 	bool needScene = false;     //!< some step needs the scene even where nothing is placed
 	QString bakeDir;            //!< the bake step's folder
-	int tbk = 5;                //!< lane SIDES6: 5; the `.tbk` version the bake step asks for (WW_CELL_CENSUS_TBK)
+	int tbk = 5;                //!< the `.tbk` version the bake step asks for (WW_CELL_CENSUS_TBK)
 	qint64 loadStartMs = 0;     //!< wall clock when the load was opened (the bake step's files are newer)
 	QVector<CensusCell> plan;   //!< every cell of the walk, plugin order
 	QVector<CensusUnit> units;  //!< every unit, in the order its first cell is planned
@@ -264,9 +182,7 @@ struct Walk
 	QString notes, error;       //!< the builder's own words for the load being opened
 	qint64 prevRefs = -1, prevDrawn = -1, prevLights = -1;  //!< the last cell's own counts (the stale red)
 	bool havePrev = false;
-	/* A TILE THAT IS TOO BIG SPLITS. The window's memory grows with the
-	 * references it reads and a downtown tile holds nine times what the
-	 * Sanctuary one does, so a tile over refsMax is opened cell by cell. */
+	/* Memory grows with the references read, so a tile over refsMax is opened cell by cell. */
 	int refsMax = 12000;
 	std::map<QString, std::unique_ptr<EsmWorld>> worlds;
 };
@@ -349,10 +265,8 @@ double rssMb()
 	return -1.0;
 }
 
-/* THE BUILDER'S OWN WORDS. The `.wwcell` door prints the census as
- * `qInfo() << "cell view:\n" << notes` and a refusal as
- * `qWarning() << "cell view:" << error`; both are caught here, on the GUI
- * thread, for the load that is being opened, and everything else is passed on. */
+/* Capture the `.wwcell` door's "cell view:" census (qInfo) and refusal (qWarning) for the load being
+ * opened, on the GUI thread; everything else is passed on. */
 void captureMessages( QtMsgType type, const QMessageLogContext & ctx, const QString & str )
 {
 	if ( g.waiting && str.startsWith( QLatin1String( "cell view:" ) )
@@ -442,9 +356,7 @@ QString rowLine( const CensusCell & c, const CensusRow & r, bool lead )
 	f << ( r.lightTypes.isEmpty() ? QStringLiteral( "-" ) : flat( r.lightTypes ) );
 	n( r.lightsApprox ); n( r.modelsLoaded ); n( r.modelsFailed ); n( r.texAsked ); n( r.texMissing );
 	n( r.matsUnreadable );
-	/* THE FAR FIELD. The ruling is "LOD beyond the block"; the cell view draws
-	 * the block and nothing beyond it, so the column says so on every row
-	 * instead of leaving a reader to assume the far field was in the frame. */
+	/* The cell view draws no far field, so the column says so instead of leaving a reader to assume it. */
 	f << ( c.interior ? QStringLiteral( "-" ) : QStringLiteral( "none" ) );
 	n( r.coverPx );
 	f << ( r.fb.isEmpty() ? QStringLiteral( "-" ) : r.fb );
@@ -564,21 +476,19 @@ QString bakeFolder( const CensusLoad & ld )
 		+ ( u.interior ? QStringLiteral( "I_%1" ).arg( hex8( g.plan.at( ld.cells.first() ).form ) ) : u.world );
 }
 
-/* ---- STEP `bake`: the probe bake, by the cell view's own headless path. The
- * builder reads these three variables every time it builds, so setting them
- * here per load is all the hook there is; nothing of the bake is done here. */
+/* ---- step `bake`: the cell view's own headless probe bake. The builder reads these variables each
+ * build, so setting them per load is the whole hook. */
 void stepBakeBefore( const CensusLoad & ld )
 {
 	if ( g.red == QLatin1String( "nobake" ) )
-		return;     // RED `nobake` (the gate's control): the row says bake, the builder was never told
+		return;     // RED `nobake`: the row says bake, the builder was never told
 	const QString dir = bakeFolder( ld );
 	QDir().mkpath( dir );
 	qputenv( "WW_CELL_PROBES", QDir::toNativeSeparators( dir + QStringLiteral( "/probes_%1.tsv" ).arg( loadFileBase( ld ) ) ).toLocal8Bit() );
 	qputenv( "WW_CELL_PROBE_BAKE", QDir::toNativeSeparators( dir ).toLocal8Bit() );
 	qputenv( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );     // the load's own cells, never the ring
-	qputenv( "WW_CELL_PROBES_HIDE", "1" );      // the markers are not part of the cell: the frame stays the check-up's
-	// the file version is the run's choice (WW_CELL_CENSUS_TBK, default 5). The builder is told here; whether it
-	// listened is read from the files in stepBakeAfter, so a run never says one version and writes another.
+	qputenv( "WW_CELL_PROBES_HIDE", "1" );      // the markers are not part of the cell's frame
+	// the builder is told the version here; stepBakeAfter reads the files back so a run never says one and writes another
 	qputenv( "WW_CELL_PROBE_BAKE_TBK", QByteArray::number( g.tbk ) );
 }
 
@@ -644,9 +554,7 @@ void stepBakeAfter( const CensusLoad & ld, CensusRow & r )
 			.arg( named ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) ).arg( r.bakeProbes ).arg( files ).arg( sectors ).arg( dir ) );
 }
 
-/* ---- STEP `census`: the per-cell check-up. The frame, the builder's own
- * counts, what the texture cache could not load, and the checks a visit
- * stands on. */
+/* ---- step `census`: the per-cell check-up: the frame, the builder's counts, missing textures, the checks. */
 void stepCensusAfter( const CensusLoad & ld, CensusRow & r )
 {
 	const CensusUnit & unit = g.units.at( ld.unit );
@@ -668,9 +576,7 @@ void stepCensusAfter( const CensusLoad & ld, CensusRow & r )
 	rt.start();
 	QImage fb;
 	if ( ogl ) {
-		/* setOrientation returns early when the view is already the one asked
-		 * for, so from the second load on it would not refit: center() asks
-		 * for the fit by itself, and the fit runs inside the next paint. */
+		/* setOrientation returns early when the view is already the one asked for, so center() forces the refit. */
 		ogl->setOrientation( GLView::ViewTop, true );
 		ogl->center();
 		for ( int i = 0; i < 3; i++ ) {
@@ -838,10 +744,7 @@ void measureLoad()
 			cr.lightsCell = c.interior ? lightsTable : lightsByGrid.value( qMakePair( c.x, c.y ), 0 );
 		}
 		const qint64 trueRefs = cr.refs, trueDrawn = cr.refsDrawn, trueLights = cr.lightsCell;
-		/* RED `stale` (the gate's control): the row carries the counts of the
-		 * cell BEFORE it -- what a one-window walk writes if it reads the window
-		 * before the new load has replaced the old one. Only an outside reader
-		 * of the plugin can tell. */
+		/* RED `stale`: the row carries the previous cell's counts, as a walk that read the window too early would. */
 		if ( g.red == QLatin1String( "stale" ) && g.havePrev ) {
 			cr.refs = g.prevRefs;
 			cr.refsDrawn = g.prevDrawn;
@@ -921,10 +824,8 @@ void prepareUnit( int ui )
 	const int ring = 2 * g.margin;
 	const qint64 n = blockRefs( w, u.tx, u.ty, g.block + ring );
 	if ( n == 0 && !g.needScene ) {
-		/* COUNT ONLY. Nothing is placed in what would be loaded, so every figure
-		 * a row holds about placed objects is zero and is known from the plugin:
-		 * the scene (terrain and water, nothing else) is not built for it. Only
-		 * when no step needs the scene: a bake needs the ground. */
+		/* Count only: nothing is placed, so every row figure is zero and the scene need not be built (unless a
+		 * step needs the ground, as a bake does). */
 		CensusRow r;
 		r.block = g.block + ring;
 		r.steps = QStringLiteral( "census" );
@@ -995,9 +896,8 @@ void openNext()
 		finishWalk( QStringLiteral( "the time budget of %1 s is spent" ).arg( g.budgetS ) );
 		return;
 	}
-	/* the window does not hand back what a big load took (measured: 0.4 GB at
-	 * the start, 13.8 GB twenty-one cells later), so a pass ends at a ceiling
-	 * and the next pass, a new window, resumes. Never before one load is done. */
+	/* The window does not hand memory back after big loads, so a pass ends at a ceiling and a new window resumes.
+	 * Never before one load is done. */
 	if ( g.rssMaxMb > 0 && g.loads > 0 && rssMb() > double( g.rssMaxMb ) ) {
 		finishWalk( QStringLiteral( "the memory ceiling of %1 MB is passed" ).arg( g.rssMaxMb ) );
 		return;
@@ -1121,10 +1021,8 @@ void finishWalk( const QString & why )
 	}
 	if ( qgetenv( "WW_CELL_CENSUS_STAY" ).isEmpty() ) {
 		QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
-		// lane PRTP5: quit() is a request: it closes the windows first and a window may refuse, and asked
-		// before the event loop runs it is lost. A window that found nothing left to load sat until its
-		// timeout, 12 minutes of the NifSkope lock (2026-10-02 13:39). So every two seconds after that
-		// the event loop is told to end without asking anybody, until it does.
+		// quit() is only a request (a window may refuse, and it is lost before the event loop runs), so
+		// every two seconds the event loop is told to end without asking, until it does.
 		QTimer * again = new QTimer( qApp );
 		QObject::connect( again, &QTimer::timeout, qApp, []() { QCoreApplication::exit( 0 ); } );
 		again->start( 2000 );
@@ -1137,7 +1035,7 @@ bool buildPlan( QString * err )
 	const bool dropRed = ( g.red == QLatin1String( "dropcell" ) );
 	int seen = 0;
 	auto add = [&]( const CensusCell & c ) {
-		// RED `dropcell` (the gate's control): the walk quietly leaves cells out
+		// RED `dropcell`: the walk quietly leaves cells out
 		if ( dropRed && ( seen++ % 7 ) == 3 )
 			return;
 		g.plan.append( c );
@@ -1337,14 +1235,8 @@ void startWalk()
 			QStringLiteral( "%1 unknown" ).arg( g.onlyUnknown ) );
 	}
 
-	/* ---- THE SLICES. The wanted units are numbered in plan order, and unit u
-	 * belongs to slice (u mod N) + 1: next-door tiles go to different walkers,
-	 * so a heavy district is shared out.
-	 * RED `dropslice` (the gate's control): the walkers count the slices one
-	 * too many, so one unit in N + 1 belongs to nobody and every walker still
-	 * says it is done.
-	 * RED `doubleslice`: this walker also walks one unit in five that is not
-	 * its own. */
+	/* ---- the slices: wanted unit u belongs to slice (u mod N) + 1, so next-door tiles go to different walkers.
+	 * RED `dropslice` leaves one unit in N + 1 to nobody; RED `doubleslice` also walks one in five not its own. */
 	const bool dropSlice = ( g.red == QLatin1String( "dropslice" ) );
 	const bool doubleSlice = ( g.red == QLatin1String( "doubleslice" ) );
 	QVector<bool> mine( g.units.size(), false );

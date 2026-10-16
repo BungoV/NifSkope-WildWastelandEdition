@@ -32,9 +32,7 @@ bool cellIdentityLoad( const QString & lodiPath, QHash<quint32, CellIdentity> & 
 	LodiHeader h;
 	LodiTable t;
 	QString readError;
-	// payloadCheck = true: the CRCs and the range partitions. This reader is
-	// about to key a PICTURE on the group table, and a file whose chunk CRC is
-	// wrong would draw a picture of corrupted memory with no sign that it had.
+	// payloadCheck = true: the CRCs and range partitions, so a corrupted file never draws a picture
 	if ( !lodiRead( lodiPath, &h, &t, true, &readError ) )
 		return fail( QString( "%1: %2" ).arg( QFileInfo( lodiPath ).fileName(), readError ) );
 
@@ -50,16 +48,12 @@ bool cellIdentityLoad( const QString & lodiPath, QHash<quint32, CellIdentity> & 
 			.arg( t.cold.size() ).arg( t.instances.size() ) );
 
 	if ( !c.hasGroups ) {
-		// Not a failure: a v6 file is a valid file. The caller says the version
-		// out loud; it must not draw an all-grey picture and call it a result.
+		// not a failure: a pre-v7 file is valid; the caller must name the version, not draw all grey
 		if ( census )
 			*census = c;
 		return true;
 	}
 
-	/* The file-wide id. Group ids are dense from 0 INSIDE EACH CHUNK
-	 * (src/lodifile.h, LODI_VERSION_GROUP_SKY), so the chunk index has to be in
-	 * the key or two different objects share one colour. */
 	QHash<quint32, int> groupSize;
 	QHash<quint32, quint32> firstOf;    // refForm -> file-wide group
 	QHash<quint32, bool> treeOf;
@@ -74,10 +68,8 @@ bool cellIdentityLoad( const QString & lodiPath, QHash<quint32, CellIdentity> & 
 		if ( last > quint64( t.instances.size() ) )
 			return fail( QString( "chunk %1 names instances %2..%3 and the blob holds %4" )
 				.arg( ci ).arg( first ).arg( last ).arg( t.instances.size() ) );
-		/* THE GROUP ID IS FILE-WIDE (lane IDENT2, 2026-09-29): `LodiTable::group`
-		 * is a u32 over the whole file for every version -- a v13 file writes it
-		 * so, and the reader offsets a v7..v12 file's per-chunk ids -- so the id
-		 * is the key as it stands and a group cut by a chunk line is one key. */
+		/* `LodiTable::group` is a file-wide u32 for every version (the reader offsets older per-chunk
+		 * ids), so the id is the key and a group cut by a chunk line is one key */
 		for ( quint64 i = first; i < last; i++ ) {
 			const size_t s = size_t( i );
 			const quint32 key = t.group[s];

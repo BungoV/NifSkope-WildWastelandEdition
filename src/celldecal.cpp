@@ -1,4 +1,4 @@
-/* lane PLACED1: placed decals, projected on the CPU. See celldecal.h for the rule. */
+/* Placed decals, projected on the CPU. See celldecal.h for the rule. */
 
 #include "celldecal.h"
 
@@ -21,8 +21,7 @@ namespace
 {
 
 constexpr float DECAL_RAY_LENGTH = 1000.0f;   // the game's reach for a decal without a box
-/* Ours, not the game's: 22 of the Vault's 503 ray decals sit ON their surface (0 to 1 unit past the drawn
- * triangle), where a ray from the reference itself misses by rounding. The ray starts this far behind. */
+// ours, not the game's: decals sitting exactly on their surface miss by rounding, so the ray starts this far behind
 constexpr float DECAL_RAY_SLACK = 1.0f;
 constexpr float DECAL_ANGLE_MIN = 0.3f;      // the angle rule's threshold
 constexpr float DECAL_ANGLE_FADE = 0.25f;     // and its fade width
@@ -369,9 +368,8 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 {
 	out = CellDecalResult();
 	out.fates.assign( refs.size(), CellDecalFate::Drawn );
-	/* RED CONTROL (WW_CELL_DECAL_RED): "none" draws no decal, "wide" doubles every
-	 * box's width and height, "axis" projects along the wrong local axis. Each one
-	 * breaks a different claim of tests/spells/cell_decal.sh. */
+	/* WW_CELL_DECAL_RED debug modes: "none" draws no decal, "wide" doubles every box's width and height,
+	 * "axis" projects along the wrong local axis. */
 	const QByteArray red = qgetenv( "WW_CELL_DECAL_RED" ).trimmed().toLower();
 	out.red = QString::fromLatin1( red );
 	const bool redNone = red == "none" || red == "1";

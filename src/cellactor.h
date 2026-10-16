@@ -1,46 +1,9 @@
 #ifndef CELLACTOR_H
 #define CELLACTOR_H
 
-/* lane PLACED1: PLACED ACTORS in the cell view.
- *
- * A cell places an actor as its own reference record type; the cell view read
- * only the ordinary references, so no actor, living or dead, was in it. This
- * reads them and builds each one AT REST: the race's skeleton, the skin's
- * armor addons, the outfit's armor addons, the pre-built face mesh, all posed
- * on the skeleton's own bind pose and handed to the cell view as ordinary
- * welded shapes at the placed transform. No animation, no ragdoll.
- *
- * WHY ON THE CPU, NOT AS RIGS. The cell view is one welded document. Its
- * shadow pass does not skin, and merging a rig per actor rescans the whole
- * document per merge. So each part is skinned once here, with the same rule
- * the character merge uses: A BONE THE SKELETON NAMES TAKES THE SKELETON'S
- * REST TRANSFORM; a bone only the part has keeps the part's own.
- *   v' = sum_k w_k * ( W_k * B_k ) * v      W_k the bone's rest transform in
- *   actor space, B_k the part's skin-to-bone transform for that bone.
- *
- * THE CHAIN (published record layouts, the xEdit definitions):
- *   looks   = the actor record its Traits come from (template chain; a leveled
- *             list on the way is a dice roll unless it holds exactly one entry
- *             that always spawns)
- *   race    -> skeleton by sex, skin, height by sex, "has a face mesh" flag
- *   skin    = the actor's own, else the race's; each of its addons made for
- *             the race is drawn UNLESS the outfit wears one of its body slots
- *   outfit  = the default outfit of the record the Inventory comes from; each
- *             armor's addons made for the race; a leveled item is taken when it
- *             is not a dice roll (use-all, or one entry), else left out, counted
- *   head    = the pre-built face mesh of the looks record, when the race has
- *             the flag and the file exists; its gore caps are never drawn, its
- *             hair not under headgear
- *   scale   = the reference's scale * the race's height for the sex * the
- *             actor's own height
- *
- * NAMED DIFFERENCES from the game: bind pose, no idle; dead-on-start actors
- * stand where they were placed (the game drops them as ragdolls); no body
- * weight morph, no face tint, no hair color, no weapons; a creature's gore
- * caps are drawn (they sit inside the whole body); an actor with a height
- * range stands at the middle of it (the game rolls it); interiors only.
- * Actors are not REFRs: they stay out of the reference list, the REFR counts
- * and the placement dump, and have their own census line and dump. */
+/* Placed actors in the cell view: each one is built at rest (race skeleton, skin and outfit
+ * addons, face mesh) and skinned once on the CPU into welded shapes, since the cell view's
+ * shadow pass does not skin. A bone the skeleton names takes the skeleton's rest transform. */
 
 #include "esmdata.h"
 #include "nativeemit.h"
@@ -61,7 +24,7 @@ enum class CellActorFate
 	NoSkeleton,     //!< the race's skeleton file does not load
 	NoBodyModel,    //!< no addon of the skin carries a model (a robot built from parts)
 	NoGeometry,     //!< models were named and none gave a triangle
-	RedOff,         //!< the red control switched actors off
+	RedOff,         //!< a debug switch turned actors off
 	Count
 };
 
@@ -96,10 +59,8 @@ public:
 	 *  Every one gets a row; a row keeps the fate Hidden until place() is asked. */
 	QVector<EsmRefr> references();
 
-	/*! Resolve and build one placed actor. True when it is drawn: `key` is what
-	 *  shapes() answers to and `scale` the whole scale to place it with. False
-	 *  = not shown (deleted, no base, or `hidden`: the caller found it disabled
-	 *  at the start) or a named refusal, counted either way. */
+/*! Resolve and build one placed actor. True when drawn (`key` for shapes(), `scale` the whole
+ *  scale); false when not shown or refused, counted either way. */
 	bool place( const EsmRefr & r, bool hidden, QString & key, float & scale );
 
 	//! The built actor, actor space, bind pose.
@@ -108,7 +69,7 @@ public:
 	/*! `  placed actors: R read, drawn D (...), not shown H, refused F: <reason> <count>, ...`.
 	 *  Every placed actor is in exactly one of drawn, not shown or a named refusal. */
 	QString censusLine() const;
-	//! One line per placed actor, tab separated (tests/spells/cell_actor_check.py reads it).
+//! One line per placed actor, tab separated.
 	void dump( const QString & path ) const;
 
 	static QString fateName( CellActorFate f );
