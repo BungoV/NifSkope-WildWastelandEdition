@@ -1,41 +1,8 @@
 #version 410 core
 
-/* lane WATER1 (src/gl/cellwater.h): the game's near-water pixel shader in the cell view, term for term.
- * World space throughout (z up), linear light; V runs from the eye to the pixel, as the game's ray does.
- *   d       = |P - eye|;  dfade = saturate( (d - 8192) / (P1.x - 8192) )            (1 near, 0 past 8192)
- *   depth   vertical = |P.z - S.z|, along the ray = |S - P|, S the opaque scene point behind the pixel;
- *           rz = saturate( 1 - vertical / P1.w ), rw = saturate( 1 - along / P1.w )
- *   alpha   x = saturate( (rw - P3.y) / (P3.x - P3.y) ); a = (1 - (3 - 2x) x^2)^0.33 (P3.w - P3.z) + P3.z
- *   shore   smoothstep( saturate( (rz - P2.x) / (1 - P2.x) ) )
- *   flatten (1 - smoothstep( saturate( (rz - P2.w) / (P2.z - P2.w) ) )) x P2.y
- *   normals n_k = ( 2 t.xy - 1, sqrt( 1 - min( |2 t.xy - 1|^2, 1 ) ) ), t the noise texel at world xy / uv scale;
- *           N = normalize( (n1 - (0,0,1)) Amp.x + (0,0,1) + (n2 Amp.y + n3 Amp.z) dfade ),
- *           N = normalize( flatten (N - up) + up )
- *   Fresnel F = P4.z + (1 - P4.z)(1 - saturate( -V.N ))^5
- *   sky     Rz = reflect( V, N ).z; mix( mix( horizon, lower, sat( Rz + 0.75 ) ), upper, sat( 1.9 Rz + 0.35 ) )
- *   silt    refr + LightSilt.w (1 - a) ( mix( DarkSilt, LightSilt, refr ) - refr )
- *   spec    sun pow( sat( reflect( V, N ).L ), Var.x ) Deep.w + sun pow( sat( N.(-0.099, -0.099, 0.99) ), Shallow.w ) P1.z
- *   colour  mix( mix( Reflection.rgb, mix( silted, sky, F Var.y ), dfade ) + spec, offset refraction, shore ), fog
- * Lane WATER2 (the game's asm, entries 02102 / 02146 / 02100):
- *   SSR     sky = mix( sky, s.rgb, s.a ), s = mix( march, blurred march, fWaterBlurRatio 0.9 ) at this pixel, before
- *           the reflection weight and the far colour read it (tech 0x21c; without SSR, tech 0x1c: the sky alone)
- *   depth   the game's depth-colour pass (02146, tech 0x18010, alpha blend 1) is drawn in the deferred composite,
- *           BEFORE the water itself; the water's refraction copy (t1) therefore holds the scene already murked:
- *           t = mix( t, mix( Deep, Shallow, smooth( sat( (rz - P4.y) / (P4.x - P4.y) ) ) ), a ), a the alpha above,
- *           rz and a taken at the pixel the texel came from (the offset tap: its own ray to the water plane)
- *   rays    waterSslr: the game's water reflection-ray pass instead of the colour: N flattened by HALF the shore
- *           factor, R = reflect( V, N ) into the view, kept when it points more than 0.2 into the view;
- *           out (R in the view, the view depth) for src/gl/cellssr.cpp's ray stage
- * The sun is the frame's light 0 (its direction and colour, the one the cell's surfaces take).
- *
- * Probes (WW_CELL_WATER_PROBE, opaque, raw; "hi/lo" = a 16-bit value's high and low byte):
- *   1/2 N x 0.5 + 0.5   3/4 V x 0.5 + 0.5   5/6 (rz, rw, dfade)   7 the scene texel behind   8 the offset texel
- *   9/10 the frame constants by column (x mod 4): 0 sun colour / 4, 1 sun direction x 0.5 + 0.5, 2 (A.a / 8, D.a / 8,
- *   under the surface), 3 (cellIsOn, cellIsLinear, fogOn)
- *   11/12 the noise taps (t0.x, t0.y, t1.x)  13/14 (t1.y, t2.x, t2.y)  15/16 the SSR read (rgb)  17/18 (a, 0, 0)
- *   19/20/21 the three bytes (high first) of 24-bit fixed ( dist / 16384, along / 4096, vertical / 4096 )
- *   22/23/24 likewise ( the offset texel's along / 4096, vertical / 4096, 1 where the depth pass covered it )
- *   25/26 (WATERHDR1) the linear light the water writes ( lin / 4 )  27 the water's pixels, magenta */
+/* The game's near-water pixel shader in the cell view, term for term (src/gl/cellwater.h). World space (z up),
+ * linear light; V runs from the eye to the pixel. The sun is the frame's light 0. waterSslr = 1 instead writes the
+ * reflection ray for cellssr.cpp. Probes (WW_CELL_WATER_PROBE): raw debug values, hi/lo bytes of 16-bit values. */
 
 #define WW_FOG 1
 #define WW_CELLLIGHTS 1
@@ -66,9 +33,9 @@ uniform sampler2D waterNoise2;
 uniform sampler2D waterScene;	// the frame behind the water, the viewport's corner at texel 0
 uniform sampler2D waterDepth;	// the opaque pass's depth, likewise
 uniform bool waterHaveDepth;
-uniform int waterRed;		// 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 noshore, 32 nonormal,
+uniform int waterRed;		// debug: 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 noshore, 32 nonormal,
 				// 64 nodepthfog, 128 nofar (the noise sampler's, in cellwater.cpp), 256 nossr, 512 fogunits
-uniform bool waterSsrOn;	// lane WATER2: this frame's reflections are bound (half the view, top row first)
+uniform bool waterSsrOn;	// this frame's reflections are bound (half the view, top row first)
 uniform sampler2D waterSsrRaw;	// the march
 uniform sampler2D waterSsrFin;	// the march blurred
 uniform int waterSslr;		// 1: the reflection-ray pass (waterDepth is then the obscurance pass's linear depth)
@@ -126,13 +93,13 @@ float smooth01( float x )
 	return x * x * ( 3.0 - 2.0 * x );
 }
 
-// lane WATER2: the game's depth-colour pass (02146) over a scene texel, linear
+// the game's depth-color pass over a scene texel, linear
 vec3 depthFog( vec3 c, float along, float vert )
 {
 	if ( ( waterRed & 64 ) != 0 )
 		return c;
 	vec4 P1 = waterMat[7], P3 = waterMat[9], P4 = waterMat[10];
-	float k = ( waterRed & 512 ) != 0 ? 0.0142875 : 1.0;	// the red: the distances taken in metres
+	float k = ( waterRed & 512 ) != 0 ? 0.0142875 : 1.0;	// debug: the distances taken in meters
 	float rzF = clamp( 1.0 - vert * k / P1.w, 0.0, 1.0 );
 	float rwF = clamp( 1.0 - along * k / P1.w, 0.0, 1.0 );
 	float xf = clamp( ( rwF - P3.y ) / ( P3.x - P3.y ), 0.0, 1.0 );
@@ -209,7 +176,7 @@ void main()
 	N = normalize( flatten * ( N - vec3( 0.0, 0.0, 1.0 ) ) + vec3( 0.0, 0.0, 1.0 ) );
 
 	if ( waterSslr == 1 ) {
-		// the game's water ray pass (02100): half the flattening, the ray into the view, the 0.2 gate
+		// the game's water ray pass: half the flattening, the ray into the view, the 0.2 gate
 		vec3 Nr = normalize( 0.5 * flatten * ( N0 - vec3( 0.0, 0.0, 1.0 ) ) + vec3( 0.0, 0.0, 1.0 ) );
 		vec3 Rw = reflect( V, Nr );
 		vec3 Rv = vec3( dot( Rw, cellWorldDir( vec3( 1.0, 0.0, 0.0 ) ) ), dot( Rw, cellWorldDir( vec3( 0.0, 1.0, 0.0 ) ) ),
@@ -227,7 +194,7 @@ void main()
 	vec3 R = reflect( V, Ns );
 	vec3 sky = mix( waterSky[0].rgb, waterSky[1].rgb, clamp( R.z + 0.75, 0.0, 1.0 ) );
 	sky = mix( sky, waterSky[2].rgb, clamp( R.z * 1.9 + 0.35, 0.0, 1.0 ) );
-	// lane WATER2: the game's screen-space reflection over the sky (02102 lines 146-152)
+	// the game's screen-space reflection over the sky
 	vec4 ssr = vec4( 0.0 );
 	if ( waterSsrOn && !under ) {
 		vec2 suv = clamp( ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw ), 0.0, 1.0 );
@@ -246,8 +213,8 @@ void main()
 	vec3 texOff = texelFetch( waterScene, opx, 0 ).rgb;
 	vec3 refr = frameToLinear( texIn );
 	vec3 refrOff = frameToLinear( texOff );
-	// lane WATER2: the depth-colour pass already drawn into the copy: here at this pixel's own distances, at the
-	// offset texel at that texel's (its view ray met with the water's plane, where the water stands before the scene)
+	// the depth-color pass is drawn into the copy before the water: apply it here at this pixel's distances, and
+	// at the offset texel's (its view ray met with the water plane)
 	float offAlong = 0.0, offVert = 0.0, offHit = 0.0;
 	if ( !under && waterSslr == 0 ) {
 		refr = depthFog( refr, along, vert );
@@ -282,7 +249,7 @@ void main()
 
 	vec3 lin;
 	if ( under ) {
-		// the game's underwater variant: half the sky and half the underwater colour, the scene by 1 - F
+		// the game's underwater variant: half the sky and half the underwater color, the scene by 1 - F
 		vec3 refl = 0.5 * ( sky + waterMat[3].rgb );
 		lin = mix( refl, refr, 1.0 - F );
 	} else {
@@ -330,9 +297,9 @@ void main()
 			o = fix24( vec3( dist / 16384.0, along / 4096.0, vert / 4096.0 ), waterProbe - 19 );
 		else if ( waterProbe >= 22 && waterProbe <= 24 )
 			o = fix24( vec3( offAlong / 4096.0, offVert / 4096.0, offHit ), waterProbe - 22 );
-		else if ( waterProbe == 25 || waterProbe == 26 )	// WATERHDR1: the linear light this pixel writes, / 4
+		else if ( waterProbe == 25 || waterProbe == 26 )	// the linear light this pixel writes, / 4
 			o = waterProbe == 25 ? hi16( lin * 0.25 ) : lo16( lin * 0.25 );
-		else if ( waterProbe == 27 )	// WATERHDR1: the water's pixels, magenta
+		else if ( waterProbe == 27 )	// the water's pixels, magenta
 			o = vec3( 1.0, 0.0, 1.0 );
 		fragColor = vec4( o, 1.0 );
 	}

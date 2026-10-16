@@ -1,6 +1,6 @@
 #version 410 core
 
-// lane DECALLIT1: fo4_effectdecal.frag with the cascaded sun shadows compiled in, chosen while the cascade map is built.
+// fo4_effectdecal.frag with the cascaded sun shadows compiled in, chosen while the cascade map is built.
 #define WW_CELLLIGHTS 1
 #define WW_CELL_FX 1
 #define WW_FX_DECALLIT 1

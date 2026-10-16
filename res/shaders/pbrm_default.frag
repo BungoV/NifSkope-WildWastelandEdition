@@ -11,31 +11,15 @@
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
 #include "cell_grass.glsl"
-#define WW_CELL_FOGGED cellOn	// lane FOG2: a cell-lit draw fogged before its imagespace
-uniform sampler2D CellSpecMap;	// lane CUBE1: a legacy material's specular map (R scale, G smoothness), for the cube term
+#define WW_CELL_FOGGED cellOn	// a cell-lit draw is fogged before its imagespace
+uniform sampler2D CellSpecMap;	// a legacy material's specular map (R scale, G smoothness), for the cube term
 #else
 #define WW_CELL_FOGGED false
 #endif
 
-// PBRM (PBR Material Editor) metallic/roughness path.
-//
-// Stage R3 (lane PBRR3, docs/NIFSKOPE_PBR_RENDERER.md s3.2): the FO4CS runtime's
-// BRDF (truepbr_brdf.hlsli, wave 89 SPECV6) with the v6 specular of
-// PBRM-v6-Specular.md, evaluated from ONE resolved surface (evalSurface):
-//   F0_ior  = ((ior-1)/(ior+1))^2        ior = constant, or the spec map's A x iorMax
-//   F_diel  = Schlick( F0' = weight * tint * F0_ior, F90' = sat( 50 F0' ) )
-//             OpenPBR v1.1.1's IOR remap (lane PBRR4): the weight scales F0, so the
-//             remapped IOR's Fresnel keeps its grazing rise; weight 0 = ior' 1 = no lobe
-//   F_metal = weight * F82( base, tint )  (the editor's; tint 1 = plain Schlick)
-//   D       = GGX( alpha = rough^2 )      Vis = height-correlated Smith
-//   env     = cube * [ (F0 A + B) ms ]    Lazarov analytic DFG, ms = 1 + F0 (1/(A+B) - 1)
-//   split   = indirect diffuse x ( 1 - E_spec )   (Q6, FO4CS bIndirectEnergySplit)
-//   diffuse = Burley x ( 1 - F ), or EON when diffuseRoughness > 0 (direct light)
-//   tint    = max( 0, (1 - sum m) + sum c m ), base *= tint   (lane PBRR4, ED:2310-2316)
-//   emit    = colour * mask * luminance/100, a map REPLACES the constant (ED:2519-2521)
-//   opacity = the .pbrm composition (ED:2282-2283, 2336-2337, 2921)
-// Not here: the editor's vegetation/parallax/surface states, coat/sheen/anisotropy,
-// refraction (merge, s3.3).
+// PBRM (PBR Material Editor) metallic/roughness path: the FO4CS runtime BRDF (truepbr_brdf.hlsli) with the v6
+// specular, evaluated from one resolved surface (evalSurface). GGX + height-correlated Smith, Lazarov env DFG with
+// multiscatter, Burley or EON diffuse, OpenPBR v1.1.1 specular weight; tint/emission/opacity follow the editor.
 
 uniform sampler2D BaseMap;      // sRGB RGB, A opacity
 uniform sampler2D NormalMap;    // linear RG (+B height, A curvature)
@@ -65,14 +49,14 @@ uniform float pbrEmissiveMask;		// the constant A mask
 uniform bool pbrEmissiveMapColor;	// the map's RGB replaces the constant (!overrideColor)
 uniform bool pbrEmissiveMapMask;	// the map's A replaces the constant mask (!overrideMask)
 
-// Tint masks (lane PBRR4): the editor's special layer 0 (ED:2310-2316)
+// Tint masks: the editor's special layer 0 (ED:2310-2316)
 uniform bool pbrTintEnabled;
 uniform int pbrTintUseTex;			// bit c: mask c comes from TintMaskMap
 uniform vec4 pbrTintMasks;			// the constant masks
 uniform vec3 pbrTintColors[4];		// raw sRGB (Q13: the editor does not decode them)
 uniform int pbrTintMode;			// 0 Normalize, 1 Add, 2 Priority RGBA
 
-// Composition (lane PBRR4): -1 = the NIF alpha property (derived/legacy shapes);
+// Composition: -1 = the NIF alpha property (derived/legacy shapes);
 // 0 Opaque, 1 Alpha Test, 2 Alpha Blend, 3 Premultiplied, 4 Additive, 5 Multiply,
 // 6 Physical Transmission, 7 Water (6/7 blend like 2 until the merge)
 uniform int pbrComposition;
@@ -99,7 +83,7 @@ uniform int pbrFeatures;
 uniform bool hasCubeMap;
 uniform float envReflection;
 
-// Scene lighting (lane PBRR2A, docs s5.2). Only this program reads these, so the
+// Scene lighting. Only this program reads these, so the
 // legacy programs cannot move. sceneMode 0 = Legacy, 1 = Studio, 2 = Lookdev (Studio + the weather DALC).
 uniform int sceneMode;
 uniform float sceneExposure;		// 2^EV, Studio only
@@ -110,9 +94,9 @@ uniform bool specIsSrgbTex;
 uniform bool hasStudioCube;
 uniform samplerCube StudioCube;		// SFCubeMapCache GGX-prefiltered specular cube (Studio)
 uniform samplerCube IrradianceMap;	// its 32 px diffuse cube (Studio)
-uniform float studioProbe;			// >= 0: replace the lit result by this linear value (output gate)
-uniform vec3 lookdevDalc[6];		// Lookdev (sceneMode 2, lane PBRR2B): DALC ambient, linear, X+ X- Y+ Y- Z+ Z-
-uniform bool lookdevDalcFlip;		// red "dalcflip": the other axis-sign convention
+uniform float studioProbe;			// >= 0: replace the lit result by this linear value (debug output)
+uniform vec3 lookdevDalc[6];		// Lookdev (sceneMode 2): DALC ambient, linear, X+ X- Y+ Y- Z+ Z-
+uniform bool lookdevDalcFlip;		// debug "dalcflip": the other axis-sign convention
 uniform float studioSun;			// WW_STUDIO_SUN: the Studio/Lookdev sun scale (0 = the white furnace)
 uniform int r3Term;					// WW_R3_TERM: 0 all, 1 diffuse only, 2 specular only
 uniform int r3Red;					// WW_R3_RED: 1 noms, 2 nosplit, 4 fo4csweight, 8 notint, 16 f90scaled, 32 lambert
@@ -120,7 +104,7 @@ uniform int r4Red;					// WW_R4_RED: 1 nodiv, 2 emitmul, 4 notintmask, 8 emitraw
 
 uniform float alpha;
 uniform int alphaFlags;
-uniform bool landSplat;		// lane TERRBLEND1: vertex alpha = this blended-ground pass's share
+uniform bool landSplat;		// vertex alpha = this blended-ground pass's share
 uniform float alphaThreshold;
 
 uniform vec2 uvScale;
@@ -132,7 +116,7 @@ in vec2 texCoord;
 
 flat in vec4 A;
 in vec4 C;
-in float rawVertexAlpha;	// lane TERRBLEND1: the vertex colour's own alpha (fo4_default.vert)
+in float rawVertexAlpha;	// the vertex color's own alpha (fo4_default.vert)
 flat in vec4 D;
 
 in mat3 btnMatrix;
@@ -193,7 +177,7 @@ vec3 srgbToLinear( vec3 c )
 	return mix( c / 12.92, pow( ( c + 0.055 ) / 1.055, vec3( 2.4 ) ), step( vec3( 0.04045 ), c ) );
 }
 
-// the sRGB OETF: the encode is here, never GL_FRAMEBUFFER_SRGB (docs s8)
+// the sRGB OETF: the encode is here, never GL_FRAMEBUFFER_SRGB
 vec3 linearToSrgb( vec3 c )
 {
 	c = clamp( c, 0.0, 1.0 );
@@ -253,9 +237,7 @@ vec3 studioOutput( vec3 c )
 	return linearToSrgb( c );	// Standard = "tonemap None"
 }
 
-// Same Hable/Uncharted curve the FO4 path uses, so a PBRM material and a BGSM
-// material in the same scene are tonemapped identically instead of one looking
-// washed out next to the other.
+// Same Hable/Uncharted curve as the FO4 path, so PBRM and BGSM materials in one scene tonemap identically.
 vec3 tonemap( vec3 x )
 {
 	float a = 0.15;
@@ -284,13 +266,9 @@ struct Surface
 	float diffRough;	// EON roughness, 0 = Burley
 };
 
-/* The specular weight, OpenPBR v1.1.1 (bungo RULED 2026-09-24, lane PBRR4): the weight
- * remaps the IOR, F0' = clamp( w F0(ior) ), ior' = (1 + sqrt F0') / (1 - sqrt F0'), and the
- * dielectric Fresnel is the one of ior'. Its Schlick form keeps F90 = 1 for any real ior'
- * and must reach 0 at ior' = 1 (weight 0 = no lobe): F90' = sat( 50 F0' ), the 2% knee
- * below which no real dielectric sits. So weight 0.5 halves the head-on reflectance and
- * keeps the grazing rise (80 deg: 0.970 of weight 1 at ior 1.5). Reds: "fo4csweight" =
- * the runtime's F90 = 1 at every weight, "f90scaled" = lane PBRR3's w x Schlick (F90 scaled). */
+/* The specular weight, OpenPBR v1.1.1: F0' = clamp( w F0(ior) ), and the dielectric Fresnel is that of
+ * ior' = (1 + sqrt F0') / (1 - sqrt F0'). F90' = sat( 50 F0' ) keeps the grazing rise yet reaches 0 at weight 0.
+ * Debug: "fo4csweight" = F90 = 1 at every weight, "f90scaled" = w x Schlick. */
 vec3 dielF0( Surface s ) { return clamp( s.weight * s.f0d, 0.0, 1.0 ); }
 vec3 dielF90( Surface s )
 {
@@ -319,7 +297,7 @@ vec3 surfaceF0( Surface s )
 	return mix( s.weight * s.f0d, s.weight * s.base, s.metal );
 }
 
-// Multiscatter energy compensation (FO4CS truepbr_brdf.hlsli:104-105). Red "noms": 1.
+// Multiscatter energy compensation (FO4CS truepbr_brdf.hlsli:104-105). Debug "noms": 1.
 vec3 multiScatter( Surface s, vec2 dfg )
 {
 	if ( ( r3Red & 1 ) != 0 )
@@ -329,7 +307,7 @@ vec3 multiScatter( Surface s, vec2 dfg )
 }
 
 // E_spec: the specular lobe's directional albedo, multiscatter included -- the env
-// specular scale and the energy the indirect diffuse gives up (Q6)
+// specular scale and the energy the indirect diffuse gives up
 vec3 specAlbedo( Surface s, vec2 dfg, vec3 ms )
 {
 	// the split sum of Schlick( F0, F90 ) is F0 A + F90 B
@@ -371,8 +349,8 @@ void directLight( Surface s, vec3 L, vec3 V, vec3 ms, out vec3 dDiff, out vec3 d
 		vec3 fms = rhoMs / M_PI * max( 0.01, 1.0 - EFo ) * max( 0.01, 1.0 - EFi ) / max( 0.01, 1.0 - avgEF );
 		dDiff = keep * ( fss + fms ) * NoL;
 	} else {
-		// Burley, the game's (FO4CS wt-spec1 F4FX/Lighting/truepbr_brdf.hlsli:57-66, the
-		// 1 - F keep :74-83), with the specular energy removed. Red "lambert": fd = 1.
+		// Burley, the game's (FO4CS truepbr_brdf.hlsli:57-66), with the specular energy removed.
+		// Debug "lambert": fd = 1.
 		float f90 = 0.5 + 2.0 * s.rough * LoH * LoH;
 		float fd = ( 1.0 + ( f90 - 1.0 ) * pow5( 1.0 - NoL ) ) * ( 1.0 + ( f90 - 1.0 ) * pow5( 1.0 - NoV ) );
 		if ( ( r3Red & 32 ) != 0 )
@@ -385,22 +363,20 @@ void main()
 {
 	vec2 offset = texCoord.st * uvScale + uvOffset;
 
-	// --- base colour / opacity ---
+	// --- base color / opacity ---
 	vec3 base = pbrBaseColor;
 	float op = pbrOpacity;
 	if ( hasFeature( F_BASECOLOR ) ) {
 		vec4 bc = texture( BaseMap, offset );
-		// decoded as sRGB whatever the DXGI tag says (s5.2): an sRGB-tagged
+		// decoded as sRGB whatever the DXGI tag says: an sRGB-tagged
 		// texture arrives decoded by GL, an UNORM one is decoded here
 		base = ( baseIsSrgbTex ? bc.rgb : srgbToLinear( bc.rgb ) ) * pbrBaseColor;
-		// Only treat the texture's alpha as coverage when the material says so.
-		// Taking it unconditionally discarded every fragment on legacy materials,
-		// whose diffuse alpha is frequently zero or unrelated to opacity.
+		// Alpha is coverage only when the material says so: legacy diffuse alpha is often zero or unrelated.
 		if ( hasFeature( F_OPACITY ) )
 			op = ( pbrComposition >= 0 ) ? bc.a : bc.a * pbrOpacity;	// the editor's baseAlpha replaces (ED:2258)
 	}
 
-	// --- tint masks (ED:2310-2316, the law verbatim) ---
+	// --- tint masks (ED:2310-2316, verbatim) ---
 	if ( pbrTintEnabled && ( r4Red & 4 ) == 0 ) {
 		vec4 masks = pbrTintMasks;
 		if ( pbrTintUseTex != 0 ) {
@@ -435,13 +411,13 @@ void main()
 		}
 		color.a = opacity;
 #ifdef WW_CELLLIGHTS
-		if ( wwGrassFadeK( ViewDir ) <= 0.0 )	// lane GRASSMB1: a composed grass material past its fade
+		if ( wwGrassFadeK( ViewDir ) <= 0.0 )	// a composed grass material past its fade
 			discard;
 #endif
 	} else if ( alphaFlags > 0 ) {
 #ifdef WW_CELLLIGHTS
 		float a = wwGrassVertexA( C.a ) * op * alpha;
-		a *= wwGrassFadeK( ViewDir );	// lane GRASSMB1: exactly 1.0 on every non-grass shape
+		a *= wwGrassFadeK( ViewDir );	// exactly 1.0 on every non-grass shape
 #else
 		float a = C.a * op * alpha;
 #endif
@@ -453,7 +429,7 @@ void main()
 	}
 
 	// --- normal ---
-	// (s*255 - 128)/127 like the game's unpack (docs s3.2 item 3), Z rebuilt (B is
+	// (s*255 - 128)/127 like the game's unpack, Z rebuilt (B is
 	// height when the material says so, never a normal component)
 	vec3 normal = vec3( 0.0, 0.0, 1.0 );
 	if ( hasFeature( F_NORMAL ) ) {
@@ -503,7 +479,7 @@ void main()
 	if ( ( r3Red & 8 ) != 0 )
 		s.tint = vec3( 1.0 );
 	s.f0d = s.tint * f0ior;
-	s.rough = clamp( s.rough, 0.035, 1.0 );	// the design's floor (docs s3.2 item 3; FO4CS 0.045)
+	s.rough = clamp( s.rough, 0.035, 1.0 );	// the design's floor (FO4CS uses 0.045)
 	s.metal = clamp( s.metal, 0.0, 1.0 );
 	s.weight = clamp( s.weight, 0.0, 1.0 );
 	s.diffRough = clamp( pbrDiffuseRoughness, 0.0, 1.0 );
@@ -514,22 +490,19 @@ void main()
 	vec2 dfg = dfgLazarov( NdotV, s.rough );
 	vec3 ms = multiScatter( s, dfg );
 	vec3 Espec = specAlbedo( s, dfg, ms );
-	// Q6: the indirect diffuse gives up the energy the specular lobe took. Red "nosplit".
+	// the indirect diffuse gives up the energy the specular lobe took. Debug "nosplit".
 	vec3 keepInd = ( ( r3Red & 2 ) != 0 ) ? vec3( 1.0 ) : clamp( vec3( 1.0 ) - Espec, 0.0, 1.0 );
 	vec3 rho = s.base * ( 1.0 - s.metal );
 
-	// Linear throughout (lane PBRR2A, docs s5.2). The sun is the one directional
-	// light in LINEAR units: its irradiance is the uploaded diffuse colour x PI, so
-	// a white Lambert surface facing a sun of 1 reads 1 -- the scale the Studio
-	// environment has. The vertex stage's D.rgb is sqrt(diffuse), the legacy sqrt
-	// space; this program reads the uniform itself and never squares a sqrt.
+	// Linear throughout. The sun's irradiance is the uploaded diffuse color x PI, so a white Lambert surface
+	// facing a sun of 1 reads 1; D.rgb is sqrt(diffuse), so read the uniform rather than square a sqrt.
 	vec3 sunE = lightSourceDiffuse[0].rgb * M_PI * ( sceneMode >= 1 ? studioSun : 1.0 );
 	vec3 dDiff, dSpec;
 	directLight( s, normalize( LightDir ), V, ms, dDiff, dSpec );
 	vec3 outDiff = dDiff * sunE;
 	vec3 outSpec = dSpec * sunE;
 #ifdef WW_SUNSHADOW
-	// lane CSM1 (spec 2.8): the cascade factor on the SUN's diffuse and specular only
+	// the cascade factor on the SUN's diffuse and specular only
 	float csmF = wwSunShadow( -ViewDir );
 	outDiff *= csmF;
 	if ( ( csmRed & 4 ) == 0 )
@@ -537,22 +510,15 @@ void main()
 #endif
 
 	// --- ambient + environment ---
-	// AO belongs on ambient, not on direct light: occlusion describes what the
-	// surface cannot see of the environment, and applying it to a direct lobe
-	// double-darkens contact shadows.
-	vec3 preAmbDiff = outDiff;	// lane SKY1: what the block below adds is the ambient's diffuse
+	// AO belongs on ambient only: applying it to a direct lobe double-darkens contact shadows.
+	vec3 preAmbDiff = outDiff;	// what the block below adds is the ambient's diffuse
 	if ( sceneMode >= 1 && hasStudioCube ) {
-		// Studio: the SFCubeMapCache pair. The irradiance cube is the radiance
-		// average (a uniform cube L stays L), so Lambert takes it without 1/PI.
-		// FO76's roughness->lod law m = r*(10-4r) over the 7 filtered levels
-		// (f76_default.frag:188).
+		// Studio: the irradiance cube is the radiance average, so Lambert takes it without 1/PI.
+		// FO76's roughness->lod law m = r*(10-4r) over the 7 filtered levels (f76_default.frag:188).
 		vec3 irr = texture( IrradianceMap, reflMatrix * s.N ).rgb;
 		if ( sceneMode == 2 ) {
-			// Lookdev: the weather's DALC 6-axis ambient on the WORLD normal (Z up).
-			// An up-facing normal takes the Z- colour: MEASURED (lane PBRR3, the engine
-			// builds the Z
-			// row as 0.5 (Z- - Z+), dotted with the normal, never negated). The engine
-			// blends linearly in the normal, in gamma space; this n^2 pick owes that.
+			// Lookdev: the weather's DALC 6-axis ambient on the WORLD normal (Z up); an up-facing normal
+			// takes the Z- color (measured). The engine blends linearly in gamma space; this n^2 pick approximates it.
 			vec3 wn = envMapRotation * s.N;
 			vec3 n2 = wn * wn;
 			vec3 ax = ( ( wn.x > 0.0 ) != lookdevDalcFlip ) ? lookdevDalc[1] : lookdevDalc[0];
@@ -564,9 +530,8 @@ void main()
 		vec3 env = textureLod( StudioCube, reflMatrix * R, s.rough * ( 10.0 - 4.0 * s.rough ) ).rgb;
 		outSpec += env * Espec * s.ao;
 	} else {
-		// Legacy (or Studio without a cube): the legacy light inputs un-squared.
-		// A.rgb = sqrt(ambient) * 0.375, so A.rgb^2 is the ambient the legacy
-		// shapes see in linear terms.
+		// Legacy (or Studio without a cube): A.rgb = sqrt(ambient) * 0.375, so A.rgb^2 is the
+		// ambient the legacy shapes see in linear terms.
 		outDiff += A.rgb * A.rgb * rho * keepInd * s.ao;
 		if ( hasCubeMap ) {
 			vec3 cube = textureLod( CubeMap, reflMatrix * R, s.rough * 8.0 ).rgb;
@@ -575,18 +540,16 @@ void main()
 		}
 	}
 #ifdef WW_CELLLIGHTS
-	/* lane PRTPGI: the cell's own lights through this BRDF, irradiance colour x curve x PI (the
-	 * sun's convention above: a white Lambert surface reads what the legacy cell path reads), and
-	 * the bake's bounce. Interior: they replace the viewport light and ambient, the DALC ambient
-	 * standing in for the environment cube; exterior: they add. */
-	vec3 cubeK = vec3( 0.0 );	// lane CUBE1: the interior cube reflection before its light (probe 50)
+	/* the cell's own lights through this BRDF (irradiance x PI, as the sun above) and the bake's bounce.
+	 * Interior: they replace the viewport light and ambient (DALC for the cube); exterior: they add. */
+	vec3 cubeK = vec3( 0.0 );	// the interior cube reflection before its light (probe 50)
 	if ( cellOn ) {
 		vec3 Pw = cellWorldPos( -ViewDir );
 		Surface sw = s;
 		sw.N = cellWorldDir( s.N );
 		vec3 Vw = cellWorldDir( V );
 		vec3 cDiff = vec3( 0.0 ), cSpec = vec3( 0.0 ), cE = vec3( 0.0 );
-		vec3 farF, farGP;	// lane FARVIEW1: the real lights fade over the band, the surfels take over (diffuse only)
+		vec3 farF, farGP;	// the real lights fade over the band, the surfels take over (diffuse only)
 		float farW = cellFarTerms( Pw, sw.N, farF, farGP );
 		int farN = farW >= 1.0 ? 0 : cellLightCount;
 		for ( int i = 0; i < farN; i++ ) {
@@ -615,10 +578,10 @@ void main()
 			outSpec = cSpec;
 			cE += giE;
 			if ( cellHasDalc && cellGiAmb == 0 ) {
-				outDiff += cellAmbient( sw.N, Pw ) * rho * keepInd * s.ao;	// lane AMBO2: P picks the Ambient Only volume
+				outDiff += cellAmbient( sw.N, Pw ) * rho * keepInd * s.ao;	// P picks the Ambient Only volume
 				outSpec += cellAmbient( reflect( -Vw, sw.N ), Pw ) * Espec * s.ao;
 				cE += cellAmbient( sw.N, Pw );
-			} else if ( cellHasDalc ) {	// lane GICAL1: WW_CELL_GI_AMB (cellAmbGi); the reflection's ambient by the same luminance share
+			} else if ( cellHasDalc ) {	// WW_CELL_GI_AMB (cellAmbGi); the reflection's ambient by the same luminance share
 				vec3 a0 = cellAmbient( sw.N, Pw );
 				vec3 a1 = cellAmbGi( a0, giE, Pw, sw.N );
 				float k = dot( a1, vec3( 0.2126, 0.7152, 0.0722 ) ) / max( dot( a0, vec3( 0.2126, 0.7152, 0.0722 ) ), 1.0e-6 );
@@ -633,9 +596,8 @@ void main()
 				outSpec += dS * cellDirColor * M_PI;
 				cE += cellDirColor * max( dot( sw.N, normalize( cellDirTo ) ), 0.0 );
 			}
-			// the material's cubemap, lit by the light reaching this point (a dark corner reflects dark)
-			// lane CUBE1: a legacy material takes the game's term (with its own specular map, CellSpecMap);
-			// a .pbrm shape, and WW_CELL_LIT_RED=cubeold, the old law
+			// the material's cubemap, lit by the light reaching this point (a dark corner reflects dark);
+			// legacy materials take the game's term, .pbrm shapes (and WW_CELL_LIT_RED=cubeold) the old law
 			if ( hasCubeMap ) {
 				if ( cellCubeGameOn() && ( cellRed & 512 ) == 0 ) {
 					vec2 sg = texture( CellSpecMap, offset ).rg;
@@ -645,14 +607,14 @@ void main()
 					cubeK = cube * cube * envReflection * Espec * s.ao;
 				}
 			}
-			// lane SSR1: the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
+			// the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
 			if ( cellSsrOn || cellProbe == 60 ) {
 				vec2 sg = texture( CellSpecMap, offset ).rg;
 				cubeK = cellSsrMix( cubeK, cellCubeMat.y * sg.g, cellCubeMat.x * sg.r, envReflection );
 			}
 			outSpec += cubeK * cE;
 		} else if ( cellGiSky ) {
-			// lane SKY1: the grid's sky stands in for the weather's unshadowed ambient by its valid share,
+			// the grid's sky stands in for the weather's unshadowed ambient by its valid share,
 			// and takes the material's AO as that ambient did
 			outDiff += cDiff + giDiff * s.ao - cellGiSkyK( Pw, sw.N ) * ( outDiff - preAmbDiff );
 			outSpec += cSpec;
@@ -663,12 +625,11 @@ void main()
 	}
 #endif
 	color.rgb = ( r3Term == 1 ) ? outDiff : ( r3Term == 2 ) ? outSpec : outDiff + outSpec;
-	if ( r3Term == 3 )	// gate s1b: the surface Fresnel at N.V
+	if ( r3Term == 3 )	// debug: the surface Fresnel at N.V
 		color.rgb = surfaceF( s, NdotV );
 
-	// --- emission (ED:2519-2521): colour x mask x luminance/100, added before exposure,
-	// never the legacy glow scale. A map REPLACES the constant colour / mask unless that
-	// channel is overridden. Red "emitmul": the old constant x map law; "emitraw": no /100.
+	// --- emission (ED:2519-2521): color x mask x luminance/100, added before exposure; a map REPLACES the
+	// constant unless overridden. Debug "emitmul": constant x map, "emitraw": no /100.
 	if ( pbrEmissiveIntensity > 0.0 && r3Term == 0 ) {
 		vec3 ecol = pow( max( pbrEmissiveColor, vec3( 0.0 ) ), vec3( 2.2 ) );
 		float emask = pbrEmissiveMask;
@@ -687,31 +648,30 @@ void main()
 	}
 
 #ifdef WW_CELLLIGHTS
-	vec3 cellSsrScene = color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
-	// lane AO1: the ambient obscurance on the whole lit colour, before the fog
+	vec3 cellSsrScene = color.rgb;	// what the reflections' march samples (probe 60)
+	// the ambient obscurance on the whole lit color, before the fog
 	if ( cellOn )
 		color.rgb *= cellAoFactor();
-	// lane FOG2: a cell-lit draw fogs here, once (the interior's fog, or the Lookdev weather's outdoors)
+	// a cell-lit draw fogs here, once (the interior's fog, or the Lookdev weather's outdoors)
 	if ( cellOn && fogOn )
 		color.rgb = wwFog( max( color.rgb, vec3( 0.0 ) ), -ViewDir );
-	// lane IMGS1: the cell's imagespace in place of the viewer's curve; probe 6 writes the linear colour raw
+	// the cell's imagespace in place of the viewer's curve; probe 6 writes the linear color raw
 	vec3 cellHdr = max( color.rgb, vec3( 0.0 ) );
 	if ( cellOn && cellIsOn )
-		color.rgb = cellIsLinear ? cellHdr : cellImageSpace( sqrt( cellHdr ) );	// lane HDR1: linear into the HDR frame
+		color.rgb = cellIsLinear ? cellHdr : cellImageSpace( sqrt( cellHdr ) );	// linear into the HDR frame
 	else
 #endif
 	if ( sceneMode >= 1 ) {
 		if ( sceneMode == 2 && !WW_CELL_FOGGED )
-			color.rgb = wwFog( color.rgb, -ViewDir );	// lane FOG1: linear, before the exposure
+			color.rgb = wwFog( color.rgb, -ViewDir );	// linear, before the exposure
 		if ( studioProbe >= 0.0 )
 			color.rgb = vec3( studioProbe );
 		color.rgb = studioOutput( color.rgb );
 	} else {
-		// Legacy lighting: the linear result goes out through the legacy Hable +
-		// sqrt, which expects its input in sqrt space.
+		// Legacy lighting: the linear result goes out through the legacy Hable + sqrt (sqrt-space input).
 		color.rgb = tonemap( sqrt( max( color.rgb, vec3( 0.0 ) ) ) );
 	}
-	// Premultiplied: the mapped colour times opacity (ED:2921), blended ONE, 1 - SRC_ALPHA
+	// Premultiplied: the mapped color times opacity (ED:2921), blended ONE, 1 - SRC_ALPHA
 	if ( pbrComposition == 3 && ( r4Red & 16 ) == 0 )
 		color.rgb *= color.a;
 
@@ -720,9 +680,9 @@ void main()
 	if ( cellOn && cellProbe > 0 )
 		fragColor = cellProbe == 6 ? vec4( cellHdr, color.a )
 			: vec4( cellProbeRaw( cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 1.0 );
-	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )	// lane CUBE1
+	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )
 		fragColor = vec4( cellProbe == 50 ? clamp( cubeK * 0.25, 0.0, 1.0 ) : cellCubeProbe( offset, s.N ), 1.0 );
-	if ( cellOn && cellPass > 0 && cellProbe == 0 )	// lane PROBEVIEW1: the PRTP band's Pass
+	if ( cellOn && cellPass > 0 && cellProbe == 0 )	// the PRTP band's Pass view
 		fragColor = vec4( cellPassOut( cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 1.0 );
 #endif
 	vec3 fogProbeOut;
@@ -735,16 +695,14 @@ void main()
 #endif
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 )
-		fragColor = cellAoPassOut( s.N, -ViewDir );	// lane AO1
+		fragColor = cellAoPassOut( s.N, -ViewDir );
 	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
-		fragColor = cellSsrProbeOut( cellSsrScene );	// lane SSR1
+		fragColor = cellSsrProbeOut( cellSsrScene );
 #endif
-	/* lane TERRBLEND1: a blended-ground pass (src/cellsplat.h). The vertex alpha
-	 * is this pass's SHARE of the engine's weighted sum: an opaque base is scaled
-	 * by it, a layer is ADDED at it (SRC_ALPHA, ONE). Never the texture's alpha, and
-	 * the RAW vertex alpha: vertexColorOverride may force C.a to 1. */
-	/* water2fix: never over the data passes -- the obscurance pass (20: normal + view depth) and the
-	 * reflections' scene pass (60/61): the ground wrote depth 1 there and the water SSR march died on it */
+	/* a blended-ground pass (src/cellsplat.h): the RAW vertex alpha (C.a may be overridden) is this pass's share;
+	 * an opaque base is scaled by it, a layer is added at it (SRC_ALPHA, ONE). */
+	/* never over the data passes (20, 60/61): the ground would write depth 1 there and the water SSR march
+	 * would die on it */
 	bool splatData = false;
 #ifdef WW_CELLLIGHTS
 	splatData = cellOn && ( cellProbe == 20 || cellProbe == 60 || cellProbe == 61 );
