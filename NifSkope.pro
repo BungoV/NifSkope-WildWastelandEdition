@@ -832,7 +832,7 @@ win32 {
     # cross-application color eyedropper.
     # -lpsapi: GetProcessMemoryInfo, behind the bake census line's peak
     # working set (lane BAKEPERF1, 2026-09-11)
-    LIBS += -lopengl32 -lgdi32 -lpsapi
+    LIBS += -lopengl32 -lgdi32 -lpsapi -lwinmm
 }
 
 macx {

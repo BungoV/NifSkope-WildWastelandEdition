@@ -5,6 +5,7 @@
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellcull.h"	// lane SUNCELL1
 #include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
+#include "gl/cellpasstime.h"	// lane PERF1
 #include "cellmesh.h"
 #include "cellspeed.h"
 #include "gl/glnode.h"
@@ -342,6 +343,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			glEnable( GL_FRAMEBUFFER_SRGB );
 		else
 			glDisable( GL_FRAMEBUFFER_SRGB );
+		PassTime::CpuScope ptSetup( PassTime::ShapeSetup );	// lane PERF1
 		shader = context->setupProgram( this, shader );
 
 	} else if ( auto prog = context->useProgram( "selection.prog" ); prog ) {
@@ -395,11 +397,14 @@ void BSShape::drawShapes( NodeList * secondPass )
 			cullCounts.push_back( GLsizei( cullRanges[k + 1] * 3 ) );
 			cullOffsets.push_back( (const void *) ( size_t( cullRanges[k] ) * 6 ) );
 		}
-		if ( !cullCounts.empty() )
+		if ( !cullCounts.empty() ) {
 			context->fn->glMultiDrawElements( GL_TRIANGLES, cullCounts.data(), GL_UNSIGNED_SHORT, cullOffsets.data(),
 				GLsizei( cullCounts.size() ) );
+			PassTime::countDraw( qint64( cullCounts.size() ) );	// lane PERF1
+		}
 	} else if ( numTriangles > 0 && !hiddenT ) {
 		context->fn->glDrawElements( GL_TRIANGLES, GLsizei( numTriangles * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
+		PassTime::countDraw( 1 );	// lane PERF1
 	} else if ( numTriangles > 0 ) {
 		qsizetype runStart = 0;
 		for ( qsizetype i = 0; i <= numTriangles; i++ ) {
@@ -414,7 +419,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 	}
 	if ( singleSample )
 		glEnable( GL_MULTISAMPLE );
-	if ( !selectionFlags )
+	if ( !selectionFlags && wwCellDrawProbeOn() )	// lane PERF1: the label is built only for the probe
 		wwCellDrawProbe( scene, QStringLiteral( "shape %1 '%2' second=%3" ).arg( id() ).arg( name ).arg( int( drawInSecondPass ) ) );	// lane VOLAIR1 (gates only)
 
 	if ( xRayDraw )

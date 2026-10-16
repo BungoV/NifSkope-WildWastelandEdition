@@ -146,6 +146,11 @@ bool probeRead( Renderer * r, GLint src, int W, int H, DrawProbe & p, std::vecto
 
 }	// namespace
 
+bool wwCellDrawProbeOn()
+{
+	return dprobe().on == 1;
+}
+
 void wwCellDrawProbe( Scene * scene, const QString & what )
 {
 	DrawProbe & p = dprobe();

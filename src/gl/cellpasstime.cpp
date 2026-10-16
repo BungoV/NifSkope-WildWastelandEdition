@@ -8,18 +8,148 @@
 #include <QSettings>
 #include <QString>
 
+#include <atomic>
+#include <algorithm>
+#include <cstring>
 #include <cstdio>
+#include <cstdlib>
+#include <thread>
 #include <vector>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <psapi.h>
+#include <mmsystem.h>	// timeBeginPeriod: the sampler's 1 ms sleep
 #endif
 
 // lane PERF1: see cellpasstime.h
 
 namespace PassTime
 {
+
+/* lane PERF1: WW_PROF_SAMPLE=<file> (timing harnesses only), a sampling profiler of the GL thread inside the timed
+ * frames: ~1 kHz, the thread suspended for the time of a stack walk (the x64 unwind tables, no allocation while
+ * it is held), each sample "pass addr addr ..." innermost first, the modules' bases at the end; written at exit.
+ * tools-side: the addresses go through addr2line on an unstripped link of the same objects. */
+namespace Sampler
+{
+std::atomic<int> pass{ -2 };	// the innermost open pass; -2 outside a frame (not sampled)
+#ifdef Q_OS_WIN
+struct Sample { int pass; int ms; int n; DWORD64 pc[48]; };
+std::vector<Sample> * samples = nullptr;
+std::atomic<bool> stop{ false };
+std::thread * thread = nullptr;
+QByteArray path;
+
+void write()
+{
+	stop = true;
+	if ( thread ) {
+		thread->join();
+		delete thread;
+		thread = nullptr;
+	}
+	FILE * f = std::fopen( path.constData(), "wb" );
+	if ( !f || !samples )
+		return;
+	for ( const Sample & sm : *samples ) {
+		std::fprintf( f, "%d @%d", sm.pass, sm.ms );
+		for ( int i = 0; i < sm.n; i++ )
+			std::fprintf( f, " %llx", (unsigned long long)sm.pc[i] );
+		std::fputc( '\n', f );
+	}
+	HMODULE mods[1024];
+	DWORD need = 0;
+	if ( EnumProcessModules( GetCurrentProcess(), mods, sizeof( mods ), &need ) ) {
+		for ( DWORD i = 0; i < need / sizeof( HMODULE ) && i < 1024; i++ ) {
+			MODULEINFO mi;
+			char name[MAX_PATH] = {};
+			if ( GetModuleInformation( GetCurrentProcess(), mods[i], &mi, sizeof( mi ) )
+				&& GetModuleFileNameA( mods[i], name, MAX_PATH ) )
+				std::fprintf( f, "module %llx %lx %s\n", (unsigned long long)(DWORD64)mi.lpBaseOfDll, mi.SizeOfImage, name );
+		}
+	}
+	std::fclose( f );
+}
+
+void start()
+{
+	path = qgetenv( "WW_PROF_SAMPLE" );
+	if ( path.isEmpty() || thread )
+		return;
+	HANDLE gl = nullptr;
+	DuplicateHandle( GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &gl, 0, FALSE, DUPLICATE_SAME_ACCESS );
+	samples = new std::vector<Sample>();
+	timeBeginPeriod( 1 );
+	// WW_PROF_SAMPLE_ALL=1 (started from main): the load too, outside the frames (pass -2), 1M samples at most
+	static const bool all = qEnvironmentVariableIntValue( "WW_PROF_SAMPLE_ALL" ) == 1;
+	const size_t cap = all ? 1000000 : 200000;
+	samples->reserve( cap );
+	const DWORD t0 = timeGetTime();
+	thread = new std::thread( [gl, cap, t0]() {
+		Sample sm;
+		// allocated here, never while the thread is stopped: it may hold the heap lock (a hang at startup)
+		std::vector<unsigned char> copy( 256 * 1024 );
+		while ( !stop ) {
+			Sleep( 1 );
+			const int p = pass.load();
+			if ( ( p == -2 && !all ) || samples->size() >= cap )
+				continue;
+			sm.ms = int( timeGetTime() - t0 );
+			/* Only the context and a copy of the stack are taken while the thread is stopped: the unwind looks up
+			 * function tables, which can take the loader lock the stopped thread may hold (a hang at startup). */
+			if ( SuspendThread( gl ) == DWORD( -1 ) )
+				continue;
+			CONTEXT ctx;
+			ctx.ContextFlags = CONTEXT_FULL;
+			sm.n = 0;
+			sm.pass = pass.load();
+			DWORD64 lo = 0, len = 0;
+			const bool got = GetThreadContext( gl, &ctx );
+			if ( got ) {
+				MEMORY_BASIC_INFORMATION mi;
+				lo = ctx.Rsp;
+				if ( VirtualQuery( reinterpret_cast<LPCVOID>( lo ), &mi, sizeof( mi ) ) ) {
+					const DWORD64 end = DWORD64( mi.BaseAddress ) + mi.RegionSize;
+					len = std::min<DWORD64>( end - lo, copy.size() );
+					std::memcpy( copy.data(), reinterpret_cast<const void *>( lo ), size_t( len ) );
+				}
+			}
+			ResumeThread( gl );
+			if ( got && len >= 8 ) {
+				const DWORD64 cb = DWORD64( copy.data() ), delta = cb - lo;
+				auto inStack = [&]( DWORD64 v ) { return v >= lo && v < lo + len; };
+				ctx.Rsp += delta;
+				if ( inStack( ctx.Rbp ) )
+					ctx.Rbp += delta;
+				for ( ; sm.n < 48 && ctx.Rip && ctx.Rsp >= cb && ctx.Rsp + 8 <= cb + len; ) {
+					sm.pc[sm.n++] = ctx.Rip;
+					DWORD64 base = 0;
+					PRUNTIME_FUNCTION fe = RtlLookupFunctionEntry( ctx.Rip, &base, nullptr );
+					if ( fe ) {
+						PVOID hd = nullptr;
+						DWORD64 est = 0;
+						RtlVirtualUnwind( UNW_FLAG_NHANDLER, base, ctx.Rip, fe, &ctx, &hd, &est, nullptr );
+						if ( inStack( ctx.Rbp ) )
+							ctx.Rbp += delta;
+						if ( inStack( ctx.Rsp ) )	// a frame pointer restored Rsp from a real-stack Rbp
+							ctx.Rsp += delta;
+					} else {
+						ctx.Rip = *reinterpret_cast<DWORD64 *>( ctx.Rsp );
+						ctx.Rsp += 8;
+					}
+				}
+			}
+			if ( sm.n > 0 )
+				samples->push_back( sm );
+		}
+	} );
+	std::atexit( write );
+}
+#else
+void start() {}
+#endif
+}	// namespace Sampler
 
 namespace
 {
@@ -38,6 +168,8 @@ struct Slot
 	std::vector<Mark> marks;
 	GLuint f0 = 0, f1 = 0;	// the whole frame
 	double cpu[Count] = {};
+	double wait[Count] = {};	// sync mode: the closing glFinish's wait (the GPU still working after the CPU issued it all)
+	qint64 calls[Count] = {}, ranges[Count] = {};
 	double cpuFrame = 0.0;
 	CacheCounts cache0, cache;
 	qint64 privMb = 0;	// private bytes at the frame's end (the log only)	// the geometry cache at the frame's start; its traffic over the frame
@@ -57,6 +189,7 @@ struct State
 	qint64 frameT0 = 0;
 	qint64 open[Count] = {};
 	int openMark[Count];
+	std::vector<int> stack;	// the open GPU passes, innermost last (countDraw)
 	// the last second's sums, for the overlay
 	qint64 winT0 = -1;
 	int winFrames = 0, winGpuFrames = 0;
@@ -123,13 +256,18 @@ void collect( Slot & sl )
 	s.pool.push_back( sl.f0 );
 	s.pool.push_back( sl.f1 );
 	if ( s.log ) {
-		QByteArray line = QByteArray( "pass time: frame=" ) + QByteArray::number( sl.frame ) + " cpu="
+		QByteArray line = QByteArray( "pass time: t=" ) + QByteArray::number( processSeconds(), 'f', 1 ) + " frame="
+			+ QByteArray::number( sl.frame ) + " cpu="
 			+ QByteArray::number( sl.cpuFrame, 'f', 2 ) + " gpu=" + QByteArray::number( gpuFrame, 'f', 2 );
 		for ( int p = 0; p < Count; p++ ) {
-			if ( sl.cpu[p] <= 0.0 && gpu[p] <= 0.0 )
+			if ( sl.cpu[p] <= 0.0 && gpu[p] <= 0.0 && sl.calls[p] == 0 )
 				continue;
 			line += QByteArray( " | " ) + name( p ) + " " + QByteArray::number( sl.cpu[p], 'f', 2 ) + "/"
 				+ QByteArray::number( gpu[p], 'f', 2 );
+			if ( s.sync && p < CullCamera )
+				line += " w=" + QByteArray::number( sl.wait[p], 'f', 2 );
+			if ( sl.calls[p] > 0 )
+				line += " d=" + QByteArray::number( sl.calls[p] ) + "/" + QByteArray::number( sl.ranges[p] );
 		}
 		line += QByteArray( " | cache made " ) + QByteArray::number( sl.cache.made ) + " ("
 			+ QByteArray::number( double( sl.cache.madeBytes ) / 1048576.0, 'f', 1 ) + " MB) evicted "
@@ -159,7 +297,7 @@ const char * name( int pass )
 {
 	static const char * const k[Count] = { "sun-cascades", "light-cubes", "sky", "obscurance", "reflections", "air",
 		"measure", "umbra-depth", "impostors", "opaque", "sorted", "effects", "far-cards", "tone-map", "post",
-		"overlays", "cull-camera", "cull-cascades" };
+		"overlays", "cull-camera", "cull-cascades", "shape-setup" };
 	return pass >= 0 && pass < Count ? k[pass] : "?";
 }
 
@@ -217,8 +355,13 @@ void frameBegin()
 	Slot & sl = s.ring[s.frame % kSlots];
 	collect( sl );	// three frames old: finished
 	sl.frame = s.frame;
-	for ( double & v : sl.cpu )
-		v = 0.0;
+	for ( int p = 0; p < Count; p++ ) {
+		sl.cpu[p] = sl.wait[p] = 0.0;
+		sl.calls[p] = sl.ranges[p] = 0;
+	}
+	s.stack.clear();
+	Sampler::start();
+	Sampler::pass = -1;
 	sl.f0 = query();
 	sl.f1 = query();
 	sl.cache0 = cacheCounts();
@@ -232,6 +375,8 @@ void begin( int pass )
 	State & s = st();
 	if ( !s.inFrame || pass < 0 || pass >= Count || s.openMark[pass] >= 0 )
 		return;
+	if ( pass < CullCamera && !s.stack.empty() )
+		return;	// nested (the measure's own scene draw): the outer pass holds its time and its draws
 	Slot & sl = s.ring[s.frame % kSlots];
 	if ( s.sync && pass < CullCamera )
 		s.gl->glFinish();
@@ -241,6 +386,8 @@ void begin( int pass )
 		s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
 		sl.marks.push_back( m );
 		s.openMark[pass] = int( sl.marks.size() ) - 1;
+		s.stack.push_back( pass );
+		Sampler::pass = pass;
 	} else {
 		s.openMark[pass] = 0;
 	}
@@ -252,11 +399,21 @@ void end( int pass )
 	if ( !s.inFrame || pass < 0 || pass >= Count || s.openMark[pass] < 0 )
 		return;
 	Slot & sl = s.ring[s.frame % kSlots];
-	if ( s.sync && pass < CullCamera )
+	if ( s.sync && pass < CullCamera ) {
+		const qint64 w0 = nowNs();
 		s.gl->glFinish();
+		sl.wait[pass] += double( nowNs() - w0 ) * 1e-6;
+	}
 	sl.cpu[pass] += double( nowNs() - s.open[pass] ) * 1e-6;
-	if ( pass < CullCamera )
+	if ( pass < CullCamera ) {
 		s.gl->glQueryCounter( sl.marks[s.openMark[pass]].q1, GL_TIMESTAMP );
+		for ( size_t k = s.stack.size(); k-- > 0; )
+			if ( s.stack[k] == pass ) {
+				s.stack.erase( s.stack.begin() + std::ptrdiff_t( k ) );
+				break;
+			}
+		Sampler::pass = s.stack.empty() ? -1 : s.stack.back();
+	}
 	s.openMark[pass] = -1;
 }
 
@@ -265,6 +422,17 @@ void addCpu( int pass, qint64 ns )
 	State & s = st();
 	if ( s.inFrame && pass >= 0 && pass < Count )
 		s.ring[s.frame % kSlots].cpu[pass] += double( ns ) * 1e-6;
+}
+
+void countDraw( qint64 ranges )
+{
+	State & s = st();
+	if ( !s.inFrame )
+		return;
+	Slot & sl = s.ring[s.frame % kSlots];
+	const int p = s.stack.empty() ? int( Overlays ) : s.stack.back();
+	sl.calls[p]++;
+	sl.ranges[p] += ranges;
 }
 
 void frameEnd()
@@ -280,6 +448,7 @@ void frameEnd()
 			end( p );
 	}
 	s.inFrame = false;
+	Sampler::pass = -2;
 	s.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
 	sl.cpuFrame = double( nowNs() - s.frameT0 ) * 1e-6;
 	const CacheCounts & cc = cacheCounts();
@@ -346,11 +515,31 @@ void memory( qint64 & privateMb, qint64 & workingMb )
 #endif
 }
 
+void profileFromStart()
+{
+	if ( qEnvironmentVariableIntValue( "WW_PROF_SAMPLE_ALL" ) == 1 )
+		Sampler::start();
+}
+
+double processSeconds()
+{
+#ifdef Q_OS_WIN
+	FILETIME c, e, k, u, now;
+	if ( GetProcessTimes( GetCurrentProcess(), &c, &e, &k, &u ) ) {
+		GetSystemTimeAsFileTime( &now );
+		const auto v = []( const FILETIME & f ) { return ( qint64( f.dwHighDateTime ) << 32 ) | qint64( f.dwLowDateTime ); };
+		return double( v( now ) - v( c ) ) * 1e-7;
+	}
+#endif
+	return 0.0;
+}
+
 void memLog( const char * stage )
 {
 	qint64 pm = 0, wm = 0;
 	memory( pm, wm );
-	std::fprintf( stderr, "cell mem: %s private=%lld MB ws=%lld MB\n", stage, (long long)pm, (long long)wm );
+	std::fprintf( stderr, "cell mem: %s private=%lld MB ws=%lld MB t=%.1f s\n", stage, (long long)pm, (long long)wm,
+		processSeconds() );
 	State & s = st();
 	if ( qstrcmp( stage, "first frames drawn" ) != 0 )
 		s.memArmed = 3;	// the next frames' figure, once the build is done

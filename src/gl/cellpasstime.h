@@ -22,6 +22,7 @@ enum Pass
 	SunShadows, CellShadows, Background, Obscurance, Reflections, Air, Measure, UmbraDepth, Impostors,
 	Opaque, Sorted, Effects, FarCards, ToneMap, Post, Overlays,
 	CullCamera, CullCascades,	// CPU only: the run culling inside the passes above
+	ShapeSetup,	// CPU only: the shapes' program and uniform setup inside the passes above
 	Count
 };
 
@@ -40,6 +41,8 @@ void begin( int pass );
 void end( int pass );
 //! CPU-only time added to a pass (the culling).
 void addCpu( int pass, qint64 ns );
+//! One draw call issued (`ranges` index ranges in it: a multi-draw's count, else 1), counted to the innermost open pass.
+void countDraw( qint64 ranges );
 qint64 nowNs();
 
 class Scope
@@ -76,8 +79,12 @@ QStringList overlay();
 
 //! This process's private bytes (commit charge) and working set in MB.
 void memory( qint64 & privateMb, qint64 & workingMb );
-//! Prints "cell mem: <stage> private=<MB> ws=<MB>" to stderr.
+//! Prints "cell mem: <stage> private=<MB> ws=<MB> t=<s since the process started>" to stderr.
 void memLog( const char * stage );
+//! Seconds since this process was created (the load timeline).
+double processSeconds();
+//! WW_PROF_SAMPLE=<file> with WW_PROF_SAMPLE_ALL=1: the sampler from the calling (GL) thread's start, the load included.
+void profileFromStart();
 
 } // namespace PassTime
 

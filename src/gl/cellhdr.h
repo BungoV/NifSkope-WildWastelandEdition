@@ -31,6 +31,8 @@ void wwCellHdrEnd( Scene * scene );
 bool wwCellHdrActive();
 //! Lane VOLAIR1 (gates only, WW_CELL_DRAW_PROBE): after a draw, logs which watched pixels it changed.
 void wwCellDrawProbe( Scene * scene, const QString & what );
+//! lane PERF1: the probe is watching (a caller builds its label only then).
+bool wwCellDrawProbeOn();
 //! One line for the notes: what the last frame did (or why it did not).
 QString wwCellHdrEcho();
 

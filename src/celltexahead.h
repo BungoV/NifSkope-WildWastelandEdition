@@ -42,6 +42,10 @@ bool armedFor( const NifModel * nif );
 void want( const NifModel * nif, const QStringList & names );
 //! The bytes of `filepath` as TexCache::texLoad is about to read it. False = read it yourself.
 bool take( const NifModel * nif, const QString & filepath, QByteArray & data );
+//! lane PERF1: the names whose bytes are read and waiting (at most `max`), for the drawing thread to upload now:
+//! the workers stop at AHEAD_BYTES, and the drawing thread asks in another order than they read, so without this
+//! it read ~40% of a cell's files itself, one at a time.
+QStringList ready( const NifModel * nif, int max );
 //! This document's resources are about to change or go: the workers stop first. Any thread.
 void stop( const NifModel * nif );
 

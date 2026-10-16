@@ -68,6 +68,7 @@ struct LdState
 
 	// resolved
 	bool dirtyLoad = true, dirtyWeather = true;
+	quint64 gen = 1;	// bumped whenever resolve() reloads (lane PERF1: the per-shape memos below key on it)
 	EsmWeather esm;
 	QString loadRefusal;
 	QVector<WwWeatherEntry> list;
@@ -204,6 +205,8 @@ QStringList resolveList( const LdState & s )
 void resolve()
 {
 	LdState & s = st();
+	if ( s.dirtyLoad || s.dirtyWeather )
+		s.gen++;
 	if ( s.dirtyLoad ) {
 		s.dirtyLoad = false;
 		s.dirtyWeather = true;
@@ -277,9 +280,29 @@ struct LdLight
 	bool fromWeather = false;
 };
 
+LdLight computeLight();
+
+/* lane PERF1: every shape's program setup asks for the light several times a frame; it is a pure function of
+ * the resolved weather (gen), the hour and the Sun row, so it is computed once per change of those */
 LdLight currentLight()
 {
 	resolve();
+	const LdState & s = st();
+	static quint64 gen = 0;
+	static double hour = -1.0;
+	static bool sun = false;
+	static LdLight memo;
+	if ( gen != s.gen || hour != s.hour || sun != s.sun ) {
+		memo = computeLight();
+		gen = s.gen;
+		hour = s.hour;
+		sun = s.sun;
+	}
+	return memo;
+}
+
+LdLight computeLight()
+{
 	LdState & s = st();
 	LdLight L;
 	if ( s.sun ) {
@@ -369,7 +392,16 @@ WwFog currentFog()
 {
 	resolve();
 	const LdState & s = st();
-	return wwFogAt( s.w, s.hour, s.tnam, s.gmst );
+	// lane PERF1: memoised like currentLight() (asked once per fogged shape)
+	static quint64 gen = 0;
+	static double hour = -1.0;
+	static WwFog memo;
+	if ( gen != s.gen || hour != s.hour ) {
+		memo = wwFogAt( s.w, s.hour, s.tnam, s.gmst );
+		gen = s.gen;
+		hour = s.hour;
+	}
+	return memo;
 }
 
 QString fogSummary()
@@ -466,8 +498,16 @@ void wwLookdevFogUniforms( Scene * scene )
 	prog->uni4f( "fogProbe", FloatVector4( s.fogProbe[0], s.fogProbe[1], s.fogProbe[2], 0.0f ) );
 	prog->uni1i( "fogRed", ( wwLookdevRed( "fogmaxclamp" ) ? 1 : 0 ) | ( wwLookdevRed( "fognoescape" ) ? 2 : 0 )
 		| ( wwLookdevRed( "fogheight0" ) ? 4 : 0 ) );
-	s.fogLast = QString( "on(groundz=%1 scale=%2%3)" ).arg( double( s.groundZ ), 0, 'f', 2 ).arg( double( sc ), 0, 'g', 6 )
-		.arg( !s.fog ? QStringLiteral( " leak" ) : QString() );	// on with the row off = the fogleak red
+	static float lastZ = 0.0f, lastSc = 0.0f;	// lane PERF1: the echo string rebuilt only when it changes
+	static bool lastLeak = false, lastOn = false;
+	if ( !lastOn || lastZ != s.groundZ || lastSc != sc || lastLeak != !s.fog || !s.fogLast.startsWith( QLatin1StringView( "on(" ) ) ) {
+		s.fogLast = QString( "on(groundz=%1 scale=%2%3)" ).arg( double( s.groundZ ), 0, 'f', 2 ).arg( double( sc ), 0, 'g', 6 )
+			.arg( !s.fog ? QStringLiteral( " leak" ) : QString() );	// on with the row off = the fogleak red
+		lastOn = true;
+		lastZ = s.groundZ;
+		lastSc = sc;
+		lastLeak = !s.fog;
+	}
 }
 
 bool wwLookdevActive()
@@ -801,7 +841,35 @@ bool wwLookdevDalc( float rgb[6][3] )
 	return L.fromWeather;
 }
 
+namespace
+{
+bool computeImageSpace( WwLookdevIs & o );
+}
+
+// lane PERF1: memoised like currentLight() (the same inputs; the strings it builds cost more than the blend)
 bool wwLookdevImageSpace( WwLookdevIs & o )
+{
+	resolve();
+	const LdState & s = st();
+	static quint64 gen = 0;
+	static double hour = -1.0;
+	static bool sun = false, ok = false;
+	static WwLookdevIs memo;
+	if ( gen != s.gen || hour != s.hour || sun != s.sun ) {
+		memo = WwLookdevIs();
+		ok = computeImageSpace( memo );
+		gen = s.gen;
+		hour = s.hour;
+		sun = s.sun;
+	}
+	if ( ok )
+		o = memo;
+	return ok;
+}
+
+namespace
+{
+bool computeImageSpace( WwLookdevIs & o )
 {
 	const LdLight L = currentLight();	// resolves the weather; the keys of the hour
 	const LdState & s = st();
@@ -832,6 +900,7 @@ bool wwLookdevImageSpace( WwLookdevIs & o )
 	o.key = QStringLiteral( "%1|%2|%3|%4" ).arg( s.weatherKey ).arg( a ).arg( b ).arg( double( t ), 0, 'g', 6 );
 	return true;
 }
+}	// namespace
 
 float wwLookdevSunlightScale()
 {
