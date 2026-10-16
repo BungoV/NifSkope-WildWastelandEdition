@@ -30,72 +30,15 @@ class QLineEdit;
 class QTreeWidget;
 class QTreeWidgetItem;
 
-/* ---------------------------------------------------------------------------
- * THE CELL WORKSPACE (lane CELLWORK1, 2026-09-19).
- *
- * bungo, verbatim: "Cell viewing will be a new workspace btw".
- *
- * ===========================================================================
- * WHAT A WORKSPACE IS IN THIS FORK, AND WHY THIS FILE IS SMALL
- * ===========================================================================
- *
- * The mechanism already exists and this lane does not add a second one.  A
- * workspace is an entry in `workspaceNames` and a manager QDockWidget in
- * `managers`, both in NifSkope::initToolBars() (src/nifskope_ui.cpp), switched
- * by NifSkope::activateWorkspace().  Cell is APPENDED LAST, exactly as every
- * workspace before it was, so every stored `UI/Workspace` index keeps pointing
- * at the workspace it pointed at before.
- *
- * What this lane DID have to add to the mechanism is the one thing it could not
- * do: a workspace could show its own dock, but never hide anything else.  The
- * Cell workspace hides the NIF-only editor (`LeftColumnDock` -- block list,
- * block details and header are three PAGES of one dock since the left-column
- * rework) and puts it back untouched on the way out.  That is one field on the
- * workspace table, not a parallel system; see `NifSkope::WorkspaceDef`.
- *
- * ===========================================================================
- * THE PANEL
- * ===========================================================================
- *
- * The reference LIST is Blender's outliner: one flat row per thing that was
- * drawn, filterable by record type and by text, click selects and frames it,
- * and a viewport pick puts the cursor on its row.  Its rows are
- * `cellPickTable()` entries, ONE ROW PER ENTRY, which is the same unit the
- * `WW_CELL_DUMP` file writes a line for -- so "the list shows what the dump
- * counts" is an identity and not a coincidence, and the gate can assert it.
- * (A SCOL that expanded into eleven parts is therefore eleven rows, because
- * eleven boxes are separately pickable.  Blender's outliner would nest those
- * under one parent; this build has no tree column and no nesting anywhere else
- * in the panel, so the divergence is listed in the lane report rather than
- * invented here.)
- *
- * THE LEGEND AND THE CENSUS ARE NOT COMPUTED HERE.  Both are parsed out of the
- * builder's own `notes` string, which is the string `qInfo()` prints and the
- * string tests/spells/cell_legend_colour.py measures against the rendered
- * picture.  A panel that recomputed either would be the second code path that
- * lane CELLVIEW3 already caught printing mauve for a grey bucket.  There is one
- * producer; this reads it.
- *
- * THE VIEW ROWS REBUILD.  An overlay is baked into vertex colours while the
- * scene is welded, so changing one is a rebuild and not a repaint.  A row
- * therefore records its choice in the override block below and asks the window
- * to re-open the same `.wwcell` through the ordinary open path -- the proven
- * path, not a second builder.  The cost is real and the summary line states it
- * in milliseconds; making an overlay switch instant would mean re-running the
- * colour pass over built geometry, which is a change to the builder and is
- * listed as a ruling owed rather than shipped.
- * --------------------------------------------------------------------------- */
+/* The Cell workspace panel: a reference list (one row per cellPickTable() entry, filterable,
+ * click selects and frames), plus the legend and census parsed from the builder's own notes.
+ * View rows change baked vertex colors, so they re-open the .wwcell rather than repaint. */
 
-/*! The rows' pending choices, applied to the spec the open path just read from
- *  the `.wwcell`.  Called from src/nifskope.cpp between `cellSpecFromFile` and
- *  `nifCreateCellScene`, so the file and the rows are never two sources of
- *  truth: the file is the default, a row that has been touched overrides it,
- *  and nothing overrides anything until a row is touched. */
+/*! Apply the rows' pending choices to the spec just read from the `.wwcell` (between cellSpecFromFile
+ *  and nifCreateCellScene). The file is the default; only touched rows override it. */
 void cellWorkspaceApplyOverrides( CellSceneSpec & spec );
 
-/*! The open path's read-back: the cell that is now open, the spec it was built
- *  from, and the builder's own notes.  The panel's census, legend and refusal
- *  line all come out of `notes` and out of nothing else. */
+/*! The open path's read-back: the open cell, its spec, and the builder's notes (the panel's only source). */
 void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
 	const QString & notes );
 
@@ -145,10 +88,10 @@ public:
 	bool probesShown() const;
 	//! Click Place / flip Show probes, exactly as the mouse would.
 	void placeProbes();
-	//! Click Bake (lane PRTPBAKE): place, then write the `.tbk` sector files.
+	//! Click Bake: place, then write the `.tbk` sector files.
 	void bakeProbes();
 	void setProbesShown( bool on );
-	//! lane MODPICK1: the Mods band (the harness drives it through its own clicks).
+	//! The Mods band (the harness drives it through its own clicks).
 	CellModPickBox * modPicker() const;
 
 public slots:
@@ -160,9 +103,7 @@ public slots:
 	void setTypeFilter( const QString & type );
 	//! Matches editor id, form id and model path, case-insensitively.
 	void setTextFilter( const QString & text );
-	/*! What a row click does, and what the harness calls: select the entry the
-	 *  same way a viewport pick on it would (one function, `cellPickSelect`),
-	 *  and frame it when `frame`. */
+	/*! A row click: select the entry exactly as a viewport pick would (`cellPickSelect`), and frame it when `frame`. */
 	void selectEntry( int index, bool frame );
 
 signals:
@@ -190,70 +131,55 @@ private:
 	QComboBox * filterType = nullptr;
 	QTreeWidget * list = nullptr;
 	QComboBox * overlayBox = nullptr;
-	/*! ONE HOME FOR THE CELL'S VIEW TOGGLES (bungo 2026-09-19: "a lot of visual
-	 *  / visibility toggles that will only live in the cell editor workspace,
-	 *  that are specific to cell stuff"). Blender's viewport Overlays popover
-	 *  and the Creation Kit's View menu are the references: label + control, no
-	 *  descriptions. The actions are built from `cellShowRows()` in order, so a
-	 *  later lane adds a toggle by adding a ROW, not by adding a widget, a
-	 *  member, a connect and a settings key in four places. */
+	/*! The cell's view toggles, built from `cellShowRows()` in order: add a toggle by adding a row. */
 	QVector<QAction *> showActions;
-	/*! THE JOIN, kept where the list was built: row i of the reference model
-	 *  draws as pick entry `pickForRef[i]`, or -1 when nothing drew it. One
-	 *  place, so the mouse and a row click cannot disagree about which
-	 *  reference is which. */
+	/*! Row i of the reference model draws as pick entry `pickForRef[i]`, or -1 when nothing drew it. */
 	QVector<int> pickForRef;
 	QTreeWidget * legend = nullptr;
-	/*! THE PRTP BAND (lane PRTPPLACE, 2026-09-30; bungo: in the Cell workspace, not a
-	 *  new one, named PRTP). Place re-opens the cell with the probes placed; the
-	 *  kind rows are READ from the builder's notes, like the legend. Bake waits
-	 *  for PRTP6. Bake (lane PRTPBAKE) places and bakes in one rebuild; the band's
-	 *  note line then says what was written and where. */
+	/*! The PRTP band: Place re-opens the cell with probes placed, Bake places and bakes in one rebuild;
+	 *  kind rows are read from the builder's notes. */
 	QCheckBox * probesShow = nullptr;
-	QAction * cellLights = nullptr;   // lane PRTP3: light the view with the cell's own lights
-	QAction * cellGi = nullptr;       // lane PRTPGI: add the bake's bounce of those lights
-	QAction * cellFar = nullptr;      // lane FARVIEW1: past the band, the surfels' baked light in place of the lights
-	QAction * cellIs = nullptr;       // lane IMGS1: the cell's imagespace (exposure, curve, grade, LUT)
-	QAction * cellCull = nullptr;     // lane SUNCELL1: per-placement culling (gl/cellcull.h); ships off
-	QAction * cellPrevis = nullptr;   // lane SUNCELL1: occlusion planes / boxes, rooms and portals (gl/cellcull.h); ships off
-	QAction * cellFarLod = nullptr;   // lane FARLOD1: the far field around the block (cellfarlod.h)
+	QAction * cellLights = nullptr;   // light the view with the cell's own lights
+	QAction * cellGi = nullptr;       // add the bake's bounce of those lights
+	QAction * cellFar = nullptr;      // past the band, the surfels' baked light in place of the lights
+	QAction * cellIs = nullptr;       // the cell's imagespace (exposure, curve, grade, LUT)
+	QAction * cellCull = nullptr;     // per-placement culling (gl/cellcull.h); ships off
+	QAction * cellPrevis = nullptr;   // occlusion planes / boxes, rooms and portals (gl/cellcull.h); ships off
+	QAction * cellFarLod = nullptr;   // the far field around the block (cellfarlod.h)
 	QMenu * cellFarLodType = nullptr;
-	QActionGroup * cellFarLodTypeGroup = nullptr;   // lane FARLOD1: Vanilla | FO4CS
-	QAction * cellTaa = nullptr;      // lane MOTION1: the game's temporal AA (one state with the Scene popup's row)
-	// lane CELLALL1: the second row, the features that were env-only (their defaults unchanged; new ones ship off)
+	QActionGroup * cellFarLodTypeGroup = nullptr;   // Vanilla | FO4CS
+	QAction * cellTaa = nullptr;      // the game's temporal AA (one state with the Scene popup's row)
+	// the second row: features otherwise env-only (new ones ship off)
 	QAction * cellAo = nullptr;
 	QAction * cellShadow = nullptr;
 	QAction * cellSsr = nullptr;
 	QAction * cellSsrExt = nullptr;
 	QAction * cellAoDecal = nullptr;
 	QAction * cellGiGpu = nullptr;
-	QAction * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off
-	QAction * cellGrass = nullptr;    // lane GRASSMB1: the game's grass (placed at cell open)
-	QAction * cellDof = nullptr;      // lane GRASSMB1: the game's depth of field
-	QAction * cellMblur = nullptr;    // lane GRASSMB1: the game's motion blur
-	QMenu * cellBloom = nullptr;      // lane BLOOM1b: Vanilla | FO4CS, FO4CS's rows and its physical glare
+	QAction * cellParticles = nullptr;	// placed models' particle systems (cellview.h); ships off
+	QAction * cellGrass = nullptr;    // the game's grass (placed at cell open)
+	QAction * cellDof = nullptr;      // the game's depth of field
+	QAction * cellMblur = nullptr;    // the game's motion blur
+	QMenu * cellBloom = nullptr;      // Vanilla | FO4CS, FO4CS's rows and its physical glare
 	QActionGroup * cellBloomGroup = nullptr;
 	QAction * cellBloomGlare = nullptr;
 	QMenu * cellPass = nullptr;
-	QActionGroup * cellPassGroup = nullptr;  // lane PROBEVIEW1: Combined / GI / Sky visibility / surfel previews
+	QActionGroup * cellPassGroup = nullptr;  // Combined / GI / Sky visibility / surfel previews
 	QPushButton * probesPlace = nullptr;
 	QPushButton * probesBake = nullptr;
 	QTreeWidget * probeKinds = nullptr;
 	void rebuildProbeKinds();
-	CellModPickBox * modPick = nullptr;	// lane MODPICK1: the Mods band
+	CellModPickBox * modPick = nullptr;	// the Mods band
 	QLabel * census = nullptr;
 	QLabel * note = nullptr;
 	bool noteRefusal = false;
 };
 
-/*! WW_CELLWS_TEST=<report path>: lane CELLWORK1's gate, run inside the real
- *  application (src/cellworkspacetest.cpp). Does nothing unless it is set. */
+/*! WW_CELLWS_TEST=<report path>: the workspace self-test inside the real application. */
 void wwCellWorkspaceHarness( NifSkope * skope );
 
-/*! lane WSRESTORE1: WW_CELL_WSRESTORE=<report path> drives workspace switches
- *  and a real close from inside the window (steps in WW_CELL_WSRESTORE_STEPS),
- *  so a close in the Cell workspace can be relaunched and measured. Refuses
- *  without a scratch WW_SETTINGS_SCOPE; does nothing unless it is set. */
+/*! WW_CELL_WSRESTORE=<report path>: drives workspace switches and a real close from inside the window
+ *  (steps in WW_CELL_WSRESTORE_STEPS). Refuses without a scratch WW_SETTINGS_SCOPE. */
 void wwWorkspaceRestoreHarness( NifSkope * skope );
 //! True when this run may persist its layout: the driver above, in a scratch scope.
 bool wwWorkspaceRestoreSavesUi();

@@ -17,7 +17,7 @@
 #include <unordered_map>
 #include <vector>
 
-// lane SPEED1 (2026-10-02): see celltexahead.h.
+// see celltexahead.h.
 
 using Game::GameManager;
 
