@@ -11,12 +11,12 @@
 #include <algorithm>
 #include <cstdint>
 
-// lane HDR1: the cell view's linear frame and its one tone map (cellhdr.h)
+// the cell view's linear frame and its one tone map (cellhdr.h)
 
 namespace {
 
 constexpr int kSrcUnit = 8;		// the linear frame (sampler2DMS) in cell_hdr.prog; the cell units are 10..16
-constexpr int kFoBloomUnit = 11;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
+constexpr int kFoBloomUnit = 11;	// the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
 
 struct HdrGpu
 {
@@ -119,9 +119,8 @@ bool wwCellHdrBegin( Scene * scene )
 			fn->glDeleteTextures( 1, &g.color );
 		fn->glGenTextures( 1, &g.color );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
-		/* finalfix (SUNCELL1): the linear frame is RGBA32F, not RGBA16F. Multisampled additive blending into fp16
-		 * (the blended ground layers, SRC_ALPHA/ONE) rounded +-1 step differently run to run on the same inputs
-		 * (every draw's state, uniforms and textures traced identical); fp32 measured 0 of 7 frames differing. */
+		/* RGBA32F, not RGBA16F: multisampled additive blending into fp16 rounded differently run to run on identical
+		 * inputs. */
 		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, GL_RGBA32F, W, H, GL_TRUE );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 		if ( !g.ds )
@@ -189,7 +188,7 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glBlitFramebuffer( 0, 0, s.w, s.h, 0, 0, s.w, s.h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST );
 	const GLenum blitErr = fn->glGetError();
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
-	// lane BLOOM1b: the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
+	// the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat );
 
 	auto prog = r->useProgram( "cell_hdr.prog" );
@@ -224,7 +223,7 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
 	prog->uni1i( "hdrSrc", kSrcUnit );
-	wwCellBloomFinal( r, kFoBloomUnit );	// lane BLOOM1b: the final combine's uniforms (off: cellIsFoBloomOn false)
+	wwCellBloomFinal( r, kFoBloomUnit );	// the final combine's uniforms (off: cellIsFoBloomOn false)
 
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -238,11 +237,8 @@ void wwCellHdrEnd( Scene * scene )
 	} else {
 		fn->glDisable( GL_STENCIL_TEST );
 	}
-	/* lane SKYHOLE1: a cell effect over the sky (no opaque draw under it, the depth still at the far plane) blended
-	 * over 0 in the linear frame, and mode 0 laid its tone-mapped value over the backdrop: the Memory Den's steam
-	 * (MistGroundWaterSteam01LongHalf) as a black patch. Mode 0 now takes only the pixels an opaque draw reached
-	 * (the quad at the far plane passes GL_GREATER there), mode 2 the rest (GL_LEQUAL), composited by coverage.
-	 * WW_CELL_SKYHOLE_RED=old: mode 0 over every 1 pixel, as before. */
+	/* Mode 0 takes only pixels an opaque draw reached (GL_GREATER vs the far-plane quad), mode 2 the rest, so a cell
+	 * effect over the sky is not laid over the backdrop as black. WW_CELL_SKYHOLE_RED=old: mode 0 everywhere. */
 	static const bool skyholeOld = qgetenv( "WW_CELL_SKYHOLE_RED" ).trimmed() == "old";
 	static bool skyholeSaid = false;
 	if ( !skyholeSaid ) {
@@ -272,9 +268,8 @@ void wwCellHdrEnd( Scene * scene )
 		prog->uni1i( "hdrMode", 1 );
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	}
-	/* lane BLOOM1b: the FO4CS glow over every pixel mode 0 did not take (the sky, the other programs, the effects over
-	 * the sky), added in display space: FO4CS spreads it over its whole HDR target, the sky included; here only the
-	 * cell-lit pixels are light, so the rest take the tone-mapped difference the bloom makes (cell_hdr.frag mode 3) */
+	/* The FO4CS glow over the pixels mode 0 did not take, added in display space as the tone-mapped difference the
+	 * bloom makes (cell_hdr.frag mode 3): only cell-lit pixels are light here. */
 	if ( foBloom && sorted ) {
 		fn->glEnable( GL_BLEND );
 		fn->glBlendFunc( GL_ONE, GL_ONE );

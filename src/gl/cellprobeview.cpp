@@ -1,4 +1,4 @@
-// lane PROBEVIEW1: the PRTP band's Pass overlays (src/gl/cellprobeview.h)
+// the PRTP band's Pass overlays (src/gl/cellprobeview.h)
 
 #include "cellprobeview.h"
 
@@ -119,10 +119,10 @@ void wwCellProbeViewDraw( Scene * scene, const Transform & viewTrans )
 	std::vector<FloatVector4> tc;
 	size_t tiles = 0, boxes = 0;
 	// the surfels, as tiles a hair off their surface
-	if ( pass >= 3 && pass <= 5 ) {	// lane WALLSTACK1: 6 (Probe coverage) draws no surfels
+	if ( pass >= 3 && pass <= 5 ) {	// 6 (Probe coverage) draws no surfels
 		// a splat 0.6 of the surfel cell: the surfels read apart, and a curved surface keeps few cards in the air
 		const float h = v->surfelCell * 0.3f;
-		// WW_CELL_PV_ID=1: each tile carries its surfel's index + 1 as 24-bit color (the gate's exact map)
+		// WW_CELL_PV_ID=1: each tile carries its surfel's index + 1 as 24-bit color
 		static const bool idColors = qEnvironmentVariableIntValue( "WW_CELL_PV_ID" ) == 1;
 		for ( size_t i = 0; i + 11 < v->surfels.size(); i += 12 ) {
 			const float * f = &v->surfels[i];
@@ -139,7 +139,7 @@ void wwCellProbeViewDraw( Scene * scene, const Transform & viewTrans )
 				col = FloatVector4( float( id & 255 ) / 255.0f, float( ( id >> 8 ) & 255 ) / 255.0f, float( ( id >> 16 ) & 255 ) / 255.0f, 1.0f );
 			else if ( pass == 3 )
 				col = FloatVector4( shown( f[6] ), shown( f[7] ), shown( f[8] ), 1.0f );
-			else if ( pass == 5 && ( i / 12 ) * 3 + 2 < v->surfelBrick.size() ) {	// lane BRICK1: the brick's light, B / pi
+			else if ( pass == 5 && ( i / 12 ) * 3 + 2 < v->surfelBrick.size() ) {	// the brick's light, B / pi
 				const float * k = &v->surfelBrick[( i / 12 ) * 3];
 				col = FloatVector4( shown( k[0] * 0.31830989f ), shown( k[1] * 0.31830989f ), shown( k[2] * 0.31830989f ), 1.0f );
 			}

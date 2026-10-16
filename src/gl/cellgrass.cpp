@@ -26,8 +26,8 @@
 
 #include "esmfile.hpp"
 
-// lane GRASSMB1: the game's grass placement (cellgrass.h). Every float below is float32 in the engine's order;
-// no contraction into fused multiply-adds, or a blade moves by one half-float step and the rebuild gate fails.
+// The game's grass placement (cellgrass.h). Every float is float32 in the engine's order; no FMA contraction,
+// or a blade moves by one half-float step.
 #if defined( __clang__ )
 #pragma clang fp contract( off )
 #elif defined( __GNUC__ )
@@ -45,9 +45,8 @@ struct GrassState
 	bool init = false, on = false, pinned = false, redSeed = false;
 	QString dump;
 	QHash<const void *, QSet<int>> shapes;
-	QHash<const void *, QHash<int, float>> wave;	// block -> its GRAS wave period (the property's +0xf4)
-	// the wind's clock: the game's accumulated frame seconds (St+0x3c), here the time since the first grass frame;
-	// cur at this frame, prev at the last (the vertex shader's two phases)
+	QHash<const void *, QHash<int, float>> wave;	// block -> its GRAS wave period
+	// the wind's clock: seconds since the first grass frame; cur at this frame, prev at the last
 	QElapsedTimer clock;
 	bool timePinned = false, windDrawn = false;
 	double tCur = 0.0, tPrev = 0.0;
@@ -143,7 +142,7 @@ float fromHalf( quint16 h )
 const float kTwoM32 = bitsToFloat( 0x2F800000U );	// 2.3283064e-10f
 const float kInv255 = bitsToFloat( 0x3B808081U );	// 1 / 255, as the engine stores it
 
-//! Float0To1DistA: 512 floats from std::mt19937(1).
+//! The engine's 512-entry jitter table: floats from std::mt19937(1).
 const float * distTable()
 {
 	static float t[512];
@@ -199,7 +198,7 @@ struct Ctx
 		return it.value().get();
 	}
 
-	//! An LTEX's grasses as GetGrassParameters takes them: GNAM order, unresolved skipped, at most 3.
+	//! An LTEX's grasses as the engine takes them: GNAM order, unresolved skipped, at most 3.
 	const QVector<quint32> * grasses( quint32 ltex )
 	{
 		if ( !ltex || ltex == ESM_LTEX_ENGINE_DEFAULT || !esm )
@@ -236,7 +235,7 @@ struct LandHit
 	float h = 0.0f, n[3] = { 0.0f, 0.0f, 1.0f }, col[3] = { 1.0f, 1.0f, 1.0f };
 };
 
-//! GetLandData at a world point: the triangle's plane height and FACE normal, the nearest corner's colour.
+//! The LAND at a world point: the triangle's plane height and FACE normal, the nearest corner's colour.
 bool landData( Ctx & c, float lx, float ly, LandHit & out )
 {
 	const int cx = int( std::floor( double( lx ) / 4096.0 ) );
@@ -311,7 +310,7 @@ struct Entry
 	float grid[9];
 };
 
-//! GetGrassParameters for the patch centred on quadrant vertex (cxv, cyv).
+//! The grass list and density grid for the patch centred on quadrant vertex (cxv, cyv).
 void grassParams( Ctx & c, const EsmLand & L, int q, int cxv, int cyv, std::vector<Entry> & out )
 {
 	out.clear();
@@ -396,7 +395,7 @@ int keepDraw( std::mt19937 & mt, int lo, int hi )
 	return int( ( ( float( u ) * kTwoM32 ) * 0.99999f ) * float( hi - lo ) ) + lo;
 }
 
-//! CreateGrass for one grass on one patch.
+//! Lays one grass on one patch.
 void createGrass( Ctx & c, int cellX, int cellY, int q, int col, int row, const Entry & e, float ox, float oy,
 	float waterW, bool redSeed, std::vector<WwGrassBlade> & out )
 {
@@ -432,7 +431,6 @@ void createGrass( Ctx & c, int cellX, int cellY, int q, int col, int row, const 
 			const float yi = float( i ) + 0.5f;
 			float x = ox + ( xj * amp ) * 2.0f;
 			float y = oy + ( yi * amp ) * 2.0f;
-			// CheckCreateFromDensity
 			const float gx = ( xj * 2.0f ) * step;
 			const float gy = ( yi * 2.0f ) * step;
 			const int ix = int( gx );
@@ -748,9 +746,8 @@ void wwCellGrassUniforms( Scene * scene, int block )
 	// fGrassStartFadeDistance 3500, fGrassFadeRange 1000 (the INI defaults), in view units
 	const float k = scene->view.scale;
 	prog->uni3f( "wwGrassFade", 3500.0f * k, 1000.0f * k, 1.0f );
-	// the wind (the game's grass vertex shader, Shaders011 entry 02183): cb2[11] = (angle, 0, prev phase, phase),
-	// cb2[12] = (min speed * 300, max speed * 300, frequency); .w = 1 = a grass shape (the game's grass vertex shader
-	// runs: renormalised frame, colour ^ 2.2); no weather loaded = no wind (speeds 0: the blade stays put)
+	// the wind, as the game's grass vertex shader: cb2[11] = (angle, 0, prev phase, phase), cb2[12] = (min * 300,
+	// max * 300, frequency); .w = 1 marks a grass shape; no weather loaded = no wind
 	float wind[4] = { 0, 0, 0, 0 }, wind2[4] = { 0, 0, 0, 1 };
 	GrassState & ws = gs();
 	const bool haveWind = wwCellGrassWind( wind, wind2 );

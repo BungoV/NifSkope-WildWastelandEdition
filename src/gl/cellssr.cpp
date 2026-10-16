@@ -23,7 +23,7 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <vector>
 
-/* ---- lane SSR1: the screen-space reflections (cellssr.h, res/shaders/cell_ssr.frag) ---- */
+/* ---- the screen-space reflections (cellssr.h, res/shaders/cell_ssr.frag) ---- */
 namespace
 {
 
@@ -36,14 +36,14 @@ struct SsrState
 {
 	bool loaded = false;
 	int red = 0;			// 1 off (computed, not applied), 2 nogap, 4 nofade
-	int probe = 0;			// WW_CELL_LIT_PROBE: another lane's probe reads its own term, without the reflection
+	int probe = 0;			// WW_CELL_LIT_PROBE: another probe reads its own term, without the reflection
 	QString dump;			// WW_CELL_SSR_DUMP
 	bool pass = false;		// the scene pass is drawing
-	bool waterRay = false;	// lane WATER2: the water ray pass is drawing
+	bool waterRay = false;	// the water ray pass is drawing
 	unsigned int gbuf = 0;
 	bool flagged = false;	// the draw being set up carries the flag
-	bool on = true, ext = false, pinOn = false, pinExt = false;	// lane CELLALL1: the rows (cellssr.h)
-	int lastVerdict = -1;	// lane CELLALL1: the telemetry line prints when it changes
+	bool on = true, ext = false, pinOn = false, pinExt = false;	// the rows (cellssr.h)
+	int lastVerdict = -1;	// the telemetry line prints when it changes
 };
 
 SsrState & ssr()
@@ -75,7 +75,7 @@ struct SsrGpu
 	SsrTarget scene;			// full size: the lit color without the reflection, alpha the flag (RGBA32F, bilinear)
 	SsrTarget ray;				// half size: u0, v0, start depth
 	SsrTarget raw, across, fin;	// half size: rgb the reflected color, a the confidence (bilinear)
-	SsrTarget wray;				// lane WATER2: full size, bottom row first: the water's ray in the view, view depth
+	SsrTarget wray;				// full size, bottom row first: the water's ray in the view, view depth
 	const void * doc = nullptr;
 	bool ready = false;
 	bool waterOnly = false;		// an exterior: the pass ran for the water alone
@@ -173,10 +173,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 		return;
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
 	WwCellAoTargets ao;
-	const bool waterSsr = wwCellWaterSsrWanted( scene );	// lane WATER2
-	// lane CELLALL1: the rows; an exterior only with "SSR outdoors" (before: interiors only)
-	/* finalfix: an exterior with the SSR outdoors row off runs the pass for the water alone (WATER2): it says so,
-	 * as verdict 5, rather than "on" -- the row still ships off and the line has to show it */
+	const bool waterSsr = wwCellWaterSsrWanted( scene );
+	// the rows; an exterior only with "SSR outdoors"
+	/* an exterior with SSR outdoors off runs the pass for the water alone: reported as verdict 5, not "on" */
 	int verdict = !L ? 0 : !s.on ? 1 : ( !L->interior && !s.ext && !waterSsr ) ? 2 : !wwCellAoTargets( scene, ao ) ? 3 : 4;
 	if ( verdict == 4 && !L->interior && !s.ext )
 		verdict = 5;
@@ -188,7 +187,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 	}
 	if ( verdict != 4 && verdict != 5 )
 		return;
-	g.waterOnly = !L->interior && !s.ext;	// merge: SSR outdoors runs the full pass, else water only (WATER2)
+	g.waterOnly = !L->interior && !s.ext;	// SSR outdoors runs the full pass, else water only
 	g.haveWater = false;
 	QElapsedTimer timer;
 	timer.start();
@@ -266,7 +265,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glDisable( GL_STENCIL_TEST );
 	fn->glDisable( GL_POLYGON_OFFSET_FILL );
 
-	// 1b. lane WATER2: the water's rays (the game's pass 02100), depth-tested against the opaque depth just drawn
+	// 1b. the water's rays, depth-tested against the opaque depth just drawn
 	if ( waterSsr ) {
 		ssrAlloc( fn, g.wray, W, H, false );
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.wray.fbo );
@@ -423,7 +422,7 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
 	cellProgram = cellProgram && ssrIsCellProgram( prog );
 	if ( s.pass && s.waterRay ) {
-		// lane WATER2: the water ray pass: the water alone writes, behind the opaque depth, writing no depth
+		// the water ray pass: the water alone writes, behind the opaque depth, writing no depth
 		const bool water = prog && prog->name == std::string_view( "fo4_water.prog" );
 		glColorMask( water, water, water, water );
 		glDepthMask( GL_FALSE );

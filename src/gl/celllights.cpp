@@ -7,17 +7,17 @@ BSD License - see nifskope.h
 #include "celllights.h"
 
 #include "gl/cellssr.h"
-#include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/cellvolfog.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
-#include "gl/cellbloom.h"	// lane BLOOM1b
-#include "gl/cellaodecalgl.h"	// lane AODECAL1
-#include "gl/lookdevstage.h"	// lane SUNCELL1
-#include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
-#include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
+#include "gl/cellbloom.h"
+#include "gl/cellaodecalgl.h"
+#include "gl/lookdevstage.h"
+#include "gl/cellwater.h"	// water casts no cube shadow
+#include "gamemanager.h"	// the weather imagespace's LUT
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -34,20 +34,19 @@ namespace
 {
 
 constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 is the CSM map
-constexpr int kTexelsPerLight = 8;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias;
-										// lane HEMI1 the 6th to 8th: the box rows (cell_lights.glsl CELL_TPL)
-constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
-constexpr int kGiSlotUnit = 18;		// lane ROOMCLAMP1: the grid's slot rooms, the fine rooms (sampler3D, R32F); off
-constexpr int kRoomUnit = 19;		// on a GPU with fewer than 20 units (the blend before the lane)
-constexpr int kFarSlotUnit = 20;	// lane FARVIEW1: the far table's slots (usamplerBuffer), records (samplerBuffer) and the
+constexpr int kTexelsPerLight = 8;		// must match CELL_TPL in cell_lights.glsl
+constexpr int kGiUnit = 13;			// the bounce grid (sampler3D)
+constexpr int kGiSlotUnit = 18;		// the grid's slot rooms, the fine rooms (sampler3D, R32F); off
+constexpr int kRoomUnit = 19;		// on a GPU with fewer than 20 units
+constexpr int kFarSlotUnit = 20;	// the far table's slots (usamplerBuffer), records (samplerBuffer) and the
 constexpr int kFarRecUnit = 21;		// GI grid's placed share (sampler3D); off on a GPU with fewer than 23 units
 constexpr int kFarPlacedUnit = 22;
-constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
-constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
-constexpr int kShadowUnit = 10;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
+constexpr int kLutUnit = 12;		// the imagespace LUT (sampler3D)
+constexpr int kBloomUnit = 11;		// the imagespace bloom (sampler2D, a quarter of the view)
+constexpr int kShadowUnit = 10;		// the lights' depth cubes (samplerCubeArrayShadow)
 constexpr int kShadowSlots = 16;	// shadowed lights at once, the nearest the camera
-constexpr int kShadowFace = 512;	// texels a cube face edge (the game's 2048 paraboloid's centre texel at 1024)
-constexpr int kAmbientSlots = 16;	// lane AMBO2: Ambient Only volumes a cell (Fallout4.esm's most in one cell: 5, measured)
+constexpr int kShadowFace = 512;	// texels a cube face edge
+constexpr int kAmbientSlots = 16;	// Ambient Only volumes a cell
 
 //! one bloom per document: the blurred bright pass, rgb floats, w x h (rows bottom-up, as read back)
 struct ClBloom
@@ -72,27 +71,27 @@ struct ClState
 	bool giOn = false, giPinned = false;
 	QHash<const void *, WwCellGi> gi;
 	QHash<const void *, int> giVersion;
-	bool farOn = false, farPinned = false;	// lane FARVIEW1
-	int dotsLast = -1;	// lane FARVIEW1: the dots the last frame drew (-1 none tried)
+	bool farOn = false, farPinned = false;
+	int dotsLast = -1;	// the dots the last frame drew (-1 none tried)
 	int farRed = 0;
 	QHash<const void *, WwCellFar> far;
 	QHash<const void *, int> farVersion;
 	bool isOn = false, isPinned = false, measuring = false;
 	int isRed = 0;          // 1 nolut, 2 noexp, 4 nograde, 8 nobloom, 16 nofx
-	QHash<const void *, float> adapted;     // lane IMGS1: the last measure per document
+	QHash<const void *, float> adapted;     // the last measure per document
 	QHash<const void *, int> adaptedPixels;
-	QHash<const void *, ClBloom> bloom;     // lane BLOOM1: the last measure's bloom per document
+	QHash<const void *, ClBloom> bloom;     // the last measure's bloom per document
 	int nextBloomVersion = 1;
-	bool shadowOn = true;   // lane SHADOW1: WW_CELL_SHADOW=0 turns the maps off (the harness's unshadowed pass)
-	bool shadowPinned = false;	// lane CELLALL1: the Light shadows row (WW/CellShadow); the pin wins
+	bool shadowOn = true;   // WW_CELL_SHADOW=0 turns the maps off
+	bool shadowPinned = false;	// the Light shadows row (WW/CellShadow); the pin wins
 	bool shadowRed = false; // WW_CELL_SHADOW_RED=noshadow: the maps rendered, every factor read as 1
 	QString shadowLast = QStringLiteral( "none yet" );
-	int fogProbe = 0;       // lane FOG2: WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog colour ^ 1/2.2) | 8 (its d, z), per fragment
-	int pass = 0;           // lane PROBEVIEW1: the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
+	int fogProbe = 0;       // WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog color ^ 1/2.2) | 8 (its d, z)
+	int pass = 0;           // the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
 	bool passPinned = false;
-	int passRed = 0;        // WW_CELL_PV_RED: 1 direct, 2 nonormal (the shader), 4 open (every sky direction open), 8 noclamp, 16 nosee, 32 borrow, 64 lendamb, 128 strand, 256 firstslot, 512 tiepick, 1024 lonesky, 2048 nofilter, 4096 nolastfill
-	int giAmb = 1;          // lane GICAL1: WW_CELL_GI_AMB = keep (0) | replace | off | max | asgi (the measure's red); lane GIAMB1: replace by default (his ruling), keep = the gate's red
-	bool giFill = true;     // lane GICAL1: WW_CELL_GI_FILL=0 leaves the GI's gaps black (as before the lane)
+	int passRed = 0;        // WW_CELL_PV_RED bits, see st()
+	int giAmb = 1;          // WW_CELL_GI_AMB = keep (0) | replace (default) | off | max | asgi
+	bool giFill = true;     // WW_CELL_GI_FILL=0 leaves the GI's gaps black
 };
 
 ClState & st()
@@ -114,7 +113,7 @@ ClState & st()
 		} else {
 			s.giOn = QSettings().value( QStringLiteral( "WW/CellGi" ), false ).toBool();
 		}
-		const QByteArray farPin = qgetenv( "WW_CELL_FAR" );	// lane FARVIEW1
+		const QByteArray farPin = qgetenv( "WW_CELL_FAR" );
 		if ( !farPin.isEmpty() ) {
 			s.farPinned = true;
 			s.farOn = farPin.trimmed() != "0";
@@ -139,8 +138,8 @@ ClState & st()
 		s.shadowOn = s.shadowPinned ? shPin != "0" : QSettings().value( QStringLiteral( "WW/CellShadow" ), true ).toBool();
 		s.shadowRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
 		s.fogProbe = qEnvironmentVariableIntValue( "WW_CELL_FOG_PROBE" );
-		const QByteArray giAmb = qgetenv( "WW_CELL_GI_AMB" ).trimmed();	// lane GICAL1
-		s.giAmb = giAmb == "keep" ? 0 : giAmb == "off" ? 2 : giAmb == "max" ? 3 : giAmb == "asgi" ? 4 : 1;	// lane GIAMB1: unset = replace
+		const QByteArray giAmb = qgetenv( "WW_CELL_GI_AMB" ).trimmed();
+		s.giAmb = giAmb == "keep" ? 0 : giAmb == "off" ? 2 : giAmb == "max" ? 3 : giAmb == "asgi" ? 4 : 1;	// unset = replace
 		s.giFill = qgetenv( "WW_CELL_GI_FILL" ).trimmed() != "0";
 		const QByteArray red = qgetenv( "WW_CELL_LIT_RED" ).trimmed();
 		if ( red == "linear" )
@@ -150,30 +149,30 @@ ClState & st()
 		else if ( red == "nodalc" )
 			s.red = 4;
 		else if ( red == "lambert" )
-			s.red = 8;	// lane ON1: the diffuse back to Lambert
+			s.red = 8;	// the diffuse back to Lambert
 		else if ( red == "normalised" )
-			s.red = 16;	// lane ON1: the textbook (normalised) Oren-Nayar azimuth
+			s.red = 16;	// the textbook (normalized) Oren-Nayar azimuth
 		else if ( red == "norim" )
-			s.red = 32;	// lane RIM1: the back-light rim term dropped
+			s.red = 32;	// the back-light rim term dropped
 		else if ( red == "rimflags" )
-			s.red = 64;	// lane RIM1: the lights' No Rim / Ignore Roughness flags ignored
+			s.red = 64;	// the lights' No Rim / Ignore Roughness flags ignored
 		else if ( red == "ambientlit" )
-			s.red = 128;	// lane AMBO1: the Ambient Only lights drawn as ordinary lights
+			s.red = 128;	// the Ambient Only lights drawn as ordinary lights
 		else if ( red == "hemiomni" )
-			s.red = 256;	// lane HEMI1: hemisphere and box lights drawn as plain omni lights (the cell view applies it)
+			s.red = 256;	// hemisphere and box lights drawn as plain omni lights (the cell view applies it)
 		else if ( red == "cubeold" )
-			s.red = 512;	// lane CUBE1: the interior cube map at its old scale (squared, x Lambert, default cube)
+			s.red = 512;	// the interior cube map at its old scale (squared, x Lambert, default cube)
 		else if ( red == "ambientfull" )
-			s.red = 1024;	// lane AMBO2: the Ambient Only lights' ambient adjustment ignored
+			s.red = 1024;	// the Ambient Only lights' ambient adjustment ignored
 		else if ( red == "probefx" )
-			s.red = 4096;	// lane FRAT1: effects and refraction shapes drawn into the probe passes again
-		// lane POOL1: the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
+			s.red = 4096;	// effects and refraction shapes drawn into the probe passes again
+		// the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
 		if ( qgetenv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
 			s.red |= 65536;
-		// lane GISHADE1: outdoors the grid's sky takes k x the flat ambient off in sqrt space again (the old law)
+		// outdoors the grid's sky takes k x the flat ambient off in sqrt space (the old law)
 		if ( qgetenv( "WW_CELL_GISHADE_RED" ).trimmed() == "sqrt" )
 			s.red |= 131072;
-		// lane PROBEVIEW1: the Pass, by number or by its entry's name
+		// the Pass, by number or by its entry's name
 		const QByteArray passPin = qgetenv( "WW_CELL_PASS" ).trimmed();
 		if ( !passPin.isEmpty() ) {
 			s.passPinned = true;
@@ -187,7 +186,7 @@ ClState & st()
 			s.pass = 0;
 		for ( const QByteArray & r : qgetenv( "WW_CELL_PV_RED" ).split( ',' ) ) {
 			const QByteArray t = r.trimmed();
-			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : t == "firstslot" ? 256 : t == "tiepick" ? 512 : t == "lonesky" ? 1024 : t == "nofilter" ? 2048 : t == "nolastfill" ? 4096 : 0;	// lane GIDARK1: firstslot, tiepick, lonesky; lane WALLSTACK1: nofilter, nolastfill   // lane ROOMCLAMP1: noclamp; lane GISHADE1: nosee; lane GIBLACK1: borrow; lane GIBLACK2: lendamb, strand
+			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : t == "firstslot" ? 256 : t == "tiepick" ? 512 : t == "lonesky" ? 1024 : t == "nofilter" ? 2048 : t == "nolastfill" ? 4096 : 0;
 		}
 	}
 	return s;
@@ -203,24 +202,23 @@ struct Gpu
 	GLuint giTex = 0;
 	const void * giDoc = nullptr;
 	int giVersion = 0;
-	GLuint slotTex = 0, roomTex = 0;	// lane ROOMCLAMP1: uploaded with the GI grid (the same document and version)
+	GLuint slotTex = 0, roomTex = 0;	// uploaded with the GI grid (the same document and version)
 	const void * roomDoc = nullptr;
 	int roomVersion = 0, units = -1;
-	GLuint skyTex = 0;		// lane PROBEVIEW1: the sky grid, bound on the GI unit in the Sky visibility pass
+	GLuint skyTex = 0;		// the sky grid, bound on the GI unit in the Sky visibility pass
 	const void * skyDoc = nullptr;
 	int skyVersion = 0;
 	GLuint lutTex = 0;
 	const void * lutDoc = nullptr;
 	int lutVersion = 0;
-	int lutStamp = -1;	// lane SUNCELL1: the exterior imagespace's stamp the LUT was uploaded at
+	int lutStamp = -1;	// the exterior imagespace's stamp the LUT was uploaded at
 	GLuint bloomTex = 0;
-	GLuint farSlotBuf = 0, farSlotTex = 0, farRecBuf = 0, farRecTex = 0, farPlacedTex = 0;	// lane FARVIEW1
+	GLuint farSlotBuf = 0, farSlotTex = 0, farRecBuf = 0, farRecTex = 0, farPlacedTex = 0;
 	const void * farDoc = nullptr;
 	int farVersion = 0;
 	const void * bloomDoc = nullptr;
 	int bloomVersion = 0;
-	// lane SHADOW1: the depth cube array, the light each slot holds (-1 free), and a stamp the light
-	// buffer re-uploads on (a light's slot is its 5th texel)
+	// the depth cube array, the light each slot holds (-1 free), and a stamp the light buffer re-uploads on
 	GLuint shTex = 0, shFbo = 0;
 	const void * shDoc = nullptr;
 	int shVersion = 0;
@@ -234,11 +232,8 @@ QHash<const void *, Gpu> & gpus()
 	return g;
 }
 
-/* lane SUNCELL1: AN EXTERIOR'S IMAGESPACE IS THE WEATHER'S. An interior keeps its XCIM imagespace (lane IMGS1); an
- * exterior has none of its own, the game uses the weather's IMSP at the hour (the two colour keys, blended).
- * isLighting() hands the imagespace sites the document's lighting with those fields filled from the Lookdev
- * weather (wwLookdevImageSpace), re-filled when the weather or the hour's keys move. No Lookdev weather: the
- * document's own lighting, so the exterior draws as before (no imagespace). */
+/* An exterior has no imagespace of its own: the game uses the weather's IMSP at the hour, so isLighting()
+ * fills those fields from the Lookdev weather, re-filled when the weather or the hour's keys move. */
 struct ExIs
 {
 	QString key;
@@ -252,7 +247,7 @@ QHash<const void *, ExIs> & exIs()
 	return m;
 }
 
-//! the 256x16 B8G8R8 strip -> 16^3 RGB8, r fastest (src/cellview.cpp's reader, lane IMGS1)
+//! the 256x16 B8G8R8 strip -> 16^3 RGB8, r fastest (as src/cellview.cpp reads it)
 bool decodeLutStrip( const QByteArray & dds, std::vector<unsigned char> & out )
 {
 	auto u32 = [&]( int o ) { quint32 v = 0; std::memcpy( &v, dds.constData() + o, 4 ); return v; };
@@ -320,7 +315,7 @@ const WwCellLighting * isLighting( const void * nif, int * stamp = nullptr )
 			e.L.isLutPath = w.lutA;
 		}
 		e.stamp++;
-		// WATERHDR1: + the grade (cine, tint) and the LUT blend, the whole chain for a gate to rebuild
+		// the whole chain (hdr, grade, LUT blend) for a gate to rebuild
 		std::fprintf( stderr, "cell imagespace: exterior=%s hdr=%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g lut=%s%s"
 			" cine=%.9g,%.9g,%.9g tint=%.9g,%.9g,%.9g,%.9g lutT=%.9g\n",
 			e.L.isName.toLocal8Bit().constData(), double( w.hdr[0] ), double( w.hdr[1] ), double( w.hdr[2] ),
@@ -412,11 +407,8 @@ int wwCellFarRed()
 	return st().farRed;
 }
 
-/* lane FARVIEW1: the bulb dots. A bulb's intensity I = Le x area / 4 (farLightDots); seen from d it covers
- * (area / 4) / d^2 sr, a pixel (1 / f)^2 sr, so the frame value it adds, spread over a normalised Gaussian, is
- * I (f / d)^2 G / (2 pi sigma^2): the summed dot equals the bulb's own emissive the near view draws, at any size.
- * The hardware depth test (the frame's depth, not written) hides a dot behind a nearer surface; the stencil marks
- * its pixels as linear light (tone-mapped once, as the cell programs' are). */
+/* The far bulb dots: intensity I spread over a normalized Gaussian, I (f / d)^2 G / (2 pi sigma^2), so the summed
+ * dot equals the bulb's own emissive at any size. Depth-tested, not written; the stencil marks them as linear light. */
 int wwCellFarDotsDraw( Scene * scene )
 {
 	ClState & s = st();
@@ -508,21 +500,20 @@ bool wwCellLightsWanted( Scene * scene )
 {
 	if ( !scene || !scene->renderer || !scene->nifModel || scene->selecting )
 		return false;
-	// lane PROBEVIEW1: a Pass other than Combined draws through the cell program with the Cell lights row off too
+	// a Pass other than Combined draws through the cell program with the Cell lights row off too
 	if ( !( st().on || wwCellPassFor( scene->nifModel ) > 0 ) || !wwCellLightsFor( scene->nifModel ) )
 		return false;
 	// an orthographic camera has no eye position to measure light distances from
 	return scene->hasOption( Scene::DoLighting ) && scene->renderer->globalUniforms->projectionMatrix[3][3] != 1.0f;
 }
 
-/* Lane EFX1: the effect program takes no cell uniforms, so in a probe pass a see-through effect (the Vault 111
- * steam, once it drew as itself) wrote its own colour over the surface the probes measure: Vault view 2's legacy
- * share fell from 23.1% to 14.7%. Probe passes are harness-only; the pictures bungo looks at keep every effect. */
+/* The effect program takes no cell uniforms, so in a probe pass a see-through effect would write its own color
+ * over the surface the probes measure. Probe passes are harness-only. */
 bool wwCellProbePass( Scene * scene )
 {
 	const ClState & s = st();
 	if ( s.red & 4096 )
-		return false;	// lane FRAT1: WW_CELL_LIT_RED=probefx, the effects write over the probes (as before lane EFX1)
+		return false;	// WW_CELL_LIT_RED=probefx: the effects write over the probes
 	return ( s.probe > 0 || s.fogProbe > 0 || ( scene && wwCellPassFor( scene->nifModel ) > 0 ) ) && wwCellLightsWanted( scene );
 }
 
@@ -541,8 +532,8 @@ QStringList wwCellPassNames()
 {
 	return { QStringLiteral( "Combined" ), QStringLiteral( "GI" ), QStringLiteral( "Sky visibility" ),
 		QStringLiteral( "Surfel color" ), QStringLiteral( "Surfel light" ),
-		QStringLiteral( "Brick light" ),	// lane BRICK1: each surfel tile shows its 4 m brick's light
-		QStringLiteral( "Probe coverage" ) };	// lane WALLSTACK1: magenta where no probe reaches (the deck's s-placement view)
+		QStringLiteral( "Brick light" ),	// each surfel tile shows its 4 m brick's light
+		QStringLiteral( "Probe coverage" ) };	// magenta where no probe reaches
 }
 
 int wwCellPass()
@@ -579,7 +570,7 @@ void wwCellLightsUniforms( Scene * scene )
 	Gpu & g = gpus()[r];
 	const WwCellLighting * L = on ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp ) ) {
-		// lane SHADOW1: the slot each light holds (the slots belong to the document the shadow pass last saw)
+		// the slot each light holds (the slots belong to the document the shadow pass last saw)
 		std::vector<float> slotOf( size_t( L->lights.size() ), -1.0f );
 		if ( g.shDoc == scene->nifModel && g.shVersion == s.version.value( scene->nifModel ) )
 			for ( int k = 0; k < kShadowSlots; k++ )
@@ -590,22 +581,21 @@ void wwCellLightsUniforms( Scene * scene )
 		for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
 			const WwCellLight & l = L->lights.at( i );
 			float dir[3] = { l.dir[0], l.dir[1], l.dir[2] };
-			// lane HEMI1: texel 1.w = cos(FOV / 2) for a spot, else the shape: -2 omni, -3 hemisphere, -4 box
+			// texel 1.w = cos(FOV / 2) for a spot, else the shape: -2 omni, -3 hemisphere, -4 box
 			const float shape = l.spot ? l.cosOuter : l.shape == 1 ? -3.0f : l.shape == 2 ? -4.0f : -2.0f;
 			const float tex[kTexelsPerLight * 4] = {
 				l.pos[0], l.pos[1], l.pos[2], l.radius,
 				l.color[0], l.color[1], l.color[2], shape,
 				dir[0], dir[1], dir[2], l.cone,
 				l.bias, l.scale, l.exponent,
-				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) ),	// lane RIM1
+				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) ),
 				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias,
 				l.box[0][0], l.box[0][1], l.box[0][2], l.box[0][3],
 				l.box[1][0], l.box[1][1], l.box[1][2], l.box[1][3],
 				l.box[2][0], l.box[2][1], l.box[2][2], l.box[2][3] };
 			t.insert( t.end(), tex, tex + kTexelsPerLight * 4 );
 		}
-		/* lane FARVIEW1: WW_CELL_LIGHT_COPIES=n (the flat-cost gate's knob): every light n times at 1/n its colour, the
-		 * picture unchanged, the light loop n times as long */
+		/* WW_CELL_LIGHT_COPIES=n: every light n times at 1/n its color (same picture, n times the light loop cost) */
 		static const int copies = std::clamp( qEnvironmentVariableIntValue( "WW_CELL_LIGHT_COPIES" ), 1, 64 );
 		if ( copies > 1 && !t.empty() ) {
 			const size_t one = t.size();
@@ -641,8 +631,8 @@ void wwCellLightsUniforms( Scene * scene )
 	} else {
 		fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
 	}
-	// lane PRTPGI: the bounce grid, bound (like the buffer above) whether or not this draw uses it
-	// lane PROBEVIEW1: a Pass reads the grid with the GI row off too; Sky visibility binds the sky grid in its place
+	// the bounce grid, bound (like the buffer above) whether or not this draw uses it; a Pass reads it with the
+	// GI row off too, and Sky visibility binds the sky grid in its place
 	const int pass = wwCellPassFor( scene->nifModel );
 	const WwCellGi * G = on && ( s.giOn || pass > 0 ) ? wwCellGiFor( scene->nifModel ) : nullptr;
 	if ( G && pass == 2 && !G->sky.empty() && ( g.skyDoc != scene->nifModel || g.skyVersion != s.giVersion.value( scene->nifModel ) ) ) {
@@ -685,7 +675,7 @@ void wwCellLightsUniforms( Scene * scene )
 	const bool giDraw = skyDraw || ( G && pass != 2 && g.giTex && g.giDoc == scene->nifModel );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, skyDraw ? g.skyTex : giDraw ? g.giTex : 0 );
-	// lane ROOMCLAMP1: the rooms (src/proberooms.h): the grid's slot rooms and the fine rooms, nearest, R32F
+	// the rooms (src/proberooms.h): the grid's slot rooms and the fine rooms, nearest, R32F
 	if ( g.units < 0 ) {
 		GLint units = 0;
 		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
@@ -729,7 +719,7 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni1f( "cellRoomsCell", G->roomsCell );
 		prog->uni3f( "cellRoomsDims", float( G->roomsDims[0] ), float( G->roomsDims[1] ), float( G->roomsDims[2] ) );
 	}
-	/* lane FARVIEW1: the far tables and the GI grid's placed share, bound (the sampler types fixed) whether or not
+	/* the far tables and the GI grid's placed share, bound (the sampler types fixed) whether or not
 	 * this draw uses them; a GPU with fewer than 23 units never draws far light */
 	const WwCellFar * Fr = on && s.farOn && pass == 0 && g.units > kFarPlacedUnit ? wwCellFarFor( scene->nifModel ) : nullptr;
 	if ( Fr && !Fr->slotTab.empty() && ( g.farDoc != scene->nifModel || g.farVersion != s.farVersion.value( scene->nifModel ) ) ) {
@@ -799,20 +789,20 @@ void wwCellLightsUniforms( Scene * scene )
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellGi", kGiUnit );
 	prog->uni1b( "cellGiOn", giDraw );
-	prog->uni1b( "cellGiSky", giDraw && !skyDraw && G->skyLit );	// lane SKY1 (never on the sky-share grid)
-	prog->uni1f( "cellSkyVis", wwCellSkyVis() );	// lane SKYSTR1: the Sky visibility row, for the AO decals
-	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
+	prog->uni1b( "cellGiSky", giDraw && !skyDraw && G->skyLit );	// never on the sky-share grid
+	prog->uni1f( "cellSkyVis", wwCellSkyVis() );	// the Sky visibility row, for the AO decals
+	prog->uni1i( "cellGiAmb", s.giAmb );
 	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
-	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
-	prog->uni1i( "cellPassRed", s.passRed & ~4 );	// lane WALLSTACK1: + 2048 nofilter, 4096 nolastfill (was & 251, which dropped them)	// lane ROOMCLAMP1: + 8 noclamp; lane GISHADE1: + 16 nosee; lane GIBLACK1: + 32 borrow; lane GIBLACK2: + 64 lendamb, 128 strand
+	prog->uni1i( "cellPass", pass );
+	prog->uni1i( "cellPassRed", s.passRed & ~4 );	// bit 4 ("open") is applied to the upload, not the shader
 	if ( giDraw ) {
 		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
 		prog->uni1f( "cellGiVoxel", G->voxel );
 		prog->uni3f( "cellGiDims", float( G->dims[0] ), float( G->dims[1] ), float( G->dims[2] ) );
 	}
-	// lane IMGS1: the imagespace, once this document has a measure; its LUT bound like the grid above
+	// the imagespace, once this document has a measure; its LUT bound like the grid above
 	const float adapted = s.adapted.value( scene->nifModel, -1.0f );
-	int isStamp = 0;	// lane SUNCELL1: an exterior's imagespace is the weather's (isLighting)
+	int isStamp = 0;	// an exterior's imagespace is the weather's (isLighting)
 	const WwCellLighting * LI = isLighting( scene->nifModel, &isStamp );
 	const bool isDraw = L && LI && !s.measuring && adapted >= 0.0f && wwCellImageSpaceWanted( scene );
 	if ( isDraw && LI->isLut.size() == 16 * 16 * 16 * 3
@@ -838,7 +828,7 @@ void wwCellLightsUniforms( Scene * scene )
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kLutUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
-	// lane BLOOM1: the measure's bloom, a quarter of the view, sampled at the fragment's place in the view
+	// the measure's bloom, a quarter of the view, sampled at the fragment's place in the view
 	const ClBloom * B = nullptr;
 	if ( isDraw ) {
 		auto it = s.bloom.constFind( scene->nifModel );
@@ -859,7 +849,7 @@ void wwCellLightsUniforms( Scene * scene )
 		g.bloomDoc = scene->nifModel;
 		g.bloomVersion = B->version;
 	}
-	// lane BLOOM1b: the FO4CS bloom stands in for it this frame (FO4CS suppresses the engine bloom the same way)
+	// the FO4CS bloom stands in for it this frame (FO4CS suppresses the engine bloom the same way)
 	const bool bloomDraw = B && B->w > 0 && g.bloomTex && g.bloomDoc == scene->nifModel && !( s.isRed & 8 ) && !wwCellBloomReplacing();
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kBloomUnit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, bloomDraw ? g.bloomTex : 0 );
@@ -872,7 +862,7 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni4f_l( prog->uniLocation( "cellIsBloomRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}
-	// lane SHADOW1: the depth cubes, bound (a sampler left on unit 0 beside BaseMap would be a type clash)
+	// the depth cubes, bound (a sampler left on unit 0 beside BaseMap would be a type clash)
 	const bool shadowDraw = L && s.shadowOn && !s.shadowRed && g.shTex && g.shDoc == scene->nifModel;
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
 	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, shadowDraw ? g.shTex : 0 );
@@ -882,7 +872,7 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1f( "cellShadowTexel", 2.0f / float( kShadowFace ) );
 	prog->uni1i( "cellIsLut", kLutUnit );
 	prog->uni1b( "cellIsOn", isDraw );
-	prog->uni1b( "cellIsLinear", isDraw && wwCellHdrActive() );	// lane HDR1: write linear light, tone-mapped once
+	prog->uni1b( "cellIsLinear", isDraw && wwCellHdrActive() );	// write linear light, tone-mapped once
 	prog->uni1b( "cellIsLutOn", lutDraw );
 	if ( isDraw ) {
 		const float * h = LI->isHdr;
@@ -902,7 +892,7 @@ void wwCellLightsUniforms( Scene * scene )
 	// world = R^T (posView - t) / sc  (lookdevstage.cpp's fog uses the same inverse)
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
-	prog->uni1f( "fxDistScale", 1.0f / sc );	// lane EFX2: view units -> game units for the soft fades
+	prog->uni1f( "fxDistScale", 1.0f / sc );	// view units -> game units for the soft fades
 	float cellRowW[3];	// the camera, world (WW_CELL_CAM_DUMP)
 	for ( int k = 0; k < 3; k++ ) {
 		float w = 0.0f;
@@ -923,26 +913,24 @@ void wwCellLightsUniforms( Scene * scene )
 			( L->dalc[0][c] - L->dalc[1][c] ) * 0.5f, ( L->dalc[2][c] - L->dalc[3][c] ) * 0.5f,
 			( L->dalc[4][c] - L->dalc[5][c] ) * 0.5f, mean ) );
 	}
-	// lane AMBO2: the Ambient Only volumes, in plugin order (the shader takes the first that holds a point)
+	// the Ambient Only volumes, in plugin order (the shader takes the first that holds a point)
 	const int ambo = ( dalc && !( s.red & 1024 ) ) ? std::min( int( L->ambientLights.size() ), kAmbientSlots ) : 0;
 	prog->uni1i( "cellAmboCount", ambo );
 	for ( int i = 0; i < ambo; i++ ) {
 		const WwCellAmbientLight & a = L->ambientLights[i];
 		prog->uni4f_l( prog->uniLocation( "cellAmbo[%d]", i ), FloatVector4( a.pos[0], a.pos[1], a.pos[2], a.volume ) );
-		// lane HEMI1: K.w = 1 marks a box volume, its three rows in cellAmboBox
+		// K.w = 1 marks a box volume, its three rows in cellAmboBox
 		prog->uni4f_l( prog->uniLocation( "cellAmboK[%d]", i ), FloatVector4( a.k[0], a.k[1], a.k[2], a.hasBox ? 1.0f : 0.0f ) );
 		for ( int k = 0; k < 3 && a.hasBox; k++ )
 			prog->uni4f_l( prog->uniLocation( "cellAmboBox[%d]", i * 3 + k ),
 				FloatVector4( a.box[k][0], a.box[k][1], a.box[k][2], a.box[k][3] ) );
 	}
-	/* lane SUNCELL1: an exterior's directional is the weather's sun (or moon at night): Lookdev's light, TO it,
-	 * world, linear, the numbers the viewport light already carries. Only the cell programs take it (the volumetric
-	 * fog keeps the old exterior law; a lit effect takes it x Sunlight Scale below); Lookdev off (no weather) = the old path, unchanged. */
+	/* An exterior's directional is the weather's sun (or moon): Lookdev's light, TO it, world, linear.
+	 * Only the cell programs take it; Lookdev off (no weather) = the old path. */
 	bool hasDir = L->hasDirectional;
 	float dirTo[3] = { L->dirTo[0], L->dirTo[1], L->dirTo[2] }, dirColor[3] = { L->dirColor[0], L->dirColor[1], L->dirColor[2] };
-	/* lane BOUNCE1: the game's lit surfaces take the sun x the imagespace Sunlight Scale (wwLookdevSunlightScale;
-	 * CommonwealthClear noon 4.5), so the sun against the weather's ambient -- and the bounce the probes carry -- is
-	 * the game's ratio; the cell imagespace's exposure (adapted luminance) takes the brighter frame. 1 indoors. */
+	/* The game's lit surfaces take the sun x the imagespace Sunlight Scale, so the sun-to-ambient ratio (and the
+	 * bounce the probes carry) matches the game. 1 indoors. */
 	const float sunScale = ( !L->interior && wwLookdevActive() ) ? wwLookdevSunlightScale() : 1.0f;
 	prog->uni1f( "cellSunScale", sunScale );
 	if ( !L->interior && wwLookdevActive() && ( wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) ) ) {
@@ -966,28 +954,15 @@ void wwCellLightsUniforms( Scene * scene )
 			sunLast = line;
 		}
 	}
-	/* lane SUNCELL1 final: a lit effect or lit particle outdoors (fo4_effectcell / particles_cell) takes the game's
-	 * base term: the game's lit-effect setup puts pow(directional colour, 2.2) x the light's fade x
-	 * the imagespace Sunlight Scale (the imagespace HDR data's 7th float, HNAM's 7th float) in
-	 * cb2[12]; the scene's directional outdoors is the sun. No ambient: the lit asm reads cb2 rows 0..14 only
-	 * (lights 0..11, base 12, alpha 13..14). Red WW_CELL_FXLIT_EXT_RED=indoors leaves exteriors self-lit.
-	 * lane ALLON2 (2026-10-12, the Goodneighbor steam drew near-white): the game puts that same Sunlight Scale on the
-	 * SURFACES' sun too (the lit-surface and deferred-light setups both multiply the imagespace Sunlight Scale
-	 * in; checked in Todd's treat), so effect and wall keep a 1:1 sun. This
-	 * viewer's surfaces take the sun unscaled, so a lit effect takes the surfaces' scale (1): with x4.5 it drew 4.5x
-	 * brighter than the wall behind it. Red WW_CELL_FXLIT_SCALE_RED=game puts the Sunlight Scale back (in and out).
-	 * lane EFFECTPARITY1: the colour is not the sunlight. The game's per-frame sun update copies the sky's colours into the sun light:
-	 * the diffuse (what the surfaces read) from the weather's Sunlight row, and a second colour (the light's
-	 * effect colour) from its Effect Lighting row (NAM0 row 9); the effect
-	 * shader's lit branch reads that effect colour. CommonwealthClear at noon: Sunlight 225 grey, Effect Lighting 150 grey
-	 * (0.41x linear); at night 53,70,87 vs 33,51,67. Red WW_CELL_FXLIT_COLOR_RED=sun takes the sunlight again. */
+	/* A lit effect or particle outdoors takes the game's base term: the weather's Effect Lighting color (not the
+	 * sunlight) x the surfaces' sun scale, so effect and wall keep a 1:1 sun. WW_CELL_FXLIT_*_RED are harness switches. */
 	{
 		static const bool fxExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
 		static const bool fxScaleRed = qgetenv( "WW_CELL_FXLIT_SCALE_RED" ).trimmed() == "game";
 		static const bool fxColorRed = qgetenv( "WW_CELL_FXLIT_COLOR_RED" ).trimmed() == "sun";
 		const bool fxProg = prog->name == std::string_view( "fo4_effectcell.prog" )
 			|| prog->name == std::string_view( "particles_cell.prog" );
-		// lane GIDARK1: the decal programs keep the surfaces' sun and take the lit-effect base as cellFxBase (fxRoomLit)
+		// the decal programs keep the surfaces' sun and take the lit-effect base as cellFxBase (fxRoomLit)
 		const bool roomProg = wwIsCellDecalProgramName( prog->name );
 		float dalc[6][3];
 		if ( !L->interior && roomProg ) {
@@ -1010,11 +985,11 @@ void wwCellLightsUniforms( Scene * scene )
 			wwLookdevLight( dirTo, dif, amb );
 			float fxCol[3] = { dif[0], dif[1], dif[2] };
 			if ( !fxColorRed )
-				wwLookdevEffectLight( fxCol );	// lane EFFECTPARITY1: the Effect Lighting row
+				wwLookdevEffectLight( fxCol );	// the Effect Lighting row
 			WwLookdevIs is;
 			const bool haveIs = wwLookdevImageSpace( is );
 			const float isScale = haveIs ? is.hdr[6] : 1.0f;
-			const float fxScale = fxScaleRed ? isScale : sunScale;	// lane ALLON2: the surfaces' scale (lane BOUNCE1: the game's)
+			const float fxScale = fxScaleRed ? isScale : sunScale;	// the surfaces' scale
 			for ( int c = 0; c < 3; c++ )
 				dirColor[c] = std::max( fxCol[c], 0.0f ) * fxScale;
 			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
@@ -1040,12 +1015,11 @@ void wwCellLightsUniforms( Scene * scene )
 				fxSunSaid = true;
 			}
 		}
-		/* lane SUNCELL1 final: indoors too the base takes the imagespace Sunlight Scale -- the lit-effect setup multiplies
-		 * the imagespace Sunlight Scale in unconditionally; indoors that is the cell's XCIM imagespace HNAM[6].
-		 * A cell with no imagespace read keeps the base as it was. Red WW_CELL_FXLIT_INT_RED=noscale leaves it out. */
+		/* Indoors the game's lit-effect setup also multiplies in the cell imagespace's Sunlight Scale (HNAM[6]);
+		 * here only under the scale red, since the surfaces take scale 1. */
 		static const bool fxIntRed = qgetenv( "WW_CELL_FXLIT_INT_RED" ).trimmed() == "noscale";
 		if ( L->interior && fxProg ) {
-			const bool scaled = fxScaleRed && !fxIntRed && L->hasImageSpace;	// lane ALLON2: the surfaces' scale (1)
+			const bool scaled = fxScaleRed && !fxIntRed && L->hasImageSpace;
 			if ( scaled )
 				for ( int c = 0; c < 3; c++ )
 					dirColor[c] *= L->isHdr[6];
@@ -1062,12 +1036,8 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 		}
 	}
-	/* lane SUNCELL1: an exterior's ambient is the weather's directional ambient (the 6 DALC colours blended over
-	 * the hour's keys, Lookdev's wwLookdevDalc), uploaded in the interior's form (byte/255, (a - b) / 2 per axis,
-	 * the mean) so cellAmbient is one law indoors and out. The axis is the light's TRAVEL direction (Lookdev's
-	 * convention: the weathers store the bright sky blue in Z-, so Z- lights an up-facing normal). Only with the
-	 * weather's sun (the exterior branch of cellLit). Red WW_CELL_EXTAMB_RED=flat keeps the flat NAM0 Ambient;
-	 * =flip swaps the axis convention. */
+	/* An exterior's ambient is the weather's DALC, uploaded in the interior's form so cellAmbient is one law
+	 * indoors and out. The axis is the light's TRAVEL direction (Z- lights an up-facing normal). */
 	bool extDalc = false;
 	if ( !L->interior && hasDir && wwLookdevActive() && ( wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) ) ) {
 		static const QByteArray extRed = qgetenv( "WW_CELL_EXTAMB_RED" ).trimmed();
@@ -1113,12 +1083,12 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1b( "cellInterior", L->interior );
 	prog->uni3f( "cellCenter", L->center[0], L->center[1], L->center[2] );
 	prog->uni1i( "cellProbe", s.measuring ? 6 : s.probe );
-	// lane DECALLIT1: a harness reads a dark linear frame through 8 bits; the imagespace's own measure stays x 1
+	// a harness reads a dark linear frame through 8 bits; the imagespace's own measure stays x 1
 	static const float probeGain = qEnvironmentVariableIsSet( "WW_CELL_LIT_PROBE_GAIN" )
 		? std::max( qgetenv( "WW_CELL_LIT_PROBE_GAIN" ).toFloat(), 0.0f ) : 1.0f;
 	prog->uni1f( "cellProbeGain", s.measuring ? 1.0f : probeGain );
 	prog->uni1i( "cellRed", s.red );
-	// WW_CELL_CAM_DUMP=<file>: the camera in world units, rewritten when it moves (the fog and diffuse gates measure from it)
+	// WW_CELL_CAM_DUMP=<file>: the camera in world units, rewritten when it moves
 	static const QString camDump = QString::fromLocal8Bit( qgetenv( "WW_CELL_CAM_DUMP" ) );
 	static QString camLast;
 	if ( !camDump.isEmpty() ) {
@@ -1130,9 +1100,8 @@ void wwCellLightsUniforms( Scene * scene )
 			camLast = line;
 		}
 	}
-	/* lane FOG2: an interior's fog in place of the Lookdev weather fog (whose uniforms ran just before): the
-	 * same formula, the cell's packing, height = world z. No fog sun indoors (INFERRED: the game's directional
-	 * fog term follows the sun, which an interior lacks). */
+	/* An interior's fog in place of the Lookdev weather fog: the same formula, height = world z. No fog sun
+	 * indoors (inferred: the game's directional fog term follows the sun). */
 	if ( L->hasFog && prog->uniLocation( "fogOn" ) >= 0 ) {
 		prog->uni1b( "fogOn", true );
 		for ( int k = 0; k < 6; k++ )
@@ -1186,7 +1155,7 @@ void wwCellGiGpuSetOn( bool on )
 	QSettings().setValue( QStringLiteral( "WW/CellGiGpu" ), on );
 }
 
-// lane SKYSTR1: the Sky visibility row (celllights.h)
+// the Sky visibility row (celllights.h)
 namespace
 {
 int & skyVisCache()
@@ -1237,8 +1206,8 @@ void wwCellImageSpaceSetOn( bool on )
 bool wwCellImageSpaceWanted( Scene * scene )
 {
 	if ( !st().isOn || !scene || wwCellPassFor( scene->nifModel ) > 0 || !wwCellLightsWanted( scene ) )
-		return false;	// lane PROBEVIEW1: a Pass shows the probes' own values, not the imagespace's grade
-	const WwCellLighting * L = isLighting( scene->nifModel );	// lane SUNCELL1: an exterior's is the weather's
+		return false;	// a Pass shows the probes' own values, not the imagespace's grade
+	const WwCellLighting * L = isLighting( scene->nifModel );	// an exterior's is the weather's
 	return L && L->hasImageSpace;
 }
 
@@ -1292,7 +1261,7 @@ void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, 
 {
 	if ( !scene || !scene->nifModel || !rgba || w <= 0 || h <= 0 || step < 1 )
 		return;
-	const WwCellLighting * L = isLighting( scene->nifModel );	// lane SUNCELL1
+	const WwCellLighting * L = isLighting( scene->nifModel );
 	if ( !L || !L->hasImageSpace )
 		return;
 	ClState & s = st();
@@ -1314,8 +1283,8 @@ void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, 
 					}
 				src[( size_t( y ) * size_t( bw ) + size_t( x ) ) * 3 + size_t( c )] = float( sum / double( step * step ) );
 			}
-	// the game's blur: radius 7, 15 taps exp(-2 x^2 / 49), normalised; vertical with the bright pass
-	// scale * max(0, c - threshold) per tap, then horizontal plain (docs/PRTP_PLAN.md 2j)
+	// the game's blur: radius 7, 15 taps exp(-2 x^2 / 49), normalized; vertical with the bright pass
+	// scale * max(0, c - threshold) per tap, then horizontal plain
 	constexpr int r = 7;
 	float wt[2 * r + 1];
 	float wsum = 0.0f;
@@ -1363,7 +1332,7 @@ void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, 
 QString wwCellImageSpaceEcho( Scene * scene )
 {
 	ClState & s = st();
-	const WwCellLighting * L = scene && scene->nifModel ? isLighting( scene->nifModel ) : nullptr;	// lane SUNCELL1
+	const WwCellLighting * L = scene && scene->nifModel ? isLighting( scene->nifModel ) : nullptr;
 	QString o = QStringLiteral( "imagespace=%1(asked=%2)" ).arg( wwCellImageSpaceWanted( scene ) ? "on" : "off" ).arg( s.isOn ? 1 : 0 );
 	if ( !L || !L->hasImageSpace )
 		return o + QStringLiteral( " (the cell has none)" );
@@ -1388,7 +1357,7 @@ int wwCellLightsRed()
 
 int wwCellCubeTag( const QString & material )
 {
-	// lane CUBE1: WW_CELL_CUBE_DUMP=<file> numbers each env-mapped material (1..255) and writes "tag|material"
+	// WW_CELL_CUBE_DUMP=<file> numbers each env-mapped material (1..255) and writes "tag|material"
 	static const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_CUBE_DUMP" ) );
 	static QHash<QString, int> tags;
 	if ( dump.isEmpty() || material.isEmpty() )
@@ -1420,26 +1389,26 @@ QString wwCellLightsEcho( Scene * scene )
 	const WwCellGi * G = scene && scene->nifModel ? wwCellGiFor( scene->nifModel ) : nullptr;
 	o += QStringLiteral( " gi=%1(asked=%2%3)" ).arg( wwCellLightsWanted( scene ) && s.giOn && G ? "on" : "off" )
 		.arg( s.giOn ? 1 : 0 ).arg( G ? QStringLiteral( ", %1" ).arg( G->summary ) : QStringLiteral( ", none published" ) );
-	const WwCellFar * Fr = scene && scene->nifModel ? wwCellFarFor( scene->nifModel ) : nullptr;	// lane FARVIEW1
+	const WwCellFar * Fr = scene && scene->nifModel ? wwCellFarFor( scene->nifModel ) : nullptr;
 	if ( s.farOn || Fr )
 		o += QStringLiteral( " far=%1(asked=%2%3, red=%4)" ).arg( wwCellLightsWanted( scene ) && s.farOn && Fr ? "on" : "off" )
 			.arg( s.farOn ? 1 : 0 ).arg( Fr ? QStringLiteral( ", %1" ).arg( Fr->summary ) : QStringLiteral( ", none published" ) ).arg( s.farRed );
-	if ( s.dotsLast >= 0 )	// lane FARVIEW1: the bulb dots the last frame drew
+	if ( s.dotsLast >= 0 )	// the bulb dots the last frame drew
 		o += QStringLiteral( " fardots=%1" ).arg( s.dotsLast );
 	if ( s.probe )
 		o += QStringLiteral( " probe=%1" ).arg( s.probe );
 	o += QStringLiteral( " giamb=%1 gifill=%2" ).arg( QStringList{ "keep", "replace", "off", "max", "asgi" }.value( s.giAmb ) )
-		.arg( s.giFill ? 1 : 0 );	// lane GICAL1
+		.arg( s.giFill ? 1 : 0 );
 	if ( s.red )
 		o += QStringLiteral( " red=%1" ).arg( s.red );
-	if ( s.pass > 0 )	// lane PROBEVIEW1
+	if ( s.pass > 0 )
 		o += QStringLiteral( " pass=%1(asked=%2 %3, sky=%4, pvred=%5)" ).arg( scene ? wwCellPassFor( scene->nifModel ) : 0 )
 			.arg( s.pass ).arg( wwCellPassNames().value( s.pass ) ).arg( G && !G->sky.empty() ? 1 : 0 ).arg( s.passRed );
 	return o + QLatin1Char( ' ' ) + wwCellShadowEcho( scene )
-		+ ( wwVolFogOn() ? QStringLiteral( " " ) + wwVolFogSummary() : QString() );	// lane VOLFOG1
+		+ ( wwVolFogOn() ? QStringLiteral( " " ) + wwVolFogSummary() : QString() );
 }
 
-//! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change (the gate's light list)
+//! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change
 static void shadowDump( Scene * scene )
 {
 	static const QString path = QString::fromLocal8Bit( qgetenv( "WW_CELL_SHADOW_DUMP" ) );
@@ -1450,7 +1419,7 @@ static void shadowDump( Scene * scene )
 		f.write( ( wwCellShadowEcho( scene ) + QLatin1Char( '\n' ) ).toUtf8() );
 }
 
-/* lane SHADOW1: the depth cubes (celllights.h). Each face: world relative to the light, GL's cube face
+/* The depth cubes (celllights.h). Each face: world relative to the light, GL's cube face
  * axes (major m, s = u.r, t = v.r over |m.r|), 90 degrees; depth = distance / radius (the fragment stage). */
 void wwCellShadowPass( Scene * scene )
 {
@@ -1562,8 +1531,7 @@ void wwCellShadowPass( Scene * scene )
 		Matrix4 mv;
 	};
 	std::vector<ShCaster> casters;
-	// lane SUNCELL1: a cell's water surface casts no light shadow either (the game's water is no caster; a pond's
-	// plane under a lamp shadowed its own bed). Red WW_CELL_SHADOW_RED=watercasts keeps it.
+	// a cell's water surface casts no light shadow (the game's water is no caster); WW_CELL_SHADOW_RED=watercasts keeps it
 	static const bool waterCastsRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts";
 	int waterSkipped = 0;
 	for ( Node * node : scene->nodes.list() ) {
@@ -1699,7 +1667,7 @@ void wwCellShadowPass( Scene * scene )
 	}
 	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6 water=%7" )
 		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( kShadowFace )
-		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) );	// lane SUNCELL1
+		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) );
 	shadowDump( scene );
 }
 
@@ -1733,7 +1701,7 @@ QString wwCellShadowEcho( Scene * scene )
 	return o;
 }
 
-/* ---- lane AO1: the ambient obscurance (celllights.h, res/shaders/cell_ao.frag) ---- */
+/* ---- the ambient obscurance (celllights.h, res/shaders/cell_ao.frag) ---- */
 namespace
 {
 
@@ -1745,7 +1713,7 @@ struct AoState
 {
 	bool loaded = false;
 	bool on = true;			// WW_CELL_AO=0: none computed
-	bool pinned = false;	// lane CELLALL1: the AO row (WW/CellAo); the pin wins
+	bool pinned = false;	// the AO row (WW/CellAo); the pin wins
 	int red = 0;			// 1 off (computed, not applied), 2 radius (halved), 4 noblur, 8 noreset
 	QString dump;			// WW_CELL_AO_DUMP
 	bool pass = false;		// the opaque pass is drawing
@@ -1781,9 +1749,9 @@ struct AoGpu
 	AoTarget raw, across, fin;	// half size: (A, key) RG32F, then the blurs; fin R32F, bilinear
 	const void * doc = nullptr;
 	bool ready = false;		// the opaque pass + depth pyramid of this frame (the shared g-buffer: SSR, the AO decal)
-	bool aoReady = false;	// lane AOOFF1: and the obscurance computed from it (false while the AO row is off)
+	bool aoReady = false;	// and the obscurance computed from it (false while the AO row is off)
 	int unit = -1;
-	GLuint decal = 0;		// lane AODECAL1: this frame's AO decal target (0: none)
+	GLuint decal = 0;		// this frame's AO decal target (0: none)
 	int decalUnit = -1;		// 20, or -1 on a GPU with 20 units or fewer
 };
 
@@ -1817,12 +1785,11 @@ void aoAlloc( NifSkopeOpenGLContext::GLFunctions * fn, AoTarget & t, int w, int 
 
 bool aoIsCellProgram( const NifSkopeOpenGLContext::Program * p )
 {
-	return p && ( wwIsCellProgramName( p->name ) || wwIsCellDecalProgramName( p->name ) );	// lane DECALLIT1: a decal reads it
+	return p && ( wwIsCellProgramName( p->name ) || wwIsCellDecalProgramName( p->name ) );	// a decal reads it too
 }
 
-/* lane AOOFF1: the units, resolved whether or not the pass ever runs. They were resolved inside the pass only, after
- * its "AO off" return: with the row off every cell-lit draw then bound texture 0 on unit max(-1, 0) = 0, which is
- * BaseMap -- black albedo, the sun "gone", the frame half as bright. */
+/* Resolve the units whether or not the pass runs: unresolved, a cell-lit draw would bind texture 0 on unit 0
+ * (BaseMap) and lose its albedo. */
 void aoUnits( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g )
 {
 	if ( g.unit >= 0 )
@@ -1833,7 +1800,7 @@ void aoUnits( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g )
 	g.decalUnit = units > 20 ? 20 : -1;
 }
 
-//! lane AOOFF1: the telemetry line, printed when it changes
+//! the telemetry line, printed when it changes
 void aoEcho( const QString & line )
 {
 	static QString last;
@@ -1873,9 +1840,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	auto fn = r->fn;
 	aoUnits( fn, g );
 	g.decal = 0;
-	/* lane AOOFF1: the opaque pass below is the frame's SHARED g-buffer (view normal + linear depth, the depth
-	 * pyramid): the reflections march it and the AO decal projects into it. The AO row switches off only the
-	 * obscurance computed from it (step 2's raw, blurs, final) and its apply, never the pass the others read. */
+	/* The opaque pass below is the frame's SHARED g-buffer (SSR and the AO decal read it); the AO row switches
+	 * off only the obscurance computed from it, never the pass. */
 	const bool forSsr = wwCellSsrWantsTargets( scene );
 	const bool forDecal = g.decalUnit >= 0 && wwCellAoDecalWanted( scene->nifModel );
 	if ( !a.on ) {
@@ -1962,7 +1928,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glDepthMask( GL_TRUE );
 	fn->glDisable( GL_STENCIL_TEST );
 	fn->glDisable( GL_POLYGON_OFFSET_FILL );
-	// lane AODECAL1 (src/gl/cellaodecalgl.h): the decal copies over this opaque pass, into their own target
+	// the AO decal (src/gl/cellaodecalgl.h) copies over this opaque pass, into its own target
 	if ( g.decalUnit >= 0 && wwCellAoDecalHas( scene->nifModel ) )
 		g.decal = GLuint( wwCellAoDecalRun( scene, g.gbuf.tex, g.gbufDepth, W, H ) );
 
@@ -2011,7 +1977,7 @@ void wwCellAoPass( Scene * scene, bool run )
 		prog->uni1i( "mipLevel", m );
 		pass( 1, g.mip[m], m > 1 ? &g.mip[m - 1] : nullptr );
 	}
-	if ( a.on ) {	// lane AOOFF1: the obscurance itself; the pyramid above is shared
+	if ( a.on ) {	// the obscurance itself; the pyramid above is shared
 		pass( 2, g.raw, nullptr );
 		pass( 3, g.across, &g.raw );
 		pass( 4, g.fin, &g.across );
@@ -2078,7 +2044,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
 }
 
-// lane SSR1: this frame's opaque pass and depth pyramid, for the reflections' march (src/gl/cellssr.h)
+// this frame's opaque pass and depth pyramid, for the reflections' march (src/gl/cellssr.h)
 bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
 {
 	if ( !scene || !scene->renderer || !aoGpus().contains( scene->renderer ) )
@@ -2115,15 +2081,15 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		if ( cellProgram ) {
 			prog->uni1i( "cellProbe", 20 );
 			prog->uni1b( "cellAoOn", false );
-			prog->uni1b( "cellAoDecalOn", false );	// lane AODECAL1
+			prog->uni1b( "cellAoDecalOn", false );
 		}
 		return;
 	}
 	if ( !cellProgram || prog->uniLocation( "cellAoOn" ) < 0 )
 		return;
 	AoGpu & g = aoGpus()[r];
-	aoUnits( r->fn, g );	// lane AOOFF1: never unit 0 (BaseMap), even when the pass has not run
-	// lane DECALLIT1: an effect decal is blended, but the game draws it into the opaque surface it lies on
+	aoUnits( r->fn, g );	// never unit 0 (BaseMap), even when the pass has not run
+	// an effect decal is blended, but the game draws it into the opaque surface it lies on
 	const bool decalProg = wwIsCellDecalProgramName( prog->name );
 	const bool on = g.aoReady && g.doc == scene->nifModel && !( a.red & 1 ) && ( !glIsEnabled( GL_BLEND ) || decalProg )
 		&& wwCellLightsWanted( scene );
@@ -2135,7 +2101,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	r->fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellAo", g.unit );
 	prog->uni1b( "cellAoOn", on );
-	/* lane AODECAL1: the decal target multiplies the probe term (cellGiE). Opaque draws only, like the obscurance:
+	/* The AO decal target multiplies the probe term (cellGiE). Opaque draws only, like the obscurance:
 	 * a blended draw is not in the opaque pass the target was made over. */
 	const bool decalOn = g.ready && g.doc == scene->nifModel && g.decal && g.decalUnit >= 0 && ( !glIsEnabled( GL_BLEND ) || decalProg );
 	{

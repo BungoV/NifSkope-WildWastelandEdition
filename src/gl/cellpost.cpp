@@ -23,20 +23,20 @@
 
 #include "esmfile.hpp"
 
-// lane GRASSMB1: the game's depth of field and motion blur on the cell view (cellpost.h)
+// the game's depth of field and motion blur on the cell view (cellpost.h)
 
 namespace {
 
 const char * const kDofKey = "WW/CellDof";
 const char * const kMblurKey = "WW/CellMotionBlur";
 
-// ImageSpaceEffectMotionBlur::UpdateParams: the imagespace's motion blur scale (50, times the literal 0.001 and
+// the game's motion blur: scale (50, times the literal 0.001 and
 // 1 / the frame time), its max blur (0.01) and fThreshold (70)
 constexpr float kMbScale = 50.0f;
 constexpr float kMbMax = 0.01f;
 constexpr float kMbThreshold = 70.0f;
 
-// the game's blur weights (aBlurWeights, filled by its static initializer: a Gaussian of sigma r / 2 over its
+// the game's blur weights (a Gaussian of sigma r / 2 over its
 // sum), row r - 1 for radius r, tap k at offset k - 7; the bits as the game holds them (a float recompute misses
 // by up to 3e-7, so the table is the data, not the formula)
 constexpr int kBlurMaxRadius = 7;
@@ -453,7 +453,7 @@ void wwCellPostApply( Scene * scene )
 		zFar = P[14] / ( P[10] + 1.0f );
 	}
 
-	// the depth of field's verdict and constants (ImageSpaceEffectDepthOfField::UpdateParams)
+	// the depth of field's verdict and constants, as the game sets them
 	bool runDof = false;
 	bool farOnly = false;
 	int radius = 3;
@@ -490,9 +490,8 @@ void wwCellPostApply( Scene * scene )
 	}
 
 	// the motion vectors' frames: the next index continues the path, the same index repeats it
-	// the camera without the temporal AA's jitter, as the game draws its vector target (RT 0x20); the jitter itself
-	// goes to the vector pass, which takes it out of the pixel's NDC. The red (WW_CELL_MBLUR_RED=nojitter) builds the
-	// frames from the jittered projection, round 1's way: a still camera's vectors then carry the jitter's change
+	// the camera without the temporal AA's jitter, as the game draws its vector target; the vector pass removes the
+	// jitter from the pixel's NDC. WW_CELL_MBLUR_RED=nojitter keeps it (debug control)
 	Matrix4 unjittered;
 	float jitX = 0.0f, jitY = 0.0f;
 	const bool jittered = wwGameTaaUnjittered( unjittered ) && wwGameTaaJitter( jitX, jitY );

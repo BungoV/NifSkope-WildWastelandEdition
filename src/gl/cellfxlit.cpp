@@ -193,7 +193,7 @@ void wwCellFxLitUniforms( Scene * scene, int block )
 bool wwCellFxLitProbeShape( Scene * scene, int block )
 {
 	const int p = st().probe;
-	return p >= 70 && p <= 75 && scene && wwCellFxLitFor( scene->nifModel, block ) != nullptr;	// lane GIDARK1: + 75
+	return p >= 70 && p <= 75 && scene && wwCellFxLitFor( scene->nifModel, block ) != nullptr;
 }
 
 bool wwCellFxRoomLit( Scene * scene, int block )

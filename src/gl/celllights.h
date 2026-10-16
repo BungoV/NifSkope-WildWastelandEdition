@@ -7,41 +7,10 @@ BSD License - see nifskope.h
 #ifndef WW_CELLLIGHTS_H
 #define WW_CELLLIGHTS_H
 
-/* CELL LIGHTS (lane PRTP3, 2026-10-01; docs/PRTP_PLAN.md 2, docs/PRTP2_LIGHT_MODEL.md).
- *
- * The cell view drawn with the cell's own lights: every placed LIGH (point and spot, the PRTP2
- * curve), and for an interior its XCLL / lighting template directional ambient (DALC) and
- * directional light, in place of the viewport's camera light. The cell view (src/cellview.cpp)
- * publishes one WwCellLighting per document it builds; the renderer swaps fo4_default for
- * fo4_cell.prog (the same shader with WW_CELLLIGHTS compiled in) on every draw of that document
- * while the Cell lights row is on. Every other document, and the row off, draw as before.
- *
- * Units: colors are linear (byte/255)^2.2 x FNAM fade, as PRTP2 section 0. The legacy FO4 program
- * works in sqrt-of-linear (its tonemap squares), so the cell branch sums in linear and writes the
- * square root.
- *
- * The spot axis is MEASURED, not assumed (scratchpad/prtp1_20260930/spot_axis.py over
- * Fallout4.esm): of 2,396 placed spots, local +X aims 1,177 down and 581 up, -Z 608 / 131, every
- * other axis under 6% down. +X it is; the PRTP4 capture is its refuter.
- *
- * Harness pins (read once): WW_CELL_LIT=0|1 (the row), WW_CELL_LIT_PROBE=<mode> (every cell-lit
- * fragment writes raw: 1 the placed lights' irradiance / 4, 2 the world position's high bytes,
- * 3 its low bytes (each over the 65536-unit box centred on the published centre), 4 the world
- * normal * 0.5 + 0.5), WW_CELL_LIT_RED=<red>: "linear" (the radial curve without its 2.2 power),
- * "axis" (spots shine along -Z), "nodalc" (the interior ambient dropped), "ambientlit" (the Ambient Only
- * lights, which add no direct light in game, drawn as ordinary lights; lane AMBO1), "hemiomni" (hemisphere
- * and box lights drawn as plain omni lights again; lane HEMI1), "ambientfull" (the Ambient Only lights' ambient
- * adjustment ignored; lane AMBO2). Probe 5 (lane PRTPGI): the bounce's irradiance E(N) / pi, raw. Probe 11
- * (lane AMBO2): the interior ambient's per-channel affine sum before its 2.2, x 8, clamped to 0..1.
- *
- * LIGHT SHAPES (lane HEMI1, from the game's code and shaders, docs/PRTP_PLAN.md "light shapes"). The type comes from the
- * LIGH flags first: 0x800 hemisphere, else 0x400 / 0x4000 spot, else a box when the ref links, by keyword
- * 00115705 LightBoxLink, to a ref carrying an XPRM primitive; else omni. Flag 0x20000 is never read. A
- * hemisphere and a box draw the omni curve (the same radial term from the light's own position and radius),
- * clipped by a volume: a pixel is lit only where its surface point lies inside it.
- *   hemisphere = the half ball on the light's local +X side: (P - pos) . dir >= 0
- *   box        = the linked ref's box: centered on its position, half extents = XPRM bounds as stored,
- *                axes from its rotation (the light's own radius and curve still apply inside) */
+/* Cell lights: the cell view drawn with the cell's own lights (placed LIGH point/spot/hemisphere/box,
+ * an interior's DALC ambient and directional) via fo4_cell.prog while the Cell lights row is on.
+ * Colors are linear; the legacy FO4 program works in sqrt-of-linear, so the cell branch writes the sqrt.
+ * WW_CELL_LIT=0|1 pins the row; WW_CELL_LIT_PROBE=<mode> and WW_CELL_LIT_RED=<name> are harness switches. */
 
 #include <QString>
 #include <QStringList>
@@ -53,28 +22,21 @@ BSD License - see nifskope.h
 
 class Scene;
 
-/*! lane SUNCELL1: a cell-lit program by name -- fo4_cell / pbrm_cell, and their cascade variants fo4_cellcsm /
- *  pbrm_cellcsm (the same shaders with the Lookdev sun shadows compiled in, chosen while the map is built) */
+/*! A cell-lit program by name: fo4_cell / pbrm_cell and their sun-cascade variants. */
 inline bool wwIsCellProgramName( std::string_view n )
 {
 	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog";
 }
 
-/*! lane DECALLIT1: an effect decal's program by name -- fo4_effectdecal and its cascade variant fo4_effectdecalcsm.
- *  The game puts an effect shader with the Decal flag (flags or material) in its decal groups, which the deferred
- *  prepass draws into the surface under it: its colour is lit by the surface's lights, ambient, sky, obscurance and
- *  fog, not drawn self-lit like an effect. A cell-lit effect decal takes fo4_effectdecal (Renderer::setupProgram):
- *  the surface's laws (cellLit) on the decal's colour, no specular of its own, the same fog. Red
- *  WW_CELL_DECALLIT_RED=unlit draws them as other effects again (fo4_effectcell, self-lit: the white drips on
- *  Goodneighbor's brick in the fog). Gate tests/spells/decallit1_cell.sh. */
+/*! An effect decal's program by name. The game draws Decal-flagged effects into the surface under them,
+ *  so they are lit by the surface's lights rather than self-lit like other effects. */
 inline bool wwIsCellDecalProgramName( std::string_view n )
 {
 	return n == "fo4_effectdecal.prog" || n == "fo4_effectdecalcsm.prog";
 }
-//! lane DECALLIT1: WW_CELL_DECALLIT_RED=unlit, the effect decals self-lit as before
+//! WW_CELL_DECALLIT_RED=unlit: the effect decals self-lit as before
 bool wwCellDecalLitRed();
-//! lane DECALLIT1: WW_CELL_DECALLIT_PROBE=1 (gates only): the probe passes draw the effect decals, white and opaque
-//! where they show, so probe 6 holds the light they take
+//! WW_CELL_DECALLIT_PROBE=1: the probe passes draw the effect decals white and opaque
 bool wwCellDecalLitProbe();
 
 struct WwCellLight
@@ -88,18 +50,18 @@ struct WwCellLight
 	float bias = 0.0f, scale = 1.0f, exponent = 2.0f;   //!< DATA Constant, Scalar, Exponent
 	float cone = 1.0f;              //!< DATA Falloff Exponent (the spot edge)
 	bool noSpecular = false;        //!< flag 0x8000
-	bool noRim = false;             //!< lane RIM1: flag 0x80000 (No Rim Lighting), the back-light term dropped
-	bool ignoreRoughness = false;   //!< lane RIM1: flag 0x40000, Lambert diffuse and no back-light
-	int shadow = 0;                 //!< lane SHADOW1: 0 none, 1 spot (0x400), 2 hemisphere (0x800), 3 omni (0x1000)
+	bool noRim = false;             //!< flag 0x80000 (No Rim Lighting), the back-light term dropped
+	bool ignoreRoughness = false;   //!< flag 0x40000, Lambert diffuse and no back-light
+	int shadow = 0;                 //!< 0 none, 1 spot (0x400), 2 hemisphere (0x800), 3 omni (0x1000)
 	float nearClip = 10.0f;         //!< DATA Near Clip + XLIG Near Clip delta: casters nearer the light cast nothing
 	float shadowBias = 0.0f;        //!< XLIG Shadow Depth Bias (read and echoed; its scale is unread, not applied)
-	int shape = 0;                  //!< lane HEMI1: 0 omni (or spot), 1 hemisphere (dir = its plane normal), 2 box
-	float box[3][4] = {};           //!< lane HEMI1: box local coordinate k = dot(box[k].xyz, P) + box[k].w, inside |k| <= 1
-	quint32 ref = 0;                //!< lane GPURELIGHT1: the placed reference (0: none, an effect's light)
-	float godRay = 0.0f;            //!< lane VOLFOG1: a shaft emitter (a shadow flag AND a WGDR): its GDRY's intensity; 0 none
+	int shape = 0;                  //!< 0 omni (or spot), 1 hemisphere (dir = its plane normal), 2 box
+	float box[3][4] = {};           //!< box local coordinate k = dot(box[k].xyz, P) + box[k].w, inside |k| <= 1
+	quint32 ref = 0;                //!< the placed reference (0: none, an effect's light)
+	float godRay = 0.0f;            //!< a shaft emitter (a shadow flag AND a WGDR): its GDRY's intensity; 0 none
 };
 
-//! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
+//! World point (x, y, z) lies inside light l's volume (always for an omni or spot light)
 inline bool wwCellLightShapeIn( const WwCellLight & l, double x, double y, double z )
 {
 	if ( l.shape == 1 )
@@ -111,29 +73,24 @@ inline bool wwCellLightShapeIn( const WwCellLight & l, double x, double y, doubl
 	return true;
 }
 
-/* lane AMBO2: an Ambient Only light (LIGH flag 0x100000) as the game draws it: a sphere volume of 1.22077 x its
- * radius (base + XRDS) at the light; the cell ambient of every surface inside it has each channel's affine sum
- * (before the 2.2) scaled by k = pow(byte / 255, 2.2) x fade. The first light in plugin order that holds a
- * point wins; it replaces the cell ambient there, never adds. No fade at the edge, no camera rule.
- * Lane HEMI1: the game gives an Ambient Only light its shape like any other light, so one linked to a box
- * (LIGHT SHAPES above; 29 of the 39 placed) fills that box instead of the sphere, whatever its radius. */
+/* An Ambient Only light (LIGH flag 0x100000): inside a sphere of 1.22077 x radius (or its linked box) it
+ * replaces the cell ambient, scaling each channel's affine sum by k; the first light in plugin order wins. */
 struct WwCellAmbientLight
 {
 	float pos[3] = { 0, 0, 0 };     //!< world
 	float volume = 0.0f;            //!< 1.22077 x radius
 	float k[3] = { 1, 1, 1 };       //!< per channel, folded into the ambient before its power
-	bool hasBox = false;            //!< lane HEMI1: the volume is `box`, not the sphere
-	float box[3][4] = {};           //!< lane HEMI1: as WwCellLight::box, inside |k| < 1
+	bool hasBox = false;            //!< the volume is `box`, not the sphere
+	float box[3][4] = {};           //!< as WwCellLight::box, inside |k| < 1
 };
 
 struct WwCellLighting
 {
 	bool interior = false;
-	bool showSky = false;	//!< lane SKYFULL1: an interior whose CELL DATA has bit 7 (Show Sky); the Lookdev sky draws there
+	bool showSky = false;	//!< an interior whose CELL DATA has bit 7 (Show Sky); the Lookdev sky draws there
 	QVector<WwCellLight> lights;
-	QVector<WwCellAmbientLight> ambientLights;  //!< lane AMBO2, in plugin order (the first that holds a point wins)
-	/*! lane GPURELIGHT1: the lights that start off (initially disabled, or the base's Off By Default), kept only
-	 *  when WW_CELL_GI_GPU is set: the relight records their pairs so a switch or a quest can turn them on live */
+	QVector<WwCellAmbientLight> ambientLights;  //!< in plugin order (the first that holds a point wins)
+	/*! Lights that start off, kept only with WW_CELL_GI_GPU so the relight can turn them on live */
 	QVector<WwCellLight> offLights;
 	bool hasDalc = false;
 	float dalc[6][3] = {};          //!< byte / 255 as stored (PRTP2 powers AFTER the affine sum), X+ X- Y+ Y- Z+ Z-
@@ -141,28 +98,22 @@ struct WwCellLighting
 	float dirColor[3] = { 0, 0, 0 };    //!< linear
 	float dirTo[3] = { 0, 0, 1 };       //!< world, TO the light
 	float center[3] = { 0, 0, 0 };      //!< the probe modes' position box centre
-	/* lane IMGS1: the cell's imagespace (XCIM -> IMGS, wbDefinitionsFO4 layout), empty when the cell has none.
-	 * hdr = HNAM: eye adapt speed, tonemap E, bloom threshold, bloom scale, exposure max, exposure min, sunlight
-	 * scale, sky scale, middle gray; cine = CNAM saturation, brightness, contrast; tint = TNAM amount, r, g, b;
-	 * lut = the TX00 3D LUT, 16x16x16 RGB8 (r fastest), empty when the strip was not found. */
+	/* The cell's imagespace (XCIM -> IMGS); hdr = HNAM, cine = CNAM, tint = TNAM, lut = the TX00 3D LUT
+	 * (16x16x16 RGB8, r fastest; empty when not found). */
 	bool hasImageSpace = false;
 	float isHdr[9] = { 3, 7, 0.6f, 0.5f, 0.15f, 0.15f, 1.8f, 1.5f, 3 };
 	float isCine[3] = { 1, 1, 1 };
 	float isTint[4] = { 0, 1, 1, 1 };
 	QString isName, isLutPath;
 	std::vector<unsigned char> isLut;
-	QString dataRoot;	//!< lane SUNCELL1: the loose Data folder (an exterior's weather LUT is looked up there too)
-	/* lane FOG2: the interior's fog, packed as the weather fog (esmweather.h wwFogPackK, lookdev_fog.glsl):
-	 * each field from XCLL or, by its Inherits flag, the lighting template (0x4 colours, scales, heights and
-	 * high density; 0x8 near; 0x10 far; 0x100 power; 0x200 max). The game's clamps: far <= 0 or > 163840
-	 * reads 163840, near <= 0 or > far reads 0.17 far, so an interior always fogs. Colours byte / 255 x their
-	 * scale, then pow 2.2. Heights are world z. */
+	QString dataRoot;	//!< the loose Data folder (an exterior's weather LUT is looked up there too)
+	/* The interior's fog, packed as the weather fog (wwFogPackK), each field from XCLL or the lighting
+	 * template per its Inherits flag; the game's clamps mean an interior always fogs. */
 	bool hasFog = false;
-	float clipDist = 0.0f;              //!< lane SSR1: an interior's clip distance (XCLL offset 32; Inherits 0x80), 0 = none
+	float clipDist = 0.0f;              //!< an interior's clip distance (XCLL offset 32; Inherits 0x80), 0 = none
 	float fogK[6][4] = {};
 	QString fogNote;
-	/* lane VOLFOG1: the interior's god-ray medium (esmweather.h WwGodRayMedium: air rgb, fwd rgb, back rgb, fwd g,
-	 * back g, post), from XGDR, else the lighting template's WGDR, else the engine's fallback */
+	/* The interior's god-ray medium (WwGodRayMedium), from XGDR, else the template's WGDR, else the fallback */
 	float godRay[12] = { 0.60f, 1.52f, 3.31f, 2, 2, 2, 1, 1, 1, 0.75f, 0, 1 };
 	QString godRayNote = QStringLiteral( "fallback" );
 	QString summary;                    //!< one census line
@@ -172,20 +123,19 @@ struct WwCellLighting
 void wwCellLightsPublish( const void * nif, const WwCellLighting & lighting );
 const WwCellLighting * wwCellLightsFor( const void * nif );
 
-/*! THE BOUNCE (lane PRTPGI, src/probegi.h): the bake relit by these lights, as a voxel grid of
- *  probe ambient cubes. Six slabs (+X -X +Y -Y +Z -Z) of dims[2] each, x fastest, (rgb x valid,
- *  valid) a voxel; the shader adds albedo x E(N) / pi, E blended over the three facing slabs by n^2. */
+/*! The bounce (src/probegi.h): a voxel grid of probe ambient cubes, six slabs (+X -X +Y -Y +Z -Z) of
+ *  dims[2] each, x fastest, rgba per voxel; the shader adds albedo x E(N) / pi. */
 struct WwCellGi
 {
 	float origin[3] = { 0, 0, 0 };
 	float voxel = 64.0f;
 	int dims[3] = { 0, 0, 0 };
 	std::vector<float> rgba;
-	std::vector<float> sky;	// lane PROBEVIEW1: the same layout, rgb = the probes' open-sky share, a = valid
+	std::vector<float> sky;	// the same layout, rgb = the probes' open-sky share, a = valid
 	QString summary;
-	bool skyLit = false;   //!< lane SKY1: the grid holds the weather's sky; it stands in for the weather's ambient
-	/*! lane ROOMCLAMP1 (src/proberooms.h): with rooms, rgba and sky hold 12 slabs (slot 0's six, then slot 1's);
-	 *  slotRooms = per voxel the packed rooms of its two slots, rooms = per fine cell its packed rooms (empty: none) */
+	bool skyLit = false;   //!< the grid holds the weather's sky; it stands in for the weather's ambient
+	/*! With rooms (src/proberooms.h), rgba and sky hold 12 slabs (slot 0's six, then slot 1's);
+	 *  slotRooms = per voxel the packed rooms of its two slots, rooms = per fine cell its packed rooms */
 	std::vector<float> slotRooms, rooms;	// (Qt reserves "slots")
 	float roomsOrigin[3] = { 0, 0, 0 };
 	float roomsCell = 16.0f;
@@ -193,12 +143,8 @@ struct WwCellGi
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
 
-/*! lane PROBEVIEW1: the PRTP band's Pass (Division deck, s18/s40/s65 views). 0 Combined (the frame as drawn),
- *  1 GI (the probe grid's E / pi on the surface's normal), 2 Sky visibility (the probes' open-sky share on the
- *  normal), 3 Surfel color, 4 Surfel light, 5 Brick light (lane BRICK1) (src/gl/cellprobeview.h draws the surfels over a cyan frame),
- *  6 Probe coverage (lane WALLSTACK1: magenta where the GI grid's valid share k, after the rooms and seen filtering, is 0,
- *  so exactly where the probe term lights nothing; grey 0.25 + 0.5 k elsewhere).
- *  Stored as WW/CellPass; the pin WW_CELL_PASS (number or entry name) wins. WW_CELL_PV_RED=direct|nonormal|open|noclamp|nosee|borrow|lendamb|strand|firstslot|tiepick|lonesky|nofilter|nolastfill. */
+/*! The PRTP band's Pass: 0 Combined, 1 GI, 2 Sky visibility, 3 Surfel color, 4 Surfel light, 5 Brick light,
+ *  6 Probe coverage. Stored as WW/CellPass; WW_CELL_PASS (number or name) wins; WW_CELL_PV_RED is a harness switch. */
 QStringList wwCellPassNames();
 int wwCellPass();
 //! the Pass this document draws: the stored one once its bake is relit (a GI grid published), else Combined
@@ -209,31 +155,23 @@ const WwCellGi * wwCellGiFor( const void * nif );
 //! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
 bool wwCellGiOn();
 void wwCellGiSetOn( bool on );
-/*! Lane CELLALL1: the rows for features that were env-only. Each env pin wins over its row; the defaults are what
- *  the features did before (AO and the lights' shadows on, the GPU relight off).
- *  AO: WW/CellAo, pin WW_CELL_AO. Light shadows: WW/CellShadow, pin WW_CELL_SHADOW. GPU relight: WW/CellGiGpu, pin
- *  WW_CELL_GI_GPU (read when a cell opens: the row reopens it). */
+/*! Rows for AO (WW/CellAo, WW_CELL_AO), light shadows (WW/CellShadow, WW_CELL_SHADOW) and GPU relight
+ *  (WW/CellGiGpu, WW_CELL_GI_GPU, read when a cell opens). Each env pin wins over its row. */
 bool wwCellAoOn();
 void wwCellAoSetOn( bool on );
 bool wwCellShadowOn();
 void wwCellShadowSetOn( bool on );
 bool wwCellGiGpuOn();
 void wwCellGiGpuSetOn( bool on );
-/*! Lane SKYSTR1: the Sky visibility row, 0-100 % (WW/CellSkyVis, default 100; pin WW_CELL_SKYSTR=<percent>). As
- *  FO4CS's Skylighting strength: each sky visibility v the GI takes becomes 1 + s (v - 1), so 0 % is the open sky
- *  everywhere (the weather's unshadowed ambient), 100 % the bake as it is (bit for bit). The relight takes it
- *  (probesky.cpp, live), the AO decals per pixel. Red WW_CELL_SKYSTR_RED=ignore: the row is ignored (100 %). */
+/*! The Sky visibility row, 0-100 % (WW/CellSkyVis, default 100; pin WW_CELL_SKYSTR). As FO4CS's Skylighting
+ *  strength: each sky visibility v becomes 1 + s (v - 1), so 0 % is the open sky everywhere, 100 % the bake. */
 int wwCellSkyVisPercent();
 float wwCellSkyVis();
 bool wwCellSkyVisPinned();
 void wwCellSkyVisSetPercent( int pct );
 
-/*! lane FARVIEW1 (src/farlight.h, docs/cloud/FARVIEW1_DESIGN.md): DISTANT LIGHT FROM THE SURFELS. Past the band's
- *  near end D0 a surface's placed-light diffuse fades from the real lights to the bake's surfels (w = smoothstep(D0, D1,
- *  the camera distance)): (1 - w)(real + the GI grid's placed share) + w x albedo x F, F the 27-cell same-side lookup.
- *  slotTab: 4 floats a slot (x, y, z x 8 + side, record + 1; 0 empty: exact integers, one sampler type), 2^bits slots; recs: 8 floats a record (pos, 0, E, 0); placed = the GI grid relit by the placed
- *  lights alone (slot 0's six slabs, the GI grid's origin, voxel and dims), subtracted x w so the far bounce is not
- *  counted twice. dots: 8 floats a bulb (pos, 0, I, 0) for the skyline pass. */
+/*! Distant light from the surfels (src/farlight.h): past the band's near end a surface's placed-light diffuse
+ *  fades from the real lights to the bake's surfels; `placed` is subtracted so the far bounce is not counted twice. */
 struct WwCellFar
 {
 	std::vector<float> slotTab;	// (Qt reserves "slots")
@@ -253,12 +191,9 @@ const WwCellFar * wwCellFarFor( const void * nif );
 //! the Far light row (ships off); the pin WW_CELL_FAR wins. Draws only while the Cell lights row is on.
 bool wwCellFarOn();
 void wwCellFarSetOn( bool on );
-//! WW_CELL_FAR_RED: 1 nosurfel (the far term dropped, the real lights still fade), 2 noblend (a hard switch at the
-//! band's middle), 4 flipside (the lookup reads the surfels facing the other way)
+//! WW_CELL_FAR_RED: 1 nosurfel, 2 noblend, 4 flipside (harness switches)
 int wwCellFarRed();
-/*! lane FARVIEW1: the far bulbs as dots on the skyline, added into the linear frame after the scene draw (between
- *  wwCellHdrBegin and wwCellHdrEnd; the frame's depth hides them behind nearer surfaces). Nothing when the Far light
- *  row is off, the cell lights are not drawn, or no bulbs were published. Returns the dots drawn. */
+/*! The far bulbs as dots on the skyline, added into the linear frame after the scene draw. Returns the dots drawn. */
 int wwCellFarDotsDraw( Scene * scene );
 
 //! the Cell lights row (ships off); the pin WW_CELL_LIT wins
@@ -269,89 +204,46 @@ void wwCellLightsSetOn( bool on );
 bool wwCellLightsWanted( Scene * scene );
 //! the uniforms of the renderer's CURRENT program (a no-op for a program without `cellOn`)
 void wwCellLightsUniforms( Scene * scene );
-//! a harness probe pass (WW_CELL_LIT_PROBE or WW_CELL_FOG_PROBE) on a cell-lit scene: effect shapes are not drawn
+//! a harness probe pass (WW_CELL_LIT_PROBE or WW_CELL_FOG_PROBE) on a cell-lit scene: effects are not drawn
 bool wwCellProbePass( Scene * scene );
-//! lane GICAL1: probe 80 (the albedo as drawn) on that pass -- it leaves out the second-pass shapes too (alpha
-//! blend and decals: drawn opaque in a probe pass, and the bake leaves them out of its soup)
+//! probe 80 (the albedo as drawn): also leaves out the second-pass shapes (alpha blend and decals)
 bool wwCellAlbedoProbePass( Scene * scene );
 //! census echo: "celllit=on lights=N dalc=.. dir=.. probe=.. red=.."
 QString wwCellLightsEcho( Scene * scene );
 //! the red bits (1 linear, 2 axis, 4 nodalc); the cell view applies "axis" when it publishes
 int wwCellLightsRed();
-//! lane CUBE1: a material's number for the cube gate's probe (WW_CELL_CUBE_DUMP set), else 0
+//! a material's number for the cube probe (WW_CELL_CUBE_DUMP set), else 0
 int wwCellCubeTag( const QString & material );
 
-/*! THE IMAGESPACE (lane IMGS1): the game's own HDR -> display chain, transcribed from the shipped shaders
- *  (Fallout4 - Shaders.ba2, Shaders011.fxp; docs/PRTP_PLAN.md 2j):
- *    adapted  = the frame's mean luminance (0.2125, 0.7154, 0.0721), Inf/NaN read as 0 (the downsample
- *               chain and its adaptation step; a still view is the converged value)
- *    exposure = clamp( middle gray / (adapted + 0.001), exposure min, exposure max )
- *    x        = exposure * hdr;  Hable (A .15, B .5, C .1, D .2, E = tonemap E, F .3), W 11.2, x2 in
- *    grade    = mix(luma, c, saturation) -> mix(.., luma * tint, amount) -> contrast * (brightness * c -
- *               adapted) + adapted
- *    display  = LUT( pow(grade, 1 / 2.2) * 15/16 + 1/32 )
- *  bloom    = added to hdr before the exposure (lane BLOOM1, wwCellImageSpaceSetBloom below)
- *  The measure: the frame drawn raw (probe 6) into a float target at a quarter size, read back. Row ships
- *  off; the pin WW_CELL_IS wins. WW_CELL_IS_DUMP=<file> writes the measure (full size) and the numbers;
- *  WW_CELL_IS_RED=nolut|noexp|nograde|nobloom|nofx its refuters. */
+/*! The imagespace: the game's HDR -> display chain (exposure from mean luminance, Hable tonemap, grade, LUT),
+ *  transcribed from the shipped Shaders011.fxp. Row ships off; WW_CELL_IS pins it, WW_CELL_IS_DUMP=<file> dumps it. */
 bool wwCellImageSpaceOn();
 void wwCellImageSpaceSetOn( bool on );
 //! the cell view draws through the imagespace: cell-lit, the row on, the document's cell has one
 bool wwCellImageSpaceWanted( Scene * scene );
 //! the measure pass's switch: while true every cell-lit fragment writes its raw linear colour
 void wwCellImageSpaceMeasuring( bool on );
-//! true inside the measure pass: the renderer masks every program that is neither cell-lit nor an effect
-//! (sky, debug draw nothing there)
+//! true inside the measure pass: every program that is neither cell-lit nor an effect is masked
 bool wwCellImageSpaceIsMeasuring();
-//! lane EXPO1: effect shaders write their colour into the measure, as the game's effects land in the HDR
-//! target its adaptation and bloom read (false under WW_CELL_IS_RED=nofx)
+//! effects write their color into the measure, as the game's effects feed its adaptation and bloom
 bool wwCellImageSpaceMeasuresEffects();
-/*! THE EFFECTS (lane EFX2, docs/PRTP_PLAN.md 2q): a cell-lit effect draws with fo4_effectcell.prog, the game's
- *  effect shader (Shaders011.fxp, the effect group) transcribed: no room light (its only "lighting" is a
- *  script-set emit colour, white when unset), colour linear (texture and base colour decoded with 2.2), alpha x the
- *  soft fade x the near fade for a Soft effect, the fog, then the cell's imagespace (no bloom: the frame has it).
- *  WW_CELL_FX_RED=legacy (the viewer's effect shader, as before), nosoft (both fades 1), nolin (no 2.2 decode),
- *  hide (the gate's reference: cell-lit effects draw nothing), comma-separated. tests/spells/cell_fx.sh gates it. */
+/*! A cell-lit effect draws with fo4_effectcell.prog, the game's effect shader transcribed (linear color, soft
+ *  fade, fog, imagespace). WW_CELL_FX_RED=legacy|nosoft|nolin|hide: harness switches. */
 int wwCellFxRed();
 //! the measured mean luminance of the last measure (negative before any)
 void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels );
-/*! lane BLOOM1: the bloom from the measure's float RGBA (w x h, step 4 when it is full size: box-averaged to a
- *  quarter first), HNAM bloom scale * max(0, c - bloom threshold), blurred 15 taps vertical then horizontal;
- *  the shader adds it (bilinear, a quarter of the view) to the HDR before the exposure */
+/*! Bloom from the measure's float RGBA: HNAM scale * max(0, c - threshold), blurred 15 taps each way; the
+ *  shader adds it to the HDR before the exposure */
 void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, int step );
 QString wwCellImageSpaceEcho( Scene * scene );
 
-/*! THE SHADOWS (lane SHADOW1, docs/PRTP_PLAN.md 2k): every shadow-casting light (LIGH flags 0x400 spot,
- *  0x800 hemisphere, 0x1000 omni) within reach, up to kShadowSlots of them nearest the camera, gets a depth
- *  cube: its distance to the nearest opaque caster over its radius, 6 faces of kShadowFace texels, rendered
- *  from the document's own shapes (opaque, depth-writing, not alpha-tested; casters nearer the light than its
- *  near clip cast nothing). The shader compares its own distance - a slope bias, 3x3 taps a texel apart, /9;
- *  a hemisphere light lights nothing behind its plane (its local +X, like a spot). Drawn before the frame;
- *  re-rendered only when the document, its lights or the slot set change. The game's map is a (dual)
- *  paraboloid with its resolution halved per 750 units of distance; ours is a cube face of 512 (the
- *  paraboloid's centre texel at 1024) at any distance.
- *  Part of the Cell lights row (no row of its own: a light's shadow is part of the light).
- *  Pins: WW_CELL_SHADOW=0 (the harness's unshadowed pass), WW_CELL_SHADOW_RED=noshadow (every
- *  factor 1: the gate's refuter). Probe 7: the shadow factors of slots 0, 1, 2 in r, g, b (0.5 / 255 marks a
- *  pixel out of that light's reach). */
+/*! Shadows: each shadow-casting light near the camera (up to kShadowSlots) gets a depth cube rendered from the
+ *  document's opaque shapes, re-rendered only when the document, lights or slots change. WW_CELL_SHADOW=0 skips it. */
 void wwCellShadowPass( Scene * scene );
 QString wwCellShadowEcho( Scene * scene );
 
-/*! THE AMBIENT OBSCURANCE (lane AO1, docs/PRTP_PLAN.md "ambient obscurance"): the game's screen-space obscurance, from its own
- *  shaders. Its settings are the INI's, never the cell's (radius 108.2, bias 0.6, intensity 7.1 game units, on
- *  in every cell). The game computes it at half the view from the opaque pass's depth and normals: 5 taps over
- *  2 turns, a disc of radius x 100 / depth pixels, the depth read from a min-of-2x2 mip by the tap's reach,
- *  1 - intensity x sum f^3 max((v.n - bias') / (v.v + 0.01), 0) / r^6 with f = max(r^2 - v.v, 0), the bias
- *  growing past 0.3 of 7000 units and toward the screen edge; turned by a random angle each frame and kept
- *  0.99 of the history, which starts over from a frame at 0.95 or more when it is under 0.7 (a still view =
- *  that history's time average, over kAoAngles angles here); then a 7-tap bilateral blur across and down. It multiplies EVERYTHING its deferred composite writes (the lights, the
- *  ambient, the specular, emissive, reflections) before the fog; nothing drawn blended (forward) or as an effect.
- *  Here: wwCellAoPass draws the frame's opaque cell-lit fragments once more (probe 20: view normal, linear
- *  depth) into a full-size float target, runs res/shaders/cell_ao.frag over it, and the cell programs multiply
- *  their lit colour by the bilinear sample before their fog. Part of the Cell lights row.
- *  Pins: WW_CELL_AO=0 (none computed), WW_CELL_AO_RED=off (computed, not applied) | radius (half the radius)
- *  | noblur (the raw value applied) | noreset (the plain mean over the angles), WW_CELL_AO_DUMP=<file> (the
- *  opaque pass, the raw and the final obscurance, the numbers; tests/spells/cell_ao.sh). */
+/*! Ambient obscurance: the game's screen-space AO (INI settings, not the cell's) computed from a pass of the
+ *  opaque cell-lit fragments by res/shaders/cell_ao.frag; it multiplies the lit color before the fog. WW_CELL_AO=0 skips it. */
 void wwCellAoPass( Scene * scene, bool run );
 //! called with every program setupProgram binds: the opaque pass's masks, and the obscurance a cell-lit draw reads
 void wwCellAoDraw( Scene * scene, bool cellProgram );
