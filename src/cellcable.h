@@ -64,6 +64,9 @@ float wwCableDropAtMiddle( const std::vector<float> & centres );
 //! Cables on (false under WW_CELL_CABLES_RED=off).
 bool wwCellCablesOn();
 
+//! The cables' wind on (false under WW_CELL_CABLES_RED=nowind: every cable is drawn as a still static).
+bool wwCellCablesWind();
+
 /*! Builds the cable's tube into `out` (geometry in the reference's frame, the texture set as tex0 / tex1, the
  *  vertex colour stream filled). False when the base is not a BNDS or the spec has no length. */
 bool wwCellCableShape( const EsmBendable & look, const WwCableSpec & spec, NativeSrcShape * out,

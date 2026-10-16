@@ -2665,7 +2665,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		if ( !wwCellCableShape( look, p.cableSpec, &s, &cb ) || cb.rings < 2 )
 			return false;
 		cableBuilt++;
-		cableWind += cb.wind ? 1 : 0;
+		cableWind += cb.wind && wwCellCablesWind() ? 1 : 0;
 		cableVerts += int( s.geom.pos.size() / 3 );
 		cableTris += int( s.geom.tris.size() / 3 );
 		auto world3 = [&]( size_t i ) {
@@ -3599,7 +3599,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			 * (the wind, the colour's 2.2 power) and its wave period is the base's wind flexibility. One bucket per
 			 * base; the vertex alpha is the weight. The grass FADE is not applied (not measured for cables). */
 			const EsmBendable * cableLook = p.cable ? &world.bendable( p.base ) : nullptr;
-			const bool cableSway = cableLook && cableLook->windSensibility > 0.0f;
+			const bool cableSway = cableLook && cableLook->windSensibility > 0.0f && wwCellCablesWind();
 			if ( cableSway )
 				bbOwn += QStringLiteral( "|CABLEWIND|%1" ).arg( p.base, 8, 16, QLatin1Char( '0' ) );
 			/* Lane WATER1: a placed water mesh (an ACTI whose WNAM names a WATR; its shape carries the water
@@ -3731,6 +3731,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			.arg( cableXbsd ).arg( cableBnds ).arg( cableOtherBase ).arg( cablePlaced ).arg( cableDetached )
 			.arg( cableBuilt ).arg( cableWind ).arg( cableVerts ).arg( cableTris ).arg( cableEndBad )
 			.arg( double( cableEndWorst ), 0, 'f', 4 ).arg( cableSagBad ).arg( double( cableSagWorst ), 0, 'f', 4 )
+			+ ( wwCellCablesWind() ? QString() : QStringLiteral( "; wind off (WW_CELL_CABLES_RED=nowind)" ) )
 		: QStringLiteral( "cables: off (WW_CELL_CABLES_RED=off), XBSD refs %1 (on a BNDS base %2), placed 0" )
 			.arg( cableXbsd ).arg( cableBnds );
 	qInfo().noquote() << cableLine;

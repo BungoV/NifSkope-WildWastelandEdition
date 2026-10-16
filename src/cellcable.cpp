@@ -53,6 +53,12 @@ bool wwCellCablesOn()
 	return on;
 }
 
+bool wwCellCablesWind()
+{
+	static const bool on = qgetenv( "WW_CELL_CABLES_RED" ) != "nowind";
+	return on;
+}
+
 bool wwCellCableShape( const EsmBendable & look, const WwCableSpec & spec, NativeSrcShape * out, WwCableBuilt * built )
 {
 	if ( !look.exists || !out )

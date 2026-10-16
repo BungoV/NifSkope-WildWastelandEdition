@@ -12,8 +12,11 @@
   The cables are statics for culling, picking, shadows and the GI soup.
 - **Wind.** Bases with a wind sensibility (the `_Wind` bases) sway through the grass wind path, with the wave period
   = the base's flexibility and no distance fade. Cables attached at both ends sway too, as in the game: the middle
-  moves most (the weight is the distance from the chord). Limits: every cable of one base swings in phase, and the
-  shadow does not move with the wind (as for grass).
+  moves most (the weight is the distance from the chord). The grass formula gives a steady lean (the weather's
+  minimum wind speed) plus a swing whose size is the max - min speed. In CommonwealthFoggy (min 73.9, max 84.8) that
+  is a lean of up to ~37 units and a sub-pixel swing. Limits: every cable of one base swings in phase; the shadow
+  does not move with the wind (as for grass); the bulbs on a string-light wire are separate statics and do not lean.
+  Red: `WW_CELL_CABLES_RED=nowind` (cables drawn still; the census line says `wind off`).
 - `src/esmdata.*`: XBSD on `EsmRefr`; `EsmWorld::bendable()` reads BNDS DNAM/TNAM and the TXST.
 - Census line in the notes: `cables: on, XBSD refs N (...), placed, built, swaying, verts, tris; geometry gate: ends
   off N (worst), sag off N (worst)`. The sag check measures the curve under the chord's middle. (The lowest point
@@ -26,6 +29,8 @@
   - Concord (3x3 block -16..-14, 16..18): 96 = 96 = 96, ends off 0 (worst 0.005), sag off 0 (worst 0.64). PASS.
   - Reds: cables off FAILs "COUNT drawing" (0 of 39 built). A dump with one end moved 1 unit and one middle raised
     10 units FAILs GEOMETRY (1 and 1). A wrong block FAILs BLOCK.
+  - Wind (Memory Den, wind clock pinned): wind on vs `nowind` moves 1655 wire pixels (> 16 levels) and 0 in the
+    cables-off arm: PASS. Known-answer red: two renders at the same clock move 0: FAIL.
   - Pictures (0 magenta): the Third Rail alley at night in fog, where the string lights now hang on sagging wires
     (11389 pixels differ from the cables-off frame by more than 16 levels); Memory Den; Concord power lines (6123).
 
