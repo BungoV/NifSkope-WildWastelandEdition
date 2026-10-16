@@ -1,5 +1,34 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CABLES1 (2026-10-16, branch cables1-20261016): cables in the cell view (power lines, string-light wires, ropes)
+
+- **The cell view draws Fallout 4 cables.** A cable is a reference whose base is a BNDS record (no model). Its XBSD
+  field holds slack, thickness, half extents and a detached-end byte. The view used to drop these as "no model".
+  Now each one becomes a tube (`src/cellcable.*`), measured against Fallout4.esm:
+  - Ends: the reference's position -/+ its rotated half extents (the position is the cable's middle).
+  - Sag: the middle control point drops by |B - A| * 1.4 * slack, on a quadratic Bezier.
+  - Rings: one every 4 % of the length (at least 8), `slices` sides each, radius thickness / 2.
+  - Material and colour: BNDS DNAM and its TXST supply the tiles, slices, colour and textures.
+  The cables are statics for culling, picking, shadows and the GI soup.
+- **Wind.** Bases with a wind sensibility (the `_Wind` bases) sway through the grass wind path, with the wave period
+  = the base's flexibility and no distance fade. Cables attached at both ends sway too, as in the game: the middle
+  moves most (the weight is the distance from the chord). Limits: every cable of one base swings in phase, and the
+  shadow does not move with the wind (as for grass).
+- `src/esmdata.*`: XBSD on `EsmRefr`; `EsmWorld::bendable()` reads BNDS DNAM/TNAM and the TXST.
+- Census line in the notes: `cables: on, XBSD refs N (...), placed, built, swaying, verts, tris; geometry gate: ends
+  off N (worst), sag off N (worst)`. The sag check measures the curve under the chord's middle. (The lowest point
+  is the wrong measure on a sloped cable, where it can be the low end.)
+- `WW_CELL_CABLES_RED=off` is the red (no cables). `WW_CELL_CABLES_DUMP=<tsv>` writes one row per cable (world ends,
+  the curve's z under the chord's middle, sag, rings, slices, tiles) for an independent reader.
+- Gates (an independent ESM reader, no NifSkope code):
+  - Goodneighbor (5x5 block 3..7, -5..-1): 39 XBSD refs read = 39 in the reference dump = 39 built. Ends off 0
+    (worst 0.0017 units), sag off 0 (worst 3.5 units against a 1 % tolerance). PASS.
+  - Concord (3x3 block -16..-14, 16..18): 96 = 96 = 96, ends off 0 (worst 0.005), sag off 0 (worst 0.64). PASS.
+  - Reds: cables off FAILs "COUNT drawing" (0 of 39 built). A dump with one end moved 1 unit and one middle raised
+    10 units FAILs GEOMETRY (1 and 1). A wrong block FAILs BLOCK.
+  - Pictures (0 magenta): the Third Rail alley at night in fog, where the string lights now hang on sagging wires
+    (11389 pixels differ from the cables-off frame by more than 16 levels); Memory Den; Concord power lines (6123).
+
 ## Lane WALLSTACK1 (2026-10-15, branch wallstack1-20261015): wall stacks reach the top of tall buildings; soil gaps get no probe; Probe coverage view
 
 - **Wall probe stacks no longer stop at 960 units.** A stack climbs its wall until the wall ends (the way up is
