@@ -173,10 +173,8 @@ def main(argv):
               % (name, x0, x1, y0, y1, x1 - x0, y1 - y0, len(s),
                  sum(s) / float(len(s)), min(s), max(s)))
     if lattice is not None:
-        # THE GEOREF CONTROL. The lattice is in world units straight from the
-        # ESM walk, so it is an INDEPENDENT ruler for the mapping above: if the
-        # mapping is right, squares with a high object top are the dark ones,
-        # and shifting the mapping by one cell must destroy that.
+        # the georef control: the lattice is in world units from the ESM walk, an independent ruler;
+        # high object tops must be the dark squares, and shifting the mapping by one cell must destroy that.
         sq = sh.square_means(lattice['cell'])
         L = lattice
         def corr(shift_cells):

@@ -141,20 +141,9 @@ def main():
     if missing:
         say("  the render pass did not produce: " + " ".join(missing))
 
-    # ---- (e) THE FIXTURES ARE FOUR FIXTURES, not one photograph four times.
-    #
-    # Lane GATEFIX1, 2026-09-19.  On 2026-09-18 the exe legitimately refilled all
-    # four sheet caches from the same .lodt container (src/lodtsheets.cpp:501-506
-    # reuses a tile only when it is newer than the container, and the container
-    # had been re-baked on 2026-09-16 16:44).  The three synthetic caches of
-    # 2026-09-12 were overwritten, `Commonwealth.VT.2.0.4.n.DDS` read sha1
-    # ad7f8084e3fb3653 in all four, and t_own/flat/tilt/tiltw_obl.png all came out
-    # b39e407cc0a7.  Gate (b) and gate (d) were then comparing a picture with
-    # itself, and reported IoU 1.000 / blockSD 0.00 / ordering 0.00 % for it.
-    #
-    # Nothing downstream is worth reading unless these rows are green, so they
-    # come first: the INPUT sheets differ, the colour sheets do NOT (the control
-    # that only the normal sheet moved), and the OUTPUT pictures differ.
+    # ---- (e) the fixtures are four distinct fixtures, not one photograph four times.
+    # The exe may refill every sheet cache from one container: input normal sheets must differ, color
+    # sheets must not, and the output pictures must differ.
     ARMS = ("own", "flat", "tilt", "tiltw")
     if not manifest or not os.path.exists(manifest):
         check(False, "gate (e): the fixture manifest %s exists, so the four sheet "
@@ -198,10 +187,7 @@ def main():
               "gate (e): the four OBLIQUE frames are pairwise distinct (%d distinct sha1 "
               "of 4; all four were b39e407cc0a7 on 2026-09-18)" % len(set(h.values())))
         # A hash says "not identical"; this says by HOW MUCH, on the weakest pair.
-        # Pre-registered floor 2.00 luma levels, from the gate's own algebra and
-        # not from a measurement: the closest pair the arithmetic predicts is
-        # west vs flat, N.L 0.7258 vs 0.4434, a 0.28 gap of full scale.  Two 8-bit
-        # levels is far below any real ordering and far above encoder noise.
+        # Floor 2.00 luma levels, from the gate's algebra: the closest predicted pair is west vs flat.
         L = {a: load(shot, "t_%s_obl" % a) for a in ARMS}
         worst, wpair = 1e9, ""
         for x in range(4):
@@ -216,10 +202,8 @@ def main():
               "gate (e): the weakest oblique pair (%s) still differs by mean|dY| %.2f luma "
               "levels, floor 2.00 pre-registered (0.00 on 2026-09-18)" % (wpair, worst))
 
-    # gate (d)'s top-view row asks for two frames to be THE SAME.  That row was
-    # green on 2026-09-18 only because every frame was the same, so it carries
-    # its own floor here: two arms whose top-view N.L provably DIFFERS (flat
-    # 0.9988 up against tilt 0.8751) must not be the same picture.
+    # gate (d)'s top-view row asks two frames to be the same; this floor proves two arms whose N.L
+    # differs (flat vs tilt) are not the same picture.
     if not ({"t_flat_top", "t_tilt_top"} & set(missing)):
         pf = os.path.join(shot, "t_flat_top.png")
         pt = os.path.join(shot, "t_tilt_top.png")
@@ -260,30 +244,12 @@ def main():
         c1, Y1 = load(shot, "t_own_obl")
         c2, Y2 = load(shot, "t_flat_obl")
         m = c1 & c2
-        # THE DARKEST-FIFTH IoU ROW WAS RETIRED HERE, lane GATEFIX2, 2026-09-19,
-        # and it was not retired for being red.  It was measured against the
-        # defects it exists to catch, on this container, with the four arms
-        # rendered from caches that differ only in their normal tiles:
-        #
-        #     the sheet is not read at all (own against a copy of own)   1.000
-        #     the sheet's UP and NORTH channels are swapped              0.887
-        #     THE HEALTHY STATE (own against flat)                       0.850
-        #     the right normals in the wrong places (the twin)     0.821 / 0.822 / 0.821
-        #
-        # The healthy value sits INSIDE the broken population, so no threshold
-        # of the form "IoU <= bar" admits the healthy state and rejects all
-        # three defects; the old bar of 0.800 rejects all four.  A statistic
-        # that cannot be thresholded is not tuned, it is replaced (the brief's
-        # own rule), and the job this row was written for -- own and flat must
-        # not be the same picture -- is already done with a pre-registered
-        # floor by gate (e)'s weakest-pair row (mean |dY| 3.10, floor 2.00).
-        # Its replacements are the two rows below and gate (g).
+        # No darkest-fifth IoU row: the healthy value lies inside the broken population, so no bar can
+        # separate them; the ratio rows below and gate (g) replace it.
         D = Y1 - Y2
         dbm, dnb = blocks(D, m)
         own_sd = float(dbm.std())
-        # The absolute floor exists ONLY so that a total collapse -- every arm
-        # rendering the same frame, which reads 0.00 -- cannot satisfy the ratio
-        # row below as 0/0.  It is deliberately far under the healthy reading.
+        # The absolute floor only stops a total collapse (all arms one frame, 0.00) passing the ratio as 0/0.
         check(own_sd >= 0.50,
               "gate (b): own-minus-flat blockSD is %.2f over %d blocks, floor 0.50 "
               "(2.28 on 2026-09-19; 0.00 when the sheet is not read at all).  The "
@@ -291,11 +257,8 @@ def main():
               "container that was re-baked at 16:44:04 the same day and no longer "
               "exists; a bar that only one generation of an untracked artefact can "
               "clear is not a bar" % (own_sd, dnb))
-        # THE RATIO IS THE REAL ROW.  The twin carries the container's own normals
-        # -- the same BC1 blocks, the same histogram, the same codec -- shuffled
-        # into the wrong places, so it answers the question this row has always
-        # asked ("does a REAL slope signal survive block averaging") on the
-        # subject's own data, in the same run, whatever container is on disk.
+        # The ratio is the real row: the twin holds the container's own normals shuffled into the wrong places,
+        # so it tests whether a real slope signal survives block averaging on the subject's own data.
         if "t_%s_obl" % TWIN in missing:
             check(False, "gate (f): the twin arm t_%s_obl was not rendered, so the "
                          "block-averaging row has no floor" % TWIN)
@@ -326,8 +289,7 @@ def main():
     sx, cx, sz, cz = math.sin(rx), math.cos(rx), math.sin(rz), math.cos(rz)
     # Matrix::fromEuler's bottom row with y = 0 (src/data/niftypes.cpp:230-232):
     #   m[2][0] = sinX sinZ - cosX sinY cosZ,  m[2][1] = cosX sinY sinZ + sinX cosZ,
-    #   m[2][2] = cosX cosY.  That row IS the view's +Z axis written in world axes,
-    #   and the headlight points down it.
+    #   m[2][2] = cosX cosY; the row is the view's +Z in world axes, down which the headlight points.
     Lw = (sx * sz, sx * cz, cx)
     N = {"flat": (0.0353, 0.0353, 0.9988),
          "tilt": (0.4827, 0.0353, 0.8751),
@@ -363,24 +325,9 @@ def main():
               "%d covered pixels, bar 99.00%% (measured 100.00 here, 46.23 on the "
               "rung -- chance)" % (pc, int(mm.sum())))
 
-    # ---- (g) THE TOP VIEW AGAINST THE CONTAINER'S OWN NORMALS, lane GATEFIX2.
-    #
-    # At the top view the headlight points straight down the world's up axis, so
-    # N.L IS the up component of the normal -- no camera algebra, no fitting.
-    # Two arms in this very run have an exactly known up (flat 0.9988, tilt
-    # 0.8751), and they calibrate luma against up on the same frames, the same
-    # colour sheet and the same lighting the terrain is rendered with.  Read the
-    # container's own mean up out of the sheet cache the exe just filled and the
-    # frame's mean luma is PREDICTED before it is measured.
-    #
-    # This is the row that catches a sheet whose axes are wrong -- the channel
-    # order in a normal sheet is measured, not declared, and getting it wrong is
-    # a live defect class.  Measured 2026-09-19 on this container: the healthy
-    # sheet lands 0.09 luma from its prediction, and the same sheet with UP and
-    # NORTH swapped lands 31.03 away.  The linear model is calibrated over a
-    # 0.1237 lever arm and is only trusted NEAR it, which is why the row is
-    # one-sided: a small error is a pass, a large one is a failure, and the 23.99
-    # is not itself a luma prediction, only a distance.
+    # ---- (g) the top view against the container's own normals.
+    # At the top view N.L is the normal's up component; flat and tilt calibrate luma against up, so mean
+    # luma is predicted from the sheet's mean up. Catches swapped axes; one-sided as the fit is only local.
     if not ({"t_own_top", "t_flat_top", "t_tilt_top"} & set(missing)):
         cO, YO = load(shot, "t_own_top")
         cF, YF = load(shot, "t_flat_top")

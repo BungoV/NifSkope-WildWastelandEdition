@@ -44,12 +44,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lodgen_cover_model import Esm, bilinear, dominant_base, ENGINE_DEFAULT, ENGINE_DEFAULT_TEX     # noqa: E402
 
-# The bake's world-space tiling of a landscape texture, in world units per
-# repeat. 341.3333 = 128/0.375 is the engine's own number, read out of
-# Fallout4.exe 1.10.155 (lane SPLAT1); the bake's default moved to it on
-# 2026-09-11, and this model has to move with it or the ring-0 gate measures
-# the old law against the new bake. Override with WW_LAND_TILING to check a
-# bake made with --land-tiling.
+# The bake's world-space tiling of a landscape texture, in world units per repeat:
+# 341.3333 = 128/0.375, the engine's own number. WW_LAND_TILING checks a --land-tiling bake.
 TILE = float(os.environ.get('WW_LAND_TILING', 341.3333))
 CELL = 4096.0
 
@@ -110,10 +106,8 @@ class Dds(object):
 		elif self.fourcc in (b'DXT3', b'DXT5'):
 			self.blockBytes = 16
 		elif self.fourcc in (b'BC5U', b'ATI2'):
-			# MEASURED, and it is the whole reason the gloss lives in GREEN:
-			# every Fallout 4 landscape `_s` map is BC5U -- TWO channels, two
-			# BC4 blocks of 8 bytes, R then G, with B 0 and A 1. It is not a
-			# colour map and it never had a blue channel to lose.
+			# every Fallout 4 landscape `_s` map is BC5U (R and G only, B 0, A 1),
+			# which is why the gloss lives in GREEN.
 			self.blockBytes = 16
 		else:
 			raise ValueError('unsupported fourCC %r in %s' % (self.fourcc, path))
@@ -406,7 +400,7 @@ class Layer(object):
 		self.edid = ''
 		self.why = 'not an LTEX'
 		if form == ENGINE_DEFAULT:
-			# the engine's default ground (lane SEAM1): TX00 + TX07, no material
+			# the engine's default ground: TX00 + TX07, no material
 			self.edid = 'ENGINE_DEFAULT'
 			self.rule = 'legacy-inverted'
 			d = find_asset(data, ENGINE_DEFAULT_TEX[0])
@@ -489,9 +483,8 @@ def layers_for(esm, data, forms, cache):
 
 
 # --------------------------------------------------------------------------
-# The composite, from 2.2 / 1.5: the base, then each layer by its bilinear
-# opacity, then VCLR, then the grass tint. The mask takes the SAME blend
-# WITHOUT VCLR and without the tint.
+# The composite: the base, then each layer by its bilinear opacity, then VCLR, then the
+# grass tint. The mask takes the SAME blend without VCLR and without the tint.
 # --------------------------------------------------------------------------
 
 def composite(esm, data, cache, cx0, cy0, dim, domBase, wx, wy, upt, withVclr=True,
@@ -582,7 +575,7 @@ def cmd_mask(esmPath, data, lodt, cx0, cy0, dim):
 	px, side = got
 	content, border = v.content, v.border
 	upt = v.levelDim * CELL / content
-	domBase = ENGINE_DEFAULT   # lane SEAM1: was the dim-4 chunk's dominant base
+	domBase = ENGINE_DEFAULT   # the engine's default ground
 	cache = {}
 
 	# T2 first: metallic. Every legacy layer must read EXACTLY 0.
@@ -683,7 +676,7 @@ def cmd_ring0(esmPath, data, lodt, cx0, cy0, dim):
 	px, side = got
 	content, border = v.content, v.border
 	upt = v.levelDim * CELL / content
-	domBase = ENGINE_DEFAULT   # lane SEAM1: was the dim-4 chunk's dominant base
+	domBase = ENGINE_DEFAULT   # the engine's default ground
 	cache = {}
 	tileN = (cy0 + v.levelDim) * CELL
 	tileW = cx0 * CELL
@@ -727,9 +720,8 @@ def cmd_ring0(esmPath, data, lodt, cx0, cy0, dim):
 	else:
 		bad('T4 the ring-0 runtime blend and the pyramid agree',
 			'mean %.2f, p95 %d, max %d of 255' % (mean, errs[int(n * 0.95)], errs[-1]))
-	# THE FLOOR THAT BITES: drop the per-texel LTEX WEIGHTS and paint the base
-	# alone. The gate's whole claim is that the runtime's weights blend lands on
-	# the pyramid's colour, so a blend WITHOUT the weights must miss it.
+	# the floor that bites: paint the base alone, without the per-texel LTEX weights;
+	# a blend without the weights must miss the pyramid's color.
 	bmean = sum(baseErrs) / len(baseErrs)
 	if bmean > mean * 3.0:
 		ok('T4 FLOOR a blend that ignores the per-texel LTEX weights is refused',
@@ -738,15 +730,12 @@ def cmd_ring0(esmPath, data, lodt, cx0, cy0, dim):
 	else:
 		bad('T4 FLOOR a blend that ignores the per-texel LTEX weights reads far worse',
 			'base-only mean %.2f vs %.2f' % (bmean, mean))
-	# The VCLR arm, REPORTED and not gated, with the reason measured rather than
-	# assumed: only 2,362 of the Commonwealth's 36,864 cells carry a VCLR at all,
-	# and in this region every one of them is within 249..255 of white -- so
-	# omitting the multiply is not a wrong grading here, it is no change.
+	# The VCLR arm is reported, not gated: in this region every VCLR is near white,
+	# so omitting the multiply is no change here.
 	say('T4 the same texels with the VCLR multiply omitted: mean %.2f (reported, '
 		'not gated -- this region\'s VCLR is 249..255 of white)' % fmean)
-	# THE CEILING: the same comparison, through the same decode path, against the
-	# bake itself. A ceiling that cannot read non-zero would be decoration, so it
-	# re-opens the file and re-decodes rather than differencing one array.
+	# the ceiling: the same comparison against the bake itself, re-opening and re-decoding
+	# the file so it can read non-zero.
 	v2 = Lodt(lodt)
 	px2, _ = v2.sheet(idx, 1, 0)
 	ceil = max(max(abs(px2[k][c] - px[k][c]) for c in range(3))

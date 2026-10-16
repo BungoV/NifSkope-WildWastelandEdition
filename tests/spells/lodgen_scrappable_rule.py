@@ -236,11 +236,8 @@ def main():
 				else 'base is UnscrappableObject' if base in unscrap
 				else 'outside every workshop build area')
 
-	# EVERY clause that the region actually refuses on gets named first, and only
-	# then is the list filled up to `nex`. A fixed quota per clause silently
-	# printed FOUR examples when a region happened to have no placement refused
-	# by the third clause, and a gate asking for five then failed on the gate's
-	# own arithmetic rather than on anything about the bake.
+	# every clause the region actually refuses on is named first, then the list is filled up to
+	# `nex` (a fixed quota per clause printed too few examples when a clause had none).
 	first, rest, seen = [], [], set()
 	for row in no:
 		why = clause(row[2])

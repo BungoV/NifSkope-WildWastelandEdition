@@ -82,10 +82,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lodgen_terrain_model import Dds                    # noqa: E402
 
 TOL = 16.0
-# The bar-2 margin.  0.8 until 2026-09-12, when ROADS4's --road-detail 1 default
-# moved the achievable ratio from 0.8505 to 0.7640; 0.72 carries the SAME 94.07 %
-# headroom the 0.8 expressed.  The docstring above has the whole derivation and
-# the reason the recalibration still binds.
+# The bar-2 margin: 0.72 keeps the same 94.07 % headroom over the achievable ratio at --road-detail 1;
+# the docstring above has the derivation.
 MARG = 0.72
 CHROMA_T = 17.5
 LUM_T = 87.7

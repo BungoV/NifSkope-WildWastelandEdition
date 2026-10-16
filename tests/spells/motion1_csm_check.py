@@ -48,8 +48,8 @@ def main():
         print('csm FAIL  no frames in %s' % side)
         return 1
     if '--sun-arc' in args:
-        # finalfix (SUNCELL1): a Lookdev exterior with a weather lights by the ENGINE ARC (pbr_wx1_gates Clock), not
-        # the R2b TNAM ramp sun_to() models; the cascades are fitted to that light, so the judge must use it too
+        # a Lookdev exterior with a weather lights by the engine arc (pbr_wx1_gates Clock), not
+        # the TNAM ramp sun_to() models; the cascades are fitted to that light, so the judge must use it too
         import pbr_wx1_gates as wx
         esm = os.environ.get('ESM', 'X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm')
         L = -np.array(wx.Clock(wx.Weather(esm, 'CommonwealthClear')).light(hour), dtype=float)

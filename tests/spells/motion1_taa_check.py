@@ -29,7 +29,7 @@ import math, os, sys
 
 import numpy as np
 
-# the game's settings defaults, read from the exe (lane notes: fTAALowFreq, fTAAHighFreq, fTAAPostSharpen,
+# the game's settings defaults, read from the exe (fTAALowFreq, fTAAHighFreq, fTAAPostSharpen,
 # fTAAPostOverlay, fTAASharpen:Display)
 LOW, HIGH, POST_SHARPEN, POST_OVERLAY, SHARPEN = 0.5, 0.8, 0.21, 0.21, 1.0
 f32 = np.float32
@@ -144,7 +144,7 @@ def main():
         return img[y, x]
     offs = dict(A=(-1, -1), B=(1, 1), C=(1, 0), D=(1, -1), E=(-1, 1), F=(0, -1), G=(0, 1), H=(-1, 0), Z=(0, 0))
     d = {k: tap(dep, *o) for k, o in offs.items()}
-    # the closest depth; ties broken in the game's order (lane notes: (A,B,D), (F,C), (H,E), (Z,G))
+    # the closest depth; ties broken in the game's order ((A,B,D), (F,C), (H,E), (Z,G))
     m = np.minimum(np.minimum(d['B'], d['D']), d['A'])
     sel = np.where(m == d['A'], 0, 1)
     names = 'ABCDEFGHZ'
@@ -224,10 +224,9 @@ def main():
         return np.clip(c4[3] * (Rr - o) + o, 0, 1)
     o1 = picture(upC, loC)
     errO = np.max(np.abs(np.round(o1 * 255) - np.round(out * 255)), -1)
-    # TIES: two neighbours of the same luma but different colour can both be the bracket's end; which one the
-    # hardware keeps depends on how its dot product rounds the luma (not specified to the bit, the game's GPU
-    # alike). Where such a tie exists, the picture made with the LAST tied neighbour in the game's order is
-    # lawful too; the share of tie pixels is reported and the bar on the rest is unchanged.
+    # TIES: two neighbours of the same luma but different color can both be the bracket's end, and the
+    # hardware's pick is not specified to the bit: the picture made with the LAST tied neighbour in the
+    # game's order is lawful too; the share of tie pixels is reported and the bar on the rest is unchanged.
     upL, loL = upC.copy(), loC.copy()
     tie = np.zeros((H, W), bool)
     for kk in 'ZGHEFCDAB':

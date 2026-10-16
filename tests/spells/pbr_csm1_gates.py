@@ -47,7 +47,7 @@ from PIL import Image
 DEG = 0.0174532924            # the engine's DEG_TO_RAD, a float
 SUNX, SUNY = 400.0, 25.0      # fSunXExtreme, fSunYExtreme
 SHSCALE, SHMIN = -15.0, 30.0  # fSunShadowScale (as Fallout4.esm sets it), fSunShadowMinAngle
-TNAM = (30, 54, 102, 126)     # CommonwealthClear's climate in Fallout4.esm (R2b gate g3)
+TNAM = (30, 54, 102, 126)     # CommonwealthClear's climate in Fallout4.esm
 SPLIT = (800.0, 3000.0)       # spec 2.1
 BLEND = 100.0                 # fSunShadowBlend, spec 2.3 / 2.4
 BACK = 15000.0                # the shadow camera sits 15000 up-sun, spec 2.2
@@ -434,9 +434,8 @@ def main():
         return np.asarray(Image.open(p).convert("RGB")).astype(float) / 255.0
 
     def echo(tag):
-        # WW_CSM_ECHO: the grabbed frame's fit. The census row is the FIRST draw's,
-        # taken before the render hook's camera pin (a pinned shot would be judged
-        # against the startup camera), so it is only the fallback.
+        # WW_CSM_ECHO: the grabbed frame's fit; the census row is the first draw's (before the camera pin),
+        # so it is only the fallback.
         e = parse_echo(os.path.join(OUT, tag + ".csm.txt"))
         return e if e is not None else parse_echo(os.path.join(OUT, tag + ".pbrm.txt"))
 
@@ -633,10 +632,8 @@ def main():
                 oth = [k for k in range(3) if k != ax]
                 on &= (np.abs(P[..., oth[0]]) < HALF - 8) & (np.abs(P[..., oth[1]]) < HALF - 8)
                 lit_face |= on
-        # the cube's sun-facing faces receive under the same law (stored depth + caster bias,
-        # receiver offsets, Poisson, blend, fade): a face the sun grazes darkens itself under
-        # the spec's own bias (receiver offsets are depth-only, 2.4) -- that is the law, so the
-        # face is judged against the model, and the law's own darkening is reported
+        # the cube's sun-facing faces are judged against the same law (incl. its depth-only receiver offsets),
+        # so a grazing face's self-darkening is the law's own and is reported, not failed.
         mface = np.ones((H, W))
         if lit_face.any():
             dvP = (P - cam.C) @ cam.fwd
