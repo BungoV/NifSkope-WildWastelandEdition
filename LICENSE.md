@@ -57,6 +57,10 @@ Syoyo Fujita, Aurélien Chatelain and many contributors under the MIT License.
 [xxHash](https://github.com/Cyan4973/xxHash) is copyright (c) 2012-2023 by
 Yann Collet, BSD 2-Clause License.
 
+The contact shadows (res/shaders/ww_contact.frag) are a port of Bend Studio's screen-space shadows
+(bend_sss_gpu.h), Copyright 2023 Sony Interactive Entertainment, under the
+[Apache 2 License](http://www.apache.org/licenses/LICENSE-2.0.html).
+
 NOTICE
 
 Parts of NifSkope (i.e. included libraries) might be subject to
