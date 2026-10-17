@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/gametaa.h"
+#include "gl/shadowset.h"	// lane TERRSHADOW1
 #include "esmweather.h"
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
@@ -155,6 +156,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveCheck( skyBox, "lookdevSky", tr( "Sky" ), wwLookdevSky() );
 	liveCheck( cloudsBox, "lookdevClouds", tr( "Clouds" ), wwLookdevClouds() );
 	liveCheck( sunBox, "lookdevSun", tr( "Sun" ), wwLookdevSun() );
+	// lane TERRSHADOW1: Engine (the sky clock's arc) or Real (Boston's solar path); ships Engine
+	sunPathBox = new QComboBox( tree );
+	sunPathBox->setObjectName( QStringLiteral( "sunPath" ) );
+	sunPathBox->addItems( { tr( "Engine" ), tr( "Real" ) } );
+	sunPathBox->setCurrentIndex( std::clamp( wwSunPathMode(), 0, 1 ) );
+	wwMatchFieldStyle( sunPathBox );
+	row( tr( "Sun Path" ), sunPathBox, true );
 	liveCheck( moonBox, "lookdevMoon", tr( "Moon" ), wwLookdevMoon() );
 	gameDayBox = new QDoubleSpinBox( tree );
 	gameDayBox->setObjectName( QStringLiteral( "lookdevGameDay" ) );
@@ -176,7 +184,18 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	heading( tr( "Effects" ) );
 	liveCheck( shadowsBox, "lookdevShadows", tr( "Cascaded Shadows" ), wwLookdevShadows() );	// lane CSM1
 	liveCheck( taaBox, "gameTaa", tr( "Temporal AA" ), wwGameTaaOn() );	// lane MOTION1: every mode, ships off
-	placeholderCheck( tr( "Contact Shadows" ) );
+	// lane TERRSHADOW1: the unified shadow set, each Off / Low / Medium / High / Ultra, ships Off
+	auto tierBox = [&]( QComboBox *& box, const char * name, const QString & label, int tier ) {
+		box = new QComboBox( tree );
+		box->setObjectName( QLatin1StringView( name ) );
+		box->addItems( { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) } );
+		box->setCurrentIndex( std::clamp( tier, 0, 4 ) );
+		wwMatchFieldStyle( box );
+		row( label, box, true );
+	};
+	tierBox( cascadeQualityBox, "cascadeQuality", tr( "Cascade Quality" ), wwShadowCascadeTier() );
+	tierBox( contactShadowsBox, "contactShadows", tr( "Contact Shadows" ), wwShadowContactTier() );
+	tierBox( terrainShadowsBox, "terrainShadows", tr( "Terrain Shadows" ), wwShadowTerrainTier() );
 	placeholderCheck( tr( "SSAO" ) );
 	placeholderCheck( tr( "SSGI" ) );
 	placeholderCheck( tr( "Bloom" ) );
@@ -273,6 +292,19 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( volAirBox, &wwVolAirSetOn );
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	liveToggle( taaBox, &wwGameTaaSetOn );
+	auto liveTier = [this, live]( QComboBox * box, void ( *set )( int ) ) {
+		connect( box, qOverload<int>( &QComboBox::currentIndexChanged ), this, [this, live, set]( int i ) {
+			if ( live )
+				set( i );
+			refreshStatus();
+			if ( m_repaint )
+				m_repaint();
+		} );
+	};
+	liveTier( sunPathBox, &wwSunPathSetMode );
+	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
+	liveTier( contactShadowsBox, &wwShadowSetContactTier );
+	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
 		if ( live )
 			wwLookdevSetGameDay( d );
@@ -321,7 +353,9 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( hourBox ), static_cast<QWidget *>( groundBox ),
 			static_cast<QWidget *>( skyBox ), static_cast<QWidget *>( cloudsBox ), static_cast<QWidget *>( sunBox ),
 			static_cast<QWidget *>( moonBox ), static_cast<QWidget *>( gameDayBox ),
-			static_cast<QWidget *>( fogBox ), static_cast<QWidget *>( shadowsBox ) } )
+			static_cast<QWidget *>( fogBox ), static_cast<QWidget *>( shadowsBox ),
+			static_cast<QWidget *>( sunPathBox ), static_cast<QWidget *>( cascadeQualityBox ),
+			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ) } )
 		if ( w )
 			w->setEnabled( ld );
 	syncCloudTimer();

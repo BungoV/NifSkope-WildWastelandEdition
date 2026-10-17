@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
+#include "gl/shadowset.h"	// lane TERRSHADOW1: the unified set (presets, terrain, contact, composition)
 
 #include <QDir>
 #include <QFile>
@@ -83,6 +84,10 @@ struct CsmState
 	double rc[3] = { 1, 0, 0 }, uc[3] = { 0, 1, 0 };	// the camera's right and up rows (world)
 	double split[2] = { kSplit0, kSplit1 };
 	int casters = 0, tris = 0, atCasters = 0;
+	// lane TERRSHADOW1: the fit's numbers, CSM1's constants unless Cascade Quality picks a preset
+	double baseD = kDefaultDistance, split0 = kSplit0, split1 = kSplit1, blend = kBlend, lightBack = kLightBack;
+	int baseMap = kDefaultMap;
+	float slopeBias = kSlopeBias, unitBias = kUnitBias;
 	bool groundCast = false;
 };
 
@@ -98,6 +103,8 @@ CsmState & cs()
 		const int m = qEnvironmentVariable( "WW_CSM_MAP" ).toInt( &ok );
 		if ( ok && m >= 64 && m <= 8192 )
 			s.map = m;
+		s.baseD = s.D;	// lane TERRSHADOW1
+		s.baseMap = s.map;
 		s.probe = qEnvironmentVariable( "WW_CSM_PROBE" ).toInt();
 		// WW_CSM_FORCE=<0..1>: the receiver returns this factor instead of the map's (the
 		// wiring test of the factor sites: both sun terms must take it); unset = -1, off
@@ -183,8 +190,8 @@ void lastRow( float * m )
 void fitCascades( CsmState & s, const Transform & vt )
 {
 	const bool one = red( "onecascade" );
-	s.split[0] = red( "wrongsplit" ) ? 400.0 : kSplit0;
-	s.split[1] = red( "wrongsplit" ) ? 1500.0 : kSplit1;
+	s.split[0] = red( "wrongsplit" ) ? 400.0 : s.split0;
+	s.split[1] = red( "wrongsplit" ) ? 1500.0 : s.split1;
 	const double far[kCascades] = { s.split[0], s.split[1], s.D };	// the last is overridden by D
 	double * rc = s.rc, * uc = s.uc;
 	for ( int j = 0; j < 3; j++ ) {
@@ -194,8 +201,8 @@ void fitCascades( CsmState & s, const Transform & vt )
 	for ( int i = 0; i < kCascades; i++ ) {
 		Cascade & c = s.c[i];
 		c = Cascade();
-		c.zn = ( i == 0 || one ) ? s.camNear : far[i - 1] - kBlend;
-		c.zf = ( one ? s.D : far[i] ) + kBlend;
+		c.zn = ( i == 0 || one ) ? s.camNear : far[i - 1] - s.blend;
+		c.zf = ( one ? s.D : far[i] ) + s.blend;
 		bool first = true;
 		for ( int zi = 0; zi < 2; zi++ ) {
 			const double z = zi ? c.zf : c.zn;
@@ -204,7 +211,7 @@ void fitCascades( CsmState & s, const Transform & vt )
 					double q[3];	// Q - C
 					for ( int j = 0; j < 3; j++ )
 						q[j] = z * ( s.fwd[j] + sx * s.tanX * rc[j] + sy * s.tanY * uc[j] );
-					const double x = dot3( q, s.right ), y = dot3( q, s.up ), zz = dot3( q, s.L ) + kLightBack;
+					const double x = dot3( q, s.right ), y = dot3( q, s.up ), zz = dot3( q, s.L ) + s.lightBack;
 					if ( first ) {
 						c.minX = c.maxX = x;
 						c.minY = c.maxY = y;
@@ -236,7 +243,7 @@ void fitCascades( CsmState & s, const Transform & vt )
 		}
 		c.pb[0] = snap( dot3( s.C, s.right ), c );
 		c.pb[1] = snap( dot3( s.C, s.up ), c );
-		c.pb[2] = snap( dot3( s.C, s.L ) - kLightBack, c );
+		c.pb[2] = snap( dot3( s.C, s.L ) - s.lightBack, c );
 		c.l = snap( c.minX, c );
 		c.b = snap( c.minY, c );
 		c.vw = std::clamp( int( std::floor( c.w / c.texel + 1e-9 ) ), 1, s.map );
@@ -323,7 +330,8 @@ bool ensureTargets( CsmState & s, Renderer * r, QString & why )
 bool wwSunShadowWanted( Scene * scene )
 {
 	const CsmState & s = cs();
-	return s.valid && scene && !scene->selecting && wwLookdevActive();
+	// lane TERRSHADOW1: the receivers also run while the terrain or contact producer is valid
+	return ( s.valid || wwShadowSetActive( scene ) ) && scene && !scene->selecting && wwLookdevActive();
 }
 
 static void sunShadowPassImpl( Scene * scene );
@@ -400,6 +408,7 @@ void wwSunShadowPass( Scene * scene )
 	if ( scene && scene->selecting )
 		return;
 	sunShadowPassImpl( scene );
+	wwShadowSetFrame( scene );	// lane TERRSHADOW1: the terrain sweep's step, whatever the Shadows row says
 	csmEchoFrame();
 }
 
@@ -473,6 +482,28 @@ static void sunShadowPassImpl( Scene * scene )
 	}
 	cross3( s.right, s.L, s.up );
 	norm3( s.up );
+
+	// lane TERRSHADOW1: Cascade Quality (Off = CSM1's own numbers, the WW_CSM_DISTANCE / WW_CSM_MAP pins kept)
+	WwCascadePreset cp;
+	if ( wwShadowCascadePreset( cp ) ) {
+		s.D = cp.D;
+		s.map = cp.map;
+		s.split0 = cp.split0;
+		s.split1 = cp.split1;
+		s.blend = cp.blend;
+		s.lightBack = cp.lightBack;
+		s.slopeBias = cp.slopeBias;
+		s.unitBias = cp.unitBias;
+	} else {
+		s.D = s.baseD;
+		s.map = s.baseMap;
+		s.split0 = kSplit0;
+		s.split1 = kSplit1;
+		s.blend = kBlend;
+		s.lightBack = kLightBack;
+		s.slopeBias = kSlopeBias;
+		s.unitBias = kUnitBias;
+	}
 
 	fitCascades( s, vt );
 
@@ -557,7 +588,7 @@ static void sunShadowPassImpl( Scene * scene )
 		fn->glDisable( GL_POLYGON_OFFSET_FILL );
 	} else {
 		fn->glEnable( GL_POLYGON_OFFSET_FILL );
-		fn->glPolygonOffset( kSlopeBias, kUnitBias );
+		fn->glPolygonOffset( s.slopeBias, s.unitBias );
 	}
 
 	const int lMvp = prog->uniLocation( "csmClipFromView" );
@@ -701,11 +732,14 @@ void wwSunShadowUniforms( Scene * scene )
 	const float offB = nobias ? 0.0f : red( "bigbias" ) ? 600.0f : kOffsetB;
 	prog->uni3f_l( prog->uniLocation( "csmInvRange" ), float( 1.0 / ( s.c[0].far - kNear ) ),
 		float( 1.0 / ( s.c[1].far - kNear ) ), float( 1.0 / ( s.c[2].far - kNear ) ) );
-	prog->uni4f( "csmParams", FloatVector4( float( 1.0 / s.sc ), float( s.D ), float( s.map ), float( kBlend ) ) );
+	prog->uni4f( "csmParams", FloatVector4( float( 1.0 / s.sc ), float( s.D ), float( s.map ), float( s.blend ) ) );
 	prog->uni4f( "csmSplitOffset", FloatVector4( float( s.split[0] ), float( s.split[1] ), offA, offB ) );
 	prog->uni1i( "csmProbe", s.probe );
 	prog->uni1f( "csmForce", s.force );
 	prog->uni1i( "csmRed", redBits() );
+	// lane TERRSHADOW1: the composition (ussOn = 0 keeps the code above exactly CSM1's)
+	const float texel[3] = { float( s.c[0].texel ), float( s.c[1].texel ), float( s.c[2].texel ) };
+	wwShadowSetUniforms( scene, prog, s.valid, texel );
 }
 
 QString wwSunShadowSummary()
