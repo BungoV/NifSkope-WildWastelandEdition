@@ -31,6 +31,7 @@ BSD License - see nifskope.h
 #include "cellmodpick.h"	// lane MODPICK1
 #include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
 #include "cellaodecal.h"		// lane AODECAL1: baked AO decals under big movable statics
+#include "cellstream.h"		// lane CELLSTREAM1: the cells round the camera
 
 #include <limits>
 
@@ -177,6 +178,10 @@ struct Bucket
 	std::vector<quint32> runStart;
 	//! Lane UMBRA1: the placed reference of each run (parallel to `runStart`; 0 = none)
 	std::vector<quint32> runRef;
+	//! lane CELLSTREAM1: the shapes' own vertex lists, cut on the worker so the writer only copies them out
+	struct Part { std::vector<OutVert> pv; std::vector<Triangle> pt; size_t p0 = 0, p1 = 0; };
+	std::vector<Part> parts;
+	size_t nVerts = 0, nTris = 0;   //!< the welded counts once `parts` holds them
 };
 
 /*! IS THIS STRING SOMETHING THE SHADER PROPERTY'S **Name** CAN RESOLVE?
@@ -355,6 +360,57 @@ void cellMeshEmit( NifModel * nif, const QModelIndex & iShape, const std::vector
 	cellMeshPut( nif, iShape, m );
 }
 
+// lane CELLSTREAM1: while a streamed cell is written, its blocks come from the streamer (freed ones first)
+static CellBlockSource * g_cellBlockSource = nullptr;
+static CellChunk * g_cellChunkEmit = nullptr;
+// lane CELLSTREAM1: where one bucket's main-thread time goes (remap, take, runs, shape, mesh, material)
+double g_emitSecMs[6] = {};
+static QElapsedTimer g_emitLap;
+static void emitLap( int k ) { g_emitSecMs[k] += double( g_emitLap.nsecsElapsed() ) * 1.0e-6; g_emitLap.restart(); }
+static QModelIndex cellNewBlock( NifModel * nif, const QString & type )
+{
+	const qint64 t0 = g_emitLap.nsecsElapsed();
+	QModelIndex r = g_cellBlockSource ? g_cellBlockSource->take( nif, type ) : nif->insertNiBlock( type );
+	g_emitSecMs[1] += double( g_emitLap.nsecsElapsed() - t0 ) * 1.0e-6;
+	return r;
+}
+
+//! A bucket cut into shapes of at most MAX_SHAPE_VERTS, on TRIANGLE boundaries, so no triangle points across a cut.
+static void splitBucket( const Bucket & b, std::vector<Bucket::Part> & out )
+{
+	size_t first = 0;
+	while ( first < b.tris.size() ) {
+		Bucket::Part P;
+		P.p0 = first;
+		QHash<int, quint16> remap;
+		size_t i = first;
+		for ( ; i < b.tris.size(); i++ ) {
+			if ( P.pv.size() + 3 > size_t( MAX_SHAPE_VERTS ) )
+				break;
+			const BucketTri & t = b.tris[i];
+			quint16 idx[3];
+			for ( int k = 0; k < 3; k++ ) {
+				const int src = int( t[k] );
+				auto it = remap.constFind( src );
+				if ( it != remap.constEnd() ) {
+					idx[k] = it.value();
+				} else {
+					idx[k] = quint16( P.pv.size() );
+					remap.insert( src, idx[k] );
+					P.pv.push_back( b.verts[size_t( src )] );
+				}
+			}
+			P.pt.push_back( Triangle( idx[0], idx[1], idx[2] ) );
+		}
+		first = i;
+		P.p1 = i;
+		const bool empty = P.pv.empty() || P.pt.empty();
+		out.push_back( std::move( P ) );
+		if ( empty )
+			break;
+	}
+}
+
 //! Write one bucket as one or more BSTriShapes under `iRoot`. Splits at
 //! MAX_SHAPE_VERTS on TRIANGLE boundaries, so no triangle points across a cut.
 bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
@@ -366,7 +422,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			*error = m;
 		return false;
 	};
-	if ( b.verts.empty() || b.tris.empty() )
+	if ( b.parts.empty() && ( b.verts.empty() || b.tris.empty() ) )
 		return true;
 
 	BSVertexDesc desc( CELL_VERTEX_DESC );
@@ -376,34 +432,23 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 	}
 	const std::uint64_t vertexDesc = desc.Value();
 	const int stride = int( desc.GetVertexSize() );
+	for ( double & d : g_emitSecMs )
+		d = 0.0;
+	g_emitLap.start();
 
-	size_t first = 0;
+	std::vector<Bucket::Part> local;
+	const std::vector<Bucket::Part> * parts = &b.parts;
+	if ( b.parts.empty() ) {
+		splitBucket( b, local );
+		parts = &local;
+	}
+	emitLap( 0 );
 	int part = 0;
-	while ( first < b.tris.size() ) {
-		const size_t p0 = first;   // lane SUNCELL1: this part's first bucket triangle
-		QHash<int, quint16> remap;
-		std::vector<OutVert> pv;
-		std::vector<Triangle> pt;
-		size_t i = first;
-		for ( ; i < b.tris.size(); i++ ) {
-			if ( pv.size() + 3 > size_t( MAX_SHAPE_VERTS ) )
-				break;
-			const BucketTri & t = b.tris[i];
-			quint16 idx[3];
-			for ( int k = 0; k < 3; k++ ) {
-				const int src = int( t[k] );
-				auto it = remap.constFind( src );
-				if ( it != remap.constEnd() ) {
-					idx[k] = it.value();
-				} else {
-					idx[k] = quint16( pv.size() );
-					remap.insert( src, idx[k] );
-					pv.push_back( b.verts[size_t( src )] );
-				}
-			}
-			pt.push_back( Triangle( idx[0], idx[1], idx[2] ) );
-		}
-		first = i;
+	for ( const Bucket::Part & P : *parts ) {
+		const std::vector<OutVert> & pv = P.pv;
+		const std::vector<Triangle> & pt = P.pt;
+		const size_t p0 = P.p0;   // lane SUNCELL1: this part's first bucket triangle
+		const size_t i = P.p1;
 		part++;
 		if ( pv.empty() || pt.empty() )
 			break;
@@ -419,9 +464,12 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 				"for a smaller block size (a 3x3 downtown block is about 4.2M)" )
 				.arg( CELL_MAX_TOTAL_VERTS ) );
 
-		QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
-		if ( b.fxLit >= 0 )   // lane FXLIT1: the renderer asks for this shape's four lights by block
+		QModelIndex iShape = cellNewBlock( nif, QStringLiteral( "BSTriShape" ) );
+		if ( b.fxLit >= 0 && g_cellChunkEmit )   // lane CELLSTREAM1: a local serial, registered by the streamer
+			g_cellChunkEmit->fxShapes.emplace_back( nif->getBlockNumber( iShape ), b.fxLit );
+		else if ( b.fxLit >= 0 )   // lane FXLIT1: the renderer asks for this shape's four lights by block
 			wwCellFxLitShape( nif, nif->getBlockNumber( iShape ), b.fxLit );
+		emitLap( 5 );   // the shape's take (counted in 1) plus the fx registration
 		if ( !b.billboard && !b.runStart.empty() ) {   // lane SUNCELL1: the part's culling runs, spheres in its own space
 			std::vector<WwCullRun> runs;
 			auto rb = std::upper_bound( b.runStart.begin(), b.runStart.end(), quint32( p0 ) );
@@ -460,6 +508,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			}
 			wwCellCullShape( nif, nif->getBlockNumber( iShape ), std::move( runs ) );
 		}
+		emitLap( 2 );
 		if ( b.water )        // lane WATER1: the renderer draws this shape with the game's water terms
 			wwCellWaterShape( nif, nif->getBlockNumber( iShape ), b.waterRec );
 		if ( b.landSplat )    // lane TERRBLEND1: the renderer tells the shader the alpha is a share
@@ -477,6 +526,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		nif->set<quint32>( iShape, "Data Size",
 			quint32( qint64( pv.size() ) * stride + qint64( pt.size() ) * 6 ) );
 
+		emitLap( 3 );
 		nif->setState( BaseModel::Processing );
 		QModelIndex iVertexData = nif->getIndex( iShape, "Vertex Data" );
 		const bool sideMesh = cellMeshOn();   // lane SPEED1: the rows stay unwritten, the arrays go beside the document
@@ -521,13 +571,14 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			nif->set<float>( iBound, "Radius", h.length() );
 		}
 		nif->restoreState();
+		emitLap( 4 );
 
 		/* The same material plumbing the chunk builder and the native LOD scene
 		 * write (src/lodgen.cpp ~4189, src/lodinative.cpp ~316): the same block
 		 * pair, the same ten slots, the BGSM in the shader's Name so the
 		 * renderer resolves it exactly as it does for a `.BTO` shape. */
 		if ( !b.effectMat.isEmpty() || !b.effectBlock.isEmpty() ) {
-			QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSEffectShaderProperty" ) );
+			QModelIndex iShader = cellNewBlock( nif, QStringLiteral( "BSEffectShaderProperty" ) );
 			if ( !b.effectBlock.isEmpty() ) {
 				// lane EFX1: the source property whole; its controller (UV scroll) is not welded
 				QByteArray eb = b.effectBlock;
@@ -544,15 +595,16 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			nif->set<quint32>( iShader, "Shader Flags 2", b.withColour ? b.effSF2 : ( b.effSF2 & ~0x20U ) );
 			nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
 			if ( b.hasAlpha ) {
-				QModelIndex iAlpha = nif->insertNiBlock( QStringLiteral( "NiAlphaProperty" ) );
+				QModelIndex iAlpha = cellNewBlock( nif, QStringLiteral( "NiAlphaProperty" ) );
 				nif->set<int>( iAlpha, "Flags", b.effAlphaFlags ? int( b.effAlphaFlags ) : b.alphaThreshold ? 4844 : 4333 );
 				nif->set<int>( iAlpha, "Threshold", int( b.alphaThreshold ) );
 				nif->setLink( iShape, "Alpha Property", nif->getBlockNumber( iAlpha ) );
 			}
 			addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iShape ) );
+			emitLap( 5 );
 			continue;
 		}
-		QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
+		QModelIndex iShader = cellNewBlock( nif, QStringLiteral( "BSLightingShaderProperty" ) );
 		nif->set<quint32>( iShader, "Shader Type", 0 );
 		/* Lane EFX1: a Refraction bucket keeps Shader Flags 1 bit 15 and its strength, so the
 		 * screen-space refraction preview (src/gl/renderer.cpp) bends the scene behind it the
@@ -563,7 +615,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		if ( b.refract )
 			nif->set<float>( iShader, "Refraction Strength", b.refractStrength );
 		nif->set<quint32>( iShader, "Shader Flags 2", ( b.withColour ? 0x25U : 5U ) & ( b.decal ? ~1U : ~0U ) );
-		QModelIndex iTexSet = nif->insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
+		QModelIndex iTexSet = cellNewBlock( nif, QStringLiteral( "BSShaderTextureSet" ) );
 		nif->setLink( iShader, "Texture Set", nif->getBlockNumber( iTexSet ) );
 		nif->set<uint>( iTexSet, "Num Textures", 10 );
 		nif->updateArraySize( iTexSet, "Textures" );
@@ -609,7 +661,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			nif->set<float>( iShader, "Alpha", b.alpha );
 		nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
 		if ( b.hasAlpha ) {
-			QModelIndex iAlpha = nif->insertNiBlock( QStringLiteral( "NiAlphaProperty" ) );
+			QModelIndex iAlpha = cellNewBlock( nif, QStringLiteral( "NiAlphaProperty" ) );
 			/* 4844 = alpha TEST only; 4333 = alpha BLEND, SRC_ALPHA /
 			 * ONE_MINUS_SRC_ALPHA. 4109 = SRC_ALPHA / ONE, ADDED: a blended-ground
 			 * layer is one share of the engine's weighted sum, not an opacity
@@ -619,6 +671,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			nif->setLink( iShape, "Alpha Property", nif->getBlockNumber( iAlpha ) );
 		}
 		addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iShape ) );
+		emitLap( 5 );
 	}
 	return true;
 }
@@ -891,7 +944,8 @@ static int cellProbeKindOf( const ProbePoint & q )
  *   direct.  = Directional Color x Directional Fade; its direction from Rotation XY (elevation) and
  *              Z (azimuth from +Y, clockwise), degrees -- ASSUMED, the PRTP4 capture is the refuter */
 static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, const CellSceneSpec & spec,
-	const QVector<EsmRefr> & lightRefs, const QHash<quint32, EsmRefr> & primRefs, const Vector3 & center )
+	const QVector<EsmRefr> & lightRefs, const QHash<quint32, EsmRefr> & primRefs, const Vector3 & center,
+	WwCellLighting * chunkOut = nullptr )
 {
 	WwCellLighting L;
 	L.interior = spec.interior;
@@ -1089,7 +1143,12 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			continue;
 		}
 		L.lights.append( l );
-		wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // lane FXLIT1: a red control's data
+		if ( !chunkOut )
+			wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // lane FXLIT1: a red control's data
+	}
+	if ( chunkOut ) {	// lane CELLSTREAM1: one streamed cell's lights, merged and published by src/cellstream.cpp
+		*chunkOut = L;
+		return;
 	}
 	QString amb = QStringLiteral( "none (exterior: the viewport light)" ), dir = QStringLiteral( "none (exterior: the Lookdev weather sun or moon)" );
 	if ( spec.interior ) {
@@ -1526,7 +1585,15 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
 	return systems;
 }
 
-bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
+// lane CELLSTREAM1: a streamed cell's welded buckets, handed from the worker to the writer
+struct CellChunkBuckets
+{
+	QHash<QString, Bucket> buckets;
+	QStringList keys;
+};
+
+// lane CELLSTREAM1: the builder; `chunk` set = one streamed cell (n = 1), no document touched, stops before emit
+static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChunk * chunk,
 	QString * error, QString * notes )
 {
 	/* lane BAKEBLOCK1 (bungo, PRTP_PLAN item 5): an exterior BAKE loads the game's own 5x5 block around the
@@ -1546,15 +1613,23 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			*error = m;
 		return false;
 	};
-	if ( !nif )
+	if ( !nif && !chunk )
 		return fail( QStringLiteral( "no model" ) );
 	if ( !spec.valid )
 		return fail( QStringLiteral( "no cell spec" ) );
+	// lane CELLSTREAM1: an exterior view streams its cells round the camera (src/cellstream.h); this open builds
+	// the document, the far field and the lighting, and hands the world to the streamer instead of welding a block
+	const bool streamInit = !chunk && !spec.interior && spec.overlay == CellOverlay::None && !bakeExterior
+		&& !spec.probes && qEnvironmentVariableIsEmpty( "WW_CELL_PROBES" )
+		&& qEnvironmentVariableIsEmpty( "WW_CELL_GI_FROM" ) && cellStreamWanted();
 
 	QElapsedTimer clock;
 	clock.start();
-	CellSpeed::begin();   // lane SPEED1
-	cellMeshClear( nif );
+	if ( !chunk ) {
+		CellSpeed::begin();   // lane SPEED1
+		cellMeshClear( nif );
+		cellStreamStop( nif );   // lane CELLSTREAM1: the last open's streamer lets go of this document
+	}
 
 	/* lane FARLOD2: ONE STACK FOR NEAR AND FAR (cellfarlod.h). With the FO4CS far LOD the near cells load the
 	 * load order and resources the far LOD was baked from (its .lodb record), so a mod's trees are the mod's
@@ -1562,7 +1637,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	QString farStackNote;
 	QString modLodb;               // lane MODPICK1: the shown bake's record, empty when none
 	QStringList modBakePresent;    // lane MODPICK1: its plugins still on disk
-	if ( !spec.interior && cellFarLodWanted() ) {
+	if ( !chunk && !spec.interior && cellFarLodWanted() ) {   // a streamed cell: the open's plugins (the seed)
 		QString preRoot = spec.dataRoot;
 		if ( preRoot.isEmpty() && !lodgenResourceSearchPaths().isEmpty() )
 			preRoot = lodgenResourceSearchPaths().first();
@@ -1587,8 +1662,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 * list stays exactly what the cell asked (after the FARLOD stack step); the line goes in the notes, and
 	 * the view's note is set once the document is built. */
 	QString modPickNote, modPickViewNote;
-	cellModPickSetViewNote( nif, QString() );
-	if ( !spec.interior ) {
+	if ( !chunk )
+		cellModPickSetViewNote( nif, QString() );
+	if ( !chunk && !spec.interior ) {
 		const CellModApplied mp = cellModPickApply( spec.world, spec.plugins, modLodb, modBakePresent );
 		spec.plugins = mp.plugins;
 		cellFarLodAdoptResources( mp.resources );	// the MO2 profile's stack when the choice came from it
@@ -1598,9 +1674,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	}
 
 	// ---- the worldspace, or (lane PRTP1) one interior cell
-	EsmWorld world;
+	// lane CELLSTREAM1: shared, so a streaming open can hand it on; a streamed cell reads the open's
+	std::shared_ptr<EsmWorld> worldOwn = chunk ? chunk->seed->world : std::make_shared<EsmWorld>();
+	EsmWorld & world = *worldOwn;
 	QString loadError;
-	if ( spec.interior ) {
+	if ( chunk ) {
+		// indexed once by the open
+	} else if ( spec.interior ) {
 		if ( !world.loadInterior( spec.plugins, spec.interiorCell, &loadError ) )
 			return fail( loadError.isEmpty()
 				? QStringLiteral( "could not open interior %1" ).arg( spec.interiorCell ) : loadError );
@@ -1638,9 +1718,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 * resolver, the generator's, never a second one. The notes line says which
 	 * of the two answered, because "the models are all missing" and "the data
 	 * root was empty" look identical in a picture. */
-	QString dataRoot = spec.dataRoot;
+	QString dataRoot = chunk ? chunk->seed->dataRoot : spec.dataRoot;
 	QString dataRootSource = QStringLiteral( "the spec" );
-	if ( dataRoot.isEmpty() ) {
+	if ( dataRoot.isEmpty() && !chunk ) {
 		const QStringList stack = lodgenResourceSearchPaths();
 		if ( !stack.isEmpty() ) {
 			dataRoot = stack.first();
@@ -1652,7 +1732,21 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 
 	int x0, y0, x1, y1;
 	spec.rect( x0, y0, x1, y1 );
+	// lane CELLSTREAM1: what the streamer is handed: the resolved spec (plugins after the far stack and the
+	// mod pick), the data root, the world. The open itself welds no cell: an empty rectangle, no ground.
+	auto seedPtr = std::make_shared<CellStreamSeed>();
+	CellStreamSeed & seed = *seedPtr;
+	if ( streamInit ) {
+		seed.world = worldOwn;
+		seed.spec = spec;
+		seed.dataRoot = dataRoot;
+		x1 = x0 - 1;
+		y1 = y0 - 1;
+		spec.terrain = spec.water = spec.grid = false;
+	}
 	CellSpeed::mark( "plugin index" );
+	// lane CELLSTREAM1: a streamed cell fills its own tables; the view's are merged from the resident cells
+	CellRefTable & refTable = chunk ? chunk->refs : cellRefTableMutable();
 
 	// ---- the placements
 	struct Placement
@@ -1697,7 +1791,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 * the reads that fill it, and not beside the pick table's clear further
 	 * down -- the REFR loop runs before that point, so clearing there would
 	 * throw away every row this build had just recorded. */
-	cellRefTableMutable().clear();
+	refTable.clear();
 
 	/* lane PRTP1: the cell's LIGHTS. Every placed LIGH that is not deleted, whether
 	 * or not it has a model and whether or not it starts disabled -- the light
@@ -1779,16 +1873,16 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			ref.baseEdid = rb.edid;
 			ref.model = rb.model;
 		}
-		const int refRow = cellRefTableMutable().append( ref );
+		const int refRow = refTable.append( ref );
 
 		if ( r.deleted ) {
 			refsDeleted++;
-			cellRefTableMutable().setFate( refRow, CellRefFate::Deleted );
+			refTable.setFate( refRow, CellRefFate::Deleted );
 			return;
 		}
 		if ( !r.base ) {
 			refsNoBase++;
-			cellRefTableMutable().setFate( refRow, CellRefFate::NoBase );
+			refTable.setFate( refRow, CellRefFate::NoBase );
 			return;
 		}
 		// lane MISS1: the state the plugin starts the reference in (startsDisabled above); what a quest does
@@ -1796,7 +1890,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		const bool disabled = startsDisabled( r );
 		if ( disabled && !spec.showDisabled ) {
 			refsHidden++;
-			cellRefTableMutable().setFate( refRow, CellRefFate::Disabled );
+			refTable.setFate( refRow, CellRefFate::Disabled );
 			return;
 		}
 		const EsmLodBase & lb = world.lodBase( r.base );
@@ -1815,12 +1909,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		}
 		if ( !isScol && lb.model.isEmpty() ) {
 			skippedByType[CellPickTable::typeName( r.baseType )]++;
-			cellRefTableMutable().setFate( refRow, CellRefFate::NoModel );
+			refTable.setFate( refRow, CellRefFate::NoModel );
 			return;
 		}
 		if ( !isScol && !spec.showMarkers && isMarkerModel( lb.model ) ) {
 			refsMarker++;
-			cellRefTableMutable().setFate( refRow, CellRefFate::Marker );
+			refTable.setFate( refRow, CellRefFate::Marker );
 			return;
 		}
 		Matrix rm;
@@ -1909,12 +2003,15 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			note( world.interiorRefrs() );
 			note( actorRefs );   // lane PLACED1: a placed actor has a start state too, and may be a parent
 		} else {
-			for ( int y = y0; y <= y1; y++ )
-				for ( int x = x0; x <= x1; x++ )
+			// lane CELLSTREAM1: a streamed cell takes the facts of the 5x5 round it, as the fixed block does
+			const int fx0 = chunk ? chunk->facts[0] : x0, fy0 = chunk ? chunk->facts[1] : y0;
+			const int fx1 = chunk ? chunk->facts[2] : x1, fy1 = chunk ? chunk->facts[3] : y1;
+			for ( int y = fy0; y <= fy1; y++ )
+				for ( int x = fx0; x <= fx1; x++ )
 					if ( world.hasCell( x, y ) )
 						note( world.refrs( x, y ) );
-			note( world.persistentRefrsIn( float( x0 ) * CELL_UNITS, float( y0 ) * CELL_UNITS,
-				float( x1 + 1 ) * CELL_UNITS, float( y1 + 1 ) * CELL_UNITS ) );
+			note( world.persistentRefrsIn( float( fx0 ) * CELL_UNITS, float( fy0 ) * CELL_UNITS,
+				float( fx1 + 1 ) * CELL_UNITS, float( fy1 + 1 ) * CELL_UNITS ) );
 		}
 	}
 
@@ -1927,7 +2024,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		block.cy = 0;
 		block.cellForm = world.interior().cellForm;
 		block.edid = world.interior().edid;
-		cellRefTableMutable().addCell( block );
+		refTable.addCell( block );
 		for ( const EsmRefr & r : world.interiorRefrs() )
 			pushRefr( r, 0, 0, false );
 		/* lane PLACED1: the placed actors. They are not REFRs: they stay out of the reference
@@ -1963,7 +2060,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				block.cy = y;
 				block.cellForm = world.cellForm( x, y );
 				block.edid = world.cellEditorId( x, y );
-				cellRefTableMutable().addCell( block );
+				refTable.addCell( block );
 
 				for ( const EsmRefr & r : world.refrs( x, y ) ) {
 					seenRefs.insert( r.formID );
@@ -1991,12 +2088,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 * every read and every fate is settled. They are not a second set of
 	 * counters incremented alongside the first: a walk of the rows the list
 	 * shows cannot disagree with the rows the list shows. */
-	cellRefTableMutable().tallyCells();
+	refTable.tallyCells();
 
 	// ---- the document
-	if ( !nif->createNew( 0x14020007, 12, 130 ) )
+	if ( !chunk && !nif->createNew( 0x14020007, 12, 130 ) )
 		return fail( QStringLiteral( "could not create a Fallout 4 document" ) );
-	nif->holdUpdates( true );
+	if ( !chunk )
+		nif->holdUpdates( true );
 	/* AN ORDINARY NiNode ROOT (lane CELLVIEW4B, and this is CELLVIEW4's own
 	 * refuter being acted on rather than argued with).
 	 *
@@ -2015,11 +2113,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 * alpha-then-depth rule it used before. So a BSOrderedNode that holds ONLY
 	 * the land shapes buys the ground its paint order and costs the rest of
 	 * the scene nothing -- see `iGround` below. */
-	QModelIndex iRoot = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
-	nif->set<QString>( iRoot, "Name", QStringLiteral( "%1 %2,%3 %4x%4" )
-		.arg( spec.world ).arg( spec.cx ).arg( spec.cy ).arg( spec.n ) );
-	nif->set<quint32>( iRoot, "Flags", 14 );
-	nif->set<float>( iRoot, "Scale", 1.0f );
+	QModelIndex iRoot;
+	if ( !chunk ) {
+		iRoot = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+		nif->set<QString>( iRoot, "Name", QStringLiteral( "%1 %2,%3 %4x%4" )
+			.arg( spec.world ).arg( spec.cx ).arg( spec.cy ).arg( spec.n ) );
+		nif->set<quint32>( iRoot, "Flags", 14 );
+		nif->set<float>( iRoot, "Scale", 1.0f );
+	}
 
 	Vector3 origin( float( spec.cx ) * CELL_UNITS + CELL_UNITS * 0.5f,
 		float( spec.cy ) * CELL_UNITS + CELL_UNITS * 0.5f, 0.0f );
@@ -2036,7 +2137,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		origin = Vector3( float( sx / n ), float( sy / n ), 0.0f );
 	}
 
-	CellPickTable & picks = cellPickTableMutable();
+	if ( chunk )
+		origin = chunk->seed->origin;   // lane CELLSTREAM1: every streamed cell shares the open's origin
+	CellPickTable & picks = chunk ? chunk->picks : cellPickTableMutable();
 	picks.clear();
 
 	/* THE .lodi IDENTITY GROUPS (lane CELLVIEW2). One read per build, before a
@@ -2078,8 +2181,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	const int fxLitCap = 4096;
 	int fxLitModels = 0, fxLitShapes = 0;
 	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
-	wwCellFxLitBegin( nif );
-	wwCellCullBegin( nif );   // lane SUNCELL1
+	if ( !chunk ) {
+		wwCellFxLitBegin( nif );
+		wwCellCullBegin( nif );   // lane SUNCELL1
+	}
 
 	/* lane SUNCELL1: PREVIS AND OCCLUSION, READ. The plugin's own visibility data for the loaded cells:
 	 *  - each CELL's RVIS (the cell whose previs file covers it: an exterior 3x3 block shares one), its VISI / PCMB
@@ -2089,7 +2194,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 *  - the occlusion primitives the game culls with (PlaneMarker planes and boxes) and, indoors, the rooms
 	 *    (RoomMarker boxes, XLRM linked rooms) and portals (PortalMarker planes, XPOD rooms): handed to gl/cellcull,
 	 *    which the Previs row applies to the camera pass only (casters always cast). */
-	{
+	if ( !chunk ) {   // lane CELLSTREAM1: previs for streamed cells is an open item
 		WwPrevisScene pv;
 		int planes = 0, boxes = 0, linked = 0, toOutside = 0, prevDisabled = 0;
 		QList<quint32> primKeys = primRefs.keys();
@@ -2261,9 +2366,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		if ( !umbraIn.empty() )
 			wwCellUmbraSet( nif, std::move( umbraIn ) );	// lane UMBRA1
 	}
-	wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
-	wwCellLandBegin( nif );    // lane TERRBLEND1: forget the last cell's blended-ground shapes
-	wwCellGrassBegin( nif );   // lane GRASSMB1: and its grass shapes
+	if ( !chunk ) {
+		wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
+		wwCellLandBegin( nif );    // lane TERRBLEND1: forget the last cell's blended-ground shapes
+		wwCellGrassBegin( nif );   // lane GRASSMB1: and its grass shapes
+	}
 	QHash<quint32, WwWaterRecord> placedWaterRecs;   // lane WATER1: WNAM form -> its record (form 0 = unreadable)
 	int placedWaterShapes = 0;
 	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors
@@ -3510,7 +3617,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 					m.radius = std::max( bit.value()[3], 0.0f ) * p.scale;
 					m.ref = p.ref;
 					m.model = model;
-					fxLitSerial = wwCellFxLitModel( nif, m );
+					if ( chunk ) {   // lane CELLSTREAM1: a local serial; registered when the cell is written
+						chunk->fxModels.append( m );
+						fxLitSerial = chunk->fxModels.size() - 1;
+					} else {
+						fxLitSerial = wwCellFxLitModel( nif, m );
+					}
 					fxLitModels++;
 				}
 				bbOwn += QStringLiteral( "|FL|%1" ).arg( fxLitSerial );
@@ -3767,6 +3879,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		}
 		const double gMb = double( gVerts * qint64( sizeof( OutVert ) ) + gTris * qint64( sizeof( BucketTri ) ) )
 			/ ( 1024.0 * 1024.0 );
+		if ( !chunk )
 		wwCellGrassNote( nif, gWhy.isEmpty()
 			? QStringLiteral( "cell grass: on, %1 blades placed in %2 cells, %3 drawn of %4 grass types (%5 without a "
 			                  "model), verts %6, tris %7, weld %8 MB, place+weld %9 ms" )
@@ -4260,7 +4373,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			const CellDecalFate f = decalResult.fates[i];
 			if ( f == CellDecalFate::NoDecalData )
 				skippedByType[QStringLiteral( "TXST" )]++;   // a texture set that is not a decal: as before
-			cellRefTableMutable().setFate( decalRefs[i].refRow, f == CellDecalFate::Drawn ? CellRefFate::Projected
+			refTable.setFate( decalRefs[i].refRow, f == CellDecalFate::Drawn ? CellRefFate::Projected
 				: ( f == CellDecalFate::NoDecalData ? CellRefFate::NoModel : CellRefFate::Refused ) );
 		}
 	}
@@ -4731,6 +4844,15 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 
 	// ---- emit
 	CellSpeed::mark( "ground, water, lights, probes" );
+	if ( chunk ) {	// lane CELLSTREAM1: a streamed cell stops here; src/cellstream.cpp writes it in slices
+		cellPublishLighting( nullptr, world, spec, lightRefs, primRefs, origin, &chunk->lights );
+		chunk->buckets = std::make_shared<CellChunkBuckets>();
+		chunk->buckets->keys = buckets.keys();
+		std::sort( chunk->buckets->keys.begin(), chunk->buckets->keys.end() );
+		chunk->buckets->buckets = std::move( buckets );
+		chunk->ok = true;
+		return true;
+	}
 	qint64 shapes = 0, verts = 0, tris = 0;
 	bool ok = true;
 	QStringList keys = buckets.keys();
@@ -4934,10 +5056,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 
 	/* lane FARLOD1: the far field around the block (cellfarlod.h) -- the Far LOD row, ships off */
 	QString farLodNotes;
+	CellFarStream farStream;   // lane CELLSTREAM1: ring 0 uncut over the roam area, a shape a cell
+	if ( qEnvironmentVariableIsSet( "WW_CELL_STREAM_ROAM" ) )
+		farStream.roam = qBound( 2, qEnvironmentVariableIntValue( "WW_CELL_STREAM_ROAM" ), 16 );
 	if ( !spec.interior && cellFarLodWanted() ) {
 		QStringList farSearched;
 		const QString farLodl = cellFarLodl( spec.world, dataRoot, farSearched );
-		farLodNotes = farStackNote + cellFarLodAppend( nif, iRoot, world, spec.world, spec.cx, spec.cy, spec.n, farLodl, origin );
+		farLodNotes = farStackNote + cellFarLodAppend( nif, iRoot, world, spec.world, spec.cx, spec.cy, spec.n, farLodl, origin,
+			streamInit ? &farStream : nullptr );
 		CellSpeed::mark( "far LOD appended" );
 	}
 
@@ -4965,6 +5091,18 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
 	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin );
 	wwCellFxLitPick( nif );   // lane FXLIT1: each lit effect model's four placed lights
+	if ( streamInit ) {	// lane CELLSTREAM1: the cells themselves come from the streamer, round the camera
+		seed.origin = origin;
+		seed.rootBlock = nif->getBlockNumber( iRoot );
+		seed.cx = spec.cx;
+		seed.cy = spec.cy;
+		seed.roam = farStream.roam;
+		if ( const WwCellLighting * L = wwCellLightsFor( nif ) )
+			seed.base = *L;
+		seed.farHand = farStream.handBlocks;
+		seed.farLand = farStream.landBlocks;
+		cellStreamStart( nif, seedPtr );
+	}
 
 	/* lane PRTPGI: the bake just written, relit by those lights (src/probegi.h), for the GI row.
 	 * WW_CELL_GI_DUMP=<folder> writes the gate's copies; WW_CELL_GI_RED=<red> its refuters. */
@@ -5560,4 +5698,101 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	}
 
 	return ok;
+}
+
+bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec, QString * error, QString * notes )
+{
+	return cellBuild( nif, spec, nullptr, error, notes );
+}
+
+// lane CELLSTREAM1: one streamed cell, on the streamer's worker thread
+void cellChunkBuild( CellChunk & c )
+{
+	CellSceneSpec spec = c.seed->spec;
+	spec.cx = c.cx;
+	spec.cy = c.cy;
+	spec.n = 1;
+	QString notes;
+	QElapsedTimer t;
+	t.start();
+	c.ok = false;
+	if ( !cellBuild( nullptr, spec, &c, &c.error, &notes ) )
+		c.ok = false;
+	if ( c.ok && c.buckets )   // the shapes' vertex split here, off the drawing thread
+		for ( Bucket & b : c.buckets->buckets ) {
+			b.nVerts = b.verts.size();
+			b.nTris = b.tris.size();
+			if ( b.verts.empty() || b.tris.empty() )
+				continue;
+			splitBucket( b, b.parts );
+			std::vector<OutVert>().swap( b.verts );
+			std::vector<BucketTri>().swap( b.tris );
+		}
+	c.buildMs = t.elapsed();
+}
+
+// lane CELLSTREAM1: the cell's buckets written under its node, as the open writes them, a slice at a time
+bool cellChunkEmit( NifModel * nif, CellChunk & c, CellBlockSource & src, const QModelIndex & iCell,
+	double budgetMs, QString * error )
+{
+	if ( !c.buckets )
+		return true;
+	QElapsedTimer t;
+	t.start();
+	g_cellBlockSource = &src;
+	g_cellChunkEmit = &c;
+	CellChunkBuckets & B = *c.buckets;
+	const Vector3 origin = c.seed->origin;
+	bool ok = true;
+	while ( ok && c.next < B.keys.size() ) {
+		const QString k = B.keys.at( c.next++ );
+		auto it = B.buckets.find( k );
+		if ( it == B.buckets.end() )
+			continue;
+		const Bucket & bk = it.value();
+		QModelIndex iParent = iCell;
+		if ( k.startsWith( QLatin1String( "\x01land" ) ) ) {
+			if ( !c.iGround.isValid() ) {
+				QModelIndex iG = src.take( nif, QStringLiteral( "BSOrderedNode" ) );
+				nif->set<QString>( iG, "Name", QStringLiteral( "ground" ) );
+				nif->set<quint32>( iG, "Flags", 14 );
+				nif->set<float>( iG, "Scale", 1.0f );
+				addLink( nif, iCell, QStringLiteral( "Children" ), nif->getBlockNumber( iG ) );
+				c.iGround = iG;
+			}
+			iParent = c.iGround;
+		}
+		if ( bk.billboard ) {
+			QModelIndex iB = src.take( nif, QStringLiteral( "NiBillboardNode" ) );
+			nif->set<QString>( iB, "Name", QStringLiteral( "billboard " ) + bk.name );
+			nif->set<quint32>( iB, "Flags", 14 );
+			nif->set<Vector3>( iB, "Translation", bk.bbPos );
+			nif->set<float>( iB, "Scale", bk.bbScale );
+			nif->set<int>( iB, "Billboard Mode", bk.bbMode );
+			addLink( nif, iCell, QStringLiteral( "Children" ), nif->getBlockNumber( iB ) );
+			ok = emitBucket( nif, iB, bk, Vector3( 0.0f, 0.0f, 0.0f ), c.shapes, c.verts, c.tris, error );
+		} else {
+			ok = emitBucket( nif, iParent, bk, origin, c.shapes, c.verts, c.tris, error );
+		}
+		if ( double( t.nsecsElapsed() ) > ( budgetMs + 3.0 ) * 1.0e6 )   // WW_CELL_STREAM_TRACE: what overran
+			cellStreamTrace( QStringLiteral( "slow bucket %1: %2 ms, %3 tris %4 verts%5%6 (remap %7 take %8 runs %9 shape %10 mesh %11 mat %12)" ).arg( bk.name )
+				.arg( double( t.nsecsElapsed() ) * 1.0e-6, 0, 'f', 1 ).arg( bk.nTris ).arg( bk.nVerts )
+				.arg( bk.billboard ? " billboard" : "" ).arg( bk.effectBlock.isEmpty() ? "" : " effect" )
+				.arg( g_emitSecMs[0], 0, 'f', 1 ).arg( g_emitSecMs[1], 0, 'f', 1 ).arg( g_emitSecMs[2], 0, 'f', 1 )
+				.arg( g_emitSecMs[3], 0, 'f', 1 ).arg( g_emitSecMs[4], 0, 'f', 1 ).arg( g_emitSecMs[5], 0, 'f', 1 ) );
+		B.buckets.erase( it );   // its vertices are in the side arrays now
+		if ( double( t.nsecsElapsed() ) * 1.0e-6 + src.wireOwedMs() > budgetMs )
+			break;
+	}
+	g_cellBlockSource = nullptr;
+	g_cellChunkEmit = nullptr;
+	if ( !ok ) {
+		c.ok = false;
+		return true;
+	}
+	if ( c.next >= B.keys.size() ) {
+		c.buckets.reset();
+		return true;
+	}
+	return false;
 }

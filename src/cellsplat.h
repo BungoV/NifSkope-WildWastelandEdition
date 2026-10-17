@@ -198,6 +198,8 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
  *  is scaled by it, a layer is added at it). Begin clears one document. */
 void wwCellLandBegin( const void * nif );
 void wwCellLandShape( const void * nif, int block );
+// lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
+void wwCellLandForget( const void * nif, int block );
 bool wwCellLandIs( const void * nif, int block );
 
 //! The one-line summary for the scene notes, in the shape cellGroundLegend uses.

@@ -778,6 +778,13 @@ void wwCellCullShape( const void * nif, int block, std::vector<WwCullRun> && run
 	st().docs[nif].insert( block, std::move( runs ) );
 }
 
+void wwCellCullForget( const void * nif, int block )
+{
+	auto d = st().docs.find( nif );
+	if ( d != st().docs.end() )
+		d->remove( block );
+}
+
 const std::vector<WwCullRun> * wwCellCullRuns( const void * nif, int block )
 {
 	CullState & s = st();

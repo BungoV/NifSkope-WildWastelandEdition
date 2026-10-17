@@ -48,6 +48,8 @@ bool cellMeshOn();
 //! Forget every shape of this document (a new cell is about to be built in it).
 void cellMeshClear( const NifModel * nif );
 void cellMeshPut( NifModel * nif, const QModelIndex & iShape, const QSharedPointer<CellMesh> & mesh );
+//! lane CELLSTREAM1: forget one shape (a streamed cell let go of it); its block is about to be reused
+void cellMeshDrop( const NifModel * nif, int block );
 //! The arrays of a welded shape whose rows are not in the document; null for every other block.
 QSharedPointer<CellMesh> cellMeshFor( const NifModel * nif, const QModelIndex & iShape );
 //! Write the rows of the welded shape holding `index` (any index inside its block). False = nothing to do.

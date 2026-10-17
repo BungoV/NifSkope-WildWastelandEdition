@@ -86,6 +86,8 @@ void wwCellGrassBlockOrigin( int cx, int cy, float & x0, float & y0 );
 //! Cell open: forget the last document's grass shapes; register one; the open's census line.
 void wwCellGrassBegin( const void * nif );
 void wwCellGrassShape( const void * nif, int block, float wavePeriod );
+// lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
+void wwCellGrassForget( const void * nif, int block );
 void wwCellGrassNote( const void * nif, const QString & line );
 QString wwCellGrassEcho( const void * nif );
 

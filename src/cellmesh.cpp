@@ -123,6 +123,15 @@ void cellMeshClear( const NifModel * nif )
 	recount();
 }
 
+void cellMeshDrop( const NifModel * nif, int block )
+{
+	auto it = nif ? table().find( nif ) : table().end();
+	if ( it == table().end() )
+		return;
+	if ( it->byBlock.remove( nif->getBlockItem( block ) ) )
+		recount();
+}
+
 void cellMeshPut( NifModel * nif, const QModelIndex & iShape, const QSharedPointer<CellMesh> & mesh )
 {
 	const NifItem * block = nif ? nif->getBlockItem( iShape ) : nullptr;

@@ -107,6 +107,35 @@ void NodeList::del( Node * n )
 	}
 }
 
+void NodeList::delMany( const QSet<Node *> & gone )
+{
+	if ( gone.isEmpty() )
+		return;
+	std::vector<Node *> hit;
+	auto keep = std::remove_if( nodes.begin(), nodes.end(), [&]( Node * n ) {
+		if ( !gone.contains( n ) )
+			return false;
+		hit.push_back( n );
+		return true;
+	} );
+	nodes.erase( keep, nodes.end() );
+	for ( Node * n : hit )   // add() lists a node once, so one count each
+		if ( --n->ref <= 0 )
+			delete n;
+}
+
+void NodeList::takeMany( const QSet<Node *> & gone )
+{
+	if ( !gone.isEmpty() )
+		nodes.erase( std::remove_if( nodes.begin(), nodes.end(), [&]( Node * n ) { return gone.contains( n ); } ), nodes.end() );
+}
+
+void NodeList::release( Node * n )
+{
+	if ( n && --n->ref <= 0 )
+		delete n;
+}
+
 Node * NodeList::get( const QModelIndex & index ) const
 {
 	for ( Node * n : nodes ) {

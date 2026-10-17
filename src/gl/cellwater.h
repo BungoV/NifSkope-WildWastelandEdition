@@ -31,6 +31,8 @@ struct WwWaterRecord;
 void wwCellWaterBegin( const void * nif );
 //! The written shape `block` is a water surface of record `rec`.
 void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec );
+// lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
+void wwCellWaterForget( const void * nif, int block );
 //! True when `block` draws as water this frame (the row on, not pinned off, a registered water shape).
 bool wwCellWaterWanted( Scene * scene, int block );
 //! Lane SUNCELL1: `block` is a registered water surface (row or not): it never casts a sun shadow, as in the game.

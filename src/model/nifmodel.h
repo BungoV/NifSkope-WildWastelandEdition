@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gamemanager.h"
 
 #include <QReadWriteLock>
+#include <QSet>
 #include <memory>
 
 class SpellBook;
@@ -328,6 +329,22 @@ public:
 	QModelIndex insertNiBlock( const QString & identifier, int row = -1 );
 	//! Remove a block from the list
 	void removeNiBlock( int blocknum );
+	/*! lane CELLSTREAM1: every field of a block back to its type's defaults -- same number, same item -- so a
+	 *  streamed cell's freed blocks are reused and no block is ever renumbered. False if the type is unknown. */
+	bool resetNiBlock( int blocknum, bool quiet = false );
+	/*! lane CELLSTREAM1: the blocks a persistent index points at or into (one pass over them). Only a block outside
+	 *  this set may be reset `quiet`: no row signals, since no index, view or selection can see its fields. */
+	QSet<int> blocksWithPersistent() const;
+	//! lane CELLSTREAM1: one block's child and parent link lists, without the whole-file pass
+	void updateBlockLinks( int blocknum );
+	/*! lane CELLSTREAM1: while set, inserts and link edits skip the whole-file header, link and footer pass
+	 *  and linksChanged (the cell streamer edits a live scene a slice at a time and wires the scene itself) */
+	bool streamQuiet = false;
+	//! lane CELLSTREAM1: the last resetNiBlock's ms (remove rows, insert rows, links) and the persistent indexes it moved
+	double resetMs[3] = { 0.0, 0.0, 0.0 };
+	int persistentCount() const { return persistentIndexList().size(); }
+	QModelIndexList persistentIndexes() const { return persistentIndexList(); }
+	int persistentNow = 0;   //!< lane CELLSTREAM1: the count blocksWithPersistent saw
 	//! Move a block in the list
 	void moveNiBlock( int src, int dst );
 

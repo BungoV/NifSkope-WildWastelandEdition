@@ -178,6 +178,10 @@ struct TerrainSurface
 	 * sheet tile's own); the grid and the sheets stay on whole sheet tiles. None when keepX1 < keepX0. */
 	int keepX0 = 0, keepY0 = 0, keepX1 = -1, keepY1 = -1;
 	qint64 cutTris = 0, shapesOut = 0, vertsOut = 0, trisOut = 0;
+	// lane CELLSTREAM1: mesh tiles of at most this many cells a side (0 = the rate's cap); each written tile's
+	// block and south-west cell, so a streamed cell hides the far tile under it
+	int maxK = 0;
+	std::vector<std::array<int, 3>> tileBlocks;
 };
 
 bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
@@ -202,6 +206,13 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 		int best = 1;
 		for ( int d = 1; d <= s.sheetDim; d++ )
 			if ( s.sheetDim % d == 0 && d <= k )
+				best = d;
+		k = best;
+	}
+	if ( s.maxK > 0 && k > s.maxK ) {	// lane CELLSTREAM1: the largest divisor of k under the cap
+		int best = 1;
+		for ( int d = 1; d <= s.maxK; d++ )
+			if ( k % d == 0 )
 				best = d;
 		k = best;
 	}
@@ -372,6 +383,7 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 			nif->set<QString>( iShape, "Name",
 				QString( "%1 %2,%3" ).arg( s.shapePrefix )
 					.arg( s.cellX0 + tileX ).arg( s.cellY0 + tileY ) );
+			s.tileBlocks.push_back( { nif->getBlockNumber( iShape ), s.cellX0 + tileX, s.cellY0 + tileY } );
 			nif->set<quint32>( iShape, "Flags", 14 );
 			nif->set<float>( iShape, "Scale", 1.0f );
 			nif->set<Vector3>( iShape, "Translation",
@@ -3294,9 +3306,26 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 			}
 		}
 
+		/* lane CELLSTREAM1: a streaming open's ring 0 stands on the LAND's own heights at every vertex inside its
+		 * written rectangle (the same 128-unit lattice), so a far cell meets a loaded cell edge for edge; the
+		 * outer edge keeps the next ring's seam. */
+		if ( !havePrev && r.innerZ && r.snapAll ) {
+			const int ei0 = ( kx0 - x0 ) * n, ei1 = ( kx1 + 1 - x0 ) * n;
+			const int ej0 = ( ky0 - y0 ) * n, ej1 = ( ky1 + 1 - y0 ) * n;
+			for ( int j = ej0 + 1; j < ej1 && j < gridH; j++ )
+				for ( int i = ei0 + 1; i < ei1 && i < gridW; i++ ) {
+					float zl = 0.0f;
+					if ( r.innerZ( float( x0 ) * 4096.0f + float( i ) * sp, float( y0 ) * 4096.0f + float( j ) * sp, &zl ) ) {
+						zAt( i, j ) = zl;
+						r.snappedAll++;
+					}
+				}
+		}
+
 		TerrainSurface s;
 		s.rootName = r.prefix;
 		s.shapePrefix = r.prefix;
+		s.maxK = r.perCell ? 1 : 0;
 		s.cellX0 = x0;
 		s.cellY0 = y0;
 		s.cellsX = cellsXr;
@@ -3360,6 +3389,7 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 		r.verts = s.vertsOut;
 		r.tris = s.trisOut;
 		r.cutTris = s.cutTris;
+		r.cellBlocks = std::move( s.tileBlocks );
 		runningVerts += s.vertsOut;
 		havePrev = true;
 		px0 = kx0;
@@ -3487,6 +3517,7 @@ bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QS
 		// the quads, by WATR form: each row's runs of one body at one surface
 		const float texel = 4096.0f / float( rate );
 		std::map<quint32, std::vector<WaterQuad>> byForm;
+		std::map<std::array<qint64, 3>, std::vector<WaterQuad>> byCell;	// lane CELLSTREAM1 (perCell): form, cell x, y
 		for ( int v = 0; v < H; v++ ) {
 			int u = 0;
 			while ( u < W ) {
@@ -3498,7 +3529,7 @@ bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QS
 				}
 				int e = u + 1;
 				while ( e < W && ids[size_t( v ) * size_t( W ) + size_t( e )] == id
-					&& surf[size_t( v ) * size_t( W ) + size_t( e )] == surf[i] )
+					&& surf[size_t( v ) * size_t( W ) + size_t( e )] == surf[i] && !( r.perCell && e % rate == 0 ) )
 					e++;
 				WaterQuad q;
 				q.x0 = float( x0 ) * 4096.0f + float( u ) * texel - shift[0];
@@ -3510,7 +3541,10 @@ bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QS
 				q.body = id;
 				LodtWaterBody B;
 				bodyOf( id, B );
-				byForm[B.watrForm].push_back( q );
+				if ( r.perCell )
+					byCell[{ qint64( B.watrForm ), qint64( x0 + u / rate ), qint64( y0 + v / rate ) }].push_back( q );
+				else
+					byForm[B.watrForm].push_back( q );
 				r.quads++;
 				u = e;
 			}
@@ -3523,6 +3557,18 @@ bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QS
 			r.shapes += addWaterShapes( nif, quads, false, readZ, &parent, name, &blocks );
 			for ( int b : blocks )
 				r.blocks.emplace_back( b, form );
+		}
+		for ( const auto & [key, quads] : byCell ) {
+			std::vector<float> readZ;
+			std::vector<int> blocks;
+			const quint32 form = quint32( key[0] );
+			const QString name = QStringLiteral( "%1 r%2 %3 %4,%5" ).arg( r.prefix ).arg( int( ri ) )
+				.arg( QString::number( form, 16 ).toUpper().rightJustified( 8, QLatin1Char( '0' ) ) ).arg( key[1] ).arg( key[2] );
+			r.shapes += addWaterShapes( nif, quads, false, readZ, &parent, name, &blocks );
+			for ( int b : blocks ) {
+				r.blocks.emplace_back( b, form );
+				r.cellBlocks.push_back( { b, int( key[1] ), int( key[2] ) } );
+			}
 		}
 	}
 	if ( error )
