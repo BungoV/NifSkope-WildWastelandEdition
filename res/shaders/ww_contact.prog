@@ -1,0 +1,5 @@
+# lane TERRSHADOW1: contact shadows (Bend Studio's screen-space shadows, ported; src/gl/shadowset.h).
+# A full-screen pass over the cell view's shared opaque pass. No conditions: never picked for a shape;
+# shadowset.cpp selects it by name.
+
+shaders cell_ao.vert ww_contact.frag
