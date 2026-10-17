@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"
 #include "gl/sunshadow.h"
+#include "gl/shadowset.h"	// lane TERRSHADOW1: contact shadows
 #include "gl/cellcull.h"	// lane SUNCELL1
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
@@ -4126,6 +4127,7 @@ void GLView::paintGL()
 	}
 	wwCellAoPass( scene, cellPasses );
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
+	wwContactShadowPass( scene );	// lane TERRSHADOW1: the contact mask from that pass's depth (fails open without it)
 	wwVolFogPass( scene, cellPasses );	// lane VOLFOG1: the lit medium's froxels
 	if ( cellPasses )
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1

@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "gl/scenelighting.h"
+#include "gl/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "gl/sunshadow.h"
 #include "model/nifmodel.h"
 
@@ -293,6 +294,8 @@ LdLight currentLight()
 		wwVanillaSunPos( s.hour, s.tnam, L.discPos );
 		L.keys = wwTodKeys( s.hour, s.tnam );
 	}
+	// lane TERRSHADOW1: Sun Path = Real replaces the direction (one sun for every producer); the colours keep the clock
+	wwSunPathApply( s.hour, s.gameDay, L.sunDir, L.discPos );
 	if ( !s.haveWeather ) {
 		neutral( L.sun, L.amb, L.dalc );
 		std::copy( L.sun, L.sun + 3, L.effect );
@@ -362,6 +365,11 @@ void updateGroundFrame( Scene * scene )
 	s.groundXY[0] = bs.center[0];
 	s.groundXY[1] = bs.center[1];
 	s.groundHalf = std::max( kGroundHalf, bs.radius * 4.0f );
+	// lane TERRSHADOW1: WW_LOOKDEV_GROUND_HALF=<units> widens the quad (the 1-degree shadow of a 512-unit cube is 29 k long)
+	bool ok = false;
+	const float pinHalf = qEnvironmentVariable( "WW_LOOKDEV_GROUND_HALF" ).toFloat( &ok );
+	if ( ok && pinHalf > s.groundHalf )
+		s.groundHalf = pinHalf;
 }
 
 //! the fog at the current hour (lane FOG1): always the engine clock, whatever the Sun row says

@@ -12,6 +12,22 @@ uniform int csmProbe;		// 0 off, 1 hard tap, 2 cascade colour, 3 filtered + blen
 uniform int csmRed;		// 1 noblend, 2 nofade, 4 diffonly, 8 factorhalf (the OFF leak)
 uniform float csmForce;		// WW_CSM_FORCE: >= 0 replaces the factor (the factor-site wiring test); -1 off
 
+// lane TERRSHADOW1: the unified set (gl/shadowset.h). ussOn = 0 runs the CSM1 code below unchanged.
+uniform int ussOn;
+uniform int ussCsmOn;			// the cascade maps were built this frame
+uniform vec4 ussCsmFilter;		// x Vogel filter on, y radius (texels), z taps, w receiver-plane depth bias on
+uniform vec3 ussCsmBias;		// the receiver offset of each cascade, world units along the light
+uniform int ussTerrOn;
+uniform sampler2D ussTerrMap;		// RG16: x the height above which a point is lit, y below which it is shadowed
+uniform mat4 ussWorldFromView;
+uniform vec4 ussTerrXform;		// u = x X.x + X.y, v = y X.z + X.w
+uniform vec4 ussTerrRange;		// zmin, z span, the receiver's bias (world up), the edge fade (uv)
+uniform int ussContactOn;
+uniform sampler2D ussContactMap;	// R8 contact visibility, screen space
+uniform vec2 ussContactInvSize;
+uniform int ussView;			// WW_SHADOW_VIEW: 1 cascades, 2 terrain, 3 contact, 4 composed, 5 weights
+uniform int ussRed;			// 1 terrseam, 2 mulcompose
+
 // spec 2.5: the 16 Poisson taps on [0,1]^2, used as (p - 0.5) x 6 texels
 const vec2 csmPoisson[16] = vec2[16](
 	vec2( 0.493393, 0.394269 ), vec2( 0.798547, 0.885922 ), vec2( 0.247322, 0.926450 ), vec2( 0.051454, 0.140782 ),
@@ -68,6 +84,117 @@ float csmBlended( vec3 posView )
 	return mix( sA, sB, t );
 }
 
+// ---- lane TERRSHADOW1: the composition ----
+
+float ussIgn( vec2 p )
+{
+	return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) );
+}
+
+//! (A) the Vogel-disk filter, rotated per pixel, with the receiver-plane depth bias
+float ussVogel( int i, vec3 posView, float offsetWorld, vec3 dPx, vec3 dPy )
+{
+	vec3 q = csmUvd( i, posView );
+	float zRef = q.z - offsetWorld * csmInvRange[i];
+	vec2 rpdb = vec2( 0.0 );
+	if ( ussCsmFilter.w > 0.5 ) {
+		vec3 qx = mat3( csmMat[i] ) * dPx, qy = mat3( csmMat[i] ) * dPy;
+		float det = qx.x * qy.y - qx.y * qy.x;
+		if ( abs( det ) > 1e-24 )
+			rpdb = vec2( qx.z * qy.y - qx.y * qy.z, qx.x * qy.z - qy.x * qx.z ) / det;
+	}
+	float R = ussCsmFilter.y * mix( 0.8, 1.2, clamp( float( i ) * 0.5, 0.0, 1.0 ) );
+	int n = max( int( ussCsmFilter.z ), 1 );
+	float rot = 6.2831853 * ussIgn( gl_FragCoord.xy );
+	float k = 1.0 / csmParams.z;
+	float lim = 2000.0 * csmInvRange[i];
+	float sum = 0.0;
+	for ( int t = 0; t < 48; t++ ) {
+		if ( t >= n )
+			break;
+		float r = sqrt( ( float( t ) + 0.5 ) / float( n ) ) * R;
+		float th = float( t ) * 2.39996323 + rot;
+		vec2 o = vec2( cos( th ), sin( th ) ) * ( r * k );
+		sum += texture( csmMap, vec4( q.xy + o, float( i ), zRef + clamp( dot( rpdb, o ), -lim, lim ) ) );
+	}
+	return sum / float( n );
+}
+
+//! (A) the cascades and their distance-fade weight w (1 inside, 0 past the reach)
+float ussCascades( vec3 posView, vec3 dPx, vec3 dPy, out float w )
+{
+	w = 0.0;
+	if ( ussCsmOn == 0 )
+		return 1.0;
+	float dv = -posView.z * csmParams.x;
+	if ( dv > csmParams.y + csmParams.w )
+		return 1.0;
+	int a, b;
+	float t;
+	csmSelect( posView, a, b, t );
+	float sA = 1.0, sB = 1.0;
+	if ( ussCsmFilter.x > 0.5 ) {
+		if ( t < 1.0 )
+			sA = ussVogel( a, posView, ussCsmBias[a], dPx, dPy );
+		if ( t > 0.0 )
+			sB = ussVogel( b, posView, ussCsmBias[b], dPx, dPy );
+	} else {
+		if ( t < 1.0 )
+			sA = csmFiltered( a, posView, csmSplitOffset.z );
+		if ( t > 0.0 )
+			sB = csmFiltered( b, posView, csmSplitOffset.w );
+	}
+	float s = clamp( dot( posView, posView ) * csmParams.x * csmParams.x / ( csmParams.y * csmParams.y ), 0.0, 1.0 );
+	float s2 = s * s;
+	w = ( csmRed & 2 ) != 0 ? 1.0 : 1.0 - s2 * s2;
+	return mix( sA, sB, t );
+}
+
+//! (C) the terrain's shadow-height map; inMap = 1 inside it
+float ussTerrain( vec3 posView, out float inMap )
+{
+	inMap = 0.0;
+	if ( ussTerrOn == 0 )
+		return 1.0;
+	vec3 wp = ( ussWorldFromView * vec4( posView, 1.0 ) ).xyz;
+	vec2 uv = vec2( wp.x * ussTerrXform.x + ussTerrXform.y, wp.y * ussTerrXform.z + ussTerrXform.w );
+	if ( any( lessThan( uv, vec2( 0.0 ) ) ) || any( greaterThan( uv, vec2( 1.0 ) ) ) )
+		return 1.0;
+	inMap = 1.0;
+	// 0 = no shadow height (lit); a missing .y (the upper limb) falls to the range's floor
+	vec2 rg = texture( ussTerrMap, uv ).rg;
+	float lo = ussTerrRange.x + rg.x * ussTerrRange.y;
+	float hi = ussTerrRange.x + rg.y * ussTerrRange.y;
+	float z = wp.z + ussTerrRange.z;
+	float vis = rg.x <= 0.0 ? 1.0 : ( lo - hi > 1e-3 ? clamp( ( z - hi ) / ( lo - hi ), 0.0, 1.0 ) : ( z >= lo ? 1.0 : 0.0 ) );
+	vec2 e = min( uv, 1.0 - uv ) / max( ussTerrRange.w, 1e-6 );
+	return mix( 1.0, vis, clamp( min( e.x, e.y ), 0.0, 1.0 ) );
+}
+
+//! (B) the contact mask at this pixel
+float ussContact()
+{
+	if ( ussContactOn == 0 )
+		return 1.0;
+	return texture( ussContactMap, gl_FragCoord.xy * ussContactInvSize ).r;
+}
+
+//! min( mix( 1, cascades, fade ), terrain, contact ): each producer fails to lit; min never darkens twice
+float ussCompose( vec3 posView )
+{
+	vec3 dPx = dFdx( posView ), dPy = dFdy( posView );
+	float w, inMap;
+	float casc = ussCascades( posView, dPx, dPy, w );
+	float terr = ussTerrain( posView, inMap );
+	float con = ussContact();
+	if ( ( ussRed & 1 ) != 0 && w > 0.0 )
+		terr = 1.0;	// red terrseam: the terrain only past the cascades' reach
+	float c = mix( 1.0, casc, w );
+	if ( ( ussRed & 2 ) != 0 )
+		return c * terr * con;	// red mulcompose
+	return min( min( c, terr ), con );
+}
+
 //! the sun's shadow factor: 1 lit, 0 fully shadowed
 float wwSunShadow( vec3 posView )
 {
@@ -75,6 +202,8 @@ float wwSunShadow( vec3 posView )
 		return 0.5;
 	if ( csmForce >= 0.0 )
 		return csmForce;
+	if ( ussOn != 0 )
+		return ussCompose( posView );
 	float dv = -posView.z * csmParams.x;
 	if ( dv > csmParams.y + csmParams.w )
 		return 1.0;
@@ -91,6 +220,25 @@ float wwSunShadow( vec3 posView )
 bool wwSunShadowProbe( vec3 posView, vec3 shaded, out vec3 outc )
 {
 	outc = shaded;
+	if ( ussOn != 0 && ussView > 0 ) {
+		// lane TERRSHADOW1: the debug ladder (raw grey, or the weights as numbers)
+		vec3 dPx = dFdx( posView ), dPy = dFdy( posView );
+		float w, inMap;
+		float casc = ussCascades( posView, dPx, dPy, w );
+		float terr = ussTerrain( posView, inMap );
+		float con = ussContact();
+		if ( ussView == 1 )
+			outc = vec3( mix( 1.0, casc, w ) );
+		else if ( ussView == 2 )
+			outc = vec3( terr );
+		else if ( ussView == 3 )
+			outc = vec3( con );
+		else if ( ussView == 4 )
+			outc = vec3( ussCompose( posView ) );
+		else
+			outc = vec3( w, inMap, con );
+		return true;
+	}
 	if ( csmProbe <= 0 )
 		return false;
 	float dv = -posView.z * csmParams.x;

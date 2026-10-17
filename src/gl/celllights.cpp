@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellssr.h"
 #include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/shadowset.h"	// lane TERRSHADOW1
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -1878,11 +1879,13 @@ void wwCellAoPass( Scene * scene, bool run )
 	 * obscurance computed from it (step 2's raw, blurs, final) and its apply, never the pass the others read. */
 	const bool forSsr = wwCellSsrWantsTargets( scene );
 	const bool forDecal = g.decalUnit >= 0 && wwCellAoDecalWanted( scene->nifModel );
+	const bool forContact = wwContactShadowWantsTargets( scene );	// lane TERRSHADOW1: contact shadows march its depth
 	if ( !a.on ) {
-		aoEcho( ( forSsr || forDecal ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2" )
+		aoEcho( ( forSsr || forDecal || forContact ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2%3" )
 			.arg( forSsr ? QStringLiteral( " ssr" ) : QString() ).arg( forDecal ? QStringLiteral( " aodecal" ) : QString() )
+			.arg( forContact ? QStringLiteral( " contact" ) : QString() )
 			: QStringLiteral( "off (row); no opaque pass (nothing reads it)" ) );
-		if ( !forSsr && !forDecal ) {
+		if ( !forSsr && !forDecal && !forContact ) {
 			a.last = QStringLiteral( "off" );
 			return;
 		}
