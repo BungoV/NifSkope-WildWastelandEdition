@@ -549,7 +549,9 @@ void Scene::drawShapes()
 	NodeList secondPass;
 	wwCellDrawProbe( this, QStringLiteral( "before the scene" ) );	// lane VOLAIR1 (gates only)
 	PassTime::begin( PassTime::Opaque );	// lane PERF1
+	wwSetupMemoArm( true );	// lane PERF1: one pass, one set of scene globals
 	collectShapes( secondPass );
+	wwSetupMemoArm( false );
 	PassTime::end( PassTime::Opaque );
 	wwCellDrawProbe( this, QStringLiteral( "after the first pass" ) );
 	drawGrid();
@@ -558,11 +560,15 @@ void Scene::drawShapes()
 		drawSelection(); // preserve the legacy highlight beneath transparency
 
 	PassTime::begin( PassTime::Sorted );
+	wwSetupMemoArm( true );
 	drawDeferredShapes( secondPass );
+	wwSetupMemoArm( false );
 	PassTime::end( PassTime::Sorted );
 	wwCellDrawProbe( this, QStringLiteral( "after the second pass" ) );
 	PassTime::begin( PassTime::Effects );
+	wwSetupMemoArm( true );
 	drawShapeEffects();
+	wwSetupMemoArm( false );
 	PassTime::end( PassTime::Effects );
 	wwCellDrawProbe( this, QStringLiteral( "after the shape effects" ) );
 }

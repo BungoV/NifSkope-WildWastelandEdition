@@ -25,6 +25,7 @@ BSD License - see nifskope.h
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <mutex>
 #include <thread>
 #include <unordered_map>
 
@@ -286,6 +287,85 @@ StaticLightCache & staticLightCache()
 }
 }	// namespace
 
+namespace
+{
+/* lane PERF1: a cell's load runs the relight two to four times over one soup (the load's, the placed-only one, the
+ * first frame's sky picture), and the tracer and the rooms come from the soup alone: the last ones built are kept,
+ * keyed on the soup's bytes (and the room spec), and a relight over the same bytes copies them instead of building
+ * them again. Off: WW_GI_GEOMEMO=0. */
+struct GeoMemo
+{
+	std::mutex lock;
+	quint64 bvhKey = 0;
+	probebvh::Bvh bvh;
+	double O[2] = { 0, 0 };
+	quint64 roomsKey = 0;
+	ProbeRooms rooms;
+	bool roomsOk = false;
+};
+GeoMemo & geoMemo()
+{
+	static GeoMemo m;
+	return m;
+}
+bool geoMemoOn()
+{
+	static const bool on = qEnvironmentVariable( "WW_GI_GEOMEMO" ) != QLatin1String( "0" );
+	return on;
+}
+struct KeyMix
+{
+	quint64 h = 0xCBF29CE484222325ULL;
+	void bytes( const void * p, size_t n )
+	{
+		const unsigned char * b = static_cast<const unsigned char *>( p );
+		size_t i = 0;
+		for ( ; i + 8 <= n; i += 8 ) {
+			quint64 w;
+			std::memcpy( &w, b + i, 8 );
+			h = ( h ^ w ) * 0x100000001B3ULL;
+			h ^= h >> 29;
+		}
+		for ( ; i < n; i++ )
+			h = ( h ^ b[i] ) * 0x100000001B3ULL;
+		h = ( h ^ quint64( n ) ) * 0x100000001B3ULL;
+	}
+	template <class T> void vec( const std::vector<T> & v ) { bytes( v.data(), v.size() * sizeof( T ) ); }
+	void str( const QString & x ) { bytes( x.constData(), size_t( x.size() ) * sizeof( QChar ) ); }
+};
+quint64 roomsKeyOf( quint64 trisKey, const ProbeSoup & soup, const ProbeRoomSpec & rs )
+{
+	KeyMix k;
+	k.h ^= trisKey;
+	k.vec( soup.glass );
+	for ( const ProbeSoup::Door & d : soup.doors ) {
+		k.bytes( &d.ref, sizeof d.ref );
+		k.bytes( d.lo, sizeof d.lo );
+		k.bytes( d.hi, sizeof d.hi );
+	}
+	const probebvh::AlphaMask & m = soup.amask;
+	k.vec( m.triOf );
+	for ( const probebvh::AlphaMask::Tri & t : m.tris ) {
+		k.bytes( &t.map, sizeof t.map );
+		k.bytes( &t.thr, sizeof t.thr );
+		k.bytes( t.uv, sizeof t.uv );
+		k.bytes( t.as, sizeof t.as );
+	}
+	for ( const probebvh::AlphaMask::Map & mp : m.maps ) {
+		k.bytes( &mp.w, sizeof mp.w );
+		k.bytes( &mp.h, sizeof mp.h );
+		k.vec( mp.a );
+	}
+	k.bytes( &rs.cell, sizeof rs.cell );
+	k.bytes( &rs.maxCells, sizeof rs.maxCells );
+	k.bytes( &rs.pinch, sizeof rs.pinch );
+	k.str( rs.red );
+	k.bytes( rs.clipLo, sizeof rs.clipLo );
+	k.bytes( rs.clipHi, sizeof rs.clipHi );
+	return k.h;
+}
+}
+
 bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCellLighting & lighting,
 	const ProbeGiSpec & spec, ProbeGiResult * out )
 {
@@ -322,25 +402,52 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 
 	// ---- the soup's tracer, local to the soup's middle (as the bake builds it)
 	double O[2] = { 0, 0 };
-	{
-		double mn[2] = { 1e300, 1e300 }, mx[2] = { -1e300, -1e300 };
-		for ( size_t i = 0; i < soup.tris.size(); i += 3 )
-			for ( int k = 0; k < 2; k++ ) {
-				mn[k] = std::min( mn[k], double( soup.tris[i + size_t( k )] ) );
-				mx[k] = std::max( mx[k], double( soup.tris[i + size_t( k )] ) );
-			}
-		if ( !soup.tris.empty() )
-			for ( int k = 0; k < 2; k++ )
-				O[k] = std::floor( ( mn[k] + mx[k] ) * 0.5 );
-	}
+	const bool memoOn = geoMemoOn();
+	quint64 trisKey = 0;
+	bool bvhHit = false;
 	probebvh::Bvh bvh;
-	bvh.t.resize( soup.tris.size() );
-	for ( size_t i = 0; i < soup.tris.size(); i += 3 ) {
-		bvh.t[i + 0] = float( double( soup.tris[i + 0] ) - O[0] );
-		bvh.t[i + 1] = float( double( soup.tris[i + 1] ) - O[1] );
-		bvh.t[i + 2] = soup.tris[i + 2];
+	if ( memoOn ) {
+		KeyMix k;
+		k.vec( soup.tris );
+		trisKey = k.h;
+		GeoMemo & M = geoMemo();
+		std::lock_guard<std::mutex> g( M.lock );
+		if ( M.bvhKey == trisKey && trisKey != 0 ) {
+			bvh = M.bvh;
+			O[0] = M.O[0];
+			O[1] = M.O[1];
+			bvhHit = true;
+		}
 	}
-	bvh.build();
+	if ( !bvhHit ) {
+		{
+			double mn[2] = { 1e300, 1e300 }, mx[2] = { -1e300, -1e300 };
+			for ( size_t i = 0; i < soup.tris.size(); i += 3 )
+				for ( int k = 0; k < 2; k++ ) {
+					mn[k] = std::min( mn[k], double( soup.tris[i + size_t( k )] ) );
+					mx[k] = std::max( mx[k], double( soup.tris[i + size_t( k )] ) );
+				}
+			if ( !soup.tris.empty() )
+				for ( int k = 0; k < 2; k++ )
+					O[k] = std::floor( ( mn[k] + mx[k] ) * 0.5 );
+		}
+		bvh.t.resize( soup.tris.size() );
+		for ( size_t i = 0; i < soup.tris.size(); i += 3 ) {
+			bvh.t[i + 0] = float( double( soup.tris[i + 0] ) - O[0] );
+			bvh.t[i + 1] = float( double( soup.tris[i + 1] ) - O[1] );
+			bvh.t[i + 2] = soup.tris[i + 2];
+		}
+		bvh.build();
+		if ( memoOn ) {
+			GeoMemo & M = geoMemo();
+			std::lock_guard<std::mutex> g( M.lock );
+			M.bvh = bvh;
+			M.bvh.mask = nullptr;
+			M.O[0] = O[0];
+			M.O[1] = O[1];
+			M.bvhKey = trisKey;
+		}
+	}
 	bvh.mask = &soup.amask;   // lane ALPHATEST1: light passes an alpha-test hole
 	auto blocked = [&]( const double p[3], const double q[3], double clearEnd ) -> bool {
 		double d[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] };
@@ -1246,8 +1353,32 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		roomSpec.clipLo[c] = R.origin[c];
 		roomSpec.clipHi[c] = c == 2 ? 1e30f : R.origin[c] + float( dims[c] ) * float( v );
 	}
-	R.roomsOn = spec.red != QLatin1String( "noclamp" ) && spec.red != QLatin1String( "prelane" )
-		&& probeRoomsBuild( soup, roomSpec, &R.rooms );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
+	const bool roomsWanted = spec.red != QLatin1String( "noclamp" ) && spec.red != QLatin1String( "prelane" );
+	bool roomsHit = false;
+	quint64 roomsKey = 0;
+	if ( roomsWanted && memoOn ) {
+		roomsKey = roomsKeyOf( trisKey, soup, roomSpec );
+		GeoMemo & M = geoMemo();
+		std::lock_guard<std::mutex> g( M.lock );
+		if ( M.roomsKey == roomsKey && roomsKey != 0 ) {
+			R.rooms = M.rooms;
+			R.roomsOn = M.roomsOk;
+			roomsHit = true;
+		}
+	}
+	if ( !roomsHit ) {
+		R.roomsOn = roomsWanted && probeRoomsBuild( soup, roomSpec, &R.rooms );
+		if ( roomsWanted && memoOn ) {
+			GeoMemo & M = geoMemo();
+			std::lock_guard<std::mutex> g( M.lock );
+			M.rooms = R.rooms;
+			M.roomsOk = R.roomsOn;
+			M.roomsKey = roomsKey;
+		}
+	}
+	if ( memoOn )
+		std::fprintf( stderr, "gi geomemo: tracer %s, rooms %s\n", bvhHit ? "kept" : "built",
+			!roomsWanted ? "off" : roomsHit ? "kept" : "built" );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
 	const ProbeRooms & RM = R.rooms;
 	// every probe's rooms: its cell's, or in a solid cell the nearest air cell's within two cells
 	std::vector<std::array<int, 2>> probeRoom( up.size(), { { -1, -1 } } );

@@ -198,6 +198,7 @@ ClState & st()
 struct Gpu
 {
 	GLuint buf = 0, tex = 0;
+	bool texAttached = false;	// lane PERF1: the buffer texture keeps its buffer across glBufferData; attached once
 	const void * doc = nullptr;
 	int version = 0;
 	int count = 0;
@@ -567,6 +568,24 @@ int wwCellPassRed()
 	return st().passRed;
 }
 
+namespace
+{
+/* lane PERF1: the telemetry lines in wwCellLightsUniforms are formatted only when their inputs' bytes change; the
+ * formatting ran for every shape and was most of the function's time. The line printed, and when, is unchanged:
+ * a changed input still formats the line and compares it with the last one printed. */
+struct InputsLast
+{
+	QByteArray last;
+	bool changed( const void * p, size_t n )
+	{
+		if ( size_t( last.size() ) == n && std::memcmp( last.constData(), p, n ) == 0 )
+			return false;
+		last = QByteArray( static_cast<const char *>( p ), qsizetype( n ) );
+		return true;
+	}
+};
+}
+
 void wwCellLightsUniforms( Scene * scene )
 {
 	if ( !scene || !scene->renderer )
@@ -643,7 +662,10 @@ void wwCellLightsUniforms( Scene * scene )
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTextureUnit ) );
 	if ( g.tex && g.buf ) {
 		fn->glBindTexture( GL_TEXTURE_BUFFER, g.tex );
-		fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.buf );
+		if ( !g.texAttached ) {
+			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.buf );
+			g.texAttached = true;
+		}
 	} else {
 		fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
 	}
@@ -965,7 +987,10 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 		// telemetry: what the exterior sun uploaded (or why not), once per change
 		static QString sunLast;
-		const QString line = hasDir
+		static InputsLast sunIn;
+		const float sunKey[9] = { hasDir ? 1.0f : 0.0f, dirTo[0], dirTo[1], dirTo[2], dirColor[0], dirColor[1], dirColor[2],
+			prog->uniLocation( "csmMap" ) >= 0 ? 1.0f : 0.0f, sunScale };
+		const QString line = !sunIn.changed( sunKey, sizeof( sunKey ) ) ? sunLast : hasDir
 			? QStringLiteral( "cell sun: exterior directional=weather to=%1,%2,%3 color=%4,%5,%6 (linear) shadows=%7 sunlight scale=%8" )
 				.arg( double( dirTo[0] ), 0, 'f', 5 ).arg( double( dirTo[1] ), 0, 'f', 5 ).arg( double( dirTo[2] ), 0, 'f', 5 )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
@@ -1029,7 +1054,10 @@ void wwCellLightsUniforms( Scene * scene )
 				dirColor[c] = std::max( fxCol[c], 0.0f ) * fxScale;
 			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
 			static QString fxSunLast;
-			const QString line = QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (%10 %4,%5,%6 x %7; "
+			static InputsLast fxSunIn;
+			const float fxKey[11] = { dirColor[0], dirColor[1], dirColor[2], fxCol[0], fxCol[1], fxCol[2], fxScale, isScale,
+				haveIs ? 1.0f : 0.0f, sunScale, ( fxScaleRed ? 1.0f : 0.0f ) + ( fxColorRed ? 2.0f : 0.0f ) };
+			const QString line = !fxSunIn.changed( fxKey, sizeof( fxKey ) ) ? fxSunLast : QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (%10 %4,%5,%6 x %7; "
 					"imagespace Sunlight Scale %8%9, surfaces' sun scale %11)" )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
 				.arg( double( fxCol[0] ), 0, 'f', 5 ).arg( double( fxCol[1] ), 0, 'f', 5 ).arg( double( fxCol[2] ), 0, 'f', 5 )
@@ -1098,7 +1126,11 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 			extDalc = true;
 			static QString ambLast;
-			const QString line = QStringLiteral( "cell ambient: exterior=weather DALC up=%1,%2,%3 down=%4,%5,%6 (byte/255)%7" )
+			static InputsLast ambIn;
+			float ambKey[19];
+			std::memcpy( ambKey, g, sizeof( g ) );
+			ambKey[18] = flip ? 1.0f : 0.0f;
+			const QString line = !ambIn.changed( ambKey, sizeof( ambKey ) ) ? ambLast : QStringLiteral( "cell ambient: exterior=weather DALC up=%1,%2,%3 down=%4,%5,%6 (byte/255)%7" )
 				.arg( double( flip ? g[4][0] : g[5][0] ), 0, 'f', 4 ).arg( double( flip ? g[4][1] : g[5][1] ), 0, 'f', 4 )
 				.arg( double( flip ? g[4][2] : g[5][2] ), 0, 'f', 4 ).arg( double( flip ? g[5][0] : g[4][0] ), 0, 'f', 4 )
 				.arg( double( flip ? g[5][1] : g[4][1] ), 0, 'f', 4 ).arg( double( flip ? g[5][2] : g[4][2] ), 0, 'f', 4 )
