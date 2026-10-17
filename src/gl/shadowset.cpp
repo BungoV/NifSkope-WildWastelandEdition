@@ -22,10 +22,13 @@ BSD License - see nifskope.h
 #include <QStringList>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <future>
 #include <limits>
 #include <vector>
 
@@ -43,6 +46,7 @@ constexpr int kContactUnit = 25;	// sampler2D
 constexpr float kNoHeight = -1.0e30f;
 constexpr double kSunRadius = 0.265;	// degrees: the penumbra's half-angle
 constexpr double kRelatch = 0.25;	// degrees: the sun moved this far -> a new sweep
+constexpr int kUploadBytes = 512 * 1024;	// the finished map goes up this much a frame
 constexpr double kLatitude = 42.36;	// Boston
 
 const char * const kCascadeKey = "Settings/Render/Scene/Shadow Cascade Quality";
@@ -56,6 +60,14 @@ struct GpuTimer
 	bool pending[2] = { false, false };
 	int cur = 0;
 	double ms = -1.0;
+};
+
+//! a terrain shape as the worker sees it: implicitly shared copies (the render thread may replace its own)
+struct TerrSrc
+{
+	Transform xf;
+	QVector<Vector3> verts;
+	QVector<Triangle> tris;
 };
 
 struct Terrain
@@ -80,7 +92,7 @@ struct Terrain
 	bool majorX = true;
 	int sMaj = 1;
 	double vMin = 0, stepLen = 1;
-	std::vector<float> gLo, gHi, nLo, nHi;
+	std::vector<float> gLo, gHi, nLo;	// the rays' horizons (lo, hi limb); the line's heights
 	std::vector<std::uint16_t> out;
 	double sweepMs = 0, frameMs = 0;
 	int linesPerFrame = 0;
@@ -95,12 +107,35 @@ struct Terrain
 	std::vector<std::uint16_t> pubOut;
 	int sweeps = 0;
 
+	// the render thread's side of the worker: the set to raster next, the upload in flight, the frame costs
+	std::vector<TerrSrc> src;
+	bool needRaster = false;
+	int setShapes = 0;
+	bool uploading = false;
+	int upRow = 0;
+	double frameMax = 0, upMs = 0;
+	int frames = 0;
+
 	// GL
 	const void * ctx = nullptr;
 	unsigned int tex[2] = { 0, 0 };
 	int texN = 0;
 	int front = 0;
 	QString last = QStringLiteral( "off" );
+};
+
+//! the raster and the sweep run here, off the render thread (lane TERRSHADOW1: 600 ms of CPU at Ultra stalled a
+//! frame); the render thread hands it a grid, a set and a sun, and uploads the finished map a band a frame
+struct TerrJob
+{
+	Terrain w;	// the CPU half only: grid, heights, sweep, out
+	std::vector<TerrSrc> src;
+	bool raster = false, flip = false, nodecay = false;
+	double toSun[3] = { 0, 0, 1 };
+	std::future<void> fut;
+	bool busy = false;
+	std::atomic<bool> stop { false };
+	double workMs = 0;
 };
 
 struct Contact
@@ -129,6 +164,7 @@ struct SetState
 	int unitsChecked = 0;
 
 	Terrain t;
+	TerrJob job;
 	Contact c;
 	GpuTimer tmTerrain, tmContact;
 	double lastElevReal = 0, lastElevShaded = 0, lastElevEngine = 0, lastDiscEngine = 0;
@@ -320,7 +356,7 @@ void collectTerrain( Scene * scene, std::vector<const Shape *> & out, quint64 & 
 }
 
 //! the heights at the texel centres (point samples of the surface; the max where surfaces overlap)
-void rasterTerrain( Terrain & t, const std::vector<const Shape *> & shapes )
+void rasterTerrain( Terrain & t, const std::vector<TerrSrc> & shapes, const std::atomic<bool> & stop )
 {
 	QElapsedTimer tm;
 	tm.start();
@@ -328,12 +364,14 @@ void rasterTerrain( Terrain & t, const std::vector<const Shape *> & shapes )
 	t.H.assign( size_t( N ) * size_t( N ), kNoHeight );
 	t.tris = 0;
 	std::vector<Vector3> w;
-	for ( const Shape * sh : shapes ) {
-		const Transform & xf = sh->worldTrans();
-		w.resize( size_t( sh->verts.size() ) );
-		for ( qsizetype v = 0; v < sh->verts.size(); v++ )
-			w[size_t( v )] = xf * sh->verts.at( v );
-		for ( const Triangle & tri : sh->triangles ) {
+	for ( const TerrSrc & sh : shapes ) {
+		if ( stop.load( std::memory_order_relaxed ) )
+			return;
+		const Transform & xf = sh.xf;
+		w.resize( size_t( sh.verts.size() ) );
+		for ( qsizetype v = 0; v < sh.verts.size(); v++ )
+			w[size_t( v )] = xf * sh.verts.at( v );
+		for ( const Triangle & tri : sh.tris ) {
 			if ( tri[0] >= w.size() || tri[1] >= w.size() || tri[2] >= w.size() )
 				continue;
 			const Vector3 & a = w[tri[0]], & b = w[tri[1]], & c = w[tri[2]];
@@ -390,7 +428,7 @@ float heightAt( const Terrain & t, int i, int j )
 	return t.H[size_t( j ) * size_t( t.N ) + size_t( i )];
 }
 
-//! G of the previous line at a fractional minor index; -inf off the map or where no terrain was
+//! a line of heights at a fractional minor index; -inf off the map or where no terrain was
 float sampleLine( const std::vector<float> & g, double m )
 {
 	const int n = int( g.size() );
@@ -418,19 +456,18 @@ std::uint16_t encodeS( float S, float zmin, float span )
 	return std::uint16_t( std::max( 1L, std::lround( std::min( v, 1.0 ) * 65535.0 ) ) );
 }
 
-void startSweep( Terrain & t, const double toSun[3] )
+void startSweep( Terrain & t, const double toSun[3], bool flip, bool nodecay )
 {
 	const double hz = std::sqrt( toSun[0] * toSun[0] + toSun[1] * toSun[1] );
 	t.elev = std::atan2( toSun[2], hz ) / kDeg;
 	t.az = std::atan2( toSun[0], toSun[1] ) / kDeg;
 	t.dir[0] = toSun[0] / hz;
 	t.dir[1] = toSun[1] / hz;
-	if ( wwShadowRed( "terrflip" ) ) {
+	if ( flip ) {
 		t.dir[0] = -t.dir[0];
 		t.dir[1] = -t.dir[1];
 	}
 	const double lo = std::max( t.elev - kSunRadius, 0.05 ), hi = t.elev + kSunRadius;
-	const bool nodecay = wwShadowRed( "terrnodecay" );
 	t.tanLo = nodecay ? 0.0 : std::tan( lo * kDeg );
 	t.tanHi = nodecay ? 0.0 : std::tan( std::min( hi, 89.0 ) * kDeg );
 	t.majorX = std::fabs( t.dir[0] ) >= std::fabs( t.dir[1] );
@@ -440,10 +477,11 @@ void startSweep( Terrain & t, const double toSun[3] )
 	t.stepLen = t.T / std::fabs( dMaj );	// world length of one step (one texel along the major axis)
 	for ( int k = 0; k < 3; k++ )
 		t.latched[k] = toSun[k];
-	t.gLo.assign( size_t( t.N ), kNoHeight );
-	t.gHi.assign( size_t( t.N ), kNoHeight );
-	t.nLo.assign( size_t( t.N ), kNoHeight );
-	t.nHi.assign( size_t( t.N ), kNoHeight );
+	// one ray per minor texel, enough of them that the sheared fan covers every texel of every line
+	const int rays = t.N + int( std::ceil( double( t.N ) * std::fabs( t.vMin ) ) ) + 2;
+	t.gLo.assign( size_t( rays ), kNoHeight );
+	t.gHi.assign( size_t( rays ), kNoHeight );
+	t.nLo.assign( size_t( t.N ), kNoHeight );	// the current line's heights
 	t.out.assign( size_t( t.N ) * size_t( t.N ) * 2, 0 );
 	t.line = 0;
 	t.running = true;
@@ -453,39 +491,66 @@ void startSweep( Terrain & t, const double toSun[3] )
 	t.swSpan = t.encSpan;
 }
 
-//! lines [line, line + count) of the sweep; returns the band of major indices written
+//! lines [line, line + count) of the sweep; returns the band of major indices written.
+//! Rays run exactly along the sun's direction (one per minor texel, sheared by vMin a line) and carry their
+//! own horizon; each texel reads the two rays either side of it. Resampling the horizon onto the texel grid
+//! every line instead drifts sideways off-axis (nearest rounding compounds: a 30-degree shadow ran at 45).
 void sweepLines( Terrain & t, int count, int & aLo, int & aHi )
 {
 	const int N = t.N;
+	const int R = int( t.gLo.size() );
 	const float zmin = t.swLo, span = t.swSpan;
 	const float dLo = float( t.stepLen * t.tanLo ), dHi = float( t.stepLen * t.tanHi );
+	// ray r sits at minor r + base - line * vMin: base keeps the fan over [0, N - 1] on every line
+	const double base = t.vMin < 0.0 ? std::floor( double( N ) * t.vMin ) : 0.0;
 	aLo = N;
 	aHi = -1;
 	for ( int k = 0; k < count && t.line < N; k++, t.line++ ) {
-		// the sun side first: p + v (one step toward the sun) is on the line before
 		const int a = t.sMaj > 0 ? N - 1 - t.line : t.line;
 		aLo = std::min( aLo, a );
 		aHi = std::max( aHi, a );
-		for ( int m = 0; m < N; m++ ) {
-			float sLo = kNoHeight, sHi = kNoHeight;
-			if ( t.line > 0 ) {
-				const double pm = double( m ) + t.vMin;
-				const float gl = sampleLine( t.gLo, pm ), gh = sampleLine( t.gHi, pm );
-				if ( gl > kNoHeight )
-					sLo = gl - dLo;
-				if ( gh > kNoHeight )
-					sHi = gh - dHi;
+		const double c = base - double( t.line ) * t.vMin;
+		for ( int m = 0; m < N; m++ )
+			t.nLo[size_t( m )] = heightAt( t, t.majorX ? a : m, t.majorX ? m : a );
+		// one step down the sun line: the carried horizon decays
+		if ( t.line > 0 ) {
+			for ( int r = 0; r < R; r++ ) {
+				if ( t.gLo[size_t( r )] > kNoHeight )
+					t.gLo[size_t( r )] -= dLo;
+				if ( t.gHi[size_t( r )] > kNoHeight )
+					t.gHi[size_t( r )] -= dHi;
 			}
+		}
+		// each texel: the rays either side (the horizon toward the sun, not counting its own height)
+		for ( int m = 0; m < N; m++ ) {
+			const double q = double( m ) - c;
+			const int r0 = int( std::floor( q ) );
+			const float w = float( q - r0 );
+			auto pick = [&]( const std::vector<float> & g ) {
+				const float A = ( r0 >= 0 && r0 < R ) ? g[size_t( r0 )] : kNoHeight;
+				const float B = ( r0 + 1 >= 0 && r0 + 1 < R ) ? g[size_t( r0 + 1 )] : kNoHeight;
+				if ( A > kNoHeight && B > kNoHeight )
+					return A + ( B - A ) * w;
+				if ( A > kNoHeight )
+					return w < 0.5f ? A : kNoHeight;
+				if ( B > kNoHeight )
+					return w >= 0.5f ? B : kNoHeight;
+				return kNoHeight;
+			};
+			const float sLo = pick( t.gLo ), sHi = pick( t.gHi );
 			const int i = t.majorX ? a : m, j = t.majorX ? m : a;
-			const float h = heightAt( t, i, j );
-			t.nLo[size_t( m )] = std::max( h, sLo );
-			t.nHi[size_t( m )] = std::max( h, sHi );
 			const size_t o = ( size_t( j ) * size_t( N ) + size_t( i ) ) * 2;
 			t.out[o + 0] = encodeS( sLo, zmin, span );	// .x lit above (the lower limb clears)
 			t.out[o + 1] = encodeS( sHi, zmin, span );	// .y shadowed below (the upper limb is hidden)
 		}
-		t.gLo.swap( t.nLo );
-		t.gHi.swap( t.nHi );
+		// then every ray meets the terrain under it on this line
+		for ( int r = 0; r < R; r++ ) {
+			const float h = sampleLine( t.nLo, double( r ) + c );
+			if ( h > kNoHeight ) {
+				t.gLo[size_t( r )] = std::max( t.gLo[size_t( r )], h );
+				t.gHi[size_t( r )] = std::max( t.gHi[size_t( r )], h );
+			}
+		}
 	}
 }
 
@@ -518,9 +583,10 @@ bool ensureTerrTex( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t )
 	return t.tex[0] != 0;
 }
 
-void uploadBand( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t, int aLo, int aHi )
+//! rows [r0, r1) of the finished map into the back texture
+void uploadRows( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t, const std::vector<std::uint16_t> & out, int r0, int r1 )
 {
-	if ( aLo > aHi )
+	if ( r0 >= r1 )
 		return;
 	GLint prev = 0, rl = 0, sp = 0, sr = 0, al = 4;
 	fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prev );
@@ -530,12 +596,10 @@ void uploadBand( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t, int aLo, 
 	fn->glGetIntegerv( GL_UNPACK_ALIGNMENT, &al );
 	fn->glBindTexture( GL_TEXTURE_2D, t.tex[1 - t.front] );
 	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
-	fn->glPixelStorei( GL_UNPACK_ROW_LENGTH, t.N );
-	const int x = t.majorX ? aLo : 0, y = t.majorX ? 0 : aLo;
-	const int w = t.majorX ? aHi - aLo + 1 : t.N, h = t.majorX ? t.N : aHi - aLo + 1;
-	fn->glPixelStorei( GL_UNPACK_SKIP_PIXELS, x );
-	fn->glPixelStorei( GL_UNPACK_SKIP_ROWS, y );
-	fn->glTexSubImage2D( GL_TEXTURE_2D, 0, x, y, w, h, GL_RG, GL_UNSIGNED_SHORT, t.out.data() );
+	fn->glPixelStorei( GL_UNPACK_ROW_LENGTH, 0 );
+	fn->glPixelStorei( GL_UNPACK_SKIP_PIXELS, 0 );
+	fn->glPixelStorei( GL_UNPACK_SKIP_ROWS, 0 );
+	fn->glTexSubImage2D( GL_TEXTURE_2D, 0, 0, r0, t.N, r1 - r0, GL_RG, GL_UNSIGNED_SHORT, out.data() + size_t( r0 ) * size_t( t.N ) * 2 );
 	fn->glPixelStorei( GL_UNPACK_ROW_LENGTH, rl );
 	fn->glPixelStorei( GL_UNPACK_SKIP_PIXELS, sp );
 	fn->glPixelStorei( GL_UNPACK_SKIP_ROWS, sr );
@@ -544,7 +608,7 @@ void uploadBand( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t, int aLo, 
 }
 
 //! WW_SHADOW_DUMP: the published map and the heights it was swept from (tests/spells/terrshadow1_march.py)
-void dumpTerrain( const Terrain & t, const QString & path )
+void dumpTerrain( const Terrain & t, const std::vector<float> & H, const QString & path )
 {
 	QFile f( path );
 	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
@@ -554,27 +618,67 @@ void dumpTerrain( const Terrain & t, const QString & path )
 	const double hd[12] = { t.pubX0, t.pubY0, t.pubT, double( t.pubZmin ), double( t.pubSpan ), t.pubDir[0], t.pubDir[1],
 		t.pubTanLo, t.pubTanHi, t.pubElev, t.pubAz, double( kNoHeight ) };
 	f.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
-	f.write( reinterpret_cast<const char *>( t.H.data() ), qint64( t.H.size() * sizeof( float ) ) );
+	f.write( reinterpret_cast<const char *>( H.data() ), qint64( H.size() * sizeof( float ) ) );
 	f.write( reinterpret_cast<const char *>( t.pubOut.data() ), qint64( t.pubOut.size() * sizeof( std::uint16_t ) ) );
+}
+
+//! the worker: the raster when the set changed, then the whole sweep
+void runTerrJob( TerrJob * j )
+{
+	QElapsedTimer tm;
+	tm.start();
+	Terrain & w = j->w;
+	if ( j->raster ) {
+		rasterTerrain( w, j->src, j->stop );
+		j->src.clear();
+	}
+	startSweep( w, j->toSun, j->flip, j->nodecay );
+	QElapsedTimer sw;
+	sw.start();
+	while ( w.line < w.N && !j->stop.load( std::memory_order_relaxed ) ) {
+		int aLo = 0, aHi = -1;
+		sweepLines( w, 64, aLo, aHi );
+	}
+	w.sweepMs = double( sw.nsecsElapsed() ) * 1e-6;
+	w.running = false;
+	j->workMs = double( tm.nsecsElapsed() ) * 1e-6;
+}
+
+void stopTerrJob( TerrJob & j )
+{
+	if ( !j.busy )
+		return;
+	j.stop = true;
+	j.fut.wait();
+	j.fut = std::future<void>();
+	j.busy = false;
+	j.stop = false;
 }
 
 void terrainFrame( Scene * scene, const double toSun[3] )
 {
 	SetState & s = ss();
 	Terrain & t = s.t;
+	TerrJob & j = s.job;
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
 	if ( !s.terrain ) {
+		stopTerrJob( j );
+		j.w.H.clear();
+		j.w.H.shrink_to_fit();
+		j.w.out.clear();
+		j.w.out.shrink_to_fit();
+		j.src.clear();
+		t.src.clear();
 		t.valid = false;
-		t.running = false;
-		t.H.clear();
-		t.H.shrink_to_fit();
-		t.out.clear();
-		t.out.shrink_to_fit();
+		t.uploading = false;
 		t.pubOut.clear();
 		t.pubOut.shrink_to_fit();
 		t.sig = 0;
+		t.setShapes = 0;
 		t.cx = t.cy = 1e300;
+		t.frameMax = 0;
+		t.frames = 0;
 		t.last = QStringLiteral( "off" );
 		return;
 	}
@@ -593,11 +697,11 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 	const Transform & vt = scene->view;
 	const double sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
 	double cam[3];
-	for ( int j = 0; j < 3; j++ ) {
+	for ( int a = 0; a < 3; a++ ) {
 		double c = 0;
 		for ( int k = 0; k < 3; k++ )
-			c -= vt.rotation( k, j ) * vt.translation[k];
-		cam[j] = c / sc;
+			c -= vt.rotation( k, a ) * vt.translation[k];
+		cam[a] = c / sc;
 	}
 	const double snap = t.N * t.T / 8.0;
 	if ( std::fabs( cam[0] - t.cx ) > t.N * t.T / 4.0 || std::fabs( cam[1] - t.cy ) > t.N * t.T / 4.0 || regrid ) {
@@ -611,20 +715,26 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 		t.last = QStringLiteral( "refused(no GL texture)" );
 		return;
 	}
-	// the terrain set: checked every 16 frames (and on a re-grid)
-	if ( regrid || t.H.empty() || --t.checkIn <= 0 ) {
+	if ( t.uploading && j.w.N != t.N )
+		t.uploading = false;	// a map for the old grid size (the textures were just re-made): drop it
+	// the terrain set: checked every 16 frames (and on a re-grid); a change hands the worker a snapshot to raster
+	if ( regrid || t.sig == 0 || --t.checkIn <= 0 ) {
 		t.checkIn = 16;
 		std::vector<const Shape *> shapes;
 		quint64 sig = 0;
 		collectTerrain( scene, shapes, sig );
 		sig ^= quint64( std::llround( t.x0 ) ) * 31ull ^ quint64( std::llround( t.y0 ) ) * 17ull ^ quint64( t.N );
-		if ( sig != t.sig || t.H.empty() ) {
+		if ( sig != t.sig ) {
 			t.sig = sig;
-			rasterTerrain( t, shapes );
-			t.running = false;	// a new sweep below
+			t.src.clear();
+			t.src.reserve( shapes.size() );
+			for ( const Shape * sh : shapes )
+				t.src.push_back( { sh->worldTrans(), sh->verts, sh->triangles } );
+			t.setShapes = int( shapes.size() );
+			t.needRaster = true;
 		}
 	}
-	if ( t.shapes == 0 ) {
+	if ( t.setShapes == 0 ) {
 		t.valid = false;
 		t.last = QStringLiteral( "on(no terrain shapes)" );
 		return;
@@ -633,57 +743,113 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 	const double hz = std::sqrt( toSun[0] * toSun[0] + toSun[1] * toSun[1] );
 	if ( toSun[2] <= std::sin( 0.05 * kDeg ) || hz < 1e-4 ) {
 		t.valid = false;
-		t.running = false;
 		t.last = QStringLiteral( "on(sun below the horizon or overhead: lit)" );
 		return;
 	}
-	const double moved = std::acos( std::clamp( dot3( toSun, t.latched ), -1.0, 1.0 ) ) / kDeg;
-	if ( !t.running && ( !t.valid || moved > kRelatch || t.sweepSig != t.sig ) )
-		startSweep( t, toSun );
-	else if ( t.running && moved > kRelatch )
-		startSweep( t, toSun );
-	if ( t.running ) {
-		t.linesPerFrame = s.sync ? t.N : std::max( 16, t.N / 32 );
-		int aLo = 0, aHi = -1;
-		QElapsedTimer sw;
-		sw.start();
-		sweepLines( t, t.linesPerFrame, aLo, aHi );
-		t.sweepMs += double( sw.nsecsElapsed() ) * 1e-6;
-		timerBegin( fn, s.tmTerrain );
-		uploadBand( fn, t, aLo, aHi );
-		timerEnd( fn, s.tmTerrain );
-		if ( t.line >= t.N ) {
-			// publish: the back texture is complete
-			t.running = false;
-			t.front = 1 - t.front;
-			t.valid = true;
-			t.sweeps++;
-			t.pubN = t.N;
-			t.pubX0 = t.x0;
-			t.pubY0 = t.y0;
-			t.pubT = t.T;
-			t.pubZmin = t.swLo;
-			t.pubSpan = t.swSpan;
-			t.pubElev = t.elev;
-			t.pubAz = t.az;
-			t.pubTanLo = t.tanLo;
-			t.pubTanHi = t.tanHi;
-			t.pubDir[0] = t.dir[0];
-			t.pubDir[1] = t.dir[1];
-			if ( !s.dump.isEmpty() ) {
-				t.pubOut = t.out;
-				dumpTerrain( t, s.dump );
+	// steps 1 and 2 run again right after a synchronous job, so a pinned harness publishes in one frame
+	auto reap = [&]() {
+		// 1. a finished job becomes an upload
+		if ( j.busy && ( s.sync || j.fut.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready ) ) {
+			j.fut.get();
+			j.busy = false;
+			if ( j.w.line >= j.w.N && j.w.N == t.N ) {
+				t.uploading = true;
+				t.upRow = 0;
+				t.upMs = 0;
 			}
+			t.shapes = j.w.shapes;
+			t.tris = j.w.tris;
+			t.zmin = j.w.zmin;
+			t.zmax = j.w.zmax;
+			t.rasterMs = j.w.rasterMs;
+			t.sweepMs = j.w.sweepMs;
+			t.elev = j.w.elev;
+			t.az = j.w.az;
+		}
+		// 2. the upload, a band a frame (the whole map in one frame when synchronous)
+		if ( t.uploading ) {
+			const int rows = s.sync ? t.N : std::max( 1, kUploadBytes / ( t.N * 4 ) );
+			const int r1 = std::min( t.N, t.upRow + rows );
+			QElapsedTimer ut;
+			ut.start();
+			timerBegin( fn, s.tmTerrain );
+			uploadRows( fn, t, j.w.out, t.upRow, r1 );
+			timerEnd( fn, s.tmTerrain );
+			t.upMs += double( ut.nsecsElapsed() ) * 1e-6;
+			t.upRow = r1;
+			if ( t.upRow >= t.N ) {
+				// publish: the back texture is complete
+				const Terrain & w = j.w;
+				t.uploading = false;
+				t.front = 1 - t.front;
+				t.valid = true;
+				t.sweeps++;
+				t.pubN = w.N;
+				t.pubX0 = w.x0;
+				t.pubY0 = w.y0;
+				t.pubT = w.T;
+				t.pubZmin = w.swLo;
+				t.pubSpan = w.swSpan;
+				t.pubElev = w.elev;
+				t.pubAz = w.az;
+				t.pubTanLo = w.tanLo;
+				t.pubTanHi = w.tanHi;
+				t.pubDir[0] = w.dir[0];
+				t.pubDir[1] = w.dir[1];
+				if ( !s.dump.isEmpty() ) {
+					t.pubOut = w.out;
+					dumpTerrain( t, w.H, s.dump );
+				}
+			}
+		}
+	};
+	reap();
+	// 3. a new job: the sun moved past the threshold, or the set or the grid changed; one at a time, never mid-upload
+	const double moved = std::acos( std::clamp( dot3( toSun, t.latched ), -1.0, 1.0 ) ) / kDeg;
+	const bool stale = !t.valid || t.pubN != t.N || t.pubX0 != t.x0 || t.pubY0 != t.y0 || t.needRaster || moved > kRelatch;
+	if ( !j.busy && !t.uploading && stale ) {
+		Terrain & w = j.w;
+		w.N = t.N;
+		w.T = t.T;
+		w.x0 = t.x0;
+		w.y0 = t.y0;
+		j.raster = t.needRaster || w.H.size() != size_t( t.N ) * size_t( t.N );
+		if ( j.raster ) {
+			j.src = std::move( t.src );
+			t.src.clear();
+			t.needRaster = false;
+		}
+		for ( int k = 0; k < 3; k++ ) {
+			j.toSun[k] = toSun[k];
+			t.latched[k] = toSun[k];
+		}
+		j.flip = wwShadowRed( "terrflip" );
+		j.nodecay = wwShadowRed( "terrnodecay" );
+		j.stop = false;
+		j.busy = true;
+		if ( s.sync ) {
+			std::promise<void> done;
+			runTerrJob( &j );
+			done.set_value();
+			j.fut = done.get_future();
+			reap();
+		} else {
+			j.fut = std::async( std::launch::async, runTerrJob, &j );
 		}
 	}
 	t.frameMs = double( tm.nsecsElapsed() ) * 1e-6;
+	if ( !s.sync && t.frames++ > 2 )
+		t.frameMax = std::max( t.frameMax, t.frameMs );
 	t.last = QStringLiteral( "on N=%1 texel=%2 x0=%3 y0=%4 z=%5..%6 shapes=%7 tris=%8 raster_ms=%9 elev=%10 az=%11 "
-		"sweep=%12/%13 lines/frame=%14 sweep_cpu_ms=%15 frame_cpu_ms=%16 upload_gpu_ms=%17 sweeps=%18 valid=%19 mem_mb=%20" )
+		"worker=%12 upload_row=%13/%14 sweep_cpu_ms=%15 frame_cpu_ms=%16 frame_cpu_max_ms=%17 upload_cpu_ms=%18 "
+		"upload_gpu_ms=%19 sweeps=%20 valid=%21 mem_mb=%22 cpu_mb=%23" )
 		.arg( t.N ).arg( t.T ).arg( t.x0, 0, 'f', 1 ).arg( t.y0, 0, 'f', 1 ).arg( double( t.zmin ), 0, 'f', 1 )
 		.arg( double( t.zmax ), 0, 'f', 1 ).arg( t.shapes ).arg( t.tris ).arg( t.rasterMs, 0, 'f', 2 )
-		.arg( t.elev, 0, 'f', 3 ).arg( t.az, 0, 'f', 3 ).arg( t.line ).arg( t.N ).arg( t.linesPerFrame )
-		.arg( t.sweepMs, 0, 'f', 2 ).arg( t.frameMs, 0, 'f', 3 ).arg( s.tmTerrain.ms, 0, 'f', 4 ).arg( t.sweeps )
-		.arg( t.valid ? 1 : 0 ).arg( double( t.N ) * t.N * 4.0 * 2.0 / ( 1024.0 * 1024.0 ), 0, 'f', 1 );
+		.arg( t.elev, 0, 'f', 3 ).arg( t.az, 0, 'f', 3 ).arg( j.busy ? QStringLiteral( "busy" ) : QStringLiteral( "idle" ) )
+		.arg( t.uploading ? t.upRow : t.N ).arg( t.N ).arg( t.sweepMs, 0, 'f', 2 ).arg( t.frameMs, 0, 'f', 3 )
+		.arg( t.frameMax, 0, 'f', 3 ).arg( t.upMs, 0, 'f', 3 ).arg( s.tmTerrain.ms, 0, 'f', 4 ).arg( t.sweeps )
+		.arg( t.valid ? 1 : 0 ).arg( double( t.N ) * t.N * 4.0 * 2.0 / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
+		.arg( double( j.w.H.size() * 4 + j.w.out.size() * 2 + t.pubOut.size() * 2 ) / ( 1024.0 * 1024.0 ), 0, 'f', 1 );
 }
 
 // ---- (B) contact ----
