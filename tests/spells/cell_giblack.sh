@@ -25,7 +25,8 @@
 # strand on the on dump against tests/fixtures/giblack2_strand_gn.tsv (the tracer at stranded points): PASS, and FAIL
 # under GI_CHECK_STRAND=1.
 #
-# Each camera is shot at 22h (DOF and motion blur off, volumetric fog off):
+# Each camera is shot at 22h (DOF and motion blur off, volumetric fog and the volumetric air off: lane VOLAIR1's in-scatter
+# lifts the whole wall by ~19/255 at night, so a black wall no longer reads near zero and the borrow red stopped biting):
 #   on     the probe GI on (the fix); memden also dumps the GI (WW_CELL_GI_DUMP) for the twin
 #   off    WW_CELL_GI=0: the weather's flat ambient, the reference
 #   red    WW_CELL_PV_RED=borrow WW_CELL_ROOMS_RED=soupbox: GIBLACK1's defect (borrows any room's answer, coarse rooms)
@@ -119,7 +120,7 @@ shoot() {	# shoot <cam> <tag> [env...]
 	local run=( env WW_CELL_BAKE_REFRACT_RED=keep WW_CELL_NOGRID=1 WW_LODGEN_RESOURCES="$RES"
 		WW_LOOKDEV=1 WW_LOOKDEV_WEATHER=CommonwealthClear WW_LOOKDEV_HOUR=22 WW_LOOKDEV_DAY=4 WW_LOOKDEV_CLOUDTIME=0
 		WW_LOOKDEV_SKY=1 WW_LOOKDEV_CLOUDS=1 WW_LOOKDEV_SUN=1 WW_LOOKDEV_MOON=1 WW_LOOKDEV_GROUND=0 WW_LOOKDEV_PLUGINS="$ESM"
-		WW_ALL_ON=1 WW_CELL_DOF=0 WW_CELL_MBLUR=0 WW_CELL_FARLOD=0 WW_VOLFOG=0
+		WW_ALL_ON=1 WW_CELL_DOF=0 WW_CELL_MBLUR=0 WW_CELL_FARLOD=0 WW_VOLFOG=0 WW_CELL_AIR=0
 		WW_CELL_GI=1 WW_CELL_GI_FROM="$(winpath "$BAKE/bake")" "$@"
 		WW_CELL_OPEN="$PLUGINS|Goodneighbor|5,-3|1" WW_CELL_PROBES="$(winpath "$BAKE/probes.tsv")" WW_CELL_PROBES_HIDE=1
 		WW_RENDER_PATH="$(winpath "$OUT/$cam.path")" WW_RENDER_SHOT="$(winpath "$OUT/$tag.png")" WW_RENDER_SIZE="$SIZE"

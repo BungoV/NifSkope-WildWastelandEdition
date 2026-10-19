@@ -574,7 +574,16 @@ int wwCellGiVis()
 {
 	static const int mode = [] {
 		const QByteArray v = qgetenv( "WW_CELL_GI_VIS" ).trimmed().toLower();
-		return v == "march" || v == "red" || v == "old" ? 1 : 0;
+		if ( v == "march" || v == "red" || v == "old" )
+			return 1;
+		// a red of the march's own rules (WW_CELL_PV_RED) restores the march: the volumes have none of those rules
+		for ( const QByteArray & r : qgetenv( "WW_CELL_PV_RED" ).split( ',' ) ) {
+			const QByteArray t = r.trimmed().toLower();
+			if ( t == "noclamp" || t == "nosee" || t == "borrow" || t == "lendamb" || t == "strand" || t == "firstslot"
+				|| t == "tiepick" || t == "lonesky" || t == "nolastfill" )
+				return 1;
+		}
+		return 0;
 	}();
 	return mode;
 }
@@ -1882,6 +1891,7 @@ struct AoGpu
 	int giKeyW = 0, giKeyH = 0;
 	int giStep = 2;			// 2 half resolution, 1 full
 	bool giReady = false;	// this frame's screen GI
+	bool volOn = false;		// this frame's volumes' mask was drawn
 	AoTarget volMask;		// lane PERF1: full size, the pixel's interior volume's room + 1 (R32F; 0 none)
 	GLuint volBuf = 0, volTex = 0, volVao = 0;	// the shapes, 3 RGBA32F texels each (a buffer texture)
 	std::vector<float> volData;	// what volBuf holds
@@ -2065,6 +2075,7 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	auto fn = r->fn;
 	const WwCellGi * G = wwCellGiFor( scene->nifModel );
 	const bool volOn = giVolMaskPass( scene, g, G, W, H, p00, p11 );
+	g.volOn = volOn;
 	g.giStep = wwCellGiRate() == 1 ? 1 : 2;
 	const int hw = ( W + g.giStep - 1 ) / g.giStep, hh = ( H + g.giStep - 1 ) / g.giStep;
 	aoAlloc( fn, g.giHalf, hw, hh, GL_RGBA32F, GL_RGBA, false );
@@ -2184,7 +2195,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	const int giRate = wwCellGiRate();
 	const bool forGi = giRate != 2 && wwCellGiVis() == 0 && g.giUnits && wwCellGiOn() && wwCellPassFor( scene->nifModel ) == 0;
 	if ( wwCellGiVis() == 1 )
-		giEcho( QStringLiteral( "march (red WW_CELL_GI_VIS: the per-pixel chain every call, no screen pass)" ) );
+		giEcho( QStringLiteral( "march (red WW_CELL_GI_VIS or a march-only WW_CELL_PV_RED: the per-pixel chain every call, no screen pass)" ) );
 	else if ( giRate == 2 )
 		giEcho( QStringLiteral( "inline (no screen pass: every surface reads the volumes)" ) );
 	else if ( !g.giUnits )
@@ -2483,11 +2494,13 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	/* lane PERF1: the half-res GI, read by the opaque draws (and the decals on them), like the obscurance; the
 	 * upsample's keys send any pixel that is not the g-buffer's surface to the full chain */
 	if ( prog->uniLocation( "cellGiHalfOn" ) >= 0 ) {
+		// a probe picture (WW_CELL_LIT_PROBE) reads the volumes' mask at its own pixel instead: the screen pass's read
+		const bool probePic = ( st().measuring ? 6 : st().probe ) != 0;
 		const bool giOn = g.giReady && g.doc == scene->nifModel && ( wwCellGiRate() == 0 || wwCellGiRate() == 1 ) && wwCellGiVis() == 0
-			&& ( !glIsEnabled( GL_BLEND ) || decalProg );
+			&& ( !glIsEnabled( GL_BLEND ) || decalProg ) && ( !probePic || g.volOn );
 		if ( g.giUnits ) {
 			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
-			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? g.giHalf.tex : 0 );
+			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? ( probePic ? g.volMask.tex : g.giHalf.tex ) : 0 );
 			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalfKey ) );
 			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? g.giKey : 0 );
 			r->fn->glActiveTexture( GLenum( prevActive ) );
