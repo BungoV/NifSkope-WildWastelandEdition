@@ -120,7 +120,11 @@ CsmState & cs()
 
 bool red( const char * name )
 {
-	return cs().reds.contains( QString::fromLatin1( name ) );
+	const QString n = QString::fromLatin1( name );
+	// lane SHADOWPAR1: TERRSHADOW1's solidcast red is an alias of VOLAIR1's atsolid (one alpha-caster path)
+	if ( n == QLatin1String( "atsolid" ) && cs().reds.contains( QStringLiteral( "solidcast" ) ) )
+		return true;
+	return cs().reds.contains( n );
 }
 
 int redBits()

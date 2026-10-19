@@ -887,6 +887,9 @@ SkyFrame skyFrame()
 	LdState & s = st();
 	SkyFrame f;
 	f.c = wwSkyClock( s.hour, s.tnam, s.gmst );
+	// lane TERRSHADOW1: Sun Path = Real moves the drawn disc and glare with the light (one sun); Off leaves the clock's
+	if ( wwSunPathMode() == 1 )
+		wwSunPathApply( s.hour, s.gameDay, f.c.lightDir, f.c.sunPos );
 	if ( !s.haveWeather )
 		return f;
 	f.skyScale = wwLookdevRed( "skyscale" ) ? 1.0f : EsmWeather::blendSkyScale( s.w, f.c.keys );
