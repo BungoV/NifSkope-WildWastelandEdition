@@ -43,7 +43,7 @@ for l in rows:
     edid, plug, lid, hit = m.groups()
     name = edid if edid else lid
     want = 'FO4CS/Weathers/%s.recx' % name
-    if hit.startswith('form:') and hit.replace('\', '/').endswith(want):
+    if hit.startswith('form:') and hit.replace('\\', '/').endswith(want):
         own += 1
     else:
         bad.append(l)

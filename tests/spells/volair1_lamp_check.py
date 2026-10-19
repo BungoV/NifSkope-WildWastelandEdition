@@ -15,7 +15,8 @@ For every light of the dump's 'light' lines whose sphere centre is in the view a
           cone x pi x phase(cos to the eye) x exp(-sigma0 rho d), unshadowed; rho is the dump's fitted law
           (airMed, airLayer, airGround), the phase the dump's record weights (phase0..2), colour x phase per
           channel, then luminance (the weights are coloured: a warm lamp scatters less than its luminance says)
-  ratio = ours / ref. Only samples inside the frustum and the slices count (coverage = their share of the ball).
+  ratio = ours / ref. Only samples inside the frustum and the slices count (coverage = their share of the ball);
+  10-19: and only froxels the pass computed -- a depth-skipped froxel (OPT 3, (0, 0, 0, 1)) lies behind a surface.
 
 A light FAILS when ratio < 0.5 (bungo's bar) or > 2 (the gate is two-sided); SKIP when coverage < 0.5 or the
 reference is under 1e-6 of the frame's largest. Verdict: PASS when no light in view fails and at least 3 are judged.
@@ -175,8 +176,12 @@ def ref_J(L, W, eye_dir, t, s0, zoff):
 
 def main(esm, d, tag, red, maxd=4000.0, label=''):
     t, lights = read_txt(os.path.join(d, tag + '.bin.txt'))
-    JA = J_of(read_inj(os.path.join(d, tag + '.bin')))
-    JR = J_of(read_inj(os.path.join(d, red + '.bin')))
+    IA, IR = read_inj(os.path.join(d, tag + '.bin')), read_inj(os.path.join(d, red + '.bin'))
+    JA, JR = J_of(IA), J_of(IR)
+    # 10-19: the depth skip (OPT bit 2) leaves a froxel behind every opaque surface at exactly (0, 0, 0, 1) and no
+    # surface ever reads it (opt gate Z); only the froxels the pass computed are judged, in ours and ref alike
+    held = np.array([0.0, 0.0, 0.0, 1.0])
+    skip = np.all(IA == held, axis=-1) | np.all(IR == held, axis=-1)
     cols, rows, N = (int(x) for x in t['dims'])
     near, logR = t['slices']
     p00, p11 = t['proj']
@@ -215,10 +220,11 @@ def main(esm, d, tag, red, maxd=4000.0, label=''):
         nx = np.where(ok, V[:, 0] / np.where(ok, -V[:, 2], 1) * p00, 9)
         ny = np.where(ok, V[:, 1] / np.where(ok, -V[:, 2], 1) * p11, 9)
         ok &= (np.abs(nx) < 1) & (np.abs(ny) < 1) & (dd > near) & (dd < far)
-        cov = ok.mean()
         ci = np.clip(((nx + 1) * 0.5 * cols).astype(int), 0, cols - 1)
         ri = np.clip(((ny + 1) * 0.5 * rows).astype(int), 0, rows - 1)
         ki = np.clip((N * np.log(np.maximum(dd, near) / near) / logR).astype(int), 0, N - 1)
+        ok &= ~skip[ki, ri, ci]
+        cov = ok.mean()
         sig = s0 * rho_law(t, W[:, 2] + zoff)
         dJ = np.where(ok, JA[ki, ri, ci] - JR[ki, ri, ci], 0.0)
         eye = (W - cam)
@@ -251,9 +257,9 @@ def main(esm, d, tag, red, maxd=4000.0, label=''):
     rs = [q[5] / q[4] for q in rows_out if q[4] > 0 and q[3] >= 0.5 and q[1] is not None and q[4] >= 1e-6 * top]
     med = float(np.median(rs)) if rs else float('nan')
     verdict = 'PASS' if judged >= 3 and fails == 0 and 0.8 <= med <= 1.25 else 'FAIL'
-    head = 'VOLAIR1 LAMP %s %s: %d lights in view within %.0f u, %d judged, %d fail; ratio median %.3f (bar 0.8..1.25) min %.3f max %.3f (red %d)' % (
+    head = 'VOLAIR1 LAMP %s %s: %d lights in view within %.0f u, %d judged, %d fail; ratio median %.3f (bar 0.8..1.25) min %.3f max %.3f (red %d, skipped %.1f%%)' % (
         label or tag, verdict, len(rows_out), maxd, judged, fails, float(np.median(rs)) if rs else float('nan'),
-        min(rs) if rs else float('nan'), max(rs) if rs else float('nan'), int(t['red'][0]) if 'red' in t else -1)
+        min(rs) if rs else float('nan'), max(rs) if rs else float('nan'), int(t['red'][0]) if 'red' in t else -1, 100.0 * float(skip.mean()))
     return head, lines, verdict
 
 

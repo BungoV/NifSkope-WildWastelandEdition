@@ -352,13 +352,9 @@ void main()
 			return;
 		}
 		lin *= m;
-		if ( fogOn ) {
-			vec3 posView = -ViewDir;
-			float hb;
-			vec3 fogCol;
-			float f = wwFogEval( length( posView ) * fogDistScale, dot( fogView.xyz, posView ) + fogView.w, hb, fogCol );
-			lin = fxAdditive ? lin * ( 1.0 - f ) : mix( lin, fogCol, f );
-		}
+		// FOGFIX1 (bungo 10-16, the Concord truck's glass bright in the fog): this branch kept the game's fog alone while
+		// every other effect path took the air; now the air as the surfaces take it (red fxfog: the game's fog alone)
+		lin = wwFogFx( lin, -ViewDir, fxAdditive );
 		if ( cellProbe == 6 )
 			fragColor = vec4( lin * cellProbeGain, color.a );
 		else

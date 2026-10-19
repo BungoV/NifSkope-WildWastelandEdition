@@ -79,7 +79,7 @@ VaState & vs()
 			const QByteArray r = t.trimmed();
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
-				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : 0;
+				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : r == "roomstep" ? 4194304 : 0;
 		}
 		const QByteArray opt = qgetenv( "WW_CELL_AIR_OPT" ).trimmed();
 		if ( !opt.isEmpty() )
@@ -390,6 +390,10 @@ VaMedium vaFit( const float K[6][4], bool wrong, bool farFit )
 		m.invH = 0.0f;
 		m.band = false;
 	}
+	// measurement pin (bungo 10-16): WW_CELL_AIR_DENSITY=<x> scales the fitted density, to show a lamp's haze alone
+	static const float densPin = qEnvironmentVariableIsSet( "WW_CELL_AIR_DENSITY" ) ? qgetenv( "WW_CELL_AIR_DENSITY" ).toFloat() : 1.0f;
+	if ( densPin > 0.0f )
+		m.sigma0 *= densPin;
 	return m;
 }
 

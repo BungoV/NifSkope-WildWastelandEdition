@@ -15,7 +15,7 @@
 #   off      the air off (the row's shipped state)        before / rung2   the exe from before the lane, twice
 # Sanctuary also:  shad / shadref  the sun's cascades on, terms 1, with and without WW_CELL_AIR_RED=noshadow
 #                  time            all terms, 1920 x 1080, a dump (its ms: the cost)
-# Vault111Cryo also:  gi / giflat  the probe GI baked here, terms 4 (the GI alone), with and without red flat
+# Vault111Cryo also:  gi / giflat  the probe GI baked here, terms 4 (the GI alone), with and without red flat, both in the physical colour (red physcol)
 #                     time         all terms + the GI, 1920 x 1080
 # Goodneighbor (NEON_DIR set: a folder holding lane NEONGI1's bake_veil and bake_off, NEON_PROFILE its plugin
 # profile): the Rexford camera (in-bounds), 22:00 CommonwealthClear, terms 4 (the GI alone), the bake WITH the
@@ -132,7 +132,9 @@ frames 3
 ' > "$run/far.path"
 		for k in 0 1 2; do printf 'key %s -75809 92149 7964 -72809 89149 7864 70
 ' "$(python -c "print($k/16)")" >> "$run/far.path"; done
-		open=( "${LD[@]}" WW_CELL_OPEN="$ESM|Commonwealth|-19,22|1" WW_CELL_DATAROOT="$DATA" WW_LODGEN_RESOURCES="$DATA" WW_CELL_FARLOD=1 )
+		# 10-19: CommonwealthClear, not the place list's Foggy: Foggy's fog max is 1, so the froxels end where T is 1%
+		# and the tail past them can never drop by 3/255 (W had no teeth); Clear's max 0.85 leaves T_edge ~0.15
+		open=( "${LD[@]}" WW_LOOKDEV_WEATHER=CommonwealthClear WW_CELL_OPEN="$ESM|Commonwealth|-19,22|1" WW_CELL_DATAROOT="$DATA" WW_LODGEN_RESOURCES="$DATA" WW_CELL_FARLOD=1 )
 		cam=( WW_RENDER_PATH="$(winpath "$run/far.path")" )
 	elif [ -n "${XY[$place]:-}" ]; then
 		open=( "${LD[@]}" WW_CELL_OPEN="$ESM|Commonwealth|${XY[$place]}|1" WW_CELL_DATAROOT="$DATA" WW_LODGEN_RESOURCES="$DATA" )
@@ -225,13 +227,16 @@ if [ "$RECHECK" != 1 ]; then
 			pr=( WW_CELL_PROBES="$(winpath "$OUT/$p/probes.tsv")" WW_CELL_PROBES_HIDE=1 WW_CELL_BAKE_REFRACT_RED=keep )
 			from=( "${pr[@]}" WW_CELL_GI_FROM="$(winpath "$OUT/$p/bake")" )
 			bake=( "${pr[@]}" WW_CELL_PROBE_SOUP="$(winpath "$OUT/$p/soup.psp")" WW_CELL_PROBE_BAKE="$(winpath "$OUT/$p/bake")" )
+			# 10-19: G / F judge the GI's own colour, so these two frames keep the physical colour (red physcol): since
+			# d3521fde the air takes the records' colour on the GI (the owner's 10-14 colour law, judged by K)
 			ls "$OUT/$p/bake/"*.tbk > /dev/null 2>&1 && bake=( "${from[@]}" )
 			case "$RED" in ""|gioff|flat)
-				shoot "$EXE" "$p" gi WW_CELL_GI=1 "${bake[@]}" WW_CELL_AIR=1 WW_CELL_AIR_TERMS=4 "${R[@]}" "$(dumpenv "$p" gi)" ;;
+				shoot "$EXE" "$p" gi WW_CELL_GI=1 "${bake[@]}" WW_CELL_AIR=1 WW_CELL_AIR_TERMS=4 \
+					WW_CELL_AIR_RED="${RED:+$RED,}physcol" "$(dumpenv "$p" gi)" ;;
 			esac
 			if [ -z "$RED" ]; then
 				shoot "$EXE" "$p" giflat WW_CELL_GI=1 "${from[@]}" WW_CELL_AIR=1 WW_CELL_AIR_TERMS=4 \
-					WW_CELL_AIR_RED=flat "$(dumpenv "$p" giflat)"
+					WW_CELL_AIR_RED=flat,physcol "$(dumpenv "$p" giflat)"
 				shoot "$EXE" "$p" time WW_CELL_AIR=1 WW_CELL_AIR_TIME=1 WW_CELL_GI=1 "${from[@]}" "$(dumpenv "$p" time)"
 			fi
 		fi

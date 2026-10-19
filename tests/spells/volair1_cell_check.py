@@ -207,11 +207,18 @@ def hg(c, g):
     return (1.0 - g * g) / (4.0 * PI * d * np.sqrt(d))
 
 
+NEUTRAL = True	# set per dump in rebuild(): the red bluescatter (524288) keeps the record's coloured weights
+
+
 def phase_pi(med, c):
-    """pi x the phase, rgb: the record's three scattering colours over the luminance of their sum"""
+    """pi x the phase, rgb: the record's three scattering colours over the luminance of their sum; 10-15 ruling
+    (bungo: "our fog is what vanilla has as the color", commit 92f19a6e): each lobe is its own luminance on all three
+    channels, so the air adds no hue (NEUTRAL False under the red bluescatter: the coloured weights)"""
     air, fwd, back = med[0:3], med[3:6], med[6:9]
     lum = float(LUM @ (air + fwd + back))
     inv = 1.0 / lum if lum > 1e-6 else 0.0
+    if NEUTRAL:
+        air, fwd, back = (np.full(3, float(LUM @ w)) for w in (air, fwd, back))
     c = c[..., None]
     return PI * ((air * inv) * (3.0 / (16.0 * PI)) * (1.0 + c * c) + (fwd * inv) * hg(c, med[9]) + (back * inv) * hg(c, med[10]))
 
@@ -225,6 +232,8 @@ def rebuild(t, with_rgb):
     top = float(t['airMed'][3])
     med = t['medium']
     recol = (int(t['red'][0]) & 256) == 0    # the red physcol keeps the physical colour
+    global NEUTRAL
+    NEUTRAL = (int(t['red'][0]) & 524288) == 0
     jj, ii = np.meshgrid(np.arange(rows), np.arange(cols), indexing='ij')
     ndc = np.stack([(ii + 0.5) / cols * 2 - 1, (jj + 0.5) / rows * 2 - 1], -1)
     dv = np.stack([ndc[..., 0] / p00, ndc[..., 1] / p11, -np.ones_like(ndc[..., 0])], -1)
@@ -462,14 +471,21 @@ def main():
             # R
             with_rgb = terms == 1 and csm == 0
             rinj = rebuild(t, with_rgb)
-            fa = (np.abs(inj[..., 3] - rinj[..., 3]) <= 1e-4).mean()
+            # 10-19: the depth skip (opt line depthskip=1, the shipped OPT 3) leaves every froxel behind the column's
+            # farthest surface at exactly (0, 0, 0, 1), never read (opt gate Z); R judges the froxels the pass computed.
+            # Without depthskip=1 a held froxel is judged like any other (it fails).
+            ds1 = 'depthskip=1' in str(t.get('opt', ''))
+            held = np.all(inj == np.array([0.0, 0.0, 0.0, 1.0]), axis=-1) if ds1 else np.zeros(inj.shape[:-1], bool)
+            jm = ~held
+            sk = ' (depth skip: %.1f%% held, judged the rest)' % (100.0 * held.mean()) if ds1 else ''
+            fa = (np.abs(inj[..., 3] - rinj[..., 3]) <= 1e-4)[jm].mean()
             if with_rgb:
-                fr, tot, mx = agree(inj[..., :3], rinj[..., :3])
+                fr, tot, mx = agree(inj[..., :3][jm], rinj[..., :3][jm])
                 G.put('R', fr >= 0.99 and abs(tot - 1) <= 0.01 and fa >= 0.99,
-                      'inject vs rebuild: %.4f of the lit voxels within 1%%, total %.5f, transmittance %.4f within 1e-4 (max %.4g; medium %s)'
-                      % (fr, tot, fa, mx, t.get('medNote', '?')))
+                      'inject vs rebuild: %.4f of the lit voxels within 1%%, total %.5f, transmittance %.4f within 1e-4 (max %.4g; medium %s)%s'
+                      % (fr, tot, fa, mx, t.get('medNote', '?'), sk))
             else:
-                G.put('R', fa >= 0.99, 'transmittance %.4f within 1e-4 (rgb judged elsewhere at terms %d, cascades %d)' % (fa, terms, csm))
+                G.put('R', fa >= 0.99, 'transmittance %.4f within 1e-4 (rgb judged elsewhere at terms %d, cascades %d)%s' % (fa, terms, csm, sk))
             # K
             if terms == 1:
                 kc = colour_check(t, inj)
@@ -485,8 +501,10 @@ def main():
             fia = (np.abs(integ[..., 3] - ri[..., 3]) <= 1e-5).mean()
             G.put('I', fi >= 0.99 and abs(ti - 1) <= 0.01 and fia >= 0.99,
                   'integrated = front-to-back: %.4f within 1%%, total %.5f, transmittance %.4f within 1e-5' % (fi, ti, fia))
-            # P
-            if Image and has('probe.png', 'probet.png', 'geo.png'):
+            # P (not at sanctfar: that place shoots only the far-tail frames W reads, by design; see its X list)
+            if p == 'sanctfar':
+                pass
+            elif Image and has('probe.png', 'probet.png', 'geo.png'):
                 ge = png(os.path.join(run, 'geo.png'))
                 H, W = ge.shape[:2]
                 vx, vy, vw, vh = t['viewport']
