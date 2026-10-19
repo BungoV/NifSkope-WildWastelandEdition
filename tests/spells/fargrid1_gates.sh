@@ -8,7 +8,7 @@
 #           terrain shadows On vs Off; the far band's L must drop where the ridge shades it. red farnoterr must FAIL
 #   seam    sun + ambient only (terms 9), no cascades, no terrain: Far Air High vs Off; the same medium, so L agrees
 #           (mean + p95 of the per-pixel step). red farseam (a gap of air at the handoff) must FAIL
-#   stable  a still camera, frames 2 and 3 of one launch: zero difference. red farjitter must FAIL
+#   stable  a still camera, frames 1 and 2 of one launch: zero difference. red farjitter must FAIL
 #   perf    1920x1080, 60 timed repaints, Far Air 0..4: the echoed gpums + volmb per preset (budget table)
 #
 # usage: bash tests/spells/fargrid1_gates.sh [--out DIR] [--only off,leak,seam,stable,perf] [--red farnoterr|farseam|farjitter]
@@ -75,16 +75,17 @@ shot() {  # shot <exe> <tag> [KEY=VALUE ...] -- the lookdev fog cube
 	reg delete "$REGKEY" //f > /dev/null 2>&1
 }
 
-# the cell view: Concord (-15,17), the TERRSHADOW1 player-eye camera; frames 1..3 of one still path are kept
+# the cell view: Concord (-15,17), the TERRSHADOW1 player-eye camera, a clear weather (a foggy one's air is opaque
+# inside 2x the handoff, so the far grid stays off); frames 1 and 2 of one still path are kept
 CELLCAM="${FARGRID1_CELLCAM:--61400 68000 6074 -71400 67000 5900 70}"
 printf 'fps 16\nframes 3\nkey 0.000000 %s\nkey 0.125000 %s\n' "$CELLCAM" "$CELLCAM" > "$OUT/cell.path"
 CELL=( "WW_CELL_OPEN=$ESM|Commonwealth|-15,17|1" "WW_CELL_DATAROOT=$(winpath "$DATA")" WW_CELL_LIT=1 WW_CELL_FARLOD=1
 	"WW_RENDER_PATH=$(winpath "$OUT/cell.path")" WW_TAA=0 WW_CELL_IS=0 WW_CELL_PARTICLES=0
-	WW_LOOKDEV=1 WW_LOOKDEV_WEATHER=CommonwealthFoggy "WW_LOOKDEV_PLUGINS=$ESM" WW_LOOKDEV_SKY=1 WW_LOOKDEV_SUN=1
+	WW_LOOKDEV=1 WW_LOOKDEV_WEATHER=${FARGRID1_WEATHER:-CommonwealthClear} "WW_LOOKDEV_PLUGINS=$ESM" WW_LOOKDEV_SKY=1 WW_LOOKDEV_SUN=1
 	WW_LOOKDEV_GROUND=0 WW_LOOKDEV_CLOUDS=0 WW_LOOKDEV_MOON=0 WW_LOOKDEV_FOG=1 WW_LOOKDEV_CLOUDTIME=0 WW_LOOKDEV_HOUR=17
 	WW_CELL_GRASS_WIND_T=1 WW_CELL_FARLOD_CARDSWAY=0 WW_CELL_FARLOD_SWAYTIME=1
 	WW_SUNPATH=1 "WW_SUNPATH_PIN=${FARGRID1_LOWSUN:-6,240}" WW_CELL_AIR=1 WW_CELL_AIR_TIME=1 )
-cellshot() {  # cellshot <exe> <tag> [KEY=VALUE ...] -- <tag>.png = frame 1, <tag>_f2/_f3.png kept for the stable gate
+cellshot() {  # cellshot <exe> <tag> [KEY=VALUE ...] -- <tag>.png = frame 1, <tag>_f2.png = frame 2 (the stable gate)
 	local exe="$1" tag="$2" try; shift 2
 	rm -f "$OUT/$tag.png" "$OUT/${tag}"_[0-9][0-9][0-9].png "$OUT/${tag}"_f[23].png
 	[ -n "$(harness_alive)" ] && { echo "  REFUSED $tag: our harness NifSkope still running"; return 1; }
@@ -98,7 +99,6 @@ cellshot() {  # cellshot <exe> <tag> [KEY=VALUE ...] -- <tag>.png = frame 1, <ta
 		env $(common_env) "${CELL[@]}" WW_RENDER_SHOT="$(winpath "$OUT/$tag.png")" "$@" \
 			timeout 900 "$exe" --port "$PORT" "$(winpath "$ROOT/tests/fixtures/empty.wwcell")" > "$OUT/$tag.log" 2>&1
 		[ -s "$OUT/${tag}_002.png" ] && mv -f "$OUT/${tag}_002.png" "$OUT/${tag}_f2.png"
-		[ -s "$OUT/${tag}_003.png" ] && mv -f "$OUT/${tag}_003.png" "$OUT/${tag}_f3.png"
 		[ -s "$OUT/${tag}_001.png" ] && mv -f "$OUT/${tag}_001.png" "$OUT/$tag.png"
 		rm -f "$OUT/${tag}"_[0-9][0-9][0-9].png
 		[ -s "$OUT/$tag.png" ] && break

@@ -76,8 +76,8 @@ if u is not None or s is not None:
 # seam: far High vs Off, sun + ambient, no shadows: the same medium, so the air's L agrees
 x, y = img('seam_off'), img('seam_on')
 if x is not None or y is not None:
-    if x is None or y is None:
-        say('seam', 'MISSING', 'a picture is missing')
+    if x is None or y is None or 'far=on' not in echo('seam_on'):
+        say('seam', 'MISSING', 'a picture or the far=on echo is missing')
     else:
         lx, ly = luma(x), luma(y)
         d = np.abs(ly - lx) / np.maximum(lx, 1.0 / 255.0)
@@ -89,16 +89,18 @@ if x is not None or y is not None:
         ok = mean_rel < 0.03 and p95 < 0.08 and step < 2.0 / 255.0
         say('seam', 'PASS' if ok else 'FAIL', 'mean rel %.4f, p95 rel %.4f, row step excess %.5f' % (mean_rel, p95, step))
 
-# stable: a still camera, frames 2 and 3 of one launch: zero difference (the base too: the noise floor)
+# stable: a still camera, frames 1 and 2 of one launch: zero difference (the base too: the noise floor)
 for tag in ('stable_base', 'stable_far'):
-    a2, a3 = img(tag + '_f2'), img(tag + '_f3')
-    if a2 is None and a3 is None and img(tag) is None:
+    a2, a3 = img(tag), img(tag + '_f2')
+    if a2 is None and a3 is None:
         continue
     if a2 is None or a3 is None:
-        say('stable', 'MISSING', '%s: frames 2/3 missing' % tag)
+        say('stable', 'MISSING', '%s: frame 1 or 2 missing' % tag)
+    elif tag == 'stable_far' and 'far=on' not in echo(tag):
+        say('stable', 'MISSING', 'stable_far: no far=on echo')
     else:
         dif = int(np.count_nonzero(a2 != a3))
-        say('stable', 'PASS' if dif == 0 else 'FAIL', '%s: channels differing frame 2 vs 3: %d' % (tag, dif))
+        say('stable', 'PASS' if dif == 0 else 'FAIL', '%s: channels differing frame 1 vs 2: %d' % (tag, dif))
 
 # perf: the budget table (echo); judged against the per-preset budgets in notes\fargrid1\STATUS.md
 BUDGET = {1: (0.15, 36.0), 2: (0.30, 40.0), 3: (0.60, 44.0), 4: (1.20, 110.0)}	# far build GPU ms, both volumes MB at 1080p
