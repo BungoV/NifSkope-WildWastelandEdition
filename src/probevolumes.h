@@ -24,7 +24,7 @@
  *       Measured on the grid: coverage, overshoot into other air, overshoot into solid
  *    6. hand fixes: a .recx room's own "shapes" replace the fitted ones (matched by its anchor)
  *  Refuters (ProbeVolumeSpec::red, WW_CELL_VOLUMES_RED / --red): nosky, nowall, noopen, noback, nofloor, nogrow,
- *  nofold, nomerge, onebox, boxonly, noglass, nowedge, noevidence, noids, norecx; the stage record: fpsoup, noskip
+ *  nofold, nomerge, onebox, boxonly, noglass, nowedge, noevidence, noids, norecx; the stage record: fpsoup, noskip; the GI map (probevolumesgi.h): nogimap, gione
  *  (probeVolumesCheck). */
 
 #include "probeplace.h"
@@ -209,7 +209,8 @@ QString probeVolumesStage( const ProbeSoup & soup, const std::vector<ProbeVolume
 /*! `nifskope -no-gui volumes --soup <psp> --out <dir> [--key K] [--world W] [--interior] [--markers f] [--recx f]
  *  [--rect x0,y0,x1,y1 (clip, and the placer's apertures as evidence)] [--skymax s] [--red r] [--grid] [--view-dump f]`:
  *  builds, writes `<dir>/<key>.space` + `.space.manifest` (+ `<key>.spacegrid` with --grid: float origin[3], cell;
- *  int dims[3]; int32 label per cell), or prints "space: skipped (clean)" when the record matches. */
+ *  int dims[3]; int32 label per cell), or prints "space: skipped (clean)" when the record matches.
+ *  `--gi-map f`: the rooms mapped onto a GI room grid of the same soup (probevolumesgi.h), written as a TSV. */
 int probeVolumesCli( const QStringList & args );
 
 #endif // PROBEVOLUMES_H

@@ -364,6 +364,7 @@ HEADERS += \
 	src/farlight.h \
 	src/proberooms.h \
 	src/probevolumes.h \
+	src/probevolumesgi.h \
 	src/probesky.h \
 	src/probeplace.h \
 	src/cellrefs.h \
@@ -634,6 +635,7 @@ SOURCES += \
 	src/farlight.cpp \
 	src/proberooms.cpp \
 	src/probevolumes.cpp \
+	src/probevolumesgi.cpp \
 	src/probesky.cpp \
 	src/probefar.cpp \
 	src/probeplace.cpp \

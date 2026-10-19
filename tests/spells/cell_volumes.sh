@@ -8,12 +8,12 @@
 #           in-rock points in no room, coverage re-counted on the written grid, the door / window thresholds with
 #           their evidence and outward normals, shape counts per scene, kept ids, the recx hand shapes, the stage
 #           record (skipped clean; rebuilt for input soup, identity, output), two exterior cells, the debug
-#           view's geometry counts
+#           view's geometry counts, the twins mapped onto a GI room grid (--gi-map)
 #   red     every red below, each run must FAIL
 #
 # RED CONTROLS (each must FAIL):
 #   nosky nowall noopen noback nofloor nogrow nofold nomerge onebox boxonly noglass nowedge noevidence noids norecx
-#   fpsoup noskip
+#   fpsoup noskip nogimap gione
 #
 # USAGE  bash tests/spells/cell_volumes.sh [synth|red] [--red <name>]     OUT= the run folder
 
@@ -28,7 +28,7 @@ RED=""
 [ "${2:-}" = "--red" ] && RED="${3:-}"
 OUT="${OUT:-$REPO/scratchpad/volfit1/gate}"
 CHECK="$REPO/tests/spells/cell_volumes_check.py"
-REDS="nosky nowall noopen noback nofloor nogrow nofold nomerge onebox boxonly noglass nowedge noevidence noids norecx fpsoup noskip"
+REDS="nosky nowall noopen noback nofloor nogrow nofold nomerge onebox boxonly noglass nowedge noevidence noids norecx fpsoup noskip nogimap gione"
 mkdir -p "$OUT"
 LOG="$OUT/cell_volumes_${PHASE}${RED:+_red_$RED}.log"
 : > "$LOG"

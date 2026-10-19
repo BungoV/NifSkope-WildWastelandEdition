@@ -41,6 +41,7 @@ BSD License - see nifskope.h
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1
 #include "gl/cellvolumeview.h"	// lane VOLFIT1
 #include "probevolumes.h"	// lane VOLFIT1: the Space stage
+#include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "gl/cellfxlit.h"
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellwater.h"	// lane WATER1
@@ -73,6 +74,20 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <cstring>
 #include <vector>
+
+/* lane VOLFIT1: feeds the GI result's volume set (lane PERF1's ProbeGiResult::volumes) when this build's GI has one;
+ * before that merge the second overload is chosen and nothing is fed. */
+template <class R>
+static auto wwVolumesIntoGi( R & r, const ProbeVolumesGi & g, int ) -> decltype( (void) r.volumes, bool() )
+{
+	probeVolumesGiFill( g, r.volumes );
+	return true;
+}
+template <class R>
+static bool wwVolumesIntoGi( R &, const ProbeVolumesGi &, long )
+{
+	return false;
+}
 
 namespace
 {
@@ -4394,6 +4409,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	// ---- lane PRTPPLACE: place the probes, write them, draw them
 	QString probeNotes;
 	QString giBakeDir;      // lane PRTPGI: the folder the bake just wrote, relit once the lights are read
+	ProbeVolumes volGi;     // lane VOLFIT1: the Space rooms kept for the GI (WW_CELL_VOLUMES_GI=1)
+	bool volGiOn = false;
 	if ( probing ) {
 		if ( !spec.interior ) {
 			// the ground is part of what a column ray meets, painted or not
@@ -4678,6 +4695,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				probeNotes += QStringLiteral( "  %1\n" ).arg( l );
 			probeNotes += QStringLiteral( "  space stage %1 ms (%2)\n" ).arg( vt.elapsed() ).arg( vok ? QStringLiteral( "ok" ) : QStringLiteral( "FAILED" ) );
 			wwCellVolumeViewPublish( nif, vol );
+			if ( vok && qgetenv( "WW_CELL_VOLUMES_GI" ) == "1" ) {
+				volGi = std::move( vol );
+				volGiOn = true;
+			}
 		}
 		if ( !soupShapesPath.isEmpty() ) {   // lane ALPHATEST1 gate
 			QFile f( QString::fromLocal8Bit( soupShapesPath ) );
@@ -5334,6 +5355,16 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				// lane SKY1; lane SKYINT1: an interior keeps its own ambient, so its grid never stands in for the weather's
 				gi.skyLit = gr.skyLit && !spec.interior && gs.skyRed != QLatin1String( "keepamb" );
 				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
+				if ( volGiOn ) {   // lane VOLFIT1: the Space rooms as the GI's volumes, on the GI room grid's ids
+					const ProbeVolumesGi vg = probeVolumesToGi( volGi, gr.rooms, 0.2f, QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_GI_RED" ) ) );
+					probeNotes += QStringLiteral( "  %1\n" ).arg( vg.census );
+					for ( const QString & l : vg.log )
+						probeNotes += QStringLiteral( "  space to GI: %1\n" ).arg( l );
+					if ( !wwVolumesIntoGi( gr, vg, 0 ) )
+						probeNotes += QStringLiteral( "  space to GI: this build's GI takes no volume set (lane PERF1 not merged); not fed\n" );
+					else if ( vg.shapes.empty() )
+						probeNotes += QStringLiteral( "  space to GI: no room mapped; the GI keeps its stand-in\n" );
+				}
 				probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1: the second slots and the rooms
 				wwCellGiPublish( nif, gi );
 				wwCellAoDecalPublish( nif, gs.aoDecals );	// lane AODECAL1 (null: no decals)

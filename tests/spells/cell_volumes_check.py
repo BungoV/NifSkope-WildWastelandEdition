@@ -7,6 +7,8 @@ re-counted on the grid.
   synth <exe> <work> [--red <name>]
     house     one room (1 box, coverage >= 0.95), a door threshold with the door box as evidence, a window
     twins     two rooms joined by a doorway: a room-room threshold and a room-outside one
+    gimap     the twins onto a GI room grid (--gi-map): two distinct GI ids, nothing logged, the thresholds on
+              those ids, every shape carried (reds nogimap, gione FAIL)
     lroom     an L room: 2 boxes, the notch outdoors (red onebox FAILS)
     church    a pitched roof: <= 3 shapes, coverage >= 0.9, the air over the roof slope in no shape (red nowedge)
     silo      a round tower: one cylinder (red boxonly FAILS)
@@ -114,10 +116,11 @@ def scene_house(window_y=200.0):
                 outside=[(400, -400, 150), (-400, 300, 150), (1200, 300, 150)])
 
 
-def scene_twins(third=False):
+def scene_twins(third=False, door=128):
+    # door 80: under the room grid's pinch (2 x 48), so the GI's own room grid also names A and B apart
     tris = ground(-1600 if third else -800, -800, 2000, 1300)
-    tris += room(0, 0, 600, 500, 300, {'-y': [(200, 328, 0, 220)], '+x': [(200, 328, 0, 220)]})
-    tris += room(616, 0, 1216, 500, 300, {'-x': [(200, 328, 0, 220)]})   # its -x wall is A's +x wall: same doorway
+    tris += room(0, 0, 600, 500, 300, {'-y': [(200, 200 + door, 0, 220)], '+x': [(200, 200 + door, 0, 220)]})
+    tris += room(616, 0, 1216, 500, 300, {'-x': [(200, 200 + door, 0, 220)]})   # its -x wall is A's +x wall: same doorway
     rooms = {'A': [(300, 250, 150)], 'B': [(900, 250, 150)]}
     if third:
         tris += room(-700, 0, -100, 500, 300, {'-y': [(-500, -372, 0, 220)]})
@@ -506,6 +509,47 @@ def synth(exe, work, red):
                 fails.append('twins: no threshold from A to the outside')
             if thresholds_between(sp, got['B'], 'outside'):
                 fails.append('twins: B (no outer door) has a threshold to the outside')
+
+    # the GI map (src/probevolumesgi.h): each twin onto one GI room id of its own, its thresholds re-named onto those ids
+    def gimap(name, sc):
+        gm = os.path.join(work, name + '.gimap')
+        if os.path.exists(gm):
+            os.remove(gm)
+        spg, _, _, _ = build(name, sc, extra=('--gi-map', gm))
+        if not spg:
+            return None, None, None
+        gotg = judge_truth(name, sc, spg, fails)
+        rows = [l.rstrip('\n').split('\t') for l in open(gm)] if os.path.exists(gm) else []
+        log.append('  %s: %s' % (name, [r for r in rows if r[0] in ('census', 'girooms', 'room', 'threshold', 'log')]))
+        return spg, gotg, rows
+
+    # wide doorways: the GI's room grid calls both rooms outdoors, so each maps to none, logged, nothing fed
+    _, gotw, rows = gimap('twins_gi_wide', s)
+    if rows is not None:
+        logs = [r[1] for r in rows if r[0] == 'log']
+        nshapes = [int(r[1]) for r in rows if r[0] == 'shapes']
+        if len([l for l in logs if 'maps to no GI room' in l]) != 2 or nshapes != [0]:
+            fails.append('gimap: wide twins (no GI rooms) logged %s, shapes %s (want 2 "maps to no GI room", 0)' % (logs, nshapes))
+    sn = scene_twins(door=80)
+    spg, gotg, rows = gimap('twins_gi', sn)
+    if rows is not None:
+        gi_of = {int(r[1]): int(r[2]) for r in rows if r[0] == 'room'}
+        logs = [r[1] for r in rows if r[0] == 'log']
+        thr = [(int(r[1]), int(r[2])) for r in rows if r[0] == 'threshold']
+        nshapes = [int(r[1]) for r in rows if r[0] == 'shapes']
+        ids = {k: gi_of.get(int(str(v), 16), -1) for k, v in gotg.items() if k in ('A', 'B')}
+        if not rows or len(ids) != 2 or min(ids.values()) < 1 or ids['A'] == ids['B']:
+            fails.append('gimap: the twins map to %s (want two distinct GI ids >= 1)' % ids)
+        elif logs:
+            fails.append('gimap: rooms logged as none or several: %s' % logs)
+        else:
+            if sorted(ids.values()) not in [sorted(t) for t in thr]:
+                fails.append('gimap: no threshold between GI rooms %s: %s' % (sorted(ids.values()), thr))
+            if not any(ids['A'] in t and 0 in t for t in thr):
+                fails.append('gimap: no threshold from A\'s GI room to the outdoors: %s' % (thr,))
+            want = sum(len(r['shapes']) for r in spg['rooms'])
+            if nshapes != [want]:
+                fails.append('gimap: shapes %s, the rooms hold %d' % (nshapes, want))
 
     # ids: a third room; A and B keep theirs
     s3 = scene_twins(third=True)

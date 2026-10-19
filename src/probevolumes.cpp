@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 
 #include "proberooms.h"
 #include "gl/cellvolumeview.h"
+#include "probevolumesgi.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -2070,7 +2071,7 @@ bool probeVolumesMarkersRead( const QString & path, std::vector<ProbeVolumeMarke
 
 int probeVolumesCli( const QStringList & args )
 {
-	QString soupPath, outDir, key, world, markersPath, recxPath, rect, recxName, viewDump;
+	QString soupPath, outDir, key, world, markersPath, recxPath, rect, recxName, viewDump, giMap;
 	bool interior = false, gridOut = false, aps = false;
 	ProbeVolumeSpec spec;
 	for ( int i = 0; i < args.size(); i++ ) {
@@ -2085,6 +2086,7 @@ int probeVolumesCli( const QStringList & args )
 		else if ( a == QLatin1String( "--recx-name" ) ) { recxName = nx; i++; }
 		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
 		else if ( a == QLatin1String( "--view-dump" ) ) { viewDump = nx; i++; }
+		else if ( a == QLatin1String( "--gi-map" ) ) { giMap = nx; i++; }
 		else if ( a == QLatin1String( "--skymax" ) ) { spec.skyMax = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--pinch" ) ) { spec.pinch = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--cell" ) ) { spec.cell = nx.toFloat(); i++; }
@@ -2097,7 +2099,7 @@ int probeVolumesCli( const QStringList & args )
 	QTextStream o( stdout );
 	if ( soupPath.isEmpty() || outDir.isEmpty() || ( interior && key.isEmpty() ) || ( !interior && rect.isEmpty() && key.isEmpty() ) ) {
 		o << "usage: volumes --soup S --out D (--interior --key EDID | --rect x0,y0,x1,y1 [--world W] | --key K) [--markers f] "
-			"[--recx f [--recx-name N]] [--skymax s] [--red r] [--grid] [--apertures] [--view-dump f]\n";
+			"[--recx f [--recx-name N]] [--skymax s] [--red r] [--grid] [--apertures] [--view-dump f] [--gi-map f]\n";
 		return 2;
 	}
 	ProbeSoup soup;
@@ -2171,6 +2173,30 @@ int probeVolumesCli( const QStringList & args )
 		if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
 			f.write( QStringLiteral( "rooms=%1 shapes=%2 thresholds=%3 lines=%4 tris=%5\n" ).arg( g.rooms ).arg( g.shapes ).arg( g.quads )
 				.arg( g.lines.size() / 6 ).arg( g.tris.size() / 9 ).toUtf8() );
+	}
+	if ( !giMap.isEmpty() ) {   // the rooms onto a GI room grid built from the same soup (the default room spec)
+		ProbeRooms gr;
+		if ( !probeRoomsBuild( soup, ProbeRoomSpec(), &gr ) ) {
+			o << "volumes: GI room grid failed: " << gr.error << "\n";
+			return 1;
+		}
+		const ProbeVolumesGi g = probeVolumesToGi( v, gr, 0.2f, spec.red );
+		QFile f( giMap );
+		if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+			o << "volumes: cannot write " << giMap << "\n";
+			return 1;
+		}
+		QString t = QStringLiteral( "census\t%1\ngirooms\t%2\n" ).arg( g.census ).arg( gr.rooms );
+		for ( size_t i = 0; i < g.rooms.size(); i++ )
+			t += QStringLiteral( "room\t%1\t%2\t%3\t%4\t%5\t%6\n" ).arg( v.rooms[i].id ).arg( g.rooms[i].giRoom ).arg( g.rooms[i].votes )
+				.arg( g.rooms[i].samples ).arg( g.rooms[i].outdoors ).arg( g.rooms[i].split.join( ' ' ) );
+		for ( const ProbeVolumesGiThreshold & th : g.thresholds )
+			t += QStringLiteral( "threshold\t%1\t%2\n" ).arg( th.rooms[0] ).arg( th.rooms[1] );
+		t += QStringLiteral( "shapes\t%1\n" ).arg( g.shapes.size() );
+		for ( const QString & l : g.log )
+			t += QStringLiteral( "log\t%1\n" ).arg( l );
+		f.write( t.toUtf8() );
+		o << g.census << "\n";
 	}
 	return ok ? 0 : 1;
 }
