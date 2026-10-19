@@ -30,6 +30,8 @@ while [ $# -gt 0 ]; do
 		*) echo "unknown argument $1"; exit 2 ;;
 	esac
 done
+# a queued run that should no longer start (the PC shuts down, the window closed): touch release/.fargrid1_hold
+[ -f "$ROOT/release/.fargrid1_hold" ] && { echo "HELD: release/.fargrid1_hold exists, no run"; exit 0; }
 case "$RED" in ''|farnoterr|farseam|farjitter) ;; *) echo "unknown red $RED"; exit 2 ;; esac
 DATA="/e/Tools/Fallout 4/DataUnpacked/Data"
 GAME="${FARGRID1_GAME:-/x/Programs/Steam/steamapps/common/Fallout 4/Data}"
