@@ -210,19 +210,18 @@ class Judge:
                 self.verdict('cell_off', same and quiet, 'byte-identical=%s echo-off=%s' % (same, quiet))
             else:
                 # the cell view is not deterministic run to run (far foliage sways): the old build twice gives the
-                # noise floor. A third run moves a few more pixels around what sways (the far band only), so the new
-                # build may differ only within 32 px of the old-vs-old unstable pixels, and nowhere beyond; a real
-                # change of the Off path (a shadow, a tint) moves pixels on the near street, far from the foliage
+                # noise floor. A third run moves a few more pixels at the edge of what sways, so the new build may
+                # differ only within 3 px of the old-vs-old unstable pixels (at most 0.001% of the picture beyond);
+                # a real change of the Off path (a shadow, a tint) moves thousands of pixels away from the foliage
                 from scipy.ndimage import binary_dilation
                 o1, o2, nw = (np.asarray(Image.open(self.f('cell_off_%s.png' % k)).convert('RGB')).astype(int) for k in ('old', 'old2', 'new'))
                 stable = (o1 == o2).all(axis=2)
                 off = stable & (nw != o1).any(axis=2)
-                far = off & ~binary_dilation(~stable, iterations=32)
+                far = off & ~binary_dilation(~stable, iterations=3)
                 share = 1.0 - stable.mean()
-                # the woods sway more than a street: up to a quarter may move; the cube shots carry the byte-for-byte proof
-                ok = quiet and int(far.sum()) == 0 and share < 0.25
+                ok = quiet and int(far.sum()) <= 0.00001 * far.size and share < 0.05
                 self.verdict('cell_off', ok, 'echo-off=%s old-vs-old unstable %.2f%% of pixels; new differs on %d stable pixels, '
-                             '%d of them beyond 32 px of the unstable ones (max step %d)'
+                             '%d of them beyond 3 px of the unstable ones (max step %d)'
                              % (quiet, 100 * share, int(off.sum()), int(far.sum()), int(np.abs(nw - o1)[off].max()) if off.any() else 0))
         v = {k: grey(self.f('cell_v%d.png' % k))[:, :, 0] for k in range(1, 6) if self.have('cell_v%d.png' % k)}
         if not v:
@@ -245,22 +244,13 @@ class Judge:
             distinct = not np.array_equal(v[1], v[2]) and not np.array_equal(v[2], v[4])
             ok &= distinct
             det.append('views distinct=%s' % distinct)
-        # each view is its own launch: pixels the old build moves between two identical launches (leaf sway, glare) are the
-        # noise floor, 8 px around them are left out of the per-pixel comparisons across views (reported, never hidden)
-        noise = None
-        if self.have('cell_off_old.png') and self.have('cell_off_old2.png'):
-            from scipy.ndimage import binary_dilation
-            n1, n2 = (np.asarray(Image.open(self.f('cell_off_%s.png' % k)).convert('RGB')) for k in ('old', 'old2'))
-            noise = binary_dilation(~(n1 == n2).all(axis=2), iterations=8)
-            det.append('noise floor %.1f%% left out' % (100 * float(noise.mean())))
         if ok:
             w = grey(self.f('cell_v5.png'))
             wR, inMap = w[:, :, 0], w[:, :, 1]
             ground = inMap > 0.5
             diff = v[4] - np.minimum(np.minimum(v[1], v[2]), v[3])
-            keep = ~noise if noise is not None else np.ones(diff.shape, dtype=bool)
-            darker = float(np.mean((diff < -3.0 / 255.0) & keep))
-            lighter = float(np.mean((diff > 3.0 / 255.0) & keep))
+            darker = float(np.mean(diff < -3.0 / 255.0))
+            lighter = float(np.mean(diff > 3.0 / 255.0))
             ok &= darker + lighter < 0.002
             det.append('composed!=min: double-dark %.3f%% lit-gap %.3f%%' % (100 * darker, 100 * lighter))
             # the sky draws the same in every view of the ladder; the scene is every other pixel
@@ -298,7 +288,7 @@ class Judge:
                     smooth = np.ones_like(d4, dtype=bool)
                     for k in (1, 2, 3):
                         smooth &= np.abs(np.diff(v[k], axis=ax)) <= 0.02
-                    m = (nearb[1:, :] if ax == 0 else nearb[:, 1:]) & smooth & (keep[1:, :] if ax == 0 else keep[:, 1:])
+                    m = (nearb[1:, :] if ax == 0 else nearb[:, 1:]) & smooth
                     seams.extend(d4[m].tolist())
                 if seams:
                     p999 = float(np.percentile(seams, 99.9))
