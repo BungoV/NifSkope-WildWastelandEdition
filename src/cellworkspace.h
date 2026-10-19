@@ -225,6 +225,9 @@ private:
 	QAction * cellShadow = nullptr;
 	QAction * cellSsr = nullptr;
 	QAction * cellSsrExt = nullptr;
+	QAction * cellSsgi = nullptr;	// lane SSGI1
+	QMenu * cellSsgiQ = nullptr;
+	QActionGroup * cellSsgiQGroup = nullptr;
 	QAction * cellAoDecal = nullptr;
 	QAction * cellGiGpu = nullptr;
 	QAction * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off

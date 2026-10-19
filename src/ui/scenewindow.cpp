@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/gametaa.h"
+#include "gl/cellssgi.h"	// lane SSGI1
 #include "esmweather.h"
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
@@ -179,7 +180,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveCheck( taaBox, "gameTaa", tr( "Temporal AA" ), wwGameTaaOn() );	// lane MOTION1: every mode, ships off
 	placeholderCheck( tr( "Contact Shadows" ) );
 	placeholderCheck( tr( "SSAO" ) );
-	placeholderCheck( tr( "SSGI" ) );
+	liveCheck( ssgiBox, "cellSsgi", tr( "SSGI" ), wwCellSsgiOn() );	// lane SSGI1: ships off
 	placeholderCheck( tr( "Bloom" ) );
 	heading( tr( "Diagnostics" ) );
 	liveCheck( frameTimersBox, "frameTimers", tr( "Frame Timers" ), PassTime::on() );	// lane PERF1: ships off
@@ -276,6 +277,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( volAirBox, &wwVolAirSetOn );
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	liveToggle( taaBox, &wwGameTaaSetOn );
+	liveToggle( ssgiBox, &wwCellSsgiSetOn );
 	liveToggle( frameTimersBox, &PassTime::setOn );	// lane PERF1
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
 		if ( live )

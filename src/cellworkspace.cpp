@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
+#include "gl/cellssgi.h"	// lane SSGI1
 #include "gl/cellwater.h"	// lane CELLALL1: the Water row
 #include "cellaodecal.h"	// lane CELLALL1: the AO decals row
 #include "gl/gametaa.h"
@@ -535,6 +536,23 @@ void CellWorkspacePanel::buildUi()
 	cellTaa = tick( showMenu, tr( "Temporal AA" ), "CellWorkspaceTemporalAa", wwGameTaaOn() );
 	cellSsr = tick( showMenu, tr( "SSR" ), "CellWorkspaceSsr", wwCellSsrOn() );
 	cellSsrExt = tick( showMenu, tr( "SSR outdoors" ), "CellWorkspaceSsrOutdoors", wwCellSsrExteriorOn() );
+	// lane SSGI1: the screen-space bounce, ships off; its quality is FO4CS's four tiers
+	cellSsgi = tick( showMenu, tr( "SSGI" ), "CellWorkspaceSsgi", wwCellSsgiOn() );
+	cellSsgi->setEnabled( !wwCellSsgiPinned() );
+	cellSsgiQ = showMenu->addMenu( tr( "SSGI quality" ) );
+	cellSsgiQ->setObjectName( QStringLiteral( "CellWorkspaceSsgiQuality" ) );
+	cellSsgiQGroup = new QActionGroup( cellSsgiQ );
+	cellSsgiQGroup->setExclusive( true );
+	{
+		const QStringList names = { tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = cellSsgiQ->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == wwCellSsgiQuality() );
+			cellSsgiQGroup->addAction( a );
+		}
+	}
 	cellDof = tick( showMenu, tr( "Depth of field" ), "CellWorkspaceCellDof", wwCellDofOn() );
 	cellMblur = tick( showMenu, tr( "Motion blur" ), "CellWorkspaceCellMotionBlur", wwCellMotionBlurOn() );
 	// lane BLOOM1b: the bloom -- Vanilla (the imagespace's own, the default) | FO4CS, then FO4CS's settings, one per
@@ -746,6 +764,12 @@ void CellWorkspacePanel::buildUi()
 	fxLive( cellShadow, &wwCellShadowSetOn );
 	fxLive( cellSsr, &wwCellSsrSetOn );
 	fxLive( cellSsrExt, &wwCellSsrExteriorSetOn );
+	fxLive( cellSsgi, &wwCellSsgiSetOn );
+	connect( cellSsgiQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		wwCellSsgiSetQuality( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
 	auto fxReopen = [this]( QAction * box, void ( *set )( bool ) ) {
 		connect( box, &QAction::toggled, this, [this, set]( bool on ) {
 			set( on );

@@ -47,6 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellssr.h"
+#include "gl/cellssgi.h"
 #include "esmweather.h"
 #include "io/material.h"
 #include "model/nifmodel.h"
@@ -328,6 +329,9 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	// lane SSR1: the reflections' scene pass, and the reflection a flagged opaque draw reads (cellssr.h)
 	if ( mesh && wwAoScene )
 		wwCellSsrDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
+	// lane SSGI1: the screen-space bounce a cell-lit opaque draw reads (cellssgi.h)
+	if ( mesh && wwAoScene )
+		wwCellSsgiDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	/* WW_PBRM_CENSUS (lane PBRR0) rides the same exits: every return of
 	 * setupProgram passes through here with the program it actually bound,
 	 * so the route it prints is the served one. Pick renders (wwKind null) are skipped. */

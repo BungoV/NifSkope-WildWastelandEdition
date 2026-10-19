@@ -144,6 +144,7 @@ private:
 #include "gl/celllights.h"	// lane IMGS1: the imagespace measure
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
 #include "gl/cellssr.h"
+#include "gl/cellssgi.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/cellpasstime.h"	// lane PERF1
 
@@ -4150,6 +4151,9 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Reflections );
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
 	PassTime::end( PassTime::Reflections );
+	PassTime::begin( PassTime::Ssgi );
+	wwCellSsgiPass( scene, cellPasses );	// lane SSGI1: reads that pass's scene colour
+	PassTime::end( PassTime::Ssgi );
 	PassTime::begin( PassTime::Air );
 	wwVolAirPass( scene, cellPasses );	// lane VOLAIR1: the air's froxels
 	PassTime::end( PassTime::Air );

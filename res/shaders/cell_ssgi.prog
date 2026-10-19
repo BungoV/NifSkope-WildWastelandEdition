@@ -1,0 +1,4 @@
+# The cell view's screen-space GI (lane SSGI1; src/gl/cellssgi.cpp). Full-screen passes at the work size.
+# No conditions: never picked for a shape; cellssgi.cpp selects it by name.
+
+shaders cell_ssr.vert cell_ssgi.frag

@@ -236,6 +236,7 @@ HEADERS += \
 	src/gl/cellbloom.h \
 	src/gl/cellprobeview.h \
 	src/gl/cellssr.h \
+	src/gl/cellssgi.h \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
 	src/gl/cellpasstime.h \
@@ -481,6 +482,7 @@ SOURCES += \
 	src/gl/cellbloom.cpp \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellssr.cpp \
+	src/gl/cellssgi.cpp \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \
 	src/gl/cellpasstime.cpp \
