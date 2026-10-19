@@ -1,5 +1,6 @@
 #include "probevolumesgi.h"
 
+#include <QElapsedTimer>
 #include <QMap>
 
 #include <algorithm>
@@ -163,6 +164,8 @@ void forShapeCells( const ProbeRooms & r, const ProbeVolumeShape & s, F f )
 
 QString probeRoomsFromSpace( const ProbeVolumes & v, ProbeRooms * r, const QString & red )
 {
+	QElapsedTimer timer;
+	timer.start();
 	const bool shapesOn = red != QLatin1String( "spaceshapes" );
 	const size_t N = r->a.size();
 	const int nRooms = std::min( int( v.rooms.size() ), 4094 );   // the pack holds ids up to 4094
@@ -202,19 +205,38 @@ QString probeRoomsFromSpace( const ProbeVolumes & v, ProbeRooms * r, const QStri
 			}
 		rcTo[it.key()] = best;
 	}
-	qint64 gapCells = 0, rcOutdoors = 0;
+	// a ROOMCLAMP1 room the Space stage did not keep (too small, a void) stays a room of its own after Space's ids:
+	// made outdoors it took the outdoor answer (no sky in a covered recess: the giblack recess point went black)
+	const bool leftOn = red != QLatin1String( "spaceleftover" );
+	QMap<int, int> leftId;
+	auto mapRc = [&]( int o ) -> int {
+		if ( o <= 0 )
+			return o;
+		if ( rcTo.value( o, 0 ) > 0 )
+			return rcTo.value( o );
+		if ( !leftOn )
+			return 0;
+		auto it = leftId.find( o );
+		if ( it != leftId.end() )
+			return it.value();
+		const int id = nRooms + leftId.size() + 1;
+		if ( id > 4094 )
+			return 0;   // the pack holds ids up to 4094
+		leftId.insert( o, id );
+		return id;
+	};
+	qint64 gapCells = 0, leftCells = 0;
 	std::vector<qint16> a( N ), b( N, -1 );
 	for ( size_t i = 0; i < N; i++ ) {
 		const int o = r->a[i];
 		if ( own[i] > 0 )
 			a[i] = own[i];
-		else if ( o > 0 && rcTo.value( o, 0 ) > 0 ) {
-			a[i] = qint16( rcTo.value( o ) );
-			gapCells++;
-		} else {
-			a[i] = o < 0 ? qint16( -1 ) : qint16( 0 );
-			if ( o > 0 )
-				rcOutdoors++;   // a ROOMCLAMP1 room the Space stage did not keep (open, sky, too small)
+		else {
+			a[i] = qint16( mapRc( o ) );
+			if ( o > 0 && rcTo.value( o, 0 ) > 0 )
+				gapCells++;
+			else if ( a[i] > nRooms )
+				leftCells++;
 		}
 	}
 	// 3. the second names: the Space thresholds only (a box grown 1.5 cells each way across, half a cell along)
@@ -235,6 +257,17 @@ QString probeRoomsFromSpace( const ProbeVolumes & v, ProbeRooms * r, const QStri
 			}
 		} );
 	}
+	// a left-over room keeps ROOMCLAMP1's second names on its own cells and on the cells naming it (its openings)
+	for ( size_t i = 0; i < N && !leftId.isEmpty(); i++ ) {
+		const int ob = r->b[i];
+		if ( b[i] >= 0 || ob < 0 || a[i] < 0 || ( a[i] <= nRooms && mapRc( ob ) <= nRooms ) )
+			continue;
+		const int other = mapRc( ob );
+		if ( other >= 0 && other != a[i] ) {
+			b[i] = qint16( other );
+			bCells++;
+		}
+	}
 	int inGrid = 0, interiorNow = 0;
 	for ( int k = 1; k <= nRooms; k++ ) {
 		if ( cellsOf[size_t( k )] > 0 )
@@ -244,9 +277,11 @@ QString probeRoomsFromSpace( const ProbeVolumes & v, ProbeRooms * r, const QStri
 	}
 	r->a.swap( a );
 	r->b.swap( b );
-	r->rooms = nRooms;
+	r->rooms = nRooms + leftId.size();
 	return QStringLiteral( "space rooms into GI: rooms %1, mapped %2, unmapped %3, interior where the room grid had outdoors %4; "
-		"room-grid rooms taken over %5, room-grid room cells now outdoors %6, gap cells %7, threshold cells %8 (grid %9x%10x%11 cell %12)" )
-		.arg( nRooms ).arg( inGrid ).arg( nRooms - inGrid ).arg( interiorNow ).arg( rcTo.size() ).arg( rcOutdoors ).arg( gapCells )
-		.arg( bCells ).arg( r->dims[0] ).arg( r->dims[1] ).arg( r->dims[2] ).arg( double( r->cell ), 0, 'f', 1 );
+		"room-grid rooms taken over %5, room-grid rooms kept as their own %6 (cells %7), gap cells %8, second-name cells %9 "
+		"(grid %10x%11x%12 cell %13, %14 ms)" )
+		.arg( nRooms ).arg( inGrid ).arg( nRooms - inGrid ).arg( interiorNow ).arg( rcTo.size() ).arg( leftId.size() ).arg( leftCells )
+		.arg( gapCells ).arg( bCells ).arg( r->dims[0] ).arg( r->dims[1] ).arg( r->dims[2] ).arg( double( r->cell ), 0, 'f', 1 )
+		.arg( timer.elapsed() );
 }

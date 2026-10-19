@@ -82,6 +82,15 @@ template <class R>
 static auto wwVolumesIntoGi( R & r, const ProbeVolumesGi & g, int ) -> decltype( (void) r.volumes, bool() )
 {
 	probeVolumesGiFill( g, r.volumes );
+	// the room-grid rooms the Space stage did not keep (ids after Space's) keep the stand-in's boxes and openings
+	const int nSpace = int( g.rooms.size() );
+	const GiVolumeSet st = giVolumesFromRooms( r.rooms );
+	for ( const GiVolumeShape & s : st.shapes )
+		if ( s.room > nSpace )
+			r.volumes.shapes.push_back( s );
+	for ( const GiThreshold & t : st.thresholds )
+		if ( t.rooms[0] > nSpace || t.rooms[1] > nSpace )
+			r.volumes.thresholds.push_back( t );
 	return true;
 }
 template <class R>
@@ -4434,7 +4443,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	// ---- lane PRTPPLACE: place the probes, write them, draw them
 	QString probeNotes;
 	QString giBakeDir;      // lane PRTPGI: the folder the bake just wrote, relit once the lights are read
-	ProbeVolumes volGi;     // lane VOLFIT1: the Space rooms kept for the GI (WW_CELL_VOLUMES_GI=1)
+	std::shared_ptr<const ProbeVolumes> volGi;   // lane VOLFIT1: the Space rooms for the GI (WW_CELL_VOLUMES_GI=1); shared with the kept sky spec
 	bool volGiOn = false;
 	if ( probing ) {
 		if ( !spec.interior ) {
@@ -4722,7 +4731,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			probeNotes += QStringLiteral( "  space stage %1 ms (%2)\n" ).arg( vt.elapsed() ).arg( vok ? QStringLiteral( "ok" ) : QStringLiteral( "FAILED" ) );
 			wwCellVolumeViewPublish( nif, vol );
 			if ( vok && qgetenv( "WW_CELL_VOLUMES_GI" ) == "1" ) {
-				volGi = std::move( vol );
+				volGi = std::make_shared<const ProbeVolumes>( std::move( vol ) );
 				volGiOn = true;
 			}
 		}
@@ -5213,7 +5222,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				gs.brickEdge = qEnvironmentVariable( "WW_CELL_GI_BRICK_EDGE" ).toFloat();
 			gs.passes = qEnvironmentVariableIntValue( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
 			gs.rooms.red = QString::fromLatin1( qgetenv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
-			gs.space = volGiOn ? &volGi : nullptr;   // lane VOLFIT1: WW_CELL_VOLUMES_GI=1, the Space rooms are the GI's rooms
+			gs.space = volGiOn ? volGi : nullptr;   // lane VOLFIT1: WW_CELL_VOLUMES_GI=1, the Space rooms are the GI's rooms
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
 			// lane SKYINT1: and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
 			const quint16 cf = spec.interior ? cellInteriorFlags( world.interior() ) : quint16( 0 );
@@ -5383,7 +5392,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				gi.skyLit = gr.skyLit && !spec.interior && gs.skyRed != QLatin1String( "keepamb" );
 				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
 				if ( volGiOn ) {   // lane VOLFIT1: the Space rooms as the GI's volumes (the room grid now carries their ids)
-					const ProbeVolumesGi vg = probeVolumesToGi( volGi, gr.rooms, 0.2f, QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_GI_RED" ) ) );
+					const ProbeVolumesGi vg = probeVolumesToGi( *volGi, gr.rooms, 0.2f, QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_GI_RED" ) ) );
 					probeNotes += QStringLiteral( "  %1\n" ).arg( vg.census );
 					for ( const QString & l : vg.log )
 						probeNotes += QStringLiteral( "  space to GI: %1\n" ).arg( l );

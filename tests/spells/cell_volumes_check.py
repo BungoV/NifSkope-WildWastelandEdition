@@ -9,7 +9,8 @@ re-counted on the grid.
     twins     two rooms joined by a doorway: a room-room threshold and a room-outside one
     gimap     the twins onto a GI room grid (--gi-map): two distinct GI ids, nothing logged, the thresholds on
               those ids, every shape carried (reds nogimap, gione FAIL); the wide twins relabeled by the Space
-              rooms (probeRoomsFromSpace): both interior, GI ids 1 and 2 (red spaceshapes FAILS)
+              rooms (probeRoomsFromSpace): both interior, GI ids 1 and 2 (red spaceshapes FAILS); the closet's sealed
+              hollow (dropped by Space) a room of its own in the GI grid (red spaceleftover FAILS)
     lroom     an L room: 2 boxes, the notch outdoors (red onebox FAILS)
     church    a pitched roof: <= 3 shapes, coverage >= 0.9, the air over the roof slope in no shape (red nowedge)
     silo      a round tower: one cylinder (red boxonly FAILS)
@@ -33,6 +34,7 @@ re-counted on the grid.
 import json
 import math
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -540,6 +542,13 @@ def synth(exe, work, red):
             fails.append('spacegi: wide twins relabeled as %s (want "%s")' % (sline, want))
         elif sorted(sgi.values()) != [1, 2] or slogs:
             fails.append('spacegi: wide twins map to %s, logged %s (want GI ids 1 and 2, nothing logged)' % (sgi, slogs))
+    # the sealed hollow the Space stage drops stays a room of its own in the GI grid, never outdoors
+    _, _, rows = gimap('closet_gi', scene_closet())
+    if rows is not None:
+        sline = [r[1] for r in rows if r[0] == 'spacegi']
+        m = re.search(r'room-grid rooms kept as their own (\d+) \(cells (\d+)\)', sline[0]) if len(sline) == 1 else None
+        if not m or int(m.group(1)) < 1 or int(m.group(2)) < 1:
+            fails.append('spacegi: closet hollow not kept as a room of its own: %s' % sline)
     sn = scene_twins(door=80)
     spg, gotg, rows = gimap('twins_gi', sn)
     if rows is not None:

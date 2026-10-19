@@ -37,6 +37,7 @@
 
 struct WwCellLighting;
 struct AoDecalSet;	// lane AODECAL1 (src/cellaodecal.h)
+struct ProbeVolumes;	// lane VOLFIT1 (src/probevolumes.h)
 
 struct ProbeGiResult
 {
@@ -153,7 +154,8 @@ struct ProbeGiSpec
 	QString red;
 	ProbeRoomSpec rooms;            //!< lane ROOMCLAMP1: the room labels (its red: WW_CELL_ROOMS_RED)
 	//! lane VOLFIT1: the Space stage's rooms (WW_CELL_VOLUMES_GI=1) relabel the room grid (probevolumesgi.h); null: ROOMCLAMP1's
-	const struct ProbeVolumes * space = nullptr;
+	//! owned: the sky keeps copies of this spec past the load (probeSkyKeep), so no pointer into a load local
+	std::shared_ptr<const ProbeVolumes> space;
 	/*! lane SKY1: the weather light of an exterior (off = none: an interior, or a view the weather
 	 *  does not light), and its refuters (WW_CELL_SKY_RED): "off" neither sky nor sun, "novis" every
 	 *  octant sees the sky, "notint" the glass tint is ignored, "sunthrough" the sun has no shadow ray. */

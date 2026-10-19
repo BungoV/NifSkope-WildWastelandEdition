@@ -13,7 +13,7 @@
 #
 # RED CONTROLS (each must FAIL):
 #   nosky nowall noopen noback nofloor nogrow nofold nomerge onebox boxonly noglass nowedge noevidence noids norecx
-#   fpsoup noskip nogimap gione spaceshapes
+#   fpsoup noskip nogimap gione spaceshapes spaceleftover
 #
 # USAGE  bash tests/spells/cell_volumes.sh [synth|red] [--red <name>]     OUT= the run folder
 
@@ -28,7 +28,7 @@ RED=""
 [ "${2:-}" = "--red" ] && RED="${3:-}"
 OUT="${OUT:-$REPO/scratchpad/volfit1/gate}"
 CHECK="$REPO/tests/spells/cell_volumes_check.py"
-REDS="nosky nowall noopen noback nofloor nogrow nofold nomerge onebox boxonly noglass nowedge noevidence noids norecx fpsoup noskip nogimap gione spaceshapes"
+REDS="nosky nowall noopen noback nofloor nogrow nofold nomerge onebox boxonly noglass nowedge noevidence noids norecx fpsoup noskip nogimap gione spaceshapes spaceleftover"
 mkdir -p "$OUT"
 LOG="$OUT/cell_volumes_${PHASE}${RED:+_red_$RED}.log"
 : > "$LOG"
