@@ -3677,6 +3677,12 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	wwCellImageSpaceSetAdapted( scene, float( sum / double( std::max( counted, 1 ) ) ), counted );
 	// lane BLOOM1: the game blooms a quarter-size copy of the HDR; a full-size (dump) measure is averaged 4x4
 	wwCellImageSpaceSetBloom( scene, px.data(), w, h, div == 1 ? 4 : 1 );
+	static const bool echo = qEnvironmentVariableIntValue( "WW_IS_MEASURE_ECHO" ) == 1;	// lane PERF1: set against the frame's
+	static QString said;
+	if ( echo && wwCellImageSpaceEcho( scene ) != said ) {
+		said = wwCellImageSpaceEcho( scene );
+		qInfo().noquote() << "cell is measure (pass):" << said;
+	}
 	if ( !dump.isEmpty() ) {
 		QFile f( dump );
 		if ( f.open( QIODevice::WriteOnly ) ) {
@@ -4148,7 +4154,7 @@ void GLView::paintGL()
 	wwVolAirPass( scene, cellPasses );	// lane VOLAIR1: the air's froxels
 	PassTime::end( PassTime::Air );
 	PassTime::begin( PassTime::Measure );
-	if ( cellPasses )
+	if ( cellPasses && wwCellImageSpaceMeasureByPass( scene ) )	// lane PERF1: else the linear frame measures it (gl/cellhdr.h)
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
 	PassTime::end( PassTime::Measure );
 	PassTime::begin( PassTime::UmbraDepth );

@@ -1322,6 +1322,11 @@ int wwCellFxRed()
 	return red;
 }
 
+float wwCellImageSpaceAdapted( Scene * scene )
+{
+	return scene && scene->nifModel ? st().adapted.value( scene->nifModel, -1.0f ) : -1.0f;
+}
+
 void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels )
 {
 	if ( !scene || !scene->nifModel )

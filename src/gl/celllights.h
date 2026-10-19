@@ -318,6 +318,8 @@ bool wwCellImageSpaceMeasuresEffects();
 int wwCellFxRed();
 //! the measured mean luminance of the last measure (negative before any)
 void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels );
+//! lane PERF1: the document's adapted value (negative before any measure)
+float wwCellImageSpaceAdapted( Scene * scene );
 /*! lane BLOOM1: the bloom from the measure's float RGBA (w x h, step 4 when it is full size: box-averaged to a
  *  quarter first), HNAM bloom scale * max(0, c - bloom threshold), blurred 15 taps vertical then horizontal;
  *  the shader adds it (bilinear, a quarter of the view) to the HDR before the exposure */
