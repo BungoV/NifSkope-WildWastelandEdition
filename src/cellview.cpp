@@ -951,6 +951,20 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			lightOffRefs.insert( id );
 	}
 	int lightOffHit = 0;
+	/* lane VOLAIR1 (bungo's barrel look test; a measurement pin, never a user toggle, never a shipped default):
+	 * WW_CELL_LIGHT_BOOST = <ref form id hex>:<colour x>:<radius x>[,...] scales those placed lights' colour and
+	 * radius where the cell reads them, so the surfaces, the probe relight and the air all see the same light.
+	 * Unset: no change. */
+	const QByteArray lightBoostPin = qgetenv( "WW_CELL_LIGHT_BOOST" ).trimmed().toLower();
+	QHash<quint32, QPair<float, float>> lightBoost;
+	for ( const QByteArray & t : lightBoostPin.split( ',' ) ) {
+		const QList<QByteArray> f = t.trimmed().split( ':' );
+		bool ok = false;
+		const quint32 id = f.value( 0 ).toUInt( &ok, 16 );
+		if ( ok && f.size() >= 2 )
+			lightBoost.insert( id, qMakePair( f.value( 1 ).toFloat(), f.size() >= 3 ? f.value( 2 ).toFloat() : 1.0f ) );
+	}
+	int lightBoostHit = 0;
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
@@ -1004,6 +1018,14 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		if ( l.color[0] <= 0.0f && l.color[1] <= 0.0f && l.color[2] <= 0.0f ) {
 			dark++;
 			continue;
+		}
+		const auto bi = lightBoost.constFind( r.formID );
+		if ( bi != lightBoost.cend() ) {	// WW_CELL_LIGHT_BOOST
+			lightBoostHit++;
+			for ( int c = 0; c < 3; c++ )
+				l.color[c] *= bi.value().first;
+			if ( bi.value().second > 0.0f )
+				l.radius *= bi.value().second;
 		}
 		for ( int k = 0; k < 3; k++ )
 			l.pos[k] = r.pos[k];
@@ -1260,6 +1282,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		.arg( QStringLiteral( "%1,%2,%3" ).arg( center[0], 0, 'f', 1 ).arg( center[1], 0, 'f', 1 ).arg( center[2], 0, 'f', 1 ) )
 		+ ( lightOffPin.isEmpty() ? QString() : QStringLiteral( " lightoff=%1 (%2 placed lights pinned off)" )	// lane SKYPIC1
 			.arg( QString::fromLatin1( lightOffPin ) ).arg( lightOffHit ) )
+		+ ( lightBoostPin.isEmpty() ? QString() : QStringLiteral( " lightboost=%1 (%2 placed lights boosted)" )	// lane VOLAIR1
+			.arg( QString::fromLatin1( lightBoostPin ) ).arg( lightBoostHit ) )
 		+ QStringLiteral( " norim=%1 ignorerough=%2" )	// lane RIM1: the lights whose shader drops the back-light
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.noRim; } ) )
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )

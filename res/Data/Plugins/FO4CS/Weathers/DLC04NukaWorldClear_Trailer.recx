@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DLC04NukaWorldClear_Trailer",
+			"weather": "DLCNukaWorld.esm|0x000396A3",
+			"groundFog": {
+				"thickness": 603,
+				"strength": 2.86,
+				"hours": {
+					"2": {
+						"thickness": 482,
+						"strength": 1.55
+					},
+					"14": {
+						"thickness": 603,
+						"strength": 2.86
+					}
+				}
+			}
+		}
+	]
+}

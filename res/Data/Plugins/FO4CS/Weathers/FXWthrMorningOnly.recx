@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "FXWthrMorningOnly",
+			"weather": "Fallout4.esm|0x00096C61",
+			"groundFog": {
+				"thickness": 300,
+				"strength": 0.25
+			}
+		}
+	]
+}

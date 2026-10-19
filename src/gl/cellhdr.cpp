@@ -1,4 +1,5 @@
 #include "cellhdr.h"
+#include "cellunits.h"
 
 #include "gl/cellbloom.h"
 #include "gl/celllights.h"
@@ -6,17 +7,19 @@
 #include "gl/renderer.h"
 
 #include <QDebug>
+#include <QFile>
 #include <QHash>
 
 #include <algorithm>
 #include <cstdint>
+#include <vector>
 
 // lane HDR1: the cell view's linear frame and its one tone map (cellhdr.h)
 
 namespace {
 
 constexpr int kSrcUnit = 8;		// the linear frame (sampler2DMS) in cell_hdr.prog; the cell units are 10..16
-constexpr int kFoBloomUnit = 11;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
+constexpr int kFoBloomUnit = WwCellUnit::Bloom;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
 
 struct HdrGpu
 {
@@ -57,7 +60,191 @@ void note( HdrState & s, const QString & line )
 	}
 }
 
+/* lane VOLAIR1 (gates only): WW_CELL_DRAW_PROBE=x,y[;x,y...] (picture pixels, row 0 at the top) watches those pixels
+ * of whatever float target a draw goes to (the linear frame, the obscurance pass's g-buffer) and, with WW_CELL_HDR_DUMP
+ * set, writes <dump>.probe once a frame: every draw that changed one, with the target and the draw's depth test, depth
+ * write and blend state. Names the draw behind a pixel. */
+struct DrawProbe
+{
+	std::vector<int> xy;	// picture coordinates, top row 0
+	QHash<GLint, std::vector<float>> last;	// per target
+	QHash<GLint, std::vector<float>> lastZ;	// per target: window depth (-1 where it cannot be read, multisampled)
+	QByteArray log;
+	GLuint fbo = 0, tex = 0;
+	GLuint zfbo = 0, ztex = 0;	// the multisampled frame's depth, resolved for the read
+	GLenum zfmt = 0;
+	int w = 0, h = 0, zw = 0, zh = 0;
+	int on = -1;
+};
+
+DrawProbe & dprobe()
+{
+	static DrawProbe p;
+	if ( p.on < 0 ) {
+		p.on = 0;
+		const QByteArray spec = qgetenv( "WW_CELL_DRAW_PROBE" );
+		if ( !spec.isEmpty() && !qgetenv( "WW_CELL_HDR_DUMP" ).isEmpty() ) {
+			for ( const QByteArray & pt : spec.split( ';' ) ) {
+				const QList<QByteArray> v = pt.split( ',' );
+				if ( v.size() == 2 ) {
+					p.xy.push_back( v[0].trimmed().toInt() );
+					p.xy.push_back( v[1].trimmed().toInt() );
+				}
+			}
+			p.on = p.xy.empty() ? 0 : 1;
+		}
+	}
+	return p;
+}
+
+// the watched pixels of the bound draw target (W x H, bottom row 0 in GL); false when it cannot be read as float
+bool probeRead( Renderer * r, GLint src, int W, int H, DrawProbe & p, std::vector<float> & out )
+{
+	for ( size_t i = 0; i + 1 < p.xy.size(); i += 2 ) {
+		if ( p.xy[i] < 0 || p.xy[i] >= W || p.xy[i + 1] < 0 || p.xy[i + 1] >= H )
+			return false;	// a smaller target (a shadow map, a probe face): not the picture's
+	}
+	auto fn = r->fn;
+	while ( fn->glGetError() != GL_NO_ERROR ) {
+	}
+	if ( !p.fbo || p.w != W || p.h != H ) {
+		if ( !p.fbo )
+			fn->glGenFramebuffers( 1, &p.fbo );
+		if ( p.tex )
+			fn->glDeleteTextures( 1, &p.tex );
+		fn->glGenTextures( 1, &p.tex );
+		fn->glBindTexture( GL_TEXTURE_2D, p.tex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, W, H, 0, GL_RGBA, GL_FLOAT, nullptr );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		p.w = W;
+		p.h = H;
+	}
+	GLint prevRead = 0;
+	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	const bool scissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	fn->glDisable( GL_SCISSOR_TEST );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, p.fbo );
+	fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, p.tex, 0 );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( src ) );
+	out.assign( p.xy.size() * 2, 0.0f );
+	for ( size_t i = 0; i + 1 < p.xy.size(); i += 2 ) {
+		const int x = p.xy[i], y = H - 1 - p.xy[i + 1];
+		fn->glBlitFramebuffer( x, y, x + 1, y + 1, x, y, x + 1, y + 1, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+	}
+	bool ok = fn->glGetError() == GL_NO_ERROR;
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, p.fbo );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	for ( size_t i = 0; ok && i + 1 < p.xy.size(); i += 2 )
+		fn->glReadPixels( p.xy[i], H - 1 - p.xy[i + 1], 1, 1, GL_RGBA, GL_FLOAT, &out[i * 2] );
+	ok = ok && fn->glGetError() == GL_NO_ERROR;
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( src ) );
+	if ( scissor )
+		fn->glEnable( GL_SCISSOR_TEST );
+	return ok;
+}
+
 }	// namespace
+
+void wwCellDrawProbe( Scene * scene, const QString & what )
+{
+	DrawProbe & p = dprobe();
+	if ( p.on != 1 || !scene || !scene->renderer )
+		return;
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	GLint src = 0, vp[4] = { 0, 0, 1, 1 };
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &src );
+	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	if ( src == 0 || GLuint( src ) == p.fbo )
+		return;
+	std::vector<float> now;
+	if ( !probeRead( r, src, vp[0] + vp[2], vp[1] + vp[3], p, now ) )
+		return;
+	GLboolean dmask = GL_FALSE;
+	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &dmask );
+	GLint dfunc = 0;
+	fn->glGetIntegerv( GL_DEPTH_FUNC, &dfunc );
+	// the depth too: a draw that writes depth and no colour moves what later fragments are tested against
+	std::vector<float> nowZ( p.xy.size() / 2, -1.0f );
+	{
+		GLint prevRead = 0;
+		fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+		while ( fn->glGetError() != GL_NO_ERROR ) {
+		}
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( src ) );
+		for ( size_t i = 0; i + 1 < p.xy.size(); i += 2 )
+			fn->glReadPixels( p.xy[i], vp[1] + vp[3] - 1 - p.xy[i + 1], 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &nowZ[i / 2] );
+		if ( fn->glGetError() != GL_NO_ERROR ) {
+			nowZ.assign( nowZ.size(), -1.0f );
+			const HdrGpu g = hdrGpus().value( r );
+			const int W = vp[0] + vp[2], H = vp[1] + vp[3];
+			if ( GLuint( src ) == g.fbo && g.dsFormat ) {	// the frame: resolve its depth into a plain texture first
+				if ( !p.zfbo || p.zw != W || p.zh != H || p.zfmt != g.dsFormat ) {
+					if ( !p.zfbo )
+						fn->glGenFramebuffers( 1, &p.zfbo );
+					if ( p.ztex )
+						fn->glDeleteTextures( 1, &p.ztex );
+					fn->glGenTextures( 1, &p.ztex );
+					fn->glBindTexture( GL_TEXTURE_2D, p.ztex );
+					fn->glTexImage2D( GL_TEXTURE_2D, 0, g.dsFormat, W, H, 0, GL_DEPTH_STENCIL,
+						g.dsFormat == GL_DEPTH32F_STENCIL8 ? GL_FLOAT_32_UNSIGNED_INT_24_8_REV : GL_UNSIGNED_INT_24_8, nullptr );
+					fn->glBindTexture( GL_TEXTURE_2D, 0 );
+					p.zw = W;
+					p.zh = H;
+					p.zfmt = g.dsFormat;
+				}
+				const bool scissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+				fn->glDisable( GL_SCISSOR_TEST );
+				fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, p.zfbo );
+				fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, p.ztex, 0 );
+				fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+				fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, p.zfbo );
+				for ( size_t i = 0; i + 1 < p.xy.size(); i += 2 )
+					fn->glReadPixels( p.xy[i], H - 1 - p.xy[i + 1], 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &nowZ[i / 2] );
+				if ( fn->glGetError() != GL_NO_ERROR )
+					nowZ.assign( nowZ.size(), -2.0f );
+				fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( src ) );
+				if ( scissor )
+					fn->glEnable( GL_SCISSOR_TEST );
+			}
+		}
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	}
+	std::vector<float> & lastZ = p.lastZ[src];
+	if ( lastZ.size() != nowZ.size() )
+		lastZ.assign( nowZ.size(), -1.0f );
+	const bool seen = p.last.contains( src );
+	std::vector<float> & last = p.last[src];
+	if ( !seen )
+		last.assign( now.size(), -1.0f );
+	const QString target = GLuint( src ) == hdrGpus().value( r ).fbo ? QStringLiteral( "frame" ) : QStringLiteral( "fbo%1" ).arg( src );
+	for ( size_t i = 0; i + 1 < p.xy.size(); i += 2 ) {
+		const float * a = &last[i * 2];
+		const float * b = &now[i * 2];
+		if ( a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3] && lastZ[i / 2] == nowZ[i / 2] )
+			continue;
+		GLint cullFace = 0, frontFace = 0;
+		GLfloat offF = 0.0f, offU = 0.0f;
+		fn->glGetIntegerv( GL_CULL_FACE_MODE, &cullFace );
+		fn->glGetIntegerv( GL_FRONT_FACE, &frontFace );
+		fn->glGetFloatv( GL_POLYGON_OFFSET_FACTOR, &offF );
+		fn->glGetFloatv( GL_POLYGON_OFFSET_UNITS, &offU );
+		p.log += QStringLiteral( "cull %1/0x%2/0x%3 offset %4 %5 %6 " ).arg( int( fn->glIsEnabled( GL_CULL_FACE ) ) ).arg( cullFace, 0, 16 )
+			.arg( frontFace, 0, 16 ).arg( int( fn->glIsEnabled( GL_POLYGON_OFFSET_FILL ) ) ).arg( double( offF ) ).arg( double( offU ) ).toUtf8();
+		p.log += QStringLiteral( "z %1 -> %2 " ).arg( double( lastZ[i / 2] ), 0, 'g', 9 ).arg( double( nowZ[i / 2] ), 0, 'g', 9 ).toUtf8();
+		p.log += QStringLiteral( "px %1,%2 %3 %4 test=%5 func=0x%6 write=%7 blend=%8 rgba %9 %10 %11 %12 -> %13 %14 %15 %16\n" )
+			.arg( p.xy[i] ).arg( p.xy[i + 1] ).arg( target, what )
+			.arg( int( fn->glIsEnabled( GL_DEPTH_TEST ) ) ).arg( dfunc, 0, 16 ).arg( int( dmask ) )
+			.arg( int( fn->glIsEnabled( GL_BLEND ) ) )
+			.arg( double( a[0] ), 0, 'g', 9 ).arg( double( a[1] ), 0, 'g', 9 ).arg( double( a[2] ), 0, 'g', 9 )
+			.arg( double( a[3] ), 0, 'g', 9 )
+			.arg( double( b[0] ), 0, 'g', 9 ).arg( double( b[1] ), 0, 'g', 9 ).arg( double( b[2] ), 0, 'g', 9 )
+			.arg( double( b[3] ), 0, 'g', 9 ).toUtf8();
+	}
+	last.swap( now );
+	lastZ.swap( nowZ );
+}
 
 bool wwCellHdrActive()
 {
@@ -176,6 +363,7 @@ void wwCellHdrEnd( Scene * scene )
 	HdrState & s = hst();
 	if ( !s.active || s.scene != scene || !scene || !scene->renderer )
 		return;
+	wwCellDrawProbe( scene, QStringLiteral( "at the frame's end" ) );	// lane VOLAIR1 (gates only)
 	s.active = false;
 	s.scene = nullptr;
 	Renderer * r = scene->renderer;
@@ -189,6 +377,82 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glBlitFramebuffer( 0, 0, s.w, s.h, 0, 0, s.w, s.h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST );
 	const GLenum blitErr = fn->glGetError();
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+	// lane VOLAIR1 (gates only): WW_CELL_HDR_DUMP=<file> writes the linear frame before the bloom and the tone map,
+	// samples resolved: int32 W H, then W x H x RGBA float32, bottom row first. Every frame (a still path: the last).
+	static const QByteArray hdrDump = qgetenv( "WW_CELL_HDR_DUMP" );
+	if ( !hdrDump.isEmpty() ) {
+		GLuint tex = 0, fbo = 0;
+		fn->glGenTextures( 1, &tex );
+		fn->glBindTexture( GL_TEXTURE_2D, tex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, s.w, s.h, 0, GL_RGBA, GL_FLOAT, nullptr );
+		fn->glGenFramebuffers( 1, &fbo );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, fbo );
+		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0 );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
+		fn->glBlitFramebuffer( 0, 0, s.w, s.h, 0, 0, s.w, s.h, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, fbo );
+		std::vector<float> px( size_t( s.w ) * size_t( s.h ) * 4 );
+		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+		fn->glReadPixels( 0, 0, s.w, s.h, GL_RGBA, GL_FLOAT, px.data() );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( s.prevDraw ) );
+		fn->glDeleteFramebuffers( 1, &fbo );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		fn->glDeleteTextures( 1, &tex );
+		QFile f( QString::fromLocal8Bit( hdrDump ) );
+		if ( f.open( QIODevice::WriteOnly ) ) {
+			const int32_t wh[2] = { s.w, s.h };
+			f.write( reinterpret_cast<const char *>( wh ), sizeof( wh ) );
+			f.write( reinterpret_cast<const char *>( px.data() ), qint64( px.size() * sizeof( float ) ) );
+		}
+		static bool said = false;
+		if ( !said ) {
+			said = true;
+			qInfo().noquote() << QStringLiteral( "cell hdr: dump of the linear frame %1x%2 to %3 (every frame)" ).arg( s.w ).arg( s.h )
+				.arg( QString::fromLocal8Bit( hdrDump ) );
+		}
+		// and <file>.depth: the main pass's own depth (samples nearest-resolved), to set against the obscurance
+		// pass's: int32 W H, float32 projection [col][row] x 16, then W x H window depth float32, bottom row first
+		GLuint dtex = 0, dfbo = 0;
+		fn->glGenTextures( 1, &dtex );
+		fn->glBindTexture( GL_TEXTURE_2D, dtex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, g.dsFormat, s.w, s.h, 0, GL_DEPTH_STENCIL,
+			g.dsFormat == GL_DEPTH32F_STENCIL8 ? GL_FLOAT_32_UNSIGNED_INT_24_8_REV : GL_UNSIGNED_INT_24_8, nullptr );
+		fn->glGenFramebuffers( 1, &dfbo );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, dfbo );
+		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, dtex, 0 );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
+		fn->glBlitFramebuffer( 0, 0, s.w, s.h, 0, 0, s.w, s.h, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, dfbo );
+		std::vector<float> dz( size_t( s.w ) * size_t( s.h ) );
+		fn->glReadPixels( 0, 0, s.w, s.h, GL_DEPTH_COMPONENT, GL_FLOAT, dz.data() );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( s.prevDraw ) );
+		fn->glDeleteFramebuffers( 1, &dfbo );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		fn->glDeleteTextures( 1, &dtex );
+		if ( dprobe().on == 1 ) {	// this frame's log (its obscurance pass, then the frame), then a clean one
+			QFile pf( QString::fromLocal8Bit( hdrDump ) + QStringLiteral( ".probe" ) );
+			if ( pf.open( QIODevice::WriteOnly ) )
+				pf.write( dprobe().log );
+			dprobe().log.clear();
+			dprobe().last.clear();
+		}
+		QFile df( QString::fromLocal8Bit( hdrDump ) + QStringLiteral( ".depth" ) );
+		if ( df.open( QIODevice::WriteOnly ) ) {
+			const auto & pm = r->globalUniforms->projectionMatrix;
+			float proj[16];
+			for ( int c = 0; c < 4; c++ )
+				for ( int k = 0; k < 4; k++ )
+					proj[c * 4 + k] = pm[c][k];
+			const int32_t wh[2] = { s.w, s.h };
+			df.write( reinterpret_cast<const char *>( wh ), sizeof( wh ) );
+			df.write( reinterpret_cast<const char *>( proj ), sizeof( proj ) );
+			df.write( reinterpret_cast<const char *>( dz.data() ), qint64( dz.size() * sizeof( float ) ) );
+		}
+		while ( fn->glGetError() != GL_NO_ERROR ) {
+		}
+	}
 	// lane BLOOM1b: the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat );
 

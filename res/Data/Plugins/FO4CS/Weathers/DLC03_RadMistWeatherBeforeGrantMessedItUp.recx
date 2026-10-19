@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DLC03_RadMistWeatherBeforeGrantMessedItUp",
+			"weather": "DLCCoast.esm|0x000427EB",
+			"groundFog": {
+				"thickness": 1000,
+				"strength": 8.0,
+				"hours": {
+					"2": {
+						"thickness": 984,
+						"strength": 8.0
+					},
+					"14": {
+						"thickness": 1000,
+						"strength": 8.0
+					}
+				}
+			}
+		}
+	]
+}

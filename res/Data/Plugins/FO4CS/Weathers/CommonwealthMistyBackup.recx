@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthMistyBackup",
+			"weather": "Fallout4.esm|0x002392A5",
+			"groundFog": {
+				"thickness": 721,
+				"strength": 4.48,
+				"hours": {
+					"2": {
+						"thickness": 804,
+						"strength": 5.97
+					},
+					"14": {
+						"thickness": 721,
+						"strength": 4.48
+					}
+				}
+			}
+		}
+	]
+}

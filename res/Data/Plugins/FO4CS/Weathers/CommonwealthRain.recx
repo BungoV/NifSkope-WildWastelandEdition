@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthRain",
+			"weather": "Fallout4.esm|0x001CA7E4",
+			"groundFog": {
+				"thickness": 626,
+				"strength": 3.14
+			}
+		}
+	]
+}

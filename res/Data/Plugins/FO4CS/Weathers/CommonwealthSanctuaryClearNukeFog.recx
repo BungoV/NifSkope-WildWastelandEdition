@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthSanctuaryClearNukeFog",
+			"weather": "Fallout4.esm|0x001A6994",
+			"groundFog": {
+				"thickness": 307,
+				"strength": 0.25,
+				"hours": {
+					"2": {
+						"thickness": 336,
+						"strength": 0.28
+					},
+					"14": {
+						"thickness": 307,
+						"strength": 0.25
+					}
+				}
+			}
+		}
+	]
+}

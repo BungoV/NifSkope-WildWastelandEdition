@@ -414,6 +414,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 	}
 	if ( singleSample )
 		glEnable( GL_MULTISAMPLE );
+	if ( !selectionFlags )
+		wwCellDrawProbe( scene, QStringLiteral( "shape %1 '%2' second=%3" ).arg( id() ).arg( name ).arg( int( drawInSecondPass ) ) );	// lane VOLAIR1 (gates only)
 
 	if ( xRayDraw )
 		glDepthMask( GL_TRUE );

@@ -35,7 +35,8 @@ BSD License - see nifskope.h
  * name while a draw receives. Shadows OFF never builds a map and never swaps.
  *
  * Divergences, stated: legacy (non-PBR) shapes cast but do not receive; alpha-test
- * cutouts cast solid; GPU-skinned casters are skinned on the CPU for the map; an
+ * cutouts cast what their base map's alpha test keeps (lane VOLAIR1, 10-15; they cast solid before,
+ * red WW_CSM_RED=atsolid); GPU-skinned casters are skinned on the CPU for the map; an
  * orthographic view draws no shadows; the right/top edge of the light window is
  * l' + viewport x texel (INFERRED; the spec floors it separately, <= 1 quantum).
  *

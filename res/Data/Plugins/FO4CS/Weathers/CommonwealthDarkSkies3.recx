@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthDarkSkies3",
+			"weather": "Fallout4.esm|0x00226448",
+			"groundFog": {
+				"thickness": 600,
+				"strength": 2.82,
+				"hours": {
+					"2": {
+						"thickness": 627,
+						"strength": 3.15
+					},
+					"14": {
+						"thickness": 600,
+						"strength": 2.82
+					}
+				}
+			}
+		}
+	]
+}

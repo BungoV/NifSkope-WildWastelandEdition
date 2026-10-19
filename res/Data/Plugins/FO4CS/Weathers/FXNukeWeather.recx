@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "FXNukeWeather",
+			"weather": "Fallout4.esm|0x001256FB",
+			"groundFog": {
+				"thickness": 396,
+				"strength": 0.77,
+				"hours": {
+					"2": {
+						"thickness": 462,
+						"strength": 1.35
+					},
+					"14": {
+						"thickness": 396,
+						"strength": 0.77
+					}
+				}
+			}
+		}
+	]
+}

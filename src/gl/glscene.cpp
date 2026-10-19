@@ -545,14 +545,18 @@ bool Scene::grabRefractionSource()
 void Scene::drawShapes()
 {
 	NodeList secondPass;
+	wwCellDrawProbe( this, QStringLiteral( "before the scene" ) );	// lane VOLAIR1 (gates only)
 	collectShapes( secondPass );
+	wwCellDrawProbe( this, QStringLiteral( "after the first pass" ) );
 	drawGrid();
 
 	if ( !secondPass.list().isEmpty() )
 		drawSelection(); // preserve the legacy highlight beneath transparency
 
 	drawDeferredShapes( secondPass );
+	wwCellDrawProbe( this, QStringLiteral( "after the second pass" ) );
 	drawShapeEffects();
+	wwCellDrawProbe( this, QStringLiteral( "after the shape effects" ) );
 }
 
 void Scene::collectShapes( NodeList & secondPass )

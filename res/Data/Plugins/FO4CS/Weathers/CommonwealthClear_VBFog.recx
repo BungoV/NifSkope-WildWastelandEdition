@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthClear_VBFog",
+			"weather": "Fallout4.esm|0x002486A4",
+			"groundFog": {
+				"thickness": 512,
+				"strength": 1.85,
+				"hours": {
+					"2": {
+						"thickness": 545,
+						"strength": 2.2
+					},
+					"14": {
+						"thickness": 512,
+						"strength": 1.85
+					}
+				}
+			}
+		}
+	]
+}
