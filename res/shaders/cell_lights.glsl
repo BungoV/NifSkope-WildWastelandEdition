@@ -1370,11 +1370,6 @@ vec3 cellCubeProbe( vec2 uv, vec3 normalView )
 }
 #endif
 
-#if !defined( WW_CELL_PBR ) && ( !defined( WW_CELL_FX ) || defined( WW_FX_DECALLIT ) )
-
-/* The lit colour, in the program's sqrt-of-linear space. Interior: the cell's ambient, directional
- * and placed lights replace the viewport light. Exterior: the placed lights add to what the
- * viewport (or the Lookdev sun) already lit. */
 // lane SSGI1: the screen-space bounce (src/gl/cellssgi.h, cell_ssgi.frag): the probe GI keeps the share of the
 // hemisphere the march left open, the screen's bounce is added (FO4CS's probe-fill law; red "stack" adds on top)
 uniform bool cellSsgiOn;
@@ -1392,6 +1387,11 @@ vec3 cellSsgiE( vec3 eProbe )
 	return eProbe * keep + max( s.rgb, vec3( 0.0 ) ) * cellSsgiK.y;
 }
 
+#if !defined( WW_CELL_PBR ) && ( !defined( WW_CELL_FX ) || defined( WW_FX_DECALLIT ) )
+
+/* The lit colour, in the program's sqrt-of-linear space. Interior: the cell's ambient, directional
+ * and placed lights replace the viewport light. Exterior: the placed lights add to what the
+ * viewport (or the Lookdev sun) already lit. */
 vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview, float specMask, vec3 specCol,
               float alphaR, float kSmith, vec3 emissive, vec3 cubeK )
 {
