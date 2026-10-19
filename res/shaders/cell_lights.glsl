@@ -707,7 +707,10 @@ vec3 cellGiKeyNormal( float k )
  *   Its volume: the screen mask (the full-screen GI pass, cell_gihalf.frag), else the fine room grid at P + N x 0.75
  *   cell, else 1.75 cell (blended and effect draws, the probe passes); neither: every voxel's first slot.
  * Red WW_CELL_GI_VIS=march compiles WW_CELL_GI_MARCH: today's chain (cellGiSampleFull), every call, as before PERF1.
- * probe 95 paths: 12 own volume, 13 own volume + threshold blend, 14 the nearest own-volume voxel, 15 none (trilinear). */
+ * Probe 95 paths, in lane GIBLACK2's words (tests/spells/cell_giblack_check.py): 1 the volume's own voxels (a room's
+ * blend; also with a threshold's), 2 the nearest own-volume voxel (a room's fill), 4 no volume known or none of its
+ * voxels in reach (the trilinear); outdoors, a surface the room grid cannot place (lane GIBLACK2's stranded): 6 and 7
+ * the outdoors' volume, 5 none in reach. A probe picture reads the mask at its own pixel (the screen pass's read). */
 #ifdef WW_CELL_GI_MARCH
 vec4 cellGiSample( vec3 P, vec3 N )
 {
@@ -743,6 +746,12 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 	ivec3 dm = ivec3( cellGiDims );
 	ivec3 sl = ivec3( N.x >= 0.0 ? 0 : 1, N.y >= 0.0 ? 2 : 3, N.z >= 0.0 ? 4 : 5 ) * dm.z;
 	vec3 n2 = N * N;
+	/* outdoors (a sky-lit grid), a surface in no interior volume whose own reads (0.75, 1.75 cell) are solid stands in the
+	 * outdoors' volume (room 0), as the march's stranded pick takes it (probe 95: 6, 7); buried a third cell deep, the darker
+	 * of that and the trilinear (lane GIDARK1's guard: a pillar beside a shop front took the street's light) */
+	bool strand = cellGiRooms && cellGiSky && L.x == -2;
+	if ( strand )
+		L = ivec2( 0, -1 );
 	bool anyRoom = !cellGiRooms || L.x == -2;
 	vec4 own = vec4( 0.0 ), oth = vec4( 0.0 );
 	float wOwn = 0.0, wOth = 0.0, tAcc = 0.0, tBest = 0.0;
@@ -804,14 +813,19 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 			}
 		}
 	}
-	if ( wOwn <= 0.0 ) {
-		cellGiPath = 15;
-		return cellGiTrilinear( P, N );
-	}
-	vec4 s = own / wOwn;
-	cellGiPath = nearPick ? 14 : wOth > 0.0 ? 13 : 12;
+	vec4 s = wOwn > 0.0 ? own / wOwn : vec4( 0.0 );
 	if ( wOth > 0.0 )
 		s = mix( s, oth / wOth, 0.5 * clamp( tAcc / wOwn, 0.0, 1.0 ) );
+	cellGiPath = anyRoom ? 4 : ( nearPick ? 2 : 1 ) + ( strand ? 5 : 0 );
+	bool lone = strand && wOwn > 0.0 && cellRoomSolid( P + N * ( 2.75 * cellRoomsCell ) );
+	if ( wOwn <= 0.0 || lone ) {	// one trilinear site: each cellGiSample inlines it
+		const vec3 Y = vec3( 0.2126, 0.7152, 0.0722 );
+		vec4 tr = cellGiTrilinear( P, N );
+		if ( wOwn <= 0.0 || ( tr.a > 0.0 && dot( tr.rgb, Y ) / tr.a < dot( s.rgb, Y ) / max( s.a, 1e-6 ) ) ) {
+			cellGiPath = strand && wOwn <= 0.0 ? 5 : 4;
+			return tr;
+		}
+	}
 	return s;
 }
 
@@ -851,11 +865,16 @@ bool cellGiHalfAt( vec3 P, vec3 N, out vec4 s )
 vec4 cellGiSample( vec3 P, vec3 N )
 {
 	vec4 s;
-	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, N, s ) ) {
-		cellGiPath = 11;	// probe 95 never takes it (cellProbe 0 only)
-		return s;
+	float m = 0.0;
+	if ( cellGiHalfOn && cellPass == 0 ) {
+		if ( cellProbe == 0 && cellGiHalfAt( P, N, s ) ) {
+			cellGiPath = 11;
+			return s;
+		}
+		if ( cellProbe != 0 )	// a probe picture: cellGiHalf holds the volumes' mask (src/gl/celllights.cpp)
+			m = texelFetch( cellGiHalf, ivec2( gl_FragCoord.xy - cellGiHalfRect.xy ), 0 ).r;
 	}
-	return cellGiVolume( P, N, cellGiVolAt( P, N ) );
+	return cellGiVolume( P, N, m > 0.5 ? ivec2( int( m + 0.5 ) - 1, -1 ) : cellGiVolAt( P, N ) );
 }
 #endif
 
