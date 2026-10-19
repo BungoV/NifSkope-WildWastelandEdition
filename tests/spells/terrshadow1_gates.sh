@@ -19,11 +19,11 @@
 #   cascade  Cascade Quality Low..Ultra: the echoed fit (D, map, splits) and the composed picture
 #   sun      Sun Path: the engine arc vs the real path over the day (echo only)
 #   perf     GPU ms per producer per preset at 1080p in the cell view (gpums + the echoed timers)
-#   cell     the combined low-sun picture in the cell view (Concord, sun 6 degrees E): every view of the ladder;
+#   cell     the combined low-sun picture in the cell view (west of Concord, sun 10 degrees ESE): every view of the ladder;
 #            composed == min of the producers, the step across the handoff, contact vs cascades; Off = before
 #
 # usage: bash tests/spells/terrshadow1_gates.sh [--out DIR] [--only off,march,...] [--red NAME]
-#   reds (WW_SHADOW_RED): terrnodecay terrflip terrseam mulcompose contactflip novogel
+#   reds (WW_SHADOW_RED): terrnodecay terrflip terrseam mulcompose contactflip novogel; (WW_CSM_RED) solidcast
 # Every red must end FAIL. One NifSkope of ours at a time (our --port), second monitor; run it under
 # withlock.sh nifskope.
 
@@ -64,6 +64,7 @@ REDPIN=""
 case "$RED" in
 	'') ;;
 	terrnodecay|terrflip|terrseam|mulcompose|contactflip|novogel) REDPIN="WW_SHADOW_RED=$RED" ;;
+	solidcast) REDPIN="WW_CSM_RED=solidcast" ;;	# leaf cards cast solid cards again: the cell judge must FAIL
 	*) echo "unknown red $RED"; exit 2 ;;
 esac
 { echo "red=${RED:-none}"; sha1sum "$ARM/NifSkope.exe" "$OLD"; echo "game=$GAME"; } > "$OUT/arms.txt"
@@ -102,7 +103,7 @@ shot() {  # shot <exe> <tag> <nif> [KEY=VALUE ...] -- one picture + echoes
 	reg delete "$REGKEY" //f > /dev/null 2>&1
 }
 
-CELLCAM="${TERRSHADOW1_CELLCAM:--57800 70325 6290 -57500 82000 6100 70}"
+CELLCAM="${TERRSHADOW1_CELLCAM:--61400 68000 6074 -71400 67000 5900 70}"
 cellshot() {  # cellshot <exe> <tag> [KEY=VALUE ...] -- the cell view through the camera path; frame 001 is the picture
 	local exe="$1" tag="$2"; shift 2
 	local png="$OUT/$tag.png" try
@@ -202,16 +203,17 @@ if want sun && [ -z "$RED" ]; then
 		shot "$ARM/NifSkope.exe" sun_$h "$CUBE" $V8 WW_LOOKDEV_HOUR=$h WW_LOOKDEV_SUN=1 WW_LOOKDEV_SKY=1 WW_LOOKDEV_DAY=0 $ON WW_SUNPATH=0
 	done
 fi
-# the cell view (Concord): a player-eye camera, in-bounds per notes/neongi1/tools/camcheck.py, Concord's street corner looking north (the sun behind, in the south) over
-# the fields; sky, sun disc and far LOD on; DOF and motion blur off
+# the cell view (west of Concord): a player-eye camera, in-bounds per notes/neongi1/tools/camcheck.py, in the woods looking west with
+# the sun 10 degrees up in the ESE behind it, so the leaf cards' cut-outs dapple the ground; sky, sun disc and far LOD on (the far
+# sway's clock pinned, a still picture); DOF and motion blur off
 cell_setup() {
 	ESM="$(winpath "$GAME/Fallout4.esm")"
 	printf 'fps 16\nframes 2\nkey 0.000000 %s\nkey 0.062500 %s\n' "$CELLCAM" "$CELLCAM" > "$OUT/cell.path"
 	CELL=( "WW_CELL_OPEN=$ESM|Commonwealth|-15,17|1" "WW_CELL_DATAROOT=$(winpath "$DATA")" WW_CELL_LIT=1 WW_CELL_FARLOD=1
 		"WW_RENDER_PATH=$(winpath "$OUT/cell.path")" WW_RENDER_SIZE=1600x1000 WW_TAA=0 WW_CELL_IS=0 WW_CELL_PARTICLES=0
 		WW_LOOKDEV_WEATHER=CommonwealthClear "WW_LOOKDEV_PLUGINS=$ESM" WW_LOOKDEV_SKY=1 WW_LOOKDEV_SUN=1 WW_LOOKDEV_GROUND=0
-		$ON WW_LOOKDEV_HOUR=17 WW_CELL_GRASS_WIND_T=1 WW_CELL_FARLOD_CARDSWAY=0 )
-	LOW=( WW_SUNPATH=1 "WW_SUNPATH_PIN=${TERRSHADOW1_LOWSUN:-6,90}" )
+		$ON WW_LOOKDEV_HOUR=17 WW_CELL_GRASS_WIND_T=1 WW_CELL_FARLOD_CARDSWAY=0 WW_CELL_FARLOD_SWAYTIME=1 )
+	LOW=( WW_SUNPATH=1 "WW_SUNPATH_PIN=${TERRSHADOW1_LOWSUN:-10,120}" )
 }
 
 # shellcheck disable=SC2086
@@ -220,7 +222,7 @@ if [[ "$ONLY" == *",cellprobe,"* ]]; then
 	echo "cellprobe"
 	cell_setup
 	for s in ${TERRSHADOW1_PROBE:-6,240}; do
-		cellshot "$ARM/NifSkope.exe" probe_${s/,/_} "${CELL[@]}" WW_SUNPATH=1 WW_SUNPATH_PIN=$s WW_SHADOW_CASCADE=4 WW_SHADOW_CONTACT=4 WW_SHADOW_TERRAIN=4 WW_SHADOW_TERRAIN_SYNC=1 WW_SHADOW_VIEW=${TERRSHADOW1_PROBE_VIEW:-4} "WW_SHADOW_DUMP=$(winpath "$OUT/probe_${s/,/_}.dump")"
+		cellshot "$ARM/NifSkope.exe" probe_${s/,/_} "${CELL[@]}" WW_SUNPATH=1 WW_SUNPATH_PIN=$s WW_SHADOW_CASCADE=4 WW_SHADOW_CONTACT=4 WW_SHADOW_TERRAIN=4 WW_SHADOW_TERRAIN_SYNC=1 WW_SHADOW_VIEW=${TERRSHADOW1_PROBE_VIEW:-4} "WW_SHADOW_DUMP=$(winpath "$OUT/probe_${s/,/_}.dump")" ${TERRSHADOW1_PROBE_EXTRA:-}
 	done
 fi
 

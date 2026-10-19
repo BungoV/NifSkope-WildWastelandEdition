@@ -1,5 +1,61 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane TERRSHADOW1 (2026-10-17..19, branch terrshadow1-20261016): unified sun shadows (cascades, contact, terrain, real sun path)
+
+- **One sun-shadow set** (`src/gl/shadowset.*`, `res/shaders/ww_sunshadow.glsl`). Every producer reads the same sun.
+  The composition is min( mix( 1, cascades, fade ), terrain, contact ): there is no double darkening and no seam.
+  Four settings rows, all Off by default, apply live: Cascade Quality, Contact Shadows, Terrain Shadows, Sun Path.
+  Each has Low/Medium/High/Ultra presets. Off draws the old path, byte-identical.
+- **(A) Cascades.** The cascade fit is tiered per preset: distance, map size, splits, a receiver-plane depth bias
+  and the PCF taps.
+- **(B) Contact shadows.** A port of Bend Studio's screen-space shadows (Apache-2.0; the Sony header is kept and
+  the credit is in LICENSE.md). It reads the cell view's opaque depth.
+- **(C) Terrain shadows.** The drawn LAND and far-LOD terrain shapes are rasterized to a height grid
+  (Low 512 / Medium 1024 / High 2048 at 160 units a texel; Ultra 4096 at 128 units). A sweep then marches exact
+  sun-direction rays (one per minor texel, in a sheared fan) and writes an RG16 map (lit above, shadowed below).
+  Beyond the cascades it gives the strongest shadow, with no seam. `wwTerrainShadowMap()` exposes the map for a
+  later far-fog lane.
+  - **Off the frame.** The raster and the sweep run on a worker thread. The finished map uploads 512 KB a frame
+    into the back texture and flips in when complete. A re-sweep happens only when the sun moves more than
+    0.25 degrees or the terrain set or grid changes.
+  - **Echo.** It reports worker, sweep_cpu_ms, frame_cpu_max_ms, upload_cpu_ms, upload_gpu_ms, mem_mb and cpu_mb.
+- **(D) Sun path.** This is the real sun for Boston (42.4 N): the declination comes from the game day and the hour
+  angle from the game hour. It sits beside the engine arc, goes below the horizon at night, and crossfades from sun
+  to moon.
+  - **Vanilla arc vs real path.** The engine's daytime sun never drops below about 27.6 degrees (at 7:00 and
+    19:00). The real sun is 2.15 degrees up at 7:00 and 34.9 at noon.
+- **The --vt-height finding (report only, no re-bake).** Commonwealth.VT.lodm already carries a height sheet:
+  R16_UNORM storing height / 8 + 32767, at 64/128/256 units a texel. Role-7 horizon sheets also exist. This lane
+  rasterizes the drawn terrain instead, for three reasons:
+  - The drawn terrain is what casts and receives, so there is no self-shadow bias against a second source.
+  - It stays current when plugins are edited.
+  - There is no reader in the tree yet (only the writer and the validator).
+
+  Reading the sheet would remove the raster cost (now off-thread) and cover the whole worldspace at 64 units. It
+  would cost 8-unit quantization, a baked pyramid and a new reader. It is left as an open item.
+- **Debug and dump.**
+  - `WW_SHADOW_VIEW` 1..5: cascades, terrain, contact, composed, weights.
+  - `WW_SHADOW_RED`: terrnodecay, terrflip, terrseam, mulcompose, contactflip, novogel.
+  - `WW_SHADOW_DUMP=<file>` writes the terrain heights and the map, for an independent CPU march.
+  - `WW_SUNPATH_PIN=elev,az` pins the sun.
+- **Gates** (`tests/spells/terrshadow1_gates.sh`, judged by `terrshadow1_gates.py` and `terrshadow1_march.py`):
+  - off, march, length, handoff, cascade and sun PASS on the cube (lane runs, 10-18). Length vs 512 / tan(elev) at
+    30/10/3/1 degrees: -9.2 / -4.1 / -2.5 / -2.1 %. Terrain frame_cpu_max <= 0.198 ms (the sweep is off the frame);
+    terrain memory 2 / 8 / 32 / 128 MB (Low..Ultra); contact gpu 0.138 / 0.235 / 0.456 / 0.726 ms.
+  - cell (west of Concord, in the woods looking west, sun pinned 10 degrees ESE): composed = min of the producers
+    (0.001 % off), no seam (p99.9 step 0.020), the ridge past the cascades matches terrain within 0.7 %, contact
+    99.7 % beside cascade shadow. Open: the terrain view shows 0.6 % shadowed in this picture (the gate wants 1 %).
+    Each view is its own launch, so pixels the old build moves between two identical launches (far sway) are the
+    measured noise floor and are left out of the cross-view comparisons; the share is reported.
+  - The per-preset 1080p GPU ms (`WW_RENDER_GPUMS`, now written to `<shot>.gpums.txt`) and the reds come from the
+    shared test run (HARNESSMIN1); the checks are listed in the lane notes.
+- **Alpha-tested casters.** With Cascade Quality on, a caster whose material (or NiAlphaProperty) alpha-tests cuts
+  its base map's alpha in the depth pass, so leaf cards and fences cast their cut-outs, not solid cards (in the
+  woods the ground was ~97 % in shadow). Off keeps the solid casters byte for byte. The cascade echo counts them
+  (`cut=N`); red `WW_CSM_RED=solidcast` keeps them solid and the cell gate FAILs.
+- **One sun on screen too.** With Sun Path = Real the drawn sun disc and glare move with the light (they stayed at
+  the clock's position before).
+
 ## Lane CABLES1 (2026-10-16, branch cables1-20261016): cables in the cell view (power lines, string-light wires, ropes)
 
 - **The cell view draws Fallout 4 cables.** A cable is a reference whose base is a BNDS record (no model). Its XBSD

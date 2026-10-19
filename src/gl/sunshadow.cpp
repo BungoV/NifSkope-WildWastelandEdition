@@ -82,6 +82,7 @@ struct CsmState
 	double rc[3] = { 1, 0, 0 }, uc[3] = { 0, 1, 0 };	// the camera's right and up rows (world)
 	double split[2] = { kSplit0, kSplit1 };
 	int casters = 0, tris = 0;
+	int cutCasters = -1;	// lane TERRSHADOW1: casters cut by their alpha (-1 = the Cascade row is off)
 	// lane TERRSHADOW1: the fit's numbers, CSM1's constants unless Cascade Quality picks a preset
 	double baseD = kDefaultDistance, split0 = kSplit0, split1 = kSplit1, blend = kBlend, lightBack = kLightBack;
 	int baseMap = kDefaultMap;
@@ -282,6 +283,7 @@ struct Caster
 	const Shape * sh;
 	bool twoSided;
 	std::vector<Vector3> skinned;
+	float alphaCut = 0;	// lane TERRSHADOW1: > 0 = the caster cuts its base map's alpha
 };
 
 bool ensureTargets( CsmState & s, Renderer * r, QString & why )
@@ -440,7 +442,8 @@ static void sunShadowPassImpl( Scene * scene )
 
 	// lane TERRSHADOW1: Cascade Quality (Off = CSM1's own numbers, the WW_CSM_DISTANCE / WW_CSM_MAP pins kept)
 	WwCascadePreset cp;
-	if ( wwShadowCascadePreset( cp ) ) {
+	const bool presetOn = wwShadowCascadePreset( cp );
+	if ( presetOn ) {
 		s.D = cp.D;
 		s.map = cp.map;
 		s.split0 = cp.split0;
@@ -477,6 +480,11 @@ static void sunShadowPassImpl( Scene * scene )
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
 		Caster c { sh, sh->wwDoubleSided(), {} };
+		// lane TERRSHADOW1: with the unified Cascade row on, an alpha-tested caster (leaf cards, fences) casts its cut-out,
+		// not a solid card. Off keeps CSM1's solid casters byte for byte. Red WW_CSM_RED=solidcast keeps them solid.
+		if ( presetOn && !red( "solidcast" ) && sh->wwCasterTexProp() && sh->coords.size() > 0
+			&& sh->coords.at( 0 ).size() == sh->verts.size() )
+			c.alphaCut = sh->wwCasterAlphaCut();
 		if ( cpuSkin && sh->wwGpuSkinned() ) {
 			c.skinned.resize( size_t( sh->verts.size() ) );
 			for ( qsizetype v = 0; v < sh->verts.size(); v++ )
@@ -486,6 +494,7 @@ static void sunShadowPassImpl( Scene * scene )
 		casters.push_back( std::move( c ) );
 	}
 	s.casters = int( casters.size() );
+	s.cutCasters = presetOn ? int( std::count_if( casters.begin(), casters.end(), []( const Caster & k ) { return k.alphaCut > 0; } ) ) : -1;
 	float gz = 0, gxy[2] = { 0, 0 }, ghalf = 0;
 	s.groundCast = wwLookdevGroundFrame( scene, gz, gxy, ghalf );
 
@@ -561,6 +570,23 @@ static void sunShadowPassImpl( Scene * scene )
 				fn->glEnable( GL_CULL_FACE );
 			prog->uni4m( "modelViewMatrix", k.sh->viewTrans().toMatrix4() );
 			const float * attrs = k.skinned.empty() ? &( k.sh->verts.constFirst()[0] ) : &( k.skinned.front()[0] );
+			// lane TERRSHADOW1: a cut-out caster also streams its UVs (location 7) and binds its base map
+			const float * cutAttrs[8] = { attrs, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+			std::uint64_t mask = 3;
+			if ( presetOn ) {
+				float cut = 0;
+				if ( k.alphaCut > 0 ) {
+					int texunit = 0;
+					if ( prog->uniSampler( k.sh->wwCasterTexProp(), "BaseMap", 0, texunit, QStringLiteral( "#FFFFFFFF" ),
+							k.sh->wwCasterTexProp()->clampMode ) ) {
+						cut = k.alphaCut;
+						cutAttrs[7] = &( k.sh->coords.at( 0 ).constFirst()[0] );
+						mask = 3ULL | ( 2ULL << 28 );
+					}
+				}
+				prog->uni1f( "csmAlphaCut", cut );
+			}
+			const float * const * attrPtr = ( mask == 3 ) ? &attrs : cutAttrs;
 			// lane SUNCELL1: a welded cell shape gives this cascade only the placements inside its own window
 			if ( wwCellCullCaster( scene, k.sh, k.sh->id(), i, c.clipFromView, cullRanges ) ) {
 				cullIdx.clear();
@@ -569,17 +595,19 @@ static void sunShadowPassImpl( Scene * scene )
 					cullIdx.insert( cullIdx.end(), src + size_t( cullRanges[q] ) * 3,
 						src + ( size_t( cullRanges[q] ) + size_t( cullRanges[q + 1] ) ) * 3 );
 				if ( !cullIdx.empty() )
-					r->drawShape( (unsigned int) ( k.sh->verts.size() ), 3, (unsigned int) cullIdx.size(),
-						GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, cullIdx.data() );
+					r->drawShape( (unsigned int) ( k.sh->verts.size() ), mask, (unsigned int) cullIdx.size(),
+						GL_TRIANGLES, GL_UNSIGNED_SHORT, attrPtr, cullIdx.data() );
 				continue;
 			}
-			r->drawShape( (unsigned int) ( k.sh->verts.size() ), 3, (unsigned int) ( k.sh->triangles.size() * 3 ),
-				GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, k.sh->triangles.constData() );
+			r->drawShape( (unsigned int) ( k.sh->verts.size() ), mask, (unsigned int) ( k.sh->triangles.size() * 3 ),
+				GL_TRIANGLES, GL_UNSIGNED_SHORT, attrPtr, k.sh->triangles.constData() );
 		}
 		if ( s.groundCast ) {
 			// the ground quad, exactly as wwLookdevDrawGround places it (world space, Z up)
 			fn->glEnable( GL_CULL_FACE );
 			prog->uni4m( "modelViewMatrix", vt.toMatrix4() );
+			if ( presetOn )
+				prog->uni1f( "csmAlphaCut", 0.0f );
 			const float x0 = gxy[0] - ghalf, x1 = gxy[0] + ghalf, y0 = gxy[1] - ghalf, y1 = gxy[1] + ghalf;
 			const float quad[12] = { x0, y0, gz, x1, y0, gz, x0, y1, gz, x1, y1, gz };
 			static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -677,5 +705,7 @@ QString wwSunShadowSummary()
 	o += QString( " casters=%1 tris=%2 ground=%3 probe=%4 force=%5 red=%6" ).arg( s.casters ).arg( s.tris ).arg( s.groundCast ? 1 : 0 )
 		.arg( s.probe ).arg( s.force < 0.0f ? QStringLiteral( "off" ) : QString::number( double( s.force ) ) )
 		.arg( s.reds.isEmpty() ? QStringLiteral( "none" ) : s.reds.join( QChar( '+' ) ) );
+	if ( s.cutCasters >= 0 )
+		o += QString( " cut=%1" ).arg( s.cutCasters );
 	return o;
 }

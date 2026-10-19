@@ -47,6 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QElapsedTimer>
 #include <QSet>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -251,6 +252,18 @@ QString Shape::boneNameAt( int i ) const
 bool Shape::wwAlphaTested() const
 {
 	return alphaProperty && alphaProperty->hasAlphaTest();
+}
+
+float Shape::wwCasterAlphaCut() const
+{
+	// the BGSM's test wins over the NiAlphaProperty, as in the lit draw; a zero threshold still cuts alpha 0
+	if ( bslsp && bslsp->bsVersion < 170 ) {
+		if ( Material * mat = bslsp->getMaterial() )
+			return mat->hasAlphaTest() ? std::max( float( mat->alphaTestThreshold() ), 0.5f ) / 255.0f : 0.0f;
+	}
+	if ( alphaProperty && alphaProperty->hasAlphaTest() )
+		return std::max( alphaProperty->alphaThreshold, 0.5f / 255.0f );
+	return 0.0f;
 }
 
 Vector3 Shape::skinVertex( int vertexIndex, const Vector3 & local ) const
