@@ -75,6 +75,7 @@ struct ProbeGiResult
 	 *  "noclamp": no rooms, one value a voxel (the blend before the lane). */
 	bool roomsOn = false;
 	ProbeRooms rooms;
+	GiVolumeSet volumes;                //!< lane PERF1: the GI volumes (the fitter's); empty: the rooms grid stand-in
 	std::vector<float> grid2, gridSky2, slotRooms;
 	std::vector<int> probeRooms;        //!< per probe: its room, its second room (-1 none)
 	int voxelsTwoRooms = 0, voxelsTwoBare = 0, voxelsCentreElsewhere = 0, probesRoomless = 0;

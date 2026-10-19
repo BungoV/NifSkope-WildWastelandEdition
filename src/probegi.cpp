@@ -2117,12 +2117,91 @@ void probeGiAoFreeSwap( ProbeGiResult & r )
 	}
 }
 
+/* lane PERF1: the GI volumes (src/proberooms.h GiVolumeSet), the fitter's or the rooms grid stand-in, for the runtime:
+ * the shapes as 12 floats each; per voxel, each slot's threshold to another volume: the weight 1 - distance / blend
+ * width (the distance from the voxel's centre to the threshold's shape, the nearest threshold of the slot's room) and
+ * the room across it. Both sides' slots carry it, so the blend runs both ways. */
+static void giVolumesInto( ProbeGiResult & r, WwCellGi & gi )
+{
+	QElapsedTimer clock;
+	clock.start();
+	if ( r.volumes.shapes.empty() && r.volumes.thresholds.empty() )
+		r.volumes = giVolumesFromRooms( r.rooms );
+	gi.volShapes.clear();
+	gi.slotThresh.clear();
+	for ( const GiVolumeShape & s : r.volumes.shapes ) {
+		const float v[12] = { s.center[0], s.center[1], s.center[2], float( s.type ), s.size[0], s.size[1], s.size[2],
+			float( s.room ), s.rotation[0], s.rotation[1], s.rotation[2], 0.0f };
+		gi.volShapes.insert( gi.volShapes.end(), v, v + 12 );
+	}
+	const size_t nv = size_t( r.dims[0] ) * size_t( r.dims[1] ) * size_t( r.dims[2] );
+	qint64 byThresh = 0;
+	if ( r.slotRooms.size() == nv && nv && !r.volumes.thresholds.empty() ) {
+		gi.slotThresh.assign( nv * 3, 0.0f );
+		std::vector<int> across( nv * 2, -1 );
+		for ( const GiThreshold & t : r.volumes.thresholds ) {
+			const float bw = t.blendWidth > 0.0f ? t.blendWidth : 1.5f * r.voxel;
+			// shape -> world = Rz Ry Rx; the distance is taken in the shape's frame (a box: the threshold's extent)
+			const double d2r = 3.14159265358979 / 180.0;
+			const double cx = std::cos( t.shape.rotation[0] * d2r ), sx = std::sin( t.shape.rotation[0] * d2r );
+			const double cy = std::cos( t.shape.rotation[1] * d2r ), sy = std::sin( t.shape.rotation[1] * d2r );
+			const double cz = std::cos( t.shape.rotation[2] * d2r ), sz = std::sin( t.shape.rotation[2] * d2r );
+			const double R[3][3] = { { cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx },
+				{ sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx }, { -sy, cy * sx, cy * cx } };
+			double h[3], reach = 0.0;
+			for ( int c = 0; c < 3; c++ ) {
+				h[c] = 0.5 * double( t.shape.size[c] );
+				reach += h[c] * h[c];
+			}
+			reach = std::sqrt( reach ) + double( bw );
+			int lo[3], hi[3];
+			for ( int c = 0; c < 3; c++ ) {
+				lo[c] = std::max( 0, int( std::floor( ( t.shape.center[c] - reach - r.origin[c] ) / r.voxel ) ) );
+				hi[c] = std::min( r.dims[c] - 1, int( std::floor( ( t.shape.center[c] + reach - r.origin[c] ) / r.voxel ) ) );
+			}
+			for ( int z = lo[2]; z <= hi[2]; z++ )
+				for ( int y = lo[1]; y <= hi[1]; y++ )
+					for ( int x = lo[0]; x <= hi[0]; x++ ) {
+						const double p[3] = { r.origin[0] + ( x + 0.5 ) * r.voxel - t.shape.center[0],
+							r.origin[1] + ( y + 0.5 ) * r.voxel - t.shape.center[1], r.origin[2] + ( z + 0.5 ) * r.voxel - t.shape.center[2] };
+						double d2 = 0.0;
+						for ( int c = 0; c < 3; c++ ) {
+							const double l = R[0][c] * p[0] + R[1][c] * p[1] + R[2][c] * p[2];	// R^T p
+							const double e = std::max( std::abs( l ) - h[c], 0.0 );
+							d2 += e * e;
+						}
+						const float w = 1.0f - float( std::sqrt( d2 ) ) / bw;
+						if ( w <= 0.0f )
+							continue;
+						const size_t i = ( size_t( z ) * size_t( r.dims[1] ) + size_t( y ) ) * size_t( r.dims[0] ) + size_t( x );
+						const int pk = int( r.slotRooms[i] );
+						const int s[2] = { pk / 4096 - 1, pk % 4096 - 1 };
+						for ( int q = 0; q < 2; q++ ) {
+							const int o = s[q] < 0 ? -2 : s[q] == t.rooms[0] ? t.rooms[1] : s[q] == t.rooms[1] ? t.rooms[0] : -2;
+							if ( o < -1 || w <= gi.slotThresh[i * 3 + 1 + size_t( q )] )
+								continue;
+							gi.slotThresh[i * 3 + 1 + size_t( q )] = w;
+							across[i * 2 + size_t( q )] = o;
+						}
+					}
+		}
+		for ( size_t i = 0; i < nv; i++ ) {
+			gi.slotThresh[i * 3] = probeRoomsPack( across[i * 2], across[i * 2 + 1] );
+			byThresh += ( across[i * 2] >= 0 || across[i * 2 + 1] >= 0 ) ? 1 : 0;
+		}
+	}
+	gi.volCensus = r.volumes.census + QStringLiteral( "; voxels by a threshold %1 of %2; pack ms %3" ).arg( byThresh )
+		.arg( qint64( nv ) ).arg( double( clock.nsecsElapsed() ) / 1e6, 0, 'f', 0 );
+	std::fprintf( stderr, "%s\n", qPrintable( gi.volCensus ) );
+}
+
 void probeGiRoomsInto( ProbeGiResult & r, WwCellGi & gi )
 {
 	if ( !r.roomsOn || gi.rgba.empty() )
 		return;
 	gi.rgba.insert( gi.rgba.end(), r.grid2.begin(), r.grid2.end() );
 	gi.sky.insert( gi.sky.end(), r.gridSky2.begin(), r.gridSky2.end() );
+	giVolumesInto( r, gi );	// lane PERF1
 	gi.slotRooms = std::move( r.slotRooms );
 	gi.rooms.resize( r.rooms.a.size() );
 	for ( size_t i = 0; i < r.rooms.a.size(); i++ )

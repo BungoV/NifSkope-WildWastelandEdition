@@ -386,6 +386,13 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 			const qsizetype eol = data.startsWith( "#version" ) ? data.indexOf( '\n' ) + 1 : 0;
 			data.insert( eol, "#error WW_SHADER_RED broke this shader on purpose\n" );
 		}
+		// lane PERF1: WW_CELL_GI_VIS=march (red): the GI's per-pixel visibility chain in every shader (cell_lights.glsl)
+		static const bool giMarch = [] {
+			const QByteArray v = qgetenv( "WW_CELL_GI_VIS" ).trimmed().toLower();
+			return v == "march" || v == "red" || v == "old";
+		}();
+		if ( giMarch && data.startsWith( "#version" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_GI_MARCH 1\n" );
 
 		if ( name.ends_with( "frag" ) ) {
 			if ( qsizetype n = data.indexOf( "NUM_TEXTURE_UNITS" ); n >= 0 )

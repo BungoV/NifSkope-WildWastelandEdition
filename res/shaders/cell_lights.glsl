@@ -677,21 +677,6 @@ vec4 cellGiSampleFull( vec3 P, vec3 N )
 	return s;
 }
 
-/* lane PERF1: the GI at half resolution (src/gl/celllights.cpp giHalfPass). A full-screen pass runs the chain above once
- * per 2 x 2 pixels over the shared opaque g-buffer; an opaque cell-lit draw takes the half-res samples round its pixel,
- * weighted by distance, normal and plane, and runs the full chain only where none match (edges, blended draws, effects).
- * The memo: a fragment's later calls with the same P and N reuse the first's result. WW_CELL_GI_RATE (unset half,
- * full: the memo only, old: neither, red: the half pass runs, the surfaces take the full chain). */
-uniform bool cellGiHalfOn;
-uniform sampler2D cellGiHalf;		// rgba: the chain's sample at the half texel's pixel (2h)
-uniform sampler2D cellGiHalfKey;	// xyz: that pixel's world position, w: its packed normal (< 0: no surface)
-uniform vec4 cellGiHalfRect;		// the viewport's x, y; the half size
-uniform bool cellGiMemo;
-vec3 cellGiMemoP, cellGiMemoN;
-vec4 cellGiMemoS;
-int cellGiMemoPath = 0;
-bool cellGiMemoOk = false;
-
 // a unit normal as one float: octahedral, 11 bits a component, exact in a float's mantissa
 float cellGiKeyPack( vec3 n )
 {
@@ -712,11 +697,129 @@ vec3 cellGiKeyNormal( float k )
 	return normalize( n );
 }
 
-// the upsample: the 4 half texels round this pixel; false: none is this surface
+/* lane PERF1 (the GI volumes, the Division deck's D4): the leak guard is the volume a pixel stands in, not a march.
+ * The outdoors is one volume (room 0); every interior room is a volume of its own, drawn as primitive shapes into a
+ * screen mask (src/gl/celllights.cpp giVolPass, cell_givol.frag). A pixel reads only the grid voxels (slots) of its own
+ * volume: the 8 voxels round P + N x half a voxel, trilinear, renormalized. Where a threshold joins two volumes the
+ * voxels near it carry its weight t and the other side's room (baked, src/probegi.cpp probeGiRoomsInto), and the pixel
+ * blends the other side's read in by t / 2: both ways, so light passes in and out through thresholds only.
+ *   cellGiVolume: one copy of the read, loops kept as loops (the bound is a uniform), so a call site costs little.
+ *   Its volume: the screen mask (the full-screen GI pass, cell_gihalf.frag), else the fine room grid at P + N x 0.75
+ *   cell, else 1.75 cell (blended and effect draws, the probe passes); neither: every voxel's first slot.
+ * Red WW_CELL_GI_VIS=march compiles WW_CELL_GI_MARCH: today's chain (cellGiSampleFull), every call, as before PERF1.
+ * probe 95 paths: 12 own volume, 13 own volume + threshold blend, 14 the nearest own-volume voxel, 15 none (trilinear). */
+#ifdef WW_CELL_GI_MARCH
+vec4 cellGiSample( vec3 P, vec3 N )
+{
+	return cellGiSampleFull( P, N );
+}
+#else
+uniform int cellGiLoop8;		// 8: the corner loop's bound, a uniform so the loop stays one body
+uniform bool cellGiHalfOn;
+uniform sampler2D cellGiHalf;		// rgba: the volume read at the screen texel's pixel
+uniform sampler2D cellGiHalfKey;	// xyz: that pixel's world position, w: its packed normal (< 0: no surface)
+uniform vec4 cellGiHalfRect;		// the viewport's x, y; the screen target's size
+uniform float cellGiHalfScale;		// 0.5 half resolution, 1 full
+
+// the volume of a point with no mask: the fine room grid's two names at P + N x 0.75 cell, else 1.75; -2: unknown
+ivec2 cellGiVolAt( vec3 P, vec3 N )
+{
+	if ( !cellGiRooms )
+		return ivec2( -2 );
+	for ( int k = 0; k < 2; k++ ) {
+		ivec2 L = cellRoomAt( P + N * ( ( k == 0 ? 0.75 : 1.75 ) * cellRoomsCell ) );
+		if ( L.x >= 0 )
+			return L;
+	}
+	return ivec2( -2 );
+}
+
+vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
+{
+	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel - 0.5;
+	ivec3 i0 = ivec3( floor( g ) );
+	vec3 f = g - vec3( i0 );
+	ivec3 r0 = ivec3( floor( g + 0.5 ) );
+	ivec3 dm = ivec3( cellGiDims );
+	ivec3 sl = ivec3( N.x >= 0.0 ? 0 : 1, N.y >= 0.0 ? 2 : 3, N.z >= 0.0 ? 4 : 5 ) * dm.z;
+	vec3 n2 = N * N;
+	bool anyRoom = !cellGiRooms || L.x == -2;
+	vec4 own = vec4( 0.0 ), oth = vec4( 0.0 );
+	float wOwn = 0.0, wOth = 0.0, tAcc = 0.0, tBest = 0.0;
+	int other = -1;
+	bool nearPick = false;
+	// pass 0: the 8 corners, own volume (and the thresholds' weight); 1: none had it, the 27 round the nearest corner;
+	// 2: the threshold's other side, the 8 corners
+	for ( int ps = 0; ps < cellGiLoop8 - 5; ps++ ) {	// 3 passes; the bound a uniform: one body, never unrolled
+		if ( ps == 1 && wOwn > 0.0 )
+			continue;
+		if ( ps == 2 && ( other < 0 || tAcc <= 0.0 || wOwn <= 0.0 ) )
+			break;
+		int n = ps == 1 ? 3 * cellGiLoop8 + 3 : cellGiLoop8;	// 27, 8
+		ivec2 R = ps == 2 ? ivec2( other ) : L;
+		for ( int k = 0; k < n; k++ ) {
+			ivec3 c;
+			float w;
+			if ( ps == 1 ) {
+				c = r0 + ivec3( k % 3, ( k / 3 ) % 3, k / 9 ) - 1;
+				vec3 d = vec3( c ) - g;
+				w = 1.0 / ( 1.0 + dot( d, d ) );
+			} else {
+				ivec3 o = ivec3( k & 1, ( k >> 1 ) & 1, ( k >> 2 ) & 1 );
+				c = i0 + o;
+				vec3 t = mix( 1.0 - f, f, vec3( o ) );
+				w = t.x * t.y * t.z;
+			}
+			if ( w <= 0.0 || any( lessThan( c, ivec3( 0 ) ) ) || any( greaterThanEqual( c, dm ) ) )
+				continue;
+			vec4 S4 = cellGiRooms ? texelFetch( cellGiSlots, c, 0 ) : vec4( 0.0 );
+			ivec2 S = cellRoomUnpack( S4.r );
+			int q = ( anyRoom && ps < 2 ) ? 0
+			      : ( S.x >= 0 && ( S.x == R.x || S.x == R.y ) ) ? 0 : ( S.y >= 0 && ( S.y == R.x || S.y == R.y ) ) ? 1 : -1;
+			if ( q < 0 )
+				continue;
+			int bq = q * 6 * dm.z;
+			vec4 u = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + bq + sl.x ), 0 )
+			       + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + bq + sl.y ), 0 )
+			       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + bq + sl.z ), 0 );
+			if ( u.a <= 0.0 )
+				continue;	// an empty slot (no probe of its volume reached the voxel): no weight
+			if ( ps == 2 ) {
+				oth += w * u;
+				wOth += w;
+				continue;
+			}
+			own += w * u;
+			wOwn += w;
+			nearPick = nearPick || ps == 1;
+			if ( ps == 0 && !anyRoom ) {	// the threshold this slot sits by: its weight, and the room across it
+				float t = q == 0 ? S4.b : S4.a;
+				ivec2 O = cellRoomUnpack( S4.g );
+				int oq = q == 0 ? O.x : O.y;
+				tAcc += w * t;
+				if ( oq >= 0 && t > tBest ) {
+					tBest = t;
+					other = oq;
+				}
+			}
+		}
+	}
+	if ( wOwn <= 0.0 ) {
+		cellGiPath = 15;
+		return cellGiTrilinear( P, N );
+	}
+	vec4 s = own / wOwn;
+	cellGiPath = nearPick ? 14 : wOth > 0.0 ? 13 : 12;
+	if ( wOth > 0.0 )
+		s = mix( s, oth / wOth, 0.5 * clamp( tAcc / wOwn, 0.0, 1.0 ) );
+	return s;
+}
+
+// the screen GI's upsample: the 4 screen texels round this pixel; false: none is this surface
 bool cellGiHalfAt( vec3 P, vec3 N, out vec4 s )
 {
 	s = vec4( 0.0 );
-	vec2 u = ( gl_FragCoord.xy - cellGiHalfRect.xy - 0.5 ) * 0.5;
+	vec2 u = ( gl_FragCoord.xy - cellGiHalfRect.xy - 0.5 ) * cellGiHalfScale;	// texel h sits at pixel h / scale
 	ivec2 h0 = ivec2( floor( u ) );
 	vec2 t = u - vec2( h0 );
 	ivec2 hs = ivec2( cellGiHalfRect.zw );
@@ -747,25 +850,14 @@ bool cellGiHalfAt( vec3 P, vec3 N, out vec4 s )
 
 vec4 cellGiSample( vec3 P, vec3 N )
 {
-	if ( cellGiMemo && cellGiMemoOk && P == cellGiMemoP && N == cellGiMemoN ) {
-		cellGiPath = cellGiMemoPath;
-		return cellGiMemoS;
-	}
-	vec4 s = vec4( 0.0 );
-	bool fromHalf = false;
-	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 )
-		fromHalf = cellGiHalfAt( P, N, s );
-	if ( fromHalf )
+	vec4 s;
+	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 && cellGiHalfAt( P, N, s ) ) {
 		cellGiPath = 11;	// probe 95 never takes it (cellProbe 0 only)
-	else
-		s = cellGiSampleFull( P, N );
-	cellGiMemoP = P;
-	cellGiMemoN = N;
-	cellGiMemoS = s;
-	cellGiMemoPath = cellGiPath;
-	cellGiMemoOk = true;
-	return s;
+		return s;
+	}
+	return cellGiVolume( P, N, cellGiVolAt( P, N ) );
 }
+#endif
 
 // lane AODECAL1 (src/gl/cellaodecalgl.h): the baked AO decals of the big movable statics, one texel per pixel,
 // multiplied into the probe term only (the grid was rebuilt without those copies' blocked sky)
