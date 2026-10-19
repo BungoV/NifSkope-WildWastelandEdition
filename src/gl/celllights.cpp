@@ -568,6 +568,18 @@ int wwCellPassRed()
 	return st().passRed;
 }
 
+/* lane PERF1: the GI's rate (WW_CELL_GI_RATE, read once): 0 half (the default: the chain at half resolution, upsampled by
+ * depth and normal, plus the memo), 1 full (the memo only), 2 old (neither: the chain every call, as before), 3 red (the
+ * half pass runs, the surfaces take the full chain: the old picture at the old cost plus the pass) */
+int wwCellGiRate()
+{
+	static const int mode = [] {
+		const QByteArray v = qgetenv( "WW_CELL_GI_RATE" ).trimmed();
+		return v == "full" ? 1 : v == "old" || v == "0" ? 2 : v == "red" ? 3 : 0;
+	}();
+	return mode;
+}
+
 namespace
 {
 /* lane PERF1: the telemetry lines in wwCellLightsUniforms are formatted only when their inputs' bytes change; the
@@ -718,6 +730,14 @@ void wwCellLightsUniforms( Scene * scene )
 		GLint units = 0;
 		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
 		g.units = units;
+	}
+	{	// lane PERF1: the half-res GI's samplers (wwCellAoDraw binds them per draw; never left on unit 0) and the memo
+		const bool fits = g.units > WwCellUnit::GiHalfKey;
+		const int u = fits ? WwCellUnit::GiHalf : g.units > WwCellUnit::Ao ? WwCellUnit::Ao : 9;
+		prog->uni1i( "cellGiHalf", u );
+		prog->uni1i( "cellGiHalfKey", fits ? WwCellUnit::GiHalfKey : u );
+		prog->uni1b( "cellGiMemo", wwCellGiRate() != 2 );
+		prog->uni1b( "cellGiHalfOn", false );	// wwCellAoDraw turns it on, per draw, after this
 	}
 	const bool roomsUp = giDraw && !G->slotRooms.empty() && !G->rooms.empty() && g.units > kRoomUnit;
 	if ( roomsUp && ( g.roomDoc != scene->nifModel || g.roomVersion != s.giVersion.value( scene->nifModel ) ) ) {
@@ -1832,6 +1852,11 @@ struct AoGpu
 	int unit = -1;
 	GLuint decal = 0;		// lane AODECAL1: this frame's AO decal target (0: none)
 	int decalUnit = -1;		// WwCellUnit::AoDecal, or -1 on a GPU without it (lane VOLAIR1: was 20, under the far slots)
+	AoTarget giHalf;		// lane PERF1: the GI at half resolution (RGBA32F), its key on the same FBO's attachment 1
+	GLuint giKey = 0;
+	int giKeyW = 0, giKeyH = 0;
+	bool giReady = false;	// this frame's half-res GI
+	bool giUnits = false;	// the GPU has WwCellUnit::GiHalfKey
 };
 
 QHash<const void *, AoGpu> & aoGpus()
@@ -1878,6 +1903,84 @@ void aoUnits( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g )
 	fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
 	g.unit = units > kAoUnit ? kAoUnit : 9;
 	g.decalUnit = units > WwCellUnit::AoDecal ? WwCellUnit::AoDecal : -1;
+	g.giUnits = units > WwCellUnit::GiHalfKey;
+}
+
+//! lane PERF1: the half-res GI's telemetry line, printed when it changes
+void giEcho( const QString & line )
+{
+	static QString last;
+	if ( line == last )
+		return;
+	last = line;
+	std::fprintf( stderr, "cell gi rate: %s\n", qPrintable( line ) );
+}
+
+/* lane PERF1: the GI at half resolution. The chain (cellGiSampleFull) once per 2 x 2 pixels over the shared opaque
+ * g-buffer: the sample and its key (world position, packed normal), which the opaque cell-lit draws upsample
+ * (cell_lights.glsl cellGiSample). Runs inside wwCellAoPass, after the depth pyramid; the caller restores the state. */
+void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
+{
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	const int hw = ( W + 1 ) / 2, hh = ( H + 1 ) / 2;
+	aoAlloc( fn, g.giHalf, hw, hh, GL_RGBA32F, GL_RGBA, false );
+	if ( !g.giKey )
+		fn->glGenTextures( 1, &g.giKey );
+	if ( g.giKeyW != hw || g.giKeyH != hh ) {
+		fn->glBindTexture( GL_TEXTURE_2D, g.giKey );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, hw, hh, 0, GL_RGBA, GL_FLOAT, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		g.giKeyW = hw;
+		g.giKeyH = hh;
+	}
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.giHalf.fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.giKey, 0 );
+	const GLenum bufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+	fn->glDrawBuffers( 2, bufs );
+	if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+		giEcho( QStringLiteral( "refused(target incomplete): the full chain" ) );
+		return;
+	}
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_gihalf.prog" );
+	if ( !prog ) {
+		giEcho( QStringLiteral( "refused(cell_gihalf.prog did not link): the full chain" ) );
+		return;
+	}
+	wwCellLightsUniforms( scene );	// the surfaces' GI uniforms and grids, on this program
+	prog->uni1b( "cellGiHalfOn", false );
+	prog->uni1b( "cellGiMemo", false );
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
+	fn->glBindTexture( GL_TEXTURE_2D, g.gbuf.tex );
+	prog->uni1i( "giGbuf", WwCellUnit::GiHalf );
+	prog->uni1i( "cellGiHalf", WwCellUnit::GiHalf );	// the same sampler type on the unit (never read here)
+	prog->uni1i( "cellGiHalfKey", WwCellUnit::GiHalf );
+	fn->glUniform2i( prog->uniLocation( "giFull" ), W, H );
+	prog->uni2f( "giProj", p00, p11 );
+	fn->glViewport( 0, 0, hw, hh );
+	fn->glDisable( GL_DEPTH_TEST );
+	fn->glDisable( GL_STENCIL_TEST );
+	fn->glDisable( GL_BLEND );
+	fn->glDisable( GL_CULL_FACE );
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
+	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	r->stopProgram();
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	const GLenum one = GL_COLOR_ATTACHMENT0;
+	fn->glDrawBuffers( 1, &one );
+	g.giReady = true;
+	giEcho( QStringLiteral( "%1 %2x%3 half %4x%5" ).arg( wwCellGiRate() == 3 ? QStringLiteral( "red (the half pass runs, the surfaces take the full chain)" )
+		: QStringLiteral( "half" ) ).arg( W ).arg( H ).arg( hw ).arg( hh ) );
 }
 
 //! lane AOOFF1: the telemetry line, printed when it changes
@@ -1915,6 +2018,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	AoGpu & g = aoGpus()[r];
 	g.ready = false;
 	g.aoReady = false;
+	g.giReady = false;
 	if ( !run || !wwCellLightsWanted( scene ) )
 		return;
 	auto fn = r->fn;
@@ -1925,11 +2029,19 @@ void wwCellAoPass( Scene * scene, bool run )
 	 * obscurance computed from it (step 2's raw, blurs, final) and its apply, never the pass the others read. */
 	const bool forSsr = wwCellSsrWantsTargets( scene );
 	const bool forDecal = g.decalUnit >= 0 && wwCellAoDecalWanted( scene->nifModel );
+	// lane PERF1: the half-res GI reads it too (the GI row on, no probe pass, a GPU with the units)
+	const int giRate = wwCellGiRate();
+	const bool forGi = ( giRate == 0 || giRate == 3 ) && g.giUnits && wwCellGiOn() && wwCellPassFor( scene->nifModel ) == 0;
+	if ( giRate == 1 || giRate == 2 )
+		giEcho( giRate == 1 ? QStringLiteral( "full (the memo only)" ) : QStringLiteral( "old (the chain every call)" ) );
+	else if ( !g.giUnits )
+		giEcho( QStringLiteral( "full (the GPU has no unit %1)" ).arg( WwCellUnit::GiHalfKey ) );
 	if ( !a.on ) {
-		aoEcho( ( forSsr || forDecal ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2" )
+		aoEcho( ( forSsr || forDecal || forGi ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2%3" )
 			.arg( forSsr ? QStringLiteral( " ssr" ) : QString() ).arg( forDecal ? QStringLiteral( " aodecal" ) : QString() )
+			.arg( forGi ? QStringLiteral( " gihalf" ) : QString() )
 			: QStringLiteral( "off (row); no opaque pass (nothing reads it)" ) );
-		if ( !forSsr && !forDecal ) {
+		if ( !forSsr && !forDecal && !forGi ) {
 			a.last = QStringLiteral( "off" );
 			return;
 		}
@@ -2069,6 +2181,8 @@ void wwCellAoPass( Scene * scene, bool run )
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	}
 	fn->glActiveTexture( GLenum( prevActive ) );
+	if ( forGi )	// lane PERF1
+		giHalfPass( scene, g, W, H, p00, p11 );
 
 	g.ready = true;
 	g.aoReady = a.on;
@@ -2211,6 +2325,25 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 			GLint dvp[4] = { 0, 0, 1, 1 };
 			glGetIntegerv( GL_VIEWPORT, dvp );
 			prog->uni4f_l( prog->uniLocation( "cellAoDecalRect" ), FloatVector4( float( dvp[0] ), float( dvp[1] ), 0.0f, 0.0f ) );
+		}
+	}
+	/* lane PERF1: the half-res GI, read by the opaque draws (and the decals on them), like the obscurance; the
+	 * upsample's keys send any pixel that is not the g-buffer's surface to the full chain */
+	if ( prog->uniLocation( "cellGiHalfOn" ) >= 0 ) {
+		const bool giOn = g.giReady && g.doc == scene->nifModel && wwCellGiRate() == 0 && ( !glIsEnabled( GL_BLEND ) || decalProg );
+		if ( g.giUnits ) {
+			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
+			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? g.giHalf.tex : 0 );
+			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalfKey ) );
+			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? g.giKey : 0 );
+			r->fn->glActiveTexture( GLenum( prevActive ) );
+		}
+		prog->uni1b( "cellGiHalfOn", giOn );
+		if ( giOn ) {
+			GLint vp[4] = { 0, 0, 1, 1 };
+			glGetIntegerv( GL_VIEWPORT, vp );
+			prog->uni4f_l( prog->uniLocation( "cellGiHalfRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
+				float( g.giHalf.w ), float( g.giHalf.h ) ) );
 		}
 	}
 	if ( on ) {

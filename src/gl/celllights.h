@@ -208,6 +208,8 @@ int wwCellPassRed();
 const WwCellGi * wwCellGiFor( const void * nif );
 //! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
 bool wwCellGiOn();
+// lane PERF1: WW_CELL_GI_RATE: 0 half (default), 1 full (memo only), 2 old, 3 red (half pass runs, surfaces take the full chain)
+int wwCellGiRate();
 void wwCellGiSetOn( bool on );
 /*! Lane CELLALL1: the rows for features that were env-only. Each env pin wins over its row; the defaults are what
  *  the features did before (AO and the lights' shadows on, the GPU relight off).

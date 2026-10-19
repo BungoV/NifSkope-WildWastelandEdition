@@ -29,9 +29,11 @@ constexpr int AirInject = 25;	// lane VOLAIR1: the air pass, stage 2 reads stage
 constexpr int AirCluster = 26;	// lane VOLAIR1: the air pass's cluster light lists (isamplerBuffer; was 23)
 constexpr int AirGbuf = 27;		// lane VOLAIR1: the air pass, stage 0 reads AO1's g-buffer (sampler2D)
 constexpr int AirTile = 28;		// lane VOLAIR1: the air pass, stage 1 reads stage 0's column distances (sampler2D)
+constexpr int GiHalf = 29;		// lane PERF1: the GI at half resolution (sampler2D)
+constexpr int GiHalfKey = 30;	// lane PERF1: its keys, the upsample's weights (sampler2D)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
-	AirVol, AirInject, AirCluster, AirGbuf, AirTile };
+	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey };
 
 constexpr bool distinct()
 {

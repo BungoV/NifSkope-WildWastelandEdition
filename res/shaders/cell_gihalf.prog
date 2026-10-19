@@ -1,0 +1,4 @@
+# The cell view's GI at half resolution (lane PERF1; src/gl/celllights.cpp giHalfPass): a full-screen pass over the
+# half-size targets. No conditions: never picked for a shape; celllights.cpp selects it by name.
+
+shaders cell_ao.vert cell_gihalf.frag

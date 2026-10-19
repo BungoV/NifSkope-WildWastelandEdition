@@ -600,7 +600,7 @@ vec4 cellGiStrandPick( vec3 P, vec3 N, out int path )
 }
 
 int cellGiPath = 0;	// lane GIBLACK1: probe 95, the branch cellGiSample took (1 room blend, 2 room fill, 3 seen fill, 4 trilinear, 5 stranded: nothing reached, the trilinear; lane GIBLACK2: stranded 6 room blend, 7 room fill, 8 seen fill, 9 sealed dark; lane WALLSTACK1: 10 the last fill)
-vec4 cellGiSample( vec3 P, vec3 N )
+vec4 cellGiSampleFull( vec3 P, vec3 N )
 {
 	bool fill = cellGiFill && cellInterior && !cellGiSky;	// interiors only: an exterior's gap keeps the weather's ambient (cellGiSkyK), also under the keepamb red
 	ivec2 Ls = ivec2( -1 );
@@ -674,6 +674,96 @@ vec4 cellGiSample( vec3 P, vec3 N )
 			return f;
 		}
 	}
+	return s;
+}
+
+/* lane PERF1: the GI at half resolution (src/gl/celllights.cpp giHalfPass). A full-screen pass runs the chain above once
+ * per 2 x 2 pixels over the shared opaque g-buffer; an opaque cell-lit draw takes the half-res samples round its pixel,
+ * weighted by distance, normal and plane, and runs the full chain only where none match (edges, blended draws, effects).
+ * The memo: a fragment's later calls with the same P and N reuse the first's result. WW_CELL_GI_RATE (unset half,
+ * full: the memo only, old: neither, red: the half pass runs, the surfaces take the full chain). */
+uniform bool cellGiHalfOn;
+uniform sampler2D cellGiHalf;		// rgba: the chain's sample at the half texel's pixel (2h)
+uniform sampler2D cellGiHalfKey;	// xyz: that pixel's world position, w: its packed normal (< 0: no surface)
+uniform vec4 cellGiHalfRect;		// the viewport's x, y; the half size
+uniform bool cellGiMemo;
+vec3 cellGiMemoP, cellGiMemoN;
+vec4 cellGiMemoS;
+int cellGiMemoPath = 0;
+bool cellGiMemoOk = false;
+
+// a unit normal as one float: octahedral, 11 bits a component, exact in a float's mantissa
+float cellGiKeyPack( vec3 n )
+{
+	vec2 o = n.xy / ( abs( n.x ) + abs( n.y ) + abs( n.z ) );
+	if ( n.z < 0.0 )
+		o = ( 1.0 - abs( o.yx ) ) * vec2( o.x >= 0.0 ? 1.0 : -1.0, o.y >= 0.0 ? 1.0 : -1.0 );
+	vec2 q = floor( clamp( o * 0.5 + 0.5, 0.0, 1.0 ) * 2047.0 + 0.5 );
+	return q.x * 2048.0 + q.y;
+}
+
+vec3 cellGiKeyNormal( float k )
+{
+	vec2 q = vec2( floor( k / 2048.0 ), mod( k, 2048.0 ) );
+	vec2 o = q / 2047.0 * 2.0 - 1.0;
+	vec3 n = vec3( o, 1.0 - abs( o.x ) - abs( o.y ) );
+	if ( n.z < 0.0 )
+		n.xy = ( 1.0 - abs( n.yx ) ) * vec2( n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0 );
+	return normalize( n );
+}
+
+// the upsample: the 4 half texels round this pixel; false: none is this surface
+bool cellGiHalfAt( vec3 P, vec3 N, out vec4 s )
+{
+	s = vec4( 0.0 );
+	vec2 u = ( gl_FragCoord.xy - cellGiHalfRect.xy - 0.5 ) * 0.5;
+	ivec2 h0 = ivec2( floor( u ) );
+	vec2 t = u - vec2( h0 );
+	ivec2 hs = ivec2( cellGiHalfRect.zw );
+	float tol = 1.0 + 0.01 * distance( P, vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) );	// game units
+	vec4 acc = vec4( 0.0 );
+	float wsum = 0.0;
+	for ( int k = 0; k < 4; k++ ) {
+		ivec2 o = ivec2( k & 1, k >> 1 );
+		float wb = ( o.x == 1 ? t.x : 1.0 - t.x ) * ( o.y == 1 ? t.y : 1.0 - t.y );
+		if ( wb <= 0.0 )
+			continue;
+		ivec2 h = clamp( h0 + o, ivec2( 0 ), hs - 1 );
+		vec4 key = texelFetch( cellGiHalfKey, h, 0 );
+		if ( key.w < 0.0 )
+			continue;
+		float w = wb * smoothstep( 0.7, 0.95, dot( N, cellGiKeyNormal( key.w ) ) )
+		        * max( 1.0 - abs( dot( N, key.xyz - P ) ) / tol, 0.0 );
+		if ( w <= 0.0 )
+			continue;
+		acc += w * texelFetch( cellGiHalf, h, 0 );
+		wsum += w;
+	}
+	if ( wsum < 1e-3 )
+		return false;
+	s = acc / wsum;
+	return true;
+}
+
+vec4 cellGiSample( vec3 P, vec3 N )
+{
+	if ( cellGiMemo && cellGiMemoOk && P == cellGiMemoP && N == cellGiMemoN ) {
+		cellGiPath = cellGiMemoPath;
+		return cellGiMemoS;
+	}
+	vec4 s = vec4( 0.0 );
+	bool fromHalf = false;
+	if ( cellGiHalfOn && cellPass == 0 && cellProbe == 0 )
+		fromHalf = cellGiHalfAt( P, N, s );
+	if ( fromHalf )
+		cellGiPath = 11;	// probe 95 never takes it (cellProbe 0 only)
+	else
+		s = cellGiSampleFull( P, N );
+	cellGiMemoP = P;
+	cellGiMemoN = N;
+	cellGiMemoS = s;
+	cellGiMemoPath = cellGiPath;
+	cellGiMemoOk = true;
 	return s;
 }
 
