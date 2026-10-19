@@ -160,6 +160,7 @@ struct Mark
 {
 	int pass;
 	GLuint q0, q1;
+	GLuint qs = 0, qp = 0;	// WW_CELL_PASSTIME_CENSUS: samples passed, primitives generated
 };
 
 struct Slot
@@ -179,6 +180,7 @@ struct State
 {
 	bool loaded = false, on = false, pinned = false, log = false;
 	bool sync = false;	// WW_CELL_PASSTIME_SYNC=1: a glFinish at each pass edge, so the timestamps hold that pass's work only
+	bool census = false;	// WW_CELL_PASSTIME_CENSUS=1: each pass's samples passed (overdraw) and primitives, in the log line
 	QOpenGLContext * ctx = nullptr;
 	QOpenGLFunctions_3_3_Core * gl = nullptr;
 	std::vector<GLuint> pool;
@@ -213,6 +215,7 @@ State & st()
 		}
 		s.log = qEnvironmentVariableIntValue( "WW_CELL_PASSTIME_LOG" ) == 1;
 		s.sync = qEnvironmentVariableIntValue( "WW_CELL_PASSTIME_SYNC" ) == 1;
+		s.census = qEnvironmentVariableIntValue( "WW_CELL_PASSTIME_CENSUS" ) == 1;
 		for ( int & m : s.openMark )
 			m = -1;
 	}
@@ -247,10 +250,20 @@ void collect( Slot & sl )
 	if ( sl.frame < 0 )
 		return;
 	double gpu[Count] = {};
+	GLuint64 samples[Count] = {}, prims[Count] = {};
 	for ( const Mark & m : sl.marks ) {
 		gpu[m.pass] += gpuMs( m.q0, m.q1 );
 		s.pool.push_back( m.q0 );
 		s.pool.push_back( m.q1 );
+		if ( m.qs ) {
+			GLuint64 v = 0;
+			s.gl->glGetQueryObjectui64v( m.qs, GL_QUERY_RESULT, &v );
+			samples[m.pass] += v;
+			s.gl->glGetQueryObjectui64v( m.qp, GL_QUERY_RESULT, &v );
+			prims[m.pass] += v;
+			s.pool.push_back( m.qs );
+			s.pool.push_back( m.qp );
+		}
 	}
 	const double gpuFrame = gpuMs( sl.f0, sl.f1 );
 	s.pool.push_back( sl.f0 );
@@ -268,6 +281,9 @@ void collect( Slot & sl )
 				line += " w=" + QByteArray::number( sl.wait[p], 'f', 2 );
 			if ( sl.calls[p] > 0 )
 				line += " d=" + QByteArray::number( sl.calls[p] ) + "/" + QByteArray::number( sl.ranges[p] );
+			if ( s.census && p < CullCamera )	// millions of samples that passed the depth test, millions of triangles
+				line += " s=" + QByteArray::number( double( samples[p] ) * 1e-6, 'f', 2 ) + "M p="
+					+ QByteArray::number( double( prims[p] ) * 1e-6, 'f', 2 ) + "M";
 		}
 		line += QByteArray( " | cache made " ) + QByteArray::number( sl.cache.made ) + " ("
 			+ QByteArray::number( double( sl.cache.madeBytes ) / 1048576.0, 'f', 1 ) + " MB) evicted "
@@ -384,6 +400,12 @@ void begin( int pass )
 	if ( pass < CullCamera ) {
 		Mark m{ pass, query(), query() };
 		s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
+		if ( s.census ) {	// top-level passes never nest (above), so one query of each target is open at a time
+			m.qs = query();
+			m.qp = query();
+			s.gl->glBeginQuery( GL_SAMPLES_PASSED, m.qs );
+			s.gl->glBeginQuery( GL_PRIMITIVES_GENERATED, m.qp );
+		}
 		sl.marks.push_back( m );
 		s.openMark[pass] = int( sl.marks.size() ) - 1;
 		s.stack.push_back( pass );
@@ -407,6 +429,10 @@ void end( int pass )
 	sl.cpu[pass] += double( nowNs() - s.open[pass] ) * 1e-6;
 	if ( pass < CullCamera ) {
 		s.gl->glQueryCounter( sl.marks[s.openMark[pass]].q1, GL_TIMESTAMP );
+		if ( sl.marks[s.openMark[pass]].qs ) {
+			s.gl->glEndQuery( GL_SAMPLES_PASSED );
+			s.gl->glEndQuery( GL_PRIMITIVES_GENERATED );
+		}
 		for ( size_t k = s.stack.size(); k-- > 0; )
 			if ( s.stack[k] == pass ) {
 				s.stack.erase( s.stack.begin() + std::ptrdiff_t( k ) );

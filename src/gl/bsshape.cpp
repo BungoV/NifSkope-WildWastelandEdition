@@ -380,7 +380,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 	 * with MSAA there came out +-1 step differently run to run on identical inputs (Vault111Cryo: 1-3 px); with the
 	 * blended draws single-sample two runs match. The fp32 linear frame (gl/cellhdr.cpp) blends deterministically
 	 * and keeps MSAA. The game itself draws blended geometry without MSAA. */
-	const bool singleSample = glIsEnabled( GL_BLEND ) && !wwCellHdrActive() && glIsEnabled( GL_MULTISAMPLE );
+	const bool singleSample = !wwCellHdrActive() && glIsEnabled( GL_BLEND ) && glIsEnabled( GL_MULTISAMPLE );	// lane PERF1: the cheap test first
 	if ( singleSample )
 		glDisable( GL_MULTISAMPLE );
 
