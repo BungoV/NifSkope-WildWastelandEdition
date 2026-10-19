@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLSTREAM1 (2026-10-16..19, branch cellstream1-20261016): the exterior cell view streams a 5x5 block
+
+- **An exterior cell document can stream full cells round the camera.** `WW_CELL_STREAM=1` (test switch, no menu
+  row yet; off = the fixed-block open as before): the 5x5 cells round the camera's cell stay loaded; a cell the
+  camera leaves is freed and a new one is built on a thread and written into the open document a slice a frame,
+  in about 4 ms of main-thread work (`WW_CELL_STREAM_BUDGET`, ms). Freed blocks are reset and taken again by the
+  next cell of their type, so the file does not grow. Far LOD hands its ring-0 chunks over to the loaded cells
+  and back. Code: `src/cellstream.*`; hooks in cellview, cellmesh, cellsplat, cellcull, cellgrass, cellwater,
+  cellfxlit, nifmodel (quiet block reset), glview, nifskope_ui (the walk dump).
+- Scene bulk operations made linear: `NodeList::delMany/takeMany/release`, one-pass `NodeList::clear`,
+  `PropertyList::delMany` (each cost ~10 ms on a cell's 2000 nodes). A left cell's nodes leave the scene at once
+  and are cleared, then freed, a few a frame; a freed shape's vertex arrays are given back on a thread of their own.
+- Texture eviction while streaming: file textures no paint has bound for `WW_CELL_STREAM_TEXKEEP` seconds
+  (default 5, 0 = never) are freed in paintGL, never ones the last 3 paints bound; they load again when bound.
+- Telemetry: the walk dump (`WW_CELL_STREAM_PATH` + `WW_CELL_STREAM_DUMP`) writes one line a step (loaded set,
+  worst tick/slice/unload/drain/bury ms, blocks, private bytes, textures freed); `WW_CELL_STREAM_TRACE=1` prints
+  every slow slice, tick, unload, node clear/free and reset to stderr.
+- Gate: `tests/spells/cell_stream.sh` + `cell_stream_check.py`: (a) loaded set == 5x5 and every crossing frame
+  <= 8 ms, (b) streamed picture == fixed open, (c) far LOD no hole/no double, (d) memory within 5% after 20
+  crossings; reds `WW_CELL_STREAM_RED=nounload` (must fail d), `nohandover` (must fail c), `loudreset`.
+  Last own run (10-19): (a) set, (c), (d) x1.039 pass; (a) frame 12.26 ms FAILS (node frees); the array-reaper
+  build is not yet measured; (b) and the reds not run on the current build. The rc 127 exits seen earlier were the
+  memory guard (MEMCAP or free RAM), not a fault.
+
 ## Lane VOLAIR1 (2026-10-13, branch volair1-20261013): Volumetric Air, one lit medium in the cell view
 
 - **The cell view can draw the air as one lit medium instead of the game's distance fog.** Scene window fold

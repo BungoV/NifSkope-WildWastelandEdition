@@ -3737,6 +3737,7 @@ void GLView::paintGL()
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
 	CellTexAhead::Frame texAheadFrame;   // lane SPEED1: a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
+	wwCellStreamEvict();
 	QElapsedTimer wwPaintClock;
 	wwPaintClock.start();
 	struct WwPaintTime
@@ -6962,24 +6963,36 @@ bool GLView::wwCellStreamFrame()
 	Vector3 eye = v.rotation.inverted() * Vector3( -v.translation[0], -v.translation[1], -v.translation[2] );
 	if ( v.scale != 0.0f )
 		eye = eye / v.scale;
-	// lane CELLSTREAM1: file textures not bound for a while (a cell that left, mostly) are freed every few seconds
-	if ( textures && cellStreamOn( model ) ) {
-		static QElapsedTimer clock;
-		static std::uint32_t nextEvict = 0;
-		static const std::uint32_t keep = std::uint32_t( cellStreamTexKeepSec() );
-		if ( !clock.isValid() )
-			clock.start();
-		const std::uint32_t sec = std::uint32_t( clock.elapsed() / 1000 ) + 1U;
-		textures->setUseTick( sec );
-		if ( keep && sec >= nextEvict && sec > keep ) {
-			nextEvict = sec + 2U;
-			cellStreamCountEvicted( model, textures->evictUnused( sec - keep ) );
-		}
-	}
 	if ( !cellStreamTick( model, scene, eye ) )
 		return false;
 	update();
 	return true;
+}
+
+void GLView::wwCellStreamEvict()
+{
+	// lane CELLSTREAM1: file textures no paint has bound for a while (a cell that left, mostly) are freed every
+	// few seconds, in a paint (the context is current). What the last 3 paints bound stays however slow they were:
+	// a wall clock alone freed the textures of a paint longer than the keep, which loaded them all again
+	if ( !textures || !model || !cellStreamOn( model ) )
+		return;
+	static QElapsedTimer clock;
+	static std::uint32_t nextEvict = 0;
+	static std::uint32_t paintSec[4] = { 0, 0, 0, 0 };
+	static std::uint32_t paints = 0;
+	static const std::uint32_t keep = std::uint32_t( cellStreamTexKeepSec() );
+	if ( !clock.isValid() )
+		clock.start();
+	const std::uint32_t sec = std::uint32_t( clock.elapsed() / 1000 ) + 1U;
+	textures->setUseTick( sec );
+	paintSec[paints++ & 3U] = sec;
+	if ( !keep || paints < 4 || sec < nextEvict || sec <= keep )
+		return;
+	nextEvict = sec + 2U;
+	const std::uint32_t threePaintsAgo = paintSec[paints & 3U];   // the oldest of the 4 kept, this one included
+	const std::uint32_t before = std::min( sec - keep, threePaintsAgo );
+	if ( before )
+		cellStreamCountEvicted( model, textures->evictUnused( before ) );
 }
 
 void GLView::wwCellStreamFlush()

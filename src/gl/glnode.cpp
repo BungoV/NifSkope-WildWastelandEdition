@@ -72,9 +72,12 @@ NodeList::~NodeList()
 
 void NodeList::clear()
 {
-	foreach ( Node * n, nodes ) {
-		del( n );
-	}
+	// lane CELLSTREAM1: one pass (del() searched the whole list per node: a cell's 2000 children took ~10 ms)
+	QVector<Node *> old;
+	old.swap( nodes );
+	for ( Node * n : old )   // add() lists a node once
+		if ( --n->ref <= 0 )
+			delete n;
 }
 
 NodeList & NodeList::operator=( const NodeList & other )

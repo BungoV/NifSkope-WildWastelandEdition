@@ -544,6 +544,7 @@ public:
 	bool wwCellStreamFrame();
 	//! lane CELLSTREAM1: drop the texture and GPU caches (a memory reading that does not count the caches)
 	void wwCellStreamFlush();
+	void wwCellStreamEvict();   // lane CELLSTREAM1: frees textures no recent paint bound
 	inline float orthographicHalfHeight() const { return float( Dist / Zoom ); }
 
 	/*! THE PINNED CAMERA -- WW_RENDER_CENTER / _DIST / _VIEW / _FOV / _ORTHO.

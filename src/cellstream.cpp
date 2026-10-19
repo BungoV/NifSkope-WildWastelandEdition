@@ -27,6 +27,7 @@
 #include <map>
 #include <set>
 #include <thread>
+#include <typeinfo>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -55,6 +56,9 @@ struct StreamCell
 	QHash<int, QPointer<Node>> nodes;               //!< the scene objects made for its node and shape blocks
 	std::vector<int> containers;                    //!< blocks whose children are wired: cell, ground, billboards
 	QSet<int> grounds;
+	QHash<int, int> childrenSeen;                   //!< per container: the Children rows already wired
+	bool emitted = false;                           //!< every block written; links and hookup still to do
+	size_t linked = 0;                              //!< containers whose links are updated
 	double writeMs = 0.0;
 };
 
@@ -100,6 +104,18 @@ public:
 	std::map<QString, std::set<int>> pool;          //!< reset blocks by type, lowest number first
 	std::vector<std::pair<int, QString>> toReset;   //!< freed blocks still holding a cell's fields
 	std::vector<Node *> toClear, toFree;            //!< a left cell's scene nodes, out of the scene, freed a few a frame
+	//! lane CELLSTREAM1: a freed shape's vertex arrays, handed to a thread of their own to give back (pure memory)
+	struct DeadArrays
+	{
+		QVector<Vector3> verts, norms, tangents, bitangents;
+		QVector<Color4> colors;
+		QVector<TexCoords> coords;
+		QVector<Triangle> triangles;
+	};
+	std::vector<DeadArrays> dead;
+	std::thread reaper;
+	std::atomic<bool> reaperDone { true };
+	double clearEstMs = 0.0, freeEstMs = 0.0;   //!< the dearest recent item of each, decaying
 	StreamCell * writing = nullptr;
 	std::thread worker;
 	std::shared_ptr<CellChunk> job;
@@ -121,6 +137,8 @@ public:
 	{
 		if ( worker.joinable() )
 			worker.join();
+		if ( reaper.joinable() )
+			reaper.join();
 		for ( Node * n : toClear )
 			n->clear();
 		for ( Node * n : toClear )
@@ -168,7 +186,7 @@ private:
 	void bury( const QElapsedTimer & t );
 	bool write( StreamCell & c, double budget );
 	void wire( StreamCell & c );
-	void attach( StreamCell & c );
+	bool attach( StreamCell & c, const QElapsedTimer & t, double budget );
 	void showFar( int x, int y, bool show );
 	void rebuild();
 	Node * makeNode( const QModelIndex & idx, const QString & type );
@@ -380,12 +398,17 @@ void Stream::wire( StreamCell & c )
 	}
 	c.takesSeen = c.takes.size();
 	// parents first: the cell's own children (ground, billboards) are made before their children are read
+	// lane CELLSTREAM1: only the rows added since the last slice (reading every child each slice grew with the cell)
 	for ( size_t ci = 0; ci < c.containers.size(); ci++ ) {
 		Node * parent = c.nodes.value( c.containers[ci] ).data();
 		if ( !parent )
 			continue;
 		const QModelIndex iP = nif->getBlockIndex( c.containers[ci] );
-		for ( const qint32 l : nif->getLinkArray( iP, "Children" ) ) {
+		const QModelIndex iCh = nif->getIndex( iP, "Children" );
+		const int rows = iCh.isValid() ? nif->rowCount( iCh ) : 0;
+		int & seen = c.childrenSeen[c.containers[ci]];
+		for ( int r = std::min( seen, rows ); r < rows; r++ ) {
+			const qint32 l = nif->getLink( nif->getIndex( iCh, r ) );
 			if ( l < 0 || c.nodes.contains( l ) )
 				continue;
 			const QModelIndex iC = nif->getBlockIndex( l );
@@ -394,6 +417,7 @@ void Stream::wire( StreamCell & c )
 			if ( n )
 				n->makeParent( parent );
 		}
+		seen = rows;
 	}
 }
 
@@ -407,6 +431,17 @@ bool Stream::write( StreamCell & c, double budget )
 		st.failed++;
 		c.st = CellState::Attached;   // nothing to show: its far tile stays
 		return false;
+	}
+	if ( c.emitted ) {   // lane CELLSTREAM1: the hookup runs in its own slices
+		g_phase = "attach";
+		const bool hooked = attach( c, t, budget );
+		const double ms = msOf( t );
+		st.sliceMaxMs = std::max( st.sliceMaxMs, ms );
+		if ( ms > budget + 2.0 )
+			trace( QStringLiteral( "slow attach slice %1,%2: %3 ms (%4 of %5 containers linked)" ).arg( c.x ).arg( c.y )
+				.arg( ms, 0, 'f', 1 ).arg( c.linked ).arg( c.containers.size() ) );
+		c.writeMs += ms;
+		return hooked;
 	}
 	writing = &c;
 	if ( c.st == CellState::Ready ) {
@@ -438,23 +473,34 @@ bool Stream::write( StreamCell & c, double budget )
 	writing = nullptr;
 	if ( !err.isEmpty() )
 		st.lastError = QStringLiteral( "%1,%2: %3" ).arg( c.x ).arg( c.y ).arg( err );
+	const double wireMs = msOf( t ) - emitMs;
 	g_phase = "attach";
-	if ( done )
-		attach( c );
+	bool hooked = false;
+	if ( done ) {
+		c.emitted = true;
+		hooked = attach( c, t, budget );
+	}
 	const double ms = msOf( t );
 	st.sliceMaxMs = std::max( st.sliceMaxMs, ms );
 	if ( ms > budget + 2.0 )
-		trace( QStringLiteral( "slow slice %1,%2: %3 ms (emit %4, wire %5 nodes %6)" ).arg( c.x ).arg( c.y )
-			.arg( ms, 0, 'f', 1 ).arg( emitMs, 0, 'f', 1 ).arg( ms - emitMs, 0, 'f', 1 ).arg( int( c.nodes.size() - before ) )
+		trace( QStringLiteral( "slow slice %1,%2: %3 ms (emit %4, wire %5 nodes %6, attach %7)" ).arg( c.x ).arg( c.y )
+			.arg( ms, 0, 'f', 1 ).arg( emitMs, 0, 'f', 1 ).arg( wireMs, 0, 'f', 1 ).arg( int( c.nodes.size() - before ) )
+			.arg( ms - emitMs - wireMs, 0, 'f', 1 )
 			+ ( building() ? QStringLiteral( " worker busy" ) : QStringLiteral( " worker idle" ) ) );
 	c.writeMs += ms;
-	return done;
+	return hooked;
 }
 
-void Stream::attach( StreamCell & c )
+bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 {
-	for ( const int b : c.containers )
-		nif->updateBlockLinks( b );
+	// lane CELLSTREAM1: the containers' links a few a slice, then the hookup itself (one step: no half-shown cell)
+	while ( c.linked < c.containers.size() ) {
+		if ( msOf( t ) >= budget )
+			return false;
+		nif->updateBlockLinks( c.containers[c.linked++] );
+	}
+	if ( msOf( t ) >= budget * 0.75 )
+		return false;
 	setRootSlot( -1, c.cellBlock );
 	if ( c.cellNode && root )
 		c.cellNode->makeParent( root.data() );
@@ -464,6 +510,7 @@ void Stream::attach( StreamCell & c )
 	st.attaches++;
 	trace( QStringLiteral( "attach %1,%2 block %3 after %4 ms of writing" ).arg( c.x ).arg( c.y ).arg( c.cellBlock ).arg( c.writeMs, 0, 'f', 1 ) );
 	dirty = true;
+	return true;
 }
 
 void Stream::unload( StreamCell & c )
@@ -540,15 +587,54 @@ void Stream::bury( const QElapsedTimer & t )
 	// lane CELLSTREAM1: every node of the left cells drops its links first (they count each other), then each goes
 	QElapsedTimer d;
 	d.start();
-	while ( !toClear.empty() && msOf( t ) < budgetMs ) {
+	// lane CELLSTREAM1: an item starts only if the dearest recent one would still fit (the budget check alone
+	// let one 10 ms free run past it); the first of a frame may take the half budget
+	int items = 0;
+	auto fits = [&]( double est ) { return msOf( t ) + est < budgetMs || ( items == 0 && msOf( t ) < 0.5 * budgetMs ); };
+	while ( !toClear.empty() && fits( clearEstMs ) ) {
 		Node * n = toClear.back();
 		toClear.pop_back();
+		const double n0 = msOf( d );
+		if ( Shape * sh = dynamic_cast<Shape *>( n ) ) {   // its arrays go to the reaper, not the heap here
+			dead.emplace_back();
+			DeadArrays & a = dead.back();
+			a.verts.swap( sh->verts );
+			a.norms.swap( sh->norms );
+			a.tangents.swap( sh->tangents );
+			a.bitangents.swap( sh->bitangents );
+			a.colors.swap( sh->colors );
+			a.coords.swap( sh->coords );
+			a.triangles.swap( sh->triangles );
+		}
 		n->clear();
+		items++;
+		clearEstMs = std::max( 0.9 * clearEstMs, msOf( d ) - n0 );
+		if ( msOf( d ) - n0 > 2.0 )
+			trace( QStringLiteral( "slow node clear: %1 ms (%2)" ).arg( msOf( d ) - n0, 0, 'f', 1 ).arg( QString::fromLatin1( typeid( *n ).name() ) ) );
 		toFree.push_back( n );
 	}
-	while ( toClear.empty() && !toFree.empty() && msOf( t ) < budgetMs ) {
-		NodeList::release( toFree.back() );
+	while ( toClear.empty() && !toFree.empty() && fits( freeEstMs ) ) {
+		Node * n = toFree.back();
 		toFree.pop_back();
+		const double n0 = msOf( d );
+		QString kind = QString::fromLatin1( typeid( *n ).name() );
+		if ( const Shape * sh = dynamic_cast<const Shape *>( n ) )
+			kind += QStringLiteral( " verts cap %1 tris cap %2" ).arg( sh->verts.capacity() ).arg( sh->triangles.capacity() );
+		NodeList::release( n );
+		items++;
+		freeEstMs = std::max( 0.9 * freeEstMs, msOf( d ) - n0 );
+		if ( msOf( d ) - n0 > 2.0 )
+			trace( QStringLiteral( "slow node free: %1 ms (%2)" ).arg( msOf( d ) - n0, 0, 'f', 1 ).arg( kind ) );
+	}
+	if ( !dead.empty() && reaperDone.load() ) {
+		if ( reaper.joinable() )
+			reaper.join();   // done already: a quick join
+		reaperDone = false;
+		reaper = std::thread( [batch = std::move( dead ), done = &reaperDone]() mutable {
+			batch.clear();
+			done->store( true );
+		} );
+		dead.clear();
 	}
 	st.buryMaxMs = std::max( st.buryMaxMs, msOf( d ) );
 }
@@ -583,7 +669,8 @@ void Stream::drain( const QElapsedTimer & t )
 	}
 	st.drainMaxMs = std::max( st.drainMaxMs, msOf( d ) );
 	if ( msOf( d ) > budgetMs )
-		trace( QStringLiteral( "slow drain: %1 ms" ).arg( msOf( d ), 0, 'f', 1 ) );
+		trace( QStringLiteral( "slow drain: %1 ms (scan %2 ms, tick at %3 ms on entry)" ).arg( msOf( d ), 0, 'f', 1 )
+			.arg( scanMs, 0, 'f', 2 ).arg( msOf( t ) - msOf( d ), 0, 'f', 1 ) );
 }
 
 void Stream::rebuild()
@@ -720,11 +807,14 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	for ( const auto & kv : cells )
 		midCell |= kv.second.st == CellState::Writing;
 	g_phase = "bury";
+	const double msBury0 = msOf( t );
 	if ( !building() )
 		bury( t );
 	g_phase = "drain";
+	const double msDrain0 = msOf( t );
 	if ( !midCell )
 		drain( t );
+	const double msWrite0 = msOf( t );
 	while ( !building() && msOf( t ) < budgetMs ) {
 		// the cell being written, else the nearest built one the block wants
 		StreamCell * next = nullptr;
@@ -751,14 +841,20 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		g_phase = "write";
 		write( *next, budgetMs - msOf( t ) );
 		changed = true;
+		if ( next->emitted && next->st != CellState::Attached )
+			break;   // lane CELLSTREAM1: its hookup waits for the next frame's budget
 	}
+	const double msWrite = msOf( t ) - msWrite0;
+	double msRebuild0 = 0.0, msRebuild = 0.0;
 	if ( dirty && !worker.joinable() && toReset.empty() ) {
 		bool writingAny = false;
 		for ( const auto & kv : cells )
 			writingAny |= wanted.count( kv.first ) && kv.second.st != CellState::Attached;
 		if ( !writingAny ) {
 			g_phase = "rebuild";
+			msRebuild0 = msOf( t );
 			rebuild();
+			msRebuild = msOf( t ) - msRebuild0;
 			changed = true;
 		}
 	}
@@ -773,8 +869,9 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		sc->invalidateBounds();
 	}
 	if ( msOf( t ) > 2.0 * budgetMs )
-		trace( QStringLiteral( "slow tick: %1 ms (pump %2, model state %3)%4" ).arg( msOf( t ), 0, 'f', 1 ).arg( msPump, 0, 'f', 1 )
-			.arg( msOf( t ) - msIdle0, 0, 'f', 1 ).arg( building() ? QStringLiteral( " worker busy" ) : QStringLiteral( " worker idle" ) ) );
+		trace( QStringLiteral( "slow tick: %1 ms (pump %2, bury %5, drain %6, write %7, rebuild %8, model state %3)%4" ).arg( msOf( t ), 0, 'f', 1 ).arg( msPump, 0, 'f', 1 )
+			.arg( msOf( t ) - msIdle0, 0, 'f', 1 ).arg( building() ? QStringLiteral( " worker busy" ) : QStringLiteral( " worker idle" ) )
+			.arg( msDrain0 - msBury0, 0, 'f', 1 ).arg( msWrite0 - msDrain0, 0, 'f', 1 ).arg( msWrite, 0, 'f', 1 ).arg( msRebuild, 0, 'f', 1 ) );
 	st.tickMaxMs = std::max( st.tickMaxMs, msOf( t ) );
 	return changed;
 }
