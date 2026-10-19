@@ -41,8 +41,8 @@ namespace
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDeg = kPi / 180.0;
-constexpr int kTerrUnit = 24;		// sampler2D; 8, 10..23 are taken (cell lights, AO, SSR, far view, volumetric fog)
-constexpr int kContactUnit = 25;	// sampler2D
+constexpr int kTerrUnit = 29;		// sampler2D; 10..28 are taken (VOLAIR1 puts its sampler3D air on 24..25: a 2D map there made the surface draw invalid)
+constexpr int kContactUnit = 30;	// sampler2D; at the rebase both move into cellunits.h
 constexpr float kNoHeight = -1.0e30f;
 constexpr double kSunRadius = 0.265;	// degrees: the penumbra's half-angle
 constexpr double kRelatch = 0.25;	// degrees: the sun moved this far -> a new sweep
@@ -56,7 +56,7 @@ const char * const kSunPathKey = "Settings/Render/Scene/Sun Path";
 
 struct GpuTimer
 {
-	unsigned int q[2] = { 0, 0 };
+	unsigned int q[4] = { 0, 0, 0, 0 };	// lane TERRSHADOW1: two slots of begin/end GL_TIMESTAMP counters
 	bool pending[2] = { false, false };
 	int cur = 0;
 	double ms = -1.0;
@@ -251,35 +251,60 @@ bool norm3( double * v )
 }
 
 // ---- GPU timers (read a frame late, never stall) ----
+// Timestamp pairs, not GL_TIME_ELAPSED: elapsed queries cannot nest, and a producer's End closed the frame
+// timer (WW_RENDER_GPUMS, glview.cpp) early, so the frame read ~13 ms with contact shadows on.
+// Red WW_SHADOW_RED=elapsedtimer brings the elapsed query back.
+namespace {
+constexpr GLenum kTimeElapsed = 0x88BF;
+constexpr GLenum kTimestamp = 0x8E28;
+bool elapsedRed()
+{
+	static const bool r = qEnvironmentVariable( "WW_SHADOW_RED" ).split( QChar( ',' ) ).contains( QStringLiteral( "elapsedtimer" ) );
+	return r;
+}
+void timerRead( NifSkopeOpenGLContext::GLFunctions * fn, GpuTimer & t, int slot, bool wait )
+{
+	if ( !t.pending[slot] )
+		return;
+	const GLuint last = elapsedRed() ? t.q[slot * 2] : t.q[slot * 2 + 1];
+	if ( !wait ) {
+		GLuint avail = 0;
+		fn->glGetQueryObjectuiv( last, GL_QUERY_RESULT_AVAILABLE, &avail );
+		if ( !avail )
+			return;
+	}
+	if ( elapsedRed() ) {
+		GLuint ns = 0;
+		fn->glGetQueryObjectuiv( t.q[slot * 2], GL_QUERY_RESULT, &ns );
+		t.ms = double( ns ) * 1e-6;
+	} else {
+		GLuint64 a = 0, b = 0;
+		fn->glGetQueryObjectui64v( t.q[slot * 2], GL_QUERY_RESULT, &a );
+		fn->glGetQueryObjectui64v( t.q[slot * 2 + 1], GL_QUERY_RESULT, &b );
+		t.ms = b > a ? double( b - a ) * 1e-6 : 0.0;
+	}
+	t.pending[slot] = false;
+}
+}
+
 void timerBegin( NifSkopeOpenGLContext::GLFunctions * fn, GpuTimer & t )
 {
-	constexpr GLenum kTimeElapsed = 0x88BF;
 	if ( !t.q[0] )
-		fn->glGenQueries( 2, t.q );
-	const int other = 1 - t.cur;
-	if ( t.pending[other] ) {
-		GLuint avail = 0;
-		fn->glGetQueryObjectuiv( t.q[other], GL_QUERY_RESULT_AVAILABLE, &avail );
-		if ( avail ) {
-			GLuint ns = 0;
-			fn->glGetQueryObjectuiv( t.q[other], GL_QUERY_RESULT, &ns );
-			t.ms = double( ns ) * 1e-6;
-			t.pending[other] = false;
-		}
-	}
-	if ( t.pending[t.cur] ) {
-		GLuint ns = 0;	// both in flight: take the older one (a wait of at most a frame)
-		fn->glGetQueryObjectuiv( t.q[t.cur], GL_QUERY_RESULT, &ns );
-		t.ms = double( ns ) * 1e-6;
-		t.pending[t.cur] = false;
-	}
-	fn->glBeginQuery( kTimeElapsed, t.q[t.cur] );
+		fn->glGenQueries( 4, t.q );
+	timerRead( fn, t, 1 - t.cur, false );
+	timerRead( fn, t, t.cur, true );	// both in flight: take the older one (a wait of at most a frame)
+	if ( elapsedRed() )
+		fn->glBeginQuery( kTimeElapsed, t.q[t.cur * 2] );
+	else
+		fn->glQueryCounter( t.q[t.cur * 2], kTimestamp );
 }
 
 void timerEnd( NifSkopeOpenGLContext::GLFunctions * fn, GpuTimer & t )
 {
-	constexpr GLenum kTimeElapsed = 0x88BF;
-	fn->glEndQuery( kTimeElapsed );
+	if ( elapsedRed() )
+		fn->glEndQuery( kTimeElapsed );
+	else
+		fn->glQueryCounter( t.q[t.cur * 2 + 1], kTimestamp );
 	t.pending[t.cur] = true;
 	t.cur = 1 - t.cur;
 }
