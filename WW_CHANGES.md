@@ -42,11 +42,10 @@
   - off, march, length, handoff, cascade and sun PASS on the cube (lane runs, 10-18). Length vs 512 / tan(elev) at
     30/10/3/1 degrees: -9.2 / -4.1 / -2.5 / -2.1 %. Terrain frame_cpu_max <= 0.198 ms (the sweep is off the frame);
     terrain memory 2 / 8 / 32 / 128 MB (Low..Ultra); contact gpu 0.138 / 0.235 / 0.456 / 0.726 ms.
-  - cell (west of Concord, in the woods looking west, sun pinned 10 degrees ESE): composed = min of the producers
-    (0.001 % off), no seam (p99.9 step 0.020), the ridge past the cascades matches terrain within 0.7 %, contact
-    99.7 % beside cascade shadow. Open: the terrain view shows 0.6 % shadowed in this picture (the gate wants 1 %).
-    Each view is its own launch, so pixels the old build moves between two identical launches (far sway) are the
-    measured noise floor and are left out of the cross-view comparisons; the share is reported.
+  - cell (west of Concord, in the woods looking west, sun pinned 10 degrees ESE; the far sway clock pinned): judged
+    in the shared single-launch run (HARNESSMIN1). The lane's separate-launch run failed on far-sway pixels that moved
+    between launches; contact sat 99.7 % beside cascade shadow, and the terrain view showed 0.6 % shadowed (the gate
+    wants 1 %).
   - The per-preset 1080p GPU ms (`WW_RENDER_GPUMS`, now written to `<shot>.gpums.txt`) and the reds come from the
     shared test run (HARNESSMIN1); the checks are listed in the lane notes.
 - **Alpha-tested casters.** VOLAIR1's always-on alpha-tested casters (`lookdev_csmdepth_at`) are the one path;
