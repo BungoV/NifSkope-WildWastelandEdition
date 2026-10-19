@@ -142,6 +142,7 @@ private:
 #include <QOpenGLExtraFunctions>	// lane FARVIEW1: the GPU timer
 #include "gl/celllights.h"	// lane IMGS1: the imagespace measure
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
+#include "gl/cellvolumeview.h"	// lane VOLFIT1: the Space stage's view
 #include "gl/cellssr.h"
 #include "gl/cellvolfog.h"	// lane VOLFOG1
 
@@ -4194,6 +4195,7 @@ void GLView::paintGL()
 
 	// lane PROBEVIEW1: the PRTP band's Pass overlays (surfel tiles, lit probes, the picked probe's links)
 	wwCellProbeViewDraw( scene, viewTrans );
+	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds (WW_CELL_VOLUMES_VIEW=1)
 
 	// Selected-bone weight heatmap. Per-corner colours are supplied by the
 	// Rigging Manager, while the viewport owns only an ephemeral triangle soup.

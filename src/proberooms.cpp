@@ -278,6 +278,8 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 
 	// 1. solid and glass: every cell a triangle touches (one z slab per task, no two tasks write one cell)
 	std::vector<quint8> st( N, 0 );   // 0 air, 1 solid, 2 glass
+	if ( spec.keep )
+		R.facing.assign( N * 3, 0 );
 	const float h[3] = { cell * 0.5f, cell * 0.5f, cell * 0.5f };
 	auto mark = [&]( const std::vector<float> & t, quint8 val ) {
 		const size_t nt = t.size() / 9;
@@ -302,15 +304,32 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 					g0[c] = std::max( 0, int( std::floor( ( l - R.origin[c] ) / cell - 0.001f ) ) );
 					g1[c] = std::min( R.dims[c] - 1, int( std::floor( ( u - R.origin[c] ) / cell + 0.001f ) ) );
 				}
+				// lane VOLFIT1: a one-sided face's unit normal x 32, summed into every cell it touches (its front side)
+				int fn[3] = { 0, 0, 0 };
+				const bool face = spec.keep && val == 1 && !soup.isTwoSided( size_t( k ) );
+				if ( face ) {
+					const float e1[3] = { p[3] - p[0], p[4] - p[1], p[5] - p[2] }, e2[3] = { p[6] - p[0], p[7] - p[1], p[8] - p[2] };
+					const float n[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+					const float l = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+					for ( int c = 0; c < 3 && l > 0.0f; c++ )
+						fn[c] = int( std::lround( n[c] / l * 32.0f ) );
+				}
 				for ( int y = g0[1]; y <= g1[1]; y++ )
 					for ( int x = g0[0]; x <= g1[0]; x++ ) {
-						quint8 & s = st[R.index( x, y, z )];
-						if ( s == 1 || s == val )
+						const size_t ci = R.index( x, y, z );
+						quint8 & s = st[ci];
+						if ( ( s == 1 || s == val ) && !face )
 							continue;
 						const float c[3] = { R.origin[0] + ( x + 0.5f ) * cell, R.origin[1] + ( y + 0.5f ) * cell,
 							R.origin[2] + ( z + 0.5f ) * cell };
-						if ( triBoxRooms( c, h, p ) )
-							s = val;
+						if ( !triBoxRooms( c, h, p ) )
+							continue;
+						s = val;
+						if ( face )
+							for ( int q = 0; q < 3; q++ ) {
+								qint8 & f = R.facing[ci * 3 + size_t( q )];
+								f = qint8( std::clamp( int( f ) + fn[q], -127, 127 ) );
+							}
 					}
 			}
 		} );
@@ -664,6 +683,14 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 							break;
 						}
 				}
+	if ( spec.keep ) {   // lane VOLFIT1: the Space stage reads them (probevolumes.cpp)
+		for ( size_t i = 0; i < N; i++ )
+			if ( st[i] != 0 )
+				lab[i] = -1;
+		R.state = std::move( st );
+		R.labels = std::move( lab );
+		R.dist2 = std::move( d2 );
+	}
 	R.ms = clock.nsecsElapsed() / 1e6;
 	R.ok = true;
 	return true;

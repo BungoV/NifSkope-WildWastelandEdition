@@ -235,6 +235,7 @@ HEADERS += \
 	src/gl/cellhdr.h \
 	src/gl/cellbloom.h \
 	src/gl/cellprobeview.h \
+	src/gl/cellvolumeview.h \
 	src/gl/cellssr.h \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolfog.h \
@@ -362,6 +363,7 @@ HEADERS += \
 	src/proberelight.h \
 	src/farlight.h \
 	src/proberooms.h \
+	src/probevolumes.h \
 	src/probesky.h \
 	src/probeplace.h \
 	src/cellrefs.h \
@@ -478,6 +480,7 @@ SOURCES += \
 	src/gl/cellhdr.cpp \
 	src/gl/cellbloom.cpp \
 	src/gl/cellprobeview.cpp \
+	src/gl/cellvolumeview.cpp \
 	src/gl/cellssr.cpp \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolfog.cpp \
@@ -630,6 +633,7 @@ SOURCES += \
 	src/proberelight.cpp \
 	src/farlight.cpp \
 	src/proberooms.cpp \
+	src/probevolumes.cpp \
 	src/probesky.cpp \
 	src/probefar.cpp \
 	src/probeplace.cpp \

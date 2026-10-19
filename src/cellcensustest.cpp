@@ -79,6 +79,9 @@ BSD License - see nifskope.h
  *   WW_CELL_CENSUS_SLICE     i/N: walk slice i of N (default 1/1)
  *   WW_CELL_CENSUS_STEPS     what a visit does: `census` or `census,bake`
  *   WW_CELL_CENSUS_BAKE      the bake's folder (required by the bake step)
+ *   WW_CELL_CENSUS_SPACE     the bake root of the `space` step (lane VOLFIT1): rooms and
+ *                            thresholds into <root>/<World>/<X>_<Y>, <root>/Interiors/<EDID>,
+ *                            one row a load in <root>/space_census.tsv
  *   WW_CELL_CENSUS_TBK       the `.tbk` version the bake step asks for: 5
  *                            (default, lane SIDES6), 4 or 3. The builder is handed it as
  *                            WW_CELL_PROBE_BAKE_TBK, and every file a visit
@@ -238,6 +241,7 @@ struct Walk
 	QString stepNames;          //!< `census` or `census+bake`
 	bool needScene = false;     //!< some step needs the scene even where nothing is placed
 	QString bakeDir;            //!< the bake step's folder
+	QString spaceDir;           //!< lane VOLFIT1: the space step's bake root (WW_CELL_CENSUS_SPACE)
 	int tbk = 5;                //!< lane SIDES6: 5; the `.tbk` version the bake step asks for (WW_CELL_CENSUS_TBK)
 	qint64 loadStartMs = 0;     //!< wall clock when the load was opened (the bake step's files are newer)
 	QVector<CensusCell> plan;   //!< every cell of the walk, plugin order
@@ -644,6 +648,45 @@ void stepBakeAfter( const CensusLoad & ld, CensusRow & r )
 			.arg( named ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) ).arg( r.bakeProbes ).arg( files ).arg( sectors ).arg( dir ) );
 }
 
+/* ---- STEP `space` (lane VOLFIT1): the Space stage (rooms, thresholds) of the load's own cells, by the cell view's
+ * own hook (WW_CELL_VOLUMES); the probes it stands on are placed as for the bake, the bake itself is not run. */
+void stepSpaceBefore( const CensusLoad & ld )
+{
+	QDir().mkpath( g.spaceDir );
+	qputenv( "WW_CELL_VOLUMES", QDir::toNativeSeparators( g.spaceDir ).toLocal8Bit() );
+	if ( qgetenv( "WW_CELL_PROBES" ).isEmpty() ) {   // the bake step did not ask already: the placing only
+		QDir().mkpath( g.spaceDir + QStringLiteral( "/_probes" ) );
+		qputenv( "WW_CELL_PROBES", QDir::toNativeSeparators( g.spaceDir + QStringLiteral( "/_probes/%1.tsv" ).arg( loadFileBase( ld ) ) ).toLocal8Bit() );
+		qputenv( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );
+		qputenv( "WW_CELL_PROBES_HIDE", "1" );
+	}
+}
+
+void stepSpaceAfter( const CensusLoad & ld, CensusRow & )
+{
+	qunsetenv( "WW_CELL_VOLUMES" );
+	qunsetenv( "WW_CELL_PROBES" );
+	qunsetenv( "WW_CELL_PROBES_N" );
+	qunsetenv( "WW_CELL_PROBES_HIDE" );
+	const CensusUnit & unit = g.units.at( ld.unit );
+	const QString leadKey = g.plan.at( ld.cells.first() ).key;
+	const qint64 ms = noteNumber( "space stage (\\d+) ms \\(ok\\)" );
+	const QString line = noteText( "(space: rooms [^\\n]*)" );
+	const QString how = g.notes.contains( QLatin1String( "space: skipped (clean)" ) ) ? QStringLiteral( "skipped" ) : QStringLiteral( "rebuilt" );
+	check( ms >= 0 && ( how == QLatin1String( "skipped" ) || !line.isEmpty() ),
+		QStringLiteral( "%1: the Space stage ran in this visit" ).arg( leadKey ), noteText( "(space[^\\n]*)" ) );
+	// one row a load: the whole-map census (cell_volumes_census.py) reads these and the .space files themselves
+	QFile f( g.spaceDir + QStringLiteral( "/space_census%1.tsv" ).arg( g.sliceN > 1 ? QStringLiteral( ".part%1of%2" ).arg( g.sliceI ).arg( g.sliceN ) : QString() ) );
+	const bool fresh = !f.exists();
+	if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
+		QTextStream s( &f );
+		if ( fresh )
+			s << "key\tworld\tinterior\tcx\tcy\town\tstage\tms\tcensus\n";
+		s << leadKey << "\t" << unit.world << "\t" << ( unit.interior ? 1 : 0 ) << "\t" << ld.cx << "\t" << ld.cy << "\t" << ld.own
+		  << "\t" << how << "\t" << ms << "\t" << ( line.isEmpty() ? QStringLiteral( "-" ) : line ) << "\n";
+	}
+}
+
 /* ---- STEP `census`: the per-cell check-up. The frame, the builder's own
  * counts, what the texture cache could not load, and the checks a visit
  * stands on. */
@@ -793,6 +836,7 @@ void stepCensusAfter( const CensusLoad & ld, CensusRow & r )
 const VisitStep kSteps[] = {
 	{ "census", false, nullptr, stepCensusAfter },
 	{ "bake", true, stepBakeBefore, stepBakeAfter },
+	{ "space", true, stepSpaceBefore, stepSpaceAfter },   // lane VOLFIT1
 };
 
 //! The load is built and its first frames are queued: every step reads it, then its rows are written.
@@ -1289,6 +1333,10 @@ bool stepsFromNames( const QString & names, QString * err )
 		*err = QStringLiteral( "the bake step needs WW_CELL_CENSUS_BAKE, the folder it bakes into" );
 		return false;
 	}
+	if ( done.contains( QStringLiteral( "space" ) ) && g.spaceDir.isEmpty() ) {
+		*err = QStringLiteral( "the space step needs WW_CELL_CENSUS_SPACE, the bake root it writes into" );
+		return false;
+	}
 	return true;
 }
 
@@ -1499,6 +1547,7 @@ void wwCellCensusHarness( NifSkope * skope )
 	g.refsMax = envInt( "WW_CELL_CENSUS_REFS_MAX", 12000 );
 	g.margin = envInt( "WW_CELL_CENSUS_MARGIN", 0 );
 	g.bakeDir = QDir::fromNativeSeparators( envStr( "WW_CELL_CENSUS_BAKE" ) );
+	g.spaceDir = QDir::fromNativeSeparators( envStr( "WW_CELL_CENSUS_SPACE" ) );   // lane VOLFIT1
 	g.tbk = envInt( "WW_CELL_CENSUS_TBK", 5 );
 	QFile::remove( g.logPath );
 

@@ -39,6 +39,8 @@ BSD License - see nifskope.h
 #include "spells/blocks.h"
 #include "gl/celllights.h"
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1
+#include "gl/cellvolumeview.h"	// lane VOLFIT1
+#include "probevolumes.h"	// lane VOLFIT1: the Space stage
 #include "gl/cellfxlit.h"
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellwater.h"	// lane WATER1
@@ -2110,6 +2112,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 *  - the occlusion primitives the game culls with (PlaneMarker planes and boxes) and, indoors, the rooms
 	 *    (RoomMarker boxes, XLRM linked rooms) and portals (PortalMarker planes, XPOD rooms): handed to gl/cellcull,
 	 *    which the Previs row applies to the camera pass only (casters always cast). */
+	std::vector<ProbeVolumeMarker> volMarkers;   // lane VOLFIT1: rooms and portals, evidence for the Space stage
 	{
 		WwPrevisScene pv;
 		int planes = 0, boxes = 0, linked = 0, toOutside = 0, prevDisabled = 0;
@@ -2137,6 +2140,20 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			x.to = r.portalTo;
 			for ( const quint32 l : r.linkedRooms )
 				x.linked.push_back( l );
+			if ( room || portal ) {
+				ProbeVolumeMarker vm;
+				vm.type = room ? 1 : 2;
+				for ( int k = 0; k < 3; k++ ) {
+					vm.c[k] = x.c[k];
+					vm.half[k] = x.half[k];
+					for ( int q = 0; q < 3; q++ )
+						vm.ax[k][q] = x.ax[k][q];
+				}
+				vm.ref = x.ref;
+				vm.from = x.from;
+				vm.to = x.to;
+				volMarkers.push_back( vm );
+			}
 			if ( occ ) {
 				( r.primType == 3 ? planes : boxes )++;
 				pv.occluders.push_back( std::move( x ) );
@@ -4604,6 +4621,64 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		QString perr;
 		if ( !soupDump.isEmpty() && !probeSoupWrite( QString::fromLocal8Bit( soupDump ), probeSoup, &perr ) )
 			qWarning() << "WW_CELL_PROBE_SOUP:" << perr;
+		// lane VOLFIT1: the markers beside the soup, so the headless `volumes` command sees what the view saw
+		if ( !soupDump.isEmpty() && !probeVolumesMarkersWrite( QString::fromLocal8Bit( soupDump ) + QStringLiteral( ".markers" ), volMarkers ) )
+			qWarning() << "WW_CELL_PROBE_SOUP: cannot write the markers";
+		// lane VOLFIT1: WW_CELL_VOLUMES=<bake root> runs the Space stage (rooms, thresholds) into <root>/<World>/<X>_<Y>
+		const QByteArray volRoot = qgetenv( "WW_CELL_VOLUMES" );
+		if ( placed && !volRoot.isEmpty() ) {
+			QElapsedTimer vt;
+			vt.start();
+			std::vector<ProbeVolumeAperture> volAps;
+			for ( const ProbePoint & p : pr.probes )
+				if ( p.cls == ProbeClass::Aperture ) {
+					ProbeVolumeAperture a;
+					a.type = int( p.kind );
+					for ( int c = 0; c < 3; c++ )
+						a.pos[c] = p.pos[c];
+					a.width = p.width;
+					a.height = p.height;
+					a.doorRef = p.doorRef;
+					volAps.push_back( a );
+				}
+			ProbeVolumesStageSpec vs;
+			vs.root = QDir::cleanPath( QString::fromLocal8Bit( volRoot ) );
+			vs.interior = spec.interior;
+			vs.byAnchor = !spec.interior;
+			vs.spec.red = QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_RED" ) );
+			QString recxName;
+			if ( spec.interior ) {
+				QString k = world.interior().edid.isEmpty() ? spec.interiorCell : world.interior().edid;
+				k.replace( QRegularExpression( QStringLiteral( "[^A-Za-z0-9_+-]" ) ), QStringLiteral( "_" ) );
+				vs.keys << ( k.isEmpty() ? QStringLiteral( "cell" ) : k );
+				recxName = vs.keys.front();
+			} else {
+				vs.world = spec.world;
+				vs.spec.clipLo[0] = ps.minX - 512.0f;   // the block plus a margin: an edge room is whole, kept by its anchor's cell
+				vs.spec.clipLo[1] = ps.minY - 512.0f;
+				vs.spec.clipHi[0] = ps.maxX + 512.0f;
+				vs.spec.clipHi[1] = ps.maxY + 512.0f;
+				for ( int y = ownCells[1]; y <= ownCells[3]; y++ )
+					for ( int x = ownCells[0]; x <= ownCells[2]; x++ )
+						vs.keys << QStringLiteral( "%1_%2" ).arg( x ).arg( y );
+				recxName = spec.world;
+			}
+			// hand fixes: WW_CELL_VOLUMES_RECX=<dir>, else Data/Plugins/FO4CS/Volumes/<World or EDID>.recx when present
+			const QByteArray rxDir = qgetenv( "WW_CELL_VOLUMES_RECX" );
+			const QString rx = QDir( rxDir.isEmpty() ? dataRoot + QStringLiteral( "/Plugins/FO4CS/Volumes" ) : QString::fromLocal8Bit( rxDir ) )
+				.filePath( recxName + QStringLiteral( ".recx" ) );
+			if ( QFileInfo::exists( rx ) ) {
+				vs.recxFile = rx;
+				vs.recxName = recxName;
+			}
+			ProbeVolumes vol;
+			bool vok = false;
+			const QString vlog = probeVolumesStage( probeSoup, volMarkers, volAps, vs, &vol, &vok );
+			for ( const QString & l : vlog.split( '\n', Qt::SkipEmptyParts ) )
+				probeNotes += QStringLiteral( "  %1\n" ).arg( l );
+			probeNotes += QStringLiteral( "  space stage %1 ms (%2)\n" ).arg( vt.elapsed() ).arg( vok ? QStringLiteral( "ok" ) : QStringLiteral( "FAILED" ) );
+			wwCellVolumeViewPublish( nif, vol );
+		}
 		if ( !soupShapesPath.isEmpty() ) {   // lane ALPHATEST1 gate
 			QFile f( QString::fromLocal8Bit( soupShapesPath ) );
 			if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
