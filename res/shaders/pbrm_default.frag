@@ -470,6 +470,12 @@ void main()
 	Surface s;
 	s.base = base;
 	s.N = normalize( tbn * normal );
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && cellProbe == 20 && cellAoEarly == 1 ) {	// lane PERF1: the obscurance pass reads the normal and depth only
+		fragColor = cellAoPassOut( s.N, -ViewDir );
+		return;
+	}
+#endif
 	s.rough = pbrRoughness;
 	s.metal = pbrMetallic;
 	s.ao = pbrAo;
@@ -739,8 +745,11 @@ void main()
 		fragColor = vec4( csmProbeOut, 1.0 );
 #endif
 #ifdef WW_CELLLIGHTS
-	if ( cellOn && cellProbe == 20 )
+	if ( cellOn && cellProbe == 20 ) {
 		fragColor = cellAoPassOut( s.N, -ViewDir );	// lane AO1
+		if ( cellAoEarly == 2 )
+			fragColor.w *= 1.001;	// lane PERF1 red: full shading runs (the old cost), and the gate must see the mark
+	}
 	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
 		fragColor = cellSsrProbeOut( cellSsrScene );	// lane SSR1
 #endif

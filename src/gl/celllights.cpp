@@ -2167,6 +2167,9 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 			glDepthMask( GL_FALSE );
 		if ( cellProgram ) {
 			prog->uni1i( "cellProbe", 20 );
+			// lane PERF1: the fragment returns once it has the normal (WW_AO_EARLY=0 shades it all, =red marks the early ones)
+			static const int early = [] { const QByteArray v = qgetenv( "WW_AO_EARLY" ).trimmed(); return v == "0" ? 0 : v == "red" ? 2 : 1; }();
+			prog->uni1i( "cellAoEarly", early );
 			prog->uni1b( "cellAoOn", false );
 			prog->uni1b( "cellAoDecalOn", false );	// lane AODECAL1
 		}
