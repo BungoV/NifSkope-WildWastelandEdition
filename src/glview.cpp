@@ -22256,19 +22256,28 @@ QString GLView::wwGpuMs( int frames )
 		return QStringLiteral( "gpums refused: no GL_TIMESTAMP queries" );
 	}
 	constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP (GL 3.3, ARB_timer_query)
+	constexpr GLenum kTimeElapsed = 0x88BF;	// red WW_SHADOW_RED=elapsedtimer: the old single elapsed query
+	const bool elapsedRed = qEnvironmentVariable( "WW_SHADOW_RED" ).split( QChar( ',' ) ).contains( QStringLiteral( "elapsedtimer" ) );
 	GLuint q[2] = { 0, 0 };
 	xf->glGenQueries( 2, q );
 	std::vector<double> gpu, cpu;
 	for ( int k = 0; k < frames + 2; k++ ) {
 		QElapsedTimer t;
 		t.start();
-		queryCounter( q[0], kTimestamp );
+		if ( elapsedRed )
+			xf->glBeginQuery( kTimeElapsed, q[0] );
+		else
+			queryCounter( q[0], kTimestamp );
 		paintGL();
-		queryCounter( q[1], kTimestamp );
+		if ( elapsedRed )
+			xf->glEndQuery( kTimeElapsed );
+		else
+			queryCounter( q[1], kTimestamp );
 		xf->glFinish();
 		GLuint64 t0 = 0, t1 = 0;
-		queryU64( q[0], GL_QUERY_RESULT, &t0 );
-		queryU64( q[1], GL_QUERY_RESULT, &t1 );
+		queryU64( q[0], GL_QUERY_RESULT, elapsedRed ? &t1 : &t0 );
+		if ( !elapsedRed )
+			queryU64( q[1], GL_QUERY_RESULT, &t1 );
 		if ( k >= 2 ) {
 			gpu.push_back( t1 > t0 ? double( t1 - t0 ) * 1e-6 : 0.0 );
 			cpu.push_back( double( t.nsecsElapsed() ) * 1e-6 );
