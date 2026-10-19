@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DLC03VirtualWeather01OriginalFog",
+			"weather": "DLCCoast.esm|0x00054132",
+			"groundFog": {
+				"thickness": 764,
+				"strength": 5.2,
+				"hours": {
+					"2": {
+						"thickness": 783,
+						"strength": 5.56
+					},
+					"14": {
+						"thickness": 764,
+						"strength": 5.2
+					}
+				}
+			}
+		}
+	]
+}

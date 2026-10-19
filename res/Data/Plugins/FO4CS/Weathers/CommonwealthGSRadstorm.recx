@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthGSRadstorm",
+			"weather": "Fallout4.esm|0x001C3D5E",
+			"groundFog": {
+				"thickness": 864,
+				"strength": 7.32
+			}
+		}
+	]
+}

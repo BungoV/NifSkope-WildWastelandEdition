@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "WorldMapWeather",
+			"weather": "Fallout4.esm|0x000A6858",
+			"groundFog": {
+				"thickness": 386,
+				"strength": 0.68
+			}
+		}
+	]
+}

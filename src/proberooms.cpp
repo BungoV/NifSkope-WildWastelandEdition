@@ -633,6 +633,7 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 					if ( st[j] == 0 && R.a[j] >= 0 && R.a[j] != R.a[i] ) {
 						R.b[i] = R.a[j];
 						R.cellsOpening++;
+						R.openings.push_back( qint32( i ) );	// lane PERF1
 						break;
 					}
 				}
@@ -734,4 +735,172 @@ bool probeRoomsDump( const ProbeRooms & r, const QString & path, QString * err )
 	}
 	f.write( reinterpret_cast<const char *>( ab.data() ), qint64( ab.size() * 2 ) );
 	return true;
+}
+
+// lane PERF1: the GI volumes' stand-in (proberooms.h giVolumesFromRooms), until the fitter (lane VOLFIT1) lands
+GiVolumeSet giVolumesFromRooms( const ProbeRooms & r, int maxPerRoom )
+{
+	GiVolumeSet V;
+	V.source = QStringLiteral( "rooms grid stand-in" );
+	if ( !r.ok || r.a.empty() ) {
+		V.census = QStringLiteral( "gi volumes: %1: none (no rooms)" ).arg( V.source );
+		return V;
+	}
+	QElapsedTimer clock;
+	clock.start();
+	const int X = r.dims[0], Y = r.dims[1], Z = r.dims[2];
+	const int dm[3] = { X, Y, Z };
+	const size_t N = r.a.size();
+	const int nr = std::min( r.rooms, 4094 );
+	auto cellOf = [&]( size_t i, int c[3] ) {
+		c[0] = int( i % size_t( X ) );
+		c[1] = int( ( i / size_t( X ) ) % size_t( Y ) );
+		c[2] = int( i / ( size_t( X ) * size_t( Y ) ) );
+	};
+	// a solid cell's air rooms: -1 none beside it, the room when one, -2 two or more (a wall between two volumes,
+	// which no box may take: the far face's read would land in it)
+	std::vector<qint16> adj( N, -1 );
+	for ( size_t i = 0; i < N; i++ ) {
+		if ( r.a[i] >= 0 )
+			continue;
+		int c[3];
+		cellOf( i, c );
+		for ( int k = 0; k < 6; k++ ) {
+			int q[3] = { c[0], c[1], c[2] };
+			q[k / 2] += ( k & 1 ) ? -1 : 1;
+			if ( q[k / 2] < 0 || q[k / 2] >= dm[k / 2] )
+				continue;
+			const qint16 b = r.a[r.index( q[0], q[1], q[2] )];
+			if ( b < 0 || b == adj[i] )
+				continue;
+			adj[i] = adj[i] == -1 ? b : qint16( -2 );
+			if ( adj[i] == -2 )
+				break;
+		}
+	}
+	std::vector<std::vector<qint32>> cells( size_t( nr ) + 1 );
+	for ( size_t i = 0; i < N; i++ )
+		if ( r.a[i] >= 1 && r.a[i] <= nr )
+			cells[size_t( r.a[i] )].push_back( qint32( i ) );
+	std::vector<quint8> claimed( N, 0 );
+	qint64 air = 0, held = 0;
+	int roomsShaped = 0, roomsUnder = 0, mostShapes = 0;
+	for ( int room = 1; room <= nr; room++ ) {
+		const auto & list = cells[size_t( room )];
+		if ( list.empty() )
+			continue;
+		roomsShaped++;
+		air += qint64( list.size() );
+		auto ok = [&]( size_t j ) { return r.a[j] == room || ( r.a[j] < 0 && ( adj[j] == -1 || adj[j] == room ) ); };
+		int shapes = 0;
+		qint64 h = 0;
+		for ( qint32 seed : list ) {
+			if ( claimed[size_t( seed )] )
+				continue;
+			if ( shapes >= maxPerRoom )
+				break;
+			int lo[3], hi[3];
+			cellOf( size_t( seed ), lo );
+			std::copy( lo, lo + 3, hi );
+			// grow a face while the slab past it is all this room or wall it may take, and holds some of its air
+			for ( bool grew = true; grew; ) {
+				grew = false;
+				for ( int d = 0; d < 6; d++ ) {
+					const int ax = d / 2, at = ( d & 1 ) ? lo[ax] - 1 : hi[ax] + 1;
+					if ( at < 0 || at >= dm[ax] )
+						continue;
+					const int u = ( ax + 1 ) % 3, v = ( ax + 2 ) % 3;
+					bool fits = true, has = false;
+					for ( int b = lo[v]; b <= hi[v] && fits; b++ )
+						for ( int a = lo[u]; a <= hi[u]; a++ ) {
+							int q[3];
+							q[ax] = at;
+							q[u] = a;
+							q[v] = b;
+							const size_t j = r.index( q[0], q[1], q[2] );
+							if ( !ok( j ) ) {
+								fits = false;
+								break;
+							}
+							has = has || r.a[j] == room;
+						}
+					if ( fits && has ) {
+						( ( d & 1 ) ? lo : hi )[ax] = at;
+						grew = true;
+					}
+				}
+			}
+			for ( int z = lo[2]; z <= hi[2]; z++ )
+				for ( int y = lo[1]; y <= hi[1]; y++ )
+					for ( int x = lo[0]; x <= hi[0]; x++ ) {
+						const size_t j = r.index( x, y, z );
+						if ( r.a[j] == room && !claimed[j] ) {
+							claimed[j] = 1;
+							h++;
+						}
+					}
+			GiVolumeShape s;
+			for ( int c = 0; c < 3; c++ ) {
+				s.center[c] = r.origin[c] + 0.5f * float( lo[c] + hi[c] + 1 ) * r.cell;
+				s.size[c] = float( hi[c] - lo[c] + 1 ) * r.cell;
+			}
+			s.room = room;
+			V.shapes.push_back( s );
+			shapes++;
+		}
+		held += h;
+		mostShapes = std::max( mostShapes, shapes );
+		if ( double( h ) < 0.9 * double( list.size() ) )
+			roomsUnder++;
+	}
+	// thresholds: the opening cells between one pair of rooms, 6-connected, each run's bounding box
+	std::vector<quint8> mark( N, 0 );	// 1 an opening, 2 taken
+	for ( qint32 i : r.openings )
+		mark[size_t( i )] = 1;
+	std::vector<qint32> stack;
+	for ( qint32 i0 : r.openings ) {
+		if ( mark[size_t( i0 )] != 1 )
+			continue;
+		const int p0 = std::min( r.a[size_t( i0 )], r.b[size_t( i0 )] ), p1 = std::max( r.a[size_t( i0 )], r.b[size_t( i0 )] );
+		int lo[3], hi[3];
+		cellOf( size_t( i0 ), lo );
+		std::copy( lo, lo + 3, hi );
+		mark[size_t( i0 )] = 2;
+		stack.assign( 1, i0 );
+		while ( !stack.empty() ) {
+			const size_t i = size_t( stack.back() );
+			stack.pop_back();
+			int c[3];
+			cellOf( i, c );
+			for ( int k = 0; k < 3; k++ ) {
+				lo[k] = std::min( lo[k], c[k] );
+				hi[k] = std::max( hi[k], c[k] );
+			}
+			for ( int k = 0; k < 6; k++ ) {
+				int q[3] = { c[0], c[1], c[2] };
+				q[k / 2] += ( k & 1 ) ? -1 : 1;
+				if ( q[k / 2] < 0 || q[k / 2] >= dm[k / 2] )
+					continue;
+				const size_t j = r.index( q[0], q[1], q[2] );
+				if ( mark[j] != 1 || std::min( r.a[j], r.b[j] ) != p0 || std::max( r.a[j], r.b[j] ) != p1 )
+					continue;
+				mark[j] = 2;
+				stack.push_back( qint32( j ) );
+			}
+		}
+		GiThreshold t;
+		for ( int c = 0; c < 3; c++ ) {
+			t.shape.center[c] = r.origin[c] + 0.5f * float( lo[c] + hi[c] + 1 ) * r.cell;
+			t.shape.size[c] = float( hi[c] - lo[c] + 1 ) * r.cell;
+		}
+		t.shape.room = -1;
+		t.rooms[0] = p0;
+		t.rooms[1] = p1;
+		V.thresholds.push_back( t );
+	}
+	V.census = QStringLiteral( "gi volumes: %1: rooms %2, boxes %3 (most a room %4, cap %5), room air held %6% (rooms under "
+		"90%: %7), thresholds %8; ms %9" ).arg( V.source ).arg( roomsShaped ).arg( V.shapes.size() ).arg( mostShapes )
+		.arg( maxPerRoom ).arg( air ? 100.0 * double( held ) / double( air ) : 100.0, 0, 'f', 1 ).arg( roomsUnder )
+		.arg( V.thresholds.size() ).arg( double( clock.nsecsElapsed() ) / 1e6, 0, 'f', 0 );
+	return V;
 }

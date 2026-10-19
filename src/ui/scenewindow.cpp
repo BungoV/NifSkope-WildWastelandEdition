@@ -9,7 +9,8 @@ BSD License - see nifskope.h
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
-#include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/cellvolair.h"	// lane VOLAIR1
+#include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/gametaa.h"
 #include "esmweather.h"
 #include "harnesswindow.h"
@@ -171,7 +172,8 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	row( tr( "Ground Plane" ), groundBox, true );
 	heading( tr( "Fog" ) );
 	liveCheck( fogBox, "lookdevFog", tr( "Fog" ), wwLookdevFog() );	// lane FOG1
-	liveCheck( volFogBox, "volFog", tr( "Volumetric Fog" ), wwVolFogOn() );	// lane VOLFOG1: every mode (interiors fog outside Lookdev)
+	heading( tr( "Volumetric Air" ) );
+	liveCheck( volAirBox, "volAir", tr( "Volumetric Air" ), wwVolAirOn() );	// lane VOLAIR1: every mode; replaces the fog while on
 	heading( tr( "Effects" ) );
 	liveCheck( shadowsBox, "lookdevShadows", tr( "Cascaded Shadows" ), wwLookdevShadows() );	// lane CSM1
 	liveCheck( taaBox, "gameTaa", tr( "Temporal AA" ), wwGameTaaOn() );	// lane MOTION1: every mode, ships off
@@ -179,6 +181,8 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	placeholderCheck( tr( "SSAO" ) );
 	placeholderCheck( tr( "SSGI" ) );
 	placeholderCheck( tr( "Bloom" ) );
+	heading( tr( "Diagnostics" ) );
+	liveCheck( frameTimersBox, "frameTimers", tr( "Frame Timers" ), PassTime::on() );	// lane PERF1: ships off
 
 	/* ---- live: every enabled row applies on change ----
 	 * red "nolive": the rows change but never reach the state, which the
@@ -269,9 +273,10 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( sunBox, &wwLookdevSetSun );
 	liveToggle( moonBox, &wwLookdevSetMoon );
 	liveToggle( fogBox, &wwLookdevSetFog );
-	liveToggle( volFogBox, &wwVolFogSetOn );
+	liveToggle( volAirBox, &wwVolAirSetOn );
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	liveToggle( taaBox, &wwGameTaaSetOn );
+	liveToggle( frameTimersBox, &PassTime::setOn );	// lane PERF1
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
 		if ( live )
 			wwLookdevSetGameDay( d );

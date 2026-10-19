@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifskope.h"
 #include "hkxanimui.h"
 #include "version.h"
+#include "gl/cellpasstime.h"
 #include "harnesswindow.h"
 #include "data/nifvalue.h"
 #include "model/nifmodel.h"
@@ -55,6 +56,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSurfaceFormat>
 #include <QUdpSocket>
 #include <QUrl>
+#include <cstdio>	// lane PERF1: setvbuf
 
 
 QCoreApplication * createApplication( int &argc, char *argv[] )
@@ -98,6 +100,13 @@ QCoreApplication * createApplication( int &argc, char *argv[] )
 //! The main program
 int main( int argc, char * argv[] )
 {
+	/* lane PERF1: WW_STDERR_BUFFER=1 (timing harnesses only) holds stderr in a 4 MB buffer, written when full and at
+	 * exit. A harness redirects stderr to a file, and there each line cost the frame that printed it ~0.3 s, so the
+	 * frame timers measured the harness's writes. Set before any output, as setvbuf asks; a refusal flushes first. */
+	if ( qEnvironmentVariableIntValue( "WW_STDERR_BUFFER" ) == 1 )
+		std::setvbuf( stderr, nullptr, _IOFBF, 4 << 20 );
+	PassTime::profileFromStart();	// lane PERF1: WW_PROF_SAMPLE_ALL=1, the load profiled too
+
 	// Before anything creates a GL context: RenderDoc cannot hook a driver it
 	// was loaded after, and Qt makes the viewport's context when GLView is
 	// constructed. No-op unless WW_RDC_FRAMES is set.
@@ -110,7 +119,7 @@ int main( int argc, char * argv[] )
 	if ( qEnvironmentVariableIntValue( "WW_ALL_ON" ) == 1 ) {
 		static const char * const kAllOn[] = { "WW_CELL_LIT", "WW_CELL_GI", "WW_CELL_FAR", "WW_CELL_IS", "WW_TAA",
 			"WW_CELL_CULL", "WW_CELL_AO", "WW_CELL_SHADOW", "WW_CELL_WATER", "WW_CELL_SSR", "WW_CELL_SSR_EXT",
-			"WW_CELL_AODECAL", "WW_LOOKDEV_SHADOWS", "WW_LOOKDEV_FOG", "WW_VOLFOG", "WW_CELL_PARTICLES", "WW_CELL_PREVIS",
+			"WW_CELL_AODECAL", "WW_LOOKDEV_SHADOWS", "WW_LOOKDEV_FOG", "WW_CELL_AIR", "WW_CELL_PARTICLES", "WW_CELL_PREVIS",
 			"WW_CELL_FARLOD", "WW_CELL_GRASS", "WW_CELL_DOF", "WW_CELL_MBLUR" };	// final merge: FARLOD1 + GRASSMB1
 		QByteArray set, kept;
 		for ( const char * k : kAllOn ) {

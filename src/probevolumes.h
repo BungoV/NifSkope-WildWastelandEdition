@@ -24,7 +24,7 @@
  *       Measured on the grid: coverage, overshoot into other air, overshoot into solid
  *    6. hand fixes: a .recx room's own "shapes" replace the fitted ones (matched by its anchor)
  *  Refuters (ProbeVolumeSpec::red, WW_CELL_VOLUMES_RED / --red): nosky, nowall, noopen, noback, nofloor, nogrow,
- *  nofold, nomerge, onebox, boxonly, noglass, nowedge, noevidence, noids, norecx; the stage record: fpsoup, noskip; the GI map (probevolumesgi.h): nogimap, gione
+ *  nofold, nomerge, onebox, boxonly, noglass, nowedge, noevidence, noids, norecx; the stage record: fpsoup, noskip; the GI map (probevolumesgi.h): nogimap, gione, spaceshapes
  *  (probeVolumesCheck). */
 
 #include "probeplace.h"

@@ -2195,6 +2195,14 @@ int probeVolumesCli( const QStringList & args )
 		t += QStringLiteral( "shapes\t%1\n" ).arg( g.shapes.size() );
 		for ( const QString & l : g.log )
 			t += QStringLiteral( "log\t%1\n" ).arg( l );
+		// the Space rooms as the room source (WW_CELL_VOLUMES_GI=1), then mapped again onto the relabeled grid
+		const QString sline = probeRoomsFromSpace( v, &gr, spec.red );
+		const ProbeVolumesGi sg = probeVolumesToGi( v, gr, 0.2f );
+		t += QStringLiteral( "spacegi\t%1\n" ).arg( sline );
+		for ( size_t i = 0; i < sg.rooms.size(); i++ )
+			t += QStringLiteral( "sroom\t%1\t%2\n" ).arg( v.rooms[i].id ).arg( sg.rooms[i].giRoom );
+		for ( const QString & l : sg.log )
+			t += QStringLiteral( "slog\t%1\n" ).arg( l );
 		f.write( t.toUtf8() );
 		o << g.census << "\n";
 	}

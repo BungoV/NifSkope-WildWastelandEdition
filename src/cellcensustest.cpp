@@ -673,6 +673,8 @@ void stepSpaceAfter( const CensusLoad & ld, CensusRow & )
 	const qint64 ms = noteNumber( "space stage (\\d+) ms \\(ok\\)" );
 	const QString line = noteText( "(space: rooms [^\\n]*)" );
 	const QString how = g.notes.contains( QLatin1String( "space: skipped (clean)" ) ) ? QStringLiteral( "skipped" ) : QStringLiteral( "rebuilt" );
+	// with the bake step and WW_CELL_VOLUMES_GI=1: the GI room grid relabeled from the Space rooms (mapped, unmapped, wide doors)
+	const QString giLine = noteText( "(space rooms into GI: [^\\n]*)" );
 	check( ms >= 0 && ( how == QLatin1String( "skipped" ) || !line.isEmpty() ),
 		QStringLiteral( "%1: the Space stage ran in this visit" ).arg( leadKey ), noteText( "(space[^\\n]*)" ) );
 	// one row a load: the whole-map census (cell_volumes_census.py) reads these and the .space files themselves
@@ -681,9 +683,10 @@ void stepSpaceAfter( const CensusLoad & ld, CensusRow & )
 	if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
 		QTextStream s( &f );
 		if ( fresh )
-			s << "key\tworld\tinterior\tcx\tcy\town\tstage\tms\tcensus\n";
+			s << "key\tworld\tinterior\tcx\tcy\town\tstage\tms\tcensus\tgi\n";
 		s << leadKey << "\t" << unit.world << "\t" << ( unit.interior ? 1 : 0 ) << "\t" << ld.cx << "\t" << ld.cy << "\t" << ld.own
-		  << "\t" << how << "\t" << ms << "\t" << ( line.isEmpty() ? QStringLiteral( "-" ) : line ) << "\n";
+		  << "\t" << how << "\t" << ms << "\t" << ( line.isEmpty() ? QStringLiteral( "-" ) : line )
+		  << "\t" << ( giLine.isEmpty() ? QStringLiteral( "-" ) : giLine ) << "\n";
 	}
 }
 

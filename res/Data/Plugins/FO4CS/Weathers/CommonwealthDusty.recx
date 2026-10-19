@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthDusty",
+			"weather": "Fallout4.esm|0x001F61A1",
+			"groundFog": {
+				"thickness": 847,
+				"strength": 6.92,
+				"hours": {
+					"2": {
+						"thickness": 1000,
+						"strength": 8.0
+					},
+					"14": {
+						"thickness": 847,
+						"strength": 6.92
+					}
+				}
+			}
+		}
+	]
+}

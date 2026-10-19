@@ -53,6 +53,15 @@ struct ProbeVolumesGi
 ProbeVolumesGi probeVolumesToGi( const ProbeVolumes & v, const ProbeRooms & gi, float splitShare = 0.2f,
 	const QString & red = QString() );
 
+/*! The Space stage as the GI's room source (coordinator ruling 10-19): relabels the GI room grid `r` (built by
+ *  ROOMCLAMP1 over the GI's box and cell, which stay) with the Space rooms' 1-based indexes. A cell takes the
+ *  smallest room whose shapes hold its centre; an air cell in no shape takes the Space room that holds most of its
+ *  ROOMCLAMP1 room (the fit's coverage gaps), else outdoors (0); solid stays -1. The second name (b) comes only from
+ *  the Space thresholds, so light crosses between rooms only there. A wide-doorway room ROOMCLAMP1 called
+ *  outdoors is interior here. Returns the census line ("space rooms into GI: ..."). Red "spaceshapes": no cell
+ *  is taken by a shape (wide-door rooms stay outdoors). */
+QString probeRoomsFromSpace( const ProbeVolumes & v, ProbeRooms * r, const QString & red = QString() );
+
 /*! Fill the GI's volume set (lane PERF1's GiVolumeSet: shapes{type, center, size, rotation, room},
  *  thresholds{shape, rooms[2], blendWidth}, source, census). A template so this branch builds before that merge. */
 template <class Set>

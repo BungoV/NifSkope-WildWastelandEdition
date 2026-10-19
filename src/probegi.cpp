@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 #include "probebake.h"
 #include "proberelight.h"
 #include "cellaodecal.h"	// lane AODECAL1
+#include "probevolumesgi.h"	// lane VOLFIT1: the Space rooms as the room source
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -25,6 +26,7 @@ BSD License - see nifskope.h
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <mutex>
 #include <thread>
 #include <unordered_map>
 
@@ -286,6 +288,85 @@ StaticLightCache & staticLightCache()
 }
 }	// namespace
 
+namespace
+{
+/* lane PERF1: a cell's load runs the relight two to four times over one soup (the load's, the placed-only one, the
+ * first frame's sky picture), and the tracer and the rooms come from the soup alone: the last ones built are kept,
+ * keyed on the soup's bytes (and the room spec), and a relight over the same bytes copies them instead of building
+ * them again. Off: WW_GI_GEOMEMO=0. */
+struct GeoMemo
+{
+	std::mutex lock;
+	quint64 bvhKey = 0;
+	probebvh::Bvh bvh;
+	double O[2] = { 0, 0 };
+	quint64 roomsKey = 0;
+	ProbeRooms rooms;
+	bool roomsOk = false;
+};
+GeoMemo & geoMemo()
+{
+	static GeoMemo m;
+	return m;
+}
+bool geoMemoOn()
+{
+	static const bool on = qEnvironmentVariable( "WW_GI_GEOMEMO" ) != QLatin1String( "0" );
+	return on;
+}
+struct KeyMix
+{
+	quint64 h = 0xCBF29CE484222325ULL;
+	void bytes( const void * p, size_t n )
+	{
+		const unsigned char * b = static_cast<const unsigned char *>( p );
+		size_t i = 0;
+		for ( ; i + 8 <= n; i += 8 ) {
+			quint64 w;
+			std::memcpy( &w, b + i, 8 );
+			h = ( h ^ w ) * 0x100000001B3ULL;
+			h ^= h >> 29;
+		}
+		for ( ; i < n; i++ )
+			h = ( h ^ b[i] ) * 0x100000001B3ULL;
+		h = ( h ^ quint64( n ) ) * 0x100000001B3ULL;
+	}
+	template <class T> void vec( const std::vector<T> & v ) { bytes( v.data(), v.size() * sizeof( T ) ); }
+	void str( const QString & x ) { bytes( x.constData(), size_t( x.size() ) * sizeof( QChar ) ); }
+};
+quint64 roomsKeyOf( quint64 trisKey, const ProbeSoup & soup, const ProbeRoomSpec & rs )
+{
+	KeyMix k;
+	k.h ^= trisKey;
+	k.vec( soup.glass );
+	for ( const ProbeSoup::Door & d : soup.doors ) {
+		k.bytes( &d.ref, sizeof d.ref );
+		k.bytes( d.lo, sizeof d.lo );
+		k.bytes( d.hi, sizeof d.hi );
+	}
+	const probebvh::AlphaMask & m = soup.amask;
+	k.vec( m.triOf );
+	for ( const probebvh::AlphaMask::Tri & t : m.tris ) {
+		k.bytes( &t.map, sizeof t.map );
+		k.bytes( &t.thr, sizeof t.thr );
+		k.bytes( t.uv, sizeof t.uv );
+		k.bytes( t.as, sizeof t.as );
+	}
+	for ( const probebvh::AlphaMask::Map & mp : m.maps ) {
+		k.bytes( &mp.w, sizeof mp.w );
+		k.bytes( &mp.h, sizeof mp.h );
+		k.vec( mp.a );
+	}
+	k.bytes( &rs.cell, sizeof rs.cell );
+	k.bytes( &rs.maxCells, sizeof rs.maxCells );
+	k.bytes( &rs.pinch, sizeof rs.pinch );
+	k.str( rs.red );
+	k.bytes( rs.clipLo, sizeof rs.clipLo );
+	k.bytes( rs.clipHi, sizeof rs.clipHi );
+	return k.h;
+}
+}
+
 bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCellLighting & lighting,
 	const ProbeGiSpec & spec, ProbeGiResult * out )
 {
@@ -322,25 +403,52 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 
 	// ---- the soup's tracer, local to the soup's middle (as the bake builds it)
 	double O[2] = { 0, 0 };
-	{
-		double mn[2] = { 1e300, 1e300 }, mx[2] = { -1e300, -1e300 };
-		for ( size_t i = 0; i < soup.tris.size(); i += 3 )
-			for ( int k = 0; k < 2; k++ ) {
-				mn[k] = std::min( mn[k], double( soup.tris[i + size_t( k )] ) );
-				mx[k] = std::max( mx[k], double( soup.tris[i + size_t( k )] ) );
-			}
-		if ( !soup.tris.empty() )
-			for ( int k = 0; k < 2; k++ )
-				O[k] = std::floor( ( mn[k] + mx[k] ) * 0.5 );
-	}
+	const bool memoOn = geoMemoOn();
+	quint64 trisKey = 0;
+	bool bvhHit = false;
 	probebvh::Bvh bvh;
-	bvh.t.resize( soup.tris.size() );
-	for ( size_t i = 0; i < soup.tris.size(); i += 3 ) {
-		bvh.t[i + 0] = float( double( soup.tris[i + 0] ) - O[0] );
-		bvh.t[i + 1] = float( double( soup.tris[i + 1] ) - O[1] );
-		bvh.t[i + 2] = soup.tris[i + 2];
+	if ( memoOn ) {
+		KeyMix k;
+		k.vec( soup.tris );
+		trisKey = k.h;
+		GeoMemo & M = geoMemo();
+		std::lock_guard<std::mutex> g( M.lock );
+		if ( M.bvhKey == trisKey && trisKey != 0 ) {
+			bvh = M.bvh;
+			O[0] = M.O[0];
+			O[1] = M.O[1];
+			bvhHit = true;
+		}
 	}
-	bvh.build();
+	if ( !bvhHit ) {
+		{
+			double mn[2] = { 1e300, 1e300 }, mx[2] = { -1e300, -1e300 };
+			for ( size_t i = 0; i < soup.tris.size(); i += 3 )
+				for ( int k = 0; k < 2; k++ ) {
+					mn[k] = std::min( mn[k], double( soup.tris[i + size_t( k )] ) );
+					mx[k] = std::max( mx[k], double( soup.tris[i + size_t( k )] ) );
+				}
+			if ( !soup.tris.empty() )
+				for ( int k = 0; k < 2; k++ )
+					O[k] = std::floor( ( mn[k] + mx[k] ) * 0.5 );
+		}
+		bvh.t.resize( soup.tris.size() );
+		for ( size_t i = 0; i < soup.tris.size(); i += 3 ) {
+			bvh.t[i + 0] = float( double( soup.tris[i + 0] ) - O[0] );
+			bvh.t[i + 1] = float( double( soup.tris[i + 1] ) - O[1] );
+			bvh.t[i + 2] = soup.tris[i + 2];
+		}
+		bvh.build();
+		if ( memoOn ) {
+			GeoMemo & M = geoMemo();
+			std::lock_guard<std::mutex> g( M.lock );
+			M.bvh = bvh;
+			M.bvh.mask = nullptr;
+			M.O[0] = O[0];
+			M.O[1] = O[1];
+			M.bvhKey = trisKey;
+		}
+	}
 	bvh.mask = &soup.amask;   // lane ALPHATEST1: light passes an alpha-test hole
 	auto blocked = [&]( const double p[3], const double q[3], double clearEnd ) -> bool {
 		double d[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] };
@@ -1246,8 +1354,35 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		roomSpec.clipLo[c] = R.origin[c];
 		roomSpec.clipHi[c] = c == 2 ? 1e30f : R.origin[c] + float( dims[c] ) * float( v );
 	}
-	R.roomsOn = spec.red != QLatin1String( "noclamp" ) && spec.red != QLatin1String( "prelane" )
-		&& probeRoomsBuild( soup, roomSpec, &R.rooms );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
+	const bool roomsWanted = spec.red != QLatin1String( "noclamp" ) && spec.red != QLatin1String( "prelane" );
+	bool roomsHit = false;
+	quint64 roomsKey = 0;
+	if ( roomsWanted && memoOn ) {
+		roomsKey = roomsKeyOf( trisKey, soup, roomSpec );
+		GeoMemo & M = geoMemo();
+		std::lock_guard<std::mutex> g( M.lock );
+		if ( M.roomsKey == roomsKey && roomsKey != 0 ) {
+			R.rooms = M.rooms;
+			R.roomsOn = M.roomsOk;
+			roomsHit = true;
+		}
+	}
+	if ( !roomsHit ) {
+		R.roomsOn = roomsWanted && probeRoomsBuild( soup, roomSpec, &R.rooms );
+		if ( roomsWanted && memoOn ) {
+			GeoMemo & M = geoMemo();
+			std::lock_guard<std::mutex> g( M.lock );
+			M.rooms = R.rooms;
+			M.roomsOk = R.roomsOn;
+			M.roomsKey = roomsKey;
+		}
+	}
+	if ( memoOn )
+		std::fprintf( stderr, "gi geomemo: tracer %s, rooms %s\n", bvhHit ? "kept" : "built",
+			!roomsWanted ? "off" : roomsHit ? "kept" : "built" );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
+	// lane VOLFIT1: the Space stage is the room source (ruling 10-19); after the memo, which keeps ROOMCLAMP1's grid
+	if ( R.roomsOn && spec.space )
+		R.spaceRooms = probeRoomsFromSpace( *spec.space, &R.rooms );
 	const ProbeRooms & RM = R.rooms;
 	// every probe's rooms: its cell's, or in a solid cell the nearest air cell's within two cells
 	std::vector<std::array<int, 2>> probeRoom( up.size(), { { -1, -1 } } );
@@ -1986,12 +2121,91 @@ void probeGiAoFreeSwap( ProbeGiResult & r )
 	}
 }
 
+/* lane PERF1: the GI volumes (src/proberooms.h GiVolumeSet), the fitter's or the rooms grid stand-in, for the runtime:
+ * the shapes as 12 floats each; per voxel, each slot's threshold to another volume: the weight 1 - distance / blend
+ * width (the distance from the voxel's centre to the threshold's shape, the nearest threshold of the slot's room) and
+ * the room across it. Both sides' slots carry it, so the blend runs both ways. */
+static void giVolumesInto( ProbeGiResult & r, WwCellGi & gi )
+{
+	QElapsedTimer clock;
+	clock.start();
+	if ( r.volumes.shapes.empty() && r.volumes.thresholds.empty() )
+		r.volumes = giVolumesFromRooms( r.rooms );
+	gi.volShapes.clear();
+	gi.slotThresh.clear();
+	for ( const GiVolumeShape & s : r.volumes.shapes ) {
+		const float v[12] = { s.center[0], s.center[1], s.center[2], float( s.type ), s.size[0], s.size[1], s.size[2],
+			float( s.room ), s.rotation[0], s.rotation[1], s.rotation[2], 0.0f };
+		gi.volShapes.insert( gi.volShapes.end(), v, v + 12 );
+	}
+	const size_t nv = size_t( r.dims[0] ) * size_t( r.dims[1] ) * size_t( r.dims[2] );
+	qint64 byThresh = 0;
+	if ( r.slotRooms.size() == nv && nv && !r.volumes.thresholds.empty() ) {
+		gi.slotThresh.assign( nv * 3, 0.0f );
+		std::vector<int> across( nv * 2, -1 );
+		for ( const GiThreshold & t : r.volumes.thresholds ) {
+			const float bw = t.blendWidth > 0.0f ? t.blendWidth : 1.5f * r.voxel;
+			// shape -> world = Rz Ry Rx; the distance is taken in the shape's frame (a box: the threshold's extent)
+			const double d2r = 3.14159265358979 / 180.0;
+			const double cx = std::cos( t.shape.rotation[0] * d2r ), sx = std::sin( t.shape.rotation[0] * d2r );
+			const double cy = std::cos( t.shape.rotation[1] * d2r ), sy = std::sin( t.shape.rotation[1] * d2r );
+			const double cz = std::cos( t.shape.rotation[2] * d2r ), sz = std::sin( t.shape.rotation[2] * d2r );
+			const double R[3][3] = { { cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx },
+				{ sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx }, { -sy, cy * sx, cy * cx } };
+			double h[3], reach = 0.0;
+			for ( int c = 0; c < 3; c++ ) {
+				h[c] = 0.5 * double( t.shape.size[c] );
+				reach += h[c] * h[c];
+			}
+			reach = std::sqrt( reach ) + double( bw );
+			int lo[3], hi[3];
+			for ( int c = 0; c < 3; c++ ) {
+				lo[c] = std::max( 0, int( std::floor( ( t.shape.center[c] - reach - r.origin[c] ) / r.voxel ) ) );
+				hi[c] = std::min( r.dims[c] - 1, int( std::floor( ( t.shape.center[c] + reach - r.origin[c] ) / r.voxel ) ) );
+			}
+			for ( int z = lo[2]; z <= hi[2]; z++ )
+				for ( int y = lo[1]; y <= hi[1]; y++ )
+					for ( int x = lo[0]; x <= hi[0]; x++ ) {
+						const double p[3] = { r.origin[0] + ( x + 0.5 ) * r.voxel - t.shape.center[0],
+							r.origin[1] + ( y + 0.5 ) * r.voxel - t.shape.center[1], r.origin[2] + ( z + 0.5 ) * r.voxel - t.shape.center[2] };
+						double d2 = 0.0;
+						for ( int c = 0; c < 3; c++ ) {
+							const double l = R[0][c] * p[0] + R[1][c] * p[1] + R[2][c] * p[2];	// R^T p
+							const double e = std::max( std::abs( l ) - h[c], 0.0 );
+							d2 += e * e;
+						}
+						const float w = 1.0f - float( std::sqrt( d2 ) ) / bw;
+						if ( w <= 0.0f )
+							continue;
+						const size_t i = ( size_t( z ) * size_t( r.dims[1] ) + size_t( y ) ) * size_t( r.dims[0] ) + size_t( x );
+						const int pk = int( r.slotRooms[i] );
+						const int s[2] = { pk / 4096 - 1, pk % 4096 - 1 };
+						for ( int q = 0; q < 2; q++ ) {
+							const int o = s[q] < 0 ? -2 : s[q] == t.rooms[0] ? t.rooms[1] : s[q] == t.rooms[1] ? t.rooms[0] : -2;
+							if ( o < -1 || w <= gi.slotThresh[i * 3 + 1 + size_t( q )] )
+								continue;
+							gi.slotThresh[i * 3 + 1 + size_t( q )] = w;
+							across[i * 2 + size_t( q )] = o;
+						}
+					}
+		}
+		for ( size_t i = 0; i < nv; i++ ) {
+			gi.slotThresh[i * 3] = probeRoomsPack( across[i * 2], across[i * 2 + 1] );
+			byThresh += ( across[i * 2] >= 0 || across[i * 2 + 1] >= 0 ) ? 1 : 0;
+		}
+	}
+	gi.volCensus = r.volumes.census + QStringLiteral( "; voxels by a threshold %1 of %2; pack ms %3" ).arg( byThresh )
+		.arg( qint64( nv ) ).arg( double( clock.nsecsElapsed() ) / 1e6, 0, 'f', 0 );
+	std::fprintf( stderr, "%s\n", qPrintable( gi.volCensus ) );
+}
+
 void probeGiRoomsInto( ProbeGiResult & r, WwCellGi & gi )
 {
 	if ( !r.roomsOn || gi.rgba.empty() )
 		return;
 	gi.rgba.insert( gi.rgba.end(), r.grid2.begin(), r.grid2.end() );
 	gi.sky.insert( gi.sky.end(), r.gridSky2.begin(), r.gridSky2.end() );
+	giVolumesInto( r, gi );	// lane PERF1
 	gi.slotRooms = std::move( r.slotRooms );
 	gi.rooms.resize( r.rooms.a.size() );
 	for ( size_t i = 0; i < r.rooms.a.size(); i++ )
@@ -2027,6 +2241,7 @@ QString probeGiCensusText( const ProbeGiResult & r )
 			+ QStringLiteral( "\n  gi rooms: voxels with a second room %1 (left empty %2), slots gathered from their eye "
 				"(the centre in another room) %3, probes in no room %4" ).arg( r.voxelsTwoRooms ).arg( r.voxelsTwoBare )
 				.arg( r.voxelsCentreElsewhere ).arg( r.probesRoomless )
+				+ ( r.spaceRooms.isEmpty() ? QString() : QStringLiteral( "\n  " ) + r.spaceRooms )   // lane VOLFIT1
 			: QStringLiteral( "gi rooms: off (red noclamp: one value a voxel)" ) )
 		+ ( r.skyLit ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() )
 		+ QStringLiteral( "\n  " ) + bounceCensusText( r )

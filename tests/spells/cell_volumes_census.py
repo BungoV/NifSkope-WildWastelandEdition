@@ -9,6 +9,7 @@ one question is about. Independent of NifSkope: plain JSON reading.
 import glob
 import json
 import os
+import re
 import sys
 
 
@@ -60,6 +61,7 @@ def main():
             if 'outside' in t['between']:
                 tot['outside thresholds'] += 1
     ms, rebuilt, skipped = [], 0, 0
+    gi_rows = []   # the GI fed from the Space rooms (WW_CELL_VOLUMES_GI=1 with the bake step): per load
     for tsv in glob.glob(os.path.join(root, 'space_census*.tsv')):
         for i, line in enumerate(open(tsv)):
             w = line.rstrip('\n').split('\t')
@@ -71,6 +73,10 @@ def main():
                 rebuilt += 1
             if w[7].lstrip('-').isdigit() and int(w[7]) >= 0:
                 ms.append(int(w[7]))
+            m = re.search(r'mapped (\d+), unmapped (\d+), interior where the room grid had outdoors (\d+)', w[9]) \
+                if len(w) > 9 else None
+            if m:
+                gi_rows.append((w[0], int(m.group(1)), int(m.group(2)), int(m.group(3))))
     print('SPACE CENSUS %s' % root)
     for k, v in tot.items():
         print('  %-20s %d' % (k, v))
@@ -83,6 +89,12 @@ def main():
         ms.sort()
         print('  stage ms             loads %d (rebuilt %d, skipped %d), sum %d, median %d, max %d' % (
             len(ms), rebuilt, skipped, sum(ms), ms[len(ms) // 2], ms[-1]))
+    if gi_rows:
+        print('  GI from Space        loads %d: rooms mapped %d, unmapped %d (want 0), wide-door rooms now interior %d' % (
+            len(gi_rows), sum(r[1] for r in gi_rows), sum(r[2] for r in gi_rows), sum(r[3] for r in gi_rows)))
+        for r in gi_rows:
+            if r[2]:
+                print('    unmapped: %s %d' % (r[0], r[2]))
     border.sort()
     print('  borderline (sky within %.2f of %.2f): %d' % (band, skymax, len(border)))
     rows = ['place\troom\tsky\twall\topenness\tback\tanchor\tshapes\tcoverage\tevidence']

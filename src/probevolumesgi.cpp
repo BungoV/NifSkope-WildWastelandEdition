@@ -137,3 +137,116 @@ ProbeVolumesGi probeVolumesToGi( const ProbeVolumes & v, const ProbeRooms & gi, 
 		.arg( g.shared ).arg( g.shapes.size() ).arg( g.thresholds.size() ).arg( g.thresholdsDropped );
 	return g;
 }
+
+namespace {
+
+// every cell of `r` whose centre `s` holds: f( cell index )
+template <class F>
+void forShapeCells( const ProbeRooms & r, const ProbeVolumeShape & s, F f )
+{
+	const double h = 0.5 * std::sqrt( double( s.size[0] ) * s.size[0] + double( s.size[1] ) * s.size[1] + double( s.size[2] ) * s.size[2] );
+	int i0[3], i1[3];
+	for ( int c = 0; c < 3; c++ ) {
+		i0[c] = std::max( 0, int( std::floor( ( s.center[c] - h - r.origin[c] ) / r.cell ) ) );
+		i1[c] = std::min( r.dims[c] - 1, int( std::floor( ( s.center[c] + h - r.origin[c] ) / r.cell ) ) );
+	}
+	for ( int z = i0[2]; z <= i1[2]; z++ )
+		for ( int y = i0[1]; y <= i1[1]; y++ )
+			for ( int x = i0[0]; x <= i1[0]; x++ ) {
+				const float p[3] = { r.origin[0] + ( x + 0.5f ) * r.cell, r.origin[1] + ( y + 0.5f ) * r.cell, r.origin[2] + ( z + 0.5f ) * r.cell };
+				if ( s.contains( p ) )
+					f( r.index( x, y, z ) );
+			}
+}
+
+}
+
+QString probeRoomsFromSpace( const ProbeVolumes & v, ProbeRooms * r, const QString & red )
+{
+	const bool shapesOn = red != QLatin1String( "spaceshapes" );
+	const size_t N = r->a.size();
+	const int nRooms = std::min( int( v.rooms.size() ), 4094 );   // the pack holds ids up to 4094
+	std::vector<qint16> own( N, 0 );
+	std::vector<double> vol( size_t( nRooms ) + 1, 0.0 );
+	for ( int k = 1; k <= nRooms; k++ )
+		for ( const ProbeVolumeShape & s : v.rooms[size_t( k - 1 )].shapes )
+			vol[size_t( k )] += s.volume();
+	// 1. the shapes: a cell takes the smallest room holding its centre (a room inside a room keeps its own)
+	std::vector<qint64> cellsOf( size_t( nRooms ) + 1, 0 ), wasOutdoors( size_t( nRooms ) + 1, 0 );
+	for ( int k = 1; k <= nRooms; k++ )
+		for ( const ProbeVolumeShape & s : v.rooms[size_t( k - 1 )].shapes )
+			forShapeCells( *r, s, [&]( size_t i ) {
+				if ( r->a[i] < 0 || !shapesOn )
+					return;   // solid stays solid (a shape's overshoot into the wall)
+				if ( own[i] == 0 || vol[size_t( k )] < vol[size_t( own[i] )] )
+					own[i] = qint16( k );
+			} );
+	// 2. each ROOMCLAMP1 room's cells: the Space room most of its shape-held cells took (the fit's gaps)
+	QMap<int, QMap<int, qint64>> votes;
+	for ( size_t i = 0; i < N; i++ )
+		if ( own[i] > 0 ) {
+			cellsOf[size_t( own[i] )]++;
+			if ( r->a[i] == 0 )
+				wasOutdoors[size_t( own[i] )]++;
+			else if ( r->a[i] > 0 )
+				votes[r->a[i]][own[i]]++;
+		}
+	QMap<int, int> rcTo;
+	for ( auto it = votes.constBegin(); it != votes.constEnd(); ++it ) {
+		int best = 0;
+		qint64 bv = 0;
+		for ( auto jt = it.value().constBegin(); jt != it.value().constEnd(); ++jt )
+			if ( jt.value() > bv ) {
+				bv = jt.value();
+				best = jt.key();
+			}
+		rcTo[it.key()] = best;
+	}
+	qint64 gapCells = 0, rcOutdoors = 0;
+	std::vector<qint16> a( N ), b( N, -1 );
+	for ( size_t i = 0; i < N; i++ ) {
+		const int o = r->a[i];
+		if ( own[i] > 0 )
+			a[i] = own[i];
+		else if ( o > 0 && rcTo.value( o, 0 ) > 0 ) {
+			a[i] = qint16( rcTo.value( o ) );
+			gapCells++;
+		} else {
+			a[i] = o < 0 ? qint16( -1 ) : qint16( 0 );
+			if ( o > 0 )
+				rcOutdoors++;   // a ROOMCLAMP1 room the Space stage did not keep (open, sky, too small)
+		}
+	}
+	// 3. the second names: the Space thresholds only (a box grown 1.5 cells each way across, half a cell along)
+	qint64 bCells = 0;
+	for ( const ProbeVolumeThreshold & t : v.thresholds ) {
+		if ( t.a > nRooms || t.b > nRooms )
+			continue;
+		ProbeVolumeShape s = t.shape;
+		s.size[0] += r->cell;
+		s.size[1] += 3.0f * r->cell;
+		s.size[2] += r->cell;
+		forShapeCells( *r, s, [&]( size_t i ) {
+			const int here = a[i];
+			const int other = here == t.a ? t.b : here == t.b ? t.a : -1;
+			if ( here >= 0 && other >= 0 && other != here && b[i] < 0 ) {
+				b[i] = qint16( other );
+				bCells++;
+			}
+		} );
+	}
+	int inGrid = 0, interiorNow = 0;
+	for ( int k = 1; k <= nRooms; k++ ) {
+		if ( cellsOf[size_t( k )] > 0 )
+			inGrid++;
+		if ( cellsOf[size_t( k )] > 0 && 2 * wasOutdoors[size_t( k )] > cellsOf[size_t( k )] )
+			interiorNow++;
+	}
+	r->a.swap( a );
+	r->b.swap( b );
+	r->rooms = nRooms;
+	return QStringLiteral( "space rooms into GI: rooms %1, mapped %2, unmapped %3, interior where the room grid had outdoors %4; "
+		"room-grid rooms taken over %5, room-grid room cells now outdoors %6, gap cells %7, threshold cells %8 (grid %9x%10x%11 cell %12)" )
+		.arg( nRooms ).arg( inGrid ).arg( nRooms - inGrid ).arg( interiorNow ).arg( rcTo.size() ).arg( rcOutdoors ).arg( gapCells )
+		.arg( bCells ).arg( r->dims[0] ).arg( r->dims[1] ).arg( r->dims[2] ).arg( double( r->cell ), 0, 'f', 1 );
+}

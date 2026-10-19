@@ -214,6 +214,13 @@ struct Options
 bool drawCard( Scene * scene, const ImpostorCardSet & set,
 				const Vector3 & worldOffset, const Options & opt, QString * why = nullptr );
 
+/*! A pass of many cards (lane PERF1). Between `batchBegin` and `batchEnd`, `drawCard` binds the program,
+ *  the pass-wide uniforms (fog, lights, view) and the GL state once, and a set's sheets only when the set
+ *  changes, an array layer's file resolved once per sheet. The cards draw in the same order with the same
+ *  values: the same pixels. WW_IMPOSTOR_RED=perdraw keeps the old per-card binding (the gate's red). */
+void batchBegin();
+void batchEnd( Scene * scene );
+
 //! The slider's two ends, in depth-search steps (lane IMPOSTORDEPTH2).
 constexpr int kCrispSearchSteps  = 0;
 constexpr int kSmoothSearchSteps = 16;

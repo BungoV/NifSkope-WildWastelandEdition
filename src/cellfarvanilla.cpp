@@ -12,6 +12,8 @@ BSD License - see nifskope.h
 #include "spells/blocks.h"
 
 #include <QBuffer>
+#include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -33,10 +35,9 @@ int fvFloorDiv( int a, int b )
 	return ( a >= 0 ) ? a / b : -( ( -a + b - 1 ) / b );
 }
 
-//! A chunk file through the resource manager (archives + the game's folders), then the loose resource stack.
-bool fvLoad( const QString & path, NifModel & src, QString * why )
+//! A chunk file's bytes through the resource manager (archives + the game's folders), then the loose resource stack.
+bool fvBytes( const QString & path, QByteArray & bytes, QString * why )
 {
-	QByteArray bytes;
 	const QString ext = QStringLiteral( "." ) + QFileInfo( path ).suffix().toLower();
 	bool found = Game::GameManager::get_file( bytes, Game::FALLOUT_4, path, "meshes", ext.toLatin1().constData() );
 	if ( !found ) {
@@ -61,6 +62,21 @@ bool fvLoad( const QString & path, NifModel & src, QString * why )
 		*why = QStringLiteral( "missing" );
 		return false;
 	}
+	return true;
+}
+
+//! A chunk file loaded as a model from its bytes (fvBytes).
+bool fvParse( const QString & path, QByteArray & bytes, NifModel & src, QString * why );
+
+//! A chunk file through the resource manager (archives + the game's folders), then the loose resource stack.
+bool fvLoad( const QString & path, NifModel & src, QString * why )
+{
+	QByteArray bytes;
+	return fvBytes( path, bytes, why ) && fvParse( path, bytes, src, why );
+}
+
+bool fvParse( const QString & path, QByteArray & bytes, NifModel & src, QString * why )
+{
 	QBuffer dev( &bytes );
 	const bool ok = dev.open( QIODevice::ReadOnly ) && src.load( dev, path.toLocal8Bit().constData() );
 	src.resetState();
@@ -750,16 +766,49 @@ qint64 wwFarVanObjectCensus( const QString & ws, int level, int x0, int y0, int 
 	const int L = std::max( 1, level );
 	qint64 tris = 0;
 	int read = 0;
+	/* lane PERF1: a chunk's count is kept in census.tsv next to the exe, keyed on the chunk's bytes and the region,
+	 * so a launch after the first reads the bytes but does not parse the model again (~20 s at 3x3 to ~1 s). */
+	static QHash<QByteArray, qint64> cache;
+	static bool cacheRead = false;
+	const bool useCache = qEnvironmentVariable( "WW_FARCENSUS_CACHE" ) != "0";
+	const QString cachePath = QCoreApplication::applicationDirPath() + QStringLiteral( "/shadercache/census.tsv" );
+	if ( useCache && !cacheRead ) {
+		cacheRead = true;
+		QFile cf( cachePath );
+		if ( cf.open( QIODevice::ReadOnly ) )
+			for ( const QByteArray & line : cf.readAll().split( '\n' ) )
+				if ( const qsizetype t = line.lastIndexOf( '\t' ); t > 0 )
+					cache.insert( line.left( t ), line.mid( t + 1 ).toLongLong() );
+	}
+	QByteArray added;
+	int hits = 0;
+	QElapsedTimer clock;
+	clock.start();
 	for ( int y = fvFloorDiv( y0, L ) * L; y <= y1; y += L )
 		for ( int x = fvFloorDiv( x0, L ) * L; x <= x1; x += L ) {
 			if ( x >= hx0 && x + L - 1 <= hx1 && y >= hy0 && y + L - 1 <= hy1 )
 				continue;   // wholly inside the hole
 			NifModel src;
 			QString why;
-			if ( !fvLoad( QStringLiteral( "meshes/terrain/%1/objects/%1.%2.%3.%4.bto" ).arg( wsl ).arg( L ).arg( x ).arg( y ),
-					src, &why ) )
+			const QString path = QStringLiteral( "meshes/terrain/%1/objects/%1.%2.%3.%4.bto" ).arg( wsl ).arg( L ).arg( x ).arg( y );
+			QByteArray bytes;
+			if ( !fvBytes( path, bytes, &why ) )
+				continue;
+			const QByteArray key = QStringLiteral( "%1 %2 %3 %4 %5 %6 %7 %8 %9" ).arg( path ).arg( bytes.size() )
+				.arg( qHash( bytes, 0 ), 0, 16 ).arg( x0 ).arg( y0 ).arg( x1 ).arg( y1 )
+				.arg( QStringLiteral( "%1 %2 %3 %4" ).arg( hx0 ).arg( hy0 ).arg( hx1 ).arg( hy1 ) ).toUtf8();
+			if ( useCache ) {
+				if ( auto it = cache.constFind( key ); it != cache.constEnd() ) {
+					tris += it.value();
+					read++;
+					hits++;
+					continue;
+				}
+			}
+			if ( !fvParse( path, bytes, src, &why ) )
 				continue;
 			read++;
+			const qint64 trisBefore = tris;
 			for ( int b = 0; b < src.getBlockCount(); b++ ) {
 				const QModelIndex iS = src.getBlockIndex( b );
 				if ( !src.blockInherits( iS, "BSTriShape" ) )
@@ -785,7 +834,18 @@ qint64 wwFarVanObjectCensus( const QString & ws, int level, int x0, int y0, int 
 						tris++;
 				}
 			}
+			if ( useCache ) {
+				cache.insert( key, tris - trisBefore );
+				added += key + '\t' + QByteArray::number( tris - trisBefore ) + '\n';
+			}
 		}
+	if ( !added.isEmpty() && QDir().mkpath( QFileInfo( cachePath ).absolutePath() ) ) {
+		QFile cf( cachePath );
+		if ( cf.open( QIODevice::Append ) )
+			cf.write( added );
+	}
+	std::fprintf( stderr, "far census: level %d chunks %d (%d from census.tsv) %lld ms\n", L, read, hits,
+		(long long) clock.elapsed() );
 	if ( chunksRead )
 		*chunksRead = read;
 	return tris;

@@ -8,7 +8,8 @@ re-counted on the grid.
     house     one room (1 box, coverage >= 0.95), a door threshold with the door box as evidence, a window
     twins     two rooms joined by a doorway: a room-room threshold and a room-outside one
     gimap     the twins onto a GI room grid (--gi-map): two distinct GI ids, nothing logged, the thresholds on
-              those ids, every shape carried (reds nogimap, gione FAIL)
+              those ids, every shape carried (reds nogimap, gione FAIL); the wide twins relabeled by the Space
+              rooms (probeRoomsFromSpace): both interior, GI ids 1 and 2 (red spaceshapes FAILS)
     lroom     an L room: 2 boxes, the notch outdoors (red onebox FAILS)
     church    a pitched roof: <= 3 shapes, coverage >= 0.9, the air over the roof slope in no shape (red nowedge)
     silo      a round tower: one cylinder (red boxonly FAILS)
@@ -530,6 +531,15 @@ def synth(exe, work, red):
         nshapes = [int(r[1]) for r in rows if r[0] == 'shapes']
         if len([l for l in logs if 'maps to no GI room' in l]) != 2 or nshapes != [0]:
             fails.append('gimap: wide twins (no GI rooms) logged %s, shapes %s (want 2 "maps to no GI room", 0)' % (logs, nshapes))
+        # the Space stage as the room source (probeRoomsFromSpace): both wide-door rooms interior, each its own id
+        sline = [r[1] for r in rows if r[0] == 'spacegi']
+        sgi = {r[1]: int(r[2]) for r in rows if r[0] == 'sroom'}
+        slogs = [r[1] for r in rows if r[0] == 'slog']
+        want = 'rooms 2, mapped 2, unmapped 0, interior where the room grid had outdoors 2;'
+        if len(sline) != 1 or want not in sline[0]:
+            fails.append('spacegi: wide twins relabeled as %s (want "%s")' % (sline, want))
+        elif sorted(sgi.values()) != [1, 2] or slogs:
+            fails.append('spacegi: wide twins map to %s, logged %s (want GI ids 1 and 2, nothing logged)' % (sgi, slogs))
     sn = scene_twins(door=80)
     spg, gotg, rows = gimap('twins_gi', sn)
     if rows is not None:

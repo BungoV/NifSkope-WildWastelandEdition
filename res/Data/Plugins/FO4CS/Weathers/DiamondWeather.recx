@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DiamondWeather",
+			"weather": "Fallout4.esm|0x0000116D",
+			"groundFog": {
+				"thickness": 499,
+				"strength": 1.72,
+				"hours": {
+					"2": {
+						"thickness": 367,
+						"strength": 0.52
+					},
+					"14": {
+						"thickness": 499,
+						"strength": 1.72
+					}
+				}
+			}
+		}
+	]
+}

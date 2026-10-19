@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "PrewarPlayerHouseInteriorWeather",
+			"weather": "Fallout4.esm|0x000FF98F",
+			"groundFog": {
+				"thickness": 416,
+				"strength": 0.94,
+				"hours": {
+					"2": {
+						"thickness": 604,
+						"strength": 2.87
+					},
+					"14": {
+						"thickness": 416,
+						"strength": 0.94
+					}
+				}
+			}
+		}
+	]
+}

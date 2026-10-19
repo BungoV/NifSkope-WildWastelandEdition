@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DLC04NukaWorldRainMarkT",
+			"weather": "DLCNukaWorld.esm|0x0000C60B",
+			"groundFog": {
+				"thickness": 531,
+				"strength": 2.04,
+				"hours": {
+					"2": {
+						"thickness": 756,
+						"strength": 5.06
+					},
+					"14": {
+						"thickness": 531,
+						"strength": 2.04
+					}
+				}
+			}
+		}
+	]
+}

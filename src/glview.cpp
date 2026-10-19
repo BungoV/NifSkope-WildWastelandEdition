@@ -75,6 +75,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <memory>
 
 #include <QApplication>
+#include <QFontMetrics>
 #include <QActionGroup>
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -144,7 +145,8 @@ private:
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
 #include "gl/cellvolumeview.h"	// lane VOLFIT1: the Space stage's view
 #include "gl/cellssr.h"
-#include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/cellvolair.h"	// lane VOLAIR1
+#include "gl/cellpasstime.h"	// lane PERF1
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -3676,6 +3678,12 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	wwCellImageSpaceSetAdapted( scene, float( sum / double( std::max( counted, 1 ) ) ), counted );
 	// lane BLOOM1: the game blooms a quarter-size copy of the HDR; a full-size (dump) measure is averaged 4x4
 	wwCellImageSpaceSetBloom( scene, px.data(), w, h, div == 1 ? 4 : 1 );
+	static const bool echo = qEnvironmentVariableIntValue( "WW_IS_MEASURE_ECHO" ) == 1;	// lane PERF1: set against the frame's
+	static QString said;
+	if ( echo && wwCellImageSpaceEcho( scene ) != said ) {
+		said = wwCellImageSpaceEcho( scene );
+		qInfo().noquote() << "cell is measure (pass):" << said;
+	}
 	if ( !dump.isEmpty() ) {
 		QFile f( dump );
 		if ( f.open( QIODevice::WriteOnly ) ) {
@@ -3744,6 +3752,12 @@ void GLView::paintGL()
 		QElapsedTimer & clock;
 		~WwPaintTime() { wwPaintNanos += clock.nsecsElapsed(); }
 	} wwPaintTime{ wwPaintClock };
+	// lane PERF1: the frame's per-pass timers (one bool test while the Frame Timers row is off)
+	PassTime::frameBegin();
+	struct WwPassFrame
+	{
+		~WwPassFrame() { PassTime::frameEnd(); }
+	} wwPassFrame;
 
 	/* RenderDoc capture of THIS context. Frames are numbered per paintGL so a
 	 * capture can be attributed to a frame: the pick render below bumps the same
@@ -3991,12 +4005,17 @@ void GLView::paintGL()
 	 * anything else this frame so the ground and the PBR shapes can receive.
 	 * A no-op with the Shadows row off (the default): no map, no program swap. */
 	wwCellCullFrame();	// lane SUNCELL1: the last frame's culling counts, printed when they change
-	if ( wwLookdevActive() )
+	if ( wwLookdevActive() ) {
+		PassTime::Scope pt( PassTime::SunShadows );	// lane PERF1
 		wwSunShadowPass( scene );
+	}
 	// lane SHADOW1: the cell lights' depth cubes (a no-op unless the document draws cell-lit)
+	PassTime::begin( PassTime::CellShadows );	// lane PERF1
 	wwCellShadowPass( scene );
+	PassTime::end( PassTime::CellShadows );
 	probeSkyTick( scene, scene->nifModel, this );	// lane SKY1: an exterior's bounce follows the weather
 
+	PassTime::begin( PassTime::Background );	// lane PERF1: the sky (or background) and the ground plane
 	if ( perspectiveMode ) {
 		// Lookdev: the lookdev cube background replaces the (FO76+) skybox
 		bool	colorBufCleared = wwLookdevActive() ? wwLookdevDrawBackground( scene ) : scene->renderer->drawSkyBox( scene );
@@ -4008,6 +4027,7 @@ void GLView::paintGL()
 	// Lookdev: the ground plane, before the model so the model depth-tests against it
 	if ( wwLookdevActive() )
 		wwLookdevDrawGround( scene );
+	PassTime::end( PassTime::Background );
 
 	if ( drawLightPos ) {
 		glEnable( GL_DEPTH_TEST );
@@ -4125,13 +4145,23 @@ void GLView::paintGL()
 			lastWs = ws;
 		}
 	}
+	PassTime::begin( PassTime::Obscurance );	// lane PERF1: one bracket per pass
 	wwCellAoPass( scene, cellPasses );
+	PassTime::end( PassTime::Obscurance );
+	PassTime::begin( PassTime::Reflections );
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
-	wwVolFogPass( scene, cellPasses );	// lane VOLFOG1: the lit medium's froxels
-	if ( cellPasses )
+	PassTime::end( PassTime::Reflections );
+	PassTime::begin( PassTime::Air );
+	wwVolAirPass( scene, cellPasses );	// lane VOLAIR1: the air's froxels
+	PassTime::end( PassTime::Air );
+	PassTime::begin( PassTime::Measure );
+	if ( cellPasses && wwCellImageSpaceMeasureByPass( scene ) )	// lane PERF1: else the linear frame measures it (gl/cellhdr.h)
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
+	PassTime::end( PassTime::Measure );
+	PassTime::begin( PassTime::UmbraDepth );
 	if ( cellPasses )
 		wwCellUmbraDepthPass( scene );	// lane UMBRA1: the tome gate's unculled depth
+	PassTime::end( PassTime::UmbraDepth );
 
 	glDisable( GL_BLEND );
 	const bool collisionOnly = Scene::collisionOnlySetting
@@ -4139,29 +4169,43 @@ void GLView::paintGL()
 	if ( workspaceDrawScenes.isEmpty() || collisionOnly || cellFirst ) {
 		// lane IMPOSTORSHOW 2026-09-19: the octahedral impostor card, when one
 		// is armed. Inert in every ordinary session -- see impostorpreviewtest.h.
+		PassTime::begin( PassTime::Impostors );	// lane PERF1
 		wwImpostorPreviewDraw( scene );
 		// ... and the cards a native LOD chunk's manifest places, when the
 		// person has switched that master on. Inert otherwise: it returns 0
 		// without touching GL state.
 		ImpostorChunk::draw( scene, ImpostorDraw::Options() );
+		PassTime::end( PassTime::Impostors );
 		if ( !wwImpostorPreviewSuppressScene() ) {
 			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
+			PassTime::begin( PassTime::Background );	// lane PERF1: the sky through the air counts as the sky
 			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );	// lane CELLALL1
 			wwCellFarLodFrame( scene );	// lane FARLOD1: the far sway's uniforms; no GL call while off
-			scene->draw();
+			if ( hdr )
+				wwVolAirSkyDraw( scene, false );	// lane VOLAIR1: the sky through the air, under the scene
+			PassTime::end( PassTime::Background );
+			scene->draw();	// lane PERF1: opaque / sorted / effects timed inside (Scene::drawShapes)
+			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)
 			if ( hdr ) {
+				PassTime::begin( PassTime::FarCards );
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
 				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame
+				PassTime::end( PassTime::FarCards );
+				PassTime::begin( PassTime::ToneMap );
 				wwCellHdrEnd( scene );
+				PassTime::end( PassTime::ToneMap );
 			}
 			// lane FARLOD1: the cards when the frame is not HDR (lit and toned by their own program), then the
 			// census a gate reads
+			PassTime::begin( PassTime::FarCards );
 			wwCellFarLodCards( scene, false, hdr );
 			wwCellFarLodSkyCensus( scene );
+			PassTime::end( PassTime::FarCards );
 			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
 			if ( workspaceDrawScenes.isEmpty() || cellFirst ) {	// lane CELLALL1
 				// lane GRASSMB1: the game's depth of field + motion blur BEFORE the temporal AA, as the engine's image-space pass
 				// runs them (3 HDR/tone map, 6 DoF, 10 motion blur, then 17/18 FXAA/TAA); inert when off
+				PassTime::Scope pt( PassTime::Post );	// lane PERF1
 				wwCellPostApply( scene );
 				wwGameTaaResolve( scene );
 				wwCellGrassFrameEnd();	// lane GRASSMB1: the grass wind's clock steps once per frame
@@ -4193,6 +4237,7 @@ void GLView::paintGL()
 		glDisable( GL_BLEND );
 	}
 
+	PassTime::begin( PassTime::Overlays );	// lane PERF1: everything after the frame (closed by frameEnd)
 	// lane PROBEVIEW1: the PRTP band's Pass overlays (surfel tiles, lit probes, the picked probe's links)
 	wwCellProbeViewDraw( scene, viewTrans );
 	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds (WW_CELL_VOLUMES_VIEW=1)
@@ -5525,7 +5570,10 @@ void GLView::paintGL()
 	bool drawSnapMarker = snapIndicator && ( gizmoMode != 0 || elemTransform );
 	// lane MODPICK1: the near cells load other mods than the far LOD bake shows -- said in the view, never silent
 	const QString modPickNote = model ? cellModPickViewNote( model ) : QString();
-	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() ) {
+	// lane PERF1: the Frame Timers overlay (never in a harness grab: WW_RENDER_CLEAN keeps the frame clean)
+	static const bool passTimeClean = qEnvironmentVariableIntValue( "WW_RENDER_CLEAN" ) == 1;
+	const QStringList passTimeLines = ( passTimeClean || scene->selecting ) ? QStringList() : PassTime::overlay();
+	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() ) {
 		// The scene passes (esp. collision wireframe) leave GL state that
 		// QPainter inherits: depth test on (so filled overlay shapes get
 		// depth-rejected against the geometry, while text glyphs survive - the
@@ -5548,6 +5596,21 @@ void GLView::paintGL()
 		}
 		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 		QPainter painter( this );
+		if ( !passTimeLines.isEmpty() ) {	// lane PERF1: top right, one pass a line (CPU / GPU ms)
+			QFont f = painter.font();
+			f.setPointSizeF( 8.5 );
+			painter.setFont( f );
+			const QFontMetrics fm( f );
+			int y = 18;
+			for ( const QString & l : passTimeLines ) {
+				const qreal x = qreal( width() ) - fm.horizontalAdvance( l ) - 10.0;
+				painter.setPen( QColor( 0, 0, 0, 200 ) );
+				painter.drawText( QPointF( x + 1, y + 1 ), l );
+				painter.setPen( QColor( 210, 220, 240 ) );
+				painter.drawText( QPointF( x, y ), l );
+				y += 14;
+			}
+		}
 		/* Physics Sim HUD: the active tool, the state, and the solver's own health.
 		 *
 		 * Every number here is already computed by the step -- SimStats is filled

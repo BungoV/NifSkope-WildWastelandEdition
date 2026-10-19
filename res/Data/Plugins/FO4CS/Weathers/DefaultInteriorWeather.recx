@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DefaultInteriorWeather",
+			"weather": "Fallout4.esm|0x001A65F0",
+			"groundFog": {
+				"thickness": 454,
+				"strength": 1.28,
+				"hours": {
+					"2": {
+						"thickness": 495,
+						"strength": 1.68
+					},
+					"14": {
+						"thickness": 454,
+						"strength": 1.28
+					}
+				}
+			}
+		}
+	]
+}

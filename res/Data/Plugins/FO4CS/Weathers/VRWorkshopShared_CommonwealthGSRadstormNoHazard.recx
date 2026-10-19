@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "VRWorkshopShared_CommonwealthGSRadstormNoHazard",
+			"weather": "Fallout4.esm|0x0024A3C0",
+			"groundFog": {
+				"thickness": 864,
+				"strength": 7.32
+			}
+		}
+	]
+}

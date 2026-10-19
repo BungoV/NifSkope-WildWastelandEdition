@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "DLC03AtomM01_RadStorm",
+			"weather": "DLCCoast.esm|0x000247B6",
+			"groundFog": {
+				"thickness": 1000,
+				"strength": 8.0
+			}
+		}
+	]
+}

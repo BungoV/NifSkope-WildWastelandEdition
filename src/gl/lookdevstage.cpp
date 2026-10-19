@@ -7,7 +7,7 @@ BSD License - see nifskope.h
 #include "lookdevstage.h"
 
 #include "esmweather.h"
-#include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/celllights.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -68,6 +68,7 @@ struct LdState
 
 	// resolved
 	bool dirtyLoad = true, dirtyWeather = true;
+	quint64 gen = 1;	// bumped whenever resolve() reloads (lane PERF1: the per-shape memos below key on it)
 	EsmWeather esm;
 	QString loadRefusal;
 	QVector<WwWeatherEntry> list;
@@ -204,6 +205,8 @@ QStringList resolveList( const LdState & s )
 void resolve()
 {
 	LdState & s = st();
+	if ( s.dirtyLoad || s.dirtyWeather )
+		s.gen++;
 	if ( s.dirtyLoad ) {
 		s.dirtyLoad = false;
 		s.dirtyWeather = true;
@@ -277,9 +280,29 @@ struct LdLight
 	bool fromWeather = false;
 };
 
+LdLight computeLight();
+
+/* lane PERF1: every shape's program setup asks for the light several times a frame; it is a pure function of
+ * the resolved weather (gen), the hour and the Sun row, so it is computed once per change of those */
 LdLight currentLight()
 {
 	resolve();
+	const LdState & s = st();
+	static quint64 gen = 0;
+	static double hour = -1.0;
+	static bool sun = false;
+	static LdLight memo;
+	if ( gen != s.gen || hour != s.hour || sun != s.sun ) {
+		memo = computeLight();
+		gen = s.gen;
+		hour = s.hour;
+		sun = s.sun;
+	}
+	return memo;
+}
+
+LdLight computeLight()
+{
 	LdState & s = st();
 	LdLight L;
 	if ( s.sun ) {
@@ -369,7 +392,16 @@ WwFog currentFog()
 {
 	resolve();
 	const LdState & s = st();
-	return wwFogAt( s.w, s.hour, s.tnam, s.gmst );
+	// lane PERF1: memoised like currentLight() (asked once per fogged shape)
+	static quint64 gen = 0;
+	static double hour = -1.0;
+	static WwFog memo;
+	if ( gen != s.gen || hour != s.hour ) {
+		memo = wwFogAt( s.w, s.hour, s.tnam, s.gmst );
+		gen = s.gen;
+		hour = s.hour;
+	}
+	return memo;
 }
 
 QString fogSummary()
@@ -432,7 +464,7 @@ void wwLookdevFogUniforms( Scene * scene )
 	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
 	if ( !prog || prog->uniLocation( "fogOn" ) < 0 )
 		return;
-	wwVolFogUniforms( scene );	// lane VOLFOG1: every program that holds the fog holds the volume's sampler
+	wwVolAirUniforms( scene );	// lane VOLAIR1: every program that holds the fog holds the air's sampler
 	LdState & s = st();
 	const bool on = wwLookdevFogWanted( scene );
 	prog->uni1b( "fogOn", on );
@@ -466,8 +498,16 @@ void wwLookdevFogUniforms( Scene * scene )
 	prog->uni4f( "fogProbe", FloatVector4( s.fogProbe[0], s.fogProbe[1], s.fogProbe[2], 0.0f ) );
 	prog->uni1i( "fogRed", ( wwLookdevRed( "fogmaxclamp" ) ? 1 : 0 ) | ( wwLookdevRed( "fognoescape" ) ? 2 : 0 )
 		| ( wwLookdevRed( "fogheight0" ) ? 4 : 0 ) );
-	s.fogLast = QString( "on(groundz=%1 scale=%2%3)" ).arg( double( s.groundZ ), 0, 'f', 2 ).arg( double( sc ), 0, 'g', 6 )
-		.arg( !s.fog ? QStringLiteral( " leak" ) : QString() );	// on with the row off = the fogleak red
+	static float lastZ = 0.0f, lastSc = 0.0f;	// lane PERF1: the echo string rebuilt only when it changes
+	static bool lastLeak = false, lastOn = false;
+	if ( !lastOn || lastZ != s.groundZ || lastSc != sc || lastLeak != !s.fog || !s.fogLast.startsWith( QLatin1StringView( "on(" ) ) ) {
+		s.fogLast = QString( "on(groundz=%1 scale=%2%3)" ).arg( double( s.groundZ ), 0, 'f', 2 ).arg( double( sc ), 0, 'g', 6 )
+			.arg( !s.fog ? QStringLiteral( " leak" ) : QString() );	// on with the row off = the fogleak red
+		lastOn = true;
+		lastZ = s.groundZ;
+		lastSc = sc;
+		lastLeak = !s.fog;
+	}
 }
 
 bool wwLookdevActive()
@@ -528,6 +568,23 @@ QVector<WwWeatherEntry> wwLookdevWeathers()
 QString wwLookdevWeatherKey()
 {
 	return st().weatherKey;
+}
+
+bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStringList & files, QString & dataDir )
+{
+	resolve();
+	const LdState & s = st();
+	if ( !s.haveWeather )
+		return false;
+	formID = s.w.formID;
+	edid = s.w.edid;
+	owner.clear();
+	for ( const WwWeatherEntry & e : s.list )
+		if ( e.formID == s.w.formID )
+			owner = e.ownerFile;
+	files = s.esm.files();
+	dataDir = EsmWeather::gameDataDir();
+	return true;
 }
 
 void wwLookdevSetWeather( const QString & key )
@@ -746,7 +803,7 @@ QString wwLookdevSummary()
 			: QString() )
 		+ ( s.fog ? QString( " fog=on %1 drew=%2" ).arg( fogSummary(), s.fogLast ) : QString() )
 		+ ( ( s.shadows || !qEnvironmentVariable( "WW_CSM_RED" ).isEmpty() ) ? QStringLiteral( " " ) + wwSunShadowSummary() : QString() )
-		+ ( wwVolFogOn() ? QStringLiteral( " " ) + wwVolFogSummary() : QString() );	// lane VOLFOG1
+		+ ( wwVolAirOn() ? QStringLiteral( " " ) + wwVolAirSummary() : QString() );	// lane VOLAIR1
 }
 
 QString wwLookdevEcho()
@@ -784,7 +841,35 @@ bool wwLookdevDalc( float rgb[6][3] )
 	return L.fromWeather;
 }
 
+namespace
+{
+bool computeImageSpace( WwLookdevIs & o );
+}
+
+// lane PERF1: memoised like currentLight() (the same inputs; the strings it builds cost more than the blend)
 bool wwLookdevImageSpace( WwLookdevIs & o )
+{
+	resolve();
+	const LdState & s = st();
+	static quint64 gen = 0;
+	static double hour = -1.0;
+	static bool sun = false, ok = false;
+	static WwLookdevIs memo;
+	if ( gen != s.gen || hour != s.hour || sun != s.sun ) {
+		memo = WwLookdevIs();
+		ok = computeImageSpace( memo );
+		gen = s.gen;
+		hour = s.hour;
+		sun = s.sun;
+	}
+	if ( ok )
+		o = memo;
+	return ok;
+}
+
+namespace
+{
+bool computeImageSpace( WwLookdevIs & o )
 {
 	const LdLight L = currentLight();	// resolves the weather; the keys of the hour
 	const LdState & s = st();
@@ -815,6 +900,7 @@ bool wwLookdevImageSpace( WwLookdevIs & o )
 	o.key = QStringLiteral( "%1|%2|%3|%4" ).arg( s.weatherKey ).arg( a ).arg( b ).arg( double( t ), 0, 'g', 6 );
 	return true;
 }
+}	// namespace
 
 float wwLookdevSunlightScale()
 {
