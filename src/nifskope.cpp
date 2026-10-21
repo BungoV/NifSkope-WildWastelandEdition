@@ -71,6 +71,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifproxymodel.h"
 #include "model/undocommands.h"
 #include "ui/widgets/fileselect.h"
+#include "ui/opencellcatalog.h"
 #include "ui/widgets/nifview.h"
 #include "ui/widgets/refrbrowser.h"
 #include "ui/widgets/inspect.h"
@@ -10522,6 +10523,7 @@ void NifSkope::load()
 			qWarning() << "cell view:" << cverr;
 		if ( loaded ) {
 			cellWorkspaceNoteOpened( fname, cvspec, cvnotes );
+			openCellRecentAdd( fname );
 			/* lane CELLALL1 (harness only): WW_CELL_ALSO_LOAD=<nif> adds that NIF to Loaded NIFs beside the cell once
 			 * the load returns, so a gate can show the cell's passes survive a Loaded NIF (glview.cpp, cellFirst) */
 			const QString alsoLoad = qEnvironmentVariable( "WW_CELL_ALSO_LOAD" ).trimmed();

@@ -214,6 +214,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QTemporaryDir>
 #include <functional>
 #include <QtEndian>
+#include "ui/opencellmenu.h"
 #include <vector>
 
 namespace {
@@ -32901,6 +32902,10 @@ void NifSkope::initMenu()
 	ui->mRecentFiles->installEventFilter( this );
 	ui->mRecentArchives->installEventFilter( this );
 	mRecentArchiveFiles->installEventFilter( this );
+
+	// File > Open Cell... and Recent Cells: a .wwcell opens through the same path as File > Open
+	openCellInstallMenu( ui->mFile, ui->aReload, ui->mRecentArchives->menuAction(), this,
+		[this]( const QString & p ) { QString f = p; openFile( f ); } );
 
 	// Load & Save
 	QMenu * mSave = new QMenu( this );
