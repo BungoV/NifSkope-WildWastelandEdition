@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
+#include "gl/gametaa.h"
 #include "gl/cellssr.h"		// the cell view's shared opaque pass (contact shadows read its depth)
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -53,6 +54,10 @@ const char * const kCascadeKey = "Settings/Render/Scene/Shadow Cascade Quality";
 const char * const kContactKey = "Settings/Render/Scene/Contact Shadows";
 const char * const kTerrainKey = "Settings/Render/Scene/Terrain Shadows";
 const char * const kSunPathKey = "Settings/Render/Scene/Sun Path";
+const char * const kParKey = "Settings/Render/Scene/FO4CS-Level Shadows";
+const char * const kDistanceKey = "Settings/Render/Scene/Shadow Distance";
+const char * const kParNames[14] = { "dist", "cradius", "cphase", "cslope", "contact", "objlod", "near", "pen", "lowsun",
+	"moon", "tslope", "dim", "temporal", "fogtail" };
 
 struct GpuTimer
 {
@@ -116,10 +121,20 @@ struct Terrain
 	double frameMax = 0, upMs = 0;
 	int frames = 0;
 
+	// lane SHADOWPAR1: the near tier (its own grid under the far map in the same texture), the object-LOD casters
+	int Nn = 0;
+	double nT = 64.0, nx0 = 0, ny0 = 0, ncx = 1e300, ncy = 1e300;
+	int pubNn = 0;
+	double pubNX0 = 0, pubNY0 = 0, pubNT = 64.0;
+	int objLod = 0;		// the far object-LOD shapes in the set (casters)
+	bool objOn = false;
+	float strength = 1.0f;	// the low sun's fade / the moon's strength
+	bool blended = false;	// the last published map blended with the one before (temporal)
+
 	// GL
 	const void * ctx = nullptr;
 	unsigned int tex[2] = { 0, 0 };
-	int texN = 0;
+	int texN = 0, texNn = 0;
 	int front = 0;
 	QString last = QStringLiteral( "off" );
 };
@@ -129,8 +144,14 @@ struct Terrain
 struct TerrJob
 {
 	Terrain w;	// the CPU half only: grid, heights, sweep, out
-	std::vector<TerrSrc> src;
-	bool raster = false, flip = false, nodecay = false;
+	Terrain wn;	// lane SHADOWPAR1: the near tier (N 0 = off), seeded from w at its upwind edge
+	std::vector<TerrSrc> src, srcKept;	// the set to raster; the last one, kept for the near tier's re-raster
+	bool raster = false, rasterNear = false, flip = false, nodecay = false;
+	bool temporal = false;	// blend with the last result (FO4CS: 0.5, only under a temporal AA)
+	bool blended = false;
+	std::vector<std::uint16_t> prevOut, prevNear;
+	int prevN = 0, prevNn = 0;
+	double prevX0 = 0, prevY0 = 0, prevNX0 = 0, prevNY0 = 0;
 	double toSun[3] = { 0, 0, 1 };
 	std::future<void> fut;
 	bool busy = false;
@@ -155,6 +176,11 @@ struct SetState
 	int cascade = 0, contact = 0, terrain = 0, sunPath = 0;
 	bool pinCascade = false, pinContact = false, pinTerrain = false, pinSunPath = false;
 	bool sunPin = false;
+	int par = 0;		// lane SHADOWPAR1: the WwShadowPar mask
+	unsigned frame = 0;
+	float airAmb = 0.3f;
+	bool pinPar = false, pinDist = false;
+	double dist = 14000.0;
 	double pinElev = 0, pinAz = 0;
 	int view = 0;
 	bool sync = false;
@@ -222,6 +248,34 @@ SetState & ss()
 		tier( "WW_SHADOW_TERRAIN", kTerrainKey, s.terrain, s.pinTerrain );
 		tier( "WW_SUNPATH", kSunPathKey, s.sunPath, s.pinSunPath );
 		s.sunPath = std::clamp( s.sunPath, 0, 1 );
+		// lane SHADOWPAR1: the parity mask (row Off / On) and the Shadow Distance slider
+		const QString pe = wwEnvStr( "WW_SHADOW_PAR" ).trimmed().toLower();
+		if ( !pe.isEmpty() ) {
+			s.pinPar = true;
+			bool ok = false;
+			const int m = pe.toInt( &ok );
+			if ( pe == QLatin1StringView( "all" ) )
+				s.par = WwParAll;
+			else if ( ok )
+				s.par = m & WwParAll;
+			else
+				for ( const QString & n : pe.split( QChar( ',' ), Qt::SkipEmptyParts ) )
+					for ( int i = 0; i < 14; i++ )
+						if ( n.trimmed() == QLatin1StringView( kParNames[i] ) )
+							s.par |= 1 << i;
+		} else if ( wwHarnessRun() ) {
+			s.pinPar = true;
+		} else {
+			s.par = q.value( QLatin1StringView( kParKey ), 0 ).toInt() != 0 ? WwParAll : 0;
+		}
+		bool dok = false;
+		const double de = wwEnvStr( "WW_SHADOW_DISTANCE" ).toDouble( &dok );
+		if ( dok ) {
+			s.dist = std::clamp( de, 2000.0, 24000.0 );
+			s.pinDist = true;
+		} else if ( !wwHarnessRun() ) {
+			s.dist = std::clamp( q.value( QLatin1StringView( kDistanceKey ), 14000.0 ).toDouble(), 2000.0, 24000.0 );
+		}
 		const QStringList pin = wwEnvStr( "WW_SUNPATH_PIN" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		if ( pin.size() == 2 ) {
 			bool a = false, b = false;
@@ -371,9 +425,28 @@ bool isTerrainShape( const Shape * sh )
 	return false;
 }
 
-void collectTerrain( Scene * scene, std::vector<const Shape *> & out, quint64 & sig )
+/*! lane SHADOWPAR1: a far object-LOD shape (FO4CS's far map casters: the LOD objects, radius >= 128): named under a
+ *  "FarLOD " node that is not the terrain's or the water's */
+bool isObjLodShape( const Shape * sh )
+{
+	bool lod = false;
+	for ( const Node * p = sh; p; p = p->parentNode() ) {
+		const QString & n = p->getName();
+		if ( n.startsWith( QLatin1StringView( "FarLOD water" ) ) || n.startsWith( QLatin1StringView( "FarLOD terrain" ) ) )
+			return false;
+		if ( n.startsWith( QLatin1StringView( "FarLOD " ) ) )
+			lod = true;
+	}
+	return lod;
+}
+
+constexpr int kObjBudget = 1500;	// FO4CS iFarMapCasterBudget: first come in the scene's walk, no sort
+constexpr float kObjMinRadius = 128.0f;
+
+void collectTerrain( Scene * scene, std::vector<const Shape *> & out, quint64 & sig, bool objLod, int & objCount )
 {
 	out.clear();
+	objCount = 0;
 	sig = 1469598103934665603ull;
 	auto mix = [&sig]( quint64 v ) {
 		sig ^= v;
@@ -381,8 +454,13 @@ void collectTerrain( Scene * scene, std::vector<const Shape *> & out, quint64 & 
 	};
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || sh->triangles.isEmpty() || !isTerrainShape( sh ) )
+		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
+		if ( !isTerrainShape( sh ) ) {
+			if ( !objLod || objCount >= kObjBudget || !isObjLodShape( sh ) || sh->bounds().radius < kObjMinRadius )
+				continue;
+			objCount++;
+		}
 		out.push_back( sh );
 		const Transform & w = sh->worldTrans();
 		mix( quint64( reinterpret_cast<quintptr>( sh ) ) );
@@ -395,6 +473,7 @@ void collectTerrain( Scene * scene, std::vector<const Shape *> & out, quint64 & 
 			mix( v );
 	}
 	mix( quint64( out.size() ) );
+	mix( quint64( objLod ? 1 : 0 ) );
 }
 
 //! the heights at the texel centres (point samples of the surface; the max where surfaces overlap)
@@ -605,7 +684,7 @@ bool ensureTerrTex( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t )
 		t.texN = 0;
 		t.valid = false;
 	}
-	if ( t.tex[0] && t.texN == t.N )
+	if ( t.tex[0] && t.texN == t.N && t.texNn == t.Nn )
 		return true;
 	if ( !t.tex[0] )
 		fn->glGenTextures( 2, t.tex );
@@ -613,7 +692,8 @@ bool ensureTerrTex( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t )
 	fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prev );
 	for ( int k = 0; k < 2; k++ ) {
 		fn->glBindTexture( GL_TEXTURE_2D, t.tex[k] );
-		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RG16, t.N, t.N, 0, GL_RG, GL_UNSIGNED_SHORT, nullptr );
+		// lane SHADOWPAR1: the near tier's rows sit under the far map's (an atlas: no new sampler unit)
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RG16, t.N, t.N + t.Nn, 0, GL_RG, GL_UNSIGNED_SHORT, nullptr );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
@@ -621,14 +701,16 @@ bool ensureTerrTex( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t )
 	}
 	fn->glBindTexture( GL_TEXTURE_2D, GLuint( prev ) );
 	t.texN = t.N;
+	t.texNn = t.Nn;
 	t.valid = false;
 	return t.tex[0] != 0;
 }
 
-//! rows [r0, r1) of the finished map into the back texture
-void uploadRows( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t, const std::vector<std::uint16_t> & out, int r0, int r1 )
+//! rows [r0, r1) of a finished map (width texels a row) into the back texture at row dst + r0
+void uploadRows( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t, const std::vector<std::uint16_t> & out, int width, int dst,
+	int r0, int r1 )
 {
-	if ( r0 >= r1 )
+	if ( r0 >= r1 || out.size() < size_t( r1 ) * size_t( width ) * 2 )
 		return;
 	GLint prev = 0, rl = 0, sp = 0, sr = 0, al = 4;
 	fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prev );
@@ -641,7 +723,7 @@ void uploadRows( NifSkopeOpenGLContext::GLFunctions * fn, Terrain & t, const std
 	fn->glPixelStorei( GL_UNPACK_ROW_LENGTH, 0 );
 	fn->glPixelStorei( GL_UNPACK_SKIP_PIXELS, 0 );
 	fn->glPixelStorei( GL_UNPACK_SKIP_ROWS, 0 );
-	fn->glTexSubImage2D( GL_TEXTURE_2D, 0, 0, r0, t.N, r1 - r0, GL_RG, GL_UNSIGNED_SHORT, out.data() + size_t( r0 ) * size_t( t.N ) * 2 );
+	fn->glTexSubImage2D( GL_TEXTURE_2D, 0, 0, dst + r0, width, r1 - r0, GL_RG, GL_UNSIGNED_SHORT, out.data() + size_t( r0 ) * size_t( width ) * 2 );
 	fn->glPixelStorei( GL_UNPACK_ROW_LENGTH, rl );
 	fn->glPixelStorei( GL_UNPACK_SKIP_PIXELS, sp );
 	fn->glPixelStorei( GL_UNPACK_SKIP_ROWS, sr );
@@ -664,7 +746,48 @@ void dumpTerrain( const Terrain & t, const std::vector<float> & H, const QString
 	f.write( reinterpret_cast<const char *>( t.pubOut.data() ), qint64( t.pubOut.size() * sizeof( std::uint16_t ) ) );
 }
 
-//! the worker: the raster when the set changed, then the whole sweep
+//! the far map's decoded limb heights at a world point (nearest texel); kNoHeight off it or where it has none
+void farS( const Terrain & f, double x, double y, float & lo, float & hi )
+{
+	lo = hi = kNoHeight;
+	const int i = int( std::floor( ( x - f.x0 ) / f.T ) ), j = int( std::floor( ( y - f.y0 ) / f.T ) );
+	if ( i < 0 || j < 0 || i >= f.N || j >= f.N || f.out.size() != size_t( f.N ) * size_t( f.N ) * 2 )
+		return;
+	const size_t o = ( size_t( j ) * size_t( f.N ) + size_t( i ) ) * 2;
+	if ( f.out[o] )
+		lo = f.swLo + float( f.out[o] ) / 65535.0f * f.swSpan;
+	if ( f.out[o + 1] )
+		hi = f.swLo + float( f.out[o + 1] ) / 65535.0f * f.swSpan;
+}
+
+/*! lane SHADOWPAR1 (FO4CS FarFieldSweepCS): the near tier's rays enter at its upwind edge carrying the far map's
+ *  horizon there (what lies toward the sun outside the window), then sweep its finer heights */
+void seedNear( Terrain & n, const Terrain & f )
+{
+	const int a = n.sMaj > 0 ? n.N - 1 : 0;
+	const double base = n.vMin < 0.0 ? std::floor( double( n.N ) * n.vMin ) : 0.0;
+	for ( size_t r = 0; r < n.gLo.size(); r++ ) {
+		const double m = double( r ) + base;
+		const double i = n.majorX ? a : m, jj = n.majorX ? m : a;
+		float lo, hi;
+		farS( f, n.x0 + ( i + 0.5 ) * n.T, n.y0 + ( jj + 0.5 ) * n.T, lo, hi );
+		// line 0 reads the carried horizon undecayed: the far map's value at the edge texel is exactly that
+		n.gLo[r] = lo;
+		n.gHi[r] = hi;
+	}
+}
+
+//! FO4CS's temporal blend: out = lerp(past, new, 0.5) where both hold a height (0 = none: the new one)
+void blendOut( std::vector<std::uint16_t> & out, const std::vector<std::uint16_t> & past )
+{
+	if ( past.size() != out.size() )
+		return;
+	for ( size_t k = 0; k < out.size(); k++ )
+		if ( out[k] && past[k] )
+			out[k] = std::uint16_t( ( unsigned( out[k] ) + unsigned( past[k] ) + 1u ) / 2u );
+}
+
+//! the worker: the raster when the set changed, then the whole sweep (and the near tier's)
 void runTerrJob( TerrJob * j )
 {
 	QElapsedTimer tm;
@@ -672,7 +795,14 @@ void runTerrJob( TerrJob * j )
 	Terrain & w = j->w;
 	if ( j->raster ) {
 		rasterTerrain( w, j->src, j->stop );
+		j->srcKept = std::move( j->src );
 		j->src.clear();
+		j->rasterNear = true;
+	}
+	Terrain & wn = j->wn;
+	if ( wn.N > 0 && j->rasterNear ) {
+		rasterTerrain( wn, j->srcKept, j->stop );
+		j->rasterNear = false;
 	}
 	startSweep( w, j->toSun, j->flip, j->nodecay );
 	QElapsedTimer sw;
@@ -681,8 +811,45 @@ void runTerrJob( TerrJob * j )
 		int aLo = 0, aHi = -1;
 		sweepLines( w, 64, aLo, aHi );
 	}
+	if ( wn.N > 0 ) {
+		// one encoded range for both tiers (the shader's)
+		wn.encLo = w.swLo;
+		wn.encSpan = w.swSpan;
+		startSweep( wn, j->toSun, j->flip, j->nodecay );
+		if ( !j->flip )
+			seedNear( wn, w );
+		while ( wn.line < wn.N && !j->stop.load( std::memory_order_relaxed ) ) {
+			int aLo = 0, aHi = -1;
+			sweepLines( wn, 64, aLo, aHi );
+		}
+		wn.running = false;
+	}
 	w.sweepMs = double( sw.nsecsElapsed() ) * 1e-6;
 	w.running = false;
+	// the temporal blend: only over the same grids, never the first map after a change of them
+	j->blended = false;
+	if ( j->temporal ) {
+		const bool same = j->prevN == w.N && j->prevX0 == w.x0 && j->prevY0 == w.y0 && j->prevNn == wn.N
+			&& ( wn.N == 0 || ( j->prevNX0 == wn.x0 && j->prevNY0 == wn.y0 ) );
+		if ( same && !j->prevOut.empty() ) {
+			blendOut( w.out, j->prevOut );
+			if ( wn.N > 0 )
+				blendOut( wn.out, j->prevNear );
+			j->blended = true;
+		}
+		j->prevOut = w.out;
+		j->prevNear = wn.N > 0 ? wn.out : std::vector<std::uint16_t>();
+		j->prevN = w.N;
+		j->prevX0 = w.x0;
+		j->prevY0 = w.y0;
+		j->prevNn = wn.N;
+		j->prevNX0 = wn.x0;
+		j->prevNY0 = wn.y0;
+	} else if ( !j->prevOut.empty() ) {
+		j->prevOut = std::vector<std::uint16_t>();
+		j->prevNear = std::vector<std::uint16_t>();
+		j->prevN = 0;
+	}
 	j->workMs = double( tm.nsecsElapsed() ) * 1e-6;
 }
 
@@ -697,7 +864,28 @@ void stopTerrJob( TerrJob & j )
 	j.stop = false;
 }
 
-void terrainFrame( Scene * scene, const double toSun[3] )
+/*! lane SHADOWPAR1: the terrain shadow's strength. FO4CS fades the sun's in over 1 -> 4 degrees (smoothstep) where ours
+ *  cut hard at 0.05; with the sun down the light is the moon's, at 0.15 phase^3 (phase |idx - 4| / 4, 3 game days each) */
+float terrStrength( const double toSun[3], const float disc[3], double gameDay, double & cutDeg )
+{
+	cutDeg = 0.05;
+	const bool lowSun = wwShadowPar( WwParLowSun ), moon = wwShadowPar( WwParMoon );
+	const double elev = std::asin( std::clamp( toSun[2], -1.0, 1.0 ) ) / kDeg;
+	const bool sunUp = disc[2] > 0.0f;
+	if ( !sunUp && moon ) {
+		const int idx = int( std::floor( std::max( gameDay, 0.0 ) / 3.0 ) ) % 8;
+		const double ph = std::fabs( double( idx ) - 4.0 ) / 4.0;
+		cutDeg = lowSun ? 1.0 : 0.05;
+		return float( 0.15 * ph * ph * ph );
+	}
+	if ( !lowSun )
+		return 1.0f;
+	cutDeg = 1.0;
+	const double x = std::clamp( ( elev - 1.0 ) / 3.0, 0.0, 1.0 );
+	return float( x * x * ( 3.0 - 2.0 * x ) );
+}
+
+void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 {
 	SetState & s = ss();
 	Terrain & t = s.t;
@@ -710,6 +898,10 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 		j.w.H.shrink_to_fit();
 		j.w.out.clear();
 		j.w.out.shrink_to_fit();
+		j.wn = Terrain();
+		j.srcKept.clear();
+		j.prevOut = std::vector<std::uint16_t>();
+		j.prevNear = std::vector<std::uint16_t>();
 		j.src.clear();
 		t.src.clear();
 		t.valid = false;
@@ -753,18 +945,35 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 	}
 	t.x0 = t.cx - t.N * t.T * 0.5;
 	t.y0 = t.cy - t.N * t.T * 0.5;
+	// lane SHADOWPAR1 near tier (FO4CS: 1024 texels at 64 units), its own window re-centred the same way
+	const int Nn = wwShadowPar( WwParNear ) ? std::min( 1024, t.N ) : 0;
+	if ( Nn != t.Nn ) {
+		t.Nn = Nn;
+		t.ncx = t.ncy = 1e300;
+	}
+	if ( t.Nn > 0 ) {
+		t.nT = 64.0;
+		const double ns = t.Nn * t.nT;
+		if ( std::fabs( cam[0] - t.ncx ) > ns / 4.0 || std::fabs( cam[1] - t.ncy ) > ns / 4.0 ) {
+			t.ncx = std::round( cam[0] / ( ns / 8.0 ) ) * ( ns / 8.0 );
+			t.ncy = std::round( cam[1] / ( ns / 8.0 ) ) * ( ns / 8.0 );
+		}
+		t.nx0 = t.ncx - ns * 0.5;
+		t.ny0 = t.ncy - ns * 0.5;
+	}
 	if ( !ensureTerrTex( fn, t ) ) {
 		t.last = QStringLiteral( "refused(no GL texture)" );
 		return;
 	}
-	if ( t.uploading && j.w.N != t.N )
+	if ( t.uploading && ( j.w.N != t.N || j.wn.N != t.Nn ) )
 		t.uploading = false;	// a map for the old grid size (the textures were just re-made): drop it
 	// the terrain set: checked every 16 frames (and on a re-grid); a change hands the worker a snapshot to raster
 	if ( regrid || t.sig == 0 || --t.checkIn <= 0 ) {
 		t.checkIn = 16;
 		std::vector<const Shape *> shapes;
 		quint64 sig = 0;
-		collectTerrain( scene, shapes, sig );
+		t.objOn = wwShadowPar( WwParObjLod );
+		collectTerrain( scene, shapes, sig, t.objOn, t.objLod );
 		sig ^= quint64( std::llround( t.x0 ) ) * 31ull ^ quint64( std::llround( t.y0 ) ) * 17ull ^ quint64( t.N );
 		if ( sig != t.sig ) {
 			t.sig = sig;
@@ -781,11 +990,13 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 		t.last = QStringLiteral( "on(no terrain shapes)" );
 		return;
 	}
-	// the sun: below 0.05 degrees or overhead, no terrain shadows (fail open)
+	// the sun: below the cut (0.05 degrees; 1 with the FO4CS fade) or overhead, no terrain shadows (fail open)
+	double cutDeg = 0.05;
+	t.strength = terrStrength( toSun, disc, wwLookdevGameDay(), cutDeg );
 	const double hz = std::sqrt( toSun[0] * toSun[0] + toSun[1] * toSun[1] );
-	if ( toSun[2] <= std::sin( 0.05 * kDeg ) || hz < 1e-4 ) {
+	if ( toSun[2] <= std::sin( cutDeg * kDeg ) || hz < 1e-4 || t.strength <= 0.0f ) {
 		t.valid = false;
-		t.last = QStringLiteral( "on(sun below the horizon or overhead: lit)" );
+		t.last = QStringLiteral( "on(sun below the horizon or overhead: lit) strength=%1" ).arg( double( t.strength ), 0, 'f', 3 );
 		return;
 	}
 	// steps 1 and 2 run again right after a synchronous job, so a pinned harness publishes in one frame
@@ -794,7 +1005,7 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 		if ( j.busy && ( s.sync || j.fut.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready ) ) {
 			j.fut.get();
 			j.busy = false;
-			if ( j.w.line >= j.w.N && j.w.N == t.N ) {
+			if ( j.w.line >= j.w.N && j.w.N == t.N && j.wn.N == t.Nn && j.wn.line >= j.wn.N ) {
 				t.uploading = true;
 				t.upRow = 0;
 				t.upMs = 0;
@@ -810,16 +1021,25 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 		}
 		// 2. the upload, a band a frame (the whole map in one frame when synchronous)
 		if ( t.uploading ) {
-			const int rows = s.sync ? t.N : std::max( 1, kUploadBytes / ( t.N * 4 ) );
-			const int r1 = std::min( t.N, t.upRow + rows );
+			// far rows [0, N), then the near tier's [N, N + Nn) (narrower rows: its own band size)
+			const int total = t.N + t.Nn;
+			const int width = t.upRow < t.N ? t.N : t.Nn;
+			const int rows = s.sync ? total : std::max( 1, kUploadBytes / ( width * 4 ) );
+			const int r1 = std::min( t.upRow < t.N ? t.N : total, t.upRow + rows );
 			QElapsedTimer ut;
 			ut.start();
 			timerBegin( fn, s.tmTerrain );
-			uploadRows( fn, t, j.w.out, t.upRow, r1 );
+			if ( t.upRow < t.N ) {
+				uploadRows( fn, t, j.w.out, t.N, 0, t.upRow, r1 );
+				if ( s.sync && t.Nn > 0 )
+					uploadRows( fn, t, j.wn.out, t.Nn, t.N, 0, t.Nn );
+			} else {
+				uploadRows( fn, t, j.wn.out, t.Nn, t.N, t.upRow - t.N, r1 - t.N );
+			}
 			timerEnd( fn, s.tmTerrain );
 			t.upMs += double( ut.nsecsElapsed() ) * 1e-6;
-			t.upRow = r1;
-			if ( t.upRow >= t.N ) {
+			t.upRow = ( s.sync && r1 >= t.N ) ? total : r1;
+			if ( t.upRow >= total ) {
 				// publish: the back texture is complete
 				const Terrain & w = j.w;
 				t.uploading = false;
@@ -838,6 +1058,11 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 				t.pubTanHi = w.tanHi;
 				t.pubDir[0] = w.dir[0];
 				t.pubDir[1] = w.dir[1];
+				t.pubNn = j.wn.N;
+				t.pubNX0 = j.wn.x0;
+				t.pubNY0 = j.wn.y0;
+				t.pubNT = j.wn.T;
+				t.blended = j.blended;
 				if ( !s.dump.isEmpty() ) {
 					t.pubOut = w.out;
 					dumpTerrain( t, w.H, s.dump );
@@ -848,9 +1073,10 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 	reap();
 	// 3. a new job: the sun moved past the threshold, or the set or the grid changed; one at a time, never mid-upload
 	const double moved = std::acos( std::clamp( dot3( toSun, t.latched ), -1.0, 1.0 ) ) / kDeg;
+	const bool nearStale = t.pubNn != t.Nn || ( t.Nn > 0 && ( t.pubNX0 != t.nx0 || t.pubNY0 != t.ny0 ) );
 	static quint64 sweptGen = 0;	// lane TESTDRIVER1: a live set (the terrain reds) sweeps again
-	const bool stale = sweptGen != wwSwitchGen() || !t.valid || t.pubN != t.N || t.pubX0 != t.x0 || t.pubY0 != t.y0 || t.needRaster
-		|| moved > kRelatch;
+	const bool stale = sweptGen != wwSwitchGen() || !t.valid || t.pubN != t.N || t.pubX0 != t.x0 || t.pubY0 != t.y0
+		|| t.needRaster || moved > kRelatch || nearStale;
 	if ( !j.busy && !t.uploading && stale ) {
 		sweptGen = wwSwitchGen();
 		Terrain & w = j.w;
@@ -864,6 +1090,19 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 			t.src.clear();
 			t.needRaster = false;
 		}
+		Terrain & wn = j.wn;
+		if ( t.Nn > 0 ) {
+			j.rasterNear = j.rasterNear || wn.N != t.Nn || wn.x0 != t.nx0 || wn.y0 != t.ny0
+				|| wn.H.size() != size_t( t.Nn ) * size_t( t.Nn );
+			wn.N = t.Nn;
+			wn.T = t.nT;
+			wn.x0 = t.nx0;
+			wn.y0 = t.ny0;
+		} else if ( wn.N != 0 ) {
+			wn = Terrain();
+			j.rasterNear = false;
+		}
+		j.temporal = wwShadowPar( WwParTemporal ) && wwGameTaaOn();
 		for ( int k = 0; k < 3; k++ ) {
 			j.toSun[k] = toSun[k];
 			t.latched[k] = toSun[k];
@@ -887,14 +1126,19 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 		t.frameMax = std::max( t.frameMax, t.frameMs );
 	t.last = QStringLiteral( "on N=%1 texel=%2 x0=%3 y0=%4 z=%5..%6 shapes=%7 tris=%8 raster_ms=%9 elev=%10 az=%11 "
 		"worker=%12 upload_row=%13/%14 sweep_cpu_ms=%15 frame_cpu_ms=%16 frame_cpu_max_ms=%17 upload_cpu_ms=%18 "
-		"upload_gpu_ms=%19 sweeps=%20 valid=%21 mem_mb=%22 cpu_mb=%23" )
+		"upload_gpu_ms=%19 sweeps=%20 valid=%21 mem_mb=%22 cpu_mb=%23 near=%24 objlod=%25 strength=%26 blended=%27" )
 		.arg( t.N ).arg( t.T ).arg( t.x0, 0, 'f', 1 ).arg( t.y0, 0, 'f', 1 ).arg( double( t.zmin ), 0, 'f', 1 )
 		.arg( double( t.zmax ), 0, 'f', 1 ).arg( t.shapes ).arg( t.tris ).arg( t.rasterMs, 0, 'f', 2 )
 		.arg( t.elev, 0, 'f', 3 ).arg( t.az, 0, 'f', 3 ).arg( j.busy ? QStringLiteral( "busy" ) : QStringLiteral( "idle" ) )
 		.arg( t.uploading ? t.upRow : t.N ).arg( t.N ).arg( t.sweepMs, 0, 'f', 2 ).arg( t.frameMs, 0, 'f', 3 )
 		.arg( t.frameMax, 0, 'f', 3 ).arg( t.upMs, 0, 'f', 3 ).arg( s.tmTerrain.ms, 0, 'f', 4 ).arg( t.sweeps )
-		.arg( t.valid ? 1 : 0 ).arg( double( t.N ) * t.N * 4.0 * 2.0 / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
-		.arg( double( j.w.H.size() * 4 + j.w.out.size() * 2 + t.pubOut.size() * 2 ) / ( 1024.0 * 1024.0 ), 0, 'f', 1 );
+		.arg( t.valid ? 1 : 0 ).arg( double( t.N ) * ( t.N + t.Nn ) * 4.0 * 2.0 / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
+		.arg( double( j.w.H.size() * 4 + j.w.out.size() * 2 + j.wn.H.size() * 4 + j.wn.out.size() * 2 + t.pubOut.size() * 2
+			+ j.prevOut.size() * 2 + j.prevNear.size() * 2 ) / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
+		.arg( t.Nn > 0 ? QStringLiteral( "%1x%2@%3(%4,%5)" ).arg( t.Nn ).arg( t.Nn ).arg( t.nT ).arg( t.nx0, 0, 'f', 0 ).arg( t.ny0, 0, 'f', 0 )
+			: QStringLiteral( "off" ) )
+		.arg( t.objOn ? QString::number( t.objLod ) : QStringLiteral( "off" ) ).arg( double( t.strength ), 0, 'f', 3 )
+		.arg( t.blended ? 1 : 0 );
 }
 
 // ---- (B) contact ----
@@ -936,6 +1180,39 @@ void echoSummary()
 bool wwShadowRed( const char * name )
 {
 	return ss().reds.contains( QString::fromLatin1( name ) );
+}
+
+bool wwShadowPar( int bit )
+{
+	const SetState & s = ss();
+	if ( ( s.par & bit ) == 0 )
+		return false;
+	for ( int i = 0; i < 14; i++ )
+		if ( bit == ( 1 << i ) )
+			return !s.reds.contains( QStringLiteral( "no" ) + QLatin1StringView( kParNames[i] ) );
+	return true;
+}
+
+int wwShadowParMask() { return ss().par; }
+
+void wwShadowSetParMask( int mask )
+{
+	SetState & s = ss();
+	s.par = mask & WwParAll;
+	if ( !s.pinPar )
+		QSettings().setValue( QLatin1StringView( kParKey ), s.par ? 1 : 0 );
+}
+
+void wwShadowSetAirAmbientShare( float a ) { ss().airAmb = std::clamp( a, 0.05f, 0.95f ); }
+
+double wwShadowDistance() { return ss().dist; }
+
+void wwShadowSetDistance( double d )
+{
+	SetState & s = ss();
+	s.dist = std::clamp( d, 2000.0, 24000.0 );
+	if ( !s.pinDist )
+		QSettings().setValue( QLatin1StringView( kDistanceKey ), s.dist );
 }
 
 int wwShadowCascadeTier() { return ss().cascade; }
@@ -1058,6 +1335,14 @@ bool wwShadowCascadePreset( WwCascadePreset & p )
 	case 4: p.D = 16000; p.split0 = 2000; p.split1 = 6500; p.blend = 400; p.map = 4096; p.radius = 3.5f; break;
 	default: return false;
 	}
+	if ( wwShadowPar( WwParDistance ) ) {
+		// lane SHADOWPAR1: FO4CS's fCascadeShadowDistanceUnits (0..24000); the tier's splits and band scale with it
+		const double k = ss().dist / p.D;
+		p.D = ss().dist;
+		p.split0 *= k;
+		p.split1 *= k;
+		p.blend *= k;
+	}
 	// a low sun reaches far: the light's origin sits behind the camera by twice the reach (never under CSM1's)
 	p.lightBack = std::max( 15000.0, 2.0 * p.D );
 	p.taps = std::clamp( int( std::lround( 32.0 * ( p.radius / 3.0 ) * ( p.radius / 3.0 ) ) ), 8, 48 );
@@ -1074,11 +1359,12 @@ void wwShadowSetFrame( Scene * scene )
 	if ( !scene || !scene->renderer || scene->selecting )
 		return;
 	SetState & s = ss();
+	s.frame++;
 	float sunDir[3], disc[3];
 	wwLookdevShadowLight( sunDir, disc );
 	double to[3] = { sunDir[0], sunDir[1], sunDir[2] };
 	norm3( to );
-	terrainFrame( scene, to );
+	terrainFrame( scene, to, disc );
 	echoSummary();
 }
 
@@ -1114,7 +1400,11 @@ void wwContactShadowPass( Scene * scene )
 		c.last = QStringLiteral( "refused(orthographic view)" );
 		return;
 	}
-	const ContactPreset p = contactPreset( s.contact );
+	ContactPreset p = contactPreset( s.contact );
+	// lane SHADOWPAR1: FO4CS's march (384 samples, 0.5 % thickness) with its fades and rejects (ww_contact.frag sssPar)
+	const bool par = wwShadowPar( WwParContact );
+	if ( par )
+		p.samples = 384;
 	const void * ctx = QOpenGLContext::currentContext();
 	if ( ctx != c.ctx ) {
 		c.ctx = ctx;
@@ -1195,8 +1485,10 @@ void wwContactShadowPass( Scene * scene )
 	prog->uni1f( "maskScale", float( p.scale ) );
 	prog->uni4f( "lightCoord", FloatVector4( float( lx ), float( ly ), float( lz ), cw > 0 ? 1.0f : -1.0f ) );
 	// the thickness window (2 % of the depth, 1.5 units at least), Bend's bilinear threshold 0.02 and contrast 4
-	prog->uni4f( "sssParams", FloatVector4( 0.02f, 0.02f, 4.0f, float( p.samples ) ) );
+	prog->uni4f( "sssParams", FloatVector4( par ? 0.005f : 0.02f, 0.02f, 4.0f, float( p.samples ) ) );
 	prog->uni1f( "sssFloor", 1.5f );
+	prog->uni1i( "sssPar", par ? 1 : 0 );
+	prog->uni3f( "sssLightView", float( lv[0] ), float( lv[1] ), float( lv[2] ) );
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
@@ -1220,9 +1512,9 @@ void wwContactShadowPass( Scene * scene )
 	c.doc = scene->nifModel;
 	c.fullW = W;
 	c.fullH = H;
-	c.last = QStringLiteral( "on mask=%1x%2 full=%3x%4 samples=%5 light=%6,%7,%8,%9 gpu_ms=%10 mem_mb=%11" ).arg( mw ).arg( mh )
+	c.last = QStringLiteral( "on mask=%1x%2 full=%3x%4 samples=%5 light=%6,%7,%8,%9 gpu_ms=%10 mem_mb=%11 par=%12" ).arg( mw ).arg( mh )
 		.arg( W ).arg( H ).arg( p.samples ).arg( lx, 0, 'f', 1 ).arg( ly, 0, 'f', 1 ).arg( lz, 0, 'f', 6 ).arg( cw > 0 ? 1 : -1 )
-		.arg( s.tmContact.ms, 0, 'f', 4 ).arg( double( mw ) * mh / ( 1024.0 * 1024.0 ), 0, 'f', 2 );
+		.arg( s.tmContact.ms, 0, 'f', 4 ).arg( double( mw ) * mh / ( 1024.0 * 1024.0 ), 0, 'f', 2 ).arg( par ? 1 : 0 );
 }
 
 bool wwShadowSetActive( Scene * scene )
@@ -1267,14 +1559,41 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	WwCascadePreset cp;
 	const bool vogel = upgraded && wwShadowCascadePreset( cp ) && !wwShadowRed( "novogel" );
 	prog->uni4f( "ussCsmFilter", FloatVector4( vogel ? 1.0f : 0.0f, cp.radius, float( cp.taps ), ( vogel && !volume ) ? 1.0f : 0.0f ) );
+	// lane SHADOWPAR1: FO4CS's world-unit radius clamp(r, 1, 6) x {0.8, 1, 1.2} x {1, 3, 10}, its taps per cascade
+	const float wr = std::clamp( cp.radius, 1.0f, 6.0f );
+	prog->uni4f( "ussCsmWorld", FloatVector4( vogel && wwShadowPar( WwParCascRadius ) ? 1.0f : 0.0f, wr * 0.8f, wr * 3.0f, wr * 12.0f ) );
+	prog->uni3f( "ussCsmTexel", csmTexel[0], csmTexel[1], csmTexel[2] );
+	prog->uni1f( "ussCsmPhase", vogel && wwShadowPar( WwParCascPhase ) && wwGameTaaOn() ? float( s.frame % 61 ) : 0.0f );
 	prog->uni3f( "ussCsmBias", cp.biasTexels * csmTexel[0], cp.biasTexels * csmTexel[1], cp.biasTexels * csmTexel[2] );
 	prog->uni1i( "ussTerrOn", terr ? 1 : 0 );
+	if ( !terr )
+		prog->uni2f( "ussDim", 0.0f, 0.0f );
 	if ( terr ) {
 		const Terrain & t = s.t;
 		const double span = t.pubN * t.pubT;
 		prog->uni4f( "ussTerrXform", FloatVector4( float( 1.0 / span ), float( -t.pubX0 / span ), float( 1.0 / span ), float( -t.pubY0 / span ) ) );
 		// zmin, span, the receiver's bias (world units up), the edge fade (uv)
 		prog->uni4f( "ussTerrRange", FloatVector4( t.pubZmin, t.pubSpan, float( 0.05 * t.pubT + 4.0 ), 0.02f ) );
+		// lane SHADOWPAR1: the near tier's atlas rows and window (off: the far map alone, as before)
+		const float rowsAll = float( t.pubN + t.pubNn );
+		if ( t.pubNn > 0 ) {
+			const double ns = t.pubNn * t.pubNT;
+			prog->uni4f( "ussTerrAtlas", FloatVector4( float( t.pubN ) / rowsAll, float( t.pubNn ) / float( t.pubN ), float( t.pubN ) / rowsAll,
+				float( t.pubNn ) / rowsAll ) );
+			prog->uni4f( "ussTerrNearXform", FloatVector4( float( 1.0 / ns ), float( -t.pubNX0 / ns ), float( 1.0 / ns ), float( -t.pubNY0 / ns ) ) );
+		} else {
+			prog->uni4f( "ussTerrAtlas", FloatVector4( 1.0f, 0.0f, 0.0f, 0.0f ) );
+		}
+		prog->uni2f( "ussTerrSize", float( t.pubN ), float( t.pubNn ) );
+		// the disc penumbra and FO4CS's slope bias: surfaces only (the fog's froxels keep the plain lookup)
+		prog->uni4f( "ussTerrPen", FloatVector4( wwShadowPar( WwParPenumbra ) && !volume ? 1.0f : 0.0f, float( t.pubT ),
+			float( t.pubTanLo ), float( t.pubTanHi ) ) );
+		const double sinEl = std::max( std::sin( t.pubElev * kDeg ), std::sin( 1.0 * kDeg ) );
+		prog->uni4f( "ussTerrBias", FloatVector4( wwShadowPar( WwParTerrSlope ) && !volume ? 1.0f : 0.0f, float( sinEl ), t.strength,
+			float( t.pubNT ) ) );
+		// FO4CS: ambient and specular dimmed to 0.5 in full terrain shadow, faded with the strength
+		const float dim = wwShadowPar( WwParDim ) ? 0.5f * t.strength : 0.0f;
+		prog->uni2f( "ussDim", dim, dim );
 		// world from view: Q = R^T (p - t) / sc
 		const Transform & vt = scene->view;
 		const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
@@ -1296,6 +1615,7 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	prog->uni1i( "ussContactOn", contact ? 1 : 0 );
 	if ( contact )
 		prog->uni2f( "ussContactInvSize", 1.0f / float( std::max( s.c.fullW, 1 ) ), 1.0f / float( std::max( s.c.fullH, 1 ) ) );
+	prog->uni2f( "ussTail", terr && wwShadowPar( WwParFogTail ) ? 1.0f : 0.0f, s.airAmb );
 	prog->uni1i( "ussView", s.view );
 	prog->uni1i( "ussRed", ( wwShadowRed( "terrseam" ) ? 1 : 0 ) | ( wwShadowRed( "mulcompose" ) ? 2 : 0 ) );
 }
@@ -1323,10 +1643,15 @@ QString wwShadowSetSummary()
 	const SetState & s = ss();
 	WwCascadePreset cp;
 	const bool up = wwShadowCascadePreset( cp );
-	return QStringLiteral( "shadowset cascade=%1%2 contact=%3 [%4] terrain=%5 [%6] sunpath=%7 [%8] view=%9 red=%10" )
+	QStringList pars;
+	for ( int b = 0; b < 14; b++ )
+		if ( wwShadowPar( 1 << b ) )
+			pars << QLatin1StringView( kParNames[b] );
+	return QStringLiteral( "shadowset cascade=%1%2 contact=%3 [%4] terrain=%5 [%6] sunpath=%7 [%8] view=%9 red=%10 par=%11 [%12] dist=%13" )
 		.arg( s.cascade )
 		.arg( up ? QStringLiteral( " (D=%1 split=%2,%3 blend=%4 map=%5 radius=%6 taps=%7 lightback=%8)" ).arg( cp.D ).arg( cp.split0 )
 			.arg( cp.split1 ).arg( cp.blend ).arg( cp.map ).arg( double( cp.radius ) ).arg( cp.taps ).arg( cp.lightBack ) : QString() )
 		.arg( s.contact ).arg( s.c.last ).arg( s.terrain ).arg( s.t.last ).arg( s.sunPath ).arg( s.sunLast ).arg( s.view )
-		.arg( s.reds.isEmpty() ? QStringLiteral( "none" ) : s.reds.join( QChar( '+' ) ) );
+		.arg( s.reds.isEmpty() ? QStringLiteral( "none" ) : s.reds.join( QChar( '+' ) ) )
+		.arg( s.par ).arg( pars.isEmpty() ? QStringLiteral( "none" ) : pars.join( QChar( '+' ) ) ).arg( s.dist );
 }

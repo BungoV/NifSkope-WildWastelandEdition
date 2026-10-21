@@ -119,6 +119,9 @@ float wwAirCol( float lo, float hi )
 
 // the records' haze colour at distance d, height z, view direction dirView (cell_volair.frag airEnvColour), unit luminance
 vec3 wwAirRecordColour( float d, float z, vec3 dirView, out bool ok );
+#ifdef WW_SUNSHADOW
+float wwAirTailShadow( vec3 dirView, float t0, float t1, float tau );	// ww_sunshadow.glsl (lane SHADOWPAR1)
+#endif
 
 /* lane FARGRID1: with the far grid on, one volume holds both grids: the near grid in layers 0..n-1 over its share of
  * the width and height, the far grid after it over its own share. (L, T) of one grid at slice coordinate f (0 at its
@@ -250,6 +253,9 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 	float dz = z1 - z0;
 	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0 ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ) ) / abs( dz );
 	float Tt = exp( -tau );
+#ifdef WW_SUNSHADOW
+	J *= wwAirTailShadow( posView / max( length( posView ), 1e-12 ), far, d, tau );
+#endif
 	if ( ( volAirFlags & 4 ) != 0 ) {
 		vec3 dirV = posView / max( length( posView ), 1e-12 );
 		bool ok0, ok1;
