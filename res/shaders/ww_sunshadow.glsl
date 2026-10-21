@@ -27,6 +27,17 @@ uniform sampler2D ussContactMap;	// R8 contact visibility, screen space
 uniform vec2 ussContactInvSize;
 uniform int ussView;			// WW_SHADOW_VIEW: 1 cascades, 2 terrain, 3 contact, 4 composed, 5 weights
 uniform int ussRed;			// 1 terrseam, 2 mulcompose
+uniform vec4 ussCsmWorld;		// lane SHADOWPAR1: x world-unit radius on, yzw each cascade's radius (world units)
+uniform vec3 ussCsmTexel;		// each cascade's texel (world units)
+uniform float ussCsmPhase;		// the rotation's temporal phase (frame % 61; 0 without TAA)
+uniform vec2 ussTail;			// lane SHADOWPAR1: x the air's far tail reads the terrain map, y the ambient's share of its light
+uniform vec4 ussTerrAtlas;		// the near tier shares the far map's texture: far v scale, near u scale, near v offset, near v scale
+uniform vec2 ussTerrSize;		// the far and near tiers' texels across (near 0: off)
+uniform vec4 ussTerrNearXform;		// the near window: u = x X.x + X.y, v = y X.z + X.w
+uniform vec4 ussTerrPen;		// x the disc penumbra on, y the far texel, z tan(elev - sun radius), w tan(elev + sun radius)
+uniform vec4 ussTerrBias;		// x FO4CS's slope bias on, y max(sin elev, sin 1 deg), z the strength (low sun, moon), w the near texel
+uniform vec2 ussDim;			// the ambient / specular dimming in terrain shadow (FO4CS 0.5 / 0.5; 0 off)
+float ussLastTerr = 1.0;		// the terrain visibility of the last composition (cell_lights.glsl dims by it)
 
 // spec 2.5: the 16 Poisson taps on [0,1]^2, used as (p - 0.5) x 6 texels
 const vec2 csmPoisson[16] = vec2[16](
@@ -105,7 +116,12 @@ float ussVogel( int i, vec3 posView, float offsetWorld, vec3 dPx, vec3 dPy )
 	}
 	float R = ussCsmFilter.y * mix( 0.8, 1.2, clamp( float( i ) * 0.5, 0.0, 1.0 ) );
 	int n = max( int( ussCsmFilter.z ), 1 );
-	float rot = 6.2831853 * ussIgn( gl_FragCoord.xy );
+	if ( ussCsmWorld.x > 0.5 ) {
+		// lane SHADOWPAR1: FO4CS's radius in world units over this cascade's texel, its taps 32 (r / 3)^2 in 8..48
+		R = clamp( ussCsmWorld[i + 1] / max( ussCsmTexel[i], 1e-6 ), 0.5, 16.0 );
+		n = int( clamp( floor( 32.0 * ( R / 3.0 ) * ( R / 3.0 ) + 0.5 ), 8.0, 48.0 ) );
+	}
+	float rot = 6.2831853 * ussIgn( gl_FragCoord.xy + ussCsmPhase * vec2( 32.665, 11.815 ) );
 	float k = 1.0 / csmParams.z;
 	float lim = 2000.0 * csmInvRange[i];
 	float sum = 0.0;
@@ -150,8 +166,53 @@ float ussCascades( vec3 posView, vec3 dPx, vec3 dPy, out float w )
 	return mix( sA, sB, t );
 }
 
-//! (C) the terrain's shadow-height map; inMap = 1 inside it
-float ussTerrain( vec3 posView, out float inMap )
+//! one tier's uv into the shared texture (lane SHADOWPAR1: the near tier sits under the far map)
+vec2 ussTerrAtlasUv( vec2 uv, int tier )
+{
+	if ( ussTerrSize.y <= 0.0 )
+		return uv;	// one tier: the map as TERRSHADOW1 made it
+	float n = tier == 0 ? ussTerrSize.x : ussTerrSize.y;
+	uv = clamp( uv, vec2( 0.5 / n ), vec2( 1.0 - 0.5 / n ) );	// no bleed across the tiers' seam
+	return tier == 0 ? vec2( uv.x, uv.y * ussTerrAtlas.x ) : vec2( uv.x * ussTerrAtlas.y, ussTerrAtlas.z + uv.y * ussTerrAtlas.w );
+}
+
+//! the visibility at height z from the limb heights rg (0 = no shadow height: lit)
+float ussTerrVis( vec2 rg, float z )
+{
+	float lo = ussTerrRange.x + rg.x * ussTerrRange.y;
+	float hi = ussTerrRange.x + rg.y * ussTerrRange.y;
+	return rg.x <= 0.0 ? 1.0 : ( lo - hi > 1e-3 ? clamp( ( z - hi ) / ( lo - hi ), 0.0, 1.0 ) : ( z >= lo ? 1.0 : 0.0 ) );
+}
+
+/*! one tier at its uv. lane SHADOWPAR1 (FO4CS FarFieldMaskCS): the disc penumbra -- the occluder's distance from the
+ *  limbs' spread (lo - hi) / (tan hi - tan lo), half the sun's width at that distance in texels (<= 16), the centre
+ *  and 8 Vogel taps */
+float ussTerrTier( vec2 uv, int tier, float z, float texel, bool pen )
+{
+	vec2 rg = texture( ussTerrMap, ussTerrAtlasUv( uv, tier ) ).rg;
+	float c = ussTerrVis( rg, z );
+	if ( !pen || ussTerrPen.x < 0.5 || rg.x <= 0.0 )
+		return c;
+	float dist = max( rg.x - rg.y, 0.0 ) * ussTerrRange.y / max( ussTerrPen.w - ussTerrPen.z, 1e-6 );
+	float r = min( dist * 0.0046251 / max( texel, 1e-6 ), 16.0 );	// tan(0.265 deg)
+	if ( r <= 0.5 )
+		return c;
+	float n = tier == 0 ? ussTerrSize.x : ussTerrSize.y;
+	if ( n <= 0.0 )
+		n = 1.0 / max( ussTerrXform.x * texel, 1e-12 );	// one tier: N = span / texel
+	float rot = 6.2831853 * ussIgn( gl_FragCoord.xy );
+	float sum = c;
+	for ( int t = 0; t < 8; t++ ) {
+		float th = float( t ) * 2.39996323 + rot;
+		vec2 o = vec2( cos( th ), sin( th ) ) * ( sqrt( ( float( t ) + 0.5 ) / 8.0 ) * r / n );
+		sum += ussTerrVis( texture( ussTerrMap, ussTerrAtlasUv( clamp( uv + o, vec2( 0.0 ), vec2( 1.0 ) ), tier ) ).rg, z );
+	}
+	return sum / 9.0;
+}
+
+//! (C) the terrain's shadow-height map; inMap = 1 inside it. grad: the receiver's slope (rise over run, the slope
+//! bias); pen: the disc penumbra (off for the air's many taps)
+float ussTerrain( vec3 posView, out float inMap, float grad, bool pen )
 {
 	inMap = 0.0;
 	if ( ussTerrOn == 0 )
@@ -161,14 +222,31 @@ float ussTerrain( vec3 posView, out float inMap )
 	if ( any( lessThan( uv, vec2( 0.0 ) ) ) || any( greaterThan( uv, vec2( 1.0 ) ) ) )
 		return 1.0;
 	inMap = 1.0;
-	// 0 = no shadow height (lit); a missing .y (the upper limb) falls to the range's floor
-	vec2 rg = texture( ussTerrMap, uv ).rg;
-	float lo = ussTerrRange.x + rg.x * ussTerrRange.y;
-	float hi = ussTerrRange.x + rg.y * ussTerrRange.y;
-	float z = wp.z + ussTerrRange.z;
-	float vis = rg.x <= 0.0 ? 1.0 : ( lo - hi > 1e-3 ? clamp( ( z - hi ) / ( lo - hi ), 0.0, 1.0 ) : ( z >= lo ? 1.0 : 0.0 ) );
+	// lane SHADOWPAR1: FO4CS's bias 12 (1 + slope) / sin(elevation); else TERRSHADOW1's 0.05 T + 4
+	float z = wp.z + ( ussTerrBias.x > 0.5 ? 12.0 * ( 1.0 + clamp( grad, 0.0, 4.0 ) ) / ussTerrBias.y : ussTerrRange.z );
+	float vis = ussTerrTier( uv, 0, z, ussTerrPen.y, pen );
+	if ( ussTerrSize.y > 0.0 ) {
+		// the near tier, faded in over 128 of its texels from its window's edge
+		vec2 un = vec2( wp.x * ussTerrNearXform.x + ussTerrNearXform.y, wp.y * ussTerrNearXform.z + ussTerrNearXform.w );
+		vec2 en = min( un, 1.0 - un ) * ussTerrSize.y / 128.0;
+		float w = smoothstep( 0.0, 1.0, clamp( min( en.x, en.y ), 0.0, 1.0 ) );
+		if ( w > 0.0 )
+			vis = mix( vis, ussTerrTier( un, 1, z, ussTerrBias.w, pen ), w );
+	}
 	vec2 e = min( uv, 1.0 - uv ) / max( ussTerrRange.w, 1e-6 );
-	return mix( 1.0, vis, clamp( min( e.x, e.y ), 0.0, 1.0 ) );
+	vis = mix( 1.0, vis, clamp( min( e.x, e.y ), 0.0, 1.0 ) );
+	return mix( 1.0, vis, ussTerrBias.z );	// the low sun's fade and the moon's strength (1 when off)
+}
+
+//! the receiver's slope (rise over run) from its position's screen derivatives
+float ussSlope( vec3 dPx, vec3 dPy )
+{
+	vec3 n = cross( dPx, dPy );
+	float l = length( n );
+	if ( l < 1e-20 || ussTerrBias.x < 0.5 )
+		return 0.0;
+	float nz = abs( ( ussWorldFromView * vec4( n / l, 0.0 ) ).z ) / max( length( ussWorldFromView[0].xyz ), 1e-20 );
+	return sqrt( max( 1.0 - nz * nz, 0.0 ) ) / max( nz, 0.2 );
 }
 
 //! (B) the contact mask at this pixel
@@ -185,10 +263,11 @@ float ussCompose( vec3 posView )
 	vec3 dPx = dFdx( posView ), dPy = dFdy( posView );
 	float w, inMap;
 	float casc = ussCascades( posView, dPx, dPy, w );
-	float terr = ussTerrain( posView, inMap );
+	float terr = ussTerrain( posView, inMap, ussSlope( dPx, dPy ), true );
 	float con = ussContact();
 	if ( ( ussRed & 1 ) != 0 && w > 0.0 )
 		terr = 1.0;	// red terrseam: the terrain only past the cascades' reach
+	ussLastTerr = terr;
 	float c = mix( 1.0, casc, w );
 	if ( ( ussRed & 2 ) != 0 )
 		return c * terr * con;	// red mulcompose
@@ -225,7 +304,7 @@ bool wwSunShadowProbe( vec3 posView, vec3 shaded, out vec3 outc )
 		vec3 dPx = dFdx( posView ), dPy = dFdy( posView );
 		float w, inMap;
 		float casc = ussCascades( posView, dPx, dPy, w );
-		float terr = ussTerrain( posView, inMap );
+		float terr = ussTerrain( posView, inMap, ussSlope( dPx, dPy ), true );
 		float con = ussContact();
 		if ( ussView == 1 )
 			outc = vec3( mix( 1.0, casc, w ) );
@@ -262,4 +341,46 @@ bool wwSunShadowProbe( vec3 posView, vec3 shaded, out vec3 outc )
 		outc = vec3( wwSunShadow( posView ) );
 	}
 	return true;
+}
+
+/* lane SHADOWPAR1 (bungo 10-21): the far air tail (lookdev_fog.glsl) carries the last froxel slice's light J past the
+ * froxels; behind a ridge the sun part of it is shadowed. The scale of J: the terrain visibility along the tail (8 taps,
+ * equal shares of the light the tail sends to the eye) over the visibility at the froxels' far edge, the ambient share
+ * a left unshadowed. dirView a unit view-space direction, t0 < t1 world distances, tau the tail's optical depth. */
+#ifdef WW_LOOKDEV_FOG_GLSL	// fo4_csm.frag casts without the fog
+float wwAirTailShadow( vec3 dirView, float t0, float t1, float tau )
+{
+	if ( ussOn == 0 || ussTail.x <= 0.0 || ussTerrOn == 0 || t1 <= t0 )
+		return 1.0;
+	float a = clamp( ussTail.y, 0.0, 1.0 );
+	float inMap;
+	float v0 = ussTerrain( dirView * ( t0 / fogDistScale ), inMap, 0.0, false );
+	float e = 1.0 - exp( -max( tau, 0.0 ) );
+	float jit = ussIgn( gl_FragCoord.xy );
+	float acc = 0.0;
+	for ( int i = 0; i < 8; i++ ) {
+		float q = ( float( i ) + jit ) / 8.0;
+		float u = tau > 1e-4 ? -log( max( 1.0 - q * e, 1e-6 ) ) / tau : q;
+		acc += ussTerrain( dirView * ( mix( t0, t1, clamp( u, 0.0, 1.0 ) ) / fogDistScale ), inMap, 0.0, false );
+	}
+	return ( a + ( 1.0 - a ) * acc / 8.0 ) / max( a + ( 1.0 - a ) * v0, 0.25 );
+}
+#endif
+
+//! lane SHADOWPAR1 (FO4CS bsdf_light_sun): the ambient (cool-tinted toward the sky) and the specular cube dimmed in
+//! terrain shadow, floors 1 - strength; the strengths fade with the low sun (ussDim, 0 off)
+void ussTerrainDim( out vec3 amb, out float spec )
+{
+	amb = vec3( 1.0 );
+	spec = 1.0;
+	if ( ussOn == 0 )
+		return;
+	float fl = 1.0 - ussDim.x;
+	float m = max( ussLastTerr, fl );
+	if ( ussDim.x > 0.0 && m < 1.0 ) {
+		float shift = min( 0.35 * clamp( ( 1.0 - m ) / max( 1.0 - fl, 1e-6 ), 0.0, 1.0 ), ( 1.0 - m ) / ( m * 0.5414 ) );
+		amb = max( m * mix( vec3( 1.0 ), vec3( 0.7770, 1.0116, 1.5414 ), shift ), vec3( 0.777 * fl ) );
+	}
+	if ( ussDim.y > 0.0 )
+		spec = max( ussLastTerr, 1.0 - ussDim.y );
 }

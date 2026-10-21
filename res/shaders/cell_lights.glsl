@@ -1443,8 +1443,13 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		vec3 dir = cellDirColor * max( nl, 0.0 ) * cellDirVis;
 		vec3 Ex = diff + gi + dir + cellExtAmb;
 		vec3 Edx = diffOn + gi + dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
-		vec3 linx = color * color + alb * Edx + spec * specMask * specCol + cellExtSpec
-		          + cubeK * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb );
+		vec3 ambDim = vec3( 1.0 );
+		float specDim = 1.0;
+#ifdef WW_SUNSHADOW
+		ussTerrainDim( ambDim, specDim );	// lane SHADOWPAR1: FO4CS's ambient / specular dimming in terrain shadow
+#endif
+		vec3 linx = color * color * ambDim + alb * Edx + spec * specMask * specCol + cellExtSpec
+		          + cubeK * specDim * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb );
 		return sqrt( max( linx, vec3( 0.0 ) ) ) + emissive;
 	}
 	// the light reaching this point (a white surface would show it): the cubemap reflection is lit by it,

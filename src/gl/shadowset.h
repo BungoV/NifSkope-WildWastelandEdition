@@ -92,6 +92,37 @@ struct WwTerrainShadowMap
 	float zLo = 0, zSpan = 1;
 };
 bool wwTerrainShadowMap( WwTerrainShadowMap & out );
+/*! lane SHADOWPAR1 (bungo 10-21): the FO4CS-level items, one bit each (the row "FO4CS-Level Shadows" Off / On = all,
+ *  ships Off; pin WW_SHADOW_PAR = all | <mask> | <name,name>). Red WW_SHADOW_RED=no<name> takes one item back to the
+ *  TERRSHADOW1 path and cost. Names: dist cradius cphase cslope contact objlod near pen lowsun moon tslope dim
+ *  temporal fogtail. */
+enum WwShadowPar : int
+{
+	WwParDistance = 1,	// the cascades' reach from the Shadow Distance slider (FO4CS 0..24000, 14000)
+	WwParCascRadius = 2,	// world-unit Vogel radius (2.4 / 9 / 36) and per-cascade taps
+	WwParCascPhase = 4,	// the Vogel rotation's temporal phase (frame % 61, TAA only)
+	WwParCascSlope = 8,	// the caster slope bias clamped at a slope of 4 (glPolygonOffsetClamp)
+	WwParContact = 16,	// contact: 384 samples, thickness 0.005, evidence 4, completion / edge fades, rejects
+	WwParObjLod = 32,	// far object-LOD shapes cast into the terrain map (radius >= 128, budget 1500)
+	WwParNear = 64,		// a 64 u/texel near tier (16 cells) over the far map
+	WwParPenumbra = 128,	// the terrain's disc penumbra from the occluder distance (<= 16 texels)
+	WwParLowSun = 256,	// a 4 -> 1 degree fade instead of the hard cutoff
+	WwParMoon = 512,	// the night light casts terrain shadows (strength 0.15)
+	WwParTerrSlope = 1024,	// the terrain bias 12 (1 + slope) / sin(elevation)
+	WwParDim = 2048,	// the ambient (cool tint 0.35) and specular dimmed in terrain shadow (0.5 / 0.5)
+	WwParTemporal = 4096,	// the swept map blends with the last one (0.5, TAA only)
+	WwParFogTail = 8192,	// the air's far tail reads the terrain map (the fog leak behind ridges)
+	WwParAll = 16383
+};
+//! the item is on (its bit set, its red not)
+bool wwShadowPar( int bit );
+int wwShadowParMask();
+void wwShadowSetParMask( int mask );
+//! the Shadow Distance slider (world units, 2000..24000; the cascades' reach under WwParDistance)
+//! the air tail's ambient share (celllights.cpp, from the weather's DALC and sun; 0.3 until set)
+void wwShadowSetAirAmbientShare( float a );
+double wwShadowDistance();
+void wwShadowSetDistance( double d );
 //! the census line
 QString wwShadowSetSummary();
 bool wwShadowRed( const char * name );

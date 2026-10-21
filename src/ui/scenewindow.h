@@ -71,6 +71,8 @@ public:
 	QComboBox * cascadeQualityBox = nullptr;
 	QComboBox * contactShadowsBox = nullptr;
 	QComboBox * terrainShadowsBox = nullptr;
+	QCheckBox * shadowParBox = nullptr;		// lane SHADOWPAR1: FO4CS-level shadows (ships off)
+	QDoubleSpinBox * shadowDistanceBox = nullptr;	// the cascades' reach under it
 
 	//! re-read the Data folder's plugins / the loaded weathers / the status line
 	void refreshPlugins();

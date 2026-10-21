@@ -85,6 +85,7 @@ struct CsmState
 	double rc[3] = { 1, 0, 0 }, uc[3] = { 0, 1, 0 };	// the camera's right and up rows (world)
 	double split[2] = { kSplit0, kSplit1 };
 	int casters = 0, tris = 0, atCasters = 0;
+	int slopeClamp = 0;	// lane SHADOWPAR1: 1 the caster bias clamped (FO4CS's slope 4), -1 no glPolygonOffsetClamp
 	// lane TERRSHADOW1: the fit's numbers, CSM1's constants unless Cascade Quality picks a preset
 	double baseD = kDefaultDistance, split0 = kSplit0, split1 = kSplit1, blend = kBlend, lightBack = kLightBack;
 	int baseMap = kDefaultMap;
@@ -608,6 +609,17 @@ static void sunShadowPassImpl( Scene * scene )
 			s.atCasters = -1;
 		r->useProgram( "lookdev_csmdepth.prog" );
 	}
+	// lane SHADOWPAR1: FO4CS clamps the caster's slope bias at a slope of 4 texels per texel (D3D DepthBiasClamp)
+	typedef void ( *PolyOffsetClamp )( float, float, float );
+	PolyOffsetClamp offsetClamp = nullptr;
+	s.slopeClamp = 0;
+	if ( wwShadowPar( WwParCascSlope ) && !red( "nobias" ) && QOpenGLContext::currentContext() ) {
+		auto * gc = QOpenGLContext::currentContext();
+		offsetClamp = reinterpret_cast<PolyOffsetClamp>( gc->getProcAddress( "glPolygonOffsetClamp" ) );
+		if ( !offsetClamp )
+			offsetClamp = reinterpret_cast<PolyOffsetClamp>( gc->getProcAddress( "glPolygonOffsetClampEXT" ) );
+		s.slopeClamp = offsetClamp ? 1 : -1;
+	}
 	bool complete = true;
 	std::vector<std::uint32_t> cullRanges;	// lane SUNCELL1
 	std::vector<std::uint16_t> cullIdx;
@@ -622,6 +634,8 @@ static void sunShadowPassImpl( Scene * scene )
 		fn->glClearDepth( 1.0 );
 		fn->glClear( GL_DEPTH_BUFFER_BIT );
 		fn->glViewport( 0, 0, c.vw, c.vh );
+		if ( offsetClamp )
+			offsetClamp( s.slopeBias, s.unitBias, float( s.unitBias / 65536.0 + s.slopeBias * c.texel * 4.0 / std::max( c.far - kNear, 1e-6 ) ) );
 		if ( lMvp >= 0 )
 			fn->glUniformMatrix4fv( lMvp, 1, GL_FALSE, c.clipFromView );
 		for ( int pass = 0; pass < ( progAt ? 2 : 1 ); pass++ ) {
@@ -778,7 +792,7 @@ QString wwSunShadowSummary()
 			m << QString::number( double( s.c[i].uvdFromView[k] ), 'g', 9 );
 		o += QString( " m%1=%2" ).arg( i ).arg( m.join( QChar( ',' ) ) );
 	}
-	o += QString( " csmat=%1" ).arg( s.atCasters );	// lane VOLAIR1: -1 = no program (they cast solid)
+	o += QString( " csmat=%1 slopeclamp=%2" ).arg( s.atCasters ).arg( s.slopeClamp );	// lane VOLAIR1: -1 = no program (they cast solid)
 	// lane VOLAIR1: the receiver constants a judge needs to predict the factor from WW_CSM_DUMP's map
 	o += QString( " recv=%1,%2,%3,%4" ).arg( g( kOffsetA ), g( kOffsetB ), g( kBlend ), g( kNear ) );
 	o += QString( " casters=%1 tris=%2 ground=%3 probe=%4 force=%5 red=%6" ).arg( s.casters ).arg( s.tris ).arg( s.groundCast ? 1 : 0 )

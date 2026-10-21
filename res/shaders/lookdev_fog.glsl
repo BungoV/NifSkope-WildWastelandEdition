@@ -9,6 +9,7 @@
 // direction, the Sunlight row, intensity 1); the power is fDirectionalFogPower.
 // Needs: posView = the fragment's view-space position (game units x view scale).
 
+#define WW_LOOKDEV_FOG_GLSL 1	// lane SHADOWPAR1: ww_sunshadow.glsl's air-tail reader needs fogDistScale
 uniform bool fogOn;
 uniform vec4 fogK[6];		// cb12[41..46]
 uniform vec4 fogView;		// world z above the ground = dot( fogView.xyz, posView ) + fogView.w
@@ -119,6 +120,9 @@ float wwAirCol( float lo, float hi )
 
 // the records' haze colour at distance d, height z, view direction dirView (cell_volair.frag airEnvColour), unit luminance
 vec3 wwAirRecordColour( float d, float z, vec3 dirView, out bool ok );
+#ifdef WW_SUNSHADOW
+float wwAirTailShadow( vec3 dirView, float t0, float t1, float tau );	// ww_sunshadow.glsl (lane SHADOWPAR1)
+#endif
 
 /* lane FARGRID1: with the far grid on, one volume holds both grids: the near grid in layers 0..n-1 over its share of
  * the width and height, the far grid after it over its own share. (L, T) of one grid at slice coordinate f (0 at its
@@ -251,6 +255,9 @@ vec4 wwVolAirAt( vec3 posView )
 	float dz = z1 - z0;
 	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0 ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ) ) / abs( dz );
 	float Tt = exp( -tau );
+#ifdef WW_SUNSHADOW
+	J *= wwAirTailShadow( posView / max( length( posView ), 1e-12 ), far, d, tau );
+#endif
 	if ( ( volAirFlags & 4 ) != 0 ) {
 		vec3 dirV = posView / max( length( posView ), 1e-12 );
 		bool ok0, ok1;

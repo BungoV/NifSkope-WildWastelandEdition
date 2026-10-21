@@ -19,6 +19,24 @@
 - **Tone map, exact.** Its full-screen quads wrote `gl_FragDepth` per sample, which turned the early stencil/depth
   tests off: every quad shaded every sample of the 4x frame. The quad now sits at the far plane (`cell_hdr.vert`);
   `WW_CELL_HDR_EARLY_RED=1` runs the old program (`cell_hdr_fd.prog`).
+## Lane SHADOWPAR1 (2026-10-21, branch shadowpar1-20261021): the sun shadows at FO4CS's level
+
+- **One row, Off by default: FO4CS-Level Shadows** (Settings, beside Terrain Shadows), plus a **Shadow Distance**
+  slider (2000..24000) for the cascades' reach. Fourteen items, each its own bit of `WW_SHADOW_PAR`
+  (`all`, a mask, or names); `WW_SHADOW_RED=no<item>` takes one item back to the old path. Off draws the old path.
+- **Cascades:** reach up to 24000 (`dist`); the filter radius in world units per cascade (FO4CS's
+  clamp(r,1,6) x {0.8, 3, 12}) with taps from the radius (`cradius`); a per-frame Vogel rotation (`cphase`,
+  frame % 61); the slope clamp (`cslope`).
+- **Contact:** FO4CS's 384 samples and 0.005 thickness, its fades and rejects (`contact`).
+- **Terrain:** far-LOD objects rasterized into the height grid (`objlod`, FO4CS's budget 1500, radius >= 128);
+  a near tier at 64 units a texel packed under the far map (`near`); the sun disc's penumbra (`pen`, tan 0.265 deg,
+  up to 16 texels); FO4CS's low-sun fade over 1..4 degrees instead of the hard cut (`lowsun`); the moon at
+  0.15 phase^3 (`moon`); FO4CS's slope bias 12 (1 + slope) / sin(elev) (`tslope`); the ambient dim in terrain
+  shadow (`dim`); a temporal blend of the map under TAA (`temporal`).
+- **Fog far tail:** Volumetric Air's far tail reads the terrain map, so the air behind a ridge is not lit (`fogtail`).
+- **Gates:** `tests/spells/shadowpar1_gates.sh` (+ `.py`); the rung is the exe and shaders before the lane.
+
+## Lane TERRSHADOW1 (2026-10-17..19, branch terrshadow1-20261016): unified sun shadows (cascades, contact, terrain, real sun path)
 
 ## Lane CABLES1 (2026-10-16, branch cables1-20261016): cables in the cell view (power lines, string-light wires, ropes)
 
