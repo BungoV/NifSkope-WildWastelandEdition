@@ -2651,6 +2651,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const bool pbrAlbRed = qEnvironmentVariable( "WW_CELL_BAKE_PBRALBEDO_RED" ) == QLatin1String( "diffuse" );
 	QHash<QString, std::shared_ptr<PbrmMaterial>> bakePbrm;   // lower-case Name -> the material, null = legacy
 	int albPbrm = 0;
+	const QString bakePbrmTracePath = qEnvironmentVariable( "WW_CELL_BAKE_PBRM_TRACE" );   // lane PBRALBEDO2
+	QStringList bakePbrmTrace;
 	auto bakePbrmFor = [&]( const NativeSrcShape & s ) -> const PbrmMaterial * {
 		if ( !isMaterialFile( s.matName ) )
 			return nullptr;
@@ -2665,6 +2667,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				return lodgenProbeAsset( dataRoot, p, nullptr, nullptr, nullptr, &out ) && !out.isEmpty();
 			};
 			const PbrmResolveResult r = pbrmResolveForMaterial( name, QString(), QString(), true, reader );
+			if ( !bakePbrmTracePath.isEmpty() )   // lane PBRALBEDO2: why each material did or did not resolve
+				bakePbrmTrace << QStringLiteral( "%1\t%2\t%3\t%4\t%5" ).arg( s.matName,
+					QString::fromLatin1( pbrmRouteName( r.route ) ), r.path, r.refusal, r.tried.join( QStringLiteral( " | " ) ) );
 			it = bakePbrm.insert( key, r.route != PbrmRoute::Legacy && r.material.ok
 				? std::make_shared<PbrmMaterial>( r.material ) : std::shared_ptr<PbrmMaterial>() );
 		}
@@ -5126,6 +5131,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						t << "  bake albedo pbrm: " << served << " of " << bakePbrm.size() << " materials served by a .pbrm, "
 						  << albPbrm << " triangles read base x (1 - metallic)"
 						  << ( pbrAlbRed ? " RED diffuse (every surface read its legacy diffuse slot)" : "" ) << "\n";
+				}
+				if ( !bakePbrmTracePath.isEmpty() ) {	// lane PBRALBEDO2: diagnosis only
+					QFile tf( bakePbrmTracePath );
+					if ( tf.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+						tf.write( ( QStringLiteral( "matName\troute\tpath\trefusal\ttried\n" )
+							+ bakePbrmTrace.join( QChar( '\n' ) ) + QChar( '\n' ) ).toUtf8() );
 				}
 				// lane SMOOTHN1: where the soup's vertex normals came from
 				t << "  bake smooth normals " << ( smoothOn ? "on" : "OFF (WW_CELL_BAKE_SMOOTH=0)" ) << ", normal maps "

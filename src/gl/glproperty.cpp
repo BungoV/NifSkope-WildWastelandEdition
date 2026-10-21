@@ -1244,17 +1244,30 @@ void pbrmRouteColor( PbrmRoute r, float rgb[3] )
 PbrmResolveResult pbrmResolveForMaterial( const QString & material, const QString & shapeName,
 	const QString & nifAbsPath, bool fo76, const PbrmReader & reader )
 {
+	/* lane PBRALBEDO2: vanilla NIFs name their BGSM by the build machine's absolute path
+	 * (C:\Projects\Fallout4\Build\PC\Data\materials\...), which the game reads cut at its last materials\;
+	 * the resolver refused it as drive-qualified, so no sibling .pbrm ever served a vanilla mesh.
+	 * WW_PBRM_AUTHORPATH_RED=refuse keeps the uncut name (the old refusal). */
+	static const bool authorPathRed = qEnvironmentVariable( "WW_PBRM_AUTHORPATH_RED" ) == QLatin1String( "refuse" );
+	QString mat = material;
+	if ( !authorPathRed ) {
+		QString m2 = mat;
+		m2.replace( QLatin1Char( '/' ), QLatin1Char( '\\' ) );
+		const int mi = m2.lastIndexOf( QLatin1String( "materials\\" ), -1, Qt::CaseInsensitive );
+		if ( mi > 0 )
+			mat = m2.mid( mi );
+	}
 	PbrmResolveInput in;
-	in.material = material;
+	in.material = mat;
 	in.shapeName = shapeName;
 
 	if ( !in.shapeName.isEmpty() && !nifAbsPath.isEmpty() )
 		in.nifxPbrm = nifxMaterialFor( nifAbsPath, in.shapeName, &in.nifxNote );
 
 	const QHash<QString, QString> & swaps = wwPbrmSwapPin();
-	if ( !swaps.isEmpty() && !material.isEmpty() ) {
+	if ( !swaps.isEmpty() && !mat.isEmpty() ) {
 		QString key;
-		if ( pbrmNormaliseMaterialPath( material, { QStringLiteral( ".bgsm" ), QStringLiteral( ".bgem" ) }, key ) ) {
+		if ( pbrmNormaliseMaterialPath( mat, { QStringLiteral( ".bgsm" ), QStringLiteral( ".bgem" ) }, key ) ) {
 			const auto it = swaps.constFind( key.toLower() );
 			if ( it != swaps.constEnd() ) {
 				QByteArray b;
