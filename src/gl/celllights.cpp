@@ -17,6 +17,7 @@ BSD License - see nifskope.h
 #include "gl/cellhdr.h"
 #include "gl/cellbloom.h"	// lane BLOOM1b
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
+#include "gl/cellpasstime.h"	// lane PERF2: sub-stage timers
 #include "gl/lookdevstage.h"	// lane SUNCELL1
 #include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
@@ -625,6 +626,7 @@ struct InputsLast
 
 void wwCellLightsUniforms( Scene * scene )
 {
+	PassTime::DrawCpuScope cpuT( PassTime::CpuCellUni );	// lane PERF2
 	if ( !scene || !scene->renderer )
 		return;
 	Renderer * r = scene->renderer;
@@ -2283,12 +2285,24 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glDisable( GL_BLEND );
 	fn->glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );	// wwCellAoDraw opens it for the opaque cell-lit draws
 	a.pass = true;
+	PassTime::subBegin( PassTime::AoGeometry );	// lane PERF2: the obscurance pass's three parts
 	{
+		/* lane PERF2: this pass is CPU-bound per draw. memo: the scene-global setters once per program (as the main
+		 * pass); opaque: no sorted/effect draws (blended or not cell-lit: they write nothing here). =0 or *_RED=1: old */
+		static const bool memo = qgetenv( "WW_CELL_AO_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_AO_MEMO_RED" );
+		static const bool opaqueOnly = qgetenv( "WW_CELL_AO_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_AO_OPAQUE_RED" );
 		NodeList second;
+		if ( memo )
+			wwSetupMemoArm( true );
 		scene->collectShapes( second );
-		Scene::drawDeferredShapes( second );
-		scene->drawShapeEffects();
+		if ( memo )
+			wwSetupMemoArm( false );
+		if ( !opaqueOnly ) {
+			Scene::drawDeferredShapes( second );
+			scene->drawShapeEffects();
+		}
 	}
+	PassTime::subEnd( PassTime::AoGeometry );
 	a.pass = false;
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 	fn->glDepthMask( GL_TRUE );
@@ -2299,6 +2313,7 @@ void wwCellAoPass( Scene * scene, bool run )
 		g.decal = GLuint( wwCellAoDecalRun( scene, g.gbuf.tex, g.gbufDepth, W, H ) );
 
 	// 2. the full-screen passes (cell_ao.frag)
+	PassTime::subBegin( PassTime::AoStages );
 	prog = r->useProgram( "cell_ao.prog" );
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDisable( GL_CULL_FACE );
@@ -2354,8 +2369,11 @@ void wwCellAoPass( Scene * scene, bool run )
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	}
 	fn->glActiveTexture( GLenum( prevActive ) );
+	PassTime::subEnd( PassTime::AoStages );
+	PassTime::subBegin( PassTime::AoGi );
 	if ( forGi )	// lane PERF1
 		giHalfPass( scene, g, W, H, p00, p11 );
+	PassTime::subEnd( PassTime::AoGi );
 
 	g.ready = true;
 	g.aoReady = a.on;
@@ -2445,6 +2463,7 @@ bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
 
 void wwCellAoDraw( Scene * scene, bool cellProgram )
 {
+	PassTime::DrawCpuScope cpuT( PassTime::CpuAoDraw );	// lane PERF2
 	if ( !scene || !scene->renderer )
 		return;
 	AoState & a = ao();

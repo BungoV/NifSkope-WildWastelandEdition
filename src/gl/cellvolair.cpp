@@ -9,6 +9,8 @@ BSD License - see nifskope.h
 
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
+#include "gl/cellpasstime.h"
+#include "gl/cellpost.h"
 #include "gl/cellssr.h"
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
@@ -16,6 +18,7 @@ BSD License - see nifskope.h
 #include "gl/shadowset.h"	// lane FARGRID1: the terrain map
 #include "gl/sunshadow.h"
 #include "esmweather.h"
+#include "harnesswindow.h"
 #include "recx.h"
 
 #include <QDebug>
@@ -63,6 +66,11 @@ struct VaState
 	int fogBlend = 0;	// WW_CELL_VOLAIR_FOGBLEND=1 (option B, test only): the game's fog drawn over the lit air
 	int opt = 3;		// WW_CELL_AIR_OPT (gates): 1 clustered lights, 2 the conservative depth skip; 0 the full loop
 	QString dump;
+	bool temporal = false;
+	int shiftFrame = -1;
+	float shift[3] = { 0, 0, 0 };
+	int settleLeft = 0;			// temporal: paints still owed after a change (interactive windows)
+	bool settlePending = false;
 	bool inPass = false;
 	QString last = QStringLiteral( "off" );
 };
@@ -85,7 +93,22 @@ VaState & vs()
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
 				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : r == "roomstep" ? 4194304
 				: r == "echoall" ? 8388608
-				: r == "farnoterr" ? 16777216 : r == "farseam" ? 33554432 : r == "farjitter" ? 67108864 : 0;	// lane FARGRID1: the far reds
+				: r == "farnoterr" ? 16777216 : r == "farseam" ? 33554432 : r == "farjitter" ? 67108864	// lane FARGRID1: the far reds
+				: r == "histstale" ? 134217728 : r == "oldint" ? 268435456 : r == "noearly" ? 536870912 : r == "noskip" ? 1073741824 : 0;
+			// BATCH1: PERF2's oldint/noearly/noskip moved off FARGRID1's far reds (2^24..2^26) to 2^28..2^30
+			// lane PERF2: echoall moved off 4194304 (VOLAIR1's roomstep); oldint the O(S^2) integrate, noearly no empty-air
+			// early out, noskip recomputes unchanged frames, histstale (temporal gates) never refreshes the history
+		}
+		// lane PERF2: temporal reuse (one fresh stratum a frame + the history); off until bungo sees it. The red brings
+		// the 4 sub-steps back
+		s.temporal = qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_TEMPORAL" ) == 1
+			&& qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_TEMPORAL_RED" ) != 1;
+		// gates only: from path frame N the air sees every placed light moved by (dx, dy, dz) world units: "N,dx,dy,dz"
+		const QList<QByteArray> sh = qgetenv( "WW_CELL_AIR_LIGHTSHIFT" ).split( ',' );
+		if ( sh.size() == 4 ) {
+			s.shiftFrame = sh[0].toInt();
+			for ( int k = 0; k < 3; k++ )
+				s.shift[k] = sh[k + 1].toFloat();
 		}
 		const QByteArray opt = qgetenv( "WW_CELL_AIR_OPT" ).trimmed();
 		if ( !opt.isEmpty() )
@@ -152,6 +175,17 @@ struct VaGpu
 	bool tileValid = false;	// stage 0 wrote this frame's column distances (the surfaces clamp to them)
 	GLuint zTex = 0, zFbo = 0, zSrc = 0;	// stage 0's depth: a copy of the obscurance pass's depth buffer (10-16)
 	int zW = 0, zH = 0;
+	GLuint carry[2] = { 0, 0 };	// lane PERF2: the O(S) integrate's running (L, T), ping-pong between its draws (RGBA32F)
+	int mrtOk = -1;				// 8 draw buffers and colour attachments (else the O(S^2) integrate)
+	// lane PERF2, temporal: the strata (cols x rows x 4 slices, stratum p at layers p x slices ..), ping-pong; the
+	// last pass's view (posView = sc R world + t: rows sc R | t) and grid
+	GLuint hist[2] = { 0, 0 };
+	int histCur = 0, histCols = 0, histRows = 0;
+	bool histOk = false;
+	double prevV[3][4] = {};
+	float prevGrid[4] = { 0, 0, 0, 0 }, prevScale = 0.0f;
+	unsigned frame = 0;
+	int tmode = 0;
 };
 
 /* THE CLUSTERED LIGHTS (coordinator 10-14). The inject evaluates the placed lights once per froxel, at the middle of
@@ -617,6 +651,16 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 
 }	// namespace
 
+bool wwVolAirWantsSettle()
+{
+	VaState & s = vs();
+	if ( !s.temporal || wwHarnessRun() || s.settleLeft <= 0 )
+		return false;
+	s.settleLeft--;
+	s.settlePending = true;
+	return true;
+}
+
 bool wwVolAirOn()
 {
 	return vs().on;
@@ -865,6 +909,16 @@ static void vaPassInner( Scene * scene, bool run )
 		vaAlloc3D( fn, g.integ, texW, texH, texD, true );
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
+		for ( GLuint & c : g.carry ) {
+			if ( !c )
+				fn->glGenTextures( 1, &c );
+			fn->glBindTexture( GL_TEXTURE_2D, c );
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, cols, rows, 0, GL_RGBA, GL_FLOAT, nullptr );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+		}
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 		g.cols = cols;
 		g.rows = rows;
 		g.slices = kSlices;
@@ -873,6 +927,23 @@ static void vaPassInner( Scene * scene, bool run )
 		g.texD = texD;
 		g.farKey.clear();	// a new volume holds no far grid
 	}
+	if ( g.mrtOk < 0 ) {
+		GLint bufs = 0, atts = 0;
+		fn->glGetIntegerv( GL_MAX_DRAW_BUFFERS, &bufs );
+		fn->glGetIntegerv( GL_MAX_COLOR_ATTACHMENTS, &atts );
+		g.mrtOk = bufs >= 8 && atts >= 8 ? 1 : 0;
+	}
+	// lane PERF2, temporal: not with red lightmid (its single light sample has no strata)
+	const bool temporal = s.temporal && g.mrtOk == 1 && !( s.red & 262144 );
+	if ( temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows ) ) {
+		for ( GLuint & h : g.hist )
+			vaAlloc3D( fn, h, cols, rows, 4 * kSlices, true );
+		g.histCols = cols;
+		g.histRows = rows;
+		g.histOk = false;
+	}
+	if ( !temporal || g.doc != scene->nifModel )
+		g.histOk = false;	// another document: its history is not this one's
 
 	// red flat: one cube for every froxel, the GI grid's mean per axis
 	float flat[6][3] = {};
@@ -923,6 +994,56 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1i( "volFarMode", farOn ? 1 : 0 );	// lane FARGRID1: the near pass
 	prog->uni1i( "volLayerBase", 0 );
 	prog->uni1f( "volJitter", 0.0f );
+
+	/* lane PERF2, temporal: this view (rows sc R | t) and the map from it to the last pass's view,
+	 * last = sc' R' R^T (y - t) / sc + t'. Mode 2 when nothing moved (the history read at the same froxel) */
+	double curV[3][4];
+	for ( int i = 0; i < 3; i++ ) {
+		for ( int j = 0; j < 3; j++ )
+			curV[i][j] = double( vt.rotation( i, j ) ) * double( sc );
+		curV[i][3] = double( vt.translation[i] );
+	}
+	const float curGrid[4] = { p00, p11, nearD, logRatio };
+	g.tmode = 0;
+	if ( temporal ) {
+		bool same = g.histOk;
+		for ( int i = 0; i < 3 && same; i++ )
+			for ( int j = 0; j < 4 && same; j++ )
+				same = curV[i][j] == g.prevV[i][j];
+		for ( int k = 0; k < 4 && same; k++ )
+			same = curGrid[k] == g.prevGrid[k];
+		same = same && distScale == g.prevScale;
+		g.tmode = same ? 2 : 1;
+		float rep[3][4];
+		const double s0 = double( sc );
+		for ( int i = 0; i < 3; i++ ) {
+			double off = g.prevV[i][3];
+			for ( int j = 0; j < 3; j++ ) {
+				// (sc' R' R^T / sc)[i][j] = sum_k prevV[i][k] curV[j][k] / sc^2
+				double m = 0.0;
+				for ( int k = 0; k < 3; k++ )
+					m += g.prevV[i][k] * curV[j][k];
+				m /= s0 * s0;
+				rep[i][j] = float( m );
+				off -= m * curV[j][3];
+			}
+			rep[i][3] = float( off );
+		}
+		for ( int i = 0; i < 3; i++ )
+			prog->uni4f_l( prog->uniLocation( "volReproj[%d]", i ), FloatVector4( rep[i][0], rep[i][1], rep[i][2], rep[i][3] ) );
+		prog->uni4f( "volPrevGrid", FloatVector4( g.prevGrid[0], g.prevGrid[1], g.prevGrid[2] > 0.0f ? g.prevGrid[2] : 1.0f,
+			g.prevGrid[3] > 0.0f ? g.prevGrid[3] : 1.0f ) );
+		prog->uni1f( "volPrevScale", g.prevScale );
+	}
+	prog->uni1i( "volTemporal", g.tmode );
+	prog->uni1i( "volQ", int( g.frame & 3u ) );
+	prog->uni1b( "volHistOk", temporal && g.histOk );
+	prog->uni1i( "volHist", kInjectUnit );
+	{
+		const int pf = wwCellPostPathFrame();
+		const bool shifted = s.shiftFrame >= 0 && pf >= s.shiftFrame;
+		prog->uni3f( "volLightShift", shifted ? s.shift[0] : 0.0f, shifted ? s.shift[1] : 0.0f, shifted ? s.shift[2] : 0.0f );
+	}
 
 	/* THE OPTIMISATION (coordinator 10-14; WW_CELL_AIR_OPT, default both): 1 the clustered lights (vaBuildClusters),
 	 * 2 the conservative depth skip: stage 0 writes, per froxel column, the farthest and the nearest ray distance of
@@ -1048,26 +1169,81 @@ static void vaPassInner( Scene * scene, bool run )
 		} else {
 			prog->uni1i( "volStage", 0 );
 			prog->uni1i( "volLayer", 0 );
+			PassTime::subBegin( PassTime::AirTile );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			PassTime::subEnd( PassTime::AirTile );
 			g.tileValid = true;
 		}
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0 );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
 		fn->glBindTexture( GL_TEXTURE_2D, g.tile );
 	}
+	// lane PERF2: the O(S) integrate (stage 3, 7 layers a draw); red oldint: stage 2, every layer re-summed from 0
+	const bool oneSum = g.mrtOk == 1 && !( s.red & 268435456 );
 	for ( int stage = 1; stage <= 2 && complete; stage++ ) {
-		prog->uni1i( "volStage", stage );
+		prog->uni1i( "volStage", stage == 2 && oneSum ? 3 : stage );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
-		fn->glBindTexture( GL_TEXTURE_3D, stage == 2 ? g.inject : 0 );
-		for ( int k = 0; k < kSlices; k++ ) {
-			fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, stage == 1 ? g.inject : g.integ, 0, k );
-			if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
-				complete = false;
-				break;
+		fn->glBindTexture( GL_TEXTURE_3D, stage == 2 ? g.inject : temporal ? g.hist[g.histCur] : 0 );
+		PassTime::subBegin( stage == 1 ? PassTime::AirInject : PassTime::AirIntegrate );
+		if ( stage == 1 && temporal ) {
+			// lane PERF2, temporal: the inject at attachment 0, the four strata of this layer into the other history
+			const GLuint out = g.hist[g.histCur ^ 1];
+			const GLenum bufs[5] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4 };
+			fn->glDrawBuffers( 5, bufs );
+			for ( int k = 0; k < kSlices; k++ ) {
+				fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.inject, 0, k );
+				for ( int p = 0; p < 4; p++ )
+					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT1 + p ), out, 0, p * kSlices + k );
+				if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+					complete = false;
+					break;
+				}
+				prog->uni1i( "volLayer", k );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			}
-			prog->uni1i( "volLayer", k );
-			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			for ( int p = 1; p <= 4; p++ )
+				fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT0 + p ), GL_TEXTURE_2D, 0, 0 );
+			const GLenum first = GL_COLOR_ATTACHMENT0;
+			fn->glDrawBuffers( 1, &first );
+		} else if ( stage == 2 && oneSum ) {
+			prog->uni1i( "volCarry", kGbufUnit );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGbufUnit ) );
+			for ( int k = 0, c = 0; k < kSlices; k += 7, c++ ) {
+				const int n = std::min( 7, kSlices - k );
+				GLenum bufs[8];
+				for ( int i = 0; i < 7; i++ ) {
+					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT0 + i ), i < n ? g.integ : 0, 0, i < n ? k + i : 0 );
+					bufs[i] = i < n ? GLenum( GL_COLOR_ATTACHMENT0 + i ) : GLenum( GL_NONE );
+				}
+				fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT7, GL_TEXTURE_2D, g.carry[( c + 1 ) & 1], 0 );
+				bufs[7] = GL_COLOR_ATTACHMENT7;
+				fn->glDrawBuffers( 8, bufs );
+				fn->glBindTexture( GL_TEXTURE_2D, g.carry[c & 1] );
+				if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+					complete = false;
+					break;
+				}
+				prog->uni1i( "volLayer", k );
+				prog->uni1i( "volCount", n );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			}
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			for ( int i = 1; i < 8; i++ )
+				fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT0 + i ), GL_TEXTURE_2D, 0, 0 );
+			const GLenum first = GL_COLOR_ATTACHMENT0;
+			fn->glDrawBuffers( 1, &first );
+		} else {
+			for ( int k = 0; k < kSlices; k++ ) {
+				fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, stage == 1 ? g.inject : g.integ, 0, k );
+				if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+					complete = false;
+					break;
+				}
+				prog->uni1i( "volLayer", k );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			}
 		}
+		PassTime::subEnd( stage == 1 ? PassTime::AirInject : PassTime::AirIntegrate );
 	}
 	/* lane FARGRID1: THE FAR GRID. The same program and medium on a fixed grid from the handoff to farEnd: the sun
 	 * (shadowed by airFarVis: the cascades where they reach, the terrain's shadow-height map, the clouds' input) and
@@ -1117,6 +1293,8 @@ static void vaPassInner( Scene * scene, bool run )
 			prog->uni4f( "volSlices", FloatVector4( farStart, farLog, float( fp.slices ), 1.0f ) );
 			prog->uni1i( "volFarMode", 3 | ( ( s.red & 16777216 ) ? 4 : 0 ) );
 			prog->uni1i( "volLayerBase", kSlices );
+			prog->uni1i( "volTemporal", 0 );	// BATCH1: PERF2's history is the near grid's only
+			prog->uni1b( "volHistOk", false );
 			prog->uni1i( "volTerms", s.terms & 9 );
 			prog->uni1i( "volDepthSkip", 0 );
 			fn->glUniform4i( prog->uniLocation( "volClusterDims" ), 0, 0, kClusterCols, kClusterSlices );
@@ -1183,6 +1361,19 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	g.ready = true;
 	g.doc = scene->nifModel;
+	if ( temporal ) {
+		g.histCur ^= 1;
+		g.histOk = true;
+		g.frame++;
+		std::copy( &curV[0][0], &curV[0][0] + 12, &g.prevV[0][0] );
+		std::copy( curGrid, curGrid + 4, g.prevGrid );
+		g.prevScale = distScale;
+		// an interactive window paints until every stratum is fresh (3 more frames after a paint of its own)
+		if ( s.settlePending )
+			s.settlePending = false;
+		else
+			s.settleLeft = 3;
+	}
 	g.near = nearD;
 	g.logRatio = logRatio;
 	g.med[0] = M.sigma0;
@@ -1207,12 +1398,13 @@ static void vaPassInner( Scene * scene, bool run )
 		.arg( cellLightCountV ).arg( cellGiOnV ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 );
 	// the optimisation's echo: the mode, the clusters (all / non-empty / mean list over the non-empty), the CPU build,
 	// the depth skip (0 off, 1 on, 2 the red)
-	const QString optNote = QStringLiteral( "opt=%1 clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8" )
+	const QString optNote = QStringLiteral( "opt=%1 clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8 temporal=%9" )
 		.arg( s.opt ).arg( clOn ? cl.ncx * cl.ncy * cl.ncz : 0 ).arg( clOn ? cl.nonEmpty : 0 )
 		.arg( clOn && cl.nonEmpty ? double( cl.refs ) / double( cl.nonEmpty ) : 0.0, 0, 'f', 2 ).arg( clMs, 0, 'f', 3 )
 		.arg( depthOn ? ( ( s.red & 8192 ) ? 2 : 1 ) : 0 )
 		.arg( !tileOn ? QStringLiteral( "none" ) : zDepth ? QStringLiteral( "depth" ) : QStringLiteral( "colour" ) )
-		.arg( g.tileValid && !( s.red & 2097152 ) ? 1 : 0 );
+		.arg( g.tileValid && !( s.red & 2097152 ) ? 1 : 0 )
+		.arg( g.tmode );	// lane PERF2: 0 the 4 sub-steps, 1 temporal reprojected, 2 temporal, camera unchanged
 	// the ground layer's echo: what was applied (the near share, the strength, thickness and anchor) and its source
 	const QString groundNote = QStringLiteral( "nearw=%1 ground=%2 thick=%3 zg=%4 recx=%5%6" )
 		.arg( double( G.w ), 0, 'f', 2 ).arg( double( G.s ), 0, 'g', 4 )
@@ -1234,7 +1426,10 @@ static void vaPassInner( Scene * scene, bool run )
 	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */
 	if ( !s.dump.isEmpty() ) {
-		QFile f( s.dump );
+		// lane PERF2 gates: WW_CELL_AIR_DUMP_FRAMES=1 keeps one file per camera-path frame (<file>.<frame>)
+		static const bool perFrame = qEnvironmentVariableIntValue( "WW_CELL_AIR_DUMP_FRAMES" ) == 1;
+		const int pf = wwCellPostPathFrame();
+		QFile f( perFrame && pf >= 0 ? s.dump + QStringLiteral( ".%1" ).arg( pf, 3, 10, QLatin1Char( '0' ) ) : s.dump );
 		if ( f.open( QIODevice::WriteOnly ) ) {
 			const qint32 hd[3] = { cols, rows, kSlices };
 			f.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
