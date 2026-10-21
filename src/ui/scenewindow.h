@@ -64,6 +64,11 @@ public:
 	QCheckBox * shadowsBox = nullptr;
 	QCheckBox * taaBox = nullptr;	// lane MOTION1
 	QCheckBox * frameTimersBox = nullptr;	// lane PERF1
+	// lane TERRSHADOW1: the unified shadow set (gl/shadowset.h)
+	QComboBox * sunPathBox = nullptr;
+	QComboBox * cascadeQualityBox = nullptr;
+	QComboBox * contactShadowsBox = nullptr;
+	QComboBox * terrainShadowsBox = nullptr;
 
 	//! re-read the Data folder's plugins / the loaded weathers / the status line
 	void refreshPlugins();

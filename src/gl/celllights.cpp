@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellssr.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
+#include "gl/shadowset.h"	// lane TERRSHADOW1
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -2191,6 +2192,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	 * obscurance computed from it (step 2's raw, blurs, final) and its apply, never the pass the others read. */
 	const bool forSsr = wwCellSsrWantsTargets( scene );
 	const bool forDecal = g.decalUnit >= 0 && wwCellAoDecalWanted( scene->nifModel );
+	const bool forContact = wwContactShadowWantsTargets( scene );	// lane TERRSHADOW1: contact shadows march its depth
 	// lane PERF1: the half-res GI reads it too (the GI row on, no probe pass, a GPU with the units)
 	const int giRate = wwCellGiRate();
 	const bool forGi = giRate != 2 && wwCellGiVis() == 0 && g.giUnits && wwCellGiOn() && wwCellPassFor( scene->nifModel ) == 0;
@@ -2201,11 +2203,11 @@ void wwCellAoPass( Scene * scene, bool run )
 	else if ( !g.giUnits )
 		giEcho( QStringLiteral( "full (the GPU has no unit %1)" ).arg( WwCellUnit::GiHalfKey ) );
 	if ( !a.on ) {
-		aoEcho( ( forSsr || forDecal || forGi ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2%3" )
+		aoEcho( ( forSsr || forDecal || forContact || forGi ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2%3%4" )
 			.arg( forSsr ? QStringLiteral( " ssr" ) : QString() ).arg( forDecal ? QStringLiteral( " aodecal" ) : QString() )
-			.arg( forGi ? QStringLiteral( " gihalf" ) : QString() )
+			.arg( forContact ? QStringLiteral( " contact" ) : QString() ).arg( forGi ? QStringLiteral( " gihalf" ) : QString() )
 			: QStringLiteral( "off (row); no opaque pass (nothing reads it)" ) );
-		if ( !forSsr && !forDecal && !forGi ) {
+		if ( !forSsr && !forDecal && !forContact && !forGi ) {
 			a.last = QStringLiteral( "off" );
 			return;
 		}

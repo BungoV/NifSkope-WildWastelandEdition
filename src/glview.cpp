@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"
 #include "gl/sunshadow.h"
+#include "gl/shadowset.h"	// lane TERRSHADOW1: contact shadows
 #include "gl/cellcull.h"	// lane SUNCELL1
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
@@ -4151,6 +4152,7 @@ void GLView::paintGL()
 	PassTime::end( PassTime::Obscurance );
 	PassTime::begin( PassTime::Reflections );
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
+	wwContactShadowPass( scene );	// lane TERRSHADOW1: the contact mask from that pass's depth (fails open without it)
 	PassTime::end( PassTime::Reflections );
 	PassTime::begin( PassTime::Air );
 	wwVolAirPass( scene, cellPasses );	// lane VOLAIR1: the air's froxels
@@ -22357,25 +22359,45 @@ QString GLView::wwGpuMs( int frames )
 	QOpenGLExtraFunctions * xf = context()->extraFunctions();
 	if ( !xf )
 		return QStringLiteral( "gpums refused: no GL 3 functions" );
-	constexpr GLenum kTimeElapsed = 0x88BF;	// GL_TIME_ELAPSED (GL 3.3, ARB_timer_query)
-	GLuint q = 0;
-	xf->glGenQueries( 1, &q );
+	/* lane TERRSHADOW1: GL_TIMESTAMP pairs, not one GL_TIME_ELAPSED query: elapsed queries cannot nest, so a pass inside
+	 * paintGL that timed itself with one ended this query early (contact shadows on read 13 ms of a 45 ms frame). */
+	using QueryCounterFn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum );
+	using QueryU64Fn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum, GLuint64 * );
+	const auto queryCounter = reinterpret_cast<QueryCounterFn>( context()->getProcAddress( "glQueryCounter" ) );
+	const auto queryU64 = reinterpret_cast<QueryU64Fn>( context()->getProcAddress( "glGetQueryObjectui64v" ) );
+	if ( !queryCounter || !queryU64 ) {
+		doneCurrent();
+		return QStringLiteral( "gpums refused: no GL_TIMESTAMP queries" );
+	}
+	constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP (GL 3.3, ARB_timer_query)
+	constexpr GLenum kTimeElapsed = 0x88BF;	// red WW_SHADOW_RED=elapsedtimer: the old single elapsed query
+	const bool elapsedRed = qEnvironmentVariable( "WW_SHADOW_RED" ).split( QChar( ',' ) ).contains( QStringLiteral( "elapsedtimer" ) );
+	GLuint q[2] = { 0, 0 };
+	xf->glGenQueries( 2, q );
 	std::vector<double> gpu, cpu;
 	for ( int k = 0; k < frames + 2; k++ ) {
 		QElapsedTimer t;
 		t.start();
-		xf->glBeginQuery( kTimeElapsed, q );
+		if ( elapsedRed )
+			xf->glBeginQuery( kTimeElapsed, q[0] );
+		else
+			queryCounter( q[0], kTimestamp );
 		paintGL();
-		xf->glEndQuery( kTimeElapsed );
+		if ( elapsedRed )
+			xf->glEndQuery( kTimeElapsed );
+		else
+			queryCounter( q[1], kTimestamp );
 		xf->glFinish();
-		GLuint ns = 0;	// 32 bits of ns: 4.29 s a frame, plenty
-		xf->glGetQueryObjectuiv( q, GL_QUERY_RESULT, &ns );
+		GLuint64 t0 = 0, t1 = 0;
+		queryU64( q[0], GL_QUERY_RESULT, elapsedRed ? &t1 : &t0 );
+		if ( !elapsedRed )
+			queryU64( q[1], GL_QUERY_RESULT, &t1 );
 		if ( k >= 2 ) {
-			gpu.push_back( double( ns ) * 1e-6 );
+			gpu.push_back( t1 > t0 ? double( t1 - t0 ) * 1e-6 : 0.0 );
 			cpu.push_back( double( t.nsecsElapsed() ) * 1e-6 );
 		}
 	}
-	xf->glDeleteQueries( 1, &q );
+	xf->glDeleteQueries( 2, q );
 	doneCurrent();
 	auto med = []( std::vector<double> v ) {
 		std::sort( v.begin(), v.end() );
