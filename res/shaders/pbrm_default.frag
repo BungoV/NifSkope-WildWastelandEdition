@@ -598,8 +598,12 @@ void main()
 		vec3 cDiff = vec3( 0.0 ), cSpec = vec3( 0.0 ), cE = vec3( 0.0 );
 		vec3 farF, farGP;	// lane FARVIEW1: the real lights fade over the band, the surfels take over (diffuse only)
 		float farW = cellFarTerms( Pw, sw.N, farF, farGP );
-		int farN = farW >= 1.0 ? 0 : cellLightCount;
-		for ( int i = 0; i < farN; i++ ) {
+		int farN;
+		int farB = cellLightsBegin( Pw, farN );
+		if ( farW >= 1.0 )
+			farN = 0;
+		for ( int k = 0; k < farN; k++ ) {
+			int i = cellLightAt( farB, k );
 			vec3 Lw;
 			bool noSpec;
 			vec3 E = cellLightE( i, Pw, sw.N, Lw, noSpec );

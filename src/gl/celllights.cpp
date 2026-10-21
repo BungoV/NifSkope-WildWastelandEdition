@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "celllights.h"
 
+#include "gl/cellclustergl.h"
 #include "gl/cellssr.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/shadowset.h"	// lane TERRSHADOW1
@@ -230,6 +231,8 @@ struct Gpu
 	int shSlot[kShadowSlots];
 	int shStamp = 1, bufShStamp = 0;
 	std::vector<float> spheres;	// lane VOLAIR1: every buffer light's world centre + radius (copies included), in order
+	std::vector<float> texels;		// the light buffer as uploaded, for the cluster lists
+	std::uint64_t texelStamp = 0;
 	Gpu() { std::fill( shSlot, shSlot + kShadowSlots, -1 ); }
 };
 QHash<const void *, Gpu> & gpus()
@@ -688,6 +691,8 @@ void wwCellLightsUniforms( Scene * scene )
 		g.doc = scene->nifModel;
 		g.version = s.version.value( scene->nifModel );
 		g.count = int( t.size() / ( kTexelsPerLight * 4 ) ) - ( L->lights.isEmpty() ? 1 : 0 );
+		g.texels = std::move( t );
+		g.texelStamp++;
 	}
 	/* The sampler is bound whether or not this draw lights: a samplerBuffer left on unit 0
 	 * beside BaseMap's sampler2D is a draw-time INVALID_OPERATION. */
@@ -979,6 +984,8 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni1i( "cellIsRed", s.isRed );
 	}
 	prog->uni1i( "cellLights", kTextureUnit );
+	// the cluster lists: their sampler bound on every draw, the lists only on a lit one
+	wwCellClusterUniforms( scene, L ? &g.texels : nullptr, L ? g.count : 0, g.texelStamp );
 	if ( !L )
 		return;
 	prog->uni1i( "cellLightCount", g.count );
