@@ -6472,12 +6472,21 @@ bool lodgenBakeHeightmap( const EsmWorld & world, const QString & outDir,
 	// world-sample coordinate of texel i is i * step; exactly i at native size
 	const double stepX = double( cellsX ) * 32.0 / double( RX );
 	const double stepY = double( cellsY ) * 32.0 / double( RY );
-	EsmLand land;
+	/* HORIZON1: a cell row's LAND records are read serially (the ESM reader's
+	 * zlib buffer is shared), then its cells fill on the pool in two column
+	 * parities: same-parity cells never share a texel, and the seam max is
+	 * order-free, so the map is byte-identical at any thread count. */
+	static const bool horizonRed = qEnvironmentVariableIntValue( "WW_LODGEN_HORIZON_RED" ) == 1;
+	std::vector<EsmLand> rowLand( static_cast<size_t>( cellsX ) );
+	std::vector<char> rowHave( size_t( cellsX ), 0 );
 	for ( int cy = minY; cy <= maxY; cy++ ) {
-		for ( int cx = minX; cx <= maxX; cx++ ) {
-			if ( !world.land( cx, cy, land ) )
-				continue;
-			const int kx = cx - minX, ky = cy - minY;
+		for ( int kx = 0; kx < cellsX; kx++ )
+			rowHave[size_t( kx )] = world.land( minX + kx, cy, rowLand[size_t( kx )] ) ? 1 : 0;
+		auto fillCell = [&]( int kx ) {
+			if ( !rowHave[size_t( kx )] )
+				return;
+			const EsmLand & land = rowLand[size_t( kx )];
+			const int ky = cy - minY;
 			/* Every texel whose sample coordinate lies in [k*32, (k+1)*32] --
 			 * CLOSED at both ends, so a cell writes its full 33 rows and
 			 * columns and the shared VHGT edge is written by every cell that
@@ -6520,6 +6529,13 @@ bool lodgenBakeHeightmap( const EsmWorld & world, const QString & outDir,
 					dst = qMax( dst, top + ( bot - top ) * fr );
 				}
 			}
+		};
+		if ( horizonRed ) {
+			for ( int kx = 0; kx < cellsX; kx++ )
+				fillCell( kx );
+		} else {
+			for ( int par = 0; par < 2; par++ )
+				lodgenParallelFor( ( cellsX - par + 1 ) / 2, [&]( int t ) { fillCell( 2 * t + par ); } );
 		}
 	}
 
@@ -15097,7 +15113,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	 * else, and only on the quadrants `aoOnly` names (the painted ones); the
 	 * heights above are the tile's own, so the value is the sheet's. */
 	if ( aoOnly ) {
-		for ( int j = 0; j < S; j++ ) {
+		auto aoRow = [&]( int j ) {
 			const float wy = tileN - ( float( j ) - float( border ) + 0.5f ) * upt;
 			const int qy = int( std::floor( wy / 2048.0f ) );
 			for ( int i = 0; i < S; i++ ) {
@@ -15107,7 +15123,14 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 				out.mask[size_t( j ) * S + i] = 0x00FF0000U | skyAo( wx, wy, wx - ringW, wy - ringS,
 					i >= border && i < S - border && j >= border && j < S - border );
 			}
-		}
+		};
+		// HORIZON1: one row per task (a texel is written by its own row only); a census caller stays serial
+		static const bool horizonRed = qEnvironmentVariableIntValue( "WW_LODGEN_HORIZON_RED" ) == 1;
+		if ( horizonRed || objCensus )
+			for ( int j = 0; j < S; j++ )
+				aoRow( j );
+		else
+			lodgenParallelFor( S, aoRow );
 		return true;
 	}
 
