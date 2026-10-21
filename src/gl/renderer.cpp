@@ -235,11 +235,8 @@ static const QString cube_fo4 = "textures/shared/cubemaps/mipblur_defaultoutside
 static const QString grayCube = "#FF555555c";
 static const QString pbr_lut_sf = "#sfpbr.dds";
 
-/* lane FXCHECK1: WHICH CHANNEL OF AN EFFECT'S ENV MASK SCALES ITS CUBE. The game's effect shader multiplies the
- * cube by the env mask texture's R (the _s specular; G is gloss, 1.0 on TrafficLightDoor01_s), so the glass of a
- * walk signal reflects at 0.7 x 0.29 on average, masked; G drew 0.7 over the whole pane, flat and milky.
- * Setting WW/FxEnvMaskR (env pin WW_FX_ENVMASK=0/1) ships OFF until bungo has seen the pair.
- * Reds: WW_FX_ENVMASK_RED=gloss reads G with the switch on (the old look); =noenv draws no cube (a gate's control). */
+/* lane FXCHECK1: the game scales an effect's cube by the env mask's R (specular), not G (gloss, often 1.0).
+ * WW/FxEnvMaskR or WW_FX_ENVMASK (off until seen); red WW_FX_ENVMASK_RED=gloss (old) | noenv (no cube). */
 bool wwFxEnvMaskR()
 {
 	static const int v = [] {

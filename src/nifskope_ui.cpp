@@ -2230,23 +2230,22 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
  * the TAA frame index is pinned (pre-roll + k), so frame k is the same picture on every run. */
 bool wwCellParticlesOn();	// src/cellview.cpp
 
-/* lane FXCHECK1: A STILL SHOT'S PARTICLES ARE WARM. The simulation advances by the time between paints, and a
- * shot jumps once to WW_RENDER_TIME and holds it, so a cell's fire barrel had nothing alive at the grab. With the
- * Particles row on, every simulated system is run from shotT - WW_CELL_PARTICLES_PREROLL (5 s) up to shotT in
- * 1/30 s steps, the scene's own time untouched, as the game's emitters are already burning when you arrive.
- * Red WW_CELL_PARTICLES_RED=nopreroll skips it (the old shot). WW_RENDER_FRAMES has its own pre-roll. */
+/* lane FXCHECK1: a held still shot starts its emitters cold; run them WW_CELL_PARTICLES_PREROLL (5) s first, as the
+ * game's are already burning. Particles row only; red WW_CELL_PARTICLES_RED=nopreroll. */
 static QString wwParticlePreroll( GLView * ogl, float shotT )
 {
 	Scene * sc = ogl ? ogl->getScene() : nullptr;
 	if ( !sc || !wwCellParticlesOn() || qEnvironmentVariableIntValue( "WW_RENDER_FRAMES" ) > 0 )
 		return QString();
-	if ( qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "nopreroll" )
-		return QStringLiteral( "particle preroll: off (red WW_CELL_PARTICLES_RED=nopreroll)" );
+	const bool red = qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "nopreroll";
 	bool ok = false;
 	float secs = qEnvironmentVariable( "WW_CELL_PARTICLES_PREROLL" ).toFloat( &ok );
 	if ( !ok || !( secs >= 0.0f ) )
 		secs = 5.0f;
+	if ( red )
+		secs = 0.0f;
 	int systems = 0, steps = 0, live = 0;
+	QMap<QString, int> byName;	// the census names each system, so a gate can read one model's systems
 	for ( Node * n : sc->nodes.list() ) {
 		auto * ps = dynamic_cast<Particles *>( n );
 		if ( !ps )
@@ -2255,9 +2254,14 @@ static QString wwParticlePreroll( GLView * ogl, float shotT )
 		systems += k > 0;
 		steps += k;
 		live += ps->liveCount();
+		byName[ps->getName()] += ps->liveCount();
 	}
-	return QStringLiteral( "particle preroll: %1 s, %2 systems, %3 steps, live %4 at t %5" ).arg( secs ).arg( systems )
-		.arg( steps ).arg( live ).arg( shotT );
+	QStringList census;
+	for ( auto it = byName.cbegin(); it != byName.cend(); ++it )
+		census << QStringLiteral( "%1=%2" ).arg( it.key() ).arg( it.value() );
+	return QStringLiteral( "particle preroll: %1 s%2, %3 systems, %4 steps, live %5 at t %6 | %7" ).arg( secs )
+		.arg( red ? QStringLiteral( " (red WW_CELL_PARTICLES_RED=nopreroll)" ) : QString() ).arg( systems ).arg( steps )
+		.arg( live ).arg( shotT ).arg( census.join( QLatin1Char( ' ' ) ) );
 }
 
 static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QString & out, float shotT )
