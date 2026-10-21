@@ -194,7 +194,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	auto fn = r->fn;
 	if ( g.unit < 0 ) {
 		GLint units = 0;
-		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
+		fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &units );	// MERGEALL1: unit 33 is past the per-stage 32
 		g.unit = units > kSsgiUnit ? kSsgiUnit : 0;
 	}
 	if ( g.unit <= 0 )
