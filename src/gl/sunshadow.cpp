@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "gametaa.h"
 #include "gl/cellwater.h"	// lane SUNCELL1: water never casts
 #include "gl/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
+#include "gl/cellpasstime.h"	// lane PERF1: the casters' draw count
 
 #include "gl/glnode.h"
 #include "gl/glproperty.h"	// lane VOLAIR1: alpha-tested casters read the base map
@@ -113,7 +114,8 @@ CsmState & cs()
 
 bool red( const char * name )
 {
-	return cs().reds.contains( QString::fromLatin1( name ) );
+	const QStringList & reds = cs().reds;	// lane PERF1: asked per caster and per shape; no reds = no string
+	return !reds.isEmpty() && reds.contains( QString::fromLatin1( name ) );
 }
 
 int redBits()
@@ -625,13 +627,16 @@ static void sunShadowPassImpl( Scene * scene )
 				for ( size_t q = 0; q + 1 < cullRanges.size(); q += 2 )
 					cullIdx.insert( cullIdx.end(), src + size_t( cullRanges[q] ) * 3,
 						src + ( size_t( cullRanges[q] ) + size_t( cullRanges[q + 1] ) ) * 3 );
-				if ( !cullIdx.empty() )
+				if ( !cullIdx.empty() ) {
 					r->drawShape( (unsigned int) ( k.sh->verts.size() ), mask, (unsigned int) cullIdx.size(),
 						GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, cullIdx.data() );
+					PassTime::countDraw( 1 );
+				}
 				continue;
 			}
 			r->drawShape( (unsigned int) ( k.sh->verts.size() ), mask, (unsigned int) ( k.sh->triangles.size() * 3 ),
 				GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, k.sh->triangles.constData() );
+			PassTime::countDraw( 1 );
 		}
 		}
 		if ( progAt )

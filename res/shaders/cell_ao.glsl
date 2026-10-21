@@ -4,6 +4,7 @@
 uniform bool cellAoOn;			// an opaque cell-lit draw with this frame's obscurance (never a blended one)
 uniform sampler2D cellAo;		// half the view, top row first, bilinear
 uniform vec4 cellAoRect;		// the viewport: x, y, 1 / w, 1 / h
+uniform int cellAoEarly;		// lane PERF1: 1 = the obscurance pass (probe 20) returns once it has the normal; 2 = its red (full shading, marked)
 
 // the game multiplies its whole deferred composite (lights, ambient, specular, emissive, reflections) by it,
 // before the fog

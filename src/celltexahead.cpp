@@ -275,6 +275,24 @@ bool CellTexAhead::take( const NifModel * nif, const QString & filepath, QByteAr
 	return true;
 }
 
+QStringList CellTexAhead::ready( const NifModel * nif, int max )
+{
+	QStringList out;
+	if ( !nif || armed.load( std::memory_order_relaxed ) != nif )
+		return out;
+	State & s = st();
+	std::unique_lock<std::mutex> l( s.lock );
+	if ( s.nif != nif )
+		return out;
+	for ( const Entry & e : s.entries ) {
+		if ( out.size() >= max )
+			break;
+		if ( e.st == St::Done )
+			out << e.name;
+	}
+	return out;
+}
+
 void CellTexAhead::stop( const NifModel * nif )
 {
 	if ( !nif || armed.load( std::memory_order_relaxed ) != nif )

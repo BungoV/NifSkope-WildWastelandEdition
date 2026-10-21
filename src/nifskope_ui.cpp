@@ -2164,6 +2164,12 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 				<< " fov " << QString::asprintf( "%.6f", fov ) << " | taa " << wwGameTaaEcho()
 				<< " | " << wwSunShadowSummary() << " | " << wwCellPostEcho() << " | " << wwCellBloomEcho() << "\n";
 	}
+	// lane PERF1: WW_RENDER_GPUMS=<frames> times that many repaints at the path's last camera (as the still shot does)
+	if ( const int gpuFrames = qEnvironmentVariableIntValue( "WW_RENDER_GPUMS" ); gpuFrames > 0 ) {
+		QFile gf( out + QStringLiteral( ".gpums.txt" ) );
+		if ( gf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+			QTextStream( &gf ) << ogl->wwGpuMs( gpuFrames ) << "\n";
+	}
 	wwGameTaaSetFrame( -1 );
 	wwCellPostSetPath( -1, 0.0f );
 	ogl->wwSetPathCamera( false );

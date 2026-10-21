@@ -238,6 +238,7 @@ HEADERS += \
 	src/gl/cellssr.h \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
+	src/gl/cellpasstime.h \
 	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
@@ -483,6 +484,7 @@ SOURCES += \
 	src/gl/cellssr.cpp \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \
+	src/gl/cellpasstime.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \
@@ -832,7 +834,7 @@ win32 {
     # cross-application color eyedropper.
     # -lpsapi: GetProcessMemoryInfo, behind the bake census line's peak
     # working set (lane BAKEPERF1, 2026-09-11)
-    LIBS += -lopengl32 -lgdi32 -lpsapi
+    LIBS += -lopengl32 -lgdi32 -lpsapi -lwinmm
 }
 
 macx {

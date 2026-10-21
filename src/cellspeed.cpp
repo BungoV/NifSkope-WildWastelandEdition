@@ -1,4 +1,5 @@
 #include "cellspeed.h"
+#include "gl/cellpasstime.h"	// lane PERF1
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -106,6 +107,7 @@ qint64 nowNs()
 
 void begin()
 {
+	PassTime::memLog( "before the build" );	// lane PERF1: private bytes at each stage, dump or not
 	if ( !on() )
 		return;
 	State & s = st();
@@ -135,6 +137,7 @@ void begin()
 
 void mark( const char * stage )
 {
+	PassTime::memLog( stage );	// lane PERF1
 	if ( !on() )
 		return;
 	State & s = st();

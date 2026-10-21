@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include "probegi.h"		// lane PRTPGI
 #include "probealbedo.h"		// lane PRTPBAKE
 #include "probefar.h"		// lane BAKEBLOCK1: the far soup beyond the loaded block
+#include "gl/cellpasstime.h"	// lane PERF1: private bytes at each stage
 #include "proberelight.h"	// lane GPURELIGHT1: the relight from recorded operators (CPU + GPU)
 #include "farlight.h"		// lane FARVIEW1: distant light from the surfels
 #include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
@@ -4624,6 +4625,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		// lane BAKEBLOCK1: past the loaded block, out to the bake's ray reach, the LOD files' far soup
 		// (after the placing, which the loaded block decides; before the dump, so the gates see it)
 		const QString farLine = bakeExterior && placed ? cellBakeFarSoup( spec, dataRoot, blockRed, probeSoup ) : QString();
+		PassTime::memLog( "probe soup built" );	// lane PERF1
 		const QByteArray soupDump = qgetenv( "WW_CELL_PROBE_SOUP" );
 		QString perr;
 		if ( !soupDump.isEmpty() && !probeSoupWrite( QString::fromLocal8Bit( soupDump ), probeSoup, &perr ) )
@@ -5342,6 +5344,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				}
 				if ( !spec.interior || gs.interiorSky )
 					probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather relights it
+				PassTime::memLog( "GI relit" );	// lane PERF1
 				WwCellProbeView pv;	// lane PROBEVIEW1: the surfel and probe previews
 				pv.surfelCell = gr.surfelCell;
 				pv.probesShown = spec.probesShow;

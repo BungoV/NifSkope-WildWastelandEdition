@@ -31,6 +31,12 @@ void wwCellHdrEnd( Scene * scene );
 bool wwCellHdrActive();
 //! Lane VOLAIR1 (gates only, WW_CELL_DRAW_PROBE): after a draw, logs which watched pixels it changed.
 void wwCellDrawProbe( Scene * scene, const QString & what );
+//! lane PERF1: the probe is watching (a caller builds its label only then).
+bool wwCellDrawProbeOn();
+/*! lane PERF1: the exposure and the bloom come from the linear frame (wwCellHdrEnd reads it back, a frame late by
+ *  default); true when glview's own measure submission must run this frame instead: WW_IS_MEASURE=old or red, the
+ *  WW_CELL_IS_DUMP gate, the document's first frame, or the last frame took no linear frame. */
+bool wwCellImageSpaceMeasureByPass( Scene * scene );
 //! One line for the notes: what the last frame did (or why it did not).
 QString wwCellHdrEcho();
 

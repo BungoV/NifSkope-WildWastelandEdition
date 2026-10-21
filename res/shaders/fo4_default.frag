@@ -459,6 +459,12 @@ void main()
 	}
 	if ( !gl_FrontFacing )
 		normal *= -1.0;
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && cellProbe == 20 && cellAoEarly == 1 ) {	// lane PERF1: the obscurance pass reads the normal and depth only
+		fragColor = cellAoPassOut( normal, -ViewDir );
+		return;
+	}
+#endif
 
 	vec3 L = normalize(LightDir);
 	vec3 V = ViewDir_norm;
@@ -735,8 +741,11 @@ void main()
 		fragColor = vec4( csmProbeOut, 1.0 );
 #endif
 #ifdef WW_CELLLIGHTS
-	if ( cellOn && cellProbe == 20 )
+	if ( cellOn && cellProbe == 20 ) {
 		fragColor = cellAoPassOut( normal, -ViewDir );	// lane AO1
+		if ( cellAoEarly == 2 )
+			fragColor.w *= 1.001;	// lane PERF1 red: full shading runs (the old cost), and the gate must see the mark
+	}
 	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
 		fragColor = cellSsrProbeOut( cellSsrScene );	// lane SSR1
 #endif

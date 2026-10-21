@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifmodel.h"
 #include "cellspeed.h"
 #include "celltexahead.h"
+#include "cellpasstime.h"	// lane PERF1
 
 #include "libfo76utils/src/filebuf.hpp"
 #include "libfo76utils/src/pbr_lut.hpp"
@@ -52,6 +53,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QOpenGLContext>
 #include <QString>
 #include <QtEndian>
+#include <cstdio>
 
 #include "dds.h"
 
@@ -646,6 +648,9 @@ static GLuint GLI_create_texture(
 		return 0;
 	}
 
+	PassTime::CacheCounts & pc = PassTime::cacheCounts();	// lane PERF1: the frame timers' texture traffic
+	pc.texMade++;
+	pc.texBytes += qint64( texture.size() );
 	for ( size_t layer = 0; layer < texture.layers(); ++layer )
 	for ( size_t face = 0; face < texture.faces(); ++face )
 	for ( size_t level = 0; level < texture.levels(); ++level ) {
@@ -898,6 +903,13 @@ GLuint TexCache::texLoadDDS( const QString & filepath, GLenum & target, QByteArr
 							QString( "'%1' is corrupt or unsupported." ).arg( file )
 		);
 	}
+
+	// lane PERF1: WW_TEX_CENSUS=1 lists every upload (bytes, size, levels, format, file) for a memory census
+	static const bool census = qEnvironmentVariableIntValue( "WW_TEX_CENSUS" ) == 1;
+	if ( census && result )
+		std::fprintf( stderr, "tex census: %lld %dx%d levels=%d layers=%d faces=%d fmt=%d %s\n", (long long)texture.size(),
+			int( texture.extent().x ), int( texture.extent().y ), int( texture.levels() ), int( texture.layers() ),
+			int( texture.faces() ), int( texture.format() ), qPrintable( filepath ) );
 
 	if ( !texture.empty() )
 		texture.clear();

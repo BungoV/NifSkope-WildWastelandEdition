@@ -535,6 +535,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 					pl[i][c] /= l;
 		}
 	}
+	ImpostorDraw::batchBegin();	// lane PERF1: the program, pass uniforms and sheets bound once, not per card
 	for ( const Placed & p : std::as_const( s.placed ) ) {
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() )
 			continue;
@@ -563,6 +564,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		else if ( refused++ == 0 )
 			firstWhy = QFileInfo( s.sets.at( p.setIndex ).lodmPath ).fileName() + QStringLiteral( ": " ) + why;
 	}
+	ImpostorDraw::batchEnd( scene );
 	if ( drawn != saidDrawn || outside != saidOut ) {
 		saidDrawn = drawn;
 		saidOut = outside;

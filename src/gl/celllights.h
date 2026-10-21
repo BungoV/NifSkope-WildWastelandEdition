@@ -190,6 +190,11 @@ struct WwCellGi
 	float roomsOrigin[3] = { 0, 0, 0 };
 	float roomsCell = 16.0f;
 	int roomsDims[3] = { 0, 0, 0 };
+	/*! lane PERF1 (src/proberooms.h GiVolumeSet): the interior volumes' shapes, 12 floats each (center, type; size,
+	 *  room; rotation degrees, 0), and per voxel its slots' thresholds (the packed rooms across, slot 0's weight,
+	 *  slot 1's; the slot texture's g, b, a) */
+	std::vector<float> volShapes, slotThresh;
+	QString volCensus;
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
 
@@ -208,6 +213,13 @@ int wwCellPassRed();
 const WwCellGi * wwCellGiFor( const void * nif );
 //! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
 bool wwCellGiOn();
+/*! lane PERF1: the GI's visibility, WW_CELL_GI_VIS: 0 the volumes (default: the pixel's volume, the threshold blend),
+ *  1 march (red: the per-pixel chain as before the volumes, compiled in by WW_CELL_GI_MARCH, src/gl/glcontext.cpp) */
+int wwCellGiVis();
+/*! lane PERF1: the GI's rate, WW_CELL_GI_RATE: 0 half (default: the screen GI at half resolution, upsampled), 1 full
+ *  (the screen GI at full resolution), 2 inline (no screen pass: each surface reads the volumes), 3 red (the screen
+ *  pass runs, the surfaces read inline). With WW_CELL_GI_VIS=march: no screen pass. */
+int wwCellGiRate();
 void wwCellGiSetOn( bool on );
 /*! Lane CELLALL1: the rows for features that were env-only. Each env pin wins over its row; the defaults are what
  *  the features did before (AO and the lights' shadows on, the GPU relight off).
@@ -318,6 +330,8 @@ bool wwCellImageSpaceMeasuresEffects();
 int wwCellFxRed();
 //! the measured mean luminance of the last measure (negative before any)
 void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels );
+//! lane PERF1: the document's adapted value (negative before any measure)
+float wwCellImageSpaceAdapted( Scene * scene );
 /*! lane BLOOM1: the bloom from the measure's float RGBA (w x h, step 4 when it is full size: box-averaged to a
  *  quarter first), HNAM bloom scale * max(0, c - bloom threshold), blurred 15 taps vertical then horizontal;
  *  the shader adds it (bilinear, a quarter of the view) to the HDR before the exposure */

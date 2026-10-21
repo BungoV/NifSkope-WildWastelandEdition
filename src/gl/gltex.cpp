@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gltex.h"
 #include "cellspeed.h"
+#include "celltexahead.h"
 
 #include "message.h"
 #include "gl/glscene.h"
@@ -376,6 +377,9 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 	if ( !tx->isLoaded() ) [[unlikely]] {
 		if ( tx->id[0] || !loadTex( *tx, nif ) )
 			return false;
+		tx = insertTex( fname );	// lane PERF1: loadTex may have grown (rehashed) the table
+		if ( !tx ) [[unlikely]]
+			return false;
 	} else {
 		if ( !tx->id[size_t(useSecondTexture)] ) [[unlikely]]
 			return false;
@@ -400,35 +404,56 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 	return true;
 }
 
-std::uint16_t TexCache::loadTex( Tex & tx, const NifModel * nif )
+std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 {
-	Tex::ImageInfo *	i = tx.imageInfo;
+	Tex *	t = &txIn;
+	Tex::ImageInfo *	i = t->imageInfo;
 	CellSpeed::Acc speedAcc( "texture loads (find, decode, upload)" );   // lane SPEED1
 
 	if ( !isSupported( i->filename ) ) {
-		tx.id[0] = GLuint( -1 );
+		t->id[0] = GLuint( -1 );
 		return 0;
 	}
 
 	i->filepath = find( i->filename, nif );
 
-	if ( !tx.id[0] )
-		glGenTextures( 1, tx.id );
+	/* lane PERF1: before this file is read here (one at a time), the files the read-ahead workers already hold go
+	 * up first, so their byte bound frees and they read on in parallel; each binds on this unit, and this file's
+	 * bind below comes last, as the caller expects. Red WW_TEX_DRAIN_RED=1 keeps the old order. */
+	static const bool drainRed = qEnvironmentVariableIntValue( "WW_TEX_DRAIN_RED" ) == 1;
+	if ( !drainRed && !draining && CellTexAhead::armedFor( nif ) ) {
+		draining = true;
+		const QStringList names = CellTexAhead::ready( nif, 4096 );
+		for ( const QString & n : names ) {
+			if ( n == i->filename )
+				continue;
+			Tex * o = insertTex( n );	// may rehash the table: t is found again below
+			if ( o && o->imageInfo != i && !o->isLoaded() && !o->id[0] )
+				loadTex( *o, nif );
+		}
+		draining = false;
+		t = insertTex( i->filename );
+		if ( !t || t->imageInfo != i ) [[unlikely]]
+			return 0;
+	}
 
-	if ( tx.target )
-		glBindTexture( tx.target, tx.id[0] );
+	if ( !t->id[0] )
+		glGenTextures( 1, t->id );
+
+	if ( t->target )
+		glBindTexture( t->target, t->id[0] );
 
 	try
 	{
-		i->mipmaps = texLoad( nif, i->filepath, i->format, tx.target, i->width, i->height, tx.id );
-		tx.mipmaps = std::uint16_t( i->mipmaps );
+		i->mipmaps = texLoad( nif, i->filepath, i->format, t->target, i->width, i->height, t->id );
+		t->mipmaps = std::uint16_t( i->mipmaps );
 	}
 	catch ( QString & e )
 	{
 		i->status = e;
 	}
 
-	return tx.mipmaps;
+	return t->mipmaps;
 }
 
 int TexCache::bind( const QModelIndex & iSource )

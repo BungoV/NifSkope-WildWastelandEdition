@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifskope.h"
 #include "hkxanimui.h"
 #include "version.h"
+#include "gl/cellpasstime.h"
 #include "harnesswindow.h"
 #include "data/nifvalue.h"
 #include "model/nifmodel.h"
@@ -55,6 +56,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSurfaceFormat>
 #include <QUdpSocket>
 #include <QUrl>
+#include <cstdio>	// lane PERF1: setvbuf
 
 
 QCoreApplication * createApplication( int &argc, char *argv[] )
@@ -101,6 +103,13 @@ bool wwCardBatchOn();
 bool wwCardBatchStart();
 int main( int argc, char * argv[] )
 {
+	/* lane PERF1: WW_STDERR_BUFFER=1 (timing harnesses only) holds stderr in a 4 MB buffer, written when full and at
+	 * exit. A harness redirects stderr to a file, and there each line cost the frame that printed it ~0.3 s, so the
+	 * frame timers measured the harness's writes. Set before any output, as setvbuf asks; a refusal flushes first. */
+	if ( qEnvironmentVariableIntValue( "WW_STDERR_BUFFER" ) == 1 )
+		std::setvbuf( stderr, nullptr, _IOFBF, 4 << 20 );
+	PassTime::profileFromStart();	// lane PERF1: WW_PROF_SAMPLE_ALL=1, the load profiled too
+
 	wwCardTimesMainEntry();
 	// Before anything creates a GL context: RenderDoc cannot hook a driver it
 	// was loaded after, and Qt makes the viewport's context when GLView is

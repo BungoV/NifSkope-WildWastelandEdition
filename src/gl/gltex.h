@@ -205,6 +205,7 @@ protected:
 	Tex * rehashTextures( Tex * p = nullptr );
 	//! Load the texture
 	std::uint16_t loadTex( Tex & tx, const NifModel * nif );
+	bool draining = false;	// lane PERF1: loadTex is uploading the read-ahead's ready files
 
 public:
 	void setOpenGLContext( NifSkopeOpenGLContext * context );
