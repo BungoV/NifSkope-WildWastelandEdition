@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FXCHECK1 (2026-10-21, branch fxcheck1-20261021): effect glass env mask channel; still-shot particle pre-roll
+
+- **Why.** bungo's 10-19 shots: the walk-signal glass (BGEM `TrafficLightDoor01.BGEM`) read milky and over-lit, and
+  the Concord fire barrel showed no particles in still shots.
+- **Glass, the wrong field, by measurement.** The BGEM's env mask (`_s`, BC5) holds specular in R (mean 0.287) and
+  gloss in G (1.000 on every texel). The game's effect shader scales the cube (`envMaskScale` 0.7) by the mask's R;
+  NifSkope read G, so the cube went on at 0.7 over the whole pane. New: setting `WW/FxEnvMaskR` (env pin
+  `WW_FX_ENVMASK=0/1`) reads R. **Ships OFF** until bungo has seen the pair. Reds: `WW_FX_ENVMASK_RED=gloss`
+  (the old G read with the switch on), `=noenv` (no cube, the gate's control). Not changed: the game also multiplies
+  by the normal map's alpha, which is 1 on BC5 normals.
+- **Particles.** A still shot jumps once to `WW_RENDER_TIME` and holds it, so emitters start cold. With the Particles
+  row on, each simulated system now runs `WW_CELL_PARTICLES_PREROLL` (5) s in 1/30 s steps before the grab
+  (`Particles::wwPreroll`); the echo names each system's live count. Red `WW_CELL_PARTICLES_RED=nopreroll`.
+- **Measured (Concord, tsproof1 camera, 1920x1080):** glass env share against the old read 0.394 (band 0.05-0.75),
+  red gloss 1.000 and byte-identical to the old shot. Pre-roll: 51 systems, 740 live vs the red's few; 215 px change
+  in the barrel crop, but no plume is visible over the barrel by eye, so the barrel itself is still open.
+- **Notes:** `E:/Projects/Claude/notes/fxcheck1/` (STATUS, BATCH, FINAL, pairs).
+
 ## Lane HORIZON1 (2026-10-21, branch horizon1-20261021): the AO map and the shadow heightmap on all cores
 ## Lane PERF2 (2026-10-21, branch perf2-20261021): cell view frame cost (timers first, then exact cuts)
 

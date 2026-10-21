@@ -134,6 +134,23 @@ void Particles::transform()
 	Node::transform();
 }
 
+int Particles::wwPreroll( float from, float to, float step )
+{
+	int steps = 0;
+	for ( Controller * c : controllers ) {
+		auto * sim = dynamic_cast<PSysSimController *>( c );
+		if ( !sim || !( step > 0.0f ) || !( to > from ) )
+			continue;
+		sim->updateTime( from + 1.0e6f );	// then a backward jump to `from`: the simulation restarts empty
+		sim->updateTime( from );
+		for ( float t = from + step; t < to; t += step, steps++ )
+			sim->updateTime( t );
+		sim->updateTime( to );
+		steps++;
+	}
+	return steps;
+}
+
 void Particles::transformShapes()
 {
 	Node::transformShapes();

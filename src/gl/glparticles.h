@@ -72,6 +72,11 @@ public:
 	//! Live sprites right now, so a test can hold it against the file's cap.
 	int liveCount() const { return active; }
 
+	/*! lane FXCHECK1: run this system's simulation from `from` to `to` in `step` second steps, as if the
+	 *  emitters had been burning before the shot (the game's are warm when you arrive). Returns the steps run
+	 *  (0: no simulated controller). The next draw at `to` changes nothing (dt 0). */
+	int wwPreroll( float from, float to, float step );
+
 	//! The per-sprite atlas cell offsets, so a test can watch the flipbook run.
 	const QVector<Vector2> & spriteCells() const { return uvOffsets; }
 

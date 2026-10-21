@@ -237,6 +237,27 @@ static const QString cube_fo4 = "textures/shared/cubemaps/mipblur_defaultoutside
 static const QString grayCube = "#FF555555c";
 static const QString pbr_lut_sf = "#sfpbr.dds";
 
+/* lane FXCHECK1: the game scales an effect's cube by the env mask's R (specular), not G (gloss, often 1.0).
+ * WW/FxEnvMaskR or WW_FX_ENVMASK (off until seen); red WW_FX_ENVMASK_RED=gloss (old) | noenv (no cube). */
+bool wwFxEnvMaskR()
+{
+	static const int v = [] {
+		const QByteArray red = qgetenv( "WW_FX_ENVMASK_RED" ).trimmed();
+		const QByteArray pin = qgetenv( "WW_FX_ENVMASK" ).trimmed();
+		const bool on = !pin.isEmpty() ? pin != "0" : QSettings().value( QStringLiteral( "WW/FxEnvMaskR" ), false ).toBool();
+		const bool r = on && red != "gloss";
+		fprintf( stderr, "fx env mask: %s\n", r ? "R (the game's)" : on ? "G (red WW_FX_ENVMASK_RED=gloss)" : "G (as before)" );
+		return r ? 1 : 0;
+	}();
+	return v != 0;
+}
+
+static bool wwFxEnvNone()
+{
+	static const bool v = qgetenv( "WW_FX_ENVMASK_RED" ).trimmed() == "noenv";
+	return v;
+}
+
 
 Renderer::Renderer( QOpenGLContext * c )
 	: NifSkopeOpenGLContext( c )
@@ -1947,7 +1968,10 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			if ( esp->hasEnvironmentMap && scene->hasOption(Scene::DoCubeMapping) && scene->hasOption(Scene::DoLighting) )
 				refl = esp->environmentReflection;
 
+			if ( wwFxEnvNone() )
+				refl = 0.0f;
 			prog->uni1f( "envReflection", refl );
+			prog->uni1b( "envMaskR", wwFxEnvMaskR() );
 
 			GLint uniCubeMap = prog->uniLocation( "CubeMap" );
 			if ( uniCubeMap >= 0 ) {
