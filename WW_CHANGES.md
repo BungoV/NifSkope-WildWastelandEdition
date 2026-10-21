@@ -1,5 +1,13 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLAIRSKY1 (2026-10-21, branch volairsky1-20261021): Volumetric Air follow-ups
+
+- **FOGTRICUBIC1 (bungo 10-21, test only, OFF):** `WW_CELL_VOLAIR_TRICUBIC=1` reads the air's froxels on surfaces with a
+  cubic B-spline (8 linear fetches; `lookdev_fog.glsl` wwVolTex, `volAirFlags` bit 32) instead of the trilinear read,
+  to smooth the grid's blocks. The far tail's and the sky's two-slice step stay exact in depth (xy smoothed only).
+  Unset or 0 = the old read, byte for byte. Notes line `cell air: volair=... fogblend=N tricubic=N`. Off until bungo
+  rules on the before/after pair.
+
 ## Lane VOLAIR1 (2026-10-13, branch volair1-20261013): Volumetric Air, one lit medium in the cell view
 
 - **The cell view can draw the air as one lit medium instead of the game's distance fog.** Scene window fold
