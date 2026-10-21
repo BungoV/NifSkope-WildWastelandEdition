@@ -156,6 +156,19 @@
   to smooth the grid's blocks. The far tail's and the sky's two-slice step stay exact in depth (xy smoothed only).
   Unset or 0 = the old read, byte for byte. Notes line `cell air: volair=... fogblend=N tricubic=N`. Off until bungo
   rules on the before/after pair.
+## Lane SSGI2 (2026-10-21, branch ssgi2-20261021): screen-space GI's four weaker rows to FO4CS's level
+
+- The screen-space GI (ships OFF, `WW/CellSsgi`) now matches FO4CS on the four rows SSGI1 left weaker:
+  - Noise: EA's FAST spatiotemporal blue-noise sheet (BSD-3, `res/ssgi/`), as FO4CS reads it. Red `ign`.
+  - Depth-interval skip: a min/max depth pyramid skips taps whose cell lies outside the radius (exact: same picture),
+    plus the early out once every sector is shut. Red `nohiz`.
+  - Emissive cast: the scene pass writes the emitted share to a second target; a 2-slice importance-sampled cast with
+    FO4CS's small-emitter boost runs with its own history and denoise and is added at the end; the ordinary cast takes
+    the emission off its donor. Effect shaders are not emitters here (FO4CS skips them too). Red `noemissive`.
+  - Denoise: FO4CS's robust blur plus the quarter-res pyramid with temporal moments. Red `oldblur`.
+- Probe 5 (`WW_CELL_LIT_PROBE=5`) now shows what the surface gets with SSGI on (the double-count gate); unchanged with SSGI off.
+- Gates: `tests/spells/cell_ssgi.sh` PASS; nohiz byte-identical PASS. Double count vs the tracer: PASS at bounce1's
+  facade pixels, FAIL at near-field pixels (SSGI under-counts, 0.80 of the tracer); see notes/ssgi2/FINAL.md.
 
 ## Lane VOLAIR1 (2026-10-13, branch volair1-20261013): Volumetric Air, one lit medium in the cell view
 

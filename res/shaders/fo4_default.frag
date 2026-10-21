@@ -103,7 +103,11 @@ in float rawVertexAlpha;	// the vertex colour's own alpha (channel 11 G only)
 in mat3 btnMatrix;
 flat in mat3 reflMatrix;
 
-out vec4 fragColor;
+layout ( location = 0 ) out vec4 fragColor;
+#ifdef WW_CELLLIGHTS
+// lane SSGI2: the scene pass's second target, the emitted share alone (the bounce's emissive cast; 0 elsewhere)
+layout ( location = 1 ) out vec4 cellEmitOut;
+#endif
 
 vec3 ViewDir_norm = normalize( ViewDir );
 mat3 btnMatrix_norm = mat3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
@@ -277,6 +281,7 @@ vec3 tonemap(vec3 x)
 void main()
 {
 #ifdef WW_CELLLIGHTS
+	cellEmitOut = vec4( 0.0 );
 	float wwGrassK = wwGrassFadeK( ViewDir );	// lane GRASSMB1: exactly 1.0 on every non-grass shape
 	if ( wwGrassK <= 0.0 )
 		discard;
@@ -646,11 +651,20 @@ void main()
 		color.rgb -= ( 1.0 - sqrt( 1.0 - k ) ) * A.rgb * albedo;
 	} else if ( cellOn && cellGiSky && ( cellRed & 131072 ) != 0 )
 		color.rgb -= cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ) * A.rgb * albedo;
+	vec3 cellPreLit = color.rgb;	// lane SSGI2: an exterior without the sun adds the glow before cellLit's root
 	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, specColor, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
 	vec3 cellSsrScene = color.rgb * color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
+	if ( cellOn && cellProbe == 60 ) {
+		// lane SSGI2: the glow's share of that (cellLit adds it after the root; c^2 - (c - e)^2), coverage in a
+		vec3 e = max( emissive * glowScaleSRGB, vec3( 0.0 ) );
+		vec3 c = ( !cellInterior && !cellHasDir ) ? cellPreLit : color.rgb;
+		vec3 c0 = max( c - e, vec3( 0.0 ) );
+		vec3 em = clamp( c * c - c0 * c0, vec3( 0.0 ), cellSsrScene );
+		cellEmitOut = vec4( em, dot( em, vec3( 0.2126, 0.7152, 0.0722 ) ) > 1.0e-6 ? 1.0 : 0.0 );
+	}
 	// lane AO1: the ambient obscurance on the whole lit colour (linear, so its root here), before the fog
 	if ( cellOn )
 		color.rgb *= sqrt( cellAoFactor() );

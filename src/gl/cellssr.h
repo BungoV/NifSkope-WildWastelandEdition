@@ -60,6 +60,9 @@ bool wwCellSsrWaterRayPass( unsigned int * gbufTex );
 bool wwCellSsrInPass();
 //! lane SSGI1: this frame's scene pass (full size RGBA32F, bottom row first), drawn for the reflections or the bounce
 bool wwCellSsrSceneTexture( Scene * scene, unsigned int & tex );
+//! lane SSGI2: the same pass's emitted share (full size RGBA16F, a = coverage, mips 0..4); only while the bounce's
+//! emissive cast wants it (wwCellSsgiWantsEmission)
+bool wwCellSsrEmissionTexture( Scene * scene, unsigned int & tex );
 //! this frame's march and its blurred result for the water (half the view, top row first, bilinear)
 bool wwCellSsrWaterTextures( Scene * scene, unsigned int & raw, unsigned int & fin );
 

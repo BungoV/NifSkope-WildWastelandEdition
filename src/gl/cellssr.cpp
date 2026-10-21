@@ -79,9 +79,11 @@ struct SsrGpu
 	SsrTarget ray;				// half size: u0, v0, start depth
 	SsrTarget raw, across, fin;	// half size: rgb the reflected color, a the confidence (bilinear)
 	SsrTarget wray;				// lane WATER2: full size, bottom row first: the water's ray in the view, view depth
+	SsrTarget emission;				// lane SSGI2: full size, the scene pass's emitted share (RGBA16F, a = coverage, mips 0..4)
 	const void * doc = nullptr;
 	bool ready = false;
 	bool sceneReady = false;	// lane SSGI1: step 1 drew this frame (the bounce's donor)
+	bool emitReady = false;		// lane SSGI2: step 1 also wrote the emission (the bounce's emissive cast)
 	bool waterOnly = false;		// an exterior: the pass ran for the water alone
 	bool haveWater = false;		// the water ray pass drew
 	int unit = -1;
@@ -241,8 +243,29 @@ void wwCellSsrPass( Scene * scene, bool run )
 	ssrAlloc( fn, g.across, hw, hh, true );
 	ssrAlloc( fn, g.fin, hw, hh, true );
 	}
+	// lane SSGI2: the emitted share beside it (FO4CS's emission source), only while the bounce's emissive cast wants it
+	const bool wantEmit = wwCellSsgiWantsEmission( scene );
+	g.emitReady = false;
+	if ( wantEmit && ( !g.emission.tex || g.emission.w != W || g.emission.h != H ) ) {
+		if ( !g.emission.tex )
+			fn->glGenTextures( 1, &g.emission.tex );
+		fn->glBindTexture( GL_TEXTURE_2D, g.emission.tex );
+		for ( int i = 0; i <= 4; i++ )
+			fn->glTexImage2D( GL_TEXTURE_2D, i, GL_RGBA16F, std::max( W >> i, 1 ), std::max( H >> i, 1 ), 0, GL_RGBA, GL_FLOAT, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 4 );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		g.emission.w = W;
+		g.emission.h = H;
+	}
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.scene.fbo );
 	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ao.depthRb );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, wantEmit ? g.emission.tex : 0, 0 );
+	const GLenum sceneBufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+	fn->glDrawBuffers( wantEmit ? 2 : 1, sceneBufs );
 	const bool complete = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
 	NifSkopeOpenGLContext::Program * prog = complete ? r->useProgram( "cell_ssr.prog" ) : nullptr;
 	if ( prog )
@@ -259,6 +282,8 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glDepthMask( GL_TRUE );
 	const GLfloat none4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	fn->glClearBufferfv( GL_COLOR, 0, none4 );
+	if ( wantEmit )
+		fn->glClearBufferfv( GL_COLOR, 1, none4 );
 	fn->glClear( GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
 	fn->glDisable( GL_BLEND );
 	fn->glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );	// wwCellSsrDraw opens it for the opaque cell-lit draws
@@ -284,6 +309,15 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glDisable( GL_POLYGON_OFFSET_FILL );
 	g.sceneReady = true;
 	g.doc = scene->nifModel;
+	if ( wantEmit ) {
+		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.scene.fbo );
+		fn->glDrawBuffers( 1, sceneBufs );
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0 );
+		fn->glBindTexture( GL_TEXTURE_2D, g.emission.tex );
+		fn->glGenerateMipmap( GL_TEXTURE_2D );	// box means: rgb the area's emission, a its coverage (FO4CS's pyramid)
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		g.emitReady = true;
+	}
 	if ( sceneOnly ) {
 		restore();
 		return;
@@ -525,6 +559,18 @@ bool wwCellSsrSceneTexture( Scene * scene, unsigned int & tex )
 	if ( it == ssrGpus().constEnd() || !it->sceneReady || it->doc != scene->nifModel )
 		return false;
 	tex = it->scene.tex;
+	return tex != 0;
+}
+
+bool wwCellSsrEmissionTexture( Scene * scene, unsigned int & tex )
+{
+	tex = 0;
+	if ( !scene || !scene->renderer )
+		return false;
+	const auto it = ssrGpus().constFind( scene->renderer );
+	if ( it == ssrGpus().constEnd() || !it->sceneReady || !it->emitReady || it->doc != scene->nifModel )
+		return false;
+	tex = it->emission.tex;
 	return tex != 0;
 }
 
