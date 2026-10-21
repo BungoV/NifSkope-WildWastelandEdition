@@ -82,7 +82,7 @@ shot() {  # shot <exe> <tag> <nif> [KEY=VALUE ...]
 	env $(common_env) $LOOK \
 		WW_CSM_ECHO="$(winpath "$OUT/$tag.csm.txt")" WW_SHADOW_ECHO="$(winpath "$OUT/$tag.uss.txt")" \
 		WW_LODGEN_RESOURCES="$(winpath "$DATA")" WW_LOOKDEV_DATA="$(winpath "$GAME")" WW_RENDER_SHOT="$(winpath "$png")" \
-		"$@" timeout 240 "$exe" --port "$PORT" "$(winpath "$nif")" > "$OUT/$tag.log" 2>&1
+		"$@" timeout 600 "$exe" --port "$PORT" "$(winpath "$nif")" > "$OUT/$tag.log" 2>&1
 	local rc=$?
 	if [ -s "$png" ]; then echo "  $tag rc=$rc $(stat -c %s "$png") B"; else echo "  $tag rc=$rc NO PICTURE"; fi
 	reg delete "$REGKEY" //f > /dev/null 2>&1

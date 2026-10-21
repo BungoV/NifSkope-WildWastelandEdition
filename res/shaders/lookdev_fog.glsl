@@ -9,6 +9,7 @@
 // direction, the Sunlight row, intensity 1); the power is fDirectionalFogPower.
 // Needs: posView = the fragment's view-space position (game units x view scale).
 
+#define WW_LOOKDEV_FOG_GLSL 1	// lane SHADOWPAR1: ww_sunshadow.glsl's air-tail reader needs fogDistScale
 uniform bool fogOn;
 uniform vec4 fogK[6];		// cb12[41..46]
 uniform vec4 fogView;		// world z above the ground = dot( fogView.xyz, posView ) + fogView.w
