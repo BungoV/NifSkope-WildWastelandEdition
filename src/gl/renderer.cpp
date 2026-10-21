@@ -284,6 +284,15 @@ void wwPbrmCensusNoteUploadF0( float f0 );	// src/gl/glproperty.cpp
 
 static Scene * wwAoScene = nullptr;	// lane AO1: the drawing scene, set by setupProgram (Shape::scene is protected)
 
+/* lane ALLON2: the blended-ground layer-edge guard (fo4_default.frag / pbrm_default.frag landSplatDbg).
+ * 0 = guard on; red WW_TERRBLEND_RED=edgepass = 1 (the old output); probe WW_TERRBLEND_PROBE=edge = 2 (a pass
+ * whose colour or share came out non-finite draws green, everything else black). */
+static int wwLandSplatDbg()
+{
+	static const int v = qgetenv( "WW_TERRBLEND_PROBE" ) == "edge" ? 2 : qgetenv( "WW_TERRBLEND_RED" ) == "edgepass" ? 1 : 0;
+	return v;
+}
+
 static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, Shape * mesh,
 	const BSShaderLightingProperty * wwSp, const char * wwKind,
 	int msn, int lodLand, NifSkopeOpenGLContext::Program * program,
@@ -1495,6 +1504,8 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	} );
 	if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
 		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
+	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
+		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 
 	// Per-draw GL state, same as the spec/gloss path ends with. Omitting it made
@@ -2121,6 +2132,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	} );
 	if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
 		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
+	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
+		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 	if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 		// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)

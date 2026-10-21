@@ -38,6 +38,7 @@ uniform float glowMult;
 uniform float alpha;
 uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
 uniform bool landSplat;		// lane TERRBLEND1: vertex alpha = this blended-ground pass's share
+uniform int landSplatDbg;	// lane ALLON2: 0 edge guard, 1 red WW_TERRBLEND_RED=edgepass (no guard), 2 probe WW_TERRBLEND_PROBE=edge
 uniform float alphaThreshold;
 
 uniform vec3 tintColor;
@@ -760,7 +761,20 @@ void main()
 	splatData = cellOn && ( cellProbe == 20 || cellProbe == 60 || cellProbe == 61 );
 #endif
 	if ( landSplat && !splatData ) {
-		if ( ( alphaFlags & 8 ) != 0 )
+		/* lane ALLON2 (bungo's thin dark lines along the ground's edges, 21.png): with MSAA a pixel on the
+		 * OUTER edge of a layer's quads is shaded once at its centre, which lies outside every triangle of
+		 * that layer, so every input is extrapolated past the edge -- the share below zero, and the lit
+		 * colour can go non-finite. The blend then adds NaN x 0 = NaN and the resolve drops the whole
+		 * pixel to black: one dark render pixel along every place a layer's quads stop. A share at or
+		 * below zero adds nothing, so it is written as exactly nothing; a non-finite colour likewise.
+		 * Red WW_TERRBLEND_RED=edgepass: the old output. Probe WW_TERRBLEND_PROBE=edge: such pixels green. */
+		float	w = rawVertexAlpha;
+		bool	bad = any( isnan( fragColor.rgb ) ) || any( isinf( fragColor.rgb ) ) || isnan( w ) || isinf( w );
+		if ( landSplatDbg == 2 ) {
+			fragColor = bad ? vec4( 0.0, 1.0, 0.0, 1.0 ) : ( ( alphaFlags & 8 ) != 0 ? vec4( 0.0 ) : vec4( 0.0, 0.0, 0.0, 1.0 ) );
+		} else if ( landSplatDbg == 0 && ( bad || ( ( alphaFlags & 8 ) != 0 && !( w > 0.0 ) ) ) ) {
+			fragColor = ( alphaFlags & 8 ) != 0 ? vec4( 0.0 ) : vec4( 0.0, 0.0, 0.0, 1.0 );
+		} else if ( ( alphaFlags & 8 ) != 0 )
 			fragColor.a = clamp( rawVertexAlpha, 0.0, 1.0 );
 		else
 			fragColor = vec4( fragColor.rgb * clamp( rawVertexAlpha, 0.0, 1.0 ), 1.0 );
