@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane RTBAKE1 (2026-10-21, branch rtbake1-20261021): one GPU ray back end for the bakes
+
+- **The bakes cast their rays on the GPU when there is one.** `src/bakert.*` takes a probebvh tree and traces batches
+  of rays three ways, picked at run time: Vulkan ray query on RT hardware, a compute shader that walks the CPU's own
+  BVH (GPUs without RT), or probebvh itself (the reference). Every GPU hit is re-tested in double; a nearest-hit ray
+  then takes the CPU's own triangle (a bounded CPU walk), and its misses are re-cast on the CPU, so the probe bake's
+  primary rays give the CPU's own answers. `WW_BAKE_RT_RED=cpu|compute|rt` forces a path (cpu is byte-identical to
+  before); the census names the path and the GPU.
+- **Moved:** the probe bake's primary rays and probegi's edge sky rays (about 20 M rays at Goodneighbor).
+  Goodneighbor in-cell: built in 52.5 s -> 43.0 s; edge + floor 5452 -> 381 ms; gi grid 6802 -> 1698 ms.
+- **`WW_BAKE_THREADS=n`** sets every bake pool's worker count. Output is byte-identical at 1 thread and at all threads.
+
 ## Lane CABLES1 (2026-10-16, branch cables1-20261016): cables in the cell view (power lines, string-light wires, ropes)
 
 - **The cell view draws Fallout 4 cables.** A cable is a reference whose base is a BNDS record (no model). Its XBSD
