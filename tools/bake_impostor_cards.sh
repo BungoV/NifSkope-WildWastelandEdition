@@ -211,9 +211,10 @@ fi
 
 # ONE PROCESS FOR THE WHOLE LIST (lane CARDBAKE2): each launch cost 20-30 s of start-up against a 2-3 s bake.
 # Same files byte for byte; skip-done stays per base. WW_CARDBAKE_RED=1 keeps the one-launch-per-base loop below.
+# One worker only: a second concurrent process measured ~70 s per base in mesh loading (cause not found).
 if [ "${WW_CARDBAKE_RED:-0}" != "1" ]; then
 	head -n "$MAX" "$W/cands.txt" > "$W/batch.txt"
-	WK="${WORKERS:-1}"
+	WK=1
 	EXTRACT=0; [ ${#RESARGS[@]} -gt 0 ] && EXTRACT=1
 	for k in $(seq 0 $((WK - 1))); do
 		mkdir -p "$W/w$k"

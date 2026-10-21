@@ -13,8 +13,8 @@
     changes them app-wide and a later window got 2 px less chrome, which moved the front/side cards.
   - The card encode reads pixels through row pointers (`WwPx`), same `QRgb` values as `QImage::pixel`.
   - `WW_CARDBAKE_TIMES=<file>` stamps each phase, with the offscreen render/readback/convert split in nanoseconds.
-  - `tools/bake_impostor_cards.sh` uses the batch by default; `WORKERS=n` splits the list over n processes;
-    `WW_CARDBAKE_RED=1` is the old one-launch-per-base loop.
+  - `tools/bake_impostor_cards.sh` uses the batch by default; `WW_CARDBAKE_RED=1` is the old one-launch-per-base
+    loop. Two processes at once were tried and left out: the second one spent ~70 s per base loading its mesh.
 - **Measured** (79 FARBAKE2 bases, same GPU): 1897 s -> 460 s. Every one of the 554 card files is sha1-identical
   to the f47f5d11 run copy's; a run stopped after 20 bases and rerun gives the same files.
 - **Not done:** one GPU pass for all views and PBO overlap. The offscreen GPU work is a small share of the bake
