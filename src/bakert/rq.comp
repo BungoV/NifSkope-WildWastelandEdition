@@ -1,0 +1,35 @@
+#version 460
+// Lane RTBAKE1: the RT tracer. One invocation a ray, VK_KHR_ray_query against the soup's BLAS (geometry 0 = the
+// unmasked triangles, opaque; geometry 1 = the alpha-tested ones, tested here). Double-sided, nearest hit.
+#extension GL_EXT_ray_query : require
+#extension GL_GOOGLE_include_directive : require
+layout( local_size_x = 128 ) in;
+#include "common.glsl"
+layout( set = 0, binding = 6 ) uniform accelerationStructureEXT tlas;
+layout( std430, set = 0, binding = 7 ) readonly buffer Remap { int remap[]; };   // BLAS primitive order -> soup triangle
+
+void main()
+{
+	const uint k = gl_GlobalInvocationID.x;
+	if ( k >= pc.count )
+		return;
+	const Ray r = rays[pc.first + k];
+	rayQueryEXT q;
+	rayQueryInitializeEXT( q, tlas, ( pc.flags & 1u ) != 0u ? gl_RayFlagsTerminateOnFirstHitEXT : gl_RayFlagsNoneEXT, 0xFF, r.oT.xyz, r.oT.w, r.dT.xyz, r.dT.w );
+	while ( rayQueryProceedEXT( q ) ) {
+		if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+			continue;
+		const uint g = rayQueryGetIntersectionGeometryIndexEXT( q, false );
+		const uint p = rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) + ( g == 1u ? pc.nOpaque : 0u );
+		const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
+		if ( !hole( remap[p], bc.x, bc.y ) )
+			rayQueryConfirmIntersectionEXT( q );
+	}
+	uvec2 h = uvec2( 0u, 0xFFFFFFFFu );
+	if ( rayQueryGetIntersectionTypeEXT( q, true ) == gl_RayQueryCommittedIntersectionTriangleEXT ) {
+		const uint g = rayQueryGetIntersectionGeometryIndexEXT( q, true );
+		const uint p = rayQueryGetIntersectionPrimitiveIndexEXT( q, true ) + ( g == 1u ? pc.nOpaque : 0u );
+		h = uvec2( floatBitsToUint( rayQueryGetIntersectionTEXT( q, true ) ), uint( remap[p] ) );
+	}
+	hits[pc.first + k] = h;
+}

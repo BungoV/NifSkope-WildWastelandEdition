@@ -356,6 +356,7 @@ HEADERS += \
 	src/probebake.h \
 	src/probefar.h \
 	src/probebvh.h \
+	src/bakert.h \
 	src/probemask.h \
 	src/probeemit.h \
 	src/probegi.h \
@@ -626,6 +627,7 @@ SOURCES += \
 	src/cellmodelahead.cpp \
 	src/probealbedo.cpp \
 	src/probebake.cpp \
+	src/bakert.cpp \
 	src/probegi.cpp \
 	src/proberelight.cpp \
 	src/farlight.cpp \

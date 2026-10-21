@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 // lane GPURELIGHT1: the relight without rays, on the CPU (double) and the GPU (GL 4.3 compute). src/proberelight.h.
 
 #include "proberelight.h"
+#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count
 
 #include "gl/celllights.h"
 #include "probebake.h"
@@ -42,7 +43,7 @@ constexpr double kPi = 3.141592653589793;
 
 void parallelFor( size_t n, const std::function<void( size_t )> & fn )
 {
-	const int nThreads = std::max( 1, int( std::thread::hardware_concurrency() ) );
+	const int nThreads = bakert::threads();
 	std::atomic<size_t> next( 0 );
 	std::vector<std::thread> pool;
 	for ( int i = 0; i < nThreads; i++ )
