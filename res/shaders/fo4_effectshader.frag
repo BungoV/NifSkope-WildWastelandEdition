@@ -34,6 +34,8 @@ uniform float falloffDepth;
 
 uniform float lightingInfluence;
 uniform float envReflection;
+// lane FXCHECK1: the game masks an effect's cube with the env mask's R (the _s specular); false = G, as before
+uniform bool envMaskR;
 
 in vec3 LightDir;
 in vec3 ViewDir;
@@ -315,7 +317,7 @@ void main()
 	float s = 1.0;
 	if ( hasEnvMask ) {
 		g = specMap.r;
-		s = specMap.g;
+		s = envMaskR ? specMap.r : specMap.g;
 	}
 
 	// Environment
