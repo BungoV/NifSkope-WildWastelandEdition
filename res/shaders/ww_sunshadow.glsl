@@ -361,6 +361,7 @@ bool wwSunShadowProbe( vec3 posView, vec3 shaded, out vec3 outc )
  * froxels; behind a ridge the sun part of it is shadowed. The scale of J: the terrain visibility along the tail (8 taps,
  * equal shares of the light the tail sends to the eye) over the visibility at the froxels' far edge, the ambient share
  * a left unshadowed. dirView a unit view-space direction, t0 < t1 world distances, tau the tail's optical depth. */
+#ifdef WW_LOOKDEV_FOG_GLSL	// fo4_csm.frag casts without the fog
 float wwAirTailShadow( vec3 dirView, float t0, float t1, float tau )
 {
 	if ( ussOn == 0 || ussTail.x <= 0.0 || ussTerrOn == 0 || t1 <= t0 )
@@ -378,6 +379,7 @@ float wwAirTailShadow( vec3 dirView, float t0, float t1, float tau )
 	}
 	return ( a + ( 1.0 - a ) * acc / 8.0 ) / max( a + ( 1.0 - a ) * v0, 0.25 );
 }
+#endif
 
 //! lane SHADOWPAR1 (FO4CS bsdf_light_sun): the ambient (cool-tinted toward the sky) and the specular cube dimmed in
 //! terrain shadow, floors 1 - strength; the strengths fade with the low sun (ussDim, 0 off)
