@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellssr.h"
+#include "cellssgi.h"
 #include "cellunits.h"
 
 #include "gl/celllights.h"
@@ -79,6 +80,7 @@ struct SsrGpu
 	SsrTarget wray;				// lane WATER2: full size, bottom row first: the water's ray in the view, view depth
 	const void * doc = nullptr;
 	bool ready = false;
+	bool sceneReady = false;	// lane SSGI1: step 1 drew this frame (the bounce's donor)
 	bool waterOnly = false;		// an exterior: the pass ran for the water alone
 	bool haveWater = false;		// the water ray pass drew
 	int unit = -1;
@@ -154,7 +156,7 @@ bool wwCellSsrWantsTargets( Scene * scene )
 	const SsrState & s = ssr();
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
 	// the same verdict as wwCellSsrPass, before its "no obscurance pass" step
-	return L && s.on && ( L->interior || s.ext || wwCellWaterSsrWanted( scene ) );
+	return ( L && s.on && ( L->interior || s.ext || wwCellWaterSsrWanted( scene ) ) ) || wwCellSsgiWantsScene( scene );
 }
 
 void wwCellSsrNote( bool flagged )
@@ -170,6 +172,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 	Renderer * r = scene->renderer;
 	SsrGpu & g = ssrGpus()[r];
 	g.ready = false;
+	g.sceneReady = false;
 	if ( !run || !wwCellLightsWanted( scene ) )
 		return;
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
@@ -187,7 +190,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 		std::fprintf( stderr, "cell ssr: %s %s\n", words[verdict], L ? ( L->interior ? "interior" : "exterior" ) : "-" );
 		s.lastVerdict = verdict;
 	}
-	if ( verdict != 4 && verdict != 5 )
+	// lane SSGI1: the bounce reads step 1 alone; the printed verdict stays the reflections'
+	const bool sceneOnly = verdict != 4 && verdict != 5 && L && wwCellSsgiWantsScene( scene ) && wwCellAoTargets( scene, ao );
+	if ( verdict != 4 && verdict != 5 && !sceneOnly )
 		return;
 	g.waterOnly = !L->interior && !s.ext;	// merge: SSR outdoors runs the full pass, else water only (WATER2)
 	g.haveWater = false;
@@ -229,10 +234,12 @@ void wwCellSsrPass( Scene * scene, bool run )
 
 	// the targets; the scene pass borrows the obscurance pass's depth buffer (that pass is done with it)
 	ssrAlloc( fn, g.scene, W, H, true );
+	if ( !sceneOnly ) {
 	ssrAlloc( fn, g.ray, hw, hh, false );
 	ssrAlloc( fn, g.raw, hw, hh, true );
 	ssrAlloc( fn, g.across, hw, hh, true );
 	ssrAlloc( fn, g.fin, hw, hh, true );
+	}
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.scene.fbo );
 	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ao.depthRb );
 	const bool complete = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
@@ -266,6 +273,12 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glDepthMask( GL_TRUE );
 	fn->glDisable( GL_STENCIL_TEST );
 	fn->glDisable( GL_POLYGON_OFFSET_FILL );
+	g.sceneReady = true;
+	g.doc = scene->nifModel;
+	if ( sceneOnly ) {
+		restore();
+		return;
+	}
 
 	// 1b. lane WATER2: the water's rays (the game's pass 02100), depth-tested against the opaque depth just drawn
 	if ( waterSsr ) {
@@ -484,6 +497,18 @@ bool wwCellSsrWaterRayPass( unsigned int * gbufTex )
 bool wwCellSsrInPass()
 {
 	return ssr().pass;
+}
+
+bool wwCellSsrSceneTexture( Scene * scene, unsigned int & tex )
+{
+	tex = 0;
+	if ( !scene || !scene->renderer )
+		return false;
+	const auto it = ssrGpus().constFind( scene->renderer );
+	if ( it == ssrGpus().constEnd() || !it->sceneReady || it->doc != scene->nifModel )
+		return false;
+	tex = it->scene.tex;
+	return tex != 0;
 }
 
 bool wwCellSsrWaterTextures( Scene * scene, unsigned int & raw, unsigned int & fin )

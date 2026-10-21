@@ -20,7 +20,7 @@ namespace PassTime
 enum Pass
 {
 	SunShadows, CellShadows, Background, Obscurance, Reflections, Air, Measure, UmbraDepth, Impostors,
-	Opaque, Sorted, Effects, FarCards, ToneMap, Post, Overlays,
+	Opaque, Sorted, Effects, FarCards, ToneMap, Post, Overlays, Ssgi,
 	CullCamera, CullCascades,	// CPU only: the run culling inside the passes above
 	ShapeSetup,	// CPU only: the shapes' program and uniform setup inside the passes above
 	Count

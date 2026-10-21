@@ -1370,6 +1370,23 @@ vec3 cellCubeProbe( vec2 uv, vec3 normalView )
 }
 #endif
 
+// lane SSGI1: the screen-space bounce (src/gl/cellssgi.h, cell_ssgi.frag): the probe GI keeps the share of the
+// hemisphere the march left open, the screen's bounce is added (FO4CS's probe-fill law; red "stack" adds on top)
+uniform bool cellSsgiOn;
+uniform sampler2D cellSsgi;		// the work size, bottom row first: rgb the bounce E, a the open share
+uniform vec4 cellSsgiRect;		// the viewport: x, y, 1 / w, 1 / h
+uniform vec2 cellSsgiK;			// FO4CS's fAoAmount, fIndirectAmount
+uniform int cellSsgiRed;
+
+vec3 cellSsgiE( vec3 eProbe )
+{
+	if ( !cellSsgiOn )
+		return eProbe;
+	vec4 s = texture( cellSsgi, ( gl_FragCoord.xy - cellSsgiRect.xy ) * cellSsgiRect.zw );
+	float keep = ( cellSsgiRed & 2 ) != 0 ? 1.0 : mix( 1.0, clamp( s.a, 0.0, 1.0 ), cellSsgiK.x );
+	return eProbe * keep + max( s.rgb, vec3( 0.0 ) ) * cellSsgiK.y;
+}
+
 #if !defined( WW_CELL_PBR ) && ( !defined( WW_CELL_FX ) || defined( WW_FX_DECALLIT ) )
 
 /* The lit colour, in the program's sqrt-of-linear space. Interior: the cell's ambient, directional
@@ -1385,7 +1402,7 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	float gloss = 1.0 - sqrt( alphaR );	// the program's rough = 1 - gloss, alphaR = rough^2
 	cellSumLights( P, N, Vw, gloss, diff, diffOn, spec );
 	vec3 alb = albedo * albedo;
-	vec3 gi = cellGiOn ? cellGiE( P, N ) * 0.31830989 : vec3( 0.0 );
+	vec3 gi = cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989;
 	vec3 farF, farGP;	// lane FARVIEW1: the far placed light (diffuse only); the GI's placed share out x w
 	float farW = cellFarTerms( P, N, farF, farGP );
 	if ( farW > 0.0 ) {

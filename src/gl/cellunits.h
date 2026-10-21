@@ -33,9 +33,10 @@ constexpr int GiHalf = 29;		// lane PERF1: the GI at half resolution (sampler2D)
 constexpr int GiHalfKey = 30;	// lane PERF1: its keys, the upsample's weights (sampler2D)
 constexpr int TerrShadow = 31;	// lane TERRSHADOW1: the terrain's shadow map (sampler2D; testint moved it off PERF1's 29)
 constexpr int ContactShadow = 32;	// lane TERRSHADOW1: the contact shadows (sampler2D; testint moved it off PERF1's 30)
+constexpr int Ssgi = 33;		// lane SSGI1: the screen-space bounce, the open share (sampler2D) (moved off TerrShadow 31 at MERGEALL1)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
-	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow };
+	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi };
 
 constexpr bool distinct()
 {

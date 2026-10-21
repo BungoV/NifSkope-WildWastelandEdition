@@ -52,6 +52,7 @@ int wwLodMaskByTree = 0;
 #include <limits>
 #include "gamemanager.h"
 #include "celltexahead.h"
+#include "cellssgi.h"	// lane SSGI1
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 #include "renderer.h"
@@ -1414,7 +1415,8 @@ static QString wwPbrmCensusHeader()
 	h += wwPinEcho( "shadows", "WW_RENDER_SHADOWS", QStringLiteral( "off" ), -1, "not built" );
 	h += wwPinEcho( "contact", "WW_RENDER_CONTACT", QStringLiteral( "off" ), -1, "not built" );
 	h += wwPinEcho( "ao", "WW_RENDER_AO", QStringLiteral( "off" ), -1, "not built" );
-	h += wwPinEcho( "ssgi", "WW_RENDER_SSGI", QStringLiteral( "off" ), -1, "not built" );
+	h += wwPinEcho( "ssgi", "WW_RENDER_SSGI", wwCellSsgiOn() ? QStringLiteral( "on" ) : QStringLiteral( "off" ),
+		wwEnvBool( "WW_RENDER_SSGI" ), wwCellSsgiEcho() );
 	return h;
 }
 

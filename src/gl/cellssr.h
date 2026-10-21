@@ -58,6 +58,8 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram );
 bool wwCellSsrWaterRayPass( unsigned int * gbufTex );
 //! true while either of the reflections' scene passes draws (the water then grabs no frame copy)
 bool wwCellSsrInPass();
+//! lane SSGI1: this frame's scene pass (full size RGBA32F, bottom row first), drawn for the reflections or the bounce
+bool wwCellSsrSceneTexture( Scene * scene, unsigned int & tex );
 //! this frame's march and its blurred result for the water (half the view, top row first, bilinear)
 bool wwCellSsrWaterTextures( Scene * scene, unsigned int & raw, unsigned int & fin );
 

@@ -147,6 +147,7 @@ private:
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
 #include "gl/cellvolumeview.h"	// lane VOLFIT1: the Space stage's view
 #include "gl/cellssr.h"
+#include "gl/cellssgi.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/cellpasstime.h"	// lane PERF1
 
@@ -4155,6 +4156,9 @@ void GLView::paintGL()
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
 	wwContactShadowPass( scene );	// lane TERRSHADOW1: the contact mask from that pass's depth (fails open without it)
 	PassTime::end( PassTime::Reflections );
+	PassTime::begin( PassTime::Ssgi );
+	wwCellSsgiPass( scene, cellPasses );	// lane SSGI1: reads that pass's scene colour
+	PassTime::end( PassTime::Ssgi );
 	PassTime::begin( PassTime::Air );
 	wwVolAirPass( scene, cellPasses );	// lane VOLAIR1: the air's froxels
 	PassTime::end( PassTime::Air );

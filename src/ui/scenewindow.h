@@ -63,6 +63,7 @@ public:
 	// the cascaded sun shadows row (lane CSM1)
 	QCheckBox * shadowsBox = nullptr;
 	QCheckBox * taaBox = nullptr;	// lane MOTION1
+	QCheckBox * ssgiBox = nullptr;	// lane SSGI1
 	QCheckBox * frameTimersBox = nullptr;	// lane PERF1
 	// lane TERRSHADOW1: the unified shadow set (gl/shadowset.h)
 	QComboBox * sunPathBox = nullptr;

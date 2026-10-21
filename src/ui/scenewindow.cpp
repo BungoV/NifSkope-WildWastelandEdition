@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/gametaa.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1
+#include "gl/cellssgi.h"	// lane SSGI1
 #include "esmweather.h"
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
@@ -198,7 +199,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	tierBox( contactShadowsBox, "contactShadows", tr( "Contact Shadows" ), wwShadowContactTier() );
 	tierBox( terrainShadowsBox, "terrainShadows", tr( "Terrain Shadows" ), wwShadowTerrainTier() );
 	placeholderCheck( tr( "SSAO" ) );
-	placeholderCheck( tr( "SSGI" ) );
+	liveCheck( ssgiBox, "cellSsgi", tr( "SSGI" ), wwCellSsgiOn() );	// lane SSGI1: ships off
 	placeholderCheck( tr( "Bloom" ) );
 	heading( tr( "Diagnostics" ) );
 	liveCheck( frameTimersBox, "frameTimers", tr( "Frame Timers" ), PassTime::on() );	// lane PERF1: ships off
@@ -295,6 +296,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( volAirBox, &wwVolAirSetOn );
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	liveToggle( taaBox, &wwGameTaaSetOn );
+	liveToggle( ssgiBox, &wwCellSsgiSetOn );
 	liveToggle( frameTimersBox, &PassTime::setOn );	// lane PERF1
 	auto liveTier = [this, live]( QComboBox * box, void ( *set )( int ) ) {
 		connect( box, qOverload<int>( &QComboBox::currentIndexChanged ), this, [this, live, set]( int i ) {
