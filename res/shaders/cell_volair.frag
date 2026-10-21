@@ -272,7 +272,7 @@ float airFarVis( vec3 posView )
 		float w, inMap;
 		c = mix( 1.0, ussCascades( posView, vec3( 0.0 ), vec3( 0.0 ), w ), w );
 		if ( ( volFarMode & 6 ) != 6 )
-			t = ussTerrain( posView, inMap );
+			t = ussTerrain( posView, inMap, 0.0, false );	// BATCH1: SHADOWPAR1 widened the signature; grad 0 + no disc = the old read
 	} else if ( volCsm ) {
 		c = wwSunShadow( posView );
 	}
