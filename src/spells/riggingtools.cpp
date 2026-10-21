@@ -7,6 +7,9 @@
 #include "nifskope.h"
 #include "glview.h"
 #include "ui/widgets/colorwheel.h"
+#include "ui/widgets/wwnumberfield.h"	// lane MORPHCYC1: wwMatchFieldStyle
+#include "hkxanimui.h"				// lane MORPHCYC1: WwHkxAnimHub::addGenerated
+#include "morphcycle.h"				// lane MORPHCYC1: the chargen preview clips
 
 #include "model/nifmodel.h"
 #include "libfo76utils/src/common.hpp"
@@ -31,6 +34,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFloat16>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -5800,6 +5804,74 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 			widget->setVisible( expanded );
 	} );
 	layout->addWidget( advanced );
+
+	/* ---- lane MORPHCYC1: the chargen preview clips (src/morphcycle.h).
+	 * bungo, 2026-09-29: "add a button in the rigging manager to load these
+	 * animations and preview them, for both males and females, the animations
+	 * get loaded as the loaded ones" -- so each button ends in
+	 * WwHkxAnimHub::addGenerated, the same list and transport as a loaded .hkx.
+	 * Neither clip is a game .hkx (skeleton.hkx has no _skin / skin_bone_*
+	 * bones); every export path refuses them. */
+	layout->addWidget( wwHeading( QObject::tr( "Chargen preview" ), panel ) );
+	auto * morphHost = new QWidget( panel );
+	morphHost->setObjectName( QStringLiteral( "RiggingMorphCycleHost" ) );
+	auto * morphGrid = new QGridLayout( morphHost );
+	morphGrid->setContentsMargins( 0, 0, 0, 0 );
+	morphGrid->setColumnStretch( 1, 1 );
+	morphGrid->addWidget( new QLabel( QObject::tr( "Gender" ), morphHost ), 0, 0 );
+	auto * morphGender = new QComboBox( morphHost );
+	morphGender->setObjectName( QStringLiteral( "RiggingMorphCycleGender" ) );
+	morphGender->addItem( QObject::tr( "Male" ), 0 );
+	morphGender->addItem( QObject::tr( "Female" ), 1 );
+	morphGender->setToolTip( QObject::tr( "Which HumanRace tables the clips are built from" ) );
+	wwMatchFieldStyle( morphGender );
+	morphGrid->addWidget( morphGender, 0, 1 );
+	layout->addWidget( morphHost );
+	auto * morphRow = new QHBoxLayout;
+	auto * morphBody = new QPushButton( QObject::tr( "Body Shape Cycle" ), panel );
+	morphBody->setObjectName( QStringLiteral( "RiggingMorphCycleBodyButton" ) );
+	morphBody->setToolTip( QObject::tr( "Thin, muscular, fat, thin on the *_skin bones; 6 s. A preview in the "
+										"animations list, never a game .hkx" ) );
+	auto * morphFace = new QPushButton( QObject::tr( "Facebones Cycle" ), panel );
+	morphFace->setObjectName( QStringLiteral( "RiggingMorphCycleFaceButton" ) );
+	morphFace->setToolTip( QObject::tr( "Every face region channel 0, max, min, 0 on the skin_bone_* bones. "
+										"A preview in the animations list, never a game .hkx" ) );
+	morphRow->addWidget( morphBody );
+	morphRow->addWidget( morphFace );
+	morphRow->addStretch();
+	layout->addLayout( morphRow );
+	auto * morphStatus = new QLabel( panel );
+	morphStatus->setObjectName( QStringLiteral( "RiggingMorphCycleStatus" ) );
+	morphStatus->setWordWrap( true );
+	morphStatus->setStyleSheet( QStringLiteral( "QLabel { color: %1; }" ).arg( wwSkinColor( "textMuted" ) ) );
+	morphStatus->setVisible( false );
+	layout->addWidget( morphStatus );
+	auto runMorphCycle = [=]( bool face ) {
+		const int gender = morphGender->currentData().toInt();
+		HkxClipEntry e;
+		QString made;
+		const bool built = face ? morphCycleFaceBones( gender, e, made )
+								: morphCycleBodyShape( gender, e, made );
+		bool bad = !built;
+		QString text = made, tip = made;
+		if ( built ) {
+			if ( !ogl ) {
+				bad = true;
+				text = QObject::tr( "There is no 3D view to play %1 in." ).arg( e.name );
+			} else {
+				const QString said = WwHkxAnimHub::instance()->addGenerated( ogl, e, &bad );
+				text = bad ? said : WwHkxAnimHub::instance()->sentenceShort();
+				tip = made + QStringLiteral( "\n\n" ) + said;
+			}
+		}
+		morphStatus->setText( text );
+		morphStatus->setToolTip( tip );
+		morphStatus->setStyleSheet( QStringLiteral( "QLabel { color: %1; }" )
+			.arg( wwSkinColor( bad ? "danger" : "textMuted" ) ) );
+		morphStatus->setVisible( true );
+	};
+	QObject::connect( morphBody, &QPushButton::clicked, panel, [=]() { runMorphCycle( false ); } );
+	QObject::connect( morphFace, &QPushButton::clicked, panel, [=]() { runMorphCycle( true ); } );
 
 	NifSkope * skope = qobject_cast<NifSkope *>( mw );
 	auto targetBlock = std::make_shared<int>( -1 );

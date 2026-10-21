@@ -75,7 +75,10 @@ bool clipFromScene( const Scene * scene, HkxAnimClip & clip, QStringList & boneN
 	if ( !scene || !scene->hkx )
 		return false;
 	const HkxClipEntry * e = scene->hkx->activeEntry();
-	if ( !e )
+	// lane MORPHCYC1: a generated preview is not offered as the clip -- its frames
+	// are skeleton-local poses of bones skeleton.hkx does not have, and its body
+	// cycle is a per-axis scale delta; the dialog says "no clip" instead
+	if ( !e || e->isGenerated() )
 		return false;
 
 	clip = e->clip;
