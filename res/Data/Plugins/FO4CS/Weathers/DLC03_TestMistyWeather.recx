@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DLC03_TestMistyWeather",
+			"weather": "DLCCoast.esm|0x000074F3",
+			"groundFog": {
+				"thickness": 739,
+				"strength": 4.77,
+				"hours": {
+					"2": {
+						"thickness": 830,
+						"strength": 6.52
+					},
+					"14": {
+						"thickness": 739,
+						"strength": 4.77
+					}
+				}
+			}
+		}
+	]
+}

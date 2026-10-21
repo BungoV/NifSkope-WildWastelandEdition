@@ -17,6 +17,7 @@ uniform float dotBulb;	// the bulb radius, world units
 uniform int dotRed;	// 1 = never faded (the dots at every distance)
 
 out vec3 dotValue;
+out vec3 dotView;	// lane VOLAIR1: the bulb in view space, for the air between it and the camera
 out float dotSigma;
 
 void main()
@@ -24,6 +25,7 @@ void main()
 	vec4 w = vec4( vertexPosition, 1.0 );
 	vec3 v = vec3( dot( dotRow[0], w ), dot( dotRow[1], w ), dot( dotRow[2], w ) );
 	gl_Position = dotProj * vec4( v, 1.0 );
+	dotView = v;
 	float d = max( length( vertexPosition - dotCam ), 1.0 );
 	float fade = ( dotRed & 1 ) != 0 ? 1.0 : smoothstep( dotBand.x, dotBand.y, d );
 	dotSigma = max( 0.6, dotFocal * dotBulb / d );

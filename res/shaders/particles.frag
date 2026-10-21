@@ -201,13 +201,7 @@ void main()
 		vec3 lin = pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
 		if ( fxLitMode != 0 )
 			lin *= cellFxLit( cellWorldPos( -ViewDir ) );	// a lit particle, before the fog
-		if ( fogOn ) {
-			vec3 posView = -ViewDir;
-			float hb;
-			vec3 fogCol;
-			float f = wwFogEval( length( posView ) * fogDistScale, dot( fogView.xyz, posView ) + fogView.w, hb, fogCol );
-			lin = fxAdditive ? lin * ( 1.0 - f ) : mix( lin, fogCol, f );
-		}
+		lin = wwFogFx( lin, -ViewDir, fxAdditive );	// lane VOLAIR1: the air, as the surfaces take it (red fxfog: the game's fog alone)
 		if ( cellProbe == 6 )
 			fragColor = vec4( lin, color.a );	// the imagespace's measure: the linear value, blended as drawn
 		else

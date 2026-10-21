@@ -143,7 +143,7 @@ private:
 #include "gl/celllights.h"	// lane IMGS1: the imagespace measure
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
 #include "gl/cellssr.h"
-#include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/cellvolair.h"	// lane VOLAIR1
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -4126,7 +4126,7 @@ void GLView::paintGL()
 	}
 	wwCellAoPass( scene, cellPasses );
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
-	wwVolFogPass( scene, cellPasses );	// lane VOLFOG1: the lit medium's froxels
+	wwVolAirPass( scene, cellPasses );	// lane VOLAIR1: the air's froxels
 	if ( cellPasses )
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
 	if ( cellPasses )
@@ -4147,7 +4147,10 @@ void GLView::paintGL()
 			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
 			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );	// lane CELLALL1
 			wwCellFarLodFrame( scene );	// lane FARLOD1: the far sway's uniforms; no GL call while off
+			if ( hdr )
+				wwVolAirSkyDraw( scene, false );	// lane VOLAIR1: the sky through the air, under the scene
 			scene->draw();
+			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)
 			if ( hdr ) {
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
 				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame

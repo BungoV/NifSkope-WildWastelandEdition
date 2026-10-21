@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthFoggyBackup",
+			"weather": "Fallout4.esm|0x002392A2",
+			"groundFog": {
+				"thickness": 739,
+				"strength": 4.77,
+				"hours": {
+					"2": {
+						"thickness": 830,
+						"strength": 6.52
+					},
+					"14": {
+						"thickness": 739,
+						"strength": 4.77
+					}
+				}
+			}
+		}
+	]
+}

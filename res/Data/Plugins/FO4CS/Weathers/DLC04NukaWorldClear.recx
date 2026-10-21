@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "DLC04NukaWorldClear",
+			"weather": "DLCNukaWorld.esm|0x00007E3B",
+			"groundFog": {
+				"thickness": 482,
+				"strength": 1.55
+			}
+		}
+	]
+}

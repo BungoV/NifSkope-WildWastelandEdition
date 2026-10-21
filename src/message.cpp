@@ -1,4 +1,5 @@
 #include "message.h"
+#include "nifskope.h"
 
 #include <QApplication>
 #include <QAbstractButton>
@@ -24,7 +25,8 @@
  */
 static bool wwMessageOffGuiThread( const QString & str, const QString & err )
 {
-	if ( !qApp || QThread::currentThread() == qApp->thread() )
+	// A test run gets no box either: each one played the Windows warning sound from an invisible window.
+	if ( !qApp || ( QThread::currentThread() == qApp->thread() && !NifSkope::wwHeadlessRun() ) )
 		return false;
 	const QByteArray s = str.toLocal8Bit();
 	const QByteArray e = err.toLocal8Bit();

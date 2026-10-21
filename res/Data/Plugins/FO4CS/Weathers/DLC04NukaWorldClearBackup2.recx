@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "DLC04NukaWorldClearBackup2",
+			"weather": "DLCNukaWorld.esm|0x0004F57A",
+			"groundFog": {
+				"thickness": 482,
+				"strength": 1.55
+			}
+		}
+	]
+}

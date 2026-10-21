@@ -237,7 +237,8 @@ HEADERS += \
 	src/gl/cellprobeview.h \
 	src/gl/cellssr.h \
 	src/gl/cellaodecalgl.h \
-	src/gl/cellvolfog.h \
+	src/gl/cellvolair.h \
+	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
 	src/impostoroct.h \
@@ -320,6 +321,7 @@ HEADERS += \
 	src/esmdata.h \
 	src/esmwater.h \
 	src/esmweather.h \
+	src/recx.h \
 	src/lodgen.h \
 	src/lodgenao.h \
 	src/lodgenchunkpass.h \
@@ -480,7 +482,7 @@ SOURCES += \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellssr.cpp \
 	src/gl/cellaodecalgl.cpp \
-	src/gl/cellvolfog.cpp \
+	src/gl/cellvolair.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \
@@ -592,6 +594,7 @@ SOURCES += \
 	src/btdterrain.cpp \
 	src/esmdata.cpp \
 	src/esmweather.cpp \
+	src/recx.cpp \
 	src/lodgen.cpp 	src/lodgenmanager.cpp 	src/lodtfile.cpp \
 	src/lodgenchunkpass.cpp \
 	src/lodgengpu.cpp \
@@ -899,6 +902,8 @@ build_pass|!debug_and_release {
 		docs/CLI.md
 
 	copyDirs( $$SHADERS, shaders )
+	# the record extension files this program ships (docs/RECX.md): the vanilla weathers' ground fog
+	copyDirs( res/Data, Data )
 	#copyDirs( $$LANG, lang )
 	copyFiles( $$XML $$QSS res/qt.conf )
 

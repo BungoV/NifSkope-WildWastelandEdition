@@ -7,7 +7,7 @@ BSD License - see nifskope.h
 #include "celllights.h"
 
 #include "gl/cellssr.h"
-#include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -27,24 +27,25 @@ BSD License - see nifskope.h
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include "cellunits.h"
 #include <cstring>
 #include <vector>
 
 namespace
 {
 
-constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 is the CSM map
+constexpr int kTextureUnit = WwCellUnit::Lights;		// TexCache allocates from unit 0 upward; 15 is the CSM map
 constexpr int kTexelsPerLight = 8;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias;
 										// lane HEMI1 the 6th to 8th: the box rows (cell_lights.glsl CELL_TPL)
-constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
-constexpr int kGiSlotUnit = 18;		// lane ROOMCLAMP1: the grid's slot rooms, the fine rooms (sampler3D, R32F); off
-constexpr int kRoomUnit = 19;		// on a GPU with fewer than 20 units (the blend before the lane)
-constexpr int kFarSlotUnit = 20;	// lane FARVIEW1: the far table's slots (usamplerBuffer), records (samplerBuffer) and the
-constexpr int kFarRecUnit = 21;		// GI grid's placed share (sampler3D); off on a GPU with fewer than 23 units
-constexpr int kFarPlacedUnit = 22;
-constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
-constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
-constexpr int kShadowUnit = 10;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
+constexpr int kGiUnit = WwCellUnit::Gi;			// lane PRTPGI: the bounce grid (sampler3D)
+constexpr int kGiSlotUnit = WwCellUnit::GiSlot;		// lane ROOMCLAMP1: the grid's slot rooms, the fine rooms (sampler3D, R32F); off
+constexpr int kRoomUnit = WwCellUnit::Room;		// on a GPU with fewer than 20 units (the blend before the lane)
+constexpr int kFarSlotUnit = WwCellUnit::FarSlot;	// lane FARVIEW1: the far table's slots (usamplerBuffer), records (samplerBuffer) and the
+constexpr int kFarRecUnit = WwCellUnit::FarRec;		// GI grid's placed share (sampler3D); off on a GPU without FarPlaced (cellunits.h)
+constexpr int kFarPlacedUnit = WwCellUnit::FarPlaced;
+constexpr int kLutUnit = WwCellUnit::Lut;		// lane IMGS1: the imagespace LUT (sampler3D)
+constexpr int kBloomUnit = WwCellUnit::Bloom;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
+constexpr int kShadowUnit = WwCellUnit::Shadow;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
 constexpr int kShadowSlots = 16;	// shadowed lights at once, the nearest the camera
 constexpr int kShadowFace = 512;	// texels a cube face edge (the game's 2048 paraboloid's centre texel at 1024)
 constexpr int kAmbientSlots = 16;	// lane AMBO2: Ambient Only volumes a cell (Fallout4.esm's most in one cell: 5, measured)
@@ -226,6 +227,7 @@ struct Gpu
 	int shVersion = 0;
 	int shSlot[kShadowSlots];
 	int shStamp = 1, bufShStamp = 0;
+	std::vector<float> spheres;	// lane VOLAIR1: every buffer light's world centre + radius (copies included), in order
 	Gpu() { std::fill( shSlot, shSlot + kShadowSlots, -1 ); }
 };
 QHash<const void *, Gpu> & gpus()
@@ -463,6 +465,7 @@ int wwCellFarDotsDraw( Scene * scene )
 	prog->uni1f( "dotFocal", pm[1][1] * 0.5f * float( vp[3] ) );
 	prog->uni1f( "dotBulb", 4.0f );	// a bulb's radius, game units (a household bulb is ~3-5)
 	prog->uni1i( "dotRed", 0 );
+	wwLookdevFogUniforms( scene );	// lane VOLAIR1: the air between the bulb and the camera (cell_fardots.frag)
 	GLboolean depthMask = GL_TRUE;
 	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
 	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasCull = fn->glIsEnabled( GL_CULL_FACE );
@@ -617,6 +620,9 @@ void wwCellLightsUniforms( Scene * scene )
 				t.insert( t.end(), t.begin(), t.begin() + std::ptrdiff_t( one ) );
 		}
 		g.bufShStamp = g.shStamp;
+		g.spheres.clear();
+		for ( size_t o = 0; o + 4 <= t.size(); o += kTexelsPerLight * 4 )
+			g.spheres.insert( g.spheres.end(), t.begin() + std::ptrdiff_t( o ), t.begin() + std::ptrdiff_t( o + 4 ) );
 		if ( t.empty() )
 			t.assign( kTexelsPerLight * 4, 0.0f );	// a buffer texture must have a store
 		if ( !g.buf ) {
@@ -945,7 +951,11 @@ void wwCellLightsUniforms( Scene * scene )
 	 * the game's ratio; the cell imagespace's exposure (adapted luminance) takes the brighter frame. 1 indoors. */
 	const float sunScale = ( !L->interior && wwLookdevActive() ) ? wwLookdevSunlightScale() : 1.0f;
 	prog->uni1f( "cellSunScale", sunScale );
-	if ( !L->interior && wwLookdevActive() && ( wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) ) ) {
+	/* lane VOLAIR1 (LAMPAIR1): the air takes the surfaces' exterior sun and sky (the weather's light x Sunlight Scale,
+	 * its DALC) so it is lit by the light the records give, not the fog-sun glare colour; red WW_CELL_AIR_RED=oldsun */
+	static const bool airOldSun = qEnvironmentVariable( "WW_CELL_AIR_RED" ).split( ',' ).contains( QStringLiteral( "oldsun" ) );
+	const bool extProg = wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) || ( prog->name == "cell_volair.prog" && !airOldSun );
+	if ( !L->interior && wwLookdevActive() && extProg ) {
 		float dalc[6][3], dif[4] = {}, amb[4] = {};
 		if ( wwLookdevDalc( dalc ) ) {
 			wwLookdevLight( dirTo, dif, amb );
@@ -1069,7 +1079,7 @@ void wwCellLightsUniforms( Scene * scene )
 	 * weather's sun (the exterior branch of cellLit). Red WW_CELL_EXTAMB_RED=flat keeps the flat NAM0 Ambient;
 	 * =flip swaps the axis convention. */
 	bool extDalc = false;
-	if ( !L->interior && hasDir && wwLookdevActive() && ( wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) ) ) {
+	if ( !L->interior && hasDir && wwLookdevActive() && extProg ) {
 		static const QByteArray extRed = qgetenv( "WW_CELL_EXTAMB_RED" ).trimmed();
 		float w[6][3];
 		if ( extRed != "flat" && wwLookdevDalc( w ) ) {
@@ -1436,7 +1446,7 @@ QString wwCellLightsEcho( Scene * scene )
 		o += QStringLiteral( " pass=%1(asked=%2 %3, sky=%4, pvred=%5)" ).arg( scene ? wwCellPassFor( scene->nifModel ) : 0 )
 			.arg( s.pass ).arg( wwCellPassNames().value( s.pass ) ).arg( G && !G->sky.empty() ? 1 : 0 ).arg( s.passRed );
 	return o + QLatin1Char( ' ' ) + wwCellShadowEcho( scene )
-		+ ( wwVolFogOn() ? QStringLiteral( " " ) + wwVolFogSummary() : QString() );	// lane VOLFOG1
+		+ ( wwVolAirOn() ? QStringLiteral( " " ) + wwVolAirSummary() : QString() );	// lane VOLAIR1
 }
 
 //! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change (the gate's light list)
@@ -1737,7 +1747,7 @@ QString wwCellShadowEcho( Scene * scene )
 namespace
 {
 
-constexpr int kAoUnit = 16;			// the obscurance (sampler2D, half the view); 9 on a GPU with only 16 units
+constexpr int kAoUnit = WwCellUnit::Ao;			// the obscurance (sampler2D, half the view); 9 on a GPU with only 16 units
 constexpr int kAoAngles = 8;		// a still view's mean over the game's per-frame angle in [0, pi)
 constexpr float kAoRadius = 108.2f, kAoBias = 0.6f, kAoIntensity = 7.1f;	// the game's INI defaults, game units
 
@@ -1784,7 +1794,7 @@ struct AoGpu
 	bool aoReady = false;	// lane AOOFF1: and the obscurance computed from it (false while the AO row is off)
 	int unit = -1;
 	GLuint decal = 0;		// lane AODECAL1: this frame's AO decal target (0: none)
-	int decalUnit = -1;		// 20, or -1 on a GPU with 20 units or fewer
+	int decalUnit = -1;		// WwCellUnit::AoDecal, or -1 on a GPU without it (lane VOLAIR1: was 20, under the far slots)
 };
 
 QHash<const void *, AoGpu> & aoGpus()
@@ -1830,7 +1840,7 @@ void aoUnits( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g )
 	GLint units = 0;
 	fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
 	g.unit = units > kAoUnit ? kAoUnit : 9;
-	g.decalUnit = units > 20 ? 20 : -1;
+	g.decalUnit = units > WwCellUnit::AoDecal ? WwCellUnit::AoDecal : -1;
 }
 
 //! lane AOOFF1: the telemetry line, printed when it changes
@@ -2076,6 +2086,17 @@ void wwCellAoPass( Scene * scene, bool run )
 	if ( wasBlend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST ); else fn->glDisable( GL_SCISSOR_TEST );
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
+}
+
+// lane VOLAIR1: the light buffer's spheres (src/gl/celllights.h)
+const std::vector<float> * wwCellLightSpheres( Scene * scene )
+{
+	if ( !scene || !scene->renderer || !gpus().contains( scene->renderer ) )
+		return nullptr;
+	const Gpu & g = gpus()[scene->renderer];
+	if ( g.doc != scene->nifModel || int( g.spheres.size() / 4 ) != g.count )
+		return nullptr;
+	return &g.spheres;
 }
 
 // lane SSR1: this frame's opaque pass and depth pyramid, for the reflections' march (src/gl/cellssr.h)

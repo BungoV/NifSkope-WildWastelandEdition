@@ -143,6 +143,10 @@ public:
 	bool wwWaterDraws() const;
 	//! lane SHADOW1: the shape alpha-tests (its depth-only caster would cast a solid card)
 	bool wwAlphaTested() const;
+	//! lane VOLAIR1: what the alpha-tested sun caster reads (the base map's property, the material alpha, the threshold)
+	BSShaderLightingProperty * wwShaderLighting() const { return bssp; }
+	const BSLightingShaderProperty * wwLightingShader() const { return bslsp; }
+	float wwAlphaThreshold() const;
 	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)
 	bool wwGpuSkinned() const { return isSkinned && !transformRigid && !boneTransforms.empty(); }
 protected:

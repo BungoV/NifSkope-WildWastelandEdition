@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "IstWeather",
+			"weather": "Fallout4.esm|0x000016EC",
+			"groundFog": {
+				"thickness": 538,
+				"strength": 2.12,
+				"hours": {
+					"2": {
+						"thickness": 300,
+						"strength": 0.25
+					},
+					"14": {
+						"thickness": 538,
+						"strength": 2.12
+					}
+				}
+			}
+		}
+	]
+}

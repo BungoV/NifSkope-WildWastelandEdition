@@ -1,6 +1,6 @@
 #version 410 core
 
-// lane VOLFOG1: a full-screen quad over one froxel layer (src/gl/cellvolfog.cpp, cell_volfog.frag)
+// lane VOLAIR1: a full-screen quad over one froxel layer (src/gl/cellvolair.cpp, cell_volair.frag)
 
 layout ( location = 0 ) in vec3 vertexPosition;
 

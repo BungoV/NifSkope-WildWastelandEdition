@@ -9,7 +9,7 @@ BSD License - see nifskope.h
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
-#include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/gametaa.h"
 #include "esmweather.h"
 #include "harnesswindow.h"
@@ -171,7 +171,8 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	row( tr( "Ground Plane" ), groundBox, true );
 	heading( tr( "Fog" ) );
 	liveCheck( fogBox, "lookdevFog", tr( "Fog" ), wwLookdevFog() );	// lane FOG1
-	liveCheck( volFogBox, "volFog", tr( "Volumetric Fog" ), wwVolFogOn() );	// lane VOLFOG1: every mode (interiors fog outside Lookdev)
+	heading( tr( "Volumetric Air" ) );
+	liveCheck( volAirBox, "volAir", tr( "Volumetric Air" ), wwVolAirOn() );	// lane VOLAIR1: every mode; replaces the fog while on
 	heading( tr( "Effects" ) );
 	liveCheck( shadowsBox, "lookdevShadows", tr( "Cascaded Shadows" ), wwLookdevShadows() );	// lane CSM1
 	liveCheck( taaBox, "gameTaa", tr( "Temporal AA" ), wwGameTaaOn() );	// lane MOTION1: every mode, ships off
@@ -269,7 +270,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( sunBox, &wwLookdevSetSun );
 	liveToggle( moonBox, &wwLookdevSetMoon );
 	liveToggle( fogBox, &wwLookdevSetFog );
-	liveToggle( volFogBox, &wwVolFogSetOn );
+	liveToggle( volAirBox, &wwVolAirSetOn );
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	liveToggle( taaBox, &wwGameTaaSetOn );
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {

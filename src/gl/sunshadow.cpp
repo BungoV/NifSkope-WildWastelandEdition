@@ -5,11 +5,13 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "sunshadow.h"
+#include "cellunits.h"
 #include "gametaa.h"
 #include "gl/cellwater.h"	// lane SUNCELL1: water never casts
 #include "gl/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 
 #include "gl/glnode.h"
+#include "gl/glproperty.h"	// lane VOLAIR1: alpha-tested casters read the base map
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/lookdevstage.h"
@@ -41,7 +43,7 @@ constexpr double kLightBack = 15000.0;			// the light origin sits this far behin
 constexpr double kNear = 150.0;				// the light's near plane, and far = max z + 150 (spec 2.3)
 constexpr float kSlopeBias = 6.0f, kUnitBias = 12.0f;	// glPolygonOffset (spec 2.6)
 constexpr float kOffsetA = 0.275f, kOffsetB = 1.0f;	// receiver depth offsets, cascade A / B of the pair (spec 2.4, INFERRED pair law)
-constexpr int kTextureUnit = 15;			// TexCache allocates from unit 0 upward
+constexpr int kTextureUnit = WwCellUnit::Csm;			// TexCache allocates from unit 0 upward
 
 struct Cascade
 {
@@ -80,7 +82,7 @@ struct CsmState
 	double C[3] = { 0, 0, 0 }, fwd[3] = { 0, 0, -1 }, tanX = 1, tanY = 1, camNear = 1, camFar = 1, sc = 1;
 	double rc[3] = { 1, 0, 0 }, uc[3] = { 0, 1, 0 };	// the camera's right and up rows (world)
 	double split[2] = { kSplit0, kSplit1 };
-	int casters = 0, tris = 0;
+	int casters = 0, tris = 0, atCasters = 0;
 	bool groundCast = false;
 };
 
@@ -275,6 +277,7 @@ struct Caster
 	const Shape * sh;
 	bool twoSided;
 	std::vector<Vector3> skinned;
+	bool alphaTested = false;	// lane VOLAIR1: drawn by lookdev_csmdepth_at.prog (the base map's alpha test)
 };
 
 bool ensureTargets( CsmState & s, Renderer * r, QString & why )
@@ -324,6 +327,48 @@ bool wwSunShadowWanted( Scene * scene )
 }
 
 static void sunShadowPassImpl( Scene * scene );
+
+/* WW_CSM_DUMP=<ABSOLUTE path> (lane VOLAIR1, gates only): the cascade map the receivers read, rewritten whenever the
+ * pass summary changes (passes with casters only): int32 map, cascades; then each layer's map x map uint16 depths, bottom row first. With
+ * its own echo (<path>.txt) a judge predicts any point's sun visibility from the map itself. */
+static void csmDumpMap( const CsmState & s, Renderer * r )
+{
+	static int armed = -1;
+	static QString path, lastSummary;
+	if ( armed < 0 ) {
+		path = qEnvironmentVariable( "WW_CSM_DUMP" ).trimmed();
+		armed = ( !path.isEmpty() && QDir::isAbsolutePath( path ) ) ? 1 : 0;
+	}
+	// a pass with no casters (a frame before the cell is placed, or after it is torn down) is never the grabbed one
+	if ( armed != 1 || !s.valid || !s.fbo || !s.tex || s.casters <= 0 )
+		return;
+	const QString line = wwSunShadowSummary();
+	if ( line == lastSummary )
+		return;
+	lastSummary = line;
+	auto fn = r->fn;
+	GLint prevRead = 0;
+	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, s.fbo );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 2 );
+	std::vector<std::uint16_t> layer( size_t( s.map ) * size_t( s.map ) );
+	QFile f( path );
+	if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+		const qint32 hd[2] = { s.map, kCascades };
+		f.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
+		for ( int i = 0; i < kCascades; i++ ) {
+			fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, s.tex, 0, i );
+			fn->glReadPixels( 0, 0, s.map, s.map, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, layer.data() );
+			f.write( reinterpret_cast<const char *>( layer.data() ), qint64( layer.size() * sizeof( std::uint16_t ) ) );
+		}
+	}
+	// its own echo beside it (<path>.txt), written under the same rule, so map and matrices are one pass's
+	QFile t( path + QStringLiteral( ".txt" ) );
+	if ( t.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+		t.write( ( QStringLiteral( " " ) + line + QStringLiteral( "\n" ) ).toUtf8() );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+}
 
 /* WW_CSM_ECHO=<ABSOLUTE path>: the summary of the pass that just ran, rewritten
  * whenever it changes. The PBRM census row is written at a shape's FIRST draw,
@@ -445,7 +490,15 @@ static void sunShadowPassImpl( Scene * scene )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
+		// lane VOLAIR1: red WW_CSM_RED=atnone drops the alpha-tested casters (the window gate's ceiling: glass gone)
+		if ( red( "atnone" ) && sh->wwAlphaTested() )
+			continue;
 		Caster c { sh, sh->wwDoubleSided(), {} };
+		// lane VOLAIR1 (10-15): an alpha-tested shape (a window's GlassWindows01 glass, a leaf card) casts what its
+		// alpha test keeps, as the colour pass draws it; it cast a solid card before, and the sun never reached the
+		// air behind a window. Red WW_CSM_RED=atsolid casts them solid again.
+		c.alphaTested = !red( "atsolid" ) && sh->wwAlphaTested() && sh->wwShaderLighting()
+			&& !sh->coords.isEmpty() && sh->coords.constFirst().size() == sh->verts.size();
 		if ( cpuSkin && sh->wwGpuSkinned() ) {
 			c.skinned.resize( size_t( sh->verts.size() ) );
 			for ( qsizetype v = 0; v < sh->verts.size(); v++ )
@@ -455,6 +508,7 @@ static void sunShadowPassImpl( Scene * scene )
 		casters.push_back( std::move( c ) );
 	}
 	s.casters = int( casters.size() );
+	s.atCasters = int( std::count_if( casters.begin(), casters.end(), []( const Caster & k ) { return k.alphaTested; } ) );
 	float gz = 0, gxy[2] = { 0, 0 }, ghalf = 0;
 	s.groundCast = wwLookdevGroundFrame( scene, gz, gxy, ghalf );
 
@@ -507,6 +561,14 @@ static void sunShadowPassImpl( Scene * scene )
 	}
 
 	const int lMvp = prog->uniLocation( "csmClipFromView" );
+	// lane VOLAIR1: the alpha-tested casters' program; without it they cast solid as before (said in the line)
+	NifSkopeOpenGLContext::Program * progAt = nullptr;
+	if ( s.atCasters ) {
+		progAt = r->useProgram( "lookdev_csmdepth_at.prog" );
+		if ( !progAt )
+			s.atCasters = -1;
+		r->useProgram( "lookdev_csmdepth.prog" );
+	}
 	bool complete = true;
 	std::vector<std::uint32_t> cullRanges;	// lane SUNCELL1
 	std::vector<std::uint16_t> cullIdx;
@@ -523,13 +585,39 @@ static void sunShadowPassImpl( Scene * scene )
 		fn->glViewport( 0, 0, c.vw, c.vh );
 		if ( lMvp >= 0 )
 			fn->glUniformMatrix4fv( lMvp, 1, GL_FALSE, c.clipFromView );
+		for ( int pass = 0; pass < ( progAt ? 2 : 1 ); pass++ ) {
+		// pass 0: the solid casters (and every caster when there is no alpha-tested program); pass 1: alpha-tested
+		NifSkopeOpenGLContext::Program * p = pass ? progAt : prog;
+		if ( pass ) {
+			r->useProgram( "lookdev_csmdepth_at.prog" );
+			const int l = p->uniLocation( "csmClipFromView" );
+			if ( l >= 0 )
+				fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
+		}
 		for ( const Caster & k : casters ) {
+			if ( progAt && k.alphaTested != bool( pass ) )
+				continue;
 			if ( k.twoSided )
 				fn->glDisable( GL_CULL_FACE );
 			else
 				fn->glEnable( GL_CULL_FACE );
-			prog->uni4m( "modelViewMatrix", k.sh->viewTrans().toMatrix4() );
-			const float * attrs = k.skinned.empty() ? &( k.sh->verts.constFirst()[0] ) : &( k.skinned.front()[0] );
+			p->uni4m( "modelViewMatrix", k.sh->viewTrans().toMatrix4() );
+			const float * pos = k.skinned.empty() ? &( k.sh->verts.constFirst()[0] ) : &( k.skinned.front()[0] );
+			const float * attrv[8] = { pos, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+			std::uint64_t mask = 3;
+			if ( pass ) {
+				int texunit = 0;
+				const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
+				BSShaderLightingProperty * bsp = k.sh->wwShaderLighting();
+				p->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+				p->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
+				p->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
+				p->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
+				p->uni1f( "alphaThreshold", k.sh->wwAlphaThreshold() );
+				attrv[7] = &( k.sh->coords.constFirst().constFirst()[0] );
+				mask = 0x20000003ULL;
+			}
+			const float * const * attrs = attrv;
 			// lane SUNCELL1: a welded cell shape gives this cascade only the placements inside its own window
 			if ( wwCellCullCaster( scene, k.sh, k.sh->id(), i, c.clipFromView, cullRanges ) ) {
 				cullIdx.clear();
@@ -538,13 +626,16 @@ static void sunShadowPassImpl( Scene * scene )
 					cullIdx.insert( cullIdx.end(), src + size_t( cullRanges[q] ) * 3,
 						src + ( size_t( cullRanges[q] ) + size_t( cullRanges[q + 1] ) ) * 3 );
 				if ( !cullIdx.empty() )
-					r->drawShape( (unsigned int) ( k.sh->verts.size() ), 3, (unsigned int) cullIdx.size(),
-						GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, cullIdx.data() );
+					r->drawShape( (unsigned int) ( k.sh->verts.size() ), mask, (unsigned int) cullIdx.size(),
+						GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, cullIdx.data() );
 				continue;
 			}
-			r->drawShape( (unsigned int) ( k.sh->verts.size() ), 3, (unsigned int) ( k.sh->triangles.size() * 3 ),
-				GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, k.sh->triangles.constData() );
+			r->drawShape( (unsigned int) ( k.sh->verts.size() ), mask, (unsigned int) ( k.sh->triangles.size() * 3 ),
+				GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, k.sh->triangles.constData() );
 		}
+		}
+		if ( progAt )
+			r->useProgram( "lookdev_csmdepth.prog" );
 		if ( s.groundCast ) {
 			// the ground quad, exactly as wwLookdevDrawGround places it (world space, Z up)
 			fn->glEnable( GL_CULL_FACE );
@@ -580,6 +671,7 @@ static void sunShadowPassImpl( Scene * scene )
 	}
 	s.valid = true;
 	s.last = leak ? QStringLiteral( "on(leak)" ) : QStringLiteral( "on" );
+	csmDumpMap( s, r );
 }
 
 void wwSunShadowUniforms( Scene * scene )
@@ -640,6 +732,9 @@ QString wwSunShadowSummary()
 			m << QString::number( double( s.c[i].uvdFromView[k] ), 'g', 9 );
 		o += QString( " m%1=%2" ).arg( i ).arg( m.join( QChar( ',' ) ) );
 	}
+	o += QString( " csmat=%1" ).arg( s.atCasters );	// lane VOLAIR1: -1 = no program (they cast solid)
+	// lane VOLAIR1: the receiver constants a judge needs to predict the factor from WW_CSM_DUMP's map
+	o += QString( " recv=%1,%2,%3,%4" ).arg( g( kOffsetA ), g( kOffsetB ), g( kBlend ), g( kNear ) );
 	o += QString( " casters=%1 tris=%2 ground=%3 probe=%4 force=%5 red=%6" ).arg( s.casters ).arg( s.tris ).arg( s.groundCast ? 1 : 0 )
 		.arg( s.probe ).arg( s.force < 0.0f ? QStringLiteral( "off" ) : QString::number( double( s.force ) ) )
 		.arg( s.reds.isEmpty() ? QStringLiteral( "none" ) : s.reds.join( QChar( '+' ) ) );
