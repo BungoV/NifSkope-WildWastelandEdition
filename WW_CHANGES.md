@@ -19,6 +19,7 @@
 - **Not done, and why:** the incremental horizon sweep (Timonen and Westerholm 2010). Both horizons here are sparse
   fixed-tap marches (terrain: 7 bilinear taps 128..1458 units in 8 directions; objects: 23 lattice taps), so the cost
   is already constant per texel and an exact sweep would change the values. Not byte-identical, so not shipped.
+
 ## Lane CARDBAKE2 (2026-10-21, branch cardbake2-20261021): the tree card bake runs every base in one process
 
 - **Why.** FARBAKE2's cards stage took 39.5 min for 79 bases, one NifSkope launch per base. Measured: each launch
@@ -67,6 +68,30 @@
   - the flat report's override-file line, which names the run folder.
 - **Found, not changed:** the bake texture LRU's 512 MB budget counts `DDSTexture16::size()`, which is texels, so the
   real cap is about 4 GB. Counting bytes made the bake 2.25x slower (thrash), so it stays as is.
+
+## Lane CELLSTREAM1 (2026-10-16..19, branch cellstream1-20261016): the exterior cell view streams a 5x5 block
+
+- **An exterior cell document can stream full cells round the camera.** `WW_CELL_STREAM=1` (test switch, no menu
+  row yet; off = the fixed-block open as before): the 5x5 cells round the camera's cell stay loaded; a cell the
+  camera leaves is freed and a new one is built on a thread and written into the open document a slice a frame,
+  in about 4 ms of main-thread work (`WW_CELL_STREAM_BUDGET`, ms). Freed blocks are reset and taken again by the
+  next cell of their type, so the file does not grow. Far LOD hands its ring-0 chunks over to the loaded cells
+  and back. Code: `src/cellstream.*`; hooks in cellview, cellmesh, cellsplat, cellcull, cellgrass, cellwater,
+  cellfxlit, nifmodel (quiet block reset), glview, nifskope_ui (the walk dump).
+- Scene bulk operations made linear: `NodeList::delMany/takeMany/release`, one-pass `NodeList::clear`,
+  `PropertyList::delMany` (each cost ~10 ms on a cell's 2000 nodes). A left cell's nodes leave the scene at once
+  and are cleared, then freed, a few a frame; a freed shape's vertex arrays are given back on a thread of their own.
+- Texture eviction while streaming: file textures no paint has bound for `WW_CELL_STREAM_TEXKEEP` seconds
+  (default 5, 0 = never) are freed in paintGL, never ones the last 3 paints bound; they load again when bound.
+- Telemetry: the walk dump (`WW_CELL_STREAM_PATH` + `WW_CELL_STREAM_DUMP`) writes one line a step (loaded set,
+  worst tick/slice/unload/drain/bury ms, blocks, private bytes, textures freed); `WW_CELL_STREAM_TRACE=1` prints
+  every slow slice, tick, unload, node clear/free and reset to stderr.
+- Gate: `tests/spells/cell_stream.sh` + `cell_stream_check.py`: (a) loaded set == 5x5 and every crossing frame
+  <= 8 ms, (b) streamed picture == fixed open, (c) far LOD no hole/no double, (d) memory within 5% after 20
+  crossings; reds `WW_CELL_STREAM_RED=nounload` (must fail d), `nohandover` (must fail c), `loudreset`.
+  Last own run (10-19): (a) set, (c), (d) x1.039 pass; (a) frame 12.26 ms FAILS (node frees); the array-reaper
+  build is not yet measured; (b) and the reds not run on the current build. The rc 127 exits seen earlier were the
+  memory guard (MEMCAP or free RAM), not a fault.
 
 ## Lane VOLAIR1 (2026-10-13, branch volair1-20261013): Volumetric Air, one lit medium in the cell view
 
@@ -345,6 +370,7 @@
   GIBLACK2's memden gates all pass.
 - The twin (`tests/spells/cell_rooms_check.py`) mirrors every law: `GI_CHECK_TIE=0`, `GI_CHECK_BOTH=0`,
   `GI_CHECK_LONE=0`; new subcommand `points` against `tests/fixtures/gidark1_recess2.tsv` / `gidark1_hinside.tsv`.
+
 ## Lane LODP1 (2026-10-15, branch lodp1-20261015): LOD PRTP step 1 -- light patches placed on the distant LOD
 
 - **New: `.lodp` sector files** (`src/lodpfile.*`, contract `docs/LODGEN_NATIVE_LODO_LODI.md` section 13). One
@@ -3415,6 +3441,7 @@ eleven failing rows -- have no floor under them yet.
 
 **Nothing was fixed and nothing was re-pinned** (a resuming lane measures a
 failure and stops). NOT COMMITTED; bungo's open window needs a restart.
+
 ## 2026-09-10 - `.lodl` version 3: water BODIES, flow, shore and a stroke store
 
 `src/lodtfile.cpp`, `src/lodtfile.h`, `src/nifcli.cpp` (the `lodl` and `lodgen`
@@ -3653,6 +3680,7 @@ moved, already named as owed item 2 of the lane's report.
 **Neither miss was fixed and neither band was re-pinned** (a resuming lane
 measures a failure and stops). The band is the lane's to re-derive or bungo's to
 accept. NOT COMMITTED; bungo's open window needs a restart.
+
 ## 2026-09-09 - the render hook's camera can be pinned, and the pin is metric
 
 `src/glview.h`, `src/glview.cpp`, `src/nifskope_ui.cpp` (the hook's call site
@@ -4577,6 +4605,7 @@ visibility, so section 5 would have to change with it.
 `off fedab869884174fb / on fedab869884174fb  ok` in the same run in which six
 checks said the window was on a screen: it had compared a picture with itself.
 It must first require the off-screen run to have recorded zero `onscreen=1`.
+
 ## 2026-09-09 - Headless runs no longer stop on the Save Confirmation dialog
 
 `src/nifskope.cpp`, `src/nifskope.h`, `tests/spells/render_shot.sh`. BUILT AND
@@ -27538,5 +27567,6 @@ _Known gaps / backlog: see `TO_BE_IMPLEMENTED.md`._
 - The three viewport shading icons are consolidated into one dropdown with
   Flat, Solid, Shaded, and Normal + Spec/Gloss modes; the diagnostic mode
   removes diffuse colour while retaining authored normal and gloss response.
+
 ## 2026-10-15: SKYPIC1 on by default (bungo)
 - The probes' sky now comes from the sky the view draws (dome, stars, clouds) per direction, not the weather's flat ambient. WW_CELL_SKYPIC=0 restores the flat sky (SKY1). tests/spells/cell_skypic.sh pins its off arms with WW_CELL_SKYPIC=0.

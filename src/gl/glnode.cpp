@@ -72,9 +72,12 @@ NodeList::~NodeList()
 
 void NodeList::clear()
 {
-	foreach ( Node * n, nodes ) {
-		del( n );
-	}
+	// lane CELLSTREAM1: one pass (del() searched the whole list per node: a cell's 2000 children took ~10 ms)
+	QVector<Node *> old;
+	old.swap( nodes );
+	for ( Node * n : old )   // add() lists a node once
+		if ( --n->ref <= 0 )
+			delete n;
 }
 
 NodeList & NodeList::operator=( const NodeList & other )
@@ -105,6 +108,35 @@ void NodeList::del( Node * n )
 			n->ref -= cnt;
 		}
 	}
+}
+
+void NodeList::delMany( const QSet<Node *> & gone )
+{
+	if ( gone.isEmpty() )
+		return;
+	std::vector<Node *> hit;
+	auto keep = std::remove_if( nodes.begin(), nodes.end(), [&]( Node * n ) {
+		if ( !gone.contains( n ) )
+			return false;
+		hit.push_back( n );
+		return true;
+	} );
+	nodes.erase( keep, nodes.end() );
+	for ( Node * n : hit )   // add() lists a node once, so one count each
+		if ( --n->ref <= 0 )
+			delete n;
+}
+
+void NodeList::takeMany( const QSet<Node *> & gone )
+{
+	if ( !gone.isEmpty() )
+		nodes.erase( std::remove_if( nodes.begin(), nodes.end(), [&]( Node * n ) { return gone.contains( n ); } ), nodes.end() );
+}
+
+void NodeList::release( Node * n )
+{
+	if ( n && --n->ref <= 0 )
+		delete n;
 }
 
 Node * NodeList::get( const QModelIndex & index ) const

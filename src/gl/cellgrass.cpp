@@ -654,6 +654,16 @@ void wwCellGrassShape( const void * nif, int block, float wavePeriod, bool fade 
 		gs().noFade[nif].insert( block );
 }
 
+void wwCellGrassForget( const void * nif, int block )
+{
+	auto s = gs().shapes.find( nif );
+	if ( s != gs().shapes.end() )
+		s->remove( block );
+	auto w = gs().wave.find( nif );
+	if ( w != gs().wave.end() )
+		w->remove( block );
+}
+
 bool wwCellGrassWind( float wind[4], float wind2[4] )
 {
 	quint8 w[4] = { 0, 0, 0, 0 };

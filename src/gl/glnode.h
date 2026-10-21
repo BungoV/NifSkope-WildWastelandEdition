@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QList>
 #include <QPersistentModelIndex>
 #include <QPointer>
+#include <QSet>
 
 
 //! @file glnode.h Node, NodeList
@@ -55,6 +56,12 @@ public:
 
 	void add( Node * );
 	void del( Node * );
+	//! lane CELLSTREAM1: drops a set of nodes in one pass (del() walks the whole list per node)
+	void delMany( const QSet<Node *> & gone );
+	//! lane CELLSTREAM1: takes a set out of the list, each keeping the list's count, for release() later
+	void takeMany( const QSet<Node *> & gone );
+	//! lane CELLSTREAM1: drops the count a takeMany() kept; deletes the node at none
+	static void release( Node * n );
 
 	Node * get( const QModelIndex & idx ) const;
 
@@ -101,6 +108,8 @@ public:
 	Node( Scene * scene, const QModelIndex & iBlock );
 
 	int id() const { return nodeId; }
+	//! lane CELLSTREAM1: read by the cell stream to find a leaving cell's properties
+	const PropertyList & propertyList() const { return properties; }
 
 	// IControllable
 

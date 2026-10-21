@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glview.h"
 #include "cellspeed.h"
+#include "cellstream.h"		// lane CELLSTREAM1: the cells round the camera
 #include "celltexahead.h"
 
 #include "rdccapture.h"
@@ -3744,6 +3745,7 @@ void GLView::paintGL()
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
 	CellTexAhead::Frame texAheadFrame;   // lane SPEED1: a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
+	wwCellStreamEvict();
 	QElapsedTimer wwPaintClock;
 	wwPaintClock.start();
 	struct WwPaintTime
@@ -7011,6 +7013,55 @@ void GLView::flush()
 {
 	if ( textures )
 		textures->flush();
+}
+
+bool GLView::wwCellStreamFrame()
+{
+	if ( !model || !scene )
+		return false;
+	const Transform v = viewTransform();
+	Vector3 eye = v.rotation.inverted() * Vector3( -v.translation[0], -v.translation[1], -v.translation[2] );
+	if ( v.scale != 0.0f )
+		eye = eye / v.scale;
+	if ( !cellStreamTick( model, scene, eye ) )
+		return false;
+	update();
+	return true;
+}
+
+void GLView::wwCellStreamEvict()
+{
+	// lane CELLSTREAM1: file textures no paint has bound for a while (a cell that left, mostly) are freed every
+	// few seconds, in a paint (the context is current). What the last 3 paints bound stays however slow they were:
+	// a wall clock alone freed the textures of a paint longer than the keep, which loaded them all again
+	if ( !textures || !model || !cellStreamOn( model ) )
+		return;
+	static QElapsedTimer clock;
+	static std::uint32_t nextEvict = 0;
+	static std::uint32_t paintSec[4] = { 0, 0, 0, 0 };
+	static std::uint32_t paints = 0;
+	static const std::uint32_t keep = std::uint32_t( cellStreamTexKeepSec() );
+	if ( !clock.isValid() )
+		clock.start();
+	const std::uint32_t sec = std::uint32_t( clock.elapsed() / 1000 ) + 1U;
+	textures->setUseTick( sec );
+	paintSec[paints++ & 3U] = sec;
+	if ( !keep || paints < 4 || sec < nextEvict || sec <= keep )
+		return;
+	nextEvict = sec + 2U;
+	const std::uint32_t threePaintsAgo = paintSec[paints & 3U];   // the oldest of the 4 kept, this one included
+	const std::uint32_t before = std::min( sec - keep, threePaintsAgo );
+	if ( before )
+		cellStreamCountEvicted( model, textures->evictUnused( before ) );
+}
+
+void GLView::wwCellStreamFlush()
+{
+	makeCurrent();
+	flush();
+	if ( scene && scene->renderer )
+		scene->renderer->flushCache();
+	doneCurrent();
 }
 
 
@@ -22007,6 +22058,7 @@ void GLView::modelChanged()
 	if ( doCompile )
 		return;
 
+	cellStreamTrace( QStringLiteral( "the view makes the scene again (model changed)" ) );   // lane CELLSTREAM1
 	doCompile = 1;
 	//doCenter  = true;
 	update();
@@ -22017,6 +22069,7 @@ void GLView::modelLinked()
 	if ( doCompile )
 		return;
 
+	cellStreamTrace( QStringLiteral( "the view makes the scene again (links changed)" ) );   // lane CELLSTREAM1
 	doCompile = 1; //scene->update( model, QModelIndex() );
 	update();
 }
@@ -22173,6 +22226,7 @@ void GLView::advanceGears()
 
 	if ( !isVisible() )
 		return;
+	wwCellStreamFrame();   // lane CELLSTREAM1: a few ms of the cells round the camera a frame
 
 	dT = std::clamp< float >( dT, 0.0f, 1.0f );
 	physicsTick( dT );

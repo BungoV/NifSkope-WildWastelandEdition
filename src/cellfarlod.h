@@ -11,6 +11,9 @@ BSD License - see nifskope.h
 #include <QString>
 #include <QStringList>
 
+#include <array>
+#include <vector>
+
 class EsmWorld;
 class NifModel;
 class Scene;
@@ -91,8 +94,18 @@ void cellFarLodAdoptResources( const QStringList & resources );
 /*! Appends the far field under `iRoot` (the caller holds updates and runs
  *  updateModel). `origin` is the cell scene's own origin (it is origin-relative).
  *  Returns the census, one "  far lod: ..." line each, for the cell's notes. */
+// lane CELLSTREAM1: a streaming open's far field -- ring 0 uncut over the roam area, one shape a cell
+struct CellFarStream
+{
+	int roam = 4;                                   //!< in: cells the camera may roam from the open's centre
+	std::vector<std::array<int, 3>> handBlocks;     //!< out: each ring-0 terrain/water shape's block, cell x, y
+	int landBlocks = 0;                             //!< out: how many of them (the first) are terrain
+	int objX0 = 0, objY0 = 0, objX1 = -1, objY1 = -1;   //!< out: the far objects' and cards' hole (cells)
+};
+
 QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWorld & world,
-	const QString & ws, int cx, int cy, int n, const QString & lodlPath, const Vector3 & origin );
+	const QString & ws, int cx, int cy, int n, const QString & lodlPath, const Vector3 & origin,
+	CellFarStream * stream = nullptr );
 
 //! How far (scene units, from the scene origin) the far field of the scene's document reaches; 0 = none.
 float wwCellFarLodReach( const Scene * scene );

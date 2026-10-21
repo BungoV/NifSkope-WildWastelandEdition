@@ -128,6 +128,13 @@ void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec )
 	d.shapeBody.insert( block, i );
 }
 
+void wwCellWaterForget( const void * nif, int block )
+{
+	auto d = st().docs.find( nif );
+	if ( d != st().docs.end() )
+		d->shapeBody.remove( block );
+}
+
 bool wwCellWaterOn()
 {
 	return !st().pinOff;

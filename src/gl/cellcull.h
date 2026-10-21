@@ -115,6 +115,8 @@ int wwCellPrevisRed();
 void wwCellCullBegin( const void * nif );
 //! The written shape `block` draws in these runs (in triangle order, covering every triangle).
 void wwCellCullShape( const void * nif, int block, std::vector<WwCullRun> && runs );
+// lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
+void wwCellCullForget( const void * nif, int block );
 //! The shape's runs, or null (not a cell shape, or one run only).
 const std::vector<WwCullRun> * wwCellCullRuns( const void * nif, int block );
 

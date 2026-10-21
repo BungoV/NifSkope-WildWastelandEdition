@@ -276,7 +276,7 @@ void TexCache::wwAskedAndMissing( int & asked, int & missing, QStringList * name
 		if ( !tx.nameLen || !tx.imageInfo )
 			continue;
 		asked++;
-		if ( tx.mipmaps )
+		if ( tx.mipmaps || ( !tx.id[0] && tx.imageInfo->mipmaps ) )   // lane CELLSTREAM1: evicted is not missing
 			continue;
 		missing++;
 		if ( names )
@@ -354,6 +354,7 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 	Tex *	tx = insertTex( fname );
 	if ( !tx ) [[unlikely]]
 		return 0;
+	tx->useTick = useTick;
 	if ( !tx->isLoaded() ) [[unlikely]] {
 		if ( tx->id[0] )
 			return 0;
@@ -373,6 +374,7 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 	Tex *	tx = insertTex( fname );
 	if ( !tx ) [[unlikely]]
 		return false;
+	tx->useTick = useTick;
 
 	if ( !tx->isLoaded() ) [[unlikely]] {
 		if ( tx->id[0] || !loadTex( *tx, nif ) )
@@ -514,6 +516,22 @@ void TexCache::flush()
 			delete tx.imageInfo;
 	}
 	embedTextures.clear();
+}
+
+int TexCache::evictUnused( std::uint32_t tick )
+{
+	int n = 0;
+	for ( size_t i = 0; i <= textureHashMask; i++ ) {
+		Tex &	tx = textures[i];
+		if ( !tx.nameLen || !tx.isLoaded() || !tx.mipmaps || tx.useTick >= tick )
+			continue;
+		glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
+		tx.id[0] = tx.id[1] = 0;
+		tx.mipmaps = 0;
+		tx.target = 0;
+		n++;
+	}
+	return n;
 }
 
 void TexCache::setNifFolder( const QString & folder )
