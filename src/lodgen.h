@@ -1540,6 +1540,10 @@ LodgenBakeCaches * lodgenCreateBakeCaches( qint64 textureBudgetBytes = qint64( 5
 void lodgenDestroyBakeCaches( LodgenBakeCaches * caches );
 //! Census counters the caches accumulate, for the bake's self-accusing line.
 void lodgenBakeCacheCounts( const LodgenBakeCaches * caches, int * nifReads, int * texLoads );
+//! lane BAKEMEM1: free the decoded textures (not the counters); a no-op under WW_LODGEN_BAKEMEM_RED=1
+void lodgenBakeCachesReleaseTextures( LodgenBakeCaches * caches, const char * phase );
+//! lane BAKEMEM1: set the texture LRU's budget (texel units), returning the old one
+qint64 lodgenBakeCachesSetTextureBudget( LodgenBakeCaches * caches, qint64 units );
 
 /*! The terrain virtual texture (docs/LODGEN_TERRAIN_VT.md).
  *

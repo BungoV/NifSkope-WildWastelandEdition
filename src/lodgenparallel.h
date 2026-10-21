@@ -118,6 +118,22 @@ QString lodgenPeakWorkingSetLine();
 bool lodgenMemLogOn();
 void lodgenMemNote( const QString & phase, const QString & extra = QString() );
 
+/*! lane BAKEMEM1: drop the pages of this process's MAPPED FILES (the plugins, the archives) from its working
+ *  set. They stay in the file cache, so a later read is a soft fault; private memory is not touched. Returns
+ *  the mapped bytes visited. A no-op under WW_LODGEN_BAKEMEM_RED=1. */
+qint64 lodgenTrimMappedWorkingSet();
+
+//! While alive, a thread calls lodgenTrimMappedWorkingSet() every `seconds`.
+class LodgenMappedTrim
+{
+public:
+	explicit LodgenMappedTrim( int seconds = 5 );
+	~LodgenMappedTrim();
+private:
+	struct Impl;
+	Impl * d;
+};
+
 /*! A bounded write queue on a thread of its own, so a worker hands over bytes
  *  and goes back to building instead of waiting on the disk.
  *

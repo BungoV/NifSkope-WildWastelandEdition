@@ -6621,6 +6621,34 @@ void lodgenDestroyBakeCaches( LodgenBakeCaches * caches )
 	delete caches;
 }
 
+// lane BAKEMEM1: the LRU's budget, in its own units (DDSTexture16::size(), texels: 8 bytes each); returns the old one
+qint64 lodgenBakeCachesSetTextureBudget( LodgenBakeCaches * caches, qint64 units )
+{
+	if ( !caches )
+		return 0;
+	const qint64 old = caches->texBudget;
+	caches->texBudget = units;
+	return old;
+}
+
+// lane BAKEMEM1: drop the decoded textures between stages (the next stage reloads what it reads); counters stay
+void lodgenBakeCachesReleaseTextures( LodgenBakeCaches * caches, const char * phase )
+{
+	if ( !caches || lodgenBakeMemRed() )
+		return;
+	const qint64 n = caches->texCache.size(), units = caches->texBytes;
+	for ( DDSTexture16 * t : caches->texCache )
+		delete t;
+	caches->texCache.clear();
+	caches->texCache.squeeze();
+	caches->texStamp.clear();
+	caches->texStamp.squeeze();
+	caches->texBytes = 0;
+	if ( lodgenMemLogOn() )
+		lodgenMemNote( QStringLiteral( "textures released after %1" ).arg( QLatin1String( phase ) ),
+			QStringLiteral( "%1 textures, %2 budget units; %3 loads so far" ).arg( n ).arg( lodgenMemMB( units ) ).arg( caches->texLoads ) );
+}
+
 void lodgenBakeCacheCounts( const LodgenBakeCaches * caches, int * nifReads, int * texLoads )
 {
 	if ( nifReads )

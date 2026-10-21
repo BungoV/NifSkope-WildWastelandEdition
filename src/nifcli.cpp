@@ -4156,6 +4156,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			LodgenBakeCaches * p;
 			~RegionCacheGuard() { lodgenDestroyBakeCaches( p ); }
 		} regionCacheGuard{ bakeCaches };
+		// lane BAKEMEM1: the plugins' and archives' mapped pages leave the working set every few seconds
+		LodgenMappedTrim mappedTrim;
 		/* The pyramid runs FIRST and ONCE. It has to: when the chunk sheets
 		 * come from it, they are assembled while its staging is live, and a
 		 * pass that ran after the chunk queue would have nothing to read. */
@@ -4424,6 +4426,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				}
 				censusOut( dReport );
 				out().flush();
+				// lane BAKEMEM1: the decals' STAT textures are not the pyramid's; the LRU would hold them to the end
+				lodgenBakeCachesReleaseTextures( bakeCaches, "decals" );
 			}
 			QString vtReport, vterr;
 			bool vtOk = gLgTerrainOption == LodgenTerrainOption::Dynamic;
@@ -4461,6 +4465,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			}
 			censusOut( vtReport );
 			out().flush();
+			lodgenBakeCachesReleaseTextures( bakeCaches, "vt pyramid" );
 		}
 
 		/* ===== THE .BTO SCRATCH FOLDER (lane BTOFREE1, 2026-09-16) =========
