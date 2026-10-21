@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include <QWaitCondition>
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 
@@ -242,6 +243,34 @@ QString lodgenPeakWorkingSetLine()
 		return QStringLiteral( "peak working set: not available on this platform" );
 	return QStringLiteral( "peak working set: %1 GB (%2 bytes)" )
 		.arg( double( b ) / 1073741824.0, 0, 'f', 2 ).arg( b );
+}
+
+bool lodgenMemLogOn()
+{
+	static const bool on = qEnvironmentVariableIsSet( "WW_LODGEN_MEMLOG" );
+	return on;
+}
+
+void lodgenMemNote( const QString & phase, const QString & extra )
+{
+	if ( !lodgenMemLogOn() )
+		return;
+	quint64 priv = 0, peakPriv = 0, ws = 0;
+#ifdef Q_OS_WIN32
+	PROCESS_MEMORY_COUNTERS_EX pmc;
+	memset( &pmc, 0, sizeof( pmc ) );
+	pmc.cb = sizeof( pmc );
+	if ( GetProcessMemoryInfo( GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS *>( &pmc ), sizeof( pmc ) ) ) {
+		priv = pmc.PrivateUsage;
+		peakPriv = pmc.PeakPagefileUsage;
+		ws = pmc.WorkingSetSize;
+	}
+#endif
+	const QByteArray line = QStringLiteral( "mem: %1 | private %2 MB, peak private %3 MB, ws %4 MB%5\n" )
+		.arg( phase ).arg( priv >> 20 ).arg( peakPriv >> 20 ).arg( ws >> 20 )
+		.arg( extra.isEmpty() ? QString() : QStringLiteral( " | " ) + extra ).toUtf8();
+	fputs( line.constData(), stderr );
+	fflush( stderr );
 }
 
 /* ---------------------------------------------------------------- writer */

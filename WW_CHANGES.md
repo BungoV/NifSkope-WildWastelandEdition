@@ -1,5 +1,34 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BAKEMEM1 (2026-10-21, branch bakemem1-20261021): the decals gather frees its decoded models
+
+- **Why.** FARBAKE2 (whole Commonwealth, every channel) was stopped by the memory guard at 13 GB private in the
+  chunks stage, inside the decals gather. There the flat rule (`LodgenRoadSet::evaluateFlat`) loaded EVERY non-road
+  STAT's full model into a model cache that was never freed. The world-space copies the rule keeps (`flatShapes`)
+  share their uv/triangle arrays with that cache, so the rest of the decoded model is what grew.
+- **What changed (memory layout only, no output changes):**
+  - `evaluateFlat` evaluates the candidates in batches of 256 model-cache keys. After each batch it frees the cache.
+    Then it puts the records, shapes and decal placements back in gather order, using integer moves only.
+  - The old body is `evaluateFlatBatch`, unchanged.
+  - After the gather, the set's road and flat model cache is freed. `LodgenObjectHeightField::gather` frees its cache
+    the same way.
+  - `LodgenRoadSet::gather` itself is byte-for-byte the f47f5d11 source. An edit inside it changed its inline SCOL
+    Matrix*Matrix codegen, which moved one placement's rotation by 1 ULP and 3 decal pieces' bounds with it.
+- **Measured** on region -4 -4 3 3, all rings, FARBAKE2 flags:
+  - private after the flat rule: 1871 -> 1192 MB;
+  - decals-stage peak: 6243 -> 5501 MB;
+  - the process peak is set later, by the texture LRU, so it barely moves (6646 -> 6628 MB).
+  - whole-map gather (stopped after the flat rule, 784392 candidates): 5094 MB private; FARBAKE2 was about 8.8 GB there.
+- **New switches:**
+  - `WW_LODGEN_MEMLOG=1` prints `mem: <phase> | private, peak private, ws | <cache sizes>` lines on stderr, at the
+    gather phases and after each named chunks-stage timer.
+  - `WW_LODGEN_BAKEMEM_RED=1` is the red: one batch, the caches kept, as before.
+- **Gate:** sha1 of every mod and scratch file against the f47f5d11 run copy. The only differences:
+  - `.lodb`: the generator word, run times, out-dir digests;
+  - the flat report's override-file line, which names the run folder.
+- **Found, not changed:** the bake texture LRU's 512 MB budget counts `DDSTexture16::size()`, which is texels, so the
+  real cap is about 4 GB. Counting bytes made the bake 2.25x slower (thrash), so it stays as is.
+
 ## Lane CABLES1 (2026-10-16, branch cables1-20261016): cables in the cell view (power lines, string-light wires, ropes)
 
 - **The cell view draws Fallout 4 cables.** A cable is a reference whose base is a BNDS record (no model). Its XBSD

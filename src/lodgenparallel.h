@@ -114,6 +114,10 @@ quint64 lodgenPeakWorkingSet();
 //! "peak working set: N.N GB (N bytes)", the words the panel and the CLI share.
 QString lodgenPeakWorkingSetLine();
 
+//! lane BAKEMEM1: with WW_LODGEN_MEMLOG set, one "mem: <phase> | private, peak private, ws" line on stderr.
+bool lodgenMemLogOn();
+void lodgenMemNote( const QString & phase, const QString & extra = QString() );
+
 /*! A bounded write queue on a thread of its own, so a worker hands over bytes
  *  and goes back to building instead of waiting on the disk.
  *

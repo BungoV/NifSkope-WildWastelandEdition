@@ -70,6 +70,9 @@ bool lodgenProbeAsset( const QString & dataRoot, const QString & relPath,
 int lodgenEditorMarkerCount( int add, const QString & model = QString() );
 //! lane FXREST1: the models (data-relative, lower case, backslashes) that lost a shape to the inside-name rule
 QStringList lodgenEditorMarkerInsideModels();
+//! lane BAKEMEM1: what the native loader's per-thread model caches took in (WW_LODGEN_MEMLOG).
+QString lodgenNativeCacheMemLine();
+
 /*! lane SUNCELL1: did this model's parse (lodgenLoadModel, this process) find a particle system? The cell view
  *  copies those systems into its document (the welded load takes triangle shapes only). */
 bool lodgenModelHasParticles( const QString & model );
