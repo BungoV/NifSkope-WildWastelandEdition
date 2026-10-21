@@ -3,14 +3,14 @@
 Rule (bungo 10-21): keep this current at every lane start, finish, merge and ruling. Every ask gets a row the moment
 bungo says it. Tiers: WORKING ON -> BUILT, NOT LANDED -> LANDED; APPROVED (his yes, not started); PLANNED (future, no yes
 yet). A row leaves only as LANDED or SUPERSEDED, and then moves to LANES_DONE.md (keeps this file short). Read this before saying anything is "done" or "covered".
-Main now: 59f38a5a (10-21 night, MERGEALL1 landing). Detail of old audits: overnight_1021\AUDIT.md, AUDIT_repo.md.
+Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overnight_1021\AUDIT.md, AUDIT_repo.md.
 
 ## 1. WORKING ON NOW
 | Lane | What | State |
 |---|---|---|
-| MERGEALL1 | merge every built branch into main, clean merged worktrees (bungo 10-21 "merge everything") | 8 landed so far (see LANDED); rest in section 2 |
+| MERGEALL1 | merge every built branch into main, clean merged worktrees (bungo 10-21 "merge everything") | 17 landed (LANES_DONE); 3 held (section 2); cleanup next |
 | PERF2 | time the frame; depth reuse, per-tile lights, fewer driver calls, temporal reuse, fog integrate O(S^2) -> O(S) | running |
-| VOLAIRSKY1 | VOLAIR1 sky gate fail (0.266 % vs 0.20 %) + placed lights never reach the fog (29 lights, 0 clusters) | running |
+| VOLAIRSKY1 | VOLAIR1 sky gate fail (0.266 % vs 0.20 %) + placed lights in the fog (audit claim: 0 clusters; lane finds 1309-1419 filled on steady frames, 0 only the first ~8 frames after load) | running |
 | SSGI2 | SSGI gate (SSGI1 landed ungated) + blue noise, depth intervals, emissive, pyramid | running |
 | SHADOWPAR1 | shadows to FO4CS level (TERRSHADOW1 WEAKER list) + fog far-tail leak | running |
 | FXCHECK1 | BGEM glass milky; no fire-barrel particles | running |
@@ -20,20 +20,12 @@ Main now: 59f38a5a (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 Queued tonight (his 10-21 go): FARBAKE2 whole-map rebake, every channel (after BAKESPEED1); VTGPU1 + PROFILE1 (after
 BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
 
-## 2. BUILT, NOT LANDED (MERGEALL1 deciding tonight)
-| Lane | Branch | What it gives | Owed |
+## 2. BUILT, NOT LANDED (MERGEALL1 holds these)
+| Lane | Branch | What it gives | Why held |
 |---|---|---|---|
-| LIGHTSYS2 | origin/cloud-lightsys2 | clustered placed lights (80 px tiles x 24 slices) | Windows build + real-cell gate |
-| OPENCELL1 | origin/cloud-opencell1 | File > Open Cell, Recent Cells, MO2 import (UIPARITY1 lane 1) | STRINGS reader, .esl order, real plugin test |
-| LEANCOMMENTS1 | origin/cloud-leancomments1 | lean comments pass 1 (-2758 lines) | lands after src/gl/cell* lanes; pass 2 |
-| PGI0 | pgi0-20261013 | .pgi probe-GI file format, gates pass | merge only |
-| BAKEINCR1 | bakeincr1-20261004 | incremental probe bake | world gate on a quiet machine |
-| VOLPART1 | volpart1-20261014 | steam/fog cards lit as volumes (ships off) | gates passed 10-15; check vs main |
-| PBRALBEDO1 | fixpack1 | bake reads .pbrm base color x (1 - metallic) | never built or gated |
-| NEAR2 | near2-20260926 | near library: texture arrays, placement identity | superseded? check |
-| CELL1 | cell1-20260926 | export a cell/LOD chunk as glb/obj + Blender shots | none noted |
-| MORPHCYC1 | morphcyc1 | chargen preview clips in the Rigging Manager | outside cell/LOD scope |
-| ALLON2 fix | worktree NifskopeWWE-allon2, uncommitted | AO-unit fix | commit first, never discard |
+| PBRALBEDO1 | fixpack1 | bake reads .pbrm base color x (1 - metallic) | its own gate fails: 0/26 fixture materials resolved |
+| VOLPART1 | volpart1-20261014 | steam/fog cards lit as volumes (ships off) | built on old VOLAIR1: 9 files conflict; needs a rebase lane |
+| LEANCOMMENTS1 | origin/cloud-leancomments1 | lean comments pass 1 (-2758 lines) | 16 conflicts; re-run on final main |
 
 ## 3. APPROVED, NOT STARTED (his yes on record)
 - LODPRTP L2-L7: distant probes (yes 10-15; L8/L9, P1/P2 still need a yes)
