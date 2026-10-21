@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "lodgenparallel.h"
 
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QMutex>
 #include <QMutexLocker>
@@ -245,6 +246,8 @@ QString lodgenPeakWorkingSetLine()
 		.arg( double( b ) / 1073741824.0, 0, 'f', 2 ).arg( b );
 }
 
+static QElapsedTimer g_memSince = []() { QElapsedTimer t; t.start(); return t; }();
+
 bool lodgenMemLogOn()
 {
 	static const bool on = qEnvironmentVariableIsSet( "WW_LODGEN_MEMLOG" );
@@ -292,9 +295,19 @@ void lodgenMemNote( const QString & phase, const QString & extra )
 			.arg( n ).arg( busy >> 20 ).arg( big >> 20 ).arg( freeC >> 20 );
 	}
 #endif
-	const QByteArray line = QStringLiteral( "mem: %1 | private %2 MB, peak private %3 MB, ws %4 MB%5%6\n" )
+	// lane BAKESPEED1: wall and process CPU seconds, so a phase's cores-busy is dcpu / dt
+	static QElapsedTimer & since = g_memSince;
+	double cpu = 0.0;
+#ifdef Q_OS_WIN32
+	FILETIME c0, e0, k0, u0;
+	if ( GetProcessTimes( GetCurrentProcess(), &c0, &e0, &k0, &u0 ) )
+		cpu = double( ( ( quint64( k0.dwHighDateTime ) << 32 ) | k0.dwLowDateTime )
+			+ ( ( quint64( u0.dwHighDateTime ) << 32 ) | u0.dwLowDateTime ) ) / 1e7;
+#endif
+	const QByteArray line = QStringLiteral( "mem: %1 | t %7 s cpu %8 s | private %2 MB, peak private %3 MB, ws %4 MB%5%6\n" )
 		.arg( phase ).arg( priv >> 20 ).arg( peakPriv >> 20 ).arg( ws >> 20 ).arg( heap )
-		.arg( extra.isEmpty() ? QString() : QStringLiteral( " | " ) + extra ).toUtf8();
+		.arg( extra.isEmpty() ? QString() : QStringLiteral( " | " ) + extra )
+		.arg( double( since.elapsed() ) / 1000.0, 0, 'f', 1 ).arg( cpu, 0, 'f', 1 ).toUtf8();
 	fputs( line.constData(), stderr );
 	fflush( stderr );
 }

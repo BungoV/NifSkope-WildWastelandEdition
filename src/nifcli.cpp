@@ -4510,6 +4510,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			const bool passOk = lodgenRunChunkPass( jobs, pass,
 				[&]( const LodgenChunkOutcome & r ) {
 					lodgenIncrementalNoteRetired( inc, pass, r );
+					if ( lodgenMemLogOn() )	// lane BAKESPEED1: per-chunk retire time
+						lodgenMemNote( QStringLiteral( "chunk retired %1 dim %2 (%3,%4)" ).arg( r.index ).arg( r.dim ).arg( r.cx ).arg( r.cy ) );
 					if ( !r.btoBuilt )
 						retiredBto.insert( lodgenIncrementalChunkKey( inc, r.dim, r.cx, r.cy ), QString() );
 					else if ( r.btoSaved )

@@ -18762,7 +18762,11 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		return true;
 	};
 
+	// lane BAKESPEED1: WW_LODGEN_MEMLOG times the row loop's parts (tiles, level-0 write, propagate)
+	qint64 msVtTiles = 0, msVtWrite = 0, msVtProp = 0;
+	QElapsedTimer vtPart;
 	for ( int ty = 0; ty < levels[0].tilesY; ty++ ) {
+		vtPart.start();
 		std::vector<LodgenVtStage> row( size_t( levels[0].tilesX ) );
 		// a tile row's border reaches one cell past its north edge, no further
 		if ( msnSheets )
@@ -18794,14 +18798,22 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			// lane TERR1: the object normals, onto whichever surface normal the tile ended with
 			roadCensus.nrmTexels += int( lodgenVtStampMsn( content, border, row[size_t( tx )] ) );
 		}
+		msVtTiles += vtPart.restart();
 		for ( int tx = 0; tx < levels[0].tilesX; tx++ )
 			if ( !writeTile( 0, row[size_t( tx )] ) )
 				return false;
 		rings[0][ty] = std::move( row );
 		// only the cells a later tile row can still reach stay cached
 		landCache.dropBelow( levels[0].north - ( ty + 2 ) * levels[0].dim );
+		msVtWrite += vtPart.restart();
 		if ( !propagate( 0, ty ) )
 			return false;
+		msVtProp += vtPart.restart();
+		if ( lodgenMemLogOn() )
+			lodgenMemNote( QStringLiteral( "vt row %1/%2" ).arg( ty + 1 ).arg( levels[0].tilesY ),
+				QStringLiteral( "tiles %1 s, write0 %2 s, propagate %3 s (cumulative)" )
+					.arg( msVtTiles / 1000.0, 0, 'f', 1 ).arg( msVtWrite / 1000.0, 0, 'f', 1 )
+					.arg( msVtProp / 1000.0, 0, 'f', 1 ) );
 		if ( opts.progress && !opts.progress( opts.progressUser, ty + 1, levels[0].tilesY ) )
 			return fail( QStringLiteral( "cancelled" ) );
 	}
