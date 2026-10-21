@@ -14,12 +14,3 @@ A row moves to LANES.md section 3 the moment bungo says yes.
   selection (09-11); denser shore LOD water (09-04); door-timed air volumes (10-16); worse Far Harbor fog (10-15)
 - VAULTDUST1 camera-local motes/snow/ash/leaves; UMBRA1 door state + multi-block; GRASSMB1 not-ported list
 - Editor (not cell/LOD): Skeleton Manager 2-4, Block Details table, collision P4 + cloth, UV ops, 3 animation gaps
-
-
-
-## From PERFRESEARCH1 WHOLEFRAME.md (10-22, need his yes)
-- FARCARD1 far cards instanced, no per-card uniforms/hash (~13-16 ms Concord, no look change)
-- TONEMAP1+SYNC1 HDR resolve/blit/mips/readback cut (~3-4.5 ms) + audit 43 sync/readback sites (~1-5 ms)
-- SHADOWCACHE1 cascade caster caching (~5.5 ms CPU Concord); overlaps GPUDRIVEN1 step A
-- LIGHTCLUSTER1 (~2-4 ms); STREAM1 streaming hitches; AAFORMAT1 MSAA study (pair if MSAA off)
-- TEXSTREAM1 / VTXPACK1 / LOAD1 memory -40-60 %, load -20-40 s; geometry cache 308 MB vs 128 MB budget

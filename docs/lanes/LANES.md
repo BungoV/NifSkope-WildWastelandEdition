@@ -43,8 +43,9 @@ BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
 
 ## 3. APPROVED, NOT STARTED (his yes on record)
 - SSGI3 (defect, queued at once): SSGI on under-counts near geometry vs tracer (0.80 vs off 0.89, bar +-10%); SSGI1 fill law (visibility removes more probe light than the march adds); diag reds in SSGI2 BATCH lines
-- PERFRESEARCH1 running (yes 10-22): research notes, then lanes GPUDRIVEN1 (meshlets + GPU-driven drawing, the CPU-bound fix), VISBUF1 (visibility buffer, tiny far triangles), VRS1 (variable rate shading, pair if any look change), FXRES1 (per-effect resolution + OIT)
-- PERF3 (after BATCH1 timings): AO stays FULL res (bungo 10-21 "full res and optimize where it counts for real"); drop AO + SSR second scene submissions by reusing the main pass depth/normals (+ per-material SSR flag from main pass, SSR from previous frame); CPU per-draw setup cuts; far-LOD proposal
+- PERFRESEARCH1 DONE (notes in perfresearch1/): research notes, then lanes GPUDRIVEN1 (meshlets + GPU-driven drawing, the CPU-bound fix), VISBUF1 (visibility buffer, tiny far triangles), VRS1 (variable rate shading, pair if any look change), FXRES1 (per-effect resolution + OIT)
+- PERF lanes (yes 10-22, order in perfresearch1/ORDER.md): FARCARD1 far cards batched; TONEMAP1+SYNC1 one lane; GPUDRIVEN1 A then B; SHADOWCACHE1 (after GPUDRIVEN1 A); LIGHTCLUSTER1; VRS1; FXRES1; STREAM1; AAFORMAT1 (MSAA off = pair); TEXSTREAM1/VTXPACK1/LOAD1; VISBUF1 last if it still pays. Running now: PERF3 + FARCARD1
+- PERF3 (started 10-22): AO stays FULL res (bungo 10-21 "full res and optimize where it counts for real"); drop AO + SSR second scene submissions by reusing the main pass depth/normals (+ per-material SSR flag from main pass, SSR from previous frame); CPU per-draw setup cuts; far-LOD proposal
 - LODPRTP L2-L7: distant probes (yes 10-15; L8/L9, P1/P2 still need a yes)
 - PGI1 HORIZON chunk + GI port to FO4CS (PGI2-7)
 - Hybrid rebake of Far Harbor, Nuka-World, pre-war Sanctuary (FARBAKE2 is Commonwealth only)
