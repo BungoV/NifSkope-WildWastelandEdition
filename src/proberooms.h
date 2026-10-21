@@ -45,6 +45,8 @@ struct ProbeRoomSpec
 	 *  not outdoors for that (only the faces the clip leaves, as before). Red "soupbox": the soup's box. */
 	float clipLo[3] = { 1.0f, 1.0f, 1.0f };
 	float clipHi[3] = { 0.0f, 0.0f, 0.0f };
+	//! lane VOLFIT1: keep the working grids (ProbeRooms::state, labels, dist2, facing) for the Space stage (probevolumes.h)
+	bool keep = false;
 };
 
 struct ProbeRooms
@@ -63,6 +65,13 @@ struct ProbeRooms
 	int cores = 0, coresOutdoors = 0, pockets = 0, folded = 0;
 	int clippedFaces = 0;           //!< lane GIBLACK2: the soup box's faces the clip cut (bits -x +x -y +y -z +z)
 	double ms = 0;
+	/*! lane VOLFIT1: with ProbeRoomSpec::keep, per cell: 0 air / 1 solid / 2 glass; the unfolded label (-1 solid or
+	 *  glass, 0 outdoors); the squared distance to solid or glass (cells); the one-sided faces' summed normal x 32
+	 *  (saturated; a wall's front side reads along it). Empty otherwise. */
+	std::vector<quint8> state;
+	std::vector<qint32> labels;
+	std::vector<float> dist2;
+	std::vector<qint8> facing;  //!< 3 per cell
 
 	size_t index( int x, int y, int z ) const
 	{

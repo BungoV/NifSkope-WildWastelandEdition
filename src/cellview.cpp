@@ -41,6 +41,9 @@ BSD License - see nifskope.h
 #include "spells/blocks.h"
 #include "gl/celllights.h"
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1
+#include "gl/cellvolumeview.h"	// lane VOLFIT1
+#include "probevolumes.h"	// lane VOLFIT1: the Space stage
+#include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "gl/cellfxlit.h"
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellwater.h"	// lane WATER1
@@ -73,6 +76,29 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <cstring>
 #include <vector>
+
+/* lane VOLFIT1: feeds the GI result's volume set (lane PERF1's ProbeGiResult::volumes) when this build's GI has one;
+ * before that merge the second overload is chosen and nothing is fed. */
+template <class R>
+static auto wwVolumesIntoGi( R & r, const ProbeVolumesGi & g, int ) -> decltype( (void) r.volumes, bool() )
+{
+	probeVolumesGiFill( g, r.volumes );
+	// the room-grid rooms the Space stage did not keep (ids after Space's) keep the stand-in's boxes and openings
+	const int nSpace = int( g.rooms.size() );
+	const GiVolumeSet st = giVolumesFromRooms( r.rooms );
+	for ( const GiVolumeShape & s : st.shapes )
+		if ( s.room > nSpace )
+			r.volumes.shapes.push_back( s );
+	for ( const GiThreshold & t : st.thresholds )
+		if ( t.rooms[0] > nSpace || t.rooms[1] > nSpace )
+			r.volumes.thresholds.push_back( t );
+	return true;
+}
+template <class R>
+static bool wwVolumesIntoGi( R &, const ProbeVolumesGi &, long )
+{
+	return false;
+}
 
 namespace
 {
@@ -2240,6 +2266,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 *  - the occlusion primitives the game culls with (PlaneMarker planes and boxes) and, indoors, the rooms
 	 *    (RoomMarker boxes, XLRM linked rooms) and portals (PortalMarker planes, XPOD rooms): handed to gl/cellcull,
 	 *    which the Previs row applies to the camera pass only (casters always cast). */
+	std::vector<ProbeVolumeMarker> volMarkers;   // lane VOLFIT1: rooms and portals, evidence for the Space stage
 	if ( !chunk ) {   // lane CELLSTREAM1: previs for streamed cells is an open item
 		WwPrevisScene pv;
 		int planes = 0, boxes = 0, linked = 0, toOutside = 0, prevDisabled = 0;
@@ -2267,6 +2294,20 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			x.to = r.portalTo;
 			for ( const quint32 l : r.linkedRooms )
 				x.linked.push_back( l );
+			if ( room || portal ) {
+				ProbeVolumeMarker vm;
+				vm.type = room ? 1 : 2;
+				for ( int k = 0; k < 3; k++ ) {
+					vm.c[k] = x.c[k];
+					vm.half[k] = x.half[k];
+					for ( int q = 0; q < 3; q++ )
+						vm.ax[k][q] = x.ax[k][q];
+				}
+				vm.ref = x.ref;
+				vm.from = x.from;
+				vm.to = x.to;
+				volMarkers.push_back( vm );
+			}
 			if ( occ ) {
 				( r.primType == 3 ? planes : boxes )++;
 				pv.occluders.push_back( std::move( x ) );
@@ -4515,6 +4556,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	// ---- lane PRTPPLACE: place the probes, write them, draw them
 	QString probeNotes;
 	QString giBakeDir;      // lane PRTPGI: the folder the bake just wrote, relit once the lights are read
+	std::shared_ptr<const ProbeVolumes> volGi;   // lane VOLFIT1: the Space rooms for the GI (WW_CELL_VOLUMES_GI=1); shared with the kept sky spec
+	bool volGiOn = false;
 	if ( probing ) {
 		if ( !spec.interior ) {
 			// the ground is part of what a column ray meets, painted or not
@@ -4743,6 +4786,68 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		QString perr;
 		if ( !soupDump.isEmpty() && !probeSoupWrite( QString::fromLocal8Bit( soupDump ), probeSoup, &perr ) )
 			qWarning() << "WW_CELL_PROBE_SOUP:" << perr;
+		// lane VOLFIT1: the markers beside the soup, so the headless `volumes` command sees what the view saw
+		if ( !soupDump.isEmpty() && !probeVolumesMarkersWrite( QString::fromLocal8Bit( soupDump ) + QStringLiteral( ".markers" ), volMarkers ) )
+			qWarning() << "WW_CELL_PROBE_SOUP: cannot write the markers";
+		// lane VOLFIT1: WW_CELL_VOLUMES=<bake root> runs the Space stage (rooms, thresholds) into <root>/<World>/<X>_<Y>
+		const QByteArray volRoot = qgetenv( "WW_CELL_VOLUMES" );
+		if ( placed && !volRoot.isEmpty() ) {
+			QElapsedTimer vt;
+			vt.start();
+			std::vector<ProbeVolumeAperture> volAps;
+			for ( const ProbePoint & p : pr.probes )
+				if ( p.cls == ProbeClass::Aperture ) {
+					ProbeVolumeAperture a;
+					a.type = int( p.kind );
+					for ( int c = 0; c < 3; c++ )
+						a.pos[c] = p.pos[c];
+					a.width = p.width;
+					a.height = p.height;
+					a.doorRef = p.doorRef;
+					volAps.push_back( a );
+				}
+			ProbeVolumesStageSpec vs;
+			vs.root = QDir::cleanPath( QString::fromLocal8Bit( volRoot ) );
+			vs.interior = spec.interior;
+			vs.byAnchor = !spec.interior;
+			vs.spec.red = QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_RED" ) );
+			QString recxName;
+			if ( spec.interior ) {
+				QString k = world.interior().edid.isEmpty() ? spec.interiorCell : world.interior().edid;
+				k.replace( QRegularExpression( QStringLiteral( "[^A-Za-z0-9_+-]" ) ), QStringLiteral( "_" ) );
+				vs.keys << ( k.isEmpty() ? QStringLiteral( "cell" ) : k );
+				recxName = vs.keys.front();
+			} else {
+				vs.world = spec.world;
+				vs.spec.clipLo[0] = ps.minX - 512.0f;   // the block plus a margin: an edge room is whole, kept by its anchor's cell
+				vs.spec.clipLo[1] = ps.minY - 512.0f;
+				vs.spec.clipHi[0] = ps.maxX + 512.0f;
+				vs.spec.clipHi[1] = ps.maxY + 512.0f;
+				for ( int y = ownCells[1]; y <= ownCells[3]; y++ )
+					for ( int x = ownCells[0]; x <= ownCells[2]; x++ )
+						vs.keys << QStringLiteral( "%1_%2" ).arg( x ).arg( y );
+				recxName = spec.world;
+			}
+			// hand fixes: WW_CELL_VOLUMES_RECX=<dir>, else Data/Plugins/FO4CS/Volumes/<World or EDID>.recx when present
+			const QByteArray rxDir = qgetenv( "WW_CELL_VOLUMES_RECX" );
+			const QString rx = QDir( rxDir.isEmpty() ? dataRoot + QStringLiteral( "/Plugins/FO4CS/Volumes" ) : QString::fromLocal8Bit( rxDir ) )
+				.filePath( recxName + QStringLiteral( ".recx" ) );
+			if ( QFileInfo::exists( rx ) ) {
+				vs.recxFile = rx;
+				vs.recxName = recxName;
+			}
+			ProbeVolumes vol;
+			bool vok = false;
+			const QString vlog = probeVolumesStage( probeSoup, volMarkers, volAps, vs, &vol, &vok );
+			for ( const QString & l : vlog.split( '\n', Qt::SkipEmptyParts ) )
+				probeNotes += QStringLiteral( "  %1\n" ).arg( l );
+			probeNotes += QStringLiteral( "  space stage %1 ms (%2)\n" ).arg( vt.elapsed() ).arg( vok ? QStringLiteral( "ok" ) : QStringLiteral( "FAILED" ) );
+			wwCellVolumeViewPublish( nif, vol );
+			if ( vok && qgetenv( "WW_CELL_VOLUMES_GI" ) == "1" ) {
+				volGi = std::make_shared<const ProbeVolumes>( std::move( vol ) );
+				volGiOn = true;
+			}
+		}
 		if ( !soupShapesPath.isEmpty() ) {   // lane ALPHATEST1 gate
 			QFile f( QString::fromLocal8Bit( soupShapesPath ) );
 			if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
@@ -5255,6 +5360,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				gs.brickEdge = qEnvironmentVariable( "WW_CELL_GI_BRICK_EDGE" ).toFloat();
 			gs.passes = qEnvironmentVariableIntValue( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
 			gs.rooms.red = QString::fromLatin1( qgetenv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
+			gs.space = volGiOn ? volGi : nullptr;   // lane VOLFIT1: WW_CELL_VOLUMES_GI=1, the Space rooms are the GI's rooms
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
 			// lane SKYINT1: and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
 			const quint16 cf = spec.interior ? cellInteriorFlags( world.interior() ) : quint16( 0 );
@@ -5423,6 +5529,16 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				// lane SKY1; lane SKYINT1: an interior keeps its own ambient, so its grid never stands in for the weather's
 				gi.skyLit = gr.skyLit && !spec.interior && gs.skyRed != QLatin1String( "keepamb" );
 				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
+				if ( volGiOn ) {   // lane VOLFIT1: the Space rooms as the GI's volumes (the room grid now carries their ids)
+					const ProbeVolumesGi vg = probeVolumesToGi( *volGi, gr.rooms, 0.2f, QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_GI_RED" ) ) );
+					probeNotes += QStringLiteral( "  %1\n" ).arg( vg.census );
+					for ( const QString & l : vg.log )
+						probeNotes += QStringLiteral( "  space to GI: %1\n" ).arg( l );
+					if ( !wwVolumesIntoGi( gr, vg, 0 ) )
+						probeNotes += QStringLiteral( "  space to GI: this build's GI takes no volume set (lane PERF1 not merged); not fed\n" );
+					else if ( vg.shapes.empty() )
+						probeNotes += QStringLiteral( "  space to GI: no room mapped; the GI keeps its stand-in\n" );
+				}
 				probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1: the second slots and the rooms
 				wwCellGiPublish( nif, gi );
 				wwCellAoDecalPublish( nif, gs.aoDecals );	// lane AODECAL1 (null: no decals)

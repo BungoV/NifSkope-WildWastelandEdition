@@ -16,6 +16,7 @@ See the LICENSE.md file for the full license text.
 #include "probefar.h"		// lane PRTPFAR
 #include "probegi.h"		// lane ROOMCLAMP1: probegi
 #include "proberelight.h"	// lane GPURELIGHT1: gpurelight
+#include "probevolumes.h"	// lane VOLFIT1: volumes
 
 #include "freezeanim.h"
 #include "gamemanager.h"
@@ -7942,6 +7943,13 @@ int nifskopeCliMain( const QStringList & args )
 	// `probegi` places, bakes and relights a soup by the lights given, then dumps (lane ROOMCLAMP1; src/probegi.cpp)
 	if ( cmd == QLatin1String( "probegi" ) ) {
 		const int rc = probeGiCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// `volumes` builds the Space stage (rooms, thresholds, shapes) of a soup (lane VOLFIT1; src/probevolumes.cpp)
+	if ( cmd == QLatin1String( "volumes" ) ) {
+		const int rc = probeVolumesCli( a );
 		out().flush();
 		err().flush();
 		return rc;

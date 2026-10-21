@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 #include "probebake.h"
 #include "proberelight.h"
 #include "cellaodecal.h"	// lane AODECAL1
+#include "probevolumesgi.h"	// lane VOLFIT1: the Space rooms as the room source
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -1379,6 +1380,9 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	if ( memoOn )
 		std::fprintf( stderr, "gi geomemo: tracer %s, rooms %s\n", bvhHit ? "kept" : "built",
 			!roomsWanted ? "off" : roomsHit ? "kept" : "built" );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
+	// lane VOLFIT1: the Space stage is the room source (ruling 10-19); after the memo, which keeps ROOMCLAMP1's grid
+	if ( R.roomsOn && spec.space )
+		R.spaceRooms = probeRoomsFromSpace( *spec.space, &R.rooms, QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_GI_RED" ) ) );
 	const ProbeRooms & RM = R.rooms;
 	// every probe's rooms: its cell's, or in a solid cell the nearest air cell's within two cells
 	std::vector<std::array<int, 2>> probeRoom( up.size(), { { -1, -1 } } );
@@ -2237,6 +2241,7 @@ QString probeGiCensusText( const ProbeGiResult & r )
 			+ QStringLiteral( "\n  gi rooms: voxels with a second room %1 (left empty %2), slots gathered from their eye "
 				"(the centre in another room) %3, probes in no room %4" ).arg( r.voxelsTwoRooms ).arg( r.voxelsTwoBare )
 				.arg( r.voxelsCentreElsewhere ).arg( r.probesRoomless )
+				+ ( r.spaceRooms.isEmpty() ? QString() : QStringLiteral( "\n  " ) + r.spaceRooms )   // lane VOLFIT1
 			: QStringLiteral( "gi rooms: off (red noclamp: one value a voxel)" ) )
 		+ ( r.skyLit ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() )
 		+ QStringLiteral( "\n  " ) + bounceCensusText( r )
