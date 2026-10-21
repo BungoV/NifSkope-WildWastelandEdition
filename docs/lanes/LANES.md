@@ -15,7 +15,7 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | SHADOWPAR1 | shadows to FO4CS level (TERRSHADOW1 WEAKER list) + fog far-tail leak | running |
 | FXCHECK1 | BGEM glass milky; no fire-barrel particles | running |
 | BAKESPEED1 | far-LOD bake speed (chunks 2864 -> 1191 s mid region) | resume/determinism gates |
-| RTBAKE1 | GPU ray-traced bake (gate cell 52.5 -> 43.0 s) | museum gate running |
+| RTBAKE1 | GPU ray-traced bake (gate cell 52.5 -> 43.0 s) | gates PASS (rt3 6cabd09); closing before merge: in-cell museum rerun + source of 40 surfel floats past 1/32 |
 
 Queued tonight (his 10-21 go): FARBAKE2 whole-map rebake, every channel (after BAKESPEED1); VTGPU1 + PROFILE1 (after
 BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
