@@ -5,6 +5,8 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellview.h"
+#include "probeincr.h"
+#include <QCryptographicHash>
 
 #include "cellpick.h"
 #include "cellrefs.h"
@@ -1615,6 +1617,34 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
 	return systems;
 }
 
+/* lane BAKEINCR1: the far soup a bake of (cx, cy) with this block would append, as one sha1 -- the
+ * triangles, their albedo and glass, the very ring probeFarAppendRing reads. "none" when the world has
+ * no FO4CSLOD .lodl (the bake then appends none either). Only cells whose ring content moved go dirty. */
+QString cellBakeFarDigest( const QString & world, const QString & dataRoot, int cx, int cy, int half )
+{
+	QStringList searched;
+	const QString lodl = cellFarLodl( world, dataRoot, searched );
+	if ( lodl.isEmpty() )
+		return QStringLiteral( "none" );
+	const QFileInfo li( lodl );
+	const QString lodi = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodi" ) );
+	const int radius = int( std::ceil( ProbeBakeSpec().rayMax / CELL_UNITS ) );
+	ProbeSoup soup;
+	ProbeFarResult r;
+	if ( !probeFarAppendRing( lodl, QFileInfo( lodi ).isFile() ? lodi : QString(), cx, cy, half, radius, soup, &r ) )
+		return QStringLiteral( "refused" );
+	QCryptographicHash h( QCryptographicHash::Sha1 );
+	auto feed = [&h]( const void * p, size_t n ) { h.addData( QByteArrayView( static_cast<const char *>( p ), qsizetype( n ) ) ); };
+	const qint64 n[4] = { qint64( soup.tris.size() ), qint64( soup.alb.size() ), qint64( soup.glass.size() ),
+		qint64( soup.glassT.size() ) };
+	feed( n, sizeof( n ) );
+	feed( soup.tris.data(), soup.tris.size() * sizeof( float ) );
+	feed( soup.alb.data(), soup.alb.size() );
+	feed( soup.glass.data(), soup.glass.size() * sizeof( float ) );
+	feed( soup.glassT.data(), soup.glassT.size() );
+	return QString::fromLatin1( h.result().toHex() );
+}
+
 // lane CELLSTREAM1: a streamed cell's welded buckets, handed from the worker to the writer
 struct CellChunkBuckets
 {
@@ -1702,6 +1732,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		modPickViewNote = mp.viewNote;
 		qInfo().noquote() << mp.line;
 	}
+	// lane BAKEINCR1: an exterior bake records every asset it reads, for its bakeincr.txt
+	const bool incrRecord = !chunk && bakeExterior && !spec.interior && qEnvironmentVariableIsEmpty( "WW_CELL_GI_FROM" );
+	if ( incrRecord )
+		ProbeIncr::startRecording();
 
 	// ---- the worldspace, or (lane PRTP1) one interior cell
 	// lane CELLSTREAM1: shared, so a streaming open can hand it on; a streamed cell reads the open's
@@ -5076,6 +5110,24 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						PgiWriteResult pres;
 						pgiWriteFromTbk( bres.files, ps, QDir::cleanPath( dir ), &pres );
 						t << "  " << pgiWriteCensusText( pres ) << "\n";
+					}
+					/* lane BAKEINCR1: what this bake read, beside what it wrote (src/probeincr.h). The
+					 * far line is its own ring read again into an empty soup -- warm, about a second. */
+					if ( incrRecord ) {
+						ProbeIncr::stopRecording();
+						QElapsedTimer rt;
+						rt.start();
+						const int half = ( spec.n - 1 ) / 2;
+						const QString recs = ProbeIncr::recordsDigest( world, spec.cx, spec.cy, half );
+						const QString recs1 = ProbeIncr::recordsDigest( world, spec.cx, spec.cy, 0 );
+						const QString far = cellBakeFarDigest( spec.world, dataRoot, spec.cx, spec.cy, half );
+						QString rerr;
+						if ( ProbeIncr::writeRecord( QDir::cleanPath( dir ), spec.world, spec.cx, spec.cy, half, recs, recs1, far, &rerr ) )
+							t << "  bake record " << ProbeIncr::recordName() << ": " << ProbeIncr::recorded().size()
+							  << " assets, records " << recs.left( 12 ) << ", far " << far.left( 12 ) << ", "
+							  << rt.elapsed() << " ms\n";
+						else
+							t << "  bake record REFUSED: " << rerr << "\n";
 					}
 				}
 			}

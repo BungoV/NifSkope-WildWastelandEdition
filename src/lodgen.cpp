@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodgen.h"
+#include "probeincr.h"
 #include "lodgenparallel.h"
 #include "lodgenbc7.h"
 #include "lodgengpu.h"
@@ -1748,7 +1749,22 @@ bool lodgenReadFromStack( const QString & relPath, const char * archiveFolder,
 	return !out.isEmpty();
 }
 
+static bool lodgenReadAssetRaw( const QString & dataRoot, const QString & relPath,
+	const char * archiveFolder, const char * extension, QByteArray & out );
+
+/* lane BAKEINCR1: every asset read passes here, and while a probe bake records its inputs
+ * (src/probeincr.cpp) the read is noted -- data root, path, folder, extension and the
+ * bytes' sha1, or "missing" -- so the incremental check can ask the same question later. */
 static bool lodgenReadAsset( const QString & dataRoot, const QString & relPath,
+	const char * archiveFolder, const char * extension, QByteArray & out )
+{
+	const bool ok = lodgenReadAssetRaw( dataRoot, relPath, archiveFolder, extension, out );
+	if ( ProbeIncr::recording() )
+		ProbeIncr::note( dataRoot, relPath, archiveFolder, extension, ok, out );
+	return ok;
+}
+
+static bool lodgenReadAssetRaw( const QString & dataRoot, const QString & relPath,
 	const char * archiveFolder, const char * extension, QByteArray & out )
 {
 	out.clear();
@@ -20876,6 +20892,13 @@ static QString lodgenLedgerAssetDigest( const QString & dataRoot, const QString 
 	QMutexLocker lock( &g_ledgerAssetMutex );
 	g_ledgerAssetDigest.insert( key, hex );
 	return hex;
+}
+
+//! lane BAKEINCR1: the generator's asset reader, for the incremental probe check (src/probeincr.cpp)
+bool lodgenReadAssetBytes( const QString & dataRoot, const QString & relPath, const char * archiveFolder,
+	const char * extension, QByteArray & out )
+{
+	return lodgenReadAsset( dataRoot, relPath, archiveFolder, extension, out );
 }
 
 QString lodgenFileDigest( const QString & path )

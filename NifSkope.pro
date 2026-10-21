@@ -368,6 +368,7 @@ HEADERS += \
 	src/pgi_format.h \
 	src/pgiwrite.h \
 	src/probefar.h \
+	src/probeincr.h \
 	src/probebvh.h \
 	src/probemask.h \
 	src/probeemit.h \
@@ -661,6 +662,7 @@ SOURCES += \
 	src/probevolumesgi.cpp \
 	src/probesky.cpp \
 	src/probefar.cpp \
+	src/probeincr.cpp \
 	src/probeplace.cpp \
 	src/cellrefs.cpp \
 	src/cellactor.cpp \
