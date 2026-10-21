@@ -361,6 +361,8 @@ HEADERS += \
 	src/cellmodelahead.h \
 	src/probealbedo.h \
 	src/probebake.h \
+	src/pgi_format.h \
+	src/pgiwrite.h \
 	src/probefar.h \
 	src/probebvh.h \
 	src/probemask.h \
@@ -641,6 +643,7 @@ SOURCES += \
 	src/cellmodelahead.cpp \
 	src/probealbedo.cpp \
 	src/probebake.cpp \
+	src/pgiwrite.cpp \
 	src/probegi.cpp \
 	src/proberelight.cpp \
 	src/farlight.cpp \

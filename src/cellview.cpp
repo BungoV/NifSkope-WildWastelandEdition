@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include "nativeemit.h"
 #include "probeplace.h"		// lane PRTPPLACE
 #include "probebake.h"		// lane PRTPBAKE
+#include "pgiwrite.h"		// lane PGI0
 #include "probegi.h"		// lane PRTPGI
 #include "probealbedo.h"		// lane PRTPBAKE
 #include "probefar.h"		// lane BAKEBLOCK1: the far soup beyond the loaded block
@@ -5061,6 +5062,21 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						t << "  " << line << "\n";
 					t << "  bake folder " << QDir::toNativeSeparators( QDir::cleanPath( dir ) ) << "\n";
 					giBakeDir = QDir::cleanPath( dir );
+					/* lane PGI0: the .pgi ("Precomputed GI", src/pgi_format.h) beside the .tbk, from the files this bake
+					 * just wrote (no new tracing): exterior <X>_<Y>.pgi a cell, interior <Cell EditorID>.pgi */
+					if ( bs.tbkVersion == 5 && bs.red.isEmpty() ) {
+						PgiWriteSpec ps;
+						ps.interior = spec.interior;
+						ps.world = spec.world;
+						ps.interiorName = spec.interiorCell;
+						ps.interiorName.replace( QRegularExpression( QStringLiteral( "[^A-Za-z0-9_+-]" ) ), QStringLiteral( "_" ) );
+						ps.options = QStringLiteral( "rays %1 maxLinks %2 cell %3 tbk %4 albedo %5 noSky %6 adapt %7" )
+							.arg( bs.rays ).arg( bs.maxLinks ).arg( double( bs.surfelCell ) ).arg( bs.tbkVersion )
+							.arg( bs.albedoWay ).arg( int( bs.noSky ) ).arg( bs.adaptMax ).toUtf8();
+						PgiWriteResult pres;
+						pgiWriteFromTbk( bres.files, ps, QDir::cleanPath( dir ), &pres );
+						t << "  " << pgiWriteCensusText( pres ) << "\n";
+					}
 				}
 			}
 		}

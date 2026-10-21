@@ -13,6 +13,7 @@ See the LICENSE.md file for the full license text.
 #include "probeplace.h"
 #include "cellaodecal.h"	// lane AODECAL1: aobake
 #include "probebake.h"
+#include "pgiwrite.h"
 #include "probefar.h"		// lane PRTPFAR
 #include "probegi.h"		// lane ROOMCLAMP1: probegi
 #include "proberelight.h"	// lane GPURELIGHT1: gpurelight
@@ -7936,6 +7937,13 @@ int nifskopeCliMain( const QStringList & args )
 	// (lane PRTPBAKE; src/probebake.cpp)
 	if ( cmd == QLatin1String( "probebake" ) ) {
 		const int rc = probeBakeCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// lane PGI0: `pgiwrite` re-packs a bake's .tbk v5 sector files into .pgi (src/pgiwrite.cpp); `pgicheck` validates
+	if ( cmd == QLatin1String( "pgiwrite" ) || cmd == QLatin1String( "pgicheck" ) ) {
+		const int rc = cmd == QLatin1String( "pgiwrite" ) ? pgiWriteCli( a ) : pgiCheckCli( a );
 		out().flush();
 		err().flush();
 		return rc;

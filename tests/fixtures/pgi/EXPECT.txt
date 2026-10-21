@@ -1,0 +1,13 @@
+# lane PGI0 fixtures: synthetic (tests/spells/pgi_read.py fixtures), no game data.
+# file  expected (ok | the refusal both readers must give)
+2_-3.pgi ok
+SynthInterior.pgi ok
+good_deflated_surf.pgi ok
+bad_magic.pgi magic
+bad_version.pgi version
+bad_kind.pgi kind
+bad_short.pgi short
+bad_truncated.pgi chunk-range
+bad_header_crc.pgi header-crc
+bad_chunk_crc.pgi chunk-crc
+bad_horizon8.pgi horizon
