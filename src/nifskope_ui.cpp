@@ -2294,11 +2294,9 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 			<< " taa " << ( wwGameTaaOn() ? 1 : 0 ) << "\n";
 	ogl->setSceneTime( shotT );
 	if ( const QString pre = wwParticlePreroll( ogl, shotT ); !pre.isEmpty() ) {
-		fprintf( stderr, "%s
-", qPrintable( pre ) );
+		fprintf( stderr, "%s\n", qPrintable( pre ) );
 		if ( sideOk )
-			log << pre << "
-";
+			log << pre << "\n";
 	}
 	auto pump = [ogl]() {
 		for ( int i = 0; i < 2; i++ ) {
@@ -23532,8 +23530,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 					skope->ogl->setSceneTime( shotT );
 					if ( const QString pre = wwParticlePreroll( skope->ogl, shotT ); !pre.isEmpty() )
-						fprintf( stderr, "%s
-", qPrintable( pre ) );
+						fprintf( stderr, "%s\n", qPrintable( pre ) );
 
 					// grabFramebuffer() reads the CURRENT buffer without
 					// repainting — pump twice or the grab is a stale frame.

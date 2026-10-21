@@ -247,8 +247,7 @@ bool wwFxEnvMaskR()
 		const QByteArray pin = qgetenv( "WW_FX_ENVMASK" ).trimmed();
 		const bool on = !pin.isEmpty() ? pin != "0" : QSettings().value( QStringLiteral( "WW/FxEnvMaskR" ), false ).toBool();
 		const bool r = on && red != "gloss";
-		fprintf( stderr, "fx env mask: %s
-", r ? "R (the game's)" : on ? "G (red WW_FX_ENVMASK_RED=gloss)" : "G (as before)" );
+		fprintf( stderr, "fx env mask: %s\n", r ? "R (the game's)" : on ? "G (red WW_FX_ENVMASK_RED=gloss)" : "G (as before)" );
 		return r ? 1 : 0;
 	}();
 	return v != 0;
