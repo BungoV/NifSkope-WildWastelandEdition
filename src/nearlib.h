@@ -47,12 +47,49 @@ class EsmWorld;
  *  Per placement the `.lodi` keeps the REFR form id (+ SCOL part ordinal), the
  *  Initially-Disabled bit (v11) and the Scrappable bit (v9).
  *
- *  Beside the pair: `<ws>.near.textures.txt` (every material's textures by
- *  (DXGI format, width, height) bucket; a material's `arraySet`/`layer` index
- *  its DIFFUSE's bucket part and layer -- nothing is re-encoded),
+ *  PLACEMENT IDENTITY (lane NEAR2, 2026-09-26). `refFormId` is in the bake's
+ *  own id space (`ESMFile::mapFormID`: top byte = the plugin's position in the
+ *  merged list, a light plugin included), the same space the far `.lodi` uses.
+ *  The game numbers light plugins differently (0xFE, then a 12-bit light
+ *  slot), so that id is NOT the running game's id once a light plugin sits in
+ *  the load order. The cold record's `u16 identity` therefore carries the
+ *  plugin's LOAD-ORDER-RESOLVED identity: a full plugin's game index (0..0xFD),
+ *  or NEAR_IDENTITY_LIGHT | its light slot (0..0xFFF). The game's form id is
+ *  nearGameFormId( refFormId, identity ). The far `.lodi` keeps the stock
+ *  bake's chunk index in that word; a near library has no stock bake.
+ *  `<ws>.near.plugins.txt` lists every plugin with its identity.
+ *
+ *  TEXTURE ARRAYS (lane NEAR2). Every texture a material names, in any of its
+ *  NEAR_TEX_SLOTS slots, is one layer of one Texture2DArray POOL keyed by
+ *  (kind 2d|cube, DXGI format, width, height, mips) -- the five things every
+ *  slice of a D3D11 array must share, so a renderer copies each source DDS's
+ *  mips into its slice as they are: nothing is decoded or re-encoded (BC data
+ *  is GPU-native; re-encoding would lose quality and ship derived game data).
+ *  A pool splits every LODO_LAYER_CAP layers (cube: LODO_LAYER_CAP / 6). Pools
+ *  holding a diffuse come first, so the `.lodo` material's u8 `arraySet` /
+ *  u16 `layer` are its DIFFUSE's pool and layer; the other slots are in
+ *  `<ws>.near.texarrays.bin` (little-endian):
+ *    header 64 B: 'NTXA', u32 version 1, u32 headerBytes 64, u32 poolCount,
+ *      u32 textureCount, u32 materialCount (the .lodo's material order),
+ *      u32 slotsPerMaterial, u32 stringBytes, u64 lodoIdentity (the .lodi's),
+ *      u32 poolsOffset, u32 texturesOffset, u32 slotsOffset, u32 stringsOffset,
+ *      u64 FNV-1a 64 of every byte after the header
+ *    pool 16 B: u8 kind (0 2d, 1 cube), u8 dxgi, u8 mips, u8 0, u16 w, u16 h,
+ *      u32 firstTexture, u16 layerCount, u16 part (the split index)
+ *    texture 8 B: u32 path offset (NUL-terminated `textures\...`, folded),
+ *      u16 pool, u16 layer -- pool by pool, layer order
+ *    slots: materialCount x slotsPerMaterial u32 = pool << 16 | layer, or
+ *      NEAR_SLOT_NONE | a reason (NEAR_SLOT_EMPTY, _MISSING, _UNUSABLE)
+ *  Order is a function of the path set alone, so two bakes are byte-identical.
+ *
+ *  Beside the pair: `<ws>.near.textures.txt` (v2: the pools, every layer's
+ *  path, and per material each slot's canonical path and `p<pool>:<layer>`),
  *  `<ws>.near.shapes.txt` (one row per source shape: block, name, triangles,
  *  model-space bounds, kept or the exclusion reason -- the input of gate G2)
- *  and `<ws>.near.refs.txt` (one row per REFR read and per placement -- gate G1).
+ *  and `<ws>.near.refs.txt` (one row per REFR read and per placement -- gate G1),
+ *  `<ws>.near.plugins.txt` and `<ws>.near.resources.txt` (lane NEAR2: the
+ *  resource stack the bake resolved every model, material and texture from,
+ *  last wins -- a viewer given it sees what the bake saw).
  *
  *  `region` (cells x0 y0 x1 y1, inclusive) limits the walk; null = the whole
  *  worldspace (`cellBounds`). Persistent references are taken inside the
@@ -63,7 +100,29 @@ struct NearLibraryOptions
 	QString dataRoot;
 	bool haveRegion = false;
 	int region[4] = { 0, 0, 0, 0 };
+	//! lane NEAR2: the plugins EsmWorld merged, in load order (full paths) -- the identity column's input
+	QStringList plugins;
 };
+
+//! lane NEAR2: `identity` bit 15 = a light plugin; the low 12 bits are then its light slot
+constexpr quint16 NEAR_IDENTITY_LIGHT = 0x8000;
+
+//! lane NEAR2: `<ws>.near.texarrays.bin` (layout in the TEXTURE ARRAYS note above)
+constexpr quint32 NEAR_TEXARRAYS_VERSION = 1;
+constexpr quint32 NEAR_TEXARRAYS_HEADER = 64;
+constexpr quint32 NEAR_TEX_SLOTS = 10;              // BGSM v17+ / BSShaderTextureSet
+constexpr quint32 NEAR_SLOT_NONE = 0xFFFF0000U;     // pool 0xFFFF: no layer; the low half says why
+constexpr quint32 NEAR_SLOT_EMPTY = 0;              // the slot names no texture
+constexpr quint32 NEAR_SLOT_MISSING = 1;            // it names one no stack entry holds
+constexpr quint32 NEAR_SLOT_UNUSABLE = 2;           // it resolves, but its DXGI format is unknown (0)
+
+//! lane NEAR2: the running game's form id of a near placement's REFR
+inline quint32 nearGameFormId( quint32 refFormId, quint16 identity )
+{
+	if ( identity & NEAR_IDENTITY_LIGHT )
+		return 0xFE000000U | ( quint32( identity & 0x0FFFU ) << 12 ) | ( refFormId & 0x0FFFU );
+	return ( quint32( identity & 0xFFU ) << 24 ) | ( refFormId & 0x00FFFFFFU );
+}
 
 bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, QStringList * report, QString * error );
 

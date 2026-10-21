@@ -54,6 +54,16 @@ class EsmWorld;
 void lodgenSetResources( const QStringList & entries );
 //! The stack as it was set, in LAST-WINS order.
 QStringList lodgenResources();
+/*! Lane NEAR2: the active plugins in load order (paths or file names). When set,
+ *  the archives inside ONE stack folder are ordered the way the game loads them:
+ *  an archive `<plugin> - *.ba2` sits at its plugin's load-order index and a
+ *  later one wins (inside one plugin, the later name); an archive no active
+ *  plugin names goes under all of them. Unset (the default), the folder keeps
+ *  the class heuristic (a mod's own, then DLC, then the game's), which lets
+ *  `DLCNukaWorld - Textures.ba2` (256 px) beat `DLCUltraHighResolution -
+ *  Textures14.ba2` (1024 px) by name when the game loads the UHD one. Only the
+ *  near library sets it; the far bake's output is left as measured. */
+void lodgenSetPluginOrder( const QStringList & plugins );
 /*! The stack flattened into the order an index wants it, FIRST-WINS: pass one's
  *  loose data sub-directories, then pass two's archives. It is what lodgen
  *  feeds its own BA2File and what the panel hands the game manager, so the
@@ -895,9 +905,11 @@ bool lodgenNativeLoadModelPlaced( void * user, const QString & model, const Lodg
  *  parses its header. `dxgi` is the DXGI_FORMAT code (a legacy FourCC is mapped:
  *  DXT1 71, DXT3 74, DXT5 77, ATI1/BC4U 80, ATI2/BC5U 83; uncompressed 32-bit
  *  87 for BGRA, 28 for RGBA). `source` says which route answered: "ba2",
- *  "loose" or "read". False when nothing supplies the file. */
+ *  "loose" or "read". False when nothing supplies the file. `cube` (lane NEAR2)
+ *  is true for a cube map: the BA2 record's flag byte bit 0, or a DDS header's
+ *  caps2 CUBEMAP bit -- a cube map cannot be a layer of a Texture2DArray. */
 bool lodgenTextureInfo( const QString & dataRoot, const QString & texPath, quint32 * dxgi, quint32 * width,
-	quint32 * height, quint32 * mips, QString * source = nullptr );
+	quint32 * height, quint32 * mips, QString * source = nullptr, bool * cube = nullptr );
 
 /*! A model's world extent, for the impostor baker's size ladder.
  *

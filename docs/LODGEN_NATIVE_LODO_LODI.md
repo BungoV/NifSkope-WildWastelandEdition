@@ -768,7 +768,8 @@ path (`src/nearlib.cpp`); the far writer is not entered.
 |---|---|
 | header 0x08 bit4 `LODO_FLAG_NEAR` (16) | this is a near library: every mesh is a base's full model, one level (`levelCount` 1, no ladder), `rep[1..3]` 0xFFFF. **Set exactly when the version is 7**; a v7 file without it, or the flag on any other version, is refused |
 | material row +7 (`u8`, v6 `reserved`) `features` | bit0 `PARALLAX` (SLSF2 Multi_Layer_Parallax), bit1 `ENV_MAP`, bit2 `GREYSCALE` (greyscale to palette), bit3 `VERTEX_COLOUR`, bit4 `MODEL_SPACE_NORMALS`; **bits 5..7 refused**; non-zero below v7 refused |
-| material `arraySet` / `layer` | on a NEAR file they index the DIFFUSE set of `<ws>.near.textures.txt`, not the far arrays |
+| material `arraySet` / `layer` | on a NEAR file: the DIFFUSE's pool and layer in `<ws>.near.texarrays.bin` (lane NEAR2; `layer` 0xFFFF = none), not the far arrays |
+| `.lodi` cold `identity` (§4.1c) | on a NEAR pair: the REFR's plugin's load-order-resolved identity (lane NEAR2, below), not a stock index |
 
 The draw BUCKET is derived, never stored twice: (family, `alphaThreshold` != 0,
 `TWO_SIDED`, `PARALLAX`) -- opaque, alpha-test, two-sided, alpha-test-two-sided,
@@ -796,11 +797,62 @@ they use (measured: every such shape in Boston stores LOD1+LOD2 after LOD0).
 **Material key** = (base, effective material swap), the SWAP1 rule (§3.8): a swap
 that renames a material of the model gets a variant base row.
 
+**Placement identity (lane NEAR2, 2026-09-26).** NEAR1 wrote 0. This document
+left the near word open, so it is decided the way the far `.lodi` identifies a
+placement: by `refFormId` + `scolPart`, with `refFormId` in the BAKE's id space
+(libfo76utils numbers every file of the merged list with its own top byte, a light
+plugin included), and the identity word carrying what joins the placement to the
+ENGINE's own numbering -- on the far pair the stock chunk index, on the near pair
+the running game's form id, which the file-list position is not once a light plugin
+is loaded (his order: 17 light plugins; BNS Trees is file 0x2C, game index 0x1C).
+So `identity` = the plugin's load-order-resolved identity: a full plugin's game
+index (0..0xFD), or `0x8000 | light slot` (0..0xFFF) for a light one (TES4 flag
+0x200, or an `.esl`). Game form id (`nearGameFormId`): full = `identity << 24 |
+(ref & 0xFFFFFF)`; light = `0xFE000000 | (identity & 0xFFF) << 12 | (ref & 0xFFF)`.
+Refused (`check_near_identity`, pair rule): two identities on one file index, one
+identity on two, an identity that is neither form, file 0 not 0, an index past the
+file position, full indices or light slots out of load order. Gate GI
+(`near_library_check.py`) works the table out from the plugins' own headers.
+**Known gap:** the far `.lodi`'s `refFormId` has the same light-plugin offset and
+no identity to resolve it; it is untouched (G4: the far bake stays byte-identical).
+
+**Texture arrays (lane NEAR2).** Every texture a kept material names, in any of
+its 10 slots, is one layer of one Texture2DArray POOL keyed by (kind 2d|cube,
+DXGI, width, height, mips) -- the five things every slice of one D3D11 array
+shares, so a reader copies each source DDS's mip chain into its slice as it is.
+**Nothing is decoded or re-encoded**: BC data is GPU-native, a re-encode would lose
+quality, cost bake time and make the library ship derived game textures. A pool
+splits every 2048 layers (a cube pool every 341: six faces a layer). Pools holding
+a diffuse (slot 0) come first, sorted by key, then the rest; a layer is the rank of
+the canonical path (`textures\...`, folded) in its pool. `<ws>.near.texarrays.bin`
+(layout: `src/nearlib.h`, TEXTURE ARRAYS): a 64-byte header (`NTXA`, version 1,
+counts, `lodoIdentity` = the `.lodi`'s, four offsets, FNV-1a 64 of the body), 16-byte
+pools, 8-byte texture records (path offset, pool, layer), then `materialCount x 10`
+u32 slots `pool << 16 | layer`, or `0xFFFF << 16 | reason` (0 empty, 1 missing,
+2 unusable). A function of the path set alone: two bakes are byte-identical
+(gate A, `near_texarrays_check.py --twin`). Boston: 1,691 layers in 55 pools
+(27 hold a diffuse, 26 cube layers), 139,268 bytes.
+
 **Sidecars** (text, beside the pair):
-* `<ws>.near.textures.txt` -- `set <id> dxgi <code> w <px> h <px> part <n> layers
-  <count>` lines, then each material's slots with their own (format, size) bucket.
-  A LIST: nothing is re-encoded. The array layer reaches the shader through UV2.y
-  as in the far field.
+* `<ws>.near.textures.txt` (v2) -- `pool <id> kind dxgi w h mips part first layers`
+  lines, `layer <pool> <layer> <path>` lines, `tex <path> dxgi w h mips <source>` (or
+  `missing`), then each material with its slots: `slot <k> <path> p<pool>:<layer>`,
+  or `missing` / `unusable` / `-`. Every path is canonical (NEAR1 stored the NIF's
+  or BGSM's own spelling, 814 of 858 Boston diffuses without `textures\`). The array
+  layer reaches the shader through UV2.y as in the far field.
+* `<ws>.near.texarrays.bin` -- above.
+* `<ws>.near.plugins.txt` -- `plugin<TAB>file index<TAB>identity<TAB>full|light<TAB>name`.
+**Archive order (lane NEAR2).** Inside one stack folder the near bake orders the
+archives the way the game loads them: `<plugin> - *.ba2` at its plugin's load-order
+index, later wins (`lodgenSetPluginOrder`). The class heuristic the far bake keeps
+(a mod's own, DLC, game; by name inside a class) let `DLCNukaWorld - Textures.ba2`
+(256 px) beat `DLCUltraHighResolution - Textures14.ba2` (1024 px): 154 pool
+headers disagreed with the texture the game loads on the whole map, 0 after.
+
+* `<ws>.near.resources.txt` -- the stack the bake resolved every model, material
+  and texture from, one entry a line, last wins; a viewer given it as
+  `WW_LODGEN_RESOURCES` sees what the bake saw (NEAR1's magenta BNS trees were a
+  viewer with no MO2 stack, not a missing file).
 * `<ws>.near.shapes.txt` (v2) -- one row per source shape: mesh, path, variant,
   block, name, verts, tris, lod0, model-space box, `kept` or the reason, material,
   meshId, srcTris. verts/tris/box are what is DRAWN (after the LOD0 trim).
@@ -811,7 +863,10 @@ that renames a material of the model gets a variant base row.
 BGSM reading; `tests/spells/near_format_selftest.py` for the refusals; the far
 byte identity with the rung exe): G1 every eligible REFR in the `.lodi` exactly
 once with its form id, the eligible count equal to the Python count; G2 per shape
-tris + verts + box equal to the source NIF; G3 the census sums. Whole Commonwealth
+tris + verts + box equal to the source NIF; G3 the census sums; GI the identities
+(lane NEAR2). `near_texture_check.py` (gate T: every material's diffuse resolves,
+classes missing / bake-path / renderer-stack / undrawable) and
+`near_texarrays_check.py` (gate A) are lane NEAR2's. Whole Commonwealth
 (his MO2 stack, 2026-09-26): 736,214 REFRs read, 523,755 eligible, 677,390
 placements, 38,622 (mesh, material) pairs, 12,160,169 triangles, 777,824 clusters;
 `.lodo` 382,058,580 B, `.lodi` 26,549,276 B; 178 s.
@@ -1084,6 +1139,9 @@ There are now three words, and the difference matters:
   neighbour's bin and meets that chunk's own index. Gated both ways: identity is
   unique inside every stock chunk (0 duplicates over the eight manifests), and
   **it equals the stock manifest's index on all 3,526 rows**.
+* **On a NEAR pair (§3.9) `identity` is the plugin's load-order-resolved
+  identity** (lane NEAR2): a near library has no stock bake to join, and the thing
+  a consumer needs to join to is the running game's form id.
 
 ### 4.7 The placement-AO byte (v5)
 
