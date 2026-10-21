@@ -57,6 +57,10 @@ Syoyo Fujita, Aurélien Chatelain and many contributors under the MIT License.
 [xxHash](https://github.com/Cyan4973/xxHash) is copyright (c) 2012-2023 by
 Yann Collet, BSD 2-Clause License.
 
+The screen-space GI's blue noise sheet (res/ssgi/fast_2uges.rg8) is from
+[FastNoise](https://github.com/electronicarts/fastnoise), copyright (c) 2023 Electronic Arts Inc.,
+BSD 3-Clause License (res/ssgi/FASTNOISE_LICENSE.txt).
+
 NOTICE
 
 Parts of NifSkope (i.e. included libraries) might be subject to
