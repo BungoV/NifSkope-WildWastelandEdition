@@ -43,6 +43,7 @@ BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
 
 ## 3. APPROVED, NOT STARTED (his yes on record)
 - SSGI3 (defect, queued at once): SSGI on under-counts near geometry vs tracer (0.80 vs off 0.89, bar +-10%); SSGI1 fill law (visibility removes more probe light than the march adds); diag reds in SSGI2 BATCH lines
+- PERFRESEARCH1 running (yes 10-22): research notes, then lanes GPUDRIVEN1 (meshlets + GPU-driven drawing, the CPU-bound fix), VISBUF1 (visibility buffer, tiny far triangles), VRS1 (variable rate shading, pair if any look change), FXRES1 (per-effect resolution + OIT)
 - PERF3 (after BATCH1 timings): AO stays FULL res (bungo 10-21 "full res and optimize where it counts for real"); drop AO + SSR second scene submissions by reusing the main pass depth/normals (+ per-material SSR flag from main pass, SSR from previous frame); CPU per-draw setup cuts; far-LOD proposal
 - LODPRTP L2-L7: distant probes (yes 10-15; L8/L9, P1/P2 still need a yes)
 - PGI1 HORIZON chunk + GI port to FO4CS (PGI2-7)
