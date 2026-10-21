@@ -1493,6 +1493,64 @@ static QPoint wwHeadlessWindowOrigin( QString * arm = nullptr )
  *
  *  Headless runs only, so an interactive session writes nothing.
  */
+/* CARDBAKE2: WW_CARDBAKE_TIMES=<file> appends where a card bake's time goes, measurement only (the pixels
+ * do not move; a glFinish brackets each render so GPU time lands in the render bucket, not the readback). */
+struct WwCardTimes {
+	bool on = false;
+	QElapsedTimer clock;		// since main()
+	qint64 render = 0, readback = 0, encode = 0, write = 0, winpaint = 0, setup = 0;
+	int renders = 0;
+	QString file;
+	qint64 renderNs = 0, readNs = 0, convNs = 0, offNs = 0;	// offscreen renders, nanoseconds (one is well under a ms)
+	void reset() { render = readback = encode = write = winpaint = setup = 0; renders = 0; renderNs = readNs = convNs = offNs = 0; }	// per base in a batch
+};
+/* QImage::pixel() through a row pointer: the same QRgb on an ARGB32 image of the expected size (CARDBAKE2: the
+ * card encode reads ~150 samples per texel), pixel() itself on anything else, so a null or odd image reads as before. */
+struct WwPx {
+	const QImage * img = nullptr;
+	const uchar * bits = nullptr;
+	qsizetype bpl = 0;
+	WwPx() = default;
+	WwPx( const QImage & i, int w, int h ) : img( &i )
+	{
+		if ( !i.isNull() && i.format() == QImage::Format_ARGB32 && i.width() == w && i.height() == h ) {
+			bits = i.constBits();
+			bpl = i.bytesPerLine();
+		}
+	}
+	QRgb pixel( int x, int y ) const
+	{
+		return bits ? reinterpret_cast<const QRgb *>( bits + qsizetype( y ) * bpl )[x] : img->pixel( x, y );
+	}
+};
+static WwCardTimes & wwCardT()
+{
+	static WwCardTimes t;
+	return t;
+}
+void wwCardTimesMainEntry()
+{
+	WwCardTimes & t = wwCardT();
+	t.file = qEnvironmentVariable( "WW_CARDBAKE_TIMES" );
+	t.on = !t.file.isEmpty();
+	t.clock.start();
+}
+static void wwCardStamp( const QString & line )
+{
+	WwCardTimes & t = wwCardT();
+	if ( !t.on )
+		return;
+	QFile f( t.file );
+	if ( f.open( QIODevice::Append | QIODevice::Text ) )
+		QTextStream( &f ) << line << " " << t.clock.elapsed() << "\n";
+}
+// adds the ms since `since` to `bucket` and restarts `since`
+static void wwCardLap( qint64 & bucket, QElapsedTimer & since )
+{
+	if ( wwCardT().on )
+		bucket += since.restart();
+}
+
 static void wwLogTopLevelWindows( const char * when )
 {
 	if ( !NifSkope::wwHeadlessRun() )
@@ -2126,6 +2184,169 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	}
 }
 
+/* CARDBAKE2 step 1: ONE PROCESS FOR EVERY BASE (WW_IMPOSTOR_BATCH=<cands list>). Archives, the resource stack,
+ * XML and the process itself are paid once; each base still gets a FRESH window (new GLView, new scene), so its
+ * bake runs exactly the code a per-base launch ran. Outputs are renamed to <formid>_* with the .txt LAST, the
+ * skip-done marker of the per-base driver, so a run stopped mid-list resumes. WW_CARDBAKE_RED=1 in the driver is
+ * the per-base path. */
+struct WwCardBatch {
+	QStringList lines;
+	int next = 0, n = 0, baked = 0, failed = 0, cached = 0, missing = 0;
+	QString out, work, formid, model, base;
+	// the application look a process's FIRST window is built under; loadTheme() changes it app-wide, and a window
+	// built under the changed look has 2 px less chrome (viewport 1212x527 against 1212x525: other front/side cards)
+	QString dataRoot;		// the driver's DATAROOT, for loose meshes
+	bool extract = false;	// the driver had a resource stack: meshes not loose come out of it
+	QString style, sheet;
+	QPalette palette;
+	QFont font;
+};
+static WwCardBatch & wwCardBatch()
+{
+	static WwCardBatch b;
+	return b;
+}
+bool wwCardBatchOn()
+{
+	return qEnvironmentVariableIsSet( "WW_IMPOSTOR_BATCH" );
+}
+static void wwCardBatchSay( const QString & line )
+{
+	const WwCardBatch & b = wwCardBatch();
+	QFile f( b.work + QStringLiteral( "/batch.log" ) );
+	if ( f.open( QIODevice::Append | QIODevice::Text ) )
+		QTextStream( &f ) << line << "\n";
+	fprintf( stdout, "%s\n", qPrintable( line ) );
+	fflush( stdout );
+}
+static void wwCardBatchNext()
+{
+	WwCardBatch & b = wwCardBatch();
+	const QRegularExpression ws( QStringLiteral( "\\s+" ) );
+	while ( b.next < b.lines.size() ) {
+		const QString line = b.lines.at( b.next++ ).trimmed();
+		if ( line.split( ws ).size() < 3 )
+			continue;
+		b.n++;
+		b.formid = line.section( ws, 0, 0 );
+		b.model = line.section( ws, 2 );
+		if ( QFileInfo::exists( b.out + "/" + b.formid + QStringLiteral( ".txt" ) ) ) {
+			b.cached++;
+			wwCardBatchSay( QStringLiteral( "[%1] %2 cached" ).arg( b.n ).arg( b.formid ) );
+			continue;
+		}
+		/* The mesh as the per-base driver found it: loose under its DATAROOT (WW_IMPOSTOR_BATCH_DATAROOT) as is,
+		 * else, when the driver had a resource stack (WW_IMPOSTOR_BATCH_EXTRACT=1), pulled out by the CLI --probe's
+		 * own reader into a file under its own name (the hook names every output after the file it loaded). */
+		QString rel = b.model;
+		rel.replace( QChar( '\\' ), QChar( '/' ) );
+		QByteArray bytes;
+		QString mesh;
+		const QString loose = b.dataRoot.isEmpty() ? QString() : b.dataRoot + QStringLiteral( "/meshes/" ) + rel;
+		if ( !loose.isEmpty() && QFileInfo( loose ).isFile() ) {
+			mesh = loose;
+			QFile lf( loose );
+			if ( lf.open( QIODevice::ReadOnly ) )
+				bytes = lf.readAll();
+		} else if ( b.extract ) {
+			const QString exDir = b.work + QStringLiteral( "/ex" );
+			QDir( exDir ).removeRecursively();
+			QDir().mkpath( exDir );
+			// no data root, as the driver's `--probe` call has none: the stack, then the game's archives
+			if ( lodgenProbeAsset( QString(), QStringLiteral( "meshes/" ) + rel, nullptr, nullptr, nullptr, &bytes ) ) {
+				QFile mf( exDir + "/" + QFileInfo( rel ).fileName() );
+				if ( mf.open( QIODevice::WriteOnly ) && mf.write( bytes ) == bytes.size() )
+					mesh = mf.fileName();
+			}
+		}
+		if ( mesh.isEmpty() ) {
+			b.missing++;
+			wwCardBatchSay( QStringLiteral( "[%1] %2 MISSING meshes/%3" ).arg( b.n ).arg( b.formid, rel ) );
+			continue;
+		}
+		wwCardBatchSay( QStringLiteral( "mesh %1 sha1 %2" ).arg( b.formid,
+			QString::fromLatin1( QCryptographicHash::hash( bytes, QCryptographicHash::Sha1 ).toHex() ) ) );
+		b.base = QFileInfo( rel ).completeBaseName().toLower();
+		const QString bakeDir = b.work + QStringLiteral( "/bake" );
+		QDir( bakeDir ).removeRecursively();
+		QDir().mkpath( bakeDir );
+		qputenv( "WW_IMPOSTOR_BAKE", QDir::toNativeSeparators( bakeDir ).toLocal8Bit() );
+		// every window starts from the process-start look, as each per-base launch's one window did
+		QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+		QApplication::setStyle( QStyleFactory::create( b.style ) );
+		qApp->setStyleSheet( b.sheet );
+		QApplication::setPalette( b.palette );
+		QApplication::setFont( b.font );
+		wwCardT().reset();
+		wwCardStamp( QStringLiteral( "base %1" ).arg( b.formid ) );
+		NifSkope::createWindow( mesh );
+		return;
+	}
+	wwCardBatchSay( QStringLiteral( "batch done: %1 baked, %2 cached, %3 failed, %4 missing" )
+		.arg( b.baked ).arg( b.cached ).arg( b.failed ).arg( b.missing ) );
+	QDir( b.work + QStringLiteral( "/bake" ) ).removeRecursively();
+	QDir( b.work + QStringLiteral( "/ex" ) ).removeRecursively();
+	qApp->exit( b.failed ? 1 : 0 );
+}
+// main(): start the batch instead of opening a window
+bool wwCardBatchStart()
+{
+	WwCardBatch & b = wwCardBatch();
+	QFile lf( qEnvironmentVariable( "WW_IMPOSTOR_BATCH" ) );
+	b.out = QDir::fromNativeSeparators( qEnvironmentVariable( "WW_IMPOSTOR_BATCH_OUT" ) );
+	b.work = QDir::fromNativeSeparators( qEnvironmentVariable( "WW_IMPOSTOR_BATCH_WORK" ) );
+	if ( b.out.isEmpty() || b.work.isEmpty() || !lf.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
+		fprintf( stderr, "WW_IMPOSTOR_BATCH needs a readable list, WW_IMPOSTOR_BATCH_OUT and WW_IMPOSTOR_BATCH_WORK\n" );
+		return false;
+	}
+	b.lines = QString::fromUtf8( lf.readAll() ).split( QChar( '\n' ), Qt::SkipEmptyParts );
+	QDir().mkpath( b.out );
+	QDir().mkpath( b.work );
+	b.dataRoot = QDir::fromNativeSeparators( qEnvironmentVariable( "WW_IMPOSTOR_BATCH_DATAROOT" ) );
+	b.extract = qEnvironmentVariableIntValue( "WW_IMPOSTOR_BATCH_EXTRACT" ) == 1;
+	b.style = QApplication::style()->name();
+	b.sheet = qApp->styleSheet();
+	b.palette = QApplication::palette();
+	b.font = QApplication::font();
+	// one base's window closes before the next opens: that must not end the run
+	qApp->setQuitOnLastWindowClosed( false );
+	QTimer::singleShot( 0, qApp, &wwCardBatchNext );
+	return true;
+}
+// the bake hook's end: a per-base launch quits; a batch files this base's outputs and opens the next
+static void wwCardBakeFinished( NifSkope * skope )
+{
+	if ( !wwCardBatchOn() ) {
+		qApp->quit();
+		return;
+	}
+	WwCardBatch & b = wwCardBatch();
+	const QString bake = b.work + QStringLiteral( "/bake/" ) + b.base;
+	auto mv = [&b]( const QString & from, const QString & suffix ) {
+		if ( !QFileInfo::exists( from ) )
+			return;
+		const QString to = b.out + "/" + b.formid + suffix;
+		QFile::remove( to );
+		QFile::rename( from, to );
+	};
+	if ( QFileInfo::exists( bake + QStringLiteral( "_front.png" ) ) ) {
+		mv( bake + QStringLiteral( "_front.png" ), QStringLiteral( "_front.png" ) );
+		mv( bake + QStringLiteral( "_side.png" ), QStringLiteral( "_side.png" ) );
+		for ( const char * s : { "albedo", "normal", "gsaos", "rmaos", "g", "e" } )
+			mv( bake + QStringLiteral( "_oct_" ) + QLatin1String( s ) + QStringLiteral( ".png" ),
+				QStringLiteral( "_oct_" ) + QLatin1String( s ) + QStringLiteral( ".png" ) );
+		mv( bake + QStringLiteral( ".txt" ), QStringLiteral( ".txt" ) );
+		b.baked++;
+		wwCardBatchSay( QStringLiteral( "[%1] %2 baked (%3)" ).arg( b.n ).arg( b.formid, b.model ) );
+	} else {
+		b.failed++;
+		wwCardBatchSay( QStringLiteral( "[%1] %2 FAILED (%3)" ).arg( b.n ).arg( b.formid, b.model ) );
+	}
+	skope->close();		// headless: discards, never asks; WA_DeleteOnClose frees the window and its GL context
+	wwCardStamp( QStringLiteral( "closed" ) );
+	QTimer::singleShot( 0, qApp, &wwCardBatchNext );
+}
+
 NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 {
 	NifSkope * primary = nullptr;
@@ -2134,9 +2355,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			primary = document;
 			if ( document->isActiveWindow() ) break;
 		}
+	wwCardStamp( QStringLiteral( "cw" ) );
 	NifSkope * skope = new NifSkope( background );
+	wwCardStamp( QStringLiteral( "ctor" ) );
 	skope->setAttribute( Qt::WA_DeleteOnClose );
 	skope->loadTheme();
+	wwCardStamp( QStringLiteral( "theme" ) );
 	skope->workspaceRoot = background && primary
 		? ( primary->workspaceRoot ? primary->workspaceRoot : primary ) : skope;
 	if ( !background ) {
@@ -2265,6 +2489,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		 * rather than the one first shown. */
 		wwHarnessRecordViewport( skope, skope->getGLView(), "shown" );
 	}
+	wwCardStamp( QStringLiteral( "shown" ) );
 
 	// TEMP DIAGNOSTIC (WW_EXTRUDE_TEST=1, remove when the append-row condition
 	// bug is fixed): after the file loads, grow "Vertex Data" on the first
@@ -23252,8 +23477,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * cancels only CONSTANT background, and a grid line would bake into the
 	 * card as geometry. */
 	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_IMPOSTOR_BAKE" ) ) {
+		wwCardStamp( QStringLiteral( "window" ) );
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
+			wwCardStamp( QStringLiteral( "loaded" ) );
 			QTimer::singleShot( 1200, skope, [skope, fname, ok]() {
+				wwCardStamp( QStringLiteral( "bakestart" ) );
+				QElapsedTimer lap;
+				lap.start();
+				WwCardTimes & ct = wwCardT();
 				const QString outDir = qEnvironmentVariable( "WW_IMPOSTOR_BAKE" );
 				do {
 					if ( !ok || outDir.isEmpty() || !skope->ogl )
@@ -23671,6 +23902,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						ms << "emissive " << setScale << " shapes " << emitters << "\n";
 					}
 
+					wwCardLap( ct.setup, lap );
 					const struct { GLView::ViewState view; const char * name; } views[2] = {
 						{ GLView::ViewFront, "front" }, { GLView::ViewLeft, "side" } };
 					for ( const auto & v : views ) {
@@ -23691,6 +23923,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								.convertToFormat( QImage::Format_ARGB32 );
 						}
 						wwLodChannelView = 0;
+						wwCardLap( ct.winpaint, lap );
 						QImage card( pass[0].size(), QImage::Format_ARGB32 );
 						for ( int y = 0; y < card.height(); y++ ) {
 							for ( int x = 0; x < card.width(); x++ ) {
@@ -23711,8 +23944,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								card.setPixel( x, y, qRgba( r, g, bl, a ) );
 							}
 						}
+						wwCardLap( ct.encode, lap );
 						card.save( outDir + "/" + base + "_" + v.name
 							+ QStringLiteral( ".png" ) );
+						wwCardLap( ct.write, lap );
 						const float halfH = skope->ogl->orthographicHalfHeight();
 						const float halfW = halfH * float( skope->ogl->width() )
 							/ float( skope->ogl->height() );
@@ -23775,6 +24010,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * the strobe bungo reported. Record where the window is
 						 * before the loop that produces it. */
 						wwLogTopLevelWindows( "sheet" );
+						lap.restart();
+						wwCardStamp( QStringLiteral( "octstart winpaint_so_far %1" ).arg( ct.winpaint ) );
 						BoundSphere bs;
 						if ( Scene * sc = skope->ogl->getScene() )
 							bs = sc->bounds();
@@ -23912,6 +24149,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						const int p1Size = qMax( 1024, 2 * tile );		// pass one's offscreen matte, square
 						float aaCentreErr = 0.0f;						// worst silhouette-centre miss, output texels
 						auto renderOff = [&]( int w, int h, float half, float ox, float oy ) {
+							QElapsedTimer offT;
+							offT.start();
 							GLView * gl = skope->ogl;
 							const float oldDist = gl->Dist;
 							const Vector3 oldPos = gl->Pos;
@@ -23937,14 +24176,26 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								ff.setAttachment( QOpenGLFramebufferObject::CombinedDepthStencil );
 								QOpenGLFramebufferObject fbo( w, h, ff );
 								if ( fbo.isValid() ) {
+									QElapsedTimer rt;
+									rt.start();
 									fbo.bind();
 									gl->paintGL();
 									fbo.bind();
-									std::vector<uchar> buf( size_t( w ) * size_t( h ) * 4 );
 									QOpenGLFunctions * f = QOpenGLContext::currentContext()->functions();
+									if ( ct.on ) {
+										f->glFinish();
+										ct.renderNs += rt.nsecsElapsed();
+										rt.restart();
+										ct.renders++;
+									}
+									std::vector<uchar> buf( size_t( w ) * size_t( h ) * 4 );
 									f->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
 									f->glReadPixels( 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf.data() );
 									fbo.release();
+									if ( ct.on ) {
+										ct.readNs += rt.nsecsElapsed();
+										rt.restart();
+									}
 									out = QImage( w, h, QImage::Format_ARGB32 );
 									for ( int y = 0; y < h; y++ ) {
 										const uchar * src = buf.data() + size_t( h - 1 - y ) * size_t( w ) * 4;
@@ -23952,6 +24203,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										for ( int x = 0; x < w; x++ )
 											dst[x] = qRgb( src[4 * x], src[4 * x + 1], src[4 * x + 2] );
 									}
+									if ( ct.on )
+										ct.convNs += rt.nsecsElapsed();
 								}
 							} catch ( std::exception & ) {
 								out = QImage();
@@ -23960,6 +24213,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							gl->Pos = oldPos;
 							gl->resizeGL( oldSize.width(), oldSize.height() );
 							gl->popGLContext( prv );
+							if ( ct.on )
+								ct.offNs += offT.nsecsElapsed();
 							return out;
 						};
 						/* The matte, offscreen: rgb = the BLACK pass as rendered (colour x
@@ -23967,8 +24222,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						auto matteOff = [&]( int w, int h, float half, float ox, float oy ) {
 							// settle the view once through the window path's own event
 							// round, so the offscreen passes see exactly what a grab would
+							QElapsedTimer wt;
+							wt.start();
 							skope->ogl->update();
 							qApp->processEvents();
+							if ( ct.on )
+								ct.winpaint += wt.elapsed();
 							QImage pass[2];
 							if ( bakeScene )
 								bakeScene->options = Scene::SceneOptions( litOptions & ~Scene::DoLighting );
@@ -23985,13 +24244,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							cov.fill( 0 );
 							if ( pass[0].isNull() || pass[1].isNull() )
 								return cov;
-							for ( int y = 0; y < h; y++ )
+							// row pointers: all three are ARGB32 w x h, where pixel()/setPixel() are the raw QRgb (CARDBAKE2)
+							for ( int y = 0; y < h; y++ ) {
+								const QRgb * rb = reinterpret_cast<const QRgb *>( pass[0].constScanLine( y ) );
+								const QRgb * rw = reinterpret_cast<const QRgb *>( pass[1].constScanLine( y ) );
+								QRgb * rc = reinterpret_cast<QRgb *>( cov.scanLine( y ) );
 								for ( int x = 0; x < w; x++ ) {
-									const QRgb pb = pass[0].pixel( x, y ), pw = pass[1].pixel( x, y );
+									const QRgb pb = rb[x], pw = rw[x];
 									const int d = ( ( qRed( pw ) - qRed( pb ) ) + ( qGreen( pw ) - qGreen( pb ) )
 										+ ( qBlue( pw ) - qBlue( pb ) ) ) / 3;
-									cov.setPixel( x, y, qRgba( qRed( pb ), qGreen( pb ), qBlue( pb ), qBound( 0, 255 - d, 255 ) ) );
+									rc[x] = qRgba( qRed( pb ), qGreen( pb ), qBlue( pb ), qBound( 0, 255 - d, 255 ) );
 								}
+							}
 							return cov;
 						};
 						auto channelOff = [&]( int which, int w, int h, float half, float ox, float oy ) {
@@ -24051,9 +24315,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								const float upp = 2.0f * halfH0 / float( H );		// units per pixel, both axes
 								float x0 = 0.0f, x1 = 0.0f, y0 = 0.0f, y1 = 0.0f;
 								bool any = false;
-								for ( int y = 0; y < H; y++ )
+								const bool covRaw = cov.format() == QImage::Format_ARGB32;	// pixel() is the raw QRgb there
+								for ( int y = 0; y < H; y++ ) {
+									const QRgb * covRow = covRaw ? reinterpret_cast<const QRgb *>( cov.constScanLine( y ) ) : nullptr;
 									for ( int x = 0; x < W; x++ )
-										if ( qAlpha( cov.pixel( x, y ) ) >= 16 ) {		// the coverage floor (spec)
+										if ( qAlpha( covRow ? covRow[x] : cov.pixel( x, y ) ) >= 16 ) {		// the coverage floor (spec)
 											const float dx = ( float( x ) + 0.5f - 0.5f * W ) * upp;
 											const float dy = ( float( y ) + 0.5f - 0.5f * H ) * upp;
 											if ( !any ) {
@@ -24063,6 +24329,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 												y0 = qMin( y0, dy ); y1 = qMax( y1, dy );
 											}
 										}
+								}
 								if ( !any )
 									continue;		// an empty view keeps offset 0 and contributes no extent
 								const int v = j * gCols + i;
@@ -24452,6 +24719,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										o->fill( 0 );
 									}
 									const QImage * chans[6] = { &s9, &s10, &s11, &s13, &s10p, &s10w };
+									const WwPx pxA( sA, RW, RH ), px8( s8, RW, RH );
+									WwPx pxC[6];
+									for ( int c = 0; c < nch; c++ )
+										pxC[c] = WwPx( *chans[c], RW, RH );
 									QImage * chOut[6] = { &tD, &tS, &tM, &tE, &tP, &tW };
 									// the self-check on the pan: the covered samples' box must sit
 									// on the render's centre, as pass one measured it
@@ -24463,7 +24734,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 											float nx = 0.0f, ny = 0.0f, nz = 0.0f;
 											for ( int q = 0; q < KK; q++ ) {
 												const int sx = aaK * x + q % aaK, sy = aaK * y + q / aaK;
-												const QRgb pa = sA.pixel( sx, sy );
+												const QRgb pa = pxA.pixel( sx, sy );
 												const int a = qAlpha( pa );
 												if ( a >= 16 ) {
 													bx0 = qMin( bx0, sx ); bx1 = qMax( bx1, sx );
@@ -24474,12 +24745,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 												sa += a;
 												cr += qRed( pa ); cg += qGreen( pa ); cb += qBlue( pa );
 												for ( int c = 0; c < nch; c++ ) {
-													const QRgb pc = chans[c]->pixel( sx, sy );
+													const QRgb pc = pxC[c].pixel( sx, sy );
 													ch[c][0] += qRed( pc ); ch[c][1] += qGreen( pc ); ch[c][2] += qBlue( pc );
 												}
 												// the normal: this sample's value un-premultiplied, decoded,
 												// weighted by its coverage -- i.e. 2c - a per component
-												const QRgb pn = s8.pixel( sx, sy );
+												const QRgb pn = px8.pixel( sx, sy );
 												nx += float( 2 * qRed( pn ) - a );
 												ny += float( 2 * qGreen( pn ) - a );
 												nz += float( 2 * qBlue( pn ) - a );
@@ -24507,11 +24778,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										aaCentreErr = qMax( aaCentreErr, qMax( ex, ey ) / float( aaK ) );	// samples -> texels
 									}
 								}
+								// row-pointer reads of the frame images (WwPx: the same QRgb pixel() returns)
+								const WwPx pA( tA, tw, th ), pD( tD, tw, th ), pM( tM, tw, th ), pN( tN, tw, th ),
+									pS( tS, tw, th ), pE( tE, tw, th ), pP( tP, tw, th ), pW( tW, tw, th );
 								// coverage extent for the sway law: rows and columns the object occupies
 								int top = th, bottom = -1, left = tw, right = -1;
 								for ( int y = 0; y < th; y++ )
 									for ( int x = 0; x < tw; x++ )
-										if ( qAlpha( tA.pixel( x, y ) ) >= 16 ) {
+										if ( qAlpha( pA.pixel( x, y ) ) >= 16 ) {
 											top = qMin( top, y ); bottom = qMax( bottom, y );
 											left = qMin( left, x ); right = qMax( right, x );
 										}
@@ -24520,11 +24794,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								const float rows = qMax( 1.0f, float( bottom - top ) );
 								for ( int y = 0; y < th; y++ ) {
 									for ( int x = 0; x < tw; x++ ) {
-										const int a = qAlpha( tA.pixel( x, y ) );
+										const int a = qAlpha( pA.pixel( x, y ) );
 										// the colour as the matte gave it; the COVERAGE re-encoded so the
 										// consumer's own alpha test selects the set the bake measured
 										{
-											const QRgb pa = tA.pixel( x, y );
+											const QRgb pa = pA.pixel( x, y );
 											albedo.setPixel( i * tw + x, j * th + y,
 												qRgba( qRed( pa ), qGreen( pa ), qBlue( pa ), coverageEncode( a ) ) );
 										}
@@ -24540,7 +24814,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										if ( a < 16 )
 											continue;
 										auto unp = [a, aaOn]( int c ) { return aaOn ? c : qMin( 255, ( c * 255 + a / 2 ) / a ); };
-										const int z = unp( qRed( tD.pixel( x, y ) ) );
+										const int z = unp( qRed( pD.pixel( x, y ) ) );
 										/* ambient from the height frame: the share of neighbours
 										 * nearer the camera than this pixel by more than a step,
 										 * eight directions, four rings */
@@ -24550,12 +24824,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										for ( const auto & dd : dirs )
 											for ( int step = 1; step <= 8; step *= 2 ) {
 												const int sx = x + dd[0] * step, sy = y + dd[1] * step;
-												const int na = ( sx < 0 || sy < 0 || sx >= tw || sy >= th ) ? 0 : qAlpha( tA.pixel( sx, sy ) );
+												const int na = ( sx < 0 || sy < 0 || sx >= tw || sy >= th ) ? 0 : qAlpha( pA.pixel( sx, sy ) );
 												if ( na < 16 )
 													continue;
 												tested++;
-												if ( ( aaOn ? qRed( tD.pixel( sx, sy ) )
-														: qMin( 255, ( qRed( tD.pixel( sx, sy ) ) * 255 + na / 2 ) / na ) ) + 2 < z )
+												if ( ( aaOn ? qRed( pD.pixel( sx, sy ) )
+														: qMin( 255, ( qRed( pD.pixel( sx, sy ) ) * 255 + na / 2 ) / na ) ) + 2 < z )
 													occl++;
 											}
 										const int ao = tested ? 255 - 255 * occl / tested : 255;
@@ -24567,30 +24841,30 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										const float h = float( bottom - y ) / rows;
 										int sway;
 										if ( wwLodMaskByTree ) {
-											const int w = unp( qGreen( tM.pixel( x, y ) ) );
+											const int w = unp( qGreen( pM.pixel( x, y ) ) );
 											sway = qBound( 0, int( float( w ) * h + 0.5f ), 255 );
 										} else {
 											const float rr = qMin( 1.0f, std::fabs( float( x ) - cxCol ) / halfSpan );
 											sway = qBound( 0, int( h * h * ( 0.35f + 0.65f * rr ) * 255.0f + 0.5f ), 255 );
 										}
-										const QRgb pn = tN.pixel( x, y );
+										const QRgb pn = pN.pixel( x, y );
 										normal.setPixel( i * tw + x, j * th + y, qRgba( unp( qRed( pn ) ), unp( qGreen( pn ) ), z, sway ) );
 										/* R, G as the material channel gives them: gloss and
 										 * specular from a vanilla material, roughness and
 										 * metallic (or gloss and specular) from a .lodm's third
 										 * texture; B multiplies that texture's AO (neutral for
 										 * the vanilla pair) by the height-neighbourhood AO. */
-										const QRgb ps = tS.pixel( x, y );
-										const int mask = unp( qRed( tM.pixel( x, y ) ) ) >= 128 ? 255 : 0;
+										const QRgb ps = pS.pixel( x, y );
+										const int mask = unp( qRed( pM.pixel( x, y ) ) ) >= 128 ? 255 : 0;
 										rmaos.setPixel( i * tw + x, j * th + y,
 											qRgba( unp( qRed( ps ) ), unp( qGreen( ps ) ), unp( qBlue( ps ) ) * ao / 255, mask ) );
 										/* The emissive sheet, un-premultiplied like the rest and
 										 * opaque: it ships as BC1 and has no alpha to spend. */
-										const QRgb pe = tE.pixel( x, y );
+										const QRgb pe = pE.pixel( x, y );
 										emissive.setPixel( i * tw + x, j * th + y,
 											qRgba( unp( qRed( pe ) ), unp( qGreen( pe ) ), unp( qBlue( pe ) ), 255 ) );
 										if ( pbrmSpec ) {
-											const QRgb pp = tP.pixel( x, y ), pw = tW.pixel( x, y );
+											const QRgb pp = pP.pixel( x, y ), pw = pW.pixel( x, y );
 											specS.setPixel( i * tw + x, j * th + y,
 												qRgba( unp( qRed( pp ) ), unp( qGreen( pp ) ), unp( qBlue( pp ) ), unp( qRed( pw ) ) ) );
 										}
@@ -24599,6 +24873,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								}
 							}
 						}
+						QElapsedTimer st;
+						st.start();
 						albedo.save( outDir + "/" + base + QStringLiteral( "_oct_albedo.png" ) );
 						normal.save( outDir + "/" + base + QStringLiteral( "_oct_normal.png" ) );
 						// the third sheet under its family's name: _oct_rmaos.png or _oct_gsaos.png
@@ -24610,6 +24886,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						// the fifth, a pbr card's specular, only when owed: _oct_s.png
 						if ( pbrmSpec )
 							specS.save( outDir + "/" + base + QStringLiteral( "_oct_s.png" ) );
+						if ( ct.on )
+							ct.write += st.elapsed();
 						/* The frame's SIZE CLASS, on a line of its own. It is the
 						 * frame size the `oct` line already carries, said once in
 						 * the meta's own words: the `oct` line's shape does not
@@ -24720,7 +24998,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 					meta.close();
 				} while ( false );
-				qApp->quit();
+				if ( ct.on ) {
+					const qint64 total = lap.elapsed();	// lap restarted after the front/side views
+					wwCardStamp( QStringLiteral( "bakeend setup %1 winpaint %2 render %3 renders %4 readback %5 write %6 octtotal %7 convert %8 offscreen %9" )
+						.arg( ct.setup ).arg( ct.winpaint ).arg( ct.renderNs / 1000000 ).arg( ct.renders ).arg( ct.readNs / 1000000 ).arg( ct.write ).arg( total )
+						.arg( ct.convNs / 1000000 ).arg( ct.offNs / 1000000 ) );
+				}
+				wwCardBakeFinished( skope );
 			} );
 		} );
 	}

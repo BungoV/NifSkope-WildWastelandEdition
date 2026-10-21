@@ -96,8 +96,12 @@ QCoreApplication * createApplication( int &argc, char *argv[] )
  */
 
 //! The main program
+void wwCardTimesMainEntry();	// CARDBAKE2, nifskope_ui.cpp
+bool wwCardBatchOn();
+bool wwCardBatchStart();
 int main( int argc, char * argv[] )
 {
+	wwCardTimesMainEntry();
 	// Before anything creates a GL context: RenderDoc cannot hook a driver it
 	// was loaded after, and Qt makes the viewport's context when GLView is
 	// constructed. No-op unless WW_RDC_FRAMES is set.
@@ -289,6 +293,13 @@ int main( int argc, char * argv[] )
 			fnames.push( QString() );
 		}
 
+		// CARDBAKE2: one process bakes every base of a card list (nifskope_ui.cpp, wwCardBatchStart)
+		if ( wwCardBatchOn() ) {
+			IPCsocket * ipc = IPCsocket::create( port );		// held like a per-base launch's, so a second bake on the port refuses
+			if ( !ipc || !wwCardBatchStart() )
+				return 2;
+			return a->exec();
+		}
 		if ( IPCsocket * ipc = IPCsocket::create( port ) ) {
 			//qDebug() << "IPCSocket exec";
 			ipc->execCommand( QString( "NifSkope::open %1" ).arg( fnames.pop() ) );

@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CARDBAKE2 (2026-10-21, branch cardbake2-20261021): the tree card bake runs every base in one process
+
+- **Why.** FARBAKE2's cards stage took 39.5 min for 79 bases, one NifSkope launch per base. Measured: each launch
+  spent 20-33 s starting up and building its first window; the bake itself was 1.5-3 s.
+- **What changed:**
+  - `WW_IMPOSTOR_BATCH=<list>` (with `_OUT`, `_WORK`, `_DATAROOT`, `_EXTRACT`) bakes a whole candidate list in one
+    process: one window per base, closed after its bake, files renamed to `<formid>_*` with the `.txt` last
+    (skip-done marker, so a stopped run resumes). A mesh not loose under the data root is pulled from the resource
+    stack through `lodgenProbeAsset`, the same read as the CLI `--probe`.
+  - Before each window the batch restores the process-start style, style sheet, palette and font: `loadTheme`
+    changes them app-wide and a later window got 2 px less chrome, which moved the front/side cards.
+  - The card encode reads pixels through row pointers (`WwPx`), same `QRgb` values as `QImage::pixel`.
+  - `WW_CARDBAKE_TIMES=<file>` stamps each phase, with the offscreen render/readback/convert split in nanoseconds.
+  - `tools/bake_impostor_cards.sh` uses the batch by default; `WORKERS=n` splits the list over n processes;
+    `WW_CARDBAKE_RED=1` is the old one-launch-per-base loop.
+- **Measured** (79 FARBAKE2 bases, same GPU): 1897 s -> 460 s. Every one of the 554 card files is sha1-identical
+  to the f47f5d11 run copy's; a run stopped after 20 bases and rerun gives the same files.
+- **Not done:** one GPU pass for all views and PBO overlap. The offscreen GPU work is a small share of the bake
+  time, so there was little left to win (notes/cardbake2/FINAL.md).
+
 ## Lane BAKEMEM1 (2026-10-21, branch bakemem1-20261021): the decals gather frees its decoded models
 
 - **Why.** FARBAKE2 (whole Commonwealth, every channel) was stopped by the memory guard at 13 GB private in the
