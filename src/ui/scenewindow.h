@@ -61,6 +61,7 @@ public:
 	QCheckBox * fogBox = nullptr;
 	QCheckBox * volAirBox = nullptr;	// lane VOLAIR1
 	QComboBox * farAirBox = nullptr;	// lane FARGRID1
+	QCheckBox * volPartBox = nullptr;	// lane VOLPART1
 	// the cascaded sun shadows row (lane CSM1)
 	QCheckBox * shadowsBox = nullptr;
 	QCheckBox * taaBox = nullptr;	// lane MOTION1

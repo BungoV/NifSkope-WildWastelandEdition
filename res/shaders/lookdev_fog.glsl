@@ -185,10 +185,9 @@ vec4 wwVolAirAtFar( float d, vec2 uv, vec3 posView )
  * segment / its slope), L += T_edge x J x (1 - T_tail), J the light the last slice's air scattered (its L and T steps,
  * so the tail starts continuous with the froxels), carried to the tail's middle in the records' colour. A ray that
  * climbs meets thinner air: a peak keeps more contrast than its foot. */
-vec4 wwVolAirAt( vec3 posView )
+vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a particle's probe: its centre's)
 {
 	float d = length( posView ) * fogDistScale;
-	vec2 uv = ( gl_FragCoord.xy - volRect.xy ) * volRect.zw;
 	/* 10-16: no farther than the column's farthest opaque surface (the obscurance pass's depth). At a thin sliver's
 	 * edge the interpolated position can lie far past the depth the same fragment writes (a trim at 596 shaded as 763):
 	 * that read the froxels the depth skip had left empty, and an air no surface there sits behind. */
@@ -230,6 +229,12 @@ vec4 wwVolAirAt( vec3 posView )
 			J *= c1 / max( c0, vec3( 1e-6 ) );
 	}
 	return vec4( v.rgb + v.a * J * ( 1.0 - Tt ), v.a * Tt );
+}
+
+// (L, T) of the air between the eye and posView, at this fragment's column
+vec4 wwVolAirAt( vec3 posView )
+{
+	return wwVolAirAtUv( posView, ( gl_FragCoord.xy - volRect.xy ) * volRect.zw );
 }
 
 /* (L, T) of the whole air along a sky ray (bungo 10-14: the far tower stood out against an unfogged sky). The sky is a
