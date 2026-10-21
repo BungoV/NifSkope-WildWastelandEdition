@@ -52,7 +52,11 @@ class Scene;
  *               Continuous at farD; a mountain top (thinner air above the band) hazes less than its foot.
  *  The surfaces' sun (FOGSUN1): the directional light on every lit surface outdoors x the air's transmittance up the
  *  sun ray, exp(-sigma0 x col(z, top) / max(mu, 0.02)), mu = the sun's height (lookdev_fog.glsl wwVolAirSunT).
- *  DEVIATION: no temporal history (NifSkope redraws on demand); the 4 stratified sub-steps stand in for it.
+ *  Temporal reuse (lane PERF2, as shipped games reuse past fog frames; test only until bungo sees it:
+ *  WW_CELL_VOLAIR_TEMPORAL=1, WW_CELL_VOLAIR_TEMPORAL_RED=1 the 4 sub-steps): one of the four strata a frame is fresh
+ *  (its sun and placed-light samples), the other three are the history reprojected to the froxel's centre last frame;
+ *  the medium, GI and ambient exact every frame. A froxel missing history takes all four; a still camera holds the
+ *  4-sub-step sum after 4 frames, and an interactive window paints until it does.
  *  Cost (coordinator 10-14), both on by default, the picture unchanged: clustered lights (per 8 x 8 columns x 8
  *  slices the lights whose sphere can reach one of its froxel points, ascending: the inject walks that list, not every
  *  light) and the conservative depth skip (stage 0: per column the farthest opaque ray distance from lane AO1's
@@ -81,6 +85,8 @@ void wwVolAirUniforms( Scene * scene );
 void wwVolAirSkyDraw( Scene * scene, bool probes );
 //! the row (ships off); the pin WW_CELL_AIR wins
 bool wwVolAirOn();
+//! lane PERF2: true while the temporal air owes a still window paints (never in a harness)
+bool wwVolAirWantsSettle();
 void wwVolAirSetOn( bool on );
 //! census echo: "volair=on(...)" or why none was drawn
 QString wwVolAirSummary();

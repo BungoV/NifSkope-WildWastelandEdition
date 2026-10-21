@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lookdevstage.h"
+#include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 
 #include "esmweather.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
@@ -458,6 +459,7 @@ bool wwLookdevFogWanted( Scene * scene )
 
 void wwLookdevFogUniforms( Scene * scene )
 {
+	PassTime::DrawCpuScope cpuT( PassTime::CpuFogUni );	// lane PERF2
 	if ( !scene || !scene->renderer )
 		return;
 	Renderer * r = scene->renderer;

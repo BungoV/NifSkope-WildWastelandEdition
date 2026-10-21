@@ -4188,8 +4188,12 @@ void GLView::paintGL()
 			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)
 			if ( hdr ) {
 				PassTime::begin( PassTime::FarCards );
+				PassTime::subBegin( PassTime::FarDots );	// lane PERF2: far LOD measured (proposal only)
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
+				PassTime::subEnd( PassTime::FarDots );
+				PassTime::subBegin( PassTime::FarCardsLit );
 				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame
+				PassTime::subEnd( PassTime::FarCardsLit );
 				PassTime::end( PassTime::FarCards );
 				PassTime::begin( PassTime::ToneMap );
 				wwCellHdrEnd( scene );
@@ -6019,7 +6023,7 @@ void GLView::paintGL()
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 	}
 	// lane MOTION1: the temporal AA converges over a few still frames after the camera moves (never in a harness)
-	if ( wwGameTaaWantsSettle() )
+	if ( wwGameTaaWantsSettle() | wwVolAirWantsSettle() )	// lane PERF2: and the temporal air's strata
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 	// lane GRASSMB1: the game's grass waves while the weather blows (never in a harness)
 	else if ( wwCellGrassWantsRepaint() )

@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellssr.h"
+#include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "cellunits.h"
 
 #include "gl/celllights.h"
@@ -255,10 +256,18 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glDisable( GL_BLEND );
 	fn->glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );	// wwCellSsrDraw opens it for the opaque cell-lit draws
 	s.pass = true;
-	{
-		NodeList second;
-		scene->collectShapes( second );
-		Scene::drawDeferredShapes( second );
+	/* lane PERF2: the pass is CPU-bound per draw. memo: the scene-global setters once per program; opaque: no
+	 * sorted/effect draws here, and the water pass draws the water alone. =0 or *_RED=1: the old path */
+	static const bool memo = qgetenv( "WW_CELL_SSR_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_MEMO_RED" );
+	static const bool opaqueOnly = qgetenv( "WW_CELL_SSR_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_OPAQUE_RED" );
+	NodeList sceneSecond;
+	if ( memo )
+		wwSetupMemoArm( true );
+	scene->collectShapes( sceneSecond );
+	if ( memo )
+		wwSetupMemoArm( false );
+	if ( !opaqueOnly ) {
+		Scene::drawDeferredShapes( sceneSecond );
 		scene->drawShapeEffects();
 	}
 	s.pass = false;
@@ -279,7 +288,14 @@ void wwCellSsrPass( Scene * scene, bool run )
 			s.pass = true;
 			s.waterRay = true;
 			s.gbuf = ao.gbuf;
-			{
+			if ( opaqueOnly ) {	// the sorted list's water, in its order (the opaque and the rest write nothing here)
+				sceneSecond.alphaSort();
+				for ( Node * node : sceneSecond.list() ) {
+					Shape * sh = dynamic_cast<Shape *>( node );
+					if ( sh && !sh->wwDecalDrawsFirst() && sh->wwWaterDraws() )
+						node->drawShapes();
+				}
+			} else {
 				NodeList second;
 				scene->collectShapes( second );
 				Scene::drawDeferredShapes( second );
@@ -417,6 +433,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 
 void wwCellSsrDraw( Scene * scene, bool cellProgram )
 {
+	PassTime::DrawCpuScope cpuT( PassTime::CpuSsrDraw );	// lane PERF2
 	if ( !scene || !scene->renderer )
 		return;
 	SsrState & s = ssr();

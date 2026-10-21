@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane PERF2 (2026-10-21, branch perf2-20261021): cell view frame cost (timers first, then exact cuts)
+
+- **Timers.** Per-pass GPU ms gain sub-stages (air tile/inject/integrate, obscurance geometry/stages/GI, tone-map
+  blit/measure/bloom/quads, far dots/lit cards) and CPU draw-setup totals per pass (`| cpu setup|cell-uni|sun-uni|
+  fog-uni|ao-draw|ssr-draw <ms> n=<calls>`). The census queries get their own pool. Measured: the frame is CPU-bound
+  per draw (about 11-17 us a draw); the obscurance and reflection passes each submit the scene again.
+- **Volumetric air, exact.** The integrate is O(slices) (red `WW_CELL_AIR_RED=oldint`), an empty air column returns
+  early (`noearly`). Dumps byte-identical to the old path.
+- **Temporal air (test only, off).** `WW_CELL_VOLAIR_TEMPORAL=1`: one of four strata fresh a frame, the rest from the
+  reprojected history (diharaw/volumetric-fog, MIT, as reference); `WW_CELL_VOLAIR_TEMPORAL_RED=1` the 4 sub-steps.
+  Stays off until bungo sees the before/after pair.
+- **Obscurance and reflection scene passes, exact.** The scene-global setters run once per program (PERF1's memo, now
+  armed there too: `WW_CELL_AO_MEMO`, `WW_CELL_SSR_MEMO`), and the sorted/effect draws that write nothing there are
+  skipped (`WW_CELL_AO_OPAQUE`, `WW_CELL_SSR_OPAQUE`; the water ray pass draws the water alone). `=0` or `*_RED=1`:
+  the old path and its cost.
+- **Tone map, exact.** Its full-screen quads wrote `gl_FragDepth` per sample, which turned the early stencil/depth
+  tests off: every quad shaded every sample of the 4x frame. The quad now sits at the far plane (`cell_hdr.vert`);
+  `WW_CELL_HDR_EARLY_RED=1` runs the old program (`cell_hdr_fd.prog`).
+
 ## Lane CABLES1 (2026-10-16, branch cables1-20261016): cables in the cell view (power lines, string-light wires, ropes)
 
 - **The cell view draws Fallout 4 cables.** A cable is a reference whose base is a BNDS record (no model). Its XBSD

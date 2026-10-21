@@ -391,6 +391,11 @@ void wwCellPostSetCell( const EsmWorld & world, bool interior )
 	}
 }
 
+int wwCellPostPathFrame()
+{
+	return ps().pathFrame;
+}
+
 void wwCellPostSetPath( int frame, float fps )
 {
 	PostState & s = ps();

@@ -61,6 +61,8 @@ void wwCellPostSetCell( const EsmWorld & world, bool interior );
 /*! The camera path: frame index k (>= 0) at fps frames a second; -1 ends the path (an interactive window
  *  measures its own frame time). */
 void wwCellPostSetPath( int frame, float fps );
+//! lane PERF2: the camera path's frame index (-1 outside a path)
+int wwCellPostPathFrame();
 
 //! After the tone map, before the temporal AA: the depth of field, then the motion blur, the frame back. Inert when
 //! both rows are off.

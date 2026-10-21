@@ -28,8 +28,8 @@ out vec4 fragColor;
 void main()
 {
 	vec4 x = texelFetch( hdrSrc, ivec2( gl_FragCoord.xy ), gl_SampleID );
-	// lane SKYHOLE1: the passes sort the pixels by depth too (the far plane = no opaque draw reached them)
-	gl_FragDepth = 1.0;
+	/* lane SKYHOLE1: the passes sort the pixels by depth too (the far plane = no opaque draw reached them); lane PERF2:
+	 * the quad sits at the far plane (cell_hdr.vert), not gl_FragDepth, so the stencil and depth reject before shading */
 	/* lane BLOOM1b: the FO4CS bloom at this pixel, exposed light (cell_bloom.glsl): the tent of the chain's top, red
 	 * and blue pushed by the glare's dispersion, times the bloom weight. cellImageSpace adds it before its curve. */
 	vec3 foBloom = vec3( 0.0 );

@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "renderer.h"
+#include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 
 #include "message.h"
 #include "nifskope.h"
@@ -450,6 +451,7 @@ float wwCellCubeDecodeMode()
 
 NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program * hint )
 {
+	PassTime::DrawCpuScope wwSetupT( PassTime::CpuSetup );	// lane PERF2
 	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
 	wwAoScene = mesh->scene;	// lane AO1

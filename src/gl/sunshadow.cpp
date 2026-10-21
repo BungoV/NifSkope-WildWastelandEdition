@@ -681,6 +681,7 @@ static void sunShadowPassImpl( Scene * scene )
 
 void wwSunShadowUniforms( Scene * scene )
 {
+	PassTime::DrawCpuScope cpuT( PassTime::CpuSunUni );	// lane PERF2
 	if ( !scene || !scene->renderer )
 		return;
 	Renderer * r = scene->renderer;

@@ -5,6 +5,7 @@
 #include "gl/celllights.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
+#include "gl/cellpasstime.h"
 
 #include <QDebug>
 #include <QFile>
@@ -597,10 +598,12 @@ void wwCellHdrEnd( Scene * scene )
 	while ( fn->glGetError() != GL_NO_ERROR ) {
 	}
 	// depth and stencil back to the frame: later draws test against the scene, the stencil sorts the pixels
+	PassTime::subBegin( PassTime::ToneBlit );	// lane PERF2: the tone-map pass's four parts
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( s.prevDraw ) );
 	fn->glBlitFramebuffer( 0, 0, s.w, s.h, 0, 0, s.w, s.h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST );
 	const GLenum blitErr = fn->glGetError();
+	PassTime::subEnd( PassTime::ToneBlit );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
 	// lane VOLAIR1 (gates only): WW_CELL_HDR_DUMP=<file> writes the linear frame before the bloom and the tone map,
 	// samples resolved: int32 W H, then W x H x RGBA float32, bottom row first. Every frame (a still path: the last).
@@ -679,11 +682,17 @@ void wwCellHdrEnd( Scene * scene )
 		}
 	}
 	// lane PERF1: the exposure and the bloom from this linear frame (before the uniforms take them)
+	PassTime::subBegin( PassTime::ToneMeasure );
 	isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead );
+	PassTime::subEnd( PassTime::ToneMeasure );
 	// lane BLOOM1b: the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
+	PassTime::subBegin( PassTime::ToneBloom );
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat );
+	PassTime::subEnd( PassTime::ToneBloom );
 
-	auto prog = r->useProgram( "cell_hdr.prog" );
+	// lane PERF2: the quad at the far plane keeps the early tests (WW_CELL_HDR_EARLY_RED=1: depth written per sample)
+	static const bool earlyRed = qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) != 0;
+	auto prog = r->useProgram( earlyRed ? "cell_hdr_fd.prog" : "cell_hdr.prog" );
 	if ( !prog ) {
 		wwCellBloomDone( r, kFoBloomUnit );
 		note( s, QStringLiteral( "lost (cell_hdr.prog went away mid-frame)" ) );
@@ -711,6 +720,7 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glDisable( GL_SCISSOR_TEST );
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 
+	PassTime::subBegin( PassTime::ToneQuads );
 	wwCellLightsUniforms( scene );	// the imagespace's uniforms (exposure, curve, grade, LUT, bloom)
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
@@ -784,6 +794,7 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	r->stopProgram();
 	wwCellBloomDone( r, kFoBloomUnit );
+	PassTime::subEnd( PassTime::ToneQuads );
 
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
