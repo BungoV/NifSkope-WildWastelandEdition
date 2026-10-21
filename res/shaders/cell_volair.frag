@@ -42,6 +42,11 @@ uniform sampler2D volGbuf;			// stage 0: lane AO1's depth buffer (volGbufZ 1: wi
 uniform int volGbufZ;
 uniform vec2 volProjZ;			// the projection's [2][2], [3][2] (the window depth back to the view distance)
 uniform ivec2 volGbufSize;
+// lane FARGRID1 (cellvolair.h): 1 the far grid is on (both passes take the sun's shadow from airFarVis), 2 this is the
+// far pass, 4 red farnoterr (the far pass ignores the terrain); 0 = as before
+uniform int volFarMode;
+uniform int volLayerBase;		// the grid's first layer in the packed volume (the far grid sits after the near one)
+uniform float volJitter;		// red farjitter: a per-frame slice offset (0 otherwise)
 
 out vec4 fragColor;
 
@@ -239,6 +244,30 @@ vec3 volCubeScatter( vec3 E[6], vec3 dW )
 	return 0.25 * max( fl + 3.0 * volGi.w * l1, vec3( 0.0 ) ) * volGi.rgb;
 }
 
+// lane FARGRID1: the cloud shadow's input (ATMORES1 feeds it later): 1 = no clouds
+float airCloudShadow( vec3 posView )
+{
+	return 1.0;
+}
+
+// lane FARGRID1: the sun's visibility with the far grid on: min(cascades where they reach, the terrain's shadow-height
+// map) x the clouds; no screen-space term (a froxel is not a pixel)
+float airFarVis( vec3 posView )
+{
+	if ( ( volRed & 8 ) != 0 )
+		return 1.0;
+	float c = 1.0, t = 1.0;
+	if ( ussOn != 0 ) {
+		float w, inMap;
+		c = mix( 1.0, ussCascades( posView, vec3( 0.0 ), vec3( 0.0 ), w ), w );
+		if ( ( volFarMode & 6 ) != 6 )
+			t = ussTerrain( posView, inMap );
+	} else if ( volCsm ) {
+		c = wwSunShadow( posView );
+	}
+	return min( c, t ) * airCloudShadow( posView );
+}
+
 // the directional light the air at posView (height z) scatters toward the eye
 vec3 airSun( vec3 posView, vec3 dirView, float z )
 {
@@ -247,12 +276,13 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 	if ( cellOn && cellHasDir ) {
 		// the cell's directional light (outdoors the weather's sun, indoors the lighting template's): world space
 		vec3 to = normalize( cellDirTo );
-		float vis = ( !cellInterior && volCsm && ( volRed & 8 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
+		float vis = ( volFarMode != 0 && !cellInterior ) ? airFarVis( posView )
+			: ( !cellInterior && volCsm && ( volRed & 8 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
 		return cellDirColor * vis * airTup( z, to.z ) * volPhasePi( dot( to, cellWorldDir( dirView ) ) );
 	}
 	if ( fogSun.w > 0.0 ) {
 		// Lookdev without the cell's lights: its sun (view space)
-		float vis = ( volCsm && ( volRed & 8 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
+		float vis = volFarMode != 0 ? airFarVis( posView ) : ( volCsm && ( volRed & 8 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
 		float mu = dot( fogView.xyz, fogSun.xyz ) / length( fogView.xyz );
 		return fogSunColour.rgb * fogSun.w * vis * airTup( z, mu ) * volPhasePi( dot( dirView, fogSun.xyz ) );
 	}
@@ -382,7 +412,7 @@ void main()
 		vec3 L = vec3( 0.0 );
 		float T = 1.0;
 		for ( int j = 0; j <= volLayer; j++ ) {
-			vec4 s = texelFetch( volInject, ivec3( col, j ), 0 );
+			vec4 s = texelFetch( volInject, ivec3( col, volLayerBase + j ), 0 );
 			L += T * s.rgb;
 			T *= s.a;
 		}
@@ -439,8 +469,8 @@ void main()
 	}
 	vec2 ndc = ( vec2( col ) + 0.5 ) / vec2( volDims.xy ) * 2.0 - 1.0;
 	vec3 dirView = normalize( vec3( ndc.x / volProj.x, ndc.y / volProj.y, -1.0 ) );
-	float t0 = volSlices.x * exp( volSlices.y * float( volLayer ) / volSlices.z );
-	float t1 = volSlices.x * exp( volSlices.y * float( volLayer + 1 ) / volSlices.z );
+	float t0 = volSlices.x * exp( volSlices.y * ( float( volLayer ) + volJitter ) / volSlices.z );
+	float t1 = volSlices.x * exp( volSlices.y * ( float( volLayer + 1 ) + volJitter ) / volSlices.z );
 	// height along the ray: z(t) = zc + dzdt x t (t in game units)
 	float zc = fogView.w;
 	float dzdt = dot( fogView.xyz, dirView ) / fogDistScale;

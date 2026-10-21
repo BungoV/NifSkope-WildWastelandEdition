@@ -183,6 +183,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveCheck( fogBox, "lookdevFog", tr( "Fog" ), wwLookdevFog() );	// lane FOG1
 	heading( tr( "Volumetric Air" ) );
 	liveCheck( volAirBox, "volAir", tr( "Volumetric Air" ), wwVolAirOn() );	// lane VOLAIR1: every mode; replaces the fog while on
+	// lane FARGRID1: the far grid, Off / Low / Medium / High / Ultra, ships Off
+	farAirBox = new QComboBox( tree );
+	farAirBox->setObjectName( QStringLiteral( "farAir" ) );
+	farAirBox->addItems( { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) } );
+	farAirBox->setCurrentIndex( std::clamp( wwVolAirFarTier(), 0, 4 ) );
+	wwMatchFieldStyle( farAirBox );
+	row( tr( "Far Air" ), farAirBox, true );
 	heading( tr( "Effects" ) );
 	liveCheck( shadowsBox, "lookdevShadows", tr( "Cascaded Shadows" ), wwLookdevShadows() );	// lane CSM1
 	liveCheck( taaBox, "gameTaa", tr( "Temporal AA" ), wwGameTaaOn() );	// lane MOTION1: every mode, ships off
@@ -311,6 +318,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
 	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );
+	liveTier( farAirBox, &wwVolAirSetFarTier );	// lane FARGRID1
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
 		if ( live )
 			wwLookdevSetGameDay( d );

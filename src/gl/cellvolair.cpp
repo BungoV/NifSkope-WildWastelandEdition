@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
+#include "gl/shadowset.h"	// lane FARGRID1: the terrain map
 #include "gl/sunshadow.h"
 #include "esmweather.h"
 #include "recx.h"
@@ -54,6 +55,8 @@ struct VaState
 {
 	bool loaded = false;
 	bool on = false, pinned = false;
+	int farTier = 0;	// lane FARGRID1: the Far Air row, 0 Off .. 4 Ultra (the pin WW_CELL_AIR_FAR wins)
+	bool farPinned = false;
 	int red = 0;
 	int terms = 15;
 	int probe = 0;
@@ -81,7 +84,8 @@ VaState & vs()
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
 				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : r == "roomstep" ? 4194304
-				: r == "echoall" ? 8388608 : 0;
+				: r == "echoall" ? 8388608
+				: r == "farnoterr" ? 16777216 : r == "farseam" ? 33554432 : r == "farjitter" ? 67108864 : 0;	// lane FARGRID1: the far reds
 		}
 		const QByteArray opt = qgetenv( "WW_CELL_AIR_OPT" ).trimmed();
 		if ( !opt.isEmpty() )
@@ -93,15 +97,49 @@ VaState & vs()
 		s.fogBlend = qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_FOGBLEND" ) == 1 ? 1 : 0;
 		if ( s.fogBlend && ( s.red & 64 ) )
 			s.fogBlend = 2;	// red blendnear: the fog colour by the air's own 1 - T, no start distance (must fail B)
+		s.farTier = std::clamp( QSettings().value( QStringLiteral( "WW/VolAirFar" ), 0 ).toInt(), 0, 4 );	// lane FARGRID1
+		const QByteArray farPin = qgetenv( "WW_CELL_AIR_FAR" ).trimmed();	// lane FARGRID1: the pin wins
+		if ( !farPin.isEmpty() ) {
+			s.farPinned = true;
+			s.farTier = std::clamp( farPin.toInt(), 0, 4 );
+		}
 		s.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AIR_DUMP" ) );
 	}
 	return s;
 }
 
+/* lane FARGRID1: the far grid's presets (cellvolair.h). Fixed sizes, not tied to the screen; 1 game unit = 1.43 cm, so
+ * 1 km = 69,930 units. The end is also never past where the near grid would have ended (the medium's farD). */
+struct VaFarPreset
+{
+	int cols, rows, slices;
+	float endKm;
+	int refresh;	// frames between rebuilds of an unchanged view (the terrain map's amortized sweep lands)
+};
+constexpr VaFarPreset kFarPresets[5] = {
+	{ 0, 0, 0, 0.0f, 0 },
+	{ 64, 36, 16, 4.0f, 32 },		// Low
+	{ 96, 54, 24, 8.0f, 16 },		// Medium
+	{ 160, 88, 32, 12.0f, 8 },		// High
+	{ 240, 132, 48, 16.0f, 4 },		// Ultra
+};
+constexpr float kUnitsPerKm = 69930.07f;
+constexpr float kFarHandoff = 17578.0f;	// the near grid's end with the far grid on: 250 m (RDR2's near range, < 160 m)
+
 struct VaGpu
 {
 	GLuint inject = 0, integ = 0, fbo = 0;
 	int cols = 0, rows = 0, slices = 0;
+	int texW = 0, texH = 0, texD = 0;	// lane FARGRID1: the packed volume (the near grid, then the far grid's layers)
+	int farCols = 0, farRows = 0, farSlices = 0;
+	bool farOn = false;
+	float farStart = 0.0f, farLog = 1.0f;
+	std::vector<float> farKey;	// what the far grid was built from (the view, the sun, the medium)
+	int farAge = 0;
+	int farBuilds = 0;
+	GLuint farQ[2] = { 0, 0 };
+	bool farQPending = false;
+	double farGpuMs = -1.0;
 	const void * doc = nullptr;
 	bool ready = false;
 	float near = kNearMin, logRatio = 1.0f;
@@ -593,6 +631,20 @@ void wwVolAirSetOn( bool on )
 	QSettings().setValue( QStringLiteral( "WW/VolAir" ), on );
 }
 
+int wwVolAirFarTier()
+{
+	return vs().farTier;
+}
+
+void wwVolAirSetFarTier( int tier )
+{
+	VaState & s = vs();
+	if ( s.farPinned )
+		return;
+	s.farTier = std::clamp( tier, 0, 4 );
+	QSettings().setValue( QStringLiteral( "WW/VolAirFar" ), s.farTier );
+}
+
 QString wwVolAirSummary()
 {
 	return QStringLiteral( "volair=" ) + vs().last;
@@ -731,8 +783,16 @@ static void vaPassInner( Scene * scene, bool run )
 		return;
 	}
 	const VaMedium M = vaFit( K, ( s.red & 32 ) != 0, ( s.red & 128 ) != 0 );
+	const WwCellLighting * L = wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr;
+	/* lane FARGRID1: with the far grid on (outdoors, and only where the air reaches past the handoff), the near grid
+	 * ends at the handoff and the far grid runs from there to min(the preset's end, the medium's farD); the tail as
+	 * before past it. Red farseam: the far grid starts 30 % past the near grid's end (a gap of air: the seam gate's red). */
+	const VaFarPreset & fp = kFarPresets[std::clamp( s.farTier, 0, 4 )];
+	const float farEnd = std::min( fp.endKm * kUnitsPerKm, M.farD );
+	const bool farOn = s.farTier > 0 && !( L && L->interior ) && farEnd > kFarHandoff * 2.0f;
+	const float farStart = kFarHandoff * ( ( s.red & 33554432 ) ? 1.3f : 1.0f );
 	// the slices: exponential from 16 units to where the air reaches the records' max opacity (vaFit)
-	const float farD = std::max( M.farD, kNearMin * 4.0f );
+	const float farD = farOn ? kFarHandoff : std::max( M.farD, kNearMin * 4.0f );
 	const float nearD = kNearMin;
 	const float logRatio = std::log( farD / nearD );
 	// the medium's top: the scene's highest point, in the fog's height frame (world z - the frame's ground)
@@ -746,7 +806,6 @@ static void vaPassInner( Scene * scene, bool run )
 	const float zTop = topW + fogView[3] - camZw;
 
 	// the phase: indoors the cell's god-ray record, outdoors the weather's, else the fallback
-	const WwCellLighting * L = wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	float med[12] = { 0.60f, 1.52f, 3.31f, 2, 2, 2, 1, 1, 1, 0.75f, 0, 1 };
 	QString medNote = QStringLiteral( "fallback" );
 	if ( L && L->interior ) {
@@ -775,14 +834,21 @@ static void vaPassInner( Scene * scene, bool run )
 
 	const int W = std::max( vp[2], 1 ), H = std::max( vp[3], 1 );
 	const int cols = ( W + kColumnPx - 1 ) / kColumnPx, rows = ( H + kColumnPx - 1 ) / kColumnPx;
-	if ( g.cols != cols || g.rows != rows || g.slices != kSlices || !g.inject ) {
-		vaAlloc3D( fn, g.inject, cols, rows, kSlices, false );
-		vaAlloc3D( fn, g.integ, cols, rows, kSlices, true );
+	// lane FARGRID1: one volume, the far grid's layers after the near grid's (no new sampler on the surfaces)
+	const int texW = farOn ? std::max( cols, fp.cols ) : cols, texH = farOn ? std::max( rows, fp.rows ) : rows;
+	const int texD = kSlices + ( farOn ? fp.slices : 0 );
+	if ( g.cols != cols || g.rows != rows || g.slices != kSlices || !g.inject || g.texW != texW || g.texH != texH || g.texD != texD ) {
+		vaAlloc3D( fn, g.inject, texW, texH, texD, false );
+		vaAlloc3D( fn, g.integ, texW, texH, texD, true );
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
 		g.cols = cols;
 		g.rows = rows;
 		g.slices = kSlices;
+		g.texW = texW;
+		g.texH = texH;
+		g.texD = texD;
+		g.farKey.clear();	// a new volume holds no far grid
 	}
 
 	// red flat: one cube for every froxel, the GI grid's mean per axis
@@ -831,6 +897,9 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1b( "volCsm", csm );
 	prog->uni1i( "volRed", s.red & ~1 );
 	prog->uni1i( "volTerms", s.terms );
+	prog->uni1i( "volFarMode", farOn ? 1 : 0 );	// lane FARGRID1: the near pass
+	prog->uni1i( "volLayerBase", 0 );
+	prog->uni1f( "volJitter", 0.0f );
 
 	/* THE OPTIMISATION (coordinator 10-14; WW_CELL_AIR_OPT, default both): 1 the clustered lights (vaBuildClusters),
 	 * 2 the conservative depth skip: stage 0 writes, per froxel column, the farthest and the nearest ray distance of
@@ -977,6 +1046,96 @@ static void vaPassInner( Scene * scene, bool run )
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 		}
 	}
+	/* lane FARGRID1: THE FAR GRID. The same program and medium on a fixed grid from the handoff to farEnd: the sun
+	 * (shadowed by airFarVis: the cascades where they reach, the terrain's shadow-height map, the clouds' input) and
+	 * the sky's ambient; no placed lights, no GI grid (neither reaches 250 m), no depth skip. Rebuilt when what it is
+	 * built from moves, else every `refresh` frames (the terrain sweep lands in slices); a still view rebuilds the
+	 * same numbers: no crawl. Red farjitter: a per-frame slice offset, rebuilt every frame (the stability gate's red). */
+	g.farOn = false;
+	if ( farOn && complete ) {
+		if ( !g.farQ[0] )
+			fn->glGenQueries( 2, g.farQ );
+		if ( g.farQPending ) {
+			GLuint avail = 0;
+			fn->glGetQueryObjectuiv( g.farQ[1], GL_QUERY_RESULT_AVAILABLE, &avail );
+			if ( avail || timed ) {
+				GLuint64 t0 = 0, t1 = 0;
+				fn->glGetQueryObjectui64v( g.farQ[0], GL_QUERY_RESULT, &t0 );
+				fn->glGetQueryObjectui64v( g.farQ[1], GL_QUERY_RESULT, &t1 );
+				g.farGpuMs = double( t1 - t0 ) / 1.0e6;
+				g.farQPending = false;
+			}
+		}
+		std::vector<float> key;
+		for ( int i = 0; i < 3; i++ )
+			for ( int j = 0; j < 3; j++ )
+				key.push_back( vt.rotation( i, j ) );
+		key.insert( key.end(), { vt.translation[0], vt.translation[1], vt.translation[2], sc, p00, p11, M.sigma0, M.zb,
+			M.invH, zTop, G.w, G.zn, G.invHn, G.s, G.zg, G.invHg, farStart, farEnd, float( s.farTier ), float( s.terms ),
+			float( s.red ), csm ? 1.0f : 0.0f } );
+		for ( int k = 0; k < 6; k++ )
+			key.insert( key.end(), K[k], K[k] + 4 );
+		float sunV[4];
+		for ( const char * n : { "cellDirTo", "cellDirColor", "fogSun", "fogSunColour" } ) {
+			uniF( n, -1, sunV, 4 );
+			key.insert( key.end(), sunV, sunV + 4 );
+		}
+		WwTerrainShadowMap tm;
+		if ( wwTerrainShadowMap( tm ) )
+			key.insert( key.end(), { float( tm.tex ), float( tm.elevDeg ), float( tm.azDeg ), float( tm.x0 ), float( tm.y0 ) } );
+		const bool jitter = ( s.red & 67108864 ) != 0;
+		const bool rebuild = jitter || key != g.farKey || ++g.farAge >= fp.refresh;
+		bool farOk = true;
+		if ( rebuild ) {
+			const float farLog = std::log( farEnd / farStart );
+			if ( !g.farQPending )
+				fn->glQueryCounter( g.farQ[0], GL_TIMESTAMP );
+			fn->glUniform3i( prog->uniLocation( "volDims" ), fp.cols, fp.rows, fp.slices );
+			prog->uni4f( "volSlices", FloatVector4( farStart, farLog, float( fp.slices ), 1.0f ) );
+			prog->uni1i( "volFarMode", 3 | ( ( s.red & 16777216 ) ? 4 : 0 ) );
+			prog->uni1i( "volLayerBase", kSlices );
+			prog->uni1i( "volTerms", s.terms & 9 );
+			prog->uni1i( "volDepthSkip", 0 );
+			fn->glUniform4i( prog->uniLocation( "volClusterDims" ), 0, 0, kClusterCols, kClusterSlices );
+			static quint32 frame = 0;
+			prog->uni1f( "volJitter", jitter ? float( ( ++frame * 2654435761u ) >> 8 ) / 16777216.0f - 0.5f : 0.0f );
+			fn->glViewport( 0, 0, fp.cols, fp.rows );
+			for ( int stage = 1; stage <= 2 && farOk; stage++ ) {
+				prog->uni1i( "volStage", stage );
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
+				fn->glBindTexture( GL_TEXTURE_3D, stage == 2 ? g.inject : 0 );
+				for ( int k = 0; k < fp.slices; k++ ) {
+					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, stage == 1 ? g.inject : g.integ, 0, kSlices + k );
+					if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+						farOk = false;
+						break;
+					}
+					prog->uni1i( "volLayer", k );
+					r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+				}
+			}
+			if ( !g.farQPending ) {
+				fn->glQueryCounter( g.farQ[1], GL_TIMESTAMP );
+				g.farQPending = true;
+			}
+			if ( timed && g.farQPending ) {
+				GLuint64 t0 = 0, t1 = 0;
+				fn->glGetQueryObjectui64v( g.farQ[0], GL_QUERY_RESULT, &t0 );
+				fn->glGetQueryObjectui64v( g.farQ[1], GL_QUERY_RESULT, &t1 );
+				g.farGpuMs = double( t1 - t0 ) / 1.0e6;
+				g.farQPending = false;
+			}
+			g.farKey = farOk ? key : std::vector<float>();
+			g.farAge = 0;
+			g.farBuilds++;
+		}
+		g.farOn = farOk;
+		g.farCols = fp.cols;
+		g.farRows = fp.rows;
+		g.farSlices = fp.slices;
+		g.farStart = farStart;
+		g.farLog = std::log( farEnd / farStart );
+	}
 	// the numbers the dump echoes, read before the program stops
 	float cellRowV[3][4], cellDirColV[3] = { 0, 0, 0 }, cellDirToV[3] = { 0, 0, 0 };
 	for ( int k = 0; k < 3; k++ )
@@ -1038,8 +1197,16 @@ static void vaPassInner( Scene * scene, bool run )
 		.arg( QString( G.recx ).replace( QLatin1Char( ' ' ), QLatin1Char( '_' ) ) )
 		.arg( G.conflict.isEmpty() ? QString() : G.conflict.startsWith( QStringLiteral( "conflict:" ) ) ? QStringLiteral( " recxconflict=1" )
 			: QStringLiteral( " recxoverride=1" ) );
+	// lane FARGRID1: the far grid's echo (the grid, its range, builds, GPU ms of its last build, the volumes' bytes)
+	const double volMb = double( g.texW ) * g.texH * g.texD * 16.0 * 2.0 / ( 1024.0 * 1024.0 );
+	const QString farNote = !farOn ? QStringLiteral( "far=off(tier=%1%2)" ).arg( s.farTier )
+			.arg( s.farTier > 0 ? QStringLiteral( " handoff=%1 end=%2" ).arg( double( kFarHandoff ), 0, 'f', 0 ).arg( double( farEnd ), 0, 'f', 0 ) : QString() )
+		: QStringLiteral( "far=on(tier=%1 %2x%3x%4 start=%5 end=%6 refresh=%7 builds=%8 gpums=%9 volmb=%10 terrain=%11)" )
+			.arg( s.farTier ).arg( fp.cols ).arg( fp.rows ).arg( fp.slices ).arg( double( farStart ), 0, 'f', 0 )
+			.arg( double( farEnd ), 0, 'f', 0 ).arg( fp.refresh ).arg( g.farBuilds ).arg( g.farGpuMs, 0, 'f', 3 )
+			.arg( volMb, 0, 'f', 1 ).arg( [] { WwTerrainShadowMap t; return wwTerrainShadowMap( t ) ? 1 : 0; }() );
 	s.last.chop( 1 );
-	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + QStringLiteral( ")" );
+	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() ) + QStringLiteral( ")" );
 
 	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */
@@ -1139,6 +1306,11 @@ void wwVolAirUniforms( Scene * scene )
 	prog->uni4f( "volSlices", FloatVector4( g.near, g.logRatio, float( g.slices ), ( s.red & 1 ) ? 0.0f : 1.0f ) );
 	prog->uni1i( "volProbe", s.probe );
 	prog->uni1i( "volFogBlend", s.fogBlend );
+	// lane FARGRID1: the packed volume's layout (volFar.w 0: the near grid alone, the lookups as before)
+	prog->uni4f( "volFar", FloatVector4( g.farStart, g.farLog, float( g.farSlices ), g.farOn ? 1.0f : 0.0f ) );
+	const float tw = float( std::max( g.texW, 1 ) ), th = float( std::max( g.texH, 1 ) );
+	prog->uni4f( "volPack", FloatVector4( float( g.cols ) / tw, float( g.rows ) / th, float( g.farCols ) / tw, float( g.farRows ) / th ) );
+	prog->uni4f( "volPackDims", FloatVector4( tw, th, float( std::max( g.texD, 1 ) ), float( g.slices ) ) );
 	// FOGSUN1: the surfaces' sun through the air (lookdev_fog.glsl wwVolAirSunT); red nosunt: the sun not dimmed
 	// and the far tail past the froxels (lookdev_fog.glsl wwVolAirAt): the medium and what is on (the reds clear a bit)
 	const int ml = prog->uniLocation( "volAirMed" );

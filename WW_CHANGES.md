@@ -69,6 +69,22 @@
 - **Found, not changed:** the bake texture LRU's 512 MB budget counts `DDSTexture16::size()`, which is texels, so the
   real cap is about 4 GB. Counting bytes made the bake 2.25x slower (thrash), so it stays as is.
 
+## Lane FARGRID1 (2026-10-19, branch fargrid1-20261019): a far air grid shadowed by the terrain
+
+- **A second, coarse air grid from 250 m out to the km range** (`WW_CELL_AIR_FAR` 0..4, menu row "Far Air" under
+  Volumetric Air: Off / Low / Medium / High / Ultra; ships Off). Lit by the sun and the sky only; the sun is shadowed by
+  the TERRSHADOW1 terrain map and the cascades where they reach, so a ridge leaves dark air behind it. With it on, the
+  near grid ends at 250 m (finer near slices); the chain near -> far -> closed-form tail uses one medium, phase, sun
+  and sky (all from the WTHR record / `.recx` groundFog, as VOLAIR1). Fixed grid per preset (64x36x16 4 km ..
+  240x132x48 16 km), rebuilt when the view, medium or sun change, else every 32..4 frames; deterministic, no crawl.
+  Packed into the near grid's 3D textures (layers 64..), so surfaces gain no sampler. `airCloudShadow()` is the
+  hook for a later cloud-shadow map.
+- Telemetry: the "cell air:" echo gains `far=on(tier grid start end refresh builds gpums volmb terrain)` (only when the
+  tier is above 0); the far build is timed with GL_TIMESTAMP.
+- Gates: `tests/spells/fargrid1_gates.sh` + `fargrid1_gates.py`: off == the rung byte for byte, leak, seam, stable,
+  perf; reds `WW_CELL_AIR_RED=farnoterr` (leak must fail), `farseam` (seam must fail), `farjitter` (stable must fail).
+  Not yet run (see notesargrid1\STATUS.md).
+
 ## Lane CELLSTREAM1 (2026-10-16..19, branch cellstream1-20261016): the exterior cell view streams a 5x5 block
 
 - **An exterior cell document can stream full cells round the camera.** `WW_CELL_STREAM=1` (test switch, no menu

@@ -51,6 +51,10 @@ uniform int volProbe;		// gates only: 1 the light term L alone, raw; 2 the trans
 uniform int volFogBlend;	// test only (WW_CELL_VOLAIR_FOGBLEND=1, option B): the game's fog drawn over the lit air
 				// with its own alpha (0 nearer than its start distance); 0 = option A, the real light only
 
+uniform vec4 volFar;		// lane FARGRID1: the far grid's start (the near grid's end), ln(end / start), slices, 1 = on
+uniform vec4 volPack;		// the packed volume's shares: the near grid's width, height, the far grid's
+uniform vec4 volPackDims;	// the packed volume's texels: width, height, depth; the near grid's slices
+
 uniform vec4 volAirMed;		// the pass's medium (cell_volair.frag airMed): sigma0, zb, 1 / H, the top (the fog's height frame)
 uniform vec4 volAirLayer;	// its near band and ground layer (airLayer): the near share w, zn, 1 / Hn, the ground strength s
 uniform vec4 volAirGround;	// (airGround): the ground layer's anchor zg, 1 / its thickness
@@ -116,6 +120,66 @@ float wwAirCol( float lo, float hi )
 // the records' haze colour at distance d, height z, view direction dirView (cell_volair.frag airEnvColour), unit luminance
 vec3 wwAirRecordColour( float d, float z, vec3 dirView, out bool ok );
 
+/* lane FARGRID1: with the far grid on, one volume holds both grids: the near grid in layers 0..n-1 over its share of
+ * the width and height, the far grid after it over its own share. (L, T) of one grid at slice coordinate f (0 at its
+ * near edge), the bilinear kept inside the grid's share (its own clamp to edge). */
+vec4 wwGridAt( vec2 uv, vec2 share, float base, float n, float f )
+{
+	vec2 lo = 0.5 / volPackDims.xy;
+	vec2 st = clamp( uv * share, lo, share - lo );
+	vec4 v;
+	if ( f < 1.0 ) {
+		v = texture( volTex, vec3( st, ( base + 0.5 ) / volPackDims.z ) );
+		v = vec4( v.rgb * max( f, 0.0 ), 1.0 - ( 1.0 - v.a ) * max( f, 0.0 ) );
+	} else {
+		v = texture( volTex, vec3( st, ( base + min( f, n ) - 0.5 ) / volPackDims.z ) );
+	}
+	return vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
+}
+
+// the light per unit (1 - T) of a grid's last slice (the closed-form tail's J), `last` its (L, T) at the end
+vec3 wwGridTailJ( vec2 uv, vec2 share, float base, float n, vec4 last )
+{
+	vec4 p = wwGridAt( uv, share, base, n, n - 1.0 );
+	float dT = p.a - last.a;
+	return dT > 1e-7 ? max( ( last.rgb - p.rgb ) / dT, vec3( 0.0 ) ) : vec3( 0.0 );
+}
+
+// near grid -> far grid -> closed-form tail: (L, T) at distance d (game units) along posView
+vec4 wwVolAirAtFar( float d, vec2 uv, vec3 posView )
+{
+	float nN = volPackDims.w;
+	if ( d <= volSlices.x )
+		return vec4( 0.0, 0.0, 0.0, 1.0 );
+	vec4 v = wwGridAt( uv, volPack.xy, 0.0, nN, log( d / volSlices.x ) / volSlices.y * nN );
+	if ( d <= volFar.x )
+		return v;
+	float fF = log( d / volFar.x ) / volFar.y * volFar.z;
+	vec4 w = wwGridAt( uv, volPack.zw, nN, volFar.z, fF );
+	vec4 o = vec4( v.rgb + v.a * w.rgb, v.a * w.a );
+	if ( fF <= volFar.z || ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
+		return o;
+	// the closed-form tail past the far grid (wwVolAirAt's, from the far grid's last slice)
+	float far = volFar.x * exp( volFar.y );
+	vec3 J = wwGridTailJ( uv, volPack.zw, nN, volFar.z, w );
+	float z1 = dot( fogView.xyz, posView ) + fogView.w;
+	float zc = fogView.w;
+	float z0 = zc + ( z1 - zc ) * ( far / d );
+	float len = d - far;
+	float dz = z1 - z0;
+	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0 ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ) ) / abs( dz );
+	float Tt = exp( -tau );
+	if ( ( volAirFlags & 4 ) != 0 ) {
+		vec3 dirV = posView / max( length( posView ), 1e-12 );
+		bool ok0, ok1;
+		vec3 c0 = wwAirRecordColour( far, z0, dirV, ok0 );
+		vec3 c1 = wwAirRecordColour( 0.5 * ( far + d ), 0.5 * ( z0 + z1 ), dirV, ok1 );
+		if ( ok0 && ok1 )
+			J *= c1 / max( c0, vec3( 1e-6 ) );
+	}
+	return vec4( o.rgb + o.a * J * ( 1.0 - Tt ), o.a * Tt );
+}
+
 /* (L, T) of the air between the eye and posView. Past the froxels' far edge (bungo 10-14, the far tail: far
  * mountains and the far LOD) the same medium continues in closed form: T x= exp(-sigma0 x the column along the
  * segment / its slope), L += T_edge x J x (1 - T_tail), J the light the last slice's air scattered (its L and T steps,
@@ -130,6 +194,8 @@ vec4 wwVolAirAt( vec3 posView )
 	 * that read the froxels the depth skip had left empty, and an air no surface there sits behind. */
 	if ( volFarClamp != 0 )
 		d = min( d, texture( volTile, uv ).r );
+	if ( volFar.w > 0.5 )
+		return wwVolAirAtFar( d, uv, posView );
 	if ( d <= volSlices.x )
 		return vec4( 0.0, 0.0, 0.0, 1.0 );
 	float f = log( d / volSlices.x ) / volSlices.y * volSlices.z;
@@ -175,14 +241,28 @@ vec4 wwVolAirSky( vec3 dirView )
 {
 	vec2 uv = ( gl_FragCoord.xy - volRect.xy ) * volRect.zw;
 	float n = volSlices.z;
-	vec4 v = texture( volTex, vec3( uv, ( n - 0.5 ) / n ) );
+	vec4 v;
+	float far;
+	vec3 J;
+	if ( volFar.w > 0.5 ) {
+		// lane FARGRID1: the near grid's end, then the far grid's, the tail from the far grid's last slice
+		vec4 a = wwGridAt( uv, volPack.xy, 0.0, volPackDims.w, volPackDims.w );
+		vec4 b = wwGridAt( uv, volPack.zw, volPackDims.w, volFar.z, volFar.z );
+		v = vec4( a.rgb + a.a * b.rgb, a.a * b.a );
+		if ( ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
+			return v;
+		far = volFar.x * exp( volFar.y );
+		J = wwGridTailJ( uv, volPack.zw, volPackDims.w, volFar.z, b );
+	} else {
+	v = texture( volTex, vec3( uv, ( n - 0.5 ) / n ) );
 	v = vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
 	if ( ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
 		return v;
-	float far = volSlices.x * exp( volSlices.y );
+	far = volSlices.x * exp( volSlices.y );
 	vec4 p = texture( volTex, vec3( uv, ( n - 1.5 ) / n ) );
 	float dT = p.a - v.a;
-	vec3 J = dT > 1e-7 ? max( ( v.rgb - p.rgb ) / dT, vec3( 0.0 ) ) : vec3( 0.0 );
+	J = dT > 1e-7 ? max( ( v.rgb - p.rgb ) / dT, vec3( 0.0 ) ) : vec3( 0.0 );
+	}
 	float s = dot( fogView.xyz, dirView ) / max( fogDistScale, 1e-12 );	// the sine of the elevation
 	float z0 = fogView.w + s * far;
 	float top = volAirMed.w;

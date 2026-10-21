@@ -82,6 +82,20 @@ void wwVolAirSkyDraw( Scene * scene, bool probes );
 //! the row (ships off); the pin WW_CELL_AIR wins
 bool wwVolAirOn();
 void wwVolAirSetOn( bool on );
+/*! lane FARGRID1: THE FAR GRID (the row "Far Air" under Volumetric Air: Off / Low / Medium / High / Ultra, ships Off,
+ *  QSettings WW/VolAirFar; the pin WW_CELL_AIR_FAR=0..4 wins). Outdoors, the near grid then ends at 250 m (17,578 units)
+ *  and a second, fixed grid (not tied to the screen) carries the SAME medium, phase, sun and sky from there to
+ *  min(the preset end, the medium's farD); the closed-form tail as before past it. Its sun is shadowed by the cascades
+ *  where they reach and the terrain's shadow-height map (TERRSHADOW1; the Terrain Shadows row), times the clouds' input
+ *  (cell_volair.frag airCloudShadow, 1 until ATMORES1). No placed lights, no GI grid. Both grids share one volume (the
+ *  far grid's layers after the near grid's), so the surfaces gain no sampler; Off draws exactly as before.
+ *  Presets (cols x rows x slices, end, rebuild of an unchanged view every N frames): Low 64x36x16 4 km 32, Medium
+ *  96x54x24 8 km 16, High 160x88x32 12 km 8, Ultra 240x132x48 16 km 4. Every input a weather owns comes from the
+ *  records the near grid reads (fog distances and powers, sun and sky colours by hour, the god-ray phase).
+ *  Reds (WW_CELL_AIR_RED): farnoterr (the far grid ignores the terrain), farseam (it starts 30 % past the near grid's
+ *  end), farjitter (a per-frame slice offset). Echo: far=on(tier ... gpums ... volmb ...) in the air's census. */
+int wwVolAirFarTier();
+void wwVolAirSetFarTier( int tier );
 //! census echo: "volair=on(...)" or why none was drawn
 QString wwVolAirSummary();
 
