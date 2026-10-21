@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BAKESPEED1 (2026-10-21, branch bakespeed1-20261021): the chunks stage runs its VT rows and chunk jobs on all cores, and resumes
+
+- **Why.** The FARBAKE2 chunks stage was serial in its two biggest parts: on the mid region (-24..23) the VT pyramid took 1539 s and the chunk pass 511 s on one core.
+- **What changed (speed and resume only; output is byte-identical):**
+  - **VT rows in parallel.** A row's tiles go to up to 8 workers, never more than the row has tiles. Each worker has its own plugin reader, land cache and mask cache.
+    - The texture LRU is shared. Each worker pins its last 8 asked textures, and everything else evicts on load as in the serial path.
+    - A worker's grass-tint resolver keeps one texture (the tint is memoised per model); a full LRU there held ~1.5 GB a worker.
+    - A texture decodes outside the lock; a second thread asking for the same key waits for it.
+    - The road and object censuses fold in tile order.
+  - **Chunk workers default to 8**, never more than free memory allows (the old cap). `--chunk-threads N` still wins. A worker's inner loops now share the pool instead of running serial.
+  - **Decals:** the road set gathered by the decals stage goes to the pyramid when its key matches (no second gather).
+    - Decoding the flat rule's models in parallel was tried and dropped: it took 10x the CPU and was slower (gate 36 -> 59 s), so the loads contend.
+    - The pictures loop stays serial. A parallel version (about 3 s faster on the gate) changes 151 of 621 pieces through FMA contraction: bounds by 1 ULP, but also 12382 visible texels by more than one BC3 step (up to 255/255) and 98 coverage-edge texels. That fails the stated tolerance, so the loop keeps its exact old text.
+  - **Resume.** A rerun with the same switches, exe and plugins (same name, size and time) continues where the last run stopped. Everything lives in `<out-dir>/lodgen_resume`, which is removed when the stage finishes:
+    - finished VT rows come from a checkpoint (every 180 s, `WW_LODGEN_RESUME_SEC` changes it, and always after the last row);
+    - finished chunks are skipped through a per-chunk ledger that holds the chunk's outcome and its native journal;
+    - the BTO scratch is kept for them;
+    - the checkpoint also carries the vanilla-reuse counters the pyramid's chunk sheets add to, so the census reads the same.
+- **Red:** `WW_LODGEN_BAKESPEED_RED=1` restores the serial VT, 1 chunk worker, nested loops serial and no resume.
+- **Measured** on gate region -4 -4 3 3, all rings, FARBAKE2 flags:
+  - chunks stage: 786 -> 560 s;
+  - VT pyramid: ~37 -> 18 s;
+  - chunk pass: 158 -> 34 s (8 workers);
+  - peak private: 5.5 -> 6.8 GB (VT workers and pinned textures).
+  - The native write (355 s) is now the gate's largest phase: its vertex-AO face cast runs parallel per chunk only, so the four dim-32 chunks finish on about one core.
+- **Gate:** sha1 of every mod and scratch file against the f47f5d11 run, at default threads, `--threads 1`, `--chunk-threads 4` and red. The only differences are the .key generator word, the flat report's override-file line, and the .lodb per-run fields (including the census row's chunk-thread count).
+
 ## Lane BAKEMEM1 (2026-10-21, branch bakemem1-20261021): the decals gather frees its decoded models
 
 - **Why.** FARBAKE2 (whole Commonwealth, every channel) was stopped by the memory guard at 13 GB private in the

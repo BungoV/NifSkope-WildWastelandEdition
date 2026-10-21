@@ -115,6 +115,8 @@ quint64 lodgenPeakWorkingSet();
 QString lodgenPeakWorkingSetLine();
 
 //! lane BAKEMEM1: with WW_LODGEN_MEMLOG set, one "mem: <phase> | private, peak private, ws" line on stderr.
+//! lane BAKESPEED1's red: WW_LODGEN_BAKESPEED_RED=1 runs the stages it made parallel serially, as before
+bool lodgenBakeSpeedRed();
 bool lodgenMemLogOn();
 void lodgenMemNote( const QString & phase, const QString & extra = QString() );
 

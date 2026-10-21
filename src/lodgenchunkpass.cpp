@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 
 #include <QBuffer>
 #include <QCryptographicHash>
+#include <QDataStream>
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
@@ -28,6 +29,7 @@ BSD License - see nifskope.h
 #include <QThread>
 
 #include <atomic>
+#include <cstdio>
 #include <memory>
 #include <vector>
 
@@ -217,6 +219,64 @@ void runJob( const LodgenChunkJob & job, int index, const LodgenChunkPassOptions
 	}
 }
 
+/* lane BAKESPEED1: THE RESUME LEDGER, one file a retired chunk: the key, the outcome, the raw journal. */
+const quint32 kChunkLedgerMagic = 0x314A4352U;	// "RCJ1"
+
+QString ledgerPath( const LodgenChunkPassOptions & o, int i, const LodgenChunkJob & j )
+{
+	return QString( "%1/%2.%3.%4.%5.chunk" ).arg( o.resumeDir ).arg( i ).arg( j.dim ).arg( j.cx ).arg( j.cy );
+}
+
+//! the ledger's bytes; it goes through the same writer queue as the chunk's files, so it lands after them
+QByteArray ledgerBytes( const LodgenChunkPassOptions & o, const LodgenChunkOutcome & r )
+{
+	QByteArray b;
+	QDataStream s( &b, QIODevice::WriteOnly );
+	s << kChunkLedgerMagic << o.resumeKey << qint32( r.index ) << qint32( r.dim ) << qint32( r.cx ) << qint32( r.cy )
+	  << r.btrBuilt << r.btrNoLand << r.btrSaved << r.btoBuilt << r.btoSaved << r.btrError << r.btoError << r.texError
+	  << r.btrPath << r.btoPath << r.manifestPath << r.btrPreviewPath << r.btoPreviewPath << qint32( r.nativeEvents )
+	  << bool( r.nativeJournal ) << lodgenNativeJournalSave( r.nativeJournal );
+	return b;
+}
+
+//! a ledger for this job under this key whose files are all still there; the journal comes back as bytes
+bool loadLedger( const LodgenChunkPassOptions & o, int i, const LodgenChunkJob & j, LodgenChunkOutcome & r,
+	bool & hasJournal, QByteArray & journal )
+{
+	QFile f( ledgerPath( o, i, j ) );
+	if ( !f.open( QIODevice::ReadOnly ) )
+		return false;
+	QDataStream s( &f );
+	quint32 magic = 0;
+	QString key;
+	qint32 idx = 0, dim = 0, cx = 0, cy = 0, ev = 0;
+	s >> magic >> key >> idx >> dim >> cx >> cy;
+	if ( s.status() != QDataStream::Ok || magic != kChunkLedgerMagic || key != o.resumeKey || idx != i
+		|| dim != j.dim || cx != j.cx || cy != j.cy )
+		return false;
+	LodgenChunkOutcome t;
+	t.index = i;
+	t.dim = dim;
+	t.cx = cx;
+	t.cy = cy;
+	s >> t.btrBuilt >> t.btrNoLand >> t.btrSaved >> t.btoBuilt >> t.btoSaved >> t.btrError >> t.btoError >> t.texError
+	  >> t.btrPath >> t.btoPath >> t.manifestPath >> t.btrPreviewPath >> t.btoPreviewPath >> ev >> hasJournal >> journal;
+	if ( s.status() != QDataStream::Ok )
+		return false;
+	if ( hasJournal ) {
+		LodgenNativeJournal * jr = lodgenNativeJournalLoad( journal );
+		if ( !jr )
+			return false;
+		lodgenNativeJournalDestroy( jr );
+	}
+	for ( const QString & p : { t.btrPath, t.btoPath, t.manifestPath, t.btrPreviewPath, t.btoPreviewPath } )
+		if ( !p.isEmpty() && !QFileInfo::exists( p ) )
+			return false;
+	t.nativeEvents = ev;
+	r = t;
+	return true;
+}
+
 /*! A worker thread: take the next job nobody has taken, build it, mark it
  *  done. Completion order is not job order; the driver retires from the
  *  results array by index. */
@@ -225,20 +285,26 @@ class ChunkThread final : public QThread
 public:
 	ChunkThread( Worker * w, const QVector<LodgenChunkJob> * jobs, const LodgenChunkPassOptions * o,
 		LodgenWriter * writer, std::atomic<int> * cursor, LodgenChunkOutcome * results,
-		std::atomic<int> * flags, const std::function<bool()> * cancel )
+		std::atomic<int> * flags, const std::function<bool()> * cancel, const char * skipJobs )
 		: worker( w ), jobList( jobs ), options( o ), out( writer ),
-		  next( cursor ), res( results ), doneFlags( flags ), cancelled( cancel ) {}
+		  next( cursor ), res( results ), doneFlags( flags ), cancelled( cancel ), skip( skipJobs ) {}
 
 protected:
 	void run() override
 	{
-		/* This thread IS one of the generator's workers: the BC encoders it
-		 * reaches must not fan out again underneath it. */
-		LodgenWorkerScope workerScope;
+		/* This thread IS one of the generator's workers. Red: the BC encoders it reaches do not fan out again
+		 * underneath it. Otherwise (lane BAKESPEED1) its inner loops share the one pool with the other workers. */
+		std::unique_ptr<LodgenWorkerScope> workerScope;
+		if ( lodgenBakeSpeedRed() )
+			workerScope.reset( new LodgenWorkerScope );
 		for ( ;; ) {
 			const int i = next->fetch_add( 1 );
 			if ( i >= jobList->size() )
 				break;
+			if ( skip[i] ) {
+				doneFlags[i].store( 1 );      // resumed: its outcome came from the ledger
+				continue;
+			}
 			if ( cancelled && *cancelled && ( *cancelled )() ) {
 				doneFlags[i].store( 2 );      // Cancel still lands between chunks
 				continue;
@@ -257,6 +323,7 @@ private:
 	LodgenChunkOutcome * res;
 	std::atomic<int> * doneFlags;
 	const std::function<bool()> * cancelled;
+	const char * skip;
 };
 
 } // namespace
@@ -422,6 +489,54 @@ bool lodgenRunChunkPass( const QVector<LodgenChunkJob> & jobs,
 
 	std::vector<LodgenChunkOutcome> results( size_t( jobs.size() ) );
 
+	/* RESUME (lane BAKESPEED1): a job whose ledger matches this run's key and whose files are still there is not
+	 * built again; its outcome and its journal come back from the ledger and retire in their own place. */
+	const bool resumeOn = !opts.resumeDir.isEmpty() && !lodgenBakeSpeedRed();
+	std::vector<char> skip( size_t( jobs.size() ), 0 );
+	std::vector<QByteArray> stored( size_t( jobs.size() ) );
+	if ( resumeOn ) {
+		QDir().mkpath( opts.resumeDir );
+		int resumed = 0;
+		for ( int i = 0; i < jobs.size(); i++ ) {
+			bool hasJournal = false;
+			if ( loadLedger( opts, i, jobs.at( i ), results[size_t( i )], hasJournal, stored[size_t( i )] ) ) {
+				skip[size_t( i )] = 1;
+				resumed++;
+				if ( !hasJournal )
+					stored[size_t( i )].clear();
+			}
+		}
+		if ( resumed )
+			fprintf( stderr, "lodgen: chunks resumed: %d of %d from the ledger\n", resumed, int( jobs.size() ) );
+	}
+	LodgenWriter * ledgerQueue = nullptr;	// set on the threaded path: the ledger follows the chunk's files
+	auto retireOne = [&]( int i ) {
+		LodgenChunkOutcome & r = results[size_t( i )];
+		if ( skip[size_t( i )] ) {
+			if ( !stored[size_t( i )].isEmpty() )
+				r.nativeJournal = lodgenNativeJournalLoad( stored[size_t( i )] );
+			stored[size_t( i )] = QByteArray();
+		} else if ( resumeOn ) {
+			const QByteArray b = ledgerBytes( opts, r );
+			const QString path = ledgerPath( opts, i, jobs.at( i ) );
+			if ( ledgerQueue ) {
+				ledgerQueue->push( path, b );
+			} else {
+				QSaveFile f( path );
+				if ( f.open( QIODevice::WriteOnly ) && f.write( b ) == b.size() )
+					f.commit();
+			}
+		}
+		if ( r.nativeJournal ) {
+			if ( opts.nativeJournalSink )
+				opts.nativeJournalSink( r, r.nativeJournal );
+			lodgenNativeJournalReplay( r.nativeJournal );
+			lodgenNativeJournalDestroy( r.nativeJournal );
+			r.nativeJournal = nullptr;
+		}
+		retire( r );
+	};
+
 	/* EMPTY-FOLDER HYGIENE (lane LAYOUT1, 2026-09-16). `meshDir` is the
 	 * LEGACY chunk folder, `meshes/terrain/<ws>/`. Under the FO4CS target
 	 * nothing lands in it any more -- the `.BTO` is scaffolding in a scratch
@@ -475,20 +590,14 @@ bool lodgenRunChunkPass( const QVector<LodgenChunkJob> & jobs,
 		 * sink the calls have to exist as data for one moment so they can be
 		 * reduced and written, and they are replayed immediately after, on
 		 * this same thread, in this same place. */
-		const bool journalNative = bool( opts.nativeJournalSink );
+		const bool journalNative = bool( opts.nativeJournalSink ) || resumeOn;
 		for ( int i = 0; i < jobs.size(); i++ ) {
 			if ( cancelled && cancelled() )
 				break;
 			replayCachedBefore( jobs.at( i ) );
-			runJob( jobs.at( i ), i, opts, w, nullptr, journalNative, results[size_t( i )] );
-			LodgenChunkOutcome & r1 = results[size_t( i )];
-			if ( r1.nativeJournal ) {
-				opts.nativeJournalSink( r1, r1.nativeJournal );
-				lodgenNativeJournalReplay( r1.nativeJournal );
-				lodgenNativeJournalDestroy( r1.nativeJournal );
-				r1.nativeJournal = nullptr;
-			}
-			retire( r1 );
+			if ( !skip[size_t( i )] )
+				runJob( jobs.at( i ), i, opts, w, nullptr, journalNative, results[size_t( i )] );
+			retireOne( i );
 		}
 		replayCachedTail();
 		if ( msMeshes )
@@ -506,11 +615,12 @@ bool lodgenRunChunkPass( const QVector<LodgenChunkJob> & jobs,
 	/* The writer thread with its bounded queue: a worker hands over bytes and
 	 * goes back to building. Nothing returns before finish() has drained it. */
 	LodgenWriter writer;
+	ledgerQueue = &writer;
 
 	QVector<ChunkThread *> ths;
 	for ( int i = 0; i < threads; i++ ) {
 		ChunkThread * t = new ChunkThread( workers[size_t( i )].get(), &jobs, &opts, &writer,
-			&cursor, results.data(), flags.data(), &cancelled );
+			&cursor, results.data(), flags.data(), &cancelled, skip.data() );
 		ths.append( t );
 		t->start();
 	}
@@ -527,16 +637,8 @@ bool lodgenRunChunkPass( const QVector<LodgenChunkJob> & jobs,
 			QThread::msleep( 1 );
 		if ( flags[size_t( i )].load() == 2 )
 			continue;                   // cancelled before this job was picked up
-		LodgenChunkOutcome & r = results[size_t( i )];
 		replayCachedBefore( jobs.at( i ) );
-		if ( r.nativeJournal ) {
-			if ( opts.nativeJournalSink )
-				opts.nativeJournalSink( r, r.nativeJournal );
-			lodgenNativeJournalReplay( r.nativeJournal );
-			lodgenNativeJournalDestroy( r.nativeJournal );
-			r.nativeJournal = nullptr;
-		}
-		retire( r );
+		retireOne( i );
 	}
 	replayCachedTail();
 

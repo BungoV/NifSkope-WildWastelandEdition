@@ -290,6 +290,10 @@ public:
 	//! Append an absent tile: 24 zero bytes, no payload.
 	bool addAbsent( QString * error );
 	bool finish( QString * error );
+	/*! lane BAKESPEED1, resume: the table so far (the file flushed first), and the way back into a file
+	 *  cut at that state: `path` opened in place, cut to the state's end, the table restored. */
+	QByteArray saveState();
+	bool resume( const QString & path, const LodvHeaderFields & fields, const QByteArray & state, QString * error );
 
 	int tilesWritten() const;
 	int tilesPresent() const;

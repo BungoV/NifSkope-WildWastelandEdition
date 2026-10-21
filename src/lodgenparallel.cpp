@@ -157,6 +157,13 @@ QString lodgenChunkThreadBoundBy()
 int lodgenChunkThreadCount()
 {
 	int n = g_chunkThreads;
+	if ( !g_chunkThreadsAsked && !lodgenBakeSpeedRed() ) {
+		/* lane BAKESPEED1: eight by default (a worker measured ~0.5 GB in the chunk pass; the workers' inner
+		 * loops share the pool), never past what free memory holds; red keeps the old one */
+		const int cap = lodgenChunkThreadMemoryCap( g_chunkTexBudgetBytes );
+		g_chunkBoundBy = ( cap < 8 ) ? QStringLiteral( "memory" ) : QStringLiteral( "default" );
+		return qMax( 1, qMin( 8, cap ) );
+	}
 	if ( n > 0 ) {
 		g_chunkBoundBy = g_chunkThreadsAsked ? QStringLiteral( "asked" )
 			: QStringLiteral( "default" );
@@ -247,6 +254,12 @@ QString lodgenPeakWorkingSetLine()
 }
 
 static QElapsedTimer g_memSince = []() { QElapsedTimer t; t.start(); return t; }();
+
+bool lodgenBakeSpeedRed()
+{
+	static const bool red = qEnvironmentVariableIntValue( "WW_LODGEN_BAKESPEED_RED" ) == 1;
+	return red;
+}
 
 bool lodgenMemLogOn()
 {
