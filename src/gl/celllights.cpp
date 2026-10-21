@@ -1080,6 +1080,7 @@ void wwCellLightsUniforms( Scene * scene )
 	 * weather's sun (the exterior branch of cellLit). Red WW_CELL_EXTAMB_RED=flat keeps the flat NAM0 Ambient;
 	 * =flip swaps the axis convention. */
 	bool extDalc = false;
+	float ambLum = -1.0f;	// lane SHADOWPAR1: the DALC's mean luminance (linear) for the air tail's ambient share
 	if ( !L->interior && hasDir && wwLookdevActive() && extProg ) {
 		static const QByteArray extRed = qgetenv( "WW_CELL_EXTAMB_RED" ).trimmed();
 		float w[6][3];
@@ -1093,6 +1094,7 @@ void wwCellLightsUniforms( Scene * scene )
 				float mean = 0.0f;
 				for ( int a = 0; a < 6; a++ )
 					mean += g[a][c] / 6.0f;
+				ambLum = std::max( ambLum, 0.0f ) + mean * mean * ( c == 0 ? 0.2126f : c == 1 ? 0.7152f : 0.0722f );
 				const float sgn = flip ? 0.5f : -0.5f;	// travel: n.z = +1 takes Z- (index 5)
 				prog->uni4f_l( prog->uniLocation( "cellDalc[%d]", c ), FloatVector4(
 					( g[0][c] - g[1][c] ) * sgn, ( g[2][c] - g[3][c] ) * sgn, ( g[4][c] - g[5][c] ) * sgn, mean ) );
@@ -1121,6 +1123,11 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1b( "cellHasDir", hasDir );
 	prog->uni3f( "cellDirColor", dirColor[0], dirColor[1], dirColor[2] );
 	prog->uni3f( "cellDirTo", dirTo[0], dirTo[1], dirTo[2] );
+	if ( ambLum >= 0.0f ) {
+		// the share of the air's light that no sun shadow dims: the ambient over it and the sun's isotropic quarter
+		const float sunLum = 0.2126f * dirColor[0] + 0.7152f * dirColor[1] + 0.0722f * dirColor[2];
+		wwShadowSetAirAmbientShare( ambLum / std::max( ambLum + 0.25f * sunLum, 1e-6f ) );
+	}
 	prog->uni1b( "cellInterior", L->interior );
 	prog->uni3f( "cellCenter", L->center[0], L->center[1], L->center[2] );
 	prog->uni1i( "cellProbe", s.measuring ? 6 : s.probe );

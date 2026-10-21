@@ -196,6 +196,16 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	tierBox( cascadeQualityBox, "cascadeQuality", tr( "Cascade Quality" ), wwShadowCascadeTier() );
 	tierBox( contactShadowsBox, "contactShadows", tr( "Contact Shadows" ), wwShadowContactTier() );
 	tierBox( terrainShadowsBox, "terrainShadows", tr( "Terrain Shadows" ), wwShadowTerrainTier() );
+	// lane SHADOWPAR1: every FO4CS-parity item at once (WW_SHADOW_PAR picks single ones), and the cascade reach
+	liveCheck( shadowParBox, "shadowPar", tr( "FO4CS-Level Shadows" ), wwShadowParMask() != 0 );
+	shadowDistanceBox = new QDoubleSpinBox( tree );
+	shadowDistanceBox->setObjectName( QStringLiteral( "shadowDistance" ) );
+	shadowDistanceBox->setRange( 2000.0, 24000.0 );
+	shadowDistanceBox->setSingleStep( 500.0 );
+	shadowDistanceBox->setDecimals( 0 );
+	shadowDistanceBox->setValue( wwShadowDistance() );
+	wwMakeScrubField( shadowDistanceBox );
+	row( tr( "Shadow Distance" ), shadowDistanceBox, true );
 	placeholderCheck( tr( "SSAO" ) );
 	placeholderCheck( tr( "SSGI" ) );
 	placeholderCheck( tr( "Bloom" ) );
@@ -305,6 +315,20 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
 	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );
+	connect( shadowParBox, &QCheckBox::toggled, this, [this, live]( bool on ) {
+		if ( live )
+			wwShadowSetParMask( on ? WwParAll : 0 );
+		refreshStatus();
+		if ( m_repaint )
+			m_repaint();
+	} );
+	connect( shadowDistanceBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
+		if ( live )
+			wwShadowSetDistance( d );
+		refreshStatus();
+		if ( m_repaint )
+			m_repaint();
+	} );
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
 		if ( live )
 			wwLookdevSetGameDay( d );
@@ -355,7 +379,8 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( moonBox ), static_cast<QWidget *>( gameDayBox ),
 			static_cast<QWidget *>( fogBox ), static_cast<QWidget *>( shadowsBox ),
 			static_cast<QWidget *>( sunPathBox ), static_cast<QWidget *>( cascadeQualityBox ),
-			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ) } )
+			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ),
+			static_cast<QWidget *>( shadowParBox ), static_cast<QWidget *>( shadowDistanceBox ) } )
 		if ( w )
 			w->setEnabled( ld );
 	syncCloudTimer();
