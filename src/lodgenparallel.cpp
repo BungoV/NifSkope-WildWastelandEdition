@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include <QWaitCondition>
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 
@@ -242,6 +243,122 @@ QString lodgenPeakWorkingSetLine()
 		return QStringLiteral( "peak working set: not available on this platform" );
 	return QStringLiteral( "peak working set: %1 GB (%2 bytes)" )
 		.arg( double( b ) / 1073741824.0, 0, 'f', 2 ).arg( b );
+}
+
+bool lodgenMemLogOn()
+{
+	static const bool on = qEnvironmentVariableIsSet( "WW_LODGEN_MEMLOG" );
+	return on;
+}
+
+void lodgenMemNote( const QString & phase, const QString & extra )
+{
+	if ( !lodgenMemLogOn() )
+		return;
+	quint64 priv = 0, peakPriv = 0, ws = 0;
+#ifdef Q_OS_WIN32
+	PROCESS_MEMORY_COUNTERS_EX pmc;
+	memset( &pmc, 0, sizeof( pmc ) );
+	pmc.cb = sizeof( pmc );
+	if ( GetProcessMemoryInfo( GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS *>( &pmc ), sizeof( pmc ) ) ) {
+		priv = pmc.PrivateUsage;
+		peakPriv = pmc.PeakPagefileUsage;
+		ws = pmc.WorkingSetSize;
+	}
+#endif
+	QString heap;
+#ifdef Q_OS_WIN32
+	// WW_LODGEN_MEMLOG=2: walk the process heaps, so live bytes and committed-but-free bytes are told apart
+	if ( qEnvironmentVariableIntValue( "WW_LODGEN_MEMLOG" ) >= 2 ) {
+		HANDLE hs[256];
+		const DWORD n = GetProcessHeaps( 256, hs );
+		quint64 busy = 0, freeC = 0, big = 0;
+		for ( DWORD i = 0; i < n && i < 256; i++ ) {
+			if ( !HeapLock( hs[i] ) )
+				continue;
+			PROCESS_HEAP_ENTRY e;
+			e.lpData = nullptr;
+			while ( HeapWalk( hs[i], &e ) ) {
+				if ( e.wFlags & PROCESS_HEAP_ENTRY_BUSY ) {
+					busy += e.cbData;
+					if ( e.cbData >= ( 1u << 19 ) )
+						big += e.cbData;
+				} else if ( !( e.wFlags & ( PROCESS_HEAP_UNCOMMITTED_RANGE | PROCESS_HEAP_REGION ) ) )
+					freeC += e.cbData;
+			}
+			HeapUnlock( hs[i] );
+		}
+		heap = QStringLiteral( " | heaps %1: busy %2 MB (blocks >= 512 KB %3 MB), free committed %4 MB" )
+			.arg( n ).arg( busy >> 20 ).arg( big >> 20 ).arg( freeC >> 20 );
+	}
+#endif
+	const QByteArray line = QStringLiteral( "mem: %1 | private %2 MB, peak private %3 MB, ws %4 MB%5%6\n" )
+		.arg( phase ).arg( priv >> 20 ).arg( peakPriv >> 20 ).arg( ws >> 20 ).arg( heap )
+		.arg( extra.isEmpty() ? QString() : QStringLiteral( " | " ) + extra ).toUtf8();
+	fputs( line.constData(), stderr );
+	fflush( stderr );
+}
+
+qint64 lodgenTrimMappedWorkingSet()
+{
+	if ( qEnvironmentVariableIntValue( "WW_LODGEN_BAKEMEM_RED" ) == 1 )
+		return 0;
+	qint64 n = 0;
+#ifdef Q_OS_WIN32
+	MEMORY_BASIC_INFORMATION mbi;
+	const char * p = nullptr;
+	while ( VirtualQuery( p, &mbi, sizeof( mbi ) ) == sizeof( mbi ) ) {
+		if ( mbi.State == MEM_COMMIT && mbi.Type == MEM_MAPPED ) {
+			// on pages that are not locked, VirtualUnlock only takes them out of the working set
+			VirtualUnlock( mbi.BaseAddress, mbi.RegionSize );
+			n += qint64( mbi.RegionSize );
+		}
+		const char * next = static_cast<const char *>( mbi.BaseAddress ) + mbi.RegionSize;
+		if ( next <= p )
+			break;
+		p = next;
+	}
+#endif
+	return n;
+}
+
+struct LodgenMappedTrim::Impl
+{
+	QMutex m;
+	QWaitCondition wake;
+	bool stop = false;
+	QThread * t = nullptr;
+};
+
+LodgenMappedTrim::LodgenMappedTrim( int seconds ) : d( new Impl )
+{
+	if ( qEnvironmentVariableIntValue( "WW_LODGEN_BAKEMEM_RED" ) == 1 )
+		return;
+	Impl * dd = d;
+	const unsigned long ms = static_cast<unsigned long>( qMax( 1, seconds ) ) * 1000UL;
+	d->t = QThread::create( [dd, ms]() {
+		QMutexLocker lock( &dd->m );
+		while ( !dd->stop ) {
+			dd->wake.wait( &dd->m, ms );
+			if ( !dd->stop )
+				lodgenTrimMappedWorkingSet();
+		}
+	} );
+	d->t->start( QThread::LowPriority );
+}
+
+LodgenMappedTrim::~LodgenMappedTrim()
+{
+	if ( d->t ) {
+		{
+			QMutexLocker lock( &d->m );
+			d->stop = true;
+			d->wake.wakeAll();
+		}
+		d->t->wait();
+		delete d->t;
+	}
+	delete d;
 }
 
 /* ---------------------------------------------------------------- writer */

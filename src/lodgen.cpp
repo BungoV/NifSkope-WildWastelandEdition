@@ -47,6 +47,7 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <algorithm>
+#include <numeric>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -1478,6 +1479,43 @@ struct LodSrcShape
 	NearShapeFacts nearFacts;
 };
 
+/* lane BAKEMEM1: heap bytes of the geometry arrays, each shared (copy-on-write) array counted once
+ * through `seen`, for the WW_LODGEN_MEMLOG lines only. */
+template <typename T>
+static qint64 lodgenMemArr( const QVector<T> & v, QSet<const void *> & seen )
+{
+	if ( v.capacity() == 0 || seen.contains( v.constData() ) )
+		return 0;
+	seen.insert( v.constData() );
+	return qint64( v.capacity() ) * qint64( sizeof( T ) );
+}
+static qint64 lodgenMemShape( const LodSrcShape & s, QSet<const void *> & seen )
+{
+	return lodgenMemArr( s.pos, seen ) + lodgenMemArr( s.nrm, seen ) + lodgenMemArr( s.tan, seen )
+		+ lodgenMemArr( s.uv, seen ) + lodgenMemArr( s.col, seen ) + lodgenMemArr( s.tris, seen )
+		+ qint64( sizeof( LodSrcShape ) );
+}
+static qint64 lodgenMemModels( const QHash<QString, QVector<LodSrcShape>> & c, QSet<const void *> & seen )
+{
+	qint64 b = 0;
+	for ( const QVector<LodSrcShape> & v : c )
+		for ( const LodSrcShape & s : v )
+			b += lodgenMemShape( s, seen );
+	return b;
+}
+static QString lodgenMemMB( qint64 b )
+{
+	return QString::number( double( b ) / 1048576.0, 'f', 1 ) + QStringLiteral( " MB" );
+}
+//! lane BAKEMEM1's red: WW_LODGEN_BAKEMEM_RED=1 keeps every bake model cache to the end of its owner, as before
+static bool lodgenBakeMemRed()
+{
+	static const bool red = qEnvironmentVariableIntValue( "WW_LODGEN_BAKEMEM_RED" ) == 1;
+	return red;
+}
+//! lane BAKEMEM1: what the native loader's per-thread caches took in (WW_LODGEN_MEMLOG only)
+static std::atomic<qint64> gNativeCacheBytes{ 0 }, gNativeCacheModels{ 0 };
+
 //! Compose a block's transform up the parent chain (local -> model space).
 Transform lodgenWorldTransform( const NifModel * nif, const QModelIndex & block )
 {
@@ -2292,6 +2330,20 @@ bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByt
 namespace
 {
 
+//! lodgenLoadModel's cache key, spelled as it does (lane BAKEMEM1 batches the flat rule by it); keep the two equal.
+QString lodgenLoadModelKey( const QString & meshPath, const LodgenMaterialSubst * swap, bool placed = false )
+{
+	if ( swap && swap->isEmpty() )
+		swap = nullptr;
+	QString key = meshPath.toLower();
+	if ( placed )
+		key += QStringLiteral( "|placed" );   // lane MISS1: the root-less load is its own cache entry
+	if ( swap )
+		for ( const auto & sw : *swap )
+			key += QStringLiteral( "|" ) + sw.first + QStringLiteral( ">" ) + sw.second;
+	return key;
+}
+
 //! Load every shape of a per-object LOD model, transforms applied, textures
 //! resolved from its shader property. Results cached per path.
 //! Lane SWAP1: `swap`, when given and not empty, replaces each shape's material
@@ -2789,6 +2841,12 @@ QString lodgenMaterialSwapKey( const QString & material )
 static bool nativeLoadModelImpl( void * user, const QString & model, const LodgenMaterialSubst * swap,
 	std::vector<NativeSrcShape> * out, bool keepInCache = true, bool placed = false );
 
+QString lodgenNativeCacheMemLine()
+{
+	return QStringLiteral( "native loader caches took in %1 models %2" )
+		.arg( gNativeCacheModels.load() ).arg( lodgenMemMB( gNativeCacheBytes.load() ) );
+}
+
 bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<NativeSrcShape> * out )
 {
 	return nativeLoadModelImpl( user, model, nullptr, out );
@@ -2842,7 +2900,16 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 	 * twice, and keeps none of them -- a per-call cache, dropped on return. */
 	QHash<QString, QVector<LodSrcShape>> once;
 	const QString & dataRoot = *static_cast<const QString *>( user );
+	const int before = cache.size();
 	const QVector<LodSrcShape> & shapes = lodgenLoadModel( dataRoot, model, keepInCache ? cache : once, swap, placed );
+	if ( lodgenMemLogOn() && cache.size() != before ) {
+		QSet<const void *> seen;
+		qint64 b = 0;
+		for ( const LodSrcShape & s : shapes )
+			b += lodgenMemShape( s, seen );
+		gNativeCacheBytes += b;
+		gNativeCacheModels++;
+	}
 	out->clear();
 	for ( const LodSrcShape & s : shapes ) {
 		if ( s.pos.isEmpty() || s.tris.isEmpty() )
@@ -6405,12 +6472,21 @@ bool lodgenBakeHeightmap( const EsmWorld & world, const QString & outDir,
 	// world-sample coordinate of texel i is i * step; exactly i at native size
 	const double stepX = double( cellsX ) * 32.0 / double( RX );
 	const double stepY = double( cellsY ) * 32.0 / double( RY );
-	EsmLand land;
+	/* HORIZON1: a cell row's LAND records are read serially (the ESM reader's
+	 * zlib buffer is shared), then its cells fill on the pool in two column
+	 * parities: same-parity cells never share a texel, and the seam max is
+	 * order-free, so the map is byte-identical at any thread count. */
+	static const bool horizonRed = qEnvironmentVariableIntValue( "WW_LODGEN_HORIZON_RED" ) == 1;
+	std::vector<EsmLand> rowLand( static_cast<size_t>( cellsX ) );
+	std::vector<char> rowHave( size_t( cellsX ), 0 );
 	for ( int cy = minY; cy <= maxY; cy++ ) {
-		for ( int cx = minX; cx <= maxX; cx++ ) {
-			if ( !world.land( cx, cy, land ) )
-				continue;
-			const int kx = cx - minX, ky = cy - minY;
+		for ( int kx = 0; kx < cellsX; kx++ )
+			rowHave[size_t( kx )] = world.land( minX + kx, cy, rowLand[size_t( kx )] ) ? 1 : 0;
+		auto fillCell = [&]( int kx ) {
+			if ( !rowHave[size_t( kx )] )
+				return;
+			const EsmLand & land = rowLand[size_t( kx )];
+			const int ky = cy - minY;
 			/* Every texel whose sample coordinate lies in [k*32, (k+1)*32] --
 			 * CLOSED at both ends, so a cell writes its full 33 rows and
 			 * columns and the shared VHGT edge is written by every cell that
@@ -6453,6 +6529,13 @@ bool lodgenBakeHeightmap( const EsmWorld & world, const QString & outDir,
 					dst = qMax( dst, top + ( bot - top ) * fr );
 				}
 			}
+		};
+		if ( horizonRed ) {
+			for ( int kx = 0; kx < cellsX; kx++ )
+				fillCell( kx );
+		} else {
+			for ( int par = 0; par < 2; par++ )
+				lodgenParallelFor( ( cellsX - par + 1 ) / 2, [&]( int t ) { fillCell( 2 * t + par ); } );
 		}
 	}
 
@@ -6552,6 +6635,34 @@ LodgenBakeCaches * lodgenCreateBakeCaches( qint64 textureBudgetBytes )
 void lodgenDestroyBakeCaches( LodgenBakeCaches * caches )
 {
 	delete caches;
+}
+
+// lane BAKEMEM1: the LRU's budget, in its own units (DDSTexture16::size(), texels: 8 bytes each); returns the old one
+qint64 lodgenBakeCachesSetTextureBudget( LodgenBakeCaches * caches, qint64 units )
+{
+	if ( !caches )
+		return 0;
+	const qint64 old = caches->texBudget;
+	caches->texBudget = units;
+	return old;
+}
+
+// lane BAKEMEM1: drop the decoded textures between stages (the next stage reloads what it reads); counters stay
+void lodgenBakeCachesReleaseTextures( LodgenBakeCaches * caches, const char * phase )
+{
+	if ( !caches || lodgenBakeMemRed() )
+		return;
+	const qint64 n = caches->texCache.size(), units = caches->texBytes;
+	for ( DDSTexture16 * t : caches->texCache )
+		delete t;
+	caches->texCache.clear();
+	caches->texCache.squeeze();
+	caches->texStamp.clear();
+	caches->texStamp.squeeze();
+	caches->texBytes = 0;
+	if ( lodgenMemLogOn() )
+		lodgenMemNote( QStringLiteral( "textures released after %1" ).arg( QLatin1String( phase ) ),
+			QStringLiteral( "%1 textures, %2 budget units; %3 loads so far" ).arg( n ).arg( lodgenMemMB( units ) ).arg( caches->texLoads ) );
 }
 
 void lodgenBakeCacheCounts( const LodgenBakeCaches * caches, int * nifReads, int * texLoads )
@@ -10131,6 +10242,17 @@ struct LodgenFlatShape : LodgenRoadShape
 	bool vertexAlpha = false;       //!< SLSF1 Vertex_Alpha: the vertex alpha scales a blended shape
 };
 
+static qint64 lodgenMemShape( const LodgenRoadShape & s, QSet<const void *> & seen )
+{
+	return lodgenMemArr( s.pos, seen ) + lodgenMemArr( s.nrm, seen ) + lodgenMemArr( s.tan, seen )
+		+ lodgenMemArr( s.uv, seen ) + lodgenMemArr( s.col, seen ) + lodgenMemArr( s.tris, seen )
+		+ qint64( sizeof( LodgenFlatShape ) );
+}
+static qint64 lodgenMemShape( const LodgenFlatShape & s, QSet<const void *> & seen )
+{
+	return lodgenMemShape( static_cast<const LodgenRoadShape &>( s ), seen ) + lodgenMemArr( s.rise, seen );
+}
+
 //! Lane FLAT1: what the flat pass reads out of one material (BGSM or BGEM).
 struct LodgenFlatMat
 {
@@ -10918,6 +11040,23 @@ public:
 	 *  spans four tiles is four `shapes` and one `meshes`. */
 	const LodgenRoadCensus & gatherCensus() const { return cen; }
 
+	//! lane BAKEMEM1: what this set holds, for the WW_LODGEN_MEMLOG lines
+	QString memLine() const
+	{
+		QSet<const void *> seen;
+		const qint64 cache = lodgenMemModels( modelCache, seen );
+		qint64 road = 0, flat = 0;
+		for ( const LodgenRoadShape & s : shapes )
+			road += lodgenMemShape( s, seen );
+		for ( const LodgenFlatShape & s : flatShapes )
+			flat += lodgenMemShape( s, seen );
+		return QStringLiteral( "modelCache %1 models %2; road shapes %3 %4 (beyond the cache); flat shapes %5 %6 "
+			"(beyond the cache); flat recs %7; landCache %8 cells %9; roadGrid %10" )
+			.arg( modelCache.size() ).arg( lodgenMemMB( cache ) ).arg( shapes.size() ).arg( lodgenMemMB( road ) )
+			.arg( flatShapes.size() ).arg( lodgenMemMB( flat ) ).arg( flatRecs.size() ).arg( landCache.size() )
+			.arg( lodgenMemMB( qint64( landCache.size() ) * 33 * 33 * 4 ) ).arg( roadGrid.size() );
+	}
+
 private:
 	/*! The substitution list of one MSWP form, built once: folded BNAM ->
 	 *  SNAM as stored, the first row per key wins, a row that swaps a material
@@ -11223,7 +11362,75 @@ private:
 	 *
 	 *  "Ground" is LAND raised to the stamped road surface where a road lies
 	 *  above it (a raised deck is not ground, so a thing on a bridge floats). */
+	/* lane BAKEMEM1: the flat rule in batches of model-cache keys, the decoded models freed after each
+	 * batch (the whole map's would not fit); evaluateFlatBatch is the old evaluateFlat unchanged, the results go back in gather order. */
 	void evaluateFlat( const EsmWorld & world, const QString & dataRoot )
+	{
+		if ( lodgenMemLogOn() )
+			lodgenMemNote( QStringLiteral( "road walk (%1 flat candidates)" ).arg( flatCands.size() ), memLine() );
+		const bool red = lodgenBakeMemRed();   // one batch in gather order, the cache kept: as before
+		const QVector<LodgenFlatCand> all = std::move( flatCands );
+		flatCands = QVector<LodgenFlatCand>();
+		const int n = all.size();
+		const int recBase = flatRecs.size(), shapeBase = flatShapes.size(), plBase = decalPl.size();
+		std::vector<QString> keyOf( static_cast<size_t>( n ) );
+		for ( int ci = 0; ci < n && !red; ci++ )
+			keyOf[size_t( ci )] = lodgenLoadModelKey( world.lodBase( all[ci].base ).model, swapFor( world, all[ci].mswp ) );
+		std::vector<int> order( static_cast<size_t>( n ) );
+		std::iota( order.begin(), order.end(), 0 );
+		std::stable_sort( order.begin(), order.end(), [&keyOf]( int a, int b ) { return keyOf[size_t( a )] < keyOf[size_t( b )]; } );
+		const int keysPerBatch = red ? INT_MAX : 256;
+		int oi = 0;
+		do {
+			int keys = 0;
+			for ( ; oi < n; oi++ ) {
+				if ( oi > 0 && keyOf[size_t( order[size_t( oi )] )] != keyOf[size_t( order[size_t( oi - 1 )] )] && ++keys == keysPerBatch )
+					break;
+				flatCands.append( all[order[size_t( oi )]] );
+			}
+			evaluateFlatBatch( world, dataRoot );
+			if ( !red )
+				modelCache.clear();
+		} while ( oi < n );
+		// back to gather order: record j of the batches is candidate order[j]
+		QVector<LodgenFlatRec> recs( n );
+		std::vector<int> plOf( static_cast<size_t>( n ), -1 );
+		for ( int j = 0; j < n; j++ )
+			recs[order[size_t( j )]] = flatRecs[recBase + j];
+		for ( int p = plBase; p < decalPl.size(); p++ )
+			plOf[size_t( order[size_t( flatShapes[decalPl[p].first].rec - recBase )] )] = p;
+		QVector<LodgenFlatShape> shp;
+		shp.reserve( flatShapes.size() - shapeBase );
+		QVector<DecalPlacement> pls;
+		for ( int ci = 0; ci < n; ci++ ) {
+			const int p = plOf[size_t( ci )];
+			if ( p < 0 )
+				continue;
+			DecalPlacement d = decalPl[p];
+			const int first = shapeBase + shp.size();
+			for ( int k = d.first; k < d.first + d.count; k++ ) {
+				shp.append( std::move( flatShapes[k] ) );
+				shp.last().rec = recBase + ci;
+			}
+			d.first = first;
+			pls.append( d );
+		}
+		flatRecs.resize( recBase );
+		flatRecs += recs;
+		flatShapes.resize( shapeBase );
+		flatShapes += shp;
+		decalPl.resize( plBase );
+		decalPl += pls;
+		// nothing after the gather reads the decoded models (road ones included); the shapes hold what they use
+		if ( !red ) {
+			modelCache.clear();
+			modelCache.squeeze();
+		}
+		if ( lodgenMemLogOn() )
+			lodgenMemNote( QStringLiteral( "flat evaluated" ), memLine() );
+	}
+
+	void evaluateFlatBatch( const EsmWorld & world, const QString & dataRoot )
 	{
 		flatDataRoot = dataRoot;
 		flatRules.clear();
@@ -11808,6 +12015,24 @@ public:
 			if ( v > SENTINEL_TEST )
 				cen.squares++;
 		countSlabSquares( world, cx0 - margin, cy0 - margin, cx1 + margin, cy1 + margin );
+		if ( lodgenMemLogOn() ) {
+			QSet<const void *> seen;
+			lodgenMemNote( QStringLiteral( "object height field walked" ),
+				QStringLiteral( "modelCache %1 models %2" ).arg( modelCache.size() )
+					.arg( lodgenMemMB( lodgenMemModels( modelCache, seen ) ) ) );
+		}
+		// lane BAKEMEM1: the lattice is what the field keeps; the LOD models are read once in the walk
+		if ( !lodgenBakeMemRed() ) {
+			modelCache.clear();
+			modelCache.squeeze();
+		}
+		if ( lodgenMemLogOn() ) {
+			QSet<const void *> seen;
+			lodgenMemNote( QStringLiteral( "object height field gathered" ),
+				QStringLiteral( "modelCache %1 models %2; grid %3" ).arg( modelCache.size() )
+					.arg( lodgenMemMB( lodgenMemModels( modelCache, seen ) ) )
+					.arg( lodgenMemMB( qint64( grid.size() + gridMin.size() ) * 4 ) ) );
+		}
 	}
 
 	/*! The lattice as a file (LodgenCoverOptions::dumpObjectAoPath). Written
@@ -14888,7 +15113,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	 * else, and only on the quadrants `aoOnly` names (the painted ones); the
 	 * heights above are the tile's own, so the value is the sheet's. */
 	if ( aoOnly ) {
-		for ( int j = 0; j < S; j++ ) {
+		auto aoRow = [&]( int j ) {
 			const float wy = tileN - ( float( j ) - float( border ) + 0.5f ) * upt;
 			const int qy = int( std::floor( wy / 2048.0f ) );
 			for ( int i = 0; i < S; i++ ) {
@@ -14898,7 +15123,14 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 				out.mask[size_t( j ) * S + i] = 0x00FF0000U | skyAo( wx, wy, wx - ringW, wy - ringS,
 					i >= border && i < S - border && j >= border && j < S - border );
 			}
-		}
+		};
+		// HORIZON1: one row per task (a texel is written by its own row only); a census caller stays serial
+		static const bool horizonRed = qEnvironmentVariableIntValue( "WW_LODGEN_HORIZON_RED" ) == 1;
+		if ( horizonRed || objCensus )
+			for ( int j = 0; j < S; j++ )
+				aoRow( j );
+		else
+			lodgenParallelFor( S, aoRow );
 		return true;
 	}
 
@@ -18036,6 +18268,13 @@ bool lodgenBakeDecals( const EsmWorld & world, const QString & dataRoot,
 			.arg( texels ).arg( QFileInfo( lodd ).size() ).arg( QFileInfo( lodg ).size() )
 			.arg( double( quatErr ), 0, 'g', 3 ).arg( msGather ).arg( msPictures ).arg( timer.elapsed() )
 			.arg( rb.simplified() );
+	if ( lodgenMemLogOn() ) {
+		qint64 pb = 0;
+		for ( const LoddPiece & k : pieces )
+			pb += k.colourBc3.size() + k.normalBc3.size();
+		lodgenMemNote( QStringLiteral( "decals written" ),
+			set.memLine() + QStringLiteral( "; pieces %1 %2" ).arg( pieces.size() ).arg( lodgenMemMB( pb ) ) );
+	}
 	return true;
 }
 
@@ -19018,6 +19257,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "erosionMaxFill %1" ).arg( ec.maxFill, 0, 'f', 3 );
 		*report = r.join( QChar( ' ' ) );
 	}
+	if ( lodgenMemLogOn() )
+		lodgenMemNote( QStringLiteral( "vt pyramid done" ), roadSet ? roadSet->memLine() : QString() );
 	if ( error )
 		error->clear();
 	return true;

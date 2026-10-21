@@ -4089,8 +4089,14 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		{
 			qint64 * acc;
 			QElapsedTimer t;
-			explicit StageTimer( qint64 * a ) : acc( a ) { t.start(); }
-			~StageTimer() { *acc += t.elapsed(); }
+			const char * name = nullptr;   // lane BAKEMEM1: the WW_LODGEN_MEMLOG line at the stage's end
+			explicit StageTimer( qint64 * a, const char * n = nullptr ) : acc( a ), name( n ) { t.start(); }
+			~StageTimer()
+			{
+				*acc += t.elapsed();
+				if ( name )
+					lodgenMemNote( QString::fromLatin1( name ), lodgenNativeCacheMemLine() );
+			}
 		};
 		const QString nativeDataRoot = dataRoot.isEmpty()
 			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
@@ -4150,6 +4156,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			LodgenBakeCaches * p;
 			~RegionCacheGuard() { lodgenDestroyBakeCaches( p ); }
 		} regionCacheGuard{ bakeCaches };
+		// lane BAKEMEM1: the plugins' and archives' mapped pages leave the working set every few seconds
+		LodgenMappedTrim mappedTrim;
 		/* The pyramid runs FIRST and ONCE. It has to: when the chunk sheets
 		 * come from it, they are assembled while its staging is live, and a
 		 * pass that ran after the chunk queue would have nothing to read. */
@@ -4407,7 +4415,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				QString dReport, derr;
 				bool dOk = false;
 				{
-					StageTimer st( &msDecals );
+					StageTimer st( &msDecals, "stage decals" );
 					dOk = lodgenBakeDecals( world,
 						dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
 						vtDir, vo, bakeCaches, &dReport, &derr );
@@ -4418,6 +4426,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				}
 				censusOut( dReport );
 				out().flush();
+				// lane BAKEMEM1: the decals' STAT textures are not the pyramid's; the LRU would hold them to the end
+				lodgenBakeCachesReleaseTextures( bakeCaches, "decals" );
 			}
 			QString vtReport, vterr;
 			bool vtOk = gLgTerrainOption == LodgenTerrainOption::Dynamic;
@@ -4432,14 +4442,14 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 						censusOut( l );
 				}
 			} else {
-				StageTimer st( &msTextures );		// the pyramid is a TEXTURE stage
+				StageTimer st( &msTextures, "stage vt pyramid" );		// the pyramid is a TEXTURE stage
 				vtOk = lodgenBakeTerrainVt( world,
 					dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
 					vtDir, vo, bakeCaches, &vtReport, &vterr );
 			}
 			/* THE AO MAP (lane TERRLIVE2): part of HYBRID and DYNAMIC, no switch. */
 			if ( vtOk ) {
-				StageTimer st( &msTextures );
+				StageTimer st( &msTextures, "stage ao map" );
 				QStringList alog;
 				vtOk = lodgenBakeAoMap( world,
 					dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
@@ -4455,6 +4465,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			}
 			censusOut( vtReport );
 			out().flush();
+			lodgenBakeCachesReleaseTextures( bakeCaches, "vt pyramid" );
 		}
 
 		/* ===== THE .BTO SCRATCH FOLDER (lane BTOFREE1, 2026-09-16) =========
@@ -4493,6 +4504,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		/* every retired chunk's raw .BTO path ("" = built none), for the raw cache */
 		QHash<QString, QString> retiredBto;
 		{
+			qint64 msPassMem = 0;
+			StageTimer stMem( &msPassMem, "stage chunk pass" );   // lane BAKEMEM1: memory line only
 			QString passErr;
 			const bool passOk = lodgenRunChunkPass( jobs, pass,
 				[&]( const LodgenChunkOutcome & r ) {
@@ -4681,7 +4694,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			const QString arrDir = objectsDir();
 			QDir().mkpath( arrDir );
 			QString rep, cerr2;
-			StageTimer st( &msImpostors );		// the IMPOSTOR stage
+			StageTimer st( &msImpostors, "stage card arrays" );		// the IMPOSTOR stage
 			if ( lodgenBuildCardArrays( writtenBto, impostors,
 				arrDir + "/" + ws + QStringLiteral( ".LodgenCards" ),
 				objectsGame( QStringLiteral( "LodgenCards" ) ),
@@ -4727,7 +4740,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			QString nrep, nerr;
 			bool nativeOk = false;
 			{
-				StageTimer st( &msMeshes );
+				StageTimer st( &msMeshes, "stage native write" );
 				nativeOk = lodgenNativeWrite( &nrep, &nerr );
 			}
 			if ( !nativeOk ) {
