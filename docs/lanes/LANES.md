@@ -8,7 +8,6 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 ## 0. WAITING FOR YOU (only bungo can do these; top of the file, bungo 10-21)
 - RTBAKE1 picture pair: CPU bake vs GPU bake, museum indoor (+ x16 difference); merge waits on your OK (coming)
 - FOGTRICUBIC1 picture pair: smoother fog-grid read, Memory Den night (coming from VOLAIRSKY1)
-- PBRALBEDO1: its own gate fails (0/26 materials); a fix lane needs your yes
 - Game flights: AUDIT1 REF1 capture, LLFCHECK1, PRTP4 (save names), MOTION1/TERRBLEND1/WATER2 RenderDoc captures
 - About 20 open questions (AUDIT_ledgers 49-54): one at a time
 
@@ -18,7 +17,7 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | BATCH1 | one combined build + one gate session for PERF2, SSGI2, SHADOWPAR1, VOLAIRSKY1, FXCHECK1 (bungo 10-21; batch1/README.md) | waiting for lanes to report BATCH ready |
 | MERGEALL1 | merge every built branch into main, clean merged worktrees (bungo 10-21 "merge everything") | 17 landed (LANES_DONE); 3 held (section 2); cleanup next |
 | PERF2 | time the frame; depth reuse, per-tile lights, fewer driver calls, temporal reuse (+ fog history reprojection, Division-style, bungo 10-21), fog integrate O(S^2) -> O(S) | BATCH ready (0ded45ca; perf2/BATCH.md); SSR prev-frame, AO temporal, per-draw CPU wait for batch timing |
-| VOLAIRSKY1 | + FOGTRICUBIC1 smoother fog-grid read, PNG pair for bungo (asked 10-21); VOLAIR1 sky gate fail (0.266 % vs 0.20 %) + placed lights in the fog (audit claim: 0 clusters; lane finds 1309-1419 filled on steady frames, 0 only the first ~8 frames after load) | running |
+| VOLAIRSKY1 | + FOGTRICUBIC1 smoother fog-grid read, PNG pair for bungo (asked 10-21); VOLAIR1 sky gate fail (0.266 % vs 0.20 %) + placed lights in the fog (audit claim: 0 clusters; lane finds 1309-1419 filled on steady frames, 0 only the first ~8 frames after load) | BATCH ready (head 8e5dc845, notes/volairsky1/BATCH.md); rev1 F still open (diag2/diag3 queued) |
 | SSGI2 | SSGI gate (SSGI1 landed ungated) + blue noise, depth intervals, emissive, pyramid | running |
 | SHADOWPAR1 | shadows to FO4CS level (TERRSHADOW1 WEAKER list) + fog far-tail leak | running |
 | FXCHECK1 | BGEM glass milky; no fire-barrel particles | running |
@@ -31,9 +30,9 @@ BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
 ## 2. BUILT, NOT LANDED (MERGEALL1 holds these)
 | Lane | Branch | What it gives | Why held |
 |---|---|---|---|
-| PBRALBEDO1 | fixpack1 | bake reads .pbrm base color x (1 - metallic) | its own gate fails: 0/26 fixture materials resolved |
-| VOLPART1 | volpart1-20261014 | steam/fog cards lit as volumes (ships off) | built on old VOLAIR1: 9 files conflict; needs a rebase lane |
-| LEANCOMMENTS1 | origin/cloud-leancomments1 | lean comments pass 1 (-2758 lines) | 16 conflicts; re-run on final main |
+| PBRALBEDO1 | fixpack1 (fix lane PBRALBEDO2 running, yes 10-21) | bake reads .pbrm base color x (1 - metallic) | its own gate fails: 0/26 fixture materials resolved |
+| VOLPART1 | volpart1-20261014 (rebase lane VOLPART1R running, yes 10-21) | steam/fog cards lit as volumes (ships off) | built on old VOLAIR1: 9 files conflict; needs a rebase lane |
+| LEANCOMMENTS1 | origin/cloud-leancomments1 | lean comments pass 1 (-2758 lines) | 16 conflicts; RERUN approved 10-21: starts on main after MERGEALL1 + BATCH1 land |
 
 ## 3. APPROVED, NOT STARTED (his yes on record)
 - PERF3 (after BATCH1 timings): AO stays FULL res (bungo 10-21 "full res and optimize where it counts for real"); drop AO + SSR second scene submissions by reusing the main pass depth/normals (+ per-material SSR flag from main pass, SSR from previous frame); CPU per-draw setup cuts; far-LOD proposal
