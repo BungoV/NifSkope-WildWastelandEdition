@@ -36,11 +36,22 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifmodel.h"
 #include "gltex.h"
 #include "glproperty.h"
+#include "harnesswindow.h"
+#include "cellpasstime.h"	// lane PERF1
+int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
+
+#include <QElapsedTimer>
+#include <QOpenGLContext>
 
 #include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QOpenGLContext>
 #include <QTextStream>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -273,6 +284,25 @@ void NifSkopeOpenGLContext::Shader::printCompileError( const QString & err )
 	QString	tmp( QString::fromUtf8( name.data(), qsizetype( name.length() ) ) );
 	tmp.append( QLatin1StringView( ":\r\n\r\n" ) );
 	tmp.append( err );
+	// lane VOLAIR1 (10-15): also into the log, where a headless run's notes see it (the box alone hid a
+	// program that failed to link, and every draw that wanted it fell back)
+	qWarning().noquote() << "shader compile/link error:" << tmp;
+	/* THE SHADER GUARD (lane VOLAIR1, 10-15, coordinator ruling: no silent grey pictures ever again).
+	 *
+	 * A program that fails to compile or link leaves every draw that wanted it on a fallback: the
+	 * picture comes out untextured or grey and still LOOKS like a measurement. In a harness run
+	 * (wwHarnessRun(): any WW_* key or -no-gui, the predicate saveUi() already uses) the run stops
+	 * here, before any picture can be written: the error text goes to the notes after a fixed
+	 * "SHADER REFUSED:" prefix and the exe exits 87. Every gate then fails on the missing picture
+	 * and tests/spells/_harness.sh ww_notes_shader_refusal prints why. A user session (no WW_* key)
+	 * keeps the message box and goes on. There is no switch to turn this off; the red that proves
+	 * it trips is WW_SHADER_RED=<shader file> (Shader::load), run by tests/spells/shader_guard.sh. */
+	if ( wwHarnessRun() ) {
+		const QByteArray line = ( QStringLiteral( "SHADER REFUSED: " ) + QString( tmp ).simplified() ).toUtf8();
+		std::fprintf( stderr, "%s\n", line.constData() );
+		std::fflush( stderr );
+		std::_Exit( 87 );
+	}
 	Message::append( QObject::tr( "There were errors during shader compilation" ), tmp );
 }
 
@@ -351,6 +381,16 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 	try
 	{
 		QByteArray	data = loadShaderFile( filepath );
+		// red for the shader guard (printCompileError): WW_SHADER_RED=<file name> breaks that one shader
+		if ( const QString red = qEnvironmentVariable( "WW_SHADER_RED" );
+			!red.isEmpty() && QFileInfo( filepath ).fileName().compare( red, Qt::CaseInsensitive ) == 0 ) {
+			const qsizetype eol = data.startsWith( "#version" ) ? data.indexOf( '\n' ) + 1 : 0;
+			data.insert( eol, "#error WW_SHADER_RED broke this shader on purpose\n" );
+		}
+		// lane PERF1: WW_CELL_GI_VIS=march (red), or a march-only WW_CELL_PV_RED: the per-pixel chain in every shader (cell_lights.glsl)
+		static const bool giMarch = wwCellGiVis() == 1;
+		if ( giMarch && data.startsWith( "#version" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_GI_MARCH 1\n" );
 
 		if ( name.ends_with( "frag" ) ) {
 			if ( qsizetype n = data.indexOf( "NUM_TEXTURE_UNITS" ); n >= 0 )
@@ -358,6 +398,9 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		}
 
 		const char * src = data.constData();
+		srcHash = 0xCBF29CE484222325ULL;
+		for ( char c : std::string( name ) + '\n' + data.toStdString() )
+			srcHash = ( srcHash ^ (unsigned char) c ) * 0x100000001B3ULL;
 
 		f->glShaderSource( id, 1, &src, (GLint *) 0 );
 		f->glCompileShader( id );
@@ -426,6 +469,8 @@ void NifSkopeOpenGLContext::Program::clear()
 
 bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpenGLContext * context )
 {
+	linkFrom = 0;
+	cacheFile.clear();
 	try
 	{
 		QFile file( filepath );
@@ -433,6 +478,14 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 		if ( !file.open( QIODevice::ReadOnly ) )
 			throw QString( "couldn't open %1 for read access" ).arg( filepath );
 
+		std::uint64_t	key = 0xCBF29CE484222325ULL;
+		const auto mix = [&key]( const QByteArray & b ) {
+			for ( char c : b )
+				key = ( key ^ (unsigned char) c ) * 0x100000001B3ULL;
+			key = ( key ^ 0xFF ) * 0x100000001B3ULL;
+		};
+		mix( file.readAll() );
+		file.seek( 0 );
 		QTextStream stream( &file );
 
 		QStack<ConditionGroup *> chkgrps;
@@ -456,8 +509,10 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 					}
 
 					if ( shader && shader->id ) {
-						if ( shader->status )
+						if ( shader->status ) {
 							f->glAttachShader( id, shader->id );
+							mix( QByteArray::number( qulonglong( shader->srcHash ), 16 ) );
+						}
 						else
 							throw QString( "depends on shader %1 which was not compiled successful" ).arg( name );
 					} else {
@@ -493,11 +548,56 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 			}
 		}
 
+		/* lane PERF1: the driver compiles at link time, about 2.4 s a program here; the links are started all
+		 * together and finishLink() waits for them, and a linked program's binary is kept in shadercache/ next
+		 * to the exe (keyed on the sources and the driver), so the next launch loads it instead */
+		if ( !context->programCacheDir.isEmpty() ) {
+			for ( GLenum k : { GL_VENDOR, GL_RENDERER, GL_VERSION } )
+				mix( QByteArray( (const char *) f->glGetString( k ) ) );
+			cacheFile = context->programCacheDir + '/' + QString::fromLatin1( name.data(), qsizetype( name.size() ) )
+				+ '-' + QString::number( qulonglong( key ), 16 ) + ".bin";
+			QFile	cf( cacheFile );
+			if ( cf.open( QIODevice::ReadOnly ) ) {
+				QByteArray	b = cf.readAll();
+				if ( b.size() > 8 && b.startsWith( "WWPB" ) ) {
+					if ( qEnvironmentVariableIntValue( "WW_PROGCACHE_RED" ) == 1 )
+						b[b.size() / 2] = char( b.at( b.size() / 2 ) ^ 0x5A );	// red: a damaged binary must fall back
+					GLenum	fmt;
+					std::memcpy( &fmt, b.constData() + 4, 4 );
+					f->glProgramBinary( id, fmt, b.constData() + 8, GLsizei( b.size() - 8 ) );
+					linkFrom = 2;
+					return true;
+				}
+			}
+			f->glProgramParameteri( id, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE );
+		}
 		f->glLinkProgram( id );
+		linkFrom = 1;
+	}
+	catch ( QString & x )
+	{
+		printCompileError( x );
+		return false;
+	}
+	return true;
+}
 
+bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context )
+{
+	try
+	{
 		GLint result;
 
 		f->glGetProgramiv( id, GL_LINK_STATUS, &result );
+
+		if ( result != GL_TRUE && linkFrom == 2 ) {
+			// the driver refused the cached binary (another driver, or damaged): link from the attached sources
+			context->programCacheRejected++;
+			f->glProgramParameteri( id, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE );
+			f->glLinkProgram( id );
+			linkFrom = 1;
+			f->glGetProgramiv( id, GL_LINK_STATUS, &result );
+		}
 
 		if ( result != GL_TRUE ) {
 			GLint logLen = 0;
@@ -520,6 +620,30 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 			if ( unsigned int l = f->glGetUniformBlockIndex( id, "skinningUniforms" ); l != GL_INVALID_INDEX ) {
 				f->glUniformBlockBinding( id, l, 1 );
 				f->glBindBufferBase( GL_UNIFORM_BUFFER, 1, context->boneTransformsBufferObject );
+			}
+			if ( linkFrom == 2 ) {
+				context->programCacheHits++;
+			} else if ( !cacheFile.isEmpty() ) {
+				GLint	len = 0;
+				f->glGetProgramiv( id, GL_PROGRAM_BINARY_LENGTH, &len );
+				if ( len > 0 ) {
+					QByteArray	b( 8 + len, '\0' );
+					GLenum	fmt = 0;
+					GLsizei	got = 0;
+					f->glGetProgramBinary( id, len, &got, &fmt, b.data() + 8 );
+					std::memcpy( b.data(), "WWPB", 4 );
+					std::memcpy( b.data() + 4, &fmt, 4 );
+					b.resize( 8 + got );
+					// one file a program: the binaries of older sources go
+					const QFileInfo	fi( cacheFile );
+					QDir	d( fi.absolutePath() );
+					for ( const QString & old : d.entryList( { QString::fromLatin1( name.data(), qsizetype( name.size() ) ) + "-*.bin" } ) )
+						if ( old != fi.fileName() )
+							d.remove( old );
+					QFile	cf( cacheFile );
+					if ( got > 0 && cf.open( QIODevice::WriteOnly ) && cf.write( b ) == b.size() )
+						context->programCacheWritten++;
+				}
 			}
 		}
 	}
@@ -951,7 +1075,34 @@ void NifSkopeOpenGLContext::updateShaders()
 		dir.cd( "/usr/share/nifskope/shaders" );
 #endif
 
+	QElapsedTimer	clock;
+	clock.start();
+	programCacheHits = programCacheRejected = programCacheWritten = 0;
+	programCacheDir.clear();
+	if ( qEnvironmentVariable( "WW_PROGCACHE" ) != "0" ) {
+		QDir	app( QCoreApplication::applicationDirPath() );
+		if ( app.mkpath( "shadercache" ) )
+			programCacheDir = app.filePath( "shadercache" );
+	}
+	/* lane PERF1: the driver's own link threads, opt-in (WW_PARALLEL_LINK=1): measured on a cold cache they made the
+	 * 62 links slower here (370 s against 132 s serial); the binary cache is what makes the second launch fast */
+	const char *	threads = "off";
+	if ( QOpenGLContext * ctx = QOpenGLContext::currentContext(); ctx && qEnvironmentVariable( "WW_PARALLEL_LINK" ) == "1" ) {
+		using MaxThreads = void ( QOPENGLF_APIENTRY * )( GLuint );
+		for ( const char * ext : { "GL_KHR_parallel_shader_compile", "GL_ARB_parallel_shader_compile" } ) {
+			if ( !ctx->hasExtension( ext ) )
+				continue;
+			const bool	khr = ext[3] == 'K';
+			if ( auto fn = reinterpret_cast< MaxThreads >( ctx->getProcAddress( khr ? "glMaxShaderCompilerThreadsKHR" : "glMaxShaderCompilerThreadsARB" ) ) ) {
+				fn( 0xFFFFFFFFU );
+				threads = khr ? "KHR" : "ARB";
+				break;
+			}
+		}
+	}
+
 	QStringList	entryList = dir.entryList();
+	QVector< Program * >	started;
 	for ( int i = 0; i < 2; i++ ) {
 		for ( const QString & name : entryList ) {
 			bool	isProgram = name.endsWith( QLatin1StringView( ".prog" ), Qt::CaseInsensitive );
@@ -963,10 +1114,17 @@ void NifSkopeOpenGLContext::updateShaders()
 			QString	fullPath = dir.filePath( name );
 			if ( !shader->isProgram )
 				shader->load( fullPath );
-			else
-				static_cast< Program * >( shader )->load( fullPath, this );
+			else if ( static_cast< Program * >( shader )->load( fullPath, this ) )
+				started.append( static_cast< Program * >( shader ) );
 		}
 	}
+	const qint64	issued = clock.elapsed();
+	int	ok = 0;
+	for ( Program * p : started )	// in the load order: programsLinked keeps the order the renderer picks by
+		ok += p->finishLink( this ) ? 1 : 0;
+	std::fprintf( stderr, "shader programs: %d of %d linked (cache: %d loaded, %d refused, %d written; %s) parallel=%s issue %lld ms total %lld ms\n",
+		ok, int( started.size() ), programCacheHits, programCacheRejected, programCacheWritten,
+		programCacheDir.isEmpty() ? "off" : "on", threads, (long long) issued, (long long) clock.elapsed() );
 }
 
 void NifSkopeOpenGLContext::releaseShaders()
@@ -1184,6 +1342,7 @@ void NifSkopeOpenGLContext::bindShape(
 				d->next->prev = d;
 			}
 			cacheLastItem = d;
+			d->usedEpoch = cacheEpoch;
 			f.glBindVertexArray( d->vao );
 			return;
 		}
@@ -1200,10 +1359,23 @@ void NifSkopeOpenGLContext::bindShape(
 		d->prev->next = d;
 		d->next->prev = d;
 	}
+	d->usedEpoch = cacheEpoch;
 	cacheLastItem = d;
 	geometryCache[i] = d;
 	cacheShapeCnt++;
 	cacheBytesUsed += d->h.getBufferDataSize() + 24576;
+	PassTime::CacheCounts & pc = PassTime::cacheCounts();	// lane PERF1: the cache's traffic for the frame timers
+	pc.made++;
+	pc.madeBytes += qint64( d->h.getBufferDataSize() );
+	pc.usedBytes = qint64( cacheBytesUsed );
+	pc.maxBytes = qint64( cacheMaxBytes );
+}
+
+//! WW_GEOCACHE_RED=thrash: the old strict size limit, evicting shapes the frame still draws (the gate's red)
+static bool geoCacheThrashRed()
+{
+	static const bool v = qgetenv( "WW_GEOCACHE_RED" ) == "thrash";
+	return v;
 }
 
 void NifSkopeOpenGLContext::setCacheSize( size_t maxBytes )
@@ -1224,6 +1396,10 @@ void NifSkopeOpenGLContext::shrinkCache( bool deleteAll )
 		} else {
 			if ( cacheBytesUsed < cacheMaxBytes )
 				break;
+			// lane PERF1: the oldest shape was drawn this frame, so all are: evicting it would re-upload
+			// the frame's whole working set every frame once it outgrows the size (a cell frame did)
+			if ( d->usedEpoch == cacheEpoch && !geoCacheThrashRed() )
+				break;
 			cacheShapeCnt--;
 			cacheBytesUsed -= d->h.getBufferDataSize() + 24576;
 		}
@@ -1239,10 +1415,13 @@ void NifSkopeOpenGLContext::shrinkCache( bool deleteAll )
 			d->next->prev = d->prev;
 		}
 		delete d;
+		PassTime::cacheCounts().evicted++;	// lane PERF1
 	}
+	PassTime::cacheCounts().usedBytes = qint64( cacheBytesUsed );
 
 	if ( rehashNeeded )
 		rehashCache();
+	cacheEpoch++;
 }
 
 void NifSkopeOpenGLContext::rehashCache()

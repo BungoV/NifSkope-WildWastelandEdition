@@ -1,0 +1,4 @@
+# The cell view's GI volume mask (lane PERF1; src/gl/celllights.cpp giVolMaskPass): the volume shapes' hulls, instanced.
+# No conditions: never picked for a shape; celllights.cpp selects it by name.
+
+shaders cell_givol.vert cell_givol.frag

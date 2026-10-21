@@ -1122,7 +1122,9 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					spilled[bkey].append( full );
 				}
 				const size_t vstart = bk.verts.size();
-				bk.verts.reserve( vstart + p.verts.size() );
+				// lane PERF1: grow by doubling; an exact reserve a placement copied the whole bucket each time (14 s)
+				if ( vstart + p.verts.size() > bk.verts.capacity() )
+					bk.verts.reserve( std::max( vstart + p.verts.size(), bk.verts.capacity() * 2 ) );
 				for ( const OutVert & sv : p.verts ) {
 					OutVert o;
 					o.pos = pos + rotate( m, sv.pos * scale );
@@ -1168,7 +1170,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					}
 					bk.verts.push_back( o );
 				}
-				bk.tris.reserve( bk.tris.size() + p.tris.size() );
+				if ( bk.tris.size() + p.tris.size() > bk.tris.capacity() )
+					bk.tris.reserve( std::max( bk.tris.size() + p.tris.size(), bk.tris.capacity() * 2 ) );
 				for ( const Triangle & t : p.tris )
 					bk.tris.push_back( Triangle( quint16( vstart + t[0] ),
 						quint16( vstart + t[1] ), quint16( vstart + t[2] ) ) );

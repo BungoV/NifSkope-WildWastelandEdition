@@ -200,12 +200,32 @@ void PropertyList::del( Property * p )
 		if ( i.value() == p ) {
 			i = properties.erase( i );
 
+			// lane CELLSTREAM1: a property is listed once; stop before reading a deleted one's type
 			if ( --p->ref <= 0 )
 				delete p;
+			break;
 		} else {
 			++i;
 		}
 	}
+}
+
+void PropertyList::delMany( const QSet<Property *> & gone )
+{
+	if ( gone.isEmpty() )
+		return;
+	std::vector<Property *> hit;
+	for ( auto i = properties.begin(); i != properties.end(); ) {
+		if ( gone.contains( i.value() ) ) {
+			hit.push_back( i.value() );
+			i = properties.erase( i );
+		} else {
+			++i;
+		}
+	}
+	for ( Property * p : hit )   // add() lists a property once
+		if ( --p->ref <= 0 )
+			delete p;
 }
 
 Property * PropertyList::get( const QModelIndex & index ) const

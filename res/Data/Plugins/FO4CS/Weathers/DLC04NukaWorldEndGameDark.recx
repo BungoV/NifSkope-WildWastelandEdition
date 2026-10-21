@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "DLC04NukaWorldEndGameDark",
+			"weather": "DLCNukaWorld.esm|0x00043B70",
+			"groundFog": {
+				"thickness": 464,
+				"strength": 1.38
+			}
+		}
+	]
+}

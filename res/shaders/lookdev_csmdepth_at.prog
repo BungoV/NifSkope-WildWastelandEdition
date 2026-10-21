@@ -1,0 +1,6 @@
+# The cascade caster pass for alpha-tested shapes (lane VOLAIR1, 10-15): depth only, the base
+# map's alpha (times the material alpha) against the shape's own alpha-test threshold. A window's
+# alpha-tested glass and a tree's leaf cards cast what the eye sees, not a solid card.
+# Selected by name from gl/sunshadow.cpp; red WW_CSM_RED=atsolid casts them solid again.
+
+shaders lookdev_csmdepth_at.vert lookdev_csmdepth_at.frag

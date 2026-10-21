@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DLC04NukaWorldDust",
+			"weather": "DLCNukaWorld.esm|0x00030ACE",
+			"groundFog": {
+				"thickness": 883,
+				"strength": 7.82,
+				"hours": {
+					"2": {
+						"thickness": 932,
+						"strength": 8.0
+					},
+					"14": {
+						"thickness": 883,
+						"strength": 7.82
+					}
+				}
+			}
+		}
+	]
+}

@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "dlc03_radmistweatherFast",
+			"weather": "DLCCoast.esm|0x0005D0C4",
+			"groundFog": {
+				"thickness": 805,
+				"strength": 5.98,
+				"hours": {
+					"2": {
+						"thickness": 788,
+						"strength": 5.65
+					},
+					"14": {
+						"thickness": 805,
+						"strength": 5.98
+					}
+				}
+			}
+		}
+	]
+}

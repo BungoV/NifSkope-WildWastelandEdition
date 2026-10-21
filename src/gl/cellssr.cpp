@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellssr.h"
+#include "cellunits.h"
 
 #include "gl/celllights.h"
 #include "gl/cellwater.h"
@@ -27,7 +28,7 @@ BSD License - see nifskope.h
 namespace
 {
 
-constexpr int kSsrUnit = 17;			// the reflection (sampler2D, half the view); 10..16 are the cell lights' and AO's
+constexpr int kSsrUnit = WwCellUnit::Ssr;			// the reflection (sampler2D, half the view); 10..16 are the cell lights' and AO's
 // the game's: color scale, angle gate, normal z scale, confidence scale; its camera's near; its far ceiling
 constexpr float kSsrK[4] = { 1.0f, 0.2f, 2.0f, 1.0f };
 constexpr float kSsrNear = 15.0f, kSsrFarMax = 353840.0f;

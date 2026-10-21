@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include <QString>
 #include <QStringList>
 
+#include <array>
 #include <functional>
 #include <utility>
 #include <vector>
@@ -233,6 +234,10 @@ struct LodlFarRing
 	bool exact = false;
 	//! Our coverage limit (a mixed run, WW_CELL_FARLOD_OURS): whole sheet tiles inside it; none when lx1 < lx0.
 	int lx0 = 0, ly0 = 0, lx1 = -1, ly1 = -1;
+	//! lane CELLSTREAM1: one shape a cell (a streaming open hides each under its loaded cell)
+	bool perCell = false;
+	//! lane CELLSTREAM1: every inner vertex takes innerZ (the LAND's height), not only the cut's edge
+	bool snapAll = false;
 
 	// ---- out, read back from what was built
 	bool built = false;
@@ -243,6 +248,8 @@ struct LodlFarRing
 	QString sheetFile;
 	qint64 seamSamples = 0;
 	double seamBeforeMax = 0, seamBeforeMean = 0, seamAfterMax = 0, seamAfterMean = 0;
+	qint64 snappedAll = 0;                    //!< lane CELLSTREAM1: vertices snapAll moved onto the LAND
+	std::vector<std::array<int, 3>> cellBlocks;   //!< lane CELLSTREAM1: each shape's block, south-west cell x, y
 	QStringList notes;
 };
 
@@ -263,6 +270,7 @@ struct LodlFarWater
 	int cx0 = 0, cy0 = 0, cx1 = -1, cy1 = -1; //!< the cut, inclusive cells (none when cx1 < cx0)
 	bool noCut = false;         //!< red control: the cut cells get water too
 	int texels = 4;             //!< body-plane samples a cell edge, wanted (clamped to the file's)
+	bool perCell = false;       //!< lane CELLSTREAM1: quads never cross a cell edge, one shape set a cell
 	QString prefix = QStringLiteral( "FarLOD water" );
 
 	// ---- out
@@ -271,6 +279,7 @@ struct LodlFarWater
 	int shapes = 0;
 	QSet<quint16> bodies;
 	std::vector<std::pair<int, quint32>> blocks;   //!< each shape's block and WATR form
+	std::vector<std::array<int, 3>> cellBlocks;    //!< lane CELLSTREAM1 (perCell): each shape's block, cell x, y
 	QStringList notes;
 };
 

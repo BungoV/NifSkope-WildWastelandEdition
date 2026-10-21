@@ -59,6 +59,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellview.h"	// lane CELLVIEW1: a whole exterior cell, built
 #include "cellworkspace.h"	// lane CELLWORK1
 
+#include <cstdlib>
+#include <cstdio>
 #include <QPainterPath>
 #include "gl/glscene.h"
 #include "model/kfmmodel.h"
@@ -10490,6 +10492,16 @@ void NifSkope::load()
 		QString cverr, cvnotes;
 		CellSceneSpec cvspec;
 		bool fromEnv = cellSpecFromEnv( cvspec, &cverr );
+		/* lane VOLAIR1 10-15: a WW_CELL_OPEN line that does not parse used to be dropped here without a word and the
+		 * run went on with the file's spec (for a harness, the empty fixture): sky-only pictures that still looked like
+		 * a measurement (the Concord window gate, block size 2). Only a harness sets WW_CELL_OPEN, so a bad line stops
+		 * the run: "CELL OPEN REFUSED: <why>" in the notes, exit 88, no picture. */
+		if ( !fromEnv && !cverr.isEmpty() && !qgetenv( "WW_CELL_OPEN" ).isEmpty() ) {
+			const QByteArray line = ( QStringLiteral( "CELL OPEN REFUSED: " ) + cverr ).toUtf8();
+			std::fprintf( stderr, "%s\n", line.constData() );
+			std::fflush( stderr );
+			std::_Exit( 88 );
+		}
 		if ( !fromEnv ) {
 			cverr.clear();
 			if ( cellSpecFromFile( fname, cvspec, &cverr ) )

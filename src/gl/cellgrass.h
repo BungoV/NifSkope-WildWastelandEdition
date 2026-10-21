@@ -87,6 +87,8 @@ void wwCellGrassBlockOrigin( int cx, int cy, float & x0, float & y0 );
 void wwCellGrassBegin( const void * nif );
 //! lane CABLES1: `fade` false = the wind without the grass fade (a swaying cable)
 void wwCellGrassShape( const void * nif, int block, float wavePeriod, bool fade = true );
+// lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
+void wwCellGrassForget( const void * nif, int block );
 void wwCellGrassNote( const void * nif, const QString & line );
 QString wwCellGrassEcho( const void * nif );
 

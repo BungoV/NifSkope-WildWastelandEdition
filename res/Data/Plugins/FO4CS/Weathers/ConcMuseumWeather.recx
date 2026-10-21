@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "ConcMuseumWeather",
+			"weather": "Fallout4.esm|0x001A65E5",
+			"groundFog": {
+				"thickness": 348,
+				"strength": 0.37,
+				"hours": {
+					"2": {
+						"thickness": 595,
+						"strength": 2.76
+					},
+					"14": {
+						"thickness": 348,
+						"strength": 0.37
+					}
+				}
+			}
+		}
+	]
+}

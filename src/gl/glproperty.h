@@ -173,6 +173,8 @@ public:
 
 	void add( Property * );
 	void del( Property * );
+	//! lane CELLSTREAM1: drops a set in one pass (del() walks its whole type bucket per property)
+	void delMany( const QSet<Property *> & gone );
 	bool contains( Property * ) const;
 
 	Property * get( const QModelIndex & idx ) const;

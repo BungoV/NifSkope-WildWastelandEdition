@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "CommonwealthPolluted",
+			"weather": "Fallout4.esm|0x001EB2FF",
+			"groundFog": {
+				"thickness": 705,
+				"strength": 4.23
+			}
+		}
+	]
+}

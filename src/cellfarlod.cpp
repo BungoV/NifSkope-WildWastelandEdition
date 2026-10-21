@@ -301,7 +301,8 @@ int cellFarLodLastType()
 }
 
 QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWorld & world,
-	const QString & ws, int cx, int cy, int n, const QString & lodlPath, const Vector3 & origin )
+	const QString & ws, int cx, int cy, int n, const QString & lodlPath, const Vector3 & origin,
+	CellFarStream * stream )
 {
 	QStringList L;
 	auto say = [&L]( const QString & line ) {
@@ -322,6 +323,17 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const bool vanBoth = red == "vanboth";   // the vanilla fill drawn over our chunks too (the mixed gate's red)
 	const int h = std::max( 0, ( n - 1 ) / 2 );
 	const int bx0 = cx - h, by0 = cy - h, bx1 = cx + h, by1 = cy + h;
+	// lane CELLSTREAM1: objects and cards leave out every cell a 5x5 round any roam position can load
+	const int sr = stream ? std::max( 0, stream->roam ) + 2 : 0;
+	const int ox0 = stream ? cx - sr : bx0, oy0 = stream ? cy - sr : by0;
+	const int ox1 = stream ? cx + sr : bx1, oy1 = stream ? cy + sr : by1;
+	if ( stream ) {
+		stream->handBlocks.clear();
+		stream->objX0 = ox0;
+		stream->objY0 = oy0;
+		stream->objX1 = ox1;
+		stream->objY1 = oy1;
+	}
 
 	/* THE NEAR GATE'S ARM (WW_CELL_FARLOD_NEARONLY=1): the far field's planes and nothing else -- no shape,
 	 * no card -- so a picture against the off path shows exactly what the planes alone change. */
@@ -383,6 +395,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		{ 4, 16, cellsTo( d2 ), 2 },                     // LOD16
 		{ 5, 32, cellsTo( dMax ), 3 },                   // LOD32
 	};
+	if ( stream )
+		defs[0].reach = sr + 1;   // lane CELLSTREAM1: one cell past the farthest a 5x5 can load
 	const int ringsWanted = qBound( 1, envInt( "WW_CELL_FARLOD_RINGS", int( defs.size() ) ), int( defs.size() ) );
 	defs.resize( size_t( ringsWanted ) );
 	for ( size_t i = 1; i < defs.size(); i++ )
@@ -507,6 +521,12 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		if ( i == 0 )
 			r.innerZ = innerZ;
 		r.prefix = QStringLiteral( "FarLOD terrain r%1" ).arg( int( i ) );
+		if ( stream && i == 0 ) {	// lane CELLSTREAM1: uncut, a shape a cell, on the LAND edge for edge
+			r.noCut = true;
+			r.perCell = true;
+			r.snapAll = true;
+			r.innerZ = landZ;
+		}
 		if ( ours && terrOk ) {
 			std::vector<LodlFarRing> one( 1, r );
 			const qint64 left = maxVerts > 0 ? std::max<qint64>( 1, maxVerts - runVerts ) : 0;
@@ -517,6 +537,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				r = one[0];
 				if ( r.built )
 					runVerts += r.verts;
+				if ( stream && i == 0 ) {
+					stream->handBlocks.insert( stream->handBlocks.end(), r.cellBlocks.begin(), r.cellBlocks.end() );
+					stream->landBlocks = int( stream->handBlocks.size() );
+				}
 			}
 		}
 		int nx0 = std::min( r.x0, fx0 ), ny0 = std::min( r.y0, fy0 );
@@ -664,6 +688,10 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			w.cx1 = hx1;
 			w.cy1 = hy1;
 			w.noCut = waterCut && i == 0;
+			if ( stream && i == 0 ) {	// lane CELLSTREAM1: uncut, split at cell edges
+				w.noCut = true;
+				w.perCell = true;
+			}
 			w.texels = kWaterTexels[std::min( i, size_t( 4 ) )];
 			wr.push_back( w );
 			hx0 = foot[i][0];
@@ -672,9 +700,12 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			hy1 = foot[i][3];
 		}
 		QString werr;
+		const bool water0 = !rings.empty() && rings[0].built;
 		if ( !nifAppendLodlFarWater( nif, iFar, lodlPath, shift, wr, &werr ) ) {
 			say( QStringLiteral( "far lod: water NONE -- %1" ).arg( werr ) );
 		} else {
+			if ( stream && water0 && !wr.empty() )
+				stream->handBlocks.insert( stream->handBlocks.end(), wr[0].cellBlocks.begin(), wr[0].cellBlocks.end() );
 			WwWaterRecord def;
 			const bool haveDef = world.defaultWaterType() != 0 && world.waterRecord( world.defaultWaterType(), def );
 			QHash<quint32, int> recOk;   // 1 its own record, 0 the default's, -1 none
@@ -935,7 +966,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					chunks << base;
 			}
 		QStringList cn;
-		cards = ImpostorChunk::armCellFar( nif, chunks, shift, ctrX, ctrY, treeDist, bx0, by0, bx1, by1,
+		cards = ImpostorChunk::armCellFar( nif, chunks, shift, ctrX, ctrY, treeDist, ox0, oy0, ox1, oy1,
 			&cardRefs, &cn );
 		for ( const QString & c : cn )
 			say( c.startsWith( QLatin1String( "far lod:" ) ) ? c : QStringLiteral( "far lod: cards: " ) + c );
@@ -949,7 +980,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	std::vector<QString> ringState( rings.size(), QStringLiteral( "not reached" ) );
 	std::vector<std::array<int, 8>> ringRegion( rings.size(), std::array<int, 8>{ { 0, 0, -1, -1, 0, 0, -1, -1 } } );
 	{	// every ring's rectangle and hole, whether or not its objects get built (the hole chain of the loop below)
-		int gx0 = bx0, gy0 = by0, gx1 = bx1, gy1 = by1;
+		int gx0 = ox0, gy0 = oy0, gx1 = ox1, gy1 = oy1;
 		for ( size_t i = 0; i < rings.size(); i++ ) {
 			if ( rings[i].built )
 				ringRegion[i] = { { rings[i].ox0, rings[i].oy0, rings[i].ox1, rings[i].oy1, gx0, gy0, gx1, gy1 } };
@@ -964,7 +995,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	} else if ( !QFileInfo( lodi ).isFile() ) {
 		say( QStringLiteral( "far lod: objects NONE -- no %1" ).arg( QDir::toNativeSeparators( lodi ) ) );
 	} else {
-		int hx0 = bx0, hy0 = by0, hx1 = bx1, hy1 = by1;
+		int hx0 = ox0, hy0 = oy0, hx1 = ox1, hy1 = oy1;
 		for ( size_t i = 0; i < rings.size(); i++ ) {
 			const LodlFarRing & r = rings[i];
 			if ( !r.built ) {
@@ -1070,6 +1101,11 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					: QString() ) );
 		}
 	}
+
+	if ( stream )
+		say( QStringLiteral( "far lod: stream hand-over %1 ring-0 shapes (one a cell), %2 vertices on the LAND, objects and cards out of cells %3,%4..%5,%6" )
+			.arg( int( stream->handBlocks.size() ) ).arg( rings.empty() ? 0 : rings[0].snappedAll )
+			.arg( ox0 ).arg( oy0 ).arg( ox1 ).arg( oy1 ) );
 
 	// ---- the draw's view of it
 	FarDoc fd;

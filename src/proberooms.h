@@ -45,6 +45,8 @@ struct ProbeRoomSpec
 	 *  not outdoors for that (only the faces the clip leaves, as before). Red "soupbox": the soup's box. */
 	float clipLo[3] = { 1.0f, 1.0f, 1.0f };
 	float clipHi[3] = { 0.0f, 0.0f, 0.0f };
+	//! lane VOLFIT1: keep the working grids (ProbeRooms::state, labels, dist2, facing) for the Space stage (probevolumes.h)
+	bool keep = false;
 };
 
 struct ProbeRooms
@@ -58,10 +60,18 @@ struct ProbeRooms
 	int rooms = 0;                  //!< rooms 1 .. rooms (0 = outdoors)
 	qint64 cellsAir = 0, cellsSolid = 0, cellsGlass = 0, cellsDoor = 0, cellsCore = 0, cellsLeft = 0;
 	qint64 cellsOpening = 0, glassBoth = 0;
+	std::vector<qint32> openings;   //!< lane PERF1: the opening cells (step 4, air only), the threshold stand-in's input
 	qint64 cellsMaskOpen = 0, cellsMaskSolid = 0;   //!< lane ALPHATEST2: cells masked triangles touch, left air / solid
 	int cores = 0, coresOutdoors = 0, pockets = 0, folded = 0;
 	int clippedFaces = 0;           //!< lane GIBLACK2: the soup box's faces the clip cut (bits -x +x -y +y -z +z)
 	double ms = 0;
+	/*! lane VOLFIT1: with ProbeRoomSpec::keep, per cell: 0 air / 1 solid / 2 glass; the unfolded label (-1 solid or
+	 *  glass, 0 outdoors); the squared distance to solid or glass (cells); the one-sided faces' summed normal x 32
+	 *  (saturated; a wall's front side reads along it). Empty otherwise. */
+	std::vector<quint8> state;
+	std::vector<qint32> labels;
+	std::vector<float> dist2;
+	std::vector<qint8> facing;  //!< 3 per cell
 
 	size_t index( int x, int y, int z ) const
 	{
@@ -85,5 +95,45 @@ inline float probeRoomsPack( int a, int b )
 }
 //! gi_rooms.bin: float32 origin[3], cell; int32 dims[3], rooms; then int16 a, int16 b per cell
 bool probeRoomsDump( const ProbeRooms & r, const QString & path, QString * err );
+
+/*! THE GI VOLUMES' INTERFACE (lane PERF1, 2026-10-19; the Division deck's D4; the shapes as VOLUMES.md section 6).
+ *
+ *  The outdoors is one volume, room 0, and has no shapes: a pixel no interior shape holds reads the outdoor GI.
+ *  Every interior room is a volume, the union of its shapes; the runtime draws the shapes into a screen mask and a
+ *  pixel reads only the grid slots of its volume's room (res/shaders/cell_lights.glsl cellGiVolume). Thresholds are
+ *  the only path between two volumes: the voxels near one carry its weight and the room across it, and a pixel
+ *  blends the other side's read in, both ways (light in through a door, a lamp's bounce out of it).
+ *  The fitter (lane VOLFIT1) fills ProbeGiResult::volumes; empty, giVolumesFromRooms stands in from the room grid.
+ *  A shape's room is the room grid's id (ProbeRooms::a), the id the grid's slots carry. */
+struct GiVolumeShape
+{
+	enum Type { Box = 0, Cylinder = 1, Wedge = 2, Capsule = 3, Sphere = 4 };
+	int type = Box;
+	float center[3] = { 0, 0, 0 };      //!< world
+	float size[3] = { 0, 0, 0 };        //!< box: edges; cylinder: x, y diameters, height; wedge: edges (full height at
+	                                    //!< -y, none at +y); capsule: diameter, diameter, end to end on z; sphere: diameters
+	float rotation[3] = { 0, 0, 0 };    //!< degrees about x, y, z (shape -> world = Rz Ry Rx)
+	int room = 1;
+};
+
+struct GiThreshold
+{
+	GiVolumeShape shape;                //!< the opening's extent (its room unused)
+	int rooms[2] = { 0, 0 };            //!< the two volumes it joins
+	float blendWidth = 0.0f;            //!< game units each side; 0: 1.5 GI voxels
+};
+
+struct GiVolumeSet
+{
+	std::vector<GiVolumeShape> shapes;  //!< interior rooms only
+	std::vector<GiThreshold> thresholds;
+	QString source;                     //!< who made it ("rooms grid stand-in", the fitter's name)
+	QString census;                     //!< one line: rooms, shapes, coverage
+};
+
+/*! The stand-in until the fitter lands: each interior room's air as boxes (greedy, grown from a seed while the next
+ *  slab holds the room's air and nothing of another room's; at most maxPerRoom a room), each connected run of
+ *  opening cells between two rooms a threshold (its bounding box). The census counts the room air the boxes hold. */
+GiVolumeSet giVolumesFromRooms( const ProbeRooms & r, int maxPerRoom = 64 );
 
 #endif // PROBEROOMS_H

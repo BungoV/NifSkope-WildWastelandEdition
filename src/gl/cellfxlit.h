@@ -68,6 +68,8 @@ void wwCellFxLitBegin( const void * nif );
 int wwCellFxLitModel( const void * nif, const WwFxLitModel & m );
 //! The written shape `block` belongs to model `serial`.
 void wwCellFxLitShape( const void * nif, int block, int serial );
+// lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
+void wwCellFxLitForget( const void * nif, int block );
 //! Red control data: light `index` of the published list at its base's fade is `ratio` x what was published.
 void wwCellFxLitNoOffset( const void * nif, int index, float ratio );
 //! After the document's lights are published: pick every model's lights (and write the dump).

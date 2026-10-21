@@ -40,6 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellpanel.h"		// lane CELLVIEW2
 #include "cellpicktest.h"	// lane CELLVIEW2
 #include "cellrefs.h"		// lane CELLWORK1
+#include "cellstream.h"		// lane CELLSTREAM1
 #include "cellworkspace.h"	// lane CELLWORK1
 #include "cellmodpick.h"
 #include "nifskope.h"
@@ -2095,6 +2096,131 @@ QStringList wwPbrmRetargetScene( Scene * sc, const QString & looseRoot )
 }
 
 
+/* lane CELLSTREAM1: a streamed view's frames until its cells are in (or `waitMs` runs out); at least `minFrames`.
+ * The ms waited. A tick is one frame's streaming work; the 5x5 draws in seconds here, so the view paints every 250 ms. */
+static qint64 wwCellStreamSettle( GLView * ogl, int minFrames, qint64 waitMs )
+{
+	QElapsedTimer t, paint;
+	t.start();
+	paint.start();
+	for ( int k = 0; k < minFrames || cellStreamBusy( nullptr ); k++ ) {
+		ogl->wwCellStreamFrame();
+		if ( k < minFrames || paint.elapsed() > 250 ) {
+			ogl->update();
+			qApp->processEvents();
+			paint.restart();
+		}
+		if ( t.elapsed() > waitMs )
+			break;
+	}
+	return t.elapsed();
+}
+
+/* lane CELLSTREAM1: WW_CELL_STREAM_PATH=<file>: lines "ex ey ez ax ay az [fov]". The camera goes to each step and
+ * the view runs until its cells are in; then one line goes to WW_CELL_STREAM_DUMP (else <out>_stream.txt): the
+ * block's centre, the cells expected and loaded, the step's worst frame and write slice, the private bytes with
+ * the texture and GPU caches dropped, and the far-LOD coverage at the loaded border. The last step is the shot. */
+static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const QString & out )
+{
+	QString dumpPath = qEnvironmentVariable( "WW_CELL_STREAM_DUMP" );
+	if ( dumpPath.isEmpty() )
+		dumpPath = QFileInfo( out ).path() + QLatin1Char( '/' ) + QFileInfo( out ).completeBaseName() + QStringLiteral( "_stream.txt" );
+	QFile dump( dumpPath );
+	const bool dumpOk = dump.open( QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate );
+	QTextStream log( &dump );
+	QFile pf( pathFile );
+	if ( !pf.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
+		if ( dumpOk )
+			log << "refused: cannot read " << pathFile << "\n";
+		return;
+	}
+	struct Step { Vector3 eye, at; float fov = 70.0f; };
+	QVector<Step> steps;
+	for ( const QString & raw : QString::fromUtf8( pf.readAll() ).split( QLatin1Char( '\n' ) ) ) {
+		const QString line = raw.trimmed();
+		if ( line.isEmpty() || line.startsWith( QLatin1Char( '#' ) ) )
+			continue;
+		const QStringList f = line.split( QRegularExpression( QStringLiteral( "[\\s,]+" ) ), Qt::SkipEmptyParts );
+		if ( f.size() < 6 )
+			continue;
+		Step st;
+		st.eye = Vector3( f[0].toFloat(), f[1].toFloat(), f[2].toFloat() );
+		st.at = Vector3( f[3].toFloat(), f[4].toFloat(), f[5].toFloat() );
+		if ( f.size() > 6 )
+			st.fov = f[6].toFloat();
+		steps.append( st );
+	}
+	const qint64 waitMs = qEnvironmentVariableIsSet( "WW_CELL_STREAM_WAIT" ) ? qEnvironmentVariableIntValue( "WW_CELL_STREAM_WAIT" ) : 600000;
+	const bool shots = qEnvironmentVariableIntValue( "WW_CELL_STREAM_SHOTS" ) != 0;
+	const CellStreamStats s0 = cellStreamStats( nullptr, true );
+	if ( dumpOk )
+		log << "stream " << ( s0.on ? "on" : "off" ) << " steps " << steps.size() << " path " << pathFile << "\n";
+	for ( int i = 0; i < steps.size(); i++ ) {
+		ogl->wwSetPathCamera( true, steps[i].eye, steps[i].at, steps[i].fov );
+		cellStreamStats( nullptr, true );
+		const qint64 waited = wwCellStreamSettle( ogl, 10, waitMs );
+		wwCellStreamSettle( ogl, 4, waitMs );   // transforms and the far tiles' data, drawn once
+		// lane CELLSTREAM1: and long enough for the textures of the cells that left to be freed (the view's rule)
+		if ( cellStreamTexKeepSec() > 0 ) {
+			QElapsedTimer linger;
+			linger.start();
+			while ( linger.elapsed() < ( cellStreamTexKeepSec() + 3 ) * 1000 ) {
+				ogl->wwCellStreamFrame();
+				ogl->update();
+				qApp->processEvents();
+				QThread::msleep( 100 );
+			}
+		}
+		const CellStreamStats s = cellStreamStats( nullptr, false );
+		int holes = 0, doubles = 0, samples = 0;
+		const QString cov = cellStreamCoverage( nullptr, &holes, &doubles, &samples );
+		// lane CELLSTREAM1: memory as it stands (textures the view freed included); WW_CELL_STREAM_FLUSH=1 also reads it
+		// after dropping every texture and cached mesh
+		const qint64 privLive = cellStreamPrivateBytes();
+		if ( qEnvironmentVariableIntValue( "WW_CELL_STREAM_FLUSH" ) > 0 )
+			ogl->wwCellStreamFlush();
+		const qint64 priv = cellStreamPrivateBytes();
+		qint64 heapBusy = 0, heapHeld = 0;   // lane CELLSTREAM1: a real leak grows busy; held free pages grow held
+		cellStreamHeapBytes( &heapBusy, &heapHeld );
+		qint64 regions[3];
+		cellStreamRegionBytes( regions );
+		if ( dumpOk ) {
+			log << "step " << i << " eye " << QString::asprintf( "%.1f %.1f %.1f", steps[i].eye[0], steps[i].eye[1], steps[i].eye[2] )
+				<< " | centre " << s.cx << "," << s.cy << " | match " << ( s.match ? 1 : 0 )
+				<< " | attached " << s.attached << " ready " << s.ready << " pending " << s.pending << " failed " << s.failed
+				<< " | waitMs " << waited << " | tickMaxMs " << QString::asprintf( "%.3f", s.tickMaxMs )
+				<< " sliceMaxMs " << QString::asprintf( "%.3f", s.sliceMaxMs )
+				<< " unloadMaxMs " << QString::asprintf( "%.3f", s.unloadMaxMs )
+				<< " drainMaxMs " << QString::asprintf( "%.3f", s.drainMaxMs )
+				<< " buryMaxMs " << QString::asprintf( "%.3f", s.buryMaxMs )
+				<< " rebuildMaxMs " << QString::asprintf( "%.3f", s.rebuildMaxMs )
+				<< " buildMaxMs " << QString::asprintf( "%.1f", s.buildMaxMs )
+				<< " | built " << s.built << " attaches " << s.attaches << " unloads " << s.unloads
+				<< " inserted " << s.inserted << " recycled " << s.recycled << " blocks " << s.blocks << " pooled " << s.pooled
+				<< " | private " << priv << " live " << privLive << " heapBusy " << heapBusy << " heapHeld " << heapHeld
+				<< " regions " << regions[0] << "/" << regions[1] << "/" << regions[2] << " texEvicted " << s.texEvicted
+				<< " quietResets " << s.quietResets << " loudResets " << s.loudResets
+				<< " | persistent " << s.persistent << " nodes " << s.sceneNodes << " props " << s.sceneProps
+				<< " shapes " << s.sceneShapes << " top " << s.persistentTop
+				<< " | holes " << holes << " doubles " << doubles << " samples " << samples
+				<< " | " << cov
+				<< " | expected " << s.expected << " | loaded " << s.loaded;
+			if ( !s.lastError.isEmpty() )
+				log << " | error " << s.lastError;
+			log << "\n";
+			log.flush();
+		}
+		if ( shots ) {
+			wwCellStreamSettle( ogl, 4, waitMs );
+			ogl->grabFramebuffer().save( QFileInfo( out ).path() + QLatin1Char( '/' ) + QFileInfo( out ).completeBaseName()
+				+ QString::asprintf( "_step%02d.", i ) + QFileInfo( out ).suffix() );
+		}
+	}
+	wwCellStreamSettle( ogl, 16, waitMs );   // the caches dropped above come back before the shot
+	ogl->grabFramebuffer().save( out );
+	ogl->wwSetPathCamera( false );
+}
+
 /* lane MOTION1: WW_RENDER_PATH=<file> (main.cpp maps --path <file> to it). The camera follows the path file
  * (gl/campath.h) one fixed step a frame; the scene's own time is held where WW_RENDER_TIME put it, so only the
  * camera moves (the temporal AA's motion vectors are the camera's alone). Frames go to <out>_000.<ext> ..;
@@ -2202,6 +2328,12 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 				<< " at " << QString::asprintf( "%.6f %.6f %.6f", at[0], at[1], at[2] )
 				<< " fov " << QString::asprintf( "%.6f", fov ) << " | taa " << wwGameTaaEcho()
 				<< " | " << wwSunShadowSummary() << " | " << wwCellPostEcho() << " | " << wwCellBloomEcho() << "\n";
+	}
+	// lane PERF1: WW_RENDER_GPUMS=<frames> times that many repaints at the path's last camera (as the still shot does)
+	if ( const int gpuFrames = qEnvironmentVariableIntValue( "WW_RENDER_GPUMS" ); gpuFrames > 0 && frames > 0 ) {
+		QFile gf( out + QStringLiteral( ".gpums.txt" ) );
+		if ( gf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+			QTextStream( &gf ) << ogl->wwGpuMs( gpuFrames ) << "\n";
 	}
 	wwGameTaaSetFrame( -1 );
 	wwCellPostSetPath( -1, 0.0f );
@@ -23457,6 +23589,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * Logged at the grab, which is the only moment that can be
 					 * quoted -- anything logged earlier is a claim about intent. */
 					skope->ogl->wwLogCameraCensus( "grab" );
+					// lane CELLSTREAM1: a stepped path through the streamed cells, else the shot waits for them
+					const QString streamPath = qEnvironmentVariable( "WW_CELL_STREAM_PATH" );
+					if ( !streamPath.isEmpty() ) {
+						wwCellStreamPathRun( skope->ogl, streamPath, out );
+						qApp->quit();
+						return;
+					}
+					if ( cellStreamBusy( nullptr ) )
+						wwCellStreamSettle( skope->ogl, 16, 600000 );
 					// lane MOTION1: a camera path renders its own frames (wwRenderPathRun above)
 					const QString renderPath = qEnvironmentVariable( "WW_RENDER_PATH" );
 					if ( !renderPath.isEmpty() ) {

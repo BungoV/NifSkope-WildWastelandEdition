@@ -48,6 +48,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QColor>
 #include <QDebug>
 #include <QFile>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QSettings>
 #include <QStringBuilder>
@@ -736,7 +737,7 @@ bool NifModel::updateArraySizeImpl( NifItem * array )
 		endRemoveRows();
 	}
 
-	if ( state != Loading
+	if ( state != Loading && !streamQuiet
 		&& ( bOldHasChildLinks || array->hasChildLinks() ) // had or has any links inside
 		&& !array->isDescendantOf( getFooterItem() )
 	) {
@@ -869,7 +870,7 @@ QModelIndex NifModel::insertNiBlock( const QString & identifier, int at )
 		for ( const NifData& data : block->types )
 			insertType( branch, data );
 
-		if ( state != Loading ) {
+		if ( state != Loading && !streamQuiet ) {
 			updateHeader();
 			updateLinks();
 			updateFooter();
@@ -882,6 +883,66 @@ QModelIndex NifModel::insertNiBlock( const QString & identifier, int at )
 	logMessage(tr("Could not insert NiBlock."), tr("Unknown block %1").arg(identifier), QMessageBox::Critical);
 
 	return QModelIndex();
+}
+
+QSet<int> NifModel::blocksWithPersistent() const
+{
+	QSet<int> r;
+	const QModelIndexList pl = persistentIndexList();
+	const_cast<NifModel *>( this )->persistentNow = pl.size();
+	for ( const QModelIndex & i : pl ) {
+		const NifItem * it = getItem( i, false );
+		if ( !it || it == root )
+			continue;
+		while ( it->parent() && it->parent() != root )
+			it = it->parent();
+		r.insert( it->row() - 1 );
+	}
+	return r;
+}
+
+bool NifModel::resetNiBlock( int blocknum, bool quiet )
+{
+	NifItem * branch = getBlockItem( blocknum );
+	NifBlockPtr block = branch ? blocks.value( branch->name() ) : NifBlockPtr();
+	if ( !block )
+		return false;
+	const QModelIndex idx = createIndex( branch->row(), 0, branch );
+	const int n = branch->childCount();
+	QElapsedTimer t;
+	t.start();
+	// lane CELLSTREAM1: quiet = no row signals; Qt's row signals walk every persistent index in the model
+	if ( n > 0 ) {
+		if ( !quiet )
+			beginRemoveRows( idx, 0, n - 1 );
+		branch->removeChildren( 0, n );
+		if ( !quiet )
+			endRemoveRows();
+	}
+	resetMs[0] = double( t.nsecsElapsed() ) * 1.0e-6;
+	// lane CELLSTREAM1: a type's top-level rows are fixed, so the count is known before the insert
+	if ( !quiet )
+		beginInsertRows( idx, 0, std::max( 0, n - 1 ) );
+	if ( !block->ancestor.isEmpty() )
+		insertAncestor( branch, block->ancestor );
+	branch->prepareInsert( block->types.count() );
+	for ( const NifData & data : block->types )
+		insertType( branch, data );
+	if ( !quiet )
+		endInsertRows();
+	resetMs[1] = double( t.nsecsElapsed() ) * 1.0e-6 - resetMs[0];
+	updateBlockLinks( blocknum );
+	resetMs[2] = double( t.nsecsElapsed() ) * 1.0e-6 - resetMs[0] - resetMs[1];
+	return branch->childCount() == n;
+}
+
+void NifModel::updateBlockLinks( int blocknum )
+{
+	if ( !isValidBlockNumber( blocknum ) )
+		return;
+	childLinks[blocknum].clear();
+	parentLinks[blocknum].clear();
+	updateLinks( blocknum, getBlockItem( blocknum ) );
 }
 
 void NifModel::removeNiBlock( int blocknum )
@@ -2472,6 +2533,10 @@ bool NifModel::loadIndex( QIODevice & device, const QModelIndex & index )
 	if ( item ) {
 		NifIStream stream( this, &device );
 		bool ok = loadItem( item, stream );
+		if ( streamQuiet ) {   // lane CELLSTREAM1: a streamed write relinks its own block only
+			updateBlockLinks( getBlockNumber( index ) );
+			return ok;
+		}
 		updateLinks();
 		updateFooter();
 		emit linksChanged();
@@ -2489,6 +2554,10 @@ bool NifModel::loadAndMapLinks( QIODevice & device, const QModelIndex & index, c
 		NifIStream stream( this, &device );
 		bool ok = loadItem( item, stream );
 		mapLinks( item, map );
+		if ( streamQuiet ) {   // lane CELLSTREAM1: as loadIndex
+			updateBlockLinks( getBlockNumber( index ) );
+			return ok;
+		}
 		updateLinks();
 		updateFooter();
 		emit linksChanged();
@@ -3384,7 +3453,7 @@ void NifModel::onItemValueChange( NifItem * item )
 	invalidateDependentConditions( item );
 	BaseModel::onItemValueChange( item );
 
-	if ( item->isLink() && !item->isDescendantOf( getFooterItem() ) ) {
+	if ( item->isLink() && !streamQuiet && !item->isDescendantOf( getFooterItem() ) ) {
 		updateLinks();
 		updateFooter();
 		emit linksChanged();

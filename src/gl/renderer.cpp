@@ -53,6 +53,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/settingsdialog.h"
 #include "gl/BSMesh.h"
 #include "gl/cellhdr.h"
+#include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 
@@ -66,6 +67,157 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSettings>
 #include <QTextStream>
 #include <chrono>
+#include <unordered_map>
+
+/* lane PERF1: the scene-global setters (fog + air, sun shadow, cell lights) skipped on a shape whose program already
+ * holds this pass's values. Their output depends on the scene, the pass and the program only, and each one reads
+ * GL state back (glGetIntegerv), a driver sync paid once per shape. WW_SETUP_MEMO=0 runs them on every shape, 2 keeps
+ * a stamp per program instead of the last one; WW_SETUP_MEMO_CHECK=1 runs them anyway and counts any GL state they
+ * would have changed (the identity gate). */
+namespace
+{
+struct SetupMemo
+{
+	int mode = 1;
+	bool check = false;
+	bool armed = false;
+	quint64 epoch = 1;
+	std::unordered_map<const void *, std::pair<const void *, quint64>> stamps;	// program -> scene, epoch
+	qint64 hits = 0, runs = 0, checked = 0, bad = 0, arms = 0;
+	SetupMemo()
+	{
+		const QByteArray v = qgetenv( "WW_SETUP_MEMO" );
+		mode = v.isEmpty() ? 1 : v.toInt();
+		check = qEnvironmentVariableIntValue( "WW_SETUP_MEMO_CHECK" ) != 0;
+	}
+};
+
+SetupMemo & setupMemo()
+{
+	static SetupMemo m;
+	return m;
+}
+
+struct GlSnap
+{
+	GLint active = 0;
+	std::vector<GLint> tex;
+	std::vector<std::pair<std::string, std::array<GLint, 16>>> uni;
+};
+
+void glSnap( Renderer * r, GLuint prog, GlSnap & o )
+{
+	auto fn = r->fn;
+	static const GLenum binds[] = { GL_TEXTURE_BINDING_2D, GL_TEXTURE_BINDING_2D_ARRAY, GL_TEXTURE_BINDING_3D,
+		GL_TEXTURE_BINDING_CUBE_MAP, GL_TEXTURE_BINDING_CUBE_MAP_ARRAY, GL_TEXTURE_BINDING_BUFFER, GL_TEXTURE_BINDING_2D_MULTISAMPLE };
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &o.active );
+	GLint units = 0;
+	fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &units );
+	units = std::min( units, 32 );
+	o.tex.clear();
+	for ( int u = 0; u < units; u++ ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+		for ( GLenum b : binds ) {
+			GLint t = 0;
+			fn->glGetIntegerv( b, &t );
+			o.tex.push_back( t );
+		}
+	}
+	fn->glActiveTexture( GLenum( o.active ) );
+	o.uni.clear();
+	GLint n = 0;
+	fn->glGetProgramiv( prog, GL_ACTIVE_UNIFORMS, &n );
+	for ( GLint i = 0; i < n; i++ ) {
+		char name[256];
+		GLsizei len = 0;
+		GLint size = 0;
+		GLenum type = 0;
+		fn->glGetActiveUniform( prog, GLuint( i ), sizeof( name ), &len, &size, &type, name );
+		std::string base( name, size_t( len ) );
+		const bool isArray = base.size() > 3 && base.compare( base.size() - 3, 3, "[0]" ) == 0;
+		if ( isArray )
+			base.resize( base.size() - 3 );
+		const bool isFloat = type == GL_FLOAT || type == GL_FLOAT_VEC2 || type == GL_FLOAT_VEC3 || type == GL_FLOAT_VEC4
+			|| type == GL_FLOAT_MAT2 || type == GL_FLOAT_MAT3 || type == GL_FLOAT_MAT4;
+		for ( GLint k = 0; k < ( isArray ? size : 1 ); k++ ) {
+			const std::string nm = isArray ? base + "[" + std::to_string( k ) + "]" : base;
+			const GLint l = fn->glGetUniformLocation( prog, nm.c_str() );
+			if ( l < 0 )
+				continue;	// a block member: the setters never write a block
+			std::array<GLint, 16> v{};
+			if ( isFloat )
+				fn->glGetUniformfv( prog, l, reinterpret_cast<GLfloat *>( v.data() ) );
+			else
+				fn->glGetUniformiv( prog, l, v.data() );
+			o.uni.emplace_back( nm, v );
+		}
+	}
+}
+
+int glSnapDiff( const GlSnap & a, const GlSnap & b, bool print )
+{
+	int d = ( a.active != b.active ) ? 1 : 0;
+	if ( d && print )
+		std::fprintf( stderr, "setup memo: MISMATCH active texture %d -> %d\n", a.active, b.active );
+	for ( size_t i = 0; i < a.tex.size() && i < b.tex.size(); i++ )
+		if ( a.tex[i] != b.tex[i] ) {
+			d++;
+			if ( print )
+				std::fprintf( stderr, "setup memo: MISMATCH unit %d target %d texture %d -> %d\n", int( i / 7 ), int( i % 7 ), a.tex[i], b.tex[i] );
+		}
+	for ( size_t i = 0; i < a.uni.size() && i < b.uni.size(); i++ )
+		if ( a.uni[i].second != b.uni[i].second ) {
+			d++;
+			if ( print )
+				std::fprintf( stderr, "setup memo: MISMATCH uniform %s\n", a.uni[i].first.c_str() );
+		}
+	if ( a.uni.size() != b.uni.size() || a.tex.size() != b.tex.size() )
+		d++;
+	return d;
+}
+}
+
+void wwSetupMemoArm( bool on )
+{
+	SetupMemo & m = setupMemo();
+	m.epoch++;
+	m.stamps.clear();
+	m.armed = on && m.mode > 0;
+	if ( on && ++m.arms % 300 == 0 )
+		std::fprintf( stderr, "setup memo: mode=%d check=%d passes=%lld kept=%lld ran=%lld checked=%lld mismatches=%lld\n", m.mode,
+			m.check ? 1 : 0, (long long)m.arms, (long long)m.hits, (long long)m.runs, (long long)m.checked, (long long)m.bad );
+}
+
+//! lane PERF1: runs the scene-global setters (all of them, in one call) unless this program already holds this pass's values
+template <typename F> static void wwSceneGlobals( Renderer * r, Scene * scene, int texunit, F run )
+{
+	SetupMemo & m = setupMemo();
+	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
+	// a shape that bound a texture on a dedicated unit (10 and up) must have the setters bind theirs back
+	const bool can = m.armed && prog && texunit < WwCellUnit::Shadow;
+	if ( can ) {
+		auto it = m.stamps.find( prog );
+		if ( it != m.stamps.end() && it->second.first == scene && it->second.second == m.epoch ) {
+			m.hits++;
+			if ( !m.check )
+				return;
+			GlSnap a, b;
+			glSnap( r, prog->id, a );
+			run();
+			glSnap( r, prog->id, b );
+			m.checked++;
+			m.bad += glSnapDiff( a, b, m.bad < 20 );
+			return;
+		}
+	}
+	m.runs++;
+	run();
+	if ( can ) {
+		if ( m.mode == 1 )
+			m.stamps.clear();
+		m.stamps[prog] = { scene, m.epoch };
+	}
+}
 
 
 //! @file renderer.cpp Renderer and child classes implementation
@@ -1357,9 +1509,11 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 			prog->uni3f_l( prog->uniLocation( "lookdevDalc[%d]", a ), dalc[a][0], dalc[a][1], dalc[a][2] );
 		prog->uni1b( "lookdevDalcFlip", wwLookdevRed( "dalcflip" ) );
 	}
-	wwLookdevFogUniforms( scene );	// lane FOG1: fogOn is false outside Lookdev
-	wwSunShadowUniforms( scene );	// lane CSM1: a no-op unless this is pbrm_csm.prog
-	wwCellLightsUniforms( scene );	// lane PRTPGI: a no-op unless this is pbrm_cell.prog
+	wwSceneGlobals( this, scene, texunit, [scene]() {	// lane PERF1: once per program and pass
+		wwLookdevFogUniforms( scene );	// lane FOG1: fogOn is false outside Lookdev
+		wwSunShadowUniforms( scene );	// lane CSM1: a no-op unless this is pbrm_csm.prog
+		wwCellLightsUniforms( scene );	// lane PRTPGI: a no-op unless this is pbrm_cell.prog
+	} );
 	if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
 		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
@@ -1984,11 +2138,13 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	glDepthMask( !mesh->depthWrite || mesh->translucent ? GL_FALSE : GL_TRUE );
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
-	wwLookdevFogUniforms( scene );	// lane FOG1: fo4_default reads it; fogOn is false outside Lookdev
-	wwCellLightsUniforms( scene );	// lane PRTP3: a no-op unless this is fo4_cell.prog
+	wwSceneGlobals( this, scene, texunit, [scene]() {	// lane PERF1: once per program and pass
+		wwLookdevFogUniforms( scene );	// lane FOG1: fo4_default reads it; fogOn is false outside Lookdev
+		wwCellLightsUniforms( scene );	// lane PRTP3: a no-op unless this is fo4_cell.prog
+		wwSunShadowUniforms( scene );	// lane SUNCELL1: a no-op unless this is a cascade program (fo4_cellcsm, fo4_csm, fo4_fogcsm)
+	} );
 	if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
 		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
-	wwSunShadowUniforms( scene );	// lane SUNCELL1: a no-op unless this is a cascade program (fo4_cellcsm, fo4_csm, fo4_fogcsm)
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 	if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 		// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)

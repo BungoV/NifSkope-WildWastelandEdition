@@ -1,6 +1,7 @@
 /*! Lane SUNCELL1: the cell view's per-placement culling (see cellcull.h). */
 #include "cellcull.h"
 
+#include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellumbra.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -49,6 +50,23 @@ struct ViewBox
 	int type = 1;
 };
 
+/*! lane PERF1: one occluder quad's planes, built once a frame: the quad's own plane (n, d; the camera's side
+ *  negative) and the four through the camera and its edges. `never`: the camera on its plane or a degenerate
+ *  edge, so it hides nothing. The per-run test was rebuilding them for every run (240k runs x 20 occluders). */
+struct OccQuad
+{
+	Vector3 n, e[4];
+	float d = 0.0f;
+	bool never = false;
+};
+
+//! lane PERF1: an occluder's quads the camera sees (a plane: its one quad; a box: its faces turned to the camera)
+struct OccFaces
+{
+	OccQuad q[6];
+	int n = 0;
+};
+
 //! lane SUNCELL1: the previs scene in this frame's view space, with the rooms the camera reaches
 struct PrevisCache
 {
@@ -56,6 +74,7 @@ struct PrevisCache
 	std::uint64_t frame = ~std::uint64_t( 0 );
 	bool valid = false;
 	std::vector<ViewBox> occ, rooms;
+	std::vector<OccFaces> occF;	// lane PERF1: occ's quads' planes, once a frame
 	std::vector<char> roomSeen;
 	bool roomsActive = false;
 	int roomsSeen = 0, portalsPassed = 0;
@@ -237,6 +256,86 @@ bool occluderHides( const ViewBox & o, const Vector3 & s, float r )
 	return false;
 }
 
+//! lane PERF1: quadHides' planes, which depend on the quad alone (the same arithmetic, hoisted out of the run loop)
+OccQuad quadPlanes( const Vector3 & c, const Vector3 & n0, const Vector3 & u, float hu, const Vector3 & w, float hw )
+{
+	OccQuad q;
+	Vector3 n = n0;
+	float d = Vector3::dotproduct( n, c );
+	if ( d < 0.0f ) {
+		n = -n;
+		d = -d;
+	}
+	q.n = n;
+	q.d = d;
+	if ( d < 1.0f ) {
+		q.never = true;	// the camera on the occluder's plane
+		return q;
+	}
+	const Vector3 p[4] = { c + u * hu + w * hw, c - u * hu + w * hw, c - u * hu - w * hw, c + u * hu - w * hw };
+	for ( int i = 0; i < 4; i++ ) {
+		Vector3 e = Vector3::crossproduct( p[i], p[( i + 1 ) & 3] );
+		const float l = e.length();
+		if ( l <= 0.0f ) {
+			q.never = true;
+			return q;
+		}
+		e /= l;
+		if ( Vector3::dotproduct( e, c ) < 0.0f )
+			e = -e;
+		q.e[i] = e;
+	}
+	return q;
+}
+
+OccFaces occluderFaces( const ViewBox & o )
+{
+	OccFaces f;
+	if ( o.type == 3 ) {
+		int m = 0;
+		for ( int k = 1; k < 3; k++ )
+			if ( o.half[k] < o.half[m] )
+				m = k;
+		const int i = ( m + 1 ) % 3, j = ( m + 2 ) % 3;
+		f.q[f.n++] = quadPlanes( o.c, o.ax[m], o.ax[i], o.half[i], o.ax[j], o.half[j] );
+		return f;
+	}
+	if ( inBox( o, Vector3( 0.0f, 0.0f, 0.0f ), 0.0f ) )
+		return f;
+	for ( int k = 0; k < 3; k++ )
+		for ( int sg = -1; sg <= 1; sg += 2 ) {
+			const Vector3 nk = o.ax[k] * float( sg );
+			const Vector3 fc = o.c + nk * o.half[k];
+			if ( Vector3::dotproduct( nk, fc ) >= 0.0f )
+				continue;	// a face turned away from the camera
+			const int i = ( k + 1 ) % 3, j = ( k + 2 ) % 3;
+			f.q[f.n++] = quadPlanes( fc, nk, o.ax[i], o.half[i], o.ax[j], o.half[j] );
+		}
+	return f;
+}
+
+bool occFacesHide( const OccFaces & f, const Vector3 & s, float r )
+{
+	for ( int k = 0; k < f.n; k++ ) {
+		const OccQuad & q = f.q[k];
+		if ( q.never || Vector3::dotproduct( q.n, s ) - q.d <= r )
+			continue;
+		bool hides = true;
+		for ( int i = 0; i < 4 && hides; i++ )
+			hides = !( Vector3::dotproduct( q.e[i], s ) < r );
+		if ( hides )
+			return true;
+	}
+	return false;
+}
+
+//! WW_CELL_PREVIS_RED=perrun: the occluders' planes rebuilt for every run, as before lane PERF1 (the gate's red)
+bool previsPlanesPerRun()
+{
+	static const bool v = qgetenv( "WW_CELL_PREVIS_RED" ).trimmed() == "perrun";
+	return v;
+}
+
 //! the camera's four side planes in view space (Gribb-Hartmann from the column-major projection), normalised
 void cameraPlanes( Scene * scene, float pl[4][4] )
 {
@@ -285,6 +384,7 @@ void previsBuild( CullState & s, Scene * scene, const float pl[4][4] )
 	const Transform & view = scene->view;
 	for ( const WwPrevisBox & b : sc.occluders ) {
 		pc.occ.push_back( toView( view, b ) );
+		pc.occF.push_back( occluderFaces( pc.occ.back() ) );
 		pc.occRef.push_back( b.ref );
 	}
 	pc.occHits.assign( pc.occ.size(), 0 );
@@ -351,8 +451,9 @@ int previsHidden( const PrevisCache & pc, const Vector3 & v, float r )
 				return 2;
 		}
 	}
+	const bool perRun = previsPlanesPerRun();
 	for ( size_t i = 0; i < pc.occ.size(); i++ )
-		if ( occluderHides( pc.occ[i], v, r ) ) {
+		if ( perRun ? occluderHides( pc.occ[i], v, r ) : occFacesHide( pc.occF[i], v, r ) ) {
 			pc.occHits[i]++;
 			return 1;
 		}
@@ -778,6 +879,13 @@ void wwCellCullShape( const void * nif, int block, std::vector<WwCullRun> && run
 	st().docs[nif].insert( block, std::move( runs ) );
 }
 
+void wwCellCullForget( const void * nif, int block )
+{
+	auto d = st().docs.find( nif );
+	if ( d != st().docs.end() )
+		d->remove( block );
+}
+
 const std::vector<WwCullRun> * wwCellCullRuns( const void * nif, int block )
 {
 	CullState & s = st();
@@ -810,6 +918,7 @@ int wwCellCullRed()
 bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t numTris,
 	std::vector<std::uint32_t> & out )
 {
+	PassTime::CpuScope pt( PassTime::CullCamera );	// lane PERF1
 	CullState & s = st();
 	if ( !scene || !sh || !scene->renderer || numTris <= 0 || s.docs.isEmpty() || s.probing )
 		return false;	// lane UMBRA1: the depth probe draws everything and counts nothing
@@ -889,6 +998,7 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 bool wwCellCullCaster( Scene * scene, const Shape * sh, int block, int cascade, const float * m,
 	std::vector<std::uint32_t> & out )
 {
+	PassTime::CpuScope pt( PassTime::CullCascades );	// lane PERF1
 	CullState & s = st();
 	/* lane SUNCELL1: casters always cast -- the Previs row never reaches this pass. Its red control `casters`
 	 * hides the casters the camera pass found occluded or roomed off (this frame's camera view, or none). */

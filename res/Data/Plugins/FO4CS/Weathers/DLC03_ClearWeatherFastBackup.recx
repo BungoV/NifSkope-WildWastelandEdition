@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DLC03_ClearWeatherFastBackup",
+			"weather": "DLCCoast.esm|0x00056638",
+			"groundFog": {
+				"thickness": 561,
+				"strength": 2.37,
+				"hours": {
+					"2": {
+						"thickness": 827,
+						"strength": 6.45
+					},
+					"14": {
+						"thickness": 561,
+						"strength": 2.37
+					}
+				}
+			}
+		}
+	]
+}

@@ -120,6 +120,8 @@ public:
 		GLuint	id[2];
 		//! Detailed information about the image file
 		ImageInfo *	imageInfo;
+		//! lane CELLSTREAM1: the use clock when last bound (see evictUnused)
+		std::uint32_t	useTick;
 
 		inline Tex()
 		{
@@ -130,6 +132,7 @@ public:
 			id[0] = 0;
 			id[1] = 0;
 			imageInfo = nullptr;
+			useTick = 0;
 		}
 
 		inline QStringView filename() const
@@ -200,11 +203,13 @@ protected:
 	std::uint32_t textureCount;
 	NifSkopeOpenGLContext::GLFunctions * fn;
 	QHash<QModelIndex, Tex> embedTextures;
+	std::uint32_t useTick = 0;
 
 	template< typename T > inline Tex * insertTex( const T & file );
 	Tex * rehashTextures( Tex * p = nullptr );
 	//! Load the texture
 	std::uint16_t loadTex( Tex & tx, const NifModel * nif );
+	bool draining = false;	// lane PERF1: loadTex is uploading the read-ahead's ready files
 
 public:
 	void setOpenGLContext( NifSkopeOpenGLContext * context );
@@ -212,6 +217,10 @@ public:
 	const Tex::ImageInfo * getTextureInfo( const QStringView & file ) const;
 	//! lane PRTP5: textures asked for since the last flush, and those of them that did not load
 	void wwAskedAndMissing( int & asked, int & missing, QStringList * names = nullptr ) const;
+	//! lane CELLSTREAM1: the clock bind() stamps a file texture with; the streamed cell view sets it in seconds
+	void setUseTick( std::uint32_t t ) { useTick = t; }
+	//! lane CELLSTREAM1: frees the GL textures of files last bound before tick (they load again when next bound)
+	int evictUnused( std::uint32_t tick );
 
 	// returns true if the settings have changed
 	static bool loadSettings( QSettings & settings );

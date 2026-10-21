@@ -4,6 +4,13 @@
 #ifdef WW_FOG
 #include "lookdev_fog.glsl"
 #endif
+// FOGSUN1: the sun through the air; a variant without the fog compiled in (fo4_default, fo4_csm) has no air between
+// the surface and the sun (lane VOLAIR1 10-15: calling wwVolAirSunT there broke both programs; the shader guard found it)
+#ifdef WW_FOG
+#define WW_AIR_SUN_T( p ) wwVolAirSunT( p )
+#else
+#define WW_AIR_SUN_T( p ) 1.0
+#endif
 #ifdef WW_SUNSHADOW
 // lane SUNCELL1: the cascades (fo4_cellcsm, fo4_csm, fo4_fogcsm); the loader takes nothing after an include's quote
 #include "ww_sunshadow.glsl"
@@ -278,11 +285,19 @@ void main()
 	/* lane SUNCELL1: the cascades on the SUN only (CSM1 spec 2.8). Every D.rgb below is the sun: D = sqrt(the
 	 * linear sun), so D x sqrt(f) is the sun x f in the linear light the tonemap squares back. The macro takes
 	 * every later D; tonemap() above still reads the varying (D.a only, unchanged). */
-	float csmF = wwSunShadow( -ViewDir );
+	float csmF = wwSunShadow( -ViewDir ) * WW_AIR_SUN_T( -ViewDir );	// FOGSUN1: and the air's transmittance
 	vec4 Dcsm = vec4( D.rgb * sqrt( csmF ), D.a );
 #define D Dcsm
 #ifdef WW_CELLLIGHTS
 	cellDirVis = csmF;	// the exterior cell sun (cellLit) takes the same cascades
+#endif
+#else
+	// FOGSUN1: no cascades compiled in; the sun still crosses the air
+	float airSunT = WW_AIR_SUN_T( -ViewDir );
+	vec4 Dair = vec4( D.rgb * sqrt( airSunT ), D.a );
+#define D Dair
+#ifdef WW_CELLLIGHTS
+	cellDirVis = airSunT;
 #endif
 #endif
 
@@ -444,6 +459,12 @@ void main()
 	}
 	if ( !gl_FrontFacing )
 		normal *= -1.0;
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && cellProbe == 20 && cellAoEarly == 1 ) {	// lane PERF1: the obscurance pass reads the normal and depth only
+		fragColor = cellAoPassOut( normal, -ViewDir );
+		return;
+	}
+#endif
 
 	vec3 L = normalize(LightDir);
 	vec3 V = ViewDir_norm;
@@ -720,8 +741,11 @@ void main()
 		fragColor = vec4( csmProbeOut, 1.0 );
 #endif
 #ifdef WW_CELLLIGHTS
-	if ( cellOn && cellProbe == 20 )
+	if ( cellOn && cellProbe == 20 ) {
 		fragColor = cellAoPassOut( normal, -ViewDir );	// lane AO1
+		if ( cellAoEarly == 2 )
+			fragColor.w *= 1.001;	// lane PERF1 red: full shading runs (the old cost), and the gate must see the mark
+	}
 	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
 		fragColor = cellSsrProbeOut( cellSsrScene );	// lane SSR1
 #endif

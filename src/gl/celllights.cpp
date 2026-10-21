@@ -7,7 +7,8 @@ BSD License - see nifskope.h
 #include "celllights.h"
 
 #include "gl/cellssr.h"
-#include "gl/cellvolfog.h"	// lane VOLFOG1
+#include "gl/cellvolair.h"	// lane VOLAIR1
+#include "gl/shadowset.h"	// lane TERRSHADOW1
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -27,24 +28,25 @@ BSD License - see nifskope.h
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include "cellunits.h"
 #include <cstring>
 #include <vector>
 
 namespace
 {
 
-constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 is the CSM map
+constexpr int kTextureUnit = WwCellUnit::Lights;		// TexCache allocates from unit 0 upward; 15 is the CSM map
 constexpr int kTexelsPerLight = 8;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias;
 										// lane HEMI1 the 6th to 8th: the box rows (cell_lights.glsl CELL_TPL)
-constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
-constexpr int kGiSlotUnit = 18;		// lane ROOMCLAMP1: the grid's slot rooms, the fine rooms (sampler3D, R32F); off
-constexpr int kRoomUnit = 19;		// on a GPU with fewer than 20 units (the blend before the lane)
-constexpr int kFarSlotUnit = 20;	// lane FARVIEW1: the far table's slots (usamplerBuffer), records (samplerBuffer) and the
-constexpr int kFarRecUnit = 21;		// GI grid's placed share (sampler3D); off on a GPU with fewer than 23 units
-constexpr int kFarPlacedUnit = 22;
-constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
-constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
-constexpr int kShadowUnit = 10;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
+constexpr int kGiUnit = WwCellUnit::Gi;			// lane PRTPGI: the bounce grid (sampler3D)
+constexpr int kGiSlotUnit = WwCellUnit::GiSlot;		// lane ROOMCLAMP1: the grid's slot rooms, the fine rooms (sampler3D, R32F); off
+constexpr int kRoomUnit = WwCellUnit::Room;		// on a GPU with fewer than 20 units (the blend before the lane)
+constexpr int kFarSlotUnit = WwCellUnit::FarSlot;	// lane FARVIEW1: the far table's slots (usamplerBuffer), records (samplerBuffer) and the
+constexpr int kFarRecUnit = WwCellUnit::FarRec;		// GI grid's placed share (sampler3D); off on a GPU without FarPlaced (cellunits.h)
+constexpr int kFarPlacedUnit = WwCellUnit::FarPlaced;
+constexpr int kLutUnit = WwCellUnit::Lut;		// lane IMGS1: the imagespace LUT (sampler3D)
+constexpr int kBloomUnit = WwCellUnit::Bloom;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
+constexpr int kShadowUnit = WwCellUnit::Shadow;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
 constexpr int kShadowSlots = 16;	// shadowed lights at once, the nearest the camera
 constexpr int kShadowFace = 512;	// texels a cube face edge (the game's 2048 paraboloid's centre texel at 1024)
 constexpr int kAmbientSlots = 16;	// lane AMBO2: Ambient Only volumes a cell (Fallout4.esm's most in one cell: 5, measured)
@@ -197,6 +199,7 @@ ClState & st()
 struct Gpu
 {
 	GLuint buf = 0, tex = 0;
+	bool texAttached = false;	// lane PERF1: the buffer texture keeps its buffer across glBufferData; attached once
 	const void * doc = nullptr;
 	int version = 0;
 	int count = 0;
@@ -226,6 +229,7 @@ struct Gpu
 	int shVersion = 0;
 	int shSlot[kShadowSlots];
 	int shStamp = 1, bufShStamp = 0;
+	std::vector<float> spheres;	// lane VOLAIR1: every buffer light's world centre + radius (copies included), in order
 	Gpu() { std::fill( shSlot, shSlot + kShadowSlots, -1 ); }
 };
 QHash<const void *, Gpu> & gpus()
@@ -463,6 +467,7 @@ int wwCellFarDotsDraw( Scene * scene )
 	prog->uni1f( "dotFocal", pm[1][1] * 0.5f * float( vp[3] ) );
 	prog->uni1f( "dotBulb", 4.0f );	// a bulb's radius, game units (a household bulb is ~3-5)
 	prog->uni1i( "dotRed", 0 );
+	wwLookdevFogUniforms( scene );	// lane VOLAIR1: the air between the bulb and the camera (cell_fardots.frag)
 	GLboolean depthMask = GL_TRUE;
 	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
 	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasCull = fn->glIsEnabled( GL_CULL_FACE );
@@ -564,6 +569,57 @@ int wwCellPassRed()
 	return st().passRed;
 }
 
+/* lane PERF1: the GI's visibility (WW_CELL_GI_VIS, read once): 0 the volumes (the default), 1 march (red: the per-pixel
+ * chain as before, compiled in by src/gl/glcontext.cpp's WW_CELL_GI_MARCH, no screen pass) */
+int wwCellGiVis()
+{
+	static const int mode = [] {
+		const QByteArray v = qgetenv( "WW_CELL_GI_VIS" ).trimmed().toLower();
+		if ( v == "march" || v == "red" || v == "old" )
+			return 1;
+		// a red of the march's own rules (WW_CELL_PV_RED) restores the march: the volumes have none of those rules
+		for ( const QByteArray & r : qgetenv( "WW_CELL_PV_RED" ).split( ',' ) ) {
+			const QByteArray t = r.trimmed().toLower();
+			if ( t == "noclamp" || t == "nosee" || t == "borrow" || t == "lendamb" || t == "strand" || t == "firstslot"
+				|| t == "tiepick" || t == "lonesky" || t == "nolastfill" )
+				return 1;
+		}
+		return 0;
+	}();
+	return mode;
+}
+
+/* lane PERF1: the GI's rate (WW_CELL_GI_RATE, read once): 0 half (the default: the screen GI at half resolution,
+ * upsampled by depth and normal), 1 full (the screen GI at full resolution), 2 inline (no screen pass: every surface
+ * reads the volumes itself), 3 red (the screen pass runs, the surfaces read inline: the inline picture at its cost plus
+ * the pass) */
+int wwCellGiRate()
+{
+	static const int mode = [] {
+		const QByteArray v = qgetenv( "WW_CELL_GI_RATE" ).trimmed().toLower();
+		return v == "full" ? 1 : v == "inline" || v == "old" || v == "0" ? 2 : v == "red" ? 3 : 0;
+	}();
+	return mode;
+}
+
+namespace
+{
+/* lane PERF1: the telemetry lines in wwCellLightsUniforms are formatted only when their inputs' bytes change; the
+ * formatting ran for every shape and was most of the function's time. The line printed, and when, is unchanged:
+ * a changed input still formats the line and compares it with the last one printed. */
+struct InputsLast
+{
+	QByteArray last;
+	bool changed( const void * p, size_t n )
+	{
+		if ( size_t( last.size() ) == n && std::memcmp( last.constData(), p, n ) == 0 )
+			return false;
+		last = QByteArray( static_cast<const char *>( p ), qsizetype( n ) );
+		return true;
+	}
+};
+}
+
 void wwCellLightsUniforms( Scene * scene )
 {
 	if ( !scene || !scene->renderer )
@@ -617,6 +673,9 @@ void wwCellLightsUniforms( Scene * scene )
 				t.insert( t.end(), t.begin(), t.begin() + std::ptrdiff_t( one ) );
 		}
 		g.bufShStamp = g.shStamp;
+		g.spheres.clear();
+		for ( size_t o = 0; o + 4 <= t.size(); o += kTexelsPerLight * 4 )
+			g.spheres.insert( g.spheres.end(), t.begin() + std::ptrdiff_t( o ), t.begin() + std::ptrdiff_t( o + 4 ) );
 		if ( t.empty() )
 			t.assign( kTexelsPerLight * 4, 0.0f );	// a buffer texture must have a store
 		if ( !g.buf ) {
@@ -637,7 +696,10 @@ void wwCellLightsUniforms( Scene * scene )
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTextureUnit ) );
 	if ( g.tex && g.buf ) {
 		fn->glBindTexture( GL_TEXTURE_BUFFER, g.tex );
-		fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.buf );
+		if ( !g.texAttached ) {
+			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.buf );
+			g.texAttached = true;
+		}
 	} else {
 		fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
 	}
@@ -691,9 +753,18 @@ void wwCellLightsUniforms( Scene * scene )
 		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
 		g.units = units;
 	}
+	{	// lane PERF1: the screen GI's samplers (wwCellAoDraw binds them per draw; never left on unit 0); the volume read's
+		// loop bound (a uniform: the loop stays one body in every program)
+		const bool fits = g.units > WwCellUnit::GiHalfKey;
+		const int u = fits ? WwCellUnit::GiHalf : g.units > WwCellUnit::Ao ? WwCellUnit::Ao : 9;
+		prog->uni1i( "cellGiHalf", u );
+		prog->uni1i( "cellGiHalfKey", fits ? WwCellUnit::GiHalfKey : u );
+		prog->uni1i( "cellGiLoop8", 8 );
+		prog->uni1b( "cellGiHalfOn", false );	// wwCellAoDraw turns it on, per draw, after this
+	}
 	const bool roomsUp = giDraw && !G->slotRooms.empty() && !G->rooms.empty() && g.units > kRoomUnit;
 	if ( roomsUp && ( g.roomDoc != scene->nifModel || g.roomVersion != s.giVersion.value( scene->nifModel ) ) ) {
-		auto up3 = [&]( GLuint & tex, int unit, const int * d, const std::vector<float> & v ) {
+		auto up3 = [&]( GLuint & tex, int unit, const int * d, const std::vector<float> & v, bool rgba ) {
 			if ( !tex )
 				fn->glGenTextures( 1, &tex );
 			fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
@@ -704,10 +775,22 @@ void wwCellLightsUniforms( Scene * scene )
 			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
 			fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
-			fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R32F, d[0], d[1], d[2], 0, GL_RED, GL_FLOAT, v.data() );
+			fn->glTexImage3D( GL_TEXTURE_3D, 0, rgba ? GL_RGBA32F : GL_R32F, d[0], d[1], d[2], 0, rgba ? GL_RGBA : GL_RED,
+				GL_FLOAT, v.data() );
 		};
-		up3( g.slotTex, kGiSlotUnit, G->dims, G->slotRooms );
-		up3( g.roomTex, kRoomUnit, G->roomsDims, G->rooms );
+		// lane PERF1: with the volumes, the slots' thresholds in g, b, a (the packed rooms across, slot 0's, slot 1's weight)
+		if ( wwCellGiVis() == 0 && G->slotThresh.size() == G->slotRooms.size() * 3 ) {
+			std::vector<float> v( G->slotRooms.size() * 4 );
+			for ( size_t i = 0; i < G->slotRooms.size(); i++ ) {
+				v[i * 4] = G->slotRooms[i];
+				for ( int c = 0; c < 3; c++ )
+					v[i * 4 + 1 + size_t( c )] = G->slotThresh[i * 3 + size_t( c )];
+			}
+			up3( g.slotTex, kGiSlotUnit, G->dims, v, true );
+		} else {
+			up3( g.slotTex, kGiSlotUnit, G->dims, G->slotRooms, false );
+		}
+		up3( g.roomTex, kRoomUnit, G->roomsDims, G->rooms, false );
 		g.roomDoc = scene->nifModel;
 		g.roomVersion = s.giVersion.value( scene->nifModel );
 	}
@@ -945,7 +1028,11 @@ void wwCellLightsUniforms( Scene * scene )
 	 * the game's ratio; the cell imagespace's exposure (adapted luminance) takes the brighter frame. 1 indoors. */
 	const float sunScale = ( !L->interior && wwLookdevActive() ) ? wwLookdevSunlightScale() : 1.0f;
 	prog->uni1f( "cellSunScale", sunScale );
-	if ( !L->interior && wwLookdevActive() && ( wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) ) ) {
+	/* lane VOLAIR1 (LAMPAIR1): the air takes the surfaces' exterior sun and sky (the weather's light x Sunlight Scale,
+	 * its DALC) so it is lit by the light the records give, not the fog-sun glare colour; red WW_CELL_AIR_RED=oldsun */
+	static const bool airOldSun = qEnvironmentVariable( "WW_CELL_AIR_RED" ).split( ',' ).contains( QStringLiteral( "oldsun" ) );
+	const bool extProg = wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) || ( prog->name == "cell_volair.prog" && !airOldSun );
+	if ( !L->interior && wwLookdevActive() && extProg ) {
 		float dalc[6][3], dif[4] = {}, amb[4] = {};
 		if ( wwLookdevDalc( dalc ) ) {
 			wwLookdevLight( dirTo, dif, amb );
@@ -955,7 +1042,10 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 		// telemetry: what the exterior sun uploaded (or why not), once per change
 		static QString sunLast;
-		const QString line = hasDir
+		static InputsLast sunIn;
+		const float sunKey[9] = { hasDir ? 1.0f : 0.0f, dirTo[0], dirTo[1], dirTo[2], dirColor[0], dirColor[1], dirColor[2],
+			prog->uniLocation( "csmMap" ) >= 0 ? 1.0f : 0.0f, sunScale };
+		const QString line = !sunIn.changed( sunKey, sizeof( sunKey ) ) ? sunLast : hasDir
 			? QStringLiteral( "cell sun: exterior directional=weather to=%1,%2,%3 color=%4,%5,%6 (linear) shadows=%7 sunlight scale=%8" )
 				.arg( double( dirTo[0] ), 0, 'f', 5 ).arg( double( dirTo[1] ), 0, 'f', 5 ).arg( double( dirTo[2] ), 0, 'f', 5 )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
@@ -1019,7 +1109,10 @@ void wwCellLightsUniforms( Scene * scene )
 				dirColor[c] = std::max( fxCol[c], 0.0f ) * fxScale;
 			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
 			static QString fxSunLast;
-			const QString line = QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (%10 %4,%5,%6 x %7; "
+			static InputsLast fxSunIn;
+			const float fxKey[11] = { dirColor[0], dirColor[1], dirColor[2], fxCol[0], fxCol[1], fxCol[2], fxScale, isScale,
+				haveIs ? 1.0f : 0.0f, sunScale, ( fxScaleRed ? 1.0f : 0.0f ) + ( fxColorRed ? 2.0f : 0.0f ) };
+			const QString line = !fxSunIn.changed( fxKey, sizeof( fxKey ) ) ? fxSunLast : QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (%10 %4,%5,%6 x %7; "
 					"imagespace Sunlight Scale %8%9, surfaces' sun scale %11)" )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
 				.arg( double( fxCol[0] ), 0, 'f', 5 ).arg( double( fxCol[1] ), 0, 'f', 5 ).arg( double( fxCol[2] ), 0, 'f', 5 )
@@ -1069,7 +1162,7 @@ void wwCellLightsUniforms( Scene * scene )
 	 * weather's sun (the exterior branch of cellLit). Red WW_CELL_EXTAMB_RED=flat keeps the flat NAM0 Ambient;
 	 * =flip swaps the axis convention. */
 	bool extDalc = false;
-	if ( !L->interior && hasDir && wwLookdevActive() && ( wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) ) ) {
+	if ( !L->interior && hasDir && wwLookdevActive() && extProg ) {
 		static const QByteArray extRed = qgetenv( "WW_CELL_EXTAMB_RED" ).trimmed();
 		float w[6][3];
 		if ( extRed != "flat" && wwLookdevDalc( w ) ) {
@@ -1088,7 +1181,11 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 			extDalc = true;
 			static QString ambLast;
-			const QString line = QStringLiteral( "cell ambient: exterior=weather DALC up=%1,%2,%3 down=%4,%5,%6 (byte/255)%7" )
+			static InputsLast ambIn;
+			float ambKey[19];
+			std::memcpy( ambKey, g, sizeof( g ) );
+			ambKey[18] = flip ? 1.0f : 0.0f;
+			const QString line = !ambIn.changed( ambKey, sizeof( ambKey ) ) ? ambLast : QStringLiteral( "cell ambient: exterior=weather DALC up=%1,%2,%3 down=%4,%5,%6 (byte/255)%7" )
 				.arg( double( flip ? g[4][0] : g[5][0] ), 0, 'f', 4 ).arg( double( flip ? g[4][1] : g[5][1] ), 0, 'f', 4 )
 				.arg( double( flip ? g[4][2] : g[5][2] ), 0, 'f', 4 ).arg( double( flip ? g[5][0] : g[4][0] ), 0, 'f', 4 )
 				.arg( double( flip ? g[5][1] : g[4][1] ), 0, 'f', 4 ).arg( double( flip ? g[5][2] : g[4][2] ), 0, 'f', 4 )
@@ -1280,6 +1377,11 @@ int wwCellFxRed()
 	return red;
 }
 
+float wwCellImageSpaceAdapted( Scene * scene )
+{
+	return scene && scene->nifModel ? st().adapted.value( scene->nifModel, -1.0f ) : -1.0f;
+}
+
 void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels )
 {
 	if ( !scene || !scene->nifModel )
@@ -1436,7 +1538,7 @@ QString wwCellLightsEcho( Scene * scene )
 		o += QStringLiteral( " pass=%1(asked=%2 %3, sky=%4, pvred=%5)" ).arg( scene ? wwCellPassFor( scene->nifModel ) : 0 )
 			.arg( s.pass ).arg( wwCellPassNames().value( s.pass ) ).arg( G && !G->sky.empty() ? 1 : 0 ).arg( s.passRed );
 	return o + QLatin1Char( ' ' ) + wwCellShadowEcho( scene )
-		+ ( wwVolFogOn() ? QStringLiteral( " " ) + wwVolFogSummary() : QString() );	// lane VOLFOG1
+		+ ( wwVolAirOn() ? QStringLiteral( " " ) + wwVolAirSummary() : QString() );	// lane VOLAIR1
 }
 
 //! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change (the gate's light list)
@@ -1737,7 +1839,7 @@ QString wwCellShadowEcho( Scene * scene )
 namespace
 {
 
-constexpr int kAoUnit = 16;			// the obscurance (sampler2D, half the view); 9 on a GPU with only 16 units
+constexpr int kAoUnit = WwCellUnit::Ao;			// the obscurance (sampler2D, half the view); 9 on a GPU with only 16 units
 constexpr int kAoAngles = 8;		// a still view's mean over the game's per-frame angle in [0, pi)
 constexpr float kAoRadius = 108.2f, kAoBias = 0.6f, kAoIntensity = 7.1f;	// the game's INI defaults, game units
 
@@ -1784,7 +1886,17 @@ struct AoGpu
 	bool aoReady = false;	// lane AOOFF1: and the obscurance computed from it (false while the AO row is off)
 	int unit = -1;
 	GLuint decal = 0;		// lane AODECAL1: this frame's AO decal target (0: none)
-	int decalUnit = -1;		// 20, or -1 on a GPU with 20 units or fewer
+	int decalUnit = -1;		// WwCellUnit::AoDecal, or -1 on a GPU without it (lane VOLAIR1: was 20, under the far slots)
+	AoTarget giHalf;		// lane PERF1: the screen GI (RGBA32F), its key on the same FBO's attachment 1
+	GLuint giKey = 0;
+	int giKeyW = 0, giKeyH = 0;
+	int giStep = 2;			// 2 half resolution, 1 full
+	bool giReady = false;	// this frame's screen GI
+	bool volOn = false;		// this frame's volumes' mask was drawn
+	AoTarget volMask;		// lane PERF1: full size, the pixel's interior volume's room + 1 (R32F; 0 none)
+	GLuint volBuf = 0, volTex = 0, volVao = 0;	// the shapes, 3 RGBA32F texels each (a buffer texture)
+	std::vector<float> volData;	// what volBuf holds
+	bool giUnits = false;	// the GPU has WwCellUnit::GiHalfKey
 };
 
 QHash<const void *, AoGpu> & aoGpus()
@@ -1830,7 +1942,208 @@ void aoUnits( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g )
 	GLint units = 0;
 	fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
 	g.unit = units > kAoUnit ? kAoUnit : 9;
-	g.decalUnit = units > 20 ? 20 : -1;
+	g.decalUnit = units > WwCellUnit::AoDecal ? WwCellUnit::AoDecal : -1;
+	g.giUnits = units > WwCellUnit::GiHalfKey;
+}
+
+//! lane PERF1: the half-res GI's telemetry line, printed when it changes
+void giEcho( const QString & line )
+{
+	static QString last;
+	if ( line == last )
+		return;
+	last = line;
+	std::fprintf( stderr, "cell gi rate: %s\n", qPrintable( line ) );
+}
+
+/* lane PERF1: the GI volume mask (the Division deck's D4: the volumes drawn into the stencil). Each interior shape's
+ * hull, grown by the bias, back faces only, depth-tested against the shared opaque pass (a hull wholly in front of the
+ * surface draws nothing); cell_givol.frag tests the surface's point a bias in front against the shape and writes its
+ * room + 1, blended by max. The outdoors draws nothing (0). False: no mask this frame. */
+bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, float p00, float p11 )
+{
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	const int n = G ? int( G->volShapes.size() / 12 ) : 0;
+	if ( n <= 0 || !g.gbufDepth )
+		return false;
+	if ( !g.volBuf ) {
+		fn->glGenBuffers( 1, &g.volBuf );
+		fn->glGenTextures( 1, &g.volTex );
+		fn->glGenVertexArrays( 1, &g.volVao );
+		g.volData.clear();
+	}
+	if ( g.volData != G->volShapes ) {
+		fn->glBindBuffer( GL_TEXTURE_BUFFER, g.volBuf );
+		fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( G->volShapes.size() * sizeof( float ) ), G->volShapes.data(), GL_STATIC_DRAW );
+		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
+		g.volData = G->volShapes;
+	}
+	aoAlloc( fn, g.volMask, W, H, GL_R32F, GL_RED, false );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.volMask.fbo );
+	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
+	const GLenum one = GL_COLOR_ATTACHMENT0;
+	fn->glDrawBuffers( 1, &one );
+	if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
+		return false;
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_givol.prog" );
+	if ( !prog )
+		return false;
+	fn->glViewport( 0, 0, W, H );
+	const GLfloat zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	fn->glClearBufferfv( GL_COLOR, 0, zero );
+	// world -> clip (the projection after posView = sc R world + t), and view -> world (cell_lights.glsl cellRow)
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	const auto & pm = r->globalUniforms->projectionMatrix;
+	for ( int row = 0; row < 4; row++ ) {
+		double e[4] = { 0, 0, 0, double( pm[3][row] ) };
+		for ( int i = 0; i < 3; i++ ) {
+			for ( int j = 0; j < 3; j++ )
+				e[j] += double( pm[i][row] ) * double( vt.rotation( i, j ) ) * double( sc );
+			e[3] += double( pm[i][row] ) * double( vt.translation[i] );
+		}
+		prog->uni4f_l( prog->uniLocation( "volClip[%d]", row ), FloatVector4( float( e[0] ), float( e[1] ), float( e[2] ), float( e[3] ) ) );
+	}
+	for ( int k = 0; k < 3; k++ ) {
+		float w = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			w -= vt.rotation( j, k ) * vt.translation[j];
+		prog->uni4f_l( prog->uniLocation( "volRow[%d]", k ), FloatVector4( vt.rotation( 0, k ) / sc, vt.rotation( 1, k ) / sc,
+			vt.rotation( 2, k ) / sc, w / sc ) );
+	}
+	const float bias = 0.75f * G->roomsCell;	// the room grid's read (cell_lights.glsl cellGiVolAt)
+	prog->uni1f( "volBias", bias );
+	prog->uni1f( "volGrow", bias + 1.0f );
+	prog->uni2f( "volProj", p00, p11 );
+	fn->glUniform2i( prog->uniLocation( "volFull" ), W, H );
+	GLint prevActive = 0, prevCull = GL_BACK, prevFront = GL_CCW, prevDepthFunc = GL_LESS, prevEq = GL_FUNC_ADD;
+	GLint prevBlend[4] = { GL_ONE, GL_ZERO, GL_ONE, GL_ZERO };
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glGetIntegerv( GL_CULL_FACE_MODE, &prevCull );
+	fn->glGetIntegerv( GL_FRONT_FACE, &prevFront );
+	fn->glGetIntegerv( GL_DEPTH_FUNC, &prevDepthFunc );
+	fn->glGetIntegerv( GL_BLEND_EQUATION_RGB, &prevEq );
+	fn->glGetIntegerv( GL_BLEND_SRC_RGB, &prevBlend[0] );
+	fn->glGetIntegerv( GL_BLEND_DST_RGB, &prevBlend[1] );
+	fn->glGetIntegerv( GL_BLEND_SRC_ALPHA, &prevBlend[2] );
+	fn->glGetIntegerv( GL_BLEND_DST_ALPHA, &prevBlend[3] );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
+	fn->glBindTexture( GL_TEXTURE_2D, g.gbuf.tex );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalfKey ) );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, g.volTex );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.volBuf );
+	prog->uni1i( "volGbuf", WwCellUnit::GiHalf );
+	prog->uni1i( "volShapes", WwCellUnit::GiHalfKey );
+	fn->glEnable( GL_DEPTH_TEST );
+	fn->glDepthFunc( GL_GEQUAL );	// the hull's back face behind the surface: the surface may be inside
+	fn->glDepthMask( GL_FALSE );
+	fn->glDisable( GL_STENCIL_TEST );
+	fn->glEnable( GL_CULL_FACE );
+	fn->glFrontFace( GL_CCW );
+	fn->glCullFace( GL_FRONT );
+	fn->glEnable( GL_DEPTH_CLAMP );	// a back face past the far plane still covers its pixels
+	fn->glEnable( GL_BLEND );
+	fn->glBlendEquation( GL_MAX );
+	fn->glBlendFunc( GL_ONE, GL_ONE );
+	fn->glBindVertexArray( g.volVao );
+	fn->glDrawArraysInstanced( GL_TRIANGLES, 0, 36, n );
+	fn->glBindVertexArray( 0 );
+	fn->glDisable( GL_DEPTH_CLAMP );
+	fn->glBlendEquation( GLenum( prevEq ) );
+	fn->glBlendFuncSeparate( GLenum( prevBlend[0] ), GLenum( prevBlend[1] ), GLenum( prevBlend[2] ), GLenum( prevBlend[3] ) );
+	fn->glDisable( GL_BLEND );
+	fn->glCullFace( GLenum( prevCull ) );
+	fn->glFrontFace( GLenum( prevFront ) );
+	fn->glDisable( GL_CULL_FACE );
+	fn->glDepthFunc( GLenum( prevDepthFunc ) );
+	fn->glDisable( GL_DEPTH_TEST );
+	r->stopProgram();
+	fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	return true;
+}
+
+/* lane PERF1: the screen GI. The volume read (cellGiVolume) once per giStep x giStep pixels over the shared opaque
+ * g-buffer, in each pixel's volume (the mask above, else the room grid): the sample and its key (world position,
+ * packed normal), which the opaque cell-lit draws upsample (cell_lights.glsl cellGiSample). Runs inside wwCellAoPass,
+ * after the depth pyramid; the caller restores the state. */
+void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
+{
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	const WwCellGi * G = wwCellGiFor( scene->nifModel );
+	const bool volOn = giVolMaskPass( scene, g, G, W, H, p00, p11 );
+	g.volOn = volOn;
+	g.giStep = wwCellGiRate() == 1 ? 1 : 2;
+	const int hw = ( W + g.giStep - 1 ) / g.giStep, hh = ( H + g.giStep - 1 ) / g.giStep;
+	aoAlloc( fn, g.giHalf, hw, hh, GL_RGBA32F, GL_RGBA, false );
+	if ( !g.giKey )
+		fn->glGenTextures( 1, &g.giKey );
+	if ( g.giKeyW != hw || g.giKeyH != hh ) {
+		fn->glBindTexture( GL_TEXTURE_2D, g.giKey );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, hw, hh, 0, GL_RGBA, GL_FLOAT, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		g.giKeyW = hw;
+		g.giKeyH = hh;
+	}
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.giHalf.fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.giKey, 0 );
+	const GLenum bufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+	fn->glDrawBuffers( 2, bufs );
+	if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+		giEcho( QStringLiteral( "refused(target incomplete): the full chain" ) );
+		return;
+	}
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_gihalf.prog" );
+	if ( !prog ) {
+		giEcho( QStringLiteral( "refused(cell_gihalf.prog did not link): the full chain" ) );
+		return;
+	}
+	wwCellLightsUniforms( scene );	// the surfaces' GI uniforms and grids, on this program
+	prog->uni1b( "cellGiHalfOn", false );
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
+	fn->glBindTexture( GL_TEXTURE_2D, g.gbuf.tex );
+	prog->uni1i( "giGbuf", WwCellUnit::GiHalf );
+	prog->uni1i( "cellGiHalf", WwCellUnit::GiHalf );	// the same sampler type on the unit (never read here)
+	prog->uni1i( "cellGiHalfKey", WwCellUnit::GiHalf );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalfKey ) );
+	fn->glBindTexture( GL_TEXTURE_2D, volOn ? g.volMask.tex : 0 );
+	prog->uni1i( "giVolMask", WwCellUnit::GiHalfKey );
+	prog->uni1b( "giVolOn", volOn );
+	prog->uni1i( "giStep", g.giStep );
+	fn->glUniform2i( prog->uniLocation( "giFull" ), W, H );
+	prog->uni2f( "giProj", p00, p11 );
+	fn->glViewport( 0, 0, hw, hh );
+	fn->glDisable( GL_DEPTH_TEST );
+	fn->glDisable( GL_STENCIL_TEST );
+	fn->glDisable( GL_BLEND );
+	fn->glDisable( GL_CULL_FACE );
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
+	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	r->stopProgram();
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	const GLenum one = GL_COLOR_ATTACHMENT0;
+	fn->glDrawBuffers( 1, &one );
+	g.giReady = true;
+	giEcho( QStringLiteral( "%1 %2x%3 screen %4x%5; volumes: mask %6 (%7 shapes)" ).arg( wwCellGiRate() == 3
+		? QStringLiteral( "red (the screen pass runs, the surfaces read inline)" ) : g.giStep == 1 ? QStringLiteral( "full" )
+		: QStringLiteral( "half" ) ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( volOn ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
+		.arg( G ? qint64( G->volShapes.size() / 12 ) : 0 ) );
 }
 
 //! lane AOOFF1: the telemetry line, printed when it changes
@@ -1868,6 +2181,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	AoGpu & g = aoGpus()[r];
 	g.ready = false;
 	g.aoReady = false;
+	g.giReady = false;
 	if ( !run || !wwCellLightsWanted( scene ) )
 		return;
 	auto fn = r->fn;
@@ -1878,11 +2192,22 @@ void wwCellAoPass( Scene * scene, bool run )
 	 * obscurance computed from it (step 2's raw, blurs, final) and its apply, never the pass the others read. */
 	const bool forSsr = wwCellSsrWantsTargets( scene );
 	const bool forDecal = g.decalUnit >= 0 && wwCellAoDecalWanted( scene->nifModel );
+	const bool forContact = wwContactShadowWantsTargets( scene );	// lane TERRSHADOW1: contact shadows march its depth
+	// lane PERF1: the half-res GI reads it too (the GI row on, no probe pass, a GPU with the units)
+	const int giRate = wwCellGiRate();
+	const bool forGi = giRate != 2 && wwCellGiVis() == 0 && g.giUnits && wwCellGiOn() && wwCellPassFor( scene->nifModel ) == 0;
+	if ( wwCellGiVis() == 1 )
+		giEcho( QStringLiteral( "march (red WW_CELL_GI_VIS or a march-only WW_CELL_PV_RED: the per-pixel chain every call, no screen pass)" ) );
+	else if ( giRate == 2 )
+		giEcho( QStringLiteral( "inline (no screen pass: every surface reads the volumes)" ) );
+	else if ( !g.giUnits )
+		giEcho( QStringLiteral( "full (the GPU has no unit %1)" ).arg( WwCellUnit::GiHalfKey ) );
 	if ( !a.on ) {
-		aoEcho( ( forSsr || forDecal ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2" )
+		aoEcho( ( forSsr || forDecal || forContact || forGi ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2%3%4" )
 			.arg( forSsr ? QStringLiteral( " ssr" ) : QString() ).arg( forDecal ? QStringLiteral( " aodecal" ) : QString() )
+			.arg( forContact ? QStringLiteral( " contact" ) : QString() ).arg( forGi ? QStringLiteral( " gihalf" ) : QString() )
 			: QStringLiteral( "off (row); no opaque pass (nothing reads it)" ) );
-		if ( !forSsr && !forDecal ) {
+		if ( !forSsr && !forDecal && !forContact && !forGi ) {
 			a.last = QStringLiteral( "off" );
 			return;
 		}
@@ -2022,6 +2347,8 @@ void wwCellAoPass( Scene * scene, bool run )
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	}
 	fn->glActiveTexture( GLenum( prevActive ) );
+	if ( forGi )	// lane PERF1
+		giHalfPass( scene, g, W, H, p00, p11 );
 
 	g.ready = true;
 	g.aoReady = a.on;
@@ -2078,6 +2405,17 @@ void wwCellAoPass( Scene * scene, bool run )
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
 }
 
+// lane VOLAIR1: the light buffer's spheres (src/gl/celllights.h)
+const std::vector<float> * wwCellLightSpheres( Scene * scene )
+{
+	if ( !scene || !scene->renderer || !gpus().contains( scene->renderer ) )
+		return nullptr;
+	const Gpu & g = gpus()[scene->renderer];
+	if ( g.doc != scene->nifModel || int( g.spheres.size() / 4 ) != g.count )
+		return nullptr;
+	return &g.spheres;
+}
+
 // lane SSR1: this frame's opaque pass and depth pyramid, for the reflections' march (src/gl/cellssr.h)
 bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
 {
@@ -2114,6 +2452,9 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 			glDepthMask( GL_FALSE );
 		if ( cellProgram ) {
 			prog->uni1i( "cellProbe", 20 );
+			// lane PERF1: the fragment returns once it has the normal (WW_AO_EARLY=0 shades it all, =red marks the early ones)
+			static const int early = [] { const QByteArray v = qgetenv( "WW_AO_EARLY" ).trimmed(); return v == "0" ? 0 : v == "red" ? 2 : 1; }();
+			prog->uni1i( "cellAoEarly", early );
 			prog->uni1b( "cellAoOn", false );
 			prog->uni1b( "cellAoDecalOn", false );	// lane AODECAL1
 		}
@@ -2150,6 +2491,29 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 			GLint dvp[4] = { 0, 0, 1, 1 };
 			glGetIntegerv( GL_VIEWPORT, dvp );
 			prog->uni4f_l( prog->uniLocation( "cellAoDecalRect" ), FloatVector4( float( dvp[0] ), float( dvp[1] ), 0.0f, 0.0f ) );
+		}
+	}
+	/* lane PERF1: the half-res GI, read by the opaque draws (and the decals on them), like the obscurance; the
+	 * upsample's keys send any pixel that is not the g-buffer's surface to the full chain */
+	if ( prog->uniLocation( "cellGiHalfOn" ) >= 0 ) {
+		// a probe picture (WW_CELL_LIT_PROBE) reads the volumes' mask at its own pixel instead: the screen pass's read
+		const bool probePic = ( st().measuring ? 6 : st().probe ) != 0;
+		const bool giOn = g.giReady && g.doc == scene->nifModel && ( wwCellGiRate() == 0 || wwCellGiRate() == 1 ) && wwCellGiVis() == 0
+			&& ( !glIsEnabled( GL_BLEND ) || decalProg ) && ( !probePic || g.volOn );
+		if ( g.giUnits ) {
+			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
+			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? ( probePic ? g.volMask.tex : g.giHalf.tex ) : 0 );
+			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalfKey ) );
+			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? g.giKey : 0 );
+			r->fn->glActiveTexture( GLenum( prevActive ) );
+		}
+		prog->uni1b( "cellGiHalfOn", giOn );
+		if ( giOn ) {
+			GLint vp[4] = { 0, 0, 1, 1 };
+			glGetIntegerv( GL_VIEWPORT, vp );
+			prog->uni4f_l( prog->uniLocation( "cellGiHalfRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
+				float( g.giHalf.w ), float( g.giHalf.h ) ) );
+			prog->uni1f( "cellGiHalfScale", 1.0f / float( g.giStep ) );
 		}
 	}
 	if ( on ) {

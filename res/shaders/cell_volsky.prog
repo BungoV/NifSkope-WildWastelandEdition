@@ -1,0 +1,4 @@
+# The sky through the volumetric air (lane VOLAIR1; src/gl/cellvolair.h wwVolAirSkyDraw): a full-screen pass.
+# No conditions: never picked for a shape; cellvolair.cpp selects it by name.
+
+shaders cell_ao.vert cell_volsky.frag

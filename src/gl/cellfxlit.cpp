@@ -110,6 +110,13 @@ void wwCellFxLitShape( const void * nif, int block, int serial )
 	st().docs[nif].shapeModel.insert( block, serial );
 }
 
+void wwCellFxLitForget( const void * nif, int block )
+{
+	auto d = st().docs.find( nif );
+	if ( d != st().docs.end() )
+		d->shapeModel.remove( block );
+}
+
 void wwCellFxLitNoOffset( const void * nif, int index, float ratio )
 {
 	if ( st().red & 8 )

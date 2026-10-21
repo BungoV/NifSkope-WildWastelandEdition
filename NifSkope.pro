@@ -223,6 +223,7 @@ HEADERS += \
 	src/gl/scenelighting.h \
 	src/gl/lookdevstage.h \
 	src/gl/sunshadow.h \
+	src/gl/shadowset.h \
 	src/gl/gametaa.h \
 	src/gl/campath.h \
 	src/gl/celllights.h \
@@ -235,9 +236,12 @@ HEADERS += \
 	src/gl/cellhdr.h \
 	src/gl/cellbloom.h \
 	src/gl/cellprobeview.h \
+	src/gl/cellvolumeview.h \
 	src/gl/cellssr.h \
 	src/gl/cellaodecalgl.h \
-	src/gl/cellvolfog.h \
+	src/gl/cellvolair.h \
+	src/gl/cellpasstime.h \
+	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
 	src/impostoroct.h \
@@ -320,6 +324,7 @@ HEADERS += \
 	src/esmdata.h \
 	src/esmwater.h \
 	src/esmweather.h \
+	src/recx.h \
 	src/lodgen.h \
 	src/lodgenao.h \
 	src/lodgenchunkpass.h \
@@ -350,6 +355,7 @@ HEADERS += \
 	src/cellfarvanilla.h \
 	src/cellmesh.h \
 	src/cellspeed.h \
+	src/cellstream.h \
 	src/celltexahead.h \
 	src/cellmodelahead.h \
 	src/probealbedo.h \
@@ -362,6 +368,8 @@ HEADERS += \
 	src/proberelight.h \
 	src/farlight.h \
 	src/proberooms.h \
+	src/probevolumes.h \
+	src/probevolumesgi.h \
 	src/probesky.h \
 	src/probeplace.h \
 	src/cellrefs.h \
@@ -466,6 +474,7 @@ SOURCES += \
 	src/gl/scenelighting.cpp \
 	src/gl/lookdevstage.cpp \
 	src/gl/sunshadow.cpp \
+	src/gl/shadowset.cpp \
 	src/gl/gametaa.cpp \
 	src/gl/campath.cpp \
 	src/gl/celllights.cpp \
@@ -478,9 +487,11 @@ SOURCES += \
 	src/gl/cellhdr.cpp \
 	src/gl/cellbloom.cpp \
 	src/gl/cellprobeview.cpp \
+	src/gl/cellvolumeview.cpp \
 	src/gl/cellssr.cpp \
 	src/gl/cellaodecalgl.cpp \
-	src/gl/cellvolfog.cpp \
+	src/gl/cellvolair.cpp \
+	src/gl/cellpasstime.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \
@@ -592,6 +603,7 @@ SOURCES += \
 	src/btdterrain.cpp \
 	src/esmdata.cpp \
 	src/esmweather.cpp \
+	src/recx.cpp \
 	src/lodgen.cpp 	src/lodgenmanager.cpp 	src/lodtfile.cpp \
 	src/lodgenchunkpass.cpp \
 	src/lodgengpu.cpp \
@@ -622,6 +634,7 @@ SOURCES += \
 	src/cellfarvanilla.cpp \
 	src/cellmesh.cpp \
 	src/cellspeed.cpp \
+	src/cellstream.cpp \
 	src/celltexahead.cpp \
 	src/cellmodelahead.cpp \
 	src/probealbedo.cpp \
@@ -630,6 +643,8 @@ SOURCES += \
 	src/proberelight.cpp \
 	src/farlight.cpp \
 	src/proberooms.cpp \
+	src/probevolumes.cpp \
+	src/probevolumesgi.cpp \
 	src/probesky.cpp \
 	src/probefar.cpp \
 	src/probeplace.cpp \
@@ -829,7 +844,7 @@ win32 {
     # cross-application color eyedropper.
     # -lpsapi: GetProcessMemoryInfo, behind the bake census line's peak
     # working set (lane BAKEPERF1, 2026-09-11)
-    LIBS += -lopengl32 -lgdi32 -lpsapi
+    LIBS += -lopengl32 -lgdi32 -lpsapi -lwinmm
 }
 
 macx {
@@ -899,6 +914,8 @@ build_pass|!debug_and_release {
 		docs/CLI.md
 
 	copyDirs( $$SHADERS, shaders )
+	# the record extension files this program ships (docs/RECX.md): the vanilla weathers' ground fog
+	copyDirs( res/Data, Data )
 	#copyDirs( $$LANG, lang )
 	copyFiles( $$XML $$QSS res/qt.conf )
 

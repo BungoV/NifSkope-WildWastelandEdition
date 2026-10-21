@@ -1,0 +1,4 @@
+# The air's froxel passes (lane VOLAIR1; src/gl/cellvolair.cpp). One layer of the froxel volume a draw.
+# No conditions: never picked for a shape; cellvolair.cpp selects it by name.
+
+shaders cell_volair.vert cell_volair.frag

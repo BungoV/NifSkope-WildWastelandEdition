@@ -37,6 +37,7 @@
 
 struct WwCellLighting;
 struct AoDecalSet;	// lane AODECAL1 (src/cellaodecal.h)
+struct ProbeVolumes;	// lane VOLFIT1 (src/probevolumes.h)
 
 struct ProbeGiResult
 {
@@ -75,6 +76,8 @@ struct ProbeGiResult
 	 *  "noclamp": no rooms, one value a voxel (the blend before the lane). */
 	bool roomsOn = false;
 	ProbeRooms rooms;
+	GiVolumeSet volumes;                //!< lane PERF1: the GI volumes (the fitter's); empty: the rooms grid stand-in
+	QString spaceRooms;                 //!< lane VOLFIT1: the Space relabel's census line (empty: not relabeled)
 	std::vector<float> grid2, gridSky2, slotRooms;
 	std::vector<int> probeRooms;        //!< per probe: its room, its second room (-1 none)
 	int voxelsTwoRooms = 0, voxelsTwoBare = 0, voxelsCentreElsewhere = 0, probesRoomless = 0;
@@ -150,6 +153,9 @@ struct ProbeGiSpec
 	 *  a voxel blocked at its centre stays empty), "noclamp" (lane ROOMCLAMP1: no rooms). Empty in real runs. */
 	QString red;
 	ProbeRoomSpec rooms;            //!< lane ROOMCLAMP1: the room labels (its red: WW_CELL_ROOMS_RED)
+	//! lane VOLFIT1: the Space stage's rooms (WW_CELL_VOLUMES_GI=1) relabel the room grid (probevolumesgi.h); null: ROOMCLAMP1's
+	//! owned: the sky keeps copies of this spec past the load (probeSkyKeep), so no pointer into a load local
+	std::shared_ptr<const ProbeVolumes> space;
 	/*! lane SKY1: the weather light of an exterior (off = none: an interior, or a view the weather
 	 *  does not light), and its refuters (WW_CELL_SKY_RED): "off" neither sky nor sun, "novis" every
 	 *  octant sees the sky, "notint" the glass tint is ignored, "sunthrough" the sun has no shadow ray. */

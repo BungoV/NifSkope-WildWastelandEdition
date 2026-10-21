@@ -55,6 +55,9 @@ class Shape;
 typedef unsigned int GLenum;
 typedef unsigned int GLuint;
 
+//! lane PERF1: the scene-global setters run once per program inside an armed pass (Scene::drawShapes)
+void wwSetupMemoArm( bool on );
+
 //! Manages rendering and shaders
 class Renderer : public QObject, public NifSkopeOpenGLContext
 {

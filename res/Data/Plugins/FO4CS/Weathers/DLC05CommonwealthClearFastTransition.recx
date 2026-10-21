@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "DLC05CommonwealthClearFastTransition",
+			"weather": "DLCworkshop02.esm|0x00000A4D",
+			"groundFog": {
+				"thickness": 300,
+				"strength": 0.25,
+				"hours": {
+					"2": {
+						"thickness": 494,
+						"strength": 1.66
+					},
+					"14": {
+						"thickness": 300,
+						"strength": 0.25
+					}
+				}
+			}
+		}
+	]
+}

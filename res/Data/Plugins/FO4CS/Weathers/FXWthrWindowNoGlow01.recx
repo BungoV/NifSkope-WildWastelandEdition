@@ -1,0 +1,12 @@
+{
+	"entries": [
+		{
+			"name": "FXWthrWindowNoGlow01",
+			"weather": "DLCCoast.esm|0x00056378",
+			"groundFog": {
+				"thickness": 300,
+				"strength": 0.25
+			}
+		}
+	]
+}

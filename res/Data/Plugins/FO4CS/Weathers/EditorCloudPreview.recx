@@ -1,0 +1,22 @@
+{
+	"entries": [
+		{
+			"name": "EditorCloudPreview",
+			"weather": "Fallout4.esm|0x0010E3D4",
+			"groundFog": {
+				"thickness": 497,
+				"strength": 1.69,
+				"hours": {
+					"2": {
+						"thickness": 606,
+						"strength": 2.9
+					},
+					"14": {
+						"thickness": 497,
+						"strength": 1.69
+					}
+				}
+			}
+		}
+	]
+}

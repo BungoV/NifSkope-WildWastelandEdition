@@ -80,3 +80,30 @@ ww_window_refusal() {
 	[ -f "$f" ] || return 0
 	grep '^REFUSED: the window size asked for was ' "$f" | tail -1
 }
+
+# NO SILENT GREY PICTURES.  Lane VOLAIR1, 2026-10-15 (coordinator ruling).
+#
+# A shader that failed to compile or link used to show only in a message box no
+# headless run ever saw; every draw that wanted the program fell back, and the
+# picture came out grey or untextured while looking like a measurement.  The exe
+# now stops a harness run at the first such error (exit 87, before any picture;
+# src/gl/glcontext.cpp printCompileError) and writes "SHADER REFUSED: <text>".
+# This reads a run's notes for that line, for the older "shader compile/link
+# error:" line, and for any program a renderer refused ("refused(... .prog ...",
+# "did not link", "did not compile"), prints each with its notes file, and
+# returns 1.  Call it on every notes file before a number or picture is trusted:
+#
+#   ww_notes_shader_refusal "$OUT/$tag.notes" || exit 1
+#
+# The red is tests/spells/shader_guard.sh (WW_SHADER_RED breaks one shader).
+ww_notes_shader_refusal() {
+	local f bad=0 hits
+	for f in "$@"; do
+		[ -f "$f" ] || continue
+		hits="$(grep -aE 'SHADER REFUSED: |shader compile/link error:|refused\([^)]*(\.prog|did not link|did not compile)' "$f" | cut -c1-600)"
+		[ -z "$hits" ] && continue
+		bad=1
+		printf '%s\n' "$hits" | while IFS= read -r l; do printf 'SHADER REFUSED in %s: %s\n' "$f" "$l"; done
+	done
+	return $bad
+}
