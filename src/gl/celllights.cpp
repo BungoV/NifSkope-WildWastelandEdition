@@ -957,9 +957,15 @@ void wwCellLightsUniforms( Scene * scene )
 	 * base term: BSEffectShader::SetupGeometry's lit branch puts pow(directional colour, 2.2) x the light's fade x
 	 * the imagespace Sunlight Scale (ImageSpaceManager+0x98 = kCurrentEOFData fHDRDataA[6], HNAM's 7th float) in
 	 * cb2[12]; the scene's directional outdoors is the sun. No ambient: the lit asm reads cb2 rows 0..14 only
-	 * (lights 0..11, base 12, alpha 13..14). Red WW_CELL_FXLIT_EXT_RED=indoors leaves exteriors self-lit. */
+	 * (lights 0..11, base 12, alpha 13..14). Red WW_CELL_FXLIT_EXT_RED=indoors leaves exteriors self-lit.
+	 * lane ALLON2 (2026-10-12, the Goodneighbor steam drew near-white): the game puts that same Sunlight Scale on the
+	 * SURFACES' sun too (BSLightingShader::GeometrySetupConstantDirectionalLight +0xfc and BSDFLightShader::
+	 * SetupGeometry +0xc33 multiply ImageSpaceManager+0x98 in, 1.10.155), so effect and wall keep a 1:1 sun. This
+	 * viewer's surfaces take the sun unscaled, so a lit effect takes the surfaces' scale (1): with x4.5 it drew 4.5x
+	 * brighter than the wall behind it. Red WW_CELL_FXLIT_SCALE_RED=game puts the Sunlight Scale back (in and out). */
 	{
 		static const bool fxExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
+		static const bool fxScaleRed = qgetenv( "WW_CELL_FXLIT_SCALE_RED" ).trimmed() == "game";
 		const bool fxProg = prog->name == std::string_view( "fo4_effectcell.prog" )
 			|| prog->name == std::string_view( "particles_cell.prog" );
 		float dalc[6][3];
@@ -968,15 +974,19 @@ void wwCellLightsUniforms( Scene * scene )
 			wwLookdevLight( dirTo, dif, amb );
 			WwLookdevIs is;
 			const bool haveIs = wwLookdevImageSpace( is );
-			const float sunScale = haveIs ? is.hdr[6] : 1.0f;
+			const float isScale = haveIs ? is.hdr[6] : 1.0f;
+			const float sunScale = fxScaleRed ? isScale : 1.0f;	// lane ALLON2: the surfaces' scale (above)
 			for ( int c = 0; c < 3; c++ )
 				dirColor[c] = std::max( dif[c], 0.0f ) * sunScale;
 			hasDir = dirColor[0] > 0.0f || dirColor[1] > 0.0f || dirColor[2] > 0.0f;
 			static QString fxSunLast;
-			const QString line = QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (sun %4,%5,%6 x Sunlight Scale %7%8)" )
+			const QString line = QStringLiteral( "cell fx sun: exterior lit effects base=%1,%2,%3 (sun %4,%5,%6 x %7; "
+					"imagespace Sunlight Scale %8%9, surfaces' sun scale 1)" )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
 				.arg( double( dif[0] ), 0, 'f', 5 ).arg( double( dif[1] ), 0, 'f', 5 ).arg( double( dif[2] ), 0, 'f', 5 )
-				.arg( double( sunScale ), 0, 'f', 3 ).arg( haveIs ? QString() : QStringLiteral( ", no imagespace: 1" ) );
+				.arg( double( sunScale ), 0, 'f', 3 ).arg( double( isScale ), 0, 'f', 3 )
+				.arg( haveIs ? ( fxScaleRed ? QStringLiteral( ", RED WW_CELL_FXLIT_SCALE_RED=game" ) : QString() )
+					: QStringLiteral( ", no imagespace: 1" ) );
 			if ( line != fxSunLast ) {
 				fprintf( stderr, "%s\n", qPrintable( line ) );
 				fxSunLast = line;
@@ -994,7 +1004,7 @@ void wwCellLightsUniforms( Scene * scene )
 		 * A cell with no imagespace read keeps the base as it was. Red WW_CELL_FXLIT_INT_RED=noscale leaves it out. */
 		static const bool fxIntRed = qgetenv( "WW_CELL_FXLIT_INT_RED" ).trimmed() == "noscale";
 		if ( L->interior && fxProg ) {
-			const bool scaled = !fxIntRed && L->hasImageSpace;
+			const bool scaled = fxScaleRed && !fxIntRed && L->hasImageSpace;	// lane ALLON2: the surfaces' scale (1)
 			if ( scaled )
 				for ( int c = 0; c < 3; c++ )
 					dirColor[c] *= L->isHdr[6];
@@ -1003,7 +1013,8 @@ void wwCellLightsUniforms( Scene * scene )
 				? QStringLiteral( "cell fx sun: interior lit effects base x Sunlight Scale %1 (%2)" )
 					.arg( double( L->isHdr[6] ), 0, 'f', 3 ).arg( L->isName )
 				: QStringLiteral( "cell fx sun: interior lit effects base unscaled (%1)" )
-					.arg( fxIntRed ? QStringLiteral( "RED WW_CELL_FXLIT_INT_RED=noscale" ) : QStringLiteral( "no imagespace read" ) );
+					.arg( fxIntRed ? QStringLiteral( "RED WW_CELL_FXLIT_INT_RED=noscale" )
+						: !fxScaleRed ? QStringLiteral( "the surfaces' sun scale 1" ) : QStringLiteral( "no imagespace read" ) );
 			if ( line != fxIntLast ) {
 				fprintf( stderr, "%s\n", qPrintable( line ) );
 				fxIntLast = line;
@@ -1639,7 +1650,7 @@ struct AoState
 	bool loaded = false;
 	bool on = true;			// WW_CELL_AO=0: none computed
 	bool pinned = false;	// lane CELLALL1: the AO row (WW/CellAo); the pin wins
-	int red = 0;			// 1 off (computed, not applied), 2 radius (halved), 4 noblur, 8 noreset
+	int red = 0;			// 1 off (computed, not applied), 2 radius (halved), 4 noblur, 8 noreset, 16 unit0 (lane ALLON2)
 	QString dump;			// WW_CELL_AO_DUMP
 	bool pass = false;		// the opaque pass is drawing
 	QString last = QStringLiteral( "none yet" );
@@ -1654,7 +1665,7 @@ AoState & ao()
 		a.pinned = !aoPin.isEmpty();
 		a.on = a.pinned ? aoPin != "0" : QSettings().value( QStringLiteral( "WW/CellAo" ), true ).toBool();
 		const QByteArray red = qgetenv( "WW_CELL_AO_RED" ).trimmed();
-		a.red = red == "off" ? 1 : red == "radius" ? 2 : red == "noblur" ? 4 : red == "noreset" ? 8 : 0;
+		a.red = red == "off" ? 1 : red == "radius" ? 2 : red == "noblur" ? 4 : red == "noreset" ? 8 : red == "unit0" ? 16 : 0;
 		a.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AO_DUMP" ) );
 	}
 	return a;
@@ -1728,6 +1739,19 @@ void wwCellAoSetOn( bool on )
 	QSettings().setValue( QStringLiteral( "WW/CellAo" ), on );
 }
 
+/* lane ALLON2: the units are known before the first pass. With the obscurance off (WW_CELL_AO=0) no pass ever ran,
+ * so the unit stayed -1 and the draw bound its empty sampler on unit 0 -- over BaseMap: the scene drew untextured.
+ * Red WW_CELL_AO_RED=unit0: the old order (the units only from a pass that runs). */
+static void aoUnits( Renderer * r, AoGpu & g )
+{
+	if ( g.unit >= 0 || ( ao().red & 16 ) )
+		return;
+	GLint units = 0;
+	r->fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
+	g.unit = units > kAoUnit ? kAoUnit : 9;
+	g.decalUnit = units > 20 ? 20 : -1;
+}
+
 void wwCellAoPass( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )
@@ -1736,6 +1760,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	Renderer * r = scene->renderer;
 	AoGpu & g = aoGpus()[r];
 	g.ready = false;
+	aoUnits( r, g );
 	if ( !run || !a.on || !wwCellLightsWanted( scene ) )
 		return;
 	QElapsedTimer timer;
@@ -1972,6 +1997,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	if ( !cellProgram || prog->uniLocation( "cellAoOn" ) < 0 )
 		return;
 	AoGpu & g = aoGpus()[r];
+	aoUnits( r, g );
 	const bool on = g.ready && g.doc == scene->nifModel && g.unit >= 0 && !( a.red & 1 ) && !glIsEnabled( GL_BLEND )
 		&& wwCellLightsWanted( scene );
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
