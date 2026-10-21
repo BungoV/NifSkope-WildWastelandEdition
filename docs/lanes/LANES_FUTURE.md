@@ -22,4 +22,3 @@ A row moves to LANES.md section 3 the moment bungo says yes.
 - Editor (not cell/LOD): Skeleton Manager 2-4, Block Details table, collision P4 + cloth, UV ops, 3 animation gaps
 
 
-- FOGTRICUBIC1: tricubic (4x4x4) read of the fog grid when applying it; softer edges, maybe a coarser grid (from diharaw/volumetric-fog, MIT). Visible change: PNG pair first.
