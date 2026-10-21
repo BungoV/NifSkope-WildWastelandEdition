@@ -21,3 +21,5 @@ A row moves to LANES.md section 3 the moment bungo says yes.
 - VAULTDUST1 camera-local motes/snow/ash/leaves; UMBRA1 door state + multi-block; GRASSMB1 not-ported list
 - Editor (not cell/LOD): Skeleton Manager 2-4, Block Details table, collision P4 + cloth, UV ops, 3 animation gaps
 
+
+- FOGTRICUBIC1: tricubic (4x4x4) read of the fog grid when applying it; softer edges, maybe a coarser grid (from diharaw/volumetric-fog, MIT). Visible change: PNG pair first.
