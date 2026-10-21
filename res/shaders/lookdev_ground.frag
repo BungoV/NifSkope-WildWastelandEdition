@@ -31,6 +31,11 @@ out vec4 fragColor;
 #ifdef WW_SUNSHADOW
 #include "ww_sunshadow.glsl"
 #endif
+#ifdef WW_GROUND_CELL
+// lane LIGHTBOOTH1 (lookdev_ground_cell.prog, the light booth's floor): the placed cell lights' diffuse on the ground
+#define WW_CELL_FX 1
+#include "cell_lights.glsl"
+#endif
 
 vec3 dalcAmbient( vec3 n )
 {
@@ -63,7 +68,25 @@ void main()
 #else
 	vec3 color = base * sunLinear * NdotL + base * dalcAmbient( n );
 #endif
+#ifdef WW_GROUND_CELL
+	// each placed light: its colour x radial curve x cone x shadow cube (cellLightE), x N.L, on the ground's albedo
+	if ( cellOn ) {
+		for ( int i = 0; i < cellLightCount; i++ ) {
+			vec3 Ld;
+			bool noSpec;
+			vec3 E = cellLightE( i, worldPos, n, Ld, noSpec );
+			color += base * E * max( dot( n, Ld ), 0.0 );
+		}
+	}
+#endif
 	color = wwFog( color, viewPos );	// lane FOG1: linear, before the exposure
+#ifdef WW_GROUND_CELL
+	// lane LIGHTBOOTH1: inside the cell's HDR frame, linear light like the cell's own programs (tone-mapped once)
+	if ( cellOn && cellIsLinear ) {
+		fragColor = vec4( max( color, vec3( 0.0 ) ), 1.0 );
+		return;
+	}
+#endif
 	if ( groundLeak >= 0.0 )
 		color = mix( vec3( 0.0 ), color, groundLeak );
 	fragColor = vec4( studioOutput( color ), 1.0 );

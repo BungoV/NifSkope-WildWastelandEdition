@@ -4189,8 +4189,10 @@ void GLView::paintGL()
 			PassTime::begin( PassTime::Background );	// lane PERF1: the sky through the air counts as the sky
 			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );	// lane CELLALL1
 			wwCellFarLodFrame( scene );	// lane FARLOD1: the far sway's uniforms; no GL call while off
-			if ( hdr )
+			if ( hdr ) {
 				wwVolAirSkyDraw( scene, false );	// lane VOLAIR1: the sky through the air, under the scene
+				wwLookdevDrawGroundCellFrame( scene );	// lane LIGHTBOOTH1: the booth floor (a harness pin; no GL call unset)
+			}
 			PassTime::end( PassTime::Background );
 			scene->draw();	// lane PERF1: opaque / sorted / effects timed inside (Scene::drawShapes)
 			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)

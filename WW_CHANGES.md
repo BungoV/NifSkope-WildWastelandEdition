@@ -109,6 +109,27 @@
   build is not yet measured; (b) and the reds not run on the current build. The rc 127 exits seen earlier were the
   memory guard (MEMCAP or free RAM), not a fault.
 
+## Lane LIGHTBOOTH1 (2026-10-16, branch lightbooth1-20261016 on volair1-20261013): the light test booth
+
+- **Harness pins for measuring one light fixture alone** (environment only; no menu rows, nothing changes unset):
+  - `WW_CELL_BOOTH=<ref id hex>[,...]` keeps ONLY those placed references when a cell opens (a fixture's base and
+    its lights). The notes print `booth: kept N of M asked (ids), missing K (ids), dropped D other references`.
+  - `WW_CELL_BOOTH_AIR=<sigma0>[,<far>]` replaces the fitted Volumetric Air medium with even air of that density at
+    every height (no height band, no ground layer, no top), so every fixture is measured in the same air. The slices
+    end at 4.6 / sigma0 (2000-20000 units) or at `<far>` (a short far end makes the 64 slices thin near the fixture).
+    Notes: `cell air booth: even air sigma0 ..., slices to ...`; the census `recx` reads `none(booth even air)`.
+  - `WW_LOOKDEV_GROUND_CELL=1` draws the lookdev ground lit by the placed cell lights too (colour x radial curve x
+    cone x shadow cube x N.L on the ground's albedo; new `lookdev_ground_cell.prog`), so a fixture's pool of light
+    shows on the booth floor. Without it the ground takes only the sun and the ambient, as before.
+  - In the cell view that ground never reached the picture: the cell draws into its own HDR frame and paints the
+    sky into it, over the ground drawn before (a front shot with and without the ground pass differed in 1 pixel of
+    2 million). With `WW_LOOKDEV_GROUND_CELL=1` the ground is now drawn again INSIDE that frame, right after the sky:
+    linear light like the cell's own programs, depth written, so the air and the fixture composite against it.
+    `WW_LOOKDEV_GROUND_CELL_AT=x,y,z` centres it on the fixture's foot (otherwise: the scene's lowest vertex). Notes:
+    `lookdev ground cell: drawn in the HDR frame (hdr 1) at x y z (...)`. Unset: no extra draw, no GL call.
+- The booth itself (cell open, cameras, froxel-dump measurement) is a harness outside the repo; it reads the
+  existing `WW_CELL_AIR_TERMS` / `WW_CELL_AIR_OPT` / `WW_CELL_AIR_DUMP` switches. No light was changed.
+
 ## Lane VOLAIR1 (2026-10-13, branch volair1-20261013): Volumetric Air, one lit medium in the cell view
 
 - **The cell view can draw the air as one lit medium instead of the game's distance fog.** Scene window fold
