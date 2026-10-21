@@ -5,6 +5,13 @@ bungo says it. Tiers: WORKING ON -> BUILT, NOT LANDED -> LANDED; APPROVED (his y
 yet). A row leaves only as LANDED or SUPERSEDED, and then moves to LANES_DONE.md (keeps this file short). Read this before saying anything is "done" or "covered".
 Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overnight_1021\AUDIT.md, AUDIT_repo.md.
 
+## 0. WAITING FOR YOU (only bungo can do these; top of the file, bungo 10-21)
+- RTBAKE1 picture pair: CPU bake vs GPU bake, museum indoor (+ x16 difference); merge waits on your OK (coming)
+- FOGTRICUBIC1 picture pair: smoother fog-grid read, Memory Den night (coming from VOLAIRSKY1)
+- PBRALBEDO1: its own gate fails (0/26 materials); a fix lane needs your yes
+- Game flights: AUDIT1 REF1 capture, LLFCHECK1, PRTP4 (save names), MOTION1/TERRBLEND1/WATER2 RenderDoc captures
+- About 20 open questions (AUDIT_ledgers 49-54): one at a time
+
 ## 1. WORKING ON NOW
 | Lane | What | State |
 |---|---|---|
