@@ -29,9 +29,11 @@ constexpr int AirInject = 25;	// lane VOLAIR1: the air pass, stage 2 reads stage
 constexpr int AirCluster = 26;	// lane VOLAIR1: the air pass's cluster light lists (isamplerBuffer; was 23)
 constexpr int AirGbuf = 27;		// lane VOLAIR1: the air pass, stage 0 reads AO1's g-buffer (sampler2D)
 constexpr int AirTile = 28;		// lane VOLAIR1: the air pass, stage 1 reads stage 0's column distances (sampler2D)
+constexpr int ShadowTerr = 31;	// lane TERRSHADOW1: the terrain shadow map (sampler2D; 29/30 are PERF1's, as on testint4)
+constexpr int ShadowContact = 32;	// lane TERRSHADOW1: the contact mask (sampler2D)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
-	AirVol, AirInject, AirCluster, AirGbuf, AirTile };
+	AirVol, AirInject, AirCluster, AirGbuf, AirTile, ShadowTerr, ShadowContact };
 
 constexpr bool distinct()
 {

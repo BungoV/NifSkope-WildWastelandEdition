@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "shadowset.h"
 
+#include "gl/cellunits.h"
 #include "gl/cellssr.h"		// the cell view's shared opaque pass (contact shadows read its depth)
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -41,8 +42,8 @@ namespace
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDeg = kPi / 180.0;
-constexpr int kTerrUnit = 29;		// sampler2D; 10..28 are taken (VOLAIR1 puts its sampler3D air on 24..25: a 2D map there made the surface draw invalid)
-constexpr int kContactUnit = 30;	// sampler2D; at the rebase both move into cellunits.h
+constexpr int kTerrUnit = WwCellUnit::ShadowTerr;	// the units live in cellunits.h (lane SHADOWPAR1)
+constexpr int kContactUnit = WwCellUnit::ShadowContact;
 constexpr float kNoHeight = -1.0e30f;
 constexpr double kSunRadius = 0.265;	// degrees: the penumbra's half-angle
 constexpr double kRelatch = 0.25;	// degrees: the sun moved this far -> a new sweep
@@ -314,7 +315,7 @@ bool unitsOk( NifSkopeOpenGLContext::GLFunctions * fn )
 	SetState & s = ss();
 	if ( !s.unitsChecked ) {
 		GLint units = 0;
-		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
+		fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &units );	// a unit index is bindable up to combined - 1 (testint4)
 		s.unitsOk = units > kContactUnit;
 		s.unitsChecked = 1;
 	}
