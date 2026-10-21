@@ -209,6 +209,28 @@ else
 	echo "half-aux off (the 2026-09-06 default): all four sheets convert at full size"
 fi
 
+# ONE PROCESS FOR THE WHOLE LIST (lane CARDBAKE2): each launch cost 20-30 s of start-up against a 2-3 s bake.
+# Same files byte for byte; skip-done stays per base. WW_CARDBAKE_RED=1 keeps the one-launch-per-base loop below.
+# One worker only: a second concurrent process measured ~70 s per base in mesh loading (cause not found).
+if [ "${WW_CARDBAKE_RED:-0}" != "1" ]; then
+	head -n "$MAX" "$W/cands.txt" > "$W/batch.txt"
+	WK=1
+	EXTRACT=0; [ ${#RESARGS[@]} -gt 0 ] && EXTRACT=1
+	for k in $(seq 0 $((WK - 1))); do
+		mkdir -p "$W/w$k"
+		awk -v k=$k -v n=$WK '(NR - 1) % n == k' "$W/batch.txt" > "$W/w$k/list.txt"
+		WW_IMPOSTOR_BATCH="$(winpath "$W/w$k/list.txt")" WW_IMPOSTOR_BATCH_OUT="$(winpath "$OUT")" \
+			WW_IMPOSTOR_BATCH_WORK="$(winpath "$W/w$k")" \
+			WW_IMPOSTOR_BATCH_DATAROOT="$DATAROOT" WW_IMPOSTOR_BATCH_EXTRACT="$EXTRACT" \
+			WW_IMPOSTOR_OCT="${OCT:-}" WW_IMPOSTOR_RING="$RING" WW_IMPOSTOR_TILE="$TILE" WW_IMPOSTOR_REF="$REF" \
+			WW_LODGEN_RESOURCES="$RESOURCES" WW_LODGEN_MO2="$MO2" \
+			"$NS" --port $((45917 + k)) >/dev/null 2>&1 &
+	done
+	brc=0; for job in $(jobs -p); do wait "$job" || brc=$?; done
+	cat "$W"/w*/batch.log 2>/dev/null | grep -v '^mesh '
+	echo done; exit $brc
+fi
+
 n=0
 while read -r formid extent model; do
 	[ -n "$formid" ] || continue
