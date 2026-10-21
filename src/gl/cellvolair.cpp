@@ -64,6 +64,7 @@ struct VaState
 	int terms = 15;
 	int probe = 0;
 	int fogBlend = 0;	// WW_CELL_VOLAIR_FOGBLEND=1 (option B, test only): the game's fog drawn over the lit air
+	int tricubic = 0;	// WW_CELL_VOLAIR_TRICUBIC=1 (FOGTRICUBIC1, bungo 10-21): the surfaces' B-spline froxel read; off until he rules
 	int opt = 3;		// WW_CELL_AIR_OPT (gates): 1 clustered lights, 2 the conservative depth skip; 0 the full loop
 	QString dump;
 	bool temporal = false;
@@ -118,6 +119,7 @@ VaState & vs()
 			s.terms = terms.toInt() & 15;
 		s.probe = qEnvironmentVariableIntValue( "WW_CELL_AIR_PROBE" );
 		s.fogBlend = qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_FOGBLEND" ) == 1 ? 1 : 0;
+		s.tricubic = qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_TRICUBIC" ) == 1 ? 1 : 0;
 		if ( s.fogBlend && ( s.red & 64 ) )
 			s.fogBlend = 2;	// red blendnear: the fog colour by the air's own 1 - T, no start distance (must fail B)
 		s.farTier = std::clamp( QSettings().value( QStringLiteral( "WW/VolAirFar" ), 0 ).toInt(), 0, 4 );	// lane FARGRID1
@@ -699,7 +701,7 @@ static void vaEcho()
 {
 	static QString said;
 	const VaState & s = vs();
-	const QString now = QStringLiteral( "volair=%1 fogblend=%2" ).arg( s.last ).arg( s.fogBlend );
+	const QString now = QStringLiteral( "volair=%1 fogblend=%2 tricubic=%3" ).arg( s.last ).arg( s.fogBlend ).arg( s.tricubic );
 	/* lane PERF1: said again only when more than the frame's own timings changed (buildms, ms): a line to a redirected
 	 * stderr every frame stalled the frame ~280 ms (measured). Red echoall: every frame, as before. */
 	static const QRegularExpression timings( QStringLiteral( " (buildms|ms)=[-0-9.]+" ) );
@@ -1543,7 +1545,7 @@ void wwVolAirUniforms( Scene * scene )
 	const int fl = prog->uniLocation( "volAirFlags" );
 	if ( fl >= 0 )
 		prog->uni1i_l( fl, ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
-			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) );
+			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) );
 }
 
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never
