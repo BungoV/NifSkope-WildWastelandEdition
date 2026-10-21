@@ -13,7 +13,8 @@
  * A GPU hit is a candidate only: refine() re-tests the GPU's triangle in double with probebvh's own test (and its
  * alpha hole); a nearest-hit ray then walks the CPU tree bounded at that distance, which returns the CPU's own
  * triangle (coplanar copies and ties included) cheaply. A hit the double test refuses (a graze the float test let
- * through) is re-cast on the CPU in full. Difference left: a CPU hit the GPU's float test missed (the ray stays a miss). */
+ * through) is re-cast on the CPU in full, and so is a nearest-hit miss: those rays then equal the CPU's exactly. An
+ * occlusion (anyHit) miss stays a miss -- the one difference left. */
 
 #include <algorithm>
 #include <atomic>
@@ -66,7 +67,8 @@ public:
 	void trace( const Ray * rays, size_t n, Hit * hits, bool anyHit = false );
 	/* The answer the CPU bake reads for a GPU hit h of the double ray (o, d) in (1e-4, tmax]: true + t + tri for a hit.
 	 * The GPU's triangle re-tested in double; a refused one re-cast on the CPU. exact (nearest-hit rays): the CPU walk
-	 * bounded at the re-tested t then gives the CPU's own triangle, ties included; an occlusion ray passes false. */
+	 * bounded at the re-tested t then gives the CPU's own triangle, ties included, and a miss is re-cast in full; an
+	 * occlusion ray passes false. */
 	bool refine( const Hit & h, const double o[3], const double d[3], double tmax, double * t, int * tri, bool exact = true ) const;
 	// counters for the bake census: rays traced here, rays the refine re-cast on the CPU, GPU milliseconds
 	std::atomic<long long> traced { 0 }, recast { 0 };

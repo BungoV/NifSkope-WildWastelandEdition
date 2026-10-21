@@ -829,7 +829,8 @@ void Scene::trace( const Ray * rays, size_t n, Hit * hits, bool anyHit )
 
 bool Scene::refine( const Hit & h, const double o[3], const double d[3], double tmax, double * t, int * tri, bool exact ) const
 {
-	if ( h.tri == -1 )
+	// an occlusion miss stays a miss; a nearest-hit miss is re-cast below (the float test can miss a CPU hit)
+	if ( h.tri == -1 && !exact )
 		return false;
 	if ( h.tri >= 0 && size_t( h.tri ) < bvh_->t.size() / 9 ) {
 		double tt, u, v;
@@ -839,12 +840,10 @@ bool Scene::refine( const Hit & h, const double o[3], const double d[3], double 
 			*t = tt;
 			*tri = h.tri;
 			/* nearest: the CPU walk bounded at that t returns the CPU's own answer (its nearest is no farther; the
-			 * pruning drops only nodes past it, so ties resolve in the same order), at a fraction of a full ray */
-			if ( exact && !( bvh_->ray( o, d, tt, t, tri ) && *tri >= 0 ) ) {
-				*t = tt;
-				*tri = h.tri;
-			}
-			return true;
+			 * pruning drops only nodes past it, so ties resolve in the same order), at a fraction of a full ray. When
+			 * that walk cannot reach the triangle (a box graze, the stack cap) the full re-cast below decides. */
+			if ( !exact || ( bvh_->ray( o, d, tt, t, tri ) && *tri >= 0 ) )
+				return true;
 		}
 	}
 	const_cast<Scene *>( this )->recast++;
