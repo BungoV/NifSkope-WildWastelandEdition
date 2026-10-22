@@ -126,10 +126,6 @@ struct Bucket
 	bool matUnreadable = false;
 	bool hasAlpha = false;
 	quint8 alphaThreshold = 128;
-	/*! lane TERRBLEND1: a blended-ground pass. Its vertex alpha is the pass's
-	 *  SHARE of the engine's weighted sum: the base opaque and scaled by it, a
-	 *  layer ADDED at it (SRC_ALPHA, ONE), and the renderer told so by block. */
-	bool landSplat = false;
 	/*! 2026-10-01: GLASS. A blended source (NiAlphaProperty bit 0, a BGSM's or a
 	 *  BGEM's bAlphaBlend) blends here too, at the material's fAlpha -- before
 	 *  this every car window was drawn as an opaque sheet. */
@@ -460,8 +456,6 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		}
 		if ( b.water )        // lane WATER1: the renderer draws this shape with the game's water terms
 			wwCellWaterShape( nif, nif->getBlockNumber( iShape ), b.waterRec );
-		if ( b.landSplat )    // lane TERRBLEND1: the renderer tells the shader the alpha is a share
-			wwCellLandShape( nif, nif->getBlockNumber( iShape ) );
 		if ( b.grass )        // lane GRASSMB1: the renderer fades this shape the game's grass way
 			wwCellGrassShape( nif, nif->getBlockNumber( iShape ), b.grassWave );
 		nif->set<QString>( iShape, "Name", part > 1
@@ -609,10 +603,10 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		if ( b.hasAlpha ) {
 			QModelIndex iAlpha = nif->insertNiBlock( QStringLiteral( "NiAlphaProperty" ) );
 			/* 4844 = alpha TEST only; 4333 = alpha BLEND, SRC_ALPHA /
-			 * ONE_MINUS_SRC_ALPHA. 4109 = SRC_ALPHA / ONE, ADDED: a blended-ground
-			 * layer is one share of the engine's weighted sum, not an opacity
-			 * over what is below it (lane TERRBLEND1). */
-			nif->set<int>( iAlpha, "Flags", b.landSplat ? 4109 : b.alphaThreshold ? 4844 : 4333 );
+			 * ONE_MINUS_SRC_ALPHA, which is what a splat layer needs
+			 * (lane CELLVIEW4). A threshold of 0 is asked for by the splat
+			 * layer buckets and by nothing else. */
+			nif->set<int>( iAlpha, "Flags", b.alphaThreshold ? 4844 : 4333 );
 			nif->set<int>( iAlpha, "Threshold", int( b.alphaThreshold ) );
 			nif->setLink( iShape, "Alpha Property", nif->getBlockNumber( iAlpha ) );
 		}
@@ -2195,7 +2189,6 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			wwCellUmbraSet( nif, std::move( umbraIn ) );	// lane UMBRA1
 	}
 	wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
-	wwCellLandBegin( nif );    // lane TERRBLEND1: forget the last cell's blended-ground shapes
 	wwCellGrassBegin( nif );   // lane GRASSMB1: and its grass shapes
 	QHash<quint32, WwWaterRecord> placedWaterRecs;   // lane WATER1: WNAM form -> its record (form 0 = unreadable)
 	int placedWaterShapes = 0;
@@ -3665,8 +3658,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 					groundNote = cellSplatLegend( sb ) + splatNote;
 					if ( baking ) {
 						/* lane PRTPBAKE: the ground's albedo per 128-unit quad -- each pass's map
-						 * mean times its VCLR, times the pass's mean SHARE, summed: the engine's
-						 * weighted sum (lane TERRBLEND1; it was laid alpha-over until then) */
+						 * mean times its VCLR, laid over the one below by the pass's mean opacity,
+						 * in the splat's draw order (buckets are emitted in it) */
 						std::vector<size_t> order( sb.quads.size() );
 						for ( size_t qi = 0; qi < order.size(); qi++ )
 							order[qi] = qi;
@@ -3690,11 +3683,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 							const qint64 gy = qint64( std::lround( ( q.v[0].p[1] + origin[1] ) / 128.0f ) );
 							const qint64 key = ( gx << 32 ) ^ ( gy & 0xffffffffll );
 							auto it = landAlb.find( key );
-							if ( it == landAlb.end() )
-								it = landAlb.insert( key, std::array<float, 3>{ { 0.0f, 0.0f, 0.0f } } );
-							std::array<float, 3> & col = it.value();
-							for ( int c = 0; c < 3; c++ )
-								col[c] += m[c] * vc[c] * std::clamp( wv, 0.0f, 1.0f );
+							const bool base = !sb.buckets.at( q.bucket ).blend || it == landAlb.end();
+							std::array<float, 3> & col = landAlb[key];
+							for ( int c = 0; c < 3; c++ ) {
+								const float layer = m[c] * vc[c];
+								col[c] = base ? layer : col[c] + ( layer - col[c] ) * std::clamp( wv, 0.0f, 1.0f );
+							}
 						}
 					}
 					splatNote.clear();
@@ -3708,11 +3702,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 						gbk.matString = src.diffuse;
 						gbk.normalTex = src.normal;
 						gbk.withColour = true;
-						/* A layer pass is ADDED; a base pass is opaque and scaled by its
-						 * share in the shader (lane TERRBLEND1). */
+						/* A layer pass blends; a base pass is opaque. Threshold 0 is
+						 * how emitBucket above tells the two apart. */
 						gbk.hasAlpha = src.blend;
 						gbk.alphaThreshold = 0;
-						gbk.landSplat = true;
 					}
 					for ( const CellSplatQuad & q : sb.quads ) {
 						if ( q.bucket < 0 || q.bucket >= groundBuckets.size() )

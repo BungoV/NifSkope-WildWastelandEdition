@@ -120,7 +120,6 @@ uniform int r4Red;					// WW_R4_RED: 1 nodiv, 2 emitmul, 4 notintmask, 8 emitraw
 
 uniform float alpha;
 uniform int alphaFlags;
-uniform bool landSplat;		// lane TERRBLEND1: vertex alpha = this blended-ground pass's share
 uniform float alphaThreshold;
 
 uniform vec2 uvScale;
@@ -132,7 +131,6 @@ in vec2 texCoord;
 
 flat in vec4 A;
 in vec4 C;
-in float rawVertexAlpha;	// lane TERRBLEND1: the vertex colour's own alpha (fo4_default.vert)
 flat in vec4 D;
 
 in mat3 btnMatrix;
@@ -739,20 +737,4 @@ void main()
 	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
 		fragColor = cellSsrProbeOut( cellSsrScene );	// lane SSR1
 #endif
-	/* lane TERRBLEND1: a blended-ground pass (src/cellsplat.h). The vertex alpha
-	 * is this pass's SHARE of the engine's weighted sum: an opaque base is scaled
-	 * by it, a layer is ADDED at it (SRC_ALPHA, ONE). Never the texture's alpha, and
-	 * the RAW vertex alpha: vertexColorOverride may force C.a to 1. */
-	/* water2fix: never over the data passes -- the obscurance pass (20: normal + view depth) and the
-	 * reflections' scene pass (60/61): the ground wrote depth 1 there and the water SSR march died on it */
-	bool splatData = false;
-#ifdef WW_CELLLIGHTS
-	splatData = cellOn && ( cellProbe == 20 || cellProbe == 60 || cellProbe == 61 );
-#endif
-	if ( landSplat && !splatData ) {
-		if ( ( alphaFlags & 8 ) != 0 )
-			fragColor.a = clamp( rawVertexAlpha, 0.0, 1.0 );
-		else
-			fragColor = vec4( fragColor.rgb * clamp( rawVertexAlpha, 0.0, 1.0 ), 1.0 );
-	}
 }
