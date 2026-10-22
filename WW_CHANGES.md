@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GIBLACKLINK1 (2026-10-22, branch giblacklink1-20261022): the giblack red links again
+
+- **Why.** On main the giblack gate's red (`WW_CELL_PV_RED=borrow`, and every march red, which compile
+  `WW_CELL_GI_MARCH`) failed to link `fo4_cellcsm.prog` on NVIDIA: "too many instructions" (the 64k-instruction
+  limit). Each `cellGiSample` call site inlined the whole march chain (`cellGiSampleFull`), about ten copies. Bisected
+  offline: it was not LIGHTSYS2. FARGRID1 (ac8ecf26) pushed the program over; TERRSHADOW1 had added +65 KB before it.
+- **What changed (march red only):** under `WW_CELL_GI_MARCH`, `fo4_default.frag` reads the march once a fragment
+  (`cellGiMarchPrime` in main, at the (P, N) every later caller passes; cellPassOut's nonormal red primes with up).
+  Every `cellGiSample` then returns that read. fo4_cellcsm's march program: did not link -> links (504769-byte driver
+  binary); fo4_cell's march 1515744 -> 403421 bytes. The red runs the chain once, not two or three times.
+- **Normal path:** untouched. Without the march, every `fo4_*.prog`'s driver binary equals main's except the run stamp
+  and the 8-byte source hash (the same machine code).
+- **Red:** `WW_CELL_GI_MARCH_COPIES` (shader define; the gate sets it) restores a march copy per call site; fo4_cellcsm
+  then fails to link again.
+- **Gate:** `tests/spells/cell_giblack_link.sh` (offline, through the driver, no NifSkope run; tool
+  `tests/spells/shader_link_check.py`): march links, red fails, normal binaries equal. PASS. The giblack picture
+  gate itself runs in the next batch.
+
 ## Lane TESTDRIVER1 (2026-10-22, branch testdriver1-20261022): switches flip live, one launch per scene
 
 - **Why.** bungo 10-22: "by relaunching nifskope, you introduce a significant delay by loading everything again".
