@@ -2229,6 +2229,42 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
  * <out>_path.txt holds, per frame, the camera as drawn, the temporal AA's echo and the sun cascades' echo.
  * With the temporal AA on, 16 still frames at the path's first camera run first so frame 0 is converged, and
  * the TAA frame index is pinned (pre-roll + k), so frame k is the same picture on every run. */
+bool wwCellParticlesOn();	// src/cellview.cpp
+
+/* lane FXCHECK1: a held still shot starts its emitters cold; run them WW_CELL_PARTICLES_PREROLL (5) s first, as the
+ * game's are already burning. Particles row only; red WW_CELL_PARTICLES_RED=nopreroll. */
+static QString wwParticlePreroll( GLView * ogl, float shotT )
+{
+	Scene * sc = ogl ? ogl->getScene() : nullptr;
+	if ( !sc || !wwCellParticlesOn() || qEnvironmentVariableIntValue( "WW_RENDER_FRAMES" ) > 0 )
+		return QString();
+	const bool red = qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "nopreroll";
+	bool ok = false;
+	float secs = qEnvironmentVariable( "WW_CELL_PARTICLES_PREROLL" ).toFloat( &ok );
+	if ( !ok || !( secs >= 0.0f ) )
+		secs = 5.0f;
+	if ( red )
+		secs = 0.0f;
+	int systems = 0, steps = 0, live = 0;
+	QMap<QString, int> byName;	// the census names each system, so a gate can read one model's systems
+	for ( Node * n : sc->nodes.list() ) {
+		auto * ps = dynamic_cast<Particles *>( n );
+		if ( !ps )
+			continue;
+		const int k = secs > 0.0f ? ps->wwPreroll( shotT - secs, shotT, 1.0f / 30.0f ) : 0;
+		systems += k > 0;
+		steps += k;
+		live += ps->liveCount();
+		byName[ps->getName()] += ps->liveCount();
+	}
+	QStringList census;
+	for ( auto it = byName.cbegin(); it != byName.cend(); ++it )
+		census << QStringLiteral( "%1=%2" ).arg( it.key() ).arg( it.value() );
+	return QStringLiteral( "particle preroll: %1 s%2, %3 systems, %4 steps, live %5 at t %6 | %7" ).arg( secs )
+		.arg( red ? QStringLiteral( " (red WW_CELL_PARTICLES_RED=nopreroll)" ) : QString() ).arg( systems ).arg( steps )
+		.arg( live ).arg( shotT ).arg( census.join( QLatin1Char( ' ' ) ) );
+}
+
 static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QString & out, float shotT )
 {
 	QFile side( QFileInfo( out ).path() + QLatin1Char( '/' ) + QFileInfo( out ).completeBaseName() + QStringLiteral( "_path.txt" ) );
@@ -2262,6 +2298,11 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		log << "path " << pathFile << " frames " << frames << " fps " << path.fps() << " preroll " << preroll
 			<< " taa " << ( wwGameTaaOn() ? 1 : 0 ) << "\n";
 	ogl->setSceneTime( shotT );
+	if ( const QString pre = wwParticlePreroll( ogl, shotT ); !pre.isEmpty() ) {
+		fprintf( stderr, "%s\n", qPrintable( pre ) );
+		if ( sideOk )
+			log << pre << "\n";
+	}
 	auto pump = [ogl]() {
 		for ( int i = 0; i < 2; i++ ) {
 			ogl->update();
@@ -23498,6 +23539,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 					skope->ogl->setSceneTime( shotT );
+					if ( const QString pre = wwParticlePreroll( skope->ogl, shotT ); !pre.isEmpty() )
+						fprintf( stderr, "%s\n", qPrintable( pre ) );
 
 					// grabFramebuffer() reads the CURRENT buffer without
 					// repainting — pump twice or the grab is a stale frame.
