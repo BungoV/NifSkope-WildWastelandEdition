@@ -1,14 +1,17 @@
 #include "cellhdr.h"
 
 #include "gl/celllights.h"
+#include "gl/cellssr.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 
 #include <QDebug>
+#include <QFile>
 #include <QHash>
 
 #include <algorithm>
 #include <cstdint>
+#include <vector>
 
 // lane HDR1: the cell view's linear frame and its one tone map (cellhdr.h)
 
@@ -117,7 +120,10 @@ bool wwCellHdrBegin( Scene * scene )
 			fn->glDeleteTextures( 1, &g.color );
 		fn->glGenTextures( 1, &g.color );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
-		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, GL_RGBA16F, W, H, GL_TRUE );
+		/* finalfix (SUNCELL1): the linear frame is RGBA32F, not RGBA16F. Multisampled additive blending into fp16
+		 * (the blended ground layers, SRC_ALPHA/ONE) rounded +-1 step differently run to run on the same inputs
+		 * (every draw's state, uniforms and textures traced identical); fp32 measured 0 of 7 frames differing. */
+		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, GL_RGBA32F, W, H, GL_TRUE );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 		if ( !g.ds )
 			fn->glGenRenderbuffers( 1, &g.ds );
@@ -166,6 +172,64 @@ bool wwCellHdrBegin( Scene * scene )
 	return true;
 }
 
+/*! finalfix (SUNCELL1 noise hunt): WW_CELL_HDR_DUMP=<prefix> writes every frame's linear frame, resolved to one
+ *  sample, as <prefix>_<n>.bin (int32 w h, then w*h RGBA float, bottom row first) just before the tone map. */
+void hdrDump( Scene * scene, NifSkopeOpenGLContext::GLFunctions * fn, const HdrGpu & g, int w, int h )
+{
+	static const QString prefix = QString::fromLocal8Bit( qgetenv( "WW_CELL_HDR_DUMP" ) );
+	static int n = 0;
+	if ( prefix.isEmpty() || n >= 64 )
+		return;
+	GLuint tex = 0, fbo = 0;
+	fn->glGenTextures( 1, &tex );
+	fn->glBindTexture( GL_TEXTURE_2D, tex );
+	fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glGenFramebuffers( 1, &fbo );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, fbo );
+	fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0 );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
+	fn->glBlitFramebuffer( 0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+	std::vector<float> px( size_t( w ) * size_t( h ) * 4 );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, fbo );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	fn->glReadPixels( 0, 0, w, h, GL_RGBA, GL_FLOAT, px.data() );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0 );
+	fn->glDeleteFramebuffers( 1, &fbo );
+	fn->glDeleteTextures( 1, &tex );
+	QFile f( prefix + QStringLiteral( "_%1.bin" ).arg( n++ ) );
+	if ( f.open( QIODevice::WriteOnly ) ) {
+		const qint32 hd[2] = { w, h };
+		f.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
+		f.write( reinterpret_cast<const char *>( px.data() ), qint64( px.size() * sizeof( float ) ) );
+	}
+	{	// the frame's globals, view and bounds, <prefix>_m<n>.bin (raw bytes, compared frame to frame)
+		QFile fm( prefix + QStringLiteral( "_m%1.bin" ).arg( n - 1 ) );
+		if ( fm.open( QIODevice::WriteOnly ) ) {
+			fm.write( reinterpret_cast<const char *>( scene->renderer->globalUniforms ),
+				qint64( sizeof( NifSkopeOpenGLContext::GlobalUniforms ) ) );
+			fm.write( reinterpret_cast<const char *>( &scene->view ), qint64( sizeof( scene->view ) ) );
+			const BoundSphere b = scene->bounds();
+			const float bb[4] = { b.center[0], b.center[1], b.center[2], b.radius };
+			fm.write( reinterpret_cast<const char *>( bb ), qint64( sizeof( bb ) ) );
+		}
+	}
+	WwCellAoTargets ao;	// the obscurance's opaque pass of the same frame, <prefix>_g<n>.bin
+	if ( wwCellAoTargets( scene, ao ) && ao.gbuf ) {
+		std::vector<float> gb( size_t( ao.w ) * size_t( ao.h ) * 4 );
+		fn->glBindTexture( GL_TEXTURE_2D, ao.gbuf );
+		fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, gb.data() );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		QFile fg( prefix + QStringLiteral( "_g%1.bin" ).arg( n - 1 ) );
+		if ( fg.open( QIODevice::WriteOnly ) ) {
+			const qint32 hd[2] = { ao.w, ao.h };
+			fg.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
+			fg.write( reinterpret_cast<const char *>( gb.data() ), qint64( gb.size() * sizeof( float ) ) );
+		}
+	}
+}
+
 void wwCellHdrEnd( Scene * scene )
 {
 	HdrState & s = hst();
@@ -178,6 +242,7 @@ void wwCellHdrEnd( Scene * scene )
 	HdrGpu & g = hdrGpus()[r];
 	while ( fn->glGetError() != GL_NO_ERROR ) {
 	}
+	hdrDump( scene, fn, g, s.w, s.h );	// finalfix: WW_CELL_HDR_DUMP only
 	// depth and stencil back to the frame: later draws test against the scene, the stencil sorts the pixels
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( s.prevDraw ) );

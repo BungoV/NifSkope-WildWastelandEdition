@@ -1457,6 +1457,14 @@ bool wwLookdevDrawBackground( Scene * scene )
 			sx.skyLast = line;
 			return true;
 		}
+		/* finalfix (SUNCELL1): the backdrop draws single-sample. Its blended layers (clouds, stars, sun, moon) blended
+		 * into the multisampled frame came out +-1 step differently run to run on identical inputs; with multisampling
+		 * off two runs match. The backdrop has no geometry edge to smooth: the scene drawn after it keeps its MSAA. */
+		struct SingleSample {
+			const GLboolean was = glIsEnabled( GL_MULTISAMPLE );
+			SingleSample() { glDisable( GL_MULTISAMPLE ); }
+			~SingleSample() { if ( was ) glEnable( GL_MULTISAMPLE ); }
+		} singleSample;
 		const SkyFrame f = skyFrame();
 		// the dome replaces the cube; a dome that will not resolve falls back to the cube, by name
 		bool dome = false;

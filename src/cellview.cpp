@@ -27,7 +27,6 @@ BSD License - see nifskope.h
 #include "farlight.h"		// lane FARVIEW1: distant light from the surfels
 #include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
 #include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
-#include "cellfarlod.h"		// lane FARLOD1: the far field around the block
 #include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
 #include "cellaodecal.h"		// lane AODECAL1: baked AO decals under big movable statics
 
@@ -2021,7 +2020,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				continue;
 			}
 			WwPrevisBox x;
-			x.c = Vector3( r.pos[0], r.pos[1], r.pos[2] ) - origin;
+			x.c = Vector3( r.pos[0], r.pos[1], r.pos[2] );	// finalfix: world units -- scene->view takes world points (cell shapes carry the origin as their translation)
 			cellPrimAxes( r.rot, x.ax );
 			for ( int k = 0; k < 3; k++ )
 				x.half[k] = std::max( std::abs( r.primHalf[k] ) * r.scale, 1.0f );
@@ -4686,15 +4685,6 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	}
 	CellSpeed::mark( "welded shapes written to the document" );
 
-	/* lane FARLOD1: the far field around the block (cellfarlod.h) -- the Far LOD row, ships off */
-	QString farLodNotes;
-	if ( !spec.interior && cellFarLodWanted() ) {
-		QStringList farSearched;
-		const QString farLodl = cellFarLodl( spec.world, dataRoot, farSearched );
-		farLodNotes = cellFarLodAppend( nif, iRoot, world, spec.world, spec.cx, spec.cy, spec.n, farLodl, origin );
-		CellSpeed::mark( "far LOD appended" );
-	}
-
 	nif->holdUpdates( false );
 	nif->updateModel();
 	CellSpeed::mark( "document updateModel" );
@@ -5146,7 +5136,6 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 		  << refModel.countOfFate( CellRefFate::Deleted ) << ", no base "
 		  << refModel.countOfFate( CellRefFate::NoBase ) << ")\n";
 		s << probeNotes;   // lane PRTPPLACE, empty unless WW_CELL_PROBES
-		s << farLodNotes;  // lane FARLOD1, empty unless the Far LOD row
 		s << "  built in " << clock.elapsed() << " ms\n";
 #ifndef ESM_HAS_CELL_FIELDS
 		s << "  NOTE: built without the esmdata cell fields (XLYR, XESP, editor ids and "
