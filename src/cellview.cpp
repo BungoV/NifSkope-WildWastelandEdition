@@ -1091,6 +1091,106 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		L.lights.append( l );
 		wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // lane FXLIT1: a red control's data
 	}
+	/* lane LIGHTBOOTH1 part C (the barrel column test; a harness pin, never a user toggle): WW_CELL_BOOTH_LIGHT =
+	 * <ref form id hex>:<key>=<v>[;<key>=<v>...][,<next>...] changes a kept placed light after it is read, so a
+	 * booth picture can try a light the record does not carry. Keys: shadow=none|omni (kind 0 / 3), spot=<fov deg>
+	 * (a spot aimed +Z), dz=<units> (moved up), radius=<units>, scale=<x> (colour), near=<units> (the shadow's near
+	 * clip), cone=<exp> (the spot edge), off (dropped). An entry with add=<x>/<y>/<z> leaves the light alone and adds a
+	 * copy of it AS READ at that point, the entry's other keys applied to the copy (ref 0). The lights line says
+	 * "booth light: <id> <what changed>" per entry. Unset: no change. */
+	QString boothLightNote;
+	const QByteArray boothLightPin = qgetenv( "WW_CELL_BOOTH_LIGHT" ).trimmed().toLower();
+	if ( !boothLightPin.isEmpty() ) {
+		QHash<quint32, WwCellLight> asRead;
+		for ( const WwCellLight & l : std::as_const( L.lights ) )
+			if ( l.ref )
+				asRead.insert( l.ref, l );
+		QList<WwCellLight> added;
+		QSet<quint32> drop;
+		QStringList notes;
+		for ( const QByteArray & e : boothLightPin.split( ',' ) ) {
+			const int colon = e.indexOf( ':' );
+			bool ok = false;
+			const quint32 id = e.left( colon < 0 ? e.size() : colon ).trimmed().toUInt( &ok, 16 );
+			const QString hex = QStringLiteral( "%1" ).arg( id, 8, 16, QLatin1Char( '0' ) );
+			if ( !ok || !asRead.contains( id ) ) {
+				notes << QStringLiteral( "%1 not kept (refused)" ).arg( QString::fromLatin1( e.trimmed() ) );
+				continue;
+			}
+			const QList<QByteArray> kv = colon < 0 ? QList<QByteArray>() : e.mid( colon + 1 ).split( ';' );
+			WwCellLight copy = asRead.value( id );
+			WwCellLight * t = nullptr;
+			QStringList what;
+			for ( const QByteArray & p : kv ) {
+				if ( p.trimmed().startsWith( "add=" ) ) {
+					const QList<QByteArray> xyz = p.trimmed().mid( 4 ).split( '/' );	// x/y/z: the comma parts the entries
+					if ( xyz.size() == 3 ) {
+						for ( int k = 0; k < 3; k++ )
+							copy.pos[k] = xyz.at( k ).toFloat();
+						copy.ref = 0;
+						t = &copy;
+						what << QStringLiteral( "added a copy at %1,%2,%3" ).arg( double( copy.pos[0] ), 0, 'f', 1 )
+							.arg( double( copy.pos[1] ), 0, 'f', 1 ).arg( double( copy.pos[2] ), 0, 'f', 1 );
+					}
+				}
+			}
+			if ( !t ) {
+				for ( WwCellLight & l : L.lights )
+					if ( l.ref == id )
+						t = &l;
+			}
+			for ( const QByteArray & p0 : kv ) {
+				const QByteArray p = p0.trimmed();
+				const int eq = p.indexOf( '=' );
+				const QByteArray k = eq < 0 ? p : p.left( eq ), v = eq < 0 ? QByteArray() : p.mid( eq + 1 );
+				bool num = false;
+				const float f = v.toFloat( &num );
+				if ( k == "add" ) {
+					continue;
+				} else if ( k == "off" && t != &copy ) {
+					drop.insert( id );
+					what << QStringLiteral( "off" );
+				} else if ( k == "shadow" && ( v == "none" || v == "omni" ) ) {
+					t->shadow = v == "omni" ? 3 : 0;
+					what << QStringLiteral( "shadow %1" ).arg( QString::fromLatin1( v ) );
+				} else if ( k == "spot" && num && f > 0.0f && f < 180.0f ) {
+					t->spot = true;
+					t->shape = 0;
+					t->cosOuter = std::cos( f * 0.5f * 3.14159265f / 180.0f );
+					t->dir[0] = 0.0f;
+					t->dir[1] = 0.0f;
+					t->dir[2] = 1.0f;
+					what << QStringLiteral( "spot fov %1 up (cos %2, edge %3)" ).arg( double( f ) )
+						.arg( double( t->cosOuter ), 0, 'f', 5 ).arg( double( t->cone ) );
+				} else if ( k == "dz" && num ) {
+					t->pos[2] += f;
+					what << QStringLiteral( "dz %1 (z %2)" ).arg( double( f ) ).arg( double( t->pos[2] ), 0, 'f', 1 );
+				} else if ( k == "radius" && num && f > 0.0f ) {
+					t->radius = f;
+					what << QStringLiteral( "radius %1" ).arg( double( f ) );
+				} else if ( k == "scale" && num ) {
+					for ( int c = 0; c < 3; c++ )
+						t->color[c] *= f;
+					what << QStringLiteral( "colour x%1" ).arg( double( f ) );
+				} else if ( k == "near" && num && f >= 0.0f ) {
+					t->nearClip = f;
+					what << QStringLiteral( "near clip %1" ).arg( double( f ) );
+				} else if ( k == "cone" && num && f > 0.0f ) {
+					t->cone = f;
+					what << QStringLiteral( "spot edge %1" ).arg( double( f ) );
+				} else {
+					what << QStringLiteral( "'%1' refused" ).arg( QString::fromLatin1( p ) );
+				}
+			}
+			if ( t == &copy )
+				added << copy;
+			notes << QStringLiteral( "%1 %2" ).arg( hex, what.isEmpty() ? QStringLiteral( "unchanged" ) : what.join( QLatin1Char( ' ' ) ) );
+		}
+		L.lights.erase( std::remove_if( L.lights.begin(), L.lights.end(),
+			[&]( const WwCellLight & l ) { return l.ref && drop.contains( l.ref ); } ), L.lights.end() );
+		L.lights.append( added );
+		boothLightNote = QStringLiteral( " booth light: %1" ).arg( notes.join( QStringLiteral( "; booth light: " ) ) );
+	}
 	QString amb = QStringLiteral( "none (exterior: the viewport light)" ), dir = QStringLiteral( "none (exterior: the Lookdev weather sun or moon)" );
 	if ( spec.interior ) {
 		const EsmInteriorCell & ic = world.interior();
@@ -1292,7 +1392,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		+ QStringLiteral( " imagespace=%1" ).arg( isNote )
 		+ QStringLiteral( " fog=%1" ).arg( L.fogNote.isEmpty() ? QStringLiteral( "none (exterior: the Lookdev weather fog)" ) : L.fogNote )
 		+ QStringLiteral( " godrays=%1 emitters=%2" ).arg( L.godRayNote )	// lane VOLFOG1
-			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.godRay > 0.0f; } ) );
+			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.godRay > 0.0f; } ) )
+		+ boothLightNote;	// lane LIGHTBOOTH1 part C
 	wwCellLightsPublish( nif, L );
 }
 

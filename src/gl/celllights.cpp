@@ -17,6 +17,7 @@ BSD License - see nifskope.h
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/lookdevstage.h"	// lane SUNCELL1
 #include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
+#include "gl/glproperty.h"	// lane LIGHTBOOTH1: alpha-tested cube casters read the base map
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 
 #include <QElapsedTimer>
@@ -1562,31 +1563,46 @@ void wwCellShadowPass( Scene * scene )
 		fn->glGenFramebuffers( 1, &g.shFbo );
 	}
 
-	// the casters: what the sun's map takes (opaque, depth-writing, no effect), less the alpha-tested
+	// the casters: what the sun's map takes (opaque, depth-writing, no effect)
 	struct ShCaster
 	{
 		const Shape * sh;
 		Vector3 c;
 		float rad;
 		Matrix4 mv;
+		bool at;	// lane LIGHTBOOTH1: alpha-tested, drawn behind its alpha test (cell_shadowdepth_at)
 	};
 	std::vector<ShCaster> casters;
 	// lane SUNCELL1: a cell's water surface casts no light shadow either (the game's water is no caster; a pond's
 	// plane under a lamp shadowed its own bed). Red WW_CELL_SHADOW_RED=watercasts keeps it.
 	static const bool waterCastsRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts";
 	int waterSkipped = 0;
+	/* lane LIGHTBOOTH1 (10-16): an alpha-tested shape casts what its alpha test keeps, as the colour pass draws it.
+	 * It was skipped: a fire barrel's walls (MetalBarrel01Alpha.BGSM, NiAlphaProperty test on) never reached the cube
+	 * of the light inside it, and that light's shadow-on and shadow-off pictures were byte-identical. Only a shape the
+	 * test can run on (a lighting shader, one UV per vertex) is taken; the rest are skipped as before. Red
+	 * WW_CELL_SHADOW_RED=atskip skips every alpha-tested shape again. */
+	static const bool atSkipRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "atskip";
+	int atCasters = 0, atSkipped = 0;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || sh->wwAlphaTested() )
+		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
+		const bool at = sh->wwAlphaTested();
+		if ( at && ( atSkipRed || !sh->wwShaderLighting() || sh->coords.isEmpty()
+			|| sh->coords.constFirst().size() != sh->verts.size() ) ) {
+			atSkipped++;
+			continue;
+		}
 		if ( !waterCastsRed && wwCellWaterIsShape( scene->nifModel, sh->id() ) ) {
 			waterSkipped++;
 			continue;
 		}
 		const BoundSphere b = sh->bounds();
-		casters.push_back( { sh, b.center, b.radius, sh->viewTrans().toMatrix4() } );
+		casters.push_back( { sh, b.center, b.radius, sh->viewTrans().toMatrix4(), at } );
+		atCasters += at ? 1 : 0;
 	}
 
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_shadowdepth.prog" );
@@ -1596,6 +1612,12 @@ void wwCellShadowPass( Scene * scene )
 		g.shStamp++;
 		s.shadowLast = QStringLiteral( "refused(no cell_shadowdepth.prog)" );
 		return;
+	}
+	// lane LIGHTBOOTH1: the alpha-tested casters' program; without it they are skipped as before (said in the line)
+	NifSkopeOpenGLContext::Program * progAt = nullptr;
+	if ( atCasters ) {
+		progAt = r->useProgram( "cell_shadowdepth_at.prog" );
+		r->useProgram( "cell_shadowdepth.prog" );
 	}
 	// save what the pass touches
 	GLint prevRead = 0, prevDraw = 0, vp[4], polyMode[2], depthFunc = 0;
@@ -1630,7 +1652,7 @@ void wwCellShadowPass( Scene * scene )
 	const int lRel = prog->uniLocation( "shRelFromView" ), lClip = prog->uniLocation( "shClipFromRel" );
 	const int lRn = prog->uniLocation( "shRadiusNear" );
 	bool complete = true;
-	qint64 drawn = 0;
+	qint64 drawn = 0, drawnAt = 0;
 	for ( int k : dirty ) {
 		if ( !complete )
 			break;
@@ -1649,12 +1671,14 @@ void wwCellShadowPass( Scene * scene )
 			fn->glUniform2f( lRn, l.radius, l.nearClip );
 		const float n = 1.0f, f = l.radius * 1.01f + 2.0f;
 		const float A = ( f + n ) / ( f - n ), B = -2.0f * f * n / ( f - n );
-		std::vector<const ShCaster *> mine;
+		std::vector<const ShCaster *> mine, mineAt;
 		for ( const ShCaster & c : casters ) {
+			if ( c.at && !progAt )
+				continue;
 			const float dx = c.c[0] - l.pos[0], dy = c.c[1] - l.pos[1], dz = c.c[2] - l.pos[2];
 			const float reach = c.rad + l.radius;
 			if ( dx * dx + dy * dy + dz * dz < reach * reach )
-				mine.push_back( &c );
+				( c.at ? mineAt : mine ).push_back( &c );
 		}
 		for ( int face = 0; face < 6; face++ ) {
 			fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.shTex, 0, 6 * k + face );
@@ -1682,6 +1706,61 @@ void wwCellShadowPass( Scene * scene )
 					GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, c->sh->triangles.constData() );
 				drawn++;
 			}
+			// lane LIGHTBOOTH1: the alpha-tested casters, the same face behind their alpha test
+			if ( !mineAt.empty() ) {
+				r->useProgram( "cell_shadowdepth_at.prog" );
+				const int aRel = progAt->uniLocation( "shRelFromView" ), aClip = progAt->uniLocation( "shClipFromRel" );
+				const int aRn = progAt->uniLocation( "shRadiusNear" );
+				if ( aRel >= 0 )
+					fn->glUniformMatrix4fv( aRel, 1, GL_FALSE, rel );
+				if ( aClip >= 0 )
+					fn->glUniformMatrix4fv( aClip, 1, GL_FALSE, clip );
+				if ( aRn >= 0 )
+					fn->glUniform2f( aRn, l.radius, l.nearClip );
+				for ( const ShCaster * c : mineAt ) {
+					progAt->uni4m( "modelViewMatrix", c->mv );
+					int texunit = 0;
+					const BSLightingShaderProperty * lsp = c->sh->wwLightingShader();
+					BSShaderLightingProperty * bsp = c->sh->wwShaderLighting();
+					progAt->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+					progAt->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
+					progAt->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
+					progAt->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
+					progAt->uni1f( "alphaThreshold", c->sh->wwAlphaThreshold() );
+					const float * attrv[8] = { &( c->sh->verts.constFirst()[0] ), nullptr, nullptr, nullptr, nullptr, nullptr,
+						nullptr, &( c->sh->coords.constFirst().constFirst()[0] ) };
+					const float * const * attrs = attrv;
+					r->drawShape( (unsigned int) ( c->sh->verts.size() ), 0x20000003ULL, (unsigned int) ( c->sh->triangles.size() * 3 ),
+						GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, c->sh->triangles.constData() );
+					drawnAt++;
+				}
+				r->useProgram( "cell_shadowdepth.prog" );
+			}
+			/* lane LIGHTBOOTH1: WW_CELL_SHADOW_CUBE_DUMP=<prefix> reads the first rendered slot's six faces back:
+			 * <prefix>_<face>.pgm (8 bit, depth x 255, 255 = nothing cast) and a line per face in <prefix>.txt with the
+			 * covered texel count. A gate's proof that a caster reached the cube; unset: no read, no GL call. */
+			static const QByteArray cubeDump = qgetenv( "WW_CELL_SHADOW_CUBE_DUMP" );
+			if ( !cubeDump.isEmpty() && k == dirty.front() ) {
+				std::vector<float> dep( size_t( kShadowFace ) * kShadowFace );
+				fn->glReadBuffer( GL_NONE );
+				fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.shFbo );
+				fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.shTex, 0, 6 * k + face );
+				fn->glReadPixels( 0, 0, kShadowFace, kShadowFace, GL_DEPTH_COMPONENT, GL_FLOAT, dep.data() );
+				qint64 covered = 0;
+				QByteArray pgm = QStringLiteral( "P5\n%1 %1\n255\n" ).arg( kShadowFace ).toLatin1();
+				for ( float d : dep ) {
+					covered += d < 1.0f ? 1 : 0;
+					pgm.append( char( std::clamp( int( d * 255.0f + 0.5f ), 0, 255 ) ) );
+				}
+				QFile pf( QString::fromLocal8Bit( cubeDump ) + QStringLiteral( "_%1.pgm" ).arg( face ) );
+				if ( pf.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+					pf.write( pgm );
+				QFile tf( QString::fromLocal8Bit( cubeDump ) + QStringLiteral( ".txt" ) );
+				if ( tf.open( QIODevice::WriteOnly | ( face ? QIODevice::Append : QIODevice::Truncate ) ) )
+					tf.write( QStringLiteral( "face %1 light %2 covered %3 of %4 casters %5 at %6\n" ).arg( face )
+						.arg( L->lights.at( g.shSlot[k] ).ref, 8, 16, QLatin1Char( '0' ) ).arg( covered )
+						.arg( qint64( kShadowFace ) * kShadowFace ).arg( mine.size() ).arg( mineAt.size() ).toLatin1() );
+			}
 		}
 	}
 	r->stopProgram();
@@ -1708,7 +1787,10 @@ void wwCellShadowPass( Scene * scene )
 	}
 	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6 water=%7" )
 		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( kShadowFace )
-		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) );	// lane SUNCELL1
+		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) )	// lane SUNCELL1
+		+ ( atSkipRed ? QStringLiteral( " at=skipped %1(RED)" ).arg( atSkipped )	// lane LIGHTBOOTH1
+			: atCasters && !progAt ? QStringLiteral( " at=refused(no cell_shadowdepth_at.prog) %1" ).arg( atCasters )
+			: QStringLiteral( " at=%1 atdraws=%2 atskipped=%3" ).arg( atCasters ).arg( drawnAt ).arg( atSkipped ) );
 	shadowDump( scene );
 }
 

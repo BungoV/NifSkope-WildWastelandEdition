@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIGHTBOOTH1 part C (2026-10-16): alpha-tested shapes cast into the light shadow cubes; booth light pin
+
+- **Fix: an alpha-tested shape now casts into a placed light's shadow cube**, behind its own alpha test (new
+  `cell_shadowdepth_at.prog`: the base map's alpha x the material alpha against the shape's threshold, as the colour
+  pass tests it). It was skipped outright: a fire barrel's walls (`MetalBarrel01Alpha.BGSM`) never reached the cube
+  of the light inside the barrel, so that light's shadow-on and shadow-off pictures were byte-identical and the fire
+  lit the air and the floor through the walls. Shapes the test cannot run on (no lighting shader, no UV per vertex)
+  are skipped as before. The shadow line adds `at=<casters> atdraws=<draws> atskipped=<n>`. Red
+  `WW_CELL_SHADOW_RED=atskip` skips every alpha-tested shape again.
+- **Harness pin `WW_CELL_BOOTH_LIGHT=<ref id hex>:<key>=<v>[;...][,<next>...]`** (never a user toggle) changes a
+  kept placed light after it is read: `shadow=none|omni`, `spot=<fov>` (aimed +Z), `dz=`, `radius=`, `scale=`
+  (colour), `near=` (shadow near clip), `cone=` (spot edge), `off`; `add=<x>/<y>/<z>` adds a copy of the light as
+  read at that point with the entry's other keys. The lights line says `booth light: <id> <what changed>`. Unset:
+  no change.
+
 ## Lane LIGHTBOOTH1 (2026-10-16, branch lightbooth1-20261016 on volair1-20261013): the light test booth
 
 - **Harness pins for measuring one light fixture alone** (environment only; no menu rows, nothing changes unset):
