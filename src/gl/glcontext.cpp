@@ -391,6 +391,11 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		static const bool giMarch = wwCellGiVis() == 1;
 		if ( giMarch && data.startsWith( "#version" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_GI_MARCH 1\n" );
+		// lane PERF3: the cascades from one per-frame block, in the sources that ask for it (WW_FRAME_UBO_RED=1: plain uniforms)
+		static const bool frameUbo = qgetenv( "WW_FRAME_UBO" ).trimmed() != "0" && qgetenv( "WW_FRAME_UBO_RED" ).trimmed() != "1"
+			&& qgetenv( "WW_PERF3_RED" ).trimmed() != "1";
+		if ( frameUbo && data.startsWith( "#version" ) && data.contains( "WW_FRAME_UBO" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_FRAME_UBO 1\n" );
 
 		if ( name.ends_with( "frag" ) ) {
 			if ( qsizetype n = data.indexOf( "NUM_TEXTURE_UNITS" ); n >= 0 )
@@ -620,6 +625,11 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 			if ( unsigned int l = f->glGetUniformBlockIndex( id, "skinningUniforms" ); l != GL_INVALID_INDEX ) {
 				f->glUniformBlockBinding( id, l, 1 );
 				f->glBindBufferBase( GL_UNIFORM_BUFFER, 1, context->boneTransformsBufferObject );
+			}
+			wwShadowFrame = false;	// lane PERF3: gl/sunshadow.cpp fills and binds the buffer
+			if ( unsigned int l = f->glGetUniformBlockIndex( id, "wwShadowFrame" ); l != GL_INVALID_INDEX ) {
+				f->glUniformBlockBinding( id, l, 2 );
+				wwShadowFrame = true;
 			}
 			if ( linkFrom == 2 ) {
 				context->programCacheHits++;

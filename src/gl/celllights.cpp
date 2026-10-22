@@ -18,6 +18,7 @@ BSD License - see nifskope.h
 #include "gl/cellbloom.h"	// lane BLOOM1b
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellpasstime.h"	// lane PERF2: sub-stage timers
+#include "gl/celldrawstate.h"	// lane PERF3
 #include "gl/lookdevstage.h"	// lane SUNCELL1
 #include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
@@ -2281,6 +2282,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glDepthMask( GL_TRUE );
 	const GLfloat far4[4] = { 0.0f, 0.0f, 0.0f, 1.0e6f };
 	fn->glClearBufferfv( GL_COLOR, 0, far4 );
+	if ( wwCellSsrPrevStencil() )
+		fn->glStencilMask( 0xFF );	// lane PERF3: the clear zeroes the flag bit too
 	fn->glClear( GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
 	fn->glDisable( GL_BLEND );
 	fn->glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );	// wwCellAoDraw opens it for the opaque cell-lit draws
@@ -2308,6 +2311,11 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glDepthMask( GL_TRUE );
 	fn->glDisable( GL_STENCIL_TEST );
 	fn->glDisable( GL_POLYGON_OFFSET_FILL );
+	if ( wwCellSsrPrevStencil() ) {	// lane PERF3: the flag write's stencil state back to the defaults
+		fn->glStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+		fn->glStencilMask( 0xFF );
+		fn->glStencilFunc( GL_ALWAYS, 0, 0xFF );
+	}
 	// lane AODECAL1 (src/gl/cellaodecalgl.h): the decal copies over this opaque pass, into their own target
 	if ( g.decalUnit >= 0 && wwCellAoDecalHas( scene->nifModel ) )
 		g.decal = GLuint( wwCellAoDecalRun( scene, g.gbuf.tex, g.gbufDepth, W, H ) );
@@ -2472,10 +2480,17 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	cellProgram = cellProgram && aoIsCellProgram( prog );
 	if ( a.pass ) {
 		// the game's opaque (deferred) pass: no blended draw, no effect, nothing that is not cell-lit
-		const bool opaque = cellProgram && !glIsEnabled( GL_BLEND );
+		const bool opaque = cellProgram && !wwDrawBlend();
 		glColorMask( opaque, opaque, opaque, opaque );
 		if ( !opaque )
 			glDepthMask( GL_FALSE );
+		if ( wwCellSsrPrevStencil() ) {
+			// lane PERF3 (cellssr.h): stencil bit 0x01 = the nearest opaque surface's reflection flag (AODECAL1 uses 0x80)
+			glEnable( GL_STENCIL_TEST );
+			glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+			glStencilMask( opaque ? 0x01u : 0x00u );
+			glStencilFunc( GL_ALWAYS, opaque && wwCellSsrFlagged() ? 1 : 0, 0xFF );
+		}
 		if ( cellProgram ) {
 			prog->uni1i( "cellProbe", 20 );
 			// lane PERF1: the fragment returns once it has the normal (WW_AO_EARLY=0 shades it all, =red marks the early ones)
@@ -2492,11 +2507,10 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	aoUnits( r->fn, g );	// lane AOOFF1: never unit 0 (BaseMap), even when the pass has not run
 	// lane DECALLIT1: an effect decal is blended, but the game draws it into the opaque surface it lies on
 	const bool decalProg = wwIsCellDecalProgramName( prog->name );
-	const bool on = g.aoReady && g.doc == scene->nifModel && !( a.red & 1 ) && ( !glIsEnabled( GL_BLEND ) || decalProg )
+	const bool on = g.aoReady && g.doc == scene->nifModel && !( a.red & 1 ) && ( !wwDrawBlend() || decalProg )
 		&& wwCellLightsWanted( scene );
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
-	GLint prevActive = 0;
-	r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	const GLint prevActive = wwDrawActiveTexture();	// lane PERF3
 	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + g.unit ) );
 	r->fn->glBindTexture( GL_TEXTURE_2D, on ? g.fin.tex : 0 );
 	r->fn->glActiveTexture( GLenum( prevActive ) );
@@ -2504,7 +2518,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	prog->uni1b( "cellAoOn", on );
 	/* lane AODECAL1: the decal target multiplies the probe term (cellGiE). Opaque draws only, like the obscurance:
 	 * a blended draw is not in the opaque pass the target was made over. */
-	const bool decalOn = g.ready && g.doc == scene->nifModel && g.decal && g.decalUnit >= 0 && ( !glIsEnabled( GL_BLEND ) || decalProg );
+	const bool decalOn = g.ready && g.doc == scene->nifModel && g.decal && g.decalUnit >= 0 && ( !wwDrawBlend() || decalProg );
 	{
 		const int du = g.decalUnit >= 0 ? g.decalUnit : g.unit;
 		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + du ) );
@@ -2514,8 +2528,8 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		prog->uni1i( "cellAoDecal", du );
 		prog->uni1b( "cellAoDecalOn", decalOn );
 		if ( decalOn ) {
-			GLint dvp[4] = { 0, 0, 1, 1 };
-			glGetIntegerv( GL_VIEWPORT, dvp );
+			int dvp[4];
+			wwDrawViewport( dvp );
 			prog->uni4f_l( prog->uniLocation( "cellAoDecalRect" ), FloatVector4( float( dvp[0] ), float( dvp[1] ), 0.0f, 0.0f ) );
 		}
 	}
@@ -2525,7 +2539,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		// a probe picture (WW_CELL_LIT_PROBE) reads the volumes' mask at its own pixel instead: the screen pass's read
 		const bool probePic = ( st().measuring ? 6 : st().probe ) != 0;
 		const bool giOn = g.giReady && g.doc == scene->nifModel && ( wwCellGiRate() == 0 || wwCellGiRate() == 1 ) && wwCellGiVis() == 0
-			&& ( !glIsEnabled( GL_BLEND ) || decalProg ) && ( !probePic || g.volOn );
+			&& ( !wwDrawBlend() || decalProg ) && ( !probePic || g.volOn );
 		if ( g.giUnits ) {
 			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
 			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? ( probePic ? g.volMask.tex : g.giHalf.tex ) : 0 );
@@ -2535,17 +2549,22 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		}
 		prog->uni1b( "cellGiHalfOn", giOn );
 		if ( giOn ) {
-			GLint vp[4] = { 0, 0, 1, 1 };
-			glGetIntegerv( GL_VIEWPORT, vp );
+			int vp[4];
+			wwDrawViewport( vp );
 			prog->uni4f_l( prog->uniLocation( "cellGiHalfRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 				float( g.giHalf.w ), float( g.giHalf.h ) ) );
 			prog->uni1f( "cellGiHalfScale", 1.0f / float( g.giStep ) );
 		}
 	}
 	if ( on ) {
-		GLint vp[4] = { 0, 0, 1, 1 };
-		glGetIntegerv( GL_VIEWPORT, vp );
+		int vp[4];
+		wwDrawViewport( vp );
 		prog->uni4f_l( prog->uniLocation( "cellAoRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}
+}
+
+bool wwCellAoInPass()
+{
+	return ao().pass;
 }

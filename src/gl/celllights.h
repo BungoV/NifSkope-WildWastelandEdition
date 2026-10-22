@@ -372,5 +372,7 @@ QString wwCellShadowEcho( Scene * scene );
 void wwCellAoPass( Scene * scene, bool run );
 //! called with every program setupProgram binds: the opaque pass's masks, and the obscurance a cell-lit draw reads
 void wwCellAoDraw( Scene * scene, bool cellProgram );
+//! lane PERF3: the opaque pass is drawing
+bool wwCellAoInPass();
 
 #endif

@@ -4,6 +4,19 @@
  * Uploaded by gl/sunshadow.cpp wwSunShadowUniforms; the fit is echoed there. */
 
 uniform sampler2DArrayShadow csmMap;
+#ifdef WW_FRAME_UBO
+// lane PERF3: the frame's cascade values, one buffer for every program (gl/sunshadow.cpp CsmFrameBlock mirrors it)
+layout ( std140 ) uniform wwShadowFrame
+{
+	mat4 csmMat[3];
+	vec3 csmInvRange;
+	float csmForce;
+	vec4 csmParams;
+	vec4 csmSplitOffset;
+	int csmProbe;
+	int csmRed;
+};
+#else
 uniform mat4 csmMat[3];		// view space -> (u, v, depth) of cascade i
 uniform vec3 csmInvRange;	// 1 / (far_i - 150): a world-unit offset in depth units
 uniform vec4 csmParams;		// 1 / view scale, shadow distance D, map size, blend band B
@@ -11,6 +24,7 @@ uniform vec4 csmSplitOffset;	// the two pair boundaries (800, 3000), receiver of
 uniform int csmProbe;		// 0 off, 1 hard tap, 2 cascade colour, 3 filtered + blend, 4 final factor, 5 selection
 uniform int csmRed;		// 1 noblend, 2 nofade, 4 diffonly, 8 factorhalf (the OFF leak)
 uniform float csmForce;		// WW_CSM_FORCE: >= 0 replaces the factor (the factor-site wiring test); -1 off
+#endif
 
 // lane TERRSHADOW1: the unified set (gl/shadowset.h). ussOn = 0 runs the CSM1 code below unchanged.
 uniform int ussOn;

@@ -3,6 +3,7 @@
 
 #include "gl/cellbloom.h"
 #include "gl/celllights.h"
+#include "gl/cellssr.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "gl/cellpasstime.h"
@@ -605,6 +606,7 @@ void wwCellHdrEnd( Scene * scene )
 	const GLenum blitErr = fn->glGetError();
 	PassTime::subEnd( PassTime::ToneBlit );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+	wwCellSsrKeepFrame( scene, g.fbo, s.w, s.h );	// lane PERF3: WW_CELL_SSR_PREV's previous frame (else nothing)
 	// lane VOLAIR1 (gates only): WW_CELL_HDR_DUMP=<file> writes the linear frame before the bloom and the tone map,
 	// samples resolved: int32 W H, then W x H x RGBA float32, bottom row first. Every frame (a still path: the last).
 	static const QByteArray hdrDump = qgetenv( "WW_CELL_HDR_DUMP" );

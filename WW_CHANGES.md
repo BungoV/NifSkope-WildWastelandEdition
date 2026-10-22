@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane PERF3 (2026-10-22, branch perf3-20261022): cell view per-draw CPU cuts, reflections from the previous frame
+
+- **GL query cache, exact.** Inside one draw's setup the per-draw hooks asked the driver for the blend state, the
+  active texture unit and the viewport several times each (a driver sync each). They now read them once a draw
+  (`src/gl/celldrawstate.h`). `WW_DRAW_GLCACHE=0` or `WW_DRAW_GLCACHE_RED=1`: the old queries and their cost.
+- **Obscurance pass lean, exact.** While the obscurance (AO) pass draws, the reflection and bounce hooks no longer
+  bind their samplers and uniforms (that pass writes only the normal and depth; the main pass sets them again).
+  `WW_CELL_AO_LEAN=0` or `WW_CELL_AO_LEAN_RED=1`: the old path.
+- **Sun-shadow frame block, exact.** The cascade matrices and their scalars go to one per-frame uniform block
+  (`wwShadowFrame`, binding 2), uploaded only when they change, instead of nine by-name uniform sets per program bind.
+  `WW_FRAME_UBO=0` or `WW_FRAME_UBO_RED=1`: the old uniforms.
+- **Reflections from the previous frame (test only, off).** `WW_CELL_SSR_PREV=1`: the reflections stop drawing the
+  scene a second time. The obscurance pass writes the reflection flag into stencil bit 0x01 of its depth buffer, and
+  a march hit samples the previous frame's finished linear color, reprojected into its camera. It falls back to the
+  second pass when the water's rays or the bounce need it, or when there is no previous frame of this size.
+  `WW_CELL_SSR_PREV_RED=1`: the second pass. A look change: stays off until bungo sees the pair.
+- `WW_PERF3_RED=1` brings back all four old paths at once. The obscurance pass itself stays the shared normal/depth
+  prepass (the main pass is a forward MSAA pass with no normal target to reuse).
+
 ## Lane HORIZON1 (2026-10-21, branch horizon1-20261021): the AO map and the shadow heightmap on all cores
 ## Lane PERF2 (2026-10-21, branch perf2-20261021): cell view frame cost (timers first, then exact cuts)
 

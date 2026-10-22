@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "cellssgi.h"
 #include "cellssr.h"
 #include "cellunits.h"
+#include "gl/celldrawstate.h"	// lane PERF3
 
 #include "gl/celllights.h"
 #include "gl/glnode.h"
@@ -360,19 +361,18 @@ void wwCellSsgiDraw( Scene * scene, bool cellProgram )
 	const bool have = it != gpus().constEnd() && it->unit > 0;
 	// the scene pass (lane SSR1's) is the donor: it never reads the bounce it feeds
 	const bool on = have && it->ready && it->doc == scene->nifModel && !( s.red & 1 ) && !wwCellSsrInPass()
-		&& !glIsEnabled( GL_BLEND ) && wwCellLightsWanted( scene );
+		&& !wwDrawBlend() && wwCellLightsWanted( scene );
 	prog->uni1b( "cellSsgiOn", on );
 	if ( !have )
 		return;
-	GLint prevActive = 0;
-	r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	const GLint prevActive = wwDrawActiveTexture();	// lane PERF3
 	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + it->unit ) );
 	r->fn->glBindTexture( GL_TEXTURE_2D, on ? it->fin.tex : 0 );
 	r->fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellSsgi", it->unit );
 	if ( on ) {
-		GLint vp[4] = { 0, 0, 1, 1 };
-		glGetIntegerv( GL_VIEWPORT, vp );
+		int vp[4];
+		wwDrawViewport( vp );
 		prog->uni4f_l( prog->uniLocation( "cellSsgiRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 		prog->uni2f( "cellSsgiK", kAoAmount, kIndirect );
