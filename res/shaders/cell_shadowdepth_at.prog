@@ -1,0 +1,6 @@
+# The cell lights' shadow caster pass for alpha-tested shapes (lane LIGHTBOOTH1, 10-16): cell_shadowdepth plus
+# the base map's alpha (times the material alpha) against the shape's own alpha-test threshold, as the colour pass
+# and the sun's lookdev_csmdepth_at test it. A fire barrel's walls (MetalBarrel01Alpha.BGSM) cast into the cube of
+# the light inside it. Selected by name from gl/celllights.cpp; red WW_CELL_SHADOW_RED=atskip skips them as before.
+
+shaders cell_shadowdepth_at.vert cell_shadowdepth_at.frag
