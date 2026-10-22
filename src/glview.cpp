@@ -62,6 +62,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "data/nifitem.h"
 #include "nifsnapshot.h"
 #include "probesky.h"	// lane SKY1: one call a frame
+#include "celldoorlive.h"	// lane DOORLIVE1: one call a frame
 #include "shortcutregistry.h"
 #include "wwskin.h"
 #include "spells/animationsetup.h"
@@ -3917,6 +3918,7 @@ void GLView::paintGL()
 	// Before anything transforms: pose the marked skeleton and hand its pose to
 	// every scene that snaps to it. No-op, and costs one branch, when unmarked.
 	applyWorkspaceSkeleton( viewTrans );
+	wwDoorLiveTick( scene, this );	// lane DOORLIVE1: the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
 	scene->transform( viewTrans, time );
 
 	// Setup projection mode (lane MOTION1: the one projection a frame the temporal AA jitters)

@@ -33,6 +33,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "lodgen.h"
 #include "lodgengpu.h"
 #include "proberelight.h"
+#include "celldoorlive.h"	// lane DOORLIVE1: the port's NifSkope::door
+#include "glview.h"
 #include "nifcli.h"
 #include "nifskope.h"
 #include "hkxanimui.h"
@@ -399,6 +401,13 @@ void IPCsocket::execCommand( const QString & cmd )
 {
 	if ( cmd.startsWith( "NifSkope::open" ) ) {
 		openNif( cmd.right( cmd.length() - 15 ) );
+	} else if ( cmd.startsWith( "NifSkope::door " ) ) {
+		// lane DOORLIVE1: NifSkope::door <open|close|cycle|t=<s>|state> drives the visible window's live door
+		for ( NifSkope * doc : NifSkope::openDocuments() )
+			if ( doc && doc->isVisible() && doc->getGLView() ) {
+				fprintf( stderr, "%s\n", qPrintable( wwDoorLiveCommand( doc->getGLView()->getScene(), cmd.mid( 15 ) ) ) );
+				break;
+			}
 	}
 }
 

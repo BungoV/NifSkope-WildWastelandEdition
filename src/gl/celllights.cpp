@@ -230,6 +230,7 @@ struct Gpu
 	int shVersion = 0;
 	int shSlot[kShadowSlots];
 	int shStamp = 1, bufShStamp = 0;
+	int shKick = 0;	// lane DOORLIVE1: a moving caster (a live door) re-renders every held slot
 	std::vector<float> spheres;	// lane VOLAIR1: every buffer light's world centre + radius (copies included), in order
 	std::vector<float> texels;		// the light buffer as uploaded, for the cluster lists
 	std::uint64_t texelStamp = 0;
@@ -1561,6 +1562,19 @@ static void shadowDump( Scene * scene )
 
 /* lane SHADOW1: the depth cubes (celllights.h). Each face: world relative to the light, GL's cube face
  * axes (major m, s = u.r, t = v.r over |m.r|), 90 degrees; depth = distance / radius (the fragment stage). */
+namespace {
+QHash<const void *, int> & shadowKicks()
+{
+	static QHash<const void *, int> k;
+	return k;
+}
+}	// namespace
+
+void wwCellShadowKick( const void * nif )
+{
+	shadowKicks()[nif]++;
+}
+
 void wwCellShadowPass( Scene * scene )
 {
 	if ( !wwCellLightsWanted( scene ) )
@@ -1629,6 +1643,15 @@ void wwCellShadowPass( Scene * scene )
 				dirty.push_back( k );
 				break;
 			}
+		}
+	}
+	{
+		const int kick = shadowKicks().value( scene->nifModel );
+		if ( g.shKick != kick ) {
+			g.shKick = kick;
+			for ( int k = 0; k < kShadowSlots; k++ )
+				if ( g.shSlot[k] >= 0 && std::find( dirty.begin(), dirty.end(), k ) == dirty.end() )
+					dirty.push_back( k );
 		}
 	}
 	if ( changed || !dirty.empty() )

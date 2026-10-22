@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "gamemanager.h"
+#include "celldoorlive.h"	// lane DOORLIVE1: a path frame poses the live door
 #include "lodgen.h"
 #include "lodgengpu.h"
 #include "lodgenlayout.h"
@@ -2313,6 +2314,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	float fov = 70.0f;
 	path.sample( 0, eye, at, fov );
 	ogl->wwSetPathCamera( true, eye, at, fov );
+	wwDoorLiveStep( ogl->getScene(), 0.0 );	// lane DOORLIVE1: the preroll sees the door at its first frame
 	for ( int k = 0; k < preroll; k++ ) {
 		wwGameTaaSetFrame( k );
 		wwCellPostSetPath( k, float( path.fps() ) );	// lane GRASSMB1: the motion blur's frame and frame time
@@ -2323,8 +2325,12 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		ogl->wwSetPathCamera( true, eye, at, fov );
 		wwGameTaaSetFrame( preroll + k );
 		wwCellPostSetPath( preroll + k, float( path.fps() ) );
+		// lane DOORLIVE1: the live door at this frame's time (posed and relit before the frame draws)
+		const QString door = wwDoorLiveStep( ogl->getScene(), path.fps() > 0 ? double( k ) / double( path.fps() ) : 0.0 );
 		pump();
 		const QImage img = ss > 0 ? ogl->grabSupersampled( ss ) : ogl->grabFramebuffer();
+		if ( sideOk && !door.isEmpty() )
+			log << "frame " << k << " " << door << "\n";
 		img.save( frameName( k ) );
 		if ( sideOk )
 			log << "frame " << k << " eye " << QString::asprintf( "%.6f %.6f %.6f", eye[0], eye[1], eye[2] )

@@ -29,6 +29,7 @@ BSD License - see nifskope.h
 #include "probefar.h"		// lane BAKEBLOCK1: the far soup beyond the loaded block
 #include "gl/cellpasstime.h"	// lane PERF1: private bytes at each stage
 #include "proberelight.h"	// lane GPURELIGHT1: the relight from recorded operators (CPU + GPU)
+#include "celldoorlive.h"	// lane DOORLIVE1: one live door
 #include "farlight.h"		// lane FARVIEW1: distant light from the surfels
 #include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
 #include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
@@ -1617,6 +1618,74 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
 	return systems;
 }
 
+/* lane DOORLIVE1: the live door's whole model (its shapes too, unlike the particles' copy) under a new node that
+ * carries the placement; the copied root's own transform is cleared as the weld ignores it. Collision and lights are
+ * left out. Returns the blocks copied (the root first), 0 or less on a refusal. */
+static int cellCopyDoorBranch( NifModel * nif, const QModelIndex & iParent, NifModel & src, const Vector3 & at,
+	const Matrix & rot, float scale, quint32 ref, qint32 * wrapper, qint32 * rootOut, QString * why )
+{
+	const QList<int> roots = src.getRootLinks();
+	if ( roots.isEmpty() || !src.blockInherits( src.getBlockIndex( roots.first() ), "NiNode" ) ) {
+		*why = QStringLiteral( "no NiNode root" );
+		return -1;
+	}
+	QList<qint32> order;
+	QSet<qint32> seen;
+	std::function<void( qint32 )> walk = [&]( qint32 b ) {
+		if ( b < 0 || seen.contains( b ) )
+			return;
+		seen.insert( b );
+		const QModelIndex ib = src.getBlockIndex( b );
+		if ( !ib.isValid() || src.blockInherits( ib, "NiCollisionObject" ) || src.blockInherits( ib, "NiLight" )
+			|| src.blockInherits( ib, "bhkSerializable" ) )
+			return;
+		order.append( b );
+		for ( const int c : src.getChildLinks( b ) )
+			walk( c );
+	};
+	walk( roots.first() );
+	const qint32 base = nif->getBlockCount();
+	QMap<qint32, qint32> map;
+	for ( qint32 b = 0; b < src.getBlockCount(); b++ )
+		map.insert( b, -1 );
+	for ( int i = 0; i < order.size(); i++ )
+		map.insert( order.at( i ), base + i );
+	for ( const qint32 b : order ) {
+		const QModelIndex ib = src.getBlockIndex( b );
+		const QString type = src.createRTTIName( ib );
+		QStringList strings = serializeStrings( &src, ib, type );
+		QByteArray data;
+		QBuffer buf( &data );
+		if ( !buf.open( QIODevice::WriteOnly ) || !src.saveIndex( buf, ib ) ) {
+			*why = QStringLiteral( "%1 %2 would not save" ).arg( type ).arg( b );
+			return -1;
+		}
+		buf.close();
+		const QModelIndex nb = buf.open( QIODevice::ReadOnly ) ? nif->insertNiBlock( type ) : QModelIndex();
+		if ( !nb.isValid() || !nif->loadAndMapLinks( buf, nb, map ) ) {
+			*why = QStringLiteral( "%1 %2 would not load" ).arg( type ).arg( b );
+			return -1;
+		}
+		deserializeStrings( nif, nb, type, strings );
+	}
+	Transform().writeBack( nif, nif->getBlockIndex( base ) );
+	const QModelIndex iW = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+	nif->set<QString>( iW, "Name", QStringLiteral( "doorlive %1" ).arg( ref, 8, 16, QLatin1Char( '0' ) ) );
+	nif->set<quint32>( iW, "Flags", 14 );
+	nif->set<float>( iW, "Scale", 1.0f );
+	Transform t;
+	t.rotation = rot;
+	t.translation = at;
+	t.scale = scale;
+	t.writeBack( nif, iW );
+	const qint32 w = nif->getBlockNumber( iW );
+	addLink( nif, iW, QStringLiteral( "Children" ), base );
+	addLink( nif, iParent, QStringLiteral( "Children" ), w );
+	*wrapper = w;
+	*rootOut = base;
+	return int( order.size() );
+}
+
 /* lane BAKEINCR1: the far soup a bake of (cx, cy) with this block would append, as one sha1 -- the
  * triangles, their albedo and glass, the very ring probeFarAppendRing reads. "none" when the world has
  * no FO4CSLOD .lodl (the bake then appends none either). Only cells whose ring content moved go dirty. */
@@ -2696,7 +2765,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const bool alphaPin = qgetenv( "WW_CELL_ALPHATEST_PIN" ).trimmed() == "off";
 	/* lane GPURELIGHT1: WW_CELL_GI_GPU or WW_CELL_GI_DOORS: the doors' own triangles go into the soup's doorGeom (a
 	 * closed door stops light by its faces, lets it through its alpha-test holes, tints it through its panes) */
-	const bool giDoorGeom = baking && ( wwCellGiGpuOn() || !qgetenv( "WW_CELL_GI_DOORS" ).isEmpty() );
+	const bool giDoorGeom = baking && ( wwCellGiGpuOn() || !qgetenv( "WW_CELL_GI_DOORS" ).isEmpty() || wwDoorLiveWantsGi() );
+	// lane DOORLIVE1: the live door is copied in whole after the weld (its own nodes move); the weld leaves it out
+	const quint32 doorLiveRef = wwDoorLiveRef();
+	int doorLiveShapes = 0;
 	int dgShapes = 0, dgMasked = 0, dgGlass = 0, dgGlassUnread = 0, dgDropped = 0;
 	// Measurement pin only: WW_CELL_ALPHATEST_FOLIAGE=keep puts landscape\ alpha-tested cards in the soup with their mask.
 	const bool foliageKeep = qgetenv( "WW_CELL_ALPHATEST_FOLIAGE" ).trimmed() == "keep";
@@ -3852,6 +3924,18 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					bbOwn += QStringLiteral( "|W%1" ).arg( lb.waterType, 8, 16, QLatin1Char( '0' ) );
 					placedWaterShapes++;
 				}
+			}
+			if ( doorLiveRef && p.ref == doorLiveRef && !isActor ) {   // lane DOORLIVE1: drawn by its copied branch
+				for ( size_t v = 0; v < nv; v++ ) {
+					const Vector3 wp = p.pos + p.rot * ( Vector3( s.geom.pos[v * 3 + 0], s.geom.pos[v * 3 + 1], s.geom.pos[v * 3 + 2] ) * p.scale );
+					for ( int k = 0; k < 3; k++ ) {
+						lo[k] = qMin( lo[k], wp[k] );
+						hi[k] = qMax( hi[k], wp[k] );
+					}
+				}
+				pick.triangles += quint32( s.geom.tris.size() / 3 );
+				doorLiveShapes++;
+				continue;
 			}
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
 			if ( cableSway ) {
@@ -5367,6 +5451,40 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 	}
 
+	/* lane DOORLIVE1: THE LIVE DOOR. The placement WW_CELL_DOOR_ANIM names is left out of the weld above and its model
+	 * copied in whole (shapes, nodes, controllers, sequences; no collision, no lights) under a node carrying the
+	 * placement, so its own Open / Close sequence moves it (src/celldoorlive.h). */
+	if ( ok && doorLiveRef ) {
+		QString why;
+		qint32 wrapper = -1, root = -1, count = 0;
+		QString model;
+		for ( const Placement & p : placements ) {
+			if ( p.ref != doorLiveRef || !p.actorKey.isEmpty() )
+				continue;
+			model = world.lodBase( p.base ).model;
+			auto m = std::make_shared<NifModel>();
+			QByteArray bytes;
+			QBuffer dev( &bytes );
+			bool good = !model.isEmpty() && lodgenReadModelBytes( dataRoot, model, bytes ) && dev.open( QIODevice::ReadOnly )
+				&& m->load( dev, model.toLocal8Bit().constData() );
+			if ( good ) {
+				m->resetState();
+				good = m->getVersionNumber() == nif->getVersionNumber() && m->getBSVersion() == nif->getBSVersion();
+			}
+			if ( !good )
+				why = QStringLiteral( "%1 unreadable or not this version" ).arg( model );
+			else
+				count = cellCopyDoorBranch( nif, iRoot, *m, p.pos - origin, p.rot, p.scale, p.ref, &wrapper, &root, &why );
+			break;
+		}
+		if ( model.isEmpty() && why.isEmpty() )
+			why = QStringLiteral( "no placement with that ref in the cell" );
+		const QString note = count > 0 ? QStringLiteral( "%1 blocks copied, %2 welded shapes left out" ).arg( count ).arg( doorLiveShapes )
+			: QStringLiteral( "not copied: %1" ).arg( why );
+		wwDoorLiveSetBranch( nif, doorLiveRef, model, count > 0 ? wrapper : -1, count > 0 ? root : -1, count, note );
+		fprintf( stderr, "door live: ref %08x model %s: %s\n", doorLiveRef, qPrintable( model ), qPrintable( note ) );
+	}
+
 	/* THE PICK HIGHLIGHT (lane CELLVIEW2) -- created ONCE, here, and MOVED on
 	 * every click (src/cellclick.h). The scene WELDS, so the picked reference
 	 * is a few hundred vertices inside a shape holding a hundred thousand and
@@ -5468,7 +5586,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			/* lane FARVIEW1: WW_CELL_FARLIGHT=<folder> records the operators too, writes the light record and the far light's
 			 * layers there (src/farlight.h), and publishes the far tables for the Far light row */
 			const QString farDir = QString::fromLocal8Bit( qgetenv( "WW_CELL_FARLIGHT" ) );
-			const bool giRec = giGpu || !farDir.isEmpty();
+			const bool giRec = giGpu || !farDir.isEmpty() || wwDoorLiveWantsGi();
 			bool farBaked = false;
 			ProbeRelightOps relOps;
 			QStringList relPlugins;
@@ -5630,6 +5748,23 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				}
 				probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1: the second slots and the rooms
 				wwCellGiPublish( nif, gi );
+				if ( wwDoorLiveWantsGi() ) {   // lane DOORLIVE1: the live door's GI follows from these operators
+					if ( relOps.built ) {
+						std::vector<WwDoorLiveBox> boxes;
+						for ( const ProbeSoup::Door & d : probeSoup.doors ) {
+							WwDoorLiveBox bx;
+							bx.ref = d.ref;
+							for ( int k = 0; k < 3; k++ ) {
+								bx.lo[k] = d.lo[k];
+								bx.hi[k] = d.hi[k];
+							}
+							boxes.push_back( bx );
+						}
+						probeNotes += wwDoorLiveKeepGi( nif, relOps, gi, boxes );
+					} else {
+						probeNotes += QStringLiteral( "  door live: no relight operators recorded; the GI does not follow\n" );
+					}
+				}
 				wwCellAoDecalPublish( nif, gs.aoDecals );	// lane AODECAL1 (null: no decals)
 				if ( farBaked ) {	// lane FARVIEW1: the far tables for the group state, and the GI's placed share
 					FarLightSet set;
