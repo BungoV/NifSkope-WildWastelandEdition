@@ -1,5 +1,12 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GATEFIX3 (2026-10-22, cherry-picked onto tonemap1-20261022): soft effects find the opaque depth again
+
+- **Soft effects find the opaque depth again (GATEFIX3).** Since TONEMAP1 the linear frame's depth / stencil texture
+  samples stencil, so the framebuffer query read its depth as 0 bits: the soft-effect depth grab failed ("lane EFX2:
+  no soft effects"), soft effects lost their depth fade in the default view, and FXRES1 refused. The grab now takes
+  the frame's own depth / stencil format.
+
 ## Lane TONEMAP1 + SYNC1 (2026-10-22, branch tonemap1-20261022): the cell view's tone map without the stencil blit
 
 - **Stencil read by the tone map, exact.** The linear (HDR) frame's depth/stencil is now a multisample texture. Only

@@ -549,6 +549,15 @@ bool wwCellHdrActive()
 	return hst().active;
 }
 
+unsigned int wwCellHdrDepthFormat( unsigned int fbo )
+{
+	if ( fbo )
+		for ( const HdrGpu & g : hdrGpus() )
+			if ( g.fbo == fbo )
+				return g.dsFormat;
+	return 0;
+}
+
 QString wwCellHdrEcho()
 {
 	return hst().last;
