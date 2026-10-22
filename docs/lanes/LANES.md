@@ -54,6 +54,7 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | FXRES1 | soft effects (smoke, steam, fog cards) at 1/2 resolution per axis: an exact layer composited with a depth-aware upsample (off-screen particles method, own GLSL); particles, AO + frame resolution full; ships OFF until bungo sees the pairs (bungo 10-22) | BATCH ready (fxres1-20261022 3c63e594 on aaformat1, exe sha1 8a5e8c4f; fxres1/BATCH.md): bar stated (mean 0.5/255, >8/255 0.05 %); gates, pairs + timing unrun |
 
 | AAFORMAT1 | anti-aliasing + HDR target format study: MSAA count (WW_MSAA) vs TAA alone, linear frame RGBA32F vs RGBA16F (R11G11B10F out: the tone map needs alpha); everything ships OFF (bungo 10-22) | BATCH ready (aaformat1-20261022 e4a201ad on vrs1, exe sha1 2dd7b5fc; aaformat1/BATCH.md): bar stated; gates, pairs, timing + memory unrun |
+| EMISSIVEGRID1 | finer local GI grid (~35 u) around glowing surfels so neon signs throw their hot spot (Rexford ceiling); ships OFF, bungo judges the pair (bungo 10-22 "let's try it") | WORKING 10-22 13:1x (emissivegrid1-20261022; may shoot its judgment pair itself, one exclusive hold) |
 Next batch (BATCH2): VOLPART1R, FARCARD1, PERF3, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
 Queued tonight (his 10-21 go): VTGPU1 + PROFILE1 (after
 BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
