@@ -623,6 +623,7 @@ static void sunShadowPassImpl( Scene * scene )
 		offsetClamp = clampFn;
 		s.slopeClamp = offsetClamp ? 1 : -1;
 	}
+	const bool cslopeZero = offsetClamp && wwShadowRed( "cslopezero" );
 	bool complete = true;
 	std::vector<std::uint32_t> cullRanges;	// lane SUNCELL1
 	std::vector<std::uint16_t> cullIdx;
@@ -637,8 +638,11 @@ static void sunShadowPassImpl( Scene * scene )
 		fn->glClearDepth( 1.0 );
 		fn->glClear( GL_DEPTH_BUFFER_BIT );
 		fn->glViewport( 0, 0, c.vw, c.vh );
+		// lane OBJLODSHADOW1: probe WW_SHADOW_RED=cslopezero -- the same entry point with clamp 0 (no clamping), to split
+		// cslope's +1.8 ms between the clamp call and the clamped bias (timing only)
 		if ( offsetClamp )
-			offsetClamp( s.slopeBias, s.unitBias, float( s.unitBias / 65536.0 + s.slopeBias * c.texel * 4.0 / std::max( c.far - kNear, 1e-6 ) ) );
+			offsetClamp( s.slopeBias, s.unitBias, cslopeZero ? 0.0f
+				: float( s.unitBias / 65536.0 + s.slopeBias * c.texel * 4.0 / std::max( c.far - kNear, 1e-6 ) ) );
 		if ( lMvp >= 0 )
 			fn->glUniformMatrix4fv( lMvp, 1, GL_FALSE, c.clipFromView );
 		for ( int pass = 0; pass < ( progAt ? 2 : 1 ); pass++ ) {

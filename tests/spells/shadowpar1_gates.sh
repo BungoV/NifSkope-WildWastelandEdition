@@ -57,6 +57,7 @@ if [ -n "$RED" ]; then
 	case "$RED" in
 		nodist|nocradius|nocslope|nocontact|noobjlod|nonear|nopen|nolowsun|nomoon|notslope|nodim|nofogtail) REDPIN="WW_SHADOW_RED=$RED" ;;
 		contactgrey|viewidle) REDPIN="WW_SHADOW_RED=$RED" ;;	# FIXGATES1's code reds: the old effect test, the idle view
+		objlodall) REDPIN="WW_SHADOW_RED=$RED" ;;	# OBJLODSHADOW1: every object-LOD shape casts (the old caster set)
 		*) echo "unknown red $RED"; exit 2 ;;
 	esac
 fi
@@ -220,6 +221,9 @@ if want cell; then
 	# the air: none / fogtail (Volumetric Air on)
 	{ it objlod || it pen || it dim || it fogtail; } && cellshot "$NEW" c_v2_none "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=2 WW_SHADOW_PAR=0 $REDPIN
 	it objlod && cellshot "$NEW" c_v2_objlod "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=2 WW_SHADOW_PAR=objlod $REDPIN
+	# OBJLODSHADOW1: a 2000-unit reach (dist item) so ring 0's objects lie past it and cast (at 16000 the whole ring is inside)
+	it objlod && cellshot "$NEW" c_v2_d2k_none "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=2 WW_SHADOW_PAR=dist \n		WW_SHADOW_DISTANCE=2000 $REDPIN
+	it objlod && cellshot "$NEW" c_v2_d2k_objlod "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=2 WW_SHADOW_PAR=dist,objlod \n		WW_SHADOW_DISTANCE=2000 $REDPIN
 	it pen && cellshot "$NEW" c_v2_pen "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=2 WW_SHADOW_PAR=pen $REDPIN
 	it contact && cellshot "$NEW" c_v3_none "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=3 WW_SHADOW_PAR=0 $REDPIN
 	it contact && cellshot "$NEW" c_v3_contact "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=3 WW_SHADOW_PAR=contact $REDPIN
@@ -251,6 +255,9 @@ if want perf && [ -z "$RED" ]; then
 		WW_SHADOW_RED=contactfull,contactnoexit
 	cellshot "$NEW" perf_base_air "${CELL[@]}" "${LOW[@]}" "${PF[@]}" "${ALLT[@]}" WW_SHADOW_PAR=0 WW_CELL_AIR=1
 	cellshot "$NEW" perf_base_taa "${CELL[@]}" "${LOW[@]}" "${PF[@]}" "${ALLT[@]}" WW_SHADOW_PAR=0 WW_TAA=1
+	# OBJLODSHADOW1: cslope's cost split -- the clamp entry point with clamp 0 (no clamping); a second base for the noise
+	cellshot "$NEW" perf_cslope_zero "${CELL[@]}" "${LOW[@]}" "${PF[@]}" "${ALLT[@]}" WW_SHADOW_PAR=cslope WW_SHADOW_RED=cslopezero
+	cellshot "$NEW" perf_base2 "${CELL[@]}" "${LOW[@]}" "${PF[@]}" "${ALLT[@]}" WW_SHADOW_PAR=0
 fi
 
 # shellcheck disable=SC2086

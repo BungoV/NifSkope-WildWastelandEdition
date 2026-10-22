@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane OBJLODSHADOW1 (2026-10-22, branch objlodshadow1-20261022): object LOD casts only past the cascades
+
+- **Object-LOD terrain casters, only where the cascades do not reach:** with the objlod item on, every far object-LOD
+  shape was a solid height column in the terrain map, so the LOD trees and houses shadowed their own surfaces and the
+  ground under them (BATCH1: 81 % of the frame dark, all the near ground). The cascades already shadow every object
+  (the far-LOD shapes cast in them too), so object LOD now casts only outside the loaded LAND's box grown by the
+  cascades' reach (FO4CS's far map: authority 1 - fade, nothing inside the cascades). Shapes wholly inside are
+  dropped; a straddling shape loses its triangles centred inside. Red `WW_SHADOW_RED=objlodall` restores the old set.
+  The echo adds `objlod_skipped=` and `objlod_cut=`.
+- **Gates:** `objlod_near` (near-ground share darkened by objlod <= 2 %, the cut in the echo); `objlod` now reads a
+  2000-unit reach (at 16000 Concord's ring 0 lies wholly inside). Timing probe `WW_SHADOW_RED=cslopezero` (the clamp
+  call with clamp 0) splits cslope's cost; perf arms `perf_cslope_zero`, `perf_base2`.
+
 ## Lane SHADOWPAR1FIX (2026-10-22, branch shadowpar1fix-20261022): the BATCH1 shadow gates, fixed
 
 - **Contact reaches the lit shader:** fo4_default also declares a GreyscaleMap (palettes), so every fo4_default
