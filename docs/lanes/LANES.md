@@ -6,6 +6,7 @@ yet). A row leaves only as LANDED or SUPERSEDED, and then moves to LANES_DONE.md
 Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overnight_1021\AUDIT.md, AUDIT_repo.md.
 
 ## 0. WAITING FOR YOU (only bungo can do these; top of the file, bungo 10-21)
+- SHADOWPAR1 fog far-tail check: at Memory Den night (CommonwealthFoggy) the far tail starts past 17,578 units and ~1 % light gets through, so the check sees nothing change. Keep it, move it, or drop it? Also the half-res contact shadow (3.0 -> ~0.6 ms) is a look change: pair coming from BATCH2
 - BATCH1 pairs ready (notes/batch1/pairs/): shadowpar1 (big look change, ships off), fogtricubic1 (+ 2x crops), volairsky1_lamp, ssgi2_goodneighbor (SSGI darkens the glass doors ~11 %), ssgi2_night, pbralbedo2; rtbake1 camera wrong (redo coming). Shown one at a time when you are back
 - RTBAKE1 picture pair: CPU bake vs GPU bake, museum indoor (+ x16 difference); merge waits on your OK (coming)
 - SSGI2 picture pairs (SSGI ships off): Vault 111 v_old_ultra -> v_ultra (+ v_off), Rexford night e_old -> e_on (+ e_off), in NifskopeWWE-ssgi2/scratchpad/ssgi2/g2/ + Goodneighbor sunlit glass wall off/on (bungo 10-21, coming from BATCH1)
@@ -29,7 +30,8 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | PERF2 | time the frame; depth reuse, per-tile lights, fewer driver calls, temporal reuse (+ fog history reprojection, Division-style, bungo 10-21), fog integrate O(S^2) -> O(S) | BATCH ready (0ded45ca; perf2/BATCH.md); SSR prev-frame, AO temporal, per-draw CPU wait for batch timing |
 | VOLAIRSKY1 | + FOGTRICUBIC1 smoother fog-grid read, PNG pair for bungo (asked 10-21); VOLAIR1 sky gate fail (0.266 % vs 0.20 %) + placed lights in the fog (audit claim: 0 clusters; lane finds 1309-1419 filled on steady frames, 0 only the first ~8 frames after load) | BATCH ready (head 8e5dc845, notes/volairsky1/BATCH.md); rev1 F open: next-batch lines D2b + D3 |
 | SSGI2 | SSGI gate (SSGI1 landed ungated) + blue noise, depth intervals, emissive, pyramid | BATCH ready (548fdbf1): 4 rows coded; cell_ssgi + nohiz PASS; double count FAILS near geometry (under-count 0.80); timing in BATCH1 |
-| SHADOWPAR1 | shadows to FO4CS level (TERRSHADOW1 WEAKER list) + fog far-tail leak | BATCH ready 10-21: code at shadowpar1-20261021 694b4f7a, gates unrun (shadowpar1/BATCH.md) |
+| SHADOWPAR1 | shadows to FO4CS level (TERRSHADOW1 WEAKER list) + fog far-tail leak | BATCH ready again: shadowpar1fix-20261022 d1930a3b (exe 7eaf0d03): contact mask never reached the shader (GreyscaleMap test, red contactgrey); low-sun debug idle fixed; cameras/masks rebuilt; contact half-res ~0.6 ms est (look change, ships off); cslope +1.8 ms open; fogtail needs ruling. Ships off |
+| OBJLODSHADOW1 | objlod casters darken 81 % of near ground (loaded cells' own far LOD cast into the terrain shadow) + cslope cost | WORKING ON 10-22 10:1x |
 | FXCHECK1 | BGEM glass milky; no fire-barrel particles | BATCH ready (8ad3aadf): glass fix gated, ships off; barrel plume still open |
 | VOLPART1R | rebase VOLPART1 onto main (steam/fog cards lit as volumes, ships off) | BATCH ready (6e8c92de; volpart1r/BATCH.md); gates unrun |
 | TESTDRIVER1 | live test switches: load a scene once, flip WW_* switches over the port, no relaunch per row (bungo 10-22) | BATCH ready |
