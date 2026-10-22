@@ -59,6 +59,9 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | REFLPROBE1 | placed reflection probes, captured and relit per time of day, replace the material's fixed cubemap where present; ships OFF (bungo 10-22 RDR2 item 3) | BATCH READY 10-22 (fogdrift1-20261022 @ 2af8ea59, exe 3ba512be) |
 | SPECOCC1 | specular occlusion from our baked sky visibility (horizon method, copied from FO4CS ambient_ibl_pass.hlsl) on top of the material-AO version; ships OFF (bungo 10-22 RDR2 item 4) | BATCH READY 10-22 (specocc1-20261022 @ 7eed6a38, exe sha1 e96671cc4e725bee2b5314933bab3cc45cb15ffc) |
 | FOGDRIFT1 | fog gets 3D lumps that drift with the weather's wind speed/direction, so lamp glows brighten and dim as patches pass (RDR2); no wind = still; interiors still unless they have outdoor parts (sky-showing cells / outdoor rooms); far haze stays smooth; ships OFF (bungo 10-22) | BATCH READY 10-22 (fogdrift1-20261022 @ 2af8ea59, exe 3ba512be) |
+| LAMPSHADOW1 | lamp shadows stored for still lamps, redrawn only where something moves near them (live door, NPC); wall-lamp half-shadow trick (RDR2); ships OFF (bungo 10-22) | WORKING 10-22 (code + build only; pictures after the BATCH2 merge) |
+| FOGBLOOM1 | lamps and glass glow stronger in thick fog and with distance (RDR2 bloom-intensity target), on top of the real fog in-scatter; ships OFF (bungo 10-22) | WORKING 10-22 (code + build only; pictures after the BATCH2 merge) |
+| GLASSLIGHT1 | measure first: lamp light bleeding/cost on pixels behind window glass; if real, skip/limit it the RDR2 way (stencil); ships OFF (bungo 10-22) | WORKING 10-22 (code + build only; pictures after the BATCH2 merge) |
 Next batch (BATCH2): VOLPART1R, FARCARD1, PERF3, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
 Queued tonight (his 10-21 go): VTGPU1 + PROFILE1 (after
 BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
