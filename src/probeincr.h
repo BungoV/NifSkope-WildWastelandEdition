@@ -71,9 +71,14 @@ QString identity( const QString & world );
 //! the ESM views a bake of cell (cx, cy) with a (2 half + 1)^2 block reads
 QString recordsDigest( const EsmWorld & world, int cx, int cy, int half );
 
+/*! lane FARLIGHTMAP1: the placed lights the block's relight reads (each LIGH ref's fields, its base's light data,
+ *  its box, its enable chain). Light moves no .tbk byte, so only a far-light bake writes it as the `lights` line. */
+QString lightsDigest( const EsmWorld & world, int cx, int cy, int half, int * count = nullptr );
+
 //! write `<dir>/bakeincr.txt` after a successful bake of (cx, cy); the outputs are the dir's *.tbk
 bool writeRecord( const QString & dir, const QString & world, int cx, int cy, int half,
-	const QString & records, const QString & cellRecords, const QString & far, QString * error );
+	const QString & records, const QString & cellRecords, const QString & far, QString * error,
+	const QString & lights = QString() );
 
 //! the WW_CELL_BAKEINCR_CHECK env mode: returns the process exit code
 int checkMain();

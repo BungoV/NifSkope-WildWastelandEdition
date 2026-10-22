@@ -1825,11 +1825,22 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 
 	// ---- the worldspace, or (lane PRTP1) one interior cell
 	// lane CELLSTREAM1: shared, so a streaming open can hand it on; a streamed cell reads the open's
-	std::shared_ptr<EsmWorld> worldOwn = chunk ? chunk->seed->world : std::make_shared<EsmWorld>();
+	/* lane FARLIGHTMAP1: WW_CELL_KEEP_WORLD=1 (a whole-map walk) keeps the last worldspace index and hands it to the next
+	 * open of the same plugins and world: the index is read-only to a build (its memo caches are pure), as a stream's is */
+	static std::shared_ptr<EsmWorld> keptWorld;
+	static QString keptKey;
+	const bool keepWorld = !chunk && !spec.interior && qEnvironmentVariable( "WW_CELL_KEEP_WORLD" ) == QLatin1String( "1" );
+	const QString worldKey = spec.plugins + QLatin1Char( '|' ) + spec.world.toLower();
+	const bool worldKept = keepWorld && keptWorld && keptKey == worldKey;
+	if ( !keepWorld )
+		keptWorld.reset();
+	std::shared_ptr<EsmWorld> worldOwn = chunk ? chunk->seed->world : worldKept ? keptWorld : std::make_shared<EsmWorld>();
 	EsmWorld & world = *worldOwn;
 	QString loadError;
 	if ( chunk ) {
 		// indexed once by the open
+	} else if ( worldKept ) {
+		// indexed by an earlier cell of the walk
 	} else if ( spec.interior ) {
 		if ( !world.loadInterior( spec.plugins, spec.interiorCell, &loadError ) )
 			return fail( loadError.isEmpty()
@@ -1861,6 +1872,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		if ( !world.load( spec.plugins, wsForm, &loadError ) )
 			return fail( loadError.isEmpty()
 				? QStringLiteral( "could not index %1" ).arg( spec.world ) : loadError );
+		if ( keepWorld ) {
+			keptWorld = worldOwn;
+			keptKey = worldKey;
+		}
 	}
 
 	/* WHERE MODELS COME FROM. The spec's data root when it names one, else the
@@ -5223,7 +5238,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						const QString recs1 = ProbeIncr::recordsDigest( world, spec.cx, spec.cy, 0 );
 						const QString far = cellBakeFarDigest( spec.world, dataRoot, spec.cx, spec.cy, half );
 						QString rerr;
-						if ( ProbeIncr::writeRecord( QDir::cleanPath( dir ), spec.world, spec.cx, spec.cy, half, recs, recs1, far, &rerr ) )
+						// lane FARLIGHTMAP1: a far-light bake's record holds its lights too (light moves no .tbk byte)
+						const QString lights = qEnvironmentVariableIsEmpty( "WW_CELL_FARLIGHT" ) ? QString()
+							: ProbeIncr::lightsDigest( world, spec.cx, spec.cy, half );
+						if ( ProbeIncr::writeRecord( QDir::cleanPath( dir ), spec.world, spec.cx, spec.cy, half, recs, recs1, far, &rerr, lights ) )
 							t << "  bake record " << ProbeIncr::recordName() << ": " << ProbeIncr::recorded().size()
 							  << " assets, records " << recs.left( 12 ) << ", far " << far.left( 12 ) << ", "
 							  << rt.elapsed() << " ms\n";

@@ -17,6 +17,7 @@ See the LICENSE.md file for the full license text.
 #include "pgiwrite.h"
 #include "probefar.h"		// lane PRTPFAR
 #include "probegi.h"		// lane ROOMCLAMP1: probegi
+#include "farlightmap.h"	// lane FARLIGHTMAP1: farlightmap
 #include "proberelight.h"	// lane GPURELIGHT1: gpurelight
 #include "probevolumes.h"	// lane VOLFIT1: volumes
 
@@ -7988,6 +7989,13 @@ int nifskopeCliMain( const QStringList & args )
 	// lane PGI0: `pgiwrite` re-packs a bake's .tbk v5 sector files into .pgi (src/pgiwrite.cpp); `pgicheck` validates
 	if ( cmd == QLatin1String( "pgiwrite" ) || cmd == QLatin1String( "pgicheck" ) ) {
 		const int rc = cmd == QLatin1String( "pgiwrite" ) ? pgiWriteCli( a ) : pgiCheckCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// lane FARLIGHTMAP1: `farlightmap` runs the cell view's probe GI bake over a worldspace, writing the far-light set
+	if ( cmd == QLatin1String( "farlightmap" ) ) {
+		const int rc = farLightMapCli( a );
 		out().flush();
 		err().flush();
 		return rc;

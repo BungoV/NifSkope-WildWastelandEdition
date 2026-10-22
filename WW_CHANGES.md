@@ -446,6 +446,17 @@
 - **Cost:** CPU work on the flickering lights only, and one `glBufferSubData` over their range per frame. No shader
   change.
 
+## Lane FARLIGHTMAP1 (2026-10-22, branch farlightmap1-20261022): the far light for the whole map, from the cell view's own bake
+
+- **Why.** Distant towns should glow from their placed lights everywhere on the map (bungo 10-22, RDR2's distant lights; ruled option a: the same light as the cell view bake). Until now only a cell view bake with `WW_CELL_FARLIGHT` wrote FARVIEW1's far-light layers, one loaded cell at a time.
+- **What changed:**
+  - `NifSkope -no-gui farlightmap --plugins <esm> --root <dir> [--region x0..x1,y0..y1] [--out <dir>] [--memcap MB] [--jobs N] [--dry]` (src/farlightmap.cpp). It walks the worldspace's exterior cells. **One launch, many cells:** a walk process loads the plugins once, then opens cell after cell in its window. Each open is the cell view's own exterior bake, set up the way `tools/ww_bake_world.py` sets it, plus `WW_CELL_FARLIGHT`: the 5x5 block plus far soup, then the probe bake, the relight and the far layers. The bake code is not forked. After each cell the driver copies the cell's `lights_/relight_/farlight_` files into one folder that FARVIEW1's reader loads.
+  - The walk goes in a serpentine over a strip of rows, so most of the next cell's 5x5 block is the last cell's. Two things stay kept between cells: the worldspace index (`WW_CELL_KEEP_WORLD=1`, in src/cellview.cpp) and the bytes of each asset read (`WW_CELL_KEEP_ASSETS_MB`, in `lodgenReadAsset`). A kept read is still noted in the bake record. A walk is respawned only when its working set passes `--memcap` after a cell, or when a cell fails, and the log says why. `--jobs N` runs N walks on separate strips. `WW_CELL_KEEP_*` is a run-only knob: it moves no `.tbk` byte.
+  - Resumable. A cell is skipped when BAKEINCR1's check calls it clean AND its `farlight.done` marker matches: the exe sha1, the `WW_CELL_FARLIGHT_*` knobs, and the sha1 of each file in the output folder. A cell whose 5x5 block holds no placed light makes no far light, so it is not baked, and any stale files it left in the output are removed.
+  - The bake record gets a `lights` line (`ProbeIncr::lightsDigest`): each placed light's fields, its base's light data, its box and its enable chain. Only a far-light bake writes this line, and the check compares it when present. A light edit moves no `.tbk` byte, but it does move the far light. `WW_CELL_FARLIGHT*` is now a run-only knob: it moves no `.tbk` byte.
+  - Census per cell: lights, groups, surfels, records, layers written, bytes, far ms, wall, peak working set. Progress lines give cells/hour and the time left. Mid-cell, a walk is stopped at 1.5x `--memcap` and that cell fails. No walk starts while free memory is below the cap.
+- **Not run yet** (code and build only; BATCH2 is open). The region test and the whole-map command are in notes/farlightmap1/BATCH.md.
+
 ## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
 
 - Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.
