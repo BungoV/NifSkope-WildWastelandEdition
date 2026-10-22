@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SSGI3 (2026-10-22, branch ssgi3-20261022): the screen-space GI fill law keeps its light
+
+- The screen-space GI (still ships OFF, `WW/CellSsgi`) took more probe light away than its march put back near
+  geometry (0.80 of the tracer, SSGI off 0.89). Two fixes in the cast, both physical:
+  - A diffuse surface looks equally bright from every side, so the donor's light no longer falls with its cosine
+    (only its back face gives nothing).
+  - A shut sector now removes probe light only as far as the screen refills it: a donor in the radius' outer band
+    or seen from behind leaves the rest to the probe. The probe keeps exactly what the screen does not replace.
+- Red `WW_CELL_SSGI_RED=oldlaw` brings SSGI1's law back. Echo: `cell ssgi: ... law fill|old`.
+- Offline gate `tests/spells/ssgi_fill_law.py` (furnace + lit corner): fill law PASS, red FAILS the furnace.
+  The live gates (DC2 at +-10 %, red identity, pictures) wait for the next batch: notes/ssgi3/BATCH.md.
+
 ## Lane SSGI2 (2026-10-21, branch ssgi2-20261021): screen-space GI's four weaker rows to FO4CS's level
 
 - The screen-space GI (ships OFF, `WW/CellSsgi`) now matches FO4CS on the four rows SSGI1 left weaker:
