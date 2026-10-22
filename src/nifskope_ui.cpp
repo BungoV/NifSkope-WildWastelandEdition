@@ -77,6 +77,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "skeletontools.h"
 
 #include <functional>
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 #include <QProcessEnvironment>
 #include <QEventLoop>
@@ -2336,8 +2339,10 @@ struct WwLiveState
 	int owed = 0;			// 1 shaders, 2 reopen
 	QStringList owedNames;
 	bool reopening = false, reopenDone = false;
+	bool stepsRunning = false;	// fix TDFIX2: a reopen's late completeLoading must not start the steps again
 	bool rowRefused = false;	// a set of this row was refused: its pictures are not taken
 	QString shaderRefused;		// fix 10-22: a program the last reload refused; pictures wait for a clean reload
+	QString reopenRefused;		// fix TDFIX2: a reopen over the 3 min limit (or never done); the row takes no picture
 };
 
 //! fix 10-22: the visible chrome around the viewport, "name WxH" each, to say what a reopen changed
@@ -2420,19 +2425,44 @@ QString wwLiveApply( NifSkope * skope )
 		// the handler's next run ends at the hook (wwLiveReopenHook) once the cells are in
 		L.reopening = true;
 		L.reopenDone = false;
+		probeSkyForget();	// fix TDFIX2: the reopened document relights from the weather, then its first frame, as at launch
+		/* fix TDFIX2: a reopen is watched. stderr may sit in WW_STDERR_BUFFER's 4 MB buffer (the c3 reopen that hung
+		 * 12 min left nothing past its last flush), so a side thread flushes it every 5 s with the seconds so far: the
+		 * notes then end at the phase it is in. Past 3 min the row is refused (the gate's limit), never a silent wait. */
+		std::atomic<bool> watchStop( false );
+		QElapsedTimer w;
+		w.start();
+		std::thread watch( [&watchStop, &w]() {
+			int n = 0;
+			while ( !watchStop.load() ) {
+				std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+				if ( ++n % 50 == 0 ) {
+					std::fprintf( stderr, "live: reopen running %lld s\n", (long long)( w.elapsed() / 1000 ) );
+					std::fflush( stderr );
+				}
+			}
+		} );
+		std::fprintf( stderr, "live: reopen starts for %s\n", qPrintable( names ) );
+		std::fflush( stderr );
 		QMetaObject::invokeMethod( skope, "reload", Qt::QueuedConnection );
 		QEventLoop loop;
 		QTimer tick;
-		QElapsedTimer w;
-		w.start();
 		QObject::connect( &tick, &QTimer::timeout, &loop, [&]() {
-			if ( L.reopenDone || w.elapsed() > 900000 )
+			if ( L.reopenDone || w.elapsed() > 180000 )
 				loop.quit();
 		} );
 		tick.start( 20 );
 		loop.exec();
+		watchStop = true;
+		watch.join();
+		const qint64 reopenMs = w.elapsed();
 		L.reopening = false;
-		did << ( L.reopenDone ? QStringLiteral( "reopen" ) : QStringLiteral( "reopen TIMED OUT" ) );
+		std::fprintf( stderr, "live: reopen %s in %lld ms\n", L.reopenDone ? "done" : "TIMED OUT", (long long)reopenMs );
+		std::fflush( stderr );
+		if ( !L.reopenDone || reopenMs > 180000 )
+			L.reopenRefused = QStringLiteral( "reopen %1 in %2 ms (limit 180000)" )
+				.arg( L.reopenDone ? QStringLiteral( "too slow" ) : QStringLiteral( "TIMED OUT" ) ).arg( reopenMs );
+		did << ( L.reopenDone ? QStringLiteral( "reopen %1 ms" ).arg( reopenMs ) : QStringLiteral( "reopen TIMED OUT" ) );
 		/* fix 10-22: the reopen must hand back the viewport the rows before it drew in (port run: 1920x1026 became
 		 * 1920x1045, the handler's window pin lands on other chrome the second time). The window takes the difference. */
 		ogl = skope->getGLView();
@@ -2471,9 +2501,17 @@ QString wwLiveApply( NifSkope * skope )
 static bool wwLiveReopenHook( float shotT )
 {
 	WwLiveState & L = wwLive();
+	if ( !L.reopening && !L.stepsRunning )
+		L.shotT = shotT;
+	if ( !L.reopening ) {
+		if ( !L.stepsRunning )
+			return false;
+		// fix TDFIX2: a reopen that finished after its limit: the steps already went on; never run them twice
+		std::fprintf( stderr, "live: a late reopen finished (ignored: its row was refused)\n" );
+		std::fflush( stderr );
+		return true;
+	}
 	L.shotT = shotT;
-	if ( !L.reopening )
-		return false;
 	L.reopenDone = true;
 	return true;
 }
@@ -2492,6 +2530,7 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	wwLiveSessionStart();	// fix 10-22: from here a refused shader refuses its row, not the process
 	if ( verb == QLatin1StringView( "row" ) ) {
 		L.rowRefused = false;
+		L.reopenRefused.clear();
 		return QStringLiteral( "row %1" ).arg( rest );
 	}
 	if ( verb == QLatin1StringView( "set" ) || verb == QLatin1StringView( "env" ) || verb == QLatin1StringView( "unset" ) ) {
@@ -2576,6 +2615,8 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	// fix 10-22: a program refused under this row's switches: no picture (the guard's rule), the session goes on
 	if ( !L.shaderRefused.isEmpty() )
 		return QStringLiteral( "refused shader %1 (%2; the row's pictures are skipped)" ).arg( L.shaderRefused, applied );
+	if ( !L.reopenRefused.isEmpty() )
+		return QStringLiteral( "refused %1 (%2; the row's pictures are skipped)" ).arg( L.reopenRefused, applied );
 	const quint64 before = wwLiveShaderRefusals();
 	const QString r = takePicture();
 	QString why;
@@ -2605,6 +2646,7 @@ static void wwLiveStepsRun( NifSkope * skope, const QString & stepsFile )
 		return;
 	}
 	const QStringList lines = QString::fromUtf8( in.readAll() ).split( QLatin1Char( '\n' ) );
+	wwLive().stepsRunning = true;
 	QElapsedTimer all, row;
 	all.start();
 	QString rowName;
@@ -2635,6 +2677,7 @@ static void wwLiveStepsRun( NifSkope * skope, const QString & stepsFile )
 			break;
 	}
 	endRow();
+	wwLive().stepsRunning = false;
 	if ( logOk )
 		log << "end ms " << all.elapsed() << "\n";
 }
