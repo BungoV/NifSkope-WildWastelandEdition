@@ -37,6 +37,7 @@ gl.wglCreateContext.restype = ctypes.c_void_p; gl.wglCreateContext.argtypes = [W
 gl.wglMakeCurrent.argtypes = [W.HDC, ctypes.c_void_p]
 gl.wglGetProcAddress.restype = ctypes.c_void_p; gl.wglGetProcAddress.argtypes = [ctypes.c_char_p]
 gl.glGetString.restype = ctypes.c_char_p
+gl.glGetIntegerv.argtypes = [ctypes.c_uint, ctypes.c_void_p]
 
 class PFD(ctypes.Structure):
     _fields_ = [('nSize', W.WORD), ('nVersion', W.WORD), ('dwFlags', W.DWORD), ('iPixelType', ctypes.c_ubyte),
@@ -86,9 +87,14 @@ def main():
     link = fn('glLinkProgram', None, GLuint)
     getProgramiv = fn('glGetProgramiv', None, GLuint, GLenum, ctypes.POINTER(GLint))
     getProgramInfoLog = fn('glGetProgramInfoLog', None, GLuint, ctypes.c_int, ctypes.c_void_p, ctypes.c_char_p)
+    # lane MARCHFIX1: the loader's NUM_TEXTURE_UNITS (Shader::load: the first one in a .frag = TexCache's units - 2)
+    units = GLint(0); gl.glGetIntegerv(0x8872, ctypes.byref(units))   # GL_MAX_TEXTURE_IMAGE_UNITS
+    units = min(max(units.value, 1), 32) - 2                           # gltex.h maxTextureUnits = 32
     p = createProgram()
     for f in files:
         src = inject(expand(os.path.join(sdir, f)), defines)
+        if f.endswith('frag') and 'NUM_TEXTURE_UNITS' in src and not any(d.split('=')[0] == 'NUM_TEXTURE_UNITS' for d in defines):
+            src = src.replace('NUM_TEXTURE_UNITS', str(units), 1)
         if dump and f.endswith('frag'):
             open(dump, 'w').write(src)
         s = createShader({'frag': 0x8B30, 'geom': 0x8DD9}.get(f.rsplit('.', 1)[-1], 0x8B31))

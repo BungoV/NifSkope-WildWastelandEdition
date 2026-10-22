@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane MARCHFIX1 (2026-10-23, branch marchfix1-20261022): the march refusal was GIBLACKLINK1's, already fixed
+
+- **Why.** TESTDRIVER1's march rows refused `fo4_cellcsm.prog` (NVIDIA "too many instructions", 67425). Its exe
+  read main 181fe5d2's shaders, which predate GIBLACKLINK1 (25ae6e98). Offline, real driver, `WW_FRAME_UBO` +
+  `WW_CELL_GI_MARCH`: TESTDRIVER1's shaders LINK FAIL; batch2 minus GIBLACKLINK1's two hunks LINK FAIL; batch2
+  LINK OK (529851-byte binary), and all 77 programs link in march mode. No shader change here.
+- **Default path:** every program's driver binary, batch2 vs batch2 minus the fix, with and without `WW_FRAME_UBO`:
+  equal but for the run stamp and the source hash (152 of 152 comparisons).
+- **Tooling:** `tests/spells/shader_link_check.py` substitutes `NUM_TEXTURE_UNITS` as the loader does (stf_default
+  links offline now); `tests/spells/cell_giblack_link.sh` works under the repo's scratchpad, not C:'s temp.
+
 ## Lane STREAM1 (2026-10-22, branch stream1-20261022): memory and load of the streamed cell view
 
 - **Why.** WHOLEFRAME.md sec. 12, 15, 16, 17 (STREAM1, TEXSTREAM1, VTXPACK1, LOAD1): a 3x3 held 308 MB of geometry
