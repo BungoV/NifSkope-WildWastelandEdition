@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include "cellcable.h"		// lane CABLES1
 #include "celldecal.h"		// lane PLACED1
 #include "esmdata.h"
+#include "esmfile.hpp"		// lane LEFTOVERS1: light-plugin form IDs back to their file
 #include "esmweather.h"		// lane FOG2: the fog packing
 #include "lodgen.h"
 #include "nativeemit.h"
@@ -2428,12 +2429,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		static const QRegularExpression verRx( QStringLiteral( "(\\d+\\.\\d+\\.\\d+)" ) );
 		for ( const auto & b : blocks ) {
 			const quint32 f = b.first;
-			const int idx = int( f >> 24 );
-			const QString plugin = idx < plugs.size() ? QFileInfo( plugs.at( idx ).trimmed() ).fileName()
+			const quint32 idx = world.plugin() ? world.plugin()->getFormIDFile( f ) : ( f >> 24 );
+			const QString plugin = idx < quint32( plugs.size() ) ? QFileInfo( plugs.at( int( idx ) ).trimmed() ).fileName()
 				: QStringLiteral( "Fallout4.esm" );
 			QByteArray u;
 			QString path;
-			for ( const quint32 name : { f, f & 0x00FFFFFFU } ) {
+			for ( const quint32 name : { f, ESMFile::getFormIDLocal( f ) } ) {
 				path = QStringLiteral( "vis/%1/%2.uvd" ).arg( plugin ).arg( name, 8, 16, QLatin1Char( '0' ) );
 				if ( lodgenReadVisFile( dataRoot, path, u ) && u.size() >= 44 )
 					break;

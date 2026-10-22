@@ -1,5 +1,95 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LEFTOVERS1 (2026-10-22, branch leftovers1-20261022): Open Cell reads localized names from the string tables
+
+- **Why.** A localized plugin (TES4 flag 0x80, e.g. the game's own masters) stores FULL as a string-table index, so
+  File > Open Cell... showed its worldspaces and cells with blank names.
+- **What changed:**
+  - The catalog reads `<Plugin>_<lang>.STRINGS` (and `.DLSTRINGS` / `.ILSTRINGS`, which carry a length before each
+    string) from `Strings\`, loose or inside a `<Plugin> - *.ba2` (libfo76utils `BA2File`), in the plugin's own folder
+    and then the Data folder. A loose table beats the archive's, as in the game. Text is UTF-8, else Latin-1.
+  - New Language box in the dialog (en, de, fr, it, es, pl, ptbr, ru, ja, cn, or typed), kept in `WW/OpenCell/Language`,
+    default `en`. When no table is found the name stays blank (never the index) and the status line names the plugin.
+  - Off: `WW_OPENCELL_STRINGS=0`. Red: `WW_OPENCELL_RED=strings` (the old blank names, no file reads).
+- **.esl confirmed:** `.esl` files and light-flagged `.esp` files (TES4 0x200) are listed. In the Data-folder order, an
+  `.esl` goes with the masters and a light-flagged `.esp` goes with the plugins, as plugins.txt orders them. Both are
+  read into the catalog. The synthetic test now has one of each.
+- **Light plugins numbered as the game does (fix):** an `.esl`, or an `.esp`/`.esm` with TES4 flag 0x200, now gets
+  form IDs `FE` + a 12-bit slot + the 12-bit local ID (libfo76utils `ESMFile`). The slot is its place among the light
+  plugins in load order. Full plugins that list it as a master resolve their references to the same FE IDs. Before, a
+  light plugin took a full load-order byte, so its IDs differed from the game's and from xEdit's. The master-flagged
+  `.esp` sort is unchanged. Skyrim SE / Fallout 4 files only (form version below 0xC0).
+  - Callers that took the top byte as the file index (face meshes for actors, previs `vis\<plugin>\` files, the
+    weather list's owner) now ask `ESMFile::getFormIDFile()`; file names use the local ID (`getFormIDLocal()`).
+  - Red: `WW_ESM_LIGHT_RED=full` (the old full-slot numbering).
+- **Gate:** `tests/spells/opencell_check.sh`: 38/38 green (19 new checks); red writer, red strings, strings-off and red
+  light each exit 1 (the strings red fails the 6 name checks, the light red the 6 FE checks). Synthetic plugins, tables
+  and a BA2 are all built in code.
+
+## Lane VOLFIT1 (2026-10-19, branch volfit1-20261019, landed by MERGEALL1 at f626c12d): the Space stage, real room volume shapes
+
+- **Why.** PERF1's GI volumes needed real room shapes. The greedy boxes it builds from the room grid could not split an
+  open shop front from the street.
+- **What changed:**
+  - Space stage: rooms are unions of box / cylinder / wedge / capsule / sphere / gable shapes fitted on the ROOMCLAMP1
+    grid, with one outdoor volume outside them. Thresholds are stored with the rooms.
+  - A fingerprinted `.space` record is written under `Data\Bake` and skipped when its inputs are clean.
+  - `.recx` `shapes` hand fixes (`WW_CELL_VOLUMES_RECX`). Census step `space`. Debug view `WW_CELL_VOLUMES_VIEW=1`
+    (`_DUMP` writes it out).
+  - `WW_CELL_VOLUMES_GI=1`: the Space rooms become the GI's room source. Each GI grid cell takes the smallest room whose
+    shapes hold its centre. An air cell in no shape takes the Space room holding most of its ROOMCLAMP1 room, else
+    outdoors. A room-grid room that Space did not keep stays a room of its own (it had turned outdoors and blacked a
+    Memory Den recess wall). Unset, the grid is ROOMCLAMP1's, untouched.
+  - The sky picture's kept spec holds its Space rooms through a shared pointer (it crashed with GI volumes and the sky
+    picture both on).
+  - Reds: `WW_CELL_VOLUMES_RED` (17 fitter reds), `WW_CELL_VOLUMES_GI_RED=nogimap|gione|spaceshapes|spaceleftover`.
+- **Measured:** Museum headless, 41 of 42 rooms mapped into the GI grid (was 29), and 20 rooms interior that the room
+  grid had called outdoors.
+- **Gate:** `tests/spells/cell_volumes.sh synth` PASS, `red` 17/17 fail as they must. Still owed (launch checks): the
+  space census, the debug view and the borderline-ruin picture.
+
+## Lane PERF1 (2026-10-16..19, branch perf1-20261016, landed by MERGEALL1 at b13a8ce7): the cell view frame from ~1 s to ~73 ms
+
+- **Why.** A 3x3 close Concord frame took 989 ms of GPU time and a 5x5 one took 1231 ms. The first frame of a launch
+  came at 227 s.
+- **What changed (each has a switch or a red; pictures 0 px against the old path unless noted):**
+  - Per-pass frame timers, cache and texture counters and private bytes per stage (`WW_CELL_PASSTIME`, `_LOG`, `_SYNC`;
+    `WW_CELL_PASSTIME_CENSUS=1` adds samples passed and primitives per pass).
+  - The geometry cache keeps the frame's shapes: 915 uploads a frame became 0. Red `WW_GEOCACHE_RED=thrash`.
+  - Far cards drawn as one batch: 201 ms became 3 ms. Red `WW_IMPOSTOR_RED=perdraw`.
+  - Previs occluder planes built once a frame (red `WW_CELL_PREVIS_RED=perrun`). The air's echo line prints only
+    when it changes; it had stalled every frame by about 280 ms (red `WW_CELL_AIR_RED=echoall`).
+  - Shader program binary cache in `shadercache/` beside the exe, keyed on the sources and the driver: 62 programs went
+    from 132 s cold to 0.3 s warm (`WW_PROGCACHE=0` off). The far LOD append grows by doubling, and the far census is
+    cached (`WW_FARCENSUS_CACHE=0` off). Fixed a startup hang in the load sampler.
+  - Light telemetry gated, GI tracer and rooms memo, scene globals set once per program per pass (`WW_GI_GEOMEMO=0`,
+    `WW_SETUP_MEMO=0`).
+  - The obscurance pass returns once it has normal and depth: about 75 ms became 16 ms (`WW_AO_EARLY=0` off, red marks).
+  - Exposure and bloom measured from the linear frame already drawn, read back a frame late (`WW_IS_MEASURE=old|sync|red`).
+  - GI visibility by volumes (Division D4): the outdoors is one volume and each room a union of shapes. A screen pass
+    draws a pixel's volume id and the GI reads only that volume's grid slots. Light crosses only at thresholds, blended
+    both ways. Half-rate GI with a depth- and normal-aware upsample. `WW_CELL_GI_VIS=march` (red: the old per-pixel
+    march, compiled in by `WW_CELL_GI_MARCH`); `WW_CELL_GI_RATE=half|full|inline|red`.
+- **Measured (GPU ms a frame, 1080p):** 3x3 close5 989 -> 72.7; 5x5 close5 1231 -> 267 (before the later passes);
+  shader programs at load ~150 s -> 0.31 s warm; first frame of a 3x3 launch 227 s -> 66 s warm.
+- **Gates (10-19, fix22):** cell_giblack memden all PASS (p95 room blend 86.3%, bar 80%); Goodneighbor vis gate
+  (`tests/spells/cell_gn_vis.sh`) PASS. Owed: the GI volumes' own gain and picture against the march, and the pass
+  census rows.
+
+## Lane BAKEINCR1 (2026-10-04, branch bakeincr1-20261004, landed by MERGEALL1 at 250b73e5): the probe bake rebakes only changed cells
+
+- Every outdoor probe bake writes `bakeincr.txt` beside its `.tbk` files, a fingerprint of everything the bake read:
+  the records of the 5x5 block around the cell, every model / material / texture it opened (by content), the far LOD
+  it traced against, and the exe and its bake settings.
+- A world rebake checks those fingerprints and rebakes only the cells that moved. Moving one object rebakes the 25
+  cells whose 5x5 block holds it. A changed model rebakes the cells that read it. Light and time-of-day changes
+  rebake nothing (the bake does not read them). Indoor cells write no fingerprint and always rebake.
+- New tool `tools/ww_bake_world.py` (full | check | incremental). Test switches `WW_CELL_BAKEINCR_CHECK` and
+  `WW_CELL_BAKEINCR_RED=nonbr|nomodels`.
+- The bake output is unchanged byte for byte (the same cell baked by two runs gives identical files).
+- The world gate (`tests/spells/cell_bakeincr.sh`, about 90 bakes) has not passed yet: its only run was stopped by the
+  memory guard. It is queued for the next test batch.
+
 ## Lane GIBLACKLINK1 (2026-10-22, branch giblacklink1-20261022): the giblack red links again
 
 - **Why.** On main the giblack gate's red (`WW_CELL_PV_RED=borrow`, and every march red, which compile

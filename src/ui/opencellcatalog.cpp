@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "opencellcatalog.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
+#include "ba2file.hpp"
 #include "esmfile.hpp"
 
 #include <QDir>
@@ -15,6 +16,7 @@ BSD License - see nifskope.h
 #include <QSet>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QStringDecoder>
 #include <QTextStream>
 
 #include <algorithm>
@@ -57,20 +59,46 @@ QVector<bool> localizedFlags( const QStringList & paths )
 	return out;
 }
 
-void readNames( ESMFile & esm, const ESMFile::ESMRecord & r, bool localized, QString & edid, QString & name,
-	int * x = nullptr, int * y = nullptr )
+// `strings` is null for a plugin that is not localized; then FULL is the text itself.
+void readNames( ESMFile & esm, const ESMFile::ESMRecord & r, const OpenCellStrings * strings, QString & edid,
+	QString & name, int * x = nullptr, int * y = nullptr )
 {
 	ESMFile::ESMField f( esm, r );
 	while ( f.next() ) {
 		if ( f == "EDID" )
 			edid = fieldText( f );
-		else if ( f == "FULL" && !localized )
+		else if ( f == "FULL" && !strings )
 			name = fieldText( f );
+		else if ( f == "FULL" && f.size() >= 4 )
+			name = strings->value( f.readUInt32() );
 		else if ( f == "XCLC" && x && y && f.size() >= 8 ) {
 			*x = int( f.readInt32() );
 			*y = int( f.readInt32() );
 		}
 	}
+}
+
+quint32 le32( const char * p )
+{
+	return quint32( quint8( p[0] ) ) | quint32( quint8( p[1] ) ) << 8 | quint32( quint8( p[2] ) ) << 16
+		| quint32( quint8( p[3] ) ) << 24;
+}
+
+// The game writes UTF-8 for most languages and cp1252 for some; Latin-1 is the near fallback.
+QString stringText( const char * p, qsizetype n )
+{
+	const QByteArray b = QByteArray::fromRawData( p, n );
+	QStringDecoder utf8( QStringDecoder::Utf8, QStringDecoder::Flag::Stateless );
+	QString s = utf8( b );
+	return utf8.hasError() ? QString::fromLatin1( b ) : s;
+}
+
+constexpr const char * kStringExt[3] = { "strings", "dlstrings", "ilstrings" };
+
+bool stringsOff()
+{
+	return qEnvironmentVariable( "WW_OPENCELL_STRINGS" ) == QLatin1String( "0" )
+		|| qEnvironmentVariable( "WW_OPENCELL_RED" ) == QLatin1String( "strings" );
 }
 
 // The world-children group (type 1) above an exterior cell, or 0 for a cell under no world.
@@ -233,7 +261,117 @@ bool openCellImportLoadOrder( const QString & pluginsTxt, QStringList & plugins,
 	return true;
 }
 
-bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QString * error )
+bool openCellParseStrings( const QByteArray & bytes, bool lengthPrefixed, OpenCellStrings & out )
+{
+	// count, data size, count x (id, offset into the data), then the data
+	if ( bytes.size() < 8 )
+		return false;
+	const char * b = bytes.constData();
+	const quint32 count = le32( b ), dataSize = le32( b + 4 );
+	const qsizetype dataAt = 8 + qsizetype( count ) * 8;
+	if ( count > quint32( bytes.size() / 8 ) || dataAt + qsizetype( dataSize ) > bytes.size() )
+		return false;
+	const char * data = b + dataAt;
+	for ( quint32 i = 0; i < count; i++ ) {
+		const quint32 id = le32( b + 8 + i * 8 ), off = le32( b + 12 + i * 8 );
+		if ( off >= dataSize )
+			return false;
+		qsizetype at = off, n = 0;
+		if ( lengthPrefixed ) {
+			if ( qsizetype( off ) + 4 > qsizetype( dataSize ) )
+				return false;
+			n = le32( data + off );
+			at += 4;
+			if ( at + n > qsizetype( dataSize ) )
+				return false;
+		} else {
+			while ( at + n < qsizetype( dataSize ) && data[at + n] )
+				n++;
+		}
+		while ( n > 0 && data[at + n - 1] == '\0' )
+			n--;
+		out.insert( id, stringText( data + at, n ) );
+	}
+	return true;
+}
+
+OpenCellStrings openCellLoadStrings( const QString & pluginPath, const QString & lang, const QString & dataDir,
+	bool * found )
+{
+	OpenCellStrings out;
+	if ( found )
+		*found = false;
+	if ( stringsOff() )
+		return out;
+	const QFileInfo plugin( pluginPath );
+	const QString base = plugin.completeBaseName();
+	QStringList dirs{ plugin.absolutePath() };
+	if ( !dataDir.isEmpty() && QDir::cleanPath( QFileInfo( dataDir ).absoluteFilePath() ) != QDir::cleanPath( dirs[0] ) )
+		dirs.append( dataDir );
+	// .STRINGS last, so a FULL id that is in several tables reads the one FULL lives in.
+	for ( int t = 2; t >= 0; t-- ) {
+		const QString file = QStringLiteral( "%1_%2.%3" ).arg( base, lang, QLatin1String( kStringExt[t] ) );
+		QByteArray bytes;
+		bool have = false;
+		for ( const QString & d : dirs ) {
+			QFile f( QDir( d ).filePath( QStringLiteral( "Strings/" ) + file ) );
+			if ( f.open( QIODevice::ReadOnly ) ) {
+				bytes = f.readAll();
+				have = true;
+				break;
+			}
+		}
+		for ( int i = 0; !have && i < dirs.size(); i++ ) {
+			QStringList archives = QDir( dirs[i] ).entryList( { base + QStringLiteral( " - *.ba2" ) }, QDir::Files,
+				QDir::Name | QDir::IgnoreCase );
+			// Texture archives hold no tables; the usual homes (Localization, Interface, Main) are opened first.
+			archives.removeIf( []( const QString & a ) { return a.contains( QLatin1String( "Textures" ), Qt::CaseInsensitive ); } );
+			auto home = []( const QString & a ) {
+				for ( const char * k : { "Localization", "Interface", "Main" } )
+					if ( a.contains( QLatin1String( k ), Qt::CaseInsensitive ) )
+						return 0;
+				return 1;
+			};
+			std::stable_sort( archives.begin(), archives.end(), [&]( const QString & a, const QString & b ) {
+				return home( a ) < home( b );
+			} );
+			const std::string want = ( QStringLiteral( "strings/" ) + file ).toLower().toStdString();
+			for ( const QString & a : archives ) {
+				try {
+					BA2File ba2( QDir( dirs[i] ).filePath( a ).toLocal8Bit().constData(),
+						[]( void * w, const std::string_view & n ) { return n == *static_cast<const std::string *>( w ); },
+						const_cast<std::string *>( &want ) );
+					if ( !ba2.findFile( want ) )
+						continue;
+					BA2File::UCharArray buf;
+					ba2.extractFile( buf, want );
+					bytes = QByteArray( reinterpret_cast<const char *>( buf.data ), qsizetype( buf.size ) );
+					have = true;
+					break;
+				} catch ( std::exception & ) {
+					// an unreadable archive is skipped like a missing one
+				}
+			}
+		}
+		if ( have && openCellParseStrings( bytes, t != 0, out ) && found )
+			*found = true;
+	}
+	return out;
+}
+
+QString openCellStringsLanguage()
+{
+	const QString l = QSettings().value( settingsKey( "Language" ) ).toString().trimmed();
+	return l.isEmpty() ? QStringLiteral( "en" ) : l;
+}
+
+void openCellSetStringsLanguage( const QString & lang )
+{
+	QSettings().setValue( settingsKey( "Language" ), lang.trimmed() );
+}
+
+bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QString * error,
+	const OpenCellReadOptions & opt )
 {
 	out = OpenCellCatalog();
 	if ( paths.isEmpty() ) {
@@ -242,8 +380,18 @@ bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QStr
 		return false;
 	}
 	const QVector<bool> localized = localizedFlags( paths );
-	auto isLocalized = [&]( const ESMFile::ESMRecord & r ) {
-		return r.srcFile < unsigned( localized.size() ) && localized[int( r.srcFile )];
+	const QString lang = opt.lang.isEmpty() ? openCellStringsLanguage() : opt.lang;
+	QVector<OpenCellStrings> tables( paths.size() );
+	for ( int i = 0; i < paths.size(); i++ ) {
+		bool found = false;
+		if ( localized[i] )
+			tables[i] = openCellLoadStrings( paths[i], lang, opt.dataDir, &found );
+		if ( localized[i] && !found )
+			out.noStrings.append( QFileInfo( paths[i] ).fileName() );
+	}
+	auto stringsOf = [&]( const ESMFile::ESMRecord & r ) -> const OpenCellStrings * {
+		const bool loc = r.srcFile < unsigned( localized.size() ) && localized[int( r.srcFile )];
+		return loc ? &tables[int( r.srcFile )] : nullptr;
 	};
 	try {
 		ESMFile esm( paths.join( QLatin1Char( ',' ) ).toLocal8Bit().constData() );
@@ -271,12 +419,12 @@ bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QStr
 				if ( worldTop && *r == "WRLD" ) {
 					OpenCellWorld w;
 					w.form = r->formID;
-					readNames( esm, *r, isLocalized( *r ), w.edid, w.name );
+					readNames( esm, *r, stringsOf( *r ), w.edid, w.name );
 					out.worlds.append( w );
 				} else if ( !worldTop && *r == "CELL" ) {
 					OpenCellCell c;
 					c.form = r->formID;
-					readNames( esm, *r, isLocalized( *r ), c.edid, c.name, &c.x, &c.y );
+					readNames( esm, *r, stringsOf( *r ), c.edid, c.name, &c.x, &c.y );
 					if ( interiorBlock )
 						out.interiors.append( c );
 					else
