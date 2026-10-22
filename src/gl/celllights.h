@@ -97,6 +97,10 @@ struct WwCellLight
 	float box[3][4] = {};           //!< lane HEMI1: box local coordinate k = dot(box[k].xyz, P) + box[k].w, inside |k| <= 1
 	quint32 ref = 0;                //!< lane GPURELIGHT1: the placed reference (0: none, an effect's light)
 	float godRay = 0.0f;            //!< lane VOLFOG1: a shaft emitter (a shadow flag AND a WGDR): its GDRY's intensity; 0 none
+	//! lane LIGHTFLICKER1: 0 steady, 1 flicker (LIGH flag 0x8), 2 pulse (0x80 | 0x100), with DATA's Flicker Effect
+	int flicker = 0;
+	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;
+	float flickerAxes[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };	//!< the ref's local x, y, z in world, x its scale
 };
 
 //! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
@@ -276,6 +280,22 @@ int wwCellFarDotsDraw( Scene * scene );
 //! the Cell lights row (ships off); the pin WW_CELL_LIT wins
 bool wwCellLightsOn();
 void wwCellLightsSetOn( bool on );
+
+/*! LIGHT FLICKER (lane LIGHTFLICKER1): a placed LIGH with flag 0x8 (flicker) or 0x80 / 0x100 (pulse) varies each frame as
+ *  the game does (measured; celllights.cpp wwCellFlickerFrame): a dimmer on its colour and an
+ *  offset of its position. One value per light per frame, written into the light buffer that the surfaces, the effects
+ *  and the air all read, so they always agree. The bake (GI, relight, far light) keeps the steady light.
+ *  The Light flicker row ships off (WW/CellFlicker; the pin WW_CELL_FLICKER wins). WW_CELL_FLICKER_RED=1 holds every
+ *  light steady (dimmer 1, no offset: the row-off picture). WW_CELL_FLICKER_STEP=<seconds> a fixed step a frame (gates),
+ *  WW_CELL_FLICKER_DUMP=<file> one line per flickering light per frame. */
+bool wwCellFlickerOn();
+void wwCellFlickerSetOn( bool on );
+//! once a frame, before the draw: advance the scene's document's flickering lights by the frame's time
+void wwCellFlickerFrame( Scene * scene );
+//! the view should repaint every frame: the row on and not red, cell-lit, the document has a flickering light
+bool wwCellFlickerWantsFrames( Scene * scene );
+//! light i's value this frame (dimmer on its colour, world offset); false (1, 0) when it is steady
+bool wwCellFlickerOf( const void * nif, qsizetype i, float * dimmer, float offset[3] );
 
 //! this scene draws cell-lit: the row on, the scene's document published, a perspective non-picking draw
 bool wwCellLightsWanted( Scene * scene );

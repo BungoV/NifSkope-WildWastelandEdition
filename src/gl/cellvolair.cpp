@@ -1283,7 +1283,10 @@ static void vaPassInner( Scene * scene, bool run )
 			if ( L )
 				for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
 					const WwCellLight & l = L->lights.at( i );
-					const float a[13] = { l.pos[0], l.pos[1], l.pos[2], l.radius, l.color[0], l.color[1], l.color[2],
+					float dim, off[3];	// lane LIGHTFLICKER1: this frame's flicker, as the light buffer holds it
+					wwCellFlickerOf( scene->nifModel, i, &dim, off );
+					const float a[13] = { l.pos[0] + off[0], l.pos[1] + off[1], l.pos[2] + off[2], l.radius, l.color[0] * dim,
+						l.color[1] * dim, l.color[2] * dim,
 						l.spot ? l.cosOuter : -2.0f, float( l.shape ), float( l.shadow ), l.bias, l.scale, l.exponent };
 					o += QStringLiteral( "light %1 %2 %3\n" ).arg( i ).arg( v( a, 13 ) ).arg( l.ref, 8, 16, QLatin1Char( '0' ) );
 				}

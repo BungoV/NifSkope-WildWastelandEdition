@@ -27,6 +27,7 @@ BSD License - see nifskope.h
 #include <QSettings>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include "cellunits.h"
@@ -96,6 +97,10 @@ struct ClState
 	int passRed = 0;        // WW_CELL_PV_RED: 1 direct, 2 nonormal (the shader), 4 open (every sky direction open), 8 noclamp, 16 nosee, 32 borrow, 64 lendamb, 128 strand, 256 firstslot, 512 tiepick, 1024 lonesky, 2048 nofilter, 4096 nolastfill
 	int giAmb = 1;          // lane GICAL1: WW_CELL_GI_AMB = keep (0) | replace | off | max | asgi (the measure's red); lane GIAMB1: replace by default (his ruling), keep = the gate's red
 	bool giFill = true;     // lane GICAL1: WW_CELL_GI_FILL=0 leaves the GI's gaps black (as before the lane)
+	// lane LIGHTFLICKER1: the Light flicker row (WW/CellFlicker, pin WW_CELL_FLICKER), its red and gate pins
+	bool flickerOn = false, flickerPinned = false, flickerRed = false;
+	float flickerStep = 0.0f;	// > 0: WW_CELL_FLICKER_STEP, seconds a frame
+	QString flickerDump;
 };
 
 ClState & st()
@@ -124,6 +129,12 @@ ClState & st()
 		} else {
 			s.farOn = QSettings().value( QStringLiteral( "WW/CellFar" ), false ).toBool();
 		}
+		const QByteArray flPin = qgetenv( "WW_CELL_FLICKER" ).trimmed();	// lane LIGHTFLICKER1
+		s.flickerPinned = !flPin.isEmpty();
+		s.flickerOn = s.flickerPinned ? flPin != "0" : QSettings().value( QStringLiteral( "WW/CellFlicker" ), false ).toBool();
+		s.flickerRed = qEnvironmentVariableIntValue( "WW_CELL_FLICKER_RED" ) != 0;
+		s.flickerStep = std::max( 0.0f, qEnvironmentVariable( "WW_CELL_FLICKER_STEP" ).toFloat() );
+		s.flickerDump = qEnvironmentVariable( "WW_CELL_FLICKER_DUMP" );
 		const QByteArray farRed = qgetenv( "WW_CELL_FAR_RED" ).trimmed();
 		s.farRed = farRed == "nosurfel" ? 1 : farRed == "noblend" ? 2 : farRed == "flipside" ? 4 : 0;
 		s.probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
@@ -233,6 +244,10 @@ struct Gpu
 	std::vector<float> spheres;	// lane VOLAIR1: every buffer light's world centre + radius (copies included), in order
 	std::vector<float> texels;		// the light buffer as uploaded, for the cluster lists
 	std::uint64_t texelStamp = 0;
+	// lane LIGHTFLICKER1: the buffer before the flicker (base) and as patched (live); the flicker stamp last patched
+	std::vector<float> flickBase, flickLive;
+	std::uint64_t flickStamp = 0;
+	bool flickOn = false;
 	Gpu() { std::fill( shSlot, shSlot + kShadowSlots, -1 ); }
 };
 QHash<const void *, Gpu> & gpus()
@@ -417,6 +432,186 @@ void wwCellFarSetOn( bool on )
 int wwCellFarRed()
 {
 	return st().farRed;
+}
+
+/* ---- lane LIGHTFLICKER1: the light flicker (celllights.h) ----
+ * Matches the game's flicker / pulse behavior, measured. s = frame seconds x Period; 512-entry sin / cos tables
+ * indexed int(x 512 / 2 pi) & 511. Phases p (per ref; start 1, 0, 0) wrap at 2 pi.
+ *  flicker (0x8): p += random(1.1, 13.1), (1.2, 13.2), (1.3, 19.3) x s; q = p + (1.7, 0.5, 0.3);
+ *    o = Movement x sin q0 x sin q1 / 2 (0 unless o + Movement > 0); local offset o (sin q0, sin q1, sin q2);
+ *    v = clamp((sin 1.3 q1 + 1) / 2 x (sin 1.1 q0 + 1) / 2 / 3 + 0.2 sin 3 q2, -1, 1)
+ *  pulse (0x80 | 0x100): p0 += s; c, n = cos, sin p0; v = c; local offset Movement (c, n, n c)
+ *  dimmer = 1 - A + A v with A = Intensity / 2 (x the fade, which the colour already holds). */
+namespace
+{
+struct FlickPhase
+{
+	float p[3] = { 1.0f, 0.0f, 0.0f };
+	quint32 rng = 0;
+};
+struct FlickDoc
+{
+	int version = -1;
+	std::vector<int> idx;			// the flickering lights
+	std::vector<float> val;			// 4 a light (dimmer, world offset), all lights
+	QHash<quint32, FlickPhase> phase;	// by ref, so a streamed republish keeps each light's phase
+	std::uint64_t stamp = 1;
+	int moving = 0;
+	qint64 frames = 0;
+};
+QHash<const void *, FlickDoc> & flickDocs()
+{
+	static QHash<const void *, FlickDoc> d;
+	return d;
+}
+float flickTab( float x, bool cosine )
+{
+	static const std::vector<float> tab = [] {
+		std::vector<float> t( 1024 );
+		for ( int i = 0; i < 512; i++ ) {
+			t[size_t( i )] = float( std::sin( double( i ) * 6.283185307179586 / 512.0 ) );
+			t[size_t( 512 + i )] = float( std::cos( double( i ) * 6.283185307179586 / 512.0 ) );
+		}
+		return t;
+	}();
+	return tab[size_t( ( int( x * ( 512.0f / 6.2831855f ) ) & 511 ) + ( cosine ? 512 : 0 ) )];
+}
+float flickRand( quint32 & r, float lo, float hi )	// a random in [lo, hi); xorshift so a gate's frames repeat
+{
+	r ^= r << 13;
+	r ^= r >> 17;
+	r ^= r << 5;
+	return lo + ( hi - lo ) * float( r >> 8 ) * ( 1.0f / 16777216.0f );
+}
+bool flickLive( Scene * scene )
+{
+	const ClState & s = st();
+	return s.flickerOn && !s.flickerRed && wwCellLightsWanted( scene );
+}
+}	// namespace
+
+bool wwCellFlickerOn()
+{
+	return st().flickerOn;
+}
+
+void wwCellFlickerSetOn( bool on )
+{
+	ClState & s = st();
+	if ( s.flickerPinned )
+		return;
+	s.flickerOn = on;
+	QSettings().setValue( QStringLiteral( "WW/CellFlicker" ), on );
+}
+
+void wwCellFlickerFrame( Scene * scene )
+{
+	using Clock = std::chrono::steady_clock;
+	static Clock::time_point last = Clock::now();
+	const Clock::time_point now = Clock::now();
+	float dt = std::clamp( std::chrono::duration<float>( now - last ).count(), 0.0f, 0.25f );
+	last = now;
+	if ( !flickLive( scene ) )
+		return;
+	const ClState & s = st();
+	if ( s.flickerStep > 0.0f )
+		dt = s.flickerStep;
+	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	FlickDoc & d = flickDocs()[scene->nifModel];
+	const int ver = s.version.value( scene->nifModel );
+	if ( d.version != ver ) {
+		d.version = ver;
+		d.idx.clear();
+		d.moving = 0;
+		for ( qsizetype i = 0; i < L->lights.size(); i++ )
+			if ( L->lights.at( i ).flicker ) {
+				d.idx.push_back( int( i ) );
+				d.moving += L->lights.at( i ).flickerMovement != 0.0f && !L->lights.at( i ).shadow ? 1 : 0;
+			}
+		d.val.assign( size_t( L->lights.size() ) * 4, 0.0f );
+		for ( size_t i = 0; i < d.val.size(); i += 4 )
+			d.val[i] = 1.0f;
+	}
+	if ( d.idx.empty() )
+		return;
+	constexpr float kTwoPi = 6.2831855f;
+	QFile dump( s.flickerDump );
+	const bool dumping = !s.flickerDump.isEmpty() && dump.open( QIODevice::Append | QIODevice::Text );
+	for ( int i : d.idx ) {
+		const WwCellLight & l = L->lights.at( i );
+		FlickPhase & ph = d.phase[l.ref];
+		if ( !ph.rng )
+			ph.rng = 0x9E3779B9u ^ ( l.ref * 2654435761u ) ^ quint32( i + 1 );
+		const float sp = dt * l.flickerPeriod;
+		const float m = l.flickerMovement, A = l.flickerIntensity * 0.5f;
+		float v, local[3];
+		if ( l.flicker == 1 ) {
+			ph.p[0] += flickRand( ph.rng, 1.1f, 13.1f ) * sp;
+			ph.p[1] += flickRand( ph.rng, 1.2f, 13.2f ) * sp;
+			ph.p[2] += flickRand( ph.rng, 1.3f, 19.3f ) * sp;
+			for ( float & p : ph.p )
+				if ( p > kTwoPi )
+					p -= kTwoPi;
+			const float q0 = ph.p[0] + 1.7f, q1 = ph.p[1] + 0.5f, q2 = ph.p[2] + 0.3f;
+			const float s0 = flickTab( q0, false ), s1 = flickTab( q1, false );
+			float o = m * s0 * s1 * 0.5f;
+			if ( !( o + m > 0.0f ) )
+				o = 0.0f;
+			local[0] = o * s0;
+			local[1] = o * s1;
+			local[2] = o * flickTab( q2, false );
+			v = ( flickTab( q1 * 1.3f, false ) + 1.0f ) * 0.5f * ( flickTab( q0 * 1.1f, false ) + 1.0f ) * 0.5f * ( 1.0f / 3.0f )
+				+ flickTab( q2 * 3.0f, false ) * 0.2f;
+			v = std::clamp( v, -1.0f, 1.0f );
+		} else {
+			ph.p[0] += sp;
+			if ( ph.p[0] > kTwoPi )
+				ph.p[0] -= kTwoPi;
+			const float c = flickTab( ph.p[0], true ), n = flickTab( ph.p[0], false );
+			v = c;
+			local[0] = m * c;
+			local[1] = m * n;
+			local[2] = m * n * c;
+		}
+		float * out = d.val.data() + size_t( i ) * 4;
+		out[0] = 1.0f - A + A * v;
+		// a shadow-casting light keeps its place: its depth cube is drawn from there, not redrawn each frame
+		for ( int k = 0; k < 3; k++ )
+			out[1 + k] = l.shadow ? 0.0f
+				: l.flickerAxes[0][k] * local[0] + l.flickerAxes[1][k] * local[1] + l.flickerAxes[2][k] * local[2];
+		if ( dumping )
+			dump.write( QStringLiteral( "%1 %2 %3 %4 %5 %6 %7 %8 %9\n" ).arg( d.frames ).arg( double( dt ), 0, 'g', 6 ).arg( i )
+				.arg( l.ref, 8, 16, QLatin1Char( '0' ) ).arg( l.flicker ).arg( double( out[0] ), 0, 'f', 6 )
+				.arg( double( out[1] ), 0, 'f', 4 ).arg( double( out[2] ), 0, 'f', 4 ).arg( double( out[3] ), 0, 'f', 4 ).toLatin1() );
+	}
+	d.frames++;
+	d.stamp++;
+}
+
+bool wwCellFlickerWantsFrames( Scene * scene )
+{
+	if ( !flickLive( scene ) )
+		return false;
+	const auto it = flickDocs().constFind( scene->nifModel );
+	// before the first frame has listed them: ask once, the frame lists them
+	return it == flickDocs().constEnd() || it->version != st().version.value( scene->nifModel ) || !it->idx.empty();
+}
+
+bool wwCellFlickerOf( const void * nif, qsizetype i, float * dimmer, float offset[3] )
+{
+	*dimmer = 1.0f;
+	offset[0] = offset[1] = offset[2] = 0.0f;
+	const ClState & s = st();
+	if ( !s.flickerOn || s.flickerRed )
+		return false;
+	const auto it = flickDocs().constFind( nif );
+	if ( it == flickDocs().constEnd() || it->version != s.version.value( nif ) || i < 0 || size_t( i ) * 4 + 4 > it->val.size() )
+		return false;
+	const float * v = it->val.data() + size_t( i ) * 4;
+	*dimmer = v[0];
+	for ( int k = 0; k < 3; k++ )
+		offset[k] = v[1 + k];
+	return v[0] != 1.0f || v[1] != 0.0f || v[2] != 0.0f || v[3] != 0.0f;
 }
 
 /* lane FARVIEW1: the bulb dots. A bulb's intensity I = Le x area / 4 (farLightDots); seen from d it covers
@@ -637,7 +832,9 @@ void wwCellLightsUniforms( Scene * scene )
 	ClState & s = st();
 	Gpu & g = gpus()[r];
 	const WwCellLighting * L = on ? wwCellLightsFor( scene->nifModel ) : nullptr;
-	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp ) ) {
+	const bool flick = L && s.flickerOn && !s.flickerRed;	// lane LIGHTFLICKER1
+	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp
+		|| g.flickOn != flick ) ) {
 		// lane SHADOW1: the slot each light holds (the slots belong to the document the shadow pass last saw)
 		std::vector<float> slotOf( size_t( L->lights.size() ), -1.0f );
 		if ( g.shDoc == scene->nifModel && g.shVersion == s.version.value( scene->nifModel ) )
@@ -691,8 +888,60 @@ void wwCellLightsUniforms( Scene * scene )
 		g.doc = scene->nifModel;
 		g.version = s.version.value( scene->nifModel );
 		g.count = int( t.size() / ( kTexelsPerLight * 4 ) ) - ( L->lights.isEmpty() ? 1 : 0 );
+		g.flickOn = flick;
+		g.flickStamp = 0;
+		g.flickBase.clear();
+		g.flickLive.clear();
+		if ( flick && !L->lights.isEmpty() ) {
+			g.flickBase = t;
+			g.flickLive = t;
+			// lane LIGHTFLICKER1: the cluster lists see a moving light's whole reach (|offset| <= 0.87 Movement x scale)
+			const size_t per = kTexelsPerLight * 4, n = size_t( L->lights.size() );
+			for ( size_t j = 0; j * per < t.size(); j++ ) {
+				const WwCellLight & l = L->lights.at( qsizetype( j % n ) );
+				if ( l.flicker && l.flickerMovement != 0.0f && !l.shadow ) {
+					float sc = 0.0f;
+					for ( int a = 0; a < 3; a++ )
+						sc = std::max( sc, std::sqrt( l.flickerAxes[a][0] * l.flickerAxes[a][0] + l.flickerAxes[a][1] * l.flickerAxes[a][1]
+							+ l.flickerAxes[a][2] * l.flickerAxes[a][2] ) );
+					t[j * per + 3] += 0.87f * std::abs( l.flickerMovement ) * sc;
+				}
+			}
+		}
 		g.texels = std::move( t );
 		g.texelStamp++;
+	}
+	/* lane LIGHTFLICKER1: this frame's flicker (wwCellFlickerFrame) patched into the buffer once, as the range of the
+	 * flickering lights: the surfaces, the effects and the air read the same texels */
+	if ( L && g.flickOn && g.doc == scene->nifModel && !g.flickBase.empty() ) {
+		const auto fd = flickDocs().constFind( scene->nifModel );
+		if ( fd != flickDocs().constEnd() && fd->version == g.version && fd->stamp != g.flickStamp && !fd->idx.empty() ) {
+			g.flickStamp = fd->stamp;
+			const size_t per = kTexelsPerLight * 4, n = size_t( L->lights.size() );
+			const size_t total = g.flickLive.size() / per;
+			size_t lo = total, hi = 0;
+			for ( size_t c = 0; c * n < total; c++ )
+				for ( int i : fd->idx ) {
+					const size_t j = c * n + size_t( i ), o = j * per;
+					if ( j >= total || size_t( i ) * 4 + 4 > fd->val.size() )
+						continue;
+					const float * v = fd->val.data() + size_t( i ) * 4;
+					for ( int k = 0; k < 3; k++ ) {
+						g.flickLive[o + size_t( k )] = g.flickBase[o + size_t( k )] + v[1 + k];
+						g.flickLive[o + 4 + size_t( k )] = g.flickBase[o + 4 + size_t( k )] * v[0];
+						if ( j * 4 + 3 < g.spheres.size() )
+							g.spheres[j * 4 + size_t( k )] = g.flickLive[o + size_t( k )];
+					}
+					lo = std::min( lo, j );
+					hi = std::max( hi, j );
+				}
+			if ( lo <= hi && g.buf ) {
+				fn->glBindBuffer( GL_TEXTURE_BUFFER, g.buf );
+				fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( lo * per * sizeof( float ) ), GLsizeiptr( ( hi - lo + 1 ) * per * sizeof( float ) ),
+					g.flickLive.data() + lo * per );
+				fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
+			}
+		}
 	}
 	/* The sampler is bound whether or not this draw lights: a samplerBuffer left on unit 0
 	 * beside BaseMap's sampler2D is a draw-time INVALID_OPERATION. */
@@ -1537,6 +1786,13 @@ QString wwCellLightsEcho( Scene * scene )
 		o += QStringLiteral( " fardots=%1" ).arg( s.dotsLast );
 	if ( s.probe )
 		o += QStringLiteral( " probe=%1" ).arg( s.probe );
+	if ( s.flickerOn || s.flickerRed ) {	// lane LIGHTFLICKER1
+		const auto fd = scene && scene->nifModel ? flickDocs().constFind( scene->nifModel ) : flickDocs().constEnd();
+		const bool known = fd != flickDocs().constEnd();
+		o += QStringLiteral( " flicker=%1(asked=%2, lights=%3, moving=%4, frames=%5, red=%6, step=%7)" )
+			.arg( flickLive( scene ) ? "on" : "off" ).arg( s.flickerOn ? 1 : 0 ).arg( known ? int( fd->idx.size() ) : 0 )
+			.arg( known ? fd->moving : 0 ).arg( known ? fd->frames : 0 ).arg( s.flickerRed ? 1 : 0 ).arg( double( s.flickerStep ) );
+	}
 	o += QStringLiteral( " giamb=%1 gifill=%2" ).arg( QStringList{ "keep", "replace", "off", "max", "asgi" }.value( s.giAmb ) )
 		.arg( s.giFill ? 1 : 0 );	// lane GICAL1
 	if ( s.red )

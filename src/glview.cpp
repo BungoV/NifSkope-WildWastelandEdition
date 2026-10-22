@@ -4013,6 +4013,7 @@ void GLView::paintGL()
 		PassTime::Scope pt( PassTime::SunShadows );	// lane PERF1
 		wwSunShadowPass( scene );
 	}
+	wwCellFlickerFrame( scene );	// lane LIGHTFLICKER1: this frame's flicker, before any pass reads the lights
 	// lane SHADOW1: the cell lights' depth cubes (a no-op unless the document draws cell-lit)
 	PassTime::begin( PassTime::CellShadows );	// lane PERF1
 	wwCellShadowPass( scene );
@@ -22237,6 +22238,8 @@ void GLView::advanceGears()
 	if ( !isVisible() )
 		return;
 	wwCellStreamFrame();   // lane CELLSTREAM1: a few ms of the cells round the camera a frame
+	if ( wwCellFlickerWantsFrames( scene ) )
+		update();	// lane LIGHTFLICKER1: a flickering lamp needs a frame every tick
 
 	dT = std::clamp< float >( dT, 0.0f, 1.0f );
 	physicsTick( dT );

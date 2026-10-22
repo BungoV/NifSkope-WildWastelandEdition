@@ -1752,8 +1752,9 @@ const EsmLight & EsmWorld::light( quint32 formID ) const
 					L.nearClip = f.readFloat();
 				}
 				if ( f.size() >= 52 ) {
-					for ( int i = 0; i < 3; i++ )
-						(void) f.readFloat();       // flicker period, intensity, movement
+					L.flickerPeriod = f.readFloat();	// lane LIGHTFLICKER1: Flicker Effect (run by flags 0x8, 0x180)
+					L.flickerIntensity = f.readFloat();
+					L.flickerMovement = f.readFloat();
 					L.constant = f.readFloat();
 					L.scalar = f.readFloat();
 					L.exponent = f.readFloat();
