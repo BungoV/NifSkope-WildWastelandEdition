@@ -95,6 +95,9 @@ QString wwCellGrassEcho( const void * nif );
 //! Per draw (fo4_cell / pbrm_cell): the fade on a grass shape, zero on every other (a no-op without the uniform).
 void wwCellGrassUniforms( Scene * scene, int block );
 
+//! lane GPUDRIVEN1 step B: the shape waves in the wind (its vertices leave its bounds), so no culling bound holds it.
+bool wwCellGrassIsShape( const void * nif, int block );
+
 //! The wind constants from the loaded weather (the engine's wind update): wind = (angle, 0, 0, 0), wind2 = (min * 300,
 //! max * 300, frequency, 1); false without a weather.
 bool wwCellGrassWind( float wind[4], float wind2[4] );

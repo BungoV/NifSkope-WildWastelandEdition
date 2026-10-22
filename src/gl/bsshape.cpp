@@ -7,6 +7,7 @@
 #include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
+#include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
 #include "gl/glproperty.h"
 #include "cellmesh.h"
 #include "cellspeed.h"
@@ -315,6 +316,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 			q = GpuDriven::AlphaTest;
 		else if ( isDoubleSided )
 			q = GpuDriven::TwoSided;
+		if ( q != GpuDriven::Rest )
+			GpuDrivenB::note( this, { q, isDoubleSided, isVertexAlphaAnimation, lodTriangleCount == triangles.size(), shader } );
 		if ( GpuDriven::mainTake( this, q ) )
 			return;
 	}
@@ -403,7 +406,11 @@ void BSShape::drawShapes( NodeList * secondPass )
 
 	// lane SUNCELL1: a welded cell shape draws only the placements that touch the camera's frustum (gl/cellcull.h)
 	static std::vector<std::uint32_t> cullRanges;
-	if ( numTriangles > 0 && !hiddenT && !selectionFlags && !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene )
+	if ( !selectionFlags )
+		GpuDrivenB::learn( this, shader );	// step B: the state this draw runs with
+	if ( numTriangles > 0 && !hiddenT && !selectionFlags && GpuDrivenB::draw( scene, this, numTriangles ) ) {
+		// step B drew it: its clusters from the GPU cull's commands (gl/cellgpucull.h)
+	} else if ( numTriangles > 0 && !hiddenT && !selectionFlags && !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene )
 		&& wwCellCullCamera( scene, this, id(), std::int64_t( numTriangles ), cullRanges ) ) {
 		// finalfix: the kept ranges go down as ONE multi-draw, so culling never costs more calls than drawing it all
 		static std::vector<GLsizei> cullCounts;

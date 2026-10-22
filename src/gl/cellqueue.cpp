@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "gl/cellqueue.h"
+#include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B
 
 #include "gl/glcontext.hpp"
 #include "gl/glnode.h"
@@ -157,12 +158,14 @@ void mainFlush( Scene * scene, NodeList * secondPass )
 	if ( !m.armed )
 		return;
 	m.flushing = true;
+	GpuDrivenB::prepare( scene );	// step B: the prepass, the Hi-Z and the cluster cull, before the queues draw
 	for ( int k = 0; k < QueueCount; k++ ) {
 		if ( redOrder() )
 			redShuffle( m.q[k], unsigned( k ) );
 		for ( Node * n : m.q[k] )
 			n->drawShapes( secondPass );
 	}
+	GpuDrivenB::finish();
 	m.flushing = false;
 	m.armed = false;
 	if ( census() ) {

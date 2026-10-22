@@ -54,6 +54,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QOpenGLContext>
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1
+#include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
@@ -551,7 +552,9 @@ void Scene::drawShapes()
 	wwCellDrawProbe( this, QStringLiteral( "before the scene" ) );	// lane VOLAIR1 (gates only)
 	PassTime::begin( PassTime::Opaque );	// lane PERF1
 	wwSetupMemoArm( true );	// lane PERF1: one pass, one set of scene globals
+	GpuDrivenB::cameraWalk( true );
 	collectShapes( secondPass );
+	GpuDrivenB::cameraWalk( false );
 	wwSetupMemoArm( false );
 	PassTime::end( PassTime::Opaque );
 	wwCellDrawProbe( this, QStringLiteral( "after the first pass" ) );

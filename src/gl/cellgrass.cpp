@@ -744,6 +744,13 @@ QString wwCellGrassEcho( const void * nif )
 	            : QStringLiteral( "cell grass: off (Grass row off)" );
 }
 
+bool wwCellGrassIsShape( const void * nif, int block )
+{
+	const GrassState & s = gs();
+	const auto it = s.shapes.constFind( nif );
+	return it != s.shapes.constEnd() && it->contains( block );
+}
+
 void wwCellGrassUniforms( Scene * scene, int block )
 {
 	if ( !scene || !scene->renderer )
