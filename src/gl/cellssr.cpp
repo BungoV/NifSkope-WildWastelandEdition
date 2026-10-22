@@ -16,10 +16,8 @@ BSD License - see nifskope.h
 #include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
-#include <QSettings>
 
 #include <algorithm>
-#include <cstdio>
 #include <cmath>
 #include <vector>
 
@@ -42,8 +40,6 @@ struct SsrState
 	bool waterRay = false;	// lane WATER2: the water ray pass is drawing
 	unsigned int gbuf = 0;
 	bool flagged = false;	// the draw being set up carries the flag
-	bool on = true, ext = false, pinOn = false, pinExt = false;	// lane CELLALL1: the rows (cellssr.h)
-	int lastVerdict = -1;	// lane CELLALL1: the telemetry line prints when it changes
 };
 
 SsrState & ssr()
@@ -55,11 +51,6 @@ SsrState & ssr()
 		s.red = red == "off" ? 1 : red == "nogap" ? 2 : red == "nofade" ? 4 : 0;
 		s.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_SSR_DUMP" ) );
 		s.probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
-		const QByteArray pinOn = qgetenv( "WW_CELL_SSR" ).trimmed(), pinExt = qgetenv( "WW_CELL_SSR_EXT" ).trimmed();
-		s.pinOn = !pinOn.isEmpty();
-		s.pinExt = !pinExt.isEmpty();
-		s.on = s.pinOn ? pinOn != "0" : QSettings().value( QStringLiteral( "WW/CellSsr" ), true ).toBool();
-		s.ext = s.pinExt ? pinExt != "0" : QSettings().value( QStringLiteral( "WW/CellSsrExterior" ), false ).toBool();
 	}
 	return s;
 }
@@ -113,38 +104,10 @@ void ssrAlloc( NifSkopeOpenGLContext::GLFunctions * fn, SsrTarget & t, int w, in
 
 bool ssrIsCellProgram( const NifSkopeOpenGLContext::Program * p )
 {
-	return p && ( wwIsCellProgramName( p->name ) );
+	return p && ( p->name == std::string_view( "fo4_cell.prog" ) || p->name == std::string_view( "pbrm_cell.prog" ) );
 }
 
 }	// namespace
-
-bool wwCellSsrOn()
-{
-	return ssr().on;
-}
-
-void wwCellSsrSetOn( bool on )
-{
-	SsrState & s = ssr();
-	if ( s.pinOn )
-		return;
-	s.on = on;
-	QSettings().setValue( QStringLiteral( "WW/CellSsr" ), on );
-}
-
-bool wwCellSsrExteriorOn()
-{
-	return ssr().ext;
-}
-
-void wwCellSsrExteriorSetOn( bool on )
-{
-	SsrState & s = ssr();
-	if ( s.pinExt )
-		return;
-	s.ext = on;
-	QSettings().setValue( QStringLiteral( "WW/CellSsrExterior" ), on );
-}
 
 void wwCellSsrNote( bool flagged )
 {
@@ -164,21 +127,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
 	WwCellAoTargets ao;
 	const bool waterSsr = wwCellWaterSsrWanted( scene );	// lane WATER2
-	// lane CELLALL1: the rows; an exterior only with "SSR outdoors" (before: interiors only)
-	/* finalfix: an exterior with the SSR outdoors row off runs the pass for the water alone (WATER2): it says so,
-	 * as verdict 5, rather than "on" -- the row still ships off and the line has to show it */
-	int verdict = !L ? 0 : !s.on ? 1 : ( !L->interior && !s.ext && !waterSsr ) ? 2 : !wwCellAoTargets( scene, ao ) ? 3 : 4;
-	if ( verdict == 4 && !L->interior && !s.ext )
-		verdict = 5;
-	if ( verdict != s.lastVerdict ) {
-		static const char * const words[6] = { "no cell", "off (row)", "off (exterior, SSR outdoors row off)",
-			"off (no obscurance pass)", "on", "water only (exterior, SSR outdoors row off)" };
-		std::fprintf( stderr, "cell ssr: %s %s\n", words[verdict], L ? ( L->interior ? "interior" : "exterior" ) : "-" );
-		s.lastVerdict = verdict;
-	}
-	if ( verdict != 4 && verdict != 5 )
+	if ( !L || !( L->interior || waterSsr ) || !wwCellAoTargets( scene, ao ) )
 		return;
-	g.waterOnly = !L->interior && !s.ext;	// merge: SSR outdoors runs the full pass, else water only (WATER2)
+	g.waterOnly = !L->interior;
 	g.haveWater = false;
 	QElapsedTimer timer;
 	timer.start();

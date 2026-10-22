@@ -649,14 +649,6 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 							f.readFloat();
 						ref.primType = f.readUInt32();
 						ref.hasPrim = true;
-					} else if ( f == "XPOD" && f.size() >= 8 ) {
-						// lane SUNCELL1: a portal's origin and destination rooms
-						ref.portalFrom = esm->mapFormID( *r, f.readUInt32() );
-						ref.portalTo = esm->mapFormID( *r, f.readUInt32() );
-					} else if ( f == "XRMR" && f.size() >= 1 ) {
-						ref.roomBound = true;	// lane SUNCELL1: a room's bound data
-					} else if ( f == "XLRM" && f.size() >= 4 ) {
-						ref.linkedRooms.append( esm->mapFormID( *r, f.readUInt32() ) );
 					}
 				}
 				if ( ref.base ) {
@@ -685,44 +677,6 @@ QVector<EsmRefr> EsmWorld::refrs( int cx, int cy ) const
 	QVector<EsmRefr> out = refrsInGroup( it->childGroup );
 	for ( quint32 g : it->extraGroups )
 		out += refrsInGroup( g );
-	return out;
-}
-
-EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
-{
-	EsmCellPrevis out;
-	const ESMFile::ESMRecord * cr = cellForm ? esm->findRecord( cellForm ) : nullptr;
-	if ( !cr || cr->type == GRUP || !( *cr == "CELL" ) )
-		return out;
-	out.exists = true;
-	ESMFile::ESMField f( *esm, *cr );
-	while ( f.next() ) {
-		if ( f == "RVIS" && f.size() >= 4 ) {
-			out.rvis = esm->mapFormID( *cr, f.readUInt32() );
-		} else if ( f == "VISI" && f.size() >= 2 ) {
-			out.visi = f.readUInt16();
-			out.hasVisi = true;
-		} else if ( f == "PCMB" && f.size() >= 2 ) {
-			out.pcmb = f.readUInt16();
-			out.hasPcmb = true;
-		} else if ( f == "XCRI" && f.size() >= 8 ) {
-			out.combinedMeshes = f.readUInt32();
-			const quint32 words = f.readUInt32();
-			out.combinedRefs = words / 2;
-			/* lane UMBRA1: then the mesh keys, then `words` u32s as (ref, value) pairs (the game's ExtraDataList load,
-			 * read from Todd's treat) */
-			if ( quint64( f.size() ) >= 8ULL + 4ULL * ( quint64( out.combinedMeshes ) + quint64( words ) ) ) {
-				for ( quint32 k = 0; k < out.combinedMeshes; k++ )
-					(void)f.readUInt32();
-				for ( quint32 k = 0; k + 1 < words; k += 2 ) {
-					out.combinedRefIds.append( esm->mapFormID( *cr, f.readUInt32() ) );
-					(void)f.readUInt32();
-				}
-			}
-		} else if ( f == "XPRI" ) {
-			out.previsRefs = quint32( f.size() / 4 );
-		}
-	}
 	return out;
 }
 

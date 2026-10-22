@@ -42,7 +42,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"
 #include "gl/sunshadow.h"
-#include "gl/cellcull.h"	// lane SUNCELL1
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
@@ -3688,48 +3687,6 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	}
 }
 
-/*! Lane UMBRA1: the depth probe for the tome's visibility gate (WW_CELL_UMBRA_DUMP=<dir> with WW_CELL_UMBRA_DEPTH=1).
- * When the camera moved, the scene is drawn once more into an offscreen target with no camera culling at all
- * (gl/cellcull counts nothing while probing), its depth is read back, and every 8th pixel's surface point goes,
- * unprojected to the world, to <dir>/depth.txt -- the gate checks each lies in an object box the tome sees. */
-static void wwCellUmbraDepthPass( Scene * scene )
-{
-	if ( !scene || !scene->renderer || !wwCellUmbraDepthWanted( scene ) )
-		return;
-	auto fn = scene->renderer->fn;
-	GLint prevFbo = 0, vp[4] = { 0, 0, 0, 0 };
-	glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
-	glGetIntegerv( GL_VIEWPORT, vp );
-	const int w = std::max( 1, int( vp[2] ) ), h = std::max( 1, int( vp[3] ) );
-	static std::unique_ptr<QOpenGLFramebufferObject> fbo;
-	if ( !fbo || fbo->width() != w || fbo->height() != h ) {
-		QOpenGLFramebufferObjectFormat fmt;
-		fmt.setAttachment( QOpenGLFramebufferObject::Attachment::CombinedDepthStencil );
-		fbo = std::make_unique<QOpenGLFramebufferObject>( w, h, fmt );
-	}
-	if ( !fbo->isValid() )
-		return;
-	GLfloat prevClear[4];
-	glGetFloatv( GL_COLOR_CLEAR_VALUE, prevClear );
-	fbo->bind();
-	glViewport( 0, 0, w, h );
-	glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
-	glDepthMask( GL_TRUE );
-	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
-	wwCellUmbraProbing( true );
-	scene->draw();
-	wwCellUmbraProbing( false );
-	glDepthMask( GL_TRUE );
-	std::vector<float> depth( size_t( w ) * size_t( h ) );
-	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, fbo->handle() );
-	glPixelStorei( GL_PACK_ALIGNMENT, 4 );
-	glReadPixels( 0, 0, w, h, GL_DEPTH_COMPONENT, GL_FLOAT, depth.data() );
-	fn->glBindFramebuffer( GL_FRAMEBUFFER, GLuint( prevFbo ) );
-	glViewport( vp[0], vp[1], vp[2], vp[3] );
-	glClearColor( prevClear[0], prevClear[1], prevClear[2], prevClear[3] );
-	wwCellUmbraDepthWrite( scene, depth.data(), w, h );
-}
-
 void GLView::paintGL()
 {
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
@@ -3988,7 +3945,6 @@ void GLView::paintGL()
 	/* Lookdev (lane CSM1): the three sun-shadow cascade maps, rendered before
 	 * anything else this frame so the ground and the PBR shapes can receive.
 	 * A no-op with the Shadows row off (the default): no map, no program swap. */
-	wwCellCullFrame();	// lane SUNCELL1: the last frame's culling counts, printed when they change
 	if ( wwLookdevActive() )
 		wwSunShadowPass( scene );
 	// lane SHADOW1: the cell lights' depth cubes (a no-op unless the document draws cell-lit)
@@ -4106,35 +4062,16 @@ void GLView::paintGL()
 	// Loaded NIFs behind it had been drawn. In a workspace, collect every opaque
 	// node first and use one globally sorted transparent/refraction pass.
 	// lane AO1: the obscurance first; the measure reads the obscured light, as the game's adaptation does
-	/* lane CELLALL1: Loaded NIFs beside a cell no longer switch the cell's passes off (obscurance, reflections, fog,
-	 * the measure, HDR, TAA). A cell primary draws first with all of them, the Loaded NIFs after it into the finished
-	 * frame (depth back from the HDR frame); the globally sorted pass stays for a primary that is not a cell.
-	 * WW_CELL_WSGATE_RED=old: the gate as it was (every pass off while a Loaded NIF draws). */
-	static const bool wsGateOld = qgetenv( "WW_CELL_WSGATE_RED" ).trimmed() == "old";
-	const bool cellFirst = !scene->selecting && !wsGateOld && !workspaceDrawScenes.isEmpty() && wwCellLightsWanted( scene );
-	const bool cellPasses = !scene->selecting && ( workspaceDrawScenes.isEmpty() || cellFirst );
-	{
-		static int lastWs = -1;
-		const int ws = scene->selecting ? lastWs : ( workspaceDrawScenes.isEmpty() ? 0 : cellFirst ? 1 : 2 );
-		if ( ws != lastWs && ( ws != 0 || lastWs > 0 ) ) {
-			std::fprintf( stderr, "cell view: %d loaded NIF(s) beside the scene: %s%s\n", int( workspaceDrawScenes.size() ),
-				ws == 1 ? "cell passes kept, the NIFs drawn after the cell" : ws == 2 ? "cell passes off, one sorted pass"
-				: "none", wsGateOld ? " (RED=old)" : "" );
-			lastWs = ws;
-		}
-	}
-	wwCellAoPass( scene, cellPasses );
-	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
-	wwVolFogPass( scene, cellPasses );	// lane VOLFOG1: the lit medium's froxels
-	if ( cellPasses )
+	wwCellAoPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );
+	wwCellSsrPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );	// lane SSR1: needs that pass's depth
+	wwVolFogPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );	// lane VOLFOG1: the lit medium's froxels
+	if ( !scene->selecting && workspaceDrawScenes.isEmpty() )
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
-	if ( cellPasses )
-		wwCellUmbraDepthPass( scene );	// lane UMBRA1: the tome gate's unculled depth
 
 	glDisable( GL_BLEND );
 	const bool collisionOnly = Scene::collisionOnlySetting
 		&& scene->hasOption( Scene::ShowCollision );
-	if ( workspaceDrawScenes.isEmpty() || collisionOnly || cellFirst ) {
+	if ( workspaceDrawScenes.isEmpty() || collisionOnly ) {
 		// lane IMPOSTORSHOW 2026-09-19: the octahedral impostor card, when one
 		// is armed. Inert in every ordinary session -- see impostorpreviewtest.h.
 		wwImpostorPreviewDraw( scene );
@@ -4144,7 +4081,7 @@ void GLView::paintGL()
 		ImpostorChunk::draw( scene, ImpostorDraw::Options() );
 		if ( !wwImpostorPreviewSuppressScene() ) {
 			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
-			const bool hdr = ( workspaceDrawScenes.isEmpty() || cellFirst ) && wwCellHdrBegin( scene );	// lane CELLALL1
+			const bool hdr = workspaceDrawScenes.isEmpty() && wwCellHdrBegin( scene );
 			wwCellFarLodFrame( scene );	// lane FARLOD1: the far sway's uniforms; no GL call while off
 			scene->draw();
 			if ( hdr ) {
@@ -4157,10 +4094,8 @@ void GLView::paintGL()
 			wwCellFarLodCards( scene, false, hdr );
 			wwCellFarLodSkyCensus( scene );
 			// lane MOTION1: the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
-			if ( workspaceDrawScenes.isEmpty() || cellFirst ) {	// lane CELLALL1
-				// lane GRASSMB1: the game's depth of field + motion blur BEFORE the temporal AA, as DrawWorld::Imagespace
-				// runs them (3 HDR/tone map, 6 DoF, 10 motion blur, then 17/18 FXAA/TAA); inert when off
-				wwCellPostApply( scene );
+			if ( workspaceDrawScenes.isEmpty() ) {
+				wwCellPostApply( scene );	// lane GRASSMB1 (BEFORE tree)
 				wwGameTaaResolve( scene );
 				wwCellGrassFrameEnd();	// lane GRASSMB1: the grass wind's clock steps once per frame
 			}
