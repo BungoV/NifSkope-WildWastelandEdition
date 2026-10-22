@@ -44,6 +44,10 @@ For bounding sphere calculation, NifSkope uses [Miniball](https://github.com/hbf
 by Kaspar Fischer, Bernd Gärtner and Martin Kutz, the code is available under the
 [Apache 2 License](http://www.apache.org/licenses/LICENSE-2.0.html).
 
+The screen-space GI's blue noise sheet (res/ssgi/fast_2uges.rg8) is from
+[FastNoise](https://github.com/electronicarts/fastnoise), copyright (c) 2023 Electronic Arts Inc.,
+BSD 3-Clause License (res/ssgi/FASTNOISE_LICENSE.txt).
+
 Starfield meshlet and LOD generation are based on code from [meshoptimizer](https://github.com/zeux/meshoptimizer)
 (MIT License, Copyright (c) 2016-2025 Arseny Kapoulkine) and [DirectXMesh](https://github.com/microsoft/DirectXMesh)
 (MIT License, Copyright (c) by Microsoft Corporation).

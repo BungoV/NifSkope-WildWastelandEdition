@@ -914,6 +914,28 @@ vec3 cellGiE( vec3 P, vec3 N )
 		d = 1.0 + cellSkyVis * ( d - 1.0 );
 	return e * d;
 }
+
+// SSGI2FIX: the probe's own tilt toward the screen march's open directions, E(B) / E(N) of one volume read each (the
+// bent-normal read): the probe light the near occluders shut is the probe's light from THEIR side, not its mean
+vec3 cellGiNorm( vec4 s )
+{
+	if ( cellGiSky )
+		return max( s.rgb, vec3( 0.0 ) );
+	return s.a > 0.01 ? max( s.rgb / s.a, vec3( 0.0 ) ) : vec3( 0.0 );
+}
+
+vec3 cellGiTilt( vec3 P, vec3 N, vec3 B )
+{
+	int keepPath = cellGiPath;	// probe 95 shows the surface's own read
+#ifdef WW_CELL_GI_MARCH
+	vec3 ea = cellGiNorm( cellGiSampleFull( P, N ) ), eb = cellGiNorm( cellGiSampleFull( P, B ) );
+#else
+	ivec2 L = cellGiVolAt( P, N );
+	vec3 ea = cellGiNorm( cellGiVolume( P, N, L ) ), eb = cellGiNorm( cellGiVolume( P, B, L ) );
+#endif
+	cellGiPath = keepPath;
+	return clamp( eb / max( ea, vec3( 1.0e-4 ) ), vec3( 0.0 ), vec3( 4.0 ) );
+}
 // lane SKY1: the share of the weather's ambient the grid's sky replaces at P (0: not a sky grid)
 float cellGiSkyK( vec3 P, vec3 N )
 {
@@ -1104,14 +1126,16 @@ vec3 cellFarProbeOut( vec3 P, vec3 N )
 }
 
 // the harness probes for a program without the legacy BRDF helpers (pbrm_cell)
+vec3 cellSsgiE( vec3 eProbe, vec3 P, vec3 N );	// lane SSGI2: probe 5 reads what the surface gets (below)
+
 vec3 cellProbeRaw( vec3 P, vec3 N )
 {
 	if ( cellProbe >= 91 && cellProbe <= 94 )	// lane FARVIEW1
 		return cellFarProbeOut( P, N );
 	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
 		return vec3( 0.0 );
-	if ( cellProbe == 5 )
-		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
+	if ( cellProbe == 5 )	// lane SSGI2: E_probe x the open share + E_screen when SSGI runs (the double-count gate)
+		return clamp( cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ), P, N ) * 0.31830989, 0.0, 1.0 );
 	if ( cellProbe == 90 )	// lane SKY1: the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
 		return vec3( cellAmbShare( P, N ) );
 	if ( cellProbe == 95 ) {	// lane GIBLACK1: r = the branch cellGiSample took / 16 (lane GIBLACK2; it was / 4), g = its .a, b = its E luminance / pi (sqrt)
@@ -1391,17 +1415,30 @@ vec3 cellCubeProbe( vec2 uv, vec3 normalView )
 // lane SSGI1: the screen-space bounce (src/gl/cellssgi.h, cell_ssgi.frag): the probe GI keeps the share of the
 // hemisphere the march left open, the screen's bounce is added (FO4CS's probe-fill law; red "stack" adds on top)
 uniform bool cellSsgiOn;
-uniform sampler2D cellSsgi;		// the work size, bottom row first: rgb the bounce E, a the open share
+uniform sampler2D cellSsgi;		// the work size, bottom row first: rgb the bounce E, a the open share; SSGI2FIX: twice as
+								// tall, the upper half the march's shut moment (view space)
 uniform vec4 cellSsgiRect;		// the viewport: x, y, 1 / w, 1 / h
 uniform vec2 cellSsgiK;			// FO4CS's fAoAmount, fIndirectAmount
 uniform int cellSsgiRed;
 
-vec3 cellSsgiE( vec3 eProbe )
+vec3 cellSsgiE( vec3 eProbe, vec3 P, vec3 N )
 {
 	if ( !cellSsgiOn )
 		return eProbe;
-	vec4 s = texture( cellSsgi, ( gl_FragCoord.xy - cellSsgiRect.xy ) * cellSsgiRect.zw );
-	float keep = ( cellSsgiRed & 2 ) != 0 ? 1.0 : mix( 1.0, clamp( s.a, 0.0, 1.0 ), cellSsgiK.x );
+	vec2 uv = ( gl_FragCoord.xy - cellSsgiRect.xy ) * cellSsgiRect.zw;
+	float th = float( textureSize( cellSsgi, 0 ).y ), hh = 0.5 * th;
+	float y = clamp( uv.y * hh, 0.5, hh - 0.5 );	// each half on its own, no blend across the seam
+	vec4 s = texture( cellSsgi, vec2( uv.x, y / th ) );
+	vec3 keep = vec3( ( cellSsgiRed & 2 ) != 0 ? 1.0 : mix( 1.0, clamp( s.a, 0.0, 1.0 ), cellSsgiK.x ) );
+	// SSGI2FIX: the kept probe light is read toward the open side (red `oldfill`: the plain open share, SSGI1's law)
+	if ( ( cellSsgiRed & ( 2 | 256 ) ) == 0 && dot( eProbe, eProbe ) > 0.0 ) {
+		// the open side's mean: the open hemisphere's cosine mean (2/3 N) less the march's shut moment
+		vec3 bv = texture( cellSsgi, vec2( uv.x, ( y + hh ) / th ) ).xyz;
+		vec3 B = 0.6666667 * N - ( dot( bv, bv ) > 1.0e-10 ? length( bv ) * cellWorldDir( bv ) : vec3( 0.0 ) );
+		B = dot( B, B ) > 1.0e-8 ? normalize( B ) : N;
+		if ( dot( B, N ) > 0.0 )
+			keep = mix( vec3( 1.0 ), clamp( s.a, 0.0, 1.0 ) * cellGiTilt( P, N, B ), cellSsgiK.x );
+	}
 	return eProbe * keep + max( s.rgb, vec3( 0.0 ) ) * cellSsgiK.y;
 }
 
@@ -1420,7 +1457,7 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	float gloss = 1.0 - sqrt( alphaR );	// the program's rough = 1 - gloss, alphaR = rough^2
 	cellSumLights( P, N, Vw, gloss, diff, diffOn, spec );
 	vec3 alb = albedo * albedo;
-	vec3 gi = cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989;
+	vec3 gi = cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ), P, N ) * 0.31830989;
 	vec3 farF, farGP;	// lane FARVIEW1: the far placed light (diffuse only); the GI's placed share out x w
 	float farW = cellFarTerms( P, N, farF, farGP );
 	if ( farW > 0.0 ) {
@@ -1475,8 +1512,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 	vec3 N = cellWorldDir( normalView );
 	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
 		return vec3( 0.0 );
-	if ( cellProbe == 5 )
-		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
+	if ( cellProbe == 5 )	// lane SSGI2: as cellProbeRaw's
+		return clamp( cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ), P, N ) * 0.31830989, 0.0, 1.0 );
 	if ( cellProbe == 90 )	// lane SKY1 (60-74 are other lanes'): the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
 		return vec3( cellAmbShare( P, N ) );
 	if ( cellProbe == 95 )	// lane GIBLACK1: the branch cellGiSample took, its .a and its E (cellProbeRaw's)

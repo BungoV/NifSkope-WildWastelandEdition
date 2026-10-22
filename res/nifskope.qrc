@@ -81,4 +81,7 @@
     <qresource prefix="/lodgen">
         <file alias="landmarks.txt">lodgen_landmarks.txt</file>
     </qresource>
+    <qresource prefix="/ssgi">
+        <file alias="fast_2uges.rg8">ssgi/fast_2uges.rg8</file>
+    </qresource>
 </RCC>

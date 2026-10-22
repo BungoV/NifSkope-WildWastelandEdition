@@ -1,5 +1,30 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SSGI2FIX (2026-10-22, branch ssgi2fix-20261022): the screen GI's fill balanced; harness pictures repeat
+
+- Fill: the march shut the probe's mean light at near occluders but gave back less than it took. A tap's light carried
+  the donor's cosine while its removal did not, back-facing taps shut light they cannot return, and the tap's depth was
+  read at a sub-texel point. Light and removal now take the same weight, and the kept probe light is read toward the
+  open side: a bent normal from the march's shut moment tilts the probe's own read. Red `oldfill` brings back SSGI1's law.
+- Repeatable pictures: in a harness run the temporal history belongs to the view (or the camera path's frame), not to
+  the number of paints. A new view pre-rolls 16 frames, the next path frame advances one, and a repaint redoes the
+  last. Red `oldframes` brings back one frame per paint.
+- Gates: to be run in batch (notes/ssgi2/BATCH.md, FIXGATES1 10-22).
+
+## Lane SSGI2 (2026-10-21, branch ssgi2-20261021): screen-space GI's four weaker rows to FO4CS's level
+
+- The screen-space GI (ships OFF, `WW/CellSsgi`) now matches FO4CS on the four rows SSGI1 left weaker:
+  - Noise: EA's FAST spatiotemporal blue-noise sheet (BSD-3, `res/ssgi/`), as FO4CS reads it. Red `ign`.
+  - Depth-interval skip: a min/max depth pyramid skips taps whose cell lies outside the radius (exact: same picture),
+    plus the early out once every sector is shut. Red `nohiz`.
+  - Emissive cast: the scene pass writes the emitted share to a second target; a 2-slice importance-sampled cast with
+    FO4CS's small-emitter boost runs with its own history and denoise and is added at the end; the ordinary cast takes
+    the emission off its donor. Effect shaders are not emitters here (FO4CS skips them too). Red `noemissive`.
+  - Denoise: FO4CS's robust blur plus the quarter-res pyramid with temporal moments. Red `oldblur`.
+- Probe 5 (`WW_CELL_LIT_PROBE=5`) now shows what the surface gets with SSGI on (the double-count gate); unchanged with SSGI off.
+- Gates: `tests/spells/cell_ssgi.sh` PASS; nohiz byte-identical PASS. Double count vs the tracer: PASS at bounce1's
+  facade pixels, FAIL at near-field pixels (SSGI under-counts, 0.80 of the tracer); see notes/ssgi2/FINAL.md.
+
 ## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
 
 - Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.
