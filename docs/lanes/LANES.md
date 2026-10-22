@@ -11,6 +11,7 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 - FOGTRICUBIC1 picture pair: smoother fog-grid read, Memory Den night (coming from VOLAIRSKY1)
 - FXCHECK1 glass pair: notes/fxcheck1/pairs/glass_off.png vs glass_on.png (envmap mask red channel; ships off)
 - PBRALBEDO2 pair: vanilla vs .pbrm-resolved Solomon's house (vanilla meshes name materials by a C:Projects path, so .pbrm never matched; coming from BATCH1)
+- PERF3 pair: reflections from the previous frame (Concord c3_on vs c3_prev; ships off; coming from BATCH2)
 - Game flights: AUDIT1 REF1 capture, LLFCHECK1, PRTP4 (save names), MOTION1/TERRBLEND1/WATER2 RenderDoc captures
 - About 20 open questions (AUDIT_ledgers 49-54): one at a time
 
@@ -30,8 +31,9 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | PBRALBEDO2 | .pbrm albedo in the bake, fix of PBRALBEDO1 gate | BATCH ready (8abbbd83; pbralbedo2/BATCH.md): cause = vanilla NIFs name BGSMs by absolute C:\Projects\... path, resolver refused it; gates unrun |
 | RTBAKE1 | GPU ray-traced bake (gate cell 52.5 -> 43.0 s) | BATCH ready (rt3 6cabd09; rtbake1/BATCH.md): museum CPU-vs-RT pair runs in BATCH1's timing hold |
 | FARCARD1 | far tree cards drawn instanced (one draw per card set, per-card data in one buffer; ~17 ms on Concord; bungo 10-22) | BATCH ready (farcard1-20261022 f03e072b; farcard1/BATCH.md): gates + timing unrun |
+| PERF3 | AO/SSR stop drawing the scene twice (SSR from the previous frame, ships off), per-draw GL query cache, sun-shadow frame block, far-LOD proposal (bungo 10-22) | BATCH ready (perf3-20261022 e91e3286; perf3/BATCH.md): gates + timing unrun |
 
-Next batch (BATCH2): VOLPART1R, FARCARD1, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
+Next batch (BATCH2): VOLPART1R, FARCARD1, PERF3, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
 Queued tonight (his 10-21 go): FARBAKE2 whole-map rebake, every channel (after BAKESPEED1); VTGPU1 + PROFILE1 (after
 BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
 
