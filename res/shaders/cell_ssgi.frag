@@ -24,7 +24,9 @@
  *            tap's footprint by importance (mip by luminance, bilinear cell, then down to mip 0), with the small-emitter
  *            boost and the near facing wrap; its own temporal (2), robust blur (4) and pyramid (5-7) run with the
  *            emissive spans (emissivePass), and the ordinary result adds it last (emitAdd). The ordinary cast then reads
- *            its donor without the emission (emitSub), so each emitter is counted once */
+ *            its donor without the emission (emitSub), so each emitter is counted once
+ * SSGI2FIX: stage 1 weighs a tap's light and its shut share alike (no donor cosine) and also writes the shut moment
+ *            (location 1); stage 2 accumulates it (location 3); stage 12 puts it in the result's upper half */
 
 uniform int ssgiStage;
 uniform sampler2D gbuf;
@@ -69,10 +71,14 @@ uniform int emitSlices;			// stage 8 (FO4CS iEmissiveSlices)
 uniform bool emissivePass;		// stages 4, 7: the emissive cast's clip spans and retention
 uniform sampler2D emitFin;		// stages 3, 7: the emissive result, added to the ordinary one
 uniform bool emitAdd;
+uniform bool oldFill;			// stage 1, red `oldfill`: SSGI1's fill (donor cosine light, every shut sector's probe removed)
+uniform sampler2D srcBent;		// SSGI2FIX stage 2: this frame's shut moment (the cast's location 1)
+uniform sampler2D histBent;		// stage 2: last frame's, in last frame's view
 
 layout ( location = 0 ) out vec4 fragColor;
 layout ( location = 1 ) out vec4 fragMeta;
 layout ( location = 2 ) out vec4 fragState;
+layout ( location = 3 ) out vec4 fragBent;	// SSGI2FIX stage 2: the accumulated shut moment (view space)
 
 const float PI = 3.14159265;
 
@@ -120,8 +126,9 @@ uint sectorBits( float a0, float a1 )
 	return m << uint( b0 );
 }
 
-vec4 cast( ivec2 wp )
+vec4 cast( ivec2 wp, out vec3 bent )
 {
+	bent = vec3( 0.0 );
 	vec2 uv = ( vec2( wp ) + 0.5 ) / vec2( workSize );
 	ivec2 ft = ivec2( uv * vec2( fullSize ) );
 	vec4 g = gAt( ft );
@@ -141,7 +148,7 @@ vec4 cast( ivec2 wp )
 		n0 = bn.x;
 		n1 = bn.y;
 	}
-	vec3 il = vec3( 0.0 );
+	vec3 il = vec3( 0.0 ), bentSum = vec3( 0.0 );
 	float vis = 0.0, wsum = 0.0;
 	for ( int s = 0; s < slices; s++ ) {
 		float phi = ( float( s ) + n0 ) * PI / float( slices );
@@ -156,6 +163,9 @@ vec4 cast( ivec2 wp )
 		float n = sign( dot( Np, ortho ) ) * acos( clamp( dot( Np, V ) / npLen, -1.0, 1.0 ) );
 		uint occ = 0u;
 		vec3 sil = vec3( 0.0 );
+		float shut = 0.0;
+		// SSGI2FIX: the shut moment, each shut tap's share along its direction (the surfaces bend the probe read by it)
+		vec3 shutDir = vec3( 0.0 );
 		// FO4CS: one step jitter per slice, slid by the golden ratio
 		float sliceStep = fract( n1 + float( s ) * 0.618034 );
 		for ( int side = 0; side < 2; side++ ) {
@@ -185,7 +195,8 @@ vec4 cast( ivec2 wp )
 				vec4 gs = gAt( ivec2( sp ) );
 				if ( gs.w <= 0.0 )
 					continue;
-				vec3 S = viewPos( sp / vec2( fullSize ), gs.w );
+				// the texel's own centre: its depth at a sub-texel xy puts S off the surface (SSGI2FIX)
+				vec3 S = viewPos( ( oldFill ? sp : floor( sp ) + 0.5 ) / vec2( fullSize ), gs.w );
 				vec3 dF = S - P;
 				float len = length( dF );
 				if ( len > radius || len < 1.0e-3 )
@@ -203,7 +214,12 @@ vec4 cast( ivec2 wp )
 					float rt = clamp( ( radius - len ) / max( 0.25 * radius, 1.0 ), 0.0, 1.0 );
 					float share = float( bitCount( fresh ) ) / 32.0 * rt * rt * ( 3.0 - 2.0 * rt );
 					vec3 Ns = normalize( gs.xyz );
-					float facing = clamp( dot( Ns, -dF / len ), 0.0, 1.0 );
+					// a lit sector's radiance carries no donor cosine; a back-facing or edge-on tap shuts no probe light it
+					// cannot give back, so light and removal take the same weight (the DC2 energy balance)
+					float facing = oldFill ? clamp( dot( Ns, -dF / len ), 0.0, 1.0 )
+						: smoothstep( 0.0, 0.1, dot( faceN( Ns, S ), -dF / len ) );
+					shut += share * facing;
+					shutDir += share * facing * dF / len;
 					// FO4CS's radiance mips: farther taps read a prefiltered level (log2 offset - 3.3, levels 0..4)
 					float lod = clamp( log2( off ) - 3.3, 0.0, 4.0 );
 					vec3 L = textureLod( scene, sp / vec2( fullSize ), lod ).rgb;
@@ -219,11 +235,13 @@ vec4 cast( ivec2 wp )
 			}
 		}
 		il += sil * npLen;
-		vis += ( 1.0 - float( bitCount( occ ) ) / 32.0 ) * npLen;
+		vis += ( 1.0 - ( oldFill ? float( bitCount( occ ) ) / 32.0 : min( shut, 1.0 ) ) ) * npLen;
+		bentSum += shutDir * npLen;
 		wsum += npLen;
 	}
 	if ( wsum <= 0.0 )
 		return vec4( 0.0, 0.0, 0.0, 1.0 );
+	bent = bentSum / wsum;
 	il = il / wsum * PI * sourceBrightness;	// cosine-weighted share x radiance x pi = irradiance
 	float y = dot( il, vec3( 0.2126, 0.7152, 0.0722 ) );
 	il = max( mix( vec3( y ), il, saturation ), vec3( 0.0 ) );
@@ -718,13 +736,41 @@ vec3 ffClamp( vec3 c, float mean, float span )
 	return c * exp2( lc - l );
 }
 
+// SSGI2FIX stage 12: the accumulated shut moment, a depth-aware 3x3, into the result's upper half (the
+// surfaces tilt the probe toward it, cell_lights.glsl cellSsgiE)
+vec4 bentOut( ivec2 wp )
+{
+	wp.y -= workSize.y;
+	vec4 g = gAt( ivec2( ( vec2( wp ) + 0.5 ) / vec2( workSize ) * vec2( fullSize ) ) );
+	if ( g.w <= 0.0 )
+		return vec4( 0.0 );
+	vec3 sum = vec3( 0.0 );
+	float ws = 0.0;
+	for ( int y = -1; y <= 1; y++ )
+		for ( int x = -1; x <= 1; x++ ) {
+			ivec2 q = clamp( wp + ivec2( x, y ), ivec2( 0 ), workSize - 1 );
+			vec4 gq = gAt( ivec2( ( vec2( q ) + 0.5 ) / vec2( workSize ) * vec2( fullSize ) ) );
+			float w = gq.w > 0.0 ? max( 1.0 - abs( gq.w - g.w ) / ( 0.05 * g.w ), 0.0 ) : 0.0;
+			sum += texelFetch( src, q, 0 ).xyz * w;
+			ws += w;
+		}
+	return vec4( sum / max( ws, 1.0e-4 ), 0.0 );
+}
+
 void main()
 {
 	ivec2 wp = ivec2( gl_FragCoord.xy );
 	fragMeta = vec4( 0.0 );
 	fragState = vec4( 0.0 );
-	if ( ssgiStage == 1 || ssgiStage == 8 ) {
-		fragColor = ssgiStage == 1 ? cast( wp ) : castEmissive( wp );
+	fragBent = vec4( 0.0 );
+	if ( ssgiStage == 1 ) {
+		vec3 bent;
+		fragColor = cast( wp, bent );
+		fragMeta = vec4( bent, 0.0 );
+		return;
+	}
+	if ( ssgiStage == 8 ) {
+		fragColor = castEmissive( wp );
 		return;
 	}
 	if ( ssgiStage >= 4 ) {
@@ -739,6 +785,8 @@ void main()
 			if ( emitAdd )
 				fragColor.rgb += texelFetch( emitFin, wp, 0 ).rgb;
 		}
+		else if ( ssgiStage == 12 )
+			fragColor = bentOut( wp );
 		else
 			fragColor = vec4( hizReduce( wp, ssgiStage == 10 ), 0.0, 1.0 );
 		return;
@@ -748,6 +796,8 @@ void main()
 	vec4 g = gAt( ft );
 	if ( ssgiStage == 2 ) {
 		vec4 now = texelFetch( src, wp, 0 );
+		vec3 bNow = texelFetch( srcBent, wp, 0 ).xyz;
+		fragBent = vec4( bNow, 0.0 );
 		float n = 1.0;
 		vec4 outc = now;
 		vec4 ps = vec4( 0.0 );
@@ -769,6 +819,7 @@ void main()
 					n = min( m.y + 1.0, moving ? min( maxAccum, motionAccum ) : maxAccum );
 					float w = max( 1.0 / n, 1.0 - historyBlend );
 					outc = mix( h, now, w );
+					fragBent = vec4( mix( transpose( curToPrev ) * texelFetch( histBent, pt, 0 ).xyz, bNow, w ), 0.0 );
 					if ( wantState ) {
 						ps = texelFetch( tstate, pt, 0 );
 						accepted = ps.w >= 1.0 && ps.z > 1.0e-4;

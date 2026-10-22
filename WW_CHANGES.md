@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SSGI2FIX (2026-10-22, branch ssgi2fix-20261022): the screen GI's fill balanced; harness pictures repeat
+
+- Fill: the march shut the probe's mean light at near occluders but gave back less than it took. A tap's light carried
+  the donor's cosine while its removal did not, back-facing taps shut light they cannot return, and the tap's depth was
+  read at a sub-texel point. Light and removal now take the same weight, and the kept probe light is read toward the
+  open side: a bent normal from the march's shut moment tilts the probe's own read. Red `oldfill` brings back SSGI1's law.
+- Repeatable pictures: in a harness run the temporal history belongs to the view (or the camera path's frame), not to
+  the number of paints. A new view pre-rolls 16 frames, the next path frame advances one, and a repaint redoes the
+  last. Red `oldframes` brings back one frame per paint.
+- Gates: to be run in batch (notes/ssgi2/BATCH.md, FIXGATES1 10-22).
+
 ## Lane SSGI2 (2026-10-21, branch ssgi2-20261021): screen-space GI's four weaker rows to FO4CS's level
 
 - The screen-space GI (ships OFF, `WW/CellSsgi`) now matches FO4CS on the four rows SSGI1 left weaker:

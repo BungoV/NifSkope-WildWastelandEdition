@@ -619,7 +619,7 @@ void main()
 			if ( !noSpec )
 				cSpec += dS * E * M_PI;
 		}
-		vec3 giE = cellSsgiE( cellGiOn ? cellGiE( Pw, sw.N ) : vec3( 0.0 ) ) / M_PI;
+		vec3 giE = cellSsgiE( cellGiOn ? cellGiE( Pw, sw.N ) : vec3( 0.0 ), Pw, sw.N ) / M_PI;
 		if ( farW > 0.0 ) {
 			cDiff = cDiff * ( 1.0 - farW ) + farW * rho * farF;
 			cSpec *= 1.0 - farW;

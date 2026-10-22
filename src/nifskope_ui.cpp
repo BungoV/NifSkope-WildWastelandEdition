@@ -48,6 +48,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/campath.h"		// lane MOTION1: WW_RENDER_PATH
 #include "gl/gametaa.h"
 #include "gl/cellpost.h"	// lane GRASSMB1
+#include "gl/cellssgi.h"	// SSGI2FIX
 #include "gl/cellbloom.h"	// lane BLOOM1b
 #include "gl/sunshadow.h"
 #include "ui_nifskope.h"
@@ -2090,6 +2091,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	for ( int k = 0; k < preroll; k++ ) {
 		wwGameTaaSetFrame( k );
 		wwCellPostSetPath( k, float( path.fps() ) );	// lane GRASSMB1: the motion blur's frame and frame time
+		wwCellSsgiSetPath( k );	// SSGI2FIX: the bounce's temporal state follows the path frame
 		pump();
 	}
 	for ( int k = 0; k < frames; k++ ) {
@@ -2097,6 +2099,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		ogl->wwSetPathCamera( true, eye, at, fov );
 		wwGameTaaSetFrame( preroll + k );
 		wwCellPostSetPath( preroll + k, float( path.fps() ) );
+		wwCellSsgiSetPath( preroll + k );
 		pump();
 		const QImage img = ss > 0 ? ogl->grabSupersampled( ss ) : ogl->grabFramebuffer();
 		img.save( frameName( k ) );
@@ -2114,6 +2117,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	}
 	wwGameTaaSetFrame( -1 );
 	wwCellPostSetPath( -1, 0.0f );
+	wwCellSsgiSetPath( -1 );
 	ogl->wwSetPathCamera( false );
 	if ( video ) {
 		QString ff = qEnvironmentVariable( "WW_FFMPEG" );
