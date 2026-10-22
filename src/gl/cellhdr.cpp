@@ -12,6 +12,7 @@
 #include <QDebug>
 #include <QFile>
 #include <QHash>
+#include <QOpenGLContext>
 
 #include <algorithm>
 #include <cmath>
@@ -34,6 +35,59 @@ bool stexOn()
 	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_HDR_STEX_RED" ) == 0 && qEnvironmentVariableIntValue( "WW_TONEMAP1_RED" ) == 0
 		&& qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) == 0;	// cell_hdr_fd.prog has no stencil test of its own
 	return on;
+}
+
+/* lane AAFORMAT1 (study, default RGBA32F): WW_CELL_HDR_FORMAT=rgba16f | r11g11b10f picks the linear frame's format.
+ * r11g11b10f has no alpha (the effects over the sky lose their coverage): a cost arm, never a default.
+ * WW_CELL_HDR_FORMAT_RED=1 / WW_AAFORMAT1_RED=1: RGBA32F whatever was asked. */
+struct HdrFormat
+{
+	GLenum gl = GL_RGBA32F;
+	int bytes = 16;
+	const char * name = "rgba32f";
+	bool red = false;
+};
+const HdrFormat & hdrFormat()
+{
+	static const HdrFormat f = [] {
+		HdrFormat h;
+		const QByteArray v = qgetenv( "WW_CELL_HDR_FORMAT" ).trimmed().toLower();
+		h.red = qEnvironmentVariableIntValue( "WW_CELL_HDR_FORMAT_RED" ) != 0 || qEnvironmentVariableIntValue( "WW_AAFORMAT1_RED" ) != 0;
+		if ( h.red )
+			return h;
+		if ( v == "rgba16f" ) {
+			h.gl = GL_RGBA16F; h.bytes = 8; h.name = "rgba16f";
+		} else if ( v == "r11g11b10f" ) {
+			h.gl = GL_R11F_G11F_B10F; h.bytes = 4; h.name = "r11g11b10f";
+		}
+		return h;
+	}();
+	return f;
+}
+
+// lane AAFORMAT1 (gates only): WW_CELL_AA_MEM=1 logs the card's used video memory (GL_NVX_gpu_memory_info) when it moves
+template <typename F> void aaVidmemNote( F * fn )
+{
+	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_AA_MEM" ) != 0;
+	static int have = -1, lastMb = -1;
+	if ( !on )
+		return;
+	if ( have < 0 ) {
+		const QOpenGLContext * c = QOpenGLContext::currentContext();
+		have = c && c->hasExtension( QByteArrayLiteral( "GL_NVX_gpu_memory_info" ) ) ? 1 : 0;
+		if ( !have )
+			qInfo().noquote() << "cell aa: vidmem unknown (no GL_NVX_gpu_memory_info)";
+	}
+	if ( !have )
+		return;
+	GLint totalKb = 0, freeKb = 0;
+	fn->glGetIntegerv( 0x9048, &totalKb );	// GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX
+	fn->glGetIntegerv( 0x9049, &freeKb );	// GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX
+	const int usedMb = int( ( qint64( totalKb ) - freeKb ) / 1024 );
+	if ( usedMb != lastMb ) {
+		lastMb = usedMb;
+		qInfo().noquote() << QStringLiteral( "cell aa: vidmem used %1 MB of %2 MB" ).arg( usedMb ).arg( totalKb / 1024 );
+	}
 }
 
 // lane SYNC1: each glGet / glGetError waits for the driver's thread; the frame's own configuration is cached, the state
@@ -632,8 +686,13 @@ bool wwCellHdrBegin( Scene * scene )
 		/* finalfix (SUNCELL1): the linear frame is RGBA32F, not RGBA16F. Multisampled additive blending into fp16
 		 * (the blended ground layers, SRC_ALPHA/ONE) rounded +-1 step differently run to run on the same inputs
 		 * (every draw's state, uniforms and textures traced identical); fp32 measured 0 of 7 frames differing. */
-		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, GL_RGBA32F, W, H, GL_TRUE );
+		const HdrFormat & hf = hdrFormat();	// lane AAFORMAT1: RGBA32F unless a study run asks
+		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, hf.gl, W, H, GL_TRUE );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
+		const double mb = double( W ) * H * S / ( 1024.0 * 1024.0 );
+		qInfo().noquote() << QStringLiteral( "cell aa: linear frame %1%2, %3x%4, %5 sample(s): colour %6 MB, depth / stencil %7 MB" )
+			.arg( QLatin1StringView( hf.name ) ).arg( hf.red ? QStringLiteral( " (red)" ) : QString() ).arg( W ).arg( H ).arg( S )
+			.arg( mb * hf.bytes, 0, 'f', 1 ).arg( mb * ( dsFormat == GL_DEPTH32F_STENCIL8 ? 8 : 4 ), 0, 'f', 1 );
 		if ( g.ds && g.dsTex )
 			fn->glDeleteTextures( 1, &g.ds );
 		else if ( g.ds )
@@ -708,6 +767,7 @@ bool wwCellHdrBegin( Scene * scene )
 	fn->glDepthMask( depthMask );
 	if ( wasScissor )
 		fn->glEnable( GL_SCISSOR_TEST );
+	aaVidmemNote( fn );
 	s.active = true;
 	s.scene = scene;
 	s.w = W;

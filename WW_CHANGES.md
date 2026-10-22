@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane AAFORMAT1 (2026-10-22, branch aaformat1-20261022): MSAA and HDR target format study switches (all OFF)
+
+- **Study switches, default unchanged.** `WW_MSAA=<1|2|4|8|16>` sets the view's MSAA sample count instead of the
+  saved "Msaa Samples" setting (1 = off; the linear frame and the FO4CS bloom source follow it). With `WW_TAA=1` it
+  gives the shipped-game setup (temporal AA, no MSAA). `WW_CELL_HDR_FORMAT=rgba16f` puts the linear frame in RGBA16F
+  (half the bytes); `=r11g11b10f` is a cost arm only (no alpha: effects over the sky lose their coverage).
+- Every new linear frame logs its format, size, samples and MB ("cell aa: linear frame ..."); `WW_CELL_AA_MEM=1`
+  logs the card's used video memory (GL_NVX_gpu_memory_info).
+- Reds: `WW_MSAA_RED=1` ignores `WW_MSAA`; `WW_CELL_HDR_FORMAT_RED=1` / `WW_AAFORMAT1_RED=1` force RGBA32F.
+  Nothing turns on before bungo sees the picture pairs (Concord daylight + a chain-link fence close-up).
+
 ## Lane VRS1 (2026-10-22, branch vrs1-20261022): variable rate shading in the cell view (OFF until the look pair)
 
 - **Coarse shading where the last frame was flat.** With `WW_CELL_VRS=1` the opaque and sorted passes shade through

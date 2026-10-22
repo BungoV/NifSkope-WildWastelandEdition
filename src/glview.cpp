@@ -363,7 +363,17 @@ GLView::GLView( QWindow * p )
 
 	fmt.setDepthBufferSize( 24 );
 	fmt.setStencilBufferSize( 8 );
-	fmt.setSamples( 1 << aa );
+	int msaa = 1 << aa;
+	// lane AAFORMAT1 (study only): WW_MSAA=<1|2|4|8|16> overrides the saved MSAA (1 = off); WW_MSAA_RED=1 ignores it
+	if ( !qEnvironmentVariableIsEmpty( "WW_MSAA" ) && qEnvironmentVariableIntValue( "WW_MSAA_RED" ) == 0 ) {
+		const int want = qEnvironmentVariableIntValue( "WW_MSAA" );
+		if ( want == 0 || want == 1 || want == 2 || want == 4 || want == 8 || want == 16 )
+			msaa = std::max( want, 1 );
+		qInfo().noquote() << QStringLiteral( "cell aa: view MSAA %1 (WW_MSAA=%2; saved setting %3)" ).arg( msaa ).arg( want ).arg( 1 << aa );
+	} else if ( !qEnvironmentVariableIsEmpty( "WW_MSAA" ) ) {
+		qInfo().noquote() << QStringLiteral( "cell aa: view MSAA %1 (WW_MSAA ignored: WW_MSAA_RED=1)" ).arg( msaa );
+	}
+	fmt.setSamples( msaa );
 
 	setFormat( fmt );
 
