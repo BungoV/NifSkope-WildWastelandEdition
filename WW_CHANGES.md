@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FARCARD1 (2026-10-22, branch farcard1-20261022): the cell view's far tree cards draw instanced
+
+- **Why.** WHOLEFRAME (perfresearch1) measured the far-cards pass at ~17 ms on Concord 3x3: one draw per card,
+  ~30 by-name uniform uploads and a geometry hash each, and none of those draws in the census counts. Shipped games
+  draw impostors instanced, with the per-card data in a buffer.
+- **What changed (no look change):**
+  - `ImpostorDraw::drawCardsInstanced`: the culled cards' values go into one RGBA32F texture buffer (6 texels a card),
+    each set's frames into a frame table built once per arming, and each card set (one sheet set) is ONE
+    `glDrawElementsInstanced` of the shared quad. No per-card uniforms, no per-card hash.
+  - The CPU still culls the cards and picks their frames, through `pickCard`, the same function the per-card path
+    now calls, so the GPU receives the same floats. `impostor_inst.vert` reads them; `impostor_oct.frag` takes them
+    as flat inputs under `WW_CARDINST` (`impostor_cellinst.prog`), otherwise as the old uniforms.
+  - The far cards now count in the census draws (`far-cards d=draws/cards`), in both paths.
+  - Off switch `WW_FARCARD=0`; red `WW_FARCARD_RED=percard` restores the one-draw-per-card path and its cost.
+    A GPU with fewer than 37 texture units, or a missing program, also falls back to it.
+  - `cellunits.h`: units 35 (`CardData`) and 36 (`CardFrames`).
+- **Gate (batch, notes/farcard1/BATCH.md):** on vs off vs red vs the base exe, 0 px on every frame, Concord 3x3
+  still and moving camera, Goodneighbor still; timing of the far-cards pass on Concord and Goodneighbor.
+
 ## Lane LIGHTCLUSTER1 (2026-10-22, branch lightcluster1-20261022): clustered light lists kept across TAA jitter
 
 - **Lists kept across jitter, exact.** The point and spot lights already go through LIGHTSYS2's clustered lists (80 px
