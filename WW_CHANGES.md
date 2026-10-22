@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GPUDRIVEN1 step B (2026-10-22, branch gpudriven1b-20261022): GPU culling (the niagara / meshoptimizer way)
+
+- **Cluster culling on the GPU.** In the main lit pass, every solid opaque, two-sided or alpha-tested cell shape is cut
+  into clusters of up to 128 triangles inside one placement (`src/gl/cellgpucull.cpp`). A compute pass tests each
+  cluster against the camera frustum, its normal cone (one-sided shapes that GL back-face-culls) and a Hi-Z depth
+  pyramid. It writes one indirect draw command per cluster, and each shape then draws with one
+  `glMultiDrawElementsIndirect`. The CPU cull still runs first; only its kept placements are tested.
+- **Hi-Z from a depth prepass.** The opaque shapes the last frame drew solid are drawn depth-only from the step A
+  pool, at the main frame's size, samples, depth format and polygon offset. A compute pass then builds a max-depth
+  pyramid. A cluster is dropped only when its nearest point lies farther than the farthest depth under its screen
+  box, so the frame should not change: the batch gates it at 0 px.
+- Never culled: skinned, grass, far-swaying, LOD-reduced and blended shapes, and shapes whose program or GL state
+  was not seen opaque and depth-tested last frame. Off in AO, reflections, probes, measuring and selection.
+- `WW_GPUDRIVEN_B=0`: step A's path. `WW_GPUDRIVEN_B_CONE=0`, `_OCC=0`, `_FRUSTUM=0`: one test off.
+  `WW_GPUDRIVEN_B_RED=hard`: the occlusion test reads the cluster's centre depth (it must change the picture).
+  `WW_GPUDRIVEN_B_RED=nocull`: all of the work, nothing culled. `WW_GPUDRIVEN_CENSUS=1` adds "gpudriven b" lines
+  (shapes, clusters, culled by frustum / cone / occlusion, triangles, draws, stage CPU and GPU ms).
+- `wwCellGrassIsShape` (`src/gl/cellgrass.h`): the wind-waved shapes, which no bound holds.
+
 ## Lane SHADOWCACHE1 (2026-10-22, branch shadowcache1-20261022): cached static sun cascades (the CoD / UE5 way)
 
 - **Static casters cached per cascade.** Each cascade keeps a second depth layer holding only its static casters
