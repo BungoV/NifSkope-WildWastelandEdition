@@ -1,5 +1,11 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane MARCHTOOLS (2026-10-23, branch marchtools-20261023): MARCHFIX1's tooling onto batch4
+
+- **Tooling only** (MARCHFIX1 1908115d; its march verdict was GIBLACKLINK1's fix, already in the batch):
+  `tests/spells/shader_link_check.py` substitutes `NUM_TEXTURE_UNITS` as the loader does (stf_default links offline);
+  `tests/spells/cell_giblack_link.sh` works under the repo's scratchpad, not C:'s temp.
+
 ## Lane OBJLODSHADOW1 (2026-10-22, branch objlodshadow1-20261022): object LOD casts only past the cascades
 
 - **Object-LOD terrain casters, only where the cascades do not reach:** with the objlod item on, every far object-LOD
