@@ -576,8 +576,8 @@ QVector<WwWeatherEntry> EsmWeather::list()
 						}
 					if ( int( r->srcFile ) < loaded.size() )
 						e.srcFile = baseName( loaded.at( int( r->srcFile ) ) );
-					const int owner = int( r->formID >> 24 );
-					e.ownerFile = owner < loaded.size() ? baseName( loaded.at( owner ) ) : QString( "?" );
+					const quint32 owner = esm->getFormIDFile( r->formID );	// FE ids resolve via the light slot
+					e.ownerFile = owner < quint32( loaded.size() ) ? baseName( loaded.at( int( owner ) ) ) : QString( "?" );
 					out.append( e );
 				}
 				id = r->next;

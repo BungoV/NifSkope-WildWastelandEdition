@@ -14,8 +14,17 @@
 - **.esl confirmed:** `.esl` files and light-flagged `.esp` files (TES4 0x200) are listed. In the Data-folder order, an
   `.esl` goes with the masters and a light-flagged `.esp` goes with the plugins, as plugins.txt orders them. Both are
   read into the catalog. The synthetic test now has one of each.
-- **Gate:** `tests/spells/opencell_check.sh`: 30/30 green (11 new checks); red writer, red strings and strings-off each
-  exit 1 (the strings red fails the 6 name checks). Synthetic plugins, tables and a BA2 are all built in code.
+- **Light plugins numbered as the game does (fix):** an `.esl`, or an `.esp`/`.esm` with TES4 flag 0x200, now gets
+  form IDs `FE` + a 12-bit slot + the 12-bit local ID (libfo76utils `ESMFile`). The slot is its place among the light
+  plugins in load order. Full plugins that list it as a master resolve their references to the same FE IDs. Before, a
+  light plugin took a full load-order byte, so its IDs differed from the game's and from xEdit's. The master-flagged
+  `.esp` sort is unchanged. Skyrim SE / Fallout 4 files only (form version below 0xC0).
+  - Callers that took the top byte as the file index (face meshes for actors, previs `vis\<plugin>\` files, the
+    weather list's owner) now ask `ESMFile::getFormIDFile()`; file names use the local ID (`getFormIDLocal()`).
+  - Red: `WW_ESM_LIGHT_RED=full` (the old full-slot numbering).
+- **Gate:** `tests/spells/opencell_check.sh`: 38/38 green (19 new checks); red writer, red strings, strings-off and red
+  light each exit 1 (the strings red fails the 6 name checks, the light red the 6 FE checks). Synthetic plugins, tables
+  and a BA2 are all built in code.
 
 ## Lane VOLFIT1 (2026-10-19, branch volfit1-20261019, landed by MERGEALL1 at f626c12d): the Space stage, real room volume shapes
 

@@ -103,6 +103,8 @@ class ESMFile
   // identity for files without masters, so Bethesda-style aligned lists
   // load exactly as before
   std::vector< std::vector< std::uint32_t > > masterMaps;
+  // light slot -> input file index (light plugins live at FE + slot)
+  std::vector< std::uint32_t > lightFiles;
   inline ESMRecord& insertFormID(unsigned int formID);
   const unsigned char *uncompressRecord(ESMRecord& r);
   unsigned int loadRecords(size_t& groupCnt, FileBuffer& buf, size_t endPos,
@@ -115,6 +117,14 @@ class ESMFile
   // translate a raw form ID read from record r's DATA into the load-order
   // mapped ID space (identity when r's file lists no resolvable masters)
   unsigned int mapFormID(const ESMRecord& r, unsigned int rawID) const;
+  // input file index of a mapped form ID (FE IDs resolve through the light
+  // slot); 0xFFFFFFFF for an unknown light slot
+  unsigned int getFormIDFile(unsigned int formID) const;
+  // the ID inside its plugin, as facegen / previs file names spell it
+  static inline unsigned int getFormIDLocal(unsigned int formID)
+  {
+    return formID & ((formID >> 24) == 0xFEU ? 0x00000FFFU : 0x00FFFFFFU);
+  }
   const ESMRecord& getRecord(unsigned int formID) const;
   // returns NULL if the record does not exist
   inline const ESMRecord *findRecord(unsigned int formID) const

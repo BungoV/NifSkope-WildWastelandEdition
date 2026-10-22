@@ -2,9 +2,11 @@
 // Prints one line per check, then PASS or FAIL; exit code 0 only on PASS.
 // Red: WW_OPENCELL_RED=writer swaps x and y in the writer, and this test must then FAIL.
 // Red: WW_OPENCELL_RED=strings (and the off switch WW_OPENCELL_STRINGS=0) leave localized names blank: FAIL.
+// Red: WW_ESM_LIGHT_RED=full numbers light plugins as full ones (top byte = file index): FAIL.
 
 #include "opencellcatalog.h"
 #include "opencelldialog.h"
+#include "esmfile.hpp"
 
 #include <QApplication>
 #include <QDir>
@@ -193,6 +195,16 @@ QByteArray readFile( const QString & path )
 
 } // namespace
 
+// A full plugin over Base.esm and Light.esl: overrides the light world and adds a record of its own.
+QByteArray usesLightPlugin()
+{
+	return header( 0, { QStringLiteral( "Base.esm" ), QStringLiteral( "Light.esl" ) } )
+		+ group( "WRLD", 0, record( "WRLD", 0x01000C01, zstring( "EDID", "LightWorld" ) )
+			+ record( "WRLD", 0x02000800, zstring( "EDID", "UsesLightWorld" ) ) );
+}
+
+QString hex( quint32 v ) { return QStringLiteral( "%1" ).arg( v, 8, 16, QLatin1Char( '0' ) ).toUpper(); }
+
 int main( int argc, char ** argv )
 {
 	qputenv( "QT_QPA_PLATFORM", "offscreen" );
@@ -269,6 +281,40 @@ int main( int argc, char ** argv )
 			w.append( x.edid );
 		checkEq( w, QStringList{ QStringLiteral( "TestWorld" ), QStringLiteral( "LightWorld" ), QStringLiteral( "LightFlagWorld" ) },
 			QStringLiteral( "an .esl and a light-flagged .esp are read" ) );
+	}
+	std::printf( "light numbering\n" );
+	{
+		// (UsesLight.esp lives outside Data so the later Data-folder checks stay as they are)
+		// the game's rule: a light plugin's IDs are FE + its slot among the light plugins in load order + 12-bit local ID
+		writeFile( tmp.path() + QStringLiteral( "/Elsewhere/UsesLight.esp" ), usesLightPlugin() );
+		const QStringList order{ base, data + QStringLiteral( "/Light.esl" ), data + QStringLiteral( "/LightFlag.esp" ),
+			tmp.path() + QStringLiteral( "/Elsewhere/UsesLight.esp" ) };
+		QStringList native;
+		for ( const QString & f : order )
+			native.append( QDir::toNativeSeparators( f ) );
+		ESMFile esm( native.join( QLatin1Char( ',' ) ).toLocal8Bit().constData() );
+		const ESMFile::ESMRecord * lw = esm.findRecord( 0xFE000C01U );
+		check( lw && lw->formID == 0xFE000C01U, QStringLiteral( "Light.esl (light slot 0): WRLD 0xC01 is FE000C01" ) );
+		const ESMFile::ESMRecord * fw = esm.findRecord( 0xFE001C02U );
+		check( fw != nullptr, QStringLiteral( "LightFlag.esp (flag 0x200, light slot 1): its own 01000C02 is FE001C02" ) );
+		check( !esm.findRecord( 0x01000C01U ) && !esm.findRecord( 0x02000C02U ), QStringLiteral( "no full-slot copy of a light record" ) );
+		const ESMFile::ESMRecord * uw = esm.findRecord( 0x03000800U );
+		check( uw != nullptr, QStringLiteral( "a full plugin after two light ones keeps its load-order byte (03000800)" ) );
+		checkEq( hex( uw ? esm.mapFormID( *uw, 0x01000C01U ) : 0U ), hex( 0xFE000C01U ),
+			QStringLiteral( "a full plugin's reference to its light master resolves to FE000C01" ) );
+		checkEq( hex( esm.getFormIDFile( 0xFE001C02U ) ) + QLatin1Char( ' ' ) + hex( ESMFile::getFormIDLocal( 0xFE001C02U ) )
+			+ QLatin1Char( ' ' ) + hex( esm.getFormIDFile( 0x03000800U ) ),
+			hex( 2 ) + QLatin1Char( ' ' ) + hex( 0xC02 ) + QLatin1Char( ' ' ) + hex( 3 ),
+			QStringLiteral( "FE ids find their plugin and local ID" ) );
+		check( esm.findRecord( 0x00000F01U ) != nullptr, QStringLiteral( "the master keeps 00000F01" ) );
+		OpenCellCatalog light;
+		openCellReadCatalog( order, light, nullptr );
+		QStringList forms;
+		for ( const OpenCellWorld & x : light.worlds )
+			forms.append( x.edid + QLatin1Char( '=' ) + hex( x.form ) );
+		checkEq( forms, QStringList{ QStringLiteral( "TestWorld=00000F01" ), QStringLiteral( "LightWorld=FE000C01" ),
+			QStringLiteral( "LightFlagWorld=FE001C02" ), QStringLiteral( "UsesLightWorld=03000800" ) },
+			QStringLiteral( "the catalog lists light worlds under their FE ids" ) );
 	}
 	checkEq( openCellParsePluginsTxt( QStringLiteral( "# Fallout 4\r\n*Mod.esp\r\nOff.esp\r\n" ) ), QStringList{ QStringLiteral( "Mod.esp" ) },
 		QStringLiteral( "plugins.txt: only the active entries" ) );
