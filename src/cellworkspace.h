@@ -223,6 +223,8 @@ private:
 	// lane CELLALL1: the second row, the features that were env-only (their defaults unchanged; new ones ship off)
 	QAction * cellAo = nullptr;
 	QAction * cellShadow = nullptr;
+	QMenu * cellLampShadow = nullptr;	// lane LAMPSHADOW1: Off | Low | Medium | High | Ultra
+	QActionGroup * cellLampShadowGroup = nullptr;
 	QAction * cellSsr = nullptr;
 	QAction * cellSsrExt = nullptr;
 	QAction * cellSsgi = nullptr;	// lane SSGI1

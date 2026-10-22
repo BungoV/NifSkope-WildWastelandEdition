@@ -242,6 +242,7 @@ HEADERS += \
 	src/gl/cellvolumeview.h \
 	src/gl/cellssr.h \
 	src/gl/cellssgi.h \
+	src/gl/celllampshadow.h \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
 	src/gl/cellpasstime.h \
@@ -504,6 +505,7 @@ SOURCES += \
 	src/gl/cellvolumeview.cpp \
 	src/gl/cellssr.cpp \
 	src/gl/cellssgi.cpp \
+	src/gl/celllampshadow.cpp \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \
 	src/gl/cellpasstime.cpp \

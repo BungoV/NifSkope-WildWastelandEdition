@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
 #include "gl/cellssgi.h"	// lane SSGI1
+#include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/cellwater.h"	// lane CELLALL1: the Water row
 #include "cellaodecal.h"	// lane CELLALL1: the AO decals row
 #include "gl/gametaa.h"
@@ -527,6 +528,22 @@ void CellWorkspacePanel::buildUi()
 	}
 	cellPass->setEnabled( false );
 	cellShadow = tick( showMenu, tr( "Light shadows" ), "CellWorkspaceLightShadows", wwCellShadowOn() );
+	// lane LAMPSHADOW1: stored lamp shadows, ships Off; the tier is the face size (Medium = the cube pass's own)
+	cellLampShadow = showMenu->addMenu( tr( "Lamp shadows" ) );
+	cellLampShadow->setObjectName( QStringLiteral( "CellWorkspaceLampShadows" ) );
+	cellLampShadowGroup = new QActionGroup( cellLampShadow );
+	cellLampShadowGroup->setExclusive( true );
+	{
+		const QStringList names = { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = cellLampShadow->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k - 1 );
+			a->setChecked( k - 1 == wwCellLampShadowTier() );
+			cellLampShadowGroup->addAction( a );
+		}
+	}
+	cellLampShadow->setEnabled( !wwCellLampShadowPinned() );
 	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
 	cellAoDecal = tick( showMenu, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
 	cellGiGpu = tick( showMenu, tr( "GPU relight" ), "CellWorkspaceGpuRelight", wwCellGiGpuOn() );
@@ -765,6 +782,11 @@ void CellWorkspacePanel::buildUi()
 	fxLive( cellSsr, &wwCellSsrSetOn );
 	fxLive( cellSsrExt, &wwCellSsrExteriorSetOn );
 	fxLive( cellSsgi, &wwCellSsgiSetOn );
+	connect( cellLampShadowGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		wwCellLampShadowSetTier( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
 	connect( cellSsgiQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwCellSsgiSetQuality( a->data().toInt() );
 		if ( glView )
