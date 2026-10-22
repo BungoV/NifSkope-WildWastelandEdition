@@ -507,8 +507,8 @@ bool Scene::grabRefractionSource()
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 
 	/* lane HDR1: a multisampled source resolves only into its own format, so the copy follows the frame:
-	 * the cell's linear frame is RGBA16F (gl/cellhdr.h) */
-	const GLenum fmt = wwCellHdrActive() ? GL_RGBA16F : GL_RGBA8;
+	 * the cell's linear frame is RGBA32F (gl/cellhdr.cpp) */
+	const GLenum fmt = wwCellHdrActive() ? GL_RGBA32F : GL_RGBA8;
 	if ( !refractionTexId || refractionTexW != w || refractionTexH != h || refractionTexFormat != fmt ) {
 		if ( !refractionTexId )
 			fn->glGenTextures( 1, &refractionTexId );

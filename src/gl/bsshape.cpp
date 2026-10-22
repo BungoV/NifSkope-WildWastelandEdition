@@ -3,6 +3,7 @@
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
+#include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
 #include "cellmesh.h"
 #include "cellspeed.h"
 #include "gl/glnode.h"
@@ -365,6 +366,14 @@ void BSShape::drawShapes( NodeList * secondPass )
 			hiddenT = &( *ith );
 	}
 
+	/* finalfix (SUNCELL1): a blended draw into the multisampled RGBA8 window frame draws single-sample. Blending
+	 * with MSAA there came out +-1 step differently run to run on identical inputs (Vault111Cryo: 1-3 px); with the
+	 * blended draws single-sample two runs match. The fp32 linear frame (gl/cellhdr.cpp) blends deterministically
+	 * and keeps MSAA. The game itself draws blended geometry without MSAA. */
+	const bool singleSample = glIsEnabled( GL_BLEND ) && !wwCellHdrActive() && glIsEnabled( GL_MULTISAMPLE );
+	if ( singleSample )
+		glDisable( GL_MULTISAMPLE );
+
 	if ( numTriangles > 0 && !hiddenT ) {
 		context->fn->glDrawElements( GL_TRIANGLES, GLsizei( numTriangles * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
 	} else if ( numTriangles > 0 ) {
@@ -379,6 +388,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 			}
 		}
 	}
+	if ( singleSample )
+		glEnable( GL_MULTISAMPLE );
 
 	if ( xRayDraw )
 		glDepthMask( GL_TRUE );
