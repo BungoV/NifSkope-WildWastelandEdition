@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
+
+- Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.
+  Both ship off: FXCHECK1's glass env mask (WW/FxEnvMaskR or WW_FX_ENVMASK) and still-shot particle pre-roll, and
+  FOGTRICUBIC1's B-spline froxel read (WW_CELL_VOLAIR_TRICUBIC=1; bungo saw no difference in the full frame, so it stays off).
+- Measured on the merged exe against main 17afcb51's own exe: the default picture is byte-identical (FXCHECK1 off shot,
+  VOLAIR1 cell gate stage O 0 px in both scenes, Vault111Cryo 0 px); tricubic unset == off 0 px. Vault111Cryo sorted pass
+  314/308 ms vs main 322/310 ms (no regression). The cell gate's far-tail stage W (17 px) and Sanctuary's Z (1 px of 1/255)
+  fail the same way on main's own exe: they predate this landing (VOLAIR1).
+
 ## Lane BAKESPEED1 (2026-10-21, branch bakespeed1-20261021): the chunks stage runs its VT rows and chunk jobs on all cores, and resumes
 
 - **Why.** The FARBAKE2 chunks stage was serial in its two biggest parts: on the mid region (-24..23) the VT pyramid took 1539 s and the chunk pass 511 s on one core.
@@ -182,6 +192,7 @@
     `lookdev ground cell: drawn in the HDR frame (hdr 1) at x y z (...)`. Unset: no extra draw, no GL call.
 - The booth itself (cell open, cameras, froxel-dump measurement) is a harness outside the repo; it reads the
   existing `WW_CELL_AIR_TERMS` / `WW_CELL_AIR_OPT` / `WW_CELL_AIR_DUMP` switches. No light was changed.
+
 ## Lane VOLAIRSKY1 (2026-10-21, branch volairsky1-20261021): Volumetric Air follow-ups
 
 - **FOGTRICUBIC1 (bungo 10-21, test only, OFF):** `WW_CELL_VOLAIR_TRICUBIC=1` reads the air's froxels on surfaces with a
