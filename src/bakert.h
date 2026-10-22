@@ -6,6 +6,8 @@
  *   rt       Vulkan ray query (VK_KHR_ray_query) against a BLAS of the tree's triangles, on RT hardware
  *   compute  a Vulkan compute shader walking the very BVH the CPU walks (GPUs without RT)
  *   cpu      probebvh itself, the reference (and what runs when no Vulkan device is there)
+ * OFF BY DEFAULT (bungo 10-23): the bakes run on the CPU unless Settings > NIF > Probe bake > GPU Ray-Traced Bake is
+ * on; WW_BAKE_RT=1 / =0 pins it either way (read at each bake start, so the row applies to the next bake).
  * WW_BAKE_RT_RED=cpu forces the CPU (the bakes' own code path, byte-identical to before this lane), =compute the
  * non-RT GPU path, =rt the RT path (falls to cpu when absent, and says so). WW_BAKE_THREADS=n sets the worker count
  * of every bake pool (default: all cores).
@@ -48,7 +50,11 @@ struct Ray { float o[3]; float tmin; float d[3]; float tmax; };
 //! tri = the soup triangle (-1: a miss), t its float distance
 struct Hit { float t; int tri; };
 
-//! the path a new Scene takes: the red, then what the machine has (RT > compute > cpu); `why` says how it was chosen
+//! the settings key of the GPU Ray-Traced Bake row (default off)
+extern const char * const kBakeRtSettingKey;
+//! the GPU bake asked for: WW_BAKE_RT when set (pins it), else the row; `why` says which
+bool gpuWanted( std::string * why = nullptr );
+//! the path a new Scene takes: cpu unless gpuWanted, then the red, then what the machine has (RT > compute > cpu)
 Path pickPath( std::string * why = nullptr );
 //! the GPU's name ("" without one)
 std::string deviceName();

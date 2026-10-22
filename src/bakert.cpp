@@ -4,6 +4,10 @@
 #include "bakert.h"
 #include "bakertwalk.h"
 #include "probebvh.h"
+#include "harnesswindow.h"   // wwHarnessSettingsSuffix
+#include "version.h"
+
+#include <QSettings>
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
@@ -457,8 +461,35 @@ const char * pathName( Path p )
 	return p == Path::Rt ? "rt" : p == Path::Compute ? "compute" : "cpu";
 }
 
+const char * const kBakeRtSettingKey = "Settings/Nif/Gpu Ray Traced Bake";
+
+bool gpuWanted( std::string * why )
+{
+	const char * e = std::getenv( "WW_BAKE_RT" );
+	if ( e && *e ) {
+		if ( why )
+			*why = std::string( "WW_BAKE_RT=" ) + e;
+		return std::strcmp( e, "0" ) != 0;
+	}
+	// the GUI's settings file, also from the CLI (as lodgenGpuSettingEnabled reads Use GPU)
+	QSettings s( QStringLiteral( "NifTools" ),
+		QStringLiteral( "NifSkope " ) + NifSkopeVersion::rawToMajMin( NIFSKOPE_VERSION ) + wwHarnessSettingsSuffix() );
+	const bool on = s.value( QLatin1String( kBakeRtSettingKey ), false ).toBool();
+	if ( why )
+		*why = on ? "setting GPU Ray-Traced Bake on" : "setting GPU Ray-Traced Bake off";
+	return on;
+}
+
 Path pickPath( std::string * why )
 {
+	/* the CPU bake is the default: no Vulkan is touched unless the GPU bake is asked for (the off path is the bakes'
+	 * own loops, byte-identical to before RTBAKE1) */
+	std::string want;
+	if ( !gpuWanted( &want ) ) {
+		if ( why )
+			*why = want;
+		return Path::Cpu;
+	}
 	Dev & D = dev();
 	const char * red = std::getenv( kRed );
 	const std::string r = red ? red : "";
@@ -470,7 +501,7 @@ Path pickPath( std::string * why )
 	else if ( D.ok )
 		p = Path::Compute;
 	if ( why ) {
-		*why = r.empty() ? std::string( "picked" ) : "red " + r;
+		*why = want + ( r.empty() ? std::string( "; picked" ) : "; red " + r );
 		if ( !D.why.empty() )
 			*why += "; " + D.why;
 		if ( r == "rt" && p != Path::Rt )
