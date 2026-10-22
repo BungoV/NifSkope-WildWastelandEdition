@@ -268,6 +268,9 @@ vec3 tonemap(vec3 x)
 
 
 #ifdef WW_CELLLIGHTS
+#ifndef WW_CELL_GI_MARCH_COPIES	// red (tests/spells/cell_giblack_link.sh): a march copy per call site, over the link limit
+#define WW_CELL_GI_MARCH_ONCE 1	// lane GIBLACKLINK1: the march red runs once (cellGiMarchPrime in main)
+#endif
 #include "cell_lights.glsl"
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
@@ -614,6 +617,12 @@ void main()
 	// Emissive
 	color.rgb += emissive * glowScaleSRGB;
 #ifdef WW_CELLLIGHTS
+#if defined( WW_CELL_GI_MARCH ) && defined( WW_CELL_GI_MARCH_ONCE )
+	// lane GIBLACKLINK1: the march red's one GI read, at the (P, N) every later caller passes (cellPassOut's nonormal red: up)
+	if ( cellOn && cellGiOn )
+		cellGiMarchPrime( cellWorldPos( -ViewDir ), cellPass > 0 && cellPass != 6 && cellProbe == 0 && ( cellPassRed & 2 ) != 0
+		                                               ? vec3( 0.0, 0.0, 1.0 ) : cellWorldDir( normal ) );
+#endif
 	// lane SKY1: outdoors the bounce grid's sky stands in for the weather's unshadowed ambient (0 elsewhere)
 	/* lane SUNCELL1: an exterior with the weather's sun (cellHasDir) hands cellLit the ambient alone; the sun's
 	 * diffuse and the cube are the game's terms there, its specular the viewport's (cellExtSpec, linear) */

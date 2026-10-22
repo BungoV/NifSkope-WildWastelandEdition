@@ -716,10 +716,24 @@ vec3 cellGiKeyNormal( float k )
  * voxels in reach (the trilinear); outdoors, a surface the room grid cannot place (lane GIBLACK2's stranded): 6 and 7
  * the outdoors' volume, 5 none in reach. A probe picture reads the mask at its own pixel (the screen pass's read). */
 #ifdef WW_CELL_GI_MARCH
+#ifdef WW_CELL_GI_MARCH_ONCE
+/* lane GIBLACKLINK1: the march once a fragment (fo4_default: its main primes it). Every call site inlines the whole chain,
+ * and ten copies took fo4_cellcsm past NVIDIA's 64k-instruction link limit; every caller reads this (P, N). */
+vec4 cellGiMarchMemo = vec4( 0.0 );
+void cellGiMarchPrime( vec3 P, vec3 N )
+{
+	cellGiMarchMemo = cellGiSampleFull( P, N );
+}
+vec4 cellGiSample( vec3 P, vec3 N )
+{
+	return cellGiMarchMemo;
+}
+#else
 vec4 cellGiSample( vec3 P, vec3 N )
 {
 	return cellGiSampleFull( P, N );
 }
+#endif
 #else
 uniform int cellGiLoop8;		// 8: the corner loop's bound, a uniform so the loop stays one body
 uniform bool cellGiHalfOn;
