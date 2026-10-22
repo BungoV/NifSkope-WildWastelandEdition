@@ -241,6 +241,7 @@ struct Gpu
 	GLuint skyTex = 0;		// lane PROBEVIEW1: the sky grid, bound on the GI unit in the Sky visibility pass
 	const void * skyDoc = nullptr;
 	int skyVersion = 0;
+	bool giSpecSky = false;	// lane SPECOCC1: the GI texture carries the sky grid's slot 0 after its own slabs
 	GLuint lutTex = 0;
 	const void * lutDoc = nullptr;
 	int lutVersion = 0;
@@ -1001,7 +1002,10 @@ void wwCellLightsUniforms( Scene * scene )
 		g.skyDoc = scene->nifModel;
 		g.skyVersion = s.giVersion.value( scene->nifModel );
 	}
-	if ( G && pass != 2 && !G->rgba.empty() && ( g.giDoc != scene->nifModel || g.giVersion != s.giVersion.value( scene->nifModel ) ) ) {
+	// lane SPECOCC1: with the sky specular occlusion on, the GI texture carries the sky grid's slot 0 after its own slabs
+	const bool specSky = G && wwCellSpecOccMode() > 0 && G->skyLit && G->sky.size() == G->rgba.size();
+	if ( G && pass != 2 && !G->rgba.empty()
+		&& ( g.giDoc != scene->nifModel || g.giVersion != s.giVersion.value( scene->nifModel ) || g.giSpecSky != specSky ) ) {
 		if ( !g.giTex )
 			fn->glGenTextures( 1, &g.giTex );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
@@ -1012,17 +1016,24 @@ void wwCellLightsUniforms( Scene * scene )
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
-		const int giLayers = G->dims[2] * ( G->slotRooms.empty() ? 6 : 12 );
-		if ( G->fine.empty() ) {
+		const int slabs = G->slotRooms.empty() ? 6 : 12;
+		const int giLayers = G->dims[2] * slabs;
+		const int skyLayers = specSky ? G->dims[2] * 6 : 0;	// lane SPECOCC1: the sky grid's slot 0, right after the grid's slabs
+		if ( G->fine.empty() && !specSky ) {
 			fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], giLayers, 0, GL_RGBA, GL_FLOAT,
 				G->rgba.data() );
-		} else {	// lane EMISSIVEGRID1: the fine boxes' atlas in the layers after the grid's (read by texelFetch only)
-			fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], giLayers + G->fineLayers, 0, GL_RGBA, GL_FLOAT,
-				nullptr );
+		} else {	// lane EMISSIVEGRID1: the fine boxes' atlas in the layers after the grid's (and the sky's; read by texelFetch only)
+			fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], giLayers + skyLayers + G->fineLayers, 0, GL_RGBA,
+				GL_FLOAT, nullptr );
 			fn->glTexSubImage3D( GL_TEXTURE_3D, 0, 0, 0, 0, G->dims[0], G->dims[1], giLayers, GL_RGBA, GL_FLOAT, G->rgba.data() );
-			fn->glTexSubImage3D( GL_TEXTURE_3D, 0, 0, 0, giLayers, G->dims[0], G->dims[1], G->fineLayers, GL_RGBA, GL_FLOAT,
-				G->fine.data() );
+			if ( specSky )
+				fn->glTexSubImage3D( GL_TEXTURE_3D, 0, 0, 0, giLayers, G->dims[0], G->dims[1], skyLayers, GL_RGBA, GL_FLOAT,
+					G->sky.data() );
+			if ( !G->fine.empty() )
+				fn->glTexSubImage3D( GL_TEXTURE_3D, 0, 0, 0, giLayers + skyLayers, G->dims[0], G->dims[1], G->fineLayers, GL_RGBA,
+					GL_FLOAT, G->fine.data() );
 		}
+		g.giSpecSky = specSky;
 		g.giDoc = scene->nifModel;
 		g.giVersion = s.giVersion.value( scene->nifModel );
 	}
@@ -1167,6 +1178,11 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1b( "cellGiOn", giDraw );
 	prog->uni1b( "cellGiSky", giDraw && !skyDraw && G->skyLit );	// lane SKY1 (never on the sky-share grid)
 	prog->uni1f( "cellSkyVis", wwCellSkyVis() );	// lane SKYSTR1: the Sky visibility row, for the AO decals
+	// lane SPECOCC1: the sky grid's slabs start after the GI's own (6, or 12 with the rooms' second slot)
+	const bool specOccDraw = giDraw && !skyDraw && G->skyLit && g.giSpecSky;
+	prog->uni1i( "cellSpecOcc", specOccDraw ? wwCellSpecOccMode() : 0 );
+	if ( specOccDraw )
+		prog->uni1f( "cellSpecSkyBase", G->slotRooms.empty() ? 6.0f : 12.0f );
 	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
 	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
 	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
@@ -1184,7 +1200,7 @@ void wwCellLightsUniforms( Scene * scene )
 				const QByteArray r = qgetenv( "WW_CELL_EMISSIVEGRID_RED" ).trimmed();
 				return r == "noseen" ? 1 : r == "nosub" ? 2 : 0;
 			}();
-			const int giLayers = G->dims[2] * ( G->slotRooms.empty() ? 6 : 12 );
+			const int giLayers = G->dims[2] * ( ( G->slotRooms.empty() ? 6 : 12 ) + ( g.giSpecSky ? 6 : 0 ) );	// + SPECOCC1's sky slot
 			const int n = std::min( int( G->fineBox.size() / 8 ), 8 );
 			prog->uni1i( "cellGiFineN", n );
 			prog->uni1i( "cellGiFineRed", fineRed );
@@ -1640,6 +1656,46 @@ void wwCellSkyVisSetPercent( int pct )
 		return;
 	skyVisCache() = std::clamp( pct, 0, 100 );
 	QSettings().setValue( QStringLiteral( "WW/CellSkyVis" ), skyVisCache() );
+}
+
+// lane SPECOCC1: the sky specular occlusion row (celllights.h)
+namespace
+{
+int & specOccCache()
+{
+	static int on = -1;
+	if ( on < 0 ) {
+		const QByteArray pin = qgetenv( "WW_CELL_SPECOCC" ).trimmed();
+		on = pin.isEmpty() ? ( QSettings().value( QStringLiteral( "WW/CellSpecOcc" ), false ).toBool() ? 1 : 0 ) : ( pin == "0" ? 0 : 1 );
+	}
+	return on;
+}
+}
+
+bool wwCellSpecOccPinned()
+{
+	return !qgetenv( "WW_CELL_SPECOCC" ).trimmed().isEmpty();
+}
+
+bool wwCellSpecOccOn()
+{
+	return specOccCache() != 0;
+}
+
+void wwCellSpecOccSetOn( bool on )
+{
+	if ( wwCellSpecOccPinned() )
+		return;
+	specOccCache() = on ? 1 : 0;
+	QSettings().setValue( QStringLiteral( "WW/CellSpecOcc" ), on );
+}
+
+int wwCellSpecOccMode()
+{
+	static const QByteArray red = qgetenv( "WW_CELL_SPECOCC_RED" ).trimmed();
+	if ( !wwCellSpecOccOn() || red == "ao" )
+		return 0;
+	return red == "hemi" ? 2 : 1;
 }
 
 void wwCellImageSpaceSetOn( bool on )

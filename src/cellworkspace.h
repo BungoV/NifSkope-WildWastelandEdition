@@ -231,6 +231,7 @@ private:
 	QMenu * cellSsgiQ = nullptr;
 	QActionGroup * cellSsgiQGroup = nullptr;
 	QAction * cellAoDecal = nullptr;
+	QAction * cellSpecOcc = nullptr;	// lane SPECOCC1: specular occlusion from the baked sky visibility; ships off
 	QAction * cellGiGpu = nullptr;
 	QAction * cellEmissiveGrid = nullptr;	// lane EMISSIVEGRID1
 	QAction * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off

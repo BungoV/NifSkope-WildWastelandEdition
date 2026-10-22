@@ -549,6 +549,11 @@ void main()
 	vec3 specSun = spec;	// lane SUNCELL1: the sun's specular before the cube (the exterior cell sun keeps it)
 
 	// Environment
+	float specSky = 1.0;	// lane SPECOCC1: outdoors the cube reflection keeps the sky visibility along R (cell_lights.glsl)
+#ifdef WW_CELLLIGHTS
+	if ( cellOn )
+		specSky = cellSpecSky( cellWorldPos( -ViewDir ), cellWorldDir( normal ), cellWorldDir( R ), rough );
+#endif
 	vec4 cube = textureLod( CubeMap, reflectedWS, 8.0 - smoothness * 8.0 );
 	vec4 env = texture( EnvironmentMap, offset );
 	vec3 envSpec = vec3( 0.0 );	// lane PRTPGI: the reflection before the viewport light, for the cell path
@@ -561,7 +566,7 @@ void main()
 		}
 
 		envSpec = cube.rgb;
-		spec += cube.rgb * diffuse;
+		spec += cube.rgb * diffuse * specSky;
 	}
 #ifdef WW_CELLLIGHTS
 	// lane CUBE1: the reflection the cell path adds before its light, linear: the game's term, or the old one
@@ -579,6 +584,7 @@ void main()
 	if ( cellOn )
 		cubeK = cellSsrMix( cubeK, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
 		                    cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection );
+	cubeK *= specSky;	// lane SPECOCC1: after the SSR mix, as FO4CS scales its reflection after the SSR blend
 #endif
 
 	vec3 backlight = vec3(0.0);

@@ -531,6 +531,8 @@ void CellWorkspacePanel::buildUi()
 	cellFlicker = tick( showMenu, tr( "Light flicker" ), "CellWorkspaceLightFlicker", wwCellFlickerOn() );
 	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
 	cellAoDecal = tick( showMenu, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
+	cellSpecOcc = tick( showMenu, tr( "Sky specular occlusion" ), "CellWorkspaceSkySpecOcc", wwCellSpecOccOn() );	// lane SPECOCC1
+	cellSpecOcc->setEnabled( !wwCellSpecOccPinned() );
 	cellGiGpu = tick( showMenu, tr( "GPU relight" ), "CellWorkspaceGpuRelight", wwCellGiGpuOn() );
 	cellEmissiveGrid = tick( showMenu, tr( "Emissive GI grid" ), "CellWorkspaceEmissiveGiGrid", wwCellEmissiveGridOn() );	// lane EMISSIVEGRID1
 	section( tr( "Effects" ), "effects" );
@@ -771,6 +773,7 @@ void CellWorkspacePanel::buildUi()
 	fxLive( cellSsrExt, &wwCellSsrExteriorSetOn );
 	fxLive( cellReflProbe, &wwCellReflProbeSetOn );
 	fxLive( cellSsgi, &wwCellSsgiSetOn );
+	fxLive( cellSpecOcc, &wwCellSpecOccSetOn );	// lane SPECOCC1: the GI texture re-uploads with or without the sky grid
 	connect( cellSsgiQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwCellSsgiSetQuality( a->data().toInt() );
 		if ( glView )
