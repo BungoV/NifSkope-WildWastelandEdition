@@ -167,11 +167,14 @@ struct Slot
 {
 	qint64 frame = -1;
 	std::vector<Mark> marks;
+	std::vector<Mark> subs;	// lane PERF2: the sub-stages (Mark::pass = the Sub)
 	GLuint f0 = 0, f1 = 0;	// the whole frame
 	double cpu[Count] = {};
 	double wait[Count] = {};	// sync mode: the closing glFinish's wait (the GPU still working after the CPU issued it all)
 	qint64 calls[Count] = {}, ranges[Count] = {};
 	double cpuFrame = 0.0;
+	double cpuSub[CpuSubCount] = {};	// lane PERF2: CPU ms inside the draws' setup
+	qint64 cpuSubN[CpuSubCount] = {};
 	CacheCounts cache0, cache;
 	qint64 privMb = 0;	// private bytes at the frame's end (the log only)	// the geometry cache at the frame's start; its traffic over the frame
 };
@@ -184,6 +187,7 @@ struct State
 	QOpenGLContext * ctx = nullptr;
 	QOpenGLFunctions_3_3_Core * gl = nullptr;
 	std::vector<GLuint> pool;
+	std::vector<GLuint> cpool;	// lane PERF2: the census's own (a query keeps the target it was first used with)
 	Slot ring[kSlots];
 	qint64 frame = 0;
 	bool inFrame = false;
@@ -191,6 +195,7 @@ struct State
 	qint64 frameT0 = 0;
 	qint64 open[Count] = {};
 	int openMark[Count];
+	int openSub[SubCount];
 	std::vector<int> stack;	// the open GPU passes, innermost last (countDraw)
 	// the last second's sums, for the overlay
 	qint64 winT0 = -1;
@@ -218,6 +223,8 @@ State & st()
 		s.census = qEnvironmentVariableIntValue( "WW_CELL_PASSTIME_CENSUS" ) == 1;
 		for ( int & m : s.openMark )
 			m = -1;
+		for ( int & m : s.openSub )
+			m = -1;
 	}
 	return s;
 }
@@ -232,6 +239,19 @@ GLuint query()
 	}
 	const GLuint q = s.pool.back();
 	s.pool.pop_back();
+	return q;
+}
+
+GLuint cquery()
+{
+	State & s = st();
+	if ( s.cpool.empty() ) {
+		GLuint q[64];
+		s.gl->glGenQueries( 64, q );
+		s.cpool.insert( s.cpool.end(), q, q + 64 );
+	}
+	const GLuint q = s.cpool.back();
+	s.cpool.pop_back();
 	return q;
 }
 
@@ -261,10 +281,19 @@ void collect( Slot & sl )
 			samples[m.pass] += v;
 			s.gl->glGetQueryObjectui64v( m.qp, GL_QUERY_RESULT, &v );
 			prims[m.pass] += v;
-			s.pool.push_back( m.qs );
-			s.pool.push_back( m.qp );
+			s.cpool.push_back( m.qs );
+			s.cpool.push_back( m.qp );
 		}
 	}
+	double sub[SubCount] = {};
+	bool subSeen[SubCount] = {};
+	for ( const Mark & m : sl.subs ) {
+		sub[m.pass] += gpuMs( m.q0, m.q1 );
+		subSeen[m.pass] = true;
+		s.pool.push_back( m.q0 );
+		s.pool.push_back( m.q1 );
+	}
+	sl.subs.clear();
 	const double gpuFrame = gpuMs( sl.f0, sl.f1 );
 	s.pool.push_back( sl.f0 );
 	s.pool.push_back( sl.f1 );
@@ -291,6 +320,17 @@ void collect( Slot & sl )
 			+ QByteArray::number( sl.cache.maxBytes >> 20 ) + " MB | textures made " + QByteArray::number( sl.cache.texMade )
 			+ " (" + QByteArray::number( double( sl.cache.texBytes ) / 1048576.0, 'f', 1 ) + " MB) | private "
 			+ QByteArray::number( sl.privMb ) + " MB";
+		static const char * const subName[SubCount] = { "air-tile", "air-inject", "air-integrate", "ao-geometry",
+			"ao-stages", "ao-gi", "tone-blit", "tone-measure", "tone-bloom", "tone-quads", "far-dots",
+			"far-cards-lit", "tone-vrs", "fxres-down", "fxres-layer", "fxres-comp" };
+		for ( int k = 0; k < SubCount; k++ )
+			if ( subSeen[k] )
+				line += QByteArray( " | sub " ) + subName[k] + " " + QByteArray::number( sub[k], 'f', 2 );
+		static const char * const cpuSubName[CpuSubCount] = { "setup", "cell-uni", "sun-uni", "fog-uni", "ao-draw", "ssr-draw" };
+		for ( int k = 0; k < CpuSubCount; k++ )
+			if ( sl.cpuSubN[k] > 0 )
+				line += QByteArray( " | cpu " ) + cpuSubName[k] + " " + QByteArray::number( sl.cpuSub[k], 'f', 2 ) + " n="
+					+ QByteArray::number( sl.cpuSubN[k] );
 		std::fprintf( stderr, "%s\n", line.constData() );
 	}
 	s.winGpuFrames++;
@@ -359,8 +399,10 @@ void frameBegin()
 		s.ctx = c;
 		s.gl = QOpenGLVersionFunctionsFactory::get<QOpenGLFunctions_3_3_Core>( c );
 		s.pool.clear();
+		s.cpool.clear();
 		for ( Slot & sl : s.ring ) {
 			sl.marks.clear();
+			sl.subs.clear();
 			sl.frame = -1;
 		}
 	}
@@ -375,7 +417,13 @@ void frameBegin()
 		sl.cpu[p] = sl.wait[p] = 0.0;
 		sl.calls[p] = sl.ranges[p] = 0;
 	}
+	for ( int k = 0; k < CpuSubCount; k++ ) {
+		sl.cpuSub[k] = 0.0;
+		sl.cpuSubN[k] = 0;
+	}
 	s.stack.clear();
+	for ( int & m : s.openSub )
+		m = -1;
 	Sampler::start();
 	Sampler::pass = -1;
 	sl.f0 = query();
@@ -401,8 +449,8 @@ void begin( int pass )
 		Mark m{ pass, query(), query() };
 		s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
 		if ( s.census ) {	// top-level passes never nest (above), so one query of each target is open at a time
-			m.qs = query();
-			m.qp = query();
+			m.qs = cquery();
+			m.qp = cquery();
 			s.gl->glBeginQuery( GL_SAMPLES_PASSED, m.qs );
 			s.gl->glBeginQuery( GL_PRIMITIVES_GENERATED, m.qp );
 		}
@@ -443,6 +491,16 @@ void end( int pass )
 	s.openMark[pass] = -1;
 }
 
+void cpuSubAdd( int sub, qint64 ns )
+{
+	State & s = st();
+	if ( !s.inFrame || sub < 0 || sub >= CpuSubCount )
+		return;
+	Slot & sl = s.ring[s.frame % kSlots];
+	sl.cpuSub[sub] += double( ns ) * 1e-6;
+	sl.cpuSubN[sub]++;
+}
+
 void addCpu( int pass, qint64 ns )
 {
 	State & s = st();
@@ -461,6 +519,27 @@ void countDraw( qint64 ranges )
 	sl.ranges[p] += ranges;
 }
 
+void subBegin( int sub )
+{
+	State & s = st();
+	if ( !s.inFrame || sub < 0 || sub >= SubCount || s.openSub[sub] >= 0 )
+		return;
+	Slot & sl = s.ring[s.frame % kSlots];
+	Mark m{ sub, query(), query() };
+	s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
+	sl.subs.push_back( m );
+	s.openSub[sub] = int( sl.subs.size() ) - 1;
+}
+
+void subEnd( int sub )
+{
+	State & s = st();
+	if ( !s.inFrame || sub < 0 || sub >= SubCount || s.openSub[sub] < 0 )
+		return;
+	s.gl->glQueryCounter( s.ring[s.frame % kSlots].subs[s.openSub[sub]].q1, GL_TIMESTAMP );
+	s.openSub[sub] = -1;
+}
+
 void frameEnd()
 {
 	State & s = st();
@@ -473,6 +552,8 @@ void frameEnd()
 		if ( s.openMark[p] >= 0 )
 			end( p );
 	}
+	for ( int k = 0; k < SubCount; k++ )
+		subEnd( k );
 	s.inFrame = false;
 	Sampler::pass = -2;
 	s.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );

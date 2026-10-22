@@ -24,9 +24,13 @@ BSD License - see nifskope.h
 #include <QOpenGLContext>
 #include <QStringList>
 
+#include <QHash>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <vector>
 
 /* See sunshadow.h for the law and its sources. Everything the fit computes is in
@@ -716,8 +720,57 @@ static void sunShadowPassImpl( Scene * scene )
 	csmDumpMap( s, r );
 }
 
+/* lane PERF3: res/shaders/ww_sunshadow.glsl's wwShadowFrame block, std140 (mat4[3] at 0, vec3 at 192 with the float
+ * packed after it at 204, vec4s at 208 and 224, ints at 240 and 244) */
+struct CsmFrameBlock
+{
+	float mat[48];
+	float invRange[3];
+	float force;
+	float params[4];
+	float split[4];
+	qint32 probe;
+	qint32 red;
+	qint32 pad[2];
+};
+static_assert( sizeof( CsmFrameBlock ) == 256, "std140 wwShadowFrame" );
+
+struct CsmFrameBuffer
+{
+	GLuint buf = 0;
+	CsmFrameBlock last{};
+	bool have = false;
+	qint64 uploads = 0, kept = 0;
+};
+
+static void csmFrameUpload( Renderer * r, const CsmFrameBlock & b )
+{
+	static QHash<Renderer *, CsmFrameBuffer> bufs;
+	CsmFrameBuffer & u = bufs[r];
+	auto fn = r->fn;
+	if ( !u.buf ) {
+		fn->glGenBuffers( 1, &u.buf );
+		fn->glBindBuffer( GL_UNIFORM_BUFFER, u.buf );
+		fn->glBufferData( GL_UNIFORM_BUFFER, GLsizeiptr( sizeof( CsmFrameBlock ) ), nullptr, GL_DYNAMIC_DRAW );
+		fn->glBindBuffer( GL_UNIFORM_BUFFER, 0 );
+	}
+	if ( !u.have || std::memcmp( &u.last, &b, sizeof( b ) ) != 0 ) {
+		fn->glBindBuffer( GL_UNIFORM_BUFFER, u.buf );
+		fn->glBufferSubData( GL_UNIFORM_BUFFER, 0, GLsizeiptr( sizeof( b ) ), &b );
+		fn->glBindBuffer( GL_UNIFORM_BUFFER, 0 );
+		u.last = b;
+		u.have = true;
+		if ( ++u.uploads % 600 == 1 )
+			std::fprintf( stderr, "ww frame ubo: uploads=%lld kept=%lld\n", (long long)u.uploads, (long long)u.kept );
+	} else {
+		u.kept++;
+	}
+	fn->glBindBufferBase( GL_UNIFORM_BUFFER, 2, u.buf );
+}
+
 void wwSunShadowUniforms( Scene * scene )
 {
+	PassTime::DrawCpuScope cpuT( PassTime::CpuSunUni );	// lane PERF2
 	if ( !scene || !scene->renderer )
 		return;
 	Renderer * r = scene->renderer;
@@ -732,22 +785,39 @@ void wwSunShadowUniforms( Scene * scene )
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, s.valid ? s.tex : 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "csmMap", kTextureUnit );
-	for ( int i = 0; i < kCascades; i++ ) {
-		const int l = prog->uniLocation( "csmMat[%d]", i );
-		if ( l >= 0 )
-			fn->glUniformMatrix4fv( l, 1, GL_FALSE, s.c[i].uvdFromView );
-	}
 	const bool nobias = red( "nobias" );
 	// red "bigbias": a 600-unit receiver offset, the peter-panning control (the shadow must detach)
 	const float offA = nobias ? 0.0f : red( "bigbias" ) ? 600.0f : kOffsetA;
 	const float offB = nobias ? 0.0f : red( "bigbias" ) ? 600.0f : kOffsetB;
-	prog->uni3f_l( prog->uniLocation( "csmInvRange" ), float( 1.0 / ( s.c[0].far - kNear ) ),
-		float( 1.0 / ( s.c[1].far - kNear ) ), float( 1.0 / ( s.c[2].far - kNear ) ) );
-	prog->uni4f( "csmParams", FloatVector4( float( 1.0 / s.sc ), float( s.D ), float( s.map ), float( s.blend ) ) );
-	prog->uni4f( "csmSplitOffset", FloatVector4( float( s.split[0] ), float( s.split[1] ), offA, offB ) );
-	prog->uni1i( "csmProbe", s.probe );
-	prog->uni1f( "csmForce", s.force );
-	prog->uni1i( "csmRed", redBits() );
+	if ( prog->wwShadowFrame ) {
+		// lane PERF3: the same values, once into the frame block (uploaded only when its bytes change)
+		CsmFrameBlock b{};
+		for ( int i = 0; i < kCascades; i++ )
+			std::memcpy( b.mat + 16 * i, s.c[i].uvdFromView, sizeof( float ) * 16 );
+		for ( int i = 0; i < kCascades; i++ )
+			b.invRange[i] = float( 1.0 / ( s.c[i].far - kNear ) );
+		b.force = s.force;
+		const float params[4] = { float( 1.0 / s.sc ), float( s.D ), float( s.map ), float( s.blend ) };
+		const float split[4] = { float( s.split[0] ), float( s.split[1] ), offA, offB };
+		std::memcpy( b.params, params, sizeof( params ) );
+		std::memcpy( b.split, split, sizeof( split ) );
+		b.probe = s.probe;
+		b.red = redBits();
+		csmFrameUpload( r, b );
+	} else {
+		for ( int i = 0; i < kCascades; i++ ) {
+			const int l = prog->uniLocation( "csmMat[%d]", i );
+			if ( l >= 0 )
+				fn->glUniformMatrix4fv( l, 1, GL_FALSE, s.c[i].uvdFromView );
+		}
+		prog->uni3f_l( prog->uniLocation( "csmInvRange" ), float( 1.0 / ( s.c[0].far - kNear ) ),
+			float( 1.0 / ( s.c[1].far - kNear ) ), float( 1.0 / ( s.c[2].far - kNear ) ) );
+		prog->uni4f( "csmParams", FloatVector4( float( 1.0 / s.sc ), float( s.D ), float( s.map ), float( s.blend ) ) );
+		prog->uni4f( "csmSplitOffset", FloatVector4( float( s.split[0] ), float( s.split[1] ), offA, offB ) );
+		prog->uni1i( "csmProbe", s.probe );
+		prog->uni1f( "csmForce", s.force );
+		prog->uni1i( "csmRed", redBits() );
+	}
 	// lane TERRSHADOW1: the composition (ussOn = 0 keeps the code above exactly CSM1's)
 	const float texel[3] = { float( s.c[0].texel ), float( s.c[1].texel ), float( s.c[2].texel ) };
 	wwShadowSetUniforms( scene, prog, s.valid, texel );

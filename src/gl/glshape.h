@@ -141,6 +141,10 @@ public:
 	bool wwMaterialClearsBlend() const;
 	//! lane WATER1: a cell water surface; with Cell lights on it draws after the decals, before the blended shapes
 	bool wwWaterDraws() const;
+	//! lane FXRES1: a Soft effect, blended in the sorted pass, writing no depth, not a decal, not lit by its spot:
+	//! the low-resolution layer may take it (src/gl/cellfxres.h)
+	bool wwFxResSoft() const;
+	Scene * wwFxResScene() const { return scene; }
 	//! lane SHADOW1: the shape alpha-tests (its depth-only caster would cast a solid card)
 	bool wwAlphaTested() const;
 	//! lane VOLAIR1: what the alpha-tested sun caster reads (the base map's property, the material alpha, the threshold)

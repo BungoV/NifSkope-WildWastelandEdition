@@ -1,0 +1,4 @@
+# lane PERF2 red (WW_CELL_HDR_EARLY_RED=1): the tone map as it was (depth written per sample, no early tests).
+# No conditions: never picked for a shape; cellhdr.cpp selects it by name.
+
+shaders cell_ao.vert cell_hdr_fd.frag

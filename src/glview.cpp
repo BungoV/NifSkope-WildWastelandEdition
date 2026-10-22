@@ -363,7 +363,17 @@ GLView::GLView( QWindow * p )
 
 	fmt.setDepthBufferSize( 24 );
 	fmt.setStencilBufferSize( 8 );
-	fmt.setSamples( 1 << aa );
+	int msaa = 1 << aa;
+	// lane AAFORMAT1 (study only): WW_MSAA=<1|2|4|8|16> overrides the saved MSAA (1 = off); WW_MSAA_RED=1 ignores it
+	if ( !qEnvironmentVariableIsEmpty( "WW_MSAA" ) && qEnvironmentVariableIntValue( "WW_MSAA_RED" ) == 0 ) {
+		const int want = qEnvironmentVariableIntValue( "WW_MSAA" );
+		if ( want == 0 || want == 1 || want == 2 || want == 4 || want == 8 || want == 16 )
+			msaa = std::max( want, 1 );
+		qInfo().noquote() << QStringLiteral( "cell aa: view MSAA %1 (WW_MSAA=%2; saved setting %3)" ).arg( msaa ).arg( want ).arg( 1 << aa );
+	} else if ( !qEnvironmentVariableIsEmpty( "WW_MSAA" ) ) {
+		qInfo().noquote() << QStringLiteral( "cell aa: view MSAA %1 (WW_MSAA ignored: WW_MSAA_RED=1)" ).arg( msaa );
+	}
+	fmt.setSamples( msaa );
 
 	setFormat( fmt );
 
@@ -4198,8 +4208,12 @@ void GLView::paintGL()
 			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)
 			if ( hdr ) {
 				PassTime::begin( PassTime::FarCards );
+				PassTime::subBegin( PassTime::FarDots );	// lane PERF2: far LOD measured (proposal only)
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
+				PassTime::subEnd( PassTime::FarDots );
+				PassTime::subBegin( PassTime::FarCardsLit );
 				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame
+				PassTime::subEnd( PassTime::FarCardsLit );
 				PassTime::end( PassTime::FarCards );
 				PassTime::begin( PassTime::ToneMap );
 				wwCellHdrEnd( scene );
@@ -6029,7 +6043,7 @@ void GLView::paintGL()
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 	}
 	// lane MOTION1: the temporal AA converges over a few still frames after the camera moves (never in a harness)
-	if ( wwGameTaaWantsSettle() )
+	if ( wwGameTaaWantsSettle() | wwVolAirWantsSettle() )	// lane PERF2: and the temporal air's strata
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 	// lane GRASSMB1: the game's grass waves while the weather blows (never in a harness)
 	else if ( wwCellGrassWantsRepaint() )

@@ -1,0 +1,4 @@
+# The soft-effect layer's composite (lane FXRES1; src/gl/cellfxres.h). No conditions: never picked for a shape;
+# cellfxres.cpp selects it by name.
+
+shaders cell_ao.vert cell_fxres_comp.frag

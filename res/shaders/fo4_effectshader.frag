@@ -49,7 +49,15 @@ flat in vec4 D;
 in mat3 btnMatrix;
 flat in mat3 reflMatrix;
 
+#ifdef WW_FXRES
+// lane FXRES1 (fo4_effectcellfx.frag, src/gl/cellfxres.h): the soft-effect layer's other two targets, blended by the
+// draw's own factors: the transmittance (0 colour, the draw's alpha, over 1) and the coverage (1, as the stencil)
+layout ( location = 0 ) out vec4 fragColor;
+layout ( location = 1 ) out vec4 fxResT;
+layout ( location = 2 ) out vec4 fxResCov;
+#else
 out vec4 fragColor;
+#endif
 
 #ifdef WW_CELLLIGHTS
 /* lane EFX2 (fo4_effectcell.frag; src/gl/celllights.h wwCellFxRed): the game's effect pixel shader in the
@@ -227,6 +235,9 @@ vec3 ViewDir_norm = normalize( ViewDir );
 mat3 btnMatrix_norm = mat3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
 
 
+#ifdef WW_FXRES
+#define main wwFxResMain
+#endif
 void main()
 {
 #ifdef WW_CELLLIGHTS
@@ -422,3 +433,13 @@ void main()
 #endif
 	fragColor = vec4( color.rgb * sqrt(D.a), color.a );
 }
+
+#ifdef WW_FXRES
+#undef main
+void main()
+{
+	wwFxResMain();
+	fxResT = vec4( 0.0, 0.0, 0.0, fragColor.a );
+	fxResCov = vec4( 1.0 );
+}
+#endif

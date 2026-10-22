@@ -1,5 +1,91 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FXRES1 (2026-10-22, branch fxres1-20261022): soft effects at a lower resolution in the cell view (OFF until the look pairs)
+
+- **Big soft effects draw into a half-resolution layer.** With `WW_CELL_FXRES=1` a Soft effect (smoke, steam, fog
+  card: soft depth, blended, no depth write, not a decal, not room-lit) that is large on screen leaves the sorted
+  pass's order and draws, after the other sorted shapes and before the particles, into a layer of 1/2 the frame per
+  axis. The layer keeps an offset and a transmittance (exact for each draw's blend) and is composited once with a
+  depth-aware upsample (off-screen particles, GPU Gems 3 ch. 23; own GLSL). Its depth is the nearest opaque depth
+  under each layer texel, so the soft fade still reads the scene.
+- Particles, AO, the opaque pass and the frame's size stay full resolution. A draw the layer cannot hold exactly is
+  drawn in place after the composite. Pass subs "fxres-down", "fxres-layer", "fxres-comp".
+- Off by default (no GL call, no reorder). Knobs `WW_CELL_FXRES_SCALE`, `_MINPX`, `_MINAREA`, `_EDGE`,
+  `_CENSUS=1`. Reds: `WW_CELL_FXRES_RED=full` (every draw in place: equals off), `=quarter` (sensitivity), `=bilinear`.
+
+## Lane AAFORMAT1 (2026-10-22, branch aaformat1-20261022): MSAA and HDR target format study switches (all OFF)
+
+- **Study switches, default unchanged.** `WW_MSAA=<1|2|4|8|16>` sets the view's MSAA sample count instead of the
+  saved "Msaa Samples" setting (1 = off; the linear frame and the FO4CS bloom source follow it). With `WW_TAA=1` it
+  gives the shipped-game setup (temporal AA, no MSAA). `WW_CELL_HDR_FORMAT=rgba16f` puts the linear frame in RGBA16F
+  (half the bytes); `=r11g11b10f` is a cost arm only (no alpha: effects over the sky lose their coverage).
+- Every new linear frame logs its format, size, samples and MB ("cell aa: linear frame ..."); `WW_CELL_AA_MEM=1`
+  logs the card's used video memory (GL_NVX_gpu_memory_info).
+- Reds: `WW_MSAA_RED=1` ignores `WW_MSAA`; `WW_CELL_HDR_FORMAT_RED=1` / `WW_AAFORMAT1_RED=1` force RGBA32F.
+  Nothing turns on before bungo sees the picture pairs (Concord daylight + a chain-link fence close-up).
+
+## Lane VRS1 (2026-10-22, branch vrs1-20261022): variable rate shading in the cell view (OFF until the look pair)
+
+- **Coarse shading where the last frame was flat.** With `WW_CELL_VRS=1` the opaque and sorted passes shade through
+  an NV shading rate image (`GL_NV_shading_rate_image`). Each 16x16 tile's rate (1x1 up to 2x2, or 4x4 with
+  `WW_CELL_VRS_MAX=4x4`) comes from the previous frame's finished picture: the largest neighbour step across the
+  tile, horizontal and vertical apart (FidelityFX-VariableShading's method, MIT, own GLSL). Fast camera motion (the
+  temporal AA's vectors) raises the allowance. The sorted pass uses a stricter second image.
+- Coverage, depth, the frame's resolution and the obscurance (AO) stay full: only fragment-shader runs drop.
+  Alpha-tested, effect and PBR-composition draws shade 1x1. Shadows, sky, effects, far cards and post are untouched.
+- Off by default (no GL call). Reds: `WW_CELL_VRS_RED=1x1` (every rate 1x1: equals off), `=4x4` (sensitivity),
+  `=noalpha`. Gate knobs `WW_CELL_VRS_CENSUS=1`, `WW_CELL_VRS_DUMP=<file>`; the build time is pass sub "tone-vrs".
+
+## Lane TONEMAP1 + SYNC1 (2026-10-22, branch tonemap1-20261022): the cell view's tone map without the stencil blit
+
+- **Stencil read by the tone map, exact.** The linear (HDR) frame's depth/stencil is now a multisample texture. Only
+  the depth is copied back to the view; the tone map's shader reads the stencil per sample and keeps the same
+  samples the GL stencil test kept. The MSAA depth+stencil blit into the view was most of the "tone-map" cost.
+  The FO4CS bloom attaches the same texture. A driver that refuses the texture falls back to the old path by itself.
+  `WW_CELL_HDR_STEX_RED=1`: the renderbuffer, both blitted, the GL stencil test.
+- **Fewer driver syncs, exact.** The view's depth format and samples are cached per size, the linear frame's status
+  is checked once, the state the measure and the tone quads restore is read once, and GL errors are checked only on
+  a new target. `WW_CELL_HDR_SYNC_RED=1`: every query every frame.
+- `WW_TONEMAP1_RED=1` brings back both. `WW_CELL_HDR_STEX_BREAK=1` is a gate-only knob (a wrong stencil test).
+
+## Lane PERF3 (2026-10-22, branch perf3-20261022): cell view per-draw CPU cuts, reflections from the previous frame
+
+- **GL query cache, exact.** Inside one draw's setup the per-draw hooks asked the driver for the blend state, the
+  active texture unit and the viewport several times each (a driver sync each). They now read them once a draw
+  (`src/gl/celldrawstate.h`). `WW_DRAW_GLCACHE=0` or `WW_DRAW_GLCACHE_RED=1`: the old queries and their cost.
+- **Obscurance pass lean, exact.** While the obscurance (AO) pass draws, the reflection and bounce hooks no longer
+  bind their samplers and uniforms (that pass writes only the normal and depth; the main pass sets them again).
+  `WW_CELL_AO_LEAN=0` or `WW_CELL_AO_LEAN_RED=1`: the old path.
+- **Sun-shadow frame block, exact.** The cascade matrices and their scalars go to one per-frame uniform block
+  (`wwShadowFrame`, binding 2), uploaded only when they change, instead of nine by-name uniform sets per program bind.
+  `WW_FRAME_UBO=0` or `WW_FRAME_UBO_RED=1`: the old uniforms.
+- **Reflections from the previous frame (test only, off).** `WW_CELL_SSR_PREV=1`: the reflections stop drawing the
+  scene a second time. The obscurance pass writes the reflection flag into stencil bit 0x01 of its depth buffer, and
+  a march hit samples the previous frame's finished linear color, reprojected into its camera. It falls back to the
+  second pass when the water's rays or the bounce need it, or when there is no previous frame of this size.
+  `WW_CELL_SSR_PREV_RED=1`: the second pass. A look change: stays off until bungo sees the pair.
+- `WW_PERF3_RED=1` brings back all four old paths at once. The obscurance pass itself stays the shared normal/depth
+  prepass (the main pass is a forward MSAA pass with no normal target to reuse).
+
+## Lane PERF2 (2026-10-21, branch perf2-20261021): cell view frame cost (timers first, then exact cuts)
+
+- **Timers.** Per-pass GPU ms gain sub-stages (air tile/inject/integrate, obscurance geometry/stages/GI, tone-map
+  blit/measure/bloom/quads, far dots/lit cards) and CPU draw-setup totals per pass (`| cpu setup|cell-uni|sun-uni|
+  fog-uni|ao-draw|ssr-draw <ms> n=<calls>`). The census queries get their own pool. Measured: the frame is CPU-bound
+  per draw (about 11-17 us a draw); the obscurance and reflection passes each submit the scene again.
+- **Volumetric air, exact.** The integrate is O(slices) (red `WW_CELL_AIR_RED=oldint`), an empty air column returns
+  early (`noearly`). Dumps byte-identical to the old path.
+- **Temporal air (test only, off).** `WW_CELL_VOLAIR_TEMPORAL=1`: one of four strata fresh a frame, the rest from the
+  reprojected history (diharaw/volumetric-fog, MIT, as reference); `WW_CELL_VOLAIR_TEMPORAL_RED=1` the 4 sub-steps.
+  Stays off until bungo sees the before/after pair.
+- **Obscurance and reflection scene passes, exact.** The scene-global setters run once per program (PERF1's memo, now
+  armed there too: `WW_CELL_AO_MEMO`, `WW_CELL_SSR_MEMO`), and the sorted/effect draws that write nothing there are
+  skipped (`WW_CELL_AO_OPAQUE`, `WW_CELL_SSR_OPAQUE`; the water ray pass draws the water alone). `=0` or `*_RED=1`:
+  the old path and its cost.
+- **Tone map, exact.** Its full-screen quads wrote `gl_FragDepth` per sample, which turned the early stencil/depth
+  tests off: every quad shaded every sample of the 4x frame. The quad now sits at the far plane (`cell_hdr.vert`);
+  `WW_CELL_HDR_EARLY_RED=1` runs the old program (`cell_hdr_fd.prog`).
+
 ## Lane BAKESPEED1 (2026-10-21, branch bakespeed1-20261021): the chunks stage runs its VT rows and chunk jobs on all cores, and resumes
 
 - **Why.** The FARBAKE2 chunks stage was serial in its two biggest parts: on the mid region (-24..23) the VT pyramid took 1539 s and the chunk pass 511 s on one core.

@@ -145,6 +145,7 @@ public:
 
 		QString cacheFile;	// lane PERF1: the program binary cache file of this source, empty when off
 		int linkFrom = 0;	// 0 none, 1 linked from the source, 2 loaded from the cache
+		bool wwShadowFrame = false;	// lane PERF3: reads the cascades from the wwShadowFrame block (binding 2)
 
 		ConditionGroup conditions;
 

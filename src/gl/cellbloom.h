@@ -80,9 +80,11 @@ float wwBloomGlareBand( const WwCellBloomSettings & s, int level, int mipCount, 
 QString wwCellBloomSelfTest();
 
 /*! In wwCellHdrEnd, after the depth / stencil went back and before the tone map: the chain, when the mode is
- *  FO4CS. hdrColor is the linear frame (multisampled), ds its depth / stencil renderbuffer. True when the chain
+ *  FO4CS. hdrColor is the linear frame (multisampled), ds its depth / stencil renderbuffer (lane TONEMAP1: a
+ *  multisample texture when dsTexture). True when the chain
  *  ran and the tone map should take it (wwCellBloomFinal). */
-bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int w, int h, int samples, unsigned dsFormat );
+bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int w, int h, int samples, unsigned dsFormat,
+	bool dsTexture = false );
 //! True between a successful wwCellBloomRun and wwCellBloomDone: the vanilla bloom stands down.
 bool wwCellBloomReplacing();
 //! The tone map's uniforms for the final combine, on the current program (cell_hdr.prog), the chain on `unit`.

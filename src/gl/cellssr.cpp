@@ -6,6 +6,8 @@ BSD License - see nifskope.h
 
 #include "cellssr.h"
 #include "cellssgi.h"
+#include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
+#include "gl/celldrawstate.h"	// lane PERF3
 #include "cellunits.h"
 
 #include "gl/celllights.h"
@@ -84,7 +86,20 @@ struct SsrGpu
 	bool waterOnly = false;		// an exterior: the pass ran for the water alone
 	bool haveWater = false;		// the water ray pass drew
 	int unit = -1;
+	// lane PERF3 (WW_CELL_SSR_PREV): the previous frame's resolved linear color and its camera
+	SsrTarget prev;
+	bool prevValid = false;
+	const void * prevDoc = nullptr;
+	float prevRot[9] = {}, prevT[3] = {}, prevSc = 1.0f, prevP00 = 1.0f, prevP11 = 1.0f;
+	int lastPrev = -1;			// the telemetry line prints when the verdict changes
 };
+
+bool ssrPrevOn()
+{
+	static const bool on = qgetenv( "WW_CELL_SSR_PREV" ).trimmed() == "1" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_PREV_RED" )
+		&& !qEnvironmentVariableIntValue( "WW_PERF3_RED" );
+	return on;
+}
 
 QHash<const void *, SsrGpu> & ssrGpus()
 {
@@ -164,6 +179,46 @@ void wwCellSsrNote( bool flagged )
 	ssr().flagged = flagged;
 }
 
+bool wwCellSsrPrevStencil()
+{
+	return ssrPrevOn() && ssr().on;
+}
+
+bool wwCellSsrFlagged()
+{
+	return ssr().flagged;
+}
+
+void wwCellSsrKeepFrame( Scene * scene, unsigned int hdrFbo, int w, int h )
+{
+	if ( !wwCellSsrPrevStencil() || !scene || !scene->renderer || !hdrFbo || w <= 0 || h <= 0 )
+		return;
+	Renderer * r = scene->renderer;
+	SsrGpu & g = ssrGpus()[r];
+	auto fn = r->fn;
+	GLint prevDraw = 0, prevRead = 0;
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	ssrAlloc( fn, g.prev, w, h, true );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( hdrFbo ) );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.prev.fbo );
+	fn->glBlitFramebuffer( 0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST );	// the samples resolved
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	const Transform & vt = scene->view;
+	for ( int j = 0; j < 3; j++ ) {
+		for ( int k = 0; k < 3; k++ )
+			g.prevRot[j * 3 + k] = vt.rotation( j, k );
+		g.prevT[j] = vt.translation[j];
+	}
+	g.prevSc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	const auto & pm = r->globalUniforms->projectionMatrix;
+	g.prevP00 = pm[0][0];
+	g.prevP11 = pm[1][1];
+	g.prevValid = true;
+	g.prevDoc = scene->nifModel;
+}
+
 void wwCellSsrPass( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )
@@ -240,6 +295,24 @@ void wwCellSsrPass( Scene * scene, bool run )
 	ssrAlloc( fn, g.across, hw, hh, true );
 	ssrAlloc( fn, g.fin, hw, hh, true );
 	}
+	/* lane PERF3 (cellssr.h): the flag from the obscurance pass's stencil and the color from the previous frame, when
+	 * this frame can use them; else the scene pass as before */
+	int prevWhy = 0;
+	if ( ssrPrevOn() && s.on ) {
+		prevWhy = sceneOnly || wwCellSsgiWantsScene( scene ) ? 2 : waterSsr ? 3 : !g.prevValid ? 4
+			: g.prevDoc != scene->nifModel ? 5 : ( g.prev.w != W || g.prev.h != H ) ? 6 : 1;
+		if ( prevWhy != g.lastPrev ) {
+			static const char * const words[7] = { "", "on", "scene pass (the bounce reads it)", "scene pass (water rays)",
+				"scene pass (no previous frame)", "scene pass (another document)", "scene pass (size changed)" };
+			std::fprintf( stderr, "cell ssr prev: %s\n", words[prevWhy] );
+			g.lastPrev = prevWhy;
+		}
+	}
+	const bool usePrev = prevWhy == 1;
+	g.prevValid = false;	// used once: the end of this frame keeps the next
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.scene.fbo );
 	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ao.depthRb );
 	const bool complete = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
@@ -251,21 +324,52 @@ void wwCellSsrPass( Scene * scene, bool run )
 		return;
 	}
 
+	/* lane PERF2: the pass is CPU-bound per draw. memo: the scene-global setters once per program; opaque: no
+	 * sorted/effect draws here, and the water pass draws the water alone. =0 or *_RED=1: the old path */
+	static const bool memo = qgetenv( "WW_CELL_SSR_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_MEMO_RED" );
+	static const bool opaqueOnly = qgetenv( "WW_CELL_SSR_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_OPAQUE_RED" );
+	NodeList sceneSecond;
+	const GLfloat none4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	if ( usePrev ) {
+		// 1'. the flag alone: alpha 1 where the obscurance pass's stencil bit 0x01 says flagged
+		fn->glViewport( 0, 0, W, H );
+		fn->glDisable( GL_SCISSOR_TEST );
+		fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+		fn->glClearBufferfv( GL_COLOR, 0, none4 );
+		fn->glDisable( GL_DEPTH_TEST );
+		fn->glDisable( GL_CULL_FACE );
+		fn->glDisable( GL_BLEND );
+		fn->glDepthMask( GL_FALSE );
+		fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+		fn->glEnable( GL_STENCIL_TEST );
+		fn->glStencilMask( 0 );
+		fn->glStencilFunc( GL_EQUAL, 1, 0x01 );
+		prog = r->useProgram( "cell_ssr.prog" );
+		prog->uni1i( "ssrStage", 0 );
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		r->stopProgram();
+		fn->glDisable( GL_STENCIL_TEST );
+		fn->glStencilMask( 0xFF );
+		fn->glStencilFunc( GL_ALWAYS, 0, 0xFF );
+		fn->glDepthMask( GL_TRUE );
+	} else {
 	// 1. the opaque cell-lit fragments once more: the lit color the game marches (probe 60)
 	fn->glViewport( 0, 0, W, H );
 	fn->glDisable( GL_SCISSOR_TEST );
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 	fn->glDepthMask( GL_TRUE );
-	const GLfloat none4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	fn->glClearBufferfv( GL_COLOR, 0, none4 );
 	fn->glClear( GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
 	fn->glDisable( GL_BLEND );
 	fn->glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );	// wwCellSsrDraw opens it for the opaque cell-lit draws
 	s.pass = true;
-	{
-		NodeList second;
-		scene->collectShapes( second );
-		Scene::drawDeferredShapes( second );
+	if ( memo )
+		wwSetupMemoArm( true );
+	scene->collectShapes( sceneSecond );
+	if ( memo )
+		wwSetupMemoArm( false );
+	if ( !opaqueOnly ) {
+		Scene::drawDeferredShapes( sceneSecond );
 		scene->drawShapeEffects();
 	}
 	s.pass = false;
@@ -274,6 +378,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glDisable( GL_STENCIL_TEST );
 	fn->glDisable( GL_POLYGON_OFFSET_FILL );
 	g.sceneReady = true;
+	}
 	g.doc = scene->nifModel;
 	if ( sceneOnly ) {
 		restore();
@@ -292,7 +397,14 @@ void wwCellSsrPass( Scene * scene, bool run )
 			s.pass = true;
 			s.waterRay = true;
 			s.gbuf = ao.gbuf;
-			{
+			if ( opaqueOnly ) {	// the sorted list's water, in its order (the opaque and the rest write nothing here)
+				sceneSecond.alphaSort();
+				for ( Node * node : sceneSecond.list() ) {
+					Shape * sh = dynamic_cast<Shape *>( node );
+					if ( sh && !sh->wwDecalDrawsFirst() && sh->wwWaterDraws() )
+						node->drawShapes();
+				}
+			} else {
 				NodeList second;
 				scene->collectShapes( second );
 				Scene::drawDeferredShapes( second );
@@ -314,9 +426,10 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glDisable( GL_BLEND );
 	fn->glDepthMask( GL_FALSE );
 	fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-	const GLuint bound[8] = { ao.gbuf, ao.mip[1], ao.mip[2], ao.mip[3], ao.mip[4], g.scene.tex, 0,
-		g.haveWater ? g.wray.tex : 0 };
-	for ( int u = 0; u < 8; u++ ) {
+	const GLuint bound[9] = { ao.gbuf, ao.mip[1], ao.mip[2], ao.mip[3], ao.mip[4], g.scene.tex, 0,
+		g.haveWater ? g.wray.tex : 0, usePrev ? g.prev.tex : 0 };
+	const int nBound = usePrev ? 9 : 8;	// lane PERF3: unit 8 only for the previous frame
+	for ( int u = 0; u < nBound; u++ ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
 		fn->glBindTexture( GL_TEXTURE_2D, bound[u] );
 	}
@@ -349,9 +462,30 @@ void wwCellSsrPass( Scene * scene, bool run )
 	prog->uni4f( "ssrK", FloatVector4( kSsrK[0], kSsrK[1], kSsrK[2], kSsrK[3] ) );
 	prog->uni2f( "ssrClip", kSsrNear, farZ );
 	prog->uni1i( "ssrRed", s.red );
-	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
-	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
-	const float * attrs = quad;
+	prog->uni1b( "ssrPrev", usePrev );
+	if ( usePrev ) {
+		/* game-unit view P = R world + t / sc (cellAoPassOut's depth); the previous view: M P + T with
+		 * M = Rp R^T, T = tp / scp - M t / sc */
+		const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+		float M[9], T[3];
+		for ( int i = 0; i < 3; i++ )
+			for ( int j = 0; j < 3; j++ ) {
+				float m = 0.0f;
+				for ( int k = 0; k < 3; k++ )
+					m += g.prevRot[i * 3 + k] * vt.rotation( j, k );
+				M[i * 3 + j] = m;
+			}
+		for ( int i = 0; i < 3; i++ ) {
+			float mt = 0.0f;
+			for ( int j = 0; j < 3; j++ )
+				mt += M[i * 3 + j] * vt.translation[j];
+			T[i] = g.prevT[i] / g.prevSc - mt / sc;
+		}
+		fn->glUniformMatrix3fv( prog->uniLocation( "ssrPrevRot" ), 1, GL_TRUE, M );	// M is row-major
+		prog->uni3f( "ssrPrevT", T[0], T[1], T[2] );
+		prog->uni2f( "ssrPrevProj", g.prevP00, g.prevP11 );
+		prog->uni1i( "prevScene", 8 );
+	}
 	auto pass = [&]( int stage, const SsrTarget & out, const SsrTarget * in ) {
 		fn->glActiveTexture( GL_TEXTURE6 );
 		fn->glBindTexture( GL_TEXTURE_2D, in ? in->tex : 0 );
@@ -365,7 +499,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 	pass( 3, g.across, &g.raw );
 	pass( 4, g.fin, &g.across );
 	r->stopProgram();
-	for ( int u = 0; u < 8; u++ ) {
+	for ( int u = 0; u < nBound; u++ ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	}
@@ -411,11 +545,11 @@ void wwCellSsrPass( Scene * scene, bool run )
 		QFile t( s.dump + QStringLiteral( ".txt" ) );
 		if ( t.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
 			QString o = QStringLiteral( "ssr: on %1x%2 half %3x%4 near %5 far %6 k %7 %8 %9 %10 p00 %11 p11 %12 unit %13 red %14"
-				" water %15 waterOnly %16" )
+				" water %15 waterOnly %16 prev %17" )
 				.arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( kSsrNear ), 0, 'f', 2 ).arg( double( farZ ), 0, 'f', 2 )
 				.arg( double( kSsrK[0] ) ).arg( double( kSsrK[1] ) ).arg( double( kSsrK[2] ) ).arg( double( kSsrK[3] ) )
 				.arg( double( p00 ), 0, 'f', 6 ).arg( double( p11 ), 0, 'f', 6 ).arg( g.unit ).arg( s.red )
-				.arg( g.haveWater ? 1 : 0 ).arg( g.waterOnly ? 1 : 0 );
+				.arg( g.haveWater ? 1 : 0 ).arg( g.waterOnly ? 1 : 0 ).arg( usePrev ? 1 : 0 );
 			o += QStringLiteral( " rot" );
 			for ( float v : rot )
 				o += QStringLiteral( " %1" ).arg( double( v ), 0, 'f', 7 );
@@ -430,6 +564,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 
 void wwCellSsrDraw( Scene * scene, bool cellProgram )
 {
+	PassTime::DrawCpuScope cpuT( PassTime::CpuSsrDraw );	// lane PERF2
 	if ( !scene || !scene->renderer )
 		return;
 	SsrState & s = ssr();
@@ -443,6 +578,7 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 		glDepthMask( GL_FALSE );
 		if ( water ) {
 			glDisable( GL_BLEND );
+			wwDrawGlCacheDirty();	// lane PERF3
 			glEnable( GL_DEPTH_TEST );
 			glDepthFunc( GL_LEQUAL );
 		}
@@ -450,7 +586,7 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 	}
 	if ( s.pass ) {
 		// the game's opaque (deferred) pass: no blended draw, no effect, nothing that is not cell-lit
-		const bool opaque = cellProgram && !glIsEnabled( GL_BLEND );
+		const bool opaque = cellProgram && !wwDrawBlend();
 		glColorMask( opaque, opaque, opaque, opaque );
 		if ( !opaque )
 			glDepthMask( GL_FALSE );
@@ -466,21 +602,20 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 		return;
 	SsrGpu & g = ssrGpus()[r];
 	const bool on = g.ready && g.doc == scene->nifModel && g.unit > 0 && !( s.red & 1 ) && s.flagged && !g.waterOnly
-		&& !glIsEnabled( GL_BLEND ) && wwCellLightsWanted( scene ) && ( s.probe == 0 || s.probe == 61 );
+		&& !wwDrawBlend() && wwCellLightsWanted( scene ) && ( s.probe == 0 || s.probe == 61 );
 	prog->uni1b( "cellSsrOn", on );
 	prog->uni1b( "cellSsrMat", s.flagged );
 	if ( g.unit <= 0 )
 		return;
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
-	GLint prevActive = 0;
-	r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	const GLint prevActive = wwDrawActiveTexture();	// lane PERF3
 	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + g.unit ) );
 	r->fn->glBindTexture( GL_TEXTURE_2D, on ? g.fin.tex : 0 );
 	r->fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellSsr", g.unit );
 	if ( on ) {
-		GLint vp[4] = { 0, 0, 1, 1 };
-		glGetIntegerv( GL_VIEWPORT, vp );
+		int vp[4];
+		wwDrawViewport( vp );
 		prog->uni4f_l( prog->uniLocation( "cellSsrRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}

@@ -43,6 +43,27 @@ void end( int pass );
 void addCpu( int pass, qint64 ns );
 //! One draw call issued (`ranges` index ranges in it: a multi-draw's count, else 1), counted to the innermost open pass.
 void countDraw( qint64 ranges );
+
+//! lane PERF2: GPU-only sub-stages inside a pass (two timestamps each), logged after the passes as "sub <name> <ms>".
+enum Sub { AirTile, AirInject, AirIntegrate, AoGeometry, AoStages, AoGi, ToneBlit, ToneMeasure, ToneBloom, ToneQuads,
+	FarDots, FarCardsLit, ToneVrs,	// lane VRS1: ToneVrs, the rate images' build after the tone map
+	FxResDown, FxResLayer, FxResComp, SubCount };	// lane FXRES1: the soft-effect layer's depth, draws and composite
+void subBegin( int sub );
+//! lane PERF2: CPU time inside the per-draw setup (setupProgram and the cell's uniform calls), summed per frame
+enum CpuSub { CpuSetup, CpuCellUni, CpuSunUni, CpuFogUni, CpuAoDraw, CpuSsrDraw, CpuSubCount };
+qint64 nowNs();
+void cpuSubAdd( int sub, qint64 ns );
+class DrawCpuScope
+{
+public:
+	explicit DrawCpuScope( int sub ) : k_( on() ? sub : -1 ), t0_( k_ >= 0 ? nowNs() : 0 ) {}
+	~DrawCpuScope() { if ( k_ >= 0 ) cpuSubAdd( k_, nowNs() - t0_ ); }
+private:
+	int k_;
+	qint64 t0_;
+	Q_DISABLE_COPY( DrawCpuScope )
+};
+void subEnd( int sub );
 qint64 nowNs();
 
 class Scope

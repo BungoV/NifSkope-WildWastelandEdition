@@ -31,6 +31,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "renderer.h"
+#include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
+#include "gl/celldrawstate.h"	// lane PERF3
+#include "gl/cellvrs.h"	// lane VRS1
+#include "gl/cellfxres.h"	// lane FXRES1
 
 #include "message.h"
 #include "nifskope.h"
@@ -314,11 +318,98 @@ static int wwLandSplatDbg()
 	return v;
 }
 
+// lane PERF3: the per-draw GL query cache (celldrawstate.h)
+namespace {
+struct DrawGlCache
+{
+	int depth = 0;
+	int blend = -1;
+	GLint active = -1;
+	GLint vp[4] = { 0, 0, 1, 1 };
+	bool vpOk = false;
+};
+DrawGlCache & drawGl() { static DrawGlCache c; return c; }
+bool envOn( const char * sw, const char * red )
+{
+	return qgetenv( sw ).trimmed() != "0" && qgetenv( red ).trimmed() != "1" && qgetenv( "WW_PERF3_RED" ).trimmed() != "1";
+}
+bool drawGlOn() { static const bool on = envOn( "WW_DRAW_GLCACHE", "WW_DRAW_GLCACHE_RED" ); return on; }
+}
+
+WwDrawGlScope::WwDrawGlScope()
+{
+	DrawGlCache & c = drawGl();
+	if ( drawGlOn() && c.depth++ == 0 ) {
+		c.blend = -1;
+		c.active = -1;
+		c.vpOk = false;
+	}
+}
+
+WwDrawGlScope::~WwDrawGlScope()
+{
+	if ( drawGlOn() )
+		drawGl().depth--;
+}
+
+bool wwDrawBlend()
+{
+	DrawGlCache & c = drawGl();
+	if ( !c.depth )
+		return glIsEnabled( GL_BLEND );
+	if ( c.blend < 0 )
+		c.blend = glIsEnabled( GL_BLEND ) ? 1 : 0;
+	return c.blend != 0;
+}
+
+int wwDrawActiveTexture()
+{
+	DrawGlCache & c = drawGl();
+	if ( !c.depth || c.active < 0 ) {
+		GLint a = 0;
+		glGetIntegerv( GL_ACTIVE_TEXTURE, &a );
+		if ( !c.depth )
+			return int( a );
+		c.active = a;
+	}
+	return int( c.active );
+}
+
+void wwDrawViewport( int vp[4] )
+{
+	DrawGlCache & c = drawGl();
+	if ( !c.depth ) {
+		GLint v[4] = { 0, 0, 1, 1 };
+		glGetIntegerv( GL_VIEWPORT, v );
+		for ( int i = 0; i < 4; i++ )
+			vp[i] = int( v[i] );
+		return;
+	}
+	if ( !c.vpOk ) {
+		glGetIntegerv( GL_VIEWPORT, c.vp );
+		c.vpOk = true;
+	}
+	for ( int i = 0; i < 4; i++ )
+		vp[i] = int( c.vp[i] );
+}
+
+void wwDrawGlCacheDirty()
+{
+	drawGl().blend = -1;
+}
+
+bool wwCellAoLean()
+{
+	static const bool on = envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" );
+	return on;
+}
+
 static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, Shape * mesh,
 	const BSShaderLightingProperty * wwSp, const char * wwKind,
 	int msn, int lodLand, NifSkopeOpenGLContext::Program * program,
 	const FloatVector4 & lightViewDir )
 {
+	const WwDrawGlScope drawGlScope;	// lane PERF3
 	/* lane IMGS1: the imagespace's measure pass holds the cell-lit fragments' linear light. Any
 	 * other program (sky, debug) writes neither colour nor depth there; glview.cpp
 	 * restores both masks after the pass. The stencil: bit 0 = a cell-lit fragment landed here (the
@@ -338,7 +429,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 			glDepthMask( GL_FALSE );
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( cell ? 0x03 : 0x02 );
-		glStencilFunc( GL_ALWAYS, !cell ? 2 : glIsEnabled( GL_BLEND ) ? 3 : 1, 0xFF );
+		glStencilFunc( GL_ALWAYS, !cell ? 2 : wwDrawBlend() ? 3 : 1, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
 	} else if ( wwCellHdrActive() ) {
 		// lane HDR1: the linear frame (cellhdr.h). The stencil keeps who wrote a pixel last: 1 a cell program or a
@@ -346,21 +437,27 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		// WATERHDR1: and the water, which writes linear light too (it was written back raw: the creek ~6/255)
 		const bool lin = program && ( wwIsCellProgramName( program->name ) || program->name == std::string_view( "fo4_effectcell.prog" )
 			|| wwIsCellDecalProgramName( program->name )	// lane DECALLIT1
+			|| program->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1: the layer's (composited as 1)
 			|| ( program->name == std::string_view( "fo4_water.prog" ) && wwCellWaterWritesLinear() ) );
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( 0x03 );
 		glStencilFunc( GL_ALWAYS, lin ? 1 : 2, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
 	}
+	// lane FXRES1: in the soft-effect layer, a draw it cannot hold exactly is masked and drawn in place after it
+	if ( mesh && wwCellFxResDrawing() )
+		wwCellFxResDrawHook( mesh, program ? program->name : std::string_view() );
 	// lane AO1: the obscurance's opaque pass (normal + depth from the opaque cell-lit draws only), and every
 	// other cell-lit draw reads this frame's obscurance (celllights.h)
 	if ( mesh && wwAoScene )
 		wwCellAoDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	// lane SSR1: the reflections' scene pass, and the reflection a flagged opaque draw reads (cellssr.h)
-	if ( mesh && wwAoScene )
+	// lane PERF3: not in the AO opaque pass (the main pass sets them again per draw)
+	const bool aoLean = wwCellAoInPass() && wwCellAoLean();
+	if ( mesh && wwAoScene && !aoLean )
 		wwCellSsrDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	// lane SSGI1: the screen-space bounce a cell-lit opaque draw reads (cellssgi.h)
-	if ( mesh && wwAoScene )
+	if ( mesh && wwAoScene && !aoLean )
 		wwCellSsgiDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	/* WW_PBRM_CENSUS (lane PBRR0) rides the same exits: every return of
 	 * setupProgram passes through here with the program it actually bound,
@@ -484,9 +581,15 @@ float wwCellCubeDecodeMode()
 
 NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program * hint )
 {
+	PassTime::DrawCpuScope wwSetupT( PassTime::CpuSetup );	// lane PERF2
 	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
 	wwAoScene = mesh->scene;	// lane AO1
+	if ( wwCellVrsActive() ) {	// lane VRS1: a draw that can discard (alpha test, effect, PBR composition) shades 1x1
+		const Material * vm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
+		wwCellVrsDraw( ( mesh->alphaProperty && mesh->alphaProperty->hasAlphaTest() ) || ( vm && vm->hasAlphaTest() ) || mesh->bsesp
+			|| ( mesh->bslsp && mesh->bslsp->pbrmValid ) );
+	}
 	{	// lane SSR1: the draw's reflection flag (an environment-mapped material file with its reflections switch on)
 		const Material * sm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
 		wwCellSsrNote( sm && sm->isShaderMaterial() && sm->bEnvironmentMapping && sm->bScreenSpaceReflections );
@@ -630,6 +733,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		/* lane DECALLIT1: an effect decal takes fo4_effectdecal.prog (the game draws it into the surface under it, lit as that
 		 * surface; + the cascades while the map is built); red WW_CELL_DECALLIT_RED=unlit keeps it a self-lit effect */
 		if ( p->name == std::string_view( "fo4_effectshader.prog" ) || p->name == std::string_view( "fo4_effectcell.prog" )
+			|| p->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1
 			|| wwIsCellDecalProgramName( p->name ) ) {
 			const bool cellFx = wwCellLightsWanted( mesh->scene ) && !( wwCellFxRed() & 1 );
 			/* lane GIDARK1: an exterior's lit effect takes the same program, lit by the spot it stands in (fxRoomLit) */
@@ -637,7 +741,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			const char * want = !cellFx ? "fo4_effectshader.prog"
 				: ( ( mesh->effectDecal && !wwCellDecalLitRed() ) || roomLit )
 					? ( wwSunShadowWanted( mesh->scene ) ? "fo4_effectdecalcsm.prog" : "fo4_effectdecal.prog" )
-				: "fo4_effectcell.prog";
+				: wwCellFxResDrawing() ? "fo4_effectcellfx.prog" : "fo4_effectcell.prog";	// lane FXRES1: the layer's outputs
 			if ( p->name == std::string_view( want ) )
 				return p;
 			Program * q = useProgram( want );
