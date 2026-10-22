@@ -33,6 +33,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gamemanager.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "probesky.h"	// fix 10-22: the live driver waits for a pending sky relight
+#include "gl/shadowset.h"	// fix 10-22: ... and for the terrain shadow sweep
 #include "lodgen.h"
 #include "lodgengpu.h"
 #include "lodgenlayout.h"
@@ -2335,7 +2337,22 @@ struct WwLiveState
 	QStringList owedNames;
 	bool reopening = false, reopenDone = false;
 	bool rowRefused = false;	// a set of this row was refused: its pictures are not taken
+	QString shaderRefused;		// fix 10-22: a program the last reload refused; pictures wait for a clean reload
 };
+
+//! fix 10-22: the visible chrome around the viewport, "name WxH" each, to say what a reopen changed
+QStringList wwLiveChrome( NifSkope * skope )
+{
+	QStringList r;
+	QList<QWidget *> ws = skope->findChildren<QWidget *>( Qt::FindDirectChildrenOnly );
+	if ( QWidget * c = skope->centralWidget() )
+		ws += c->findChildren<QWidget *>( Qt::FindDirectChildrenOnly );
+	for ( QWidget * w : ws )
+		if ( w->isVisible() && w->height() > 0 )
+			r << QStringLiteral( "%1(%2) %3x%4" ).arg( w->objectName(), QLatin1String( w->metaObject()->className() ) )
+				.arg( w->width() ).arg( w->height() );
+	return r;
+}
 
 WwLiveState & wwLive()
 {
@@ -2351,6 +2368,33 @@ void wwLivePump( GLView * ogl, int frames )
 	}
 }
 
+/* fix 10-22: a live hour set starts time-of-day work in the background that a launch finished while loading: the probe
+ * sky relight (a 0.4 s timer) and the terrain shadow sweep (a worker, then a band-a-frame upload). A picture waits for
+ * both, so it draws what a launch at that hour draws (the hour row was brighter where the far terrain shadow was due). */
+QString wwLiveSettleBackground( GLView * ogl )
+{
+	QElapsedTimer t;
+	t.start();
+	wwLivePump( ogl, 2 );	// a frame sees the new light and starts the work
+	int frames = 2;
+	bool relit = false;
+	while ( t.elapsed() < 120000 ) {
+		if ( probeSkyRelightPending() ) {
+			probeSkyRelightNow();
+			relit = true;
+		}
+		if ( !wwTerrainShadowPending() && !probeSkyRelightPending() )
+			break;
+		wwLivePump( ogl, 1 );
+		frames++;
+	}
+	if ( !relit && frames == 2 )
+		return QString();
+	return QStringLiteral( "; background settled in %1 frames %2 ms%3%4" ).arg( frames ).arg( t.elapsed() )
+		.arg( relit ? QStringLiteral( " (sky relit now)" ) : QString() )
+		.arg( wwTerrainShadowPending() ? QStringLiteral( " TIMED OUT (terrain shadows still pending)" ) : QString() );
+}
+
 //! Runs the stages the sets since the last picture owe; the reply says what was redone
 QString wwLiveApply( NifSkope * skope )
 {
@@ -2364,8 +2408,12 @@ QString wwLiveApply( NifSkope * skope )
 	L.owed = 0;
 	L.owedNames.clear();
 	QStringList did;
+	GLView * ogl = skope->getGLView();
+	const quint64 refusedBefore = wwLiveShaderRefusals();
+	const QSize viewBefore( ogl->width(), ogl->height() );
+	const QStringList chromeBefore = wwLiveChrome( skope );
 	if ( owed & 1 ) {
-		skope->getGLView()->updateShaders();
+		ogl->updateShaders();
 		did << QStringLiteral( "shaders" );
 	}
 	if ( owed & 2 ) {
@@ -2385,6 +2433,35 @@ QString wwLiveApply( NifSkope * skope )
 		loop.exec();
 		L.reopening = false;
 		did << ( L.reopenDone ? QStringLiteral( "reopen" ) : QStringLiteral( "reopen TIMED OUT" ) );
+		/* fix 10-22: the reopen must hand back the viewport the rows before it drew in (port run: 1920x1026 became
+		 * 1920x1045, the handler's window pin lands on other chrome the second time). The window takes the difference. */
+		ogl = skope->getGLView();
+		const QSize viewAfter( ogl->width(), ogl->height() );
+		if ( viewAfter != viewBefore ) {
+			const QStringList chromeAfter = wwLiveChrome( skope );
+			QStringList gone, came;
+			for ( const QString & c : chromeBefore )
+				if ( !chromeAfter.contains( c ) )
+					gone << c;
+			for ( const QString & c : chromeAfter )
+				if ( !chromeBefore.contains( c ) )
+					came << c;
+			skope->resize( skope->size() + ( viewBefore - viewAfter ) );
+			qApp->processEvents();
+			wwLivePump( ogl, 2 );
+			did << QStringLiteral( "viewport %1x%2 -> %3x%4 put back to %5x%6 (chrome before only: %7; after only: %8)" )
+				.arg( viewBefore.width() ).arg( viewBefore.height() ).arg( viewAfter.width() ).arg( viewAfter.height() )
+				.arg( ogl->width() ).arg( ogl->height() )
+				.arg( gone.isEmpty() ? QStringLiteral( "-" ) : gone.join( QLatin1Char( ',' ) ),
+					came.isEmpty() ? QStringLiteral( "-" ) : came.join( QLatin1Char( ',' ) ) );
+		}
+	}
+	QString why;
+	if ( wwLiveShaderRefusals( &why ) != refusedBefore ) {
+		L.shaderRefused = why;
+		did << QStringLiteral( "REFUSED shader %1" ).arg( why );
+	} else if ( owed & 1 ) {
+		L.shaderRefused.clear();	// every program linked again
 	}
 	return QStringLiteral( "redone %1 for %2 in %3 ms" ).arg( did.join( QLatin1Char( '+' ) ), names ).arg( t.elapsed() );
 }
@@ -2412,6 +2489,7 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	GLView * ogl = skope ? skope->getGLView() : nullptr;
 	if ( !ogl )
 		return QStringLiteral( "refused no view" );
+	wwLiveSessionStart();	// fix 10-22: from here a refused shader refuses its row, not the process
 	if ( verb == QLatin1StringView( "row" ) ) {
 		L.rowRefused = false;
 		return QStringLiteral( "row %1" ).arg( rest );
@@ -2464,25 +2542,28 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	}
 	if ( verb == QLatin1StringView( "settle" ) ) {
 		const qint64 ms = cellStreamBusy( nullptr ) ? wwCellStreamSettle( ogl, 16, 600000 ) : 0;
-		return QStringLiteral( "%1; settled in %2 ms" ).arg( applied ).arg( ms );
+		return QStringLiteral( "%1; settled in %2 ms%3" ).arg( applied ).arg( ms ).arg( wwLiveSettleBackground( ogl ) );
 	}
-	if ( verb == QLatin1StringView( "shot" ) ) {
-		ogl->setSceneTime( L.shotT );
-		wwLivePump( ogl, 2 );
-		const int renderSS = wwEnvInt( "WW_RENDER_SS" );
-		const QImage img = renderSS > 0 ? ogl->grabSupersampled( renderSS ) : ogl->grabFramebuffer();
-		const bool ok = img.save( rest );
-		return QStringLiteral( "%1; shot %2 %3" ).arg( applied, rest, ok ? QStringLiteral( "saved" ) : QStringLiteral( "NOT SAVED" ) );
-	}
-	if ( verb == QLatin1StringView( "path" ) ) {
-		const QString file = rest.section( QLatin1Char( ' ' ), 0, 0 ), out = rest.section( QLatin1Char( ' ' ), 1 ).trimmed();
-		if ( file.isEmpty() || out.isEmpty() )
-			return QStringLiteral( "refused bad step: %1" ).arg( s );
-		wwRenderPathRun( ogl, file, out, L.shotT );
-		return QStringLiteral( "%1; path %2 -> %3 in %4 ms" ).arg( applied, file, out ).arg( t.elapsed() );
-	}
-	if ( verb == QLatin1StringView( "gpums" ) ) {
-		const int frames = rest.section( QLatin1Char( ' ' ), 0, 0 ).toInt();
+	if ( verb != QLatin1StringView( "shot" ) && verb != QLatin1StringView( "path" ) && verb != QLatin1StringView( "gpums" ) )
+		return QStringLiteral( "refused unknown verb: %1" ).arg( verb );
+	const QString bg = wwLiveSettleBackground( ogl );
+	auto takePicture = [&]() -> QString {
+		if ( verb == QLatin1StringView( "shot" ) ) {
+			ogl->setSceneTime( L.shotT );
+			wwLivePump( ogl, 2 );
+			const int renderSS = wwEnvInt( "WW_RENDER_SS" );
+			const QImage img = renderSS > 0 ? ogl->grabSupersampled( renderSS ) : ogl->grabFramebuffer();
+			const bool ok = img.save( rest );
+			return QStringLiteral( "%1%2; shot %3 %4" ).arg( applied, bg, rest, ok ? QStringLiteral( "saved" ) : QStringLiteral( "NOT SAVED" ) );
+		}
+		if ( verb == QLatin1StringView( "path" ) ) {
+			const QString file = rest.section( QLatin1Char( ' ' ), 0, 0 ), out = rest.section( QLatin1Char( ' ' ), 1 ).trimmed();
+			if ( file.isEmpty() || out.isEmpty() )
+				return QStringLiteral( "refused bad step: %1" ).arg( s );
+			wwRenderPathRun( ogl, file, out, L.shotT );
+			return QStringLiteral( "%1%2; path %3 -> %4 in %5 ms" ).arg( applied, bg, file, out ).arg( t.elapsed() );
+		}
+		const int frames = rest.section( QLatin1Char( ' ' ), 0, 0 ).toInt();	// gpums
 		const QString out = rest.section( QLatin1Char( ' ' ), 1 ).trimmed();
 		if ( frames < 1 || out.isEmpty() )
 			return QStringLiteral( "refused bad step: %1" ).arg( s );
@@ -2490,9 +2571,24 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 		if ( !gf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 			return QStringLiteral( "refused cannot write %1" ).arg( out );
 		QTextStream( &gf ) << ogl->wwGpuMs( frames ) << "\n";
-		return QStringLiteral( "%1; gpums %2 frames -> %3" ).arg( applied ).arg( frames ).arg( out );
-	}
-	return QStringLiteral( "refused unknown verb: %1" ).arg( verb );
+		return QStringLiteral( "%1%2; gpums %3 frames -> %4" ).arg( applied, bg ).arg( frames ).arg( out );
+	};
+	// fix 10-22: a program refused under this row's switches: no picture (the guard's rule), the session goes on
+	if ( !L.shaderRefused.isEmpty() )
+		return QStringLiteral( "refused shader %1 (%2; the row's pictures are skipped)" ).arg( L.shaderRefused, applied );
+	const quint64 before = wwLiveShaderRefusals();
+	const QString r = takePicture();
+	QString why;
+	if ( wwLiveShaderRefusals( &why ) == before )
+		return r;
+	// a program linked lazily during the picture was refused: the files it drew are removed
+	L.shaderRefused = why;
+	const QString out = verb == QLatin1StringView( "shot" ) ? rest : rest.section( QLatin1Char( ' ' ), 1 ).trimmed();
+	const QFileInfo fi( out );
+	QFile::remove( out );
+	for ( const QFileInfo & f : QDir( fi.path() ).entryInfoList( { fi.completeBaseName() + QStringLiteral( "_[0-9][0-9][0-9].*" ) }, QDir::Files ) )
+		QFile::remove( f.filePath() );
+	return QStringLiteral( "refused shader %1 (during the picture; its files removed)" ).arg( why );
 }
 
 /* WW_LIVE_STEPS=<file>: every step in order; <file>.log gets "<ms since start>\t<step ms>\t<step>\t<reply>" and

@@ -17,7 +17,7 @@ def main():
     ap.add_argument('steps', nargs='*')
     ap.add_argument('--file')
     ap.add_argument('--timeout', type=float, default=900.0)
-    a = ap.parse_args()
+    a = ap.parse_intermixed_args()  # fix 10-22: --timeout may come after the port
     steps = list(a.steps)
     if a.file:
         steps += [l.strip() for l in open(a.file, encoding='utf-8') if l.strip() and not l.startswith('#')]

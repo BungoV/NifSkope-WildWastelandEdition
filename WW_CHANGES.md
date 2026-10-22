@@ -20,6 +20,17 @@
 - **No set, no change:** the generation stays 0 and every reader computes what it did before.
 - **Gates (batch, notes/testdriver1/BATCH.md):** no-set identity main vs lane exe; live vs relaunch twins per class on
   Memory Den and Concord 3x3; leak check (first row vs last); wall clock per scene; the port path.
+- **Gate fixes (10-22, after the first gate):**
+  - Hour row: a live `WW_LOOKDEV_HOUR` starts the terrain shadow sweep (worker + band-a-frame upload) and the probe
+    sky relight (0.4 s timer) in the background; a launch finished both while loading. A picture step now waits for
+    both (`wwTerrainShadowPending`, `probeSkyRelightPending`/`probeSkyRelightNow`); the reply says "background settled".
+  - A refused shader ends a live row, not the session: in a live session the shader guard records the refusal
+    (`wwLiveShaderRefused`) instead of exiting 87; that row's pictures are refused ("refused shader ..."), the next
+    row reloads the programs.
+  - A reopen hands back the viewport size the rows before it drew in (the window takes the difference; the reply
+    names the chrome that changed).
+  - A switch the stage table lacks is relaunch (unknown = relaunch), with the reason in the reply.
+  - `tests/spells/ww_live.py` takes `--timeout` anywhere on the line.
 
 ## Lane HORIZON1 (2026-10-21, branch horizon1-20261021): the AO map and the shadow heightmap on all cores
 

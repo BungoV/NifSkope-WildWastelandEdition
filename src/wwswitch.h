@@ -58,7 +58,7 @@ bool wwSwitchMovedFor( quint64 & seen, std::initializer_list<const char *> prefi
 enum class WwSwitchStage { Live = 0, Reopen = 1, Relaunch = 2, Tool = 3, Shaders = 4 };
 
 const char * wwSwitchStageName( WwSwitchStage s );
-//! The stage of one switch (the survey's table); a name nobody reads is Live, `where` says so
+//! The stage of one switch (the survey's table); a name the table lacks is Relaunch, `where` says so
 WwSwitchStage wwSwitchStageOf( const QByteArray & name, QString * where = nullptr );
 //! WW_TESTDRIVER_RED=relaunch: every live set is refused (the harness launches once per row)
 bool wwSwitchRedRelaunch();
@@ -103,6 +103,14 @@ private:
 #define WW_SWITCH_STATIC( T, var, ... ) \
 	static WwSwitchCache<T> var##_wwsc; \
 	const T & var = var##_wwsc.get( [&]() -> T { return ( __VA_ARGS__ ); } )
+
+/* ---- a refused shader in a live session (fix 10-22): once the driver has run a step, the shader guard records the
+ * refusal here instead of ending the process; the driver refuses that row's pictures and goes on to the next row */
+void wwLiveSessionStart();
+bool wwLiveSessionOn();
+void wwLiveShaderRefused( const QString & text );
+//! How many programs were refused so far in the live session; `last` gets the latest text
+quint64 wwLiveShaderRefusals( QString * last = nullptr );
 
 // ---- the live driver (src/nifskope_ui.cpp): one step, from the steps file or the port
 class NifSkope;

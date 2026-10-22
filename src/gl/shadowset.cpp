@@ -166,6 +166,7 @@ struct SetState
 
 	Terrain t;
 	TerrJob job;
+	bool terrWants = false;	// fix 10-22: the last frame found the map stale (a sweep owed or running)
 	Contact c;
 	GpuTimer tmTerrain, tmContact;
 	double lastElevReal = 0, lastElevShaded = 0, lastElevEngine = 0, lastDiscEngine = 0;
@@ -704,6 +705,7 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 	TerrJob & j = s.job;
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
+	s.terrWants = false;
 	if ( !s.terrain ) {
 		stopTerrJob( j );
 		j.w.H.clear();
@@ -851,6 +853,7 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 	static quint64 sweptGen = 0;	// lane TESTDRIVER1: a live set (the terrain reds) sweeps again
 	const bool stale = sweptGen != wwSwitchGen() || !t.valid || t.pubN != t.N || t.pubX0 != t.x0 || t.pubY0 != t.y0 || t.needRaster
 		|| moved > kRelatch;
+	s.terrWants = stale;
 	if ( !j.busy && !t.uploading && stale ) {
 		sweptGen = wwSwitchGen();
 		Terrain & w = j.w;
@@ -1298,6 +1301,12 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 		prog->uni2f( "ussContactInvSize", 1.0f / float( std::max( s.c.fullW, 1 ) ), 1.0f / float( std::max( s.c.fullH, 1 ) ) );
 	prog->uni1i( "ussView", s.view );
 	prog->uni1i( "ussRed", ( wwShadowRed( "terrseam" ) ? 1 : 0 ) | ( wwShadowRed( "mulcompose" ) ? 2 : 0 ) );
+}
+
+bool wwTerrainShadowPending()
+{
+	const SetState & s = ss();
+	return s.terrain > 0 && ( s.job.busy || s.t.uploading || s.terrWants );
 }
 
 bool wwTerrainShadowMap( WwTerrainShadowMap & out )
