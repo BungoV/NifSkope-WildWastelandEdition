@@ -6,6 +6,7 @@ yet). A row leaves only as LANDED or SUPERSEDED, and then moves to LANES_DONE.md
 Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overnight_1021\AUDIT.md, AUDIT_repo.md.
 
 ## 0. WAITING FOR YOU (only bungo can do these; top of the file, bungo 10-21)
+- BATCH1 pairs ready (notes/batch1/pairs/): shadowpar1 (big look change, ships off), fogtricubic1 (+ 2x crops), volairsky1_lamp, ssgi2_goodneighbor (SSGI darkens the glass doors ~11 %), ssgi2_night, pbralbedo2; rtbake1 camera wrong (redo coming). Shown one at a time when you are back
 - RTBAKE1 picture pair: CPU bake vs GPU bake, museum indoor (+ x16 difference); merge waits on your OK (coming)
 - SSGI2 picture pairs (SSGI ships off): Vault 111 v_old_ultra -> v_ultra (+ v_off), Rexford night e_old -> e_on (+ e_off), in NifskopeWWE-ssgi2/scratchpad/ssgi2/g2/ + Goodneighbor sunlit glass wall off/on (bungo 10-21, coming from BATCH1)
 - FOGTRICUBIC1 picture pair: smoother fog-grid read, Memory Den night (coming from VOLAIRSKY1)
@@ -20,6 +21,9 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 ## 1. WORKING ON NOW
 | Lane | What | State |
 |---|---|---|
+| MERGE1+BATCH2 | land FXCHECK1 (+ VOLAIRSKY1 if its looks ship off and diffs meet the bar), push; then BATCH2 build + gates (notes/batch2) | WORKING ON 10-22 09:3x |
+| PERF2FIX1 | make the AO opaque and SSR cuts exact (or under the near-invisible bar), un-blind G3 | WORKING ON 10-22 09:3x |
+| FIXGATES1 | BATCH1 fails: SSGI2 fill rule + launch-dependent picture, RTBAKE1 extra ray batch + room camera, SHADOWPAR1 harness + contact cost, PBRALBEDO2 R gate + P | WORKING ON 10-22 09:3x |
 | BATCH1 | one combined build + one gate session for PERF2, SSGI2, SHADOWPAR1, VOLAIRSKY1, FXCHECK1 (bungo 10-21; batch1/README.md); also runs RTBAKE1 pics + PBRALBEDO2 gates on their own exes, + Goodneighbor sunlit glass SSGI pair (bungo's camera) | GATES DONE 10-22 09:30 (batch1/RESULTS.md; branch not merged, not pushed): FXCHECK1 PASS (its G3 red = PERF2 AO opaque cut); PERF2 timing win c3 39->29 ms, mem 41->27 ms, but exact-cut G1a/G6/G7 FAIL; VOLAIRSKY1 T/L/M PASS, Z so + X FAIL, S known red; SHADOWPAR1 6 FAIL (mostly gate/scene) + perf +3.9 ms; SSGI2 FAIL (DC2 0.80, noise v2, timing); RTBAKE1 rays FAIL in-cell; PBRALBEDO2 R/R2 stale expectation, P not judged; Vault sorted pass +100 ms vs main unattributed; pairs in batch1/pairs |
 | MERGEALL1 | merge every built branch into main, clean merged worktrees (bungo 10-21 "merge everything") | DONE 10-22 01:5x: 17 landed (main 9c624f47, exe sha1 edd43625), 3 held, ~30 GB freed; gates: gn_vis PASS, cluster twin PASS, cluster build 0.4 ms; giblack FAIL (march reds fail to link fo4_cellcsm: too many instructions, LIGHTSYS2 suspect); real-cell cluster on/off/red inconclusive at concord daylight; concord close5 all-on 114.9 GPU ms (second window). notes/mergeall1/FINAL.md |
 | PERF2 | time the frame; depth reuse, per-tile lights, fewer driver calls, temporal reuse (+ fog history reprojection, Division-style, bungo 10-21), fog integrate O(S^2) -> O(S) | BATCH ready (0ded45ca; perf2/BATCH.md); SSR prev-frame, AO temporal, per-draw CPU wait for batch timing |
