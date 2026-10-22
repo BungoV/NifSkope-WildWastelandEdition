@@ -33,8 +33,9 @@
  * share (the directional light, the GI, the ambient) takes the records' haze colour as the air's does (airEnvColour,
  * red physcol the physical colour); the placed lights keep their own colours. The far grid's terrain shadow (Far Air,
  * ships off) is not mirrored: a puff takes the cascades alone. */
+// the cascade variants (WW_SUNSHADOW) have ww_sunshadow.glsl already (the loader takes no comment after an #include)
 #ifndef WW_SUNSHADOW
-#include "ww_sunshadow.glsl"	// the cascade variants (WW_SUNSHADOW) have it already
+#include "ww_sunshadow.glsl"
 #endif
 #include "cell_airmed.glsl"
 uniform int volPart;			// 0 off: the law above, as before; 1 on
