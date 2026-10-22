@@ -65,6 +65,7 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | TDFIX1 | TESTDRIVER1 gate fixes: hour row live!=relaunch, refused shader must not end a live session, port_smoke arg order, reopen frame size, unknown switches = relaunch (10-22) | RUNNING 10-22 |
 | DRIFT1 | find the BATCH2 lane that changes the default look (c3 0.37 %, mem 0.20 % px > 8 vs main); fix to byte-identical (10-22) | RUNNING 10-22 |
 | GATEFIX3 | BATCH2 lane gate defects: VRS1 red4 not caught, AAFORMAT1 1080 size + TAA pin, FXRES1 opaque depth refused (10-22) | DONE 10-22: VRS1 check fixed (detail bar); AAFORMAT1 size+TAA pin fixed, MSAA=1 rows save black (real defect, open); FXRES1 cause = TONEMAP1 depth/stencil; fix dc0138f3 exe ec0e84df, proof shots queued (notes/gatefix3/probe2.log) |
+| VANILLADEF1 | audit: main with every switch off vs a vanilla FO4 picture; any look change with no own toggle gets one, off by default (bungo 10-22 "vanilla fo4 look being the default") | QUEUED: before the next batch |
 Next batch (BATCH2): VOLPART1R, FARCARD1, PERF3, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
 Queued tonight (his 10-21 go): VTGPU1 + PROFILE1 (after
 BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
