@@ -5446,6 +5446,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			// lane BRICK1: the probes gather the deck's 4 m bricks (off: their links, as before); WW_CELL_GI_BRICK_RED its refuters
 			gs.bricks = wwEnvInt( "WW_CELL_GI_BRICKS" ) == 1;
 			gs.brickRed = QString::fromLatin1( wwEnv( "WW_CELL_GI_BRICK_RED" ) ).trimmed();
+			gs.emissiveGrid = wwCellEmissiveGridOn();	// lane EMISSIVEGRID1: the fine boxes round bright glow
+			gs.emissiveGridRed = QString::fromLatin1( qgetenv( "WW_CELL_EMISSIVEGRID_RED" ) ).trimmed();
 			// lane SKYPIC1 (part B, the review sheet): WW_CELL_GI_BRICK_EDGE=<game units> sizes the bricks (unset: 4 m)
 			if ( wwEnvIsSet( "WW_CELL_GI_BRICK_EDGE" ) )
 				gs.brickEdge = wwEnvStr( "WW_CELL_GI_BRICK_EDGE" ).toFloat();

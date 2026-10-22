@@ -54,6 +54,12 @@ uniform vec3 cellRoomsDims;
 // lane SKY1 (src/probesky.h): a weather-lit exterior's grid holds the sky the probes see, so it stands in
 // for the weather's unshadowed ambient by the grid's valid share (0 where the grid does not reach)
 uniform bool cellGiSky;
+// lane EMISSIVEGRID1 (src/probegifine.h): the fine boxes round bright glow, their atlas in cellGi's layers after the grid's
+uniform bool cellGiFineOn;
+uniform int cellGiFineN;
+uniform int cellGiFineRed;		// 1 noseen, 2 nosub (WW_CELL_EMISSIVEGRID_RED)
+uniform vec4 cellGiFineBox[8];		// origin, voxel
+uniform vec4 cellGiFineDim[8];		// nx, ny, nz, first layer
 // lane PROBEVIEW1: the PRTP band's Pass (0 Combined, 1 GI, 2 Sky visibility, 3 Surfel color, 4 Surfel light).
 // In the Sky visibility pass the CPU binds the sky grid on cellGi (same layout, rgb = the probes' sky share).
 uniform int cellPass;
@@ -539,7 +545,7 @@ vec4 cellGiTrilinear( vec3 P, vec3 N )
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;
 	vec2 xy = g.xy / cellGiDims.xy;
 	float z = clamp( g.z, 0.5, cellGiDims.z - 0.5 );
-	float depth = ( cellGiRooms ? 12.0 : 6.0 ) * cellGiDims.z;
+	float depth = cellGiFineOn ? float( textureSize( cellGi, 0 ).z ) : ( cellGiRooms ? 12.0 : 6.0 ) * cellGiDims.z;	// lane EMISSIVEGRID1: + the fine atlas
 	vec3 n2 = N * N;
 	return n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
 	     + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )
@@ -907,9 +913,81 @@ float cellAoDecalAt()
 	return texelFetch( cellAoDecal, ivec2( gl_FragCoord.xy - cellAoDecalRect.xy ), 0 ).r;
 }
 
+/* lane EMISSIVEGRID1 (src/probegifine.h): inside a fine box the coarse grid's share of the box's glow (C, kC of it in
+ * the sample) gives way to the box's own (D), faded back to the coarse grid over the box's outer two voxels. A fine
+ * voxel counts only when its centre is air and the fine room grid shows no solid cell between the surface's room
+ * read and it (cellGiSeen's rule). One call site (cellGiE0): the program link limit (GIDARK1). */
+vec3 cellGiFineAdd( vec3 P, vec3 N, vec3 base, float kC )
+{
+	int b = -1;
+	vec3 g = vec3( 0.0 );
+	for ( int k = 0; k < cellGiFineN; k++ ) {
+		vec3 gk = ( P + N * ( 0.5 * cellGiFineBox[k].w ) - cellGiFineBox[k].xyz ) / cellGiFineBox[k].w - 0.5;
+		if ( all( greaterThanEqual( gk, vec3( 0.0 ) ) ) && all( lessThan( gk, cellGiFineDim[k].xyz - 1.0 ) ) ) {
+			b = k;
+			g = gk;
+			break;
+		}
+	}
+	if ( b < 0 )
+		return base;
+	vec4 o = cellGiFineBox[b];
+	vec4 dm = cellGiFineDim[b];
+	ivec3 i0 = ivec3( floor( g ) );
+	vec3 f = g - vec3( i0 );
+	ivec3 sl = ivec3( N.x >= 0.0 ? 0 : 1, N.y >= 0.0 ? 2 : 3, N.z >= 0.0 ? 4 : 5 ) * int( dm.z ) + int( dm.w );
+	int cOff = 6 * int( dm.z );
+	vec3 n2 = N * N;
+	bool see = cellGiRooms && ( cellGiFineRed & 1 ) == 0;
+	vec3 from = P + N * ( 0.75 * cellRoomsCell );
+	if ( see && cellRoomSolid( from ) ) {
+		from = P + N * ( 1.75 * cellRoomsCell );
+		see = !cellRoomSolid( from );
+	}
+	vec3 D = vec3( 0.0 ), C = vec3( 0.0 );
+	float ws = 0.0;
+	for ( int k = 0; k < cellGiLoop8; k++ ) {
+		ivec3 oo = ivec3( k & 1, ( k >> 1 ) & 1, ( k >> 2 ) & 1 );
+		ivec3 c = i0 + oo;
+		vec3 t = mix( 1.0 - f, f, vec3( oo ) );
+		float w = t.x * t.y * t.z;
+		if ( w <= 0.0 )
+			continue;
+		vec4 d = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + sl.x ), 0 )
+		       + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + sl.y ), 0 )
+		       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + sl.z ), 0 );
+		if ( d.a <= 0.0 )
+			continue;	// solid at its centre
+		if ( see ) {
+			vec3 dv = o.xyz + ( vec3( c ) + 0.5 ) * o.w - from;
+			int nt = clamp( int( ceil( length( dv ) / ( 0.5 * cellRoomsCell ) ) ), 1, 8 );
+			bool hit = false;
+			for ( int j = 1; j <= nt && !hit; j++ )
+				hit = cellRoomSolid( from + dv * ( float( j ) / float( nt + 1 ) ) );
+			if ( hit )
+				continue;
+		}
+		vec4 e = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + sl.x + cOff ), 0 )
+		       + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + sl.y + cOff ), 0 )
+		       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + sl.z + cOff ), 0 );
+		D += w * d.rgb;
+		C += w * e.rgb;
+		ws += w;
+	}
+	if ( ws <= 0.0 )
+		return base;
+	vec3 edge = min( g, dm.xyz - 1.0 - g );
+	float fade = clamp( min( edge.x, min( edge.y, edge.z ) ) / 2.0, 0.0, 1.0 );
+	vec3 sub = ( cellGiFineRed & 2 ) != 0 ? vec3( 0.0 ) : kC * C / ws;
+	return max( base + fade * ( D / ws - sub ), vec3( 0.0 ) );
+}
+
 vec3 cellGiE0( vec3 P, vec3 N )
 {
 	vec4 s = cellGiSample( P, N );
+	if ( cellGiFineOn )	// lane EMISSIVEGRID1: the sample as below, then the fine boxes
+		return cellGiFineAdd( P, N, cellGiSky ? max( s.rgb, vec3( 0.0 ) ) : s.a > 0.01 ? max( s.rgb / s.a, vec3( 0.0 ) ) : vec3( 0.0 ),
+			cellGiSky ? clamp( s.a, 0.0, 1.0 ) : s.a > 0.01 ? 1.0 : 0.0 );
 	// lane SKY1: with the sky in the grid the sample keeps its valid share (E x share), the other
 	// ( 1 - share ) being the weather's own ambient the program leaves in (cellGiSkyK)
 	if ( cellGiSky )

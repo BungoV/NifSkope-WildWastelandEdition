@@ -530,6 +530,7 @@ void CellWorkspacePanel::buildUi()
 	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
 	cellAoDecal = tick( showMenu, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
 	cellGiGpu = tick( showMenu, tr( "GPU relight" ), "CellWorkspaceGpuRelight", wwCellGiGpuOn() );
+	cellEmissiveGrid = tick( showMenu, tr( "Emissive GI grid" ), "CellWorkspaceEmissiveGiGrid", wwCellEmissiveGridOn() );	// lane EMISSIVEGRID1
 	section( tr( "Effects" ), "effects" );
 	cellIs = tick( showMenu, tr( "Imagespace" ), "CellWorkspaceCellImageSpace", wwCellImageSpaceOn() );
 	// lane MOTION1: the game's temporal AA, the same state as the Scene popup's Temporal AA row; ships off
@@ -783,6 +784,7 @@ void CellWorkspacePanel::buildUi()
 	};
 	fxReopen( cellAoDecal, &aoDecalSetOn );
 	fxReopen( cellGiGpu, &wwCellGiGpuSetOn );
+	fxReopen( cellEmissiveGrid, &wwCellEmissiveGridSetOn );	// lane EMISSIVEGRID1: built when the cell opens
 	fxReopen( cellParticles, &wwCellParticlesSetOn );	// lane SUNCELL1: the systems are copied in when the cell opens
 	connect( cellCull, &QAction::toggled, this, [this]( bool on ) {
 		wwCellCullSetOn( on );

@@ -763,8 +763,17 @@ void wwCellLightsUniforms( Scene * scene )
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
-		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], G->dims[2] * ( G->slotRooms.empty() ? 6 : 12 ), 0, GL_RGBA, GL_FLOAT,
-			G->rgba.data() );
+		const int giLayers = G->dims[2] * ( G->slotRooms.empty() ? 6 : 12 );
+		if ( G->fine.empty() ) {
+			fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], giLayers, 0, GL_RGBA, GL_FLOAT,
+				G->rgba.data() );
+		} else {	// lane EMISSIVEGRID1: the fine boxes' atlas in the layers after the grid's (read by texelFetch only)
+			fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], giLayers + G->fineLayers, 0, GL_RGBA, GL_FLOAT,
+				nullptr );
+			fn->glTexSubImage3D( GL_TEXTURE_3D, 0, 0, 0, 0, G->dims[0], G->dims[1], giLayers, GL_RGBA, GL_FLOAT, G->rgba.data() );
+			fn->glTexSubImage3D( GL_TEXTURE_3D, 0, 0, 0, giLayers, G->dims[0], G->dims[1], G->fineLayers, GL_RGBA, GL_FLOAT,
+				G->fine.data() );
+		}
 		g.giDoc = scene->nifModel;
 		g.giVersion = s.giVersion.value( scene->nifModel );
 	}
@@ -917,6 +926,25 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
 		prog->uni1f( "cellGiVoxel", G->voxel );
 		prog->uni3f( "cellGiDims", float( G->dims[0] ), float( G->dims[1] ), float( G->dims[2] ) );
+	}
+	{	// lane EMISSIVEGRID1: the fine boxes (their atlas rides the grid's texture, after its layers)
+		const bool fineDraw = giDraw && !skyDraw && !G->fine.empty();
+		prog->uni1b( "cellGiFineOn", fineDraw );
+		if ( fineDraw ) {
+			static const int fineRed = []() {
+				const QByteArray r = qgetenv( "WW_CELL_EMISSIVEGRID_RED" ).trimmed();
+				return r == "noseen" ? 1 : r == "nosub" ? 2 : 0;
+			}();
+			const int giLayers = G->dims[2] * ( G->slotRooms.empty() ? 6 : 12 );
+			const int n = std::min( int( G->fineBox.size() / 8 ), 8 );
+			prog->uni1i( "cellGiFineN", n );
+			prog->uni1i( "cellGiFineRed", fineRed );
+			for ( int k = 0; k < n; k++ ) {
+				const float * b = &G->fineBox[size_t( k ) * 8];
+				prog->uni4f_l( prog->uniLocation( "cellGiFineBox[%d]", k ), FloatVector4( b[0], b[1], b[2], b[3] ) );
+				prog->uni4f_l( prog->uniLocation( "cellGiFineDim[%d]", k ), FloatVector4( b[4], b[5], b[6], b[7] + float( giLayers ) ) );
+			}
+		}
 	}
 	// lane IMGS1: the imagespace, once this document has a measure; its LUT bound like the grid above
 	const float adapted = s.adapted.value( scene->nifModel, -1.0f );
@@ -1309,6 +1337,21 @@ void wwCellGiGpuSetOn( bool on )
 	if ( !wwEnv( "WW_CELL_GI_GPU" ).trimmed().isEmpty() )
 		return;
 	QSettings().setValue( QStringLiteral( "WW/CellGiGpu" ), on );
+}
+
+bool wwCellEmissiveGridOn()
+{
+	const QByteArray pin = qgetenv( "WW_CELL_EMISSIVEGRID" ).trimmed();
+	if ( !pin.isEmpty() )
+		return pin != "0";
+	return QSettings().value( QStringLiteral( "WW/CellEmissiveGrid" ), false ).toBool();
+}
+
+void wwCellEmissiveGridSetOn( bool on )
+{
+	if ( !qgetenv( "WW_CELL_EMISSIVEGRID" ).trimmed().isEmpty() )
+		return;
+	QSettings().setValue( QStringLiteral( "WW/CellEmissiveGrid" ), on );
 }
 
 // lane SKYSTR1: the Sky visibility row (celllights.h)

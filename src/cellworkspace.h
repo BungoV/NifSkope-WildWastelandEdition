@@ -230,6 +230,7 @@ private:
 	QActionGroup * cellSsgiQGroup = nullptr;
 	QAction * cellAoDecal = nullptr;
 	QAction * cellGiGpu = nullptr;
+	QAction * cellEmissiveGrid = nullptr;	// lane EMISSIVEGRID1
 	QAction * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off
 	QAction * cellGrass = nullptr;    // lane GRASSMB1: the game's grass (placed at cell open)
 	QAction * cellDof = nullptr;      // lane GRASSMB1: the game's depth of field

@@ -380,6 +380,7 @@ HEADERS += \
 	src/probemask.h \
 	src/probeemit.h \
 	src/probegi.h \
+	src/probegifine.h \
 	src/proberelight.h \
 	src/farlight.h \
 	src/proberooms.h \
@@ -669,6 +670,7 @@ SOURCES += \
 	src/probebake.cpp \
 	src/pgiwrite.cpp \
 	src/probegi.cpp \
+	src/probegifine.cpp \
 	src/proberelight.cpp \
 	src/farlight.cpp \
 	src/proberooms.cpp \
