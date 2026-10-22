@@ -683,8 +683,11 @@ int farLightMapCli( const QStringList & args )
 		env.insert( QStringLiteral( "WW_CELL_FARLIGHTWALK" ), QDir::toNativeSeparators( queue ) );
 		env.insert( QStringLiteral( "WW_CELL_FARLIGHTWALK_SPEC" ), openSpec );
 		env.insert( QStringLiteral( "WW_CELL_FARLIGHTWALK_MEMCAP" ), QString::number( A.memcapMB ) );
-		env.insert( QStringLiteral( "WW_CELL_KEEP_WORLD" ), QStringLiteral( "1" ) );
-		env.insert( QStringLiteral( "WW_CELL_KEEP_ASSETS_MB" ), QString::number( keepAssetsMB ) );
+		// the keeps are on unless the driver's env says otherwise (=0 turns one off: the gate's red)
+		if ( !env.contains( QStringLiteral( "WW_CELL_KEEP_WORLD" ) ) )
+			env.insert( QStringLiteral( "WW_CELL_KEEP_WORLD" ), QStringLiteral( "1" ) );
+		if ( !env.contains( QStringLiteral( "WW_CELL_KEEP_ASSETS_MB" ) ) )
+			env.insert( QStringLiteral( "WW_CELL_KEEP_ASSETS_MB" ), QString::number( keepAssetsMB ) );
 		W.p = std::make_unique<QProcess>();
 		W.p->setProcessEnvironment( env );
 		W.p->setProcessChannelMode( QProcess::MergedChannels );
