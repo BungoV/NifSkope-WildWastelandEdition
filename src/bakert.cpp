@@ -23,6 +23,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <functional>
 #include <cstring>
 #include <mutex>
 #include <sstream>
@@ -30,6 +31,7 @@
 namespace {
 #include "bakert/rq.spv.h"
 #include "bakert/bvh.spv.h"
+#include "bakert/rqx.spv.h"
 }
 
 namespace bakert {
@@ -74,7 +76,7 @@ struct Buf
 
 struct Dev
 {
-	bool ok = false, rt = false;
+	bool ok = false, rt = false, x = false;   // x: lane RTGI1's whole-ray tracer (rt + shaderFloat64)
 	std::string name, why;
 	VkInstance inst = VK_NULL_HANDLE;
 	VkPhysicalDevice pd = VK_NULL_HANDLE;
@@ -85,12 +87,13 @@ struct Dev
 	VkCommandPool pool = VK_NULL_HANDLE;
 	VkCommandBuffer cb = VK_NULL_HANDLE;
 	VkFence fence = VK_NULL_HANDLE;
-	VkDescriptorSetLayout dsl[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };   // [0] compute, [1] rt
-	VkPipelineLayout pl[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
-	VkPipeline pipe[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+	VkDescriptorSetLayout dsl[3] = { VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE };   // [0] compute, [1] rt, [2] rqx
+	VkPipelineLayout pl[3] = { VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE };
+	VkPipeline pipe[3] = { VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE };
 	VkDescriptorPool dpool = VK_NULL_HANDLE;
 	VkDeviceSize scratchAlign = 256;
 	Buf rays, hits;            // one batch's rays and hits, shared by every Scene (under m)
+	Buf xrays, xhits;          // lane RTGI1: the whole-ray batch (XRay, uvec2)
 	size_t cap = 0;
 	std::mutex m;
 };
@@ -234,7 +237,7 @@ VkPipeline pipeline( Dev & D, const uint32_t * code, size_t bytes, VkPipelineLay
 bool layout( Dev & D, int which )
 {
 	std::vector<VkDescriptorSetLayoutBinding> b;
-	const int n = which ? 8 : 9;
+	const int n = which == 1 ? 8 : 9;
 	for ( int i = 0; i < n; i++ ) {
 		VkDescriptorSetLayoutBinding x {};
 		x.binding = uint32_t( i );
@@ -256,7 +259,8 @@ bool layout( Dev & D, int which )
 	pi.pPushConstantRanges = &pr;
 	if ( vk.vkCreatePipelineLayout( D.dev, &pi, nullptr, &D.pl[which] ) != VK_SUCCESS )
 		return false;
-	D.pipe[which] = which ? pipeline( D, bakert_rq_spv, sizeof bakert_rq_spv, D.pl[1] )
+	D.pipe[which] = which == 2 ? pipeline( D, bakert_rqx_spv, sizeof bakert_rqx_spv, D.pl[2] )
+		: which ? pipeline( D, bakert_rq_spv, sizeof bakert_rq_spv, D.pl[1] )
 		: pipeline( D, bakert_bvh_spv, sizeof bakert_bvh_spv, D.pl[0] );
 	return D.pipe[which] != VK_NULL_HANDLE;
 }
@@ -315,7 +319,7 @@ void init( Dev & D )
 		vk.vkEnumeratePhysicalDevices( D.inst, &n, pds.data() );
 	// the device: RT first, then a discrete GPU, then anything with a compute queue on Vulkan 1.2
 	int best = -1, bestScore = -1;
-	bool bestRt = false;
+	bool bestRt = false, bestF64 = false;
 	uint32_t bestQf = 0;
 	for ( uint32_t i = 0; i < n; i++ ) {
 		VkPhysicalDeviceProperties pp;
@@ -353,6 +357,7 @@ void init( Dev & D )
 			best = int( i );
 			bestScore = score;
 			bestRt = rt;
+			bestF64 = f2.features.shaderFloat64 == VK_TRUE;
 			bestQf = uint32_t( qf );
 		}
 	}
@@ -381,10 +386,16 @@ void init( Dev & D )
 	VkPhysicalDeviceVulkan12Features v12 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
 	v12.bufferDeviceAddress = wantRt ? VK_TRUE : VK_FALSE;
 	v12.pNext = wantRt ? &as : nullptr;
+	// lane RTGI1: the whole-ray tracer re-tests in double (WW_BAKE_RT_WHOLE=0 keeps RTBAKE1's trace + refine)
+	const char * wh = std::getenv( "WW_BAKE_RT_WHOLE" );
+	const bool wantX = wantRt && bestF64 && !( wh && !std::strcmp( wh, "0" ) );
+	VkPhysicalDeviceFeatures2 f2on { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	f2on.features.shaderFloat64 = wantX ? VK_TRUE : VK_FALSE;
+	f2on.pNext = &v12;
 	const char * exts[] = { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
 		VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME };
 	VkDeviceCreateInfo di { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
-	di.pNext = &v12;
+	di.pNext = &f2on;
 	di.queueCreateInfoCount = 1;
 	di.pQueueCreateInfos = &qi;
 	di.enabledExtensionCount = wantRt ? 3 : 0;
@@ -420,10 +431,10 @@ void init( Dev & D )
 		D.why = "no command buffer";
 		return;
 	}
-	VkDescriptorPoolSize ps[2] = { { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 64 * 9 }, { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 64 } };
+	VkDescriptorPoolSize ps[2] = { { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 128 * 9 }, { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 128 } };
 	VkDescriptorPoolCreateInfo dpi { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 	dpi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-	dpi.maxSets = 64;
+	dpi.maxSets = 128;
 	dpi.poolSizeCount = wantRt ? 2 : 1;
 	dpi.pPoolSizes = ps;
 	if ( vk.vkCreateDescriptorPool( D.dev, &dpi, nullptr, &D.dpool ) != VK_SUCCESS || !layout( D, 0 ) ) {
@@ -433,6 +444,9 @@ void init( Dev & D )
 	if ( wantRt && !layout( D, 1 ) ) {
 		D.why = "the ray-query tracer did not build";
 		return;
+	}
+	if ( wantX && !layout( D, 2 ) ) {   // no whole-ray tracer: the bakes keep trace + refine, and say so
+		D.why = "the whole-ray tracer did not build";
 	}
 	// one batch: 1M rays (32 MB) and their hits; the hits read back from cached host memory when there is one
 	D.cap = size_t( 1 ) << 20;
@@ -444,6 +458,12 @@ void init( Dev & D )
 	}
 	D.ok = true;
 	D.rt = wantRt;
+	// lane RTGI1: the whole-ray batch, 1M rays (64 MB) and their answers
+	D.x = wantX && D.pipe[2] != VK_NULL_HANDLE
+		&& makeBuf( D, D.cap * sizeof( XRay ), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, { kHost | kDevLocal, kHost }, D.xrays )
+		&& makeBuf( D, D.cap * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, { kHost | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, kHost }, D.xhits );
+	if ( wantX && !D.x && D.why.empty() )
+		D.why = "no memory for the whole-ray batch";
 }
 
 Dev & dev()
@@ -522,6 +542,7 @@ struct Scene::Impl
 	VkAccelerationStructureKHR blas = VK_NULL_HANDLE, tlas = VK_NULL_HANDLE;
 	Buf nodes, idx, tris;               // compute
 	VkDescriptorSet ds = VK_NULL_HANDLE;
+	VkDescriptorSet dsx = VK_NULL_HANDLE;   // lane RTGI1: the whole-ray tracer's set (rt only)
 	uint32_t nTri = 0, nOpaque = 0, useMask = 0;
 	int which = 0;                      // 0 compute, 1 rt
 
@@ -529,6 +550,8 @@ struct Scene::Impl
 	{
 		if ( ds )
 			vk.vkFreeDescriptorSets( D.dev, D.dpool, 1, &ds );
+		if ( dsx )
+			vk.vkFreeDescriptorSets( D.dev, D.dpool, 1, &dsx );
 		if ( tlas )
 			vk.vkDestroyAccelerationStructureKHR( D.dev, tlas, nullptr );
 		if ( blas )
@@ -609,7 +632,8 @@ bool buildRt( Dev & D, const probebvh::Bvh & bvh, Scene::Impl & I )
 		std::memcpy( &v[i * 9], &bvh.t[size_t( remap[i] ) * 9], 36 );
 	const VkBufferUsageFlags in = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
 		| VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-	if ( !upload( D, v.data(), v.size() * 4, in, I.verts )
+	// lane RTGI1: the whole-ray tracer reads the vertices too (its double re-test)
+	if ( !upload( D, v.data(), v.size() * 4, in | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, I.verts )
 		|| !upload( D, remap.data(), remap.size() * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, I.remap ) )
 		return false;
 	std::vector<float>().swap( v );
@@ -720,16 +744,20 @@ bool buildRt( Dev & D, const probebvh::Bvh & bvh, Scene::Impl & I )
 	return ok;
 }
 
-bool writeSet( Dev & D, Scene::Impl & I )
+bool writeSet( Dev & D, Scene::Impl & I, int which )
 {
 	VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
 	ai.descriptorPool = D.dpool;
 	ai.descriptorSetCount = 1;
-	ai.pSetLayouts = &D.dsl[I.which];
-	if ( vk.vkAllocateDescriptorSets( D.dev, &ai, &I.ds ) != VK_SUCCESS )
+	ai.pSetLayouts = &D.dsl[which];
+	VkDescriptorSet & set = which == 2 ? I.dsx : I.ds;
+	if ( vk.vkAllocateDescriptorSets( D.dev, &ai, &set ) != VK_SUCCESS )
 		return false;
-	std::vector<const Buf *> bs = { &D.rays, &D.hits, &I.triOf, &I.maskTris, &I.maps, &I.alpha };
-	if ( I.which )
+	std::vector<const Buf *> bs = { which == 2 ? &D.xrays : &D.rays, which == 2 ? &D.xhits : &D.hits, &I.triOf,
+		&I.maskTris, &I.maps, &I.alpha };
+	if ( which == 2 )
+		bs.insert( bs.end(), { nullptr, &I.remap, &I.verts } );
+	else if ( which )
 		bs.insert( bs.end(), { nullptr, &I.remap } );
 	else
 		bs.insert( bs.end(), { &I.nodes, &I.idx, &I.tris } );
@@ -740,7 +768,7 @@ bool writeSet( Dev & D, Scene::Impl & I )
 	wa.pAccelerationStructures = &I.tlas;
 	for ( size_t i = 0; i < bs.size(); i++ ) {
 		VkWriteDescriptorSet x { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		x.dstSet = I.ds;
+		x.dstSet = set;
 		x.dstBinding = uint32_t( i );
 		x.descriptorCount = 1;
 		if ( !bs[i] ) {
@@ -773,7 +801,10 @@ std::unique_ptr<Scene> Scene::make( const probebvh::Bvh & bvh, std::string * log
 		const auto t0 = std::chrono::steady_clock::now();
 		Impl * I = new Impl();
 		I->which = p == Path::Rt ? 1 : 0;
-		bool ok = buildMasks( D, bvh, *I ) && ( I->which ? buildRt( D, bvh, *I ) : buildCompute( D, bvh, *I ) ) && writeSet( D, *I );
+		bool ok = buildMasks( D, bvh, *I ) && ( I->which ? buildRt( D, bvh, *I ) : buildCompute( D, bvh, *I ) )
+			&& writeSet( D, *I, I->which );
+		if ( ok && I->which && D.x && !writeSet( D, *I, 2 ) )   // lane RTGI1: no set, no whole rays (trace + refine)
+			I->dsx = VK_NULL_HANDLE;
 		if ( !ok ) {
 			I->release( D );
 			delete I;
@@ -893,6 +924,152 @@ bool Scene::refine( const Hit & h, const double o[3], const double d[3], double 
 	return bvh_->ray( o, d, tmax, t, tri ) && *tri >= 0;
 }
 
+bool Scene::whole() const
+{
+	return path_ == Path::Rt && d_ && d_->dsx != VK_NULL_HANDLE;
+}
+
+namespace {
+
+// n jobs over the bake pool, in blocks
+void poolFor( size_t n, const std::function<void( size_t, size_t )> & fn )
+{
+	const size_t step = 2048;
+	std::atomic<size_t> next( 0 );
+	std::vector<std::thread> pool;
+	const int nt = int( std::min<size_t>( size_t( threads() ), ( n + step - 1 ) / step ) );
+	for ( int i = 0; i < nt; i++ )
+		pool.emplace_back( [&]() {
+			for ( size_t b; ( b = next.fetch_add( step ) ) < n; )
+				fn( b, std::min( n, b + step ) );
+		} );
+	for ( std::thread & t : pool )
+		t.join();
+}
+
+} // namespace
+
+void Scene::cast( const XRay * rays, size_t n, XHit * out, bool anyHit )
+{
+	static const bool check = [] { const char * c = std::getenv( "WW_BAKE_RT_CHECK" ); return c && *c && std::strcmp( c, "0" ); }();
+	const probebvh::Bvh & B = *bvh_;
+	const bool useMask = B.mask && !B.mask->empty();
+	// the CPU's own answer: the full walk (a boolean for an occlusion ray, its t and tri kept all the same)
+	auto walk = [&]( const XRay & r, XHit & h ) {
+		h.tri = -1;
+		h.t = 0.0;
+		if ( !( B.ray( r.o, r.d, r.tmax, &h.t, &h.tri ) && h.tri >= 0 ) )
+			h.tri = -1;
+	};
+	if ( !whole() ) {   // the CPU walk, or RTBAKE1's trace + refine
+		if ( path_ == Path::Cpu || !d_ ) {
+			traced += (long long)n;
+			poolFor( n, [&]( size_t b, size_t e ) {
+				for ( size_t k = b; k < e; k++ )
+					walk( rays[k], out[k] );
+			} );
+			return;
+		}
+		std::vector<Ray> fr( n );
+		std::vector<Hit> fh( n );
+		for ( size_t k = 0; k < n; k++ ) {
+			const XRay & r = rays[k];
+			fr[k] = { { float( r.o[0] ), float( r.o[1] ), float( r.o[2] ) }, 1e-4f, { float( r.d[0] ), float( r.d[1] ), float( r.d[2] ) },
+				float( r.tmax ) };
+		}
+		trace( fr.data(), n, fh.data(), anyHit );
+		poolFor( n, [&]( size_t b, size_t e ) {
+			for ( size_t k = b; k < e; k++ ) {
+				XHit & h = out[k];
+				h.t = 0.0;
+				h.tri = -1;
+				if ( !refine( fh[k], rays[k].o, rays[k].d, rays[k].tmax, &h.t, &h.tri, !anyHit ) )
+					h.tri = -1;
+			}
+		} );
+		return;
+	}
+	traced += (long long)n;
+	Dev & D = dev();
+	std::vector<uint32_t> ans( std::min( n, D.cap ) * 2 );
+	for ( size_t b0 = 0; b0 < n; b0 += D.cap ) {
+		const size_t m = std::min( D.cap, n - b0 );
+		bool ok;
+		{
+			std::lock_guard<std::mutex> lk( D.m );
+			const auto t0 = std::chrono::steady_clock::now();
+			std::memcpy( D.xrays.map, rays + b0, m * sizeof( XRay ) );
+			ok = begin( D );
+			if ( ok ) {
+				vk.vkCmdBindPipeline( D.cb, VK_PIPELINE_BIND_POINT_COMPUTE, D.pipe[2] );
+				vk.vkCmdBindDescriptorSets( D.cb, VK_PIPELINE_BIND_POINT_COMPUTE, D.pl[2], 0, 1, &d_->dsx, 0, nullptr );
+				const uint32_t pcv[6] = { 0u, uint32_t( m ), d_->useMask, d_->nTri, d_->nOpaque, anyHit ? 1u : 0u };
+				vk.vkCmdPushConstants( D.cb, D.pl[2], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pcv, pcv );
+				vk.vkCmdDispatch( D.cb, uint32_t( ( m + 127 ) / 128 ), 1, 1 );
+				VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+				mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+				mb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+				vk.vkCmdPipelineBarrier( D.cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+				ok = submitWait( D );
+			}
+			if ( ok )
+				std::memcpy( ans.data(), D.xhits.map, m * 8 );
+			gpuUs += std::chrono::duration_cast<std::chrono::microseconds>( std::chrono::steady_clock::now() - t0 ).count();
+		}
+		if ( !ok )   // a lost device: this batch walks on the CPU
+			for ( size_t k = 0; k < m; k++ ) {
+				ans[k * 2] = 0xFFFFFFFFu;
+				ans[k * 2 + 1] = 1u;
+			}
+		std::atomic<long long> nSure( 0 ), nRecast( 0 ), nDiff( 0 );
+		poolFor( m, [&]( size_t b, size_t e ) {
+			long long sr = 0, rc = 0, df = 0;
+			for ( size_t k = b; k < e; k++ ) {
+				const XRay & r = rays[b0 + k];
+				XHit & h = out[b0 + k];
+				const int gt = int( ans[k * 2] );
+				bool done = false;
+				if ( ans[k * 2 + 1] == 0u ) {
+					if ( gt < 0 ) {   // a sure miss
+						h.tri = -1;
+						h.t = 0.0;
+						done = true;
+					} else if ( size_t( gt ) < B.t.size() / 9 ) {   // a sure hit: its t from probebvh's own test
+						double tt, u, v;
+						if ( probebvh::Bvh::tri( &B.t[size_t( gt ) * 9], r.o, r.d, tt, u, v ) && tt > 1e-4 && tt <= r.tmax
+							&& !( useMask && B.mask->hole( gt, u, v ) ) ) {
+							h.tri = gt;
+							h.t = tt;
+							done = true;
+						}
+					}
+				}
+				if ( !done ) {
+					rc++;
+					walk( r, h );
+					continue;
+				}
+				sr++;
+				if ( check ) {
+					XHit c;
+					walk( r, c );
+					const bool same = anyHit ? ( c.tri >= 0 ) == ( h.tri >= 0 ) : ( c.tri == h.tri && ( c.tri < 0 || c.t == h.t ) );
+					df += same ? 0 : 1;
+				}
+			}
+			nSure += sr;
+			nRecast += rc;
+			nDiff += df;
+		} );
+		sure += nSure.load();
+		recast += nRecast.load();
+		if ( check ) {
+			checked += nSure.load();
+			diff += nDiff.load();
+		}
+	}
+}
+
 std::string census( const char * who, const Scene & s )
 {
 	std::ostringstream o;
@@ -900,6 +1077,10 @@ std::string census( const char * who, const Scene & s )
 	if ( s.path() != Path::Cpu )
 		o << " (" << deviceName() << ")";
 	o << ", traced " << s.traced.load() << ", re-cast on the CPU " << s.recast.load() << ", GPU " << s.gpuUs.load() / 1000 << " ms";
+	if ( s.sure.load() )
+		o << ", whole: sure " << s.sure.load();
+	if ( s.checked.load() )
+		o << ", check: answers unlike the CPU's " << s.diff.load() << " of " << s.checked.load();
 	return o.str();
 }
 

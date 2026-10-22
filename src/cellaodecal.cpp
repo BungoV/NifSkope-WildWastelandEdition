@@ -379,13 +379,19 @@ std::shared_ptr<const AoDecalSet> AoDecalBuilder::finish( const QString & dataRo
 	}
 	S.copies.swap( keep );
 	qint64 bytes = 0;
-	for ( const auto & M : S.models )
+	int onGpu = 0;	// lane RTGI1
+	for ( const auto & M : S.models ) {
 		bytes += M.vol.k.empty() ? 0 : qint64( aovol::kAoHead + M.vol.payload.size() );
+		onGpu += M.baked && M.vol.gpuRays ? 1 : 0;
+	}
 	S.census += QStringLiteral( "  aodecal: %1 placements considered, %2 models with a volume (%3 baked in %4 s, %5 read, %6 refused "
 		"as stale or damaged; %7 KB), %8 copies; skipped models: %9 not his kind, %10 small clutter, %11 too big, %12 placements "
 		"of other types%13\n" ).arg( considered_ ).arg( S.models.size() ).arg( S.modelsBaked ).arg( S.msBake / 1000.0, 0, 'f', 1 )
 		.arg( S.modelsRead ).arg( S.modelsRefused ).arg( bytes / 1024 ).arg( S.copies.size() ).arg( skippedKind_ ).arg( skippedSmall_ )
 		.arg( skippedBig_ ).arg( skippedType_ ).arg( S.red.isEmpty() ? QString() : QStringLiteral( " [red %1]" ).arg( S.red ) );
+	if ( S.modelsBaked )
+		S.census += QStringLiteral( "  aodecal: rays of %1 of %2 baked models as whole GPU batches
+" ).arg( onGpu ).arg( S.modelsBaked );
 	if ( !censusFile_.isEmpty() ) {
 		QFile f( censusFile_ );
 		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {

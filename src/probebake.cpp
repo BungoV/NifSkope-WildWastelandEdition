@@ -1483,8 +1483,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		std::vector<int> active( probes.size() );
 		for ( size_t p = 0; p < probes.size(); p++ )
 			active[p] = int( p );
-		std::vector<bakert::Ray> rays;
-		std::vector<bakert::Hit> hits;
+		// lane RTGI1: whole rays (bakert::Scene::cast): the GPU answers each ray as the CPU walk would, or says it is unsure
+		std::vector<bakert::XRay> rays;
+		std::vector<bakert::XHit> hits;
 		for ( int b = 0; !active.empty(); b++ ) {
 			rays.resize( active.size() * size_t( N ) );
 			hits.resize( rays.size() );
@@ -1505,10 +1506,10 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				std::vector<double> rbuf;
 				const double * bd = batchDirs( pi, b, rbuf );
 				for ( int i = 0; i < N; i++ )
-					rays[k * size_t( N ) + size_t( i )] = { { float( double( pp.pos[0] ) - O[0] ), float( double( pp.pos[1] ) - O[1] ),
-						pp.pos[2] }, 1e-4f, { float( bd[i * 3] ), float( bd[i * 3 + 1] ), float( bd[i * 3 + 2] ) }, float( spec.rayMax ) };
+					rays[k * size_t( N ) + size_t( i )] = { { double( pp.pos[0] ) - O[0], double( pp.pos[1] ) - O[1], double( pp.pos[2] ) },
+						double( spec.rayMax ), { bd[i * 3], bd[i * 3 + 1], bd[i * 3 + 2] }, 0.0 };
 			} );
-			rtScene->trace( rays.data(), rays.size(), hits.data() );
+			rtScene->cast( rays.data(), rays.size(), hits.data() );
 			pool( [&]( size_t k ) {
 				const int pi = active[k];
 				const ProbePoint & pp = probes[size_t( pi )];
@@ -1522,9 +1523,10 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				std::memcpy( pc, PC[size_t( pi )].data(), sizeof pc );
 				for ( int i = 0; i < N; i++ ) {
 					const double * d = &bd[size_t( i ) * 3];
-					double t = 0;
-					int tri = -1;
-					const bool hitAny = rtScene->refine( hits[k * size_t( N ) + size_t( i )], o, d, spec.rayMax, &t, &tri );
+					const bakert::XHit & xh = hits[k * size_t( N ) + size_t( i )];
+					const double t = xh.t;
+					const int tri = xh.tri;
+					const bool hitAny = tri >= 0;
 					C[size_t( b ) * size_t( N ) + size_t( i )] = RHit { t, hitAny ? tri : -1 };
 					if ( adaptMax > 1 ) {   // pass 1's light-free estimate, as there
 						const quint8 * a = hitAny && albKnown ? &soup.alb[size_t( tri ) * 3] : nullptr;

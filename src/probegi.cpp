@@ -1826,8 +1826,9 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			if ( rtScene && rtScene->path() != bakert::Path::Cpu ) {
 				skyHit.assign( edge.size() * size_t( kDirs ), 0 );
 				const size_t chunk = 4096;   // slots a batch: 1 M rays
-				std::vector<bakert::Ray> rays;
-				std::vector<bakert::Hit> hits;
+				// lane RTGI1: whole occlusion rays (bakert::Scene::cast): the GPU's sure verdicts stand, the unsure walk
+				std::vector<bakert::XRay> rays;
+				std::vector<bakert::XHit> hits;
 				for ( size_t k0 = 0; k0 < edge.size(); k0 += chunk ) {
 					const size_t k1 = std::min( edge.size(), k0 + chunk );
 					rays.resize( ( k1 - k0 ) * size_t( kDirs ) );
@@ -1836,21 +1837,20 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 						double o[3];
 						eyeOf( k, o );
 						for ( int d = 0; d < kDirs; d++ ) {
-							bakert::Ray & r = rays[( k - k0 ) * size_t( kDirs ) + size_t( d )];
-							r = { { float( o[0] ), float( o[1] ), float( o[2] ) }, 1e-4f,
-								{ float( dirs[d][0] ), float( dirs[d][1] ), float( dirs[d][2] ) }, 131072.0f };
+							bakert::XRay & r = rays[( k - k0 ) * size_t( kDirs ) + size_t( d )];
+							r = { { o[0], o[1], o[2] }, 131072.0, { dirs[d][0], dirs[d][1], dirs[d][2] }, 0.0 };
 						}
 					}
-					rtScene->trace( rays.data(), rays.size(), hits.data(), true );
+					rtScene->cast( rays.data(), rays.size(), hits.data(), true );
 					parallelFor( k1 - k0, [&]( size_t j ) {
 						double o[3];
 						eyeOf( k0 + j, o );
 						for ( int d = 0; d < kDirs; d++ ) {
 							double t;
-							int tri;
-							const bool hit = rtScene->refine( hits[j * size_t( kDirs ) + size_t( d )], o, dirs[d], 131072.0, &t, &tri, false );
+							const bool hit = hits[j * size_t( kDirs ) + size_t( d )].tri >= 0;
 							skyHit[( k0 + j ) * size_t( kDirs ) + size_t( d )] = hit ? 1 : 0;
-							if ( rtCheck && hit != bvh.ray( o, dirs[d], 131072.0, &t ) )
+							// the whole-ray tracer counts its own check (bakert census); trace + refine is counted here
+							if ( rtCheck && !rtScene->whole() && hit != bvh.ray( o, dirs[d], 131072.0, &t ) )
 								rtDiff++;
 						}
 					} );
