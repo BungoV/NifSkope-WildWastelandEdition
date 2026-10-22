@@ -737,18 +737,14 @@ void Shape::setUniforms( NifSkopeOpenGLContext::Program * prog ) const
 		prog->uni1i_l( l, isVertexAlphaAnimation ? 1 : 0 );
 }
 
-bool Shape::bindShape() const
+// lane GPUDRIVEN1: the attribute table bindShape uploads (0 = no geometry)
+std::uint64_t Shape::wwVertexAttrs( const float ** vertexAttrs ) const
 {
-	NifSkopeOpenGLContext *	context = scene->renderer;
-	if ( !context ) [[unlikely]]
-		return false;
-
 	qsizetype	numVerts = verts.size();
 	qsizetype	numTriangles = triangles.size();
 	if ( !( numVerts > 0 && numTriangles > 0 ) ) [[unlikely]]
-		return false;
+		return 0;
 
-	const float *	vertexAttrs[16];
 	vertexAttrs[0] = &( verts.constFirst()[0] );
 	std::uint64_t	attrModeMask = 3U;
 
@@ -790,14 +786,37 @@ bool Shape::bindShape() const
 		}
 	}
 	attrModeMask |= tmp;
+	return attrModeMask;
+}
 
-	size_t	elementDataSize = size_t( numTriangles ) * sizeof( Triangle );
+const NifSkopeOpenGLContext::ShapeDataHash * Shape::wwDataHash( const float ** vertexAttrs ) const
+{
+	const float *	own[16];
+	const float **	attrs = vertexAttrs ? vertexAttrs : own;
+	const std::uint64_t	attrModeMask = wwVertexAttrs( attrs );
+	if ( !attrModeMask ) [[unlikely]]
+		return nullptr;
+	const qsizetype	numVerts = verts.size();
+	size_t	elementDataSize = size_t( triangles.size() ) * sizeof( Triangle );
 	if ( !( dataHash.attrMask && numVerts == dataHash.numVerts && elementDataSize == dataHash.elementBytes ) ) {
 		dataHash = NifSkopeOpenGLContext::ShapeDataHash( std::uint32_t( numVerts ), attrModeMask, elementDataSize,
-															vertexAttrs, triangles.constData() );
+															attrs, triangles.constData() );
 	}
+	return &dataHash;
+}
 
-	context->bindShape( dataHash, vertexAttrs, triangles.constData() );
+bool Shape::bindShape() const
+{
+	NifSkopeOpenGLContext *	context = scene->renderer;
+	if ( !context ) [[unlikely]]
+		return false;
+
+	const float *	vertexAttrs[16];
+	const NifSkopeOpenGLContext::ShapeDataHash *	h = wwDataHash( vertexAttrs );
+	if ( !h ) [[unlikely]]
+		return false;
+
+	context->bindShape( *h, vertexAttrs, triangles.constData() );
 
 	return true;
 }

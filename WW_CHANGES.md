@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GPUDRIVEN1 (2026-10-22, branch gpudriven1-20261022): render queues, step A (the Division 2 way)
+
+- **Sun cascades through queues.** The cascade casters are sorted once a frame into solid, two-sided and alpha-tested
+  queues. Their positions, UVs and indices live in one shared pool per GL context (`src/gl/cellqueue.cpp`), so a
+  caster no longer hashes and uploads its mesh per cascade. Each cascade draws its solid and two-sided queues with one
+  indirect multi-draw each (`glMultiDrawElementsIndirect`, a per-draw matrix per command; new shaders
+  `lookdev_csmdepth_q` / `_atq`). The CPU cull per caster is kept. Skinned casters stay on the old path.
+- **Main pass by queue.** In the second (lit) pass, BSShapes are collected during the walk and drawn queue by queue:
+  opaque, two-sided, alpha-tested, then the rest in walk order. Skinned, blended, decal, effect, x-ray and
+  non-depth-writing shapes go to "rest". Blended shapes stay sorted as before.
+- **GL 4.6 context**, requested only when a probe gets 4.6 from the driver.
+- Bindless textures are deferred: each bind still sets the wrap mode per texture, so one texture can carry two sampler
+  states. `WW_GPUDRIVEN_CENSUS=1` counts them, along with the queue sizes and the pool.
+- `WW_GPUDRIVEN=0`: everything off (and no 4.6 request). `WW_GPUDRIVEN_RED=perdraw`: the old per-draw paths and their
+  cost. `WW_GPUDRIVEN_CSM=0` / `WW_GPUDRIVEN_MAIN=0`: one half off. `WW_GPUDRIVEN_RED=order`: a fixed shuffle inside
+  every queue (the order gate).
+
 ## Lane PERF3 (2026-10-22, branch perf3-20261022): cell view per-draw CPU cuts, reflections from the previous frame
 
 - **GL query cache, exact.** Inside one draw's setup the per-draw hooks asked the driver for the blend state, the

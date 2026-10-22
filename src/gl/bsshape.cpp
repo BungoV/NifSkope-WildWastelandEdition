@@ -6,6 +6,8 @@
 #include "gl/cellcull.h"	// lane SUNCELL1
 #include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
 #include "gl/cellpasstime.h"	// lane PERF1
+#include "gl/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
+#include "gl/glproperty.h"
 #include "cellmesh.h"
 #include "cellspeed.h"
 #include "gl/glnode.h"
@@ -300,6 +302,21 @@ void BSShape::drawShapes( NodeList * secondPass )
 	if ( secondPass && wwCellWaterWanted( scene, id() ) ) {
 		secondPass->add( this );
 		return;
+	}
+	/* lane GPUDRIVEN1: the walk queues the shape by render state (gl/cellqueue.h) and draws it at the flush. A shape
+	 * whose result depends on what is under it (skinned, blended, decal, effect, x-ray, hidden triangles, no depth
+	 * write) goes in the last queue, which keeps tree order. */
+	if ( secondPass && GpuDriven::mainArmed() ) {
+		int q = GpuDriven::Opaque;
+		if ( isSkinned || surfaceDecal || effectDecal || bsesp || scene->xRay || isGhosted() || !depthWrite || !depthTest
+			|| ( alphaProperty && alphaProperty->hasAlphaBlend() ) || scene->hiddenTris.contains( nodeId ) )
+			q = GpuDriven::Rest;
+		else if ( wwAlphaTested() )
+			q = GpuDriven::AlphaTest;
+		else if ( isDoubleSided )
+			q = GpuDriven::TwoSided;
+		if ( GpuDriven::mainTake( this, q ) )
+			return;
 	}
 
 	auto nif = scene->nifModel;

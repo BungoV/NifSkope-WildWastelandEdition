@@ -53,6 +53,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QAction>
 #include <QOpenGLContext>
 #include "gl/cellpasstime.h"	// lane PERF1
+#include "gl/cellqueue.h"	// lane GPUDRIVEN1
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
@@ -578,9 +579,13 @@ void Scene::collectShapes( NodeList & secondPass )
 	pendingBolts.clear();
 
 	if ( hasOption(DoBlending) ) {
+		// lane GPUDRIVEN1: the walk fills the render queues, the flush draws them (gl/cellqueue.h)
+		const bool queues = GpuDriven::mainBegin( this );
 		for ( Node * node : roots.list() ) {
 			node->drawShapes( &secondPass );
 		}
+		if ( queues )
+			GpuDriven::mainFlush( this, &secondPass );
 	} else {
 		for ( Node * node : roots.list() ) {
 			node->drawShapes();

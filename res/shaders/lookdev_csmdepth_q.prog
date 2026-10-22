@@ -1,0 +1,4 @@
+# The cascade caster pass through the render queues (lane GPUDRIVEN1): one indirect multi-draw per queue, the
+# matrices per draw from one buffer. Selected by name from gl/sunshadow.cpp; WW_GPUDRIVEN_CSM=0 uses lookdev_csmdepth.
+
+shaders lookdev_csmdepth_q.vert lookdev_csmdepth.frag

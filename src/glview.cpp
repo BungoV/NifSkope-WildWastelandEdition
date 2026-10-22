@@ -64,6 +64,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "probesky.h"	// lane SKY1: one call a frame
 #include "shortcutregistry.h"
 #include "wwskin.h"
+#include "gl/cellqueue.h"	// lane GPUDRIVEN1
 #include "spells/animationsetup.h"
 #include "skeletontools.h"	// skeletonAnalyse: the Skeleton Manager's own classes
 #include "ui/settingsdialog.h"
@@ -364,6 +365,8 @@ GLView::GLView( QWindow * p )
 	fmt.setDepthBufferSize( 24 );
 	fmt.setStencilBufferSize( 8 );
 	fmt.setSamples( 1 << aa );
+
+	GpuDriven::requestContext( fmt );	// lane GPUDRIVEN1: 4.6 core when the driver makes one (WW_GPUDRIVEN=0: 4.2)
 
 	setFormat( fmt );
 

@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "gl/cellwater.h"	// lane SUNCELL1: water never casts
 #include "gl/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 #include "gl/cellpasstime.h"	// lane PERF1: the casters' draw count
+#include "gl/cellqueue.h"	// lane GPUDRIVEN1: the casters' render queues
 
 #include "gl/glnode.h"
 #include "gl/glproperty.h"	// lane VOLAIR1: alpha-tested casters read the base map
@@ -31,6 +32,7 @@ BSD License - see nifskope.h
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <random>
 #include <vector>
 
 /* See sunshadow.h for the law and its sources. Everything the fit computes is in
@@ -615,6 +617,78 @@ static void sunShadowPassImpl( Scene * scene )
 	bool complete = true;
 	std::vector<std::uint32_t> cullRanges;	// lane SUNCELL1
 	std::vector<std::uint16_t> cullIdx;
+
+	/* lane GPUDRIVEN1: the casters' render queues (gl/cellqueue.h). Solid one-sided, solid two-sided and alpha-tested
+	 * casters draw from the shared pool, each solid queue as one indirect multi-draw per cascade; skinned casters
+	 * keep the per-draw loop below. Depth only with LEQUAL keeps the nearest depth in any order. */
+	enum { QSolid, QTwoSided, QAlpha, QCount };
+	std::vector<int> queue[QCount];
+	std::vector<GpuDriven::PoolEntry> entry( casters.size() );
+	std::vector<char> queued( casters.size(), 0 );
+	NifSkopeOpenGLContext::Program * progQ = nullptr, * progAtQ = nullptr;
+	struct Span { std::size_t first = 0, n = 0; };
+	Span span[kCascades][QCount];
+	std::vector<Span> atSpan;
+	qint64 qCalls = 0, qCommands = 0, perDraw = 0;
+	if ( GpuDriven::csm() && !casters.empty() && GpuDriven::poolBegin( r ) ) {
+		progQ = r->useProgram( "lookdev_csmdepth_q.prog" );
+		if ( progAt )
+			progAtQ = r->useProgram( "lookdev_csmdepth_atq.prog" );
+		r->useProgram( "lookdev_csmdepth.prog" );
+	}
+	if ( progQ ) {
+		for ( std::size_t n = 0; n < casters.size(); n++ ) {
+			const Caster & k = casters[n];
+			if ( !k.skinned.empty() || k.sh->wwGpuSkinned() )
+				continue;
+			const bool at = progAt && k.alphaTested;
+			if ( ( at && !progAtQ ) || !GpuDriven::poolEnsure( r, k.sh, entry[n] ) || ( at && !entry[n].uv ) )
+				continue;
+			queued[n] = 1;
+			queue[at ? QAlpha : ( k.twoSided ? QTwoSided : QSolid )].push_back( int( n ) );
+		}
+		if ( GpuDriven::redOrder() ) {
+			std::mt19937 g( 0x6d1u );
+			for ( auto & q : queue )
+				std::shuffle( q.begin(), q.end(), g );
+		}
+		// the frame's matrices, one per queued caster, and every cascade's commands, uploaded once
+		std::vector<float> mats;
+		std::vector<std::uint32_t> matOf( casters.size(), 0 );
+		for ( const auto & q : queue ) {
+			for ( int n : q ) {
+				matOf[std::size_t( n )] = std::uint32_t( mats.size() / 16 );
+				const Matrix4 m = casters[std::size_t( n )].sh->viewTrans().toMatrix4();
+				mats.insert( mats.end(), m.data(), m.data() + 16 );
+			}
+		}
+		std::vector<GpuDriven::DrawCmd> cmds;
+		atSpan.resize( std::size_t( kCascades ) * queue[QAlpha].size() );
+		for ( int i = 0; i < kCascades; i++ ) {
+			for ( int q = 0; q < QCount; q++ ) {
+				span[i][q].first = cmds.size();
+				for ( std::size_t j = 0; j < queue[q].size(); j++ ) {
+					const std::size_t n = std::size_t( queue[q][j] ), f = cmds.size();
+					const GpuDriven::PoolEntry & e = entry[n];
+					const Shape * sh = casters[n].sh;
+					if ( wwCellCullCaster( scene, sh, sh->id(), i, s.c[i].clipFromView, cullRanges ) ) {
+						for ( std::size_t r2 = 0; r2 + 1 < cullRanges.size(); r2 += 2 ) {
+							if ( cullRanges[r2 + 1] )
+								cmds.push_back( { cullRanges[r2 + 1] * 3, 1, e.firstIndex + cullRanges[r2] * 3, e.baseVertex,
+									matOf[n] } );
+						}
+					} else {
+						cmds.push_back( { e.numIndices, 1, e.firstIndex, e.baseVertex, matOf[n] } );
+					}
+					if ( q == QAlpha )
+						atSpan[std::size_t( i ) * queue[QAlpha].size() + j] = { f, cmds.size() - f };
+				}
+				span[i][q].n = cmds.size() - span[i][q].first;
+			}
+		}
+		GpuDriven::poolBind( r, mats, cmds );
+	}
+
 	for ( int i = 0; i < kCascades && complete; i++ ) {
 		const Cascade & c = s.c[i];
 		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, s.tex, 0, i );
@@ -628,6 +702,48 @@ static void sunShadowPassImpl( Scene * scene )
 		fn->glViewport( 0, 0, c.vw, c.vh );
 		if ( lMvp >= 0 )
 			fn->glUniformMatrix4fv( lMvp, 1, GL_FALSE, c.clipFromView );
+		if ( progQ && ( span[i][QSolid].n || span[i][QTwoSided].n || !queue[QAlpha].empty() ) ) {
+			// lane GPUDRIVEN1: the queues first, render state set once per queue
+			GpuDriven::poolRebind( r );
+			r->useProgram( "lookdev_csmdepth_q.prog" );
+			if ( const int l = progQ->uniLocation( "csmClipFromView" ); l >= 0 )
+				fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
+			for ( int q : { int( QSolid ), int( QTwoSided ) } ) {
+				if ( !span[i][q].n )
+					continue;
+				q == QTwoSided ? fn->glDisable( GL_CULL_FACE ) : fn->glEnable( GL_CULL_FACE );
+				GpuDriven::poolDraw( r, span[i][q].first, span[i][q].n );
+				PassTime::countDraw( qint64( span[i][q].n ) );
+				qCalls++;
+				qCommands += qint64( span[i][q].n );
+			}
+			if ( !queue[QAlpha].empty() ) {
+				// the base map differs per caster: one multi-draw each, geometry and matrices still from the pool
+				r->useProgram( "lookdev_csmdepth_atq.prog" );
+				if ( const int l = progAtQ->uniLocation( "csmClipFromView" ); l >= 0 )
+					fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
+				for ( std::size_t j = 0; j < queue[QAlpha].size(); j++ ) {
+					const Span & sp = atSpan[std::size_t( i ) * queue[QAlpha].size() + j];
+					if ( !sp.n )
+						continue;
+					const Caster & k = casters[std::size_t( queue[QAlpha][j] )];
+					k.twoSided ? fn->glDisable( GL_CULL_FACE ) : fn->glEnable( GL_CULL_FACE );
+					int texunit = 0;
+					const BSLightingShaderProperty * lsp = k.sh->wwLightingShader();
+					BSShaderLightingProperty * bsp = k.sh->wwShaderLighting();
+					progAtQ->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+					progAtQ->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
+					progAtQ->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
+					progAtQ->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
+					progAtQ->uni1f( "alphaThreshold", k.sh->wwAlphaThreshold() );
+					GpuDriven::poolDraw( r, sp.first, sp.n );
+					PassTime::countDraw( qint64( sp.n ) );
+					qCalls++;
+					qCommands += qint64( sp.n );
+				}
+			}
+			r->useProgram( "lookdev_csmdepth.prog" );
+		}
 		for ( int pass = 0; pass < ( progAt ? 2 : 1 ); pass++ ) {
 		// pass 0: the solid casters (and every caster when there is no alpha-tested program); pass 1: alpha-tested
 		NifSkopeOpenGLContext::Program * p = pass ? progAt : prog;
@@ -637,9 +753,11 @@ static void sunShadowPassImpl( Scene * scene )
 			if ( l >= 0 )
 				fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
 		}
-		for ( const Caster & k : casters ) {
-			if ( progAt && k.alphaTested != bool( pass ) )
+		for ( std::size_t kn = 0; kn < casters.size(); kn++ ) {
+			const Caster & k = casters[kn];
+			if ( ( progAt && k.alphaTested != bool( pass ) ) || queued[kn] )
 				continue;
+			perDraw++;
 			if ( k.twoSided )
 				fn->glDisable( GL_CULL_FACE );
 			else
@@ -693,7 +811,14 @@ static void sunShadowPassImpl( Scene * scene )
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 		}
 	}
+	if ( progQ )
+		GpuDriven::poolUnbind( r );
 	r->stopProgram();
+	if ( GpuDriven::census() ) {
+		GpuDriven::censusLine( "csm", QStringLiteral( "casters %1 solid %2 two-sided %3 alpha-test %4 per-draw %5 (draws); "
+			"queue calls %6 commands %7; %8" ).arg( casters.size() ).arg( queue[QSolid].size() ).arg( queue[QTwoSided].size() )
+			.arg( queue[QAlpha].size() ).arg( perDraw ).arg( qCalls ).arg( qCommands ).arg( GpuDriven::poolCensus( r ) ) );
+	}
 
 	// restore
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
