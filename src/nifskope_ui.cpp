@@ -47,6 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "starterscene.h"
 #include "harnesswindow.h"
 #include "gl/campath.h"		// lane MOTION1: WW_RENDER_PATH
+#include "gl/lookdevstage.h"	// lane SHADOWCACHE1: the path's hour step
 #include "gl/gametaa.h"
 #include "gl/cellpost.h"	// lane GRASSMB1
 #include "gl/cellbloom.h"	// lane BLOOM1b
@@ -2318,7 +2319,16 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		wwCellPostSetPath( k, float( path.fps() ) );	// lane GRASSMB1: the motion blur's frame and frame time
 		pump();
 	}
+	/* lane SHADOWCACHE1: WW_RENDER_PATH_HOURSTEP=<hours a frame> moves the sun along the path too (frame k at the
+	 * pinned hour + k * step); only with WW_LOOKDEV_HOUR set, so the stepped hour is never saved */
+	const double hourStep = qEnvironmentVariable( "WW_RENDER_PATH_HOURSTEP" ).toDouble();
+	const bool stepHour = hourStep != 0.0 && qEnvironmentVariableIsSet( "WW_LOOKDEV_HOUR" );
+	const double hour0 = wwLookdevHour();
+	if ( sideOk && hourStep != 0.0 )
+		log << "hourstep " << QString::asprintf( "%.6f", hourStep ) << ( stepHour ? " on" : " refused (WW_LOOKDEV_HOUR unset)" ) << "\n";
 	for ( int k = 0; k < frames; k++ ) {
+		if ( stepHour )
+			wwLookdevSetHour( hour0 + double( k ) * hourStep );
 		path.sample( k, eye, at, fov );
 		ogl->wwSetPathCamera( true, eye, at, fov );
 		wwGameTaaSetFrame( preroll + k );

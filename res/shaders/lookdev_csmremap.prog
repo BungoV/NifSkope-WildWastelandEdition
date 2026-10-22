@@ -1,0 +1,4 @@
+# The cascade cache's scroll (lane SHADOWCACHE1): a static depth layer copied onto a shifted window on the same texel
+# lattice, its depth range remapped. Selected by name from gl/sunshadow.cpp.
+
+shaders lookdev_csmremap.vert lookdev_csmremap.frag

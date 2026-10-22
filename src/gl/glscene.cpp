@@ -55,6 +55,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellvrs.h"	// lane VRS1
 #include "gl/cellfxres.h"	// lane FXRES1
+#include "gl/cellqueue.h"	// lane GPUDRIVEN1
+#include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
@@ -553,7 +555,9 @@ void Scene::drawShapes()
 	PassTime::begin( PassTime::Opaque );	// lane PERF1
 	wwCellVrsPass( this, false, true );	// lane VRS1: coarse shading where the last frame was flat
 	wwSetupMemoArm( true );	// lane PERF1: one pass, one set of scene globals
+	GpuDrivenB::cameraWalk( true );
 	collectShapes( secondPass );
+	GpuDrivenB::cameraWalk( false );
 	wwSetupMemoArm( false );
 	wwCellVrsPass( this, false, false );
 	PassTime::end( PassTime::Opaque );
@@ -584,9 +588,13 @@ void Scene::collectShapes( NodeList & secondPass )
 	pendingBolts.clear();
 
 	if ( hasOption(DoBlending) ) {
+		// lane GPUDRIVEN1: the walk fills the render queues, the flush draws them (gl/cellqueue.h)
+		const bool queues = GpuDriven::mainBegin( this );
 		for ( Node * node : roots.list() ) {
 			node->drawShapes( &secondPass );
 		}
+		if ( queues )
+			GpuDriven::mainFlush( this, &secondPass );
 	} else {
 		for ( Node * node : roots.list() ) {
 			node->drawShapes();

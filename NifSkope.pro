@@ -247,6 +247,8 @@ HEADERS += \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
 	src/gl/cellpasstime.h \
+	src/gl/cellqueue.h \
+	src/gl/cellgpucull.h \
 	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
@@ -511,6 +513,8 @@ SOURCES += \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \
 	src/gl/cellpasstime.cpp \
+	src/gl/cellqueue.cpp \
+	src/gl/cellgpucull.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \

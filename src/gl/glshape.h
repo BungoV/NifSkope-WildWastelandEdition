@@ -76,6 +76,10 @@ public:
 	void drawBoundingBox( const Vector3 & boundsCenter, const Vector3 & boundsDims, FloatVector4 color ) const;
 	void setUniforms( NifSkopeOpenGLContext::Program * prog ) const;
 	bool bindShape() const;
+	// lane GPUDRIVEN1: the content hash bindShape keys the geometry cache with, kept until the shape changes; no
+	// upload, nullptr without geometry. vertexAttrs (16 entries) receives the attribute table when given.
+	const NifSkopeOpenGLContext::ShapeDataHash * wwDataHash( const float ** vertexAttrs = nullptr ) const;
+	std::uint64_t wwVertexAttrs( const float ** vertexAttrs ) const;
 	//! Evaluate/invert the same blended vertex skin transform used by the GPU.
 	//! False from unskinVertex means the weighted matrix was singular.
 	Vector3 skinVertex( int vertexIndex, const Vector3 & local ) const;

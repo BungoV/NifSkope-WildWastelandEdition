@@ -64,6 +64,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "probesky.h"	// lane SKY1: one call a frame
 #include "shortcutregistry.h"
 #include "wwskin.h"
+#include "gl/cellqueue.h"	// lane GPUDRIVEN1
 #include "spells/animationsetup.h"
 #include "skeletontools.h"	// skeletonAnalyse: the Skeleton Manager's own classes
 #include "ui/settingsdialog.h"
@@ -374,6 +375,8 @@ GLView::GLView( QWindow * p )
 		qInfo().noquote() << QStringLiteral( "cell aa: view MSAA %1 (WW_MSAA ignored: WW_MSAA_RED=1)" ).arg( msaa );
 	}
 	fmt.setSamples( msaa );
+
+	GpuDriven::requestContext( fmt );	// lane GPUDRIVEN1: 4.6 core when the driver makes one (WW_GPUDRIVEN=0: 4.2)
 
 	setFormat( fmt );
 

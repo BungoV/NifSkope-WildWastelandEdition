@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glproperty.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
+#include "gl/cellqueue.h"	// lane GPUDRIVEN1: the sampler census
 
 /*! Which vertex-colour channel the viewport previews, or 0 for normal shading.
  *  It lives here because this is where the vertex-colour uniforms are set: the
@@ -1636,6 +1637,12 @@ bool BSShaderLightingProperty::bind( const QStringView & fname, bool forceTextur
 	glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, TexCache::get_max_anisotropy() );
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmaps > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR );
+	// lane GPUDRIVEN1: which textures are bound with more than one wrap mode (bindless needs a handle per state)
+	if ( GpuDriven::census() ) {
+		GLint tex = 0;
+		glGetIntegerv( GL_TEXTURE_BINDING_2D, &tex );
+		GpuDriven::samplerCensus( GLuint( tex ), int( i ) );
+	}
 	return true;
 }
 
