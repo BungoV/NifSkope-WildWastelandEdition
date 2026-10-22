@@ -2,6 +2,7 @@
 #include "cellunits.h"
 
 #include "gl/cellbloom.h"
+#include "gl/cellfogbloom.h"
 #include "gl/celllights.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -20,6 +21,7 @@
 namespace {
 
 constexpr int kSrcUnit = 8;		// the linear frame (sampler2DMS) in cell_hdr.prog; the cell units are 10..16
+constexpr int kFogBloomUnit = 9;	// lane FOGBLOOM1: the bloom-intensity target (sampler2DMS); no TexCache map in this pass
 constexpr int kFoBloomUnit = WwCellUnit::Bloom;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
 
 struct HdrGpu
@@ -682,9 +684,12 @@ void wwCellHdrEnd( Scene * scene )
 	isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead );
 	// lane BLOOM1b: the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat );
+	// lane FOGBLOOM1: the per-pixel bloom strength from the air along each ray (cellfogbloom.h); off: no GL call
+	const bool fogBloom = wwCellFogBloomRun( scene, g.fbo, g.ds, s.w, s.h, s.samples, g.dsFormat );
 
 	auto prog = r->useProgram( "cell_hdr.prog" );
 	if ( !prog ) {
+		wwCellFogBloomDone( r, kFogBloomUnit );
 		wwCellBloomDone( r, kFoBloomUnit );
 		note( s, QStringLiteral( "lost (cell_hdr.prog went away mid-frame)" ) );
 		return;
@@ -715,6 +720,7 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
 	prog->uni1i( "hdrSrc", kSrcUnit );
+	wwCellFogBloomFinal( r, kFogBloomUnit, fogBloom );
 	wwCellBloomFinal( r, kFoBloomUnit );	// lane BLOOM1b: the final combine's uniforms (off: cellIsFoBloomOn false)
 
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
@@ -784,6 +790,7 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	r->stopProgram();
 	wwCellBloomDone( r, kFoBloomUnit );
+	wwCellFogBloomDone( r, kFogBloomUnit );
 
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );

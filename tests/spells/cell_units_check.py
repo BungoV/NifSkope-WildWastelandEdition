@@ -16,7 +16,7 @@ import sys
 
 ALLOW = {
     ('cellbloom.cpp', 'kUnitA'), ('cellbloom.cpp', 'kUnitB'),
-    ('cellhdr.cpp', 'kSrcUnit'),
+    ('cellhdr.cpp', 'kSrcUnit'), ('cellhdr.cpp', 'kFogBloomUnit'), ('cellfogbloom.cpp', 'kDepthUnit'),
     ('cellpost.cpp', 'kUnitCur'), ('cellpost.cpp', 'kUnitBlur'), ('cellpost.cpp', 'kUnitDepth'), ('cellpost.cpp', 'kUnitMv'),
     ('gametaa.cpp', 'kUnitCur'), ('gametaa.cpp', 'kUnitHist'), ('gametaa.cpp', 'kUnitMv'), ('gametaa.cpp', 'kUnitDepth'),
 }

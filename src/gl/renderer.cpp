@@ -54,6 +54,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/settingsdialog.h"
 #include "gl/BSMesh.h"
 #include "gl/cellhdr.h"
+#include "gl/cellfogbloom.h"
 #include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
@@ -347,9 +348,12 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		const bool lin = program && ( wwIsCellProgramName( program->name ) || program->name == std::string_view( "fo4_effectcell.prog" )
 			|| wwIsCellDecalProgramName( program->name )	// lane DECALLIT1
 			|| ( program->name == std::string_view( "fo4_water.prog" ) && wwCellWaterWritesLinear() ) );
+		// lane FOGBLOOM1 (cellfogbloom.h): a blended linear draw (an effect, glass) also sets bit 2, the bloom it takes in fog
+		const bool fogMark = lin && wwCellFogBloomMarks() && glIsEnabled( GL_BLEND )
+			&& program->name != std::string_view( "fo4_water.prog" ) && !wwIsCellDecalProgramName( program->name );
 		glEnable( GL_STENCIL_TEST );
-		glStencilMask( 0x03 );
-		glStencilFunc( GL_ALWAYS, lin ? 1 : 2, 0xFF );
+		glStencilMask( wwCellFogBloomMarks() ? 0x07 : 0x03 );
+		glStencilFunc( GL_ALWAYS, ( lin ? 1 : 2 ) | ( fogMark ? 4 : 0 ), 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
 	}
 	// lane AO1: the obscurance's opaque pass (normal + depth from the opaque cell-lit draws only), and every

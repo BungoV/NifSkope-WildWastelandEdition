@@ -1,0 +1,4 @@
+# The bloom-intensity target (lane FOGBLOOM1; src/gl/cellfogbloom.h): a full-screen pass at the tone map.
+# No conditions: never picked for a shape; cellfogbloom.cpp selects it by name.
+
+shaders cell_ao.vert cell_fogbloom.frag

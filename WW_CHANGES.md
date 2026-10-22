@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FOGBLOOM1 (2026-10-22, branch fogbloom1-20261022): fog bloom, a per-pixel bloom strength that rises in fog (off)
+
+- **Why.** Our bloom is the same over the whole frame: a lamp in clear air and one seen through thick fog get the same glow.
+  In real fog the halo around a light widens and brightens with the optical depth along the view ray. RDR2 does this with
+  an R8 "bloom intensity" target that the composite multiplies the bloom by; it is higher with distance in fog and higher for translucents.
+- **What changed (ships off):**
+  - New pass `cell_fogbloom.frag` (src/gl/cellfogbloom.*), run at the tone map. It writes an R8 target at the frame's size and sample count:
+    gain = 1 + f (1 - T) (1 + 0.5 translucent), with T the air's transmittance to the pixel, read from the froxel volume
+    (lookdev_fog.glsl), so any change in the fog's density moves it.
+  - f is a smoothstep over the ray's mean extinction, from mist (visibility 2 km) to fog (1 km). Clear air writes exactly 0,
+    so the gain is exactly 1.0 and the picture keeps the same bits.
+  - Translucents: blended linear-light draws (effects, glass; not water, not decals) set stencil bit 0x04 while the feature is on,
+    and the pass gives those samples up to 1.5x the fog term.
+  - The tone map (cell_hdr.frag, cell_lights.glsl) multiplies both blooms (Vanilla and FO4CS) by the gain.
+- **Row:** Cell workspace, Show > Bloom > Fog bloom (`WW/CellFogBloom`, off).
+- **Pins:** `WW_CELL_FOGBLOOM=0|1`; red `WW_CELL_FOGBLOOM_RED=flat` = today's uniform bloom (no pass, no marks);
+  `WW_CELL_FOGBLOOM_TIME=1` prints the pass's GPU time. Budget ~0.1 ms at 1080p.
+- `tests/spells/cell_units_check.py` allows the pass's two units (9 in the tone map, 1 for its depth).
+
 ## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
 
 - Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.

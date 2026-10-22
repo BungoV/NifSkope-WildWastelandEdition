@@ -30,6 +30,9 @@ void main()
 	vec4 x = texelFetch( hdrSrc, ivec2( gl_FragCoord.xy ), gl_SampleID );
 	// lane SKYHOLE1: the passes sort the pixels by depth too (the far plane = no opaque draw reached them)
 	gl_FragDepth = 1.0;
+	// lane FOGBLOOM1 (cellfogbloom.h): the bloom this pixel receives, raised where its view ray crosses fog
+	if ( cellFogBloomOn )
+		cellBloomGain = 1.0 + 4.0 * texelFetch( cellFogBloom, ivec2( gl_FragCoord.xy ), gl_SampleID ).r;
 	/* lane BLOOM1b: the FO4CS bloom at this pixel, exposed light (cell_bloom.glsl): the tent of the chain's top, red
 	 * and blue pushed by the glare's dispersion, times the bloom weight. cellImageSpace adds it before its curve. */
 	vec3 foBloom = vec3( 0.0 );
