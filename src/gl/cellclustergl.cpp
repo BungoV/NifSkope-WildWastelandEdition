@@ -15,9 +15,12 @@ BSD License - see nifskope.h
 #include <QHash>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+
+quint64 wwGlPaintCount();	// glview.cpp: frames painted
 
 namespace
 {
@@ -25,6 +28,11 @@ namespace
 constexpr int kClusterUnit = WwCellUnit::LightCluster;	// isamplerBuffer (MERGEALL1: was 24, VOLAIR1's AirVol)
 constexpr int kTexelsPerLight = 8;  // celllights.cpp's light layout, 4 floats a texel
 constexpr int kRebuildsPerFrame = 4;
+/* LIGHTCLUSTER1: grids kept per renderer (passes that switch camera or viewport each keep theirs), and how far a
+ * TAA jitter may move the projection, in pixels either axis, before the lists are rebuilt. The lists are built
+ * padded by the same amount (cellcluster.h jitterPadPx), so a pixel drawn under any jitter within it is covered. */
+constexpr int kSlots = 4;
+constexpr double kJitterReusePx = 1.0;
 
 struct Key
 {
@@ -39,6 +47,8 @@ struct Key
 struct Settings
 {
 	bool on = true;
+	bool keep = true;   // LIGHTCLUSTER1: grids kept across jitter, camera switches and draws (off/red: one grid, exact key)
+	int stats = 0;      // WW_CELL_CLUSTER_STATS=n: a stats line every n frames (0 none)
 	WwClusterParams params;
 };
 
@@ -54,21 +64,47 @@ const Settings & settings()
 		if ( const int v = qEnvironmentVariableIntValue( "WW_CELL_CLUSTER_MAX" ); v > 0 )
 			t.params.maxPerCluster = v;
 		// the refuter: slices culled at their middle depth only, so lights near a slice edge go missing
-		t.params.redMidSlice = qEnvironmentVariable( "WW_CELL_CLUSTER_RED" ) == QLatin1String( "midslice" );
+		const QString red = qEnvironmentVariable( "WW_CELL_CLUSTER_RED" );
+		t.params.redMidSlice = red.contains( QLatin1String( "midslice" ) );
+		// LIGHTCLUSTER1: WW_CELL_CLUSTER_KEEP=0 the switch, WW_CELL_CLUSTER_RED=rebuild the red (both: the old
+		// single grid on the exact projection, a rebuild per TAA frame, the buffer re-attached per draw)
+		t.keep = qEnvironmentVariable( "WW_CELL_CLUSTER_KEEP", QStringLiteral( "1" ) ) != QLatin1String( "0" )
+			&& !red.contains( QLatin1String( "rebuild" ) );
+		if ( t.keep )
+			t.params.jitterPadPx = kJitterReusePx;
+		if ( qEnvironmentVariableIsSet( "WW_CELL_CLUSTER_STATS" ) )
+			t.stats = std::max( qEnvironmentVariableIntValue( "WW_CELL_CLUSTER_STATS" ), 1 );
 		return t;
 	}();
 	return s;
 }
 
-struct ClusterGpu
+struct Slot
 {
 	GLuint buf = 0, tex = 0;
-	int units = -1;
 	bool valid = false;
-	Key key = {};
+	bool attached = false;  // the buffer is attached to the texture (once per upload, not per draw)
+	Key key = {};           // key.proj is the projection the lists were built with (the jitter anchor)
 	WwClusterGrid grid;
+	WwClusterScratch scratch;
+	quint64 used = 0;
+};
+
+struct Stats
+{
+	quint64 builds = 0, boxesKept = 0, hits = 0, jitterHits = 0, evictions = 0, capped = 0;
+	double buildMs = 0.0;
+	quint64 lastFrame = ~quint64( 0 );
+};
+
+struct ClusterGpu
+{
+	int units = -1;
+	std::array<Slot, kSlots> grids;	// not "slots": a Qt keyword macro
+	quint64 tick = 0;
 	QElapsedTimer window;   // rebuilds counted per frame-length window
 	int rebuilds = 0;
+	Stats stats;
 };
 
 QHash<const void *, ClusterGpu> & gpus()
@@ -148,34 +184,119 @@ void echo( const WwClusterGrid & g, int count )
 	lastEcho() = line;
 }
 
-bool rebuild( Renderer * r, ClusterGpu & c, const Key & k, const std::vector<float> & texels, int count, const Transform & vt )
+bool rebuild( Renderer * r, ClusterGpu & c, Slot & sl, const Key & k, const std::vector<float> & texels, int count, const Transform & vt )
 {
 	if ( !c.window.isValid() || c.window.elapsed() > 16 ) {
 		c.window.start();
 		c.rebuilds = 0;
 	}
 	// a pass that switches cameras draw by draw keeps the flat loop instead of rebuilding per draw
-	if ( ++c.rebuilds > kRebuildsPerFrame )
+	if ( ++c.rebuilds > kRebuildsPerFrame ) {
+		c.stats.capped++;
 		return false;
-	c.valid = wwClusterBuild( k.proj, k.vp, viewLights( texels, count, vt ), settings().params, c.grid );
-	c.key = k;
-	if ( !c.valid )
+	}
+	const quint64 kept = sl.scratch.hits;
+	sl.valid = wwClusterBuild( k.proj, k.vp, viewLights( texels, count, vt ), settings().params, sl.grid,
+		settings().keep ? &sl.scratch : nullptr );
+	sl.key = k;
+	sl.used = ++c.tick;
+	if ( !sl.valid )
 		return false;
+	c.stats.builds++;
+	c.stats.boxesKept += sl.scratch.hits - kept;
+	c.stats.buildMs += sl.grid.buildMs;
 	std::vector<std::int32_t> data;
-	data.reserve( c.grid.cells.size() + c.grid.index.size() + 1 );
-	data.insert( data.end(), c.grid.cells.begin(), c.grid.cells.end() );
-	data.insert( data.end(), c.grid.index.begin(), c.grid.index.end() );
+	data.reserve( sl.grid.cells.size() + sl.grid.index.size() + 1 );
+	data.insert( data.end(), sl.grid.cells.begin(), sl.grid.cells.end() );
+	data.insert( data.end(), sl.grid.index.begin(), sl.grid.index.end() );
 	data.push_back( 0 );    // a buffer texture must have a store
 	auto fn = r->fn;
-	if ( !c.buf ) {
-		fn->glGenBuffers( 1, &c.buf );
-		fn->glGenTextures( 1, &c.tex );
+	if ( !sl.buf ) {
+		fn->glGenBuffers( 1, &sl.buf );
+		fn->glGenTextures( 1, &sl.tex );
 	}
-	fn->glBindBuffer( GL_TEXTURE_BUFFER, c.buf );
+	fn->glBindBuffer( GL_TEXTURE_BUFFER, sl.buf );
 	fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( data.size() * sizeof( std::int32_t ) ), data.data(), GL_STREAM_DRAW );
 	fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
-	echo( c.grid, count );
+	sl.attached = false;
+	echo( sl.grid, count );
 	return true;
+}
+
+// LIGHTCLUSTER1: the same projection but for a TAA jitter (perspective: m[8], m[9]) within kJitterReusePx of the anchor
+bool jitterNear( const Key & anchor, const Key & k )
+{
+	if ( !std::equal( k.vp, k.vp + 4, anchor.vp ) )
+		return false;
+	for ( int i = 0; i < 16; i++ )
+		if ( i != 8 && i != 9 && k.proj[i] != anchor.proj[i] )
+			return false;
+	if ( k.proj[11] != -1.0f || k.proj[15] != 0.0f )
+		return k.proj[8] == anchor.proj[8] && k.proj[9] == anchor.proj[9];   // not a perspective: exact
+	const double dx = std::fabs( double( k.proj[8] ) - double( anchor.proj[8] ) ) * 0.5 * double( k.vp[2] );
+	const double dy = std::fabs( double( k.proj[9] ) - double( anchor.proj[9] ) ) * 0.5 * double( k.vp[3] );
+	return dx <= kJitterReusePx && dy <= kJitterReusePx;
+}
+
+bool sameScene( const Key & a, const Key & b )
+{
+	return std::memcmp( a.view, b.view, sizeof( a.view ) ) == 0 && a.stamp == b.stamp && a.count == b.count;
+}
+
+// The slot whose lists serve this draw, rebuilt when they cannot; null keeps the flat loop.
+Slot * slotFor( Renderer * r, ClusterGpu & c, const Key & k, const std::vector<float> & texels, int count, const Transform & vt )
+{
+	Stats & st = c.stats;
+	if ( !settings().keep ) {
+		// the old path: one grid, the exact key
+		Slot & sl = c.grids[0];
+		if ( sl.valid && sl.key == k ) {
+			st.hits++;
+			return &sl;
+		}
+		return rebuild( r, c, sl, k, texels, count, vt ) ? &sl : nullptr;
+	}
+	Slot * nearSlot = nullptr;
+	for ( Slot & sl : c.grids ) {
+		if ( !sl.valid || !jitterNear( sl.key, k ) )
+			continue;
+		if ( sameScene( sl.key, k ) ) {
+			sl.used = ++c.tick;
+			st.hits++;
+			st.jitterHits += sl.key.proj[8] != k.proj[8] || sl.key.proj[9] != k.proj[9];
+			return &sl;
+		}
+		nearSlot = &sl;
+	}
+	Key b = k;
+	if ( nearSlot ) {
+		// the camera or lights moved: new lists under the slot's own projection, so its boxes stay
+		std::copy( nearSlot->key.proj, nearSlot->key.proj + 16, b.proj );
+		return rebuild( r, c, *nearSlot, b, texels, count, vt ) ? nearSlot : nullptr;
+	}
+	Slot * lru = &c.grids[0];
+	for ( Slot & sl : c.grids )
+		if ( !sl.valid || sl.used < lru->used ) {
+			lru = &sl;
+			if ( !sl.valid )
+				break;
+		}
+	st.evictions += lru->valid;
+	return rebuild( r, c, *lru, b, texels, count, vt ) ? lru : nullptr;
+}
+
+void statsLine( ClusterGpu & c )
+{
+	const quint64 f = wwGlPaintCount();
+	if ( !settings().stats || f == c.stats.lastFrame || f % quint64( settings().stats ) != 0 )
+		return;
+	c.stats.lastFrame = f;
+	const Stats & s = c.stats;
+	std::fprintf( stderr, "cell cluster stats: frame %llu, %s, builds %llu (boxes kept %llu), list reuses %llu (across jitter %llu), "
+		"evictions %llu, over the rebuild cap %llu, build ms total %.3f\n", (unsigned long long)f,
+		settings().keep ? "keep" : "keep OFF (one grid, exact key)", (unsigned long long)s.builds,
+		(unsigned long long)s.boxesKept, (unsigned long long)s.hits, (unsigned long long)s.jitterHits,
+		(unsigned long long)s.evictions, (unsigned long long)s.capped, s.buildMs );
 }
 
 } // namespace
@@ -190,34 +311,38 @@ void wwCellClusterUniforms( Scene * scene, const std::vector<float> * texels, in
 		return;
 	auto fn = r->fn;
 	ClusterGpu & c = gpus()[r];
+	statsLine( c );
 	if ( c.units < 0 ) {
 		GLint units = 0;
 		fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &units );	// a unit index is bounded by the combined limit
 		c.units = units;
 	}
-	bool on = false;
+	Slot * sl = nullptr;
 	if ( texels && count > 0 && settings().on && c.units > kClusterUnit ) {
 		GLint vp[4] = { 0, 0, 0, 0 };
 		fn->glGetIntegerv( GL_VIEWPORT, vp );
 		const Key k = keyFor( r, scene->view, vp, count, stamp );
-		on = ( c.valid && c.key == k ) || rebuild( r, c, k, *texels, count, scene->view );
+		sl = slotFor( r, c, k, *texels, count, scene->view );
 	}
+	const bool on = sl != nullptr;
 	{
 		// the last unit stands in on a GPU without kClusterUnit: the sampler must not share unit 0 with BaseMap
 		const int unit = std::min( kClusterUnit, c.units - 1 );
 		GLint prevActive = 0;
 		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
-		fn->glBindTexture( GL_TEXTURE_BUFFER, on ? c.tex : 0 );
-		if ( on )
-			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_R32I, c.buf );
+		fn->glBindTexture( GL_TEXTURE_BUFFER, on ? sl->tex : 0 );
+		if ( on && ( !sl->attached || !settings().keep ) ) {
+			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_R32I, sl->buf );
+			sl->attached = true;
+		}
 		fn->glActiveTexture( GLenum( prevActive ) );
 		prog->uni1i( "cellCluster", unit );
 	}
 	prog->uni1b( "cellClusterOn", on );
 	if ( !on )
 		return;
-	const WwClusterGrid & g = c.grid;
+	const WwClusterGrid & g = sl->grid;
 	const Transform & vt = scene->view;
 	prog->uni4f( "cellClusterDims", FloatVector4( float( g.tilesX ), float( g.tilesY ), float( g.slices ), float( g.tilePx ) ) );
 	prog->uni2f( "cellClusterOrigin", float( g.vp[0] ), float( g.vp[1] ) );
