@@ -4,6 +4,7 @@
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellcull.h"	// lane SUNCELL1
+#include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
@@ -400,6 +401,23 @@ void BSShape::drawShapes( NodeList * secondPass )
 	 * with MSAA there came out +-1 step differently run to run on identical inputs (Vault111Cryo: 1-3 px); with the
 	 * blended draws single-sample two runs match. The fp32 linear frame (gl/cellhdr.cpp) blends deterministically
 	 * and keeps MSAA. The game itself draws blended geometry without MSAA. */
+	/* lane VOLPART1: a volumetric lit effect card (gl/cellvolair.h) draws with no depth test while its soft slab is on
+	 * (the slab's fade is the occlusion: no hard line where it meets the ground or a wall); gates only, the plate hides
+	 * it and the dump draws its probe */
+	int vpFx = 0;
+	if ( !selectionFlags ) {
+		const auto * cur = context->getCurrentProgram();
+		if ( cur && cur->name == std::string_view( "fo4_effectcell.prog" ) )
+			vpFx = wwVolPartFx();
+	}
+	if ( ( vpFx & 1 ) && wwVolPartHidden() )
+		numTriangles = 0;
+	GLint vpPrevDepth = GL_LEQUAL;
+	if ( vpFx & 2 ) {
+		glGetIntegerv( GL_DEPTH_FUNC, &vpPrevDepth );
+		glDepthFunc( GL_ALWAYS );
+	}
+
 	const bool singleSample = !wwCellHdrActive() && glIsEnabled( GL_BLEND ) && glIsEnabled( GL_MULTISAMPLE );	// lane PERF1: the cheap test first
 	if ( singleSample )
 		glDisable( GL_MULTISAMPLE );
@@ -443,6 +461,14 @@ void BSShape::drawShapes( NodeList * secondPass )
 	}
 	if ( singleSample )
 		glEnable( GL_MULTISAMPLE );
+	if ( vpFx & 2 )
+		glDepthFunc( GLenum( vpPrevDepth ) );
+	if ( ( vpFx & 1 ) && numTriangles > 0 && !hiddenT ) {
+		const GLsizei n = GLsizei( numTriangles * 3 );
+		wwVolPartFxDump( scene, [context, n]() {
+			context->fn->glDrawElements( GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void *) 0 );
+		}, id(), getName() );
+	}
 	if ( !selectionFlags && wwCellDrawProbeOn() )	// lane PERF1: the label is built only for the probe
 		wwCellDrawProbe( scene, QStringLiteral( "shape %1 '%2' second=%3" ).arg( id() ).arg( name ).arg( int( drawInSecondPass ) ) );	// lane VOLAIR1 (gates only)
 

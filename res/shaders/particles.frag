@@ -115,6 +115,50 @@ in vec4 C;
 
 out vec4 fragColor;
 
+#ifdef WW_CELLLIGHTS
+/* lane VOLPART1: VOLUMETRIC PARTICLES -- the law is cell_volpart.glsl (shared with the effect cards). Here the
+ * sprite's own parts: its normal (the normal map turned by the sprite's rotation, else a sphere) and the soft ball. */
+#include "cell_volpart.glsl"
+uniform bool fxSoft;			// the opaque pass's depth is bound
+uniform sampler2D fxDepth;		// the opaque pass's depth, the viewport's corner at texel 0
+
+in vec3 pPos;
+in vec2 pQ;
+flat in vec4 pSprite;
+
+// the puff's normal (view space): the normal map turned by the sprite's rotation, else a sphere over the sprite
+vec3 vpNormal( vec2 uvN )
+{
+	vec2 T = pSprite.xy, B = vec2( -pSprite.y, pSprite.x );
+	vec3 n;
+	if ( hasNormalMap ) {
+		n = texture( NormalMap, uvN ).rgb * 2.0 - 1.0;
+		n.z = sqrt( max( 1.0 - dot( n.xy, n.xy ), 0.0 ) );
+	} else {
+		float r2 = dot( pQ, pQ );
+		n = r2 < 1.0 ? vec3( pQ, sqrt( 1.0 - r2 ) ) : vec3( pQ * inversesqrt( r2 ), 0.0 );
+	}
+	return normalize( vec3( n.x * T + n.y * B, n.z ) );
+}
+
+// the share of the puff's ball in front of the scene (1 = all of it)
+float vpSoft()
+{
+	if ( !fxSoft || ( volPartRed & 4 ) != 0 )
+		return 1.0;
+	float dz = texelFetch( fxDepth, ivec2( gl_FragCoord.xy ) - viewportDimensions.xy, 0 ).r;
+	float sceneW = projectionMatrix[3][2] / ( projectionMatrix[2][2] + ( 2.0 * dz - 1.0 ) );
+	float h = pSprite.z * max( sqrt( max( 1.0 - dot( pQ, pQ ), 0.0 ) ), 0.2 );
+	return clamp( ( sceneW - ( -pPos.z - h ) ) / ( 2.0 * h ), 0.0, 1.0 );
+}
+
+// gates only (volPartDump): this particle's 8 probe pixels at its centre (cell_volpart.glsl vpProbe)
+vec4 vpDump( float a )
+{
+	return vpProbe( int( gl_FragCoord.x ) - int( pSprite.w + 0.5 ) * 8, pPos, a );
+}
+#endif
+
 vec4 getTexture( int n )
 {
 	float	r_c = cos( textures[n].uvRotation );
@@ -200,9 +244,29 @@ void main()
 		if ( !pfxAlphaRed )
 			color.a = baseMap.a * pow( max( C.a, 0.0 ), 2.2 );	// texture alpha (falloff folded in) x vertex alpha^2.2
 		vec3 lin = pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
+		if ( volPart != 0 ) {
+			// lane VOLPART1: lit at its own point, seen through the integrated air, soft against the scene
+			if ( volPartDump > 0 ) {
+				fragColor = vpDump( color.a );
+				return;
+			}
+			if ( fxLitMode != 0 )
+				lin *= fxAdditive ? cellFxLit( cellWorldPos( -ViewDir ) ) : vpLit( pPos, vpNormal( uv ), color.a );
+			color.a *= vpSoft();
+			// the landed air at the pixel's own point (wwFogFx: c T + L, additive c T); red nofog: the game's fog alone
+			if ( ( volPartRed & 32 ) == 0 ) {
+				lin = wwFogFx( lin, pPos, fxAdditive );
+			} else if ( fogOn ) {
+				float hb;
+				vec3 fc;
+				float f = wwFogEval( length( pPos ) * fogDistScale, dot( fogView.xyz, pPos ) + fogView.w, hb, fc );
+				lin = fxAdditive ? lin * ( 1.0 - f ) : mix( lin, fc, f );
+			}
+		} else {
 		if ( fxLitMode != 0 )
 			lin *= cellFxLit( cellWorldPos( -ViewDir ) );	// a lit particle, before the fog
 		lin = wwFogFx( lin, -ViewDir, fxAdditive );	// lane VOLAIR1: the air, as the surfaces take it (red fxfog: the game's fog alone)
+		}
 		if ( cellProbe == 6 )
 			fragColor = vec4( lin, color.a );	// the imagespace's measure: the linear value, blended as drawn
 		else

@@ -59,6 +59,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/BSMesh.h"
 #include "gl/cellhdr.h"
 #include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
+#include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 
@@ -2022,10 +2023,27 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		/* lane EFX2 (fo4_effectcell only): a Soft effect fades where it nears the opaque surface behind it and
 		 * near the eye, from the depth of the opaque pass, grabbed once per second pass */
 		if ( prog->uniLocation( "fxSoft" ) >= 0 ) {
-			const bool soft = esp->soft && esp->falloff.softDepth > 0.0f && !( wwCellFxRed() & 2 )
-				&& scene->grabEffectDepth();
+			/* lane VOLPART1: a LIT effect card while Volumetric Particles is on (cellvolair.h) is lit as a puff of the
+			 * air (cell_volpart.glsl) and always soft: a slab of the card's soft depth (else kVpCardDepth units)
+			 * against the opaque pass's depth, drawn with no depth test (BSShape reads wwVolPartFx) */
+			constexpr float kVpCardDepth = 64.0f;
+			const bool fxLit = wwCellFxLitFor( scene->nifModel, mesh->id() ) != nullptr;
+			const bool vp = wwVolPartUniforms( scene ) && fxLit;
+			if ( !vp && prog->uniLocation( "volPart" ) >= 0 )
+				prog->uni1i( "volPart", 0 );
+			const bool espSoft = esp->soft && esp->falloff.softDepth > 0.0f;
+			const bool soft = ( espSoft || vp ) && !( wwCellFxRed() & 2 ) && scene->grabEffectDepth();
 			prog->uni1b( "fxSoft", soft );
-			prog->uni1f( "fxSoftDepth", std::max( esp->falloff.softDepth, 1.0f ) );
+			prog->uni1f( "fxSoftDepth", espSoft ? std::max( esp->falloff.softDepth, 1.0f ) : vp ? kVpCardDepth : 1.0f );
+			wwVolPartFxSet( vp ? 1 | ( soft && !( wwVolPartRed() & 4 ) ? 2 : 0 ) : 0 );
+			if ( vp ) {
+				static QString said;
+				const QString now = wwVolPartSummary() + QStringLiteral( " soft=%1" ).arg( soft ? 1 : 0 );
+				if ( now != said ) {
+					said = now;
+					fprintf( stderr, "cell effects volumetric: %s\n", qPrintable( now ) );
+				}
+			}
 			fn->glActiveTexture( GL_TEXTURE0 + texunit );
 			fn->glBindTexture( GL_TEXTURE_2D, soft ? scene->fxDepthTexId : 0 );
 			prog->uni1i_l( prog->uniLocation( "fxDepth" ), texunit++ );
@@ -2262,6 +2280,10 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
 	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
 		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
+	if ( ( wwVolPartFx() & 1 ) && ( wwVolPartRed() & 64 ) && prog->name == std::string_view( "fo4_effectcell.prog" ) ) {
+		prog->uni1b( "cellShadowOn", false );	// lane VOLPART1 red noshadow: the placed lights' cubes too
+		setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)
+	}
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 	if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 		// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)

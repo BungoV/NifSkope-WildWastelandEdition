@@ -188,6 +188,11 @@ struct VaGpu
 	float prevGrid[4] = { 0, 0, 0, 0 }, prevScale = 0.0f;
 	unsigned frame = 0;
 	int tmode = 0;
+	// lane VOLPART1: the frame's phase and cascades, for the particles lit by the same law (wwVolPartUniforms; the
+	// medium is med / layer / ground above)
+	float phase[3][4] = {};
+	float gi[4] = {};
+	bool csm = false;
 };
 
 /* THE CLUSTERED LIGHTS (coordinator 10-14). The inject evaluates the placed lights once per froxel, at the middle of
@@ -715,11 +720,19 @@ static void vaEcho()
 
 static void vaPassInner( Scene * scene, bool run );
 
+static int vaFrameSerial = 0;
+
+int wwVolAirFrameSerial()
+{
+	return vaFrameSerial;
+}
+
 void wwVolAirPass( Scene * scene, bool run )
 {
 	static const bool prof = qEnvironmentVariableIntValue( "WW_CELL_AIR_PROF" ) == 1;	// lane PERF1: where the pass's CPU goes
 	QElapsedTimer pt;
 	pt.start();
+	vaFrameSerial++;
 	vaPassInner( scene, run );
 	const qint64 tInner = pt.nsecsElapsed();
 	if ( vs().on && run )
@@ -1385,6 +1398,9 @@ static void vaPassInner( Scene * scene, bool run )
 	const float layerV[4] = { G.w, G.zn, G.invHn, G.s }, groundV[4] = { G.zg, G.invHg, 0.0f, 0.0f };
 	std::copy( layerV, layerV + 4, g.layer );
 	std::copy( groundV, groundV + 4, g.ground );
+	std::copy( &ph.w[0][0], &ph.w[0][0] + 12, &g.phase[0][0] );	// lane VOLPART1
+	std::copy( ph.gi, ph.gi + 4, g.gi );
+	g.csm = csm;
 	double ms = -1.0;
 	if ( timed ) {
 		fn->glFinish();
@@ -1647,4 +1663,127 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	fn->glDepthMask( depthMask );
 	note( probes ? QStringLiteral( "probes (red nosky %1)" ).arg( ( s.red & 65536 ) ? 1 : 0 )
 		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) );
+}
+
+/* ---- lane VOLPART1: volumetric particles (cellvolair.h, res/shaders/particles.frag) ---- */
+namespace
+{
+struct VpState
+{
+	bool loaded = false;
+	bool on = false, pinned = false;
+	int red = 0;
+};
+
+VpState & vps()
+{
+	static VpState s;
+	if ( !s.loaded ) {
+		s.loaded = true;
+		const QByteArray pin = qgetenv( "WW_CELL_VOLPART" );
+		if ( !pin.isEmpty() ) {
+			s.pinned = true;
+			s.on = pin.trimmed() != "0";
+		} else {
+			s.on = QSettings().value( QStringLiteral( "WW/VolPart" ), false ).toBool();
+		}
+		for ( const QByteArray & t : qgetenv( "WW_CELL_VOLPART_RED" ).split( ',' ) ) {
+			const QByteArray r = t.trimmed();
+			s.red |= r == "flat" ? 1 : r == "nothick" ? 2 : r == "nosoft" ? 4 : r == "nolights" ? 8 : r == "white" ? 16
+				: r == "nofog" ? 32 : r == "noshadow" ? 64 : r == "noedge" ? 128 : r == "nophase" ? 256 : r == "nonear" ? 512 : 0;
+		}
+	}
+	return s;
+}
+}	// namespace
+
+bool wwVolPartOn()
+{
+	return vps().on;
+}
+
+namespace
+{
+int vpFxFlags = 0;	// the effect card being set up: 1 a volumetric card, 2 its soft fade on (depth ALWAYS)
+}
+
+void wwVolPartFxSet( int flags )
+{
+	vpFxFlags = flags;
+}
+
+int wwVolPartFx()
+{
+	return vpFxFlags;
+}
+
+bool wwVolPartHidden()
+{
+	static const bool hide = qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1;
+	return hide;
+}
+
+void wwVolPartSetOn( bool on )
+{
+	VpState & s = vps();
+	if ( s.pinned )
+		return;
+	s.on = on;
+	QSettings().setValue( QStringLiteral( "WW/VolPart" ), on );
+}
+
+int wwVolPartRed()
+{
+	return vps().red;
+}
+
+bool wwVolPartUniforms( Scene * scene )
+{
+	if ( !scene || !scene->renderer )
+		return false;
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
+	if ( !prog || prog->uniLocation( "volPart" ) < 0 )
+		return false;
+	const VpState & s = vps();
+	prog->uni1i( "volPart", s.on ? 1 : 0 );
+	prog->uni1i( "volPartDump", 0 );
+	if ( !s.on )
+		return false;
+	// the air's medium and phase this frame; no air drawn: a clear medium (the light alone) and the phase the air
+	// would take (the cell's god-ray record indoors, the weather's outdoors, else the fallback)
+	const VaGpu & g = vaGpus()[r];
+	const bool air = vs().on && g.ready && g.doc == scene->nifModel;
+	VaPhase fb;
+	if ( !air ) {
+		const WwCellLighting * L = wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr;
+		float med[12] = { 0.60f, 1.52f, 3.31f, 2, 2, 2, 1, 1, 1, 0.75f, 0, 1 };
+		if ( L && L->interior )
+			std::copy( L->godRay, L->godRay + 12, med );
+		else
+			wwLookdevGodRays( med, nullptr );
+		fb = vaPhase( med, ( vs().red & 524288 ) != 0 );
+	}
+	prog->uni4f( "airMed", air ? FloatVector4( g.med[0], g.med[1], g.med[2], g.med[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 1e30f ) );
+	// the landed air's layered law (its near band, its ground layer) and its GPU reds (roomstep, physcol), as the pass
+	prog->uni4f( "airLayer", air ? FloatVector4( g.layer[0], g.layer[1], g.layer[2], g.layer[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+	prog->uni4f( "airGround", air ? FloatVector4( g.ground[0], g.ground[1], g.ground[2], g.ground[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+	prog->uni1i( "volRed", vs().red & ~1 );
+	for ( int k = 0; k < 3; k++ ) {
+		const float * w = air ? g.phase[k] : fb.w[k];
+		prog->uni4f_l( prog->uniLocation( "volPhase[%d]", k ), FloatVector4( w[0], w[1], w[2], w[3] ) );
+	}
+	const float * gi = air ? g.gi : fb.gi;
+	prog->uni4f( "volGi", FloatVector4( gi[0], gi[1], gi[2], gi[3] ) );
+	prog->uni1b( "volCsm", air ? g.csm : wwSunShadowWanted( scene ) );
+	prog->uni1i( "volTerms", vs().terms );
+	prog->uni1i( "volPartRed", s.red );
+	return true;
+}
+
+QString wwVolPartSummary()
+{
+	const VpState & s = vps();
+	return QStringLiteral( "volpart=%1%2 red=%3" ).arg( s.on ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
+		.arg( s.pinned ? QStringLiteral( "(pinned)" ) : QString() ).arg( s.red );
 }
