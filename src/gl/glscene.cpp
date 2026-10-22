@@ -54,6 +54,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QOpenGLContext>
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellvrs.h"	// lane VRS1
+#include "gl/cellfxres.h"	// lane FXRES1
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
@@ -690,6 +691,9 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 {
 	secondPass.alphaSort();
 	++fxDepthPassNow;	// lane EFX2: the opaque depth is grabbed again at this pass's first Soft effect
+	// lane FXRES1 (src/gl/cellfxres.h): the large Soft effects leave the order for the low-resolution layer
+	const QVector<Node *> fxLayer = wwCellFxResSplit( secondPass.list() );
+	auto inFxLayer = [&fxLayer]( Node * node ) { return !fxLayer.isEmpty() && fxLayer.contains( node ); };
 
 	/* lane FXD1: with Cell lights on, the lighting shader's decals go first, as the game draws its decals before
 	 * its sorted blended pass. A cell's welded buckets share one origin, so the depth sort above leaves them in
@@ -719,9 +723,10 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 	for ( Node * node : secondPass.list() ) {
 		if ( dynamic_cast<Particles *>( node ) )
 			deferredParticles.append( node );
-		else if ( !isDecal( node ) && !isWater( node ) )
+		else if ( !isDecal( node ) && !isWater( node ) && !inFxLayer( node ) )
 			node->drawShapes();
 	}
+	wwCellFxResDraw( fxLayer );	// lane FXRES1: drawn and composited once, before the particles
 	for ( Node * node : deferredParticles )
 		node->drawShapes();
 }

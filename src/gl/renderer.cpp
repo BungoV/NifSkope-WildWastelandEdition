@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "gl/cellvrs.h"	// lane VRS1
+#include "gl/cellfxres.h"	// lane FXRES1
 
 #include "message.h"
 #include "nifskope.h"
@@ -415,12 +416,16 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		// WATERHDR1: and the water, which writes linear light too (it was written back raw: the creek ~6/255)
 		const bool lin = program && ( wwIsCellProgramName( program->name ) || program->name == std::string_view( "fo4_effectcell.prog" )
 			|| wwIsCellDecalProgramName( program->name )	// lane DECALLIT1
+			|| program->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1: the layer's (composited as 1)
 			|| ( program->name == std::string_view( "fo4_water.prog" ) && wwCellWaterWritesLinear() ) );
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( 0x03 );
 		glStencilFunc( GL_ALWAYS, lin ? 1 : 2, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
 	}
+	// lane FXRES1: in the soft-effect layer, a draw it cannot hold exactly is masked and drawn in place after it
+	if ( mesh && wwCellFxResDrawing() )
+		wwCellFxResDrawHook( mesh, program ? program->name : std::string_view() );
 	// lane AO1: the obscurance's opaque pass (normal + depth from the opaque cell-lit draws only), and every
 	// other cell-lit draw reads this frame's obscurance (celllights.h)
 	if ( mesh && wwAoScene )
@@ -707,6 +712,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		/* lane DECALLIT1: an effect decal takes fo4_effectdecal.prog (the game draws it into the surface under it, lit as that
 		 * surface; + the cascades while the map is built); red WW_CELL_DECALLIT_RED=unlit keeps it a self-lit effect */
 		if ( p->name == std::string_view( "fo4_effectshader.prog" ) || p->name == std::string_view( "fo4_effectcell.prog" )
+			|| p->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1
 			|| wwIsCellDecalProgramName( p->name ) ) {
 			const bool cellFx = wwCellLightsWanted( mesh->scene ) && !( wwCellFxRed() & 1 );
 			/* lane GIDARK1: an exterior's lit effect takes the same program, lit by the spot it stands in (fxRoomLit) */
@@ -714,7 +720,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			const char * want = !cellFx ? "fo4_effectshader.prog"
 				: ( ( mesh->effectDecal && !wwCellDecalLitRed() ) || roomLit )
 					? ( wwSunShadowWanted( mesh->scene ) ? "fo4_effectdecalcsm.prog" : "fo4_effectdecal.prog" )
-				: "fo4_effectcell.prog";
+				: wwCellFxResDrawing() ? "fo4_effectcellfx.prog" : "fo4_effectcell.prog";	// lane FXRES1: the layer's outputs
 			if ( p->name == std::string_view( want ) )
 				return p;
 			Program * q = useProgram( want );

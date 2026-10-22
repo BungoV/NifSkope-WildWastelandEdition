@@ -1,0 +1,4 @@
+# fo4_effectcell with the soft-effect layer's outputs (lane FXRES1; src/gl/cellfxres.h). No conditions: the
+# condition scan never picks it; Renderer::setupProgram swaps it in by name while the layer draws.
+
+shaders fo4_default.vert fo4_effectcellfx.frag

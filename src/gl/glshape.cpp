@@ -40,6 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/renderer.h"
 #include "gl/celllights.h"
 #include "gl/cellwater.h"	// lane WATER1
+#include "gl/cellfxlit.h"	// lane FXRES1: wwCellFxRoomLit
 #include "gl/glmesh.h"
 #include "glview.h"
 
@@ -628,6 +629,13 @@ bool Shape::wwWaterDraws() const
 {
 	// lane WATER1: a registered water surface, drawn by src/gl/cellwater.h while the Cell lights row is on
 	return wwCellWaterWanted( scene, id() );
+}
+
+bool Shape::wwFxResSoft() const
+{
+	// lane FXRES1 (src/gl/cellfxres.h): the effects the soft fade reads the opaque depth for; the layer keeps no depth
+	return bsesp && !bslsp && bsesp->soft && bsesp->falloff.softDepth > 0.0f && drawInSecondPass && !effectDecal
+		&& !surfaceDecal && !depthWrite && !wwCellFxRoomLit( scene, id() );
 }
 
 bool Shape::wwMaterialClearsBlend() const

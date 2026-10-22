@@ -1086,6 +1086,7 @@ void wwCellLightsUniforms( Scene * scene )
 		static const bool fxScaleRed = qgetenv( "WW_CELL_FXLIT_SCALE_RED" ).trimmed() == "game";
 		static const bool fxColorRed = qgetenv( "WW_CELL_FXLIT_COLOR_RED" ).trimmed() == "sun";
 		const bool fxProg = prog->name == std::string_view( "fo4_effectcell.prog" )
+			|| prog->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1
 			|| prog->name == std::string_view( "particles_cell.prog" );
 		// lane GIDARK1: the decal programs keep the surfaces' sun and take the lit-effect base as cellFxBase (fxRoomLit)
 		const bool roomProg = wwIsCellDecalProgramName( prog->name );

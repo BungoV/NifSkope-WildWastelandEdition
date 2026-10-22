@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FXRES1 (2026-10-22, branch fxres1-20261022): soft effects at a lower resolution in the cell view (OFF until the look pairs)
+
+- **Big soft effects draw into a half-resolution layer.** With `WW_CELL_FXRES=1` a Soft effect (smoke, steam, fog
+  card: soft depth, blended, no depth write, not a decal, not room-lit) that is large on screen leaves the sorted
+  pass's order and draws, after the other sorted shapes and before the particles, into a layer of 1/2 the frame per
+  axis. The layer keeps an offset and a transmittance (exact for each draw's blend) and is composited once with a
+  depth-aware upsample (off-screen particles, GPU Gems 3 ch. 23; own GLSL). Its depth is the nearest opaque depth
+  under each layer texel, so the soft fade still reads the scene.
+- Particles, AO, the opaque pass and the frame's size stay full resolution. A draw the layer cannot hold exactly is
+  drawn in place after the composite. Pass subs "fxres-down", "fxres-layer", "fxres-comp".
+- Off by default (no GL call, no reorder). Knobs `WW_CELL_FXRES_SCALE`, `_MINPX`, `_MINAREA`, `_EDGE`,
+  `_CENSUS=1`. Reds: `WW_CELL_FXRES_RED=full` (every draw in place: equals off), `=quarter` (sensitivity), `=bilinear`.
+
 ## Lane AAFORMAT1 (2026-10-22, branch aaformat1-20261022): MSAA and HDR target format study switches (all OFF)
 
 - **Study switches, default unchanged.** `WW_MSAA=<1|2|4|8|16>` sets the view's MSAA sample count instead of the
