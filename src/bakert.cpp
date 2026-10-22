@@ -2,6 +2,7 @@
  * window, no GL interop. vulkan-1.dll is loaded at run time, so the exe starts (and bakes on the CPU) without it. */
 
 #include "bakert.h"
+#include "bakertwalk.h"
 #include "probebvh.h"
 
 #define VK_NO_PROTOTYPES
@@ -839,11 +840,21 @@ bool Scene::refine( const Hit & h, const double o[3], const double d[3], double 
 			&& !( useMask && bvh_->mask->hole( h.tri, u, v ) ) ) {
 			*t = tt;
 			*tri = h.tri;
-			/* nearest: the CPU walk bounded at that t returns the CPU's own answer (its nearest is no farther; the
-			 * pruning drops only nodes past it, so ties resolve in the same order), at a fraction of a full ray. When
-			 * that walk cannot reach the triangle (a box graze, the stack cap) the full re-cast below decides. */
-			if ( !exact || ( bvh_->ray( o, d, tt, t, tri ) && *tri >= 0 ) )
+			if ( !exact )
 				return true;
+			/* nearest: the CPU walk from that t gives the full walk's answer unless it left out a node or triangle a
+			 * hair past its best (bakertwalk.h); then, or when it finds nothing, the full re-cast below decides.
+			 * WW_BAKE_RT_WALK_RED=bounded: the walk bounded at t alone (its near ties differ from the CPU bake's). */
+			static const bool redBounded = [] { const char * r = std::getenv( "WW_BAKE_RT_WALK_RED" ); return r && !std::strcmp( r, "bounded" ); }();
+			if ( redBounded ) {
+				if ( bvh_->ray( o, d, tt, t, tri ) && *tri >= 0 )
+					return true;
+			} else {
+				bool sure = true;
+				const double from = std::min( tmax, tt + kNearPad * ( 1.0 + tt ) );
+				if ( rayFrom( *bvh_, o, d, from, t, tri, &sure ) && sure && *tri >= 0 )
+					return true;
+			}
 		}
 	}
 	const_cast<Scene *>( this )->recast++;

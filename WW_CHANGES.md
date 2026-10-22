@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane RTBAKE1FIX (2026-10-22, branch rtbake1fix-20261022): the RT bake casts the CPU bake's rays exactly
+
+- **The in-cell museum bake no longer casts one batch more on RT** (batch 1: cpu 6,572,032 vs rt 6,574,080 rays).
+  The cause: refine() checked a GPU nearest hit with the CPU walk bounded at the GPU's t. That walk prunes more
+  than the full walk: a node whose box entry rounds a hair past t is skipped, though the full walk visits it, so
+  on near ties (shared edges, coplanar faces) it could keep another triangle. One probe's noise test then flipped.
+  Now `src/bakertwalk.h` rayFrom() walks from t + 1e-6 (1 + t) and says when it left out any node or triangle
+  within that margin of its best; only then can it differ, and such rays are re-cast in full.
+- Gate: `tests/bakert_walk_gate.cpp` (standalone, no GPU) re-traces the bake's 16 batches from every probe of the
+  in-cell museum soup and tries every triangle a float tracer could return: old walk 700 answers unlike the full
+  walk in 92 probes (the red), new 0 (5.7% of candidates re-cast). `WW_BAKE_RT_WALK_RED=bounded` brings the old walk back.
+
 ## Lane RTBAKE1 (2026-10-21, branch rtbake1-20261021): one GPU ray back end for the bakes
 
 - **The bakes cast their rays on the GPU when there is one.** `src/bakert.*` takes a probebvh tree and traces batches

@@ -67,8 +67,8 @@ public:
 	void trace( const Ray * rays, size_t n, Hit * hits, bool anyHit = false );
 	/* The answer the CPU bake reads for a GPU hit h of the double ray (o, d) in (1e-4, tmax]: true + t + tri for a hit.
 	 * The GPU's triangle re-tested in double; a refused one re-cast on the CPU. exact (nearest-hit rays): the CPU walk
-	 * bounded at the re-tested t then gives the CPU's own triangle, ties included, and a miss is re-cast in full; an
-	 * occlusion ray passes false. */
+	 * from the re-tested t (bakertwalk.h) then gives the CPU's own triangle, ties included; a miss, or a walk with a
+	 * near tie it could decide unlike the full walk, is re-cast in full; an occlusion ray passes false. */
 	bool refine( const Hit & h, const double o[3], const double d[3], double tmax, double * t, int * tri, bool exact = true ) const;
 	// counters for the bake census: rays traced here, rays the refine re-cast on the CPU, GPU milliseconds
 	std::atomic<long long> traced { 0 }, recast { 0 };
