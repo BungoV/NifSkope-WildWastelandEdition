@@ -562,6 +562,23 @@ void wwGameTaaResolve( Scene * scene )
 
 	// 1. the frame (resolved when multisampled) into t0 and t3
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );
+	// lane MSAABLACK1: a pass that set the view's read buffer to GL_NONE makes this colour blit a silent no-op
+	// (no GL error, t0 stays zero, the frame saves black): give the frame its colour buffer back first
+	{
+		WW_SWITCH_STATIC( bool, msaaBlackRed, wwEnvInt( "WW_MSAABLACK1_RED" ) == 1 );
+		GLint rb = 0;
+		fn->glGetIntegerv( GL_READ_BUFFER, &rb );
+		if ( rb == GL_NONE ) {
+			static bool said = false;
+			if ( !said ) {
+				said = true;
+				qInfo().noquote() << QStringLiteral( "temporal aa: the frame's read buffer was GL_NONE (fbo %1); %2" ).arg( prevDraw )
+					.arg( msaaBlackRed ? QStringLiteral( "left (WW_MSAABLACK1_RED)" ) : QStringLiteral( "set back to its colour buffer" ) );
+			}
+			if ( !msaaBlackRed )
+				fn->glReadBuffer( prevDraw ? GL_COLOR_ATTACHMENT0 : GL_BACK );
+		}
+	}
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.inFbo );
 	fn->glDisable( GL_SCISSOR_TEST );
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
