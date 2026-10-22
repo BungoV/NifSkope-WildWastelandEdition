@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "sunshadow.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
 #include "gametaa.h"
 #include "gl/cellwater.h"	// lane SUNCELL1: water never casts
@@ -65,6 +66,7 @@ struct Cascade
 struct CsmState
 {
 	bool init = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	double D = kDefaultDistance;
 	int map = kDefaultMap;
 	int probe = 0;
@@ -95,24 +97,32 @@ struct CsmState
 CsmState & cs()
 {
 	static CsmState s;
-	if ( !s.init ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CSM_" } ) ) {
 		s.init = true;
+		s.liveGen = wwSwitchGen();
+		{
+			const CsmState d {};
+			s.D = d.D;
+			s.map = d.map;
+			s.force = d.force;
+		}
 		bool ok = false;
-		const double d = qEnvironmentVariable( "WW_CSM_DISTANCE" ).toDouble( &ok );
+		const double d = wwEnvStr( "WW_CSM_DISTANCE" ).toDouble( &ok );
 		if ( ok && d > 2.0 * kBlend )
 			s.D = d;
-		const int m = qEnvironmentVariable( "WW_CSM_MAP" ).toInt( &ok );
+		const int m = wwEnvStr( "WW_CSM_MAP" ).toInt( &ok );
 		if ( ok && m >= 64 && m <= 8192 )
 			s.map = m;
 		s.baseD = s.D;	// lane TERRSHADOW1
 		s.baseMap = s.map;
-		s.probe = qEnvironmentVariable( "WW_CSM_PROBE" ).toInt();
+		s.probe = wwEnvStr( "WW_CSM_PROBE" ).toInt();
 		// WW_CSM_FORCE=<0..1>: the receiver returns this factor instead of the map's (the
 		// wiring test of the factor sites: both sun terms must take it); unset = -1, off
-		const float f = qEnvironmentVariable( "WW_CSM_FORCE" ).toFloat( &ok );
+		const float f = wwEnvStr( "WW_CSM_FORCE" ).toFloat( &ok );
 		if ( ok && f >= 0.0f && f <= 1.0f )
 			s.force = f;
-		s.reds = qEnvironmentVariable( "WW_CSM_RED" ).split( QChar( ',' ), Qt::SkipEmptyParts );
+		s.reds = wwEnvStr( "WW_CSM_RED" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		for ( QString & r : s.reds )
 			r = r.trimmed().toLower();
 	}
@@ -351,7 +361,7 @@ static void csmDumpMap( const CsmState & s, Renderer * r )
 	static int armed = -1;
 	static QString path, lastSummary;
 	if ( armed < 0 ) {
-		path = qEnvironmentVariable( "WW_CSM_DUMP" ).trimmed();
+		path = wwEnvStr( "WW_CSM_DUMP" ).trimmed();
 		armed = ( !path.isEmpty() && QDir::isAbsolutePath( path ) ) ? 1 : 0;
 	}
 	// a pass with no casters (a frame before the cell is placed, or after it is torn down) is never the grabbed one
@@ -394,7 +404,7 @@ static void csmEchoFrame()
 	static int armed = -1;
 	static QString path, lastWritten;
 	if ( armed < 0 ) {
-		path = qEnvironmentVariable( "WW_CSM_ECHO" ).trimmed();
+		path = wwEnvStr( "WW_CSM_ECHO" ).trimmed();
 		armed = ( !path.isEmpty() && QDir::isAbsolutePath( path ) ) ? 1 : 0;
 	}
 	if ( armed != 1 )

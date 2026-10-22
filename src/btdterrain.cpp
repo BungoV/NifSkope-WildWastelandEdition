@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "btdterrain.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
@@ -847,7 +848,7 @@ bool nifCreateBtdTerrainScene( NifModel * nif, const QString & btdPath,
 
 bool btdRegionFromEnv( BtdRegionSpec & spec )
 {
-	const QByteArray env = qgetenv( "WW_BTD_REGION" );
+	const QByteArray env = wwEnv( "WW_BTD_REGION" );
 	if ( env.isEmpty() )
 		return false;
 	const QStringList parts = QString::fromLatin1( env ).split( QLatin1Char( ',' ) );
@@ -1190,7 +1191,7 @@ bool lodtRegionFromEnv( LodtRegionSpec & spec )
 	 * to stop. Refusing here would leave the caller with no region at all, so
 	 * this SAYS SO and then reads nothing from them. */
 	for ( const char * old : { "WW_LODT_REGION", "WW_LODT_PLANE" } ) {
-		if ( !qgetenv( old ).isEmpty() )
+		if ( !wwEnv( old ).isEmpty() )
 			qCritical().noquote() << QString( "REFUSED: %1 is retired -- the landscape "
 				"file is .lodl now (.lodt names the terrain texture sheets). Set %2 "
 				"instead; this run is ignoring it." )
@@ -1198,7 +1199,7 @@ bool lodtRegionFromEnv( LodtRegionSpec & spec )
 				.arg( QLatin1String( old ) == QLatin1String( "WW_LODT_REGION" )
 					? "WW_LODL_REGION" : "WW_LODL_PLANE" );
 	}
-	const QByteArray env = qgetenv( "WW_LODL_REGION" );
+	const QByteArray env = wwEnv( "WW_LODL_REGION" );
 	bool got = false;
 	if ( !env.isEmpty() ) {
 		const QStringList parts = QString::fromLatin1( env ).split( QLatin1Char( ',' ) );
@@ -1215,7 +1216,7 @@ bool lodtRegionFromEnv( LodtRegionSpec & spec )
 		}
 	}
 	// the plane on its own, so one region can be photographed plane by plane
-	const QByteArray planeEnv = qgetenv( "WW_LODL_PLANE" );
+	const QByteArray planeEnv = wwEnv( "WW_LODL_PLANE" );
 	if ( !planeEnv.isEmpty() && lodtPlaneFromKey( QString::fromLatin1( planeEnv ), spec.plane ) )
 		got = got || spec.valid;
 	return got;
@@ -1531,7 +1532,7 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 		bool hPinned = false;
 		float hSeenLo = hLo, hSeenHi = hHi;
 		{
-			const QList<QByteArray> r = qgetenv( "WW_LODL_HEIGHT_RANGE" ).split( ',' );
+			const QList<QByteArray> r = wwEnv( "WW_LODL_HEIGHT_RANGE" ).split( ',' );
 			bool okLo = false, okHi = false;
 			const float pLo = r.size() == 2 ? r[0].trimmed().toFloat( &okLo ) : 0.0f;
 			const float pHi = r.size() == 2 ? r[1].trimmed().toFloat( &okHi ) : 0.0f;
@@ -1923,7 +1924,7 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 				.arg( double( depthMax ), 0, 'f', 1 ).arg( counts.join( QStringLiteral( "; " ) ) );
 			/* WW_LODL_DEPTH_PROBE="x,y;x,y": world points to report, so a gate can
 			 * quote numbers at named places and check them against the file. */
-			const QList<QByteArray> pts = qgetenv( "WW_LODL_DEPTH_PROBE" ).split( ';' );
+			const QList<QByteArray> pts = wwEnv( "WW_LODL_DEPTH_PROBE" ).split( ';' );
 			for ( const QByteArray & p : pts ) {
 				const QList<QByteArray> xy = p.split( ',' );
 				if ( xy.size() != 2 )
@@ -2095,7 +2096,7 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 	 * and the water planes painted on the ground. It exists for the identity
 	 * gate, not as a feature switch. */
 	const LodtPlane askedPlane = spec.plane;
-	const bool waterForcedOff = qgetenv( "WW_LODL_WATER" ) == "0";
+	const bool waterForcedOff = wwEnv( "WW_LODL_WATER" ) == "0";
 	LodtPlane waterPlane = LodtPlane::Height;   // Height = the plain water colour
 	bool drawWater = false;
 	if ( !waterForcedOff ) {
@@ -2113,7 +2114,7 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 			break;
 		case LodtPlane::Height:
 			drawWater = sheetChanGiven.isEmpty()
-				&& qEnvironmentVariableIntValue( "WW_LODL_AO" ) == 0;
+				&& wwEnvInt( "WW_LODL_AO" ) == 0;
 			break;
 		default:
 			break;
@@ -2738,7 +2739,7 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 				.arg( tiles ).arg( texels ).arg( per.join( QStringLiteral( ", " ) ) );
 		}
 	}
-	const bool wantAoT = qEnvironmentVariableIntValue( "WW_LODL_AO" ) != 0
+	const bool wantAoT = wwEnvInt( "WW_LODL_AO" ) != 0
 		|| sheetChan == LodlChannel::Ao;
 	int maskCh = -1;
 	switch ( sheetChan ) {

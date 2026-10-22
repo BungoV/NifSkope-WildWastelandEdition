@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lookdevstage.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmweather.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
@@ -60,6 +61,7 @@ constexpr float kGroundHalf = 4096.0f;	// an ~8192-unit quad
 struct LdState
 {
 	bool init = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	QStringList pinPlugins;
 	QString pinPlugin;
 	bool pinWeather = false, pinHour = false, pinGround = false, pinCube = false;
@@ -114,36 +116,71 @@ struct LdState
 LdState & st()
 {
 	static LdState s;
-	if ( !s.init ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_LOOKDEV_" } ) ) {
+		const bool again = s.init;
+		const QString oldPlugin = s.plugin;
 		s.init = true;
-		const QString pl = qEnvironmentVariable( "WW_LOOKDEV_PLUGINS" ).trimmed();
+		s.liveGen = wwSwitchGen();
+		{
+			const LdState d {};
+			s.pinWeather = d.pinWeather;
+			s.pinHour = d.pinHour;
+			s.pinGround = d.pinGround;
+			s.pinCube = d.pinCube;
+			s.weatherKey = d.weatherKey;
+			s.hour = d.hour;
+			s.ground = d.ground;
+			s.sky = d.sky;
+			s.sun = d.sun;
+			s.clouds = d.clouds;
+			s.moon = d.moon;
+			s.gameDay = d.gameDay;
+			s.pinSky = d.pinSky;
+			s.pinSun = d.pinSun;
+			s.pinClouds = d.pinClouds;
+			s.pinMoon = d.pinMoon;
+			s.pinDay = d.pinDay;
+			s.pinCloudTime = d.pinCloudTime;
+			s.probe = d.probe;
+			s.probeLayer = d.probeLayer;
+			s.fog = d.fog;
+			s.pinFog = d.pinFog;
+			s.shadows = d.shadows;
+			s.pinShadows = d.pinShadows;
+		}
+		if ( again && !s.pinPlugin.isEmpty() )
+			s.plugin.clear();
+		for ( float & f : s.fogProbe )
+			f = 0.0f;
+		const QString pl = wwEnvStr( "WW_LOOKDEV_PLUGINS" ).trimmed();
 		if ( !pl.isEmpty() )
 			s.pinPlugins = pl.split( QChar( ',' ), Qt::SkipEmptyParts );
-		s.pinPlugin = qEnvironmentVariable( "WW_LOOKDEV_PLUGIN" ).trimmed();
+		s.pinPlugin = wwEnvStr( "WW_LOOKDEV_PLUGIN" ).trimmed();
 		if ( !s.pinPlugin.isEmpty() )
 			s.plugin = s.pinPlugin;
-		const QString w = qEnvironmentVariable( "WW_LOOKDEV_WEATHER" ).trimmed();
+		const QString w = wwEnvStr( "WW_LOOKDEV_WEATHER" ).trimmed();
 		if ( !w.isEmpty() ) {
 			s.weatherKey = w;
 			s.pinWeather = true;
 		}
 		bool ok = false;
-		const double h = qEnvironmentVariable( "WW_LOOKDEV_HOUR" ).toDouble( &ok );
+		const double h = wwEnvStr( "WW_LOOKDEV_HOUR" ).toDouble( &ok );
 		if ( ok ) {
 			s.hour = std::clamp( h, 0.0, 23.99 );
 			s.pinHour = true;
 		}
-		const QString g = qEnvironmentVariable( "WW_LOOKDEV_GROUND" ).trimmed();
+		const QString g = wwEnvStr( "WW_LOOKDEV_GROUND" ).trimmed();
 		if ( !g.isEmpty() ) {
 			s.ground = g != QLatin1StringView( "0" );
 			s.pinGround = true;
 		}
-		s.cube = qEnvironmentVariable( "WW_LOOKDEV_CUBE" ).trimmed();
+		s.cube = wwEnvStr( "WW_LOOKDEV_CUBE" ).trimmed();
 		s.pinCube = !s.cube.isEmpty();
 		if ( s.cube.isEmpty() )
 			s.cube = QString::fromLatin1( kDefaultCube );
 		auto pinBool = []( const char * name, bool & v, bool & pin ) {
-			const QString e = qEnvironmentVariable( name ).trimmed();
+			const QString e = wwEnvStr( name ).trimmed();
 			if ( !e.isEmpty() ) {
 				v = e != QLatin1StringView( "0" ) && e.compare( QLatin1StringView( "off" ), Qt::CaseInsensitive ) != 0;
 				pin = true;
@@ -155,26 +192,32 @@ LdState & st()
 		pinBool( "WW_LOOKDEV_MOON", s.moon, s.pinMoon );
 		pinBool( "WW_LOOKDEV_FOG", s.fog, s.pinFog );
 		pinBool( "WW_LOOKDEV_SHADOWS", s.shadows, s.pinShadows );
-		const QStringList fp = qEnvironmentVariable( "WW_LOOKDEV_FOGPROBE" ).split( QChar( ',' ), Qt::SkipEmptyParts );
+		const QStringList fp = wwEnvStr( "WW_LOOKDEV_FOGPROBE" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		if ( fp.size() == 3 )
 			for ( int i = 0; i < 3; i++ )
 				s.fogProbe[i] = fp.at( i ).toFloat();
-		const double d = qEnvironmentVariable( "WW_LOOKDEV_DAY" ).toDouble( &ok );
+		const double d = wwEnvStr( "WW_LOOKDEV_DAY" ).toDouble( &ok );
 		if ( ok ) {
 			s.gameDay = std::max( 0.0, d );
 			s.pinDay = true;
 		}
-		const double ct = qEnvironmentVariable( "WW_LOOKDEV_CLOUDTIME" ).toDouble( &ok );
+		const double ct = wwEnvStr( "WW_LOOKDEV_CLOUDTIME" ).toDouble( &ok );
 		if ( ok )
 			s.pinCloudTime = std::max( 0.0, ct );
-		const QStringList pr = qEnvironmentVariable( "WW_LOOKDEV_CLOUDPROBE" ).split( QChar( ',' ), Qt::SkipEmptyParts );
+		const QStringList pr = wwEnvStr( "WW_LOOKDEV_CLOUDPROBE" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		if ( pr.size() == 3 ) {
 			s.probe = true;
 			s.probeLayer = pr.at( 0 ).toInt();
 			s.probeUV[0] = pr.at( 1 ).toFloat();
 			s.probeUV[1] = pr.at( 2 ).toFloat();
 		}
-		s.cloudClock.start();
+		if ( !again )
+			s.cloudClock.start();
+		else {
+			s.dirtyWeather = true;
+			if ( s.plugin != oldPlugin )
+				s.dirtyLoad = true;
+		}
 	}
 	return s;
 }
@@ -392,7 +435,7 @@ void updateGroundFrame( Scene * scene )
 	s.groundHalf = std::max( kGroundHalf, bs.radius * 4.0f );
 	// lane TERRSHADOW1: WW_LOOKDEV_GROUND_HALF=<units> widens the quad (the 1-degree shadow of a 512-unit cube is 29 k long)
 	bool ok = false;
-	const float pinHalf = qEnvironmentVariable( "WW_LOOKDEV_GROUND_HALF" ).toFloat( &ok );
+	const float pinHalf = wwEnvStr( "WW_LOOKDEV_GROUND_HALF" ).toFloat( &ok );
 	if ( ok && pinHalf > s.groundHalf )
 		s.groundHalf = pinHalf;
 }
@@ -729,7 +772,7 @@ bool wwLookdevGroundFrame( Scene * scene, float & z, float xy[2], float & half )
 	xy[0] = s.groundXY[0];
 	xy[1] = s.groundXY[1];
 	half = s.groundHalf;
-	return s.ground && qEnvironmentVariable( "WW_LOOKDEV_GROUNDPASS" ) != QLatin1StringView( "0" );
+	return s.ground && wwEnvStr( "WW_LOOKDEV_GROUNDPASS" ) != QLatin1StringView( "0" );
 }
 
 double wwLookdevGameDay()
@@ -812,13 +855,13 @@ QString wwLookdevSummary()
 				.arg( s.gameDay, 0, 'f', 2 ).arg( wwLookdevCloudSeconds(), 0, 'f', 2 ).arg( s.skyLast )
 			: QString() )
 		+ ( s.fog ? QString( " fog=on %1 drew=%2" ).arg( fogSummary(), s.fogLast ) : QString() )
-		+ ( ( s.shadows || !qEnvironmentVariable( "WW_CSM_RED" ).isEmpty() ) ? QStringLiteral( " " ) + wwSunShadowSummary() : QString() )
+		+ ( ( s.shadows || !wwEnvStr( "WW_CSM_RED" ).isEmpty() ) ? QStringLiteral( " " ) + wwSunShadowSummary() : QString() )
 		+ ( wwVolAirOn() ? QStringLiteral( " " ) + wwVolAirSummary() : QString() );	// lane VOLAIR1
 }
 
 QString wwLookdevEcho()
 {
-	const QString asked = qEnvironmentVariableIsSet( "WW_LOOKDEV" ) ? qEnvironmentVariable( "WW_LOOKDEV" ) : QStringLiteral( "unset" );
+	const QString asked = wwEnvIsSet( "WW_LOOKDEV" ) ? wwEnvStr( "WW_LOOKDEV" ) : QStringLiteral( "unset" );
 	if ( !wwLookdevActive() )
 		return QString( "lookdev=off(asked=%1)" ).arg( asked );
 	return QString( "lookdev=on(asked=%1) %2" ).arg( asked, wwLookdevSummary() );
@@ -914,7 +957,7 @@ bool computeImageSpace( WwLookdevIs & o )
 
 float wwLookdevSunlightScale()
 {
-	static const bool red = qgetenv( "WW_CELL_SUNSCALE_RED" ).trimmed() == "one";
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_SUNSCALE_RED" ).trimmed() == "one" );
 	WwLookdevIs is;
 	if ( red || !wwLookdevImageSpace( is ) || !( is.hdr[6] > 0.0f ) )
 		return 1.0f;
@@ -1705,7 +1748,7 @@ static bool sGroundInFrame = false;
 
 static bool groundCellAt( float xy[2], float & z )
 {
-	static const QList<QByteArray> p = qgetenv( "WW_LOOKDEV_GROUND_CELL_AT" ).split( ',' );
+	WW_SWITCH_STATIC( QList<QByteArray>, p, wwEnv( "WW_LOOKDEV_GROUND_CELL_AT" ).split( ',' ) );
 	if ( p.size() != 3 )
 		return false;
 	bool ok[3];
@@ -1720,7 +1763,7 @@ static bool groundCellAt( float xy[2], float & z )
 
 void wwLookdevDrawGroundCellFrame( Scene * scene )
 {
-	static const bool cellGround = qEnvironmentVariableIntValue( "WW_LOOKDEV_GROUND_CELL" ) == 1;
+	WW_SWITCH_STATIC( bool, cellGround, wwEnvInt( "WW_LOOKDEV_GROUND_CELL" ) == 1 );
 	if ( !cellGround || !wwLookdevActive() || !scene || !wwCellLightsWanted( scene ) )
 		return;
 	sGroundInFrame = true;
@@ -1732,7 +1775,7 @@ void wwLookdevDrawGround( Scene * scene )
 {
 	// harness reference: WW_LOOKDEV_GROUNDPASS=0 -> the ground pass never runs at
 	// all (the "no ground" picture the Ground-off gate is judged against)
-	static const bool noPass = qEnvironmentVariable( "WW_LOOKDEV_GROUNDPASS" ) == QLatin1StringView( "0" );
+	WW_SWITCH_STATIC( bool, noPass, wwEnvStr( "WW_LOOKDEV_GROUNDPASS" ) == QLatin1StringView( "0" ) );
 	if ( noPass )
 		return;
 	if ( !scene || !scene->renderer || scene->selecting || scene->hasVisMode( Scene::VisSilhouette ) )
@@ -1750,7 +1793,7 @@ void wwLookdevDrawGround( Scene * scene )
 	const bool receives = wwSunShadowWanted( scene );
 	/* lane LIGHTBOOTH1 (the light booth; a harness pin, never a user toggle): WW_LOOKDEV_GROUND_CELL=1 draws the ground
 	 * lit by the placed cell lights too (no sun cascades on it), so a fixture's pool of light shows on the booth floor */
-	static const bool cellGround = qEnvironmentVariableIntValue( "WW_LOOKDEV_GROUND_CELL" ) == 1;
+	WW_SWITCH_STATIC( bool, cellGround, wwEnvInt( "WW_LOOKDEV_GROUND_CELL" ) == 1 );
 	const bool litByCell = cellGround && wwCellLightsWanted( scene );
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( litByCell ? "lookdev_ground_cell.prog"
 		: receives ? "lookdev_ground_csm.prog" : "lookdev_ground.prog" );

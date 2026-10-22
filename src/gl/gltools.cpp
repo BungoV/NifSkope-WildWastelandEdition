@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "gltools.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "model/nifmodel.h"
 #include "glview.h"
@@ -546,7 +547,7 @@ void Scene::drawLines( const Vector3 * positions, size_t numVerts, const FloatVe
 	// update+processEvents round trips make the grid appear, so it cannot
 	// observe the broken frame.
 	if ( !selecting ) [[unlikely]] {
-		static const bool wwGridProbe = qEnvironmentVariableIsSet( "WW_GRID_PROBE" );
+		WW_SWITCH_STATIC( bool, wwGridProbe, wwEnvIsSet( "WW_GRID_PROBE" ) );
 		static int wwGridProbeCount = 0;
 		if ( wwGridProbe && wwGridProbeCount < 40 ) {
 			wwGridProbeCount++;
@@ -592,13 +593,13 @@ void Scene::drawLines( const Vector3 * positions, size_t numVerts, const FloatVe
 			// grid appears with this set, it was being depth-rejected; if it stays
 			// invisible, it is never reaching the colour buffer at all. That single
 			// bit splits the remaining suspects in half.
-			static const bool wwNoDepth = qEnvironmentVariableIsSet( "WW_GRID_NODEPTH" );
+			WW_SWITCH_STATIC( bool, wwNoDepth, wwEnvIsSet( "WW_GRID_NODEPTH" ) );
 			if ( wwNoDepth )
 				glDisable( GL_DEPTH_TEST );
 			// WW_GRID_RED: paint the line geometry opaque red and fat. If red does
 			// not appear, the draw never rasterizes into the colour buffer and the
 			// "invisible grid" is not a subtle blend/contrast problem.
-			static const bool wwRed = qEnvironmentVariableIsSet( "WW_GRID_RED" );
+			WW_SWITCH_STATIC( bool, wwRed, wwEnvIsSet( "WW_GRID_RED" ) );
 			if ( wwRed ) {
 				prog->uni4f( "vertexColorOverride", FloatVector4( 1.0f, 0.0f, 0.0f, 1.0f ) );
 				prog->uni1f( "lineWidth", 8.0f );
@@ -671,7 +672,7 @@ void Scene::drawLines( const Vector3 * positions, size_t numVerts, const FloatVe
 	// rasterized" (count 0 here) from "something later overwrote it" (count > 0
 	// here but 0 at end of frame — see the matching probe in paintGL).
 	if ( !selecting ) [[unlikely]] {
-		static const bool wwRedCount = qEnvironmentVariableIsSet( "WW_GRID_RED" );
+		WW_SWITCH_STATIC( bool, wwRedCount, wwEnvIsSet( "WW_GRID_RED" ) );
 		static int wwRedCountCalls = 0;
 		if ( wwRedCount && wwRedCountCalls < 14 ) {
 			wwRedCountCalls++;
@@ -1067,7 +1068,7 @@ void Scene::drawGrid( float s /* grid size / 2 */, int lines /* number of lines 
 	Vector3 *	positions = allocateVertexAttr( numVerts, &colors );
 	// TEMP DIAGNOSTIC (WW_GRID_TRACE): why is the startup grid invisible?
 	// Its own variable, like drawGrid's — see the note there.
-	if ( qEnvironmentVariableIsSet( "WW_GRID_TRACE" ) ) {
+	if ( wwEnvIsSet( "WW_GRID_TRACE" ) ) {
 		QFile f( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
 		if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
 			QTextStream ts( &f );

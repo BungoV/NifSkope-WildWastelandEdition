@@ -1,4 +1,5 @@
 #include "cellhdr.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
 
 #include "gl/cellbloom.h"
@@ -35,7 +36,7 @@ struct HdrState
 	Scene * scene = nullptr;
 	GLint prevDraw = 0, prevRead = 0;
 	int w = 0, h = 0, samples = 0;
-	bool red = qgetenv( "WW_CELL_HDR_RED" ) == "perfrag";
+	bool red = wwEnv( "WW_CELL_HDR_RED" ) == "perfrag";
 	QString last = QStringLiteral( "off" );
 	QString said;
 };
@@ -43,6 +44,9 @@ struct HdrState
 HdrState & hst()
 {
 	static HdrState s;
+	static quint64 liveGen = 0;
+	if ( wwSwitchMovedFor( liveGen, { "WW_CELL_HDR" } ) )	// lane TESTDRIVER1: a live set re-reads the red
+		s.red = wwEnv( "WW_CELL_HDR_RED" ) == "perfrag";
 	return s;
 }
 
@@ -83,8 +87,8 @@ DrawProbe & dprobe()
 	static DrawProbe p;
 	if ( p.on < 0 ) {
 		p.on = 0;
-		const QByteArray spec = qgetenv( "WW_CELL_DRAW_PROBE" );
-		if ( !spec.isEmpty() && !qgetenv( "WW_CELL_HDR_DUMP" ).isEmpty() ) {
+		const QByteArray spec = wwEnv( "WW_CELL_DRAW_PROBE" );
+		if ( !spec.isEmpty() && !wwEnv( "WW_CELL_HDR_DUMP" ).isEmpty() ) {
 			for ( const QByteArray & pt : spec.split( ';' ) ) {
 				const QList<QByteArray> v = pt.split( ',' );
 				if ( v.size() == 2 ) {
@@ -152,8 +156,8 @@ bool probeRead( Renderer * r, GLint src, int W, int H, DrawProbe & p, std::vecto
  * as well (its cost back) and the frame's values replace its. WW_CELL_IS_DUMP keeps the old (full-size) measure. */
 int isMeasureMode()
 {
-	const QByteArray v = qgetenv( "WW_IS_MEASURE" ).trimmed();
-	if ( !qgetenv( "WW_CELL_IS_DUMP" ).isEmpty() )
+	const QByteArray v = wwEnv( "WW_IS_MEASURE" ).trimmed();
+	if ( !wwEnv( "WW_CELL_IS_DUMP" ).isEmpty() )
 		return 2;
 	return v == "sync" ? 1 : v == "old" ? 2 : v == "red" ? 3 : 0;
 }
@@ -196,7 +200,7 @@ void isApply( Scene * scene, const float * px, int qw, int qh )
 	}
 	wwCellImageSpaceSetAdapted( scene, cover > 0.0 ? float( sum / cover ) : 0.0f, int( std::lround( cover ) ) );
 	wwCellImageSpaceSetBloom( scene, px, qw, qh, 1 );
-	static const bool echo = qEnvironmentVariableIntValue( "WW_IS_MEASURE_ECHO" ) == 1;
+	WW_SWITCH_STATIC( bool, echo, wwEnvInt( "WW_IS_MEASURE_ECHO" ) == 1 );
 	static QString said;
 	if ( echo ) {
 		const QString e = wwCellImageSpaceEcho( scene );
@@ -604,7 +608,7 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
 	// lane VOLAIR1 (gates only): WW_CELL_HDR_DUMP=<file> writes the linear frame before the bloom and the tone map,
 	// samples resolved: int32 W H, then W x H x RGBA float32, bottom row first. Every frame (a still path: the last).
-	static const QByteArray hdrDump = qgetenv( "WW_CELL_HDR_DUMP" );
+	WW_SWITCH_STATIC( QByteArray, hdrDump, wwEnv( "WW_CELL_HDR_DUMP" ) );
 	if ( !hdrDump.isEmpty() ) {
 		GLuint tex = 0, fbo = 0;
 		fn->glGenTextures( 1, &tex );
@@ -734,7 +738,7 @@ void wwCellHdrEnd( Scene * scene )
 	 * (MistGroundWaterSteam01LongHalf) as a black patch. Mode 0 now takes only the pixels an opaque draw reached
 	 * (the quad at the far plane passes GL_GREATER there), mode 2 the rest (GL_LEQUAL), composited by coverage.
 	 * WW_CELL_SKYHOLE_RED=old: mode 0 over every 1 pixel, as before. */
-	static const bool skyholeOld = qgetenv( "WW_CELL_SKYHOLE_RED" ).trimmed() == "old";
+	WW_SWITCH_STATIC( bool, skyholeOld, wwEnv( "WW_CELL_SKYHOLE_RED" ).trimmed() == "old" );
 	static bool skyholeSaid = false;
 	if ( !skyholeSaid ) {
 		skyholeSaid = true;

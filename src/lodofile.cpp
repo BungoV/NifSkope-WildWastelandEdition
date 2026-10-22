@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodofile.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "lodifile.h"
 #include "lodgenao.h"
 #include "io/lodvfile.h"
@@ -910,7 +911,7 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 			 * vertex takes the area x barycentric weighted mean of its triangles'
 			 * samples, and copies at one position (0.5 u) with normals within 30 deg
 			 * pool theirs. WW_SELFAO_FACE=0 = the old cast at the vertex (the refuter). */
-			static const bool faceCast = qEnvironmentVariable( "WW_SELFAO_FACE", "1" ) != "0";
+			WW_SWITCH_STATIC( bool, faceCast, wwEnvStr( "WW_SELFAO_FACE", "1" ) != "0" );
 			std::vector<size_t> base( work.size() + 1, 0 );
 			for ( size_t si = 0; si < work.size(); si++ )
 				base[si + 1] = base[si] + ( work[si].ao.size() == work[si].pos.size() / 3 ? 0 : work[si].pos.size() / 3 );

@@ -112,6 +112,7 @@
    Lane SKELOVERLAY, 2026-09-10; lane SKEL2, 2026-09-11. */
 
 #include "nifskope.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "glview.h"
 #include "skeletontools.h"
 #include "hkxplayback.h"
@@ -221,16 +222,16 @@ int wwDiffPixels( const QImage & a, const QImage & b, QVector<QPoint> * where )
 
 void wwSkelOverlayHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_SKELOVERLAY_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_SKELOVERLAY_TEST" ) )
 		return;
 
 	auto * st = new WwSkelState;
-	st->clipPath = qEnvironmentVariable( "WW_SKELOVERLAY_CLIP" );
-	st->shotDir = qEnvironmentVariable( "WW_SKELOVERLAY_SHOTDIR" );
-	if ( qEnvironmentVariableIsSet( "WW_SKELOVERLAY_FRAME" ) )
-		st->frame = qEnvironmentVariableIntValue( "WW_SKELOVERLAY_FRAME" );
-	if ( qEnvironmentVariableIsSet( "WW_SKELOVERLAY_FPS" ) ) {
-		const float f = qEnvironmentVariable( "WW_SKELOVERLAY_FPS" ).toFloat();
+	st->clipPath = wwEnvStr( "WW_SKELOVERLAY_CLIP" );
+	st->shotDir = wwEnvStr( "WW_SKELOVERLAY_SHOTDIR" );
+	if ( wwEnvIsSet( "WW_SKELOVERLAY_FRAME" ) )
+		st->frame = wwEnvInt( "WW_SKELOVERLAY_FRAME" );
+	if ( wwEnvIsSet( "WW_SKELOVERLAY_FPS" ) ) {
+		const float f = wwEnvStr( "WW_SKELOVERLAY_FPS" ).toFloat();
 		if ( f > 0.0f )
 			st->fps = f;
 	}
@@ -1047,7 +1048,7 @@ void wwSkelOverlayHarness( NifSkope * skope )
 				 * cmp_manager_names.png.
 				 */
 				{
-					const QString dockShot = qEnvironmentVariable( "WW_SKELOVERLAY_DOCKSHOT" );
+					const QString dockShot = wwEnvStr( "WW_SKELOVERLAY_DOCKSHOT" );
 					if ( !dockShot.isEmpty() ) {
 						auto * dk = skope->findChild<QDockWidget *>( QStringLiteral( "SkeletonManagerDock" ) );
 						if ( dk ) {

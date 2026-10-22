@@ -1,4 +1,5 @@
 #include "gametaa.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -158,6 +159,7 @@ struct TaaGpu
 struct TaaState
 {
 	bool init = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool on = false, pinned = false;
 	bool redNoClamp = false, redWrongJitter = false;
 	QString dumpDir;
@@ -188,9 +190,15 @@ struct TaaState
 TaaState & ts()
 {
 	static TaaState s;
-	if ( !s.init ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_TAA" } ) ) {
 		s.init = true;
-		const QString pin = qEnvironmentVariable( "WW_TAA" ).trimmed();
+		s.liveGen = wwSwitchGen();
+		{
+			const TaaState d {};
+			s.dumpFrame = d.dumpFrame;
+		}
+		const QString pin = wwEnvStr( "WW_TAA" ).trimmed();
 		if ( !pin.isEmpty() ) {
 			s.on = pin != QLatin1StringView( "0" ) && pin.compare( QLatin1StringView( "off" ), Qt::CaseInsensitive ) != 0;
 			s.pinned = true;
@@ -200,12 +208,12 @@ TaaState & ts()
 		} else {
 			s.on = QSettings().value( QLatin1StringView( kTaaKey ), false ).toBool();
 		}
-		const QString red = qEnvironmentVariable( "WW_TAA_RED" ).trimmed();
+		const QString red = wwEnvStr( "WW_TAA_RED" ).trimmed();
 		s.redNoClamp = red.contains( QLatin1StringView( "noclamp" ) );
 		s.redWrongJitter = red.contains( QLatin1StringView( "wrongjitter" ) );
-		s.dumpDir = qEnvironmentVariable( "WW_TAA_DUMP" ).trimmed();
+		s.dumpDir = wwEnvStr( "WW_TAA_DUMP" ).trimmed();
 		bool ok = false;
-		const int df = qEnvironmentVariable( "WW_TAA_DUMP_FRAME" ).toInt( &ok );
+		const int df = wwEnvStr( "WW_TAA_DUMP_FRAME" ).toInt( &ok );
 		if ( ok )
 			s.dumpFrame = df;
 	}

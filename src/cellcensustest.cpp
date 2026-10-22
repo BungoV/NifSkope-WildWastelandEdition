@@ -114,6 +114,7 @@ BSD License - see nifskope.h
  * --------------------------------------------------------------------------- */
 
 #include "cellrefs.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellview.h"
 #include "cellworkspace.h"
 #include "esmdata.h"
@@ -287,7 +288,7 @@ const char * const kColumns =
 
 QString envStr( const char * name, const QString & def = QString() )
 {
-	const QByteArray v = qgetenv( name );
+	const QByteArray v = wwEnv( name );
 	return v.isEmpty() ? def : QString::fromLocal8Bit( v );
 }
 
@@ -654,7 +655,7 @@ void stepSpaceBefore( const CensusLoad & ld )
 {
 	QDir().mkpath( g.spaceDir );
 	qputenv( "WW_CELL_VOLUMES", QDir::toNativeSeparators( g.spaceDir ).toLocal8Bit() );
-	if ( qgetenv( "WW_CELL_PROBES" ).isEmpty() ) {   // the bake step did not ask already: the placing only
+	if ( wwEnv( "WW_CELL_PROBES" ).isEmpty() ) {   // the bake step did not ask already: the placing only
 		QDir().mkpath( g.spaceDir + QStringLiteral( "/_probes" ) );
 		qputenv( "WW_CELL_PROBES", QDir::toNativeSeparators( g.spaceDir + QStringLiteral( "/_probes/%1.tsv" ).arg( loadFileBase( ld ) ) ).toLocal8Bit() );
 		qputenv( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );
@@ -1166,7 +1167,7 @@ void finishWalk( const QString & why )
 		markClean();
 		closeMessageBoxes();
 	}
-	if ( qgetenv( "WW_CELL_CENSUS_STAY" ).isEmpty() ) {
+	if ( wwEnv( "WW_CELL_CENSUS_STAY" ).isEmpty() ) {
 		QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
 		// lane PRTP5: quit() is a request: it closes the windows first and a window may refuse, and asked
 		// before the event loop runs it is lost. A window that found nothing left to load sat until its
@@ -1191,7 +1192,7 @@ bool buildPlan( QString * err )
 		( c.interior ? g.planInteriors : g.planExteriors )++;
 	};
 	QString e;
-	if ( qgetenv( "WW_CELL_CENSUS_NOINTERIORS" ).isEmpty() ) {
+	if ( wwEnv( "WW_CELL_CENSUS_NOINTERIORS" ).isEmpty() ) {
 		const QVector<QPair<quint32, QString>> list = EsmWorld::listInteriors( g.plugins, &e );
 		if ( !e.isEmpty() ) {
 			*err = QStringLiteral( "the interiors could not be listed: %1" ).arg( e );
@@ -1348,7 +1349,7 @@ void startWalk()
 	g.wall.start();
 	g_prevHandler = qInstallMessageHandler( captureMessages );
 	QString err;
-	if ( !qgetenv( "WW_CELL_OPEN" ).isEmpty() )
+	if ( !wwEnv( "WW_CELL_OPEN" ).isEmpty() )
 		err = QStringLiteral( "WW_CELL_OPEN is set: it overrides every spec file, so every load of the walk would be the same cell" );
 	else if ( g.plugins.isEmpty() )
 		err = QStringLiteral( "WW_CELL_CENSUS_PLUGINS is not set" );

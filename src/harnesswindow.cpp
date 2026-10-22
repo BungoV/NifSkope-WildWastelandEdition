@@ -10,6 +10,7 @@ See the accompanying LICENSE file for the full text.
 ***** END LICENSE BLOCK *****/
 
 #include "harnesswindow.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "nifskope.h"
 
@@ -209,7 +210,7 @@ QSize viewportSize( const QObject * v )
 //! that moves onto this path sees no change of behaviour at the small end.
 QSize parseSizeEnv( const char * name )
 {
-	const QString v = qEnvironmentVariable( name );
+	const QString v = wwEnvStr( name );
 	if ( !v.contains( QLatin1Char( 'x' ) ) )
 		return QSize();
 	const QStringList parts = v.split( QLatin1Char( 'x' ) );
@@ -271,7 +272,7 @@ QString wwHarnessSettingsSuffix()
 	 * which the gate detects by reading the line this file writes rather than
 	 * by trusting the variable.
 	 */
-	const QString scope = qEnvironmentVariable( "WW_SETTINGS_SCOPE" ).trimmed();
+	const QString scope = wwEnvStr( "WW_SETTINGS_SCOPE" ).trimmed();
 	if ( scope.isEmpty() || scope.size() > 40 )
 		return QString();
 	for ( const QChar c : scope )

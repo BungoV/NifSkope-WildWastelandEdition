@@ -324,6 +324,7 @@ HEADERS += \
 	src/nifcli.h \
 	src/nifmerge.h \
 	src/nifskope.h \
+	src/wwswitch.h \
 	src/shortcutregistry.h \
 	src/skeletontools.h \
 	src/starterscene.h \
@@ -612,6 +613,7 @@ SOURCES += \
 	src/nifcli.cpp \
 	src/nifmerge.cpp \
 	src/nifskope.cpp \
+	src/wwswitch.cpp \
 	src/posetools.cpp \
 	src/nifskope_ui.cpp \
 	src/shortcutregistry.cpp \

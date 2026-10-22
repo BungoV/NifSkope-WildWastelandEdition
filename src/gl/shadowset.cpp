@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "shadowset.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
 #include "gl/cellssr.h"		// the cell view's shared opaque pass (contact shadows read its depth)
@@ -150,6 +151,7 @@ struct Contact
 struct SetState
 {
 	bool init = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	int cascade = 0, contact = 0, terrain = 0, sunPath = 0;
 	bool pinCascade = false, pinContact = false, pinTerrain = false, pinSunPath = false;
 	bool sunPin = false;
@@ -184,11 +186,27 @@ int tierFrom( const QString & e )
 SetState & ss()
 {
 	static SetState s;
-	if ( !s.init ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_SHADOW_", "WW_SUNPATH" } ) ) {
 		s.init = true;
+		s.liveGen = wwSwitchGen();
+		{
+			const SetState d {};
+			s.cascade = d.cascade;
+			s.contact = d.contact;
+			s.terrain = d.terrain;
+			s.sunPath = d.sunPath;
+			s.pinCascade = d.pinCascade;
+			s.pinContact = d.pinContact;
+			s.pinTerrain = d.pinTerrain;
+			s.pinSunPath = d.pinSunPath;
+			s.sunPin = d.sunPin;
+			s.pinElev = d.pinElev;
+			s.pinAz = d.pinAz;
+		}
 		QSettings q;
 		auto tier = [&q]( const char * env, const char * key, int & v, bool & pin ) {
-			const QString e = qEnvironmentVariable( env );
+			const QString e = wwEnvStr( env );
 			if ( !e.trimmed().isEmpty() ) {
 				v = tierFrom( e );
 				pin = true;
@@ -204,23 +222,23 @@ SetState & ss()
 		tier( "WW_SHADOW_TERRAIN", kTerrainKey, s.terrain, s.pinTerrain );
 		tier( "WW_SUNPATH", kSunPathKey, s.sunPath, s.pinSunPath );
 		s.sunPath = std::clamp( s.sunPath, 0, 1 );
-		const QStringList pin = qEnvironmentVariable( "WW_SUNPATH_PIN" ).split( QChar( ',' ), Qt::SkipEmptyParts );
+		const QStringList pin = wwEnvStr( "WW_SUNPATH_PIN" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		if ( pin.size() == 2 ) {
 			bool a = false, b = false;
 			s.pinElev = pin.at( 0 ).toDouble( &a );
 			s.pinAz = pin.at( 1 ).toDouble( &b );
 			s.sunPin = a && b;
 		}
-		s.view = qEnvironmentVariable( "WW_SHADOW_VIEW" ).toInt();
-		s.sync = qEnvironmentVariable( "WW_SHADOW_TERRAIN_SYNC" ) == QLatin1StringView( "1" );
-		s.terrainAll = qEnvironmentVariable( "WW_SHADOW_TERRAIN_ALL" ) == QLatin1StringView( "1" );
-		s.dump = qEnvironmentVariable( "WW_SHADOW_DUMP" ).trimmed();
+		s.view = wwEnvStr( "WW_SHADOW_VIEW" ).toInt();
+		s.sync = wwEnvStr( "WW_SHADOW_TERRAIN_SYNC" ) == QLatin1StringView( "1" );
+		s.terrainAll = wwEnvStr( "WW_SHADOW_TERRAIN_ALL" ) == QLatin1StringView( "1" );
+		s.dump = wwEnvStr( "WW_SHADOW_DUMP" ).trimmed();
 		if ( !QDir::isAbsolutePath( s.dump ) )
 			s.dump.clear();
-		s.echo = qEnvironmentVariable( "WW_SHADOW_ECHO" ).trimmed();
+		s.echo = wwEnvStr( "WW_SHADOW_ECHO" ).trimmed();
 		if ( !QDir::isAbsolutePath( s.echo ) )
 			s.echo.clear();
-		s.reds = qEnvironmentVariable( "WW_SHADOW_RED" ).split( QChar( ',' ), Qt::SkipEmptyParts );
+		s.reds = wwEnvStr( "WW_SHADOW_RED" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		for ( QString & r : s.reds )
 			r = r.trimmed().toLower();
 	}
@@ -258,7 +276,7 @@ constexpr GLenum kTimeElapsed = 0x88BF;
 constexpr GLenum kTimestamp = 0x8E28;
 bool elapsedRed()
 {
-	static const bool r = qEnvironmentVariable( "WW_SHADOW_RED" ).split( QChar( ',' ) ).contains( QStringLiteral( "elapsedtimer" ) );
+	WW_SWITCH_STATIC( bool, r, wwEnvStr( "WW_SHADOW_RED" ).split( QChar( ',' ) ).contains( QStringLiteral( "elapsedtimer" ) ) );
 	return r;
 }
 void timerRead( NifSkopeOpenGLContext::GLFunctions * fn, GpuTimer & t, int slot, bool wait )
@@ -830,8 +848,11 @@ void terrainFrame( Scene * scene, const double toSun[3] )
 	reap();
 	// 3. a new job: the sun moved past the threshold, or the set or the grid changed; one at a time, never mid-upload
 	const double moved = std::acos( std::clamp( dot3( toSun, t.latched ), -1.0, 1.0 ) ) / kDeg;
-	const bool stale = !t.valid || t.pubN != t.N || t.pubX0 != t.x0 || t.pubY0 != t.y0 || t.needRaster || moved > kRelatch;
+	static quint64 sweptGen = 0;	// lane TESTDRIVER1: a live set (the terrain reds) sweeps again
+	const bool stale = sweptGen != wwSwitchGen() || !t.valid || t.pubN != t.N || t.pubX0 != t.x0 || t.pubY0 != t.y0 || t.needRaster
+		|| moved > kRelatch;
 	if ( !j.busy && !t.uploading && stale ) {
+		sweptGen = wwSwitchGen();
 		Terrain & w = j.w;
 		w.N = t.N;
 		w.T = t.T;

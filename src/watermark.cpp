@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "watermark.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "watercurves.h"        // lane WATER6: WaterRasterLayer, the PNG codec
 
@@ -4213,7 +4214,7 @@ void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
 		if ( !QFile::exists( found ) ) {
 			found = QCoreApplication::applicationDirPath() + QStringLiteral( "/../" ) + fixture;
 			if ( !QFile::exists( found ) )
-				found = qEnvironmentVariable( "WW_WATER_DIRECTX_FIXTURE" );
+				found = wwEnvStr( "WW_WATER_DIRECTX_FIXTURE" );
 		}
 		QImage img;
 		const bool loaded = !found.isEmpty() && img.load( found ) && !img.isNull();
@@ -4297,7 +4298,7 @@ bool lodtWaterMarkSelfTest( const QString & path, QString * text, QString * erro
 	/* ---- 1b. THE FLOW GATES (lane WATER4) -----------------------------------
 	 * Synthetic masks through the solver core alone, before any body of this
 	 * file is touched: a red gate here is the METHOD, not the file. */
-	if ( qEnvironmentVariableIsSet( "WW_WATER_FLOW_TEST" ) || true ) {
+	if ( wwEnvIsSet( "WW_WATER_FLOW_TEST" ) || true ) {
 		say( QStringLiteral( "-- the flow gates on synthetic masks --" ) );
 		waterFlowGates( check, say );
 	}
@@ -4333,7 +4334,7 @@ bool lodtWaterMarkSelfTest( const QString & path, QString * text, QString * erro
 	 * renders are cut to its cells.  The neighbour is re-picked so it can
 	 * never be the body under test. */
 	{
-		const QByteArray pin = qgetenv( "WW_WATER_MARK_BODY" );
+		const QByteArray pin = wwEnv( "WW_WATER_MARK_BODY" );
 		bool okPin = false;
 		const int want = pin.toInt( &okPin );
 		LodtWaterBody pb;

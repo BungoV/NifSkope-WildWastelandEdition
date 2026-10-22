@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellcluster.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <algorithm>
 #include <chrono>
@@ -251,7 +252,7 @@ bool wwClusterBuild( const float proj[16], const int vp[4], const std::vector<Ww
 		std::vector<std::int32_t> cluster, light;
 		int offscreen = 0;
 	};
-	const int threads = lights.size() < 128 || std::getenv( "WW_CELL_CLUSTER_THREADS1" ) ? 1
+	const int threads = lights.size() < 128 || wwEnvIsSet( "WW_CELL_CLUSTER_THREADS1" ) ? 1
 		: int( std::clamp( std::thread::hardware_concurrency(), 1u, 8u ) );
 	std::vector<Chunk> chunks( static_cast<size_t>( threads ) );
 	auto work = [&]( int t ) {

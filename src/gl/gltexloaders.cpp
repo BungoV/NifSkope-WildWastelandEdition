@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "gltex.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "message.h"
 #include "model/nifmodel.h"
@@ -905,7 +906,7 @@ GLuint TexCache::texLoadDDS( const QString & filepath, GLenum & target, QByteArr
 	}
 
 	// lane PERF1: WW_TEX_CENSUS=1 lists every upload (bytes, size, levels, format, file) for a memory census
-	static const bool census = qEnvironmentVariableIntValue( "WW_TEX_CENSUS" ) == 1;
+	WW_SWITCH_STATIC( bool, census, wwEnvInt( "WW_TEX_CENSUS" ) == 1 );
 	if ( census && result )
 		std::fprintf( stderr, "tex census: %lld %dx%d levels=%d layers=%d faces=%d fmt=%d %s\n", (long long)texture.size(),
 			int( texture.extent().x ), int( texture.extent().y ), int( texture.levels() ), int( texture.layers() ),
@@ -1277,7 +1278,7 @@ void TexCache::wwFo4SrgbTagAsUnorm( const NifModel * nif, const QString & filepa
 	default:
 		return;
 	}
-	static const bool red = qEnvironmentVariableIntValue( "WW_SRGBTAG1_RED" ) == 1;
+	WW_SWITCH_STATIC( bool, red, wwEnvInt( "WW_SRGBTAG1_RED" ) == 1 );
 	if ( red )
 		return;
 	QOpenGLContext * c = QOpenGLContext::currentContext();

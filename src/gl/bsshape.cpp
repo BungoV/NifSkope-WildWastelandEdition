@@ -1,4 +1,5 @@
 #include "bsshape.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
@@ -323,7 +324,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 	/* lane DECALLIT1: WW_CELL_DECALLIT_HIDE=1 draws no decal (of the lighting shader or the effect shader), =2 no effect
 	 * decal only (the surface's own decals stay, as the wall the effect decal lies on), so a harness reads the wall under
 	 * them at the same pixels (tests/spells/decallit1_cell.sh); never set in a picture bungo looks at */
-	static const int decalHide = qEnvironmentVariableIntValue( "WW_CELL_DECALLIT_HIDE" );
+	WW_SWITCH_STATIC( int, decalHide, wwEnvInt( "WW_CELL_DECALLIT_HIDE" ) );
 	if ( decalHide && !selectionFlags && ( effectDecal || ( decalHide == 1 && surfaceDecal ) ) )
 		return;
 

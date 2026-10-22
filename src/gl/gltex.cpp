@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "gltex.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellspeed.h"
 #include "celltexahead.h"
 
@@ -422,7 +423,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	/* lane PERF1: before this file is read here (one at a time), the files the read-ahead workers already hold go
 	 * up first, so their byte bound frees and they read on in parallel; each binds on this unit, and this file's
 	 * bind below comes last, as the caller expects. Red WW_TEX_DRAIN_RED=1 keeps the old order. */
-	static const bool drainRed = qEnvironmentVariableIntValue( "WW_TEX_DRAIN_RED" ) == 1;
+	WW_SWITCH_STATIC( bool, drainRed, wwEnvInt( "WW_TEX_DRAIN_RED" ) == 1 );
 	if ( !drainRed && !draining && CellTexAhead::armedFor( nif ) ) {
 		draining = true;
 		const QStringList names = CellTexAhead::ready( nif, 4096 );

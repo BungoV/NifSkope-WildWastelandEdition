@@ -34,6 +34,7 @@
    Log: release/ww_gltf_export_dialog.log, ending PASS / FAIL then done. */
 
 #include "gltfexportdialog.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "nifskope.h"
 
 #include <QApplication>
@@ -158,7 +159,7 @@ void runOne( WwGltfDlgState * st, const QString & name, const GltfExportOptions 
 
 void wwGltfExportDialogHarness( NifSkope * skope )
 {
-	if ( !qEnvironmentVariableIsSet( "WW_GLTF_EXPORT_DIALOG" ) )
+	if ( !wwEnvIsSet( "WW_GLTF_EXPORT_DIALOG" ) )
 		return;
 
 	QTimer::singleShot( 800, skope ? static_cast<QObject *>( skope ) : qApp, [skope]() {

@@ -1,4 +1,5 @@
 #include "cellpost.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmdata.h"
 #include "gl/gametaa.h"
@@ -152,6 +153,7 @@ struct PostGpu
 struct PostState
 {
 	bool init = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool dof = false, dofPinned = false, mb = false, mbPinned = false;
 	bool redNoCoc = false, redNoVelocity = false, redNoJitter = false, redBlurRow = false;
 	QString dumpDir;
@@ -178,7 +180,7 @@ struct PostState
 
 bool readPin( const char * env, const char * key, bool & pinned )
 {
-	const QString pin = qEnvironmentVariable( env ).trimmed();
+	const QString pin = wwEnvStr( env ).trimmed();
 	if ( !pin.isEmpty() ) {
 		pinned = true;
 		return pin != QLatin1StringView( "0" ) && pin.compare( QLatin1StringView( "off" ), Qt::CaseInsensitive ) != 0;
@@ -194,17 +196,23 @@ bool readPin( const char * env, const char * key, bool & pinned )
 PostState & ps()
 {
 	static PostState s;
-	if ( !s.init ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CELL_DOF", "WW_CELL_MBLUR", "WW_CELL_POST" } ) ) {
 		s.init = true;
+		s.liveGen = wwSwitchGen();
+		{
+			const PostState d {};
+			s.dumpFrame = d.dumpFrame;
+		}
 		s.dof = readPin( "WW_CELL_DOF", kDofKey, s.dofPinned );
 		s.mb = readPin( "WW_CELL_MBLUR", kMblurKey, s.mbPinned );
-		s.redNoCoc = qEnvironmentVariable( "WW_CELL_DOF_RED" ).contains( QLatin1StringView( "nococ" ) );
-		s.redBlurRow = qEnvironmentVariable( "WW_CELL_DOF_RED" ).contains( QLatin1StringView( "blurrow" ) );
-		s.redNoVelocity = qEnvironmentVariable( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "novelocity" ) );
-		s.redNoJitter = qEnvironmentVariable( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "nojitter" ) );
-		s.dumpDir = qEnvironmentVariable( "WW_CELL_POST_DUMP" ).trimmed();
+		s.redNoCoc = wwEnvStr( "WW_CELL_DOF_RED" ).contains( QLatin1StringView( "nococ" ) );
+		s.redBlurRow = wwEnvStr( "WW_CELL_DOF_RED" ).contains( QLatin1StringView( "blurrow" ) );
+		s.redNoVelocity = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "novelocity" ) );
+		s.redNoJitter = wwEnvStr( "WW_CELL_MBLUR_RED" ).contains( QLatin1StringView( "nojitter" ) );
+		s.dumpDir = wwEnvStr( "WW_CELL_POST_DUMP" ).trimmed();
 		bool ok = false;
-		const int df = qEnvironmentVariable( "WW_CELL_POST_DUMP_FRAME" ).toInt( &ok );
+		const int df = wwEnvStr( "WW_CELL_POST_DUMP_FRAME" ).toInt( &ok );
 		if ( ok )
 			s.dumpFrame = df;
 	}

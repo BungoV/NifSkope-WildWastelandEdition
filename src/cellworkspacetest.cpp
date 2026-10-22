@@ -20,6 +20,7 @@ BSD License - see nifskope.h
  * --------------------------------------------------------------------------- */
 
 #include "cellworkspace.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellclick.h"
 #include "cellpick.h"
@@ -206,7 +207,7 @@ bool runPrtpStage( NifSkope * skope, int stage )
 		add( "PRTP: the kinds add up to All", s > 0 && QString::number( s ) == all,
 			QStringLiteral( "%1 vs %2" ).arg( s ).arg( all ) );
 		add( "PRTP: the markers are drawn", probeShapes( skope ) > 0, QString::number( probeShapes( skope ) ) );
-		const QString shotDir = QString::fromLocal8Bit( qgetenv( "WW_CELLWS_SHOTS" ) );
+		const QString shotDir = QString::fromLocal8Bit( wwEnv( "WW_CELLWS_SHOTS" ) );
 		if ( !shotDir.isEmpty() ) {
 			const QSize sz = composeWindowShot( skope, shotDir + QStringLiteral( "/cell_prtp_placed.png" ) );
 			add( "picture: the PRTP band after Place", sz.width() > 800,
@@ -270,7 +271,7 @@ bool runPrtpStage( NifSkope * skope, int stage )
 		QMenu * pass = dCell->findChild<QMenu *>( QStringLiteral( "CellWorkspaceCellPass" ) );
 		add( "PRTP: Pass is on after Bake", pass && pass->isEnabled() );
 	}
-	const QString shotDir = QString::fromLocal8Bit( qgetenv( "WW_CELLWS_SHOTS" ) );
+	const QString shotDir = QString::fromLocal8Bit( wwEnv( "WW_CELLWS_SHOTS" ) );
 	if ( !shotDir.isEmpty() ) {
 		const QSize sz = composeWindowShot( skope, shotDir + QStringLiteral( "/cell_prtp_baked.png" ) );
 		add( "picture: the PRTP band after Bake", sz.width() > 800,
@@ -547,11 +548,11 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 	 * Each row prints the SIZE, which is the number the window log is checked
 	 * against -- a picture with no stated size proves nothing about the window
 	 * it claims to be of. */
-	const QString shotDir = QString::fromLocal8Bit( qgetenv( "WW_CELLWS_SHOTS" ) );
+	const QString shotDir = QString::fromLocal8Bit( wwEnv( "WW_CELLWS_SHOTS" ) );
 	if ( !shotDir.isEmpty() ) {
 		if ( drawnRow >= 0 )
 			panel->selectEntry( drawnRow, false );
-		const QString tag = QString::fromLocal8Bit( qgetenv( "WW_CELLWS_SHOTTAG" ) );
+		const QString tag = QString::fromLocal8Bit( wwEnv( "WW_CELLWS_SHOTTAG" ) );
 		const QString base = tag.isEmpty() ? QStringLiteral( "cell_workspace" ) : tag;
 		const QSize s1 = composeWindowShot( skope,
 			shotDir + QLatin1Char( '/' ) + base + QStringLiteral( ".png" ) );
@@ -799,7 +800,7 @@ void wwShowMenuGate( NifSkope * skope, const QString & dir )
 	g_sm.skope = skope;
 	g_sm.dir = dir;
 	QDir().mkpath( dir );
-	g_sm.steps = QString::fromLocal8Bit( qgetenv( "WW_SHOWMENU_GATE_STEPS" ) ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+	g_sm.steps = QString::fromLocal8Bit( wwEnv( "WW_SHOWMENU_GATE_STEPS" ) ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
 	QObject::connect( skope, &NifSkope::completeLoading, skope, []( bool, QString & ) {
 		g_sm.loads++;
 		smNote( QStringLiteral( "load %1" ).arg( g_sm.loads ) );
@@ -820,12 +821,12 @@ void wwShowMenuGate( NifSkope * skope, const QString & dir )
 void wwCellWorkspaceHarness( NifSkope * skope )
 {
 	// lane SHOWMENU1: the Show dropdown gate takes the run when it is asked for
-	const QString showMenuDir = QString::fromLocal8Bit( qgetenv( "WW_SHOWMENU_GATE" ) );
+	const QString showMenuDir = QString::fromLocal8Bit( wwEnv( "WW_SHOWMENU_GATE" ) );
 	if ( !showMenuDir.isEmpty() && skope ) {
 		wwShowMenuGate( skope, showMenuDir );
 		return;
 	}
-	const QString reportPath = QString::fromLocal8Bit( qgetenv( "WW_CELLWS_TEST" ) );
+	const QString reportPath = QString::fromLocal8Bit( wwEnv( "WW_CELLWS_TEST" ) );
 	if ( reportPath.isEmpty() || !skope )
 		return;
 
@@ -837,7 +838,7 @@ void wwCellWorkspaceHarness( NifSkope * skope )
 			/* Lane PRTPPLACE: with WW_CELLWS_PRTP set, the PRTP band's stages run on
 			 * the re-opens its own buttons cause; the report is written after each. */
 			static int stage = -1;
-			const bool prtp = !qgetenv( "WW_CELLWS_PRTP" ).isEmpty();
+			const bool prtp = !wwEnv( "WW_CELLWS_PRTP" ).isEmpty();
 			bool done = true;
 			if ( stage < 0 ) {
 				runCellWorkspaceTest( skope, reportPath );
@@ -851,7 +852,7 @@ void wwCellWorkspaceHarness( NifSkope * skope )
 						if ( noCell )   // Place refuses: no re-open is coming, so end here
 							g_rows.append( Row{ false, QStringLiteral( "PRTP: a cell is open to place in" ), QString() } );
 						writeReport( reportPath );
-						if ( noCell && qgetenv( "WW_CELLWS_STAY" ).isEmpty() )
+						if ( noCell && wwEnv( "WW_CELLWS_STAY" ).isEmpty() )
 							QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
 					} );
 					return;
@@ -861,12 +862,12 @@ void wwCellWorkspaceHarness( NifSkope * skope )
 				QTimer::singleShot( 0, skope, [skope, reportPath, now]() {
 					const bool fin = runPrtpStage( skope, now );
 					writeReport( reportPath );
-					if ( fin && qgetenv( "WW_CELLWS_STAY" ).isEmpty() )
+					if ( fin && wwEnv( "WW_CELLWS_STAY" ).isEmpty() )
 						QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
 				} );
 				return;
 			}
-			if ( !done || !qgetenv( "WW_CELLWS_STAY" ).isEmpty() )
+			if ( !done || !wwEnv( "WW_CELLWS_STAY" ).isEmpty() )
 				return;		// leave the window up for a picture
 			QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
 		} );
@@ -892,7 +893,7 @@ void wwCellWorkspaceHarness( NifSkope * skope )
  * --------------------------------------------------------------------------- */
 bool wwWorkspaceRestoreSavesUi()
 {
-	return !qEnvironmentVariable( "WW_CELL_WSRESTORE" ).isEmpty()
+	return !wwEnvStr( "WW_CELL_WSRESTORE" ).isEmpty()
 		&& !wwHarnessSettingsSuffix().isEmpty();
 }
 
@@ -922,7 +923,7 @@ void wsRestoreWrite( const QString & path, const QStringList & lines )
 
 void wwWorkspaceRestoreHarness( NifSkope * skope )
 {
-	const QString reportPath = qEnvironmentVariable( "WW_CELL_WSRESTORE" );
+	const QString reportPath = wwEnvStr( "WW_CELL_WSRESTORE" );
 	if ( reportPath.isEmpty() || !skope )
 		return;
 	if ( wwHarnessSettingsSuffix().isEmpty() ) {
@@ -930,7 +931,7 @@ void wwWorkspaceRestoreHarness( NifSkope * skope )
 		QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
 		return;
 	}
-	const QStringList steps = qEnvironmentVariable( "WW_CELL_WSRESTORE_STEPS" )
+	const QStringList steps = wwEnvStr( "WW_CELL_WSRESTORE_STEPS" )
 		.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
 	// After the window is up: restoreUi() and show() have both run by then.
 	QTimer::singleShot( 1500, skope, [skope, reportPath, steps]() {

@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "rdccapture.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <QCoreApplication>
 #include <QDir>
@@ -28,7 +29,7 @@ QString rdcOutBase;
 //! Where renderdoc.dll lives when it was not injected into this process.
 QString rdcDefaultDll()
 {
-	const QString fromEnv = qEnvironmentVariable( "WW_RDC_DLL" );
+	const QString fromEnv = wwEnvStr( "WW_RDC_DLL" );
 	if ( !fromEnv.isEmpty() )
 		return fromEnv;
 	// The install this was developed against. Only a default: WW_RDC_DLL wins,
@@ -40,7 +41,7 @@ QString rdcDefaultDll()
 
 bool rdcInit()
 {
-	rdcRemaining = qEnvironmentVariableIntValue( "WW_RDC_FRAMES" );
+	rdcRemaining = wwEnvInt( "WW_RDC_FRAMES" );
 	if ( rdcRemaining < 1 )
 		return false;
 
@@ -71,7 +72,7 @@ bool rdcInit()
 		return false;
 	}
 
-	rdcOutBase = qEnvironmentVariable( "WW_RDC_OUT" );
+	rdcOutBase = wwEnvStr( "WW_RDC_OUT" );
 	if ( rdcOutBase.isEmpty() )
 		rdcOutBase = QCoreApplication::applicationDirPath() + QStringLiteral( "/ww_rdc" );
 	rdcApi->SetCaptureFilePathTemplate( rdcOutBase.toLocal8Bit().constData() );

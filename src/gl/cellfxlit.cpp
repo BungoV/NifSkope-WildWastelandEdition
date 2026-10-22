@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellfxlit.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "celllights.h"
 #include "gl/glscene.h"
@@ -40,13 +41,17 @@ struct FxState
 FxState & st()
 {
 	static FxState * s = nullptr;
-	if ( !s ) {
-		s = new FxState;
-		s->strongest = qgetenv( "WW_CELL_FXLIT_PICK" ) == "strong";
-		const QByteArray r = qgetenv( "WW_CELL_FXLIT_RED" );
+	static quint64 liveGen = 0;
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s || wwSwitchMovedFor( liveGen, { "WW_CELL_FXLIT", "WW_CELL_LIT_PROBE" } ) ) {
+		if ( !s )
+			s = new FxState;
+		liveGen = wwSwitchGen();
+		s->strongest = wwEnv( "WW_CELL_FXLIT_PICK" ) == "strong";
+		const QByteArray r = wwEnv( "WW_CELL_FXLIT_RED" );
 		s->red = r == "white" ? 1 : r == "all" ? 2 : r == "nopower" ? 4 : r == "nofade" ? 8 : 0;
-		s->probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
-		s->dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_FXLIT_DUMP" ) );
+		s->probe = wwEnvInt( "WW_CELL_LIT_PROBE" );
+		s->dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_FXLIT_DUMP" ) );
 	}
 	return *s;
 }
@@ -205,7 +210,7 @@ bool wwCellFxLitProbeShape( Scene * scene, int block )
 
 bool wwCellFxRoomLit( Scene * scene, int block )
 {
-	static const bool red = qgetenv( "WW_CELL_FXROOM_RED" ).trimmed() == "game";
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_FXROOM_RED" ).trimmed() == "game" );
 	if ( red || !scene || !wwCellLightsWanted( scene ) )
 		return false;
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );

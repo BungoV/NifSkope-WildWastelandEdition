@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "scenelighting.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gltex.h"
 #include "model/nifmodel.h"
@@ -29,6 +30,7 @@ struct WwSceneState
 {
 	bool init = false;
 	int mode = WwSceneLegacy;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	float ev = 0.0f;
 	int view = WwViewPbrNeutral;	// s5.2: PBR Neutral is the default for judging material colour
 	float probe = -1.0f;
@@ -56,9 +58,22 @@ int wwParseView( const QString & s )
 WwSceneState & st()
 {
 	static WwSceneState s;
-	if ( !s.init ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_LIGHTING_MODE", "WW_LOOKDEV", "WW_EXPOSURE_EV", "WW_VIEW_TRANSFORM", "WW_STUDIO_", "WW_R2A_RED", "WW_R3_", "WW_R4_RED" } ) ) {
 		s.init = true;
-		const QString m = qEnvironmentVariable( "WW_LIGHTING_MODE" ).trimmed().toLower();
+		s.liveGen = wwSwitchGen();
+		{
+			const WwSceneState d {};
+			s.mode = d.mode;
+			s.ev = d.ev;
+			s.view = d.view;
+			s.probe = d.probe;
+			s.pinMode = d.pinMode;
+			s.pinEv = d.pinEv;
+			s.pinView = d.pinView;
+			s.sun = d.sun;
+		}
+		const QString m = wwEnvStr( "WW_LIGHTING_MODE" ).trimmed().toLower();
 		if ( m == QLatin1StringView( "studio" ) ) {
 			s.mode = WwSceneStudio;
 			s.pinMode = true;
@@ -69,36 +84,36 @@ WwSceneState & st()
 			s.pinMode = true;
 		}
 		// WW_LOOKDEV=1 (docs s6.2): the Lookdev mode unless the mode is pinned otherwise
-		if ( qEnvironmentVariable( "WW_LOOKDEV" ).trimmed() == QLatin1StringView( "1" ) && m.isEmpty() ) {
+		if ( wwEnvStr( "WW_LOOKDEV" ).trimmed() == QLatin1StringView( "1" ) && m.isEmpty() ) {
 			s.mode = WwSceneLookdev;
 			s.pinMode = true;
 		}
 		bool ok = false;
-		const double ev = qEnvironmentVariable( "WW_EXPOSURE_EV" ).toDouble( &ok );
+		const double ev = wwEnvStr( "WW_EXPOSURE_EV" ).toDouble( &ok );
 		if ( ok ) {
 			s.ev = float( ev );
 			s.pinEv = true;
 		}
-		const int vt = wwParseView( qEnvironmentVariable( "WW_VIEW_TRANSFORM" ) );
+		const int vt = wwParseView( wwEnvStr( "WW_VIEW_TRANSFORM" ) );
 		if ( vt >= 0 ) {
 			s.view = vt;
 			s.pinView = true;
 		}
-		const double pr = qEnvironmentVariable( "WW_STUDIO_PROBE" ).toDouble( &ok );
+		const double pr = wwEnvStr( "WW_STUDIO_PROBE" ).toDouble( &ok );
 		if ( ok && pr >= 0.0 )
 			s.probe = float( pr );
-		s.cube = qEnvironmentVariable( "WW_STUDIO_CUBE" ).trimmed();
+		s.cube = wwEnvStr( "WW_STUDIO_CUBE" ).trimmed();
 		if ( s.cube.isEmpty() )
 			s.cube = QStringLiteral( "textures/shared/cubemaps/mipblur_defaultoutside1.dds" );
-		s.red = qEnvironmentVariable( "WW_R2A_RED" ).trimmed().toLower();
-		const double sun = qEnvironmentVariable( "WW_STUDIO_SUN" ).toDouble( &ok );
+		s.red = wwEnvStr( "WW_R2A_RED" ).trimmed().toLower();
+		const double sun = wwEnvStr( "WW_STUDIO_SUN" ).toDouble( &ok );
 		if ( ok && sun >= 0.0 )
 			s.sun = float( sun );
-		const QString t = qEnvironmentVariable( "WW_R3_TERM" ).trimmed().toLower();
+		const QString t = wwEnvStr( "WW_R3_TERM" ).trimmed().toLower();
 		s.term = ( t == QLatin1StringView( "diffuse" ) ? 1 : t == QLatin1StringView( "specular" ) ? 2
 			: t == QLatin1StringView( "fresnel" ) ? 3 : 0 );
-		s.red3 = qEnvironmentVariable( "WW_R3_RED" ).trimmed().toLower();
-		s.red4 = qEnvironmentVariable( "WW_R4_RED" ).trimmed().toLower();
+		s.red3 = wwEnvStr( "WW_R3_RED" ).trimmed().toLower();
+		s.red4 = wwEnvStr( "WW_R4_RED" ).trimmed().toLower();
 	}
 	return s;
 }
@@ -182,11 +197,11 @@ QString wwSceneEcho()
 	const WwSceneState & s = st();
 	QString e = QStringLiteral( "lighting=%1(asked=%2) ev=%3(asked=%4) view=%5(asked=%6)" )
 		.arg( s.mode == WwSceneStudio ? QStringLiteral( "studio" ) : s.mode == WwSceneLookdev ? QStringLiteral( "lookdev" ) : QStringLiteral( "legacy" ),
-			qEnvironmentVariableIsSet( "WW_LIGHTING_MODE" ) ? qEnvironmentVariable( "WW_LIGHTING_MODE" ) : QStringLiteral( "unset" ) )
+			wwEnvIsSet( "WW_LIGHTING_MODE" ) ? wwEnvStr( "WW_LIGHTING_MODE" ) : QStringLiteral( "unset" ) )
 		.arg( double( s.ev ), 0, 'f', 2 )
-		.arg( qEnvironmentVariableIsSet( "WW_EXPOSURE_EV" ) ? qEnvironmentVariable( "WW_EXPOSURE_EV" ) : QStringLiteral( "unset" ) )
+		.arg( wwEnvIsSet( "WW_EXPOSURE_EV" ) ? wwEnvStr( "WW_EXPOSURE_EV" ) : QStringLiteral( "unset" ) )
 		.arg( QLatin1StringView( names[s.view] ),
-			qEnvironmentVariableIsSet( "WW_VIEW_TRANSFORM" ) ? qEnvironmentVariable( "WW_VIEW_TRANSFORM" ) : QStringLiteral( "unset" ) );
+			wwEnvIsSet( "WW_VIEW_TRANSFORM" ) ? wwEnvStr( "WW_VIEW_TRANSFORM" ) : QStringLiteral( "unset" ) );
 	if ( s.probe >= 0.0f )
 		e += QStringLiteral( " probe=%1" ).arg( double( s.probe ), 0, 'f', 4 );
 	if ( !s.red.isEmpty() )

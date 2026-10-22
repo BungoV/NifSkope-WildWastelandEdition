@@ -37,6 +37,7 @@
    Lane BUILD9, 2026-09-10. */
 
 #include "nifskope.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "model/nifmodel.h"
 
 #include <QApplication>
@@ -112,12 +113,12 @@ bool wwSameRow( const QRect & a, const QRect & b, int tol )
 
 void wwUiAlignHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_UIALIGN_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_UIALIGN_TEST" ) )
 		return;
 
 	auto * st = new WwAlignState;
-	st->shot = qEnvironmentVariable( "WW_UIALIGN_SHOT" );
-	st->dumpOnly = qEnvironmentVariableIsSet( "WW_UIALIGN_DUMP" );
+	st->shot = wwEnvStr( "WW_UIALIGN_SHOT" );
+	st->dumpOnly = wwEnvIsSet( "WW_UIALIGN_DUMP" );
 
 	QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, st]( bool ok, QString & ) {
 		QTimer::singleShot( 1500, skope, [skope, st, ok]() {

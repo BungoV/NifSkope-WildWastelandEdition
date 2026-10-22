@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellclustergl.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellcluster.h"
 #include "gl/cellunits.h"
@@ -44,19 +45,19 @@ struct Settings
 
 const Settings & settings()
 {
-	static const Settings s = []() {
+	WW_SWITCH_STATIC( Settings, s, []() {
 		Settings t;
-		t.on = qEnvironmentVariable( "WW_CELL_CLUSTER", QStringLiteral( "1" ) ) != QLatin1String( "0" );
-		if ( const int v = qEnvironmentVariableIntValue( "WW_CELL_CLUSTER_TILE" ); v > 0 )
+		t.on = wwEnvStr( "WW_CELL_CLUSTER", QStringLiteral( "1" ) ) != QLatin1String( "0" );
+		if ( const int v = wwEnvInt( "WW_CELL_CLUSTER_TILE" ); v > 0 )
 			t.params.tilePx = std::clamp( v, 8, 512 );
-		if ( const int v = qEnvironmentVariableIntValue( "WW_CELL_CLUSTER_SLICES" ); v > 0 )
+		if ( const int v = wwEnvInt( "WW_CELL_CLUSTER_SLICES" ); v > 0 )
 			t.params.slices = std::clamp( v, 1, 64 );
-		if ( const int v = qEnvironmentVariableIntValue( "WW_CELL_CLUSTER_MAX" ); v > 0 )
+		if ( const int v = wwEnvInt( "WW_CELL_CLUSTER_MAX" ); v > 0 )
 			t.params.maxPerCluster = v;
 		// the refuter: slices culled at their middle depth only, so lights near a slice edge go missing
-		t.params.redMidSlice = qEnvironmentVariable( "WW_CELL_CLUSTER_RED" ) == QLatin1String( "midslice" );
+		t.params.redMidSlice = wwEnvStr( "WW_CELL_CLUSTER_RED" ) == QLatin1String( "midslice" );
 		return t;
-	}();
+	}() );
 	return s;
 }
 
@@ -143,7 +144,7 @@ void echo( const WwClusterGrid & g, int count )
 		.arg( g.buildMs, 0, 'f', 3 ).arg( settings().params.redMidSlice ? QStringLiteral( " (RED midslice)" ) : QString() );
 	// once per change of what the lists hold, not per frame
 	const QString shape = line.section( QStringLiteral( ", build" ), 0, 0 );
-	if ( shape != lastEcho().section( QStringLiteral( ", build" ), 0, 0 ) || qEnvironmentVariableIsSet( "WW_CELL_CLUSTER_ECHO" ) )
+	if ( shape != lastEcho().section( QStringLiteral( ", build" ), 0, 0 ) || wwEnvIsSet( "WW_CELL_CLUSTER_ECHO" ) )
 		std::fprintf( stderr, "%s\n", qPrintable( line ) );
 	lastEcho() = line;
 }

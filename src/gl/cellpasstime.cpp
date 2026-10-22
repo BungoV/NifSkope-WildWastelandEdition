@@ -1,4 +1,5 @@
 #include "cellpasstime.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <QByteArray>
 #include <QElapsedTimer>
@@ -74,7 +75,7 @@ void write()
 
 void start()
 {
-	path = qgetenv( "WW_PROF_SAMPLE" );
+	path = wwEnv( "WW_PROF_SAMPLE" );
 	if ( path.isEmpty() || thread )
 		return;
 	HANDLE gl = nullptr;
@@ -82,11 +83,11 @@ void start()
 	samples = new std::vector<Sample>();
 	timeBeginPeriod( 1 );
 	// WW_PROF_SAMPLE_ALL=1 (started from main): the load too, outside the frames (pass -2), 1M samples at most
-	static const bool all = qEnvironmentVariableIntValue( "WW_PROF_SAMPLE_ALL" ) == 1;
+	WW_SWITCH_STATIC( bool, all, wwEnvInt( "WW_PROF_SAMPLE_ALL" ) == 1 );
 	const size_t cap = all ? 1000000 : 200000;
 	samples->reserve( cap );
 	const DWORD t0 = timeGetTime();
-	thread = new std::thread( [gl, cap, t0]() {
+	thread = new std::thread( [gl, cap, t0, all]() {
 		Sample sm;
 		// allocated here, never while the thread is stopped: it may hold the heap lock (a hang at startup)
 		std::vector<unsigned char> copy( 256 * 1024 );
@@ -179,6 +180,7 @@ struct Slot
 struct State
 {
 	bool loaded = false, on = false, pinned = false, log = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool sync = false;	// WW_CELL_PASSTIME_SYNC=1: a glFinish at each pass edge, so the timestamps hold that pass's work only
 	bool census = false;	// WW_CELL_PASSTIME_CENSUS=1: each pass's samples passed (overdraw) and primitives, in the log line
 	QOpenGLContext * ctx = nullptr;
@@ -203,19 +205,28 @@ struct State
 State & st()
 {
 	static State s;
-	if ( !s.loaded ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_PASSTIME" } ) ) {
 		s.loaded = true;
-		s.clock.start();
-		const QByteArray pin = qgetenv( "WW_CELL_PASSTIME" ).trimmed();
+		s.liveGen = wwSwitchGen();
+		{
+			const State d {};
+			s.pinned = d.pinned;
+		}
+		if ( !s.clock.isValid() )
+			if ( !s.clock.isValid() )
+			if ( !s.clock.isValid() )
+			s.clock.start();
+		const QByteArray pin = wwEnv( "WW_CELL_PASSTIME" ).trimmed();
 		if ( !pin.isEmpty() ) {
 			s.pinned = true;
 			s.on = pin != "0";
 		} else {
 			s.on = QSettings().value( QStringLiteral( "WW/PassTimers" ), false ).toBool();
 		}
-		s.log = qEnvironmentVariableIntValue( "WW_CELL_PASSTIME_LOG" ) == 1;
-		s.sync = qEnvironmentVariableIntValue( "WW_CELL_PASSTIME_SYNC" ) == 1;
-		s.census = qEnvironmentVariableIntValue( "WW_CELL_PASSTIME_CENSUS" ) == 1;
+		s.log = wwEnvInt( "WW_CELL_PASSTIME_LOG" ) == 1;
+		s.sync = wwEnvInt( "WW_CELL_PASSTIME_SYNC" ) == 1;
+		s.census = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) == 1;
 		for ( int & m : s.openMark )
 			m = -1;
 	}
@@ -543,7 +554,7 @@ void memory( qint64 & privateMb, qint64 & workingMb )
 
 void profileFromStart()
 {
-	if ( qEnvironmentVariableIntValue( "WW_PROF_SAMPLE_ALL" ) == 1 )
+	if ( wwEnvInt( "WW_PROF_SAMPLE_ALL" ) == 1 )
 		Sampler::start();
 }
 

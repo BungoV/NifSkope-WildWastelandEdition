@@ -1,4 +1,5 @@
 #include "cellwater.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellhdr.h"
 #include "celllights.h"
@@ -53,17 +54,21 @@ struct WaterState
 WaterState & st()
 {
 	static WaterState * s = nullptr;
-	if ( !s ) {
-		s = new WaterState;
-		const QByteArray pin = qgetenv( "WW_CELL_WATER" ).trimmed();
+	static quint64 liveGen = 0;
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s || wwSwitchMovedFor( liveGen, { "WW_CELL_WATER" } ) ) {
+		if ( !s )
+			s = new WaterState;
+		liveGen = wwSwitchGen();
+		const QByteArray pin = wwEnv( "WW_CELL_WATER" ).trimmed();
 		s->pinned = !pin.isEmpty();
 		s->pinOff = s->pinned ? pin == "0" : !QSettings().value( QStringLiteral( "WW/CellWater" ), true ).toBool();
-		const QByteArray r = qgetenv( "WW_CELL_WATER_RED" );
+		const QByteArray r = wwEnv( "WW_CELL_WATER_RED" );
 		s->red = r == "norefl" ? 1 : r == "nofresnel" ? 2 : r == "nosilt" ? 4 : r == "nospec" ? 8
 			: r == "noshore" ? 16 : r == "nonormal" ? 32 : r == "nodepthfog" ? 64 : r == "nofar" ? 128
 			: r == "nossr" ? 256 : r == "fogunits" ? 512 : r == "hdrraw" ? 1024 : 0;
-		s->probe = qEnvironmentVariableIntValue( "WW_CELL_WATER_PROBE" );
-		s->dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_WATER_DUMP" ) );
+		s->probe = wwEnvInt( "WW_CELL_WATER_PROBE" );
+		s->dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_WATER_DUMP" ) );
 	}
 	return *s;
 }

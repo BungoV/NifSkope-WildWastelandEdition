@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glproperty.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
 
@@ -1060,7 +1061,7 @@ static constexpr bool pbrmFeatureEnabled = true;
  */
 static int wwEnvBool( const char * var )
 {
-	const QString s = qEnvironmentVariable( var ).trimmed().toLower();
+	const QString s = wwEnvStr( var ).trimmed().toLower();
 	if ( s.isEmpty() )
 		return -1;
 	if ( s == QLatin1StringView( "0" ) || s == QLatin1StringView( "off" ) || s == QLatin1StringView( "false" ) )
@@ -1072,8 +1073,8 @@ static int wwEnvBool( const char * var )
 
 static int wwEnvPbrmMode()
 {
-	static const int v = []() {
-		const QString s = qEnvironmentVariable( "WW_PBRM_MODE" ).trimmed().toLower();
+	WW_SWITCH_STATIC( int, v, []() {
+		const QString s = wwEnvStr( "WW_PBRM_MODE" ).trimmed().toLower();
 		if ( s.isEmpty() )
 			return -1;
 		if ( s == QLatin1StringView( "legacy" ) || s == QLatin1StringView( "0" ) )
@@ -1083,7 +1084,7 @@ static int wwEnvPbrmMode()
 		if ( s == QLatin1StringView( "both" ) || s == QLatin1StringView( "legacyandpbr" ) || s == QLatin1StringView( "2" ) )
 			return int( PbrmModeLegacyAndPBR );
 		return -2;
-	}();
+	}() );
 	return v;
 }
 
@@ -1153,25 +1154,25 @@ struct WwPbrmOrderPin
 
 static const WwPbrmOrderPin & wwPbrmOrderPin()
 {
-	static const WwPbrmOrderPin v = []() {
+	WW_SWITCH_STATIC( WwPbrmOrderPin, v, []() {
 		WwPbrmOrderPin p;
 		p.order = pbrmDefaultOrder();
-		p.set = qEnvironmentVariableIsSet( "WW_PBRM_ORDER" );
-		p.asked = qEnvironmentVariable( "WW_PBRM_ORDER" ).trimmed();
+		p.set = wwEnvIsSet( "WW_PBRM_ORDER" );
+		p.asked = wwEnvStr( "WW_PBRM_ORDER" ).trimmed();
 		if ( p.set && !p.asked.isEmpty() ) {
 			QString why;
 			if ( !pbrmParseOrder( p.asked, p.order, why ) )
 				p.refusal = why;
 		}
 		return p;
-	}();
+	}() );
 	return v;
 }
 
 static int wwEnvF0Law()
 {
-	static const int v = []() {
-		const QString s = qEnvironmentVariable( "WW_PBRM_F0_LAW" ).trimmed().toLower();
+	WW_SWITCH_STATIC( int, v, []() {
+		const QString s = wwEnvStr( "WW_PBRM_F0_LAW" ).trimmed().toLower();
 		if ( s.isEmpty() )
 			return -1;
 		if ( s == QLatin1StringView( "auto" ) )
@@ -1179,7 +1180,7 @@ static int wwEnvF0Law()
 		if ( s == QLatin1StringView( "v5" ) )
 			return 1;
 		return -2;
-	}();
+	}() );
 	return v;
 }
 
@@ -1191,9 +1192,10 @@ PbrmF0Law wwPbrmF0Law()
 //! WW_PBRM_SWAP pairs, keys and values normalised to `Materials\...` lower-case.
 static const QHash<QString, QString> & wwPbrmSwapPin()
 {
-	static const QHash<QString, QString> v = []() {
+	using SwapPin = QHash<QString, QString>;	// the macro splits a type at its comma
+	WW_SWITCH_STATIC( SwapPin, v, []() {
 		QHash<QString, QString> h;
-		for ( const QString & pair : qEnvironmentVariable( "WW_PBRM_SWAP" ).split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) ) {
+		for ( const QString & pair : wwEnvStr( "WW_PBRM_SWAP" ).split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) ) {
 			const int gt = pair.indexOf( QLatin1Char( '>' ) );
 			if ( gt <= 0 )
 				continue;
@@ -1204,7 +1206,7 @@ static const QHash<QString, QString> & wwPbrmSwapPin()
 				h.insert( from.toLower(), to );
 		}
 		return h;
-	}();
+	}() );
 	return v;
 }
 
@@ -1350,7 +1352,7 @@ static QString wwPbrmCensusPath;
 bool wwPbrmCensusArmed()
 {
 	if ( wwPbrmCensusArmedState < 0 ) {
-		const QString p = qEnvironmentVariable( "WW_PBRM_CENSUS" ).trimmed();
+		const QString p = wwEnvStr( "WW_PBRM_CENSUS" ).trimmed();
 		wwPbrmCensusArmedState = ( !p.isEmpty() && QDir::isAbsolutePath( p ) ) ? 1 : 0;
 		wwPbrmCensusPath = p;
 	}
@@ -1359,7 +1361,7 @@ bool wwPbrmCensusArmed()
 
 static QString wwPinAsked( const char * var )
 {
-	return qEnvironmentVariableIsSet( var ) ? qEnvironmentVariable( var ) : QStringLiteral( "unset" );
+	return wwEnvIsSet( var ) ? wwEnvStr( var ) : QStringLiteral( "unset" );
 }
 
 static QString wwPinEcho( const char * key, const char * var, const QString & served, int parsed,
@@ -1402,7 +1404,7 @@ static QString wwPbrmCensusHeader()
 	QStringList lookdev;
 	for ( const QString & k : QProcessEnvironment::systemEnvironment().keys() )
 		if ( k.startsWith( QLatin1StringView( "WW_LOOKDEV" ) ) )
-			lookdev << k + QLatin1Char( '=' ) + qEnvironmentVariable( k.toLatin1().constData() );
+			lookdev << k + QLatin1Char( '=' ) + wwEnvStr( k.toLatin1().constData() );
 	lookdev.sort();
 	// lane PBRR2B: the lookdev stage is real; the echo names every WW_LOOKDEV* pin
 	// as asked and the stage as served (weather, keys, sun, cube source, ground)

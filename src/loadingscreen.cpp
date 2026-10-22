@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "loadingscreen.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "animgraph.h"
 #include "model/nifmodel.h"
@@ -475,7 +476,7 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, bool kee
 			res.effectBlocks = live.size();
 			// Which branch went where, one line each. Off by default because a full
 			// rig keeps sixteen of them; on when a placement has to be traced.
-			if ( qEnvironmentVariableIsSet( "WW_LIVEFX_DEBUG" ) ) {
+			if ( wwEnvIsSet( "WW_LIVEFX_DEBUG" ) ) {
 				const QHash<int, int> p2 = childParents( nif );
 				for ( const int r : std::as_const( liveRoots ) ) {
 					const int attach = p2.value( r, rootBlock );

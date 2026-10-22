@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "probegi.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celllights.h"
 #include "probebvh.h"
@@ -311,7 +312,7 @@ GeoMemo & geoMemo()
 }
 bool geoMemoOn()
 {
-	static const bool on = qEnvironmentVariable( "WW_GI_GEOMEMO" ) != QLatin1String( "0" );
+	WW_SWITCH_STATIC( bool, on, wwEnvStr( "WW_GI_GEOMEMO" ) != QLatin1String( "0" ) );
 	return on;
 }
 struct KeyMix
@@ -544,8 +545,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	const int nLive = lights.size();
 	const int nAll = nLive + ( REC ? spec.recordExtra.size() : 0 );
 	// lane STATICCACHE1: the key of what the placed lights' stage reads (never with the GPU record: it wants the pairs)
-	const bool scOn = qEnvironmentVariableIntValue( "WW_CELL_GI_STATICCACHE" ) == 1 && !REC;
-	const bool scRedWithSun = scOn && qgetenv( "WW_CELL_GI_STATICCACHE_RED" ).trimmed() == "withsun";
+	const bool scOn = wwEnvInt( "WW_CELL_GI_STATICCACHE" ) == 1 && !REC;
+	const bool scRedWithSun = scOn && wwEnv( "WW_CELL_GI_STATICCACHE_RED" ).trimmed() == "withsun";
 	StaticLightCache & SC = staticLightCache();
 	QByteArray scKey;
 	bool scHit = false;
@@ -1019,7 +1020,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		R.aoGate = QStringLiteral( "aodecal relight: %1 probes inside a copy's footprint, mean dE %2" )
 			.arg( R.aoProbes ).arg( R.aoDsMean, 0, 'g', 4 );
 	// lane AODECAL1 gate D: WW_CELL_AODECAL_GATE=<file>, the probes near a copy traced with and without the copies
-	if ( aoOn && !qgetenv( "WW_CELL_AODECAL_GATE" ).isEmpty() ) {
+	if ( aoOn && !wwEnv( "WW_CELL_AODECAL_GATE" ).isEmpty() ) {
 		std::vector<float> pp, pv;
 		for ( const Tbk & t : tbks )
 			for ( const TbkProbe & pr : t.probes ) {
@@ -1027,7 +1028,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				pv.insert( pv.end(), pr.skyVis, pr.skyVis + 8 );
 			}
 		QString gl;
-		if ( !aoDecalProbeGate( *spec.aoDecals, soup, pp, pv, QString::fromLocal8Bit( qgetenv( "WW_CELL_AODECAL_GATE" ) ), &gl ) )
+		if ( !aoDecalProbeGate( *spec.aoDecals, soup, pp, pv, QString::fromLocal8Bit( wwEnv( "WW_CELL_AODECAL_GATE" ) ), &gl ) )
 			gl = QStringLiteral( "aodecal gate: the table could not be written" );
 		R.aoGate += QStringLiteral( "; " ) + gl;
 	}
@@ -1382,7 +1383,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			!roomsWanted ? "off" : roomsHit ? "kept" : "built" );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
 	// lane VOLFIT1: the Space stage is the room source (ruling 10-19); after the memo, which keeps ROOMCLAMP1's grid
 	if ( R.roomsOn && spec.space )
-		R.spaceRooms = probeRoomsFromSpace( *spec.space, &R.rooms, QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_GI_RED" ) ) );
+		R.spaceRooms = probeRoomsFromSpace( *spec.space, &R.rooms, QString::fromLatin1( wwEnv( "WW_CELL_VOLUMES_GI_RED" ) ) );
 	const ProbeRooms & RM = R.rooms;
 	// every probe's rooms: its cell's, or in a solid cell the nearest air cell's within two cells
 	std::vector<std::array<int, 2>> probeRoom( up.size(), { { -1, -1 } } );

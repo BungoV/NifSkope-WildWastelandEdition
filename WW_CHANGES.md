@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane TESTDRIVER1 (2026-10-22, branch testdriver1-20261022): switches flip live, one launch per scene
+
+- **Why.** bungo 10-22: "by relaunching nifskope, you introduce a significant delay by loading everything again".
+  Every harness row was its own launch: start-up, plugins, cells and bake loaded again for one switch.
+- **What changed:**
+  - One switch store (`src/wwswitch.h/.cpp`). The process env stays the store; every `WW_*` read goes through
+    `wwEnv*` (1013 sites). `wwSwitchSet`/`wwSwitchReset` change a switch and move a generation counter.
+  - Cached readers follow the generation: 104 function statics (`WW_SWITCH_STATIC`), 18 init-once state functions
+    (pins and reds back to defaults, then re-read), and the GPU caches a switch feeds (light buffer, terrain shadow
+    sweep, draw setup memo).
+  - Each switch has a stage (`src/wwswitchstages.inc`, made by `tools/wwswitch_survey.py`): live 236, shaders 6
+    (programs reload in place), reopen 277 (the cell document re-opens in the same window), tool 115, relaunch 166
+    (harness selectors and start-up state; refused live, listed with the reason).
+  - Driver: `WW_LIVE_STEPS=<file>` or UDP `NifSkope::live <step>` (`WW_LIVE_SERVE=1`, client
+    `tests/spells/ww_live.py`): row, set, unset, reset, apply, wait, settle, shot, path, gpums, status, quit. A
+    picture step first redoes what the sets owe and says so ("redone reopen for ... in N ms").
+  - Red: `WW_TESTDRIVER_RED=relaunch` refuses every live set (the harness then launches once per row).
+- **No set, no change:** the generation stays 0 and every reader computes what it did before.
+- **Gates (batch, notes/testdriver1/BATCH.md):** no-set identity main vs lane exe; live vs relaunch twins per class on
+  Memory Den and Concord 3x3; leak check (first row vs last); wall clock per scene; the port path.
+
 ## Lane HORIZON1 (2026-10-21, branch horizon1-20261021): the AO map and the shadow heightmap on all cores
 
 - **Why.** The terrain sky bake (the 32-unit AO map, `lodgenBakeAoMap`, `.loda`) and the shadow heightmap

@@ -34,6 +34,7 @@
    Log: release/ww_morphcyc_test.log. Lane MORPHCYC1, 2026-09-29. */
 
 #include "morphcycle.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "bodybuild.h"
 #include "gamemanager.h"
@@ -507,11 +508,11 @@ void finish( NifSkope * skope, WwMorphState * st )
 
 void wwMorphCycleHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_MORPHCYC_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_MORPHCYC_TEST" ) )
 		return;
 	auto * st = new WwMorphState;
-	st->shot = qEnvironmentVariable( "WW_MORPHCYC_SHOT" );
-	st->nifs = qEnvironmentVariable( "WW_MORPHCYC_NIFS" ).split( QLatin1Char( ';' ), Qt::SkipEmptyParts );
+	st->shot = wwEnvStr( "WW_MORPHCYC_SHOT" );
+	st->nifs = wwEnvStr( "WW_MORPHCYC_NIFS" ).split( QLatin1Char( ';' ), Qt::SkipEmptyParts );
 
 	QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, st]( bool ok, QString & ) {
 		QTimer::singleShot( 1500, skope, [skope, st, ok]() {

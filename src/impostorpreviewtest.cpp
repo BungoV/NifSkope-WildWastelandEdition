@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "impostorpreviewtest.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/glscene.h"
 #include "gl/impostordraw.h"
@@ -211,7 +212,7 @@ void registerNow( GLView * ogl )
 
 void writeLog()
 {
-	const QString out = qEnvironmentVariable( "WW_IMPOSTOR_LOG" );
+	const QString out = wwEnvStr( "WW_IMPOSTOR_LOG" );
 	if ( out.isEmpty() )
 		return;
 	QFile f( out );
@@ -274,7 +275,7 @@ void endRun( int code )
 QSize forceWindow( NifSkope * skope, GLView * ogl, QWidget * viewportHeader )
 {
 	int rw = 1024, rh = 1024;
-	const QString szEnv = qEnvironmentVariable( "WW_RENDER_SIZE" );
+	const QString szEnv = wwEnvStr( "WW_RENDER_SIZE" );
 	if ( szEnv.contains( QLatin1Char( 'x' ) ) ) {
 		const QStringList parts = szEnv.split( QLatin1Char( 'x' ) );
 		if ( parts.size() == 2 ) {
@@ -534,7 +535,7 @@ void wwImpostorPreviewDraw( Scene * scene )
 
 bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportHeader )
 {
-	const QString modeEnv = qEnvironmentVariable( "WW_IMPOSTOR_PREVIEW" );
+	const QString modeEnv = wwEnvStr( "WW_IMPOSTOR_PREVIEW" );
 	if ( modeEnv.isEmpty() || !skope || !ogl )
 		return false;
 
@@ -553,7 +554,7 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 		return false;
 	}
 
-	const QString lodm = qEnvironmentVariable( "WW_IMPOSTOR_LODM" );
+	const QString lodm = wwEnvStr( "WW_IMPOSTOR_LODM" );
 	if ( lodm.isEmpty() ) {
 		s.log << QStringLiteral( "REFUSED: WW_IMPOSTOR_PREVIEW=%1 with no WW_IMPOSTOR_LODM."
 				" This harness does not bake; point it at a baked <id>_oct.lodm." ).arg( modeEnv );
@@ -562,8 +563,8 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 		return false;
 	}
 
-	const int layer = qEnvironmentVariableIsSet( "WW_IMPOSTOR_LAYER" )
-			? qEnvironmentVariableIntValue( "WW_IMPOSTOR_LAYER" ) : -1;
+	const int layer = wwEnvIsSet( "WW_IMPOSTOR_LAYER" )
+			? wwEnvInt( "WW_IMPOSTOR_LAYER" ) : -1;
 	s.set = impostorCardLoad( lodm, layer );
 	s.log << s.set.notes();
 	if ( !s.set.ok ) {
@@ -574,15 +575,15 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 
 	// The options, all of them nameable from the environment so a picture can
 	// be reproduced from its own log line and nothing is a hidden default.
-	s.opt.depthOffset  = qEnvironmentVariableIntValue( "WW_IMPOSTOR_DEPTH" ) != 0
-			|| !qEnvironmentVariableIsSet( "WW_IMPOSTOR_DEPTH" );
-	s.opt.heightBlend  = qEnvironmentVariableIntValue( "WW_IMPOSTOR_BLEND" ) != 0
-			|| !qEnvironmentVariableIsSet( "WW_IMPOSTOR_BLEND" );
-	s.opt.bakedAo      = qEnvironmentVariableIntValue( "WW_IMPOSTOR_AO" ) != 0
-			|| !qEnvironmentVariableIsSet( "WW_IMPOSTOR_AO" );
-	s.opt.debugChannel = qEnvironmentVariableIntValue( "WW_IMPOSTOR_CHANNEL" );
+	s.opt.depthOffset  = wwEnvInt( "WW_IMPOSTOR_DEPTH" ) != 0
+			|| !wwEnvIsSet( "WW_IMPOSTOR_DEPTH" );
+	s.opt.heightBlend  = wwEnvInt( "WW_IMPOSTOR_BLEND" ) != 0
+			|| !wwEnvIsSet( "WW_IMPOSTOR_BLEND" );
+	s.opt.bakedAo      = wwEnvInt( "WW_IMPOSTOR_AO" ) != 0
+			|| !wwEnvIsSet( "WW_IMPOSTOR_AO" );
+	s.opt.debugChannel = wwEnvInt( "WW_IMPOSTOR_CHANNEL" );
 	{
-		const QString cut = qEnvironmentVariable( "WW_IMPOSTOR_CUT" );
+		const QString cut = wwEnvStr( "WW_IMPOSTOR_CUT" );
 		s.opt.cutRule = cut.compare( QStringLiteral( "mean" ), Qt::CaseInsensitive ) == 0 ? 1
 				: cut.compare( QStringLiteral( "strong" ), Qt::CaseInsensitive ) == 0 ? 2 : 0;
 	}
@@ -623,8 +624,8 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 			: QStringLiteral( "off -- the one-step parallax (%1)" )
 				.arg( rs.searchForced ? QStringLiteral( "WW_IMPOSTOR_SEARCH" ) : QStringLiteral( "the slider's" ) ) );
 	s.log << QStringLiteral( "coverage filter: DECODED per texel, then bilinear -- always (WW_IMPOSTOR_COVFILTER retired)" );
-	if ( qEnvironmentVariableIsSet( "WW_IMPOSTOR_ALPHA" ) )
-		s.opt.alphaThreshold = float( qEnvironmentVariable( "WW_IMPOSTOR_ALPHA" ).toDouble() );
+	if ( wwEnvIsSet( "WW_IMPOSTOR_ALPHA" ) )
+		s.opt.alphaThreshold = float( wwEnvStr( "WW_IMPOSTOR_ALPHA" ).toDouble() );
 	// The cut is in the DECODED fraction domain; a negative one means the set's
 	// own `coverage.floor` decides. Said out loud so a picture names its cut.
 	s.log << ( s.opt.alphaThreshold >= 0.0f
@@ -643,8 +644,8 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 	 * IoU collapse) and what a person inspecting a set by hand may want. It is
 	 * named in the log every run so no picture is taken under a forced
 	 * convention without saying so. */
-	if ( qEnvironmentVariableIsSet( "WW_IMPOSTOR_CONVENTION" ) ) {
-		const QString c = qEnvironmentVariable( "WW_IMPOSTOR_CONVENTION" ).trimmed().toLower();
+	if ( wwEnvIsSet( "WW_IMPOSTOR_CONVENTION" ) ) {
+		const QString c = wwEnvStr( "WW_IMPOSTOR_CONVENTION" ).trimmed().toLower();
 		if ( c == QLatin1String( "spec" ) || c == QLatin1String( "spec1" ) ) {
 			s.opt.forceConvention = true;
 			s.opt.convention = ImpostorOct::Convention::SpecLiteral;
@@ -667,20 +668,20 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 	 * With this set, the same azimuth run produces the shuffled card sheet the
 	 * rank test needs in order to show that the honest run beat chance. */
 	s.opt.shuffleFrames = ( s.mode == Mode::IouShuffled )
-			|| qEnvironmentVariableIntValue( "WW_IMPOSTOR_SHUFFLE" ) != 0;
+			|| wwEnvInt( "WW_IMPOSTOR_SHUFFLE" ) != 0;
 	if ( s.opt.shuffleFrames )
 		s.log << QStringLiteral( "SHUFFLED: the frame choice is deliberately wrong (red control)" );
 
 	/* THE SWAY, on request (CARDFIX1 step 6): the drawer's wind shear at a fixed
 	 * amplitude and phase, so a run of phases makes a moving picture. 0 = still. */
-	s.opt.swayAmplitude = float( qEnvironmentVariable( "WW_IMPOSTOR_SWAY_AMP" ).toDouble() );
-	s.opt.swayPhase = float( qEnvironmentVariable( "WW_IMPOSTOR_SWAY_PHASE" ).toDouble() );
+	s.opt.swayAmplitude = float( wwEnvStr( "WW_IMPOSTOR_SWAY_AMP" ).toDouble() );
+	s.opt.swayPhase = float( wwEnvStr( "WW_IMPOSTOR_SWAY_PHASE" ).toDouble() );
 	if ( s.opt.swayAmplitude != 0.0f )
 		s.log << QStringLiteral( "sway: amplitude %1, phase %2 rad" ).arg( s.opt.swayAmplitude ).arg( s.opt.swayPhase );
 
 	/* THE SECOND SET. Loaded for every mode, not just `pair`, so a `show` run
 	 * can put two grids on the screen for a picture; only `pair` measures it. */
-	const QString lodm2 = qEnvironmentVariable( "WW_IMPOSTOR_LODM2" );
+	const QString lodm2 = wwEnvStr( "WW_IMPOSTOR_LODM2" );
 	if ( !lodm2.isEmpty() ) {
 		s.set2 = impostorCardLoad( lodm2, layer );
 		for ( const QString & line : s.set2.notes() )
@@ -692,7 +693,7 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 			return false;
 		}
 		s.haveSecond = true;
-		s.forceN = qEnvironmentVariableIntValue( "WW_IMPOSTOR_FORCE_N" );
+		s.forceN = wwEnvInt( "WW_IMPOSTOR_FORCE_N" );
 		if ( s.forceN >= 2 && s.forceN <= 16 && s.forceN != s.set2.oct ) {
 			s.log << QStringLiteral( "FORCED N: set B's grid is %1 but is being read as %2"
 					" (red control -- a GLOBAL N is this bug)" ).arg( s.set2.oct ).arg( s.forceN );
@@ -748,7 +749,7 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 		const QSize got = forceWindow( skope, ogl, viewportHeader );
 		st.log << QStringLiteral( "viewport %1x%2" ).arg( got.width() ).arg( got.height() );
 		st.log << QStringLiteral( "requested %1" ).arg(
-				qEnvironmentVariable( "WW_RENDER_SIZE", QStringLiteral( "1024x1024 (default)" ) ) );
+				wwEnvStr( "WW_RENDER_SIZE", QStringLiteral( "1024x1024 (default)" ) ) );
 
 		const QColor clear = ogl->clearColor().toQColor();
 		Scene * scene = ogl->getScene();
@@ -814,9 +815,9 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 			 *
 			 * Every picture goes through the same ortho fit as the iou mode, so
 			 * the two silhouettes being compared were taken at one scale. */
-			const float elev = qEnvironmentVariableIsSet( "WW_IMPOSTOR_ELEV" )
-					? float( qEnvironmentVariable( "WW_IMPOSTOR_ELEV" ).toDouble() ) : 15.0f;
-			const QString stem = qEnvironmentVariable( "WW_IMPOSTOR_SHOT" );
+			const float elev = wwEnvIsSet( "WW_IMPOSTOR_ELEV" )
+					? float( wwEnvStr( "WW_IMPOSTOR_ELEV" ).toDouble() ) : 15.0f;
+			const QString stem = wwEnvStr( "WW_IMPOSTOR_SHOT" );
 			double sumSame = 0.0, sumOpp = 0.0, worst = 1e9;
 			int counted = 0, positive = 0;
 			for ( int k = 0; k < 8; k++ ) {
@@ -927,7 +928,7 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 					st.log << QStringLiteral( "  B %1" ).arg( line );
 			}
 			// And one picture, so the row has a thing a person can look at.
-			const QString stem = qEnvironmentVariable( "WW_IMPOSTOR_SHOT" );
+			const QString stem = wwEnvStr( "WW_IMPOSTOR_SHOT" );
 			if ( !stem.isEmpty() ) {
 				aimCamera( ogl, st.set, st.offset, 45.0f, 20.0f, widen, &mid );
 				st.suppressScene = true;
@@ -956,12 +957,12 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 			 * MESH FIRST, THEN CARD, at one camera per view: the pair is the
 			 * comparison, and a camera that moved between the two halves would
 			 * make every number here a measure of the camera. */
-			const QString stem = qEnvironmentVariable( "WW_IMPOSTOR_SHOT",
+			const QString stem = wwEnvStr( "WW_IMPOSTOR_SHOT",
 					QApplication::applicationDirPath() + QStringLiteral( "/ww_impostor_orbit" ) );
-			const int nAz = qBound( 1, qEnvironmentVariableIsSet( "WW_IMPOSTOR_ORBIT_AZ" )
-					? qEnvironmentVariableIntValue( "WW_IMPOSTOR_ORBIT_AZ" ) : 12, 64 );
+			const int nAz = qBound( 1, wwEnvIsSet( "WW_IMPOSTOR_ORBIT_AZ" )
+					? wwEnvInt( "WW_IMPOSTOR_ORBIT_AZ" ) : 12, 64 );
 			QList<float> elevs;
-			for ( const QString & piece : qEnvironmentVariable( "WW_IMPOSTOR_ORBIT_ELEV",
+			for ( const QString & piece : wwEnvStr( "WW_IMPOSTOR_ORBIT_ELEV",
 					QStringLiteral( "15,45" ) ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 				bool okNum = false;
 				const float e = float( piece.trimmed().toDouble( &okNum ) );
@@ -984,7 +985,7 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 			 * list of `azim:elev` pairs. Unset, the mode is the even turn it
 			 * has always been, and every existing caller is untouched. */
 			QList<QPair<float, float>> views;
-			for ( const QString & piece : qEnvironmentVariable( "WW_IMPOSTOR_ORBIT_VIEWS" )
+			for ( const QString & piece : wwEnvStr( "WW_IMPOSTOR_ORBIT_VIEWS" )
 					.split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 				const QStringList ab = piece.trimmed().split( QLatin1Char( ':' ) );
 				if ( ab.size() != 2 )
@@ -1025,14 +1026,14 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 			 * case where the card's normal SPACE decides which side is lit, so
 			 * it is the side-light picture's switch. Neither is persisted: the
 			 * members are set on this window only, never in QSettings. */
-			const int meshChannel = qEnvironmentVariableIntValue( "WW_IMPOSTOR_MESH_CHANNEL" );
+			const int meshChannel = wwEnvInt( "WW_IMPOSTOR_MESH_CHANNEL" );
 			/* WW_IMPOSTOR_MESH_PBRM=1 (IMPOSTORPBRM1's pictures): the mesh takes the
 			 * bake's .pbrm retarget, so channel 10 on the mesh half is the source's
 			 * own roughness / metallic. The .pbrm is read from WW_LODGEN_DATA_ROOT
 			 * first, as the bake reads it. */
-			if ( qEnvironmentVariableIntValue( "WW_IMPOSTOR_MESH_PBRM" ) == 1 ) {
+			if ( wwEnvInt( "WW_IMPOSTOR_MESH_PBRM" ) == 1 ) {
 				for ( const QString & l : wwPbrmRetargetScene( ogl->getScene(),
-						qEnvironmentVariable( "WW_LODGEN_DATA_ROOT" ) ) )
+						wwEnvStr( "WW_LODGEN_DATA_ROOT" ) ) )
 					st.log << l;
 			}
 
@@ -1040,7 +1041,7 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 				st.log << QStringLiteral( "orbit mesh half through LOD channel %1 (WW_IMPOSTOR_MESH_CHANNEL)" )
 						.arg( meshChannel );
 			{
-				const QStringList lp = qEnvironmentVariable( "WW_IMPOSTOR_LIGHT" )
+				const QStringList lp = wwEnvStr( "WW_IMPOSTOR_LIGHT" )
 						.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
 				bool okD = false, okP = false;
 				if ( lp.size() == 2 ) {
@@ -1058,7 +1059,7 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 									.arg( double( ogl->declination ), 0, 'f', 1 )
 									.arg( double( ogl->planarAngle ), 0, 'f', 1 )
 							: QStringLiteral( "orbit light: WW_IMPOSTOR_LIGHT '%1' REFUSED, want declination,planar;"
-									" the headlight stays" ).arg( qEnvironmentVariable( "WW_IMPOSTOR_LIGHT" ) ) );
+									" the headlight stays" ).arg( wwEnvStr( "WW_IMPOSTOR_LIGHT" ) ) );
 			}
 
 			double sumIou = 0.0, sumCol = 0.0;
@@ -1109,7 +1110,7 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 
 					// THE SELECTION, per view, on request (CARDFIX1 step 5): the frames the
 					// drawer chose here and their weights, so a gate can check the rule.
-					if ( qEnvironmentVariableIntValue( "WW_IMPOSTOR_ORBIT_SELECT" ) != 0 )
+					if ( wwEnvInt( "WW_IMPOSTOR_ORBIT_SELECT" ) != 0 )
 						for ( const QString & line : ImpostorDraw::describeSelection( scene, st.set, st.offset, st.opt ) )
 							st.log << QStringLiteral( "  select %1" ).arg( line );
 
@@ -1172,14 +1173,14 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 			 * them, because grabbing a 16-pixel framebuffer would also shrink
 			 * the LINE WIDTH of everything else the scene draws.
 			 */
-			const QString stem = qEnvironmentVariable( "WW_IMPOSTOR_SHOT",
+			const QString stem = wwEnvStr( "WW_IMPOSTOR_SHOT",
 					QApplication::applicationDirPath() + QStringLiteral( "/ww_impostor_dist" ) );
-			const float azim = qEnvironmentVariableIsSet( "WW_IMPOSTOR_AZIM" )
-					? float( qEnvironmentVariable( "WW_IMPOSTOR_AZIM" ).toDouble() ) : 45.0f;
-			const float elev = qEnvironmentVariableIsSet( "WW_IMPOSTOR_ELEV" )
-					? float( qEnvironmentVariable( "WW_IMPOSTOR_ELEV" ).toDouble() ) : 15.0f;
+			const float azim = wwEnvIsSet( "WW_IMPOSTOR_AZIM" )
+					? float( wwEnvStr( "WW_IMPOSTOR_AZIM" ).toDouble() ) : 45.0f;
+			const float elev = wwEnvIsSet( "WW_IMPOSTOR_ELEV" )
+					? float( wwEnvStr( "WW_IMPOSTOR_ELEV" ).toDouble() ) : 15.0f;
 			QList<int> targets;
-			for ( const QString & piece : qEnvironmentVariable( "WW_IMPOSTOR_DIST_PX",
+			for ( const QString & piece : wwEnvStr( "WW_IMPOSTOR_DIST_PX",
 					QStringLiteral( "256,128,64,32,16" ) ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 				bool okNum = false;
 				const int p = piece.trimmed().toInt( &okNum );
@@ -1229,7 +1230,7 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 						.arg( ( w1 && w2 ) ? QStringLiteral( "written" ) : QStringLiteral( "SAVE FAILED" ) );
 			}
 		} else if ( st.mode == Mode::Channels ) {
-			const QString stem = qEnvironmentVariable( "WW_IMPOSTOR_SHOT",
+			const QString stem = wwEnvStr( "WW_IMPOSTOR_SHOT",
 					QApplication::applicationDirPath() + QStringLiteral( "/ww_impostor" ) );
 			const int saved = st.opt.debugChannel;
 			for ( int ch = 0; ch <= 12; ch++ ) {

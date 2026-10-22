@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellssr.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellssgi.h"
 #include "cellunits.h"
 
@@ -37,6 +38,7 @@ constexpr float kSsrNear = 15.0f, kSsrFarMax = 353840.0f;
 struct SsrState
 {
 	bool loaded = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	int red = 0;			// 1 off (computed, not applied), 2 nogap, 4 nofade
 	int probe = 0;			// WW_CELL_LIT_PROBE: another lane's probe reads its own term, without the reflection
 	QString dump;			// WW_CELL_SSR_DUMP
@@ -51,13 +53,15 @@ struct SsrState
 SsrState & ssr()
 {
 	static SsrState s;
-	if ( !s.loaded ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_SSR", "WW_CELL_LIT_PROBE" } ) ) {
 		s.loaded = true;
-		const QByteArray red = qgetenv( "WW_CELL_SSR_RED" ).trimmed();
+		s.liveGen = wwSwitchGen();
+		const QByteArray red = wwEnv( "WW_CELL_SSR_RED" ).trimmed();
 		s.red = red == "off" ? 1 : red == "nogap" ? 2 : red == "nofade" ? 4 : 0;
-		s.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_SSR_DUMP" ) );
-		s.probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
-		const QByteArray pinOn = qgetenv( "WW_CELL_SSR" ).trimmed(), pinExt = qgetenv( "WW_CELL_SSR_EXT" ).trimmed();
+		s.dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_SSR_DUMP" ) );
+		s.probe = wwEnvInt( "WW_CELL_LIT_PROBE" );
+		const QByteArray pinOn = wwEnv( "WW_CELL_SSR" ).trimmed(), pinExt = wwEnv( "WW_CELL_SSR_EXT" ).trimmed();
 		s.pinOn = !pinOn.isEmpty();
 		s.pinExt = !pinExt.isEmpty();
 		s.on = s.pinOn ? pinOn != "0" : QSettings().value( QStringLiteral( "WW/CellSsr" ), true ).toBool();

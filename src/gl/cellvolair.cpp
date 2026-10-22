@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellvolair.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
 
 #include "gl/cellhdr.h"
@@ -54,6 +55,7 @@ constexpr float kNearMin = 16.0f;	// game units
 struct VaState
 {
 	bool loaded = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool on = false, pinned = false;
 	int farTier = 0;	// lane FARGRID1: the Far Air row, 0 Off .. 4 Ultra (the pin WW_CELL_AIR_FAR wins)
 	bool farPinned = false;
@@ -70,16 +72,26 @@ struct VaState
 VaState & vs()
 {
 	static VaState s;
-	if ( !s.loaded ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_AIR", "WW_CELL_VOLAIR" } ) ) {
 		s.loaded = true;
-		const QByteArray pin = qgetenv( "WW_CELL_AIR" );
+		s.liveGen = wwSwitchGen();
+		{
+			const VaState d {};
+			s.pinned = d.pinned;
+			s.farPinned = d.farPinned;
+			s.red = d.red;
+			s.terms = d.terms;
+			s.opt = d.opt;
+		}
+		const QByteArray pin = wwEnv( "WW_CELL_AIR" );
 		if ( !pin.isEmpty() ) {
 			s.pinned = true;
 			s.on = pin.trimmed() != "0";
 		} else {
 			s.on = QSettings().value( QStringLiteral( "WW/VolAir" ), false ).toBool();
 		}
-		for ( const QByteArray & t : qgetenv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
+		for ( const QByteArray & t : wwEnv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
@@ -87,23 +99,23 @@ VaState & vs()
 				: r == "echoall" ? 8388608
 				: r == "farnoterr" ? 16777216 : r == "farseam" ? 33554432 : r == "farjitter" ? 67108864 : 0;	// lane FARGRID1: the far reds
 		}
-		const QByteArray opt = qgetenv( "WW_CELL_AIR_OPT" ).trimmed();
+		const QByteArray opt = wwEnv( "WW_CELL_AIR_OPT" ).trimmed();
 		if ( !opt.isEmpty() )
 			s.opt = opt.toInt() & 3;
-		const QByteArray terms = qgetenv( "WW_CELL_AIR_TERMS" ).trimmed();
+		const QByteArray terms = wwEnv( "WW_CELL_AIR_TERMS" ).trimmed();
 		if ( !terms.isEmpty() )
 			s.terms = terms.toInt() & 15;
-		s.probe = qEnvironmentVariableIntValue( "WW_CELL_AIR_PROBE" );
-		s.fogBlend = qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_FOGBLEND" ) == 1 ? 1 : 0;
+		s.probe = wwEnvInt( "WW_CELL_AIR_PROBE" );
+		s.fogBlend = wwEnvInt( "WW_CELL_VOLAIR_FOGBLEND" ) == 1 ? 1 : 0;
 		if ( s.fogBlend && ( s.red & 64 ) )
 			s.fogBlend = 2;	// red blendnear: the fog colour by the air's own 1 - T, no start distance (must fail B)
 		s.farTier = std::clamp( QSettings().value( QStringLiteral( "WW/VolAirFar" ), 0 ).toInt(), 0, 4 );	// lane FARGRID1
-		const QByteArray farPin = qgetenv( "WW_CELL_AIR_FAR" ).trimmed();	// lane FARGRID1: the pin wins
+		const QByteArray farPin = wwEnv( "WW_CELL_AIR_FAR" ).trimmed();	// lane FARGRID1: the pin wins
 		if ( !farPin.isEmpty() ) {
 			s.farPinned = true;
 			s.farTier = std::clamp( farPin.toInt(), 0, 4 );
 		}
-		s.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AIR_DUMP" ) );
+		s.dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_AIR_DUMP" ) );
 	}
 	return s;
 }
@@ -431,7 +443,7 @@ VaMedium vaFit( const float K[6][4], bool wrong, bool farFit )
 		m.band = false;
 	}
 	// measurement pin (bungo 10-16): WW_CELL_AIR_DENSITY=<x> scales the fitted density, to show a lamp's haze alone
-	static const float densPin = qEnvironmentVariableIsSet( "WW_CELL_AIR_DENSITY" ) ? qgetenv( "WW_CELL_AIR_DENSITY" ).toFloat() : 1.0f;
+	WW_SWITCH_STATIC( float, densPin, wwEnvIsSet( "WW_CELL_AIR_DENSITY" ) ? wwEnv( "WW_CELL_AIR_DENSITY" ).toFloat() : 1.0f );
 	if ( densPin > 0.0f )
 		m.sigma0 *= densPin;
 	return m;
@@ -671,7 +683,7 @@ static void vaPassInner( Scene * scene, bool run );
 
 void wwVolAirPass( Scene * scene, bool run )
 {
-	static const bool prof = qEnvironmentVariableIntValue( "WW_CELL_AIR_PROF" ) == 1;	// lane PERF1: where the pass's CPU goes
+	WW_SWITCH_STATIC( bool, prof, wwEnvInt( "WW_CELL_AIR_PROF" ) == 1 );	// lane PERF1: where the pass's CPU goes
 	QElapsedTimer pt;
 	pt.start();
 	vaPassInner( scene, run );
@@ -712,7 +724,7 @@ static void vaPassInner( Scene * scene, bool run )
 		return;
 	}
 	QElapsedTimer timer;
-	const bool timed = !s.dump.isEmpty() || qEnvironmentVariableIsSet( "WW_CELL_AIR_TIME" );
+	const bool timed = !s.dump.isEmpty() || wwEnvIsSet( "WW_CELL_AIR_TIME" );
 	if ( timed ) {
 		fn->glFinish();
 		timer.start();
@@ -788,7 +800,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * fixture's glow is measured in the same air wherever it stands. The slices end where the air reaches 99%
 	 * opacity (4.6 / sigma0, held between 2000 and 20000 units), or at <far> when given as "<sigma0>,<far>": a short
 	 * far end makes the 64 slices thin near the fixture (the booth's measuring runs). Unset: the fitted medium. */
-	const QStringList boothArg = qEnvironmentVariable( "WW_CELL_BOOTH_AIR" ).split( QLatin1Char( ',' ) );
+	const QStringList boothArg = wwEnvStr( "WW_CELL_BOOTH_AIR" ).split( QLatin1Char( ',' ) );
 	const float boothAir = boothArg.value( 0 ).toFloat();
 	if ( boothAir > 0.0f ) {
 		M.sigma0 = boothAir;
@@ -1362,10 +1374,10 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	VaState & s = vs();
 	if ( s.inPass )
 		return;
-	static const bool fogProbeFrame = [] {
-		const auto p = qgetenv( "WW_LOOKDEV_FOGPROBE" ).split( ',' );
+	WW_SWITCH_STATIC( bool, fogProbeFrame, [] {
+		const auto p = wwEnv( "WW_LOOKDEV_FOGPROBE" ).split( ',' );
 		return p.size() >= 3 && p[2].trimmed().toFloat() > 8.5f;
-	}();
+	}() );
 	const bool probeFrame = s.probe == 1 || s.probe == 2 || fogProbeFrame;
 	if ( probes != probeFrame )
 		return;

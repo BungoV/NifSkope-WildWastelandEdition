@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "nifskope.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "ui_nifskope.h"
 
 #include "bakegeom.h"
@@ -2701,7 +2702,7 @@ NifSkope::NifSkope( bool background )
 		[this]( const QModelIndex & index ) {
 			// TEMP DIAGNOSTIC (WW_PERF_TEST): the flat list stops somewhere in here
 			auto note = []( const char * what ) {
-				if ( !qEnvironmentVariableIsSet( "WW_PERF_TEST" ) )
+				if ( !wwEnvIsSet( "WW_PERF_TEST" ) )
 					return;
 				QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
 				if ( f.open( QIODevice::Append | QIODevice::Text ) )
@@ -6535,7 +6536,7 @@ static void hideBlockListDragCard()
  */
 static QString wwDragLogPath()
 {
-	const QString path = qEnvironmentVariable( "WW_DRAG_LOG" );
+	const QString path = wwEnvStr( "WW_DRAG_LOG" );
 	return path.isEmpty()
 		? QApplication::applicationDirPath() + QStringLiteral( "/ww_drag.log" ) : path;
 }
@@ -6576,7 +6577,7 @@ static void wwDragLogRestart()
 	// WW_DRAG_LOG=off for anyone who does not want a file appearing beside the
 	// executable. It is a few KB holding one drag, and it is the only window
 	// there is onto a native drag, so it is on unless refused.
-	if ( qEnvironmentVariable( "WW_DRAG_LOG" ).compare( QLatin1String( "off" ),
+	if ( wwEnvStr( "WW_DRAG_LOG" ).compare( QLatin1String( "off" ),
 		Qt::CaseInsensitive ) == 0 ) {
 		if ( wwDragLogFile ) {
 			delete wwDragLogFile;
@@ -7812,7 +7813,7 @@ void NifSkope::select( const QModelIndex & index )
 
 	// TEMP DIAGNOSTIC (WW_PERF_TEST): stage timing for the slow click-select
 	QElapsedTimer perfT;
-	const bool perfOn = qEnvironmentVariableIsSet( "WW_PERF_TEST" );
+	const bool perfOn = wwEnvIsSet( "WW_PERF_TEST" );
 	if ( perfOn )
 		perfT.start();
 	auto perfMark = [&perfT, perfOn]( const char * what ) {
@@ -10153,9 +10154,9 @@ void NifSkope::showExternalNifDropMenu( const QStringList & files, const QPoint 
 
 	// A harness enters below Qt's native drag manager. Bypass only the modal
 	// choice while retaining this exact method and all of its file policy.
-	if ( qEnvironmentVariableIsSet( "WW_EXTERNAL_DROP_TEST" ) ) {
+	if ( wwEnvIsSet( "WW_EXTERNAL_DROP_TEST" ) ) {
 		bool ok = false;
-		const int choice = qEnvironmentVariableIntValue( "WW_EXTERNAL_DROP_CHOICE", &ok );
+		const int choice = wwEnvInt( "WW_EXTERNAL_DROP_CHOICE", &ok );
 		if ( ok ) {
 			performExternalNifDrop( valid, choice );
 			return;
@@ -10286,7 +10287,7 @@ void NifSkope::load()
 
 	// TEMP DIAGNOSTIC (WW_PERF_TEST): phase timing of the real load path
 	QElapsedTimer perfT;
-	const bool perfOn = qEnvironmentVariableIsSet( "WW_PERF_TEST" );
+	const bool perfOn = wwEnvIsSet( "WW_PERF_TEST" );
 	if ( perfOn )
 		perfT.start();
 	auto perfMark = [&perfT, perfOn]( const char * what ) {
@@ -10444,7 +10445,7 @@ void NifSkope::load()
 			 * picture of the region needs. The terrain builder owns createNew(),
 			 * so the objects go under the root it has just made. Unset, none of
 			 * this runs and the document is exactly the terrain document. */
-			const QString lodlObjects = qEnvironmentVariable( "WW_LODL_OBJECTS" );
+			const QString lodlObjects = wwEnvStr( "WW_LODL_OBJECTS" );
 			if ( loaded && !lodlObjects.isEmpty() ) {
 				LodiSceneSpec ospec;
 				lodiSpecFromEnv( ospec );
@@ -10497,7 +10498,7 @@ void NifSkope::load()
 		 * run went on with the file's spec (for a harness, the empty fixture): sky-only pictures that still looked like
 		 * a measurement (the Concord window gate, block size 2). Only a harness sets WW_CELL_OPEN, so a bad line stops
 		 * the run: "CELL OPEN REFUSED: <why>" in the notes, exit 88, no picture. */
-		if ( !fromEnv && !cverr.isEmpty() && !qgetenv( "WW_CELL_OPEN" ).isEmpty() ) {
+		if ( !fromEnv && !cverr.isEmpty() && !wwEnv( "WW_CELL_OPEN" ).isEmpty() ) {
 			const QByteArray line = ( QStringLiteral( "CELL OPEN REFUSED: " ) + cverr ).toUtf8();
 			std::fprintf( stderr, "%s\n", line.constData() );
 			std::fflush( stderr );
@@ -10526,7 +10527,7 @@ void NifSkope::load()
 			openCellRecentAdd( fname );
 			/* lane CELLALL1 (harness only): WW_CELL_ALSO_LOAD=<nif> adds that NIF to Loaded NIFs beside the cell once
 			 * the load returns, so a gate can show the cell's passes survive a Loaded NIF (glview.cpp, cellFirst) */
-			const QString alsoLoad = qEnvironmentVariable( "WW_CELL_ALSO_LOAD" ).trimmed();
+			const QString alsoLoad = wwEnvStr( "WW_CELL_ALSO_LOAD" ).trimmed();
 			if ( !alsoLoad.isEmpty() ) {
 				QTimer::singleShot( 0, this, [this, alsoLoad]() {
 					const bool ok = addWorkspaceDocumentFromFile( alsoLoad );

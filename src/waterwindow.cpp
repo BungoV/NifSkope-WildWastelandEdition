@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "waterwindow.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "watercurves.h"
 #include "watermark.h"
@@ -2215,10 +2216,10 @@ void runWindowSelfTest( QMainWindow * mw )
 	}
 
 	// ---- the file ----------------------------------------------------------
-	const QString file = QString::fromLocal8Bit( qgetenv( "WW_WATER_WINDOW_FILE" ) );
+	const QString file = QString::fromLocal8Bit( wwEnv( "WW_WATER_WINDOW_FILE" ) );
 	const bool opened = !file.isEmpty() && win->openFile( file );
 	check( QStringLiteral( "the landscape file opens: %1" ).arg( file ), opened );
-	const QString shotDir = QString::fromLocal8Bit( qgetenv( "WW_WATER_WINDOW_SHOT" ) );
+	const QString shotDir = QString::fromLocal8Bit( wwEnv( "WW_WATER_WINDOW_SHOT" ) );
 	auto shot = [&]( const QString & name ) {
 		if ( shotDir.isEmpty() )
 			return;
@@ -2416,7 +2417,7 @@ void runWindowSelfTest( QMainWindow * mw )
 		log << "marked file: body " << river << " has " << t1 << " texels, " << mv1 << " moved from the automatic word\n";
 		check( QStringLiteral( "the curve moved at least 60 percent of the river's own texels (%1 of %2)" ).arg( mv1 ).arg( t1 ),
 			t1 > 0 && mv1 * 100 >= t1 * 60 );
-		const QString file2 = QString::fromLocal8Bit( qgetenv( "WW_WATER_WINDOW_FILE2" ) );
+		const QString file2 = QString::fromLocal8Bit( wwEnv( "WW_WATER_WINDOW_FILE2" ) );
 		if ( file2.isEmpty() ) {
 			skip( QStringLiteral( "W4 needs WW_WATER_WINDOW_FILE2, an unmarked copy of the fixture" ) );
 		} else {
@@ -2534,7 +2535,7 @@ void waterWindowInstall( QMainWindow * mw )
 	 * workspace (src/watermarkpanel.cpp), which is where bungo put the whole
 	 * tool. `waterWindowOpen` is unchanged and so is everything the window
 	 * does; only the menu entry is gone. */
-	if ( qEnvironmentVariableIsSet( "WW_WATER_WINDOW_TEST" ) ) {
+	if ( wwEnvIsSet( "WW_WATER_WINDOW_TEST" ) ) {
 		/* A timer and not a load signal: this file knows nothing about the
 		 * main document; the window opens its own landscape file. */
 		QTimer::singleShot( 1200, mw, [mw]() { runWindowSelfTest( mw ); } );

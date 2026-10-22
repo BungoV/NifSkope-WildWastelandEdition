@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "gl/impostordraw.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gamemanager.h"
 #include "gl/celllights.h"
@@ -38,7 +39,7 @@ BSD License - see nifskope.h
 namespace {
 void wwImpostorTrace( const char * where )
 {
-	static const bool on = qEnvironmentVariableIsSet( "WW_IMPOSTOR_TRACE" );
+	WW_SWITCH_STATIC( bool, on, wwEnvIsSet( "WW_IMPOSTOR_TRACE" ) );
 	if ( !on )
 		return;
 	QFile f( QCoreApplication::applicationDirPath() + QStringLiteral( "/ww_impostor_trace.log" ) );
@@ -202,7 +203,7 @@ CardBatch & cardBatch()
 
 bool batchRedPerDraw()
 {
-	static const bool v = qgetenv( "WW_IMPOSTOR_RED" ) == "perdraw";
+	WW_SWITCH_STATIC( bool, v, wwEnv( "WW_IMPOSTOR_RED" ) == "perdraw" );
 	return v;
 }
 
@@ -494,11 +495,11 @@ QStringList ImpostorDraw::describeSelection( Scene * scene, const ImpostorCardSe
 
 ImpostorDraw::Resolved ImpostorDraw::resolve( const Options & opt )
 {
-	static const float envSlider = qEnvironmentVariableIsSet( "WW_IMPOSTOR_SLIDER" )
-			? qBound( 0.0f, float( qEnvironmentVariable( "WW_IMPOSTOR_SLIDER" ).toDouble() ), 1.0f ) : -1.0f;
-	static const bool envSnap = qEnvironmentVariableIntValue( "WW_IMPOSTOR_SNAP" ) != 0;
-	static const int envSearch = qEnvironmentVariableIsSet( "WW_IMPOSTOR_SEARCH" )
-			? qBound( 0, qEnvironmentVariableIntValue( "WW_IMPOSTOR_SEARCH" ), 64 ) : -1;
+	WW_SWITCH_STATIC( float, envSlider, wwEnvIsSet( "WW_IMPOSTOR_SLIDER" )
+			? qBound( 0.0f, float( wwEnvStr( "WW_IMPOSTOR_SLIDER" ).toDouble() ), 1.0f ) : -1.0f );
+	WW_SWITCH_STATIC( bool, envSnap, wwEnvInt( "WW_IMPOSTOR_SNAP" ) != 0 );
+	WW_SWITCH_STATIC( int, envSearch, wwEnvIsSet( "WW_IMPOSTOR_SEARCH" )
+			? qBound( 0, wwEnvInt( "WW_IMPOSTOR_SEARCH" ), 64 ) : -1 );
 	Resolved r;
 	r.sliderForced = envSlider >= 0.0f;
 	r.slider = r.sliderForced ? envSlider : qBound( 0.0f, opt.slider, 1.0f );
@@ -774,14 +775,14 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	 * 3-frame mean, 2 the strongest frame alone (see ImpostorDrawOptions::cutRule).
 	 * WW_IMPOSTOR_CUT=mean|strong is read here and not by the caller so every
 	 * path that draws a card has the way back. */
-	static const int envCutRule = []() {
-		const QString v = qEnvironmentVariable( "WW_IMPOSTOR_CUT" );
+	WW_SWITCH_STATIC( int, envCutRule, []() {
+		const QString v = wwEnvStr( "WW_IMPOSTOR_CUT" );
 		if ( v.compare( QStringLiteral( "mean" ), Qt::CaseInsensitive ) == 0 )
 			return 1;
 		if ( v.compare( QStringLiteral( "strong" ), Qt::CaseInsensitive ) == 0 )
 			return 2;
 		return -1;
-	}();
+	}() );
 	prog->uni1i( "cutRule", envCutRule >= 0 ? envCutRule : rs.cutRule );
 	/* The depth search (lane IMPOSTORDEPTH1): the slider's number unless
 	 * Options or WW_IMPOSTOR_SEARCH=N force one (clamped to 64 so a typo cannot

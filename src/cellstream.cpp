@@ -1,5 +1,6 @@
 // lane CELLSTREAM1: the exterior cell view's block of full cells, streamed round the camera (cellstream.h)
 #include "cellstream.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellmesh.h"
 #include "cellsplat.h"
@@ -72,7 +73,7 @@ const char * g_phase = "idle";   // the tick step a traced line came from
 // lane CELLSTREAM1: WW_CELL_STREAM_TRACE=1 prints each load, write, attach, unload and scene remake to stderr
 void trace( const QString & s )
 {
-	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_STREAM_TRACE" ) > 0;
+	WW_SWITCH_STATIC( bool, on, wwEnvInt( "WW_CELL_STREAM_TRACE" ) > 0 );
 	if ( !on )
 		return;
 	fprintf( stderr, "stream: %s [%s]\n", qPrintable( s ), g_phase );
@@ -888,9 +889,9 @@ QString keyList( const std::vector<Key> & keys )
 
 bool cellStreamWanted()
 {
-	if ( qEnvironmentVariableIsSet( "WW_CELL_STREAM" ) )
-		return qEnvironmentVariableIntValue( "WW_CELL_STREAM" ) != 0;
-	return qEnvironmentVariableIsEmpty( "WW_CELL_OPEN" );   // a harness's fixed block stays fixed
+	if ( wwEnvIsSet( "WW_CELL_STREAM" ) )
+		return wwEnvInt( "WW_CELL_STREAM" ) != 0;
+	return wwEnvIsEmpty( "WW_CELL_OPEN" );   // a harness's fixed block stays fixed
 }
 
 void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
@@ -903,11 +904,11 @@ void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
 	s->seed = seed;
 	s->ccx = seed->cx;
 	s->ccy = seed->cy;
-	if ( qEnvironmentVariableIsSet( "WW_CELL_STREAM_BUDGET" ) )
-		s->budgetMs = std::clamp( qEnvironmentVariable( "WW_CELL_STREAM_BUDGET" ).toDouble(), 0.5, 100.0 );
-	if ( qEnvironmentVariableIsSet( "WW_CELL_STREAM_SHIFT" ) )
-		s->shift = std::clamp( float( qEnvironmentVariableIntValue( "WW_CELL_STREAM_SHIFT" ) ), 0.0f, 4096.0f );
-	s->red = qEnvironmentVariable( "WW_CELL_STREAM_RED" );
+	if ( wwEnvIsSet( "WW_CELL_STREAM_BUDGET" ) )
+		s->budgetMs = std::clamp( wwEnvStr( "WW_CELL_STREAM_BUDGET" ).toDouble(), 0.5, 100.0 );
+	if ( wwEnvIsSet( "WW_CELL_STREAM_SHIFT" ) )
+		s->shift = std::clamp( float( wwEnvInt( "WW_CELL_STREAM_SHIFT" ) ), 0.0f, 4096.0f );
+	s->red = wwEnvStr( "WW_CELL_STREAM_RED" );
 	s->baseRefs = cellRefTable();
 	s->basePicks = cellPickTableMutable();
 	s->st.on = true;
@@ -939,7 +940,7 @@ bool cellStreamTick( NifModel * nif, Scene * scene, const Vector3 & eye )
 
 int cellStreamTexKeepSec()
 {
-	static const int keep = qEnvironmentVariableIsSet( "WW_CELL_STREAM_TEXKEEP" ) ? qEnvironmentVariableIntValue( "WW_CELL_STREAM_TEXKEEP" ) : 5;
+	WW_SWITCH_STATIC( int, keep, wwEnvIsSet( "WW_CELL_STREAM_TEXKEEP" ) ? wwEnvInt( "WW_CELL_STREAM_TEXKEEP" ) : 5 );
 	return std::max( keep, 0 );
 }
 

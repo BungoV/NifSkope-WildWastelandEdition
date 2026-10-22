@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellssgi.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellssr.h"
 #include "cellunits.h"
 
@@ -43,6 +44,7 @@ constexpr float kAoAmount = 1.0f, kIndirect = 1.0f, kSource = 1.0f, kNormalWeigh
 struct SsgiState
 {
 	bool loaded = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool on = false, pinOn = false, pinQ = false;
 	int quality = 3;
 	int red = 0;	// 1 off, 2 stack, 4 notemporal, 8 noblur
@@ -53,10 +55,16 @@ struct SsgiState
 SsgiState & st()
 {
 	static SsgiState s;
-	if ( !s.loaded ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_RENDER_SSGI", "WW_CELL_SSGI" } ) ) {
 		s.loaded = true;
-		const QByteArray pin = qgetenv( "WW_RENDER_SSGI" ).trimmed(), q = qgetenv( "WW_CELL_SSGI_QUALITY" ).trimmed().toLower();
-		const QByteArray red = qgetenv( "WW_CELL_SSGI_RED" ).trimmed();
+		s.liveGen = wwSwitchGen();
+		{
+			const SsgiState d {};
+			s.red = d.red;
+		}
+		const QByteArray pin = wwEnv( "WW_RENDER_SSGI" ).trimmed(), q = wwEnv( "WW_CELL_SSGI_QUALITY" ).trimmed().toLower();
+		const QByteArray red = wwEnv( "WW_CELL_SSGI_RED" ).trimmed();
 		s.pinOn = !pin.isEmpty();
 		s.on = s.pinOn ? ( pin != "0" && pin != "off" ) : QSettings().value( QStringLiteral( "WW/CellSsgi" ), false ).toBool();
 		s.pinQ = !q.isEmpty();

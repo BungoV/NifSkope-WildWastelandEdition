@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "skeletontools.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "nifskope.h"
 #include "glview.h"
@@ -491,7 +492,7 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 	 * one exe. It is what cmp_manager_names.png is made of.
 	 */
 	tree->setMouseTracking( true );			// hover, mirrored into the viewport
-	if ( qEnvironmentVariableIntValue( "WW_SKELETON_LEGACY_COLUMNS" ) != 0 ) {
+	if ( wwEnvInt( "WW_SKELETON_LEGACY_COLUMNS" ) != 0 ) {
 		tree->header()->setStretchLastSection( false );
 		tree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
 		for ( int c = 1; c < 4; c++ )
@@ -645,7 +646,7 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 		 * larger. A name is therefore elided only when the dock is narrower
 		 * than the widest row, and even then the row scrolls into view rather
 		 * than vanishing. */
-		if ( qEnvironmentVariableIntValue( "WW_SKELETON_LEGACY_COLUMNS" ) == 0 ) {
+		if ( wwEnvInt( "WW_SKELETON_LEGACY_COLUMNS" ) == 0 ) {
 			const QFontMetrics fm( tree->font() );
 			int need = fm.horizontalAdvance( tree->headerItem()->text( 0 ) ) + 24;
 			std::function<void( QTreeWidgetItem *, int )> measure =

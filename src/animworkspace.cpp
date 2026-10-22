@@ -2,6 +2,7 @@
    for the shape; nifskope-ww-panel-style for every control's rule. */
 
 #include "animworkspace.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "hkxanimui.h"
 #include "hkxplayback.h"
 #include "hkxwrite.h"
@@ -2267,7 +2268,7 @@ void AnimWorkspace::loadVocabulary()
 {
 	vocab.clear();
 	QStringList paths;
-	const QByteArray env = qgetenv( "WW_HKX_VOCAB" );
+	const QByteArray env = wwEnv( "WW_HKX_VOCAB" );
 	if ( !env.isEmpty() )
 		paths.append( QString::fromLocal8Bit( env ) );
 	paths.append( QCoreApplication::applicationDirPath() + QStringLiteral( "/hkx_annotation_vocabulary.txt" ) );
