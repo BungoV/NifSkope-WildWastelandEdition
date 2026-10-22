@@ -27,6 +27,7 @@
 #include "probeplace.h"
 #include "proberooms.h"
 #include "probesky.h"
+#include "probegifine.h"
 #include "gl/celllights.h"
 #include <memory>
 
@@ -140,6 +141,8 @@ struct ProbeGiResult
 	std::vector<float> brickCube;       //!< per probe: probeCube's layout, gathered from the bricks (last pass)
 	std::vector<float> linkCube;        //!< per probe: the same, gathered from the links
 	std::vector<float> surfelBrick;     //!< per unique surfel: rgb, its brick's mean of pass 1's B (the Pass view)
+	bool fineOn = false;                //!< lane EMISSIVEGRID1: spec.emissiveGrid asked for the fine boxes
+	ProbeGiFine fine;                   //!< lane EMISSIVEGRID1 (src/probegifine.h)
 };
 
 struct ProbeGiSpec
@@ -193,6 +196,9 @@ struct ProbeGiSpec
 	bool bricks = false;
 	float brickEdge = 280.0f;
 	QString brickRed;
+	//! lane EMISSIVEGRID1: the fine boxes round bright glow (WW_CELL_EMISSIVEGRID / the row); red WW_CELL_EMISSIVEGRID_RED
+	bool emissiveGrid = false;
+	QString emissiveGridRed;
 };
 
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.

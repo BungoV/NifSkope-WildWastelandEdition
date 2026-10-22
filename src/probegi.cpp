@@ -1898,6 +1898,64 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.voxelsTwoBare = nTwoBare;
 	R.msGrid = clock.nsecsElapsed() / 1e6 - R.msLight - R.msGather - R.msBounce;
 
+	// lane EMISSIVEGRID1: the fine boxes round bright glow (probegifine.h); off: nothing here runs
+	if ( spec.emissiveGrid && !spec.noGlow && lks.size() == R.probeLinks.size() ) {
+		R.fineOn = true;
+		ProbeGiFineInput fi;
+		std::vector<int> emitOf( us.size(), -1 );
+		const double cs = R.surfelCell;
+		for ( size_t i = 0; i < us.size(); i++ )
+			if ( us[i].emits ) {
+				emitOf[i] = int( fi.glow.size() );
+				ProbeGiFineEmitter e;
+				for ( int c = 0; c < 3; c++ ) {
+					e.p[c] = us[i].p[c];
+					e.n[c] = us[i].n[c];
+					e.Le[c] = us[i].Le[c];
+				}
+				e.area = 0.0;
+				fi.glow.push_back( e );
+			}
+		for ( size_t j = 0; j < up.size(); j++ ) {
+			ProbeGiFineProbe P;
+			for ( int c = 0; c < 3; c++ )
+				P.p[c] = up[j].p[c];
+			P.room[0] = probeRoom[j][0];
+			P.room[1] = probeRoom[j][1];
+			P.linkStart = int( fi.linkEmit.size() );
+			for ( int k = R.probeLinkStart[j]; k < R.probeLinkStart[j + 1]; k++ ) {
+				const int e = emitOf[size_t( R.probeLinks[size_t( k )] )];
+				if ( e < 0 )
+					continue;
+				const LK & L = lks[size_t( k )];
+				// the surfel's area as the probe saw it: omega x d^2 (the largest over its links)
+				double d2 = 0.0;
+				for ( int c = 0; c < 3; c++ )
+					d2 += ( fi.glow[size_t( e )].p[c] - P.p[c] ) * ( fi.glow[size_t( e )].p[c] - P.p[c] );
+				fi.glow[size_t( e )].area = std::max( fi.glow[size_t( e )].area, L.omega * d2 );
+				fi.linkEmit.push_back( e );
+				for ( int a = 0; a < 6; a++ )
+					fi.linkW.push_back( L.omega * up[j].kUnl * L.cosA[a] );
+				fi.linkW.push_back( 0.0 );
+				for ( int c = 0; c < 3; c++ )
+					fi.linkTint.push_back( L.tint[c] );
+			}
+			P.linkEnd = int( fi.linkEmit.size() );
+			fi.probes.push_back( P );
+		}
+		for ( ProbeGiFineEmitter & e : fi.glow )
+			e.area = e.area > 0.0 ? std::min( e.area, 1.5 * cs * cs ) : 0.5 * cs * cs;
+		fi.coarseVoxel = v;
+		fi.radius = rad;
+		for ( int c = 0; c < 3; c++ )
+			fi.coarseDims[c] = dims[c];
+		fi.rooms = R.roomsOn ? &R.rooms : nullptr;
+		fi.blocked = [&]( const double p[3], const double q[3] ) { return blocked( p, q, 0.0 ); };
+		fi.red = spec.emissiveGridRed;
+		probeGiFineBuild( fi, &R.fine );
+		std::fprintf( stderr, "%s\n", qPrintable( probeGiFineCensusText( R.fine ) ) );
+	}
+
 	// the gate's copies
 	R.surfelOut.reserve( us.size() * 12 );
 	for ( const US & u : us )
@@ -2201,6 +2259,11 @@ static void giVolumesInto( ProbeGiResult & r, WwCellGi & gi )
 
 void probeGiRoomsInto( ProbeGiResult & r, WwCellGi & gi )
 {
+	if ( r.fineOn && r.fine.boxes > 0 ) {	// lane EMISSIVEGRID1: the fine boxes ride the GI grid (both publish sites call here)
+		gi.fineBox = r.fine.box;	// copied: probesky's kept relight and the census still read the result
+		gi.fine = r.fine.data;
+		gi.fineLayers = r.fine.layers;
+	}
 	if ( !r.roomsOn || gi.rgba.empty() )
 		return;
 	gi.rgba.insert( gi.rgba.end(), r.grid2.begin(), r.grid2.end() );
@@ -2254,7 +2317,8 @@ QString probeGiCensusText( const ProbeGiResult & r )
 			.arg( 100.0 * r.brickP95, 0, 'f', 2 ).arg( r.bricksGather ? QStringLiteral( "the BRICKS" ) : QStringLiteral( "their links" ) )
 			.arg( r.msBricks, 0, 'f', 0 )
 		+ ( r.surfelsEmit ? QStringLiteral( "\n  gi emissive: %1 of %2 surfels glow (their Le added once to B)" )
-			.arg( r.surfelsEmit ).arg( r.surfels ) : QString() );   // lane EMISSIVEGI1
+			.arg( r.surfelsEmit ).arg( r.surfels ) : QString() )   // lane EMISSIVEGI1
+		+ ( r.fineOn ? QStringLiteral( "\n  " ) + probeGiFineCensusText( r.fine ) : QString() );   // lane EMISSIVEGRID1
 }
 
 /* The dump (little-endian):

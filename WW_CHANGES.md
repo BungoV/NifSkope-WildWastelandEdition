@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane EMISSIVEGRID1 (2026-10-22, branch emissivegrid1-20261022): a finer GI grid around bright glowing surfels (ships off)
+
+- **Why.** The Hotel Rexford neon sign throws a bright orange spot on the canopy ceiling about 1 m above it. Probe GI makes the sign glow, but the coarse grid (about 100 u voxels, probes about 280 u apart) smears that splash into a faint wash.
+- **What changed:**
+  - **Fine boxes.** At cell load the relight (src/probegifine.cpp) groups glowing surfels into clusters (neighbors within one coarse voxel).
+    - A cluster gets a box when its power gives a reach of at least 1.5 coarse voxels. The reach is sqrt(power / eth), eth 0.02, `WW_CELL_EMISSIVEGRID_ETH`, capped at 4 voxels.
+    - Boxes that overlap merge. There are at most 8 boxes and 600k voxels in total.
+    - The voxel is a third of the coarse voxel, so about 35 u.
+  - **What a fine voxel holds** (six axes):
+    - D: the glow's direct light. Each glowing surfel is a small area light, shadowed by a ray through the bake's geometry.
+    - C: the coarse grid's own share of the same surfels. These are their probe links, blended the way the coarse grid blends probes, with the same room match.
+    - Voxels whose centre is solid are marked empty and skipped.
+    - No rebake: everything comes from the surfels and links the relight already has.
+  - **Storage.** The atlas rides as extra layers of the existing GI 3D texture: no new texture unit, read only with texelFetch. The filtered readers keep their old layer depth.
+  - **Shader** (`cellGiFineAdd`): inside a box, the coarse irradiance trades C for D.
+    - It uses the same seen/room test (cellGiRooms) so no light crosses a wall.
+    - It fades back to the coarse grid over the box's outer 2 voxels.
+  - **Census line:** "gi emissive grid: N fine boxes ... voxels, atlas KB, rays, build ms".
+- **Switch:** `WW_CELL_EMISSIVEGRID` (env pin) or the cell menu row "Emissive GI grid" (WW/CellEmissiveGrid). Default off; with it off nothing is built or bound.
+- **Red:** `WW_CELL_EMISSIVEGRID_RED=1` builds nothing (the old path and its cost). `noseen` and `nosub` drop the wall test or the C subtraction (for diagnosis).
+- **Measured:** pending. The judgment pictures (off/on at 22:00 and 13:30, red, the main rung) and costs wait for the batch after BATCH2 (notes/emissivegrid1/BATCH.md).
+
 ## Lane BAKESPEED1 (2026-10-21, branch bakespeed1-20261021): the chunks stage runs its VT rows and chunk jobs on all cores, and resumes
 
 - **Why.** The FARBAKE2 chunks stage was serial in its two biggest parts: on the mid region (-24..23) the VT pyramid took 1539 s and the chunk pass 511 s on one core.

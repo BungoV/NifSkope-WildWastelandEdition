@@ -195,8 +195,17 @@ struct WwCellGi
 	 *  slot 1's; the slot texture's g, b, a) */
 	std::vector<float> volShapes, slotThresh;
 	QString volCensus;
+	/*! lane EMISSIVEGRID1 (src/probegifine.h): the fine boxes round bright glow, 8 floats a box, and their atlas (dims[0] x
+	 *  dims[1] a layer, fineLayers layers, rgba), uploaded after the grid's own layers; empty: none (the row off) */
+	std::vector<float> fineBox, fine;
+	int fineLayers = 0;
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
+/*! lane EMISSIVEGRID1: the Emissive GI grid row (ships off): WW/CellEmissiveGrid, pin WW_CELL_EMISSIVEGRID (read when a
+ *  cell opens: the row reopens it). Red WW_CELL_EMISSIVEGRID_RED=1|old: nothing built or drawn (the old path and cost);
+ *  =noseen|nosub: the shader's refuters (no seen test; no coarse share taken out). */
+bool wwCellEmissiveGridOn();
+void wwCellEmissiveGridSetOn( bool on );
 
 /*! lane PROBEVIEW1: the PRTP band's Pass (Division deck, s18/s40/s65 views). 0 Combined (the frame as drawn),
  *  1 GI (the probe grid's E / pi on the surface's normal), 2 Sky visibility (the probes' open-sky share on the

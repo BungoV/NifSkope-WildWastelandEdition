@@ -161,7 +161,7 @@ void volCubeAll( vec3 P, out vec3 E[6], out float share[6] )
 	vec3 g = ( P - cellGiOrigin ) / cellGiVoxel;
 	vec2 xy = g.xy / cellGiDims.xy;
 	float z = clamp( g.z, 0.5, cellGiDims.z - 0.5 );
-	float depth = ( cellGiRooms ? 12.0 : 6.0 ) * cellGiDims.z;
+	float depth = cellGiFineOn ? float( textureSize( cellGi, 0 ).z ) : ( cellGiRooms ? 12.0 : 6.0 ) * cellGiDims.z;	// lane EMISSIVEGRID1: + the fine atlas
 	vec4 plain[6];
 	vec4 r[6];
 	for ( int a = 0; a < 6; a++ ) {
