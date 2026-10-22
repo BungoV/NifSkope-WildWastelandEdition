@@ -152,6 +152,12 @@ struct LodgenChunkPassOptions
 	QVector<LodgenChunkJob> nativeAllJobs;
 	std::function<void( const LodgenChunkJob & )> nativeReplayCached;
 	std::function<void( const LodgenChunkOutcome &, LodgenNativeJournal * )> nativeJournalSink;
+
+	/* lane BAKESPEED1: RESUME. Each retired chunk's outcome and raw native journal are kept in `resumeDir`
+	 * under `resumeKey`; a rerun with the same key retires those chunks from there (their files still on disk)
+	 * instead of building them. Empty = off. */
+	QString resumeDir;
+	QString resumeKey;
 };
 
 /*! Run the queue.

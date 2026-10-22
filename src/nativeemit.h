@@ -354,6 +354,9 @@ void lodgenNativeJournalReplay( LodgenNativeJournal * j );
 //! How many events a journal holds -- a census number, so a silent journal shows.
 int lodgenNativeJournalSize( const LodgenNativeJournal * j );
 void lodgenNativeJournalDestroy( LodgenNativeJournal * j );
+//! lane BAKESPEED1: a journal as bytes and back (the chunk resume ledger); null on a damaged one
+QByteArray lodgenNativeJournalSave( const LodgenNativeJournal * j );
+LodgenNativeJournal * lodgenNativeJournalLoad( const QByteArray & bytes );
 
 /* ---- THE PER-CHUNK NATIVE CACHE (`.lodj`, lane INCR1, 2026-09-17) -------
  *

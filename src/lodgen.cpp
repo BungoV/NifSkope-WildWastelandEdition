@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include "cellspeed.h"
 
 #include <QMutex>
+#include <QWaitCondition>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QMutexLocker>
@@ -40,7 +41,10 @@ BSD License - see nifskope.h
 #include <QPainter>
 #include <memory>
 #include <string_view>
+#include <cstddef>
 #include <QFile>
+#include <QDataStream>
+#include <QSaveFile>
 #include <QTextStream>
 #include <QtEndian>
 #include <QFileInfo>
@@ -51,6 +55,7 @@ BSD License - see nifskope.h
 #include <numeric>
 #include <array>
 #include <atomic>
+#include <thread>
 #include <cmath>
 #include <complex>
 #include <functional>
@@ -6674,6 +6679,18 @@ struct LodgenBakeCaches
 	QHash<QString, QPair<bool, FloatVector4>> grassTint;
 	int nifReads = 0;                   //!< grass meshes actually loaded
 	int texLoads = 0;                   //!< textures actually decoded
+	/* lane BAKESPEED1: set while tile workers share this LRU. Each worker keeps its last asked textures in a
+	 * per-thread memo; texRefs counts the memos holding a key and eviction skips those (a new shareGen voids
+	 * the memos and the counts). */
+	QMutex * shareLock = nullptr;
+	quint64 shareGen = 0;
+	QHash<QString, int> texRefs;
+	QSet<QString> texLoading;           //!< keys a worker decodes outside the lock
+	QWaitCondition texLoaded;
+	/* lane BAKESPEED1: the decals stage's road set, handed to the pyramid when its gather key matches
+	 * (the gather is a function of the key alone); void so this struct needs no LodgenRoadSet. */
+	std::shared_ptr<void> roadSet;
+	QString roadKey;
 	~LodgenBakeCaches()
 	{
 		for ( DDSTexture16 * t : texCache )
@@ -6707,6 +6724,10 @@ qint64 lodgenBakeCachesSetTextureBudget( LodgenBakeCaches * caches, qint64 units
 // lane BAKEMEM1: drop the decoded textures between stages (the next stage reloads what it reads); counters stay
 void lodgenBakeCachesReleaseTextures( LodgenBakeCaches * caches, const char * phase )
 {
+	if ( caches && qstrcmp( phase, "decals" ) != 0 ) {	// the decals' road set waits for the pyramid
+		caches->roadSet.reset();
+		caches->roadKey.clear();
+	}
 	if ( !caches || lodgenBakeMemRed() )
 		return;
 	const qint64 n = caches->texCache.size(), units = caches->texBytes;
@@ -6733,9 +6754,15 @@ void lodgenBakeCacheCounts( const LodgenBakeCaches * caches, int * nifReads, int
 //! lodgenLoadTexture through the LRU. The returned pointer is used inside the
 //! call that asked for it and never held across another ask, which is what
 //! makes eviction safe.
+static void lodgenTexEvict( LodgenBakeCaches & c, const QString & key );
+static const DDSTexture16 * lodgenCachedTextureShared( LodgenBakeCaches & c,
+	const QString & dataRoot, const QString & texPath );
+
 static const DDSTexture16 * lodgenCachedTexture( LodgenBakeCaches & c,
 	const QString & dataRoot, const QString & texPath )
 {
+	if ( c.shareLock )
+		return lodgenCachedTextureShared( c, dataRoot, texPath );
 	const QString key = texPath.toLower();
 	auto it = c.texCache.constFind( key );
 	if ( it != c.texCache.constEnd() ) {
@@ -6748,6 +6775,98 @@ static const DDSTexture16 * lodgenCachedTexture( LodgenBakeCaches & c,
 		c.texLoads++;
 		c.texBytes += qint64( tex->size() );
 	}
+	lodgenTexEvict( c, key );
+	return tex;
+}
+
+static std::atomic<quint64> g_texShareGen{ 0 };
+
+// lane BAKESPEED1: open (or reopen, voiding every thread's memo) the LRU to tile workers; null closes it
+static void lodgenTexShare( LodgenBakeCaches & c, QMutex * lock )
+{
+	c.shareLock = lock;
+	c.shareGen = ++g_texShareGen;
+	c.texRefs.clear();
+}
+
+/*! lane BAKESPEED1: lodgenCachedTexture while workers share the LRU. A worker's last kTexMemo textures stay
+ * pinned (a caller holds at most one pointer across its next ask), the rest evict as in the serial path. */
+static const DDSTexture16 * lodgenCachedTextureShared( LodgenBakeCaches & c,
+	const QString & dataRoot, const QString & texPath )
+{
+	enum { kTexMemo = 8 };
+	struct Slot
+	{
+		QString path, key;
+		const DDSTexture16 * tex = nullptr;
+		quint64 used = 0;
+	};
+	struct Memo
+	{
+		quint64 gen = 0, clock = 0;
+		Slot s[kTexMemo];
+	};
+	static thread_local Memo memo;
+	if ( memo.gen != c.shareGen ) {
+		for ( Slot & s : memo.s )
+			s = Slot();
+		memo.gen = c.shareGen;
+	}
+	Slot * v = &memo.s[0];
+	for ( Slot & s : memo.s ) {
+		if ( s.used && s.path == texPath ) {
+			s.used = ++memo.clock;
+			return s.tex;
+		}
+		if ( s.used < v->used )
+			v = &s;
+	}
+	const QString key = texPath.toLower();
+	const DDSTexture16 * tex = nullptr;
+	{
+		QMutexLocker lock( c.shareLock );
+		if ( v->used ) {
+			auto r = c.texRefs.find( v->key );
+			if ( r != c.texRefs.end() && --*r <= 0 )
+				c.texRefs.erase( r );
+		}
+		for ( ;; ) {	// the decode runs unlocked; a second asker of the same key waits for it
+			auto it = c.texCache.constFind( key );
+			if ( it != c.texCache.constEnd() ) {
+				tex = *it;
+				break;
+			}
+			if ( !c.texLoading.contains( key ) ) {
+				c.texLoading.insert( key );
+				lock.unlock();
+				QHash<QString, DDSTexture16 *> one;
+				tex = lodgenLoadTexture( dataRoot, texPath, one );
+				lock.relock();
+				c.texCache.insert( key, const_cast<DDSTexture16 *>( tex ) );
+				c.texLoading.remove( key );
+				if ( tex ) {
+					c.texLoads++;
+					c.texBytes += qint64( tex->size() );
+				}
+				c.texLoaded.wakeAll();
+				break;
+			}
+			c.texLoaded.wait( c.shareLock );
+		}
+		c.texStamp[key] = ++c.texClock;
+		c.texRefs[key]++;
+		lodgenTexEvict( c, key );
+	}
+	v->path = texPath;
+	v->key = key;
+	v->tex = tex;
+	v->used = ++memo.clock;
+	return tex;
+}
+
+//! The LRU's eviction down to its budget; `key` (just used) is never the victim.
+static void lodgenTexEvict( LodgenBakeCaches & c, const QString & key )
+{
 	while ( c.texBytes > c.texBudget && c.texStamp.size() > 1 ) {
 		/* Lane TERR1: a PINNED key is never the victim -- the normal stamp holds
 		 * a shape's diffuse while it loads that shape's normal map, and the
@@ -6756,7 +6875,7 @@ static const DDSTexture16 * lodgenCachedTexture( LodgenBakeCaches & c,
 		auto oldest = c.texStamp.constEnd();
 		for ( auto s = c.texStamp.constBegin(); s != c.texStamp.constEnd(); ++s )
 			if ( ( oldest == c.texStamp.constEnd() || s.value() < oldest.value() )
-				&& !c.texPinned.contains( s.key() ) )
+				&& !c.texPinned.contains( s.key() ) && !c.texRefs.contains( s.key() ) )
 				oldest = s;
 		if ( oldest == c.texStamp.constEnd() )
 			break;
@@ -6772,7 +6891,6 @@ static const DDSTexture16 * lodgenCachedTexture( LodgenBakeCaches & c,
 			c.texCache.erase( vt );
 		}
 	}
-	return tex;
 }
 
 /*! The grass tint's colour source (docs/LODGEN_TERRAIN_VT.md §3.2).
@@ -8706,6 +8824,9 @@ static std::atomic<int> g_vrLayered( 0 );
 static std::atomic<int> g_vrLayerless( 0 );
 static std::atomic<int> g_vrLayerlessNoVanilla( 0 );
 static std::atomic<int> g_vrShaded( 0 );
+// lane BAKESPEED1: the pyramid's chunk sheets add to these, so its checkpoint carries them
+static std::atomic<int> * const g_vrAll[] = { &g_vrMsnCopied, &g_vrMsnOurs, &g_vrMsnCacheHit, &g_vrMsnCacheMiss,
+	&g_vrMsnCacheRenorm, &g_vrColCopied, &g_vrColOurs, &g_vrLayered, &g_vrLayerless, &g_vrLayerlessNoVanilla, &g_vrShaded };
 
 /*! THE EROSION PASS (lane GROUND1 Part B). 0 is off and is the rung's bytes:
  *  at 0 no lattice is built at all, so the two `_msn` writers take the branch
@@ -10436,6 +10557,8 @@ static const DDSTexture16 * lodgenStampNormalMap( LodgenBakeCaches & bc,
 {
 	if ( nmapPath.isEmpty() )
 		return nullptr;
+	if ( bc.shareLock )		// lane BAKESPEED1: a shared LRU's per-thread memo already pins the diffuse
+		return lodgenCachedTexture( bc, dataRoot, nmapPath );
 	const QString pin = diffuse.toLower();
 	bc.texPinned.insert( pin );
 	const DDSTexture16 * n = lodgenCachedTexture( bc, dataRoot, nmapPath );
@@ -10456,6 +10579,8 @@ class LodgenRoadSet
 public:
 	bool empty() const { return shapes.isEmpty(); }
 	const LodgenRoadCensus & census() const { return cen; }
+	//! lane BAKESPEED1, resume: the per-record texel counts the tiles add to, saved with a pyramid checkpoint
+	std::vector<qint64> & flatTexelCounts() const { return flatRecTexels; }
 
 	void gather( const EsmWorld & world, const QString & dataRoot,
 		int cx0, int cy0, int cx1, int cy1, bool includeRaised = true,
@@ -10597,6 +10722,7 @@ public:
 		int composite = LodgenCoverOptions::RoadMaxZ, float detail = 1.0f,
 		float groundPaint = 1.0f, int inset = 0, std::vector<float> * nplane = nullptr ) const
 	{
+		static thread_local QSet<size_t> decalHere;	// lane BAKESPEED1: per thread, tiles rasterise at once
 		colour.assign( size_t( S ) * S, 0U );
 		if ( nplane )
 			nplane->assign( size_t( S ) * S * 4, 0.0f );
@@ -11087,7 +11213,7 @@ public:
 				if ( sh.decal || sh.alphaBlend || sh.alphaTest )
 					out.flatDecalTexels++;
 				if ( sh.rec >= 0 && size_t( sh.rec ) < flatRecTexels.size() )
-					flatRecTexels[size_t( sh.rec )]++;
+					__atomic_fetch_add( &flatRecTexels[size_t( sh.rec )], qint64( 1 ), __ATOMIC_RELAXED );	// tiles run at once
 			}
 	}
 
@@ -11820,7 +11946,6 @@ private:
 	//! Include `Landscape\\Sidewalks\\`. True is ROADS1's behaviour and the way back.
 	bool sidewalks = true;
 	QSet<QString> sidewalkSeen;
-	mutable QSet<size_t> decalHere;
 	/* Lane FLAT1. */
 	bool flatOn = false;
 	QString flatFile, flatFileResolved, flatDataRoot;
@@ -18042,6 +18167,16 @@ template <typename S> void lodgenDecalLocalise( S & sh, const Vector3 & pos, con
 
 } // namespace
 
+
+//! lane BAKESPEED1: everything LodgenRoadSet::gather reads besides the ESM, for the decals -> pyramid handoff
+static QString lodgenRoadSetKey( const EsmWorld & world, const QString & dataRoot,
+	int cx0, int cy0, int cx1, int cy1, const LodgenCoverOptions & cov )
+{
+	return QStringLiteral( "%1|%2|%3 %4 %5 %6|%7%8%9|" ).arg( quintptr( &world ) ).arg( dataRoot )
+		.arg( cx0 ).arg( cy0 ).arg( cx1 ).arg( cy1 )
+		.arg( int( cov.roadRaised ) ).arg( int( cov.roadSidewalks ) ).arg( int( cov.flatObjects ) ) + cov.flatObjectsFile;
+}
+
 bool lodgenBakeDecals( const EsmWorld & world, const QString & dataRoot,
 	const QString & outDir, const LodgenVtOptions & opts, LodgenBakeCaches * caches,
 	QString * report, QString * error )
@@ -18080,7 +18215,8 @@ bool lodgenBakeDecals( const EsmWorld & world, const QString & dataRoot,
 	const float boxPad = 128.0f;
 	const LodgenCoverOptions & cov = opts.cover;
 
-	LodgenRoadSet set;
+	const std::shared_ptr<LodgenRoadSet> setOwn = std::make_shared<LodgenRoadSet>();
+	LodgenRoadSet & set = *setOwn;
 	if ( cov.roads ) {
 		set.setFlat( cov.flatObjects, cov.flatObjectsFile );
 		set.gather( world, dataRoot, cx0, cy0, cx1, cy1, cov.roadRaised, cov.roadSidewalks );
@@ -18332,6 +18468,10 @@ bool lodgenBakeDecals( const EsmWorld & world, const QString & dataRoot,
 		lodgenMemNote( QStringLiteral( "decals written" ),
 			set.memLine() + QStringLiteral( "; pieces %1 %2" ).arg( pieces.size() ).arg( lodgenMemMB( pb ) ) );
 	}
+	if ( caches && cov.roads && !lodgenBakeSpeedRed() ) {	// the pyramid gathers the same set when its rectangle is this one
+		caches->roadSet = setOwn;
+		caches->roadKey = lodgenRoadSetKey( world, dataRoot, cx0, cy0, cx1, cy1, cov );
+	}
 	return true;
 }
 
@@ -18366,6 +18506,69 @@ bool lodgenLtexPicture( const EsmWorld & world, const QString & dataRoot, Lodgen
 			rgba[size_t( y ) * side + x] = ( 255u << 24 ) | ( b( c[0] ) << 16 ) | ( b( c[1] ) << 8 ) | b( c[2] );
 		}
 	return true;
+}
+
+/* lane BAKESPEED1: THE PYRAMID CHECKPOINT. Raw vectors and the censuses' plain counters, read back by the
+ * same build only (the key carries the inputs; a file from another key is ignored and overwritten). */
+static const quint32 kVtResumeMagic = 0x32525456U;	// "VTR2"
+
+template <class T>
+static void lodgenRsPut( QDataStream & s, const std::vector<T> & v )
+{
+	s << quint64( v.size() );
+	s.writeRawData( reinterpret_cast<const char *>( v.data() ), int( v.size() * sizeof( T ) ) );
+}
+
+template <class T>
+static void lodgenRsGet( QDataStream & s, std::vector<T> & v )
+{
+	quint64 n = 0;
+	s >> n;
+	if ( s.status() != QDataStream::Ok || n > ( quint64( 1 ) << 28 ) ) {
+		s.setStatus( QDataStream::ReadCorruptData );
+		return;
+	}
+	v.resize( size_t( n ) );
+	if ( s.readRawData( reinterpret_cast<char *>( v.data() ), int( n * sizeof( T ) ) ) != int( n * sizeof( T ) ) )
+		s.setStatus( QDataStream::ReadPastEnd );
+}
+
+static void lodgenRsPutStage( QDataStream & s, const LodgenVtStage & st )
+{
+	lodgenRsPut( s, st.colour ); lodgenRsPut( s, st.msn ); lodgenRsPut( s, st.data ); lodgenRsPut( s, st.mask );
+	lodgenRsPut( s, st.emissive ); lodgenRsPut( s, st.height ); lodgenRsPut( s, st.msnHeights );
+	lodgenRsPut( s, st.stampNormal ); lodgenRsPut( s, st.stampW ); lodgenRsPut( s, st.rule );
+	s << st.cover;
+}
+
+static void lodgenRsGetStage( QDataStream & s, LodgenVtStage & st )
+{
+	lodgenRsGet( s, st.colour ); lodgenRsGet( s, st.msn ); lodgenRsGet( s, st.data ); lodgenRsGet( s, st.mask );
+	lodgenRsGet( s, st.emissive ); lodgenRsGet( s, st.height ); lodgenRsGet( s, st.msnHeights );
+	lodgenRsGet( s, st.stampNormal ); lodgenRsGet( s, st.stampW ); lodgenRsGet( s, st.rule );
+	s >> st.cover;
+}
+
+//! a census: its leading plain counters as bytes, then the refusal list
+template <class C>
+static void lodgenRsPutCensus( QDataStream & s, const C & c )
+{
+	const int n = int( offsetof( C, refusals ) );
+	s << qint32( n );
+	s.writeRawData( reinterpret_cast<const char *>( &c ), n );
+	s << c.refusals;
+}
+
+template <class C>
+static void lodgenRsGetCensus( QDataStream & s, C & c )
+{
+	qint32 n = 0;
+	s >> n;
+	if ( n != int( offsetof( C, refusals ) ) || s.readRawData( reinterpret_cast<char *>( &c ), n ) != n ) {
+		s.setStatus( QDataStream::ReadCorruptData );
+		return;
+	}
+	s >> c.refusals;
 }
 
 bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
@@ -18473,6 +18676,39 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		while ( firstW < nLevels && levels[firstW].dim < opts.writeFinestDim )
 			firstW++;
 	const int nWritten = nLevels - firstW;
+	/* lane BAKESPEED1: RESUME. A checkpoint with this key puts every writer back at its saved table and the
+	 * rows below restart after its last row. The fill and the rule paint keep state outside it: no resume there. */
+	const bool resumeOn = !opts.resumeFile.isEmpty() && !opts.vanillaFill && !opts.outsideRule && !lodgenBakeSpeedRed();
+	QByteArray rsBytes;
+	std::unique_ptr<QDataStream> rs;
+	int rsRows = 0;
+	std::vector<QByteArray> rsWriter( static_cast<size_t>( nLevels ) );
+	if ( resumeOn ) {
+		QFile rf( opts.resumeFile );
+		if ( rf.open( QIODevice::ReadOnly ) ) {
+			rsBytes = rf.readAll();
+			rs.reset( new QDataStream( rsBytes ) );
+			quint32 magic = 0;
+			QString key;
+			qint32 rows = 0, nl = 0;
+			*rs >> magic >> key >> rows >> nl;
+			bool ok = rs->status() == QDataStream::Ok && magic == kVtResumeMagic && key == opts.resumeKey
+				&& nl == nLevels && rows > 0 && rows <= levels[0].tilesY;
+			for ( int l = 0; ok && l < nLevels; l++ ) {
+				bool has = false;
+				*rs >> has;
+				if ( has )
+					*rs >> rsWriter[size_t( l )];
+				ok = rs->status() == QDataStream::Ok && has == ( l >= firstW );
+			}
+			if ( ok )
+				rsRows = rows;
+			else {
+				rs.reset();
+				rsBytes = QByteArray();
+			}
+		}
+	}
 	std::vector<std::unique_ptr<LodvWriter>> writers;
 	std::vector<QString> paths;
 	std::vector<LodvHeaderFields> headers;      // the one-value test reads the sheet set
@@ -18540,7 +18776,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		}
 		auto w = std::make_unique<LodvWriter>();
 		QString werr;
-		if ( !w->begin( path, h, &werr ) )
+		if ( rsRows ? !w->resume( path, h, rsWriter[size_t( l )], &werr ) : !w->begin( path, h, &werr ) )
 			return fail( werr );
 		writers.push_back( std::move( w ) );
 		paths.push_back( path );
@@ -18570,15 +18806,25 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	 * the ESM walk and the model loads are paid once and each tile pays only
 	 * its own scan conversion. Coarser levels inherit the roads through the box
 	 * filter, exactly as they inherit the splat. */
-	std::unique_ptr<LodgenRoadSet> roadSet;
+	std::shared_ptr<LodgenRoadSet> roadSet;
 	LodgenRoadCensus roadCensus;
 	if ( opts.cover.roads ) {
-		roadSet.reset( new LodgenRoadSet );
-		roadSet->setFlat( opts.cover.flatObjects, opts.cover.flatObjectsFile );
-		roadSet->gather( world, dataRoot, levels[0].west, levels[0].south,
-			levels[0].east, levels[0].north, opts.cover.roadRaised,
-			opts.cover.roadSidewalks );
+		const QString rk = lodgenRoadSetKey( world, dataRoot, levels[0].west, levels[0].south,
+			levels[0].east, levels[0].north, opts.cover );
+		if ( caches && caches->roadSet && caches->roadKey == rk )
+			roadSet = std::static_pointer_cast<LodgenRoadSet>( caches->roadSet );	// lane BAKESPEED1: the decals' gather
+		else {
+			roadSet.reset( new LodgenRoadSet );
+			roadSet->setFlat( opts.cover.flatObjects, opts.cover.flatObjectsFile );
+			roadSet->gather( world, dataRoot, levels[0].west, levels[0].south,
+				levels[0].east, levels[0].north, opts.cover.roadRaised,
+				opts.cover.roadSidewalks );
+		}
 		roadCensus.add( roadSet->gatherCensus() );
+	}
+	if ( caches ) {
+		caches->roadSet.reset();
+		caches->roadKey.clear();
 	}
 
 	/* THE OBJECT HEIGHT FIELD (lane GROUND1), gathered ONCE for the whole
@@ -18842,15 +19088,232 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		return true;
 	};
 
-	for ( int ty = 0; ty < levels[0].tilesY; ty++ ) {
+	/* lane BAKESPEED1: THE ROW ON EVERY CORE. A finest tile reads only the paint and the gathered sets, so a
+	 * row's tiles bake at once: each worker owns a plugin reader (with its LTEX/GRAS caches), a land and a mask
+	 * cache; the texture LRU is shared and the censuses fold in tile order. Red or the rule paint: the serial loop. */
+	struct VtWorker
+	{
+		std::unique_ptr<EsmWorld> world;
+		LodgenBakeCaches * tint = nullptr;      // the grass-tint memo this worker's world calls into
+		LodgenVtLandCache land;
+		LodgenVtMaskCache mask;
+		~VtWorker() { if ( tint ) lodgenDestroyBakeCaches( tint ); }
+	};
+	/* eight at most: each worker holds a plugin reader and pins its last textures (sixteen on a 16-tile row
+	 * reached 17 GB private) */
+	const int vtThreads = ( lodgenBakeSpeedRed() || ruleOn ) ? 1
+		: qBound( 1, qMin( lodgenThreadCount(), 8 ), levels[0].tilesX );
+	std::vector<std::unique_ptr<VtWorker>> vtWorkers;
+	QMutex texShareLock;
+	struct ShareGuard
+	{
+		LodgenBakeCaches * c = nullptr;
+		~ShareGuard() { if ( c ) lodgenTexShare( *c, nullptr ); }
+	} shareGuard;
+	if ( vtThreads > 1 ) {
+		QElapsedTimer wt;
+		wt.start();
+		lodgenWarmSharedIndices();
+		for ( int i = 0; i < vtThreads; i++ ) {
+			auto w = std::make_unique<VtWorker>();
+			w->world = std::make_unique<EsmWorld>();
+			QString werr;
+			if ( !w->world->load( world.pluginList(), world.worldspace(), &werr ) )
+				return fail( QStringLiteral( "vt worker %1: %2" ).arg( i ).arg( werr ) );
+			if ( opts.cover.cover ) {
+				// a budget of one texture: the tint is memoised per model, and a full LRU a worker held ~1.5 GB of grass
+				w->tint = lodgenCreateBakeCaches( 1 );
+				w->world->setGrassTintResolver( &lodgenGrassTintResolve, w->tint );
+			}
+			w->mask = maskCache;
+			vtWorkers.push_back( std::move( w ) );
+		}
+		lodgenTexShare( bc, &texShareLock );
+		shareGuard.c = &bc;
+		if ( lodgenMemLogOn() )
+			lodgenMemNote( QStringLiteral( "vt workers ready" ), QStringLiteral( "%1 worker(s), loaded in %2 s" )
+				.arg( vtThreads ).arg( wt.elapsed() / 1000.0, 0, 'f', 1 ) );
+	}
+
+	// lane BAKESPEED1: WW_LODGEN_MEMLOG times the row loop's parts (tiles, level-0 write, propagate)
+	qint64 msVtTiles = 0, msVtWrite = 0, msVtProp = 0;
+	QElapsedTimer vtPart;
+	int tyStart = 0;
+	if ( rsRows ) {
+		QDataStream & s = *rs;
+		for ( int l = 0; l < nLevels; l++ ) {
+			qint32 np = 0;
+			quint32 nr = 0;
+			s >> np >> nr;
+			nextParent[size_t( l )] = np;
+			rings[size_t( l )].clear();
+			for ( quint32 k = 0; k < nr && s.status() == QDataStream::Ok; k++ ) {
+				qint32 key = 0;
+				quint32 nt = 0;
+				s >> key >> nt;
+				if ( nt > 65536 ) {
+					s.setStatus( QDataStream::ReadCorruptData );
+					break;
+				}
+				std::vector<LodgenVtStage> row( nt );
+				for ( LodgenVtStage & st : row )
+					lodgenRsGetStage( s, st );
+				rings[size_t( l )][key] = std::move( row );
+			}
+		}
+		s >> presentTotal >> coverTiles;
+		for ( int i = 0; i < LODV_MAX_SHEETS; i++ )
+			s >> uniformCount[i];
+		s >> uniformSaved >> stagedOnly >> normalTilesSheet >> normalTilesHeights >> normalTilesMixed;
+		lodgenRsGetCensus( s, roadCensus );
+		lodgenRsGetCensus( s, objCensus );
+		bool hasFlat = false, hasMsn = false;
+		s >> hasFlat;
+		if ( hasFlat != bool( roadSet ) )
+			s.setStatus( QDataStream::ReadCorruptData );
+		if ( roadSet && s.status() == QDataStream::Ok ) {
+			std::vector<qint64> t;
+			lodgenRsGet( s, t );
+			if ( t.size() != roadSet->flatTexelCounts().size() )
+				s.setStatus( QDataStream::ReadCorruptData );
+			else
+				roadSet->flatTexelCounts() = t;
+		}
+		QList<quint32> forms;
+		s >> forms;
+		for ( quint32 f : forms )
+			if ( !maskCache.byForm.contains( f ) )
+				maskCache.resolve( world, dataRoot, f );
+		s >> hasMsn;
+		if ( hasMsn != bool( msnSheets ) )
+			s.setStatus( QDataStream::ReadCorruptData );
+		if ( msnSheets && s.status() == QDataStream::Ok ) {
+			qint64 nRead = 0, nMissing = 0;
+			QList<QPair<qint32, qint32>> keys;
+			s >> nRead >> nMissing >> keys;
+			for ( const auto & k : keys )
+				msnSheets->get( k.first, k.second );
+			msnSheets->sheetsRead = nRead;
+			msnSheets->sheetsMissing = nMissing;
+		}
+		for ( std::atomic<int> * c : g_vrAll ) {
+			qint32 v = 0;
+			s >> v;
+			c->store( v );
+		}
+		if ( s.status() != QDataStream::Ok )
+			return fail( QString( "the pyramid checkpoint %1 is damaged; delete it and bake again" ).arg( opts.resumeFile ) );
+		tyStart = rsRows;
+		rs.reset();
+		rsBytes = QByteArray();
+		if ( lodgenMemLogOn() )
+			lodgenMemNote( QStringLiteral( "vt resumed after row %1/%2" ).arg( tyStart ).arg( levels[0].tilesY ) );
+	}
+	auto saveResume = [&]( int rowsDone ) {
+		QElapsedTimer t;
+		t.start();
+		QDir().mkpath( QFileInfo( opts.resumeFile ).absolutePath() );
+		QSaveFile f( opts.resumeFile );
+		if ( !f.open( QIODevice::WriteOnly ) )
+			return;
+		QDataStream s( &f );
+		s << kVtResumeMagic << opts.resumeKey << qint32( rowsDone ) << qint32( nLevels );
+		for ( int l = 0; l < nLevels; l++ ) {
+			s << bool( writers[size_t( l )] );
+			if ( writers[size_t( l )] )
+				s << writers[size_t( l )]->saveState();
+		}
+		for ( int l = 0; l < nLevels; l++ ) {
+			s << qint32( nextParent[size_t( l )] ) << quint32( rings[size_t( l )].size() );
+			for ( auto it = rings[size_t( l )].constBegin(); it != rings[size_t( l )].constEnd(); ++it ) {
+				s << qint32( it.key() ) << quint32( it->size() );
+				for ( const LodgenVtStage & st : *it )
+					lodgenRsPutStage( s, st );
+			}
+		}
+		s << presentTotal << coverTiles;
+		for ( int i = 0; i < LODV_MAX_SHEETS; i++ )
+			s << uniformCount[i];
+		s << uniformSaved << stagedOnly << normalTilesSheet << normalTilesHeights << normalTilesMixed;
+		lodgenRsPutCensus( s, roadCensus );
+		lodgenRsPutCensus( s, objCensus );
+		s << bool( roadSet );
+		if ( roadSet )
+			lodgenRsPut( s, roadSet->flatTexelCounts() );
+		s << maskCache.byForm.keys();
+		s << bool( msnSheets );
+		if ( msnSheets ) {
+			QList<QPair<qint32, qint32>> keys;
+			for ( auto it = msnSheets->chunks.constBegin(); it != msnSheets->chunks.constEnd(); ++it )
+				keys.append( qMakePair( qint32( it.key().first ), qint32( it.key().second ) ) );
+			s << msnSheets->sheetsRead << msnSheets->sheetsMissing << keys;
+		}
+		for ( const std::atomic<int> * c : g_vrAll )
+			s << qint32( c->load() );
+		const bool ok = s.status() == QDataStream::Ok && f.commit();
+		if ( lodgenMemLogOn() )
+			lodgenMemNote( QStringLiteral( "vt checkpoint after row %1" ).arg( rowsDone ),
+				QStringLiteral( "%1, %2 MB in %3 s" ).arg( ok ? "saved" : "FAILED" )
+					.arg( QFileInfo( opts.resumeFile ).size() >> 20 ).arg( t.elapsed() / 1000.0, 0, 'f', 1 ) );
+	};
+	// the checkpoint interval, seconds (WW_LODGEN_RESUME_SEC; 0 = every row, for the resume gate)
+	const qint64 rsEveryMs = 1000 * ( qEnvironmentVariableIsSet( "WW_LODGEN_RESUME_SEC" )
+		? qEnvironmentVariableIntValue( "WW_LODGEN_RESUME_SEC" ) : 180 );
+	QElapsedTimer rsTimer;
+	rsTimer.start();
+	for ( int ty = tyStart; ty < levels[0].tilesY; ty++ ) {
+		vtPart.start();
 		std::vector<LodgenVtStage> row( size_t( levels[0].tilesX ) );
 		// a tile row's border reaches one cell past its north edge, no further
 		if ( msnSheets )
 			msnSheets->dropNorthOf( levels[0].north - ty * levels[0].dim + 1 );
+		const int cellY0 = levels[0].north - ( ty + 1 ) * levels[0].dim + 1;
+		if ( vtThreads > 1 ) {
+			const int n = levels[0].tilesX;
+			std::vector<LodgenRoadCensus> tRoad( static_cast<size_t>( n ) );
+			std::vector<LodgenObjectAoCensus> tObj( static_cast<size_t>( n ) );
+			std::vector<char> tOk( size_t( n ), 0 );
+			std::atomic<int> next{ 0 };
+			auto work = [&]( int wi ) {
+				LodgenWorkerScope scope;
+				VtWorker & w = *vtWorkers[size_t( wi )];
+				for ( ;; ) {
+					const int tx = next.fetch_add( 1 );
+					if ( tx >= n )
+						break;
+					tOk[size_t( tx )] = lodgenBakeVtTile( *w.world, dataRoot, bc, opts.cover, w.land, w.mask,
+						wantEmissive, levels[0].west + tx * levels[0].dim, cellY0, levels[0].dim, content, border,
+						row[size_t( tx )], roadSet.get(), &tRoad[size_t( tx )], objField.get(),
+						&tObj[size_t( tx )] ) ? 1 : 0;
+				}
+			};
+			{
+				std::vector<std::thread> ths;
+				for ( int i = 1; i < vtThreads; i++ )
+					ths.emplace_back( work, i );
+				work( 0 );
+				for ( std::thread & t : ths )
+					t.join();
+			}
+			for ( int tx = 0; tx < n; tx++ ) {
+				if ( !tOk[size_t( tx )] )
+					return fail( QString( "could not bake tile (%1,%2)" ).arg( tx ).arg( ty ) );
+				roadCensus.add( tRoad[size_t( tx )] );
+				objCensus.add( tObj[size_t( tx )] );
+			}
+			// between rows, as the serial loop: the LRU back to its budget, the land caches trimmed, forms counted once
+			lodgenTexShare( bc, &texShareLock );	// a new generation: no memo holds a texture now
+			lodgenTexEvict( bc, QString() );
+			for ( auto & w : vtWorkers ) {
+				w->land.dropBelow( levels[0].north - ( ty + 2 ) * levels[0].dim );
+				for ( auto f = w->mask.byForm.constBegin(); f != w->mask.byForm.constEnd(); ++f )
+					if ( !maskCache.byForm.contains( f.key() ) )
+						maskCache.resolve( world, dataRoot, f.key() );
+			}
+		}
 		for ( int tx = 0; tx < levels[0].tilesX; tx++ ) {
 			const int cellX0 = levels[0].west + tx * levels[0].dim;
-			const int cellY0 = levels[0].north - ( ty + 1 ) * levels[0].dim + 1;
-			if ( !lodgenBakeVtTile( world, dataRoot, bc, opts.cover, landCache, maskCache,
+			if ( vtThreads <= 1 && !lodgenBakeVtTile( world, dataRoot, bc, opts.cover, landCache, maskCache,
 				wantEmissive, cellX0, cellY0, levels[0].dim, content, border, row[size_t( tx )],
 				roadSet.get(), &roadCensus, objField.get(), &objCensus,
 				ruleOn ? &ruleMap : nullptr, ruleOn ? &ruleNeed : nullptr ) )
@@ -18874,14 +19337,27 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			// lane TERR1: the object normals, onto whichever surface normal the tile ended with
 			roadCensus.nrmTexels += int( lodgenVtStampMsn( content, border, row[size_t( tx )] ) );
 		}
+		msVtTiles += vtPart.restart();
 		for ( int tx = 0; tx < levels[0].tilesX; tx++ )
 			if ( !writeTile( 0, row[size_t( tx )] ) )
 				return false;
 		rings[0][ty] = std::move( row );
 		// only the cells a later tile row can still reach stay cached
 		landCache.dropBelow( levels[0].north - ( ty + 2 ) * levels[0].dim );
+		msVtWrite += vtPart.restart();
 		if ( !propagate( 0, ty ) )
 			return false;
+		msVtProp += vtPart.restart();
+		// the last row checkpoints too: a bake stopped after the pyramid does not build it again
+		if ( resumeOn && ( ty + 1 == levels[0].tilesY || rsTimer.elapsed() >= rsEveryMs ) ) {
+			saveResume( ty + 1 );
+			rsTimer.restart();
+		}
+		if ( lodgenMemLogOn() )
+			lodgenMemNote( QStringLiteral( "vt row %1/%2" ).arg( ty + 1 ).arg( levels[0].tilesY ),
+				QStringLiteral( "tiles %1 s, write0 %2 s, propagate %3 s (cumulative)" )
+					.arg( msVtTiles / 1000.0, 0, 'f', 1 ).arg( msVtWrite / 1000.0, 0, 'f', 1 )
+					.arg( msVtProp / 1000.0, 0, 'f', 1 ) );
 		if ( opts.progress && !opts.progress( opts.progressUser, ty + 1, levels[0].tilesY ) )
 			return fail( QStringLiteral( "cancelled" ) );
 	}

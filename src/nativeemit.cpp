@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include <limits>
 
 #include <QCryptographicHash>
+#include <QDataStream>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QMutex>
@@ -1456,6 +1457,78 @@ int lodgenNativeJournalSize( const LodgenNativeJournal * j )
 void lodgenNativeJournalDestroy( LodgenNativeJournal * j )
 {
 	delete j;
+}
+
+// lane BAKESPEED1: the raw events, bit for bit, for the chunk resume ledger
+QByteArray lodgenNativeJournalSave( const LodgenNativeJournal * j )
+{
+	QByteArray b;
+	if ( !j )
+		return b;
+	QDataStream s( &b, QIODevice::WriteOnly );
+	s.setFloatingPointPrecision( QDataStream::SinglePrecision );
+	s << quint64( j->events.size() );
+	for ( const LodgenNativeJournalEvent & e : j->events ) {
+		s << qint8( e.kind );
+		if ( e.kind == LNE_PLACEMENT ) {
+			const NativePlacement & p = e.p;
+			s << p.baseForm << p.refForm << qint32( p.scolPart );
+			for ( float v : p.pos )
+				s << v;
+			for ( float v : p.rot )
+				s << v;
+			s << p.scale << qint32( p.slot ) << p.model << p.isTree << p.mirrorU << p.treeHash << p.hasAlpha
+			  << p.emits << qint32( p.objectIndex ) << qint32( p.chunkX ) << qint32( p.chunkY ) << qint32( p.dim );
+		} else {
+			s << qint32( e.chunkX ) << qint32( e.chunkY ) << qint32( e.dim ) << qint32( e.objectIndex ) << e.ao;
+			if ( e.kind == LNE_LIGHTING )
+				s << e.sky << e.ground;
+		}
+	}
+	return b;
+}
+
+LodgenNativeJournal * lodgenNativeJournalLoad( const QByteArray & bytes )
+{
+	QDataStream s( bytes );
+	s.setFloatingPointPrecision( QDataStream::SinglePrecision );
+	quint64 n = 0;
+	s >> n;
+	if ( s.status() != QDataStream::Ok || n > quint64( bytes.size() ) )
+		return nullptr;
+	auto * j = new LodgenNativeJournal;
+	j->events.resize( size_t( n ) );
+	for ( LodgenNativeJournalEvent & e : j->events ) {
+		qint8 kind = 0;
+		qint32 a = 0, b = 0, c = 0, d = 0;
+		s >> kind;
+		e.kind = kind;
+		if ( kind == LNE_PLACEMENT ) {
+			NativePlacement & p = e.p;
+			s >> p.baseForm >> p.refForm >> a;
+			p.scolPart = a;
+			for ( float & v : p.pos )
+				s >> v;
+			for ( float & v : p.rot )
+				s >> v;
+			s >> p.scale >> a >> p.model >> p.isTree >> p.mirrorU >> p.treeHash >> p.hasAlpha >> p.emits;
+			p.slot = a;
+			s >> a >> b >> c >> d;
+			p.objectIndex = a; p.chunkX = b; p.chunkY = c; p.dim = d;
+		} else {
+			s >> a >> b >> c >> d >> e.ao;
+			e.chunkX = a; e.chunkY = b; e.dim = c; e.objectIndex = d;
+			if ( kind == LNE_LIGHTING )
+				s >> e.sky >> e.ground;
+		}
+		if ( s.status() != QDataStream::Ok )
+			break;
+	}
+	if ( s.status() != QDataStream::Ok ) {
+		delete j;
+		return nullptr;
+	}
+	return j;
 }
 
 void lodgenNativeAddPlacement( const NativePlacement & p );

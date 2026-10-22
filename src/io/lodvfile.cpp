@@ -6,6 +6,8 @@ BSD License - see nifskope.h
 
 #include "lodvfile.h"
 
+#include <QDataStream>
+
 /* Only for LODL_MAGIC: this validator must be able to NAME the LANDSCAPE
  * file when it is handed one, because `.lodt` meant that format until
  * 2026-09-09 and means this one now. */
@@ -607,6 +609,55 @@ bool LodvWriter::addAbsent( QString * error )
 	}
 	d->table[size_t( d->written )] = LodvTileEntry();
 	d->written++;
+	return true;
+}
+
+QByteArray LodvWriter::saveState()
+{
+	QByteArray s;
+	if ( !d->open || !d->f.flush() )
+		return s;
+	QDataStream o( &s, QIODevice::WriteOnly );
+	o << quint64( d->cursor ) << qint32( d->written ) << qint32( d->present ) << quint64( d->table.size() );
+	for ( const LodvTileEntry & e : d->table )
+		o << quint64( e.offset ) << e.storedBytes << e.rawBytes << e.crc32 << e.flags << e.reserved;
+	return s;
+}
+
+bool LodvWriter::resume( const QString & path, const LodvHeaderFields & fields, const QByteArray & state,
+	QString * error )
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	QDataStream in( state );
+	quint64 cursor = 0, n = 0;
+	qint32 written = 0, present = 0;
+	in >> cursor >> written >> present >> n;
+	if ( in.status() != QDataStream::Ok || n != quint64( fields.tilesX ) * quint64( fields.tilesY ) )
+		return fail( QStringLiteral( "resume: the saved table does not fit this level" ) );
+	d->fields = fields;
+	d->table.assign( size_t( n ), LodvTileEntry() );
+	for ( LodvTileEntry & e : d->table ) {
+		quint64 off = 0;
+		in >> off >> e.storedBytes >> e.rawBytes >> e.crc32 >> e.flags >> e.reserved;
+		e.offset = off;
+	}
+	if ( in.status() != QDataStream::Ok )
+		return fail( QStringLiteral( "resume: the saved table is short" ) );
+	d->tableOffset = LODV_HEADER_BYTES;
+	d->payloadOffset = alignUp( d->tableOffset + quint64( LODV_TABLE_STRIDE ) * d->table.size(),
+		LODV_PAYLOAD_ALIGN );
+	d->cursor = cursor;
+	d->written = written;
+	d->present = present;
+	d->f.setFileName( path );
+	if ( !d->f.open( QIODevice::ReadWrite ) || quint64( d->f.size() ) < cursor
+		|| !d->f.resize( qint64( cursor ) ) || !d->f.seek( qint64( cursor ) ) )
+		return fail( QString( "resume: %1 is not the file the checkpoint saw" ).arg( path ) );
+	d->open = true;
 	return true;
 }
 

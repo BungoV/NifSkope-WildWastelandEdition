@@ -85,6 +85,7 @@ See the LICENSE.md file for the full license text.
 #include <QMutex>
 #include <cstdio>
 #include <QCryptographicHash>
+#include <QSaveFile>
 #include <QDir>
 #include <QBuffer>
 #include <QFile>
@@ -4384,6 +4385,22 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			out().flush();
 			return 0;
 		}
+		/* lane BAKESPEED1: THE RESUME KEY of the pyramid's checkpoint and the chunk ledger: the switches, the exe and
+		 * every plugin's size and time, so a rerun with the same inputs continues and any change starts over. */
+		const QString lgResumeDir = QDir( outDir ).absolutePath() + QStringLiteral( "/lodgen_resume" );
+		QString lgResumeKey;
+		{
+			QCryptographicHash kh( QCryptographicHash::Sha1 );
+			kh.addData( inc.switches.toUtf8() );
+			QStringList keyFiles = world.pluginList().split( QChar( ',' ), Qt::SkipEmptyParts );
+			keyFiles.prepend( QCoreApplication::applicationFilePath() );
+			for ( const QString & f : keyFiles ) {
+				const QFileInfo fi( f.trimmed() );
+				kh.addData( QString( "|%1|%2|%3" ).arg( fi.fileName() ).arg( fi.size() )
+					.arg( fi.lastModified().toMSecsSinceEpoch() ).toUtf8() );
+			}
+			lgResumeKey = QString::fromLatin1( kh.result().toHex() );
+		}
 		/* THE PYRAMID reads the land, the land textures, the grass and the roads
 		 * -- every one of them inside some chunk's input digest -- plus the
 		 * vanilla colour fill. An incremental run with no chunk whose inputs moved
@@ -4410,6 +4427,9 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				vo.btrTexDir = texDir;
 				vo.btrDims = QVector<int>{ 4, 8, 16, 32 };
 			}
+			// lane BAKESPEED1: the pyramid's checkpoint
+			vo.resumeFile = lgResumeDir + QString( "/vt_%1.resume" ).arg( world.worldspace(), 8, 16, QChar( '0' ) );
+			vo.resumeKey = lgResumeKey;
 			/* THE TERRAIN OPTION (lane TERRLIVE1). The decals are written by
 			 * every option, as their own stage; the pyramid by full and hybrid. */
 			{
@@ -4489,7 +4509,16 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		lodgenClearBtoDisposition();
 		if ( !nativeDir.isEmpty() && !gLgKeepBto ) {
 			btoScratch = QDir( outDir ).absolutePath() + QStringLiteral( "/lodgen_bto_scratch" );
-			QDir( btoScratch ).removeRecursively();
+			/* lane BAKESPEED1: a chunk ledger from a stopped bake keeps the scratch its chunks wrote; the ledger
+			 * itself is checked job by job against the key */
+			const QString ledgerDir = lgResumeDir + QStringLiteral( "/chunks" );
+			QFile keyFile( ledgerDir + QStringLiteral( "/key" ) );
+			const bool sameKey = keyFile.open( QIODevice::ReadOnly ) && keyFile.readAll() == lgResumeKey.toLatin1();
+			keyFile.close();
+			if ( lodgenBakeSpeedRed() || !sameKey ) {
+				QDir( btoScratch ).removeRecursively();
+				QDir( ledgerDir ).removeRecursively();
+			}
 			if ( !QDir().mkpath( btoScratch ) ) {
 				err() << "error: cannot create the .BTO scratch folder " << btoScratch
 					  << " -- pass --keep-bto to write the chunks into the output folder "
@@ -4499,6 +4528,14 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		}
 
 		pass.btoScratchDir = btoScratch;
+		if ( !lodgenBakeSpeedRed() ) {
+			pass.resumeDir = lgResumeDir + QStringLiteral( "/chunks" );
+			pass.resumeKey = lgResumeKey + QStringLiteral( "|chunks" );
+			QDir().mkpath( pass.resumeDir );
+			QSaveFile kf( pass.resumeDir + QStringLiteral( "/key" ) );
+			if ( kf.open( QIODevice::WriteOnly ) && kf.write( lgResumeKey.toLatin1() ) > 0 )
+				kf.commit();
+		}
 
 		/* THE PER-CHUNK NATIVE CACHE (lane INCR1, 2026-09-17): written on every
 		 * `--native` bake unless `--no-native-cache`, replayed for the chunks an
@@ -4514,6 +4551,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			const bool passOk = lodgenRunChunkPass( jobs, pass,
 				[&]( const LodgenChunkOutcome & r ) {
 					lodgenIncrementalNoteRetired( inc, pass, r );
+					if ( lodgenMemLogOn() )	// lane BAKESPEED1: per-chunk retire time
+						lodgenMemNote( QStringLiteral( "chunk retired %1 dim %2 (%3,%4)" ).arg( r.index ).arg( r.dim ).arg( r.cx ).arg( r.cy ) );
 					if ( !r.btoBuilt )
 						retiredBto.insert( lodgenIncrementalChunkKey( inc, r.dim, r.cx, r.cy ), QString() );
 					else if ( r.btoSaved )
@@ -4820,6 +4859,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		} else if ( pass.wantBto ) {
 			lodgenSetBtoDisposition( QString(), writtenBto.size(), 0, 0 );
 		}
+		// lane BAKESPEED1: the pyramid and the chunks are whole and the chunks' scratch is gone: nothing to resume
+		QDir( lgResumeDir ).removeRecursively();
 
 		/* THE LEDGER GOES HERE, LAST, and the reason is a defect this lane
 		 * shipped and its own gate caught. It used to be written straight

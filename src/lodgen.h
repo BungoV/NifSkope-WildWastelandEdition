@@ -1651,6 +1651,10 @@ struct LodgenVtOptions
 	 *  honours its own Cancel here rather than freezing its window. */
 	bool ( *progress )( void * user, int rowsDone, int rowsTotal ) = nullptr;
 	void * progressUser = nullptr;
+	/*! lane BAKESPEED1, resume: the checkpoint file (empty = none) and the key of the inputs it is valid
+	 *  for. A rerun with the same key starts after the last saved row (all of them: no row runs). The caller removes it when the bake is done. */
+	QString resumeFile;
+	QString resumeKey;
 };
 
 struct LodgenVtEstimateOut
