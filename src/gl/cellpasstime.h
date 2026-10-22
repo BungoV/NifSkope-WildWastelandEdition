@@ -92,8 +92,37 @@ struct CacheCounts
 {
 	qint64 made = 0, madeBytes = 0, evicted = 0, usedBytes = 0, maxBytes = 0;
 	qint64 texMade = 0, texBytes = 0;	// textures uploaded by the texture cache (gltexloaders.cpp), their bytes
+	// lane STREAM1: what is resident now: geometry entries, their real bytes and their fp32 size; file textures
+	qint64 geoShapes = 0, geoGpuBytes = 0, geoFp32Bytes = 0, texResident = 0, texResidentBytes = 0;
+	qint64 texPumped = 0, texPumpedBytes = 0;	// uploaded ahead of their first bind by the streaming pump
 };
 CacheCounts & cacheCounts();
+
+/*! lane STREAM1: WW_STREAM1_RED=<list> brings an old path (and its cost) back: geocache (the 128 MB geometry
+ *  budget), texpump (the read-ahead ends after the open, nothing uploaded ahead), vtxpack (fp32 vertex arrays),
+ *  texcopy (each DDS copied once more before upload); "all" = every one. */
+bool stream1Red( const char * what );
+//! lane STREAM1: the card's dedicated memory in MB (GL_NVX_gpu_memory_info; 0 = unknown), and
+//! the MB in use on it now (all processes) when `usedMb` is given. Needs a current GL context.
+qint64 videoMemoryMb( qint64 * usedMb );
+//! lane STREAM1: "stream1 mem: <stage> geo=.. MB (fp32 .. MB) shapes=.. tex=.. MB (n) vram=../.. MB private=.. MB"
+QString stream1MemLine( const char * stage );
+//! lane STREAM1: a paint begins (after the streaming pump) / ends. `ready` = no cell queued, building or being
+//! written and (streaming) the loaded block is the expected one. The first ready paint after a cell open that
+//! needed no texture and under 1 MB of geometry prints "stream1 load: first full frame t=<s> ..." once; after it
+//! each paint's CPU time feeds the hitch figures.
+void stream1PaintBegin();
+//! lane STREAM1: a cell open starts (memLog "before the build" calls it).
+void stream1LoadArm();
+void stream1PaintEnd( bool ready, double paintMs );
+//! lane STREAM1: the open's first full frame has been drawn (or no cell open was timed: false)
+bool stream1Loaded();
+//! lane STREAM1: the worst paint (ms), paints over 33.3 ms and paints counted since the last reset (after the
+//! first full frame only).
+void stream1Hitch( double * maxMs, int * over, int * frames, bool reset );
+//! lane STREAM1: a file texture `id` now holds `bytes` on the card / was deleted (the resident texture figures)
+void texResidentSet( unsigned int id, qint64 bytes );
+void texResidentDrop( unsigned int id );
 
 //! The overlay's lines (averages of the last second), empty while off.
 QStringList overlay();

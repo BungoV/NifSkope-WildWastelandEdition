@@ -283,6 +283,7 @@ public:
 		unsigned int	ebo;					// element buffer object
 		unsigned int	vbo;					// vertex buffer object
 		std::uint32_t	usedEpoch = 0;			// the shrinkCache period that last drew it (lane PERF1)
+		std::uint32_t	gpuBytes = 0;			// lane VTXPACK1: the vertex buffer's real size (exact half arrays packed)
 		ShapeData( NifSkopeOpenGLContext & context, const ShapeDataHash & dataHash,
 					const float * const * attrData, const void * elementData );
 		~ShapeData();
@@ -407,6 +408,8 @@ protected:
 	size_t	cacheBytesUsed = 0;
 	size_t	cacheMaxBytes = 0x08000000;
 	std::uint32_t	cacheEpoch = 1;			// lane PERF1: shapes drawn since the last shrink are never evicted
+	size_t	cacheBudgetBytes = 0;			// lane STREAM1: the budget sized from the card's memory (0 = not read yet)
+	size_t effectiveCacheBytes();
 
 	Program *	currentProgram = nullptr;
 	Program *	programsLinked = nullptr;

@@ -611,10 +611,61 @@ static GLuint texLoadBMP(
 }
 
 
-//! Create texture with glTexStorage2D using GLI
+/*! lane STREAM1 (LOAD1): a DDS file's images where they lie in the file's bytes, in gli's layout (layer, face,
+ *  level; storage_linear's level sizes), so the upload reads them in place instead of from a full copy.
+ *  WW_STREAM1_RED=texcopy builds the gli copy as before; WW_STREAM1_TEXCHECK=1 builds both and counts mismatches. */
+class DdsView
+{
+public:
+	using extent_type = gli::texture::extent_type;
+	bool init( gli::target t, gli::format f, const extent_type & e, size_t layers, size_t faces, size_t levels,
+				const char * base )
+	{
+		if ( !base || levels < 1 || levels > 32 || layers < 1 || faces < 1 )
+			return false;
+		tgt = t; fmt = f; ext = e; nLayers = layers; nFaces = faces; nLevels = levels; bytes = base;
+		const extent_type	be = gli::block_extent( f );
+		const size_t	bs = gli::block_size( f );
+		faceSize = 0;
+		for ( size_t l = 0; l < levels; l++ ) {
+			const extent_type	bc = glm::ceilMultiple( extent( l ), be ) / be;
+			levelOffset[l] = faceSize;
+			levelSize[l] = bs * size_t( glm::compMul( bc ) );
+			faceSize += levelSize[l];
+		}
+		return true;
+	}
+	gli::target target() const { return tgt; }
+	gli::format format() const { return fmt; }
+	gli::swizzles swizzles() const { return gli::swizzles( gli::SWIZZLE_RED, gli::SWIZZLE_GREEN, gli::SWIZZLE_BLUE, gli::SWIZZLE_ALPHA ); }
+	size_t levels() const { return nLevels; }
+	size_t layers() const { return nLayers; }
+	size_t faces() const { return nFaces; }
+	extent_type extent( size_t level = 0 ) const
+	{
+		return glm::max( ext >> extent_type( static_cast< extent_type::value_type >( level ) ), extent_type( 1 ) );
+	}
+	size_t size() const { return faceSize * nFaces * nLayers; }
+	size_t size( size_t level ) const { return levelSize[level]; }
+	const void * data( size_t layer, size_t face, size_t level ) const
+	{
+		return bytes + ( layer * nFaces + face ) * faceSize + levelOffset[level];
+	}
+	bool empty() const { return !bytes; }
+private:
+	gli::target	tgt = gli::TARGET_2D;
+	gli::format	fmt = gli::FORMAT_UNDEFINED;
+	extent_type	ext{ 0 };
+	size_t	nLayers = 0, nFaces = 0, nLevels = 0, faceSize = 0;
+	size_t	levelOffset[32] = {}, levelSize[32] = {};
+	const char *	bytes = nullptr;
+};
+
+//! Create texture with glTexStorage2D using GLI (lane STREAM1: from a gli::texture or, in place, a DdsView)
 #ifndef Q_OS_MACOS
+template< class TextureT >
 static GLuint GLI_create_texture(
-	NifSkopeOpenGLContext::GLFunctions * fn, gli::texture& texture, GLenum& target, GLuint * id )
+	NifSkopeOpenGLContext::GLFunctions * fn, TextureT & texture, GLenum& target, GLuint * id )
 {
 	gli::gl glProfile( gli::gl::PROFILE_GL33 );
 	gli::gl::format const format = glProfile.translate( texture.format(), texture.swizzles() );
@@ -652,6 +703,7 @@ static GLuint GLI_create_texture(
 	PassTime::CacheCounts & pc = PassTime::cacheCounts();	// lane PERF1: the frame timers' texture traffic
 	pc.texMade++;
 	pc.texBytes += qint64( texture.size() );
+	PassTime::texResidentSet( id[0], qint64( texture.size() ) );	// lane STREAM1
 	for ( size_t layer = 0; layer < texture.layers(); ++layer )
 	for ( size_t face = 0; face < texture.faces(); ++face )
 	for ( size_t level = 0; level < texture.levels(); ++level ) {
@@ -752,8 +804,8 @@ static GLuint GLI_create_texture_fallback(
 }
 #endif
 
-//! Rewrite of gli::load_dds to not crash on invalid textures
-static gli::texture load_if_valid( const char * data, unsigned int size )
+//! Rewrite of gli::load_dds to not crash on invalid textures (lane STREAM1: `view` set = no copy, the view only)
+static gli::texture load_if_valid( const char * data, unsigned int size, DdsView * view = nullptr )
 {
 	using namespace gli;
 	using namespace gli::detail;
@@ -864,6 +916,16 @@ static gli::texture load_if_valid( const char * data, unsigned int size )
 	if ( Header.CubemapFlags & DDSCAPS2_VOLUME )
 		DepthCount = Header.Depth;
 
+	if ( view ) {
+		DdsView	v;
+		if ( v.init( get_target( Header, Header10 ), Format,
+				texture::extent_type( Header.Width, Header.Height, DepthCount ),
+				std::max<texture::size_type>( Header10.ArraySize, 1 ), FaceCount, MipMapCount, data + Offset )
+			&& Offset + v.size() <= size )
+			*view = v;
+		return texture();
+	}
+
 	texture Texture(
 		get_target( Header, Header10 ), Format,
 		texture::extent_type( Header.Width, Header.Height, DepthCount ),
@@ -886,7 +948,42 @@ GLuint TexCache::texLoadDDS( const QString & filepath, GLenum & target, QByteArr
 
 	GLuint mipmaps = 0;
 	GLuint result = 0;
-	gli::texture texture = load_if_valid( data.constData(), data.size() );
+	gli::texture texture;
+#ifndef Q_OS_MACOS
+	// lane STREAM1 (LOAD1): the images go up from the file's bytes (red WW_STREAM1_RED=texcopy: from a copy)
+	static const bool inPlace = !PassTime::stream1Red( "texcopy" );
+	static const bool check = qEnvironmentVariableIntValue( "WW_STREAM1_TEXCHECK" ) == 1;
+	DdsView	view;
+	if ( inPlace && fn )
+		load_if_valid( data.constData(), data.size(), &view );
+	if ( check ) {
+		texture = load_if_valid( data.constData(), data.size() );
+		int	bad = ( texture.empty() != view.empty() ) ? 1 : 0;
+		if ( !bad && !texture.empty() ) {
+			bad += ( texture.size() != view.size() || texture.levels() != view.levels() || texture.layers() != view.layers()
+						|| texture.faces() != view.faces() || texture.format() != view.format() || texture.target() != view.target() );
+			for ( size_t a = 0; !bad && a < texture.layers(); a++ )
+			for ( size_t b = 0; !bad && b < texture.faces(); b++ )
+			for ( size_t c = 0; !bad && c < texture.levels(); c++ ) {
+				bad += ( texture.size( c ) != view.size( c ) || texture.extent( c ) != view.extent( c )
+							|| std::memcmp( texture.data( a, b, c ), view.data( a, b, c ), texture.size( c ) ) != 0 );
+			}
+		}
+		std::fprintf( stderr, "stream1 texcheck: %s %s\n", bad ? "MISMATCH" : "same", qPrintable( filepath ) );
+		if ( inPlace && !view.empty() )
+			texture = gli::texture();
+	}
+	if ( inPlace && fn && !view.empty() ) {	// a file the view cannot read takes the old path below
+		result = GLI_create_texture( fn, view, target, id );
+		if ( result ) {
+			id[0] = result;
+			mipmaps = GLuint( view.levels() );
+		}
+	} else
+#endif
+	{
+	if ( texture.empty() )
+		texture = load_if_valid( data.constData(), data.size() );
 	if ( !texture.empty() && fn ) {
 #ifdef Q_OS_MACOS
 		result = GLI_create_texture_fallback( fn, texture, target, id );
@@ -894,8 +991,10 @@ GLuint TexCache::texLoadDDS( const QString & filepath, GLenum & target, QByteArr
 		result = GLI_create_texture( fn, texture, target, id );
 #endif
 	}
+	}
 
-	if ( result || !fn ) {
+	if ( mipmaps ) {
+	} else if ( result || !fn ) {
 		id[0] = result;
 		mipmaps = (GLuint)texture.levels();
 	} else {
@@ -907,10 +1006,16 @@ GLuint TexCache::texLoadDDS( const QString & filepath, GLenum & target, QByteArr
 
 	// lane PERF1: WW_TEX_CENSUS=1 lists every upload (bytes, size, levels, format, file) for a memory census
 	WW_SWITCH_STATIC( bool, census, wwEnvInt( "WW_TEX_CENSUS" ) == 1 );
-	if ( census && result )
+	if ( census && result && !texture.empty() )
 		std::fprintf( stderr, "tex census: %lld %dx%d levels=%d layers=%d faces=%d fmt=%d %s\n", (long long)texture.size(),
 			int( texture.extent().x ), int( texture.extent().y ), int( texture.levels() ), int( texture.layers() ),
 			int( texture.faces() ), int( texture.format() ), qPrintable( filepath ) );
+#ifndef Q_OS_MACOS
+	else if ( census && result && !view.empty() )
+		std::fprintf( stderr, "tex census: %lld %dx%d levels=%d layers=%d faces=%d fmt=%d %s\n", (long long)view.size(),
+			int( view.extent().x ), int( view.extent().y ), int( view.levels() ), int( view.layers() ),
+			int( view.faces() ), int( view.format() ), qPrintable( filepath ) );
+#endif
 
 	if ( !texture.empty() )
 		texture.clear();

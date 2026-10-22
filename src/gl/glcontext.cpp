@@ -58,6 +58,12 @@ int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_G
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #  include <QOpenGLVersionFunctionsFactory>
 #endif
+#if defined( __F16C__ ) && defined( __AVX__ )
+#  include <immintrin.h>
+#endif
+#ifndef GL_HALF_FLOAT
+#  define GL_HALF_FLOAT 0x140B
+#endif
 
 
 static const QString white = "#FFFFFFFF";
@@ -1379,7 +1385,25 @@ void NifSkopeOpenGLContext::bindShape(
 	pc.made++;
 	pc.madeBytes += qint64( d->h.getBufferDataSize() );
 	pc.usedBytes = qint64( cacheBytesUsed );
-	pc.maxBytes = qint64( cacheMaxBytes );
+	pc.maxBytes = qint64( effectiveCacheBytes() );
+}
+
+/*! lane STREAM1: the geometry budget a game sizes from the card (an eighth of its dedicated memory, 256 MB to
+ *  1.5 GB), never below the renderer's setting: a 3x3 set held 308 MB against 128 MB and re-uploaded shapes every
+ *  frame. WW_GEOCACHE_MB=<n> pins it; WW_STREAM1_RED=geocache keeps the setting alone (the old budget). */
+size_t NifSkopeOpenGLContext::effectiveCacheBytes()
+{
+	if ( PassTime::stream1Red( "geocache" ) )
+		return cacheMaxBytes;
+	if ( !cacheBudgetBytes ) {
+		qint64 mb = qEnvironmentVariableIntValue( "WW_GEOCACHE_MB" );
+		if ( mb <= 0 ) {
+			const qint64 vram = PassTime::videoMemoryMb( nullptr );
+			mb = vram > 0 ? std::clamp< qint64 >( vram / 8, 256, 1536 ) : 256;
+		}
+		cacheBudgetBytes = size_t( mb ) << 20;
+	}
+	return std::max( cacheMaxBytes, cacheBudgetBytes );
 }
 
 //! WW_GEOCACHE_RED=thrash: the old strict size limit, evicting shapes the frame still draws (the gate's red)
@@ -1397,6 +1421,11 @@ void NifSkopeOpenGLContext::setCacheSize( size_t maxBytes )
 void NifSkopeOpenGLContext::shrinkCache( bool deleteAll )
 {
 	bool	rehashNeeded = false;
+	// lane STREAM1: between the setting and the budget a shape goes only after ~30 s (60 fps) undrawn, so a
+	// streamed cell that left frees its geometry and one that comes back into view is not uploaded again
+	const bool	budgetOn = !deleteAll && !geoCacheThrashRed() && !PassTime::stream1Red( "geocache" );
+	const size_t	budget = budgetOn ? effectiveCacheBytes() : 0;
+	constexpr std::uint32_t	keepEpochs = 1800;
 
 	while ( cacheLastItem ) {
 		ShapeData *	d = cacheLastItem->next;
@@ -1410,6 +1439,8 @@ void NifSkopeOpenGLContext::shrinkCache( bool deleteAll )
 			// lane PERF1: the oldest shape was drawn this frame, so all are: evicting it would re-upload
 			// the frame's whole working set every frame once it outgrows the size (a cell frame did)
 			if ( d->usedEpoch == cacheEpoch && !geoCacheThrashRed() )
+				break;
+			if ( budgetOn && cacheBytesUsed < budget && cacheEpoch - d->usedEpoch < keepEpochs )
 				break;
 			cacheShapeCnt--;
 			cacheBytesUsed -= d->h.getBufferDataSize() + 24576;
@@ -1467,6 +1498,58 @@ inline std::uint32_t NifSkopeOpenGLContext::ShapeDataHash::hashFunction() const
 	return std::uint32_t( r );
 }
 
+//! lane VTXPACK1: WW_STREAM1_RED=vtxpack uploads every array as fp32 (the old buffers and their size)
+static bool vtxPackOn()
+{
+	static const bool v = !PassTime::stream1Red( "vtxpack" );
+	return v;
+}
+
+/*! lane VTXPACK1: the array as half floats only when EVERY value comes back bit-exact from fp16 and is a normal
+ *  half or zero (FO4 stores UVs, weights and most positions as halves): the vertex fetch widens each to the very
+ *  float the fp32 array held, so the shader reads the same numbers. n = components a vertex (2 to 4); 3 is padded
+ *  to 4 so each vertex stays 4-byte aligned. False = keep fp32. */
+static bool wwPackHalfExact( const float * src, size_t n, size_t verts, std::vector< std::uint16_t > & out )
+{
+#if defined( __F16C__ ) && defined( __AVX__ )
+	const size_t	total = n * verts;
+	std::vector< std::uint16_t >	tmp( ( total + 7 ) & ~size_t( 7 ) );
+	const __m256	absMask = _mm256_castsi256_ps( _mm256_set1_epi32( 0x7FFFFFFF ) );
+	const __m256	maxHalf = _mm256_set1_ps( 65504.0f );
+	const __m256	minNormal = _mm256_set1_ps( 6.103515625e-05f );
+	const __m256	zero = _mm256_setzero_ps();
+	for ( size_t i = 0; i < total; i += 8 ) {
+		alignas( 32 ) float	buf[8] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		const float *	p = src + i;
+		if ( i + 8 > total ) {
+			std::memcpy( buf, p, ( total - i ) * sizeof( float ) );
+			p = buf;
+		}
+		const __m256	v = _mm256_loadu_ps( p );
+		const __m128i	h = _mm256_cvtps_ph( v, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC );
+		const __m256	a = _mm256_and_ps( v, absMask );
+		__m256	ok = _mm256_cmp_ps( _mm256_cvtph_ps( h ), v, _CMP_EQ_OQ );	// NaN fails here
+		ok = _mm256_and_ps( ok, _mm256_cmp_ps( a, maxHalf, _CMP_LE_OQ ) );	// infinity
+		ok = _mm256_and_ps( ok, _mm256_or_ps( _mm256_cmp_ps( a, minNormal, _CMP_GE_OQ ), _mm256_cmp_ps( a, zero, _CMP_EQ_OQ ) ) );
+		if ( _mm256_movemask_ps( ok ) != 0xFF )
+			return false;
+		_mm_storeu_si128( reinterpret_cast< __m128i * >( tmp.data() + i ), h );
+	}
+	if ( n != 3 ) {
+		tmp.resize( total );
+		out.swap( tmp );
+	} else {
+		out.assign( verts * 4, 0 );
+		for ( size_t v = 0; v < verts; v++ )
+			std::memcpy( out.data() + v * 4, tmp.data() + v * 3, 3 * sizeof( std::uint16_t ) );
+	}
+	return true;
+#else
+	(void) src; (void) n; (void) verts; (void) out;
+	return false;
+#endif
+}
+
 size_t NifSkopeOpenGLContext::ShapeDataHash::getBufferDataSize() const
 {
 	std::uint64_t	tmp = ( attrMask & 0x0F0F0F0F0F0F0F0FULL ) + ( ( attrMask >> 4 ) & 0x0F0F0F0F0F0F0F0FULL );
@@ -1489,6 +1572,27 @@ NifSkopeOpenGLContext::ShapeData::ShapeData(
 	std::uint32_t	attrDataSize = dataHash.getBufferDataSize() - elementDataSize;
 	std::uintptr_t	attrOffset = 0;
 
+	// lane VTXPACK1: which arrays go up as exact halves (WW_STREAM1_RED=vtxpack: none, the old buffer)
+	std::vector< std::uint16_t >	halves[16];
+	if ( vtxPackOn() ) {
+		attrDataSize = 0;
+		std::uint64_t	m = attrMask;
+		for ( size_t i = 0; m && i < 16; i++, m = m >> 4 ) {
+			size_t	n = m & 15;
+			if ( !n )
+				continue;
+			if ( n >= 2 && n <= 4 && attrData[i] && wwPackHalfExact( attrData[i], n, vertCnt, halves[i] ) )
+				attrDataSize += std::uint32_t( halves[i].size() * sizeof( std::uint16_t ) );
+			else
+				attrDataSize += std::uint32_t( n * sizeof( float ) * vertCnt );
+		}
+	}
+	gpuBytes = attrDataSize + elementDataSize;
+	PassTime::CacheCounts &	pc = PassTime::cacheCounts();
+	pc.geoShapes++;
+	pc.geoGpuBytes += qint64( gpuBytes );
+	pc.geoFp32Bytes += qint64( dataHash.getBufferDataSize() );
+
 	GLFunctions &	f = *( context.fn );
 	f.glGenVertexArrays( 1, &vao );
 	f.glBindVertexArray( vao );
@@ -1499,6 +1603,15 @@ NifSkopeOpenGLContext::ShapeData::ShapeData(
 		size_t	n = attrMask & 15;
 		if ( !n )
 			continue;
+		if ( i < 16 && !halves[i].empty() ) {
+			size_t	nBytes = halves[i].size() * sizeof( std::uint16_t );
+			f.glBufferSubData( GL_ARRAY_BUFFER, GLintptr( attrOffset ), GLsizeiptr( nBytes ), halves[i].data() );
+			f.glVertexAttribPointer( GLuint( i ), GLint( n ), GL_HALF_FLOAT, GL_FALSE,
+										GLsizei( ( n == 3 ? 4 : n ) * sizeof( std::uint16_t ) ), (void *) attrOffset );
+			f.glEnableVertexAttribArray( GLuint( i ) );
+			attrOffset = attrOffset + nBytes;
+			continue;
+		}
 		size_t	nBytes = n * sizeof( float ) * vertCnt;
 		f.glBufferSubData( GL_ARRAY_BUFFER, GLintptr( attrOffset ), GLsizeiptr( nBytes ), attrData[i] );
 		f.glVertexAttribPointer( GLuint( i ), GLint( n ), GL_FLOAT, GL_FALSE, 0, (void *) attrOffset );
@@ -1531,6 +1644,10 @@ NifSkopeOpenGLContext::ShapeData::ShapeData(
 
 NifSkopeOpenGLContext::ShapeData::~ShapeData()
 {
+	PassTime::CacheCounts &	pc = PassTime::cacheCounts();	// lane STREAM1: what stays resident
+	pc.geoShapes--;
+	pc.geoGpuBytes -= qint64( gpuBytes );
+	pc.geoFp32Bytes -= qint64( h.getBufferDataSize() );
 	GLFunctions &	f = *fn;
 	f.glBindVertexArray( 0 );
 	f.glDeleteVertexArrays( 1, &vao );

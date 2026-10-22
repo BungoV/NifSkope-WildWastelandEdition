@@ -2,6 +2,8 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellspeed.h"
+#include "cellstream.h"
+#include "gl/cellpasstime.h"
 #include "gamemanager.h"
 #include "model/nifmodel.h"
 
@@ -294,6 +296,26 @@ QStringList CellTexAhead::ready( const NifModel * nif, int max )
 	return out;
 }
 
+void CellTexAhead::drop( const NifModel * nif, const QString & name )
+{
+	if ( !nif || armed.load( std::memory_order_relaxed ) != nif )
+		return;
+	State & s = st();
+	std::unique_lock<std::mutex> l( s.lock );
+	if ( s.nif != nif )
+		return;
+	auto it = s.byKey.find( GameManager::get_full_path( name, "textures", ".dds" ) );
+	if ( it == s.byKey.end() )
+		return;
+	Entry & e = s.entries[size_t( it->second )];
+	if ( e.st != St::Done )
+		return;
+	s.held -= e.data.size();
+	e.data = QByteArray();
+	e.st = St::Gone;
+	s.cv.notify_all();
+}
+
 void CellTexAhead::stop( const NifModel * nif )
 {
 	if ( !nif || armed.load( std::memory_order_relaxed ) != nif )
@@ -306,7 +328,13 @@ void CellTexAhead::stop( const NifModel * nif )
 
 void CellTexAhead::frameEnd()
 {
-	if ( !armed.load( std::memory_order_relaxed ) )
+	const NifModel * a = armed.load( std::memory_order_relaxed );
+	if ( !a )
+		return;
+	// lane STREAM1: a streaming document keeps reading ahead, for the cells still to come (they arrive while the
+	// camera moves; the view's pump uploads what is read). Red WW_STREAM1_RED=texpump: it ends as before.
+	static const bool pumpRed = PassTime::stream1Red( "texpump" );
+	if ( !pumpRed && cellStreamOn( a ) )
 		return;
 	State & s = st();
 	std::unique_lock<std::mutex> l( s.lock );

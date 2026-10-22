@@ -217,6 +217,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <functional>
 #include <QtEndian>
 #include "ui/opencellmenu.h"
+#include "gl/cellpasstime.h"	// lane STREAM1
 #include <vector>
 
 namespace {
@@ -2161,6 +2162,7 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 	for ( int i = 0; i < steps.size(); i++ ) {
 		ogl->wwSetPathCamera( true, steps[i].eye, steps[i].at, steps[i].fov );
 		cellStreamStats( nullptr, true );
+		PassTime::stream1Hitch( nullptr, nullptr, nullptr, true );	// lane STREAM1: this step's paints only
 		const qint64 waited = wwCellStreamSettle( ogl, 10, waitMs );
 		wwCellStreamSettle( ogl, 4, waitMs );   // transforms and the far tiles' data, drawn once
 		// lane CELLSTREAM1: and long enough for the textures of the cells that left to be freed (the view's rule)
@@ -2180,6 +2182,13 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		// lane CELLSTREAM1: memory as it stands (textures the view freed included); WW_CELL_STREAM_FLUSH=1 also reads it
 		// after dropping every texture and cached mesh
 		const qint64 privLive = cellStreamPrivateBytes();
+		// lane STREAM1: the step's worst paint, paints over 33.3 ms, and the memory line (before any flush)
+		double hitchMs = 0.0;
+		int hitchOver = 0, hitchFrames = 0;
+		PassTime::stream1Hitch( &hitchMs, &hitchOver, &hitchFrames, false );
+		ogl->makeCurrent();
+		const QString s1mem = PassTime::stream1MemLine( "walk" );
+		ogl->doneCurrent();
 		if ( wwEnvInt( "WW_CELL_STREAM_FLUSH" ) > 0 )
 			ogl->wwCellStreamFlush();
 		const qint64 priv = cellStreamPrivateBytes();
@@ -2207,7 +2216,9 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " shapes " << s.sceneShapes << " top " << s.persistentTop
 				<< " | holes " << holes << " doubles " << doubles << " samples " << samples
 				<< " | " << cov
-				<< " | expected " << s.expected << " | loaded " << s.loaded;
+				<< " | expected " << s.expected << " | loaded " << s.loaded
+				<< " | hitchMaxMs " << QString::asprintf( "%.1f", hitchMs ) << " over33 " << hitchOver
+				<< " hitchFrames " << hitchFrames << " | " << s1mem;
 			if ( !s.lastError.isEmpty() )
 				log << " | error " << s.lastError;
 			log << "\n";

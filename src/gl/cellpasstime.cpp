@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLVersionFunctionsFactory>
 #include <QSettings>
@@ -15,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #ifdef Q_OS_WIN
@@ -661,6 +663,175 @@ void memLog( const char * stage )
 	State & s = st();
 	if ( qstrcmp( stage, "first frames drawn" ) != 0 )
 		s.memArmed = 3;	// the next frames' figure, once the build is done
+	if ( qstrcmp( stage, "before the build" ) == 0 )
+		stream1LoadArm();	// lane STREAM1: a cell open starts: time it to its first full frame
+}
+
+// lane STREAM1 ------------------------------------------------------------------------------------------------
+
+bool stream1Red( const char * what )
+{
+	static const QByteArray v = qgetenv( "WW_STREAM1_RED" );
+	if ( v.isEmpty() )
+		return false;
+	if ( v == "all" || v == "1" )
+		return true;
+	for ( const QByteArray & w : v.split( ',' ) ) {
+		if ( w.trimmed() == what )
+			return true;
+	}
+	return false;
+}
+
+qint64 videoMemoryMb( qint64 * usedMb )
+{
+	if ( usedMb )
+		*usedMb = 0;
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	if ( !c )
+		return 0;
+	QOpenGLFunctions * f = c->functions();
+	if ( c->hasExtension( QByteArrayLiteral( "GL_NVX_gpu_memory_info" ) ) ) {
+		GLint total = 0, avail = 0;
+		f->glGetIntegerv( 0x9047, &total );	// GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX (KB)
+		f->glGetIntegerv( 0x9049, &avail );	// GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX (KB)
+		if ( usedMb )
+			*usedMb = qint64( total - avail ) >> 10;
+		return qint64( total ) >> 10;
+	}
+	return 0;
+}
+
+QString stream1MemLine( const char * stage )
+{
+	const CacheCounts & cc = cacheCounts();
+	qint64 pm = 0, wm = 0, used = 0;
+	memory( pm, wm );
+	const qint64 total = videoMemoryMb( &used );
+	return QString::asprintf( "stream1 mem: %s geo=%.1f MB (fp32 %.1f MB) shapes=%lld budget=%.0f MB tex=%.1f MB (%lld)"
+		" pumped=%lld (%.1f MB) vram=%lld/%lld MB private=%lld MB ws=%lld MB t=%.1f s", stage,
+		double( cc.geoGpuBytes ) / 1048576.0, double( cc.geoFp32Bytes ) / 1048576.0, (long long)cc.geoShapes,
+		double( cc.maxBytes ) / 1048576.0, double( cc.texResidentBytes ) / 1048576.0, (long long)cc.texResident,
+		(long long)cc.texPumped, double( cc.texPumpedBytes ) / 1048576.0, (long long)used, (long long)total,
+		(long long)pm, (long long)wm, processSeconds() );
+}
+
+namespace
+{
+struct Stream1Load
+{
+	bool armed = false, fired = false;
+	double t0 = 0.0;
+	qint64 made0 = 0, tex0 = 0;	// counts at the open's start
+	qint64 madeP = 0, madeBytesP = 0, texP = 0;	// counts after this paint's pump
+	double hitchMax = 0.0;
+	int hitchOver = 0, hitchFrames = 0;
+};
+Stream1Load & s1()
+{
+	static Stream1Load v;
+	return v;
+}
+} // namespace
+
+void stream1LoadArm()
+{
+	Stream1Load & l = s1();
+	const CacheCounts & cc = cacheCounts();
+	l.armed = true;
+	l.fired = false;
+	l.t0 = processSeconds();
+	l.made0 = cc.made;
+	l.tex0 = cc.texMade;
+	l.hitchMax = 0.0;
+	l.hitchOver = l.hitchFrames = 0;
+}
+
+bool stream1Loaded()
+{
+	return s1().fired;
+}
+
+void stream1PaintBegin()
+{
+	Stream1Load & l = s1();
+	const CacheCounts & cc = cacheCounts();
+	l.madeP = cc.made;
+	l.madeBytesP = cc.madeBytes;
+	l.texP = cc.texMade;
+}
+
+void stream1PaintEnd( bool ready, double paintMs )
+{
+	Stream1Load & l = s1();
+	const CacheCounts & cc = cacheCounts();
+	if ( l.armed && !l.fired ) {
+		const qint64 tex = cc.texMade - l.texP, made = cc.made - l.madeP, madeBytes = cc.madeBytes - l.madeBytesP;
+		if ( ready && tex == 0 && madeBytes < ( 1LL << 20 ) && cc.texMade > l.tex0 && cc.made > l.made0 ) {
+			l.fired = true;
+			const double t = processSeconds();
+			std::fprintf( stderr, "stream1 load: first full frame t=%.1f s (%.1f s after the build started) textures=%lld"
+				" shapes=%lld this paint: %lld shapes %lld bytes\n", t, t - l.t0, (long long)( cc.texMade - l.tex0 ),
+				(long long)( cc.made - l.made0 ), (long long)made, (long long)madeBytes );
+			std::fprintf( stderr, "%s\n", qPrintable( stream1MemLine( "first full frame" ) ) );
+		}
+		return;
+	}
+	if ( !l.fired )
+		return;
+	l.hitchFrames++;
+	l.hitchMax = std::max( l.hitchMax, paintMs );
+	if ( paintMs > 33.3 )
+		l.hitchOver++;
+}
+
+namespace
+{
+std::unordered_map< unsigned int, qint64 > & texResidentMap()
+{
+	static std::unordered_map< unsigned int, qint64 > v;
+	return v;
+}
+} // namespace
+
+void texResidentSet( unsigned int id, qint64 bytes )
+{
+	CacheCounts & cc = cacheCounts();
+	qint64 & b = texResidentMap()[id];
+	if ( b ) {
+		cc.texResident--;
+		cc.texResidentBytes -= b;
+	}
+	b = bytes;
+	cc.texResident++;
+	cc.texResidentBytes += bytes;
+}
+
+void texResidentDrop( unsigned int id )
+{
+	auto & m = texResidentMap();
+	auto it = m.find( id );
+	if ( it == m.end() )
+		return;
+	CacheCounts & cc = cacheCounts();
+	cc.texResident--;
+	cc.texResidentBytes -= it->second;
+	m.erase( it );
+}
+
+void stream1Hitch( double * maxMs, int * over, int * frames, bool reset )
+{
+	Stream1Load & l = s1();
+	if ( maxMs )
+		*maxMs = l.hitchMax;
+	if ( over )
+		*over = l.hitchOver;
+	if ( frames )
+		*frames = l.hitchFrames;
+	if ( reset ) {
+		l.hitchMax = 0.0;
+		l.hitchOver = l.hitchFrames = 0;
+	}
 }
 
 } // namespace PassTime
