@@ -58,6 +58,7 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | FARLIGHTMAP1 | far-light layers (.fvl/.fvg) written for the whole map by FARBAKE2's rebake, so distant towns glow without a loaded cell bake (bungo 10-22 RDR2 item 1) | FOLDED INTO FARBAKE2 10-22 |
 | REFLPROBE1 | placed reflection probes, captured and relit per time of day, replace the material's fixed cubemap where present; ships OFF (bungo 10-22 RDR2 item 3) | WORKING 10-22 (code + build only; pictures after the BATCH2 merge) |
 | SPECOCC1 | specular occlusion from our baked sky visibility (horizon method, copied from FO4CS ambient_ibl_pass.hlsl) on top of the material-AO version; ships OFF (bungo 10-22 RDR2 item 4) | WORKING 10-22 (code + build only; pictures after the BATCH2 merge) |
+| FOGDRIFT1 | fog gets 3D lumps that drift with the weather's wind speed/direction, so lamp glows brighten and dim as patches pass (RDR2); no wind = still; interiors still unless they have outdoor parts (sky-showing cells / outdoor rooms); far haze stays smooth; ships OFF (bungo 10-22) | WORKING 10-22 (code + build only; pictures after the BATCH2 merge) |
 Next batch (BATCH2): VOLPART1R, FARCARD1, PERF3, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
 Queued tonight (his 10-21 go): VTGPU1 + PROFILE1 (after
 BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
