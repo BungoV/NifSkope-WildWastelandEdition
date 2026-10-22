@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SPECOCC1 (2026-10-22, branch specocc1-20261022): specular occlusion from the baked sky visibility
+
+- **Why.** Outdoors the cube reflection is the sky's, but only the material AO dimmed it: a glossy floor under an awning
+  or in a doorway reflected the open sky. FO4CS dims its reflection by its sky visibility (ambient_ibl_pass.hlsl, the M2.3
+  horizon specular occlusion, on top of TruePBR_SpecularOcclusion's material AO).
+- **What.** New Show row **Sky specular occlusion** (WW/CellSpecOcc, ships off; pin `WW_CELL_SPECOCC=0|1`). With it on, in
+  a weather-lit exterior with a baked GI grid, the cube reflection (after the SSR mix) keeps the probes' sky visibility
+  read along the reflection: the sky grid's per-axis open-sky share on the lobe's dominant direction (R for a mirror,
+  bending to N as the surface roughens), n^2 axis weights, times the Sky visibility row's strength. Both programs: the
+  legacy FO4 program (cubeK and the viewport cube term) and the PBR program (the ambient block's reflection). Interiors,
+  the material AO term and every light's specular are unchanged.
+- **Cost.** Three hardware-trilinear reads of the GI texture per exterior pixel. No new sampler: the sky grid's slot 0
+  rides the GI texture after its own slabs (6 more RGBA16F slabs) only while the row is on; the GI reads now take the
+  texture's depth from `textureSize` (the same number when off).
+- **Reds.** `WW_CELL_SPECOCC_RED=ao`: the material AO alone (today's picture). `WW_CELL_SPECOCC_RED=hemi`: FO4CS's own
+  read, the normal's sky visibility faded out by smoothness.
+
 ## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
 
 - Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.

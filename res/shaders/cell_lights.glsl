@@ -539,7 +539,7 @@ vec4 cellGiTrilinear( vec3 P, vec3 N )
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;
 	vec2 xy = g.xy / cellGiDims.xy;
 	float z = clamp( g.z, 0.5, cellGiDims.z - 0.5 );
-	float depth = ( cellGiRooms ? 12.0 : 6.0 ) * cellGiDims.z;
+	float depth = float( textureSize( cellGi, 0 ).z );	// lane SPECOCC1: the sky grid's slabs may follow
 	vec3 n2 = N * N;
 	return n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
 	     + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )
@@ -921,6 +921,35 @@ float cellGiSkyK( vec3 P, vec3 N )
 		return 0.0;
 	return clamp( cellGiSample( P, N ).a, 0.0, 1.0 );
 }
+/* lane SPECOCC1: specular occlusion from the baked sky visibility (FO4CS ambient_ibl_pass.hlsl, M2.3 horizon specular
+ * occlusion), on top of the material AO. Outdoors the cube reflection is the sky's, so it keeps the probes' open-sky
+ * share in the direction it reflects: the sky grid read on the lobe's dominant direction (R for a mirror, bending to N
+ * as it roughens), n^2 axis weights, the Sky visibility row's strength; 1 where the grid has no evidence. Red hemi:
+ * FO4CS's own read, the normal's share faded out by smoothness (a mirror sees one direction, not the hemisphere). */
+uniform int cellSpecOcc;		// 0 off (the material AO alone), 1 on, 2 the hemi red (src/gl/celllights.h)
+uniform float cellSpecSkyBase;		// the sky grid's slot 0 rides cellGi after its own slabs (6, or 12 with rooms): no new sampler
+float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
+{
+	if ( cellSpecOcc == 0 || !cellGiOn || !cellGiSky || cellInterior )
+		return 1.0;
+	float r = clamp( rough, 0.0, 1.0 );
+	vec3 D = cellSpecOcc == 2 ? N : normalize( mix( N, R, ( 1.0 - r ) * ( sqrt( 1.0 - r ) + r ) ) );
+	vec3 t = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;	// texels: voxel i's centre is i + 0.5
+	float z = clamp( t.z, 0.5, cellGiDims.z - 0.5 );	// the slabs stack on z: never filter across one
+	vec3 sl = vec3( D.x >= 0.0 ? 0.0 : 1.0, D.y >= 0.0 ? 2.0 : 3.0, D.z >= 0.0 ? 4.0 : 5.0 );
+	vec3 w = D * D;
+	float depth = float( textureSize( cellGi, 0 ).z );
+	vec2 a = vec2( 0.0 );
+	for ( int k = 0; k < 3; k++ ) {
+		vec4 s = texture( cellGi, vec3( t.xy / cellGiDims.xy, ( ( cellSpecSkyBase + sl[k] ) * cellGiDims.z + z ) / depth ) );
+		a += w[k] * s.ra;
+	}
+	if ( a.y < 0.01 )
+		return 1.0;
+	float v = 1.0 + cellSkyVis * ( clamp( a.x / a.y, 0.0, 1.0 ) - 1.0 );
+	return cellSpecOcc == 2 ? mix( 1.0, v, r ) : v;
+}
+
 /* lane GIAMB1: probe 90 indoors, the share of the cell's ambient (DALC) the probe light replaced at P, under the
  * rule in force (cellAmbGi): the grid's valid share with replace (the default), 0 with keep or without the GI */
 float cellAmbShare( vec3 P, vec3 N )

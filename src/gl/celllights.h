@@ -240,6 +240,15 @@ float wwCellSkyVis();
 bool wwCellSkyVisPinned();
 void wwCellSkyVisSetPercent( int pct );
 
+/*! Lane SPECOCC1: specular occlusion from the baked sky visibility (FO4CS's horizon specular occlusion), on top of the
+ *  material AO: outdoors the cube reflection keeps the sky grid's visibility along the reflection. WW/CellSpecOcc, ships
+ *  off; pin WW_CELL_SPECOCC=0|1. Red WW_CELL_SPECOCC_RED=ao: the material AO alone (today's), hemi: FO4CS's literal
+ *  read (the normal's sky visibility faded out by smoothness). Mode: 0 off, 1 on, 2 hemi. */
+bool wwCellSpecOccOn();
+bool wwCellSpecOccPinned();
+void wwCellSpecOccSetOn( bool on );
+int wwCellSpecOccMode();
+
 /*! lane FARVIEW1 (src/farlight.h, docs/cloud/FARVIEW1_DESIGN.md): DISTANT LIGHT FROM THE SURFELS. Past the band's
  *  near end D0 a surface's placed-light diffuse fades from the real lights to the bake's surfels (w = smoothstep(D0, D1,
  *  the camera distance)): (1 - w)(real + the GI grid's placed share) + w x albedo x F, F the 27-cell same-side lookup.

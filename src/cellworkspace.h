@@ -229,6 +229,7 @@ private:
 	QMenu * cellSsgiQ = nullptr;
 	QActionGroup * cellSsgiQGroup = nullptr;
 	QAction * cellAoDecal = nullptr;
+	QAction * cellSpecOcc = nullptr;	// lane SPECOCC1: specular occlusion from the baked sky visibility; ships off
 	QAction * cellGiGpu = nullptr;
 	QAction * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off
 	QAction * cellGrass = nullptr;    // lane GRASSMB1: the game's grass (placed at cell open)
