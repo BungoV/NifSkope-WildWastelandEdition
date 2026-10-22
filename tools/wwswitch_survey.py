@@ -156,12 +156,13 @@ def scan(path, rel):
     def current():
         fn = None
         st = False
-        for t, name, s in stack:
+        fs = -1
+        for t, name, s, k0 in stack:
             if t == 'fn':
-                fn = name
+                fn, fs = name, k0
             if s:
                 st = True
-        return fn, st
+        return fn, st, fs
     last_break = 0
     for m in reads:
         pos = m.start()
@@ -170,34 +171,80 @@ def scan(path, rel):
             ch = code[k]
             head = code[last_break:k]
             if ch == '{':
-                in_fn = any(t == 'fn' for t, _, _ in stack)
+                in_fn = any(t == 'fn' for t, _, _, _ in stack)
                 name = None if in_fn else fn_name(head)
                 hs = ' '.join(head.split())
                 is_static = in_fn and bool(re.match(r'^static\b', hs))
                 kind = 'fn' if name else ('rec' if re.match(r'^(template\s*<.*>\s*)?(struct|class|union)\b', hs) and not in_fn else 'blk')
-                stack.append((kind, name, is_static))
+                if kind == 'rec':
+                    rm = re.match(r'^(?:template\s*<.*>\s*)?(?:struct|class|union)\s+(\w+)', hs)
+                    name = rm.group(1) if rm else None
+                if kind == 'blk':
+                    name = hs
+                stack.append((kind, name, is_static, k))
             elif ch == '}':
                 if stack:
                     stack.pop()
             last_break = k + 1
             ev += 1
-        fn, st = current()
+        fn, st, fs = current()
         if fn is None and stack and stack[-1][0] == 'rec':
             fn = '(member default)'
+        # TDFIX2: an inline constructor of a struct (`struct Switches { Switches() { ...reads... } }`): its name
+        recs = [nm for t, nm, _, _ in stack if t == 'rec']
+        heads = [nm for t, nm, _, _ in stack if t == 'blk']
+        once = fs >= 0 and once_guarded(code, fs, fn, recs, heads)
         stmt = ' '.join(code[last_break:pos].split())
         if re.match(r'^static\b', stmt):
             st = True
         name = m.group(3) or ''
         sites.append((rel, line_of[pos], fn or '(file scope)', st, m.group(1), name, lines[line_of[pos] - 1].strip()[:160]))
+        if once:
+            ONCE.add((rel, line_of[pos]))
     return sites, set(LIT.findall(re.sub(r'wwSwitchMovedFor\s*\([^)]*\)', '', text)))	# prefixes are not names
 
 
 SHOT_RANGE = {}	# rel -> (first, last) line of the WW_RENDER_SHOT handler in createWindow
+ONCE = set()	# (rel, line) of reads a once-guard caches for the process (TDFIX2)
+ONCE_GUARD = re.compile(r'^if\s*\(\s*!\s*\w+\s*\.\s*(loaded|init)\s*\)$')
+SENTINEL = re.compile(r'^if\s*\(\s*(\w+)\s*<\s*0\s*\)$')
+FOLLOWS = re.compile(r'wwSwitchMovedFor|wwSwitchMoved\b|WW_SWITCH_STATIC|wwSwitchGen')
+
+
+def body_of(code, start):
+    """The function body from its '{' at `start` to the matching '}' (comments and strings are blanked in `code`)."""
+    d = 0
+    for k in range(start, len(code)):
+        if code[k] == '{':
+            d += 1
+        elif code[k] == '}':
+            d -= 1
+            if d == 0:
+                return code[start:k + 1]
+    return code[start:]
+
+
+def once_guarded(code, fs, fn, recs, heads):
+    """True when the read's function caches it once for the process: an enclosing block is exactly
+    `if ( !s.loaded )` / `if ( !s.init )` (no generation check in it), or `if ( on < 0 )` on a `static int on = -1`,
+    or the read is in the constructor of a struct some function keeps as `static const`."""
+    short = (fn or '').split('::')[-1]
+    if recs and short == recs[-1]:
+        return bool(re.search(r'static\s+const\s+' + re.escape(short) + r'\s+\w+\s*;', code))
+    for h in heads:
+        if ONCE_GUARD.match(h):
+            return True
+        m = SENTINEL.match(h)
+        if m and re.search(r'static\s+int\s+' + m.group(1) + r'\s*=\s*-1\s*;', body_of(code, fs)):
+            return True
+    return False
 
 
 def stage_of(rel, fn, static, line=0):
     if (rel.split('/')[-1], (fn or '').split('::')[-1]) in SINGLETONS:
         return 'live', 'init-once state, re-read when a live set moves its prefix (b)'
+    if (rel, line) in ONCE and not any(s == 'tool' and re.search(rx, '/' + rel) for rx, s in FILE_RULES):
+        return 'relaunch', 'read once for the process (a loaded/init flag or static const struct, no generation check)'
     for rx, s in FILE_RULES:
         if s == 'shaders' and not re.search(r'(Shader::load|Program::load|updateShaders)$', fn or ''):
             continue

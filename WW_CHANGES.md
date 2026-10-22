@@ -258,6 +258,14 @@
     names the chrome that changed).
   - A switch the stage table lacks is relaunch (unknown = relaunch), with the reason in the reply.
   - `tests/spells/ww_live.py` takes `--timeout` anywhere on the line.
+- **Gate fixes 2 (TDFIX2, 10-23):**
+  - Rows after a live reopen were 81 px off their own launch (1-LSB, near lights and AO decals): the reopened document
+    took its GI from the drawn-sky capture the process still held, so its open-time AO decal relight ran on other GI
+    than a launch's. A reopen now forgets the capture and the kept relight (`probeSkyForget`) and opens as at launch.
+  - A reopen is watched: stderr is flushed every 5 s with the seconds so far (`live: reopen running N s`), and a reopen
+    over 3 min refuses its row (`refused reopen ...`) instead of waiting 15 min; a late one never starts the steps again.
+  - `tools/wwswitch_survey.py`: a read under an exact `if ( !s.loaded )` / `if ( !s.init )`, a `static int x = -1`
+    sentinel, or a `static const` struct's constructor is read once for the process: stage relaunch, not live.
 
 ## Lane FARCARD1 (2026-10-22, branch farcard1-20261022): the cell view's far tree cards draw instanced
 
