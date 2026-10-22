@@ -366,7 +366,7 @@ const char * name( int pass )
 {
 	static const char * const k[Count] = { "sun-cascades", "light-cubes", "sky", "obscurance", "reflections", "air",
 		"measure", "umbra-depth", "impostors", "opaque", "sorted", "effects", "far-cards", "tone-map", "post",
-		"overlays", "ssgi", "cull-camera", "cull-cascades", "shape-setup" };
+		"overlays", "ssgi", "refl-probes", "cull-camera", "cull-cascades", "shape-setup" };
 	return pass >= 0 && pass < Count ? k[pass] : "?";
 }
 

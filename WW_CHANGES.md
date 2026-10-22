@@ -457,6 +457,24 @@
   - Census per cell: lights, groups, surfels, records, layers written, bytes, far ms, wall, peak working set. Progress lines give cells/hour and the time left. Mid-cell, a walk is stopped at 1.5x `--memcap` and that cell fails. No walk starts while free memory is below the cap.
 - **Not run yet** (code and build only; BATCH2 is open). The region test and the whole-map command are in notes/farlightmap1/BATCH.md.
 
+## Lane REFLPROBE1 (2026-10-22, branch reflprobe1-20261022): placed reflection probes, relit by the cell's light
+
+- **Why.** A vanilla env map reflects a fixed cube: it darkens at night but never shows what is around it. bungo's RDR2
+  comparison (item 3) asked for placed probes relit per time of day. Research and decisions: notes/reflprobe1/RESEARCH.md.
+- **What.** Ships OFF behind the cell row "Reflection probes" (WW/CellReflProbe; pin WW_CELL_REFLPROBE).
+  - Placement is automatic: one probe per room of the probe GI's room grid (big rooms split at 2048 units), else a
+    3 x 3 grid of 2048-unit cells round the camera; plus RDR2's camera probe, which takes what the boxes leave. 32 placed at most.
+  - Each probe is captured once as a 64-px G-buffer cube (albedo; normal + distance) from the static opaque shapes,
+    one face a frame (WW_CELL_REFLPROBE_ALL=1: all at once, for stills).
+  - Relit by cell_reflrelight.frag with the cell's own light code (placed lights + shadow cubes, probe GI and its sky
+    visibility, the ambient, the sun x cascades) into an R11G11B10F octahedral atlas with box mips; again when the light changes.
+  - An env-mapped cell surface in a probe's box takes the parallax-corrected, box-faded probe reflection in place of its
+    material cube, at lane CUBE1's strength; SSR stays on top. The atlas is read through the idle GreyscaleMap sampler
+    (fo4_cellcsm is at 32 samplers).
+- **Gates.** Red WW_CELL_REFLPROBE_RED=fixed returns the material cube (must equal off); nosun|nolights|nogi|white strip
+  relight terms. Probe 66 (WW_CELL_LIT_PROBE): the boxes' weight, the camera share, the added light. stderr "reflprobe: ...";
+  PassTime "refl-probes". Memory ~10.4 MB.
+
 ## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
 
 - Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.

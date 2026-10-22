@@ -52,6 +52,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellssr.h"
+#include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellssgi.h"
 #include "esmweather.h"
 #include "io/material.h"
@@ -542,6 +543,9 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	const bool aoLean = wwCellAoInPass() && wwCellAoLean();
 	if ( mesh && wwAoScene && !aoLean )
 		wwCellSsrDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
+	// lane REFLPROBE1: the placed probes a cell-lit env-mapped draw reads (cellreflprobe.h)
+	if ( mesh && wwAoScene )
+		wwCellReflProbeDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	// lane SSGI1: the screen-space bounce a cell-lit opaque draw reads (cellssgi.h)
 	if ( mesh && wwAoScene && !aoLean )
 		wwCellSsgiDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
@@ -679,6 +683,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	{	// lane SSR1: the draw's reflection flag (an environment-mapped material file with its reflections switch on)
 		const Material * sm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
 		wwCellSsrNote( sm && sm->isShaderMaterial() && sm->bEnvironmentMapping && sm->bScreenSpaceReflections );
+		wwCellReflProbeNote( mesh->bslsp && mesh->bslsp->greyscaleColor );	// lane REFLPROBE1: the palette owns GreyscaleMap
 	}
 
 	/* Read here, not inside wwProgramCensus: `Shape::bslsp` is protected and

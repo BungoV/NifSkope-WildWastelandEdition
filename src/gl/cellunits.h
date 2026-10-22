@@ -37,10 +37,13 @@ constexpr int Ssgi = 33;		// lane SSGI1: the screen-space bounce, the open share
 constexpr int LightCluster = 34;	// lane LIGHTSYS2: the surfaces' clustered light lists (isamplerBuffer; was 24 = AirVol)
 constexpr int CardData = 35;	// lane FARCARD1: the instanced far cards' per-card data (samplerBuffer, vertex stage)
 constexpr int CardFrames = 36;	// lane FARCARD1: their sets' frame tables (samplerBuffer, vertex stage)
+constexpr int ReflProbe = 37;	// lane REFLPROBE1: the probe atlas (sampler2D, read through GreyscaleMap: no new sampler; 35 in the lane, FARCARD1 holds it)
+constexpr int ReflGbufAlb = 38;	// lane REFLPROBE1: the relight pass reads the G-buffer cubes (samplerCubeArray)
+constexpr int ReflGbufNd = 39;
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
-	CardData, CardFrames };
+	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd };
 
 constexpr bool distinct()
 {

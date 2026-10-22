@@ -276,6 +276,7 @@ vec3 tonemap(vec3 x)
 #define WW_CELL_GI_MARCH_ONCE 1	// lane GIBLACKLINK1: the march red runs once (cellGiMarchPrime in main)
 #endif
 #include "cell_lights.glsl"
+#include "cell_reflprobe.glsl"
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
 #include "cell_grass.glsl"
@@ -570,6 +571,10 @@ void main()
 		cubeK = hasCubeMap ? cellCubeGame( CubeMap, reflectedWS, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
 		                                   cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection, -ViewDir )
 		                   : vec3( 0.0 );
+	// lane REFLPROBE1: the placed probes take the material cube's place where they cover (cell_reflprobe.glsl)
+	if ( cellOn && hasCubeMap && ( cellRed & 512 ) == 0 )
+		cubeK *= cellReflProbe( GreyscaleMap, -ViewDir, R, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
+		                        cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection );
 	// lane SSR1: the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
 	if ( cellOn )
 		cubeK = cellSsrMix( cubeK, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
@@ -747,6 +752,8 @@ void main()
 		fragColor = cellProbe == 6 ? vec4( cellHdr * cellProbeGain, color.a ) : vec4( cellProbeOut( normal, -ViewDir, alphaR, kSmith ), 1.0 );
 	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )	// lane CUBE1
 		fragColor = vec4( cellProbe == 50 ? clamp( cubeK * 0.25, 0.0, 1.0 ) : cellCubeProbe( offset, normal ), 1.0 );
+	if ( cellOn && cellProbe == 66 )	// lane REFLPROBE1: the boxes' weight, the camera probe's share, the added light
+		fragColor = vec4( cellReflW, cellReflFall, clamp( dot( cellReflAdd, vec3( 1.0 / 3.0 ) ), 0.0, 1.0 ), 1.0 );
 	if ( cellOn && cellProbe == 80 )	// lane GICAL1 (80; 81-89 kept for it): the albedo as drawn, texture gamma space
 		fragColor = vec4( clamp( albedo, 0.0, 1.0 ), 1.0 );
 	if ( cellOn && cellProbe == 81 )	// lane GICAL1: the same, blends and decals composited over it with their own alpha

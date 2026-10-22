@@ -243,6 +243,7 @@ HEADERS += \
 	src/gl/cellprobeview.h \
 	src/gl/cellvolumeview.h \
 	src/gl/cellssr.h \
+	src/gl/cellreflprobe.h \
 	src/gl/cellssgi.h \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
@@ -513,6 +514,7 @@ SOURCES += \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellvolumeview.cpp \
 	src/gl/cellssr.cpp \
+	src/gl/cellreflprobe.cpp \
 	src/gl/cellssgi.cpp \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \

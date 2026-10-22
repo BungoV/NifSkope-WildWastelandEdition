@@ -226,6 +226,7 @@ private:
 	QAction * cellFlicker = nullptr;	// lane LIGHTFLICKER1: the lamps' LIGH flicker (ships off)
 	QAction * cellSsr = nullptr;
 	QAction * cellSsrExt = nullptr;
+	QAction * cellReflProbe = nullptr;	// lane REFLPROBE1
 	QAction * cellSsgi = nullptr;	// lane SSGI1
 	QMenu * cellSsgiQ = nullptr;
 	QActionGroup * cellSsgiQGroup = nullptr;

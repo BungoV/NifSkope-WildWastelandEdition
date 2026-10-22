@@ -1,0 +1,4 @@
+# The reflection probes' relight (lane REFLPROBE1, src/gl/cellreflprobe.h): one probe's G-buffer cube lit by the
+# cell's light code into its octahedral tile of the probe atlas. Selected by name from gl/cellreflprobe.cpp.
+
+shaders cell_reflrelight.vert cell_reflrelight.frag
