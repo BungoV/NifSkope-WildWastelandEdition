@@ -104,6 +104,11 @@ private:
  */
 void lodgenParallelFor( int n, const std::function<void( int )> & f, int cap = 0 );
 
+/*! lane BAKESPEED2: as lodgenParallelFor, with no size floor, on a pool of its own whose threads are not
+ *  generator workers, so a lodgenParallelFor inside f still fans out (a few big items keep every core busy).
+ *  Serial where lodgenParallelFor is; WW_LODGEN_BAKESPEED_RED=1 is exactly lodgenParallelFor. */
+void lodgenParallelForOuter( int n, const std::function<void( int )> & f );
+
 /*! Peak working set of THIS process, in bytes; 0 where the platform cannot say.
  *
  *  Printed at the end of a bake so a run that would not fit in the machine is

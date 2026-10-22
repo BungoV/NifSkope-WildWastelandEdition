@@ -389,6 +389,28 @@
   tests off: every quad shaded every sample of the 4x frame. The quad now sits at the far plane (`cell_hdr.vert`);
   `WW_CELL_HDR_EARLY_RED=1` runs the old program (`cell_hdr_fd.prog`).
 
+## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
+
+- Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.
+  Both ship off: FXCHECK1's glass env mask (WW/FxEnvMaskR or WW_FX_ENVMASK) and still-shot particle pre-roll, and
+  FOGTRICUBIC1's B-spline froxel read (WW_CELL_VOLAIR_TRICUBIC=1; bungo saw no difference in the full frame, so it stays off).
+- Measured on the merged exe against main 17afcb51's own exe: the default picture is byte-identical (FXCHECK1 off shot,
+  VOLAIR1 cell gate stage O 0 px in both scenes, Vault111Cryo 0 px); tricubic unset == off 0 px. Vault111Cryo sorted pass
+  314/308 ms vs main 322/310 ms (no regression). The cell gate's far-tail stage W (17 px) and Sanctuary's Z (1 px of 1/255)
+  fail the same way on main's own exe: they predate this landing (VOLAIR1).
+
+## Lane BAKESPEED2 (2026-10-22, branch bakespeed2-20261022): the native write's vertex-AO cast runs per receiver, not per chunk
+
+- **Why.** The chunks stage's native write spent most of its time casting vertex AO, one chunk per worker: a few big chunks kept only a few cores busy (gate region: cast 337 s of 569 s).
+- **What changed (speed only; output is byte-identical):**
+  - The chunks run on their own pool (`lodgenParallelForOuter`): no size floor, and its threads are not generator workers, so each chunk's receivers fan out on the main pool.
+  - Each receiver casts into its own slot; the slots join in receiver order, so the bytes are the serial loop's.
+  - The AO ray length is summed in one fixed order at both native-write sites (`ambientOcclusionFace(..., fixedSum)`). Left to the compiler, the moved code summed x, y, z in another order; a 1-ULP ray change flipped back/front ties at shared edges (buried count 241760 vs 241743).
+- **Red:** `WW_LODGEN_BAKESPEED_RED=1` brings back the old chunk loop and serial receivers.
+- **Measured** on gate region -4 -4 3 3, all rings, FARBAKE2 flags, against BAKESPEED1 (v16):
+  - chunks stage 569 -> 213-326 s; the cast 337 -> 29-32 s;
+  - all 210 files byte-identical (only the .key files and the report's exe-path line differ), at default threads, `--threads 1` and red; census buried count 241743 in all three.
+
 ## Lane BAKESPEED1 (2026-10-21, branch bakespeed1-20261021): the chunks stage runs its VT rows and chunk jobs on all cores, and resumes
 
 - **Why.** The FARBAKE2 chunks stage was serial in its two biggest parts: on the mid region (-24..23) the VT pyramid took 1539 s and the chunk pass 511 s on one core.
@@ -571,6 +593,7 @@
     `lookdev ground cell: drawn in the HDR frame (hdr 1) at x y z (...)`. Unset: no extra draw, no GL call.
 - The booth itself (cell open, cameras, froxel-dump measurement) is a harness outside the repo; it reads the
   existing `WW_CELL_AIR_TERMS` / `WW_CELL_AIR_OPT` / `WW_CELL_AIR_DUMP` switches. No light was changed.
+
 ## Lane VOLAIRSKY1 (2026-10-21, branch volairsky1-20261021): Volumetric Air follow-ups
 
 - **FOGTRICUBIC1 (bungo 10-21, test only, OFF):** `WW_CELL_VOLAIR_TRICUBIC=1` reads the air's froxels on surfaces with a

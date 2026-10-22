@@ -14,3 +14,4 @@ A row moves to LANES.md section 3 the moment bungo says yes.
   selection (09-11); denser shore LOD water (09-04); door-timed air volumes (10-16); worse Far Harbor fog (10-15)
 - VAULTDUST1 camera-local motes/snow/ash/leaves; UMBRA1 door state + multi-block; GRASSMB1 not-ported list
 - Editor (not cell/LOD): Skeleton Manager 2-4, Block Details table, collision P4 + cloth, UV ops, 3 animation gaps
+- FO4CS port of LAMPSHADOW1 (stored lamp shadows, redraw only near movers; wall-lamp half shadow): FO4/FO4CS do not have it (bungo 10-22). Prove in NifSkope first; port on his go (FO4CS built last).

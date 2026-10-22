@@ -3,6 +3,9 @@
 ## LANDED
 | Lane | sha |
 |---|---|
+| BAKESPEED2 (native write: vertex-AO cast per receiver, fixed-order ray length; gates byte-identical, buried 241743; 10-22) | a67c34e6 |
+| FXCHECK1 | fde1939c merge of 8ad3aadf (10-22, MERGE1; glass env mask + still-shot pre-roll, both off; barrel plume still open) |
+| VOLAIRSKY1 (+ FOGTRICUBIC1) | e77c59db merge of 8e5dc845 (10-22, MERGE1; tricubic off; D2b/D3 lines run in BATCH2) |
 | BAKESPEED1 | 174a4bc7 merge of 13775118, b63e9a15, e6d62172 (10-22; bake VT rows + chunk jobs on all cores, VT/chunk resume) |
 | ALLON2 AO-unit fix + edge guard | caec245f + 9c624f47 (10-21, MERGEALL1) |
 | SSGI1 unit guard fix | 2f6a7ccd (10-21, MERGEALL1) |
