@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane STREAM1 (2026-10-22, branch stream1-20261022): memory and load of the streamed cell view
+
+- **Why.** WHOLEFRAME.md sec. 12, 15, 16, 17 (STREAM1, TEXSTREAM1, VTXPACK1, LOAD1): a 3x3 held 308 MB of geometry
+  against a 128 MB cache and re-uploaded shapes every frame; after the open, a streamed cell read and uploaded its
+  textures at its first draw (the hitch); vertex arrays went up as fp32 even when FO4 stored them as halves; every
+  DDS was copied once more before its upload.
+- **What changed (pixels the same once loaded):**
+  - Geometry budget sized from the card (VRAM/8, 256 MB to 1.5 GB; `WW_GEOCACHE_MB` pins it). Between the setting
+    and the budget a shape goes only after ~1800 frames undrawn. Red `WW_STREAM1_RED=geocache`.
+  - While a document streams, the texture read-ahead stays armed and the view uploads its ready files at the start
+    of each paint, `WW_TEX_PUMP_MB` (24) a paint, through the same loadTex as a bind. Red `texpump`.
+  - Vertex arrays go up as GL_HALF_FLOAT only when every value round-trips bit-exactly through fp16 (normal halves
+    or zero), so the shader reads the same floats. Red `vtxpack`.
+  - DDS images are uploaded from the file's bytes (a view in gli's layout) instead of a full copy. Red `texcopy`;
+    `WW_STREAM1_TEXCHECK=1` builds both and prints "stream1 texcheck: same/MISMATCH" per file.
+  - New lines: "stream1 load: first full frame ..." and "stream1 mem: ..." (geometry packed/fp32 MB, budget,
+    resident textures, card memory, private MB); the streamed walk dump adds hitchMaxMs / over33 / the mem line.
+  - `WW_STREAM1_RED=all` brings every old path and its cost back.
+- **Gates:** notes/stream1/BATCH.md (run by the batch): every red and main 0 px / identical dumps on Concord 3x3 and
+  Goodneighbor, in-place DDS == copy, the streamed walk's spell gates and pictures unchanged, plus the three lines.
+- **Not done:** mip residency (TEXSTREAM1's partial levels) is not exact on a moving camera, so it is study only.
+  LOAD1's far-append and census items live in the far-card lane's files (cellfarlod / impostor), left to it.
+
 ## Lane HORIZON1 (2026-10-21, branch horizon1-20261021): the AO map and the shadow heightmap on all cores
 
 - **Why.** The terrain sky bake (the 32-unit AO map, `lodgenBakeAoMap`, `.loda`) and the shadow heightmap

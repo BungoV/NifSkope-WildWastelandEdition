@@ -3748,7 +3748,34 @@ void GLView::paintGL()
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
 	CellTexAhead::Frame texAheadFrame;   // lane SPEED1: a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
+	QElapsedTimer wwStream1Clock;	// lane STREAM1: the whole paint, for the hitch figures
+	wwStream1Clock.start();
 	wwCellStreamEvict();
+	// lane STREAM1 (TEXSTREAM1): the streaming read-ahead's ready files go up before anything draws, a few MB a
+	// paint (WW_TEX_PUMP_MB, default 24), so a cell that comes into view finds them loaded. Red: texpump.
+	static const bool wwPumpRed = PassTime::stream1Red( "texpump" );
+	if ( !wwPumpRed && textures && model && cellStreamOn( model ) ) {
+		static const qint64 wwPumpMb = [] {
+			const int v = qEnvironmentVariableIntValue( "WW_TEX_PUMP_MB" );
+			return qint64( v > 0 ? v : 24 );
+		}();
+		textures->setPumpOwnsDrain( PassTime::stream1Loaded() );
+		textures->wwPump( model, wwPumpMb << 20 );
+	}
+	PassTime::stream1PaintBegin();
+	struct WwStream1End
+	{
+		GLView * v;
+		QElapsedTimer & clock;
+		~WwStream1End()
+		{
+			// ready = nothing queued or being written and, streaming, the block loaded is the one expected
+			bool ready = false;
+			if ( !PassTime::stream1Loaded() && v->model )
+				ready = !cellStreamBusy( v->model ) && ( !cellStreamOn( v->model ) || cellStreamStats( v->model, false ).match );
+			PassTime::stream1PaintEnd( ready, double( clock.nsecsElapsed() ) / 1.0e6 );
+		}
+	} wwStream1End{ this, wwStream1Clock };
 	QElapsedTimer wwPaintClock;
 	wwPaintClock.start();
 	struct WwPaintTime
