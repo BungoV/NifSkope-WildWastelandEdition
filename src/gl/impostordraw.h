@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 /*! Vanilla Fallout 4's LOD alpha test as a coverage fraction: NiAlphaProperty
  *  threshold 128 (flags 0x12EC) on every alpha-tested shape of every vanilla
@@ -220,6 +221,31 @@ bool drawCard( Scene * scene, const ImpostorCardSet & set,
  *  values: the same pixels. WW_IMPOSTOR_RED=perdraw keeps the old per-card binding (the gate's red). */
 void batchBegin();
 void batchEnd( Scene * scene );
+
+/*! THE INSTANCED CARD PASS (lane FARCARD1), the shipped-game impostor draw: every card's values in one buffer,
+ *  one instanced draw per card set (impostor_cellinst.prog), no per-card uniform, hash or bind. The frames and
+ *  the billboard are picked by the same CPU function `drawCard` uses, so the GPU sees the same floats; the cards
+ *  of one set draw in their placement order. Only the cell view's lit cards (`Options::cellLit`) take it. */
+struct InstCard
+{
+	const ImpostorCardSet * set = nullptr;
+	float offset[3] = { 0.0f, 0.0f, 0.0f };	//!< drawCard's worldOffset
+	float scale = 1.0f;						//!< Options::worldScale
+	float swayPhase = 0.0f;					//!< Options::swayPhase
+};
+struct InstStats
+{
+	int drawn = 0, refused = 0, draws = 0, sets = 0;
+	qint64 bytes = 0;		//!< the card buffer uploaded this pass
+	QString firstWhy;		//!< the first refusal, as drawCard words it
+};
+/*! WW_FARCARD=0 (the off switch) or WW_FARCARD_RED=percard (the red: the old per-card path and its cost)
+ *  turn it off; so does a GPU without the two texture units it needs. */
+bool instancedOn( Scene * scene );
+/*! Draw `cards`. `tableKey` names the armed card sets (their frame tables are kept while it holds). Returns false
+ *  when the program is missing: nothing was drawn and the caller draws the per-card way. */
+bool drawCardsInstanced( Scene * scene, const QVector< InstCard > & cards, const Options & opt,
+						quint64 tableKey, InstStats * stats );
 
 //! The slider's two ends, in depth-search steps (lane IMPOSTORDEPTH2).
 constexpr int kCrispSearchSteps  = 0;

@@ -1,0 +1,4 @@
+# lane FARCARD1: the cell view's far cards, instanced -- one draw per card set, the per-card values in one buffer
+# (impostor_inst.vert). Selected BY NAME in ImpostorDraw::drawCardsInstanced, like impostor_cell.prog.
+
+shaders impostor_inst.vert impostor_cellinst.frag
