@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FARLIGHTMAP1 (2026-10-22, branch farlightmap1-20261022): the far light for the whole map, from the cell view's own bake
+
+- **Why.** Distant towns should glow from their placed lights everywhere on the map (bungo 10-22, RDR2's distant lights; ruled option a: the same light as the cell view bake). Until now only a cell view bake with `WW_CELL_FARLIGHT` wrote FARVIEW1's far-light layers, one loaded cell at a time.
+- **What changed:**
+  - `NifSkope -no-gui farlightmap --plugins <esm> --root <dir> [--region x0..x1,y0..y1] [--out <dir>] [--memcap MB] [--jobs N] [--dry]` (src/farlightmap.cpp). It walks the worldspace's exterior cells. For each cell it starts the cell view's own exterior bake in a child process, the same way `tools/ww_bake_world.py` does, plus `WW_CELL_FARLIGHT`. That bake is the 5x5 block plus far soup, then the probe bake, the relight, and the far layers. The driver then copies the cell's `lights_/relight_/farlight_` files into one folder that FARVIEW1's reader loads. The bake code is not forked. The child exits after each cell, which frees its memory.
+  - Resumable. A cell is skipped when BAKEINCR1's check calls it clean AND its `farlight.done` marker matches: the exe sha1, the `WW_CELL_FARLIGHT_*` knobs, and the sha1 of each file in the output folder. A cell whose 5x5 block holds no placed light makes no far light, so it is not baked, and any stale files it left in the output are removed.
+  - The bake record gets a `lights` line (`ProbeIncr::lightsDigest`): each placed light's fields, its base's light data, its box and its enable chain. Only a far-light bake writes this line, and the check compares it when present. A light edit moves no `.tbk` byte, but it does move the far light. `WW_CELL_FARLIGHT*` is now a run-only knob: it moves no `.tbk` byte.
+  - Census per cell: lights, groups, surfels, records, layers written, bytes, far ms, wall, peak working set. Progress lines give cells/hour and the time left. `--memcap` stops a child whose working set passes the cap and leaves that cell undone. It also holds back the next start while free memory is below the cap.
+- **Not run yet** (code and build only; BATCH2 is open). The region test and the whole-map command are in notes/farlightmap1/BATCH.md.
+
 ## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
 
 - Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.

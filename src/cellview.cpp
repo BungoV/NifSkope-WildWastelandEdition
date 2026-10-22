@@ -5122,7 +5122,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						const QString recs1 = ProbeIncr::recordsDigest( world, spec.cx, spec.cy, 0 );
 						const QString far = cellBakeFarDigest( spec.world, dataRoot, spec.cx, spec.cy, half );
 						QString rerr;
-						if ( ProbeIncr::writeRecord( QDir::cleanPath( dir ), spec.world, spec.cx, spec.cy, half, recs, recs1, far, &rerr ) )
+						// lane FARLIGHTMAP1: a far-light bake's record holds its lights too (light moves no .tbk byte)
+						const QString lights = qEnvironmentVariableIsEmpty( "WW_CELL_FARLIGHT" ) ? QString()
+							: ProbeIncr::lightsDigest( world, spec.cx, spec.cy, half );
+						if ( ProbeIncr::writeRecord( QDir::cleanPath( dir ), spec.world, spec.cx, spec.cy, half, recs, recs1, far, &rerr, lights ) )
 							t << "  bake record " << ProbeIncr::recordName() << ": " << ProbeIncr::recorded().size()
 							  << " assets, records " << recs.left( 12 ) << ", far " << far.left( 12 ) << ", "
 							  << rt.elapsed() << " ms\n";

@@ -377,6 +377,7 @@ HEADERS += \
 	src/probegi.h \
 	src/proberelight.h \
 	src/farlight.h \
+	src/farlightmap.h \
 	src/proberooms.h \
 	src/probevolumes.h \
 	src/probevolumesgi.h \
@@ -661,6 +662,7 @@ SOURCES += \
 	src/probegi.cpp \
 	src/proberelight.cpp \
 	src/farlight.cpp \
+	src/farlightmap.cpp \
 	src/proberooms.cpp \
 	src/probevolumes.cpp \
 	src/probevolumesgi.cpp \
