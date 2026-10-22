@@ -28,6 +28,7 @@ BSD License - see nifskope.h
 #include <QHash>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -88,6 +89,7 @@ struct CsmState
 	Cascade c[kCascades];
 	double L[3] = { 0, 0, -1 }, right[3] = { 1, 0, 0 }, up[3] = { 0, 1, 0 };
 	double C[3] = { 0, 0, 0 }, fwd[3] = { 0, 0, -1 }, tanX = 1, tanY = 1, camNear = 1, camFar = 1, sc = 1;
+	double cL[kCascades][3] = {}, cR[kCascades][3] = {}, cU[kCascades][3] = {};	// lane SHADOWCACHE1: per cascade
 	double rc[3] = { 1, 0, 0 }, uc[3] = { 0, 1, 0 };	// the camera's right and up rows (world)
 	double split[2] = { kSplit0, kSplit1 };
 	int casters = 0, tris = 0, atCasters = 0;
@@ -213,6 +215,8 @@ void fitCascades( CsmState & s, const Transform & vt )
 	}
 	for ( int i = 0; i < kCascades; i++ ) {
 		Cascade & c = s.c[i];
+		// lane SHADOWCACHE1: each cascade's own light direction (the far ones may hold theirs a few frames)
+		const double * Lr = s.cL[i], * Rr = s.cR[i], * Ur = s.cU[i];
 		c = Cascade();
 		c.zn = ( i == 0 || one ) ? s.camNear : far[i - 1] - s.blend;
 		c.zf = ( one ? s.D : far[i] ) + s.blend;
@@ -224,7 +228,7 @@ void fitCascades( CsmState & s, const Transform & vt )
 					double q[3];	// Q - C
 					for ( int j = 0; j < 3; j++ )
 						q[j] = z * ( s.fwd[j] + sx * s.tanX * rc[j] + sy * s.tanY * uc[j] );
-					const double x = dot3( q, s.right ), y = dot3( q, s.up ), zz = dot3( q, s.L ) + s.lightBack;
+					const double x = dot3( q, Rr ), y = dot3( q, Ur ), zz = dot3( q, Lr ) + s.lightBack;
 					if ( first ) {
 						c.minX = c.maxX = x;
 						c.minY = c.maxY = y;
@@ -254,9 +258,9 @@ void fitCascades( CsmState & s, const Transform & vt )
 			c.n = std::max( 1, int( std::floor( 1.0 / ratio ) ) );
 			c.texel = 1.0 / c.n;
 		}
-		c.pb[0] = snap( dot3( s.C, s.right ), c );
-		c.pb[1] = snap( dot3( s.C, s.up ), c );
-		c.pb[2] = snap( dot3( s.C, s.L ) - s.lightBack, c );
+		c.pb[0] = snap( dot3( s.C, Rr ), c );
+		c.pb[1] = snap( dot3( s.C, Ur ), c );
+		c.pb[2] = snap( dot3( s.C, Lr ) - s.lightBack, c );
 		c.l = snap( c.minX, c );
 		c.b = snap( c.minY, c );
 		c.vw = std::clamp( int( std::floor( c.w / c.texel + 1e-9 ) ), 1, s.map );
@@ -267,25 +271,25 @@ void fitCascades( CsmState & s, const Transform & vt )
 		const double wx = c.vw * c.texel, wy = c.vh * c.texel, wz = c.far - kNear;
 		double a[3];
 		for ( int j = 0; j < 3; j++ )
-			a[j] = s.right[j] * 2.0 / wx;
+			a[j] = Rr[j] * 2.0 / wx;
 		viewRow( c.clipFromView, 0, a, -( c.pb[0] + c.l ) * 2.0 / wx - 1.0, vt, s.sc );
 		for ( int j = 0; j < 3; j++ )
-			a[j] = s.up[j] * 2.0 / wy;
+			a[j] = Ur[j] * 2.0 / wy;
 		viewRow( c.clipFromView, 1, a, -( c.pb[1] + c.b ) * 2.0 / wy - 1.0, vt, s.sc );
 		for ( int j = 0; j < 3; j++ )
-			a[j] = s.L[j] * 2.0 / wz;
+			a[j] = Lr[j] * 2.0 / wz;
 		viewRow( c.clipFromView, 2, a, -( c.pb[2] + kNear ) * 2.0 / wz - 1.0, vt, s.sc );
 		lastRow( c.clipFromView );
 
 		const double tm = c.texel * s.map;
 		for ( int j = 0; j < 3; j++ )
-			a[j] = s.right[j] / tm;
+			a[j] = Rr[j] / tm;
 		viewRow( c.uvdFromView, 0, a, -( c.pb[0] + c.l ) / tm, vt, s.sc );
 		for ( int j = 0; j < 3; j++ )
-			a[j] = s.up[j] / tm;
+			a[j] = Ur[j] / tm;
 		viewRow( c.uvdFromView, 1, a, -( c.pb[1] + c.b ) / tm, vt, s.sc );
 		for ( int j = 0; j < 3; j++ )
-			a[j] = s.L[j] / wz;
+			a[j] = Lr[j] / wz;
 		viewRow( c.uvdFromView, 2, a, -( c.pb[2] + kNear ) / wz, vt, s.sc );
 		lastRow( c.uvdFromView );
 	}
@@ -298,6 +302,8 @@ struct Caster
 	bool twoSided;
 	std::vector<Vector3> skinned;
 	bool alphaTested = false;	// lane VOLAIR1: drawn by lookdev_csmdepth_at.prog (the base map's alpha test)
+	bool dynamic = false;		// lane SHADOWCACHE1: drawn over the cached static layer every pass
+	std::uint64_t sig = 0;
 };
 
 bool ensureTargets( CsmState & s, Renderer * r, QString & why )
@@ -337,6 +343,271 @@ bool ensureTargets( CsmState & s, Renderer * r, QString & why )
 	}
 	return true;
 }
+
+
+/* lane SHADOWCACHE1 (2026-10-22): THE STATIC CASCADE CACHE (the way CoD, Snowdrop and UE5's virtual shadow maps do it).
+ * Each cascade keeps a second depth layer holding only its static casters. A pass whose fit, camera, static set and
+ * render state equal the cached ones copies that layer into the live map and draws the dynamic casters over it (or
+ * does nothing when there are none): depth-only LEQUAL keeps the nearest depth in any order, so this is exact.
+ * Far cascades (WW_SHADOWCACHE_SCROLL mask) also scroll: when the window only moved on the same texel lattice, the old
+ * static depths are copied across with their depth range remapped, and only the newly exposed strips are drawn.
+ * Switches: WW_SHADOWCACHE=0 (GPUDRIVEN1's pass exactly); WW_SHADOWCACHE_RED=full (static redrawn every pass, its
+ * cost back) or =stale (never redrawn: the moving gate must fail); WW_SHADOWCACHE_SCROLL=<cascade mask, 6>;
+ * WW_SHADOWCACHE_SUNHOLD=<degrees, 0.05> (the scrolling cascades keep their sun direction until it turns further);
+ * WW_SHADOWCACHE_DYNFRAMES=<120> (a caster whose transform or geometry changed that recently draws as dynamic);
+ * WW_SHADOWCACHE_CENSUS=1 (or WW_GPUDRIVEN_CENSUS=1): the modes per cascade on stderr. */
+namespace ShadowCache
+{
+
+enum Mode { Off, Skip, Hit, Full, Scroll };
+
+struct Hash
+{
+	std::uint64_t h = 0x9e3779b97f4a7c15ULL;
+	void w( std::uint64_t x )
+	{
+		h ^= x;
+		h *= 0xff51afd7ed558ccdULL;
+		h ^= h >> 33;
+	}
+	void f( float x )
+	{
+		std::uint32_t u;
+		std::memcpy( &u, &x, 4 );
+		w( u );
+	}
+	void d( double x )
+	{
+		std::uint64_t u;
+		std::memcpy( &u, &x, 8 );
+		w( u );
+	}
+	void p( const void * x ) { w( std::uint64_t( reinterpret_cast<std::uintptr_t>( x ) ) ); }
+	void t( const Transform & x )
+	{
+		for ( int i = 0; i < 3; i++ )
+			for ( int j = 0; j < 3; j++ )
+				f( x.rotation( i, j ) );
+		for ( int i = 0; i < 3; i++ )
+			f( x.translation[i] );
+		f( x.scale );
+	}
+};
+
+struct Track
+{
+	std::uint64_t h = 0;
+	qint64 changed = -( qint64( 1 ) << 40 );
+	qint64 seen = 0;
+};
+
+struct Layer
+{
+	bool valid = false;
+	bool liveIsStatic = false;	// the live layer holds exactly the static layer (no dynamic caster drawn over it)
+	std::uint64_t key = 0, setSig = 0, stateSig = 0;
+	double corner[2] = { 0, 0 }, nearZ = 0, wz = 0, texel = 0;
+	double L[3] = { 0, 0, 0 };
+	int n = 0, vw = 0, vh = 0, map = 0;
+};
+
+struct State
+{
+	bool init = false, on = true, census = false;
+	int red = 0;		// 1 full, 2 stale
+	int mask = 6;		// the cascades that scroll and hold the sun
+	double holdDeg = 0.05, holdCos = 1.0;
+	qint64 dynFrames = 120;
+	const void * ctx = nullptr;
+	unsigned int tex = 0, scratch = 0, fbo = 0, vao = 0;
+	unsigned int liveTex = 0;
+	int texMap = 0;
+	qint64 frame = 0;
+	Layer c[kCascades];
+	QHash<const Shape *, Track> track;
+	bool haveL[kCascades] = {};
+};
+
+State & st()
+{
+	static State s;
+	if ( !s.init ) {
+		s.init = true;
+		s.on = qEnvironmentVariable( "WW_SHADOWCACHE" ).trimmed() != QLatin1StringView( "0" );
+		const QString r = qEnvironmentVariable( "WW_SHADOWCACHE_RED" ).trimmed().toLower();
+		s.red = ( r == QLatin1StringView( "full" ) || r == QLatin1StringView( "1" ) ) ? 1 : r == QLatin1StringView( "stale" ) ? 2 : 0;
+		bool ok = false;
+		const int m = qEnvironmentVariable( "WW_SHADOWCACHE_SCROLL" ).toInt( &ok );
+		if ( ok )
+			s.mask = m & 7;
+		const double deg = qEnvironmentVariable( "WW_SHADOWCACHE_SUNHOLD" ).toDouble( &ok );
+		if ( ok )
+			s.holdDeg = std::clamp( deg, 0.0, 5.0 );
+		s.holdCos = s.holdDeg > 0.0 ? std::cos( s.holdDeg * 3.14159265358979323846 / 180.0 ) : 2.0;	// 2: never holds
+		const int df = qEnvironmentVariable( "WW_SHADOWCACHE_DYNFRAMES" ).toInt( &ok );
+		if ( ok && df >= 0 )
+			s.dynFrames = df;
+		s.census = qEnvironmentVariable( "WW_SHADOWCACHE_CENSUS" ).trimmed() == QLatin1StringView( "1" ) || GpuDriven::census();
+		std::fprintf( stderr, "shadowcache: %s red=%d scroll=%d sunhold=%g dynframes=%lld\n", s.on ? "on" : "off", s.red, s.mask,
+			s.holdDeg, (long long)s.dynFrames );
+	}
+	return s;
+}
+
+//! the cascades' light directions: the current sun, except a masked cascade keeps its last one within the hold angle
+void chooseLights( CsmState & cs, bool presetChanged )
+{
+	State & s = st();
+	for ( int i = 0; i < kCascades; i++ ) {
+		bool keep = s.on && s.red != 1 && ( s.mask >> i & 1 ) && s.haveL[i] && !presetChanged;
+		if ( keep )
+			keep = dot3( cs.cL[i], cs.L ) >= s.holdCos;
+		if ( !keep ) {
+			std::memcpy( cs.cL[i], cs.L, sizeof( cs.L ) );
+			std::memcpy( cs.cR[i], cs.right, sizeof( cs.right ) );
+			std::memcpy( cs.cU[i], cs.up, sizeof( cs.up ) );
+		}
+		s.haveL[i] = true;
+	}
+}
+
+//! a caster's static signature; false when it draws as dynamic this pass (skinned, or changed within dynFrames)
+bool classify( const Shape * sh, bool skinned, bool twoSided, bool alphaTested, std::uint64_t & sig )
+{
+	State & s = st();
+	Hash h;
+	h.p( sh );
+	h.w( std::uint64_t( std::uint32_t( sh->id() ) ) );
+	h.t( sh->worldTrans() );
+	h.p( sh->verts.constData() );
+	h.w( std::uint64_t( sh->verts.size() ) );
+	h.p( sh->triangles.constData() );
+	h.w( std::uint64_t( sh->triangles.size() ) );
+	h.w( ( twoSided ? 1u : 0u ) | ( alphaTested ? 2u : 0u ) );
+	if ( const NifSkopeOpenGLContext::ShapeDataHash * dh = sh->wwDataHash() ) {
+		h.w( dh->h[0] );
+		h.w( dh->h[1] );
+	}
+	if ( alphaTested ) {
+		const BSLightingShaderProperty * lsp = sh->wwLightingShader();
+		BSShaderLightingProperty * bsp = sh->wwShaderLighting();
+		h.p( bsp );
+		if ( bsp ) {
+			h.f( bsp->uvScale.x );
+			h.f( bsp->uvScale.y );
+			h.f( bsp->uvOffset.x );
+			h.f( bsp->uvOffset.y );
+			h.w( std::uint64_t( int( bsp->clampMode ) ) );
+			h.w( qHash( bsp->fileName( 0 ) ) );
+		}
+		h.f( lsp ? lsp->alpha : 1.0f );
+		h.f( sh->wwAlphaThreshold() );
+		h.p( sh->coords.isEmpty() ? nullptr : sh->coords.constFirst().constData() );
+	}
+	sig = h.h;
+	Track & t = s.track[sh];
+	if ( t.seen && t.h != sig )
+		t.changed = s.frame;
+	t.h = sig;
+	t.seen = s.frame;
+	return !skinned && s.frame - t.changed >= s.dynFrames;
+}
+
+//! once a pass, after the casters: forget shapes not seen for 600 passes (their pointers may be reused)
+void sweep()
+{
+	State & s = st();
+	if ( s.frame % 600 )
+		return;
+	for ( auto it = s.track.begin(); it != s.track.end(); ) {
+		if ( s.frame - it->seen > 600 )
+			it = s.track.erase( it );
+		else
+			++it;
+	}
+}
+
+void invalidate()
+{
+	State & s = st();
+	for ( Layer & l : s.c )
+		l = Layer();
+}
+
+//! the static layers, the one-layer scratch and their framebuffer, per context and map size
+bool ensure( Renderer * r, int map, unsigned int liveTex )
+{
+	State & s = st();
+	auto fn = r->fn;
+	const void * ctx = QOpenGLContext::currentContext();
+	if ( ctx != s.ctx ) {
+		s.ctx = ctx;
+		s.tex = s.scratch = s.fbo = s.vao = 0;
+		s.texMap = 0;
+		invalidate();
+	}
+	if ( liveTex != s.liveTex ) {
+		s.liveTex = liveTex;	// the live map was made again: its content is gone
+		for ( Layer & l : s.c )
+			l.liveIsStatic = false;
+	}
+	if ( !s.tex || s.texMap != map ) {
+		if ( !s.tex )
+			fn->glGenTextures( 1, &s.tex );
+		if ( !s.scratch )
+			fn->glGenTextures( 1, &s.scratch );
+		GLint prevTex = 0;
+		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D_ARRAY, &prevTex );
+		for ( unsigned int t : { s.tex, s.scratch } ) {
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, t );
+			fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT16, map, map, t == s.tex ? kCascades : 1, 0,
+				GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE );
+		}
+		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, GLuint( prevTex ) );
+		s.texMap = map;
+		invalidate();
+	}
+	if ( !s.fbo )
+		fn->glGenFramebuffers( 1, &s.fbo );
+	if ( !s.vao )
+		fn->glGenVertexArrays( 1, &s.vao );
+	return s.tex && s.scratch && s.fbo && s.vao;
+}
+
+//! the cascade's clip matrix narrowed to the texel rect rc = (x0, y0, x1, y1) of its (vw, vh) viewport, for culling
+void stripMatrix( const float * m, int vw, int vh, const int * rc, float * out )
+{
+	std::memcpy( out, m, sizeof( float ) * 16 );
+	const double ax = double( vw ) / double( rc[2] - rc[0] ), bx = ( double( vw ) - double( rc[0] + rc[2] ) ) / double( rc[2] - rc[0] );
+	const double ay = double( vh ) / double( rc[3] - rc[1] ), by = ( double( vh ) - double( rc[1] + rc[3] ) ) / double( rc[3] - rc[1] );
+	for ( int col = 0; col < 4; col++ ) {
+		out[col * 4 + 0] = float( m[col * 4 + 0] * ax );
+		out[col * 4 + 1] = float( m[col * 4 + 1] * ay );
+	}
+	out[12] += float( bx );
+	out[13] += float( by );
+}
+
+//! a caster's world bounds against a strip's matrix (x and y only, as the cell cull does)
+bool boundsInside( const Scene * scene, const Shape * sh, const float * m )
+{
+	const BoundSphere bs = sh->bounds();
+	const Vector3 v = scene->view * bs.center;
+	const float rv = bs.radius * std::fabs( scene->view.scale );
+	float lx = 0.0f, ly = 0.0f;
+	for ( int c = 0; c < 3; c++ ) {
+		lx += m[c * 4 + 0] * m[c * 4 + 0];
+		ly += m[c * 4 + 1] * m[c * 4 + 1];
+	}
+	const float x = m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + m[12];
+	const float y = m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + m[13];
+	return std::fabs( x ) <= 1.0f + rv * std::sqrt( lx ) && std::fabs( y ) <= 1.0f + rv * std::sqrt( ly );
+}
+
+} // namespace ShadowCache
 
 } // namespace
 
@@ -519,6 +790,11 @@ static void sunShadowPassImpl( Scene * scene )
 		s.unitBias = kUnitBias;
 	}
 
+	// lane SHADOWCACHE1: the cascades' own light directions (a far cascade may hold its last one a little)
+	ShadowCache::State & cst = ShadowCache::st();
+	if ( cst.on )
+		cst.frame++;
+	ShadowCache::chooseLights( s, false );
 	fitCascades( s, vt );
 
 	// the casters
@@ -549,6 +825,8 @@ static void sunShadowPassImpl( Scene * scene )
 			for ( qsizetype v = 0; v < sh->verts.size(); v++ )
 				c.skinned[size_t( v )] = sh->skinVertex( int( v ), sh->verts.at( v ) );
 		}
+		if ( cst.on )
+			c.dynamic = !ShadowCache::classify( sh, sh->wwGpuSkinned(), c.twoSided, c.alphaTested, c.sig );
 		s.tris += int( sh->triangles.size() );
 		casters.push_back( std::move( c ) );
 	}
@@ -618,6 +896,154 @@ static void sunShadowPassImpl( Scene * scene )
 	std::vector<std::uint32_t> cullRanges;	// lane SUNCELL1
 	std::vector<std::uint16_t> cullIdx;
 
+	/* lane SHADOWCACHE1: each cascade's mode (ShadowCache above), then its jobs. A job is (cascade, caster set, cull
+	 * matrix, scissor): set 0 = every caster into the live layer (the old pass), 1 = the static casters into the
+	 * static layer, 2 = the dynamic casters over the live layer. */
+	using ShadowCache::Mode;
+	Mode mode[kCascades] = { ShadowCache::Off, ShadowCache::Off, ShadowCache::Off };
+	const bool cacheOn = cst.on && ShadowCache::ensure( r, s.map, s.tex );
+	std::uint64_t setSig = 0, stateSig = 0, key[kCascades] = {};
+	bool anyDyn = false;
+	int nStatic = 0, srcOff[kCascades][2] = {}, oldSize[kCascades][2] = {};
+	float zMap[kCascades][2] = {};
+	int strip[kCascades][4][4] = {}, nStrip[kCascades] = {};
+	if ( cacheOn ) {
+		ShadowCache::Hash hs, ht;
+		for ( const Caster & k : casters ) {
+			anyDyn |= k.dynamic;
+			if ( !k.dynamic ) {
+				hs.w( k.sig );
+				nStatic++;
+			}
+		}
+		hs.w( s.groundCast ? 1u : 0u );
+		if ( s.groundCast ) {
+			hs.f( gz );
+			hs.f( gxy[0] );
+			hs.f( gxy[1] );
+			hs.f( ghalf );
+		}
+		setSig = hs.h;
+		ht.w( std::uint64_t( s.map ) );
+		ht.f( s.slopeBias );
+		ht.f( s.unitBias );
+		ht.w( ( red( "nobias" ) ? 1u : 0u ) | ( GpuDriven::csm() ? 2u : 0u ) );
+		ht.p( progAt );
+		for ( const QString & rr : cs().reds )
+			ht.w( qHash( rr ) );
+		stateSig = ht.h;
+	}
+	bool anyScroll = false;
+	for ( int i = 0; i < kCascades && cacheOn; i++ ) {
+		const Cascade & c = s.c[i];
+		const ShadowCache::Layer & L = cst.c[i];
+		ShadowCache::Hash hk;
+		for ( float v : c.clipFromView )
+			hk.f( v );
+		hk.w( std::uint64_t( c.vw ) << 32 | std::uint64_t( c.vh ) );
+		hk.t( vt );
+		hk.w( setSig );
+		hk.w( stateSig );
+		key[i] = hk.h;
+		mode[i] = ShadowCache::Full;
+		if ( cst.red == 1 || !L.valid || L.map != s.map )
+			continue;
+		if ( cst.red == 2 || L.key == key[i] ) {
+			mode[i] = ( L.liveIsStatic && !anyDyn ) ? ShadowCache::Skip : ShadowCache::Hit;
+			continue;
+		}
+		// the scroll: same casters, state, light and lattice; the window moved by whole texels
+		if ( !( cst.mask >> i & 1 ) || L.setSig != setSig || L.stateSig != stateSig || L.n != c.n || L.texel != c.texel
+			|| std::memcmp( L.L, s.cL[i], sizeof( L.L ) ) != 0 )
+			continue;
+		const double fx = ( c.pb[0] + c.l - L.corner[0] ) / c.texel, fy = ( c.pb[1] + c.b - L.corner[1] ) / c.texel;
+		const double rx = std::round( fx ), ry = std::round( fy );
+		if ( std::fabs( fx - rx ) > 1e-3 || std::fabs( fy - ry ) > 1e-3 || std::fabs( rx ) > s.map || std::fabs( ry ) > s.map )
+			continue;
+		const int dx = int( rx ), dy = int( ry );
+		// the old window in the new texels is [-dx, L.vw - dx) x [-dy, L.vh - dy)
+		const int ix0 = std::max( 0, -dx ), ix1 = std::min( c.vw, L.vw - dx ), iy0 = std::max( 0, -dy ), iy1 = std::min( c.vh, L.vh - dy );
+		if ( ix0 >= ix1 || iy0 >= iy1 )
+			continue;
+		const double wzNew = c.far - kNear;
+		if ( wzNew <= 0.0 )
+			continue;
+		mode[i] = ShadowCache::Scroll;
+		anyScroll = true;
+		srcOff[i][0] = dx;
+		srcOff[i][1] = dy;
+		oldSize[i][0] = L.vw;
+		oldSize[i][1] = L.vh;
+		zMap[i][0] = float( L.wz / wzNew );
+		zMap[i][1] = float( ( L.nearZ - ( c.pb[2] + kNear ) ) / wzNew );
+		auto addStrip = [&]( int x0, int y0, int x1, int y1 ) {
+			if ( x0 < x1 && y0 < y1 ) {
+				int * o = strip[i][nStrip[i]++];
+				o[0] = x0;
+				o[1] = y0;
+				o[2] = x1;
+				o[3] = y1;
+			}
+		};
+		addStrip( 0, 0, ix0, c.vh );
+		addStrip( ix1, 0, c.vw, c.vh );
+		addStrip( ix0, 0, ix1, iy0 );
+		addStrip( ix0, iy1, ix1, c.vh );
+	}
+	NifSkopeOpenGLContext::Program * progRemap = nullptr;
+	if ( anyScroll ) {
+		progRemap = r->useProgram( "lookdev_csmremap.prog" );
+		r->useProgram( "lookdev_csmdepth.prog" );
+		for ( int i = 0; i < kCascades && !progRemap; i++ ) {
+			if ( mode[i] == ShadowCache::Scroll )
+				mode[i] = ShadowCache::Full;	// no remap program: draw it whole
+		}
+	}
+	struct Job
+	{
+		int i = 0, set = 0;
+		float m[16];
+		int rc[4] = { 0, 0, 0, 0 };
+		bool scissor = false;
+	};
+	std::vector<Job> jobs;
+	std::vector<int> jobsOf[kCascades][3];
+	for ( int i = 0; i < kCascades; i++ ) {
+		const Cascade & c = s.c[i];
+		auto add = [&]( int set, const int * rc ) {
+			Job j;
+			j.i = i;
+			j.set = set;
+			if ( rc ) {
+				ShadowCache::stripMatrix( c.clipFromView, c.vw, c.vh, rc, j.m );
+				std::memcpy( j.rc, rc, sizeof( j.rc ) );
+				j.scissor = true;
+			} else {
+				std::memcpy( j.m, c.clipFromView, sizeof( j.m ) );
+			}
+			jobsOf[i][set].push_back( int( jobs.size() ) );
+			jobs.push_back( j );
+		};
+		switch ( mode[i] ) {
+		case ShadowCache::Off:
+			add( 0, nullptr );
+			break;
+		case ShadowCache::Full:
+			add( 1, nullptr );
+			break;
+		case ShadowCache::Scroll:
+			for ( int k = 0; k < nStrip[i]; k++ )
+				add( 1, strip[i][k] );
+			break;
+		default:
+			break;
+		}
+		if ( mode[i] != ShadowCache::Off && mode[i] != ShadowCache::Skip && anyDyn )
+			add( 2, nullptr );
+	}
+	// set 0 is every caster; 1 the static ones; 2 the dynamic ones
+	auto inSet = []( const Caster & k, int set ) { return set == 0 || ( set == 1 ) != k.dynamic; };
+
 	/* lane GPUDRIVEN1: the casters' render queues (gl/cellqueue.h). Solid one-sided, solid two-sided and alpha-tested
 	 * casters draw from the shared pool, each solid queue as one indirect multi-draw per cascade; skinned casters
 	 * keep the per-draw loop below. Depth only with LEQUAL keeps the nearest depth in any order. */
@@ -627,10 +1053,10 @@ static void sunShadowPassImpl( Scene * scene )
 	std::vector<char> queued( casters.size(), 0 );
 	NifSkopeOpenGLContext::Program * progQ = nullptr, * progAtQ = nullptr;
 	struct Span { std::size_t first = 0, n = 0; };
-	Span span[kCascades][QCount];
+	std::vector<std::array<Span, QCount>> span( jobs.size() );
 	std::vector<Span> atSpan;
 	qint64 qCalls = 0, qCommands = 0, perDraw = 0;
-	if ( GpuDriven::csm() && !casters.empty() && GpuDriven::poolBegin( r ) ) {
+	if ( GpuDriven::csm() && !casters.empty() && !jobs.empty() && GpuDriven::poolBegin( r ) ) {
 		progQ = r->useProgram( "lookdev_csmdepth_q.prog" );
 		if ( progAt )
 			progAtQ = r->useProgram( "lookdev_csmdepth_atq.prog" );
@@ -652,7 +1078,7 @@ static void sunShadowPassImpl( Scene * scene )
 			for ( auto & q : queue )
 				std::shuffle( q.begin(), q.end(), g );
 		}
-		// the frame's matrices, one per queued caster, and every cascade's commands, uploaded once
+		// the frame's matrices, one per queued caster, and every job's commands, uploaded once
 		std::vector<float> mats;
 		std::vector<std::uint32_t> matOf( casters.size(), 0 );
 		for ( const auto & q : queue ) {
@@ -663,59 +1089,59 @@ static void sunShadowPassImpl( Scene * scene )
 			}
 		}
 		std::vector<GpuDriven::DrawCmd> cmds;
-		atSpan.resize( std::size_t( kCascades ) * queue[QAlpha].size() );
-		for ( int i = 0; i < kCascades; i++ ) {
+		atSpan.resize( jobs.size() * queue[QAlpha].size() );
+		for ( std::size_t jb = 0; jb < jobs.size(); jb++ ) {
+			const Job & J = jobs[jb];
 			for ( int q = 0; q < QCount; q++ ) {
-				span[i][q].first = cmds.size();
+				span[jb][q].first = cmds.size();
 				for ( std::size_t j = 0; j < queue[q].size(); j++ ) {
 					const std::size_t n = std::size_t( queue[q][j] ), f = cmds.size();
 					const GpuDriven::PoolEntry & e = entry[n];
 					const Shape * sh = casters[n].sh;
-					if ( wwCellCullCaster( scene, sh, sh->id(), i, s.c[i].clipFromView, cullRanges ) ) {
+					if ( !inSet( casters[n], J.set ) ) {
+					} else if ( wwCellCullCaster( scene, sh, sh->id(), J.i, J.m, cullRanges ) ) {
 						for ( std::size_t r2 = 0; r2 + 1 < cullRanges.size(); r2 += 2 ) {
 							if ( cullRanges[r2 + 1] )
 								cmds.push_back( { cullRanges[r2 + 1] * 3, 1, e.firstIndex + cullRanges[r2] * 3, e.baseVertex,
 									matOf[n] } );
 						}
-					} else {
+					} else if ( !J.scissor || ShadowCache::boundsInside( scene, sh, J.m ) ) {
 						cmds.push_back( { e.numIndices, 1, e.firstIndex, e.baseVertex, matOf[n] } );
 					}
 					if ( q == QAlpha )
-						atSpan[std::size_t( i ) * queue[QAlpha].size() + j] = { f, cmds.size() - f };
+						atSpan[jb * queue[QAlpha].size() + j] = { f, cmds.size() - f };
 				}
-				span[i][q].n = cmds.size() - span[i][q].first;
+				span[jb][q].n = cmds.size() - span[jb][q].first;
 			}
 		}
 		GpuDriven::poolBind( r, mats, cmds );
 	}
 
-	for ( int i = 0; i < kCascades && complete; i++ ) {
-		const Cascade & c = s.c[i];
-		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, s.tex, 0, i );
-		if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
-			complete = false;
-			break;
-		}
-		fn->glViewport( 0, 0, s.map, s.map );
-		fn->glClearDepth( 1.0 );
-		fn->glClear( GL_DEPTH_BUFFER_BIT );
+	// one job into whatever layer is attached
+	auto drawJob = [&]( std::size_t jb ) {
+		const Job & J = jobs[jb];
+		const Cascade & c = s.c[J.i];
 		fn->glViewport( 0, 0, c.vw, c.vh );
+		if ( J.scissor ) {
+			fn->glEnable( GL_SCISSOR_TEST );
+			fn->glScissor( J.rc[0], J.rc[1], J.rc[2] - J.rc[0], J.rc[3] - J.rc[1] );
+		}
 		if ( lMvp >= 0 )
 			fn->glUniformMatrix4fv( lMvp, 1, GL_FALSE, c.clipFromView );
-		if ( progQ && ( span[i][QSolid].n || span[i][QTwoSided].n || !queue[QAlpha].empty() ) ) {
+		if ( progQ && ( span[jb][QSolid].n || span[jb][QTwoSided].n || !queue[QAlpha].empty() ) ) {
 			// lane GPUDRIVEN1: the queues first, render state set once per queue
 			GpuDriven::poolRebind( r );
 			r->useProgram( "lookdev_csmdepth_q.prog" );
 			if ( const int l = progQ->uniLocation( "csmClipFromView" ); l >= 0 )
 				fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
 			for ( int q : { int( QSolid ), int( QTwoSided ) } ) {
-				if ( !span[i][q].n )
+				if ( !span[jb][q].n )
 					continue;
 				q == QTwoSided ? fn->glDisable( GL_CULL_FACE ) : fn->glEnable( GL_CULL_FACE );
-				GpuDriven::poolDraw( r, span[i][q].first, span[i][q].n );
-				PassTime::countDraw( qint64( span[i][q].n ) );
+				GpuDriven::poolDraw( r, span[jb][q].first, span[jb][q].n );
+				PassTime::countDraw( qint64( span[jb][q].n ) );
 				qCalls++;
-				qCommands += qint64( span[i][q].n );
+				qCommands += qint64( span[jb][q].n );
 			}
 			if ( !queue[QAlpha].empty() ) {
 				// the base map differs per caster: one multi-draw each, geometry and matrices still from the pool
@@ -723,7 +1149,7 @@ static void sunShadowPassImpl( Scene * scene )
 				if ( const int l = progAtQ->uniLocation( "csmClipFromView" ); l >= 0 )
 					fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
 				for ( std::size_t j = 0; j < queue[QAlpha].size(); j++ ) {
-					const Span & sp = atSpan[std::size_t( i ) * queue[QAlpha].size() + j];
+					const Span & sp = atSpan[jb * queue[QAlpha].size() + j];
 					if ( !sp.n )
 						continue;
 					const Caster & k = casters[std::size_t( queue[QAlpha][j] )];
@@ -755,7 +1181,11 @@ static void sunShadowPassImpl( Scene * scene )
 		}
 		for ( std::size_t kn = 0; kn < casters.size(); kn++ ) {
 			const Caster & k = casters[kn];
-			if ( ( progAt && k.alphaTested != bool( pass ) ) || queued[kn] )
+			if ( ( progAt && k.alphaTested != bool( pass ) ) || queued[kn] || !inSet( k, J.set ) )
+				continue;
+			// lane SUNCELL1: a welded cell shape gives this cascade only the placements inside its own window
+			const bool runs = wwCellCullCaster( scene, k.sh, k.sh->id(), J.i, J.m, cullRanges );
+			if ( !runs && J.scissor && !ShadowCache::boundsInside( scene, k.sh, J.m ) )
 				continue;
 			perDraw++;
 			if ( k.twoSided )
@@ -779,8 +1209,7 @@ static void sunShadowPassImpl( Scene * scene )
 				mask = 0x20000003ULL;
 			}
 			const float * const * attrs = attrv;
-			// lane SUNCELL1: a welded cell shape gives this cascade only the placements inside its own window
-			if ( wwCellCullCaster( scene, k.sh, k.sh->id(), i, c.clipFromView, cullRanges ) ) {
+			if ( runs ) {
 				cullIdx.clear();
 				const std::uint16_t * src = reinterpret_cast<const std::uint16_t *>( k.sh->triangles.constData() );
 				for ( size_t q = 0; q + 1 < cullRanges.size(); q += 2 )
@@ -800,8 +1229,8 @@ static void sunShadowPassImpl( Scene * scene )
 		}
 		if ( progAt )
 			r->useProgram( "lookdev_csmdepth.prog" );
-		if ( s.groundCast ) {
-			// the ground quad, exactly as wwLookdevDrawGround places it (world space, Z up)
+		if ( s.groundCast && J.set != 2 ) {
+			// the ground quad, exactly as wwLookdevDrawGround places it (world space, Z up); static
 			fn->glEnable( GL_CULL_FACE );
 			prog->uni4m( "modelViewMatrix", vt.toMatrix4() );
 			const float x0 = gxy[0] - ghalf, x1 = gxy[0] + ghalf, y0 = gxy[1] - ghalf, y1 = gxy[1] + ghalf;
@@ -810,7 +1239,120 @@ static void sunShadowPassImpl( Scene * scene )
 			const float * attrs = quad;
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 		}
+		if ( J.scissor )
+			fn->glDisable( GL_SCISSOR_TEST );
+	};
+	auto attach = [&]( unsigned int tex, int layer ) {
+		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, tex, 0, layer );
+		if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
+			complete = false;
+		return complete;
+	};
+	auto clearAll = [&]() {
+		fn->glViewport( 0, 0, s.map, s.map );
+		fn->glClearDepth( 1.0 );
+		fn->glClear( GL_DEPTH_BUFFER_BIT );
+	};
+	// the whole layer (the cleared margin too) from (tex, layer) into the attached one: depth bits, exact
+	auto copyFrom = [&]( unsigned int tex, int layer ) {
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, cst.fbo );
+		fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, tex, 0, layer );
+		fn->glReadBuffer( GL_NONE );
+		fn->glBlitFramebuffer( 0, 0, s.map, s.map, 0, 0, s.map, s.map, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+	};
+	auto remap = [&]( int i ) {
+		const Cascade & c = s.c[i];
+		r->useProgram( "lookdev_csmremap.prog" );
+		progRemap->uni1i( "srcMap", kTextureUnit );
+		progRemap->uni1i( "srcX", srcOff[i][0] );
+		progRemap->uni1i( "srcY", srcOff[i][1] );
+		progRemap->uni1i( "srcW", oldSize[i][0] );
+		progRemap->uni1i( "srcH", oldSize[i][1] );
+		progRemap->uni1f( "zScale", zMap[i][0] );
+		progRemap->uni1f( "zBias", zMap[i][1] );
+		GLint prevActive = 0, prevTex = 0, prevVao = 0;
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTextureUnit ) );
+		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D_ARRAY, &prevTex );
+		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, cst.scratch );
+		fn->glGetIntegerv( GL_VERTEX_ARRAY_BINDING, &prevVao );
+		fn->glBindVertexArray( cst.vao );
+		fn->glDisable( GL_CULL_FACE );
+		fn->glDisable( GL_POLYGON_OFFSET_FILL );
+		fn->glDepthFunc( GL_ALWAYS );
+		fn->glViewport( 0, 0, c.vw, c.vh );
+		fn->glDrawArrays( GL_TRIANGLES, 0, 3 );
+		fn->glDepthFunc( GL_LEQUAL );
+		if ( !red( "nobias" ) )
+			fn->glEnable( GL_POLYGON_OFFSET_FILL );
+		fn->glBindVertexArray( GLuint( prevVao ) );
+		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, GLuint( prevTex ) );
+		fn->glActiveTexture( GLenum( prevActive ) );
+		r->useProgram( "lookdev_csmdepth.prog" );
+	};
+	auto runSet = [&]( int i, int set ) {
+		for ( int jb : jobsOf[i][set] )
+			drawJob( std::size_t( jb ) );
+	};
+
+	for ( int i = 0; i < kCascades && complete; i++ ) {
+		const Cascade & c = s.c[i];
+		ShadowCache::Layer & L = cst.c[i];
+		switch ( mode[i] ) {
+		case ShadowCache::Off:
+			if ( attach( s.tex, i ) ) {
+				clearAll();
+				runSet( i, 0 );
+			}
+			break;
+		case ShadowCache::Skip:
+			break;
+		case ShadowCache::Full:
+			if ( attach( cst.tex, i ) ) {
+				clearAll();
+				runSet( i, 1 );
+			}
+			break;
+		case ShadowCache::Scroll:
+			// the old static layer to the scratch, then back remapped onto the moved window, then the new strips
+			if ( attach( cst.scratch, 0 ) )
+				copyFrom( cst.tex, i );
+			if ( attach( cst.tex, i ) ) {
+				clearAll();
+				remap( i );
+				runSet( i, 1 );
+			}
+			break;
+		case ShadowCache::Hit:
+			break;
+		}
+		if ( !complete || mode[i] == ShadowCache::Off || mode[i] == ShadowCache::Skip )
+			continue;
+		if ( mode[i] == ShadowCache::Full || mode[i] == ShadowCache::Scroll ) {
+			L.valid = true;
+			L.key = key[i];
+			L.setSig = setSig;
+			L.stateSig = stateSig;
+			L.corner[0] = c.pb[0] + c.l;
+			L.corner[1] = c.pb[1] + c.b;
+			L.nearZ = c.pb[2] + kNear;
+			L.wz = c.far - kNear;
+			L.texel = c.texel;
+			L.n = c.n;
+			std::memcpy( L.L, s.cL[i], sizeof( L.L ) );
+			L.vw = c.vw;
+			L.vh = c.vh;
+			L.map = s.map;
+		}
+		// the live layer: the static one, then the dynamic casters over it
+		if ( attach( s.tex, i ) ) {
+			copyFrom( cst.tex, i );
+			runSet( i, 2 );
+			L.liveIsStatic = !anyDyn;
+		}
 	}
+	if ( cacheOn && !complete )
+		ShadowCache::invalidate();
 	if ( progQ )
 		GpuDriven::poolUnbind( r );
 	r->stopProgram();
@@ -819,6 +1361,14 @@ static void sunShadowPassImpl( Scene * scene )
 			"queue calls %6 commands %7; %8" ).arg( casters.size() ).arg( queue[QSolid].size() ).arg( queue[QTwoSided].size() )
 			.arg( queue[QAlpha].size() ).arg( perDraw ).arg( qCalls ).arg( qCommands ).arg( GpuDriven::poolCensus( r ) ) );
 	}
+	if ( cst.census ) {
+		static const char * const names[] = { "off", "skip", "hit", "full", "scroll" };
+		GpuDriven::censusLine( "shadowcache", QStringLiteral( "c0 %1 c1 %2 c2 %3 static %4 dynamic %5 jobs %6 strips %7,%8" )
+			.arg( names[mode[0]] ).arg( names[mode[1]] ).arg( names[mode[2]] ).arg( nStatic )
+			.arg( qint64( casters.size() ) - nStatic ).arg( qint64( jobs.size() ) ).arg( nStrip[1] ).arg( nStrip[2] ) );
+	}
+	if ( cst.on )
+		ShadowCache::sweep();
 
 	// restore
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );

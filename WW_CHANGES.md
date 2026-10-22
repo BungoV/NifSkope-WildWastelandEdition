@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SHADOWCACHE1 (2026-10-22, branch shadowcache1-20261022): cached static sun cascades (the CoD / UE5 way)
+
+- **Static casters cached per cascade.** Each cascade keeps a second depth layer holding only its static casters
+  (`src/gl/sunshadow.cpp`, ShadowCache). When the fit, the camera, the static set and the render state match the
+  cached ones, the pass copies that layer into the live map and draws only the dynamic casters over it, or does
+  nothing when there are none. Depth-only LEQUAL keeps the nearest depth in any order, so a still camera is exact.
+  A caster counts as dynamic when it is skinned, or when its transform or geometry changed in the last 120 passes.
+- **Far cascades scroll.** Cascades 1 and 2 keep their sun direction until the sun turns 0.05 degrees. When their
+  window only moved on the same texel lattice, the old static depths are copied across with the depth range
+  remapped (new shader `lookdev_csmremap`), and only the newly exposed strips are drawn. A look change at most
+  within the stated near-invisible bar; the batch measures it on a moving camera and a moving sun.
+- `WW_SHADOWCACHE=0`: GPUDRIVEN1's pass. `WW_SHADOWCACHE_RED=full`: everything redrawn every pass (the old result
+  and cost). `WW_SHADOWCACHE_RED=stale`: never redrawn (the moving gates' bite). `WW_SHADOWCACHE_SCROLL=<mask>`,
+  `WW_SHADOWCACHE_SUNHOLD=<deg>`, `WW_SHADOWCACHE_DYNFRAMES=<n>`, `WW_SHADOWCACHE_CENSUS=1`.
+- Test driver: `WW_RENDER_PATH_HOURSTEP=<hours a frame>` steps the pinned hour along a camera path.
+- Cost: one extra 3-layer depth array plus a 1-layer scratch (32 MB at map 2048).
+
 ## Lane GPUDRIVEN1 (2026-10-22, branch gpudriven1-20261022): render queues, step A (the Division 2 way)
 
 - **Sun cascades through queues.** The cascade casters are sorted once a frame into solid, two-sided and alpha-tested
