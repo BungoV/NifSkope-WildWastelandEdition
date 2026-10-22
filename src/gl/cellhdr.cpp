@@ -24,11 +24,88 @@ namespace {
 constexpr int kSrcUnit = 8;		// the linear frame (sampler2DMS) in cell_hdr.prog; the cell units are 10..16
 constexpr int kFoBloomUnit = WwCellUnit::Bloom;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
 
+constexpr int kStencilUnit = 9;	// lane TONEMAP1: the frame's stencil (usampler2DMS) in cell_hdr.prog, always assigned
+
+// lane TONEMAP1: the depth / stencil is a texture and the tone map tests the stencil in its shader, so only the depth
+// goes back to the view (the MSAA stencil blit was the pass's cost). WW_CELL_HDR_STEX_RED=1: renderbuffer + both blitted.
+bool stexOn()
+{
+	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_HDR_STEX_RED" ) == 0 && qEnvironmentVariableIntValue( "WW_TONEMAP1_RED" ) == 0
+		&& qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) == 0;	// cell_hdr_fd.prog has no stencil test of its own
+	return on;
+}
+
+// lane SYNC1: each glGet / glGetError waits for the driver's thread; the frame's own configuration is cached, the state
+// read once per tone map, errors checked on a new configuration only. WW_CELL_HDR_SYNC_RED=1: every query every frame.
+bool syncOn()
+{
+	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_HDR_SYNC_RED" ) == 0 && qEnvironmentVariableIntValue( "WW_TONEMAP1_RED" ) == 0;
+	return on;
+}
+
 struct HdrGpu
 {
 	GLuint fbo = 0, color = 0, ds = 0;
 	int w = 0, h = 0, samples = 0;
 	GLenum dsFormat = 0;
+	bool dsTex = false;		// lane TONEMAP1: ds is a multisample texture (else a renderbuffer)
+	bool stexFailed = false;	// its texture or target was refused once: renderbuffers from then on
+	bool complete = false;	// lane SYNC1: the target passed its status check since it was made
+	bool trusted = false;	// lane SYNC1: a frame on this target raised no GL error
+	bool cfgValid = false;	// lane SYNC1: the view's (framebuffer 0) depth format and samples at this size
+	int cfgW = 0, cfgH = 0, cfgSamples = 0;
+	GLenum cfgFormat = 0;
+};
+
+// lane SYNC1: the state the measure and the tone quads restore, read once (sync) or each where it was (red)
+struct GlSnap
+{
+	GLint active = 0, vp[4] = { 0, 0, 1, 1 };
+	GLfloat clear[4] = { 0, 0, 0, 0 };
+	GLboolean colorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE }, depthMask = GL_TRUE;
+	bool depth = false, blend = false, cull = false, stencil = false, scissor = false;
+	GLint sFunc = GL_ALWAYS, sRef = 0, sMask = 0xFF, sWrite = 0xFF, sFail = GL_KEEP, sZFail = GL_KEEP, sPass = GL_KEEP;
+	GLint depthFunc = GL_LESS, blendF[4] = { GL_ONE, GL_ZERO, GL_ONE, GL_ZERO };
+
+	template <typename F> void enables( F * fn )
+	{
+		depth = fn->glIsEnabled( GL_DEPTH_TEST );
+		blend = fn->glIsEnabled( GL_BLEND );
+		cull = fn->glIsEnabled( GL_CULL_FACE );
+		stencil = fn->glIsEnabled( GL_STENCIL_TEST );
+		scissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	}
+	template <typename F> void measurePart( F * fn )	// what isMeasureFrame read
+	{
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &active );
+		fn->glGetIntegerv( GL_VIEWPORT, vp );
+		fn->glGetFloatv( GL_COLOR_CLEAR_VALUE, clear );
+		fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+		enables( fn );
+		fn->glGetIntegerv( GL_STENCIL_FUNC, &sFunc );
+		fn->glGetIntegerv( GL_STENCIL_REF, &sRef );
+		fn->glGetIntegerv( GL_STENCIL_VALUE_MASK, &sMask );
+		fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &sWrite );
+		fn->glGetIntegerv( GL_STENCIL_FAIL, &sFail );
+		fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_FAIL, &sZFail );
+		fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_PASS, &sPass );
+	}
+	template <typename F> void quadsExtra( F * fn )	// what the tone quads read beyond that
+	{
+		fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+		fn->glGetIntegerv( GL_DEPTH_FUNC, &depthFunc );
+		fn->glGetIntegerv( GL_BLEND_SRC_RGB, &blendF[0] );
+		fn->glGetIntegerv( GL_BLEND_DST_RGB, &blendF[1] );
+		fn->glGetIntegerv( GL_BLEND_SRC_ALPHA, &blendF[2] );
+		fn->glGetIntegerv( GL_BLEND_DST_ALPHA, &blendF[3] );
+	}
+	template <typename F> void quadsPart( F * fn )	// what the tone quads read (red: as before)
+	{
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &active );
+		fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+		enables( fn );
+		quadsExtra( fn );
+	}
 };
 
 struct HdrState
@@ -166,6 +243,7 @@ struct IsMeasureGpu
 	int w = 0, h = 0;
 	GLenum dsFormat = 0;
 	GLsync fence = nullptr;	// frame mode: the readback in flight
+	bool trusted = false;	// lane SYNC1: a measure on this target raised no GL error
 	int qw = 0, qh = 0;
 	const void * doc = nullptr;
 };
@@ -209,7 +287,7 @@ void isApply( Scene * scene, const float * px, int qw, int qh )
 	}
 }
 
-void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevDraw, GLint prevRead )
+void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevDraw, GLint prevRead, const GlSnap * shared )
 {
 	const int mode = isMeasureMode();
 	static int saidMode = -1;
@@ -244,27 +322,18 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 	auto prog = r->useProgram( "cell_is_measure.prog" );
 	if ( !prog )
 		return;	// glview's pass measures the next frame
-	GLint prevActive = 0, prevTex = 0, vp[4] = { 0, 0, 1, 1 };
-	GLfloat prevClear[4];
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glGetIntegerv( GL_VIEWPORT, vp );
-	fn->glGetFloatv( GL_COLOR_CLEAR_VALUE, prevClear );
-	GLboolean colorMask[4];
-	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
-	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
-	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
-	const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
-	GLint sFunc = GL_ALWAYS, sRef = 0, sMask = 0xFF, sWrite = 0xFF, sFail = GL_KEEP, sZFail = GL_KEEP, sPass = GL_KEEP;
-	fn->glGetIntegerv( GL_STENCIL_FUNC, &sFunc );
-	fn->glGetIntegerv( GL_STENCIL_REF, &sRef );
-	fn->glGetIntegerv( GL_STENCIL_VALUE_MASK, &sMask );
-	fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &sWrite );
-	fn->glGetIntegerv( GL_STENCIL_FAIL, &sFail );
-	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_FAIL, &sZFail );
-	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_PASS, &sPass );
-	while ( fn->glGetError() != GL_NO_ERROR ) {
+	GLint prevTex = 0;
+	GlSnap own;	// lane SYNC1: the tone map's one read of the state (shared), else this pass's own as before
+	if ( !shared )
+		own.measurePart( fn );
+	const GlSnap & sn = shared ? *shared : own;
+	const bool check = !shared || !m.trusted;	// lane SYNC1: errors read on a new target only
+	if ( check ) {
+		while ( fn->glGetError() != GL_NO_ERROR ) {
+		}
 	}
 	if ( !m.fbo || m.w != W || m.h != H || m.dsFormat != g.dsFormat ) {
+		m.trusted = false;
 		if ( !m.fbo )
 			fn->glGenFramebuffers( 1, &m.fbo );
 		if ( m.tex )
@@ -296,7 +365,7 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, m.fbo );
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_STENCIL_BUFFER_BIT, GL_NEAREST );
-	bool ok = fn->glGetError() == GL_NO_ERROR;
+	bool ok = !check || fn->glGetError() == GL_NO_ERROR;
 	if ( ok ) {
 		fn->glViewport( 0, 0, W, H );
 		fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
@@ -338,22 +407,24 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 			m.qh = qh;
 		}
 		fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
-		ok = fn->glGetError() == GL_NO_ERROR;
+		ok = !check || fn->glGetError() == GL_NO_ERROR;
+		if ( check && ok )
+			m.trusted = true;
 	}
 	r->stopProgram();
 	isServed().insert( doc, ok );
-	fn->glActiveTexture( GLenum( prevActive ) );
-	fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
-	fn->glClearColor( prevClear[0], prevClear[1], prevClear[2], prevClear[3] );
-	fn->glColorMask( colorMask[0], colorMask[1], colorMask[2], colorMask[3] );
-	fn->glStencilFunc( GLenum( sFunc ), sRef, GLuint( sMask ) );
-	fn->glStencilMask( GLuint( sWrite ) );
-	fn->glStencilOp( GLenum( sFail ), GLenum( sZFail ), GLenum( sPass ) );
-	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
-	if ( wasDepth ) fn->glEnable( GL_DEPTH_TEST ); else fn->glDisable( GL_DEPTH_TEST );
-	if ( wasBlend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
-	if ( wasCull ) fn->glEnable( GL_CULL_FACE ); else fn->glDisable( GL_CULL_FACE );
-	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST );
+	fn->glActiveTexture( GLenum( sn.active ) );
+	fn->glViewport( sn.vp[0], sn.vp[1], sn.vp[2], sn.vp[3] );
+	fn->glClearColor( sn.clear[0], sn.clear[1], sn.clear[2], sn.clear[3] );
+	fn->glColorMask( sn.colorMask[0], sn.colorMask[1], sn.colorMask[2], sn.colorMask[3] );
+	fn->glStencilFunc( GLenum( sn.sFunc ), sn.sRef, GLuint( sn.sMask ) );
+	fn->glStencilMask( GLuint( sn.sWrite ) );
+	fn->glStencilOp( GLenum( sn.sFail ), GLenum( sn.sZFail ), GLenum( sn.sPass ) );
+	if ( sn.stencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
+	if ( sn.depth ) fn->glEnable( GL_DEPTH_TEST ); else fn->glDisable( GL_DEPTH_TEST );
+	if ( sn.blend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
+	if ( sn.cull ) fn->glEnable( GL_CULL_FACE ); else fn->glDisable( GL_CULL_FACE );
+	if ( sn.scissor ) fn->glEnable( GL_SCISSOR_TEST );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
 }
@@ -506,27 +577,44 @@ bool wwCellHdrBegin( Scene * scene )
 	fn->glGetIntegerv( GL_VIEWPORT, vp );
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &s.prevDraw );
 	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &s.prevRead );
-	fn->glGetIntegerv( GL_SAMPLES, &samples );
-	// the frame's depth format: depth and stencil go back by a blit, which needs the same format both sides
-	GLint depthBits = 0, stencilBits = 0, compType = 0;
-	const GLenum att = s.prevDraw ? GL_DEPTH_ATTACHMENT : GL_DEPTH;
-	fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depthBits );
-	fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, s.prevDraw ? GL_STENCIL_ATTACHMENT : GL_STENCIL,
-		GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &stencilBits );
-	fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &compType );
-	GLenum dsFormat = 0;
-	if ( stencilBits == 8 && depthBits == 24 && compType != GL_FLOAT )
-		dsFormat = GL_DEPTH24_STENCIL8;
-	else if ( stencilBits == 8 && depthBits == 32 && compType == GL_FLOAT )
-		dsFormat = GL_DEPTH32F_STENCIL8;
-	if ( !dsFormat ) {
-		note( s, QStringLiteral( "refused (the frame's depth is %1 bits, %2 stencil: no stencil to sort the pixels by)" )
-			.arg( depthBits ).arg( stencilBits ) );
-		return false;
-	}
-	const int W = vp[0] + vp[2], H = vp[1] + vp[3], S = std::max( int( samples ), 1 );
+	const int W = vp[0] + vp[2], H = vp[1] + vp[3];
 	HdrGpu & g = hdrGpus()[r];
-	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat ) {
+	const bool sync = syncOn();
+	// lane SYNC1: the view's own framebuffer keeps its format for the window's life (an FBO name can come back as another)
+	const bool cached = sync && s.prevDraw == 0 && g.cfgValid && g.cfgW == W && g.cfgH == H;
+	GLenum dsFormat = 0;
+	if ( cached ) {
+		dsFormat = g.cfgFormat;
+		samples = g.cfgSamples;
+	} else {
+		fn->glGetIntegerv( GL_SAMPLES, &samples );
+		// the frame's depth format: depth and stencil go back by a blit, which needs the same format both sides
+		GLint depthBits = 0, stencilBits = 0, compType = 0;
+		const GLenum att = s.prevDraw ? GL_DEPTH_ATTACHMENT : GL_DEPTH;
+		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depthBits );
+		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, s.prevDraw ? GL_STENCIL_ATTACHMENT : GL_STENCIL,
+			GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &stencilBits );
+		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &compType );
+		if ( stencilBits == 8 && depthBits == 24 && compType != GL_FLOAT )
+			dsFormat = GL_DEPTH24_STENCIL8;
+		else if ( stencilBits == 8 && depthBits == 32 && compType == GL_FLOAT )
+			dsFormat = GL_DEPTH32F_STENCIL8;
+		if ( !dsFormat ) {
+			note( s, QStringLiteral( "refused (the frame's depth is %1 bits, %2 stencil: no stencil to sort the pixels by)" )
+				.arg( depthBits ).arg( stencilBits ) );
+			return false;
+		}
+		if ( sync && s.prevDraw == 0 ) {
+			g.cfgValid = true;
+			g.cfgW = W;
+			g.cfgH = H;
+			g.cfgSamples = samples;
+			g.cfgFormat = dsFormat;
+		}
+	}
+	const int S = std::max( int( samples ), 1 );
+	const bool wantTex = stexOn() && !g.stexFailed;
+	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat || g.dsTex != wantTex ) {
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
 		if ( g.color )
@@ -538,25 +626,60 @@ bool wwCellHdrBegin( Scene * scene )
 		 * (every draw's state, uniforms and textures traced identical); fp32 measured 0 of 7 frames differing. */
 		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, GL_RGBA32F, W, H, GL_TRUE );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
-		if ( !g.ds )
+		if ( g.ds && g.dsTex )
+			fn->glDeleteTextures( 1, &g.ds );
+		else if ( g.ds )
+			fn->glDeleteRenderbuffers( 1, &g.ds );
+		g.ds = 0;
+		g.dsTex = false;
+		if ( wantTex ) {	// lane TONEMAP1: the stencil read as an unsigned integer (usampler2DMS) by the tone map
+			while ( fn->glGetError() != GL_NO_ERROR ) {
+			}
+			fn->glGenTextures( 1, &g.ds );
+			fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.ds );
+			fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, dsFormat, W, H, GL_TRUE );
+			fn->glTexParameteri( GL_TEXTURE_2D_MULTISAMPLE, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_STENCIL_INDEX );
+			fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
+			g.dsTex = fn->glGetError() == GL_NO_ERROR;
+			if ( !g.dsTex ) {
+				fn->glDeleteTextures( 1, &g.ds );
+				g.ds = 0;
+				g.stexFailed = true;
+				qInfo().noquote() << "cell hdr: the depth / stencil texture was refused; renderbuffer and stencil blit (lane TONEMAP1 off)";
+			}
+		}
+		if ( !g.dsTex ) {
 			fn->glGenRenderbuffers( 1, &g.ds );
-		fn->glBindRenderbuffer( GL_RENDERBUFFER, g.ds );
-		fn->glRenderbufferStorageMultisample( GL_RENDERBUFFER, S, dsFormat, W, H );
-		fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
+			fn->glBindRenderbuffer( GL_RENDERBUFFER, g.ds );
+			fn->glRenderbufferStorageMultisample( GL_RENDERBUFFER, S, dsFormat, W, H );
+			fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
+		}
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, g.color, 0 );
-		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.ds );
+		if ( g.dsTex )
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, g.ds, 0 );
+		else
+			fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.ds );
 		g.w = W;
 		g.h = H;
 		g.samples = S;
 		g.dsFormat = dsFormat;
+		g.complete = false;
+		g.trusted = false;
 	}
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
-	if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
-		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( s.prevDraw ) );
-		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
-		note( s, QStringLiteral( "refused (the linear frame is incomplete)" ) );
-		return false;
+	if ( !( sync && g.complete ) ) {
+		if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+			fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( s.prevDraw ) );
+			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+			if ( g.dsTex ) {	// lane TONEMAP1: a target the driver will not take: renderbuffers from the next frame
+				g.stexFailed = true;
+				qInfo().noquote() << "cell hdr: the linear frame with a depth / stencil texture is incomplete; renderbuffer and stencil blit";
+			}
+			note( s, QStringLiteral( "refused (the linear frame is incomplete)" ) );
+			return false;
+		}
+		g.complete = true;
 	}
 	// a clean target: no colour (pixels no draw reaches are not written back), the depth / stencil clears
 	GLfloat clear[4];
@@ -596,14 +719,22 @@ void wwCellHdrEnd( Scene * scene )
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
 	HdrGpu & g = hdrGpus()[r];
-	while ( fn->glGetError() != GL_NO_ERROR ) {
+	const bool sync = syncOn();
+	const bool check = !sync || !g.trusted;	// lane SYNC1: errors read on a new target only
+	if ( check ) {
+		while ( fn->glGetError() != GL_NO_ERROR ) {
+		}
 	}
-	// depth and stencil back to the frame: later draws test against the scene, the stencil sorts the pixels
+	/* depth and stencil back to the frame: later draws test against the scene, the stencil sorts the pixels.
+	 * lane TONEMAP1: with the stencil a texture the tone map reads it itself; only the depth goes back. */
 	PassTime::subBegin( PassTime::ToneBlit );	// lane PERF2: the tone-map pass's four parts
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( s.prevDraw ) );
-	fn->glBlitFramebuffer( 0, 0, s.w, s.h, 0, 0, s.w, s.h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST );
-	const GLenum blitErr = fn->glGetError();
+	fn->glBlitFramebuffer( 0, 0, s.w, s.h, 0, 0, s.w, s.h, g.dsTex ? GL_DEPTH_BUFFER_BIT : GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+		GL_NEAREST );
+	const GLenum blitErr = check ? fn->glGetError() : GLenum( GL_NO_ERROR );
+	if ( check && sync && blitErr == GL_NO_ERROR )
+		g.trusted = true;
 	PassTime::subEnd( PassTime::ToneBlit );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
 	wwCellSsrKeepFrame( scene, g.fbo, s.w, s.h );	// lane PERF3: WW_CELL_SSR_PREV's previous frame (else nothing)
@@ -685,36 +816,33 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	// lane PERF1: the exposure and the bloom from this linear frame (before the uniforms take them)
 	PassTime::subBegin( PassTime::ToneMeasure );
-	isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead );
+	GlSnap sn;	// lane SYNC1: read once here for the measure and the tone quads (the measure and the bloom restore it)
+	if ( sync ) {
+		sn.measurePart( fn );
+		sn.quadsExtra( fn );
+	}
+	isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead, sync ? &sn : nullptr );
 	PassTime::subEnd( PassTime::ToneMeasure );
 	// lane BLOOM1b: the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
 	PassTime::subBegin( PassTime::ToneBloom );
-	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat );
+	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
 	PassTime::subEnd( PassTime::ToneBloom );
 
 	// lane PERF2: the quad at the far plane keeps the early tests (WW_CELL_HDR_EARLY_RED=1: depth written per sample)
 	static const bool earlyRed = qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) != 0;
-	auto prog = r->useProgram( earlyRed ? "cell_hdr_fd.prog" : "cell_hdr.prog" );
+	auto prog = r->useProgram( earlyRed && !g.dsTex ? "cell_hdr_fd.prog" : "cell_hdr.prog" );
 	if ( !prog ) {
 		wwCellBloomDone( r, kFoBloomUnit );
 		note( s, QStringLiteral( "lost (cell_hdr.prog went away mid-frame)" ) );
 		return;
 	}
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	GLboolean colorMask[4], depthMask = GL_TRUE;
-	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
-	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
-	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
-	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
-	const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
-	GLint prevDepthFunc = GL_LESS;
-	fn->glGetIntegerv( GL_DEPTH_FUNC, &prevDepthFunc );
-	GLint prevBlend[4] = { GL_ONE, GL_ZERO, GL_ONE, GL_ZERO };
-	fn->glGetIntegerv( GL_BLEND_SRC_RGB, &prevBlend[0] );
-	fn->glGetIntegerv( GL_BLEND_DST_RGB, &prevBlend[1] );
-	fn->glGetIntegerv( GL_BLEND_SRC_ALPHA, &prevBlend[2] );
-	fn->glGetIntegerv( GL_BLEND_DST_ALPHA, &prevBlend[3] );
+	if ( !sync )
+		sn.quadsPart( fn );	// red: read here, as before
+	const GLint prevActive = sn.active, prevDepthFunc = sn.depthFunc;
+	const GLint * prevBlend = sn.blendF;
+	const GLboolean * colorMask = sn.colorMask;
+	const GLboolean depthMask = sn.depthMask;
+	const bool wasDepth = sn.depth, wasBlend = sn.blend, wasCull = sn.cull, wasStencil = sn.stencil, wasScissor = sn.scissor;
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDepthMask( GL_FALSE );
 	fn->glDisable( GL_BLEND );
@@ -727,20 +855,42 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
 	prog->uni1i( "hdrSrc", kSrcUnit );
+	// lane TONEMAP1: the stencil sampler always gets its own unit (two sampler types on one unit fail the draw)
+	if ( g.dsTex ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kStencilUnit ) );
+		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.ds );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
+	}
+	prog->uni1i( "hdrStencil", kStencilUnit );
+	prog->uni1i( "hdrStencilTest", 0 );
 	wwCellBloomFinal( r, kFoBloomUnit );	// lane BLOOM1b: the final combine's uniforms (off: cellIsFoBloomOn false)
 
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
 	const bool sorted = blitErr == GL_NO_ERROR;
+	// lane TONEMAP1: test 1 keeps the samples whose stencil (& 3) is ref, 2 the others; in the shader with the texture
+	// WW_CELL_HDR_STEX_BREAK=1 (gates only): mode 1 keeps the wrong samples, so the picture gate must fail
+	static const bool stexBreak = qEnvironmentVariableIntValue( "WW_CELL_HDR_STEX_BREAK" ) == 1;
+	auto pick = [&]( int test, int ref ) {
+		if ( stexBreak && ref == 2 )
+			test = 2;
+		if ( g.dsTex ) {
+			prog->uni1i( "hdrStencilTest", test );
+			prog->uni1i( "hdrStencilRef", ref );
+		} else {
+			fn->glStencilFunc( test == 1 ? GL_EQUAL : GL_NOTEQUAL, ref, 0x03 );
+		}
+	};
 	fn->glStencilMask( 0 );
-	if ( sorted ) {
+	if ( sorted && !g.dsTex ) {
 		fn->glEnable( GL_STENCIL_TEST );
 		fn->glStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
-		fn->glStencilFunc( GL_EQUAL, 1, 0x03 );	// a cell program or a cell effect wrote it last: the imagespace
 	} else {
 		fn->glDisable( GL_STENCIL_TEST );
 	}
+	if ( sorted )
+		pick( 1, 1 );	// a cell program or a cell effect wrote it last: the imagespace
 	/* lane SKYHOLE1: a cell effect over the sky (no opaque draw under it, the depth still at the far plane) blended
 	 * over 0 in the linear frame, and mode 0 laid its tone-mapped value over the backdrop: the Memory Den's steam
 	 * (MistGroundWaterSteam01LongHalf) as a black patch. Mode 0 now takes only the pixels an opaque draw reached
@@ -771,7 +921,7 @@ void wwCellHdrEnd( Scene * scene )
 		fn->glDepthFunc( GLenum( prevDepthFunc ) );
 	}
 	if ( sorted ) {
-		fn->glStencilFunc( GL_EQUAL, 2, 0x03 );	// any other program: its value as written
+		pick( 1, 2 );	// any other program: its value as written
 		prog->uni1i( "hdrMode", 1 );
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	}
@@ -782,10 +932,10 @@ void wwCellHdrEnd( Scene * scene )
 		fn->glEnable( GL_BLEND );
 		fn->glBlendFunc( GL_ONE, GL_ONE );
 		prog->uni1i( "hdrMode", 3 );
-		fn->glStencilFunc( GL_NOTEQUAL, 1, 0x03 );
+		pick( 2, 1 );
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 		if ( splitSky ) {	// the 1s at the far plane: mode 2's pixels
-			fn->glStencilFunc( GL_EQUAL, 1, 0x03 );
+			pick( 1, 1 );
 			fn->glEnable( GL_DEPTH_TEST );
 			fn->glDepthFunc( GL_LEQUAL );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
@@ -796,6 +946,11 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	r->stopProgram();
 	wwCellBloomDone( r, kFoBloomUnit );
+	if ( g.dsTex ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kStencilUnit ) );
+		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
+	}
 	PassTime::subEnd( PassTime::ToneQuads );
 
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
@@ -812,7 +967,10 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glDepthMask( depthMask );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( s.prevDraw ) );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
-	note( s, sorted ? QStringLiteral( "linear frame %1x%2, %3 sample(s), one tone map" ).arg( s.w ).arg( s.h ).arg( s.samples )
+	// lane TONEMAP1 / SYNC1: which stencil path and which query regime ran (the gates read these words)
+	const QString lane = QStringLiteral( " [stencil %1, sync %2]" ).arg( g.dsTex ? QStringLiteral( "in shader" ) : QStringLiteral( "blit" ),
+		sync ? QStringLiteral( "cached" ) : QStringLiteral( "red" ) );
+	note( s, sorted ? QStringLiteral( "linear frame %1x%2, %3 sample(s), one tone map" ).arg( s.w ).arg( s.h ).arg( s.samples ) + lane
 		: QStringLiteral( "linear frame %1x%2, %3 sample(s), one tone map over every pixel (depth / stencil blit refused, GL error %4)" )
 			.arg( s.w ).arg( s.h ).arg( s.samples ).arg( blitErr ) );
 }

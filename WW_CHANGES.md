@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane TONEMAP1 + SYNC1 (2026-10-22, branch tonemap1-20261022): the cell view's tone map without the stencil blit
+
+- **Stencil read by the tone map, exact.** The linear (HDR) frame's depth/stencil is now a multisample texture. Only
+  the depth is copied back to the view; the tone map's shader reads the stencil per sample and keeps the same
+  samples the GL stencil test kept. The MSAA depth+stencil blit into the view was most of the "tone-map" cost.
+  The FO4CS bloom attaches the same texture. A driver that refuses the texture falls back to the old path by itself.
+  `WW_CELL_HDR_STEX_RED=1`: the renderbuffer, both blitted, the GL stencil test.
+- **Fewer driver syncs, exact.** The view's depth format and samples are cached per size, the linear frame's status
+  is checked once, the state the measure and the tone quads restore is read once, and GL errors are checked only on
+  a new target. `WW_CELL_HDR_SYNC_RED=1`: every query every frame.
+- `WW_TONEMAP1_RED=1` brings back both. `WW_CELL_HDR_STEX_BREAK=1` is a gate-only knob (a wrong stencil test).
+
 ## Lane PERF3 (2026-10-22, branch perf3-20261022): cell view per-draw CPU cuts, reflections from the previous frame
 
 - **GL query cache, exact.** Inside one draw's setup the per-draw hooks asked the driver for the blend state, the

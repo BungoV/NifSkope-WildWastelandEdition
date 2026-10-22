@@ -440,7 +440,7 @@ QString wwCellBloomEcho()
 	return QStringLiteral( "cell bloom: " ) + bs().last;
 }
 
-bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H, int samples, unsigned dsFormat )
+bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H, int samples, unsigned dsFormat, bool dsTexture )
 {
 	BloomState & s = bs();
 	s.replacing = false;
@@ -548,7 +548,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	// 1. the source: the cell-lit samples (stencil 1, the frame's own depth / stencil), exposed; then resolved
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.srcFbo );
 	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, g.msColor, 0 );
-	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ds );
+	if ( dsTexture )	// lane TONEMAP1: the frame's depth / stencil is a multisample texture
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, ds, 0 );
+	else
+		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ds );
 	fn->glDrawBuffers( 1, &one );
 	if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
 		ok = false;
@@ -581,7 +584,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 			bind( kUnitA, GL_TEXTURE_2D_MULTISAMPLE, 0 );
 		}
 		fn->glDisable( GL_STENCIL_TEST );
-		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0 );
+		if ( dsTexture )
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, 0, 0 );
+		else
+			fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0 );
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.srcFbo );
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.resFbo );
 		fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
