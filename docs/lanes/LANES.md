@@ -14,6 +14,7 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 - PERF3 pair: reflections from the previous frame (Concord c3_on vs c3_prev; ships off; coming from BATCH2)
 - Game flights: AUDIT1 REF1 capture, LLFCHECK1, PRTP4 (save names), MOTION1/TERRBLEND1/WATER2 RenderDoc captures
 - AAFORMAT1 pairs (all ship off): Concord daylight c3day_off vs c3day_ms1taa (MSAA off + TAA), vs c3day_f16 (RGBA16F), vs c3day_ms4taa; same three on a chain-link fence close-up (notes/aaformat1/t1; coming from the batch)
+- FXRES1 pairs (ships off): Memory Den night mem_off vs mem_on, Concord daylight c3day_off vs c3day_on (notes/fxres1/t1; coming from the batch)
 - About 20 open questions (AUDIT_ledgers 49-54): one at a time
 
 ## 1. WORKING ON NOW
@@ -43,6 +44,7 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | LEFTOVERS1 | MERGEALL1's gaps: WW_CHANGES for PERF1/VOLFIT1/BAKEINCR1; BAKEINCR1 world gate as a batch line; OPENCELL1 STRINGS reader + .esl confirm | BATCH ready (leftovers1-20261022 82f98b74, exe sha1 312cf81d; leftovers1/BATCH.md): Open Cell names localized plugins from .STRINGS (loose or ba2), Language box; .esl/light plugins now FE + slot + local ID (red WW_ESM_LIGHT_RED=full); opencell_check 38/38, reds fail; bakeincr world gate + real-master check unrun |
 | TONEMAP1 | + SYNC1: the 5-6 ms "tone-map" (MSAA depth+stencil blit into the view): stencil read by the tone map itself, depth-only blit; fewer driver syncs per frame (bungo 10-22) | BATCH ready (tonemap1-20261022 d4d83869; tonemap1/BATCH.md): exact by design, gates + timing unrun |
 | VRS1 | variable rate shading in the cell view: NV shading rate image from the previous frame's picture (FidelityFX method, MIT), opaque + stricter sorted image, alpha-tested draws 1x1; AO + resolution full; ships OFF until bungo sees the pair (bungo 10-22) | BATCH ready (vrs1-20261022 6bf661ac on tonemap1, exe sha1 ac459088; vrs1/BATCH.md): bar stated (mean 0.5/255, >8/255 0.05 %); gates, daylight pair + timing unrun |
+| FXRES1 | soft effects (smoke, steam, fog cards) at 1/2 resolution per axis: an exact layer composited with a depth-aware upsample (off-screen particles method, own GLSL); particles, AO + frame resolution full; ships OFF until bungo sees the pairs (bungo 10-22) | BATCH ready (fxres1-20261022 3c63e594 on aaformat1, exe sha1 8a5e8c4f; fxres1/BATCH.md): bar stated (mean 0.5/255, >8/255 0.05 %); gates, pairs + timing unrun |
 
 | AAFORMAT1 | anti-aliasing + HDR target format study: MSAA count (WW_MSAA) vs TAA alone, linear frame RGBA32F vs RGBA16F (R11G11B10F out: the tone map needs alpha); everything ships OFF (bungo 10-22) | BATCH ready (aaformat1-20261022 e4a201ad on vrs1, exe sha1 2dd7b5fc; aaformat1/BATCH.md): bar stated; gates, pairs, timing + memory unrun |
 Next batch (BATCH2): VOLPART1R, FARCARD1, PERF3, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
