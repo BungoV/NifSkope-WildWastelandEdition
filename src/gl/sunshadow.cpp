@@ -610,10 +610,17 @@ static void sunShadowPassImpl( Scene * scene )
 	PolyOffsetClamp offsetClamp = nullptr;
 	s.slopeClamp = 0;
 	if ( wwShadowPar( WwParCascSlope ) && !red( "nobias" ) && QOpenGLContext::currentContext() ) {
+		// looked up once per context, not every pass (the lookup is a driver call)
+		static const QOpenGLContext * clampCtx = nullptr;
+		static PolyOffsetClamp clampFn = nullptr;
 		auto * gc = QOpenGLContext::currentContext();
-		offsetClamp = reinterpret_cast<PolyOffsetClamp>( gc->getProcAddress( "glPolygonOffsetClamp" ) );
-		if ( !offsetClamp )
-			offsetClamp = reinterpret_cast<PolyOffsetClamp>( gc->getProcAddress( "glPolygonOffsetClampEXT" ) );
+		if ( gc != clampCtx ) {
+			clampCtx = gc;
+			clampFn = reinterpret_cast<PolyOffsetClamp>( gc->getProcAddress( "glPolygonOffsetClamp" ) );
+			if ( !clampFn )
+				clampFn = reinterpret_cast<PolyOffsetClamp>( gc->getProcAddress( "glPolygonOffsetClampEXT" ) );
+		}
+		offsetClamp = clampFn;
 		s.slopeClamp = offsetClamp ? 1 : -1;
 	}
 	bool complete = true;

@@ -11,11 +11,13 @@
 #   cube     the known answer (QryCube01 on the Lookdev ground): dist (echo), cradius (the penumbra in world units across
 #            two cascade presets), lowsun (2.5 and 0.5 degrees), moon (game day 0 and 12 at midnight), near (the side edge
 #            in the terrain view), tslope (the shadow's length vs FO4CS's bias), cslope (echo)
-#   cell     west of Concord, a 10-degree sun: objlod, pen, dim, contact, fogtail, temporal
+#   cell     west of Concord, a 10-degree sun from 300 (FIXGATES1: the LAND heights put terrain shadow on ~59 % of the
+#            visible ground there; at 120 it was 0.06 %): objlod, pen, dim, contact; fogtail at the Memory Den, night, foggy
 #   perf     GPU ms at 1080p, the base and each item alone and all of them
 #   pairs    the before/after look pair (Concord, CommonwealthClear, hour 10; rung vs all items), and with Volumetric Air
 #
 # usage: bash tests/spells/shadowpar1_gates.sh [--out DIR] [--only off,cube,cell,perf,pairs] [--red no<name>]
+#        RECHECK=1 ... --out DIR   re-judges the pictures already in DIR (no launch)
 # One NifSkope of ours at a time: run it under withlock.sh nifskope.
 
 set -u
@@ -54,8 +56,13 @@ REDPIN=""
 if [ -n "$RED" ]; then
 	case "$RED" in
 		nodist|nocradius|nocslope|nocontact|noobjlod|nonear|nopen|nolowsun|nomoon|notslope|nodim|nofogtail) REDPIN="WW_SHADOW_RED=$RED" ;;
+		contactgrey|viewidle) REDPIN="WW_SHADOW_RED=$RED" ;;	# FIXGATES1's code reds: the old effect test, the idle view
 		*) echo "unknown red $RED"; exit 2 ;;
 	esac
+fi
+if [ "${RECHECK:-0}" = 1 ]; then
+	python "$HERE/shadowpar1_gates.py" --out "$(winpath "$OUT")" --red "${RED:-none}"
+	exit $?
 fi
 { echo "red=${RED:-none}"; sha1sum "$NEW" "$OLD"; echo "game=$GAME"; } > "$OUT/arms.txt"
 
@@ -112,7 +119,14 @@ cellshot() {  # cellshot <exe> <tag> [KEY=VALUE ...]: frame 001 of the camera pa
 	reg delete "$REGKEY" //f > /dev/null 2>&1
 }
 want() { [ -z "$ONLY" ] || [[ "$ONLY" == *",$1,"* ]]; }
-it() { [ -z "$RED" ] || [ "$RED" = "no$1" ]; }	# under a red only that item's shots run
+it() {	# under a red only that item's shots run (the code reds: the gates they break)
+	case "$RED" in
+		"") return 0 ;;
+		contactgrey) [ "$1" = contact ] ;;
+		viewidle) [ "$1" = lowsun ] ;;
+		*) [ "$RED" = "no$1" ] ;;
+	esac
+}
 
 ON="WW_LOOKDEV_SHADOWS=1"
 GRD="WW_LOOKDEV_GROUND=1 WW_LOOKDEV_GROUND_HALF=40000"
@@ -134,12 +148,14 @@ if want cube; then
 	# dist: the cascades' reach under the item (echo of the fit)
 	it dist && shot "$NEW" dist_on "$CUBE" WW_RENDER_VIEW=8 $GRD $ON WW_SHADOW_CASCADE=4 WW_SUNPATH=1 WW_SUNPATH_PIN=30,90 \
 		WW_SHADOW_PAR=dist WW_SHADOW_DISTANCE=24000 $REDPIN
-	# cradius: top-down ortho over the cube's shadow (sun east, 30 degrees: the shadow runs -x), the cascades alone (view 1),
-	# High and Ultra (their texels differ 1.6x): the penumbra's width in world units must not follow the texel
+	# cradius: top-down over the END of the cube's shadow (sun east, 30 degrees: the shadow runs -x and ends at x = -1143,
+	# its penumbra stretched 2x by the grazing sun), the cascades alone (view 1), High and Ultra (their texels differ):
+	# the penumbra's width in world units must not follow the texel. FIXGATES1: a PERSPECTIVE eye 500 above the ground
+	# (the cascades refuse an ortho view: BATCH1's ortho shots measured no cascade at all, so the red could not fail)
 	it cradius && for t in 3 4; do
 		for arm in base on; do
 			P=0; [ $arm = on ] && P=cradius
-			shot "$NEW" crad_${t}_$arm "$CUBE" $TOP WW_RENDER_ORTHO=700 WW_RENDER_CENTER=-500,0,-256 $GRD $ON \
+			shot "$NEW" crad_${t}_$arm "$CUBE" $TOP WW_RENDER_CENTER=-1100,0,-256 WW_RENDER_DIST=500 WW_RENDER_FOV=46 $GRD $ON \
 				WW_SHADOW_CASCADE=$t WW_SUNPATH=1 WW_SUNPATH_PIN=30,90 WW_SHADOW_VIEW=1 WW_SHADOW_PAR=$P $REDPIN
 		done
 	done
@@ -147,8 +163,10 @@ if want cube; then
 	TV="$TOP $GRD $TERR WW_SHADOW_VIEW=2"
 	for arm in base on; do
 		P=0; [ $arm = on ] && P=near
-		it near && shot "$NEW" near_$arm "$CUBE" $TV WW_RENDER_ORTHO=2000 WW_RENDER_CENTER=-1400,0,-256 WW_SHADOW_TERRAIN=1 \
-			WW_SUNPATH_PIN=10,90 WW_SHADOW_PAR=$P $REDPIN
+		# FIXGATES1: sun from 110, so the side edges cross the texel rows (at 90 they ran along one row: the error was
+		# grid luck, base 5 u vs near 27 u); the judge measures the side edges' distance from the cube's analytic sides
+		it near && shot "$NEW" near_$arm "$CUBE" $TV WW_RENDER_ORTHO=2000 WW_RENDER_CENTER=-1000,0,-256 WW_SHADOW_TERRAIN=1 \
+			WW_SUNPATH_PIN=10,110 WW_SHADOW_PAR=$P $REDPIN
 		P=near; [ $arm = on ] && P=near,tslope
 		it tslope && shot "$NEW" tslope_$arm "$CUBE" $TV WW_RENDER_ORTHO=2000 WW_RENDER_CENTER=-1400,0,-256 WW_SHADOW_TERRAIN=1 \
 			WW_SUNPATH_PIN=10,90 WW_SHADOW_PAR=$P $REDPIN
@@ -182,8 +200,17 @@ cell_setup() {
 		WW_LOOKDEV_WEATHER=CommonwealthClear "WW_LOOKDEV_PLUGINS=$ESM" WW_LOOKDEV_SKY=1 WW_LOOKDEV_SUN=1 WW_LOOKDEV_GROUND=0
 		$ON WW_CELL_GRASS_WIND_T=1 WW_CELL_FARLOD_CARDSWAY=0 WW_CELL_FARLOD_SWAYTIME=1 )
 	TIERS=( WW_SHADOW_CASCADE=4 WW_SHADOW_CONTACT=4 WW_SHADOW_TERRAIN=4 WW_SHADOW_TERRAIN_SYNC=1 )
-	LOW=( WW_SUNPATH=1 "WW_SUNPATH_PIN=${SHADOWPAR1_LOWSUN:-10,120}" )
+	LOW=( WW_SUNPATH=1 "WW_SUNPATH_PIN=${SHADOWPAR1_LOWSUN:-10,300}" )
+	# the fog shots' place (the standing rule: fog only at the Memory Den front, at night): Goodneighbor, CommonwealthFoggy
+	# 22:00, the still_memden camera; the moon item on in both arms so the terrain map exists at night
+	printf 'fps 16\nframes 2\nkey 0.000000 %s\nkey 0.062500 %s\n' "$MEMCAM" "$MEMCAM" > "$OUT/mem.path"
+	MEM=( "WW_CELL_OPEN=$ESM|Goodneighbor|5,-3|1" "WW_CELL_DATAROOT=$(winpath "$DATA")" WW_CELL_LIT=1 WW_CELL_FARLOD=1
+		"WW_RENDER_PATH=$(winpath "$OUT/mem.path")" WW_RENDER_SIZE=1600x1000 WW_TAA=0 WW_CELL_IS=0 WW_CELL_PARTICLES=0
+		WW_LOOKDEV_WEATHER=CommonwealthFoggy WW_LOOKDEV_HOUR=22 WW_LOOKDEV_DAY=0 WW_SUNPATH=0 "WW_LOOKDEV_PLUGINS=$ESM"
+		WW_LOOKDEV_SKY=1 WW_LOOKDEV_SUN=1 WW_LOOKDEV_GROUND=0 WW_LOOKDEV_FOG=1 WW_CELL_AIR=1 $ON WW_CELL_GRASS_WIND_T=1
+		WW_CELL_FARLOD_CARDSWAY=0 WW_CELL_FARLOD_SWAYTIME=1 )
 }
+MEMCAM="${SHADOWPAR1_MEMCAM:-22600 -10050 740 23600 -9500 760 55}"
 
 # shellcheck disable=SC2086
 if want cell; then
@@ -196,10 +223,15 @@ if want cell; then
 	it pen && cellshot "$NEW" c_v2_pen "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=2 WW_SHADOW_PAR=pen $REDPIN
 	it contact && cellshot "$NEW" c_v3_none "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=3 WW_SHADOW_PAR=0 $REDPIN
 	it contact && cellshot "$NEW" c_v3_contact "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=3 WW_SHADOW_PAR=contact $REDPIN
+	# FIXGATES1: the early exit must not move a pixel (its red marches every sample); the full-res march for the look
+	[ -z "$RED" ] && cellshot "$NEW" c_v3_contact_noexit "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=3 WW_SHADOW_PAR=contact \
+		WW_SHADOW_RED=contactnoexit
+	[ -z "$RED" ] && cellshot "$NEW" c_v3_contact_full "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_VIEW=3 WW_SHADOW_PAR=contact \
+		WW_SHADOW_RED=contactfull
 	it dim && cellshot "$NEW" c_fin_none "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_PAR=0 $REDPIN
 	it dim && cellshot "$NEW" c_fin_dim "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_SHADOW_PAR=dim $REDPIN
-	it fogtail && cellshot "$NEW" c_air_none "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_CELL_AIR=1 WW_SHADOW_PAR=0 $REDPIN
-	it fogtail && cellshot "$NEW" c_air_fogtail "${CELL[@]}" "${LOW[@]}" "${TIERS[@]}" WW_CELL_AIR=1 WW_SHADOW_PAR=fogtail $REDPIN
+	it fogtail && cellshot "$NEW" c_air_none "${MEM[@]}" "${TIERS[@]}" WW_SHADOW_PAR=moon $REDPIN
+	it fogtail && cellshot "$NEW" c_air_fogtail "${MEM[@]}" "${TIERS[@]}" WW_SHADOW_PAR=moon,fogtail $REDPIN
 fi
 
 # shellcheck disable=SC2086
@@ -214,6 +246,9 @@ if want perf && [ -z "$RED" ]; then
 		X=""; case $p in fogtail|all) X=WW_CELL_AIR=1 ;; cphase|temporal) X=WW_TAA=1 ;; esac
 		cellshot "$NEW" perf_$p "${CELL[@]}" "${LOW[@]}" "${PF[@]}" "${ALLT[@]}" WW_SHADOW_PAR=$p $X
 	done
+	# FIXGATES1: the contact march's old cost (full res, every sample) for the saving
+	cellshot "$NEW" perf_contact_full "${CELL[@]}" "${LOW[@]}" "${PF[@]}" "${ALLT[@]}" WW_SHADOW_PAR=contact \
+		WW_SHADOW_RED=contactfull,contactnoexit
 	cellshot "$NEW" perf_base_air "${CELL[@]}" "${LOW[@]}" "${PF[@]}" "${ALLT[@]}" WW_SHADOW_PAR=0 WW_CELL_AIR=1
 	cellshot "$NEW" perf_base_taa "${CELL[@]}" "${LOW[@]}" "${PF[@]}" "${ALLT[@]}" WW_SHADOW_PAR=0 WW_TAA=1
 fi

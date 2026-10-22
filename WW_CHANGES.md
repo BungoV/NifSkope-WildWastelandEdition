@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SHADOWPAR1FIX (2026-10-22, branch shadowpar1fix-20261022): the BATCH1 shadow gates, fixed
+
+- **Contact reaches the lit shader:** fo4_default also declares a GreyscaleMap (palettes), so every fo4_default
+  surface was taken for an effect and never got the contact mask. Now only the effect shaders' own uniforms mark
+  an effect. Red `WW_SHADOW_RED=contactgrey` brings the old test back.
+- **Contact is cheaper, the way shipped games do it:** half-res mask, 192 samples (the same 384-pixel reach), and an
+  exact early exit (a lane stops once its result can no longer change; byte-identical picture). Reds `contactfull`
+  (full res, 384 samples) and `contactnoexit`. The half-res mask is a look change: not the default until seen.
+- **Debug views draw while the sun is too low:** a pinned shadow view keeps the set active. Red `viewidle`.
+- **Gates (`tests/spells/shadowpar1_gates.*`):** cradius on a perspective top-down eye (the cascades refuse ortho);
+  near judges the side edges against the cube's analytic sides at sun azimuth 110; pen/dim/lowsun on a view
+  holding terrain shadow (sun 10,300); every mask counts grey (factor) pixels only, never the sky; fogtail moves to
+  the Memory Den at night in CommonwealthFoggy and fails when nothing changes; contact checks the shadow is in the
+  view, the half mask and the exact exit.
+- The glPolygonOffsetClamp lookup is cached per context.
+
 ## Lane SHADOWPAR1 (2026-10-21, branch shadowpar1-20261021): the sun shadows at FO4CS's level
 
 - **One row, Off by default: FO4CS-Level Shadows** (Settings, beside Terrain Shadows), plus a **Shadow Distance**
