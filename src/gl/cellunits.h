@@ -40,10 +40,11 @@ constexpr int CardFrames = 36;	// lane FARCARD1: their sets' frame tables (sampl
 constexpr int ReflProbe = 37;	// lane REFLPROBE1: the probe atlas (sampler2D, read through GreyscaleMap: no new sampler; 35 in the lane, FARCARD1 holds it)
 constexpr int ReflGbufAlb = 38;	// lane REFLPROBE1: the relight pass reads the G-buffer cubes (samplerCubeArray)
 constexpr int ReflGbufNd = 39;
+constexpr int AirNoise = 40;		// lane FOGDRIFT1: the air's drifting density noise (sampler3D; 37 in the lane, REFLPROBE1 holds it)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
-	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd };
+	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise };
 
 constexpr bool distinct()
 {

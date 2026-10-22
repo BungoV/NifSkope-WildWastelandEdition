@@ -191,6 +191,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	wwMatchFieldStyle( farAirBox );
 	row( tr( "Far Air" ), farAirBox, true );
 	liveCheck( volPartBox, "volPart", tr( "Volumetric Particles" ), wwVolPartOn() );	// lane VOLPART1: lit steam, seen through the air
+	liveCheck( fogDriftBox, "fogDrift", tr( "Fog Drift" ), wwVolAirDriftOn() );	// lane FOGDRIFT1: ships off
 	heading( tr( "Effects" ) );
 	liveCheck( shadowsBox, "lookdevShadows", tr( "Cascaded Shadows" ), wwLookdevShadows() );	// lane CSM1
 	liveCheck( taaBox, "gameTaa", tr( "Temporal AA" ), wwGameTaaOn() );	// lane MOTION1: every mode, ships off
@@ -303,6 +304,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( fogBox, &wwLookdevSetFog );
 	liveToggle( volAirBox, &wwVolAirSetOn );
 	liveToggle( volPartBox, &wwVolPartSetOn );
+	liveToggle( fogDriftBox, &wwVolAirSetDriftOn );	// lane FOGDRIFT1
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	liveToggle( taaBox, &wwGameTaaSetOn );
 	liveToggle( ssgiBox, &wwCellSsgiSetOn );

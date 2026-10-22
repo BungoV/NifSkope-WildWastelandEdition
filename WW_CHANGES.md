@@ -537,6 +537,20 @@
 - **Red:** `WW_CELL_EMISSIVEGRID_RED=1` builds nothing (the old path and its cost). `noseen` and `nosub` drop the wall test or the C subtraction (for diagnosis).
 - **Measured:** pending. The judgment pictures (off/on at 22:00 and 13:30, red, the main rung) and costs wait for the batch after BATCH2 (notes/emissivegrid1/BATCH.md).
 
+## Lane FOGDRIFT1 (2026-10-22, branch fogdrift1-20261022): the near fog drifts with the weather's wind (ships off)
+
+- **Why.** bungo 10-22, from RDR2: fog moves, and as it moves the lamps' glow in it brightens and dims. Our air was smooth height bands only.
+- **What changed:**
+  - The near froxel grid's density is multiplied by a tileable 64^3 R8 noise (two gradient octaves; read twice, tiles 4096 and 1843 units), on each of the inject's 4 sub-steps. The sun, sky, GI and placed-light in-scatter all use that one sub-step density, so a lamp's halo pulses as lumps pass.
+  - The factor is 1 + a (n - mean) / span with the texture's measured mean: the mean density is unchanged (offline: 0.9992 over 400k world points; range 0.23..1.72, std 0.195).
+  - It fades to 1 from 2000 to 8000 units (the detail octave sooner). The far grid and the closed-form tail stay smooth.
+  - The wind comes from the weather's WTHR DATA (speed, direction; range and turbulence wobble the bearing and gust the speed), already read by GRASSMB1 (wwLookdevWind). The offset is integrated with the velocity eased over 2 s, so a weather change does not jump. With no wind the lumps stand still. 400 units/s at full wind speed.
+  - Exteriors drift. Interiors drift only when the cell shows the sky (CELL DATA bit 7). A sealed interior is drawn exactly as with the row off.
+- **Row:** "Fog Drift" under Volumetric Air, ships OFF (QSettings WW/VolAirDrift; the pin WW_CELL_FOGDRIFT=0|1 wins). WW_CELL_FOGDRIFT_T=<s> pins the clock for shots (a harness pins t = 0). The view repaints while the fog drifts (never in a harness).
+- **Reds:** WW_CELL_FOGDRIFT_RED=still (no motion), =smooth (no noise; byte-equal to the row off).
+- **Echo:** drift=on(wind dir range turb speed t) in the air's census; the dump's "drift" line. New texture unit AirNoise = 37 (cellunits.h).
+- Code and build only; pictures and GPU-ms after the BATCH2 merge (notes/fogdrift1/BATCH.md).
+
 ## Lane BAKESPEED1 (2026-10-21, branch bakespeed1-20261021): the chunks stage runs its VT rows and chunk jobs on all cores, and resumes
 
 - **Why.** The FARBAKE2 chunks stage was serial in its two biggest parts: on the mid region (-24..23) the VT pyramid took 1539 s and the chunk pass 511 s on one core.

@@ -51,11 +51,28 @@ uniform vec4 volPrevGrid;		// last frame's [0][0], [1][1], near, ln(far / near)
 uniform float volPrevScale;		// last frame's fogDistScale
 uniform bool volHistOk;			// a history at these dims
 uniform vec3 volLightShift;		// gates only (WW_CELL_AIR_LIGHTSHIFT): the air sees every placed light moved by this (world)
+// lane FOGDRIFT1 (cellvolair.h): x amp / span (0: smooth air), y the fade's start, z 1 / its length, w the noise's mean
+uniform vec4 volDrift;
+uniform vec4 volDriftOfs[2];	// per octave: xyz the wind's offset (world units), w 1 / its tile
+uniform sampler3D volNoise;
 
 layout ( location = 0 ) out vec4 fragColor;
 layout ( location = 1 ) out vec4 volMrt[7];	// stage 3: layers volLayer + 1 .. + 6, then the carry; stage 1 temporal: the 4 strata
 
 #include "cell_airmed.glsl"
+
+/* lane FOGDRIFT1: the density factor at distance t along dirView, around 1 (the texture's exact mean subtracted, so
+ * the mean density holds); fades to 1 with distance, the detail octave sooner (it would alias in the deep slices) */
+float airDrift( vec3 dirView, float t )
+{
+	float f = 1.0 - clamp( ( t - volDrift.y ) * volDrift.z, 0.0, 1.0 );
+	if ( f <= 0.0 || !cellOn )
+		return 1.0;
+	vec3 P = cellWorldPos( dirView * ( t / fogDistScale ) );
+	float a = texture( volNoise, ( P - volDriftOfs[0].xyz ) * volDriftOfs[0].w ).r - volDrift.w;
+	float b = texture( volNoise, ( P - volDriftOfs[1].xyz ) * volDriftOfs[1].w + vec3( 0.37, 0.61, 0.13 ) ).r - volDrift.w;
+	return 1.0 + volDrift.x * f * ( a + 0.5 * f * b ) * ( 1.0 / 1.5 );
+}
 
 // lane FARGRID1: the cloud shadow's input (ATMORES1 feeds it later): 1 = no clouds
 float airCloudShadow( vec3 posView )
@@ -362,6 +379,8 @@ void main()
 	for ( int q = 0; q < 4; q++ ) {
 		float ta = mix( t0, t1, float( q ) * 0.25 ), tb = mix( t0, t1, float( q + 1 ) * 0.25 );
 		tauQ[q] = airOd( zc + dzdt * ta, zc + dzdt * tb, tb - ta );
+		if ( volDrift.x > 0.0 )	// lane FOGDRIFT1: one noisy density for every term below (the lamps' glow too)
+			tauQ[q] *= airDrift( dirView, 0.5 * ( ta + tb ) );
 		scatters = scatters || air1mE( tauQ[q] ) > 0.0;
 	}
 	float keep = fogK[0].x + fogK[1].x + fogK[2].x + fogK[3].x + fogK[4].x + fogK[5].x;
