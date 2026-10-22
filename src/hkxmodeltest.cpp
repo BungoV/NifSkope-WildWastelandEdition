@@ -30,6 +30,7 @@
    Log: release/ww_hkxmodel_test.log, ending PASS / FAIL then done. */
 
 #include "hkxmodel.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "hkxfile.h"
 #include "nifskope.h"
 #include "model/nifmodel.h"
@@ -78,10 +79,10 @@ static QModelIndex findChildNamed( const HkxModel * m, const QModelIndex & paren
 
 void wwHkxModelHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_HKXMODEL_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_HKXMODEL_TEST" ) )
 		return;
 	auto * st = new WwHkxModelState;
-	st->outDir = qEnvironmentVariable( "WW_HKXMODEL_OUT" );
+	st->outDir = wwEnvStr( "WW_HKXMODEL_OUT" );
 	if ( st->outDir.isEmpty() )
 		st->outDir = QApplication::applicationDirPath();
 

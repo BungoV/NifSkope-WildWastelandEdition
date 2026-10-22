@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "impostorchunk.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -159,8 +160,8 @@ bool ImpostorChunk::enabled()
 	 * to switch the master on without writing to the person's QSettings -- a
 	 * harness that persists the state it forced is the known cause of the
 	 * standing `native_open.sh` red. */
-	if ( qEnvironmentVariableIsSet( "WW_IMPOSTOR_CHUNK" ) )
-		return qEnvironmentVariableIntValue( "WW_IMPOSTOR_CHUNK" ) != 0;
+	if ( wwEnvIsSet( "WW_IMPOSTOR_CHUNK" ) )
+		return wwEnvInt( "WW_IMPOSTOR_CHUNK" ) != 0;
 	return QSettings().value( QLatin1String( kSettingsKey ), false ).toBool();
 }
 
@@ -275,7 +276,7 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 			 * wrote with the model's layer in it. An install that carries the atlas and not the per-model set
 			 * (his FO4CSLOD: 79 sets named, no Cards folder) draws the atlas layer -- the same bake's card --
 			 * and says which one served. WW_CELL_FARLOD_RED=noatlas keeps the old refusal. */
-			static const bool noAtlas = qgetenv( "WW_CELL_FARLOD_RED" ) == "noatlas";
+			WW_SWITCH_STATIC( bool, noAtlas, wwEnv( "WW_CELL_FARLOD_RED" ) == "noatlas" );
 			if ( path.isEmpty() && !p.c.arrayLodm.isEmpty() && !noAtlas ) {
 				path = resolveLodm( nif, s.chunkDir, p.c.arrayLodm );
 				if ( !path.isEmpty() )
@@ -527,7 +528,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	 * shapes). Cards cast no sun shadow (they are no document shape), so no cascade asks for them.
 	 * WW_CELL_FARLOD_RED=nocardcull draws every card: the picture must not change, the count must. */
 	float pl[4][4];
-	bool cull = qgetenv( "WW_CELL_FARLOD_RED" ) != "nocardcull" && scene->renderer
+	bool cull = wwEnv( "WW_CELL_FARLOD_RED" ) != "nocardcull" && scene->renderer
 		&& scene->renderer->globalUniforms->projectionMatrix[3][3] != 1.0f;
 	if ( cull ) {
 		const auto & pm = scene->renderer->globalUniforms->projectionMatrix;	// pm[column][row]
@@ -629,7 +630,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		qInfo().noquote() << QStringLiteral( "far lod: drew %1 cards of %2 placed, %3 outside the camera%4%5" )
 			.arg( drawn ).arg( s.placed.size() ).arg( outside )
 			.arg( cull ? QString() : QStringLiteral( " (cull off%1)" )
-				.arg( qgetenv( "WW_CELL_FARLOD_RED" ) == "nocardcull" ? QStringLiteral( ", RED nocardcull" ) : QString() ) )
+				.arg( wwEnv( "WW_CELL_FARLOD_RED" ) == "nocardcull" ? QStringLiteral( ", RED nocardcull" ) : QString() ) )
 			.arg( refused ? QStringLiteral( ", %1 refused by the drawer (first: %2)" ).arg( refused ).arg( firstWhy ) : QString() );
 	}
 	return drawn;

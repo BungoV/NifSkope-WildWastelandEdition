@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glshape.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 
 #include "gl/controllers.h"
@@ -621,7 +622,7 @@ void Shape::resetSkeletonData()
 bool Shape::wwDecalDrawsFirst() const
 {
 	// lane FXD1: the game draws its decals before its sorted blended pass. Red control WW_CELL_FXD_RED=late: never
-	static const bool late = qgetenv( "WW_CELL_FXD_RED" ) == "late";
+	WW_SWITCH_STATIC( bool, late, wwEnv( "WW_CELL_FXD_RED" ) == "late" );
 	return surfaceDecal && drawInSecondPass && !late && wwCellLightsWanted( scene );
 }
 
@@ -649,7 +650,7 @@ bool Shape::wwMaterialClearsBlend() const
 	 * over the steam: dark spots with the haze cut out at their outline.
 	 * The lighting-shader draw already takes its blend state from the material (renderer.cpp).
 	 * Red control WW_MATALPHA_RED=nif: the NIF blend bit wins again. */
-	static const bool red = qgetenv( "WW_MATALPHA_RED" ) == "nif";
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_MATALPHA_RED" ) == "nif" );
 	if ( red || !bslsp || bslsp->bsVersion >= 170 )
 		return false;
 	Material * mat = bslsp->getMaterial();
@@ -740,7 +741,7 @@ void Shape::setUniforms( NifSkopeOpenGLContext::Program * prog ) const
 	/* lane FARLOD1: the tree-animation flag the far field's sway reads (fo4_default.vert), for every program
 	 * that has it -- the PBR path (pbrm_*) never set it, so its far trees stood still. The legacy path sets
 	 * the same value again in its own setup. WW_CELL_FARLOD_RED=pbrnosway is the old path, the red control. */
-	static const bool farlod1PbrNoSway = qgetenv( "WW_CELL_FARLOD_RED" ) == "pbrnosway";
+	WW_SWITCH_STATIC( bool, farlod1PbrNoSway, wwEnv( "WW_CELL_FARLOD_RED" ) == "pbrnosway" );
 	if ( const int l = farlod1PbrNoSway ? -1 : prog->uniLocation( "lodTreeAnim" ); l >= 0 )
 		prog->uni1i_l( l, isVertexAlphaAnimation ? 1 : 0 );
 }

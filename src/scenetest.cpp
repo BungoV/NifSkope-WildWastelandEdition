@@ -59,6 +59,7 @@ BSD License - see nifskope.h
    WW_SETTINGS_SCOPE; without one it FAILS by name and touches nothing. */
 
 #include "nifskope.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "glview.h"
 #include "harnesswindow.h"
 #include "gl/glscene.h"
@@ -120,7 +121,7 @@ void check( WwScState & st, const QString & what, bool pass )
 
 bool quad( const char * var, QRect & r )
 {
-	const QStringList l = qEnvironmentVariable( var ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+	const QStringList l = wwEnvStr( var ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
 	if ( l.size() != 4 )
 		return false;
 	int v[4];
@@ -237,7 +238,7 @@ void cubeLeg( NifSkope * skope, WwScState & st )
 	TexCache * tc = ogl->getScene()->textures;
 	const NifModel * nif = skope->getNifModel();
 
-	if ( qEnvironmentVariable( "WW_SCENE_TEST_CUBE" ) == QLatin1StringView( "1" ) ) {
+	if ( wwEnvStr( "WW_SCENE_TEST_CUBE" ) == QLatin1StringView( "1" ) ) {
 		const unsigned char byte = 188;
 		const double c = byte / 255.0;
 		const double L = c <= 0.04045 ? c / 12.92 : std::pow( ( c + 0.055 ) / 1.055, 2.4 );
@@ -270,7 +271,7 @@ void cubeLeg( NifSkope * skope, WwScState & st )
 		glDeleteTextures( 2, id );
 	}
 
-	const QString vanilla = qEnvironmentVariable( "WW_SCENE_TEST_VANILLA" );
+	const QString vanilla = wwEnvStr( "WW_SCENE_TEST_VANILLA" );
 	if ( !vanilla.isEmpty() ) {
 		say( st, QStringLiteral( "--- vanilla cube: %1 ---" ).arg( vanilla ) );
 		QFile f( vanilla );
@@ -798,12 +799,12 @@ void restartLeg( NifSkope * skope, WwScState & st )
 	auto * ev = w->findChild<QDoubleSpinBox *>( QStringLiteral( "sceneExposure" ) );
 	auto * view = w->findChild<QComboBox *>( QStringLiteral( "sceneViewTransform" ) );
 	bool okEv = false;
-	const double wantEv = qEnvironmentVariable( "WW_SCENE_TEST_EXPECT_EV" ).toDouble( &okEv );
+	const double wantEv = wwEnvStr( "WW_SCENE_TEST_EXPECT_EV" ).toDouble( &okEv );
 	if ( okEv && ev )
 		check( st, QStringLiteral( "(restart) the exposure came back: %1 == %2 EV" ).arg( ev->value() ).arg( wantEv ),
 			std::fabs( ev->value() - wantEv ) < 1e-6 && std::fabs( double( wwSceneExposureEV() ) - wantEv ) < 1e-6 );
 	bool okView = false;
-	const int wantView = qEnvironmentVariable( "WW_SCENE_TEST_EXPECT_VIEW" ).toInt( &okView );
+	const int wantView = wwEnvStr( "WW_SCENE_TEST_EXPECT_VIEW" ).toInt( &okView );
 	if ( okView && view )
 		check( st, QStringLiteral( "(restart) the view transform came back: %1 == %2" ).arg( view->currentIndex() ).arg( wantView ),
 			view->currentIndex() == wantView && wwSceneViewTransform() == wantView );
@@ -847,15 +848,15 @@ void run( NifSkope * skope, WwScState * st )
 		return;
 	}
 	cubeLeg( skope, *st );
-	if ( qEnvironmentVariable( "WW_SCENE_TEST_WINDOW" ) == QLatin1StringView( "1" ) )
+	if ( wwEnvStr( "WW_SCENE_TEST_WINDOW" ) == QLatin1StringView( "1" ) )
 		windowLeg( skope, *st );
-	if ( qEnvironmentVariable( "WW_SCENE_TEST_LOOKDEV" ) == QLatin1StringView( "1" ) )
+	if ( wwEnvStr( "WW_SCENE_TEST_LOOKDEV" ) == QLatin1StringView( "1" ) )
 		lookdevLeg( skope, *st );
-	if ( qEnvironmentVariable( "WW_SCENE_TEST_WEATHER" ) == QLatin1StringView( "1" ) )
+	if ( wwEnvStr( "WW_SCENE_TEST_WEATHER" ) == QLatin1StringView( "1" ) )
 		weatherLeg( skope, *st );
-	if ( qEnvironmentVariable( "WW_SCENE_TEST_FOG" ) == QLatin1StringView( "1" ) )
+	if ( wwEnvStr( "WW_SCENE_TEST_FOG" ) == QLatin1StringView( "1" ) )
 		fogLeg( skope, *st );
-	if ( qEnvironmentVariable( "WW_SCENE_TEST_SHADOWS" ) == QLatin1StringView( "1" ) )
+	if ( wwEnvStr( "WW_SCENE_TEST_SHADOWS" ) == QLatin1StringView( "1" ) )
 		shadowsLeg( skope, *st );
 	restartLeg( skope, *st );
 }
@@ -864,10 +865,10 @@ void run( NifSkope * skope, WwScState * st )
 
 void wwSceneHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_SCENE_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_SCENE_TEST" ) )
 		return;
 	auto * st = new WwScState;
-	st->logPath = qEnvironmentVariable( "WW_SCENE_TEST_LOG" );
+	st->logPath = wwEnvStr( "WW_SCENE_TEST_LOG" );
 	if ( st->logPath.isEmpty() )
 		st->logPath = QCoreApplication::applicationDirPath() + QStringLiteral( "/ww_scene_test.log" );
 	QFile::remove( st->logPath );

@@ -1,6 +1,7 @@
 // lane VOLFIT1: the Space stage's debug view (src/gl/cellvolumeview.h)
 
 #include "cellvolumeview.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/glscene.h"
 
@@ -232,7 +233,7 @@ void wwCellVolumeViewPublish( const void * nif, const ProbeVolumes & v )
 
 void wwCellVolumeViewDraw( Scene * scene, const Transform & viewTrans )
 {
-	static const bool on = qgetenv( "WW_CELL_VOLUMES_VIEW" ).trimmed() == "1";
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_CELL_VOLUMES_VIEW" ).trimmed() == "1" );
 	if ( !on || !scene || !scene->nifModel || scene->selecting )
 		return;
 	VvState & s = vv();
@@ -270,7 +271,7 @@ void wwCellVolumeViewDraw( Scene * scene, const Transform & viewTrans )
 	for ( size_t i = 0; i < lp.size(); i += kChunk )
 		scene->drawLines( lp.data() + i, std::min( kChunk, lp.size() - i ), lc.data() + i );
 	glDepthFunc( GL_LESS );
-	static const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_VOLUMES_VIEW_DUMP" ) );
+	WW_SWITCH_STATIC( QString, dump, QString::fromLocal8Bit( wwEnv( "WW_CELL_VOLUMES_VIEW_DUMP" ) ) );
 	if ( !dump.isEmpty() ) {
 		const QString o = QStringLiteral( "rooms=%1 shapes=%2 thresholds=%3 lines=%4 tris=%5\n" ).arg( g.rooms ).arg( g.shapes )
 			.arg( g.quads ).arg( lp.size() / 2 ).arg( tp.size() / 3 );

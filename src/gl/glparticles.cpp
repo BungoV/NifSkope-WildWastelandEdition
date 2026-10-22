@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glparticles.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <cmath>
 
@@ -585,7 +586,7 @@ void Particles::drawShapes( NodeList * secondPass )
 	/* lane SUNCELL1: in the cell view a particle draws with the cell's effect law (particles_cell.prog: linear, the
 	 * fog, the HDR frame or the imagespace), as the game draws its particles with the effect shader. Red
 	 * WW_CELL_PARTICLES_RED=viewer keeps the viewer's program (sRGB as written, no fog, no stencil). */
-	static const bool cellPfxRed = qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "viewer";
+	WW_SWITCH_STATIC( bool, cellPfxRed, wwEnv( "WW_CELL_PARTICLES_RED" ).trimmed() == "viewer" );
 	const bool cellPfx = !scene->selecting && !cellPfxRed && wwCellLightsWanted( scene );
 	// lane VOLPART1, gates only: WW_CELL_VOLPART_HIDE=1 draws no cell particle (the plate the hard-edge gate subtracts)
 	static const bool vpHide = qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1;
@@ -657,7 +658,7 @@ void Particles::drawShapes( NodeList * secondPass )
 			 * lighting flag beside Ptcl, so a system the cell registered as a lit effect (src/cellview.cpp, the
 			 * particles) takes its model's four placed lights, as a lit effect card does (FXLIT1). fxLitMode stays 0
 			 * for any other system. Red WW_CELL_PARTICLES_RED=unlit draws every particle unlit, as before. */
-			static const bool litRed = qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "unlit";
+			WW_SWITCH_STATIC( bool, litRed, wwEnv( "WW_CELL_PARTICLES_RED" ).trimmed() == "unlit" );
 			const int litBlock = scene->nifModel->getBlockNumber( iBlock );
 			const auto * espLit = dynamic_cast<const BSEffectShaderProperty *>( shaderProp );
 			wwCellFxLitUniforms( scene, litBlock );
@@ -732,7 +733,7 @@ void Particles::drawShapes( NodeList * secondPass )
 			 * Ptcl|Lit|Pma asm 00613, unlit 00604 / 00903) opens with log/mul 2.2/exp on v2.xyzw, so the colour AND
 			 * the alpha of the vertex colour are raised to 2.2 before the texture multiply. Red
 			 * WW_CELL_PARTICLES_RED=linalpha keeps the vertex alpha as written, as before. */
-			static const bool alphaRed = qgetenv( "WW_CELL_PARTICLES_RED" ).trimmed() == "linalpha";
+			WW_SWITCH_STATIC( bool, alphaRed, wwEnv( "WW_CELL_PARTICLES_RED" ).trimmed() == "linalpha" );
 			prog->uni1b( "pfxAlphaRed", alphaRed );
 			static bool alphaSaid = false;
 			if ( !alphaSaid ) {

@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENSE BLOCK *****/
 
 #include "cellaodecal.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "nativeemit.h"
 #include "probeplace.h"
@@ -61,14 +62,14 @@ constexpr float kMaxHeight = 600.0f;
 
 QString redOf()
 {
-	return QString::fromLatin1( qgetenv( "WW_CELL_AODECAL_RED" ) ).trimmed();
+	return QString::fromLatin1( wwEnv( "WW_CELL_AODECAL_RED" ) ).trimmed();
 }
 
 }	// namespace
 
 bool aoDecalOn()
 {
-	const QByteArray pin = qgetenv( "WW_CELL_AODECAL" ).trimmed();
+	const QByteArray pin = wwEnv( "WW_CELL_AODECAL" ).trimmed();
 	if ( !pin.isEmpty() )
 		return pin != "0";
 	return QSettings().value( QStringLiteral( "WW/CellAoDecal" ), false ).toBool();
@@ -148,10 +149,10 @@ AoDecalBuilder::AoDecalBuilder()
 		return;
 	set_ = std::make_shared<AoDecalSet>();
 	set_->red = redOf();
-	set_->dir = QString::fromLocal8Bit( qgetenv( "WW_CELL_AODECAL_DIR" ) ).trimmed();
+	set_->dir = QString::fromLocal8Bit( wwEnv( "WW_CELL_AODECAL_DIR" ) ).trimmed();
 	if ( set_->dir.isEmpty() )
 		set_->dir = QCoreApplication::applicationDirPath() + QStringLiteral( "/prtp_bake/ao" );
-	censusFile_ = QString::fromLocal8Bit( qgetenv( "WW_CELL_AODECAL_CENSUS" ) ).trimmed();
+	censusFile_ = QString::fromLocal8Bit( wwEnv( "WW_CELL_AODECAL_CENSUS" ) ).trimmed();
 }
 
 void AoDecalBuilder::consider( const QString & baseType, const QString & model, const std::vector<NativeSrcShape> & shapes,
@@ -276,7 +277,7 @@ std::shared_ptr<const AoDecalSet> AoDecalBuilder::finish( const QString & dataRo
 			aovol::readIndex( f.readAll(), &index, &why );
 	}
 	bool indexDirty = false;
-	const quint64 salt = qgetenv( "WW_CELL_AODECAL_FPSALT" ).toULongLong();	// a gate's "the model changed"
+	const quint64 salt = wwEnv( "WW_CELL_AODECAL_FPSALT" ).toULongLong();	// a gate's "the model changed"
 	const bool redStale = S.red == QLatin1String( "stale" );
 	for ( size_t mi = 0; mi < S.models.size(); mi++ ) {
 		AoDecalSet::Model & M = S.models[mi];

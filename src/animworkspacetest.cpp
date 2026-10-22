@@ -85,6 +85,7 @@
    Lane HKXEDIT2, 2026-09-10. */
 
 #include "animworkspace.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "wwskin.h"
 #include "hkxanimui.h"
 #include "hkxplayback.h"
@@ -193,14 +194,14 @@ Node * nodeOf( Scene * sc, int block )
 
 void wwAnimWorkspaceHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_ANIMWS_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_ANIMWS_TEST" ) )
 		return;
 	auto * st = new WwAwState;
-	st->clip = qEnvironmentVariable( "WW_ANIMWS_CLIP" );
-	st->skel = qEnvironmentVariable( "WW_ANIMWS_SKEL" );
-	st->jog = qEnvironmentVariable( "WW_ANIMWS_JOG" );
-	st->seqNif = qEnvironmentVariable( "WW_ANIMWS_SEQNIF" );
-	st->outDir = qEnvironmentVariable( "WW_ANIMWS_OUT" );
+	st->clip = wwEnvStr( "WW_ANIMWS_CLIP" );
+	st->skel = wwEnvStr( "WW_ANIMWS_SKEL" );
+	st->jog = wwEnvStr( "WW_ANIMWS_JOG" );
+	st->seqNif = wwEnvStr( "WW_ANIMWS_SEQNIF" );
+	st->outDir = wwEnvStr( "WW_ANIMWS_OUT" );
 
 	QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, st]( bool ok, QString & ) {
 		static bool ran = false;

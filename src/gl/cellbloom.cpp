@@ -1,4 +1,5 @@
 #include "cellbloom.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celllights.h"
 #include "gl/glscene.h"
@@ -60,6 +61,7 @@ struct BloomGpu
 struct BloomState
 {
 	bool init = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	WwCellBloomSettings set;
 	bool modePinned = false;
 	bool pinned[kFieldCount] = {};
@@ -125,12 +127,22 @@ bool truthy( const QString & v )
 BloomState & bs()
 {
 	static BloomState s;
-	if ( s.init )
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( s.init && !wwSwitchMovedFor( s.liveGen, { "WW_CELL_BLOOM" } ) )
 		return s;
+	const bool again = s.init;
 	s.init = true;
+	s.liveGen = wwSwitchGen();
+	{
+		const BloomState d {};
+		s.set = d.set;
+		s.modePinned = d.modePinned;
+		for ( int i = 0; i < kFieldCount; i++ )
+			s.pinned[i] = d.pinned[i];
+	}
 	QSettings q;
 	// the mode: a pin wins; a harness without the pin runs Vanilla (it measures what it pins); else the saved row
-	const QString modePin = qEnvironmentVariable( "WW_CELL_BLOOM" ).trimmed();
+	const QString modePin = wwEnvStr( "WW_CELL_BLOOM" ).trimmed();
 	if ( !modePin.isEmpty() ) {
 		s.modePinned = true;
 		s.set.fo4cs = modePin.compare( QLatin1StringView( "fo4cs" ), Qt::CaseInsensitive ) == 0;
@@ -142,7 +154,7 @@ BloomState & bs()
 			.compare( QLatin1StringView( "fo4cs" ), Qt::CaseInsensitive ) == 0;
 	}
 	for ( int i = 0; i < kFieldCount; i++ ) {
-		const QString pin = qEnvironmentVariable( kFields[i].env ).trimmed();
+		const QString pin = wwEnvStr( kFields[i].env ).trimmed();
 		s.pinned[i] = !pin.isEmpty();
 		// a harness reads only pins (the defaults otherwise), never what the window saved
 		const bool useSaved = !s.pinned[i] && !wwHarnessRun() && q.contains( QLatin1StringView( kFields[i].key ) );
@@ -164,11 +176,13 @@ BloomState & bs()
 		}
 	}
 	s.set = clamped( s.set );
-	s.red = qEnvironmentVariable( "WW_CELL_BLOOM_RED" ).contains( QLatin1StringView( "nokaris" ) ) ? 1 : 0;
-	s.impulse = qEnvironmentVariable( "WW_CELL_BLOOM_IMPULSE" ).toFloat();
-	s.dumpDir = qEnvironmentVariable( "WW_CELL_BLOOM_DUMP" ).trimmed();
-	s.selfTest = wwCellBloomSelfTest();
-	qInfo().noquote() << "cell bloom: FO4CS checks" << s.selfTest;
+	s.red = wwEnvStr( "WW_CELL_BLOOM_RED" ).contains( QLatin1StringView( "nokaris" ) ) ? 1 : 0;
+	s.impulse = wwEnvStr( "WW_CELL_BLOOM_IMPULSE" ).toFloat();
+	s.dumpDir = wwEnvStr( "WW_CELL_BLOOM_DUMP" ).trimmed();
+	if ( !again ) {
+		s.selfTest = wwCellBloomSelfTest();
+		qInfo().noquote() << "cell bloom: FO4CS checks" << s.selfTest;
+	}
 	return s;
 }
 

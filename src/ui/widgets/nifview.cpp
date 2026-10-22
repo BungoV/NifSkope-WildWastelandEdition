@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "nifview.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "spellbook.h"
 #include "wwskin.h"	// the reorder insertion line's colour
@@ -107,7 +108,7 @@ void NifTreeView::setRootIndex( const QModelIndex & index )
 // TEMP DIAGNOSTIC (WW_EXTRUDE_TEST): trace refreshRowHiding decisions
 static void wwHideTrace( const QString & msg )
 {
-	if ( !qEnvironmentVariableIsSet( "WW_EXTRUDE_TEST" ) )
+	if ( !wwEnvIsSet( "WW_EXTRUDE_TEST" ) )
 		return;
 	QFile f( QApplication::applicationDirPath() + "/ww_hide.log" );
 	if ( f.open( QIODevice::Append | QIODevice::Text ) )
@@ -163,7 +164,7 @@ void NifTreeView::refreshRowHiding()
 	// arrays is derived lazily, one level at a time, by the expansion hook.
 	updateConditionRecurse( rootIndex(), false );
 	doItemsLayout();
-	if ( qEnvironmentVariableIsSet( "WW_EXTRUDE_TEST" ) ) {
+	if ( wwEnvIsSet( "WW_EXTRUDE_TEST" ) ) {
 		int hiddenCount = 0;
 		for ( int r = 0; r < model()->rowCount( rootIndex() ); r++ )
 			if ( QTreeView::isRowHidden( r, rootIndex() ) )

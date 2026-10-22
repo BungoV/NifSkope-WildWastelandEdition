@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodinative.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "lodifile.h"
 #include "lodofile.h"
@@ -415,7 +416,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 bool lodiSpecFromEnv( LodiSceneSpec & spec )
 {
 	bool got = false;
-	const QByteArray env = qgetenv( "WW_LODI_REGION" );
+	const QByteArray env = wwEnv( "WW_LODI_REGION" );
 	if ( !env.isEmpty() ) {
 		const QStringList parts = QString::fromLatin1( env ).split( QLatin1Char( ',' ) );
 		if ( parts.size() == 4 ) {
@@ -436,12 +437,12 @@ bool lodiSpecFromEnv( LodiSceneSpec & spec )
 				.arg( QString::fromLatin1( env ) );
 		}
 	}
-	if ( !qgetenv( "WW_LODI_LEVEL" ).isEmpty() ) {
-		spec.level = qMax( 0, qEnvironmentVariableIntValue( "WW_LODI_LEVEL" ) );
+	if ( !wwEnv( "WW_LODI_LEVEL" ).isEmpty() ) {
+		spec.level = qMax( 0, wwEnvInt( "WW_LODI_LEVEL" ) );
 		spec.valid = true;
 		got = true;
 	}
-	if ( qEnvironmentVariableIntValue( "WW_LODI_BOXES" ) == 1 ) {
+	if ( wwEnvInt( "WW_LODI_BOXES" ) == 1 ) {
 		spec.boxes = true;
 		spec.valid = true;
 		got = true;
@@ -487,7 +488,7 @@ const ChannelName CHANNEL_NAMES[] = {
 
 LodlChannel lodlChannelFromEnv( QString * given, int * bin )
 {
-	const QString env = qEnvironmentVariable( "WW_LODL_CHANNEL" ).trimmed().toLower();
+	const QString env = wwEnvStr( "WW_LODL_CHANNEL" ).trimmed().toLower();
 	if ( given )
 		*given = env;
 	if ( bin )
@@ -599,7 +600,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	const Vector3 shapeOrigin = origin - Vector3( spec.shift[0], spec.shift[1], spec.shift[2] );
 
 	// the census the gates read; written by the code that PLACES the instances
-	const QString dumpPath = qEnvironmentVariable( "WW_LODI_DUMP" );
+	const QString dumpPath = wwEnvStr( "WW_LODI_DUMP" );
 	QFile dumpFile( dumpPath );
 	QTextStream dump;
 	if ( !dumpPath.isEmpty() ) {
@@ -626,8 +627,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	};
 	QHash<quint32, std::vector<MeshPart>> meshCache;
 	const int wantSlot = spec.slot >= 0 ? qBound( 0, spec.slot, 3 )
-		: qEnvironmentVariableIsSet( "WW_LODI_SLOT" )
-		? qBound( 0, qEnvironmentVariableIntValue( "WW_LODI_SLOT" ), 3 ) : -1;
+		: wwEnvIsSet( "WW_LODI_SLOT" )
+		? qBound( 0, wwEnvInt( "WW_LODI_SLOT" ), 3 ) : -1;
 	QHash<quint16, int> levelUsed;
 	/* WW_LODL_AO=1 (bungo 2026-09-18, "AO overlaid on the terrain and objects /
 	 * trees"): every vertex carries the model's self-AO (`.lodo` selfAO, 255 =
@@ -641,7 +642,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	QString channelGiven;
 	int channelBin = 0;
 	const LodlChannel channel = lodlChannelFromEnv( &channelGiven, &channelBin );
-	const bool wantAo = qEnvironmentVariableIntValue( "WW_LODL_AO" ) != 0
+	const bool wantAo = wwEnvInt( "WW_LODL_AO" ) != 0
 		|| channel == LodlChannel::Ao;
 	//! true for the names this builder draws on the PLACEMENTS (the terrain names
 	//! are btdterrain's, and leave the objects at their default look)
@@ -1087,7 +1088,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 						 * the BGSM loads (src/gl/renderer.cpp ~1321, same dial there); this
 						 * one covers the no-BGSM fallback only. */
 						if ( nb.hasAlpha && ( mat.flags & LODO_MAT_TREE ) ) {
-							const int dial = qEnvironmentVariableIntValue( "WW_LODL_TREE_ALPHA" );
+							const int dial = wwEnvInt( "WW_LODL_TREE_ALPHA" );
 							if ( dial >= 1 && dial <= 255 )
 								nb.alphaThreshold = quint8( dial );
 						}

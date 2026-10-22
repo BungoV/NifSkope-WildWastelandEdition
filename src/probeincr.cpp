@@ -1,6 +1,7 @@
 /* lane BAKEINCR1 (2026-10-04): the incremental probe bake's record and check. See probeincr.h. */
 
 #include "probeincr.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellview.h"
 #include "esmdata.h"
@@ -229,7 +230,7 @@ namespace ProbeIncr
 {
 QByteArray red()
 {
-	static const QByteArray r = qgetenv( "WW_CELL_BAKEINCR_RED" );
+	WW_SWITCH_STATIC( QByteArray, r, wwEnv( "WW_CELL_BAKEINCR_RED" ) );
 	return r;
 }
 
@@ -401,7 +402,7 @@ int checkMain()
 {
 	QElapsedTimer clock;
 	clock.start();
-	const QStringList p = qEnvironmentVariable( "WW_CELL_BAKEINCR_CHECK" ).split( QLatin1Char( '|' ) );
+	const QStringList p = wwEnvStr( "WW_CELL_BAKEINCR_CHECK" ).split( QLatin1Char( '|' ) );
 	if ( p.size() != 5 ) {
 		qWarning( "WW_CELL_BAKEINCR_CHECK wants <plugins>|<world>|x0,y0,x1,y1|<root>|<verdict file>" );
 		return 2;
@@ -429,7 +430,7 @@ int checkMain()
 		return 3;
 	}
 	// the bake's own data-root rule (cellview.cpp): the spec's, else the stack's first entry
-	QString dataRoot = qEnvironmentVariable( "WW_CELL_DATAROOT" );
+	QString dataRoot = wwEnvStr( "WW_CELL_DATAROOT" );
 	if ( dataRoot.isEmpty() ) {
 		const QStringList stack = lodgenResourceSearchPaths();
 		if ( !stack.isEmpty() )

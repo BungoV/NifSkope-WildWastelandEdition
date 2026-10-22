@@ -1,6 +1,7 @@
 /* lane SKY1 (2026-10-02): the sky and the sun in the cell view's bounce light; see probesky.h. */
 
 #include "probesky.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmweather.h"
 #include "gl/celllights.h"
@@ -32,14 +33,14 @@ namespace
 bool skyPicOn()
 {
 	// on by default since 2026-10-15 (bungo); WW_CELL_SKYPIC=0 gives the weather's flat ambient (SKY1)
-	return !qEnvironmentVariableIsSet( "WW_CELL_SKYPIC" ) || qEnvironmentVariableIntValue( "WW_CELL_SKYPIC" ) == 1;
+	return !wwEnvIsSet( "WW_CELL_SKYPIC" ) || wwEnvInt( "WW_CELL_SKYPIC" ) == 1;
 }
 
 //! WW_CELL_SKYPIC_FLAT=r,g,b (the known-answer control): the capture is that one colour; with the switch off the
 //! weather's six colours are all that colour, so the two runs must agree
 bool skyPicFlat( float rgb[3] )
 {
-	const QStringList p = QString::fromLatin1( qgetenv( "WW_CELL_SKYPIC_FLAT" ) ).split( QLatin1Char( ',' ) );
+	const QStringList p = QString::fromLatin1( wwEnv( "WW_CELL_SKYPIC_FLAT" ) ).split( QLatin1Char( ',' ) );
 	if ( p.size() != 3 )
 		return false;
 	for ( int c = 0; c < 3; c++ )
@@ -244,7 +245,7 @@ void skyPicRelit( const ProbeGiResult & gr, const ProbeGiSpec & spec )
 	std::fprintf( stderr, "gi skypic: %s; relit %s; captured in %.1f ms; open sky drawn / weather per axis:%s\n",
 		qPrintable( s.picNote ), qPrintable( s.label ), p.pic.ms, qPrintable( open ) );
 	std::fprintf( stderr, "gi skypic census: %s\n", qPrintable( probeGiCensusText( gr ).replace( QLatin1Char( '\n' ), QStringLiteral( " / " ) ) ) );
-	const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_GI_DUMP" ) );
+	const QString dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_GI_DUMP" ) );
 	if ( dump.isEmpty() )
 		return;
 	QString err;
@@ -344,7 +345,7 @@ void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 		if ( p.key != key ) {
 			float flat[3];
 			const bool haveFlat = skyPicFlat( flat );
-			const int n = qEnvironmentVariableIsSet( "WW_CELL_SKYPIC_N" ) ? qEnvironmentVariableIntValue( "WW_CELL_SKYPIC_N" ) : 64;
+			const int n = wwEnvIsSet( "WW_CELL_SKYPIC_N" ) ? wwEnvInt( "WW_CELL_SKYPIC_N" ) : 64;
 			p.key = key;
 			p.why.clear();
 			p.ok = wwLookdevCaptureSky( scene, n, haveFlat ? flat : nullptr, p.pic, &p.why );
@@ -371,7 +372,7 @@ void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 				}
 			}
 			if ( p.ok )
-				probeSkyPictureQ( p.pic, QString::fromLatin1( qgetenv( "WW_CELL_SKYPIC_RED" ) ).trimmed(), p.Q );
+				probeSkyPictureQ( p.pic, QString::fromLatin1( wwEnv( "WW_CELL_SKYPIC_RED" ) ).trimmed(), p.Q );
 			else
 				std::fprintf( stderr, "gi skypic: capture refused (%s)\n", qPrintable( p.why ) );
 			firstPic = p.ok && !k.wanted.pic;

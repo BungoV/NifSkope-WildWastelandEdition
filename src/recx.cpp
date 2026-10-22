@@ -1,4 +1,5 @@
 #include "recx.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -157,7 +158,7 @@ int rankOf( const QJsonObject & e, const QString & key, const QString & plugin, 
 
 QStringList wwRecxRoots( const QStringList & pluginFiles, const QString & gameData )
 {
-	const QByteArray pin = qgetenv( "WW_RECX_ROOT" );
+	const QByteArray pin = wwEnv( "WW_RECX_ROOT" );
 	if ( !pin.isEmpty() )
 		return { QDir::fromNativeSeparators( QString::fromLocal8Bit( pin ) ) };
 	QStringList out;

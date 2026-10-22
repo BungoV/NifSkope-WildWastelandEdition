@@ -1,6 +1,7 @@
 // lane PROBEVIEW1: the PRTP band's Pass overlays (src/gl/cellprobeview.h)
 
 #include "cellprobeview.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celllights.h"
 #include "gl/glscene.h"
@@ -25,7 +26,7 @@ PvState & pv()
 {
 	static PvState s;
 	if ( s.pin == -2 ) {
-		const QByteArray p = qgetenv( "WW_CELL_PV_PROBE" ).trimmed();
+		const QByteArray p = wwEnv( "WW_CELL_PV_PROBE" ).trimmed();
 		bool ok = false;
 		const int i = p.toInt( &ok );
 		s.pin = ok ? i : -1;
@@ -123,7 +124,7 @@ void wwCellProbeViewDraw( Scene * scene, const Transform & viewTrans )
 		// a splat 0.6 of the surfel cell: the surfels read apart, and a curved surface keeps few cards in the air
 		const float h = v->surfelCell * 0.3f;
 		// WW_CELL_PV_ID=1: each tile carries its surfel's index + 1 as 24-bit color (the gate's exact map)
-		static const bool idColors = qEnvironmentVariableIntValue( "WW_CELL_PV_ID" ) == 1;
+		WW_SWITCH_STATIC( bool, idColors, wwEnvInt( "WW_CELL_PV_ID" ) == 1 );
 		for ( size_t i = 0; i + 11 < v->surfels.size(); i += 12 ) {
 			const float * f = &v->surfels[i];
 			const Vector3 n( f[3], f[4], f[5] );
@@ -249,7 +250,7 @@ void wwCellProbeViewDraw( Scene * scene, const Transform & viewTrans )
 	}
 	glDepthFunc( GL_LESS );
 	glDisable( GL_BLEND );
-	static const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_PV_DUMP" ) );
+	WW_SWITCH_STATIC( QString, dump, QString::fromLocal8Bit( wwEnv( "WW_CELL_PV_DUMP" ) ) );
 	if ( !dump.isEmpty() ) {
 		QString o = QStringLiteral( "pass=%1 tiles=%2 boxes=%3 probe=%4 links=%5\n" ).arg( pass ).arg( tiles ).arg( boxes )
 			.arg( picked ).arg( nLinks );

@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "watermarkpanel.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "watermark.h"
 #include "waterwindow.h"
@@ -1167,7 +1168,7 @@ void runSelfTest( QMainWindow * mw, WaterMarkPanel * panel )
 		panel->summaryLabel()->text().contains( QLatin1String( "No landscape file" ) )
 		&& !panel->saveBtn()->isEnabled() );
 
-	const QString file = QString::fromLocal8Bit( qgetenv( "WW_WATER_MARK_FILE" ) );
+	const QString file = QString::fromLocal8Bit( wwEnv( "WW_WATER_MARK_FILE" ) );
 	const bool opened = !file.isEmpty() && panel->openFile( file );
 	check( QStringLiteral( "the landscape file opens: %1" ).arg( file ), opened );
 
@@ -1350,7 +1351,7 @@ void runSelfTest( QMainWindow * mw, WaterMarkPanel * panel )
 
 	/* WW_WATER_MARK_SHOT=<png>: the dock as a person would see it, from inside
 	 * the app, in the state this test leaves -- a river selected and marked. */
-	const QByteArray shot = qgetenv( "WW_WATER_MARK_SHOT" );
+	const QByteArray shot = wwEnv( "WW_WATER_MARK_SHOT" );
 	if ( !shot.isEmpty() ) {
 		mw->resizeDocks( { dock }, { 660 }, Qt::Horizontal );
 		QApplication::processEvents();
@@ -1439,7 +1440,7 @@ void waterMarkInstall( QMainWindow * mw )
 
 	waterWindowInstall( mw );      // WW_WATER_WINDOW_TEST only; the menu entry is gone
 
-	if ( qEnvironmentVariableIsSet( "WW_WATER_MARK_TEST" ) ) {
+	if ( wwEnvIsSet( "WW_WATER_MARK_TEST" ) ) {
 		/* A timer and not a load signal: this file knows nothing about the
 		 * document, and the panel opens its own landscape file. */
 		QTimer::singleShot( 1200, panel, [mw, panel]() { runSelfTest( mw, panel ); } );

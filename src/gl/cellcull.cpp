@@ -1,5 +1,6 @@
 /*! Lane SUNCELL1: the cell view's per-placement culling (see cellcull.h). */
 #include "cellcull.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellumbra.h"
@@ -121,6 +122,7 @@ struct UmbraDoc
 
 struct CullState
 {
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool loaded = false, on = false, pinned = false;
 	int red = 0;
 	QHash<const void *, QHash<int, std::vector<WwCullRun>>> docs;
@@ -147,29 +149,36 @@ struct CullState
 CullState & st()
 {
 	static CullState s;
-	if ( !s.loaded ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_CULL", "WW_CELL_PREVIS", "WW_CELL_UMBRA" } ) ) {
 		s.loaded = true;
-		const QByteArray pin = qgetenv( "WW_CELL_CULL" ).trimmed();
+		s.liveGen = wwSwitchGen();
+		{
+			const CullState d {};
+			s.pinned = d.pinned;
+			s.previsPinned = d.previsPinned;
+		}
+		const QByteArray pin = wwEnv( "WW_CELL_CULL" ).trimmed();
 		if ( !pin.isEmpty() ) {
 			s.pinned = true;
 			s.on = pin != "0";
 		} else {
 			s.on = QSettings().value( QStringLiteral( "WW/CellCull" ), false ).toBool();
 		}
-		s.red = qgetenv( "WW_CELL_CULL_RED" ).trimmed() == "casters" ? 1 : 0;
-		const QByteArray pv = qgetenv( "WW_CELL_PREVIS" ).trimmed();
+		s.red = wwEnv( "WW_CELL_CULL_RED" ).trimmed() == "casters" ? 1 : 0;
+		const QByteArray pv = wwEnv( "WW_CELL_PREVIS" ).trimmed();
 		if ( !pv.isEmpty() ) {
 			s.previsPinned = true;
 			s.previsOn = pv != "0";
 		} else {
 			s.previsOn = QSettings().value( QStringLiteral( "WW/CellPrevis" ), false ).toBool();
 		}
-		s.previsRed = qgetenv( "WW_CELL_PREVIS_RED" ).trimmed() == "casters" ? 1 : 0;
+		s.previsRed = wwEnv( "WW_CELL_PREVIS_RED" ).trimmed() == "casters" ? 1 : 0;
 		// lane UMBRA1
-		s.umbraOn = qgetenv( "WW_CELL_UMBRA" ).trimmed() != "0";
-		s.umbraRed = qgetenv( "WW_CELL_UMBRA_RED" ).trimmed() == "casters" ? 1 : 0;
-		s.umbraDump = QString::fromLocal8Bit( qgetenv( "WW_CELL_UMBRA_DUMP" ) ).trimmed();
-		s.umbraDepth = !s.umbraDump.isEmpty() && qgetenv( "WW_CELL_UMBRA_DEPTH" ).trimmed() == "1";
+		s.umbraOn = wwEnv( "WW_CELL_UMBRA" ).trimmed() != "0";
+		s.umbraRed = wwEnv( "WW_CELL_UMBRA_RED" ).trimmed() == "casters" ? 1 : 0;
+		s.umbraDump = QString::fromLocal8Bit( wwEnv( "WW_CELL_UMBRA_DUMP" ) ).trimmed();
+		s.umbraDepth = !s.umbraDump.isEmpty() && wwEnv( "WW_CELL_UMBRA_DEPTH" ).trimmed() == "1";
 	}
 	return s;
 }
@@ -332,7 +341,7 @@ bool occFacesHide( const OccFaces & f, const Vector3 & s, float r )
 //! WW_CELL_PREVIS_RED=perrun: the occluders' planes rebuilt for every run, as before lane PERF1 (the gate's red)
 bool previsPlanesPerRun()
 {
-	static const bool v = qgetenv( "WW_CELL_PREVIS_RED" ).trimmed() == "perrun";
+	WW_SWITCH_STATIC( bool, v, wwEnv( "WW_CELL_PREVIS_RED" ).trimmed() == "perrun" );
 	return v;
 }
 

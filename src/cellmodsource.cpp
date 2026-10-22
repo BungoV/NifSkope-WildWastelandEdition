@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENSE BLOCK *****/
 
 #include "cellmodsource.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gamemanager.h"
 #include "lodgenloadorder.h"
@@ -120,7 +121,7 @@ bool readInstance( const QString & ini, const QString & portableBase, Mo2Instanc
 QList<Mo2Instance> findInstances( const QString & game )
 {
 	QList<Mo2Instance> out;
-	const QString local = clean( QString::fromLocal8Bit( qgetenv( "LOCALAPPDATA" ) ) );
+	const QString local = clean( QString::fromLocal8Bit( wwEnv( "LOCALAPPDATA" ) ) );
 	if ( !local.isEmpty() ) {
 		const QDir mo( local + QStringLiteral( "/ModOrganizer" ) );
 		for ( const QString & sub : mo.entryList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name ) ) {
@@ -173,7 +174,7 @@ bool fromMo2( const QString & profile, const QString & mods, const QString & dat
 	/* Fallout4.ccc's files load under MO2 too: MO2 forces them on and never
 	 * writes them to plugins.txt; the reader puts them after the masters. */
 	s->alwaysLoads = lo.masters;
-	if ( qgetenv( "WW_MODPICK_RED" ) == "noccc" )
+	if ( wwEnv( "WW_MODPICK_RED" ) == "noccc" )
 		s->alwaysLoads = 0;  // red: 89478e4f's MO2 list (the Creation Club files unticked)
 	return true;
 }
@@ -181,7 +182,7 @@ bool fromMo2( const QString & profile, const QString & mods, const QString & dat
 //! the folder the game's own Fallout4.ini and Fallout4Custom.ini sit in
 QString myGames()
 {
-	const QString o = clean( QString::fromLocal8Bit( qgetenv( "WW_MODPICK_MYGAMES" ) ) );  // a test fixture
+	const QString o = clean( QString::fromLocal8Bit( wwEnv( "WW_MODPICK_MYGAMES" ) ) );  // a test fixture
 	if ( !o.isEmpty() )
 		return o;
 	return clean( QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) ) + QStringLiteral( "/My Games/Fallout4" );
@@ -237,7 +238,7 @@ void applyTestFiles( CellModSource * s, const QStringList & inis, const QStringL
 {
 	QString from;
 	const QStringList names = testFiles( inis, &from );
-	if ( names.isEmpty() || qgetenv( "WW_MODPICK_RED" ) == "notestfile" )
+	if ( names.isEmpty() || wwEnv( "WW_MODPICK_RED" ) == "notestfile" )
 		return;  // red notestfile: 89478e4f, the ini ignored
 	static const char * masters[] = { "Fallout4.esm", "DLCRobot.esm", "DLCworkshop01.esm", "DLCCoast.esm",
 		"DLCworkshop02.esm", "DLCworkshop03.esm", "DLCNukaWorld.esm", "DLCUltraHighResolution.esm" };
@@ -359,7 +360,7 @@ CellModSource cellModSource()
 	QString gameFrom;
 	const QString game = gameFolder( &gameFrom );
 	QStringList looked;
-	const bool noMo2 = qgetenv( "WW_MODPICK_NOMO2" ) == "1";
+	const bool noMo2 = wwEnv( "WW_MODPICK_NOMO2" ) == "1";
 
 	// 1. the LOD panel's MO2 profile
 	const QString set = QSettings().value( QStringLiteral( "LodGeneration/mo2Profile" ) ).toString().trimmed();
@@ -394,7 +395,7 @@ CellModSource cellModSource()
 		}
 	}
 	s = CellModSource();
-	if ( qgetenv( "WW_MODPICK_RED" ) == "nofallback" ) {
+	if ( wwEnv( "WW_MODPICK_RED" ) == "nofallback" ) {
 		s.error = QStringLiteral( "no MO2 profile (RED nofallback: the Data folder is not read)" );
 		return s;
 	}
@@ -410,9 +411,9 @@ CellModSource cellModSource()
 	s.from = data;
 	s.plugins = lodgenLoadOrderMasters( data );
 	s.alwaysLoads = int( s.plugins.size() );  // the game loads Fallout4.ccc's files like the DLC masters
-	if ( qgetenv( "WW_MODPICK_RED" ) == "noccc" )
+	if ( wwEnv( "WW_MODPICK_RED" ) == "noccc" )
 		s.alwaysLoads = 0;  // red: the Creation Club files become ordinary rows again
-	const QString ptxt = clean( QString::fromLocal8Bit( qgetenv( "LOCALAPPDATA" ) ) ) + QStringLiteral( "/Fallout4/plugins.txt" );
+	const QString ptxt = clean( QString::fromLocal8Bit( wwEnv( "LOCALAPPDATA" ) ) ) + QStringLiteral( "/Fallout4/plugins.txt" );
 	const QStringList lines = readLines( ptxt );
 	if ( !lines.isEmpty() ) {
 		QStringList missing;

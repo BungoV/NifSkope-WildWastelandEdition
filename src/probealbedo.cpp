@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENSE BLOCK *****/
 
 #include "probealbedo.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "data/niftypes.h"
 #include "io/material.h"
@@ -259,7 +260,7 @@ bool ProbeAlbedo::meanGamma( const QString & tex, float out[3] )
 int probeGlassFeed( ProbeSoup & soup, ProbeAlbedo & alb, const NativeSrcShape & s, const Vector3 & pos,
 	const Matrix & rot, float scale, quint32 ref, const QString & model, QString * census )
 {
-	static const QByteArray red = qgetenv( "WW_CELL_PROBE_GLASS_RED" );
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_CELL_PROBE_GLASS_RED" ) );
 	if ( !s.bakeBlend && !s.nearFacts.alphaBlend && !s.nearFacts.effectShader )
 		return 0;
 	bool pane = s.bakePane();

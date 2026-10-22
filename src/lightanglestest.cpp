@@ -48,6 +48,7 @@ BSD License - see nifskope.h
        the widget's intent */
 
 #include "nifskope.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "glview.h"
 #include "harnesswindow.h"
 #include "model/nifmodel.h"
@@ -97,7 +98,7 @@ void wwLaCheck( WwLaState & st, const QString & what, bool pass )
 //! "d,p" -> two angles; false when the variable is not exactly two numbers
 bool wwLaPair( const char * var, float & d, float & p )
 {
-	const QStringList l = qEnvironmentVariable( var ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+	const QStringList l = wwEnvStr( var ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
 	if ( l.size() != 2 )
 		return false;
 	bool okD = false, okP = false;
@@ -216,10 +217,10 @@ void wwLaRun( NifSkope * skope, WwLaState * st )
 
 void wwLightAnglesHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_LIGHTANGLES_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_LIGHTANGLES_TEST" ) )
 		return;
 	auto * st = new WwLaState;
-	st->logPath = qEnvironmentVariable( "WW_LIGHTANGLES_LOG" );
+	st->logPath = wwEnvStr( "WW_LIGHTANGLES_LOG" );
 	if ( st->logPath.isEmpty() )
 		st->logPath = QCoreApplication::applicationDirPath() + QStringLiteral( "/ww_lightangles_test.log" );
 	QFile::remove( st->logPath );

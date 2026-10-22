@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "gl/cellvrs.h"	// lane VRS1
 #include "gl/cellfxres.h"	// lane FXRES1
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "message.h"
 #include "nifskope.h"
@@ -92,15 +93,23 @@ struct SetupMemo
 	qint64 hits = 0, runs = 0, checked = 0, bad = 0, arms = 0;
 	SetupMemo()
 	{
-		const QByteArray v = qgetenv( "WW_SETUP_MEMO" );
+		const QByteArray v = wwEnv( "WW_SETUP_MEMO" );
 		mode = v.isEmpty() ? 1 : v.toInt();
-		check = qEnvironmentVariableIntValue( "WW_SETUP_MEMO_CHECK" ) != 0;
+		check = wwEnvInt( "WW_SETUP_MEMO_CHECK" ) != 0;
 	}
 };
 
 SetupMemo & setupMemo()
 {
 	static SetupMemo m;
+	static quint64 liveGen = 0;
+	if ( wwSwitchMoved( liveGen ) ) {	// lane TESTDRIVER1: any live set may move a uniform the memo would skip; old stamps are void
+		const QByteArray v = wwEnv( "WW_SETUP_MEMO" );
+		m.mode = v.isEmpty() ? 1 : v.toInt();
+		m.check = wwEnvInt( "WW_SETUP_MEMO_CHECK" ) != 0;
+		m.epoch++;
+		m.stamps.clear();
+	}
 	return m;
 }
 
@@ -315,7 +324,7 @@ static Scene * wwAoScene = nullptr;	// lane AO1: the drawing scene, set by setup
  * whose colour or share came out non-finite draws green, everything else black). */
 static int wwLandSplatDbg()
 {
-	static const int v = qgetenv( "WW_TERRBLEND_PROBE" ) == "edge" ? 2 : qgetenv( "WW_TERRBLEND_RED" ) == "edgepass" ? 1 : 0;
+	WW_SWITCH_STATIC( int, v, wwEnv( "WW_TERRBLEND_PROBE" ) == "edge" ? 2 : wwEnv( "WW_TERRBLEND_RED" ) == "edgepass" ? 1 : 0 );
 	return v;
 }
 
@@ -487,7 +496,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	static int	armed = -1;
 	static QString	censusPath;
 	if ( armed < 0 ) {
-		QString	p = QString::fromLocal8Bit( qgetenv( "WW_PROGRAM_CENSUS" ) ).trimmed();
+		QString	p = QString::fromLocal8Bit( wwEnv( "WW_PROGRAM_CENSUS" ) ).trimmed();
 		armed = ( !p.isEmpty() && QDir::isAbsolutePath( p ) ) ? 1 : 0;
 		censusPath = p;
 	}
@@ -1297,8 +1306,8 @@ bool Renderer::setupProgramCE2( const NifModel * nif, Program * prog, Shape * me
  * refused by name on stderr and changes nothing. Echoed once, so a picture under it can be told apart. */
 bool wwLegacyRouteRed()
 {
-	static const bool v = []() {
-		const QString s = qEnvironmentVariable( "WW_LEGACYROUTE_RED" ).trimmed().toLower();
+	WW_SWITCH_STATIC( bool, v, []() {
+		const QString s = wwEnvStr( "WW_LEGACYROUTE_RED" ).trimmed().toLower();
 		if ( s.isEmpty() )
 			return false;
 		const bool on = ( s == QLatin1StringView( "oldroute" ) );
@@ -1307,7 +1316,7 @@ bool wwLegacyRouteRed()
 			   : "REFUSED: unknown value (known: oldroute); legacy materials draw their legacy program" );
 		fflush( stderr );
 		return on;
-	}();
+	}() );
 	return v;
 }
 
@@ -1795,7 +1804,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		/* lane FIXPACK1 (REDFIX1): WW_R2A_RED=nomsn now breaks the _msn read where it lives since LEGACYROUTE1
 		 * (this legacy program, every renderer mode): the far ground's model-space sheet is read as tangent
 		 * space again. FARLOD3's red sat in pbrm_default.frag, which no vanilla material reaches any more. */
-		static const bool redNoMsn = qgetenv( "WW_R2A_RED" ) == "nomsn";
+		WW_SWITCH_STATIC( bool, redNoMsn, wwEnv( "WW_R2A_RED" ) == "nomsn" );
 		prog->uni1i( "hasModelSpaceNormals",
 			int( !redNoMsn && forced == &emptyString
 				&& lsp->hasSF1( ShaderFlags::SLSF1_Model_Space_Normals ) ) );
@@ -2060,7 +2069,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		if ( nifVersion >= 130 ) {
 
 			prog->uni1f( "lightingInfluence", esp->lightingInfluence );
-			if ( wwCellFxLitProbeShape( scene, mesh->id() ) && qEnvironmentVariableIsSet( "WW_CELL_FXLIT_DUMP" ) ) {
+			if ( wwCellFxLitProbeShape( scene, mesh->id() ) && wwEnvIsSet( "WW_CELL_FXLIT_DUMP" ) ) {
 				// lane FXLIT1: what each lit effect's probe drew with, once per shape (the gate's dump)
 				static QSet<int> said;
 				if ( !said.contains( mesh->id() ) ) {
@@ -2199,7 +2208,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	 * where the layer's share is small, hard-edged where its quads stop (bungo's circled ground at -19,23, on his
 	 * stack: Boston Natural Surroundings' material-backed sets). The game's landscape shader never reads the BGSM's
 	 * alpha. WW_TERRBLEND_RED=matalpha puts the material back in charge, so the gate is shown to fail on it. */
-	static const bool landMatAlphaRed = qgetenv( "WW_TERRBLEND_RED" ) == "matalpha";
+	WW_SWITCH_STATIC( bool, landMatAlphaRed, wwEnv( "WW_TERRBLEND_RED" ) == "matalpha" );
 	const bool landSplatPass = !landMatAlphaRed && scene && wwCellLandIs( scene->nifModel, mesh->id() );
 	if ( landSplatPass ) {
 		AlphaProperty::glProperty( mesh->alphaProperty, prog );
@@ -2230,7 +2239,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			 * lives under a trees/ folder at that threshold instead of the
 			 * BGSM's own (80/82 on the tree LOD sets). The BGSM wins over the
 			 * NiAlphaProperty here, so this is the only place the dial bites. */
-			static const int treeDial = qEnvironmentVariableIntValue( "WW_LODL_TREE_ALPHA" );
+			WW_SWITCH_STATIC( int, treeDial, wwEnvInt( "WW_LODL_TREE_ALPHA" ) );
 			if ( treeDial >= 1 && treeDial <= 255 && !mat->textureList.isEmpty()
 				&& QString( mat->textureList.at( 0 ) ).replace( QChar( '\\' ), QChar( '/' ) )
 					.contains( QLatin1String( "/trees/" ), Qt::CaseInsensitive ) )

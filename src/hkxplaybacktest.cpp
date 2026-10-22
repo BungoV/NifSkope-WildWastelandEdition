@@ -37,6 +37,7 @@
    Lane HKX2, 2026-09-10. */
 
 #include "hkxplayback.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "nifskope.h"
 #include "glview.h"
@@ -427,18 +428,18 @@ void wwStage2( NifSkope * skope, WwHkxState & st, bool ok )
 
 void wwHkxAnimHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_HKXANIM_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_HKXANIM_TEST" ) )
 		return;
 
 	auto * st = new WwHkxState;
 	const QString root = QApplication::applicationDirPath() + QStringLiteral( "/../" );
-	st->clipPath = qEnvironmentVariable( "WW_HKXANIM_CLIP",
+	st->clipPath = wwEnvStr( "WW_HKXANIM_CLIP",
 		root + QStringLiteral( "scratchpad/hkx1_20260910/clips/jog.hkx" ) );
-	st->skelPath = qEnvironmentVariable( "WW_HKXANIM_SKEL",
+	st->skelPath = wwEnvStr( "WW_HKXANIM_SKEL",
 		root + QStringLiteral( "scratchpad/hkx1_20260910/clips/skeleton.hkx" ) );
-	st->noMatchNif = qEnvironmentVariable( "WW_HKXANIM_NOMATCH" );
+	st->noMatchNif = wwEnvStr( "WW_HKXANIM_NOMATCH" );
 
-	const QStringList exp = qEnvironmentVariable( "WW_HKXANIM_EXPECT",
+	const QStringList exp = wwEnvStr( "WW_HKXANIM_EXPECT",
 		QStringLiteral( "78,17,4" ) ).split( QLatin1Char( ',' ) );
 	if ( exp.count() == 3 ) {
 		st->expMatched = exp.at( 0 ).toInt();

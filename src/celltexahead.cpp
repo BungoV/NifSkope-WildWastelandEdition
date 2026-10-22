@@ -1,4 +1,5 @@
 #include "celltexahead.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellspeed.h"
 #include "gamemanager.h"
@@ -66,10 +67,10 @@ State & st()
 
 bool enabled()
 {
-	static const bool on = [] {
-		const QByteArray red = qgetenv( "WW_CELL_SPEED_RED" );
+	WW_SWITCH_STATIC( bool, on, [] {
+		const QByteArray red = wwEnv( "WW_CELL_SPEED_RED" );
 		return red != "slow" && red != "notex";
-	}();
+	}() );
 	return on;
 }
 
@@ -148,7 +149,7 @@ void stopLocked( State & s, std::unique_lock<std::mutex> & l )
 		CellSpeed::count( "texture files named, not ready when asked (not there, or stopped)", s.gone );
 		CellSpeed::count( "texture files read and never taken", s.left );
 		// which ones: beside the timer dump, for the next reader of these counts
-		const QByteArray dump = qgetenv( "WW_CELL_SPEED_DUMP" );
+		const QByteArray dump = wwEnv( "WW_CELL_SPEED_DUMP" );
 		if ( FILE * f = dump.isEmpty() ? nullptr : std::fopen( ( dump + ".texnames" ).constData(), "ab" ) ) {
 			int n = 0;
 			for ( const QString & u : s.unknownNames )

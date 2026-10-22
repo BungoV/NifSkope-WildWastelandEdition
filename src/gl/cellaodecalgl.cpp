@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellaodecalgl.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellaodecal.h"
 #include "gl/glscene.h"
@@ -27,6 +28,7 @@ constexpr std::uint32_t kSelfBit = 0x80u;
 struct DecalState
 {
 	bool loaded = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool add = false;		// WW_CELL_AODECAL_RED=add
 	QString dump;			// WW_CELL_AODECAL_DUMP
 	QString last = QStringLiteral( "none yet" );
@@ -35,10 +37,12 @@ struct DecalState
 DecalState & st()
 {
 	static DecalState s;
-	if ( !s.loaded ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_AODECAL" } ) ) {
 		s.loaded = true;
-		s.add = qgetenv( "WW_CELL_AODECAL_RED" ).trimmed() == "add";
-		s.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AODECAL_DUMP" ) );
+		s.liveGen = wwSwitchGen();
+		s.add = wwEnv( "WW_CELL_AODECAL_RED" ).trimmed() == "add";
+		s.dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_AODECAL_DUMP" ) );
 	}
 	return s;
 }

@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodgen.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "probeincr.h"
 #include "lodgenparallel.h"
 #include "lodgenbc7.h"
@@ -1516,7 +1517,7 @@ static QString lodgenMemMB( qint64 b )
 //! lane BAKEMEM1's red: WW_LODGEN_BAKEMEM_RED=1 keeps every bake model cache to the end of its owner, as before
 static bool lodgenBakeMemRed()
 {
-	static const bool red = qEnvironmentVariableIntValue( "WW_LODGEN_BAKEMEM_RED" ) == 1;
+	static const bool red = wwEnvInt( "WW_LODGEN_BAKEMEM_RED" ) == 1;
 	return red;
 }
 //! lane BAKEMEM1: what the native loader's per-thread caches took in (WW_LODGEN_MEMLOG only)
@@ -2201,7 +2202,7 @@ bool lodgenUnderMo2()
 
 QString lodgenPluginsTxtPath()
 {
-	const QString local = QString::fromLocal8Bit( qgetenv( "LOCALAPPDATA" ) );
+	const QString local = QString::fromLocal8Bit( wwEnv( "LOCALAPPDATA" ) );
 	if ( local.isEmpty() )
 		return QString();
 	return QDir::cleanPath( local + QStringLiteral( "/Fallout4/plugins.txt" ) );
@@ -2502,7 +2503,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			 * `VisibilityEditorMarker` (a green effect box in the large shrub groups) goes too.
 			 * WW_CELL_EDMARK_RED=prefix keeps the old prefix rule (the gate's red). */
 			{
-				static const bool prefixRed = qgetenv( "WW_CELL_EDMARK_RED" ).trimmed() == "prefix";
+				static const bool prefixRed = wwEnv( "WW_CELL_EDMARK_RED" ).trimmed() == "prefix";
 				bool marker = false, prefix = false;
 				int blk = b;
 				for ( int hop = 0; blk >= 0 && hop < 64 && !marker; hop++ ) {
@@ -6040,7 +6041,7 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	QHash<QString, DDSTexture16 *> texCache;
 	int unreadable = 0, lodmLayers = 0, ownEmitSources = 0, mergedLayers = 0;
 	// gate-only way back: one layer per spelling, as before lane TIDY1
-	const bool dedupeLayers = qgetenv( "WW_LODGEN_NO_LAYER_DEDUPE" ).isEmpty();
+	const bool dedupeLayers = wwEnv( "WW_LODGEN_NO_LAYER_DEDUPE" ).isEmpty();
 	for ( auto it = sources.constBegin(); it != sources.constEnd(); ++it ) {
 		const ShapeSrc & src = it.value();
 		// the source .lodm, when there is one: its family and its textures
@@ -6224,7 +6225,7 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	 * its .lodm and has no `_g`/`_e` file; absent = emits nothing, as the VT
 	 * sheets already have it. A set with one lit texel ships the sheet whole.
 	 * Gate-only way back: WW_LODGEN_KEEP_BLACK_EMISSIVE=1. */
-	const bool keepBlackEmissive = !qgetenv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty();
+	const bool keepBlackEmissive = !wwEnv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty();
 	for ( auto it = classes.begin(); it != classes.end(); ++it ) {
 		ArrayClass & cls = it.value();
 		const QString sizeKey = it.key().mid( it.key().indexOf( QChar( '|' ) ) + 1 );
@@ -6538,7 +6539,7 @@ bool lodgenBakeHeightmap( const EsmWorld & world, const QString & outDir,
 	 * zlib buffer is shared), then its cells fill on the pool in two column
 	 * parities: same-parity cells never share a texel, and the seam max is
 	 * order-free, so the map is byte-identical at any thread count. */
-	static const bool horizonRed = qEnvironmentVariableIntValue( "WW_LODGEN_HORIZON_RED" ) == 1;
+	static const bool horizonRed = wwEnvInt( "WW_LODGEN_HORIZON_RED" ) == 1;
 	std::vector<EsmLand> rowLand( static_cast<size_t>( cellsX ) );
 	std::vector<char> rowHave( size_t( cellsX ), 0 );
 	for ( int cy = minY; cy <= maxY; cy++ ) {
@@ -7430,7 +7431,7 @@ static bool lodgenTerrainRingSelfTest()
 static void lodgenTerrainRingSelfTestOnce()
 {
 	static bool done = false;
-	if ( done || qgetenv( "WW_TERRAIN_RING_TEST" ).isEmpty() )
+	if ( done || wwEnv( "WW_TERRAIN_RING_TEST" ).isEmpty() )
 		return;
 	done = true;
 	lodgenTerrainRingSelfTest();
@@ -12847,7 +12848,7 @@ static bool lodgenObjectSlabSelfTest()
 static void lodgenObjectSlabSelfTestOnce()
 {
 	static bool done = false;
-	if ( done || qgetenv( "WW_OBJAO_SLAB_TEST" ).isEmpty() )
+	if ( done || wwEnv( "WW_OBJAO_SLAB_TEST" ).isEmpty() )
 		return;
 	done = true;
 	lodgenObjectSlabSelfTest();
@@ -15307,7 +15308,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			}
 		};
 		// HORIZON1: one row per task (a texel is written by its own row only); a census caller stays serial
-		static const bool horizonRed = qEnvironmentVariableIntValue( "WW_LODGEN_HORIZON_RED" ) == 1;
+		static const bool horizonRed = wwEnvInt( "WW_LODGEN_HORIZON_RED" ) == 1;
 		if ( horizonRed || objCensus )
 			for ( int j = 0; j < S; j++ )
 				aoRow( j );
@@ -17291,7 +17292,7 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 	/* WW_RULE_DUMP=<file>: a DEBUG dump of every sample (vanilla colour, slope,
 	 * height, our true mix) plus the palette and the choice, for tuning offline.
 	 * Nothing reads it back; no shipped format. */
-	const QString dumpPath = QString::fromLocal8Bit( qgetenv( "WW_RULE_DUMP" ) );
+	const QString dumpPath = QString::fromLocal8Bit( wwEnv( "WW_RULE_DUMP" ) );
 	std::vector<quint8> dMixId;
 	std::vector<float> dMixW;
 	if ( !dumpPath.isEmpty() ) {
@@ -21191,7 +21192,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		// a black emissive is not written, as the mesh arrays have it (lane TIDY1);
 		// WW_LODGEN_KEEP_BLACK_EMISSIVE=1 is the gate's way back
 		// black as SHIPPED: the BC1 sheet at the aux size and mip count it is written with
-		const bool writeEmissive = !qgetenv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty()
+		const bool writeEmissive = !wwEnv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty()
 			|| !lodgenEmissiveShipsBlack( g.emis, g.aw, g.ah, g.auxMips );
 		if ( !writeEmissive )
 			blackEmissiveDropped++;

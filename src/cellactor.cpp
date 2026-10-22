@@ -2,6 +2,7 @@
  * layouts follow the published plugin format notes (the xEdit definitions). */
 
 #include "cellactor.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmfile.hpp"
 #include "lodgen.h"
@@ -164,7 +165,7 @@ struct CellActors::Impl
 	Impl( const EsmWorld & w, const QString & root ) : world( w ), dataRoot( root )
 	{
 		esm = world.plugin();
-		red = QString::fromLocal8Bit( qgetenv( "WW_CELL_ACTOR_RED" ) ).trimmed().toLower();
+		red = QString::fromLocal8Bit( wwEnv( "WW_CELL_ACTOR_RED" ) ).trimmed().toLower();
 		for ( const QString & p : world.pluginList().split( QChar( ',' ), Qt::SkipEmptyParts ) )
 			plugins.append( QFileInfo( p.trimmed() ).fileName() );
 	}

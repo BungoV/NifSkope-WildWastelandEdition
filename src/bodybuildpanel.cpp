@@ -19,6 +19,7 @@ BSD License - see nifskope.h
    go through `Transform( nif, index )` and could promise nothing. */
 
 #include "bodybuildpanel.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gamemanager.h"
 #include "glview.h"
@@ -363,7 +364,7 @@ BodyBuildPanel::BodyBuildPanel( QWidget * parent )
 	: QWidget( parent )
 {
 	setObjectName( QStringLiteral( "BodyBuildPanel" ) );
-	forced = qEnvironmentVariableIsSet( "WW_BODY_BUILD" );
+	forced = wwEnvIsSet( "WW_BODY_BUILD" );
 	buildUi();
 	loadRaceList();
 
@@ -372,7 +373,7 @@ BodyBuildPanel::BodyBuildPanel( QWidget * parent )
 	 * panel reads no QSettings and writes none, so a harness measures the build
 	 * it asked for and never the one the last session left behind. */
 	if ( forced ) {
-		const QStringList part = qEnvironmentVariable( "WW_BODY_BUILD" ).split( QLatin1Char( '|' ) );
+		const QStringList part = wwEnvStr( "WW_BODY_BUILD" ).split( QLatin1Char( '|' ) );
 		if ( part.count() > 0 && !part.at( 0 ).trimmed().isEmpty() )
 			setRaceByEditorId( part.at( 0 ).trimmed() );
 		if ( part.count() > 1 ) {
@@ -1064,7 +1065,7 @@ bool sameTransform( const Transform & a, const Transform & b )
 
 void wwBodyBuildHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_BODY_BUILD" ) )
+	if ( !skope || !wwEnvIsSet( "WW_BODY_BUILD" ) )
 		return;
 
 	QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
@@ -1376,7 +1377,7 @@ void wwBodyBuildHarness( NifSkope * skope )
 				   tri->thin() == tw );
 
 			// ---- the picture
-			const QString shot = qEnvironmentVariable( "WW_BODY_BUILD_SHOT" );
+			const QString shot = wwEnvStr( "WW_BODY_BUILD_SHOT" );
 			if ( !shot.isEmpty() ) {
 				QWidget * grabTarget = panel;
 				if ( auto * dock = qobject_cast<QDockWidget *>( panel->parentWidget() ) )
@@ -1400,7 +1401,7 @@ void wwBodyBuildHarness( NifSkope * skope )
 			 * comment at src/glview.h:546 -- so each view is pumped before it
 			 * is grabbed, and a null image is reported rather than saved
 			 * silently. */
-			const QString viewShot = qEnvironmentVariable( "WW_BODY_BUILD_VIEW_SHOT" );
+			const QString viewShot = wwEnvStr( "WW_BODY_BUILD_VIEW_SHOT" );
 			if ( !viewShot.isEmpty() && ogl ) {
 				const GLView::ViewState was = ogl->viewState();
 				const struct { GLView::ViewState v; const char * tag; } views[2] = {
@@ -1534,7 +1535,7 @@ void wwBodyBuildHarness( NifSkope * skope )
 			 * back where the harness left it, and the gender written on each
 			 * row is the panel's, so a female table dumped onto a male body
 			 * announces itself. */
-			const QString dump = qEnvironmentVariable( "WW_BODY_BUILD_DUMP" );
+			const QString dump = wwEnvStr( "WW_BODY_BUILD_DUMP" );
 			if ( !dump.isEmpty() ) {
 				QFile df( dump );
 				if ( df.open( QIODevice::WriteOnly | QIODevice::Text ) ) {

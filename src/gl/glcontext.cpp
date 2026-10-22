@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glcontext.hpp"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "ddstxt16.hpp"
 #include "libfo76utils/src/filebuf.hpp"
 #include "model/nifmodel.h"
@@ -382,13 +383,13 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 	{
 		QByteArray	data = loadShaderFile( filepath );
 		// red for the shader guard (printCompileError): WW_SHADER_RED=<file name> breaks that one shader
-		if ( const QString red = qEnvironmentVariable( "WW_SHADER_RED" );
+		if ( const QString red = wwEnvStr( "WW_SHADER_RED" );
 			!red.isEmpty() && QFileInfo( filepath ).fileName().compare( red, Qt::CaseInsensitive ) == 0 ) {
 			const qsizetype eol = data.startsWith( "#version" ) ? data.indexOf( '\n' ) + 1 : 0;
 			data.insert( eol, "#error WW_SHADER_RED broke this shader on purpose\n" );
 		}
 		// lane PERF1: WW_CELL_GI_VIS=march (red), or a march-only WW_CELL_PV_RED: the per-pixel chain in every shader (cell_lights.glsl)
-		static const bool giMarch = wwCellGiVis() == 1;
+		const bool giMarch = wwCellGiVis() == 1;	// not static: a live set reloads the shaders (stage shaders)
 		if ( giMarch && data.startsWith( "#version" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_GI_MARCH 1\n" );
 		// lane PERF3: the cascades from one per-frame block, in the sources that ask for it (WW_FRAME_UBO_RED=1: plain uniforms)
@@ -565,7 +566,7 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 			if ( cf.open( QIODevice::ReadOnly ) ) {
 				QByteArray	b = cf.readAll();
 				if ( b.size() > 8 && b.startsWith( "WWPB" ) ) {
-					if ( qEnvironmentVariableIntValue( "WW_PROGCACHE_RED" ) == 1 )
+					if ( wwEnvInt( "WW_PROGCACHE_RED" ) == 1 )
 						b[b.size() / 2] = char( b.at( b.size() / 2 ) ^ 0x5A );	// red: a damaged binary must fall back
 					GLenum	fmt;
 					std::memcpy( &fmt, b.constData() + 4, 4 );
@@ -1089,7 +1090,7 @@ void NifSkopeOpenGLContext::updateShaders()
 	clock.start();
 	programCacheHits = programCacheRejected = programCacheWritten = 0;
 	programCacheDir.clear();
-	if ( qEnvironmentVariable( "WW_PROGCACHE" ) != "0" ) {
+	if ( wwEnvStr( "WW_PROGCACHE" ) != "0" ) {
 		QDir	app( QCoreApplication::applicationDirPath() );
 		if ( app.mkpath( "shadercache" ) )
 			programCacheDir = app.filePath( "shadercache" );
@@ -1097,7 +1098,7 @@ void NifSkopeOpenGLContext::updateShaders()
 	/* lane PERF1: the driver's own link threads, opt-in (WW_PARALLEL_LINK=1): measured on a cold cache they made the
 	 * 62 links slower here (370 s against 132 s serial); the binary cache is what makes the second launch fast */
 	const char *	threads = "off";
-	if ( QOpenGLContext * ctx = QOpenGLContext::currentContext(); ctx && qEnvironmentVariable( "WW_PARALLEL_LINK" ) == "1" ) {
+	if ( QOpenGLContext * ctx = QOpenGLContext::currentContext(); ctx && wwEnvStr( "WW_PARALLEL_LINK" ) == "1" ) {
 		using MaxThreads = void ( QOPENGLF_APIENTRY * )( GLuint );
 		for ( const char * ext : { "GL_KHR_parallel_shader_compile", "GL_ARB_parallel_shader_compile" } ) {
 			if ( !ctx->hasExtension( ext ) )
@@ -1384,7 +1385,7 @@ void NifSkopeOpenGLContext::bindShape(
 //! WW_GEOCACHE_RED=thrash: the old strict size limit, evicting shapes the frame still draws (the gate's red)
 static bool geoCacheThrashRed()
 {
-	static const bool v = qgetenv( "WW_GEOCACHE_RED" ) == "thrash";
+	WW_SWITCH_STATIC( bool, v, wwEnv( "WW_GEOCACHE_RED" ) == "thrash" );
 	return v;
 }
 
@@ -1514,7 +1515,7 @@ NifSkopeOpenGLContext::ShapeData::ShapeData(
 	// TEMP DIAGNOSTIC (WW_GRID_TRACE): trace small streaming uploads (grid/axes).
 	// Its own variable for the same reason as drawGrid's: a file write per upload
 	// has no business under the flag reached for when something is slow.
-	if ( qEnvironmentVariableIsSet( "WW_GRID_TRACE" ) && dataHash.numVerts <= 100
+	if ( wwEnvIsSet( "WW_GRID_TRACE" ) && dataHash.numVerts <= 100
 		&& !dataHash.elementBytes ) {
 		QFile df( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
 		if ( df.open( QIODevice::Append | QIODevice::Text ) )

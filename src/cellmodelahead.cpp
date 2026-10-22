@@ -1,4 +1,5 @@
 #include "cellmodelahead.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellspeed.h"
 #include "data/nifitemcache.h"
@@ -21,7 +22,7 @@ namespace
 int workerCap()
 {
 	bool ok = false;
-	const int asked = qEnvironmentVariableIntValue( "WW_CELL_SPEED_THREADS", &ok );
+	const int asked = wwEnvInt( "WW_CELL_SPEED_THREADS", &ok );
 	if ( ok && asked > 0 )
 		return asked;
 	return qBound( 1, QThread::idealThreadCount() - 2, 8 );
@@ -42,7 +43,7 @@ QString keyOf( const QString & model, const LodgenMaterialSubst * subst )
 CellModelAhead::CellModelAhead( const QString & dataRoot, bool on )
 	: dataRoot_( dataRoot ), on_( on )
 {
-	const QByteArray red = qgetenv( "WW_CELL_SPEED_RED" );
+	const QByteArray red = wwEnv( "WW_CELL_SPEED_RED" );
 	if ( red == "slow" || red == "nomodels" )
 		on_ = false;
 }

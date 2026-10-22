@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellclustergl.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellcluster.h"
 #include "gl/cellunits.h"
@@ -54,28 +55,28 @@ struct Settings
 
 const Settings & settings()
 {
-	static const Settings s = []() {
+	WW_SWITCH_STATIC( Settings, s, []() {
 		Settings t;
-		t.on = qEnvironmentVariable( "WW_CELL_CLUSTER", QStringLiteral( "1" ) ) != QLatin1String( "0" );
-		if ( const int v = qEnvironmentVariableIntValue( "WW_CELL_CLUSTER_TILE" ); v > 0 )
+		t.on = wwEnvStr( "WW_CELL_CLUSTER", QStringLiteral( "1" ) ) != QLatin1String( "0" );
+		if ( const int v = wwEnvInt( "WW_CELL_CLUSTER_TILE" ); v > 0 )
 			t.params.tilePx = std::clamp( v, 8, 512 );
-		if ( const int v = qEnvironmentVariableIntValue( "WW_CELL_CLUSTER_SLICES" ); v > 0 )
+		if ( const int v = wwEnvInt( "WW_CELL_CLUSTER_SLICES" ); v > 0 )
 			t.params.slices = std::clamp( v, 1, 64 );
-		if ( const int v = qEnvironmentVariableIntValue( "WW_CELL_CLUSTER_MAX" ); v > 0 )
+		if ( const int v = wwEnvInt( "WW_CELL_CLUSTER_MAX" ); v > 0 )
 			t.params.maxPerCluster = v;
 		// the refuter: slices culled at their middle depth only, so lights near a slice edge go missing
-		const QString red = qEnvironmentVariable( "WW_CELL_CLUSTER_RED" );
+		const QString red = wwEnvStr( "WW_CELL_CLUSTER_RED" );
 		t.params.redMidSlice = red.contains( QLatin1String( "midslice" ) );
 		// LIGHTCLUSTER1: WW_CELL_CLUSTER_KEEP=0 the switch, WW_CELL_CLUSTER_RED=rebuild the red (both: the old
 		// single grid on the exact projection, a rebuild per TAA frame, the buffer re-attached per draw)
-		t.keep = qEnvironmentVariable( "WW_CELL_CLUSTER_KEEP", QStringLiteral( "1" ) ) != QLatin1String( "0" )
+		t.keep = wwEnvStr( "WW_CELL_CLUSTER_KEEP", QStringLiteral( "1" ) ) != QLatin1String( "0" )
 			&& !red.contains( QLatin1String( "rebuild" ) );
 		if ( t.keep )
 			t.params.jitterPadPx = kJitterReusePx;
-		if ( qEnvironmentVariableIsSet( "WW_CELL_CLUSTER_STATS" ) )
-			t.stats = std::max( qEnvironmentVariableIntValue( "WW_CELL_CLUSTER_STATS" ), 1 );
+		if ( wwEnvIsSet( "WW_CELL_CLUSTER_STATS" ) )
+			t.stats = std::max( wwEnvInt( "WW_CELL_CLUSTER_STATS" ), 1 );
 		return t;
-	}();
+	}() );
 	return s;
 }
 
@@ -179,7 +180,7 @@ void echo( const WwClusterGrid & g, int count )
 		.arg( g.buildMs, 0, 'f', 3 ).arg( settings().params.redMidSlice ? QStringLiteral( " (RED midslice)" ) : QString() );
 	// once per change of what the lists hold, not per frame
 	const QString shape = line.section( QStringLiteral( ", build" ), 0, 0 );
-	if ( shape != lastEcho().section( QStringLiteral( ", build" ), 0, 0 ) || qEnvironmentVariableIsSet( "WW_CELL_CLUSTER_ECHO" ) )
+	if ( shape != lastEcho().section( QStringLiteral( ", build" ), 0, 0 ) || wwEnvIsSet( "WW_CELL_CLUSTER_ECHO" ) )
 		std::fprintf( stderr, "%s\n", qPrintable( line ) );
 	lastEcho() = line;
 }

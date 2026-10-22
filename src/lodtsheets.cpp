@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodtsheets.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gamemanager.h"
 #include "io/lodvfile.h"
@@ -115,7 +116,7 @@ bool LodtSheets::openFiltered( const QString & lodlPath, int wantRole, QString *
 	const QFileInfo li( lodlPath );
 	const QString stem = li.completeBaseName();
 
-	QString dir = qEnvironmentVariable( "WW_LODL_SHEETS" );
+	QString dir = wwEnvStr( "WW_LODL_SHEETS" );
 	if ( !dir.isEmpty() ) {
 		if ( !QFileInfo( dir ).isDir() )
 			return no( QString( "WW_LODL_SHEETS=%1 is not a directory" ).arg( dir ) );
@@ -129,7 +130,7 @@ bool LodtSheets::openFiltered( const QString & lodlPath, int wantRole, QString *
 	 * for: the horizon is on the level the bake authored it on, and a dial
 	 * pointing elsewhere would turn "here it is" into "absent". */
 	const int wantDim = ( wantRole >= 0 ) ? 0
-		: d->forceDim > 0 ? d->forceDim : qEnvironmentVariableIntValue( "WW_LODL_SHEET_DIM" );
+		: d->forceDim > 0 ? d->forceDim : wwEnvInt( "WW_LODL_SHEET_DIM" );
 	QDir qd( dir );
 	const QStringList found = qd.entryList(
 		QStringList() << ( stem + QStringLiteral( ".VT.*.lodt" ) ), QDir::Files, QDir::Name );
@@ -202,7 +203,7 @@ bool LodtSheets::openFiltered( const QString & lodlPath, int wantRole, QString *
 	/* The cache, and the folder the renderer will resolve against. Under the
 	 * system temporary directory by default; WW_LODL_SHEET_CACHE puts it where
 	 * a lane can look at the files afterwards. */
-	QString cache = qEnvironmentVariable( "WW_LODL_SHEET_CACHE" );
+	QString cache = wwEnvStr( "WW_LODL_SHEET_CACHE" );
 	if ( cache.isEmpty() )
 		cache = QDir( QStandardPaths::writableLocation( QStandardPaths::TempLocation ) )
 			.absoluteFilePath( QStringLiteral( "nifskope_ww_lodl_sheets" ) );

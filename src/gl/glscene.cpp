@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glscene.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellspeed.h"
 
 #include "hkxplayback.h"
@@ -761,7 +762,7 @@ void Scene::drawGrid()
 	 *
 	 * (env read hoisted — this runs per frame)
 	 */
-	static const bool wwPerfTest = qEnvironmentVariableIsSet( "WW_GRID_TRACE" );
+	WW_SWITCH_STATIC( bool, wwPerfTest, wwEnvIsSet( "WW_GRID_TRACE" ) );
 	if ( wwPerfTest ) {
 		QFile f( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
 		if ( f.open( QIODevice::Append | QIODevice::Text ) )

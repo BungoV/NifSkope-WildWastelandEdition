@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "celllights.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellclustergl.h"
 #include "gl/cellssr.h"
@@ -67,6 +68,7 @@ struct ClBloom
 struct ClState
 {
 	bool loaded = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool on = false;
 	bool pinned = false;
 	int probe = 0;
@@ -103,51 +105,63 @@ struct ClState
 ClState & st()
 {
 	static ClState s;
-	if ( !s.loaded ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_" } ) ) {
 		s.loaded = true;
-		const QByteArray pin = qgetenv( "WW_CELL_LIT" );
+		s.liveGen = wwSwitchGen();
+		{
+			const ClState d {};
+			s.pinned = d.pinned;
+			s.giPinned = d.giPinned;
+			s.farPinned = d.farPinned;
+			s.isPinned = d.isPinned;
+			s.passPinned = d.passPinned;
+			s.red = d.red;
+			s.passRed = d.passRed;
+		}
+		const QByteArray pin = wwEnv( "WW_CELL_LIT" );
 		if ( !pin.isEmpty() ) {
 			s.pinned = true;
 			s.on = pin.trimmed() != "0";
 		} else {
 			s.on = QSettings().value( QStringLiteral( "WW/CellLights" ), false ).toBool();
 		}
-		const QByteArray giPin = qgetenv( "WW_CELL_GI" );
+		const QByteArray giPin = wwEnv( "WW_CELL_GI" );
 		if ( !giPin.isEmpty() ) {
 			s.giPinned = true;
 			s.giOn = giPin.trimmed() != "0";
 		} else {
 			s.giOn = QSettings().value( QStringLiteral( "WW/CellGi" ), false ).toBool();
 		}
-		const QByteArray farPin = qgetenv( "WW_CELL_FAR" );	// lane FARVIEW1
+		const QByteArray farPin = wwEnv( "WW_CELL_FAR" );	// lane FARVIEW1
 		if ( !farPin.isEmpty() ) {
 			s.farPinned = true;
 			s.farOn = farPin.trimmed() != "0";
 		} else {
 			s.farOn = QSettings().value( QStringLiteral( "WW/CellFar" ), false ).toBool();
 		}
-		const QByteArray farRed = qgetenv( "WW_CELL_FAR_RED" ).trimmed();
+		const QByteArray farRed = wwEnv( "WW_CELL_FAR_RED" ).trimmed();
 		s.farRed = farRed == "nosurfel" ? 1 : farRed == "noblend" ? 2 : farRed == "flipside" ? 4 : 0;
-		s.probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
-		const QByteArray isPin = qgetenv( "WW_CELL_IS" );
+		s.probe = wwEnvInt( "WW_CELL_LIT_PROBE" );
+		const QByteArray isPin = wwEnv( "WW_CELL_IS" );
 		if ( !isPin.isEmpty() ) {
 			s.isPinned = true;
 			s.isOn = isPin.trimmed() != "0";
 		} else {
 			s.isOn = QSettings().value( QStringLiteral( "WW/CellImageSpace" ), false ).toBool();
 		}
-		const QByteArray isRed = qgetenv( "WW_CELL_IS_RED" ).trimmed();
+		const QByteArray isRed = wwEnv( "WW_CELL_IS_RED" ).trimmed();
 		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : isRed == "nobloom" ? 8
 			: isRed == "nofx" ? 16 : 0;
-		const QByteArray shPin = qgetenv( "WW_CELL_SHADOW" ).trimmed();
+		const QByteArray shPin = wwEnv( "WW_CELL_SHADOW" ).trimmed();
 		s.shadowPinned = !shPin.isEmpty();
 		s.shadowOn = s.shadowPinned ? shPin != "0" : QSettings().value( QStringLiteral( "WW/CellShadow" ), true ).toBool();
-		s.shadowRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
-		s.fogProbe = qEnvironmentVariableIntValue( "WW_CELL_FOG_PROBE" );
-		const QByteArray giAmb = qgetenv( "WW_CELL_GI_AMB" ).trimmed();	// lane GICAL1
+		s.shadowRed = wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
+		s.fogProbe = wwEnvInt( "WW_CELL_FOG_PROBE" );
+		const QByteArray giAmb = wwEnv( "WW_CELL_GI_AMB" ).trimmed();	// lane GICAL1
 		s.giAmb = giAmb == "keep" ? 0 : giAmb == "off" ? 2 : giAmb == "max" ? 3 : giAmb == "asgi" ? 4 : 1;	// lane GIAMB1: unset = replace
-		s.giFill = qgetenv( "WW_CELL_GI_FILL" ).trimmed() != "0";
-		const QByteArray red = qgetenv( "WW_CELL_LIT_RED" ).trimmed();
+		s.giFill = wwEnv( "WW_CELL_GI_FILL" ).trimmed() != "0";
+		const QByteArray red = wwEnv( "WW_CELL_LIT_RED" ).trimmed();
 		if ( red == "linear" )
 			s.red = 1;
 		else if ( red == "axis" )
@@ -173,13 +187,13 @@ ClState & st()
 		else if ( red == "probefx" )
 			s.red = 4096;	// lane FRAT1: effects and refraction shapes drawn into the probe passes again
 		// lane POOL1: the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
-		if ( qgetenv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
+		if ( wwEnv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
 			s.red |= 65536;
 		// lane GISHADE1: outdoors the grid's sky takes k x the flat ambient off in sqrt space again (the old law)
-		if ( qgetenv( "WW_CELL_GISHADE_RED" ).trimmed() == "sqrt" )
+		if ( wwEnv( "WW_CELL_GISHADE_RED" ).trimmed() == "sqrt" )
 			s.red |= 131072;
 		// lane PROBEVIEW1: the Pass, by number or by its entry's name
-		const QByteArray passPin = qgetenv( "WW_CELL_PASS" ).trimmed();
+		const QByteArray passPin = wwEnv( "WW_CELL_PASS" ).trimmed();
 		if ( !passPin.isEmpty() ) {
 			s.passPinned = true;
 			const QStringList names = wwCellPassNames();
@@ -190,7 +204,7 @@ ClState & st()
 		}
 		if ( s.pass < 0 || s.pass >= int( wwCellPassNames().size() ) )
 			s.pass = 0;
-		for ( const QByteArray & r : qgetenv( "WW_CELL_PV_RED" ).split( ',' ) ) {
+		for ( const QByteArray & r : wwEnv( "WW_CELL_PV_RED" ).split( ',' ) ) {
 			const QByteArray t = r.trimmed();
 			s.passRed |= t == "direct" ? 1 : t == "nonormal" ? 2 : t == "open" ? 4 : t == "noclamp" ? 8 : t == "nosee" ? 16 : t == "borrow" ? 32 : t == "lendamb" ? 64 : t == "strand" ? 128 : t == "firstslot" ? 256 : t == "tiepick" ? 512 : t == "lonesky" ? 1024 : t == "nofilter" ? 2048 : t == "nolastfill" ? 4096 : 0;	// lane GIDARK1: firstslot, tiepick, lonesky; lane WALLSTACK1: nofilter, nolastfill   // lane ROOMCLAMP1: noclamp; lane GISHADE1: nosee; lane GIBLACK1: borrow; lane GIBLACK2: lendamb, strand
 		}
@@ -203,6 +217,7 @@ struct Gpu
 {
 	GLuint buf = 0, tex = 0;
 	bool texAttached = false;	// lane PERF1: the buffer texture keeps its buffer across glBufferData; attached once
+	quint64 bufLiveGen = 0;	// lane TESTDRIVER1: a live set (light copies, reds) rebuilds the buffer
 	const void * doc = nullptr;
 	int version = 0;
 	int count = 0;
@@ -578,19 +593,19 @@ int wwCellPassRed()
  * chain as before, compiled in by src/gl/glcontext.cpp's WW_CELL_GI_MARCH, no screen pass) */
 int wwCellGiVis()
 {
-	static const int mode = [] {
-		const QByteArray v = qgetenv( "WW_CELL_GI_VIS" ).trimmed().toLower();
+	WW_SWITCH_STATIC( int, mode, [] {
+		const QByteArray v = wwEnv( "WW_CELL_GI_VIS" ).trimmed().toLower();
 		if ( v == "march" || v == "red" || v == "old" )
 			return 1;
 		// a red of the march's own rules (WW_CELL_PV_RED) restores the march: the volumes have none of those rules
-		for ( const QByteArray & r : qgetenv( "WW_CELL_PV_RED" ).split( ',' ) ) {
+		for ( const QByteArray & r : wwEnv( "WW_CELL_PV_RED" ).split( ',' ) ) {
 			const QByteArray t = r.trimmed().toLower();
 			if ( t == "noclamp" || t == "nosee" || t == "borrow" || t == "lendamb" || t == "strand" || t == "firstslot"
 				|| t == "tiepick" || t == "lonesky" || t == "nolastfill" )
 				return 1;
 		}
 		return 0;
-	}();
+	}() );
 	return mode;
 }
 
@@ -600,10 +615,10 @@ int wwCellGiVis()
  * the pass) */
 int wwCellGiRate()
 {
-	static const int mode = [] {
-		const QByteArray v = qgetenv( "WW_CELL_GI_RATE" ).trimmed().toLower();
+	WW_SWITCH_STATIC( int, mode, [] {
+		const QByteArray v = wwEnv( "WW_CELL_GI_RATE" ).trimmed().toLower();
 		return v == "full" ? 1 : v == "inline" || v == "old" || v == "0" ? 2 : v == "red" ? 3 : 0;
-	}();
+	}() );
 	return mode;
 }
 
@@ -640,7 +655,9 @@ void wwCellLightsUniforms( Scene * scene )
 	ClState & s = st();
 	Gpu & g = gpus()[r];
 	const WwCellLighting * L = on ? wwCellLightsFor( scene->nifModel ) : nullptr;
-	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp ) ) {
+	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp
+	            || g.bufLiveGen != wwSwitchGen() ) ) {
+		g.bufLiveGen = wwSwitchGen();
 		// lane SHADOW1: the slot each light holds (the slots belong to the document the shadow pass last saw)
 		std::vector<float> slotOf( size_t( L->lights.size() ), -1.0f );
 		if ( g.shDoc == scene->nifModel && g.shVersion == s.version.value( scene->nifModel ) )
@@ -668,7 +685,7 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 		/* lane FARVIEW1: WW_CELL_LIGHT_COPIES=n (the flat-cost gate's knob): every light n times at 1/n its colour, the
 		 * picture unchanged, the light loop n times as long */
-		static const int copies = std::clamp( qEnvironmentVariableIntValue( "WW_CELL_LIGHT_COPIES" ), 1, 64 );
+		WW_SWITCH_STATIC( int, copies, std::clamp( wwEnvInt( "WW_CELL_LIGHT_COPIES" ), 1, 64 ) );
 		if ( copies > 1 && !t.empty() ) {
 			const size_t one = t.size();
 			t.reserve( one * size_t( copies ) );
@@ -1040,7 +1057,7 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1f( "cellSunScale", sunScale );
 	/* lane VOLAIR1 (LAMPAIR1): the air takes the surfaces' exterior sun and sky (the weather's light x Sunlight Scale,
 	 * its DALC) so it is lit by the light the records give, not the fog-sun glare colour; red WW_CELL_AIR_RED=oldsun */
-	static const bool airOldSun = qEnvironmentVariable( "WW_CELL_AIR_RED" ).split( ',' ).contains( QStringLiteral( "oldsun" ) );
+	WW_SWITCH_STATIC( bool, airOldSun, wwEnvStr( "WW_CELL_AIR_RED" ).split( ',' ).contains( QStringLiteral( "oldsun" ) ) );
 	const bool extProg = wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) || ( prog->name == "cell_volair.prog" && !airOldSun );
 	if ( !L->interior && wwLookdevActive() && extProg ) {
 		float dalc[6][3], dif[4] = {}, amb[4] = {};
@@ -1082,9 +1099,9 @@ void wwCellLightsUniforms( Scene * scene )
 	 * shader's lit branch reads that effect colour. CommonwealthClear at noon: Sunlight 225 grey, Effect Lighting 150 grey
 	 * (0.41x linear); at night 53,70,87 vs 33,51,67. Red WW_CELL_FXLIT_COLOR_RED=sun takes the sunlight again. */
 	{
-		static const bool fxExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
-		static const bool fxScaleRed = qgetenv( "WW_CELL_FXLIT_SCALE_RED" ).trimmed() == "game";
-		static const bool fxColorRed = qgetenv( "WW_CELL_FXLIT_COLOR_RED" ).trimmed() == "sun";
+		WW_SWITCH_STATIC( bool, fxExtRed, wwEnv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors" );
+		WW_SWITCH_STATIC( bool, fxScaleRed, wwEnv( "WW_CELL_FXLIT_SCALE_RED" ).trimmed() == "game" );
+		WW_SWITCH_STATIC( bool, fxColorRed, wwEnv( "WW_CELL_FXLIT_COLOR_RED" ).trimmed() == "sun" );
 		const bool fxProg = prog->name == std::string_view( "fo4_effectcell.prog" )
 			|| prog->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1
 			|| prog->name == std::string_view( "particles_cell.prog" );
@@ -1147,7 +1164,7 @@ void wwCellLightsUniforms( Scene * scene )
 		/* lane SUNCELL1 final: indoors too the base takes the imagespace Sunlight Scale -- the lit-effect setup multiplies
 		 * the imagespace Sunlight Scale in unconditionally; indoors that is the cell's XCIM imagespace HNAM[6].
 		 * A cell with no imagespace read keeps the base as it was. Red WW_CELL_FXLIT_INT_RED=noscale leaves it out. */
-		static const bool fxIntRed = qgetenv( "WW_CELL_FXLIT_INT_RED" ).trimmed() == "noscale";
+		WW_SWITCH_STATIC( bool, fxIntRed, wwEnv( "WW_CELL_FXLIT_INT_RED" ).trimmed() == "noscale" );
 		if ( L->interior && fxProg ) {
 			const bool scaled = fxScaleRed && !fxIntRed && L->hasImageSpace;	// lane ALLON2: the surfaces' scale (1)
 			if ( scaled )
@@ -1174,7 +1191,7 @@ void wwCellLightsUniforms( Scene * scene )
 	 * =flip swaps the axis convention. */
 	bool extDalc = false;
 	if ( !L->interior && hasDir && wwLookdevActive() && extProg ) {
-		static const QByteArray extRed = qgetenv( "WW_CELL_EXTAMB_RED" ).trimmed();
+		WW_SWITCH_STATIC( QByteArray, extRed, wwEnv( "WW_CELL_EXTAMB_RED" ).trimmed() );
 		float w[6][3];
 		if ( extRed != "flat" && wwLookdevDalc( w ) ) {
 			const bool flip = extRed == "flip";
@@ -1222,12 +1239,12 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni3f( "cellCenter", L->center[0], L->center[1], L->center[2] );
 	prog->uni1i( "cellProbe", s.measuring ? 6 : s.probe );
 	// lane DECALLIT1: a harness reads a dark linear frame through 8 bits; the imagespace's own measure stays x 1
-	static const float probeGain = qEnvironmentVariableIsSet( "WW_CELL_LIT_PROBE_GAIN" )
-		? std::max( qgetenv( "WW_CELL_LIT_PROBE_GAIN" ).toFloat(), 0.0f ) : 1.0f;
+	WW_SWITCH_STATIC( float, probeGain, wwEnvIsSet( "WW_CELL_LIT_PROBE_GAIN" )
+		? std::max( wwEnv( "WW_CELL_LIT_PROBE_GAIN" ).toFloat(), 0.0f ) : 1.0f );
 	prog->uni1f( "cellProbeGain", s.measuring ? 1.0f : probeGain );
 	prog->uni1i( "cellRed", s.red );
 	// WW_CELL_CAM_DUMP=<file>: the camera in world units, rewritten when it moves (the fog and diffuse gates measure from it)
-	static const QString camDump = QString::fromLocal8Bit( qgetenv( "WW_CELL_CAM_DUMP" ) );
+	WW_SWITCH_STATIC( QString, camDump, QString::fromLocal8Bit( wwEnv( "WW_CELL_CAM_DUMP" ) ) );
 	static QString camLast;
 	if ( !camDump.isEmpty() ) {
 		const QString line = QStringLiteral( "cam=%1,%2,%3 fogprobe=%4 probe=%5\n" ).arg( double( cellRowW[0] ), 0, 'f', 2 )
@@ -1281,7 +1298,7 @@ void wwCellShadowSetOn( bool on )
 
 bool wwCellGiGpuOn()
 {
-	const QByteArray pin = qgetenv( "WW_CELL_GI_GPU" ).trimmed();
+	const QByteArray pin = wwEnv( "WW_CELL_GI_GPU" ).trimmed();
 	if ( !pin.isEmpty() )
 		return pin != "0";
 	return QSettings().value( QStringLiteral( "WW/CellGiGpu" ), false ).toBool();
@@ -1289,7 +1306,7 @@ bool wwCellGiGpuOn()
 
 void wwCellGiGpuSetOn( bool on )
 {
-	if ( !qgetenv( "WW_CELL_GI_GPU" ).trimmed().isEmpty() )
+	if ( !wwEnv( "WW_CELL_GI_GPU" ).trimmed().isEmpty() )
 		return;
 	QSettings().setValue( QStringLiteral( "WW/CellGiGpu" ), on );
 }
@@ -1301,7 +1318,7 @@ int & skyVisCache()
 {
 	static int pct = -1;
 	if ( pct < 0 ) {
-		const QByteArray pin = qgetenv( "WW_CELL_SKYSTR" ).trimmed();
+		const QByteArray pin = wwEnv( "WW_CELL_SKYSTR" ).trimmed();
 		pct = pin.isEmpty() ? QSettings().value( QStringLiteral( "WW/CellSkyVis" ), 100 ).toInt() : pin.toInt();
 		pct = std::clamp( pct, 0, 100 );
 	}
@@ -1311,7 +1328,7 @@ int & skyVisCache()
 
 bool wwCellSkyVisPinned()
 {
-	return !qgetenv( "WW_CELL_SKYSTR" ).trimmed().isEmpty();
+	return !wwEnv( "WW_CELL_SKYSTR" ).trimmed().isEmpty();
 }
 
 int wwCellSkyVisPercent()
@@ -1321,7 +1338,7 @@ int wwCellSkyVisPercent()
 
 float wwCellSkyVis()
 {
-	static const bool ignore = qgetenv( "WW_CELL_SKYSTR_RED" ).trimmed() == "ignore";
+	WW_SWITCH_STATIC( bool, ignore, wwEnv( "WW_CELL_SKYSTR_RED" ).trimmed() == "ignore" );
 	return ignore ? 1.0f : float( skyVisCache() ) / 100.0f;
 }
 
@@ -1367,24 +1384,24 @@ bool wwCellImageSpaceMeasuresEffects()
 
 bool wwCellDecalLitRed()
 {
-	static const bool red = qgetenv( "WW_CELL_DECALLIT_RED" ).trimmed() == "unlit";
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_DECALLIT_RED" ).trimmed() == "unlit" );
 	return red;
 }
 
 bool wwCellDecalLitProbe()
 {
-	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_DECALLIT_PROBE" ) == 1;
+	WW_SWITCH_STATIC( bool, on, wwEnvInt( "WW_CELL_DECALLIT_PROBE" ) == 1 );
 	return on;
 }
 
 int wwCellFxRed()
 {
-	static const int red = [] {
+	WW_SWITCH_STATIC( int, red, [] {
 		int r = 0;
-		for ( const QByteArray & t : qgetenv( "WW_CELL_FX_RED" ).split( ',' ) )
+		for ( const QByteArray & t : wwEnv( "WW_CELL_FX_RED" ).split( ',' ) )
 			r |= t == "legacy" ? 1 : t == "nosoft" ? 2 : t == "nolin" ? 4 : t == "hide" ? 8 : 0;
 		return r;
-	}();
+	}() );
 	return red;
 }
 
@@ -1502,7 +1519,7 @@ int wwCellLightsRed()
 int wwCellCubeTag( const QString & material )
 {
 	// lane CUBE1: WW_CELL_CUBE_DUMP=<file> numbers each env-mapped material (1..255) and writes "tag|material"
-	static const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_CUBE_DUMP" ) );
+	WW_SWITCH_STATIC( QString, dump, QString::fromLocal8Bit( wwEnv( "WW_CELL_CUBE_DUMP" ) ) );
 	static QHash<QString, int> tags;
 	if ( dump.isEmpty() || material.isEmpty() )
 		return 0;
@@ -1555,7 +1572,7 @@ QString wwCellLightsEcho( Scene * scene )
 //! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change (the gate's light list)
 static void shadowDump( Scene * scene )
 {
-	static const QString path = QString::fromLocal8Bit( qgetenv( "WW_CELL_SHADOW_DUMP" ) );
+	WW_SWITCH_STATIC( QString, path, QString::fromLocal8Bit( wwEnv( "WW_CELL_SHADOW_DUMP" ) ) );
 	if ( path.isEmpty() )
 		return;
 	QFile f( path );
@@ -1677,7 +1694,7 @@ void wwCellShadowPass( Scene * scene )
 	std::vector<ShCaster> casters;
 	// lane SUNCELL1: a cell's water surface casts no light shadow either (the game's water is no caster; a pond's
 	// plane under a lamp shadowed its own bed). Red WW_CELL_SHADOW_RED=watercasts keeps it.
-	static const bool waterCastsRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts";
+	WW_SWITCH_STATIC( bool, waterCastsRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts" );
 	int waterSkipped = 0;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
@@ -1857,6 +1874,7 @@ constexpr float kAoRadius = 108.2f, kAoBias = 0.6f, kAoIntensity = 7.1f;	// the 
 struct AoState
 {
 	bool loaded = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool on = true;			// WW_CELL_AO=0: none computed
 	bool pinned = false;	// lane CELLALL1: the AO row (WW/CellAo); the pin wins
 	int red = 0;			// 1 off (computed, not applied), 2 radius (halved), 4 noblur, 8 noreset
@@ -1868,14 +1886,16 @@ struct AoState
 AoState & ao()
 {
 	static AoState a;
-	if ( !a.loaded ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !a.loaded || wwSwitchMovedFor( a.liveGen, { "WW_CELL_AO" } ) ) {
 		a.loaded = true;
-		const QByteArray aoPin = qgetenv( "WW_CELL_AO" ).trimmed();
+		a.liveGen = wwSwitchGen();
+		const QByteArray aoPin = wwEnv( "WW_CELL_AO" ).trimmed();
 		a.pinned = !aoPin.isEmpty();
 		a.on = a.pinned ? aoPin != "0" : QSettings().value( QStringLiteral( "WW/CellAo" ), true ).toBool();
-		const QByteArray red = qgetenv( "WW_CELL_AO_RED" ).trimmed();
+		const QByteArray red = wwEnv( "WW_CELL_AO_RED" ).trimmed();
 		a.red = red == "off" ? 1 : red == "radius" ? 2 : red == "noblur" ? 4 : red == "noreset" ? 8 : 0;
-		a.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AO_DUMP" ) );
+		a.dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_AO_DUMP" ) );
 	}
 	return a;
 }
@@ -2495,7 +2515,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		if ( cellProgram ) {
 			prog->uni1i( "cellProbe", 20 );
 			// lane PERF1: the fragment returns once it has the normal (WW_AO_EARLY=0 shades it all, =red marks the early ones)
-			static const int early = [] { const QByteArray v = qgetenv( "WW_AO_EARLY" ).trimmed(); return v == "0" ? 0 : v == "red" ? 2 : 1; }();
+			WW_SWITCH_STATIC( int, early, [] { const QByteArray v = wwEnv( "WW_AO_EARLY" ).trimmed(); return v == "0" ? 0 : v == "red" ? 2 : 1; }() );
 			prog->uni1i( "cellAoEarly", early );
 			prog->uni1b( "cellAoOn", false );
 			prog->uni1b( "cellAoDecalOn", false );	// lane AODECAL1

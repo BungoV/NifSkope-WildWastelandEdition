@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellsplat.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmdata.h"
 
@@ -89,14 +90,14 @@ struct Pass
  *  FAIL on it. It forces the state a measurement needs; it is not a feature. */
 bool redNearest()
 {
-	static const bool on = qgetenv( "WW_TERRBLEND_RED" ) == "nearest";
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_TERRBLEND_RED" ) == "nearest" );
 	return on;
 }
 
 //! lane ALLON2: the red for the vertex normals -- every corner lit with its quad's face normal, as before
 bool redFaceNormal()
 {
-	static const bool on = qgetenv( "WW_TERRBLEND_RED" ) == "facenormal";
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_TERRBLEND_RED" ) == "facenormal" );
 	return on;
 }
 

@@ -4,6 +4,7 @@
    each other and against every shipped .hkx by tests/spells/hkxfile_gates.py. */
 
 #include "hkxfile.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <QCoreApplication>
 #include <QDir>
@@ -322,7 +323,7 @@ ClassDb * ClassDb::loadJson( const QByteArray & json, QString * error )
 QStringList ClassDb::defaultPaths()
 {
 	QStringList out;
-	const QByteArray env = qgetenv( "WW_HKCLASSDB" );
+	const QByteArray env = wwEnv( "WW_HKCLASSDB" );
 	if ( !env.isEmpty() )
 		out << QString::fromLocal8Bit( env );
 	const QString app = QCoreApplication::applicationDirPath();

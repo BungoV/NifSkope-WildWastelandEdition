@@ -10,6 +10,7 @@ See the LICENSE.md file for the full license text.
 ***** END LICENCE BLOCK *****/
 
 #include "nifcli.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "probeplace.h"
 #include "cellaodecal.h"	// lane AODECAL1: aobake
 #include "probebake.h"
@@ -419,13 +420,13 @@ int cmdPbrmResolve( const QString & file )
 
 	QSettings settings;
 	bool autoReplace = settings.value( QStringLiteral( "Settings/Render/PBRM Auto Replace" ), true ).toBool();
-	const QString envAuto = qEnvironmentVariable( "WW_PBRM_AUTOREPLACE" );
+	const QString envAuto = wwEnvStr( "WW_PBRM_AUTOREPLACE" );
 	if ( envAuto == QLatin1String( "0" ) )
 		autoReplace = false;
 	else if ( envAuto == QLatin1String( "1" ) )
 		autoReplace = true;
 	QList<PbrmRoute> order = pbrmDefaultOrder();
-	const QString envOrder = qEnvironmentVariable( "WW_PBRM_ORDER" );
+	const QString envOrder = wwEnvStr( "WW_PBRM_ORDER" );
 	if ( !envOrder.isEmpty() ) {
 		QString why;
 		if ( !pbrmParseOrder( envOrder, order, why ) ) {
@@ -433,7 +434,7 @@ int cmdPbrmResolve( const QString & file )
 			return 2;
 		}
 	}
-	const PbrmF0Law law = qEnvironmentVariable( "WW_PBRM_F0_LAW" ) == QLatin1String( "v5" )
+	const PbrmF0Law law = wwEnvStr( "WW_PBRM_F0_LAW" ) == QLatin1String( "v5" )
 		? PbrmF0Law::V5 : PbrmF0Law::Auto;
 	QStringList orderNames;
 	for ( PbrmRoute r : order )
@@ -4286,7 +4287,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		out() << "identity: " << idWord << ", " << idDump.size() << " setting(s)" << Qt::endl;
 		{
 			// WW_LODGEN_IDENTITY_DUMP=<file>: the lines the word is hashed from, for a gate to diff
-			const QString dumpTo = qEnvironmentVariable( "WW_LODGEN_IDENTITY_DUMP" );
+			const QString dumpTo = wwEnvStr( "WW_LODGEN_IDENTITY_DUMP" );
 			QFile df( dumpTo );
 			if ( !dumpTo.isEmpty() && df.open( QIODevice::WriteOnly ) )
 				df.write( ( idDump.join( QChar( '\n' ) ) + QChar( '\n' ) ).toUtf8() );
@@ -4614,7 +4615,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			/* WW_LODGEN_INCR_NO_RESTORE=1 is the REFUTER: the region passes see only
 			 * the rebaked chunks, as they would have if the refusal were simply
 			 * lifted. The gate must go red on it. */
-			if ( inc.incremental && qEnvironmentVariableIntValue( "WW_LODGEN_INCR_NO_RESTORE" ) == 1 ) {
+			if ( inc.incremental && wwEnvInt( "WW_LODGEN_INCR_NO_RESTORE" ) == 1 ) {
 				out() << "raw chunk cache: RESTORE SKIPPED (WW_LODGEN_INCR_NO_RESTORE, a refuter)" << Qt::endl;
 			} else {
 				const QString btoDir = btoScratch.isEmpty() ? outDir : btoScratch;

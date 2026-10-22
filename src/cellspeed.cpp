@@ -1,4 +1,5 @@
 #include "cellspeed.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "gl/cellpasstime.h"	// lane PERF1
 
 #include <QByteArray>
@@ -95,7 +96,7 @@ void atExit()
 
 bool on()
 {
-	static const bool v = !qEnvironmentVariableIsEmpty( "WW_CELL_SPEED_DUMP" );
+	WW_SWITCH_STATIC( bool, v, !wwEnvIsEmpty( "WW_CELL_SPEED_DUMP" ) );
 	return v;
 }
 
@@ -210,8 +211,8 @@ void count( const char * what, qint64 n )
 
 int reopenStep( const QString & fname )
 {
-	static QList<QByteArray> next = qgetenv( "WW_CELL_SPEED_REOPEN" ).split( ';' );
-	static const bool asked = !qgetenv( "WW_CELL_SPEED_REOPEN" ).isEmpty();
+	static QList<QByteArray> next = wwEnv( "WW_CELL_SPEED_REOPEN" ).split( ';' );
+	static const bool asked = !wwEnv( "WW_CELL_SPEED_REOPEN" ).isEmpty();
 	if ( !asked || !on() || !fname.endsWith( QLatin1String( ".wwcell" ), Qt::CaseInsensitive ) )
 		return -1;
 	if ( next.isEmpty() )
@@ -232,11 +233,11 @@ void end()
 	const qint64 total = s.clock.nsecsElapsed();
 	qint64 cpu, rss, peak;
 	sample( cpu, rss, peak );
-	QFile f( qEnvironmentVariable( "WW_CELL_SPEED_DUMP" ) );
+	QFile f( wwEnvStr( "WW_CELL_SPEED_DUMP" ) );
 	if ( !f.open( QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text ) )
 		return;
 	QTextStream o( &f );
-	const QString tag = qEnvironmentVariable( "WW_CELL_SPEED_TAG" );
+	const QString tag = wwEnvStr( "WW_CELL_SPEED_TAG" );
 	o << "CELLSPEED v1 " << ( tag.isEmpty() ? QStringLiteral( "-" ) : tag ) << "\n";
 	for ( const Row & r : s.rows )
 		o << "stage\t" << r.stage << "\t" << r.wallNs / 1000000 << "\t" << r.cpuMs << "\t"

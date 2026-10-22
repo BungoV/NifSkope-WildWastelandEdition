@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "opencellcatalog.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmfile.hpp"
 
@@ -304,7 +305,7 @@ bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QStr
 QString openCellExteriorLine( const QStringList & paths, const QString & world, int x, int y, int n )
 {
 	// WW_OPENCELL_RED=writer swaps x and y: the unit test's red must catch it.
-	if ( qEnvironmentVariable( "WW_OPENCELL_RED" ) == QLatin1String( "writer" ) )
+	if ( wwEnvStr( "WW_OPENCELL_RED" ) == QLatin1String( "writer" ) )
 		std::swap( x, y );
 	return QStringLiteral( "%1|%2|%3,%4|%5" ).arg( paths.join( QLatin1Char( ',' ) ), world ).arg( x ).arg( y ).arg( n );
 }
