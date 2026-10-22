@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BAKESPEED2 (2026-10-22, branch bakespeed2-20261022): the native write's vertex-AO cast runs per receiver, not per chunk
+
+- **Why.** The chunks stage's native write spent most of its time casting vertex AO, one chunk per worker: a few big chunks kept only a few cores busy (gate region: cast 337 s of 569 s).
+- **What changed (speed only; output is byte-identical):**
+  - The chunks run on their own pool (`lodgenParallelForOuter`): no size floor, and its threads are not generator workers, so each chunk's receivers fan out on the main pool.
+  - Each receiver casts into its own slot; the slots join in receiver order, so the bytes are the serial loop's.
+  - The AO ray length is summed in one fixed order at both native-write sites (`ambientOcclusionFace(..., fixedSum)`). Left to the compiler, the moved code summed x, y, z in another order; a 1-ULP ray change flipped back/front ties at shared edges (buried count 241760 vs 241743).
+- **Red:** `WW_LODGEN_BAKESPEED_RED=1` brings back the old chunk loop and serial receivers.
+- **Measured** on gate region -4 -4 3 3, all rings, FARBAKE2 flags, against BAKESPEED1 (v16):
+  - chunks stage 569 -> 213-326 s; the cast 337 -> 29-32 s;
+  - all 210 files byte-identical (only the .key files and the report's exe-path line differ), at default threads, `--threads 1` and red; census buried count 241743 in all three.
+
 ## Lane BAKESPEED1 (2026-10-21, branch bakespeed1-20261021): the chunks stage runs its VT rows and chunk jobs on all cores, and resumes
 
 - **Why.** The FARBAKE2 chunks stage was serial in its two biggest parts: on the mid region (-24..23) the VT pyramid took 1539 s and the chunk pass 511 s on one core.

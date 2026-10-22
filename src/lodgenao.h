@@ -394,7 +394,8 @@ struct LodgenAoScene
 	 *  toward the normal, the same 2-unit origin offset, the same 1 - 0.85 x
 	 *  hits / 8 -- cast through rayHitFace. `buried` is set when every cast ray's
 	 *  nearest hit is a BACK face: the point is inside closed geometry. */
-	float ambientOcclusionFace( const Vector3 & p, const Vector3 & n, float maxT, bool * buried = nullptr ) const
+	float ambientOcclusionFace( const Vector3 & p, const Vector3 & n, float maxT, bool * buried = nullptr,
+		bool fixedSum = false ) const
 	{
 		static const float dirs[8][3] = {
 			{ 0.7f, 0.0f, 0.7f }, { -0.7f, 0.0f, 0.7f },
@@ -406,7 +407,16 @@ struct LodgenAoScene
 		for ( const auto & dv : dirs ) {
 			Vector3 d( dv[0], dv[1], dv[2] );
 			d = d + n * 0.6f;
-			d.normalize();
+			if ( fixedSum ) {
+				// lane BAKESPEED2: the length summed y, x, z in a fixed order, as the serial cast compiled it;
+				// left to the compiler, an inlining can pick x, y, z and flip ties at the ULP
+				const float m = std::sqrt( std::fma( d[2], d[2], std::fma( d[0], d[0], d[1] * d[1] ) ) );
+				if ( m > 0.0f )
+					d /= m;
+				else
+					d = Vector3( 0.0f, 0.0f, 0.0f );
+			} else
+				d.normalize();
 			if ( Vector3::dotproduct( d, n ) < 0.05f )
 				continue;
 			cast++;

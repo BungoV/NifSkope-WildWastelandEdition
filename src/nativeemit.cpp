@@ -3669,8 +3669,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			h = 0;
 		QElapsedTimer castClock;
 		castClock.start();
-		lodgenParallelFor( int( chunkKeys.size() ), [&]( int ci ) {
-			nativeNoteWorker();
+		// lane BAKESPEED2: the chunks on a pool whose threads may fan their receivers out (red: as before)
+		lodgenParallelForOuter( int( chunkKeys.size() ), [&]( int ci ) {
+			if ( lodgenBakeSpeedRed() )   // the outer pool's threads are not the fan-out the census counts
+				nativeNoteWorker();
 			const int cx = std::get<0>( chunkKeys[size_t( ci )] ), cy = std::get<1>( chunkKeys[size_t( ci )] );
 			const int dim = std::max( 1, std::get<2>( chunkKeys[size_t( ci )] ) );
 			constexpr int SKIRT = 1;
@@ -3801,7 +3803,26 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				std::vector<Vector3> sP;
 				std::vector<float> sAo, sSk;
 				std::vector<double> sW;
-				for ( quint32 i : slotRecv.second ) {
+				/* lane BAKESPEED2: the receivers cast on the pool, each into its own slot, and join below in
+				 * receiver order, so the bytes are the serial loop's; the red casts them one after another */
+				struct RecvCast {
+					std::vector<Vector3> wp, wn, sP;
+					std::vector<double> aoAcc, skyAcc, wAcc, aoU, skyU, wU, sW;
+					std::vector<size_t> sTri;
+					std::vector<float> sAo, sSk;
+					quint64 hist[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+				};
+				const std::vector<quint32> & recvList = slotRecv.second;
+				std::vector<RecvCast> recvOut( recvList.size() );
+				auto castRecv = [&]( int ri ) {
+					const quint32 i = recvList[size_t( ri )];
+					RecvCast & ro = recvOut[size_t( ri )];
+					std::vector<Vector3> & wp = ro.wp, & wn = ro.wn, & sP = ro.sP;
+					std::vector<double> & aoAcc = ro.aoAcc, & skyAcc = ro.skyAcc, & wAcc = ro.wAcc, & aoU = ro.aoU,
+						& skyU = ro.skyU, & wU = ro.wU, & sW = ro.sW;
+					std::vector<size_t> & sTri = ro.sTri;
+					std::vector<float> & sAo = ro.sAo, & sSk = ro.sSk;
+					quint64 * hist = ro.hist;
 					LodiSrcInstance & r = set.instances[i];
 					const DecodedMesh & d = dm[instMesh[i]];
 					placed( r, d, wp );
@@ -3885,7 +3906,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 								const bool under = underTol >= 0.0f && scene.hn
 									&& p[2] < scene.groundHeight( p[0], p[1] ) - underTol / float( dim );
 								bool buried = false;
-								const float ao = scene.ambientOcclusionFace( p, n, maxT, &buried );
+								const float ao = scene.ambientOcclusionFace( p, n, maxT, &buried, true );
 								const float sk = wantSky ? scene.skyVisibilityFace( p, n, skyT, float( dim ), hist ) : 0.0f;
 								if ( under ) {
 									// kept apart: used only by a vertex with no sample above the ground
@@ -3918,6 +3939,23 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						}
 					}
 					sTri[d.tris.size() / 3] = sP.size();
+				};
+				if ( lodgenBakeSpeedRed() )
+					for ( int ri = 0; ri < int( recvList.size() ); ri++ )
+						castRecv( ri );
+				else
+					lodgenParallelFor( int( recvList.size() ), castRecv );
+				for ( size_t ri = 0; ri < recvList.size(); ri++ ) {
+					const quint32 i = recvList[ri];
+					const DecodedMesh & d = dm[instMesh[i]];
+					RecvCast & ro = recvOut[ri];
+					for ( int b = 0; b < 8; b++ )
+						hist[b] += ro.hist[b];
+					const std::vector<Vector3> & wp = ro.wp, & wn = ro.wn, & sP = ro.sP;
+					const std::vector<double> & aoAcc = ro.aoAcc, & skyAcc = ro.skyAcc, & wAcc = ro.wAcc, & aoU = ro.aoU,
+						& skyU = ro.skyU, & wU = ro.wU, & sW = ro.sW;
+					const std::vector<size_t> & sTri = ro.sTri;
+					const std::vector<float> & sAo = ro.sAo, & sSk = ro.sSk;
 					{
 						const quint32 base = quint32( cP.size() );
 						const size_t sBase = cSP.size();
@@ -3943,6 +3981,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						cSSk.insert( cSSk.end(), sSk.begin(), sSk.end() );
 						cSW.insert( cSW.end(), sW.begin(), sW.end() );
 					}
+					ro = RecvCast();
 				}
 				/* Steps 4 and 5 over the whole chunk and ring (lane AO2, bungo 2026-09-26 on the
 				 * right round tower: "a hard AO cutoff, then the next face is totally white").
@@ -4043,7 +4082,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						} else {
 							// on no triangle (or WW_AO_FACE_STEP=0): cast where it stands
 							bool buried = false;
-							ao = scene.ambientOcclusionFace( wp[v], wn[v], maxT, &buried );
+							ao = scene.ambientOcclusionFace( wp[v], wn[v], maxT, &buried, true );
 							if ( wantSky )
 								sk = scene.skyVisibilityFace( wp[v], wn[v], skyT, float( dim ), hist );
 							aAtVertex++;
