@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "data/niftypes.h"
 #include "io/material.h"
+#include "io/pbrmfile.h"
 #include "lodgen.h"
 #include "nativeemit.h"
 #include "probeplace.h"
@@ -225,6 +226,39 @@ bool ProbeAlbedo::sample( const QString & tex, float u, float v, const float vc[
 	}
 	if ( alpha )   // lane BAKE4: alpha is linear in every format
 		*alpha = std::clamp( c[3], 0.0f, 1.0f );
+	return true;
+}
+
+bool ProbeAlbedo::samplePbrm( const PbrmMaterial & m, float u, float v, const float vc[3], float out[3] )
+{
+	// the renderer's rule (renderer.cpp, the PBRM slot binds): a slot the material samples must load
+	auto slotMap = [&]( const PbrmMaterial::Slot & s, quint32 bit, const DDSTexture16 ** t ) -> bool {
+		*t = nullptr;
+		if ( !( m.features & bit ) || !s.enabled || !s.pathValid )
+			return true;
+		*t = s.lookupPath.isEmpty() ? nullptr : load( s.lookupPath );
+		return *t != nullptr;
+	};
+	const DDSTexture16 * tb = nullptr;
+	const DDSTexture16 * tr = nullptr;
+	if ( !slotMap( m.baseColor, PbrmMaterial::BaseColorTexture, &tb ) || !slotMap( m.rmaos, PbrmMaterial::RmaosTexture, &tr ) )
+		return false;
+	u -= std::floor( u );
+	v -= std::floor( v );
+	float base[3] = { m.baseColorRGB[0], m.baseColorRGB[1], m.baseColorRGB[2] };
+	if ( tb ) {
+		const FloatVector4 c = tb->getPixelB( u, v, 0 );
+		for ( int k = 0; k < 3; k++ ) {
+			const float g = tb->isSRGBTexture() ? linearToSrgb( c[size_t( k )] ) : c[size_t( k )];
+			base[k] *= srgbToLinear( g );
+		}
+	}
+	float metal = m.metallic;
+	if ( tr && ( m.features & PbrmMaterial::RmaosMetallic ) )
+		metal = tr->getPixelB( u, v, 0 )[1];   // as the shader samples it (an sRGB tag decodes, as GL does)
+	metal = std::clamp( metal, 0.0f, 1.0f );
+	for ( int k = 0; k < 3; k++ )
+		out[k] = std::max( 0.0f, base[k] * vc[k] * ( 1.0f - metal ) );
 	return true;
 }
 

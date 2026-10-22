@@ -58,6 +58,14 @@ extern int wwLodMaskByTree;
 void setPbrmAutoReplace( bool on );
 bool pbrmAutoReplaceEnabled();
 
+/*! BSShaderLightingProperty::resolvePbrm()'s input, gathered for a property Name -- the .nifx entry beside
+ *  `nifAbsPath` for `shapeName`, the WW_PBRM_SWAP pin, Auto-replace, the FO76 step, the WW_PBRM_ORDER pin --
+ *  and the one candidate function. resolvePbrm() is this call with the property's own facts; the cell bake's
+ *  albedo (lane FIXPACK1 PBRALBEDO1) calls it with the Name its bucket's property carries, so the bake and
+ *  the drawn shape cannot disagree about which .pbrm serves a surface. */
+PbrmResolveResult pbrmResolveForMaterial( const QString & material, const QString & shapeName,
+	const QString & nifAbsPath, bool fo76, const PbrmReader & reader );
+
 //! Shading menu ▸ lighting mode. Exactly one is active.
 enum PbrmLightingMode
 {

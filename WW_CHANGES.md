@@ -648,6 +648,23 @@
   red gloss 1.000 and byte-identical to the old shot. Pre-roll: 51 systems, 740 live vs the red's few; 215 px change
   in the barrel crop, but no plume is visible over the barrel by eye, so the barrel itself is still open.
 - **Notes:** `E:/Projects/Claude/notes/fxcheck1/` (STATUS, BATCH, FINAL, pairs).
+## Lanes PBRALBEDO1 + PBRALBEDO2 (2026-10-21/22, branch pbralbedo2-20261021): a .pbrm's albedo in the probe bake
+
+- **Why.** The probe bake read every surface's albedo from the legacy diffuse, even where a `.pbrm` serves the
+  material, so a PBR material bounced the wrong color. PBRALBEDO1 made the bake read base x (1 - metallic) through the
+  same resolver as the renderer (`pbrmResolveForMaterial`); its run then found 0 of 26 materials served.
+- **Cause (PBRALBEDO2).** Vanilla NIFs name their BGSM by the build machine's absolute path
+  (`C:\Projects\Fallout4\Build\PC\Data\materials\...`). `pbrmNormaliseMaterialPath` refuses drive-qualified paths,
+  so the sibling step refused every vanilla material, in the bake and in the drawn view alike.
+- **What changed:** `pbrmResolveForMaterial` cuts such a name at its last `materials\` (what the game and lodgen's
+  `cutAuthoringPath` already do) before resolving. Data without `.pbrm` files is unchanged (the extra lookup misses).
+  A `.pbrm` sibling of a vanilla material now draws and bakes PBR: a look change only where such files exist.
+- **Switches and reds:** `WW_PBRM_AUTHORPATH_RED=refuse` keeps the uncut name (the old refusal);
+  `WW_CELL_BAKE_PBRALBEDO_RED=diffuse` bakes the legacy diffuse; `WW_CELL_BAKE_PBRM_TRACE=<file>` writes each bake
+  material's route, path, refusal and tried list (diagnosis only).
+- **Gates:** in the next batch (notes/pbralbedo2/BATCH.md): vanilla bake byte-identical to main, served count > 0
+  with every cell material routed "sibling" on the full-cell fixture, surfel albedo = legacy x color x (1 - metallic)
+  within 2/255, and both reds fail the matching check.
 
 ## Lane HORIZON1 (2026-10-21, branch horizon1-20261021): the AO map and the shadow heightmap on all cores
 

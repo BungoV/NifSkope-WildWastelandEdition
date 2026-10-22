@@ -54,6 +54,7 @@ BSD License - see nifskope.h
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellcull.h"	// lane SUNCELL1: the per-placement culling runs
+#include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
 #include "gl/cellpost.h"	// lane GRASSMB1
 #include "esmwater.h"
@@ -2741,6 +2742,41 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const QString albRed = wwEnvStr( "WW_CELL_BAKE_ALBEDO_RED" );
 	const bool wantMat = baking && ( albWay == QLatin1String( "hit" ) || albWay == QLatin1String( "cube" ) );
 	const bool wantExtra = wantMat && albWay == QLatin1String( "cube" ) && albRed == QLatin1String( "nofilter" );
+	/* lane FIXPACK1 (PBRALBEDO1): a surface a .pbrm serves in the drawn view gives the bake its PBR diffuse,
+	 * base x (1 - metallic) (ProbeAlbedo::samplePbrm), not the legacy diffuse slot. Found through the
+	 * renderer's own resolve (pbrmResolveForMaterial) with the Name the shape's bucket property carries:
+	 * a .bgsm (bucketFor's first choice), materialNameFor'd; any other bucket names no material and draws
+	 * legacy. One resolve per material, through the bake's resource stack. The tri way (the default) only;
+	 * the hit/cube ways, glass panes and folded decals still read the legacy diffuse.
+	 * WW_CELL_BAKE_PBRALBEDO_RED=diffuse reads the legacy diffuse slot for every surface (the gate's red). */
+	const bool pbrAlbRed = qEnvironmentVariable( "WW_CELL_BAKE_PBRALBEDO_RED" ) == QLatin1String( "diffuse" );
+	QHash<QString, std::shared_ptr<PbrmMaterial>> bakePbrm;   // lower-case Name -> the material, null = legacy
+	int albPbrm = 0;
+	const QString bakePbrmTracePath = qEnvironmentVariable( "WW_CELL_BAKE_PBRM_TRACE" );   // lane PBRALBEDO2
+	QStringList bakePbrmTrace;
+	auto bakePbrmFor = [&]( const NativeSrcShape & s ) -> const PbrmMaterial * {
+		if ( !isMaterialFile( s.matName ) )
+			return nullptr;
+		const QString name = materialNameFor( s.matName );
+		const QString key = name.toLower();
+		auto it = bakePbrm.constFind( key );
+		if ( it == bakePbrm.constEnd() ) {
+			const PbrmReader reader = [&]( const QString & path, QByteArray & out ) -> bool {
+				out.clear();
+				QString p = path;
+				p.replace( QChar( '\\' ), QChar( '/' ) );
+				return lodgenProbeAsset( dataRoot, p, nullptr, nullptr, nullptr, &out ) && !out.isEmpty();
+			};
+			const PbrmResolveResult r = pbrmResolveForMaterial( name, QString(), QString(), true, reader );
+			if ( !bakePbrmTracePath.isEmpty() )   // lane PBRALBEDO2: why each material did or did not resolve
+				bakePbrmTrace << QStringLiteral( "%1\t%2\t%3\t%4\t%5" ).arg( s.matName,
+					QString::fromLatin1( pbrmRouteName( r.route ) ), r.path, r.refusal, r.tried.join( QStringLiteral( " | " ) ) );
+			it = bakePbrm.insert( key, r.route != PbrmRoute::Legacy && r.material.ok
+				? std::make_shared<PbrmMaterial>( r.material ) : std::shared_ptr<PbrmMaterial>() );
+		}
+		// the Legacy menu mode draws every surface the legacy way: the bake reads what is drawn
+		return ( pbrAlbRed || pbrmMode() == PbrmModeLegacy ) ? nullptr : it->get();
+	};
 	/* lane CAPTURE1 (docs/PRTP_PLAN.md 2o, EFX1): a Refraction-flagged lighting shape (Shader Flags 1 bit
 	 * 15: the walkway's drip-splash rings) only bends what is behind it in game; its diffuse slot holds a
 	 * normal map. It is no surface: it leaves the bake's soup (every albedo way, the cube included) and
@@ -3743,6 +3779,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						}
 					}
 					const int amFirst = probeSoup.triCount();
+					const PbrmMaterial * shapePbrm = baking ? bakePbrmFor( s ) : nullptr;   // lane FIXPACK1
 					for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 						float w[3][3];
 						bool okTri = true;
@@ -3802,11 +3839,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 							quint8 rgb[3] = { 128, 128, 128 };
 							/* a palette material is painted as the game paints it: the map's green
 							 * picks the column, the paint index (or scale x vertex red) the row */
-							const bool viaPalette = s.g2p && !s.g2pTex.isEmpty()
+							// lane FIXPACK1: a .pbrm-served surface first (the PBR program draws it: no palette)
+							const bool viaPbrm = shapePbrm && probeAlb.samplePbrm( *shapePbrm, uv[0], uv[1], vc, lin );
+							albPbrm += viaPbrm ? 1 : 0;
+							const bool viaPalette = !viaPbrm && s.g2p && !s.g2pTex.isEmpty()
 								&& probeAlb.samplePalette( s.tex0, s.g2pTex, uv[0], uv[1],
 									painted ? paintIndex : s.g2pScale * vc[0], lin );
 							albPalette += viaPalette ? 1 : 0;
-							if ( viaPalette || probeAlb.sample( s.tex0, uv[0], uv[1], vc, lin ) ) {
+							if ( viaPbrm || viaPalette || probeAlb.sample( s.tex0, uv[0], uv[1], vc, lin ) ) {
 								albTextured++;
 								for ( int k = 0; k < 3; k++ )
 									rgb[k] = quint8( std::lround( std::clamp( lin[k], 0.0f, 1.0f ) * 255.0f ) );
@@ -5199,6 +5239,21 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				  << albUntextured << ", ground quads from the splat " << albLandSplat << ", flat tone x VCLR "
 				  << albLandFlat << ", maps read " << probeAlb.texturesRead << ", missing " << probeAlb.texturesMissing
 				  << "\n";
+				{	// lane FIXPACK1 (PBRALBEDO1): written only when a .pbrm served (a vanilla bake's notes are unchanged)
+					int served = 0;
+					for ( auto it = bakePbrm.constBegin(); it != bakePbrm.constEnd(); ++it )
+						served += it.value() ? 1 : 0;
+					if ( served || pbrAlbRed )
+						t << "  bake albedo pbrm: " << served << " of " << bakePbrm.size() << " materials served by a .pbrm, "
+						  << albPbrm << " triangles read base x (1 - metallic)"
+						  << ( pbrAlbRed ? " RED diffuse (every surface read its legacy diffuse slot)" : "" ) << "\n";
+				}
+				if ( !bakePbrmTracePath.isEmpty() ) {	// lane PBRALBEDO2: diagnosis only
+					QFile tf( bakePbrmTracePath );
+					if ( tf.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+						tf.write( ( QStringLiteral( "matName\troute\tpath\trefusal\ttried\n" )
+							+ bakePbrmTrace.join( QChar( '\n' ) ) + QChar( '\n' ) ).toUtf8() );
+				}
 				// lane SMOOTHN1: where the soup's vertex normals came from
 				t << "  bake smooth normals " << ( smoothOn ? "on" : "OFF (WW_CELL_BAKE_SMOOTH=0)" ) << ", normal maps "
 				  << ( nmapOn ? "on" : "OFF" ) << ": object triangles with NIF normals " << soupSmoothTris << ", ground cells from VNML "
