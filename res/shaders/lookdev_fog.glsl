@@ -61,7 +61,7 @@ uniform vec4 volAirGround;	// (airGround): the ground layer's anchor zg, 1 / its
 uniform int volAirFlags;	// 1 the surfaces' sun through the air (FOGSUN1; red nosunt clears it), 2 the far tail (red
 				// froxonly clears it), 4 the records' colour on the tail (red physcol clears it), 8 the sky
 				// through the air (cell_volsky.frag; red nosky clears it), 16 the effects and particles through the
-				// air (wwFogFx; red fxfog clears it)
+				// air (wwFogFx; red fxfog clears it), 32 the tricubic read (FOGTRICUBIC1, WW_CELL_VOLAIR_TRICUBIC=1)
 
 // the column between heights lo < hi of one term B(z) = min(1, exp(-(z - z0) invH)): flat under z0, exponential
 // above (invH 0: flat everywhere); no cancellation of two large columns. Shared with cell_volair.frag airCol.
@@ -185,6 +185,36 @@ vec4 wwVolAirAtFar( float d, vec2 uv, vec3 posView )
  * segment / its slope), L += T_edge x J x (1 - T_tail), J the light the last slice's air scattered (its L and T steps,
  * so the tail starts continuous with the froxels), carried to the tail's middle in the records' colour. A ray that
  * climbs meets thinner air: a peak keeps more contrast than its foot. */
+/* FOGTRICUBIC1 (bungo 10-21): a cubic B-spline read of the froxels, from linear fetches placed between texels (the
+ * fractional offsets carry the weights). Smooths the grid's blocks; xyOnly keeps the slice exact (the far tail's and the
+ * sky's step J needs the two slices themselves). Flag 32 off: the plain trilinear read. */
+vec4 wwVolTex( vec3 p, bool xyOnly )
+{
+	if ( ( volAirFlags & 32 ) == 0 )
+		return texture( volTex, p );
+	vec3 n = vec3( textureSize( volTex, 0 ) );
+	vec3 c = p * n - 0.5;
+	vec3 i = floor( c );
+	vec3 f = c - i;
+	vec3 w0 = ( ( -f + 3.0 ) * f - 3.0 ) * f + 1.0;	// x 6: (1 - f)^3
+	vec3 w1 = ( 3.0 * f - 6.0 ) * f * f + 4.0;
+	vec3 w2 = ( ( -3.0 * f + 3.0 ) * f + 3.0 ) * f + 1.0;
+	vec3 w3 = f * f * f;
+	vec3 g0 = w0 + w1, g1 = w2 + w3;
+	vec3 h0 = ( i - 0.5 + w1 / g0 ) / n, h1 = ( i + 1.5 + w3 / g1 ) / n;
+	g0 /= 6.0;
+	g1 /= 6.0;
+	if ( xyOnly ) {
+		return g0.y * ( g0.x * texture( volTex, vec3( h0.x, h0.y, p.z ) ) + g1.x * texture( volTex, vec3( h1.x, h0.y, p.z ) ) )
+			+ g1.y * ( g0.x * texture( volTex, vec3( h0.x, h1.y, p.z ) ) + g1.x * texture( volTex, vec3( h1.x, h1.y, p.z ) ) );
+	}
+	vec4 a = g0.y * ( g0.x * texture( volTex, vec3( h0.x, h0.y, h0.z ) ) + g1.x * texture( volTex, vec3( h1.x, h0.y, h0.z ) ) )
+		+ g1.y * ( g0.x * texture( volTex, vec3( h0.x, h1.y, h0.z ) ) + g1.x * texture( volTex, vec3( h1.x, h1.y, h0.z ) ) );
+	vec4 b = g0.y * ( g0.x * texture( volTex, vec3( h0.x, h0.y, h1.z ) ) + g1.x * texture( volTex, vec3( h1.x, h0.y, h1.z ) ) )
+		+ g1.y * ( g0.x * texture( volTex, vec3( h0.x, h1.y, h1.z ) ) + g1.x * texture( volTex, vec3( h1.x, h1.y, h1.z ) ) );
+	return g0.z * a + g1.z * b;
+}
+
 vec4 wwVolAirAt( vec3 posView )
 {
 	float d = length( posView ) * fogDistScale;
@@ -201,17 +231,17 @@ vec4 wwVolAirAt( vec3 posView )
 	float f = log( d / volSlices.x ) / volSlices.y * volSlices.z;
 	vec4 v;
 	if ( f < 1.0 ) {
-		v = texture( volTex, vec3( uv, 0.5 / volSlices.z ) );
+		v = wwVolTex( vec3( uv, 0.5 / volSlices.z ), true );
 		v = vec4( v.rgb * f, 1.0 - ( 1.0 - v.a ) * f );
 	} else {
-		v = texture( volTex, vec3( uv, ( min( f, volSlices.z ) - 0.5 ) / volSlices.z ) );
+		v = wwVolTex( vec3( uv, ( min( f, volSlices.z ) - 0.5 ) / volSlices.z ), f > volSlices.z );
 	}
 	v = vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
 	if ( f <= volSlices.z || ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
 		return v;
 	// the far tail
 	float far = volSlices.x * exp( volSlices.y );
-	vec4 p = texture( volTex, vec3( uv, ( volSlices.z - 1.5 ) / volSlices.z ) );
+	vec4 p = wwVolTex( vec3( uv, ( volSlices.z - 1.5 ) / volSlices.z ), true );
 	float dT = p.a - v.a;
 	vec3 J = dT > 1e-7 ? max( ( v.rgb - p.rgb ) / dT, vec3( 0.0 ) ) : vec3( 0.0 );
 	float z1 = dot( fogView.xyz, posView ) + fogView.w;
@@ -254,12 +284,12 @@ vec4 wwVolAirSky( vec3 dirView )
 		far = volFar.x * exp( volFar.y );
 		J = wwGridTailJ( uv, volPack.zw, volPackDims.w, volFar.z, b );
 	} else {
-	v = texture( volTex, vec3( uv, ( n - 0.5 ) / n ) );
+	v = wwVolTex( vec3( uv, ( n - 0.5 ) / n ), true );
 	v = vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
 	if ( ( volAirFlags & 2 ) == 0 || volAirMed.x <= 0.0 )
 		return v;
 	far = volSlices.x * exp( volSlices.y );
-	vec4 p = texture( volTex, vec3( uv, ( n - 1.5 ) / n ) );
+	vec4 p = wwVolTex( vec3( uv, ( n - 1.5 ) / n ), true );
 	float dT = p.a - v.a;
 	J = dT > 1e-7 ? max( ( v.rgb - p.rgb ) / dT, vec3( 0.0 ) ) : vec3( 0.0 );
 	}
