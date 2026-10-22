@@ -389,6 +389,35 @@
   tests off: every quad shaded every sample of the 4x frame. The quad now sits at the far plane (`cell_hdr.vert`);
   `WW_CELL_HDR_EARLY_RED=1` runs the old program (`cell_hdr_fd.prog`).
 
+## Lane DOORLIVE1 (2026-10-22, branch doorlive1-20261022): one live door in the cell view, and the GI follows it
+
+- **Why.** bungo: "a video of the door closing and opening would be a good proof it works". The relight (GPURELIGHT1)
+  could shut a door slot, but nothing in the view moved a door, and a slot was only open or closed.
+- **What changed (off by default; nothing runs unless `WW_CELL_DOOR_ANIM` is set):**
+  - `WW_CELL_DOOR_ANIM=<ref hex>:<open|close|cycle>` picks one placed door. The weld leaves it out and its model is
+    copied in whole (shapes, nodes, controllers, sequences; no collision or lights) under a node carrying the
+    placement (`src/celldoorlive.h`, `cellCopyDoorBranch` in `src/cellview.cpp`).
+  - The door plays its own NIF `Open` / `Close` NiControllerSequence through the existing controllers, posed at an
+    exact time (frequency 0, phase t). No `Open`: the `Close` runs backwards, and the reverse. Neither: a 90 degree
+    hinge turn of the placement node (the census says "hinge fallback").
+  - The open fraction is measured from the pose: the node that moves most between the closed and open poses, by its
+    slide, or by its turn when it slides less than a unit.
+  - The GI follows: the relight's slot for that door is shut by (1 - open fraction). A part-shut slot blends its
+    transmittance toward open (`T' = 1 - s (1 - T)`); shut 1 is the closed factor exactly, as before. Visibility
+    entries are weighted the same way. CPU and GPU kernels both (`src/proberelight.cpp`, `doorShut`).
+  - It runs on the GPU on each change, never a rebake. The published grid = the bake + (this run - the all-open run).
+  - The cell lights' shadow cubes re-render while the door moves (`wwCellShadowKick`).
+  - Drivers: a path frame (`WW_RENDER_PATH`) poses the door at k / fps and relights before the frame draws; the
+    test driver's `door:<open|close|cycle|t=<s>|state>[:<ms>]` step; the port's `NifSkope::door <same>`.
+  - `WW_CELL_DOOR_ANIM=list` ranks the cell's doors by the light each one stops alone, and suggests a dark-side camera
+    and floor point.
+  - Census: `door live: ref .. state .. open .. relight .. ms (gpu|cpu, relights n) gi follows .. floor E ..`, per
+    path frame in `<shot>_path.txt`.
+- **Reds:** `WW_CELL_DOORLIVE_RED=static` (the GI stays at the bake while the mesh moves) | `snap` (the GI flips at
+  half open). `WW_CELL_DOORLIVE_HOLD` (seconds held closed and open, default 1), `WW_CELL_DOORLIVE_FLOOR=x y z`.
+- **Measured:** built only; the video (closed, opening, open, closing, closed, plus the static red) and the floor
+  brightness curve are shot in the next batch, after BATCH2 lands (notes/doorlive1/BATCH.md).
+
 ## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
 
 - Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.

@@ -361,6 +361,8 @@ QString wwCellImageSpaceEcho( Scene * scene );
  *  factor 1: the gate's refuter). Probe 7: the shadow factors of slots 0, 1, 2 in r, g, b (0.5 / 255 marks a
  *  pixel out of that light's reach). */
 void wwCellShadowPass( Scene * scene );
+//! lane DOORLIVE1: a caster moved (a live door): the next pass re-renders every held shadow slot
+void wwCellShadowKick( const void * nif );
 QString wwCellShadowEcho( Scene * scene );
 
 /*! THE AMBIENT OBSCURANCE (lane AO1, docs/PRTP_PLAN.md "ambient obscurance"): the game's screen-space obscurance, from its own

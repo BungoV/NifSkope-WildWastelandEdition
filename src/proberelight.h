@@ -166,7 +166,11 @@ struct ProbeRelightState
 	std::vector<float> color;               //!< 3 a light: the live color x dimmer (0: off); empty = as baked
 	std::vector<float> radius;              //!< per light; empty = as baked; > baked is clamped (census)
 	std::vector<quint8> doorClosed;         //!< per door slot; empty = all open (the bake)
-	float sun[3] = { -1, -1, -1 };          //!< < 0 = as baked
+	std::vector<float> doorShut;            //!< lane DOORLIVE1: per slot shut fraction 0..1 (< 0 or absent: doorClosed)
+	float sun[3] = { -1, -1, -1 };
+//! lane DOORLIVE1: each door slot's shut fraction (doorShut over doorClosed)
+std::vector<float> probeRelightShut( const ProbeRelightState & st, size_t nDoors );
+          //!< < 0 = as baked
 	int passes = 0;                         //!< 0 = until settled (the ops' rule), n = exactly n
 	/*! deliberate defects (the gates' reds): "nobounce" pass 1 only, "doorblanket" a closed door stops every entry
 	 *  that crosses its box (its holes and panes ignored), "glassopaque" a pane stops light like wood, "dooropen" a

@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellclick.h"
+#include "celldoorlive.h"	// lane DOORLIVE1: the door: step
 #include "cellpick.h"
 #include "cellrefs.h"
 #include "glview.h"
@@ -785,6 +786,21 @@ void smNext()
 			smNote( QStringLiteral( "BAD camera %1" ).arg( arg ) );
 		}
 		smSettle( 2000 );
+	} else if ( step.startsWith( QLatin1String( "door:" ) ) ) {
+		/* lane DOORLIVE1: door:<open|close|cycle|t=<s>|state>[:<settle ms>] -- drives the live door (WW_CELL_DOOR_ANIM)
+		 * and repaints through the wait, so its swing and its relights play */
+		const int ms = step.section( QLatin1Char( ':' ), 2, 2 ).isEmpty() ? 2000 : step.section( QLatin1Char( ':' ), 2, 2 ).toInt();
+		GLView * ogl = g_sm.skope->getGLView();
+		smNote( QStringLiteral( "  %1" ).arg( ogl ? wwDoorLiveCommand( ogl->getScene(), arg ) : QStringLiteral( "no view" ) ) );
+		for ( int t = 100; t < ms; t += 100 )
+			QTimer::singleShot( t, g_sm.skope, []() {
+				if ( GLView * v = g_sm.skope->getGLView() )
+					v->update();
+			} );
+		QTimer::singleShot( ms, g_sm.skope, []() {
+			smNote( QStringLiteral( "  %1" ).arg( wwDoorLiveEcho() ) );
+			smNext();
+		} );
 	} else if ( step == QLatin1String( "quit" ) ) {
 		smNote( QStringLiteral( "quit" ) );
 		g_sm.skope->close();
