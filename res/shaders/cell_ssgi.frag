@@ -9,6 +9,7 @@
  *            (front + thickness) angles cover sectors of a 32-bit mask over the slice's cosine-weighted hemisphere;
  *            sectors newly covered take the tap's radiance x its facing. rgb = bounce irradiance E (x pi),
  *            a = the unoccluded (cosine-weighted) share
+ *            (lane SSGI3: a = the share the probe keeps; a sector leaves it only as far as the screen refills it)
  *   stage 2  temporal: the history reprojected through last frame's camera, refused on a depth or normal jump;
  *            out = mix(history, now, max(1 / n, 1 - historyBlend)), n capped at maxAccum (location 1: depth, n, normal)
  *   stage 3  the denoise: a depth- and normal-aware blur, `blurRadius` work pixels (lane SSGI2: red `oldblur`)
@@ -69,6 +70,7 @@ uniform int emitSlices;			// stage 8 (FO4CS iEmissiveSlices)
 uniform bool emissivePass;		// stages 4, 7: the emissive cast's clip spans and retention
 uniform sampler2D emitFin;		// stages 3, 7: the emissive result, added to the ordinary one
 uniform bool emitAdd;
+uniform bool oldLaw;			// lane SSGI3: red `oldlaw`, SSGI1's fill law (stage 1)
 
 layout ( location = 0 ) out vec4 fragColor;
 layout ( location = 1 ) out vec4 fragMeta;
@@ -156,6 +158,7 @@ vec4 cast( ivec2 wp )
 		float n = sign( dot( Np, ortho ) ) * acos( clamp( dot( Np, V ) / npLen, -1.0, 1.0 ) );
 		uint occ = 0u;
 		vec3 sil = vec3( 0.0 );
+		float taken = 0.0;	// lane SSGI3: the cosine-weighted share whose probe light the screen replaces
 		// FO4CS: one step jitter per slice, slid by the golden ratio
 		float sliceStep = fract( n1 + float( s ) * 0.618034 );
 		for ( int side = 0; side < 2; side++ ) {
@@ -213,13 +216,21 @@ vec4 cast( ivec2 wp )
 						float lvl = lod <= 0.5 ? 0.0 : ceil( lod + 0.5 ) - 1.0;
 						L -= textureLod( emitTex, sp / vec2( fullSize ), lvl ).rgb;
 					}
-					sil += share * facing * max( L, vec3( 0.0 ) );
+					if ( oldLaw ) {
+						sil += share * facing * max( L, vec3( 0.0 ) );
+					} else {
+						// lane SSGI3, the fill law: a diffuse donor's radiance does not fall with its cosine, and a sector
+						// takes the probe's light only in the share the screen refills (band, front face); the rest keeps it
+						float front = clamp( facing * 10.0, 0.0, 1.0 );
+						sil += share * front * max( L, vec3( 0.0 ) );
+						taken += share * front;
+					}
 					occ |= bits;
 				}
 			}
 		}
 		il += sil * npLen;
-		vis += ( 1.0 - float( bitCount( occ ) ) / 32.0 ) * npLen;
+		vis += ( oldLaw ? 1.0 - float( bitCount( occ ) ) / 32.0 : 1.0 - taken ) * npLen;
 		wsum += npLen;
 	}
 	if ( wsum <= 0.0 )

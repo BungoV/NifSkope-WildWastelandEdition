@@ -47,7 +47,8 @@ struct SsgiState
 	bool loaded = false;
 	bool on = false, pinOn = false, pinQ = false;
 	int quality = 3;
-	int red = 0;	// 1 off, 2 stack, 4 notemporal, 8 noblur; lane SSGI2: 16 ign, 32 nohiz, 64 oldblur, 128 noemissive
+	int red = 0;	// 1 off, 2 stack, 4 notemporal, 8 noblur; lane SSGI2: 16 ign, 32 nohiz, 64 oldblur, 128 noemissive;
+					// lane SSGI3: 256 oldlaw (SSGI1's fill law)
 	int lastVerdict = -1;
 	char echo[240] = {};
 };
@@ -66,7 +67,7 @@ SsgiState & st()
 		s.quality = s.pinQ && qs >= 0 ? qs : std::clamp( QSettings().value( QStringLiteral( "WW/CellSsgiQuality" ), 3 ).toInt(), 0, 3 );
 		for ( const QByteArray & w : red.split( ',' ) )
 			s.red |= w == "off" ? 1 : w == "stack" ? 2 : w == "notemporal" ? 4 : w == "noblur" ? 8 : w == "ign" ? 16
-				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : 0;
+				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : w == "oldlaw" ? 256 : 0;
 	}
 	return s;
 }
@@ -225,9 +226,10 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		: !wwCellSsrSceneTexture( scene, sceneTex ) ? 2 : 3;
 	if ( verdict != s.lastVerdict && ( verdict != 0 || s.lastVerdict > 0 ) ) {
 		static const char * const words[4] = { "off", "off (no obscurance pass)", "off (no scene pass)", "on" };
-		std::snprintf( s.echo, sizeof( s.echo ), "cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s",
+		std::snprintf( s.echo, sizeof( s.echo ), "cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s",
 			words[verdict], s.quality, s.red, ( s.red & 16 ) ? "ign" : "fast", ( s.red & 32 ) ? "off" : "on",
-			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : "on" );
+			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : "on",
+			( s.red & 256 ) ? "old" : "fill" );
 		std::fprintf( stderr, "%s\n", s.echo );
 		s.lastVerdict = verdict;
 	}
@@ -383,6 +385,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	prog->uni1f( "radius", kRadius );
 	prog->uni1f( "thickness", kThickness );
 	prog->uni1f( "sourceBrightness", kSource );
+	prog->uni1b( "oldLaw", ( s.red & 256 ) != 0 );
 	prog->uni1f( "saturation", kSaturation );
 	prog->uni1f( "historyBlend", kHistoryBlend );
 	prog->uni1f( "maxAccum", 1.0f / ( 1.0f - kHistoryBlend ) );
