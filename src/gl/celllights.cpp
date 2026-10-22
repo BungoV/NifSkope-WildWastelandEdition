@@ -1732,6 +1732,11 @@ void wwCellShadowPass( Scene * scene )
 	const bool wasBlend = fn->glIsEnabled( GL_BLEND );
 
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.shFbo );
+	// lane MSAABLACK1: bind READ too, so glReadBuffer below sets OUR fbo; on the view's it left TAA's colour blit
+	// a silent no-op (MSAA 1 + TAA saved black). WW_MSAABLACK1_RED=1: the old binding
+	WW_SWITCH_STATIC( bool, msaaBlackRed, wwEnvInt( "WW_MSAABLACK1_RED" ) == 1 );
+	if ( !msaaBlackRed )
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.shFbo );
 	fn->glDrawBuffer( GL_NONE );
 	fn->glReadBuffer( GL_NONE );
 	fn->glDisable( GL_SCISSOR_TEST );

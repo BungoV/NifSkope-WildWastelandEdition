@@ -17,6 +17,7 @@ BSD License - see nifskope.h
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
+#include "wwswitch.h"	// lane MSAABLACK1: WW_MSAABLACK1_RED
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -689,6 +690,11 @@ bool target( G43 * g, Gpu & G, int w, int h, int samples, GLenum fmt )
 		g->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE );
 		g->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, G.depthTex, 0 );
 	}
+	// lane MSAABLACK1: bind READ too, so glReadBuffer below sets OUR fbo; on the view's it left TAA's colour blit
+	// a silent no-op (MSAA 1 + TAA saved black). WW_MSAABLACK1_RED=1: the old binding
+	WW_SWITCH_STATIC( bool, msaaBlackRed, wwEnvInt( "WW_MSAABLACK1_RED" ) == 1 );
+	if ( !msaaBlackRed )
+		g->glBindFramebuffer( GL_READ_FRAMEBUFFER, G.fbo );	// restore() puts the caller's READ back
 	g->glDrawBuffer( GL_NONE );
 	g->glReadBuffer( GL_NONE );
 	const GLenum st = g->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER );

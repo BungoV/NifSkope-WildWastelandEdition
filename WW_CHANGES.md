@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane MSAABLACK1 (2026-10-23, branch msaablack1-20261022): MSAA 1 + TAA no longer saves a black frame
+
+- **Why.** AAFORMAT1 / BATCH2: with MSAA off (WW_MSAA=1) and TAA on, the saved PNG was all zero apart from the
+  overlay, while the linear .hdr dump was a normal frame and the same exe with TAA off was a normal picture.
+- **Cause (code reading).** Three passes bound only GL_DRAW_FRAMEBUFFER to their own depth-only FBO and then called
+  glReadBuffer( GL_NONE ): sunshadow.cpp (the sun cascades, every frame), celllights.cpp (the light shadow cubes)
+  and cellgpucull.cpp (the GPU prepass target). glReadBuffer acts on the READ binding, which was still the view's
+  framebuffer, so the view was left with READ_BUFFER = NONE. TAA's first step blits the view's colour into its
+  input texture; a colour blit from a NONE read buffer copies nothing and raises no GL error, so TAA resolved a
+  zeroed texture and wrote black back. The tone map, its stencil path and the .hdr dump never read that buffer.
+- **What changed.**
+  - The three passes also bind GL_READ_FRAMEBUFFER to their own FBO before glReadBuffer( GL_NONE ); each pass
+    already puts the caller's READ binding back.
+  - TAA checks the frame's read buffer before its colour blit; when it is GL_NONE it sets the colour buffer back and
+    says once "temporal aa: the frame's read buffer was GL_NONE (fbo N); set back to its colour buffer".
+  - Red `WW_MSAABLACK1_RED=1`: the old binding at all three passes and no repair in TAA (the line then ends
+    "left (WW_MSAABLACK1_RED)").
+- **Gate (notes/msaablack1, run in the batch):** check.py "is a picture" (luminance std and lit share against the
+  same exe's TAA-off frame) must pass on new ms1taa and fail on the red and the rung; off, ms1 (TAA off) and
+  ms4taa must be byte-identical to the rung; the ms1taa .hdr dump identical to the rung's. On the AAFORMAT1 PNGs
+  the check fails the black frame (std 1.48 vs 10.24, 0.06 % lit) and passes the TAA-off MSAA 1 one (std 10.25).
+
 ## Lane STREAM1 (2026-10-22, branch stream1-20261022): memory and load of the streamed cell view
 
 - **Why.** WHOLEFRAME.md sec. 12, 15, 16, 17 (STREAM1, TEXSTREAM1, VTXPACK1, LOAD1): a 3x3 held 308 MB of geometry
