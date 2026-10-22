@@ -149,6 +149,7 @@ struct ProbeBakeResult
 	qint64 veilHits = 0, veilBack = 0, veilFar = 0;
 	double emitLeSum[3] = { 0, 0, 0 };      //!< the written surfels' Le, summed
 	double msRays = 0, msWrite = 0;
+	QString rtNote;                         //!< lane RTBAKE1: the primary rays' tracer (bakert census), "" = cpu
 	// lane SIDES6: v5 sides, and the corner measure (every version)
 	int sideSurfels = 0;                    //!< v5: surfels beyond each cell's first
 	int cellsSampled = 0, cornerCells = 0;  //!< cells with a hit; whose v4 front merges faces over 45 deg apart

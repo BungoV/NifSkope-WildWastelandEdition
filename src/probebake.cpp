@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "probebake.h"
 #include "probealbedo.h"
 #include "probebvh.h"
+#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count, the GPU ray back end
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -562,7 +563,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		};
 		{
 			using std::thread;
-			const int nt = std::max( 1, spec.threads > 0 ? spec.threads : int( thread::hardware_concurrency() ) );
+			const int nt = std::max( 1, spec.threads > 0 ? spec.threads : bakert::threads() );
 			std::vector<std::thread> pool;
 			for ( int t = 0; t < nt; t++ )
 				pool.emplace_back( work );
@@ -733,6 +734,19 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	auto cast = [&]( const double o[3], const double * d, double * t, int * tri ) {
 		*tri = -1;
 		return bvh.ray( o, d, spec.rayMax, t, tri ) && *tri >= 0;
+	};
+	/* lane RTBAKE1: ray i of batch b of probe pi -- the GPU's answer (re-tested in double) when the primary rays went
+	 * to the GPU, else the cast above. A miss leaves *t as the cast does. */
+	struct RHit { double t; int tri; };
+	std::vector<std::vector<RHit>> rcache;
+	auto castP = [&]( int pi, int b, int i, const double o[3], const double * d, double * t, int * tri ) {
+		if ( rcache.empty() )
+			return cast( o, d, t, tri );
+		const RHit & h = rcache[size_t( pi )][size_t( b ) * size_t( N ) + size_t( i )];
+		*tri = h.tri;
+		if ( h.tri >= 0 )
+			*t = h.t;
+		return h.tri >= 0;
 	};
 	auto hitPoint = [&]( const double o[3], const double * d, double t, float hw[3] ) {
 		hw[0] = float( o[0] + d[0] * t + O[0] );
@@ -999,7 +1013,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				const double * d = &bd[size_t( i ) * 3];
 				double t = 0;
 				int tri;
-				const bool hitAny = cast( o, d, &t, &tri );
+				const bool hitAny = castP( pi, b, i, o, d, &t, &tri );
 				if ( adaptMax > 1 ) {   // lane SMOOTHN1: the light-free estimate the noise test reads
 					const quint8 * a = hitAny && albKnown ? &soup.alb[size_t( tri ) * 3] : nullptr;
 					const double val = hitAny ? ( a ? ( 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2] ) / 255.0 : 0.5 )
@@ -1181,7 +1195,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				double t = 0;
 				int tri;
 				const int oc = octantOf( d );
-				const bool hit = cast( o, d, &t, &tri );
+				const bool hit = castP( pi, b, i, o, d, &t, &tri );
 				double T[3] = { 1.0, 1.0, 1.0 };
 				if ( glassOn && transmit( o, d, hit ? t : double( spec.rayMax ), T ) )
 					glassW += om;
@@ -1432,7 +1446,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 	};
 
-	int nThreads = spec.threads > 0 ? spec.threads : int( std::thread::hardware_concurrency() );
+	int nThreads = spec.threads > 0 ? spec.threads : bakert::threads();
 	nThreads = qBound( 1, nThreads, nChunks );
 	auto runAll = [&]( const std::function<void( Chunk & )> & fn ) {
 		std::atomic<int> next( 0 );
@@ -1446,7 +1460,101 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			t.join();
 	};
 
+	/* lane RTBAKE1: the primary rays on the GPU (bakert.h; WW_BAKE_RT_RED=cpu keeps the loops' own casts). Batch
+	 * rounds over the probes still taking batches: round b traces batch b of each, re-tests every hit in double and
+	 * runs SMOOTHN1's noise test on the same light-free estimate pass 1 reads, so the batch counts come out as pass 1's
+	 * own (checked below). Passes 1 and 2 then read the cached answers. Secondary legs stay on the CPU. */
+	std::vector<int> rtMult;
+	std::unique_ptr<bakert::Scene> rtScene;
+	if ( bakert::pickPath() != bakert::Path::Cpu ) {
+		std::string why;
+		rtScene = bakert::Scene::make( bvh, &why );
+		if ( rtScene->path() == bakert::Path::Cpu )
+			R.rtNote = QString::fromStdString( "cpu: " + why );
+	}
+	if ( rtScene && rtScene->path() != bakert::Path::Cpu ) {
+		rcache.resize( probes.size() );
+		rtMult.assign( probes.size(), 1 );
+		std::vector<std::array<double, 64>> PS( probes.size() ), PC( probes.size() );
+		for ( size_t p = 0; p < probes.size(); p++ ) {
+			PS[p].fill( 0.0 );
+			PC[p].fill( 0.0 );
+		}
+		std::vector<int> active( probes.size() );
+		for ( size_t p = 0; p < probes.size(); p++ )
+			active[p] = int( p );
+		std::vector<bakert::Ray> rays;
+		std::vector<bakert::Hit> hits;
+		for ( int b = 0; !active.empty(); b++ ) {
+			rays.resize( active.size() * size_t( N ) );
+			hits.resize( rays.size() );
+			auto pool = [&]( const std::function<void( size_t )> & fn ) {
+				std::atomic<size_t> next( 0 );
+				std::vector<std::thread> th;
+				for ( int t = 0; t < nThreads; t++ )
+					th.emplace_back( [&]() {
+						for ( size_t k = next++; k < active.size(); k = next++ )
+							fn( k );
+					} );
+				for ( std::thread & t : th )
+					t.join();
+			};
+			pool( [&]( size_t k ) {
+				const int pi = active[k];
+				const ProbePoint & pp = probes[size_t( pi )];
+				std::vector<double> rbuf;
+				const double * bd = batchDirs( pi, b, rbuf );
+				for ( int i = 0; i < N; i++ )
+					rays[k * size_t( N ) + size_t( i )] = { { float( double( pp.pos[0] ) - O[0] ), float( double( pp.pos[1] ) - O[1] ),
+						pp.pos[2] }, 1e-4f, { float( bd[i * 3] ), float( bd[i * 3 + 1] ), float( bd[i * 3 + 2] ) }, float( spec.rayMax ) };
+			} );
+			rtScene->trace( rays.data(), rays.size(), hits.data() );
+			pool( [&]( size_t k ) {
+				const int pi = active[k];
+				const ProbePoint & pp = probes[size_t( pi )];
+				const double o[3] = { double( pp.pos[0] ) - O[0], double( pp.pos[1] ) - O[1], double( pp.pos[2] ) };
+				std::vector<double> rbuf;
+				const double * bd = batchDirs( pi, b, rbuf );
+				std::vector<RHit> & C = rcache[size_t( pi )];
+				C.resize( size_t( b + 1 ) * size_t( N ) );
+				double ps[8][8], pc[8][8];
+				std::memcpy( ps, PS[size_t( pi )].data(), sizeof ps );
+				std::memcpy( pc, PC[size_t( pi )].data(), sizeof pc );
+				for ( int i = 0; i < N; i++ ) {
+					const double * d = &bd[size_t( i ) * 3];
+					double t = 0;
+					int tri = -1;
+					const bool hitAny = rtScene->refine( hits[k * size_t( N ) + size_t( i )], o, d, spec.rayMax, &t, &tri );
+					C[size_t( b ) * size_t( N ) + size_t( i )] = RHit { t, hitAny ? tri : -1 };
+					if ( adaptMax > 1 ) {   // pass 1's light-free estimate, as there
+						const quint8 * a = hitAny && albKnown ? &soup.alb[size_t( tri ) * 3] : nullptr;
+						const double val = hitAny ? ( a ? ( 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2] ) / 255.0 : 0.5 )
+							: ( spec.noSky ? 0.0 : 1.0 );
+						const int oc = ( d[0] < 0 ? 1 : 0 ) | ( d[1] < 0 ? 2 : 0 ) | ( d[2] < 0 ? 4 : 0 );
+						ps[i & 7][oc] += val;
+						pc[i & 7][oc] += 1.0;
+					}
+				}
+				std::memcpy( PS[size_t( pi )].data(), ps, sizeof ps );
+				std::memcpy( PC[size_t( pi )].data(), pc, sizeof pc );
+				if ( b + 1 == rtMult[size_t( pi )] && rtMult[size_t( pi )] < adaptMax && noisy( ps, pc ) )
+					rtMult[size_t( pi )]++;
+			} );
+			std::vector<int> still;
+			for ( int pi : active )
+				if ( rtMult[size_t( pi )] > b + 1 )
+					still.push_back( pi );
+			active.swap( still );
+		}
+	}
 	runAll( surfelChunk );
+	if ( !rtMult.empty() ) {
+		int off = 0;
+		for ( size_t p = 0; p < probes.size(); p++ )
+			off += rtMult[p] != multOf[p] ? 1 : 0;
+		R.rtNote = QString::fromStdString( bakert::census( "bake primary", *rtScene ) )
+			+ QStringLiteral( ", batch counts unlike pass 1's %1" ).arg( off );
+	}
 	// merge in chunk order (the same sums whatever ran where), then settle each cell's side
 	SurfelMap all;
 	for ( Chunk & ch : chunks ) {
@@ -2186,6 +2294,7 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 		t << " " << h;
 	t << "\n";
 	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite ) << "\n";
+	t << "bake rays: " << ( r.rtNote.isEmpty() ? QStringLiteral( "cpu" ) : r.rtNote ) << "\n";   // lane RTBAKE1
 	// lane SMOOTHN1
 	t << "bake smooth normals: soup triangles with vertex normals " << r.smoothTris << ", surfel hits given one "
 	  << r.smoothHits << " of " << r.surfelHits << "; normal-mapped triangles " << r.nmapTris << ", samples a normal map bent "

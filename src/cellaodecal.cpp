@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nativeemit.h"
 #include "probeplace.h"
 #include "probebvh.h"
+#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count, the GPU ray back end
 #include "data/niftypes.h"
 
 #include <QCoreApplication>
@@ -458,7 +459,7 @@ bool aoDecalProbeGate( const AoDecalSet & set, const ProbeSoup & soup, const std
 	std::vector<Row> rows( near.size() );
 	std::atomic<size_t> next( 0 );
 	std::vector<std::thread> pool;
-	const int nThreads = std::max( 1, int( std::thread::hardware_concurrency() ) );
+	const int nThreads = bakert::threads();
 	for ( int th = 0; th < nThreads; th++ )
 		pool.emplace_back( [&]() {
 			for ( size_t k; ( k = next.fetch_add( 1 ) ) < near.size(); ) {
@@ -642,7 +643,7 @@ int aoDecalCli( const QStringList & args )
 	}
 	std::atomic<size_t> next( 0 );
 	std::vector<std::thread> pool;
-	const int nThreads = std::max( 1, int( std::thread::hardware_concurrency() ) );
+	const int nThreads = bakert::threads();
 	for ( int th = 0; th < nThreads; th++ )
 		pool.emplace_back( [&]() {
 			for ( size_t i; ( i = next.fetch_add( 1 ) ) < n; ) {

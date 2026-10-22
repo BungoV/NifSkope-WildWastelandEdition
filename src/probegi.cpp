@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 
 #include "gl/celllights.h"
 #include "probebvh.h"
+#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count, the GPU ray back end
 #include "probebake.h"
 #include "proberelight.h"
 #include "cellaodecal.h"	// lane AODECAL1
@@ -250,7 +251,7 @@ double radial( double d, double r, const WwCellLight & l )
 
 void parallelFor( size_t n, const std::function<void( size_t )> & fn )
 {
-	const int nThreads = std::max( 1, int( std::thread::hardware_concurrency() ) );
+	const int nThreads = bakert::threads();
 	std::atomic<size_t> next( 0 );
 	std::vector<std::thread> pool;
 	for ( int i = 0; i < nThreads; i++ )
@@ -1799,17 +1800,82 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				}
 			std::vector<double> shareOf( edge.size(), 0.0 );
 			std::vector<int> raisedOf( edge.size(), 0 );
+			auto eyeOf = [&]( size_t k, double o[3] ) {
+				const VS & V = vs[edge[k].i];
+				const int si = slotOf[edge[k].i][size_t( edge[k].slot )];
+				o[0] = double( V.eye[si][0] ) - O[0];
+				o[1] = double( V.eye[si][1] ) - O[1];
+				o[2] = double( V.eye[si][2] );
+			};
+			/* lane RTBAKE1: these sky rays (slots x 256, ~20 M at Goodneighbor) are the bake's biggest ray load; on a GPU
+			 * they go out in batches as occlusion rays, each hit re-tested in double (bakert::Scene::refine). The cpu
+			 * path (WW_BAKE_RT_RED=cpu, or no Vulkan) is the loop below untouched. WW_BAKE_RT_CHECK=1 also casts every
+			 * ray on the CPU and counts the verdicts that differ (the gate). */
+			QElapsedTimer edgeClock;
+			edgeClock.start();
+			std::unique_ptr<bakert::Scene> rtScene;
+			std::vector<uint8_t> skyHit;   // per (slot, direction): 1 = the ray met something
+			std::atomic<long long> rtDiff( 0 );
+			const bool rtCheck = !qgetenv( "WW_BAKE_RT_CHECK" ).isEmpty();
+			if ( bakert::pickPath() != bakert::Path::Cpu ) {
+				std::string why;
+				rtScene = bakert::Scene::make( bvh, &why );
+				if ( rtScene->path() == bakert::Path::Cpu )
+					R.edgeRaysNote = QString::fromStdString( "cpu: " + why );
+			}
+			if ( rtScene && rtScene->path() != bakert::Path::Cpu ) {
+				skyHit.assign( edge.size() * size_t( kDirs ), 0 );
+				const size_t chunk = 4096;   // slots a batch: 1 M rays
+				std::vector<bakert::Ray> rays;
+				std::vector<bakert::Hit> hits;
+				for ( size_t k0 = 0; k0 < edge.size(); k0 += chunk ) {
+					const size_t k1 = std::min( edge.size(), k0 + chunk );
+					rays.resize( ( k1 - k0 ) * size_t( kDirs ) );
+					hits.resize( rays.size() );
+					for ( size_t k = k0; k < k1; k++ ) {
+						double o[3];
+						eyeOf( k, o );
+						for ( int d = 0; d < kDirs; d++ ) {
+							bakert::Ray & r = rays[( k - k0 ) * size_t( kDirs ) + size_t( d )];
+							r = { { float( o[0] ), float( o[1] ), float( o[2] ) }, 1e-4f,
+								{ float( dirs[d][0] ), float( dirs[d][1] ), float( dirs[d][2] ) }, 131072.0f };
+						}
+					}
+					rtScene->trace( rays.data(), rays.size(), hits.data(), true );
+					parallelFor( k1 - k0, [&]( size_t j ) {
+						double o[3];
+						eyeOf( k0 + j, o );
+						for ( int d = 0; d < kDirs; d++ ) {
+							double t;
+							int tri;
+							const bool hit = rtScene->refine( hits[j * size_t( kDirs ) + size_t( d )], o, dirs[d], 131072.0, &t, &tri, false );
+							skyHit[( k0 + j ) * size_t( kDirs ) + size_t( d )] = hit ? 1 : 0;
+							if ( rtCheck && hit != bvh.ray( o, dirs[d], 131072.0, &t ) )
+								rtDiff++;
+						}
+					} );
+				}
+				R.edgeRaysNote = QString::fromStdString( bakert::census( "edge sky", *rtScene ) )
+					+ ( rtCheck ? QStringLiteral( ", check: verdicts unlike the CPU's %1 of %2" ).arg( rtDiff.load() )
+						.arg( qint64( skyHit.size() ) ) : QString() );
+			} else if ( R.edgeRaysNote.isEmpty() )
+				R.edgeRaysNote = QStringLiteral( "edge sky rays: cpu, %1 rays" ).arg( qint64( edge.size() ) * kDirs );
 			parallelFor( edge.size(), [&]( size_t k ) {
 				const ES & e = edge[k];
 				const VS & V = vs[e.i];
 				const int si = slotOf[e.i][size_t( e.slot )];
 				const double o[3] = { double( V.eye[si][0] ) - O[0], double( V.eye[si][1] ) - O[1], double( V.eye[si][2] ) };
 				int open[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-				for ( int d = 0; d < kDirs; d++ ) {
-					double tHit;
-					if ( !bvh.ray( o, dirs[d], 131072.0, &tHit ) )
-						open[dirOct[d]]++;
-				}
+				if ( !skyHit.empty() ) {
+					for ( int d = 0; d < kDirs; d++ )
+						if ( !skyHit[k * size_t( kDirs ) + size_t( d )] )
+							open[dirOct[d]]++;
+				} else
+					for ( int d = 0; d < kDirs; d++ ) {
+						double tHit;
+						if ( !bvh.ray( o, dirs[d], 131072.0, &tHit ) )
+							open[dirOct[d]]++;
+					}
 				float vis[8];
 				double vsum = 0.0;
 				for ( int q = 0; q < 8; q++ ) {
@@ -1893,6 +1959,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				}
 			}
 			R.edgeSkyShare = nEdge == 0 ? 0.0 : shSum / double( nEdge );
+			R.msEdgeRays = edgeClock.nsecsElapsed() / 1e6;
 		}
 	}
 	R.voxelsBare = nBare;
@@ -2301,6 +2368,8 @@ QString probeGiCensusText( const ProbeGiResult & r )
 		+ ( r.skyLit ? QStringLiteral( "\n  gi sky floor: outdoor slots held at least at the sky their eye sees: looked at %1, "
 			"raised %2 (axes %3; %4)" ).arg( r.skyFloorSlots ).arg( r.skyFloorRaised ).arg( r.skyFloorAxes )
 			.arg( r.skyFloorNote.isEmpty() ? QStringLiteral( "off" ) : r.skyFloorNote ) : QString() )   // lane GIDARK1
+		+ ( r.edgeRaysNote.isEmpty() ? QString() : QStringLiteral( "\n  gi %1; edge + floor ms %2" ).arg( r.edgeRaysNote )
+			.arg( r.msEdgeRays, 0, 'f', 0 ) )   // lane RTBAKE1
 		+ QStringLiteral( "\n  " ) + ( r.roomsOn ? probeRoomsCensusText( r.rooms )
 			+ QStringLiteral( "\n  gi rooms: voxels with a second room %1 (left empty %2), slots gathered from their eye "
 				"(the centre in another room) %3, probes in no room %4" ).arg( r.voxelsTwoRooms ).arg( r.voxelsTwoBare )

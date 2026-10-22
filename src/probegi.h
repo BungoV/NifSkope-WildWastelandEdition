@@ -70,6 +70,9 @@ struct ProbeGiResult
 	 *  and "on" / "red noskyfloor" / "recording: left as blended" */
 	int skyFloorSlots = 0, skyFloorRaised = 0, skyFloorAxes = 0;
 	QString skyFloorNote;
+	//! lane RTBAKE1: the edge/floor sky rays' tracer (bakert census: path, device, re-casts, GPU ms) and their ms
+	QString edgeRaysNote;
+	double msEdgeRays = 0;
 	/*! lane ROOMCLAMP1 (src/proberooms.h): the rooms. Each near voxel keeps two slots, the two rooms the surfaces
 	 *  reading it stand in most; a slot gathers only the probes of its room, from the voxel's centre when the
 	 *  centre is in that room, else from the slot's eye. grid / gridSky then hold slot 0 and grid2 / gridSky2
