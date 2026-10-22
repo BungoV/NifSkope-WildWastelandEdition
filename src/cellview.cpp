@@ -1173,6 +1173,21 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			}
 		}
 		l.ref = r.formID;
+		// lane LIGHTFLICKER1: the game tests 0x8 first, then 0x180; the offset is in the light's local frame
+		l.flicker = ( b.flags & 0x8 ) ? 1 : ( b.flags & 0x180 ) ? 2 : 0;
+		if ( l.flicker ) {
+			l.flickerPeriod = b.flickerPeriod;
+			l.flickerIntensity = b.flickerIntensity;
+			l.flickerMovement = b.flickerMovement;
+			Matrix rm;
+			rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+			const float sc = r.scale > 0.0f ? r.scale : 1.0f;
+			for ( int a = 0; a < 3; a++ ) {
+				const Vector3 d = rm * Vector3( a == 0 ? 1.0f : 0.0f, a == 1 ? 1.0f : 0.0f, a == 2 ? 1.0f : 0.0f );
+				for ( int k = 0; k < 3; k++ )
+					l.flickerAxes[a][k] = d[k] * sc;
+			}
+		}
 		if ( startOff ) {   // lane GPURELIGHT1: recorded, lights nothing at the start
 			L.offLights.append( l );
 			continue;

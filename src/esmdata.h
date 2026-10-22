@@ -147,6 +147,7 @@ struct EsmLight
 	QString gobo;                   //!< NAM0
 	quint32 godRays = 0;            //!< lane VOLFOG1: WGDR, the light's GDRY (0 = none: the light casts no shafts)
 	float godRayNear = 0.0f;        //!< lane VOLFOG1: DATA "God Rays - Near Clip" (offset 52)
+	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;	//!< lane LIGHTFLICKER1: DATA Flicker Effect
 	//! "omni", "spot", "hemi", "box", with "shadow " in front when it casts one
 	QString typeName() const;
 };

@@ -418,6 +418,34 @@
 - **Measured:** built only; the video (closed, opening, open, closing, closed, plus the static red) and the floor
   brightness curve are shot in the next batch, after BATCH2 lands (notes/doorlive1/BATCH.md).
 
+## Lane LIGHTFLICKER1 (2026-10-22, branch lightflicker1-20261022): lamps flicker from their LIGH Flicker Effect
+
+- **Why.** bungo 10-22 (RDR2 list, item 5): fires and broken lamps in the cell view stood still. The LIGH DATA Flicker
+  Effect (period, intensity amplitude, movement amplitude) was read and thrown away.
+- **What.** `EsmLight` keeps the three values; the cell view hands them, the flag's mode and the ref's local axes x
+  scale to each placed light. Each frame `wwCellFlickerFrame` computes ONE value per light (a dimmer on its colour and a
+  world offset of its position) and patches it into the cell light buffer. The surfaces, the lit effects and the
+  volumetric air all read that buffer, so they always agree. The GI, the relight and the far light keep the steady light.
+- **The FO4 way** (matches the game's flicker / pulse behavior, measured):
+  - flag 0x8 (Flicker) runs the flicker, else 0x80 / 0x100 runs the pulse.
+  - Three phases a light step by random ranges (1.1-13.1, 1.2-13.2, 1.3-19.3) x frame seconds x Period.
+  - 512-entry sin/cos tables give the dimmer `1 - A + A v` (A = intensity / 2) and the local offset
+    (`NiAVObject` local translate). The pulse uses cos/sin of one phase.
+  - Our random is a seeded xorshift per ref, so a gate's frames repeat.
+- **One difference from the game.** A shadow-casting light keeps its place and flickers in brightness only. Its depth
+  cube is drawn once, from there, not every frame. The cluster lists take a moving light's radius + 0.87 x movement, so
+  the patched light is never cut off.
+- **Row:** Cell workspace "Light flicker" (`WW/CellFlicker`, **ships OFF**; pin `WW_CELL_FLICKER=0/1` wins).
+  - Red `WW_CELL_FLICKER_RED=1` holds every light steady, which is the row-off picture.
+  - Gate pins: `WW_CELL_FLICKER_STEP=<s>` sets a fixed step a frame; `WW_CELL_FLICKER_DUMP=<file>` writes one line per
+    flickering light per frame.
+  - The echo says `flicker=on(asked, lights, moving, frames, red, step)`.
+  - The view repaints every tick only while a flickering light is on screen.
+- **Vanilla census** (Fallout4.esm): 694 LIGH; 182 flicker, 18 pulse. Most movements are 0 to 0.8 units; fires 32, a few
+  128.
+- **Cost:** CPU work on the flickering lights only, and one `glBufferSubData` over their range per frame. No shader
+  change.
+
 ## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
 
 - Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.

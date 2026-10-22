@@ -223,6 +223,7 @@ private:
 	// lane CELLALL1: the second row, the features that were env-only (their defaults unchanged; new ones ship off)
 	QAction * cellAo = nullptr;
 	QAction * cellShadow = nullptr;
+	QAction * cellFlicker = nullptr;	// lane LIGHTFLICKER1: the lamps' LIGH flicker (ships off)
 	QAction * cellSsr = nullptr;
 	QAction * cellSsrExt = nullptr;
 	QAction * cellSsgi = nullptr;	// lane SSGI1

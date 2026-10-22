@@ -527,6 +527,7 @@ void CellWorkspacePanel::buildUi()
 	}
 	cellPass->setEnabled( false );
 	cellShadow = tick( showMenu, tr( "Light shadows" ), "CellWorkspaceLightShadows", wwCellShadowOn() );
+	cellFlicker = tick( showMenu, tr( "Light flicker" ), "CellWorkspaceLightFlicker", wwCellFlickerOn() );
 	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
 	cellAoDecal = tick( showMenu, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
 	cellGiGpu = tick( showMenu, tr( "GPU relight" ), "CellWorkspaceGpuRelight", wwCellGiGpuOn() );
@@ -763,6 +764,7 @@ void CellWorkspacePanel::buildUi()
 	};
 	fxLive( cellAo, &wwCellAoSetOn );
 	fxLive( cellShadow, &wwCellShadowSetOn );
+	fxLive( cellFlicker, &wwCellFlickerSetOn );
 	fxLive( cellSsr, &wwCellSsrSetOn );
 	fxLive( cellSsrExt, &wwCellSsrExteriorSetOn );
 	fxLive( cellSsgi, &wwCellSsgiSetOn );
