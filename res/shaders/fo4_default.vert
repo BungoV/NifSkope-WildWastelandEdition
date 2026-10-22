@@ -23,13 +23,6 @@ uniform mat4 modelViewMatrix;
 
 uniform vec4 vertexColorOverride;	// components greater than zero replace the vertex color
 
-// lane FARLOD1: the far field's wind. 0 (the default, and whenever the Far LOD row is off) = no sway;
-// a tree-animation shape's vertex alpha is the weight, as in the game
-uniform float farSwayAmp;
-uniform float farSwayTime;
-// the loaded block in view space: xyz its centre, w its half edge -- the cell's own trees stand inside it, unswayed
-uniform vec4 farSwayBlock;
-uniform bool lodTreeAnim;
 /* lane GRASSMB1: the game's grass wind, op for op from its grass vertex shader (Shaders011 entry 02183, the deferred
  * prepass's grass technique; src/gl/cellgrass.h). wwGrassWind = cb2[11] = (angle, 0, previous phase, phase),
  * wwGrassWind2 = cb2[12] = (min speed * 300, max speed * 300, frequency) with .w = 1 on a grass shape, 0 on
@@ -85,13 +78,6 @@ void main()
 	}
 
 	v = modelViewMatrix * v;
-	vec3 farRel = transpose( viewMatrix ) * ( v.xyz - farSwayBlock.xyz );	// world-axis offset from the block's centre
-	if ( farSwayAmp > 0.0 && lodTreeAnim && max( abs( farRel.x ), abs( farRel.y ) ) > farSwayBlock.w ) {
-		// world-horizontal offset, phase by the vertex's own place so a forest does not move as one
-		float ph = dot( vertexPosition.xy, vec2( 0.0021, 0.0017 ) );
-		vec3 w = vec3( sin( farSwayTime * 1.3 + ph ), cos( farSwayTime * 0.9 + ph * 1.7 ) * 0.6, 0.0 );
-		v.xyz += viewMatrix * ( w * ( farSwayAmp * vertexColor.a ) );
-	}
 	gl_Position = projectionMatrix * v;
 	texCoord = multiTexCoord0;
 
