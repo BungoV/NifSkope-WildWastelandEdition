@@ -732,6 +732,7 @@ vec3 cellGiKeyNormal( float k )
  * blend; also with a threshold's), 2 the nearest own-volume voxel (a room's fill), 4 no volume known or none of its
  * voxels in reach (the trilinear); outdoors, a surface the room grid cannot place (lane GIBLACK2's stranded): 6 and 7
  * the outdoors' volume, 5 none in reach. A probe picture reads the mask at its own pixel (the screen pass's read). */
+uniform int cellGiLoop8;		// 8: the corner loop's bound, a uniform so the loop stays one body; MARCHTOOLS: declared for both modes (EMISSIVEGRID1 reads it in the march mode too)
 #ifdef WW_CELL_GI_MARCH
 #ifdef WW_CELL_GI_MARCH_ONCE
 /* lane GIBLACKLINK1: the march once a fragment (fo4_default: its main primes it). Every call site inlines the whole chain,
@@ -752,7 +753,6 @@ vec4 cellGiSample( vec3 P, vec3 N )
 }
 #endif
 #else
-uniform int cellGiLoop8;		// 8: the corner loop's bound, a uniform so the loop stays one body
 uniform bool cellGiHalfOn;
 uniform sampler2D cellGiHalf;		// rgba: the volume read at the screen texel's pixel
 uniform sampler2D cellGiHalfKey;	// xyz: that pixel's world position, w: its packed normal (< 0: no surface)
