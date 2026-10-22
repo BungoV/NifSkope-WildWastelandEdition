@@ -1118,14 +1118,16 @@ vec3 cellFarProbeOut( vec3 P, vec3 N )
 }
 
 // the harness probes for a program without the legacy BRDF helpers (pbrm_cell)
+vec3 cellSsgiE( vec3 eProbe );	// lane SSGI2: probe 5 reads what the surface gets (below)
+
 vec3 cellProbeRaw( vec3 P, vec3 N )
 {
 	if ( cellProbe >= 91 && cellProbe <= 94 )	// lane FARVIEW1
 		return cellFarProbeOut( P, N );
 	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
 		return vec3( 0.0 );
-	if ( cellProbe == 5 )
-		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
+	if ( cellProbe == 5 )	// lane SSGI2: E_probe x the open share + E_screen when SSGI runs (the double-count gate)
+		return clamp( cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989, 0.0, 1.0 );
 	if ( cellProbe == 90 )	// lane SKY1: the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
 		return vec3( cellAmbShare( P, N ) );
 	if ( cellProbe == 95 ) {	// lane GIBLACK1: r = the branch cellGiSample took / 16 (lane GIBLACK2; it was / 4), g = its .a, b = its E luminance / pi (sqrt)
@@ -1489,8 +1491,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 	vec3 N = cellWorldDir( normalView );
 	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
 		return vec3( 0.0 );
-	if ( cellProbe == 5 )
-		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
+	if ( cellProbe == 5 )	// lane SSGI2: as cellProbeRaw's
+		return clamp( cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989, 0.0, 1.0 );
 	if ( cellProbe == 90 )	// lane SKY1 (60-74 are other lanes'): the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
 		return vec3( cellAmbShare( P, N ) );
 	if ( cellProbe == 95 )	// lane GIBLACK1: the branch cellGiSample took, its .a and its E (cellProbeRaw's)

@@ -1,5 +1,31 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SSGI3 (2026-10-22, branch ssgi3-20261022): the screen-space GI fill law keeps its light
+
+- The screen-space GI (still ships OFF, `WW/CellSsgi`) took more probe light away than its march put back near
+  geometry (0.80 of the tracer, SSGI off 0.89). Two fixes in the cast, both physical:
+  - A diffuse surface looks equally bright from every side, so the donor's light no longer falls with its cosine
+    (only its back face gives nothing).
+  - A shut sector now removes probe light only as far as the screen refills it: a donor in the radius' outer band
+    or seen from behind leaves the rest to the probe. The probe keeps exactly what the screen does not replace.
+- Red `WW_CELL_SSGI_RED=oldlaw` brings SSGI1's law back. Echo: `cell ssgi: ... law fill|old`.
+- Offline gate `tests/spells/ssgi_fill_law.py` (furnace + lit corner): fill law PASS, red FAILS the furnace.
+  The live gates (DC2 at +-10 %, red identity, pictures) wait for the next batch: notes/ssgi3/BATCH.md.
+
+## Lane SSGI2 (2026-10-21, branch ssgi2-20261021): screen-space GI's four weaker rows to FO4CS's level
+
+- The screen-space GI (ships OFF, `WW/CellSsgi`) now matches FO4CS on the four rows SSGI1 left weaker:
+  - Noise: EA's FAST spatiotemporal blue-noise sheet (BSD-3, `res/ssgi/`), as FO4CS reads it. Red `ign`.
+  - Depth-interval skip: a min/max depth pyramid skips taps whose cell lies outside the radius (exact: same picture),
+    plus the early out once every sector is shut. Red `nohiz`.
+  - Emissive cast: the scene pass writes the emitted share to a second target; a 2-slice importance-sampled cast with
+    FO4CS's small-emitter boost runs with its own history and denoise and is added at the end; the ordinary cast takes
+    the emission off its donor. Effect shaders are not emitters here (FO4CS skips them too). Red `noemissive`.
+  - Denoise: FO4CS's robust blur plus the quarter-res pyramid with temporal moments. Red `oldblur`.
+- Probe 5 (`WW_CELL_LIT_PROBE=5`) now shows what the surface gets with SSGI on (the double-count gate); unchanged with SSGI off.
+- Gates: `tests/spells/cell_ssgi.sh` PASS; nohiz byte-identical PASS. Double count vs the tracer: PASS at bounce1's
+  facade pixels, FAIL at near-field pixels (SSGI under-counts, 0.80 of the tracer); see notes/ssgi2/FINAL.md.
+
 ## Lane LEFTOVERS1 (2026-10-22, branch leftovers1-20261022): Open Cell reads localized names from the string tables
 
 - **Why.** A localized plugin (TES4 flag 0x80, e.g. the game's own masters) stores FULL as a string-table index, so
