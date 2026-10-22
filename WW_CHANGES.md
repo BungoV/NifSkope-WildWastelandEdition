@@ -493,6 +493,32 @@
 - **Reds.** `WW_CELL_SPECOCC_RED=ao`: the material AO alone (today's picture). `WW_CELL_SPECOCC_RED=hemi`: FO4CS's own
   read, the normal's sky visibility faded out by smoothness.
 
+## Lane LAMPSHADOW1 (2026-10-22, branch lampshadow1-20261022): stored lamp shadows; live redraws only near movers
+
+- **Why.** The cell lights' shadow cubes were rendered whenever a lamp entered one of the 16 shadow slots, so walking
+  through a lamp-heavy interior kept re-rendering them, and nothing redrew when a caster moved. RDR2 stores most static
+  point-light shadows and renders live ones only when something dynamic is near the light; its wall lights use a
+  spot-sized map instead of a full cube (notes: lane folder RESEARCH.md).
+- **What.** New row Cell lights > **Lamp shadows**: Off | Low | Medium | High | Ultra (setting `WW/CellLampShadow`, pin
+  `WW_CELL_LAMPSHADOW=off|low|medium|high|ultra`). Ships **Off**, which is the shadow pass exactly as before.
+  - Each shadow lamp's cube is rendered once from the still casters into a store (`src/gl/celllampshadow.*`,
+    `lampShadowPass` in `src/gl/celllights.cpp`) and copied into its slot by depth blits when it takes one.
+  - A caster whose world transform (or CPU-skinned vertices) changes becomes a mover: the stored maps it was in are
+    rendered again without it, and a slot is redrawn only on a frame when a mover inside its light's volume moved or the
+    set of movers inside changed: the stored map copied in, then the movers drawn over it.
+  - Wall lamps: 8 short rays beside the lamp along each world axis must hit one plane square to it within 64 units. Such
+    a lamp stores only the room half of its cube (the front face and the room halves of the 4 side faces: half the
+    memory); on restore the wall half is drawn as that plane.
+  - Tiers set the face edge and the store budget: Low 256 / 32 MB, Medium 512 (the old face) / 128 MB, High 768 /
+    256 MB, Ultra 1024 / 384 MB. An omni lamp costs 6 x face^2 x 2 B (3 MB at Medium), a wall lamp half that. When the
+    budget is full, the least-recently-used maps not in a slot are dropped; a lamp that still does not fit renders the
+    old way. The census line (`lamp=`) prints the store's lamps, walls and MB.
+  - Reds: `WW_CELL_LAMPSHADOW_RED=live` redraws every held slot from every caster every frame; `=cube` turns off the wall half.
+- **Gates** (on the merged build, after BATCH2): a still scene at Medium vs Off byte-equal with `=cube`, near with walls;
+  GPU-ms in a lamp-heavy interior at 1080p, stored vs `=live`; the store's MB per cell.
+- **After DOORLIVE1 lands:** its shadow kick re-marks every held slot; with Lamp shadows on, the stored path makes each
+  of those a copy (no re-render), and the door is caught as a mover on its own.
+
 ## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
 
 - Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.

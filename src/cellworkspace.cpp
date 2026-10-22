@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
 #include "gl/cellssgi.h"	// lane SSGI1
+#include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/cellwater.h"	// lane CELLALL1: the Water row
 #include "cellaodecal.h"	// lane CELLALL1: the AO decals row
 #include "gl/gametaa.h"
@@ -529,6 +530,22 @@ void CellWorkspacePanel::buildUi()
 	cellPass->setEnabled( false );
 	cellShadow = tick( showMenu, tr( "Light shadows" ), "CellWorkspaceLightShadows", wwCellShadowOn() );
 	cellFlicker = tick( showMenu, tr( "Light flicker" ), "CellWorkspaceLightFlicker", wwCellFlickerOn() );
+	// lane LAMPSHADOW1: stored lamp shadows, ships Off; the tier is the face size (Medium = the cube pass's own)
+	cellLampShadow = showMenu->addMenu( tr( "Lamp shadows" ) );
+	cellLampShadow->setObjectName( QStringLiteral( "CellWorkspaceLampShadows" ) );
+	cellLampShadowGroup = new QActionGroup( cellLampShadow );
+	cellLampShadowGroup->setExclusive( true );
+	{
+		const QStringList names = { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = cellLampShadow->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k - 1 );
+			a->setChecked( k - 1 == wwCellLampShadowTier() );
+			cellLampShadowGroup->addAction( a );
+		}
+	}
+	cellLampShadow->setEnabled( !wwCellLampShadowPinned() );
 	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
 	cellAoDecal = tick( showMenu, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
 	cellSpecOcc = tick( showMenu, tr( "Sky specular occlusion" ), "CellWorkspaceSkySpecOcc", wwCellSpecOccOn() );	// lane SPECOCC1
@@ -774,6 +791,11 @@ void CellWorkspacePanel::buildUi()
 	fxLive( cellReflProbe, &wwCellReflProbeSetOn );
 	fxLive( cellSsgi, &wwCellSsgiSetOn );
 	fxLive( cellSpecOcc, &wwCellSpecOccSetOn );	// lane SPECOCC1: the GI texture re-uploads with or without the sky grid
+	connect( cellLampShadowGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		wwCellLampShadowSetTier( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
 	connect( cellSsgiQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwCellSsgiSetQuality( a->data().toInt() );
 		if ( glView )

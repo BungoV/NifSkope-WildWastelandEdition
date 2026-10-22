@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "gl/lookdevstage.h"	// lane SUNCELL1
 #include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
+#include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 
 #include <QElapsedTimer>
@@ -95,6 +96,7 @@ struct ClState
 	bool shadowPinned = false;	// lane CELLALL1: the Light shadows row (WW/CellShadow); the pin wins
 	bool shadowRed = false; // WW_CELL_SHADOW_RED=noshadow: the maps rendered, every factor read as 1
 	QString shadowLast = QStringLiteral( "none yet" );
+	QString lampLast = QStringLiteral( "off" );	// lane LAMPSHADOW1: the stored lamp shadows' last frame
 	int fogProbe = 0;       // lane FOG2: WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog colour ^ 1/2.2) | 8 (its d, z), per fragment
 	int pass = 0;           // lane PROBEVIEW1: the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
 	bool passPinned = false;
@@ -260,6 +262,32 @@ struct Gpu
 	int shSlot[kShadowSlots];
 	int shStamp = 1, bufShStamp = 0;
 	int shKick = 0;	// lane DOORLIVE1: a moving caster (a live door) re-renders every held slot
+	int shFace = 0;	// lane LAMPSHADOW1: the face edge shTex was made at (the tier's)
+	// lane LAMPSHADOW1: the store (a 2D array in blocks of 3 face layers), its maps by light, the movers
+	struct LsEntry
+	{
+		std::vector<int> blocks;	// omni 2 (faces 0-2, 3-5); wall 1 (the front face, then the side halves two a layer)
+		int back = -1;			// the face into the wall (-1 omni)
+		float dist = 0.0f;
+		std::uint64_t used = 0;
+	};
+	struct LsSig
+	{
+		float v[20];
+		Vector3 c;
+		float rad = 0.0f;
+	};
+	GLuint lsTex = 0, lsReadFbo = 0;
+	int lsFace = 0, lsBlocks = 0;
+	std::vector<char> lsBlockUsed;
+	QHash<int, LsEntry> lsStore;
+	QHash<int, WwLampWall> lsWall;
+	QHash<int, LsSig> lsHist;
+	QHash<int, char> lsMovers;
+	std::vector<int> lsSlotMovers[kShadowSlots];
+	const void * lsDoc = nullptr;
+	int lsVersion = 0;
+	std::uint64_t lsFrame = 0;
 	std::vector<float> spheres;	// lane VOLAIR1: every buffer light's world centre + radius (copies included), in order
 	std::vector<float> texels;		// the light buffer as uploaded, for the cluster lists
 	std::uint64_t texelStamp = 0;
@@ -1280,7 +1308,7 @@ void wwCellLightsUniforms( Scene * scene )
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellShadow", kShadowUnit );
 	prog->uni1b( "cellShadowOn", shadowDraw );
-	prog->uni1f( "cellShadowTexel", 2.0f / float( kShadowFace ) );
+	prog->uni1f( "cellShadowTexel", 2.0f / float( g.shFace > 0 ? g.shFace : kShadowFace ) );	// lane LAMPSHADOW1: the tier's face
 	prog->uni1i( "cellIsLut", kLutUnit );
 	prog->uni1b( "cellIsOn", isDraw );
 	prog->uni1b( "cellIsLinear", isDraw && wwCellHdrActive() );	// lane HDR1: write linear light, tone-mapped once
@@ -1935,6 +1963,569 @@ static void shadowDump( Scene * scene )
 		f.write( ( wwCellShadowEcho( scene ) + QLatin1Char( '\n' ) ).toUtf8() );
 }
 
+//! the depth cube array (kShadowSlots cubes of face x face) and its framebuffer, once
+static void shadowAlloc( Renderer * r, Gpu & g, int face )
+{
+	if ( g.shTex )
+		return;
+	auto fn = r->fn;
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glGenTextures( 1, &g.shTex );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
+	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, g.shTex );
+	fn->glTexImage3D( GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT16, face, face, 6 * kShadowSlots, 0,
+		GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
+	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE );
+	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL );
+	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	fn->glGenFramebuffers( 1, &g.shFbo );
+	g.shFace = face;
+}
+
+/* lane LAMPSHADOW1: THE STORED LAMP SHADOWS (gl/celllampshadow.h). A held slot is only drawn when it is new, or a
+ * mover in its light's volume moved, or the set of movers in it changed: the light's stored static map is copied in
+ * (depth blits, exact), then the movers drawn over it (LEQUAL keeps the nearest: the same depths as one pass). */
+namespace {
+
+constexpr float kLsM[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+constexpr float kLsU[6][3] = { { 0, 0, -1 }, { 0, 0, 1 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { -1, 0, 0 } };
+constexpr float kLsV[6][3] = { { 0, -1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 }, { 0, -1, 0 }, { 0, -1, 0 } };
+
+struct LsCaster
+{
+	const Shape * sh;
+	int id;
+	Vector3 c;
+	float rad;
+};
+
+struct LsRect
+{
+	int x = 0, y = 0, w = 0, h = 0;
+};
+
+//! one face draw: the layer of tex, the viewport's origin (a packed half shifts it), the scissor, clear first or not
+struct LsTarget
+{
+	GLuint tex = 0;
+	int layer = 0;
+	int vx = 0, vy = 0;
+	LsRect cut;
+	bool clear = true;
+};
+
+bool lsTouch( const WwCellLight & l, const Vector3 & c, float rad )
+{
+	const float dx = c[0] - l.pos[0], dy = c[1] - l.pos[1], dz = c[2] - l.pos[2], reach = rad + l.radius;
+	return dx * dx + dy * dy + dz * dz < reach * reach;
+}
+
+Gpu::LsSig lsSigOf( const Shape * sh, const Vector3 & c, float rad )
+{
+	Gpu::LsSig s;
+	const Transform & w = sh->worldTrans();
+	int n = 0;
+	for ( int i = 0; i < 3; i++ )
+		for ( int j = 0; j < 3; j++ )
+			s.v[n++] = w.rotation( i, j );
+	for ( int i = 0; i < 3; i++ )
+		s.v[n++] = w.translation[i];
+	s.v[n++] = w.scale;
+	// two vertices: a CPU-skinned shape moves its vertices, not its transform
+	const Vector3 & a = sh->verts.constFirst();
+	const Vector3 & b = sh->verts.at( sh->verts.size() / 2 );
+	for ( int i = 0; i < 3; i++ ) {
+		s.v[n++] = a[i];
+		s.v[n++] = b[i];
+	}
+	s.v[n++] = float( sh->verts.size() );
+	s.c = c;
+	s.rad = rad;
+	return s;
+}
+
+//! side face f of a lamp whose back looks into a wall: the room half and the wall half of it
+void lsSideHalves( int f, int back, int S, LsRect & room, LsRect & wall )
+{
+	const float * fr = kLsM[back ^ 1];
+	const float cu = kLsU[f][0] * fr[0] + kLsU[f][1] * fr[1] + kLsU[f][2] * fr[2];
+	const float cv = kLsV[f][0] * fr[0] + kLsV[f][1] * fr[1] + kLsV[f][2] * fr[2];
+	const int h = S / 2;
+	if ( cu != 0.0f ) {
+		room = { cu > 0.0f ? h : 0, 0, h, S };
+		wall = { cu > 0.0f ? 0 : h, 0, h, S };
+	} else {
+		room = { 0, cv > 0.0f ? h : 0, S, h };
+		wall = { 0, cv > 0.0f ? 0 : h, S, h };
+	}
+}
+
+//! a wall lamp's side faces (the four off its back axis) with their packed place: layer 1 + pair, member 0/1
+void lsSides( int back, int sides[4], int layer[4], int member[4] )
+{
+	int n = 0, pair = 0;
+	for ( int ax = 0; ax < 3; ax++ ) {
+		if ( ax == back / 2 )
+			continue;
+		for ( int j = 0; j < 2; j++ ) {
+			sides[n] = 2 * ax + j;
+			layer[n] = 1 + pair;
+			member[n] = j;
+			n++;
+		}
+		pair++;
+	}
+}
+
+LsRect lsPacked( const LsRect & room, int member, int S )
+{
+	const int h = S / 2;
+	return room.w == h ? LsRect { member * h, 0, h, S } : LsRect { 0, member * h, S, h };
+}
+
+}	// namespace
+
+static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, std::vector<int> & dirty, const float cam[3] )
+{
+	ClState & s = st();
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	const int S = wwCellLampShadowFace();
+	const int red = wwCellLampShadowRed();
+	const int ver = s.version.value( scene->nifModel );
+	const std::uint64_t blockBytes = std::uint64_t( 3 ) * std::uint64_t( S ) * std::uint64_t( S ) * 2u;
+	QElapsedTimer timer;
+	timer.start();
+	g.lsFrame++;
+	if ( g.lsDoc != scene->nifModel || g.lsVersion != ver || g.lsFace != S ) {
+		g.lsStore.clear();
+		g.lsWall.clear();
+		g.lsHist.clear();
+		g.lsMovers.clear();
+		for ( std::vector<int> & v : g.lsSlotMovers )
+			v.clear();
+		std::fill( g.lsBlockUsed.begin(), g.lsBlockUsed.end(), char( 0 ) );
+		// the store holds the cell's shadow lamps (2 blocks each at most), up to the tier's budget
+		int lamps = 0;
+		for ( const WwCellLight & l : L.lights )
+			lamps += l.shadow ? 1 : 0;
+		const int budget = int( std::uint64_t( wwCellLampShadowBudgetMB() ) * 1048576u / blockBytes );
+		const int want = std::max( 2, std::min( budget, 2 * lamps ) );
+		if ( g.lsTex && ( g.lsFace != S || g.lsBlocks != want ) ) {
+			fn->glDeleteTextures( 1, &g.lsTex );
+			g.lsTex = 0;
+		}
+		g.lsBlocks = want;
+		g.lsBlockUsed.assign( size_t( want ), char( 0 ) );
+		g.lsDoc = scene->nifModel;
+		g.lsVersion = ver;
+		g.lsFace = S;
+	}
+
+	// the casters, as the cube pass takes them (the water too: SUNCELL1's red keeps it)
+	static const bool waterCastsRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts";
+	std::vector<LsCaster> casters;
+	for ( Node * node : scene->nodes.list() ) {
+		const Shape * sh = dynamic_cast<const Shape *>( node );
+		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || sh->wwAlphaTested() )
+			continue;
+		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
+			continue;
+		if ( !waterCastsRed && wwCellWaterIsShape( scene->nifModel, sh->id() ) )
+			continue;
+		const BoundSphere b = sh->bounds();
+		casters.push_back( { sh, sh->id(), b.center, b.radius } );
+	}
+	// what moved since the last frame; a first move makes a caster a mover and drops the stored maps it was in
+	auto slotOfLight = [&g]( int li ) {
+		for ( int k = 0; k < kShadowSlots; k++ )
+			if ( g.shSlot[k] == li )
+				return k;
+		return -1;
+	};
+	auto markDirty = [&dirty]( int k ) {
+		if ( k >= 0 && std::find( dirty.begin(), dirty.end(), k ) == dirty.end() )
+			dirty.push_back( k );
+	};
+	auto freeEntry = [&g]( const Gpu::LsEntry & e ) {
+		for ( int b : e.blocks )
+			if ( b >= 0 && b < int( g.lsBlockUsed.size() ) )
+				g.lsBlockUsed[size_t( b )] = 0;
+	};
+	QHash<int, char> moved;
+	int newMovers = 0;
+	for ( const LsCaster & c : casters ) {
+		const Gpu::LsSig sig = lsSigOf( c.sh, c.c, c.rad );
+		auto it = g.lsHist.find( c.id );
+		if ( it != g.lsHist.end() && std::memcmp( it->v, sig.v, sizeof sig.v ) != 0 ) {
+			moved.insert( c.id, 1 );
+			if ( !g.lsMovers.contains( c.id ) ) {
+				g.lsMovers.insert( c.id, 1 );
+				newMovers++;
+				for ( auto e = g.lsStore.begin(); e != g.lsStore.end(); ) {
+					const WwCellLight & l = L.lights.at( e.key() );
+					if ( lsTouch( l, it->c, it->rad ) || lsTouch( l, c.c, c.rad ) ) {
+						freeEntry( e.value() );
+						g.lsWall.remove( e.key() );
+						markDirty( slotOfLight( e.key() ) );
+						e = g.lsStore.erase( e );
+					} else {
+						++e;
+					}
+				}
+			}
+		}
+		g.lsHist.insert( c.id, sig );
+	}
+	std::vector<const LsCaster *> movers;
+	for ( const LsCaster & c : casters )
+		if ( g.lsMovers.contains( c.id ) )
+			movers.push_back( &c );
+
+	// the slots to draw this frame
+	struct Job
+	{
+		int k;
+		std::vector<int> in;
+	};
+	std::vector<Job> jobs;
+	for ( int k = 0; k < kShadowSlots; k++ ) {
+		const int li = g.shSlot[k];
+		if ( li < 0 || li >= L.lights.size() )
+			continue;
+		const WwCellLight & l = L.lights.at( li );
+		Job j { k, {} };
+		bool anyMoved = false;
+		for ( const LsCaster * m : movers ) {
+			if ( lsTouch( l, m->c, m->rad ) ) {
+				j.in.push_back( m->id );
+				anyMoved = anyMoved || moved.contains( m->id );
+			}
+		}
+		const bool isDirty = std::find( dirty.begin(), dirty.end(), k ) != dirty.end();
+		if ( red == 1 || isDirty || anyMoved || j.in != g.lsSlotMovers[k] )
+			jobs.push_back( std::move( j ) );
+	}
+	auto census = [&]( int stored, int restored, int direct, int moverDraws ) {
+		int used = 0, walls = 0;
+		for ( char u : g.lsBlockUsed )
+			used += u ? 1 : 0;
+		for ( const Gpu::LsEntry & e : g.lsStore )
+			walls += e.back >= 0 ? 1 : 0;
+		const double mb = 1.0 / 1048576.0;
+		s.lampLast = QStringLiteral( "%1 face=%2 store=%3(wall %4) storeMB=%5/%6 slotsMB=%7 slotsDrawn=%8 stored=%9 restored=%10"
+			" direct=%11 movers=%12(new %13) moverDraws=%14 ms=%15%16" )
+			.arg( wwCellLampShadowTierName( wwCellLampShadowTier() ) ).arg( S )
+			.arg( g.lsStore.size() ).arg( walls )
+			.arg( double( used ) * double( blockBytes ) * mb, 0, 'f', 1 ).arg( double( g.lsBlocks ) * double( blockBytes ) * mb, 0, 'f', 1 )
+			.arg( double( blockBytes ) * 2.0 * kShadowSlots * mb, 0, 'f', 1 )
+			.arg( jobs.size() ).arg( stored ).arg( restored ).arg( direct ).arg( movers.size() ).arg( newMovers ).arg( moverDraws )
+			.arg( timer.elapsed() )
+			.arg( red == 1 ? QStringLiteral( " red=live" ) : red == 2 ? QStringLiteral( " red=cube" ) : QString() );
+	};
+	if ( jobs.empty() ) {
+		census( 0, 0, 0, 0 );
+		return;
+	}
+
+	shadowAlloc( r, g, S );
+	if ( !g.lsTex ) {
+		fn->glGenTextures( 1, &g.lsTex );
+		GLint prevActive = 0;
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
+		GLint prevArray = 0;
+		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D_ARRAY, &prevArray );
+		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.lsTex );
+		fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT16, S, S, 3 * g.lsBlocks, 0, GL_DEPTH_COMPONENT,
+			GL_UNSIGNED_SHORT, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, GLuint( prevArray ) );
+		fn->glActiveTexture( GLenum( prevActive ) );
+	}
+	if ( !g.lsReadFbo )
+		fn->glGenFramebuffers( 1, &g.lsReadFbo );
+
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_shadowdepth.prog" );
+	if ( !prog ) {
+		s.lampLast = QStringLiteral( "refused(no cell_shadowdepth.prog)" );
+		return;
+	}
+	// save what the pass touches
+	GLint prevRead = 0, prevDraw = 0, vp[4], sc4[4], polyMode[2], depthFunc = 0;
+	GLboolean depthMask = GL_TRUE;
+	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	fn->glGetIntegerv( GL_SCISSOR_BOX, sc4 );
+	fn->glGetIntegerv( GL_POLYGON_MODE, polyMode );
+	fn->glGetIntegerv( GL_DEPTH_FUNC, &depthFunc );
+	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasOffset = fn->glIsEnabled( GL_POLYGON_OFFSET_FILL );
+	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	const bool wasBlend = fn->glIsEnabled( GL_BLEND );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.lsReadFbo );
+	fn->glReadBuffer( GL_NONE );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.shFbo );
+	fn->glDrawBuffer( GL_NONE );
+	fn->glDisable( GL_BLEND );
+	fn->glDisable( GL_CULL_FACE );
+	fn->glDisable( GL_POLYGON_OFFSET_FILL );
+	fn->glEnable( GL_DEPTH_TEST );
+	fn->glDepthFunc( GL_LEQUAL );
+	fn->glDepthMask( GL_TRUE );
+	fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+	fn->glClearDepth( 1.0 );
+
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	const Matrix4 viewM = vt.toMatrix4();
+	const int lRel = prog->uniLocation( "shRelFromView" ), lClip = prog->uniLocation( "shClipFromRel" );
+	const int lRn = prog->uniLocation( "shRadiusNear" );
+	bool complete = true;
+	auto setLight = [&]( const WwCellLight & l ) {
+		float rel[16];
+		for ( int row = 0; row < 3; row++ ) {
+			for ( int j = 0; j < 3; j++ )
+				rel[j * 4 + row] = vt.rotation( j, row ) / sc;
+			rel[12 + row] = cam[row] - l.pos[row];
+		}
+		rel[3] = rel[7] = rel[11] = 0.0f;
+		rel[15] = 1.0f;
+		if ( lRel >= 0 )
+			fn->glUniformMatrix4fv( lRel, 1, GL_FALSE, rel );
+		if ( lRn >= 0 )
+			fn->glUniform2f( lRn, l.radius, l.nearClip );
+	};
+	// one face: target, the face's projection, the casters (and the wall's plane when given)
+	auto drawFace = [&]( const WwCellLight & l, int face, const LsTarget & t, const std::vector<const LsCaster *> & list,
+		const float * quad ) -> qint64 {
+		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, t.tex, 0, t.layer );
+		if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+			complete = false;
+			return 0;
+		}
+		fn->glViewport( t.vx, t.vy, S, S );
+		fn->glEnable( GL_SCISSOR_TEST );
+		fn->glScissor( t.cut.x, t.cut.y, t.cut.w, t.cut.h );
+		if ( t.clear )
+			fn->glClear( GL_DEPTH_BUFFER_BIT );
+		const float n = 1.0f, f = l.radius * 1.01f + 2.0f;
+		const float A = ( f + n ) / ( f - n ), B = -2.0f * f * n / ( f - n );
+		float clip[16];
+		for ( int c = 0; c < 3; c++ ) {
+			clip[c * 4 + 0] = kLsU[face][c];
+			clip[c * 4 + 1] = kLsV[face][c];
+			clip[c * 4 + 2] = A * kLsM[face][c];
+			clip[c * 4 + 3] = kLsM[face][c];
+		}
+		clip[12] = clip[13] = clip[15] = 0.0f;
+		clip[14] = B;
+		if ( lClip >= 0 )
+			fn->glUniformMatrix4fv( lClip, 1, GL_FALSE, clip );
+		qint64 drawn = 0;
+		for ( const LsCaster * c : list ) {
+			prog->uni4m( "modelViewMatrix", c->sh->viewTrans().toMatrix4() );
+			const float * attrs = &( c->sh->verts.constFirst()[0] );
+			r->drawShape( (unsigned int) ( c->sh->verts.size() ), 3, (unsigned int) ( c->sh->triangles.size() * 3 ),
+				GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, c->sh->triangles.constData() );
+			drawn++;
+		}
+		if ( quad ) {
+			static const quint16 idx[6] = { 0, 1, 2, 0, 2, 3 };
+			prog->uni4m( "modelViewMatrix", viewM );
+			r->drawShape( 4u, 3, 6u, GL_TRIANGLES, GL_UNSIGNED_SHORT, &quad, idx );
+			drawn++;
+		}
+		return drawn;
+	};
+	auto blit = [&]( int srcLayer, const LsRect & a, int slotLayer, const LsRect & b ) {
+		fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.lsTex, 0, srcLayer );
+		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.shTex, 0, slotLayer );
+		if ( fn->glCheckFramebufferStatus( GL_READ_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE
+			|| fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+			complete = false;
+			return;
+		}
+		fn->glDisable( GL_SCISSOR_TEST );
+		fn->glBlitFramebuffer( a.x, a.y, a.x + a.w, a.y + a.h, b.x, b.y, b.x + b.w, b.y + b.h, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+	};
+	const LsRect full { 0, 0, S, S };
+
+	int nStored = 0, nRestored = 0, nDirect = 0;
+	qint64 moverDraws = 0;
+	for ( Job & j : jobs ) {
+		if ( !complete )
+			break;
+		const int k = j.k, li = g.shSlot[k];
+		const WwCellLight & l = L.lights.at( li );
+		setLight( l );
+		std::vector<const LsCaster *> still, mov;
+		for ( const LsCaster & c : casters ) {
+			if ( !lsTouch( l, c.c, c.rad ) )
+				continue;
+			if ( red != 1 && g.lsMovers.contains( c.id ) ) {
+				if ( std::find( j.in.begin(), j.in.end(), c.id ) != j.in.end() )
+					mov.push_back( &c );
+			} else {
+				still.push_back( &c );
+			}
+		}
+		auto direct = [&]() {
+			for ( int f = 0; f < 6 && complete; f++ )
+				drawFace( l, f, LsTarget { g.shTex, 6 * k + f, 0, 0, full, true }, still, nullptr );
+			nDirect++;
+		};
+		if ( red == 1 ) {
+			direct();
+			g.lsSlotMovers[k] = j.in;
+			continue;
+		}
+		// stored already, or store it now (the wall test once per lamp)
+		auto e = g.lsStore.find( li );
+		if ( e == g.lsStore.end() ) {
+			if ( !g.lsWall.contains( li ) ) {
+				WwLampWall w;
+				if ( red != 2 ) {
+					std::vector<const Shape *> shapes;
+					for ( const LsCaster & c : casters )
+						if ( !g.lsMovers.contains( c.id ) )
+							shapes.push_back( c.sh );
+					w = wwLampFindWall( l.pos, shapes );
+				}
+				g.lsWall.insert( li, w );
+			}
+			const WwLampWall w = g.lsWall.value( li );
+			const int need = w.back >= 0 ? 1 : 2;
+			std::vector<int> blocks;
+			for ( int pass = 0; pass < 2 && int( blocks.size() ) < need; pass++ ) {
+				blocks.clear();
+				for ( int b = 0; b < g.lsBlocks && int( blocks.size() ) < need; b++ )
+					if ( !g.lsBlockUsed[size_t( b )] )
+						blocks.push_back( b );
+				if ( int( blocks.size() ) >= need || pass == 1 )
+					break;
+				// full: evict the least recently used maps no slot holds until this one fits
+				std::vector<std::pair<std::uint64_t, int>> lru;
+				for ( auto it = g.lsStore.cbegin(); it != g.lsStore.cend(); ++it )
+					if ( slotOfLight( it.key() ) < 0 )
+						lru.emplace_back( it->used, it.key() );
+				std::sort( lru.begin(), lru.end() );
+				int freed = int( blocks.size() );
+				for ( const auto & [used, key] : lru ) {
+					if ( freed >= need )
+						break;
+					freed += int( g.lsStore.value( key ).blocks.size() );
+					freeEntry( g.lsStore.value( key ) );
+					g.lsStore.remove( key );
+				}
+			}
+			if ( int( blocks.size() ) >= need ) {
+				Gpu::LsEntry ne;
+				ne.blocks = blocks;
+				ne.back = w.back;
+				ne.dist = w.dist;
+				for ( int b : blocks )
+					g.lsBlockUsed[size_t( b )] = 1;
+				if ( w.back < 0 ) {
+					for ( int f = 0; f < 6 && complete; f++ )
+						drawFace( l, f, LsTarget { g.lsTex, 3 * blocks[size_t( f / 3 )] + f % 3, 0, 0, full, true }, still, nullptr );
+				} else {
+					drawFace( l, w.back ^ 1, LsTarget { g.lsTex, 3 * blocks[0], 0, 0, full, true }, still, nullptr );
+					int sides[4], layer[4], member[4];
+					lsSides( w.back, sides, layer, member );
+					for ( int i = 0; i < 4 && complete; i++ ) {
+						LsRect room, wall;
+						lsSideHalves( sides[i], w.back, S, room, wall );
+						const LsRect dst = lsPacked( room, member[i], S );
+						drawFace( l, sides[i], LsTarget { g.lsTex, 3 * blocks[0] + layer[i], dst.x - room.x, dst.y - room.y, dst, true },
+							still, nullptr );
+					}
+				}
+				e = g.lsStore.insert( li, ne );
+				nStored++;
+			}
+		}
+		if ( e == g.lsStore.end() ) {
+			direct();	// over the budget: drawn as before
+		} else {
+			e->used = g.lsFrame;
+			const Gpu::LsEntry & en = e.value();
+			if ( en.back < 0 ) {
+				for ( int f = 0; f < 6; f++ )
+					blit( 3 * en.blocks[size_t( f / 3 )] + f % 3, full, 6 * k + f, full );
+			} else {
+				blit( 3 * en.blocks[0], full, 6 * k + ( en.back ^ 1 ), full );
+				int sides[4], layer[4], member[4];
+				lsSides( en.back, sides, layer, member );
+				for ( int i = 0; i < 4; i++ ) {
+					LsRect room, wall;
+					lsSideHalves( sides[i], en.back, S, room, wall );
+					blit( 3 * en.blocks[0] + layer[i], lsPacked( room, member[i], S ), 6 * k + sides[i], room );
+				}
+				// the wall's half: the plane itself, out past the light's reach
+				const int ax = en.back / 2, a1 = ( ax + 1 ) % 3, a2 = ( ax + 2 ) % 3;
+				const float sg = ( en.back & 1 ) ? -1.0f : 1.0f, ext = l.radius * 2.0f + 64.0f;
+				float quad[12];
+				for ( int v = 0; v < 4; v++ ) {
+					float * q = quad + 3 * v;
+					q[ax] = l.pos[ax] + sg * en.dist;
+					q[a1] = l.pos[a1] + ( v == 0 || v == 3 ? -ext : ext );
+					q[a2] = l.pos[a2] + ( v < 2 ? -ext : ext );
+				}
+				const std::vector<const LsCaster *> none;
+				drawFace( l, en.back, LsTarget { g.shTex, 6 * k + en.back, 0, 0, full, true }, none, quad );
+				for ( int i = 0; i < 4 && complete; i++ ) {
+					LsRect room, wall;
+					lsSideHalves( sides[i], en.back, S, room, wall );
+					drawFace( l, sides[i], LsTarget { g.shTex, 6 * k + sides[i], 0, 0, wall, true }, none, quad );
+				}
+			}
+			nRestored++;
+		}
+		// the movers in this light's volume, over the static map
+		if ( !mov.empty() )
+			for ( int f = 0; f < 6 && complete; f++ )
+				moverDraws += drawFace( l, f, LsTarget { g.shTex, 6 * k + f, 0, 0, full, false }, mov, nullptr );
+		g.lsSlotMovers[k] = j.in;
+	}
+	r->stopProgram();
+
+	// restore
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+	fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
+	fn->glScissor( sc4[0], sc4[1], sc4[2], sc4[3] );
+	fn->glPolygonMode( GL_FRONT_AND_BACK, GLenum( polyMode[0] ) );
+	fn->glDepthFunc( GLenum( depthFunc ) );
+	fn->glDepthMask( depthMask );
+	wasCull ? fn->glEnable( GL_CULL_FACE ) : fn->glDisable( GL_CULL_FACE );
+	wasOffset ? fn->glEnable( GL_POLYGON_OFFSET_FILL ) : fn->glDisable( GL_POLYGON_OFFSET_FILL );
+	wasDepth ? fn->glEnable( GL_DEPTH_TEST ) : fn->glDisable( GL_DEPTH_TEST );
+	wasScissor ? fn->glEnable( GL_SCISSOR_TEST ) : fn->glDisable( GL_SCISSOR_TEST );
+	wasBlend ? fn->glEnable( GL_BLEND ) : fn->glDisable( GL_BLEND );
+
+	if ( !complete ) {
+		for ( int k = 0; k < kShadowSlots; k++ )
+			g.shSlot[k] = -1;
+		g.shStamp++;
+		g.lsStore.clear();
+		std::fill( g.lsBlockUsed.begin(), g.lsBlockUsed.end(), char( 0 ) );
+		s.lampLast = QStringLiteral( "refused(framebuffer incomplete)" );
+		return;
+	}
+	census( nStored, nRestored, nDirect, int( moverDraws ) );
+	shadowDump( scene );
+}
+
 /* lane SHADOW1: the depth cubes (celllights.h). Each face: world relative to the light, GL's cube face
  * axes (major m, s = u.r, t = v.r over |m.r|), 90 degrees; depth = distance / radius (the fragment stage). */
 namespace {
@@ -1970,6 +2561,15 @@ void wwCellShadowPass( Scene * scene )
 	if ( !s.shadowOn ) {
 		s.shadowLast = s.shadowPinned ? QStringLiteral( "off(WW_CELL_SHADOW=0)" ) : QStringLiteral( "off(row)" );
 		return;
+	}
+	// lane LAMPSHADOW1: the tier's face edge; a change remakes the cube array and empties the slots
+	const int face = wwCellLampShadowFace();
+	if ( g.shTex && g.shFace != face ) {
+		r->fn->glDeleteTextures( 1, &g.shTex );
+		r->fn->glDeleteFramebuffers( 1, &g.shFbo );
+		g.shTex = g.shFbo = 0;
+		std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
+		g.shStamp++;
 	}
 	// the camera in the world (the view's inverse, as cellRow)
 	const Transform & vt = scene->view;
@@ -2031,6 +2631,17 @@ void wwCellShadowPass( Scene * scene )
 	}
 	if ( changed || !dirty.empty() )
 		g.shStamp++;
+	if ( wwCellLampShadowTier() >= 0 ) {
+		s.shadowLast = QStringLiteral( "on shadowLights=%1 face=%2 (lamp)" ).arg( cand.size() ).arg( face );
+		lampShadowPass( scene, g, *L, dirty, cam );	// lane LAMPSHADOW1: stored maps, movers redrawn on top
+		return;
+	}
+	if ( g.lsTex ) {	// the row turned Off: the store's memory goes back
+		r->fn->glDeleteTextures( 1, &g.lsTex );
+		g.lsTex = 0;
+		g.lsDoc = nullptr;
+		g.lsStore.clear();
+	}
 	if ( dirty.empty() ) {
 		if ( changed )
 			shadowDump( scene );
@@ -2042,23 +2653,7 @@ void wwCellShadowPass( Scene * scene )
 	auto fn = r->fn;
 	GLint prevActive = 0;
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	if ( !g.shTex ) {
-		fn->glGenTextures( 1, &g.shTex );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
-		fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, g.shTex );
-		fn->glTexImage3D( GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT16, kShadowFace, kShadowFace, 6 * kShadowSlots, 0,
-			GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
-		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
-		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE );
-		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL );
-		fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, 0 );
-		fn->glActiveTexture( GLenum( prevActive ) );
-		fn->glGenFramebuffers( 1, &g.shFbo );
-	}
+	shadowAlloc( r, g, face );
 
 	// the casters: what the sun's map takes (opaque, depth-writing, no effect), less the alpha-tested
 	struct ShCaster
@@ -2124,7 +2719,7 @@ void wwCellShadowPass( Scene * scene )
 	fn->glDepthFunc( GL_LEQUAL );
 	fn->glDepthMask( GL_TRUE );
 	fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-	fn->glViewport( 0, 0, kShadowFace, kShadowFace );
+	fn->glViewport( 0, 0, face, face );
 
 	// GL's cube faces: major axis m, s along u, t along v (the spec's sc / tc table)
 	static const float M[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
@@ -2210,7 +2805,7 @@ void wwCellShadowPass( Scene * scene )
 		return;
 	}
 	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6 water=%7" )
-		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( kShadowFace )
+		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( face )
 		.arg( waterCastsRed ? QStringLiteral( "casts(RED)" ) : QStringLiteral( "skipped %1" ).arg( waterSkipped ) );	// lane SUNCELL1
 	shadowDump( scene );
 }
@@ -2219,6 +2814,8 @@ QString wwCellShadowEcho( Scene * scene )
 {
 	ClState & s = st();
 	QString o = QStringLiteral( "shadow=%1" ).arg( s.shadowLast );
+	if ( wwCellLampShadowTier() >= 0 )
+		o += QStringLiteral( " lamp=" ) + s.lampLast;	// lane LAMPSHADOW1
 	if ( s.shadowRed )
 		o += QStringLiteral( " red=noshadow" );
 	if ( !scene || !scene->renderer || !scene->nifModel )

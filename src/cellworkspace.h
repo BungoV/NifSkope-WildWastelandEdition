@@ -224,6 +224,8 @@ private:
 	QAction * cellAo = nullptr;
 	QAction * cellShadow = nullptr;
 	QAction * cellFlicker = nullptr;	// lane LIGHTFLICKER1: the lamps' LIGH flicker (ships off)
+	QMenu * cellLampShadow = nullptr;	// lane LAMPSHADOW1: Off | Low | Medium | High | Ultra
+	QActionGroup * cellLampShadowGroup = nullptr;
 	QAction * cellSsr = nullptr;
 	QAction * cellSsrExt = nullptr;
 	QAction * cellReflProbe = nullptr;	// lane REFLPROBE1
