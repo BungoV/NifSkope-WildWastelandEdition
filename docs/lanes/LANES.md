@@ -32,6 +32,8 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | RTBAKE1 | GPU ray-traced bake (gate cell 52.5 -> 43.0 s) | BATCH ready (rt3 6cabd09; rtbake1/BATCH.md): museum CPU-vs-RT pair runs in BATCH1's timing hold |
 | FARCARD1 | far tree cards drawn instanced (one draw per card set, per-card data in one buffer; ~17 ms on Concord; bungo 10-22) | BATCH ready (farcard1-20261022 f03e072b; farcard1/BATCH.md): gates + timing unrun |
 | PERF3 | AO/SSR stop drawing the scene twice (SSR from the previous frame, ships off), per-draw GL query cache, sun-shadow frame block, far-LOD proposal (bungo 10-22) | BATCH ready (perf3-20261022 e91e3286; perf3/BATCH.md): gates + timing unrun |
+| GPUDRIVEN1 | Step A: sorted render queues + indirect multi-draw for sun cascades and main pass, GL 4.6 (bungo 10-22) | BATCH ready (gpudriven1-20261022 3b2202ab; gpudriven1/BATCH.md): gates + timing unrun; bindless deferred |
+| SSGI3 | SSGI on under-counts near geometry vs tracer (0.80 vs off 0.89, bar +-10%): fix the SSGI1 fill law (defect, bungo yes) | BATCH ready (ssgi3-20261022 f577e9a8; ssgi3/BATCH.md): fill law fixed (donor no cosine, sector leaves probe only as far as screen refills); offline furnace twin PASS, red oldlaw fails it; DC2 + pairs unrun |
 
 Next batch (BATCH2): VOLPART1R, FARCARD1, PERF3, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
 Queued tonight (his 10-21 go): FARBAKE2 whole-map rebake, every channel (after BAKESPEED1); VTGPU1 + PROFILE1 (after
@@ -45,7 +47,6 @@ BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
 | LEANCOMMENTS1 | origin/cloud-leancomments1 | lean comments pass 1 (-2758 lines) | 16 conflicts; RERUN approved 10-21: starts on main after MERGEALL1 + BATCH1 land |
 
 ## 3. APPROVED, NOT STARTED (his yes on record)
-- SSGI3 (defect, queued at once): SSGI on under-counts near geometry vs tracer (0.80 vs off 0.89, bar +-10%); SSGI1 fill law (visibility removes more probe light than the march adds); diag reds in SSGI2 BATCH lines
 - PERFRESEARCH1 DONE (notes in perfresearch1/): research notes, then lanes GPUDRIVEN1 (meshlets + GPU-driven drawing, the CPU-bound fix), VISBUF1 (visibility buffer, tiny far triangles), VRS1 (variable rate shading, pair if any look change), FXRES1 (per-effect resolution + OIT)
 - PERF lanes (yes 10-22, order in perfresearch1/ORDER.md): FARCARD1 far cards batched; TONEMAP1+SYNC1 one lane; GPUDRIVEN1 A then B; SHADOWCACHE1 (after GPUDRIVEN1 A); LIGHTCLUSTER1; VRS1; FXRES1; STREAM1; AAFORMAT1 (MSAA off = pair); TEXSTREAM1/VTXPACK1/LOAD1; VISBUF1 last if it still pays. Running now: PERF3 + FARCARD1
 - PERF3 (started 10-22): AO stays FULL res (bungo 10-21 "full res and optimize where it counts for real"); drop AO + SSR second scene submissions by reusing the main pass depth/normals (+ per-material SSR flag from main pass, SSR from previous frame); CPU per-draw setup cuts; far-LOD proposal
