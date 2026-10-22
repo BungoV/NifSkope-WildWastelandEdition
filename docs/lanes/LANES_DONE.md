@@ -3,6 +3,7 @@
 ## LANDED
 | Lane | sha |
 |---|---|
+| BAKESPEED1 | 174a4bc7 merge of 13775118, b63e9a15, e6d62172 (10-22; bake VT rows + chunk jobs on all cores, VT/chunk resume) |
 | ALLON2 AO-unit fix + edge guard | caec245f + 9c624f47 (10-21, MERGEALL1) |
 | SSGI1 unit guard fix | 2f6a7ccd (10-21, MERGEALL1) |
 | LIGHTSYS2 | 2c69b160 (10-21, MERGEALL1; real-cell gate owed) |

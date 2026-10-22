@@ -29,7 +29,8 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | FXCHECK1 | BGEM glass milky; no fire-barrel particles | BATCH ready (8ad3aadf): glass fix gated, ships off; barrel plume still open |
 | VOLPART1R | rebase VOLPART1 onto main (steam/fog cards lit as volumes, ships off) | BATCH ready (6e8c92de; volpart1r/BATCH.md); gates unrun |
 | TESTDRIVER1 | live test switches: load a scene once, flip WW_* switches over the port, no relaunch per row (bungo 10-22) | BATCH ready |
-| BAKESPEED1 | far-LOD bake speed (chunks 2864 -> 1191 s mid region) | resume/determinism gates |
+| BAKESPEED2 | native write: the vertex-AO face cast split per receiver, not per chunk (gate write ~355 s -> ~60 s expected); red WW_LODGEN_BAKESPEED_RED=1 | WORKING (bakespeed2-20261022): built, gates running (identity vs BAKESPEED1 v16 at default + --threads 1, red) |
+| FARBAKE2 | whole-map Commonwealth far-LOD rebake, every channel (notes/farbake2/CHANNELS.md), with the merged exe (bungo 10-21 yes) | waits for BAKESPEED2 merge |
 | PBRALBEDO2 | .pbrm albedo in the bake, fix of PBRALBEDO1 gate | BATCH ready (8abbbd83; pbralbedo2/BATCH.md): cause = vanilla NIFs name BGSMs by absolute C:\Projects\... path, resolver refused it; gates unrun |
 | RTBAKE1 | GPU ray-traced bake (gate cell 52.5 -> 43.0 s) | BATCH ready (rt3 6cabd09; rtbake1/BATCH.md): museum CPU-vs-RT pair runs in BATCH1's timing hold |
 | FARCARD1 | far tree cards drawn instanced (one draw per card set, per-card data in one buffer; ~17 ms on Concord; bungo 10-22) | BATCH ready (farcard1-20261022 f03e072b; farcard1/BATCH.md): gates + timing unrun |
@@ -48,7 +49,7 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 
 | AAFORMAT1 | anti-aliasing + HDR target format study: MSAA count (WW_MSAA) vs TAA alone, linear frame RGBA32F vs RGBA16F (R11G11B10F out: the tone map needs alpha); everything ships OFF (bungo 10-22) | BATCH ready (aaformat1-20261022 e4a201ad on vrs1, exe sha1 2dd7b5fc; aaformat1/BATCH.md): bar stated; gates, pairs, timing + memory unrun |
 Next batch (BATCH2): VOLPART1R, FARCARD1, PERF3, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
-Queued tonight (his 10-21 go): FARBAKE2 whole-map rebake, every channel (after BAKESPEED1); VTGPU1 + PROFILE1 (after
+Queued tonight (his 10-21 go): VTGPU1 + PROFILE1 (after
 BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
 
 ## 2. BUILT, NOT LANDED (MERGEALL1 holds these)
