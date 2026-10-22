@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIGHTCLUSTER1 (2026-10-22, branch lightcluster1-20261022): clustered light lists kept across TAA jitter
+
+- **Lists kept across jitter, exact.** The point and spot lights already go through LIGHTSYS2's clustered lists (80 px
+  tiles x 24 depth slices in a texture buffer). TAA moves the projection by under half a pixel every frame, and a
+  still camera used to rebuild every frame (Memory Den, 149 lights: 1.5-3.8 ms a build). The lists are now built with
+  1 px of extra screen padding. A grid is reused while the jitter stays within 1 px of the projection it was built
+  for, so its lists still hold every light that touches a pixel.
+- **Up to 4 grids per renderer**, picked by least recent use. The cluster boxes are cached per projection and
+  viewport (they do not depend on the lights). The texture buffer is attached once per upload, not on every draw.
+- No light is dropped by count on either path. A cluster over the 512 cap walks every light, as before.
+- `WW_CELL_CLUSTER_KEEP=0` or `WW_CELL_CLUSTER_RED=rebuild`: one grid with the exact key (the old path and its cost).
+  `WW_CELL_CLUSTER_STATS=n`: a stderr stats line every n frames. The unit test adds a 1 px jitter-reuse gate, a box
+  cache gate and a jitter red (`--red-jitter`, 16 px, must fail).
+
 ## Lane GPUDRIVEN1 step B (2026-10-22, branch gpudriven1b-20261022): GPU culling (the niagara / meshoptimizer way)
 
 - **Cluster culling on the GPU.** In the main lit pass, every solid opaque, two-sided or alpha-tested cell shape is cut
