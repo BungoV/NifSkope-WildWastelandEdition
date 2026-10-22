@@ -25,7 +25,15 @@
   - chunk pass: 158 -> 34 s (8 workers);
   - peak private: 5.5 -> 6.8 GB (VT workers and pinned textures).
   - The native write (355 s) is now the gate's largest phase: its vertex-AO face cast runs parallel per chunk only, so the four dim-32 chunks finish on about one core.
+- **Measured** on the mid region -24 -24 23 23, running alone on the machine:
+  - chunks stage: 2864 -> 1040 s;
+  - VT pyramid: 1539 -> 196 s;
+  - chunk pass: 511 -> 127 s;
+  - the decals (299 s), ao map (34 s), cards (157 s) and native write (198 s) are unchanged;
+  - CPU over the stage: 1.6 -> 4.2 cores;
+  - peak private: 9.5 -> 12.3 GB.
 - **Gate:** sha1 of every mod and scratch file against the f47f5d11 run, at default threads, `--threads 1`, `--chunk-threads 4` and red. The only differences are the .key generator word, the flat report's override-file line, and the .lodb per-run fields (including the census row's chunk-thread count).
+- **Resume gate** on -16 -16 15 15: two cases were tested. In one the run was killed during the decals; in the other it was killed right after VT row 6 of 16 was checkpointed. Each rerun gives every file identical to an uninterrupted run, and the census rows are equal.
 
 ## Lane BAKEMEM1 (2026-10-21, branch bakemem1-20261021): the decals gather frees its decoded models
 
