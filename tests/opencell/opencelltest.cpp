@@ -1,6 +1,7 @@
 // OPENCELL1 unit test: File > Open Cell... against synthetic plugins built here (no game data).
 // Prints one line per check, then PASS or FAIL; exit code 0 only on PASS.
 // Red: WW_OPENCELL_RED=writer swaps x and y in the writer, and this test must then FAIL.
+// Red: WW_OPENCELL_RED=strings (and the off switch WW_OPENCELL_STRINGS=0) leave localized names blank: FAIL.
 
 #include "opencellcatalog.h"
 #include "opencelldialog.h"
@@ -117,11 +118,64 @@ QByteArray modPlugin()
 	return header( 0, { QStringLiteral( "Base.esm" ) } ) + group( "WRLD", 0, world + children + own );
 }
 
-// Localized: FULL is a string-table index and must not show as a name.
+// Localized: FULL is a string-table index, read from Strings/Loc_<lang>.STRINGS.
 QByteArray localizedPlugin()
 {
 	const QByteArray world = record( "WRLD", 0xA01, zstring( "EDID", "LocWorld" ) + field( "FULL", u32( 0x1234 ) ) );
-	return header( 0x81, {} ) + group( "WRLD", 0, world );
+	const QByteArray locCell = record( "CELL", 0xA03, zstring( "EDID", "LocCell" ) + field( "FULL", u32( 0x55 ) )
+		+ field( "XCLC", i32( 2 ) + i32( 3 ) + u32( 0 ) ) );
+	const QByteArray children = group( u32( 0xA01 ), 1, exteriorBlock( locCell ) );
+	const QByteArray interiors = group( "CELL", 0, group( u32( 0 ), 2, group( u32( 0 ), 3,
+		record( "CELL", 0xA10, zstring( "EDID", "LocRoom" ) + field( "FULL", u32( 0x66 ) ) + field( "DATA", u16( 1 ) ) ) ) ) );
+	return header( 0x81, {} ) + group( "WRLD", 0, world + children ) + interiors;
+}
+
+// Localized too; its tables are only inside "Loc2 - Localization.ba2" (and a loose German one beside it).
+QByteArray localized2Plugin()
+{
+	return header( 0x81, {} ) + group( "WRLD", 0, record( "WRLD", 0xB01, zstring( "EDID", "Loc2World" ) + field( "FULL", u32( 7 ) ) ) );
+}
+
+// A light master (.esl) and a light-flagged .esp (TES4 0x200).
+QByteArray lightMaster()
+{
+	return header( 0x201, {} ) + group( "WRLD", 0, record( "WRLD", 0xC01, zstring( "EDID", "LightWorld" ) ) );
+}
+
+QByteArray lightFlagged()
+{
+	return header( 0x200, { QStringLiteral( "Base.esm" ) } )
+		+ group( "WRLD", 0, record( "WRLD", 0x01000C02, zstring( "EDID", "LightFlagWorld" ) ) );
+}
+
+// A string table: count, data size, (id, offset) pairs, data. DL/IL strings carry a length before the text.
+QByteArray stringTable( const QList<QPair<quint32, QByteArray>> & entries, bool lengthPrefixed )
+{
+	QByteArray dir, data;
+	for ( const auto & e : entries ) {
+		dir += u32( e.first ) + u32( quint32( data.size() ) );
+		if ( lengthPrefixed )
+			data += u32( quint32( e.second.size() + 1 ) );
+		data += e.second + '\0';
+	}
+	return u32( quint32( entries.size() ) ) + u32( quint32( data.size() ) ) + dir + data;
+}
+
+// A general BA2 (version 1, files stored uncompressed).
+QByteArray ba2( const QList<QPair<QByteArray, QByteArray>> & files )
+{
+	const quint32 n = quint32( files.size() );
+	quint64 at = 24 + 36 * quint64( n );
+	QByteArray recs, data, names;
+	for ( const auto & f : files ) {
+		recs += u32( 0 ) + QByteArray( "str", 4 ) + u32( 0 ) + u32( 0x00100100 )
+			+ u32( quint32( at ) ) + u32( quint32( at >> 32 ) ) + u32( 0 ) + u32( quint32( f.second.size() ) ) + u32( 0xBAADF00D );
+		data += f.second;
+		at += quint64( f.second.size() );
+		names += u16( quint16( f.first.size() ) ) + f.first;
+	}
+	return QByteArray( "BTDX" ) + u32( 1 ) + QByteArray( "GNRL" ) + u32( n ) + u32( quint32( at ) ) + u32( quint32( at >> 32 ) )
+		+ recs + data + names;
 }
 
 bool writeFile( const QString & path, const QByteArray & data )
@@ -147,11 +201,52 @@ int main( int argc, char ** argv )
 	QApplication::setOrganizationName( QStringLiteral( "opencelltest" ) );
 	QApplication::setApplicationName( QStringLiteral( "opencelltest" ) );
 
+	// --real <Data> <plugin> [lang]: the user's own installed plugin (nothing of it is in the repo). PASS when the
+	// plugin is localized, its tables are found and its worldspaces carry names.
+	if ( argc >= 4 && QByteArray( argv[1] ) == "--real" ) {
+		const QString dataDir = QString::fromLocal8Bit( argv[2] );
+		const QString path = QDir( dataDir ).filePath( QString::fromLocal8Bit( argv[3] ) );
+		OpenCellReadOptions opt;
+		opt.lang = argc >= 5 ? QString::fromLocal8Bit( argv[4] ) : QStringLiteral( "en" );
+		opt.dataDir = dataDir;
+		bool localized = false;
+		openCellReadHeader( path, nullptr, &localized, nullptr );
+		OpenCellCatalog cat;
+		QString err;
+		const bool read = openCellReadCatalog( { path }, cat, &err, opt );
+		int wn = 0, cn = 0, ct = 0, in = 0;
+		for ( const OpenCellWorld & w : cat.worlds )
+			wn += !w.name.isEmpty();
+		for ( const auto & list : cat.cells )
+			for ( const OpenCellCell & c : list ) {
+				ct++;
+				cn += !c.name.isEmpty();
+			}
+		for ( const OpenCellCell & c : cat.interiors )
+			in += !c.name.isEmpty();
+		std::printf( "opencell real: localized %d, worlds %d named %d, exterior cells %d named %d, interiors %d named %d, "
+			"no strings [%s]%s\n", int( localized ), int( cat.worlds.size() ), wn, ct, cn, int( cat.interiors.size() ), in,
+			qPrintable( cat.noStrings.join( QLatin1Char( ',' ) ) ), read ? "" : qPrintable( QStringLiteral( " error " ) + err ) );
+		const bool pass = read && localized && cat.noStrings.isEmpty() && wn > 0;
+		std::printf( "%s\n", pass ? "PASS" : "FAIL" );
+		return pass ? 0 : 1;
+	}
+
 	QTemporaryDir tmp;
 	const QString data = tmp.path() + QStringLiteral( "/Data" );
 	writeFile( data + QStringLiteral( "/Base.esm" ), basePlugin() );
 	writeFile( data + QStringLiteral( "/Mod.esp" ), modPlugin() );
 	writeFile( data + QStringLiteral( "/Loc.esm" ), localizedPlugin() );
+	writeFile( data + QStringLiteral( "/Loc2.esm" ), localized2Plugin() );
+	writeFile( data + QStringLiteral( "/Light.esl" ), lightMaster() );
+	writeFile( data + QStringLiteral( "/LightFlag.esp" ), lightFlagged() );
+	writeFile( data + QStringLiteral( "/Strings/Loc_en.STRINGS" ), stringTable( { { 0x1234, "Localized World" },
+		{ 0x55, "Caf\xc3\xa9 Cell" }, { 0x66, "Loc Room" } }, false ) );
+	writeFile( data + QStringLiteral( "/Strings/Loc_en.DLSTRINGS" ), stringTable( { { 0x9001, "a description" } }, true ) );
+	writeFile( data + QStringLiteral( "/Loc2 - Localization.ba2" ), ba2( {
+		{ "Strings\\Loc2_en.STRINGS", stringTable( { { 7, "Archived World" } }, false ) },
+		{ "Strings\\Loc2_de.STRINGS", stringTable( { { 7, "Archiv-Welt" } }, false ) } } ) );
+	writeFile( data + QStringLiteral( "/Strings/Loc2_de.STRINGS" ), stringTable( { { 7, "Lose Welt" } }, false ) );
 	const QString base = data + QStringLiteral( "/Base.esm" ), mod = data + QStringLiteral( "/Mod.esp" );
 
 	std::printf( "catalog\n" );
@@ -161,14 +256,55 @@ int main( int argc, char ** argv )
 	checkEq( openCellWithMasters( { QStringLiteral( "Mod.esp" ) }, src, &missing ),
 		QStringList{ QStringLiteral( "Base.esm" ), QStringLiteral( "Mod.esp" ) }, QStringLiteral( "a master is added before its plugin" ) );
 	check( missing.isEmpty(), QStringLiteral( "no master missing" ) );
-	checkEq( openCellDataPlugins( data ), QStringList{ QStringLiteral( "Base.esm" ), QStringLiteral( "Loc.esm" ), QStringLiteral( "Mod.esp" ) },
-		QStringLiteral( "Data folder plugins: masters first" ) );
+	checkEq( openCellDataPlugins( data ), QStringList{ QStringLiteral( "Base.esm" ), QStringLiteral( "Light.esl" ),
+		QStringLiteral( "Loc.esm" ), QStringLiteral( "Loc2.esm" ), QStringLiteral( "LightFlag.esp" ), QStringLiteral( "Mod.esp" ) },
+		QStringLiteral( "Data folder plugins: masters and .esl first, a light-flagged .esp with the plugins" ) );
+	checkEq( openCellParsePluginsTxt( QStringLiteral( "*Light.esl\n*LightFlag.esp\n" ) ),
+		QStringList{ QStringLiteral( "Light.esl" ), QStringLiteral( "LightFlag.esp" ) }, QStringLiteral( "plugins.txt keeps .esl entries" ) );
+	{
+		OpenCellCatalog light;
+		openCellReadCatalog( { base, data + QStringLiteral( "/Light.esl" ), data + QStringLiteral( "/LightFlag.esp" ) }, light, nullptr );
+		QStringList w;
+		for ( const OpenCellWorld & x : light.worlds )
+			w.append( x.edid );
+		checkEq( w, QStringList{ QStringLiteral( "TestWorld" ), QStringLiteral( "LightWorld" ), QStringLiteral( "LightFlagWorld" ) },
+			QStringLiteral( "an .esl and a light-flagged .esp are read" ) );
+	}
 	checkEq( openCellParsePluginsTxt( QStringLiteral( "# Fallout 4\r\n*Mod.esp\r\nOff.esp\r\n" ) ), QStringList{ QStringLiteral( "Mod.esp" ) },
 		QStringLiteral( "plugins.txt: only the active entries" ) );
+
+	std::printf( "strings\n" );
+	OpenCellStrings dl;
+	check( openCellParseStrings( readFile( data + QStringLiteral( "/Strings/Loc_en.DLSTRINGS" ) ), true, dl )
+		&& dl.value( 0x9001 ) == QLatin1String( "a description" ), QStringLiteral( "a length-prefixed table parses" ) );
+	OpenCellStrings bad;
+	check( !openCellParseStrings( QByteArray( "\x05\0\0\0\x10\0\0\0", 8 ), false, bad ), QStringLiteral( "a truncated table is refused" ) );
+	OpenCellReadOptions en;
+	en.lang = QStringLiteral( "en" );
 	OpenCellCatalog loc;
-	openCellReadCatalog( { data + QStringLiteral( "/Loc.esm" ) }, loc, nullptr );
-	check( loc.worlds.size() == 1 && loc.worlds[0].edid == QLatin1String( "LocWorld" ) && loc.worlds[0].name.isEmpty(),
-		QStringLiteral( "a localized FULL is not shown as a name" ) );
+	openCellReadCatalog( { data + QStringLiteral( "/Loc.esm" ) }, loc, nullptr, en );
+	checkEq( loc.worlds.value( 0 ).name, QStringLiteral( "Localized World" ), QStringLiteral( "a localized world's name from Strings/" ) );
+	checkEq( loc.cells.value( 0xA01 ).value( 0 ).name, QString::fromUtf8( "Caf\xc3\xa9 Cell" ), QStringLiteral( "a localized cell's name (UTF-8)" ) );
+	checkEq( loc.interiors.value( 0 ).name, QStringLiteral( "Loc Room" ), QStringLiteral( "a localized interior's name" ) );
+	check( loc.noStrings.isEmpty(), QStringLiteral( "no plugin reported without strings" ) );
+	OpenCellReadOptions fr;
+	fr.lang = QStringLiteral( "fr" );
+	OpenCellCatalog locFr;
+	openCellReadCatalog( { data + QStringLiteral( "/Loc.esm" ) }, locFr, nullptr, fr );
+	check( locFr.worlds.size() == 1 && locFr.worlds[0].name.isEmpty()
+		&& locFr.noStrings == QStringList{ QStringLiteral( "Loc.esm" ) },
+		QStringLiteral( "no table for the language: blank name (never the index), plugin reported" ) );
+	OpenCellCatalog arch;
+	openCellReadCatalog( { data + QStringLiteral( "/Loc2.esm" ) }, arch, nullptr, en );
+	checkEq( arch.worlds.value( 0 ).name, QStringLiteral( "Archived World" ), QStringLiteral( "a table inside <plugin> - *.ba2" ) );
+	OpenCellReadOptions de;
+	de.lang = QStringLiteral( "de" );
+	OpenCellCatalog loose;
+	openCellReadCatalog( { data + QStringLiteral( "/Loc2.esm" ) }, loose, nullptr, de );
+	checkEq( loose.worlds.value( 0 ).name, QStringLiteral( "Lose Welt" ), QStringLiteral( "a loose table beats the archive's" ) );
+	OpenCellCatalog plain;
+	openCellReadCatalog( { base }, plain, nullptr, en );
+	checkEq( plain.worlds.value( 0 ).name, QStringLiteral( "Test World" ), QStringLiteral( "a plugin that is not localized keeps its FULL text" ) );
 
 	std::printf( "MO2 profile\n" );
 	const QString mo2 = tmp.path() + QStringLiteral( "/MO2" );

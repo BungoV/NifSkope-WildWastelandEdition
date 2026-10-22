@@ -18,7 +18,7 @@ struct OpenCellWorld
 {
 	quint32 form = 0;
 	QString edid;
-	QString name;   //!< FULL; empty when the plugin is localized (FULL is then a string-table index)
+	QString name;   //!< FULL; a localized plugin's from its string tables, empty when they are not found
 };
 
 struct OpenCellCell
@@ -35,6 +35,14 @@ struct OpenCellCatalog
 	QVector<OpenCellWorld> worlds;
 	QHash<quint32, QVector<OpenCellCell>> cells;    //!< exterior cells by worldspace form, sorted by (y, x)
 	QVector<OpenCellCell> interiors;                //!< sorted by editor ID
+	QStringList noStrings;                          //!< localized plugins whose string tables were not found
+};
+
+//! How a catalog read finds a localized plugin's names.
+struct OpenCellReadOptions
+{
+	QString lang;      //!< string-table language ("en"); empty = openCellStringsLanguage()
+	QString dataDir;   //!< searched after the plugin's own folder (an MO2 mod's plugin, the game's archives)
 };
 
 //! Where plugin files are found: MO2 mods first (highest priority first), then the Data folder.
@@ -66,7 +74,24 @@ bool openCellImportLoadOrder( const QString & pluginsTxt, QStringList & plugins,
 	QString * error );
 
 //! Read worldspaces, their exterior cells and the interior cells out of `paths` (full paths, load order).
-bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QString * error );
+bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QString * error,
+	const OpenCellReadOptions & opt = OpenCellReadOptions() );
+
+//! A string table, id -> text.
+using OpenCellStrings = QHash<quint32, QString>;
+
+//! One .STRINGS (`lengthPrefixed` false) or .DLSTRINGS/.ILSTRINGS (true) file; false when malformed.
+bool openCellParseStrings( const QByteArray & bytes, bool lengthPrefixed, OpenCellStrings & out );
+
+//! A localized plugin's tables: `Strings/<plugin>_<lang>.STRINGS`, `.DLSTRINGS`, `.ILSTRINGS`, loose or inside a
+//! `<plugin> - *.ba2`, in the plugin's folder and then in `dataDir`. Loose beats archive, as in the game.
+//! `found` is false when no table was found. WW_OPENCELL_STRINGS=0 (off) and WW_OPENCELL_RED=strings read nothing.
+OpenCellStrings openCellLoadStrings( const QString & pluginPath, const QString & lang, const QString & dataDir,
+	bool * found = nullptr );
+
+//! The string-table language: QSettings WW/OpenCell/Language, default "en".
+QString openCellStringsLanguage();
+void openCellSetStringsLanguage( const QString & lang );
 
 //! The `.wwcell` spec line, in the form cellSpecFromLine() parses.
 QString openCellExteriorLine( const QStringList & paths, const QString & world, int x, int y, int n );
