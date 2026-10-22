@@ -26,11 +26,15 @@
 #include <algorithm>
 #include <climits>
 #include <cstdio>
+#include <deque>
+#include <functional>
 #include <memory>
 #include <vector>
 
 #ifdef Q_OS_WIN
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <psapi.h>
@@ -245,8 +249,9 @@ void usageText()
 		"      [--region x0..x1,y0..y1] [--memcap <MB>] [--jobs N] [--port 14950] [--scope farlightmap]\n"
 		"      [--dataroot <dir>] [--exe <NifSkope.exe>] [--force] [--dry] [--all-cells]\n"
 		"  --out        the far-light folder (default <root>/farlight): point the cell view's WW_CELL_FARLIGHT reader there\n"
-		"  --memcap     a child whose working set passes this is stopped and the cell left undone; no cell starts\n"
-		"               while free memory is below it\n"
+		"  --memcap     a walk whose working set passes this after a cell is respawned (1.5x mid-cell stops it and\n"
+		"               fails that cell); no walk starts while free memory is below it\n"
+		"  --jobs       walks side by side, each on its own strip of rows (one process loads the plugins once a strip)\n"
 		"  --dry        list the plan (cells, with lights, up to date) and bake nothing\n"
 		"  --all-cells  bake cells whose 5x5 block has no placed light too (they write no light)" ) );
 }
@@ -288,16 +293,56 @@ bool markerMatches( const Marker & M, const QString & exeSha, const QString & kn
 	return true;
 }
 
-struct Running
+QString cellDirOf( const QString & root, int x, int y ) { return root + QStringLiteral( "/cell_%1_%2" ).arg( x ).arg( y ); }
+QString runDirOf( const QString & root, int x, int y ) { return root + QStringLiteral( "/_runs/cell_%1_%2" ).arg( x ).arg( y ); }
+
+//! one strip of the map and the walk process baking it, cell after cell in one window
+struct Walk
 {
-	Cell c;
+	int strip = 0, port = 0, spawns = 0;
+	std::deque<Cell> cells;          // what is left; the front is the cell in the bake
 	std::unique_ptr<QProcess> p;
-	QElapsedTimer t;
+	QElapsedTimer t;                 // since the front cell began
+	QByteArray buf;                  // the front cell's notes so far
+	QFile log;                       // everything the process said, every spawn
 	qint64 peakMB = 0;
-	bool capped = false;
-	int port = 0;
-	QString cellDir, runDir, stage, notes;
+	bool capped = false, respawnSaid = false;
 };
+
+//! a walk's own working set and peak, MB
+void selfRss( qint64 * ws, qint64 * peak )
+{
+	*ws = *peak = -1;
+#ifdef Q_OS_WIN
+	PROCESS_MEMORY_COUNTERS c;
+	if ( K32GetProcessMemoryInfo( GetCurrentProcess(), &c, sizeof c ) ) {
+		*ws = qint64( c.WorkingSetSize >> 20 );
+		*peak = qint64( c.PeakWorkingSetSize >> 20 );
+	}
+#endif
+}
+
+void walkSay( const QString & l )
+{
+	std::fflush( stdout );
+	const QByteArray b = l.toUtf8() + '\n';
+	std::fwrite( b.constData(), 1, size_t( b.size() ), stderr );
+	std::fflush( stderr );
+}
+
+//! the per-cell env of tools/ww_bake_world.py's bake, plus WW_CELL_FARLIGHT (driver and walk set it the same way)
+void prepCell( const QString & spec, const QString & cellDir, const QString & runDir, int x, int y,
+	const std::function<void( const QString &, const QString & )> & set )
+{
+	for ( const QString & d : { cellDir, runDir } ) {
+		QDir( d ).removeRecursively();
+		QDir().mkpath( d );
+	}
+	set( QStringLiteral( "WW_CELL_OPEN" ), QStringLiteral( "%1|%2,%3|1" ).arg( spec ).arg( x ).arg( y ) );
+	set( QStringLiteral( "WW_CELL_PROBES" ), QDir::toNativeSeparators( runDir + QStringLiteral( "/probes.tsv" ) ) );
+	set( QStringLiteral( "WW_CELL_PROBE_BAKE" ), QDir::toNativeSeparators( cellDir ) );
+	set( QStringLiteral( "WW_CELL_FARLIGHT" ), QDir::toNativeSeparators( cellDir + QStringLiteral( "/far" ) ) );
+}
 
 QString num( double v, int prec = 1 ) { return QString::number( v, 'f', prec ); }
 } // namespace
@@ -318,7 +363,7 @@ int farLightMapCli( const QStringList & args )
 	QDir().mkpath( A.root + QStringLiteral( "/_runs" ) );
 	QDir().mkpath( A.out );
 	g_log.setFileName( A.root + QStringLiteral( "/farlightmap.log" ) );
-	g_log.open( QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text );
+	(void)g_log.open( QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text );
 	QElapsedTimer clock;
 	clock.start();
 	const QString exeSha = fileSha1( A.exe );
@@ -448,62 +493,97 @@ int farLightMapCli( const QStringList & args )
 		return 0;
 	}
 
-	// 4. the bakes, one child a cell (its memory is freed when it exits)
+	/* 4. the bakes. One walk process a strip: it loads the plugins once and opens cell after cell in one window, the cell
+	 * view's own open and bake each time (WW_CELL_FARLIGHTWALK, farLightWalkStep below). The strip is walked as a
+	 * serpentine, so the next cell's 5x5 block is mostly the last one's, and the worldspace index and the asset bytes
+	 * stay kept between cells (WW_CELL_KEEP_WORLD, WW_CELL_KEEP_ASSETS_MB). A walk is respawned only when its working
+	 * set passes --memcap or a cell fails; --jobs N walks N strips side by side. */
 	const QString fixture = A.root + QStringLiteral( "/_runs/farlightmap.wwcell" );
 	{
-		QFile ff( fixture );   // the file a child opens; WW_CELL_OPEN overrides its spec
+		QFile ff( fixture );   // the file a walk opens; WW_CELL_OPEN overrides its spec
 		if ( ff.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
 			ff.write( "# farlightmap: the cell comes from WW_CELL_OPEN\n" );
 	}
+	const QString openSpec = A.plugins + QLatin1Char( '|' ) + A.world;
+	// the strips: rows of cells in bands of about equal count, each band walked as a serpentine
+	QMap<int, std::vector<Cell>> rows;
+	for ( const Cell & c : todo )
+		rows[c.y].push_back( c );
+	std::vector<std::unique_ptr<Walk>> walks;
+	{
+		const size_t per = ( todo.size() + size_t( A.jobs ) - 1 ) / size_t( A.jobs );
+		bool flip = false;
+		for ( auto it = rows.begin(); it != rows.end(); ++it ) {
+			std::vector<Cell> row = it.value();
+			std::sort( row.begin(), row.end(), [flip]( const Cell & a, const Cell & b ) { return flip ? a.x > b.x : a.x < b.x; } );
+			flip = !flip;
+			if ( walks.empty() || walks.back()->cells.size() >= per ) {
+				walks.push_back( std::make_unique<Walk>() );
+				walks.back()->strip = int( walks.size() ) - 1;
+				walks.back()->port = A.port + walks.back()->strip;
+			}
+			for ( const Cell & c : row )
+				walks.back()->cells.push_back( c );
+		}
+	}
+	for ( const auto & w : walks ) {
+		w->log.setFileName( A.root + QStringLiteral( "/_runs/walk_%1.notes" ).arg( w->strip ) );
+		(void)w->log.open( QIODevice::WriteOnly | QIODevice::Truncate );
+		logLine( QStringLiteral( "strip %1: %2 cells, rows %3..%4, port %5" ).arg( w->strip ).arg( w->cells.size() )
+			.arg( w->cells.front().y ).arg( w->cells.back().y ).arg( w->port ) );
+	}
+	const qint64 keepAssetsMB = A.memcapMB > 0 ? std::max<qint64>( 256, A.memcapMB / 4 ) : 2048;
 	const QRegularExpression reRec( QStringLiteral( "([+-]\\d{4}_[+-]\\d{4}): (\\d+) lights in (\\d+) groups, (\\d+) pairs over (\\d+) surfels" ) );
 	const QRegularExpression reFar( QStringLiteral( "farlight \\(FARVIEW1\\): (\\d+) groups \\((\\d+) switched\\)[^\\n]*?; (\\d+) sectors, (\\d+) records, "
 		"(\\d+) switched entries, (\\d+) B, (\\d+) ms" ) );
-	std::vector<std::unique_ptr<Running>> run;
-	size_t next = 0;
-	int baked = 0, failed = 0, finished = 0;
+	int baked = 0, failed = 0, finished = 0, respawns = 0;
 	qint64 bytesOut = 0;
 	QElapsedTimer bakeClock;
 	bakeClock.start();
 	QStringList failedCells;
 	qint64 lastWait = -1;
 
-	auto finish = [&]( Running & R ) {
+	// a cell's end: its files into the shared set, the done marker, the census line
+	auto finish = [&]( Walk & W, const QString & notes, const QString & walkFail ) {
+		const Cell c = W.cells.front();
+		W.cells.pop_front();
 		finished++;
-		const double wall = R.t.elapsed();
-		const QString tag = QStringLiteral( "cell %1 %2" ).arg( R.c.x ).arg( R.c.y );
-		QString notes;
+		const double wall = W.t.elapsed();
+		W.t.restart();
+		const QString tag = QStringLiteral( "cell %1 %2" ).arg( c.x ).arg( c.y );
+		const QString cellDir = cellDirOf( A.root, c.x, c.y ), stage = cellDir + QStringLiteral( "/far" );
+		const QString notesPath = runDirOf( A.root, c.x, c.y ) + QStringLiteral( "/shot.notes" );
 		{
-			QFile nf( R.notes );
-			if ( nf.open( QIODevice::ReadOnly ) )
-				notes = QString::fromUtf8( nf.readAll() );
+			QDir().mkpath( runDirOf( A.root, c.x, c.y ) );
+			QFile nf( notesPath );
+			if ( nf.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+				nf.write( notes.toUtf8() );
 		}
 		auto fail = [&]( const QString & w ) {
 			failed++;
-			failedCells << QStringLiteral( "%1,%2" ).arg( R.c.x ).arg( R.c.y );
-			logLine( QStringLiteral( "%1 FAILED: %2 (rc %3, wall %4 s, peak rss %5 MB; notes %6)" ).arg( tag, w ).arg( R.p->exitCode() )
-				.arg( num( wall / 1000.0 ) ).arg( R.peakMB ).arg( R.notes ) );
+			failedCells << QStringLiteral( "%1,%2" ).arg( c.x ).arg( c.y );
+			logLine( QStringLiteral( "%1 FAILED: %2 (strip %3, wall %4 s, peak rss %5 MB; notes %6)" ).arg( tag, w ).arg( W.strip )
+				.arg( num( wall / 1000.0 ) ).arg( W.peakMB ).arg( notesPath ) );
 		};
-		if ( R.capped )
-			return fail( QStringLiteral( "memcap %1 MB passed, stopped" ).arg( A.memcapMB ) );
-		if ( R.p->exitStatus() != QProcess::NormalExit || R.p->exitCode() != 0 )
-			return fail( QStringLiteral( "the bake did not end cleanly" ) );
-		if ( !QFileInfo::exists( R.cellDir + QStringLiteral( "/bakeincr.txt" ) ) )
+		if ( !walkFail.isEmpty() )
+			return fail( walkFail );
+		if ( !QFileInfo::exists( cellDir + QStringLiteral( "/bakeincr.txt" ) ) )
 			return fail( QStringLiteral( "no bake record (the probe bake was refused?)" ) );
-		const QStringList own = ownNames( R.c.x, R.c.y );
-		if ( !QFileInfo::exists( QDir( R.stage ).filePath( own[2] ) ) ) {
+		const QStringList own = ownNames( c.x, c.y );
+		if ( !QFileInfo::exists( QDir( stage ).filePath( own[2] ) ) ) {
 			const int at = notes.indexOf( QLatin1String( "far light" ) );
 			return fail( at >= 0 ? notes.mid( at, notes.indexOf( QLatin1Char( '\n' ), at ) - at ).trimmed()
 				: QStringLiteral( "no %1 written" ).arg( own[2] ) );
 		}
-		// the cell's own files into the shared set; anything else the child wrote stays in the stage, counted
+		// the cell's own files into the shared set; anything else the bake wrote stays in the stage, counted
 		int foreign = 0;
-		for ( const QString & n : QDir( R.stage ).entryList( QDir::Files ) )
+		for ( const QString & n : QDir( stage ).entryList( QDir::Files ) )
 			foreign += own.contains( n ) ? 0 : 1;
 		QStringList fileLines;
 		qint64 bytes = 0;
 		int layers = 0;
 		for ( const QString & n : own ) {
-			const QString dst = QDir( A.out ).filePath( n ), src = QDir( R.stage ).filePath( n );
+			const QString dst = QDir( A.out ).filePath( n ), src = QDir( stage ).filePath( n );
 			QFile::remove( dst );
 			if ( !QFileInfo::exists( src ) )
 				continue;
@@ -515,10 +595,10 @@ int farLightMapCli( const QStringList & args )
 			bytes += QFileInfo( dst ).size();
 			layers += n.endsWith( QLatin1String( ".fvl" ) ) || n.endsWith( QLatin1String( ".fvg" ) ) ? 1 : 0;
 		}
-		QFile mf( R.cellDir + QStringLiteral( "/farlight.done" ) );
+		QFile mf( cellDir + QStringLiteral( "/farlight.done" ) );
 		if ( !mf.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
 			return fail( QStringLiteral( "cannot write the done marker" ) );
-		mf.write( ( QStringList { QStringLiteral( "WWFARLIGHTMAP 1" ), QStringLiteral( "cell %1 %2" ).arg( R.c.x ).arg( R.c.y ),
+		mf.write( ( QStringList { QStringLiteral( "WWFARLIGHTMAP 1" ), QStringLiteral( "cell %1 %2" ).arg( c.x ).arg( c.y ),
 			QStringLiteral( "exe %1" ).arg( exeSha ), QStringLiteral( "knobs %1" ).arg( knobs ) } + fileLines ).join( QLatin1Char( '\n' ) ).toUtf8() + "\n" );
 		mf.close();
 		baked++;
@@ -527,7 +607,7 @@ int farLightMapCli( const QStringList & args )
 		QString lights = QStringLiteral( "?" ), groups = QStringLiteral( "?" ), surfels = QStringLiteral( "?" );
 		for ( auto it = reRec.globalMatch( notes ); it.hasNext(); ) {
 			const QRegularExpressionMatch m = it.next();
-			if ( m.captured( 1 ) == sectorBase( R.c.x, R.c.y ) ) {
+			if ( m.captured( 1 ) == sectorBase( c.x, c.y ) ) {
 				lights = m.captured( 2 );
 				groups = m.captured( 3 );
 				surfels = m.captured( 5 );
@@ -535,92 +615,199 @@ int farLightMapCli( const QStringList & args )
 		}
 		const QRegularExpressionMatch fm = reFar.match( notes );
 		logLine( QStringLiteral( "%1 baked: lights %2 (block %3, groups %4), surfels %5, records %6, switched entries %7, layers %8, "
-			"%9 B, far ms %10, wall %11 s, peak rss %12 MB%13" ).arg( tag, lights ).arg( R.c.lights ).arg( groups, surfels )
+			"%9 B, far ms %10, wall %11 s, peak rss %12 MB (strip %13)%14" ).arg( tag, lights ).arg( c.lights ).arg( groups, surfels )
 			.arg( fm.hasMatch() ? fm.captured( 4 ) : QStringLiteral( "?" ), fm.hasMatch() ? fm.captured( 5 ) : QStringLiteral( "?" ) )
 			.arg( layers ).arg( bytes ).arg( fm.hasMatch() ? fm.captured( 7 ) : QStringLiteral( "?" ) ).arg( num( wall / 1000.0 ) )
-			.arg( R.peakMB ).arg( foreign ? QStringLiteral( ", %1 other files left in the stage" ).arg( foreign ) : QString() ) );
+			.arg( W.peakMB ).arg( W.strip ).arg( foreign ? QStringLiteral( ", %1 other files left in the stage" ).arg( foreign ) : QString() ) );
+	};
+	auto progress = [&]() {
+		const double hours = bakeClock.elapsed() / 3.6e6;
+		const double cph = hours > 0 ? finished / hours : 0.0;
+		const size_t left = todo.size() - size_t( finished );
+		logLine( QStringLiteral( "progress: %1 of %2 (baked %3, failed %4), %5 cells/hour, %6 MB written, %7 respawns, eta %8 h" )
+			.arg( finished ).arg( todo.size() ).arg( baked ).arg( failed ).arg( num( cph ) ).arg( bytesOut >> 20 ).arg( respawns )
+			.arg( cph > 0 ? num( left / cph ) : QStringLiteral( "?" ) ) );
+	};
+	// the walk's lines: each END closes the front cell, its notes are what the walk said since the last END
+	auto drain = [&]( Walk & W ) {
+		const QByteArray got = W.p->readAllStandardOutput();
+		if ( got.isEmpty() )
+			return;
+		W.log.write( got );
+		W.log.flush();
+		W.buf += got;
+		qsizetype from = 0;
+		for ( ;; ) {
+			const qsizetype at = W.buf.indexOf( "FARLIGHTMAP WALK ", from );
+			const qsizetype eol = at < 0 ? -1 : W.buf.indexOf( '\n', at );
+			if ( eol < 0 )
+				break;
+			const QString line = QString::fromUtf8( W.buf.mid( at, eol - at ) ).trimmed();
+			const QStringList w = line.split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+			if ( w.value( 2 ) == QLatin1String( "END" ) && !W.cells.empty() ) {
+				const QString notes = QString::fromUtf8( W.buf.left( at ) );
+				W.peakMB = std::max( W.peakMB, w.value( 7 ).toLongLong() );
+				const bool sameCell = w.value( 3 ).toInt() == W.cells.front().x && w.value( 4 ).toInt() == W.cells.front().y;
+				finish( W, notes, !sameCell ? QStringLiteral( "the walk reported cell %1,%2" ).arg( w.value( 3 ), w.value( 4 ) )
+					: w.value( 5 ) == QLatin1String( "ok" ) ? QString() : QStringLiteral( "the walk says: %1" ).arg( w.mid( 8 ).join( QLatin1Char( ' ' ) ) ) );
+				progress();
+				W.buf = W.buf.mid( eol + 1 );
+				from = 0;
+				continue;
+			}
+			if ( w.value( 2 ) == QLatin1String( "RESPAWN" ) ) {
+				W.respawnSaid = true;
+				logLine( QStringLiteral( "strip %1: respawn asked: %2" ).arg( W.strip ).arg( w.mid( 3 ).join( QLatin1Char( ' ' ) ) ) );
+			}
+			from = eol + 1;
+		}
+	};
+	auto start = [&]( Walk & W ) {
+		// the queue: the strip's cells left, in walk order; the first one's env is set here, the rest by the walk
+		const QString queue = A.root + QStringLiteral( "/_runs/walk_%1.queue" ).arg( W.strip );
+		{
+			QFile qf( queue );
+			if ( qf.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) )
+				for ( const Cell & c : W.cells )
+					qf.write( QStringLiteral( "%1\t%2\t%3\t%4\n" ).arg( c.x ).arg( c.y )
+						.arg( cellDirOf( A.root, c.x, c.y ), runDirOf( A.root, c.x, c.y ) ).toUtf8() );
+		}
+		QProcessEnvironment env = childEnv();
+		const Cell & c = W.cells.front();
+		prepCell( openSpec, cellDirOf( A.root, c.x, c.y ), runDirOf( A.root, c.x, c.y ), c.x, c.y,
+			[&env]( const QString & k, const QString & v ) { env.insert( k, v ); } );
+		env.insert( QStringLiteral( "WW_CELL_PROBES_HIDE" ), QStringLiteral( "1" ) );
+		env.insert( QStringLiteral( "WW_RENDER_SIZE" ), QStringLiteral( "320x200" ) );
+		env.insert( QStringLiteral( "WW_RENDER_VIEW" ), QStringLiteral( "1" ) );
+		env.insert( QStringLiteral( "WW_RENDER_CLEAN" ), QStringLiteral( "1" ) );
+		env.insert( QStringLiteral( "WW_CELL_FARLIGHTWALK" ), QDir::toNativeSeparators( queue ) );
+		env.insert( QStringLiteral( "WW_CELL_FARLIGHTWALK_SPEC" ), openSpec );
+		env.insert( QStringLiteral( "WW_CELL_FARLIGHTWALK_MEMCAP" ), QString::number( A.memcapMB ) );
+		env.insert( QStringLiteral( "WW_CELL_KEEP_WORLD" ), QStringLiteral( "1" ) );
+		env.insert( QStringLiteral( "WW_CELL_KEEP_ASSETS_MB" ), QString::number( keepAssetsMB ) );
+		W.p = std::make_unique<QProcess>();
+		W.p->setProcessEnvironment( env );
+		W.p->setProcessChannelMode( QProcess::MergedChannels );
+		W.buf.clear();
+		W.peakMB = 0;
+		W.capped = W.respawnSaid = false;
+		W.t.start();
+		W.p->start( A.exe, { QStringLiteral( "--port" ), QString::number( W.port ), fixture } );
+		if ( W.spawns++ )
+			respawns++;
+		logLine( QStringLiteral( "strip %1: walk %2 starts at cell %3 %4, %5 cells left (port %6)" ).arg( W.strip ).arg( W.spawns )
+			.arg( c.x ).arg( c.y ).arg( W.cells.size() ).arg( W.port ) );
 	};
 
-	while ( next < todo.size() || !run.empty() ) {
-		// start: a free slot, and (with a cap) room for one more child
-		while ( next < todo.size() && int( run.size() ) < A.jobs ) {
+	for ( ;; ) {
+		bool any = false;
+		for ( auto & wp : walks ) {
+			Walk & W = *wp;
+			if ( W.p && W.p->state() != QProcess::NotRunning ) {
+				any = true;
+				W.p->waitForReadyRead( 0 );
+				drain( W );
+				qint64 ws = -1, peak = -1;
+				childRss( W.p->processId(), &ws, &peak );
+				W.peakMB = std::max( W.peakMB, peak );
+				// the walk respawns itself between cells past the memcap; mid-cell, 1.5x the cap stops it (our own child)
+				if ( A.memcapMB > 0 && ws > A.memcapMB * 3 / 2 && !W.capped ) {
+					W.capped = true;
+					logLine( QStringLiteral( "strip %1: working set %2 MB passed 1.5x the memcap %3 MB mid-cell, stopping the walk" )
+						.arg( W.strip ).arg( ws ).arg( A.memcapMB ) );
+					W.p->kill();
+				}
+				continue;
+			}
+			if ( W.p ) {   // the walk ended: what it said last, then the cell it was in (if any) failed with it
+				W.p->waitForFinished( 0 );
+				drain( W );
+				const int rc = W.p->exitStatus() == QProcess::NormalExit ? W.p->exitCode() : -1;
+				if ( !W.cells.empty() && !W.respawnSaid ) {
+					finish( W, QString::fromUtf8( W.buf ), W.capped ? QStringLiteral( "memcap: the walk was stopped mid-cell" )
+						: QStringLiteral( "the walk ended mid-cell (rc %1)" ).arg( rc ) );
+					progress();
+				}
+				W.p.reset();
+				if ( !W.cells.empty() )
+					logLine( QStringLiteral( "strip %1: walk %2 ended (rc %3), %4 cells left: respawning" ).arg( W.strip ).arg( W.spawns )
+						.arg( rc ).arg( W.cells.size() ) );
+			}
+			if ( W.cells.empty() )
+				continue;
+			any = true;
 			const qint64 freeMB = freePhysMB();
 			if ( A.memcapMB > 0 && freeMB >= 0 && freeMB < A.memcapMB ) {
 				if ( lastWait < 0 || bakeClock.elapsed() - lastWait > 60000 ) {
 					logLine( QStringLiteral( "waiting: %1 MB free, below the memcap %2 MB" ).arg( freeMB ).arg( A.memcapMB ) );
 					lastWait = bakeClock.elapsed();
 				}
-				break;
-			}
-			std::vector<int> used;
-			for ( const auto & r : run )
-				used.push_back( r->port );
-			int port = A.port;
-			while ( std::find( used.begin(), used.end(), port ) != used.end() )
-				port++;
-			auto R = std::make_unique<Running>();
-			R->c = todo[next++];
-			R->port = port;
-			R->cellDir = A.root + QStringLiteral( "/cell_%1_%2" ).arg( R->c.x ).arg( R->c.y );
-			R->runDir = A.root + QStringLiteral( "/_runs/cell_%1_%2" ).arg( R->c.x ).arg( R->c.y );
-			R->stage = R->cellDir + QStringLiteral( "/far" );
-			R->notes = R->runDir + QStringLiteral( "/shot.notes" );
-			for ( const QString & d : { R->cellDir, R->runDir } ) {
-				QDir( d ).removeRecursively();
-				QDir().mkpath( d );
-			}
-			// tools/ww_bake_world.py's bake, plus WW_CELL_FARLIGHT: the cell view's own bake, relight and far layers
-			QProcessEnvironment env = childEnv();
-			env.insert( QStringLiteral( "WW_CELL_OPEN" ), QStringLiteral( "%1|%2|%3,%4|1" ).arg( A.plugins, A.world ).arg( R->c.x ).arg( R->c.y ) );
-			env.insert( QStringLiteral( "WW_CELL_PROBES" ), QDir::toNativeSeparators( R->runDir + QStringLiteral( "/probes.tsv" ) ) );
-			env.insert( QStringLiteral( "WW_CELL_PROBES_HIDE" ), QStringLiteral( "1" ) );
-			env.insert( QStringLiteral( "WW_CELL_PROBE_BAKE" ), QDir::toNativeSeparators( R->cellDir ) );
-			env.insert( QStringLiteral( "WW_CELL_FARLIGHT" ), QDir::toNativeSeparators( R->stage ) );
-			env.insert( QStringLiteral( "WW_RENDER_SHOT" ), QDir::toNativeSeparators( R->runDir + QStringLiteral( "/shot.png" ) ) );
-			env.insert( QStringLiteral( "WW_RENDER_SIZE" ), QStringLiteral( "320x200" ) );
-			env.insert( QStringLiteral( "WW_RENDER_VIEW" ), QStringLiteral( "1" ) );
-			env.insert( QStringLiteral( "WW_RENDER_CLEAN" ), QStringLiteral( "1" ) );
-			R->p = std::make_unique<QProcess>();
-			R->p->setProcessEnvironment( env );
-			R->p->setProcessChannelMode( QProcess::MergedChannels );
-			R->p->setStandardOutputFile( R->notes );
-			R->t.start();
-			R->p->start( A.exe, { QStringLiteral( "--port" ), QString::number( port ), fixture } );
-			logLine( QStringLiteral( "cell %1 %2 start (port %3, %4 lights in the block, %5 MB free)" ).arg( R->c.x ).arg( R->c.y )
-				.arg( port ).arg( R->c.lights ).arg( freeMB ) );
-			run.push_back( std::move( R ) );
-		}
-		QCoreApplication::processEvents();
-		QThread::msleep( 500 );
-		for ( size_t i = 0; i < run.size(); ) {
-			Running & R = *run[i];
-			qint64 ws = -1, peak = -1;
-			if ( R.p->state() != QProcess::NotRunning ) {
-				childRss( R.p->processId(), &ws, &peak );
-				R.peakMB = std::max( R.peakMB, peak );
-				if ( A.memcapMB > 0 && ws > A.memcapMB && !R.capped ) {   // our own child, past the cap: the memory guard
-					R.capped = true;
-					logLine( QStringLiteral( "cell %1 %2: working set %3 MB passed the memcap %4 MB, stopping it" ).arg( R.c.x ).arg( R.c.y )
-						.arg( ws ).arg( A.memcapMB ) );
-					R.p->kill();
-				}
-				i++;
 				continue;
 			}
-			R.p->waitForFinished( 0 );
-			finish( R );
-			const double hours = bakeClock.elapsed() / 3.6e6;
-			const double cph = hours > 0 ? finished / hours : 0.0;
-			const size_t left = todo.size() - next + run.size() - 1;
-			logLine( QStringLiteral( "progress: %1 of %2 (baked %3, failed %4), %5 cells/hour, %6 MB written, eta %7 h" ).arg( finished )
-				.arg( todo.size() ).arg( baked ).arg( failed ).arg( num( cph ) ).arg( bytesOut >> 20 )
-				.arg( cph > 0 ? num( left / cph ) : QStringLiteral( "?" ) ) );
-			run.erase( run.begin() + std::ptrdiff_t( i ) );
+			start( W );
 		}
+		if ( !any )
+			break;
+		QCoreApplication::processEvents();
+		QThread::msleep( 500 );
 	}
 	const double hours = bakeClock.elapsed() / 3.6e6;
-	logLine( QStringLiteral( "farlightmap end: baked %1, failed %2%3, up to date %4, without lights %5; %6 h, %7 cells/hour, %8 MB written to %9" )
+	logLine( QStringLiteral( "farlightmap end: baked %1, failed %2%3, up to date %4, without lights %5; %6 h, %7 cells/hour, %8 respawns, %9 MB written to %10" )
 		.arg( baked ).arg( failed ).arg( failedCells.isEmpty() ? QString() : QStringLiteral( " (%1)" ).arg( failedCells.join( QLatin1Char( ' ' ) ) ) )
-		.arg( upToDate ).arg( dark ).arg( num( hours, 2 ) ).arg( num( hours > 0 ? finished / hours : 0.0 ) ).arg( bytesOut >> 20 ).arg( A.out ) );
+		.arg( upToDate ).arg( dark ).arg( num( hours, 2 ) ).arg( num( hours > 0 ? finished / hours : 0.0 ) ).arg( respawns )
+		.arg( bytesOut >> 20 ).arg( A.out ) );
 	return failed ? 1 : 0;
+}
+
+/* The walk's side (lane FARLIGHTMAP1): runs in the window a walk process opened, after each open of the fixture. It
+ * reports the cell that just ended, then sets the next cell's env (the same as the driver's first) and asks for the same
+ * file again: the cell view's own open and bake, cell after cell, with no relaunch. */
+int farLightWalkStep( const QString & fname, bool loaded )
+{
+	static const QString queuePath = qEnvironmentVariable( "WW_CELL_FARLIGHTWALK" );
+	if ( queuePath.isEmpty() || !fname.endsWith( QLatin1String( ".wwcell" ), Qt::CaseInsensitive ) )
+		return FarLightWalkOff;
+	static const QList<QStringList> queue = []() {
+		QList<QStringList> q;
+		QFile f( qEnvironmentVariable( "WW_CELL_FARLIGHTWALK" ) );
+		if ( f.open( QIODevice::ReadOnly | QIODevice::Text ) )
+			for ( const QString & l : QString::fromUtf8( f.readAll() ).split( QLatin1Char( '\n' ), Qt::SkipEmptyParts ) )
+				if ( const QStringList w = l.split( QLatin1Char( '\t' ) ); w.size() >= 4 )
+					q << w;
+		return q;
+	}();
+	static int pos = 0;
+	if ( pos >= queue.size() ) {
+		walkSay( QStringLiteral( "FARLIGHTMAP WALK RESPAWN the queue %1 is empty or done" ).arg( queuePath ) );
+		return 0;
+	}
+	const QStringList & c = queue[pos++];
+	const int x = c[0].toInt(), y = c[1].toInt();
+	// a cell is good when the open built, the bake wrote its record and the far light wrote its layers
+	QString why;
+	if ( !loaded )
+		why = QStringLiteral( "the cell did not open" );
+	else if ( !QFileInfo::exists( c[2] + QStringLiteral( "/bakeincr.txt" ) ) )
+		why = QStringLiteral( "no bake record" );
+	else if ( !QFileInfo::exists( c[2] + QStringLiteral( "/far/" ) + ownNames( x, y )[2] ) )
+		why = QStringLiteral( "no far light written" );
+	qint64 ws = -1, peak = -1;
+	selfRss( &ws, &peak );
+	walkSay( QStringLiteral( "FARLIGHTMAP WALK END %1 %2 %3 %4 %5 %6" ).arg( x ).arg( y )
+		.arg( why.isEmpty() ? QStringLiteral( "ok" ) : QStringLiteral( "fail" ) ).arg( ws ).arg( peak ).arg( why ) );
+	if ( !why.isEmpty() ) {
+		walkSay( QStringLiteral( "FARLIGHTMAP WALK RESPAWN cell %1 %2 failed: %3" ).arg( x ).arg( y ).arg( why ) );
+		return 3;
+	}
+	if ( pos >= queue.size() )
+		return 0;
+	const qint64 cap = qEnvironmentVariable( "WW_CELL_FARLIGHTWALK_MEMCAP" ).toLongLong();
+	if ( cap > 0 && ws > cap ) {
+		walkSay( QStringLiteral( "FARLIGHTMAP WALK RESPAWN working set %1 MB past the memcap %2 MB" ).arg( ws ).arg( cap ) );
+		return 0;
+	}
+	const QStringList & n = queue[pos];
+	prepCell( qEnvironmentVariable( "WW_CELL_FARLIGHTWALK_SPEC" ), n[2], n[3], n[0].toInt(), n[1].toInt(),
+		[]( const QString & k, const QString & v ) { qputenv( k.toLocal8Bit().constData(), v.toLocal8Bit() ); } );
+	return FarLightWalkNext;
 }

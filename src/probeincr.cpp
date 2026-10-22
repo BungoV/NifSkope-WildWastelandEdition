@@ -67,7 +67,8 @@ bool knobIsRunOnly( const QString & k )
 		QStringLiteral( "WW_CELL_LIGHTS" ), QStringLiteral( "WW_CELL_FAR_LOD" ),
 	};
 	static const char * prefixes[] = { "WW_RENDER_", "WW_CELL_SPEED_", "WW_CELL_BAKEINCR_", "WW_LOOKDEV_",
-		"WW_CELL_GI_", "WW_CELL_LIT", "WW_CELL_FARLIGHT" };   // FARLIGHTMAP1: the far layers move no .tbk byte
+		"WW_CELL_GI_", "WW_CELL_LIT", "WW_CELL_FARLIGHT",   // FARLIGHTMAP1: the far layers move no .tbk byte
+		"WW_CELL_KEEP_" };   // FARLIGHTMAP1: what a walk keeps between cells (the same bytes, read once)
 	if ( exact.contains( k ) )
 		return true;
 	for ( const char * p : prefixes )

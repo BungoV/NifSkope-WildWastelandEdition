@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "bakegeom.h"
 #include "cellmesh.h"
 #include "cellspeed.h"
+#include "farlightmap.h"	// lane FARLIGHTMAP1
 #include "ui/widgets/wwnumberfield.h"
 #include "freezeanim.h"
 #include "glview.h"
@@ -10614,6 +10615,9 @@ void NifSkope::load()
 	emit completeLoading( loaded, fname );
 	perfMark( "completeLoading consumers" );
 	CellSpeed::mark( "views rebuilt (completeLoading)" );
+	// lane FARLIGHTMAP1: a whole-map walk opens its next cell in this window (one launch, many cells)
+	if ( const int walk = farLightWalkStep( fname, loaded ); walk != FarLightWalkOff )
+		QTimer::singleShot( 0, this, [this, walk, fname]() { if ( walk == FarLightWalkNext ) loadFile( fname ); else qApp->exit( walk ); } );
 	if ( const int step = CellSpeed::reopenStep( fname ); step >= 0 )   // lane SPEED1: measurement only
 		QTimer::singleShot( 5000, this, [this, step, fname]() { if ( step ) loadFile( fname ); else qApp->quit(); } );
 	// reframe on the new contents, after the scene has been rebuilt

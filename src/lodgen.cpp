@@ -1757,13 +1757,66 @@ bool lodgenReadFromStack( const QString & relPath, const char * archiveFolder,
 static bool lodgenReadAssetRaw( const QString & dataRoot, const QString & relPath,
 	const char * archiveFolder, const char * extension, QByteArray & out );
 
+/* lane FARLIGHTMAP1: WW_CELL_KEEP_ASSETS_MB=<MB> keeps the bytes of the assets read, so a walk's next cell (most of
+ * its 5x5 block is the last cell's) reads each file once; a kept read is still noted, so the bake record is the same */
+namespace
+{
+struct AssetKeep
+{
+	QMutex m;
+	QHash<QString, QPair<bool, QByteArray>> map;
+	QList<QString> order;   // oldest first: the first out when the cap is passed
+	qint64 bytes = 0;
+};
+AssetKeep & assetKeep()
+{
+	static AssetKeep k;
+	return k;
+}
+qint64 assetKeepCap()
+{
+	static const qint64 cap = qint64( qEnvironmentVariableIntValue( "WW_CELL_KEEP_ASSETS_MB" ) ) << 20;
+	return cap;
+}
+} // namespace
+
 /* lane BAKEINCR1: every asset read passes here, and while a probe bake records its inputs
  * (src/probeincr.cpp) the read is noted -- data root, path, folder, extension and the
  * bytes' sha1, or "missing" -- so the incremental check can ask the same question later. */
 static bool lodgenReadAsset( const QString & dataRoot, const QString & relPath,
 	const char * archiveFolder, const char * extension, QByteArray & out )
 {
-	const bool ok = lodgenReadAssetRaw( dataRoot, relPath, archiveFolder, extension, out );
+	const qint64 cap = assetKeepCap();
+	QString key;
+	bool ok = false, kept = false;
+	if ( cap > 0 ) {
+		key = dataRoot + QLatin1Char( '|' ) + relPath.toLower() + QLatin1Char( '|' ) + QLatin1String( archiveFolder )
+			+ QLatin1Char( '|' ) + QLatin1String( extension );
+		AssetKeep & k = assetKeep();
+		QMutexLocker l( &k.m );
+		const auto it = k.map.constFind( key );
+		if ( it != k.map.constEnd() ) {
+			ok = it->first;
+			out = it->second;
+			kept = true;
+		}
+	}
+	if ( !kept ) {
+		ok = lodgenReadAssetRaw( dataRoot, relPath, archiveFolder, extension, out );
+		if ( cap > 0 && out.size() < cap / 16 ) {   // one huge file must not flush the whole keep
+			AssetKeep & k = assetKeep();
+			QMutexLocker l( &k.m );
+			if ( !k.map.contains( key ) ) {
+				k.map.insert( key, { ok, out } );
+				k.order.append( key );
+				k.bytes += out.size();
+				while ( k.bytes > cap && !k.order.isEmpty() ) {
+					k.bytes -= k.map.value( k.order.first() ).second.size();
+					k.map.remove( k.order.takeFirst() );
+				}
+			}
+		}
+	}
 	if ( ProbeIncr::recording() )
 		ProbeIncr::note( dataRoot, relPath, archiveFolder, extension, ok, out );
 	return ok;

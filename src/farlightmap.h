@@ -9,7 +9,9 @@
  *  FARVIEW1's writer (src/farlight.h) writes the cell's far-light layers. Nothing of the bake is forked: a cell's
  *  files are the cell view's files for that cell, byte for byte.
  *
- *  One child process a cell: its memory is the OS's again when it exits. The driver itself opens no window.
+ *  One launch, many cells: a walk process loads the plugins once and opens cell after cell in its window, in a
+ *  serpentine over its strip of rows, keeping the worldspace index and the asset bytes between neighbouring cells.
+ *  It is respawned only past --memcap or after a failed cell; --jobs N runs N strips. The driver opens no window.
  *
  *  FOLDERS
  *    <root>/cell_X_Y/          the cell's .tbk + bakeincr.txt (BAKEINCR1's record, with a `lights` line)
@@ -27,5 +29,11 @@
 
 //! the `farlightmap` CLI command; returns the process exit code
 int farLightMapCli( const QStringList & args );
+
+/*! the walk's step, in the window a walk process opened (nifskope.cpp, after each open of a .wwcell): FarLightWalkOff
+ *  when no walk was asked (WW_CELL_FARLIGHTWALK unset), FarLightWalkNext when the next cell's env is set and the same
+ *  file is to be opened again, else the exit code to quit with (0 done or a memcap respawn, 3 a cell failed) */
+enum { FarLightWalkOff = -1, FarLightWalkNext = -2 };
+int farLightWalkStep( const QString & fname, bool loaded );
 
 #endif // FARLIGHTMAP_H
