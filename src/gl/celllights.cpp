@@ -2317,19 +2317,23 @@ void wwCellAoPass( Scene * scene, bool run )
 	PassTime::subBegin( PassTime::AoGeometry );	// lane PERF2: the obscurance pass's three parts
 	{
 		/* lane PERF2: this pass is CPU-bound per draw. memo: the scene-global setters once per program (as the main
-		 * pass); opaque: no sorted/effect draws (blended or not cell-lit: they write nothing here). =0 or *_RED=1: old */
+		 * pass); opaque: the sorted draws that write nothing here are skipped (PERF2FIX1). =0 or *_RED=1: old */
 		static const bool memo = qgetenv( "WW_CELL_AO_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_AO_MEMO_RED" );
 		static const bool opaqueOnly = qgetenv( "WW_CELL_AO_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_AO_OPAQUE_RED" );
 		NodeList second;
+		wwOpaqueCutNewFrame();
 		if ( memo )
 			wwSetupMemoArm( true );
 		scene->collectShapes( second );
 		if ( memo )
 			wwSetupMemoArm( false );
-		if ( !opaqueOnly ) {
-			Scene::drawDeferredShapes( second );
-			scene->drawShapeEffects();
-		}
+		// lane PERF2FIX1: the sorted draws keep their order; the cut skips only those that wrote nothing here last frame
+		if ( opaqueOnly )
+			wwOpaqueCutArm( true, "ao" );
+		Scene::drawDeferredShapes( second );
+		scene->drawShapeEffects();
+		if ( opaqueOnly )
+			wwOpaqueCutArm( false, "ao" );
 	}
 	PassTime::subEnd( PassTime::AoGeometry );
 	a.pass = false;
@@ -2517,6 +2521,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 			glStencilMask( opaque ? 0x01u : 0x00u );
 			glStencilFunc( GL_ALWAYS, opaque && wwCellSsrFlagged() ? 1 : 0, 0xFF );
 		}
+		wwOpaqueCutSaw( opaque );	// lane PERF2FIX1 (the cut's check)
 		if ( cellProgram ) {
 			prog->uni1i( "cellProbe", 20 );
 			// lane PERF1: the fragment returns once it has the normal (WW_AO_EARLY=0 shades it all, =red marks the early ones)

@@ -351,8 +351,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 		return;
 	}
 
-	/* lane PERF2: the pass is CPU-bound per draw. memo: the scene-global setters once per program; opaque: no
-	 * sorted/effect draws here, and the water pass draws the water alone. =0 or *_RED=1: the old path */
+	/* lane PERF2: the pass is CPU-bound per draw. memo: the scene-global setters once per program; opaque: the sorted
+	 * draws that wrote nothing here last frame are skipped (PERF2FIX1), the water pass draws the water alone.
+	 * =0 or *_RED=1: the old path */
 	static const bool memo = qgetenv( "WW_CELL_SSR_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_MEMO_RED" );
 	static const bool opaqueOnly = qgetenv( "WW_CELL_SSR_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_OPAQUE_RED" );
 	NodeList sceneSecond;
@@ -397,10 +398,12 @@ void wwCellSsrPass( Scene * scene, bool run )
 	scene->collectShapes( sceneSecond );
 	if ( memo )
 		wwSetupMemoArm( false );
-	if ( !opaqueOnly ) {
-		Scene::drawDeferredShapes( sceneSecond );
-		scene->drawShapeEffects();
-	}
+	if ( opaqueOnly )
+		wwOpaqueCutArm( true, "ssr" );
+	Scene::drawDeferredShapes( sceneSecond );
+	scene->drawShapeEffects();
+	if ( opaqueOnly )
+		wwOpaqueCutArm( false, "ssr" );
 	s.pass = false;
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 	fn->glDepthMask( GL_TRUE );
@@ -435,7 +438,11 @@ void wwCellSsrPass( Scene * scene, bool run )
 			s.pass = true;
 			s.waterRay = true;
 			s.gbuf = ao.gbuf;
-			if ( opaqueOnly ) {	// the sorted list's water, in its order (the opaque and the rest write nothing here)
+			// a particle inherits the masks of the draw before it (it may follow the water): then the whole old pass
+			bool waterAlone = opaqueOnly;
+			for ( Node * node : sceneSecond.list() )
+				waterAlone = waterAlone && dynamic_cast<Shape *>( node ) != nullptr;
+			if ( waterAlone ) {	// the sorted list's water, in its order (the opaque and the rest write nothing here)
 				sceneSecond.alphaSort();
 				for ( Node * node : sceneSecond.list() ) {
 					Shape * sh = dynamic_cast<Shape *>( node );
@@ -628,6 +635,7 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 		glColorMask( opaque, opaque, opaque, opaque );
 		if ( !opaque )
 			glDepthMask( GL_FALSE );
+		wwOpaqueCutSaw( opaque );	// lane PERF2FIX1 (the cut's check)
 		if ( cellProgram ) {
 			prog->uni1i( "cellProbe", 60 );
 			prog->uni1b( "cellAoOn", false );
