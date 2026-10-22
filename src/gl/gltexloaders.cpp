@@ -636,7 +636,9 @@ public:
 	}
 	gli::target target() const { return tgt; }
 	gli::format format() const { return fmt; }
-	gli::swizzles swizzles() const { return gli::swizzles( gli::SWIZZLE_RED, gli::SWIZZLE_GREEN, gli::SWIZZLE_BLUE, gli::SWIZZLE_ALPHA ); }
+	// DRIFT1: gli::texture::swizzles() maps through the format's own swizzle (BGR-ordered formats swap R and B);
+	// a plain RGBA here uploaded those textures red/blue swapped
+	gli::swizzles swizzles() const { return gli::detail::get_format_info( fmt ).Swizzles; }
 	size_t levels() const { return nLevels; }
 	size_t layers() const { return nLayers; }
 	size_t faces() const { return nFaces; }
