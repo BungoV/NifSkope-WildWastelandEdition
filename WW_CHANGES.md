@@ -5,6 +5,10 @@
 - **Tooling only** (MARCHFIX1 1908115d; its march verdict was GIBLACKLINK1's fix, already in the batch):
   `tests/spells/shader_link_check.py` substitutes `NUM_TEXTURE_UNITS` as the loader does (stf_default links offline);
   `tests/spells/cell_giblack_link.sh` works under the repo's scratchpad, not C:'s temp.
+- **Two batch4 shader link breaks the full sweep found (all 240 program x mode rows LINK OK after):**
+  `cell_volair.frag` called `ussTerrain` with 3 arguments after SHADOWPAR1 made it 4 (`, 0.0, false` as the air tail
+  does; cell_volair.prog failed in every mode); `cell_lights.glsl` declared `cellGiLoop8` only outside
+  `WW_CELL_GI_MARCH`, so EMISSIVEGRID1's read broke 18 cell programs in the march mode. Now declared for both.
 
 ## Lane OBJLODSHADOW1 (2026-10-22, branch objlodshadow1-20261022): object LOD casts only past the cascades
 
