@@ -53,6 +53,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QAction>
 #include <QOpenGLContext>
 #include "gl/cellpasstime.h"	// lane PERF1
+#include "gl/cellvrs.h"	// lane VRS1
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
@@ -549,9 +550,11 @@ void Scene::drawShapes()
 	NodeList secondPass;
 	wwCellDrawProbe( this, QStringLiteral( "before the scene" ) );	// lane VOLAIR1 (gates only)
 	PassTime::begin( PassTime::Opaque );	// lane PERF1
+	wwCellVrsPass( this, false, true );	// lane VRS1: coarse shading where the last frame was flat
 	wwSetupMemoArm( true );	// lane PERF1: one pass, one set of scene globals
 	collectShapes( secondPass );
 	wwSetupMemoArm( false );
+	wwCellVrsPass( this, false, false );
 	PassTime::end( PassTime::Opaque );
 	wwCellDrawProbe( this, QStringLiteral( "after the first pass" ) );
 	drawGrid();
@@ -560,9 +563,11 @@ void Scene::drawShapes()
 		drawSelection(); // preserve the legacy highlight beneath transparency
 
 	PassTime::begin( PassTime::Sorted );
+	wwCellVrsPass( this, true, true );	// lane VRS1: the stricter image
 	wwSetupMemoArm( true );
 	drawDeferredShapes( secondPass );
 	wwSetupMemoArm( false );
+	wwCellVrsPass( this, true, false );
 	PassTime::end( PassTime::Sorted );
 	wwCellDrawProbe( this, QStringLiteral( "after the second pass" ) );
 	PassTime::begin( PassTime::Effects );

@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VRS1 (2026-10-22, branch vrs1-20261022): variable rate shading in the cell view (OFF until the look pair)
+
+- **Coarse shading where the last frame was flat.** With `WW_CELL_VRS=1` the opaque and sorted passes shade through
+  an NV shading rate image (`GL_NV_shading_rate_image`). Each 16x16 tile's rate (1x1 up to 2x2, or 4x4 with
+  `WW_CELL_VRS_MAX=4x4`) comes from the previous frame's finished picture: the largest neighbour step across the
+  tile, horizontal and vertical apart (FidelityFX-VariableShading's method, MIT, own GLSL). Fast camera motion (the
+  temporal AA's vectors) raises the allowance. The sorted pass uses a stricter second image.
+- Coverage, depth, the frame's resolution and the obscurance (AO) stay full: only fragment-shader runs drop.
+  Alpha-tested, effect and PBR-composition draws shade 1x1. Shadows, sky, effects, far cards and post are untouched.
+- Off by default (no GL call). Reds: `WW_CELL_VRS_RED=1x1` (every rate 1x1: equals off), `=4x4` (sensitivity),
+  `=noalpha`. Gate knobs `WW_CELL_VRS_CENSUS=1`, `WW_CELL_VRS_DUMP=<file>`; the build time is pass sub "tone-vrs".
+
 ## Lane TONEMAP1 + SYNC1 (2026-10-22, branch tonemap1-20261022): the cell view's tone map without the stencil blit
 
 - **Stencil read by the tone map, exact.** The linear (HDR) frame's depth/stencil is now a multisample texture. Only

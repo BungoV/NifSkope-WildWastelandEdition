@@ -322,7 +322,7 @@ void collect( Slot & sl )
 			+ QByteArray::number( sl.privMb ) + " MB";
 		static const char * const subName[SubCount] = { "air-tile", "air-inject", "air-integrate", "ao-geometry",
 			"ao-stages", "ao-gi", "tone-blit", "tone-measure", "tone-bloom", "tone-quads", "far-dots",
-			"far-cards-lit" };
+			"far-cards-lit", "tone-vrs" };
 		for ( int k = 0; k < SubCount; k++ )
 			if ( subSeen[k] )
 				line += QByteArray( " | sub " ) + subName[k] + " " + QByteArray::number( sub[k], 'f', 2 );

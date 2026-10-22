@@ -1,0 +1,4 @@
+# lane VRS1 (src/gl/cellvrs.h): the next frame's shading rate images, one texel per tile, from this frame's picture.
+# No conditions: never picked for a shape; cellvrs.cpp selects it by name.
+
+shaders cell_ao.vert cell_vrs_rate.frag

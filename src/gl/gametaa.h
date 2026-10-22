@@ -58,6 +58,9 @@ void wwGameTaaResolve( Scene * scene );
 //! True when the view moved recently: an interactive window paints a few more frames to settle.
 bool wwGameTaaWantsSettle();
 
+//! lane VRS1: the last resolve's vectors (RG32F, previous minus current, texture units) and their size; 0 when none
+unsigned wwGameTaaMotionTex( Scene * scene, int & w, int & h );
+
 //! One line for the notes / the path log: the last frame's index, n, offsets, or why it did not run.
 QString wwGameTaaEcho();
 

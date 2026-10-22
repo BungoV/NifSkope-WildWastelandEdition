@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "renderer.h"
 #include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "gl/celldrawstate.h"	// lane PERF3
+#include "gl/cellvrs.h"	// lane VRS1
 
 #include "message.h"
 #include "nifskope.h"
@@ -558,6 +559,11 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
 	wwAoScene = mesh->scene;	// lane AO1
+	if ( wwCellVrsActive() ) {	// lane VRS1: a draw that can discard (alpha test, effect, PBR composition) shades 1x1
+		const Material * vm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
+		wwCellVrsDraw( ( mesh->alphaProperty && mesh->alphaProperty->hasAlphaTest() ) || ( vm && vm->hasAlphaTest() ) || mesh->bsesp
+			|| ( mesh->bslsp && mesh->bslsp->pbrmValid ) );
+	}
 	{	// lane SSR1: the draw's reflection flag (an environment-mapped material file with its reflections switch on)
 		const Material * sm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
 		wwCellSsrNote( sm && sm->isShaderMaterial() && sm->bEnvironmentMapping && sm->bScreenSpaceReflections );

@@ -7,6 +7,7 @@
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "gl/cellpasstime.h"
+#include "gl/cellvrs.h"
 
 #include <QDebug>
 #include <QFile>
@@ -549,6 +550,13 @@ bool wwCellHdrActive()
 	return hst().active;
 }
 
+void wwCellHdrFrameSize( int & w, int & h )
+{
+	const HdrState & s = hst();
+	w = s.active ? s.w : 0;
+	h = s.active ? s.h : 0;
+}
+
 QString wwCellHdrEcho()
 {
 	return hst().last;
@@ -952,6 +960,10 @@ void wwCellHdrEnd( Scene * scene )
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 	}
 	PassTime::subEnd( PassTime::ToneQuads );
+	// lane VRS1: the next frame's shading rate images from this picture (returns at once while the row is off)
+	if ( !sync && wwCellVrsWanted() )
+		fn->glGetIntegerv( GL_VIEWPORT, sn.vp );
+	wwCellVrsBuild( scene, s.prevDraw, s.prevRead, s.w, s.h, sn.vp );
 
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );

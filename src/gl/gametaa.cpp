@@ -153,6 +153,7 @@ struct TaaGpu
 	int w = 0, h = 0;
 	GLenum dsFormat = 0;
 	GLbitfield depthBits = 0;
+	bool mvOk = false;	// lane VRS1: the last frame's vectors were drawn (the next rate image reads them)
 };
 
 struct TaaState
@@ -381,6 +382,18 @@ bool wwGameTaaWantsSettle()
 	return true;
 }
 
+unsigned wwGameTaaMotionTex( Scene * scene, int & w, int & h )
+{
+	if ( !scene || !scene->renderer )
+		return 0;
+	auto it = taaGpus().find( scene->renderer );
+	if ( it == taaGpus().end() || !it->mvOk || !it->mv )
+		return 0;
+	w = it->w;
+	h = it->h;
+	return it->mv;
+}
+
 QString wwGameTaaEcho()
 {
 	return ts().last;
@@ -389,6 +402,11 @@ QString wwGameTaaEcho()
 void wwGameTaaResolve( Scene * scene )
 {
 	TaaState & s = ts();
+	if ( scene && scene->renderer ) {	// lane VRS1: the vectors count only for the frame that drew them
+		auto it = taaGpus().find( scene->renderer );
+		if ( it != taaGpus().end() )
+			it->mvOk = false;
+	}
 	if ( !s.jittered ) {
 		if ( s.on && scene && !scene->selecting )
 			note( s, QStringLiteral( "refused (no jittered projection this frame)" ) );
@@ -570,6 +588,7 @@ void wwGameTaaResolve( Scene * scene )
 			prog->uni2f( "invSize", 1.0f / float( W ), 1.0f / float( H ) );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			r->stopProgram();
+			g.mvOk = true;
 		}
 	}
 
