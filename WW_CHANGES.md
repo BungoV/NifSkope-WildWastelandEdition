@@ -12,6 +12,10 @@
   drawn in place after the composite. Pass subs "fxres-down", "fxres-layer", "fxres-comp".
 - Off by default (no GL call, no reorder). Knobs `WW_CELL_FXRES_SCALE`, `_MINPX`, `_MINAREA`, `_EDGE`,
   `_CENSUS=1`. Reds: `WW_CELL_FXRES_RED=full` (every draw in place: equals off), `=quarter` (sensitivity), `=bilinear`.
+- **Soft effects find the opaque depth again (GATEFIX3).** Since TONEMAP1 the linear frame's depth / stencil texture
+  samples stencil, so the framebuffer query read its depth as 0 bits: the soft-effect depth grab failed ("lane EFX2:
+  no soft effects"), soft effects lost their depth fade in the default view, and FXRES1 refused. The grab now takes
+  the frame's own depth / stencil format.
 
 ## Lane AAFORMAT1 (2026-10-22, branch aaformat1-20261022): MSAA and HDR target format study switches (all OFF)
 

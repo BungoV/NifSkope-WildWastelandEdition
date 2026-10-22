@@ -635,6 +635,16 @@ bool Scene::grabEffectDepth()
 		fmt = GL_DEPTH_COMPONENT16;
 		pixType = GL_UNSIGNED_SHORT;
 	}
+	/* lane GATEFIX3: the cell view's linear frame keeps depth / stencil in a texture set to sample stencil (TONEMAP1);
+	 * the query above then reads 0 depth bits and every soft effect lost its fade. Take the frame's own format. */
+	if ( !fmt ) {
+		const GLenum hf = GLenum( wwCellHdrDepthFormat( GLuint( prevDraw ) ) );
+		if ( hf == GL_DEPTH24_STENCIL8 || hf == GL_DEPTH32F_STENCIL8 ) {
+			fmt = hf;
+			stencilBits = 8;
+			pixType = hf == GL_DEPTH32F_STENCIL8 ? GL_FLOAT_32_UNSIGNED_INT_24_8_REV : GL_UNSIGNED_INT_24_8;
+		}
+	}
 	if ( !stencilBits )
 		pixFmt = GL_DEPTH_COMPONENT;
 	if ( !fmt ) {
