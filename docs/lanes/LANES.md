@@ -18,19 +18,20 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | Lane | What | State |
 |---|---|---|
 | BATCH1 | one combined build + one gate session for PERF2, SSGI2, SHADOWPAR1, VOLAIRSKY1, FXCHECK1 (bungo 10-21; batch1/README.md); also runs RTBAKE1 pics + PBRALBEDO2 gates on their own exes, + Goodneighbor sunlit glass SSGI pair (bungo's camera) | built 23:47 (sha1 44523481); 4 holds queued (concord, memden, vault, time) |
-| MERGEALL1 | merge every built branch into main, clean merged worktrees (bungo 10-21 "merge everything") | 17 landed, 3 held; end check batch2 queued; FOUND: giblack red (march) fails to link fo4_cellcsm on main (NVIDIA too many instructions) |
+| MERGEALL1 | merge every built branch into main, clean merged worktrees (bungo 10-21 "merge everything") | DONE 10-22 01:5x: 17 landed (main 9c624f47, exe sha1 edd43625), 3 held, ~30 GB freed; gates: gn_vis PASS, cluster twin PASS, cluster build 0.4 ms; giblack FAIL (march reds fail to link fo4_cellcsm: too many instructions, LIGHTSYS2 suspect); real-cell cluster on/off/red inconclusive at concord daylight; concord close5 all-on 114.9 GPU ms (second window). notes/mergeall1/FINAL.md |
 | PERF2 | time the frame; depth reuse, per-tile lights, fewer driver calls, temporal reuse (+ fog history reprojection, Division-style, bungo 10-21), fog integrate O(S^2) -> O(S) | BATCH ready (0ded45ca; perf2/BATCH.md); SSR prev-frame, AO temporal, per-draw CPU wait for batch timing |
 | VOLAIRSKY1 | + FOGTRICUBIC1 smoother fog-grid read, PNG pair for bungo (asked 10-21); VOLAIR1 sky gate fail (0.266 % vs 0.20 %) + placed lights in the fog (audit claim: 0 clusters; lane finds 1309-1419 filled on steady frames, 0 only the first ~8 frames after load) | BATCH ready (head 8e5dc845, notes/volairsky1/BATCH.md); rev1 F open: next-batch lines D2b + D3 |
 | SSGI2 | SSGI gate (SSGI1 landed ungated) + blue noise, depth intervals, emissive, pyramid | BATCH ready (548fdbf1): 4 rows coded; cell_ssgi + nohiz PASS; double count FAILS near geometry (under-count 0.80); timing in BATCH1 |
 | SHADOWPAR1 | shadows to FO4CS level (TERRSHADOW1 WEAKER list) + fog far-tail leak | BATCH ready 10-21: code at shadowpar1-20261021 694b4f7a, gates unrun (shadowpar1/BATCH.md) |
 | FXCHECK1 | BGEM glass milky; no fire-barrel particles | BATCH ready (8ad3aadf): glass fix gated, ships off; barrel plume still open |
 | VOLPART1R | rebase VOLPART1 onto main (steam/fog cards lit as volumes, ships off) | BATCH ready (6e8c92de; volpart1r/BATCH.md); gates unrun |
-| TESTDRIVER1 | live test switches: load a scene once, flip WW_* switches over the port, no relaunch per row (bungo 10-22) | started 10-22 |
+| TESTDRIVER1 | live test switches: load a scene once, flip WW_* switches over the port, no relaunch per row (bungo 10-22) | BATCH ready |
 | BAKESPEED1 | far-LOD bake speed (chunks 2864 -> 1191 s mid region) | resume/determinism gates |
 | PBRALBEDO2 | .pbrm albedo in the bake, fix of PBRALBEDO1 gate | BATCH ready (8abbbd83; pbralbedo2/BATCH.md): cause = vanilla NIFs name BGSMs by absolute C:\Projects\... path, resolver refused it; gates unrun |
 | RTBAKE1 | GPU ray-traced bake (gate cell 52.5 -> 43.0 s) | BATCH ready (rt3 6cabd09; rtbake1/BATCH.md): museum CPU-vs-RT pair runs in BATCH1's timing hold |
+| FARCARD1 | far tree cards drawn instanced (one draw per card set, per-card data in one buffer; ~17 ms on Concord; bungo 10-22) | BATCH ready (farcard1-20261022 f03e072b; farcard1/BATCH.md): gates + timing unrun |
 
-Next batch (BATCH2): VOLPART1R, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
+Next batch (BATCH2): VOLPART1R, FARCARD1, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
 Queued tonight (his 10-21 go): FARBAKE2 whole-map rebake, every channel (after BAKESPEED1); VTGPU1 + PROFILE1 (after
 BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
 
