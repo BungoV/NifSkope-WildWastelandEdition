@@ -1,5 +1,14 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SSGI2FRAMES (2026-10-23, branch ssgi2frames-20261023): screen GI harness pictures repeat
+
+- Port of SSGI2FIX's row b onto BATCH4 (its fill change is not ported: SSGI3's fill law, already merged, does the same
+  job). In a harness run the screen GI's temporal history belongs to the view (or the camera path's frame), not to the
+  number of paints: a new view, a live switch set, a quality or red change or a streamed-in cell pre-rolls 16 frames,
+  the next path frame advances one, and a repaint redoes the last. Red `WW_CELL_SSGI_RED=oldframes` brings back one
+  frame per paint; the notes line adds `frames live|pinned|per-paint`. Live views and SSGI off are unchanged.
+- Gates: notes/ssgi2recon1/FINAL.md (run by RESUME1).
+
 ## Lane OBJLODSHADOW1 (2026-10-22, branch objlodshadow1-20261022): object LOD casts only past the cascades
 
 - **Object-LOD terrain casters, only where the cascades do not reach:** with the objlod item on, every far object-LOD

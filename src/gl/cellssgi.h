@@ -17,7 +17,7 @@ class Scene;
  *  obscurance by min (FO4CS's composite). Row "SSGI" (WW/CellSsgi, pin WW_RENDER_SSGI) ships OFF; "SSGI quality"
  *  (WW/CellSsgiQuality, pin WW_CELL_SSGI_QUALITY=low|medium|high|ultra) picks FO4CS's tiers.
  *  Reds: WW_CELL_SSGI_RED=off (computed, not applied) | stack (added on top of the probes: the double count) |
- *  notemporal | noblur. */
+ *  notemporal | noblur | oldframes (harness runs advance one temporal frame per paint, not per view). */
 bool wwCellSsgiOn();
 void wwCellSsgiSetOn( bool on );
 int wwCellSsgiQuality();			// 0 Low, 1 Medium, 2 High, 3 Ultra
@@ -33,5 +33,7 @@ void wwCellSsgiPass( Scene * scene, bool run );
 void wwCellSsgiDraw( Scene * scene, bool cellProgram );
 //! one line for the notes
 const char * wwCellSsgiEcho();
+//! lane SSGI2FRAMES: the camera path's frame index (-1 after the path); harness runs pin the temporal state to it
+void wwCellSsgiSetPath( int frame );
 
 #endif
