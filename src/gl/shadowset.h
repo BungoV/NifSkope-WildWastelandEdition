@@ -123,6 +123,8 @@ void wwShadowSetParMask( int mask );
 void wwShadowSetAirAmbientShare( float a );
 double wwShadowDistance();
 void wwShadowSetDistance( double d );
+//! fix 10-22: a terrain shadow sweep is owed, running or uploading (the live driver's pictures wait for it)
+bool wwTerrainShadowPending();
 //! the census line
 QString wwShadowSetSummary();
 bool wwShadowRed( const char * name );

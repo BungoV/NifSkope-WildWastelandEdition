@@ -304,6 +304,22 @@ void NifSkopeOpenGLContext::Shader::printCompileError( const QString & err )
 	 * and tests/spells/_harness.sh ww_notes_shader_refusal prints why. A user session (no WW_* key)
 	 * keeps the message box and goes on. There is no switch to turn this off; the red that proves
 	 * it trips is WW_SHADER_RED=<shader file> (Shader::load), run by tests/spells/shader_guard.sh. */
+	if ( wwHarnessRun() && wwLiveSessionOn() ) {
+		/* fix 10-22: in a live session the guard refuses the ROW, not the process: the driver skips that row's
+		 * pictures (so still no grey picture is written) and the next row's reset reloads the programs */
+		QString why;
+		for ( const QString & l : err.split( QLatin1Char( '\n' ) ) )
+			if ( l.contains( QLatin1StringView( "error" ), Qt::CaseInsensitive ) ) {
+				why = l.simplified();
+				break;
+			}
+		const QString shortText = QString::fromUtf8( name.data(), qsizetype( name.length() ) ) + QStringLiteral( ": " )
+			+ ( why.isEmpty() ? QString( err ).simplified().left( 200 ) : why );
+		std::fprintf( stderr, "SHADER REFUSED (live row): %s\n", qPrintable( shortText ) );
+		std::fflush( stderr );
+		wwLiveShaderRefused( shortText );
+		return;
+	}
 	if ( wwHarnessRun() ) {
 		const QByteArray line = ( QStringLiteral( "SHADER REFUSED: " ) + QString( tmp ).simplified() ).toUtf8();
 		std::fprintf( stderr, "%s\n", line.constData() );
