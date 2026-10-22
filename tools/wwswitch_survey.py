@@ -250,7 +250,7 @@ def stage_of(rel, fn, static, line=0):
             continue
         if re.search(rx, '/' + rel):
             if s == 'reopen' and static:
-                return 'reopen', 'cell build, cached static (follows the generation)'
+                return 'relaunch', 'cell build, function static: read once for the process (a reopen keeps it)'
             return s, {'tool': 'bake/CLI/test path', 'relaunch': 'startup (main)', 'shaders': 'read when the shader programs load (in place: reload shaders)', 'reopen': 'read while the cell document is built'}[s]
     if fn == '(member default)':
         return 'relaunch', 'member default of a long-lived object'
@@ -263,8 +263,8 @@ def stage_of(rel, fn, static, line=0):
         return 'relaunch', 'createWindow: picks which harness the window runs'
     if fn and LOAD_FN.search(fn.split('::')[-1]) and re.search(r'/gl/', '/' + rel):
         return 'reopen', 'read when the renderer is handed the cell (publish/load/build)'
-    if static:
-        return 'live', 'static cache, follows the switch generation (b)'
+    if static:	# TDFIX2: a C++ function static is read once for the process (WW_SWITCH_STATIC sites are not 'static')
+        return 'relaunch', 'function static: read once for the process (not WW_SWITCH_STATIC)'
     return 'live', 're-read per frame or per call (a)'
 
 

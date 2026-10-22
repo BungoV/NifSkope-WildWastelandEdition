@@ -266,6 +266,11 @@
     over 3 min refuses its row (`refused reopen ...`) instead of waiting 15 min; a late one never starts the steps again.
   - `tools/wwswitch_survey.py`: a read under an exact `if ( !s.loaded )` / `if ( !s.init )`, a `static int x = -1`
     sentinel, or a `static const` struct's constructor is read once for the process: stage relaunch, not live.
+    A plain C++ function `static` (not `WW_SWITCH_STATIC`) is read once too: relaunch (57 names moved, e.g. FXRES, VRS, HDR).
+  - These readers now follow a live set (`wwSwitchMovedFor`, pins and reds back to defaults first): fog drift
+    (`WW_CELL_FOGDRIFT*`), volume particles (`WW_CELL_VOLPART*`), reflection probes (`WW_CELL_REFLPROBE*`,
+    `WW_CELL_LIT_PROBE`), lamp shadows (`WW_CELL_LAMPSHADOW*`), specular occlusion (`WW_CELL_SPECOCC*`), the CSM dump
+    (`WW_CSM_DUMP`) and `WW_CELL_SHADOW_RED=watercasts`. GPU-driven and the shadow cache stay relaunch (built at first use).
 
 ## Lane FARCARD1 (2026-10-22, branch farcard1-20261022): the cell view's far tree cards draw instanced
 

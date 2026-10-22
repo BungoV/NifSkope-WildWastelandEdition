@@ -1699,7 +1699,9 @@ namespace
 int & specOccCache()
 {
 	static int on = -1;
-	if ( on < 0 ) {
+	static quint64 liveGen = 0;	// fix TDFIX2: a live set of WW_CELL_SPECOCC re-reads it
+	if ( on < 0 || wwSwitchMovedFor( liveGen, { "WW_CELL_SPECOCC" } ) ) {
+		liveGen = wwSwitchGen();
 		const QByteArray pin = qgetenv( "WW_CELL_SPECOCC" ).trimmed();
 		on = pin.isEmpty() ? ( QSettings().value( QStringLiteral( "WW/CellSpecOcc" ), false ).toBool() ? 1 : 0 ) : ( pin == "0" ? 0 : 1 );
 	}
@@ -1727,7 +1729,7 @@ void wwCellSpecOccSetOn( bool on )
 
 int wwCellSpecOccMode()
 {
-	static const QByteArray red = qgetenv( "WW_CELL_SPECOCC_RED" ).trimmed();
+	WW_SWITCH_STATIC( QByteArray, red, qgetenv( "WW_CELL_SPECOCC_RED" ).trimmed() );	// fix TDFIX2: follows a live set
 	if ( !wwCellSpecOccOn() || red == "ao" )
 		return 0;
 	return red == "hemi" ? 2 : 1;
@@ -2137,7 +2139,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	}
 
 	// the casters, as the cube pass takes them (the water too: SUNCELL1's red keeps it)
-	static const bool waterCastsRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts";
+	WW_SWITCH_STATIC( bool, waterCastsRed, qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "watercasts" );	// fix TDFIX2: follows a live set
 	std::vector<LsCaster> casters;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
