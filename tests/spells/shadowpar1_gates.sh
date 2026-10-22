@@ -196,7 +196,8 @@ fi
 cell_setup() {
 	ESM="$(winpath "$GAME/Fallout4.esm")"
 	printf 'fps 16\nframes 2\nkey 0.000000 %s\nkey 0.062500 %s\n' "$CELLCAM" "$CELLCAM" > "$OUT/cell.path"
-	CELL=( "WW_CELL_OPEN=$ESM|Commonwealth|-15,17|1" "WW_CELL_DATAROOT=$(winpath "$DATA")" WW_CELL_LIT=1 WW_CELL_FARLOD=1
+	# bungo 10-23: every cell gate 5x5 (SHADOWPAR1_CELLN=1 = the lane's own framing)
+	CELL=( "WW_CELL_OPEN=$ESM|Commonwealth|-15,17|${SHADOWPAR1_CELLN:-5}" "WW_CELL_DATAROOT=$(winpath "$DATA")" WW_CELL_LIT=1 WW_CELL_FARLOD=1
 		"WW_RENDER_PATH=$(winpath "$OUT/cell.path")" WW_RENDER_SIZE=1600x1000 WW_TAA=0 WW_CELL_IS=0 WW_CELL_PARTICLES=0
 		WW_LOOKDEV_WEATHER=CommonwealthClear "WW_LOOKDEV_PLUGINS=$ESM" WW_LOOKDEV_SKY=1 WW_LOOKDEV_SUN=1 WW_LOOKDEV_GROUND=0
 		$ON WW_CELL_GRASS_WIND_T=1 WW_CELL_FARLOD_CARDSWAY=0 WW_CELL_FARLOD_SWAYTIME=1 )
@@ -205,7 +206,7 @@ cell_setup() {
 	# the fog shots' place (the standing rule: fog only at the Memory Den front, at night): Goodneighbor, CommonwealthFoggy
 	# 22:00, the still_memden camera; the moon item on in both arms so the terrain map exists at night
 	printf 'fps 16\nframes 2\nkey 0.000000 %s\nkey 0.062500 %s\n' "$MEMCAM" "$MEMCAM" > "$OUT/mem.path"
-	MEM=( "WW_CELL_OPEN=$ESM|Goodneighbor|5,-3|1" "WW_CELL_DATAROOT=$(winpath "$DATA")" WW_CELL_LIT=1 WW_CELL_FARLOD=1
+	MEM=( "WW_CELL_OPEN=$ESM|Goodneighbor|5,-3|${SHADOWPAR1_CELLN:-5}" "WW_CELL_DATAROOT=$(winpath "$DATA")" WW_CELL_LIT=1 WW_CELL_FARLOD=1
 		"WW_RENDER_PATH=$(winpath "$OUT/mem.path")" WW_RENDER_SIZE=1600x1000 WW_TAA=0 WW_CELL_IS=0 WW_CELL_PARTICLES=0
 		WW_LOOKDEV_WEATHER=CommonwealthFoggy WW_LOOKDEV_HOUR=22 WW_LOOKDEV_DAY=0 WW_SUNPATH=0 "WW_LOOKDEV_PLUGINS=$ESM"
 		WW_LOOKDEV_SKY=1 WW_LOOKDEV_SUN=1 WW_LOOKDEV_GROUND=0 WW_LOOKDEV_FOG=1 WW_CELL_AIR=1 $ON WW_CELL_GRASS_WIND_T=1
