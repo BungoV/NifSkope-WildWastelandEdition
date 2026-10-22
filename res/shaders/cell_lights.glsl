@@ -21,6 +21,7 @@ uniform float cellSunScale;			// lane BOUNCE1: the imagespace Sunlight Scale out
 float cellDirVis = 1.0;
 vec3 cellExtAmb = vec3( 0.0 );
 vec3 cellExtSpec = vec3( 0.0 );
+vec3 cellReflAdd = vec3( 0.0 );	// lane REFLPROBE1: the probes' reflection, light already (cell_reflprobe.glsl)
 uniform vec3 cellDirColor;			// linear
 uniform vec3 cellDirTo;				// world, TO the light
 uniform bool cellInterior;
@@ -1434,7 +1435,7 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	 * color is then the viewport's ambient alone (A x albedo) and cellExtSpec the sun's specular, both linear-squared
 	 * by the caller; without the sun the old law (the viewport light plus the cell's lights). */
 	if ( !cellInterior && !cellHasDir )
-		return sqrt( color * color + add );
+		return sqrt( color * color + add + cellReflAdd );
 	if ( !cellInterior ) {
 		vec3 Ld = normalize( cellDirTo );
 		float nl = dot( N, Ld );
@@ -1442,7 +1443,7 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		vec3 Ex = diff + gi + dir + cellExtAmb;
 		vec3 Edx = diffOn + gi + dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
 		vec3 linx = color * color + alb * Edx + spec * specMask * specCol + cellExtSpec
-		          + cubeK * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb );
+		          + cubeK * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb ) + cellReflAdd;
 		return sqrt( max( linx, vec3( 0.0 ) ) ) + emissive;
 	}
 	// the light reaching this point (a white surface would show it): the cubemap reflection is lit by it,
@@ -1464,7 +1465,7 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		Ed += dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
 	}
 	// lane CUBE1: the game multiplies its cube term by the diffuse light (Ed); the old law took the Lambert sum
-	vec3 lin = alb * Ed + spec * specMask * specCol + cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed );
+	vec3 lin = alb * Ed + spec * specMask * specCol + cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed ) + cellReflAdd;
 	return sqrt( max( lin, vec3( 0.0 ) ) ) + emissive;
 }
 

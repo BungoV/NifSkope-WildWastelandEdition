@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
+#include "gl/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
 #include "gl/cellssgi.h"	// lane SSGI1
 #include "gl/cellwater.h"	// lane CELLALL1: the Water row
 #include "cellaodecal.h"	// lane CELLALL1: the AO decals row
@@ -536,6 +537,7 @@ void CellWorkspacePanel::buildUi()
 	cellTaa = tick( showMenu, tr( "Temporal AA" ), "CellWorkspaceTemporalAa", wwGameTaaOn() );
 	cellSsr = tick( showMenu, tr( "SSR" ), "CellWorkspaceSsr", wwCellSsrOn() );
 	cellSsrExt = tick( showMenu, tr( "SSR outdoors" ), "CellWorkspaceSsrOutdoors", wwCellSsrExteriorOn() );
+	cellReflProbe = tick( showMenu, tr( "Reflection probes" ), "CellWorkspaceReflProbe", wwCellReflProbeOn() );	// lane REFLPROBE1
 	// lane SSGI1: the screen-space bounce, ships off; its quality is FO4CS's four tiers
 	cellSsgi = tick( showMenu, tr( "SSGI" ), "CellWorkspaceSsgi", wwCellSsgiOn() );
 	cellSsgi->setEnabled( !wwCellSsgiPinned() );
@@ -764,6 +766,7 @@ void CellWorkspacePanel::buildUi()
 	fxLive( cellShadow, &wwCellShadowSetOn );
 	fxLive( cellSsr, &wwCellSsrSetOn );
 	fxLive( cellSsrExt, &wwCellSsrExteriorSetOn );
+	fxLive( cellReflProbe, &wwCellReflProbeSetOn );
 	fxLive( cellSsgi, &wwCellSsgiSetOn );
 	connect( cellSsgiQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwCellSsgiSetQuality( a->data().toInt() );

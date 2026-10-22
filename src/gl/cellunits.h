@@ -35,9 +35,13 @@ constexpr int TerrShadow = 31;	// lane TERRSHADOW1: the terrain's shadow map (sa
 constexpr int ContactShadow = 32;	// lane TERRSHADOW1: the contact shadows (sampler2D; testint moved it off PERF1's 30)
 constexpr int Ssgi = 33;		// lane SSGI1: the screen-space bounce, the open share (sampler2D) (moved off TerrShadow 31 at MERGEALL1)
 constexpr int LightCluster = 34;	// lane LIGHTSYS2: the surfaces' clustered light lists (isamplerBuffer; was 24 = AirVol)
+constexpr int ReflProbe = 35;	// lane REFLPROBE1: the probe atlas (sampler2D, read through GreyscaleMap: no new sampler)
+constexpr int ReflGbufAlb = 36;	// lane REFLPROBE1: the relight pass reads the G-buffer cubes (samplerCubeArray)
+constexpr int ReflGbufNd = 37;
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
-	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster };
+	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
+	ReflProbe, ReflGbufAlb, ReflGbufNd };
 
 constexpr bool distinct()
 {

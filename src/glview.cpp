@@ -149,6 +149,7 @@ private:
 #include "gl/cellssr.h"
 #include "gl/cellssgi.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
+#include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellpasstime.h"	// lane PERF1
 
 // NOTE: The FPS define is a frame limiter,
@@ -4162,6 +4163,9 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Air );
 	wwVolAirPass( scene, cellPasses );	// lane VOLAIR1: the air's froxels
 	PassTime::end( PassTime::Air );
+	PassTime::begin( PassTime::ReflProbes );
+	wwCellReflProbePass( scene, cellPasses );	// lane REFLPROBE1: capture + relight (reads the cell setters, so after the air)
+	PassTime::end( PassTime::ReflProbes );
 	PassTime::begin( PassTime::Measure );
 	if ( cellPasses && wwCellImageSpaceMeasureByPass( scene ) )	// lane PERF1: else the linear frame measures it (gl/cellhdr.h)
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1

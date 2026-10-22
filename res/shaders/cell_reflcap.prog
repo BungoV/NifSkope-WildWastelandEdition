@@ -1,0 +1,4 @@
+# The reflection probes' capture (lane REFLPROBE1, src/gl/cellreflprobe.h): one face of a probe's G-buffer
+# cube a draw, the albedo and the world normal + distance. Selected by name from gl/cellreflprobe.cpp.
+
+shaders cell_reflcap.vert cell_reflcap.frag
