@@ -954,7 +954,7 @@ static void sunShadowPassImpl( Scene * scene )
 		ht.w( std::uint64_t( s.map ) );
 		ht.f( s.slopeBias );
 		ht.f( s.unitBias );
-		ht.w( ( red( "nobias" ) ? 1u : 0u ) | ( GpuDriven::csm() ? 2u : 0u ) );
+		ht.w( ( red( "nobias" ) ? 1u : 0u ) | ( GpuDriven::csm() ? 2u : 0u ) | ( offsetClamp ? 4u : 0u ) );	// SHADOWPAR1's clamp
 		ht.p( progAt );
 		for ( const QString & rr : cs().reds )
 			ht.w( qHash( rr ) );
