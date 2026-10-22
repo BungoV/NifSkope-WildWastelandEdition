@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 #include "gl/shadowset.h"	// lane FARGRID1: the terrain map
 #include "gl/sunshadow.h"
 #include "esmweather.h"
+#include "harnesswindow.h"
 #include "recx.h"
 
 #include <QDebug>
@@ -110,6 +111,148 @@ VaState & vs()
 	return s;
 }
 
+/* lane FOGDRIFT1: the near air's drifting lumps (cellvolair.h). One tileable 64^3 R8 noise built once; its exact texel
+ * mean and largest deviation go to the shader, so the factor 1 + a (n - mean) / span keeps the mean density. */
+constexpr int kNoiseUnit = WwCellUnit::AirNoise;
+constexpr int kNoiseN = 64;
+constexpr float kDriftTile = 4096.0f;	// the base octave's tile, game units (~58 m); the detail octave's is 0.45 of it
+constexpr float kDriftDetail = 0.45f;
+constexpr float kDriftAmp = 0.95f;	// the density factor spans 0.05 .. 1.95 at the texture's extremes (std ~0.2)
+constexpr float kDriftFade0 = 2000.0f, kDriftFade1 = 8000.0f;	// full strength to fade0, smooth air past fade1 (no shimmer)
+constexpr float kDriftSpeed = 400.0f;	// units per second at the weather's full wind speed (DATA byte 255)
+
+struct VaDrift
+{
+	bool loaded = false, on = false, pinned = false;
+	int red = 0;				// 1 still (no motion), 2 smooth (no noise)
+	bool timePinned = false;
+	double tPin = 0.0;
+	QElapsedTimer clock;
+	double tDone = 0.0;			// the offsets are integrated up to this time
+	float ofs[2][3] = {};		// the two octaves' offsets, world units
+	float vel[2] = { 0, 0 };	// the eased wind velocity (units / s)
+	bool moving = false;		// the last pass drew moving lumps (the view keeps repainting)
+	std::vector<quint8> tex;
+	float mean = 0.5f, span = 0.5f;
+	QString note = QStringLiteral( "off" );
+};
+
+VaDrift & vd()
+{
+	static VaDrift d;
+	if ( !d.loaded ) {
+		d.loaded = true;
+		const QByteArray pin = qgetenv( "WW_CELL_FOGDRIFT" ).trimmed();
+		if ( !pin.isEmpty() ) {
+			d.pinned = true;
+			d.on = pin != "0";
+		} else {
+			d.on = QSettings().value( QStringLiteral( "WW/VolAirDrift" ), false ).toBool();
+		}
+		const QByteArray red = qgetenv( "WW_CELL_FOGDRIFT_RED" ).trimmed();
+		d.red = red == "still" ? 1 : red == "smooth" ? 2 : 0;
+		bool ok = false;
+		const double t = qEnvironmentVariable( "WW_CELL_FOGDRIFT_T" ).toDouble( &ok );
+		if ( ok ) {	// a fixed clock (the shots' frames): the drift integrated from 0 to t in fixed steps
+			d.timePinned = true;
+			d.tPin = std::max( t, 0.0 );
+		} else if ( wwHarnessRun() ) {	// a harness never reads the wall clock
+			d.timePinned = true;
+		}
+	}
+	return d;
+}
+
+// tileable gradient noise at (x, y, z) in lattice cells, period P cells
+float vaGrad( float x, float y, float z, int P )
+{
+	auto hash = []( int i, int j, int k ) {
+		std::uint32_t h = std::uint32_t( i ) * 73856093u ^ std::uint32_t( j ) * 19349663u ^ std::uint32_t( k ) * 83492791u;
+		h ^= h >> 13;
+		h *= 0x5bd1e995u;
+		return h ^ ( h >> 15 );
+	};
+	static const float g[12][3] = { { 1, 1, 0 }, { -1, 1, 0 }, { 1, -1, 0 }, { -1, -1, 0 }, { 1, 0, 1 }, { -1, 0, 1 },
+		{ 1, 0, -1 }, { -1, 0, -1 }, { 0, 1, 1 }, { 0, -1, 1 }, { 0, 1, -1 }, { 0, -1, -1 } };
+	const int x0 = int( std::floor( x ) ), y0 = int( std::floor( y ) ), z0 = int( std::floor( z ) );
+	const float fx = x - float( x0 ), fy = y - float( y0 ), fz = z - float( z0 );
+	auto fade = []( float t ) { return t * t * t * ( t * ( t * 6.0f - 15.0f ) + 10.0f ); };
+	float r = 0.0f;
+	for ( int c = 0; c < 8; c++ ) {
+		const int dx = c & 1, dy = ( c >> 1 ) & 1, dz = ( c >> 2 ) & 1;
+		const float * v = g[hash( ( x0 + dx ) % P, ( y0 + dy ) % P, ( z0 + dz ) % P ) % 12];
+		const float d = v[0] * ( fx - float( dx ) ) + v[1] * ( fy - float( dy ) ) + v[2] * ( fz - float( dz ) );
+		r += d * ( dx ? fade( fx ) : 1.0f - fade( fx ) ) * ( dy ? fade( fy ) : 1.0f - fade( fy ) ) * ( dz ? fade( fz ) : 1.0f - fade( fz ) );
+	}
+	return r;
+}
+
+// the 64^3 texture: two octaves (4 and 8 lattice cells across), bytes over their own range; mean and span measured
+void vaNoiseBuild( VaDrift & d )
+{
+	const int n = kNoiseN;
+	std::vector<float> v( size_t( n ) * n * n );
+	float lo = 1e30f, hi = -1e30f;
+	for ( int k = 0; k < n; k++ )
+		for ( int j = 0; j < n; j++ )
+			for ( int i = 0; i < n; i++ ) {
+				const float x = ( float( i ) + 0.5f ) / float( n ), y = ( float( j ) + 0.5f ) / float( n ), z = ( float( k ) + 0.5f ) / float( n );
+				const float f = vaGrad( x * 4.0f, y * 4.0f, z * 4.0f, 4 ) + 0.5f * vaGrad( x * 8.0f + 0.31f, y * 8.0f + 0.17f, z * 8.0f + 0.53f, 8 );
+				v[( size_t( k ) * n + j ) * n + i] = f;
+				lo = std::min( lo, f );
+				hi = std::max( hi, f );
+			}
+	d.tex.resize( v.size() );
+	double sum = 0.0;
+	int bmin = 255, bmax = 0;
+	for ( size_t i = 0; i < v.size(); i++ ) {
+		const int b = int( std::lround( ( v[i] - lo ) / std::max( hi - lo, 1e-6f ) * 255.0f ) );
+		d.tex[i] = quint8( b );
+		sum += b;
+		bmin = std::min( bmin, b );
+		bmax = std::max( bmax, b );
+	}
+	const double mean = sum / double( v.size() );
+	d.mean = float( mean / 255.0 );
+	d.span = float( std::max( mean - bmin, bmax - mean ) / 255.0 );
+}
+
+/* the wind's offsets at time t (fixed steps of at most 1/30 s; a pinned clock restarts from 0, run to run identical).
+ * Range and turbulence wobble the bearing and gust the speed; the velocity eases toward them (2 s), so a weather
+ * change never jumps. The detail octave moves 1.35x faster and a little upward: the lumps change shape as they go. */
+void vaDriftAdvance( VaDrift & d, double t, const quint8 w[4] )
+{
+	if ( t < d.tDone ) {
+		d.tDone = 0.0;
+		d.vel[0] = d.vel[1] = 0.0f;
+		std::fill( &d.ofs[0][0], &d.ofs[0][0] + 6, 0.0f );
+	}
+	if ( !d.timePinned && t - d.tDone > 1.0 )
+		d.tDone = t - 1.0;	// an idle window: carry on from a second ago, no catch-up loop
+	const double twoPi = 6.283185307179586;
+	const double M = w[0] / 255.0, dir = w[1] / 255.0 * twoPi, range = w[2] / 255.0 * 0.5 * twoPi, T = w[3] / 255.0;
+	const int steps = int( std::ceil( ( t - d.tDone ) * 30.0 ) );
+	const double dt = steps > 0 ? ( t - d.tDone ) / steps : 0.0;
+	for ( int s = 0; s < steps; s++ ) {
+		const double u = d.tDone + dt * ( s + 0.5 );
+		const double a = dir + 0.5 * range * ( 0.6 * std::sin( twoPi * u / 23.0 ) + 0.4 * std::sin( twoPi * u / 9.1 ) );
+		const double gust = std::max( 0.0, 1.0 + T * ( 0.35 * std::sin( twoPi * u / 7.3 ) + 0.25 * std::sin( twoPi * u / 3.1 ) ) );
+		const double v = kDriftSpeed * M * gust;
+		const double e = 1.0 - std::exp( -dt / 2.0 );
+		d.vel[0] += float( ( v * std::sin( a ) - d.vel[0] ) * e );	// bearing: 0 = +Y (north), clockwise
+		d.vel[1] += float( ( v * std::cos( a ) - d.vel[1] ) * e );
+		for ( int o = 0; o < 2; o++ ) {
+			// wrapped at the octave's own tile: the texture repeats there, so the wrap is seamless
+			const float k = float( dt ) * ( o ? 1.35f : 1.0f ), tile = kDriftTile * ( o ? kDriftDetail : 1.0f );
+			d.ofs[o][0] = std::fmod( d.ofs[o][0] + d.vel[0] * k, tile );
+			d.ofs[o][1] = std::fmod( d.ofs[o][1] + d.vel[1] * k, tile );
+			if ( o )
+				d.ofs[o][2] = std::fmod( d.ofs[o][2] + 0.15f * std::hypot( d.vel[0], d.vel[1] ) * k, tile );
+		}
+	}
+	d.tDone = t;
+}
+
 /* lane FARGRID1: the far grid's presets (cellvolair.h). Fixed sizes, not tied to the screen; 1 game unit = 1.43 cm, so
  * 1 km = 69,930 units. The end is also never past where the near grid would have ended (the medium's farD). */
 struct VaFarPreset
@@ -154,6 +297,7 @@ struct VaGpu
 	bool tileValid = false;	// stage 0 wrote this frame's column distances (the surfaces clamp to them)
 	GLuint zTex = 0, zFbo = 0, zSrc = 0;	// stage 0's depth: a copy of the obscurance pass's depth buffer (10-16)
 	int zW = 0, zH = 0;
+	GLuint noise = 0;	// lane FOGDRIFT1: the drift's noise (R8, repeat)
 };
 
 /* THE CLUSTERED LIGHTS (coordinator 10-14). The inject evaluates the placed lights once per froxel, at the middle of
@@ -647,6 +791,28 @@ void wwVolAirSetFarTier( int tier )
 	QSettings().setValue( QStringLiteral( "WW/VolAirFar" ), s.farTier );
 }
 
+bool wwVolAirDriftOn()
+{
+	return vd().on;
+}
+
+void wwVolAirSetDriftOn( bool on )
+{
+	VaDrift & d = vd();
+	if ( d.pinned )
+		return;
+	d.on = on;
+	QSettings().setValue( QStringLiteral( "WW/VolAirDrift" ), on );
+}
+
+bool wwVolAirWantsRepaint()
+{
+	VaDrift & d = vd();
+	const bool want = d.moving && vs().on && d.on && !d.timePinned && !wwHarnessRun();
+	d.moving = false;
+	return want;
+}
+
 QString wwVolAirSummary()
 {
 	return QStringLiteral( "volair=" ) + vs().last;
@@ -926,6 +1092,65 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1i( "volLayerBase", 0 );
 	prog->uni1f( "volJitter", 0.0f );
 
+	/* lane FOGDRIFT1: the near grid's drifting lumps. Exteriors drift; an interior only when it shows the sky (CELL DATA
+	 * bit 7), a sealed one stays smooth (amplitude 0: the same froxels as the row off). No wind: lumps, standing still. */
+	VaDrift & dr = vd();
+	float driftAmp = 0.0f;
+	quint8 wind[4] = { 0, 0, 0, 0 };
+	const bool hasWind = wwLookdevWind( wind );
+	{
+		static GLint combined = -1;
+		if ( combined < 0 )
+			fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &combined );
+		const bool sealed = L && L->interior && !L->showSky;
+		dr.moving = false;
+		if ( !dr.on ) {
+			dr.note = QStringLiteral( "off" );
+		} else if ( dr.red == 2 ) {
+			dr.note = QStringLiteral( "smooth(red)" );
+		} else if ( !uniI( "cellOn" ) || combined <= kNoiseUnit ) {
+			dr.note = QStringLiteral( "none(no cell lights or texture units)" );
+		} else if ( sealed ) {
+			dr.note = QStringLiteral( "still(sealed interior)" );
+		} else {
+			if ( dr.tex.empty() )
+				vaNoiseBuild( dr );
+			if ( !g.noise ) {
+				fn->glGenTextures( 1, &g.noise );
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );
+				fn->glBindTexture( GL_TEXTURE_3D, g.noise );
+				fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+				fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R8, kNoiseN, kNoiseN, kNoiseN, 0, GL_RED, GL_UNSIGNED_BYTE, dr.tex.data() );
+				fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+				for ( GLenum w : { GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_TEXTURE_WRAP_R } )
+					fn->glTexParameteri( GL_TEXTURE_3D, w, GL_REPEAT );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0 );
+			}
+			const bool blows = hasWind && wind[0] > 0 && dr.red != 1;
+			if ( blows ) {
+				if ( !dr.clock.isValid() )
+					dr.clock.start();
+				vaDriftAdvance( dr, dr.timePinned ? dr.tPin : double( dr.clock.nsecsElapsed() ) * 1e-9, wind );
+			}
+			dr.moving = blows;
+			driftAmp = kDriftAmp / std::max( dr.span, 1e-3f );
+			dr.note = QStringLiteral( "on(wind=%1 dir=%2 range=%3 turb=%4 speed=%5 t=%6%7)" )
+				.arg( hasWind ? wind[0] / 255.0 : 0.0, 0, 'f', 3 ).arg( wind[1] / 255.0 * 360.0, 0, 'f', 1 )
+				.arg( wind[2] / 255.0 * 180.0, 0, 'f', 1 ).arg( wind[3] / 255.0, 0, 'f', 3 )
+				.arg( double( std::hypot( dr.vel[0], dr.vel[1] ) ), 0, 'f', 1 ).arg( dr.tDone, 0, 'f', 3 )
+				.arg( !blows ? ( dr.red == 1 ? QStringLiteral( " still(red)" ) : QStringLiteral( " still(no wind)" ) ) : QString() );
+		}
+	}
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );
+	fn->glBindTexture( GL_TEXTURE_3D, driftAmp > 0.0f ? g.noise : 0 );
+	prog->uni1i( "volNoise", kNoiseUnit );
+	prog->uni4f( "volDrift", FloatVector4( driftAmp, kDriftFade0, 1.0f / ( kDriftFade1 - kDriftFade0 ), dr.mean ) );
+	for ( int o = 0; o < 2; o++ )
+		prog->uni4f_l( prog->uniLocation( "volDriftOfs[%d]", o ), FloatVector4( dr.ofs[o][0], dr.ofs[o][1], dr.ofs[o][2],
+			1.0f / ( kDriftTile * ( o ? kDriftDetail : 1.0f ) ) ) );
+
 	/* THE OPTIMISATION (coordinator 10-14; WW_CELL_AIR_OPT, default both): 1 the clustered lights (vaBuildClusters),
 	 * 2 the conservative depth skip: stage 0 writes, per froxel column, the farthest and the nearest ray distance of
 	 * lane AO1's opaque depth over the column's pixels (one pixel of margin; empty pixels: unbounded); stage 1 skips a
@@ -1121,6 +1346,7 @@ static void vaPassInner( Scene * scene, bool run )
 			prog->uni1i( "volLayerBase", kSlices );
 			prog->uni1i( "volTerms", s.terms & 9 );
 			prog->uni1i( "volDepthSkip", 0 );
+			prog->uni4f( "volDrift", FloatVector4( 0.0f, kDriftFade0, 1.0f, dr.mean ) );	// lane FOGDRIFT1: the far air stays smooth
 			fn->glUniform4i( prog->uniLocation( "volClusterDims" ), 0, 0, kClusterCols, kClusterSlices );
 			static quint32 frame = 0;
 			prog->uni1f( "volJitter", jitter ? float( ( ++frame * 2654435761u ) >> 8 ) / 16777216.0f - 0.5f : 0.0f );
@@ -1171,6 +1397,8 @@ static void vaPassInner( Scene * scene, bool run )
 	const int cellGiOnV = uniI( "cellGiOn" ), cellHasDalcV = uniI( "cellHasDalc" ), cellExtDalcV = uniI( "cellExtDalc" );
 	r->stopProgram();
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
+	fn->glBindTexture( GL_TEXTURE_3D, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kClusterUnit ) );
 	fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
@@ -1231,7 +1459,8 @@ static void vaPassInner( Scene * scene, bool run )
 			.arg( double( farEnd ), 0, 'f', 0 ).arg( fp.refresh ).arg( g.farBuilds ).arg( g.farGpuMs, 0, 'f', 3 )
 			.arg( volMb, 0, 'f', 1 ).arg( [] { WwTerrainShadowMap t; return wwTerrainShadowMap( t ) ? 1 : 0; }() );
 	s.last.chop( 1 );
-	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() ) + QStringLiteral( ")" );
+	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() )
+		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( ")" );
 
 	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */
@@ -1276,6 +1505,12 @@ static void vaPassInner( Scene * scene, bool run )
 			o += QStringLiteral( "csm %1\nterms %2\nred %3\nmedNote %4\nms %5\n" ).arg( csm ? 1 : 0 )
 				.arg( s.terms ).arg( s.red ).arg( medNote ).arg( ms, 0, 'f', 3 );
 			o += QStringLiteral( "opt %1\n" ).arg( optNote );
+			// lane FOGDRIFT1: the density factor 1 + amp x fade x (a + 0.5 fade b) / 1.5, a b = noise - mean (cell_volair.frag airDrift)
+			o += QStringLiteral( "drift %1 amp %2 mean %3 span %4 fade %5 %6 tile %7 %8 ofs %9 %10 %11 %12 %13 %14\n" ).arg( dr.note )
+				.arg( double( driftAmp ), 0, 'g', 9 ).arg( double( dr.mean ), 0, 'g', 9 ).arg( double( dr.span ), 0, 'g', 9 )
+				.arg( double( kDriftFade0 ) ).arg( double( kDriftFade1 ) ).arg( double( kDriftTile ) ).arg( double( kDriftTile * kDriftDetail ) )
+				.arg( double( dr.ofs[0][0] ), 0, 'g', 9 ).arg( double( dr.ofs[0][1] ), 0, 'g', 9 ).arg( double( dr.ofs[0][2] ), 0, 'g', 9 )
+				.arg( double( dr.ofs[1][0] ), 0, 'g', 9 ).arg( double( dr.ofs[1][1] ), 0, 'g', 9 ).arg( double( dr.ofs[1][2] ), 0, 'g', 9 );
 			o += QStringLiteral( "airLayer %1\nairGround %2\nrecx %3\nrecxConflict %4\n" ).arg( v( layerV, 4 ), v( groundV, 4 ), G.recx,
 				G.conflict.isEmpty() ? QStringLiteral( "none" ) : G.conflict );
 			// lane LAMPAIR1: every light the air sees (world pos, radius, linear colour with fade, spot cos, shape,

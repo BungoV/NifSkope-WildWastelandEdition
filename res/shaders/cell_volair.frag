@@ -47,6 +47,10 @@ uniform ivec2 volGbufSize;
 uniform int volFarMode;
 uniform int volLayerBase;		// the grid's first layer in the packed volume (the far grid sits after the near one)
 uniform float volJitter;		// red farjitter: a per-frame slice offset (0 otherwise)
+// lane FOGDRIFT1 (cellvolair.h): x amp / span (0: smooth air), y the fade's start, z 1 / its length, w the noise's mean
+uniform vec4 volDrift;
+uniform vec4 volDriftOfs[2];	// per octave: xyz the wind's offset (world units), w 1 / its tile
+uniform sampler3D volNoise;
 
 out vec4 fragColor;
 
@@ -82,6 +86,19 @@ float airF( float z )
 float airRho( float z )
 {
 	return wwAirRhoLaw( z, airMed, airLayer, airGround );
+}
+
+/* lane FOGDRIFT1: the density factor at distance t along dirView, around 1 (the texture's exact mean subtracted, so
+ * the mean density holds); fades to 1 with distance, the detail octave sooner (it would alias in the deep slices) */
+float airDrift( vec3 dirView, float t )
+{
+	float f = 1.0 - clamp( ( t - volDrift.y ) * volDrift.z, 0.0, 1.0 );
+	if ( f <= 0.0 || !cellOn )
+		return 1.0;
+	vec3 P = cellWorldPos( dirView * ( t / fogDistScale ) );
+	float a = texture( volNoise, ( P - volDriftOfs[0].xyz ) * volDriftOfs[0].w ).r - volDrift.w;
+	float b = texture( volNoise, ( P - volDriftOfs[1].xyz ) * volDriftOfs[1].w + vec3( 0.37, 0.61, 0.13 ) ).r - volDrift.w;
+	return 1.0 + volDrift.x * f * ( a + 0.5 * f * b ) * ( 1.0 / 1.5 );
 }
 
 // (1 - exp(-u)) / u, precise for small u
@@ -482,6 +499,8 @@ void main()
 	for ( int q = 0; q < 4; q++ ) {
 		float ta = mix( t0, t1, float( q ) * 0.25 ), tb = mix( t0, t1, float( q + 1 ) * 0.25 );
 		float tau = airOd( zc + dzdt * ta, zc + dzdt * tb, tb - ta );
+		if ( volDrift.x > 0.0 )	// lane FOGDRIFT1: one noisy density for every term below (the lamps' glow too)
+			tau *= airDrift( dirView, 0.5 * ( ta + tb ) );
 		float w = air1mE( tau );
 		if ( w > 0.0 ) {
 			float t = 0.5 * ( ta + tb );

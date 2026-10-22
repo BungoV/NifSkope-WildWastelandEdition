@@ -96,6 +96,19 @@ void wwVolAirSetOn( bool on );
  *  end), farjitter (a per-frame slice offset). Echo: far=on(tier ... gpums ... volmb ...) in the air's census. */
 int wwVolAirFarTier();
 void wwVolAirSetFarTier( int tier );
+/*! lane FOGDRIFT1: DRIFTING FOG (bungo 10-22, after RDR2). The near grid's density x a tileable 64^3 noise (two
+ *  octaves, tiles 4096 and 1843 units) that the weather's wind (WTHR DATA speed, direction; range and turbulence wobble
+ *  it) carries along; no wind = still lumps. The factor keeps the mean density (1 + a (n - mean) / span) and fades to 1
+ *  from 2000 to 8000 units; the far grid and the tail stay smooth. Every in-scatter term (sun, sky, GI, the placed
+ *  lights) scatters by the same noisy sub-step, so a lamp's glow brightens and dims as the lumps pass. Exteriors drift;
+ *  an interior only when it shows the sky; a sealed one is drawn exactly as with the row off.
+ *  The row "Fog Drift" under Volumetric Air ships OFF (QSettings WW/VolAirDrift; the pin WW_CELL_FOGDRIFT=0|1 wins).
+ *  WW_CELL_FOGDRIFT_RED=still (no motion) | smooth (no noise); WW_CELL_FOGDRIFT_T=<s> pins the clock (shots' frames;
+ *  a harness pins t = 0). Echo: drift=on(wind dir range turb speed t) in the air's census; the dump's "drift" line. */
+bool wwVolAirDriftOn();
+void wwVolAirSetDriftOn( bool on );
+//! the view repaints while the fog drifts (never in a harness or with the clock pinned)
+bool wwVolAirWantsRepaint();
 //! census echo: "volair=on(...)" or why none was drawn
 QString wwVolAirSummary();
 

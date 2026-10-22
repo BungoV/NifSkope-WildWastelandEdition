@@ -35,9 +35,10 @@ constexpr int TerrShadow = 31;	// lane TERRSHADOW1: the terrain's shadow map (sa
 constexpr int ContactShadow = 32;	// lane TERRSHADOW1: the contact shadows (sampler2D; testint moved it off PERF1's 30)
 constexpr int Ssgi = 33;		// lane SSGI1: the screen-space bounce, the open share (sampler2D) (moved off TerrShadow 31 at MERGEALL1)
 constexpr int LightCluster = 34;	// lane LIGHTSYS2: the surfaces' clustered light lists (isamplerBuffer; was 24 = AirVol)
+constexpr int AirNoise = 37;		// lane FOGDRIFT1: the air's drifting density noise (sampler3D; 35/36 are FARCARD1's)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
-	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster };
+	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster, AirNoise };
 
 constexpr bool distinct()
 {
