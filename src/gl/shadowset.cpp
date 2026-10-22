@@ -1403,8 +1403,16 @@ void wwContactShadowPass( Scene * scene )
 	ContactPreset p = contactPreset( s.contact );
 	// lane SHADOWPAR1: FO4CS's march (384 samples, 0.5 % thickness) with its fades and rejects (ww_contact.frag sssPar)
 	const bool par = wwShadowPar( WwParContact );
-	if ( par )
-		p.samples = 384;
+	// the same 384-full-pixel reach on a half-res mask with half the steps, the usual shipped-game trade (the mask is soft anyway).
+	// Red WW_SHADOW_RED=contactfull brings back the full-res 384-sample march.
+	const bool full = wwShadowRed( "contactfull" );
+	if ( par ) {
+		p.samples = full ? 384 : 192;
+		p.scale = full ? p.scale : 2;
+	}
+	// stop marching once every lane is past the contrast floor (the output is 0 from there on: exact).
+	// Red WW_SHADOW_RED=contactnoexit marches every sample.
+	const bool earlyExit = par && !wwShadowRed( "contactnoexit" );
 	const void * ctx = QOpenGLContext::currentContext();
 	if ( ctx != c.ctx ) {
 		c.ctx = ctx;
@@ -1488,6 +1496,7 @@ void wwContactShadowPass( Scene * scene )
 	prog->uni4f( "sssParams", FloatVector4( par ? 0.005f : 0.02f, 0.02f, 4.0f, float( p.samples ) ) );
 	prog->uni1f( "sssFloor", 1.5f );
 	prog->uni1i( "sssPar", par ? 1 : 0 );
+	prog->uni1i( "sssExit", earlyExit ? 1 : 0 );
 	prog->uni3f( "sssLightView", float( lv[0] ), float( lv[1] ), float( lv[2] ) );
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -1512,9 +1521,9 @@ void wwContactShadowPass( Scene * scene )
 	c.doc = scene->nifModel;
 	c.fullW = W;
 	c.fullH = H;
-	c.last = QStringLiteral( "on mask=%1x%2 full=%3x%4 samples=%5 light=%6,%7,%8,%9 gpu_ms=%10 mem_mb=%11 par=%12" ).arg( mw ).arg( mh )
+	c.last = QStringLiteral( "on mask=%1x%2 full=%3x%4 samples=%5 light=%6,%7,%8,%9 gpu_ms=%10 mem_mb=%11 par=%12 exit=%13" ).arg( mw ).arg( mh )
 		.arg( W ).arg( H ).arg( p.samples ).arg( lx, 0, 'f', 1 ).arg( ly, 0, 'f', 1 ).arg( lz, 0, 'f', 6 ).arg( cw > 0 ? 1 : -1 )
-		.arg( s.tmContact.ms, 0, 'f', 4 ).arg( double( mw ) * mh / ( 1024.0 * 1024.0 ), 0, 'f', 2 ).arg( par ? 1 : 0 );
+		.arg( s.tmContact.ms, 0, 'f', 4 ).arg( double( mw ) * mh / ( 1024.0 * 1024.0 ), 0, 'f', 2 ).arg( par ? 1 : 0 ).arg( earlyExit ? 1 : 0 );
 }
 
 bool wwShadowSetActive( Scene * scene )
@@ -1522,7 +1531,10 @@ bool wwShadowSetActive( Scene * scene )
 	const SetState & s = ss();
 	if ( !scene )
 		return false;
-	return ( s.t.valid && s.terrain > 0 ) || ( s.c.valid && s.c.doc == scene->nifModel );
+	// a pinned debug view draws even when the terrain has nothing to cast (sun under the horizon: the view shows lit).
+	// Red WW_SHADOW_RED=viewidle brings back the old rule (no view at all, the plain shaded picture).
+	const bool viewPinned = s.view > 0 && ( s.terrain > 0 || s.contact > 0 ) && !wwShadowRed( "viewidle" );
+	return ( s.t.valid && s.terrain > 0 ) || ( s.c.valid && s.c.doc == scene->nifModel ) || viewPinned;
 }
 
 void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool csmValid, const float csmTexel[3] )
@@ -1534,7 +1546,11 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	auto fn = r->fn;
 	// the volumetric fog's froxels and the effect shaders' (blended) surfaces: no screen-space term
 	const bool volume = prog->uniLocation( "volStage" ) >= 0;
-	const bool noScreen = volume || prog->uniLocation( "GreyscaleMap" ) >= 0 || prog->uniLocation( "hasGreyscaleMap" ) >= 0;
+	// fo4_default also samples a GreyscaleMap (palettes), so only the effect shaders' own uniforms mark an effect.
+	// Red WW_SHADOW_RED=contactgrey brings back the old test that kept contact off every fo4_default surface.
+	const bool effect = prog->uniLocation( "hasGreyscaleMap" ) >= 0 || prog->uniLocation( "useFalloff" ) >= 0
+		|| ( wwShadowRed( "contactgrey" ) && prog->uniLocation( "GreyscaleMap" ) >= 0 );
+	const bool noScreen = volume || effect;
 	const bool terr = s.terrain > 0 && s.t.valid && s.t.tex[s.t.front];
 	const bool contact = !noScreen && s.c.valid && s.c.doc == scene->nifModel && s.c.tex;
 	const bool upgraded = s.cascade > 0 && csmValid;

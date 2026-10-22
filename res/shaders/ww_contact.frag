@@ -17,6 +17,7 @@ uniform vec4 sssParams;		// thickness (fraction of depth), bilinear threshold, c
 uniform float sssFloor;		// the thickness floor, game units
 uniform int sssPar;		// lane SHADOWPAR1: FO4CS's evidence, completion and edge fades, plane and normal rejects
 uniform vec3 sssLightView;	// the direction TO the light, view space (the normal reject)
+uniform int sssExit;		// lane SHADOWPAR1FIX: stop once every lane is at the contrast floor (the output cannot change)
 
 out float fragMask;
 
@@ -115,6 +116,9 @@ void main()
 		}
 		int lane = k & 3;
 		lanes[lane] = min( lanes[lane], d );
+		// every lane resolves to 0 from here; past the hard samples and the 16-pixel edge band nothing else can move
+		if ( sssExit != 0 && k >= 4 && float( k ) * maskScale >= kEdgeBand && all( lessThanEqual( lanes, vec4( 1.0 - 1.0 / contrast ) ) ) )
+			break;
 	}
 	lanes = clamp( lanes * contrast + ( 1.0 - contrast ), 0.0, 1.0 );
 	fragMask = dot( lanes, vec4( 0.25 ) );
