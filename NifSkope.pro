@@ -240,6 +240,7 @@ HEADERS += \
 	src/gl/cellvrs.h \
 	src/gl/cellfxres.h \
 	src/gl/cellbloom.h \
+	src/gl/cellfogbloom.h \
 	src/gl/cellprobeview.h \
 	src/gl/cellvolumeview.h \
 	src/gl/cellssr.h \
@@ -512,6 +513,7 @@ SOURCES += \
 	src/gl/cellvrs.cpp \
 	src/gl/cellfxres.cpp \
 	src/gl/cellbloom.cpp \
+	src/gl/cellfogbloom.cpp \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellvolumeview.cpp \
 	src/gl/cellssr.cpp \

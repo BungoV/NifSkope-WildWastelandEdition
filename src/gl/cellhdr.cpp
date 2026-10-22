@@ -3,6 +3,7 @@
 #include "cellunits.h"
 
 #include "gl/cellbloom.h"
+#include "gl/cellfogbloom.h"
 #include "gl/celllights.h"
 #include "gl/cellssr.h"
 #include "gl/glscene.h"
@@ -25,6 +26,7 @@
 namespace {
 
 constexpr int kSrcUnit = 8;		// the linear frame (sampler2DMS) in cell_hdr.prog; the cell units are 10..16
+constexpr int kFogBloomUnit = 7;	// lane FOGBLOOM1: the bloom-intensity target (sampler2DMS); no TexCache map in this pass (9 in the lane: TONEMAP1's stencil holds it)
 constexpr int kFoBloomUnit = WwCellUnit::Bloom;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
 
 constexpr int kStencilUnit = 9;	// lane TONEMAP1: the frame's stencil (usampler2DMS) in cell_hdr.prog, always assigned
@@ -908,11 +910,14 @@ void wwCellHdrEnd( Scene * scene )
 	PassTime::subBegin( PassTime::ToneBloom );
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
 	PassTime::subEnd( PassTime::ToneBloom );
+	// lane FOGBLOOM1: the per-pixel bloom strength from the air along each ray (cellfogbloom.h); off: no GL call
+	const bool fogBloom = wwCellFogBloomRun( scene, g.fbo, g.ds, s.w, s.h, s.samples, g.dsFormat );
 
 	// lane PERF2: the quad at the far plane keeps the early tests (WW_CELL_HDR_EARLY_RED=1: depth written per sample)
 	static const bool earlyRed = qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) != 0;
 	auto prog = r->useProgram( earlyRed && !g.dsTex ? "cell_hdr_fd.prog" : "cell_hdr.prog" );
 	if ( !prog ) {
+		wwCellFogBloomDone( r, kFogBloomUnit );
 		wwCellBloomDone( r, kFoBloomUnit );
 		note( s, QStringLiteral( "lost (cell_hdr.prog went away mid-frame)" ) );
 		return;
@@ -944,6 +949,7 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	prog->uni1i( "hdrStencil", kStencilUnit );
 	prog->uni1i( "hdrStencilTest", 0 );
+	wwCellFogBloomFinal( r, kFogBloomUnit, fogBloom );
 	wwCellBloomFinal( r, kFoBloomUnit );	// lane BLOOM1b: the final combine's uniforms (off: cellIsFoBloomOn false)
 
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
@@ -1037,6 +1043,7 @@ void wwCellHdrEnd( Scene * scene )
 	if ( !sync && wwCellVrsWanted() )
 		fn->glGetIntegerv( GL_VIEWPORT, sn.vp );
 	wwCellVrsBuild( scene, s.prevDraw, s.prevRead, s.w, s.h, sn.vp );
+	wwCellFogBloomDone( r, kFogBloomUnit );
 
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );

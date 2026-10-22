@@ -29,6 +29,7 @@ BSD License - see nifskope.h
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellpost.h"	// lane GRASSMB1
 #include "gl/cellbloom.h"	// lane BLOOM1b
+#include "gl/cellfogbloom.h"
 #include "ui/widgets/wwnumberfield.h"	// lane BLOOM1b: the Bloom rows
 
 #include <QAction>
@@ -601,6 +602,18 @@ void CellWorkspacePanel::buildUi()
 			a->setEnabled( !wwCellBloomPinned( "mode" ) );
 			cellBloomGroup->addAction( a );
 		}
+		// lane FOGBLOOM1: the bloom each pixel takes rises with the fog along its view ray (gl/cellfogbloom.h; ships off)
+		QAction * fogBloom = cellBloom->addAction( tr( "Fog bloom" ) );
+		fogBloom->setObjectName( QStringLiteral( "CellWorkspaceBloomFog" ) );
+		fogBloom->setCheckable( true );
+		fogBloom->setChecked( wwCellFogBloomOn() );
+		fogBloom->setEnabled( !wwCellFogBloomPinned() );
+		fogBloom->setToolTip( tr( "Glow spreads stronger through fog and from glowing glass and effects; none in clear air" ) );
+		connect( fogBloom, &QAction::toggled, this, [this]( bool on ) {
+			wwCellFogBloomSetOn( on );
+			if ( glView )
+				glView->update();
+		} );
 		// one label | field grid per block, one label width for both so the value edge is one line
 		struct Row { const char * id; const char * name; QString label; QString tip; double lo, hi, step; int dec; QString prefix; };
 		auto grid = [this]( const char * name, const QList<Row> & rows, QList<QWidget *> & out ) {

@@ -107,6 +107,11 @@ uniform sampler2D cellIsFoBloom;
 uniform vec4 cellIsFoBloomParams;	// radius (pixels), bloom weight, dispersion, 0
 uniform vec2 cellIsFoBloomFrame;	// the frame's size: the combine's uv
 vec3 cellFoBloomHere = vec3( 0.0 );
+// lane FOGBLOOM1 (src/gl/cellfogbloom.h): the bloom-intensity target, (gain - 1) / 4 per sample; cell_hdr.frag sets
+// cellBloomGain from it, which scales both blooms (1.0 exactly in clear air: the same bits)
+uniform bool cellFogBloomOn;
+uniform sampler2DMS cellFogBloom;
+float cellBloomGain = 1.0;
 #endif
 
 // sqrt-of-linear in (this program's convention), display out. Shaders011.fxp, the tonemap PS and the LUT PS.
@@ -117,12 +122,16 @@ vec3 cellImageSpace( vec3 sqrtColor )
 // lane EFX2: an effect blends over a surface that already took the bloom; lane HDR1: the one tone map takes it
 #if !defined( WW_CELL_FX ) || defined( WW_CELL_HDR )
 	if ( cellIsBloomOn )	// the tonemap PS adds the bloom target before its exposure multiply
+#if defined( WW_CELL_HDR )
+		x += cellBloomGain * texture( cellIsBloom, ( gl_FragCoord.xy - cellIsBloomRect.xy ) * cellIsBloomRect.zw ).rgb;
+#else
 		x += texture( cellIsBloom, ( gl_FragCoord.xy - cellIsBloomRect.xy ) * cellIsBloomRect.zw ).rgb;
+#endif
 #endif
 	x = x * ( ( cellIsRed & 2 ) != 0 ? 1.0 : cellIsExposure ) * 2.0;
 #if defined( WW_CELL_HDR )
 	if ( cellIsFoBloomOn )	// lane BLOOM1b: FO4CS adds its bloom to the exposed light, before the curve (x 2: the curve's input)
-		x += 2.0 * cellFoBloomHere;
+		x += 2.0 * cellBloomGain * cellFoBloomHere;
 #endif
 	float E = cellIsE;
 	vec3 c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
