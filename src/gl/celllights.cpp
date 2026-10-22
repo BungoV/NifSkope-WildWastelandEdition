@@ -202,6 +202,8 @@ ClState & st()
 		// lane POOL1: the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
 		if ( wwEnv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
 			s.red |= 65536;
+		else if ( wwEnv( "WW_CELL_SPEC_RED" ).trimmed() == "tint" )
+			s.red |= 262144;	// lane GAPFIX1: opaque (deferred) draws tint the lights' specular by the material colour again
 		// lane GISHADE1: outdoors the grid's sky takes k x the flat ambient off in sqrt space again (the old law)
 		if ( wwEnv( "WW_CELL_GISHADE_RED" ).trimmed() == "sqrt" )
 			s.red |= 131072;

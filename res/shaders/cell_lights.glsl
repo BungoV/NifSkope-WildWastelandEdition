@@ -22,6 +22,7 @@ float cellDirVis = 1.0;
 vec3 cellExtAmb = vec3( 0.0 );
 vec3 cellExtSpec = vec3( 0.0 );
 vec3 cellReflAdd = vec3( 0.0 );	// lane REFLPROBE1: the probes' reflection, light already (cell_reflprobe.glsl)
+vec3 cellSpecTint = vec3( 1.0 );	// lane GAPFIX1: the colour cellLit puts on the lights' specular (probe 31)
 uniform vec3 cellDirColor;			// linear
 uniform vec3 cellDirTo;				// world, TO the light
 uniform bool cellInterior;
@@ -1621,7 +1622,7 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 		return cellProbeRaw( P, N );
 	if ( cellProbe >= 91 && cellProbe <= 94 )	// lane FARVIEW1
 		return cellFarProbeOut( P, N );
-	if ( cellProbe == 1 || cellProbe == 8 || cellProbe == 10 || cellProbe == 30 ) {
+	if ( cellProbe == 1 || cellProbe == 8 || cellProbe == 10 || cellProbe == 30 || cellProbe == 31 ) {
 		// 1: the irradiance / 4; 8 (lanes ON1, RIM1): the game's diffuse (Oren-Nayar + rim) / 4, seen from the camera;
 		// 10 (lane RIM1): the rim alone x 4, sixteen times probe 8's reach, so the per-light rim flags show
 		vec3 diff, diffOn, spec;
@@ -1630,6 +1631,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 			return clamp( cellRimSum * 4.0, 0.0, 1.0 );
 		if ( cellProbe == 30 )	// lane POOL1 (11 is lane AMBO2's): the placed lights' specular / 4, before the mask
 			return clamp( spec * 0.25, 0.0, 1.0 );
+		if ( cellProbe == 31 )	// lane GAPFIX1: the same after the colour cellLit puts on it (deferred = white)
+			return clamp( spec * cellSpecTint * 0.25, 0.0, 1.0 );
 		return clamp( ( cellProbe == 8 ? diffOn : diff ) * 0.25, 0.0, 1.0 );
 	}
 	if ( cellProbe == 9 )
