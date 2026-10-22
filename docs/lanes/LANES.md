@@ -61,6 +61,7 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | LAMPSHADOW1 | lamp shadows stored for still lamps, redrawn only where something moves near them (live door, NPC); wall-lamp half-shadow trick (RDR2); ships OFF (bungo 10-22) | BATCH READY 10-22 (lampshadow1-20261022 @ f05d5440, exe sha1 fd21f3d8) |
 | FOGBLOOM1 | lamps and glass glow stronger in thick fog and with distance (RDR2 bloom-intensity target), on top of the real fog in-scatter; ships OFF (bungo 10-22) | BATCH READY 10-22 (fogbloom1-20261022 @ 501215e1, exe sha1 1d37e8841ee8ea8ea7ce3459377b3b3e6543ac60) |
 | GLASSLIGHT1 | measure first: lamp light bleeding/cost on pixels behind window glass; if real, skip/limit it the RDR2 way (stencil); ships OFF (bungo 10-22) | CLOSED 10-22: nothing to fix (notes/glasslight1/FINDINGS.md) |
+| BLUEBRICK1 | diagnose + fix: Concord brick wall draws blue, middle tree has no crown (seen in BATCH2 c3day off+on; bungo 10-22) | RUNNING 10-22: diagnosis; launches via withlock behind BATCH2 |
 Next batch (BATCH2): VOLPART1R, FARCARD1, PERF3, TESTDRIVER1, VOLAIRSKY1 D2b/D3, SSGI3 once built.
 Queued tonight (his 10-21 go): VTGPU1 + PROFILE1 (after
 BAKESPEED1); ROOMS-RT room enclosure by rays (after RTBAKE1).
