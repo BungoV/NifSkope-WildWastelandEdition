@@ -926,6 +926,7 @@ static void sunShadowPassImpl( Scene * scene )
 		offsetClamp = clampFn;
 		s.slopeClamp = offsetClamp ? 1 : -1;
 	}
+	const bool cslopeZero = offsetClamp && wwShadowRed( "cslopezero" );
 	bool complete = true;
 	std::vector<std::uint32_t> cullRanges;	// lane SUNCELL1
 	std::vector<std::uint16_t> cullIdx;
@@ -961,7 +962,7 @@ static void sunShadowPassImpl( Scene * scene )
 		ht.w( std::uint64_t( s.map ) );
 		ht.f( s.slopeBias );
 		ht.f( s.unitBias );
-		ht.w( ( red( "nobias" ) ? 1u : 0u ) | ( GpuDriven::csm() ? 2u : 0u ) | ( offsetClamp ? 4u : 0u ) );	// SHADOWPAR1's clamp
+		ht.w( ( red( "nobias" ) ? 1u : 0u ) | ( GpuDriven::csm() ? 2u : 0u ) | ( offsetClamp ? 4u : 0u ) | ( cslopeZero ? 8u : 0u ) );	// SHADOWPAR1's clamp, OBJLODSHADOW1's probe
 		ht.p( progAt );
 		for ( const QString & rr : cs().reds )
 			ht.w( qHash( rr ) );
@@ -1160,8 +1161,11 @@ static void sunShadowPassImpl( Scene * scene )
 			fn->glEnable( GL_SCISSOR_TEST );
 			fn->glScissor( J.rc[0], J.rc[1], J.rc[2] - J.rc[0], J.rc[3] - J.rc[1] );
 		}
+		// lane OBJLODSHADOW1: probe WW_SHADOW_RED=cslopezero -- the same entry point with clamp 0 (no clamping), to split
+		// cslope's +1.8 ms between the clamp call and the clamped bias (timing only)
 		if ( offsetClamp )
-			offsetClamp( s.slopeBias, s.unitBias, float( s.unitBias / 65536.0 + s.slopeBias * c.texel * 4.0 / std::max( c.far - kNear, 1e-6 ) ) );
+			offsetClamp( s.slopeBias, s.unitBias, cslopeZero ? 0.0f
+				: float( s.unitBias / 65536.0 + s.slopeBias * c.texel * 4.0 / std::max( c.far - kNear, 1e-6 ) ) );
 		if ( lMvp >= 0 )
 			fn->glUniformMatrix4fv( lMvp, 1, GL_FALSE, c.clipFromView );
 		if ( progQ && ( span[jb][QSolid].n || span[jb][QTwoSided].n || !queue[QAlpha].empty() ) ) {

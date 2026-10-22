@@ -306,22 +306,36 @@ class Judge:
             return None
         return a, b
 
-    # -- objlod: far-LOD objects in the heightfield: echo count in (0, 1500], and the terrain view darkens
-    # (dark fraction up by >= 0.1 % of the picture)
+    # -- objlod: far-LOD objects in the heightfield past the cascades' reach of the loaded LAND (OBJLODSHADOW1). At the
+    # default 16000-unit reach ring 0 lies wholly inside it, so the caster gate reads a 2000-unit reach (dist item in both
+    # arms): echo count in (0, 1500], and the terrain view darkens (dark fraction up by >= 0.1 % of the picture)
     def objlod(self):
+        p = self.pair('c_v2_d2k_none', 'c_v2_d2k_objlod')
+        if p is not None:
+            n = num(r'objlod=(\d+)', self.uss('c_v2_d2k_objlod'), 0.0)
+            g0, g1 = grey(p[0]), grey(p[1])
+            d0 = float((g0 & (p[0][:, :, 0] < 0.5)).mean())
+            d1 = float((g1 & (p[1][:, :, 0] < 0.5)).mean())
+            ok = 0 < n <= 1500 and d1 - d0 >= 0.001
+            self.verdict('objlod', ok, 'reach 2000: casters=%d dark %.4f -> %.4f (want casters in (0,1500], +0.001)' % (n, d0, d1))
+        # objlod_near (the BATCH1 defect: the objlod arm darkened 81 % of the frame, the whole near ground). Near ground =
+        # the bottom quarter's grey pixels lit (>= 0.5) without the item; the share of them the item turns dark (< 0.5)
+        # must be <= 2 %, and the echo must show the cut ran. Red objlodall (every object-LOD shape casts) must FAIL it.
         p = self.pair('c_v2_none', 'c_v2_objlod')
         if p is None:
             return
-        n = num(r'objlod=(\d+)', self.uss('c_v2_objlod'), 0.0)
-        g0, g1 = grey(p[0]), grey(p[1])
-        d0 = float((g0 & (p[0][:, :, 0] < 0.5)).mean())
-        d1 = float((g1 & (p[1][:, :, 0] < 0.5)).mean())
-        ok = 0 < n <= 1500 and d1 - d0 >= 0.001
-        self.verdict('objlod', ok, 'casters=%d dark %.4f -> %.4f (want casters in (0,1500], +0.001)' % (n, d0, d1))
-        # FIXGATES1 finding: BATCH1's objlod arm turned 81 % of the frame (all the near ground) dark; say it every run
+        u = self.uss('c_v2_objlod')
+        cut = re.search(r'objlod_cut=(\S+)', u)
         lo = slice(p[0].shape[0] * 3 // 4, None)
-        self.info('objlod_near_ground', 'bottom quarter dark %.3f -> %.3f (the loaded cells\' own ground)' % (
-            float((g0[lo] & (p[0][lo, :, 0] < 0.5)).mean()), float((g1[lo] & (p[1][lo, :, 0] < 0.5)).mean())))
+        lit0 = grey(p[0])[lo] & (p[0][lo, :, 0] >= 0.5)
+        went = lit0 & grey(p[1])[lo] & (p[1][lo, :, 0] < 0.5)
+        share = float(went.sum()) / max(float(lit0.sum()), 1.0)
+        ok = cut is not None and cut.group(1) != 'none' and lit0.sum() > 0 and share <= 0.02
+        self.verdict('objlod_near', ok, 'near ground lit %d px, darkened by objlod %.4f (want <= 0.02); cut %s; skipped %s' % (
+            int(lit0.sum()), share, cut.group(1) if cut else 'absent', num(r'objlod_skipped=(\d+)', u, -1)))
+        g0, g1 = grey(p[0]), grey(p[1])
+        self.info('objlod_frame', 'reach 16000: casters=%d dark %.4f -> %.4f' % (
+            num(r'objlod=(\d+)', u, 0.0), float((g0 & (p[0][:, :, 0] < 0.5)).mean()), float((g1 & (p[1][:, :, 0] < 0.5)).mean())))
 
     # -- pen: the disc penumbra widens the soft band: partial pixels (0.1..0.9) >= 1.5x
     def pen(self):

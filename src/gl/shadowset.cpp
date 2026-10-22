@@ -73,6 +73,7 @@ struct TerrSrc
 	Transform xf;
 	QVector<Vector3> verts;
 	QVector<Triangle> tris;
+	float cut[4] = { 1.0f, 1.0f, 0.0f, 0.0f };	// lane OBJLODSHADOW1: triangles centred in this XY rect skipped (x0 > x1: none)
 };
 
 struct Terrain
@@ -128,6 +129,9 @@ struct Terrain
 	double pubNX0 = 0, pubNY0 = 0, pubNT = 64.0;
 	int objLod = 0;		// the far object-LOD shapes in the set (casters)
 	bool objOn = false;
+	int objSkipped = 0;	// lane OBJLODSHADOW1: object-LOD shapes wholly inside the cut (not casters)
+	float objCut[4] = { 1.0f, 1.0f, 0.0f, 0.0f };	// the loaded LAND grown by the cascades' reach (x0 > x1: none)
+	double objReach = 0;
 	float strength = 1.0f;	// the low sun's fade / the moon's strength
 	bool blended = false;	// the last published map blended with the one before (temporal)
 
@@ -443,25 +447,90 @@ bool isObjLodShape( const Shape * sh )
 constexpr int kObjBudget = 1500;	// FO4CS iFarMapCasterBudget: first come in the scene's walk, no sort
 constexpr float kObjMinRadius = 128.0f;
 
-void collectTerrain( Scene * scene, std::vector<const Shape *> & out, quint64 & sig, bool objLod, int & objCount )
+//! lane OBJLODSHADOW1: a loaded cell's own LAND (under "ground", not the far field's terrain)
+bool isLoadedLand( const Shape * sh )
+{
+	if ( ss().terrainAll || sh->getName().startsWith( QLatin1StringView( "FarLOD" ) ) )
+		return false;
+	bool ground = false;
+	for ( const Node * p = sh->parentNode(); p; p = p->parentNode() ) {
+		const QString & n = p->getName();
+		if ( n.startsWith( QLatin1StringView( "FarLOD" ) ) )
+			return false;
+		if ( n.compare( QLatin1StringView( "ground" ), Qt::CaseInsensitive ) == 0 )
+			ground = true;
+	}
+	return ground;
+}
+
+/*! lane OBJLODSHADOW1: where object LOD may not cast -- the loaded LAND's XY box grown by the cascades' reach. The
+ *  cascades already shadow every object there (the far-LOD shapes too); a height column on top of them shadowed the
+ *  objects' own surfaces and the ground under them (BATCH1: 81 % of the frame). FO4CS's far map is the same band:
+ *  authority 1 - fade, nothing inside the cascades. Red WW_SHADOW_RED=objlodall: every object-LOD shape casts. */
+void objLodCut( Scene * scene, float cut[4], double & reach )
+{
+	cut[0] = cut[1] = 1.0f;
+	cut[2] = cut[3] = 0.0f;
+	WwCascadePreset p;
+	reach = wwShadowCascadePreset( p ) ? p.D : 0.0;
+	if ( wwShadowRed( "objlodall" ) )
+		return;
+	float lo[2] = { std::numeric_limits<float>::max(), std::numeric_limits<float>::max() };
+	float hi[2] = { -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max() };
+	for ( Node * node : scene->nodes.list() ) {
+		const Shape * sh = dynamic_cast<const Shape *>( node );
+		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || !isLoadedLand( sh ) )
+			continue;
+		const Transform w = sh->worldTrans();
+		for ( const Vector3 & v : sh->verts ) {
+			const Vector3 q = w * v;
+			for ( int k = 0; k < 2; k++ ) {
+				lo[k] = std::min( lo[k], q[k] );
+				hi[k] = std::max( hi[k], q[k] );
+			}
+		}
+	}
+	if ( lo[0] > hi[0] )
+		return;	// no loaded LAND: nothing is drawn at full detail
+	cut[0] = float( lo[0] - reach );
+	cut[1] = float( lo[1] - reach );
+	cut[2] = float( hi[0] + reach );
+	cut[3] = float( hi[1] + reach );
+}
+
+void collectTerrain( Scene * scene, std::vector<const Shape *> & out, std::vector<char> & isObj, quint64 & sig, bool objLod,
+	int & objCount, int & objSkipped, const float cut[4] )
 {
 	out.clear();
+	isObj.clear();
 	objCount = 0;
+	objSkipped = 0;
 	sig = 1469598103934665603ull;
 	auto mix = [&sig]( quint64 v ) {
 		sig ^= v;
 		sig *= 1099511628211ull;
 	};
+	const bool cutOn = cut[0] <= cut[2];
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
 		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
-		if ( !isTerrainShape( sh ) ) {
-			if ( !objLod || objCount >= kObjBudget || !isObjLodShape( sh ) || sh->bounds().radius < kObjMinRadius )
+		const bool terr = isTerrainShape( sh );
+		if ( !terr ) {
+			if ( !objLod || objCount >= kObjBudget || !isObjLodShape( sh ) )
 				continue;
+			const BoundSphere b = sh->bounds();
+			if ( b.radius < kObjMinRadius )
+				continue;
+			if ( cutOn && b.center[0] - b.radius >= cut[0] && b.center[0] + b.radius <= cut[2]
+				&& b.center[1] - b.radius >= cut[1] && b.center[1] + b.radius <= cut[3] ) {
+				objSkipped++;	// wholly inside: no caster, no budget spent
+				continue;
+			}
 			objCount++;
 		}
 		out.push_back( sh );
+		isObj.push_back( terr ? 0 : 1 );
 		const Transform & w = sh->worldTrans();
 		mix( quint64( reinterpret_cast<quintptr>( sh ) ) );
 		mix( quint64( sh->verts.size() ) );
@@ -474,6 +543,10 @@ void collectTerrain( Scene * scene, std::vector<const Shape *> & out, quint64 & 
 	}
 	mix( quint64( out.size() ) );
 	mix( quint64( objLod ? 1 : 0 ) );
+	quint32 c[4];
+	std::memcpy( c, cut, sizeof( c ) );
+	for ( quint32 v : c )
+		mix( v );
 }
 
 //! the heights at the texel centres (point samples of the surface; the max where surfaces overlap)
@@ -492,10 +565,16 @@ void rasterTerrain( Terrain & t, const std::vector<TerrSrc> & shapes, const std:
 		w.resize( size_t( sh.verts.size() ) );
 		for ( qsizetype v = 0; v < sh.verts.size(); v++ )
 			w[size_t( v )] = xf * sh.verts.at( v );
+		const bool cutOn = sh.cut[0] <= sh.cut[2];
 		for ( const Triangle & tri : sh.tris ) {
 			if ( tri[0] >= w.size() || tri[1] >= w.size() || tri[2] >= w.size() )
 				continue;
 			const Vector3 & a = w[tri[0]], & b = w[tri[1]], & c = w[tri[2]];
+			if ( cutOn ) {
+				const float mx = ( a[0] + b[0] + c[0] ) / 3.0f, my = ( a[1] + b[1] + c[1] ) / 3.0f;
+				if ( mx >= sh.cut[0] && mx <= sh.cut[2] && my >= sh.cut[1] && my <= sh.cut[3] )
+					continue;
+			}
 			// texel space: centre of texel i at x0 + (i + 0.5) T
 			const double ax = ( a[0] - t.x0 ) / t.T - 0.5, ay = ( a[1] - t.y0 ) / t.T - 0.5;
 			const double bx = ( b[0] - t.x0 ) / t.T - 0.5, by = ( b[1] - t.y0 ) / t.T - 0.5;
@@ -971,16 +1050,23 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 	if ( regrid || t.sig == 0 || --t.checkIn <= 0 ) {
 		t.checkIn = 16;
 		std::vector<const Shape *> shapes;
+		std::vector<char> isObj;
 		quint64 sig = 0;
 		t.objOn = wwShadowPar( WwParObjLod );
-		collectTerrain( scene, shapes, sig, t.objOn, t.objLod );
+		if ( t.objOn )
+			objLodCut( scene, t.objCut, t.objReach );
+		collectTerrain( scene, shapes, isObj, sig, t.objOn, t.objLod, t.objSkipped, t.objCut );
 		sig ^= quint64( std::llround( t.x0 ) ) * 31ull ^ quint64( std::llround( t.y0 ) ) * 17ull ^ quint64( t.N );
 		if ( sig != t.sig ) {
 			t.sig = sig;
 			t.src.clear();
 			t.src.reserve( shapes.size() );
-			for ( const Shape * sh : shapes )
+			for ( size_t k = 0; k < shapes.size(); k++ ) {
+				const Shape * sh = shapes[k];
 				t.src.push_back( { sh->worldTrans(), sh->verts, sh->triangles } );
+				if ( isObj[k] )
+					std::copy( t.objCut, t.objCut + 4, t.src.back().cut );
+			}
 			t.setShapes = int( shapes.size() );
 			t.needRaster = true;
 		}
@@ -1137,7 +1223,11 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 			+ j.prevOut.size() * 2 + j.prevNear.size() * 2 ) / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
 		.arg( t.Nn > 0 ? QStringLiteral( "%1x%2@%3(%4,%5)" ).arg( t.Nn ).arg( t.Nn ).arg( t.nT ).arg( t.nx0, 0, 'f', 0 ).arg( t.ny0, 0, 'f', 0 )
 			: QStringLiteral( "off" ) )
-		.arg( t.objOn ? QString::number( t.objLod ) : QStringLiteral( "off" ) ).arg( double( t.strength ), 0, 'f', 3 )
+		.arg( t.objOn ? QStringLiteral( "%1 objlod_skipped=%2 objlod_cut=%3" ).arg( t.objLod ).arg( t.objSkipped )
+			.arg( t.objCut[0] <= t.objCut[2] ? QStringLiteral( "%1,%2..%3,%4(reach %5)" ).arg( double( t.objCut[0] ), 0, 'f', 0 )
+				.arg( double( t.objCut[1] ), 0, 'f', 0 ).arg( double( t.objCut[2] ), 0, 'f', 0 ).arg( double( t.objCut[3] ), 0, 'f', 0 )
+				.arg( t.objReach, 0, 'f', 0 ) : QStringLiteral( "none" ) )
+			: QStringLiteral( "off" ) ).arg( double( t.strength ), 0, 'f', 3 )
 		.arg( t.blended ? 1 : 0 );
 }
 
