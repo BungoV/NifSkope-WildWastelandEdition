@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <memory>
 
 #ifdef Q_OS_WIN32
 #include <windows.h>
@@ -62,13 +63,27 @@ QThreadPool & forPool()
 	return pool;
 }
 
+/*! lane BAKESPEED2: the pool of lodgenParallelForOuter. Its threads are NOT generator workers, so a
+ *  lodgenParallelFor inside one fans out on forPool(); forPool tasks never wait, so the two cannot deadlock. */
+QThreadPool & outerPool()
+{
+	static QThreadPool pool;
+	static const bool armed = []() {
+		pool.setMaxThreadCount( qMax( 2, QThread::idealThreadCount() ) );
+		pool.setExpiryTimeout( -1 );
+		return true;
+	}();
+	Q_UNUSED( armed )
+	return pool;
+}
+
 //! One share of a parallel-for, run on a pooled thread.
 class ForTask final : public QRunnable
 {
 public:
 	ForTask( int n, std::atomic<int> * next, const std::function<void( int )> * f,
-		QSemaphore * done )
-		: total( n ), cursor( next ), fn( f ) , finished( done )
+		QSemaphore * done, bool asWorker = true )
+		: worker( asWorker ), total( n ), cursor( next ), fn( f ) , finished( done )
 	{
 		setAutoDelete( true );
 	}
@@ -76,7 +91,9 @@ public:
 	void run() override
 	{
 		{
-			LodgenWorkerScope scope;
+			std::unique_ptr<LodgenWorkerScope> scope;
+			if ( worker )
+				scope.reset( new LodgenWorkerScope );
 			for ( ;; ) {
 				const int i = cursor->fetch_add( 1 );
 				if ( i >= total )
@@ -88,6 +105,7 @@ public:
 	}
 
 private:
+	bool worker;
 	int total;
 	std::atomic<int> * cursor;
 	const std::function<void( int )> * fn;
@@ -229,6 +247,27 @@ void lodgenParallelFor( int n, const std::function<void( int )> & f, int cap )
 		}
 	}
 	// nothing returns until every share has finished with `f` and with `next`
+	done.acquire( workers - 1 );
+}
+
+void lodgenParallelForOuter( int n, const std::function<void( int )> & f )
+{
+	const int t = lodgenThreadCount();
+	if ( n <= 0 || t <= 1 || tlsInWorker || lodgenBakeSpeedRed() ) {
+		lodgenParallelFor( n, f );
+		return;
+	}
+	const int workers = qMin( t, n );
+	std::atomic<int> next{ 0 };
+	QSemaphore done;
+	for ( int w = 0; w < workers - 1; w++ )
+		outerPool().start( new ForTask( n, &next, &f, &done, false ) );
+	for ( ;; ) {
+		const int i = next.fetch_add( 1 );
+		if ( i >= n )
+			break;
+		f( i );
+	}
 	done.acquire( workers - 1 );
 }
 
