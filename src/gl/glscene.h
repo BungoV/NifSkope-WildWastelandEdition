@@ -413,6 +413,9 @@ public:
 	//! Screen-space refraction preview toggle (lighting options)
 	bool showRefraction = true;
 
+	//! lane VANILLADEF1: fo4_default's material-editor BRDF (GGX, F0 0.04, 1 - F); off = the upstream law
+	bool editorBrdf = false;
+
 	// --- screen-space refraction preview (SLSF1_Refraction) ---
 	unsigned int refractionTexId = 0;   //!< copy of the framebuffer behind the shape
 	unsigned int refractionFbo = 0;
