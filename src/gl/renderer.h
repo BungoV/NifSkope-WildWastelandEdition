@@ -57,6 +57,15 @@ typedef unsigned int GLuint;
 
 //! lane PERF1: the scene-global setters run once per program inside an armed pass (Scene::drawShapes)
 void wwSetupMemoArm( bool on );
+/* lane PERF2FIX1: the obscurance/reflection opaque passes skip a sorted shape whose last draw (last frame) wrote
+ * nothing there: blended or not cell-lit. NewFrame once per obscurance pass; Arm around the sorted draws */
+void wwOpaqueCutNewFrame();
+void wwOpaqueCutArm( bool on, const char * pass );
+bool wwOpaqueCutChecking();	// WW_CELL_OPAQUE_CUT_CHECK=1 (gates): draw all, count the skips that would have written
+bool wwOpaqueCutArmed();
+bool wwOpaqueCutSkips( const Shape * s );
+void wwOpaqueCutSaw( bool opaque );	// the pass's own verdict (wwCellAoDraw / wwCellSsrDraw), for the check
+void wwOpaqueCutCheckNote( bool predictedSkip, const QString & name );
 
 //! Manages rendering and shaders
 class Renderer : public QObject, public NifSkopeOpenGLContext

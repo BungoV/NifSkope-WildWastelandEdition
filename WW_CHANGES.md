@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane PERF2FIX1 (2026-10-22, branch perf2fix1-20261022): PERF2's opaque cuts made exact
+
+- **Obscurance and reflection opaque cuts, per shape.** PERF2 skipped the whole sorted list in the obscurance and
+  reflection scene passes, but decals and composition materials that draw unblended with a cell program write normal
+  and depth there (facade speckle, max 8/255 in Concord, 15 in Goodneighbor). Now each shape records whether its last
+  draw wrote in such a pass; the sorted draws run again and skip only shapes whose record (at most 2 frames old) says
+  blended or not cell-lit. Draw order, particles and the masks the next draw inherits stay as before.
+  `WW_CELL_OPAQUE_CUT_CHECK=1` draws all and prints `opaque cut check (ao|ssr): ... wrong=N` plus the writing shapes.
+  Reds unchanged (`WW_CELL_AO_OPAQUE_RED=1`, `WW_CELL_SSR_OPAQUE_RED=1`).
+- **Temporal air gate.** Its camera-move check moves to Goodneighbor (lamps in the air); Concord at night has no
+  light in the froxels, so a stale history could not show there.
+
 ## Lane PERF2 (2026-10-21, branch perf2-20261021): cell view frame cost (timers first, then exact cuts)
 
 - **Timers.** Per-pass GPU ms gain sub-stages (air tile/inject/integrate, obscurance geometry/stages/GI, tone-map

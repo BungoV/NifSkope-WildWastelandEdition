@@ -141,6 +141,9 @@ public:
 	bool wwMaterialClearsBlend() const;
 	//! lane WATER1: a cell water surface; with Cell lights on it draws after the decals, before the blended shapes
 	bool wwWaterDraws() const;
+	//! lane PERF2FIX1: did this shape's last draw write in an opaque-only pass (cell program, no blend), and when
+	bool wwCutWrote = true;
+	unsigned wwCutStamp = 0;
 	//! lane SHADOW1: the shape alpha-tests (its depth-only caster would cast a solid card)
 	bool wwAlphaTested() const;
 	//! lane VOLAIR1: what the alpha-tested sun caster reads (the base map's property, the material alpha, the threshold)

@@ -178,6 +178,77 @@ int glSnapDiff( const GlSnap & a, const GlSnap & b, bool print )
 }
 }
 
+namespace {
+struct OpaqueCut
+{
+	unsigned serial = 1;
+	bool armed = false;
+	const char * pass = "";
+	long long drawn = 0, skips = 0, wrong = 0;	// check mode, this armed run
+	int saw = -1;
+	QSet<QString> writers;
+};
+OpaqueCut & opaqueCut()
+{
+	static OpaqueCut c;
+	return c;
+}
+}
+
+void wwOpaqueCutNewFrame()
+{
+	opaqueCut().serial++;
+}
+
+bool wwOpaqueCutChecking()
+{
+	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_OPAQUE_CUT_CHECK" ) == 1;
+	return on;
+}
+
+void wwOpaqueCutArm( bool on, const char * pass )
+{
+	OpaqueCut & c = opaqueCut();
+	if ( !on && c.armed && wwOpaqueCutChecking() )
+		std::fprintf( stderr, "opaque cut check (%s): sorted draws=%lld predicted skips=%lld wrong=%lld (must be 0)\n",
+			c.pass, c.drawn, c.skips, c.wrong );
+	c.armed = on;
+	c.pass = pass;
+	c.drawn = c.skips = c.wrong = 0;
+}
+
+bool wwOpaqueCutArmed()
+{
+	return opaqueCut().armed;
+}
+
+bool wwOpaqueCutSkips( const Shape * s )
+{
+	// a record from this or the last two passes' frames (an edit shows at most that late); none: draw
+	const OpaqueCut & c = opaqueCut();
+	return c.armed && s->wwCutStamp != 0 && c.serial - s->wwCutStamp <= 2 && !s->wwCutWrote;
+}
+
+void wwOpaqueCutSaw( bool opaque )
+{
+	opaqueCut().saw = opaque ? 1 : 0;
+}
+
+void wwOpaqueCutCheckNote( bool predictedSkip, const QString & name )
+{
+	OpaqueCut & c = opaqueCut();
+	const bool wrote = c.saw != 0;	// -1 (the pass never judged it): counted as written, never skippable
+	c.saw = -1;
+	c.drawn++;
+	c.skips += predictedSkip ? 1 : 0;
+	c.wrong += ( predictedSkip && wrote ) ? 1 : 0;
+	// the sorted shapes that write in the opaque pass (unblended, cell-lit): what the old full cut dropped
+	if ( wrote && c.writers.size() < 64 && !c.writers.contains( name ) ) {
+		c.writers.insert( name );
+		std::fprintf( stderr, "opaque cut writer (%s): '%s'\n", c.pass, qPrintable( name ) );
+	}
+}
+
 void wwSetupMemoArm( bool on )
 {
 	SetupMemo & m = setupMemo();
@@ -321,6 +392,11 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		glStencilMask( 0x03 );
 		glStencilFunc( GL_ALWAYS, lin ? 1 : 2, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	}
+	// lane PERF2FIX1: what this draw writes in the obscurance/reflection opaque passes (their own test, below)
+	if ( mesh && wwKind ) {
+		mesh->wwCutWrote = program && wwIsCellProgramName( program->name ) && !glIsEnabled( GL_BLEND );
+		mesh->wwCutStamp = opaqueCut().serial;
 	}
 	// lane AO1: the obscurance's opaque pass (normal + depth from the opaque cell-lit draws only), and every
 	// other cell-lit draw reads this frame's obscurance (celllights.h)

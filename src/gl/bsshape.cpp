@@ -343,8 +343,21 @@ void BSShape::drawShapes( NodeList * secondPass )
 			glEnable( GL_FRAMEBUFFER_SRGB );
 		else
 			glDisable( GL_FRAMEBUFFER_SRGB );
-		PassTime::CpuScope ptSetup( PassTime::ShapeSetup );	// lane PERF1
-		shader = context->setupProgram( this, shader );
+		/* lane PERF2FIX1: an opaque-only pass skips a sorted shape that wrote nothing there last frame, leaving the
+		 * masks and offset as its draw would (wwCellAoDraw / wwCellSsrDraw close both for it) */
+		const bool cutSkip = !scene->xRay && !isGhosted() && !wwCellDrawProbeOn() && wwOpaqueCutSkips( this );
+		if ( cutSkip && !wwOpaqueCutChecking() ) {
+			glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+			glDepthMask( GL_FALSE );
+			glDisable( GL_POLYGON_OFFSET_FILL );
+			return;
+		}
+		{
+			PassTime::CpuScope ptSetup( PassTime::ShapeSetup );	// lane PERF1
+			shader = context->setupProgram( this, shader );
+		}
+		if ( wwOpaqueCutChecking() && wwOpaqueCutArmed() )
+			wwOpaqueCutCheckNote( cutSkip, name );
 
 	} else if ( auto prog = context->useProgram( "selection.prog" ); prog ) {
 		if ( nif->getBSVersion() >= 151 )
