@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SKY2 (2026-10-23, branch sky2-20261023): fog slices and the grey sky fallback
+
+### FOGSLICE1: the air samples its own filled probe-irradiance volume (5a7c4a55)
+- Symptom (bungo, Concord night h22): horizontal fog bands that stay put in the world as the camera moves.
+- Cause: the air read the near-surface GI grid inside its valid shell and the weather's flat ambient outside it.
+  At the open Concord street at night they differ (probe GI 0.0099 vs flat 0.0182) and the shell's valid share
+  fell 1 -> 0 over one 70 u voxel, so the fog held world-anchored layers.
+- The gap is physical, not a bug: the bounce tracer gives the street ~1/3 of the open sky (6-axis mean 0.177 grid
+  vs 0.180 tracer). The defect was switching sources across one voxel.
+- Fix (Division deck D2 s55, D9 s61; fallback outside the box s57): a filled air volume over the GI grid's box
+  (3/4 probe spacing, <= 262144 voxels, RGBA16F, unit GiAir 44), sampled trilinearly by cell_volair only.
+- Concord c3 stepgate (largest bin-to-bin jump in J): old 0.0041 / 0.0029 / 0.0041 (h0/h37/h100);
+  new 0.0012 / 0.0008 / 0.0008, ramp 73-105 u at the street.
+- 1920x1026 GPU ms (median of 24): Concord 27.35 new / 28.23 old / 23.98 air off;
+  Memory Den 35.34 / 36.61 / 28.13. Volume 4.8 MB (Concord) / 8.6 MB (Memory Den), built in 59-95 ms.
+- Reds: WW_CELL_AIR_RED=noairvol (the shell stopgap), shellstep (the old law). Shader sweep 261 LINK OK.
+
+### SKYGREY1: no cube as the sky (dcd8f8c9)
+- Sky row off or the dome refused: the viewport's grey clear, the sun/moon/cloud rows still draw over it.
+- The cube stays a reflection/ambient input on surfaces. Red WW_LOOKDEV_RED=cubesky restores the cube backdrop.
+
 ## Lane FLYFIX1 (2026-10-23, branch flyfix1-20261023): flying the merged build
 - About 1 fps in the merged build: stderr was unbuffered, and the per-frame cull, previs, umbra and far LOD lines went
   out one character per write into the redirected log. stderr now has a 64 KB buffer flushed once a frame (and after
