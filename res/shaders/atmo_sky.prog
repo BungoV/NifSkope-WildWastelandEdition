@@ -1,0 +1,4 @@
+# lane ATMO1: the physical sky, a full-screen pass in the lookdev backdrop (src/gl/atmosphere.cpp).
+# No conditions: never picked for a shape; selected by name.
+
+shaders cell_ao.vert atmo_sky.frag
