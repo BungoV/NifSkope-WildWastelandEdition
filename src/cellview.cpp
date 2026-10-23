@@ -16,6 +16,8 @@ BSD License - see nifskope.h
 #include "cellsplat.h"		// lane CELLVIEW4
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
+#include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
+#include "cellweapon.h"		// lane MISS1 (GAPLOOK2)
 #include "cellcable.h"		// lane CABLES1
 #include "celldecal.h"		// lane PLACED1
 #include "esmdata.h"
@@ -2282,6 +2284,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	QHash<quint32, bool> lightStartOff;	// lane GAPFIX1: each placed light's start state, its enable parent's included
 	std::vector<CellDecalRef> decalRefs;   // lane PLACED1: placed decals, projected after the weld
 	CellActors actors( world, dataRoot );  // lane PLACED1: placed actors, built at rest
+	CellWeapons weapons( world, dataRoot );  // lane MISS1 (GAPLOOK2): placed weapons with their default parts
 	int actorPlacements = 0;
 	QHash<quint32, EsmRefr> primRefs;	// lane HEMI1: the refs carrying a primitive (a light's LightBoxLink target)
 	/* lane MISS1: a reference with an enable parent starts in the PARENT's state, inverted when it is
@@ -2532,7 +2535,35 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		placements.append( out );
 	};
 
-	const QVector<EsmRefr> actorRefs = spec.interior ? actors.references() : QVector<EsmRefr>();   // lane PLACED1
+	QVector<EsmRefr> actorRefs;   // lane PLACED1
+	if ( spec.interior ) {
+		actorRefs = actors.references();
+	} else if ( wwLookOn( WwLook::ActorsOutdoors ) ) {
+		// lane GAPLOOK2: the block's own cells, then the persistent cell's actors standing in the block
+		for ( int y = y0; y <= y1; y++ )
+			for ( int x = x0; x <= x1; x++ )
+				actorRefs += actors.referencesIn( world.cellChildGroups( x, y ) );
+		const float box[4] = { float( x0 ) * CELL_UNITS, float( y0 ) * CELL_UNITS, float( x1 + 1 ) * CELL_UNITS,
+			float( y1 + 1 ) * CELL_UNITS };
+		actorRefs += actors.referencesIn( world.persistentChildGroups(), box );
+	}
+	// red WW_CELL_ACTORS_OUT_RED=lift (read per build): outdoor actors stand 256 units up
+	const float actorLift = !spec.interior && wwEnvStr( "WW_CELL_ACTORS_OUT_RED" ) == QLatin1String( "lift" ) ? 256.0f : 0.0f;
+	auto pushActor = [&]( const EsmRefr & r, int cellX, int cellY ) {
+		Placement out;
+		if ( !actors.place( r, startsDisabled( r ) && !spec.showDisabled, out.actorKey, out.scale ) )
+			return;
+		out.base = r.base;
+		out.pos = Vector3( r.pos[0], r.pos[1], r.pos[2] + actorLift );
+		out.rot.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+		out.ref = r.formID;
+		out.cellX = cellX;
+		out.cellY = cellY;
+		for ( int k = 0; k < 3; k++ )
+			out.storedRot[k] = r.rot[k];
+		placements.append( out );
+		actorPlacements++;
+	};
 	// lane MISS1: every reference's enable facts, before the first one is placed (a parent may come later)
 	{
 		auto note = [&]( const QVector<EsmRefr> & refs ) {
@@ -2556,6 +2587,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						note( world.refrs( x, y ) );
 			note( world.persistentRefrsIn( float( fx0 ) * CELL_UNITS, float( fy0 ) * CELL_UNITS,
 				float( fx1 + 1 ) * CELL_UNITS, float( fy1 + 1 ) * CELL_UNITS ) );
+			note( actorRefs );   // lane GAPLOOK2: outdoor actors (empty with the row off)
 		}
 	}
 
@@ -2573,19 +2605,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			pushRefr( r, 0, 0, false );
 		/* lane PLACED1: the placed actors. They are not REFRs: they stay out of the reference
 		 * list, the REFR counts and the placement dump, and have their own census line. */
-		for ( const EsmRefr & r : actorRefs ) {
-			Placement out;
-			if ( !actors.place( r, startsDisabled( r ) && !spec.showDisabled, out.actorKey, out.scale ) )
-				continue;
-			out.base = r.base;
-			out.pos = Vector3( r.pos[0], r.pos[1], r.pos[2] );
-			out.rot.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
-			out.ref = r.formID;
-			for ( int k = 0; k < 3; k++ )
-				out.storedRot[k] = r.rot[k];
-			placements.append( out );
-			actorPlacements++;
-		}
+		for ( const EsmRefr & r : actorRefs )
+			pushActor( r, 0, 0 );
 	} else {
 		for ( int y = y0; y <= y1; y++ ) {
 			for ( int x = x0; x <= x1; x++ ) {
@@ -2626,6 +2647,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				pushRefr( r, cx, cy, true );
 			}
 		}
+		// lane GAPLOOK2: outdoor actors, as the interior's (not REFRs: their own census line)
+		for ( const EsmRefr & r : actorRefs )
+			pushActor( r, int( std::floor( r.pos[0] / CELL_UNITS ) ), int( std::floor( r.pos[1] / CELL_UNITS ) ) );
 	}
 
 	/* Per-cell counts are a WALK of the reference table, taken once here, after
@@ -3396,9 +3420,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	for ( const Placement & p : placements ) {
 		const EsmLodBase & lb = world.lodBase( p.base );
 		const bool isActor = !p.actorKey.isEmpty();   // lane PLACED1
+		const bool isWeap = !isActor && !p.cable && !lb.model.isEmpty() && weapons.wants( p.base );   // lane MISS1 (GAPLOOK2)
 		// lane CABLES1: each cable's tube is its own (the key names the reference)
 		const QString model = isActor ? p.actorKey
-			: p.cable ? QStringLiteral( "cable|%1" ).arg( p.ref, 8, 16, QLatin1Char( '0' ) ) : lb.model;
+			: p.cable ? QStringLiteral( "cable|%1" ).arg( p.ref, 8, 16, QLatin1Char( '0' ) )
+			: isWeap ? QStringLiteral( "weap|%1" ).arg( p.base, 8, 16, QLatin1Char( '0' ) ) : lb.model;
 		if ( model.isEmpty() ) {
 			skippedByType[CellPickTable::typeName( lb.type )]++;
 			continue;
@@ -3464,6 +3490,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			bool okAhead = false;   // lane SPEED1: the answer read ahead, else the load as before
 			const bool okLoad = p.cable ? cableBuild( p, &shapes )
 				: isActor ? actors.shapes( model, &shapes )
+				: isWeap ? weapons.shapes( p.base, &shapes )
 				: modelsAhead.take( model, subst, &shapes, &okAhead ) ? okAhead : refsRed != "root"
 				? lodgenNativeLoadModelPlaced( const_cast<QString *>( &dataRoot ), model, subst, &shapes )
 				: subst
@@ -6331,6 +6358,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 		s << cellDecalCensusLine( decalResult );   // lane PLACED1
 		s << actors.censusLine();
+		s << weapons.censusLine();   // lane MISS1 (GAPLOOK2)
 		actors.dump( QString::fromLocal8Bit( wwEnv( "WW_CELL_ACTOR_DUMP" ) ) );
 		s << "  buckets over 65,536 vertices " << bucketsWide << " (largest " << qulonglong( bucketMaxVerts )
 		  << "), shapes drawn with their own vertex colors " << shapesVertexColor

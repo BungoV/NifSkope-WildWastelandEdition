@@ -225,6 +225,7 @@ HEADERS += \
 	src/gl/lookdevstage.h \
 	src/gl/sunshadow.h \
 	src/gl/shadowset.h \
+	src/gl/skyephem.h \
 	src/gl/gametaa.h \
 	src/gl/campath.h \
 	src/gl/celllights.h \
@@ -399,6 +400,7 @@ HEADERS += \
 	src/probeplace.h \
 	src/cellrefs.h \
 	src/cellactor.h \
+	src/cellweapon.h \
 	src/cellcable.h \
 	src/celldecal.h \
 	src/aovolume.h \
@@ -699,6 +701,7 @@ SOURCES += \
 	src/probeplace.cpp \
 	src/cellrefs.cpp \
 	src/cellactor.cpp \
+	src/cellweapon.cpp \
 	src/cellcable.cpp \
 	src/celldecal.cpp \
 	src/aovolume.cpp \

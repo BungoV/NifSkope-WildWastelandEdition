@@ -842,6 +842,13 @@ void CellWorkspacePanel::buildUi()
 	for ( int k = 0; k < lookActions.size(); k++ )
 		connect( lookActions.at( k ), &QAction::toggled, this, [this, k]( bool on ) {
 			wwLookSet( WwLook( k ), on );
+			if ( wwLookReopens( WwLook( k ) ) && !syncing && !g_path.isEmpty() ) {	// lane GAPLOOK2: built when the cell opens
+				g_over = g_spec;
+				g_haveOverrides = true;
+				say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+				emit reopenRequested( g_path );
+				return;
+			}
 			if ( glView )
 				glView->update();
 		} );

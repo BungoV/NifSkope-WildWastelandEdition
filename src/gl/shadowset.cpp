@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
 #include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
+#include "gl/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
 #include "gl/gametaa.h"
 #include "gl/cellssr.h"		// the cell view's shared opaque pass (contact shadows read its depth)
 #include "gl/glnode.h"
@@ -1347,6 +1348,20 @@ void wwSunPathSetMode( int mode )
 
 // ---- (D) the sun ----
 
+namespace {
+// lane EPHEM1: the game's date at Boston; red (read per call) june = the date forced to 21 June (a higher sun)
+wwephem::Date ephemDate( double hour, double gameDay, double & lon )
+{
+	lon = wwephem::kBostonLon;
+	wwephem::Date d = wwephem::dateFromGameDay( gameDay, hour );
+	if ( wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" ) ) {
+		d.month = 6;
+		d.day = 21;
+	}
+	return d;
+}
+}	// namespace
+
 double wwSunPathReal( double hour, double gameDay, double out[3] )
 {
 	const SetState & s = ss();
@@ -1356,6 +1371,14 @@ double wwSunPathReal( double hour, double gameDay, double out[3] )
 		out[1] = std::cos( az ) * std::cos( el );
 		out[2] = std::sin( el );
 		return s.pinElev;
+	}
+	if ( wwLookOn( WwLook::Ephemeris ) ) {
+		// lane EPHEM1: FO4CS Solar's NOAA sun on the game's date
+		double lon;
+		const wwephem::Date d = ephemDate( hour, gameDay, lon );
+		const wwephem::Body b = wwephem::sun( d, wwephem::kBostonLat, lon );
+		std::copy( b.dir, b.dir + 3, out );
+		return b.elevDeg;
 	}
 	// the game starts on 23 October (day 296 of the year); solar time = the game hour
 	const double n = std::fmod( 296.0 + std::floor( std::max( gameDay, 0.0 ) ), 365.0 ) + 1.0;
@@ -1422,6 +1445,33 @@ bool wwSunPathApply( double hour, double gameDay, float sunDir[3], float disc[3]
 	s.sunLast = QStringLiteral( "real elev=%1 shaded_elev=%2 az=%3 engine_elev=%4%5" ).arg( e, 0, 'f', 3 )
 		.arg( s.lastElevShaded, 0, 'f', 3 ).arg( std::atan2( r[0], r[1] ) / kDeg, 0, 'f', 3 ).arg( s.lastElevEngine, 0, 'f', 3 )
 		.arg( s.sunPin ? QStringLiteral( " (pinned)" ) : QString() );
+	double m[3], el = 0.0, lit = 0.0;
+	if ( wwSkyMoonReal( hour, gameDay, m, &el, &lit ) ) {
+		double lon;
+		const wwephem::Date d = ephemDate( hour, gameDay, lon );
+		s.sunLast += QStringLiteral( " ephem date=%1-%2-%3 moon_elev=%4 moon_az=%5 elong=%6 lit=%7" ).arg( d.year )
+			.arg( d.month, 2, 10, QChar( '0' ) ).arg( d.day, 2, 10, QChar( '0' ) )
+			.arg( std::asin( std::clamp( m[2], -1.0, 1.0 ) ) / kDeg, 0, 'f', 3 ).arg( std::atan2( m[0], m[1] ) / kDeg, 0, 'f', 3 )
+			.arg( el, 0, 'f', 2 ).arg( lit, 0, 'f', 3 );
+	}
+	return true;
+}
+
+bool wwSkyMoonReal( double hour, double gameDay, double dir[3], double * elongDeg, double * litFraction )
+{
+	if ( ss().sunPath != 1 || !wwLookOn( WwLook::Ephemeris ) )
+		return false;
+	double lon;
+	const wwephem::Date d = ephemDate( hour, gameDay, lon );
+	const wwephem::Body b = wwephem::moon( d, wwephem::kBostonLat, lon );
+	if ( !b.valid )
+		return false;
+	std::copy( b.dir, b.dir + 3, dir );
+	const double el = wwephem::elongationDeg( b.julianDay );
+	if ( elongDeg )
+		*elongDeg = el;
+	if ( litFraction )
+		*litFraction = wwephem::illuminatedFraction( el );
 	return true;
 }
 

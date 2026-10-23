@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "gl/atmosphere.h"	// lane ATMO1: the physical sky
 #include "gl/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
+#include "gl/skyephem.h"	// lane EPHEM1: the real moon's phase texture
 #include "gl/sunshadow.h"
 #include "model/nifmodel.h"
 
@@ -834,7 +835,13 @@ float wwLookdevMoonShadowTerm( bool invertClear, QString * why )
 			*why = QStringLiteral( "moonsky=0(no moons)" );
 		return 0.0f;
 	}
-	const float lit = std::fabs( float( phase ) - 4.0f ) / 4.0f;
+	float lit = std::fabs( float( phase ) - 4.0f ) / 4.0f;
+	{
+		// lane EPHEM1: the real moon's lit fraction, and none while it is under the horizon
+		double md[3], mlit = 0.0;
+		if ( wwSkyMoonReal( s.hour, s.gameDay, md, nullptr, &mlit ) )
+			lit = md[2] > 0.0 ? float( mlit ) : 0.0f;
+	}
 	const WwSkyClock c = wwSkyClock( s.hour, s.tnam, s.gmst );
 	float alpha = 0.0f;
 	if ( moons & 0x80 )
@@ -1473,7 +1480,18 @@ void drawMoon( Scene * scene, const SkyFrame & f, float mul, QStringList & drew 
 		return;
 	}
 	const unsigned char moons = s.clim.tnam[5];
-	const int phase = wwMoonPhase( s.gameDay, moons );
+	// lane EPHEM1: the real moon (row "Real sun and moon" + Sun Path Real): its own place, its phase from the elongation
+	double md[3], mel = 0.0;
+	const bool real = wwSkyMoonReal( s.hour, s.gameDay, md, &mel, nullptr );
+	const int phase = real ? wwephem::phaseIndex( mel ) : wwMoonPhase( s.gameDay, moons );
+	float realPos[3];
+	if ( real ) {
+		const float * p = f.c.sunPos;
+		const float len = std::sqrt( p[0] * p[0] + p[1] * p[1] + p[2] * p[2] );
+		for ( int k = 0; k < 3; k++ )
+			realPos[k] = float( md[k] ) * ( len > 1e-3f ? len : std::fabs( s.gmst.sunX ) );
+	}
+	const float * moonPos = real ? realPos : f.c.sunPos;
 	const bool full = mul >= 1.0f;
 	struct M { unsigned char bit; const char * name; float size, fs, fe; };
 	const M list[2] = { { 0x80, "masser", s.gmst.masserSize, s.gmst.masserFadeStart, s.gmst.masserFadeEnd },
@@ -1483,7 +1501,7 @@ void drawMoon( Scene * scene, const SkyFrame & f, float mul, QStringList & drew 
 		if ( !( moons & m.bit ) )
 			continue;
 		any = true;
-		const float alpha = wwMoonAlpha( f.c, s.gmst, m.fs, m.fe );
+		const float alpha = ( real && md[2] < 0.0 ) ? 0.0f : wwMoonAlpha( f.c, s.gmst, m.fs, m.fe );
 		const float shadowA = std::min( alpha, f.c.starsAlpha );
 		const bool black = f.moonGlare[0] <= 0.0f && f.moonGlare[1] <= 0.0f && f.moonGlare[2] <= 0.0f;
 		if ( full && ( black || ( alpha <= 0.0f && shadowA <= 0.0f ) ) ) {
@@ -1496,18 +1514,19 @@ void drawMoon( Scene * scene, const SkyFrame & f, float mul, QStringList & drew 
 		for ( int c = 0; c < 3; c++ )
 			shadowTint[c] = f.up[c] * f.skyScale;
 		const QString sh = QStringLiteral( "textures/sky/moonshadow.dds" );
-		const bool shOk = drawBill( scene, f.c.sunPos, half, sh, shadowTint, full ? shadowA : mul, false );
+		const bool shOk = drawBill( scene, moonPos, half, sh, shadowTint, full ? shadowA : mul, false );
 		const QString tex = QString( "textures/sky/%1_%2.dds" ).arg( QString::fromLatin1( m.name ),
 			QString::fromLatin1( wwMoonPhaseSuffix( phase ) ) );
-		// lane SKYA (NIGHT1): the disc through the air toward it (Moon Phase and Stars on; else 1, today's disc)
+		// lane SKYA (NIGHT1): the disc through the air toward it (Moon Phase and Stars on; else 1, today's disc); MERGE1023: toward moonPos (EPHEM1's real moon, else the game's)
 		float glare[3], ext[3];
-		const float ml = std::sqrt( f.c.sunPos[0] * f.c.sunPos[0] + f.c.sunPos[1] * f.c.sunPos[1] + f.c.sunPos[2] * f.c.sunPos[2] );
-		wwAtmoStarExtinction( ml > 0.0f ? f.c.sunPos[2] / ml : 1.0f, ext );
+		const float ml = std::sqrt( moonPos[0] * moonPos[0] + moonPos[1] * moonPos[1] + moonPos[2] * moonPos[2] );
+		wwAtmoStarExtinction( ml > 0.0f ? moonPos[2] / ml : 1.0f, ext );
 		for ( int c = 0; c < 3; c++ )
 			glare[c] = f.moonGlare[c] * ext[c];
-		if ( drawBill( scene, f.c.sunPos, half, tex, glare, full ? alpha : mul, false ) )
-			drew << QString( "moon:%1(alpha=%2,shadow=%3%4)" ).arg( tex, f3( full ? alpha : mul ), f3( full ? shadowA : mul ),
-				shOk ? QString() : QStringLiteral( ",no moonshadow.dds" ) );
+		if ( drawBill( scene, moonPos, half, tex, glare, full ? alpha : mul, false ) )
+			drew << QString( "moon:%1(alpha=%2,shadow=%3%4%5)" ).arg( tex, f3( full ? alpha : mul ), f3( full ? shadowA : mul ),
+				shOk ? QString() : QStringLiteral( ",no moonshadow.dds" ),
+				real ? QStringLiteral( ",real elev=%1 elong=%2" ).arg( std::asin( std::clamp( md[2], -1.0, 1.0 ) ) * 57.29577951308232, 0, 'f', 2 ).arg( mel, 0, 'f', 1 ) : QString() );
 		else
 			drew << QString( "moon:refused(%1 did not resolve)" ).arg( tex );
 	}

@@ -728,6 +728,25 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 	return out;
 }
 
+QVector<quint32> EsmWorld::cellChildGroups( int cx, int cy ) const
+{
+	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
+	if ( it == cellIndex.constEnd() )
+		return {};
+	QVector<quint32> out;
+	if ( it->childGroup )
+		out.append( it->childGroup );
+	return out + it->extraGroups;
+}
+
+QVector<quint32> EsmWorld::persistentChildGroups() const
+{
+	QVector<quint32> out;
+	if ( persistentCellGroup )
+		out.append( persistentCellGroup );
+	return out + persistentExtraGroups;
+}
+
 QString EsmWorld::cellEditorId( int cx, int cy ) const
 {
 	auto it = cellIndex.constFind( qMakePair( cx, cy ) );

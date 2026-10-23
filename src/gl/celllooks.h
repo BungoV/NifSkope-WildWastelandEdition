@@ -17,6 +17,9 @@ enum class WwLook : int
 	TerrMoonSky,		// TERRSHADOWLEFT: the moon's terrain shadow from phase, moon fade and sky clearness (WW_SHADOW_MOONSKY)
 	TerrPbrDim,			// TERRSHADOWLEFT: terrain shadow dims the PBR path's ambient + environment (WW_SHADOW_PBRDIM)
 	BloomMip,			// BLOOMMIP: the bloom's blur width chosen per pixel by the fog it crosses (WW_CELL_BLOOM_PERPIX)
+	Ephemeris,			// EPHEM1 (GAPLOOK2): Sun Path Real uses FO4CS Solar's sun + the real moon, phase, date (WW_SKY_EPHEM)
+	ActorsOutdoors,		// PLACED1 (GAPLOOK2): placed actors in exterior cells, not only interiors (WW_CELL_ACTORS_OUT)
+	WeaponParts,		// MISS1 (GAPLOOK2): placed weapons get their default mod parts on the connect points (WW_CELL_WEAP_PARTS)
 	Count
 };
 
@@ -25,6 +28,8 @@ const char * wwLookLabel( WwLook l );
 const char * wwLookPinName( WwLook l );
 bool wwLookOn( WwLook l );
 bool wwLookPinned( WwLook l );
+//! true when the look is read while the cell is built: the menu row reopens the cell
+bool wwLookReopens( WwLook l );
 void wwLookSet( WwLook l, bool on );
 
 /* LIGHTSYS-3: the lamp-shadow budget. 0 Off (the 16 nearest shadow lights, as before); else at most N slots, ranked

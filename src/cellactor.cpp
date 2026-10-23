@@ -543,6 +543,11 @@ CellActors::~CellActors()
 
 QVector<EsmRefr> CellActors::references()
 {
+	return referencesIn( d->world.interiorChildGroups() );
+}
+
+QVector<EsmRefr> CellActors::referencesIn( const QVector<quint32> & groups, const float * box )
+{
 	QVector<EsmRefr> out;
 	ESMFile * esm = d->esm;
 	if ( !esm )
@@ -576,30 +581,34 @@ QVector<EsmRefr> CellActors::references()
 						ref.layer = esm->mapFormID( *r, u32At( p ) );
 					}
 				}
-				if ( ref.base ) {
-					const ESMFile::ESMRecord * br = esm->findRecord( ref.base );
-					if ( br )
-						ref.baseType = br->type;
+				// lane GAPLOOK2: a worldspace's persistent cell spans the map; keep the block's actors only
+				const bool inBox = !box || ( ref.pos[0] >= box[0] && ref.pos[0] < box[2] && ref.pos[1] >= box[1] && ref.pos[1] < box[3] );
+				if ( inBox ) {
+					if ( ref.base ) {
+						const ESMFile::ESMRecord * br = esm->findRecord( ref.base );
+						if ( br )
+							ref.baseType = br->type;
+					}
+					CellActorRow row;
+					row.form = ref.formID;
+					row.base = ref.base;
+					row.dead = ( r->flags & 0x00000200 ) != 0;
+					for ( int k = 0; k < 3; k++ ) {
+						row.pos[k] = ref.pos[k];
+						row.rot[k] = ref.rot[k];
+					}
+					row.scale = ref.scale;
+					rowOf.insert( ref.formID, int( d->rows.size() ) );
+					d->rows.append( row );
+					out.append( ref );
 				}
-				CellActorRow row;
-				row.form = ref.formID;
-				row.base = ref.base;
-				row.dead = ( r->flags & 0x00000200 ) != 0;
-				for ( int k = 0; k < 3; k++ ) {
-					row.pos[k] = ref.pos[k];
-					row.rot[k] = ref.rot[k];
-				}
-				row.scale = ref.scale;
-				rowOf.insert( ref.formID, int( d->rows.size() ) );
-				d->rows.append( row );
-				out.append( ref );
 			}
 			if ( r->children )
 				walk( r->children );
 			id = r->next;
 		}
 	};
-	for ( quint32 g : d->world.interiorChildGroups() ) {
+	for ( quint32 g : groups ) {
 		const ESMFile::ESMRecord * gr = esm->findRecord( g );
 		if ( gr )
 			walk( gr->children );

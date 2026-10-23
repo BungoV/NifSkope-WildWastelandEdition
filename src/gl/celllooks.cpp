@@ -24,6 +24,9 @@ const LookRow kRows[] = {
 	{ "Moonlit terrain shadows", "WW/ShadowMoonSky" },
 	{ "PBR ambient in terrain shadow", "WW/ShadowPbrDim" },
 	{ "Bloom width in fog", "WW/CellBloomPerPixel" },
+	{ "Real sun and moon", "WW/SkyEphemeris" },
+	{ "Actors outdoors", "WW/CellActorsOutdoors" },
+	{ "Weapon mod parts", "WW/CellWeaponParts" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -77,6 +80,18 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_BLOOM_PERPIX" ).trimmed() );
 		return p;
 	}
+	case WwLook::Ephemeris: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_SKY_EPHEM" ).trimmed() );
+		return p;
+	}
+	case WwLook::ActorsOutdoors: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_ACTORS_OUT" ).trimmed() );
+		return p;
+	}
+	case WwLook::WeaponParts: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WEAP_PARTS" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -100,6 +115,9 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::TerrMoonSky: return "WW_SHADOW_MOONSKY";
 	case WwLook::TerrPbrDim: return "WW_SHADOW_PBRDIM";
 	case WwLook::BloomMip: return "WW_CELL_BLOOM_PERPIX";
+	case WwLook::Ephemeris: return "WW_SKY_EPHEM";
+	case WwLook::ActorsOutdoors: return "WW_CELL_ACTORS_OUT";
+	case WwLook::WeaponParts: return "WW_CELL_WEAP_PARTS";
 	default: return "";
 	}
 }
@@ -107,6 +125,11 @@ const char * wwLookPinName( WwLook l )
 bool wwLookPinned( WwLook l )
 {
 	return !pinOf( l ).isEmpty();
+}
+
+bool wwLookReopens( WwLook l )
+{
+	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts;
 }
 
 bool wwLookOn( WwLook l )
