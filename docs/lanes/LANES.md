@@ -117,6 +117,9 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | EXPO1 | exposure from sky brightness (needs ATMO1). S | BUILT, NOT LANDED 10-23 lane SKYA: skya-20261023 5ff72b1f; row Exposure From Sky, ships Off |
 | SKYGI1 | GI sky light from the ATMO1 sky-view table. M | BUILT, NOT LANDED 10-23 lane SKYA: skya-20261023 ef660d04; row GI Sky From Physical Sky, ships Off (Off = today's bake) |
 | ATMOCHECK1 | ATMO1 cross-check vs Bruneton 2017; optional mode keeping the vanilla weather tint. S | BUILT, NOT LANDED 10-23 lane SKYA: skya-20261023 8da41b2f; tests/spells/atmo_bruneton_check.py (3 gates PASS, red noozone fails); row Sky Color (Physical/Weather Tint), ships Physical |
+| CLOUD1 | cloud texture census -> per-weather cloud map driving the volume (atmores1/RESEARCH.md:615). S | ON HOLD (bungo 10-23 "We hold with these") |
+| CLOUD2 | volume clouds (Nubis 2015), Low keeps 2D layers; 0.5/0.8/1.5 ms Med/High/Ultra (RESEARCH.md:616). L | ON HOLD (bungo 10-23) |
+| CLOUD3 | cloud shadows + shafts in fog + GI shade; after CLOUD2 (RESEARCH.md:617). M | ON HOLD (bungo 10-23) |
 | SKYAROWS1 | SKYA live rows: notes/skya/rows_live.txt (43 rows: live/fresh pairs, the sky x fog x far LOD matrix at c3 + mem, reds, a GPU-ms cost row), exe release/snap_skya a9deff9a. S | PLANNED: next batch hold (no GUI in lane SKYA) |
 | EXPO2 | Exposure From Sky counts the sky pixels actually in view (EXPO1 takes the hemisphere mean for every non-cell pixel). S | PLANNED (lane SKYA follow-on) |
 | SKYGI2 | offline GL gate for SKYGI1: render the probes' 6-face physical-sky capture in the hidden context (atmo_lut_check.py style) and check its +Z cosine sum against the model's sky irradiance; the far-LOD bake's sky term (probefar.cpp) from the physical sky too. M | PLANNED (lane SKYA follow-on) |
