@@ -114,7 +114,8 @@ def main():
     red = a[a.index('--red') + 1] if '--red' in a else ''
     P = A.params()
     base = dict(atRay=tuple(P['ray']), atMieS=(P['mieS'],), atMieE=(P['mieE'],),
-                atOzone=(0.0, 0.0, 0.0) if red == 'noozone' else tuple(P['oz']), atG=(P['g'],))
+                atOzone=(0.0, 0.0, 0.0) if red == 'noozone' else tuple(P['oz']), atG=(P['g'],),
+                atHaze=(P['hazeE'], P['hazeH'], P['hazeMid']))
     g = Gl()
     fails = 0
 
@@ -136,6 +137,12 @@ def main():
     got = T[ys, xs]
     err = np.abs(got - ref).max()   # absolute: grazing texels are ~0
     gate('transmittance', err < 0.01, 'max |GPU - exact| over 64 texels = %.5f (< 0.01)' % err)
+    # the same with the Koschmieder fixture's haze layer (3 km visibility fog, 143 m scale height)
+    Ph = A.params(haze=A.haze_from_fog(3000.0 / A.UNIT_M, 1.0))
+    Th = g.draw(pt, tfb, tw, th, dict(base, atHaze=(Ph['hazeE'], Ph['hazeH'], Ph['hazeMid'])), [])
+    err = np.abs(Th[ys, xs] - A.transmittance(Ph, r, mu, 4000)).max()
+    gate('transmittance-haze', err < 0.01, 'max |GPU - exact| with the haze layer = %.5f (< 0.01)' % err)
+    g.draw(pt, tfb, tw, th, base, [])
 
     # 2. multiple scattering
     mw = mh = 32

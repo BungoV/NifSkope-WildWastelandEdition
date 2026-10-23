@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/gametaa.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1
+#include "gl/atmosphere.h"	// lane ATMO1
 #include "gl/cellssgi.h"	// lane SSGI1
 #include "esmweather.h"
 #include "harnesswindow.h"
@@ -156,6 +157,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		row( label, box, true );
 	};
 	liveCheck( skyBox, "lookdevSky", tr( "Sky" ), wwLookdevSky() );
+	// lane ATMO1: the physical sky in place of the dome, Off / Low / Medium / High / Ultra, ships Off
+	physicalSkyBox = new QComboBox( tree );
+	physicalSkyBox->setObjectName( QStringLiteral( "physicalSky" ) );
+	physicalSkyBox->addItems( { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) } );
+	physicalSkyBox->setCurrentIndex( std::clamp( wwAtmoTier(), 0, 4 ) );
+	wwMatchFieldStyle( physicalSkyBox );
+	row( tr( "Physical Sky" ), physicalSkyBox, true );
 	liveCheck( cloudsBox, "lookdevClouds", tr( "Clouds" ), wwLookdevClouds() );
 	liveCheck( sunBox, "lookdevSun", tr( "Sun" ), wwLookdevSun() );
 	// lane TERRSHADOW1: Engine (the sky clock's arc) or Real (Boston's solar path); ships Engine
@@ -329,6 +337,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		} );
 	};
 	liveTier( sunPathBox, &wwSunPathSetMode );
+	liveTier( physicalSkyBox, &wwAtmoSetTier );	// lane ATMO1
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
 	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );
@@ -396,7 +405,8 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( skyBox ), static_cast<QWidget *>( cloudsBox ), static_cast<QWidget *>( sunBox ),
 			static_cast<QWidget *>( moonBox ), static_cast<QWidget *>( gameDayBox ),
 			static_cast<QWidget *>( fogBox ), static_cast<QWidget *>( shadowsBox ),
-			static_cast<QWidget *>( sunPathBox ), static_cast<QWidget *>( cascadeQualityBox ),
+			static_cast<QWidget *>( sunPathBox ), static_cast<QWidget *>( physicalSkyBox ),
+			static_cast<QWidget *>( cascadeQualityBox ),
 			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ),
 			static_cast<QWidget *>( shadowParBox ), static_cast<QWidget *>( shadowDistanceBox ) } )
 		if ( w )

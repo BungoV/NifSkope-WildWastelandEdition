@@ -15,23 +15,25 @@ UNIT_M = 0.0142875          # one game unit in meters (FO4: 70 units = 1 m)
 KOSCH = 3.912               # Koschmieder: -ln(0.02)
 
 
-def params(mie_scale=1.0, ozone=True, ms=True):
+def params(haze=(0.0, 1.0, 0.0), ozone=True, ms=True):
+    """haze = (ground extinction /km, scale height km, plateau top km): the weather fog's layer (haze_from_fog)"""
     return dict(ray=np.array([5.802, 13.558, 33.1]) * 1e-3, rayH=8.0,
-                mieS=3.996e-3 * mie_scale, mieE=4.40e-3 * mie_scale, mieH=1.2, g=0.8,
+                mieS=3.996e-3, mieE=4.40e-3, mieH=1.2, g=0.8, hazeE=haze[0], hazeH=haze[1], hazeMid=haze[2],
                 oz=(np.array([0.650, 1.881, 0.085]) * 1e-3) if ozone else np.zeros(3), ozC=25.0, ozW=15.0,
                 albedo=np.array([0.3, 0.3, 0.3]), ms=ms)
 
 
-def mie_scale_from_fog(far_units, maxv):
+def haze_from_fog(far_units, maxv, mid_units=0.0, range_units=10000.0):
     """The haze rung: the record's fog reaches `maxv` at Day/Night-Far; a fog that reaches the 2 % contrast threshold
     there is Koschmieder's visibility (sigma = 3.912 / V). The general form keeps the record's own Max:
-    sigma = -ln(1 - min(maxv, 0.98)) / Far. Rayleigh's share at 550 nm comes off; the rest is Mie (x Hillaire's base)."""
+    sigma = -ln(1 - min(maxv, 0.98)) / Far. The clear air's ground extinction (Rayleigh + Hillaire's Mie at 550 nm)
+    comes off; the rest is a haze layer: flat up to the fog's Far Height Mid, then e-folding over its Range."""
     if far_units <= 0 or maxv <= 0:
-        return 1.0
+        return (0.0, 1.0, 0.0)
     v_km = far_units * UNIT_M / 1000.0
     sigma = -math.log(1.0 - min(maxv, 0.98)) / v_km
-    mie = sigma - 13.558e-3
-    return float(np.clip(mie / 4.40e-3, 0.25, 400.0))
+    e = max(0.0, sigma - 13.558e-3 - 4.40e-3)
+    return (min(e, 50.0), max(0.02, range_units * UNIT_M / 1000.0), max(0.0, mid_units * UNIT_M / 1000.0))
 
 
 def medium(P, h):
@@ -39,9 +41,10 @@ def medium(P, h):
     dr = np.exp(-np.maximum(h, 0) / P['rayH'])
     dm = np.exp(-np.maximum(h, 0) / P['mieH'])
     do = np.maximum(0.0, 1.0 - np.abs(h - P['ozC']) / P['ozW'])
+    dh = np.exp(-np.maximum(h - P['hazeMid'], 0) / P['hazeH'])
     rayS = P['ray'] * dr[..., None]
-    mieS = P['mieS'] * dm[..., None] * np.ones(3)
-    ext = rayS + (P['mieE'] * dm)[..., None] + P['oz'] * do[..., None]
+    mieS = (P['mieS'] * dm + P['hazeE'] * (3.996 / 4.40) * dh)[..., None] * np.ones(3)
+    ext = rayS + (P['mieE'] * dm + P['hazeE'] * dh)[..., None] + P['oz'] * do[..., None]
     return rayS, mieS, ext
 
 
@@ -320,15 +323,15 @@ def main():
 
     # 2. Koschmieder: a weather whose fog reaches 0.98 at Day-Far 3 km has 2 % contrast at 3 km along the ground
     far_units = 3000.0 / UNIT_M
-    ms_haze = mie_scale_from_fog(far_units, 1.0) if red != 'nohaze' else 1.0
-    Ph = params(mie_scale=ms_haze)
+    hz = haze_from_fog(far_units, 1.0) if red != 'nohaze' else (0.0, 1.0, 0.0)
+    Ph = params(haze=hz)
     # horizontal path at 2 m: the curvature is negligible over 3 km
     rr = RB + 0.002
     t = np.linspace(0, 3.0, 3001)
     hh = np.sqrt(rr * rr + t * t) - RB
     ext = medium(Ph, hh)[2][:, 1]
     contrast = math.exp(-np.trapz(ext, t))
-    gate('koschmieder', abs(contrast - 0.02) < 0.002, 'contrast at Day-Far = %.4f (2 %% wanted), mie x%.1f' % (contrast, ms_haze))
+    gate('koschmieder', abs(contrast - 0.02) < 0.002, 'contrast at Day-Far = %.4f (2 %% wanted), haze %.3f /km over %.3f km' % (contrast, hz[0], hz[1]))
 
     # 3. multiple scattering vs the path tracer at sun 30 and 10 deg: zenith and the horizon at 90 deg azimuth
     psi = MsTable(P, 32, 32)

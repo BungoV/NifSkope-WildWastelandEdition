@@ -70,6 +70,7 @@ public:
 	QCheckBox * frameTimersBox = nullptr;	// lane PERF1
 	// lane TERRSHADOW1: the unified shadow set (gl/shadowset.h)
 	QComboBox * sunPathBox = nullptr;
+	QComboBox * physicalSkyBox = nullptr;	// lane ATMO1
 	QComboBox * cascadeQualityBox = nullptr;
 	QComboBox * contactShadowsBox = nullptr;
 	QComboBox * terrainShadowsBox = nullptr;

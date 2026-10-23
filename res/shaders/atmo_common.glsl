@@ -6,8 +6,9 @@ const float kRb = 6360.0;
 const float kRt = 6460.0;
 
 uniform vec3 atRay;	// Rayleigh scattering /km (5.802, 13.558, 33.1)e-3
-uniform float atMieS;	// Mie scattering /km x the haze scale
-uniform float atMieE;	// Mie extinction /km x the haze scale
+uniform float atMieS;	// Mie scattering /km (3.996e-3)
+uniform float atMieE;	// Mie extinction /km (4.40e-3)
+uniform vec3 atHaze;	// the weather fog's haze layer: ground extinction /km, scale height km, plateau top km
 uniform vec3 atOzone;	// ozone absorption /km (0.650, 1.881, 0.085)e-3; 0 under the red "noozone"
 uniform float atG;	// Mie Henyey-Greenstein g
 
@@ -21,9 +22,10 @@ void atMedium( float h, out vec3 rayS, out vec3 mieS, out vec3 ext )
 	float dr = exp( -h / kRayH );
 	float dm = exp( -h / kMieH );
 	float dz = max( 0.0, 1.0 - abs( h - 25.0 ) / 15.0 );
+	float dh = atHaze.x * exp( -max( h - atHaze.z, 0.0 ) / max( atHaze.y, 0.02 ) );
 	rayS = atRay * dr;
-	mieS = vec3( atMieS * dm );
-	ext = rayS + vec3( atMieE * dm ) + atOzone * dz;
+	mieS = vec3( atMieS * dm + dh * ( 3.996 / 4.40 ) );
+	ext = rayS + vec3( atMieE * dm + dh ) + atOzone * dz;
 }
 
 float atDistTop( float r, float mu )
