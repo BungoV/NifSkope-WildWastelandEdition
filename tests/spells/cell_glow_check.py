@@ -38,6 +38,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_lit_check import euler, record, walk  # noqa: E402  (the plugin walk only)
 
 
+def editor_marker(name):
+    """the game's rule (lane FXREST1): a node or shape whose name CONTAINS EditorMarker, any case, is removed
+    with everything under it (a shrub's 'VisibilityEditorMarker' too); a prefix test misses those."""
+    return 'editormarker' in name.lower()
+
+
 # ---- a minimal FO4 NIF reader (20.2.0.7, BS version 130): header, node tree, transforms, shape bounds
 def nif_read(path):
     b = open(path, 'rb').read()
@@ -144,9 +150,9 @@ def billboard_cards(path):
     for i, rec in info.items():
         if 'sphere' not in rec or rec.get('nverts', 0) == 0:
             continue
-        chain, k, bb, marker = [i], parent.get(i), None, rec['name'].lower().startswith('editormarker')
+        chain, k, bb, marker = [i], parent.get(i), None, editor_marker(rec['name'])
         while k is not None:
-            if info.get(k, {}).get('name', '').lower().startswith('editormarker'):
+            if editor_marker(info.get(k, {}).get('name', '')):
                 marker = True
             if bb is None and info.get(k, {}).get('type') == 'NiBillboardNode':
                 bb = k

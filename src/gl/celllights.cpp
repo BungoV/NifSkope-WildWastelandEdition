@@ -3244,6 +3244,11 @@ void wwCellAoSetOn( bool on )
 	QSettings().setValue( QStringLiteral( "WW/CellAo" ), on );
 }
 
+bool wwCellAoPinned()
+{
+	return ao().pinned;
+}
+
 void wwCellAoPass( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )

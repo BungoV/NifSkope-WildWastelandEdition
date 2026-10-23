@@ -455,7 +455,7 @@ class Models:
                 continue
             b, marker = i, False
             for _ in range(64):
-                if name_of(b).lower().startswith('editormarker'):
+                if 'editormarker' in name_of(b).lower():
                     marker = True
                     break
                 if b not in parent:
