@@ -76,17 +76,17 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | GAPFIX-OPENCELLSORT | Open Cell sorts by extension only; an ESM-flagged .esp is misplaced (leftovers1/FINAL.md:445). S | RUNNING 10-23 01:50 helper GAPFIX1, branch gapfix1-20261023 on batch4 (gap sweep, GAPS_20261023.md; run order 1: defect) |
 | GAPFIX-FARTREE | sway replaces a Vertex_Alpha tree's opacity; sway only moves on repaint (farlod1/STATUS.md:73). S | RUNNING 10-23 01:50 helper GAPFIX1, branch gapfix1-20261023 on batch4 (gap sweep, GAPS_20261023.md; run order 1: defect) |
 | GAPFIX-CELLSPIKE | 12.3 ms spike on cell crossing (bar 8). The reaper fix was never measured (cellstream1/FINAL.md:706). M | RUNNING 10-23 01:50 helper GAPFIX1, branch gapfix1-20261023 on batch4 (gap sweep, GAPS_20261023.md; run order 1: defect) |
-| GAPTOOL-SHOWMENU | Show menu SSAO/Contact/SSGI/Bloom rows are dead placeholders: wire or remove (scenewindow.cpp:208, src). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| DECALDET1 | DECALDET1: decal bake byte-stable. S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| GAPTOOL-RC127LOCK | rc 127 kills leave no log line; ww_build releases the lock early (AUDIT_ledgers:43). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| HARNESSMIN1-SUNPATH | HARNESSMIN1: prove the live WW_SUNPATH. S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| GAPTOOL-CELLSTREAM1CHK | CELLSTREAM1 owed checks + streamed-vs-fixed gate + 2 reds (cellstream1/FINAL.md:715). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| GAPTOOL-VOLFIT1CHK | VOLFIT1 launch checks: space census, debug view, borderline-ruin picture (volfit1/FINAL.md:623). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| GAPTOOL-BOOTHLAMPS | light booth for oil lamp, grating barrel, candles (lightbooth1/FINAL.md:325). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| GAPTOOL-FXREST1MARKER | FXREST1 editor-marker substring rule in cell_fxlit_check.py:111. S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| GAPTOOL-OPENREDS | open gate reds: FARLOD1 g10 twig speckle, TERRBLEND1 far tone, SUNCELL1 g21 camera (AUDIT_ledgers:115). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| GAPTOOL-SANCSTABLE | Sanctuary picture not byte-stable on BEFORE exe (gical1/STATUS.md:140). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| DECK1 | DECK1: path-traced reference picture (prtp_next E5). L | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
+| GAPTOOL-SHOWMENU | Show menu SSAO/Contact/SSGI/Bloom rows are dead placeholders: wire or remove (scenewindow.cpp:208, src). S | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
+| DECALDET1 | DECALDET1: decal bake byte-stable. S | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
+| GAPTOOL-RC127LOCK | rc 127 kills leave no log line; ww_build releases the lock early (AUDIT_ledgers:43). S | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
+| HARNESSMIN1-SUNPATH | HARNESSMIN1: prove the live WW_SUNPATH. S | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
+| GAPTOOL-CELLSTREAM1CHK | CELLSTREAM1 owed checks + streamed-vs-fixed gate + 2 reds (cellstream1/FINAL.md:715). S | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
+| GAPTOOL-VOLFIT1CHK | VOLFIT1 launch checks: space census, debug view, borderline-ruin picture (volfit1/FINAL.md:623). S | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
+| GAPTOOL-BOOTHLAMPS | light booth for oil lamp, grating barrel, candles (lightbooth1/FINAL.md:325). S | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
+| GAPTOOL-FXREST1MARKER | FXREST1 editor-marker substring rule in cell_fxlit_check.py:111. S | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
+| GAPTOOL-OPENREDS | open gate reds: FARLOD1 g10 twig speckle, TERRBLEND1 far tone, SUNCELL1 g21 camera (AUDIT_ledgers:115). S | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
+| GAPTOOL-SANCSTABLE | Sanctuary picture not byte-stable on BEFORE exe (gical1/STATUS.md:140). S | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
+| DECK1 | DECK1: path-traced reference picture (prtp_next E5). L | RUNNING 10-23 02:10 helper GAPTOOL1, branch gaptool1-20261023 on batch4 (gap sweep; run order 2: tool/test) |
 | GAPPERF-BINDLESS | bindless textures + materials and per-draw data in one buffer (gpudriven1/FINAL.md:25). L | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
 | GAPPERF-AOWALK | AO half-res/temporal or deferred ambient: drop the AO scene walk (perf3/FINAL.md:115). M | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
 | GAPPERF-DSAUBO | DSA binds + lights/fog in uniform blocks, ~2.5 ms (perf3/FINAL.md:119). S | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
