@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GAPLOOK1 (2026-10-23, branch gaplook1-20261023): lamp-shadow budget, fog extras, contact tiers, moonlit terrain, bloom width
+
+Every item is its own Show-menu row with an env pin, live, and OFF = the look before this lane.
+- **Lamp shadow budget (LIGHTSYS-3):** Show > Lamp shadow budget (Off / 4 / 8 / 16), `WW_CELL_SHADOWBUDGET`. Only the
+  N most important lamps keep a shadow map, faded by camera distance so a demoted lamp never pops. Red `_RED=worst`.
+- **Fog light clusters (LIGHTSYS-4):** `WW_CELL_AIR_CLUSTERS`. The air reads the surface pass's light clusters instead
+  of its own CPU light list. Red `_RED=drop`.
+- **Fog multiple scattering / Ground fog burn-off (FOGEXTRAS):** `WW_CELL_AIR_MS` (the sun's scattering octaves; red
+  `_RED=hard`) and `WW_CELL_AIR_BURNOFF` (the ground layer thins after sunrise from the climate's sunrise times; red
+  `_RED=noon`).
+- **Far contact shadows (C7):** `WW_CELL_CONTACT_FAR`. FO4CS's far tier: a quarter-size min-depth copy of the g-buffer,
+  a 96-step march, a depth-aware upsample min'd into the contact mask. Red `_RED=halo`. ~0.1-0.2 ms at 1080p, +2.2 MB.
+- **Lamp contact shadows (C8):** `WW_CELL_CONTACT_LOCAL`. A short screen march toward each lamp that has no shadow map
+  (FO4CS LocalLightFirstPersonCasters defaults). Red `_RED=away`. ~0.3-1 ms in lamp-heavy interiors, no memory.
+- **Moonlit terrain shadows:** `WW_SHADOW_MOONSKY`. The night terrain shadow = 0.15 x moon phase^3 x the climate's
+  moon fade x sky clearness (FO4CS EngineSunNight). Red `_RED=cloudy`. CPU only.
+- **PBR ambient in terrain shadow:** `WW_SHADOW_PBRDIM`. The PBR path dims its ambient + environment in terrain shadow
+  as the vanilla path does. Red `_RED=all`. ~0 ms.
+- **Bloom width in fog (BLOOMMIP):** `WW_CELL_BLOOM_PERPIX`. The bloom tent reads log2(fog bloom gain) mips down the
+  chain's top, so glow spreads wider through fog. Red `_RED=wide`. ~0.05 ms, +1/3 of the top texture.
+
 ## Lane RTBAKEOPT1 (2026-10-23, branch rtbakeopt1-20261023): the GPU ray-traced bake is an option, off by default
 
 - **CPU bake is the default again (bungo 10-23):** RTBAKE1's Vulkan tracer (src/bakert.cpp: the probe bake's primary
