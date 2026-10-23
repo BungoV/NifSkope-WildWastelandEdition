@@ -215,10 +215,34 @@ struct Bin
 struct SurfelBins
 {
 	Bin b[6];
+	// lane GAPBAKE1: the room split -- b is room `room`'s sides, other rooms' in `more` (both unused when off)
+	struct More { quint32 room; Bin b[6]; };
+	quint32 room = kProbeRoomNone;
+	std::vector<More> more;
+	Bin & at( quint32 r, int bin )
+	{
+		if ( room == kProbeRoomNone || room == r ) {
+			room = r;
+			return b[bin];
+		}
+		for ( More & m : more )
+			if ( m.room == r )
+				return m.b[bin];
+		more.push_back( More{ r, {} } );
+		return more.back().b[bin];
+	}
 	void add( const SurfelBins & o )
 	{
+		if ( o.room == kProbeRoomNone ) {
+			for ( int i = 0; i < 6; i++ )
+				b[i].add( o.b[i] );
+			return;
+		}
 		for ( int i = 0; i < 6; i++ )
-			b[i].add( o.b[i] );
+			at( o.room, i ).add( o.b[i] );
+		for ( const More & m : o.more )
+			for ( int i = 0; i < 6; i++ )
+				at( m.room, i ).add( m.b[i] );
 	}
 };
 typedef std::unordered_map<Key, SurfelBins, KeyHash> SurfelMap;
@@ -342,6 +366,13 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	R.version = v5 ? 5 : v4 ? 4 : 3;
 	const bool redOneSide = spec.red == QLatin1String( "oneside" );
 	const bool redRooms = spec.red == QLatin1String( "rooms" );
+	/* lane GAPBAKE1: v5 surfel cells split by the room of the probe whose ray found the sample (pass 1 and 2 cast the
+	 * same rays, so a link finds its own room's slot); side id = bin + 6 x slot, noSide = a face with no bin */
+	const bool roomSplit = spec.roomSplit && v5 && !redRooms;
+	constexpr int kSides = 6 * kTbkRoomSlots;
+	const int noSide = roomSplit ? 255 : 6;
+	std::vector<quint32> roomOfProbe;   // per final probe, filled once the probe list is final
+	auto probeRoom = [&]( const ProbePoint & p ) { return roomSplit ? roomOfProbe[size_t( &p - probes.data() )] : 0u; };
 	const bool redGlass = spec.red == QLatin1String( "glass" );
 	const bool glassOn = v4 && !redGlass && !soup.glass.empty() && soup.glassT.size() * 3 == soup.glass.size();
 	R.glassTris = int( soup.glass.size() / 9 );
@@ -621,6 +652,40 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			R.error = QStringLiteral( "every probe stood outside the shell" );
 			return false;
 		}
+	}
+
+	/* lane GAPBAKE1: a probe's room for the split: the soup's rooms grid when given (its cell, else the nearest air
+	 * cell within two, probegi's rule; grid ids + 1, 0 = none), else the placer's room */
+	if ( roomSplit ) {
+		roomOfProbe.assign( probes.size(), 0u );
+		std::vector<std::array<int, 3>> offs;
+		for ( int dz = -2; dz <= 2; dz++ )
+			for ( int dy = -2; dy <= 2; dy++ )
+				for ( int dx = -2; dx <= 2; dx++ )
+					offs.push_back( { dx, dy, dz } );
+		std::stable_sort( offs.begin(), offs.end(), []( const std::array<int, 3> & a, const std::array<int, 3> & b ) {
+			return a[0] * a[0] + a[1] * a[1] + a[2] * a[2] < b[0] * b[0] + b[1] * b[1] + b[2] * b[2];
+		} );
+		std::map<quint32, int> seen;
+		for ( size_t pi = 0; pi < probes.size(); pi++ ) {
+			const ProbePoint & p = probes[pi];
+			quint32 r = p.room[0] == kProbeRoomNone ? 0u : p.room[0];
+			if ( spec.roomGrid && spec.roomGrid->ok ) {
+				r = 0;
+				const double cs = spec.roomGrid->cell;
+				for ( const auto & o : offs ) {
+					const double q[3] = { p.pos[0] + o[0] * cs, p.pos[1] + o[1] * cs, p.pos[2] + o[2] * cs };
+					int r2[2];
+					if ( spec.roomGrid->at( q, r2 ) && r2[0] >= 0 ) {
+						r = quint32( r2[0] ) + 1u;
+						break;
+					}
+				}
+			}
+			roomOfProbe[pi] = r;
+			seen[r]++;
+		}
+		R.roomSplitRooms = int( seen.size() );
 	}
 
 	// the ray set: a Fibonacci sphere, 4 pi / N steradians each
@@ -1047,7 +1112,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					const int bin = binOf( triL, dL, n );
 					if ( bin < 0 )
 						continue;
-					Bin & s = ch.surfels[keyFor( hw, cellS )].b[bin];
+					SurfelBins & sbin = ch.surfels[keyFor( hw, cellS )];
+					Bin & s = roomSplit ? sbin.at( probeRoom( pp ), bin ) : sbin.b[bin];
 					{   // lane SMOOTHN1: the smooth normal at the hit (the face normal where the soup has none)
 						const double p[3] = { oL[0] + dL[0] * tL, oL[1] + dL[1] * tL, oL[2] + dL[2] * tL };
 						double ns[3];
@@ -1150,15 +1216,26 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 
 	/* lane SIDES6: a cell's surfels by side. v3/v4: [0] the front (fin), [1] v4's back (backFin);
 	 * v5: [bin], one per facing bin (axis * 2 + negative; pad0 of the record says which) */
-	FinalMap sideFin[6];
+	FinalMap sideFin[kSides];
 	FinalMap & fin = sideFin[0];
+	std::unordered_map<Key, std::vector<std::pair<quint32, int>>, KeyHash> roomSlotOf;   // lane GAPBAKE1: split cells' room -> slot
 	std::unordered_map<Key, Key, KeyHash> alt;   // a two-sided cell -> the neighbour holding its second side
 	FinalMap & backFin = sideFin[1];             // v4: a two-sided cell's second side, in the cell itself
 	std::unordered_map<Key, quint8, KeyHash> backMask;   // v4: the facing bins that make up that side
 	// lane SIDES6: the side a ray's face bin lands on in cell k (v5: the bin; v4: back mask; v3: 0; 6 = none)
-	auto slotOf = [&]( const Key & k, int bin ) -> int {
-		if ( v5 )
-			return bin >= 0 ? bin : 6;
+	auto slotOf = [&]( const Key & k, int bin, quint32 room ) -> int {
+		if ( v5 ) {
+			if ( bin < 0 )
+				return noSide;
+			if ( roomSplit ) {
+				const auto rs = roomSlotOf.find( k );
+				if ( rs != roomSlotOf.end() )
+					for ( const auto & e : rs->second )
+						if ( e.first == room )
+							return bin + 6 * e.second;
+			}
+			return bin;
+		}
 		if ( !v4 )
 			return 0;
 		const auto bm = backMask.find( k );
@@ -1281,13 +1358,13 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 						// the side this leg sees: its face's bin, as pass 1 sorted it (lane SIDES6: v5 = the bin itself)
 						double n[3];
 						const int bin = binOf( L.tri, L.ld, n );
-						const int slot = slotOf( lk.k, bin );
+						const int slot = slotOf( lk.k, bin, probeRoom( pp ) );
 						lk.side = quint8( slot );
 						if ( !doorBoxes.empty() )
 							lk.door = doorOn( o, d, L.doorT );
 						/* lane SIDES6 measure: the ray weight whose surfel's normal is over 45 degrees off the face
 						 * it hit (a corner's blend), and the weight landing on a corner cell (counters only) */
-						if ( bin >= 0 && slot < 6 ) {
+						if ( bin >= 0 && slot != noSide ) {
 							ch.hitW += omega;
 							const auto f = sideFin[slot].find( lk.k );
 							if ( f != sideFin[slot].end() && n[0] * f->second.n[0] + n[1] * f->second.n[1] + n[2] * f->second.n[2] < 0.70710678 )
@@ -1352,7 +1429,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				if ( v4 ) {
 					// v4: the side the rays saw, in the cell itself; refused only when that side
 					// is missing (the oneside red) or still faces away
-					if ( cd.side > 5 ) {   // lane SIDES6: a degenerate face (no bin, no surfel)
+					if ( cd.side == noSide ) {   // lane SIDES6: a degenerate face (no bin, no surfel)
 						turned += e.second.w;
 						ch.turned++;
 						continue;
@@ -1656,6 +1733,33 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		if ( v5 ) {
 			// lane SIDES6: every facing bin its own surfel in the cell (the oneside red keeps the most-seen one)
 			int kept = 0;
+			if ( roomSplit && !sb.more.empty() ) {
+				// lane GAPBAKE1: each room's sides apart, rooms by id; rooms past the last slot merge into it
+				std::vector<std::pair<quint32, const Bin *>> rooms( 1, { sb.room, &sb.b[0] } );
+				for ( const auto & m : sb.more )
+					rooms.push_back( { m.room, &m.b[0] } );
+				std::sort( rooms.begin(), rooms.end(), []( const auto & a, const auto & b ) { return a.first < b.first; } );
+				auto & tab = roomSlotOf[e.first];
+				Bin sum[kTbkRoomSlots][6];
+				for ( size_t r = 0; r < rooms.size(); r++ ) {
+					const int s = std::min( int( r ), kTbkRoomSlots - 1 );
+					tab.push_back( { rooms[r].first, s } );
+					R.roomSlotsMerged += int( r ) >= kTbkRoomSlots ? 1 : 0;
+					for ( int i = 0; i < 6; i++ )
+						sum[s][i].add( rooms[r].second[i] );
+				}
+				for ( int s = 0; s < kTbkRoomSlots; s++ )
+					for ( int i = 0; i < 6; i++ ) {
+						if ( !sum[s][i].n || ( redOneSide && i != w ) )
+							continue;
+						Final f = makeFinal( sum[s][i], e.first );
+						f.rec.pad0 = quint8( i + 6 * s );
+						sideFin[i + 6 * s].emplace( e.first, f );
+						kept++;
+						R.roomSplitSurfels += s ? 1 : 0;
+					}
+				R.roomSplitCells++;
+			} else
 			for ( int i = 0; i < 6; i++ ) {
 				if ( !sb.b[i].n || ( redOneSide && i != w ) )
 					continue;
@@ -1851,7 +1955,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		};
 		struct Acc { double alb[3] = { 0, 0, 0 }, nrm[3] = { 0, 0, 0 }; quint32 n = 0; };
 		typedef std::unordered_map<Key, Acc, KeyHash> AccMap;
-		std::vector<std::vector<AccMap>> accS( 6, std::vector<AccMap>( chunks.size() ) );   // lane SIDES6: per side
+		std::vector<std::vector<AccMap>> accS( kSides, std::vector<AccMap>( chunks.size() ) );   // lane SIDES6: per side
 		std::vector<qint64> cSamp( chunks.size(), 0 ), cDrop( chunks.size(), 0 ), cExtra( chunks.size(), 0 );
 		std::vector<qint64> cNmap( chunks.size(), 0 );   // lane SMOOTHN1: pixels a normal map bent
 		std::vector<std::vector<char>> dumps( cubeDumpProbes.size() );
@@ -1915,8 +2019,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					float hw[3];
 					hitPoint( o, d, t, hw );
 					const Key k = keyFor( hw, cellS );
-					const int slot = slotOf( k, bin );   // lane SIDES6: v4 back = 1, v5 = the bin
-					if ( slot > 5 ) {
+					const int slot = slotOf( k, bin, probeRoom( pp ) );   // lane SIDES6: v4 back = 1, v5 = the bin
+					if ( slot == noSide ) {
 						cDrop[ci]++;
 						continue;
 					}
@@ -1948,13 +2052,13 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		};
 		runAll( cubeChunk );
 		// merge in chunk order (the same sums whatever ran where), then rewrite albedo + normal only
-		AccMap allS[6];
+		AccMap allS[kSides];
 		for ( size_t c = 0; c < chunks.size(); c++ ) {
 			R.albSamples += cSamp[c];
 			R.albDropped += cDrop[c];
 			R.albExtra += cExtra[c];
 			R.nmapHits += cNmap[c];
-			for ( int s = 0; s < 6; s++ )
+			for ( int s = 0; s < kSides; s++ )
 				for ( const auto & e : accS[size_t( s )][c] ) {
 					Acc & z = allS[s][e.first];
 					for ( int k = 0; k < 3; k++ ) {
@@ -1982,7 +2086,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				R.albSurfels++;
 			}
 		};
-		for ( int s = 0; s < 6; s++ )
+		for ( int s = 0; s < kSides; s++ )
 			rewrite( sideFin[s], allS[s] );
 		if ( !spec.cubeDump.isEmpty() ) {
 			QFile df( spec.cubeDump );
@@ -2010,7 +2114,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	 * face normal itself always does), so the links stay the tri way's and every link faces. */
 	if ( wayHit || wayCube || smoothOn ) {   // lane SMOOTHN1: the tri way's smooth normal too
 		typedef std::unordered_map<Key, std::vector<std::array<double, 3>>, KeyHash> DirMap;
-		DirMap dS[6];   // lane SIDES6: per side (v3 0; v4 0/1; v5 the bin)
+		DirMap dS[kSides];   // lane SIDES6: per side (v3 0; v4 0/1; v5 the bin; GAPBAKE1: + 6 x room slot)
 		for ( const Chunk & ch : chunks )
 			for ( const ProbeOut & po : ch.probes )
 				for ( size_t i = 0; i < po.links.size(); i++ ) {
@@ -2060,7 +2164,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				R.albLeaned++;
 			}
 		};
-		for ( int s = 0; s < 6; s++ )
+		for ( int s = 0; s < kSides; s++ )
 			lean( sideFin[s], dS[s] );
 	}
 
@@ -2185,7 +2289,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			h.reserved[0] = quint32( bks.size() );   // v5: 0 (every side is in the one table)
 			h.reserved[1] = quint32( bxs.size() );
 			h.reserved[2] = ( redOneSide ? 0u : 1u ) | ( roomBoxes && !redRooms ? 2u : 0u ) | ( doorBoxes.empty() ? 0u : 4u )
-				| ( glassOn ? 8u : 0u ) | ( v5 && !redOneSide ? 16u : 0u );   // lane SIDES6: 16 = six sides
+				| ( glassOn ? 8u : 0u ) | ( v5 && !redOneSide ? 16u : 0u )   // lane SIDES6: 16 = six sides
+				| ( roomSplit ? 32u : 0u );   // lane GAPBAKE1: 32 = sides past 5 are room slots (bin + 6 x slot)
 			h.reserved[3] = quint32( ems.size() );   // lane EMISSIVEGI1 (0: no tail)
 		}
 		h.cellX = sec.first.first;
@@ -2228,6 +2333,25 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	return true;
 }
 
+bool probeBakeRoomGrid( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, const ProbeRoomSpec & spec,
+	ProbeRooms * out, float pad )
+{
+	if ( probes.empty() )
+		return false;
+	ProbeRoomSpec rs = spec;
+	float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+	for ( const ProbePoint & p : probes )
+		for ( int c = 0; c < 3; c++ ) {
+			lo[c] = std::min( lo[c], p.pos[c] );
+			hi[c] = std::max( hi[c], p.pos[c] );
+		}
+	for ( int c = 0; c < 3; c++ ) {   // the top stays the soup's (the open sky), as probegi's grid
+		rs.clipLo[c] = lo[c] - pad;
+		rs.clipHi[c] = c == 2 ? 1e30f : hi[c] + pad;
+	}
+	return probeRoomsBuild( soup, rs, out ) && out->ok;
+}
+
 QString probeBakeCensusText( const ProbeBakeResult & r )
 {
 	QString s;
@@ -2258,6 +2382,10 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 		t << "bake: .tbk v3 (FO4CS's own format; no back sides, rooms, doors or glass)\n";
 	if ( r.version >= 5 )   // lane SIDES6
 		t << "bake: .tbk v5: six sides a cell, surfels beyond a cell's first " << r.sideSurfels << "\n";
+	if ( r.roomSplitCells )   // lane GAPBAKE1
+		t << "bake: room split: cells split by room " << r.roomSplitCells << ", their surfels past the first room "
+		  << r.roomSplitSurfels << ", rooms merged into the last slot " << r.roomSlotsMerged << ", probe rooms "
+		  << r.roomSplitRooms << "\n";
 	if ( r.cellsSampled > 0 ) {   // lane SIDES6 measure
 		t << "bake: sides: cells " << r.cellsSampled << ", by faces seen (1..6)";
 		for ( size_t i = 1; i < r.sideHist.size(); i++ )
@@ -2335,12 +2463,13 @@ int probeBakeCli( const QStringList & args )
 		else if ( a == QLatin1String( "--back-max" ) ) { bs.backMax = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--back-dump" ) ) { bs.backDump = nx; i++; }
 		else if ( a == QLatin1String( "--place-red" ) ) { ps.red = nx; i++; }
+		else if ( a == QLatin1String( "--room-split" ) ) { bs.roomSplit = nx.toInt() != 0; i++; }   // lane GAPBAKE1
 	}
 	const QStringList rc = rect.split( ',' );
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 ) {
 		std::fprintf( stderr, "usage: probebake --soup <file> --rect minX,minY,maxX,maxY --out <dir> "
 			"[--rays n] [--adapt n] [--threads n] [--spacing s] [--red octant|normal|oneside|rooms|glass|backface] [--no-sky] [--no-spill] [--tbk 3|4|5] "
-			"[--max-links n] [--no-openings] [--no-rooms] [--back-max f] [--back-dump tsv] [--place-red floor|...]\n" );
+			"[--max-links n] [--no-openings] [--no-rooms] [--back-max f] [--back-dump tsv] [--place-red floor|...] [--room-split 0|1]\n" );
 		return 2;
 	}
 	ps.minX = rc[0].toFloat();
@@ -2359,6 +2488,9 @@ int probeBakeCli( const QStringList & args )
 		return 1;
 	}
 	ProbeBakeResult br;
+	ProbeRooms splitRooms;   // lane GAPBAKE1: the room split's rooms, from the soup before the bake
+	if ( bs.roomSplit && probeBakeRoomGrid( soup, pr.probes, ProbeRoomSpec(), &splitRooms ) )
+		bs.roomGrid = &splitRooms;
 	if ( !probeBake( soup, pr.probes, bs, outDir, &br, &pr.roomBoxes ) ) {
 		std::fprintf( stderr, "probebake: %s\n", qPrintable( br.error ) );
 		return 1;

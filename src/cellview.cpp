@@ -1452,6 +1452,13 @@ static QString cellFarLodl( const QString & ws, const QString & dataRoot, QStrin
 }
 
 /* lane BAKEBLOCK1: append the far soup around the bake's block; the census line it returns says what went in */
+/* lane GAPBAKE1: WW_CELL_BAKE_FARNORMALS=1 gives the far ring's ground quads smooth vertex normals (the .lodl
+ * heights' central differences) instead of their faceted 1024-unit face normals; off = the old soup, byte for byte */
+static bool cellBakeFarNormals()
+{
+	return wwEnvStr( "WW_CELL_BAKE_FARNORMALS" ) == QLatin1String( "1" ) && wwEnvStr( "WW_CELL_BAKE_SMOOTH" ) != QLatin1String( "0" );
+}
+
 static QString cellBakeFarSoup( const CellSceneSpec & spec, const QString & dataRoot, const QByteArray & red,
 	ProbeSoup & soup )
 {
@@ -1473,14 +1480,14 @@ static QString cellBakeFarSoup( const CellSceneSpec & spec, const QString & data
 	const qint64 before = soup.triCount();
 	ProbeFarResult r;
 	if ( !probeFarAppendRing( lodl, QFileInfo( lodi ).isFile() ? lodi : QString(), spec.cx, spec.cy, ( spec.n - 1 ) / 2,
-			radius, soup, &r ) ) {
+			radius, soup, &r, cellBakeFarNormals() ) ) {
 		qWarning() << "far soup:" << r.error;
 		return QStringLiteral( "far soup: REFUSED -- %1" ).arg( r.error );
 	}
 	return QStringLiteral( "far soup %1 out to %2 cells: ground quads %3 (colour %4), water quads %5, boxes %6, "
-		"trees %7, triangles +%8, %9 ms" ).arg( QDir::toNativeSeparators( lodl ) ).arg( radius ).arg( r.quads )
+		"trees %7, triangles +%8, %9 ms%10" ).arg( QDir::toNativeSeparators( lodl ) ).arg( radius ).arg( r.quads )
 		.arg( r.albedoQuads ).arg( r.waterQuads ).arg( r.boxes ).arg( r.trees ).arg( soup.triCount() - before )
-		.arg( t.elapsed() );
+		.arg( t.elapsed() ).arg( r.normalQuads ? QStringLiteral( ", ground vertex normals %1 quads" ).arg( r.normalQuads ) : QString() );
 }
 
 /* lane SUNCELL1: the Particles row (WW/CellParticles, env pin WW_CELL_PARTICLES, ships OFF). Read when a cell
@@ -1718,7 +1725,8 @@ QString cellBakeFarDigest( const QString & world, const QString & dataRoot, int 
 	const int radius = int( std::ceil( ProbeBakeSpec().rayMax / CELL_UNITS ) );
 	ProbeSoup soup;
 	ProbeFarResult r;
-	if ( !probeFarAppendRing( lodl, QFileInfo( lodi ).isFile() ? lodi : QString(), cx, cy, half, radius, soup, &r ) )
+	if ( !probeFarAppendRing( lodl, QFileInfo( lodi ).isFile() ? lodi : QString(), cx, cy, half, radius, soup, &r,
+			cellBakeFarNormals() ) )
 		return QStringLiteral( "refused" );
 	QCryptographicHash h( QCryptographicHash::Sha1 );
 	auto feed = [&h]( const void * p, size_t n ) { h.addData( QByteArrayView( static_cast<const char *>( p ), qsizetype( n ) ) ); };
@@ -1729,6 +1737,8 @@ QString cellBakeFarDigest( const QString & world, const QString & dataRoot, int 
 	feed( soup.alb.data(), soup.alb.size() );
 	feed( soup.glass.data(), soup.glass.size() * sizeof( float ) );
 	feed( soup.glassT.data(), soup.glassT.size() );
+	if ( !soup.vn.empty() )   // lane GAPBAKE1: only with WW_CELL_BAKE_FARNORMALS=1, so the old digests stand
+		feed( soup.vn.data(), soup.vn.size() * sizeof( qint16 ) );
 	return QString::fromLatin1( h.result().toHex() );
 }
 
@@ -5197,6 +5207,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				// lane SMOOTHN1: the most batches a noisy probe takes (1 = the base set alone: the gate's pin)
 				if ( wwEnvInt( "WW_CELL_PROBE_BAKE_ADAPT" ) > 0 )
 					bs.adaptMax = wwEnvInt( "WW_CELL_PROBE_BAKE_ADAPT" );
+				/* lane GAPBAKE1: WW_CELL_BAKE_ROOMSPLIT=1 keeps a surfel cell's rooms apart (a 70-unit cell straddling a
+				 * thin wall no longer hands the lit room's floor to the dark room's probes); off = the old .tbk */
+				bs.roomSplit = wwEnvStr( "WW_CELL_BAKE_ROOMSPLIT" ) == QLatin1String( "1" );
 				// an interior's misses are void, never sky -- unless its cell shows the sky (lane SKYINT1, the deck's
 				// rule: a ray that meets nothing sees the sky)
 				bs.noSky = spec.interior && !( cellInteriorFlags( world.interior() ) & 0x0080u );
@@ -5259,6 +5272,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				  << ( nmapOn ? "on" : "OFF" ) << ": object triangles with NIF normals " << soupSmoothTris << ", ground cells from VNML "
 				  << soupLandVnml << ", from the heights (no VNML) " << soupLandDerived << ", model-space normal maps left out "
 				  << soupNmapModelSpace << "\n";
+				// lane GAPBAKE1: the room split's rooms, the soup's grid (the GI's rule) before the bake
+				ProbeRooms splitRooms;
+				if ( bs.roomSplit ) {
+					ProbeRoomSpec rsp;
+					rsp.red = QString::fromLatin1( wwEnv( "WW_CELL_ROOMS_RED" ) ).trimmed();
+					if ( probeBakeRoomGrid( probeSoup, pr.probes, rsp, &splitRooms ) )
+						bs.roomGrid = &splitRooms;
+				}
 				// lane BAKE4: the placer's room boxes go into the `.tbk` v4 files
 				if ( !probeBake( probeSoup, pr.probes, bs, QDir::cleanPath( dir ), &bres, &pr.roomBoxes ) ) {
 					t << "  bake REFUSED: " << bres.error << "\n";

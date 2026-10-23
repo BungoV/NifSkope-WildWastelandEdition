@@ -440,6 +440,12 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 	const float q = f.heightQuantum();
 	const int n = spc / step;
 	const float qs = kCell / float( n );
+	// lane GAPBAKE1: corner (a, b)'s normal from central differences one quad step each way (h clamps at the file edge)
+	auto gnorm = [&]( int cx, int cy, int a, int b, float o[3] ) {
+		o[0] = h( cx, cy, ( a - 1 ) * step, b * step ) - h( cx, cy, ( a + 1 ) * step, b * step );
+		o[1] = h( cx, cy, a * step, ( b - 1 ) * step ) - h( cx, cy, a * step, ( b + 1 ) * step );
+		o[2] = 2.0f * qs;
+	};
 
 	// the colour sheet: decoded one tile at a time, quads laid tile by tile
 	LodtSheets sheets;
@@ -530,7 +536,21 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 					const float p00[3] = { wx0, wy0, z00 }, p10[3] = { wx0 + qs, wy0, z10 };
 					const float p01[3] = { wx0, wy0 + qs, z01 }, p11[3] = { wx0 + qs, wy0 + qs, z11 };
 					soup.addTri( p00, p10, p11, rgb );
-					soup.addTri( p00, p11, p01, rgb );
+					if ( spec.normals ) {
+						float n00[3], n10[3], n01[3], n11[3];
+						gnorm( cx, cy, a, b, n00 );
+						gnorm( cx, cy, a + 1, b, n10 );
+						gnorm( cx, cy, a, b + 1, n01 );
+						gnorm( cx, cy, a + 1, b + 1, n11 );
+						const float t0[9] = { n00[0], n00[1], n00[2], n10[0], n10[1], n10[2], n11[0], n11[1], n11[2] };
+						soup.setLastNormals( t0 );
+						soup.addTri( p00, p11, p01, rgb );
+						const float t1[9] = { n00[0], n00[1], n00[2], n11[0], n11[1], n11[2], n01[0], n01[1], n01[2] };
+						soup.setLastNormals( t1 );
+						R.normalQuads++;
+					} else {
+						soup.addTri( p00, p11, p01, rgb );
+					}
 					R.quads++;
 					if ( c.water && std::min( { z00, z10, z01, z11 } ) < c.waterH ) {
 						const float w00[3] = { wx0, wy0, c.waterH }, w10[3] = { wx0 + qs, wy0, c.waterH };
@@ -714,11 +734,12 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 }
 
 bool probeFarAppendRing( const QString & lodl, const QString & lodi, int cx, int cy, int half, int radius,
-	ProbeSoup & soup, ProbeFarResult * out )
+	ProbeSoup & soup, ProbeFarResult * out, bool normals )
 {
 	ProbeFarSpec fs;
 	fs.lodl = lodl;
 	fs.lodi = lodi;
+	fs.normals = normals;
 	fs.region = true;
 	fs.ringCells = 0.0f;
 	fs.x0 = cx - radius;
@@ -743,6 +764,8 @@ QString probeFarCensusText( const ProbeFarResult & r )
 	t << "far: ground quads " << r.quads << " (colour from the sheet " << r.albedoQuads << "), water quads "
 	  << r.waterQuads << ", building boxes " << r.boxes << " in " << r.boxCells << " cells\n";
 	t << "far: height samples outside their cell's stored range " << r.heightOutside << "; colour sheet " << r.sheet << "\n";
+	if ( r.normalQuads )
+		t << "far: ground quads with vertex normals " << r.normalQuads << "\n";
 	if ( r.trees )
 		t << "far: trees " << r.trees << " of " << r.treesPlaced << " in the LOD data (" << r.treeTris
 		  << " triangles from soup triangle " << r.treeFirst << ", keeping " << QString::number( r.treeAreaFull > 0 ? r.treeArea / r.treeAreaFull : 0.0, 'f', 3 )
@@ -776,6 +799,7 @@ int probeFarCli( const QStringList & args )
 		else if ( a == QLatin1String( "--hoist" ) ) { fs.hoist = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--sheet-dim" ) ) { fs.sheetDim = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--red" ) ) { fs.red = nx; i++; }
+		else if ( a == QLatin1String( "--normals" ) ) { fs.normals = nx.toInt() != 0; i++; }
 		else if ( a == QLatin1String( "--cells" ) ) {
 			const QStringList c = nx.split( ',' );
 			if ( c.size() == 4 ) {
@@ -794,7 +818,7 @@ int probeFarCli( const QStringList & args )
 	}
 	if ( fs.lodl.isEmpty() || ( outDir.isEmpty() && soupOut.isEmpty() ) ) {
 		std::fprintf( stderr, "usage: probefar --lodl <world.lodl> [--lodi <world.lodi>] --out <dir> [--cells x0,y0,x1,y1] "
-			"[--step n] [--hoist u] [--sheet-dim n] [--sector u] [--rays n] [--adapt n] [--threads n] [--surfel-cell u] [--max-links n] "
+			"[--step n] [--hoist u] [--sheet-dim n] [--normals 0|1] [--sector u] [--rays n] [--adapt n] [--threads n] [--surfel-cell u] [--max-links n] "
 			"[--soup-out f.psp] [--probes-out f.txt] [--red shift|notrees|treebox|treeshift|canopy]\n" );
 		return 2;
 	}

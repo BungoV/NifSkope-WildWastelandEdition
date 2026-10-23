@@ -46,6 +46,8 @@ struct ProbeFarSpec
 	 *  ground, boxes and trees stay out of the soup (an object goes by the cell of its middle). */
 	bool hole = false;
 	int hx0 = 0, hy0 = 0, hx1 = -1, hy1 = -1;
+	//! lane GAPBAKE1: ground vertex normals from the heights' central differences (soup VNM1); off = face normals
+	bool normals = false;
 };
 
 struct ProbeFarResult
@@ -53,6 +55,7 @@ struct ProbeFarResult
 	int cells = 0, probes = 0;
 	int quads = 0, waterQuads = 0, boxes = 0, boxCells = 0;
 	int albedoQuads = 0;                //!< ground quads whose colour came from the sheet
+	int normalQuads = 0;                //!< lane GAPBAKE1: ground quads given vertex normals
 	qint64 heightOutside = 0;           //!< samples outside their cell's stored lo..hi (must be 0)
 	double hoistMean = 0;               //!< mean probe height over the ground under it
 	float roofMax = 0;
@@ -72,7 +75,7 @@ QString probeFarCensusText( const ProbeFarResult & r );
 /*! lane BAKEBLOCK1: the far soup around an exterior bake. Everything the LOD files hold within `radius`
  *  cells of cell (cx, cy), minus the loaded block `half` cells around it, appended to `soup` (no probes). */
 bool probeFarAppendRing( const QString & lodl, const QString & lodi, int cx, int cy, int half, int radius,
-	ProbeSoup & soup, ProbeFarResult * out );
+	ProbeSoup & soup, ProbeFarResult * out, bool normals = false );
 int probeFarCli( const QStringList & args );
 
 #endif

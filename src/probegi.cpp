@@ -837,12 +837,12 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		const float cs = t.h.surfelCellSize;
 		std::unordered_map<Key3, int, Key3Hash> keys, keysBack;   // lane BAKE4: the back side's own map
 		const bool six = t.h.version >= 5u;   // lane SIDES6: a cell's sides by bin, all in the one table
-		std::unordered_map<Key3, int, Key3Hash> keysSide[6];
+		std::unordered_map<Key3, int, Key3Hash> keysSide[6 * kTbkRoomSlots];   // lane GAPBAKE1: + 6 x room slot
 		for ( size_t i = 0; i < t.surfels.size(); i++ ) {
 			const TbkSurfel & s = t.surfels[i];
 			const Key3 k { floorDiv( s.position[0], cs ), floorDiv( s.position[1], cs ), floorDiv( s.position[2], cs ) };
 			if ( six ) {
-				if ( s.pad0 < 6 )
+				if ( s.pad0 < 6 * kTbkRoomSlots )
 					keysSide[s.pad0].emplace( k, int( i ) );
 				continue;
 			}
@@ -878,7 +878,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				const bool sideBack = !six && li < t.lext.size() && t.lext[li].side;
 				const int sd = six && li < t.lext.size() ? int( t.lext[li].side ) : -1;
 				static const std::unordered_map<Key3, int, Key3Hash> kNone;
-				const auto & km = six ? ( sd >= 0 && sd < 6 ? keysSide[sd] : kNone ) : sideBack ? keysBack : keys;
+				const auto & km = six ? ( sd >= 0 && sd < 6 * kTbkRoomSlots ? keysSide[sd] : kNone ) : sideBack ? keysBack : keys;
 				auto it = km.find( Key3 { pk.x + lk.cellDelta[0], pk.y + lk.cellDelta[1], pk.z + lk.cellDelta[2] } );
 				if ( it == km.end() ) {
 					R.linksUnresolved++;
@@ -2578,6 +2578,7 @@ int probeGiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--passes" ) ) { gs.passes = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--red" ) ) { gs.red = nx; i++; }
 		else if ( a == QLatin1String( "--rooms-red" ) ) { gs.rooms.red = nx; i++; }
+		else if ( a == QLatin1String( "--room-split" ) ) { bs.roomSplit = nx.toInt() != 0; i++; }   // lane GAPBAKE1
 		else if ( a == QLatin1String( "--pinch" ) ) { gs.rooms.pinch = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--cell" ) ) { gs.rooms.cell = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--sun" ) || a == QLatin1String( "--sky" ) ) {
@@ -2618,7 +2619,7 @@ int probeGiCli( const QStringList & args )
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || ( L.lights.isEmpty() && !gs.sky.on ) ) {
 		std::fprintf( stderr, "usage: probegi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b "
 			"[--light ...] [--spacing s] [--rays n] [--adapt n] [--passes n] [--red noclamp|noeye|novis|...] "
-			"[--rooms-red conn26|boxes|glasswall|nomask] [--pinch u] [--cell u] [--sun tx,ty,tz,r,g,b] [--sky r,g,b]\n" );
+			"[--rooms-red conn26|boxes|glasswall|nomask] [--room-split 0|1] [--pinch u] [--cell u] [--sun tx,ty,tz,r,g,b] [--sky r,g,b]\n" );
 		return 2;
 	}
 	ps.minX = rc[0].toFloat();
@@ -2638,6 +2639,9 @@ int probeGiCli( const QStringList & args )
 	}
 	const QString bakeDir = QDir( outDir ).filePath( QStringLiteral( "bake" ) );
 	ProbeBakeResult br;
+	ProbeRooms splitRooms;   // lane GAPBAKE1: the room split's rooms, from the soup before the bake
+	if ( bs.roomSplit && probeBakeRoomGrid( soup, pr.probes, gs.rooms, &splitRooms ) )
+		bs.roomGrid = &splitRooms;
 	if ( !probeBake( soup, pr.probes, bs, bakeDir, &br, &pr.roomBoxes ) ) {
 		std::fprintf( stderr, "probegi: %s\n", qPrintable( br.error ) );
 		return 1;
