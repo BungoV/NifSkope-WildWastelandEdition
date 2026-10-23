@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 #include "proberooms.h"
 #include "gl/cellvolumeview.h"
 #include "probevolumesgi.h"
+#include "probegi.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -424,6 +425,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		V.error = R.error;
 		return false;
 	}
+	probeGiRoomsOffer( soup, rs, R );   // lane GAPPERF1: GI and Space share one grid when clip and cell agree
 	V.roomsLine = probeRoomsCensusText( R );
 	V.msRooms = clock.nsecsElapsed() / 1e6;
 	const float C = R.cell;

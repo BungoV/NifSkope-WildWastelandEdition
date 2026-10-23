@@ -369,6 +369,40 @@ quint64 roomsKeyOf( quint64 trisKey, const ProbeSoup & soup, const ProbeRoomSpec
 }
 }
 
+void probeGiRoomsOffer( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeRooms & rooms )
+{
+	WW_SWITCH_STATIC( bool, share, wwEnvStr( "WW_GI_ROOMSHARE" ) != QLatin1String( "0" ) );
+	if ( !share || !geoMemoOn() || !rooms.ok )
+		return;
+	KeyMix k;
+	k.vec( soup.tris );
+	ProbeRoomSpec rs = spec;
+	rs.keep = false;
+	const quint64 key = roomsKeyOf( k.h, soup, rs );
+	// the kept grids stay with the caller: swapped out around the copy, so the memo holds what a plain build makes
+	std::vector<quint8> st;
+	std::vector<qint32> lab;
+	std::vector<float> d2;
+	std::vector<qint8> fa;
+	st.swap( rooms.state );
+	lab.swap( rooms.labels );
+	d2.swap( rooms.dist2 );
+	fa.swap( rooms.facing );
+	{
+		GeoMemo & M = geoMemo();
+		std::lock_guard<std::mutex> g( M.lock );
+		M.rooms = rooms;
+		M.roomsOk = true;
+		M.roomsKey = key;
+	}
+	st.swap( rooms.state );
+	lab.swap( rooms.labels );
+	d2.swap( rooms.dist2 );
+	fa.swap( rooms.facing );
+	std::fprintf( stderr, "gi roomshare: the Space grid offered (cell %.1f, %d x %d x %d)\n", double( rooms.cell ),
+		rooms.dims[0], rooms.dims[1], rooms.dims[2] );
+}
+
 bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCellLighting & lighting,
 	const ProbeGiSpec & spec, ProbeGiResult * out )
 {
