@@ -171,6 +171,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	aerialPerspectiveBox->setCurrentIndex( std::clamp( wwAtmoAp(), 0, 1 ) );
 	wwMatchFieldStyle( aerialPerspectiveBox );
 	row( tr( "Aerial Perspective" ), aerialPerspectiveBox, true );
+	// lane SKYA (ATMOSUN1): the key light and the ambient coloured by the air (needs Physical Sky), ships Off
+	sunlightFromSkyBox = new QComboBox( tree );
+	sunlightFromSkyBox->setObjectName( QStringLiteral( "sunlightFromSky" ) );
+	sunlightFromSkyBox->addItems( { tr( "Off" ), tr( "Tint" ), tr( "Full" ) } );
+	sunlightFromSkyBox->setCurrentIndex( std::clamp( wwAtmoSun(), 0, 2 ) );
+	wwMatchFieldStyle( sunlightFromSkyBox );
+	row( tr( "Sunlight From Sky" ), sunlightFromSkyBox, true );
 	liveCheck( cloudsBox, "lookdevClouds", tr( "Clouds" ), wwLookdevClouds() );
 	liveCheck( sunBox, "lookdevSun", tr( "Sun" ), wwLookdevSun() );
 	// lane TERRSHADOW1: Engine (the sky clock's arc) or Real (Boston's solar path); ships Engine
@@ -346,6 +353,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveTier( sunPathBox, &wwSunPathSetMode );
 	liveTier( physicalSkyBox, &wwAtmoSetTier );	// lane ATMO1
 	liveTier( aerialPerspectiveBox, &wwAtmoSetAp );	// lane SKYA
+	liveTier( sunlightFromSkyBox, &wwAtmoSetSun );
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
 	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );
@@ -414,7 +422,7 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( moonBox ), static_cast<QWidget *>( gameDayBox ),
 			static_cast<QWidget *>( fogBox ), static_cast<QWidget *>( shadowsBox ),
 			static_cast<QWidget *>( sunPathBox ), static_cast<QWidget *>( physicalSkyBox ),
-			static_cast<QWidget *>( aerialPerspectiveBox ),
+			static_cast<QWidget *>( aerialPerspectiveBox ), static_cast<QWidget *>( sunlightFromSkyBox ),
 			static_cast<QWidget *>( cascadeQualityBox ),
 			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ),
 			static_cast<QWidget *>( shadowParBox ), static_cast<QWidget *>( shadowDistanceBox ) } )

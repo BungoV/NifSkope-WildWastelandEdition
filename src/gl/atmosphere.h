@@ -53,6 +53,18 @@ void wwAtmoApFrame();	//!< the frame's start: last frame's volume is no longer v
 bool wwAtmoApActive();	//!< this frame drew a volume (Renderer then picks the fog program with the Fog row off)
 void wwAtmoApUniforms( Scene * scene );	//!< the current program's atAp* uniforms and its sampler (unit AtmoAp)
 
+/* lane SKYA (ATMOSUN1): the key light and the ambient coloured by the air (Hillaire 2020 sec. 4: the sun's light at
+ * the ground = its light at the top of the air x the transmittance toward it). Row Render > Scene > Sunlight From Sky:
+ * Off / Tint (the weather's brightness, the air's colour) / Full (the air's colour and brightness); ships Off, needs
+ * Physical Sky on. Pin WW_ATMO_SUN (off|tint|full or 0..2), red WW_ATMO_SUN_RED = flat (a low sun no warmer). */
+int wwAtmoSun();	//!< the row: 0 Off / 1 Tint / 2 Full
+void wwAtmoSetSun( int mode );	//!< refused while WW_ATMO_SUN pins it
+bool wwAtmoSunPinned();
+int wwAtmoSunKey();	//!< 0 when it changes nothing; else a memo key of the mode and red (lookdevstage's light cache)
+//! the light toward cos zenith muLight (the sun, or the moon by night); fog = the weather fog's Far, Max, Height Mid,
+//! Height Range; keyLum45 = the weather's Day (Night) key luminance. False (nothing changed) when the row is Off.
+bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float sun[3], float amb[3], float dalc[6][3] );
+
 QString wwAtmoSummary();
 
 #endif

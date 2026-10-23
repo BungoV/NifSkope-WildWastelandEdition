@@ -2,6 +2,25 @@
 
 ## Lane SKYA (2026-10-23, branch skya-20261023): the physical sky reaches the world, every part off by default
 
+### ATMOSUN1: sunlight and ambient from the sky's air
+- **What:** the key light (the sun, or the moon by night) and the ambient (NAM0 Ambient and every DALC side) take
+  their colour from the physical sky's air: the key through the transmittance toward the light (Hillaire 2020 sec. 4),
+  the ambient through the sky's irradiance on level ground (single scattering, cosine-weighted). Haze from the
+  weather's fog, as the sky uses. Math in `src/gl/atmomath.h` (`skyKeyLight`, `skyIrradiance`).
+  - Tint: the weather's own key brightness, the air's colour (a 3-degree sun turns orange, R/B 1.3 -> 22.9).
+  - Full: the air's colour and brightness, anchored so a 45-degree sun keeps the weather's Day key; a low sun dims
+    (3 deg = 0.21 of 45 deg); 0 under the horizon.
+  - Ambient (both): the weather's ambient brightness kept, its colour turned by the sky irradiance's colour against
+    45 degrees (R/B x2.4 at 3 deg, where the sun's is x17).
+- **Row:** Render > Scene > Sunlight From Sky (Off / Tint / Full), key `Settings/Render/Scene/Sunlight From Sky`,
+  live; needs Physical Sky on. `WW_ATMO_SUN=off|tint|full` pins it; red `WW_ATMO_SUN_RED=flat` (the air's colour held
+  at 45 degrees: a low sun no warmer). Off = today's light exactly (the code is skipped).
+- **Cost:** no GPU pass, no memory. CPU about 1-2 ms each time the light is recomputed (hour, weather or row change;
+  cached in between). stderr `atmo sun: mode=... mu=... key ... -> ... amb -> ...` (first and every 240th recompute).
+- **Checks:** `tests/spells/atmomath_check.py <scratch>` builds `tests/atmomath/atmomath_dump.cpp` (MSYS2 g++) and
+  gates the shipped functions: transmittance vs `atmo_model.py`, sun tint, sun full, ambient, sky irradiance colour
+  vs the model's full sky (worst 0.104 < 0.15). Red flat fails 3 gates; irrflat (the checker's own) fails one.
+
 ### ATMO2: aerial perspective (Hillaire 2020 sec. 5.4)
 - **What:** the physical sky's own air on every surface: a froxel volume (RGBA16F 3D: in-scatter + transmittance)
   built each frame from the sky's medium and LUTs, out to 16 km (quadratic slices, slice 0 at 4 m).

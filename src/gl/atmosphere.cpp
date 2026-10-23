@@ -23,6 +23,7 @@ using namespace WwAtmoMath;	// lane SKYA: the constants and the CPU math, shared
 
 constexpr const char * kKey = "Settings/Render/Scene/Physical Sky";
 constexpr const char * kApKey = "Settings/Render/Scene/Aerial Perspective";
+constexpr const char * kSunKey = "Settings/Render/Scene/Sunlight From Sky";	// lane SKYA (ATMOSUN1)
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 constexpr int kTransW = 256, kTransH = 64;
 /* lane SKYA (ATMO2): the aerial-perspective volume's reach. A Fallout 4 worldspace is ~4 km across (64 cells of
@@ -41,7 +42,29 @@ struct AtState
 	QString last = QStringLiteral( "off" );
 	int ap = 0;	// lane SKYA (ATMO2): the Aerial Perspective row, 0 Off / 1 On (pin WW_ATMO_AP)
 	bool apPinned = false;
+	int sun = 0;	// lane SKYA (ATMOSUN1): the Sunlight From Sky row, 0 Off / 1 Tint / 2 Full (pin WW_ATMO_SUN)
+	bool sunPinned = false;
 };
+
+//! lane SKYA: one row's value from its pin (already read by the caller: the survey needs literal names), a harness
+//! run (0, pinned) or its QSettings key
+int rowValue( const QString & pin, const char * key, const QStringList & names, bool & pinned )
+{
+	const QString e = pin.trimmed().toLower();
+	pinned = true;
+	if ( !e.isEmpty() ) {
+		bool ok = false;
+		const int v = e.toInt( &ok );
+		if ( ok )
+			return std::clamp( v, 0, int( names.size() ) - 1 );
+		const int i = int( names.indexOf( e ) );
+		return i >= 0 ? i : 0;
+	}
+	if ( wwHarnessRun() )
+		return 0;
+	pinned = false;
+	return std::clamp( QSettings().value( QLatin1StringView( key ), 0 ).toInt(), 0, int( names.size() ) - 1 );
+}
 
 AtState & as()
 {
@@ -75,6 +98,8 @@ AtState & as()
 			s.apPinned = false;
 			s.ap = QSettings().value( QLatin1StringView( kApKey ), 0 ).toInt() ? 1 : 0;
 		}
+		// lane SKYA: the rows after ATMO2 (the same prefix re-reads them live)
+		s.sun = rowValue( wwEnvStr( "WW_ATMO_SUN" ), kSunKey, { "off", "tint", "full" }, s.sunPinned );
 	}
 	return s;
 }
@@ -568,6 +593,59 @@ void wwAtmoSetAp( int on )
 bool wwAtmoApPinned()
 {
 	return as().apPinned;
+}
+
+int wwAtmoSun()
+{
+	return as().sun;
+}
+
+void wwAtmoSetSun( int mode )
+{
+	AtState & s = as();
+	if ( s.sunPinned )
+		return;
+	s.sun = std::clamp( mode, 0, 2 );
+	QSettings().setValue( QLatin1StringView( kSunKey ), s.sun );
+}
+
+bool wwAtmoSunPinned()
+{
+	return as().sunPinned;
+}
+
+int wwAtmoSunKey()
+{
+	const AtState & s = as();
+	return s.tier > 0 ? s.sun + 3 * ( wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" ) )
+		: 0;
+}
+
+bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float sun[3], float amb[3], float dalc[6][3] )
+{
+	const AtState & s = as();
+	if ( s.tier <= 0 || s.sun <= 0 )
+		return false;
+	const bool flat = wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" );
+	float haze[3];
+	hazeFromFog( fog[0], fog[1], fog[2], fog[3], red( "nohaze" ), haze );
+	float rows[7][3];
+	std::copy( amb, amb + 3, rows[0] );
+	for ( int a = 0; a < 6; a++ )
+		std::copy( dalc[a], dalc[a] + 3, rows[1 + a] );
+	const float was[3] = { sun[0], sun[1], sun[2] };
+	skyKeyLight( s.sun, muLight, haze, keyLum45, flat, sun, rows, 7 );
+	std::copy( rows[0], rows[0] + 3, amb );
+	for ( int a = 0; a < 6; a++ )
+		std::copy( rows[1 + a], rows[1 + a] + 3, dalc[a] );
+	// stderr: the first change and every 240th after (the light is recomputed once per hour/weather change)
+	static int n = 0;
+	if ( n++ % 240 == 0 )
+		fprintf( stderr, "atmo sun: mode=%s%s mu=%.3f key %.4f,%.4f,%.4f -> %.4f,%.4f,%.4f amb -> %.4f,%.4f,%.4f\n",
+			s.sun == 2 ? "full" : "tint", flat ? ",RED=flat" : "", double( muLight ), double( was[0] ), double( was[1] ),
+			double( was[2] ), double( sun[0] ), double( sun[1] ), double( sun[2] ), double( amb[0] ), double( amb[1] ),
+			double( amb[2] ) );
+	return true;
 }
 
 void wwAtmoApFrame()

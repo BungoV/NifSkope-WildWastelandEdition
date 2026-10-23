@@ -72,6 +72,7 @@ public:
 	QComboBox * sunPathBox = nullptr;
 	QComboBox * physicalSkyBox = nullptr;	// lane ATMO1
 	QComboBox * aerialPerspectiveBox = nullptr;	// lane SKYA (ATMO2)
+	QComboBox * sunlightFromSkyBox = nullptr;	// lane SKYA (ATMOSUN1)
 	QComboBox * cascadeQualityBox = nullptr;
 	QComboBox * contactShadowsBox = nullptr;
 	QComboBox * terrainShadowsBox = nullptr;

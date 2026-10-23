@@ -329,6 +329,7 @@ struct LdLight
 };
 
 LdLight computeLight();
+WwFog currentFog();
 
 /* lane PERF1: every shape's program setup asks for the light several times a frame; it is a pure function of
  * the resolved weather (gen), the hour and the Sun row, so it is computed once per change of those */
@@ -339,12 +340,15 @@ LdLight currentLight()
 	static quint64 gen = 0;
 	static double hour = -1.0;
 	static bool sun = false;
+	static int atmoSun = 0;	// lane SKYA (ATMOSUN1): the Sunlight From Sky row, its red and the Physical Sky tier
 	static LdLight memo;
-	if ( gen != s.gen || hour != s.hour || sun != s.sun ) {
+	const int atmoKey = wwAtmoSunKey();
+	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey ) {
 		memo = computeLight();
 		gen = s.gen;
 		hour = s.hour;
 		sun = s.sun;
+		atmoSun = atmoKey;
 	}
 	return memo;
 }
@@ -400,6 +404,21 @@ LdLight computeLight()
 			for ( int c = 0; c < 3; c++ )
 				L.dalc[a][c] = L.amb[c];	// NAM0 Ambient: the flat fallback
 		}
+	}
+	if ( wwAtmoSunKey() > 0 ) {
+		/* lane SKYA (ATMOSUN1): the key and the ambient through the physical sky's air toward the light (the moon by
+		 * night, as the engine's light is), the brightness anchored on the weather's Day (Night) key at 45 degrees */
+		const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
+		const bool night = s.hour < raw.A || s.hour > raw.D;
+		WwTodKeys k;
+		k.a = k.b = night ? WwTodNight : WwTodDay;
+		k.t = 0.0f;
+		EsmWeather::blendRowLab( s.w, WwRowSunlight, k, rgb );
+		const float keyLum = 0.2126f * lin( rgb[0] ) + 0.7152f * lin( rgb[1] ) + 0.0722f * lin( rgb[2] );
+		const float len = std::sqrt( L.sunDir[0] * L.sunDir[0] + L.sunDir[1] * L.sunDir[1] + L.sunDir[2] * L.sunDir[2] );
+		const WwFog fog = currentFog();
+		const float fogIn[4] = { fog.effOff ? 0.0f : fog.fogFar, fog.effOff ? 0.0f : fog.maxv, fog.fMid, fog.fRange };
+		wwAtmoKeyLight( len > 0.0f ? L.sunDir[2] / len : 1.0f, fogIn, keyLum, L.sun, L.amb, L.dalc );
 	}
 	return L;
 }

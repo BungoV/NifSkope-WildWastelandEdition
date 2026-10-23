@@ -1,0 +1,67 @@
+// lane SKYA: prints src/gl/atmomath.h's results on a fixed grid, one "key value..." line each, for
+// tests/spells/atmomath_check.py (which compares them with tests/spells/atmo_model.py and published numbers).
+// Build: g++ -O2 -std=c++17 -I src tests/atmomath/atmomath_dump.cpp -o <scratch>/atmomath_dump.exe
+#include "gl/atmomath.h"
+
+#include <cmath>
+#include <cstdio>
+
+using namespace WwAtmoMath;
+
+int main()
+{
+	float hz[2][3];
+	hazeFromFog( 0.0f, 0.0f, 0.0f, 10000.0f, false, hz[0] );
+	hazeFromFog( 20000.0f / ( kUnitKm * 1000.0f ), 0.6f, 0.0f, 10000.0f, false, hz[1] );	// Far 20 km, Max 0.6
+	for ( int k = 0; k < 2; k++ )
+		std::printf( "haze %d %.7g %.7g %.7g\n", k, hz[k][0], hz[k][1], hz[k][2] );
+	const float mus[] = { 1.0f, 0.7071f, 0.3f, 0.1f, 0.03f, 0.0f };
+	for ( int k = 0; k < 2; k++ )
+		for ( float mu : mus ) {
+			float t[3];
+			cpuTrans( 0.0f, mu, hz[k], false, t );
+			std::printf( "trans %d %.4f %.7g %.7g %.7g\n", k, mu, t[0], t[1], t[2] );
+		}
+	// ATMOSUN1: sun at 45 deg and at 3 deg, the weather's key (a warm-white) and ambient (a blue-grey)
+	const float key[3] = { 1.0f, 0.95f, 0.85f }, amb[3] = { 0.20f, 0.24f, 0.30f };
+	float t45[3], tlow[3];
+	cpuTrans( 0.0f, 0.7071f, hz[1], false, t45 );
+	cpuTrans( 0.0f, 0.0523f, hz[1], false, tlow );
+	const float kl = lum( key );
+	for ( int mode = 1; mode <= 2; mode++ ) {
+		float o45[3], olow[3];
+		sunLight( mode, kl, t45, t45, key, o45 );
+		sunLight( mode, kl, tlow, t45, key, olow );
+		std::printf( "sun %d 45 %.7g %.7g %.7g\n", mode, o45[0], o45[1], o45[2] );
+		std::printf( "sun %d 3 %.7g %.7g %.7g\n", mode, olow[0], olow[1], olow[2] );
+	}
+	float a45[3] = { amb[0], amb[1], amb[2] }, alow[3] = { amb[0], amb[1], amb[2] };
+	ambientTint( t45, t45, a45 );
+	ambientTint( tlow, t45, alow );
+	std::printf( "amb 45 %.7g %.7g %.7g\n", a45[0], a45[1], a45[2] );
+	std::printf( "amb 3 %.7g %.7g %.7g\n", alow[0], alow[1], alow[2] );
+	std::printf( "key %.7g %.7g %.7g\n", key[0], key[1], key[2] );
+	std::printf( "ambin %.7g %.7g %.7g\n", amb[0], amb[1], amb[2] );
+	// the sky irradiance (the ambient's tint) at 45, 20, 10 and 3 degrees
+	for ( int deg : { 45, 20, 10, 3 } ) {
+		float e[3];
+		skyIrradiance( std::sin( float( deg ) * kPi / 180.0f ), hz[1], e );
+		std::printf( "irr %d %.7g %.7g %.7g\n", deg, e[0], e[1], e[2] );
+	}
+	// the shipped policy (skyKeyLight, what atmosphere.cpp's wwAtmoKeyLight calls), with and without red "flat"
+	for ( int redFlat = 0; redFlat < 2; redFlat++ )
+		for ( int mode = 1; mode <= 2; mode++ )
+			for ( int deg : { 45, 3 } ) {
+				float s[3] = { key[0], key[1], key[2] }, a[1][3] = { { amb[0], amb[1], amb[2] } };
+				skyKeyLight( mode, deg == 45 ? 0.7071f : 0.0523f, hz[1], kl, redFlat != 0, s, a, 1 );
+				std::printf( "skykey %d %d %d %.7g %.7g %.7g %.7g %.7g %.7g\n", redFlat, mode, deg, s[0], s[1], s[2],
+					a[0][0], a[0][1], a[0][2] );
+			}
+	// NIGHT1
+	for ( int p = 0; p < 8; p++ )
+		std::printf( "moon %d %.4f %.7g %.7g\n", p, moonPhaseAlpha( p ), moonPhaseFactor( p, false ), moonPhaseFactor( p, true ) );
+	// EXPO1
+	std::printf( "expo %.7g %.7g %.7g\n", adaptedWithSky( 0.2f, 0.6f, 1.5f, false ), adaptedWithSky( 0.2f, 0.6f, 1.5f, true ),
+		adaptedWithSky( 0.2f, 1.0f, 1.5f, false ) );
+	return 0;
+}

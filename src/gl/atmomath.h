@@ -99,9 +99,7 @@ inline float moonPhaseFactor( int phase, bool redNoPhase )
  * illuminance at a point = E_sun x T(mu)). k = the weather's Day key luminance / the 45-degree transmittance's
  * luminance, the same k the sky uses (atmosphere.cpp), so a 45-degree sun keeps the weather's Day brightness.
  *   mode 1 (Tint): the weather's own key luminance, the transmittance's colour (mu held at 0.02 or above)
- *   mode 2 (Full): k x T(mu), the colour and the brightness (0 once the light is under the horizon)
- * The ambient (both modes): the weather's ambient luminance, its colour turned by T(mu) against T(45 deg), so a
- * 45-degree sun keeps the weather's ambient colour exactly and a low sun warms it. */
+ *   mode 2 (Full): k x T(mu), the colour and the brightness (0 once the light is under the horizon) */
 inline void sunLight( int mode, float keyLum45, const float T[3], const float T45[3], const float vanilla[3],
 	float out[3] )
 {
@@ -116,6 +114,78 @@ inline void sunLight( int mode, float keyLum45, const float T[3], const float T4
 		out[c] = lt > 1e-6f ? lv * T[c] / lt : vanilla[c];
 }
 
+/* ATMOSUN1: the sky's irradiance on a level ground (cosine-weighted upper hemisphere) with the sun at cos zenith
+ * mus, single scattering (Rayleigh + Mie, Hillaire 2020 eq. 3 without the MS term), sun irradiance 1. Only its
+ * COLOUR is used (the ambient's tint), so the missing multiple scattering is checked against the model's full sky
+ * (tests/spells/atmomath_check.py, gate "sky irradiance"). 8 x 16 view rays, 16 steps, 24-step light rays: ~1 ms. */
+inline void skyIrradiance( float mus, const float haze[3], float out[3] )
+{
+	constexpr int NE = 8, NA = 16, NS = 16;
+	const float sx = std::sqrt( std::max( 0.0f, 1.0f - mus * mus ) ), sz = mus;
+	double acc[3] = { 0, 0, 0 }, wsum = 0;
+	for ( int i = 0; i < NE; i++ ) {
+		const float el = ( float( i ) + 0.5f ) / NE * 0.5f * kPi;
+		const float ce = std::cos( el ), se = std::sin( el );
+		for ( int j = 0; j < NA; j++ ) {
+			const float az = ( float( j ) + 0.5f ) / NA * 2.0f * kPi;
+			const float vx = ce * std::cos( az ), vy = ce * std::sin( az ), vz = se;
+			const float w = ce * se;	// cos(theta) dOmega on the elevation grid
+			const float nu = vx * sx + vz * sz;
+			const float pr = 3.0f / ( 16.0f * kPi ) * ( 1.0f + nu * nu );
+			const float g = kMieG, pm = ( 1.0f - g * g ) / ( 4.0f * kPi * std::pow( std::max( 1e-4f, 1.0f + g * g - 2.0f * g * nu ), 1.5f ) );
+			// the view ray to the top of the air, steps packed toward the ground (the haze sits there)
+			const float r0 = kRb;
+			const float d = -r0 * vz + std::sqrt( r0 * r0 * ( vz * vz - 1.0f ) + kRt * kRt );
+			double od[3] = { 0, 0, 0 }, L[3] = { 0, 0, 0 };
+			for ( int k = 0; k < NS; k++ ) {
+				const float a0 = float( k ) / NS, a1 = float( k + 1 ) / NS, am = 0.5f * ( a0 + a1 );
+				const float t = d * am * am, dt = d * ( a1 * a1 - a0 * a0 );
+				const float px = vx * t, py = vy * t, pz = r0 + vz * t;
+				const float r = std::sqrt( px * px + py * py + pz * pz );
+				const float h = std::max( r - kRb, 0.0f );
+				float e[3];
+				odAt( h, haze, false, e );
+				const float muS = ( px * sx + pz * sz ) / r;
+				float Ts[3];
+				// the light ray (cpuTrans's math, fewer steps)
+				if ( muS < 0.0f && r * r * ( muS * muS - 1.0f ) + kRb * kRb >= 0.0f ) {
+					Ts[0] = Ts[1] = Ts[2] = 0.0f;
+				} else {
+					const float dl = std::max( 0.0f, -r * muS + std::sqrt( std::max( 0.0f, r * r * ( muS * muS - 1.0f ) + kRt * kRt ) ) );
+					constexpr int NL = 24;
+					double ol[3] = { 0, 0, 0 };
+					for ( int q = 0; q < NL; q++ ) {
+						const float b0 = float( q ) / NL, b1 = float( q + 1 ) / NL, bm = 0.5f * ( b0 + b1 );
+						const float tt = dl * bm * bm, ww = dl * ( b1 * b1 - b0 * b0 );
+						const float rr = std::sqrt( r * r + tt * tt + 2.0f * r * muS * tt );
+						float el2[3];
+						odAt( rr - kRb, haze, false, el2 );
+						for ( int c = 0; c < 3; c++ )
+							ol[c] += double( el2[c] ) * ww;
+					}
+					for ( int c = 0; c < 3; c++ )
+						Ts[c] = float( std::exp( -ol[c] ) );
+				}
+				const float dr = std::exp( -h / 8.0f ), dm = std::exp( -h / 1.2f );
+				const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
+				for ( int c = 0; c < 3; c++ ) {
+					const double tv = std::exp( -( od[c] + 0.5 * double( e[c] ) * dt ) );
+					const double sc = double( kRay[c] ) * dr * pr + double( kMieS * dm + dh * ( kMieS / kMieE ) ) * pm;
+					L[c] += tv * sc * Ts[c] * dt;
+					od[c] += double( e[c] ) * dt;
+				}
+			}
+			for ( int c = 0; c < 3; c++ )
+				acc[c] += L[c] * w;
+			wsum += w;
+		}
+	}
+	for ( int c = 0; c < 3; c++ )
+		out[c] = float( acc[c] / wsum * kPi );	// E = pi x the cosine-weighted mean radiance
+}
+
+/* the ambient's tint: the weather's ambient luminance kept, its colour turned by the sky irradiance's colour now
+ * against the same at 45 degrees (E, E45 from skyIrradiance), so a 45-degree sun keeps the weather's colour exactly */
 inline void ambientTint( const float T[3], const float T45[3], float rgb[3] )
 {
 	const float lt = lum( T ), l45 = lum( T45 ), lv = lum( rgb );
@@ -129,6 +199,34 @@ inline void ambientTint( const float T[3], const float T45[3], float rgb[3] )
 	const float lo = lum( o );
 	for ( int c = 0; c < 3; c++ )
 		rgb[c] = lo > 1e-9f ? o[c] * lv / lo : rgb[c];
+}
+
+/* ATMOSUN1: the whole Sunlight From Sky policy, as atmosphere.cpp ships it (the unit test calls this same function).
+ * mu = cos zenith of the light (the sun by day, the moon by night: moonlight crosses the same air); keyLum45 = the
+ * weather's Day (or Night) key luminance. The key: sunLight above (Tint holds mu at 0.02 or above, Full uses it as is).
+ * The ambient rows (amb, each DALC side): ambientTint by the sky irradiance's colour (skyIrradiance), not by T: the
+ * sky's light turns far less than the sun's (the model: R/B x2.4 from 45 to 3 degrees where T's is x17), mu held at
+ * 0.02 or above in both modes.
+ * Red "flat" (WW_ATMO_SUN_RED=flat): T := T(45 deg) at every height, the low sun no warmer, which must fail its gate. */
+inline void skyKeyLight( int mode, float mu, const float haze[3], float keyLum45, bool redFlat, float sun[3],
+	float ( *amb )[3], int nAmb )
+{
+	if ( mode <= 0 )
+		return;
+	float T45[3], T[3], E45[3], E[3];
+	cpuTrans( 0.0f, 0.70710678f, haze, false, T45 );
+	skyIrradiance( 0.70710678f, haze, E45 );
+	if ( redFlat ) {
+		std::copy( T45, T45 + 3, T );
+		std::copy( E45, E45 + 3, E );
+	} else {
+		cpuTrans( 0.0f, mode == 2 ? mu : std::max( mu, 0.02f ), haze, false, T );
+		skyIrradiance( std::max( mu, 0.02f ), haze, E );
+	}
+	const float v[3] = { sun[0], sun[1], sun[2] };
+	sunLight( mode, keyLum45, T, T45, v, sun );
+	for ( int i = 0; i < nAmb; i++ )
+		ambientTint( E, E45, amb[i] );
 }
 
 /* EXPO1: the frame's mean luminance with the sky in it. The imagespace measure (celllights.h THE IMAGESPACE) averages
