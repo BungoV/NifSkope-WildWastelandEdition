@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GAPLOOK2 (2026-10-23, branch gaplook2-20261023, on GAPLOOK1): real sun and moon, actors outdoors, weapon parts
+
+Each is its own Show-menu row with an env pin; OFF = the look before this lane.
+- **Real sun and moon (EPHEM1):** `WW_SKY_EPHEM` (needs Sun Path = Real). FO4CS Solar's NOAA sun and Meeus moon at
+  Boston on Fallout's calendar (day 0 = 2287-10-23); the moon billboard sits at the real moon with its real phase.
+  Parity with FO4CS over 288 samples: 0.000000 deg. Gate tests/skyephem_gate.cpp. Red `_RED=june`. CPU only, ~0 ms.
+- **Actors outdoors (PLACED1):** `WW_CELL_ACTORS_OUT`. Exterior cells place their actors (the block's ACHRs and the
+  persistent cell's inside the block) as interiors do. Read when the cell opens; the tick reopens it. Red `_RED=lift`.
+- **Weapon mod parts (MISS1):** `WW_CELL_WEAP_PARTS`. A placed weapon draws its default object template's mod parts on
+  their connect points (src/cellweapon.*). Read when the cell opens; the tick reopens it. Red `_RED=root`.
+
 ## Lane GAPLOOK1 (2026-10-23, branch gaplook1-20261023): lamp-shadow budget, fog extras, contact tiers, moonlit terrain, bloom width
 
 Every item is its own Show-menu row with an env pin, live, and OFF = the look before this lane.
