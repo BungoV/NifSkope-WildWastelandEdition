@@ -670,6 +670,8 @@ void Particles::drawShapes( NodeList * secondPass )
 			 * program, the opaque pass's depth for the soft ball; off: volPart 0 and nothing else read */
 			wwSunShadowUniforms( scene );
 			volPart = wwVolPartUniforms( scene );
+			if ( wwEnv( "WW_CELL_PARTICLES_AIR_RED" ).trimmed() == "1" )
+				prog->uni1b( "cellGiAirOn", false );	// SKY3 red: the puff reads the grid's shell, as before
 			{
 				const bool soft = volPart && scene->grabEffectDepth();
 				vpAlways = soft && !( wwVolPartRed() & 4 );	// the ball's fade is the occlusion

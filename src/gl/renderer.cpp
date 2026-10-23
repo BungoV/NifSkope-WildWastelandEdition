@@ -2126,6 +2126,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			constexpr float kVpCardDepth = 64.0f;
 			const bool fxLit = wwCellFxLitFor( scene->nifModel, mesh->id() ) != nullptr;
 			const bool vp = wwVolPartUniforms( scene ) && fxLit;
+			if ( wwEnv( "WW_CELL_PARTICLES_AIR_RED" ).trimmed() == "1" && prog->uniLocation( "cellGiAirOn" ) >= 0 )
+				prog->uni1b( "cellGiAirOn", false );	// SKY3 red: a lit card's puff reads the grid's shell, as before
 			if ( !vp && prog->uniLocation( "volPart" ) >= 0 )
 				prog->uni1i( "volPart", 0 );
 			const bool espSoft = esp->soft && esp->falloff.softDepth > 0.0f;

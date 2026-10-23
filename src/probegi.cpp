@@ -2035,6 +2035,50 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				break;
 			av *= 1.1;
 		}
+		/* SKY3: the open-air top (a SKY2 residual). Above the box the shader clamps to the top layer, which held the
+		 * street probes' blend (0.36 of the tracer's open air 0.52-0.66 at Concord). The box now reaches 2 voxels over
+		 * the highest geometry in it (same limits, the voxel kept), and a voxel above every surface of its column
+		 * (+-1 voxel) reads at least the sky its eye sees (64 rays, GIDARK1's own-sky law). Red WW_CELL_GI_RED=noairtop. */
+		const bool airTopOn = skyOn && spec.red != QLatin1String( "noairtop" );
+		std::vector<float> colTop;
+		int airExt = 0;
+		if ( airTopOn ) {
+			colTop.assign( size_t( ad[0] ) * size_t( ad[1] ), -1e30f );
+			double soupTop = -1e300;
+			for ( size_t t = 0; t + 9 <= soup.tris.size(); t += 9 ) {
+				const float * T = soup.tris.data() + t;
+				const double lx = std::min( { T[0], T[3], T[6] } ), hx = std::max( { T[0], T[3], T[6] } );
+				const double ly = std::min( { T[1], T[4], T[7] } ), hy = std::max( { T[1], T[4], T[7] } );
+				const float hz = std::max( { T[2], T[5], T[8] } );
+				const int x0 = int( std::floor( ( lx - R.origin[0] ) / av ) ), x1 = int( std::floor( ( hx - R.origin[0] ) / av ) );
+				const int y0 = int( std::floor( ( ly - R.origin[1] ) / av ) ), y1 = int( std::floor( ( hy - R.origin[1] ) / av ) );
+				if ( x1 < 0 || y1 < 0 || x0 >= ad[0] || y0 >= ad[1] )
+					continue;
+				soupTop = std::max( soupTop, double( hz ) );
+				for ( int yy = std::max( y0, 0 ); yy <= std::min( y1, ad[1] - 1 ); yy++ )
+					for ( int xx = std::max( x0, 0 ); xx <= std::min( x1, ad[0] - 1 ); xx++ ) {
+						float & ct = colTop[size_t( yy ) * size_t( ad[0] ) + size_t( xx )];
+						ct = std::max( ct, hz );
+					}
+			}
+			std::vector<float> dil( colTop.size(), -1e30f );
+			for ( int yy = 0; yy < ad[1]; yy++ )
+				for ( int xx = 0; xx < ad[0]; xx++ )
+					for ( int dy = -1; dy <= 1; dy++ )
+						for ( int dx = -1; dx <= 1; dx++ ) {
+							const int qx = xx + dx, qy = yy + dy;
+							if ( qx >= 0 && qy >= 0 && qx < ad[0] && qy < ad[1] )
+								dil[size_t( yy ) * size_t( ad[0] ) + size_t( xx )] = std::max( dil[size_t( yy ) * size_t( ad[0] ) + size_t( xx )],
+									colTop[size_t( qy ) * size_t( ad[0] ) + size_t( qx )] );
+						}
+			colTop = std::move( dil );
+			const double top = R.origin[2] + ad[2] * av;
+			if ( soupTop > -1e299 )
+				airExt = std::max( 0, int( std::ceil( ( soupTop + 2.0 * av - top ) / av ) ) );
+			const int cap = int( std::min<qint64>( 262144 / ( qint64( ad[0] ) * ad[1] ), 2048 / 6 ) ) - ad[2];
+			airExt = std::min( airExt, std::max( cap, 0 ) );
+			ad[2] += airExt;
+		}
 		R.airVoxel = float( av );
 		for ( int c = 0; c < 3; c++ ) {
 			R.airDims[c] = ad[c];
@@ -2042,8 +2086,76 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 		const size_t na = size_t( ad[0] ) * size_t( ad[1] ) * size_t( ad[2] );
 		R.air.assign( na * 6 * 4, 0.0f );
+		// SKY3: the open voxels' sky visibility (8 octants of 64 Fibonacci rays), kept while the geometry and box stand
+		struct AirVis { quint64 tris = 0; QString box; std::vector<uint8_t> open; };
+		static AirVis airVisMemo;
+		static std::mutex airVisLock;
+		constexpr int kAirDirs = 64;
+		double airDirs[kAirDirs][3];
+		int airOct[kAirDirs], airOctN[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+		for ( int k = 0; k < kAirDirs; k++ ) {
+			const double ga = 3.14159265358979323846 * ( 3.0 - std::sqrt( 5.0 ) );
+			const double zz = 1.0 - ( k + 0.5 ) * 2.0 / kAirDirs, rr = std::sqrt( std::max( 0.0, 1.0 - zz * zz ) );
+			airDirs[k][0] = std::cos( ga * k ) * rr;
+			airDirs[k][1] = std::sin( ga * k ) * rr;
+			airDirs[k][2] = zz;
+			airOct[k] = ( airDirs[k][0] < 0.0 ? 1 : 0 ) | ( airDirs[k][1] < 0.0 ? 2 : 0 ) | ( airDirs[k][2] < 0.0 ? 4 : 0 );
+			airOctN[airOct[k]]++;
+		}
+		auto airCentre = [&]( size_t i, double c[3] ) {
+			const size_t x = i % size_t( ad[0] ), y = ( i / size_t( ad[0] ) ) % size_t( ad[1] ), z = i / ( size_t( ad[0] ) * size_t( ad[1] ) );
+			c[0] = R.airOrigin[0] + ( double( x ) + 0.5 ) * av;
+			c[1] = R.airOrigin[1] + ( double( y ) + 0.5 ) * av;
+			c[2] = R.airOrigin[2] + ( double( z ) + 0.5 ) * av;
+			return colTop.empty() ? false : c[2] > double( colTop[y * size_t( ad[0] ) + x] );
+		};
+		std::vector<uint8_t> airOpen;   // per voxel 8 counts of open rays (above its column only), else empty
+		std::atomic<int> nTop( 0 );
+		bool airVisHit = false;
+		double msAirRays = 0.0;
+		if ( airTopOn ) {
+			const QString box = QStringLiteral( "%1 %2 %3 %4 %5 %6 %7" ).arg( double( R.airOrigin[0] ) ).arg( double( R.airOrigin[1] ) )
+				.arg( double( R.airOrigin[2] ) ).arg( av, 0, 'g', 17 ).arg( ad[0] ).arg( ad[1] ).arg( ad[2] );
+			{
+				std::lock_guard<std::mutex> g( airVisLock );
+				if ( memoOn && trisKey != 0 && airVisMemo.tris == trisKey && airVisMemo.box == box ) {
+					airOpen = airVisMemo.open;
+					airVisHit = true;
+				}
+			}
+			if ( !airVisHit ) {
+				QElapsedTimer rc;
+				rc.start();
+				airOpen.assign( na * 8, 0 );
+				parallelFor( na, [&]( size_t i ) {
+					double c[3];
+					if ( !airCentre( i, c ) )
+						return;
+					const double o[3] = { c[0] - O[0], c[1] - O[1], c[2] };
+					for ( int d = 0; d < kAirDirs; d++ ) {
+						double tHit;
+						if ( !bvh.ray( o, airDirs[d], 131072.0, &tHit ) )
+							airOpen[i * 8 + size_t( airOct[d] )]++;
+					}
+				} );
+				msAirRays = rc.nsecsElapsed() / 1e6;
+				if ( memoOn && trisKey != 0 ) {
+					std::lock_guard<std::mutex> g( airVisLock );
+					airVisMemo.tris = trisKey;
+					airVisMemo.box = box;
+					airVisMemo.open = airOpen;
+				}
+			}
+		}
+		std::atomic<int> nRaised( 0 );
 		std::atomic<int> nSeen( 0 ), nNear( 0 ), nNearest( 0 );
+		constexpr int kTaps = ProbeRelightOps::kAirTaps;
+		if ( REC ) {	// SKY3: the door's live relight moves the air with its probes
+			REC->airProbe.assign( na * size_t( kTaps ), -1 );
+			REC->airW.assign( na * size_t( kTaps ), 0.0f );
+		}
 		parallelFor( na, [&]( size_t i ) {
+			std::vector<std::pair<double, int>> taps;	// SKY3: (weight, probe) of the blend, recording only
 			const int x = int( i % size_t( ad[0] ) ), y = int( ( i / size_t( ad[0] ) ) % size_t( ad[1] ) ),
 				z = int( i / ( size_t( ad[0] ) * size_t( ad[1] ) ) );
 			const double c[3] = { R.airOrigin[0] + ( x + 0.5 ) * av, R.airOrigin[1] + ( y + 0.5 ) * av, R.airOrigin[2] + ( z + 0.5 ) * av };
@@ -2069,6 +2181,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 								for ( int a = 0; a < 6; a++ )
 									for ( int ch = 0; ch < 3; ch++ )
 										acc[a][ch] += t * t * P.E[a][ch];
+								if ( REC )
+									taps.emplace_back( t * t, j );
 							}
 						}
 			};
@@ -2096,6 +2210,43 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 					for ( int ch = 0; ch < 3; ch++ )
 						acc[a][ch] = up[best].E[a][ch];
 				nNearest++;
+				if ( REC )
+					taps.assign( 1, { 1.0, int( best ) } );
+			}
+			double cc[3];
+			const bool openTop = !airOpen.empty() && airCentre( i, cc );
+			if ( REC && !openTop && !taps.empty() ) {	// the heaviest kTaps, summing to 1 (open-top voxels keep their sky)
+				const size_t keep = std::min( taps.size(), size_t( kTaps ) );
+				std::partial_sort( taps.begin(), taps.begin() + std::ptrdiff_t( keep ), taps.end(),
+					[]( const std::pair<double, int> & l, const std::pair<double, int> & r ) { return l.first > r.first; } );
+				double ks = 0.0;
+				for ( size_t k = 0; k < keep; k++ )
+					ks += taps[k].first;
+				for ( size_t k = 0; k < keep && ks > 0.0; k++ ) {
+					REC->airProbe[i * size_t( kTaps ) + k] = taps[k].second;
+					REC->airW[i * size_t( kTaps ) + k] = float( taps[k].first / ks );
+				}
+			}
+			if ( openTop ) {	// SKY3: open air reads at least the sky its eye sees
+				nTop++;
+				float vis[8];
+				for ( int q = 0; q < 8; q++ )
+					vis[q] = airOctN[q] > 0 ? float( airOpen[i * 8 + size_t( q )] ) / float( airOctN[q] ) : 0.0f;
+				double S[6][3] = {};
+				probeSkyCube( vis, nullptr, spec.sky, redSkyNoVis, redSkyNoTint, S );
+				if ( wsum <= 0.0 ) {
+					wsum = 1.0;
+					std::memset( acc, 0, sizeof acc );
+				}
+				for ( int a = 0; a < 6; a++ ) {
+					const double lS = 0.2125 * S[a][0] + 0.7154 * S[a][1] + 0.0721 * S[a][2];
+					const double lB = ( 0.2125 * acc[a][0] + 0.7154 * acc[a][1] + 0.0721 * acc[a][2] ) / wsum;
+					if ( !( lS > lB ) )
+						continue;
+					nRaised++;
+					for ( int ch = 0; ch < 3; ch++ )
+						acc[a][ch] = S[a][ch] * wsum;
+				}
 			}
 			for ( int a = 0; a < 6; a++ ) {
 				const size_t o = ( size_t( a ) * na + i ) * 4;
@@ -2107,7 +2258,11 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		R.airNote = QStringLiteral( "gi air: %1x%2x%3 voxel %4 (%5 KB as RGBA16F); voxels lit by the probes they see %6, by the probes "
 			"in reach (unseen) %7, by the nearest probe %8; ms %9" ).arg( ad[0] ).arg( ad[1] ).arg( ad[2] ).arg( av, 0, 'f', 1 )
 			.arg( qint64( na ) * 6 * 8 / 1024 ).arg( int( nSeen ) ).arg( int( nNear ) - int( nSeen ) ).arg( int( nNearest ) )
-			.arg( airClock.nsecsElapsed() / 1e6, 0, 'f', 0 );
+			.arg( airClock.nsecsElapsed() / 1e6, 0, 'f', 0 )
+			+ ( airTopOn ? QStringLiteral( "; open top: +%1 layers, %2 voxels above their column's surfaces, %3 axes raised to "
+				"their own sky, rays %4 (ms %5)" ).arg( airExt ).arg( int( nTop ) ).arg( int( nRaised ) )
+				.arg( airVisHit ? QStringLiteral( "kept" ) : QString::number( int( nTop ) ) + QStringLiteral( " voxels x 64" ) )
+				.arg( msAirRays, 0, 'f', 0 ) : QStringLiteral( "; open top: off" ) );
 		std::fprintf( stderr, "%s\n", qPrintable( R.airNote ) );
 	}
 

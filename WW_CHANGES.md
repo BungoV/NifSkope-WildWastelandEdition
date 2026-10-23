@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SKY3 (2026-10-23, branch sky3-20261023): the probes' sky from the probes' height, the open air's own sky, air in door live, lit puffs in the air
+
+### SKYGI2: the physical-sky capture stands at the probes, not the camera (defect fix, on)
+- The probes' 6-face sky capture (GI Sky From Physical Sky on) drew the sky from the VIEW camera's height, so a high
+  camera changed every probe's sky light. The capture now stands at the median height of the cell's probes (rounded
+  to 64 u, part of the capture key only while the row is active: off = the old key byte for byte).
+- Repo gate tests/spells/atmo_gi_capture_check.py (a twin of probeSkyPictureQ's projection against
+  atmo_model.py's sky irradiance, tests/spells/atmo_skyrender.py renders the real atmo_sky.frag): PASS worst 0.0055
+  (< 0.03); red `--red half` (flat texel solid angle) 1.00, red `--red camz` (capture at 1.5 km) 0.17-0.24.
+- Red WW_ATMO_GI_RED=camz (live) = the old capture height.
+
+### Open-air clamp: the air above the surfaces takes its own sky (defect fix, on)
+- The air volume (FOGSLICE1) stopped at the GI grid's box top and its voxels above roofs blended the probes' sky
+  under them. The air grid now grows up to 2 voxels above the highest surface (capped by its voxel budget); a voxel
+  whose centre is above every surface in its column casts 64 rays for its own sky visibility and raises each axis to
+  that sky when brighter. Exteriors with the sky lit only. Red WW_CELL_GI_RED=noairtop (read at build).
+  The bake echo names it: "open top: +N layers, M voxels above their column's surfaces, K axes raised, rays ms".
+
+### Door live carries the air (defect fix, on)
+- celldoorlive.cpp's relight moved the probe grid but not the air volume: the fog in a doorway kept the open light.
+  The bake records each air voxel's 8 heaviest probe taps (ProbeRelightOps airProbe/airW); door live adds the
+  weighted shut-minus-open delta of the probes that moved. Echo "| air moved N". Red WW_CELL_DOORLIVE_AIR_RED=1.
+  The WW_CELL_GI_GPU relight already publishes the CPU grid with the air: no change there.
+
+### Lit puffs read the air's filled volume (defect fix, on)
+- Lit particles (cell_volpart.glsl) read the old grid's shell; they now read the air volume as the air pass does.
+  Red WW_CELL_PARTICLES_AIR_RED=1 (live).
+
+### Cost (1080p, expected; not measured live: the NifSkope lock was busy)
+- Air pass: unchanged shader. Lit puffs: one 3D texture tap per axis in place of the grid's room walk (about equal).
+  Capture: only on a key change. Open-air rays and door-live air: CPU at bake/relight, logged in the echoes.
+
 ## Lane SKY2B (2026-10-23, branch sky2b-20261023): the high-camera band, sky in view, Weather Tint on the haze
 
 ### SKYSTRIPE1: no dark band under the horizon from a high camera

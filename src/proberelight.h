@@ -148,6 +148,11 @@ struct ProbeRelightOps
 	std::vector<int> growSlot;              //!< grown slots in their order (ring 1, then ring 2)
 	std::vector<int> growStart, growSrc;    //!< per grown slot: the neighbour slots averaged
 	int growRing0 = 0;                      //!< growSlot[0 .. growRing0) = ring 1, the rest ring 2
+	/*! SKY3: the air volume (WwCellGi::air) as the probes it blends, kAirTaps a voxel (the heaviest, weights summing
+	 *  to 1; probe -1 = none). A door's live relight moves the air by these x the probes' change. Empty: no air. */
+	static constexpr int kAirTaps = 8;
+	std::vector<int> airProbe;
+	std::vector<float> airW;
 	// ---- doors
 	std::vector<quint32> doorRefs;          //!< door slot -> the door's ref
 	qint64 doorRays = 0;                    //!< census: entries re-traced against a door's real geometry

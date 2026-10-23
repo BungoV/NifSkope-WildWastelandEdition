@@ -7,6 +7,7 @@
 #include "gl/celllights.h"
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"
+#include "gl/atmosphere.h"	// SKY3: the physical sky's capture height
 #include "gl/scenelighting.h"
 #include "probegi.h"
 
@@ -64,11 +65,16 @@ PicNow & picNow()
 	return p;
 }
 
+float captureZNow();
+
 QString picKeyNow()
 {
 	float f[3];
+	const float z = captureZNow();
 	return wwLookdevSkyPictureKey() + ( skyPicFlat( f ) ? QStringLiteral( "|flat %1 %2 %3" ).arg( double( f[0] ) )
-		.arg( double( f[1] ) ).arg( double( f[2] ) ) : QString() );
+		.arg( double( f[1] ) ).arg( double( f[2] ) ) : QString() )
+		// SKY3: only while the probes take the physical sky (the dome has no height; Off keeps today's key)
+		+ ( std::isfinite( z ) ? QStringLiteral( "|z %1" ).arg( double( z ), 0, 'f', 0 ) : QString() );
 }
 }	// namespace
 
@@ -227,6 +233,33 @@ Kept & kept()
 	return k;
 }
 
+/* SKY3: the physical sky's capture stands at the kept exterior's probes' median height. It took the view camera's: the
+ * probes' sky depended on where the camera was at the first capture (a raised camera thins the haze). Red
+ * WW_ATMO_GI_RED=camz: the view's, as before. NaN while the dome is captured (no height) or no probe is known yet. */
+float captureZNow()
+{
+	const Kept & k = kept();
+	if ( !k.nif || !wwAtmoGiActive() || wwAtmoGiRedDome() || wwAtmoGiRedCamZ() )
+		return NAN;
+	const WwCellProbeView * pv = wwCellProbeViewFor( k.nif );
+	if ( !pv || pv->probes.size() < 21 )
+		return NAN;
+	static const float * seenData = nullptr;
+	static size_t seenSize = 0;
+	static float z = NAN;
+	if ( pv->probes.data() != seenData || pv->probes.size() != seenSize ) {
+		std::vector<float> zs;
+		zs.reserve( pv->probes.size() / 21 );
+		for ( size_t i = 0; i + 21 <= pv->probes.size(); i += 21 )
+			zs.push_back( pv->probes[i + 2] );
+		std::nth_element( zs.begin(), zs.begin() + std::ptrdiff_t( zs.size() / 2 ), zs.end() );
+		z = std::round( zs[zs.size() / 2] / 64.0f ) * 64.0f;	// 64 u steps: a relight's jitter never recaptures
+		seenData = pv->probes.data();
+		seenSize = pv->probes.size();
+	}
+	return z;
+}
+
 //! lane SKYPIC1: the relight that took the drawn sky states it, and a gate's dump folder gets it beside the bake's
 void skyPicRelit( const ProbeGiResult & gr, const ProbeGiSpec & spec )
 {
@@ -372,7 +405,9 @@ void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 			const int n = wwEnvIsSet( "WW_CELL_SKYPIC_N" ) ? wwEnvInt( "WW_CELL_SKYPIC_N" ) : 64;
 			p.key = key;
 			p.why.clear();
+			wwLookdevSetSkyCaptureZ( captureZNow() );
 			p.ok = wwLookdevCaptureSky( scene, n, haveFlat ? flat : nullptr, p.pic, &p.why );
+			wwLookdevSetSkyCaptureZ( NAN );
 			if ( p.ok ) {
 				/* below the horizon the game shows ground (the far terrain), never sky; NifSkope's dome goes on below it
 				 * only because the cell's ground ends. There the probes take the weather's ground-facing colour, as SKY1
