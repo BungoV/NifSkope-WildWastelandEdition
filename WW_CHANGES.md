@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane PERF4 (2026-10-23, branch perf4-20261023): two hidden-work cuts in the cell view (first part of FLYPERF1)
+
+- **Far cards stop hidden fragments early:** the card shader writes its own depth, so the card's early depth test was
+  off and every hidden fragment marched its sheets. A max-depth-per-pixel texture (cell_depthmax) now lets the card
+  drop a fragment whose nearest possible depth is behind the scene. `WW_FARCARD_ZCULL=0` = as before;
+  `WW_FARCARD_ZCULL_RED=1` (gates) takes the card's far end. Far-card pass about 0.7 to 0.4 ms at still_close5.
+- **The reflections' scene pass keeps the obscurance pass's depth:** it no longer clears and rebuilds depth, so only
+  the visible layer is shaded. `WW_CELL_SSR_ZREUSE=0` = as before; `WW_CELL_SSR_ZREUSE_RED=1` (gates) tests GL_LESS
+  and blanks it. Gate (WW_CELL_SSR_DUMP): reflection result 0 px different, scene buffer 1053 px of 1.97 M at most
+  0.008; the red changes every lit pixel.
+- **Measured:** the frame is CPU-bound by the draw submission (about 4800 draws a frame, 20 ms of per-draw setup,
+  6.5 ms camera cull), so these two cuts stay inside the run-to-run spread (still_close5 about 61 to 68 ms either
+  way). Profile, numbers and the next rows: notes/perf4/RESULTS.md (lane notes).
+
 ## Lane FXPARITY1 (2026-10-23, branch fxparity1-20261023): particles follow the game's rules (off by default)
 
 - **Row:** Scene window > Particle Game Rules (off), key `WW/FxParity`, live in every mode. `WW_FX_PARITY=1` / `=0`
