@@ -404,6 +404,11 @@ int wwCellPostPathFrame()
 	return ps().pathFrame;
 }
 
+float wwCellPostPathFps()
+{
+	return ps().pathFrame >= 0 ? ps().pathFps : 0.0f;
+}
+
 void wwCellPostSetPath( int frame, float fps )
 {
 	PostState & s = ps();
