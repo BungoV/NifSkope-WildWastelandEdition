@@ -185,6 +185,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	moonPhaseStarsBox->setCurrentIndex( std::clamp( wwAtmoNight(), 0, 1 ) );
 	wwMatchFieldStyle( moonPhaseStarsBox );
 	row( tr( "Moon Phase and Stars" ), moonPhaseStarsBox, true );
+	// lane SKYA (EXPO1): the eye adaptation counts the sky (needs Physical Sky), ships Off
+	exposureFromSkyBox = new QComboBox( tree );
+	exposureFromSkyBox->setObjectName( QStringLiteral( "exposureFromSky" ) );
+	exposureFromSkyBox->addItems( { tr( "Off" ), tr( "On" ) } );
+	exposureFromSkyBox->setCurrentIndex( std::clamp( wwAtmoExpo(), 0, 1 ) );
+	wwMatchFieldStyle( exposureFromSkyBox );
+	row( tr( "Exposure From Sky" ), exposureFromSkyBox, true );
 	liveCheck( cloudsBox, "lookdevClouds", tr( "Clouds" ), wwLookdevClouds() );
 	liveCheck( sunBox, "lookdevSun", tr( "Sun" ), wwLookdevSun() );
 	// lane TERRSHADOW1: Engine (the sky clock's arc) or Real (Boston's solar path); ships Engine
@@ -362,6 +369,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveTier( aerialPerspectiveBox, &wwAtmoSetAp );	// lane SKYA
 	liveTier( sunlightFromSkyBox, &wwAtmoSetSun );
 	liveTier( moonPhaseStarsBox, &wwAtmoSetNight );
+	liveTier( exposureFromSkyBox, &wwAtmoSetExpo );
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
 	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );
@@ -431,7 +439,7 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( fogBox ), static_cast<QWidget *>( shadowsBox ),
 			static_cast<QWidget *>( sunPathBox ), static_cast<QWidget *>( physicalSkyBox ),
 			static_cast<QWidget *>( aerialPerspectiveBox ), static_cast<QWidget *>( sunlightFromSkyBox ),
-			static_cast<QWidget *>( moonPhaseStarsBox ),
+			static_cast<QWidget *>( moonPhaseStarsBox ), static_cast<QWidget *>( exposureFromSkyBox ),
 			static_cast<QWidget *>( cascadeQualityBox ),
 			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ),
 			static_cast<QWidget *>( shadowParBox ), static_cast<QWidget *>( shadowDistanceBox ) } )

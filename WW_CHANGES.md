@@ -2,6 +2,25 @@
 
 ## Lane SKYA (2026-10-23, branch skya-20261023): the physical sky reaches the world, every part off by default
 
+### EXPO1: the eye adaptation counts the sky
+- **What:** the imagespace measure (the game's eye adaptation) averages only the cell-lit pixels, so an open view
+  of a bright sky adapts as if the sky were not there. With this row on, the rest of the frame counts at the
+  physical sky's mean luminance over the upper hemisphere: the sun's (and by night the moon's) sky-view table is
+  read back a frame late (PBO + fence, no stall), averaged by solid angle (24 x 24 directions, bilinear) and scaled
+  by the sky pass's own pi k. Both measure paths (`cellhdr.cpp` isApply, `glview.cpp` the full-size pass) go
+  through `wwAtmoAdapted`. Math in `src/gl/atmomath.h` (`skyDirToUv`, `skyViewMeanLum`, `adaptedWithSky`).
+  - The sky counts at its hemisphere mean, not at the pixels actually in view (those are not in the measure's
+    buffer): a first step, said as such.
+  - Interiors, or the Physical Sky just turned off: no sky read within two frames, the scene alone (today's).
+- **Row:** Render > Scene > Exposure From Sky (Off / On), key `Settings/Render/Scene/Exposure From Sky`, live; needs
+  Physical Sky on. `WW_ATMO_EXPO=0|1` pins it; reds `WW_ATMO_EXPO_RED=skyzero` (the sky counted as nothing) and
+  `zenithw` (the hemisphere mean not weighted by solid angle). Off = today's exposure exactly.
+- **Cost:** one or two texture read-backs a frame (192x108 RGBA32F = 324 KB each at High, 576 KB at Ultra; the PBOs
+  hold that), well under 0.05 ms GPU (estimate); CPU 576 bilinear samples. stderr `atmo expo: scene ... cover ...
+  sky ... -> ...` every 600th frame.
+- **Checks:** `tests/spells/atmomath_check.py` gates "sky mean" (a synthetic table of cos zenith averages to 0.50026,
+  want 1/2; red zenithw 0.637 fails) and "exposure" (red skyzero fails).
+
 ### NIGHT1: the moon's phase and the stars through the air
 - **What:** with the Physical Sky on, the moon's light follows its phase (the engine's own phase on the game day,
   esmweather `wwMoonPhase`): the night key light and the sky's moonlight are scaled by the phase's brightness against

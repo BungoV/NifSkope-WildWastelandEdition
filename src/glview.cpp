@@ -147,6 +147,7 @@ private:
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLExtraFunctions>	// lane FARVIEW1: the GPU timer
 #include "gl/celllights.h"	// lane IMGS1: the imagespace measure
+#include "gl/atmosphere.h"	// lane SKYA (EXPO1): the sky in the exposure's mean
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
 #include "gl/cellvolumeview.h"	// lane VOLFIT1: the Space stage's view
 #include "gl/cellssr.h"
@@ -3694,7 +3695,8 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 			if ( std::isfinite( px[i * 4 + c] ) )
 				sum += wgt[c] * px[i * 4 + c];
 	}
-	wwCellImageSpaceSetAdapted( scene, float( sum / double( std::max( counted, 1 ) ) ), counted );
+	wwCellImageSpaceSetAdapted( scene, wwAtmoAdapted( float( sum / double( std::max( counted, 1 ) ) ), counted,
+		int( cover.size() ) ), counted );
 	// lane BLOOM1: the game blooms a quarter-size copy of the HDR; a full-size (dump) measure is averaged 4x4
 	wwCellImageSpaceSetBloom( scene, px.data(), w, h, div == 1 ? 4 : 1 );
 	WW_SWITCH_STATIC( bool, echo, wwEnvInt( "WW_IS_MEASURE_ECHO" ) == 1 );	// lane PERF1: set against the frame's

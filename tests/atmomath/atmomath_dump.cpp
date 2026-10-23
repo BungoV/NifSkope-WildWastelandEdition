@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 using namespace WwAtmoMath;
 
@@ -67,6 +68,30 @@ int main()
 			starExtinction( mu, hz[1], redNoExt != 0, e );
 			std::printf( "star %d %.4f %.7g %.7g %.7g\n", redNoExt, mu, e[0], e[1], e[2] );
 		}
+	// EXPO1: a synthetic sky-view table holding max(cos zenith, 0) at each texel's direction (the inverse mapping,
+	// atmo_common.glsl atSkyUvToDir); its solid-angle mean over the upper hemisphere is exactly 1/2
+	{
+		const int w = 192, h = 108;
+		const float r = kRb + 0.002f;
+		std::vector<float> t( size_t( w ) * size_t( h ) * 4 );
+		const float vh = std::sqrt( r * r - kRb * kRb ), beta = std::acos( std::clamp( vh / r, -1.0f, 1.0f ) ), zh = kPi - beta;
+		for ( int j = 0; j < h; j++ )
+			for ( int i = 0; i < w; i++ ) {
+				const float vy = float( j ) / float( h - 1 );
+				float za;
+				if ( vy < 0.5f ) {
+					const float c = 1.0f - 2.0f * vy;
+					za = zh * ( 1.0f - c * c );
+				} else {
+					const float c = vy * 2.0f - 1.0f;
+					za = zh + beta * c * c;
+				}
+				float * p = t.data() + ( size_t( j ) * size_t( w ) + size_t( i ) ) * 4;
+				p[0] = p[1] = p[2] = std::max( std::cos( za ), 0.0f );
+				p[3] = 1.0f;
+			}
+		std::printf( "skymean %.7g %.7g\n", skyViewMeanLum( t.data(), w, h, r, false ), skyViewMeanLum( t.data(), w, h, r, true ) );
+	}
 	// EXPO1
 	std::printf( "expo %.7g %.7g %.7g\n", adaptedWithSky( 0.2f, 0.6f, 1.5f, false ), adaptedWithSky( 0.2f, 0.6f, 1.5f, true ),
 		adaptedWithSky( 0.2f, 1.0f, 1.5f, false ) );

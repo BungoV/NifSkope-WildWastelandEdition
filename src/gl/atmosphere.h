@@ -78,6 +78,16 @@ int wwAtmoNightKey( int phase );	//!< 0 when off; else a memo key of the phase a
 float wwAtmoMoonFactor( int phase );	//!< the moon's light against the full moon's (1 when off)
 void wwAtmoStarExtinction( float mu, float out[3] );	//!< T(mu) / T(1) from the drawn sky's haze (1 when off)
 
+/* lane SKYA (EXPO1): the eye adaptation counts the sky. The imagespace measure averages the cell-lit pixels only;
+ * with this row on, the rest of the frame counts at the sky's mean over the upper hemisphere (solid-angle weighted,
+ * from the sky-view tables read back a frame late), in the sky pass's scene units. Row Render > Scene > Exposure From
+ * Sky: Off / On, ships Off, needs Physical Sky on. Pin WW_ATMO_EXPO (0/1), red WW_ATMO_EXPO_RED = skyzero | zenithw. */
+int wwAtmoExpo();
+void wwAtmoSetExpo( int on );	//!< refused while WW_ATMO_EXPO pins it
+bool wwAtmoExpoPinned();
+//! the adapted mean: sceneMean over `counted` of `total` pixels, the rest at the sky's mean (sceneMean when off)
+float wwAtmoAdapted( float sceneMean, int counted, int total );
+
 QString wwAtmoSummary();
 
 #endif

@@ -245,6 +245,62 @@ inline void skyKeyLight( int mode, float mu, const float haze[3], float keyLum45
 		ambientTint( E, E45, amb[i] );
 }
 
+/* EXPO1: the sky-view table's texture coordinate of a world direction (atmo_common.glsl atSkyDirToUv, 1:1):
+ * Hillaire 2020 sec. 5.3, latitude squeezed toward the horizon, longitude = the angle to the light (0..pi). */
+inline void skyDirToUv( float r, float cosZ, float cosAz, int w, int h, float & u, float & v )
+{
+	const float vh = std::sqrt( std::max( 0.0f, r * r - kRb * kRb ) );
+	const float beta = std::acos( std::clamp( vh / r, -1.0f, 1.0f ) );
+	const float zh = kPi - beta;
+	const float za = std::acos( std::clamp( cosZ, -1.0f, 1.0f ) );
+	if ( za < zh ) {
+		const float c = 1.0f - za / zh;
+		v = ( 1.0f - std::sqrt( std::max( 0.0f, c ) ) ) * 0.5f;
+	} else {
+		const float c = ( za - zh ) / std::max( beta, 1e-5f );
+		v = std::sqrt( std::clamp( c, 0.0f, 1.0f ) ) * 0.5f + 0.5f;
+	}
+	u = std::sqrt( std::clamp( -cosAz * 0.5f + 0.5f, 0.0f, 1.0f ) );
+	u = 0.5f / float( w ) + u * ( 1.0f - 1.0f / float( w ) );
+	v = 0.5f / float( h ) + v * ( 1.0f - 1.0f / float( h ) );
+}
+
+/* EXPO1: the sky-view table's mean luminance over the upper hemisphere, each direction weighted by its solid angle
+ * (24 zenith bands x 24 azimuths over 0..pi; the table is symmetric about the light), bilinear like the GPU. rgba =
+ * the table read back (w x h RGBA floats); the measure's luminance weights (cellhdr.cpp isApply). Times k (pi k, the
+ * sky's display scale) it is in the sky pass's scene units. Red "zenithw": each band weighted alike (not by its
+ * solid angle), which must fail the gate. */
+inline float skyViewMeanLum( const float * rgba, int w, int h, float r, bool redZenithW )
+{
+	constexpr int NZ = 24, NA = 24;
+	double acc = 0.0, wsum = 0.0;
+	for ( int i = 0; i < NZ; i++ ) {
+		const float za = ( float( i ) + 0.5f ) / NZ * 0.5f * kPi;
+		const float wz = redZenithW ? 1.0f : std::sin( za );
+		for ( int j = 0; j < NA; j++ ) {
+			const float az = ( float( j ) + 0.5f ) / NA * kPi;
+			float u, v;
+			skyDirToUv( r, std::cos( za ), std::cos( az ), w, h, u, v );
+			const float x = std::clamp( u * float( w ) - 0.5f, 0.0f, float( w - 1 ) );
+			const float y = std::clamp( v * float( h ) - 0.5f, 0.0f, float( h - 1 ) );
+			const int x0 = std::min( int( x ), std::max( w - 2, 0 ) ), y0 = std::min( int( y ), std::max( h - 2, 0 ) );
+			const int x1 = std::min( x0 + 1, w - 1 ), y1 = std::min( y0 + 1, h - 1 );
+			const float fx = x - float( x0 ), fy = y - float( y0 );
+			auto lumAt = [&]( int px, int py ) {
+				const float * p = rgba + ( size_t( py ) * size_t( w ) + size_t( px ) ) * 4;
+				return 0.2125f * p[0] + 0.7154f * p[1] + 0.0721f * p[2];
+			};
+			const float l = ( lumAt( x0, y0 ) * ( 1.0f - fx ) + lumAt( x1, y0 ) * fx ) * ( 1.0f - fy )
+				+ ( lumAt( x0, y1 ) * ( 1.0f - fx ) + lumAt( x1, y1 ) * fx ) * fy;
+			if ( std::isfinite( l ) ) {
+				acc += double( l ) * wz;
+				wsum += wz;
+			}
+		}
+	}
+	return wsum > 0.0 ? float( acc / wsum ) : 0.0f;
+}
+
 /* EXPO1: the frame's mean luminance with the sky in it. The imagespace measure (celllights.h THE IMAGESPACE) averages
  * the cell-lit pixels only; the sky's pixels (the rest of the frame, share 1 - cover) are taken at the sky-view
  * table's mean luminance over the upper hemisphere (sr-weighted), in the same scene units as the surfaces.

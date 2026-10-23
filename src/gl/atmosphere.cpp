@@ -25,6 +25,7 @@ constexpr const char * kKey = "Settings/Render/Scene/Physical Sky";
 constexpr const char * kApKey = "Settings/Render/Scene/Aerial Perspective";
 constexpr const char * kSunKey = "Settings/Render/Scene/Sunlight From Sky";	// lane SKYA (ATMOSUN1)
 constexpr const char * kNightKey = "Settings/Render/Scene/Moon Phase and Stars";	// lane SKYA (NIGHT1)
+constexpr const char * kExpoKey = "Settings/Render/Scene/Exposure From Sky";	// lane SKYA (EXPO1)
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 constexpr int kTransW = 256, kTransH = 64;
 /* lane SKYA (ATMO2): the aerial-perspective volume's reach. A Fallout 4 worldspace is ~4 km across (64 cells of
@@ -49,6 +50,10 @@ struct AtState
 	bool nightPinned = false;
 	float extHaze[4] = { -1.0f, -1.0f, -1.0f, -1.0f };	// NIGHT1: the haze (+ red) the extinction table was built for
 	float ext[33][3] = {};	// T(mu) / T(1) at mu = 0, 1/32 .. 1
+	int expo = 0;	// lane SKYA (EXPO1): the Exposure From Sky row, 0 Off / 1 On (pin WW_ATMO_EXPO)
+	bool expoPinned = false;
+	float skyMean = -1.0f;	// EXPO1: the sky's mean luminance over the upper hemisphere, scene units (< 0 = none)
+	quint64 frame = 0, skyFrame = 0;	// EXPO1: the frame count (wwAtmoApFrame) and the frame skyMean was read in
 };
 
 //! lane SKYA: one row's value from its pin (already read by the caller: the survey needs literal names), a harness
@@ -106,6 +111,7 @@ AtState & as()
 		// lane SKYA: the rows after ATMO2 (the same prefix re-reads them live)
 		s.sun = rowValue( wwEnvStr( "WW_ATMO_SUN" ), kSunKey, { "off", "tint", "full" }, s.sunPinned );
 		s.night = rowValue( wwEnvStr( "WW_ATMO_NIGHT" ), kNightKey, { "off", "on" }, s.nightPinned );
+		s.expo = rowValue( wwEnvStr( "WW_ATMO_EXPO" ), kExpoKey, { "off", "on" }, s.expoPinned );
 	}
 	return s;
 }
@@ -127,6 +133,12 @@ bool apRed( const char * word )
 bool nightRed( const char * word )
 {
 	return wwEnvStr( "WW_ATMO_NIGHT_RED" ).trimmed().toLower() == QLatin1StringView( word );
+}
+
+//! lane SKYA (EXPO1): skyzero (the sky counted as nothing), zenithw (the hemisphere mean not weighted by solid angle)
+bool expoRed( const char * word )
+{
+	return wwEnvStr( "WW_ATMO_EXPO_RED" ).trimmed().toLower() == QLatin1StringView( word );
 }
 
 struct Target
@@ -156,6 +168,12 @@ struct AtGpu
 	int cur = 0;
 	double ms_ = -1.0;
 	int frames = 0;
+	// lane SKYA (EXPO1): the sun's and the moon's sky-view tables read back a frame late (no stall), with the scales
+	// and the size they were drawn with
+	GLuint pbo[2] = { 0, 0 };
+	GLsync fence = nullptr;
+	int rbW = 0, rbH = 0;
+	float rbSunK = 0.0f, rbMoonK = 0.0f, rbCamR = 0.0f;
 };
 
 QHash<Renderer *, AtGpu> & gpus()
@@ -490,6 +508,50 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	}
 	if ( ok && moonK > 0.0f )
 		view( g.moonView, moonW );
+	// 2a. lane SKYA (EXPO1): the last frame's read-back tables give the sky's mean; this frame's are queued
+	if ( g.fence ) {
+		fn->glClientWaitSync( g.fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64( 1000000000 ) );
+		fn->glDeleteSync( g.fence );
+		g.fence = nullptr;
+		const GLsizeiptr bytes = GLsizeiptr( size_t( g.rbW ) * size_t( g.rbH ) * 4 * sizeof( float ) );
+		float mean = 0.0f;
+		bool got = true;
+		for ( int t = 0; t < ( g.rbMoonK > 0.0f ? 2 : 1 ); t++ ) {
+			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pbo[t] );
+			const auto * px = static_cast<const float *>( fn->glMapBufferRange( GL_PIXEL_PACK_BUFFER, 0, bytes, GL_MAP_READ_BIT ) );
+			if ( px )
+				mean += ( t ? g.rbMoonK : g.rbSunK ) * skyViewMeanLum( px, g.rbW, g.rbH, g.rbCamR, expoRed( "zenithw" ) );
+			got = got && px;
+			fn->glUnmapBuffer( GL_PIXEL_PACK_BUFFER );
+		}
+		fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+		if ( got ) {
+			s.skyMean = mean;
+			s.skyFrame = s.frame;
+		}
+	}
+	if ( ok && s.expo > 0 ) {
+		if ( !g.pbo[0] )
+			fn->glGenBuffers( 2, g.pbo );
+		GLint prevTex = 0;
+		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
+		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+		for ( int t = 0; t < ( moonK > 0.0f ? 2 : 1 ); t++ ) {
+			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pbo[t] );
+			fn->glBufferData( GL_PIXEL_PACK_BUFFER, GLsizeiptr( size_t( vw ) * size_t( vh ) * 4 * sizeof( float ) ), nullptr,
+				GL_STREAM_READ );
+			fn->glBindTexture( GL_TEXTURE_2D, t ? g.moonView.tex : g.sunView.tex );
+			fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, nullptr );
+		}
+		fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+		fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+		g.fence = fn->glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+		g.rbW = vw;
+		g.rbH = vh;
+		g.rbSunK = sunK;
+		g.rbMoonK = moonK;
+		g.rbCamR = camR;
+	}
 	// 2b. lane SKYA (ATMO2): the aerial-perspective volume over this view's frustum (Hillaire 2020 sec. 5.4)
 	QString apLine;	// empty while the row is off: the sky line stays ATMO1's
 	g.ap.valid = false;
@@ -719,6 +781,41 @@ void wwAtmoApFrame()
 {
 	for ( AtGpu & g : gpus() )
 		g.ap.valid = false;
+	as().frame++;
+}
+
+int wwAtmoExpo()
+{
+	return as().expo;
+}
+
+void wwAtmoSetExpo( int on )
+{
+	AtState & s = as();
+	if ( s.expoPinned )
+		return;
+	s.expo = on ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kExpoKey ), s.expo );
+}
+
+bool wwAtmoExpoPinned()
+{
+	return as().expoPinned;
+}
+
+float wwAtmoAdapted( float sceneMean, int counted, int total )
+{
+	const AtState & s = as();
+	// the sky read within the last two frames only (an interior, or the Physical Sky just turned off: the scene alone)
+	if ( s.tier <= 0 || s.expo <= 0 || s.skyMean < 0.0f || total <= 0 || s.frame > s.skyFrame + 2 )
+		return sceneMean;
+	const float a = adaptedWithSky( sceneMean, float( counted ) / float( total ), s.skyMean, expoRed( "skyzero" ) );
+	static int n = 0;
+	if ( n++ % 600 == 0 )
+		fprintf( stderr, "atmo expo: scene %.5f cover %.3f sky %.5f -> %.5f%s\n", double( sceneMean ),
+			double( counted ) / double( total ), double( s.skyMean ), double( a ),
+			expoRed( "skyzero" ) ? ",RED=skyzero" : expoRed( "zenithw" ) ? ",RED=zenithw" : "" );
+	return a;
 }
 
 bool wwAtmoApActive()

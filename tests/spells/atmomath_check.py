@@ -1,7 +1,7 @@
 """Lane SKYA: the physical sky's CPU math (src/gl/atmomath.h) against the numpy model and published numbers.
 Runs no NifSkope. Builds tests/atmomath/atmomath_dump.cpp with the MSYS2 UCRT64 g++ into a scratch folder.
 
-    python -I tests/spells/atmomath_check.py <scratch dir> [--red flat|irrflat|phase|noext|skyzero]
+    python -I tests/spells/atmomath_check.py <scratch dir> [--red flat|irrflat|phase|noext|zenithw|skyzero]
 
 Gates:
   transmittance   cpuTrans (the key light's T, ATMOSUN1) vs atmo_model.transmittance (< 0.005 absolute)
@@ -16,6 +16,8 @@ Gates:
                   about 1/10 of the full one, Allen's Astrophysical Quantities); new < 0.01; red "nophase" all 1
   stars           T(mu) / T(zenith) (starExtinction): 1 at the zenith; matches the model's T ratio (< 0.005) at
                   mu 0.5, 0.1, 0.03; at mu 0.03 the light is under half and redder (R/B up) -- Bruneton & Neyret 2008
+  sky mean        skyViewMeanLum on a synthetic table of max(cos zenith, 0): the solid-angle mean is 1/2 (< 0.01);
+                  red zenithw (bands weighted alike) gives 2/pi
   exposure        the frame mean with the sky = cover x scene + (1 - cover) x sky; full cover = the scene alone
 The sun/ambient gates read skyKeyLight, the function the build ships (atmosphere.cpp wwAtmoKeyLight).
 Each red must make one gate fail: flat (WW_ATMO_SUN_RED=flat: T held at 45 deg, a low sun no warmer), phase (the
@@ -132,6 +134,9 @@ def main():
     gate('stars', np.abs(st[1.0] - 1).max() < 1e-6 and err < 0.005 and lum(lo) < 0.5 and lo[0] / lo[2] > 1.1,
          'zenith %s, worst vs the model %.5f (< 0.005), mu 0.03: luminance %.3f (< 0.5), R/B %.3f (> 1.1)'
          % (np.round(st[1.0], 6), err, lum(lo), lo[0] / lo[2]))
+    sm = [float(x) for x in D['skymean'][0]]
+    got = sm[1] if red == 'zenithw' else sm[0]
+    gate('sky mean', abs(got - 0.5) < 0.01, 'hemisphere mean of cos zenith %.5f (want 0.5, < 0.01)' % got)
     e = [float(x) for x in D['expo'][0]]
     want = 0.6 * 0.2 + 0.4 * 1.5
     got = e[1] if red == 'skyzero' else e[0]
