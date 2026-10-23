@@ -6089,6 +6089,9 @@ void GLView::paintGL()
 	// lane FOGDRIFT1: the fog drifts while the weather blows (never in a harness)
 	else if ( wwVolAirWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
+	// lane GAPFIX1: the far trees sway (never in a harness)
+	else if ( wwCellFarLodWantsRepaint() )
+		QTimer::singleShot( 16, this, [this]() { update(); } );
 
 	emit paintUpdate();
 }

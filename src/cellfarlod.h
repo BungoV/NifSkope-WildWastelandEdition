@@ -114,6 +114,8 @@ Vector3 wwCellFarLodOrigin( const Scene * scene );
 
 //! Before the scene draws: the far sway uniforms (zeroed once when no far field is active).
 void wwCellFarLodFrame( Scene * scene );
+//! lane GAPFIX1: the last frame drew a moving far sway, so the view paints again (never in a harness)
+bool wwCellFarLodWantsRepaint();
 
 /*! The far tree cards, drawn with the cell's lights, fog and imagespace (impostor_cell.prog). Called
  *  twice a frame: inside the HDR frame before its resolve (`insideHdr`), and after it; they draw in the
