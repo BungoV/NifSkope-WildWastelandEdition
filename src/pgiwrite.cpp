@@ -103,6 +103,22 @@ bool readTbk( const QString & path, Sector & s, QString & err )
 		err = QStringLiteral( "%1: size %2, the counts say %3" ).arg( path ).arg( s.bytes.size() ).arg( need );
 		return false;
 	}
+	// lane PGIBIT32: side ids are 0..5, or 0..23 (bin + 6 x slot) when the bake split cells by room (content 32)
+	const unsigned sides = ( h.reserved[2] & pgi::kContentRoomSplit ) ? 6u * pgi::kRoomSlots : 6u;
+	const char * b = s.bytes.constData();
+	const qint64 oLx = 64 + 32 * qint64( h.surfelCount ) + 144 * qint64( h.probeCount ) + 12 * qint64( h.linkCount );
+	for ( uint32_t i = 0; i < h.surfelCount; i++ )
+		if ( uint8_t( b[64 + 32 * qint64( i ) + offsetof( pgi::Surfel, bin )] ) >= sides ) {
+			err = QStringLiteral( "%1: surfel %2 side %3, the content flags (%4) allow %5" ).arg( path ).arg( i )
+				.arg( uint8_t( b[64 + 32 * qint64( i ) + offsetof( pgi::Surfel, bin )] ) ).arg( h.reserved[2] ).arg( sides );
+			return false;
+		}
+	for ( uint32_t i = 0; i < h.linkCount; i++ )
+		if ( uint8_t( b[oLx + 8 * qint64( i )] ) >= sides ) {
+			err = QStringLiteral( "%1: link %2 side %3, the content flags (%4) allow %5" ).arg( path ).arg( i )
+				.arg( uint8_t( b[oLx + 8 * qint64( i )] ) ).arg( h.reserved[2] ).arg( sides );
+			return false;
+		}
 	return true;
 }
 
@@ -161,8 +177,8 @@ void groupChunks( const Sector & s, uint16_t g, const PgiWriteSpec & spec, std::
 		pgi::Link l;
 		std::memcpy( &l, b + oL + 12 * qint64( i ), 12 );
 		std::memcpy( reinterpret_cast<char *>( &l ) + 12, b + oLx + 8 * qint64( i ), 8 );
-		if ( shuffle )
-			l.side = uint8_t( ( l.side + 1 ) % 6 );
+		if ( shuffle )   // the next facing bin, same room slot
+			l.side = uint8_t( ( l.side % 6 + 1 ) % 6 + 6 * ( l.side / 6 ) );
 		lk.append( raw( &l, sizeof l ) );
 	}
 	out.push_back( { pgi::kLINK, g, lk } );
@@ -171,6 +187,7 @@ void groupChunks( const Sector & s, uint16_t g, const PgiWriteSpec & spec, std::
 	out.push_back( { pgi::kEMIT, g, QByteArray( b + oE, int( 16 * qint64( h.reserved[3] ) ) ) } );
 
 	R.sectors++;
+	R.roomSplit += ( h.reserved[2] & pgi::kContentRoomSplit ) ? 1 : 0;
 	R.surfels += h.surfelCount;
 	R.probes += h.probeCount;
 	R.links += h.linkCount;
@@ -284,6 +301,8 @@ QString pgiWriteCensusText( const PgiWriteResult & r )
 	t << "pgi: " << r.files.size() << " files from " << r.sectors << " sectors, " << QString::number( double( r.bytes ) / 1e6, 'f', 2 )
 	  << " MB; surfels " << r.surfels << " (horizon 16 azimuths, self-plane), probes " << r.probes << ", links " << r.links
 	  << ", room boxes " << r.rooms << ", glowing " << r.emits;
+	if ( r.roomSplit )
+		t << "; room split sectors " << r.roomSplit;
 	if ( !r.error.isEmpty() )
 		t << "; REFUSED: " << r.error;
 	return s;

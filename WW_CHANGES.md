@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane PGIBIT32 (2026-10-23, branch pgibit32-20261023): the .pgi carries the bake's room split
+
+- **.pgi content bit 32:** with GAPBAKE1's room split on (`WW_CELL_BAKE_ROOMSPLIT=1`), `Surfel::bin` and `Link::side` are
+  a side id = facing bin + 6 x room slot (0..23). `pgi_format.h` names it (`kContentRoomSplit`, `kRoomSlots`). The file
+  version is unchanged; with the split off every byte is as before.
+- **pgiwrite** refuses a `.tbk` whose surfel or link side is past what its content flags allow. Its shuffle red keeps
+  the room slot. The census adds "room split sectors N".
+- **tests/spells/pgi_read.py** resolves 5-bit side ids and adds `split <exe> <work>`, a synthetic room-split gate with
+  reds. `all` runs it as well.
+
 ## Lane RTBAKEOPT1 (2026-10-23, branch rtbakeopt1-20261023): the GPU ray-traced bake is an option, off by default
 
 - **CPU bake is the default again (bungo 10-23):** RTBAKE1's Vulkan tracer (src/bakert.cpp: the probe bake's primary
