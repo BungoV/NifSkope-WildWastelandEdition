@@ -19,6 +19,11 @@ const LookRow kRows[] = {
 	{ "Fog light clusters", "WW/CellAirClusters" },
 	{ "Fog multiple scattering", "WW/CellAirMultiScatter" },
 	{ "Ground fog burn-off", "WW/CellAirBurnOff" },
+	{ "Far contact shadows", "WW/CellContactFar" },
+	{ "Lamp contact shadows", "WW/CellContactLocal" },
+	{ "Moonlit terrain shadows", "WW/ShadowMoonSky" },
+	{ "PBR ambient in terrain shadow", "WW/ShadowPbrDim" },
+	{ "Bloom width in fog", "WW/CellBloomPerPixel" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -52,6 +57,26 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_AIR_BURNOFF" ).trimmed() );
 		return p;
 	}
+	case WwLook::ContactFar: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_CONTACT_FAR" ).trimmed() );
+		return p;
+	}
+	case WwLook::ContactLocal: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_CONTACT_LOCAL" ).trimmed() );
+		return p;
+	}
+	case WwLook::TerrMoonSky: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_SHADOW_MOONSKY" ).trimmed() );
+		return p;
+	}
+	case WwLook::TerrPbrDim: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_SHADOW_PBRDIM" ).trimmed() );
+		return p;
+	}
+	case WwLook::BloomMip: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_BLOOM_PERPIX" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -70,6 +95,11 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::AirClusters: return "WW_CELL_AIR_CLUSTERS";
 	case WwLook::AirMultiScatter: return "WW_CELL_AIR_MS";
 	case WwLook::GroundBurnOff: return "WW_CELL_AIR_BURNOFF";
+	case WwLook::ContactFar: return "WW_CELL_CONTACT_FAR";
+	case WwLook::ContactLocal: return "WW_CELL_CONTACT_LOCAL";
+	case WwLook::TerrMoonSky: return "WW_SHADOW_MOONSKY";
+	case WwLook::TerrPbrDim: return "WW_SHADOW_PBRDIM";
+	case WwLook::BloomMip: return "WW_CELL_BLOOM_PERPIX";
 	default: return "";
 	}
 }

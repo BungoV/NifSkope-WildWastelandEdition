@@ -787,6 +787,45 @@ double wwLookdevGameDay()
 	return st().gameDay;
 }
 
+float wwLookdevMoonShadowTerm( bool invertClear, QString * why )
+{
+	LdState & s = st();
+	if ( !s.haveWeather ) {
+		if ( why )
+			*why = QStringLiteral( "moonsky=0(no weather)" );
+		return 0.0f;
+	}
+	const unsigned char moons = s.clim.tnam[5];
+	const int phase = wwMoonPhase( s.gameDay, moons );
+	if ( phase < 0 || !( moons & 0xC0 ) ) {
+		if ( why )
+			*why = QStringLiteral( "moonsky=0(no moons)" );
+		return 0.0f;
+	}
+	const float lit = std::fabs( float( phase ) - 4.0f ) / 4.0f;
+	const WwSkyClock c = wwSkyClock( s.hour, s.tnam, s.gmst );
+	float alpha = 0.0f;
+	if ( moons & 0x80 )
+		alpha += wwMoonAlpha( c, s.gmst, s.gmst.masserFadeStart, s.gmst.masserFadeEnd );
+	if ( moons & 0x40 )
+		alpha += wwMoonAlpha( c, s.gmst, s.gmst.secundaFadeStart, s.gmst.secundaFadeEnd );
+	alpha = std::clamp( alpha, 0.0f, 1.0f );
+	// the sky's clearness: the Day Sunlight's share of Sunlight + Ambient luma, smoothstep over 0.38..0.68
+	auto luma = []( const unsigned char * k ) { return 0.2126f * k[0] + 0.7152f * k[1] + 0.0722f * k[2]; };
+	const float d = luma( s.w.color[WwTodDay][WwRowSunlight] ), a = luma( s.w.color[WwTodDay][WwRowAmbient] );
+	float clear = 1.0f;
+	if ( d + a > 0.0f ) {
+		const float t = std::clamp( ( d / ( d + a ) - 0.38f ) / 0.30f, 0.0f, 1.0f );
+		clear = t * t * ( 3.0f - 2.0f * t );
+	}
+	if ( invertClear )
+		clear = 1.0f - clear;
+	const float term = lit * lit * lit * alpha * clear;
+	if ( why )
+		*why = QStringLiteral( "moonsky=%1(phase %2 alpha %3 clear %4)" ).arg( term, 0, 'f', 3 ).arg( phase ).arg( alpha, 0, 'f', 2 ).arg( clear, 0, 'f', 2 );
+	return term;
+}
+
 void wwLookdevSetGameDay( double d )
 {
 	LdState & s = st();

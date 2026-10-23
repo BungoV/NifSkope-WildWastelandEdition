@@ -197,6 +197,62 @@ float cellShadowF( int i, vec3 P, vec3 N )
 	return cellShadowFadeOn ? mix( 1.0, s / 9.0, cellShadowFade[clamp( int( t4.x + 0.5 ), 0, 15 )] ) : s / 9.0;
 }
 
+/* lane GAPLOOK1 (C8): contact shadows for a lamp WITHOUT a shadow map, FO4CS's port (res/Lighting/
+ * fo4cs_contact_shadows.hlsli, its defaults): a view-space march toward the light over the shared opaque pass's depth,
+ * reach min(0.15 x radius, 12) but at least 4 units, a hit inside [0.6 + 0.008 z, max(20, 0.1 z)] units behind the
+ * depth darkens by (1 - travelled / reach) x 0.5. Steps: 48, fewer when the march covers fewer pixels (a pixel read
+ * twice adds nothing); the phase jittered per pixel. A mapped light keeps its map: dark places never darken twice. */
+uniform bool cellCtOn;
+uniform sampler2D cellCtGbuf;	// RGBA32F, bottom row first: view normal, linear depth (1e6 none)
+uniform vec4 cellCtProj;		// P00, P11, P20, P21 of the projection
+uniform vec4 cellCtRect;		// the target's origin in this viewport, the g-buffer's size
+uniform int cellCtRed;			// 1: march away from the light
+
+float cellContactLocal( int i, vec3 P )
+{
+	vec4 t4 = texelFetch( cellLights, i * CELL_TPL + 4 );
+	if ( !cellCtOn || ( cellShadowOn && t4.y > 0.5 && t4.x > -0.5 ) )
+		return 1.0;
+	vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
+	// world to view: the inverse of cellRow's rotation (orthonormal) and translation
+	vec3 w = P - vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w ), l = t0.xyz - vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w );
+	mat3 R = mat3( cellRow[0].xyz, cellRow[1].xyz, cellRow[2].xyz );	// columns = rows of view-to-world: R = its transpose
+	vec3 pv = R * w, lv = R * l;
+	vec3 toL = lv - pv;
+	float dist = length( toL );
+	if ( dist < 1e-3 )
+		return 1.0;
+	vec3 dir = toL / dist * ( cellCtRed == 1 ? -1.0 : 1.0 );
+	float z = max( -pv.z, 8.0 );
+	float bias = 0.8 + z * 0.012, thickMin = 0.6 + z * 0.008, thickMax = max( 20.0, z * 0.1 );
+	float reach = max( min( 0.15 * t0.w, 12.0 ), 4.0 );
+	float march = min( dist - bias, reach );
+	if ( march <= 0.0 )
+		return 1.0;
+	vec3 S0 = pv + dir * bias, S1 = S0 + dir * march;
+	vec2 a = ( cellCtProj.xy * S0.xy + cellCtProj.zw * S0.z ) / max( -S0.z, 1e-4 );
+	vec2 b = ( cellCtProj.xy * S1.xy + cellCtProj.zw * S1.z ) / max( -S1.z, 1e-4 );
+	float px = length( ( b - a ) * 0.5 * cellCtRect.zw );
+	int steps = clamp( int( px ), 2, 48 );
+	float jit = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );
+	for ( int k = 1; k <= 48; k++ ) {
+		if ( k > steps )
+			break;
+		float t = ( float( k ) - jit ) / float( steps );
+		vec3 S = S0 + dir * ( march * t );
+		if ( S.z >= -1.0 )
+			break;
+		vec2 ndc = ( cellCtProj.xy * S.xy + cellCtProj.zw * S.z ) / -S.z;
+		vec2 q = ( ndc * 0.5 + 0.5 ) * cellCtRect.zw;
+		if ( any( lessThan( q, vec2( 0.0 ) ) ) || any( greaterThanEqual( q, cellCtRect.zw ) ) )
+			break;
+		float delta = -S.z - texelFetch( cellCtGbuf, ivec2( q ), 0 ).a;
+		if ( delta > thickMin && delta < thickMax )
+			return 1.0 - clamp( 1.0 - march * t / reach, 0.0, 1.0 ) * 0.5;
+	}
+	return 1.0;
+}
+
 /* probe 7: the factors of shadow slots 0, 1, 2 in r, g, b as 2/255 + f x 253/255; 0 where that light is out
  * of reach or faces away (N.L under 0.05), or no light holds the slot */
 vec3 cellShadowProbe( vec3 P, vec3 N )
@@ -1408,7 +1464,7 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 			a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
 		}
 		if ( a > 0.0 )
-			a *= cellShadowF( i, P, N );	// lane SHADOW1
+			a *= cellShadowF( i, P, N ) * cellContactLocal( i, P );	// lane SHADOW1; GAPLOOK1 (C8)
 		vec3 E = t1.rgb * a * NdotL;
 		diff += E;
 		// lane RIM1: No Rim Lighting (2) drops the back-light; Ignore Roughness (4) also takes Lambert's diffuse

@@ -45,7 +45,13 @@ void main()
 	/* lane BLOOM1b: the FO4CS bloom at this pixel, exposed light (cell_bloom.glsl): the tent of the chain's top, red
 	 * and blue pushed by the glare's dispersion, times the bloom weight. cellImageSpace adds it before its curve. */
 	vec3 foBloom = vec3( 0.0 );
-	if ( cellIsFoBloomOn )
+	/* lane GAPLOOK1 (BLOOMMIP): through fog the glow spreads wider (an atmospheric PSF), so the fog's receiver gain
+	 * picks how far down the top's mips the tent reads: log2(gain) levels (w = 1; 0 in clear air: the same bits) */
+	float bloomLod = cellIsFoBloomParams.w < 0.0 ? 2.0 : cellIsFoBloomParams.w * log2( max( cellBloomGain, 1.0 ) );
+	if ( cellIsFoBloomOn && bloomLod > 0.0 )
+		foBloom = bloomTentDispersedLod( cellIsFoBloom, ( floor( gl_FragCoord.xy ) + 0.5 ) / cellIsFoBloomFrame,
+			cellIsFoBloomParams.x, cellIsFoBloomParams.z, bloomLod ) * cellIsFoBloomParams.y;
+	else if ( cellIsFoBloomOn )
 		foBloom = bloomTentDispersed( cellIsFoBloom, ( floor( gl_FragCoord.xy ) + 0.5 ) / cellIsFoBloomFrame,
 			cellIsFoBloomParams.x, cellIsFoBloomParams.z ) * cellIsFoBloomParams.y;
 	if ( hdrMode == 3 ) {

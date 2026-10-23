@@ -116,6 +116,9 @@ void wwLookdevShadowLight( float sunDir[3], float disc[3] );
 //! the ground frame the ground quad sits on; true = the ground draws (so it casts)
 bool wwLookdevGroundFrame( Scene * scene, float & z, float xy[2], float & half );
 double wwLookdevGameDay();
+/*! lane GAPLOOK1 (TERRSHADOWLEFT): FO4CS's moonlit distant-shadow term phase^3 x moon alpha x sky clearness (FarField
+ *  EngineSunNight.h ResolveNight, FarFieldMaskPolicy.h sunVisibility); 0 without weather or moons */
+float wwLookdevMoonShadowTerm( bool invertClear, QString * why );
 void wwLookdevSetGameDay( double d );
 //! seconds on the cloud scroll clock (the pin, 0 in a harness run, else real time since Clouds went on)
 double wwLookdevCloudSeconds();

@@ -3578,6 +3578,8 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 			prog->uni1i( "cellAoEarly", early );
 			prog->uni1b( "cellAoOn", false );
 			prog->uni1b( "cellAoDecalOn", false );	// lane AODECAL1
+			if ( prog->uniLocation( "cellCtOn" ) >= 0 )
+				prog->uni1b( "cellCtOn", false );	// lane GAPLOOK1: this pass writes the depth C8 reads
 		}
 		return;
 	}
@@ -3611,6 +3613,22 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 			int dvp[4];
 			wwDrawViewport( dvp );
 			prog->uni4f_l( prog->uniLocation( "cellAoDecalRect" ), FloatVector4( float( dvp[0] ), float( dvp[1] ), 0.0f, 0.0f ) );
+		}
+	}
+	// lane GAPLOOK1 (C8): the lamps' contact march reads the shared opaque pass (opaque draws, perspective views only)
+	if ( prog->uniLocation( "cellCtOn" ) >= 0 ) {
+		const auto & pm = r->globalUniforms->projectionMatrix;
+		const bool ctOn = wwLookOn( WwLook::ContactLocal ) && g.ready && g.doc == scene->nifModel && g.gbuf.tex
+			&& ( !wwDrawBlend() || decalProg ) && pm[3][3] != 1.0f;
+		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::ContactGbuf ) );
+		r->fn->glBindTexture( GL_TEXTURE_2D, ctOn ? g.gbuf.tex : 0 );
+		r->fn->glActiveTexture( GLenum( prevActive ) );
+		prog->uni1i( "cellCtGbuf", WwCellUnit::ContactGbuf );
+		prog->uni1b( "cellCtOn", ctOn );
+		if ( ctOn ) {
+			prog->uni4f( "cellCtProj", FloatVector4( pm[0][0], pm[1][1], pm[2][0], pm[2][1] ) );
+			prog->uni4f( "cellCtRect", FloatVector4( 0.0f, 0.0f, float( g.gbuf.w ), float( g.gbuf.h ) ) );
+			prog->uni1i( "cellCtRed", wwEnvStr( "WW_CELL_CONTACT_LOCAL_RED" ) == QLatin1String( "away" ) ? 1 : 0 );	// red: march away from the light
 		}
 	}
 	/* lane PERF1: the half-res GI, read by the opaque draws (and the decals on them), like the obscurance; the

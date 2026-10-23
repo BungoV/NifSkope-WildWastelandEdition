@@ -38,6 +38,34 @@ vec3 bloomTent( sampler2D m, vec2 uv, vec2 texel, float radiusPixels )
 	return c * ( 1.0 / 16.0 );
 }
 
+// lane GAPLOOK1 (BLOOMMIP): the same tent read lod levels down the chain top's own mips (the blur chosen per pixel)
+vec3 bloomTentLod( sampler2D m, vec2 uv, vec2 texel, float radiusPixels, float lod )
+{
+	vec2 o = texel * exp2( lod ) * max( radiusPixels, 0.0 );
+	vec3 c = bloomSanitize( textureLod( m, uv, lod ).rgb ) * 4.0;
+	c += bloomSanitize( textureLod( m, uv + vec2( -o.x, 0.0 ), lod ).rgb ) * 2.0;
+	c += bloomSanitize( textureLod( m, uv + vec2( o.x, 0.0 ), lod ).rgb ) * 2.0;
+	c += bloomSanitize( textureLod( m, uv + vec2( 0.0, -o.y ), lod ).rgb ) * 2.0;
+	c += bloomSanitize( textureLod( m, uv + vec2( 0.0, o.y ), lod ).rgb ) * 2.0;
+	c += bloomSanitize( textureLod( m, uv + vec2( -o.x, -o.y ), lod ).rgb );
+	c += bloomSanitize( textureLod( m, uv + vec2( o.x, -o.y ), lod ).rgb );
+	c += bloomSanitize( textureLod( m, uv + vec2( -o.x, o.y ), lod ).rgb );
+	c += bloomSanitize( textureLod( m, uv + vec2( o.x, o.y ), lod ).rgb );
+	return c * ( 1.0 / 16.0 );
+}
+
+vec3 bloomTentDispersedLod( sampler2D m, vec2 uv, float radiusPixels, float dispersion, float lod )
+{
+	vec2 texel = 1.0 / vec2( max( textureSize( m, 0 ), ivec2( 1 ) ) );
+	vec2 radial = uv - 0.5;
+	float len = length( radial );
+	vec2 d = len > 1e-5 ? ( radial / len ) * texel * max( dispersion, 0.0 ) : vec2( 0.0 );
+	vec3 g = bloomTentLod( m, uv, texel, radiusPixels, lod );
+	if ( d == vec2( 0.0 ) )
+		return g;
+	return vec3( bloomTentLod( m, uv + d, texel, radiusPixels, lod ).r, g.g, bloomTentLod( m, uv - d, texel, radiusPixels, lod ).b );
+}
+
 // BloomUpCS's dispersion: red and blue tents pushed apart along the radial from the frame's centre, green the anchor
 vec3 bloomTentDispersed( sampler2D m, vec2 uv, float radiusPixels, float dispersion )
 {
