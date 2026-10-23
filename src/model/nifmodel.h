@@ -329,6 +329,8 @@ public:
 	QModelIndex insertNiBlock( const QString & identifier, int row = -1 );
 	//! Remove a block from the list
 	void removeNiBlock( int blocknum );
+	//! lane LIVESET1: drops blocks `first`.. in one pass (links into them become -1); removeNiBlock walks the tree per block
+	void removeTailBlocks( int first );
 	/*! lane CELLSTREAM1: every field of a block back to its type's defaults -- same number, same item -- so a
 	 *  streamed cell's freed blocks are reused and no block is ever renumbered. False if the type is unknown. */
 	bool resetNiBlock( int blocknum, bool quiet = false );

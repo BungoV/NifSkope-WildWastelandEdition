@@ -962,6 +962,21 @@ void NifModel::removeNiBlock( int blocknum )
 	emit linksChanged();
 }
 
+void NifModel::removeTailBlocks( int first )
+{
+	const int n = getBlockCount();
+	if ( first < 0 || first >= n )
+		return;
+	adjustLinks( root, first, -( n - first ) );	// every link into the range: -1
+	beginRemoveRows( QModelIndex(), first + 1, n );
+	root->removeChildren( first + 1, n - first );
+	endRemoveRows();
+	updateLinks();
+	updateHeader();
+	updateFooter();
+	emit linksChanged();
+}
+
 void NifModel::moveNiBlock( int src, int dst )
 {
 	if ( !isValidBlockNumber( src ) )

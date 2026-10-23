@@ -35,8 +35,9 @@ constexpr int kStencilUnit = 9;	// lane TONEMAP1: the frame's stencil (usampler2
 // goes back to the view (the MSAA stencil blit was the pass's cost). WW_CELL_HDR_STEX_RED=1: renderbuffer + both blitted.
 bool stexOn()
 {
-	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_HDR_STEX_RED" ) == 0 && qEnvironmentVariableIntValue( "WW_TONEMAP1_RED" ) == 0
-		&& qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) == 0;	// cell_hdr_fd.prog has no stencil test of its own
+	// lane LIVESET1: follows a live set (the frame's targets compare dsTex, so they are made again)
+	WW_SWITCH_STATIC( bool, on, qEnvironmentVariableIntValue( "WW_CELL_HDR_STEX_RED" ) == 0 && qEnvironmentVariableIntValue( "WW_TONEMAP1_RED" ) == 0
+		&& qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) == 0 );	// cell_hdr_fd.prog has no stencil test of its own
 	return on;
 }
 
@@ -52,7 +53,7 @@ struct HdrFormat
 };
 const HdrFormat & hdrFormat()
 {
-	static const HdrFormat f = [] {
+	WW_SWITCH_STATIC( HdrFormat, f, [] {	// lane LIVESET1: a live set makes the frame's colour target again (HdrGpu.colorFormat)
 		HdrFormat h;
 		const QByteArray v = qgetenv( "WW_CELL_HDR_FORMAT" ).trimmed().toLower();
 		h.red = qEnvironmentVariableIntValue( "WW_CELL_HDR_FORMAT_RED" ) != 0 || qEnvironmentVariableIntValue( "WW_AAFORMAT1_RED" ) != 0;
@@ -64,14 +65,14 @@ const HdrFormat & hdrFormat()
 			h.gl = GL_R11F_G11F_B10F; h.bytes = 4; h.name = "r11g11b10f";
 		}
 		return h;
-	}();
+	}() );
 	return f;
 }
 
 // lane AAFORMAT1 (gates only): WW_CELL_AA_MEM=1 logs the card's used video memory (GL_NVX_gpu_memory_info) when it moves
 template <typename F> void aaVidmemNote( F * fn )
 {
-	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_AA_MEM" ) != 0;
+	WW_SWITCH_STATIC( bool, on, qEnvironmentVariableIntValue( "WW_CELL_AA_MEM" ) != 0 );
 	static int have = -1, lastMb = -1;
 	if ( !on )
 		return;
@@ -97,7 +98,7 @@ template <typename F> void aaVidmemNote( F * fn )
 // read once per tone map, errors checked on a new configuration only. WW_CELL_HDR_SYNC_RED=1: every query every frame.
 bool syncOn()
 {
-	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_HDR_SYNC_RED" ) == 0 && qEnvironmentVariableIntValue( "WW_TONEMAP1_RED" ) == 0;
+	WW_SWITCH_STATIC( bool, on, qEnvironmentVariableIntValue( "WW_CELL_HDR_SYNC_RED" ) == 0 && qEnvironmentVariableIntValue( "WW_TONEMAP1_RED" ) == 0 );
 	return on;
 }
 
@@ -106,6 +107,7 @@ struct HdrGpu
 	GLuint fbo = 0, color = 0, ds = 0;
 	int w = 0, h = 0, samples = 0;
 	GLenum dsFormat = 0;
+	GLenum colorFormat = 0;	// lane LIVESET1: the colour target's format, so a live WW_CELL_HDR_FORMAT makes it again
 	bool dsTex = false;		// lane TONEMAP1: ds is a multisample texture (else a renderbuffer)
 	bool stexFailed = false;	// its texture or target was refused once: renderbuffers from then on
 	bool complete = false;	// lane SYNC1: the target passed its status check since it was made
@@ -691,7 +693,8 @@ bool wwCellHdrBegin( Scene * scene )
 	}
 	const int S = std::max( int( samples ), 1 );
 	const bool wantTex = stexOn() && !g.stexFailed;
-	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat || g.dsTex != wantTex ) {
+	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat || g.dsTex != wantTex
+		|| g.colorFormat != hdrFormat().gl ) {
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
 		if ( g.color )
@@ -703,6 +706,7 @@ bool wwCellHdrBegin( Scene * scene )
 		 * (every draw's state, uniforms and textures traced identical); fp32 measured 0 of 7 frames differing. */
 		const HdrFormat & hf = hdrFormat();	// lane AAFORMAT1: RGBA32F unless a study run asks
 		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, hf.gl, W, H, GL_TRUE );
+		g.colorFormat = hf.gl;
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 		const double mb = double( W ) * H * S / ( 1024.0 * 1024.0 );
 		qInfo().noquote() << QStringLiteral( "cell aa: linear frame %1%2, %3x%4, %5 sample(s): colour %6 MB, depth / stencil %7 MB" )
@@ -914,7 +918,7 @@ void wwCellHdrEnd( Scene * scene )
 	const bool fogBloom = wwCellFogBloomRun( scene, g.fbo, g.ds, s.w, s.h, s.samples, g.dsFormat );
 
 	// lane PERF2: the quad at the far plane keeps the early tests (WW_CELL_HDR_EARLY_RED=1: depth written per sample)
-	static const bool earlyRed = qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) != 0;
+	WW_SWITCH_STATIC( bool, earlyRed, qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) != 0 );
 	auto prog = r->useProgram( earlyRed && !g.dsTex ? "cell_hdr_fd.prog" : "cell_hdr.prog" );
 	if ( !prog ) {
 		wwCellFogBloomDone( r, kFogBloomUnit );
@@ -958,7 +962,7 @@ void wwCellHdrEnd( Scene * scene )
 	const bool sorted = blitErr == GL_NO_ERROR;
 	// lane TONEMAP1: test 1 keeps the samples whose stencil (& 3) is ref, 2 the others; in the shader with the texture
 	// WW_CELL_HDR_STEX_BREAK=1 (gates only): mode 1 keeps the wrong samples, so the picture gate must fail
-	static const bool stexBreak = qEnvironmentVariableIntValue( "WW_CELL_HDR_STEX_BREAK" ) == 1;
+	WW_SWITCH_STATIC( bool, stexBreak, qEnvironmentVariableIntValue( "WW_CELL_HDR_STEX_BREAK" ) == 1 );
 	auto pick = [&]( int test, int ref ) {
 		if ( stexBreak && ref == 2 )
 			test = 2;

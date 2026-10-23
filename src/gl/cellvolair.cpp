@@ -1689,7 +1689,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */
 	if ( !s.dump.isEmpty() ) {
 		// lane PERF2 gates: WW_CELL_AIR_DUMP_FRAMES=1 keeps one file per camera-path frame (<file>.<frame>)
-		static const bool perFrame = qEnvironmentVariableIntValue( "WW_CELL_AIR_DUMP_FRAMES" ) == 1;
+		WW_SWITCH_STATIC( bool, perFrame, qEnvironmentVariableIntValue( "WW_CELL_AIR_DUMP_FRAMES" ) == 1 );
 		const int pf = wwCellPostPathFrame();
 		QFile f( perFrame && pf >= 0 ? s.dump + QStringLiteral( ".%1" ).arg( pf, 3, 10, QLatin1Char( '0' ) ) : s.dump );
 		if ( f.open( QIODevice::WriteOnly ) ) {
@@ -1976,7 +1976,7 @@ int wwVolPartFx()
 
 bool wwVolPartHidden()
 {
-	static const bool hide = qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1;
+	WW_SWITCH_STATIC( bool, hide, qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1 );	// lane LIVESET1: follows a live set
 	return hide;
 }
 

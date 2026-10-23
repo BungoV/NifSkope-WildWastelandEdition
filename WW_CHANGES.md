@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIVESET1 (2026-10-23, branch liveset1-20261023): a changed setting updates live
+- bungo 10-23: "In games, if you change a setting, that setting updates live." Switches that needed a relaunch now
+  re-read on a live set and rebuild only their own part: shadow cache, CSM echo, GPU-driven queues and culling, HDR
+  target format, VRS, effect resolution, fog bloom, SSR/AO memos, far cards, door live, sky strength, and more
+  (WW_SWITCH_STATIC / wwSwitchMovedFor).
+- The far LOD and the probe markers are rebuilt in place, as the cell document's last blocks (cellLiveSections), with
+  no reopen. A far LOD under streamed cells, far LOD on/off, its type and the stack reds still reopen, and the reply
+  names the reason. The PRTP band's Show probes tick shows/hides the markers in place.
+- NifModel::removeTailBlocks drops a document's last blocks in one pass.
+- tools/wwswitch_survey.py: the converted switches classify live; CellModelAhead's reads are reopen.
+- tests/liveswitch: a changed value rebuilds once, an unchanged value does not; the stage table red fails.
+
 ## Lane OBJLODSHADOW1 (2026-10-22, branch objlodshadow1-20261022): object LOD casts only past the cascades
 
 - **Object-LOD terrain casters, only where the cascades do not reach:** with the objlod item on, every far object-LOD

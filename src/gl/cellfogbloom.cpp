@@ -1,4 +1,5 @@
 #include "cellfogbloom.h"
+#include "wwswitch.h"	// lane LIVESET1: the pin and reds follow a live set
 
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
@@ -36,6 +37,7 @@ struct FbGpu
 struct FbState
 {
 	bool on = false, pinned = false, red = false, time = false;
+	quint64 liveGen = 0;	// lane LIVESET1
 	bool ran = false;
 	GLuint target = 0;
 	double ms = -1.0;
@@ -45,16 +47,18 @@ struct FbState
 
 FbState & fs()
 {
-	static FbState s = [] {
-		FbState v;
+	static FbState s;
+	static bool init = false;
+	// lane LIVESET1: a live set of WW_CELL_FOGBLOOM* reads the switches again (the targets are per renderer)
+	if ( !init || wwSwitchMovedFor( s.liveGen, { "WW_CELL_FOGBLOOM" } ) ) {
+		init = true;
 		const QByteArray pin = qgetenv( "WW_CELL_FOGBLOOM" ).trimmed();
-		v.pinned = pin == "0" || pin == "1";
+		s.pinned = pin == "0" || pin == "1";
 		// a harness reads only the pin (off otherwise), never what the window saved
-		v.on = v.pinned ? pin == "1" : !wwHarnessRun() && QSettings().value( QLatin1StringView( kKey ), false ).toBool();
-		v.red = qgetenv( "WW_CELL_FOGBLOOM_RED" ).trimmed() == "flat";
-		v.time = qgetenv( "WW_CELL_FOGBLOOM_TIME" ).trimmed() == "1";
-		return v;
-	}();
+		s.on = s.pinned ? pin == "1" : !wwHarnessRun() && QSettings().value( QLatin1StringView( kKey ), false ).toBool();
+		s.red = qgetenv( "WW_CELL_FOGBLOOM_RED" ).trimmed() == "flat";
+		s.time = qgetenv( "WW_CELL_FOGBLOOM_TIME" ).trimmed() == "1";
+	}
 	return s;
 }
 

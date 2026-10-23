@@ -885,8 +885,10 @@ void cellApplyEnvModifiers( CellSceneSpec & spec )
 		spec.showDisabled = true;
 	if ( !wwEnv( "WW_CELL_MARKERS" ).isEmpty() )
 		spec.showMarkers = true;
-	if ( !wwEnv( "WW_CELL_PROBES_HIDE" ).isEmpty() )
+	if ( !wwEnv( "WW_CELL_PROBES_HIDE" ).isEmpty() ) {
+		spec.probesHiddenByEnv = spec.probesHiddenByEnv || spec.probesShow;	// lane LIVESET1: a live unset shows them
 		spec.probesShow = false;    // lane PRTPGI: placed and baked, the markers not drawn (clean pictures)
+	}
 	if ( !wwEnv( "WW_CELL_NOTERRAIN" ).isEmpty() )
 		spec.terrain = false;
 	if ( !wwEnv( "WW_CELL_NOWATER" ).isEmpty() )
@@ -1739,6 +1741,298 @@ struct CellChunkBuckets
 	QStringList keys;
 };
 
+//! lane PRTPPLACE: the probe markers, one small box each, colored by class, split under the 16-bit index limit
+static void cellProbeMarkerBuckets( const std::vector<ProbePoint> & probes, const Vector3 & origin, QHash<QString, Bucket> & buckets )
+{
+	int bucketNo = 0;
+	Bucket pb;
+	pb.name = QStringLiteral( "probes" );
+	pb.withColour = true;
+	auto flush = [&]() {
+		if ( pb.verts.empty() )
+			return;
+		buckets.insert( QStringLiteral( "\x01probes%1" ).arg( bucketNo++, 2, 10, QLatin1Char( '0' ) ), pb );
+		pb.verts.clear();
+		pb.tris.clear();
+	};
+	auto box = [&]( const Vector3 & c, float h, const float rgb[3] ) {
+		if ( pb.verts.size() + 24 > 60000 )
+			flush();
+		const Vector3 X( h, 0, 0 ), Y( 0, h, 0 ), Z( 0, 0, h );
+		appendQuad( pb, c - X - Y + Z, c + X - Y + Z, c + X + Y + Z, c - X + Y + Z, Vector3( 0, 0, 1 ), rgb );
+		appendQuad( pb, c - X + Y - Z, c + X + Y - Z, c + X - Y - Z, c - X - Y - Z, Vector3( 0, 0, -1 ), rgb );
+		appendQuad( pb, c + X - Y - Z, c + X + Y - Z, c + X + Y + Z, c + X - Y + Z, Vector3( 1, 0, 0 ), rgb );
+		appendQuad( pb, c - X + Y - Z, c - X - Y - Z, c - X - Y + Z, c - X + Y + Z, Vector3( -1, 0, 0 ), rgb );
+		appendQuad( pb, c + X + Y - Z, c - X + Y - Z, c - X + Y + Z, c + X + Y + Z, Vector3( 0, 1, 0 ), rgb );
+		appendQuad( pb, c - X - Y - Z, c + X - Y - Z, c + X - Y + Z, c - X - Y + Z, Vector3( 0, -1, 0 ), rgb );
+	};
+	for ( const ProbePoint & q : probes ) {
+		const float * rgb = g_probeKinds[cellProbeKindOf( q )].rgb;
+		const Vector3 c( q.pos[0] - origin[0], q.pos[1] - origin[1], q.pos[2] - origin[2] );
+		if ( q.cls == ProbeClass::Aperture ) {
+			box( c, 16.0f, rgb );
+			// a smaller box on the open side shows which way the opening faces
+			box( c + Vector3( q.nrm[0], q.nrm[1], q.nrm[2] ) * 36.0f, 7.0f, rgb );
+		} else {
+			box( c, q.cls == ProbeClass::Room ? 14.0f : 10.0f, rgb );
+		}
+	}
+	flush();
+}
+
+/* lane LIVESET1 (bungo 10-23: "In games, if you change a setting, that setting updates live"). The far LOD and the
+ * probe markers are the document's last sections: a live set cuts the document from the section on and appends it
+ * again, so the rest of the cell stays as built. Anything that cannot (the streamer's cells after the far LOD, a
+ * switch that moves the near cells' load order, markers built inside the document) asks for the reopen as before. */
+namespace
+{
+struct LiveDoc
+{
+	int rootBlock = -1;
+	int tailEnd = -1;              //!< the block count our last step left: anything else appended = not our tail
+	bool interior = false;
+	bool farWanted = false;        //!< the far LOD was built (exterior, Far LOD on)
+	bool farLive = false;          //!< ... with no streamer: a set rebuilds it
+	QByteArray farType, farRed;    //!< the inputs that also move the near cells' load order (the bake's stack)
+	int farFirst = -1;             //!< the block count before the far section
+	std::shared_ptr<EsmWorld> world;
+	QString ws, lodl;
+	int cx = 0, cy = 0, n = 1;
+	Vector3 origin;
+	std::vector<ProbePoint> probes;
+	bool probesBand = true;        //!< the PRTP band's Show probes (before WW_CELL_PROBES_HIDE)
+	bool markersShown = false;
+	int markersFirst = -1;         //!< >= 0: appended live, the tail from there
+	quint64 farSeen = 0, probesSeen = 0;
+	QByteArray farKey;             //!< liveFarKey() the far LOD was built with
+};
+
+std::map<const NifModel *, LiveDoc> & liveDocs()
+{
+	static std::map<const NifModel *, LiveDoc> m;
+	return m;
+}
+
+QByteArray liveFarType()
+{
+	return wwEnv( "WW_CELL_FARLOD_TYPE" ).toLower() + '|' + QByteArray::number( cellFarLodTypePinned() );
+}
+
+//! The values cellFarLodAppend reads while it builds; the per-draw ones (NEAR, SWAYTIME, CARDSWAY, SKY*) stay out
+QByteArray liveFarKey()
+{
+	QByteArray k;
+	for ( const char * n : { "WW_CELL_FARLOD_RED", "WW_CELL_FARLOD_NEARONLY", "WW_CELL_FARLOD_MAX", "WW_CELL_FARLOD_L0",
+			"WW_CELL_FARLOD_L1", "WW_CELL_FARLOD_L2", "WW_CELL_FARLOD_TREE_DIST", "WW_CELL_FARLOD_RINGS",
+			"WW_CELL_FARLOD_BUDGET_MB", "WW_CELL_FARLOD_OURS", "WW_CELL_FARLOD_SWAY" } )
+		k += wwEnv( n ) + '\x1f';
+	return k;
+}
+
+bool liveStackRed( const QByteArray & r )
+{
+	return r == "ownstack" || r == "refusemissing" || r == "nobakeroots";	// cellFarLodStackFor / LendRoots
+}
+
+//! Drops blocks `first`.. (our tail) and the root's links to them, with the side tables keyed by those blocks
+void liveCut( NifModel * nif, LiveDoc & d, int first )
+{
+	const int n = nif->getBlockCount();
+	if ( first < 0 || first >= n )
+		return;
+	for ( int b = first; b < n; b++ ) {
+		cellMeshDrop( nif, b );
+		wwCellCullForget( nif, b );
+		wwCellWaterForget( nif, b );
+		wwCellLandForget( nif, b );
+		wwCellGrassForget( nif, b );
+		wwCellFxLitForget( nif, b );
+	}
+	const QModelIndex iRoot = nif->getBlockIndex( d.rootBlock );
+	for ( const qint32 l : nif->getLinkArray( nif->getIndex( iRoot, "Children" ) ) )
+		if ( l >= first )
+			delLink( nif, iRoot, QStringLiteral( "Children" ), l );
+	nif->removeTailBlocks( first );
+}
+
+QString liveAppendFar( NifModel * nif, LiveDoc & d )
+{
+	d.farFirst = nif->getBlockCount();
+	return cellFarLodAppend( nif, nif->getBlockIndex( d.rootBlock ), *d.world, d.ws, d.cx, d.cy, d.n, d.lodl, d.origin, nullptr );
+}
+
+void liveAppendMarkers( NifModel * nif, LiveDoc & d )
+{
+	QHash<QString, Bucket> buckets;
+	cellProbeMarkerBuckets( d.probes, d.origin, buckets );
+	QStringList keys = buckets.keys();
+	std::sort( keys.begin(), keys.end() );
+	d.markersFirst = nif->getBlockCount();
+	qint64 shapes = 0, verts = 0, tris = 0;
+	const QModelIndex iRoot = nif->getBlockIndex( d.rootBlock );
+	for ( const QString & k : keys )
+		emitBucket( nif, iRoot, buckets[k], d.origin, shapes, verts, tris, nullptr );
+}
+
+//! The markers to `want`: 0 nothing to do, 1 done, 2 a reopen is needed
+int liveMarkers( NifModel * nif, LiveDoc & d, QString * why )
+{
+	const bool want = d.probesBand && wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) && !d.probes.empty();
+	wwCellProbeViewSetShown( nif, d.probesBand && wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) );
+	if ( want == d.markersShown )
+		return 0;
+	if ( nif->getBlockCount() != d.tailEnd || ( !want && d.markersFirst < 0 ) ) {
+		*why = !want && d.markersFirst < 0 ? QStringLiteral( "probe markers built inside the cell document" )
+			: QStringLiteral( "blocks were added after the live sections" );
+		return 2;
+	}
+	nif->holdUpdates( true );
+	if ( want ) {
+		liveAppendMarkers( nif, d );
+	} else {
+		liveCut( nif, d, d.markersFirst );
+		d.markersFirst = -1;
+	}
+	nif->holdUpdates( false );
+	nif->updateModel();
+	d.markersShown = want;
+	d.tailEnd = nif->getBlockCount();
+	*why = QStringLiteral( "probe markers %1 in place" ).arg( want ? QStringLiteral( "shown" ) : QStringLiteral( "hidden" ) );
+	return 1;
+}
+
+//! The far LOD again from the switches: 0 nothing to do, 1 rebuilt, 2 a reopen is needed
+int liveFar( NifModel * nif, LiveDoc & d, QString * why )
+{
+	const QByteArray red = wwEnv( "WW_CELL_FARLOD_RED" );
+	const bool wanted = !d.interior && cellFarLodWanted();
+	if ( wanted != d.farWanted ) {
+		*why = QStringLiteral( "WW_CELL_FARLOD on/off (the bake's stack sets the near cells' load order)" );
+		return 2;
+	}
+	if ( liveFarType() != d.farType ) {
+		*why = QStringLiteral( "WW_CELL_FARLOD_TYPE (the type sets the near cells' load order)" );
+		return 2;
+	}
+	if ( red != d.farRed && ( liveStackRed( red ) || liveStackRed( d.farRed ) ) ) {
+		*why = QStringLiteral( "WW_CELL_FARLOD_RED=%1 (a stack red sets the near cells' load order)" ).arg( QString::fromLatin1( red ) );
+		return 2;
+	}
+	if ( !d.farWanted || liveFarKey() == d.farKey )
+		return 0;	// no far LOD either way, or no build-time value moved
+	if ( !d.farLive || nif->getBlockCount() != d.tailEnd ) {
+		*why = !d.farLive ? QStringLiteral( "far LOD under streamed cells (the streamer holds its blocks)" )
+			: QStringLiteral( "blocks were added after the live sections" );
+		return 2;
+	}
+	QElapsedTimer t;
+	t.start();
+	const bool markers = d.markersFirst >= 0;
+	nif->holdUpdates( true );
+	liveCut( nif, d, d.farFirst );
+	d.markersFirst = -1;
+	const QString notes = liveAppendFar( nif, d );
+	if ( markers )
+		liveAppendMarkers( nif, d );
+	nif->holdUpdates( false );
+	nif->updateModel();
+	d.farRed = red;
+	d.farKey = liveFarKey();
+	d.tailEnd = nif->getBlockCount();
+	qInfo().noquote() << notes.trimmed();
+	*why = QStringLiteral( "far LOD rebuilt in place in %1 ms" ).arg( t.elapsed() );
+	return 1;
+}
+
+void liveForget( const NifModel * nif )
+{
+	liveDocs().erase( nif );
+}
+
+void liveKeep( NifModel * nif, const CellSceneSpec & spec, const std::shared_ptr<EsmWorld> & world, const QString & lodl,
+	int farFirst, const Vector3 & origin, int rootBlock, bool streamed, std::vector<ProbePoint> probes )
+{
+	LiveDoc d;
+	d.rootBlock = rootBlock;
+	d.interior = spec.interior;
+	d.farWanted = !spec.interior && cellFarLodWanted();
+	d.farLive = d.farWanted && !streamed;
+	d.farType = liveFarType();
+	d.farRed = wwEnv( "WW_CELL_FARLOD_RED" );
+	d.farKey = liveFarKey();
+	d.farFirst = farFirst;
+	if ( d.farLive )
+		d.world = world;	// read-only to a build (a stream holds it the same way)
+	d.ws = spec.world;
+	d.lodl = lodl;
+	d.cx = spec.cx;
+	d.cy = spec.cy;
+	d.n = spec.n;
+	d.origin = origin;
+	d.probesBand = spec.probesShow || spec.probesHiddenByEnv;
+	d.markersShown = spec.probesShow && !probes.empty();
+	d.probes = std::move( probes );
+	d.tailEnd = nif->getBlockCount();
+	d.farSeen = d.probesSeen = wwSwitchGen();
+	liveDocs()[nif] = std::move( d );
+	static QSet<const void *> hooked;
+	if ( hooked.contains( nif ) )
+		return;
+	hooked.insert( nif );
+	const NifModel * key = nif;
+	QObject::connect( nif, &QAbstractItemModel::modelReset, nif, [nif]() {
+		if ( nif->getBlockCount() == 0 )
+			liveForget( nif );
+	} );
+	QObject::connect( nif, &QObject::destroyed, [key]() {
+		liveForget( key );
+		hooked.remove( key );
+	} );
+}
+} // namespace
+
+int cellLiveSections( NifModel * nif, QString * why )
+{
+	QString w;
+	auto it = liveDocs().find( nif );
+	if ( !nif || it == liveDocs().end() )
+		return 0;
+	LiveDoc & d = it->second;
+	const bool farMoved = wwSwitchMovedFor( d.farSeen, { "WW_CELL_FARLOD" } );
+	const bool probesMoved = wwSwitchMovedFor( d.probesSeen, { "WW_CELL_PROBES_HIDE" } );
+	int r = farMoved ? liveFar( nif, d, &w ) : 0;
+	if ( r != 2 && probesMoved ) {
+		QString pw;
+		const int p = liveMarkers( nif, d, &pw );
+		if ( p )
+			w = w.isEmpty() || p == 2 ? pw : w + QStringLiteral( "; " ) + pw;
+		r = std::max( r, p );
+	}
+	if ( why )
+		*why = w;
+	return r;
+}
+
+int cellLiveProbesShow( NifModel * nif, bool show, QString * why )
+{
+	auto it = liveDocs().find( nif );
+	if ( !nif || it == liveDocs().end() ) {
+		if ( why )
+			*why = QStringLiteral( "no live cell document" );
+		return 2;
+	}
+	LiveDoc & d = it->second;
+	const bool was = d.probesBand;
+	d.probesBand = show;
+	QString w;
+	const int r = liveMarkers( nif, d, &w );
+	if ( r == 2 )
+		d.probesBand = was;
+	if ( why )
+		*why = w;
+	return r == 2 ? 2 : 1;
+}
+
 // lane CELLSTREAM1: the builder; `chunk` set = one streamed cell (n = 1), no document touched, stops before emit
 static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChunk * chunk,
 	QString * error, QString * notes )
@@ -1764,6 +2058,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		return fail( QStringLiteral( "no model" ) );
 	if ( !spec.valid )
 		return fail( QStringLiteral( "no cell spec" ) );
+	if ( !chunk )
+		liveForget( nif );	// lane LIVESET1: the old document's live context (and the world it holds) goes first
 	// lane CELLSTREAM1: an exterior view streams its cells round the camera (src/cellstream.h); this open builds
 	// the document, the far field and the lighting, and hands the world to the streamer instead of welding a block
 	const bool streamInit = !chunk && !spec.interior && spec.overlay == CellOverlay::None && !bakeExterior
@@ -2385,6 +2681,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		cellIdentityLoad( spec.lodiPath, identity, &identityCensus, &identityError );
 
 	QHash<QString, Bucket> buckets;
+	std::vector<ProbePoint> liveProbes;	// lane LIVESET1: the placed probes, for a live Show probes
 	QHash<QString, std::vector<NativeSrcShape>> modelCache;
 	QSet<QString> modelsFailed;
 	QHash<quint64, int> overlayLegend;      // key -> placements
@@ -5306,43 +5603,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				}
 			}
 		}
-		// the markers: one small box each, colored by class, split under the 16-bit index limit
-		int bucketNo = 0;
-		Bucket pb;
-		pb.name = QStringLiteral( "probes" );
-		pb.withColour = true;
-		auto flush = [&]() {
-			if ( pb.verts.empty() )
-				return;
-			buckets.insert( QStringLiteral( "\x01probes%1" ).arg( bucketNo++, 2, 10, QLatin1Char( '0' ) ), pb );
-			pb.verts.clear();
-			pb.tris.clear();
-		};
-		auto box = [&]( const Vector3 & c, float h, const float rgb[3] ) {
-			if ( pb.verts.size() + 24 > 60000 )
-				flush();
-			const Vector3 X( h, 0, 0 ), Y( 0, h, 0 ), Z( 0, 0, h );
-			appendQuad( pb, c - X - Y + Z, c + X - Y + Z, c + X + Y + Z, c - X + Y + Z, Vector3( 0, 0, 1 ), rgb );
-			appendQuad( pb, c - X + Y - Z, c + X + Y - Z, c + X - Y - Z, c - X - Y - Z, Vector3( 0, 0, -1 ), rgb );
-			appendQuad( pb, c + X - Y - Z, c + X + Y - Z, c + X + Y + Z, c + X - Y + Z, Vector3( 1, 0, 0 ), rgb );
-			appendQuad( pb, c - X + Y - Z, c - X - Y - Z, c - X - Y + Z, c - X + Y + Z, Vector3( -1, 0, 0 ), rgb );
-			appendQuad( pb, c + X + Y - Z, c - X + Y - Z, c - X + Y + Z, c + X + Y + Z, Vector3( 0, 1, 0 ), rgb );
-			appendQuad( pb, c - X - Y - Z, c + X - Y - Z, c + X - Y + Z, c - X - Y + Z, Vector3( 0, -1, 0 ), rgb );
-		};
-		for ( const ProbePoint & q : pr.probes ) {
-			if ( !spec.probesShow )
-				break;      // placed and counted, not drawn (the PRTP band's Show probes off)
-			const float * rgb = g_probeKinds[cellProbeKindOf( q )].rgb;
-			const Vector3 c( q.pos[0] - origin[0], q.pos[1] - origin[1], q.pos[2] - origin[2] );
-			if ( q.cls == ProbeClass::Aperture ) {
-				box( c, 16.0f, rgb );
-				// a smaller box on the open side shows which way the opening faces
-				box( c + Vector3( q.nrm[0], q.nrm[1], q.nrm[2] ) * 36.0f, 7.0f, rgb );
-			} else {
-				box( c, q.cls == ProbeClass::Room ? 14.0f : 10.0f, rgb );
-			}
-		}
-		flush();
+		// the markers (placed and counted always; drawn with the PRTP band's Show probes on)
+		if ( spec.probesShow )
+			cellProbeMarkerBuckets( pr.probes, origin, buckets );
+		if ( !chunk )
+			liveProbes = pr.probes;	// lane LIVESET1
 	}
 
 	// ---- emit
@@ -5596,9 +5861,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	CellFarStream farStream;   // lane CELLSTREAM1: ring 0 uncut over the roam area, a shape a cell
 	if ( wwEnvIsSet( "WW_CELL_STREAM_ROAM" ) )
 		farStream.roam = qBound( 2, wwEnvInt( "WW_CELL_STREAM_ROAM" ), 16 );
+	const int liveFarFirst = chunk ? -1 : nif->getBlockCount();	// lane LIVESET1: where the far section starts
+	QString liveFarLodl;
 	if ( !spec.interior && cellFarLodWanted() ) {
 		QStringList farSearched;
 		const QString farLodl = cellFarLodl( spec.world, dataRoot, farSearched );
+		liveFarLodl = farLodl;
 		farLodNotes = farStackNote + cellFarLodAppend( nif, iRoot, world, spec.world, spec.cx, spec.cy, spec.n, farLodl, origin,
 			streamInit ? &farStream : nullptr );
 		CellSpeed::mark( "far LOD appended" );
@@ -5607,6 +5875,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	nif->holdUpdates( false );
 	nif->updateModel();
 	CellSpeed::mark( "document updateModel" );
+	// lane LIVESET1: what a live set of the far LOD or the probe markers rebuilds from
+	liveKeep( nif, spec, worldOwn, liveFarLodl, liveFarFirst, origin, nif->getBlockNumber( iRoot ), streamInit, std::move( liveProbes ) );
 	// lane MODPICK1: "Mods differ from the far LOD bake", over the view, for as long as this document is the cell
 	cellModPickSetViewNote( nif, modPickViewNote );
 	{

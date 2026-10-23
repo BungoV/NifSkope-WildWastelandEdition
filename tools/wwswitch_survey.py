@@ -34,6 +34,30 @@ OVERRIDES = {
     'WW_SETUP_MEMO': ('live', 'setupMemo() re-reads it on any live set (and voids its stamps)'),
     'WW_SETUP_MEMO_CHECK': ('live', 'setupMemo() re-reads it on any live set'),
     'WW_CELL_HDR_RED': ('live', 'a member default; hst() re-reads it on a live set'),
+    # lane LIVESET1: cellLiveSections rebuilds the far LOD / the probe markers in place (the document's tail);
+    # on/off, TYPE and the stack reds still reopen (they set the near cells' load order), named in the reply
+    'WW_CELL_FARLOD_RED': ('live', 'rebuilt in place (live section); ownstack/refusemissing/nobakeroots owe a reopen'),
+    'WW_CELL_FARLOD_NEARONLY': ('live', 'rebuilt in place (live section)'),
+    'WW_CELL_FARLOD_MAX': ('live', 'rebuilt in place (live section)'),
+    'WW_CELL_FARLOD_L0': ('live', 'rebuilt in place (live section)'),
+    'WW_CELL_FARLOD_L1': ('live', 'rebuilt in place (live section)'),
+    'WW_CELL_FARLOD_L2': ('live', 'rebuilt in place (live section)'),
+    'WW_CELL_FARLOD_TREE_DIST': ('live', 'rebuilt in place (live section)'),
+    'WW_CELL_FARLOD_RINGS': ('live', 'rebuilt in place (live section)'),
+    'WW_CELL_FARLOD_BUDGET_MB': ('live', 'rebuilt in place (live section)'),
+    'WW_CELL_FARLOD_OURS': ('live', 'rebuilt in place (live section)'),
+    'WW_CELL_FARLOD_SWAY': ('live', 'rebuilt in place (live section); the draw re-reads it per frame'),
+    'WW_CELL_FARLOD_NEAR': ('live', 'wwCellFarLodNear: re-read per frame'),
+    'WW_CELL_FARLOD_SWAYTIME': ('live', 'swayTime: re-read per frame'),
+    'WW_CELL_FARLOD_CARDSWAY': ('live', 'wwCellFarLodCards: re-read per frame'),
+    'WW_CELL_FARLOD_SKYCENSUS': ('live', 'wwCellFarLodSkyCensus: re-read per frame'),
+    'WW_CELL_FARLOD_SKYMASK': ('live', 'wwCellFarLodSkyCensus: re-read per frame'),
+    'WW_CELL_PROBES_HIDE': ('live', 'probe markers appended/cut in place (live section); hiding markers built at open owes a reopen'),
+    'WW_STREAM1_RED': ('relaunch', 'its reds pick load-time upload formats of every texture/mesh already resident'),
+    'WW_PBRM_AUTHORPATH_RED': ('relaunch', 'every loaded property keeps its resolved .pbrm; a measuring red, not a setting'),
+    'WW_MSAA': ('relaunch', 'the GL surface format is chosen when the window is made'),
+    'WW_MSAA_RED': ('relaunch', 'the GL surface format is chosen when the window is made'),
+    'WW_CELL_DOOR_ANIM': ('reopen', 'req() re-reads it, but the door to animate is found while the cell is built'),
 }
 
 # init-once state functions (read once under a loaded flag) that re-read their prefix on a live set: class (b)
@@ -49,7 +73,7 @@ FILE_RULES = [
     (r'/lodgen[a-z]*\.cpp$|/lodgenao\.h$|impostorpreview|bake_|/impostorbake', 'tool'),
     (r'/gl/glcontext\.cpp$', 'shaders'),	# only Shader::load, Program::load, updateShaders (stage_of)
     (r'/main\.cpp$', 'relaunch'),
-    (r'/cell(view|stream|farlod|mesh|texahead|splat|cable|aodecal|modsource|speed|census)\.cpp$|/probe[a-z]*\.cpp$|/esm[a-z]*\.cpp$|/btdterrain\.cpp$|/lodinative\.cpp$|/lodofile\.cpp$|/impostorchunk\.cpp$|/aovolume\.cpp$|/nativeemit\.cpp$', 'reopen'),
+    (r'/cell(view|stream|farlod|mesh|texahead|splat|cable|aodecal|modsource|speed|census|modelahead)\.cpp$|/probe[a-z]*\.cpp$|/esm[a-z]*\.cpp$|/btdterrain\.cpp$|/lodinative\.cpp$|/lodofile\.cpp$|/impostorchunk\.cpp$|/aovolume\.cpp$|/nativeemit\.cpp$', 'reopen'),
 ]
 LOAD_FN = re.compile(r'(Publish|Load|load|Build|build|Open|open|Bake|bake|Pick|Import|import)')
 CTOR = re.compile(r'\b(\w+)::\1$')

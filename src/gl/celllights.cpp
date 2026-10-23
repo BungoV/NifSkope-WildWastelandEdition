@@ -1224,10 +1224,10 @@ void wwCellLightsUniforms( Scene * scene )
 		const bool fineDraw = giDraw && !skyDraw && !G->fine.empty();
 		prog->uni1b( "cellGiFineOn", fineDraw );
 		if ( fineDraw ) {
-			static const int fineRed = []() {
+			WW_SWITCH_STATIC( int, fineRed, []() {	// lane LIVESET1: follows a live set
 				const QByteArray r = qgetenv( "WW_CELL_EMISSIVEGRID_RED" ).trimmed();
 				return r == "noseen" ? 1 : r == "nosub" ? 2 : 0;
-			}();
+			}() );
 			const int giLayers = G->dims[2] * ( ( G->slotRooms.empty() ? 6 : 12 ) + ( g.giSpecSky ? 6 : 0 ) );	// + SPECOCC1's sky slot
 			const int n = std::min( int( G->fineBox.size() / 8 ), 8 );
 			prog->uni1i( "cellGiFineN", n );
@@ -1660,7 +1660,8 @@ namespace
 int & skyVisCache()
 {
 	static int pct = -1;
-	if ( pct < 0 ) {
+	static quint64 liveGen = 0;	// lane LIVESET1: a live set of the pin reads it (or the saved row) again
+	if ( pct < 0 || wwSwitchMovedFor( liveGen, { "WW_CELL_SKYSTR" } ) ) {
 		const QByteArray pin = wwEnv( "WW_CELL_SKYSTR" ).trimmed();
 		pct = pin.isEmpty() ? QSettings().value( QStringLiteral( "WW/CellSkyVis" ), 100 ).toInt() : pin.toInt();
 		pct = std::clamp( pct, 0, 100 );
@@ -3301,8 +3302,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	{
 		/* lane PERF2: this pass is CPU-bound per draw. memo: the scene-global setters once per program (as the main
 		 * pass); opaque: the sorted draws that write nothing here are skipped (PERF2FIX1). =0 or *_RED=1: old */
-		static const bool memo = qgetenv( "WW_CELL_AO_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_AO_MEMO_RED" );
-		static const bool opaqueOnly = qgetenv( "WW_CELL_AO_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_AO_OPAQUE_RED" );
+		WW_SWITCH_STATIC( bool, memo, qgetenv( "WW_CELL_AO_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_AO_MEMO_RED" ) );
+		WW_SWITCH_STATIC( bool, opaqueOnly, qgetenv( "WW_CELL_AO_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_AO_OPAQUE_RED" ) );
 		NodeList second;
 		wwOpaqueCutNewFrame();
 		if ( memo )

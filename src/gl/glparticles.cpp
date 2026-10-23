@@ -228,7 +228,7 @@ void vpDumpWrite( Scene * scene, NifSkopeOpenGLContext::Program * prog, const QS
  * kVpFxSamples of its covered pixels appended to the dump as "particles" (the same 8 RGBA a probe) */
 void wwVolPartFxDump( Scene * scene, const std::function<void()> & draw, int block, const QString & name )
 {
-	static const QString path = QString::fromLocal8Bit( qgetenv( "WW_CELL_VOLPART_DUMP" ) );
+	WW_SWITCH_STATIC( QString, path, QString::fromLocal8Bit( qgetenv( "WW_CELL_VOLPART_DUMP" ) ) );
 	if ( path.isEmpty() || !scene || !scene->renderer || !wwVolPartOn() )
 		return;
 	NifSkopeOpenGLContext::Program * prog = scene->renderer->getCurrentProgram();
@@ -589,7 +589,7 @@ void Particles::drawShapes( NodeList * secondPass )
 	WW_SWITCH_STATIC( bool, cellPfxRed, wwEnv( "WW_CELL_PARTICLES_RED" ).trimmed() == "viewer" );
 	const bool cellPfx = !scene->selecting && !cellPfxRed && wwCellLightsWanted( scene );
 	// lane VOLPART1, gates only: WW_CELL_VOLPART_HIDE=1 draws no cell particle (the plate the hard-edge gate subtracts)
-	static const bool vpHide = qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1;
+	WW_SWITCH_STATIC( bool, vpHide, qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1 );	// lane LIVESET1: follows a live set
 	if ( cellPfx && vpHide )
 		return;
 	bool volPart = false, vpAlways = false;
@@ -935,7 +935,7 @@ void Particles::drawShapes( NodeList * secondPass )
 	if ( !scene->selecting )
 		glDepthMask( GL_TRUE );
 	// lane VOLPART1, gates only: the per-particle probe (WW_CELL_VOLPART_DUMP)
-	static const QString vpDump = QString::fromLocal8Bit( qgetenv( "WW_CELL_VOLPART_DUMP" ) );
+	WW_SWITCH_STATIC( QString, vpDump, QString::fromLocal8Bit( qgetenv( "WW_CELL_VOLPART_DUMP" ) ) );
 	if ( volPart && !vpDump.isEmpty() && numVerts > 0 )
 		vpDumpSystem( scene, prog, vpDump, getName(), scene->nifModel->getBlockNumber( iBlock ), int( numVerts ) );
 }

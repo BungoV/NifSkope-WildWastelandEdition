@@ -218,7 +218,7 @@ void wwOpaqueCutNewFrame()
 
 bool wwOpaqueCutChecking()
 {
-	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_OPAQUE_CUT_CHECK" ) == 1;
+	WW_SWITCH_STATIC( bool, on, qEnvironmentVariableIntValue( "WW_CELL_OPAQUE_CUT_CHECK" ) == 1 );
 	return on;
 }
 
@@ -327,20 +327,20 @@ static const QString pbr_lut_sf = "#sfpbr.dds";
  * WW/FxEnvMaskR or WW_FX_ENVMASK (off until seen); red WW_FX_ENVMASK_RED=gloss (old) | noenv (no cube). */
 bool wwFxEnvMaskR()
 {
-	static const int v = [] {
+	WW_SWITCH_STATIC( int, v, [] {	// lane LIVESET1: follows a live set (the uniform is set per draw)
 		const QByteArray red = qgetenv( "WW_FX_ENVMASK_RED" ).trimmed();
 		const QByteArray pin = qgetenv( "WW_FX_ENVMASK" ).trimmed();
 		const bool on = !pin.isEmpty() ? pin != "0" : QSettings().value( QStringLiteral( "WW/FxEnvMaskR" ), false ).toBool();
 		const bool r = on && red != "gloss";
 		fprintf( stderr, "fx env mask: %s\n", r ? "R (the game's)" : on ? "G (red WW_FX_ENVMASK_RED=gloss)" : "G (as before)" );
 		return r ? 1 : 0;
-	}();
+	}() );
 	return v != 0;
 }
 
 static bool wwFxEnvNone()
 {
-	static const bool v = qgetenv( "WW_FX_ENVMASK_RED" ).trimmed() == "noenv";
+	WW_SWITCH_STATIC( bool, v, qgetenv( "WW_FX_ENVMASK_RED" ).trimmed() == "noenv" );
 	return v;
 }
 
@@ -579,7 +579,8 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 
 	static int	armed = -1;
 	static QString	censusPath;
-	if ( armed < 0 ) {
+	static quint64	liveGen = 0;	// lane LIVESET1: a live set arms (or disarms) it
+	if ( armed < 0 || wwSwitchMovedFor( liveGen, { "WW_PROGRAM_CENSUS" } ) ) {
 		QString	p = QString::fromLocal8Bit( wwEnv( "WW_PROGRAM_CENSUS" ) ).trimmed();
 		armed = ( !p.isEmpty() && QDir::isAbsolutePath( p ) ) ? 1 : 0;
 		censusPath = p;
