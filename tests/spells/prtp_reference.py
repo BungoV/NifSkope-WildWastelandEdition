@@ -210,7 +210,7 @@ def main(a):
             s = t['surfels'].copy()
             s['alb'] = s['alb'][rng.permutation(len(s))]
             t['surfels'] = s
-            t['bysides'] = tuple(s[s['pad0'] == b] for b in range(6)) if t['ver'] >= 5 else (s, t['back'])
+            t['bysides'] = tuple(s[s['pad0'] == b] for b in range(len(t['bysides']))) if t['ver'] >= 5 else (s, t['back'])
 
     work = os.path.join(bake, '_reference')
     os.makedirs(work, exist_ok=True)

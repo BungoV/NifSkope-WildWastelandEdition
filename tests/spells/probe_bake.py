@@ -112,7 +112,8 @@ def read_tbk(path):
         em = np.zeros(0, EMIT)
     # lane SIDES6: the surfel table a link side names. v3/v4: (front, back); v5: the six bins (pad0), each
     # its own array, so `bysides[side][j]` and a per-side key map read every version the same way
-    bysides = tuple(s[s['pad0'] == b] for b in range(6)) if ver >= 5 else (s, back)
+    # lane GAPBAKE1: content bit 32 = room slots, side = bin + 6 x slot (4 slots)
+    bysides = tuple(s[s['pad0'] == b] for b in range(24 if res[2] & 32 else 6)) if ver >= 5 else (s, back)
     return dict(emits=em, ver=ver, content=res[2] if ver >= 4 else 0, cx=cx, cy=cy, cell=cs, flags=flags, surfels=s,
                 probes=p, links=lk, back=back, lext=lx, pext=px, boxes=bx, bysides=bysides)
 
@@ -382,7 +383,7 @@ def structure(files, fails):
             t['keys_side'].append(keys)
         t['keys'], t['keys_back'] = t['keys_side'][0], t['keys_side'][1]
         if t['ver'] >= 5:
-            if len(s) and int(s['pad0'].max()) > 5:
+            if len(s) and int(s['pad0'].max()) > (23 if t['content'] & 32 else 5):
                 fails.append('%s: a surfel bin over 5' % name)
             # the table's order: cell (z, y, x), then bin
             order = [(floordiv(sp['pos'][2], t['cell']), floordiv(sp['pos'][1], t['cell']), floordiv(sp['pos'][0], t['cell']),
@@ -401,7 +402,7 @@ def structure(files, fails):
         if nxt != len(lk):
             fails.append('%s: %d links not owned by a probe' % (name, len(lk) - nxt))
         if t['ver'] >= 4:
-            top = 5 if t['ver'] >= 5 else 1
+            top = (23 if t['content'] & 32 else 5) if t['ver'] >= 5 else 1   # lane GAPBAKE1: bit 32 = room slots
             if len(t['lext']) and int(t['lext']['side'].max()) > top:
                 fails.append('%s: a link side over %d' % (name, top))
             named = set(int(r) for r in t['pext']['room'].ravel()) - {0, ROOM_NONE}

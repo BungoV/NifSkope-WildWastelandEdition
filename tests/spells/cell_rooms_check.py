@@ -1059,6 +1059,7 @@ def synth_cmd(exe, work, red):
             cmd += ['--red', 'noclamp']
         elif red and red != 'noscale':
             cmd += ['--rooms-red', red]
+        cmd += os.environ.get('CELL_ROOMS_PROBEGI_ARGS', '').split()   # lane GAPBAKE1: bake flags, e.g. --room-split 1
         t0 = time.time()
         p = subprocess.run(cmd, capture_output=True, text=True)
         cen = [l.strip() for l in p.stdout.splitlines() if l.strip().startswith(('rooms:', 'gi rooms:'))]

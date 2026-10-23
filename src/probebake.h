@@ -30,6 +30,7 @@
  *  writer above is unchanged byte for byte (tbkVersion 3). */
 
 #include "probeplace.h"
+#include "proberooms.h"
 
 #include <QString>
 #include <QStringList>
@@ -103,7 +104,14 @@ struct ProbeBakeSpec
 	 *  never rewrite each other's cells. Unset (ownX1 < ownX0, the CLI tools and interiors): every sector
 	 *  the probes reach is written. */
 	int ownX0 = 0, ownY0 = 0, ownX1 = -1, ownY1 = -1;
+	/*! lane GAPBAKE1 (ROOMCLAMP1's straddle): v5 only. A surfel cell's samples split by the room of the probe whose
+	 *  ray found them (a ray reaches only its own room's side of a wall), up to kTbkRoomSlots rooms a cell; the
+	 *  record's pad0 and a link's side = bin + 6 x slot, header reserved[2] bit 32. Off = the old bytes. */
+	bool roomSplit = false;
+	//! lane GAPBAKE1: the split's rooms, the soup's grid (probeBakeRoomGrid); null = the placer's probe rooms
+	const ProbeRooms * roomGrid = nullptr;
 };
+constexpr int kTbkRoomSlots = 4;   //!< lane GAPBAKE1: rooms a surfel cell keeps apart (more merge into the last)
 
 struct ProbeBakeResult
 {
@@ -152,6 +160,7 @@ struct ProbeBakeResult
 	QString rtNote;                         //!< lane RTBAKE1: the primary rays' tracer (bakert census), "" = cpu
 	// lane SIDES6: v5 sides, and the corner measure (every version)
 	int sideSurfels = 0;                    //!< v5: surfels beyond each cell's first
+	int roomSplitCells = 0, roomSplitSurfels = 0, roomSlotsMerged = 0, roomSplitRooms = 0;   //!< lane GAPBAKE1: cells split by room; their extra surfels; rooms past the last slot
 	int cellsSampled = 0, cornerCells = 0;  //!< cells with a hit; whose v4 front merges faces over 45 deg apart
 	std::vector<int> sideHist;              //!< cells by the number of facing bins they were seen on (index 1..6)
 	double hitW = 0, offW = 0, cornerW = 0; //!< v4+: ray weight on a surfel; on one over 45 deg off its face; on a corner cell
@@ -177,6 +186,10 @@ struct ProbeBakeResult
 //! `roomBoxes` (the placer's) go into the v4 files whose probes name their rooms.
 bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, const ProbeBakeSpec & spec,
 	const QString & outDir, ProbeBakeResult * out, const std::vector<ProbeRoomBox> * roomBoxes = nullptr );
+//! lane GAPBAKE1: the room split's rooms grid from the soup before the bake (probegi's grid rule over the probes'
+//! box grown by `pad`): a placer that finds no enclosed room (two rooms sharing one wall) still splits.
+bool probeBakeRoomGrid( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, const ProbeRoomSpec & spec,
+	ProbeRooms * out, float pad = 512.0f );
 //! The census as notes lines (cell view notes, CLI stdout).
 QString probeBakeCensusText( const ProbeBakeResult & r );
 //! `nifskope -no-gui probebake --soup <f> --rect minX,minY,maxX,maxY --out <dir>
