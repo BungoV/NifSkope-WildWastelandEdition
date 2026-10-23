@@ -36,6 +36,8 @@ struct WwCellProbeView
 
 void wwCellProbeViewPublish( const void * nif, const WwCellProbeView & v );
 const WwCellProbeView * wwCellProbeViewFor( const void * nif );
+//! lane LIVESET1: the PRTP band's Show probes, live
+void wwCellProbeViewSetShown( const void * nif, bool shown );
 //! a click in a Pass: picks the probe nearest the ray (within its box); false (nothing changed) otherwise
 bool wwCellProbeViewPick( Scene * scene, const float origin[3], const float dir[3] );
 //! the overlay, after the scene draw (a no-op in Combined or without a published view)

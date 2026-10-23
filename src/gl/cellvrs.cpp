@@ -1,4 +1,5 @@
 #include "cellvrs.h"
+#include "wwswitch.h"	// lane LIVESET1: the configuration follows a live set
 
 #include "gl/cellhdr.h"
 #include "gl/cellpasstime.h"
@@ -56,7 +57,7 @@ struct VrsCfg
 
 const VrsCfg & cfg()
 {
-	static const VrsCfg c = [] {
+	WW_SWITCH_STATIC( VrsCfg, c, [] {	// lane LIVESET1: re-read on a live set (the rate images are built each frame)
 		VrsCfg v;
 		v.on = qEnvironmentVariableIntValue( "WW_CELL_VRS" ) == 1;
 		const QByteArray red = qgetenv( "WW_CELL_VRS_RED" ).trimmed().toLower();
@@ -74,7 +75,7 @@ const VrsCfg & cfg()
 		v.census = qEnvironmentVariableIntValue( "WW_CELL_VRS_CENSUS" ) == 1;
 		v.dump = qEnvironmentVariable( "WW_CELL_VRS_DUMP" );
 		return v;
-	}();
+	}() );
 	return c;
 }
 

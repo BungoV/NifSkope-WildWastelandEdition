@@ -1,4 +1,5 @@
 #include "cellfxres.h"
+#include "wwswitch.h"	// lane LIVESET1: the configuration follows a live set
 
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
@@ -36,7 +37,7 @@ struct FxCfg
 
 const FxCfg & cfg()
 {
-	static const FxCfg c = [] {
+	WW_SWITCH_STATIC( FxCfg, c, [] {	// lane LIVESET1: makeTargets keys on the scale, so a live set sizes them again
 		FxCfg v;
 		v.on = qEnvironmentVariableIntValue( "WW_CELL_FXRES" ) == 1;
 		const QByteArray red = qgetenv( "WW_CELL_FXRES_RED" ).trimmed().toLower();
@@ -58,7 +59,7 @@ const FxCfg & cfg()
 			v.edge = f;
 		v.census = qEnvironmentVariableIntValue( "WW_CELL_FXRES_CENSUS" ) == 1;
 		return v;
-	}();
+	}() );
 	return c;
 }
 

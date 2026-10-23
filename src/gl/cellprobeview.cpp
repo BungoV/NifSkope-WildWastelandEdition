@@ -65,6 +65,14 @@ void wwCellProbeViewPublish( const void * nif, const WwCellProbeView & v )
 	s.picked.insert( nif, s.pin >= 0 && size_t( s.pin ) * 21 < v.probes.size() ? s.pin : -1 );
 }
 
+void wwCellProbeViewSetShown( const void * nif, bool shown )
+{
+	PvState & s = pv();
+	auto it = s.views.find( nif );
+	if ( it != s.views.end() )
+		it->probesShown = shown;
+}
+
 const WwCellProbeView * wwCellProbeViewFor( const void * nif )
 {
 	PvState & s = pv();

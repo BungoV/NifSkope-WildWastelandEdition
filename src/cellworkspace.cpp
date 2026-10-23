@@ -911,6 +911,14 @@ void CellWorkspacePanel::buildUi()
 		QSettings().setValue( QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), on );
 		if ( syncing || g_path.isEmpty() || !g_spec.probes )
 			return;     // nothing placed: the choice waits for Place
+		QString why;
+		if ( cellLiveProbesShow( nif, on, &why ) == 1 ) {	// lane LIVESET1: in place, no rebuild
+			g_spec.probesShow = on;
+			if ( glView )
+				glView->update();
+			say( why, false );
+			return;
+		}
 		g_over = g_spec;
 		g_over.probesShow = on;
 		g_haveOverrides = true;

@@ -67,5 +67,7 @@ void wwSunShadowPass( Scene * scene );
 void wwSunShadowUniforms( Scene * scene );
 //! one line for the census: the fit of the last pass, or why none was built
 QString wwSunShadowSummary();
+//! lane LIVESET1: the casters were rebuilt live: the held cascade layers and caster tracks start over
+void wwSunShadowForget();
 
 #endif

@@ -59,7 +59,8 @@ struct Switches
 
 const Switches & sw()
 {
-	static const Switches s;
+	// lane LIVESET1: read again after a live set; the arena is built at first use either way
+	WW_SWITCH_STATIC( Switches, s, Switches() );
 	return s;
 }
 

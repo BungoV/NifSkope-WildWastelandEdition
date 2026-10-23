@@ -1,0 +1,63 @@
+// LIVESET1: the live-set mechanism each converted subsystem uses (WW_SWITCH_STATIC, wwSwitchMovedFor) rebuilds on a
+// changed value and not on an unchanged one; the converted switches read live in the stage table. Exit 0 = pass.
+#include "wwswitch.h"
+
+#include <cstdio>
+
+static int g_fail = 0;
+static void check( bool ok, const char * what )
+{
+	std::printf( "%s %s\n", ok ? "PASS" : "FAIL", what );
+	g_fail += ok ? 0 : 1;
+}
+
+static int g_builds = 0;
+static int reader()	// the shape of cellqueue/cellgpucull sw(), celldoorlive req(), cellhdr ...
+{
+	WW_SWITCH_STATIC( int, v, ( ++g_builds, qEnvironmentVariableIntValue( "WW_SHADOWCACHE" ) ) );
+	return v;
+}
+
+int main()
+{
+	qputenv( "WW_SHADOWCACHE", "1" );
+	check( reader() == 1 && g_builds == 1, "first read builds once" );
+	reader();
+	check( g_builds == 1, "no set: no rebuild" );
+
+	QString r = wwSwitchSet( "WW_SHADOWCACHE", "1", false );
+	reader();
+	check( r.startsWith( "same" ) && g_builds == 1, "unchanged value: no rebuild" );
+
+	r = wwSwitchSet( "WW_SHADOWCACHE", "0", false );
+	check( r.startsWith( "ok" ) && reader() == 0 && g_builds == 2, "changed value: one rebuild, new value" );
+	reader();
+	check( g_builds == 2, "after the rebuild: no more" );
+
+	// the far LOD / probe sections and sunshadow/CSM_ECHO watch their prefixes only
+	quint64 far = wwSwitchGen(), probes = wwSwitchGen(), csm = wwSwitchGen();
+	wwSwitchSet( "WW_CELL_FARLOD_RED", "nocut", false );
+	check( wwSwitchMovedFor( far, { "WW_CELL_FARLOD" } ), "far section sees WW_CELL_FARLOD_RED" );
+	check( !wwSwitchMovedFor( probes, { "WW_CELL_PROBES_HIDE" } ), "probe section ignores WW_CELL_FARLOD_RED" );
+	check( !wwSwitchMovedFor( csm, { "WW_CSM_ECHO" } ), "CSM echo ignores WW_CELL_FARLOD_RED" );
+	check( !wwSwitchMovedFor( far, { "WW_CELL_FARLOD" } ), "far section: nothing new after it looked" );
+	wwSwitchSet( "WW_CELL_FARLOD_RED", "nocut", false );
+	check( !wwSwitchMovedFor( far, { "WW_CELL_FARLOD" } ), "same far value: no rebuild" );
+	wwSwitchSet( "WW_CELL_PROBES_HIDE", "", true );
+	check( !wwSwitchMovedFor( probes, { "WW_CELL_PROBES_HIDE" } ), "unset of an unset HIDE: no rebuild" );
+	wwSwitchSet( "WW_CELL_PROBES_HIDE", "1", false );
+	check( wwSwitchMovedFor( probes, { "WW_CELL_PROBES_HIDE" } ), "HIDE set: probe section moves" );
+
+	// the converted switches classify live (a relaunch here would make the runner launch per row)
+	for ( const char * n : { "WW_CELL_FARLOD_RED", "WW_CELL_PROBES_HIDE", "WW_SHADOWCACHE", "WW_CSM_ECHO", "WW_GPUDRIVEN",
+			"WW_GPUDRIVEN_B", "WW_CELL_FARLOD_L0", "WW_CELL_FARLOD_NEARONLY" } ) {
+		const bool live = wwSwitchStageOf( n ) == WwSwitchStage::Live;
+		std::printf( "%s %s live\n", live ? "PASS" : "FAIL", n );
+		g_fail += live ? 0 : 1;
+	}
+	check( wwSwitchStageOf( "WW_CELL_FARLOD" ) == WwSwitchStage::Reopen, "WW_CELL_FARLOD on/off stays reopen" );
+	check( wwSwitchStageOf( "WW_CELL_SPEED_RED" ) == WwSwitchStage::Reopen, "WW_CELL_SPEED_RED reopen (was relaunch)" );
+
+	std::printf( "%s (%d failed)\n", g_fail ? "LIVESWITCH FAIL" : "LIVESWITCH PASS", g_fail );
+	return g_fail ? 1 : 0;
+}

@@ -3771,10 +3771,10 @@ void GLView::paintGL()
 	// paint (WW_TEX_PUMP_MB, default 24), so a cell that comes into view finds them loaded. Red: texpump.
 	static const bool wwPumpRed = PassTime::stream1Red( "texpump" );
 	if ( !wwPumpRed && textures && model && cellStreamOn( model ) ) {
-		static const qint64 wwPumpMb = [] {
+		WW_SWITCH_STATIC( qint64, wwPumpMb, [] {	// lane LIVESET1: follows a live set
 			const int v = qEnvironmentVariableIntValue( "WW_TEX_PUMP_MB" );
 			return qint64( v > 0 ? v : 24 );
-		}();
+		}() );
 		textures->setPumpOwnsDrain( PassTime::stream1Loaded() );
 		textures->wwPump( model, wwPumpMb << 20 );
 	}

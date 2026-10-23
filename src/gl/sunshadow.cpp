@@ -437,12 +437,26 @@ struct State
 	Layer c[kCascades];
 	QHash<const Shape *, Track> track;
 	bool haveL[kCascades] = {};
+	quint64 liveGen = 0;	// lane LIVESET1
 };
 
 State & st()
 {
 	static State s;
-	if ( !s.init ) {
+	// lane LIVESET1: a live set reads the switches again (defaults first) and empties the cache, so the next frame
+	// draws every layer as a fresh launch's first frame does; the GL objects are kept
+	const bool moved = s.init && wwSwitchMovedFor( s.liveGen, { "WW_SHADOWCACHE", "WW_GPUDRIVEN_CENSUS" } );
+	if ( moved ) {
+		for ( int i = 0; i < kCascades; i++ ) {
+			s.c[i] = Layer();
+			s.haveL[i] = false;
+		}
+		s.track.clear();
+		s.mask = 6;
+		s.holdDeg = 0.05;
+		s.dynFrames = 120;
+	}
+	if ( !s.init || moved ) {
 		s.init = true;
 		s.on = qEnvironmentVariable( "WW_SHADOWCACHE" ).trimmed() != QLatin1StringView( "0" );
 		const QString r = qEnvironmentVariable( "WW_SHADOWCACHE_RED" ).trimmed().toLower();
@@ -684,7 +698,9 @@ static void csmEchoFrame()
 {
 	static int armed = -1;
 	static QString path, lastWritten;
-	if ( armed < 0 ) {
+	static quint64 liveGen = 0;	// lane LIVESET1: a live set arms it (or moves the file) on the next frame
+	if ( armed < 0 || wwSwitchMovedFor( liveGen, { "WW_CSM_ECHO" } ) ) {
+		lastWritten.clear();
 		path = wwEnvStr( "WW_CSM_ECHO" ).trimmed();
 		armed = ( !path.isEmpty() && QDir::isAbsolutePath( path ) ) ? 1 : 0;
 	}
@@ -1539,6 +1555,16 @@ void wwSunShadowUniforms( Scene * scene )
 	// lane TERRSHADOW1: the composition (ussOn = 0 keeps the code above exactly CSM1's)
 	const float texel[3] = { float( s.c[0].texel ), float( s.c[1].texel ), float( s.c[2].texel ) };
 	wwShadowSetUniforms( scene, prog, s.valid, texel );
+}
+
+void wwSunShadowForget()
+{
+	ShadowCache::State & s = ShadowCache::st();
+	for ( int i = 0; i < kCascades; i++ ) {
+		s.c[i] = ShadowCache::Layer();
+		s.haveL[i] = false;
+	}
+	s.track.clear();
 }
 
 QString wwSunShadowSummary()

@@ -168,6 +168,7 @@ struct CellSceneSpec
 	 * file); `probesShow` draws them. */
 	bool probes = false;
 	bool probesShow = true;
+	bool probesHiddenByEnv = false;	//!< lane LIVESET1: WW_CELL_PROBES_HIDE turned probesShow off
 	/* Lane PRTPBAKE (2026-09-30): the band's Bake. Places the probes, then bakes them
 	 * into FO4CS `.tbk` sector files in `bakeDir` (empty = `<app>/prtp_bake/<world or
 	 * cell>`). One-shot: the workspace clears it once the build is noted. */
@@ -211,6 +212,12 @@ QString cellBakeFarDigest( const QString & world, const QString & dataRoot, int 
 
 bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	QString * error, QString * notes = nullptr );
+
+/*! lane LIVESET1: the far LOD and the probe markers follow a live set in place (the document's last sections).
+ *  0 = nothing moved, 1 = rebuilt (`why` says what), 2 = a reopen is needed (`why` says which input). */
+int cellLiveSections( NifModel * nif, QString * why );
+//! lane LIVESET1: the PRTP band's Show probes in place; 1 done, 2 a reopen is needed
+int cellLiveProbesShow( NifModel * nif, bool show, QString * why );
 
 /*! lane SUNCELL1: the Particles row (WW/CellParticles, env pin WW_CELL_PARTICLES, ships OFF): a placed model's
  *  particle systems are copied into the cell (read when the cell opens). */

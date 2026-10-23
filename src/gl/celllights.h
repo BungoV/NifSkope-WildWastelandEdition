@@ -392,6 +392,8 @@ QString wwCellImageSpaceEcho( Scene * scene );
 void wwCellShadowPass( Scene * scene );
 //! lane DOORLIVE1: a caster moved (a live door): the next pass re-renders every held shadow slot
 void wwCellShadowKick( const void * nif );
+//! lane LIVESET1: a section of the document was rebuilt live: every held slot and the lamp store start over
+void wwCellShadowsForget( const void * nif );
 QString wwCellShadowEcho( Scene * scene );
 
 /*! THE AMBIENT OBSCURANCE (lane AO1, docs/PRTP_PLAN.md "ambient obscurance"): the game's screen-space obscurance, from its own

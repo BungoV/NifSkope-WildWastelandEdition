@@ -102,8 +102,8 @@ struct SsrGpu
 
 bool ssrPrevOn()
 {
-	static const bool on = qgetenv( "WW_CELL_SSR_PREV" ).trimmed() == "1" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_PREV_RED" )
-		&& !qEnvironmentVariableIntValue( "WW_PERF3_RED" );
+	WW_SWITCH_STATIC( bool, on, qgetenv( "WW_CELL_SSR_PREV" ).trimmed() == "1" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_PREV_RED" )
+		&& !qEnvironmentVariableIntValue( "WW_PERF3_RED" ) );	// lane LIVESET1: follows a live set
 	return on;
 }
 
@@ -354,8 +354,8 @@ void wwCellSsrPass( Scene * scene, bool run )
 	/* lane PERF2: the pass is CPU-bound per draw. memo: the scene-global setters once per program; opaque: the sorted
 	 * draws that wrote nothing here last frame are skipped (PERF2FIX1), the water pass draws the water alone.
 	 * =0 or *_RED=1: the old path */
-	static const bool memo = qgetenv( "WW_CELL_SSR_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_MEMO_RED" );
-	static const bool opaqueOnly = qgetenv( "WW_CELL_SSR_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_OPAQUE_RED" );
+	WW_SWITCH_STATIC( bool, memo, wwSwitchEcho( "ssr memo", qgetenv( "WW_CELL_SSR_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_MEMO_RED" ) ) );
+	WW_SWITCH_STATIC( bool, opaqueOnly, qgetenv( "WW_CELL_SSR_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_OPAQUE_RED" ) );
 	NodeList sceneSecond;
 	const GLfloat none4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	if ( usePrev ) {

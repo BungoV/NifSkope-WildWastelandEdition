@@ -1,4 +1,5 @@
 #include "celldoorlive.h"
+#include "wwswitch.h"	// lane LIVESET1: the request follows a live set
 
 #include "gl/celllights.h"
 #include "gl/glcontroller.h"
@@ -31,7 +32,7 @@ struct Req
 
 const Req & req()
 {
-	static const Req r = [] {
+	WW_SWITCH_STATIC( Req, r, [] {	// lane LIVESET1: re-read on a live set (a new door ref still needs the reopen)
 		Req q;
 		const QString v = QString::fromLocal8Bit( qgetenv( "WW_CELL_DOOR_ANIM" ) ).trimmed().toLower();
 		if ( v == QLatin1String( "list" ) ) {
@@ -48,7 +49,7 @@ const Req & req()
 		const QByteArray red = qgetenv( "WW_CELL_DOORLIVE_RED" ).trimmed();
 		q.red = red == "static" ? RedStatic : red == "snap" ? RedSnap : RedNone;
 		return q;
-	}();
+	}() );
 	return r;
 }
 
@@ -116,8 +117,8 @@ Kept & kept()
 
 double holdS()
 {
-	static const double h = qEnvironmentVariableIsSet( "WW_CELL_DOORLIVE_HOLD" )
-		? std::max( 0.0, qEnvironmentVariable( "WW_CELL_DOORLIVE_HOLD" ).toDouble() ) : 1.0;
+	WW_SWITCH_STATIC( double, h, qEnvironmentVariableIsSet( "WW_CELL_DOORLIVE_HOLD" )
+		? std::max( 0.0, qEnvironmentVariable( "WW_CELL_DOORLIVE_HOLD" ).toDouble() ) : 1.0 );
 	return h;
 }
 

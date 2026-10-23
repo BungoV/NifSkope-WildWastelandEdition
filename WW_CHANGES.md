@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIVESET1 (2026-10-23, branch liveset1-20261023): a changed setting updates live
+- bungo 10-23: "In games, if you change a setting, that setting updates live." Switches that needed a relaunch now
+  re-read on a live set and rebuild only their own part: shadow cache, CSM echo, GPU-driven queues and culling, HDR
+  target format, VRS, effect resolution, fog bloom, SSR/AO memos, far cards, door live, sky strength, and more
+  (WW_SWITCH_STATIC / wwSwitchMovedFor).
+- The far LOD and the probe markers are rebuilt in place, as the cell document's last blocks (cellLiveSections), with
+  no reopen. A far LOD under streamed cells, far LOD on/off, its type and the stack reds still reopen, and the reply
+  names the reason. The PRTP band's Show probes tick shows/hides the markers in place.
+- NifModel::removeTailBlocks drops a document's last blocks in one pass.
+- tools/wwswitch_survey.py: the converted switches classify live; CellModelAhead's reads are reopen.
+- tests/liveswitch: a changed value rebuilds once, an unchanged value does not; the stage table red fails.
+- Same state, same frame (10-23 rows): the far LOD's object-ring budget charges the far field's own size estimate, not
+  the process working set (a live rebuild reused freed memory and built ring 1 where a fresh open did not). A live
+  far LOD or probe-marker rebuild drops the held cell-light shadow slots, the lamp shadow store and the sun shadow
+  cache layers, as a fresh open has none (wwCellShadowsForget, wwSunShadowForget). Far cards and the SSR memo print a
+  `switch:` line when they read their value again.
+
 ## Lane RTBAKEOPT1 (2026-10-23, branch rtbakeopt1-20261023): the GPU ray-traced bake is an option, off by default
 
 - **CPU bake is the default again (bungo 10-23):** RTBAKE1's Vulkan tracer (src/bakert.cpp: the probe bake's primary

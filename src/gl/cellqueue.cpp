@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellqueue.h"
 #include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B
+#include "wwswitch.h"	// lane LIVESET1: the switches follow a live set
 
 #include "gl/glcontext.hpp"
 #include "gl/glnode.h"
@@ -50,7 +51,8 @@ struct Switches
 
 const Switches & sw()
 {
-	static const Switches s;
+	// lane LIVESET1: read again after a live set; the pools are built at first use either way
+	WW_SWITCH_STATIC( Switches, s, Switches() );
 	return s;
 }
 

@@ -46,6 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellrefs.h"		// lane CELLWORK1
 #include "cellstream.h"		// lane CELLSTREAM1
 #include "cellworkspace.h"	// lane CELLWORK1
+#include "cellview.h"		// lane LIVESET1: the far LOD and the probe markers in place
 #include "cellmodpick.h"
 #include "nifskope.h"
 #include "starterscene.h"
@@ -2472,8 +2473,19 @@ QString wwLiveSettleBackground( GLView * ogl )
 QString wwLiveApply( NifSkope * skope )
 {
 	WwLiveState & L = wwLive();
+	// lane LIVESET1: the far LOD and the probe markers rebuild in place; the reopen only when they cannot
+	QString liveWhy;
+	const int liveSec = ( L.owed & 2 ) ? 0 : cellLiveSections( skope->getNifModel(), &liveWhy );
+	if ( liveSec ) {
+		std::fprintf( stderr, "live: %s%s\n", liveSec == 2 ? "reopen owed: " : "", qPrintable( liveWhy ) );
+		std::fflush( stderr );
+	}
+	if ( liveSec == 2 ) {
+		L.owed |= 2;
+		L.owedNames << liveWhy;
+	}
 	if ( !L.owed )
-		return QStringLiteral( "nothing owed" );
+		return liveSec == 1 ? liveWhy : QStringLiteral( "nothing owed" );
 	QElapsedTimer t;
 	t.start();
 	const int owed = L.owed;
@@ -2485,6 +2497,8 @@ QString wwLiveApply( NifSkope * skope )
 	const quint64 refusedBefore = wwLiveShaderRefusals();
 	const QSize viewBefore( ogl->width(), ogl->height() );
 	const QStringList chromeBefore = wwLiveChrome( skope );
+	if ( liveSec == 1 )
+		did << liveWhy;
 	if ( owed & 1 ) {
 		ogl->updateShaders();
 		did << QStringLiteral( "shaders" );
