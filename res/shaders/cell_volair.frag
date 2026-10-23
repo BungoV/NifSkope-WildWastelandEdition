@@ -94,7 +94,7 @@ float airFarVis( vec3 posView )
 		float w, inMap;
 		c = mix( 1.0, ussCascades( posView, vec3( 0.0 ), vec3( 0.0 ), w ), w );
 		if ( ( volFarMode & 6 ) != 6 )
-			t = ussTerrain( posView, inMap );
+			t = ussTerrain( posView, inMap, 0.0, false );	// SHADOWPAR1's 4-argument form, as the air tail calls it
 	} else if ( volCsm ) {
 		c = wwSunShadow( posView );
 	}

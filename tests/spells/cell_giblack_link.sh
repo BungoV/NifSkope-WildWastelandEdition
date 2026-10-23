@@ -7,7 +7,9 @@
 #          one 8-byte window (the source hash; a byte of it may match by chance): the same machine code, so the same pixels. Tolerance: exactly that, nothing more.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"; REPO="$(cd "$HERE/../.." && pwd)"
-REF="${REF:-3c9b4397}"; T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+# lane MARCHFIX1: the work folder under the repo's scratchpad (never C:'s temp). The "off" check holds only while no
+# other change touched res/shaders since REF: on a later branch pass REF=<that branch without the fix> or read 1+2 only.
+REF="${REF:-3c9b4397}"; mkdir -p "$REPO/scratchpad"; T="$(mktemp -d "$REPO/scratchpad/giblack_link.XXXXXX")"; trap 'rm -rf "$T"' EXIT
 CHK="python -I $HERE/shader_link_check.py"
 git -C "$REPO" archive "$REF" res/shaders | tar -x -C "$T"
 fail=0
