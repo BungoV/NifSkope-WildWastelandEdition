@@ -225,6 +225,8 @@ HEADERS += \
 	src/gl/lookdevstage.h \
 	src/gl/sunshadow.h \
 	src/gl/shadowset.h \
+	src/gl/fxparity.h \
+	src/gl/fxparityrules.h \
 	src/gl/gametaa.h \
 	src/gl/campath.h \
 	src/gl/celllights.h \
@@ -499,6 +501,7 @@ SOURCES += \
 	src/gl/lookdevstage.cpp \
 	src/gl/sunshadow.cpp \
 	src/gl/shadowset.cpp \
+	src/gl/fxparity.cpp \
 	src/gl/gametaa.cpp \
 	src/gl/campath.cpp \
 	src/gl/celllights.cpp \

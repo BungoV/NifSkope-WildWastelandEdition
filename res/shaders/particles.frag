@@ -107,6 +107,9 @@ uniform vec4 falloffParams;			// x,y = start/stop angle, z,w = start/stop opacit
 uniform vec4 glowColor;				// BGEM emissive colour (defaults to white)
 uniform float glowMult;				// BGEM emissive multiple (defaults to 1)
 uniform float envReflection;
+/* lane FXPARITY1: Particle Game Rules (src/gl/fxparity.h); 0 = as before. Bit 1: the effect card's law for a
+ * particle (material alpha squared, no falloff: the game sets Fo only off Ptcl, the palette row as the colour). Bit 2: its soft fade */
+uniform int pfxGame;
 
 in vec3 ViewDir;
 
@@ -152,6 +155,22 @@ float vpSoft()
 	return clamp( ( sceneW - ( -pPos.z - h ) ) / ( 2.0 * h ), 0.0, 1.0 );
 }
 
+// lane FXPARITY1: a Soft particle's fade near the surface behind it and near the eye (fo4_effectshader.frag cellFxFade)
+uniform float fxSoftDepth;		// game units
+uniform float fxDistScale;		// view units -> game units
+float pfxSoftFade()
+{
+	if ( ( pfxGame & 2 ) == 0 || !fxSoft || volPart != 0 )
+		return 1.0;
+	float d = texelFetch( fxDepth, ivec2( gl_FragCoord.xy ) - viewportDimensions.xy, 0 ).r;
+	float sceneW = projectionMatrix[3][2] / ( projectionMatrix[2][2] + ( 2.0 * d - 1.0 ) );
+	float k = fxDistScale / max( fxSoftDepth, 1.0 );
+	float fragW = 1.0 / gl_FragCoord.w;
+	float soft = clamp( ( sceneW - fragW ) * k, 0.0, 1.0 );
+	float t = clamp( ( fragW * k - 0.075 ) * 2.352941, 0.0, 1.0 );
+	return soft * t * t * ( 3.0 - 2.0 * t );
+}
+
 // gates only (volPartDump): this particle's 8 probe pixels at its centre (cell_volpart.glsl vpProbe)
 vec4 vpDump( float a )
 {
@@ -175,6 +194,7 @@ void main()
 	vec2	uv = texCoords[0].st;
 
 	vec4	baseMap = getTexture( 0 );
+	vec4	baseMap0 = baseMap;	// lane FXPARITY1: before the falloff
 	// palette lookups index the untouched base green channel
 	float	baseG = baseMap.g;
 
@@ -237,12 +257,38 @@ void main()
 		color.rgb += cube * envReflection * falloff * coverage;
 	}
 
+	if ( ( pfxGame & 1 ) != 0 ) {
+		// lane FXPARITY1: the game's effect law for a particle, replacing the viewer's above
+		float ca = C.a;
+#ifdef WW_CELLLIGHTS
+		if ( cellOn && !pfxAlphaRed )
+			ca = pow( max( C.a, 0.0 ), 2.2 );	// lane SUNCELL1's vertex alpha, kept
+		float fade = cellOn ? pfxSoftFade() : 1.0;
+#else
+		float fade = 1.0;
+#endif
+		vec4 bc = glowColor;
+		if ( !greyscaleColor )
+			bc.rgb *= glowMult;
+		color = vec4( baseMap0.rgb * C.rgb * bc.rgb, ( greyscaleAlpha ? 1.0 : baseMap0.a ) * ca * bc.a * bc.a );
+		if ( !greyscaleAlpha )
+			color.a *= fade;
+		if ( doGreyColor )
+			color.rgb = textureLod( GreyscaleMap, vec2( baseG, bc.r * C.r * fade ), 0.0 ).rgb;
+		if ( greyscaleAlpha && hasGreyscaleMap )
+			color.a = textureLod( GreyscaleMap, vec2( baseMap0.a, color.a * fade ), 0.0 ).a;
+		if ( hasCubeMap )
+			color.rgb += texture( CubeMap, envMapRotation * reflect( -V, normal ) ).rgb * envReflection;
+	}
+
 #ifdef WW_CELLLIGHTS
 	if ( cellOn ) {
 		if ( cellProbe != 0 && cellProbe != 6 )
 			discard;	// the probe passes read surfaces; a particle is none
-		if ( !pfxAlphaRed )
+		if ( !pfxAlphaRed && ( pfxGame & 1 ) == 0 )
 			color.a = baseMap.a * pow( max( C.a, 0.0 ), 2.2 );	// texture alpha (falloff folded in) x vertex alpha^2.2
+		if ( ( pfxGame & 1 ) == 0 )
+			color.a *= pfxSoftFade();	// lane FXPARITY1: red law keeps the soft fade alone (1 while off)
 		vec3 lin = pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
 		if ( volPart != 0 ) {
 			// lane VOLPART1: lit at its own point, seen through the integrated air, soft against the scene

@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FXPARITY1 (2026-10-23, branch fxparity1-20261023): particles follow the game's rules (off by default)
+
+- **Row:** Scene window > Particle Game Rules (off), key `WW/FxParity`, live in every mode. `WW_FX_PARITY=1` / `=0`
+  pins it. Off = the particles drawn exactly as before.
+- **On, as Todd's treat does it:** the simple colour modifier keeps colour 2 when the first ramp is empty and runs the
+  alpha on its own fade ramps (172 vanilla blocks showed colour 1 for the whole life, most faded out early); drag
+  removes a linear share capped at all of it (not an exponential); the flipbook's Frame Count is steps over the life,
+  not frames a second; the draw takes alpha squared, the emissive as written (no white fallback, no x4 clamp), the
+  palette as an effect card, no falloff, and a soft depth fade for Soft particles.
+- **Reds:** `WW_FX_PARITY_RED=color,drag,subtex,law,soft` (any list) puts that rule back to the old one.
+- **Unit gate:** tests/fxparity (plain g++, no Qt): the rules against the game's branch-for-branch reference; `-DFXP_RED`
+  (the old rules) must fail.
+
 ## Lane RTBAKEOPT1 (2026-10-23, branch rtbakeopt1-20261023): the GPU ray-traced bake is an option, off by default
 
 - **CPU bake is the default again (bungo 10-23):** RTBAKE1's Vulkan tracer (src/bakert.cpp: the probe bake's primary
