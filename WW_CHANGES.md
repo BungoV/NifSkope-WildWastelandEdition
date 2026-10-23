@@ -1,5 +1,14 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane RTBAKEOPT1 (2026-10-23, branch rtbakeopt1-20261023): the GPU ray-traced bake is an option, off by default
+
+- **CPU bake is the default again (bungo 10-23):** RTBAKE1's Vulkan tracer (src/bakert.cpp: the probe bake's primary
+  rays, the cell GI's edge sky rays) now runs only when asked for. Off, no Vulkan is touched and the bakes run their own
+  CPU loops, byte-identical to before RTBAKE1.
+- **Row:** Settings > NIF > Probe bake > GPU Ray-Traced Bake (off), key `Settings/Nif/Gpu Ray Traced Bake`, read at
+  each bake start, so a change applies to the next bake. `WW_BAKE_RT=1` / `=0` pins it (harness rule).
+  `WW_BAKE_RT_RED=cpu` still forces the CPU when it is on; `WW_BAKE_RT_WALK_RED` and `WW_BAKE_RT_CHECK` are unchanged.
+
 ## Lane OBJLODSHADOW1 (2026-10-22, branch objlodshadow1-20261022): object LOD casts only past the cascades
 
 - **Object-LOD terrain casters, only where the cascades do not reach:** with the objlod item on, every far object-LOD
