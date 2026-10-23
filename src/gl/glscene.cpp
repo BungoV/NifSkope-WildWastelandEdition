@@ -971,8 +971,8 @@ void Scene::drawFurn()
 
 void Scene::drawSelection() const
 {
-	if ( selecting )
-		return; // do not render the selection when selecting
+	if ( selecting || cleanView )
+		return; // do not render the selection when selecting (or in Clean View, lane VIEWFULL1)
 
 	if ( editMode )
 		return; // GLView draws its own vertex/edge/face selection overlay

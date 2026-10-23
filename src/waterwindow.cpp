@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "watercurves.h"
 #include "watermark.h"
 #include "wwskin.h"
+#include "wwfullscreen.h"	// lane VIEWFULL1: the full screen shared with the viewport
 #include "ui/widgets/wwnumberfield.h"
 
 #include <QApplication>
@@ -352,6 +353,7 @@ private:
 	QPushButton * solveButton = nullptr;
 	QPushButton * saveButton = nullptr;
 	QPushButton * fullButton = nullptr;
+	WwFullScreen fullScreen{ this };
 	QLabel * summary = nullptr;
 	FoldSection * filesSection = nullptr;
 	QColor pick = QColor( 60, 130, 200 );
@@ -1597,13 +1599,8 @@ void WaterWindow::closeEvent( QCloseEvent * e )
 
 void WaterWindow::toggleFullScreen()
 {
-	if ( isFullScreen() ) {
-		showNormal();
-		fullButton->setText( tr( "Full screen" ) );
-	} else {
-		showFullScreen();
-		fullButton->setText( tr( "Leave full screen" ) );
-	}
+	fullScreen.toggle();
+	fullButton->setText( fullScreen.active() ? tr( "Leave full screen" ) : tr( "Full screen" ) );
 }
 
 bool WaterWindow::openFile( const QString & path )

@@ -416,6 +416,7 @@ HEADERS += \
 	src/watermarkpanel.h \
 	src/watercurves.h \
 	src/waterwindow.h \
+	src/wwfullscreen.h \
 	src/rdccapture.h \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
@@ -487,6 +488,8 @@ SOURCES += \
 	src/archlocktest.cpp \
 	src/harnesswindow.cpp \
 	src/uialigntest.cpp \
+	src/viewfulltest.cpp \
+	src/wwfullscreen.cpp \
 	src/wateruitest.cpp \
 	src/wateruitest_lod.cpp \
 	src/physics/physicspreview.cpp \

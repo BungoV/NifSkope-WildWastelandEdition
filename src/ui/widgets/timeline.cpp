@@ -993,6 +993,20 @@ QIcon tlMakeIcon( const QString & id, const QColor & col, const QColor & accent 
 			p.setBrush( Qt::NoBrush );
 			p.drawEllipse( c, 7, 7 );
 		}
+	} else if ( id == QLatin1String( "fullscreen" ) ) {
+		// lane VIEWFULL1: four corner brackets, the screen edge
+		p.setBrush( Qt::NoBrush );
+		for ( int sx : { -1, 1 } )
+			for ( int sy : { -1, 1 } ) {
+				const QPointF c( 32 + sx * 20, 32 + sy * 16 );
+				p.drawLine( c, c - QPointF( sx * 12, 0 ) );
+				p.drawLine( c, c - QPointF( 0, sy * 10 ) );
+			}
+	} else if ( id == QLatin1String( "clean_view" ) ) {
+		// lane VIEWFULL1: Blender's Overlays glyph, two overlapping rings
+		p.setBrush( Qt::NoBrush );
+		p.drawEllipse( QPointF( 25, 32 ), 14, 14 );
+		p.drawEllipse( QPointF( 39, 32 ), 14, 14 );
 	}
 
 	return QIcon( pm );
@@ -1025,6 +1039,7 @@ QStringList tlIconNames()
 		// chrome
 		"chevron_left", "chevron_right", "chevron_down", "check", "panel",
 		"workspace", "eye_hidden", "collision", "nodes", "brush",
+		"fullscreen", "clean_view",
 	};
 }
 
