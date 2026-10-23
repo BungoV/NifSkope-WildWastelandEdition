@@ -40,6 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <thread>
@@ -284,6 +285,8 @@ bool bake( const std::vector<float> & tris, Volume * out, QString * why, int ray
 			valid[i] = !( hits > 0 && 2 * back > hits );
 		} );
 	}
+	if ( rt )	// lane RTGI1: the GPU census (traced, re-cast, check) on stderr for the CLI and gate logs
+		std::fprintf( stderr, "%s\n", bakert::census( "aovol bake", *rt ).c_str() );
 	for ( char c : valid )
 		V.insideVoxels += c ? 0 : 1;
 	if ( size_t( V.insideVoxels ) >= nv ) {

@@ -390,8 +390,7 @@ std::shared_ptr<const AoDecalSet> AoDecalBuilder::finish( const QString & dataRo
 		.arg( S.modelsRead ).arg( S.modelsRefused ).arg( bytes / 1024 ).arg( S.copies.size() ).arg( skippedKind_ ).arg( skippedSmall_ )
 		.arg( skippedBig_ ).arg( skippedType_ ).arg( S.red.isEmpty() ? QString() : QStringLiteral( " [red %1]" ).arg( S.red ) );
 	if ( S.modelsBaked )
-		S.census += QStringLiteral( "  aodecal: rays of %1 of %2 baked models as whole GPU batches
-" ).arg( onGpu ).arg( S.modelsBaked );
+		S.census += QStringLiteral( "  aodecal: rays of %1 of %2 baked models as whole GPU batches\n" ).arg( onGpu ).arg( S.modelsBaked );
 	if ( !censusFile_.isEmpty() ) {
 		QFile f( censusFile_ );
 		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
