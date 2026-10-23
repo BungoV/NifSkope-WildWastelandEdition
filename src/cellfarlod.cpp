@@ -595,10 +595,24 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 
 	// ---- the game's chunks where ours are not (all of them for the Vanilla type)
 	{
-		auto overBudget = [ws0, budgetMB]() {
-			double w = 0, p = 0;
-			memNow( w, p );
-			return w - ws0 > budgetMB;
+		/* lane LIVESET2: the far field's own estimate (our built rings' vertices, the vanilla triangles appended so far),
+		 * never the working set: a live rebuild reuses freed pages and placed more chunks than a fresh open.
+		 * WW_CELL_FARLOD_VANBUDGET_RED=1: the working set as before */
+		WW_SWITCH_STATIC( bool, vanBudgetRed, wwEnvInt( "WW_CELL_FARLOD_VANBUDGET_RED" ) == 1 );
+		auto overBudget = [ws0, budgetMB, &rings, &van, ours, red = vanBudgetRed]() {
+			if ( red ) {
+				double w = 0, p = 0;
+				memNow( w, p );
+				return w - ws0 > budgetMB;
+			}
+			constexpr double kVanBytesPerTri = 2560.0;	// document rows, 2.4 KB a triangle (FINALFIX g3, top of file)
+			double mb = 0.0;
+			for ( size_t i = 0; ours && i < rings.size(); i++ )
+				if ( rings[i].built )
+					mb += double( rings[i].verts ) * kBytesPerVert / ( 1024.0 * 1024.0 );
+			for ( const WwFarVanRing & v : van )
+				mb += double( v.terrainTris + v.objectTris + v.skirtTris ) * kVanBytesPerTri / ( 1024.0 * 1024.0 );
+			return mb > budgetMB;
 		};
 		QString verr;
 		if ( !wwFarVanAppend( nif, iFar, ws, shift, van, landZ, overBudget, &verr ) )

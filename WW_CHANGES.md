@@ -14,6 +14,10 @@
   frame's depth / stencil texture reads 0 bits, so occlusion never ran outside the reds. It now takes the frame's own
   format. `WW_GPUDRIVEN_B_FMT_RED=1` is the old 0-bit path (test red); `WW_GPUDRIVEN_B_OCC=0` still turns occlusion off.
   Its 1080p cost is not measured yet (rows c3_ls2_ref / _fmtred / _occoff with WW_GPUDRIVEN_CENSUS=1).
+- **Vanilla far budget (LIVESET-VANBUDGET):** the vanilla far chunks stopped at a working-set rise, so a live far rebuild
+  (freed pages reused) placed more chunks than a fresh open. The budget now charges an estimate: our built rings'
+  vertices plus the vanilla triangles appended so far (2.4 KB a triangle, FINALFIX g3). Same state, same far field.
+  `WW_CELL_FARLOD_VANBUDGET_RED=1` is the working set as before.
 
 ## Lane FXPARITY1 (2026-10-23, branch fxparity1-20261023): particles follow the game's rules (off by default)
 
