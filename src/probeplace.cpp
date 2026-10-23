@@ -1614,7 +1614,9 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( s.size() ) );
 			f.write( s.data(), qint64( s.size() ) );
 		};
-		sizedBegin( 0x31475244u /* 'DRG1' */, quint32( g.tris.size() / 9 ) );
+		// lane GAPFIX1: 'DRG2' = DRG1 with 3 f32 more a masked triangle (the corners' vertex alpha x material alpha), only when any
+		const bool drg2 = g.amask.anyScaled();
+		sizedBegin( drg2 ? 0x32475244u /* 'DRG2' */ : 0x31475244u /* 'DRG1' */, quint32( g.tris.size() / 9 ) );
 		u32( quint32( g.glass.size() / 9 ) );
 		for ( size_t i = 0; i * 9 < g.tris.size(); i++ ) {
 			f.write( reinterpret_cast<const char *>( &g.tris[i * 9] ), 36 );
@@ -1646,6 +1648,8 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			u32( quint32( t.model ) );
 			u32( t.thr );
 			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
+			if ( drg2 )
+				f.write( reinterpret_cast<const char *>( t.as ), 12 );
 		}
 		sizedEnd();
 	}
@@ -1742,7 +1746,7 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			}
 			end = f.pos() + qint64( bytes );
 			if ( tail[0] == 0x314B4D41u || tail[0] == 0x324B4D41u || tail[0] == 0x31544D45u || tail[0] == 0x314D4E56u
-				|| tail[0] == 0x31475244u || tail[0] == 0x31564D45u )
+				|| tail[0] == 0x31475244u || tail[0] == 0x32475244u || tail[0] == 0x31564D45u )
 				return;
 			more = f.seek( end ) && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
 		}
@@ -1886,7 +1890,8 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		next();
 	}
 	// lane GPURELIGHT1: the doors' optional real geometry (a short or broken tail leaves the doors without any)
-	if ( more && tail[0] == 0x31475244u ) {
+	if ( more && ( tail[0] == 0x31475244u || tail[0] == 0x32475244u ) ) {   // DRG1, or DRG2 (lane GAPFIX1)
+		const bool drg2 = tail[0] == 0x32475244u;
 		ProbeSoup::DoorGeom g;
 		bool ok = true;
 		auto u32 = [&]( quint32 * v ) { ok = ok && f.read( reinterpret_cast<char *>( v ), 4 ) == 4; return *v; };
@@ -1961,6 +1966,8 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			u32( &thr );
 			probebvh::AlphaMask::Tri t;
 			ok = ok && f.read( reinterpret_cast<char *>( t.uv ), 24 ) == 24 && tri < tail[1] && map < nm;
+			if ( drg2 )
+				ok = ok && f.read( reinterpret_cast<char *>( t.as ), 12 ) == 12;
 			if ( !ok )
 				break;
 			t.map = int( map );

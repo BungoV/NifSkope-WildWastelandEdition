@@ -18,6 +18,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // lane SPEED1 (2026-10-02): see celltexahead.h.
@@ -54,6 +55,8 @@ struct State
 	bool sawTakes = false;
 	qint64 hits = 0, waited = 0, own = 0, unknown = 0, gone = 0, left = 0;
 	QStringList unknownNames;                      // the timer dump's: the first few nobody named
+	std::unordered_set<std::string> forgotten;     // lane GAPFIX1: freed by the view, read again when named again
+	qint64 again = 0, drawRead = 0;                // lane GAPFIX1: whole session (the walk dump reads them)
 	const NifModel * nif = nullptr;
 	bool quitHooked = false;
 };
@@ -163,6 +166,7 @@ void stopLocked( State & s, std::unique_lock<std::mutex> & l )
 		}
 	}
 	s.unknownNames.clear();
+	s.forgotten.clear();
 	s.entries.clear();
 	s.byKey.clear();
 	s.next = 0;
@@ -215,6 +219,7 @@ void CellTexAhead::want( const NifModel * nif, const QStringList & names )
 		const std::string key = GameManager::get_full_path( n, "textures", ".dds" );
 		if ( s.byKey.find( key ) != s.byKey.end() )
 			continue;
+		s.again += s.forgotten.erase( key ) ? 1 : 0;
 		s.byKey.emplace( key, int( s.entries.size() ) );
 		Entry e;
 		e.name = n;
@@ -246,12 +251,14 @@ bool CellTexAhead::take( const NifModel * nif, const QString & filepath, QByteAr
 	s.takesThisFrame++;
 	auto it = s.byKey.find( key );
 	if ( it == s.byKey.end() ) {
+		s.drawRead += s.forgotten.count( key ) ? 1 : 0;
 		s.unknown++;
 		if ( CellSpeed::on() && s.unknownNames.size() < 60 )
 			s.unknownNames << filepath;
 		return false;
 	}
 	const int i = it->second;
+	s.drawRead += ( s.entries[size_t( i )].st == St::Gone ) ? 1 : 0;
 	if ( s.entries[size_t( i )].st == St::Pending ) {
 		s.entries[size_t( i )].st = St::Gone;   // no worker has started it: the old way, now
 		s.pending--;
@@ -314,6 +321,30 @@ void CellTexAhead::drop( const NifModel * nif, const QString & name )
 	e.data = QByteArray();
 	e.st = St::Gone;
 	s.cv.notify_all();
+}
+
+void CellTexAhead::forget( const NifModel * nif, const QString & name )
+{
+	if ( !nif || armed.load( std::memory_order_relaxed ) != nif )
+		return;
+	State & s = st();
+	std::unique_lock<std::mutex> l( s.lock );
+	if ( s.nif != nif )
+		return;
+	const std::string key = GameManager::get_full_path( name, "textures", ".dds" );
+	auto it = s.byKey.find( key );
+	if ( it == s.byKey.end() || s.entries[size_t( it->second )].st != St::Gone )
+		return;   // still to read, or read and waiting: the bytes come anyway
+	s.byKey.erase( it );   // the entry stays (indices hold); a later want() appends a fresh one
+	s.forgotten.insert( key );
+}
+
+void CellTexAhead::counts( qint64 & again, qint64 & drawRead )
+{
+	State & s = st();
+	std::unique_lock<std::mutex> l( s.lock );
+	again = s.again;
+	drawRead = s.drawRead;
 }
 
 void CellTexAhead::stop( const NifModel * nif )

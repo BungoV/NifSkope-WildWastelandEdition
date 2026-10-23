@@ -271,6 +271,15 @@ int main( int argc, char ** argv )
 	checkEq( openCellDataPlugins( data ), QStringList{ QStringLiteral( "Base.esm" ), QStringLiteral( "Light.esl" ),
 		QStringLiteral( "Loc.esm" ), QStringLiteral( "Loc2.esm" ), QStringLiteral( "LightFlag.esp" ), QStringLiteral( "Mod.esp" ) },
 		QStringLiteral( "Data folder plugins: masters and .esl first, a light-flagged .esp with the plugins" ) );
+	{	// lane GAPFIX1: an ESM-flagged .esp ranks with the masters (the flag decides, not the extension)
+		QTemporaryDir tmp2;
+		const QString d2 = tmp2.path() + QStringLiteral( "/Data" );
+		writeFile( d2 + QStringLiteral( "/Base.esm" ), basePlugin() );
+		writeFile( d2 + QStringLiteral( "/Aaa.esp" ), modPlugin() );
+		writeFile( d2 + QStringLiteral( "/Zed.esp" ), header( 0x1, {} ) );
+		checkEq( openCellDataPlugins( d2 ), QStringList{ QStringLiteral( "Base.esm" ), QStringLiteral( "Zed.esp" ),
+			QStringLiteral( "Aaa.esp" ) }, QStringLiteral( "an ESM-flagged .esp sorts with the masters" ) );
+	}
 	checkEq( openCellParsePluginsTxt( QStringLiteral( "*Light.esl\n*LightFlag.esp\n" ) ),
 		QStringList{ QStringLiteral( "Light.esl" ), QStringLiteral( "LightFlag.esp" ) }, QStringLiteral( "plugins.txt keeps .esl entries" ) );
 	{

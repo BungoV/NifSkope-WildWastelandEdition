@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
+#include "gl/glproperty.h"	// lane GAPFIX1: alpha-tested cube casters read the base map
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
 #include "gl/cellbloom.h"	// lane BLOOM1b
@@ -202,6 +203,8 @@ ClState & st()
 		// lane POOL1: the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
 		if ( wwEnv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
 			s.red |= 65536;
+		else if ( wwEnv( "WW_CELL_SPEC_RED" ).trimmed() == "tint" )
+			s.red |= 262144;	// lane GAPFIX1: opaque (deferred) draws tint the lights' specular by the material colour again
 		// lane GISHADE1: outdoors the grid's sky takes k x the flat ambient off in sqrt space again (the old law)
 		if ( wwEnv( "WW_CELL_GISHADE_RED" ).trimmed() == "sqrt" )
 			s.red |= 131072;
@@ -2102,6 +2105,46 @@ LsRect lsPacked( const LsRect & room, int member, int S )
 
 }	// namespace
 
+/* lane GAPFIX1: an alpha-tested shape casts what its alpha test keeps into the light cubes, as the sun's map
+ * does (VOLAIR1); the cube passes skipped it, and a barrel's own lamp drew an empty cube (lightbooth1).
+ * Red WW_CELL_SHADOW_RED=atskip skips them again. */
+static bool cubeCasterAt( const Shape * sh )
+{
+	return sh->wwAlphaTested() && sh->wwShaderLighting() && !sh->coords.isEmpty()
+		&& sh->coords.constFirst().size() == sh->verts.size();
+}
+
+static bool cubeSkipsCaster( const Shape * sh )
+{
+	static const bool atRed = wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "atskip";
+	return sh->wwAlphaTested() && ( atRed || !cubeCasterAt( sh ) );
+}
+
+static qint64 g_cubeAtCasters = 0, g_cubeAtDraws = 0;
+
+static void cubeDrawCaster( Renderer * r, NifSkopeOpenGLContext::Program * prog, const Shape * sh )
+{
+	const bool at = sh->wwAlphaTested();
+	const float * attrv[8] = { &( sh->verts.constFirst()[0] ), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+	std::uint64_t mask = 3;
+	prog->uni1i( "shAlphaTest", at ? 1 : 0 );
+	if ( at ) {
+		int texunit = 0;
+		BSShaderLightingProperty * bsp = sh->wwShaderLighting();
+		const BSLightingShaderProperty * lsp = sh->wwLightingShader();
+		prog->uniSampler( bsp, "BaseMap", 0, texunit, QString(), bsp->clampMode, QString() );
+		prog->uni2f( "uvScale", bsp->uvScale.x, bsp->uvScale.y );
+		prog->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
+		prog->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
+		prog->uni1f( "alphaThreshold", sh->wwAlphaThreshold() );
+		attrv[7] = &( sh->coords.constFirst().constFirst()[0] );
+		mask = 0x20000003ULL;
+		g_cubeAtDraws++;
+	}
+	r->drawShape( (unsigned int) ( sh->verts.size() ), mask, (unsigned int) ( sh->triangles.size() * 3 ),
+		GL_TRIANGLES, GL_UNSIGNED_SHORT, attrv, sh->triangles.constData() );
+}
+
 static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, std::vector<int> & dirty, const float cam[3] )
 {
 	ClState & s = st();
@@ -2144,7 +2187,7 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 	std::vector<LsCaster> casters;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || sh->wwAlphaTested() )
+		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || cubeSkipsCaster( sh ) )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
@@ -2344,13 +2387,12 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 		qint64 drawn = 0;
 		for ( const LsCaster * c : list ) {
 			prog->uni4m( "modelViewMatrix", c->sh->viewTrans().toMatrix4() );
-			const float * attrs = &( c->sh->verts.constFirst()[0] );
-			r->drawShape( (unsigned int) ( c->sh->verts.size() ), 3, (unsigned int) ( c->sh->triangles.size() * 3 ),
-				GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, c->sh->triangles.constData() );
+			cubeDrawCaster( r, prog, c->sh );
 			drawn++;
 		}
 		if ( quad ) {
 			static const quint16 idx[6] = { 0, 1, 2, 0, 2, 3 };
+			prog->uni1i( "shAlphaTest", 0 );
 			prog->uni4m( "modelViewMatrix", viewM );
 			r->drawShape( 4u, 3, 6u, GL_TRIANGLES, GL_UNSIGNED_SHORT, &quad, idx );
 			drawn++;
@@ -2690,7 +2732,7 @@ void wwCellShadowPass( Scene * scene )
 	int waterSkipped = 0;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || sh->wwAlphaTested() )
+		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || cubeSkipsCaster( sh ) )
 			continue;
 		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
 			continue;
@@ -2698,6 +2740,7 @@ void wwCellShadowPass( Scene * scene )
 			waterSkipped++;
 			continue;
 		}
+		g_cubeAtCasters += sh->wwAlphaTested() ? 1 : 0;
 		const BoundSphere b = sh->bounds();
 		casters.push_back( { sh, b.center, b.radius, sh->viewTrans().toMatrix4() } );
 	}
@@ -2795,9 +2838,7 @@ void wwCellShadowPass( Scene * scene )
 				fn->glUniformMatrix4fv( lClip, 1, GL_FALSE, clip );
 			for ( const ShCaster * c : mine ) {
 				prog->uni4m( "modelViewMatrix", c->mv );
-				const float * attrs = &( c->sh->verts.constFirst()[0] );
-				r->drawShape( (unsigned int) ( c->sh->verts.size() ), 3, (unsigned int) ( c->sh->triangles.size() * 3 ),
-					GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, c->sh->triangles.constData() );
+				cubeDrawCaster( r, prog, c->sh );
 				drawn++;
 			}
 		}
@@ -2834,6 +2875,7 @@ QString wwCellShadowEcho( Scene * scene )
 {
 	ClState & s = st();
 	QString o = QStringLiteral( "shadow=%1" ).arg( s.shadowLast );
+	o += QStringLiteral( " atCasters=%1 atDraws=%2" ).arg( g_cubeAtCasters ).arg( g_cubeAtDraws );	// lane GAPFIX1
 	if ( wwCellLampShadowTier() >= 0 )
 		o += QStringLiteral( " lamp=" ) + s.lampLast;	// lane LAMPSHADOW1
 	if ( s.shadowRed )

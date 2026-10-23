@@ -6091,6 +6091,9 @@ void GLView::paintGL()
 	// lane FOGDRIFT1: the fog drifts while the weather blows (never in a harness)
 	else if ( wwVolAirWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
+	// lane GAPFIX1: the far trees sway (never in a harness)
+	else if ( wwCellFarLodWantsRepaint() )
+		QTimer::singleShot( 16, this, [this]() { update(); } );
 
 	emit paintUpdate();
 }
@@ -7118,8 +7121,15 @@ void GLView::wwCellStreamEvict()
 	nextEvict = sec + 2U;
 	const std::uint32_t threePaintsAgo = paintSec[paints & 3U];   // the oldest of the 4 kept, this one included
 	const std::uint32_t before = std::min( sec - keep, threePaintsAgo );
-	if ( before )
-		cellStreamCountEvicted( model, textures->evictUnused( before ) );
+	if ( !before )
+		return;
+	// lane GAPFIX1: a freed file is read ahead again when its cell comes back (stream1 FINAL: it was read on this
+	// thread, a hitch). Red WW_STREAM1_RED=texredo
+	static const bool redoRed = PassTime::stream1Red( "texredo" );
+	QStringList freed;
+	cellStreamCountEvicted( model, textures->evictUnused( before, redoRed ? nullptr : &freed ) );
+	for ( const QString & n : freed )
+		CellTexAhead::forget( model, n );
 }
 
 void GLView::wwCellStreamFlush()

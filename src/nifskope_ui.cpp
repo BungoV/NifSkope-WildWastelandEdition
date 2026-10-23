@@ -225,6 +225,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QtEndian>
 #include "ui/opencellmenu.h"
 #include "gl/cellpasstime.h"	// lane STREAM1
+#include "celltexahead.h"		// lane GAPFIX1
 #include <vector>
 
 namespace {
@@ -2195,6 +2196,8 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		PassTime::stream1Hitch( &hitchMs, &hitchOver, &hitchFrames, false );
 		ogl->makeCurrent();
 		const QString s1mem = PassTime::stream1MemLine( "walk" );
+		qint64 texAgain = 0, texDrawRead = 0;
+		CellTexAhead::counts( texAgain, texDrawRead );
 		ogl->doneCurrent();
 		if ( wwEnvInt( "WW_CELL_STREAM_FLUSH" ) > 0 )
 			ogl->wwCellStreamFlush();
@@ -2219,6 +2222,7 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " | private " << priv << " live " << privLive << " heapBusy " << heapBusy << " heapHeld " << heapHeld
 				<< " regions " << regions[0] << "/" << regions[1] << "/" << regions[2] << " texEvicted " << s.texEvicted
 				<< " quietResets " << s.quietResets << " loudResets " << s.loudResets
+				<< " texAheadAgain " << texAgain << " texDrawRead " << texDrawRead	// lane GAPFIX1
 				<< " | persistent " << s.persistent << " nodes " << s.sceneNodes << " props " << s.sceneProps
 				<< " shapes " << s.sceneShapes << " top " << s.persistentTop
 				<< " | holes " << holes << " doubles " << doubles << " samples " << samples

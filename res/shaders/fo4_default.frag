@@ -673,8 +673,10 @@ void main()
 		color.rgb -= cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ) * A.rgb * albedo;
 	vec3 cellPreLit = color.rgb;	// lane SSGI2: an exterior without the sun adds the glow before cellLit's root
 	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
+	// lane GAPFIX1: the game's deferred lights read only the spec scale (pool1 findings 5); blended draws are forward and keep the colour
+	cellSpecTint = ( ( alphaFlags & 8 ) != 0 || ( cellRed & 262144 ) != 0 ) ? specColor : vec3( 1.0 );	// WW_CELL_SPEC_RED=tint
 	if ( cellOn )
-		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, specColor, alphaR, kSmith,
+		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, cellSpecTint, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
 	vec3 cellSsrScene = color.rgb * color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
 	if ( cellOn && cellProbe == 60 ) {

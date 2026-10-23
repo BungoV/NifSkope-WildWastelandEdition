@@ -221,7 +221,7 @@ public:
 	//! lane CELLSTREAM1: the clock bind() stamps a file texture with; the streamed cell view sets it in seconds
 	void setUseTick( std::uint32_t t ) { useTick = t; }
 	//! lane CELLSTREAM1: frees the GL textures of files last bound before tick (they load again when next bound)
-	int evictUnused( std::uint32_t tick );
+	int evictUnused( std::uint32_t tick, QStringList * names = nullptr );
 	/*! lane STREAM1 (TEXSTREAM1): uploads the streaming read-ahead's ready files, up to `budgetBytes` of them this
 	 *  frame (at least one), before anything draws, so a streamed cell's first frame finds them loaded. Returns
 	 *  how many went up. The same loadTex as a bind's, so what a draw sees is the same texture. */

@@ -202,6 +202,7 @@ struct Bucket
 	//! Lane FXLIT1: one placement's lit effect shapes; the placed model's serial in src/gl/cellfxlit.h, -1 = none.
 	int fxLit = -1;
 	bool decal = false;   // lane PLACED1: a placed decal's pieces (src/celldecal.h): Decal flag, no depth write
+	quint32 decalSF1 = 0;   // lane GAPFIX1: a lighting source's own Decal / Dynamic_Decal bits (the model's flags), kept
 	/* Lane WATER1: a water surface of one WATR record (the cell's plane or a placed water mesh); its shapes are
 	 * registered with src/gl/cellwater.h, which draws them the game's way while the Cell lights row is on. */
 	bool water = false;
@@ -648,7 +649,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		 * way the game does, instead of showing its normal-map diffuse as a solid swirled disk. */
 		nif->set<quint32>( iShader, "Shader Flags 1",
 			( b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) ) | ( b.refract ? 0x8000U : 0U )
-			| ( b.decal ? 0x04000000U : 0U ) );   // lane PLACED1: Decal
+			| ( b.decal ? 0x04000000U : 0U ) | b.decalSF1 );   // lane PLACED1: Decal; lane GAPFIX1: the model's own
 		if ( b.refract )
 			nif->set<float>( iShader, "Refraction Strength", b.refractStrength );
 		nif->set<quint32>( iShader, "Shader Flags 2", ( b.withColour ? 0x25U : 5U ) & ( b.decal ? ~1U : ~0U ) );
@@ -984,7 +985,7 @@ static int cellProbeKindOf( const ProbePoint & q )
  *              Z (azimuth from +Y, clockwise), degrees -- ASSUMED, the PRTP4 capture is the refuter */
 static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, const CellSceneSpec & spec,
 	const QVector<EsmRefr> & lightRefs, const QHash<quint32, EsmRefr> & primRefs, const Vector3 & center,
-	WwCellLighting * chunkOut = nullptr )
+	WwCellLighting * chunkOut = nullptr, const QHash<quint32, bool> * startOffOf = nullptr )
 {
 	WwCellLighting L;
 	L.interior = spec.interior;
@@ -1056,13 +1057,17 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			lightBoost.insert( id, qMakePair( f.value( 1 ).toFloat(), f.size() >= 3 ? f.value( 2 ).toFloat() : 1.0f ) );
 	}
 	int lightBoostHit = 0;
+	int parentMoved = 0;
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
 			continue;
 		const bool pinOff = lightOffPin == "all" || lightOffRefs.contains( r.formID );
 		lightOffHit += pinOff ? 1 : 0;
-		const bool startOff = r.initiallyDisabled || ( b.flags & 0x20 ) || pinOff;
+		// lane GAPFIX1: a placed light starts in its enable parent's state, as every other ref does (MISS1)
+		const bool refOff = startOffOf ? startOffOf->value( r.formID, r.initiallyDisabled ) : r.initiallyDisabled;
+		parentMoved += refOff != r.initiallyDisabled ? 1 : 0;
+		const bool startOff = refOff || ( b.flags & 0x20 ) || pinOff;
 		if ( startOff ) {
 			off++;
 			if ( !giKeepOff || ( b.flags & 0x100000 ) )
@@ -1398,6 +1403,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		+ QStringLiteral( " norim=%1 ignorerough=%2" )	// lane RIM1: the lights whose shader drops the back-light
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.noRim; } ) )
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )
+		+ QStringLiteral( " parentstate=%1" ).arg( parentMoved )	// lane GAPFIX1: lights an enable parent turned on/off
 		+ QStringLiteral( " ambientonly=%1" ).arg( ambientOnly )	// lane AMBO1: skipped, no direct light in game
 		+ QStringLiteral( " ambientvolumes=%1" ).arg( L.ambientLights.size() )	// lane AMBO2: they scale the ambient
 		+ QStringLiteral( " shapes=hemisphere %1 box %2 (box link unresolved %3) ambientboxes=%4" ).arg( hemi ).arg( box )
@@ -2273,6 +2279,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * list is what the cell CONTAINS, as the ref table is. WW_CELL_LIGHTS dumps it
 	 * and the gate compares it with an independent walk of the plugin. */
 	QVector<EsmRefr> lightRefs;
+	QHash<quint32, bool> lightStartOff;	// lane GAPFIX1: each placed light's start state, its enable parent's included
 	std::vector<CellDecalRef> decalRefs;   // lane PLACED1: placed decals, projected after the weld
 	CellActors actors( world, dataRoot );  // lane PLACED1: placed actors, built at rest
 	int actorPlacements = 0;
@@ -2330,8 +2337,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			boothSeen.insert( r.formID );
 		}
 		refsRead++;
-		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 )
+		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 ) {
 			lightRefs.append( r );
+			lightStartOff.insert( r.formID, refsRed == "lightparent" ? r.initiallyDisabled : startsDisabled( r ) );	// red: the old rule
+		}
 		if ( !r.deleted && r.hasPrim )
 			primRefs.insert( r.formID, r );
 
@@ -2702,6 +2711,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	int effectBuckets = 0;                  //!< 2026-10-01: BGEM buckets drawn by the effect shader
 	int inlineFxBuckets = 0;                //!< lane EFX1: BGEM-less effect buckets, the source block written back
 	int refractBuckets = 0;                 //!< lane EFX1: Refraction-flagged buckets, drawn by the refraction preview
+	int decalFlagBuckets = 0, decalFlagShapes = 0;   //!< lane GAPFIX1: lighting buckets keeping the model's decal flags
+	// lane GAPFIX1 red (gates only): the welded lighting shapes drop the model's decal flags again
+	const bool fxdNoFlag = wwEnv( "WW_CELL_FXD_RED" ).trimmed() == "noflag";
 	/* Lane GLOW1: billboard shapes turned to the camera, and those welded flat (the red
 	 * WW_CELL_GLOW_RED=1 welds all of them, as before; past the cap the rest weld flat too). */
 	const bool glowRed = wwEnvInt( "WW_CELL_GLOW_RED" ) != 0;
@@ -2977,7 +2989,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			.arg( s.ownEmit ? 1 : 0 ).arg( withColour ? 1 : 0 )
 			.arg( ( mat.isEmpty() && s.matUnreadable ) ? 1 : 0 ).arg( double( alpha ) )
 			+ own;   // lane GLOW1: a billboard placement's own bucket
-		auto it = buckets.find( key );
+		// lane GAPFIX1: the game honours a model's Decal flag without a material file; keyed only when set
+		const quint32 decalBits = ( effect || inlineFx || refract || fxdNoFlag ) ? 0U : ( s.shaderSF1 & 0x0C000000U );
+		const QString keyD = decalBits ? key + QStringLiteral( "|D%1" ).arg( decalBits ) : key;
+		decalFlagShapes += decalBits ? 1 : 0;
+		auto it = buckets.find( keyD );
 		if ( it != buckets.end() )
 			return it.value();
 		Bucket b;
@@ -3017,7 +3033,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			b.refractStrength = s.refractStrength;
 			refractBuckets++;
 		}
-		return buckets.insert( key, b ).value();
+		b.decalSF1 = decalBits;
+		decalFlagBuckets += decalBits ? 1 : 0;
+		return buckets.insert( keyD, b ).value();
 	};
 
 	const bool colouring = spec.overlay != CellOverlay::None;
@@ -3143,7 +3161,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	// lane DOORLIVE1: the live door is copied in whole after the weld (its own nodes move); the weld leaves it out
 	const quint32 doorLiveRef = wwDoorLiveRef();
 	int doorLiveShapes = 0;
-	int dgShapes = 0, dgMasked = 0, dgGlass = 0, dgGlassUnread = 0, dgDropped = 0;
+	int dgShapes = 0, dgMasked = 0, dgGlass = 0, dgGlassUnread = 0, dgDropped = 0, dgScaled = 0, dgTrisScaled = 0;
 	// Measurement pin only: WW_CELL_ALPHATEST_FOLIAGE=keep puts landscape\ alpha-tested cards in the soup with their mask.
 	const bool foliageKeep = wwEnv( "WW_CELL_ALPHATEST_FOLIAGE" ).trimmed() == "keep";
 	/* lane EMISSIVEGI1: glowing surfaces light the bake (probeemit.h). WW_CELL_EMISSIVE_PIN=off (gates only, never
@@ -3648,6 +3666,29 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			const size_t nv = s.geom.pos.size() / 3;
 			if ( !nv || s.geom.tris.empty() )
 				continue;
+			/* lane ALPHATEST2: each vertex's alpha-test scale = its vertex alpha x the material's fAlpha (empty = all 1). The
+			 * vertex alpha counts as the renderer counts it (src/gl/renderer.cpp: vertexColorOverride[3] = 1 unless SLSF1
+			 * Vertex_Alpha): a colour stream drawn (the .lodo W4 rule), the Vertex_Alpha bit, and not a tree's wind weight.
+			 * Returns the smallest scale. Lane GAPFIX1: the soup and the doors' masks both take it. */
+			auto alphaScaleOf = [&]( std::vector<float> & sc ) -> float {
+				sc.clear();
+				if ( alphaPin || alphaNoScale || !s.nearFacts.alphaTest )
+					return 1.0f;
+				const bool va = s.geom.rgba.size() == nv * 4 && s.geom.vertexAlpha && !s.nearFacts.treeAnim;
+				const float ma = std::clamp( s.matAlpha, 0.0f, 1.0f );
+				if ( !va && ma == 1.0f )
+					return 1.0f;
+				sc.assign( nv, ma );
+				if ( va )
+					for ( size_t v = 0; v < nv; v++ )
+						sc[v] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f * ma;
+				float lo = 1.0f;
+				for ( float x : sc )
+					lo = std::min( lo, x );
+				if ( lo >= 1.0f )
+					sc.clear();
+				return lo;
+			};
 			/* THE PAINT ROW this shape takes: the swap row's CNAM for its original material, else
 			 * the base's own MODC (2026-10-01: the museum pickup's paint lives there, bungo's
 			 * "vertex paint"). Only a Greyscale_To_PaletteColor material takes one. */
@@ -3715,11 +3756,19 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				const bool glassy = s.nearFacts.alphaBlend;
 				int dMap = -1;
 				const quint8 dThr = s.nearFacts.alphaRef;
+				std::vector<float> dScale;   // lane GAPFIX1: the door's mask takes the vertex alpha too (as the soup's)
+				const float dScaleMin = glassy ? 1.0f : alphaScaleOf( dScale );
 				if ( !glassy && !alphaPin && s.nearFacts.alphaTest && s.geom.uv.size() >= nv * 2 ) {
 					const MaskInfo mi = maskOf( s.tex0 );
-					if ( mi.map >= 0 && mi.minA < int( dThr ) )
+					const bool scaleHole = mi.map != -1 && double( mi.minA ) * double( dScaleMin ) < double( dThr );
+					if ( mi.map >= 0 && ( mi.minA < int( dThr ) || scaleHole ) )
 						dMap = mi.map;
+					else if ( mi.map < -1 && scaleHole )
+						dMap = fullMaskOf( s.tex0 );
 				}
+				if ( dMap < 0 )
+					dScale.clear();
+				dgScaled += dScale.empty() ? 0 : 1;
 				dgShapes++;
 				dgMasked += dMap >= 0 ? 1 : 0;
 				dgGlass += glassy ? 1 : 0;
@@ -3774,7 +3823,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						for ( int k = 0; k < 3; k++ ) {
 							mt.uv[k * 2] = s.geom.uv[vi[k] * 2];
 							mt.uv[k * 2 + 1] = s.geom.uv[vi[k] * 2 + 1];
+							if ( !dScale.empty() )
+								mt.as[k] = dScale[vi[k]];
 						}
+						dgTrisScaled += mt.scaled() ? 1 : 0;
 						dg.amask.triOf.back() = int( dg.amask.tris.size() );
 						dg.amask.tris.push_back( mt );
 					}
@@ -3996,21 +4048,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					 * Vertex_Alpha): a colour stream drawn (the .lodo W4 rule), the Vertex_Alpha bit, and not a tree's
 					 * wind weight */
 					std::vector<float> amScale;
-					float amScaleMin = 1.0f;
-					if ( !alphaPin && !alphaNoScale && s.nearFacts.alphaTest ) {
-						const bool va = s.geom.rgba.size() == nv * 4 && s.geom.vertexAlpha && !s.nearFacts.treeAnim;
-						const float ma = std::clamp( s.matAlpha, 0.0f, 1.0f );
-						if ( va || ma != 1.0f ) {
-							amScale.assign( nv, ma );
-							if ( va )
-								for ( size_t v = 0; v < nv; v++ )
-									amScale[v] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f * ma;
-							for ( float x : amScale )
-								amScaleMin = std::min( amScaleMin, x );
-							if ( amScaleMin >= 1.0f )
-								amScale.clear();
-						}
-					}
+					const float amScaleMin = alphaScaleOf( amScale );
 					if ( !alphaPin && s.nearFacts.alphaTest && s.geom.uv.size() >= nv * 2 ) {
 						const MaskInfo mi = maskOf( s.tex0 );
 						// lane ALPHATEST2: a hole exists where map alpha x scale < threshold (the smallest scale is a corner's)
@@ -5403,7 +5441,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				t << "  probe soup door geometry: shapes " << dgShapes << " (alpha-tested with a hole " << dgMasked << ", blended = glass "
 				  << dgGlass << ", glass map unread " << dgGlassUnread << "), triangles " << int( probeSoup.doorGeom.door.size() )
 				  << " (masked " << int( probeSoup.doorGeom.amask.tris.size() ) << ", maps " << int( probeSoup.doorGeom.amask.maps.size() )
-				  << "), panes " << int( probeSoup.doorGeom.glassDoor.size() ) << ", dropped (door never tagged) " << dgDropped << "\n";
+				  << "), panes " << int( probeSoup.doorGeom.glassDoor.size() ) << ", dropped (door never tagged) " << dgDropped
+				  << "; vertex-alpha scaled shapes " << dgScaled << ", triangles " << dgTrisScaled << "\n";   // lane GAPFIX1
 			// lane EMISSIVEGI1: the glowing surfaces
 			t << "  probe soup emissive" << ( emitPin ? " PIN off (nothing glows)" : "" )
 			  << ( emitRed.isEmpty() ? "" : " RED " ) << emitRed.constData() << ": shapes glowing " << emShapes
@@ -5622,7 +5661,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	// ---- emit
 	CellSpeed::mark( "ground, water, lights, probes" );
 	if ( chunk ) {	// lane CELLSTREAM1: a streamed cell stops here; src/cellstream.cpp writes it in slices
-		cellPublishLighting( nullptr, world, spec, lightRefs, primRefs, origin, &chunk->lights );
+		cellPublishLighting( nullptr, world, spec, lightRefs, primRefs, origin, &chunk->lights, &lightStartOff );
 		chunk->buckets = std::make_shared<CellChunkBuckets>();
 		chunk->buckets->keys = buckets.keys();
 		std::sort( chunk->buckets->keys.begin(), chunk->buckets->keys.end() );
@@ -5905,7 +5944,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	}
 
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
-	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin );
+	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin, nullptr, &lightStartOff );
 	wwCellFxLitPick( nif );   // lane FXLIT1: each lit effect model's four placed lights
 	if ( streamInit ) {	// lane CELLSTREAM1: the cells themselves come from the streamer, round the camera
 		seed.origin = origin;
@@ -6320,7 +6359,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		     "resolved to nothing, " << blendBuckets << " blended (glass) buckets, "
 		  << effectBuckets << " drawn by the effect shader (BGEM), "
 		  << inlineFxBuckets << " by the effect shader as the NIF sets it (lane EFX1), "
-		  << refractBuckets << " refraction buckets (lane EFX1)";
+		  << refractBuckets << " refraction buckets (lane EFX1), "
+		  << decalFlagBuckets << " lighting buckets with the model's decal flag from " << decalFlagShapes << " shapes"
+		  << ( fxdNoFlag ? " RED noflag" : "" ) << " (lane GAPFIX1)";
 		if ( !unreadableMatNames.isEmpty() )
 			s << " (" << unreadableMatNames.join( QLatin1String( ", " ) ) << ")";
 		s << "\n";

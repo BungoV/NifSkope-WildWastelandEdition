@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 #include "lodinative.h"
 #include "lodgen.h"
 #include "gamemanager.h"
+#include "harnesswindow.h"	// lane GAPFIX1
 #include "gl/cellhdr.h"
 #if __has_include( "gl/cellcull.h" )
 #include "gl/cellcull.h"   // lane SUNCELL1's culling, when merged
@@ -120,6 +121,8 @@ float swayAmp()
 {
 	return std::max( 0.0f, envFloat( "WW_CELL_FARLOD_SWAY", 10.0f ) );
 }
+
+bool swayMoving = false;   //!< lane GAPFIX1: the last frame set a sway that moves with the clock
 
 //! Seconds for the sway: WW_CELL_FARLOD_SWAYTIME pins it (a still picture), else the session clock.
 float swayTime()
@@ -1375,13 +1378,26 @@ void wwCellFarLodFrame( Scene * scene )
 	}
 	r->stopProgram();
 	wasSet = amp > 0.0f;
+	/* lane GAPFIX1: a moving sway needs frames of its own (it moved only when something else repainted). The
+	 * line says whether it would, a harness included; red WW_CELL_FARLOD_RED=swaystill */
+	static const bool stillRed = wwEnv( "WW_CELL_FARLOD_RED" ) == "swaystill";
+	bool pinned = false;
+	wwEnvStr( "WW_CELL_FARLOD_SWAYTIME" ).toFloat( &pinned );
+	swayMoving = amp > 0.0f && !pinned && !stillRed;
 	static QString said;
-	const QString line = QStringLiteral( "far lod: sway amp %1 on %2 programs: %3" ).arg( double( amp ), 0, 'f', 1 )
-		.arg( set.size() ).arg( set.join( QLatin1Char( ' ' ) ) );
+	const QString line = QStringLiteral( "far lod: sway amp %1 on %2 programs: %3; repaints itself %4" ).arg( double( amp ), 0, 'f', 1 )
+		.arg( set.size() ).arg( set.join( QLatin1Char( ' ' ) ) ).arg( swayMoving ? ( wwHarnessRun() ? "1 (held: harness)" : "1" ) : "0" );
 	if ( line != said ) {
 		said = line;
 		qInfo().noquote() << line;
 	}
+}
+
+bool wwCellFarLodWantsRepaint()
+{
+	const bool want = swayMoving && !wwHarnessRun();
+	swayMoving = false;
+	return want;
 }
 
 int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame )
