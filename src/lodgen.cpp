@@ -2415,6 +2415,18 @@ static void lodgenNoteParticleModel( const QString & model )
 	QMutexLocker lock( &particleModelMutex );
 	particleModels.insert( lodgenParticleKey( model ) );
 }
+// lane FXPARITY2: the models that move on their own (a looping sequence, or a controller no sequence drives)
+static QSet<QString> movingModels;
+bool lodgenModelMoves( const QString & model )
+{
+	QMutexLocker lock( &particleModelMutex );
+	return movingModels.contains( lodgenParticleKey( model ) );
+}
+static void lodgenNoteMovingModel( const QString & model )
+{
+	QMutexLocker lock( &particleModelMutex );
+	movingModels.insert( lodgenParticleKey( model ) );
+}
 bool lodgenReadVisFile( const QString & dataRoot, const QString & relPath, QByteArray & bytes )
 {
 	return lodgenReadAsset( dataRoot, relPath, "vis", ".uvd", bytes );
@@ -2531,6 +2543,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	 * one parse, and read by nobody else. */
 	int modelControllers = 0;
 	bool modelParticles = false;	// lane SUNCELL1: a particle system rides the same scan
+	bool modelMoves = false;		// lane FXPARITY2: a looping sequence, or a free controller (not a particle's)
 	if ( loaded )
 		for ( int b = 0; b < src.getBlockCount(); b++ ) {
 			const QModelIndex ib = src.getBlockIndex( b );
@@ -2538,9 +2551,21 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				modelControllers++;
 			if ( !modelParticles && src.blockInherits( ib, "NiParticleSystem" ) )
 				modelParticles = true;
+			if ( !modelMoves ) {
+				if ( src.blockInherits( ib, "NiControllerSequence" ) )
+					modelMoves = src.get<int>( ib, "Cycle Type" ) == 0;	// CYCLE_LOOP
+				else if ( src.blockInherits( ib, "NiTimeController" ) && !src.blockInherits( ib, "NiControllerManager" )
+					&& !src.blockInherits( ib, "NiMultiTargetTransformController" ) ) {
+					// a lamp's controller is the flicker's, a particle system's rides the particles' copy
+					const QModelIndex it = src.getBlockIndex( src.getLink( ib, "Target" ) );
+					modelMoves = it.isValid() && !( src.blockInherits( it, "NiLight" ) || src.blockInherits( it, "NiParticleSystem" ) );
+				}
+			}
 		}
 	if ( modelParticles )
 		lodgenNoteParticleModel( meshPath );
+	if ( modelMoves )
+		lodgenNoteMovingModel( meshPath );
 	if ( loaded ) {
 		for ( int b = 0; b < src.getBlockCount(); b++ ) {
 			QModelIndex iShape = src.getBlockIndex( b );

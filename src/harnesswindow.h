@@ -33,6 +33,12 @@ QString wwHarnessSettingsSuffix();
 //! True when this process is a harness run (NifSkope::wwHeadlessRun()).
 bool wwHarnessRun();
 
+//! lane FXPARITY2: WW_FLY=1 (launch-time) marks a fly session. Its settings stay pinned as in a harness run.
+bool wwFlyRun();
+//! lane FXPARITY2: the world's wall clocks run (sway, grass wind, fog drift, clouds, the cell world clock):
+//! not a harness run, or a fly session. A harness stands at its pinned times.
+bool wwWorldClockLive();
+
 //! True when restoreUi() must NOT replay the persisted window geometry.
 //! Same predicate as the one saveUi() already uses to refuse to persist, so the
 //! read side and the write side cannot disagree.

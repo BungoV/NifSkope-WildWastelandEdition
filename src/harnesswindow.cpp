@@ -288,6 +288,19 @@ bool wwHarnessRun()
 }
 
 
+bool wwFlyRun()
+{
+	static const bool fly = wwEnvStr( "WW_FLY" ).trimmed() == QLatin1String( "1" );
+	return fly;
+}
+
+
+bool wwWorldClockLive()
+{
+	return !wwHarnessRun() || wwFlyRun();
+}
+
+
 bool wwHarnessGeometryRestoreSuppressed()
 {
 	return NifSkope::wwHeadlessRun();

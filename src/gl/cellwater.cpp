@@ -6,6 +6,7 @@
 #include "cellssr.h"
 #include "lookdevstage.h"
 #include "esmwater.h"
+#include "cellworldanim.h"	// lane FXPARITY2: the world clock
 #include "gl/glscene.h"
 #include "gl/gltex.h"
 #include "gl/renderer.h"
@@ -224,9 +225,16 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	prog->uni4fv( "waterSky", sk, 3 );
 	prog->uni1i( "waterRed", s.red );
 	prog->uni1i( "waterProbe", s.probe );
-	// the normals' scroll: wind direction x speed x time in the game; the cell view stands at time 0 (INFERRED)
-	prog->uni4f( "waterScroll0", FloatVector4( 0.0f ) );
-	prog->uni4f( "waterScroll1", FloatVector4( 0.0f ) );
+	// the normals' scroll: lane FXPARITY2, wind direction x speed x the world clock (INFERRED); off: time 0 as before
+	if ( wwCellWorldAnimOn() ) {
+		float s0[4], s1[4];
+		wwWaterScroll( b.rec, wwCellWorldSeconds(), s0, s1 );
+		prog->uni4f( "waterScroll0", FloatVector4( s0[0], s0[1], s0[2], s0[3] ) );
+		prog->uni4f( "waterScroll1", FloatVector4( s1[0], s1[1], s1[2], s1[3] ) );
+	} else {
+		prog->uni4f( "waterScroll0", FloatVector4( 0.0f ) );
+		prog->uni4f( "waterScroll1", FloatVector4( 0.0f ) );
+	}
 
 	static const char * const noiseUni[3] = { "waterNoise0", "waterNoise1", "waterNoise2" };
 	for ( int k = 0; k < 3; k++ ) {
