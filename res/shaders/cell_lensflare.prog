@@ -1,0 +1,4 @@
+# lane LIGHTS3 (LENSFLARE1): the placed lights' lens-flare sprites on the tone-mapped frame (src/gl/celllensflare.cpp).
+# No conditions: never picked for a shape; celllensflare.cpp selects it by name.
+
+shaders cell_lensflare.vert cell_lensflare.frag

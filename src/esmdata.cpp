@@ -1790,6 +1790,8 @@ const EsmLight & EsmWorld::light( quint32 formID ) const
 				L.gobo = fieldString( f );
 			} else if ( f == "WGDR" && f.size() >= 4 ) {
 				L.godRays = esm->mapFormID( *r, f.readUInt32() );	// lane VOLFOG1
+			} else if ( f == "LNAM" && f.size() >= 4 ) {
+				L.lens = esm->mapFormID( *r, f.readUInt32() );	// lane LIGHTS3 (LENSFLARE1)
 			}
 		}
 	}

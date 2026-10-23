@@ -21,6 +21,10 @@ enum class WwLook : int
 	ActorsOutdoors,		// PLACED1 (GAPLOOK2): placed actors in exterior cells, not only interiors (WW_CELL_ACTORS_OUT)
 	WeaponParts,		// MISS1 (GAPLOOK2): placed weapons get their default mod parts on the connect points (WW_CELL_WEAP_PARTS)
 	PlacementEmittance,	// XEMI1 (LIGHTS2): a placement's emittance colour tints its effects and lamp glow (WW_CELL_XEMI)
+	RegionEmittance,	// XEMI-REGN (LIGHTS3): region-sourced emittance, the region weather's Effect Lighting (WW_CELL_XEMI_REGN)
+	ParticleEmittance,	// XEMI-PARTICLES (LIGHTS3): particle systems of an emittance placement take its colour (WW_CELL_XEMI_PART)
+	BounceEmittance,	// XEMI-GI (LIGHTS3): the bounce light of a recoloured emissive uses the emittance colour (WW_CELL_XEMI_GI)
+	LensFlares,			// LENSFLARE1 (LIGHTS3): LENS sprites of lights, a post-process pass (WW_CELL_LENSFLARE)
 	Count
 };
 

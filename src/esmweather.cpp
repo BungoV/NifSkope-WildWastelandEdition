@@ -924,6 +924,83 @@ bool wwGodRaysRead( ESMFile & esm, quint32 formID, WwGodRays & out )
 	return true;
 }
 
+bool wwLensRead( ESMFile & esm, quint32 formID, WwLens & out )
+{
+	out = WwLens();
+	const ESMFile::ESMRecord * r = esm.findRecord( formID );
+	if ( !r || r->type == GRUP || !( *r == "LENS" ) )
+		return false;
+	out.formID = formID;
+	try {
+		ESMFile::ESMField f( esm, *r );
+		bool inSprites = false;	// DNAM before LFSP is the fade scale, after it a sprite's ID string
+		while ( f.next() ) {
+			if ( f == "EDID" ) {
+				out.edid = fieldString( f );
+			} else if ( f == "CNAM" && f.size() >= 4 ) {
+				std::memcpy( &out.colorInfluence, f.data(), 4 );
+			} else if ( f == "DNAM" && !inSprites && f.size() >= 4 ) {
+				std::memcpy( &out.fadeRadiusScale, f.data(), 4 );
+			} else if ( f == "LFSP" ) {
+				inSprites = true;
+			} else if ( f == "FNAM" ) {
+				out.sprites.append( WwLensSprite() );
+				out.sprites.last().texture = fieldString( f );
+			} else if ( f == "LFSD" && f.size() >= 36 && !out.sprites.isEmpty() ) {
+				float d[8];
+				std::memcpy( d, f.data(), 32 );
+				WwLensSprite & s = out.sprites.last();
+				for ( int c = 0; c < 3; c++ )
+					s.tint[c] = d[c];
+				s.width = d[3];
+				s.height = d[4];
+				s.position = d[5];
+				s.angularFade = d[6];
+				s.opacity = d[7];
+				std::memcpy( &s.flags, reinterpret_cast<const char *>( f.data() ) + 32, 4 );
+			}
+		}
+	} catch ( std::exception & ) {
+		return false;
+	}
+	return true;
+}
+
+quint32 EsmWeather::regionWeather( quint32 regn, int * listed )
+{
+	if ( listed )
+		*listed = 0;
+	if ( !esm )
+		return 0;
+	const ESMFile::ESMRecord * r = esm->findRecord( regn );
+	if ( !r || !( *r == "REGN" ) )
+		return 0;
+	quint32 best = 0, bestChance = 0, type = 0;
+	try {
+		ESMFile::ESMField f( *esm, *r );
+		while ( f.next() ) {
+			if ( f == "RDAT" && f.size() >= 4 ) {
+				type = f.readUInt32( 0 );
+			} else if ( f == "RDWT" && type == 3 ) {
+				// {weather, chance, global} x n; the first of equal chances is kept
+				for ( size_t k = 0; k + 12 <= f.size(); k += 12 ) {
+					const quint32 raw = f.readUInt32( k ), ch = f.readUInt32( k + 4 );
+					const quint32 w = raw ? esm->mapFormID( *r, raw ) : 0;
+					if ( listed )
+						( *listed )++;
+					if ( !best || ch > bestChance ) {
+						best = w;
+						bestChance = ch;
+					}
+				}
+			}
+		}
+	} catch ( std::exception & ) {
+		return 0;
+	}
+	return best ? best : 0x0000015EU;
+}
+
 bool EsmWeather::climateData( quint32 formID, WwClimateData & out, QString * why )
 {
 	out = WwClimateData();

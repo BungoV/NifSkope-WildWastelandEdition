@@ -234,6 +234,7 @@ HEADERS += \
 	src/gl/cellcluster.h \
 	src/gl/cellclustergl.h \
 	src/gl/cellfxlit.h \
+	src/gl/celllensflare.h \
 	src/gl/cellcull.h \
 	src/gl/cellumbra.h \
 	src/gl/cellwater.h \
@@ -513,6 +514,7 @@ SOURCES += \
 	src/gl/cellcluster.cpp \
 	src/gl/cellclustergl.cpp \
 	src/gl/cellfxlit.cpp \
+	src/gl/celllensflare.cpp \
 	src/gl/cellcull.cpp \
 	src/gl/cellumbra.cpp \
 	src/gl/cellwater.cpp \

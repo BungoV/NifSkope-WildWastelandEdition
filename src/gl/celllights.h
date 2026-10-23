@@ -97,6 +97,8 @@ struct WwCellLight
 	float box[3][4] = {};           //!< lane HEMI1: box local coordinate k = dot(box[k].xyz, P) + box[k].w, inside |k| <= 1
 	quint32 ref = 0;                //!< lane GPURELIGHT1: the placed reference (0: none, an effect's light)
 	float godRay = 0.0f;            //!< lane VOLFOG1: a shaft emitter (a shadow flag AND a WGDR): its GDRY's intensity; 0 none
+	quint32 lens = 0;               //!< lane LIGHTS3 (LENSFLARE1): the base's LENS (0 none)
+	float byteColor[3] = { 0, 0, 0 };   //!< lane LIGHTS3: DATA colour bytes / 255 (the lens flare's colour influence)
 	//! lane LIGHTFLICKER1: 0 steady, 1 flicker (LIGH flag 0x8), 2 pulse (0x80 | 0x100), with DATA's Flicker Effect
 	int flicker = 0;
 	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;

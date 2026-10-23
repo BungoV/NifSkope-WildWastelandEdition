@@ -668,6 +668,12 @@ void Particles::drawShapes( NodeList * secondPass )
 			const auto * espLit = dynamic_cast<const BSEffectShaderProperty *>( shaderProp );
 			wwCellFxLitUniforms( scene, litBlock );
 			prog->uni1f( "lightingInfluence", espLit ? espLit->lightingInfluence : 0.0f );
+			{	// lane LIGHTS3 (XEMI-PARTICLES): the placement's emittance colour ^2.2 (w 0 = none), as an unlit effect card
+				float xe[3];
+				const bool on = wwCellXemiFor( scene->nifModel, litBlock, xe );
+				prog->uni4f( "fxEmit", on ? FloatVector4( std::pow( xe[0], 2.2f ), std::pow( xe[1], 2.2f ), std::pow( xe[2], 2.2f ), 1.0f )
+					: FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+			}
 			if ( litRed )
 				prog->uni1i( "fxLitMode", 0 );
 			const bool litNow = !litRed && wwCellFxLitFor( scene->nifModel, litBlock ) != nullptr;

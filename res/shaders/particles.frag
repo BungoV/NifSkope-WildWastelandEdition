@@ -42,6 +42,7 @@ uniform bool fxAdditive;
  * mix( 1, directional + the model's four lights, lighting influence ), in linear light, before the fog.
  * glparticles.cpp sets these from src/gl/cellfxlit.h; fxLitMode 0 = unlit, as before. */
 uniform float lightingInfluence;
+uniform vec4 fxEmit;			// lane LIGHTS3 (XEMI-PARTICLES): the placement's emittance colour ^2.2 on an unlit system; w 0 = none
 uniform int fxLitMode;			// 0 unlit; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
 uniform vec4 fxLit;				// indices into cellLights, -1 = none
 uniform vec4 fxLitScale;		// 1 (a red control's per-light ratio)
@@ -289,6 +290,8 @@ void main()
 			color.a = baseMap.a * pow( max( C.a, 0.0 ), 2.2 );	// texture alpha (falloff folded in) x vertex alpha^2.2
 		if ( ( pfxGame & 1 ) == 0 )
 			color.a *= pfxSoftFade();	// lane FXPARITY1: red law keeps the soft fade alone (1 while off)
+		if ( fxEmit.a > 0.0 && fxLitMode == 0 )	// lane LIGHTS3 (XEMI-PARTICLES): the unlit effect's emittance, as fo4_effectshader
+			color.rgb = mix( color.rgb, color.rgb * fxEmit.rgb, lightingInfluence );
 		vec3 lin = pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
 		if ( volPart != 0 ) {
 			// lane VOLPART1: lit at its own point, seen through the integrated air, soft against the scene

@@ -28,6 +28,10 @@ const LookRow kRows[] = {
 	{ "Actors outdoors", "WW/CellActorsOutdoors" },
 	{ "Weapon mod parts", "WW/CellWeaponParts" },
 	{ "Placement emittance", "WW/CellPlacementEmittance" },
+	{ "Region emittance", "WW/CellRegionEmittance" },
+	{ "Emittance on particles", "WW/CellParticleEmittance" },
+	{ "Emittance in bounce light", "WW/CellBounceEmittance" },
+	{ "Lens flares", "WW/CellLensFlares" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -97,6 +101,22 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_XEMI" ).trimmed() );
 		return p;
 	}
+	case WwLook::RegionEmittance: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_XEMI_REGN" ).trimmed() );
+		return p;
+	}
+	case WwLook::ParticleEmittance: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_XEMI_PART" ).trimmed() );
+		return p;
+	}
+	case WwLook::BounceEmittance: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_XEMI_GI" ).trimmed() );
+		return p;
+	}
+	case WwLook::LensFlares: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LENSFLARE" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -124,6 +144,10 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::ActorsOutdoors: return "WW_CELL_ACTORS_OUT";
 	case WwLook::WeaponParts: return "WW_CELL_WEAP_PARTS";
 	case WwLook::PlacementEmittance: return "WW_CELL_XEMI";
+	case WwLook::RegionEmittance: return "WW_CELL_XEMI_REGN";
+	case WwLook::ParticleEmittance: return "WW_CELL_XEMI_PART";
+	case WwLook::BounceEmittance: return "WW_CELL_XEMI_GI";
+	case WwLook::LensFlares: return "WW_CELL_LENSFLARE";
 	default: return "";
 	}
 }
@@ -135,7 +159,8 @@ bool wwLookPinned( WwLook l )
 
 bool wwLookReopens( WwLook l )
 {
-	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::PlacementEmittance;
+	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::PlacementEmittance
+		|| l == WwLook::RegionEmittance || l == WwLook::ParticleEmittance || l == WwLook::BounceEmittance;
 }
 
 bool wwLookOn( WwLook l )

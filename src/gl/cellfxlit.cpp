@@ -10,10 +10,12 @@ BSD License - see nifskope.h
 #include "celllights.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
+#include "gl/lookdevstage.h"	// lane LIGHTS3: a region's emittance at the clock
 
 #include <QFile>
 #include <QHash>
 #include <QTextStream>
+#include <QVector>
 
 #include <algorithm>
 #include <cmath>
@@ -270,6 +272,21 @@ QHash<const void *, QHash<int, quint32>> & xemiDocs()
 	static QHash<const void *, QHash<int, quint32>> d;
 	return d;
 }
+QVector<quint32> & xemiRegions()
+{
+	static QVector<quint32> r;
+	return r;
+}
+}
+
+quint32 wwCellXemiRegionCode( quint32 regn )
+{
+	int slot = xemiRegions().indexOf( regn );
+	if ( slot < 0 ) {
+		slot = xemiRegions().size();
+		xemiRegions().append( regn );
+	}
+	return 0x02000000U | quint32( slot );
 }
 
 void wwCellXemiBegin( const void * nif )
@@ -289,6 +306,21 @@ void wwCellXemiForget( const void * nif, int block )
 		d->remove( block );
 }
 
+bool wwCellXemiCode( quint32 code, float rgb[3] )
+{
+	// red: magenta on every tinted shape, so the picture shows which shapes the rule reached
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_CELL_XEMI_RED" ).trimmed() );
+	if ( red != "magenta" && ( code & 0x02000000U ) ) {
+		const int slot = int( code & 0xFFFFFFU );
+		return slot < xemiRegions().size() && wwLookdevRegionEmit( xemiRegions().at( slot ), rgb );
+	}
+	const quint32 c = red == "magenta" ? 0xFF00FFU : ( code & 0xFFFFFFU );
+	rgb[0] = float( ( c >> 16 ) & 0xFF ) / 255.0f;
+	rgb[1] = float( ( c >> 8 ) & 0xFF ) / 255.0f;
+	rgb[2] = float( c & 0xFF ) / 255.0f;
+	return true;
+}
+
 bool wwCellXemiFor( const void * nif, int block, float rgb[3] )
 {
 	const auto d = xemiDocs().constFind( nif );
@@ -297,11 +329,5 @@ bool wwCellXemiFor( const void * nif, int block, float rgb[3] )
 	const auto it = d->constFind( block );
 	if ( it == d->constEnd() )
 		return false;
-	// red: magenta on every tinted shape, so the picture shows which shapes the rule reached
-	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_CELL_XEMI_RED" ).trimmed() );
-	const quint32 c = red == "magenta" ? 0xFF00FFU : ( it.value() & 0xFFFFFFU );
-	rgb[0] = float( ( c >> 16 ) & 0xFF ) / 255.0f;
-	rgb[1] = float( ( c >> 8 ) & 0xFF ) / 255.0f;
-	rgb[2] = float( c & 0xFF ) / 255.0f;
-	return true;
+	return wwCellXemiCode( it.value(), rgb );
 }
