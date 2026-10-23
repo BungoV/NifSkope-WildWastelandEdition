@@ -1281,7 +1281,11 @@ static void vaPassInner( Scene * scene, bool run )
 			if ( blows ) {
 				if ( !dr.clock.isValid() )
 					dr.clock.start();
-				vaDriftAdvance( dr, dr.timePinned ? dr.tPin : double( dr.clock.nsecsElapsed() ) * 1e-9, wind );
+				double t = dr.timePinned ? dr.tPin : double( dr.clock.nsecsElapsed() ) * 1e-9;
+				// lane FOGVID1: WW_CELL_FOGDRIFT_PATH=1 runs the pinned clock along a WW_RENDER_PATH (frame k at T + k / fps)
+				if ( dr.timePinned && wwEnvInt( "WW_CELL_FOGDRIFT_PATH" ) > 0 && wwCellPostPathFps() > 0.0f )
+					t += double( wwCellPostPathFrame() ) / double( wwCellPostPathFps() );
+				vaDriftAdvance( dr, t, wind );
 			}
 			dr.moving = blows;
 			driftAmp = kDriftAmp / std::max( dr.span, 1e-3f );

@@ -789,6 +789,51 @@
          </layout>
         </widget>
        </item>
+       <item>
+        <widget class="QGroupBox" name="groupBoxProbeBake">
+         <property name="title">
+          <string>Probe bake</string>
+         </property>
+         <property name="flat">
+          <bool>true</bool>
+         </property>
+         <layout class="QGridLayout" name="gridLayoutProbeBake">
+          <item row="0" column="0">
+           <widget class="QLabel" name="lblGpuRayTracedBake">
+            <property name="text">
+             <string>GPU Ray-Traced Bake</string>
+            </property>
+            <property name="buddy">
+             <cstring>gpuRayTracedBake</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QCheckBox" name="gpuRayTracedBake">
+            <property name="text">
+             <string/>
+            </property>
+            <property name="checked">
+             <bool>false</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="2">
+           <spacer name="horizontalSpacerProbeBake">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </widget>
+       </item>
       </layout>
      </widget>
      <widget class="QWidget" name="importex">

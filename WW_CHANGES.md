@@ -12,6 +12,25 @@
 - tools/wwswitch_survey.py: the converted switches classify live; CellModelAhead's reads are reopen.
 - tests/liveswitch: a changed value rebuilds once, an unchanged value does not; the stage table red fails.
 
+## Lane RTBAKEOPT1 (2026-10-23, branch rtbakeopt1-20261023): the GPU ray-traced bake is an option, off by default
+
+- **CPU bake is the default again (bungo 10-23):** RTBAKE1's Vulkan tracer (src/bakert.cpp: the probe bake's primary
+  rays, the cell GI's edge sky rays) now runs only when asked for. Off, no Vulkan is touched and the bakes run their own
+  CPU loops, byte-identical to before RTBAKE1.
+- **Row:** Settings > NIF > Probe bake > GPU Ray-Traced Bake (off), key `Settings/Nif/Gpu Ray Traced Bake`, read at
+  each bake start, so a change applies to the next bake. `WW_BAKE_RT=1` / `=0` pins it (harness rule).
+  `WW_BAKE_RT_RED=cpu` still forces the CPU when it is on; `WW_BAKE_RT_WALK_RED` and `WW_BAKE_RT_CHECK` are unchanged.
+
+## Lane MARCHTOOLS (2026-10-23, branch marchtools-20261023): MARCHFIX1's tooling onto batch4
+
+- **Tooling only** (MARCHFIX1 1908115d; its march verdict was GIBLACKLINK1's fix, already in the batch):
+  `tests/spells/shader_link_check.py` substitutes `NUM_TEXTURE_UNITS` as the loader does (stf_default links offline);
+  `tests/spells/cell_giblack_link.sh` works under the repo's scratchpad, not C:'s temp.
+- **Two batch4 shader link breaks the full sweep found (all 240 program x mode rows LINK OK after):**
+  `cell_volair.frag` called `ussTerrain` with 3 arguments after SHADOWPAR1 made it 4 (`, 0.0, false` as the air tail
+  does; cell_volair.prog failed in every mode); `cell_lights.glsl` declared `cellGiLoop8` only outside
+  `WW_CELL_GI_MARCH`, so EMISSIVEGRID1's read broke 18 cell programs in the march mode. Now declared for both.
+
 ## Lane OBJLODSHADOW1 (2026-10-22, branch objlodshadow1-20261022): object LOD casts only past the cascades
 
 - **Object-LOD terrain casters, only where the cascades do not reach:** with the objlod item on, every far object-LOD
