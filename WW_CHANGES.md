@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FXPARITY2 (2026-10-23, branch fxparity2-20261023): the world moves in a cell, and three more particle rules
+
+- **World animation** (Show menu row, key `WW/CellWorldAnim`, pin `WW_CELL_WORLDANIM`, live, off): one world clock for
+  cell documents. Scene animation, controllers and the effect UV scroll run on it. Water noise scrolls by each WATR's
+  wind direction and speed. Time pin `WW_CELL_WORLDANIM_TIME`, red `WW_CELL_WORLDANIM_RED=still`.
+- **Animated objects** (row, key `WW/CellAnimObjects`, pin `WW_CELL_ANIMOBJ`, off): placed models that move by
+  themselves leave the weld and are copied whole, like the live door, and keep their controllers. The cap is
+  `WW_CELL_ANIMOBJ_MAX` (256). The row is read when the cell is built: the Show tick reopens the cell, and in rows it
+  must be a launch key (`^WW_CELL_ANIMOBJ=1`).
+- **`WW_FLY=1`** (launch time): a harness launch whose world clocks still run (grass, far LOD sway, air drift, clouds,
+  the world clock). Settings stay pinned. Harness runs without it are unchanged.
+- **Particle Game Rules, more of them** (same row, off = the old math): drag Range / Range Falloff around the drag
+  object (red `range`); the bomb modifier with spherical, cylindrical and planar symmetry and none, linear or exp decay
+  (red `bomb`); gravity strength x1.6, spherical pulls toward the centre, decay and turbulence (red `gravity`). The
+  rules are as Todd's treat does them. Rotation already matched. Unit gate tests/fxparity: green 0 failed, red 15 failed.
+- Off is identical to the base exe: the cube sha is af2aa406 for base, off and on, and the Concord 5x5 row is 0 px.
+
 ## Lane FXPARITY1 (2026-10-23, branch fxparity1-20261023): particles follow the game's rules (off by default)
 
 - **Row:** Scene window > Particle Game Rules (off), key `WW/FxParity`, live in every mode. `WW_FX_PARITY=1` / `=0`
