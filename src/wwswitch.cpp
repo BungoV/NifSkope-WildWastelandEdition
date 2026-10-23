@@ -109,9 +109,45 @@ WwSwitchStage wwSwitchStageOf( const QByteArray & name, QString * where )
 			*where = QString::fromLatin1( r->where );
 		return WwSwitchStage( r->stage );
 	}
+	// fix 10-22: a name the table lacks (a lane's new switch, or a direct env read) may be cached once: relaunch
 	if ( where )
-		*where = QStringLiteral( "no reader in src/ (the survey's table)" );
-	return WwSwitchStage::Live;
+		*where = QStringLiteral( "not in the stage table: unknown = relaunch" );
+	return WwSwitchStage::Relaunch;
+}
+
+namespace {
+std::atomic<bool> g_liveSession { false };
+std::atomic<quint64> g_shaderRefusals { 0 };
+QString & lastShaderRefusal()
+{
+	static QString s;
+	return s;
+}
+}	// namespace
+
+void wwLiveSessionStart()
+{
+	g_liveSession.store( true, std::memory_order_release );
+}
+
+bool wwLiveSessionOn()
+{
+	return g_liveSession.load( std::memory_order_acquire );
+}
+
+void wwLiveShaderRefused( const QString & text )
+{
+	QMutexLocker l( &changeLock() );
+	lastShaderRefusal() = text;
+	g_shaderRefusals.fetch_add( 1, std::memory_order_acq_rel );
+}
+
+quint64 wwLiveShaderRefusals( QString * last )
+{
+	QMutexLocker l( &changeLock() );
+	if ( last )
+		*last = lastShaderRefusal();
+	return g_shaderRefusals.load( std::memory_order_acquire );
 }
 
 static QHash<QByteArray, std::pair<bool, QByteArray>> & launchValues()

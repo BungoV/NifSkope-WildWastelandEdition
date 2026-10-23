@@ -158,6 +158,7 @@ constexpr float kDriftSpeed = 400.0f;	// units per second at the weather's full 
 struct VaDrift
 {
 	bool loaded = false, on = false, pinned = false;
+	quint64 liveGen = 0;		// fix TDFIX2: a live set of WW_CELL_FOGDRIFT* re-reads them
 	int red = 0;				// 1 still (no motion), 2 smooth (no noise)
 	bool timePinned = false;
 	double tPin = 0.0;
@@ -174,8 +175,12 @@ struct VaDrift
 VaDrift & vd()
 {
 	static VaDrift d;
-	if ( !d.loaded ) {
+	if ( !d.loaded || wwSwitchMovedFor( d.liveGen, { "WW_CELL_FOGDRIFT" } ) ) {
 		d.loaded = true;
+		d.liveGen = wwSwitchGen();
+		d.pinned = false;	// back to the defaults before the re-read
+		d.timePinned = false;
+		d.tPin = 0.0;
 		const QByteArray pin = qgetenv( "WW_CELL_FOGDRIFT" ).trimmed();
 		if ( !pin.isEmpty() ) {
 			d.pinned = true;
@@ -1925,13 +1930,17 @@ struct VpState
 	bool loaded = false;
 	bool on = false, pinned = false;
 	int red = 0;
+	quint64 liveGen = 0;	// fix TDFIX2: a live set of WW_CELL_VOLPART* re-reads them
 };
 
 VpState & vps()
 {
 	static VpState s;
-	if ( !s.loaded ) {
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_VOLPART" } ) ) {
 		s.loaded = true;
+		s.liveGen = wwSwitchGen();
+		s.pinned = false;	// back to the defaults before the re-read (the reds are or-ed)
+		s.red = 0;
 		const QByteArray pin = qgetenv( "WW_CELL_VOLPART" );
 		if ( !pin.isEmpty() ) {
 			s.pinned = true;

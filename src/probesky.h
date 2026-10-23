@@ -63,6 +63,13 @@ void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bak
 //! WW_CELL_SKYPIC=1 it also captures the drawn sky (the view's GL context is current here) when it has changed,
 //! and the first capture relights at once (the cell opened before any frame was drawn).
 void probeSkyTick( Scene * scene, const void * nif, QWindow * view );
+//! fix 10-22: a relight waits on its 0.4 s timer; RelightNow runs it at once (the live driver, before a picture)
+bool probeSkyRelightPending();
+void probeSkyRelightNow();
+/* fix TDFIX2 10-23: forget the drawn-sky capture and the kept relight, so a document opened again in this process opens
+ * as at launch (relit from the weather, then the first frame's capture). Kept, the reopen relit its GI from the old
+ * capture and the AO decal relight ran on that: 81 px off its own launch on every row after a live reopen. */
+void probeSkyForget();
 
 //! lane SKYPIC1: per axis and octant, the integral of the captured sky's radiance x max(axis . dir, 0) d(solid
 //! angle) (exact texel solid angles, the cosine at the texel's centre). Reds: "flipz" reads the picture upside

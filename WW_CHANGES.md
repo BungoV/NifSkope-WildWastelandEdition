@@ -266,6 +266,30 @@
 - **No set, no change:** the generation stays 0 and every reader computes what it did before.
 - **Gates (batch, notes/testdriver1/BATCH.md):** no-set identity main vs lane exe; live vs relaunch twins per class on
   Memory Den and Concord 3x3; leak check (first row vs last); wall clock per scene; the port path.
+- **Gate fixes (10-22, after the first gate):**
+  - Hour row: a live `WW_LOOKDEV_HOUR` starts the terrain shadow sweep (worker + band-a-frame upload) and the probe
+    sky relight (0.4 s timer) in the background; a launch finished both while loading. A picture step now waits for
+    both (`wwTerrainShadowPending`, `probeSkyRelightPending`/`probeSkyRelightNow`); the reply says "background settled".
+  - A refused shader ends a live row, not the session: in a live session the shader guard records the refusal
+    (`wwLiveShaderRefused`) instead of exiting 87; that row's pictures are refused ("refused shader ..."), the next
+    row reloads the programs.
+  - A reopen hands back the viewport size the rows before it drew in (the window takes the difference; the reply
+    names the chrome that changed).
+  - A switch the stage table lacks is relaunch (unknown = relaunch), with the reason in the reply.
+  - `tests/spells/ww_live.py` takes `--timeout` anywhere on the line.
+- **Gate fixes 2 (TDFIX2, 10-23):**
+  - Rows after a live reopen were 81 px off their own launch (1-LSB, near lights and AO decals): the reopened document
+    took its GI from the drawn-sky capture the process still held, so its open-time AO decal relight ran on other GI
+    than a launch's. A reopen now forgets the capture and the kept relight (`probeSkyForget`) and opens as at launch.
+  - A reopen is watched: stderr is flushed every 5 s with the seconds so far (`live: reopen running N s`), and a reopen
+    over 3 min refuses its row (`refused reopen ...`) instead of waiting 15 min; a late one never starts the steps again.
+  - `tools/wwswitch_survey.py`: a read under an exact `if ( !s.loaded )` / `if ( !s.init )`, a `static int x = -1`
+    sentinel, or a `static const` struct's constructor is read once for the process: stage relaunch, not live.
+    A plain C++ function `static` (not `WW_SWITCH_STATIC`) is read once too: relaunch (57 names moved, e.g. FXRES, VRS, HDR).
+  - These readers now follow a live set (`wwSwitchMovedFor`, pins and reds back to defaults first): fog drift
+    (`WW_CELL_FOGDRIFT*`), volume particles (`WW_CELL_VOLPART*`), reflection probes (`WW_CELL_REFLPROBE*`,
+    `WW_CELL_LIT_PROBE`), lamp shadows (`WW_CELL_LAMPSHADOW*`), specular occlusion (`WW_CELL_SPECOCC*`), the CSM dump
+    (`WW_CSM_DUMP`) and `WW_CELL_SHADOW_RED=watercasts`. GPU-driven and the shadow cache stay relaunch (built at first use).
 
 ## Lane FARCARD1 (2026-10-22, branch farcard1-20261022): the cell view's far tree cards draw instanced
 

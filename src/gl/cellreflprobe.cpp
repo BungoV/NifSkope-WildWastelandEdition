@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "cellreflprobe.h"
 #include "cellunits.h"
+#include "wwswitch.h"	// fix TDFIX2: a live set re-reads the switches
 
 #include "gl/celllights.h"
 #include "gl/cellssr.h"
@@ -50,13 +51,16 @@ struct RpState
 	bool all = false;	// WW_CELL_REFLPROBE_ALL: capture and relight every probe at once
 	bool greyscale = false;	// the draw being set up reads the greyscale palette
 	QString last;
+	quint64 liveGen = 0;	// fix TDFIX2: a live set of WW_CELL_REFLPROBE* / WW_CELL_LIT_PROBE re-reads them
 };
 
 RpState & rps()
 {
 	static RpState s;
-	if ( !s.loaded ) {
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_REFLPROBE", "WW_CELL_LIT_PROBE" } ) ) {
 		s.loaded = true;
+		s.liveGen = wwSwitchGen();
+		s.red = 0;	// the reds are or-ed: back to none before the re-read
 		const QByteArray pin = qgetenv( "WW_CELL_REFLPROBE" ).trimmed();
 		s.pinOn = !pin.isEmpty();
 		s.on = s.pinOn ? pin != "0" : QSettings().value( QStringLiteral( "WW/CellReflProbe" ), false ).toBool();

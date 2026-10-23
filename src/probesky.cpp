@@ -323,6 +323,30 @@ void relightKept()
 
 }	// namespace
 
+bool probeSkyRelightPending()
+{
+	const Kept & k = kept();
+	return k.timer && k.timer->isActive();
+}
+
+void probeSkyRelightNow()
+{
+	Kept & k = kept();
+	if ( !k.timer || !k.timer->isActive() )
+		return;
+	k.timer->stop();
+	relightKept();
+}
+
+void probeSkyForget()
+{
+	Kept & k = kept();
+	if ( k.timer )
+		k.timer->stop();
+	k.nif = nullptr;
+	picNow() = PicNow();
+}
+
 void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec )
 {
 	Kept & k = kept();   // one exterior at a time: the latest relit

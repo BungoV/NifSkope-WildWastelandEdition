@@ -638,7 +638,10 @@ static void csmDumpMap( const CsmState & s, Renderer * r )
 {
 	static int armed = -1;
 	static QString path, lastSummary;
-	if ( armed < 0 ) {
+	static quint64 liveGen = 0;	// fix TDFIX2: a live set of WW_CSM_DUMP re-arms it
+	if ( armed < 0 || wwSwitchMovedFor( liveGen, { "WW_CSM_DUMP" } ) ) {
+		liveGen = wwSwitchGen();
+		lastSummary.clear();
 		path = wwEnvStr( "WW_CSM_DUMP" ).trimmed();
 		armed = ( !path.isEmpty() && QDir::isAbsolutePath( path ) ) ? 1 : 0;
 	}

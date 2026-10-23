@@ -1,6 +1,7 @@
 #include "celllampshadow.h"
 
 #include "gl/glshape.h"
+#include "wwswitch.h"	// fix TDFIX2: a live set re-reads the switches
 
 #include <QSettings>
 
@@ -34,8 +35,10 @@ int tierFromText( const QByteArray & t )
 LsState & st()
 {
 	static LsState s;
-	if ( !s.loaded ) {
+	static quint64 liveGen = 0;	// fix TDFIX2: a live set of WW_CELL_LAMPSHADOW* re-reads them
+	if ( !s.loaded || wwSwitchMovedFor( liveGen, { "WW_CELL_LAMPSHADOW" } ) ) {
 		s.loaded = true;
+		liveGen = wwSwitchGen();
 		const QByteArray pin = qgetenv( "WW_CELL_LAMPSHADOW" );
 		s.pinned = !pin.trimmed().isEmpty();
 		s.tier = s.pinned ? tierFromText( pin )
