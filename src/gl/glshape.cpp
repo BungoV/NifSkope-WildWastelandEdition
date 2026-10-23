@@ -710,6 +710,14 @@ void Shape::updateShader()
 		depthWrite = bssp->depthWrite;
 		isDoubleSided = bssp->isDoubleSided;
 		isVertexAlphaAnimation = bssp->isVertexAlphaAnimation;
+		/* lane TREECROWN1: a far-LOD tree bucket (src/lodinative.cpp, "FarLOD r<i> ...") stores its wind weight
+		 * in vertex alpha and says so with the NIF Tree_Anim bit, but its .bgsm (a LOD material, Tree off) won
+		 * here, so the weight became OPACITY: ElmYwLOD leaves under weight 90/255 failed the alpha test and the
+		 * crown went missing. WW_CELL_FARLOD_RED=bgsmtree is the old path, the red control. */
+		static const bool farLodTreeRed = qgetenv( "WW_CELL_FARLOD_RED" ) == "bgsmtree";
+		if ( !isVertexAlphaAnimation && !farLodTreeRed && bssp->hasSF2( ShaderFlags::SLSF2_Tree_Anim )
+			&& name.startsWith( QLatin1String( "FarLOD " ) ) )
+			isVertexAlphaAnimation = true;
 	} else {
 		depthTest = true;
 		depthWrite = true;
