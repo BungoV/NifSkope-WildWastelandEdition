@@ -628,6 +628,10 @@ public:
 	ESMFile * plugin() const { return esm.get(); }
 	//! lane PLACED1: the open interior's child groups, load order (empty for a worldspace)
 	const QVector<quint32> & interiorChildGroups() const { return interiorGroups; }
+	//! lane GAPLOOK2: an exterior cell's child groups (its own + later plugins'), empty when the cell is absent
+	QVector<quint32> cellChildGroups( int cx, int cy ) const;
+	//! lane GAPLOOK2: the worldspace's persistent-cell groups (its own + later plugins')
+	QVector<quint32> persistentChildGroups() const;
 
 private:
 	std::unique_ptr<ESMFile> esm;

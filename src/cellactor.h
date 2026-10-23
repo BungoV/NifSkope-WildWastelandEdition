@@ -95,6 +95,9 @@ public:
 	/*! The open interior's placed actors as references (empty in a worldspace).
 	 *  Every one gets a row; a row keeps the fate Hidden until place() is asked. */
 	QVector<EsmRefr> references();
+	/*! lane GAPLOOK2: the placed actors of these cell groups (an exterior cell's, the persistent cell's);
+	 *  `box` (minX, minY, maxX, maxY, game units) keeps only the actors standing inside it. */
+	QVector<EsmRefr> referencesIn( const QVector<quint32> & groups, const float * box = nullptr );
 
 	/*! Resolve and build one placed actor. True when it is drawn: `key` is what
 	 *  shapes() answers to and `scale` the whole scale to place it with. False
