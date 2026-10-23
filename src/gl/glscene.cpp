@@ -58,6 +58,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellfxres.h"	// lane FXRES1
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1
 #include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B
+#include "gl/taainputs.h"	// lane TAAINPUTS1
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
@@ -571,6 +572,7 @@ void Scene::drawShapes()
 	PassTime::begin( PassTime::Sorted );
 	wwCellVrsPass( this, true, true );	// lane VRS1: the stricter image
 	wwSetupMemoArm( true );
+	wwTaaInputsNoteBlended( this, secondPass.list() );	// lane TAAINPUTS1: the mask's shapes (no GL call)
 	drawDeferredShapes( secondPass );
 	wwSetupMemoArm( false );
 	wwCellVrsPass( this, true, false );
