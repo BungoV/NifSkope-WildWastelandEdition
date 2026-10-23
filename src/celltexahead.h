@@ -50,6 +50,10 @@ QStringList ready( const NifModel * nif, int max );
 void drop( const NifModel * nif, const QString & name );
 //! This document's resources are about to change or go: the workers stop first. Any thread.
 void stop( const NifModel * nif );
+//! lane GAPFIX1: the view freed `name`'s texture (the stream keep-timer): the next want() reads it ahead again
+void forget( const NifModel * nif, const QString & name );
+//! lane GAPFIX1: names read ahead again after a forget; handed-out names the drawing thread had to read itself
+void counts( qint64 & again, qint64 & drawRead );
 
 //! The end of a frame: one that asked for no texture ends the read-ahead.
 void frameEnd();

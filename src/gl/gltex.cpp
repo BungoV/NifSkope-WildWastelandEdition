@@ -524,7 +524,7 @@ void TexCache::flush()
 	embedTextures.clear();
 }
 
-int TexCache::evictUnused( std::uint32_t tick )
+int TexCache::evictUnused( std::uint32_t tick, QStringList * names )
 {
 	int n = 0;
 	for ( size_t i = 0; i <= textureHashMask; i++ ) {
@@ -536,6 +536,8 @@ int TexCache::evictUnused( std::uint32_t tick )
 		tx.id[0] = tx.id[1] = 0;
 		tx.mipmaps = 0;
 		tx.target = 0;
+		if ( names )
+			names->append( tx.filename().toString() );
 		n++;
 	}
 	return n;
