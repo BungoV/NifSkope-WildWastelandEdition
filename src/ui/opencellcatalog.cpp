@@ -193,14 +193,24 @@ QStringList openCellDataPlugins( const QString & dataDir )
 	QStringList all = QDir( dataDir ).entryList( QDir::Files, QDir::Name | QDir::IgnoreCase );
 	all.erase( std::remove_if( all.begin(), all.end(), []( const QString & n ) { return !isPluginName( n ); } ),
 		all.end() );
-	// The game loads masters before plugins, and its own master first.
-	auto rank = []( const QString & n ) {
-		if ( n.compare( QLatin1String( "Fallout4.esm" ), Qt::CaseInsensitive ) == 0 )
-			return 0;
-		return n.endsWith( QLatin1String( ".esp" ), Qt::CaseInsensitive ) ? 2 : 1;
+	// The game loads masters before plugins, and its own master first. A master is the TES4 ESM flag (0x1), not
+	// the extension: an ESM-flagged .esp loads with the masters (lane GAPFIX1; .esm/.esl carry it implicitly).
+	auto esmFlag = [&]( const QString & n ) {
+		QFile f( QDir( dataDir ).filePath( n ) );
+		const QByteArray h = f.open( QIODevice::ReadOnly ) ? f.read( 12 ) : QByteArray();
+		return h.size() == 12 && h.startsWith( "TES4" ) && ( quint8( h[8] ) & 0x01 ) != 0;
 	};
+	QHash<QString, int> ranks;
+	for ( const QString & n : all ) {
+		int r = 1;
+		if ( n.compare( QLatin1String( "Fallout4.esm" ), Qt::CaseInsensitive ) == 0 )
+			r = 0;
+		else if ( n.endsWith( QLatin1String( ".esp" ), Qt::CaseInsensitive ) && !esmFlag( n ) )
+			r = 2;
+		ranks.insert( n, r );
+	}
 	std::stable_sort( all.begin(), all.end(), [&]( const QString & a, const QString & b ) {
-		return rank( a ) < rank( b );
+		return ranks.value( a ) < ranks.value( b );
 	} );
 	return all;
 }
