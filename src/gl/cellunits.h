@@ -43,10 +43,11 @@ constexpr int ReflGbufNd = 39;
 constexpr int AirNoise = 40;		// lane FOGDRIFT1: the air's drifting density noise (sampler3D; 37 in the lane, REFLPROBE1 holds it)
 constexpr int AtmoAp = 41;		// lane SKYA (ATMO2): the physical sky's aerial-perspective froxels (sampler3D)
 constexpr int AtmoTrans = 42;	// lane SKYA (ATMO2): the sky's transmittance LUT, read by the sky's air (cell_volsky)
+constexpr int ContactGbuf = 43;	// lane GAPLOOK1 (C8): the lamps' contact march reads the shared opaque pass (sampler2D; 41 in the lane, SKYA holds it)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
-	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans };
+	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans, ContactGbuf };
 
 constexpr bool distinct()
 {

@@ -51,6 +51,10 @@ uniform vec4 volPrevGrid;		// last frame's [0][0], [1][1], near, ln(far / near)
 uniform float volPrevScale;		// last frame's fogDistScale
 uniform bool volHistOk;			// a history at these dims
 uniform vec3 volLightShift;		// gates only (WW_CELL_AIR_LIGHTSHIFT): the air sees every placed light moved by this (world)
+uniform bool volSurfClusters;	// lane GAPLOOK1 (LIGHTSYS-4): the lights from the surfaces' lists (cell_cluster.glsl)
+uniform vec2 volSurfPx;			// the main viewport's pixels a froxel column (x, y)
+uniform bool volSurfRed;		// red drop: each walk leaves out its first light
+uniform vec4 volMs;				// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octaves a, b, c, w 1 = shadows lift (x 0: off)
 // lane FOGDRIFT1 (cellvolair.h): x amp / span (0: smooth air), y the fade's start, z 1 / its length, w the noise's mean
 uniform vec4 volDrift;
 uniform vec4 volDriftOfs[2];	// per octave: xyz the wind's offset (world units), w 1 / its tile
@@ -98,6 +102,25 @@ float airFarVis( vec3 posView )
 	return min( c, t ) * airCloudShadow( posView );
 }
 
+/* lane GAPLOOK1 (FOGEXTRAS): the multiple-scattering octaves (Wrenninge, Kulla, Lundqvist, "Oz: The Great and
+ * Volumetric", SIGGRAPH 2013): octave i scatters a^i, sees the optical depth to the sun x b^i and the phase's g x c^i;
+ * vis the sun's shadow, lifted toward 1 as b^i shrinks (w 1). Octave 0 is the single scattering. */
+vec3 airMsSum( float vis, float T, float c )
+{
+	vec3 r = vis * T * volPhasePi( c );
+	float a = 1.0, b = 1.0, g = 1.0;
+	for ( int i = 1; i < 3; i++ ) {
+		a *= volMs.x;
+		b *= volMs.y;
+		g *= volMs.z;
+		float v = volMs.w > 0.5 ? mix( 1.0, vis, b ) : vis;
+		vec3 ph = PI * ( volPhase[0].rgb * ( 3.0 / ( 16.0 * PI ) ) * ( 1.0 + c * c )
+			+ volPhase[1].rgb * volHg( c, volPhase[1].w * g ) + volPhase[2].rgb * volHg( c, volPhase[2].w * g ) );
+		r += a * v * pow( T, b ) * ph;
+	}
+	return r;
+}
+
 // the directional light the air at posView (height z) scatters toward the eye
 vec3 airSun( vec3 posView, vec3 dirView, float z )
 {
@@ -108,15 +131,65 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		vec3 to = normalize( cellDirTo );
 		float vis = ( volFarMode != 0 && !cellInterior ) ? airFarVis( posView )
 			: ( !cellInterior && volCsm && ( volRed & 8 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
+		if ( volMs.x > 0.0 )
+			return cellDirColor * airMsSum( vis, airTup( z, to.z ), dot( to, cellWorldDir( dirView ) ) );
 		return cellDirColor * vis * airTup( z, to.z ) * volPhasePi( dot( to, cellWorldDir( dirView ) ) );
 	}
 	if ( fogSun.w > 0.0 ) {
 		// Lookdev without the cell's lights: its sun (view space)
 		float vis = volFarMode != 0 ? airFarVis( posView ) : ( volCsm && ( volRed & 8 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
 		float mu = dot( fogView.xyz, fogSun.xyz ) / length( fogView.xyz );
+		if ( volMs.x > 0.0 )
+			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTup( z, mu ), dot( dirView, fogSun.xyz ) );
 		return fogSunColour.rgb * fogSun.w * vis * airTup( z, mu ) * volPhasePi( dot( dirView, fogSun.xyz ) );
 	}
 	return vec3( 0.0 );
+}
+
+// the next light of the merged lists, ascending and once each (the flat loop's order); -1 at the end
+int volSurfNext( inout ivec4 p, ivec4 e )
+{
+	int best = 0x7fffffff;
+	for ( int k = 0; k < 4; k++ )
+		if ( p[k] < e[k] )
+			best = min( best, texelFetch( cellCluster, p[k] ).r );
+	if ( best == 0x7fffffff )
+		return -1;
+	for ( int k = 0; k < 4; k++ )
+		if ( p[k] < e[k] && texelFetch( cellCluster, p[k] ).r == best )
+			p[k]++;
+	return best;
+}
+
+/* lane GAPLOOK1 (LIGHTSYS-4): the surface lists of the column's centre ray over [sA, sB] (world P, Dw per game unit):
+ * its tile, the 1-4 slices its view depth spans. False: walk every light (off, a flat-loop cluster, more slices). */
+bool volSurfBegin( vec3 P, vec3 Dw, float sA, float sB, out ivec4 p, out ivec4 e )
+{
+	p = ivec4( 0 );
+	e = ivec4( 0 );
+	if ( !volSurfClusters || !cellClusterOn || any( notEqual( volLightShift, vec3( 0.0 ) ) ) )
+		return false;
+	ivec3 d = ivec3( cellClusterDims.xyz + 0.5 );
+	ivec2 t = clamp( ivec2( floor( ( floor( gl_FragCoord.xy ) + 0.5 ) * volSurfPx / cellClusterDims.w ) ), ivec2( 0 ), d.xy - 1 );
+	float za = dot( cellClusterDepth.xyz, P + Dw * sA ) + cellClusterDepth.w;
+	float zb = dot( cellClusterDepth.xyz, P + Dw * sB ) + cellClusterDepth.w;
+	int s0 = clamp( int( floor( ( log( max( min( za, zb ) * 0.999, 1e-6 ) ) - cellClusterLog.x ) * cellClusterLog.y ) ), 0, d.z - 1 );
+	int s1 = clamp( int( floor( ( log( max( max( za, zb ) * 1.001, 1e-6 ) ) - cellClusterLog.x ) * cellClusterLog.y ) ), 0, d.z - 1 );
+	if ( s1 - s0 > 3 )
+		return false;
+	for ( int k = 0; k < 4; k++ ) {
+		if ( s0 + k > s1 )
+			break;
+		int c = ( ( s0 + k ) * d.y + t.y ) * d.x + t.x;
+		int n = texelFetch( cellCluster, 2 * c + 1 ).r;
+		if ( n < 0 )
+			return false;
+		p[k] = cellClusterBase + texelFetch( cellCluster, 2 * c ).r;
+		e[k] = p[k] + n;
+	}
+	if ( volSurfRed )
+		volSurfNext( p, e );
+	return true;
 }
 
 // the rest of the light at posView (height z), once a froxel: the placed lights (returned) and the sky's share, the
@@ -136,14 +209,18 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 		// clustered: only the lights whose sphere can reach this cluster, in the same ascending order (a light left out
 		// would add exactly nothing below: d >= radius)
 		int n = cellLightCount, base = -1;
-		if ( volClusterDims.x > 0 ) {
+		ivec4 sp, se;
+		bool surf = volSurfBegin( P, Dw, sA, sB, sp, se );
+		if ( !surf && volClusterDims.x > 0 ) {
 			ivec2 c = ivec2( gl_FragCoord.xy ) / volClusterDims.z;
 			int ci = ( ( volLayer / volClusterDims.w ) * volClusterDims.y + c.y ) * volClusterDims.x + c.x;
 			base = texelFetch( volClusters, 2 * ci ).r;
 			n = texelFetch( volClusters, 2 * ci + 1 ).r;
 		}
-		for ( int j = 0; j < n; j++ ) {
-			int i = base < 0 ? j : texelFetch( volClusters, base + j ).r;
+		for ( int j = 0; surf || j < n; j++ ) {
+			int i = surf ? volSurfNext( sp, se ) : base < 0 ? j : texelFetch( volClusters, base + j ).r;
+			if ( i < 0 )
+				break;
 			vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 			if ( ( volRed & 262144 ) != 0 ) {	// red lightmid: the light at the slice's middle only (a small light
 				float d = length( t0.xyz - Pl );	// between two middles adds nothing)
@@ -236,14 +313,18 @@ void airLightsQ( vec3 posView, vec3 dirView, float z, float sA, float sB, int ne
 	vec3 Dw = cellWorldPos( dirView * ( 1.0 / fogDistScale ) ) - cellWorldPos( vec3( 0.0 ) );
 	vec3 Pl = P - volLightShift;
 	int n = cellLightCount, base = -1;
-	if ( volClusterDims.x > 0 ) {
+	ivec4 sp, se;
+	bool surf = volSurfBegin( P, Dw, sA, sB, sp, se );
+	if ( !surf && volClusterDims.x > 0 ) {
 		ivec2 c = ivec2( gl_FragCoord.xy ) / volClusterDims.z;
 		int ci = ( ( volLayer / volClusterDims.w ) * volClusterDims.y + c.y ) * volClusterDims.x + c.x;
 		base = texelFetch( volClusters, 2 * ci ).r;
 		n = texelFetch( volClusters, 2 * ci + 1 ).r;
 	}
-	for ( int j = 0; j < n; j++ ) {
-		int i = base < 0 ? j : texelFetch( volClusters, base + j ).r;
+	for ( int j = 0; surf || j < n; j++ ) {
+		int i = surf ? volSurfNext( sp, se ) : base < 0 ? j : texelFetch( volClusters, base + j ).r;
+		if ( i < 0 )
+			break;
 		vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 		vec3 m = Pl - t0.xyz;
 		float qa = dot( Dw, Dw ), qb = dot( Dw, m ), qc = dot( m, m ) - t0.w * t0.w;

@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"	// lane SUNCELL1
 #include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
+#include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 
 #include <QElapsedTimer>
@@ -56,6 +57,8 @@ constexpr int kBloomUnit = WwCellUnit::Bloom;		// lane BLOOM1: the imagespace bl
 constexpr int kShadowUnit = WwCellUnit::Shadow;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
 constexpr int kShadowSlots = 16;	// shadowed lights at once, the nearest the camera
 constexpr int kShadowFace = 512;	// texels a cube face edge (the game's 2048 paraboloid's centre texel at 1024)
+// lane GAPLOOK1 (LIGHTSYS-3): the budget's distance fade, Godot's Light3D shadow fade (40 to 50 m) at 70 units a metre
+constexpr float kShadowFadeBegin = 2800.0f, kShadowFadeEnd = 3500.0f;
 constexpr int kAmbientSlots = 16;	// lane AMBO2: Ambient Only volumes a cell (Fallout4.esm's most in one cell: 5, measured)
 
 //! one bloom per document: the blurred bright pass, rgb floats, w x h (rows bottom-up, as read back)
@@ -266,6 +269,9 @@ struct Gpu
 	int shStamp = 1, bufShStamp = 0;
 	int shKick = 0;	// lane DOORLIVE1: a moving caster (a live door) re-renders every held slot
 	int shFace = 0;	// lane LAMPSHADOW1: the face edge shTex was made at (the tier's)
+	float shFade[kShadowSlots];	// lane GAPLOOK1: each slot's shadow strength under the budget (1 without it)
+	int shBudget = 0;
+	float shCut = 0.0f;
 	// lane LAMPSHADOW1: the store (a 2D array in blocks of 3 face layers), its maps by light, the movers
 	struct LsEntry
 	{
@@ -298,7 +304,11 @@ struct Gpu
 	std::vector<float> flickBase, flickLive;
 	std::uint64_t flickStamp = 0;
 	bool flickOn = false;
-	Gpu() { std::fill( shSlot, shSlot + kShadowSlots, -1 ); }
+	Gpu()
+	{
+		std::fill( shSlot, shSlot + kShadowSlots, -1 );
+		std::fill( shFade, shFade + kShadowSlots, 1.0f );
+	}
 };
 QHash<const void *, Gpu> & gpus()
 {
@@ -1312,6 +1322,11 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1i( "cellShadow", kShadowUnit );
 	prog->uni1b( "cellShadowOn", shadowDraw );
 	prog->uni1f( "cellShadowTexel", 2.0f / float( g.shFace > 0 ? g.shFace : kShadowFace ) );	// lane LAMPSHADOW1: the tier's face
+	// lane GAPLOOK1 (LIGHTSYS-3): the budget's per-slot strengths; off, the shader keeps its old return
+	const bool fadeOn = shadowDraw && g.shBudget > 0;
+	prog->uni1b( "cellShadowFadeOn", fadeOn );
+	if ( fadeOn && prog->uniLocation( "cellShadowFade[0]" ) >= 0 )
+		r->fn->glUniform1fv( prog->uniLocation( "cellShadowFade[0]" ), kShadowSlots, g.shFade );
 	prog->uni1i( "cellIsLut", kLutUnit );
 	prog->uni1b( "cellIsOn", isDraw );
 	prog->uni1b( "cellIsLinear", isDraw && wwCellHdrActive() );	// lane HDR1: write linear light, tone-mapped once
@@ -2645,15 +2660,58 @@ void wwCellShadowPass( Scene * scene )
 	}
 	// the wanted set: the shadow lights whose reach comes nearest the camera
 	std::vector<std::pair<float, int>> cand;
-	for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
-		const WwCellLight & l = L->lights.at( i );
-		if ( !l.shadow )
-			continue;
-		const float dx = l.pos[0] - cam[0], dy = l.pos[1] - cam[1], dz = l.pos[2] - cam[2];
-		cand.emplace_back( std::max( 0.0f, std::sqrt( dx * dx + dy * dy + dz * dz ) - l.radius ), int( i ) );
+	const int budget = wwCellShadowBudget();	// lane GAPLOOK1 (LIGHTSYS-3): 0 = the nearest, as before
+	std::vector<float> fadeOf, rawOf;
+	if ( budget > 0 ) {
+		const bool worst = wwCellShadowBudgetRedWorst();
+		std::vector<char> wasHeld( size_t( L->lights.size() ), 0 );
+		for ( int k = 0; k < kShadowSlots; k++ )
+			if ( g.shSlot[k] >= 0 && g.shSlot[k] < L->lights.size() )
+				wasHeld[size_t( g.shSlot[k] )] = 1;
+		fadeOf.assign( size_t( L->lights.size() ), 0.0f );
+		rawOf.assign( size_t( L->lights.size() ), 0.0f );
+		for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
+			const WwCellLight & l = L->lights.at( i );
+			if ( !l.shadow )
+				continue;
+			const float dx = l.pos[0] - cam[0], dy = l.pos[1] - cam[1], dz = l.pos[2] - cam[2];
+			const float d = std::sqrt( dx * dx + dy * dy + dz * dz );
+			const float t = std::clamp( ( d - kShadowFadeBegin ) / ( kShadowFadeEnd - kShadowFadeBegin ), 0.0f, 1.0f );
+			const float dfade = 1.0f - t * t * ( 3.0f - 2.0f * t );
+			if ( dfade <= 0.0f )
+				continue;	// faded out: takes no slot
+			const float lum = 0.2126f * l.color[0] + 0.7152f * l.color[1] + 0.0722f * l.color[2];
+			const float raw = std::max( lum, 1e-6f ) * l.radius / std::max( d, 1.0f ) * dfade;
+			fadeOf[size_t( i )] = dfade;
+			rawOf[size_t( i )] = raw;
+			const float eff = raw * ( wasHeld[size_t( i )] ? 1.2f : 1.0f );	// hysteresis: a holder needs beating by 20 %
+			cand.emplace_back( worst ? eff : -eff, int( i ) );
+		}
+	} else {
+		for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
+			const WwCellLight & l = L->lights.at( i );
+			if ( !l.shadow )
+				continue;
+			const float dx = l.pos[0] - cam[0], dy = l.pos[1] - cam[1], dz = l.pos[2] - cam[2];
+			cand.emplace_back( std::max( 0.0f, std::sqrt( dx * dx + dy * dy + dz * dz ) - l.radius ), int( i ) );
+		}
 	}
-	const int want = std::min( int( cand.size() ), kShadowSlots );
+	const int want = std::min( int( cand.size() ), budget > 0 ? budget : kShadowSlots );
 	std::partial_sort( cand.begin(), cand.begin() + want, cand.end() );
+	g.shBudget = budget;
+	g.shCut = 0.0f;
+	if ( budget > 0 ) {
+		// the cut: the best raw score left out; a kept light fades in over 1.2..1.5 x it (past the hysteresis, so
+		// neither the light leaving nor the one taking its slot pops)
+		for ( size_t k = size_t( want ); k < cand.size(); k++ )
+			g.shCut = std::max( g.shCut, rawOf[size_t( cand[k].second )] );
+		if ( g.shCut > 0.0f && !wwCellShadowBudgetRedWorst() )
+			for ( int k = 0; k < want; k++ ) {
+				const size_t li = size_t( cand[size_t( k )].second );
+				const float t = std::clamp( ( rawOf[li] / g.shCut - 1.2f ) / 0.3f, 0.0f, 1.0f );
+				fadeOf[li] *= t * t * ( 3.0f - 2.0f * t );
+			}
+	}
 	std::vector<char> wanted( size_t( L->lights.size() ), 0 ), held( size_t( L->lights.size() ), 0 );
 	for ( int i = 0; i < want; i++ )
 		wanted[size_t( cand[size_t( i )].second )] = 1;
@@ -2693,6 +2751,8 @@ void wwCellShadowPass( Scene * scene )
 	}
 	if ( changed || !dirty.empty() )
 		g.shStamp++;
+	for ( int k = 0; k < kShadowSlots; k++ )	// lane GAPLOOK1: the strengths follow the camera every pass
+		g.shFade[k] = budget > 0 && g.shSlot[k] >= 0 && size_t( g.shSlot[k] ) < fadeOf.size() ? fadeOf[size_t( g.shSlot[k] )] : 1.0f;
 	if ( wwCellLampShadowTier() >= 0 ) {
 		s.shadowLast = QStringLiteral( "on shadowLights=%1 face=%2 (lamp)" ).arg( cand.size() ).arg( face );
 		lampShadowPass( scene, g, *L, dirty, cam );	// lane LAMPSHADOW1: stored maps, movers redrawn on top
@@ -2890,6 +2950,14 @@ QString wwCellShadowEcho( Scene * scene )
 	for ( int k = 0; k < kShadowSlots; k++ )
 		used += g.shSlot[k] >= 0 ? 1 : 0;
 	o += QStringLiteral( " slots=%1/%2" ).arg( used ).arg( kShadowSlots );
+	if ( g.shBudget > 0 ) {	// lane GAPLOOK1: the budget, its cut score and the strengths it gives the held slots
+		QString f;
+		for ( int k = 0; k < kShadowSlots; k++ )
+			if ( g.shSlot[k] >= 0 )
+				f += QStringLiteral( "%1%2" ).arg( f.isEmpty() ? QString() : QStringLiteral( "," ) ).arg( double( g.shFade[k] ), 0, 'f', 3 );
+		o += QStringLiteral( " budget=%1 cut=%2 fade=%3%4" ).arg( g.shBudget ).arg( double( g.shCut ), 0, 'g', 4 )
+			.arg( f.isEmpty() ? QStringLiteral( "-" ) : f ).arg( wwCellShadowBudgetRedWorst() ? QStringLiteral( " RED=worst" ) : QString() );
+	}
 	// the gate's three: position, radius, kind, near clip, direction (a hemisphere's plane)
 	for ( int k = 0; k < 3; k++ ) {
 		const int i = g.shSlot[k];
@@ -3570,6 +3638,8 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 			prog->uni1i( "cellAoEarly", early );
 			prog->uni1b( "cellAoOn", false );
 			prog->uni1b( "cellAoDecalOn", false );	// lane AODECAL1
+			if ( prog->uniLocation( "cellCtOn" ) >= 0 )
+				prog->uni1b( "cellCtOn", false );	// lane GAPLOOK1: this pass writes the depth C8 reads
 		}
 		return;
 	}
@@ -3603,6 +3673,22 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 			int dvp[4];
 			wwDrawViewport( dvp );
 			prog->uni4f_l( prog->uniLocation( "cellAoDecalRect" ), FloatVector4( float( dvp[0] ), float( dvp[1] ), 0.0f, 0.0f ) );
+		}
+	}
+	// lane GAPLOOK1 (C8): the lamps' contact march reads the shared opaque pass (opaque draws, perspective views only)
+	if ( prog->uniLocation( "cellCtOn" ) >= 0 ) {
+		const auto & pm = r->globalUniforms->projectionMatrix;
+		const bool ctOn = wwLookOn( WwLook::ContactLocal ) && g.ready && g.doc == scene->nifModel && g.gbuf.tex
+			&& ( !wwDrawBlend() || decalProg ) && pm[3][3] != 1.0f;
+		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::ContactGbuf ) );
+		r->fn->glBindTexture( GL_TEXTURE_2D, ctOn ? g.gbuf.tex : 0 );
+		r->fn->glActiveTexture( GLenum( prevActive ) );
+		prog->uni1i( "cellCtGbuf", WwCellUnit::ContactGbuf );
+		prog->uni1b( "cellCtOn", ctOn );
+		if ( ctOn ) {
+			prog->uni4f( "cellCtProj", FloatVector4( pm[0][0], pm[1][1], pm[2][0], pm[2][1] ) );
+			prog->uni4f( "cellCtRect", FloatVector4( 0.0f, 0.0f, float( g.gbuf.w ), float( g.gbuf.h ) ) );
+			prog->uni1i( "cellCtRed", wwEnvStr( "WW_CELL_CONTACT_LOCAL_RED" ) == QLatin1String( "away" ) ? 1 : 0 );	// red: march away from the light
 		}
 	}
 	/* lane PERF1: the half-res GI, read by the opaque draws (and the decals on them), like the obscurance; the

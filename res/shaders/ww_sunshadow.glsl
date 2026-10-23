@@ -51,6 +51,7 @@ uniform vec4 ussTerrNearXform;		// the near window: u = x X.x + X.y, v = y X.z +
 uniform vec4 ussTerrPen;		// x the disc penumbra on, y the far texel, z tan(elev - sun radius), w tan(elev + sun radius)
 uniform vec4 ussTerrBias;		// x FO4CS's slope bias on, y max(sin elev, sin 1 deg), z the strength (low sun, moon), w the near texel
 uniform vec2 ussDim;			// the ambient / specular dimming in terrain shadow (FO4CS 0.5 / 0.5; 0 off)
+uniform int ussPbrDim;			// lane GAPLOOK1: 1 the PBR path dims its ambient + environment too, 2 red (the sun too)
 float ussLastTerr = 1.0;		// the terrain visibility of the last composition (cell_lights.glsl dims by it)
 
 // spec 2.5: the 16 Poisson taps on [0,1]^2, used as (p - 0.5) x 6 texels

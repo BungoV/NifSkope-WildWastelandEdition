@@ -1,0 +1,3 @@
+# lane GAPLOOK1 (C7): the contact far tier's depth reduction (shadowset.cpp selects it by name).
+
+shaders cell_ao.vert ww_contact_farmin.frag

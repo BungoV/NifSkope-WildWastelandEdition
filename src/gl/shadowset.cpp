@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
+#include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
 #include "gl/gametaa.h"
 #include "gl/cellssr.h"		// the cell view's shared opaque pass (contact shadows read its depth)
 #include "gl/glnode.h"
@@ -171,6 +172,9 @@ struct Contact
 	bool valid = false;
 	const void * doc = nullptr;
 	QString last = QStringLiteral( "off" );
+	// lane GAPLOOK1 (C7): the far tier's coarse depth (RGBA32F) and coarse mask (R8)
+	unsigned int farDepth = 0, farDepthFbo = 0, farMask = 0, farMaskFbo = 0;
+	int fw = 0, fh = 0;
 };
 
 struct SetState
@@ -956,6 +960,10 @@ float terrStrength( const double toSun[3], const float disc[3], double gameDay, 
 		const int idx = int( std::floor( std::max( gameDay, 0.0 ) / 3.0 ) ) % 8;
 		const double ph = std::fabs( double( idx ) - 4.0 ) / 4.0;
 		cutDeg = lowSun ? 1.0 : 0.05;
+		// lane GAPLOOK1 (TERRSHADOWLEFT): the climate's moons, their fade-in alpha and the sky's clearness (FO4CS's
+		// phase^3 x moonAlpha x skyClear). Red WW_SHADOW_MOONSKY_RED=cloudy inverts the clearness
+		if ( wwLookOn( WwLook::TerrMoonSky ) )
+			return 0.15f * wwLookdevMoonShadowTerm( wwEnvStr( "WW_SHADOW_MOONSKY_RED" ) == QLatin1String( "cloudy" ), nullptr );
 		return float( 0.15 * ph * ph * ph );
 	}
 	if ( !lowSun )
@@ -1466,6 +1474,102 @@ bool wwContactShadowWantsTargets( Scene * scene )
 	return scene && ss().contact > 0 && wwLookdevActive() && !scene->selecting;
 }
 
+/* lane GAPLOOK1 (C7): FO4CS's far tier (res/Effects/ScreenSpaceShadows/Far*.hlsl): the depth min-reduced by 4, the
+ * same march over it (96 samples = 384 full pixels further, a 250-unit thickness floor for crowns), composed into
+ * the near mask by min through a depth-aware upsample (2 % of the view depth). Returns the echo part. */
+QString contactFarPass( Renderer * r, Contact & c, unsigned int gbuf, int W, int H, int mw, int mh, int scale,
+	double ndcX, double ndcY, double lz, double cw, const double lv[3], bool par, bool earlyExit )
+{
+	auto fn = r->fn;
+	const int div = 4, fw = ( W + div - 1 ) / div, fh = ( H + div - 1 ) / div;
+	auto makeTarget = [fn]( unsigned int & tex, unsigned int & fbo, int w, int h, GLenum ifmt, GLenum fmt, GLenum type ) {
+		if ( !tex ) {
+			fn->glGenTextures( 1, &tex );
+			fn->glGenFramebuffers( 1, &fbo );
+		}
+		fn->glBindTexture( GL_TEXTURE_2D, tex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, ifmt, w, h, 0, fmt, type, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		fn->glBindFramebuffer( GL_FRAMEBUFFER, fbo );
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0 );
+	};
+	if ( c.fw != fw || c.fh != fh || !c.farDepth ) {
+		makeTarget( c.farDepth, c.farDepthFbo, fw, fh, GL_RGBA32F, GL_RGBA, GL_FLOAT );
+		makeTarget( c.farMask, c.farMaskFbo, fw, fh, GL_R8, GL_RED, GL_UNSIGNED_BYTE );
+		c.fw = fw;
+		c.fh = fh;
+	}
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
+	// 1: the min reduction
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, c.farDepthFbo );
+	fn->glViewport( 0, 0, fw, fh );
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "ww_contact_farmin.prog" );
+	if ( !prog )
+		return QStringLiteral( "far=refused(ww_contact_farmin.prog)" );
+	fn->glActiveTexture( GL_TEXTURE0 );
+	fn->glBindTexture( GL_TEXTURE_2D, gbuf );
+	prog->uni1i( "gbuf", 0 );
+	fn->glUniform2i( prog->uniLocation( "fullSize" ), W, H );
+	prog->uni1i( "divisor", div );
+	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	r->stopProgram();
+	// 2: the march over it, in coarse pixels
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, c.farMaskFbo );
+	prog = r->useProgram( "ww_contact.prog" );
+	if ( !prog )
+		return QStringLiteral( "far=refused(ww_contact.prog)" );
+	fn->glBindTexture( GL_TEXTURE_2D, c.farDepth );
+	prog->uni1i( "gbuf", 0 );
+	fn->glUniform2i( prog->uniLocation( "fullSize" ), fw, fh );
+	prog->uni1f( "maskScale", 1.0f );
+	prog->uni4f( "lightCoord", FloatVector4( float( ( ndcX * 0.5 + 0.5 ) * fw ), float( ( ndcY * 0.5 + 0.5 ) * fh ), float( lz ), cw > 0 ? 1.0f : -1.0f ) );
+	prog->uni4f( "sssParams", FloatVector4( par ? 0.005f : 0.02f, 0.02f, 4.0f, 96.0f ) );
+	prog->uni1f( "sssFloor", 250.0f );
+	prog->uni1i( "sssPar", par ? 1 : 0 );
+	prog->uni1i( "sssExit", earlyExit ? 1 : 0 );
+	prog->uni3f( "sssLightView", float( lv[0] ), float( lv[1] ), float( lv[2] ) );
+	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	r->stopProgram();
+	// 3: the depth-aware resolve into the near mask, by min. Red WW_CELL_CONTACT_FAR_RED=halo: no depth agreement
+	const bool halo = wwEnvStr( "WW_CELL_CONTACT_FAR_RED" ) == QLatin1String( "halo" );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, c.fbo );
+	fn->glViewport( 0, 0, mw, mh );
+	prog = r->useProgram( "ww_contact_farcomp.prog" );
+	if ( !prog )
+		return QStringLiteral( "far=refused(ww_contact_farcomp.prog)" );
+	fn->glBindTexture( GL_TEXTURE_2D, gbuf );
+	fn->glActiveTexture( GL_TEXTURE1 );
+	fn->glBindTexture( GL_TEXTURE_2D, c.farDepth );
+	fn->glActiveTexture( GL_TEXTURE2 );
+	fn->glBindTexture( GL_TEXTURE_2D, c.farMask );
+	prog->uni1i( "gbuf", 0 );
+	prog->uni1i( "farDepth", 1 );
+	prog->uni1i( "farMask", 2 );
+	fn->glUniform2i( prog->uniLocation( "fullSize" ), W, H );
+	fn->glUniform2i( prog->uniLocation( "coarseSize" ), fw, fh );
+	prog->uni1f( "maskScale", float( scale ) );
+	prog->uni1i( "divisor", div );
+	prog->uni1f( "tolerance", halo ? 1e6f : 0.02f );
+	fn->glEnable( GL_BLEND );
+	fn->glBlendEquation( GL_MIN );
+	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	fn->glBlendEquation( GL_FUNC_ADD );
+	fn->glDisable( GL_BLEND );
+	r->stopProgram();
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GL_TEXTURE1 );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GL_TEXTURE0 );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	return QStringLiteral( "far=%1x%2%3" ).arg( fw ).arg( fh ).arg( halo ? QStringLiteral( "(red halo)" ) : QString() );
+}
+
 void wwContactShadowPass( Scene * scene )
 {
 	SetState & s = ss();
@@ -1597,6 +1701,8 @@ void wwContactShadowPass( Scene * scene )
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	r->stopProgram();
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	const QString far = wwLookOn( WwLook::ContactFar )
+		? contactFarPass( r, c, g.gbuf, W, H, mw, mh, p.scale, cx / cw, cy / cw, lz, cw, lv, par, earlyExit ) : QStringLiteral( "far=off" );
 	timerEnd( fn, s.tmContact );
 
 	fn->glActiveTexture( GLenum( prevActive ) );
@@ -1616,7 +1722,8 @@ void wwContactShadowPass( Scene * scene )
 	c.fullH = H;
 	c.last = QStringLiteral( "on mask=%1x%2 full=%3x%4 samples=%5 light=%6,%7,%8,%9 gpu_ms=%10 mem_mb=%11 par=%12 exit=%13" ).arg( mw ).arg( mh )
 		.arg( W ).arg( H ).arg( p.samples ).arg( lx, 0, 'f', 1 ).arg( ly, 0, 'f', 1 ).arg( lz, 0, 'f', 6 ).arg( cw > 0 ? 1 : -1 )
-		.arg( s.tmContact.ms, 0, 'f', 4 ).arg( double( mw ) * mh / ( 1024.0 * 1024.0 ), 0, 'f', 2 ).arg( par ? 1 : 0 ).arg( earlyExit ? 1 : 0 );
+		.arg( s.tmContact.ms, 0, 'f', 4 ).arg( double( mw ) * mh / ( 1024.0 * 1024.0 ), 0, 'f', 2 ).arg( par ? 1 : 0 ).arg( earlyExit ? 1 : 0 )
+		+ QStringLiteral( " " ) + far;
 }
 
 bool wwShadowSetActive( Scene * scene )
@@ -1703,6 +1810,8 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 		// FO4CS: ambient and specular dimmed to 0.5 in full terrain shadow, faded with the strength
 		const float dim = wwShadowPar( WwParDim ) ? 0.5f * t.strength : 0.0f;
 		prog->uni2f( "ussDim", dim, dim );
+		// lane GAPLOOK1 (TERRSHADOWLEFT): the PBR path's ambient and environment dimmed the same way (red all: the sun too)
+		prog->uni1i( "ussPbrDim", !wwLookOn( WwLook::TerrPbrDim ) ? 0 : wwEnvStr( "WW_SHADOW_PBRDIM_RED" ) == QLatin1String( "all" ) ? 2 : 1 );
 		// world from view: Q = R^T (p - t) / sc
 		const Transform & vt = scene->view;
 		const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;

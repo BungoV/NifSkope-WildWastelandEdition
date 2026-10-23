@@ -593,6 +593,16 @@ void main()
 			outSpec += cube * cube * envReflection * Espec * s.ao;
 		}
 	}
+#ifdef WW_SUNSHADOW
+	if ( ussPbrDim != 0 ) {
+		// lane GAPLOOK1 (TERRSHADOWLEFT): FO4CS's terrain-shadow dimming of the ambient and the environment (red all: the sun too)
+		vec3 ad;
+		float sd;
+		ussTerrainDim( ad, sd );
+		outDiff = ( ussPbrDim == 2 ? preAmbDiff * ad : preAmbDiff ) + ( outDiff - preAmbDiff ) * ad;
+		outSpec = ( ussPbrDim == 2 ? preAmbSpec * sd : preAmbSpec ) + ( outSpec - preAmbSpec ) * sd;
+	}
+#endif
 #ifdef WW_CELLLIGHTS
 	/* lane PRTPGI: the cell's own lights through this BRDF, irradiance colour x curve x PI (the
 	 * sun's convention above: a white Lambert surface reads what the legacy cell path reads), and

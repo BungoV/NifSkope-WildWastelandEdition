@@ -2,6 +2,7 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celllights.h"
+#include "gl/celllooks.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
@@ -72,6 +73,7 @@ struct BloomState
 	// this frame
 	bool replacing = false;
 	GLuint top = 0;
+	bool topMips = false;	// lane GAPLOOK1: Final grew the top's mips this frame
 	int w = 0, h = 0;
 	float finalWeight = 0.0f, radius = 1.0f, dispersion = 0.0f;
 	QString last = QStringLiteral( "vanilla" ), said;
@@ -780,8 +782,18 @@ void wwCellBloomFinal( Renderer * r, int unit )
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, s.top );
+	/* lane GAPLOOK1 (BLOOMMIP): the top's own mips, so the composite picks a wider blur per pixel; w = 1 the fog's
+	 * gain picks it, -1 the red (lod 2 everywhere), 0 off (the base level only, today's bits) */
+	float perPixel = 0.0f;
+	if ( wwLookOn( WwLook::BloomMip ) ) {
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 3 );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+		fn->glGenerateMipmap( GL_TEXTURE_2D );
+		s.topMips = true;
+		perPixel = wwEnvStr( "WW_CELL_BLOOM_PERPIX_RED" ) == QLatin1String( "wide" ) ? -1.0f : 1.0f;
+	}
 	fn->glActiveTexture( GLenum( prevActive ) );
-	prog->uni4f( "cellIsFoBloomParams", FloatVector4( s.radius, s.finalWeight, s.dispersion, 0.0f ) );
+	prog->uni4f( "cellIsFoBloomParams", FloatVector4( s.radius, s.finalWeight, s.dispersion, perPixel ) );
 	prog->uni2f( "cellIsFoBloomFrame", float( s.w ), float( s.h ) );
 }
 
@@ -793,9 +805,16 @@ void wwCellBloomDone( Renderer * r, int unit )
 		GLint prevActive = 0;
 		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
+		if ( s.topMips && s.top ) {
+			// the chain renders into the top again next frame: back to its one level
+			fn->glBindTexture( GL_TEXTURE_2D, s.top );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+		}
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 		fn->glActiveTexture( GLenum( prevActive ) );
 	}
+	s.topMips = false;
 	s.replacing = false;
 	s.top = 0;
 }
