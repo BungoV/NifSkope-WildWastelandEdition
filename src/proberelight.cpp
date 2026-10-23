@@ -1905,6 +1905,22 @@ int probeRelightCli( const QStringList & args )
 		gate( QStringLiteral( "DRG1 round trip" ), same, QStringLiteral( "%1 door triangles (%2 masked), %3 panes read back equal" )
 			.arg( b.tris.size() / 9 ).arg( b.amask.tris.size() ).arg( b.glass.size() / 9 ) );
 	}
+	{	// lane GAPFIX1: a door mask scaled by vertex alpha writes DRG2 and reads its corner scales back
+		ProbeSoup sc = S.soup;
+		for ( size_t i = 0; i < sc.doorGeom.amask.tris.size(); i++ )
+			for ( int k = 0; k < 3; k++ )
+				sc.doorGeom.amask.tris[i].as[k] = 0.25f + 0.25f * float( ( i + size_t( k ) ) % 3 );
+		const QString scPath = out.filePath( QStringLiteral( "soup_scaled.psp" ) );
+		ProbeSoup back;
+		bool same = !sc.doorGeom.amask.tris.empty() && probeSoupWrite( scPath, sc, &err ) && probeSoupRead( scPath, &back, &err )
+			&& back.doorGeom.amask.tris.size() == sc.doorGeom.amask.tris.size();
+		for ( size_t i = 0; same && i < sc.doorGeom.amask.tris.size(); i++ )
+			same = std::memcmp( sc.doorGeom.amask.tris[i].as, back.doorGeom.amask.tris[i].as, 12 ) == 0;
+		QFile a( scPath );
+		const bool tag = a.open( QIODevice::ReadOnly ) && a.readAll().contains( QByteArray( "DRG2", 4 ) );
+		gate( QStringLiteral( "DRG2 round trip" ), same && tag, QStringLiteral( "%1 scaled door mask triangles read back with their corner scales, tail %2" )
+			.arg( back.doorGeom.amask.tris.size() ).arg( tag ? "DRG2" : "not DRG2" ) );
+	}
 	// ---- place and bake (the doors open: the bake never sees doorGeom)
 	ps.minX = -16;
 	ps.minY = -16;

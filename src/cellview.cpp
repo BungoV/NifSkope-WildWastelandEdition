@@ -2837,7 +2837,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	// lane DOORLIVE1: the live door is copied in whole after the weld (its own nodes move); the weld leaves it out
 	const quint32 doorLiveRef = wwDoorLiveRef();
 	int doorLiveShapes = 0;
-	int dgShapes = 0, dgMasked = 0, dgGlass = 0, dgGlassUnread = 0, dgDropped = 0;
+	int dgShapes = 0, dgMasked = 0, dgGlass = 0, dgGlassUnread = 0, dgDropped = 0, dgScaled = 0, dgTrisScaled = 0;
 	// Measurement pin only: WW_CELL_ALPHATEST_FOLIAGE=keep puts landscape\ alpha-tested cards in the soup with their mask.
 	const bool foliageKeep = wwEnv( "WW_CELL_ALPHATEST_FOLIAGE" ).trimmed() == "keep";
 	/* lane EMISSIVEGI1: glowing surfaces light the bake (probeemit.h). WW_CELL_EMISSIVE_PIN=off (gates only, never
@@ -3342,6 +3342,29 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			const size_t nv = s.geom.pos.size() / 3;
 			if ( !nv || s.geom.tris.empty() )
 				continue;
+			/* lane ALPHATEST2: each vertex's alpha-test scale = its vertex alpha x the material's fAlpha (empty = all 1). The
+			 * vertex alpha counts as the renderer counts it (src/gl/renderer.cpp: vertexColorOverride[3] = 1 unless SLSF1
+			 * Vertex_Alpha): a colour stream drawn (the .lodo W4 rule), the Vertex_Alpha bit, and not a tree's wind weight.
+			 * Returns the smallest scale. Lane GAPFIX1: the soup and the doors' masks both take it. */
+			auto alphaScaleOf = [&]( std::vector<float> & sc ) -> float {
+				sc.clear();
+				if ( alphaPin || alphaNoScale || !s.nearFacts.alphaTest )
+					return 1.0f;
+				const bool va = s.geom.rgba.size() == nv * 4 && s.geom.vertexAlpha && !s.nearFacts.treeAnim;
+				const float ma = std::clamp( s.matAlpha, 0.0f, 1.0f );
+				if ( !va && ma == 1.0f )
+					return 1.0f;
+				sc.assign( nv, ma );
+				if ( va )
+					for ( size_t v = 0; v < nv; v++ )
+						sc[v] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f * ma;
+				float lo = 1.0f;
+				for ( float x : sc )
+					lo = std::min( lo, x );
+				if ( lo >= 1.0f )
+					sc.clear();
+				return lo;
+			};
 			/* THE PAINT ROW this shape takes: the swap row's CNAM for its original material, else
 			 * the base's own MODC (2026-10-01: the museum pickup's paint lives there, bungo's
 			 * "vertex paint"). Only a Greyscale_To_PaletteColor material takes one. */
@@ -3409,11 +3432,19 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				const bool glassy = s.nearFacts.alphaBlend;
 				int dMap = -1;
 				const quint8 dThr = s.nearFacts.alphaRef;
+				std::vector<float> dScale;   // lane GAPFIX1: the door's mask takes the vertex alpha too (as the soup's)
+				const float dScaleMin = glassy ? 1.0f : alphaScaleOf( dScale );
 				if ( !glassy && !alphaPin && s.nearFacts.alphaTest && s.geom.uv.size() >= nv * 2 ) {
 					const MaskInfo mi = maskOf( s.tex0 );
-					if ( mi.map >= 0 && mi.minA < int( dThr ) )
+					const bool scaleHole = mi.map != -1 && double( mi.minA ) * double( dScaleMin ) < double( dThr );
+					if ( mi.map >= 0 && ( mi.minA < int( dThr ) || scaleHole ) )
 						dMap = mi.map;
+					else if ( mi.map < -1 && scaleHole )
+						dMap = fullMaskOf( s.tex0 );
 				}
+				if ( dMap < 0 )
+					dScale.clear();
+				dgScaled += dScale.empty() ? 0 : 1;
 				dgShapes++;
 				dgMasked += dMap >= 0 ? 1 : 0;
 				dgGlass += glassy ? 1 : 0;
@@ -3468,7 +3499,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						for ( int k = 0; k < 3; k++ ) {
 							mt.uv[k * 2] = s.geom.uv[vi[k] * 2];
 							mt.uv[k * 2 + 1] = s.geom.uv[vi[k] * 2 + 1];
+							if ( !dScale.empty() )
+								mt.as[k] = dScale[vi[k]];
 						}
+						dgTrisScaled += mt.scaled() ? 1 : 0;
 						dg.amask.triOf.back() = int( dg.amask.tris.size() );
 						dg.amask.tris.push_back( mt );
 					}
@@ -3690,21 +3724,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					 * Vertex_Alpha): a colour stream drawn (the .lodo W4 rule), the Vertex_Alpha bit, and not a tree's
 					 * wind weight */
 					std::vector<float> amScale;
-					float amScaleMin = 1.0f;
-					if ( !alphaPin && !alphaNoScale && s.nearFacts.alphaTest ) {
-						const bool va = s.geom.rgba.size() == nv * 4 && s.geom.vertexAlpha && !s.nearFacts.treeAnim;
-						const float ma = std::clamp( s.matAlpha, 0.0f, 1.0f );
-						if ( va || ma != 1.0f ) {
-							amScale.assign( nv, ma );
-							if ( va )
-								for ( size_t v = 0; v < nv; v++ )
-									amScale[v] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f * ma;
-							for ( float x : amScale )
-								amScaleMin = std::min( amScaleMin, x );
-							if ( amScaleMin >= 1.0f )
-								amScale.clear();
-						}
-					}
+					const float amScaleMin = alphaScaleOf( amScale );
 					if ( !alphaPin && s.nearFacts.alphaTest && s.geom.uv.size() >= nv * 2 ) {
 						const MaskInfo mi = maskOf( s.tex0 );
 						// lane ALPHATEST2: a hole exists where map alpha x scale < threshold (the smallest scale is a corner's)
@@ -5097,7 +5117,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				t << "  probe soup door geometry: shapes " << dgShapes << " (alpha-tested with a hole " << dgMasked << ", blended = glass "
 				  << dgGlass << ", glass map unread " << dgGlassUnread << "), triangles " << int( probeSoup.doorGeom.door.size() )
 				  << " (masked " << int( probeSoup.doorGeom.amask.tris.size() ) << ", maps " << int( probeSoup.doorGeom.amask.maps.size() )
-				  << "), panes " << int( probeSoup.doorGeom.glassDoor.size() ) << ", dropped (door never tagged) " << dgDropped << "\n";
+				  << "), panes " << int( probeSoup.doorGeom.glassDoor.size() ) << ", dropped (door never tagged) " << dgDropped
+				  << "; vertex-alpha scaled shapes " << dgScaled << ", triangles " << dgTrisScaled << "\n";   // lane GAPFIX1
 			// lane EMISSIVEGI1: the glowing surfaces
 			t << "  probe soup emissive" << ( emitPin ? " PIN off (nothing glows)" : "" )
 			  << ( emitRed.isEmpty() ? "" : " RED " ) << emitRed.constData() << ": shapes glowing " << emShapes
