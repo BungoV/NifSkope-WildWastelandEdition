@@ -33,7 +33,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_lit_check import euler, fields, record, walk  # noqa: E402  (the plugin walk only)
-from cell_glow_check import NODES, apply, av_object, compose, nif_read  # noqa: E402  (the NIF header and nodes)
+from cell_glow_check import NODES, apply, av_object, compose, editor_marker, nif_read  # noqa: E402  (the NIF header and nodes)
 
 PLACED = (b'STAT', b'MSTT', b'ACTI', b'FURN', b'DOOR', b'MISC', b'CONT', b'FLOR', b'TERM', b'IDLM', b'LIGH')
 SHAPES = ('BSTriShape', 'BSSubIndexTriShape', 'BSMeshLODTriShape', 'BSDynamicTriShape')
@@ -108,9 +108,9 @@ def model_facts(path, data, swap=()):
     for i, rec in info.items():
         if 'sphere' not in rec or rec['nverts'] == 0:
             continue
-        xf, k, marker = rec['xf'], parent.get(i), rec['name'].lower().startswith('editormarker')
+        xf, k, marker = rec['xf'], parent.get(i), editor_marker(rec['name'])
         while k is not None:
-            marker |= info[k]['name'].lower().startswith('editormarker')
+            marker |= editor_marker(info[k]['name'])
             if k in parent:     # the root's own transform is the placement's in the game, never the file's
                 xf = compose(info[k]['xf'], xf)
             k = parent.get(k)

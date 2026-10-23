@@ -189,12 +189,12 @@ def model_shapes(data, model):
         # the chain to the root: hidden nodes and editor markers carry nothing. A placed model's ROOT (the
         # block with no parent) takes the reference's transform in the game: what the file stores on it is
         # never seen (lane MISS1, 2026-10-02), so the root's own transform is left out of the chain.
-        xf, k, skip = rec['xf'], parent.get(i), rec['name'].lower().startswith('editormarker') or rec['flags'] & 1
+        xf, k, skip = rec['xf'], parent.get(i), 'editormarker' in rec['name'].lower() or rec['flags'] & 1
         if k is None:
             xf = (np.eye(3), np.zeros(3), 1.0)
         while k is not None and not skip:
             n = info[k]
-            skip = n['name'].lower().startswith('editormarker') or n['flags'] & 1
+            skip = 'editormarker' in n['name'].lower() or n['flags'] & 1  # FXREST1: the word anywhere
             if parent.get(k) is not None:
                 ra, ta, sa = n['xf']
                 xf = (ra @ xf[0], ra @ xf[1] * sa + ta, sa * xf[2])

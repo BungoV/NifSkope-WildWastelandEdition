@@ -252,7 +252,7 @@ def model_info(data_root, model, cache):
                     continue
                 blk, marker = i, False
                 for _ in range(64):
-                    if name(blk).lower().startswith('editormarker'):
+                    if 'editormarker' in name(blk).lower():
                         marker = True
                         break
                     if blk not in parent:

@@ -243,7 +243,7 @@ def model_points(data_root, model, cache):
                 # -- the size of a marker, not of a rotation.
                 blk, marker = i, False
                 for _ in range(64):
-                    if block_name(blk).lower().startswith('editormarker'):
+                    if 'editormarker' in block_name(blk).lower():
                         marker = True
                         break
                     if blk not in parent:
