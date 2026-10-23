@@ -1,0 +1,4 @@
+# lane PERF4: the linear frame's farthest depth per pixel for the far cards' depth reject. No conditions: never picked
+# for a shape; wwCellHdrDepthMax (src/gl/cellhdr.cpp) selects it by name.
+
+shaders cell_hdr.vert cell_depthmax.frag
