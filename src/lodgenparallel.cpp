@@ -306,6 +306,8 @@ bool lodgenMemLogOn()
 	return on;
 }
 
+std::atomic<qint64> g_lodgenBcNs{ 0 };
+
 void lodgenMemNote( const QString & phase, const QString & extra )
 {
 	if ( !lodgenMemLogOn() )
@@ -356,10 +358,11 @@ void lodgenMemNote( const QString & phase, const QString & extra )
 		cpu = double( ( ( quint64( k0.dwHighDateTime ) << 32 ) | k0.dwLowDateTime )
 			+ ( ( quint64( u0.dwHighDateTime ) << 32 ) | u0.dwLowDateTime ) ) / 1e7;
 #endif
-	const QByteArray line = QStringLiteral( "mem: %1 | t %7 s cpu %8 s | private %2 MB, peak private %3 MB, ws %4 MB%5%6\n" )
+	const QByteArray line = QStringLiteral( "mem: %1 | t %7 s cpu %8 s bc %9 s | private %2 MB, peak private %3 MB, ws %4 MB%5%6\n" )
 		.arg( phase ).arg( priv >> 20 ).arg( peakPriv >> 20 ).arg( ws >> 20 ).arg( heap )
 		.arg( extra.isEmpty() ? QString() : QStringLiteral( " | " ) + extra )
-		.arg( double( since.elapsed() ) / 1000.0, 0, 'f', 1 ).arg( cpu, 0, 'f', 1 ).toUtf8();
+		.arg( double( since.elapsed() ) / 1000.0, 0, 'f', 1 ).arg( cpu, 0, 'f', 1 )
+		.arg( double( g_lodgenBcNs.load() ) / 1e9, 0, 'f', 1 ).toUtf8();
 	fputs( line.constData(), stderr );
 	fflush( stderr );
 }

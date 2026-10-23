@@ -7,9 +7,11 @@ BSD License - see nifskope.h
 #ifndef LODGENPARALLEL_H
 #define LODGENPARALLEL_H
 
+#include <QElapsedTimer>
 #include <QString>
 #include <QtGlobal>
 
+#include <atomic>
 #include <functional>
 
 /*! THE GENERATOR'S THREAD BUDGET, and the one way back.
@@ -124,6 +126,16 @@ QString lodgenPeakWorkingSetLine();
 bool lodgenBakeSpeedRed();
 bool lodgenMemLogOn();
 void lodgenMemNote( const QString & phase, const QString & extra = QString() );
+
+/*! lane BAKESPEED3: the CPU block encoders' share, for WW_LODGEN_MEMLOG. Each BC1/BC3/BC4/BC5/BC7 block loop adds
+ *  its wall time here; loops on several threads at once add up, so the total reads as CPU seconds. */
+extern std::atomic<qint64> g_lodgenBcNs;
+struct LodgenBcTimer
+{
+	QElapsedTimer t;
+	LodgenBcTimer() { t.start(); }
+	~LodgenBcTimer() { g_lodgenBcNs += t.nsecsElapsed(); }
+};
 
 /*! lane BAKEMEM1: drop the pages of this process's MAPPED FILES (the plugins, the archives) from its working
  *  set. They stay in the file cache, so a later read is a soft fault; private memory is not touched. Returns

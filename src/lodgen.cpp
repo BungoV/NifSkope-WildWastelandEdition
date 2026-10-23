@@ -3596,6 +3596,7 @@ bool lodgenWriteDdsBC5( const QString & path, int w, int h,
 		data.resize( at + size_t( bw ) * bh * 16 );
 		// BLOCK ROWS IN PARALLEL: each row writes its own disjoint slice of
 		// `data` and reads `mr`/`mg` only. Serial at one thread (lodgenparallel.h).
+		LodgenBcTimer bcTimer;
 		lodgenParallelFor( bh, [&]( int by ) {
 			for ( int bx = 0; bx < bw; bx++ ) {
 				quint8 * o = data.data() + at + ( size_t( by ) * bw + bx ) * 16;
@@ -5588,6 +5589,7 @@ bool lodgenWriteDds( const QString & path, int w, int h,
 			continue;
 		}
 		// BLOCK ROWS IN PARALLEL: disjoint writes into `block`, `mip` read-only.
+		LodgenBcTimer bcTimer;
 		lodgenParallelFor( bh, [&]( int by ) {
 			for ( int bx = 0; bx < bw; bx++ ) {
 				quint8 * out = block.data() + ( size_t( by ) * bw + bx ) * blockBytes;
@@ -5771,6 +5773,7 @@ static int lodgenEncodeArrayLayer( const std::vector<quint32> & bgra, int w, int
 		// BC7 on the GPU when it is on (no worse on the CPU's error measure, not its bytes; src/lodgengpu.h), else the loop below
 		const bool onGpu = bc7 && lodgenGpuEncodeBc7( mip.data(), mw, mh, kCardNormalBc7Weights, out.data() + at );
 		// BLOCK ROWS IN PARALLEL: disjoint writes into `out`, `mip` read-only.
+		LodgenBcTimer bcTimer;
 		if ( !onGpu )
 		lodgenParallelFor( bh, [&]( int by ) {
 			for ( int bx = 0; bx < bw; bx++ ) {
@@ -11421,6 +11424,11 @@ private:
 		const int cx = int( std::floor( x / 4096.0 ) ), cy = int( std::floor( y / 4096.0 ) );
 		const qint64 key = ( qint64( cx ) << 32 ) ^ qint64( quint32( cy ) );
 		auto it = landCache.constFind( key );
+		if ( it == landCache.constEnd() && flatShared ) {	// BAKESPEED3: told, loaded after the fan-out
+			if ( !flatTl.fm->landMiss.contains( key ) )
+				flatTl.fm->landMiss.append( key );
+			return std::numeric_limits<double>::quiet_NaN();
+		}
 		if ( it == landCache.constEnd() ) {
 			QVector<float> h;
 			std::unique_ptr<EsmLand> L( new EsmLand );
@@ -11450,6 +11458,11 @@ private:
 		const int cx = int( std::floor( x / 4096.0 ) ), cy = int( std::floor( y / 4096.0 ) );
 		const qint64 key = ( qint64( cx ) << 32 ) ^ qint64( quint32( cy ) );
 		auto it = waterCache.constFind( key );
+		if ( it == waterCache.constEnd() && flatShared ) {
+			if ( !flatTl.fm->waterMiss.contains( key ) )
+				flatTl.fm->waterMiss.append( key );
+			return std::numeric_limits<double>::quiet_NaN();
+		}
 		if ( it == waterCache.constEnd() ) {
 			float h = 0.0f;
 			const double v = world.cellWater( cx, cy, h )
@@ -11467,6 +11480,11 @@ private:
 		auto it = roadZCache.constFind( key );
 		if ( it != roadZCache.constEnd() )
 			return *it;
+		if ( flatShared ) {	// BAKESPEED3: the shared cache is only read; this candidate's own memo instead
+			auto m = flatTl.roadMemo.constFind( key );
+			if ( m != flatTl.roadMemo.constEnd() )
+				return *m;
+		}
 		const double x = ( double( bx ) + 0.5 ) * 16.0, y = ( double( by ) + 0.5 ) * 16.0;
 		double best = std::numeric_limits<double>::quiet_NaN();
 		const qint64 gx = qint64( std::floor( x / 256.0 ) ), gy = qint64( std::floor( y / 256.0 ) );
@@ -11492,7 +11510,10 @@ private:
 					best = z;
 			}
 		}
-		roadZCache.insert( key, best );
+		if ( flatShared )
+			flatTl.roadMemo.insert( key, best );
+		else
+			roadZCache.insert( key, best );
 		return best;
 	}
 
@@ -11610,7 +11631,130 @@ private:
 			modelCache.squeeze();
 		}
 		if ( lodgenMemLogOn() )
-			lodgenMemNote( QStringLiteral( "flat evaluated" ), memLine() );
+			lodgenMemNote( QStringLiteral( "flat evaluated" ), memLine()
+				+ QStringLiteral( "; flat ms load %1 measure %2 finish %3 again %4" )
+					.arg( flatMsLoad ).arg( flatMsMeasure ).arg( flatMsFinish ).arg( flatMeasureAgain ) );
+	}
+
+	/* lane BAKESPEED3: one candidate's measurement, the old loop body from "world space" on, unchanged but for
+	 * where its answers go. Pure in the candidate: it reads only LAND, water and the road grid, so the batch runs
+	 * it on all cores while flatShared is set (the caches are then only read; a miss is told, see landAt). */
+	struct FlatMeasure
+	{
+		QVector<QVector<Vector3>> wv;
+		const char * why = "";
+		double top = 0.0, under = 0.0, ratio = 0.0;
+		int squares = 0;
+		bool measured = false;
+		QVector<qint64> landMiss, waterMiss;   //!< cells the shared caches lacked: loaded, then measured again
+	};
+
+	void measureFlat( const EsmWorld & world, const LodgenFlatCand & c, const QVector<LodSrcShape> & src,
+		FlatMeasure & fm )
+	{
+		flatTl.fm = &fm;
+		flatTl.roadMemo.clear();
+		// world space, and the highest / lowest point per 16-unit square
+		QVector<QVector<Vector3>> & wv = fm.wv;
+		wv.resize( src.size() );
+		QHash<qint64, QPair<double, double>> sq;
+		auto bin = [&sq]( double x, double y, double z ) {
+			const qint64 bx = qint64( std::floor( x / 16.0 ) ), by = qint64( std::floor( y / 16.0 ) );
+			const qint64 k = ( bx << 32 ) ^ qint64( quint32( by ) );
+			auto it = sq.find( k );
+			if ( it == sq.end() )
+				sq.insert( k, qMakePair( z, z ) );
+			else {
+				it->first = qMax( it->first, z );
+				it->second = qMin( it->second, z );
+			}
+		};
+		for ( int si = 0; si < src.size(); si++ ) {
+			const LodSrcShape & s = src[si];
+			QVector<Vector3> & w = wv[si];
+			w.resize( s.pos.size() );
+			for ( int k = 0; k < s.pos.size(); k++ ) {
+				w[k] = c.pos + c.rot * ( s.pos[k] * c.scale );
+				bin( w[k][0], w[k][1], w[k][2] );
+			}
+			for ( const Triangle & t : s.tris ) {
+				const Vector3 m = ( w[t[0]] + w[t[1]] + w[t[2]] ) / 3.0f;
+				bin( m[0], m[1], m[2] );
+			}
+		}
+		std::vector<double> ghi, glo;
+		ghi.reserve( size_t( sq.size() ) );
+		glo.reserve( size_t( sq.size() ) );
+		for ( auto it = sq.constBegin(); it != sq.constEnd(); ++it ) {
+			const qint64 bx = it.key() >> 32;
+			const qint64 by = qint64( qint32( quint32( it.key() & 0xFFFFFFFFLL ) ) );
+			const double g = groundOf( landAt( world, ( double( bx ) + 0.5 ) * 16.0,
+				( double( by ) + 0.5 ) * 16.0 ), roadZSquare( bx, by ) );
+			if ( std::isnan( g ) )
+				continue;
+			ghi.push_back( it->first - g );
+			glo.push_back( it->second - g );
+		}
+		fm.squares = int( ghi.size() );
+		if ( ghi.empty() ) {
+			fm.why = "no land under it";
+			return;
+		}
+		fm.measured = true;
+		fm.top = lodgenFlatPercentile( ghi, 90.0 );
+		fm.under = lodgenFlatPercentile( glo, 50.0 );
+		// the faces: steep side rising above the ground against the visible top
+		double side = 0.0, upvis = 0.0;
+		for ( int si = 0; si < src.size(); si++ ) {
+			const QVector<Vector3> & w = wv[si];
+			std::vector<double> gv( size_t( w.size() ) );
+			for ( int k = 0; k < w.size(); k++ )
+				gv[size_t( k )] = groundOf( landAt( world, w[k][0], w[k][1] ),
+					roadZSquare( qint64( std::floor( w[k][0] / 16.0 ) ),
+						qint64( std::floor( w[k][1] / 16.0 ) ) ) );
+			for ( const Triangle & t : src[si].tris ) {
+				const Vector3 & a = w[t[0]];
+				const Vector3 & b = w[t[1]];
+				const Vector3 & cc = w[t[2]];
+				const double ux = double( b[0] ) - a[0], uy = double( b[1] ) - a[1], uz = double( b[2] ) - a[2];
+				const double vx = double( cc[0] ) - a[0], vy = double( cc[1] ) - a[1], vz = double( cc[2] ) - a[2];
+				const double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+				const double len = std::sqrt( nx * nx + ny * ny + nz * nz );
+				const double area = 0.5 * len;
+				const double cz = len > 0.0 ? nz / len : 0.0;
+				double rise = -1e30;
+				bool bad = false;
+				for ( int q = 0; q < 3; q++ ) {
+					const double g = gv[size_t( t[q] )];
+					if ( std::isnan( g ) ) {
+						bad = true;
+						break;
+					}
+					rise = qMax( rise, double( w[t[q]][2] ) - g );
+				}
+				if ( bad )
+					rise = 0.0;
+				const bool steep = std::fabs( cz ) < 0.7;
+				if ( steep && rise > 8.0 )
+					side += area;
+				else if ( !steep && rise > -16.0 )
+					upvis += area;
+			}
+		}
+		fm.ratio = side / qMax( upvis, 1.0 );
+		const double wh = waterAt( world, c.pos[0], c.pos[1] );
+		if ( !std::isnan( wh ) && double( c.pos[2] ) < wh )
+			fm.why = "under water";
+		else if ( fm.under > 16.0 )
+			fm.why = "not on the ground";
+		else if ( fm.top < -8.0 )
+			fm.why = "under the ground";
+		else if ( fm.top > 64.0 )
+			fm.why = "too tall";
+		else if ( fm.ratio > 0.35 )
+			fm.why = "stands up";
+		else if ( upvis <= 0.0 )
+			fm.why = "no top surface";
 	}
 
 	void evaluateFlatBatch( const EsmWorld & world, const QString & dataRoot )
@@ -11620,131 +11764,93 @@ private:
 		flatProblems.clear();
 		lodgenFlatLoadOverrides( flatFile, flatRules, &flatFileResolved, &flatProblems );
 		buildRoadGrid();
-		for ( int ci = 0; ci < flatCands.size(); ci++ ) {
-			const LodgenFlatCand & c = flatCands[ci];
-			const EsmLodBase lb = world.lodBase( c.base );
-			LodgenFlatRec rec;
-			rec.model = lb.model;
-			rec.refr = c.refr;
-			rec.base = c.base;
-			rec.plugin = world.recordPlugin( c.refr );
-			rec.hasLod = lb.hasLod
-				|| ( c.nameBase != c.base && world.lodBase( c.nameBase ).hasLod );
-			rec.override = lodgenFlatOverrideFor( flatRules, lb.model );
-			cen.flatExamined++;
-			const LodgenMaterialSubst * sw = swapFor( world, c.mswp );
-			const QVector<LodSrcShape> src = lodgenLoadModel( dataRoot, lb.model, modelCache, sw );
-			const int recIndex = flatRecs.size();
-			if ( src.isEmpty() ) {
-				/* No override decides a model that will not load: a bake line
-				 * cannot paint it, and the report says why, not "overridden". */
-				rec.why = "would not load";
-				rec.override = -1;
-				flatRecs.append( rec );
-				continue;
+		/* lane BAKESPEED3: in blocks of candidates -- the models load in turn (the loads contend, BAKESPEED1),
+		 * the measurements run on all cores, and the records and shapes are made in candidate order as before.
+		 * WW_LODGEN_BAKESPEED_RED=1: one candidate at a time, all three steps, as before BAKESPEED3. */
+		const bool red = lodgenBakeSpeedRed();
+		const int block = red ? 1 : 4096;
+		QElapsedTimer tm;
+		for ( int b0 = 0; b0 < flatCands.size(); b0 += block ) {
+			const int b1 = qMin( int( flatCands.size() ), b0 + block );
+			tm.start();
+			std::vector<LodgenFlatRec> recs( size_t( b1 - b0 ) );
+			std::vector<QVector<LodSrcShape>> srcs( size_t( b1 - b0 ) );
+			std::vector<FlatMeasure> ms( size_t( b1 - b0 ) );
+			for ( int ci = b0; ci < b1; ci++ ) {
+				const LodgenFlatCand & c = flatCands[ci];
+				const EsmLodBase lb = world.lodBase( c.base );
+				LodgenFlatRec & rec = recs[size_t( ci - b0 )];
+				rec.model = lb.model;
+				rec.refr = c.refr;
+				rec.base = c.base;
+				rec.plugin = world.recordPlugin( c.refr );
+				rec.hasLod = lb.hasLod
+					|| ( c.nameBase != c.base && world.lodBase( c.nameBase ).hasLod );
+				rec.override = lodgenFlatOverrideFor( flatRules, lb.model );
+				cen.flatExamined++;
+				const LodgenMaterialSubst * sw = swapFor( world, c.mswp );
+				srcs[size_t( ci - b0 )] = lodgenLoadModel( dataRoot, lb.model, modelCache, sw );
 			}
-			// world space, and the highest / lowest point per 16-unit square
-			QVector<QVector<Vector3>> wv( src.size() );
-			QHash<qint64, QPair<double, double>> sq;
-			auto bin = [&sq]( double x, double y, double z ) {
-				const qint64 bx = qint64( std::floor( x / 16.0 ) ), by = qint64( std::floor( y / 16.0 ) );
-				const qint64 k = ( bx << 32 ) ^ qint64( quint32( by ) );
-				auto it = sq.find( k );
-				if ( it == sq.end() )
-					sq.insert( k, qMakePair( z, z ) );
-				else {
-					it->first = qMax( it->first, z );
-					it->second = qMin( it->second, z );
-				}
-			};
-			for ( int si = 0; si < src.size(); si++ ) {
-				const LodSrcShape & s = src[si];
-				QVector<Vector3> & w = wv[si];
-				w.resize( s.pos.size() );
-				for ( int k = 0; k < s.pos.size(); k++ ) {
-					w[k] = c.pos + c.rot * ( s.pos[k] * c.scale );
-					bin( w[k][0], w[k][1], w[k][2] );
-				}
-				for ( const Triangle & t : s.tris ) {
-					const Vector3 m = ( w[t[0]] + w[t[1]] + w[t[2]] ) / 3.0f;
-					bin( m[0], m[1], m[2] );
-				}
-			}
-			std::vector<double> ghi, glo;
-			ghi.reserve( size_t( sq.size() ) );
-			glo.reserve( size_t( sq.size() ) );
-			for ( auto it = sq.constBegin(); it != sq.constEnd(); ++it ) {
-				const qint64 bx = it.key() >> 32;
-				const qint64 by = qint64( qint32( quint32( it.key() & 0xFFFFFFFFLL ) ) );
-				const double g = groundOf( landAt( world, ( double( bx ) + 0.5 ) * 16.0,
-					( double( by ) + 0.5 ) * 16.0 ), roadZSquare( bx, by ) );
-				if ( std::isnan( g ) )
-					continue;
-				ghi.push_back( it->first - g );
-				glo.push_back( it->second - g );
-			}
-			rec.squares = int( ghi.size() );
-			if ( ghi.empty() ) {
-				rec.why = "no land under it";
-				finishFlat( rec, recIndex, src, wv, world, c.rot, &c );
-				continue;
-			}
-			rec.measured = true;
-			rec.top = lodgenFlatPercentile( ghi, 90.0 );
-			rec.under = lodgenFlatPercentile( glo, 50.0 );
-			// the faces: steep side rising above the ground against the visible top
-			double side = 0.0, upvis = 0.0;
-			for ( int si = 0; si < src.size(); si++ ) {
-				const QVector<Vector3> & w = wv[si];
-				std::vector<double> gv( size_t( w.size() ) );
-				for ( int k = 0; k < w.size(); k++ )
-					gv[size_t( k )] = groundOf( landAt( world, w[k][0], w[k][1] ),
-						roadZSquare( qint64( std::floor( w[k][0] / 16.0 ) ),
-							qint64( std::floor( w[k][1] / 16.0 ) ) ) );
-				for ( const Triangle & t : src[si].tris ) {
-					const Vector3 & a = w[t[0]];
-					const Vector3 & b = w[t[1]];
-					const Vector3 & cc = w[t[2]];
-					const double ux = double( b[0] ) - a[0], uy = double( b[1] ) - a[1], uz = double( b[2] ) - a[2];
-					const double vx = double( cc[0] ) - a[0], vy = double( cc[1] ) - a[1], vz = double( cc[2] ) - a[2];
-					const double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-					const double len = std::sqrt( nx * nx + ny * ny + nz * nz );
-					const double area = 0.5 * len;
-					const double cz = len > 0.0 ? nz / len : 0.0;
-					double rise = -1e30;
-					bool bad = false;
-					for ( int q = 0; q < 3; q++ ) {
-						const double g = gv[size_t( t[q] )];
-						if ( std::isnan( g ) ) {
-							bad = true;
-							break;
-						}
-						rise = qMax( rise, double( w[t[q]][2] ) - g );
+			flatMsLoad += tm.restart();
+			std::vector<int> todo;
+			for ( int k = 0; k < b1 - b0; k++ )
+				if ( !srcs[size_t( k )].isEmpty() )
+					todo.push_back( k );
+			for ( int pass = 0; !todo.empty(); pass++ ) {
+				if ( red || pass >= 8 ) {	// serially, filling the caches as it goes (the old path)
+					for ( int k : todo ) {
+						ms[size_t( k )] = FlatMeasure();
+						measureFlat( world, flatCands[b0 + k], srcs[size_t( k )], ms[size_t( k )] );
 					}
-					if ( bad )
-						rise = 0.0;
-					const bool steep = std::fabs( cz ) < 0.7;
-					if ( steep && rise > 8.0 )
-						side += area;
-					else if ( !steep && rise > -16.0 )
-						upvis += area;
+					break;
 				}
+				flatShared = true;
+				lodgenParallelFor( int( todo.size() ), [&]( int t ) {
+					const int k = todo[size_t( t )];
+					ms[size_t( k )] = FlatMeasure();
+					measureFlat( world, flatCands[b0 + k], srcs[size_t( k )], ms[size_t( k )] );
+				} );
+				flatShared = false;
+				// the cells a measurement missed: loaded here in candidate order, and those candidates measured again
+				std::vector<int> again;
+				for ( int k : todo ) {
+					const FlatMeasure & fm = ms[size_t( k )];
+					if ( fm.landMiss.isEmpty() && fm.waterMiss.isEmpty() )
+						continue;
+					for ( qint64 key : fm.landMiss )
+						landAt( world, ( double( key >> 32 ) + 0.5 ) * 4096.0, ( double( qint32( quint32( key & 0xFFFFFFFFLL ) ) ) + 0.5 ) * 4096.0 );
+					for ( qint64 key : fm.waterMiss )
+						waterAt( world, ( double( key >> 32 ) + 0.5 ) * 4096.0, ( double( qint32( quint32( key & 0xFFFFFFFFLL ) ) ) + 0.5 ) * 4096.0 );
+					again.push_back( k );
+				}
+				flatMeasureAgain += int( again.size() );
+				todo.swap( again );
 			}
-			rec.ratio = side / qMax( upvis, 1.0 );
-			const double wh = waterAt( world, c.pos[0], c.pos[1] );
-			if ( !std::isnan( wh ) && double( c.pos[2] ) < wh )
-				rec.why = "under water";
-			else if ( rec.under > 16.0 )
-				rec.why = "not on the ground";
-			else if ( rec.top < -8.0 )
-				rec.why = "under the ground";
-			else if ( rec.top > 64.0 )
-				rec.why = "too tall";
-			else if ( rec.ratio > 0.35 )
-				rec.why = "stands up";
-			else if ( upvis <= 0.0 )
-				rec.why = "no top surface";
-			finishFlat( rec, recIndex, src, wv, world, c.rot, &c );
+			flatMsMeasure += tm.restart();
+			for ( int ci = b0; ci < b1; ci++ ) {
+				const LodgenFlatCand & c = flatCands[ci];
+				LodgenFlatRec & rec = recs[size_t( ci - b0 )];
+				const QVector<LodSrcShape> & src = srcs[size_t( ci - b0 )];
+				const int recIndex = flatRecs.size();
+				if ( src.isEmpty() ) {
+					/* No override decides a model that will not load: a bake line
+					 * cannot paint it, and the report says why, not "overridden". */
+					rec.why = "would not load";
+					rec.override = -1;
+					flatRecs.append( rec );
+					continue;
+				}
+				FlatMeasure & m = ms[size_t( ci - b0 )];
+				rec.squares = m.squares;
+				rec.measured = m.measured;
+				rec.top = m.top;
+				rec.under = m.under;
+				rec.ratio = m.ratio;
+				rec.why = m.why;
+				finishFlat( rec, recIndex, src, m.wv, world, c.rot, &c );
+				m = FlatMeasure();
+			}
+			flatMsFinish += tm.elapsed();
 		}
 		flatRecTexels.assign( size_t( flatRecs.size() ), 0 );
 		flatCands.clear();
@@ -11962,11 +12068,24 @@ private:
 	QHash<qint64, double> waterCache;
 	QHash<qint64, double> roadZCache;
 	QHash<qint64, QVector<QPair<int, int>>> roadGrid;
+	/* lane BAKESPEED3: while flatShared the measurement runs on all cores and the three caches above are only
+	 * read; a land / water miss goes to the candidate's FlatMeasure, a road square to its own memo. */
+	bool flatShared = false;
+	struct FlatTl
+	{
+		FlatMeasure * fm = nullptr;
+		QHash<qint64, double> roadMemo;
+	};
+	static thread_local FlatTl flatTl;
+	qint64 flatMsLoad = 0, flatMsMeasure = 0, flatMsFinish = 0;
+	int flatMeasureAgain = 0;
 	QHash<QString, LodgenFlatMat> flatMatCache;
 };
 
 /*! THE PER-BAKE REPORT (lane FLAT1): one row per base model the flat rule looked
  *  at, most texels first. Tab-separated so it opens in a spreadsheet. */
+thread_local LodgenRoadSet::FlatTl LodgenRoadSet::flatTl;
+
 QString LodgenRoadSet::flatReport( const QString & title ) const
 {
 	struct Row
@@ -14820,6 +14939,7 @@ void lodgenVtEncodeBlocks( const std::vector<quint32> & img, int w, int h, bool 
 	out.resize( base + qsizetype( bw ) * bh * blockBytes );
 	quint8 * p = reinterpret_cast<quint8 *>( out.data() ) + base;
 	// BLOCK ROWS IN PARALLEL: disjoint writes into `out`, `img` read-only.
+	LodgenBcTimer bcTimer;
 	lodgenParallelFor( bh, [&]( int by ) {
 		for ( int bx = 0; bx < bw; bx++ ) {
 			quint8 * o = p + ( size_t( by ) * bw + bx ) * blockBytes;
@@ -18258,110 +18378,187 @@ bool lodgenBakeDecals( const EsmWorld & world, const QString & dataRoot,
 	}
 
 	// every piece's pictures, scan-converted in its own frame
+	/* lane BAKESPEED3: in batches of pieces. Each batch localises its pieces in turn (the same lines as before),
+	 * scan-converts them on all cores over the shared texture LRU, turns the planes into the two pictures in turn
+	 * (the same lines), and encodes the BC3 chains on all cores. WW_LODGEN_BAKESPEED_RED=1: one piece a batch,
+	 * on this thread, the LRU unshared. */
 	QVector<LoddPiece> pieces( build.size() );
-	LodgenRoadCensus scratch;
 	int capped = 0;
 	qint64 texels = 0;
-	for ( int pi = 0; pi < build.size(); pi++ ) {
-		const LodgenRoadSet::DecalPlacement & p = pl[build[pi].placement];
-		const Matrix inv = p.rot.inverted();
-		const float invScale = p.scale > 0.0f ? 1.0f / p.scale : 1.0f;
-		QVector<LodgenRoadShape> lr;
-		QVector<LodgenFlatShape> lf;
-		for ( int k = p.first; k < p.first + p.count; k++ ) {
-			if ( p.flat ) {
-				LodgenFlatShape s = fsh[k];
-				lodgenDecalLocalise( s, p.pos, inv, invScale );
-				/* The picture paints every fragment: a flat object's "buried" test
-				 * needs the ground under ONE placement, and the ground hides what
-				 * is under it at draw time. `rec` -1 keeps the report's counts. */
-				s.rise.fill( 0.0f );
-				s.rec = -1;
-				lf.append( s );
-			} else {
-				LodgenRoadShape s = rs[k];
-				lodgenDecalLocalise( s, p.pos, inv, invScale );
-				lr.append( s );
-			}
-		}
-		float x0 = 1e30f, y0 = 1e30f, z0 = 1e30f, x1 = -1e30f, y1 = -1e30f, z1 = -1e30f;
-		auto grow = [&]( const QVector<Vector3> & v ) {
-			for ( const Vector3 & q : v ) {
-				x0 = qMin( x0, q[0] ); x1 = qMax( x1, q[0] );
-				y0 = qMin( y0, q[1] ); y1 = qMax( y1, q[1] );
-				z0 = qMin( z0, q[2] ); z1 = qMax( z1, q[2] );
-			}
-		};
-		for ( const LodgenRoadShape & s : lr )
-			grow( s.pos );
-		for ( const LodgenFlatShape & s : lf )
-			grow( s.pos );
-		const float ext = qMax( x1 - x0, y1 - y0 );
-		float upt = baseUpt;
-		if ( ext / upt > float( maxSide ) ) {
-			upt = ext / float( maxSide );
-			capped++;
-		}
-		auto side = [upt]( float e ) {
-			int n = int( std::ceil( double( e ) / double( upt ) ) );
-			n = qMax( 4, ( n + 3 ) & ~3 );
-			return n;
-		};
-		const int w = qMin( side( x1 - x0 ), maxSide ), h = qMin( side( y1 - y0 ), maxSide );
-		const int S = qMax( w, h );
-		LodgenRoadSet local;
-		local.adoptShapes( lr, lf );
-		std::vector<quint32> plane;
+	const bool redPics = lodgenBakeSpeedRed();
+	struct PicJob
+	{
+		std::unique_ptr<LodgenRoadSet> local;
+		float x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0, upt = 0, wyTop = 0;
+		int w = 0, h = 0, S = 0;
+		std::vector<quint32> plane, col, nrm;
 		std::vector<float> nplane;
-		local.rasterise( x0, y0 + float( h ) * upt, upt, S, plane, bc, dataRoot, scratch,
-			cov.roadComposite, cov.roadDetail, cov.roadGroundPaint, 0,
-			cov.stampNormals ? &nplane : nullptr );
-		std::vector<quint32> col( size_t( w ) * size_t( h ) ), nrm( size_t( w ) * size_t( h ) );
-		quint32 covered = 0;
-		bool stamped = false;
-		for ( int y = 0; y < h; y++ )
-			for ( int x = 0; x < w; x++ ) {
-				const size_t si = size_t( y ) * size_t( S ) + size_t( x ), di = size_t( y ) * size_t( w ) + size_t( x );
-				col[di] = plane[si];
-				if ( plane[si] >> 24 )
-					covered++;
-				quint32 n = ( 128U << 16 ) | ( 128U << 8 ) | 255U;
-				if ( !nplane.empty() ) {
-					const float * q = &nplane[si * 4];
-					if ( q[3] > 0.0f ) {
-						Vector3 v( q[0], q[1], q[2] );
-						if ( v.length() > 1e-6f )
-							v.normalize();
-						else
-							v = Vector3( 0.0f, 0.0f, 1.0f );
-						auto b = []( float c ) { return quint32( qBound( 0, int( std::lround( ( c * 0.5f + 0.5f ) * 255.0f ) ), 255 ) ); };
-						n = ( quint32( qBound( 0, int( std::lround( q[3] * 255.0f ) ), 255 ) ) << 24 )
-							| ( b( v[0] ) << 16 ) | ( b( v[1] ) << 8 ) | b( v[2] );
-						stamped = true;
-					}
+	};
+	QMutex picShareLock;
+	qint64 msPicLocal = 0, msPicRaster = 0, msPicConvert = 0, msPicChain = 0;
+	int picBatches = 0;
+	QElapsedTimer pt;
+	for ( int pb = 0; pb < build.size(); ) {
+		pt.start();
+		std::vector<PicJob> jobs;
+		const int pb0 = pb;
+		qint64 batchTexels = 0;
+		for ( ; pb < build.size() && ( jobs.empty() || ( !redPics && jobs.size() < 256 && batchTexels < ( qint64( 48 ) << 20 ) ) ); pb++ ) {
+			const int pi = pb;
+			const LodgenRoadSet::DecalPlacement & p = pl[build[pi].placement];
+			const Matrix inv = p.rot.inverted();
+			const float invScale = p.scale > 0.0f ? 1.0f / p.scale : 1.0f;
+			QVector<LodgenRoadShape> lr;
+			QVector<LodgenFlatShape> lf;
+			for ( int k = p.first; k < p.first + p.count; k++ ) {
+				if ( p.flat ) {
+					LodgenFlatShape s = fsh[k];
+					lodgenDecalLocalise( s, p.pos, inv, invScale );
+					/* The picture paints every fragment: a flat object's "buried" test
+					 * needs the ground under ONE placement, and the ground hides what
+					 * is under it at draw time. `rec` -1 keeps the report's counts. */
+					s.rise.fill( 0.0f );
+					s.rec = -1;
+					lf.append( s );
+				} else {
+					LodgenRoadShape s = rs[k];
+					lodgenDecalLocalise( s, p.pos, inv, invScale );
+					lr.append( s );
 				}
-				nrm[di] = n;
 			}
-		int mips = 1;
-		while ( ( qMin( w, h ) >> mips ) >= 4 )
-			mips++;
-		LoddPiece & o = pieces[pi];
-		o.x0 = x0;
-		o.y0 = y0;
-		o.x1 = x0 + float( w ) * upt;
-		o.y1 = y0 + float( h ) * upt;
-		o.z0 = z0;
-		o.z1 = z1;
-		o.width = w;
-		o.height = h;
-		o.mips = mips;
-		o.cls = build[pi].cls;
-		o.flags = stamped ? 1u : 0u;
-		o.covered = covered;
-		o.name = build[pi].key;
-		o.colourBc3 = lodgenDecalChain( col, w, h, mips, 0x808080U );
-		o.normalBc3 = lodgenDecalChain( nrm, w, h, mips, ( 128U << 16 ) | ( 128U << 8 ) | 255U );
+			float x0 = 1e30f, y0 = 1e30f, z0 = 1e30f, x1 = -1e30f, y1 = -1e30f, z1 = -1e30f;
+			auto grow = [&]( const QVector<Vector3> & v ) {
+				for ( const Vector3 & q : v ) {
+					x0 = qMin( x0, q[0] ); x1 = qMax( x1, q[0] );
+					y0 = qMin( y0, q[1] ); y1 = qMax( y1, q[1] );
+					z0 = qMin( z0, q[2] ); z1 = qMax( z1, q[2] );
+				}
+			};
+			for ( const LodgenRoadShape & s : lr )
+				grow( s.pos );
+			for ( const LodgenFlatShape & s : lf )
+				grow( s.pos );
+			const float ext = qMax( x1 - x0, y1 - y0 );
+			float upt = baseUpt;
+			if ( ext / upt > float( maxSide ) ) {
+				upt = ext / float( maxSide );
+				capped++;
+			}
+			auto side = [upt]( float e ) {
+				int n = int( std::ceil( double( e ) / double( upt ) ) );
+				n = qMax( 4, ( n + 3 ) & ~3 );
+				return n;
+			};
+			const int w = qMin( side( x1 - x0 ), maxSide ), h = qMin( side( y1 - y0 ), maxSide );
+			const int S = qMax( w, h );
+			PicJob j;
+			j.local = std::make_unique<LodgenRoadSet>();
+			j.local->adoptShapes( lr, lf );
+			j.x0 = x0; j.y0 = y0; j.z0 = z0; j.x1 = x1; j.y1 = y1; j.z1 = z1;
+			j.upt = upt;
+			j.wyTop = y0 + float( h ) * upt;
+			j.w = w; j.h = h; j.S = S;
+			batchTexels += qint64( S ) * S;
+			jobs.push_back( std::move( j ) );
+		}
+		const int nj = int( jobs.size() );
+		picBatches++;
+		msPicLocal += pt.restart();
+		auto raster = [&]( int k ) {
+			PicJob & j = jobs[size_t( k )];
+			LodgenRoadCensus scratch;	// nothing reads it: the gather's census is the report's
+			j.local->rasterise( j.x0, j.wyTop, j.upt, j.S, j.plane, bc, dataRoot, scratch,
+				cov.roadComposite, cov.roadDetail, cov.roadGroundPaint, 0,
+				cov.stampNormals ? &j.nplane : nullptr );
+			j.local.reset();
+		};
+		if ( redPics || nj == 1 ) {
+			for ( int k = 0; k < nj; k++ )
+				raster( k );
+		} else {
+			lodgenTexShare( bc, &picShareLock );
+			lodgenParallelForOuter( nj, raster );
+			lodgenTexShare( bc, nullptr );
+			lodgenTexEvict( bc, QString() );	// back to the LRU's budget, as the serial path keeps it
+		}
+		msPicRaster += pt.restart();
+		for ( int k = 0; k < nj; k++ ) {
+			const int pi = pb0 + k;
+			PicJob & j = jobs[size_t( k )];
+			const int w = j.w, h = j.h, S = j.S;
+			const std::vector<quint32> & plane = j.plane;
+			const std::vector<float> & nplane = j.nplane;
+			std::vector<quint32> & col = j.col;
+			std::vector<quint32> & nrm = j.nrm;
+			col.resize( size_t( w ) * size_t( h ) );
+			nrm.resize( size_t( w ) * size_t( h ) );
+			quint32 covered = 0;
+			bool stamped = false;
+			for ( int y = 0; y < h; y++ )
+				for ( int x = 0; x < w; x++ ) {
+					const size_t si = size_t( y ) * size_t( S ) + size_t( x ), di = size_t( y ) * size_t( w ) + size_t( x );
+					col[di] = plane[si];
+					if ( plane[si] >> 24 )
+						covered++;
+					quint32 n = ( 128U << 16 ) | ( 128U << 8 ) | 255U;
+					if ( !nplane.empty() ) {
+						const float * q = &nplane[si * 4];
+						if ( q[3] > 0.0f ) {
+							Vector3 v( q[0], q[1], q[2] );
+							if ( v.length() > 1e-6f )
+								v.normalize();
+							else
+								v = Vector3( 0.0f, 0.0f, 1.0f );
+							auto b = []( float c ) { return quint32( qBound( 0, int( std::lround( ( c * 0.5f + 0.5f ) * 255.0f ) ), 255 ) ); };
+							n = ( quint32( qBound( 0, int( std::lround( q[3] * 255.0f ) ), 255 ) ) << 24 )
+								| ( b( v[0] ) << 16 ) | ( b( v[1] ) << 8 ) | b( v[2] );
+							stamped = true;
+						}
+					}
+					nrm[di] = n;
+				}
+			std::vector<quint32>().swap( j.plane );
+			std::vector<float>().swap( j.nplane );
+			int mips = 1;
+			while ( ( qMin( w, h ) >> mips ) >= 4 )
+				mips++;
+			LoddPiece & o = pieces[pi];
+			o.x0 = j.x0;
+			o.y0 = j.y0;
+			o.x1 = j.x0 + float( w ) * j.upt;
+			o.y1 = j.y0 + float( h ) * j.upt;
+			o.z0 = j.z0;
+			o.z1 = j.z1;
+			o.width = w;
+			o.height = h;
+			o.mips = mips;
+			o.cls = build[pi].cls;
+			o.flags = stamped ? 1u : 0u;
+			o.covered = covered;
+			o.name = build[pi].key;
+		}
+		msPicConvert += pt.restart();
+		// two chains a piece, colour then normal
+		auto chain = [&]( int t ) {
+			const int k = t >> 1;
+			PicJob & j = jobs[size_t( k )];
+			LoddPiece & o = pieces[pb0 + k];
+			if ( ( t & 1 ) == 0 )
+				o.colourBc3 = lodgenDecalChain( std::move( j.col ), j.w, j.h, o.mips, 0x808080U );
+			else
+				o.normalBc3 = lodgenDecalChain( std::move( j.nrm ), j.w, j.h, o.mips, ( 128U << 16 ) | ( 128U << 8 ) | 255U );
+		};
+		if ( redPics )
+			for ( int t = 0; t < 2 * nj; t++ )
+				chain( t );
+		else
+			lodgenParallelForOuter( 2 * nj, chain );
+		msPicChain += pt.restart();
 	}
+	if ( lodgenMemLogOn() )
+		lodgenMemNote( QStringLiteral( "decal pictures" ), QStringLiteral( "%1 pieces in %2 batches; ms localise %3 "
+			"raster %4 convert %5 chains %6" ).arg( build.size() ).arg( picBatches ).arg( msPicLocal )
+			.arg( msPicRaster ).arg( msPicConvert ).arg( msPicChain ) );
 	const qint64 msPictures = timer.elapsed() - msGather;
 
 	// the placements: draw order, their world XY boxes, kept where they touch the region
