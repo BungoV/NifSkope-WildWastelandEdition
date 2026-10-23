@@ -17,6 +17,9 @@ horizon arithmetic, its own `.tbk` v5 parser.
   pgi_read.py census <out.tsv> <label>=<tbk dir>[,interior] ...
         size of each sector file under each encoding (raw .pgi v1, packed 1024, packed 256, 1 m bricks; each also
         deflated), MB a sector.
+  pgi_read.py split <exe> <work>
+        lane PGIBIT32: a synthetic room-split sector (.tbk content 32, side = bin + 6 x slot) round-trips bit-exact
+        and every link resolves to its own room slot; reds: a side past the flags refused, the shuffle unresolved.
   pgi_read.py all <exe> <work> <tbk dir>...
         every gate green, then every red, one verdict line.
 """
@@ -68,6 +71,14 @@ assert (SECTOR.itemsize, SURFEL.itemsize, PROBE.itemsize, LINKR.itemsize, ROOMBO
 # the bake's own `.tbk` v5 (src/probebake.cpp), parsed here independently of the .pgi
 TBK_MAGIC = 0x314B4254
 TBK_HEAD = struct.Struct('<IIIiifIIII6I')
+ROOM_SPLIT = 32             # content flag (GAPBAKE1): Surfel.bin / Link.side = facing bin + 6 x room slot
+ROOM_SLOTS = 4
+
+
+def side_split(side):
+    """(facing bin, room slot) of a side id; without the room split the slot is 0."""
+    side = np.asarray(side).astype(np.int64)
+    return side % 6, side // 6
 
 
 class Refused(Exception):
@@ -330,20 +341,21 @@ def roundtrip(exe, tbkdir, work, interior=None, red=''):
 # ---------------------------------------------------------------- synthetic fixtures (no game data)
 
 
-def synth_tbk(path, cx, cy, seed, nprobe=3, nsurf=48):
+def synth_tbk(path, cx, cy, seed, nprobe=3, nsurf=48, rooms=False, bad_side=False):
+    """rooms: room-split content (side ids 0..23); bad_side: one link side past what the content flags allow."""
     rng = np.random.default_rng(seed)
     cell = 70.0
     base = np.array([cx * 4096.0, cy * 4096.0, 0.0])
     cells = set()
     while len(cells) < nsurf:
         c = tuple(int(v) for v in rng.integers([4, 4, 0], [14, 14, 5]))
-        cells.add((c[0], c[1], c[2], int(rng.integers(0, 6))))
+        cells.add((c[0], c[1], c[2], int(rng.integers(0, 6 * ROOM_SLOTS if rooms else 6))))
     keys = sorted(cells, key=lambda k: (k[2], k[1], k[0], k[3]))
     origin = np.floor(base / cell).astype(int)
     s = np.zeros(nsurf, SURFEL)
     for i, (x, y, z, b) in enumerate(keys):
         s[i]['pos'] = (origin + [x, y, z]) * cell + rng.uniform(5, 65, 3)
-        ax, neg = b // 2, b % 2
+        ax, neg = (b % 6) // 2, b % 2
         v = rng.normal(0, 0.25, 3)
         v[ax] = -1.0 if neg else 1.0
         v /= np.linalg.norm(v)
@@ -381,6 +393,8 @@ def synth_tbk(path, cx, cy, seed, nprobe=3, nsurf=48):
             l['door'] = 0 if rng.random() < 0.85 else int(rng.integers(1, 2 ** 24))
             lks.append(l)
     lk = np.array(lks, LINKR)
+    if bad_side:
+        lk[len(lk) // 2]['side'] = 6 * ROOM_SLOTS if rooms else 6
     bx = np.zeros(1, ROOMBOX)
     bx[0]['room'] = 1
     bx[0]['lo'] = base + [100, 100, 0]
@@ -390,7 +404,8 @@ def synth_tbk(path, cx, cy, seed, nprobe=3, nsurf=48):
     em['le'] = rng.uniform(0, 8, (2, 3))
     probe, pext = split(p.tobytes(), nprobe, 144, 32)
     link, lext = split(lk.tobytes(), len(lk), 12, 8)
-    head = TBK_HEAD.pack(TBK_MAGIC, 5, 1, cx, cy, cell, nsurf, nprobe, len(lk), 3, 0, 1, 1 | 2 | 4 | 8 | 16, 2, 0, 0)
+    content = 1 | 2 | 4 | 8 | 16 | (ROOM_SPLIT if rooms else 0)
+    head = TBK_HEAD.pack(TBK_MAGIC, 5, 1, cx, cy, cell, nsurf, nprobe, len(lk), 3, 0, 1, content, 2, 0, 0)
     open(path, 'wb').write(head + s.tobytes() + probe + link + lext + pext + bx.tobytes() + em.tobytes())
 
 
@@ -523,6 +538,47 @@ def refusal(exe, fdir, red=''):
     return not fails, [line] + ['  FAIL ' + f for f in fails]
 
 
+def split_gate(exe, work):
+    """Lane PGIBIT32. Greens: a room-split synth sector round-trips (F1/H0/X1), the SECT content keeps 32, every
+    link resolves to a surfel of its own slot, slots past 0 are present. Reds (must fail): pgiwrite takes a side past
+    the flags (split and plain), the shuffle red still resolves."""
+    lines, ok = [], True
+    src = os.path.join(work, 'split_src')
+    os.makedirs(src, exist_ok=True)
+    f = os.path.join(src, 'sector_+0003_+0001.tbk')
+    synth_tbk(f, 3, 1, 7, nprobe=4, nsurf=96, rooms=True)
+    t = read_tbk(f)
+    rok, rl = roundtrip(exe, src, os.path.join(work, 'split_rt'))
+    lines += ['GREEN split ' + l for l in rl] + ['GREEN split roundtrip %s' % ('PASS' if rok else 'FAIL')]
+    ok &= rok
+    head, chunks = read_pgi(os.path.join(work, 'split_rt', '3_1.pgi'))
+    sect = np.frombuffer([c for c in chunks if c['id'] == SECT][0]['data'], SECTOR, 1)[0]
+    s, p, lk, owner, idx = resolve(t)
+    sb, ss = side_split(s['bin'])
+    lb, ls = side_split(lk['side'])
+    good = (idx >= 0) & (ss[np.maximum(idx, 0)] == ls) & (sb[np.maximum(idx, 0)] == lb)
+    g = bool(sect['content'] & ROOM_SPLIT) and good.all() and len(lk) > 0 and int(ss.max()) > 0 and int(s['bin'].max()) < 24
+    lines.append('GREEN split: content %d, side ids %d..%d, slots %s, links %d resolved to their own slot %d -> %s'
+                 % (int(sect['content']), int(s['bin'].min()), int(s['bin'].max()), sorted(set(ss.tolist())), len(lk),
+                    int(good.sum()), 'PASS' if g else 'FAIL'))
+    ok &= g
+    for name, sp in (('split', True), ('plain', False)):
+        d = os.path.join(work, 'badside_' + name)
+        os.makedirs(d, exist_ok=True)
+        synth_tbk(os.path.join(d, 'sector_+0003_+0001.tbk'), 3, 1, 7, nprobe=4, nsurf=96 if sp else 48, rooms=sp,
+                  bad_side=True)
+        rc, out = run([os.path.abspath(exe), '-no-gui', 'pgiwrite', '--tbk', os.path.abspath(d), '--out',
+                       os.path.abspath(os.path.join(d, 'out'))])
+        refused = rc != 0 and 'side' in out
+        lines.append('RED badside %s: pgiwrite rc %d, refused for the side: %s (must be refused)' % (name, rc, refused))
+        ok &= refused
+    # the shuffle red on the split sector: the links name another facing bin of the same slot, so none resolve
+    rok, rl = roundtrip(exe, src, os.path.join(work, 'split_shuffle'), None, 'shuffle')
+    lines.append('RED split shuffle roundtrip %s (must FAIL)' % ('PASS' if rok else 'FAIL'))
+    ok &= not rok
+    return ok, lines
+
+
 # ---------------------------------------------------------------- the size census
 
 
@@ -562,8 +618,8 @@ def resolve(t):
     owner = np.repeat(np.arange(len(p)), p['cnt'].astype(np.int64))
     lkey = pk[owner] + lk['delta'].astype(np.int64)
 
-    def code(k, b):
-        return ((k[:, 0] + 2 ** 20) << 44) | ((k[:, 1] + 2 ** 20) << 23) | ((k[:, 2] + 2 ** 18) << 3) | b.astype(np.int64)
+    def code(k, b):   # 5 bits of side id: 0..23 under the room split
+        return ((k[:, 0] + 2 ** 20) << 46) | ((k[:, 1] + 2 ** 20) << 25) | ((k[:, 2] + 2 ** 18) << 5) | b.astype(np.int64)
     sc = code(sk, s['bin'])
     order = np.argsort(sc)
     lc = code(lkey, lk['side'])
@@ -745,6 +801,11 @@ def main(argv):
     if cmd == 'census':
         census(argv[2], argv[3:])
         return 0
+    if cmd == 'split':
+        ok, lines = split_gate(argv[2], argv[3])
+        print('\n'.join(lines))
+        print('split gates: %s' % ('PASS (greens pass, reds fail)' if ok else 'FAIL'))
+        return 0 if ok else 1
     if cmd == 'all':
         exe, work = argv[2], argv[3]
         verdict = True
@@ -770,6 +831,9 @@ def main(argv):
         ok, lines = refusal(exe, fx, 'acceptall')
         out += ['RED acceptall ' + lines[0], 'RED acceptall refusal %s (must FAIL)' % ('PASS' if ok else 'FAIL')]
         verdict &= not ok
+        ok, lines = split_gate(exe, os.path.join(work, 'split'))
+        out += lines
+        verdict &= ok
         print('\n'.join(out))
         print('pgi gates: %s' % ('PASS (greens pass, reds fail)' if verdict else 'FAIL'))
         return 0 if verdict else 1

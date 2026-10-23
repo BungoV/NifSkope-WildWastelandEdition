@@ -23,7 +23,8 @@
  *  Version 1 chunks (kind 1 and 2). The near bake's content, losslessly (a reader can rebuild the bake's
  *  sector file bit for bit), plus the horizon:
  *    SECT  1 Sector      per group: square X/Y, the bake's file version and content flags
- *    SURF  n Surfel      32 B: the bake's surfels; up to six a 70-unit cell, one per facing bin
+ *    SURF  n Surfel      32 B: the bake's surfels; up to six a 70-unit cell, one per facing bin (Sector::content
+ *                              32: up to 24, one per facing bin and room slot)
  *    HORZ  HorizonHead + n HorizonRecord (32 B): per surfel, 16 azimuths of horizon elevation and openness
  *    PROB  n Probe       176 B: position, link range, sky visibility and tint per octant, rooms
  *    LINK  n Link        20 B: probe -> surfel (the surfel's cell relative to the probe's, its facing bin),
@@ -34,6 +35,8 @@
  *
  *  Resolving a link: the probe's cell is floor(position / surfelCell) per axis (float division, then floor);
  *  the surfel is the one of the same group whose cell is probeCell + cellDelta and whose bin == Link::side.
+ *  Room split (Sector::content 32): bin and side are a side id = facing bin + 6 x room slot (0..23); the facing
+ *  bin is id % 6, the slot id / 6. The rule above is unchanged (compare the whole id).
  */
 
 #include <cstddef>
@@ -105,7 +108,8 @@ struct Sector
 {
 	int32_t x, y;            //!< the 4096-unit square (an exterior: the cell)
 	uint32_t bakeVersion;    //!< the near bake's sector file version the content came from (5)
-	uint32_t content;        //!< what the bake modelled: 1 sides, 2 rooms, 4 doors, 8 glass, 16 six sides
+	uint32_t content;        //!< what the bake modelled: 1 sides, 2 rooms, 4 doors, 8 glass, 16 six sides,
+	                         //!< 32 room split (bin/side = facing bin + 6 x room slot)
 	uint32_t bakeFlags;      //!< 1 = links, 2 = sky visibility
 	uint32_t recordKind;     //!< 1 = resolved albedo
 	uint32_t reserved[2];
@@ -117,12 +121,15 @@ struct Surfel
 	float position[3];       //!< world units (the mean of the cell's hits on this side)
 	int16_t normal[3];       //!< snorm16
 	uint8_t albedo[3];       //!< linear unorm8
-	uint8_t bin;             //!< facing bin: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z
+	uint8_t bin;             //!< facing bin: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z; content 32: + 6 x room slot (0..3)
 	uint8_t pad[2];          //!< carried as the bake wrote them
 	uint32_t samples;
 	uint32_t reserved;
 };
 static_assert( sizeof( Surfel ) == 32, "pgi surfel" );
+
+constexpr uint32_t kContentRoomSplit = 32;   //!< Sector::content: side ids = facing bin + 6 x room slot
+constexpr int kRoomSlots = 4;                 //!< room slots under kContentRoomSplit (side ids 0..23)
 
 constexpr int kAzimuths = 16;
 
@@ -170,7 +177,7 @@ struct Link
 	int16_t cellDelta[3];    //!< surfel cell - probe cell
 	int16_t dir[2];          //!< octahedral snorm16, probe -> surfel
 	uint16_t weight;         //!< unorm16 of the probe's linkWeightScale
-	uint8_t side;            //!< the surfel's facing bin
+	uint8_t side;            //!< the surfel's bin (its whole side id under content 32)
 	uint8_t tint[3];         //!< unorm8 glass transmittance on the way (255 = clear)
 	uint32_t door;           //!< the door ref the link passes through, 0 = none
 };

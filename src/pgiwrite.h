@@ -32,7 +32,7 @@ struct PgiWriteSpec
 struct PgiWriteResult
 {
 	QStringList files;
-	int sectors = 0;
+	int sectors = 0, roomSplit = 0;   //!< roomSplit: sectors with content 32 (lane PGIBIT32)
 	qint64 surfels = 0, probes = 0, links = 0, rooms = 0, emits = 0, bytes = 0;
 	QString error;
 };
