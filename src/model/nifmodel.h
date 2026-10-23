@@ -331,6 +331,10 @@ public:
 	void removeNiBlock( int blocknum );
 	//! lane LIVESET1: drops blocks `first`.. in one pass (links into them become -1); removeNiBlock walks the tree per block
 	void removeTailBlocks( int first );
+	//! lane LIVESET3: drops blocks first..first+count-1 from anywhere; links into them become -1, links past them move down
+	void removeBlockRange( int first, int count );
+	//! lane LIVESET3: moves blocks first..first+count-1 to start at `dst` (< first), every link renumbered
+	void moveBlockRange( int first, int count, int dst );
 	/*! lane CELLSTREAM1: every field of a block back to its type's defaults -- same number, same item -- so a
 	 *  streamed cell's freed blocks are reused and no block is ever renumbered. False if the type is unknown. */
 	bool resetNiBlock( int blocknum, bool quiet = false );

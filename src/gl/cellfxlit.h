@@ -1,6 +1,8 @@
 #ifndef CELLFXLIT_H
 #define CELLFXLIT_H
 
+#include "cellblockmap.h"
+
 #include <QString>
 #include <QVector>
 
@@ -70,6 +72,8 @@ int wwCellFxLitModel( const void * nif, const WwFxLitModel & m );
 void wwCellFxLitShape( const void * nif, int block, int serial );
 // lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
 void wwCellFxLitForget( const void * nif, int block );
+//! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)
+void wwCellFxLitRemap( const void * nif, const WwBlockMap & m );
 //! Red control data: light `index` of the published list at its base's fade is `ratio` x what was published.
 void wwCellFxLitNoOffset( const void * nif, int index, float ratio );
 //! After the document's lights are published: pick every model's lights (and write the dump).

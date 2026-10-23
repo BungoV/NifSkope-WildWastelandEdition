@@ -7,6 +7,8 @@ BSD License - see nifskope.h
 #ifndef CELLCLICK_H
 #define CELLCLICK_H
 
+#include "cellblockmap.h"
+
 #include <QModelIndex>
 #include <QObject>
 
@@ -129,5 +131,7 @@ void cellHighlightShow( NifModel * nif, const float bmin[3], const float bmax[3]
 void cellHighlightHide( NifModel * nif );
 //! Forget the shape (a new document is being built).
 void cellHighlightForget();
+//! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)
+void cellHighlightRemap( const WwBlockMap & m );
 
 #endif // CELLCLICK_H
