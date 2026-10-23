@@ -28,6 +28,8 @@ struct WwAtmoInputs
 	bool disc = true;	//!< the sun disc (the Sun row)
 	float exposure = 1.0f;
 	int viewTransform = 0;
+	float tint[17][3] = {};	//!< lane SKYA (ATMOCHECK1): the weather dome's linear color at atmomath.h's tint elevations
+	bool tintOk = false;	//!< the table is filled (the dome resolved); else Weather Tint draws the physical color
 };
 
 //! draws the sky full screen in place of the dome; false when it cannot (the caller falls back to the dome)
@@ -87,6 +89,15 @@ void wwAtmoSetExpo( int on );	//!< refused while WW_ATMO_EXPO pins it
 bool wwAtmoExpoPinned();
 //! the adapted mean: sceneMean over `counted` of `total` pixels, the rest at the sky's mean (sceneMean when off)
 float wwAtmoAdapted( float sceneMean, int counted, int total );
+
+/* lane SKYA (ATMOCHECK1): the Sky Color row. Physical = the model's color (today's); Weather Tint keeps the physical
+ * sky's luminance (the light, the exposure and the bloom see the same brightness) and takes the weather's own sky
+ * colors at each elevation (the dome's Horizon / Sky-Lower / Sky-Upper blend). Row Render > Scene > Sky Color, ships
+ * Physical, needs Physical Sky on. Pin WW_ATMO_TINT (physical|weather or 0/1), red WW_ATMO_TINT_RED = flat. */
+int wwAtmoTint();
+void wwAtmoSetTint( int mode );	//!< refused while WW_ATMO_TINT pins it
+bool wwAtmoTintPinned();
+bool wwAtmoTintRedFlat();	//!< the red: the horizon's color at every elevation (the gradient lost)
 
 QString wwAtmoSummary();
 

@@ -92,6 +92,31 @@ int main()
 			}
 		std::printf( "skymean %.7g %.7g\n", skyViewMeanLum( t.data(), w, h, r, false ), skyViewMeanLum( t.data(), w, h, r, true ) );
 	}
+	// ATMOCHECK1: a synthetic dome (rings at 0, 10, 30, 60, 90 deg; Horizon at 0 fading to Sky-Upper at 90, two
+	// vertices a ring with a 0.01 deg jitter that must merge) and a blue physical color, tinted at 0, 20, 90 deg
+	{
+		const float els[] = { 0.0f, 0.01f, 10.0f, 10.01f, 30.0f, 30.01f, 60.0f, 60.01f, 90.0f, 90.0f };
+		float wts[10][3];
+		for ( int i = 0; i < 10; i++ ) {
+			const float u = els[i] / 90.0f;
+			wts[i][0] = 1.0f - u;
+			wts[i][1] = 0.0f;
+			wts[i][2] = u;
+		}
+		std::vector<float> re, rw;
+		tintRings( els, wts, 10, re, rw );
+		const float H[3] = { 1.0f, 0.5f, 0.2f }, L[3] = { 0.3f, 0.3f, 0.3f }, U[3] = { 0.2f, 0.4f, 1.0f };
+		const float phys[3] = { 0.3f, 0.5f, 0.9f };
+		for ( int k = 0; k < 2; k++ ) {
+			float tab[kTintN][3];
+			tintTable( re, rw, H, L, U, 1.3f, k == 1, tab );
+			for ( float el : { 0.0f, 20.0f, 90.0f, -5.0f } ) {
+				float o[3];
+				weatherTint( phys, tab, el, o );
+				std::printf( "tint %d %zu %.7g %.7g %.7g %.7g\n", k, re.size(), el, o[0], o[1], o[2] );
+			}
+		}
+	}
 	// EXPO1
 	std::printf( "expo %.7g %.7g %.7g\n", adaptedWithSky( 0.2f, 0.6f, 1.5f, false ), adaptedWithSky( 0.2f, 0.6f, 1.5f, true ),
 		adaptedWithSky( 0.2f, 1.0f, 1.5f, false ) );

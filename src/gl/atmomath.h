@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace WwAtmoMath
 {
@@ -311,6 +312,85 @@ inline float adaptedWithSky( float sceneMean, float cover, float skyMean, bool r
 	if ( redSkyZero )
 		return sceneMean * cover;
 	return sceneMean * cover + std::max( skyMean, 0.0f ) * ( 1.0f - cover );
+}
+
+/* ATMOCHECK1: the Sky Color row's Weather Tint keeps the physical sky's luminance and takes the weather dome's color
+ * at the same elevation. The dome (Meshes\Sky\Atmosphere.nif) blends Horizon / Sky-Lower / Sky-Upper by its vertex
+ * colors (lookdev_dome.frag); its vertices are grouped into rings by elevation once (tintRings), and each frame the
+ * weather's colors make a table at kTintN elevations, 90 x (i / 16)^2 degrees (dense at the horizon). Red "flat":
+ * the horizon's color at every elevation (the gradient lost), which must fail the gate. */
+constexpr int kTintN = 17;
+
+inline float tintElevation( int i )
+{
+	const float t = float( i ) / float( kTintN - 1 );
+	return 90.0f * t * t;
+}
+
+//! ring means of the dome's (elevation deg, weights) points: rings within 0.05 deg merge; sorted ascending
+inline void tintRings( const float * elDeg, const float ( *w )[3], int n, std::vector<float> & ringEl,
+	std::vector<float> & ringW )
+{
+	ringEl.clear();
+	ringW.clear();
+	std::vector<int> o( size_t( std::max( n, 0 ) ) );
+	for ( int i = 0; i < n; i++ )
+		o[size_t( i )] = i;
+	std::sort( o.begin(), o.end(), [&]( int a, int b ) { return elDeg[a] < elDeg[b]; } );
+	for ( size_t k = 0; k < o.size(); ) {
+		size_t e = k;
+		double s = 0.0, a[3] = { 0.0, 0.0, 0.0 };
+		while ( e < o.size() && elDeg[o[e]] - elDeg[o[k]] < 0.05f ) {
+			s += elDeg[o[e]];
+			for ( int c = 0; c < 3; c++ )
+				a[c] += w[o[e]][c];
+			e++;
+		}
+		const double m = double( e - k );
+		ringEl.push_back( float( s / m ) );
+		for ( int c = 0; c < 3; c++ )
+			ringW.push_back( float( a[c] / m ) );
+		k = e;
+	}
+}
+
+//! the weather's linear sky color at each table elevation: scale x (wr H + wg L + wb U), the rings interpolated
+inline void tintTable( const std::vector<float> & ringEl, const std::vector<float> & ringW, const float H[3],
+	const float L[3], const float U[3], float scale, bool redFlat, float out[kTintN][3] )
+{
+	const int nr = int( ringEl.size() );
+	for ( int i = 0; i < kTintN; i++ ) {
+		const float el = redFlat ? 0.0f : tintElevation( i );
+		float wt[3] = { 1.0f, 0.0f, 0.0f };
+		if ( nr > 0 ) {
+			int j = 0;
+			while ( j + 1 < nr && ringEl[size_t( j + 1 )] < el )
+				j++;
+			const int k = std::min( j + 1, nr - 1 );
+			const float span = ringEl[size_t( k )] - ringEl[size_t( j )];
+			const float f = ( k == j || span <= 0.0f ) ? 0.0f : std::clamp( ( el - ringEl[size_t( j )] ) / span, 0.0f, 1.0f );
+			for ( int c = 0; c < 3; c++ )
+				wt[c] = ringW[size_t( j ) * 3 + size_t( c )] * ( 1.0f - f ) + ringW[size_t( k ) * 3 + size_t( c )] * f;
+		}
+		for ( int c = 0; c < 3; c++ )
+			out[i][c] = scale * ( wt[0] * H[c] + wt[1] * L[c] + wt[2] * U[c] );
+	}
+}
+
+//! the physical color's luminance in the table's color at elevDeg (below the horizon: the horizon's); the GLSL twin
+//! is atmo_sky.frag atWeatherTint
+inline void weatherTint( const float phys[3], const float table[kTintN][3], float elevDeg, float out[3] )
+{
+	const float t = std::sqrt( std::clamp( elevDeg, 0.0f, 90.0f ) / 90.0f ) * float( kTintN - 1 );
+	const int i = std::min( int( t ), kTintN - 2 );
+	const float f = t - float( i );
+	float w[3];
+	for ( int c = 0; c < 3; c++ )
+		w[c] = table[i][c] * ( 1.0f - f ) + table[i + 1][c] * f;
+	const float lw = lum( w );
+	const float s = lw > 1e-8f ? lum( phys ) / lw : 0.0f;
+	for ( int c = 0; c < 3; c++ )
+		out[c] = lw > 1e-8f ? w[c] * s : phys[c];
 }
 
 }	// namespace WwAtmoMath

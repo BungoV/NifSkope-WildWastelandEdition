@@ -1,7 +1,7 @@
 """Lane SKYA: the physical sky's CPU math (src/gl/atmomath.h) against the numpy model and published numbers.
 Runs no NifSkope. Builds tests/atmomath/atmomath_dump.cpp with the MSYS2 UCRT64 g++ into a scratch folder.
 
-    python -I tests/spells/atmomath_check.py <scratch dir> [--red flat|irrflat|phase|noext|zenithw|skyzero]
+    python -I tests/spells/atmomath_check.py <scratch dir> [--red flat|irrflat|phase|noext|zenithw|skyzero|tintflat]
 
 Gates:
   transmittance   cpuTrans (the key light's T, ATMOSUN1) vs atmo_model.transmittance (< 0.005 absolute)
@@ -19,6 +19,10 @@ Gates:
   sky mean        skyViewMeanLum on a synthetic table of max(cos zenith, 0): the solid-angle mean is 1/2 (< 0.01);
                   red zenithw (bands weighted alike) gives 2/pi
   exposure        the frame mean with the sky = cover x scene + (1 - cover) x sky; full cover = the scene alone
+  weather tint    (ATMOCHECK1, the Sky Color row's Weather Tint) a synthetic dome of 5 rings (10 jittered vertices
+                  merge to 5): the physical luminance kept exactly at every elevation; the chromaticity = the
+                  Horizon's at 0 deg and below, the Sky-Upper's at the zenith, between at 20 deg; red "flat" (the
+                  horizon color everywhere) fails the zenith
 The sun/ambient gates read skyKeyLight, the function the build ships (atmosphere.cpp wwAtmoKeyLight).
 Each red must make one gate fail: flat (WW_ATMO_SUN_RED=flat: T held at 45 deg, a low sun no warmer), phase (the
 vanilla moon), skyzero; irrflat is the checker's own (no colour change), proving the irradiance gate can fail.
@@ -142,6 +146,23 @@ def main():
     got = e[1] if red == 'skyzero' else e[0]
     gate('exposure', abs(got - want) < 1e-6 and abs(e[2] - 0.2) < 1e-6,
          'cover 0.6: %.6f (want %.6f); full cover %.6f (want 0.2)' % (got, want, e[2]))
+    tk = 1 if red == 'tintflat' else 0
+    T = {float(x[2]): np.array([float(v) for v in x[3:6]]) for x in D['tint'] if int(x[0]) == tk}
+    rings = int(D['tint'][0][1])
+    phys = np.array([0.3, 0.5, 0.9])
+    H, U = np.array([1.0, 0.5, 0.2]), np.array([0.2, 0.4, 1.0])
+
+    def chroma(c):
+        return c / c.sum()
+    lerr = max(abs(lum(T[el]) - lum(phys)) for el in T)
+    zen = np.abs(chroma(T[90.0]) - chroma(U)).max()
+    hor = max(np.abs(chroma(T[0.0]) - chroma(H)).max(), np.abs(chroma(T[-5.0]) - chroma(H)).max())
+    mid = chroma(T[20.0])
+    between = bool(np.all(mid >= np.minimum(chroma(H), chroma(U)) - 1e-6) and np.all(mid <= np.maximum(chroma(H), chroma(U)) + 1e-6)
+                   and np.abs(mid - chroma(H)).max() > 0.01)
+    gate('weather tint', rings == 5 and lerr < 1e-5 and zen < 1e-4 and hor < 1e-4 and between,
+         'rings %d (want 5), luminance worst %.2g, zenith chroma vs Sky-Upper %.2g, horizon vs Horizon %.2g, 20 deg between %s'
+         % (rings, lerr, zen, hor, between))
     return 1 if fails else 0
 
 

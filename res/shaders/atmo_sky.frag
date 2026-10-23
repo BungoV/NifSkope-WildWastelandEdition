@@ -21,6 +21,8 @@ uniform float atLimb;	// 1 = limb darkening (High+)
 uniform float atDiscCap;	// the disc's display cap (scene units)
 uniform float sceneExposure;
 uniform int viewTransform;
+uniform float atTintOn;	// lane SKYA (ATMOCHECK1): 1 = the Sky Color row's Weather Tint
+uniform vec3 atTint[17];	// the weather dome's linear color at 90 (i / 16)^2 degrees (gl/atmomath.h tintTable)
 
 out vec4 fragColor;
 
@@ -37,6 +39,17 @@ vec3 atLookup( sampler2D lut, vec3 d, vec3 l )
 	return texture( lut, atSkyDirToUv( atCamR, d.z, cosAz, atViewSize ) ).rgb;
 }
 
+// the GLSL twin of gl/atmomath.h weatherTint: the physical luminance in the weather's color at this elevation
+vec3 atWeatherTint( vec3 c, float elevDeg )
+{
+	float t = sqrt( clamp( elevDeg, 0.0, 90.0 ) / 90.0 ) * 16.0;
+	int i = min( int( t ), 15 );
+	vec3 w = mix( atTint[i], atTint[i + 1], t - float( i ) );
+	const vec3 y = vec3( 0.2126, 0.7152, 0.0722 );
+	float lw = dot( w, y );
+	return lw > 1e-8 ? w * ( dot( c, y ) / lw ) : c;
+}
+
 void main()
 {
 	vec2 ndc = ( gl_FragCoord.xy - atRect.xy ) * atRect.zw * 2.0 - 1.0;
@@ -46,6 +59,8 @@ void main()
 	vec3 c = atSunK * atLookup( atSunView, d, atSunW );
 	if ( atMoonK > 0.0 )
 		c += atMoonK * atLookup( atMoonView, d, atMoonW );
+	if ( atTintOn > 0.5 )	// the disc below keeps the physical color
+		c = atWeatherTint( c, degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ) );
 	float cs = dot( d, atSunW );
 	if ( cs > kSunCos ) {
 		float x = clamp( ( 1.0 - cs ) / ( 1.0 - kSunCos ), 0.0, 1.0 );	// ~ (theta / alpha)^2

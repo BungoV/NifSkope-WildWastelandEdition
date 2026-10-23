@@ -2,6 +2,33 @@
 
 ## Lane SKYA (2026-10-23, branch skya-20261023): the physical sky reaches the world, every part off by default
 
+### ATMOCHECK1: the model checked against Bruneton 2017, and a Weather Tint sky color
+- **Cross-check:** `tests/spells/atmo_bruneton_check.py` ports Bruneton 2017's reference numerics
+  ("Precomputed Atmospheric Scattering: a New Implementation", functions.glsl: the trapezoidal optical length,
+  ComputeSingleScattering, GetTransmittance's ratio, the Rayleigh and Cornette-Shanks phases) and runs them against
+  `atmo_model.py` (Hillaire 2020; the GPU LUTs are gated against it by `atmo_lut_check.py`) on the same medium (his
+  demo constants are Hillaire's). Transmittance worst 0.00011 at 8 zenith angles (gate 0.002), Rayleigh single
+  scattering 0.0010 and Rayleigh + Mie 0.0020 at 12 view/sun pairs (gate 0.005). Reported, not gated: Cornette-Shanks
+  against our Henyey-Greenstein differs by up to 7 % (a phase choice), and Bruneton's demo count of 50 samples is
+  up to 11 % off 400 for a low sun through the 1.2 km Mie layer (his sampling, not the model). Red `--red noozone`
+  (his side without ozone) fails all three. The stars' horizon dimming (NIGHT1) follows Bruneton & Neyret 2008's
+  transmittance ratio and is gated in `atmomath_check.py`.
+- **What (row):** Sky Color = Weather Tint keeps the physical sky's luminance (so the light, Exposure From Sky and
+  the bloom see the same brightness) and takes the weather's own sky colors at each elevation: the dome mesh's
+  Horizon / Sky-Lower / Sky-Upper weights are grouped into rings once, the hour's weather colors make a 17-entry
+  table each frame (`atmomath.h` tintRings / tintTable / weatherTint), and `atmo_sky.frag` atWeatherTint applies it
+  to the sky's pixels. The sun disc keeps the physical color; the air (Aerial Perspective) and the key light are
+  not tinted.
+- **Row:** Render > Scene > Sky Color (Physical / Weather Tint), key `Settings/Render/Scene/Sky Color`, live; needs
+  Physical Sky on. `WW_ATMO_TINT=physical|weather` (0/1) pins it; red `WW_ATMO_TINT_RED=flat` (the horizon's color
+  at every elevation). Physical = today's sky exactly (the shader branch is skipped). stderr: the sky line gains
+  `,tint=weather` (or `,tint=refused(no dome)`).
+- **Cost:** one uniform array (17 vec3) and a few ALU per sky pixel, well under 0.01 ms at 1080p (estimate); CPU
+  17 lerps a frame plus a one-time ring sort of the dome's vertices; no memory.
+- **Checks:** `atmomath_check.py` gate "weather tint" (a synthetic 5-ring dome: luminance kept to 5e-8, the zenith
+  takes Sky-Upper's chromaticity, the horizon and below the Horizon's; red `tintflat` fails the zenith).
+  `atmo_sky.prog` links in all 3 modes.
+
 ### EXPO1: the eye adaptation counts the sky
 - **What:** the imagespace measure (the game's eye adaptation) averages only the cell-lit pixels, so an open view
   of a bright sky adapts as if the sky were not there. With this row on, the rest of the frame counts at the

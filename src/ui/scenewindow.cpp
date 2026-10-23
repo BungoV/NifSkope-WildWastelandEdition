@@ -192,6 +192,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	exposureFromSkyBox->setCurrentIndex( std::clamp( wwAtmoExpo(), 0, 1 ) );
 	wwMatchFieldStyle( exposureFromSkyBox );
 	row( tr( "Exposure From Sky" ), exposureFromSkyBox, true );
+	// lane SKYA (ATMOCHECK1): the physical sky's luminance in the weather's colors (needs Physical Sky), ships Physical
+	skyColorBox = new QComboBox( tree );
+	skyColorBox->setObjectName( QStringLiteral( "skyColor" ) );
+	skyColorBox->addItems( { tr( "Physical" ), tr( "Weather Tint" ) } );
+	skyColorBox->setCurrentIndex( std::clamp( wwAtmoTint(), 0, 1 ) );
+	wwMatchFieldStyle( skyColorBox );
+	row( tr( "Sky Color" ), skyColorBox, true );
 	liveCheck( cloudsBox, "lookdevClouds", tr( "Clouds" ), wwLookdevClouds() );
 	liveCheck( sunBox, "lookdevSun", tr( "Sun" ), wwLookdevSun() );
 	// lane TERRSHADOW1: Engine (the sky clock's arc) or Real (Boston's solar path); ships Engine
@@ -370,6 +377,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveTier( sunlightFromSkyBox, &wwAtmoSetSun );
 	liveTier( moonPhaseStarsBox, &wwAtmoSetNight );
 	liveTier( exposureFromSkyBox, &wwAtmoSetExpo );
+	liveTier( skyColorBox, &wwAtmoSetTint );
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
 	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );
@@ -440,6 +448,7 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( sunPathBox ), static_cast<QWidget *>( physicalSkyBox ),
 			static_cast<QWidget *>( aerialPerspectiveBox ), static_cast<QWidget *>( sunlightFromSkyBox ),
 			static_cast<QWidget *>( moonPhaseStarsBox ), static_cast<QWidget *>( exposureFromSkyBox ),
+			static_cast<QWidget *>( skyColorBox ),
 			static_cast<QWidget *>( cascadeQualityBox ),
 			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ),
 			static_cast<QWidget *>( shadowParBox ), static_cast<QWidget *>( shadowDistanceBox ) } )

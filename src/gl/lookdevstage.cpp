@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include "gl/scenelighting.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "gl/atmosphere.h"	// lane ATMO1: the physical sky
+#include "gl/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
 #include "gl/sunshadow.h"
 #include "model/nifmodel.h"
 
@@ -1718,6 +1719,33 @@ bool drawAtmo( Scene * scene, QStringList & drew )
 	in.disc = s.sun;
 	in.exposure = skyExposure();
 	in.viewTransform = skyViewTransform();
+	// lane SKYA (ATMOCHECK1): the weather dome's colors by elevation for the Sky Color row's Weather Tint; the rings come
+	// from the dome mesh's vertex weights once per mesh, the colors from this hour's weather each frame
+	if ( wwAtmoTint() > 0 ) {
+		QString why;
+		const SkyMesh * m = domeMesh( scene, &why );
+		const int cs = m && m->nv > 0 ? int( m->col.size() ) / int( m->nv ) : 0;
+		if ( m && cs >= 3 && m->pos.size() >= int( m->nv ) * 3 ) {
+			static const void * ringsFor = nullptr;
+			static quint32 ringsNv = 0;
+			static std::vector<float> ringEl, ringW;
+			if ( ringsFor != m || ringsNv != m->nv ) {
+				std::vector<float> el( m->nv ), w( size_t( m->nv ) * 3 );
+				for ( quint32 i = 0; i < m->nv; i++ ) {
+					const float * p = m->pos.constData() + size_t( i ) * 3;
+					el[i] = std::atan2( p[2], std::hypot( p[0], p[1] ) ) * 57.2957795f;
+					for ( int c = 0; c < 3; c++ )
+						w[size_t( i ) * 3 + size_t( c )] = m->col[int( i ) * cs + c];
+				}
+				WwAtmoMath::tintRings( el.data(), reinterpret_cast<const float ( * )[3]>( w.data() ), int( m->nv ), ringEl, ringW );
+				ringsFor = m;
+				ringsNv = m->nv;
+			}
+			const SkyFrame f = skyFrame();
+			WwAtmoMath::tintTable( ringEl, ringW, f.hz, f.lo, f.up, f.skyScale, wwAtmoTintRedFlat(), in.tint );
+			in.tintOk = true;
+		}
+	}
 	QString line;
 	const bool ok = wwAtmoDrawSky( scene, in, &line );
 	drew << QStringLiteral( "sky:" ) + line;

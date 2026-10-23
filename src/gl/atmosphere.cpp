@@ -26,6 +26,8 @@ constexpr const char * kApKey = "Settings/Render/Scene/Aerial Perspective";
 constexpr const char * kSunKey = "Settings/Render/Scene/Sunlight From Sky";	// lane SKYA (ATMOSUN1)
 constexpr const char * kNightKey = "Settings/Render/Scene/Moon Phase and Stars";	// lane SKYA (NIGHT1)
 constexpr const char * kExpoKey = "Settings/Render/Scene/Exposure From Sky";	// lane SKYA (EXPO1)
+constexpr const char * kTintKey = "Settings/Render/Scene/Sky Color";	// lane SKYA (ATMOCHECK1)
+static_assert( kTintN == 17, "WwAtmoInputs::tint and atmo_sky.frag atTint[17]" );
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 constexpr int kTransW = 256, kTransH = 64;
 /* lane SKYA (ATMO2): the aerial-perspective volume's reach. A Fallout 4 worldspace is ~4 km across (64 cells of
@@ -54,6 +56,8 @@ struct AtState
 	bool expoPinned = false;
 	float skyMean = -1.0f;	// EXPO1: the sky's mean luminance over the upper hemisphere, scene units (< 0 = none)
 	quint64 frame = 0, skyFrame = 0;	// EXPO1: the frame count (wwAtmoApFrame) and the frame skyMean was read in
+	int tint = 0;	// lane SKYA (ATMOCHECK1): the Sky Color row, 0 Physical / 1 Weather Tint (pin WW_ATMO_TINT)
+	bool tintPinned = false;
 };
 
 //! lane SKYA: one row's value from its pin (already read by the caller: the survey needs literal names), a harness
@@ -112,6 +116,7 @@ AtState & as()
 		s.sun = rowValue( wwEnvStr( "WW_ATMO_SUN" ), kSunKey, { "off", "tint", "full" }, s.sunPinned );
 		s.night = rowValue( wwEnvStr( "WW_ATMO_NIGHT" ), kNightKey, { "off", "on" }, s.nightPinned );
 		s.expo = rowValue( wwEnvStr( "WW_ATMO_EXPO" ), kExpoKey, { "off", "on" }, s.expoPinned );
+		s.tint = rowValue( wwEnvStr( "WW_ATMO_TINT" ), kTintKey, { "physical", "weather" }, s.tintPinned );
 	}
 	return s;
 }
@@ -584,6 +589,12 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			p->uni1f( "atDiscCap", in.disc ? kDiscCap : 0.0f );
 			p->uni1f( "sceneExposure", in.exposure );
 			p->uni1i( "viewTransform", in.viewTransform );
+			// lane SKYA (ATMOCHECK1): the Sky Color row's Weather Tint (atWeatherTint); 0 = the physical color, as before
+			const bool tintOn = s.tint > 0 && in.tintOk;
+			p->uni1f( "atTintOn", tintOn ? 1.0f : 0.0f );
+			const GLint tintLoc = p->uniLocation( "atTint" );
+			if ( tintOn && tintLoc >= 0 )
+				fn->glUniform3fv( tintLoc, kTintN, &in.tint[0][0] );
 			quad( r );
 			r->stopProgram();
 		} else {
@@ -620,6 +631,9 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	for ( const char * w : { "nosunt", "double" } )
 		if ( apRed( w ) )
 			reds += QStringLiteral( ",AP_RED=%1" ).arg( QLatin1StringView( w ) );
+	if ( s.tint > 0 )	// lane SKYA (ATMOCHECK1)
+		reds += in.tintOk ? ( wwAtmoTintRedFlat() ? QStringLiteral( ",tint=weather,TINT_RED=flat" ) : QStringLiteral( ",tint=weather" ) )
+			: QStringLiteral( ",tint=refused(no dome)" );
 	s.last = ok ? QString( "physical(tier=%1,view=%2x%3,ms=%4,haze=%5/km@%6km,sun_elev=%7,k=%8,moon=%9%10)" )
 			.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( vw ).arg( vh ).arg( msN )
 			.arg( double( s.haze[0] ), 0, 'f', 3 ).arg( double( s.haze[1] ), 0, 'f', 3 ).arg( double( sunEl ), 0, 'f', 1 )
@@ -782,6 +796,30 @@ void wwAtmoApFrame()
 	for ( AtGpu & g : gpus() )
 		g.ap.valid = false;
 	as().frame++;
+}
+
+int wwAtmoTint()
+{
+	return as().tint;
+}
+
+void wwAtmoSetTint( int mode )
+{
+	AtState & s = as();
+	if ( s.tintPinned )
+		return;
+	s.tint = mode ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kTintKey ), s.tint );
+}
+
+bool wwAtmoTintPinned()
+{
+	return as().tintPinned;
+}
+
+bool wwAtmoTintRedFlat()
+{
+	return wwEnvStr( "WW_ATMO_TINT_RED" ).trimmed().toLower() == QLatin1StringView( "flat" );
 }
 
 int wwAtmoExpo()
