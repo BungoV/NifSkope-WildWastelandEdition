@@ -1826,8 +1826,10 @@ struct LodgenAoMap
 qint64 lodgenAoWrite( const QString & path, const LodgenAoMap & m, QString * why );
 bool lodgenAoRead( const QString & path, LodgenAoMap & m, QString * why );
 //! Bake `<outDir>/<ws>.loda` over the worldspace (or opts' region); `log` gets the census.
+//! `caches` (lane BAKESPEED3): the pyramid's object height field is taken from it when gathered over the same rectangle.
 bool lodgenBakeAoMap( const EsmWorld & world, const QString & dataRoot,
-	const QString & outDir, const LodgenVtOptions & opts, QStringList * log, QString * why );
+	const QString & outDir, const LodgenVtOptions & opts, QStringList * log, QString * why,
+	LodgenBakeCaches * caches = nullptr );
 
 /*! What the option does to the pyramid's options: Hybrid sets the finest level
  *  to dim 8. Returns a one-line note when it could not (the .btr chunk sheets

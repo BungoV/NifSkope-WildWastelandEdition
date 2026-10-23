@@ -6694,6 +6694,9 @@ struct LodgenBakeCaches
 	 * (the gather is a function of the key alone); void so this struct needs no LodgenRoadSet. */
 	std::shared_ptr<void> roadSet;
 	QString roadKey;
+	//! lane BAKESPEED3: the pyramid's object height field, handed to the AO map when its gather key matches
+	std::shared_ptr<void> objField;
+	QString objKey;
 	~LodgenBakeCaches()
 	{
 		for ( DDSTexture16 * t : texCache )
@@ -6730,6 +6733,8 @@ void lodgenBakeCachesReleaseTextures( LodgenBakeCaches * caches, const char * ph
 	if ( caches && qstrcmp( phase, "decals" ) != 0 ) {	// the decals' road set waits for the pyramid
 		caches->roadSet.reset();
 		caches->roadKey.clear();
+		caches->objField.reset();
+		caches->objKey.clear();
 	}
 	if ( !caches || lodgenBakeMemRed() )
 		return;
@@ -17997,8 +18002,14 @@ bool lodgenAoRead( const QString & path, LodgenAoMap & m, QString * why )
 	return true;
 }
 
+static QString lodgenObjFieldKey( const EsmWorld & world, const QString & dataRoot, int w, int s, int e, int n )
+{
+	return QString( "%1|%2|%3 %4 %5 %6" ).arg( quintptr( &world ) ).arg( dataRoot ).arg( w ).arg( s ).arg( e ).arg( n );
+}
+
 bool lodgenBakeAoMap( const EsmWorld & world, const QString & dataRoot,
-	const QString & outDir, const LodgenVtOptions & opts, QStringList * log, QString * why )
+	const QString & outDir, const LodgenVtOptions & opts, QStringList * log, QString * why,
+	LodgenBakeCaches * caches )
 {
 	auto fail = [why]( const QString & s ) {
 		if ( why )
@@ -18020,10 +18031,20 @@ bool lodgenBakeAoMap( const EsmWorld & world, const QString & dataRoot,
 	lodgenVtFillPainted( world, F, west, south, east, north );
 	const std::function<bool( int, int )> painted = [&F]( int qx, int qy ) { return F.isPaintedQ( qx, qy ); };
 	// the objects' height lattice, as the pyramid gathers it
-	std::unique_ptr<LodgenObjectHeightField> objField;
+	std::shared_ptr<LodgenObjectHeightField> objField;
+	bool objReused = false;
 	if ( opts.cover.terrainObjectAo || opts.cover.skyObjects ) {
-		objField.reset( new LodgenObjectHeightField );
-		objField->gather( world, dataRoot, west, south, east, north );
+		// lane BAKESPEED3: the pyramid's field when it was gathered over this rectangle (the gather is a function of the key)
+		if ( caches && caches->objField && !lodgenBakeSpeedRed()
+			&& caches->objKey == lodgenObjFieldKey( world, dataRoot, west, south, east, north ) ) {
+			objField = std::static_pointer_cast<LodgenObjectHeightField>( caches->objField );
+			objReused = true;
+		} else {
+			objField.reset( new LodgenObjectHeightField );
+			objField->gather( world, dataRoot, west, south, east, north );
+		}
+		lodgenMemNote( QStringLiteral( "ao map object field" ), objReused ? QStringLiteral( "the pyramid's" )
+			: QStringLiteral( "gathered" ) );
 	}
 	const qint64 gatherMs = t.elapsed();
 	LodgenBakeCaches * bc = lodgenCreateBakeCaches();
@@ -19029,7 +19050,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	 * stands on the same ground, so the ESM walk and the LOD model loads are
 	 * paid once. Coarser levels inherit the darkened AO byte through the
 	 * existing box filter, exactly as they inherit the splat. */
-	std::unique_ptr<LodgenObjectHeightField> objField;
+	std::shared_ptr<LodgenObjectHeightField> objField;
 	LodgenObjectAoCensus objCensus;
 	/* lane TERR1: the sky union (`skyObjects`, default on) reads the same
 	 * field, so it is gathered for either switch. */
@@ -19037,6 +19058,12 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		objField.reset( new LodgenObjectHeightField );
 		objField->gather( world, dataRoot, levels[0].west, levels[0].south,
 			levels[0].east, levels[0].north );
+		// lane BAKESPEED3: the AO map gathers the same field over the same rectangle; it takes this one
+		if ( caches && !lodgenBakeSpeedRed() ) {
+			caches->objField = objField;
+			caches->objKey = lodgenObjFieldKey( world, dataRoot, levels[0].west, levels[0].south,
+				levels[0].east, levels[0].north );
+		}
 		objCensus.add( objField->gatherCensus() );
 		if ( !opts.cover.dumpObjectAoPath.isEmpty() )
 			objField->dump( opts.cover.dumpObjectAoPath );

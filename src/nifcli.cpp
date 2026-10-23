@@ -4477,7 +4477,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				QStringList alog;
 				vtOk = lodgenBakeAoMap( world,
 					dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
-					vtDir, vo, &alog, &vterr );
+					vtDir, vo, &alog, &vterr, bakeCaches );
 				for ( const QString & l : alog )
 					censusOut( l );
 				if ( !vtOk )
