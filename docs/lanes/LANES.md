@@ -151,7 +151,16 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | PGIBIT32 | pgiwrite / FO4CS .pgi reader / pgi_read.py learn the .tbk room-split header bit 32 (side = bin + 6 x slot), so ROOMCLAMP1 can ship. S | CODE DONE 10-23 GAPMISC1 pgibit32-20261023 5fb9bd50: OFF = same bytes on 11 fixtures + museum + Concord; ON round-trips; FO4CS needs in notes/gapmisc1/FO4CS_PGI.md |
 | RTGI1-CONCORD | RTGI1 GPU != CPU on headless Concord 5x5 (21/61 files; one surfel, one faces-seen count): WW_BAKE_RT_CHECK=1, fix edge/tie in rqx.comp; red WW_BAKE_RT_WHOLE=0. S-M | PLANNED |
 | IMPOSTORAA1-POP | owed fine-orbit popping check for impostors (flicker count; AA off as red). S | PLANNED (live, after LIVESET1) |
-| FXPARITY1 | particle parity vs the game, per-nif shot vs capture + reds (partly EFFECTPARITY1/FXCHECK1). M | RUNNING 10-23 (bungo yes): branch fxparity1-20261023 off batch4; code + build only, shots in the next batch |
+| FXPARITY1 | particle parity vs the game, per-nif shot vs capture + reds (partly EFFECTPARITY1/FXCHECK1). M | CODE DONE 10-23 fxparity1-20261023 4988ea1f: Scene row Particle Game Rules (off; WW_FX_PARITY): simple colour, linear drag, flipbook steps, draw law + soft fade; reds color/drag/subtex/law/soft; unit tests/fxparity green, red fails; rows notes/fxparity1/rows_live.txt for the next batch |
+| FXPARITY2-DRAGRANGE | drag Range / Range Falloff (full drag inside Range, none past Falloff, linear between; 3 vanilla blocks). S | APPROVED (FXPARITY1 goal, 10-23) |
+| FXPARITY2-WIND | BSWindModifier: particles pushed by the weather wind (400 blocks, 227 effect NIFs; the viewer ignores it). M | APPROVED (FXPARITY1 goal, 10-23) |
+| FXPARITY2-COLLIDE | NiPSysPlanarCollider / SphericalCollider / ColliderManager (bounce, die, spawn on hit; 68+ NIFs). M | APPROVED (FXPARITY1 goal, 10-23) |
+| FXPARITY2-BOMB | NiPSysBombModifier push (193 blocks, 64 NIFs). S | APPROVED (FXPARITY1 goal, 10-23) |
+| FXPARITY2-RECYCLE | BSPSysRecycleBoundModifier + BSPSysLODModifier (recycle box; particle count by distance; every effect NIF has LOD). S | APPROVED (FXPARITY1 goal, 10-23) |
+| FXPARITY2-EMITVAR | emitter speed/size/life variation: symmetric or one-sided? not found in Todd's treat yet; read the emit routine. S | APPROVED (FXPARITY1 goal, 10-23) |
+| FXPARITY2-DETAILS | additive (Ab) technique details, vertex colour gate (Vc flag), flipbook frame byte wrap. S | APPROVED (FXPARITY1 goal, 10-23) |
+| FXPARITY2-GRAVROT | check NiPSysGravityModifier + NiPSysRotationModifier against the game (1136 + 836 blocks). S | APPROVED (FXPARITY1 goal, 10-23) |
+| FXPARITY2-REFS | game reference shots per effect NIF (muzpistolsmall01, explosiongrenade01, deadinsectfloorimpact, Memory Den steam) from his rdc captures beside the viewer shots. S | APPROVED (FXPARITY1 goal, 10-23) |
 | CARDMEM1 | memlog whole-map bake through chunk pass + card arrays; bar 10.5 GB under the 12 GB guard. S | PLANNED |
 | CABLEFADE1 | _Wind cables take grass distance fade? bulbs + shadows follow the sway. S | PLANNED |
 | WATERSCROLL1 | drive water noise scroll (cellwater.cpp:228, now 0) from the clock with WATR speeds; red scroll 0. S | PLANNED |
