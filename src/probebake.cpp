@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -246,6 +247,19 @@ struct SurfelBins
 	}
 };
 typedef std::unordered_map<Key, SurfelBins, KeyHash> SurfelMap;
+//! lane RTGI2: a chunk's samples per (cell, bin), so only the bins hit take memory
+struct KeyB
+{
+	Key k;
+	int bin;
+	quint32 room = 0;   // MERGE1023: GAPBAKE1's probe room (0 = split off)
+	bool operator==( const KeyB & o ) const { return k == o.k && bin == o.bin && room == o.room; }
+};
+struct KeyBHash
+{
+	size_t operator()( const KeyB & b ) const { return KeyHash()( b.k ) ^ ( size_t( b.bin ) * 0x9E3779B97F4A7C15ull ) ^ ( size_t( b.room ) * 0xC2B2AE3D27D4EB4Full ); }
+};
+typedef std::unordered_map<KeyB, Bin, KeyBHash> BinMap;
 
 struct Final
 {
@@ -319,7 +333,8 @@ struct LKeyHash
 struct Chunk
 {
 	int first = 0, count = 0;
-	SurfelMap surfels;
+	BinMap surfels;
+	std::unordered_map<Key, quint32, KeyHash> firstRoom;   // MERGE1023: room split on: a cell's first hit room in this chunk
 	std::vector<ProbeOut> probes;
 	qint64 hits = 0, misses = 0;
 	qint64 spilled = 0;         // links sent to a second side instead of refused
@@ -336,6 +351,7 @@ struct Chunk
 	int waterUnder = 0;                      // lane WATER1: probes under the water
 	double waterReflW = 0;                   // lane WATER1: the sphere the mirror legs took
 	QString waterDump;                       // lane WATER1: the gate's rays (spec.waterDumpProbes)
+	qint64 pf[11] = {};                      // lane RTGI2: WW_BAKE_PROF section ns
 };
 
 } // namespace
@@ -503,6 +519,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	 * by the stored winding; a two-sided face has no back). A probe whose back-face share of the sphere is over
 	 * spec.backMax moves to the nearest point of a 35-unit lattice (within 280) under it, 16 units clear of any
 	 * surface; none: it is dropped. backMax >= 1 or red "backface": every probe stays (the old bake). */
+	R.msPart[0] = double( tm.nsecsElapsed() ) / 1e6;
 	{
 		const int NB = 256, NQ = 32;
 		std::vector<double> bd( size_t( NB ) * 3 );
@@ -570,36 +587,70 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		std::vector<double> share( np, 0.0 );
 		std::vector<int> fate( np, 0 );   // 0 kept, 1 moved, 2 dropped
 		std::vector<std::array<double, 3>> moved( np );
-		std::atomic<size_t> next( 0 );
-		auto work = [&]() {
-			for ( size_t pi; ( pi = next++ ) < np; ) {
-				const ProbePoint & pp = probesOwn[pi];
-				const double pl[3] = { double( pp.pos[0] ) - O[0], double( pp.pos[1] ) - O[1], double( pp.pos[2] ) };
-				double near = 0;
-				share[pi] = backShare( pl, NB, &near );
-				if ( !ruleOn || share[pi] <= double( spec.backMax ) )
-					continue;
-				fate[pi] = 2;
-				for ( const auto & o3 : offs ) {
-					const double c[3] = { pl[0] + o3[0], pl[1] + o3[1], pl[2] + o3[2] };
-					if ( backShare( c, NQ, &near ) > double( spec.backMax ) || !( near > clear ) )
-						continue;
-					if ( backShare( c, NB, &near ) > double( spec.backMax ) || !( near > clear ) || roofTop( c ) )
-						continue;
-					fate[pi] = 1;
-					moved[pi] = { c[0] + O[0], c[1] + O[1], c[2] };
-					break;
-				}
-			}
-		};
-		{
-			using std::thread;
-			const int nt = std::max( 1, spec.threads > 0 ? spec.threads : bakert::threads() );
+		const int nt = std::max( 1, spec.threads > 0 ? spec.threads : bakert::threads() );
+		auto runPool = [&]( const std::function<void()> & work ) {
 			std::vector<std::thread> pool;
 			for ( int t = 0; t < nt; t++ )
 				pool.emplace_back( work );
 			for ( std::thread & t : pool )
 				t.join();
+		};
+		auto probeAt = [&]( size_t pi, double pl[3] ) {
+			const ProbePoint & pp = probesOwn[pi];
+			pl[0] = double( pp.pos[0] ) - O[0];
+			pl[1] = double( pp.pos[1] ) - O[1];
+			pl[2] = double( pp.pos[2] );
+		};
+		std::atomic<size_t> next( 0 );
+		runPool( [&]() {
+			for ( size_t pi; ( pi = next++ ) < np; ) {
+				double pl[3], near = 0;
+				probeAt( pi, pl );
+				share[pi] = backShare( pl, NB, &near );
+				if ( ruleOn && share[pi] > double( spec.backMax ) )
+					fate[pi] = 2;
+			}
+		} );
+		/* lane RTGI2: the over-bar probes' lattice search in blocks of 64 candidates over every worker (block 0 of each
+		 * probe first, so one dropped probe no longer runs alone at the end). A probe takes its lowest passing
+		 * candidate: the serial loop's first success, so the same move. */
+		std::vector<size_t> over;
+		for ( size_t pi = 0; pi < np; pi++ )
+			if ( fate[pi] == 2 )
+				over.push_back( pi );
+		const size_t kBlock = 64, nBlocks = ( offs.size() + kBlock - 1 ) / kBlock, nTask = over.size() * nBlocks;
+		std::vector<std::atomic<size_t>> best( over.size() );
+		for ( size_t oi = 0; oi < over.size(); oi++ )
+			best[oi].store( offs.size() );
+		next = 0;
+		runPool( [&]() {
+			for ( size_t tk; ( tk = next++ ) < nTask; ) {
+				const size_t oi = tk % over.size(), i0 = tk / over.size() * kBlock;
+				double pl[3], near = 0;
+				probeAt( over[oi], pl );
+				for ( size_t i = i0; i < std::min( offs.size(), i0 + kBlock ) && i < best[oi].load(); i++ ) {
+					const auto & o3 = offs[i];
+					const double c[3] = { pl[0] + o3[0], pl[1] + o3[1], pl[2] + o3[2] };
+					if ( backShare( c, NQ, &near ) > double( spec.backMax ) || !( near > clear ) )
+						continue;
+					if ( backShare( c, NB, &near ) > double( spec.backMax ) || !( near > clear ) || roofTop( c ) )
+						continue;
+					for ( size_t cur = best[oi].load(); i < cur && !best[oi].compare_exchange_weak( cur, i ); )
+						;
+					break;
+				}
+			}
+		} );
+		for ( size_t oi = 0; oi < over.size(); oi++ ) {
+			const size_t i = best[oi].load();
+			if ( i >= offs.size() )
+				continue;
+			const size_t pi = over[oi];
+			double pl[3];
+			probeAt( pi, pl );
+			const double c[3] = { pl[0] + offs[i][0], pl[1] + offs[i][1], pl[2] + offs[i][2] };
+			fate[pi] = 1;
+			moved[pi] = { c[0] + O[0], c[1] + O[1], c[2] };
 		}
 		R.backMax = spec.backMax;
 		R.backRule = ruleOn;
@@ -688,6 +739,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		R.roomSplitRooms = int( seen.size() );
 	}
 
+	R.msPart[1] = double( tm.nsecsElapsed() ) / 1e6 - R.msPart[0];
 	// the ray set: a Fibonacci sphere, 4 pi / N steradians each
 	std::vector<double> dirs( size_t( N ) * 3 );
 	const double golden = 3.14159265358979323846 * ( 3.0 - std::sqrt( 5.0 ) );
@@ -794,6 +846,17 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		chunks[size_t( c )].first = int( qint64( probes.size() ) * c / nChunks );
 		chunks[size_t( c )].count = int( qint64( probes.size() ) * ( c + 1 ) / nChunks ) - chunks[size_t( c )].first;
 	}
+	// lane RTGI2: WW_BAKE_PROF=1 times the sections of pass 1 and pass 2 per chunk (census "bake profile")
+	static const bool prof = [] { const char * e = std::getenv( "WW_BAKE_PROF" ); return e && *e == '1'; }();
+	using PClock = std::chrono::steady_clock;
+	auto pnow = []() { return prof ? PClock::now() : PClock::time_point(); };
+	auto lap = []( PClock::time_point & t0, qint64 & acc ) {
+		if ( !prof )
+			return;
+		const PClock::time_point t1 = PClock::now();
+		acc += std::chrono::duration_cast<std::chrono::nanoseconds>( t1 - t0 ).count();
+		t0 = t1;
+	};
 
 	// the ray: nearest soup triangle within rayMax, t > 1e-3 (a probe inside its own surface carries no direction)
 	auto cast = [&]( const double o[3], const double * d, double * t, int * tri ) {
@@ -1075,6 +1138,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			for ( int b = 0; b < mult; b++ ) {
 			const double * bd = batchDirs( pi, b, rbuf );
 			for ( int i = 0; i < N; i++ ) {
+				PClock::time_point tp = pnow();
 				const double * d = &bd[size_t( i ) * 3];
 				double t = 0;
 				int tri;
@@ -1087,6 +1151,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					ps[i & 7][oc] += val;
 					pc[i & 7][oc] += 1.0;
 				}
+				lap( tp, ch.pf[0] );
 				/* lane WATER1 (ported onto the land6 bake, water2fix): a ray that crosses the water also leaves a surfel
 				 * where its mirror leg lands. Leg 0 is the ray itself, exactly as without water. */
 				double ro[3], rd[3];
@@ -1098,6 +1163,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 						mirror = true;
 					}
 				}
+				lap( tp, ch.pf[1] );
 				for ( int leg = 0; leg < ( mirror ? 2 : 1 ); leg++ ) {
 					const double * oL = leg ? ro : o;
 					const double * dL = leg ? rd : d;
@@ -1112,8 +1178,11 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					const int bin = binOf( triL, dL, n );
 					if ( bin < 0 )
 						continue;
-					SurfelBins & sbin = ch.surfels[keyFor( hw, cellS )];
-					Bin & s = roomSplit ? sbin.at( probeRoom( pp ), bin ) : sbin.b[bin];
+					// lane GAPBAKE1 (MERGE1023: carried into RTGI2's per-(cell, bin) map): the probe's room, 0 when the split is off
+					const quint32 room = probeRoom( pp );
+					if ( roomSplit )
+						ch.firstRoom.emplace( keyFor( hw, cellS ), room );
+					Bin & s = ch.surfels[KeyB{ keyFor( hw, cellS ), bin, room }];
 					{   // lane SMOOTHN1: the smooth normal at the hit (the face normal where the soup has none)
 						const double p[3] = { oL[0] + dL[0] * tL, oL[1] + dL[1] * tL, oL[2] + dL[2] * tL };
 						double ns[3];
@@ -1122,6 +1191,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 						for ( int k = 0; k < 3; k++ )
 							s.nrmS[k] += sm ? ns[k] : n[k];
 					}
+					lap( tp, ch.pf[2] );
 					/* lane GICAL1: a decal lying on the hit surface (within 2 units in front of it, 0.25 behind) covers it
 					 * by its mean coverage, over its own albedo (the game blends it over the surface) */
 					double dA = 0;
@@ -1141,6 +1211,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 						s.alb[k] += dA > 0 ? a0 * ( 1.0 - dA ) + soup.decalA[size_t( dt ) * 4 + size_t( k )] / 255.0 * dA : a0;
 					}
 					s.n++;
+					lap( tp, ch.pf[3] );
 					if ( glowOn && soup.glow.emits( triL ) ) {   // lane EMISSIVEGI1: the hit's own emitted light
 						const float * T = &bvh.t[size_t( triL ) * 9];
 						const double e1[3] = { double( T[3] ) - T[0], double( T[4] ) - T[1], double( T[5] ) - T[2] };
@@ -1163,6 +1234,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 							s.le[k] += L[k];
 						ch.emitHits++;
 					}
+					lap( tp, ch.pf[4] );
 					if ( veilOn ) {   // lane NEONGI1: the glowing effect surfaces this leg crossed, front first (additive: each adds)
 						double s0 = 0;
 						for ( int it = 0; it < 16 && s0 < tL; it++ ) {
@@ -1189,6 +1261,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 							ch.veilHits++;
 						}
 					}
+					lap( tp, ch.pf[5] );
 					if ( wayHit ) {   // lane CAPTURE1: the hit's own point
 						const double p[3] = { oL[0] + dL[0] * tL, oL[1] + dL[1] * tL, oL[2] + dL[2] * tL };
 						double a2[3], n2[3];
@@ -1201,6 +1274,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 						}
 						s.n2++;
 					}
+					lap( tp, ch.pf[6] );
 				}
 			}
 			// lane SMOOTHN1: still noisy after this batch: one more (never fewer than the base set)
@@ -1268,6 +1342,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			const double * bd = batchDirs( pi, b, rbuf );
 			ch.rays += N;
 			for ( int i = 0; i < N; i++ ) {
+				PClock::time_point tp = pnow();
 				const double * d = &bd[size_t( i ) * 3];
 				double t = 0;
 				int tri;
@@ -1276,6 +1351,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				double T[3] = { 1.0, 1.0, 1.0 };
 				if ( glassOn && transmit( o, d, hit ? t : double( spec.rayMax ), T ) )
 					glassW += om;
+				lap( tp, ch.pf[7] );
 				if ( hit )
 					ch.hits++;
 				else
@@ -1322,6 +1398,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					for ( int c = 0; c < 3; c++ )
 						legs[0].T[c] *= f[c];
 				}
+				lap( tp, ch.pf[8] );
 				if ( dumpThis ) {
 					const Leg & a = legs[0];
 					ch.waterDump += QStringLiteral( "ray %1 %2 %3 %4 %5 %6 %7 %8 %9" ).arg( pi ).arg( i )
@@ -1385,8 +1462,10 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					oD2[oc] += dist * dist * L.w;
 					total += L.w;
 				}
+				lap( tp, ch.pf[9] );
 			}
 			}
+			PClock::time_point tp = pnow();
 			// the record, as the reader's accumulator emits it
 			ProbeOut po;
 			TbkProbe & r = po.rec;
@@ -1520,6 +1599,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			po.sx = floorDiv( pp.pos[0], spec.sector );
 			po.sy = floorDiv( pp.pos[1], spec.sector );
 			ch.probes.push_back( std::move( po ) );
+			lap( tp, ch.pf[10] );
 		}
 	};
 
@@ -1536,11 +1616,24 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		for ( std::thread & t : pool )
 			t.join();
 	};
+	auto parFor = [&]( int n, const std::function<void( int )> & fn ) {   // lane RTGI2: runAll over any index
+		std::atomic<int> next( 0 );
+		std::vector<std::thread> pool;
+		for ( int t = 0; t < qMin( nThreads, n ); t++ )
+			pool.emplace_back( [&]() {
+				for ( int i = next++; i < n; i = next++ )
+					fn( i );
+			} );
+		for ( std::thread & t : pool )
+			t.join();
+	};
 
 	/* lane RTBAKE1: the primary rays on the GPU (bakert.h; WW_BAKE_RT_RED=cpu keeps the loops' own casts). Batch
 	 * rounds over the probes still taking batches: round b traces batch b of each, re-tests every hit in double and
 	 * runs SMOOTHN1's noise test on the same light-free estimate pass 1 reads, so the batch counts come out as pass 1's
 	 * own (checked below). Passes 1 and 2 then read the cached answers. Secondary legs stay on the CPU. */
+	QElapsedTimer tmGpu;	// lane RTGI1: the GPU batches' share of the rays time
+	tmGpu.start();
 	std::vector<int> rtMult;
 	std::unique_ptr<bakert::Scene> rtScene;
 	if ( bakert::pickPath() != bakert::Path::Cpu ) {
@@ -1548,7 +1641,10 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		rtScene = bakert::Scene::make( bvh, &why );
 		if ( rtScene->path() == bakert::Path::Cpu )
 			R.rtNote = QString::fromStdString( "cpu: " + why );
+		R.msPart[2] = double( tmGpu.nsecsElapsed() ) / 1e6;
+		R.msPart[3] = R.msPart[4] = R.msPart[5] = 0;
 	}
+	QElapsedTimer tmPart;   // lane RTGI2
 	if ( rtScene && rtScene->path() != bakert::Path::Cpu ) {
 		rcache.resize( probes.size() );
 		rtMult.assign( probes.size(), 1 );
@@ -1560,9 +1656,11 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		std::vector<int> active( probes.size() );
 		for ( size_t p = 0; p < probes.size(); p++ )
 			active[p] = int( p );
-		std::vector<bakert::Ray> rays;
-		std::vector<bakert::Hit> hits;
+		// lane RTGI1: whole rays (bakert::Scene::cast): the GPU answers each ray as the CPU walk would, or says it is unsure
+		std::vector<bakert::XRay> rays;
+		std::vector<bakert::XHit> hits;
 		for ( int b = 0; !active.empty(); b++ ) {
+			tmPart.start();
 			rays.resize( active.size() * size_t( N ) );
 			hits.resize( rays.size() );
 			auto pool = [&]( const std::function<void( size_t )> & fn ) {
@@ -1582,10 +1680,14 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				std::vector<double> rbuf;
 				const double * bd = batchDirs( pi, b, rbuf );
 				for ( int i = 0; i < N; i++ )
-					rays[k * size_t( N ) + size_t( i )] = { { float( double( pp.pos[0] ) - O[0] ), float( double( pp.pos[1] ) - O[1] ),
-						pp.pos[2] }, 1e-4f, { float( bd[i * 3] ), float( bd[i * 3 + 1] ), float( bd[i * 3 + 2] ) }, float( spec.rayMax ) };
+					rays[k * size_t( N ) + size_t( i )] = { { double( pp.pos[0] ) - O[0], double( pp.pos[1] ) - O[1], double( pp.pos[2] ) },
+						double( spec.rayMax ), { bd[i * 3], bd[i * 3 + 1], bd[i * 3 + 2] }, 0.0 };
 			} );
-			rtScene->trace( rays.data(), rays.size(), hits.data() );
+			R.msPart[3] += double( tmPart.nsecsElapsed() ) / 1e6;
+			tmPart.restart();
+			rtScene->cast( rays.data(), rays.size(), hits.data() );
+			R.msPart[4] += double( tmPart.nsecsElapsed() ) / 1e6;
+			tmPart.restart();
 			pool( [&]( size_t k ) {
 				const int pi = active[k];
 				const ProbePoint & pp = probes[size_t( pi )];
@@ -1599,9 +1701,10 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				std::memcpy( pc, PC[size_t( pi )].data(), sizeof pc );
 				for ( int i = 0; i < N; i++ ) {
 					const double * d = &bd[size_t( i ) * 3];
-					double t = 0;
-					int tri = -1;
-					const bool hitAny = rtScene->refine( hits[k * size_t( N ) + size_t( i )], o, d, spec.rayMax, &t, &tri );
+					const bakert::XHit & xh = hits[k * size_t( N ) + size_t( i )];
+					const double t = xh.t;
+					const int tri = xh.tri;
+					const bool hitAny = tri >= 0;
 					C[size_t( b ) * size_t( N ) + size_t( i )] = RHit { t, hitAny ? tri : -1 };
 					if ( adaptMax > 1 ) {   // pass 1's light-free estimate, as there
 						const quint8 * a = hitAny && albKnown ? &soup.alb[size_t( tri ) * 3] : nullptr;
@@ -1622,9 +1725,14 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				if ( rtMult[size_t( pi )] > b + 1 )
 					still.push_back( pi );
 			active.swap( still );
+			R.msPart[5] += double( tmPart.nsecsElapsed() ) / 1e6;
 		}
 	}
+	if ( !rcache.empty() )
+		R.msGpuRays = double( tmGpu.nsecsElapsed() ) / 1e6;
+	tmGpu.restart();
 	runAll( surfelChunk );
+	R.msSurfelPass = double( tmGpu.nsecsElapsed() ) / 1e6;
 	if ( !rtMult.empty() ) {
 		int off = 0;
 		for ( size_t p = 0; p < probes.size(); p++ )
@@ -1632,14 +1740,42 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		R.rtNote = QString::fromStdString( bakert::census( "bake primary", *rtScene ) )
 			+ QStringLiteral( ", batch counts unlike pass 1's %1" ).arg( off );
 	}
-	// merge in chunk order (the same sums whatever ran where), then settle each cell's side
-	SurfelMap all;
-	for ( Chunk & ch : chunks ) {
-		for ( const auto & e : ch.surfels )
-			all[e.first].add( e.second );
-		SurfelMap().swap( ch.surfels );
-	}
-	fin.reserve( all.size() );
+	tmPart.start();
+	/* merge in chunk order (the same sums whatever ran where), then settle each cell's side. Lane RTGI2: the cells
+	 * go to shards by key hash and the shards merge in parallel; each (cell, bin) still sums its chunks in chunk order */
+	constexpr int nShard = 64;
+	auto shardOf = []( const Key & k ) { return size_t( ( quint64( KeyHash()( k ) ) >> 40 ) % quint64( nShard ) ); };
+	std::vector<std::vector<std::vector<const BinMap::value_type *>>> part( static_cast<size_t>( nChunks ) );
+	parFor( nChunks, [&]( int c ) {
+		auto & pc = part[size_t( c )];
+		pc.resize( nShard );
+		for ( const auto & e : chunks[size_t( c )].surfels )
+			pc[shardOf( e.first.k )].push_back( &e );
+	} );
+	std::vector<SurfelMap> all( nShard );
+	// WW_BAKE_RTGI2_RED=order merges the chunks last to first: other sums, so the gate must see a difference
+	static const bool redOrder = [] { const char * e = std::getenv( "WW_BAKE_RTGI2_RED" ); return e && !std::strcmp( e, "order" ); }();
+	parFor( nShard, [&]( int s ) {
+		SurfelMap & m = all[size_t( s )];
+		for ( int i = 0; i < nChunks; i++ )
+			for ( const BinMap::value_type * e : part[size_t( redOrder ? nChunks - 1 - i : i )][size_t( s )] )
+				if ( roomSplit ) {   // MERGE1023: GAPBAKE1's room split; the cell's own room = its first chunk's first hit room
+					const int ci = redOrder ? nChunks - 1 - i : i;
+					SurfelBins & sb = m[e->first.k];
+					if ( sb.room == kProbeRoomNone )
+						sb.room = chunks[size_t( ci )].firstRoom.at( e->first.k );
+					sb.at( e->first.room, e->first.bin ).add( e->second );
+				} else
+					m[e->first.k].b[e->first.bin].add( e->second );
+	} );
+	std::vector<std::vector<std::vector<const BinMap::value_type *>>>().swap( part );
+	parFor( nChunks, [&]( int c ) { BinMap().swap( chunks[size_t( c )].surfels ); chunks[size_t( c )].firstRoom.clear(); } );
+	size_t nAll = 0;
+	for ( const SurfelMap & m : all )
+		nAll += m.size();
+	R.msPart[7] = double( tmPart.nsecsElapsed() ) / 1e6;
+	tmPart.restart();
+	fin.reserve( nAll );
 	R.sideHist.assign( 7, 0 );
 	// one surfel record from a side's summed samples, its position kept inside `home`
 	// (the reader keys a surfel by where it is, so a mean outside would land elsewhere)
@@ -1694,7 +1830,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		return f;
 	};
 	std::vector<std::pair<Key, Bin>> backs;   // the second sides, housed below in key order
-	for ( const auto & e : all ) {
+	for ( const SurfelMap & shard : all )   // lane RTGI2: shard order; the results do not depend on it
+	for ( const auto & e : shard ) {
 		const SurfelBins & sb = e.second;
 		int w = 0;
 		for ( int i = 1; i < 6; i++ )
@@ -1834,7 +1971,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		Key nb = kb.first;
 		bool found = false;
 		for ( int i = 0; i < nt && try26[i].first >= 0.7071 - 1.0e-6; i++ )
-			if ( !all.count( try26[i].second ) && !fin.count( try26[i].second ) ) {
+			if ( !all[shardOf( try26[i].second )].count( try26[i].second ) && !fin.count( try26[i].second ) ) {
 				nb = try26[i].second;
 				found = true;
 				break;
@@ -1845,9 +1982,14 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		alt.emplace( kb.first, nb );
 		R.spilled++;
 	}
-	SurfelMap().swap( all );
+	parFor( nShard, [&]( int s ) { SurfelMap().swap( all[size_t( s )] ); } );
+	R.msPart[8] = double( tmPart.nsecsElapsed() ) / 1e6;
+	tmPart.restart();
 	runAll( probeChunk );
+	R.msPart[9] = double( tmPart.nsecsElapsed() ) / 1e6;
 	for ( const Chunk & ch : chunks ) {
+		for ( int k = 0; k < 11; k++ )
+			R.msProf[k] += double( ch.pf[k] ) / 1e6;
 		R.hits += ch.hits;
 		R.emitHits += ch.emitHits;
 		R.veilHits += ch.veilHits;
@@ -2421,7 +2563,28 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 	for ( int h : r.backHist )
 		t << " " << h;
 	t << "\n";
-	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite ) << "\n";
+	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite );
+	if ( r.msGpuRays >= 0 )
+		t << " (of the rays, the GPU batches " << qRound( r.msGpuRays ) << ")";
+	t << " (surfel pass " << qRound( r.msSurfelPass ) << ")";
+	t << "\n";
+	{   // lane RTGI2: where the rays time goes
+		static const char * const pn[10] = { "trees", "shell", "gpu scene", "ray build", "cast", "read back", "", "merge",
+			"sides", "links" };
+		t << "bake split ms:";
+		for ( int k = 0; k < 10; k++ )
+			if ( r.msPart[k] >= 0 && *pn[k] )
+				t << " " << pn[k] << " " << qRound( r.msPart[k] );
+		t << "\n";
+		if ( r.msProf[0] > 0 ) {
+			static const char * const fn[11] = { "p1 ray", "p1 water", "p1 bin", "p1 decal", "p1 glow", "p1 veil", "p1 hitway",
+				"p2 ray+glass", "p2 water", "p2 cells", "p2 links" };
+			t << "bake profile ms (summed over workers):";
+			for ( int k = 0; k < 11; k++ )
+				t << " " << fn[k] << " " << qRound( r.msProf[k] );
+			t << "\n";
+		}
+	}
 	t << "bake rays: " << ( r.rtNote.isEmpty() ? QStringLiteral( "cpu" ) : r.rtNote ) << "\n";   // lane RTBAKE1
 	// lane SMOOTHN1
 	t << "bake smooth normals: soup triangles with vertex normals " << r.smoothTris << ", surfel hits given one "

@@ -8,4 +8,5 @@ G="${GLSLANG:-/e/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidato
 cd "$ROOT/src/bakert"
 "$G" --target-env vulkan1.2 -V --vn bakert_rq_spv -o rq.spv.h rq.comp
 "$G" --target-env vulkan1.1 -V --vn bakert_bvh_spv -o bvh.spv.h bvh.comp
-ls -la rq.spv.h bvh.spv.h
+"$G" --target-env vulkan1.2 -V --vn bakert_rqx_spv -o rqx.spv.h rqx.comp   # lane RTGI1: whole rays, sure/unsure
+ls -la rq.spv.h bvh.spv.h rqx.spv.h

@@ -192,6 +192,21 @@ Every item is its own Show-menu row with an env pin, live, and OFF = the look be
   as the vanilla path does. Red `_RED=all`. ~0 ms.
 - **Bloom width in fog (BLOOMMIP):** `WW_CELL_BLOOM_PERPIX`. The bloom tent reads log2(fog bloom gain) mips down the
   chain's top, so glow spreads wider through fog. Red `_RED=wide`. ~0.05 ms, +1/3 of the top texture.
+## Lane RTGI2 (2026-10-23, branch rtgi2-20261023): the probe bake's CPU side, faster, same bytes
+
+- **Where the time went:** a new census line, "bake split ms" (trees, shell, GPU scene / ray build / cast / read back,
+  merge, sides, links), splits "bake time ms: rays". On Concord 5x5 with the GPU rays, the serial merge of the 64
+  surfel chunks was 9.8 of 30 s.
+- **Sharded merge:** chunk maps are keyed by (cell, bin). The merge splits the keys into 64 shards over all workers,
+  and each shard folds the chunks in chunk order, so every sum is the same as before. The sides loop and the backs
+  check read the shards. Merge 9.8 s -> 1.1-1.4 s; surfel pass 5.1 -> 1.9-2.2 s.
+- **Shell pass (ROOMCLAMP1):** the over-bar probes' lattice search runs in blocks of 64 candidates over every worker,
+  and each probe takes its lowest passing candidate (the serial first success).
+- **Numbers, headless, before exe vs new exe back to back:** Concord GPU rays 25.5 s -> 14.7 s (wall 52 -> 43 s);
+  Concord CPU rays 64.6 -> 51.7 s; museum unchanged (3.5 s CPU, 1.3 s GPU).
+- **Same bytes:** every .tbk and gi_*.bin is identical to the before exe: museum CPU, GPU and one thread (20 files),
+  Concord CPU and GPU (61 files). Red: `WW_BAKE_RTGI2_RED=order` folds the chunks last to first; 13 of 20 files
+  differ. The CPU stays the default.
 
 ## Lane RTBAKEOPT1 (2026-10-23, branch rtbakeopt1-20261023): the GPU ray-traced bake is an option, off by default
 

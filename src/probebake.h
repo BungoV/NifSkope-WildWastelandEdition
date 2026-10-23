@@ -156,7 +156,10 @@ struct ProbeBakeResult
 	int veilTris = 0;
 	qint64 veilHits = 0, veilBack = 0, veilFar = 0;
 	double emitLeSum[3] = { 0, 0, 0 };      //!< the written surfels' Le, summed
-	double msRays = 0, msWrite = 0;
+	double msRays = 0, msWrite = 0, msGpuRays = -1, msSurfelPass = 0;	// lane RTGI1: msRays' GPU batches + surfel pass
+	// lane RTGI2: msRays split (trees, shell, GPU scene, ray build, cast, read back, -, merge, sides, links); -1 = not run
+	double msPart[10] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+	double msProf[11] = {};	//!< lane RTGI2: WW_BAKE_PROF=1 pass 1 / pass 2 sections, summed over the workers
 	QString rtNote;                         //!< lane RTBAKE1: the primary rays' tracer (bakert census), "" = cpu
 	// lane SIDES6: v5 sides, and the corner measure (every version)
 	int sideSurfels = 0;                    //!< v5: surfels beyond each cell's first

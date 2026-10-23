@@ -49,6 +49,10 @@ const char * pathName( Path p );
 struct Ray { float o[3]; float tmin; float d[3]; float tmax; };
 //! tri = the soup triangle (-1: a miss), t its float distance
 struct Hit { float t; int tri; };
+/* lane RTGI1: a whole ray, in double as the CPU bake casts it (the tree's local frame, unit d), and its answer: the
+ * CPU walk's own (tri -1 = a miss; t = probebvh's double distance). 64 bytes, the shader's record. */
+struct XRay { double o[3]; double tmax; double d[3]; double pad; };
+struct XHit { double t; int tri; };
 
 //! the settings key of the GPU Ray-Traced Bake row (default off)
 extern const char * const kBakeRtSettingKey;
@@ -76,9 +80,18 @@ public:
 	 * from the re-tested t (bakertwalk.h) then gives the CPU's own triangle, ties included; a miss, or a walk with a
 	 * near tie it could decide unlike the full walk, is re-cast in full; an occlusion ray passes false. */
 	bool refine( const Hit & h, const double o[3], const double d[3], double tmax, double * t, int * tri, bool exact = true ) const;
+	/* lane RTGI1: n whole rays answered exactly as probebvh::Bvh::ray answers them (nearest; anyHit: whether any
+	 * triangle is hit, tri = one of them). On rt the GPU re-tests every candidate in double and says when it is
+	 * unsure (an edge, a hole border, a near tie: rqx.comp); only those rays are walked on the CPU, every sure hit
+	 * just gets its t from probebvh's own triangle test. Other paths: trace + refine (compute) or the CPU walk.
+	 * WW_BAKE_RT_CHECK=1 also walks every sure ray on the CPU and counts the answers that differ (`diff`). */
+	void cast( const XRay * rays, size_t n, XHit * out, bool anyHit = false );
+	//! the whole-ray tracer runs (rt with the double re-test); false = cast() falls back as said above
+	bool whole() const;
 	// counters for the bake census: rays traced here, rays the refine re-cast on the CPU, GPU milliseconds
 	std::atomic<long long> traced { 0 }, recast { 0 };
 	std::atomic<long long> gpuUs { 0 };
+	std::atomic<long long> sure { 0 }, checked { 0 }, diff { 0 };   // lane RTGI1: cast()'s sure rays, its check
 	struct Impl;
 private:
 	Scene() = default;
@@ -87,7 +100,8 @@ private:
 	Impl * d_ = nullptr;
 };
 
-//! a census line: "<who> rays: <path> (<device>), traced n, re-cast on the CPU m, GPU s ms"
+//! a census line: "<who> rays: <path> (<device>), traced n, re-cast on the CPU m, GPU s ms"; RTGI1's whole rays
+//! add ", whole: sure n" and, under the check, ", check: answers unlike the CPU's d of c"
 std::string census( const char * who, const Scene & s );
 
 } // namespace bakert
