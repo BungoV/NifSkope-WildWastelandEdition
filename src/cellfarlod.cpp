@@ -1436,7 +1436,8 @@ int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame )
 		.arg( o.cellLit ? QStringLiteral( "impostor_cell (cell lights, fog, imagespace)" ) : QStringLiteral( "impostor_oct (viewer light)" ) )
 		.arg( insideHdr ? QStringLiteral( "inside the HDR frame" ) : ( hdrFrame ? QStringLiteral( "after the HDR resolve" )
 			: QStringLiteral( "no HDR frame" ) ) );
-	if ( line != said ) {
+	extern bool wwFrameLog();	// lane FLYFIX1 (gl/cellcull.cpp): WW_FRAME_LOG=0 keeps this per-camera line out
+	if ( line != said && wwFrameLog() ) {
 		said = line;
 		qInfo().noquote() << line;
 	}

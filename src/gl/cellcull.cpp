@@ -1103,6 +1103,14 @@ QString wwCellCullSummary()
 		.arg( c.cCulled[2] ).arg( st().red == 1 ? QStringLiteral( " RED=casters" ) : QString() );
 }
 
+/* lane FLYFIX1: WW_FRAME_LOG=0 keeps the lines that change with the camera (cull, previs, umbra, far LOD cards) out of
+ * the log, for a flight; every other value (and unset) prints them as before */
+bool wwFrameLog()
+{
+	WW_SWITCH_STATIC( bool, on, !( qEnvironmentVariableIsSet( "WW_FRAME_LOG" ) && qEnvironmentVariableIntValue( "WW_FRAME_LOG" ) == 0 ) );
+	return on;
+}
+
 void wwCellCullFrame()
 {
 	CullState & s = st();
@@ -1110,7 +1118,7 @@ void wwCellCullFrame()
 	if ( !s.previs.isEmpty() ) {
 		const PrevisCache & pc = s.pc;
 		const int occ = int( pc.occ.size() ), rooms = int( pc.rooms.size() );
-		if ( s.any && ( !( s.cur == s.last ) || occ != s.lastOcc || rooms != s.lastRooms || pc.roomsSeen != s.lastSeen
+		if ( s.any && wwFrameLog() && ( !( s.cur == s.last ) || occ != s.lastOcc || rooms != s.lastRooms || pc.roomsSeen != s.lastSeen
 			|| pc.portalsPassed != s.lastPortals || !s.printed ) ) {
 			s.lastOcc = occ;
 			s.lastRooms = rooms;
@@ -1139,7 +1147,7 @@ void wwCellCullFrame()
 			.arg( d.govUid + d.govComb ).arg( d.govUid ).arg( d.govComb ).arg( qint64( s.cur.tomeDrawn ) )
 			.arg( qint64( s.cur.tomeCulled ) ).arg( qint64( s.cur.ungoverned ) ).arg( qint64( s.cur.tomeCasterHidden ) )
 			.arg( s.umbraRed == 1 ? QStringLiteral( " RED=casters" ) : QString() );
-		if ( line != s.lastUmbraLine ) {
+		if ( line != s.lastUmbraLine && wwFrameLog() ) {
 			s.lastUmbraLine = line;
 			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );
 		}
@@ -1151,7 +1159,7 @@ void wwCellCullFrame()
 		}
 		return;
 	}
-	if ( !( s.cur == s.last ) || !s.printed ) {
+	if ( ( !( s.cur == s.last ) || !s.printed ) && wwFrameLog() ) {
 		s.last = s.cur;
 		std::fprintf( stderr, "%s\n", wwCellCullSummary().toLocal8Bit().constData() );
 		s.printed = true;

@@ -132,6 +132,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QTimer>
+#include <QWindow>	// lane FLYFIX1: wwWindowZLine
 #include <QTranslator>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -7612,6 +7613,46 @@ bool NifSkope::wwHeadlessRun()
 	return headless;
 }
 
+/* lane FLYFIX1 (bungo 10-23): test windows open BEHIND his windows, never activated, so a lane's run never covers
+ * or takes the keys from what he is doing; he can still click it on the taskbar. WW_WINDOW_VISIBLE=1 skips this. */
+void NifSkope::wwHeadlessWindowBehind( QWidget * w )
+{
+#ifdef WIN32
+	if ( w && w->isWindow() && wwHeadlessRun() && wwEnvInt( "WW_WINDOW_VISIBLE" ) != 1 )
+		SetWindowPos( HWND( w->winId() ), HWND_BOTTOM, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER );
+#else
+	(void) w;
+#endif
+}
+
+QString NifSkope::wwWindowZLine( const QWindow * w )
+{
+#ifdef WIN32
+	if ( !w || !w->handle() )
+		return QStringLiteral( " z=none" );
+	const HWND me = HWND( w->winId() );
+	RECT mine, r, both;
+	GetWindowRect( me, &mine );
+	int above = 0, overlap = 0, below = 0;
+	for ( HWND h = GetWindow( me, GW_HWNDPREV ); h; h = GetWindow( h, GW_HWNDPREV ) ) {
+		if ( !IsWindowVisible( h ) || IsIconic( h ) )
+			continue;
+		above++;
+		if ( GetWindowRect( h, &r ) && IntersectRect( &both, &mine, &r ) )
+			overlap++;
+	}
+	for ( HWND h = GetWindow( me, GW_HWNDNEXT ); h; h = GetWindow( h, GW_HWNDNEXT ) )
+		if ( IsWindowVisible( h ) && !IsIconic( h ) )
+			below++;
+	return QStringLiteral( " zabove=%1 zabove_overlap=%2 zbelow=%3 foreground=%4" ).arg( above ).arg( overlap )
+		.arg( below ).arg( GetForegroundWindow() == me ? 1 : 0 );
+#else
+	(void) w;
+	return QString();
+#endif
+}
+
 
 void NifSkope::closeEvent( QCloseEvent * e )
 {
@@ -10707,14 +10748,17 @@ void NifSkope::MessageOutput( QtMsgType type, const QMessageLogContext & context
 		break;
 	case QtWarningMsg:
 		fprintf( stderr, "[Warning] %s\n", qPrintable( str ) );
+		fflush( stderr );	// lane FLYFIX1: stderr is buffered now; a warning is on disk before anything else happens
 		Message::message( qApp->activeWindow(), str, &context, QMessageBox::Warning );
 		break;
 	case QtCriticalMsg:
 		fprintf( stderr, "[Critical] %s\n", qPrintable( str ) );
+		fflush( stderr );
 		Message::message( qApp->activeWindow(), str, &context, QMessageBox::Critical );
 		break;
 	case QtFatalMsg:
 		fprintf( stderr, "[Fatal] %s\n", qPrintable( str ) );
+		fflush( stderr );
 		break;
 	case QtInfoMsg:
 		fprintf( stderr, "[Info] %s\n", qPrintable( str ) );

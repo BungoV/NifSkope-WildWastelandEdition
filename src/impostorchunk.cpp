@@ -36,6 +36,8 @@ BSD License - see nifskope.h
  * trees in the wrong places.
  * ------------------------------------------------------------------------- */
 
+bool wwFrameLog();	// lane FLYFIX1 (gl/cellcull.cpp): WW_FRAME_LOG=0 keeps the per-camera far LOD lines out
+
 namespace
 {
 
@@ -616,7 +618,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		}
 	}
 	static int saidSets = -2, saidDraws = -1;
-	if ( inst && ( ist.sets != saidSets || ist.draws != saidDraws ) ) {
+	if ( inst && wwFrameLog() && ( ist.sets != saidSets || ist.draws != saidDraws ) ) {
 		saidSets = ist.sets;
 		saidDraws = ist.draws;
 		qInfo().noquote() << ( ist.sets < 0
@@ -624,7 +626,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			: QStringLiteral( "far cards: instanced, %1 cards in %2 draws (%3 sets), %4 KB a frame" )
 				.arg( ist.drawn ).arg( ist.draws ).arg( ist.sets ).arg( double( ist.bytes ) / 1024.0, 0, 'f', 1 ) );
 	}
-	if ( drawn != saidDrawn || outside != saidOut ) {
+	if ( ( drawn != saidDrawn || outside != saidOut ) && wwFrameLog() ) {
 		saidDrawn = drawn;
 		saidOut = outside;
 		qInfo().noquote() << QStringLiteral( "far lod: drew %1 cards of %2 placed, %3 outside the camera%4%5" )
