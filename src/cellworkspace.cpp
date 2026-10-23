@@ -567,9 +567,12 @@ void CellWorkspacePanel::buildUi()
 	// lane GAPLOOK1: the gap sweep's look ticks, each Off by default
 	for ( int k = 0; k < int( WwLook::Count ); k++ ) {
 		const WwLook l = WwLook( k );
+		if ( !wwLookHasRow( l ) )
+			continue;	// lane FOGPERF1: a speed switch rides with its feature, no row
 		QAction * a = tick( showMenu, tr( wwLookLabel( l ) ),
 			( QByteArray( "CellWorkspaceLook_" ) + wwLookPinName( l ) ).constData(), wwLookOn( l ) );
 		a->setEnabled( !wwLookPinned( l ) );
+		a->setData( k );
 		lookActions.append( a );
 	}
 	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
@@ -840,9 +843,9 @@ void CellWorkspacePanel::buildUi()
 			glView->update();
 	} );
 	for ( int k = 0; k < lookActions.size(); k++ )
-		connect( lookActions.at( k ), &QAction::toggled, this, [this, k]( bool on ) {
-			wwLookSet( WwLook( k ), on );
-			if ( wwLookReopens( WwLook( k ) ) && !syncing && !g_path.isEmpty() ) {	// lane GAPLOOK2: built when the cell opens
+		connect( lookActions.at( k ), &QAction::toggled, this, [this, l = WwLook( lookActions.at( k )->data().toInt() )]( bool on ) {
+			wwLookSet( l, on );
+			if ( wwLookReopens( l ) && !syncing && !g_path.isEmpty() ) {	// lane GAPLOOK2: built when the cell opens
 				g_over = g_spec;
 				g_haveOverrides = true;
 				say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );

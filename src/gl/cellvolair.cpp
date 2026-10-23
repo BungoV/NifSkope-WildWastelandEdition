@@ -924,6 +924,28 @@ static void vaPassInner( Scene * scene, bool run );
 
 static int vaFrameSerial = 0;
 
+// lane FOGPERF1: the pass's CPU stage by stage; a mark adds the time since the previous mark to its stage
+struct VaCpuMarks
+{
+	bool on = false;
+	qint64 t = 0;
+	void start()
+	{
+		on = PassTime::on();
+		if ( on )
+			t = PassTime::nowNs();
+	}
+	void mark( int sub )
+	{
+		if ( !on )
+			return;
+		const qint64 n = PassTime::nowNs();
+		PassTime::cpuSubAdd( sub, n - t );
+		t = n;
+	}
+};
+static VaCpuMarks vaCpu;
+
 int wwVolAirFrameSerial()
 {
 	return vaFrameSerial;
@@ -935,10 +957,15 @@ void wwVolAirPass( Scene * scene, bool run )
 	QElapsedTimer pt;
 	pt.start();
 	vaFrameSerial++;
+	vaCpu.start();
 	vaPassInner( scene, run );
+	vaCpu.mark( PassTime::CpuAirTail );
+	for ( int k : { PassTime::AirPre, PassTime::AirFar, PassTime::AirPost } )
+		PassTime::subEnd( k );	// no-ops unless an early return left one open
 	const qint64 tInner = pt.nsecsElapsed();
 	if ( vs().on && run )
 		vaEcho();
+	vaCpu.mark( PassTime::CpuAirEcho );
 	if ( prof )
 		std::fprintf( stderr, "air prof: inner %.3f ms echo %.3f ms\n", double( tInner ) * 1e-6, double( pt.nsecsElapsed() - tInner ) * 1e-6 );
 }
@@ -973,11 +1000,14 @@ static void vaPassInner( Scene * scene, bool run )
 		return;
 	}
 	QElapsedTimer timer;
-	const bool timed = !s.dump.isEmpty() || wwEnvIsSet( "WW_CELL_AIR_TIME" );
+	// lane FOGPERF1: its glFinish pair serializes the frame into the air zone's GPU ms; =0 turns it off in a row
+	const bool timed = !s.dump.isEmpty()
+		|| ( wwEnvIsSet( "WW_CELL_AIR_TIME" ) && wwEnvStr( "WW_CELL_AIR_TIME" ) != QLatin1String( "0" ) );
 	if ( timed ) {
 		fn->glFinish();
 		timer.start();
 	}
+	PassTime::subBegin( PassTime::AirPre );
 
 	GLint prevFbo = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 }, prevActive = 0;
 	GLboolean depthMask = GL_TRUE, colorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
@@ -1043,6 +1073,7 @@ static void vaPassInner( Scene * scene, bool run )
 		restore();
 		return;
 	}
+	vaCpu.mark( PassTime::CpuAirState );
 	VaMedium M = vaFit( K, ( s.red & 32 ) != 0, ( s.red & 128 ) != 0 );
 	/* lane LIGHTBOOTH1 (the light test booth; a harness pin, never a user toggle): WW_CELL_BOOTH_AIR = <sigma0 per
 	 * unit> replaces the fitted medium with EVEN air of that density at every height (no band, no ground layer), so a
@@ -1334,6 +1365,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * apply's bilinear and its two slices never read it) and writes (0, 1) there, so the integrate stays continuous.
 	 * No opaque pass this frame: no skip. The units are always distinct (a sampler2D and an isamplerBuffer on one unit
 	 * is a draw-time error). */
+	vaCpu.mark( PassTime::CpuAirSetup );
 	prog->uni1i( "volClusters", kClusterUnit );
 	prog->uni1i( "volGbuf", kGbufUnit );
 	prog->uni1i( "volTile", kTileUnit );
@@ -1341,7 +1373,8 @@ static void vaPassInner( Scene * scene, bool run )
 	bool clOn = false;
 	double clMs = 0.0;
 	// lane GAPLOOK1 (LIGHTSYS-4): the air walks the surfaces' lists (bound by wwCellLightsUniforms above), no build of its own
-	const bool surfCl = wwLookOn( WwLook::AirClusters );
+	// lane FOGPERF1: on with the fog; where the surfaces bound no lists (their clustering off) the air builds its own
+	const bool surfCl = wwLookOn( WwLook::AirClusters ) && uniI( "cellClusterOn" );
 	prog->uni1b( "volSurfClusters", surfCl );
 	prog->uni2f( "volSurfPx", float( vp[2] ) / float( std::max( cols, 1 ) ), float( vp[3] ) / float( std::max( rows, 1 ) ) );
 	prog->uni1b( "volSurfRed", surfCl && wwEnvStr( "WW_CELL_AIR_CLUSTERS_RED" ) == QLatin1String( "drop" ) );
@@ -1374,6 +1407,7 @@ static void vaPassInner( Scene * scene, bool run )
 	if ( clOn )
 		fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_R32I, g.clBuf );
 	fn->glUniform4i( prog->uniLocation( "volClusterDims" ), clOn ? cl.ncx : 0, cl.ncy, kClusterCols, kClusterSlices );
+	vaCpu.mark( PassTime::CpuAirClusters );
 	WwCellAoTargets ao;
 	/* 10-16: stage 0 runs whenever the obscurance pass is there, the skip or not: the surfaces clamp their lookup to the
 	 * column's farthest opaque distance (lookdev_fog.glsl wwVolAirAt), so every mode reads the same froxels. */
@@ -1449,6 +1483,7 @@ static void vaPassInner( Scene * scene, bool run )
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
 	fn->glViewport( 0, 0, cols, rows );
 	bool complete = true;
+	PassTime::subEnd( PassTime::AirPre );
 	if ( tileOn ) {
 		// stage 0: the columns' opaque distances (the tile off its unit while it is the target)
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
@@ -1468,6 +1503,7 @@ static void vaPassInner( Scene * scene, bool run )
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
 		fn->glBindTexture( GL_TEXTURE_2D, g.tile );
 	}
+	vaCpu.mark( PassTime::CpuAirTile );
 	// lane PERF2: the O(S) integrate (stage 3, 7 layers a draw); red oldint: stage 2, every layer re-summed from 0
 	const bool oneSum = g.mrtOk == 1 && !( s.red & 268435456 );
 	for ( int stage = 1; stage <= 2 && complete; stage++ ) {
@@ -1534,6 +1570,7 @@ static void vaPassInner( Scene * scene, bool run )
 			}
 		}
 		PassTime::subEnd( stage == 1 ? PassTime::AirInject : PassTime::AirIntegrate );
+		vaCpu.mark( stage == 1 ? PassTime::CpuAirInject : PassTime::CpuAirInteg );
 	}
 	/* lane FARGRID1: THE FAR GRID. The same program and medium on a fixed grid from the handoff to farEnd: the sun
 	 * (shadowed by airFarVis: the cascades where they reach, the terrain's shadow-height map, the clouds' input) and
@@ -1542,6 +1579,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * same numbers: no crawl. Red farjitter: a per-frame slice offset, rebuilt every frame (the stability gate's red). */
 	g.farOn = false;
 	if ( farOn && complete ) {
+		PassTime::subBegin( PassTime::AirFar );
 		if ( !g.farQ[0] )
 			fn->glGenQueries( 2, g.farQ );
 		if ( g.farQPending ) {
@@ -1627,7 +1665,10 @@ static void vaPassInner( Scene * scene, bool run )
 		g.farSlices = fp.slices;
 		g.farStart = farStart;
 		g.farLog = std::log( farEnd / farStart );
+		PassTime::subEnd( PassTime::AirFar );
+		vaCpu.mark( PassTime::CpuAirFar );
 	}
+	PassTime::subBegin( PassTime::AirPost );
 	// the numbers the dump echoes, read before the program stops
 	float cellRowV[3][4], cellDirColV[3] = { 0, 0, 0 }, cellDirToV[3] = { 0, 0, 0 };
 	for ( int k = 0; k < 3; k++ )
