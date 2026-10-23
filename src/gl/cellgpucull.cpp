@@ -777,8 +777,15 @@ void prepare( Scene * scene )
 		g->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
 			GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depthBits );
 	}
-	const GLenum depthFmt = compType == GL_FLOAT ? GL_DEPTH_COMPONENT32F
+	GLenum depthFmt = compType == GL_FLOAT ? GL_DEPTH_COMPONENT32F
 		: ( depthBits == 24 ? GL_DEPTH_COMPONENT24 : ( depthBits == 16 ? GL_DEPTH_COMPONENT16 : GLenum( 0 ) ) );
+	/* lane LIVESET2: the linear frame's depth / stencil texture samples stencil (TONEMAP1), so the query reads 0 bits
+	 * and occlusion never ran in the default view; take the frame's own format. WW_GPUDRIVEN_B_FMT_RED=1: as before */
+	WW_SWITCH_STATIC( bool, fmtRed, wwEnvInt( "WW_GPUDRIVEN_B_FMT_RED" ) == 1 );
+	if ( !depthFmt && !fmtRed ) {
+		const GLenum hf = GLenum( wwCellHdrDepthFormat( GLuint( S.drawFbo ) ) );
+		depthFmt = hf == GL_DEPTH32F_STENCIL8 ? GL_DEPTH_COMPONENT32F : hf == GL_DEPTH24_STENCIL8 ? GL_DEPTH_COMPONENT24 : GLenum( 0 );
+	}
 	const int vw = S.vp[2], vh = S.vp[3];
 	// the prepass must rasterize as the main frame does: anything unusual and occlusion sits out this frame
 	bool occ = sw().occ && S.drawFbo && depthFmt && vw > 0 && vh > 0 && !g->glIsEnabled( GL_SCISSOR_TEST )
