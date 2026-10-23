@@ -557,41 +557,57 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	QElapsedTimer scClock;
 	scClock.start();
 	if ( scOn ) {
-		QCryptographicHash h( QCryptographicHash::Sha1 );
-		auto add = [&h]( const void * p, size_t n ) { h.addData( QByteArrayView( static_cast<const char *>( p ), qsizetype( n ) ) ); };
-		const QByteArray bd = bakeDir.toUtf8();
-		add( bd.constData(), size_t( bd.size() ) );
-		const quint64 nus = us.size();
-		add( &nus, 8 );
-		for ( const US & u : us ) {
-			add( u.p, sizeof u.p );
-			add( u.n, sizeof u.n );
+		/* lane GAPPERF1: the soup keyed by the geometry memo's trisKey (already paid) and the rest by two 64-bit mixes,
+		 * not SHA-1 over every triangle (42 of 45 ms). Red WW_CELL_GI_STATICCACHE_KEY_RED=1: the SHA-1 key. */
+		const bool keyRed = wwEnvInt( "WW_CELL_GI_STATICCACHE_KEY_RED" ) == 1;
+		auto feed = [&]( auto && add, bool trisByKey ) {
+			const QByteArray bd = bakeDir.toUtf8();
+			add( bd.constData(), size_t( bd.size() ) );
+			const quint64 nus = us.size();
+			add( &nus, 8 );
+			for ( const US & u : us ) {
+				add( u.p, sizeof u.p );
+				add( u.n, sizeof u.n );
+			}
+			if ( trisByKey )
+				add( &trisKey, 8 );
+			else
+				add( soup.tris.data(), soup.tris.size() * sizeof( float ) );
+			add( soup.amask.triOf.data(), soup.amask.triOf.size() * sizeof( int ) );
+			for ( const WwCellLight & l : lights ) {
+				add( l.pos, sizeof l.pos );
+				add( &l.radius, 4 );
+				add( l.color, sizeof l.color );
+				const char sp = l.spot ? 1 : 0;
+				add( &sp, 1 );
+				add( l.dir, sizeof l.dir );
+				add( &l.cosOuter, 4 );
+				add( &l.bias, 4 );
+				add( &l.scale, 4 );
+				add( &l.exponent, 4 );
+				add( &l.cone, 4 );
+				add( &l.shape, 4 );
+				add( l.box, sizeof l.box );
+			}
+			const char flags[2] = { char( lighting.interior ? 1 : 0 ), char( lighting.hasDirectional ? 1 : 0 ) };
+			add( flags, 2 );
+			add( lighting.dirTo, sizeof lighting.dirTo );
+			add( lighting.dirColor, sizeof lighting.dirColor );
+			add( &spec.fixtureClear, 4 );
+			const char ns = redNoShadow ? 1 : 0;
+			add( &ns, 1 );
+		};
+		if ( keyRed ) {
+			QCryptographicHash h( QCryptographicHash::Sha1 );
+			feed( [&h]( const void * p, size_t n ) { h.addData( QByteArrayView( static_cast<const char *>( p ), qsizetype( n ) ) ); }, false );
+			scKey = h.result();
+		} else {
+			KeyMix ka, kb;
+			kb.h = 0x9E3779B97F4A7C15ULL;
+			feed( [&]( const void * p, size_t n ) { ka.bytes( p, n ); kb.bytes( p, n ); }, trisKey != 0 );
+			const quint64 k2[2] = { ka.h, kb.h };
+			scKey = QByteArray( reinterpret_cast<const char *>( k2 ), 16 );
 		}
-		add( soup.tris.data(), soup.tris.size() * sizeof( float ) );
-		add( soup.amask.triOf.data(), soup.amask.triOf.size() * sizeof( int ) );
-		for ( const WwCellLight & l : lights ) {
-			add( l.pos, sizeof l.pos );
-			add( &l.radius, 4 );
-			add( l.color, sizeof l.color );
-			const char sp = l.spot ? 1 : 0;
-			add( &sp, 1 );
-			add( l.dir, sizeof l.dir );
-			add( &l.cosOuter, 4 );
-			add( &l.bias, 4 );
-			add( &l.scale, 4 );
-			add( &l.exponent, 4 );
-			add( &l.cone, 4 );
-			add( &l.shape, 4 );
-			add( l.box, sizeof l.box );
-		}
-		const char flags[2] = { char( lighting.interior ? 1 : 0 ), char( lighting.hasDirectional ? 1 : 0 ) };
-		add( flags, 2 );
-		add( lighting.dirTo, sizeof lighting.dirTo );
-		add( lighting.dirColor, sizeof lighting.dirColor );
-		add( &spec.fixtureClear, 4 );
-		const char ns = redNoShadow ? 1 : 0;
-		add( &ns, 1 );
-		scKey = h.result();
 		scHit = SC.key == scKey && SC.E.size() == us.size() * 3;
 		if ( !scHit ) {
 			scE.assign( us.size() * 3, 0.0 );
