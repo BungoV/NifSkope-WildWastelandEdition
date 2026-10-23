@@ -22,6 +22,7 @@
 #endif
 
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <functional>
 #include <cstring>
@@ -539,6 +540,9 @@ struct Scene::Impl
 {
 	Buf triOf, maskTris, maps, alpha;   // the alpha masks (both tracers)
 	Buf verts, remap, blasBuf, tlasBuf; // rt
+	Buf vertsBlas;                      // lane GIBAKE2: the grown triangles the BLAS is built from (whole rays only)
+	double inflate = 0.0;               // how far each edge moved out (0 = the true triangles)
+	long long inflateTris = 0, inflateCapped = 0;
 	VkAccelerationStructureKHR blas = VK_NULL_HANDLE, tlas = VK_NULL_HANDLE;
 	Buf nodes, idx, tris;               // compute
 	VkDescriptorSet ds = VK_NULL_HANDLE;
@@ -556,7 +560,7 @@ struct Scene::Impl
 			vk.vkDestroyAccelerationStructureKHR( D.dev, tlas, nullptr );
 		if ( blas )
 			vk.vkDestroyAccelerationStructureKHR( D.dev, blas, nullptr );
-		for ( Buf * b : { &triOf, &maskTris, &maps, &alpha, &verts, &remap, &blasBuf, &tlasBuf, &nodes, &idx, &tris } )
+		for ( Buf * b : { &triOf, &maskTris, &maps, &alpha, &verts, &vertsBlas, &remap, &blasBuf, &tlasBuf, &nodes, &idx, &tris } )
 			freeBuf( D, *b );
 	}
 };
@@ -636,7 +640,33 @@ bool buildRt( Dev & D, const probebvh::Bvh & bvh, Scene::Impl & I )
 	if ( !upload( D, v.data(), v.size() * 4, in | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, I.verts )
 		|| !upload( D, remap.data(), remap.size() * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, I.remap ) )
 		return false;
+	/* lane GIBAKE2 (RTGI1-CONCORD): the float hardware can miss a triangle the double re-test accepts near its edge,
+	 * with no neighbour reported to make the ray unsure. The BLAS takes each triangle grown in its own plane by the
+	 * re-test's error bound, so every such triangle is reported; rqx.comp re-tests the true ones (binding 8). */
+	static const bool inflateRed = [] { const char * r = std::getenv( "WW_BAKE_RT_INFLATE_RED" ); return r && !std::strcmp( r, "off" ); }();
+	if ( D.x && !inflateRed && !v.empty() ) {
+		double lo[3] = { 1e300, 1e300, 1e300 }, hi[3] = { -1e300, -1e300, -1e300 };
+		for ( size_t i = 0; i < v.size(); i++ ) {
+			lo[i % 3] = std::min( lo[i % 3], double( v[i] ) );
+			hi[i % 3] = std::max( hi[i % 3], double( v[i] ) );
+		}
+		double mag = 0.0, diag2 = 0.0;
+		for ( int k = 0; k < 3; k++ ) {
+			mag = std::max( mag, std::max( std::abs( lo[k] ), std::abs( hi[k] ) ) );
+			diag2 += ( hi[k] - lo[k] ) * ( hi[k] - lo[k] );
+		}
+		const double del = 4e-6 * ( mag + std::sqrt( diag2 ) + 1.0 );   // rqx.comp's kErr x (|o| + t + 1), t <= diag
+		I.inflate = del;
+		std::vector<float> g( v.size() );
+		int capped = 0;
+		for ( size_t t = 0; t < size_t( I.nTri ); t++ )
+			I.inflateTris += growTri( &v[t * 9], del, &g[t * 9], &capped ) ? 1 : 0;   // src/bakertwalk.h
+		I.inflateCapped = capped;
+		if ( !upload( D, g.data(), g.size() * 4, in, I.vertsBlas ) )
+			return false;
+	}
 	std::vector<float>().swap( v );
+	const VkDeviceAddress blasVerts = I.vertsBlas.addr ? I.vertsBlas.addr : I.verts.addr;
 
 	VkAccelerationStructureGeometryKHR g[2] {};
 	uint32_t counts[2] = { I.nOpaque, I.nTri - I.nOpaque };
@@ -652,7 +682,7 @@ bool buildRt( Dev & D, const probebvh::Bvh & bvh, Scene::Impl & I )
 		auto & tr = x.geometry.triangles;
 		tr.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
 		tr.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-		tr.vertexData.deviceAddress = I.verts.addr + ( k ? VkDeviceAddress( I.nOpaque ) * 36 : 0 );
+		tr.vertexData.deviceAddress = blasVerts + ( k ? VkDeviceAddress( I.nOpaque ) * 36 : 0 );
 		tr.vertexStride = 12;
 		tr.maxVertex = counts[k] * 3 - 1;
 		tr.indexType = VK_INDEX_TYPE_NONE_KHR;
@@ -812,6 +842,9 @@ std::unique_ptr<Scene> Scene::make( const probebvh::Bvh & bvh, std::string * log
 			p = Path::Cpu;
 		} else {
 			s->d_ = I;
+			s->inflate = I->inflate;
+			s->inflateTris = I->inflateTris;
+			s->inflateCapped = I->inflateCapped;
 			s->gpuUs += std::chrono::duration_cast<std::chrono::microseconds>( std::chrono::steady_clock::now() - t0 ).count();
 		}
 	}
@@ -1055,6 +1088,10 @@ void Scene::cast( const XRay * rays, size_t n, XHit * out, bool anyHit )
 					walk( r, c );
 					const bool same = anyHit ? ( c.tri >= 0 ) == ( h.tri >= 0 ) : ( c.tri == h.tri && ( c.tri < 0 || c.t == h.t ) );
 					df += same ? 0 : 1;
+					static std::atomic<int> shown( 0 );   // lane GIBAKE2: the first unlike rays, for the edge/tie hunt
+					if ( !same && shown.fetch_add( 1 ) < 20 )
+						fprintf( stderr, "rt check unlike%s: o %.17g %.17g %.17g d %.17g %.17g %.17g tmax %.17g | gpu tri %d t %.17g | cpu tri %d t %.17g\n",
+							anyHit ? " (any)" : "", r.o[0], r.o[1], r.o[2], r.d[0], r.d[1], r.d[2], r.tmax, h.tri, h.t, c.tri, c.t );
 				}
 			}
 			nSure += sr;
@@ -1081,6 +1118,9 @@ std::string census( const char * who, const Scene & s )
 		o << ", whole: sure " << s.sure.load();
 	if ( s.checked.load() )
 		o << ", check: answers unlike the CPU's " << s.diff.load() << " of " << s.checked.load();
+	if ( s.whole() )   // lane GIBAKE2
+		o << ", BLAS grown " << s.inflate << " u (" << s.inflateTris << " triangles, " << s.inflateCapped << " corners capped"
+		  << ( s.inflate > 0.0 ? "" : "; off" ) << ")";
 	return o.str();
 }
 

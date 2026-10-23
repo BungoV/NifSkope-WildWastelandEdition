@@ -27,6 +27,7 @@ const LookRow kRows[] = {
 	{ "Real sun and moon", "WW/SkyEphemeris" },
 	{ "Actors outdoors", "WW/CellActorsOutdoors" },
 	{ "Weapon mod parts", "WW/CellWeaponParts" },
+	{ "Wide exposure range", "WW/CellExposureWide" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -92,6 +93,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WEAP_PARTS" ).trimmed() );
 		return p;
 	}
+	case WwLook::ExposureWide: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_EXPOSURE_WIDE" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -118,6 +123,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::Ephemeris: return "WW_SKY_EPHEM";
 	case WwLook::ActorsOutdoors: return "WW_CELL_ACTORS_OUT";
 	case WwLook::WeaponParts: return "WW_CELL_WEAP_PARTS";
+	case WwLook::ExposureWide: return "WW_CELL_EXPOSURE_WIDE";
 	default: return "";
 	}
 }

@@ -5495,6 +5495,38 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			for ( auto it = veilLeftOut.constBegin(); it != veilLeftOut.constEnd(); ++it )
 				t << " " << it.key() << " " << it.value() << ";";
 			t << "\n" << veilModels;
+			/* lane GIBAKE2: placed weapons and placed particles, counted. A weapon is a pick-up item (BAKE4: left
+			 * out); let in by WW_CELL_PROBE_SOUP_RED=items it carries its mod parts when the Weapon mod parts row is on.
+			 * Particles stay out: a placed light within 256 units carries the fire's light (NEONGI1's rule). */
+			{
+				int wTotal = 0, wSoup = 0, wParts = 0, pfxRefs = 0, pfxNear = 0;
+				QSet<QString> pfxModelSet;
+				for ( const Placement & p : placements ) {
+					if ( !p.actorKey.isEmpty() || p.disabled || p.cable )
+						continue;
+					const EsmLodBase & lb = world.lodBase( p.base );
+					if ( CellPickTable::typeName( lb.type ) == QLatin1String( "WEAP" ) ) {
+						wTotal++;
+						wSoup += soupRole( QStringLiteral( "WEAP" ) ) == 1 ? 1 : 0;
+						wParts += weapons.wants( p.base ) ? 1 : 0;
+					}
+					if ( lb.model.isEmpty() || !lodgenModelHasParticles( lb.model ) )
+						continue;
+					pfxRefs++;
+					pfxModelSet.insert( lb.model.toLower() );
+					for ( const EsmRefr & lr : lightRefs ) {
+						const float dx = lr.pos[0] - p.pos[0], dy = lr.pos[1] - p.pos[1], dz = lr.pos[2] - p.pos[2];
+						if ( dx * dx + dy * dy + dz * dz <= 256.0f * 256.0f && !startsDisabled( lr ) ) {
+							pfxNear++;
+							break;
+						}
+					}
+				}
+				t << "  probe soup placed weapons: " << wTotal << " (in the soup " << wSoup << ", with mod parts " << wParts
+				  << ( wwLookOn( WwLook::WeaponParts ) ? "" : "; Weapon mod parts row off" ) << ")\n";
+				t << "  probe soup placed particles left out: placements " << pfxRefs << " of " << pfxModelSet.size()
+				  << " models (models loaded this build only), with a placed light lit within 256 units " << pfxNear << "\n";
+			}
 			// lane CAPTURE1: refraction-only shapes left out of the soup, per model
 			t << "  probe soup refraction-only shapes left out " << soupRefractShapes << " (" << soupRefractTris
 			  << " triangles)" << ( refractKeepRed ? " RED keep: kept as surfaces" : "" );

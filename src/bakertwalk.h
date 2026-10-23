@@ -76,6 +76,62 @@ inline bool rayFrom( const probebvh::Bvh & B, const double o[3], const double d[
 	return hit;
 }
 
+/* Lane GIBAKE2: triangle t (9 floats) grown in its own plane so each edge moves out by `del`; a vertex moves
+ * del (ma + mb) / (1 + ma.mb) (ma, mb its two edges' outward normals), capped at 1000 del on a sliver's sharp corner.
+ * Returns false (out = in) for a degenerate triangle; *capped counts capped corners. */
+inline bool growTri( const float * in, double del, float * out, int * capped )
+{
+	double p[3][3];
+	for ( int i = 0; i < 9; i++ ) {
+		p[i / 3][i % 3] = in[i];
+		out[i] = in[i];
+	}
+	auto sub = []( const double * a, const double * b, double * r ) { for ( int k = 0; k < 3; k++ ) r[k] = a[k] - b[k]; };
+	auto crs = []( const double * a, const double * b, double * r ) {
+		r[0] = a[1] * b[2] - a[2] * b[1];
+		r[1] = a[2] * b[0] - a[0] * b[2];
+		r[2] = a[0] * b[1] - a[1] * b[0];
+	};
+	auto len = []( const double * a ) { return std::sqrt( a[0] * a[0] + a[1] * a[1] + a[2] * a[2] ); };
+	double e1[3], e2[3], n[3];
+	sub( p[1], p[0], e1 );
+	sub( p[2], p[0], e2 );
+	crs( e1, e2, n );
+	const double a2 = len( n );
+	if ( !( a2 > 1e-12 ) )
+		return false;   // degenerate: the double test refuses it anyway
+	for ( double & c : n )
+		c /= a2;
+	double m[3][3];   // edge j (p[j] -> p[j+1]): its outward unit normal in the plane
+	for ( int j = 0; j < 3; j++ ) {
+		double e[3];
+		sub( p[( j + 1 ) % 3], p[j], e );
+		crs( e, n, m[j] );
+		const double l = len( m[j] );
+		if ( !( l > 0.0 ) )
+			return false;
+		for ( double & c : m[j] )
+			c /= l;
+	}
+	for ( int i = 0; i < 3; i++ ) {
+		const double * ma = m[( i + 2 ) % 3], * mb = m[i];
+		const double den = std::max( 1.0 + ma[0] * mb[0] + ma[1] * mb[1] + ma[2] * mb[2], 1e-30 );
+		double x[3];
+		for ( int k = 0; k < 3; k++ )
+			x[k] = ( ma[k] + mb[k] ) * del / den;
+		const double xl = len( x );
+		if ( xl > 1000.0 * del ) {
+			if ( capped )
+				( *capped )++;
+			for ( double & c : x )
+				c *= 1000.0 * del / xl;
+		}
+		for ( int k = 0; k < 3; k++ )
+			out[i * 3 + k] = float( p[i][k] + x[k] );
+	}
+	return true;
+}
+
 } // namespace bakert
 
 #endif // BAKERTWALK_H

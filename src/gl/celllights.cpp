@@ -57,6 +57,14 @@ constexpr int kBloomUnit = WwCellUnit::Bloom;		// lane BLOOM1: the imagespace bl
 constexpr int kShadowUnit = WwCellUnit::Shadow;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
 constexpr int kShadowSlots = 16;	// shadowed lights at once, the nearest the camera
 constexpr int kShadowFace = 512;	// texels a cube face edge (the game's 2048 paraboloid's centre texel at 1024)
+
+/* the frame's exposure: the tonemap PS's clamp( mid / (lum + 0.001), HNAM min, HNAM max ). lane GIBAKE2 (GISHADE1): the
+ * Wide exposure range row lifts the max to 16, so a dim GI-lit room opens up (the imagespace caps it at ~3.25). */
+float cellExposure( const float * h, float adapted )
+{
+	const float cap = wwLookOn( WwLook::ExposureWide ) ? std::max( h[4], 16.0f ) : h[4];
+	return std::min( std::max( h[8] / ( adapted + 0.001f ), h[5] ), cap );
+}
 // lane GAPLOOK1 (LIGHTSYS-3): the budget's distance fade, Godot's Light3D shadow fade (40 to 50 m) at 70 units a metre
 constexpr float kShadowFadeBegin = 2800.0f, kShadowFadeEnd = 3500.0f;
 constexpr int kAmbientSlots = 16;	// lane AMBO2: Ambient Only volumes a cell (Fallout4.esm's most in one cell: 5, measured)
@@ -1334,7 +1342,7 @@ void wwCellLightsUniforms( Scene * scene )
 	if ( isDraw ) {
 		const float * h = LI->isHdr;
 		// the tonemap PS: max( mid / (lum + 0.001), cb.y ) then min( .., cb.x ); cb (x, y) = HNAM (max, min)
-		const float e = std::min( std::max( h[8] / ( adapted + 0.001f ), h[5] ), h[4] );
+		const float e = cellExposure( h, adapted );
 		prog->uni1f( "cellIsExposure", e );
 		prog->uni1f( "cellIsE", h[1] );
 		prog->uni1f( "cellIsAdapted", adapted );
@@ -1903,7 +1911,7 @@ QString wwCellImageSpaceEcho( Scene * scene )
 		return o + QStringLiteral( " (the cell has none)" );
 	const float a = s.adapted.value( scene->nifModel, -1.0f );
 	const float * h = L->isHdr;
-	const float e = std::min( std::max( h[8] / ( a + 0.001f ), h[5] ), h[4] );
+	const float e = cellExposure( h, a );
 	o += QStringLiteral( " %1 adapted=%2 over %3 px exposure=%4 tonemapE=%5 lut=%6" ).arg( L->isName )
 		.arg( double( a ), 0, 'g', 7 ).arg( s.adaptedPixels.value( scene->nifModel ) ).arg( double( e ), 0, 'g', 7 )
 		.arg( double( h[1] ), 0, 'g', 4 ).arg( L->isLut.empty() ? QStringLiteral( "none" ) : L->isLutPath );
