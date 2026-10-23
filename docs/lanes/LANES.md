@@ -87,14 +87,14 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | GAPTOOL-OPENREDS | open gate reds: FARLOD1 g10 twig speckle, TERRBLEND1 far tone, SUNCELL1 g21 camera (AUDIT_ledgers:115). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
 | GAPTOOL-SANCSTABLE | Sanctuary picture not byte-stable on BEFORE exe (gical1/STATUS.md:140). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
 | DECK1 | DECK1: path-traced reference picture (prtp_next E5). L | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 2: tool/test) |
-| GAPPERF-BINDLESS | bindless textures + materials and per-draw data in one buffer (gpudriven1/FINAL.md:25). L | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 3: perf) |
-| GAPPERF-AOWALK | AO half-res/temporal or deferred ambient: drop the AO scene walk (perf3/FINAL.md:115). M | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 3: perf) |
-| GAPPERF-DSAUBO | DSA binds + lights/fog in uniform blocks, ~2.5 ms (perf3/FINAL.md:119). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 3: perf) |
-| GAPPERF-FARCARDS | far cards: pass split, front-to-back sort, Hi-Z; target < 4 ms (perf3/FINAL.md:123). M | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 3: perf) |
-| GAPPERF-TONEMAPONCE | tone map once per pixel when MSAA samples agree; quarter-res exposure with fence poll (tonemap1/FINAL.md:162). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 3: perf) |
-| GAPPERF-FARCARDLINEAR | far cards straight into the linear frame, no depth blit (tonemap1/BATCH.md:52). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 3: perf) |
-| STATICCACHE1-HASH | STATICCACHE1 key hashing 42 of 45 ms. S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 3: perf) |
-| GAPPERF-GISPACEGRID | GI and Space share one grid in one visit (volfit1/STATUS.md:57). S | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 3: perf) |
+| GAPPERF-BINDLESS | bindless textures + materials and per-draw data in one buffer (gpudriven1/FINAL.md:25). L | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
+| GAPPERF-AOWALK | AO half-res/temporal or deferred ambient: drop the AO scene walk (perf3/FINAL.md:115). M | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
+| GAPPERF-DSAUBO | DSA binds + lights/fog in uniform blocks, ~2.5 ms (perf3/FINAL.md:119). S | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
+| GAPPERF-FARCARDS | far cards: pass split, front-to-back sort, Hi-Z; target < 4 ms (perf3/FINAL.md:123). M | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
+| GAPPERF-TONEMAPONCE | tone map once per pixel when MSAA samples agree; quarter-res exposure with fence poll (tonemap1/FINAL.md:162). S | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
+| GAPPERF-FARCARDLINEAR | far cards straight into the linear frame, no depth blit (tonemap1/BATCH.md:52). S | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
+| STATICCACHE1-HASH | STATICCACHE1 key hashing 42 of 45 ms. S | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
+| GAPPERF-GISPACEGRID | GI and Space share one grid in one visit (volfit1/STATUS.md:57). S | RUNNING 10-23 02:10 helper GAPPERF1, branch gapperf1-20261023 on batch4 (gap sweep; run order 3: perf) |
 | GAPBAKE-TERRNORMALS | terrain normal maps in bake, far-soup normals, per-bin normal maps (smoothn1/STATUS.md:41). M | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 4: bake) |
 | ROOMCLAMP1 | ROOMCLAMP1: split surfels by room (2-10 % have no room weight). M | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 4: bake) |
 | GPURELIGHT1 | GPURELIGHT1: neighbouring probes share irradiance. M | QUEUED 10-23 (gap sweep, GAPS_20261023.md; RESUME1 run order 4: bake) |
