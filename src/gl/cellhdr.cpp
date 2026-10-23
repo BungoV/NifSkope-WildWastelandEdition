@@ -917,7 +917,7 @@ void wwCellHdrEnd( Scene * scene )
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
 	PassTime::subEnd( PassTime::ToneBloom );
 	// lane FOGBLOOM1: the per-pixel bloom strength from the air along each ray (cellfogbloom.h); off: no GL call
-	const bool fogBloom = wwCellFogBloomRun( scene, g.fbo, g.ds, s.w, s.h, s.samples, g.dsFormat );
+	const bool fogBloom = wwCellFogBloomRun( scene, g.fbo, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
 
 	// lane PERF2: the quad at the far plane keeps the early tests (WW_CELL_HDR_EARLY_RED=1: depth written per sample)
 	WW_SWITCH_STATIC( bool, earlyRed, qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) != 0 );

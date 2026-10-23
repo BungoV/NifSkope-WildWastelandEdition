@@ -880,8 +880,12 @@ void prepare( Scene * scene )
 			f.trisKept += rec.ranges[k + 1];
 		// an occluder: drawn solid and opaque last frame, through a program whose depth the prepass reproduces
 		if ( occ && n.queue != GpuDriven::AlphaTest && L.occluderProgram && L.opaque && ( !L.cullOn || ( L.cullBack && L.ccw ) ) )
-			occluders.push_back( { sh, &rec, L.cullOn } );
+			occluders.push_back( { sh, nullptr, L.cullOn } );
 	}
+	// lane LIVESET2: each Rec's address only now, after the last insert; an insert that grows f.recs moves its values,
+	// and the kept &rec dangled (the segfault a frame after the HDR depth turned renderbuffer, STEX/TONEMAP1 red)
+	for ( Occluder & o : occluders )
+		o.rec = &f.recs.constFind( o.sh ).value();
 	f.items = qint64( items.size() / 2 );
 	f.occluders = qint64( occluders.size() );
 	occ = occ && !occluders.empty();
