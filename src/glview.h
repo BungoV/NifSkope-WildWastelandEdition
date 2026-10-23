@@ -54,6 +54,9 @@ class NifSkope;
 class QMenu;
 class QTimer;
 
+//! lane FLYFIX1: WW_FLYFIX_RED=1 brings back the free camera's old refocus jump and 1 s tick
+bool wwFlyFixRed();
+
 
 //! The main [Viewport](@ref viewport_details) class
 class GLView final : public QOpenGLWindow
@@ -639,6 +642,10 @@ public:
 	/*! lane FARVIEW1: the GPU time of `frames` repaints of the current view (GL_TIME_ELAPSED around paintGL, after
 	 *  two warm-up repaints): "gpums median=.. min=.. max=.. frames=.. cpums median=..", or why not */
 	QString wwGpuMs( int frames );
+	//! lane FLYFIX1: the free camera's refocus gate ("flycheck PASS|FAIL | ..."), the view put back after
+	QString wwFlyRefocusCheck();
+	//! lane FLYFIX1: the view at eye looking at at, kept after (the live verb "camera PATHFILE"); residuals returned
+	QString wwPlaceCamera( const Vector3 & eye, const Vector3 & at );
 
 	//! Where the timeline is parked right now.
 	/*! The freeze dialog seeds itself from this, so "scrub until it looks right,
@@ -890,6 +897,7 @@ protected:
 	void dragMoveEvent( QDragMoveEvent * );
 	void dropEvent( QDropEvent * );
 	void focusOutEvent( QFocusEvent * ) override final;
+	bool event( QEvent * ) override;
 	void keyPressEvent( QKeyEvent * ) override final;
 	void keyReleaseEvent( QKeyEvent * ) override final;
 	void mouseDoubleClickEvent( QMouseEvent * ) override final;
@@ -1971,6 +1979,8 @@ private:
 	GLdouble aspect;
 
 	std::uint64_t kbdState = 0;
+	bool flyResync = false;	// lane FLYFIX1: the next free-camera move only re-centres (focus or the cursor came back)
+	bool flyGrab = true;	// lane FLYFIX1: false only in the refocus gate (no cursor move, no activation)
 	QPointF lastPos;
 	QPointF pressPos;
 	Vector3 mouseMov;

@@ -3805,7 +3805,13 @@ void GLView::paintGL()
 	PassTime::frameBegin();
 	struct WwPassFrame
 	{
-		~WwPassFrame() { PassTime::frameEnd(); }
+		~WwPassFrame()
+		{
+			PassTime::frameEnd();
+			extern bool wwStderrFrameFlush;	// lane FLYFIX1 (main.cpp): the frame's log lines in one write
+			if ( wwStderrFrameFlush )
+				std::fflush( stderr );
+		}
 	} wwPassFrame;
 
 	/* RenderDoc capture of THIS context. Frames are numbered per paintGL so a
@@ -22360,6 +22366,9 @@ void GLView::advanceGears()
 		update();
 	}
 
+	// lane FLYFIX1: the camera moves at most 0.1 s a tick, so a stalled frame or a spell away is never one long jump
+	if ( !wwFlyFixRed() )
+		dT = std::min( dT, 0.1f );
 	float	rotateStep = cfg.rotSpd * dT;
 	// Fix movement speed for Starfield scale
 	dT *= scale();
@@ -22483,6 +22492,135 @@ QString GLView::wwGpuMs( int frames )
 	const auto mm = std::minmax_element( gpu.begin(), gpu.end() );
 	return QStringLiteral( "gpums median=%1 min=%2 max=%3 frames=%4 cpums median=%5" ).arg( med( gpu ), 0, 'f', 3 )
 		.arg( *mm.first, 0, 'f', 3 ).arg( *mm.second, 0, 'f', 3 ).arg( frames ).arg( med( cpu ), 0, 'f', 3 );
+}
+
+/* lane FLYFIX1: the refocus gate, in the free camera without grabbing the cursor or the focus: a plain move must look
+ * (control), the first move after FocusIn / WindowActivate / Enter must leave Rot and Pos alone however far the cursor
+ * jumped, and one gears tick after a 5 s stall moves the camera at most 0.1 s worth. The view is put back after. */
+/* lane FLYFIX1: the view put at a path key for good (the path camera is an override that ends with its path), so a
+ * flight starts there. Pitch and yaw are searched (grid, then finer) to match the look-at's rows; residuals returned. */
+QString GLView::wwPlaceCamera( const Vector3 & eye, const Vector3 & at )
+{
+	Vector3 f = at - eye;
+	if ( f.length() <= 0.0f )
+		return QStringLiteral( "camera refused (eye == at)" );
+	f.normalize();
+	Vector3 r( f[1], -f[0], 0.0f );	// f x up(0,0,1)
+	if ( r.length() <= 1.0e-6f )
+		r = Vector3( 1.0f, 0.0f, 0.0f );
+	r.normalize();
+	auto err = [&]( float p, float y ) {
+		Matrix m;
+		m.fromEuler( deg2rad( p ), 0.0f, deg2rad( y ) );
+		float e = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			e += ( m( 2, j ) + f[j] ) * ( m( 2, j ) + f[j] ) + ( m( 0, j ) - r[j] ) * ( m( 0, j ) - r[j] );
+		return e;
+	};
+	float bp = 0.0f, by = 0.0f, be = err( 0.0f, 0.0f );
+	for ( int p = -179; p <= 179; p++ )
+		for ( int y = -180; y < 180; y++ )
+			if ( const float e = err( float( p ), float( y ) ); e < be ) {
+				be = e;
+				bp = float( p );
+				by = float( y );
+			}
+	for ( float step = 0.1f; step >= 1.0e-4f; step *= 0.1f ) {
+		const float p0 = bp, y0 = by;
+		for ( int i = -10; i <= 10; i++ )
+			for ( int j = -10; j <= 10; j++ )
+				if ( const float e = err( p0 + i * step, y0 + j * step ); e < be ) {
+					be = e;
+					bp = p0 + i * step;
+					by = y0 + j * step;
+				}
+	}
+	Rot = Vector3( bp, 0.0f, by );
+	Matrix m;
+	m.fromEuler( deg2rad( bp ), 0.0f, deg2rad( by ) );
+	Pos = Vector3() - eye + ( view != ViewWalk ? m.inverted() * Vector3( 0.0f, 0.0f, 2.0f * float( Dist ) ) : Vector3() );
+	updateViewpoint();
+	update();
+	const Vector3 back = viewTransform() * eye;	// the eye must land at the view's origin
+	return QStringLiteral( "camera eye %1,%2,%3 rot %4,0,%5 | eye residual %6 rows residual %7" )
+		.arg( double( eye[0] ), 0, 'f', 1 ).arg( double( eye[1] ), 0, 'f', 1 ).arg( double( eye[2] ), 0, 'f', 1 )
+		.arg( double( bp ), 0, 'f', 4 ).arg( double( by ), 0, 'f', 4 ).arg( double( back.length() ), 0, 'f', 3 )
+		.arg( double( std::sqrt( be ) ), 0, 'g', 3 );
+}
+
+QString GLView::wwFlyRefocusCheck()
+{
+	const bool wasFree = freeCamera, wasGrab = flyGrab;
+	const Vector3 pos0 = Pos, rot0 = Rot;
+	const std::uint64_t kbd0 = kbdState;
+	freeCamera = true;	// the member, not setFreeCamera: no keyboard grab, no cursor move, no activation
+	flyGrab = false;
+	flyResync = false;
+	const QPointF c( width() * 0.5, height() * 0.5 );
+	auto moveTo = [&]( QPointF p ) {
+		QMouseEvent ev( QEvent::MouseMove, p, mapToGlobal( p ), Qt::NoButton, Qt::NoButton, Qt::NoModifier );
+		QCoreApplication::sendEvent( this, &ev );
+	};
+	auto moved = [&]() {
+		float d = 0.0f;
+		for ( int i = 0; i < 3; i++ )
+			d = std::max( { d, std::fabs( Rot[i] - rot0[i] ), std::fabs( Pos[i] - pos0[i] ) } );
+		return d;
+	};
+	auto putBack = [&]() {
+		Pos = pos0;
+		Rot = rot0;
+		mouseRot = Vector3();
+	};
+	QStringList out;
+	bool pass = true;
+	moveTo( c + QPointF( 40.0, 0.0 ) );
+	const float ctl = moved();
+	pass = pass && ctl > 0.0f;
+	out << QStringLiteral( "control move %1" ).arg( double( ctl ), 0, 'f', 4 );
+	putBack();
+	const QPointF corner( 3.0, 3.0 );	// the cursor came back at the window's corner
+	for ( int k = 0; k < 3; k++ ) {
+		const char * name = k == 0 ? "FocusIn" : k == 1 ? "WindowActivate" : "Enter";
+		if ( k == 0 ) {
+			QFocusEvent fe( QEvent::FocusIn, Qt::ActiveWindowFocusReason );
+			QCoreApplication::sendEvent( this, &fe );
+		} else if ( k == 1 ) {
+			QEvent ae( QEvent::WindowActivate );
+			QCoreApplication::sendEvent( this, &ae );
+		} else {
+			QEnterEvent ee( c, c, mapToGlobal( c ) );
+			QCoreApplication::sendEvent( this, &ee );
+		}
+		moveTo( corner );
+		const float jump = moved();
+		putBack();
+		moveTo( c + QPointF( 40.0, 0.0 ) );	// the next move looks again
+		const float after = moved();
+		putBack();
+		pass = pass && jump == 0.0f && after > 0.0f;
+		out << QStringLiteral( "%1: jump %2 then move %3" ).arg( QLatin1StringView( name ) ).arg( double( jump ), 0, 'f', 4 )
+			.arg( double( after ), 0, 'f', 4 );
+	}
+	// one gears tick after a 5 s stall with W held
+	kbdState = 1ULL << Key_MoveForward;
+	lastTime = std::chrono::steady_clock::now() - std::chrono::seconds( 5 );
+	advanceGears();
+	const float step = ( Pos - pos0 ).length();
+	const float perSec = cfg.moveSpd * float( scale() ) * freeCamSpeed;
+	const float secs = perSec > 0.0f ? step / perSec : 0.0f;
+	pass = pass && secs > 0.0f && secs <= 0.1001f;
+	out << QStringLiteral( "tick after 5 s: step %1 = %2 s of flight" ).arg( double( step ), 0, 'f', 3 ).arg( double( secs ), 0, 'f', 4 );
+	putBack();
+	kbdState = kbd0;
+	lastTime = std::chrono::steady_clock::now();
+	freeCamera = wasFree;
+	flyGrab = wasGrab;
+	flyResync = false;
+	updateViewpoint();
+	update();
+	return QStringLiteral( "flycheck %1%2 | %3" ).arg( pass ? QStringLiteral( "PASS" ) : QStringLiteral( "FAIL" ) )
+		.arg( wwFlyFixRed() ? QStringLiteral( " (red WW_FLYFIX_RED=1)" ) : QString() ).arg( out.join( QStringLiteral( " | " ) ) );
 }
 
 QImage GLView::grabSupersampled( int shift )
@@ -22952,6 +23090,32 @@ void GLView::focusOutEvent( QFocusEvent * )
 		return;
 	kbdState = 0;
 	mouseButtonState = 0;
+}
+
+/* lane FLYFIX1 (bungo 10-23: the free camera swung to the void on coming back to the window): focus, activation or
+ * the cursor leaving/entering makes the next free-camera move a re-centre, never a look; WW_FLYFIX_RED=1 is the old way */
+bool GLView::event( QEvent * e )
+{
+	switch ( e->type() ) {
+	case QEvent::FocusIn:
+	case QEvent::FocusOut:
+	case QEvent::WindowActivate:
+	case QEvent::WindowDeactivate:
+	case QEvent::Enter:
+	case QEvent::Leave:
+		flyResync = true;
+		mouseRot = Vector3();
+		break;
+	default:
+		break;
+	}
+	return QOpenGLWindow::event( e );
+}
+
+bool wwFlyFixRed()
+{
+	WW_SWITCH_STATIC( bool, red, qEnvironmentVariableIntValue( "WW_FLYFIX_RED" ) == 1 );
+	return red;
 }
 
 bool GLView::viewportClaimsKey( int n ) const
@@ -23713,15 +23877,23 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 	// Fly look has priority over every modal viewport tool. Weight Paint stays
 	// active underneath and resumes when fly mode exits.
 	if ( freeCamera ) {
-		if ( !isActive() )
+		if ( !isActive() && flyGrab )
 			requestActivate();	// regain key focus so WASD keeps working
 		QPointF c( width() * 0.5, height() * 0.5 );
 		auto p = getQMouseEventPosition( event );
+		// lane FLYFIX1: the first move after a refocus is where the cursor came back, not a look: re-centre only
+		if ( flyResync && !wwFlyFixRed() ) {
+			flyResync = false;
+			if ( flyGrab )
+				QCursor::setPos( mapToGlobal( QPoint( int( c.x() ), int( c.y() ) ) ) );
+			return;
+		}
 		float ldx = float( p.x() - c.x() );
 		float ldy = float( p.y() - c.y() );
 		if ( ldx != 0.0f || ldy != 0.0f ) {
 			freeCameraLook( ldy * 0.2f, ldx * 0.2f );
-			QCursor::setPos( mapToGlobal( QPoint( int( c.x() ), int( c.y() ) ) ) );
+			if ( flyGrab )
+				QCursor::setPos( mapToGlobal( QPoint( int( c.x() ), int( c.y() ) ) ) );
 			update();
 		}
 		return;

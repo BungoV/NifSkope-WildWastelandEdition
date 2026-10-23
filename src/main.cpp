@@ -107,13 +107,19 @@ QCoreApplication * createApplication( int &argc, char *argv[] )
 void wwCardTimesMainEntry();	// CARDBAKE2, nifskope_ui.cpp
 bool wwCardBatchOn();
 bool wwCardBatchStart();
+bool wwStderrFrameFlush = false;	// lane FLYFIX1: GLView::paintGL flushes stderr once a frame when set
 int main( int argc, char * argv[] )
 {
 	/* lane PERF1: WW_STDERR_BUFFER=1 (timing harnesses only) holds stderr in a 4 MB buffer, written when full and at
 	 * exit. A harness redirects stderr to a file, and there each line cost the frame that printed it ~0.3 s, so the
 	 * frame timers measured the harness's writes. Set before any output, as setvbuf asks; a refusal flushes first. */
-	if ( wwEnvInt( "WW_STDERR_BUFFER" ) == 1 )
+	const QByteArray wwSb = qgetenv( "WW_STDERR_BUFFER" );
+	if ( wwSb == "1" )
 		std::setvbuf( stderr, nullptr, _IOFBF, 4 << 20 );
+	/* lane FLYFIX1 (bungo 10-23, ~1 fps flying with stderr in a file): unbuffered stderr wrote one char a syscall;
+	 * by default it is buffered and flushed once a frame and on warnings. WW_STDERR_BUFFER=0 is the old way. */
+	else if ( wwSb != "0" && std::setvbuf( stderr, nullptr, _IOFBF, 64 << 10 ) == 0 )
+		wwStderrFrameFlush = true;
 	PassTime::profileFromStart();	// lane PERF1: WW_PROF_SAMPLE_ALL=1, the load profiled too
 
 	wwCardTimesMainEntry();
