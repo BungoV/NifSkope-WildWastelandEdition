@@ -24,6 +24,7 @@ const LookRow kRows[] = {
 	{ "Moonlit terrain shadows", "WW/ShadowMoonSky" },
 	{ "PBR ambient in terrain shadow", "WW/ShadowPbrDim" },
 	{ "Bloom width in fog", "WW/CellBloomPerPixel" },
+	{ "Real sun and moon", "WW/SkyEphemeris" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -77,6 +78,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_BLOOM_PERPIX" ).trimmed() );
 		return p;
 	}
+	case WwLook::Ephemeris: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_SKY_EPHEM" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -100,6 +105,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::TerrMoonSky: return "WW_SHADOW_MOONSKY";
 	case WwLook::TerrPbrDim: return "WW_SHADOW_PBRDIM";
 	case WwLook::BloomMip: return "WW_CELL_BLOOM_PERPIX";
+	case WwLook::Ephemeris: return "WW_SKY_EPHEM";
 	default: return "";
 	}
 }

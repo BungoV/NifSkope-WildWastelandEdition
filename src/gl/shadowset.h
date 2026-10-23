@@ -56,6 +56,9 @@ double wwSunPathReal( double hour, double gameDay, double out[3] );
 /*! (D) with Sun Path = Real: replaces the shaded light direction (TO the light) and the disc, crossfading to
  *  `sunDir`'s own night light between 0 and -6 degrees of elevation. False (nothing changed) on Engine. */
 bool wwSunPathApply( double hour, double gameDay, float sunDir[3], float disc[3] );
+/*! lane EPHEM1: with Sun Path = Real and the row "Real sun and moon" on, the moon TO-vector (unit, world), its
+ *  sun-moon elongation (0 new, 180 full) and lit fraction; false (nothing written) otherwise. */
+bool wwSkyMoonReal( double hour, double gameDay, double dir[3], double * elongDeg, double * litFraction );
 
 //! (A) the upgraded cascades' preset; false = Off (CSM1's own numbers)
 struct WwCascadePreset

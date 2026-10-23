@@ -225,6 +225,7 @@ HEADERS += \
 	src/gl/lookdevstage.h \
 	src/gl/sunshadow.h \
 	src/gl/shadowset.h \
+	src/gl/skyephem.h \
 	src/gl/gametaa.h \
 	src/gl/campath.h \
 	src/gl/celllights.h \
