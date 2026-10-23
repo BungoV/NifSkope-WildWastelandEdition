@@ -24092,7 +24092,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		wwCardStamp( QStringLiteral( "window" ) );
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			wwCardStamp( QStringLiteral( "loaded" ) );
-			QTimer::singleShot( 1200, skope, [skope, fname, ok]() {
+			// lane BAKESPEED3: WW_IMPOSTOR_SETTLE_MS, a measuring knob for the fixed settle before the bake
+			static const int settleMs = qEnvironmentVariableIsSet( "WW_IMPOSTOR_SETTLE_MS" )
+				? qBound( 0, qEnvironmentVariableIntValue( "WW_IMPOSTOR_SETTLE_MS" ), 5000 ) : 1200;
+			QTimer::singleShot( settleMs, skope, [skope, fname, ok]() {
 				wwCardStamp( QStringLiteral( "bakestart" ) );
 				QElapsedTimer lap;
 				lap.start();

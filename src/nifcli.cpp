@@ -4479,7 +4479,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				QStringList alog;
 				vtOk = lodgenBakeAoMap( world,
 					dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
-					vtDir, vo, &alog, &vterr );
+					vtDir, vo, &alog, &vterr, bakeCaches );
 				for ( const QString & l : alog )
 					censusOut( l );
 				if ( !vtOk )
@@ -4658,7 +4658,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			const QString arrDir = objectsDir();
 			QDir().mkpath( arrDir );
 			QString rep, aerr;
-			StageTimer st( &msTextures );
+			StageTimer st( &msTextures, "stage texture arrays" );	// lane BAKESPEED3: named, so the memlog splits the window
 			if ( !lodgenBuildTextureArrays( writtenBto,
 				dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
 				arrDir + "/" + ws + QStringLiteral( ".LodgenArrays" ),
@@ -4691,7 +4691,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					looseRoot = norm.left( norm.size() - suffix.size() );
 			}
 			QString aerr;
-			StageTimer st( &msTextures );
+			StageTimer st( &msTextures, "stage atlas" );
 			/* NOT vanilla's "<ws>.Objects" name: a loose file at that path
 			 * SHADOWS the archived vanilla sheet, and every vanilla BTO
 			 * still in play (unregenerated chunks, the legacy fallback set)
@@ -4716,7 +4716,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		if ( merge && !writtenBto.isEmpty() ) {
 			// last: one shape per material the engine can tell apart (after the atlas and the arrays)
 			QString rep, merr;
-			StageTimer st( &msMeshes );
+			StageTimer st( &msMeshes, "stage merge" );
 			if ( lodgenMergeChunkShapes( writtenBto, &rep, &merr ) )
 				censusOut( QStringLiteral( "merged: " ) + rep );
 			else
@@ -4727,7 +4727,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			 * has already made one shape per material, which is the cluster a
 			 * far ring wants one simplified mesh of. Ring 0 is never cut. */
 			QString rep, serr;
-			StageTimer st( &msMeshes );
+			StageTimer st( &msMeshes, "stage far rings" );
 			if ( lodgenSimplifyFarRings( writtenBto, simplify, &rep, &serr ) )
 				censusOut( QStringLiteral( "far rings: " ) + rep );
 			else
