@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "controllers.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "gl/fxparity.h"	// lane FXPARITY1
 
 #include "gl/glshape.h"
 #include "gl/glparticles.h"
@@ -1425,6 +1426,15 @@ Color4 PSysSimController::particleColor( const Emitter & e, float u ) const
 		// fadeIn/fadeOut below is skipped for it.
 		int i = 0;
 		interpolate( c, iColorGradKeys, std::min( std::max( u, 0.0f ), 1.0f ), i );
+	} else if ( hasColorMod && ( fxRules & WwFxColor ) ) {
+		// lane FXPARITY1: the game's colour and alpha ramps (fxparityrules.h); its fades are in them
+		const float f[6] = { fadeIn, fadeOut, c1End, c2Start, c2End, c3Start };
+		float col[3][4], o[4];
+		for ( int k = 0; k < 3; k++ )
+			for ( int j = 0; j < 4; j++ )
+				col[k][j] = modColors[k][j];
+		FxRules::simpleColor( f, col, u, o );
+		return Color4( o[0], o[1], o[2], std::max( o[3], 0.0f ) );
 	} else if ( hasColorMod ) {
 		if ( u < c1End || c2Start <= c1End )
 			c = modColors[0];
@@ -1608,6 +1618,12 @@ void PSysSimController::emitParticle( Emitter & e )
 			p.frame = stStart + random( stStartFudge );
 			p.frameRate = stCount + random( stCountFudge );
 			p.frameLoop = stLoopStart + random( stLoopFudge );
+			if ( fxRules & WwFxSubTex ) {
+				// lane FXPARITY1: the game picks the start frame at the particle's first step
+				int f = 0;
+				FxRules::subTexStep( subTexRules(), p.stK, p.stSteps, f, 0.0f, []( float r ) { return random( r ); } );
+				p.frame = float( f );
+			}
 			p.uvOff = subtexCell( p.frame );
 		} else {
 			const Vector4 & s = subtexOffsets.at( std::rand() % subtexOffsets.size() );
@@ -1647,6 +1663,7 @@ void PSysSimController::updateTime( float time )
 	if ( dt <= 0.0f )
 		return;
 	dt = std::min( dt, 0.25f );
+	fxRules = wwFxParityRules();	// lane FXPARITY1: read each step, so the switch acts live
 
 	/* Which modifiers are switched on this frame.
 	 *
@@ -1751,7 +1768,9 @@ void PSysSimController::updateTime( float time )
 		if ( ax.length() <= 0.0f )
 			continue;
 		ax.normalize();
-		dragAxes.append( { ax, 1.0f - std::exp( -d.percentage * 30.0f * dt ) } );
+		// lane FXPARITY1: the game's drag is linear in the step and capped at 1 (fxparityrules.h)
+		dragAxes.append( { ax, ( fxRules & WwFxDrag ) ? FxRules::dragShare( d.percentage, dt )
+			: 1.0f - std::exp( -d.percentage * 30.0f * dt ) } );
 	}
 
 	int n = 0;
@@ -1789,7 +1808,14 @@ void PSysSimController::updateTime( float time )
 		}
 		for ( const auto & d : dragAxes )
 			p.vel -= d.first * ( Vector3::dotproduct( p.vel, d.first ) * d.second );
-		if ( subtexOn ) {
+		if ( subtexOn && ( fxRules & WwFxSubTex ) ) {
+			// lane FXPARITY1: one frame per step of the life, Frame Count steps in all (fxparityrules.h)
+			int f = int( p.frame );
+			FxRules::subTexStep( subTexRules(), p.stK, p.stSteps, f, p.age / std::max( p.lifespan, 1e-6f ),
+				[]( float r ) { return random( r ); } );
+			p.frame = float( f );
+			p.uvOff = subtexCell( p.frame );
+		} else if ( subtexOn ) {
 			p.frame += p.frameRate * dt;
 			// past End Frame it goes back to LOOP START, not to where it began:
 			// the start was randomised per particle and is not where a loop is

@@ -17,6 +17,7 @@ BSD License - see nifskope.h
 #include "gl/cellssgi.h"	// lane SSGI1
 #include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row
 #include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row
+#include "gl/fxparity.h"	// lane FXPARITY1
 #include "esmweather.h"
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
@@ -240,6 +241,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	wwMatchFieldStyle( farAirBox );
 	row( tr( "Far Air" ), farAirBox, true );
 	liveCheck( volPartBox, "volPart", tr( "Volumetric Particles" ), wwVolPartOn() );	// lane VOLPART1: lit steam, seen through the air
+	liveCheck( fxParityBox, "fxParity", tr( "Particle Game Rules" ), wwFxParityOn() );	// lane FXPARITY1: every mode, ships off
 	liveCheck( fogDriftBox, "fogDrift", tr( "Fog Drift" ), wwVolAirDriftOn() );	// lane FOGDRIFT1: ships off
 	heading( tr( "Effects" ) );
 	liveCheck( shadowsBox, "lookdevShadows", tr( "Cascaded Shadows" ), wwLookdevShadows() );	// lane CSM1
@@ -371,6 +373,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( fogBox, &wwLookdevSetFog );
 	liveToggle( volAirBox, &wwVolAirSetOn );
 	liveToggle( volPartBox, &wwVolPartSetOn );
+	liveToggle( fxParityBox, &wwFxParitySetOn );	// lane FXPARITY1
 	liveToggle( fogDriftBox, &wwVolAirSetDriftOn );	// lane FOGDRIFT1
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	liveToggle( taaBox, &wwGameTaaSetOn );

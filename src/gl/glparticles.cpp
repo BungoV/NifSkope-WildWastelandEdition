@@ -44,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/celllights.h"	// lane SUNCELL1: the cell effect law
 #include "gl/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights
 #include "gl/cellvolair.h"	// lane VOLPART1: volumetric particles
+#include "gl/fxparity.h"	// lane FXPARITY1: Particle Game Rules
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"	// lane SUNCELL1: the weather fog
 #include "gl/glproperty.h"
@@ -628,6 +629,10 @@ void Particles::drawShapes( NodeList * secondPass )
 		const Vector2	cell = spriteUVCell();
 		prog->uni4f( "particleUV", FloatVector4( 0.0f, 0.0f, cell[0], cell[1] ) );
 
+		// lane FXPARITY1: Particle Game Rules (fxparity.h), the shader's part: 1 the effect law, 2 the soft fade
+		const int fxRules = wwFxParityRules();
+		prog->uni1i( "pfxGame", ( ( fxRules & WwFxLaw ) ? 1 : 0 ) | ( ( fxRules & WwFxSoft ) ? 2 : 0 ) );
+
 		// setup blending: honour the linked NiAlphaProperty (FO4 electricity is
 		// additive: SRC_ALPHA, ONE), else fall back to additive
 		AlphaProperty::glProperty( aprop, prog );
@@ -671,9 +676,15 @@ void Particles::drawShapes( NodeList * secondPass )
 			wwSunShadowUniforms( scene );
 			volPart = wwVolPartUniforms( scene );
 			{
-				const bool soft = volPart && scene->grabEffectDepth();
-				vpAlways = soft && !( wwVolPartRed() & 4 );	// the ball's fade is the occlusion
+				/* lane FXPARITY1: under the game's soft rule a particle whose effect shader is Soft fades near the
+				 * opaque surface behind it, as an effect card does (fo4_effectshader.frag cellFxFade) */
+				const auto * espSoft = dynamic_cast<const BSEffectShaderProperty *>( shaderProp );
+				const bool gameSoft = !volPart && ( fxRules & WwFxSoft ) && espSoft && espSoft->soft
+					&& espSoft->falloff.softDepth > 0.0f;
+				const bool soft = ( volPart || gameSoft ) && scene->grabEffectDepth();
+				vpAlways = volPart && soft && !( wwVolPartRed() & 4 );	// the ball's fade is the occlusion
 				prog->uni1b( "fxSoft", soft );
+				prog->uni1f( "fxSoftDepth", gameSoft ? std::max( espSoft->falloff.softDepth, 1.0f ) : 1.0f );
 				GLint prevActive = 0;
 				glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 				scene->renderer->fn->glActiveTexture( GLenum( GL_TEXTURE0 + kVpFxDepthUnit ) );
@@ -817,12 +828,13 @@ void Particles::drawShapes( NodeList * secondPass )
 			// sprite, so fall back to white (plain base texture) in that case
 			FloatVector4	gc( esp->emissiveColor );
 			float	gm = esp->emissiveMult;
-			if ( gc[0] + gc[1] + gc[2] < 0.02f ) {
+			// lane FXPARITY1: the game takes the emissive as written (no white fallback, no clamp), as for a card
+			if ( !( fxRules & WwFxLaw ) && gc[0] + gc[1] + gc[2] < 0.02f ) {
 				gc = FloatVector4( 1.0f, 1.0f, 1.0f, gc[3] );
 				gm = 1.0f;
 			}
 			prog->uni4f( "glowColor", gc );
-			prog->uni1f( "glowMult", std::min( std::max( gm, 0.0f ), 4.0f ) );
+			prog->uni1f( "glowMult", ( fxRules & WwFxLaw ) ? gm : std::min( std::max( gm, 0.0f ), 4.0f ) );
 
 			prog->uni1i( "greyscaleColor", esp->greyscaleColor );
 			prog->uni1i( "greyscaleAlpha", esp->greyscaleAlpha );

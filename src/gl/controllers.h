@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gl/glcontroller.h" // Inherited
 #include "data/niftypes.h"
+#include "gl/fxparityrules.h"	// lane FXPARITY1
 
 #include <QPointer>
 
@@ -288,6 +289,7 @@ class PSysSimController final : public Controller
 		float frame = 0;                   // BSPSysSubTexModifier playhead, in frames
 		float frameRate = 0;               // its own rate, fudged at birth
 		float frameLoop = 0;               // where its loop restarts, likewise
+		int stK = -1, stSteps = 0;         // lane FXPARITY1: the game's flipbook step and step count
 		float angle = 0;                   // sprite rotation (radians)
 		float angVel = 0;                  // rotation speed (radians/sec)
 	};
@@ -499,6 +501,11 @@ class PSysSimController final : public Controller
 	float stStart = 0, stStartFudge = 0;
 	float stEnd = 0, stLoopStart = 0, stLoopFudge = 0;
 	float stCount = 0, stCountFudge = 0;
+	FxRules::SubTex subTexRules() const
+	{
+		return { stStart, stStartFudge, stEnd, stLoopStart, stLoopFudge, stCount, stCountFudge };
+	}
+	int fxRules = 0;	// lane FXPARITY1: the game rules in force this step (fxparity.h)
 
 	//! The atlas cell a frame index lands on: (offU, offV) of that Subtexture
 	//! Offset, taken modulo the real cell count.
