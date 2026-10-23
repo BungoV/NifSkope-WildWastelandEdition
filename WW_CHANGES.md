@@ -235,6 +235,14 @@ Every item is its own Show-menu row with an env pin, live, and OFF = the look be
   `cell_volair.frag` called `ussTerrain` with 3 arguments after SHADOWPAR1 made it 4 (`, 0.0, false` as the air tail
   does; cell_volair.prog failed in every mode); `cell_lights.glsl` declared `cellGiLoop8` only outside
   `WW_CELL_GI_MARCH`, so EMISSIVEGRID1's read broke 18 cell programs in the march mode. Now declared for both.
+## Lane SSGI2FRAMES (2026-10-23, branch ssgi2frames-20261023): screen GI harness pictures repeat
+
+- Port of SSGI2FIX's row b onto BATCH4 (its fill change is not ported: SSGI3's fill law, already merged, does the same
+  job). In a harness run the screen GI's temporal history belongs to the view (or the camera path's frame), not to the
+  number of paints: a new view, a live switch set, a quality or red change or a streamed-in cell pre-rolls 16 frames,
+  the next path frame advances one, and a repaint redoes the last. Red `WW_CELL_SSGI_RED=oldframes` brings back one
+  frame per paint; the notes line adds `frames live|pinned|per-paint`. Live views and SSGI off are unchanged.
+- Gates: notes/ssgi2recon1/FINAL.md (run by RESUME1).
 
 ## Lane OBJLODSHADOW1 (2026-10-22, branch objlodshadow1-20261022): object LOD casts only past the cascades
 

@@ -55,6 +55,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/lookdevstage.h"	// lane SHADOWCACHE1: the path's hour step
 #include "gl/gametaa.h"
 #include "gl/cellpost.h"	// lane GRASSMB1
+#include "gl/cellssgi.h"	// lane SSGI2FRAMES
 #include "gl/cellbloom.h"	// lane BLOOM1b
 #include "gl/sunshadow.h"
 #include "ui_nifskope.h"
@@ -2341,6 +2342,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	for ( int k = 0; k < preroll; k++ ) {
 		wwGameTaaSetFrame( k );
 		wwCellPostSetPath( k, float( path.fps() ) );	// lane GRASSMB1: the motion blur's frame and frame time
+		wwCellSsgiSetPath( k );	// lane SSGI2FRAMES: the bounce's temporal state follows the path frame
 		pump();
 	}
 	/* lane SHADOWCACHE1: WW_RENDER_PATH_HOURSTEP=<hours a frame> moves the sun along the path too (frame k at the
@@ -2357,6 +2359,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		ogl->wwSetPathCamera( true, eye, at, fov );
 		wwGameTaaSetFrame( preroll + k );
 		wwCellPostSetPath( preroll + k, float( path.fps() ) );
+		wwCellSsgiSetPath( preroll + k );
 		// lane DOORLIVE1: the live door at this frame's time (posed and relit before the frame draws)
 		const QString door = wwDoorLiveStep( ogl->getScene(), path.fps() > 0 ? double( k ) / double( path.fps() ) : 0.0 );
 		pump();
@@ -2378,6 +2381,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	}
 	wwGameTaaSetFrame( -1 );
 	wwCellPostSetPath( -1, 0.0f );
+	wwCellSsgiSetPath( -1 );
 	ogl->wwSetPathCamera( false );
 	if ( video ) {
 		QString ff = wwEnvStr( "WW_FFMPEG" );

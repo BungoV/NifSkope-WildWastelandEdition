@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
+#include "harnesswindow.h"	// lane SSGI2FRAMES
 
 #include <QFile>
 #include <QHash>
@@ -51,7 +52,8 @@ struct SsgiState
 	bool on = false, pinOn = false, pinQ = false;
 	int quality = 3;
 	int red = 0;	// 1 off, 2 stack, 4 notemporal, 8 noblur; lane SSGI2: 16 ign, 32 nohiz, 64 oldblur, 128 noemissive;
-					// lane SSGI3: 256 oldlaw (SSGI1's fill law)
+					// lane SSGI3: 256 oldlaw (SSGI1's fill law); lane SSGI2FRAMES: 512 oldframes
+	int pathFrame = -1;	// lane SSGI2FRAMES: the camera path's frame (wwCellSsgiSetPath), -1 a still view
 	int lastVerdict = -1;
 	char echo[240] = {};
 };
@@ -76,7 +78,8 @@ SsgiState & st()
 		s.quality = s.pinQ && qs >= 0 ? qs : std::clamp( QSettings().value( QStringLiteral( "WW/CellSsgiQuality" ), 3 ).toInt(), 0, 3 );
 		for ( const QByteArray & w : red.split( ',' ) )
 			s.red |= w == "off" ? 1 : w == "stack" ? 2 : w == "notemporal" ? 4 : w == "noblur" ? 8 : w == "ign" ? 16
-				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : w == "oldlaw" ? 256 : 0;
+				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : w == "oldlaw" ? 256
+				: w == "oldframes" ? 512 : 0;
 	}
 	return s;
 }
@@ -103,6 +106,12 @@ struct SsgiGpu
 	bool ready = false;
 	int frame = 0;
 	int unit = -1;
+	// lane SSGI2FRAMES: a harness run's temporal state belongs to the view (or path frame), not to how many paints ran
+	struct Key { const void * doc; quint64 gen; int w, h, path, quality, red, shapes; float p0, p1, R[9], T[3]; };
+	struct Snap { int cur, frame; bool have, eHave; float R[9], T[3]; };
+	Key key = {};
+	bool keyValid = false;
+	Snap snap = {};
 };
 
 QHash<const void *, SsgiGpu> & gpus()
@@ -235,10 +244,11 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		: !wwCellSsrSceneTexture( scene, sceneTex ) ? 2 : 3;
 	if ( verdict != s.lastVerdict && ( verdict != 0 || s.lastVerdict > 0 ) ) {
 		static const char * const words[4] = { "off", "off (no obscurance pass)", "off (no scene pass)", "on" };
-		std::snprintf( s.echo, sizeof( s.echo ), "cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s",
+		std::snprintf( s.echo, sizeof( s.echo ),
+			"cell ssgi: %s quality %d red %d noise %s hiz %s denoise %s emissive %s law %s frames %s",
 			words[verdict], s.quality, s.red, ( s.red & 16 ) ? "ign" : "fast", ( s.red & 32 ) ? "off" : "on",
 			( s.red & 8 ) ? "none" : ( s.red & 64 ) ? "5x5" : "robust+quarter", ( s.red & 128 ) ? "off" : "on",
-			( s.red & 256 ) ? "old" : "fill" );
+			( s.red & 256 ) ? "old" : "fill", !wwHarnessRun() ? "live" : ( s.red & 512 ) ? "per-paint" : "pinned" );
 		std::fprintf( stderr, "%s\n", s.echo );
 		s.lastVerdict = verdict;
 	}
@@ -326,7 +336,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	if ( resized || g.doc != scene->nifModel )
 		g.haveHistory = g.eHistory = false;
 
-	// this view (game units): v = R w + t / sc; last frame's the same; cur -> prev = Rp R^T (v - t) + tp
+	// this view (game units): v = R w + t / sc
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
 	float R[9], T[3];
@@ -335,21 +345,53 @@ void wwCellSsgiPass( Scene * scene, bool run )
 			R[j * 3 + k] = vt.rotation( j, k );
 		T[j] = vt.translation[j] / sc;
 	}
-	float M[9], Mt[3];	// M = Rp R^T (row major), Mt = tp - M t
-	for ( int i = 0; i < 3; i++ ) {
-		for ( int k = 0; k < 3; k++ ) {
-			float a = 0.0f;
-			for ( int j = 0; j < 3; j++ )
-				a += g.prevR[i * 3 + j] * R[k * 3 + j];
-			M[i * 3 + k] = a;
+	const auto & pm = r->globalUniforms->projectionMatrix;
+
+	// lane SSGI2FRAMES (SSGI2FIX's row b): in a harness run a new view (a path jump, a live switch set, a quality or
+	// red change) starts the history and pre-rolls kPreroll frames at once, the next path frame advances one, and a
+	// repaint of the same one redoes its last frame from the saved state, so the grab never depends on how many paints
+	// the launch happened to run (red `oldframes`: one frame per paint). Live views keep one frame per paint.
+	constexpr int kPreroll = 16;
+	int subFrames = 1;
+	if ( wwHarnessRun() && !( s.red & 512 ) ) {
+		SsgiGpu::Key k = {};
+		k.doc = scene->nifModel;
+		k.gen = wwSwitchGen();
+		k.w = W;
+		k.h = H;
+		k.path = s.pathFrame;
+		k.quality = s.quality;
+		k.red = s.red;
+		k.shapes = int( scene->shapes.size() );	// a cell streamed in since: a new view
+		k.p0 = pm[0][0];
+		k.p1 = pm[1][1];
+		if ( k.path < 0 ) {
+			std::memcpy( k.R, R, sizeof( R ) );
+			std::memcpy( k.T, T, sizeof( T ) );
 		}
-	}
-	for ( int i = 0; i < 3; i++ )
-		Mt[i] = g.prevT[i] - ( M[i * 3] * T[0] + M[i * 3 + 1] * T[1] + M[i * 3 + 2] * T[2] );
-	float Mcol[9];	// GL wants column major
-	for ( int i = 0; i < 3; i++ )
-		for ( int k = 0; k < 3; k++ )
-			Mcol[k * 3 + i] = M[i * 3 + k];
+		SsgiGpu::Key nextOf = g.key;
+		nextOf.path = g.key.path + 1;
+		const bool same = g.keyValid && g.haveHistory && std::memcmp( &k, &g.key, sizeof( k ) ) == 0;
+		const bool next = g.keyValid && g.haveHistory && k.path >= 0 && g.key.path >= 0
+			&& std::memcmp( &k, &nextOf, sizeof( k ) ) == 0;
+		if ( same ) {
+			g.cur = g.snap.cur;
+			g.frame = g.snap.frame;
+			g.haveHistory = g.snap.have;
+			g.eHistory = g.snap.eHave;
+			std::memcpy( g.prevR, g.snap.R, sizeof( R ) );
+			std::memcpy( g.prevT, g.snap.T, sizeof( T ) );
+		} else if ( !next ) {
+			g.haveHistory = g.eHistory = false;
+			g.frame = 0;
+			std::memcpy( g.prevR, R, sizeof( R ) );
+			std::memcpy( g.prevT, T, sizeof( T ) );
+			subFrames = kPreroll;
+		}
+		g.key = k;
+		g.keyValid = true;
+	} else
+		g.keyValid = false;
 
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_ssgi.prog" );
 	if ( !prog ) {
@@ -363,7 +405,6 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	fn->glDisable( GL_SCISSOR_TEST );
 	fn->glDepthMask( GL_FALSE );
 	fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-	const auto & pm = r->globalUniforms->projectionMatrix;
 	prog->uni1i( "gbuf", 0 );
 	prog->uni1i( "scene", 1 );
 	prog->uni1i( "src", 2 );
@@ -400,22 +441,10 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	prog->uni1f( "maxAccum", 1.0f / ( 1.0f - kHistoryBlend ) );
 	prog->uni1f( "blurRadius", ( s.red & 8 ) ? 0.0f : kBlurPx * ( tier.full ? 1.0f : 0.5f ) );
 	prog->uni1f( "normalWeight", kNormalWeight );
-	prog->uni1i( "frameIndex", g.frame & 63 );
-	prog->uni1b( "historyValid", g.haveHistory && !( s.red & 4 ) );
-	bool moving = false;
-	for ( int i = 0; i < 9; i++ )
-		moving = moving || std::fabs( M[i] - ( i % 4 == 0 ? 1.0f : 0.0f ) ) > 1.0e-5f;
-	for ( int i = 0; i < 3; i++ )
-		moving = moving || std::fabs( Mt[i] ) > 1.0e-3f;
-	prog->uni1b( "moving", moving );
 	prog->uni1f( "motionAccum", kMotionAccum );
-	fn->glUniformMatrix3fv( prog->uniLocation( "curToPrev" ), 1, GL_FALSE, Mcol );
-	prog->uni3f( "curToPrevT", Mt[0], Mt[1], Mt[2] );
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
-	const Target & prev = g.acc[g.cur ^ 1];
-	Target & now = g.acc[g.cur];
 	auto bind = [&]( int u, GLuint t ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
 		fn->glBindTexture( GL_TEXTURE_2D, t );
@@ -479,17 +508,55 @@ void wwCellSsgiPass( Scene * scene, bool run )
 			pass( 7, out, cst.tex, 1 );
 		}
 	};
-	bind( 9, emis ? GLuint( emitTex ) : 0 );
-	if ( emis ) {
-		// FO4CS: the emitters' own cast, history and denoise; the ordinary result adds it at the end
-		prog->uni1b( "emissivePass", true );
-		prog->uni1b( "historyValid", g.eHistory && !( s.red & 4 ) );
-		chain( 8, g.ecast, g.eacc[g.cur ^ 1], g.eacc[g.cur], g.efin );
-		prog->uni1b( "emissivePass", false );
+	for ( int sub = 0; sub < subFrames; sub++ ) {
+		bind( 9, emis ? GLuint( emitTex ) : 0 );	// the last chain left efin there
+		if ( sub == subFrames - 1 ) {	// lane SSGI2FRAMES: the state a repaint of this view redoes from
+			g.snap = { g.cur, g.frame, g.haveHistory, g.eHistory, {}, {} };
+			std::memcpy( g.snap.R, g.prevR, sizeof( R ) );
+			std::memcpy( g.snap.T, g.prevT, sizeof( T ) );
+		}
+		// last frame's view the same; cur -> prev = Rp R^T (v - t) + tp
+		float M[9], Mt[3];	// M = Rp R^T (row major), Mt = tp - M t
+		for ( int i = 0; i < 3; i++ ) {
+			for ( int k = 0; k < 3; k++ ) {
+				float a = 0.0f;
+				for ( int j = 0; j < 3; j++ )
+					a += g.prevR[i * 3 + j] * R[k * 3 + j];
+				M[i * 3 + k] = a;
+			}
+		}
+		for ( int i = 0; i < 3; i++ )
+			Mt[i] = g.prevT[i] - ( M[i * 3] * T[0] + M[i * 3 + 1] * T[1] + M[i * 3 + 2] * T[2] );
+		float Mcol[9];	// GL wants column major
+		for ( int i = 0; i < 3; i++ )
+			for ( int k = 0; k < 3; k++ )
+				Mcol[k * 3 + i] = M[i * 3 + k];
+		bool moving = false;
+		for ( int i = 0; i < 9; i++ )
+			moving = moving || std::fabs( M[i] - ( i % 4 == 0 ? 1.0f : 0.0f ) ) > 1.0e-5f;
+		for ( int i = 0; i < 3; i++ )
+			moving = moving || std::fabs( Mt[i] ) > 1.0e-3f;
+		prog->uni1b( "moving", moving );
+		fn->glUniformMatrix3fv( prog->uniLocation( "curToPrev" ), 1, GL_FALSE, Mcol );
+		prog->uni3f( "curToPrevT", Mt[0], Mt[1], Mt[2] );
+		prog->uni1i( "frameIndex", g.frame & 63 );
+		if ( emis ) {
+			// FO4CS: the emitters' own cast, history and denoise; the ordinary result adds it at the end
+			prog->uni1b( "emissivePass", true );
+			prog->uni1b( "historyValid", g.eHistory && !( s.red & 4 ) );
+			chain( 8, g.ecast, g.eacc[g.cur ^ 1], g.eacc[g.cur], g.efin );
+			prog->uni1b( "emissivePass", false );
+		}
+		// the ordinary cast reads the emission (unit 9) to take it off its donor; its last stage reads efin there
 		prog->uni1b( "historyValid", g.haveHistory && !( s.red & 4 ) );
+		chain( 1, g.cast, g.acc[g.cur ^ 1], g.acc[g.cur], g.fin );
+		std::memcpy( g.prevR, R, sizeof( R ) );
+		std::memcpy( g.prevT, T, sizeof( T ) );
+		g.cur ^= 1;
+		g.haveHistory = true;
+		g.eHistory = emis;
+		g.frame++;
 	}
-	// the ordinary cast reads the emission (unit 9) to take it off its donor; its last stage reads efin there
-	chain( 1, g.cast, prev, now, g.fin );
 	prog->uni1b( "emitAdd", false );
 	r->stopProgram();
 	bind( 1, sceneTex );
@@ -498,18 +565,12 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	for ( int u = 0; u < 10; u++ )
 		bind( u, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
-	{
+	for ( const Target & a : g.acc ) {
 		const GLenum b0 = GL_COLOR_ATTACHMENT0;
-		fn->glBindFramebuffer( GL_FRAMEBUFFER, now.fbo );
+		fn->glBindFramebuffer( GL_FRAMEBUFFER, a.fbo );
 		fn->glDrawBuffers( 1, &b0 );
 	}
 
-	std::memcpy( g.prevR, R, sizeof( R ) );
-	std::memcpy( g.prevT, T, sizeof( T ) );
-	g.cur ^= 1;
-	g.haveHistory = true;
-	g.eHistory = emis;
-	g.frame++;
 	g.ready = true;
 	g.doc = scene->nifModel;
 
@@ -553,4 +614,9 @@ void wwCellSsgiDraw( Scene * scene, bool cellProgram )
 		prog->uni2f( "cellSsgiK", kAoAmount, kIndirect );
 		prog->uni1i( "cellSsgiRed", s.red );
 	}
+}
+
+void wwCellSsgiSetPath( int frame )
+{
+	st().pathFrame = frame;
 }
