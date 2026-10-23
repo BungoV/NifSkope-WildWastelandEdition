@@ -2016,6 +2016,101 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.voxelsTwoBare = nTwoBare;
 	R.msGrid = clock.nsecsElapsed() / 1e6 - R.msLight - R.msGather - R.msBounce;
 
+	/* SKY2 FOGSLICE1: the air's own volume (Division deck D2 s55, D9 s61: a filled coarse volume of the probes' mean
+	 * irradiance that the fog samples). The grid above is valid only within the probes' reach of surfaces; the air
+	 * above it took the weather's flat ambient, which differs from the probes' light (Concord street, night: 0.0099
+	 * against 0.0182), so the fog held world-anchored layers where the grid's valid share fell 1 -> 0 over one voxel.
+	 * Here every voxel of the grid's box, at 3/4 of the probe spacing (the deck's 3 m to 4 m), holds the probes it sees
+	 * within the blend radius, weighted as the grid's; none seen: the probes within it, then within twice and four
+	 * times it, regardless of sight; still none: the nearest probe. Open air thus reads the probes' sky. */
+	{
+		QElapsedTimer airClock;
+		airClock.start();
+		double av = std::max( 0.75 * ( med > 0.0 ? med : 4.0 * v ), v );
+		int ad[3];
+		for ( ;; ) {
+			for ( int c = 0; c < 3; c++ )
+				ad[c] = std::max( 2, int( std::ceil( double( dims[c] ) * v / av ) ) );
+			if ( qint64( ad[0] ) * ad[1] * ad[2] <= 262144 && ad[2] * 6 <= 2048 && ad[0] <= 2048 && ad[1] <= 2048 )
+				break;
+			av *= 1.1;
+		}
+		R.airVoxel = float( av );
+		for ( int c = 0; c < 3; c++ ) {
+			R.airDims[c] = ad[c];
+			R.airOrigin[c] = R.origin[c];
+		}
+		const size_t na = size_t( ad[0] ) * size_t( ad[1] ) * size_t( ad[2] );
+		R.air.assign( na * 6 * 4, 0.0f );
+		std::atomic<int> nSeen( 0 ), nNear( 0 ), nNearest( 0 );
+		parallelFor( na, [&]( size_t i ) {
+			const int x = int( i % size_t( ad[0] ) ), y = int( ( i / size_t( ad[0] ) ) % size_t( ad[1] ) ),
+				z = int( i / ( size_t( ad[0] ) * size_t( ad[1] ) ) );
+			const double c[3] = { R.airOrigin[0] + ( x + 0.5 ) * av, R.airOrigin[1] + ( y + 0.5 ) * av, R.airOrigin[2] + ( z + 0.5 ) * av };
+			double acc[6][3] = {}, wsum = 0.0;
+			auto gather = [&]( double r, bool vis ) {
+				const Key3 ck { floorDiv( float( c[0] ), float( rad ) ), floorDiv( float( c[1] ), float( rad ) ), floorDiv( float( c[2] ), float( rad ) ) };
+				const int reach = int( std::ceil( r / rad ) );
+				for ( int dz = -reach; dz <= reach; dz++ )
+					for ( int dy = -reach; dy <= reach; dy++ )
+						for ( int dx = -reach; dx <= reach; dx++ ) {
+							auto it = ph.find( Key3 { ck.x + dx, ck.y + dy, ck.z + dz } );
+							if ( it == ph.end() )
+								continue;
+							for ( int j : it->second ) {
+								const UP & P = up[size_t( j )];
+								double d2 = 0.0;
+								for ( int a = 0; a < 3; a++ )
+									d2 += ( P.p[a] - c[a] ) * ( P.p[a] - c[a] );
+								if ( d2 >= r * r || ( vis && blocked( c, P.p, 0.0 ) ) )
+									continue;
+								const double t = 1.0 - d2 / ( r * r );
+								wsum += t * t;
+								for ( int a = 0; a < 6; a++ )
+									for ( int ch = 0; ch < 3; ch++ )
+										acc[a][ch] += t * t * P.E[a][ch];
+							}
+						}
+			};
+			gather( rad, true );
+			if ( wsum > 0.0 )
+				nSeen++;
+			for ( double k = 1.0; wsum <= 0.0 && k <= 4.0; k *= 2.0 )
+				gather( k * rad, false );
+			if ( wsum > 0.0 ) {
+				nNear++;
+			} else if ( !up.empty() ) {
+				size_t best = 0;
+				double bd = 1e300;
+				for ( size_t j = 0; j < up.size(); j++ ) {
+					double d2 = 0.0;
+					for ( int a = 0; a < 3; a++ )
+						d2 += ( up[j].p[a] - c[a] ) * ( up[j].p[a] - c[a] );
+					if ( d2 < bd ) {
+						bd = d2;
+						best = j;
+					}
+				}
+				wsum = 1.0;
+				for ( int a = 0; a < 6; a++ )
+					for ( int ch = 0; ch < 3; ch++ )
+						acc[a][ch] = up[best].E[a][ch];
+				nNearest++;
+			}
+			for ( int a = 0; a < 6; a++ ) {
+				const size_t o = ( size_t( a ) * na + i ) * 4;
+				for ( int ch = 0; ch < 3; ch++ )
+					R.air[o + size_t( ch )] = wsum > 0.0 ? float( acc[a][ch] / wsum ) : 0.0f;
+				R.air[o + 3] = 1.0f;
+			}
+		} );
+		R.airNote = QStringLiteral( "gi air: %1x%2x%3 voxel %4 (%5 KB as RGBA16F); voxels lit by the probes they see %6, by the probes "
+			"in reach (unseen) %7, by the nearest probe %8; ms %9" ).arg( ad[0] ).arg( ad[1] ).arg( ad[2] ).arg( av, 0, 'f', 1 )
+			.arg( qint64( na ) * 6 * 8 / 1024 ).arg( int( nSeen ) ).arg( int( nNear ) - int( nSeen ) ).arg( int( nNearest ) )
+			.arg( airClock.nsecsElapsed() / 1e6, 0, 'f', 0 );
+		std::fprintf( stderr, "%s\n", qPrintable( R.airNote ) );
+	}
+
 	// lane EMISSIVEGRID1: the fine boxes round bright glow (probegifine.h); off: nothing here runs
 	if ( spec.emissiveGrid && !spec.noGlow && lks.size() == R.probeLinks.size() ) {
 		R.fineOn = true;
@@ -2377,6 +2472,14 @@ static void giVolumesInto( ProbeGiResult & r, WwCellGi & gi )
 
 void probeGiRoomsInto( ProbeGiResult & r, WwCellGi & gi )
 {
+	if ( !r.air.empty() && !gi.rgba.empty() ) {	// SKY2 FOGSLICE1: the air's volume rides the grid (both publish sites call here)
+		gi.air = std::move( r.air );
+		gi.airVoxel = r.airVoxel;
+		for ( int c = 0; c < 3; c++ ) {
+			gi.airOrigin[c] = r.airOrigin[c];
+			gi.airDims[c] = r.airDims[c];
+		}
+	}
 	if ( r.fineOn && r.fine.boxes > 0 ) {	// lane EMISSIVEGRID1: the fine boxes ride the GI grid (both publish sites call here)
 		gi.fineBox = r.fine.box;	// copied: probesky's kept relight and the census still read the result
 		gi.fine = r.fine.data;
@@ -2438,7 +2541,8 @@ QString probeGiCensusText( const ProbeGiResult & r )
 			.arg( r.msBricks, 0, 'f', 0 )
 		+ ( r.surfelsEmit ? QStringLiteral( "\n  gi emissive: %1 of %2 surfels glow (their Le added once to B)" )
 			.arg( r.surfelsEmit ).arg( r.surfels ) : QString() )   // lane EMISSIVEGI1
-		+ ( r.fineOn ? QStringLiteral( "\n  " ) + probeGiFineCensusText( r.fine ) : QString() );   // lane EMISSIVEGRID1
+		+ ( r.fineOn ? QStringLiteral( "\n  " ) + probeGiFineCensusText( r.fine ) : QString() )   // lane EMISSIVEGRID1
+		+ ( r.airNote.isEmpty() ? QString() : QStringLiteral( "\n  " ) + r.airNote );   // SKY2 FOGSLICE1
 }
 
 /* The dump (little-endian):

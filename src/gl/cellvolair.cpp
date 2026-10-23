@@ -64,6 +64,8 @@ struct VaState
 	int farTier = 0;	// lane FARGRID1: the Far Air row, 0 Off .. 4 Ultra (the pin WW_CELL_AIR_FAR wins)
 	bool farPinned = false;
 	int red = 0;
+	bool shellStep = false;	// SKY2 red WW_CELL_AIR_RED=shellstep: the old law (no air volume, the GI shell's edge one voxel wide)
+	bool noAirVol = false;	// SKY2 red WW_CELL_AIR_RED=noairvol: no air volume, the shell read over the probes' reach (the stopgap)
 	int terms = 15;
 	int probe = 0;
 	int fogBlend = 0;	// WW_CELL_VOLAIR_FOGBLEND=1 (option B, test only): the game's fog drawn over the lit air
@@ -91,6 +93,8 @@ VaState & vs()
 			s.pinned = d.pinned;
 			s.farPinned = d.farPinned;
 			s.red = d.red;
+			s.shellStep = d.shellStep;
+			s.noAirVol = d.noAirVol;
 			s.terms = d.terms;
 			s.opt = d.opt;
 		}
@@ -103,6 +107,8 @@ VaState & vs()
 		}
 		for ( const QByteArray & t : wwEnv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
+			s.shellStep = s.shellStep || r == "shellstep";
+			s.noAirVol = s.noAirVol || r == "noairvol";
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
 				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : r == "roomstep" ? 4194304
@@ -1201,6 +1207,9 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni4f( "airGround", FloatVector4( G.zg, G.invHg, 0.0f, 0.0f ) );
 	prog->uni1b( "volCsm", csm );
 	prog->uni1i( "volRed", s.red & ~1 );
+	prog->uni1f( "volShell", s.shellStep ? 0.0f : 1.0f );
+	if ( s.shellStep || s.noAirVol )
+		prog->uni1b( "cellGiAirOn", false );	// wwCellLightsUniforms turned it on
 	prog->uni1i( "volTerms", s.terms );
 	prog->uni1i( "volFarMode", farOn ? 1 : 0 );	// lane FARGRID1: the near pass
 	prog->uni1i( "volLayerBase", 0 );
@@ -1627,6 +1636,7 @@ static void vaPassInner( Scene * scene, bool run )
 	uniF( "cellDirTo", -1, cellDirToV, 3 );
 	const int cellOnV = uniI( "cellOn" ), cellHasDirV = uniI( "cellHasDir" ), cellLightCountV = uniI( "cellLightCount" );
 	const int cellGiOnV = uniI( "cellGiOn" ), cellHasDalcV = uniI( "cellHasDalc" ), cellExtDalcV = uniI( "cellExtDalc" );
+	const int cellGiAirOnV = uniI( "cellGiAirOn" );
 	r->stopProgram();
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, 0 );
@@ -1751,6 +1761,7 @@ static void vaPassInner( Scene * scene, bool run )
 			o += QStringLiteral( "cellOn %1\ncellInterior %2\ncellHasDir %3\ncellLightCount %4\ncellGiOn %5\ncellHasDalc %6\ncellExtDalc %7\n" )
 				.arg( cellOnV ).arg( L && L->interior ? 1 : 0 ).arg( cellHasDirV ).arg( cellLightCountV ).arg( cellGiOnV )
 				.arg( cellHasDalcV ).arg( cellExtDalcV );
+			o += QStringLiteral( "cellGiAirOn %1\n" ).arg( cellGiAirOnV );
 			for ( int k = 0; k < 3; k++ )
 				o += QStringLiteral( "cellRow%1 %2\n" ).arg( k ).arg( v( cellRowV[k], 4 ) );
 			o += QStringLiteral( "cellDirColor %1\ncellDirTo %2\n" ).arg( v( cellDirColV, 3 ), v( cellDirToV, 3 ) );
@@ -2052,6 +2063,7 @@ bool wwVolPartUniforms( Scene * scene )
 	prog->uni4f( "airLayer", air ? FloatVector4( g.layer[0], g.layer[1], g.layer[2], g.layer[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 	prog->uni4f( "airGround", air ? FloatVector4( g.ground[0], g.ground[1], g.ground[2], g.ground[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 	prog->uni1i( "volRed", vs().red & ~1 );
+	prog->uni1f( "volShell", vs().shellStep ? 0.0f : 1.0f );
 	for ( int k = 0; k < 3; k++ ) {
 		const float * w = air ? g.phase[k] : fb.w[k];
 		prog->uni4f_l( prog->uniLocation( "volPhase[%d]", k ), FloatVector4( w[0], w[1], w[2], w[3] ) );

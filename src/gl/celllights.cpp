@@ -250,6 +250,9 @@ struct Gpu
 	const void * skyDoc = nullptr;
 	int skyVersion = 0;
 	bool giSpecSky = false;	// lane SPECOCC1: the GI texture carries the sky grid's slot 0 after its own slabs
+	GLuint airTex = 0;		// SKY2 FOGSLICE1: the air volume (WwCellGi::air), uploaded with the GI grid
+	const void * airDoc = nullptr;
+	int airVersion = 0;
 	GLuint lutTex = 0;
 	const void * lutDoc = nullptr;
 	int lutVersion = 0;
@@ -1082,6 +1085,35 @@ void wwCellLightsUniforms( Scene * scene )
 	const bool giDraw = skyDraw || ( G && pass != 2 && g.giTex && g.giDoc == scene->nifModel );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, skyDraw ? g.skyTex : giDraw ? g.giTex : 0 );
+	{	// SKY2 FOGSLICE1: the air volume (the deck's D2 s55), read by the air pass only (cell_airmed.glsl volCubeAll)
+		const bool airUp = giDraw && !skyDraw && G->skyLit && !G->air.empty();
+		if ( airUp && ( g.airDoc != scene->nifModel || g.airVersion != s.giVersion.value( scene->nifModel ) ) ) {
+			if ( !g.airTex )
+				fn->glGenTextures( 1, &g.airTex );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiAir ) );
+			fn->glBindTexture( GL_TEXTURE_3D, g.airTex );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+			fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+			fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->airDims[0], G->airDims[1], G->airDims[2] * 6, 0, GL_RGBA, GL_FLOAT,
+				G->air.data() );
+			g.airDoc = scene->nifModel;
+			g.airVersion = s.giVersion.value( scene->nifModel );
+		}
+		const bool airDraw = airUp && g.airTex && g.airDoc == scene->nifModel;
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiAir ) );
+		fn->glBindTexture( GL_TEXTURE_3D, airDraw ? g.airTex : 0 );
+		prog->uni1i( "cellGiAir", WwCellUnit::GiAir );
+		prog->uni1b( "cellGiAirOn", airDraw );
+		if ( airDraw ) {
+			prog->uni3f( "cellGiAirOrigin", G->airOrigin[0], G->airOrigin[1], G->airOrigin[2] );
+			prog->uni1f( "cellGiAirVoxel", G->airVoxel );
+			prog->uni3f( "cellGiAirDims", float( G->airDims[0] ), float( G->airDims[1] ), float( G->airDims[2] ) );
+		}
+	}
 	// lane ROOMCLAMP1: the rooms (src/proberooms.h): the grid's slot rooms and the fine rooms, nearest, R32F
 	if ( g.units < 0 ) {
 		GLint units = 0;
