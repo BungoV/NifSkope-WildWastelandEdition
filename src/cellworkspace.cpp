@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
 #include "gl/cellssgi.h"	// lane SSGI1
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
+#include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/cellwater.h"	// lane CELLALL1: the Water row
 #include "cellaodecal.h"	// lane CELLALL1: the AO decals row
 #include "gl/gametaa.h"
@@ -547,6 +548,30 @@ void CellWorkspacePanel::buildUi()
 		}
 	}
 	cellLampShadow->setEnabled( !wwCellLampShadowPinned() );
+	// lane GAPLOOK1 (LIGHTSYS-3): the lamp-shadow budget, ships Off (the 16 nearest, as before)
+	cellShadowBudget = showMenu->addMenu( tr( "Lamp shadow budget" ) );
+	cellShadowBudget->setObjectName( QStringLiteral( "CellWorkspaceShadowBudget" ) );
+	cellShadowBudgetGroup = new QActionGroup( cellShadowBudget );
+	cellShadowBudgetGroup->setExclusive( true );
+	{
+		const int vals[] = { 0, 4, 8, 16 };
+		for ( int v : vals ) {
+			QAction * a = cellShadowBudget->addAction( v ? QString::number( v ) : tr( "Off" ) );
+			a->setCheckable( true );
+			a->setData( v );
+			a->setChecked( v == wwCellShadowBudget() );
+			cellShadowBudgetGroup->addAction( a );
+		}
+	}
+	cellShadowBudget->setEnabled( !wwCellShadowBudgetPinned() );
+	// lane GAPLOOK1: the gap sweep's look ticks, each Off by default
+	for ( int k = 0; k < int( WwLook::Count ); k++ ) {
+		const WwLook l = WwLook( k );
+		QAction * a = tick( showMenu, tr( wwLookLabel( l ) ),
+			( QByteArray( "CellWorkspaceLook_" ) + wwLookPinName( l ) ).constData(), wwLookOn( l ) );
+		a->setEnabled( !wwLookPinned( l ) );
+		lookActions.append( a );
+	}
 	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
 	cellAoDecal = tick( showMenu, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
 	cellSpecOcc = tick( showMenu, tr( "Sky specular occlusion" ), "CellWorkspaceSkySpecOcc", wwCellSpecOccOn() );	// lane SPECOCC1
@@ -809,6 +834,17 @@ void CellWorkspacePanel::buildUi()
 		if ( glView )
 			glView->update();
 	} );
+	connect( cellShadowBudgetGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {	// lane GAPLOOK1
+		wwCellShadowBudgetSet( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
+	for ( int k = 0; k < lookActions.size(); k++ )
+		connect( lookActions.at( k ), &QAction::toggled, this, [this, k]( bool on ) {
+			wwLookSet( WwLook( k ), on );
+			if ( glView )
+				glView->update();
+		} );
 	connect( cellSsgiQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwCellSsgiSetQuality( a->data().toInt() );
 		if ( glView )

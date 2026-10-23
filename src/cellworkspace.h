@@ -226,6 +226,9 @@ private:
 	QAction * cellFlicker = nullptr;	// lane LIGHTFLICKER1: the lamps' LIGH flicker (ships off)
 	QMenu * cellLampShadow = nullptr;	// lane LAMPSHADOW1: Off | Low | Medium | High | Ultra
 	QActionGroup * cellLampShadowGroup = nullptr;
+	QMenu * cellShadowBudget = nullptr;	// lane GAPLOOK1 (LIGHTSYS-3): Off | 4 | 8 | 16
+	QActionGroup * cellShadowBudgetGroup = nullptr;
+	QList<QAction *> lookActions;	// lane GAPLOOK1: one tick a WwLook (gl/celllooks.h)
 	QAction * cellSsr = nullptr;
 	QAction * cellSsrExt = nullptr;
 	QAction * cellReflProbe = nullptr;	// lane REFLPROBE1

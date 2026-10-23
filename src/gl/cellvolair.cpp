@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
+#include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/cellpasstime.h"
 #include "gl/cellpost.h"
 #include "gl/cellssr.h"
@@ -1312,7 +1313,12 @@ static void vaPassInner( Scene * scene, bool run )
 	VaClusters cl;
 	bool clOn = false;
 	double clMs = 0.0;
-	if ( ( s.opt & 1 ) && g.optUnitsOk && ( s.terms & 2 ) && !( s.red & 16 ) && uniI( "cellOn" ) ) {
+	// lane GAPLOOK1 (LIGHTSYS-4): the air walks the surfaces' lists (bound by wwCellLightsUniforms above), no build of its own
+	const bool surfCl = wwLookOn( WwLook::AirClusters );
+	prog->uni1b( "volSurfClusters", surfCl );
+	prog->uni2f( "volSurfPx", float( vp[2] ) / float( std::max( cols, 1 ) ), float( vp[3] ) / float( std::max( rows, 1 ) ) );
+	prog->uni1b( "volSurfRed", surfCl && wwEnvStr( "WW_CELL_AIR_CLUSTERS_RED" ) == QLatin1String( "drop" ) );
+	if ( !surfCl && ( s.opt & 1 ) && g.optUnitsOk && ( s.terms & 2 ) && !( s.red & 16 ) && uniI( "cellOn" ) ) {
 		const std::vector<float> * sp = wwCellLightSpheres( scene );
 		const int nL = uniI( "cellLightCount" );
 		float rowV[3][4];

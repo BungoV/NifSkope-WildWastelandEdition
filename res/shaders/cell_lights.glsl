@@ -85,6 +85,8 @@ uniform vec4 cellIsBloomRect;
 uniform bool cellShadowOn;
 uniform samplerCubeArrayShadow cellShadow;
 uniform float cellShadowTexel;
+uniform bool cellShadowFadeOn;		// lane GAPLOOK1 (LIGHTSYS-3): the budget's per-slot strength (celllights.cpp shFade)
+uniform float cellShadowFade[16];
 // lane FARVIEW1 (src/farlight.h): distant light from the surfels, set by celllights.cpp
 uniform bool cellFarOn;
 uniform samplerBuffer cellFarSlots;	// a slot: x, y, z x 8 + side, record + 1 (0 empty); exact integers
@@ -192,7 +194,7 @@ float cellShadowF( int i, vec3 P, vec3 N )
 	for ( int y = -1; y <= 1; y++ )
 		for ( int x = -1; x <= 1; x++ )
 			s += texture( cellShadow, vec4( a + ( float( x ) * u + float( y ) * v ) * cellShadowTexel, t4.x ), ref );
-	return s / 9.0;
+	return cellShadowFadeOn ? mix( 1.0, s / 9.0, cellShadowFade[clamp( int( t4.x + 0.5 ), 0, 15 )] ) : s / 9.0;
 }
 
 /* probe 7: the factors of shadow slots 0, 1, 2 in r, g, b as 2/255 + f x 253/255; 0 where that light is out
