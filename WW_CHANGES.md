@@ -16,6 +16,25 @@
   far LOD or probe-marker rebuild drops the held cell-light shadow slots, the lamp shadow store and the sun shadow
   cache layers, as a fresh open has none (wwCellShadowsForget, wwSunShadowForget). Far cards and the SSR memo print a
   `switch:` line when they read their value again.
+## Lane ATMO1 (2026-10-23, branch atmo1-20261023): a physical sky (Hillaire 2020), off by default
+
+- **What:** the cell view's sky can be drawn from a physical atmosphere model instead of the weather dome.
+  - Model: Rayleigh, Mie and an ozone layer, plus a low haze layer taken from the weather's fog (Far, Max, Height Mid/Range).
+  - Look-up tables:
+    - transmittance (256x64), cached until the haze changes;
+    - multiple scattering (32x32);
+    - per-frame sky-view (192x108 at High).
+  - A limb-darkened sun disc replaces the vanilla sun quad and glare; glow comes only from bloom.
+  - Sun direction: the one the renderer already uses (engine arc or Real Sun Path). The moon gets its own sky-view at night.
+  - Brightness: the weather's Day Sunlight color sets the scale, so the sky sits in the same scene units as the lit ground.
+- **Row:** Render > Scene > Physical Sky (Off / Low / Medium / High / Ultra), key `Settings/Render/Scene/Physical Sky`, live.
+  - `WW_ATMO=0..4` pins it (a harness run forces 0).
+  - `WW_ATMO_RED=noozone|noms|nohaze` are the reds.
+  - Off = the dome exactly as before.
+- **Cost:** about 0.5 MB of textures at High. The GPU time prints as `atmo: gpu X ms` on stderr every 120 frames.
+- **Checks:** both run offline, with no NifSkope launch.
+  - `tests/spells/atmo_model.py`: physics gates and a path-traced reference.
+  - `tests/spells/atmo_lut_check.py`: the shaders against the model.
 
 ## Lane RTBAKEOPT1 (2026-10-23, branch rtbakeopt1-20261023): the GPU ray-traced bake is an option, off by default
 

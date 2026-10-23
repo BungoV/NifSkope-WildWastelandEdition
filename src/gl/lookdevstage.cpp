@@ -18,6 +18,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "gl/scenelighting.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
+#include "gl/atmosphere.h"	// lane ATMO1: the physical sky
 #include "gl/sunshadow.h"
 #include "model/nifmodel.h"
 
@@ -1616,6 +1617,63 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 	drew << QString( "stars:%1(alpha=%2,turn=%3deg)" ).arg( path, f3( a ) ).arg( double( ang ) * 360.0 / kTau, 0, 'f', 1 );
 }
 
+//! lane ATMO1: the physical sky in place of the dome (gl/atmosphere.h); the vanilla sun quad and glare then stay off
+bool drawAtmo( Scene * scene, QStringList & drew )
+{
+	LdState & s = st();
+	if ( wwAtmoTier() <= 0 || !s.haveWeather )
+		return false;
+	WwAtmoInputs in;
+	const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
+	const bool night = s.hour < raw.A || s.hour > raw.D;
+	if ( wwSunPathMode() == 1 ) {
+		double r[3];
+		wwSunPathReal( s.hour, s.gameDay, r );
+		for ( int c = 0; c < 3; c++ )
+			in.sunW[c] = float( r[c] );
+	} else {
+		// the engine's arc; at night its point is the moon's, so the sun is that point mirrored under the horizon
+		for ( int c = 0; c < 3; c++ )
+			in.sunW[c] = raw.sunPos[c];
+		if ( night )
+			in.sunW[2] = -raw.sunPos[2];
+	}
+	if ( night ) {
+		for ( int c = 0; c < 3; c++ )
+			in.moonW[c] = raw.sunPos[c];
+		in.moonUp = raw.sunPos[2] > 0.0f;
+	}
+	auto keyLum = [&]( int tod ) {
+		WwTodKeys k;
+		k.a = k.b = tod;
+		k.t = 0.0f;
+		float rgb[3];
+		EsmWeather::blendRowLab( s.w, WwRowSunlight, k, rgb );
+		return 0.2126f * lin( rgb[0] ) + 0.7152f * lin( rgb[1] ) + 0.0722f * lin( rgb[2] );
+	};
+	const float scale = wwLookdevSunlightScale();
+	in.sunLum = keyLum( WwTodDay ) * scale;
+	in.moonLum = keyLum( WwTodNight ) * scale;
+	const WwFog fog = currentFog();
+	if ( !fog.effOff ) {
+		in.fogFar = fog.fogFar;
+		in.fogMax = fog.maxv;
+		in.fogMid = fog.fMid;
+		in.fogRange = fog.fRange;
+	}
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	for ( int j = 0; j < 3; j++ )
+		in.camZ -= vt.rotation( j, 2 ) * vt.translation[j] / sc;
+	in.disc = s.sun;
+	in.exposure = skyExposure();
+	in.viewTransform = skyViewTransform();
+	QString line;
+	const bool ok = wwAtmoDrawSky( scene, in, &line );
+	drew << QStringLiteral( "sky:" ) + line;
+	return ok;
+}
+
 } // namespace
 
 bool wwLookdevDrawBackground( Scene * scene )
@@ -1655,10 +1713,11 @@ bool wwLookdevDrawBackground( Scene * scene )
 		} singleSample;
 		const SkyFrame f = skyFrame();
 		// the dome replaces the cube; a dome that will not resolve falls back to the cube, by name
-		bool dome = false;
+		bool dome = false, physical = false;
 		if ( sx.sky ) {
+			physical = drawAtmo( scene, drew );	// lane ATMO1: Physical Sky Off = the dome below, as before
 			// the dome is never fogged (ruling); red "fogsky": Fog ON darkens the dome, the sky gate must fail
-			dome = drawDome( scene, f, ( sx.fog && wwLookdevRed( "fogsky" ) ) ? 0.97f : 1.0f, drew );
+			dome = physical || drawDome( scene, f, ( sx.fog && wwLookdevRed( "fogsky" ) ) ? 0.97f : 1.0f, drew );
 		}
 		if ( !dome && !drawCube( scene, !sx.sun ) )
 			return false;
@@ -1671,7 +1730,8 @@ bool wwLookdevDrawBackground( Scene * scene )
 		const float moonMul = sx.moon ? 1.0f : ( wwLookdevRed( "moonleak" ) ? 0.02f : 0.0f );
 		if ( moonMul > 0.0f )
 			drawMoon( scene, f, moonMul, drew );
-		const float sunMul = sx.sun ? 1.0f : ( wwLookdevRed( "sunleak" ) ? 0.02f : 0.0f );
+		// lane ATMO1: the physical sky draws its own disc; glow comes from the bloom (post), never a drawn glare
+		const float sunMul = physical ? 0.0f : sx.sun ? 1.0f : ( wwLookdevRed( "sunleak" ) ? 0.02f : 0.0f );
 		if ( sunMul > 0.0f )
 			drawSunQuad( scene, f, false, sunMul, drew );
 		const float cloudMul = sx.clouds ? 1.0f : ( wwLookdevRed( "cloudleak" ) ? 0.02f : 0.0f );

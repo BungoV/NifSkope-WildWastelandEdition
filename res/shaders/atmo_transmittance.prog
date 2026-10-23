@@ -1,0 +1,4 @@
+# lane ATMO1: the transmittance LUT, a full-screen pass into its own target (src/gl/atmosphere.cpp).
+# No conditions: never picked for a shape; selected by name.
+
+shaders cell_ao.vert atmo_transmittance.frag
