@@ -243,6 +243,14 @@ Every item is its own Show-menu row with an env pin, live, and OFF = the look be
   the next path frame advances one, and a repaint redoes the last. Red `WW_CELL_SSGI_RED=oldframes` brings back one
   frame per paint; the notes line adds `frames live|pinned|per-paint`. Live views and SSGI off are unchanged.
 - Gates: notes/ssgi2recon1/FINAL.md (run by RESUME1).
+## Lane VANILLADEF1 (2026-10-23, branch vanilladef1-20261023): Editor BRDF is a switch, off = vanilla
+
+- **bungo 10-22, vanilla by default.** fo4_default.frag's material-editor BRDF (2026-07-27a: GGX + Smith, F0 0.04,
+  (1 - F) on the diffuse, specular without a specular map, ambient rim F0 0.04) drew every FO4 lit mesh with no
+  switch. Now Shading > Viewport Effects > **Editor BRDF** (GLView/Display/EditorBrdf, env pin WW_EDITOR_BRDF; a
+  harness forces it from the env, unset = off). OFF = the upstream law, which is also the game's light specular
+  (normalized Phong, n = 2^(gloss x 10 + 1), F0 0.2, cell_lights.glsl). Applies live (uniform `editorBrdf`).
+  The cell path's own terms (cellLit, the exterior sun) are unchanged. Audit: notes/vanilladef1/AUDIT.md.
 
 ## Lane OBJLODSHADOW1 (2026-10-22, branch objlodshadow1-20261022): object LOD casts only past the cascades
 

@@ -23771,6 +23771,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						// WW_RENDER_PARTICLES=0 turns them off for a paired capture (lane
 						// PBRR0); unset keeps the old forced-on.
 						sc->showParticles = wwRenderParticlesPin();
+						// lane VANILLADEF1: a harness forces the BRDF it measures; unset = off (vanilla)
+						sc->editorBrdf = wwEnvIsSet( "WW_EDITOR_BRDF" ) && wwEnvInt( "WW_EDITOR_BRDF" ) != 0;
 
 						/* WW_RENDER_CLEAN=1: the MODEL and nothing else -- no viewport
 						 * grid, no axis lines, no node markers. A script that measures
@@ -29445,6 +29447,21 @@ void NifSkope::initDockWidgets()
 			ogl->update();
 		} );
 
+		/* lane VANILLADEF1 (bungo 10-22, vanilla by default): the material editor's GGX lobe on fo4_default
+		 * (F0 0.04, 1 - F on the diffuse, specular without a specular map). Off = the upstream law, the game's own.
+		 * WW_EDITOR_BRDF pins it (0 = off). */
+		QAction * editorBrdfAction = new QAction( tr( "Editor BRDF" ), shadeMenu );
+		editorBrdfAction->setCheckable( true );
+		editorBrdfAction->setChecked( wwEnvIsSet( "WW_EDITOR_BRDF" ) ? wwEnvInt( "WW_EDITOR_BRDF" ) != 0
+			: effectSettings.value( QStringLiteral( "GLView/Display/EditorBrdf" ), false ).toBool() );
+		editorBrdfAction->setProperty( "keepMenuOpen", true );
+		ogl->getScene()->editorBrdf = editorBrdfAction->isChecked();
+		connect( editorBrdfAction, &QAction::toggled, this, [this]( bool on ) {
+			ogl->getScene()->editorBrdf = on;
+			QSettings().setValue( QStringLiteral( "GLView/Display/EditorBrdf" ), on );
+			ogl->update();
+		} );
+
 		// same text-toggle presentation as the contribution mixer above: plain
 		// text, blue + orange highlight while active (no checkmark column)
 		QWidget * effectsPanel = new QWidget( shadeMenu );
@@ -29453,7 +29470,7 @@ void NifSkope::initDockWidgets()
 		effectsLayout->setHorizontalSpacing( 4 );
 		effectsLayout->setVerticalSpacing( 1 );
 		int effectRow = 0;
-		for ( QAction * effectAction : { refractionAction, particlesAction } ) {
+		for ( QAction * effectAction : { refractionAction, particlesAction, editorBrdfAction } ) {
 			QToolButton * effectButton = new QToolButton( effectsPanel );
 			effectButton->setDefaultAction( effectAction );
 			effectButton->setToolButtonStyle( Qt::ToolButtonTextOnly );

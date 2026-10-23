@@ -2377,6 +2377,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
 	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
 		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
+	if ( prog->uniLocation( "editorBrdf" ) >= 0 )	// lane VANILLADEF1: Shading > Editor BRDF (off = vanilla)
+		prog->uni1b( "editorBrdf", scene->editorBrdf );
 	if ( ( wwVolPartFx() & 1 ) && ( wwVolPartRed() & 64 ) && prog->name == std::string_view( "fo4_effectcell.prog" ) ) {
 		prog->uni1b( "cellShadowOn", false );	// lane VOLPART1 red noshadow: the placed lights' cubes too
 		setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)

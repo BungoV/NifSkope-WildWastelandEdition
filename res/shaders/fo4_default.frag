@@ -88,6 +88,7 @@ uniform float envReflection;
 // screen-space refraction preview (SLSF1_Refraction)
 uniform sampler2D RefractionSrc;
 uniform bool doRefraction;
+uniform bool editorBrdf;		// lane VANILLADEF1: the material editor's GGX lobe (Shading > Editor BRDF, WW_EDITOR_BRDF); off = the upstream law
 uniform float refractionStrength;
 
 in vec3 LightDir;
@@ -546,6 +547,20 @@ void main()
 	                  * G1( NdotL0, kSmith ) * G1( NdotV, kSmith )
 	                  * F / max( 4.0 * NdotL0 * NdotV, 0.001 ) )
 	            * specMask * NdotL0 * D.rgb * specColor;
+	float ambF0 = 0.04;
+	float ambMask = specMask;
+	if ( !editorBrdf ) {
+		/* lane VANILLADEF1: the upstream law (and the game's light specular, cell_lights.glsl): normalized Phong,
+		 * n = 2^(gloss x 10 + 1), F0 0.2, no specular without a specular map, no (1 - F) on the diffuse */
+		F = 0.0;
+		ambF0 = 0.2;
+		spec = vec3( 0.0 );
+		if ( hasSpecularMap )
+			spec = TorranceSparrow( NdotL0, NdotH, NdotV, VdotH, vec3( specMask ), exp2( smoothness * 10.0 + 1.0 ), 0.2 )
+			       * NdotL0 * D.rgb * specColor;
+		else
+			ambMask = 1.0;
+	}
 	vec3 specSun = spec;	// lane SUNCELL1: the sun's specular before the cube (the exterior cell sun keeps it)
 
 	// Environment
@@ -629,7 +644,7 @@ void main()
 	color.rgb += A.rgb * albedo;
 	// Specular
 	color.rgb += spec;
-	color.rgb += A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * (1.0 - NdotV) * D.rgb;
+	color.rgb += A.rgb * ambMask * fresnelSchlick( VdotH, ambF0 ) * (1.0 - NdotV) * D.rgb;
 	// Emissive
 	color.rgb += emissive * glowScaleSRGB;
 #ifdef WW_CELLLIGHTS
