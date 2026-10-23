@@ -21,6 +21,7 @@ OVERRIDES = {
     'WW_SUNPATH': ('live', 'read through tier() in shadowset.cpp ss(), which re-reads when a live set moves WW_SUNPATH (GAPTOOL1 twin rows)'),
     'WW_SETTINGS_SCOPE': ('relaunch', 'QSettings scope chosen in main() before any window'),
     'WW_STDERR_BUFFER': ('relaunch', 'stderr buffering set once in main()'),
+    'WW_WINDOW_VISIBLE': ('relaunch', 'window placement (opacity, z-order) when each window is first shown (FLYFIX1)'),
     'WW_RENDER_SHOT': ('live', 'the steps verb "shot <out>" names the file; the launch value only arms the handler'),
     'WW_RENDER_PATH': ('live', 'the steps verb "path <file> <out>" takes it as an argument'),
     'WW_RENDER_GPUMS': ('live', 'the steps verb "gpums <frames> <out>" takes it as an argument; path re-reads it per call'),

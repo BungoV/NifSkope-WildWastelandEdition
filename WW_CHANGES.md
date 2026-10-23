@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FLYFIX1 (2026-10-23, branch flyfix1-20261023): flying the merged build
+- About 1 fps in the merged build: stderr was unbuffered, and the per-frame cull, previs, umbra and far LOD lines went
+  out one character per write into the redirected log. stderr now has a 64 KB buffer flushed once a frame (and after
+  each warning). WW_STDERR_BUFFER=0 is the old unbuffered way (red); =1 keeps the 4 MB buffer. Concord 5x5 fly env:
+  60 frames 39.4 s -> 4.2 s. WW_FRAME_LOG=0 drops the per-frame lines altogether (default on, live).
+- The free camera no longer jumps on refocus: the mouse position is re-taken on focus-in, window activation and
+  enter, the first move after it does not turn the view, and one tick's time is clamped to 0.1 s. WW_FLYFIX_RED=1 is
+  the old way. Live verb `flycheck [OUT]` measures it.
+- Test windows open behind his windows: bottom of the z-order, not activated, normal opacity (a taskbar button that can
+  be clicked and maximised). WW_WINDOW_VISIBLE=0 asks for the old opacity 0; =1 leaves the window alone. The window
+  log adds `zabove=N zabove_overlap=N zbelow=N foreground=0|1`.
+- Live verb `camera PATHFILE` puts the view at a path's first key and keeps it (the path's fov is not applied).
+
 ## Lane LIVESET1 (2026-10-23, branch liveset1-20261023): a changed setting updates live
 - bungo 10-23: "In games, if you change a setting, that setting updates live." Switches that needed a relaunch now
   re-read on a live set and rebuild only their own part: shadow cache, CSM echo, GPU-driven queues and culling, HDR

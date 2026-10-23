@@ -109,6 +109,10 @@ set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 EXE="$REPO/release/NifSkope.exe"
+# Since FLYFIX1 (2026-10-23) a headless window opens behind at opacity 1 unless
+# WW_WINDOW_VISIBLE=0. Every hidden run below measures the opacity-0 property,
+# so it is pinned here; the controls set 1 and restore 0.
+export WW_WINDOW_VISIBLE=0
 # Second monitor, one instance at a time; _harness.sh owns the coordinates.
 # WW_WINDOW_AT is honoured for a headless run AND for the visible control, but
 # only if the point is not on the primary screen: wwHeadlessWindowOrigin()
@@ -608,7 +612,7 @@ echo "6. the controls: the way back, the floors, and the pixels that must not mo
 # control put a NifSkope on bungo's main monitor once already.
 export WW_WINDOW_VISIBLE=1
 shot render_visible "$PLAIN"
-unset WW_WINDOW_VISIBLE
+export WW_WINDOW_VISIBLE=0
 check "$( [ "$RC" -eq 0 ] && echo 1 || echo 0 )" "the visible control run exits 0" \
 	"rc=$RC after ${SECS}s"
 check "$( [ "$(winlog_onprimary render_visible)" -eq 0 ] && echo 1 || echo 0 )" \
@@ -631,7 +635,7 @@ check "$( over "$(lum_range render_visible)" "$NOISE_BAR" )" \
 # This runs the matte visibly, once, on the second monitor, on purpose.
 export WW_WINDOW_VISIBLE=1
 bake_oct bake_oct_visible "$PLAIN"
-unset WW_WINDOW_VISIBLE
+export WW_WINDOW_VISIBLE=0
 check "$( [ "$RC" -eq 0 ] && echo 1 || echo 0 )" "the visible octahedral bake exits 0" \
 	"rc=$RC after ${SECS}s"
 check "$( over "$(lum_range bake_oct_visible)" 30 )" \

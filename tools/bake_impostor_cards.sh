@@ -28,7 +28,8 @@
 #
 # Since 2026-09-09 every headless run (src/nifskope_ui.cpp, createWindow)
 # un-maximises its window, places it on a NON-PRIMARY screen and shows it at
-# WINDOW OPACITY 0. It is deliberately still ON a screen: an earlier attempt
+# WINDOW OPACITY 0 (since FLYFIX1 only when WW_WINDOW_VISIBLE=0, which this
+# script exports by default). It is deliberately still ON a screen: an earlier attempt
 # moved it off every screen, and then nothing rendered at all -- GLView is a
 # QOpenGLWindow, an unexposed surface never gets a context, and the bake wrote
 # empty card sets while exiting 0. The pixels are unchanged either way --
@@ -106,6 +107,10 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NS="$ROOT/release/NifSkope.exe"
+# Since FLYFIX1 (2026-10-23) headless windows open behind at opacity 1; the
+# black/white matte strobe must stay at opacity 0, so the bake asks for it.
+# WW_WINDOW_VISIBLE=1 from the caller still makes one bake watchable.
+export WW_WINDOW_VISIBLE="${WW_WINDOW_VISIBLE:-0}"
 ESM="${1:?esm}"
 X0="${2:?x0}"; Y0="${3:?y0}"; X1="${4:?x1}"; Y1="${5:?y1}"
 OUT="${6:?outdir}"

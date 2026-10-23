@@ -1565,6 +1565,14 @@ static void wwCardLap( qint64 & bucket, QElapsedTimer & since )
 		bucket += since.restart();
 }
 
+// lane FLYFIX1: a headless window is at opacity 0 only when WW_WINDOW_VISIBLE=0 (it opens behind his windows instead)
+static bool wwHeadlessOpacity0()
+{
+	bool ok = false;
+	const int v = wwEnvInt( "WW_WINDOW_VISIBLE", &ok );
+	return ok && v == 0;
+}
+
 static void wwLogTopLevelWindows( const char * when )
 {
 	if ( !NifSkope::wwHeadlessRun() )
@@ -1601,6 +1609,7 @@ static void wwLogTopLevelWindows( const char * when )
 			<< " maximised=" << ( ( w->windowStates() & Qt::WindowMaximized ) ? 1 : 0 )
 			<< " arm=" << ( wwHeadlessPlacementArm().isEmpty()
 				? QStringLiteral( "-" ) : wwHeadlessPlacementArm() )
+			<< NifSkope::wwWindowZLine( w )
 			<< "\n";
 	}
 }
@@ -1629,8 +1638,11 @@ void NifSkope::wwPlaceHeadlessWindow( QWidget * w )
 		const QScreen * s = QGuiApplication::screenAt( g.center() );
 		if ( s && s != QGuiApplication::primaryScreen() && s->geometry().contains( g ) ) {
 			w->setAttribute( Qt::WA_ShowWithoutActivating, true );
-			if ( wwEnvInt( "WW_WINDOW_VISIBLE" ) != 1 )
+			if ( wwHeadlessOpacity0() )
 				w->setWindowOpacity( 0.0 );
+			if ( w->windowHandle() )
+				NifSkope::wwHeadlessWindowBehind( w );
+			w->setProperty( "wwHeadlessPlaced", true );
 			return;
 		}
 	}
@@ -1645,8 +1657,11 @@ void NifSkope::wwPlaceHeadlessWindow( QWidget * w )
 	 * this window was just placed on.  See src/harnesswindow.cpp. */
 	wwApplyHarnessWindow( w );
 	w->setAttribute( Qt::WA_ShowWithoutActivating, true );
-	if ( wwEnvInt( "WW_WINDOW_VISIBLE" ) != 1 )
+	if ( wwHeadlessOpacity0() )
 		w->setWindowOpacity( 0.0 );
+	if ( w->windowHandle() )	// lane FLYFIX1: only a window that exists natively; the constructor's call must not create one
+		NifSkope::wwHeadlessWindowBehind( w );
+	w->setProperty( "wwHeadlessPlaced", true );
 	wwHeadlessPlacementArm() = arm;
 }
 
@@ -2407,7 +2422,8 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
  * relaunch-stage set is refused, and the harness gives that row a launch of its own.
  * Steps (WW_LIVE_STEPS=<file>, one a line, or "NifSkope::live <step>" on the --port):
  *   row NAME | set NAME=VALUE | unset NAME | reset [NAME] | apply | wait FRAMES | settle | shot OUT | path FILE OUT
- *   | gpums FRAMES OUT | status | quit   (reset: back to the launch value; no name: every switch set so far)        ("env NAME=VALUE" is HARNESSMIN1's spelling of set) */
+ *   | gpums FRAMES OUT | status | quit   (reset: back to the launch value; no name: every switch set so far)        ("env NAME=VALUE" is HARNESSMIN1's spelling of set)
+ *   | flycheck [OUT] (FLYFIX1: the free camera's refocus and stall check) | camera PATHFILE (FLYFIX1: the view put at the path's first key, kept) */
 namespace
 {
 struct WwLiveState
@@ -2672,6 +2688,23 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	if ( verb == QLatin1StringView( "settle" ) ) {
 		const qint64 ms = cellStreamBusy( nullptr ) ? wwCellStreamSettle( ogl, 16, 600000 ) : 0;
 		return QStringLiteral( "%1; settled in %2 ms%3" ).arg( applied ).arg( ms ).arg( wwLiveSettleBackground( ogl ) );
+	}
+	if ( verb == QLatin1StringView( "flycheck" ) ) {	// lane FLYFIX1: the free camera's refocus gate, "flycheck [OUT]"
+		const QString r = ogl->wwFlyRefocusCheck();
+		QFile ff( rest );
+		if ( !rest.isEmpty() && ff.open( QIODevice::WriteOnly | QIODevice::Text ) )
+			QTextStream( &ff ) << r << "\n";
+		return r;
+	}
+	if ( verb == QLatin1StringView( "camera" ) ) {	// lane FLYFIX1: "camera PATHFILE", the view at the path's first key for good
+		WwCamPath cp;
+		QString err;
+		if ( !cp.load( rest, &err ) )
+			return QStringLiteral( "camera refused: %1" ).arg( err );
+		Vector3 eye, at;
+		float fov = 70.0f;
+		cp.sample( 0, eye, at, fov );
+		return ogl->wwPlaceCamera( eye, at ) + QStringLiteral( " (path fov %1 not applied)" ).arg( double( fov ), 0, 'f', 1 );
 	}
 	if ( verb != QLatin1StringView( "shot" ) && verb != QLatin1StringView( "path" ) && verb != QLatin1StringView( "gpums" ) )
 		return QStringLiteral( "refused unknown verb: %1" ).arg( verb );
@@ -3013,8 +3046,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		 * WW_WINDOW_VISIBLE=1, so it shows nothing either.
 		 */
 		const bool headlessRun = NifSkope::wwHeadlessRun();
-		const bool headlessHidden = headlessRun
-			&& wwEnvInt( "WW_WINDOW_VISIBLE" ) != 1;
+		const bool headlessHidden = headlessRun && wwHeadlessOpacity0();
 
 		if ( headlessRun ) {
 			/* AGAIN, because restoreUi() above just overwrote both: its
@@ -3033,6 +3065,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			 * when move() was called can be placed by the window manager
 			 * instead. Cheap, and the log below reads back what actually took. */
 			skope->move( origin );
+			NifSkope::wwHeadlessWindowBehind( skope );	// lane FLYFIX1: show() put it on top; back behind his windows
+			QTimer::singleShot( 2000, skope, []() { wwLogTopLevelWindows( "settled" ); } );
 			(void) headlessHidden;
 		} else {
 			/* WW_WINDOW_AT=x,y: place the window BEFORE showing it, and do not raise.
@@ -34972,7 +35006,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 	 * anything that must never be created wrong is placed at its source. */
 	if ( e->type() == QEvent::Show && NifSkope::wwHeadlessRun() ) {
 		if ( QWidget * w = qobject_cast<QWidget *>( o ) ) {
-			if ( w->isWindow() )
+			// lane FLYFIX1: once per window, so a window he restores or maximises from the taskbar stays his
+			if ( w->isWindow() && !w->property( "wwHeadlessPlaced" ).toBool() )
 				NifSkope::wwPlaceHeadlessWindow( w );
 		}
 	}

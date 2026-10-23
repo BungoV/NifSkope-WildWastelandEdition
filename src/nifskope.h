@@ -138,11 +138,16 @@ public:
 	static bool wwHeadlessRun();
 
 	//! Put one top-level window where a headless run's windows go: off the
-	//! primary monitor, un-maximised, and at opacity 0 unless WW_WINDOW_VISIBLE=1.
+	//! primary monitor, un-maximised, never activated, and (lane FLYFIX1) behind every other window at
+	//! normal opacity; WW_WINDOW_VISIBLE=1 leaves it where Windows shows it, WW_WINDOW_VISIBLE=0 is opacity 0.
 	//! Called from the constructor (before any native window can exist), from
 	//! createWindow after restoreUi has had its say, and from the application
 	//! event filter for every other top-level window this process shows.
 	static void wwPlaceHeadlessWindow( QWidget * w );
+	//! lane FLYFIX1: a headless window to the bottom of the z-order, without activating it
+	static void wwHeadlessWindowBehind( QWidget * w );
+	//! lane FLYFIX1: " zabove=N zabove_overlap=N zbelow=N foreground=0|1" for the window log
+	static QString wwWindowZLine( const QWindow * w );
 	//! Save Confirm dialog
 	bool saveConfirm();
 	//! Save NifSkope application settings.
