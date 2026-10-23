@@ -245,7 +245,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveCheck( fogDriftBox, "fogDrift", tr( "Fog Drift" ), wwVolAirDriftOn() );	// lane FOGDRIFT1: ships off
 	heading( tr( "Effects" ) );
 	liveCheck( shadowsBox, "lookdevShadows", tr( "Cascaded Shadows" ), wwLookdevShadows() );	// lane CSM1
-	liveCheck( taaBox, "gameTaa", tr( "Temporal AA" ), wwGameTaaOn() );	// lane MOTION1: every mode, ships off
+	liveCheck( taaBox, "gameTaa", tr( "Temporal AA" ), wwGameTaaRowOn() );	// lane MOTION1: every mode, ships off
 	// lane TERRSHADOW1: the unified shadow set, each Off / Low / Medium / High / Ultra, ships Off
 	auto tierBox = [&]( QComboBox *& box, const char * name, const QString & label, int tier ) {
 		box = new QComboBox( tree );
@@ -255,6 +255,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		wwMatchFieldStyle( box );
 		row( label, box, true );
 	};
+	tierBox( modernTaaBox, "modernTaa", tr( "Modern temporal AA" ), wwTaa2Tier() );	// lane TAA2: ships Off
 	tierBox( cascadeQualityBox, "cascadeQuality", tr( "Cascade Quality" ), wwShadowCascadeTier() );
 	tierBox( contactShadowsBox, "contactShadows", tr( "Contact Shadows" ), wwShadowContactTier() );
 	tierBox( terrainShadowsBox, "terrainShadows", tr( "Terrain Shadows" ), wwShadowTerrainTier() );
@@ -407,6 +408,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveTier( exposureFromSkyBox, &wwAtmoSetExpo );
 	liveTier( skyColorBox, &wwAtmoSetTint );
 	liveTier( giSkyFromPhysicalBox, &wwAtmoSetGi );
+	liveTier( modernTaaBox, &wwTaa2SetTier );	// lane TAA2
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
 	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );

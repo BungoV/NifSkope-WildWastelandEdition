@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane TAA2 (2026-10-23, branch taa2-20261023): Modern temporal AA (off by default)
+
+- **Row:** "Modern temporal AA" Off | Low | Medium | High | Ultra, in the cell view's Show menu (Effects, under
+  Temporal AA) and the Scene window's Effects. Key `Settings/Render/Modern temporal AA`, live, ships Off. Off = the
+  game's temporal AA path exactly as before (the "Temporal AA" row still turns that on or off).
+- **On:** our own one-pass resolve (res/shaders/taa2.frag) replaces the game's: full-colour history, the jittered
+  frame filtered where its samples really lie, a 5-tap Catmull-Rom history fetch, a variance clip box, flicker-proof
+  luma weights, depth disocclusion, and a history that the clip had to pull far counts less (trails die fast). High
+  and Ultra sharpen with AMD's RCAS (taa2_rcas.frag, MIT notice in the file) instead of the game's sharpen pair.
+- **Switches (live):** `WW_TAA2=0..4|off..ultra` pins the tier (a harness without it runs Off); `WW_TAA2_RED=noclip,
+  nobicubic,wrongjitter`; `WW_TAA2_DUMP=<dir>` writes the 256 px centre crop (out and in) of 32 frames.
+- **Cost:** GPU-timed, a "modern temporal aa: tier N gpu X ms" line every 60 frames. Offline at 1080p: about
+  0.15 ms every tier (the game's resolve 0.11 ms); cap 0.5 ms.
+- **Offline gates** (notes/taa2/sim/taa2_gates.py, the real shaders): every tier trails less than the game TAA behind
+  an unvectored mover and shimmers less on a still camera; the reds noclip, wrongjitter and nobicubic each fail.
+
 ## Lane FXPARITY1 (2026-10-23, branch fxparity1-20261023): particles follow the game's rules (off by default)
 
 - **Row:** Scene window > Particle Game Rules (off), key `WW/FxParity`, live in every mode. `WW_FX_PARITY=1` / `=0`

@@ -1,0 +1,4 @@
+# Modern temporal AA: the RCAS sharpen into the frame, High and Ultra (lane TAA2; src/gl/gametaa.h).
+# No conditions: never picked for a shape; gametaa.cpp selects it by name.
+
+shaders cell_ao.vert taa2_rcas.frag

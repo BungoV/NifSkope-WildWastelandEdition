@@ -32,13 +32,31 @@ class Transform;
  *   WW_TAA_RED=wrongjitter     Halton bases swapped (3, 2) (the gate's red)
  *   WW_TAA_DUMP=<dir>          at frame WW_TAA_DUMP_FRAME (the frame index, default 8): every input and
  *                              output of the resolve, raw, plus the numbers (taa.txt) -- the numpy rebuild's food
- *  Divergences, stated: the history target is RGBA16F and the vectors RG32F (the game's formats are owed to a
- *  capture); the vectors are the camera's alone; no dynamic resolution (c0.zw = c5.zw = 1). */
+ *  Divergences, stated: the history target is RGBA16F and the vectors RG32F (lane TAA2 MOTION1-FMT: the game's
+ *  vectors are R16G16_FLOAT and its frame R11G11B10_FLOAT before the pass, RGBA8 after it, per FO4CS's RenderDoc
+ *  notes; its history's format is still owed to a capture); the vectors are the camera's alone; no dynamic
+ *  resolution (c0.zw = c5.zw = 1).
+ *
+ *  Lane TAA2 (2026-10-23): "Modern temporal AA", Off | Low | Medium | High | Ultra, beside the row above. A tier
+ *  above Off jitters the frame (the same Halton) and replaces the game's resolve with res/shaders/taa2.frag
+ *  (full-colour history, jitter-aware current filter, Catmull-Rom history, variance clip, anti-flicker) and, at
+ *  High and Ultra, AMD's RCAS (taa2_rcas.frag, MIT). Off = the game's path above, untouched. Ships Off, saved.
+ *   WW_TAA2=0..4|off|low|medium|high|ultra  the tier (a harness without it: Off)
+ *   WW_TAA2_RED=noclip|nobicubic|wrongjitter  the gates' reds (no clip; bilinear history; the filter's jitter turned)
+ *   WW_TAA2_DUMP=<dir>         the frame's 256 px centre crop, out and in, for 32 frames from WW_TAA_DUMP_FRAME
+ *  The resolve and its final pass are GPU-timed: a "modern temporal aa: tier N gpu X ms" line every 60 frames. */
 
-//! The row's state (pinned, saved, or OFF in a harness run).
+//! True when either resolve runs (the game's row or a Modern tier): the frame is jittered.
 bool wwGameTaaOn();
+//! The game's "Temporal AA" row alone (pinned, saved, or OFF in a harness run).
+bool wwGameTaaRowOn();
 //! The row: sets and saves (unless pinned).
 void wwGameTaaSetOn( bool on );
+
+//! lane TAA2: the "Modern temporal AA" tier, 0 Off .. 4 Ultra; the setter saves it unless WW_TAA2 pins it.
+int wwTaa2Tier();
+void wwTaa2SetTier( int tier );
+bool wwTaa2Pinned();
 
 /*! The frame index the next frames use: >= 0 pins it (the camera path renders frame k as index k, so a
  *  repeated paint of the same frame is the same picture), -1 (default) counts paints. */

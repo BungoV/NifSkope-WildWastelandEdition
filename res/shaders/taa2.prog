@@ -1,0 +1,4 @@
+# Modern temporal AA resolve (lane TAA2; src/gl/gametaa.h). A full-screen pass, two targets.
+# No conditions: never picked for a shape; gametaa.cpp selects it by name.
+
+shaders cell_ao.vert taa2.frag
