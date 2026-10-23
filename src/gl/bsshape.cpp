@@ -1,11 +1,16 @@
 #include "bsshape.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellcull.h"	// lane SUNCELL1
+#include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
 #include "gl/cellpasstime.h"	// lane PERF1
+#include "gl/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
+#include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
+#include "gl/glproperty.h"
 #include "cellmesh.h"
 #include "cellspeed.h"
 #include "gl/glnode.h"
@@ -301,6 +306,23 @@ void BSShape::drawShapes( NodeList * secondPass )
 		secondPass->add( this );
 		return;
 	}
+	/* lane GPUDRIVEN1: the walk queues the shape by render state (gl/cellqueue.h) and draws it at the flush. A shape
+	 * whose result depends on what is under it (skinned, blended, decal, effect, x-ray, hidden triangles, no depth
+	 * write) goes in the last queue, which keeps tree order. */
+	if ( secondPass && GpuDriven::mainArmed() ) {
+		int q = GpuDriven::Opaque;
+		if ( isSkinned || surfaceDecal || effectDecal || bsesp || scene->xRay || isGhosted() || !depthWrite || !depthTest
+			|| ( alphaProperty && alphaProperty->hasAlphaBlend() ) || scene->hiddenTris.contains( nodeId ) )
+			q = GpuDriven::Rest;
+		else if ( wwAlphaTested() )
+			q = GpuDriven::AlphaTest;
+		else if ( isDoubleSided )
+			q = GpuDriven::TwoSided;
+		if ( q != GpuDriven::Rest )
+			GpuDrivenB::note( this, { q, isDoubleSided, isVertexAlphaAnimation, lodTriangleCount == triangles.size(), shader } );
+		if ( GpuDriven::mainTake( this, q ) )
+			return;
+	}
 
 	auto nif = scene->nifModel;
 
@@ -323,7 +345,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 	/* lane DECALLIT1: WW_CELL_DECALLIT_HIDE=1 draws no decal (of the lighting shader or the effect shader), =2 no effect
 	 * decal only (the surface's own decals stay, as the wall the effect decal lies on), so a harness reads the wall under
 	 * them at the same pixels (tests/spells/decallit1_cell.sh); never set in a picture bungo looks at */
-	static const int decalHide = qEnvironmentVariableIntValue( "WW_CELL_DECALLIT_HIDE" );
+	WW_SWITCH_STATIC( int, decalHide, wwEnvInt( "WW_CELL_DECALLIT_HIDE" ) );
 	if ( decalHide && !selectionFlags && ( effectDecal || ( decalHide == 1 && surfaceDecal ) ) )
 		return;
 
@@ -343,8 +365,21 @@ void BSShape::drawShapes( NodeList * secondPass )
 			glEnable( GL_FRAMEBUFFER_SRGB );
 		else
 			glDisable( GL_FRAMEBUFFER_SRGB );
-		PassTime::CpuScope ptSetup( PassTime::ShapeSetup );	// lane PERF1
-		shader = context->setupProgram( this, shader );
+		/* lane PERF2FIX1: an opaque-only pass skips a sorted shape that wrote nothing there last frame, leaving the
+		 * masks and offset as its draw would (wwCellAoDraw / wwCellSsrDraw close both for it) */
+		const bool cutSkip = !scene->xRay && !isGhosted() && !wwCellDrawProbeOn() && wwOpaqueCutSkips( this );
+		if ( cutSkip && !wwOpaqueCutChecking() ) {
+			glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+			glDepthMask( GL_FALSE );
+			glDisable( GL_POLYGON_OFFSET_FILL );
+			return;
+		}
+		{
+			PassTime::CpuScope ptSetup( PassTime::ShapeSetup );	// lane PERF1
+			shader = context->setupProgram( this, shader );
+		}
+		if ( wwOpaqueCutChecking() && wwOpaqueCutArmed() )
+			wwOpaqueCutCheckNote( cutSkip, name );
 
 	} else if ( auto prog = context->useProgram( "selection.prog" ); prog ) {
 		if ( nif->getBSVersion() >= 151 )
@@ -380,13 +415,34 @@ void BSShape::drawShapes( NodeList * secondPass )
 	 * with MSAA there came out +-1 step differently run to run on identical inputs (Vault111Cryo: 1-3 px); with the
 	 * blended draws single-sample two runs match. The fp32 linear frame (gl/cellhdr.cpp) blends deterministically
 	 * and keeps MSAA. The game itself draws blended geometry without MSAA. */
+	/* lane VOLPART1: a volumetric lit effect card (gl/cellvolair.h) draws with no depth test while its soft slab is on
+	 * (the slab's fade is the occlusion: no hard line where it meets the ground or a wall); gates only, the plate hides
+	 * it and the dump draws its probe */
+	int vpFx = 0;
+	if ( !selectionFlags ) {
+		const auto * cur = context->getCurrentProgram();
+		if ( cur && cur->name == std::string_view( "fo4_effectcell.prog" ) )
+			vpFx = wwVolPartFx();
+	}
+	if ( ( vpFx & 1 ) && wwVolPartHidden() )
+		numTriangles = 0;
+	GLint vpPrevDepth = GL_LEQUAL;
+	if ( vpFx & 2 ) {
+		glGetIntegerv( GL_DEPTH_FUNC, &vpPrevDepth );
+		glDepthFunc( GL_ALWAYS );
+	}
+
 	const bool singleSample = !wwCellHdrActive() && glIsEnabled( GL_BLEND ) && glIsEnabled( GL_MULTISAMPLE );	// lane PERF1: the cheap test first
 	if ( singleSample )
 		glDisable( GL_MULTISAMPLE );
 
 	// lane SUNCELL1: a welded cell shape draws only the placements that touch the camera's frustum (gl/cellcull.h)
 	static std::vector<std::uint32_t> cullRanges;
-	if ( numTriangles > 0 && !hiddenT && !selectionFlags && !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene )
+	if ( !selectionFlags )
+		GpuDrivenB::learn( this, shader );	// step B: the state this draw runs with
+	if ( numTriangles > 0 && !hiddenT && !selectionFlags && GpuDrivenB::draw( scene, this, numTriangles ) ) {
+		// step B drew it: its clusters from the GPU cull's commands (gl/cellgpucull.h)
+	} else if ( numTriangles > 0 && !hiddenT && !selectionFlags && !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene )
 		&& wwCellCullCamera( scene, this, id(), std::int64_t( numTriangles ), cullRanges ) ) {
 		// finalfix: the kept ranges go down as ONE multi-draw, so culling never costs more calls than drawing it all
 		static std::vector<GLsizei> cullCounts;
@@ -419,6 +475,14 @@ void BSShape::drawShapes( NodeList * secondPass )
 	}
 	if ( singleSample )
 		glEnable( GL_MULTISAMPLE );
+	if ( vpFx & 2 )
+		glDepthFunc( GLenum( vpPrevDepth ) );
+	if ( ( vpFx & 1 ) && numTriangles > 0 && !hiddenT ) {
+		const GLsizei n = GLsizei( numTriangles * 3 );
+		wwVolPartFxDump( scene, [context, n]() {
+			context->fn->glDrawElements( GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void *) 0 );
+		}, id(), getName() );
+	}
 	if ( !selectionFlags && wwCellDrawProbeOn() )	// lane PERF1: the label is built only for the probe
 		wwCellDrawProbe( scene, QStringLiteral( "shape %1 '%2' second=%3" ).arg( id() ).arg( name ).arg( int( drawInSecondPass ) ) );	// lane VOLAIR1 (gates only)
 

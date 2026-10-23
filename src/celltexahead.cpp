@@ -1,6 +1,9 @@
 #include "celltexahead.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellspeed.h"
+#include "cellstream.h"
+#include "gl/cellpasstime.h"
 #include "gamemanager.h"
 #include "model/nifmodel.h"
 
@@ -66,10 +69,10 @@ State & st()
 
 bool enabled()
 {
-	static const bool on = [] {
-		const QByteArray red = qgetenv( "WW_CELL_SPEED_RED" );
+	WW_SWITCH_STATIC( bool, on, [] {
+		const QByteArray red = wwEnv( "WW_CELL_SPEED_RED" );
 		return red != "slow" && red != "notex";
-	}();
+	}() );
 	return on;
 }
 
@@ -148,7 +151,7 @@ void stopLocked( State & s, std::unique_lock<std::mutex> & l )
 		CellSpeed::count( "texture files named, not ready when asked (not there, or stopped)", s.gone );
 		CellSpeed::count( "texture files read and never taken", s.left );
 		// which ones: beside the timer dump, for the next reader of these counts
-		const QByteArray dump = qgetenv( "WW_CELL_SPEED_DUMP" );
+		const QByteArray dump = wwEnv( "WW_CELL_SPEED_DUMP" );
 		if ( FILE * f = dump.isEmpty() ? nullptr : std::fopen( ( dump + ".texnames" ).constData(), "ab" ) ) {
 			int n = 0;
 			for ( const QString & u : s.unknownNames )
@@ -293,6 +296,26 @@ QStringList CellTexAhead::ready( const NifModel * nif, int max )
 	return out;
 }
 
+void CellTexAhead::drop( const NifModel * nif, const QString & name )
+{
+	if ( !nif || armed.load( std::memory_order_relaxed ) != nif )
+		return;
+	State & s = st();
+	std::unique_lock<std::mutex> l( s.lock );
+	if ( s.nif != nif )
+		return;
+	auto it = s.byKey.find( GameManager::get_full_path( name, "textures", ".dds" ) );
+	if ( it == s.byKey.end() )
+		return;
+	Entry & e = s.entries[size_t( it->second )];
+	if ( e.st != St::Done )
+		return;
+	s.held -= e.data.size();
+	e.data = QByteArray();
+	e.st = St::Gone;
+	s.cv.notify_all();
+}
+
 void CellTexAhead::stop( const NifModel * nif )
 {
 	if ( !nif || armed.load( std::memory_order_relaxed ) != nif )
@@ -305,7 +328,13 @@ void CellTexAhead::stop( const NifModel * nif )
 
 void CellTexAhead::frameEnd()
 {
-	if ( !armed.load( std::memory_order_relaxed ) )
+	const NifModel * a = armed.load( std::memory_order_relaxed );
+	if ( !a )
+		return;
+	// lane STREAM1: a streaming document keeps reading ahead, for the cells still to come (they arrive while the
+	// camera moves; the view's pump uploads what is read). Red WW_STREAM1_RED=texpump: it ends as before.
+	static const bool pumpRed = PassTime::stream1Red( "texpump" );
+	if ( !pumpRed && cellStreamOn( a ) )
 		return;
 	State & s = st();
 	std::unique_lock<std::mutex> l( s.lock );

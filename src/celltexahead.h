@@ -46,6 +46,8 @@ bool take( const NifModel * nif, const QString & filepath, QByteArray & data );
 //! the workers stop at AHEAD_BYTES, and the drawing thread asks in another order than they read, so without this
 //! it read ~40% of a cell's files itself, one at a time.
 QStringList ready( const NifModel * nif, int max );
+//! lane STREAM1: `name`'s file is loaded already (under another name): its waiting bytes are freed.
+void drop( const NifModel * nif, const QString & name );
 //! This document's resources are about to change or go: the workers stop first. Any thread.
 void stop( const NifModel * nif );
 

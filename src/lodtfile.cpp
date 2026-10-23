@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodtfile.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "esmdata.h"
 #include "lodgenlayout.h"
 #include "data/niftypes.h"   // lane WATER1: Matrix, for placed water refs
@@ -1968,12 +1969,12 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 	 * WW_LODT_VERSION was written for the format this file used to be called,
 	 * and silently writing version 2 bytes for it is the failure the rename
 	 * was supposed to make impossible. */
-	if ( qEnvironmentVariableIsSet( "WW_LODT_VERSION" ) )
+	if ( wwEnvIsSet( "WW_LODT_VERSION" ) )
 		return fail( QStringLiteral( "WW_LODT_VERSION is retired: the landscape file "
 			"is .lodl now (.lodt names the terrain texture sheets) -- set "
 			"WW_LODL_VERSION instead" ) );
-	if ( qEnvironmentVariableIsSet( "WW_LODL_VERSION" ) )
-		version = quint32( qEnvironmentVariableIntValue( "WW_LODL_VERSION" ) );
+	if ( wwEnvIsSet( "WW_LODL_VERSION" ) )
+		version = quint32( wwEnvInt( "WW_LODL_VERSION" ) );
 	if ( version < LODL_VERSION_MIN || version > LODL_VERSION )
 		return fail( QStringLiteral( "header version %1 is not one this writer knows (%2..%3)" )
 			.arg( version ).arg( LODL_VERSION_MIN ).arg( LODL_VERSION ) );

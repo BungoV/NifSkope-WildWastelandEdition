@@ -31,9 +31,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENSE BLOCK *****/
 
 #include "probealbedo.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "data/niftypes.h"
 #include "io/material.h"
+#include "io/pbrmfile.h"
 #include "lodgen.h"
 #include "nativeemit.h"
 #include "probeplace.h"
@@ -227,6 +229,39 @@ bool ProbeAlbedo::sample( const QString & tex, float u, float v, const float vc[
 	return true;
 }
 
+bool ProbeAlbedo::samplePbrm( const PbrmMaterial & m, float u, float v, const float vc[3], float out[3] )
+{
+	// the renderer's rule (renderer.cpp, the PBRM slot binds): a slot the material samples must load
+	auto slotMap = [&]( const PbrmMaterial::Slot & s, quint32 bit, const DDSTexture16 ** t ) -> bool {
+		*t = nullptr;
+		if ( !( m.features & bit ) || !s.enabled || !s.pathValid )
+			return true;
+		*t = s.lookupPath.isEmpty() ? nullptr : load( s.lookupPath );
+		return *t != nullptr;
+	};
+	const DDSTexture16 * tb = nullptr;
+	const DDSTexture16 * tr = nullptr;
+	if ( !slotMap( m.baseColor, PbrmMaterial::BaseColorTexture, &tb ) || !slotMap( m.rmaos, PbrmMaterial::RmaosTexture, &tr ) )
+		return false;
+	u -= std::floor( u );
+	v -= std::floor( v );
+	float base[3] = { m.baseColorRGB[0], m.baseColorRGB[1], m.baseColorRGB[2] };
+	if ( tb ) {
+		const FloatVector4 c = tb->getPixelB( u, v, 0 );
+		for ( int k = 0; k < 3; k++ ) {
+			const float g = tb->isSRGBTexture() ? linearToSrgb( c[size_t( k )] ) : c[size_t( k )];
+			base[k] *= srgbToLinear( g );
+		}
+	}
+	float metal = m.metallic;
+	if ( tr && ( m.features & PbrmMaterial::RmaosMetallic ) )
+		metal = tr->getPixelB( u, v, 0 )[1];   // as the shader samples it (an sRGB tag decodes, as GL does)
+	metal = std::clamp( metal, 0.0f, 1.0f );
+	for ( int k = 0; k < 3; k++ )
+		out[k] = std::max( 0.0f, base[k] * vc[k] * ( 1.0f - metal ) );
+	return true;
+}
+
 bool ProbeAlbedo::samplePalette( const QString & tex, const QString & palette, float u, float v, float row,
 	float out[3] )
 {
@@ -259,7 +294,7 @@ bool ProbeAlbedo::meanGamma( const QString & tex, float out[3] )
 int probeGlassFeed( ProbeSoup & soup, ProbeAlbedo & alb, const NativeSrcShape & s, const Vector3 & pos,
 	const Matrix & rot, float scale, quint32 ref, const QString & model, QString * census )
 {
-	static const QByteArray red = qgetenv( "WW_CELL_PROBE_GLASS_RED" );
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_CELL_PROBE_GLASS_RED" ) );
 	if ( !s.bakeBlend && !s.nearFacts.alphaBlend && !s.nearFacts.effectShader )
 		return 0;
 	bool pane = s.bakePane();

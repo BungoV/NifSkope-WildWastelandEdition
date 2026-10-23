@@ -5,9 +5,12 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "gl/impostordraw.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gamemanager.h"
 #include "gl/celllights.h"
+#include "gl/cellpasstime.h"
+#include "gl/cellunits.h"
 #include "gl/lookdevstage.h"
 #include "gl/glscene.h"
 #include "gl/gltex.h"
@@ -38,7 +41,7 @@ BSD License - see nifskope.h
 namespace {
 void wwImpostorTrace( const char * where )
 {
-	static const bool on = qEnvironmentVariableIsSet( "WW_IMPOSTOR_TRACE" );
+	WW_SWITCH_STATIC( bool, on, wwEnvIsSet( "WW_IMPOSTOR_TRACE" ) );
 	if ( !on )
 		return;
 	QFile f( QCoreApplication::applicationDirPath() + QStringLiteral( "/ww_impostor_trace.log" ) );
@@ -174,6 +177,15 @@ GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QStrin
 	return e.id;
 }
 
+//! An array-layer sheet's texture: the file beside the .lodm, else an absolute resolved path. 0 = none.
+GLuint layerSheetId( Scene * scene, const ImpostorSheet & sheet, int layer )
+{
+	QString file = sheet.localPath;
+	if ( file.isEmpty() || !QFileInfo::exists( file ) )
+		file = ( !sheet.resolved.isEmpty() && QFileInfo( sheet.resolved ).isAbsolute() ) ? sheet.resolved : QString();
+	return file.isEmpty() ? 0 : arrayLayerTexture( scene, file, layer, nullptr );
+}
+
 //! Bind one sheet to `unit` and tell the program. Returns false when the
 //! texture cache could not produce it, which the caller REPORTS.
 //! `layer` >= 0: the sheet is a cardArray's texture array (lane FARLOD2).
@@ -202,7 +214,7 @@ CardBatch & cardBatch()
 
 bool batchRedPerDraw()
 {
-	static const bool v = qgetenv( "WW_IMPOSTOR_RED" ) == "perdraw";
+	WW_SWITCH_STATIC( bool, v, wwEnv( "WW_IMPOSTOR_RED" ) == "perdraw" );
 	return v;
 }
 
@@ -226,11 +238,7 @@ bool bindSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog,
 				return true;
 			}
 		}
-		// the file itself: the sibling beside the .lodm, else an absolute resolved path
-		QString file = sheet.localPath;
-		if ( file.isEmpty() || !QFileInfo::exists( file ) )
-			file = ( !sheet.resolved.isEmpty() && QFileInfo( sheet.resolved ).isAbsolute() ) ? sheet.resolved : QString();
-		const GLuint id = file.isEmpty() ? 0 : arrayLayerTexture( scene, file, layer, nullptr );
+		const GLuint id = layerSheetId( scene, sheet, layer );
 		if ( b.on )
 			b.layerIds.insert( &sheet, id );
 		if ( !id )
@@ -292,11 +300,11 @@ ImpostorOct::Convention effectiveConvention( const ImpostorCardSet & set,
 //! `pickFramesForCamera` for the card as this scene currently sees it.
 void selectFrames( const Scene * scene, const ImpostorCardSet & set,
 					const Vector3 & worldOffset, const ImpostorDraw::Options & opt,
-					float camDir[3], int idx[3], float w[3] )
+					float camDir[3], int idx[3], float w[3], const Vector3 * eyeIn = nullptr )
 {
 	const Vector3 centre = worldOffset + Vector3( set.center[0], set.center[1], set.center[2] )
 			* ( ( opt.worldScale > 0.0f ) ? opt.worldScale : 1.0f );
-	Vector3 d = ( cardBatch().prog ? cardBatch().eye : eyeWorld( scene ) ) - centre;
+	Vector3 d = ( eyeIn ? *eyeIn : cardBatch().prog ? cardBatch().eye : eyeWorld( scene ) ) - centre;
 	const float len = d.length();
 	if ( len > 1e-6f )
 		d = d / len;
@@ -370,6 +378,152 @@ void selectFrames( const Scene * scene, const ImpostorCardSet & set,
 			idx[k] = j + ( set.oct - 1 - i ) * set.oct;
 		}
 	}
+}
+
+
+//! One baked frame of a set: its rect on the sheet, its camera basis, its unscaled quad offset.
+struct CardFrame
+{
+	float rect[4];
+	float right[3], up[3], fwd[3];
+	float offR = 0.0f, offU = 0.0f;
+};
+
+/*! Frame (i, j) of `set`. The rect comes from the ONE function that knows it (`ImpostorOct::frameRect`; row j
+ *  runs downward in sheet space, the way the bake writes it). The basis: `frameDir` gives the SPEC direction of
+ *  the cell, `frameBasis` the camera the bake actually used for it -- a legacy set still carries the old 180
+ *  degrees. A ring's frame v was photographed from azimuth 2 pi v / V at elevation 0 under the spec law
+ *  (docs/LODGEN_LODM_FORMAT.md 3a). The offset is the set's own (0, 0 for a set baked before the law). */
+void frameData( const ImpostorCardSet & set, const ImpostorDraw::Options & opt, int i, int j, CardFrame & f )
+{
+	const float du = 1.0f / float( set.cols() );
+	float u0 = 0.0f, v0 = 0.0f, dU = du, dV = du;
+	if ( set.ring() ) {
+		// the ring's one row: frame v at [v/V, (v+1)/V) x [0, 1)
+		u0 = float( i ) * du; v0 = 0.0f; dU = du; dV = 1.0f;
+	} else {
+		ImpostorOct::frameRect( i, j, set.oct, &u0, &v0, &dU, &dV );
+	}
+	f.rect[0] = u0; f.rect[1] = v0; f.rect[2] = dU; f.rect[3] = dV;
+
+	float dir[3];
+	const ImpostorOct::Convention saved = ImpostorOct::g_convention;
+	ImpostorOct::g_convention = effectiveConvention( set, opt );
+	if ( set.ring() ) {
+		const float p = 6.28318530718f * float( i ) / float( set.views );
+		dir[0] = std::cos( p ); dir[1] = std::sin( p ); dir[2] = 0.0f;
+		ImpostorOct::g_convention = ImpostorOct::Convention::SpecLiteral;
+	} else {
+		ImpostorOct::frameDir( i, j, set.oct, dir );
+	}
+	ImpostorOct::frameBasis( dir, f.right, f.up, f.fwd );
+	ImpostorOct::g_convention = saved;
+
+	set.frameOffsetOf( i, j, &f.offR, &f.offU );
+}
+
+//! What one card draws: its frames and weights, its scale and its billboard.
+struct CardPick
+{
+	int frameCount = 1;
+	int idx[3] = { 0, 0, 0 };
+	float w[3] = { 0.0f, 0.0f, 0.0f };
+	float sc = 1.0f;
+	Vector3 centre, rightV, upV, fwdV;
+};
+
+/*! The CPU half of one card, shared by the per-card and the instanced pass so both hand the GPU the same floats.
+ *  `eye` null = the batch's eye or the scene's (selectFrames). */
+void pickCard( const Scene * scene, const ImpostorCardSet & set, const Vector3 & worldOffset,
+				const ImpostorDraw::Options & opt, const ImpostorDraw::Resolved & rs, const Vector3 * eye, CardPick & c )
+{
+	float camDir[3];
+	int * idx = c.idx;
+	float * w = c.w;
+	selectFrames( scene, set, worldOffset, opt, camDir, idx, w, eye );
+
+	/* THE SLIDER (lane IMPOSTORDEPTH2): crisp end = FLAT SNAP, the nearest frame alone; smooth end = three
+	 * frames, stipple, search 16; between = three frames with the weights sharpened. A RING set blends its two
+	 * neighbouring azimuths, never three (CARDFIX1 step 5). */
+	const int frameCount = set.ring() ? qMin( rs.frameCount, 2 ) : rs.frameCount;
+	if ( frameCount > 1 && rs.sharpen != 1.0f ) {
+		float sum = 0.0f;
+		for ( int k = 0; k < 3; k++ ) {
+			w[k] = std::pow( qMax( 0.0f, w[k] ), rs.sharpen );
+			sum += w[k];
+		}
+		if ( sum > 0.0f )
+			for ( int k = 0; k < 3; k++ )
+				w[k] /= sum;
+	}
+	if ( frameCount == 1 ) {
+		// No blend: the nearest frame alone, at full weight.
+		int best = 0;
+		for ( int k = 1; k < 3; k++ ) {
+			if ( w[k] > w[best] )
+				best = k;
+		}
+		idx[0] = idx[best];
+		w[0] = 1.0f;
+	}
+	c.frameCount = frameCount;
+
+	// the placement's scale multiplies the centre offset, the quad, the depth span and the frame offsets together
+	const float sc = ( opt.worldScale > 0.0f ) ? opt.worldScale : 1.0f;
+	c.sc = sc;
+
+	/* The quad faces the camera and stands UP: world +Z projected into the plane perpendicular to the view
+	 * direction. A card that rolls with the camera is the classic impostor tell. */
+	Vector3 fwdV( camDir[0], camDir[1], camDir[2] );
+	Vector3 worldUp( 0.0f, 0.0f, 1.0f );
+	Vector3 rightV = Vector3::crossproduct( worldUp, fwdV );
+	if ( rightV.length() < 1e-4f ) {
+		// Looking straight down the pole: +X, the one the bake's own top frame uses.
+		rightV = Vector3( 1.0f, 0.0f, 0.0f );
+	}
+	rightV.normalize();
+	Vector3 upV = Vector3::crossproduct( fwdV, rightV );
+	upV.normalize();
+
+	c.fwdV = fwdV;
+	c.rightV = rightV;
+	c.upV = upV;
+	c.centre = worldOffset
+			+ Vector3( set.center[0], set.center[1], set.center[2] ) * sc;
+}
+
+/* The cut's coverage (lane IMPOSTORTEAR1): WW_IMPOSTOR_CUT=mean|strong forces rule 1 or 2 for every draw, read
+ * by the drawer and not the caller so every path that draws a card has the way back. -1 = not forced. */
+int envCutRule()
+{
+	WW_SWITCH_STATIC( int, v, []() {
+		const QString s = wwEnvStr( "WW_IMPOSTOR_CUT" );
+		if ( s.compare( QStringLiteral( "mean" ), Qt::CaseInsensitive ) == 0 )
+			return 1;
+		if ( s.compare( QStringLiteral( "strong" ), Qt::CaseInsensitive ) == 0 )
+			return 2;
+		return -1;
+	}() );
+	return v;
+}
+
+
+//! Why a set's cards are refused when its colour (or else its normal) sheet did not bind, by name.
+QString sheetRefusal( Scene * scene, const ImpostorCardSet & set, bool haveColour )
+{
+	if ( !haveColour ) {
+		QString arrayWhy;
+		if ( set.layer >= 0 )
+			arrayLayerTexture( scene, set.colour.localPath.isEmpty() ? set.colour.resolved : set.colour.localPath,
+					set.layer, &arrayWhy );
+		return set.layer >= 0
+				? QStringLiteral( "the colour sheet's array layer %1 did not bind: %2" ).arg( set.layer ).arg( arrayWhy )
+				: QStringLiteral( "the colour sheet did not bind: %1"
+				"  (a loose set outside a data folder is unreachable by the texture cache --"
+				" see ImpostorDraw::registerLooseSheets)" ).arg( set.colour.resolved );
+	}
+	return QStringLiteral( "the normal sheet did not bind: %1"
+			"  (without it there is no height channel, so no depth and no blend)" ).arg( set.normal.resolved );
 }
 
 } // namespace
@@ -494,11 +648,11 @@ QStringList ImpostorDraw::describeSelection( Scene * scene, const ImpostorCardSe
 
 ImpostorDraw::Resolved ImpostorDraw::resolve( const Options & opt )
 {
-	static const float envSlider = qEnvironmentVariableIsSet( "WW_IMPOSTOR_SLIDER" )
-			? qBound( 0.0f, float( qEnvironmentVariable( "WW_IMPOSTOR_SLIDER" ).toDouble() ), 1.0f ) : -1.0f;
-	static const bool envSnap = qEnvironmentVariableIntValue( "WW_IMPOSTOR_SNAP" ) != 0;
-	static const int envSearch = qEnvironmentVariableIsSet( "WW_IMPOSTOR_SEARCH" )
-			? qBound( 0, qEnvironmentVariableIntValue( "WW_IMPOSTOR_SEARCH" ), 64 ) : -1;
+	WW_SWITCH_STATIC( float, envSlider, wwEnvIsSet( "WW_IMPOSTOR_SLIDER" )
+			? qBound( 0.0f, float( wwEnvStr( "WW_IMPOSTOR_SLIDER" ).toDouble() ), 1.0f ) : -1.0f );
+	WW_SWITCH_STATIC( bool, envSnap, wwEnvInt( "WW_IMPOSTOR_SNAP" ) != 0 );
+	WW_SWITCH_STATIC( int, envSearch, wwEnvIsSet( "WW_IMPOSTOR_SEARCH" )
+			? qBound( 0, wwEnvInt( "WW_IMPOSTOR_SEARCH" ), 64 ) : -1 );
 	Resolved r;
 	r.sliderForced = envSlider >= 0.0f;
 	r.slider = r.sliderForced ? envSlider : qBound( 0.0f, opt.slider, 1.0f );
@@ -583,70 +737,19 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 
 	if ( !haveColour || !haveNormal )
 		batch.prog = nullptr;	// a refusal unbinds the program: the next card binds it again
-	if ( !haveColour ) {
+	if ( !haveColour || !haveNormal ) {
 		scene->renderer->stopProgram();
-		QString arrayWhy;
-		if ( set.layer >= 0 )
-			arrayLayerTexture( scene, set.colour.localPath.isEmpty() ? set.colour.resolved : set.colour.localPath,
-					set.layer, &arrayWhy );
-		return refuse( set.layer >= 0
-				? QStringLiteral( "the colour sheet's array layer %1 did not bind: %2" ).arg( set.layer ).arg( arrayWhy )
-				: QStringLiteral( "the colour sheet did not bind: %1"
-				"  (a loose set outside a data folder is unreachable by the texture cache --"
-				" see ImpostorDraw::registerLooseSheets)" ).arg( set.colour.resolved ) );
-	}
-	if ( !haveNormal ) {
-		scene->renderer->stopProgram();
-		return refuse( QStringLiteral( "the normal sheet did not bind: %1"
-				"  (without it there is no height channel, so no depth and no blend)" )
-				.arg( set.normal.resolved ) );
+		return refuse( sheetRefusal( scene, set, haveColour ) );
 	}
 
-	// ---- which frames ----------------------------------------------------
-	float camDir[3], w[3];
-	int idx[3];
-	selectFrames( scene, set, worldOffset, opt, camDir, idx, w );
-	wwImpostorTrace( "F frames selected" );
-
-	/* THE SLIDER (lane IMPOSTORDEPTH2): crisp end = FLAT SNAP, the nearest
-	 * frame alone, the no-blend picture below (WW_IMPOSTOR_SNAP=1 adds the
-	 * height parallax, a harness override);
-	 * smooth end = three frames, stipple, search 16; between = three frames
-	 * with the weights sharpened. `resolve` reads the environment's overrides,
-	 * here and not by the caller, like WW_IMPOSTOR_CUT, so every path that
-	 * draws a card has them. */
+	// ---- which frames, and the billboard (pickCard: the one function the instanced pass shares) ----
 	const Resolved rs = resolve( opt );
-	// a RING set blends its two neighbouring azimuths, never three (CARDFIX1 step 5)
-	const int frameCount = set.ring() ? qMin( rs.frameCount, 2 ) : rs.frameCount;
-	if ( frameCount > 1 && rs.sharpen != 1.0f ) {
-		float sum = 0.0f;
-		for ( int k = 0; k < 3; k++ ) {
-			w[k] = std::pow( qMax( 0.0f, w[k] ), rs.sharpen );
-			sum += w[k];
-		}
-		if ( sum > 0.0f )
-			for ( int k = 0; k < 3; k++ )
-				w[k] /= sum;
-	}
-	if ( frameCount == 1 ) {
-		// No blend: the nearest frame alone, at full weight. This is the
-		// before-picture the gate's blend row compares ghosting against.
-		int best = 0;
-		for ( int k = 1; k < 3; k++ ) {
-			if ( w[k] > w[best] )
-				best = k;
-		}
-		idx[0] = idx[best];
-		w[0] = 1.0f;
-	}
+	CardPick pick;
+	pickCard( scene, set, worldOffset, opt, rs, nullptr, pick );
+	wwImpostorTrace( "F frames selected" );
+	const int frameCount = pick.frameCount;
+	const float sc = pick.sc;
 
-	/* The placement's scale multiplies the centre offset, the quad, the depth
-	 * span AND the per-frame offsets together -- they are all the same kind of
-	 * model-unit measurement. See `ImpostorDrawOptions::worldScale`. Hoisted
-	 * above the frame loop because the loop needs it too. */
-	const float sc = ( opt.worldScale > 0.0f ) ? opt.worldScale : 1.0f;
-
-	const float du = 1.0f / float( set.cols() );
 	const GLint locRect   = prog->uniLocation( "frameRect" );
 	const GLint locWeight = prog->uniLocation( "frameWeight" );
 	const GLint locRight  = prog->uniLocation( "frameRight" );
@@ -655,94 +758,29 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	const GLint locOffset = prog->uniLocation( "frameOffset" );
 
 	for ( int k = 0; k < frameCount; k++ ) {
-		const int i = idx[k] % set.cols();
-		const int j = idx[k] / set.cols();
-
-		/* The frame's rectangle in the sheet, from the ONE function that knows
-		 * it (`ImpostorOct::frameRect`, checked offline against the Python
-		 * reference). Row j runs DOWNWARD in sheet space, the way the bake
-		 * writes it; the fragment stage flips within the frame when it turns
-		 * the card's own y into a v. A sign error here draws a perfectly
-		 * convincing card of the WRONG frame, which is why the frame index is
-		 * checked against the reference AND the picture against the mesh's
-		 * silhouette -- neither alone would catch it. */
-		if ( locRect >= 0 ) {
-			float u0 = 0.0f, v0 = 0.0f, dU = du, dV = du;
-			if ( set.ring() ) {
-				// the ring's one row: frame v at [v/V, (v+1)/V) x [0, 1)
-				u0 = float( i ) * du; v0 = 0.0f; dU = du; dV = 1.0f;
-			} else {
-				ImpostorOct::frameRect( i, j, set.oct, &u0, &v0, &dU, &dV );
-			}
-			const float rect[4] = { u0, v0, dU, dV };
-			scene->renderer->fn->glUniform4fv( locRect + k, 1, rect );
-		}
+		const int i = pick.idx[k] % set.cols();
+		const int j = pick.idx[k] / set.cols();
+		CardFrame f;
+		frameData( set, opt, i, j, f );
+		if ( locRect >= 0 )
+			scene->renderer->fn->glUniform4fv( locRect + k, 1, f.rect );
 		if ( locWeight >= 0 )
-			scene->renderer->fn->glUniform1f( locWeight + k, w[k] );
-
-		/* The frame's own axes. `frameDir` gives the SPEC direction of cell
-		 * (i,j); `frameBasis` turns a direction into the camera basis the bake
-		 * actually used for it -- which for a legacy set still carries the old
-		 * 180 degrees. The two are kept apart on purpose: the first is what the
-		 * grid means, the second is what the picture in the sheet was taken
-		 * with, and this lane found them disagreeing before the repair. */
-		float right[3], up[3], fwd[3], dir[3];
-		{
-			const ImpostorOct::Convention saved = ImpostorOct::g_convention;
-			ImpostorOct::g_convention = effectiveConvention( set, opt );
-			if ( set.ring() ) {
-				/* The ring's own eye (docs/LODGEN_LODM_FORMAT.md 3a): ( cos p, sin p, 0 ),
-				 * p = 2 pi v / V; frameBasis then gives right ( -sin p, cos p, 0 ) and up
-				 * ( 0, 0, 1 ) -- the bake's camera for that frame, under the spec law
-				 * (a ring set is only ever baked under it). */
-				const float p = 6.28318530718f * float( i ) / float( set.views );
-				dir[0] = std::cos( p ); dir[1] = std::sin( p ); dir[2] = 0.0f;
-				ImpostorOct::g_convention = ImpostorOct::Convention::SpecLiteral;
-			} else {
-				ImpostorOct::frameDir( i, j, set.oct, dir );
-			}
-			ImpostorOct::frameBasis( dir, right, up, fwd );
-			ImpostorOct::g_convention = saved;
-		}
+			scene->renderer->fn->glUniform1f( locWeight + k, pick.w[k] );
 		if ( locRight >= 0 )
-			scene->renderer->fn->glUniform3fv( locRight + k, 1, right );
+			scene->renderer->fn->glUniform3fv( locRight + k, 1, f.right );
 		if ( locUp >= 0 )
-			scene->renderer->fn->glUniform3fv( locUp + k, 1, up );
+			scene->renderer->fn->glUniform3fv( locUp + k, 1, f.up );
 		if ( locFwd >= 0 )
-			scene->renderer->fn->glUniform3fv( locFwd + k, 1, fwd );
-
-		/* WHERE THIS FRAME'S QUAD SITS. The set's own per-frame offset, in the
-		 * frame's right/up, scaled with everything else. A set that declares
-		 * none answers (0, 0), which is the law it was baked under. */
+			scene->renderer->fn->glUniform3fv( locFwd + k, 1, f.fwd );
 		if ( locOffset >= 0 ) {
-			float offR = 0.0f, offU = 0.0f;
-			set.frameOffsetOf( i, j, &offR, &offU );
-			const float off[2] = { offR * sc, offU * sc };
+			const float off[2] = { f.offR * sc, f.offU * sc };
 			scene->renderer->fn->glUniform2fv( locOffset + k, 1, off );
 		}
 	}
 	prog->uni1i( "frameCount", frameCount );
 	wwImpostorTrace( "G per-frame uniforms" );
 
-	// ---- the card's own billboard ----------------------------------------
-	/* The quad faces the camera and stands UP: world +Z projected into the
-	 * plane perpendicular to the view direction. A card that rolls with the
-	 * camera is the classic impostor tell, and a tree that leans when you tilt
-	 * your head is worse than no impostor at all. */
-	Vector3 fwdV( camDir[0], camDir[1], camDir[2] );
-	Vector3 worldUp( 0.0f, 0.0f, 1.0f );
-	Vector3 rightV = Vector3::crossproduct( worldUp, fwdV );
-	if ( rightV.length() < 1e-4f ) {
-		// Looking straight down the pole: any right will do, and +X is the one
-		// the bake's own top frame uses.
-		rightV = Vector3( 1.0f, 0.0f, 0.0f );
-	}
-	rightV.normalize();
-	Vector3 upV = Vector3::crossproduct( fwdV, rightV );
-	upV.normalize();
-
-	const Vector3 centre = worldOffset
-			+ Vector3( set.center[0], set.center[1], set.center[2] ) * sc;
+	const Vector3 & fwdV = pick.fwdV, & rightV = pick.rightV, & upV = pick.upV, & centre = pick.centre;
 	const Vector3 eye = batch.on ? batch.eye : eyeWorld( scene );
 
 	prog->uni3f( "cardCenter", centre[0], centre[1], centre[2] );
@@ -774,15 +812,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	 * 3-frame mean, 2 the strongest frame alone (see ImpostorDrawOptions::cutRule).
 	 * WW_IMPOSTOR_CUT=mean|strong is read here and not by the caller so every
 	 * path that draws a card has the way back. */
-	static const int envCutRule = []() {
-		const QString v = qEnvironmentVariable( "WW_IMPOSTOR_CUT" );
-		if ( v.compare( QStringLiteral( "mean" ), Qt::CaseInsensitive ) == 0 )
-			return 1;
-		if ( v.compare( QStringLiteral( "strong" ), Qt::CaseInsensitive ) == 0 )
-			return 2;
-		return -1;
-	}();
-	prog->uni1i( "cutRule", envCutRule >= 0 ? envCutRule : rs.cutRule );
+	prog->uni1i( "cutRule", envCutRule() >= 0 ? envCutRule() : rs.cutRule );
 	/* The depth search (lane IMPOSTORDEPTH1): the slider's number unless
 	 * Options or WW_IMPOSTOR_SEARCH=N force one (clamped to 64 so a typo cannot
 	 * hang the GPU). The coverage is always decoded per texel, then filtered:
@@ -815,6 +845,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 
 	const float * attrs[8] = { kQuadPos, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, kQuadUv };
 	scene->renderer->drawShape( 4, kQuadAttrMask, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, kQuadIdx );
+	PassTime::countDraw( 1 );	// lane FARCARD1: the far cards were missing from the census draws
 	wwImpostorTrace( "K drawShape returned" );
 
 	if ( !batch.on ) {
@@ -825,5 +856,266 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 
 	if ( why )
 		why->clear();
+	return true;
+}
+
+/* ---- lane FARCARD1: the instanced card pass (impostordraw.h) ----
+ * WHOLEFRAME (perfresearch1): the far-cards pass cost 17 ms on Concord, one draw per card with ~30 by-name
+ * uniforms and a geometry hash each. Shipped games draw impostors instanced, the per-instance data in a buffer:
+ * here one RGBA32F texture buffer of 6 texels a card, a per-set frame table built once per arming, one quad VAO
+ * and one glDrawElementsInstanced per set. */
+namespace {
+
+struct InstGl
+{
+	QOpenGLContext * cx = nullptr;
+	GLuint vao = 0, vbo = 0, ibo = 0, dataBuf = 0, dataTex = 0, tabBuf = 0, tabTex = 0;
+	quint64 tabKey = ~quint64( 0 );
+	QHash< const ImpostorCardSet *, int > tabBase;		// a set's first texel in the frame table
+	std::vector< float > tab;
+	bool tabDirty = false;
+	QHash< const ImpostorSheet *, GLuint > layerIds;	// an array-layer sheet's texture, resolved once per arming
+	std::vector< float > data;
+};
+
+InstGl & instGl()
+{
+	static InstGl g;
+	return g;
+}
+
+constexpr int kInstTexels = 6;		// impostor_inst.vert's cardData layout
+
+//! bindSheet, with an array layer's file resolved once per arming instead of once per pass.
+bool bindInstSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog, const char * uniform,
+					const ImpostorSheet & sheet, int unit, int layer, InstGl & g )
+{
+	if ( layer < 0 )
+		return bindSheet( scene, prog, uniform, sheet, unit, -1 );
+	const GLint loc = prog->uniLocation( uniform );
+	if ( loc < 0 )
+		return false;
+	auto it = g.layerIds.constFind( &sheet );
+	if ( it == g.layerIds.constEnd() )
+		it = g.layerIds.insert( &sheet, layerSheetId( scene, sheet, layer ) );
+	if ( !*it )
+		return false;
+	auto * fn = scene->renderer->fn;
+	fn->glActiveTexture( GL_TEXTURE0 + GLenum( unit ) );
+	fn->glBindTexture( GL_TEXTURE_2D, *it );
+	fn->glUniform1i( loc, unit );
+	return true;
+}
+
+//! The set's frame table, appended on its first card: 4 texels a frame, frame index = i + j * cols.
+int frameTableBase( const ImpostorCardSet & set, const ImpostorDraw::Options & opt, InstGl & g )
+{
+	const auto it = g.tabBase.constFind( &set );
+	if ( it != g.tabBase.constEnd() )
+		return *it;
+	const int base = int( g.tab.size() / 4 );
+	const int cols = set.cols(), n = cols * set.rows();
+	for ( int f = 0; f < n; f++ ) {
+		CardFrame fr;
+		frameData( set, opt, f % cols, f / cols, fr );
+		const float t[16] = { fr.rect[0], fr.rect[1], fr.rect[2], fr.rect[3],
+			fr.right[0], fr.right[1], fr.right[2], fr.offR,
+			fr.up[0], fr.up[1], fr.up[2], fr.offU,
+			fr.fwd[0], fr.fwd[1], fr.fwd[2], 0.0f };
+		g.tab.insert( g.tab.end(), t, t + 16 );
+	}
+	g.tabBase.insert( &set, base );
+	g.tabDirty = true;
+	return base;
+}
+
+void instGlCreate( Scene * scene, InstGl & g )
+{
+	auto * fn = scene->renderer->fn;
+	fn->glGenVertexArrays( 1, &g.vao );
+	fn->glBindVertexArray( g.vao );
+	fn->glGenBuffers( 1, &g.vbo );
+	fn->glBindBuffer( GL_ARRAY_BUFFER, g.vbo );
+	fn->glBufferData( GL_ARRAY_BUFFER, GLsizeiptr( sizeof( kQuadPos ) + sizeof( kQuadUv ) ), nullptr, GL_STATIC_DRAW );
+	fn->glBufferSubData( GL_ARRAY_BUFFER, 0, GLsizeiptr( sizeof( kQuadPos ) ), kQuadPos );
+	fn->glBufferSubData( GL_ARRAY_BUFFER, GLintptr( sizeof( kQuadPos ) ), GLsizeiptr( sizeof( kQuadUv ) ), kQuadUv );
+	fn->glEnableVertexAttribArray( 0 );
+	fn->glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, nullptr );
+	fn->glEnableVertexAttribArray( 7 );
+	fn->glVertexAttribPointer( 7, 2, GL_FLOAT, GL_FALSE, 0, reinterpret_cast< const void * >( sizeof( kQuadPos ) ) );
+	fn->glGenBuffers( 1, &g.ibo );
+	fn->glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, g.ibo );
+	fn->glBufferData( GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr( sizeof( kQuadIdx ) ), kQuadIdx, GL_STATIC_DRAW );
+	fn->glBindVertexArray( 0 );
+	fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
+	fn->glGenBuffers( 1, &g.dataBuf );
+	fn->glGenBuffers( 1, &g.tabBuf );
+	fn->glGenTextures( 1, &g.dataTex );
+	fn->glGenTextures( 1, &g.tabTex );
+}
+
+} // namespace
+
+bool ImpostorDraw::instancedOn( Scene * scene )
+{
+	static const bool off = qgetenv( "WW_FARCARD" ) == "0" || qgetenv( "WW_FARCARD_RED" ) == "percard";
+	if ( off || !scene || !scene->renderer )
+		return false;
+	static GLint units = -1;
+	if ( units < 0 )
+		scene->renderer->fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &units );
+	return units > WwCellUnit::CardFrames;
+}
+
+bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > & cards, const Options & opt,
+										quint64 tableKey, InstStats * stats )
+{
+	InstStats st;
+	if ( !scene || !scene->renderer )
+		return false;
+	Renderer * r = scene->renderer;
+	auto * fn = r->fn;
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "impostor_cellinst.prog" );
+	if ( !prog )
+		return false;
+
+	InstGl & g = instGl();
+	if ( g.cx != QOpenGLContext::currentContext() ) {
+		g = InstGl();	// another context: the old names are not ours
+		g.cx = QOpenGLContext::currentContext();
+	}
+	if ( !g.vao )
+		instGlCreate( scene, g );
+	// a forced convention reads the frames another way: its own tables
+	const quint64 key = tableKey * 4 + ( opt.forceConvention ? 1 + quint64( opt.convention ) : 0 );
+	if ( g.tabKey != key ) {
+		g.tabKey = key;
+		g.tabBase.clear();
+		g.tab.clear();
+		g.layerIds.clear();
+		g.tabDirty = true;
+	}
+
+	// ---- the sets, in the order their first card comes; a set's cards keep their placement order ----
+	QHash< const ImpostorCardSet *, int > groupOf;
+	QVector< const ImpostorCardSet * > sets;
+	QVector< int > count;
+	QVector< int > groupOfCard( cards.size() );
+	for ( int i = 0; i < cards.size(); i++ ) {
+		auto it = groupOf.constFind( cards.at( i ).set );
+		if ( it == groupOf.constEnd() ) {
+			it = groupOf.insert( cards.at( i ).set, sets.size() );
+			sets << cards.at( i ).set;
+			count << 0;
+		}
+		count[*it]++;
+		groupOfCard[i] = *it;
+	}
+	QVector< int > first( sets.size() ), fill( sets.size() );
+	for ( int s = 0, run = 0; s < sets.size(); s++ ) {
+		first[s] = fill[s] = run;
+		run += count.at( s );
+	}
+
+	// ---- every card's values: drawCard's own arithmetic (pickCard), into the buffer ----
+	const Resolved rs = resolve( opt );
+	const Vector3 eye = eyeWorld( scene );
+	g.data.resize( size_t( cards.size() ) * kInstTexels * 4 );
+	for ( int i = 0; i < cards.size(); i++ ) {
+		const InstCard & c = cards.at( i );
+		const ImpostorCardSet & set = *c.set;
+		Options o = opt;
+		o.worldScale = c.scale;
+		o.swayPhase = c.swayPhase;
+		CardPick pk;
+		pickCard( scene, set, Vector3( c.offset[0], c.offset[1], c.offset[2] ), o, rs, &eye, pk );
+		frameTableBase( set, opt, g );
+		const float sc = pk.sc;
+		float * d = g.data.data() + size_t( fill[groupOfCard.at( i )]++ ) * kInstTexels * 4;
+		d[0] = pk.centre[0]; d[1] = pk.centre[1]; d[2] = pk.centre[2]; d[3] = set.depthSpan * sc;
+		d[4] = set.halfW * sc; d[5] = set.halfH * sc; d[6] = o.swayPhase; d[7] = sc;
+		d[8] = pk.rightV[0]; d[9] = pk.rightV[1]; d[10] = pk.rightV[2]; d[11] = float( pk.frameCount );
+		d[12] = pk.upV[0]; d[13] = pk.upV[1]; d[14] = pk.upV[2]; d[15] = float( pk.idx[0] );
+		d[16] = pk.fwdV[0]; d[17] = pk.fwdV[1]; d[18] = pk.fwdV[2]; d[19] = float( pk.idx[1] );
+		d[20] = pk.w[0]; d[21] = pk.w[1]; d[22] = pk.w[2]; d[23] = float( pk.idx[2] );
+	}
+
+	// ---- one upload a pass; the frame table only when a set was added ----
+	st.bytes = qint64( g.data.size() * sizeof( float ) );
+	fn->glBindBuffer( GL_TEXTURE_BUFFER, g.dataBuf );
+	fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( st.bytes ), g.data.data(), GL_STREAM_DRAW );
+	if ( g.tabDirty ) {
+		fn->glBindBuffer( GL_TEXTURE_BUFFER, g.tabBuf );
+		fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( g.tab.size() * sizeof( float ) ), g.tab.data(), GL_STATIC_DRAW );
+		g.tabDirty = false;
+	}
+	fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CardData ) );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, g.dataTex );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.dataBuf );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CardFrames ) );
+	fn->glBindTexture( GL_TEXTURE_BUFFER, g.tabTex );
+	fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.tabBuf );
+
+	// ---- the pass: drawCard's pass-wide uniforms and state, once ----
+	if ( opt.cellLit ) {
+		wwLookdevFogUniforms( scene );
+		wwCellLightsUniforms( scene );
+	}
+	prog->uni1i( "cardData", WwCellUnit::CardData );
+	prog->uni1i( "cardFrames", WwCellUnit::CardFrames );
+	prog->uni4m( "modelViewMatrix", scene->view.toMatrix4() );
+	prog->uni3f( "cardEyeModel", eye[0], eye[1], eye[2] );
+	prog->uni1b( "cardOrtho", false );
+	prog->uni1f( "alphaThreshold", ( opt.alphaThreshold >= 0.0f ) ? opt.alphaThreshold : kImpostorVanillaCut );
+	prog->uni1b( "useHeightBlend", rs.parallax );
+	prog->uni1i( "cutRule", envCutRule() >= 0 ? envCutRule() : rs.cutRule );
+	prog->uni1i( "depthSearchSteps", rs.searchSteps );
+	prog->uni1b( "useDepthOffset", opt.depthOffset );
+	prog->uni1b( "useBakedAo", opt.bakedAo );
+	prog->uni1i( "debugChannel", opt.debugChannel );
+	prog->uni1f( "swayAmplitude", opt.swayAmplitude );
+	glDisable( GL_BLEND );
+	glEnable( GL_DEPTH_TEST );
+	glDepthFunc( GL_LEQUAL );
+	glDepthMask( GL_TRUE );
+	glDisable( GL_CULL_FACE );
+	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+	fn->glBindVertexArray( g.vao );
+
+	// ---- one instanced draw per set ----
+	for ( int s = 0; s < sets.size(); s++ ) {
+		const ImpostorCardSet & set = *sets.at( s );
+		const bool haveColour = bindInstSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer, g );
+		const bool haveNormal = bindInstSheet( scene, prog, "NormalSheet", set.normal, 1, set.layer, g );
+		if ( !haveColour || !haveNormal ) {
+			if ( !st.refused )
+				st.firstWhy = QFileInfo( set.lodmPath ).fileName() + QStringLiteral( ": " ) + sheetRefusal( scene, set, haveColour );
+			st.refused += count.at( s );
+			continue;
+		}
+		const bool haveMask = bindInstSheet( scene, prog, "MaskSheet", set.mask, 2, set.layer, g );
+		const bool haveEmiss = bindInstSheet( scene, prog, "EmissiveSheet", set.emissive, 3, set.layer, g );
+		prog->uni1b( "hasMaskSheet", haveMask );
+		prog->uni1b( "hasEmissiveSheet", haveEmiss );
+		prog->uni1b( "familyPbr", set.pbr );
+		prog->uni1f( "emissiveScale", set.emissiveScale );
+		prog->uni1f( "cardMipCap", float( set.mips ) );
+		prog->uni1f( "cardCovFloor", set.covOk() ? float( set.covFloor ) / 255.0f : 0.0f );
+		prog->uni1f( "cardCovBase",  set.covOk() ? float( set.covBase )  / 255.0f : 0.0f );
+		prog->uni1i( "cardBase", first.at( s ) );
+		prog->uni1i( "frameTableBase", g.tabBase.value( &set ) );
+		fn->glDrawElementsInstanced( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr, GLsizei( count.at( s ) ) );
+		PassTime::countDraw( count.at( s ) );
+		st.draws++;
+		st.drawn += count.at( s );
+	}
+	st.sets = sets.size();
+
+	fn->glBindVertexArray( 0 );
+	r->stopProgram();
+	fn->glActiveTexture( GL_TEXTURE0 );
+	if ( stats )
+		*stats = st;
 	return true;
 }

@@ -15,7 +15,10 @@
  *            alpha = the confidence squared (screen edge, travelled distance, depth gained)
  *   stage 3  the 5-tap blur across, stage 4 down: taps without confidence hand their weight to the others
  * ASSUMED (not read from the game): stage 1 point-samples its inputs (the full-size texel under the half pixel's
- * centre). Deviation: float targets (the game stores the march and the blurs in 8 bits, sRGB). */
+ * centre). Deviation: float targets (the game stores the march and the blurs in 8 bits, sRGB).
+ * Lane PERF3 (WW_CELL_SSR_PREV=1, a look change, ships off): stage 0 writes the flag alone (alpha 1 where the
+ * obscurance pass's stencil carries it), and a stage 2 hit samples the PREVIOUS frame's finished linear color,
+ * reprojected into its camera, instead of a second scene pass. */
 
 uniform int ssrStage;
 uniform sampler2D gbuf;
@@ -36,6 +39,11 @@ uniform int ssrRed;			// WW_CELL_SSR_RED: 2 nogap (no 50-unit refusal), 4 nofade
 uniform sampler2D waterRay;	// lane WATER2: full size, bottom row first: the water's ray in the view, its view depth
 uniform bool haveWaterRay;
 uniform bool opaqueRays;	// false in an exterior: the water's rays alone
+uniform bool ssrPrev;		// lane PERF3: the hit's color from prevScene
+uniform sampler2D prevScene;	// the previous frame's linear color (full size, bottom row first, bilinear)
+uniform mat3 ssrPrevRot;	// this view -> the previous view (game units): ssrPrevRot * P + ssrPrevT
+uniform vec3 ssrPrevT;
+uniform vec2 ssrPrevProj;	// the previous projection's P00, P11
 
 out vec4 fragColor;
 
@@ -67,6 +75,11 @@ void main()
 	ivec2 q = ivec2( gl_FragCoord.xy );
 	vec2 uv = ( vec2( q ) + 0.5 ) / vec2( halfSize );
 	fragColor = vec4( 0.0 );
+
+	if ( ssrStage == 0 ) {	// lane PERF3: the flag (the stencil test passes flagged pixels only)
+		fragColor = vec4( 0.0, 0.0, 0.0, 1.0 );
+		return;
+	}
 
 	if ( ssrStage == 1 ) {
 		ivec2 t = min( ( ( 2 * q + 1 ) * fullSize ) / ( 2 * halfSize ), fullSize - 1 );
@@ -176,6 +189,19 @@ void main()
 		c *= clamp( 1.0 - 25.0 * ( d - zfirst ) / ( ssrClip.y - ssrClip.x ), 0.0, 1.0 );
 		if ( ( ssrRed & 4 ) != 0 )
 			c = 1.0;
+		if ( ssrPrev ) {	// lane PERF3: the hit in the previous frame's view; off its screen or behind it: no hit
+			float zh = 1.0 / p.z;
+			vec3 H = vec3( ( 2.0 * p.x - 1.0 ) * zh / proj.x, ( 1.0 - 2.0 * p.y ) * zh / proj.y, -zh );
+			vec3 Hp = ssrPrevRot * H + ssrPrevT;
+			float zp = -Hp.z;
+			if ( !( zp > ssrClip.x ) )
+				return;
+			vec2 up = vec2( 0.5 + 0.5 * ssrPrevProj.x * Hp.x / zp, 0.5 - 0.5 * ssrPrevProj.y * Hp.y / zp );
+			if ( up.x <= 0.0 || up.x >= 1.0 || up.y <= 0.0 || up.y >= 1.0 )
+				return;
+			fragColor = vec4( clamp( textureLod( prevScene, vec2( up.x, 1.0 - up.y ), 0.0 ).rgb, 0.0, 1.0 ), c * c );
+			return;
+		}
 		fragColor = vec4( clamp( textureLod( scene, vec2( p.x, 1.0 - p.y ), 0.0 ).rgb, 0.0, 1.0 ), c * c );
 		return;
 	}

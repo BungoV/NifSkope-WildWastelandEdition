@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "nifskope.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "glview.h"
 #include "nifmerge.h"
 #include "model/nifmodel.h"
@@ -157,7 +158,7 @@ void wwSamExportHarness( NifSkope * skope, GLView * ogl, QWidget * panel )
 			const QString restPath = dir + QStringLiteral( "/ww_samexport_rest.json" );
 			const QString posedPath = dir + QStringLiteral( "/ww_samexport_posed.json" );
 			const QString againPath = dir + QStringLiteral( "/ww_samexport_again.json" );
-			const QString fixture = QString::fromLocal8Bit( qgetenv( "WW_SAMEXPORT_POSE" ) );
+			const QString fixture = QString::fromLocal8Bit( wwEnv( "WW_SAMEXPORT_POSE" ) );
 
 			auto readJson = []( const QString & p, QJsonObject & root ) -> bool {
 				QFile f( p );
@@ -1248,7 +1249,7 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 
 	// the export harness drives the callables above with no dialog in sight;
 	// see wwSamExportHarness for what it measures and why it lives in this file
-	if ( skope && ogl && qEnvironmentVariableIsSet( "WW_SAMEXPORT_TEST" ) )
+	if ( skope && ogl && wwEnvIsSet( "WW_SAMEXPORT_TEST" ) )
 		wwSamExportHarness( skope, ogl, panel );
 
 	refresh();

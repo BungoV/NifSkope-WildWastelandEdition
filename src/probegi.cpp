@@ -5,9 +5,11 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "probegi.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celllights.h"
 #include "probebvh.h"
+#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count, the GPU ray back end
 #include "probebake.h"
 #include "proberelight.h"
 #include "cellaodecal.h"	// lane AODECAL1
@@ -249,7 +251,7 @@ double radial( double d, double r, const WwCellLight & l )
 
 void parallelFor( size_t n, const std::function<void( size_t )> & fn )
 {
-	const int nThreads = std::max( 1, int( std::thread::hardware_concurrency() ) );
+	const int nThreads = bakert::threads();
 	std::atomic<size_t> next( 0 );
 	std::vector<std::thread> pool;
 	for ( int i = 0; i < nThreads; i++ )
@@ -311,7 +313,7 @@ GeoMemo & geoMemo()
 }
 bool geoMemoOn()
 {
-	static const bool on = qEnvironmentVariable( "WW_GI_GEOMEMO" ) != QLatin1String( "0" );
+	WW_SWITCH_STATIC( bool, on, wwEnvStr( "WW_GI_GEOMEMO" ) != QLatin1String( "0" ) );
 	return on;
 }
 struct KeyMix
@@ -544,8 +546,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	const int nLive = lights.size();
 	const int nAll = nLive + ( REC ? spec.recordExtra.size() : 0 );
 	// lane STATICCACHE1: the key of what the placed lights' stage reads (never with the GPU record: it wants the pairs)
-	const bool scOn = qEnvironmentVariableIntValue( "WW_CELL_GI_STATICCACHE" ) == 1 && !REC;
-	const bool scRedWithSun = scOn && qgetenv( "WW_CELL_GI_STATICCACHE_RED" ).trimmed() == "withsun";
+	const bool scOn = wwEnvInt( "WW_CELL_GI_STATICCACHE" ) == 1 && !REC;
+	const bool scRedWithSun = scOn && wwEnv( "WW_CELL_GI_STATICCACHE_RED" ).trimmed() == "withsun";
 	StaticLightCache & SC = staticLightCache();
 	QByteArray scKey;
 	bool scHit = false;
@@ -1019,7 +1021,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		R.aoGate = QStringLiteral( "aodecal relight: %1 probes inside a copy's footprint, mean dE %2" )
 			.arg( R.aoProbes ).arg( R.aoDsMean, 0, 'g', 4 );
 	// lane AODECAL1 gate D: WW_CELL_AODECAL_GATE=<file>, the probes near a copy traced with and without the copies
-	if ( aoOn && !qgetenv( "WW_CELL_AODECAL_GATE" ).isEmpty() ) {
+	if ( aoOn && !wwEnv( "WW_CELL_AODECAL_GATE" ).isEmpty() ) {
 		std::vector<float> pp, pv;
 		for ( const Tbk & t : tbks )
 			for ( const TbkProbe & pr : t.probes ) {
@@ -1027,7 +1029,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				pv.insert( pv.end(), pr.skyVis, pr.skyVis + 8 );
 			}
 		QString gl;
-		if ( !aoDecalProbeGate( *spec.aoDecals, soup, pp, pv, QString::fromLocal8Bit( qgetenv( "WW_CELL_AODECAL_GATE" ) ), &gl ) )
+		if ( !aoDecalProbeGate( *spec.aoDecals, soup, pp, pv, QString::fromLocal8Bit( wwEnv( "WW_CELL_AODECAL_GATE" ) ), &gl ) )
 			gl = QStringLiteral( "aodecal gate: the table could not be written" );
 		R.aoGate += QStringLiteral( "; " ) + gl;
 	}
@@ -1382,7 +1384,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			!roomsWanted ? "off" : roomsHit ? "kept" : "built" );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
 	// lane VOLFIT1: the Space stage is the room source (ruling 10-19); after the memo, which keeps ROOMCLAMP1's grid
 	if ( R.roomsOn && spec.space )
-		R.spaceRooms = probeRoomsFromSpace( *spec.space, &R.rooms, QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_GI_RED" ) ) );
+		R.spaceRooms = probeRoomsFromSpace( *spec.space, &R.rooms, QString::fromLatin1( wwEnv( "WW_CELL_VOLUMES_GI_RED" ) ) );
 	const ProbeRooms & RM = R.rooms;
 	// every probe's rooms: its cell's, or in a solid cell the nearest air cell's within two cells
 	std::vector<std::array<int, 2>> probeRoom( up.size(), { { -1, -1 } } );
@@ -1798,17 +1800,82 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				}
 			std::vector<double> shareOf( edge.size(), 0.0 );
 			std::vector<int> raisedOf( edge.size(), 0 );
+			auto eyeOf = [&]( size_t k, double o[3] ) {
+				const VS & V = vs[edge[k].i];
+				const int si = slotOf[edge[k].i][size_t( edge[k].slot )];
+				o[0] = double( V.eye[si][0] ) - O[0];
+				o[1] = double( V.eye[si][1] ) - O[1];
+				o[2] = double( V.eye[si][2] );
+			};
+			/* lane RTBAKE1: these sky rays (slots x 256, ~20 M at Goodneighbor) are the bake's biggest ray load; on a GPU
+			 * they go out in batches as occlusion rays, each hit re-tested in double (bakert::Scene::refine). The cpu
+			 * path (WW_BAKE_RT_RED=cpu, or no Vulkan) is the loop below untouched. WW_BAKE_RT_CHECK=1 also casts every
+			 * ray on the CPU and counts the verdicts that differ (the gate). */
+			QElapsedTimer edgeClock;
+			edgeClock.start();
+			std::unique_ptr<bakert::Scene> rtScene;
+			std::vector<uint8_t> skyHit;   // per (slot, direction): 1 = the ray met something
+			std::atomic<long long> rtDiff( 0 );
+			const bool rtCheck = !qgetenv( "WW_BAKE_RT_CHECK" ).isEmpty();
+			if ( bakert::pickPath() != bakert::Path::Cpu ) {
+				std::string why;
+				rtScene = bakert::Scene::make( bvh, &why );
+				if ( rtScene->path() == bakert::Path::Cpu )
+					R.edgeRaysNote = QString::fromStdString( "cpu: " + why );
+			}
+			if ( rtScene && rtScene->path() != bakert::Path::Cpu ) {
+				skyHit.assign( edge.size() * size_t( kDirs ), 0 );
+				const size_t chunk = 4096;   // slots a batch: 1 M rays
+				std::vector<bakert::Ray> rays;
+				std::vector<bakert::Hit> hits;
+				for ( size_t k0 = 0; k0 < edge.size(); k0 += chunk ) {
+					const size_t k1 = std::min( edge.size(), k0 + chunk );
+					rays.resize( ( k1 - k0 ) * size_t( kDirs ) );
+					hits.resize( rays.size() );
+					for ( size_t k = k0; k < k1; k++ ) {
+						double o[3];
+						eyeOf( k, o );
+						for ( int d = 0; d < kDirs; d++ ) {
+							bakert::Ray & r = rays[( k - k0 ) * size_t( kDirs ) + size_t( d )];
+							r = { { float( o[0] ), float( o[1] ), float( o[2] ) }, 1e-4f,
+								{ float( dirs[d][0] ), float( dirs[d][1] ), float( dirs[d][2] ) }, 131072.0f };
+						}
+					}
+					rtScene->trace( rays.data(), rays.size(), hits.data(), true );
+					parallelFor( k1 - k0, [&]( size_t j ) {
+						double o[3];
+						eyeOf( k0 + j, o );
+						for ( int d = 0; d < kDirs; d++ ) {
+							double t;
+							int tri;
+							const bool hit = rtScene->refine( hits[j * size_t( kDirs ) + size_t( d )], o, dirs[d], 131072.0, &t, &tri, false );
+							skyHit[( k0 + j ) * size_t( kDirs ) + size_t( d )] = hit ? 1 : 0;
+							if ( rtCheck && hit != bvh.ray( o, dirs[d], 131072.0, &t ) )
+								rtDiff++;
+						}
+					} );
+				}
+				R.edgeRaysNote = QString::fromStdString( bakert::census( "edge sky", *rtScene ) )
+					+ ( rtCheck ? QStringLiteral( ", check: verdicts unlike the CPU's %1 of %2" ).arg( rtDiff.load() )
+						.arg( qint64( skyHit.size() ) ) : QString() );
+			} else if ( R.edgeRaysNote.isEmpty() )
+				R.edgeRaysNote = QStringLiteral( "edge sky rays: cpu, %1 rays" ).arg( qint64( edge.size() ) * kDirs );
 			parallelFor( edge.size(), [&]( size_t k ) {
 				const ES & e = edge[k];
 				const VS & V = vs[e.i];
 				const int si = slotOf[e.i][size_t( e.slot )];
 				const double o[3] = { double( V.eye[si][0] ) - O[0], double( V.eye[si][1] ) - O[1], double( V.eye[si][2] ) };
 				int open[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-				for ( int d = 0; d < kDirs; d++ ) {
-					double tHit;
-					if ( !bvh.ray( o, dirs[d], 131072.0, &tHit ) )
-						open[dirOct[d]]++;
-				}
+				if ( !skyHit.empty() ) {
+					for ( int d = 0; d < kDirs; d++ )
+						if ( !skyHit[k * size_t( kDirs ) + size_t( d )] )
+							open[dirOct[d]]++;
+				} else
+					for ( int d = 0; d < kDirs; d++ ) {
+						double tHit;
+						if ( !bvh.ray( o, dirs[d], 131072.0, &tHit ) )
+							open[dirOct[d]]++;
+					}
 				float vis[8];
 				double vsum = 0.0;
 				for ( int q = 0; q < 8; q++ ) {
@@ -1892,11 +1959,70 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				}
 			}
 			R.edgeSkyShare = nEdge == 0 ? 0.0 : shSum / double( nEdge );
+			R.msEdgeRays = edgeClock.nsecsElapsed() / 1e6;
 		}
 	}
 	R.voxelsBare = nBare;
 	R.voxelsTwoBare = nTwoBare;
 	R.msGrid = clock.nsecsElapsed() / 1e6 - R.msLight - R.msGather - R.msBounce;
+
+	// lane EMISSIVEGRID1: the fine boxes round bright glow (probegifine.h); off: nothing here runs
+	if ( spec.emissiveGrid && !spec.noGlow && lks.size() == R.probeLinks.size() ) {
+		R.fineOn = true;
+		ProbeGiFineInput fi;
+		std::vector<int> emitOf( us.size(), -1 );
+		const double cs = R.surfelCell;
+		for ( size_t i = 0; i < us.size(); i++ )
+			if ( us[i].emits ) {
+				emitOf[i] = int( fi.glow.size() );
+				ProbeGiFineEmitter e;
+				for ( int c = 0; c < 3; c++ ) {
+					e.p[c] = us[i].p[c];
+					e.n[c] = us[i].n[c];
+					e.Le[c] = us[i].Le[c];
+				}
+				e.area = 0.0;
+				fi.glow.push_back( e );
+			}
+		for ( size_t j = 0; j < up.size(); j++ ) {
+			ProbeGiFineProbe P;
+			for ( int c = 0; c < 3; c++ )
+				P.p[c] = up[j].p[c];
+			P.room[0] = probeRoom[j][0];
+			P.room[1] = probeRoom[j][1];
+			P.linkStart = int( fi.linkEmit.size() );
+			for ( int k = R.probeLinkStart[j]; k < R.probeLinkStart[j + 1]; k++ ) {
+				const int e = emitOf[size_t( R.probeLinks[size_t( k )] )];
+				if ( e < 0 )
+					continue;
+				const LK & L = lks[size_t( k )];
+				// the surfel's area as the probe saw it: omega x d^2 (the largest over its links)
+				double d2 = 0.0;
+				for ( int c = 0; c < 3; c++ )
+					d2 += ( fi.glow[size_t( e )].p[c] - P.p[c] ) * ( fi.glow[size_t( e )].p[c] - P.p[c] );
+				fi.glow[size_t( e )].area = std::max( fi.glow[size_t( e )].area, L.omega * d2 );
+				fi.linkEmit.push_back( e );
+				for ( int a = 0; a < 6; a++ )
+					fi.linkW.push_back( L.omega * up[j].kUnl * L.cosA[a] );
+				fi.linkW.push_back( 0.0 );
+				for ( int c = 0; c < 3; c++ )
+					fi.linkTint.push_back( L.tint[c] );
+			}
+			P.linkEnd = int( fi.linkEmit.size() );
+			fi.probes.push_back( P );
+		}
+		for ( ProbeGiFineEmitter & e : fi.glow )
+			e.area = e.area > 0.0 ? std::min( e.area, 1.5 * cs * cs ) : 0.5 * cs * cs;
+		fi.coarseVoxel = v;
+		fi.radius = rad;
+		for ( int c = 0; c < 3; c++ )
+			fi.coarseDims[c] = dims[c];
+		fi.rooms = R.roomsOn ? &R.rooms : nullptr;
+		fi.blocked = [&]( const double p[3], const double q[3] ) { return blocked( p, q, 0.0 ); };
+		fi.red = spec.emissiveGridRed;
+		probeGiFineBuild( fi, &R.fine );
+		std::fprintf( stderr, "%s\n", qPrintable( probeGiFineCensusText( R.fine ) ) );
+	}
 
 	// the gate's copies
 	R.surfelOut.reserve( us.size() * 12 );
@@ -2201,6 +2327,11 @@ static void giVolumesInto( ProbeGiResult & r, WwCellGi & gi )
 
 void probeGiRoomsInto( ProbeGiResult & r, WwCellGi & gi )
 {
+	if ( r.fineOn && r.fine.boxes > 0 ) {	// lane EMISSIVEGRID1: the fine boxes ride the GI grid (both publish sites call here)
+		gi.fineBox = r.fine.box;	// copied: probesky's kept relight and the census still read the result
+		gi.fine = r.fine.data;
+		gi.fineLayers = r.fine.layers;
+	}
 	if ( !r.roomsOn || gi.rgba.empty() )
 		return;
 	gi.rgba.insert( gi.rgba.end(), r.grid2.begin(), r.grid2.end() );
@@ -2237,6 +2368,8 @@ QString probeGiCensusText( const ProbeGiResult & r )
 		+ ( r.skyLit ? QStringLiteral( "\n  gi sky floor: outdoor slots held at least at the sky their eye sees: looked at %1, "
 			"raised %2 (axes %3; %4)" ).arg( r.skyFloorSlots ).arg( r.skyFloorRaised ).arg( r.skyFloorAxes )
 			.arg( r.skyFloorNote.isEmpty() ? QStringLiteral( "off" ) : r.skyFloorNote ) : QString() )   // lane GIDARK1
+		+ ( r.edgeRaysNote.isEmpty() ? QString() : QStringLiteral( "\n  gi %1; edge + floor ms %2" ).arg( r.edgeRaysNote )
+			.arg( r.msEdgeRays, 0, 'f', 0 ) )   // lane RTBAKE1
 		+ QStringLiteral( "\n  " ) + ( r.roomsOn ? probeRoomsCensusText( r.rooms )
 			+ QStringLiteral( "\n  gi rooms: voxels with a second room %1 (left empty %2), slots gathered from their eye "
 				"(the centre in another room) %3, probes in no room %4" ).arg( r.voxelsTwoRooms ).arg( r.voxelsTwoBare )
@@ -2254,7 +2387,8 @@ QString probeGiCensusText( const ProbeGiResult & r )
 			.arg( 100.0 * r.brickP95, 0, 'f', 2 ).arg( r.bricksGather ? QStringLiteral( "the BRICKS" ) : QStringLiteral( "their links" ) )
 			.arg( r.msBricks, 0, 'f', 0 )
 		+ ( r.surfelsEmit ? QStringLiteral( "\n  gi emissive: %1 of %2 surfels glow (their Le added once to B)" )
-			.arg( r.surfelsEmit ).arg( r.surfels ) : QString() );   // lane EMISSIVEGI1
+			.arg( r.surfelsEmit ).arg( r.surfels ) : QString() )   // lane EMISSIVEGI1
+		+ ( r.fineOn ? QStringLiteral( "\n  " ) + probeGiFineCensusText( r.fine ) : QString() );   // lane EMISSIVEGRID1
 }
 
 /* The dump (little-endian):

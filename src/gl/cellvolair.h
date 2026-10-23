@@ -9,6 +9,8 @@ BSD License - see nifskope.h
 
 #include <QString>
 
+#include <functional>
+
 class Scene;
 
 /*! VOLUMETRIC AIR (lane VOLAIR1, absorbs lane VOLFOG1's lit fog): ONE participating medium, "air", that both hides
@@ -52,7 +54,11 @@ class Scene;
  *               Continuous at farD; a mountain top (thinner air above the band) hazes less than its foot.
  *  The surfaces' sun (FOGSUN1): the directional light on every lit surface outdoors x the air's transmittance up the
  *  sun ray, exp(-sigma0 x col(z, top) / max(mu, 0.02)), mu = the sun's height (lookdev_fog.glsl wwVolAirSunT).
- *  DEVIATION: no temporal history (NifSkope redraws on demand); the 4 stratified sub-steps stand in for it.
+ *  Temporal reuse (lane PERF2, as shipped games reuse past fog frames; test only until bungo sees it:
+ *  WW_CELL_VOLAIR_TEMPORAL=1, WW_CELL_VOLAIR_TEMPORAL_RED=1 the 4 sub-steps): one of the four strata a frame is fresh
+ *  (its sun and placed-light samples), the other three are the history reprojected to the froxel's centre last frame;
+ *  the medium, GI and ambient exact every frame. A froxel missing history takes all four; a still camera holds the
+ *  4-sub-step sum after 4 frames, and an interactive window paints until it does.
  *  Cost (coordinator 10-14), both on by default, the picture unchanged: clustered lights (per 8 x 8 columns x 8
  *  slices the lights whose sphere can reach one of its froxel points, ascending: the inject walks that list, not every
  *  light) and the conservative depth skip (stage 0: per column the farthest opaque ray distance from lane AO1's
@@ -81,6 +87,8 @@ void wwVolAirUniforms( Scene * scene );
 void wwVolAirSkyDraw( Scene * scene, bool probes );
 //! the row (ships off); the pin WW_CELL_AIR wins
 bool wwVolAirOn();
+//! lane PERF2: true while the temporal air owes a still window paints (never in a harness)
+bool wwVolAirWantsSettle();
 void wwVolAirSetOn( bool on );
 /*! lane FARGRID1: THE FAR GRID (the row "Far Air" under Volumetric Air: Off / Low / Medium / High / Ultra, ships Off,
  *  QSettings WW/VolAirFar; the pin WW_CELL_AIR_FAR=0..4 wins). Outdoors, the near grid then ends at 250 m (17,578 units)
@@ -96,7 +104,54 @@ void wwVolAirSetOn( bool on );
  *  end), farjitter (a per-frame slice offset). Echo: far=on(tier ... gpums ... volmb ...) in the air's census. */
 int wwVolAirFarTier();
 void wwVolAirSetFarTier( int tier );
+/*! lane FOGDRIFT1: DRIFTING FOG (bungo 10-22, after RDR2). The near grid's density x a tileable 64^3 noise (two
+ *  octaves, tiles 4096 and 1843 units) that the weather's wind (WTHR DATA speed, direction; range and turbulence wobble
+ *  it) carries along; no wind = still lumps. The factor keeps the mean density (1 + a (n - mean) / span) and fades to 1
+ *  from 2000 to 8000 units; the far grid and the tail stay smooth. Every in-scatter term (sun, sky, GI, the placed
+ *  lights) scatters by the same noisy sub-step, so a lamp's glow brightens and dims as the lumps pass. Exteriors drift;
+ *  an interior only when it shows the sky; a sealed one is drawn exactly as with the row off.
+ *  The row "Fog Drift" under Volumetric Air ships OFF (QSettings WW/VolAirDrift; the pin WW_CELL_FOGDRIFT=0|1 wins).
+ *  WW_CELL_FOGDRIFT_RED=still (no motion) | smooth (no noise); WW_CELL_FOGDRIFT_T=<s> pins the clock (shots' frames;
+ *  a harness pins t = 0). Echo: drift=on(wind dir range turb speed t) in the air's census; the dump's "drift" line. */
+bool wwVolAirDriftOn();
+void wwVolAirSetDriftOn( bool on );
+//! the view repaints while the fog drifts (never in a harness or with the clock pinned)
+bool wwVolAirWantsRepaint();
 //! census echo: "volair=on(...)" or why none was drawn
 QString wwVolAirSummary();
+
+/*! VOLUMETRIC PARTICLES (lane VOLPART1): a particle system the cell lights (steam, smoke, fog puffs) is a little
+ *  piece of the air. In particles_cell.prog (res/shaders/particles.frag, the law written out there):
+ *    lit    DIRECTLY per pixel at the sprite's own point from the very list the air reads (the directional light x its
+ *           cascade shadow, every placed light x its cone x its shadow cube x the air's transmittance to it, the GI
+ *           and the ambient as six-axis cubes): thin = the air's phase (per unit opacity the air's own J), thick = a
+ *           wrapped diffuse at the puff's normal (its normal map turned by the sprite's rotation, else a sphere);
+ *           alpha as thickness: single-scatter share 1 - a, wrap 1 - a. Never lit from the integrated volume.
+ *    seen   through the INTEGRATED froxel volume between it and the eye (colour x T + L, as every surface), so steam
+ *           and air fade alike (the game's fog as before while the air is off)
+ *    soft   a ball round the sprite's plane against the opaque pass's depth: no hard line where it meets a surface
+ *  The row "Volumetric Particles" (Scene window) ships OFF (QSettings WW/VolPart); the pin WW_CELL_VOLPART=0|1 wins.
+ *  Off, the particles draw exactly as before. Gates only: WW_CELL_VOLPART_RED=flat | nothick | nosoft | nolights |
+ *  white | nofog | noshadow | noedge |
+ *  nophase | nonear (comma list), WW_CELL_VOLPART_DUMP=<file> (each lit system's per-particle probe, appended:
+ *  glparticles.cpp), WW_CELL_VOLPART_HIDE=1 (no particle or volumetric card
+ *  drawn: the gates' plate). */
+bool wwVolPartOn();
+void wwVolPartSetOn( bool on );
+int wwVolPartRed();
+//! the uniforms of the renderer's CURRENT program (particles_cell.prog); true while on
+bool wwVolPartUniforms( Scene * scene );
+QString wwVolPartSummary();
+//! the effect card the renderer just set up (fo4_effectcell.prog, read by BSShape's draw): 0 not volumetric, else
+//! 1 a volumetric lit card | 2 its soft fade is on (drawn with no depth test: the fade is the occlusion)
+void wwVolPartFxSet( int flags );
+int wwVolPartFx();
+//! gates only: WW_CELL_VOLPART_HIDE=1, no volumetric particle or card drawn (the plate)
+bool wwVolPartHidden();
+//! gates only (WW_CELL_VOLPART_DUMP): a volumetric effect card's probe, drawn again by draw() with the CURRENT
+//! program (fo4_effectcell.prog); appended to the dump as system "fx:<name>"
+void wwVolPartFxDump( Scene * scene, const std::function<void()> & draw, int block, const QString & name );
+//! gates only: counts the air's pass calls (one a frame); the particle probe keeps the last frame's alone
+int wwVolAirFrameSerial();
 
 #endif

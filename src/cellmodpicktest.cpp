@@ -36,6 +36,7 @@ BSD License - see nifskope.h
  * --------------------------------------------------------------------------- */
 
 #include "cellmodpick.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellmodpickbox.h"
 #include "cellworkspace.h"
 #include "glview.h"
@@ -92,7 +93,7 @@ void writeReport( const QString & path )
 
 QString env( const char * name )
 {
-	return QString::fromLocal8Bit( qgetenv( name ) ).trimmed();
+	return QString::fromLocal8Bit( wwEnv( name ) ).trimmed();
 }
 
 //! The band as the user sees it: the whole Cell dock (the Mods band inside it), saved to `path`.
@@ -218,8 +219,8 @@ void stageOne( NifSkope * skope, const QString & report, bool * acted )
 	}
 	row( gone == goneNoted && goneTickable == 0, QStringLiteral( "gone files greyed with a note, never ticked" ),
 		QStringLiteral( "%1 gone, %2 noted, %3 took a tick" ).arg( gone ).arg( goneNoted ).arg( goneTickable ) );
-	if ( qgetenv( "WW_MODPICK_EXPECT_GONE" ).toInt() > 0 )
-		row( gone == qgetenv( "WW_MODPICK_EXPECT_GONE" ).toInt(), QStringLiteral( "gone rows = the files missing on disk" ),
+	if ( wwEnv( "WW_MODPICK_EXPECT_GONE" ).toInt() > 0 )
+		row( gone == wwEnv( "WW_MODPICK_EXPECT_GONE" ).toInt(), QStringLiteral( "gone rows = the files missing on disk" ),
 			QStringLiteral( "%1 vs %2" ).arg( gone ).arg( env( "WW_MODPICK_EXPECT_GONE" ) ) );
 	if ( !env( "WW_MODPICK_EXPECT_LIST" ).isEmpty() ) {
 		QFile f( env( "WW_MODPICK_EXPECT_LIST" ) );
@@ -400,7 +401,7 @@ void stageTwo( NifSkope * skope, const QString & report )
 
 void wwCellModPickHarness( NifSkope * skope )
 {
-	const QString report = QString::fromLocal8Bit( qgetenv( "WW_MODPICK_TEST" ) );
+	const QString report = QString::fromLocal8Bit( wwEnv( "WW_MODPICK_TEST" ) );
 	if ( report.isEmpty() || !skope )
 		return;
 	// a watchdog: a re-open that never completes still ends the run, with the report saying so
@@ -417,11 +418,11 @@ void wwCellModPickHarness( NifSkope * skope )
 			if ( now == 0 ) {
 				bool acted = false;
 				stageOne( skope, report, &acted );
-				if ( !acted && qgetenv( "WW_MODPICK_STAY" ).isEmpty() )
+				if ( !acted && wwEnv( "WW_MODPICK_STAY" ).isEmpty() )
 					QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
 			} else if ( now == 1 ) {
 				stageTwo( skope, report );
-				if ( qgetenv( "WW_MODPICK_STAY" ).isEmpty() )
+				if ( wwEnv( "WW_MODPICK_STAY" ).isEmpty() )
 					QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
 			}
 		} );

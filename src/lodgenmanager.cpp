@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodbfile.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "lodgen.h"
 #include "lodgenchunkpass.h"
 #include "lodgengpu.h"
@@ -1906,9 +1907,9 @@ public:
 					"run bakes everything again and says why. One chunk size at a time. A model\n"
 					"or texture edited while NifSkope stays open is seen after a restart.\n"
 					"Command line: --incremental" ) );
-			if ( qEnvironmentVariableIsSet( "WW_LODGEN_INCREMENTAL" ) )
+			if ( wwEnvIsSet( "WW_LODGEN_INCREMENTAL" ) )
 				if ( auto * c = qobject_cast<QCheckBox *>( extras.value( QStringLiteral( "incremental" ) ).field ) )
-					c->setChecked( qEnvironmentVariableIntValue( "WW_LODGEN_INCREMENTAL" ) != 0 );
+					c->setChecked( wwEnvInt( "WW_LODGEN_INCREMENTAL" ) != 0 );
 			layout->addLayout( f.g );
 		}
 

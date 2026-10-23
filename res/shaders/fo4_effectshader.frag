@@ -49,7 +49,15 @@ flat in vec4 D;
 in mat3 btnMatrix;
 flat in mat3 reflMatrix;
 
+#ifdef WW_FXRES
+// lane FXRES1 (fo4_effectcellfx.frag, src/gl/cellfxres.h): the soft-effect layer's other two targets, blended by the
+// draw's own factors: the transmittance (0 colour, the draw's alpha, over 1) and the coverage (1, as the stencil)
+layout ( location = 0 ) out vec4 fragColor;
+layout ( location = 1 ) out vec4 fxResT;
+layout ( location = 2 ) out vec4 fxResCov;
+#else
 out vec4 fragColor;
+#endif
 
 #ifdef WW_CELLLIGHTS
 /* lane EFX2 (fo4_effectcell.frag; src/gl/celllights.h wwCellFxRed): the game's effect pixel shader in the
@@ -221,12 +229,42 @@ vec3 fxRoomLitMul( vec3 Pv, vec3 normal )
 	return mix( vec3( 1.0 ), E, lightingInfluence );
 }
 #endif
+
+/* lane VOLPART1: a lit effect card (the street steam) as a piece of the air, as the volumetric particles
+ * (cell_volpart.glsl): lit at its own point from the air's light list with its normal (the normal map, else the
+ * card's own) and its alpha as thickness, seen through the integrated air, and soft: the card is a slab of
+ * half-depth h round its plane (h = fxSoftDepth: its soft depth when the material sets one, else the row's card depth), and
+ * its opacity is the share of the slab in front of the scene. It draws with no depth test (the fade is the
+ * occlusion: a surface h in front of the card takes it all), so no hard line where a card meets the ground or a wall. */
+#include "cell_volpart.glsl"
+
+uniform vec2 vpDumpScale;		// gates only: the full-size pixels a quarter-size dump pixel stands for (0 off)
+
+// the soft slab's inputs: (the scene's view depth, the card's, the half-depth h) in view units
+vec3 vpCardSlab()
+{
+	ivec2 px = vpDumpScale.x > 0.0 ? ivec2( gl_FragCoord.xy * vpDumpScale ) : ivec2( gl_FragCoord.xy ) - viewportDimensions.xy;
+	float d = texelFetch( fxDepth, px, 0 ).r;
+	float sceneW = projectionMatrix[3][2] / ( projectionMatrix[2][2] + ( 2.0 * d - 1.0 ) );
+	return vec3( sceneW, 1.0 / gl_FragCoord.w, max( fxSoftDepth, 1.0 ) / max( fxDistScale, 1e-6 ) );
+}
+
+float vpCardSoft()
+{
+	if ( !fxSoft || ( volPartRed & 4 ) != 0 )
+		return 1.0;
+	vec3 s = vpCardSlab();
+	return clamp( ( s.x - ( s.y - s.z ) ) / ( 2.0 * s.z ), 0.0, 1.0 );
+}
 #endif
 
 vec3 ViewDir_norm = normalize( ViewDir );
 mat3 btnMatrix_norm = mat3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
 
 
+#ifdef WW_FXRES
+#define main wwFxResMain
+#endif
 void main()
 {
 #ifdef WW_CELLLIGHTS
@@ -286,8 +324,23 @@ void main()
 	color.a *= alphaMult;
 
 #ifdef WW_CELLLIGHTS
+	/* lane VOLPART1: a volumetric lit card is a fake volume (cell_volpart.glsl): its opacity from the path through a
+	 * ball of its size (the puff, the thickness its light reads), x the edge-on fade at its face normal x the near fade */
+	vec4 vpVol = vec4( 1.0, 1.0, 1.0, color.a );	// edge, near, the puff's opacity, a0
+	vec3 vpFaceN = vec3( 0.0, 0.0, 1.0 );
+	if ( cellOn && volPart != 0 ) {
+		vec3 pv = -ViewDir;
+		vpFaceN = normalize( cross( dFdx( pv ), dFdy( pv ) ) );
+		if ( dot( vpFaceN, ViewDir_norm ) < 0.0 )
+			vpFaceN = -vpFaceN;
+		vpVol.x = vpEdgeFade( abs( dot( vpFaceN, ViewDir_norm ) ) );
+		vpVol.y = vpNearFade( -pv.z * fxDistScale );
+		vpVol.z = vpPuffAlpha( color.a, clamp( texCoord.st, 0.0, 1.0 ) * 2.0 - 1.0 );
+		if ( !greyscaleAlpha )
+			color.a = vpVol.z * vpVol.x * vpVol.y;
+	}
 	// lane EFX2: the Soft fades scale alpha, or a palette's row (the game's PS multiplies its palette coordinates)
-	float fxFade = cellOn ? cellFxFade() : 1.0;
+	float fxFade = cellOn ? ( volPart != 0 ? vpCardSoft() : cellFxFade() ) : 1.0;
 	if ( !greyscaleAlpha )
 		color.a *= fxFade;
 #define WW_FX_FADE * fxFade
@@ -408,8 +461,42 @@ void main()
 				fragColor = vec4( cellProbe == 70 ? fxLitId : high ? floor( q / 256.0 ) / 255.0 : mod( q, 256.0 ) / 255.0, 1.0 );
 				return;
 			}
-			lin *= m;
+			if ( volPart == 0 )
+				lin *= m;
 		}
+		if ( volPart != 0 ) {
+			// lane VOLPART1: lit at its own point, seen through the integrated air (cell_volpart.glsl)
+			vec3 posView = -ViewDir;
+			float aThick = greyscaleAlpha ? color.a : vpVol.z;	// the puff's opacity is its thickness; the fades are coverage
+			if ( volPartDump >= 100 ) {	// gates only: probe slot volPartDump - 100 at every pixel, raw
+				int k = volPartDump - 100;
+				vec3 dW = cellWorldDir( posView ), Nw = cellWorldDir( vpFaceN );
+				if ( k == 8 )	// the card volume: |N.V| at the face, edge fade, near fade, depth (game units)
+					fragColor = vec4( abs( dot( vpFaceN, ViewDir_norm ) ), vpVol.x, vpVol.y, -posView.z * fxDistScale );
+				else if ( k == 9 )	// the puff: q, a0, its opacity
+					fragColor = vec4( clamp( texCoord.st, 0.0, 1.0 ) * 2.0 - 1.0, vpVol.w, vpVol.z );
+				else if ( k == 10 )	// one white light at the eye's side (to = -dW), its N.to in w
+					fragColor = vec4( vpOneLight( dW, Nw, -dW, aThick ), dot( Nw, -dW ) );
+				else if ( k == 11 )	// the same light behind the card (to = dW); w: the coverage drawn (alpha)
+					fragColor = vec4( vpOneLight( dW, Nw, dW, aThick ), color.a );
+				else if ( k == 12 )	// the soft slab: scene depth, card depth, h (game units), the fade drawn
+					fragColor = vec4( vpCardSlab() * fxDistScale, fxFade );
+				else
+					fragColor = vpProbe( k, posView, aThick );
+				return;
+			}
+			if ( fxLitMode != 0 )
+				lin *= fxAdditive ? cellFxLit( cellWorldPos( posView ) ) : vpLit( posView, dot( normal, V ) < 0.0 ? -normal : normal, aThick );
+		}
+		// the landed air (wwFogFx, as the surfaces take it); VOLPART1 red nofog: the game's fog alone
+		if ( volPart != 0 && ( volPartRed & 32 ) != 0 ) {
+			if ( fogOn ) {
+				float hb;
+				vec3 fc;
+				float f = wwFogEval( length( ViewDir ) * fogDistScale, dot( fogView.xyz, -ViewDir ) + fogView.w, hb, fc );
+				lin = fxAdditive ? lin * ( 1.0 - f ) : mix( lin, fc, f );
+			}
+		} else
 		lin = wwFogFx( lin, -ViewDir, fxAdditive );	// lane VOLAIR1: the air, as the surfaces take it (red fxfog: the game's fog alone)
 		// probe 6 (the imagespace's measure): the linear value, blended as drawn
 		if ( cellProbe == 6 )
@@ -422,3 +509,13 @@ void main()
 #endif
 	fragColor = vec4( color.rgb * sqrt(D.a), color.a );
 }
+
+#ifdef WW_FXRES
+#undef main
+void main()
+{
+	wwFxResMain();
+	fxResT = vec4( 0.0, 0.0, 0.0, fragColor.a );
+	fxResCov = vec4( 1.0 );
+}
+#endif

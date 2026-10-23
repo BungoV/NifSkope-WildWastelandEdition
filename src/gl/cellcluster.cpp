@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellcluster.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <algorithm>
 #include <chrono>
@@ -78,10 +79,7 @@ struct Box
 };
 
 // The tests run in float: the pads above dwarf its rounding.
-struct FBox
-{
-	float lo[3], hi[3], c[3], rad;  // corners, centre and bounding radius
-};
+using FBox = WwClusterBox;
 
 struct FLight
 {
@@ -129,7 +127,7 @@ bool touches( const FLight & l, const FBox & b )
 
 // The tiles the part of a sphere inside the depth slab [dLo, dHi] can cover; false when it covers none.
 bool screenRect( const Proj & P, const WwClusterGrid & g, const double pos[3], double r, double dLo, double dHi,
-	const int vp[4], int & tx0, int & tx1, int & ty0, int & ty1 )
+	const int vp[4], double padPx, int & tx0, int & tx1, int & ty0, int & ty1 )
 {
 	tx0 = 0, tx1 = g.tilesX - 1, ty0 = 0, ty1 = g.tilesY - 1;
 	const double zc = -pos[2];
@@ -148,7 +146,7 @@ bool screenRect( const Proj & P, const WwClusterGrid & g, const double pos[3], d
 		lo[0] = std::min( lo[0], nx ), hi[0] = std::max( hi[0], nx );
 		lo[1] = std::min( lo[1], ny ), hi[1] = std::max( hi[1], ny );
 	}
-	const double px = 2.0 * kPadPx / vp[2], py = 2.0 * kPadPx / vp[3];
+	const double px = 2.0 * padPx / vp[2], py = 2.0 * padPx / vp[3];
 	if ( hi[0] + px < -1.0 || lo[0] - px > 1.0 || hi[1] + py < -1.0 || lo[1] - py > 1.0 )
 		return false;
 	auto tile = [&]( double ndc, double size, int n ) {
@@ -172,7 +170,7 @@ int WwClusterGrid::clusterOf( float fx, float fy, float depth ) const
 }
 
 bool wwClusterBuild( const float proj[16], const int vp[4], const std::vector<WwClusterLight> & lights,
-	const WwClusterParams & params, WwClusterGrid & out )
+	const WwClusterParams & params, WwClusterGrid & out, WwClusterScratch * scratch )
 {
 	const auto t0 = std::chrono::steady_clock::now();
 	out = WwClusterGrid();
@@ -188,56 +186,74 @@ bool wwClusterBuild( const float proj[16], const int vp[4], const std::vector<Ww
 	g.logNear = float( std::log( P.nearZ ) );
 	g.sliceScale = float( double( g.slices ) / std::log( P.farZ / P.nearZ ) );
 
-	// slice k covers depth near * (far / near)^(k / S) .. ^((k + 1) / S); the end slices take everything beyond
-	std::vector<double> sliceLo( size_t( g.slices ) ), sliceHi( size_t( g.slices ) );
-	for ( int k = 0; k < g.slices; k++ ) {
-		const double a = P.nearZ * std::pow( P.farZ / P.nearZ, double( k ) / g.slices );
-		const double b = P.nearZ * std::pow( P.farZ / P.nearZ, double( k + 1 ) / g.slices );
-		sliceLo[size_t( k )] = a * ( 1.0 - kPadDepth );
-		sliceHi[size_t( k )] = b * ( 1.0 + kPadDepth );
-		if ( params.redMidSlice )
-			sliceLo[size_t( k )] = sliceHi[size_t( k )] = 0.5 * ( a + b );
-	}
-	if ( !params.redMidSlice ) {
-		sliceLo[0] = P.ortho ? -1e30 : 0.0;
-		sliceHi[size_t( g.slices - 1 )] = 1e30;
-	}
-	auto ndcX = [&]( double px ) { return 2.0 * px / double( vp[2] ) - 1.0; };
-	auto ndcY = [&]( double py ) { return 2.0 * py / double( vp[3] ) - 1.0; };
-	auto clusterBox = [&]( int tx, int ty, int sz ) {
-		const double nx[2] = { ndcX( tx * g.tilePx - kPadPx ), ndcX( ( tx + 1 ) * g.tilePx + kPadPx ) };
-		const double ny[2] = { ndcY( ty * g.tilePx - kPadPx ), ndcY( ( ty + 1 ) * g.tilePx + kPadPx ) };
-		const double d[2] = { sliceLo[size_t( sz )], sliceHi[size_t( sz )] };
-		Box b = { { 1e300, 1e300, 1e300 }, { -1e300, -1e300, -1e300 } };
-		for ( double dd : d )
-			for ( double xx : nx )
-				for ( double yy : ny ) {
-					double v[3];
-					P.unproject( xx, yy, dd, v[0], v[1] );
-					v[2] = -dd;
-					for ( int k = 0; k < 3; k++ ) {
-						b.lo[k] = std::min( b.lo[k], v[k] );
-						b.hi[k] = std::max( b.hi[k], v[k] );
+	const double padPx = kPadPx + std::max( params.jitterPadPx, 0.0 );
+	WwClusterScratch local;
+	WwClusterScratch & sc = scratch ? *scratch : local;
+	const bool same = !sc.boxes.empty() && std::equal( proj, proj + 16, sc.proj ) && std::equal( vp, vp + 4, sc.vp )
+		&& sc.tilePx == g.tilePx && sc.slices == g.slices && sc.padPx == padPx && sc.redMidSlice == params.redMidSlice;
+	if ( same ) {
+		sc.hits++;
+	} else {
+		sc.misses++;
+		std::copy( proj, proj + 16, sc.proj );
+		std::copy( vp, vp + 4, sc.vp );
+		sc.tilePx = g.tilePx, sc.slices = g.slices, sc.padPx = padPx, sc.redMidSlice = params.redMidSlice;
+		std::vector<double> & sliceLo = sc.sliceLo, & sliceHi = sc.sliceHi;
+		sliceLo.assign( size_t( g.slices ), 0.0 );
+		sliceHi.assign( size_t( g.slices ), 0.0 );
+		// slice k covers depth near * (far / near)^(k / S) .. ^((k + 1) / S); the end slices take everything beyond
+		for ( int k = 0; k < g.slices; k++ ) {
+			const double a = P.nearZ * std::pow( P.farZ / P.nearZ, double( k ) / g.slices );
+			const double b = P.nearZ * std::pow( P.farZ / P.nearZ, double( k + 1 ) / g.slices );
+			sliceLo[size_t( k )] = a * ( 1.0 - kPadDepth );
+			sliceHi[size_t( k )] = b * ( 1.0 + kPadDepth );
+			if ( params.redMidSlice )
+				sliceLo[size_t( k )] = sliceHi[size_t( k )] = 0.5 * ( a + b );
+		}
+		if ( !params.redMidSlice ) {
+			sliceLo[0] = P.ortho ? -1e30 : 0.0;
+			sliceHi[size_t( g.slices - 1 )] = 1e30;
+		}
+		auto ndcX = [&]( double px ) { return 2.0 * px / double( vp[2] ) - 1.0; };
+		auto ndcY = [&]( double py ) { return 2.0 * py / double( vp[3] ) - 1.0; };
+		auto clusterBox = [&]( int tx, int ty, int sz ) {
+			const double nx[2] = { ndcX( tx * g.tilePx - padPx ), ndcX( ( tx + 1 ) * g.tilePx + padPx ) };
+			const double ny[2] = { ndcY( ty * g.tilePx - padPx ), ndcY( ( ty + 1 ) * g.tilePx + padPx ) };
+			const double d[2] = { sliceLo[size_t( sz )], sliceHi[size_t( sz )] };
+			Box b = { { 1e300, 1e300, 1e300 }, { -1e300, -1e300, -1e300 } };
+			for ( double dd : d )
+				for ( double xx : nx )
+					for ( double yy : ny ) {
+						double v[3];
+						P.unproject( xx, yy, dd, v[0], v[1] );
+						v[2] = -dd;
+						for ( int k = 0; k < 3; k++ ) {
+							b.lo[k] = std::min( b.lo[k], v[k] );
+							b.hi[k] = std::max( b.hi[k], v[k] );
+						}
 					}
+			return b;
+		};
+		std::vector<FBox> & boxes = sc.boxes;
+		boxes.assign( size_t( g.clusterCount() ), FBox() );
+		for ( int sz = 0; sz < g.slices; sz++ )
+			for ( int ty = 0; ty < g.tilesY; ty++ )
+				for ( int tx = 0; tx < g.tilesX; tx++ ) {
+					const Box b = clusterBox( tx, ty, sz );
+					FBox & f = boxes[size_t( ( sz * g.tilesY + ty ) * g.tilesX + tx )];
+					double rad2 = 0.0;
+					for ( int k = 0; k < 3; k++ ) {
+						// float rounding of the corners goes outward
+						f.lo[k] = std::nextafter( float( b.lo[k] ), -HUGE_VALF );
+						f.hi[k] = std::nextafter( float( b.hi[k] ), HUGE_VALF );
+						f.c[k] = float( 0.5 * ( b.lo[k] + b.hi[k] ) );
+						rad2 += 0.25 * ( b.hi[k] - b.lo[k] ) * ( b.hi[k] - b.lo[k] );
+					}
+					f.rad = float( std::sqrt( rad2 ) * ( 1.0 + kPadRadius ) );
 				}
-		return b;
-	};
-	std::vector<FBox> boxes( size_t( g.clusterCount() ) );
-	for ( int sz = 0; sz < g.slices; sz++ )
-		for ( int ty = 0; ty < g.tilesY; ty++ )
-			for ( int tx = 0; tx < g.tilesX; tx++ ) {
-				const Box b = clusterBox( tx, ty, sz );
-				FBox & f = boxes[size_t( ( sz * g.tilesY + ty ) * g.tilesX + tx )];
-				double rad2 = 0.0;
-				for ( int k = 0; k < 3; k++ ) {
-					// float rounding of the corners goes outward
-					f.lo[k] = std::nextafter( float( b.lo[k] ), -HUGE_VALF );
-					f.hi[k] = std::nextafter( float( b.hi[k] ), HUGE_VALF );
-					f.c[k] = float( 0.5 * ( b.lo[k] + b.hi[k] ) );
-					rad2 += 0.25 * ( b.hi[k] - b.lo[k] ) * ( b.hi[k] - b.lo[k] );
-				}
-				f.rad = float( std::sqrt( rad2 ) * ( 1.0 + kPadRadius ) );
-			}
+	}
+	const std::vector<double> & sliceLo = sc.sliceLo, & sliceHi = sc.sliceHi;
+	const std::vector<FBox> & boxes = sc.boxes;
 	auto sliceOf = [&]( double depth ) {
 		const double s = std::floor( ( std::log( std::max( depth, 1e-30 ) ) - std::log( P.nearZ ) ) * g.slices
 			/ std::log( P.farZ / P.nearZ ) );
@@ -251,7 +267,7 @@ bool wwClusterBuild( const float proj[16], const int vp[4], const std::vector<Ww
 		std::vector<std::int32_t> cluster, light;
 		int offscreen = 0;
 	};
-	const int threads = lights.size() < 128 || std::getenv( "WW_CELL_CLUSTER_THREADS1" ) ? 1
+	const int threads = lights.size() < 128 || wwEnvIsSet( "WW_CELL_CLUSTER_THREADS1" ) ? 1
 		: int( std::clamp( std::thread::hardware_concurrency(), 1u, 8u ) );
 	std::vector<Chunk> chunks( static_cast<size_t>( threads ) );
 	auto work = [&]( int t ) {
@@ -285,7 +301,7 @@ bool wwClusterBuild( const float proj[16], const int vp[4], const std::vector<Ww
 			bool any = false;
 			for ( int sz = s0; sz <= s1; sz++ ) {
 				int tx0, tx1, ty0, ty1;
-				if ( !screenRect( P, g, l.pos, r, sliceLo[size_t( sz )], sliceHi[size_t( sz )], vp, tx0, tx1, ty0, ty1 ) )
+				if ( !screenRect( P, g, l.pos, r, sliceLo[size_t( sz )], sliceHi[size_t( sz )], vp, padPx, tx0, tx1, ty0, ty1 ) )
 					continue;
 				any = true;
 				for ( int ty = ty0; ty <= ty1; ty++ ) {

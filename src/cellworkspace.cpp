@@ -20,13 +20,16 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "gl/cellcull.h"	// lane SUNCELL1: the Culling row
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
+#include "gl/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
 #include "gl/cellssgi.h"	// lane SSGI1
+#include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/cellwater.h"	// lane CELLALL1: the Water row
 #include "cellaodecal.h"	// lane CELLALL1: the AO decals row
 #include "gl/gametaa.h"
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellpost.h"	// lane GRASSMB1
 #include "gl/cellbloom.h"	// lane BLOOM1b
+#include "gl/cellfogbloom.h"
 #include "ui/widgets/wwnumberfield.h"	// lane BLOOM1b: the Bloom rows
 
 #include <QAction>
@@ -527,15 +530,36 @@ void CellWorkspacePanel::buildUi()
 	}
 	cellPass->setEnabled( false );
 	cellShadow = tick( showMenu, tr( "Light shadows" ), "CellWorkspaceLightShadows", wwCellShadowOn() );
+	cellFlicker = tick( showMenu, tr( "Light flicker" ), "CellWorkspaceLightFlicker", wwCellFlickerOn() );
+	// lane LAMPSHADOW1: stored lamp shadows, ships Off; the tier is the face size (Medium = the cube pass's own)
+	cellLampShadow = showMenu->addMenu( tr( "Lamp shadows" ) );
+	cellLampShadow->setObjectName( QStringLiteral( "CellWorkspaceLampShadows" ) );
+	cellLampShadowGroup = new QActionGroup( cellLampShadow );
+	cellLampShadowGroup->setExclusive( true );
+	{
+		const QStringList names = { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = cellLampShadow->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k - 1 );
+			a->setChecked( k - 1 == wwCellLampShadowTier() );
+			cellLampShadowGroup->addAction( a );
+		}
+	}
+	cellLampShadow->setEnabled( !wwCellLampShadowPinned() );
 	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
 	cellAoDecal = tick( showMenu, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
+	cellSpecOcc = tick( showMenu, tr( "Sky specular occlusion" ), "CellWorkspaceSkySpecOcc", wwCellSpecOccOn() );	// lane SPECOCC1
+	cellSpecOcc->setEnabled( !wwCellSpecOccPinned() );
 	cellGiGpu = tick( showMenu, tr( "GPU relight" ), "CellWorkspaceGpuRelight", wwCellGiGpuOn() );
+	cellEmissiveGrid = tick( showMenu, tr( "Emissive GI grid" ), "CellWorkspaceEmissiveGiGrid", wwCellEmissiveGridOn() );	// lane EMISSIVEGRID1
 	section( tr( "Effects" ), "effects" );
 	cellIs = tick( showMenu, tr( "Imagespace" ), "CellWorkspaceCellImageSpace", wwCellImageSpaceOn() );
 	// lane MOTION1: the game's temporal AA, the same state as the Scene popup's Temporal AA row; ships off
 	cellTaa = tick( showMenu, tr( "Temporal AA" ), "CellWorkspaceTemporalAa", wwGameTaaOn() );
 	cellSsr = tick( showMenu, tr( "SSR" ), "CellWorkspaceSsr", wwCellSsrOn() );
 	cellSsrExt = tick( showMenu, tr( "SSR outdoors" ), "CellWorkspaceSsrOutdoors", wwCellSsrExteriorOn() );
+	cellReflProbe = tick( showMenu, tr( "Reflection probes" ), "CellWorkspaceReflProbe", wwCellReflProbeOn() );	// lane REFLPROBE1
 	// lane SSGI1: the screen-space bounce, ships off; its quality is FO4CS's four tiers
 	cellSsgi = tick( showMenu, tr( "SSGI" ), "CellWorkspaceSsgi", wwCellSsgiOn() );
 	cellSsgi->setEnabled( !wwCellSsgiPinned() );
@@ -578,6 +602,18 @@ void CellWorkspacePanel::buildUi()
 			a->setEnabled( !wwCellBloomPinned( "mode" ) );
 			cellBloomGroup->addAction( a );
 		}
+		// lane FOGBLOOM1: the bloom each pixel takes rises with the fog along its view ray (gl/cellfogbloom.h; ships off)
+		QAction * fogBloom = cellBloom->addAction( tr( "Fog bloom" ) );
+		fogBloom->setObjectName( QStringLiteral( "CellWorkspaceBloomFog" ) );
+		fogBloom->setCheckable( true );
+		fogBloom->setChecked( wwCellFogBloomOn() );
+		fogBloom->setEnabled( !wwCellFogBloomPinned() );
+		fogBloom->setToolTip( tr( "Glow spreads stronger through fog and from glowing glass and effects; none in clear air" ) );
+		connect( fogBloom, &QAction::toggled, this, [this]( bool on ) {
+			wwCellFogBloomSetOn( on );
+			if ( glView )
+				glView->update();
+		} );
 		// one label | field grid per block, one label width for both so the value edge is one line
 		struct Row { const char * id; const char * name; QString label; QString tip; double lo, hi, step; int dec; QString prefix; };
 		auto grid = [this]( const char * name, const QList<Row> & rows, QList<QWidget *> & out ) {
@@ -762,9 +798,17 @@ void CellWorkspacePanel::buildUi()
 	};
 	fxLive( cellAo, &wwCellAoSetOn );
 	fxLive( cellShadow, &wwCellShadowSetOn );
+	fxLive( cellFlicker, &wwCellFlickerSetOn );
 	fxLive( cellSsr, &wwCellSsrSetOn );
 	fxLive( cellSsrExt, &wwCellSsrExteriorSetOn );
+	fxLive( cellReflProbe, &wwCellReflProbeSetOn );
 	fxLive( cellSsgi, &wwCellSsgiSetOn );
+	fxLive( cellSpecOcc, &wwCellSpecOccSetOn );	// lane SPECOCC1: the GI texture re-uploads with or without the sky grid
+	connect( cellLampShadowGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		wwCellLampShadowSetTier( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
 	connect( cellSsgiQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwCellSsgiSetQuality( a->data().toInt() );
 		if ( glView )
@@ -783,6 +827,7 @@ void CellWorkspacePanel::buildUi()
 	};
 	fxReopen( cellAoDecal, &aoDecalSetOn );
 	fxReopen( cellGiGpu, &wwCellGiGpuSetOn );
+	fxReopen( cellEmissiveGrid, &wwCellEmissiveGridSetOn );	// lane EMISSIVEGRID1: built when the cell opens
 	fxReopen( cellParticles, &wwCellParticlesSetOn );	// lane SUNCELL1: the systems are copied in when the cell opens
 	connect( cellCull, &QAction::toggled, this, [this]( bool on ) {
 		wwCellCullSetOn( on );

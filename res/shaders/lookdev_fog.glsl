@@ -9,6 +9,7 @@
 // direction, the Sunlight row, intensity 1); the power is fDirectionalFogPower.
 // Needs: posView = the fragment's view-space position (game units x view scale).
 
+#define WW_LOOKDEV_FOG_GLSL 1	// lane SHADOWPAR1: ww_sunshadow.glsl's air-tail reader needs fogDistScale
 uniform bool fogOn;
 uniform vec4 fogK[6];		// cb12[41..46]
 uniform vec4 fogView;		// world z above the ground = dot( fogView.xyz, posView ) + fogView.w
@@ -119,6 +120,9 @@ float wwAirCol( float lo, float hi )
 
 // the records' haze colour at distance d, height z, view direction dirView (cell_volair.frag airEnvColour), unit luminance
 vec3 wwAirRecordColour( float d, float z, vec3 dirView, out bool ok );
+#ifdef WW_SUNSHADOW
+float wwAirTailShadow( vec3 dirView, float t0, float t1, float tau );	// ww_sunshadow.glsl (lane SHADOWPAR1)
+#endif
 
 /* lane FARGRID1: with the far grid on, one volume holds both grids: the near grid in layers 0..n-1 over its share of
  * the width and height, the far grid after it over its own share. (L, T) of one grid at slice coordinate f (0 at its
@@ -215,10 +219,9 @@ vec4 wwVolTex( vec3 p, bool xyOnly )
 	return g0.z * a + g1.z * b;
 }
 
-vec4 wwVolAirAt( vec3 posView )
+vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a particle's probe: its centre's)
 {
 	float d = length( posView ) * fogDistScale;
-	vec2 uv = ( gl_FragCoord.xy - volRect.xy ) * volRect.zw;
 	/* 10-16: no farther than the column's farthest opaque surface (the obscurance pass's depth). At a thin sliver's
 	 * edge the interpolated position can lie far past the depth the same fragment writes (a trim at 596 shaded as 763):
 	 * that read the froxels the depth skip had left empty, and an air no surface there sits behind. */
@@ -251,6 +254,9 @@ vec4 wwVolAirAt( vec3 posView )
 	float dz = z1 - z0;
 	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0 ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ) ) / abs( dz );
 	float Tt = exp( -tau );
+#ifdef WW_SUNSHADOW
+	J *= wwAirTailShadow( posView / max( length( posView ), 1e-12 ), far, d, tau );
+#endif
 	if ( ( volAirFlags & 4 ) != 0 ) {
 		vec3 dirV = posView / max( length( posView ), 1e-12 );
 		bool ok0, ok1;
@@ -260,6 +266,12 @@ vec4 wwVolAirAt( vec3 posView )
 			J *= c1 / max( c0, vec3( 1e-6 ) );
 	}
 	return vec4( v.rgb + v.a * J * ( 1.0 - Tt ), v.a * Tt );
+}
+
+// (L, T) of the air between the eye and posView, at this fragment's column
+vec4 wwVolAirAt( vec3 posView )
+{
+	return wwVolAirAtUv( posView, ( gl_FragCoord.xy - volRect.xy ) * volRect.zw );
 }
 
 /* (L, T) of the whole air along a sky ray (bungo 10-14: the far tower stood out against an unfogged sky). The sky is a

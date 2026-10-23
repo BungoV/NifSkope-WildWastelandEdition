@@ -1,6 +1,7 @@
 /* lane PLACED1: placed decals, projected on the CPU. See celldecal.h for the rule. */
 
 #include "celldecal.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmdata.h"
 #include "esmplaced.h"
@@ -372,7 +373,7 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 	/* RED CONTROL (WW_CELL_DECAL_RED): "none" draws no decal, "wide" doubles every
 	 * box's width and height, "axis" projects along the wrong local axis. Each one
 	 * breaks a different claim of tests/spells/cell_decal.sh. */
-	const QByteArray red = qgetenv( "WW_CELL_DECAL_RED" ).trimmed().toLower();
+	const QByteArray red = wwEnv( "WW_CELL_DECAL_RED" ).trimmed().toLower();
 	out.red = QString::fromLatin1( red );
 	const bool redNone = red == "none" || red == "1";
 	const bool redWide = red == "wide";

@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellview.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "probeincr.h"
 #include <QCryptographicHash>
 
@@ -18,6 +19,7 @@ BSD License - see nifskope.h
 #include "cellcable.h"		// lane CABLES1
 #include "celldecal.h"		// lane PLACED1
 #include "esmdata.h"
+#include "esmfile.hpp"		// lane LEFTOVERS1: light-plugin form IDs back to their file
 #include "esmweather.h"		// lane FOG2: the fog packing
 #include "lodgen.h"
 #include "nativeemit.h"
@@ -29,6 +31,7 @@ BSD License - see nifskope.h
 #include "probefar.h"		// lane BAKEBLOCK1: the far soup beyond the loaded block
 #include "gl/cellpasstime.h"	// lane PERF1: private bytes at each stage
 #include "proberelight.h"	// lane GPURELIGHT1: the relight from recorded operators (CPU + GPU)
+#include "celldoorlive.h"	// lane DOORLIVE1: one live door
 #include "farlight.h"		// lane FARVIEW1: distant light from the surfels
 #include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
 #include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
@@ -51,6 +54,7 @@ BSD License - see nifskope.h
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellcull.h"	// lane SUNCELL1: the per-placement culling runs
+#include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
 #include "gl/cellpost.h"	// lane GRASSMB1
 #include "esmwater.h"
@@ -867,7 +871,7 @@ bool cellSpecFromFile( const QString & path, CellSceneSpec & spec, QString * err
 
 void cellApplyEnvModifiers( CellSceneSpec & spec )
 {
-	const QByteArray ov = qgetenv( "WW_CELL_OVERLAY" );
+	const QByteArray ov = wwEnv( "WW_CELL_OVERLAY" );
 	if ( !ov.isEmpty() ) {
 		bool known = false;
 		const CellOverlay o = cellOverlayFromName( QString::fromLatin1( ov ), &known );
@@ -877,31 +881,31 @@ void cellApplyEnvModifiers( CellSceneSpec & spec )
 			qWarning() << "WW_CELL_OVERLAY:" << ov << "is not an overlay; try one of:"
 				<< cellOverlayNames();
 	}
-	if ( !qgetenv( "WW_CELL_DISABLED" ).isEmpty() )
+	if ( !wwEnv( "WW_CELL_DISABLED" ).isEmpty() )
 		spec.showDisabled = true;
-	if ( !qgetenv( "WW_CELL_MARKERS" ).isEmpty() )
+	if ( !wwEnv( "WW_CELL_MARKERS" ).isEmpty() )
 		spec.showMarkers = true;
-	if ( !qgetenv( "WW_CELL_PROBES_HIDE" ).isEmpty() )
+	if ( !wwEnv( "WW_CELL_PROBES_HIDE" ).isEmpty() )
 		spec.probesShow = false;    // lane PRTPGI: placed and baked, the markers not drawn (clean pictures)
-	if ( !qgetenv( "WW_CELL_NOTERRAIN" ).isEmpty() )
+	if ( !wwEnv( "WW_CELL_NOTERRAIN" ).isEmpty() )
 		spec.terrain = false;
-	if ( !qgetenv( "WW_CELL_NOWATER" ).isEmpty() )
+	if ( !wwEnv( "WW_CELL_NOWATER" ).isEmpty() )
 		spec.water = false;
-	if ( !qgetenv( "WW_CELL_NOGRID" ).isEmpty() )
+	if ( !wwEnv( "WW_CELL_NOGRID" ).isEmpty() )
 		spec.grid = false;
-	if ( qEnvironmentVariableIntValue( "WW_CELL_GRID" ) != 0 )
+	if ( wwEnvInt( "WW_CELL_GRID" ) != 0 )
 		spec.grid = true;     // lane FIXPACK1 (YELLOWSLAB1): the borders forced on, the gate's red
-	const QByteArray dr = qgetenv( "WW_CELL_DATAROOT" );
+	const QByteArray dr = wwEnv( "WW_CELL_DATAROOT" );
 	if ( !dr.isEmpty() )
 		spec.dataRoot = QString::fromLocal8Bit( dr );
-	const QByteArray li = qgetenv( "WW_CELL_LODI" );
+	const QByteArray li = wwEnv( "WW_CELL_LODI" );
 	if ( !li.isEmpty() )
 		spec.lodiPath = QString::fromLocal8Bit( li );
 }
 
 bool cellSpecFromEnv( CellSceneSpec & spec, QString * error )
 {
-	const QByteArray env = qgetenv( "WW_CELL_OPEN" );
+	const QByteArray env = wwEnv( "WW_CELL_OPEN" );
 	if ( env.isEmpty() )
 		return false;
 	if ( !cellSpecFromLine( QString::fromLocal8Bit( env ), spec, error ) )
@@ -937,7 +941,7 @@ const CellProbeKind * cellProbeKinds( int * count )
  * gate's refuters (WW_CELL_SKYINT_RED): "noflag" every interior is read as closed, "all" every one as Show Sky. */
 static quint16 cellInteriorFlags( const EsmInteriorCell & ic )
 {
-	const QByteArray red = qgetenv( "WW_CELL_SKYINT_RED" ).trimmed();
+	const QByteArray red = wwEnv( "WW_CELL_SKYINT_RED" ).trimmed();
 	if ( red == "noflag" )
 		return quint16( ic.flags & ~0x0980u );
 	if ( red == "all" )
@@ -1026,7 +1030,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	/* lane SKYPIC1 (the brick review's light gate; a measurement pin, never a user toggle): WW_CELL_LIGHT_OFF =
 	 * all | <ref form id hex>[,<id>...] starts those placed lights off, as if initially disabled, so the frame and the
 	 * probe relight both lose them. Unset: no change. */
-	const QByteArray lightOffPin = qgetenv( "WW_CELL_LIGHT_OFF" ).trimmed().toLower();
+	const QByteArray lightOffPin = wwEnv( "WW_CELL_LIGHT_OFF" ).trimmed().toLower();
 	QSet<quint32> lightOffRefs;
 	for ( const QByteArray & t : lightOffPin.split( ',' ) ) {
 		bool ok = false;
@@ -1039,7 +1043,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	 * WW_CELL_LIGHT_BOOST = <ref form id hex>:<colour x>:<radius x>[,...] scales those placed lights' colour and
 	 * radius where the cell reads them, so the surfaces, the probe relight and the air all see the same light.
 	 * Unset: no change. */
-	const QByteArray lightBoostPin = qgetenv( "WW_CELL_LIGHT_BOOST" ).trimmed().toLower();
+	const QByteArray lightBoostPin = wwEnv( "WW_CELL_LIGHT_BOOST" ).trimmed().toLower();
 	QHash<quint32, QPair<float, float>> lightBoost;
 	for ( const QByteArray & t : lightBoostPin.split( ',' ) ) {
 		const QList<QByteArray> f = t.trimmed().split( ':' );
@@ -1170,6 +1174,21 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			}
 		}
 		l.ref = r.formID;
+		// lane LIGHTFLICKER1: the game tests 0x8 first, then 0x180; the offset is in the light's local frame
+		l.flicker = ( b.flags & 0x8 ) ? 1 : ( b.flags & 0x180 ) ? 2 : 0;
+		if ( l.flicker ) {
+			l.flickerPeriod = b.flickerPeriod;
+			l.flickerIntensity = b.flickerIntensity;
+			l.flickerMovement = b.flickerMovement;
+			Matrix rm;
+			rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+			const float sc = r.scale > 0.0f ? r.scale : 1.0f;
+			for ( int a = 0; a < 3; a++ ) {
+				const Vector3 d = rm * Vector3( a == 0 ? 1.0f : 0.0f, a == 1 ? 1.0f : 0.0f, a == 2 ? 1.0f : 0.0f );
+				for ( int k = 0; k < 3; k++ )
+					l.flickerAxes[a][k] = d[k] * sc;
+			}
+		}
 		if ( startOff ) {   // lane GPURELIGHT1: recorded, lights nothing at the start
 			L.offLights.append( l );
 			continue;
@@ -1258,8 +1277,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			const QByteArray & clS = fromT( 0x80 ) ? tData : x;
 			L.clipDist = clS.size() >= 36 ? f32( clS, 32 ) : 0.0f;
 		}
-		const QByteArray fogPin = qgetenv( "WW_CELL_FOG" ).trimmed();
-		const QByteArray fogRed = qgetenv( "WW_CELL_FOG_RED" ).trimmed();
+		const QByteArray fogPin = wwEnv( "WW_CELL_FOG" ).trimmed();
+		const QByteArray fogRed = wwEnv( "WW_CELL_FOG_RED" ).trimmed();
 		auto fT = [&]( quint32 flag ) { return fogRed == "noinherit" ? ( haveT && x.isEmpty() ) : fromT( flag ); };
 		const QByteArray & cS = fT( 0x4 ) ? tData : x;
 		const QByteArray & nS = fT( 0x8 ) ? tData : x;
@@ -1398,7 +1417,7 @@ static QString cellFarLodl( const QString & ws, const QString & dataRoot, QStrin
 		const QString p = QDir( root ).filePath( r );
 		return QFileInfo( p ).isFile() ? QDir::cleanPath( p ) : QString();
 	};
-	const QString env = qEnvironmentVariable( "WW_CELL_FAR_LOD" );
+	const QString env = wwEnvStr( "WW_CELL_FAR_LOD" );
 	if ( !env.isEmpty() ) {
 		if ( QFileInfo( env ).isFile() )
 			return QDir::cleanPath( env );
@@ -1468,7 +1487,7 @@ static QString cellBakeFarSoup( const CellSceneSpec & spec, const QString & data
  * opens: the row reopens the cell. */
 bool wwCellParticlesOn()
 {
-	const QByteArray pin = qgetenv( "WW_CELL_PARTICLES" ).trimmed();
+	const QByteArray pin = wwEnv( "WW_CELL_PARTICLES" ).trimmed();
 	if ( !pin.isEmpty() )
 		return pin != "0";
 	return QSettings().value( QStringLiteral( "WW/CellParticles" ), false ).toBool();
@@ -1617,6 +1636,74 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
 	return systems;
 }
 
+/* lane DOORLIVE1: the live door's whole model (its shapes too, unlike the particles' copy) under a new node that
+ * carries the placement; the copied root's own transform is cleared as the weld ignores it. Collision and lights are
+ * left out. Returns the blocks copied (the root first), 0 or less on a refusal. */
+static int cellCopyDoorBranch( NifModel * nif, const QModelIndex & iParent, NifModel & src, const Vector3 & at,
+	const Matrix & rot, float scale, quint32 ref, qint32 * wrapper, qint32 * rootOut, QString * why )
+{
+	const QList<int> roots = src.getRootLinks();
+	if ( roots.isEmpty() || !src.blockInherits( src.getBlockIndex( roots.first() ), "NiNode" ) ) {
+		*why = QStringLiteral( "no NiNode root" );
+		return -1;
+	}
+	QList<qint32> order;
+	QSet<qint32> seen;
+	std::function<void( qint32 )> walk = [&]( qint32 b ) {
+		if ( b < 0 || seen.contains( b ) )
+			return;
+		seen.insert( b );
+		const QModelIndex ib = src.getBlockIndex( b );
+		if ( !ib.isValid() || src.blockInherits( ib, "NiCollisionObject" ) || src.blockInherits( ib, "NiLight" )
+			|| src.blockInherits( ib, "bhkSerializable" ) )
+			return;
+		order.append( b );
+		for ( const int c : src.getChildLinks( b ) )
+			walk( c );
+	};
+	walk( roots.first() );
+	const qint32 base = nif->getBlockCount();
+	QMap<qint32, qint32> map;
+	for ( qint32 b = 0; b < src.getBlockCount(); b++ )
+		map.insert( b, -1 );
+	for ( int i = 0; i < order.size(); i++ )
+		map.insert( order.at( i ), base + i );
+	for ( const qint32 b : order ) {
+		const QModelIndex ib = src.getBlockIndex( b );
+		const QString type = src.createRTTIName( ib );
+		QStringList strings = serializeStrings( &src, ib, type );
+		QByteArray data;
+		QBuffer buf( &data );
+		if ( !buf.open( QIODevice::WriteOnly ) || !src.saveIndex( buf, ib ) ) {
+			*why = QStringLiteral( "%1 %2 would not save" ).arg( type ).arg( b );
+			return -1;
+		}
+		buf.close();
+		const QModelIndex nb = buf.open( QIODevice::ReadOnly ) ? nif->insertNiBlock( type ) : QModelIndex();
+		if ( !nb.isValid() || !nif->loadAndMapLinks( buf, nb, map ) ) {
+			*why = QStringLiteral( "%1 %2 would not load" ).arg( type ).arg( b );
+			return -1;
+		}
+		deserializeStrings( nif, nb, type, strings );
+	}
+	Transform().writeBack( nif, nif->getBlockIndex( base ) );
+	const QModelIndex iW = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+	nif->set<QString>( iW, "Name", QStringLiteral( "doorlive %1" ).arg( ref, 8, 16, QLatin1Char( '0' ) ) );
+	nif->set<quint32>( iW, "Flags", 14 );
+	nif->set<float>( iW, "Scale", 1.0f );
+	Transform t;
+	t.rotation = rot;
+	t.translation = at;
+	t.scale = scale;
+	t.writeBack( nif, iW );
+	const qint32 w = nif->getBlockNumber( iW );
+	addLink( nif, iW, QStringLiteral( "Children" ), base );
+	addLink( nif, iParent, QStringLiteral( "Children" ), w );
+	*wrapper = w;
+	*rootOut = base;
+	return int( order.size() );
+}
+
 /* lane BAKEINCR1: the far soup a bake of (cx, cy) with this block would append, as one sha1 -- the
  * triangles, their albedo and glass, the very ring probeFarAppendRing reads. "none" when the world has
  * no FO4CSLOD .lodl (the bake then appends none either). Only cells whose ring content moved go dirty. */
@@ -1662,10 +1749,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * the gate's red controls only. A relight of a bake on disk (WW_CELL_GI_FROM) traces its shadow, sun and
 	 * feed rays against the soup too, so it loads the same block + far the bake did. */
 	CellSceneSpec spec = specAsked;
-	const QByteArray blockRed = qgetenv( "WW_CELL_BAKEBLOCK_RED" );
-	const bool bakeExterior = !spec.interior && ( !qEnvironmentVariableIsEmpty( "WW_CELL_PROBES" ) || spec.probes )
-		&& ( spec.probesBake || !qEnvironmentVariableIsEmpty( "WW_CELL_PROBE_BAKE" )
-			|| !qEnvironmentVariableIsEmpty( "WW_CELL_GI_FROM" ) );
+	const QByteArray blockRed = wwEnv( "WW_CELL_BAKEBLOCK_RED" );
+	const bool bakeExterior = !spec.interior && ( !wwEnvIsEmpty( "WW_CELL_PROBES" ) || spec.probes )
+		&& ( spec.probesBake || !wwEnvIsEmpty( "WW_CELL_PROBE_BAKE" )
+			|| !wwEnvIsEmpty( "WW_CELL_GI_FROM" ) );
 	if ( bakeExterior && blockRed != "n1" )
 		spec.n = qMax( spec.n, 5 );
 	auto fail = [error]( const QString & m ) {
@@ -1680,8 +1767,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	// lane CELLSTREAM1: an exterior view streams its cells round the camera (src/cellstream.h); this open builds
 	// the document, the far field and the lighting, and hands the world to the streamer instead of welding a block
 	const bool streamInit = !chunk && !spec.interior && spec.overlay == CellOverlay::None && !bakeExterior
-		&& !spec.probes && qEnvironmentVariableIsEmpty( "WW_CELL_PROBES" )
-		&& qEnvironmentVariableIsEmpty( "WW_CELL_GI_FROM" ) && cellStreamWanted();
+		&& !spec.probes && wwEnvIsEmpty( "WW_CELL_PROBES" )
+		&& wwEnvIsEmpty( "WW_CELL_GI_FROM" ) && cellStreamWanted();
 
 	QElapsedTimer clock;
 	clock.start();
@@ -1733,17 +1820,28 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		qInfo().noquote() << mp.line;
 	}
 	// lane BAKEINCR1: an exterior bake records every asset it reads, for its bakeincr.txt
-	const bool incrRecord = !chunk && bakeExterior && !spec.interior && qEnvironmentVariableIsEmpty( "WW_CELL_GI_FROM" );
+	const bool incrRecord = !chunk && bakeExterior && !spec.interior && wwEnvIsEmpty( "WW_CELL_GI_FROM" );
 	if ( incrRecord )
 		ProbeIncr::startRecording();
 
 	// ---- the worldspace, or (lane PRTP1) one interior cell
 	// lane CELLSTREAM1: shared, so a streaming open can hand it on; a streamed cell reads the open's
-	std::shared_ptr<EsmWorld> worldOwn = chunk ? chunk->seed->world : std::make_shared<EsmWorld>();
+	/* lane FARLIGHTMAP1: WW_CELL_KEEP_WORLD=1 (a whole-map walk) keeps the last worldspace index and hands it to the next
+	 * open of the same plugins and world: the index is read-only to a build (its memo caches are pure), as a stream's is */
+	static std::shared_ptr<EsmWorld> keptWorld;
+	static QString keptKey;
+	const bool keepWorld = !chunk && !spec.interior && qEnvironmentVariable( "WW_CELL_KEEP_WORLD" ) == QLatin1String( "1" );
+	const QString worldKey = spec.plugins + QLatin1Char( '|' ) + spec.world.toLower();
+	const bool worldKept = keepWorld && keptWorld && keptKey == worldKey;
+	if ( !keepWorld )
+		keptWorld.reset();
+	std::shared_ptr<EsmWorld> worldOwn = chunk ? chunk->seed->world : worldKept ? keptWorld : std::make_shared<EsmWorld>();
 	EsmWorld & world = *worldOwn;
 	QString loadError;
 	if ( chunk ) {
 		// indexed once by the open
+	} else if ( worldKept ) {
+		// indexed by an earlier cell of the walk
 	} else if ( spec.interior ) {
 		if ( !world.loadInterior( spec.plugins, spec.interiorCell, &loadError ) )
 			return fail( loadError.isEmpty()
@@ -1775,6 +1873,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		if ( !world.load( spec.plugins, wsForm, &loadError ) )
 			return fail( loadError.isEmpty()
 				? QStringLiteral( "could not index %1" ).arg( spec.world ) : loadError );
+		if ( keepWorld ) {
+			keptWorld = worldOwn;
+			keptKey = worldKey;
+		}
 	}
 
 	/* WHERE MODELS COME FROM. The spec's data root when it names one, else the
@@ -1876,7 +1978,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * gate's red control: the old rule, which never looked at the parent. */
 	struct EnableFact { bool off; quint32 parent; bool opposite; };
 	QHash<quint32, EnableFact> enableFacts;
-	const QByteArray refsRed = qgetenv( "WW_CELL_REFS_RED" );
+	const QByteArray refsRed = wwEnv( "WW_CELL_REFS_RED" );
 	auto startsDisabled = [&]( const EsmRefr & r ) {
 		bool off = r.initiallyDisabled;
 #ifdef ESM_HAS_CELL_FIELDS
@@ -1906,7 +2008,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * Every other reference is dropped before anything reads it: no row, no light, no shadow caster, no GI soup.
 	 * Unset: no change. */
 	QSet<quint32> boothRefs;
-	for ( const QByteArray & t : qgetenv( "WW_CELL_BOOTH" ).split( ',' ) ) {
+	for ( const QByteArray & t : wwEnv( "WW_CELL_BOOTH" ).split( ',' ) ) {
 		bool ok = false;
 		const quint32 id = t.trimmed().toUInt( &ok, 16 );
 		if ( ok && id )
@@ -2296,7 +2398,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	int refractBuckets = 0;                 //!< lane EFX1: Refraction-flagged buckets, drawn by the refraction preview
 	/* Lane GLOW1: billboard shapes turned to the camera, and those welded flat (the red
 	 * WW_CELL_GLOW_RED=1 welds all of them, as before; past the cap the rest weld flat too). */
-	const bool glowRed = qEnvironmentVariableIntValue( "WW_CELL_GLOW_RED" ) != 0;
+	const bool glowRed = wwEnvInt( "WW_CELL_GLOW_RED" ) != 0;
 	const int glowCap = 8192;
 	int billboardShapes = 0, billboardFlat = 0;
 	/* Lane FXLIT1: in an interior a lit effect shape (the effect-lighting flag) takes a bucket per placement,
@@ -2304,7 +2406,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	/* lane SUNCELL1 final: exteriors too. The game's lit effect constants (its lit-effect setup, lit branch)
 	 * take the scene's directional (the sun outdoors) and the placed lights near the model, inside or out. Red
 	 * WW_CELL_FXLIT_EXT_RED=indoors keeps exteriors self-lit, as before. */
-	static const bool fxLitExtRed = qgetenv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors";
+	WW_SWITCH_STATIC( bool, fxLitExtRed, wwEnv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors" );
 	const bool fxLitOn = ( spec.interior || !fxLitExtRed ) && spec.overlay == CellOverlay::None;
 	const int fxLitCap = 4096;
 	int fxLitModels = 0, fxLitShapes = 0;
@@ -2427,12 +2529,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		static const QRegularExpression verRx( QStringLiteral( "(\\d+\\.\\d+\\.\\d+)" ) );
 		for ( const auto & b : blocks ) {
 			const quint32 f = b.first;
-			const int idx = int( f >> 24 );
-			const QString plugin = idx < plugs.size() ? QFileInfo( plugs.at( idx ).trimmed() ).fileName()
+			const quint32 idx = world.plugin() ? world.plugin()->getFormIDFile( f ) : ( f >> 24 );
+			const QString plugin = idx < quint32( plugs.size() ) ? QFileInfo( plugs.at( int( idx ) ).trimmed() ).fileName()
 				: QStringLiteral( "Fallout4.esm" );
 			QByteArray u;
 			QString path;
-			for ( const quint32 name : { f, f & 0x00FFFFFFU } ) {
+			for ( const quint32 name : { f, ESMFile::getFormIDLocal( f ) } ) {
 				path = QStringLiteral( "vis/%1/%2.uvd" ).arg( plugin ).arg( name, 8, 16, QLatin1Char( '0' ) );
 				if ( lodgenReadVisFile( dataRoot, path, u ) && u.size() >= 44 )
 					break;
@@ -2620,15 +2722,15 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * baked open -- and only their boxes are kept, to tag the openings they
 	 * stand in. Per shape, effect shaders, alpha-blended glass and decals are
 	 * dropped: light passes through all three. */
-	const QString probeOut = QString::fromLocal8Bit( qgetenv( "WW_CELL_PROBES" ) );
+	const QString probeOut = QString::fromLocal8Bit( wwEnv( "WW_CELL_PROBES" ) );
 	const bool probing = !probeOut.isEmpty() || spec.probes;   // the env, or the PRTP band's Place
 	ProbeSoup probeSoup;
 	int soupRefs = 0, soupShapesDropped = 0;
 	/* lane PRTPBAKE: the bake's albedo, one per soup triangle -- the band's Bake, or
 	 * WW_CELL_PROBE_BAKE=<folder> (every probing build bakes there, for a headless run).
 	 * WW_CELL_PROBE_BAKE_DIR=<folder> only moves the Bake button's folder. */
-	const QString bakeEnv = QString::fromLocal8Bit( qgetenv( "WW_CELL_PROBE_BAKE" ) );
-	const QString bakeDirEnv = QString::fromLocal8Bit( qgetenv( "WW_CELL_PROBE_BAKE_DIR" ) );
+	const QString bakeEnv = QString::fromLocal8Bit( wwEnv( "WW_CELL_PROBE_BAKE" ) );
+	const QString bakeDirEnv = QString::fromLocal8Bit( wwEnv( "WW_CELL_PROBE_BAKE_DIR" ) );
 	const bool baking = probing && ( spec.probesBake || !bakeEnv.isEmpty() );
 	ProbeAlbedo probeAlb( dataRoot );
 	/* lane CAPTURE1: WW_CELL_BAKE_ALBEDO = tri (default, today) | hit | cube picks where the surfels'
@@ -2636,32 +2738,67 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * triangle's UVs, vertex colors, vertex normals and maps in the soup. WW_CELL_BAKE_ALBEDO_RED =
 	 * centroid | nofilter, WW_CELL_BAKE_CUBE_FACE = pixels a face (128), WW_CELL_BAKE_CUBE_DUMP=<file>
 	 * + WW_CELL_BAKE_CUBE_PROBES=x,y,z;... (the nearest probes' faces): gate and sheet only. */
-	const QString albWay = qEnvironmentVariable( "WW_CELL_BAKE_ALBEDO", QStringLiteral( "tri" ) );
-	const QString albRed = qEnvironmentVariable( "WW_CELL_BAKE_ALBEDO_RED" );
+	const QString albWay = wwEnvStr( "WW_CELL_BAKE_ALBEDO", QStringLiteral( "tri" ) );
+	const QString albRed = wwEnvStr( "WW_CELL_BAKE_ALBEDO_RED" );
 	const bool wantMat = baking && ( albWay == QLatin1String( "hit" ) || albWay == QLatin1String( "cube" ) );
 	const bool wantExtra = wantMat && albWay == QLatin1String( "cube" ) && albRed == QLatin1String( "nofilter" );
+	/* lane FIXPACK1 (PBRALBEDO1): a surface a .pbrm serves in the drawn view gives the bake its PBR diffuse,
+	 * base x (1 - metallic) (ProbeAlbedo::samplePbrm), not the legacy diffuse slot. Found through the
+	 * renderer's own resolve (pbrmResolveForMaterial) with the Name the shape's bucket property carries:
+	 * a .bgsm (bucketFor's first choice), materialNameFor'd; any other bucket names no material and draws
+	 * legacy. One resolve per material, through the bake's resource stack. The tri way (the default) only;
+	 * the hit/cube ways, glass panes and folded decals still read the legacy diffuse.
+	 * WW_CELL_BAKE_PBRALBEDO_RED=diffuse reads the legacy diffuse slot for every surface (the gate's red). */
+	const bool pbrAlbRed = qEnvironmentVariable( "WW_CELL_BAKE_PBRALBEDO_RED" ) == QLatin1String( "diffuse" );
+	QHash<QString, std::shared_ptr<PbrmMaterial>> bakePbrm;   // lower-case Name -> the material, null = legacy
+	int albPbrm = 0;
+	const QString bakePbrmTracePath = qEnvironmentVariable( "WW_CELL_BAKE_PBRM_TRACE" );   // lane PBRALBEDO2
+	QStringList bakePbrmTrace;
+	auto bakePbrmFor = [&]( const NativeSrcShape & s ) -> const PbrmMaterial * {
+		if ( !isMaterialFile( s.matName ) )
+			return nullptr;
+		const QString name = materialNameFor( s.matName );
+		const QString key = name.toLower();
+		auto it = bakePbrm.constFind( key );
+		if ( it == bakePbrm.constEnd() ) {
+			const PbrmReader reader = [&]( const QString & path, QByteArray & out ) -> bool {
+				out.clear();
+				QString p = path;
+				p.replace( QChar( '\\' ), QChar( '/' ) );
+				return lodgenProbeAsset( dataRoot, p, nullptr, nullptr, nullptr, &out ) && !out.isEmpty();
+			};
+			const PbrmResolveResult r = pbrmResolveForMaterial( name, QString(), QString(), true, reader );
+			if ( !bakePbrmTracePath.isEmpty() )   // lane PBRALBEDO2: why each material did or did not resolve
+				bakePbrmTrace << QStringLiteral( "%1\t%2\t%3\t%4\t%5" ).arg( s.matName,
+					QString::fromLatin1( pbrmRouteName( r.route ) ), r.path, r.refusal, r.tried.join( QStringLiteral( " | " ) ) );
+			it = bakePbrm.insert( key, r.route != PbrmRoute::Legacy && r.material.ok
+				? std::make_shared<PbrmMaterial>( r.material ) : std::shared_ptr<PbrmMaterial>() );
+		}
+		// the Legacy menu mode draws every surface the legacy way: the bake reads what is drawn
+		return ( pbrAlbRed || pbrmMode() == PbrmModeLegacy ) ? nullptr : it->get();
+	};
 	/* lane CAPTURE1 (docs/PRTP_PLAN.md 2o, EFX1): a Refraction-flagged lighting shape (Shader Flags 1 bit
 	 * 15: the walkway's drip-splash rings) only bends what is behind it in game; its diffuse slot holds a
 	 * normal map. It is no surface: it leaves the bake's soup (every albedo way, the cube included) and
 	 * is counted. WW_CELL_BAKE_REFRACT_RED=keep keeps it as a solid surface (the gate's red only). */
-	const bool refractKeepRed = qEnvironmentVariable( "WW_CELL_BAKE_REFRACT_RED" ) == QLatin1String( "keep" );
+	const bool refractKeepRed = wwEnvStr( "WW_CELL_BAKE_REFRACT_RED" ) == QLatin1String( "keep" );
 	/* lane GICAL1: the decals and alpha-blended surfaces the soup leaves out still color the surface under them in
 	 * game (Vault111Cryo view w1: they change 36% of the surface pixels and darken the drawn albedo by 12%).
 	 * They, and the placed decals (TXST, projected below), are folded into the surfel albedo (ProbeSoup::decal).
  * WW_CELL_BAKE_DECALS=0 leaves them out, as before. */
-	const bool decalFold = qEnvironmentVariable( "WW_CELL_BAKE_DECALS" ) != QLatin1String( "0" );
+	const bool decalFold = wwEnvStr( "WW_CELL_BAKE_DECALS" ) != QLatin1String( "0" );
 	/* lane SMOOTHN1: the bake's hit normal is the surface's smooth one -- the NIF's vertex normals, the ground's
 	 * LAND VNML -- blended at the hit (every albedo way); the hit and cube ways also bend it by the shape's
 	 * normal map at the hit's UV. WW_CELL_BAKE_SMOOTH=0 (the face normal, as before, byte for byte) and
 	 * WW_CELL_BAKE_NMAP=0 (no normal maps) are the gates' reds only. */
-	const bool smoothOn = qEnvironmentVariable( "WW_CELL_BAKE_SMOOTH" ) != QLatin1String( "0" );
-	const bool nmapOn = smoothOn && qEnvironmentVariable( "WW_CELL_BAKE_NMAP" ) != QLatin1String( "0" );
+	const bool smoothOn = wwEnvStr( "WW_CELL_BAKE_SMOOTH" ) != QLatin1String( "0" );
+	const bool nmapOn = smoothOn && wwEnvStr( "WW_CELL_BAKE_NMAP" ) != QLatin1String( "0" );
 	int soupSmoothTris = 0, soupLandVnml = 0, soupLandDerived = 0, soupNmapModelSpace = 0;
-	const QString landDump = qEnvironmentVariable( "WW_CELL_BAKE_LAND_DUMP" );
+	const QString landDump = wwEnvStr( "WW_CELL_BAKE_LAND_DUMP" );
 	/* lane WATER1: the water surfaces in the placer and the bake (src/probebake.cpp, the water split). The pin
 	 * WW_CELL_BAKE_WATER=0 leaves them out, as before (and prints nothing new); WW_CELL_WATER_BAKEDUMP=<file> +
 	 * WW_CELL_WATER_BAKEDUMP_PROBES=x,y,z;... (the nearest probes) dumps every ray's split for the gate. */
-	const bool bakeWater = qEnvironmentVariable( "WW_CELL_BAKE_WATER" ) != QLatin1String( "0" );
+	const bool bakeWater = wwEnvStr( "WW_CELL_BAKE_WATER" ) != QLatin1String( "0" );
 	int soupWaterCells = 0;
 	int soupDecalShapes = 0, soupPlacedDecals = 0, soupPlacedDecalTris = 0;
 	int soupRefractShapes = 0, soupRefractTris = 0;
@@ -2681,30 +2818,33 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	};
 	// lane BAKE4: glass panes into the bake's soup; WW_CELL_PROBE_GLASS=<tsv> dumps the census
 	QString glassCensus;
-	const QByteArray glassDump = qgetenv( "WW_CELL_PROBE_GLASS" );
+	const QByteArray glassDump = wwEnv( "WW_CELL_PROBE_GLASS" );
 	int soupGlassShapes = 0;
 	int soupLoadDoors = 0;   // lane ROOMCLAMP1
 	/* lane ROOMCLAMP1: WW_CELL_ROOMCLAMP_PIN=off (gates only, never a user toggle) turns every rule of the lane off
 	 * (load doors open, the placer's old floors, no probe moved off a back face, no rooms, no eye fallbacks): the
 	 * output is byte for byte the exe from before the lane, which the before/after gates compare against. */
-	const bool roomclampPin = qgetenv( "WW_CELL_ROOMCLAMP_PIN" ).trimmed() == "off";
-	const bool loadDoorRed = roomclampPin || qEnvironmentVariable( "WW_CELL_PROBE_LOADDOOR_RED" ) == QLatin1String( "open" );
+	const bool roomclampPin = wwEnv( "WW_CELL_ROOMCLAMP_PIN" ).trimmed() == "off";
+	const bool loadDoorRed = roomclampPin || wwEnvStr( "WW_CELL_PROBE_LOADDOOR_RED" ) == QLatin1String( "open" );
 	/* lane ALPHATEST1: an alpha-tested shape's triangles carry their UVs and its map's alpha (probemask.h): a
 	 * ray through a texel under the material's threshold passes on (the Concord storefront glass is 66-72%
 	 * holes). A map whose every texel passes needs no mask. WW_CELL_ALPHATEST_PIN=off (gates only, never a
 	 * user toggle) keeps every alpha-tested face solid: byte for byte the exe from before the lane. */
-	const bool alphaPin = qgetenv( "WW_CELL_ALPHATEST_PIN" ).trimmed() == "off";
+	const bool alphaPin = wwEnv( "WW_CELL_ALPHATEST_PIN" ).trimmed() == "off";
 	/* lane GPURELIGHT1: WW_CELL_GI_GPU or WW_CELL_GI_DOORS: the doors' own triangles go into the soup's doorGeom (a
 	 * closed door stops light by its faces, lets it through its alpha-test holes, tints it through its panes) */
-	const bool giDoorGeom = baking && ( wwCellGiGpuOn() || !qgetenv( "WW_CELL_GI_DOORS" ).isEmpty() );
+	const bool giDoorGeom = baking && ( wwCellGiGpuOn() || !wwEnv( "WW_CELL_GI_DOORS" ).isEmpty() || wwDoorLiveWantsGi() );
+	// lane DOORLIVE1: the live door is copied in whole after the weld (its own nodes move); the weld leaves it out
+	const quint32 doorLiveRef = wwDoorLiveRef();
+	int doorLiveShapes = 0;
 	int dgShapes = 0, dgMasked = 0, dgGlass = 0, dgGlassUnread = 0, dgDropped = 0;
 	// Measurement pin only: WW_CELL_ALPHATEST_FOLIAGE=keep puts landscape\ alpha-tested cards in the soup with their mask.
-	const bool foliageKeep = qgetenv( "WW_CELL_ALPHATEST_FOLIAGE" ).trimmed() == "keep";
+	const bool foliageKeep = wwEnv( "WW_CELL_ALPHATEST_FOLIAGE" ).trimmed() == "keep";
 	/* lane EMISSIVEGI1: glowing surfaces light the bake (probeemit.h). WW_CELL_EMISSIVE_PIN=off (gates only, never
 	 * a user toggle) lists no glowing triangle: byte for byte the exe from before the lane. WW_CELL_EMISSIVE_RED =
 	 * nomask (the glow map ignored: the whole surface glows) | noflag (Own-Emit ignored): the gate's reds. */
-	const bool emitPin = qgetenv( "WW_CELL_EMISSIVE_PIN" ).trimmed() == "off";
-	const QByteArray emitRed = qgetenv( "WW_CELL_EMISSIVE_RED" ).trimmed();
+	const bool emitPin = wwEnv( "WW_CELL_EMISSIVE_PIN" ).trimmed() == "off";
+	const QByteArray emitRed = wwEnv( "WW_CELL_EMISSIVE_RED" ).trimmed();
 	QHash<QString, int> glowMapOf;   // lower-case path -> into probeSoup.glow.maps; -1 = unread
 	QHash<QString, int> emitterOf;
 	int emShapes = 0, emShapesBlack = 0, emShapesUnread = 0, emShapesNoUv = 0, emOffShapes = 0;
@@ -2736,7 +2876,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	/* lane ALPHATEST2: the tested alpha is vertex alpha x map alpha x material alpha (probemask.h), so a map with no
 	 * texel under 255 still has holes under a scale < 1: such a map is kept on demand (its own entry, read again).
 	 * WW_CELL_ALPHATEST_RED=noscale (gates only, never a user toggle): every scale 1, the ALPHATEST1 mask. */
-	const bool alphaNoScale = qgetenv( "WW_CELL_ALPHATEST_RED" ).trimmed() == "noscale";
+	const bool alphaNoScale = wwEnv( "WW_CELL_ALPHATEST_RED" ).trimmed() == "noscale";
 	QHash<QString, int> fullMaskOfTex;   // lower-case path -> into probeSoup.amask.maps (an all-255 map kept for a scale)
 	int amShapesScaled = 0, amShapesScaleOnly = 0, amTrisScaled = 0;
 	auto fullMaskOf = [&]( const QString & tex ) -> int {
@@ -2757,7 +2897,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	QHash<QString, int> maskModelIdx;
 	int amShapes = 0, amShapesNoHole = 0, amShapesUnread = 0, amAlbMoved = 0;
 	// gate only (tests/spells/alphatest_check.py): one row per kept shape: first soup triangle, count, model, material, map
-	const QByteArray soupShapesPath = qgetenv( "WW_CELL_PROBE_SOUP_SHAPES" );
+	const QByteArray soupShapesPath = wwEnv( "WW_CELL_PROBE_SOUP_SHAPES" );
 	QString soupShapes;
 	auto maskOf = [&]( const QString & tex ) -> MaskInfo {
 		const QString k = tex.toLower();
@@ -2780,7 +2920,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	};
 	// lane BAKE4: WW_CELL_PROBE_SOUP_REFS=<tsv> lists every reference the soup took (form, role, base type)
 	QString soupRefList;
-	const QByteArray soupRefDump = qgetenv( "WW_CELL_PROBE_SOUP_REFS" );
+	const QByteArray soupRefDump = wwEnv( "WW_CELL_PROBE_SOUP_REFS" );
 	int albTextured = 0, albUntextured = 0, albLandSplat = 0, albLandFlat = 0, albPalette = 0;
 	QHash<qint64, std::array<float, 3>> landAlb;   // 128-unit ground quad -> gamma color, from the splat
 	QHash<QString, int> soupSkippedTypes;
@@ -2793,7 +2933,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			return 2;
 		// lane BAKE4: the bake sees the fixed world only. WW_CELL_PROBE_SOUP_RED=items is the gate's red
 		// control: pick-up items let into the soup.
-		static const bool itemsRed = qgetenv( "WW_CELL_PROBE_SOUP_RED" ) == "items";
+		WW_SWITCH_STATIC( bool, itemsRed, wwEnv( "WW_CELL_PROBE_SOUP_RED" ) == "items" );
 		static const QSet<QString> items { QStringLiteral( "ARMO" ), QStringLiteral( "WEAP" ),
 			QStringLiteral( "MISC" ), QStringLiteral( "ALCH" ), QStringLiteral( "AMMO" ),
 			QStringLiteral( "BOOK" ), QStringLiteral( "KEYM" ), QStringLiteral( "NOTE" ) };
@@ -2805,8 +2945,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * (WW_CELL_LIT, WW_CELL_GI_DUMP), a placement the soup leaves out is neither loaded nor drawn: the same
 	 * rule as the role below (disabled, marker, actor, a type soupRole leaves out, sky, water), counted the same.
 	 * WW_CELL_SPEED_RED=nolean loads them all again -- the bake's files must be the same bytes either way. */
-	const bool bakeLean = probing && !bakeEnv.isEmpty() && qEnvironmentVariableIsEmpty( "WW_CELL_LIT" )
-		&& qEnvironmentVariableIsEmpty( "WW_CELL_GI_DUMP" ) && qgetenv( "WW_CELL_SPEED_RED" ) != "nolean";
+	const bool bakeLean = probing && !bakeEnv.isEmpty() && wwEnvIsEmpty( "WW_CELL_LIT" )
+		&& wwEnvIsEmpty( "WW_CELL_GI_DUMP" ) && wwEnv( "WW_CELL_SPEED_RED" ) != "nolean";
 	int leanSkipped = 0;
 	auto soupLeavesOut = [&]( const Placement & p, bool counted ) -> bool {
 		const EsmLodBase & lb = world.lodBase( p.base );
@@ -2832,7 +2972,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			tn = QStringLiteral( "water" );
 		}
 		// the gate's red control (WW_CELL_SPEED_RED=leanred): every second reference the soup DOES take is skipped too
-		static const bool leanRed = qgetenv( "WW_CELL_SPEED_RED" ) == "leanred";
+		WW_SWITCH_STATIC( bool, leanRed, wwEnv( "WW_CELL_SPEED_RED" ) == "leanred" );
 		if ( leanRed && role == 1 && ( p.ref & 1 ) )
 			return true;
 		if ( role == 0 && counted )
@@ -2844,7 +2984,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	/* Lane SPEED1, the gate's second red control (WW_CELL_SPEED_RED=transform): the model placed most often
 	 * loses its per-placement transform -- every copy stands where the first one does. The picture check of
 	 * tests/spells/cell_speed.sh must see it. */
-	if ( qgetenv( "WW_CELL_SPEED_RED" ) == "transform" ) {
+	if ( wwEnv( "WW_CELL_SPEED_RED" ) == "transform" ) {
 		QHash<QString, int> uses;
 		for ( const Placement & p : placements )
 			uses[world.lodBase( p.base ).model]++;
@@ -2886,7 +3026,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	int cableBuilt = 0, cableWind = 0, cableEndBad = 0, cableSagBad = 0, cableVerts = 0, cableTris = 0;
 	float cableEndWorst = 0.0f, cableSagWorst = 0.0f;
 	QString cableDump;
-	const QString cableDumpPath = qEnvironmentVariable( "WW_CELL_CABLES_DUMP" );
+	const QString cableDumpPath = wwEnvStr( "WW_CELL_CABLES_DUMP" );
 	auto cableBuild = [&]( const Placement & p, std::vector<NativeSrcShape> * shapes ) -> bool {
 		const EsmBendable & look = world.bendable( p.base );
 		NativeSrcShape s;
@@ -2944,7 +3084,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		 * everything. Drawn as world geometry, one card hid the whole of Concord behind a grey
 		 * sheet (bungo's "wedges"; measured: hiding it alone uncovers the town). Hidden and
 		 * counted; WW_CELL_SKY=1 draws them again. */
-		static const bool showSky = !qgetenv( "WW_CELL_SKY" ).isEmpty();
+		WW_SWITCH_STATIC( bool, showSky, !wwEnv( "WW_CELL_SKY" ).isEmpty() );
 		if ( !showSky && QString( model ).replace( '/', '\\' ).startsWith( QLatin1String( "sky\\" ), Qt::CaseInsensitive ) ) {
 			skyCardsHidden++;
 			continue;
@@ -3039,7 +3179,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 		/* WW_CELL_SWAPLOG=<model substring>: every shape of a matching placement, its material
 		 * before and after the swap and what the paint rule decided -- to stderr. */
-		static const QString swapLog = QString::fromLocal8Bit( qgetenv( "WW_CELL_SWAPLOG" ) );
+		WW_SWITCH_STATIC( QString, swapLog, QString::fromLocal8Bit( wwEnv( "WW_CELL_SWAPLOG" ) ) );
 		if ( !swapLog.isEmpty() && model.contains( swapLog, Qt::CaseInsensitive ) ) {
 			fprintf( stderr, "SWAPLOG ref %08x model %s swap %08x subst %d cnam %d modc %g\n", p.ref,
 				qPrintable( model ), p.swap, subst ? int( subst->size() ) : 0, cnamOf ? int( cnamOf->size() ) : 0,
@@ -3639,6 +3779,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						}
 					}
 					const int amFirst = probeSoup.triCount();
+					const PbrmMaterial * shapePbrm = baking ? bakePbrmFor( s ) : nullptr;   // lane FIXPACK1
 					for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 						float w[3][3];
 						bool okTri = true;
@@ -3698,11 +3839,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 							quint8 rgb[3] = { 128, 128, 128 };
 							/* a palette material is painted as the game paints it: the map's green
 							 * picks the column, the paint index (or scale x vertex red) the row */
-							const bool viaPalette = s.g2p && !s.g2pTex.isEmpty()
+							// lane FIXPACK1: a .pbrm-served surface first (the PBR program draws it: no palette)
+							const bool viaPbrm = shapePbrm && probeAlb.samplePbrm( *shapePbrm, uv[0], uv[1], vc, lin );
+							albPbrm += viaPbrm ? 1 : 0;
+							const bool viaPalette = !viaPbrm && s.g2p && !s.g2pTex.isEmpty()
 								&& probeAlb.samplePalette( s.tex0, s.g2pTex, uv[0], uv[1],
 									painted ? paintIndex : s.g2pScale * vc[0], lin );
 							albPalette += viaPalette ? 1 : 0;
-							if ( viaPalette || probeAlb.sample( s.tex0, uv[0], uv[1], vc, lin ) ) {
+							if ( viaPbrm || viaPalette || probeAlb.sample( s.tex0, uv[0], uv[1], vc, lin ) ) {
 								albTextured++;
 								for ( int k = 0; k < 3; k++ )
 									rgb[k] = quint8( std::lround( std::clamp( lin[k], 0.0f, 1.0f ) * 255.0f ) );
@@ -3852,6 +3996,18 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					bbOwn += QStringLiteral( "|W%1" ).arg( lb.waterType, 8, 16, QLatin1Char( '0' ) );
 					placedWaterShapes++;
 				}
+			}
+			if ( doorLiveRef && p.ref == doorLiveRef && !isActor ) {   // lane DOORLIVE1: drawn by its copied branch
+				for ( size_t v = 0; v < nv; v++ ) {
+					const Vector3 wp = p.pos + p.rot * ( Vector3( s.geom.pos[v * 3 + 0], s.geom.pos[v * 3 + 1], s.geom.pos[v * 3 + 2] ) * p.scale );
+					for ( int k = 0; k < 3; k++ ) {
+						lo[k] = qMin( lo[k], wp[k] );
+						hi[k] = qMax( hi[k], wp[k] );
+					}
+				}
+				pick.triangles += quint32( s.geom.tris.size() / 3 );
+				doorLiveShapes++;
+				continue;
 			}
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
 			if ( cableSway ) {
@@ -4175,7 +4331,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		qint64 splatCap = qint64( CELL_MAX_TOTAL_VERTS );
 		{
 			bool capOk = false;
-			const qint64 v = qEnvironmentVariableIntValue( "WW_CELL_SPLAT_CAP", &capOk );
+			const qint64 v = wwEnvInt( "WW_CELL_SPLAT_CAP", &capOk );
 			if ( capOk && v > 0 )
 				splatCap = v;
 		}
@@ -4523,7 +4679,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 		const float org[3] = { origin[0], origin[1], origin[2] };
 		cellProjectDecals( world, dataRoot, decalRefs, receivers, org, decalResult,
-			QString::fromLocal8Bit( qgetenv( "WW_CELL_DECAL_DUMP" ) ) );
+			QString::fromLocal8Bit( wwEnv( "WW_CELL_DECAL_DUMP" ) ) );
 		for ( const CellDecalMesh & m : decalResult.meshes ) {
 			if ( m.tris.empty() )
 				continue;
@@ -4775,7 +4931,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		} else {
 			// the probed block: the middle N x N of what is loaded (default the center cell)
 			// (the PRTP band's Place, with no variable set: the whole loaded block)
-			int pn = qEnvironmentVariableIntValue( "WW_CELL_PROBES_N" );
+			int pn = wwEnvInt( "WW_CELL_PROBES_N" );
 			pn = qBound( 1, pn > 0 ? pn : ( spec.probes ? specAsked.n : 1 ), qMax( 1, spec.n ) );
 			const int ph = ( pn - 1 ) / 2;
 			ps.minX = float( spec.cx - ph ) * CELL_UNITS;
@@ -4787,10 +4943,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			ownCells[2] = spec.cx + ph;
 			ownCells[3] = spec.cy + ph;
 		}
-		const QByteArray sp = qgetenv( "WW_CELL_PROBES_SPACING" );
+		const QByteArray sp = wwEnv( "WW_CELL_PROBES_SPACING" );
 		if ( !sp.isEmpty() && sp.toFloat() > 1.0f )
 			ps.spacing = sp.toFloat();
-		ps.red = QString::fromLatin1( qgetenv( "WW_PROBE_RED" ) );
+		ps.red = QString::fromLatin1( wwEnv( "WW_PROBE_RED" ) );
 		if ( roomclampPin && ps.red.isEmpty() )
 			ps.red = QStringLiteral( "floor" );   // lane ROOMCLAMP1 pin: the old floors
 		if ( !probeSoup.doorGeom.empty() ) {
@@ -4838,7 +4994,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		// (after the placing, which the loaded block decides; before the dump, so the gates see it)
 		const QString farLine = bakeExterior && placed ? cellBakeFarSoup( spec, dataRoot, blockRed, probeSoup ) : QString();
 		PassTime::memLog( "probe soup built" );	// lane PERF1
-		const QByteArray soupDump = qgetenv( "WW_CELL_PROBE_SOUP" );
+		const QByteArray soupDump = wwEnv( "WW_CELL_PROBE_SOUP" );
 		QString perr;
 		if ( !soupDump.isEmpty() && !probeSoupWrite( QString::fromLocal8Bit( soupDump ), probeSoup, &perr ) )
 			qWarning() << "WW_CELL_PROBE_SOUP:" << perr;
@@ -4846,7 +5002,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		if ( !soupDump.isEmpty() && !probeVolumesMarkersWrite( QString::fromLocal8Bit( soupDump ) + QStringLiteral( ".markers" ), volMarkers ) )
 			qWarning() << "WW_CELL_PROBE_SOUP: cannot write the markers";
 		// lane VOLFIT1: WW_CELL_VOLUMES=<bake root> runs the Space stage (rooms, thresholds) into <root>/<World>/<X>_<Y>
-		const QByteArray volRoot = qgetenv( "WW_CELL_VOLUMES" );
+		const QByteArray volRoot = wwEnv( "WW_CELL_VOLUMES" );
 		if ( placed && !volRoot.isEmpty() ) {
 			QElapsedTimer vt;
 			vt.start();
@@ -4866,7 +5022,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			vs.root = QDir::cleanPath( QString::fromLocal8Bit( volRoot ) );
 			vs.interior = spec.interior;
 			vs.byAnchor = !spec.interior;
-			vs.spec.red = QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_RED" ) );
+			vs.spec.red = QString::fromLatin1( wwEnv( "WW_CELL_VOLUMES_RED" ) );
 			QString recxName;
 			if ( spec.interior ) {
 				QString k = world.interior().edid.isEmpty() ? spec.interiorCell : world.interior().edid;
@@ -4885,7 +5041,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				recxName = spec.world;
 			}
 			// hand fixes: WW_CELL_VOLUMES_RECX=<dir>, else Data/Plugins/FO4CS/Volumes/<World or EDID>.recx when present
-			const QByteArray rxDir = qgetenv( "WW_CELL_VOLUMES_RECX" );
+			const QByteArray rxDir = wwEnv( "WW_CELL_VOLUMES_RECX" );
 			const QString rx = QDir( rxDir.isEmpty() ? dataRoot + QStringLiteral( "/Plugins/FO4CS/Volumes" ) : QString::fromLocal8Bit( rxDir ) )
 				.filePath( recxName + QStringLiteral( ".recx" ) );
 			if ( QFileInfo::exists( rx ) ) {
@@ -4899,7 +5055,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				probeNotes += QStringLiteral( "  %1\n" ).arg( l );
 			probeNotes += QStringLiteral( "  space stage %1 ms (%2)\n" ).arg( vt.elapsed() ).arg( vok ? QStringLiteral( "ok" ) : QStringLiteral( "FAILED" ) );
 			wwCellVolumeViewPublish( nif, vol );
-			if ( vok && qgetenv( "WW_CELL_VOLUMES_GI" ) == "1" ) {
+			if ( vok && wwEnv( "WW_CELL_VOLUMES_GI" ) == "1" ) {
 				volGi = std::make_shared<const ProbeVolumes>( std::move( vol ) );
 				volGiOn = true;
 			}
@@ -4990,8 +5146,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			 * game's own (Documents/My Games/Fallout4/F4SE/TransportBake): copying there is a
 			 * choice the user makes. */
 			// lane PRTPGI: WW_CELL_GI_FROM=<bake folder> relights a bake already on disk (no new bake)
-			if ( !baking && placed && !qgetenv( "WW_CELL_GI_FROM" ).isEmpty() )
-				giBakeDir = QDir::cleanPath( QString::fromLocal8Bit( qgetenv( "WW_CELL_GI_FROM" ) ) );
+			if ( !baking && placed && !wwEnv( "WW_CELL_GI_FROM" ).isEmpty() )
+				giBakeDir = QDir::cleanPath( QString::fromLocal8Bit( wwEnv( "WW_CELL_GI_FROM" ) ) );
 			if ( baking && placed ) {
 				QString dir =!bakeEnv.isEmpty() ? bakeEnv : !bakeDirEnv.isEmpty() ? bakeDirEnv : spec.bakeDir;
 				if ( dir.isEmpty() ) {
@@ -5006,21 +5162,21 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				bs.ownY0 = ownCells[1];
 				bs.ownX1 = ownCells[2];
 				bs.ownY1 = ownCells[3];
-				const QByteArray br = qgetenv( "WW_CELL_PROBE_BAKE_RAYS" );
+				const QByteArray br = wwEnv( "WW_CELL_PROBE_BAKE_RAYS" );
 				if ( br.toInt() > 0 )
 					bs.rays = br.toInt();
-				bs.red = QString::fromLatin1( qgetenv( "WW_PROBE_BAKE_RED" ) );
+				bs.red = QString::fromLatin1( wwEnv( "WW_PROBE_BAKE_RED" ) );
 				// lane SIDES6: the file version a gate asks for (the census's, and the two-sides red: 4)
-				if ( qgetenv( "WW_CELL_PROBE_BAKE_TBK" ).toInt() >= 3 && qgetenv( "WW_CELL_PROBE_BAKE_TBK" ).toInt() <= 5 )
-					bs.tbkVersion = qgetenv( "WW_CELL_PROBE_BAKE_TBK" ).toInt();
+				if ( wwEnv( "WW_CELL_PROBE_BAKE_TBK" ).toInt() >= 3 && wwEnv( "WW_CELL_PROBE_BAKE_TBK" ).toInt() <= 5 )
+					bs.tbkVersion = wwEnv( "WW_CELL_PROBE_BAKE_TBK" ).toInt();
 				if ( roomclampPin && bs.red.isEmpty() )
 					bs.red = QStringLiteral( "backface" );   // lane ROOMCLAMP1 pin: no probe moved
 				// lane ROOMCLAMP1: the outside-the-shell threshold (gate red: 1 = off) and the gate's list
-				if ( qEnvironmentVariableIsSet( "WW_CELL_PROBE_BACKMAX" ) )
-					bs.backMax = qEnvironmentVariable( "WW_CELL_PROBE_BACKMAX" ).toFloat();
-				bs.backDump = qEnvironmentVariable( "WW_CELL_PROBE_BACKDUMP" );
-				bs.waterDump = qEnvironmentVariable( "WW_CELL_WATER_BAKEDUMP" );   // lane WATER1
-				for ( const QString & q : qEnvironmentVariable( "WW_CELL_WATER_BAKEDUMP_PROBES" ).split( ';', Qt::SkipEmptyParts ) ) {
+				if ( wwEnvIsSet( "WW_CELL_PROBE_BACKMAX" ) )
+					bs.backMax = wwEnvStr( "WW_CELL_PROBE_BACKMAX" ).toFloat();
+				bs.backDump = wwEnvStr( "WW_CELL_PROBE_BACKDUMP" );
+				bs.waterDump = wwEnvStr( "WW_CELL_WATER_BAKEDUMP" );   // lane WATER1
+				for ( const QString & q : wwEnvStr( "WW_CELL_WATER_BAKEDUMP_PROBES" ).split( ';', Qt::SkipEmptyParts ) ) {
 					const QStringList c = q.split( ',' );
 					if ( c.size() != 3 )
 						continue;
@@ -5039,23 +5195,23 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						bs.waterDumpProbes.push_back( best );
 				}
 				// lane SMOOTHN1: the most batches a noisy probe takes (1 = the base set alone: the gate's pin)
-				if ( qEnvironmentVariableIntValue( "WW_CELL_PROBE_BAKE_ADAPT" ) > 0 )
-					bs.adaptMax = qEnvironmentVariableIntValue( "WW_CELL_PROBE_BAKE_ADAPT" );
+				if ( wwEnvInt( "WW_CELL_PROBE_BAKE_ADAPT" ) > 0 )
+					bs.adaptMax = wwEnvInt( "WW_CELL_PROBE_BAKE_ADAPT" );
 				// an interior's misses are void, never sky -- unless its cell shows the sky (lane SKYINT1, the deck's
 				// rule: a ray that meets nothing sees the sky)
 				bs.noSky = spec.interior && !( cellInteriorFlags( world.interior() ) & 0x0080u );
 				if ( wantMat ) {   // lane CAPTURE1: the albedo way, its maps loaded once (the bake reads them from threads)
 					bs.albedoWay = albWay;
 					bs.albedoRed = albRed;
-					const int cf = qEnvironmentVariableIntValue( "WW_CELL_BAKE_CUBE_FACE" );
+					const int cf = wwEnvInt( "WW_CELL_BAKE_CUBE_FACE" );
 					if ( cf > 0 )
 						bs.cubeFace = cf;
 					probeSoup.mat.resize( size_t( probeSoup.triCount() ) );   // the ground: its tri value
 					probeSoup.matTexPtr.clear();
 					for ( const QString & tx : probeSoup.matTex )
 						probeSoup.matTexPtr.push_back( probeAlb.loadFine( tx ) );
-					bs.cubeDump = qEnvironmentVariable( "WW_CELL_BAKE_CUBE_DUMP" );
-					for ( const QString & q : qEnvironmentVariable( "WW_CELL_BAKE_CUBE_PROBES" ).split( ';', Qt::SkipEmptyParts ) ) {
+					bs.cubeDump = wwEnvStr( "WW_CELL_BAKE_CUBE_DUMP" );
+					for ( const QString & q : wwEnvStr( "WW_CELL_BAKE_CUBE_PROBES" ).split( ';', Qt::SkipEmptyParts ) ) {
 						const QStringList c = q.split( ',' );
 						if ( c.size() != 3 )
 							continue;
@@ -5083,6 +5239,21 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				  << albUntextured << ", ground quads from the splat " << albLandSplat << ", flat tone x VCLR "
 				  << albLandFlat << ", maps read " << probeAlb.texturesRead << ", missing " << probeAlb.texturesMissing
 				  << "\n";
+				{	// lane FIXPACK1 (PBRALBEDO1): written only when a .pbrm served (a vanilla bake's notes are unchanged)
+					int served = 0;
+					for ( auto it = bakePbrm.constBegin(); it != bakePbrm.constEnd(); ++it )
+						served += it.value() ? 1 : 0;
+					if ( served || pbrAlbRed )
+						t << "  bake albedo pbrm: " << served << " of " << bakePbrm.size() << " materials served by a .pbrm, "
+						  << albPbrm << " triangles read base x (1 - metallic)"
+						  << ( pbrAlbRed ? " RED diffuse (every surface read its legacy diffuse slot)" : "" ) << "\n";
+				}
+				if ( !bakePbrmTracePath.isEmpty() ) {	// lane PBRALBEDO2: diagnosis only
+					QFile tf( bakePbrmTracePath );
+					if ( tf.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+						tf.write( ( QStringLiteral( "matName\troute\tpath\trefusal\ttried\n" )
+							+ bakePbrmTrace.join( QChar( '\n' ) ) + QChar( '\n' ) ).toUtf8() );
+				}
 				// lane SMOOTHN1: where the soup's vertex normals came from
 				t << "  bake smooth normals " << ( smoothOn ? "on" : "OFF (WW_CELL_BAKE_SMOOTH=0)" ) << ", normal maps "
 				  << ( nmapOn ? "on" : "OFF" ) << ": object triangles with NIF normals " << soupSmoothTris << ", ground cells from VNML "
@@ -5122,7 +5293,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						const QString recs1 = ProbeIncr::recordsDigest( world, spec.cx, spec.cy, 0 );
 						const QString far = cellBakeFarDigest( spec.world, dataRoot, spec.cx, spec.cy, half );
 						QString rerr;
-						if ( ProbeIncr::writeRecord( QDir::cleanPath( dir ), spec.world, spec.cx, spec.cy, half, recs, recs1, far, &rerr ) )
+						// lane FARLIGHTMAP1: a far-light bake's record holds its lights too (light moves no .tbk byte)
+						const QString lights = qEnvironmentVariableIsEmpty( "WW_CELL_FARLIGHT" ) ? QString()
+							: ProbeIncr::lightsDigest( world, spec.cx, spec.cy, half );
+						if ( ProbeIncr::writeRecord( QDir::cleanPath( dir ), spec.world, spec.cx, spec.cy, half, recs, recs1, far, &rerr, lights ) )
 							t << "  bake record " << ProbeIncr::recordName() << ": " << ProbeIncr::recorded().size()
 							  << " assets, records " << recs.left( 12 ) << ", far " << far.left( 12 ) << ", "
 							  << rt.elapsed() << " ms\n";
@@ -5246,8 +5420,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * carry none. WW_CELL_PARTICLES_MAX (512) caps the copies. */
 	if ( ok && !bakeLean ) {
 		if ( wwCellParticlesOn() ) {
-			static const int cap = qEnvironmentVariableIsSet( "WW_CELL_PARTICLES_MAX" )
-				? qEnvironmentVariableIntValue( "WW_CELL_PARTICLES_MAX" ) : 512;
+			WW_SWITCH_STATIC( int, cap, wwEnvIsSet( "WW_CELL_PARTICLES_MAX" )
+				? wwEnvInt( "WW_CELL_PARTICLES_MAX" ) : 512 );
 			QHash<QString, std::shared_ptr<NifModel>> pfxSrc;	// one parse a model; null = unusable
 			QPersistentModelIndex iPfx;
 			int pfxCopies = 0, pfxSystems = 0, pfxModels = 0, pfxRefused = 0, pfxCapped = 0;
@@ -5367,6 +5541,40 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 	}
 
+	/* lane DOORLIVE1: THE LIVE DOOR. The placement WW_CELL_DOOR_ANIM names is left out of the weld above and its model
+	 * copied in whole (shapes, nodes, controllers, sequences; no collision, no lights) under a node carrying the
+	 * placement, so its own Open / Close sequence moves it (src/celldoorlive.h). */
+	if ( ok && doorLiveRef ) {
+		QString why;
+		qint32 wrapper = -1, root = -1, count = 0;
+		QString model;
+		for ( const Placement & p : placements ) {
+			if ( p.ref != doorLiveRef || !p.actorKey.isEmpty() )
+				continue;
+			model = world.lodBase( p.base ).model;
+			auto m = std::make_shared<NifModel>();
+			QByteArray bytes;
+			QBuffer dev( &bytes );
+			bool good = !model.isEmpty() && lodgenReadModelBytes( dataRoot, model, bytes ) && dev.open( QIODevice::ReadOnly )
+				&& m->load( dev, model.toLocal8Bit().constData() );
+			if ( good ) {
+				m->resetState();
+				good = m->getVersionNumber() == nif->getVersionNumber() && m->getBSVersion() == nif->getBSVersion();
+			}
+			if ( !good )
+				why = QStringLiteral( "%1 unreadable or not this version" ).arg( model );
+			else
+				count = cellCopyDoorBranch( nif, iRoot, *m, p.pos - origin, p.rot, p.scale, p.ref, &wrapper, &root, &why );
+			break;
+		}
+		if ( model.isEmpty() && why.isEmpty() )
+			why = QStringLiteral( "no placement with that ref in the cell" );
+		const QString note = count > 0 ? QStringLiteral( "%1 blocks copied, %2 welded shapes left out" ).arg( count ).arg( doorLiveShapes )
+			: QStringLiteral( "not copied: %1" ).arg( why );
+		wwDoorLiveSetBranch( nif, doorLiveRef, model, count > 0 ? wrapper : -1, count > 0 ? root : -1, count, note );
+		fprintf( stderr, "door live: ref %08x model %s: %s\n", doorLiveRef, qPrintable( model ), qPrintable( note ) );
+	}
+
 	/* THE PICK HIGHLIGHT (lane CELLVIEW2) -- created ONCE, here, and MOVED on
 	 * every click (src/cellclick.h). The scene WELDS, so the picked reference
 	 * is a few hundred vertices inside a shape holding a hundred thousand and
@@ -5386,8 +5594,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	/* lane FARLOD1: the far field around the block (cellfarlod.h) -- the Far LOD row, ships off */
 	QString farLodNotes;
 	CellFarStream farStream;   // lane CELLSTREAM1: ring 0 uncut over the roam area, a shape a cell
-	if ( qEnvironmentVariableIsSet( "WW_CELL_STREAM_ROAM" ) )
-		farStream.roam = qBound( 2, qEnvironmentVariableIntValue( "WW_CELL_STREAM_ROAM" ), 16 );
+	if ( wwEnvIsSet( "WW_CELL_STREAM_ROAM" ) )
+		farStream.roam = qBound( 2, wwEnvInt( "WW_CELL_STREAM_ROAM" ), 16 );
 	if ( !spec.interior && cellFarLodWanted() ) {
 		QStringList farSearched;
 		const QString farLodl = cellFarLodl( spec.world, dataRoot, farSearched );
@@ -5438,17 +5646,19 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	if ( !giBakeDir.isEmpty() ) {
 		if ( const WwCellLighting * L = wwCellLightsFor( nif ) ) {
 			ProbeGiSpec gs;
-			gs.red = QString::fromLatin1( qgetenv( "WW_CELL_GI_RED" ) ).trimmed();
-			if ( gs.red.isEmpty() && qgetenv( "WW_CELL_ROOMCLAMP_PIN" ).trimmed() == "off" )
+			gs.red = QString::fromLatin1( wwEnv( "WW_CELL_GI_RED" ) ).trimmed();
+			if ( gs.red.isEmpty() && wwEnv( "WW_CELL_ROOMCLAMP_PIN" ).trimmed() == "off" )
 				gs.red = QStringLiteral( "prelane" );   // lane ROOMCLAMP1 pin: no rooms, no eye fallbacks
 			// lane BRICK1: the probes gather the deck's 4 m bricks (off: their links, as before); WW_CELL_GI_BRICK_RED its refuters
-			gs.bricks = qEnvironmentVariableIntValue( "WW_CELL_GI_BRICKS" ) == 1;
-			gs.brickRed = QString::fromLatin1( qgetenv( "WW_CELL_GI_BRICK_RED" ) ).trimmed();
+			gs.bricks = wwEnvInt( "WW_CELL_GI_BRICKS" ) == 1;
+			gs.brickRed = QString::fromLatin1( wwEnv( "WW_CELL_GI_BRICK_RED" ) ).trimmed();
+			gs.emissiveGrid = wwCellEmissiveGridOn();	// lane EMISSIVEGRID1: the fine boxes round bright glow
+			gs.emissiveGridRed = QString::fromLatin1( qgetenv( "WW_CELL_EMISSIVEGRID_RED" ) ).trimmed();
 			// lane SKYPIC1 (part B, the review sheet): WW_CELL_GI_BRICK_EDGE=<game units> sizes the bricks (unset: 4 m)
-			if ( qEnvironmentVariableIsSet( "WW_CELL_GI_BRICK_EDGE" ) )
-				gs.brickEdge = qEnvironmentVariable( "WW_CELL_GI_BRICK_EDGE" ).toFloat();
-			gs.passes = qEnvironmentVariableIntValue( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
-			gs.rooms.red = QString::fromLatin1( qgetenv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
+			if ( wwEnvIsSet( "WW_CELL_GI_BRICK_EDGE" ) )
+				gs.brickEdge = wwEnvStr( "WW_CELL_GI_BRICK_EDGE" ).toFloat();
+			gs.passes = wwEnvInt( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
+			gs.rooms.red = QString::fromLatin1( wwEnv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
 			gs.space = volGiOn ? volGi : nullptr;   // lane VOLFIT1: WW_CELL_VOLUMES_GI=1, the Space rooms are the GI's rooms
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
 			// lane SKYINT1: and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
@@ -5457,7 +5667,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			gs.interiorSun = gs.interiorSky && ( cf & 0x0900u ) == 0x0900u;
 			if ( !spec.interior || gs.interiorSky ) {
 				gs.sky = probeSkyLightNow();
-				gs.skyRed = QString::fromLatin1( qgetenv( "WW_CELL_SKY_RED" ) ).trimmed();
+				gs.skyRed = QString::fromLatin1( wwEnv( "WW_CELL_SKY_RED" ) ).trimmed();
 				if ( !gs.sky.on )
 					probeNotes += QStringLiteral( "  gi sky: none (the view is not weather-lit; Scene mode Lookdev lights it with the weather)\n" );
 			}
@@ -5467,8 +5677,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			const bool giGpu = wwCellGiGpuOn();
 			/* lane FARVIEW1: WW_CELL_FARLIGHT=<folder> records the operators too, writes the light record and the far light's
 			 * layers there (src/farlight.h), and publishes the far tables for the Far light row */
-			const QString farDir = QString::fromLocal8Bit( qgetenv( "WW_CELL_FARLIGHT" ) );
-			const bool giRec = giGpu || !farDir.isEmpty();
+			const QString farDir = QString::fromLocal8Bit( wwEnv( "WW_CELL_FARLIGHT" ) );
+			const bool giRec = giGpu || !farDir.isEmpty() || wwDoorLiveWantsGi();
 			bool farBaked = false;
 			ProbeRelightOps relOps;
 			QStringList relPlugins;
@@ -5523,7 +5733,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				if ( aoSet && !aoSet->copies.empty() )
 					gs.aoDecals = aoSet;
 			}
-			if ( qEnvironmentVariableIntValue( "WW_CELL_GI_STATICCACHE_WARM" ) == 1 ) {
+			if ( wwEnvInt( "WW_CELL_GI_STATICCACHE_WARM" ) == 1 ) {
 				/* lane STATICCACHE1's gate: one relight first under another sun (turned 90 degrees, half as bright), so
 				 * the relight below is a second hour's: it takes the placed lights from the cache */
 				ProbeGiSpec gw = gs;
@@ -5572,7 +5782,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						.arg( go.msKernel[1], 0, 'f', 1 ).arg( gpu.msUpload(), 0, 'f', 1 ).arg( rel( go.B, co.B ), 0, 'g', 3 )
 						.arg( relOps.doorRefs.size() ).arg( cs.ms, 0, 'f', 1 ).arg( gsh.ms, 0, 'f', 1 ).arg( rel( gsh.B, cs.B ), 0, 'g', 3 )
 						.arg( cs.slotsEmptied ).arg( sum( cs.B ) / std::max( sum( co.B ), 1e-30 ), 0, 'f', 4 );
-				const QString recDir = QString::fromLocal8Bit( qgetenv( "WW_CELL_GI_RECORDS" ) );
+				const QString recDir = QString::fromLocal8Bit( wwEnv( "WW_CELL_GI_RECORDS" ) );
 				if ( !recDir.isEmpty() ) {
 					QString rerr, rcensus;
 					probeNotes += probeRelightWriteRecords( relOps, recDir, relPlugins, &rerr, &rcensus )
@@ -5591,8 +5801,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				} else {
 					probeNotes += QStringLiteral( "  %1\n" ).arg( rc );
 					FarLightBakeSpec fs;
-					fs.red = QString::fromLatin1( qgetenv( "WW_CELL_FARLIGHT_RED" ) ).trimmed();
-					fs.dump = !qgetenv( "WW_CELL_FARLIGHT_DUMP" ).isEmpty();
+					fs.red = QString::fromLatin1( wwEnv( "WW_CELL_FARLIGHT_RED" ) ).trimmed();
+					fs.dump = !wwEnv( "WW_CELL_FARLIGHT_DUMP" ).isEmpty();
 					FarLightBakeOut fo;
 					farBaked = farLightBake( relOps, farDir, fs, &fo, &ferr );
 					probeNotes += farBaked ? QStringLiteral( "  %1\n" ).arg( fo.census ) : QStringLiteral( "  far light bake FAILED: %1\n" ).arg( ferr );
@@ -5607,7 +5817,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				gi.voxel = gr.voxel;
 				gi.summary = QStringLiteral( "grid %1x%2x%3 voxel %4" ).arg( gr.dims[0] ).arg( gr.dims[1] ).arg( gr.dims[2] )
 					.arg( double( gr.voxel ), 0, 'f', 1 );
-				const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_GI_DUMP" ) );
+				const QString dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_GI_DUMP" ) );
 				QString derr;
 				if ( !dump.isEmpty() && !probeGiDump( gr, gs, dump, &derr ) )
 					probeNotes += QStringLiteral( "  gi dump FAILED: %1\n" ).arg( derr );
@@ -5619,7 +5829,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				gi.skyLit = gr.skyLit && !spec.interior && gs.skyRed != QLatin1String( "keepamb" );
 				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
 				if ( volGiOn ) {   // lane VOLFIT1: the Space rooms as the GI's volumes (the room grid now carries their ids)
-					const ProbeVolumesGi vg = probeVolumesToGi( *volGi, gr.rooms, 0.2f, QString::fromLatin1( qgetenv( "WW_CELL_VOLUMES_GI_RED" ) ) );
+					const ProbeVolumesGi vg = probeVolumesToGi( *volGi, gr.rooms, 0.2f, QString::fromLatin1( wwEnv( "WW_CELL_VOLUMES_GI_RED" ) ) );
 					probeNotes += QStringLiteral( "  %1\n" ).arg( vg.census );
 					for ( const QString & l : vg.log )
 						probeNotes += QStringLiteral( "  space to GI: %1\n" ).arg( l );
@@ -5630,6 +5840,23 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				}
 				probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1: the second slots and the rooms
 				wwCellGiPublish( nif, gi );
+				if ( wwDoorLiveWantsGi() ) {   // lane DOORLIVE1: the live door's GI follows from these operators
+					if ( relOps.built ) {
+						std::vector<WwDoorLiveBox> boxes;
+						for ( const ProbeSoup::Door & d : probeSoup.doors ) {
+							WwDoorLiveBox bx;
+							bx.ref = d.ref;
+							for ( int k = 0; k < 3; k++ ) {
+								bx.lo[k] = d.lo[k];
+								bx.hi[k] = d.hi[k];
+							}
+							boxes.push_back( bx );
+						}
+						probeNotes += wwDoorLiveKeepGi( nif, relOps, gi, boxes );
+					} else {
+						probeNotes += QStringLiteral( "  door live: no relight operators recorded; the GI does not follow\n" );
+					}
+				}
 				wwCellAoDecalPublish( nif, gs.aoDecals );	// lane AODECAL1 (null: no decals)
 				if ( farBaked ) {	// lane FARVIEW1: the far tables for the group state, and the GI's placed share
 					FarLightSet set;
@@ -5638,7 +5865,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						probeNotes += QStringLiteral( "  far light load FAILED: %1\n" ).arg( ferr );
 					} else {
 						// WW_CELL_FARLIGHT_STATE: start (each group as the game starts it; the default) | all | none
-						const QByteArray st = qgetenv( "WW_CELL_FARLIGHT_STATE" ).trimmed();
+						const QByteArray st = wwEnv( "WW_CELL_FARLIGHT_STATE" ).trimmed();
 						auto on = [&]( quint64, bool onAtStart ) { return st == "all" ? true : st == "none" ? false : onAtStart; };
 						std::vector<float> E;
 						farLightSum( set, on, E );
@@ -5646,7 +5873,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						farLightTables( set, E, fr.slotTab, fr.recs, &fr.bits, &fr.maxProbe );
 						fr.cell = set.cell;
 						fr.records = int( set.recs.size() );
-						const QStringList band = QString::fromLatin1( qgetenv( "WW_CELL_FAR_BAND" ) ).split( QLatin1Char( ',' ) );
+						const QStringList band = QString::fromLatin1( wwEnv( "WW_CELL_FAR_BAND" ) ).split( QLatin1Char( ',' ) );
 						if ( band.size() == 2 && band[0].toFloat() > 0.0f && band[1].toFloat() > band[0].toFloat() ) {
 							fr.band[0] = band[0].toFloat();
 							fr.band[1] = band[1].toFloat();
@@ -5718,7 +5945,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			s << "  cell flags 0x" << QString::number( ic.flags, 16 ).rightJustified( 4, '0' ) << ": Show Sky "
 			  << ( ( cf & 0x0080u ) ? "yes" : "no" ) << ", Use Sky Lighting " << ( ( cf & 0x0100u ) ? "yes" : "no" )
 			  << ", Sunlight Shadows " << ( ( cf & 0x0800u ) ? "yes" : "no" )
-			  << ( cf != ic.flags ? QStringLiteral( " (RED %1)" ).arg( QString::fromLatin1( qgetenv( "WW_CELL_SKYINT_RED" ) ) ) : QString() )
+			  << ( cf != ic.flags ? QStringLiteral( " (RED %1)" ).arg( QString::fromLatin1( wwEnv( "WW_CELL_SKYINT_RED" ) ) ) : QString() )
 			  << "\n";
 		} else {
 			s << "cell view " << spec.world << " " << spec.cx << "," << spec.cy
@@ -5786,7 +6013,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 		s << cellDecalCensusLine( decalResult );   // lane PLACED1
 		s << actors.censusLine();
-		actors.dump( QString::fromLocal8Bit( qgetenv( "WW_CELL_ACTOR_DUMP" ) ) );
+		actors.dump( QString::fromLocal8Bit( wwEnv( "WW_CELL_ACTOR_DUMP" ) ) );
 		s << "  buckets over 65,536 vertices " << bucketsWide << " (largest " << qulonglong( bucketMaxVerts )
 		  << "), shapes drawn with their own vertex colors " << shapesVertexColor
 		  << ", placements drawn with a material swap " << placementsSwapped
@@ -5842,9 +6069,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		s << "  " << wwCellGrassEcho( nif ) << "\n";   // lane GRASSMB1
 		/* lane WATER1: the reader gate's records -- WW_CELL_WATER_DUMP_FORMS=<hex,hex,...> describes each into
 		 * WW_CELL_WATER_DUMP + ".forms" (a form that is no WATR: "WATR <form> NONE") */
-		const QString dumpForms = qEnvironmentVariable( "WW_CELL_WATER_DUMP_FORMS" );
-		if ( !dumpForms.isEmpty() && qEnvironmentVariableIsSet( "WW_CELL_WATER_DUMP" ) ) {
-			QFile ff( qEnvironmentVariable( "WW_CELL_WATER_DUMP" ) + QStringLiteral( ".forms" ) );
+		const QString dumpForms = wwEnvStr( "WW_CELL_WATER_DUMP_FORMS" );
+		if ( !dumpForms.isEmpty() && wwEnvIsSet( "WW_CELL_WATER_DUMP" ) ) {
+			QFile ff( wwEnvStr( "WW_CELL_WATER_DUMP" ) + QStringLiteral( ".forms" ) );
 			if ( ff.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
 				QTextStream fo( &ff );
 				for ( const QString & h : dumpForms.split( ',', Qt::SkipEmptyParts ) ) {
@@ -5942,7 +6169,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	cellMeshSaveIfAsked( nif );   // lane SPEED1: WW_CELL_SPEED_SAVE, the gate's saved-file check
 
 	// ---- the placement dump: a gate cannot count placements in welded geometry
-	const QByteArray dump = qgetenv( "WW_CELL_DUMP" );
+	const QByteArray dump = wwEnv( "WW_CELL_DUMP" );
 	if ( !dump.isEmpty() ) {
 		QFile f( QString::fromLocal8Bit( dump ) );
 		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
@@ -5986,7 +6213,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	/* WW_CELL_LIGHTS (lane PRTP1): one row per placed light, the columns the
 	 * independent walk (scratchpad/prtp1_20260930/light_census.py) writes, so the
 	 * gate is a diff. Sorted by ref form. */
-	const QByteArray lightDump = qgetenv( "WW_CELL_LIGHTS" );
+	const QByteArray lightDump = wwEnv( "WW_CELL_LIGHTS" );
 	if ( !lightDump.isEmpty() ) {
 		QFile f( QString::fromLocal8Bit( lightDump ) );
 		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
@@ -6020,7 +6247,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * (tests/spells/cell_census.py) and a disagreement is a reading defect
 	 * rather than a drawing one. The two dumps together are how "the list shows
 	 * everything, and the viewport draws some of it" is checked as arithmetic. */
-	const QByteArray refdump = qgetenv( "WW_CELL_REFDUMP" );
+	const QByteArray refdump = wwEnv( "WW_CELL_REFDUMP" );
 	if ( !refdump.isEmpty() ) {
 		QFile f( QString::fromLocal8Bit( refdump ) );
 		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {

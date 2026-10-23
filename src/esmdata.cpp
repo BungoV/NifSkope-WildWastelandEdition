@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "esmdata.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "esmwater.h"
 
 #include <cstdio>
@@ -54,7 +55,7 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 	/* WW_ESM_TRACE=1: where load() is, on stderr, unbuffered. Put in for a
 	 * FO76 plugin that blocked with zero CPU while listWorldspaces() on the
 	 * same file returned at once; the trace says which step never returns. */
-	const bool trace = qEnvironmentVariableIsSet( "WW_ESM_TRACE" );
+	const bool trace = wwEnvIsSet( "WW_ESM_TRACE" );
 	auto tr = [trace]( const char * what ) {
 		if ( trace ) {
 			std::fputs( what, stderr );
@@ -98,7 +99,7 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 		tr( "load: header fields read, indexing cells" );
 		indexWorldspace();
 		tr( "load: cells indexed" );
-		if ( wnam && ( pnam & 1 ) && !qEnvironmentVariableIsSet( "WW_CELL_PARENTLAND_RED" ) ) {	// lane ALLON2 (esmdata.h)
+		if ( wnam && ( pnam & 1 ) && !wwEnvIsSet( "WW_CELL_PARENTLAND_RED" ) ) {	// lane ALLON2 (esmdata.h)
 			landParent = esm->mapFormID( w, wnam );
 			indexParentLand();
 		}
@@ -244,7 +245,7 @@ void EsmWorld::indexWorldspace()
 				extraCellGroups++;
 			}
 	}
-	if ( qEnvironmentVariableIsSet( "WW_ESM_TRACE" ) )
+	if ( wwEnvIsSet( "WW_ESM_TRACE" ) )
 		std::fprintf( stderr, "index: %d later world group(s), %d later cell group(s) joined, %d persistent\n",
 			extraWorldGroups, extraCellGroups, int( persistentExtraGroups.size() ) );
 }
@@ -1752,8 +1753,9 @@ const EsmLight & EsmWorld::light( quint32 formID ) const
 					L.nearClip = f.readFloat();
 				}
 				if ( f.size() >= 52 ) {
-					for ( int i = 0; i < 3; i++ )
-						(void) f.readFloat();       // flicker period, intensity, movement
+					L.flickerPeriod = f.readFloat();	// lane LIGHTFLICKER1: Flicker Effect (run by flags 0x8, 0x180)
+					L.flickerIntensity = f.readFloat();
+					L.flickerMovement = f.readFloat();
 					L.constant = f.readFloat();
 					L.scalar = f.readFloat();
 					L.exponent = f.readFloat();

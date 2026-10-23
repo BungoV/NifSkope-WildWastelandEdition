@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENSE BLOCK *****/
 
 #include "cellfarvanilla.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gamemanager.h"
 #include "lodgen.h"
@@ -770,7 +771,7 @@ qint64 wwFarVanObjectCensus( const QString & ws, int level, int x0, int y0, int 
 	 * so a launch after the first reads the bytes but does not parse the model again (~20 s at 3x3 to ~1 s). */
 	static QHash<QByteArray, qint64> cache;
 	static bool cacheRead = false;
-	const bool useCache = qEnvironmentVariable( "WW_FARCENSUS_CACHE" ) != "0";
+	const bool useCache = wwEnvStr( "WW_FARCENSUS_CACHE" ) != "0";
 	const QString cachePath = QCoreApplication::applicationDirPath() + QStringLiteral( "/shadercache/census.tsv" );
 	if ( useCache && !cacheRead ) {
 		cacheRead = true;

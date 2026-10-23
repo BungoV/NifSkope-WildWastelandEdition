@@ -139,7 +139,11 @@ flat in vec4 D;
 in mat3 btnMatrix;
 flat in mat3 reflMatrix;
 
-out vec4 fragColor;
+layout ( location = 0 ) out vec4 fragColor;
+#ifdef WW_CELLLIGHTS
+// lane SSGI2: the scene pass's second target, the emitted share alone (the bounce's emissive cast; 0 elsewhere)
+layout ( location = 1 ) out vec4 cellEmitOut;
+#endif
 
 #ifndef M_PI
 	#define M_PI 3.1415926535897932384626433832795
@@ -384,6 +388,9 @@ void directLight( Surface s, vec3 L, vec3 V, vec3 ms, out vec3 dDiff, out vec3 d
 
 void main()
 {
+#ifdef WW_CELLLIGHTS
+	cellEmitOut = vec4( 0.0 );
+#endif
 	vec2 offset = texCoord.st * uvScale + uvOffset;
 
 	// --- base colour / opacity ---
@@ -552,6 +559,7 @@ void main()
 	// surface cannot see of the environment, and applying it to a direct lobe
 	// double-darkens contact shadows.
 	vec3 preAmbDiff = outDiff;	// lane SKY1: what the block below adds is the ambient's diffuse
+	vec3 preAmbSpec = outSpec;	// lane SPECOCC1: what the block below adds is the cube reflection
 	if ( sceneMode >= 1 && hasStudioCube ) {
 		// Studio: the SFCubeMapCache pair. The irradiance cube is the radiance
 		// average (a uniform cube L stays L), so Lambert takes it without 1/PI.
@@ -671,6 +679,10 @@ void main()
 			// lane SKY1: the grid's sky stands in for the weather's unshadowed ambient by its valid share,
 			// and takes the material's AO as that ambient did
 			outDiff += cDiff + giDiff * s.ao - cellGiSkyK( Pw, sw.N ) * ( outDiff - preAmbDiff );
+			// lane SPECOCC1: the cube reflection keeps the sky visibility along R (exactly 1 with the row off: untouched)
+			float specSky = cellSpecSky( Pw, sw.N, cellWorldDir( R ), s.rough );
+			if ( specSky < 1.0 )
+				outSpec = preAmbSpec + ( outSpec - preAmbSpec ) * specSky;
 			outSpec += cSpec;
 		} else {
 			outDiff += cDiff + giDiff;
@@ -685,6 +697,7 @@ void main()
 	// --- emission (ED:2519-2521): colour x mask x luminance/100, added before exposure,
 	// never the legacy glow scale. A map REPLACES the constant colour / mask unless that
 	// channel is overridden. Red "emitmul": the old constant x map law; "emitraw": no /100.
+	vec3 pbrEmitLin = vec3( 0.0 );	// lane SSGI2: the emission alone (cellEmitOut)
 	if ( pbrEmissiveIntensity > 0.0 && r3Term == 0 ) {
 		vec3 ecol = pow( max( pbrEmissiveColor, vec3( 0.0 ) ), vec3( 2.2 ) );
 		float emask = pbrEmissiveMask;
@@ -699,11 +712,16 @@ void main()
 				if ( pbrEmissiveMapMask ) emask = em.a;
 			}
 		}
-		color.rgb += ecol * emask * pbrEmissiveIntensity * ( ( r4Red & 8 ) != 0 ? 100.0 : 1.0 );
+		pbrEmitLin = ecol * emask * pbrEmissiveIntensity * ( ( r4Red & 8 ) != 0 ? 100.0 : 1.0 );
+		color.rgb += pbrEmitLin;
 	}
 
 #ifdef WW_CELLLIGHTS
 	vec3 cellSsrScene = color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
+	if ( cellOn && cellProbe == 60 ) {
+		vec3 em = clamp( pbrEmitLin, vec3( 0.0 ), max( cellSsrScene, vec3( 0.0 ) ) );	// lane SSGI2: coverage in a
+		cellEmitOut = vec4( em, dot( em, vec3( 0.2126, 0.7152, 0.0722 ) ) > 1.0e-6 ? 1.0 : 0.0 );
+	}
 	// lane AO1: the ambient obscurance on the whole lit colour, before the fog
 	if ( cellOn )
 		color.rgb *= cellAoFactor();

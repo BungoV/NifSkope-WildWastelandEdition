@@ -223,13 +223,19 @@ private:
 	// lane CELLALL1: the second row, the features that were env-only (their defaults unchanged; new ones ship off)
 	QAction * cellAo = nullptr;
 	QAction * cellShadow = nullptr;
+	QAction * cellFlicker = nullptr;	// lane LIGHTFLICKER1: the lamps' LIGH flicker (ships off)
+	QMenu * cellLampShadow = nullptr;	// lane LAMPSHADOW1: Off | Low | Medium | High | Ultra
+	QActionGroup * cellLampShadowGroup = nullptr;
 	QAction * cellSsr = nullptr;
 	QAction * cellSsrExt = nullptr;
+	QAction * cellReflProbe = nullptr;	// lane REFLPROBE1
 	QAction * cellSsgi = nullptr;	// lane SSGI1
 	QMenu * cellSsgiQ = nullptr;
 	QActionGroup * cellSsgiQGroup = nullptr;
 	QAction * cellAoDecal = nullptr;
+	QAction * cellSpecOcc = nullptr;	// lane SPECOCC1: specular occlusion from the baked sky visibility; ships off
 	QAction * cellGiGpu = nullptr;
+	QAction * cellEmissiveGrid = nullptr;	// lane EMISSIVEGRID1
 	QAction * cellParticles = nullptr;	// lane SUNCELL1: placed models' particle systems (cellview.h); ships off
 	QAction * cellGrass = nullptr;    // lane GRASSMB1: the game's grass (placed at cell open)
 	QAction * cellDof = nullptr;      // lane GRASSMB1: the game's depth of field

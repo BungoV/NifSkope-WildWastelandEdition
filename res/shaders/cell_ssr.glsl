@@ -23,6 +23,7 @@ vec3 cellSsrMix( vec3 cubeK, float gloss, float spec, float envScale )
 	if ( !cellSsrOn )
 		return cubeK;
 	vec4 s = cellSsrTexel();
+	cellReflAdd *= 1.0 - min( s.a, 1.0 );	// lane REFLPROBE1: the march's confidence takes the probes' share too
 	float k = 3.0 * clamp( spec, 0.0, 1.0 ) * min( sqrt( clamp( clamp( gloss, 0.0, 1.0 ) - 0.3, 0.0, 1.0 ) ), 1.0 )
 		* clamp( envScale, 0.0, 50.0 );
 	return mix( cubeK, s.rgb * k, min( s.a, 1.0 ) );

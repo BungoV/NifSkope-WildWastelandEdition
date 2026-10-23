@@ -97,6 +97,10 @@ struct WwCellLight
 	float box[3][4] = {};           //!< lane HEMI1: box local coordinate k = dot(box[k].xyz, P) + box[k].w, inside |k| <= 1
 	quint32 ref = 0;                //!< lane GPURELIGHT1: the placed reference (0: none, an effect's light)
 	float godRay = 0.0f;            //!< lane VOLFOG1: a shaft emitter (a shadow flag AND a WGDR): its GDRY's intensity; 0 none
+	//! lane LIGHTFLICKER1: 0 steady, 1 flicker (LIGH flag 0x8), 2 pulse (0x80 | 0x100), with DATA's Flicker Effect
+	int flicker = 0;
+	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;
+	float flickerAxes[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };	//!< the ref's local x, y, z in world, x its scale
 };
 
 //! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
@@ -195,8 +199,17 @@ struct WwCellGi
 	 *  slot 1's; the slot texture's g, b, a) */
 	std::vector<float> volShapes, slotThresh;
 	QString volCensus;
+	/*! lane EMISSIVEGRID1 (src/probegifine.h): the fine boxes round bright glow, 8 floats a box, and their atlas (dims[0] x
+	 *  dims[1] a layer, fineLayers layers, rgba), uploaded after the grid's own layers; empty: none (the row off) */
+	std::vector<float> fineBox, fine;
+	int fineLayers = 0;
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
+/*! lane EMISSIVEGRID1: the Emissive GI grid row (ships off): WW/CellEmissiveGrid, pin WW_CELL_EMISSIVEGRID (read when a
+ *  cell opens: the row reopens it). Red WW_CELL_EMISSIVEGRID_RED=1|old: nothing built or drawn (the old path and cost);
+ *  =noseen|nosub: the shader's refuters (no seen test; no coarse share taken out). */
+bool wwCellEmissiveGridOn();
+void wwCellEmissiveGridSetOn( bool on );
 
 /*! lane PROBEVIEW1: the PRTP band's Pass (Division deck, s18/s40/s65 views). 0 Combined (the frame as drawn),
  *  1 GI (the probe grid's E / pi on the surface's normal), 2 Sky visibility (the probes' open-sky share on the
@@ -240,6 +253,15 @@ float wwCellSkyVis();
 bool wwCellSkyVisPinned();
 void wwCellSkyVisSetPercent( int pct );
 
+/*! Lane SPECOCC1: specular occlusion from the baked sky visibility (FO4CS's horizon specular occlusion), on top of the
+ *  material AO: outdoors the cube reflection keeps the sky grid's visibility along the reflection. WW/CellSpecOcc, ships
+ *  off; pin WW_CELL_SPECOCC=0|1. Red WW_CELL_SPECOCC_RED=ao: the material AO alone (today's), hemi: FO4CS's literal
+ *  read (the normal's sky visibility faded out by smoothness). Mode: 0 off, 1 on, 2 hemi. */
+bool wwCellSpecOccOn();
+bool wwCellSpecOccPinned();
+void wwCellSpecOccSetOn( bool on );
+int wwCellSpecOccMode();
+
 /*! lane FARVIEW1 (src/farlight.h, docs/cloud/FARVIEW1_DESIGN.md): DISTANT LIGHT FROM THE SURFELS. Past the band's
  *  near end D0 a surface's placed-light diffuse fades from the real lights to the bake's surfels (w = smoothstep(D0, D1,
  *  the camera distance)): (1 - w)(real + the GI grid's placed share) + w x albedo x F, F the 27-cell same-side lookup.
@@ -276,6 +298,22 @@ int wwCellFarDotsDraw( Scene * scene );
 //! the Cell lights row (ships off); the pin WW_CELL_LIT wins
 bool wwCellLightsOn();
 void wwCellLightsSetOn( bool on );
+
+/*! LIGHT FLICKER (lane LIGHTFLICKER1): a placed LIGH with flag 0x8 (flicker) or 0x80 / 0x100 (pulse) varies each frame as
+ *  the game does (measured; celllights.cpp wwCellFlickerFrame): a dimmer on its colour and an
+ *  offset of its position. One value per light per frame, written into the light buffer that the surfaces, the effects
+ *  and the air all read, so they always agree. The bake (GI, relight, far light) keeps the steady light.
+ *  The Light flicker row ships off (WW/CellFlicker; the pin WW_CELL_FLICKER wins). WW_CELL_FLICKER_RED=1 holds every
+ *  light steady (dimmer 1, no offset: the row-off picture). WW_CELL_FLICKER_STEP=<seconds> a fixed step a frame (gates),
+ *  WW_CELL_FLICKER_DUMP=<file> one line per flickering light per frame. */
+bool wwCellFlickerOn();
+void wwCellFlickerSetOn( bool on );
+//! once a frame, before the draw: advance the scene's document's flickering lights by the frame's time
+void wwCellFlickerFrame( Scene * scene );
+//! the view should repaint every frame: the row on and not red, cell-lit, the document has a flickering light
+bool wwCellFlickerWantsFrames( Scene * scene );
+//! light i's value this frame (dimmer on its colour, world offset); false (1, 0) when it is steady
+bool wwCellFlickerOf( const void * nif, qsizetype i, float * dimmer, float offset[3] );
 
 //! this scene draws cell-lit: the row on, the scene's document published, a perspective non-picking draw
 bool wwCellLightsWanted( Scene * scene );
@@ -352,6 +390,8 @@ QString wwCellImageSpaceEcho( Scene * scene );
  *  factor 1: the gate's refuter). Probe 7: the shadow factors of slots 0, 1, 2 in r, g, b (0.5 / 255 marks a
  *  pixel out of that light's reach). */
 void wwCellShadowPass( Scene * scene );
+//! lane DOORLIVE1: a caster moved (a live door): the next pass re-renders every held shadow slot
+void wwCellShadowKick( const void * nif );
 QString wwCellShadowEcho( Scene * scene );
 
 /*! THE AMBIENT OBSCURANCE (lane AO1, docs/PRTP_PLAN.md "ambient obscurance"): the game's screen-space obscurance, from its own
@@ -372,5 +412,7 @@ QString wwCellShadowEcho( Scene * scene );
 void wwCellAoPass( Scene * scene, bool run );
 //! called with every program setupProgram binds: the opaque pass's masks, and the obscurance a cell-lit draw reads
 void wwCellAoDraw( Scene * scene, bool cellProgram );
+//! lane PERF3: the opaque pass is drawing
+bool wwCellAoInPass();
 
 #endif

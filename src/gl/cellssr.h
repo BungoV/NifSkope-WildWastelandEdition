@@ -49,6 +49,17 @@ void wwCellSsrNote( bool flagged );
 //! called with every program setupProgram binds: the scene pass's masks, and the reflection a flagged draw reads
 void wwCellSsrDraw( Scene * scene, bool cellProgram );
 
+/*! Lane PERF3: WW_CELL_SSR_PREV=1 (a look change, ships off; WW_CELL_SSR_PREV_RED=1 or WW_PERF3_RED=1: the second
+ *  scene pass as before). The reflections draw no second scene pass: the obscurance pass writes the flag into
+ *  stencil bit 0x01 of its depth buffer, and a hit samples the previous frame's linear color (kept at the end of
+ *  the HDR frame) reprojected into its camera. Falls back to the scene pass when there is no previous frame of
+ *  this size and document, when the water's rays or the bounce need the pass. */
+bool wwCellSsrPrevStencil();
+//! the flag of the draw being set up (wwCellSsrNote)
+bool wwCellSsrFlagged();
+//! the end of the HDR frame: keep its resolved color and camera for the next frame's reflections
+void wwCellSsrKeepFrame( Scene * scene, unsigned int hdrFbo, int w, int h );
+
 /*! Lane WATER2: THE WATER'S REFLECTIONS (the game's water ray pass, asm 02100; the water reads them in 02102).
  *  When a cell water surface draws (src/gl/cellwater.h) and its WATR's SSR flag is set, wwCellSsrPass also
  *  draws the water once more into a full-size ray target (fo4_water.frag with waterSslr = 1: the ray into the
@@ -60,6 +71,9 @@ bool wwCellSsrWaterRayPass( unsigned int * gbufTex );
 bool wwCellSsrInPass();
 //! lane SSGI1: this frame's scene pass (full size RGBA32F, bottom row first), drawn for the reflections or the bounce
 bool wwCellSsrSceneTexture( Scene * scene, unsigned int & tex );
+//! lane SSGI2: the same pass's emitted share (full size RGBA16F, a = coverage, mips 0..4); only while the bounce's
+//! emissive cast wants it (wwCellSsgiWantsEmission)
+bool wwCellSsrEmissionTexture( Scene * scene, unsigned int & tex );
 //! this frame's march and its blurred result for the water (half the view, top row first, bilinear)
 bool wwCellSsrWaterTextures( Scene * scene, unsigned int & raw, unsigned int & fin );
 

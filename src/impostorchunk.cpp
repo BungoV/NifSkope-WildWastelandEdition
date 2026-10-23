@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "impostorchunk.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -67,6 +68,16 @@ CellFarState & farSt()
 {
 	static CellFarState s;
 	return s;
+}
+//! lane FARCARD1: bumped on every arm and forget, so the instanced pass rebuilds its frame tables
+quint64 & farGenRef()
+{
+	static quint64 g = 0;
+	return g;
+}
+quint64 farGen()
+{
+	return farGenRef();
 }
 
 const char * kSettingsKey = "GLView/ImpostorChunkCards";
@@ -149,8 +160,8 @@ bool ImpostorChunk::enabled()
 	 * to switch the master on without writing to the person's QSettings -- a
 	 * harness that persists the state it forced is the known cause of the
 	 * standing `native_open.sh` red. */
-	if ( qEnvironmentVariableIsSet( "WW_IMPOSTOR_CHUNK" ) )
-		return qEnvironmentVariableIntValue( "WW_IMPOSTOR_CHUNK" ) != 0;
+	if ( wwEnvIsSet( "WW_IMPOSTOR_CHUNK" ) )
+		return wwEnvInt( "WW_IMPOSTOR_CHUNK" ) != 0;
 	return QSettings().value( QLatin1String( kSettingsKey ), false ).toBool();
 }
 
@@ -265,7 +276,7 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 			 * wrote with the model's layer in it. An install that carries the atlas and not the per-model set
 			 * (his FO4CSLOD: 79 sets named, no Cards folder) draws the atlas layer -- the same bake's card --
 			 * and says which one served. WW_CELL_FARLOD_RED=noatlas keeps the old refusal. */
-			static const bool noAtlas = qgetenv( "WW_CELL_FARLOD_RED" ) == "noatlas";
+			WW_SWITCH_STATIC( bool, noAtlas, wwEnv( "WW_CELL_FARLOD_RED" ) == "noatlas" );
 			if ( path.isEmpty() && !p.c.arrayLodm.isEmpty() && !noAtlas ) {
 				path = resolveLodm( nif, s.chunkDir, p.c.arrayLodm );
 				if ( !path.isEmpty() )
@@ -423,6 +434,7 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 {
 	CellFarState & F = farSt();
 	F = CellFarState();
+	farGenRef()++;
 	F.shift[0] = shift[0];
 	F.shift[1] = shift[1];
 	F.shift[2] = shift[2];
@@ -516,7 +528,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	 * shapes). Cards cast no sun shadow (they are no document shape), so no cascade asks for them.
 	 * WW_CELL_FARLOD_RED=nocardcull draws every card: the picture must not change, the count must. */
 	float pl[4][4];
-	bool cull = qgetenv( "WW_CELL_FARLOD_RED" ) != "nocardcull" && scene->renderer
+	bool cull = wwEnv( "WW_CELL_FARLOD_RED" ) != "nocardcull" && scene->renderer
 		&& scene->renderer->globalUniforms->projectionMatrix[3][3] != 1.0f;
 	if ( cull ) {
 		const auto & pm = scene->renderer->globalUniforms->projectionMatrix;	// pm[column][row]
@@ -535,6 +547,10 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 					pl[i][c] /= l;
 		}
 	}
+	// lane FARCARD1: the culled cards go to one instanced draw per set; WW_FARCARD=0 / _RED=percard draw them one by one
+	const bool inst = opt.cellLit && ImpostorDraw::instancedOn( scene );
+	static QVector< ImpostorDraw::InstCard > instCards;
+	instCards.clear();
 	ImpostorDraw::batchBegin();	// lane PERF1: the program, pass uniforms and sheets bound once, not per card
 	for ( const Placed & p : std::as_const( s.placed ) ) {
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() )
@@ -557,6 +573,17 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		o.worldScale = p.scale;
 		if ( o.swayAmplitude != 0.0f )   // a forest does not sway as one
 			o.swayPhase += 0.0021f * p.world[0] + 0.0017f * p.world[1];
+		if ( inst && s.sets.at( p.setIndex ).ok ) {
+			ImpostorDraw::InstCard c;
+			c.set = &s.sets.at( p.setIndex );
+			c.offset[0] = p.world[0] - F.shift[0];
+			c.offset[1] = p.world[1] - F.shift[1];
+			c.offset[2] = p.world[2] - F.shift[2];
+			c.scale = p.scale;
+			c.swayPhase = o.swayPhase;
+			instCards << c;
+			continue;
+		}
 		QString why;
 		if ( ImpostorDraw::drawCard( scene, s.sets.at( p.setIndex ),
 				Vector3( p.world[0] - F.shift[0], p.world[1] - F.shift[1], p.world[2] - F.shift[2] ), o, &why ) )
@@ -565,13 +592,45 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			firstWhy = QFileInfo( s.sets.at( p.setIndex ).lodmPath ).fileName() + QStringLiteral( ": " ) + why;
 	}
 	ImpostorDraw::batchEnd( scene );
+	ImpostorDraw::InstStats ist;
+	if ( !instCards.isEmpty() ) {
+		if ( ImpostorDraw::drawCardsInstanced( scene, instCards, opt, farGen(), &ist ) ) {
+			drawn += ist.drawn;
+			if ( ist.refused && !refused )
+				firstWhy = ist.firstWhy;
+			refused += ist.refused;
+		} else {	// the instanced program is missing: the cards the old way, so nothing vanishes
+			ImpostorDraw::batchBegin();
+			for ( const ImpostorDraw::InstCard & c : std::as_const( instCards ) ) {
+				ImpostorDraw::Options o = opt;
+				o.worldScale = c.scale;
+				o.swayPhase = c.swayPhase;
+				QString why;
+				if ( ImpostorDraw::drawCard( scene, *c.set, Vector3( c.offset[0], c.offset[1], c.offset[2] ), o, &why ) )
+					drawn++;
+				else if ( refused++ == 0 )
+					firstWhy = QFileInfo( c.set->lodmPath ).fileName() + QStringLiteral( ": " ) + why;
+			}
+			ImpostorDraw::batchEnd( scene );
+			ist.sets = -1;
+		}
+	}
+	static int saidSets = -2, saidDraws = -1;
+	if ( inst && ( ist.sets != saidSets || ist.draws != saidDraws ) ) {
+		saidSets = ist.sets;
+		saidDraws = ist.draws;
+		qInfo().noquote() << ( ist.sets < 0
+			? QStringLiteral( "far cards: instanced program missing, drawn one by one" )
+			: QStringLiteral( "far cards: instanced, %1 cards in %2 draws (%3 sets), %4 KB a frame" )
+				.arg( ist.drawn ).arg( ist.draws ).arg( ist.sets ).arg( double( ist.bytes ) / 1024.0, 0, 'f', 1 ) );
+	}
 	if ( drawn != saidDrawn || outside != saidOut ) {
 		saidDrawn = drawn;
 		saidOut = outside;
 		qInfo().noquote() << QStringLiteral( "far lod: drew %1 cards of %2 placed, %3 outside the camera%4%5" )
 			.arg( drawn ).arg( s.placed.size() ).arg( outside )
 			.arg( cull ? QString() : QStringLiteral( " (cull off%1)" )
-				.arg( qgetenv( "WW_CELL_FARLOD_RED" ) == "nocardcull" ? QStringLiteral( ", RED nocardcull" ) : QString() ) )
+				.arg( wwEnv( "WW_CELL_FARLOD_RED" ) == "nocardcull" ? QStringLiteral( ", RED nocardcull" ) : QString() ) )
 			.arg( refused ? QStringLiteral( ", %1 refused by the drawer (first: %2)" ).arg( refused ).arg( firstWhy ) : QString() );
 	}
 	return drawn;
@@ -580,6 +639,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 void ImpostorChunk::forgetCellFar()
 {
 	farSt() = CellFarState();
+	farGenRef()++;
 }
 
 int ImpostorChunk::cellFarCount()

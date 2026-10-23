@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENSE BLOCK *****/
 
 #include "cellmodpick.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellmodsource.h"
 #include "lodbfile.h"
@@ -74,7 +75,7 @@ QString modOfPath( const QString & path )
 
 bool red( const char * what )
 {
-	return qgetenv( "WW_MODPICK_RED" ) == what;
+	return wwEnv( "WW_MODPICK_RED" ) == what;
 }
 
 CellModRow sourceRow( const QString & path, const QString & mod )

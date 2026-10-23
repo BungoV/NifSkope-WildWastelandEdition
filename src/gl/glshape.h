@@ -76,6 +76,10 @@ public:
 	void drawBoundingBox( const Vector3 & boundsCenter, const Vector3 & boundsDims, FloatVector4 color ) const;
 	void setUniforms( NifSkopeOpenGLContext::Program * prog ) const;
 	bool bindShape() const;
+	// lane GPUDRIVEN1: the content hash bindShape keys the geometry cache with, kept until the shape changes; no
+	// upload, nullptr without geometry. vertexAttrs (16 entries) receives the attribute table when given.
+	const NifSkopeOpenGLContext::ShapeDataHash * wwDataHash( const float ** vertexAttrs = nullptr ) const;
+	std::uint64_t wwVertexAttrs( const float ** vertexAttrs ) const;
 	//! Evaluate/invert the same blended vertex skin transform used by the GPU.
 	//! False from unskinVertex means the weighted matrix was singular.
 	Vector3 skinVertex( int vertexIndex, const Vector3 & local ) const;
@@ -141,6 +145,13 @@ public:
 	bool wwMaterialClearsBlend() const;
 	//! lane WATER1: a cell water surface; with Cell lights on it draws after the decals, before the blended shapes
 	bool wwWaterDraws() const;
+	//! lane FXRES1: a Soft effect, blended in the sorted pass, writing no depth, not a decal, not lit by its spot:
+	//! the low-resolution layer may take it (src/gl/cellfxres.h)
+	bool wwFxResSoft() const;
+	Scene * wwFxResScene() const { return scene; }
+	//! lane PERF2FIX1: did this shape's last draw write in an opaque-only pass (cell program, no blend), and when
+	bool wwCutWrote = true;
+	unsigned wwCutStamp = 0;
 	//! lane SHADOW1: the shape alpha-tests (its depth-only caster would cast a solid card)
 	bool wwAlphaTested() const;
 	//! lane VOLAIR1: what the alpha-tested sun caster reads (the base map's property, the material alpha, the threshold)

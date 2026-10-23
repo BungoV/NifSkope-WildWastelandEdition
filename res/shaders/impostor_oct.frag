@@ -46,6 +46,14 @@
 
 uniform mat4 modelViewMatrix;      // the same one the vertex stage used
 
+/* lane FARCARD1: the instanced far cards (impostor_cellinst.frag) read the per-card values as flat inputs from
+ * impostor_inst.vert (one buffer, one draw per set); every other card keeps them as uniforms. */
+#ifdef WW_CARDINST
+#define CARD_IN flat in
+#else
+#define CARD_IN uniform
+#endif
+
 // --- the four sheets of spec 42..48 -----------------------------------------
 uniform sampler2D ColourSheet;     // _d / _bc : RGB colour (unlit), A coverage
 uniform sampler2D NormalSheet;     // _n       : R nX, G nY, B height, A sway
@@ -60,24 +68,29 @@ uniform float emissiveScale;       // spec 88..95 -- carried, never folded in
 // --- the frames this pixel blends (chosen CPU-side, src/impostoroct.cpp) -----
 // Each frame k carries its rect on the sheet, its weight, and its own camera
 // basis -- three DIFFERENT view spaces, which is the whole difficulty.
-uniform vec4  frameRect[3];        // u0, v0, du, dv
+CARD_IN vec4  frameRect[3];        // u0, v0, du, dv
+#ifdef WW_CARDINST
+flat in vec3  frameWeightV;        // one location, not three
+#define frameWeight frameWeightV
+#else
 uniform float frameWeight[3];
-uniform vec3  frameRight[3];
-uniform vec3  frameUp[3];
-uniform vec3  frameFwd[3];
-uniform int   frameCount;          // 3 normally; 1 when blending is off
+#endif
+CARD_IN vec3  frameRight[3];
+CARD_IN vec3  frameUp[3];
+CARD_IN vec3  frameFwd[3];
+CARD_IN int   frameCount;          // 3 normally; 1 when blending is off
 
 /* PER-FRAME POSITIONING: where frame k's quad SITS, relative to `cardCenter`,
  * along that frame's own right and up (`card.frameOffset`, lodgen.cpp:2999).
  * The bake slides each view's silhouette to its own frame's centre so a frame
  * does not have to pay for the union of every view's box; this slides it back.
  * Zero for a set baked before the law, which is exactly that older behaviour. */
-uniform vec2  frameOffset[3];
+CARD_IN vec2  frameOffset[3];
 
 // --- the card ---------------------------------------------------------------
-uniform vec3  cardCenter;
-uniform vec2  cardHalf;
-uniform float cardDepthSpan;       // spec 285: 3 x max(bound radius, 1024)
+CARD_IN vec3  cardCenter;
+CARD_IN vec2  cardHalf;
+CARD_IN float cardDepthSpan;       // spec 285: 3 x max(bound radius, 1024)
 uniform float cardMipCap;          // spec 243: mips stop at 8 texels a side
 
 /* THE COVERAGE CONTRACT, as the SET declares it, in 0..1 (lodgen.cpp:3031).
@@ -182,7 +195,7 @@ uniform int   debugChannel;        // 0 = lit; otherwise one sheet channel raw
  * not evidence of anything and every gate runs at 0.
  */
 uniform float swayAmplitude;
-uniform float swayPhase;           // radians; the harness steps it, not a clock
+CARD_IN float swayPhase;           // radians; the harness steps it, not a clock
 
 in vec3 cardPosModel;
 in vec2 cardQuadUv;

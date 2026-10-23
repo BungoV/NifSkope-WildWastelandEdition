@@ -33,6 +33,26 @@ struct WwClusterParams
 	int slices = 24;
 	int maxPerCluster = 512;
 	bool redMidSlice = false;   //!< the refuter: each slice culled as its middle depth only (lights at its edges get dropped)
+	double jitterPadPx = 0.0;   //!< LIGHTCLUSTER1: extra tile slack, so lists built under one TAA jitter serve another this far off
+};
+
+//! LIGHTCLUSTER1: a cluster's view-space box, as the culling tests it (float, corners rounded outward).
+struct WwClusterBox
+{
+	float lo[3], hi[3], c[3], rad;  // corners, centre and bounding radius
+};
+
+/*! LIGHTCLUSTER1: the boxes depend only on the projection, viewport, tiles, slices and pads, never on the lights
+ *  or the view; a build handed this keeps them while those match (a moving camera then rebuilds only the lists). */
+struct WwClusterScratch
+{
+	float proj[16] = {};
+	int vp[4] = {}, tilePx = 0, slices = 0;
+	double padPx = -1.0;
+	bool redMidSlice = false;
+	std::vector<WwClusterBox> boxes;
+	std::vector<double> sliceLo, sliceHi;
+	int hits = 0, misses = 0;
 };
 
 struct WwClusterGrid
@@ -53,6 +73,6 @@ struct WwClusterGrid
 /*! Build the lists for one camera: `proj` is the projection matrix column-major (m[col * 4 + row]), `vp` the GL
  *  viewport. False (grid left empty) when the projection is not a plain perspective or orthographic one. */
 bool wwClusterBuild( const float proj[16], const int vp[4], const std::vector<WwClusterLight> & lights,
-	const WwClusterParams & params, WwClusterGrid & out );
+	const WwClusterParams & params, WwClusterGrid & out, WwClusterScratch * scratch = nullptr );
 
 #endif // WW_CELLCLUSTER_H

@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glscene.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellspeed.h"
 
 #include "hkxplayback.h"
@@ -53,6 +54,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QAction>
 #include <QOpenGLContext>
 #include "gl/cellpasstime.h"	// lane PERF1
+#include "gl/cellvrs.h"	// lane VRS1
+#include "gl/cellfxres.h"	// lane FXRES1
+#include "gl/cellqueue.h"	// lane GPUDRIVEN1
+#include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
@@ -549,9 +554,13 @@ void Scene::drawShapes()
 	NodeList secondPass;
 	wwCellDrawProbe( this, QStringLiteral( "before the scene" ) );	// lane VOLAIR1 (gates only)
 	PassTime::begin( PassTime::Opaque );	// lane PERF1
+	wwCellVrsPass( this, false, true );	// lane VRS1: coarse shading where the last frame was flat
 	wwSetupMemoArm( true );	// lane PERF1: one pass, one set of scene globals
+	GpuDrivenB::cameraWalk( true );
 	collectShapes( secondPass );
+	GpuDrivenB::cameraWalk( false );
 	wwSetupMemoArm( false );
+	wwCellVrsPass( this, false, false );
 	PassTime::end( PassTime::Opaque );
 	wwCellDrawProbe( this, QStringLiteral( "after the first pass" ) );
 	drawGrid();
@@ -560,9 +569,11 @@ void Scene::drawShapes()
 		drawSelection(); // preserve the legacy highlight beneath transparency
 
 	PassTime::begin( PassTime::Sorted );
+	wwCellVrsPass( this, true, true );	// lane VRS1: the stricter image
 	wwSetupMemoArm( true );
 	drawDeferredShapes( secondPass );
 	wwSetupMemoArm( false );
+	wwCellVrsPass( this, true, false );
 	PassTime::end( PassTime::Sorted );
 	wwCellDrawProbe( this, QStringLiteral( "after the second pass" ) );
 	PassTime::begin( PassTime::Effects );
@@ -578,9 +589,13 @@ void Scene::collectShapes( NodeList & secondPass )
 	pendingBolts.clear();
 
 	if ( hasOption(DoBlending) ) {
+		// lane GPUDRIVEN1: the walk fills the render queues, the flush draws them (gl/cellqueue.h)
+		const bool queues = GpuDriven::mainBegin( this );
 		for ( Node * node : roots.list() ) {
 			node->drawShapes( &secondPass );
 		}
+		if ( queues )
+			GpuDriven::mainFlush( this, &secondPass );
 	} else {
 		for ( Node * node : roots.list() ) {
 			node->drawShapes();
@@ -628,6 +643,16 @@ bool Scene::grabEffectDepth()
 	} else if ( depthBits == 16 && !stencilBits ) {
 		fmt = GL_DEPTH_COMPONENT16;
 		pixType = GL_UNSIGNED_SHORT;
+	}
+	/* lane GATEFIX3: the cell view's linear frame keeps depth / stencil in a texture set to sample stencil (TONEMAP1);
+	 * the query above then reads 0 depth bits and every soft effect lost its fade. Take the frame's own format. */
+	if ( !fmt ) {
+		const GLenum hf = GLenum( wwCellHdrDepthFormat( GLuint( prevDraw ) ) );
+		if ( hf == GL_DEPTH24_STENCIL8 || hf == GL_DEPTH32F_STENCIL8 ) {
+			fmt = hf;
+			stencilBits = 8;
+			pixType = hf == GL_DEPTH32F_STENCIL8 ? GL_FLOAT_32_UNSIGNED_INT_24_8_REV : GL_UNSIGNED_INT_24_8;
+		}
 	}
 	if ( !stencilBits )
 		pixFmt = GL_DEPTH_COMPONENT;
@@ -685,6 +710,9 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 {
 	secondPass.alphaSort();
 	++fxDepthPassNow;	// lane EFX2: the opaque depth is grabbed again at this pass's first Soft effect
+	// lane FXRES1 (src/gl/cellfxres.h): the large Soft effects leave the order for the low-resolution layer
+	const QVector<Node *> fxLayer = wwCellFxResSplit( secondPass.list() );
+	auto inFxLayer = [&fxLayer]( Node * node ) { return !fxLayer.isEmpty() && fxLayer.contains( node ); };
 
 	/* lane FXD1: with Cell lights on, the lighting shader's decals go first, as the game draws its decals before
 	 * its sorted blended pass. A cell's welded buckets share one origin, so the depth sort above leaves them in
@@ -714,9 +742,10 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 	for ( Node * node : secondPass.list() ) {
 		if ( dynamic_cast<Particles *>( node ) )
 			deferredParticles.append( node );
-		else if ( !isDecal( node ) && !isWater( node ) )
+		else if ( !isDecal( node ) && !isWater( node ) && !inFxLayer( node ) )
 			node->drawShapes();
 	}
+	wwCellFxResDraw( fxLayer );	// lane FXRES1: drawn and composited once, before the particles
 	for ( Node * node : deferredParticles )
 		node->drawShapes();
 }
@@ -743,7 +772,7 @@ void Scene::drawGrid()
 	 *
 	 * (env read hoisted — this runs per frame)
 	 */
-	static const bool wwPerfTest = qEnvironmentVariableIsSet( "WW_GRID_TRACE" );
+	WW_SWITCH_STATIC( bool, wwPerfTest, wwEnvIsSet( "WW_GRID_TRACE" ) );
 	if ( wwPerfTest ) {
 		QFile f( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
 		if ( f.open( QIODevice::Append | QIODevice::Text ) )

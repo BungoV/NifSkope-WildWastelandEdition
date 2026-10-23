@@ -237,14 +237,21 @@ HEADERS += \
 	src/gl/cellgrass.h \
 	src/gl/cellpost.h \
 	src/gl/cellhdr.h \
+	src/gl/cellvrs.h \
+	src/gl/cellfxres.h \
 	src/gl/cellbloom.h \
+	src/gl/cellfogbloom.h \
 	src/gl/cellprobeview.h \
 	src/gl/cellvolumeview.h \
 	src/gl/cellssr.h \
+	src/gl/cellreflprobe.h \
 	src/gl/cellssgi.h \
+	src/gl/celllampshadow.h \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
 	src/gl/cellpasstime.h \
+	src/gl/cellqueue.h \
+	src/gl/cellgpucull.h \
 	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
@@ -324,6 +331,7 @@ HEADERS += \
 	src/nifcli.h \
 	src/nifmerge.h \
 	src/nifskope.h \
+	src/wwswitch.h \
 	src/shortcutregistry.h \
 	src/skeletontools.h \
 	src/starterscene.h \
@@ -372,15 +380,19 @@ HEADERS += \
 	src/probefar.h \
 	src/probeincr.h \
 	src/probebvh.h \
+	src/bakert.h \
 	src/probemask.h \
 	src/probeemit.h \
 	src/probegi.h \
+	src/probegifine.h \
 	src/proberelight.h \
 	src/farlight.h \
+	src/farlightmap.h \
 	src/proberooms.h \
 	src/probevolumes.h \
 	src/probevolumesgi.h \
 	src/probesky.h \
+	src/celldoorlive.h \
 	src/probeplace.h \
 	src/cellrefs.h \
 	src/cellactor.h \
@@ -499,14 +511,21 @@ SOURCES += \
 	src/gl/cellgrass.cpp \
 	src/gl/cellpost.cpp \
 	src/gl/cellhdr.cpp \
+	src/gl/cellvrs.cpp \
+	src/gl/cellfxres.cpp \
 	src/gl/cellbloom.cpp \
+	src/gl/cellfogbloom.cpp \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellvolumeview.cpp \
 	src/gl/cellssr.cpp \
+	src/gl/cellreflprobe.cpp \
 	src/gl/cellssgi.cpp \
+	src/gl/celllampshadow.cpp \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \
 	src/gl/cellpasstime.cpp \
+	src/gl/cellqueue.cpp \
+	src/gl/cellgpucull.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \
@@ -612,6 +631,7 @@ SOURCES += \
 	src/nifcli.cpp \
 	src/nifmerge.cpp \
 	src/nifskope.cpp \
+	src/wwswitch.cpp \
 	src/posetools.cpp \
 	src/nifskope_ui.cpp \
 	src/shortcutregistry.cpp \
@@ -658,13 +678,17 @@ SOURCES += \
 	src/probealbedo.cpp \
 	src/probebake.cpp \
 	src/pgiwrite.cpp \
+	src/bakert.cpp \
 	src/probegi.cpp \
+	src/probegifine.cpp \
 	src/proberelight.cpp \
 	src/farlight.cpp \
+	src/farlightmap.cpp \
 	src/proberooms.cpp \
 	src/probevolumes.cpp \
 	src/probevolumesgi.cpp \
 	src/probesky.cpp \
+	src/celldoorlive.cpp \
 	src/probefar.cpp \
 	src/probeincr.cpp \
 	src/probeplace.cpp \

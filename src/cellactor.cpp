@@ -2,6 +2,7 @@
  * layouts follow the published plugin format notes (the xEdit definitions). */
 
 #include "cellactor.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmfile.hpp"
 #include "lodgen.h"
@@ -164,7 +165,7 @@ struct CellActors::Impl
 	Impl( const EsmWorld & w, const QString & root ) : world( w ), dataRoot( root )
 	{
 		esm = world.plugin();
-		red = QString::fromLocal8Bit( qgetenv( "WW_CELL_ACTOR_RED" ) ).trimmed().toLower();
+		red = QString::fromLocal8Bit( wwEnv( "WW_CELL_ACTOR_RED" ) ).trimmed().toLower();
 		for ( const QString & p : world.pluginList().split( QChar( ',' ), Qt::SkipEmptyParts ) )
 			plugins.append( QFileInfo( p.trimmed() ).fileName() );
 	}
@@ -713,10 +714,11 @@ bool CellActors::place( const EsmRefr & r, bool hidden, QString & key, float & s
 
 	// the head: the pre-built face mesh of the looks record; slot 32 worn hides it
 	if ( race.faceMesh && !( worn & ( 1U << 2 ) ) ) {
-		const int file = int( looks >> 24 );
-		const QString plugin = file < d->plugins.size() ? d->plugins[file] : QString();
+		// light plugins sit at FE + slot; the face file is named by the plugin's local ID
+		const quint32 file = d->esm ? d->esm->getFormIDFile( looks ) : ( looks >> 24 );
+		const QString plugin = file < quint32( d->plugins.size() ) ? d->plugins[int( file )] : QString();
 		const QString face = QStringLiteral( "actors\\character\\facegendata\\facegeom\\%1\\%2.nif" )
-			.arg( plugin, QStringLiteral( "%1" ).arg( looks & 0x00FFFFFFU, 8, 16, QChar( '0' ) ).toUpper() );
+			.arg( plugin, QStringLiteral( "%1" ).arg( ESMFile::getFormIDLocal( looks ), 8, 16, QChar( '0' ) ).toUpper() );
 		QByteArray probe;
 		if ( !plugin.isEmpty() && lodgenProbeAsset( d->dataRoot, meshPath( face ), nullptr, nullptr, nullptr, &probe )
 			&& !probe.isEmpty() )

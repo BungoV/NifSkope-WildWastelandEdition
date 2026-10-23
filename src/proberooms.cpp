@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 // lane ROOMCLAMP1: room labels per voxel (proberooms.h)
 
 #include "proberooms.h"
+#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -24,7 +25,7 @@ namespace {
 void roomsParallel( size_t n, const std::function<void( size_t )> & fn )
 {
 	using std::thread;
-	const int nThreads = std::max( 1, int( thread::hardware_concurrency() ) );
+	const int nThreads = bakert::threads();
 	std::atomic<size_t> next( 0 );
 	std::vector<std::thread> pool;
 	for ( int i = 0; i < nThreads; i++ )

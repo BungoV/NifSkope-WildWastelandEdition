@@ -31,8 +31,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "gltex.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellspeed.h"
 #include "celltexahead.h"
+#include "cellpasstime.h"	// lane STREAM1
 
 #include "message.h"
 #include "gl/glscene.h"
@@ -422,8 +424,8 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	/* lane PERF1: before this file is read here (one at a time), the files the read-ahead workers already hold go
 	 * up first, so their byte bound frees and they read on in parallel; each binds on this unit, and this file's
 	 * bind below comes last, as the caller expects. Red WW_TEX_DRAIN_RED=1 keeps the old order. */
-	static const bool drainRed = qEnvironmentVariableIntValue( "WW_TEX_DRAIN_RED" ) == 1;
-	if ( !drainRed && !draining && CellTexAhead::armedFor( nif ) ) {
+	WW_SWITCH_STATIC( bool, drainRed, wwEnvInt( "WW_TEX_DRAIN_RED" ) == 1 );
+	if ( !drainRed && !draining && !pumpOwnsDrain && CellTexAhead::armedFor( nif ) ) {
 		draining = true;
 		const QStringList names = CellTexAhead::ready( nif, 4096 );
 		for ( const QString & n : names ) {
@@ -500,8 +502,10 @@ void TexCache::flush()
 {
 	for ( size_t i = 0; i <= textureHashMask; i++ ) {
 		Tex &	tx = textures[i];
-		if ( tx.isLoaded() )
+		if ( tx.isLoaded() ) {
+			PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
 			glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
+		}
 		if ( tx.imageInfo )
 			delete tx.imageInfo;
 	}
@@ -510,8 +514,10 @@ void TexCache::flush()
 	rehashTextures();
 
 	for ( Tex & tx : embedTextures ) {
-		if ( tx.id[0] )
+		if ( tx.id[0] ) {
+			PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
 			glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
+		}
 		if ( tx.imageInfo )
 			delete tx.imageInfo;
 	}
@@ -525,12 +531,52 @@ int TexCache::evictUnused( std::uint32_t tick )
 		Tex &	tx = textures[i];
 		if ( !tx.nameLen || !tx.isLoaded() || !tx.mipmaps || tx.useTick >= tick )
 			continue;
+		PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
 		glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
 		tx.id[0] = tx.id[1] = 0;
 		tx.mipmaps = 0;
 		tx.target = 0;
 		n++;
 	}
+	return n;
+}
+
+int TexCache::wwPump( const NifModel * nif, qint64 budgetBytes )
+{
+	if ( draining || !CellTexAhead::armedFor( nif ) )
+		return 0;
+	const QStringList names = CellTexAhead::ready( nif, 512 );
+	if ( names.isEmpty() )
+		return 0;
+	GLint	unit = 0, b2d = 0, bCube = 0;	// a load binds on the active unit: put back what was bound there
+	glGetIntegerv( GL_ACTIVE_TEXTURE, &unit );
+	glGetIntegerv( GL_TEXTURE_BINDING_2D, &b2d );
+	glGetIntegerv( GL_TEXTURE_BINDING_CUBE_MAP, &bCube );
+	PassTime::CacheCounts &	pc = PassTime::cacheCounts();
+	const qint64	bytes0 = pc.texBytes;
+	int	n = 0;
+	draining = true;
+	for ( const QString & name : names ) {
+		if ( n > 0 && pc.texBytes - bytes0 >= budgetBytes )
+			break;
+		Tex *	tx = insertTex( name );
+		if ( !tx )
+			continue;
+		if ( tx->isLoaded() || tx->id[0] ) {
+			CellTexAhead::drop( nif, name );	// loaded already (another name of the file): free its bytes
+			continue;
+		}
+		tx->useTick = useTick;
+		loadTex( *tx, nif );
+		n++;
+	}
+	draining = false;
+	pc.texPumped += n;
+	pc.texPumpedBytes += pc.texBytes - bytes0;
+	if ( fn )
+		fn->glActiveTexture( GLenum( unit ) );
+	glBindTexture( GL_TEXTURE_2D, GLuint( b2d ) );
+	glBindTexture( GL_TEXTURE_CUBE_MAP, GLuint( bCube ) );
 	return n;
 }
 

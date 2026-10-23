@@ -61,6 +61,8 @@ public:
 	QCheckBox * fogBox = nullptr;
 	QCheckBox * volAirBox = nullptr;	// lane VOLAIR1
 	QComboBox * farAirBox = nullptr;	// lane FARGRID1
+	QCheckBox * volPartBox = nullptr;	// lane VOLPART1
+	QCheckBox * fogDriftBox = nullptr;	// lane FOGDRIFT1
 	// the cascaded sun shadows row (lane CSM1)
 	QCheckBox * shadowsBox = nullptr;
 	QCheckBox * taaBox = nullptr;	// lane MOTION1
@@ -71,6 +73,8 @@ public:
 	QComboBox * cascadeQualityBox = nullptr;
 	QComboBox * contactShadowsBox = nullptr;
 	QComboBox * terrainShadowsBox = nullptr;
+	QCheckBox * shadowParBox = nullptr;		// lane SHADOWPAR1: FO4CS-level shadows (ships off)
+	QDoubleSpinBox * shadowDistanceBox = nullptr;	// the cascades' reach under it
 
 	//! re-read the Data folder's plugins / the loaded weathers / the status line
 	void refreshPlugins();

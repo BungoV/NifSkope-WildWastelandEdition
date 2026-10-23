@@ -1,0 +1,4 @@
+# The alpha-tested casters through the render queues (lane GPUDRIVEN1): the base map per shape as before, the
+# geometry and matrices from the queues' pool. Selected by name from gl/sunshadow.cpp.
+
+shaders lookdev_csmdepth_atq.vert lookdev_csmdepth_at.frag

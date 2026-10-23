@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "nativeemit.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "lodbfile.h"
 #include "lodifile.h"
 #include "lodpplace.h"
@@ -2069,31 +2070,31 @@ struct GroupKnobs
 	 *  leaves the value above exactly as written. */
 	GroupKnobs()
 	{
-		const QByteArray c = qgetenv( "WW_LODI_GROUP_COMPONENT" );
+		const QByteArray c = wwEnv( "WW_LODI_GROUP_COMPONENT" );
 		if ( !c.isEmpty() ) {
 			static QByteArray held;
 			held = c;
 			archComponent = held.constData();
 		}
 		bool okv = false;
-		const float t = qgetenv( "WW_LODI_GROUP_TOLERANCE" ).toFloat( &okv );
+		const float t = wwEnv( "WW_LODI_GROUP_TOLERANCE" ).toFloat( &okv );
 		if ( okv )
 			touchTolerance = t;
-		const QByteArray b = qgetenv( "WW_LODI_GROUP_SHAPE" );
+		const QByteArray b = wwEnv( "WW_LODI_GROUP_SHAPE" );
 		if ( b == "sphere" )
 			useBox = false;
 		else if ( b == "box" )
 			useBox = true;
-		const float g = qgetenv( "WW_LODI_GROUP_GRID" ).toFloat( &okv );
+		const float g = wwEnv( "WW_LODI_GROUP_GRID" ).toFloat( &okv );
 		if ( okv && g > 0.0f )
 			gridCell = g;
-		const float ct = qgetenv( "WW_LODI_CONTACT_TOL" ).toFloat( &okv );
+		const float ct = wwEnv( "WW_LODI_CONTACT_TOL" ).toFloat( &okv );
 		if ( okv && ct >= 0.0f )
 			contactTol = ct;
-		const float cap = qgetenv( "WW_LODI_GROUP_CAP" ).toFloat( &okv );
+		const float cap = wwEnv( "WW_LODI_GROUP_CAP" ).toFloat( &okv );
 		if ( okv && cap >= 0.0f )
 			groupCap = cap;
-		const QByteArray rays = qgetenv( "WW_LODI_OCC_RAYS" );
+		const QByteArray rays = wwEnv( "WW_LODI_OCC_RAYS" );
 		if ( !rays.isEmpty() )
 			occRays = rays;
 	}
@@ -2340,7 +2341,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			libraryWhy = QStringLiteral( "not offered: this is not an incremental bake" );
 		else if ( s.occluders )
 			libraryWhy = QStringLiteral( "occluders are on and the per-model box is in neither file" );
-		else if ( s.vertexAo && s.placementAo && s.world && qEnvironmentVariable( "WW_AO_OVERLAY_CASTERS" ) != QStringLiteral( "1" ) )
+		else if ( s.vertexAo && s.placementAo && s.world && wwEnvStr( "WW_AO_OVERLAY_CASTERS" ) != QStringLiteral( "1" ) )
 			libraryWhy = QStringLiteral( "vertex AO is on and which materials are see-through (blend, or a decal that tests) is in neither file" );
 		else if ( offer.loadOrderHex != hex16( world.loadOrderHash() ) )
 			libraryWhy = QStringLiteral( "the load order moved" );
@@ -2873,7 +2874,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			 * several models (the key has no blend bit), so a row is see-through only
 			 * when EVERY shape on it is; a row with both kinds stays solid and is
 			 * counted. A row whose texture does not load stays solid and is counted. */
-			const bool overlayCastLib = qEnvironmentVariable( "WW_AO_OVERLAY_CASTERS" ) == QStringLiteral( "1" );
+			const bool overlayCastLib = wwEnvStr( "WW_AO_OVERLAY_CASTERS" ) == QStringLiteral( "1" );
 			{
 				std::vector<quint8> anyOver( lib.materials.size(), 0 ), anySolid( lib.materials.size(), 0 ), anyTest( lib.materials.size(), 0 );
 				std::vector<const NativeSrcShape *> first( lib.materials.size(), nullptr );
@@ -3484,7 +3485,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		/* v12 (lane GROUND1): the per-vertex ground-contact stream rides the same
 		 * loop and reads the same ESM heightfield. ON by default; the env switch is
 		 * the byte-identity gate's way back and nothing else. */
-		set.vertexGround = s.lodiV7 && qEnvironmentVariable( "WW_LODGEN_NO_VERTEX_GROUND" ) != QStringLiteral( "1" );
+		set.vertexGround = s.lodiV7 && wwEnvStr( "WW_LODGEN_NO_VERTEX_GROUND" ) != QStringLiteral( "1" );
 		// the library meshes decoded once: vertex range, positions, normals, level-0 triangles
 		struct DecodedMesh {
 			quint32 first = 0, count = 0;
@@ -3615,19 +3616,19 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		float faceStep = 256.0f;
 		int faceMax = 4;
 		float skyReach = 10000.0f;
-		if ( qEnvironmentVariableIsSet( "WW_AO_FACE_STEP" ) )
-			faceStep = qMax( 0.0f, qEnvironmentVariable( "WW_AO_FACE_STEP" ).toFloat() );
-		if ( qEnvironmentVariableIsSet( "WW_AO_FACE_MAX" ) )
-			faceMax = qBound( 1, qEnvironmentVariable( "WW_AO_FACE_MAX" ).toInt(), 16 );
-		if ( qEnvironmentVariableIsSet( "WW_SKY_REACH" ) )
-			skyReach = qMax( 1.0f, qEnvironmentVariable( "WW_SKY_REACH" ).toFloat() );
+		if ( wwEnvIsSet( "WW_AO_FACE_STEP" ) )
+			faceStep = qMax( 0.0f, wwEnvStr( "WW_AO_FACE_STEP" ).toFloat() );
+		if ( wwEnvIsSet( "WW_AO_FACE_MAX" ) )
+			faceMax = qBound( 1, wwEnvStr( "WW_AO_FACE_MAX" ).toInt(), 16 );
+		if ( wwEnvIsSet( "WW_SKY_REACH" ) )
+			skyReach = qMax( 1.0f, wwEnvStr( "WW_SKY_REACH" ).toFloat() );
 		float weldDeg = 30.0f;   // step 4 below; < 0 = off
-		if ( qEnvironmentVariableIsSet( "WW_AO_WELD_DEG" ) )
-			weldDeg = qMin( 180.0f, qEnvironmentVariable( "WW_AO_WELD_DEG" ).toFloat() );
+		if ( wwEnvIsSet( "WW_AO_WELD_DEG" ) )
+			weldDeg = qMin( 180.0f, wwEnvStr( "WW_AO_WELD_DEG" ).toFloat() );
 		vaoWeldDeg = weldDeg;
-		const bool weldAcross = qEnvironmentVariable( "WW_AO_WELD_ACROSS" ) != QStringLiteral( "0" );
+		const bool weldAcross = wwEnvStr( "WW_AO_WELD_ACROSS" ) != QStringLiteral( "0" );
 		vaoWeldAcross = weldAcross;
-		const bool overlayCast = qEnvironmentVariable( "WW_AO_OVERLAY_CASTERS" ) == QStringLiteral( "1" );
+		const bool overlayCast = wwEnvStr( "WW_AO_OVERLAY_CASTERS" ) == QStringLiteral( "1" );
 		vaoOverlayCast = overlayCast;
 		/* A sample more than underTol world u below the chunk's ground (the ESM
 		 * heightfield the rays march) is on a part of the mesh the terrain hides:
@@ -3638,15 +3639,15 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		 * when it has no sample above the ground (a vertex wholly buried), so it
 		 * still takes one welded value and never a per-copy cast; < 0 keeps them. */
 		float underTol = 32.0f;
-		if ( qEnvironmentVariableIsSet( "WW_AO_UNDER_TOL" ) )
-			underTol = qEnvironmentVariable( "WW_AO_UNDER_TOL" ).toFloat();
+		if ( wwEnvIsSet( "WW_AO_UNDER_TOL" ) )
+			underTol = wwEnvStr( "WW_AO_UNDER_TOL" ).toFloat();
 		vaoUnderTol = underTol;
 		float patchDeg = 1.0f;   // step 5 below; < 0 = off. Measured: 44% of the edge area between adjacent
 		                          // triangles of the Boston library meshes lies within 0.1 deg (flat faces)
-		if ( qEnvironmentVariableIsSet( "WW_AO_PATCH_DEG" ) )
-			patchDeg = qMin( 89.0f, qEnvironmentVariable( "WW_AO_PATCH_DEG" ).toFloat() );
+		if ( wwEnvIsSet( "WW_AO_PATCH_DEG" ) )
+			patchDeg = qMin( 89.0f, wwEnvStr( "WW_AO_PATCH_DEG" ).toFloat() );
 		vaoPatchDeg = patchDeg;
-		const bool patchSamples = qEnvironmentVariable( "WW_AO_PATCH_FIT" ) == QStringLiteral( "samples" );
+		const bool patchSamples = wwEnvStr( "WW_AO_PATCH_FIT" ) == QStringLiteral( "samples" );
 		vaoPatchSamples = patchSamples;
 		vaoFaceStep = faceStep;
 		vaoFaceMax = faceMax;
@@ -3656,7 +3657,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			LodgenAoScene::faceSamples( k, samplePattern[size_t( k )] );
 		float probe[4] = { 0, 0, 0, -1 };
 		{
-			const QStringList pl = qEnvironmentVariable( "WW_AO_PROBE" ).split( ',' );
+			const QStringList pl = wwEnvStr( "WW_AO_PROBE" ).split( ',' );
 			if ( pl.size() == 4 )
 				for ( int k = 0; k < 4; k++ )
 					probe[k] = pl[k].toFloat();
@@ -4520,7 +4521,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		/* v13 (lane IDENT2, 2026-09-29): the writer makes the group ids FILE-WIDE
 		 * (a u32 a placement), so a group cut by a chunk line keeps one id.
 		 * WW_LODI_GROUPS_PER_CHUNK=1 is the exact way back: v7..v12's u16 per chunk. */
-		set.groupPerChunk = qEnvironmentVariable( "WW_LODI_GROUPS_PER_CHUNK" ) == QStringLiteral( "1" );
+		set.groupPerChunk = wwEnvStr( "WW_LODI_GROUPS_PER_CHUNK" ) == QStringLiteral( "1" );
 		const size_t ni = set.instances.size();
 		std::vector<quint32> uf( ni );
 		for ( size_t i = 0; i < ni; i++ )
@@ -4745,7 +4746,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			QElapsedTimer joinClock;
 			joinClock.start();
 			const float TOL = KNOB.contactTol, CAP = KNOB.groupCap;
-			const QByteArray dumpPath = qgetenv( "WW_LODI_GROUP_DUMP" );
+			const QByteArray dumpPath = wwEnv( "WW_LODI_GROUP_DUMP" );
 			// the dump measures every pair out to 32 u, so the tolerance can be chosen from it
 			const float MEAS = dumpPath.isEmpty() ? TOL : std::max( TOL, 32.0f );
 			joinEligible = quint32( arch.size() );
@@ -5412,7 +5413,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			float splitU = KNOB.groupCap > 0.0f ? KNOB.groupCap : 4096.0f;
 			{
 				bool ok = false;
-				const float e = qEnvironmentVariable( "WW_LODI_OCC_SPLIT" ).toFloat( &ok );
+				const float e = wwEnvStr( "WW_LODI_OCC_SPLIT" ).toFloat( &ok );
 				if ( ok && e >= 256.0f )
 					splitU = e;
 			}

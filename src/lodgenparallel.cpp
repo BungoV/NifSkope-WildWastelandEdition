@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodgenparallel.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <QByteArray>
 #include <QElapsedTimer>
@@ -302,7 +303,7 @@ bool lodgenBakeSpeedRed()
 
 bool lodgenMemLogOn()
 {
-	static const bool on = qEnvironmentVariableIsSet( "WW_LODGEN_MEMLOG" );
+	static const bool on = wwEnvIsSet( "WW_LODGEN_MEMLOG" );
 	return on;
 }
 
@@ -324,7 +325,7 @@ void lodgenMemNote( const QString & phase, const QString & extra )
 	QString heap;
 #ifdef Q_OS_WIN32
 	// WW_LODGEN_MEMLOG=2: walk the process heaps, so live bytes and committed-but-free bytes are told apart
-	if ( qEnvironmentVariableIntValue( "WW_LODGEN_MEMLOG" ) >= 2 ) {
+	if ( wwEnvInt( "WW_LODGEN_MEMLOG" ) >= 2 ) {
 		HANDLE hs[256];
 		const DWORD n = GetProcessHeaps( 256, hs );
 		quint64 busy = 0, freeC = 0, big = 0;
@@ -366,7 +367,7 @@ void lodgenMemNote( const QString & phase, const QString & extra )
 
 qint64 lodgenTrimMappedWorkingSet()
 {
-	if ( qEnvironmentVariableIntValue( "WW_LODGEN_BAKEMEM_RED" ) == 1 )
+	if ( wwEnvInt( "WW_LODGEN_BAKEMEM_RED" ) == 1 )
 		return 0;
 	qint64 n = 0;
 #ifdef Q_OS_WIN32
@@ -397,7 +398,7 @@ struct LodgenMappedTrim::Impl
 
 LodgenMappedTrim::LodgenMappedTrim( int seconds ) : d( new Impl )
 {
-	if ( qEnvironmentVariableIntValue( "WW_LODGEN_BAKEMEM_RED" ) == 1 )
+	if ( wwEnvInt( "WW_LODGEN_BAKEMEM_RED" ) == 1 )
 		return;
 	Impl * dd = d;
 	const unsigned long ms = static_cast<unsigned long>( qMax( 1, seconds ) ) * 1000UL;

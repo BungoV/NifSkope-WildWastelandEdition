@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 // lane GPURELIGHT1: the relight without rays, on the CPU (double) and the GPU (GL 4.3 compute). src/proberelight.h.
 
 #include "proberelight.h"
+#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count
 
 #include "gl/celllights.h"
 #include "probebake.h"
@@ -42,7 +43,7 @@ constexpr double kPi = 3.141592653589793;
 
 void parallelFor( size_t n, const std::function<void( size_t )> & fn )
 {
-	const int nThreads = std::max( 1, int( std::thread::hardware_concurrency() ) );
+	const int nThreads = bakert::threads();
 	std::atomic<size_t> next( 0 );
 	std::vector<std::thread> pool;
 	for ( int i = 0; i < nThreads; i++ )
@@ -82,35 +83,61 @@ int redMode( const QString & r )
 	return RedNone;
 }
 
+}	// namespace
+
+std::vector<float> probeRelightShut( const ProbeRelightState & st, size_t nDoors )
+{
+	std::vector<float> s( nDoors, 0.0f );
+	for ( size_t i = 0; i < nDoors; i++ ) {
+		if ( i < st.doorShut.size() && st.doorShut[i] >= 0.0f )
+			s[i] = std::min( st.doorShut[i], 1.0f );
+		else if ( i < st.doorClosed.size() && st.doorClosed[i] )
+			s[i] = 1.0f;
+	}
+	return s;
+}
+
+namespace {
+
 /*! An entry's factor for channel c through its closed doors. vis: a visibility entry (the feed's, the blend's):
  *  0 where a solid face stops it, else 1 (the bake's visibility rays pass glass); glassClear (the gate's knob): the
  *  light entries read their doors that way too (the merged reference traces no glass). */
-inline double doorFactor( const int door[2], const float * T, int c, bool vis, const std::vector<quint8> & closed, int red )
+inline double doorFactor( const int door[2], const float * T, int c, bool vis, const std::vector<float> & closed, int red )
 {
 	if ( red == RedDoorOpen )
 		return 1.0;
 	double f = 1.0;
 	for ( int s = 0; s < 2; s++ ) {
 		const int d = door[s];
-		if ( d < 0 || size_t( d ) >= closed.size() || !closed[size_t( d )] )
+		if ( d < 0 || size_t( d ) >= closed.size() || !( closed[size_t( d )] > 0.0f ) )
 			continue;
-		if ( red == RedBlanket )
-			return 0.0;
+		// lane DOORLIVE1: a part-shut door (0..1) blends its T toward open; shut 1 keeps the closed factor exactly
+		const double cl = closed[size_t( d )];
 		const float * t = T + s * 4;
-		if ( red == RedGlassOpaque )
-			f *= t[3];
+		double tt;
+		if ( red == RedBlanket )
+			tt = 0.0;
+		else if ( red == RedGlassOpaque )
+			tt = t[3];
 		else if ( vis )
-			f *= ( t[0] > 0.0f || t[1] > 0.0f || t[2] > 0.0f ) ? 1.0 : 0.0;
+			tt = ( t[0] > 0.0f || t[1] > 0.0f || t[2] > 0.0f ) ? 1.0 : 0.0;
 		else
-			f *= t[c];
+			tt = t[c];
+		if ( cl >= 1.0 ) {
+			if ( red == RedBlanket )
+				return 0.0;
+			f *= tt;
+		} else {
+			f *= 1.0 - cl * ( 1.0 - tt );
+		}
 	}
 	return f;
 }
 
-inline bool anyClosed( const int door[2], const std::vector<quint8> & closed )
+inline bool anyClosed( const int door[2], const std::vector<float> & closed )
 {
 	for ( int s = 0; s < 2; s++ )
-		if ( door[s] >= 0 && size_t( door[s] ) < closed.size() && closed[size_t( door[s] )] )
+		if ( door[s] >= 0 && size_t( door[s] ) < closed.size() && closed[size_t( door[s] )] > 0.0f )
 			return true;
 	return false;
 }
@@ -370,11 +397,10 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 		}
 		rad[l] = r;
 	}
-	std::vector<quint8> closed = st.doorClosed;
-	closed.resize( X.doorRefs.size(), 0 );
+	const std::vector<float> closed = probeRelightShut( st, X.doorRefs.size() );
 	bool doors = false;
-	for ( quint8 c : closed )
-		doors = doors || c;
+	for ( float c : closed )
+		doors = doors || c > 0.0f;
 	double sun[3];
 	for ( int c = 0; c < 3; c++ )
 		sun[c] = st.sun[0] >= 0.0f ? double( st.sun[c] ) : X.sun[c];
@@ -487,10 +513,14 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 			double E[3] = { 0, 0, 0 }, ws = 0.0;
 			for ( int k = X.feedStart[i]; k < X.feedStart[i + 1]; k++ ) {
 				const int * dr = &X.feedDoor[size_t( k ) * 2];
-				if ( doors && anyClosed( dr, closed ) && doorFactor( dr, &X.feedT[size_t( k ) * 8], 0, true, closed, red ) <= 0.0 )
-					continue;
+				double vf = 1.0;
+				if ( doors && anyClosed( dr, closed ) ) {
+					vf = doorFactor( dr, &X.feedT[size_t( k ) * 8], 0, true, closed, red );
+					if ( vf <= 0.0 )
+						continue;
+				}
 				const double * P = &PE[size_t( X.feedProbe[size_t( k )] ) * 18];
-				const double w = X.feedW[size_t( k )];
+				const double w = X.feedW[size_t( k )] * vf;
 				ws += w;
 				for ( int a = 0; a < 3; a++ ) {
 					const int ax = 2 * a + ( n[a] >= 0.0 ? 0 : 1 );
@@ -540,9 +570,13 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 		double acc[18] = {}, wsum = 0.0;
 		for ( int k = b; k < e; k++ ) {
 			const int * dr = &X.blendDoor[size_t( k ) * 2];
-			if ( doors && anyClosed( dr, closed ) && doorFactor( dr, &X.blendT[size_t( k ) * 8], 0, true, closed, red ) <= 0.0 )
-				continue;
-			const double w = X.blendW[size_t( k )];
+			double vf = 1.0;
+			if ( doors && anyClosed( dr, closed ) ) {
+				vf = doorFactor( dr, &X.blendT[size_t( k ) * 8], 0, true, closed, red );
+				if ( vf <= 0.0 )
+					continue;
+			}
+			const double w = X.blendW[size_t( k )] * vf;
 			const double * P = &PE[size_t( X.blendProbe[size_t( k )] ) * 18];
 			wsum += w;
 			for ( int q = 0; q < 18; q++ )
@@ -650,15 +684,24 @@ float doorF( int rec, int c, bool vis )
 		int d = floatBitsToInt( doorRec[rec * 12 + s] );
 		if ( d < 0 || ctl[2 + d] == 0u )
 			continue;
-		if ( uRed == 1 )
-			return 0.0;
+		float cl = uintBitsToFloat( ctl[2 + d] );   // lane DOORLIVE1: the slot's shut fraction (0u = open)
 		int o = rec * 12 + 4 + s * 4;
-		if ( uRed == 2 )
-			f *= doorRec[o + 3];
+		float tt;
+		if ( uRed == 1 )
+			tt = 0.0;
+		else if ( uRed == 2 )
+			tt = doorRec[o + 3];
 		else if ( vis )
-			f *= ( doorRec[o] > 0.0 || doorRec[o + 1] > 0.0 || doorRec[o + 2] > 0.0 ) ? 1.0 : 0.0;
+			tt = ( doorRec[o] > 0.0 || doorRec[o + 1] > 0.0 || doorRec[o + 2] > 0.0 ) ? 1.0 : 0.0;
 		else
-			f *= doorRec[o + c];
+			tt = doorRec[o + c];
+		if ( cl >= 1.0 ) {
+			if ( uRed == 1 )
+				return 0.0;
+			f *= tt;
+		} else {
+			f *= 1.0 - cl * ( 1.0 - tt );
+		}
 	}
 	return f;
 }
@@ -754,10 +797,11 @@ void main()
 	float ws = 0.0;
 	for ( int k = feedStart[i]; k < feedStart[i + 1]; k++ ) {
 		int rec = floatBitsToInt( feed[k * 4 + 2] );
-		if ( rec >= 0 && doorF( rec, 0, true ) <= 0.0 )
+		float vf = rec >= 0 ? doorF( rec, 0, true ) : 1.0;
+		if ( vf <= 0.0 )
 			continue;
 		int p = floatBitsToInt( feed[k * 4] );
-		float w = feed[k * 4 + 1];
+		float w = feed[k * 4 + 1] * vf;
 		ws += w;
 		for ( int a = 0; a < 3; a++ ) {
 			int ax = 2 * a + ( n[a] >= 0.0 ? 0 : 1 );
@@ -794,10 +838,11 @@ void main()
 	float wsum = 0.0;
 	for ( int k = b; k < e; k++ ) {
 		int rec = floatBitsToInt( feed[k * 4 + 2] );
-		if ( rec >= 0 && doorF( rec, 0, true ) <= 0.0 )
+		float vf = rec >= 0 ? doorF( rec, 0, true ) : 1.0;
+		if ( vf <= 0.0 )
 			continue;
 		int p = floatBitsToInt( feed[k * 4] );
-		float w = feed[k * 4 + 1];
+		float w = feed[k * 4 + 1] * vf;
 		wsum += w;
 		for ( int q = 0; q < 18; q++ )
 			acc[q] += w * pe[p * 18 + q];
@@ -1153,8 +1198,12 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 	if ( !lights.empty() )
 		gl->glBufferSubData( GL_SHADER_STORAGE_BUFFER, 0, GLsizeiptr( lights.size() * 4 ), lights.data() );
 	std::vector<quint32> ctl( 2 + X.doorRefs.size(), 0u );
-	for ( size_t i = 0; i < X.doorRefs.size() && i < st.doorClosed.size(); i++ )
-		ctl[2 + i] = st.doorClosed[i] ? 1u : 0u;
+	const std::vector<float> shut = probeRelightShut( st, X.doorRefs.size() );
+	for ( size_t i = 0; i < shut.size(); i++ ) {   // the shut fraction's bits (1.0f = closed, as before; 0u open)
+		const float f = std::min( std::max( shut[i], 0.0f ), 1.0f );
+		if ( f > 0.0f )
+			std::memcpy( &ctl[2 + i], &f, 4 );
+	}
 	gl->glBindBuffer( GL_SHADER_STORAGE_BUFFER, d->buf[Impl::bCtl] );
 	gl->glBufferSubData( GL_SHADER_STORAGE_BUFFER, 0, GLsizeiptr( ctl.size() * 4 ), ctl.data() );
 	const int red = redMode( st.red );

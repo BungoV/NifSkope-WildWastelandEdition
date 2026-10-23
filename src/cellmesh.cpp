@@ -1,4 +1,5 @@
 #include "cellmesh.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellspeed.h"
 #include "celltexahead.h"
@@ -53,7 +54,7 @@ void writeRows( NifModel * nif, const QModelIndex & iShape, const CellMesh & m )
 {
 	CellSpeed::Acc speedAcc( "welded rows written on demand" );
 	// the gate's red control for the saved file: the rows come back without their normals
-	static const bool redRows = qgetenv( "WW_CELL_SPEED_RED" ) == "rows";
+	WW_SWITCH_STATIC( bool, redRows, wwEnv( "WW_CELL_SPEED_RED" ) == "rows" );
 	nif->setState( BaseModel::Processing );
 	QModelIndex iVertexData = nif->getIndex( iShape, "Vertex Data" );
 	nif->updateArraySize( iVertexData );
@@ -94,7 +95,7 @@ CellMeshQuiet::~CellMeshQuiet() { quietDepth--; }
 void cellMeshRowsAsked( const BaseModel * model, const NifItem * block, const NifItem * array )
 {
 	// the gate's red control for this net: the reader gets the empty array, as it would without it
-	static const bool redNoNet = qgetenv( "WW_CELL_SPEED_RED" ) == "nonet";
+	WW_SWITCH_STATIC( bool, redNoNet, wwEnv( "WW_CELL_SPEED_RED" ) == "nonet" );
 	if ( quietDepth > 0 || redNoNet || offMainThread() || table().isEmpty() )
 		return;
 	auto it = table().constFind( model );
@@ -110,7 +111,7 @@ void cellMeshRowsAsked( const BaseModel * model, const NifItem * block, const Ni
 
 bool cellMeshOn()
 {
-	static const bool on = qgetenv( "WW_CELL_SPEED_RED" ) != "slow";
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_CELL_SPEED_RED" ) != "slow" );
 	return on;
 }
 
@@ -236,7 +237,7 @@ int cellMeshWaitingBytes( const NifModel * nif, const NifItem * block )
 
 void cellMeshSaveIfAsked( NifModel * nif )
 {
-	const QByteArray path = qgetenv( "WW_CELL_SPEED_SAVE" );
+	const QByteArray path = wwEnv( "WW_CELL_SPEED_SAVE" );
 	if ( path.isEmpty() || !nif )
 		return;
 	const int waiting = cellMeshCount( nif );

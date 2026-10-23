@@ -1,5 +1,609 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane RTBAKEOPT1 (2026-10-23, branch rtbakeopt1-20261023): the GPU ray-traced bake is an option, off by default
+
+- **CPU bake is the default again (bungo 10-23):** RTBAKE1's Vulkan tracer (src/bakert.cpp: the probe bake's primary
+  rays, the cell GI's edge sky rays) now runs only when asked for. Off, no Vulkan is touched and the bakes run their own
+  CPU loops, byte-identical to before RTBAKE1.
+- **Row:** Settings > NIF > Probe bake > GPU Ray-Traced Bake (off), key `Settings/Nif/Gpu Ray Traced Bake`, read at
+  each bake start, so a change applies to the next bake. `WW_BAKE_RT=1` / `=0` pins it (harness rule).
+  `WW_BAKE_RT_RED=cpu` still forces the CPU when it is on; `WW_BAKE_RT_WALK_RED` and `WW_BAKE_RT_CHECK` are unchanged.
+
+## Lane MARCHTOOLS (2026-10-23, branch marchtools-20261023): MARCHFIX1's tooling onto batch4
+
+- **Tooling only** (MARCHFIX1 1908115d; its march verdict was GIBLACKLINK1's fix, already in the batch):
+  `tests/spells/shader_link_check.py` substitutes `NUM_TEXTURE_UNITS` as the loader does (stf_default links offline);
+  `tests/spells/cell_giblack_link.sh` works under the repo's scratchpad, not C:'s temp.
+- **Two batch4 shader link breaks the full sweep found (all 240 program x mode rows LINK OK after):**
+  `cell_volair.frag` called `ussTerrain` with 3 arguments after SHADOWPAR1 made it 4 (`, 0.0, false` as the air tail
+  does; cell_volair.prog failed in every mode); `cell_lights.glsl` declared `cellGiLoop8` only outside
+  `WW_CELL_GI_MARCH`, so EMISSIVEGRID1's read broke 18 cell programs in the march mode. Now declared for both.
+
+## Lane OBJLODSHADOW1 (2026-10-22, branch objlodshadow1-20261022): object LOD casts only past the cascades
+
+- **Object-LOD terrain casters, only where the cascades do not reach:** with the objlod item on, every far object-LOD
+  shape was a solid height column in the terrain map, so the LOD trees and houses shadowed their own surfaces and the
+  ground under them (BATCH1: 81 % of the frame dark, all the near ground). The cascades already shadow every object
+  (the far-LOD shapes cast in them too), so object LOD now casts only outside the loaded LAND's box grown by the
+  cascades' reach (FO4CS's far map: authority 1 - fade, nothing inside the cascades). Shapes wholly inside are
+  dropped; a straddling shape loses its triangles centred inside. Red `WW_SHADOW_RED=objlodall` restores the old set.
+  The echo adds `objlod_skipped=` and `objlod_cut=`.
+- **Gates:** `objlod_near` (near-ground share darkened by objlod <= 2 %, the cut in the echo); `objlod` now reads a
+  2000-unit reach (at 16000 Concord's ring 0 lies wholly inside). Timing probe `WW_SHADOW_RED=cslopezero` (the clamp
+  call with clamp 0) splits cslope's cost; perf arms `perf_cslope_zero`, `perf_base2`.
+
+## Lane SHADOWPAR1FIX (2026-10-22, branch shadowpar1fix-20261022): the BATCH1 shadow gates, fixed
+
+- **Contact reaches the lit shader:** fo4_default also declares a GreyscaleMap (palettes), so every fo4_default
+  surface was taken for an effect and never got the contact mask. Now only the effect shaders' own uniforms mark
+  an effect. Red `WW_SHADOW_RED=contactgrey` brings the old test back.
+- **Contact is cheaper, the way shipped games do it:** half-res mask, 192 samples (the same 384-pixel reach), and an
+  exact early exit (a lane stops once its result can no longer change; byte-identical picture). Reds `contactfull`
+  (full res, 384 samples) and `contactnoexit`. The half-res mask is a look change: not the default until seen.
+- **Debug views draw while the sun is too low:** a pinned shadow view keeps the set active. Red `viewidle`.
+- **Gates (`tests/spells/shadowpar1_gates.*`):** cradius on a perspective top-down eye (the cascades refuse ortho);
+  near judges the side edges against the cube's analytic sides at sun azimuth 110; pen/dim/lowsun on a view
+  holding terrain shadow (sun 10,300); every mask counts grey (factor) pixels only, never the sky; fogtail moves to
+  the Memory Den at night in CommonwealthFoggy and fails when nothing changes; contact checks the shadow is in the
+  view, the half mask and the exact exit.
+- The glPolygonOffsetClamp lookup is cached per context.
+
+## Lane SHADOWPAR1 (2026-10-21, branch shadowpar1-20261021): the sun shadows at FO4CS's level
+
+- **One row, Off by default: FO4CS-Level Shadows** (Settings, beside Terrain Shadows), plus a **Shadow Distance**
+  slider (2000..24000) for the cascades' reach. Fourteen items, each its own bit of `WW_SHADOW_PAR`
+  (`all`, a mask, or names); `WW_SHADOW_RED=no<item>` takes one item back to the old path. Off draws the old path.
+- **Cascades:** reach up to 24000 (`dist`); the filter radius in world units per cascade (FO4CS's
+  clamp(r,1,6) x {0.8, 3, 12}) with taps from the radius (`cradius`); a per-frame Vogel rotation (`cphase`,
+  frame % 61); the slope clamp (`cslope`).
+- **Contact:** FO4CS's 384 samples and 0.005 thickness, its fades and rejects (`contact`).
+- **Terrain:** far-LOD objects rasterized into the height grid (`objlod`, FO4CS's budget 1500, radius >= 128);
+  a near tier at 64 units a texel packed under the far map (`near`); the sun disc's penumbra (`pen`, tan 0.265 deg,
+  up to 16 texels); FO4CS's low-sun fade over 1..4 degrees instead of the hard cut (`lowsun`); the moon at
+  0.15 phase^3 (`moon`); FO4CS's slope bias 12 (1 + slope) / sin(elev) (`tslope`); the ambient dim in terrain
+  shadow (`dim`); a temporal blend of the map under TAA (`temporal`).
+- **Fog far tail:** Volumetric Air's far tail reads the terrain map, so the air behind a ridge is not lit (`fogtail`).
+- **Gates:** `tests/spells/shadowpar1_gates.sh` (+ `.py`); the rung is the exe and shaders before the lane.
+
+## Lane TERRSHADOW1 (2026-10-17..19, branch terrshadow1-20261016): unified sun shadows (cascades, contact, terrain, real sun path)
+
+## Lane MSAABLACK1 (2026-10-23, branch msaablack1-20261022): MSAA 1 + TAA no longer saves a black frame
+
+- **Why.** AAFORMAT1 / BATCH2: with MSAA off (WW_MSAA=1) and TAA on, the saved PNG was all zero apart from the
+  overlay, while the linear .hdr dump was a normal frame and the same exe with TAA off was a normal picture.
+- **Cause (code reading).** Three passes bound only GL_DRAW_FRAMEBUFFER to their own depth-only FBO and then called
+  glReadBuffer( GL_NONE ): sunshadow.cpp (the sun cascades, every frame), celllights.cpp (the light shadow cubes)
+  and cellgpucull.cpp (the GPU prepass target). glReadBuffer acts on the READ binding, which was still the view's
+  framebuffer, so the view was left with READ_BUFFER = NONE. TAA's first step blits the view's colour into its
+  input texture; a colour blit from a NONE read buffer copies nothing and raises no GL error, so TAA resolved a
+  zeroed texture and wrote black back. The tone map, its stencil path and the .hdr dump never read that buffer.
+- **What changed.**
+  - The three passes also bind GL_READ_FRAMEBUFFER to their own FBO before glReadBuffer( GL_NONE ); each pass
+    already puts the caller's READ binding back.
+  - TAA checks the frame's read buffer before its colour blit; when it is GL_NONE it sets the colour buffer back and
+    says once "temporal aa: the frame's read buffer was GL_NONE (fbo N); set back to its colour buffer".
+  - Red `WW_MSAABLACK1_RED=1`: the old binding at all three passes and no repair in TAA (the line then ends
+    "left (WW_MSAABLACK1_RED)").
+- **Gate (notes/msaablack1, run in the batch):** check.py "is a picture" (luminance std and lit share against the
+  same exe's TAA-off frame) must pass on new ms1taa and fail on the red and the rung; off, ms1 (TAA off) and
+  ms4taa must be byte-identical to the rung; the ms1taa .hdr dump identical to the rung's. On the AAFORMAT1 PNGs
+  the check fails the black frame (std 1.48 vs 10.24, 0.06 % lit) and passes the TAA-off MSAA 1 one (std 10.25).
+
+## Lane STREAM1 (2026-10-22, branch stream1-20261022): memory and load of the streamed cell view
+
+- **Why.** WHOLEFRAME.md sec. 12, 15, 16, 17 (STREAM1, TEXSTREAM1, VTXPACK1, LOAD1): a 3x3 held 308 MB of geometry
+  against a 128 MB cache and re-uploaded shapes every frame; after the open, a streamed cell read and uploaded its
+  textures at its first draw (the hitch); vertex arrays went up as fp32 even when FO4 stored them as halves; every
+  DDS was copied once more before its upload.
+- **What changed (pixels the same once loaded):**
+  - Geometry budget sized from the card (VRAM/8, 256 MB to 1.5 GB; `WW_GEOCACHE_MB` pins it). Between the setting
+    and the budget a shape goes only after ~1800 frames undrawn. Red `WW_STREAM1_RED=geocache`.
+  - While a document streams, the texture read-ahead stays armed and the view uploads its ready files at the start
+    of each paint, `WW_TEX_PUMP_MB` (24) a paint, through the same loadTex as a bind. Red `texpump`.
+  - Vertex arrays go up as GL_HALF_FLOAT only when every value round-trips bit-exactly through fp16 (normal halves
+    or zero), so the shader reads the same floats. Red `vtxpack`.
+  - DDS images are uploaded from the file's bytes (a view in gli's layout) instead of a full copy. Red `texcopy`;
+    `WW_STREAM1_TEXCHECK=1` builds both and prints "stream1 texcheck: same/MISMATCH" per file.
+  - New lines: "stream1 load: first full frame ..." and "stream1 mem: ..." (geometry packed/fp32 MB, budget,
+    resident textures, card memory, private MB); the streamed walk dump adds hitchMaxMs / over33 / the mem line.
+  - `WW_STREAM1_RED=all` brings every old path and its cost back.
+- **Gates:** notes/stream1/BATCH.md (run by the batch): every red and main 0 px / identical dumps on Concord 3x3 and
+  Goodneighbor, in-place DDS == copy, the streamed walk's spell gates and pictures unchanged, plus the three lines.
+- **Not done:** mip residency (TEXSTREAM1's partial levels) is not exact on a moving camera, so it is study only.
+  LOAD1's far-append and census items live in the far-card lane's files (cellfarlod / impostor), left to it.
+
+## Lane SSGI3 (2026-10-22, branch ssgi3-20261022): the screen-space GI fill law keeps its light
+
+- The screen-space GI (still ships OFF, `WW/CellSsgi`) took more probe light away than its march put back near
+  geometry (0.80 of the tracer, SSGI off 0.89). Two fixes in the cast, both physical:
+  - A diffuse surface looks equally bright from every side, so the donor's light no longer falls with its cosine
+    (only its back face gives nothing).
+  - A shut sector now removes probe light only as far as the screen refills it: a donor in the radius' outer band
+    or seen from behind leaves the rest to the probe. The probe keeps exactly what the screen does not replace.
+- Red `WW_CELL_SSGI_RED=oldlaw` brings SSGI1's law back. Echo: `cell ssgi: ... law fill|old`.
+- Offline gate `tests/spells/ssgi_fill_law.py` (furnace + lit corner): fill law PASS, red FAILS the furnace.
+  The live gates (DC2 at +-10 %, red identity, pictures) wait for the next batch: notes/ssgi3/BATCH.md.
+
+## Lane SSGI2 (2026-10-21, branch ssgi2-20261021): screen-space GI's four weaker rows to FO4CS's level
+
+- The screen-space GI (ships OFF, `WW/CellSsgi`) now matches FO4CS on the four rows SSGI1 left weaker:
+  - Noise: EA's FAST spatiotemporal blue-noise sheet (BSD-3, `res/ssgi/`), as FO4CS reads it. Red `ign`.
+  - Depth-interval skip: a min/max depth pyramid skips taps whose cell lies outside the radius (exact: same picture),
+    plus the early out once every sector is shut. Red `nohiz`.
+  - Emissive cast: the scene pass writes the emitted share to a second target; a 2-slice importance-sampled cast with
+    FO4CS's small-emitter boost runs with its own history and denoise and is added at the end; the ordinary cast takes
+    the emission off its donor. Effect shaders are not emitters here (FO4CS skips them too). Red `noemissive`.
+  - Denoise: FO4CS's robust blur plus the quarter-res pyramid with temporal moments. Red `oldblur`.
+- Probe 5 (`WW_CELL_LIT_PROBE=5`) now shows what the surface gets with SSGI on (the double-count gate); unchanged with SSGI off.
+- Gates: `tests/spells/cell_ssgi.sh` PASS; nohiz byte-identical PASS. Double count vs the tracer: PASS at bounce1's
+  facade pixels, FAIL at near-field pixels (SSGI under-counts, 0.80 of the tracer); see notes/ssgi2/FINAL.md.
+
+## Lane LEFTOVERS1 (2026-10-22, branch leftovers1-20261022): Open Cell reads localized names from the string tables
+
+- **Why.** A localized plugin (TES4 flag 0x80, e.g. the game's own masters) stores FULL as a string-table index, so
+  File > Open Cell... showed its worldspaces and cells with blank names.
+- **What changed:**
+  - The catalog reads `<Plugin>_<lang>.STRINGS` (and `.DLSTRINGS` / `.ILSTRINGS`, which carry a length before each
+    string) from `Strings\`, loose or inside a `<Plugin> - *.ba2` (libfo76utils `BA2File`), in the plugin's own folder
+    and then the Data folder. A loose table beats the archive's, as in the game. Text is UTF-8, else Latin-1.
+  - New Language box in the dialog (en, de, fr, it, es, pl, ptbr, ru, ja, cn, or typed), kept in `WW/OpenCell/Language`,
+    default `en`. When no table is found the name stays blank (never the index) and the status line names the plugin.
+  - Off: `WW_OPENCELL_STRINGS=0`. Red: `WW_OPENCELL_RED=strings` (the old blank names, no file reads).
+- **.esl confirmed:** `.esl` files and light-flagged `.esp` files (TES4 0x200) are listed. In the Data-folder order, an
+  `.esl` goes with the masters and a light-flagged `.esp` goes with the plugins, as plugins.txt orders them. Both are
+  read into the catalog. The synthetic test now has one of each.
+- **Light plugins numbered as the game does (fix):** an `.esl`, or an `.esp`/`.esm` with TES4 flag 0x200, now gets
+  form IDs `FE` + a 12-bit slot + the 12-bit local ID (libfo76utils `ESMFile`). The slot is its place among the light
+  plugins in load order. Full plugins that list it as a master resolve their references to the same FE IDs. Before, a
+  light plugin took a full load-order byte, so its IDs differed from the game's and from xEdit's. The master-flagged
+  `.esp` sort is unchanged. Skyrim SE / Fallout 4 files only (form version below 0xC0).
+  - Callers that took the top byte as the file index (face meshes for actors, previs `vis\<plugin>\` files, the
+    weather list's owner) now ask `ESMFile::getFormIDFile()`; file names use the local ID (`getFormIDLocal()`).
+  - Red: `WW_ESM_LIGHT_RED=full` (the old full-slot numbering).
+- **Gate:** `tests/spells/opencell_check.sh`: 38/38 green (19 new checks); red writer, red strings, strings-off and red
+  light each exit 1 (the strings red fails the 6 name checks, the light red the 6 FE checks). Synthetic plugins, tables
+  and a BA2 are all built in code.
+
+## Lane VOLFIT1 (2026-10-19, branch volfit1-20261019, landed by MERGEALL1 at f626c12d): the Space stage, real room volume shapes
+
+- **Why.** PERF1's GI volumes needed real room shapes. The greedy boxes it builds from the room grid could not split an
+  open shop front from the street.
+- **What changed:**
+  - Space stage: rooms are unions of box / cylinder / wedge / capsule / sphere / gable shapes fitted on the ROOMCLAMP1
+    grid, with one outdoor volume outside them. Thresholds are stored with the rooms.
+  - A fingerprinted `.space` record is written under `Data\Bake` and skipped when its inputs are clean.
+  - `.recx` `shapes` hand fixes (`WW_CELL_VOLUMES_RECX`). Census step `space`. Debug view `WW_CELL_VOLUMES_VIEW=1`
+    (`_DUMP` writes it out).
+  - `WW_CELL_VOLUMES_GI=1`: the Space rooms become the GI's room source. Each GI grid cell takes the smallest room whose
+    shapes hold its centre. An air cell in no shape takes the Space room holding most of its ROOMCLAMP1 room, else
+    outdoors. A room-grid room that Space did not keep stays a room of its own (it had turned outdoors and blacked a
+    Memory Den recess wall). Unset, the grid is ROOMCLAMP1's, untouched.
+  - The sky picture's kept spec holds its Space rooms through a shared pointer (it crashed with GI volumes and the sky
+    picture both on).
+  - Reds: `WW_CELL_VOLUMES_RED` (17 fitter reds), `WW_CELL_VOLUMES_GI_RED=nogimap|gione|spaceshapes|spaceleftover`.
+- **Measured:** Museum headless, 41 of 42 rooms mapped into the GI grid (was 29), and 20 rooms interior that the room
+  grid had called outdoors.
+- **Gate:** `tests/spells/cell_volumes.sh synth` PASS, `red` 17/17 fail as they must. Still owed (launch checks): the
+  space census, the debug view and the borderline-ruin picture.
+
+## Lane PERF1 (2026-10-16..19, branch perf1-20261016, landed by MERGEALL1 at b13a8ce7): the cell view frame from ~1 s to ~73 ms
+
+- **Why.** A 3x3 close Concord frame took 989 ms of GPU time and a 5x5 one took 1231 ms. The first frame of a launch
+  came at 227 s.
+- **What changed (each has a switch or a red; pictures 0 px against the old path unless noted):**
+  - Per-pass frame timers, cache and texture counters and private bytes per stage (`WW_CELL_PASSTIME`, `_LOG`, `_SYNC`;
+    `WW_CELL_PASSTIME_CENSUS=1` adds samples passed and primitives per pass).
+  - The geometry cache keeps the frame's shapes: 915 uploads a frame became 0. Red `WW_GEOCACHE_RED=thrash`.
+  - Far cards drawn as one batch: 201 ms became 3 ms. Red `WW_IMPOSTOR_RED=perdraw`.
+  - Previs occluder planes built once a frame (red `WW_CELL_PREVIS_RED=perrun`). The air's echo line prints only
+    when it changes; it had stalled every frame by about 280 ms (red `WW_CELL_AIR_RED=echoall`).
+  - Shader program binary cache in `shadercache/` beside the exe, keyed on the sources and the driver: 62 programs went
+    from 132 s cold to 0.3 s warm (`WW_PROGCACHE=0` off). The far LOD append grows by doubling, and the far census is
+    cached (`WW_FARCENSUS_CACHE=0` off). Fixed a startup hang in the load sampler.
+  - Light telemetry gated, GI tracer and rooms memo, scene globals set once per program per pass (`WW_GI_GEOMEMO=0`,
+    `WW_SETUP_MEMO=0`).
+  - The obscurance pass returns once it has normal and depth: about 75 ms became 16 ms (`WW_AO_EARLY=0` off, red marks).
+  - Exposure and bloom measured from the linear frame already drawn, read back a frame late (`WW_IS_MEASURE=old|sync|red`).
+  - GI visibility by volumes (Division D4): the outdoors is one volume and each room a union of shapes. A screen pass
+    draws a pixel's volume id and the GI reads only that volume's grid slots. Light crosses only at thresholds, blended
+    both ways. Half-rate GI with a depth- and normal-aware upsample. `WW_CELL_GI_VIS=march` (red: the old per-pixel
+    march, compiled in by `WW_CELL_GI_MARCH`); `WW_CELL_GI_RATE=half|full|inline|red`.
+- **Measured (GPU ms a frame, 1080p):** 3x3 close5 989 -> 72.7; 5x5 close5 1231 -> 267 (before the later passes);
+  shader programs at load ~150 s -> 0.31 s warm; first frame of a 3x3 launch 227 s -> 66 s warm.
+- **Gates (10-19, fix22):** cell_giblack memden all PASS (p95 room blend 86.3%, bar 80%); Goodneighbor vis gate
+  (`tests/spells/cell_gn_vis.sh`) PASS. Owed: the GI volumes' own gain and picture against the march, and the pass
+  census rows.
+
+## Lane BAKEINCR1 (2026-10-04, branch bakeincr1-20261004, landed by MERGEALL1 at 250b73e5): the probe bake rebakes only changed cells
+
+- Every outdoor probe bake writes `bakeincr.txt` beside its `.tbk` files, a fingerprint of everything the bake read:
+  the records of the 5x5 block around the cell, every model / material / texture it opened (by content), the far LOD
+  it traced against, and the exe and its bake settings.
+- A world rebake checks those fingerprints and rebakes only the cells that moved. Moving one object rebakes the 25
+  cells whose 5x5 block holds it. A changed model rebakes the cells that read it. Light and time-of-day changes
+  rebake nothing (the bake does not read them). Indoor cells write no fingerprint and always rebake.
+- New tool `tools/ww_bake_world.py` (full | check | incremental). Test switches `WW_CELL_BAKEINCR_CHECK` and
+  `WW_CELL_BAKEINCR_RED=nonbr|nomodels`.
+- The bake output is unchanged byte for byte (the same cell baked by two runs gives identical files).
+- The world gate (`tests/spells/cell_bakeincr.sh`, about 90 bakes) has not passed yet: its only run was stopped by the
+  memory guard. It is queued for the next test batch.
+
+## Lane GIBLACKLINK1 (2026-10-22, branch giblacklink1-20261022): the giblack red links again
+
+- **Why.** On main the giblack gate's red (`WW_CELL_PV_RED=borrow`, and every march red, which compile
+  `WW_CELL_GI_MARCH`) failed to link `fo4_cellcsm.prog` on NVIDIA: "too many instructions" (the 64k-instruction
+  limit). Each `cellGiSample` call site inlined the whole march chain (`cellGiSampleFull`), about ten copies. Bisected
+  offline: it was not LIGHTSYS2. FARGRID1 (ac8ecf26) pushed the program over; TERRSHADOW1 had added +65 KB before it.
+- **What changed (march red only):** under `WW_CELL_GI_MARCH`, `fo4_default.frag` reads the march once a fragment
+  (`cellGiMarchPrime` in main, at the (P, N) every later caller passes; cellPassOut's nonormal red primes with up).
+  Every `cellGiSample` then returns that read. fo4_cellcsm's march program: did not link -> links (504769-byte driver
+  binary); fo4_cell's march 1515744 -> 403421 bytes. The red runs the chain once, not two or three times.
+- **Normal path:** untouched. Without the march, every `fo4_*.prog`'s driver binary equals main's except the run stamp
+  and the 8-byte source hash (the same machine code).
+- **Red:** `WW_CELL_GI_MARCH_COPIES` (shader define; the gate sets it) restores a march copy per call site; fo4_cellcsm
+  then fails to link again.
+- **Gate:** `tests/spells/cell_giblack_link.sh` (offline, through the driver, no NifSkope run; tool
+  `tests/spells/shader_link_check.py`): march links, red fails, normal binaries equal. PASS. The giblack picture
+  gate itself runs in the next batch.
+
+## Lane TESTDRIVER1 (2026-10-22, branch testdriver1-20261022): switches flip live, one launch per scene
+
+- **Why.** bungo 10-22: "by relaunching nifskope, you introduce a significant delay by loading everything again".
+  Every harness row was its own launch: start-up, plugins, cells and bake loaded again for one switch.
+- **What changed:**
+  - One switch store (`src/wwswitch.h/.cpp`). The process env stays the store; every `WW_*` read goes through
+    `wwEnv*` (1013 sites). `wwSwitchSet`/`wwSwitchReset` change a switch and move a generation counter.
+  - Cached readers follow the generation: 104 function statics (`WW_SWITCH_STATIC`), 18 init-once state functions
+    (pins and reds back to defaults, then re-read), and the GPU caches a switch feeds (light buffer, terrain shadow
+    sweep, draw setup memo).
+  - Each switch has a stage (`src/wwswitchstages.inc`, made by `tools/wwswitch_survey.py`): live 236, shaders 6
+    (programs reload in place), reopen 277 (the cell document re-opens in the same window), tool 115, relaunch 166
+    (harness selectors and start-up state; refused live, listed with the reason).
+  - Driver: `WW_LIVE_STEPS=<file>` or UDP `NifSkope::live <step>` (`WW_LIVE_SERVE=1`, client
+    `tests/spells/ww_live.py`): row, set, unset, reset, apply, wait, settle, shot, path, gpums, status, quit. A
+    picture step first redoes what the sets owe and says so ("redone reopen for ... in N ms").
+  - Red: `WW_TESTDRIVER_RED=relaunch` refuses every live set (the harness then launches once per row).
+- **No set, no change:** the generation stays 0 and every reader computes what it did before.
+- **Gates (batch, notes/testdriver1/BATCH.md):** no-set identity main vs lane exe; live vs relaunch twins per class on
+  Memory Den and Concord 3x3; leak check (first row vs last); wall clock per scene; the port path.
+
+## Lane FARCARD1 (2026-10-22, branch farcard1-20261022): the cell view's far tree cards draw instanced
+
+- **Why.** WHOLEFRAME (perfresearch1) measured the far-cards pass at ~17 ms on Concord 3x3: one draw per card,
+  ~30 by-name uniform uploads and a geometry hash each, and none of those draws in the census counts. Shipped games
+  draw impostors instanced, with the per-card data in a buffer.
+- **What changed (no look change):**
+  - `ImpostorDraw::drawCardsInstanced`: the culled cards' values go into one RGBA32F texture buffer (6 texels a card),
+    each set's frames into a frame table built once per arming, and each card set (one sheet set) is ONE
+    `glDrawElementsInstanced` of the shared quad. No per-card uniforms, no per-card hash.
+  - The CPU still culls the cards and picks their frames, through `pickCard`, the same function the per-card path
+    now calls, so the GPU receives the same floats. `impostor_inst.vert` reads them; `impostor_oct.frag` takes them
+    as flat inputs under `WW_CARDINST` (`impostor_cellinst.prog`), otherwise as the old uniforms.
+  - The far cards now count in the census draws (`far-cards d=draws/cards`), in both paths.
+  - Off switch `WW_FARCARD=0`; red `WW_FARCARD_RED=percard` restores the one-draw-per-card path and its cost.
+    A GPU with fewer than 37 texture units, or a missing program, also falls back to it.
+  - `cellunits.h`: units 35 (`CardData`) and 36 (`CardFrames`).
+- **Gate (batch, notes/farcard1/BATCH.md):** on vs off vs red vs the base exe, 0 px on every frame, Concord 3x3
+  still and moving camera, Goodneighbor still; timing of the far-cards pass on Concord and Goodneighbor.
+
+## Lane LIGHTCLUSTER1 (2026-10-22, branch lightcluster1-20261022): clustered light lists kept across TAA jitter
+
+- **Lists kept across jitter, exact.** The point and spot lights already go through LIGHTSYS2's clustered lists (80 px
+  tiles x 24 depth slices in a texture buffer). TAA moves the projection by under half a pixel every frame, and a
+  still camera used to rebuild every frame (Memory Den, 149 lights: 1.5-3.8 ms a build). The lists are now built with
+  1 px of extra screen padding. A grid is reused while the jitter stays within 1 px of the projection it was built
+  for, so its lists still hold every light that touches a pixel.
+- **Up to 4 grids per renderer**, picked by least recent use. The cluster boxes are cached per projection and
+  viewport (they do not depend on the lights). The texture buffer is attached once per upload, not on every draw.
+- No light is dropped by count on either path. A cluster over the 512 cap walks every light, as before.
+- `WW_CELL_CLUSTER_KEEP=0` or `WW_CELL_CLUSTER_RED=rebuild`: one grid with the exact key (the old path and its cost).
+  `WW_CELL_CLUSTER_STATS=n`: a stderr stats line every n frames. The unit test adds a 1 px jitter-reuse gate, a box
+  cache gate and a jitter red (`--red-jitter`, 16 px, must fail).
+
+## Lane GPUDRIVEN1 step B (2026-10-22, branch gpudriven1b-20261022): GPU culling (the niagara / meshoptimizer way)
+
+- **Cluster culling on the GPU.** In the main lit pass, every solid opaque, two-sided or alpha-tested cell shape is cut
+  into clusters of up to 128 triangles inside one placement (`src/gl/cellgpucull.cpp`). A compute pass tests each
+  cluster against the camera frustum, its normal cone (one-sided shapes that GL back-face-culls) and a Hi-Z depth
+  pyramid. It writes one indirect draw command per cluster, and each shape then draws with one
+  `glMultiDrawElementsIndirect`. The CPU cull still runs first; only its kept placements are tested.
+- **Hi-Z from a depth prepass.** The opaque shapes the last frame drew solid are drawn depth-only from the step A
+  pool, at the main frame's size, samples, depth format and polygon offset. A compute pass then builds a max-depth
+  pyramid. A cluster is dropped only when its nearest point lies farther than the farthest depth under its screen
+  box, so the frame should not change: the batch gates it at 0 px.
+- Never culled: skinned, grass, far-swaying, LOD-reduced and blended shapes, and shapes whose program or GL state
+  was not seen opaque and depth-tested last frame. Off in AO, reflections, probes, measuring and selection.
+- `WW_GPUDRIVEN_B=0`: step A's path. `WW_GPUDRIVEN_B_CONE=0`, `_OCC=0`, `_FRUSTUM=0`: one test off.
+  `WW_GPUDRIVEN_B_RED=hard`: the occlusion test reads the cluster's centre depth (it must change the picture).
+  `WW_GPUDRIVEN_B_RED=nocull`: all of the work, nothing culled. `WW_GPUDRIVEN_CENSUS=1` adds "gpudriven b" lines
+  (shapes, clusters, culled by frustum / cone / occlusion, triangles, draws, stage CPU and GPU ms).
+- `wwCellGrassIsShape` (`src/gl/cellgrass.h`): the wind-waved shapes, which no bound holds.
+
+
+## Lane SHADOWCACHE1 (2026-10-22, branch shadowcache1-20261022): cached static sun cascades (the CoD / UE5 way)
+
+- **Static casters cached per cascade.** Each cascade keeps a second depth layer holding only its static casters
+  (`src/gl/sunshadow.cpp`, ShadowCache). When the fit, the camera, the static set and the render state match the
+  cached ones, the pass copies that layer into the live map and draws only the dynamic casters over it, or does
+  nothing when there are none. Depth-only LEQUAL keeps the nearest depth in any order, so a still camera is exact.
+  A caster counts as dynamic when it is skinned, or when its transform or geometry changed in the last 120 passes.
+- **Far cascades scroll.** Cascades 1 and 2 keep their sun direction until the sun turns 0.05 degrees. When their
+  window only moved on the same texel lattice, the old static depths are copied across with the depth range
+  remapped (new shader `lookdev_csmremap`), and only the newly exposed strips are drawn. A look change at most
+  within the stated near-invisible bar; the batch measures it on a moving camera and a moving sun.
+- `WW_SHADOWCACHE=0`: GPUDRIVEN1's pass. `WW_SHADOWCACHE_RED=full`: everything redrawn every pass (the old result
+  and cost). `WW_SHADOWCACHE_RED=stale`: never redrawn (the moving gates' bite). `WW_SHADOWCACHE_SCROLL=<mask>`,
+  `WW_SHADOWCACHE_SUNHOLD=<deg>`, `WW_SHADOWCACHE_DYNFRAMES=<n>`, `WW_SHADOWCACHE_CENSUS=1`.
+- Test driver: `WW_RENDER_PATH_HOURSTEP=<hours a frame>` steps the pinned hour along a camera path.
+- Cost: one extra 3-layer depth array plus a 1-layer scratch (32 MB at map 2048).
+
+## Lane GPUDRIVEN1 (2026-10-22, branch gpudriven1-20261022): render queues, step A (the Division 2 way)
+
+- **Sun cascades through queues.** The cascade casters are sorted once a frame into solid, two-sided and alpha-tested
+  queues. Their positions, UVs and indices live in one shared pool per GL context (`src/gl/cellqueue.cpp`), so a
+  caster no longer hashes and uploads its mesh per cascade. Each cascade draws its solid and two-sided queues with one
+  indirect multi-draw each (`glMultiDrawElementsIndirect`, a per-draw matrix per command; new shaders
+  `lookdev_csmdepth_q` / `_atq`). The CPU cull per caster is kept. Skinned casters stay on the old path.
+- **Main pass by queue.** In the second (lit) pass, BSShapes are collected during the walk and drawn queue by queue:
+  opaque, two-sided, alpha-tested, then the rest in walk order. Skinned, blended, decal, effect, x-ray and
+  non-depth-writing shapes go to "rest". Blended shapes stay sorted as before.
+- **GL 4.6 context**, requested only when a probe gets 4.6 from the driver.
+- Bindless textures are deferred: each bind still sets the wrap mode per texture, so one texture can carry two sampler
+  states. `WW_GPUDRIVEN_CENSUS=1` counts them, along with the queue sizes and the pool.
+- `WW_GPUDRIVEN=0`: everything off (and no 4.6 request). `WW_GPUDRIVEN_RED=perdraw`: the old per-draw paths and their
+  cost. `WW_GPUDRIVEN_CSM=0` / `WW_GPUDRIVEN_MAIN=0`: one half off. `WW_GPUDRIVEN_RED=order`: a fixed shuffle inside
+  every queue (the order gate).
+
+## Lane FXRES1 (2026-10-22, branch fxres1-20261022): soft effects at a lower resolution in the cell view (OFF until the look pairs)
+
+- **Big soft effects draw into a half-resolution layer.** With `WW_CELL_FXRES=1` a Soft effect (smoke, steam, fog
+  card: soft depth, blended, no depth write, not a decal, not room-lit) that is large on screen leaves the sorted
+  pass's order and draws, after the other sorted shapes and before the particles, into a layer of 1/2 the frame per
+  axis. The layer keeps an offset and a transmittance (exact for each draw's blend) and is composited once with a
+  depth-aware upsample (off-screen particles, GPU Gems 3 ch. 23; own GLSL). Its depth is the nearest opaque depth
+  under each layer texel, so the soft fade still reads the scene.
+- Particles, AO, the opaque pass and the frame's size stay full resolution. A draw the layer cannot hold exactly is
+  drawn in place after the composite. Pass subs "fxres-down", "fxres-layer", "fxres-comp".
+- Off by default (no GL call, no reorder). Knobs `WW_CELL_FXRES_SCALE`, `_MINPX`, `_MINAREA`, `_EDGE`,
+  `_CENSUS=1`. Reds: `WW_CELL_FXRES_RED=full` (every draw in place: equals off), `=quarter` (sensitivity), `=bilinear`.
+- **Soft effects find the opaque depth again (GATEFIX3).** Since TONEMAP1 the linear frame's depth / stencil texture
+  samples stencil, so the framebuffer query read its depth as 0 bits: the soft-effect depth grab failed ("lane EFX2:
+  no soft effects"), soft effects lost their depth fade in the default view, and FXRES1 refused. The grab now takes
+  the frame's own depth / stencil format.
+
+## Lane AAFORMAT1 (2026-10-22, branch aaformat1-20261022): MSAA and HDR target format study switches (all OFF)
+
+- **Study switches, default unchanged.** `WW_MSAA=<1|2|4|8|16>` sets the view's MSAA sample count instead of the
+  saved "Msaa Samples" setting (1 = off; the linear frame and the FO4CS bloom source follow it). With `WW_TAA=1` it
+  gives the shipped-game setup (temporal AA, no MSAA). `WW_CELL_HDR_FORMAT=rgba16f` puts the linear frame in RGBA16F
+  (half the bytes); `=r11g11b10f` is a cost arm only (no alpha: effects over the sky lose their coverage).
+- Every new linear frame logs its format, size, samples and MB ("cell aa: linear frame ..."); `WW_CELL_AA_MEM=1`
+  logs the card's used video memory (GL_NVX_gpu_memory_info).
+- Reds: `WW_MSAA_RED=1` ignores `WW_MSAA`; `WW_CELL_HDR_FORMAT_RED=1` / `WW_AAFORMAT1_RED=1` force RGBA32F.
+  Nothing turns on before bungo sees the picture pairs (Concord daylight + a chain-link fence close-up).
+
+## Lane VRS1 (2026-10-22, branch vrs1-20261022): variable rate shading in the cell view (OFF until the look pair)
+
+- **Coarse shading where the last frame was flat.** With `WW_CELL_VRS=1` the opaque and sorted passes shade through
+  an NV shading rate image (`GL_NV_shading_rate_image`). Each 16x16 tile's rate (1x1 up to 2x2, or 4x4 with
+  `WW_CELL_VRS_MAX=4x4`) comes from the previous frame's finished picture: the largest neighbour step across the
+  tile, horizontal and vertical apart (FidelityFX-VariableShading's method, MIT, own GLSL). Fast camera motion (the
+  temporal AA's vectors) raises the allowance. The sorted pass uses a stricter second image.
+- Coverage, depth, the frame's resolution and the obscurance (AO) stay full: only fragment-shader runs drop.
+  Alpha-tested, effect and PBR-composition draws shade 1x1. Shadows, sky, effects, far cards and post are untouched.
+- Off by default (no GL call). Reds: `WW_CELL_VRS_RED=1x1` (every rate 1x1: equals off), `=4x4` (sensitivity),
+  `=noalpha`. Gate knobs `WW_CELL_VRS_CENSUS=1`, `WW_CELL_VRS_DUMP=<file>`; the build time is pass sub "tone-vrs".
+
+## Lane TONEMAP1 + SYNC1 (2026-10-22, branch tonemap1-20261022): the cell view's tone map without the stencil blit
+
+- **Stencil read by the tone map, exact.** The linear (HDR) frame's depth/stencil is now a multisample texture. Only
+  the depth is copied back to the view; the tone map's shader reads the stencil per sample and keeps the same
+  samples the GL stencil test kept. The MSAA depth+stencil blit into the view was most of the "tone-map" cost.
+  The FO4CS bloom attaches the same texture. A driver that refuses the texture falls back to the old path by itself.
+  `WW_CELL_HDR_STEX_RED=1`: the renderbuffer, both blitted, the GL stencil test.
+- **Fewer driver syncs, exact.** The view's depth format and samples are cached per size, the linear frame's status
+  is checked once, the state the measure and the tone quads restore is read once, and GL errors are checked only on
+  a new target. `WW_CELL_HDR_SYNC_RED=1`: every query every frame.
+- `WW_TONEMAP1_RED=1` brings back both. `WW_CELL_HDR_STEX_BREAK=1` is a gate-only knob (a wrong stencil test).
+
+## Lane PERF3 (2026-10-22, branch perf3-20261022): cell view per-draw CPU cuts, reflections from the previous frame
+
+- **GL query cache, exact.** Inside one draw's setup the per-draw hooks asked the driver for the blend state, the
+  active texture unit and the viewport several times each (a driver sync each). They now read them once a draw
+  (`src/gl/celldrawstate.h`). `WW_DRAW_GLCACHE=0` or `WW_DRAW_GLCACHE_RED=1`: the old queries and their cost.
+- **Obscurance pass lean, exact.** While the obscurance (AO) pass draws, the reflection and bounce hooks no longer
+  bind their samplers and uniforms (that pass writes only the normal and depth; the main pass sets them again).
+  `WW_CELL_AO_LEAN=0` or `WW_CELL_AO_LEAN_RED=1`: the old path.
+- **Sun-shadow frame block, exact.** The cascade matrices and their scalars go to one per-frame uniform block
+  (`wwShadowFrame`, binding 2), uploaded only when they change, instead of nine by-name uniform sets per program bind.
+  `WW_FRAME_UBO=0` or `WW_FRAME_UBO_RED=1`: the old uniforms.
+- **Reflections from the previous frame (test only, off).** `WW_CELL_SSR_PREV=1`: the reflections stop drawing the
+  scene a second time. The obscurance pass writes the reflection flag into stencil bit 0x01 of its depth buffer, and
+  a march hit samples the previous frame's finished linear color, reprojected into its camera. It falls back to the
+  second pass when the water's rays or the bounce need it, or when there is no previous frame of this size.
+  `WW_CELL_SSR_PREV_RED=1`: the second pass. A look change: stays off until bungo sees the pair.
+- `WW_PERF3_RED=1` brings back all four old paths at once. The obscurance pass itself stays the shared normal/depth
+  prepass (the main pass is a forward MSAA pass with no normal target to reuse).
+
+## Lane PERF2FIX1 (2026-10-22, branch perf2fix1-20261022): PERF2's opaque cuts made exact
+
+- **Obscurance and reflection opaque cuts, per shape.** PERF2 skipped the whole sorted list in the obscurance and
+  reflection scene passes, but decals and composition materials that draw unblended with a cell program write normal
+  and depth there (facade speckle, max 8/255 in Concord, 15 in Goodneighbor). Now each shape records whether its last
+  draw wrote in such a pass; the sorted draws run again and skip only shapes whose record (at most 2 frames old) says
+  blended or not cell-lit. Draw order, particles and the masks the next draw inherits stay as before.
+  `WW_CELL_OPAQUE_CUT_CHECK=1` draws all and prints `opaque cut check (ao|ssr): ... wrong=N` plus the writing shapes.
+  Reds unchanged (`WW_CELL_AO_OPAQUE_RED=1`, `WW_CELL_SSR_OPAQUE_RED=1`).
+- **Temporal air gate.** Its camera-move check moves to Goodneighbor (lamps in the air); Concord at night has no
+  light in the froxels, so a stale history could not show there.
+
+## Lane PERF2 (2026-10-21, branch perf2-20261021): cell view frame cost (timers first, then exact cuts)
+
+- **Timers.** Per-pass GPU ms gain sub-stages (air tile/inject/integrate, obscurance geometry/stages/GI, tone-map
+  blit/measure/bloom/quads, far dots/lit cards) and CPU draw-setup totals per pass (`| cpu setup|cell-uni|sun-uni|
+  fog-uni|ao-draw|ssr-draw <ms> n=<calls>`). The census queries get their own pool. Measured: the frame is CPU-bound
+  per draw (about 11-17 us a draw); the obscurance and reflection passes each submit the scene again.
+- **Volumetric air, exact.** The integrate is O(slices) (red `WW_CELL_AIR_RED=oldint`), an empty air column returns
+  early (`noearly`). Dumps byte-identical to the old path.
+- **Temporal air (test only, off).** `WW_CELL_VOLAIR_TEMPORAL=1`: one of four strata fresh a frame, the rest from the
+  reprojected history (diharaw/volumetric-fog, MIT, as reference); `WW_CELL_VOLAIR_TEMPORAL_RED=1` the 4 sub-steps.
+  Stays off until bungo sees the before/after pair.
+- **Obscurance and reflection scene passes, exact.** The scene-global setters run once per program (PERF1's memo, now
+  armed there too: `WW_CELL_AO_MEMO`, `WW_CELL_SSR_MEMO`), and the sorted/effect draws that write nothing there are
+  skipped (`WW_CELL_AO_OPAQUE`, `WW_CELL_SSR_OPAQUE`; the water ray pass draws the water alone). `=0` or `*_RED=1`:
+  the old path and its cost.
+- **Tone map, exact.** Its full-screen quads wrote `gl_FragDepth` per sample, which turned the early stencil/depth
+  tests off: every quad shaded every sample of the 4x frame. The quad now sits at the far plane (`cell_hdr.vert`);
+  `WW_CELL_HDR_EARLY_RED=1` runs the old program (`cell_hdr_fd.prog`).
+
+## Lane DOORLIVE1 (2026-10-22, branch doorlive1-20261022): one live door in the cell view, and the GI follows it
+
+- **Why.** bungo: "a video of the door closing and opening would be a good proof it works". The relight (GPURELIGHT1)
+  could shut a door slot, but nothing in the view moved a door, and a slot was only open or closed.
+- **What changed (off by default; nothing runs unless `WW_CELL_DOOR_ANIM` is set):**
+  - `WW_CELL_DOOR_ANIM=<ref hex>:<open|close|cycle>` picks one placed door. The weld leaves it out and its model is
+    copied in whole (shapes, nodes, controllers, sequences; no collision or lights) under a node carrying the
+    placement (`src/celldoorlive.h`, `cellCopyDoorBranch` in `src/cellview.cpp`).
+  - The door plays its own NIF `Open` / `Close` NiControllerSequence through the existing controllers, posed at an
+    exact time (frequency 0, phase t). No `Open`: the `Close` runs backwards, and the reverse. Neither: a 90 degree
+    hinge turn of the placement node (the census says "hinge fallback").
+  - The open fraction is measured from the pose: the node that moves most between the closed and open poses, by its
+    slide, or by its turn when it slides less than a unit.
+  - The GI follows: the relight's slot for that door is shut by (1 - open fraction). A part-shut slot blends its
+    transmittance toward open (`T' = 1 - s (1 - T)`); shut 1 is the closed factor exactly, as before. Visibility
+    entries are weighted the same way. CPU and GPU kernels both (`src/proberelight.cpp`, `doorShut`).
+  - It runs on the GPU on each change, never a rebake. The published grid = the bake + (this run - the all-open run).
+  - The cell lights' shadow cubes re-render while the door moves (`wwCellShadowKick`).
+  - Drivers: a path frame (`WW_RENDER_PATH`) poses the door at k / fps and relights before the frame draws; the
+    test driver's `door:<open|close|cycle|t=<s>|state>[:<ms>]` step; the port's `NifSkope::door <same>`.
+  - `WW_CELL_DOOR_ANIM=list` ranks the cell's doors by the light each one stops alone, and suggests a dark-side camera
+    and floor point.
+  - Census: `door live: ref .. state .. open .. relight .. ms (gpu|cpu, relights n) gi follows .. floor E ..`, per
+    path frame in `<shot>_path.txt`.
+- **Reds:** `WW_CELL_DOORLIVE_RED=static` (the GI stays at the bake while the mesh moves) | `snap` (the GI flips at
+  half open). `WW_CELL_DOORLIVE_HOLD` (seconds held closed and open, default 1), `WW_CELL_DOORLIVE_FLOOR=x y z`.
+- **Measured:** built only; the video (closed, opening, open, closing, closed, plus the static red) and the floor
+  brightness curve are shot in the next batch, after BATCH2 lands (notes/doorlive1/BATCH.md).
+
+## Lane LIGHTFLICKER1 (2026-10-22, branch lightflicker1-20261022): lamps flicker from their LIGH Flicker Effect
+
+- **Why.** bungo 10-22 (RDR2 list, item 5): fires and broken lamps in the cell view stood still. The LIGH DATA Flicker
+  Effect (period, intensity amplitude, movement amplitude) was read and thrown away.
+- **What.** `EsmLight` keeps the three values; the cell view hands them, the flag's mode and the ref's local axes x
+  scale to each placed light. Each frame `wwCellFlickerFrame` computes ONE value per light (a dimmer on its colour and a
+  world offset of its position) and patches it into the cell light buffer. The surfaces, the lit effects and the
+  volumetric air all read that buffer, so they always agree. The GI, the relight and the far light keep the steady light.
+- **The FO4 way** (matches the game's flicker / pulse behavior, measured):
+  - flag 0x8 (Flicker) runs the flicker, else 0x80 / 0x100 runs the pulse.
+  - Three phases a light step by random ranges (1.1-13.1, 1.2-13.2, 1.3-19.3) x frame seconds x Period.
+  - 512-entry sin/cos tables give the dimmer `1 - A + A v` (A = intensity / 2) and the local offset
+    (`NiAVObject` local translate). The pulse uses cos/sin of one phase.
+  - Our random is a seeded xorshift per ref, so a gate's frames repeat.
+- **One difference from the game.** A shadow-casting light keeps its place and flickers in brightness only. Its depth
+  cube is drawn once, from there, not every frame. The cluster lists take a moving light's radius + 0.87 x movement, so
+  the patched light is never cut off.
+- **Row:** Cell workspace "Light flicker" (`WW/CellFlicker`, **ships OFF**; pin `WW_CELL_FLICKER=0/1` wins).
+  - Red `WW_CELL_FLICKER_RED=1` holds every light steady, which is the row-off picture.
+  - Gate pins: `WW_CELL_FLICKER_STEP=<s>` sets a fixed step a frame; `WW_CELL_FLICKER_DUMP=<file>` writes one line per
+    flickering light per frame.
+  - The echo says `flicker=on(asked, lights, moving, frames, red, step)`.
+  - The view repaints every tick only while a flickering light is on screen.
+- **Vanilla census** (Fallout4.esm): 694 LIGH; 182 flicker, 18 pulse. Most movements are 0 to 0.8 units; fires 32, a few
+  128.
+- **Cost:** CPU work on the flickering lights only, and one `glBufferSubData` over their range per frame. No shader
+  change.
+
+## Lane FARLIGHTMAP1 (2026-10-22, branch farlightmap1-20261022): the far light for the whole map, from the cell view's own bake
+
+- **Why.** Distant towns should glow from their placed lights everywhere on the map (bungo 10-22, RDR2's distant lights; ruled option a: the same light as the cell view bake). Until now only a cell view bake with `WW_CELL_FARLIGHT` wrote FARVIEW1's far-light layers, one loaded cell at a time.
+- **What changed:**
+  - `NifSkope -no-gui farlightmap --plugins <esm> --root <dir> [--region x0..x1,y0..y1] [--out <dir>] [--memcap MB] [--jobs N] [--dry]` (src/farlightmap.cpp). It walks the worldspace's exterior cells. **One launch, many cells:** a walk process loads the plugins once, then opens cell after cell in its window. Each open is the cell view's own exterior bake, set up the way `tools/ww_bake_world.py` sets it, plus `WW_CELL_FARLIGHT`: the 5x5 block plus far soup, then the probe bake, the relight and the far layers. The bake code is not forked. After each cell the driver copies the cell's `lights_/relight_/farlight_` files into one folder that FARVIEW1's reader loads.
+  - The walk goes in a serpentine over a strip of rows, so most of the next cell's 5x5 block is the last cell's. Two things stay kept between cells: the worldspace index (`WW_CELL_KEEP_WORLD=1`, in src/cellview.cpp) and the bytes of each asset read (`WW_CELL_KEEP_ASSETS_MB`, in `lodgenReadAsset`). A kept read is still noted in the bake record. A walk is respawned only when its working set passes `--memcap` after a cell, or when a cell fails, and the log says why. `--jobs N` runs N walks on separate strips. `WW_CELL_KEEP_*` is a run-only knob: it moves no `.tbk` byte.
+  - Resumable. A cell is skipped when BAKEINCR1's check calls it clean AND its `farlight.done` marker matches: the exe sha1, the `WW_CELL_FARLIGHT_*` knobs, and the sha1 of each file in the output folder. A cell whose 5x5 block holds no placed light makes no far light, so it is not baked, and any stale files it left in the output are removed.
+  - The bake record gets a `lights` line (`ProbeIncr::lightsDigest`): each placed light's fields, its base's light data, its box and its enable chain. Only a far-light bake writes this line, and the check compares it when present. A light edit moves no `.tbk` byte, but it does move the far light. `WW_CELL_FARLIGHT*` is now a run-only knob: it moves no `.tbk` byte.
+  - Census per cell: lights, groups, surfels, records, layers written, bytes, far ms, wall, peak working set. Progress lines give cells/hour and the time left. Mid-cell, a walk is stopped at 1.5x `--memcap` and that cell fails. No walk starts while free memory is below the cap.
+- **Not run yet** (code and build only; BATCH2 is open). The region test and the whole-map command are in notes/farlightmap1/BATCH.md.
+
+## Lane REFLPROBE1 (2026-10-22, branch reflprobe1-20261022): placed reflection probes, relit by the cell's light
+
+- **Why.** A vanilla env map reflects a fixed cube: it darkens at night but never shows what is around it. bungo's RDR2
+  comparison (item 3) asked for placed probes relit per time of day. Research and decisions: notes/reflprobe1/RESEARCH.md.
+- **What.** Ships OFF behind the cell row "Reflection probes" (WW/CellReflProbe; pin WW_CELL_REFLPROBE).
+  - Placement is automatic: one probe per room of the probe GI's room grid (big rooms split at 2048 units), else a
+    3 x 3 grid of 2048-unit cells round the camera; plus RDR2's camera probe, which takes what the boxes leave. 32 placed at most.
+  - Each probe is captured once as a 64-px G-buffer cube (albedo; normal + distance) from the static opaque shapes,
+    one face a frame (WW_CELL_REFLPROBE_ALL=1: all at once, for stills).
+  - Relit by cell_reflrelight.frag with the cell's own light code (placed lights + shadow cubes, probe GI and its sky
+    visibility, the ambient, the sun x cascades) into an R11G11B10F octahedral atlas with box mips; again when the light changes.
+  - An env-mapped cell surface in a probe's box takes the parallax-corrected, box-faded probe reflection in place of its
+    material cube, at lane CUBE1's strength; SSR stays on top. The atlas is read through the idle GreyscaleMap sampler
+    (fo4_cellcsm is at 32 samplers).
+- **Gates.** Red WW_CELL_REFLPROBE_RED=fixed returns the material cube (must equal off); nosun|nolights|nogi|white strip
+  relight terms. Probe 66 (WW_CELL_LIT_PROBE): the boxes' weight, the camera share, the added light. stderr "reflprobe: ...";
+  PassTime "refl-probes". Memory ~10.4 MB.
+
+## Lane SPECOCC1 (2026-10-22, branch specocc1-20261022): specular occlusion from the baked sky visibility
+
+- **Why.** Outdoors the cube reflection is the sky's, but only the material AO dimmed it: a glossy floor under an awning
+  or in a doorway reflected the open sky. FO4CS dims its reflection by its sky visibility (ambient_ibl_pass.hlsl, the M2.3
+  horizon specular occlusion, on top of TruePBR_SpecularOcclusion's material AO).
+- **What.** New Show row **Sky specular occlusion** (WW/CellSpecOcc, ships off; pin `WW_CELL_SPECOCC=0|1`). With it on, in
+  a weather-lit exterior with a baked GI grid, the cube reflection (after the SSR mix) keeps the probes' sky visibility
+  read along the reflection: the sky grid's per-axis open-sky share on the lobe's dominant direction (R for a mirror,
+  bending to N as the surface roughens), n^2 axis weights, times the Sky visibility row's strength. Both programs: the
+  legacy FO4 program (cubeK and the viewport cube term) and the PBR program (the ambient block's reflection). Interiors,
+  the material AO term and every light's specular are unchanged.
+- **Cost.** Three hardware-trilinear reads of the GI texture per exterior pixel. No new sampler: the sky grid's slot 0
+  rides the GI texture after its own slabs (6 more RGBA16F slabs) only while the row is on; the GI reads now take the
+  texture's depth from `textureSize` (the same number when off).
+- **Reds.** `WW_CELL_SPECOCC_RED=ao`: the material AO alone (today's picture). `WW_CELL_SPECOCC_RED=hemi`: FO4CS's own
+  read, the normal's sky visibility faded out by smoothness.
+
+## Lane LAMPSHADOW1 (2026-10-22, branch lampshadow1-20261022): stored lamp shadows; live redraws only near movers
+
+- **Why.** The cell lights' shadow cubes were rendered whenever a lamp entered one of the 16 shadow slots, so walking
+  through a lamp-heavy interior kept re-rendering them, and nothing redrew when a caster moved. RDR2 stores most static
+  point-light shadows and renders live ones only when something dynamic is near the light; its wall lights use a
+  spot-sized map instead of a full cube (notes: lane folder RESEARCH.md).
+- **What.** New row Cell lights > **Lamp shadows**: Off | Low | Medium | High | Ultra (setting `WW/CellLampShadow`, pin
+  `WW_CELL_LAMPSHADOW=off|low|medium|high|ultra`). Ships **Off**, which is the shadow pass exactly as before.
+  - Each shadow lamp's cube is rendered once from the still casters into a store (`src/gl/celllampshadow.*`,
+    `lampShadowPass` in `src/gl/celllights.cpp`) and copied into its slot by depth blits when it takes one.
+  - A caster whose world transform (or CPU-skinned vertices) changes becomes a mover: the stored maps it was in are
+    rendered again without it, and a slot is redrawn only on a frame when a mover inside its light's volume moved or the
+    set of movers inside changed: the stored map copied in, then the movers drawn over it.
+  - Wall lamps: 8 short rays beside the lamp along each world axis must hit one plane square to it within 64 units. Such
+    a lamp stores only the room half of its cube (the front face and the room halves of the 4 side faces: half the
+    memory); on restore the wall half is drawn as that plane.
+  - Tiers set the face edge and the store budget: Low 256 / 32 MB, Medium 512 (the old face) / 128 MB, High 768 /
+    256 MB, Ultra 1024 / 384 MB. An omni lamp costs 6 x face^2 x 2 B (3 MB at Medium), a wall lamp half that. When the
+    budget is full, the least-recently-used maps not in a slot are dropped; a lamp that still does not fit renders the
+    old way. The census line (`lamp=`) prints the store's lamps, walls and MB.
+  - Reds: `WW_CELL_LAMPSHADOW_RED=live` redraws every held slot from every caster every frame; `=cube` turns off the wall half.
+- **Gates** (on the merged build, after BATCH2): a still scene at Medium vs Off byte-equal with `=cube`, near with walls;
+  GPU-ms in a lamp-heavy interior at 1080p, stored vs `=live`; the store's MB per cell.
+- **After DOORLIVE1 lands:** its shadow kick re-marks every held slot; with Lamp shadows on, the stored path makes each
+  of those a copy (no re-render), and the door is caught as a mover on its own.
+
+## Lane FOGBLOOM1 (2026-10-22, branch fogbloom1-20261022): fog bloom, a per-pixel bloom strength that rises in fog (off)
+
+- **Why.** Our bloom is the same over the whole frame: a lamp in clear air and one seen through thick fog get the same glow.
+  In real fog the halo around a light widens and brightens with the optical depth along the view ray. RDR2 does this with
+  an R8 "bloom intensity" target that the composite multiplies the bloom by; it is higher with distance in fog and higher for translucents.
+- **What changed (ships off):**
+  - New pass `cell_fogbloom.frag` (src/gl/cellfogbloom.*), run at the tone map. It writes an R8 target at the frame's size and sample count:
+    gain = 1 + f (1 - T) (1 + 0.5 translucent), with T the air's transmittance to the pixel, read from the froxel volume
+    (lookdev_fog.glsl), so any change in the fog's density moves it.
+  - f is a smoothstep over the ray's mean extinction, from mist (visibility 2 km) to fog (1 km). Clear air writes exactly 0,
+    so the gain is exactly 1.0 and the picture keeps the same bits.
+  - Translucents: blended linear-light draws (effects, glass; not water, not decals) set stencil bit 0x04 while the feature is on,
+    and the pass gives those samples up to 1.5x the fog term.
+  - The tone map (cell_hdr.frag, cell_lights.glsl) multiplies both blooms (Vanilla and FO4CS) by the gain.
+- **Row:** Cell workspace, Show > Bloom > Fog bloom (`WW/CellFogBloom`, off).
+- **Pins:** `WW_CELL_FOGBLOOM=0|1`; red `WW_CELL_FOGBLOOM_RED=flat` = today's uniform bloom (no pass, no marks);
+  `WW_CELL_FOGBLOOM_TIME=1` prints the pass's GPU time. Budget ~0.1 ms at 1080p.
+- `tests/spells/cell_units_check.py` allows the pass's two units (9 in the tone map, 1 for its depth).
+
 ## Landed on main (2026-10-22, lane MERGE1): FXCHECK1, VOLAIRSKY1 (FOGTRICUBIC1)
 
 - Two finished lanes merged into main in this order: fxcheck1 (8ad3aadf), volairsky1 (8e5dc845). Their entries follow.
@@ -21,6 +625,42 @@
 - **Measured** on gate region -4 -4 3 3, all rings, FARBAKE2 flags, against BAKESPEED1 (v16):
   - chunks stage 569 -> 213-326 s; the cast 337 -> 29-32 s;
   - all 210 files byte-identical (only the .key files and the report's exe-path line differ), at default threads, `--threads 1` and red; census buried count 241743 in all three.
+
+## Lane EMISSIVEGRID1 (2026-10-22, branch emissivegrid1-20261022): a finer GI grid around bright glowing surfels (ships off)
+
+- **Why.** The Hotel Rexford neon sign throws a bright orange spot on the canopy ceiling about 1 m above it. Probe GI makes the sign glow, but the coarse grid (about 100 u voxels, probes about 280 u apart) smears that splash into a faint wash.
+- **What changed:**
+  - **Fine boxes.** At cell load the relight (src/probegifine.cpp) groups glowing surfels into clusters (neighbors within one coarse voxel).
+    - A cluster gets a box when its power gives a reach of at least 1.5 coarse voxels. The reach is sqrt(power / eth), eth 0.02, `WW_CELL_EMISSIVEGRID_ETH`, capped at 4 voxels.
+    - Boxes that overlap merge. There are at most 8 boxes and 600k voxels in total.
+    - The voxel is a third of the coarse voxel, so about 35 u.
+  - **What a fine voxel holds** (six axes):
+    - D: the glow's direct light. Each glowing surfel is a small area light, shadowed by a ray through the bake's geometry.
+    - C: the coarse grid's own share of the same surfels. These are their probe links, blended the way the coarse grid blends probes, with the same room match.
+    - Voxels whose centre is solid are marked empty and skipped.
+    - No rebake: everything comes from the surfels and links the relight already has.
+  - **Storage.** The atlas rides as extra layers of the existing GI 3D texture: no new texture unit, read only with texelFetch. The filtered readers keep their old layer depth.
+  - **Shader** (`cellGiFineAdd`): inside a box, the coarse irradiance trades C for D.
+    - It uses the same seen/room test (cellGiRooms) so no light crosses a wall.
+    - It fades back to the coarse grid over the box's outer 2 voxels.
+  - **Census line:** "gi emissive grid: N fine boxes ... voxels, atlas KB, rays, build ms".
+- **Switch:** `WW_CELL_EMISSIVEGRID` (env pin) or the cell menu row "Emissive GI grid" (WW/CellEmissiveGrid). Default off; with it off nothing is built or bound.
+- **Red:** `WW_CELL_EMISSIVEGRID_RED=1` builds nothing (the old path and its cost). `noseen` and `nosub` drop the wall test or the C subtraction (for diagnosis).
+- **Measured:** pending. The judgment pictures (off/on at 22:00 and 13:30, red, the main rung) and costs wait for the batch after BATCH2 (notes/emissivegrid1/BATCH.md).
+
+## Lane FOGDRIFT1 (2026-10-22, branch fogdrift1-20261022): the near fog drifts with the weather's wind (ships off)
+
+- **Why.** bungo 10-22, from RDR2: fog moves, and as it moves the lamps' glow in it brightens and dims. Our air was smooth height bands only.
+- **What changed:**
+  - The near froxel grid's density is multiplied by a tileable 64^3 R8 noise (two gradient octaves; read twice, tiles 4096 and 1843 units), on each of the inject's 4 sub-steps. The sun, sky, GI and placed-light in-scatter all use that one sub-step density, so a lamp's halo pulses as lumps pass.
+  - The factor is 1 + a (n - mean) / span with the texture's measured mean: the mean density is unchanged (offline: 0.9992 over 400k world points; range 0.23..1.72, std 0.195).
+  - It fades to 1 from 2000 to 8000 units (the detail octave sooner). The far grid and the closed-form tail stay smooth.
+  - The wind comes from the weather's WTHR DATA (speed, direction; range and turbulence wobble the bearing and gust the speed), already read by GRASSMB1 (wwLookdevWind). The offset is integrated with the velocity eased over 2 s, so a weather change does not jump. With no wind the lumps stand still. 400 units/s at full wind speed.
+  - Exteriors drift. Interiors drift only when the cell shows the sky (CELL DATA bit 7). A sealed interior is drawn exactly as with the row off.
+- **Row:** "Fog Drift" under Volumetric Air, ships OFF (QSettings WW/VolAirDrift; the pin WW_CELL_FOGDRIFT=0|1 wins). WW_CELL_FOGDRIFT_T=<s> pins the clock for shots (a harness pins t = 0). The view repaints while the fog drifts (never in a harness).
+- **Reds:** WW_CELL_FOGDRIFT_RED=still (no motion), =smooth (no noise; byte-equal to the row off).
+- **Echo:** drift=on(wind dir range turb speed t) in the air's census; the dump's "drift" line. New texture unit AirNoise = 37 (cellunits.h).
+- Code and build only; pictures and GPU-ms after the BATCH2 merge (notes/fogdrift1/BATCH.md).
 
 ## Lane BAKESPEED1 (2026-10-21, branch bakespeed1-20261021): the chunks stage runs its VT rows and chunk jobs on all cores, and resumes
 
@@ -74,6 +714,23 @@
   red gloss 1.000 and byte-identical to the old shot. Pre-roll: 51 systems, 740 live vs the red's few; 215 px change
   in the barrel crop, but no plume is visible over the barrel by eye, so the barrel itself is still open.
 - **Notes:** `E:/Projects/Claude/notes/fxcheck1/` (STATUS, BATCH, FINAL, pairs).
+## Lanes PBRALBEDO1 + PBRALBEDO2 (2026-10-21/22, branch pbralbedo2-20261021): a .pbrm's albedo in the probe bake
+
+- **Why.** The probe bake read every surface's albedo from the legacy diffuse, even where a `.pbrm` serves the
+  material, so a PBR material bounced the wrong color. PBRALBEDO1 made the bake read base x (1 - metallic) through the
+  same resolver as the renderer (`pbrmResolveForMaterial`); its run then found 0 of 26 materials served.
+- **Cause (PBRALBEDO2).** Vanilla NIFs name their BGSM by the build machine's absolute path
+  (`C:\Projects\Fallout4\Build\PC\Data\materials\...`). `pbrmNormaliseMaterialPath` refuses drive-qualified paths,
+  so the sibling step refused every vanilla material, in the bake and in the drawn view alike.
+- **What changed:** `pbrmResolveForMaterial` cuts such a name at its last `materials\` (what the game and lodgen's
+  `cutAuthoringPath` already do) before resolving. Data without `.pbrm` files is unchanged (the extra lookup misses).
+  A `.pbrm` sibling of a vanilla material now draws and bakes PBR: a look change only where such files exist.
+- **Switches and reds:** `WW_PBRM_AUTHORPATH_RED=refuse` keeps the uncut name (the old refusal);
+  `WW_CELL_BAKE_PBRALBEDO_RED=diffuse` bakes the legacy diffuse; `WW_CELL_BAKE_PBRM_TRACE=<file>` writes each bake
+  material's route, path, refusal and tried list (diagnosis only).
+- **Gates:** in the next batch (notes/pbralbedo2/BATCH.md): vanilla bake byte-identical to main, served count > 0
+  with every cell material routed "sibling" on the full-cell fixture, surfel albedo = legacy x color x (1 - metallic)
+  within 2/255, and both reds fail the matching check.
 
 ## Lane HORIZON1 (2026-10-21, branch horizon1-20261021): the AO map and the shadow heightmap on all cores
 
@@ -212,6 +869,44 @@
   to smooth the grid's blocks. The far tail's and the sky's two-slice step stay exact in depth (xy smoothed only).
   Unset or 0 = the old read, byte for byte. Notes line `cell air: volair=... fogblend=N tricubic=N`. Off until bungo
   rules on the before/after pair.
+
+## Lane VOLPART1R (2026-10-21, branch volpart1r-20261021): VOLPART1 rebased onto the landed Volumetric Air
+
+- **VOLPART1 (below) moved onto main, every landed VOLAIR1 behavior kept.** The particle and card law now uses the
+  landed air's medium: its layered law (near band, ground layer; `airLayer` / `airGround`), the records' haze colour on
+  the sky's share (`airEnvColour`, red physcol), the neutral phase ruling (red bluescatter), and the landed `wwFogFx`
+  for the air over a puff or card (reds fxfog / fogblend apply; VOLPART red nofog keeps the game's fog alone).
+- The air's medium functions moved out of `cell_volair.frag` into `res/shaders/cell_airmed.glsl` (shared by the air
+  and the particles; same code). `lookdev_fog.glsl` `wwVolAirAtUv` takes the froxel uv (a particle's sprite pixel).
+- With the row off (`WW_CELL_VOLPART=0`) the frame is the main exe's byte for byte (gate O). Not mirrored: the Far Air
+  terrain shadow (ships off). Under `WW_ALL_ON=1` the row is on unless `WW_CELL_VOLPART=0` is pinned.
+
+## Lane VOLPART1 (2026-10-14/15, branch volpart1-20261014): Volumetric Particles, steam and fog cards lit as volumes
+
+- **Steam and fog in the cell view can be drawn as lit volumes instead of flat cards.** Scene window row "Volumetric
+  Particles" (ships OFF, `WW/VolPart`; pin `WW_CELL_VOLPART=0|1`). Goodneighbor's street steam is mostly effect
+  cards (MistGroundWaterSteam, MistLargeRoundDusty, the lamp beams), so both the particle systems and the lit effect
+  cards take the law. Each card or puff is lit at its own point from the same light list as the Volumetric Air: the
+  sun through its cascades, every placed light with its shadow, the probe GI and the sky ambient; tinted by each
+  light's colour; turned by its normal map (else the card's own normal); its alpha is its thickness (thin = single
+  scatter with the air's phase, thick = wrapped diffuse); and it is seen through the integrated froxel air.
+- Fake-volume features on the cards (`res/shaders/cell_volpart.glsl`, `fo4_effectshader.frag`): the edge-on fade
+  (opacity x smoothstep(0.05, 0.35, |N.V|)); the puff (the path through a ball: alpha 1 - (1 - a)^(1.5 sqrt(1 - r^2)),
+  thicker at the centre, thin at the rim); the phase backlight (the air's own three-lobe phase, so steam with a lamp
+  behind it glows); the near-camera fade (gone at 16 units, whole from 128); the soft slab (a card is a slab of its
+  soft depth, or 64 units, against the opaque depth, drawn with no depth test: no hard line where it meets the ground
+  or a wall).
+- Telemetry: `cell particles volumetric: ...` and `cell effects volumetric: volpart=on|off red=N soft=0|1` in the notes
+  whenever it changes.
+- Gate switches (environment only): `WW_CELL_VOLPART_RED=flat|nothick|nosoft|nolights|white|nofog|noshadow|noedge|
+  nophase|nonear`, `WW_CELL_VOLPART_HIDE=1` (no volumetric particle or card drawn), `WW_CELL_VOLPART_DUMP=<file>`
+  (probes per particle and per sampled card pixel, 13 slots).
+- Gates: `tests/spells/volpart1_cell.sh` + `volpart1_check.py`, rev1 (Foggy 18:00) and memden (Clear 22:00): a numpy
+  rebuild of the light law (A L T N K), the fog-over vs the integrated volume (F), the particle's light vs the air's at
+  its froxel (G), edge (V), puff (P), phase (H), near (M), soft slab (E), off == the exe before the lane (O); each red
+  fails its stage.
+- Not done (follow-up): the cards' density is not injected into the Volumetric Air's froxels (they do not shadow or
+  thicken the air around them).
 
 ## Lane VOLAIR1 (2026-10-13, branch volair1-20261013): Volumetric Air, one lit medium in the cell view
 
@@ -411,6 +1106,29 @@
   of VOLAIR1's `atsolid` (casters solid again; the cell gate FAILs).
 - **One sun on screen too.** With Sun Path = Real the drawn sun disc and glare move with the light (they stayed at
   the clock's position before).
+## Lane RTBAKE1FIX (2026-10-22, branch rtbake1fix-20261022): the RT bake casts the CPU bake's rays exactly
+
+- **The in-cell museum bake no longer casts one batch more on RT** (batch 1: cpu 6,572,032 vs rt 6,574,080 rays).
+  The cause: refine() checked a GPU nearest hit with the CPU walk bounded at the GPU's t. That walk prunes more
+  than the full walk: a node whose box entry rounds a hair past t is skipped, though the full walk visits it, so
+  on near ties (shared edges, coplanar faces) it could keep another triangle. One probe's noise test then flipped.
+  Now `src/bakertwalk.h` rayFrom() walks from t + 1e-6 (1 + t) and says when it left out any node or triangle
+  within that margin of its best; only then can it differ, and such rays are re-cast in full.
+- Gate: `tests/bakert_walk_gate.cpp` (standalone, no GPU) re-traces the bake's 16 batches from every probe of the
+  in-cell museum soup and tries every triangle a float tracer could return: old walk 700 answers unlike the full
+  walk in 92 probes (the red), new 0 (5.7% of candidates re-cast). `WW_BAKE_RT_WALK_RED=bounded` brings the old walk back.
+
+## Lane RTBAKE1 (2026-10-21, branch rtbake1-20261021): one GPU ray back end for the bakes
+
+- **The bakes cast their rays on the GPU when there is one.** `src/bakert.*` takes a probebvh tree and traces batches
+  of rays three ways, picked at run time: Vulkan ray query on RT hardware, a compute shader that walks the CPU's own
+  BVH (GPUs without RT), or probebvh itself (the reference). Every GPU hit is re-tested in double; a nearest-hit ray
+  then takes the CPU's own triangle (a bounded CPU walk), and its misses are re-cast on the CPU, so the probe bake's
+  primary rays give the CPU's own answers. `WW_BAKE_RT_RED=cpu|compute|rt` forces a path (cpu is byte-identical to
+  before); the census names the path and the GPU.
+- **Moved:** the probe bake's primary rays and probegi's edge sky rays (about 20 M rays at Goodneighbor).
+  Goodneighbor in-cell: built in 52.5 s -> 43.0 s; edge + floor 5452 -> 381 ms; gi grid 6802 -> 1698 ms.
+- **`WW_BAKE_THREADS=n`** sets every bake pool's worker count. Output is byte-identical at 1 thread and at all threads.
 
 ## Lane CABLES1 (2026-10-16, branch cables1-20261016): cables in the cell view (power lines, string-light wires, ropes)
 

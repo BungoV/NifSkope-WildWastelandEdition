@@ -1,4 +1,5 @@
 #include "spellbook.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "wwskin.h"
 #include "blocks.h"
 #include "sanitize.h"
@@ -272,7 +273,7 @@ static QString riggingChooseDonorFile( const NifModel * nif )
 		return riggingWorkflow.donorFile;
 	// TEMP TEST SEAM (WW_CREATESKIN_TEST harness): the native file dialog
 	// cannot be auto-driven, so an env var supplies the donor path directly.
-	const QByteArray envDonor = qgetenv( "WW_TEST_DONOR" );
+	const QByteArray envDonor = wwEnv( "WW_TEST_DONOR" );
 	if ( !envDonor.isEmpty() )
 		return QString::fromLocal8Bit( envDonor );
 	riggingSessionDonorFile.reset();
@@ -7421,7 +7422,7 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 			QElapsedTimer perfT;	// TEMP DIAGNOSTIC (WW_PERF_TEST)
 			perfT.start();
 			refresh( skope ? skope->currentNifIndex() : QModelIndex() );
-			if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+			if ( wwEnvIsSet( "WW_PERF_TEST" ) ) {
 				QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
 				if ( f.open( QIODevice::Append | QIODevice::Text ) )
 					QTextStream( &f ) << "    [rigging refresh: " << perfT.elapsed()
@@ -7769,7 +7770,7 @@ QDockWidget * tlCreateVertexPaintManagerDock( NifModel * nif, QMainWindow * mw, 
 			QElapsedTimer perfT;	// TEMP DIAGNOSTIC (WW_PERF_TEST)
 			perfT.start();
 			refreshTarget( skope ? skope->currentNifIndex() : QModelIndex() );
-			if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+			if ( wwEnvIsSet( "WW_PERF_TEST" ) ) {
 				QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
 				if ( f.open( QIODevice::Append | QIODevice::Text ) )
 					QTextStream( &f ) << "    [vertex-paint refreshTarget: " << perfT.elapsed()
@@ -8578,8 +8579,8 @@ public:
 		 * deliberately rather than by accident.
 		 */
 		bool identityOnly = false;
-		QString referencePath = qEnvironmentVariable( "WW_SCLP_REFERENCE" );
-		if ( !qEnvironmentVariableIsSet( "WW_SCLP_REFERENCE" ) ) {
+		QString referencePath = wwEnvStr( "WW_SCLP_REFERENCE" );
+		if ( !wwEnvIsSet( "WW_SCLP_REFERENCE" ) ) {
 			if ( !qobject_cast<QApplication *>( QCoreApplication::instance() ) )
 				return index;						// headless with nothing to ask
 			QMessageBox ask( QMessageBox::Question, name(),

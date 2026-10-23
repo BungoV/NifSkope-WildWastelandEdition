@@ -70,6 +70,7 @@
    Lane HKX3, 2026-09-10. */
 
 #include "hkxanimui.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "hkxplayback.h"
 
 #include "nifskope.h"
@@ -761,20 +762,20 @@ void wwRun( NifSkope * skope, WwUiState & st, bool loaded )
 
 void wwHkxAnimUiHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_HKXANIM_UI_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_HKXANIM_UI_TEST" ) )
 		return;
 
 	auto * st = new WwUiState;
 	const QString root = QApplication::applicationDirPath() + QStringLiteral( "/../" );
-	st->clipPath = qEnvironmentVariable( "WW_HKXANIM_UI_CLIP",
+	st->clipPath = wwEnvStr( "WW_HKXANIM_UI_CLIP",
 		root + QStringLiteral( "fixtures/Running_To_Slide_And_Back_To_Running.hkx" ) );
-	st->refusePath = qEnvironmentVariable( "WW_HKXANIM_UI_REFUSE",
+	st->refusePath = wwEnvStr( "WW_HKXANIM_UI_REFUSE",
 		root + QStringLiteral( "scratchpad/hkx1_20260910/clips/skeleton.hkx" ) );
-	st->shotPath = qEnvironmentVariable( "WW_HKXANIM_UI_SHOT" );
-	st->atFrame = qEnvironmentVariable( "WW_HKXANIM_UI_FRAME",
+	st->shotPath = wwEnvStr( "WW_HKXANIM_UI_SHOT" );
+	st->atFrame = wwEnvStr( "WW_HKXANIM_UI_FRAME",
 		QStringLiteral( "46" ) ).toInt();
 
-	const QStringList exp = qEnvironmentVariable( "WW_HKXANIM_UI_EXPECT",
+	const QStringList exp = wwEnvStr( "WW_HKXANIM_UI_EXPECT",
 		QStringLiteral( "93,60" ) ).split( QLatin1Char( ',' ) );
 	if ( exp.count() == 2 ) {
 		st->expFrames = exp.at( 0 ).toInt();

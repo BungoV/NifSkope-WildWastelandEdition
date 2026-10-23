@@ -3,12 +3,17 @@
 // Per pixel: every light that reaches the pixel must be in its cluster's list (or the cluster walks every
 // light), and the lighting summed over the list must equal the flat loop's bit for bit.
 // `--red` builds with the slice-middle depth range: lights near a slice edge get dropped, and it must FAIL.
+// LIGHTCLUSTER1: lists built under one TAA jitter must serve pixels drawn under another up to 1 px away (the GL
+// glue's reuse bound), and a build handed the box scratch must equal a fresh build bit for bit. `--red-jitter`
+// reuses across a 4 px shift (the bound ignored): it must FAIL.
 
+#define _USE_MATH_DEFINES   // M_PI on MinGW
 #include "cellcluster.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <vector>
@@ -60,9 +65,10 @@ float depthAt( int px, int py, float & nx, float & ny, float & nz )
 
 void viewPoint( const float proj[16], int px, int py, float d, float P[3] )
 {
+	// ndc = m0 x / d - m8 (m8: the off-centre / jitter term)
 	const double nx = 2.0 * ( px + 0.5 ) / W - 1.0, ny = 2.0 * ( py + 0.5 ) / H - 1.0;
-	P[0] = float( nx * d / proj[0] );
-	P[1] = float( ny * d / proj[5] );
+	P[0] = float( ( nx + proj[8] ) * d / proj[0] );
+	P[1] = float( ( ny + proj[9] ) * d / proj[5] );
 	P[2] = -d;
 }
 
@@ -140,10 +146,21 @@ struct Result
 	int refs = 0, overflowed = 0, maxCount = 0;
 };
 
-Result runOne( int n, bool red )
+// jitter in pixels, as gametaa.cpp adds it to a perspective projection (m[8] -= 2 offPx / W)
+void jitter( float m[16], double jx, double jy )
 {
-	float proj[16];
+	m[8] -= float( 2.0 * jx / W );
+	m[9] -= float( 2.0 * jy / H );
+}
+
+/* buildJit: the jitter the lists are built under; drawJit: the one the pixels are drawn under; pad: jitterPadPx */
+Result runOne( int n, bool red, double buildJit = 0.0, double drawJit = 0.0, double pad = 0.0 )
+{
+	float proj[16], projDraw[16];
 	perspective( proj );
+	std::memcpy( projDraw, proj, sizeof( proj ) );
+	jitter( proj, buildJit, buildJit );
+	jitter( projDraw, drawJit, -drawJit );
 	const int vp[4] = { 0, 0, W, H };
 	const std::vector<Light> lights = makeLights( n, 1234u + unsigned( n ), proj );
 	std::vector<WwClusterLight> cl;
@@ -151,6 +168,7 @@ Result runOne( int n, bool red )
 		cl.push_back( l.v );
 	WwClusterParams prm;
 	prm.redMidSlice = red;
+	prm.jitterPadPx = pad;
 	WwClusterGrid g;
 	Result r;
 	if ( !wwClusterBuild( proj, vp, cl, prm, g ) ) {
@@ -162,7 +180,7 @@ Result runOne( int n, bool red )
 		for ( int px = 0; px < W; px++ ) {
 			float N[3], P[3];
 			const float d = depthAt( px, py, N[0], N[1], N[2] );
-			viewPoint( proj, px, py, d, P );
+			viewPoint( projDraw, px, py, d, P );
 			const int c = g.clusterOf( px + 0.5f, py + 0.5f, -P[2] );
 			const int off = g.cells[size_t( c ) * 2], cnt = g.cells[size_t( c ) * 2 + 1];
 			float flat[3] = {}, clus[3] = {};
@@ -189,8 +207,48 @@ Result runOne( int n, bool red )
 
 } // namespace
 
+// A build through the box scratch (boxes kept from the previous build) equals a fresh build, cells and index.
+bool scratchSame()
+{
+	float proj[16];
+	perspective( proj );
+	const int vp[4] = { 0, 0, W, H };
+	WwClusterParams prm;
+	prm.jitterPadPx = 1.0;
+	WwClusterScratch sc;
+	bool ok = true;
+	double msFresh = 0.0, msKept = 0.0;
+	for ( int n : { 64, 256, 64 } ) {
+		std::vector<WwClusterLight> cl;
+		for ( const Light & l : makeLights( n, 77u + unsigned( n ) + unsigned( sc.misses + sc.hits ), proj ) )
+			cl.push_back( l.v );
+		WwClusterGrid a, b;
+		wwClusterBuild( proj, vp, cl, prm, a );
+		wwClusterBuild( proj, vp, cl, prm, b, &sc );
+		ok &= a.cells == b.cells && a.index == b.index;
+		msFresh += a.buildMs, msKept += sc.hits ? b.buildMs : a.buildMs;
+	}
+	std::printf( "  box scratch: %d kept, %d built, lists %s, build ms fresh %.3f vs through the scratch %.3f\n",
+		sc.hits, sc.misses, ok ? "identical" : "DIFFER", msFresh, msKept );
+	return ok && sc.hits == 2 && sc.misses == 1;
+}
+
+constexpr double kRedShiftPx = 16.0;  // the AABB slack hides a few px; 16 bites at 256 and 1024 lights
+
 int main( int argc, char ** argv )
 {
+	if ( argc > 1 && std::strcmp( argv[1], "--red-jitter" ) == 0 ) {
+		// the reuse bound ignored: lists built at +S/2 px drawn at -S/2 px (S = argv[2], default kRedShiftPx)
+		const double S = argc > 2 ? std::atof( argv[2] ) : kRedShiftPx;
+		bool ok = true;
+		for ( int n : { 64, 256, 1024 } ) {
+			const Result r = runOne( n, false, 0.5 * S, -0.5 * S, 1.0 );
+			std::printf( "  RED jitter %.1f px, %4d lights: missed %ld, sums unequal %ld px\n", S, n, r.misses, r.unequal );
+			ok &= r.misses == 0 && r.unequal == 0;
+		}
+		std::printf( "%s\n", ok ? "PASS" : "FAIL" );
+		return ok ? 0 : 1;
+	}
 	const bool red = argc > 1 && std::strcmp( argv[1], "--red" ) == 0;
 	std::printf( "cluster builder, %dx%d, %s\n", W, H, red ? "RED slice-middle depth range" : "green" );
 	bool ok = true;
@@ -201,6 +259,17 @@ int main( int argc, char ** argv )
 		std::printf( "  %4d lights: missed %ld, sums unequal %ld px, overflow px %ld, mean walked %.1f, refs %d, "
 			"clusters over cap %d, max list %d, build %.3f ms  %s\n", n, r.misses, r.unequal, r.overflowPixels,
 			double( r.walked ) / double( W * H ), r.refs, r.overflowed, r.maxCount, r.buildMs, pass ? "ok" : "FAIL" );
+	}
+	if ( !red ) {
+		// LIGHTCLUSTER1: built at +0.5 px, drawn at -0.5 px (the two ends of the TAA's Halton range), padded 1 px
+		for ( int n : { 64, 256, 1024 } ) {
+			const Result r = runOne( n, false, 0.5, -0.5, 1.0 );
+			const bool pass = r.misses == 0 && r.unequal == 0;
+			ok &= pass;
+			std::printf( "  jitter reuse 1 px, %4d lights: missed %ld, sums unequal %ld px, refs %d, build %.3f ms  %s\n",
+				n, r.misses, r.unequal, r.refs, r.buildMs, pass ? "ok" : "FAIL" );
+		}
+		ok &= scratchSame();
 	}
 	std::printf( "%s\n", ok ? "PASS" : "FAIL" );
 	return ok ? 0 : 1;

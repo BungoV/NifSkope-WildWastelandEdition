@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENSE BLOCK *****/
 
 #include "cellfarlod.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "btdterrain.h"
 #include "cellfarvanilla.h"
@@ -98,14 +99,14 @@ void memNow( double & wsMB, double & peakMB )
 int envInt( const char * name, int fallback )
 {
 	bool ok = false;
-	const int v = qEnvironmentVariableIntValue( name, &ok );
+	const int v = wwEnvInt( name, &ok );
 	return ok ? v : fallback;
 }
 
 float envFloat( const char * name, float fallback )
 {
 	bool ok = false;
-	const float v = qEnvironmentVariable( name ).toFloat( &ok );
+	const float v = wwEnvStr( name ).toFloat( &ok );
 	return ok ? v : fallback;
 }
 
@@ -124,7 +125,7 @@ float swayAmp()
 float swayTime()
 {
 	bool ok = false;
-	const float pinned = qEnvironmentVariable( "WW_CELL_FARLOD_SWAYTIME" ).toFloat( &ok );
+	const float pinned = wwEnvStr( "WW_CELL_FARLOD_SWAYTIME" ).toFloat( &ok );
 	if ( ok )
 		return pinned;
 	static QElapsedTimer clock;
@@ -146,8 +147,8 @@ const FarDoc * farFor( const Scene * scene )
 bool cellFarLodWanted()
 {
 	// the environment wins, and only for a measuring run (a harness never writes his settings)
-	if ( qEnvironmentVariableIsSet( "WW_CELL_FARLOD" ) )
-		return qEnvironmentVariableIntValue( "WW_CELL_FARLOD" ) != 0;
+	if ( wwEnvIsSet( "WW_CELL_FARLOD" ) )
+		return wwEnvInt( "WW_CELL_FARLOD" ) != 0;
 	return QSettings().value( QStringLiteral( "CellView/FarLod" ), false ).toBool();
 }
 
@@ -167,7 +168,7 @@ int & farlod1LastType()
 //! The type this build takes, and why (env pin, his setting, or auto on whether our files exist).
 int farlod1TypeFor( bool oursFound, QString * why )
 {
-	const QByteArray env = qgetenv( "WW_CELL_FARLOD_TYPE" ).toLower();
+	const QByteArray env = wwEnv( "WW_CELL_FARLOD_TYPE" ).toLower();
 	if ( env == "vanilla" || env == "fo4cs" ) {
 		*why = QStringLiteral( "WW_CELL_FARLOD_TYPE" );
 		return env == "vanilla" ? WwFarLodVanilla : WwFarLodFo4cs;
@@ -315,7 +316,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	ImpostorChunk::forgetCellFar();
 
 	// the gates' red controls: nocut | nosnap | watercut | nowater (cardsafter, nocardcull, pbrnosway act at draw)
-	const QByteArray red = qgetenv( "WW_CELL_FARLOD_RED" );
+	const QByteArray red = wwEnv( "WW_CELL_FARLOD_RED" );
 	const bool noCut = red == "nocut";
 	const bool noSnap = red == "nosnap";
 	const bool waterCut = red == "watercut";
@@ -337,7 +338,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 
 	/* THE NEAR GATE'S ARM (WW_CELL_FARLOD_NEARONLY=1): the far field's planes and nothing else -- no shape,
 	 * no card -- so a picture against the off path shows exactly what the planes alone change. */
-	if ( qEnvironmentVariableIntValue( "WW_CELL_FARLOD_NEARONLY" ) != 0 && nif ) {
+	if ( wwEnvInt( "WW_CELL_FARLOD_NEARONLY" ) != 0 && nif ) {
 		FarDoc fd;
 		fd.origin[0] = origin[0];
 		fd.origin[1] = origin[1];
@@ -473,7 +474,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	 * rectangle only, the game's chunks the rest -- the boundary gate's arm */
 	int lim[4] = { 0, 0, -1, -1 };
 	{
-		const QStringList p = qEnvironmentVariable( "WW_CELL_FARLOD_OURS" ).split( QLatin1Char( ',' ) );
+		const QStringList p = wwEnvStr( "WW_CELL_FARLOD_OURS" ).split( QLatin1Char( ',' ) );
 		if ( p.size() == 4 )
 			for ( int k = 0; k < 4; k++ )
 				lim[k] = p[k].trimmed().toInt();
@@ -1223,7 +1224,7 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 			: QStringLiteral( " differences: " ) + QStringList( moved.mid( 0, 4 ) ).join( QStringLiteral( "; " ) )
 				+ ( moved.size() > 4 ? QStringLiteral( "; ..." ) : QString() ) )
 		.arg( resSame ? QString() : QStringLiteral( "; resource stack %1 roots now, %2 in the bake" ).arg( nowRes.size() ).arg( bakeRes.size() ) );
-	if ( qgetenv( "WW_CELL_FARLOD_RED" ) == "ownstack" ) {
+	if ( wwEnv( "WW_CELL_FARLOD_RED" ) == "ownstack" ) {
 		r.line = QStringLiteral( "far lod: stack MISMATCH -- %1; NOT adopted (RED ownstack)" ).arg( what );
 		return r;
 	}
@@ -1245,7 +1246,7 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 		else
 			keptRes << res.path;
 	}
-	if ( !missing.isEmpty() && ( qgetenv( "WW_CELL_FARLOD_RED" ) == "refusemissing" || paths.isEmpty() ) ) {
+	if ( !missing.isEmpty() && ( wwEnv( "WW_CELL_FARLOD_RED" ) == "refusemissing" || paths.isEmpty() ) ) {
 		r.line = QStringLiteral( "far lod: stack MISMATCH -- %1; NOT adopted: %2 of the bake's files are gone (%3)" )
 			.arg( what ).arg( missing.size() ).arg( QStringList( missing.mid( 0, 3 ) ).join( QStringLiteral( "; " ) ) );
 		// lane FARLOD3: the near cells keep their stack, but the far field still needs its own assets
@@ -1261,7 +1262,7 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 	 * plugins are adopted but NOT its resource roots, so the far field's (and the near cells') mod assets
 	 * resolve through the session's stack alone. FARLOD3's red only stopped the lending, which an adopted
 	 * stack never reaches. */
-	const bool redNoRoots = qgetenv( "WW_CELL_FARLOD_RED" ) == "nobakeroots";
+	const bool redNoRoots = wwEnv( "WW_CELL_FARLOD_RED" ) == "nobakeroots";
 	if ( redNoRoots )
 		r.resources.clear();
 	r.line = QStringLiteral( "far lod: stack ADOPTED -- %1; the near cells now load the bake's %2 plugins and %3 resource "
@@ -1293,7 +1294,7 @@ QString cellFarLodLendRoots( const QStringList & bakeRoots )
 {
 	if ( bakeRoots.isEmpty() )
 		return QString();
-	if ( qgetenv( "WW_CELL_FARLOD_RED" ) == "nobakeroots" )
+	if ( wwEnv( "WW_CELL_FARLOD_RED" ) == "nobakeroots" )
 		return QStringLiteral( "far lod: resources -- lent NONE of the bake's %1 roots on disk (RED nobakeroots): the far "
 			"field's own materials resolve only through the session's stack" ).arg( bakeRoots.size() );
 	if ( !Game::GameManager::status( Game::FALLOUT_4 ) )
@@ -1385,14 +1386,14 @@ int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame )
 	if ( !f || f->cards <= 0 )
 		return 0;
 	// the red control: the Phase 1 path, after the resolve and lit by the viewer alone
-	const bool redAfter = qgetenv( "WW_CELL_FARLOD_RED" ) == "cardsafter";
+	const bool redAfter = wwEnv( "WW_CELL_FARLOD_RED" ) == "cardsafter";
 	if ( redAfter ? insideHdr : ( insideHdr != hdrFrame ) )
 		return 0;
 	ImpostorDraw::Options o;
 	o.cellLit = !redAfter;
 	/* WW_CELL_FARLOD_CARDSWAY=0 (harness only): the cards stand still, so the PBR sway gate (g9) sees the
 	 * mesh trees alone -- the cards sway on their own path and would move both its arms. */
-	const float amp = qgetenv( "WW_CELL_FARLOD_CARDSWAY" ) == "0" ? 0.0f : swayAmp();
+	const float amp = wwEnv( "WW_CELL_FARLOD_CARDSWAY" ) == "0" ? 0.0f : swayAmp();
 	if ( amp > 0.0f ) {
 		// the card's own sway is a UV shear (impostordraw.h), a fraction, not units
 		o.swayAmplitude = std::min( 0.05f, amp * 0.002f );
@@ -1448,7 +1449,7 @@ void wwCellFarLodPlanes( double nearPlane, double farPlane )
 
 void wwCellFarLodSkyCensus( Scene * scene )
 {
-	if ( !qEnvironmentVariableIsSet( "WW_CELL_FARLOD_SKYCENSUS" ) || !scene || !scene->renderer )
+	if ( !wwEnvIsSet( "WW_CELL_FARLOD_SKYCENSUS" ) || !scene || !scene->renderer )
 		return;
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
@@ -1536,7 +1537,7 @@ void wwCellFarLodSkyCensus( Scene * scene )
 	const float down = -std::sin( 3.14159265f / 180.0f );
 	qint64 below = 0, empty = 0, emptyAbove = 0;
 	int bx0 = vp[2], by0 = vp[3], bx1 = -1, by1 = -1;	// where the empty below-horizon pixels are (top-left origin)
-	const QByteArray maskPath = qgetenv( "WW_CELL_FARLOD_SKYMASK" );
+	const QByteArray maskPath = wwEnv( "WW_CELL_FARLOD_SKYMASK" );
 	std::vector<unsigned char> mask( maskPath.isEmpty() ? 0 : size_t( vp[2] ) * size_t( vp[3] ), 0 );
 	for ( int y = 0; y < vp[3]; y++ ) {
 		const float ndcY = ( float( y ) + 0.5f ) / float( vp[3] ) * 2.0f - 1.0f;

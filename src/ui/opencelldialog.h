@@ -32,6 +32,7 @@ public:
 
 	// Driven by the unit test as well as by the widgets.
 	void setDataDir( const QString & dir );
+	void setLanguage( const QString & lang );         //!< the string-table language of localized plugins
 	void setPluginsTicked( const QStringList & names );
 	bool importLoadOrder( const QString & pluginsTxt );
 	void readNow();                                   //!< read the catalog now instead of after the debounce
@@ -64,6 +65,7 @@ private:
 	QString written;
 
 	QLineEdit * dataEdit = nullptr;
+	QComboBox * langCombo = nullptr;
 	QListWidget * pluginList = nullptr;
 	QComboBox * worldCombo = nullptr;
 	QLineEdit * filterEdit = nullptr;

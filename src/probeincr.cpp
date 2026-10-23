@@ -1,6 +1,7 @@
 /* lane BAKEINCR1 (2026-10-04): the incremental probe bake's record and check. See probeincr.h. */
 
 #include "probeincr.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellview.h"
 #include "esmdata.h"
@@ -67,7 +68,8 @@ bool knobIsRunOnly( const QString & k )
 		QStringLiteral( "WW_CELL_LIGHTS" ), QStringLiteral( "WW_CELL_FAR_LOD" ),
 	};
 	static const char * prefixes[] = { "WW_RENDER_", "WW_CELL_SPEED_", "WW_CELL_BAKEINCR_", "WW_LOOKDEV_",
-		"WW_CELL_GI_", "WW_CELL_LIT" };
+		"WW_CELL_GI_", "WW_CELL_LIT", "WW_CELL_FARLIGHT",   // FARLIGHTMAP1: the far layers move no .tbk byte
+		"WW_CELL_KEEP_" };   // FARLIGHTMAP1: what a walk keeps between cells (the same bytes, read once)
 	if ( exact.contains( k ) )
 		return true;
 	for ( const char * p : prefixes )
@@ -219,6 +221,63 @@ void feedLand( Feeder & F, const EsmWorld & world, int x, int y, QSet<quint32> &
 
 bool byForm( const EsmRefr & a, const EsmRefr & b ) { return a.formID < b.formID; }
 
+/* lane FARLIGHTMAP1: one placed light, every field the relight and the far layers read (its base's light data,
+ * its overrides, its box, and the enable chain that picks its switch group) */
+void feedLight( Feeder & F, const EsmWorld & world, const EsmRefr & r, const QHash<quint32, const EsmRefr *> & refOf )
+{
+	F.i( r.formID );
+	F.i( r.base );
+	F.i( r.initiallyDisabled ? 1 : 0 );
+	F.i( r.layer );
+	for ( float v : r.pos )
+		F.f( v );
+	for ( float v : r.rot )
+		F.f( v );
+	F.f( r.scale );
+	F.i( r.hasRadius ? 1 : 0 );
+	F.f( r.radius );
+	F.i( r.xligCount );
+	for ( float v : r.xlig )
+		F.f( v );
+	F.i( r.lightBox );
+	if ( const EsmRefr * box = r.lightBox ? refOf.value( r.lightBox ) : nullptr ) {
+		for ( float v : box->pos )
+			F.f( v );
+		for ( float v : box->rot )
+			F.f( v );
+		F.f( box->scale );
+		F.i( box->hasPrim ? 1 : 0 );
+		F.i( box->primType );
+		for ( float v : box->primHalf )
+			F.f( v );
+	}
+	quint32 up = r.enableParent;
+	bool opposite = r.enableParentOpposite;
+	for ( int hop = 0; hop < 16; hop++ ) {   // the cell view's own walk: a parent outside the block counts as enabled
+		F.i( up );
+		F.i( opposite ? 1 : 0 );
+		const EsmRefr * p = up ? refOf.value( up ) : nullptr;
+		if ( !p )
+			break;
+		F.i( p->initiallyDisabled ? 1 : 0 );
+		up = p->enableParent;
+		opposite = p->enableParentOpposite;
+	}
+	const EsmLight & b = world.light( r.base );
+	F.i( b.exists ? 1 : 0 );
+	if ( !b.exists )
+		return;
+	F.i( b.time );
+	F.i( b.radius );
+	F.raw( b.color, 3 );
+	F.i( b.flags );
+	for ( float v : { b.falloff, b.fov, b.nearClip, b.constant, b.scalar, b.exponent, b.fade, b.godRayNear } )
+		F.f( v );
+	F.i( b.hasAttenuation ? 1 : 0 );
+	F.s( b.gobo );
+	F.i( b.godRays );
+}
+
 QString assetKey( const QString & root, const QString & folder, const QString & ext, const QString & path )
 {
 	return ( root + QLatin1Char( '|' ) + folder + QLatin1Char( '|' ) + ext + QLatin1Char( '|' ) + path ).toLower();
@@ -229,7 +288,7 @@ namespace ProbeIncr
 {
 QByteArray red()
 {
-	static const QByteArray r = qgetenv( "WW_CELL_BAKEINCR_RED" );
+	WW_SWITCH_STATIC( QByteArray, r, wwEnv( "WW_CELL_BAKEINCR_RED" ) );
 	return r;
 }
 
@@ -358,8 +417,43 @@ QString recordsDigest( const EsmWorld & world, int cx, int cy, int half )
 	return F.hex();
 }
 
+QString lightsDigest( const EsmWorld & world, int cx, int cy, int half, int * count )
+{
+	QVector<EsmRefr> all;
+	QSet<quint32> seen;
+	for ( int y = cy - half; y <= cy + half; y++ )
+		for ( int x = cx - half; x <= cx + half; x++ )
+			if ( world.hasCell( x, y ) )
+				for ( const EsmRefr & r : world.refrs( x, y ) ) {
+					seen.insert( r.formID );
+					all.append( r );
+				}
+	for ( const EsmRefr & r : world.persistentRefrsIn( float( cx - half ) * kCellUnits, float( cy - half ) * kCellUnits,
+			 float( cx + half + 1 ) * kCellUnits, float( cy + half + 1 ) * kCellUnits ) )
+		if ( !seen.contains( r.formID ) )
+			all.append( r );
+	std::sort( all.begin(), all.end(), byForm );
+	QHash<quint32, const EsmRefr *> refOf;
+	for ( const EsmRefr & r : all )
+		refOf.insert( r.formID, &r );
+	Feeder F;
+	F.raw( "bakeincr lights v1;", 19 );
+	F.i( cx );
+	F.i( cy );
+	F.i( half );
+	int n = 0;
+	for ( const EsmRefr & r : all )
+		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 ) {
+			feedLight( F, world, r, refOf );
+			n++;
+		}
+	if ( count )
+		*count = n;
+	return F.hex();
+}
+
 bool writeRecord( const QString & dir, const QString & world, int cx, int cy, int half,
-	const QString & records, const QString & cellRecords, const QString & far, QString * error )
+	const QString & records, const QString & cellRecords, const QString & far, QString * error, const QString & lights )
 {
 	QStringList lines;
 	lines << QStringLiteral( "WWBAKEINCR 1" );
@@ -371,6 +465,8 @@ bool writeRecord( const QString & dir, const QString & world, int cx, int cy, in
 	lines << QStringLiteral( "records %1" ).arg( records );
 	lines << QStringLiteral( "cellrecords %1" ).arg( cellRecords );   // the asked cell alone: the nonbr red's
 	lines << QStringLiteral( "far %1" ).arg( far );
+	if ( !lights.isEmpty() )   // lane FARLIGHTMAP1: only a far-light bake reads the lights into a file
+		lines << QStringLiteral( "lights %1" ).arg( lights );
 	for ( const Asset & a : recorded() )
 		lines << QStringLiteral( "asset %1\t%2\t%3\t%4\t%5" ).arg( a.digest, a.root, a.folder, a.ext, a.relPath );
 	const QStringList tbk = QDir( dir ).entryList( { QStringLiteral( "*.tbk" ) }, QDir::Files, QDir::Name );
@@ -401,7 +497,7 @@ int checkMain()
 {
 	QElapsedTimer clock;
 	clock.start();
-	const QStringList p = qEnvironmentVariable( "WW_CELL_BAKEINCR_CHECK" ).split( QLatin1Char( '|' ) );
+	const QStringList p = wwEnvStr( "WW_CELL_BAKEINCR_CHECK" ).split( QLatin1Char( '|' ) );
 	if ( p.size() != 5 ) {
 		qWarning( "WW_CELL_BAKEINCR_CHECK wants <plugins>|<world>|x0,y0,x1,y1|<root>|<verdict file>" );
 		return 2;
@@ -429,7 +525,7 @@ int checkMain()
 		return 3;
 	}
 	// the bake's own data-root rule (cellview.cpp): the spec's, else the stack's first entry
-	QString dataRoot = qEnvironmentVariable( "WW_CELL_DATAROOT" );
+	QString dataRoot = wwEnvStr( "WW_CELL_DATAROOT" );
 	if ( dataRoot.isEmpty() ) {
 		const QStringList stack = lodgenResourceSearchPaths();
 		if ( !stack.isEmpty() )
@@ -445,7 +541,7 @@ int checkMain()
 			const QString cellDir = QDir( root ).filePath( QStringLiteral( "cell_%1_%2" ).arg( x ).arg( y ) );
 			QFile rf( QDir( cellDir ).filePath( QString::fromLatin1( recordName() ) ) );
 			QString why;
-			QString records, cellRecords, far;
+			QString records, cellRecords, far, lights;
 			int half = -1;
 			QStringList assets, outs;
 			if ( !rf.open( QIODevice::ReadOnly ) ) {
@@ -458,6 +554,7 @@ int checkMain()
 					else if ( l.startsWith( QLatin1String( "records " ) ) ) records = l.mid( 8 );
 					else if ( l.startsWith( QLatin1String( "cellrecords " ) ) ) cellRecords = l.mid( 12 );
 					else if ( l.startsWith( QLatin1String( "far " ) ) ) far = l.mid( 4 );
+					else if ( l.startsWith( QLatin1String( "lights " ) ) ) lights = l.mid( 7 );
 					else if ( l.startsWith( QLatin1String( "half " ) ) ) half = l.mid( 5 ).toInt();
 					else if ( l.startsWith( QLatin1String( "asset " ) ) ) assets << l.mid( 6 );
 					else if ( l.startsWith( QLatin1String( "out " ) ) ) outs << l.mid( 4 );
@@ -482,6 +579,9 @@ int checkMain()
 			if ( why.isEmpty() && ( red() == "nonbr" ? recordsDigest( world, x, y, 0 ) != cellRecords
 				: recordsDigest( world, x, y, half ) != records ) )
 				why = QStringLiteral( "records" );
+			// lane FARLIGHTMAP1: a far-light bake's record also holds its lights (a plain bake's has no line)
+			if ( why.isEmpty() && !lights.isEmpty() && lightsDigest( world, x, y, half ) != lights )
+				why = QStringLiteral( "lights" );
 			if ( why.isEmpty() ) {
 				for ( const QString & a : assets ) {
 					// digest \t root \t folder \t ext \t path

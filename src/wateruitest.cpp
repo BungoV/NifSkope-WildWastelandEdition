@@ -64,6 +64,7 @@
 */
 
 #include "nifskope.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "model/nifmodel.h"
 #include "wwskin.h"
 
@@ -426,13 +427,13 @@ bool sameHeight( const QRect & a, const QRect & b, int tol )
 
 void wwWaterUiHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_WATERUI_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_WATERUI_TEST" ) )
 		return;
 
 	auto * st = new WwWaterUiState;
-	st->shot = qEnvironmentVariable( "WW_WATERUI_SHOT" );
-	st->tabShot = qEnvironmentVariable( "WW_WATERUI_TABSHOT" );
-	st->stripShot = qEnvironmentVariable( "WW_WATERUI_STRIPSHOT" );
+	st->shot = wwEnvStr( "WW_WATERUI_SHOT" );
+	st->tabShot = wwEnvStr( "WW_WATERUI_TABSHOT" );
+	st->stripShot = wwEnvStr( "WW_WATERUI_STRIPSHOT" );
 
 	QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, st]( bool ok, QString & ) {
 		/* 1.5 s: the scene is BUILT on the load signal, but the first paint --
@@ -1309,8 +1310,8 @@ void wwWaterUiHarness( NifSkope * skope )
 				extern void wwWaterUiLodTabs( NifSkope *, QTextStream &, int &, int &,
 					int &, const QString &, const QString & );
 				wwWaterUiLodTabs( skope, log, st->checks, st->fails, st->skips,
-					qEnvironmentVariable( "WW_WATERUI_LODSHOT" ),
-					qEnvironmentVariable( "WW_WATERUI_LODSHOT2" ) );
+					wwEnvStr( "WW_WATERUI_LODSHOT" ),
+					wwEnvStr( "WW_WATERUI_LODSHOT2" ) );
 			}
 
 			/* GROUP A RUNS LAST (lane UI6, after its own floor caught it).

@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glview.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellspeed.h"
 #include "cellstream.h"		// lane CELLSTREAM1: the cells round the camera
 #include "celltexahead.h"
@@ -62,8 +63,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "data/nifitem.h"
 #include "nifsnapshot.h"
 #include "probesky.h"	// lane SKY1: one call a frame
+#include "celldoorlive.h"	// lane DOORLIVE1: one call a frame
 #include "shortcutregistry.h"
 #include "wwskin.h"
+#include "gl/cellqueue.h"	// lane GPUDRIVEN1
 #include "spells/animationsetup.h"
 #include "skeletontools.h"	// skeletonAnalyse: the Skeleton Manager's own classes
 #include "ui/settingsdialog.h"
@@ -149,6 +152,7 @@ private:
 #include "gl/cellssr.h"
 #include "gl/cellssgi.h"
 #include "gl/cellvolair.h"	// lane VOLAIR1
+#include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellpasstime.h"	// lane PERF1
 
 // NOTE: The FPS define is a frame limiter,
@@ -199,7 +203,7 @@ static const Vector3 wwBlenderStartupRotation = { -63.5593f, 0.0f, 133.3081f };
  */
 static void wwCameraLog( const char * where, const Vector3 & rot, int state )
 {
-	static const QString path = qEnvironmentVariable( "WW_CAMERA_LOG" );
+	WW_SWITCH_STATIC( QString, path, wwEnvStr( "WW_CAMERA_LOG" ) );
 	if ( path.isEmpty() )
 		return;
 	QFile f( path );
@@ -363,7 +367,19 @@ GLView::GLView( QWindow * p )
 
 	fmt.setDepthBufferSize( 24 );
 	fmt.setStencilBufferSize( 8 );
-	fmt.setSamples( 1 << aa );
+	int msaa = 1 << aa;
+	// lane AAFORMAT1 (study only): WW_MSAA=<1|2|4|8|16> overrides the saved MSAA (1 = off); WW_MSAA_RED=1 ignores it
+	if ( !qEnvironmentVariableIsEmpty( "WW_MSAA" ) && qEnvironmentVariableIntValue( "WW_MSAA_RED" ) == 0 ) {
+		const int want = qEnvironmentVariableIntValue( "WW_MSAA" );
+		if ( want == 0 || want == 1 || want == 2 || want == 4 || want == 8 || want == 16 )
+			msaa = std::max( want, 1 );
+		qInfo().noquote() << QStringLiteral( "cell aa: view MSAA %1 (WW_MSAA=%2; saved setting %3)" ).arg( msaa ).arg( want ).arg( 1 << aa );
+	} else if ( !qEnvironmentVariableIsEmpty( "WW_MSAA" ) ) {
+		qInfo().noquote() << QStringLiteral( "cell aa: view MSAA %1 (WW_MSAA ignored: WW_MSAA_RED=1)" ).arg( msaa );
+	}
+	fmt.setSamples( msaa );
+
+	GpuDriven::requestContext( fmt );	// lane GPUDRIVEN1: 4.6 core when the driver makes one (WW_GPUDRIVEN=0: 4.2)
 
 	setFormat( fmt );
 
@@ -2899,7 +2915,7 @@ void GLView::drawSkeletonOverlay()
 	 * picture knows its own viewport size and camera. A harness window is a
 	 * different size and would answer about a different projection.
 	 */
-	static const QString dumpPath = qEnvironmentVariable( "WW_SKELOVERLAY_DUMP" );
+	WW_SWITCH_STATIC( QString, dumpPath, wwEnvStr( "WW_SKELOVERLAY_DUMP" ) );
 	if ( !dumpPath.isEmpty() ) {
 		QFile f( dumpPath );
 		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
@@ -3626,7 +3642,7 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	if ( !wwCellImageSpaceWanted( scene ) || !scene->renderer )
 		return;
 	auto fn = scene->renderer->fn;
-	static const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_IS_DUMP" ) );
+	WW_SWITCH_STATIC( QString, dump, QString::fromLocal8Bit( wwEnv( "WW_CELL_IS_DUMP" ) ) );
 	GLint prevFbo = 0, vp[4] = { 0, 0, 0, 0 };
 	glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
 	glGetIntegerv( GL_VIEWPORT, vp );
@@ -3681,7 +3697,7 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	wwCellImageSpaceSetAdapted( scene, float( sum / double( std::max( counted, 1 ) ) ), counted );
 	// lane BLOOM1: the game blooms a quarter-size copy of the HDR; a full-size (dump) measure is averaged 4x4
 	wwCellImageSpaceSetBloom( scene, px.data(), w, h, div == 1 ? 4 : 1 );
-	static const bool echo = qEnvironmentVariableIntValue( "WW_IS_MEASURE_ECHO" ) == 1;	// lane PERF1: set against the frame's
+	WW_SWITCH_STATIC( bool, echo, wwEnvInt( "WW_IS_MEASURE_ECHO" ) == 1 );	// lane PERF1: set against the frame's
 	static QString said;
 	if ( echo && wwCellImageSpaceEcho( scene ) != said ) {
 		said = wwCellImageSpaceEcho( scene );
@@ -3748,7 +3764,34 @@ void GLView::paintGL()
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
 	CellTexAhead::Frame texAheadFrame;   // lane SPEED1: a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
+	QElapsedTimer wwStream1Clock;	// lane STREAM1: the whole paint, for the hitch figures
+	wwStream1Clock.start();
 	wwCellStreamEvict();
+	// lane STREAM1 (TEXSTREAM1): the streaming read-ahead's ready files go up before anything draws, a few MB a
+	// paint (WW_TEX_PUMP_MB, default 24), so a cell that comes into view finds them loaded. Red: texpump.
+	static const bool wwPumpRed = PassTime::stream1Red( "texpump" );
+	if ( !wwPumpRed && textures && model && cellStreamOn( model ) ) {
+		static const qint64 wwPumpMb = [] {
+			const int v = qEnvironmentVariableIntValue( "WW_TEX_PUMP_MB" );
+			return qint64( v > 0 ? v : 24 );
+		}();
+		textures->setPumpOwnsDrain( PassTime::stream1Loaded() );
+		textures->wwPump( model, wwPumpMb << 20 );
+	}
+	PassTime::stream1PaintBegin();
+	struct WwStream1End
+	{
+		GLView * v;
+		QElapsedTimer & clock;
+		~WwStream1End()
+		{
+			// ready = nothing queued or being written and, streaming, the block loaded is the one expected
+			bool ready = false;
+			if ( !PassTime::stream1Loaded() && v->model )
+				ready = !cellStreamBusy( v->model ) && ( !cellStreamOn( v->model ) || cellStreamStats( v->model, false ).match );
+			PassTime::stream1PaintEnd( ready, double( clock.nsecsElapsed() ) / 1.0e6 );
+		}
+	} wwStream1End{ this, wwStream1Clock };
 	QElapsedTimer wwPaintClock;
 	wwPaintClock.start();
 	struct WwPaintTime
@@ -3789,7 +3832,7 @@ void GLView::paintGL()
 	// frame — and so it is visible whether the frame that actually gets presented
 	// or grabbed contains any grid draw at all. See WW_CHANGES 2026-07-27i.
 	{
-		static const bool wwGridProbe = qEnvironmentVariableIsSet( "WW_GRID_PROBE" );
+		WW_SWITCH_STATIC( bool, wwGridProbe, wwEnvIsSet( "WW_GRID_PROBE" ) );
 		static int wwFrame = 0;
 		if ( wwGridProbe && wwFrame < 40 ) [[unlikely]] {
 			wwFrame++;
@@ -3917,6 +3960,7 @@ void GLView::paintGL()
 	// Before anything transforms: pose the marked skeleton and hand its pose to
 	// every scene that snaps to it. No-op, and costs one branch, when unmarked.
 	applyWorkspaceSkeleton( viewTrans );
+	wwDoorLiveTick( scene, this );	// lane DOORLIVE1: the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
 	scene->transform( viewTrans, time );
 
 	// Setup projection mode (lane MOTION1: the one projection a frame the temporal AA jitters)
@@ -4013,6 +4057,7 @@ void GLView::paintGL()
 		PassTime::Scope pt( PassTime::SunShadows );	// lane PERF1
 		wwSunShadowPass( scene );
 	}
+	wwCellFlickerFrame( scene );	// lane LIGHTFLICKER1: this frame's flicker, before any pass reads the lights
 	// lane SHADOW1: the cell lights' depth cubes (a no-op unless the document draws cell-lit)
 	PassTime::begin( PassTime::CellShadows );	// lane PERF1
 	wwCellShadowPass( scene );
@@ -4136,7 +4181,7 @@ void GLView::paintGL()
 	 * the measure, HDR, TAA). A cell primary draws first with all of them, the Loaded NIFs after it into the finished
 	 * frame (depth back from the HDR frame); the globally sorted pass stays for a primary that is not a cell.
 	 * WW_CELL_WSGATE_RED=old: the gate as it was (every pass off while a Loaded NIF draws). */
-	static const bool wsGateOld = qgetenv( "WW_CELL_WSGATE_RED" ).trimmed() == "old";
+	WW_SWITCH_STATIC( bool, wsGateOld, wwEnv( "WW_CELL_WSGATE_RED" ).trimmed() == "old" );
 	const bool cellFirst = !scene->selecting && !wsGateOld && !workspaceDrawScenes.isEmpty() && wwCellLightsWanted( scene );
 	const bool cellPasses = !scene->selecting && ( workspaceDrawScenes.isEmpty() || cellFirst );
 	{
@@ -4162,6 +4207,9 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Air );
 	wwVolAirPass( scene, cellPasses );	// lane VOLAIR1: the air's froxels
 	PassTime::end( PassTime::Air );
+	PassTime::begin( PassTime::ReflProbes );
+	wwCellReflProbePass( scene, cellPasses );	// lane REFLPROBE1: capture + relight (reads the cell setters, so after the air)
+	PassTime::end( PassTime::ReflProbes );
 	PassTime::begin( PassTime::Measure );
 	if ( cellPasses && wwCellImageSpaceMeasureByPass( scene ) )	// lane PERF1: else the linear frame measures it (gl/cellhdr.h)
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
@@ -4198,8 +4246,12 @@ void GLView::paintGL()
 			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)
 			if ( hdr ) {
 				PassTime::begin( PassTime::FarCards );
+				PassTime::subBegin( PassTime::FarDots );	// lane PERF2: far LOD measured (proposal only)
 				wwCellFarDotsDraw( scene );	// lane FARVIEW1: the far bulbs, into the linear frame
+				PassTime::subEnd( PassTime::FarDots );
+				PassTime::subBegin( PassTime::FarCardsLit );
 				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame
+				PassTime::subEnd( PassTime::FarCardsLit );
 				PassTime::end( PassTime::FarCards );
 				PassTime::begin( PassTime::ToneMap );
 				wwCellHdrEnd( scene );
@@ -5581,7 +5633,7 @@ void GLView::paintGL()
 	// lane MODPICK1: the near cells load other mods than the far LOD bake shows -- said in the view, never silent
 	const QString modPickNote = model ? cellModPickViewNote( model ) : QString();
 	// lane PERF1: the Frame Timers overlay (never in a harness grab: WW_RENDER_CLEAN keeps the frame clean)
-	static const bool passTimeClean = qEnvironmentVariableIntValue( "WW_RENDER_CLEAN" ) == 1;
+	WW_SWITCH_STATIC( bool, passTimeClean, wwEnvInt( "WW_RENDER_CLEAN" ) == 1 );
 	const QStringList passTimeLines = ( passTimeClean || scene->selecting ) ? QStringList() : PassTime::overlay();
 	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() ) {
 		// The scene passes (esp. collision wireframe) leave GL state that
@@ -5948,7 +6000,7 @@ void GLView::paintGL()
 	// Scene::drawLines. red>0 after the draw but 0 here means something later in
 	// the frame overwrites the grid; 0 in both means it never rasterized.
 	{
-		static const bool wwRedCount = qEnvironmentVariableIsSet( "WW_GRID_RED" );
+		WW_SWITCH_STATIC( bool, wwRedCount, wwEnvIsSet( "WW_GRID_RED" ) );
 		static int wwEndFrame = 0;
 		if ( wwRedCount && wwEndFrame < 12 ) [[unlikely]] {
 			wwEndFrame++;
@@ -5991,9 +6043,9 @@ void GLView::paintGL()
 	 * WW_FRAME_SHOTS_MAX (default 16) caps how many are written.
 	 */
 	{
-		static const QString wwShotPrefix = qEnvironmentVariable( "WW_FRAME_SHOTS" );
-		static const int wwShotMax = ( qEnvironmentVariableIsSet( "WW_FRAME_SHOTS_MAX" )
-			? qEnvironmentVariableIntValue( "WW_FRAME_SHOTS_MAX" ) : 16 );
+		WW_SWITCH_STATIC( QString, wwShotPrefix, wwEnvStr( "WW_FRAME_SHOTS" ) );
+		WW_SWITCH_STATIC( int, wwShotMax, ( wwEnvIsSet( "WW_FRAME_SHOTS_MAX" )
+			? wwEnvInt( "WW_FRAME_SHOTS_MAX" ) : 16 ) );
 		static int wwShotCount = 0;
 		if ( !wwShotPrefix.isEmpty() && wwFrameShotsArmed && wwShotCount < wwShotMax ) [[unlikely]] {
 			wwShotCount++;
@@ -6029,10 +6081,13 @@ void GLView::paintGL()
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 	}
 	// lane MOTION1: the temporal AA converges over a few still frames after the camera moves (never in a harness)
-	if ( wwGameTaaWantsSettle() )
+	if ( wwGameTaaWantsSettle() | wwVolAirWantsSettle() )	// lane PERF2: and the temporal air's strata
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 	// lane GRASSMB1: the game's grass waves while the weather blows (never in a harness)
 	else if ( wwCellGrassWantsRepaint() )
+		QTimer::singleShot( 16, this, [this]() { update(); } );
+	// lane FOGDRIFT1: the fog drifts while the weather blows (never in a harness)
+	else if ( wwVolAirWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 
 	emit paintUpdate();
@@ -6695,7 +6750,7 @@ GLView::WwCameraPin GLView::wwCameraPinFromEnvironment()
 	WwCameraPin	pin;
 	QStringList	arms;
 
-	const QString ctr = qEnvironmentVariable( "WW_RENDER_CENTER" );
+	const QString ctr = wwEnvStr( "WW_RENDER_CENTER" );
 	if ( !ctr.isEmpty() ) {
 		const QStringList parts = ctr.split( QChar( ',' ) );
 		if ( parts.size() == 3 ) {
@@ -6717,7 +6772,7 @@ GLView::WwCameraPin GLView::wwCameraPinFromEnvironment()
 	 * units. It used to mean the orthographic half-height, a meaning that
 	 * never once took effect (see the header), so nothing can have relied
 	 * on it. */
-	const QString dst = qEnvironmentVariable( "WW_RENDER_DIST" );
+	const QString dst = wwEnvStr( "WW_RENDER_DIST" );
 	if ( !dst.isEmpty() ) {
 		bool ok = false;
 		const float d = dst.toFloat( &ok );
@@ -6730,7 +6785,7 @@ GLView::WwCameraPin GLView::wwCameraPinFromEnvironment()
 		}
 	}
 
-	const QString fv = qEnvironmentVariable( "WW_RENDER_FOV" );
+	const QString fv = wwEnvStr( "WW_RENDER_FOV" );
 	if ( !fv.isEmpty() ) {
 		bool ok = false;
 		const float f = fv.toFloat( &ok );
@@ -6747,7 +6802,7 @@ GLView::WwCameraPin GLView::wwCameraPinFromEnvironment()
 	 * is exact and independent of the eye distance, so an object of E units
 	 * spans E * viewportWidth / ( 2 * half-width ) pixels whatever
 	 * WW_RENDER_DIST says. */
-	const QString ort = qEnvironmentVariable( "WW_RENDER_ORTHO" );
+	const QString ort = wwEnvStr( "WW_RENDER_ORTHO" );
 	if ( !ort.isEmpty() ) {
 		bool ok = false;
 		const float w = ort.toFloat( &ok );
@@ -6770,8 +6825,8 @@ GLView::WwCameraPin GLView::wwCameraPinFromEnvironment()
 	 * camera. A WW_RENDER_VIEW-only capture stays on the old auto-fit path, so
 	 * every picture taken that way keeps its framing. */
 	if ( pin.active ) {
-		if ( qEnvironmentVariableIsSet( "WW_RENDER_VIEW" ) ) {
-			int v = qEnvironmentVariableIntValue( "WW_RENDER_VIEW" );
+		if ( wwEnvIsSet( "WW_RENDER_VIEW" ) ) {
+			int v = wwEnvInt( "WW_RENDER_VIEW" );
 			if ( v < 0 ) {
 				arms << QStringLiteral( "view-kept" );
 			} else if ( v == int( ViewWalk ) ) {
@@ -6815,8 +6870,8 @@ void GLView::wwApplyCameraPinNow()
 			Rot = wwBlenderStartupRotation;
 		view = wwPin.view;
 		// lane SKYFULL1: WW_RENDER_PITCH tilts a pinned side view up by that many degrees (the sky shots)
-		if ( qEnvironmentVariableIsSet( "WW_RENDER_PITCH" ) )
-			Rot[0] -= qEnvironmentVariable( "WW_RENDER_PITCH" ).toFloat();
+		if ( wwEnvIsSet( "WW_RENDER_PITCH" ) )
+			Rot[0] -= wwEnvStr( "WW_RENDER_PITCH" ).toFloat();
 	}
 
 	if ( wwPin.haveCenter )
@@ -6903,7 +6958,7 @@ QString GLView::wwCameraCensus( const char * stage ) const
 
 void GLView::wwLogCameraCensus( const char * stage ) const
 {
-	QString path = qEnvironmentVariable( "WW_CAMERA_CENSUS" );
+	QString path = wwEnvStr( "WW_CAMERA_CENSUS" );
 	if ( path.isEmpty() )
 		path = QApplication::applicationDirPath() + QStringLiteral( "/ww_camera_pin.log" );
 	// One process, one file: the first record of a run truncates it, so a gate
@@ -22237,6 +22292,8 @@ void GLView::advanceGears()
 	if ( !isVisible() )
 		return;
 	wwCellStreamFrame();   // lane CELLSTREAM1: a few ms of the cells round the camera a frame
+	if ( wwCellFlickerWantsFrames( scene ) )
+		update();	// lane LIGHTFLICKER1: a flickering lamp needs a frame every tick
 
 	dT = std::clamp< float >( dT, 0.0f, 1.0f );
 	physicsTick( dT );
@@ -22379,7 +22436,7 @@ QString GLView::wwGpuMs( int frames )
 	}
 	constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP (GL 3.3, ARB_timer_query)
 	constexpr GLenum kTimeElapsed = 0x88BF;	// red WW_SHADOW_RED=elapsedtimer: the old single elapsed query
-	const bool elapsedRed = qEnvironmentVariable( "WW_SHADOW_RED" ).split( QChar( ',' ) ).contains( QStringLiteral( "elapsedtimer" ) );
+	const bool elapsedRed = wwEnvStr( "WW_SHADOW_RED" ).split( QChar( ',' ) ).contains( QStringLiteral( "elapsedtimer" ) );
 	GLuint q[2] = { 0, 0 };
 	xf->glGenQueries( 2, q );
 	std::vector<double> gpu, cpu;

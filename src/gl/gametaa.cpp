@@ -1,4 +1,5 @@
 #include "gametaa.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -153,11 +154,13 @@ struct TaaGpu
 	int w = 0, h = 0;
 	GLenum dsFormat = 0;
 	GLbitfield depthBits = 0;
+	bool mvOk = false;	// lane VRS1: the last frame's vectors were drawn (the next rate image reads them)
 };
 
 struct TaaState
 {
 	bool init = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool on = false, pinned = false;
 	bool redNoClamp = false, redWrongJitter = false;
 	QString dumpDir;
@@ -188,9 +191,15 @@ struct TaaState
 TaaState & ts()
 {
 	static TaaState s;
-	if ( !s.init ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_TAA" } ) ) {
 		s.init = true;
-		const QString pin = qEnvironmentVariable( "WW_TAA" ).trimmed();
+		s.liveGen = wwSwitchGen();
+		{
+			const TaaState d {};
+			s.dumpFrame = d.dumpFrame;
+		}
+		const QString pin = wwEnvStr( "WW_TAA" ).trimmed();
 		if ( !pin.isEmpty() ) {
 			s.on = pin != QLatin1StringView( "0" ) && pin.compare( QLatin1StringView( "off" ), Qt::CaseInsensitive ) != 0;
 			s.pinned = true;
@@ -200,12 +209,12 @@ TaaState & ts()
 		} else {
 			s.on = QSettings().value( QLatin1StringView( kTaaKey ), false ).toBool();
 		}
-		const QString red = qEnvironmentVariable( "WW_TAA_RED" ).trimmed();
+		const QString red = wwEnvStr( "WW_TAA_RED" ).trimmed();
 		s.redNoClamp = red.contains( QLatin1StringView( "noclamp" ) );
 		s.redWrongJitter = red.contains( QLatin1StringView( "wrongjitter" ) );
-		s.dumpDir = qEnvironmentVariable( "WW_TAA_DUMP" ).trimmed();
+		s.dumpDir = wwEnvStr( "WW_TAA_DUMP" ).trimmed();
 		bool ok = false;
-		const int df = qEnvironmentVariable( "WW_TAA_DUMP_FRAME" ).toInt( &ok );
+		const int df = wwEnvStr( "WW_TAA_DUMP_FRAME" ).toInt( &ok );
 		if ( ok )
 			s.dumpFrame = df;
 	}
@@ -381,6 +390,18 @@ bool wwGameTaaWantsSettle()
 	return true;
 }
 
+unsigned wwGameTaaMotionTex( Scene * scene, int & w, int & h )
+{
+	if ( !scene || !scene->renderer )
+		return 0;
+	auto it = taaGpus().find( scene->renderer );
+	if ( it == taaGpus().end() || !it->mvOk || !it->mv )
+		return 0;
+	w = it->w;
+	h = it->h;
+	return it->mv;
+}
+
 QString wwGameTaaEcho()
 {
 	return ts().last;
@@ -389,6 +410,11 @@ QString wwGameTaaEcho()
 void wwGameTaaResolve( Scene * scene )
 {
 	TaaState & s = ts();
+	if ( scene && scene->renderer ) {	// lane VRS1: the vectors count only for the frame that drew them
+		auto it = taaGpus().find( scene->renderer );
+		if ( it != taaGpus().end() )
+			it->mvOk = false;
+	}
 	if ( !s.jittered ) {
 		if ( s.on && scene && !scene->selecting )
 			note( s, QStringLiteral( "refused (no jittered projection this frame)" ) );
@@ -536,6 +562,23 @@ void wwGameTaaResolve( Scene * scene )
 
 	// 1. the frame (resolved when multisampled) into t0 and t3
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );
+	// lane MSAABLACK1: a pass that set the view's read buffer to GL_NONE makes this colour blit a silent no-op
+	// (no GL error, t0 stays zero, the frame saves black): give the frame its colour buffer back first
+	{
+		WW_SWITCH_STATIC( bool, msaaBlackRed, wwEnvInt( "WW_MSAABLACK1_RED" ) == 1 );
+		GLint rb = 0;
+		fn->glGetIntegerv( GL_READ_BUFFER, &rb );
+		if ( rb == GL_NONE ) {
+			static bool said = false;
+			if ( !said ) {
+				said = true;
+				qInfo().noquote() << QStringLiteral( "temporal aa: the frame's read buffer was GL_NONE (fbo %1); %2" ).arg( prevDraw )
+					.arg( msaaBlackRed ? QStringLiteral( "left (WW_MSAABLACK1_RED)" ) : QStringLiteral( "set back to its colour buffer" ) );
+			}
+			if ( !msaaBlackRed )
+				fn->glReadBuffer( prevDraw ? GL_COLOR_ATTACHMENT0 : GL_BACK );
+		}
+	}
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.inFbo );
 	fn->glDisable( GL_SCISSOR_TEST );
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
@@ -570,6 +613,7 @@ void wwGameTaaResolve( Scene * scene )
 			prog->uni2f( "invSize", 1.0f / float( W ), 1.0f / float( H ) );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			r->stopProgram();
+			g.mvOk = true;
 		}
 	}
 

@@ -103,7 +103,11 @@ in float rawVertexAlpha;	// the vertex colour's own alpha (channel 11 G only)
 in mat3 btnMatrix;
 flat in mat3 reflMatrix;
 
-out vec4 fragColor;
+layout ( location = 0 ) out vec4 fragColor;
+#ifdef WW_CELLLIGHTS
+// lane SSGI2: the scene pass's second target, the emitted share alone (the bounce's emissive cast; 0 elsewhere)
+layout ( location = 1 ) out vec4 cellEmitOut;
+#endif
 
 vec3 ViewDir_norm = normalize( ViewDir );
 mat3 btnMatrix_norm = mat3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
@@ -268,7 +272,11 @@ vec3 tonemap(vec3 x)
 
 
 #ifdef WW_CELLLIGHTS
+#ifndef WW_CELL_GI_MARCH_COPIES	// red (tests/spells/cell_giblack_link.sh): a march copy per call site, over the link limit
+#define WW_CELL_GI_MARCH_ONCE 1	// lane GIBLACKLINK1: the march red runs once (cellGiMarchPrime in main)
+#endif
 #include "cell_lights.glsl"
+#include "cell_reflprobe.glsl"
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
 #include "cell_grass.glsl"
@@ -277,6 +285,7 @@ vec3 tonemap(vec3 x)
 void main()
 {
 #ifdef WW_CELLLIGHTS
+	cellEmitOut = vec4( 0.0 );
 	float wwGrassK = wwGrassFadeK( ViewDir );	// lane GRASSMB1: exactly 1.0 on every non-grass shape
 	if ( wwGrassK <= 0.0 )
 		discard;
@@ -540,6 +549,11 @@ void main()
 	vec3 specSun = spec;	// lane SUNCELL1: the sun's specular before the cube (the exterior cell sun keeps it)
 
 	// Environment
+	float specSky = 1.0;	// lane SPECOCC1: outdoors the cube reflection keeps the sky visibility along R (cell_lights.glsl)
+#ifdef WW_CELLLIGHTS
+	if ( cellOn )
+		specSky = cellSpecSky( cellWorldPos( -ViewDir ), cellWorldDir( normal ), cellWorldDir( R ), rough );
+#endif
 	vec4 cube = textureLod( CubeMap, reflectedWS, 8.0 - smoothness * 8.0 );
 	vec4 env = texture( EnvironmentMap, offset );
 	vec3 envSpec = vec3( 0.0 );	// lane PRTPGI: the reflection before the viewport light, for the cell path
@@ -552,7 +566,7 @@ void main()
 		}
 
 		envSpec = cube.rgb;
-		spec += cube.rgb * diffuse;
+		spec += cube.rgb * diffuse * specSky;
 	}
 #ifdef WW_CELLLIGHTS
 	// lane CUBE1: the reflection the cell path adds before its light, linear: the game's term, or the old one
@@ -562,10 +576,15 @@ void main()
 		cubeK = hasCubeMap ? cellCubeGame( CubeMap, reflectedWS, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
 		                                   cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection, -ViewDir )
 		                   : vec3( 0.0 );
+	// lane REFLPROBE1: the placed probes take the material cube's place where they cover (cell_reflprobe.glsl)
+	if ( cellOn && hasCubeMap && ( cellRed & 512 ) == 0 )
+		cubeK *= cellReflProbe( GreyscaleMap, -ViewDir, R, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
+		                        cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection );
 	// lane SSR1: the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
 	if ( cellOn )
 		cubeK = cellSsrMix( cubeK, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
 		                    cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection );
+	cubeK *= specSky;	// lane SPECOCC1: after the SSR mix, as FO4CS scales its reflection after the SSR blend
 #endif
 
 	vec3 backlight = vec3(0.0);
@@ -614,6 +633,12 @@ void main()
 	// Emissive
 	color.rgb += emissive * glowScaleSRGB;
 #ifdef WW_CELLLIGHTS
+#if defined( WW_CELL_GI_MARCH ) && defined( WW_CELL_GI_MARCH_ONCE )
+	// lane GIBLACKLINK1: the march red's one GI read, at the (P, N) every later caller passes (cellPassOut's nonormal red: up)
+	if ( cellOn && cellGiOn )
+		cellGiMarchPrime( cellWorldPos( -ViewDir ), cellPass > 0 && cellPass != 6 && cellProbe == 0 && ( cellPassRed & 2 ) != 0
+		                                               ? vec3( 0.0, 0.0, 1.0 ) : cellWorldDir( normal ) );
+#endif
 	// lane SKY1: outdoors the bounce grid's sky stands in for the weather's unshadowed ambient (0 elsewhere)
 	/* lane SUNCELL1: an exterior with the weather's sun (cellHasDir) hands cellLit the ambient alone; the sun's
 	 * diffuse and the cube are the game's terms there, its specular the viewport's (cellExtSpec, linear) */
@@ -646,11 +671,20 @@ void main()
 		color.rgb -= ( 1.0 - sqrt( 1.0 - k ) ) * A.rgb * albedo;
 	} else if ( cellOn && cellGiSky && ( cellRed & 131072 ) != 0 )
 		color.rgb -= cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ) * A.rgb * albedo;
+	vec3 cellPreLit = color.rgb;	// lane SSGI2: an exterior without the sun adds the glow before cellLit's root
 	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, specColor, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
 	vec3 cellSsrScene = color.rgb * color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
+	if ( cellOn && cellProbe == 60 ) {
+		// lane SSGI2: the glow's share of that (cellLit adds it after the root; c^2 - (c - e)^2), coverage in a
+		vec3 e = max( emissive * glowScaleSRGB, vec3( 0.0 ) );
+		vec3 c = ( !cellInterior && !cellHasDir ) ? cellPreLit : color.rgb;
+		vec3 c0 = max( c - e, vec3( 0.0 ) );
+		vec3 em = clamp( c * c - c0 * c0, vec3( 0.0 ), cellSsrScene );
+		cellEmitOut = vec4( em, dot( em, vec3( 0.2126, 0.7152, 0.0722 ) ) > 1.0e-6 ? 1.0 : 0.0 );
+	}
 	// lane AO1: the ambient obscurance on the whole lit colour (linear, so its root here), before the fog
 	if ( cellOn )
 		color.rgb *= sqrt( cellAoFactor() );
@@ -724,6 +758,8 @@ void main()
 		fragColor = cellProbe == 6 ? vec4( cellHdr * cellProbeGain, color.a ) : vec4( cellProbeOut( normal, -ViewDir, alphaR, kSmith ), 1.0 );
 	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )	// lane CUBE1
 		fragColor = vec4( cellProbe == 50 ? clamp( cubeK * 0.25, 0.0, 1.0 ) : cellCubeProbe( offset, normal ), 1.0 );
+	if ( cellOn && cellProbe == 66 )	// lane REFLPROBE1: the boxes' weight, the camera probe's share, the added light
+		fragColor = vec4( cellReflW, cellReflFall, clamp( dot( cellReflAdd, vec3( 1.0 / 3.0 ) ), 0.0, 1.0 ), 1.0 );
 	if ( cellOn && cellProbe == 80 )	// lane GICAL1 (80; 81-89 kept for it): the albedo as drawn, texture gamma space
 		fragColor = vec4( clamp( albedo, 0.0, 1.0 ), 1.0 );
 	if ( cellOn && cellProbe == 81 )	// lane GICAL1: the same, blends and decals composited over it with their own alpha

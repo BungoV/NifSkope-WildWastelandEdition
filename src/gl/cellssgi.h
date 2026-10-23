@@ -25,6 +25,8 @@ void wwCellSsgiSetQuality( int q );
 bool wwCellSsgiPinned();
 //! does this frame want lane SSR1's scene pass and lane AO1's g-buffer for the bounce
 bool wwCellSsgiWantsScene( Scene * scene );
+//! lane SSGI2: the scene pass also writes the emitted share (the emissive cast; red `noemissive` off)
+bool wwCellSsgiWantsEmission( Scene * scene );
 //! after wwCellSsrPass: the cast, the history, the denoise
 void wwCellSsgiPass( Scene * scene, bool run );
 //! called with every program setupProgram binds: the bounce a cell-lit opaque draw reads

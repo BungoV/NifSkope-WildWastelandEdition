@@ -1,4 +1,5 @@
 #include "nifskope.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "glview.h"
 #include "spellbook.h"
 #include "ui/widgets/wwnumberfield.h"
@@ -2349,7 +2350,7 @@ protected:
 		 * So the prompt and the popup are not covered by that harness; they want a
 		 * driven-dialog test of their own. What is covered is everything after them.
 		 */
-		const bool harness = qEnvironmentVariableIsSet( "WW_COLLDROP_TEST" );
+		const bool harness = wwEnvIsSet( "WW_COLLDROP_TEST" );
 		if ( !anyBody && harness && createBodyNow ) {
 			pendingDropShapes.clear();
 			for ( const qint32 block : sources ) {

@@ -82,6 +82,16 @@ void OpenCellDialog::build()
 	dataRow->addWidget( import );
 	grid->addLayout( dataRow, row++, 1 );
 
+	label( tr( "Language" ) );
+	langCombo = new QComboBox( this );
+	langCombo->setEditable( true );   // the game's language codes; any other a mod ships can be typed
+	langCombo->addItems( { QStringLiteral( "en" ), QStringLiteral( "de" ), QStringLiteral( "fr" ), QStringLiteral( "it" ),
+		QStringLiteral( "es" ), QStringLiteral( "pl" ), QStringLiteral( "ptbr" ), QStringLiteral( "ru" ),
+		QStringLiteral( "ja" ), QStringLiteral( "cn" ) } );
+	langCombo->setToolTip( tr( "Names of localized plugins come from Strings/<plugin>_<language>.STRINGS" ) );
+	langCombo->setCurrentText( openCellStringsLanguage() );
+	grid->addWidget( langCombo, row++, 1 );
+
 	label( tr( "Plugins" ) );
 	pluginList = new QListWidget( this );
 	pluginList->setDragDropMode( QAbstractItemView::InternalMove );   // the list order is the load order
@@ -133,6 +143,7 @@ void OpenCellDialog::build()
 	connect( browse, &QToolButton::clicked, this, &OpenCellDialog::browseData );
 	connect( import, &QToolButton::clicked, this, &OpenCellDialog::browseImport );
 	connect( dataEdit, &QLineEdit::editingFinished, this, [this]() { setDataDir( dataEdit->text() ); } );
+	connect( langCombo, &QComboBox::currentTextChanged, this, &OpenCellDialog::setLanguage );
 	connect( pluginList, &QListWidget::itemChanged, this, &OpenCellDialog::pluginsChanged );
 	connect( pluginList->model(), &QAbstractItemModel::rowsMoved, this, &OpenCellDialog::pluginsChanged );
 	connect( readTimer, &QTimer::timeout, this, &OpenCellDialog::readNow );
@@ -183,6 +194,18 @@ void OpenCellDialog::setPluginsTicked( const QStringList & names )
 		for ( int i = at; i < pluginList->count(); i++ )
 			pluginList->item( i )->setCheckState( Qt::Unchecked );
 	}
+	pluginsChanged();
+}
+
+void OpenCellDialog::setLanguage( const QString & lang )
+{
+	if ( langCombo->currentText() != lang ) {
+		langCombo->setCurrentText( lang );   // re-enters through currentTextChanged
+		return;
+	}
+	if ( lang.trimmed().isEmpty() || lang.trimmed() == openCellStringsLanguage() )
+		return;
+	openCellSetStringsLanguage( lang );
 	pluginsChanged();
 }
 
@@ -243,7 +266,9 @@ void OpenCellDialog::readNow()
 	catalog = OpenCellCatalog();
 	if ( !order.isEmpty() ) {
 		QApplication::setOverrideCursor( Qt::WaitCursor );   // a full master takes seconds to index
-		openCellReadCatalog( loadOrderPaths(), catalog, &err );
+		OpenCellReadOptions opt;
+		opt.dataDir = sources.dataDir;
+		openCellReadCatalog( loadOrderPaths(), catalog, &err, opt );
 		QApplication::restoreOverrideCursor();
 	}
 	const int added = int( order.size() - ticked.size() ) + int( missing.size() );
@@ -253,6 +278,9 @@ void OpenCellDialog::readNow()
 		status->setText( err );
 	else if ( added > 0 )
 		status->setText( tr( "%n master(s) added", nullptr, added ) );
+	else if ( !catalog.noStrings.isEmpty() )
+		status->setText( tr( "No %1 strings for %2: names stay blank" )
+			.arg( openCellStringsLanguage(), catalog.noStrings.join( QStringLiteral( ", " ) ) ) );
 	else
 		status->clear();
 	fillWorlds();

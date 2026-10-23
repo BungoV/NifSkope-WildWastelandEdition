@@ -1,4 +1,5 @@
 #include "probefar.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "lodifile.h"
 #include "lodofile.h"
@@ -444,7 +445,7 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 	LodtSheets sheets;
 	bool haveSheet = false;
 	if ( spec.sheetDim > 0 ) {
-		const QByteArray old = qgetenv( "WW_LODL_SHEET_DIM" );
+		const QByteArray old = wwEnv( "WW_LODL_SHEET_DIM" );
 		qputenv( "WW_LODL_SHEET_DIM", QByteArray::number( spec.sheetDim ) );
 		QString why;
 		haveSheet = sheets.open( spec.lodl, &why ) && sheets.hasRole( LODV_ROLE_COLOR );

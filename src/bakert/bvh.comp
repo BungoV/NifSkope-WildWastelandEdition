@@ -1,0 +1,103 @@
+#version 450
+// Lane RTBAKE1: the no-RT GPU tracer. One invocation a ray walks src/probebvh.h's tree exactly as Bvh::ray does
+// (same node order, same stack cap, same "t <= best" tie rule), in float instead of double.
+#extension GL_GOOGLE_include_directive : require
+layout( local_size_x = 64 ) in;
+#include "common.glsl"
+layout( std430, set = 0, binding = 6 ) readonly buffer Nodes { uint nd[]; };    // 9 words a node: lo3 hi3 left first count
+layout( std430, set = 0, binding = 7 ) readonly buffer Idx { int idx[]; };
+layout( std430, set = 0, binding = 8 ) readonly buffer Tris { float tv[]; };    // 9 floats a triangle
+
+float nf( uint i ) { return uintBitsToFloat( nd[i] ); }
+
+bool slab( uint n, vec3 o, vec3 inv, float tmax )
+{
+	float t0 = 0.0, t1 = tmax;
+	for ( int k = 0; k < 3; k++ ) {
+		const float lo = nf( n * 9u + uint( k ) ), hi = nf( n * 9u + 3u + uint( k ) );
+		if ( inv[k] == 0.0 ) {   // flat in this axis: the box holds the ray or not
+			if ( o[k] < lo || o[k] > hi )
+				return false;
+			continue;
+		}
+		float a = ( lo - o[k] ) * inv[k];
+		float b = ( hi - o[k] ) * inv[k];
+		if ( a > b ) {
+			const float s = a;
+			a = b;
+			b = s;
+		}
+		t0 = max( t0, a );
+		t1 = min( t1, b );
+		if ( t0 > t1 )
+			return false;
+	}
+	return true;
+}
+
+bool tri( uint t, vec3 o, vec3 d, out float tOut, out float u, out float v )
+{
+	const uint b = t * 9u;
+	const vec3 p0 = vec3( tv[b], tv[b + 1u], tv[b + 2u] );
+	const vec3 e1 = vec3( tv[b + 3u], tv[b + 4u], tv[b + 5u] ) - p0;
+	const vec3 e2 = vec3( tv[b + 6u], tv[b + 7u], tv[b + 8u] ) - p0;
+	tOut = 0.0;
+	u = 0.0;
+	v = 0.0;
+	const vec3 pv = cross( d, e2 );
+	const float det = dot( e1, pv );
+	if ( abs( det ) < 1e-12 )
+		return false;
+	const float id = 1.0 / det;
+	const vec3 tvv = o - p0;
+	u = dot( tvv, pv ) * id;
+	if ( u < 0.0 || u > 1.0 )
+		return false;
+	const vec3 qv = cross( tvv, e1 );
+	v = dot( d, qv ) * id;
+	if ( v < 0.0 || u + v > 1.0 )
+		return false;
+	tOut = dot( e2, qv ) * id;
+	return true;
+}
+
+void main()
+{
+	const uint k = gl_GlobalInvocationID.x;
+	if ( k >= pc.count )
+		return;
+	const Ray r = rays[pc.first + k];
+	const vec3 o = r.oT.xyz, d = r.dT.xyz;
+	const float tmin = r.oT.w;
+	vec3 inv;
+	for ( int a = 0; a < 3; a++ )
+		inv[a] = d[a] != 0.0 ? 1.0 / d[a] : 0.0;
+	float best = r.dT.w;
+	int hitTri = -1;
+	uint stack[128];
+	int sp = 0;
+	stack[sp++] = 0u;
+	const bool anyHit = ( pc.flags & 1u ) != 0u;
+	while ( sp > 0 && !( anyHit && hitTri >= 0 ) ) {
+		const uint n = stack[--sp];
+		if ( !slab( n, o, inv, best ) )
+			continue;
+		const int left = int( nd[n * 9u + 6u] );
+		const int first = int( nd[n * 9u + 7u] );
+		const int count = int( nd[n * 9u + 8u] );
+		if ( left < 0 ) {
+			for ( int i = first; i < first + count; i++ ) {
+				const int t = idx[i];
+				float tt, bu, bv;
+				if ( tri( uint( t ), o, d, tt, bu, bv ) && tt > tmin && tt <= best && !hole( t, bu, bv ) ) {
+					best = tt;
+					hitTri = t;
+				}
+			}
+		} else if ( sp < 126 ) {
+			stack[sp++] = uint( first );   // right
+			stack[sp++] = uint( left );
+		}
+	}
+	hits[pc.first + k] = hitTri >= 0 ? uvec2( floatBitsToUint( best ), uint( hitTri ) ) : uvec2( 0u, 0xFFFFFFFFu );
+}

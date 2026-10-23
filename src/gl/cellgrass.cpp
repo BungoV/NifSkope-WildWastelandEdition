@@ -1,4 +1,5 @@
 #include "cellgrass.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 
 #include "esmdata.h"
@@ -43,6 +44,7 @@ constexpr const char * kGrassKey = "WW/CellGrass";
 struct GrassState
 {
 	bool init = false, on = false, pinned = false, redSeed = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	QString dump;
 	QHash<const void *, QSet<int>> shapes;
 	QHash<const void *, QHash<int, float>> wave;	// block -> its GRAS wave period (the property's +0xf4)
@@ -60,9 +62,17 @@ struct GrassState
 GrassState & gs()
 {
 	static GrassState s;
-	if ( !s.init ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CELL_GRASS" } ) ) {
 		s.init = true;
-		const QString pin = qEnvironmentVariable( "WW_CELL_GRASS" ).trimmed();
+		s.liveGen = wwSwitchGen();
+		{
+			const GrassState d {};
+			s.timePinned = d.timePinned;
+			s.tCur = d.tCur;
+			s.tPrev = d.tPrev;
+		}
+		const QString pin = wwEnvStr( "WW_CELL_GRASS" ).trimmed();
 		if ( !pin.isEmpty() ) {
 			s.on = pin != QLatin1StringView( "0" ) && pin.compare( QLatin1StringView( "off" ), Qt::CaseInsensitive ) != 0;
 			s.pinned = true;
@@ -72,10 +82,10 @@ GrassState & gs()
 		} else {
 			s.on = QSettings().value( QLatin1StringView( kGrassKey ), false ).toBool();
 		}
-		s.redSeed = qEnvironmentVariable( "WW_CELL_GRASS_RED" ).contains( QLatin1StringView( "seed" ) );
-		s.dump = qEnvironmentVariable( "WW_CELL_GRASS_DUMP" ).trimmed();
+		s.redSeed = wwEnvStr( "WW_CELL_GRASS_RED" ).contains( QLatin1StringView( "seed" ) );
+		s.dump = wwEnvStr( "WW_CELL_GRASS_DUMP" ).trimmed();
 		bool ok = false;
-		const double t = qEnvironmentVariable( "WW_CELL_GRASS_WIND_T" ).toDouble( &ok );
+		const double t = wwEnvStr( "WW_CELL_GRASS_WIND_T" ).toDouble( &ok );
 		if ( ok ) {	// a fixed clock: the frame at t, its previous frame 1/60 s before
 			s.timePinned = true;
 			s.tCur = t;
@@ -742,6 +752,13 @@ QString wwCellGrassEcho( const void * nif )
 		return it.value();
 	return s.on ? QStringLiteral( "cell grass: on, nothing placed" )
 	            : QStringLiteral( "cell grass: off (Grass row off)" );
+}
+
+bool wwCellGrassIsShape( const void * nif, int block )
+{
+	const GrassState & s = gs();
+	const auto it = s.shapes.constFind( nif );
+	return it != s.shapes.constEnd() && it->contains( block );
 }
 
 void wwCellGrassUniforms( Scene * scene, int block )

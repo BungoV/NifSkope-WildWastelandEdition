@@ -1,8 +1,10 @@
 #include "cellpasstime.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLVersionFunctionsFactory>
 #include <QSettings>
@@ -14,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #ifdef Q_OS_WIN
@@ -74,7 +77,7 @@ void write()
 
 void start()
 {
-	path = qgetenv( "WW_PROF_SAMPLE" );
+	path = wwEnv( "WW_PROF_SAMPLE" );
 	if ( path.isEmpty() || thread )
 		return;
 	HANDLE gl = nullptr;
@@ -82,11 +85,11 @@ void start()
 	samples = new std::vector<Sample>();
 	timeBeginPeriod( 1 );
 	// WW_PROF_SAMPLE_ALL=1 (started from main): the load too, outside the frames (pass -2), 1M samples at most
-	static const bool all = qEnvironmentVariableIntValue( "WW_PROF_SAMPLE_ALL" ) == 1;
+	WW_SWITCH_STATIC( bool, all, wwEnvInt( "WW_PROF_SAMPLE_ALL" ) == 1 );
 	const size_t cap = all ? 1000000 : 200000;
 	samples->reserve( cap );
 	const DWORD t0 = timeGetTime();
-	thread = new std::thread( [gl, cap, t0]() {
+	thread = new std::thread( [gl, cap, t0, all]() {
 		Sample sm;
 		// allocated here, never while the thread is stopped: it may hold the heap lock (a hang at startup)
 		std::vector<unsigned char> copy( 256 * 1024 );
@@ -167,11 +170,14 @@ struct Slot
 {
 	qint64 frame = -1;
 	std::vector<Mark> marks;
+	std::vector<Mark> subs;	// lane PERF2: the sub-stages (Mark::pass = the Sub)
 	GLuint f0 = 0, f1 = 0;	// the whole frame
 	double cpu[Count] = {};
 	double wait[Count] = {};	// sync mode: the closing glFinish's wait (the GPU still working after the CPU issued it all)
 	qint64 calls[Count] = {}, ranges[Count] = {};
 	double cpuFrame = 0.0;
+	double cpuSub[CpuSubCount] = {};	// lane PERF2: CPU ms inside the draws' setup
+	qint64 cpuSubN[CpuSubCount] = {};
 	CacheCounts cache0, cache;
 	qint64 privMb = 0;	// private bytes at the frame's end (the log only)	// the geometry cache at the frame's start; its traffic over the frame
 };
@@ -179,11 +185,13 @@ struct Slot
 struct State
 {
 	bool loaded = false, on = false, pinned = false, log = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool sync = false;	// WW_CELL_PASSTIME_SYNC=1: a glFinish at each pass edge, so the timestamps hold that pass's work only
 	bool census = false;	// WW_CELL_PASSTIME_CENSUS=1: each pass's samples passed (overdraw) and primitives, in the log line
 	QOpenGLContext * ctx = nullptr;
 	QOpenGLFunctions_3_3_Core * gl = nullptr;
 	std::vector<GLuint> pool;
+	std::vector<GLuint> cpool;	// lane PERF2: the census's own (a query keeps the target it was first used with)
 	Slot ring[kSlots];
 	qint64 frame = 0;
 	bool inFrame = false;
@@ -191,6 +199,7 @@ struct State
 	qint64 frameT0 = 0;
 	qint64 open[Count] = {};
 	int openMark[Count];
+	int openSub[SubCount];
 	std::vector<int> stack;	// the open GPU passes, innermost last (countDraw)
 	// the last second's sums, for the overlay
 	qint64 winT0 = -1;
@@ -203,20 +212,31 @@ struct State
 State & st()
 {
 	static State s;
-	if ( !s.loaded ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_PASSTIME" } ) ) {
 		s.loaded = true;
-		s.clock.start();
-		const QByteArray pin = qgetenv( "WW_CELL_PASSTIME" ).trimmed();
+		s.liveGen = wwSwitchGen();
+		{
+			const State d {};
+			s.pinned = d.pinned;
+		}
+		if ( !s.clock.isValid() )
+			if ( !s.clock.isValid() )
+			if ( !s.clock.isValid() )
+			s.clock.start();
+		const QByteArray pin = wwEnv( "WW_CELL_PASSTIME" ).trimmed();
 		if ( !pin.isEmpty() ) {
 			s.pinned = true;
 			s.on = pin != "0";
 		} else {
 			s.on = QSettings().value( QStringLiteral( "WW/PassTimers" ), false ).toBool();
 		}
-		s.log = qEnvironmentVariableIntValue( "WW_CELL_PASSTIME_LOG" ) == 1;
-		s.sync = qEnvironmentVariableIntValue( "WW_CELL_PASSTIME_SYNC" ) == 1;
-		s.census = qEnvironmentVariableIntValue( "WW_CELL_PASSTIME_CENSUS" ) == 1;
+		s.log = wwEnvInt( "WW_CELL_PASSTIME_LOG" ) == 1;
+		s.sync = wwEnvInt( "WW_CELL_PASSTIME_SYNC" ) == 1;
+		s.census = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) == 1;
 		for ( int & m : s.openMark )
+			m = -1;
+		for ( int & m : s.openSub )
 			m = -1;
 	}
 	return s;
@@ -232,6 +252,19 @@ GLuint query()
 	}
 	const GLuint q = s.pool.back();
 	s.pool.pop_back();
+	return q;
+}
+
+GLuint cquery()
+{
+	State & s = st();
+	if ( s.cpool.empty() ) {
+		GLuint q[64];
+		s.gl->glGenQueries( 64, q );
+		s.cpool.insert( s.cpool.end(), q, q + 64 );
+	}
+	const GLuint q = s.cpool.back();
+	s.cpool.pop_back();
 	return q;
 }
 
@@ -261,10 +294,19 @@ void collect( Slot & sl )
 			samples[m.pass] += v;
 			s.gl->glGetQueryObjectui64v( m.qp, GL_QUERY_RESULT, &v );
 			prims[m.pass] += v;
-			s.pool.push_back( m.qs );
-			s.pool.push_back( m.qp );
+			s.cpool.push_back( m.qs );
+			s.cpool.push_back( m.qp );
 		}
 	}
+	double sub[SubCount] = {};
+	bool subSeen[SubCount] = {};
+	for ( const Mark & m : sl.subs ) {
+		sub[m.pass] += gpuMs( m.q0, m.q1 );
+		subSeen[m.pass] = true;
+		s.pool.push_back( m.q0 );
+		s.pool.push_back( m.q1 );
+	}
+	sl.subs.clear();
 	const double gpuFrame = gpuMs( sl.f0, sl.f1 );
 	s.pool.push_back( sl.f0 );
 	s.pool.push_back( sl.f1 );
@@ -291,6 +333,17 @@ void collect( Slot & sl )
 			+ QByteArray::number( sl.cache.maxBytes >> 20 ) + " MB | textures made " + QByteArray::number( sl.cache.texMade )
 			+ " (" + QByteArray::number( double( sl.cache.texBytes ) / 1048576.0, 'f', 1 ) + " MB) | private "
 			+ QByteArray::number( sl.privMb ) + " MB";
+		static const char * const subName[SubCount] = { "air-tile", "air-inject", "air-integrate", "ao-geometry",
+			"ao-stages", "ao-gi", "tone-blit", "tone-measure", "tone-bloom", "tone-quads", "far-dots",
+			"far-cards-lit", "tone-vrs", "fxres-down", "fxres-layer", "fxres-comp" };
+		for ( int k = 0; k < SubCount; k++ )
+			if ( subSeen[k] )
+				line += QByteArray( " | sub " ) + subName[k] + " " + QByteArray::number( sub[k], 'f', 2 );
+		static const char * const cpuSubName[CpuSubCount] = { "setup", "cell-uni", "sun-uni", "fog-uni", "ao-draw", "ssr-draw" };
+		for ( int k = 0; k < CpuSubCount; k++ )
+			if ( sl.cpuSubN[k] > 0 )
+				line += QByteArray( " | cpu " ) + cpuSubName[k] + " " + QByteArray::number( sl.cpuSub[k], 'f', 2 ) + " n="
+					+ QByteArray::number( sl.cpuSubN[k] );
 		std::fprintf( stderr, "%s\n", line.constData() );
 	}
 	s.winGpuFrames++;
@@ -313,7 +366,7 @@ const char * name( int pass )
 {
 	static const char * const k[Count] = { "sun-cascades", "light-cubes", "sky", "obscurance", "reflections", "air",
 		"measure", "umbra-depth", "impostors", "opaque", "sorted", "effects", "far-cards", "tone-map", "post",
-		"overlays", "ssgi", "cull-camera", "cull-cascades", "shape-setup" };
+		"overlays", "ssgi", "refl-probes", "cull-camera", "cull-cascades", "shape-setup" };
 	return pass >= 0 && pass < Count ? k[pass] : "?";
 }
 
@@ -359,8 +412,10 @@ void frameBegin()
 		s.ctx = c;
 		s.gl = QOpenGLVersionFunctionsFactory::get<QOpenGLFunctions_3_3_Core>( c );
 		s.pool.clear();
+		s.cpool.clear();
 		for ( Slot & sl : s.ring ) {
 			sl.marks.clear();
+			sl.subs.clear();
 			sl.frame = -1;
 		}
 	}
@@ -375,7 +430,13 @@ void frameBegin()
 		sl.cpu[p] = sl.wait[p] = 0.0;
 		sl.calls[p] = sl.ranges[p] = 0;
 	}
+	for ( int k = 0; k < CpuSubCount; k++ ) {
+		sl.cpuSub[k] = 0.0;
+		sl.cpuSubN[k] = 0;
+	}
 	s.stack.clear();
+	for ( int & m : s.openSub )
+		m = -1;
 	Sampler::start();
 	Sampler::pass = -1;
 	sl.f0 = query();
@@ -401,8 +462,8 @@ void begin( int pass )
 		Mark m{ pass, query(), query() };
 		s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
 		if ( s.census ) {	// top-level passes never nest (above), so one query of each target is open at a time
-			m.qs = query();
-			m.qp = query();
+			m.qs = cquery();
+			m.qp = cquery();
 			s.gl->glBeginQuery( GL_SAMPLES_PASSED, m.qs );
 			s.gl->glBeginQuery( GL_PRIMITIVES_GENERATED, m.qp );
 		}
@@ -443,6 +504,16 @@ void end( int pass )
 	s.openMark[pass] = -1;
 }
 
+void cpuSubAdd( int sub, qint64 ns )
+{
+	State & s = st();
+	if ( !s.inFrame || sub < 0 || sub >= CpuSubCount )
+		return;
+	Slot & sl = s.ring[s.frame % kSlots];
+	sl.cpuSub[sub] += double( ns ) * 1e-6;
+	sl.cpuSubN[sub]++;
+}
+
 void addCpu( int pass, qint64 ns )
 {
 	State & s = st();
@@ -461,6 +532,27 @@ void countDraw( qint64 ranges )
 	sl.ranges[p] += ranges;
 }
 
+void subBegin( int sub )
+{
+	State & s = st();
+	if ( !s.inFrame || sub < 0 || sub >= SubCount || s.openSub[sub] >= 0 )
+		return;
+	Slot & sl = s.ring[s.frame % kSlots];
+	Mark m{ sub, query(), query() };
+	s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
+	sl.subs.push_back( m );
+	s.openSub[sub] = int( sl.subs.size() ) - 1;
+}
+
+void subEnd( int sub )
+{
+	State & s = st();
+	if ( !s.inFrame || sub < 0 || sub >= SubCount || s.openSub[sub] < 0 )
+		return;
+	s.gl->glQueryCounter( s.ring[s.frame % kSlots].subs[s.openSub[sub]].q1, GL_TIMESTAMP );
+	s.openSub[sub] = -1;
+}
+
 void frameEnd()
 {
 	State & s = st();
@@ -473,6 +565,8 @@ void frameEnd()
 		if ( s.openMark[p] >= 0 )
 			end( p );
 	}
+	for ( int k = 0; k < SubCount; k++ )
+		subEnd( k );
 	s.inFrame = false;
 	Sampler::pass = -2;
 	s.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
@@ -543,7 +637,7 @@ void memory( qint64 & privateMb, qint64 & workingMb )
 
 void profileFromStart()
 {
-	if ( qEnvironmentVariableIntValue( "WW_PROF_SAMPLE_ALL" ) == 1 )
+	if ( wwEnvInt( "WW_PROF_SAMPLE_ALL" ) == 1 )
 		Sampler::start();
 }
 
@@ -569,6 +663,175 @@ void memLog( const char * stage )
 	State & s = st();
 	if ( qstrcmp( stage, "first frames drawn" ) != 0 )
 		s.memArmed = 3;	// the next frames' figure, once the build is done
+	if ( qstrcmp( stage, "before the build" ) == 0 )
+		stream1LoadArm();	// lane STREAM1: a cell open starts: time it to its first full frame
+}
+
+// lane STREAM1 ------------------------------------------------------------------------------------------------
+
+bool stream1Red( const char * what )
+{
+	static const QByteArray v = qgetenv( "WW_STREAM1_RED" );
+	if ( v.isEmpty() )
+		return false;
+	if ( v == "all" || v == "1" )
+		return true;
+	for ( const QByteArray & w : v.split( ',' ) ) {
+		if ( w.trimmed() == what )
+			return true;
+	}
+	return false;
+}
+
+qint64 videoMemoryMb( qint64 * usedMb )
+{
+	if ( usedMb )
+		*usedMb = 0;
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	if ( !c )
+		return 0;
+	QOpenGLFunctions * f = c->functions();
+	if ( c->hasExtension( QByteArrayLiteral( "GL_NVX_gpu_memory_info" ) ) ) {
+		GLint total = 0, avail = 0;
+		f->glGetIntegerv( 0x9047, &total );	// GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX (KB)
+		f->glGetIntegerv( 0x9049, &avail );	// GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX (KB)
+		if ( usedMb )
+			*usedMb = qint64( total - avail ) >> 10;
+		return qint64( total ) >> 10;
+	}
+	return 0;
+}
+
+QString stream1MemLine( const char * stage )
+{
+	const CacheCounts & cc = cacheCounts();
+	qint64 pm = 0, wm = 0, used = 0;
+	memory( pm, wm );
+	const qint64 total = videoMemoryMb( &used );
+	return QString::asprintf( "stream1 mem: %s geo=%.1f MB (fp32 %.1f MB) shapes=%lld budget=%.0f MB tex=%.1f MB (%lld)"
+		" pumped=%lld (%.1f MB) vram=%lld/%lld MB private=%lld MB ws=%lld MB t=%.1f s", stage,
+		double( cc.geoGpuBytes ) / 1048576.0, double( cc.geoFp32Bytes ) / 1048576.0, (long long)cc.geoShapes,
+		double( cc.maxBytes ) / 1048576.0, double( cc.texResidentBytes ) / 1048576.0, (long long)cc.texResident,
+		(long long)cc.texPumped, double( cc.texPumpedBytes ) / 1048576.0, (long long)used, (long long)total,
+		(long long)pm, (long long)wm, processSeconds() );
+}
+
+namespace
+{
+struct Stream1Load
+{
+	bool armed = false, fired = false;
+	double t0 = 0.0;
+	qint64 made0 = 0, tex0 = 0;	// counts at the open's start
+	qint64 madeP = 0, madeBytesP = 0, texP = 0;	// counts after this paint's pump
+	double hitchMax = 0.0;
+	int hitchOver = 0, hitchFrames = 0;
+};
+Stream1Load & s1()
+{
+	static Stream1Load v;
+	return v;
+}
+} // namespace
+
+void stream1LoadArm()
+{
+	Stream1Load & l = s1();
+	const CacheCounts & cc = cacheCounts();
+	l.armed = true;
+	l.fired = false;
+	l.t0 = processSeconds();
+	l.made0 = cc.made;
+	l.tex0 = cc.texMade;
+	l.hitchMax = 0.0;
+	l.hitchOver = l.hitchFrames = 0;
+}
+
+bool stream1Loaded()
+{
+	return s1().fired;
+}
+
+void stream1PaintBegin()
+{
+	Stream1Load & l = s1();
+	const CacheCounts & cc = cacheCounts();
+	l.madeP = cc.made;
+	l.madeBytesP = cc.madeBytes;
+	l.texP = cc.texMade;
+}
+
+void stream1PaintEnd( bool ready, double paintMs )
+{
+	Stream1Load & l = s1();
+	const CacheCounts & cc = cacheCounts();
+	if ( l.armed && !l.fired ) {
+		const qint64 tex = cc.texMade - l.texP, made = cc.made - l.madeP, madeBytes = cc.madeBytes - l.madeBytesP;
+		if ( ready && tex == 0 && madeBytes < ( 1LL << 20 ) && cc.texMade > l.tex0 && cc.made > l.made0 ) {
+			l.fired = true;
+			const double t = processSeconds();
+			std::fprintf( stderr, "stream1 load: first full frame t=%.1f s (%.1f s after the build started) textures=%lld"
+				" shapes=%lld this paint: %lld shapes %lld bytes\n", t, t - l.t0, (long long)( cc.texMade - l.tex0 ),
+				(long long)( cc.made - l.made0 ), (long long)made, (long long)madeBytes );
+			std::fprintf( stderr, "%s\n", qPrintable( stream1MemLine( "first full frame" ) ) );
+		}
+		return;
+	}
+	if ( !l.fired )
+		return;
+	l.hitchFrames++;
+	l.hitchMax = std::max( l.hitchMax, paintMs );
+	if ( paintMs > 33.3 )
+		l.hitchOver++;
+}
+
+namespace
+{
+std::unordered_map< unsigned int, qint64 > & texResidentMap()
+{
+	static std::unordered_map< unsigned int, qint64 > v;
+	return v;
+}
+} // namespace
+
+void texResidentSet( unsigned int id, qint64 bytes )
+{
+	CacheCounts & cc = cacheCounts();
+	qint64 & b = texResidentMap()[id];
+	if ( b ) {
+		cc.texResident--;
+		cc.texResidentBytes -= b;
+	}
+	b = bytes;
+	cc.texResident++;
+	cc.texResidentBytes += bytes;
+}
+
+void texResidentDrop( unsigned int id )
+{
+	auto & m = texResidentMap();
+	auto it = m.find( id );
+	if ( it == m.end() )
+		return;
+	CacheCounts & cc = cacheCounts();
+	cc.texResident--;
+	cc.texResidentBytes -= it->second;
+	m.erase( it );
+}
+
+void stream1Hitch( double * maxMs, int * over, int * frames, bool reset )
+{
+	Stream1Load & l = s1();
+	if ( maxMs )
+		*maxMs = l.hitchMax;
+	if ( over )
+		*over = l.hitchOver;
+	if ( frames )
+		*frames = l.hitchFrames;
+	if ( reset ) {
+		l.hitchMax = 0.0;
+		l.hitchOver = l.hitchFrames = 0;
+	}
 }
 
 } // namespace PassTime

@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "esmweather.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmfile.hpp"
 #include "gamemanager.h"
@@ -77,7 +78,7 @@ const char * wwTodName( int slot )
 
 bool wwLookdevRed( const char * name )
 {
-	static const QByteArray red = qgetenv( "WW_LOOKDEV_RED" ).trimmed().toLower();
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_LOOKDEV_RED" ).trimmed().toLower() );
 	if ( red.isEmpty() )
 		return false;
 	for ( const QByteArray & p : red.split( ',' ) )
@@ -502,7 +503,7 @@ QStringList EsmWeather::loadListFor( const QString & plugin, const QString & dat
 
 QString EsmWeather::gameDataDir()
 {
-	const QByteArray pin = qgetenv( "WW_LOOKDEV_DATA" );
+	const QByteArray pin = wwEnv( "WW_LOOKDEV_DATA" );
 	if ( !pin.isEmpty() )
 		return QDir::fromNativeSeparators( QString::fromLocal8Bit( pin ) );
 	for ( const QString & f : Game::GameManager::folders( Game::FALLOUT_4 ) )
@@ -576,8 +577,8 @@ QVector<WwWeatherEntry> EsmWeather::list()
 						}
 					if ( int( r->srcFile ) < loaded.size() )
 						e.srcFile = baseName( loaded.at( int( r->srcFile ) ) );
-					const int owner = int( r->formID >> 24 );
-					e.ownerFile = owner < loaded.size() ? baseName( loaded.at( owner ) ) : QString( "?" );
+					const quint32 owner = esm->getFormIDFile( r->formID );	// FE ids resolve via the light slot
+					e.ownerFile = owner < quint32( loaded.size() ) ? baseName( loaded.at( int( owner ) ) ) : QString( "?" );
 					out.append( e );
 				}
 				id = r->next;
@@ -1304,7 +1305,7 @@ int cmdWeather( const QStringList & args )
 	}
 	if ( dataDir.isEmpty() )
 		dataDir = EsmWeather::gameDataDir();
-	const QByteArray red = qgetenv( "WW_LOOKDEV_RED" );
+	const QByteArray red = wwEnv( "WW_LOOKDEV_RED" );
 	say( QString( "# WW_WEATHER data=%1 red=%2" ).arg( dataDir.isEmpty() ? "none" : dataDir,
 		red.isEmpty() ? "none" : QString::fromLatin1( red ) ) );
 

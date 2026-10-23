@@ -1,4 +1,5 @@
 #include "cellcable.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmdata.h"
 #include "nativeemit.h"
@@ -49,13 +50,13 @@ QString texPath( const QString & p )
 
 bool wwCellCablesOn()
 {
-	static const bool on = qgetenv( "WW_CELL_CABLES_RED" ) != "off";
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_CELL_CABLES_RED" ) != "off" );
 	return on;
 }
 
 bool wwCellCablesWind()
 {
-	static const bool on = qgetenv( "WW_CELL_CABLES_RED" ) != "nowind";
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_CELL_CABLES_RED" ) != "nowind" );
 	return on;
 }
 

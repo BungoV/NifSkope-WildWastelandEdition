@@ -210,6 +210,7 @@ protected:
 	//! Load the texture
 	std::uint16_t loadTex( Tex & tx, const NifModel * nif );
 	bool draining = false;	// lane PERF1: loadTex is uploading the read-ahead's ready files
+	bool pumpOwnsDrain = false;	// lane STREAM1
 
 public:
 	void setOpenGLContext( NifSkopeOpenGLContext * context );
@@ -221,6 +222,12 @@ public:
 	void setUseTick( std::uint32_t t ) { useTick = t; }
 	//! lane CELLSTREAM1: frees the GL textures of files last bound before tick (they load again when next bound)
 	int evictUnused( std::uint32_t tick );
+	/*! lane STREAM1 (TEXSTREAM1): uploads the streaming read-ahead's ready files, up to `budgetBytes` of them this
+	 *  frame (at least one), before anything draws, so a streamed cell's first frame finds them loaded. Returns
+	 *  how many went up. The same loadTex as a bind's, so what a draw sees is the same texture. */
+	int wwPump( const NifModel * nif, qint64 budgetBytes );
+	//! lane STREAM1: the pump runs each frame: a bind's own load uploads only its file (no 4096-file drain)
+	void setPumpOwnsDrain( bool on ) { pumpOwnsDrain = on; }
 
 	// returns true if the settings have changed
 	static bool loadSettings( QSettings & settings );

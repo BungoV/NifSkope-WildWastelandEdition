@@ -1,4 +1,5 @@
 #include "lodgenloadorder.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include <QDir>
 #include <QFile>
@@ -115,7 +116,7 @@ QString lodgenMo2GameData( const QString & instanceBase, QString * from )
 	const QString base = clean( instanceBase );
 	QStringList inis;
 	inis << base + QStringLiteral( "/ModOrganizer.ini" );    // a portable instance
-	const QString local = QString::fromLocal8Bit( qgetenv( "LOCALAPPDATA" ) );
+	const QString local = QString::fromLocal8Bit( wwEnv( "LOCALAPPDATA" ) );
 	if ( !local.isEmpty() ) {
 		const QDir mo( clean( local ) + QStringLiteral( "/ModOrganizer" ) );
 		for ( const QString & sub : mo.entryList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name ) )

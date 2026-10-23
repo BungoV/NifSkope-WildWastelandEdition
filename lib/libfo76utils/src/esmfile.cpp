@@ -60,11 +60,26 @@ const unsigned char * ESMFile::uncompressRecord(ESMRecord& r)
   return p;
 }
 
-// load-order form ID remapping: rewrite the top (plugin index) byte
+// load-order form ID remapping: rewrite the top (plugin index) byte; a
+// target marked light (bit 31, slot in the low 12 bits) gets the game's
+// FE + 12-bit slot + 12-bit local ID instead
 static inline unsigned int remapESMFormID(unsigned int id,
                                           const std::uint32_t *m)
 {
-  return (m[(id >> 24) & 0xFFU] << 24) | (id & 0x00FFFFFFU);
+  std::uint32_t t = m[(id >> 24) & 0xFFU];
+  if (t & 0x80000000U) [[unlikely]]
+    return 0xFE000000U | ((t & 0xFFFU) << 12) | (id & 0x00000FFFU);
+  return (t << 24) | (id & 0x00FFFFFFU);
+}
+
+unsigned int ESMFile::getFormIDFile(unsigned int formID) const
+{
+  if ((formID >> 24) == 0xFEU && !lightFiles.empty())
+  {
+    size_t  slot = (formID >> 12) & 0xFFFU;
+    return (slot < lightFiles.size() ? lightFiles[slot] : 0xFFFFFFFFU);
+  }
+  return formID >> 24;
 }
 
 unsigned int ESMFile::loadRecords(
@@ -229,6 +244,8 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
      * Fallout 76 / Starfield files (form version >= 0xC0) keep the old
      * mapping and the old refusal. */
     std::vector< unsigned char >  ownBeyondMasters(esmFiles.size(), 0);
+    // input index -> light slot | 0x80000000 (0 = full plugin)
+    std::vector< std::uint32_t >  lightTag(esmFiles.size(), 0U);
     std::vector< std::string > baseNames(tmpFileNames.size());
     for (size_t i = 0; i < tmpFileNames.size(); i++)
     {
@@ -239,6 +256,9 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
         b[k] = char(std::tolower((unsigned char) b[k]));
       baseNames[i] = b;
     }
+    const char  *lightEnv = std::getenv("WW_ESM_LIGHT_RED");
+    const bool  lightRed = (lightEnv && std::strcmp(lightEnv, "full") == 0);
+    lightFiles.clear();
     masterMaps.resize(esmFiles.size());
     for (size_t i = 0; i < esmFiles.size(); i++)
     {
@@ -260,6 +280,23 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
       if (recordHdrSize >= 24 && buf.size() >= 24)
         fileFormVersion = FileBuffer::readUInt16Fast(buf.data() + 20);
       ownBeyondMasters[i] = (unsigned char) (fileFormVersion < 0xC0U);
+      // light plugin (.esl, or TES4 flag 0x200), Skyrim SE / Fallout 4
+      // only: the game numbers it FE + slot in load order among light
+      // plugins; WW_ESM_LIGHT_RED=full brings back the full-slot numbering
+      if (ownBeyondMasters[i] && recordHdrSize >= 24 && !lightRed &&
+          lightFiles.size() < 0x1000)
+      {
+        const std::string&  b = baseNames[i];
+        bool  isLight = (FileBuffer::readUInt32Fast(buf.data() + 8) & 0x200U)
+                        != 0U;
+        if (b.length() > 4 && b.compare(b.length() - 4, 4, ".esl") == 0)
+          isLight = true;
+        if (isLight)
+        {
+          lightTag[i] = 0x80000000U | std::uint32_t(lightFiles.size());
+          lightFiles.push_back(std::uint32_t(i));
+        }
+      }
       while ((buf.getPosition() + 6) <= endPos)
       {
         unsigned int  tag = buf.readUInt32Fast();
@@ -280,7 +317,7 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
           {
             if (baseNames[k] == name)
             {
-              m[masterCnt] = std::uint32_t(k);
+              m[masterCnt] = (lightTag[k] ? lightTag[k] : std::uint32_t(k));
               break;
             }
           }
@@ -291,7 +328,7 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
       if (ownBeyondMasters[i])
       {
         for (size_t k = masterCnt; k < 256; k++)
-          m[k] = std::uint32_t(i);
+          m[k] = (lightTag[i] ? lightTag[i] : std::uint32_t(i));
       }
       else if (masterCnt < 256)
       {

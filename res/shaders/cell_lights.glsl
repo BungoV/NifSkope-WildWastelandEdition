@@ -21,6 +21,7 @@ uniform float cellSunScale;			// lane BOUNCE1: the imagespace Sunlight Scale out
 float cellDirVis = 1.0;
 vec3 cellExtAmb = vec3( 0.0 );
 vec3 cellExtSpec = vec3( 0.0 );
+vec3 cellReflAdd = vec3( 0.0 );	// lane REFLPROBE1: the probes' reflection, light already (cell_reflprobe.glsl)
 uniform vec3 cellDirColor;			// linear
 uniform vec3 cellDirTo;				// world, TO the light
 uniform bool cellInterior;
@@ -54,6 +55,12 @@ uniform vec3 cellRoomsDims;
 // lane SKY1 (src/probesky.h): a weather-lit exterior's grid holds the sky the probes see, so it stands in
 // for the weather's unshadowed ambient by the grid's valid share (0 where the grid does not reach)
 uniform bool cellGiSky;
+// lane EMISSIVEGRID1 (src/probegifine.h): the fine boxes round bright glow, their atlas in cellGi's layers after the grid's
+uniform bool cellGiFineOn;
+uniform int cellGiFineN;
+uniform int cellGiFineRed;		// 1 noseen, 2 nosub (WW_CELL_EMISSIVEGRID_RED)
+uniform vec4 cellGiFineBox[8];		// origin, voxel
+uniform vec4 cellGiFineDim[8];		// nx, ny, nz, first layer
 // lane PROBEVIEW1: the PRTP band's Pass (0 Combined, 1 GI, 2 Sky visibility, 3 Surfel color, 4 Surfel light).
 // In the Sky visibility pass the CPU binds the sky grid on cellGi (same layout, rgb = the probes' sky share).
 uniform int cellPass;
@@ -100,6 +107,11 @@ uniform sampler2D cellIsFoBloom;
 uniform vec4 cellIsFoBloomParams;	// radius (pixels), bloom weight, dispersion, 0
 uniform vec2 cellIsFoBloomFrame;	// the frame's size: the combine's uv
 vec3 cellFoBloomHere = vec3( 0.0 );
+// lane FOGBLOOM1 (src/gl/cellfogbloom.h): the bloom-intensity target, (gain - 1) / 4 per sample; cell_hdr.frag sets
+// cellBloomGain from it, which scales both blooms (1.0 exactly in clear air: the same bits)
+uniform bool cellFogBloomOn;
+uniform sampler2DMS cellFogBloom;
+float cellBloomGain = 1.0;
 #endif
 
 // sqrt-of-linear in (this program's convention), display out. Shaders011.fxp, the tonemap PS and the LUT PS.
@@ -110,12 +122,16 @@ vec3 cellImageSpace( vec3 sqrtColor )
 // lane EFX2: an effect blends over a surface that already took the bloom; lane HDR1: the one tone map takes it
 #if !defined( WW_CELL_FX ) || defined( WW_CELL_HDR )
 	if ( cellIsBloomOn )	// the tonemap PS adds the bloom target before its exposure multiply
+#if defined( WW_CELL_HDR )
+		x += cellBloomGain * texture( cellIsBloom, ( gl_FragCoord.xy - cellIsBloomRect.xy ) * cellIsBloomRect.zw ).rgb;
+#else
 		x += texture( cellIsBloom, ( gl_FragCoord.xy - cellIsBloomRect.xy ) * cellIsBloomRect.zw ).rgb;
+#endif
 #endif
 	x = x * ( ( cellIsRed & 2 ) != 0 ? 1.0 : cellIsExposure ) * 2.0;
 #if defined( WW_CELL_HDR )
 	if ( cellIsFoBloomOn )	// lane BLOOM1b: FO4CS adds its bloom to the exposed light, before the curve (x 2: the curve's input)
-		x += 2.0 * cellFoBloomHere;
+		x += 2.0 * cellBloomGain * cellFoBloomHere;
 #endif
 	float E = cellIsE;
 	vec3 c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
@@ -539,7 +555,7 @@ vec4 cellGiTrilinear( vec3 P, vec3 N )
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;
 	vec2 xy = g.xy / cellGiDims.xy;
 	float z = clamp( g.z, 0.5, cellGiDims.z - 0.5 );
-	float depth = ( cellGiRooms ? 12.0 : 6.0 ) * cellGiDims.z;
+	float depth = float( textureSize( cellGi, 0 ).z );	// lanes EMISSIVEGRID1 + SPECOCC1: the fine atlas / sky slabs may follow
 	vec3 n2 = N * N;
 	return n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
 	     + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )
@@ -715,13 +731,27 @@ vec3 cellGiKeyNormal( float k )
  * blend; also with a threshold's), 2 the nearest own-volume voxel (a room's fill), 4 no volume known or none of its
  * voxels in reach (the trilinear); outdoors, a surface the room grid cannot place (lane GIBLACK2's stranded): 6 and 7
  * the outdoors' volume, 5 none in reach. A probe picture reads the mask at its own pixel (the screen pass's read). */
+uniform int cellGiLoop8;		// 8: the corner loop's bound, a uniform so the loop stays one body; MARCHTOOLS: declared for both modes (EMISSIVEGRID1 reads it in the march mode too)
 #ifdef WW_CELL_GI_MARCH
+#ifdef WW_CELL_GI_MARCH_ONCE
+/* lane GIBLACKLINK1: the march once a fragment (fo4_default: its main primes it). Every call site inlines the whole chain,
+ * and ten copies took fo4_cellcsm past NVIDIA's 64k-instruction link limit; every caller reads this (P, N). */
+vec4 cellGiMarchMemo = vec4( 0.0 );
+void cellGiMarchPrime( vec3 P, vec3 N )
+{
+	cellGiMarchMemo = cellGiSampleFull( P, N );
+}
+vec4 cellGiSample( vec3 P, vec3 N )
+{
+	return cellGiMarchMemo;
+}
+#else
 vec4 cellGiSample( vec3 P, vec3 N )
 {
 	return cellGiSampleFull( P, N );
 }
+#endif
 #else
-uniform int cellGiLoop8;		// 8: the corner loop's bound, a uniform so the loop stays one body
 uniform bool cellGiHalfOn;
 uniform sampler2D cellGiHalf;		// rgba: the volume read at the screen texel's pixel
 uniform sampler2D cellGiHalfKey;	// xyz: that pixel's world position, w: its packed normal (< 0: no surface)
@@ -893,9 +923,81 @@ float cellAoDecalAt()
 	return texelFetch( cellAoDecal, ivec2( gl_FragCoord.xy - cellAoDecalRect.xy ), 0 ).r;
 }
 
+/* lane EMISSIVEGRID1 (src/probegifine.h): inside a fine box the coarse grid's share of the box's glow (C, kC of it in
+ * the sample) gives way to the box's own (D), faded back to the coarse grid over the box's outer two voxels. A fine
+ * voxel counts only when its centre is air and the fine room grid shows no solid cell between the surface's room
+ * read and it (cellGiSeen's rule). One call site (cellGiE0): the program link limit (GIDARK1). */
+vec3 cellGiFineAdd( vec3 P, vec3 N, vec3 base, float kC )
+{
+	int b = -1;
+	vec3 g = vec3( 0.0 );
+	for ( int k = 0; k < cellGiFineN; k++ ) {
+		vec3 gk = ( P + N * ( 0.5 * cellGiFineBox[k].w ) - cellGiFineBox[k].xyz ) / cellGiFineBox[k].w - 0.5;
+		if ( all( greaterThanEqual( gk, vec3( 0.0 ) ) ) && all( lessThan( gk, cellGiFineDim[k].xyz - 1.0 ) ) ) {
+			b = k;
+			g = gk;
+			break;
+		}
+	}
+	if ( b < 0 )
+		return base;
+	vec4 o = cellGiFineBox[b];
+	vec4 dm = cellGiFineDim[b];
+	ivec3 i0 = ivec3( floor( g ) );
+	vec3 f = g - vec3( i0 );
+	ivec3 sl = ivec3( N.x >= 0.0 ? 0 : 1, N.y >= 0.0 ? 2 : 3, N.z >= 0.0 ? 4 : 5 ) * int( dm.z ) + int( dm.w );
+	int cOff = 6 * int( dm.z );
+	vec3 n2 = N * N;
+	bool see = cellGiRooms && ( cellGiFineRed & 1 ) == 0;
+	vec3 from = P + N * ( 0.75 * cellRoomsCell );
+	if ( see && cellRoomSolid( from ) ) {
+		from = P + N * ( 1.75 * cellRoomsCell );
+		see = !cellRoomSolid( from );
+	}
+	vec3 D = vec3( 0.0 ), C = vec3( 0.0 );
+	float ws = 0.0;
+	for ( int k = 0; k < cellGiLoop8; k++ ) {
+		ivec3 oo = ivec3( k & 1, ( k >> 1 ) & 1, ( k >> 2 ) & 1 );
+		ivec3 c = i0 + oo;
+		vec3 t = mix( 1.0 - f, f, vec3( oo ) );
+		float w = t.x * t.y * t.z;
+		if ( w <= 0.0 )
+			continue;
+		vec4 d = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + sl.x ), 0 )
+		       + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + sl.y ), 0 )
+		       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + sl.z ), 0 );
+		if ( d.a <= 0.0 )
+			continue;	// solid at its centre
+		if ( see ) {
+			vec3 dv = o.xyz + ( vec3( c ) + 0.5 ) * o.w - from;
+			int nt = clamp( int( ceil( length( dv ) / ( 0.5 * cellRoomsCell ) ) ), 1, 8 );
+			bool hit = false;
+			for ( int j = 1; j <= nt && !hit; j++ )
+				hit = cellRoomSolid( from + dv * ( float( j ) / float( nt + 1 ) ) );
+			if ( hit )
+				continue;
+		}
+		vec4 e = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + sl.x + cOff ), 0 )
+		       + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + sl.y + cOff ), 0 )
+		       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + sl.z + cOff ), 0 );
+		D += w * d.rgb;
+		C += w * e.rgb;
+		ws += w;
+	}
+	if ( ws <= 0.0 )
+		return base;
+	vec3 edge = min( g, dm.xyz - 1.0 - g );
+	float fade = clamp( min( edge.x, min( edge.y, edge.z ) ) / 2.0, 0.0, 1.0 );
+	vec3 sub = ( cellGiFineRed & 2 ) != 0 ? vec3( 0.0 ) : kC * C / ws;
+	return max( base + fade * ( D / ws - sub ), vec3( 0.0 ) );
+}
+
 vec3 cellGiE0( vec3 P, vec3 N )
 {
 	vec4 s = cellGiSample( P, N );
+	if ( cellGiFineOn )	// lane EMISSIVEGRID1: the sample as below, then the fine boxes
+		return cellGiFineAdd( P, N, cellGiSky ? max( s.rgb, vec3( 0.0 ) ) : s.a > 0.01 ? max( s.rgb / s.a, vec3( 0.0 ) ) : vec3( 0.0 ),
+			cellGiSky ? clamp( s.a, 0.0, 1.0 ) : s.a > 0.01 ? 1.0 : 0.0 );
 	// lane SKY1: with the sky in the grid the sample keeps its valid share (E x share), the other
 	// ( 1 - share ) being the weather's own ambient the program leaves in (cellGiSkyK)
 	if ( cellGiSky )
@@ -921,6 +1023,35 @@ float cellGiSkyK( vec3 P, vec3 N )
 		return 0.0;
 	return clamp( cellGiSample( P, N ).a, 0.0, 1.0 );
 }
+/* lane SPECOCC1: specular occlusion from the baked sky visibility (FO4CS ambient_ibl_pass.hlsl, M2.3 horizon specular
+ * occlusion), on top of the material AO. Outdoors the cube reflection is the sky's, so it keeps the probes' open-sky
+ * share in the direction it reflects: the sky grid read on the lobe's dominant direction (R for a mirror, bending to N
+ * as it roughens), n^2 axis weights, the Sky visibility row's strength; 1 where the grid has no evidence. Red hemi:
+ * FO4CS's own read, the normal's share faded out by smoothness (a mirror sees one direction, not the hemisphere). */
+uniform int cellSpecOcc;		// 0 off (the material AO alone), 1 on, 2 the hemi red (src/gl/celllights.h)
+uniform float cellSpecSkyBase;		// the sky grid's slot 0 rides cellGi after its own slabs (6, or 12 with rooms): no new sampler
+float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
+{
+	if ( cellSpecOcc == 0 || !cellGiOn || !cellGiSky || cellInterior )
+		return 1.0;
+	float r = clamp( rough, 0.0, 1.0 );
+	vec3 D = cellSpecOcc == 2 ? N : normalize( mix( N, R, ( 1.0 - r ) * ( sqrt( 1.0 - r ) + r ) ) );
+	vec3 t = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;	// texels: voxel i's centre is i + 0.5
+	float z = clamp( t.z, 0.5, cellGiDims.z - 0.5 );	// the slabs stack on z: never filter across one
+	vec3 sl = vec3( D.x >= 0.0 ? 0.0 : 1.0, D.y >= 0.0 ? 2.0 : 3.0, D.z >= 0.0 ? 4.0 : 5.0 );
+	vec3 w = D * D;
+	float depth = float( textureSize( cellGi, 0 ).z );
+	vec2 a = vec2( 0.0 );
+	for ( int k = 0; k < 3; k++ ) {
+		vec4 s = texture( cellGi, vec3( t.xy / cellGiDims.xy, ( ( cellSpecSkyBase + sl[k] ) * cellGiDims.z + z ) / depth ) );
+		a += w[k] * s.ra;
+	}
+	if ( a.y < 0.01 )
+		return 1.0;
+	float v = 1.0 + cellSkyVis * ( clamp( a.x / a.y, 0.0, 1.0 ) - 1.0 );
+	return cellSpecOcc == 2 ? mix( 1.0, v, r ) : v;
+}
+
 /* lane GIAMB1: probe 90 indoors, the share of the cell's ambient (DALC) the probe light replaced at P, under the
  * rule in force (cellAmbGi): the grid's valid share with replace (the default), 0 with keep or without the GI */
 float cellAmbShare( vec3 P, vec3 N )
@@ -1104,14 +1235,16 @@ vec3 cellFarProbeOut( vec3 P, vec3 N )
 }
 
 // the harness probes for a program without the legacy BRDF helpers (pbrm_cell)
+vec3 cellSsgiE( vec3 eProbe );	// lane SSGI2: probe 5 reads what the surface gets (below)
+
 vec3 cellProbeRaw( vec3 P, vec3 N )
 {
 	if ( cellProbe >= 91 && cellProbe <= 94 )	// lane FARVIEW1
 		return cellFarProbeOut( P, N );
 	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
 		return vec3( 0.0 );
-	if ( cellProbe == 5 )
-		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
+	if ( cellProbe == 5 )	// lane SSGI2: E_probe x the open share + E_screen when SSGI runs (the double-count gate)
+		return clamp( cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989, 0.0, 1.0 );
 	if ( cellProbe == 90 )	// lane SKY1: the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
 		return vec3( cellAmbShare( P, N ) );
 	if ( cellProbe == 95 ) {	// lane GIBLACK1: r = the branch cellGiSample took / 16 (lane GIBLACK2; it was / 4), g = its .a, b = its E luminance / pi (sqrt)
@@ -1434,15 +1567,20 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	 * color is then the viewport's ambient alone (A x albedo) and cellExtSpec the sun's specular, both linear-squared
 	 * by the caller; without the sun the old law (the viewport light plus the cell's lights). */
 	if ( !cellInterior && !cellHasDir )
-		return sqrt( color * color + add );
+		return sqrt( color * color + add + cellReflAdd );
 	if ( !cellInterior ) {
 		vec3 Ld = normalize( cellDirTo );
 		float nl = dot( N, Ld );
 		vec3 dir = cellDirColor * max( nl, 0.0 ) * cellDirVis;
 		vec3 Ex = diff + gi + dir + cellExtAmb;
 		vec3 Edx = diffOn + gi + dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
-		vec3 linx = color * color + alb * Edx + spec * specMask * specCol + cellExtSpec
-		          + cubeK * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb );
+		vec3 ambDim = vec3( 1.0 );
+		float specDim = 1.0;
+#ifdef WW_SUNSHADOW
+		ussTerrainDim( ambDim, specDim );	// lane SHADOWPAR1: FO4CS's ambient / specular dimming in terrain shadow
+#endif
+		vec3 linx = color * color * ambDim + alb * Edx + spec * specMask * specCol + cellExtSpec
+		          + cubeK * specDim * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb ) + cellReflAdd;
 		return sqrt( max( linx, vec3( 0.0 ) ) ) + emissive;
 	}
 	// the light reaching this point (a white surface would show it): the cubemap reflection is lit by it,
@@ -1464,7 +1602,7 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		Ed += dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
 	}
 	// lane CUBE1: the game multiplies its cube term by the diffuse light (Ed); the old law took the Lambert sum
-	vec3 lin = alb * Ed + spec * specMask * specCol + cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed );
+	vec3 lin = alb * Ed + spec * specMask * specCol + cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed ) + cellReflAdd;
 	return sqrt( max( lin, vec3( 0.0 ) ) ) + emissive;
 }
 
@@ -1475,8 +1613,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 	vec3 N = cellWorldDir( normalView );
 	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
 		return vec3( 0.0 );
-	if ( cellProbe == 5 )
-		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
+	if ( cellProbe == 5 )	// lane SSGI2: as cellProbeRaw's
+		return clamp( cellSsgiE( cellGiOn ? cellGiE( P, N ) : vec3( 0.0 ) ) * 0.31830989, 0.0, 1.0 );
 	if ( cellProbe == 90 )	// lane SKY1 (60-74 are other lanes'): the share of the weather's ambient the grid's sky replaced (lane GIAMB1: indoors the DALC's)
 		return vec3( cellAmbShare( P, N ) );
 	if ( cellProbe == 95 )	// lane GIBLACK1: the branch cellGiSample took, its .a and its E (cellProbeRaw's)

@@ -5,10 +5,13 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellvolair.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
 
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
+#include "gl/cellpasstime.h"
+#include "gl/cellpost.h"
 #include "gl/cellssr.h"
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
@@ -16,6 +19,7 @@ BSD License - see nifskope.h
 #include "gl/shadowset.h"	// lane FARGRID1: the terrain map
 #include "gl/sunshadow.h"
 #include "esmweather.h"
+#include "harnesswindow.h"
 #include "recx.h"
 
 #include <QDebug>
@@ -54,6 +58,7 @@ constexpr float kNearMin = 16.0f;	// game units
 struct VaState
 {
 	bool loaded = false;
+	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool on = false, pinned = false;
 	int farTier = 0;	// lane FARGRID1: the Far Air row, 0 Off .. 4 Ultra (the pin WW_CELL_AIR_FAR wins)
 	bool farPinned = false;
@@ -64,6 +69,11 @@ struct VaState
 	int tricubic = 0;	// WW_CELL_VOLAIR_TRICUBIC=1 (FOGTRICUBIC1, bungo 10-21): the surfaces' B-spline froxel read; off until he rules
 	int opt = 3;		// WW_CELL_AIR_OPT (gates): 1 clustered lights, 2 the conservative depth skip; 0 the full loop
 	QString dump;
+	bool temporal = false;
+	int shiftFrame = -1;
+	float shift[3] = { 0, 0, 0 };
+	int settleLeft = 0;			// temporal: paints still owed after a change (interactive windows)
+	bool settlePending = false;
 	bool inPass = false;
 	QString last = QStringLiteral( "off" );
 };
@@ -71,43 +81,210 @@ struct VaState
 VaState & vs()
 {
 	static VaState s;
-	if ( !s.loaded ) {
+	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
+	if ( !s.loaded || wwSwitchMovedFor( s.liveGen, { "WW_CELL_AIR", "WW_CELL_VOLAIR" } ) ) {
 		s.loaded = true;
-		const QByteArray pin = qgetenv( "WW_CELL_AIR" );
+		s.liveGen = wwSwitchGen();
+		{
+			const VaState d {};
+			s.pinned = d.pinned;
+			s.farPinned = d.farPinned;
+			s.red = d.red;
+			s.terms = d.terms;
+			s.opt = d.opt;
+		}
+		const QByteArray pin = wwEnv( "WW_CELL_AIR" );
 		if ( !pin.isEmpty() ) {
 			s.pinned = true;
 			s.on = pin.trimmed() != "0";
 		} else {
 			s.on = QSettings().value( QStringLiteral( "WW/VolAir" ), false ).toBool();
 		}
-		for ( const QByteArray & t : qgetenv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
+		for ( const QByteArray & t : wwEnv( "WW_CELL_AIR_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
 				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : r == "roomstep" ? 4194304
 				: r == "echoall" ? 8388608
-				: r == "farnoterr" ? 16777216 : r == "farseam" ? 33554432 : r == "farjitter" ? 67108864 : 0;	// lane FARGRID1: the far reds
+				: r == "farnoterr" ? 16777216 : r == "farseam" ? 33554432 : r == "farjitter" ? 67108864	// lane FARGRID1: the far reds
+				: r == "histstale" ? 134217728 : r == "oldint" ? 268435456 : r == "noearly" ? 536870912 : r == "noskip" ? 1073741824 : 0;
+			// BATCH1: PERF2's oldint/noearly/noskip moved off FARGRID1's far reds (2^24..2^26) to 2^28..2^30
+			// lane PERF2: echoall moved off 4194304 (VOLAIR1's roomstep); oldint the O(S^2) integrate, noearly no empty-air
+			// early out, noskip recomputes unchanged frames, histstale (temporal gates) never refreshes the history
 		}
-		const QByteArray opt = qgetenv( "WW_CELL_AIR_OPT" ).trimmed();
+		// lane PERF2: temporal reuse (one fresh stratum a frame + the history); off until bungo sees it. The red brings
+		// the 4 sub-steps back
+		s.temporal = qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_TEMPORAL" ) == 1
+			&& qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_TEMPORAL_RED" ) != 1;
+		// gates only: from path frame N the air sees every placed light moved by (dx, dy, dz) world units: "N,dx,dy,dz"
+		const QList<QByteArray> sh = qgetenv( "WW_CELL_AIR_LIGHTSHIFT" ).split( ',' );
+		if ( sh.size() == 4 ) {
+			s.shiftFrame = sh[0].toInt();
+			for ( int k = 0; k < 3; k++ )
+				s.shift[k] = sh[k + 1].toFloat();
+		}
+		const QByteArray opt = wwEnv( "WW_CELL_AIR_OPT" ).trimmed();
 		if ( !opt.isEmpty() )
 			s.opt = opt.toInt() & 3;
-		const QByteArray terms = qgetenv( "WW_CELL_AIR_TERMS" ).trimmed();
+		const QByteArray terms = wwEnv( "WW_CELL_AIR_TERMS" ).trimmed();
 		if ( !terms.isEmpty() )
 			s.terms = terms.toInt() & 15;
-		s.probe = qEnvironmentVariableIntValue( "WW_CELL_AIR_PROBE" );
-		s.fogBlend = qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_FOGBLEND" ) == 1 ? 1 : 0;
-		s.tricubic = qEnvironmentVariableIntValue( "WW_CELL_VOLAIR_TRICUBIC" ) == 1 ? 1 : 0;
+		s.probe = wwEnvInt( "WW_CELL_AIR_PROBE" );
+		s.fogBlend = wwEnvInt( "WW_CELL_VOLAIR_FOGBLEND" ) == 1 ? 1 : 0;
+		s.tricubic = wwEnvInt( "WW_CELL_VOLAIR_TRICUBIC" ) == 1 ? 1 : 0;
 		if ( s.fogBlend && ( s.red & 64 ) )
 			s.fogBlend = 2;	// red blendnear: the fog colour by the air's own 1 - T, no start distance (must fail B)
 		s.farTier = std::clamp( QSettings().value( QStringLiteral( "WW/VolAirFar" ), 0 ).toInt(), 0, 4 );	// lane FARGRID1
-		const QByteArray farPin = qgetenv( "WW_CELL_AIR_FAR" ).trimmed();	// lane FARGRID1: the pin wins
+		const QByteArray farPin = wwEnv( "WW_CELL_AIR_FAR" ).trimmed();	// lane FARGRID1: the pin wins
 		if ( !farPin.isEmpty() ) {
 			s.farPinned = true;
 			s.farTier = std::clamp( farPin.toInt(), 0, 4 );
 		}
-		s.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AIR_DUMP" ) );
+		s.dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_AIR_DUMP" ) );
 	}
 	return s;
+}
+
+/* lane FOGDRIFT1: the near air's drifting lumps (cellvolair.h). One tileable 64^3 R8 noise built once; its exact texel
+ * mean and largest deviation go to the shader, so the factor 1 + a (n - mean) / span keeps the mean density. */
+constexpr int kNoiseUnit = WwCellUnit::AirNoise;
+constexpr int kNoiseN = 64;
+constexpr float kDriftTile = 4096.0f;	// the base octave's tile, game units (~58 m); the detail octave's is 0.45 of it
+constexpr float kDriftDetail = 0.45f;
+constexpr float kDriftAmp = 0.95f;	// the density factor spans 0.05 .. 1.95 at the texture's extremes (std ~0.2)
+constexpr float kDriftFade0 = 2000.0f, kDriftFade1 = 8000.0f;	// full strength to fade0, smooth air past fade1 (no shimmer)
+constexpr float kDriftSpeed = 400.0f;	// units per second at the weather's full wind speed (DATA byte 255)
+
+struct VaDrift
+{
+	bool loaded = false, on = false, pinned = false;
+	int red = 0;				// 1 still (no motion), 2 smooth (no noise)
+	bool timePinned = false;
+	double tPin = 0.0;
+	QElapsedTimer clock;
+	double tDone = 0.0;			// the offsets are integrated up to this time
+	float ofs[2][3] = {};		// the two octaves' offsets, world units
+	float vel[2] = { 0, 0 };	// the eased wind velocity (units / s)
+	bool moving = false;		// the last pass drew moving lumps (the view keeps repainting)
+	std::vector<quint8> tex;
+	float mean = 0.5f, span = 0.5f;
+	QString note = QStringLiteral( "off" );
+};
+
+VaDrift & vd()
+{
+	static VaDrift d;
+	if ( !d.loaded ) {
+		d.loaded = true;
+		const QByteArray pin = qgetenv( "WW_CELL_FOGDRIFT" ).trimmed();
+		if ( !pin.isEmpty() ) {
+			d.pinned = true;
+			d.on = pin != "0";
+		} else {
+			d.on = QSettings().value( QStringLiteral( "WW/VolAirDrift" ), false ).toBool();
+		}
+		const QByteArray red = qgetenv( "WW_CELL_FOGDRIFT_RED" ).trimmed();
+		d.red = red == "still" ? 1 : red == "smooth" ? 2 : 0;
+		bool ok = false;
+		const double t = qEnvironmentVariable( "WW_CELL_FOGDRIFT_T" ).toDouble( &ok );
+		if ( ok ) {	// a fixed clock (the shots' frames): the drift integrated from 0 to t in fixed steps
+			d.timePinned = true;
+			d.tPin = std::max( t, 0.0 );
+		} else if ( wwHarnessRun() ) {	// a harness never reads the wall clock
+			d.timePinned = true;
+		}
+	}
+	return d;
+}
+
+// tileable gradient noise at (x, y, z) in lattice cells, period P cells
+float vaGrad( float x, float y, float z, int P )
+{
+	auto hash = []( int i, int j, int k ) {
+		std::uint32_t h = std::uint32_t( i ) * 73856093u ^ std::uint32_t( j ) * 19349663u ^ std::uint32_t( k ) * 83492791u;
+		h ^= h >> 13;
+		h *= 0x5bd1e995u;
+		return h ^ ( h >> 15 );
+	};
+	static const float g[12][3] = { { 1, 1, 0 }, { -1, 1, 0 }, { 1, -1, 0 }, { -1, -1, 0 }, { 1, 0, 1 }, { -1, 0, 1 },
+		{ 1, 0, -1 }, { -1, 0, -1 }, { 0, 1, 1 }, { 0, -1, 1 }, { 0, 1, -1 }, { 0, -1, -1 } };
+	const int x0 = int( std::floor( x ) ), y0 = int( std::floor( y ) ), z0 = int( std::floor( z ) );
+	const float fx = x - float( x0 ), fy = y - float( y0 ), fz = z - float( z0 );
+	auto fade = []( float t ) { return t * t * t * ( t * ( t * 6.0f - 15.0f ) + 10.0f ); };
+	float r = 0.0f;
+	for ( int c = 0; c < 8; c++ ) {
+		const int dx = c & 1, dy = ( c >> 1 ) & 1, dz = ( c >> 2 ) & 1;
+		const float * v = g[hash( ( x0 + dx ) % P, ( y0 + dy ) % P, ( z0 + dz ) % P ) % 12];
+		const float d = v[0] * ( fx - float( dx ) ) + v[1] * ( fy - float( dy ) ) + v[2] * ( fz - float( dz ) );
+		r += d * ( dx ? fade( fx ) : 1.0f - fade( fx ) ) * ( dy ? fade( fy ) : 1.0f - fade( fy ) ) * ( dz ? fade( fz ) : 1.0f - fade( fz ) );
+	}
+	return r;
+}
+
+// the 64^3 texture: two octaves (4 and 8 lattice cells across), bytes over their own range; mean and span measured
+void vaNoiseBuild( VaDrift & d )
+{
+	const int n = kNoiseN;
+	std::vector<float> v( size_t( n ) * n * n );
+	float lo = 1e30f, hi = -1e30f;
+	for ( int k = 0; k < n; k++ )
+		for ( int j = 0; j < n; j++ )
+			for ( int i = 0; i < n; i++ ) {
+				const float x = ( float( i ) + 0.5f ) / float( n ), y = ( float( j ) + 0.5f ) / float( n ), z = ( float( k ) + 0.5f ) / float( n );
+				const float f = vaGrad( x * 4.0f, y * 4.0f, z * 4.0f, 4 ) + 0.5f * vaGrad( x * 8.0f + 0.31f, y * 8.0f + 0.17f, z * 8.0f + 0.53f, 8 );
+				v[( size_t( k ) * n + j ) * n + i] = f;
+				lo = std::min( lo, f );
+				hi = std::max( hi, f );
+			}
+	d.tex.resize( v.size() );
+	double sum = 0.0;
+	int bmin = 255, bmax = 0;
+	for ( size_t i = 0; i < v.size(); i++ ) {
+		const int b = int( std::lround( ( v[i] - lo ) / std::max( hi - lo, 1e-6f ) * 255.0f ) );
+		d.tex[i] = quint8( b );
+		sum += b;
+		bmin = std::min( bmin, b );
+		bmax = std::max( bmax, b );
+	}
+	const double mean = sum / double( v.size() );
+	d.mean = float( mean / 255.0 );
+	d.span = float( std::max( mean - bmin, bmax - mean ) / 255.0 );
+}
+
+/* the wind's offsets at time t (fixed steps of at most 1/30 s; a pinned clock restarts from 0, run to run identical).
+ * Range and turbulence wobble the bearing and gust the speed; the velocity eases toward them (2 s), so a weather
+ * change never jumps. The detail octave moves 1.35x faster and a little upward: the lumps change shape as they go. */
+void vaDriftAdvance( VaDrift & d, double t, const quint8 w[4] )
+{
+	if ( t < d.tDone ) {
+		d.tDone = 0.0;
+		d.vel[0] = d.vel[1] = 0.0f;
+		std::fill( &d.ofs[0][0], &d.ofs[0][0] + 6, 0.0f );
+	}
+	if ( !d.timePinned && t - d.tDone > 1.0 )
+		d.tDone = t - 1.0;	// an idle window: carry on from a second ago, no catch-up loop
+	const double twoPi = 6.283185307179586;
+	const double M = w[0] / 255.0, dir = w[1] / 255.0 * twoPi, range = w[2] / 255.0 * 0.5 * twoPi, T = w[3] / 255.0;
+	const int steps = int( std::ceil( ( t - d.tDone ) * 30.0 ) );
+	const double dt = steps > 0 ? ( t - d.tDone ) / steps : 0.0;
+	for ( int s = 0; s < steps; s++ ) {
+		const double u = d.tDone + dt * ( s + 0.5 );
+		const double a = dir + 0.5 * range * ( 0.6 * std::sin( twoPi * u / 23.0 ) + 0.4 * std::sin( twoPi * u / 9.1 ) );
+		const double gust = std::max( 0.0, 1.0 + T * ( 0.35 * std::sin( twoPi * u / 7.3 ) + 0.25 * std::sin( twoPi * u / 3.1 ) ) );
+		const double v = kDriftSpeed * M * gust;
+		const double e = 1.0 - std::exp( -dt / 2.0 );
+		d.vel[0] += float( ( v * std::sin( a ) - d.vel[0] ) * e );	// bearing: 0 = +Y (north), clockwise
+		d.vel[1] += float( ( v * std::cos( a ) - d.vel[1] ) * e );
+		for ( int o = 0; o < 2; o++ ) {
+			// wrapped at the octave's own tile: the texture repeats there, so the wrap is seamless
+			const float k = float( dt ) * ( o ? 1.35f : 1.0f ), tile = kDriftTile * ( o ? kDriftDetail : 1.0f );
+			d.ofs[o][0] = std::fmod( d.ofs[o][0] + d.vel[0] * k, tile );
+			d.ofs[o][1] = std::fmod( d.ofs[o][1] + d.vel[1] * k, tile );
+			if ( o )
+				d.ofs[o][2] = std::fmod( d.ofs[o][2] + 0.15f * std::hypot( d.vel[0], d.vel[1] ) * k, tile );
+		}
+	}
+	d.tDone = t;
 }
 
 /* lane FARGRID1: the far grid's presets (cellvolair.h). Fixed sizes, not tied to the screen; 1 game unit = 1.43 cm, so
@@ -154,6 +331,23 @@ struct VaGpu
 	bool tileValid = false;	// stage 0 wrote this frame's column distances (the surfaces clamp to them)
 	GLuint zTex = 0, zFbo = 0, zSrc = 0;	// stage 0's depth: a copy of the obscurance pass's depth buffer (10-16)
 	int zW = 0, zH = 0;
+	GLuint carry[2] = { 0, 0 };	// lane PERF2: the O(S) integrate's running (L, T), ping-pong between its draws (RGBA32F)
+	int mrtOk = -1;				// 8 draw buffers and colour attachments (else the O(S^2) integrate)
+	// lane PERF2, temporal: the strata (cols x rows x 4 slices, stratum p at layers p x slices ..), ping-pong; the
+	// last pass's view (posView = sc R world + t: rows sc R | t) and grid
+	GLuint hist[2] = { 0, 0 };
+	int histCur = 0, histCols = 0, histRows = 0;
+	bool histOk = false;
+	double prevV[3][4] = {};
+	float prevGrid[4] = { 0, 0, 0, 0 }, prevScale = 0.0f;
+	unsigned frame = 0;
+	int tmode = 0;
+	// lane VOLPART1: the frame's phase and cascades, for the particles lit by the same law (wwVolPartUniforms; the
+	// medium is med / layer / ground above)
+	float phase[3][4] = {};
+	float gi[4] = {};
+	bool csm = false;
+	GLuint noise = 0;	// lane FOGDRIFT1: the drift's noise (R8, repeat)
 };
 
 /* THE CLUSTERED LIGHTS (coordinator 10-14). The inject evaluates the placed lights once per froxel, at the middle of
@@ -433,7 +627,7 @@ VaMedium vaFit( const float K[6][4], bool wrong, bool farFit )
 		m.band = false;
 	}
 	// measurement pin (bungo 10-16): WW_CELL_AIR_DENSITY=<x> scales the fitted density, to show a lamp's haze alone
-	static const float densPin = qEnvironmentVariableIsSet( "WW_CELL_AIR_DENSITY" ) ? qgetenv( "WW_CELL_AIR_DENSITY" ).toFloat() : 1.0f;
+	WW_SWITCH_STATIC( float, densPin, wwEnvIsSet( "WW_CELL_AIR_DENSITY" ) ? wwEnv( "WW_CELL_AIR_DENSITY" ).toFloat() : 1.0f );
 	if ( densPin > 0.0f )
 		m.sigma0 *= densPin;
 	return m;
@@ -619,6 +813,16 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 
 }	// namespace
 
+bool wwVolAirWantsSettle()
+{
+	VaState & s = vs();
+	if ( !s.temporal || wwHarnessRun() || s.settleLeft <= 0 )
+		return false;
+	s.settleLeft--;
+	s.settlePending = true;
+	return true;
+}
+
 bool wwVolAirOn()
 {
 	return vs().on;
@@ -647,6 +851,28 @@ void wwVolAirSetFarTier( int tier )
 	QSettings().setValue( QStringLiteral( "WW/VolAirFar" ), s.farTier );
 }
 
+bool wwVolAirDriftOn()
+{
+	return vd().on;
+}
+
+void wwVolAirSetDriftOn( bool on )
+{
+	VaDrift & d = vd();
+	if ( d.pinned )
+		return;
+	d.on = on;
+	QSettings().setValue( QStringLiteral( "WW/VolAirDrift" ), on );
+}
+
+bool wwVolAirWantsRepaint()
+{
+	VaDrift & d = vd();
+	const bool want = d.moving && vs().on && d.on && !d.timePinned && !wwHarnessRun();
+	d.moving = false;
+	return want;
+}
+
 QString wwVolAirSummary()
 {
 	return QStringLiteral( "volair=" ) + vs().last;
@@ -671,11 +897,19 @@ static void vaEcho()
 
 static void vaPassInner( Scene * scene, bool run );
 
+static int vaFrameSerial = 0;
+
+int wwVolAirFrameSerial()
+{
+	return vaFrameSerial;
+}
+
 void wwVolAirPass( Scene * scene, bool run )
 {
-	static const bool prof = qEnvironmentVariableIntValue( "WW_CELL_AIR_PROF" ) == 1;	// lane PERF1: where the pass's CPU goes
+	WW_SWITCH_STATIC( bool, prof, wwEnvInt( "WW_CELL_AIR_PROF" ) == 1 );	// lane PERF1: where the pass's CPU goes
 	QElapsedTimer pt;
 	pt.start();
+	vaFrameSerial++;
 	vaPassInner( scene, run );
 	const qint64 tInner = pt.nsecsElapsed();
 	if ( vs().on && run )
@@ -714,7 +948,7 @@ static void vaPassInner( Scene * scene, bool run )
 		return;
 	}
 	QElapsedTimer timer;
-	const bool timed = !s.dump.isEmpty() || qEnvironmentVariableIsSet( "WW_CELL_AIR_TIME" );
+	const bool timed = !s.dump.isEmpty() || wwEnvIsSet( "WW_CELL_AIR_TIME" );
 	if ( timed ) {
 		fn->glFinish();
 		timer.start();
@@ -790,7 +1024,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * fixture's glow is measured in the same air wherever it stands. The slices end where the air reaches 99%
 	 * opacity (4.6 / sigma0, held between 2000 and 20000 units), or at <far> when given as "<sigma0>,<far>": a short
 	 * far end makes the 64 slices thin near the fixture (the booth's measuring runs). Unset: the fitted medium. */
-	const QStringList boothArg = qEnvironmentVariable( "WW_CELL_BOOTH_AIR" ).split( QLatin1Char( ',' ) );
+	const QStringList boothArg = wwEnvStr( "WW_CELL_BOOTH_AIR" ).split( QLatin1Char( ',' ) );
 	const float boothAir = boothArg.value( 0 ).toFloat();
 	if ( boothAir > 0.0f ) {
 		M.sigma0 = boothAir;
@@ -867,6 +1101,16 @@ static void vaPassInner( Scene * scene, bool run )
 		vaAlloc3D( fn, g.integ, texW, texH, texD, true );
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
+		for ( GLuint & c : g.carry ) {
+			if ( !c )
+				fn->glGenTextures( 1, &c );
+			fn->glBindTexture( GL_TEXTURE_2D, c );
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, cols, rows, 0, GL_RGBA, GL_FLOAT, nullptr );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+		}
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 		g.cols = cols;
 		g.rows = rows;
 		g.slices = kSlices;
@@ -875,6 +1119,23 @@ static void vaPassInner( Scene * scene, bool run )
 		g.texD = texD;
 		g.farKey.clear();	// a new volume holds no far grid
 	}
+	if ( g.mrtOk < 0 ) {
+		GLint bufs = 0, atts = 0;
+		fn->glGetIntegerv( GL_MAX_DRAW_BUFFERS, &bufs );
+		fn->glGetIntegerv( GL_MAX_COLOR_ATTACHMENTS, &atts );
+		g.mrtOk = bufs >= 8 && atts >= 8 ? 1 : 0;
+	}
+	// lane PERF2, temporal: not with red lightmid (its single light sample has no strata)
+	const bool temporal = s.temporal && g.mrtOk == 1 && !( s.red & 262144 );
+	if ( temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows ) ) {
+		for ( GLuint & h : g.hist )
+			vaAlloc3D( fn, h, cols, rows, 4 * kSlices, true );
+		g.histCols = cols;
+		g.histRows = rows;
+		g.histOk = false;
+	}
+	if ( !temporal || g.doc != scene->nifModel )
+		g.histOk = false;	// another document: its history is not this one's
 
 	// red flat: one cube for every froxel, the GI grid's mean per axis
 	float flat[6][3] = {};
@@ -925,6 +1186,118 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1i( "volFarMode", farOn ? 1 : 0 );	// lane FARGRID1: the near pass
 	prog->uni1i( "volLayerBase", 0 );
 	prog->uni1f( "volJitter", 0.0f );
+
+	/* lane PERF2, temporal: this view (rows sc R | t) and the map from it to the last pass's view,
+	 * last = sc' R' R^T (y - t) / sc + t'. Mode 2 when nothing moved (the history read at the same froxel) */
+	double curV[3][4];
+	for ( int i = 0; i < 3; i++ ) {
+		for ( int j = 0; j < 3; j++ )
+			curV[i][j] = double( vt.rotation( i, j ) ) * double( sc );
+		curV[i][3] = double( vt.translation[i] );
+	}
+	const float curGrid[4] = { p00, p11, nearD, logRatio };
+	g.tmode = 0;
+	if ( temporal ) {
+		bool same = g.histOk;
+		for ( int i = 0; i < 3 && same; i++ )
+			for ( int j = 0; j < 4 && same; j++ )
+				same = curV[i][j] == g.prevV[i][j];
+		for ( int k = 0; k < 4 && same; k++ )
+			same = curGrid[k] == g.prevGrid[k];
+		same = same && distScale == g.prevScale;
+		g.tmode = same ? 2 : 1;
+		float rep[3][4];
+		const double s0 = double( sc );
+		for ( int i = 0; i < 3; i++ ) {
+			double off = g.prevV[i][3];
+			for ( int j = 0; j < 3; j++ ) {
+				// (sc' R' R^T / sc)[i][j] = sum_k prevV[i][k] curV[j][k] / sc^2
+				double m = 0.0;
+				for ( int k = 0; k < 3; k++ )
+					m += g.prevV[i][k] * curV[j][k];
+				m /= s0 * s0;
+				rep[i][j] = float( m );
+				off -= m * curV[j][3];
+			}
+			rep[i][3] = float( off );
+		}
+		for ( int i = 0; i < 3; i++ )
+			prog->uni4f_l( prog->uniLocation( "volReproj[%d]", i ), FloatVector4( rep[i][0], rep[i][1], rep[i][2], rep[i][3] ) );
+		prog->uni4f( "volPrevGrid", FloatVector4( g.prevGrid[0], g.prevGrid[1], g.prevGrid[2] > 0.0f ? g.prevGrid[2] : 1.0f,
+			g.prevGrid[3] > 0.0f ? g.prevGrid[3] : 1.0f ) );
+		prog->uni1f( "volPrevScale", g.prevScale );
+	}
+	prog->uni1i( "volTemporal", g.tmode );
+	prog->uni1i( "volQ", int( g.frame & 3u ) );
+	prog->uni1b( "volHistOk", temporal && g.histOk );
+	prog->uni1i( "volHist", kInjectUnit );
+	{
+		const int pf = wwCellPostPathFrame();
+		const bool shifted = s.shiftFrame >= 0 && pf >= s.shiftFrame;
+		prog->uni3f( "volLightShift", shifted ? s.shift[0] : 0.0f, shifted ? s.shift[1] : 0.0f, shifted ? s.shift[2] : 0.0f );
+	}
+	/* lane FOGDRIFT1: the near grid's drifting lumps. Exteriors drift; an interior only when it shows the sky (CELL DATA
+	 * bit 7), a sealed one stays smooth (amplitude 0: the same froxels as the row off). No wind: lumps, standing still. */
+	VaDrift & dr = vd();
+	float driftAmp = 0.0f;
+	quint8 wind[4] = { 0, 0, 0, 0 };
+	const bool hasWind = wwLookdevWind( wind );
+	{
+		static GLint combined = -1;
+		if ( combined < 0 )
+			fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &combined );
+		const bool sealed = L && L->interior && !L->showSky;
+		dr.moving = false;
+		if ( !dr.on ) {
+			dr.note = QStringLiteral( "off" );
+		} else if ( dr.red == 2 ) {
+			dr.note = QStringLiteral( "smooth(red)" );
+		} else if ( !uniI( "cellOn" ) || combined <= kNoiseUnit ) {
+			dr.note = QStringLiteral( "none(no cell lights or texture units)" );
+		} else if ( sealed ) {
+			dr.note = QStringLiteral( "still(sealed interior)" );
+		} else {
+			if ( dr.tex.empty() )
+				vaNoiseBuild( dr );
+			if ( !g.noise ) {
+				fn->glGenTextures( 1, &g.noise );
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );
+				fn->glBindTexture( GL_TEXTURE_3D, g.noise );
+				fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+				fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_R8, kNoiseN, kNoiseN, kNoiseN, 0, GL_RED, GL_UNSIGNED_BYTE, dr.tex.data() );
+				fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+				for ( GLenum w : { GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_TEXTURE_WRAP_R } )
+					fn->glTexParameteri( GL_TEXTURE_3D, w, GL_REPEAT );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0 );
+			}
+			const bool blows = hasWind && wind[0] > 0 && dr.red != 1;
+			if ( blows ) {
+				if ( !dr.clock.isValid() )
+					dr.clock.start();
+				double t = dr.timePinned ? dr.tPin : double( dr.clock.nsecsElapsed() ) * 1e-9;
+				// lane FOGVID1: WW_CELL_FOGDRIFT_PATH=1 runs the pinned clock along a WW_RENDER_PATH (frame k at T + k / fps)
+				if ( dr.timePinned && wwEnvInt( "WW_CELL_FOGDRIFT_PATH" ) > 0 && wwCellPostPathFps() > 0.0f )
+					t += double( wwCellPostPathFrame() ) / double( wwCellPostPathFps() );
+				vaDriftAdvance( dr, t, wind );
+			}
+			dr.moving = blows;
+			driftAmp = kDriftAmp / std::max( dr.span, 1e-3f );
+			dr.note = QStringLiteral( "on(wind=%1 dir=%2 range=%3 turb=%4 speed=%5 t=%6%7)" )
+				.arg( hasWind ? wind[0] / 255.0 : 0.0, 0, 'f', 3 ).arg( wind[1] / 255.0 * 360.0, 0, 'f', 1 )
+				.arg( wind[2] / 255.0 * 180.0, 0, 'f', 1 ).arg( wind[3] / 255.0, 0, 'f', 3 )
+				.arg( double( std::hypot( dr.vel[0], dr.vel[1] ) ), 0, 'f', 1 ).arg( dr.tDone, 0, 'f', 3 )
+				.arg( !blows ? ( dr.red == 1 ? QStringLiteral( " still(red)" ) : QStringLiteral( " still(no wind)" ) ) : QString() );
+		}
+	}
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );
+	fn->glBindTexture( GL_TEXTURE_3D, driftAmp > 0.0f ? g.noise : 0 );
+	prog->uni1i( "volNoise", kNoiseUnit );
+	prog->uni4f( "volDrift", FloatVector4( driftAmp, kDriftFade0, 1.0f / ( kDriftFade1 - kDriftFade0 ), dr.mean ) );
+	for ( int o = 0; o < 2; o++ )
+		prog->uni4f_l( prog->uniLocation( "volDriftOfs[%d]", o ), FloatVector4( dr.ofs[o][0], dr.ofs[o][1], dr.ofs[o][2],
+			1.0f / ( kDriftTile * ( o ? kDriftDetail : 1.0f ) ) ) );
 
 	/* THE OPTIMISATION (coordinator 10-14; WW_CELL_AIR_OPT, default both): 1 the clustered lights (vaBuildClusters),
 	 * 2 the conservative depth skip: stage 0 writes, per froxel column, the farthest and the nearest ray distance of
@@ -1050,26 +1423,81 @@ static void vaPassInner( Scene * scene, bool run )
 		} else {
 			prog->uni1i( "volStage", 0 );
 			prog->uni1i( "volLayer", 0 );
+			PassTime::subBegin( PassTime::AirTile );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			PassTime::subEnd( PassTime::AirTile );
 			g.tileValid = true;
 		}
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0 );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
 		fn->glBindTexture( GL_TEXTURE_2D, g.tile );
 	}
+	// lane PERF2: the O(S) integrate (stage 3, 7 layers a draw); red oldint: stage 2, every layer re-summed from 0
+	const bool oneSum = g.mrtOk == 1 && !( s.red & 268435456 );
 	for ( int stage = 1; stage <= 2 && complete; stage++ ) {
-		prog->uni1i( "volStage", stage );
+		prog->uni1i( "volStage", stage == 2 && oneSum ? 3 : stage );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
-		fn->glBindTexture( GL_TEXTURE_3D, stage == 2 ? g.inject : 0 );
-		for ( int k = 0; k < kSlices; k++ ) {
-			fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, stage == 1 ? g.inject : g.integ, 0, k );
-			if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
-				complete = false;
-				break;
+		fn->glBindTexture( GL_TEXTURE_3D, stage == 2 ? g.inject : temporal ? g.hist[g.histCur] : 0 );
+		PassTime::subBegin( stage == 1 ? PassTime::AirInject : PassTime::AirIntegrate );
+		if ( stage == 1 && temporal ) {
+			// lane PERF2, temporal: the inject at attachment 0, the four strata of this layer into the other history
+			const GLuint out = g.hist[g.histCur ^ 1];
+			const GLenum bufs[5] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4 };
+			fn->glDrawBuffers( 5, bufs );
+			for ( int k = 0; k < kSlices; k++ ) {
+				fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.inject, 0, k );
+				for ( int p = 0; p < 4; p++ )
+					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT1 + p ), out, 0, p * kSlices + k );
+				if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+					complete = false;
+					break;
+				}
+				prog->uni1i( "volLayer", k );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			}
-			prog->uni1i( "volLayer", k );
-			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			for ( int p = 1; p <= 4; p++ )
+				fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT0 + p ), GL_TEXTURE_2D, 0, 0 );
+			const GLenum first = GL_COLOR_ATTACHMENT0;
+			fn->glDrawBuffers( 1, &first );
+		} else if ( stage == 2 && oneSum ) {
+			prog->uni1i( "volCarry", kGbufUnit );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGbufUnit ) );
+			for ( int k = 0, c = 0; k < kSlices; k += 7, c++ ) {
+				const int n = std::min( 7, kSlices - k );
+				GLenum bufs[8];
+				for ( int i = 0; i < 7; i++ ) {
+					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT0 + i ), i < n ? g.integ : 0, 0, i < n ? k + i : 0 );
+					bufs[i] = i < n ? GLenum( GL_COLOR_ATTACHMENT0 + i ) : GLenum( GL_NONE );
+				}
+				fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT7, GL_TEXTURE_2D, g.carry[( c + 1 ) & 1], 0 );
+				bufs[7] = GL_COLOR_ATTACHMENT7;
+				fn->glDrawBuffers( 8, bufs );
+				fn->glBindTexture( GL_TEXTURE_2D, g.carry[c & 1] );
+				if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+					complete = false;
+					break;
+				}
+				prog->uni1i( "volLayer", k );
+				prog->uni1i( "volCount", n );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			}
+			fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			for ( int i = 1; i < 8; i++ )
+				fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT0 + i ), GL_TEXTURE_2D, 0, 0 );
+			const GLenum first = GL_COLOR_ATTACHMENT0;
+			fn->glDrawBuffers( 1, &first );
+		} else {
+			for ( int k = 0; k < kSlices; k++ ) {
+				fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, stage == 1 ? g.inject : g.integ, 0, k );
+				if ( k == 0 && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+					complete = false;
+					break;
+				}
+				prog->uni1i( "volLayer", k );
+				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			}
 		}
+		PassTime::subEnd( stage == 1 ? PassTime::AirInject : PassTime::AirIntegrate );
 	}
 	/* lane FARGRID1: THE FAR GRID. The same program and medium on a fixed grid from the handoff to farEnd: the sun
 	 * (shadowed by airFarVis: the cascades where they reach, the terrain's shadow-height map, the clouds' input) and
@@ -1119,8 +1547,11 @@ static void vaPassInner( Scene * scene, bool run )
 			prog->uni4f( "volSlices", FloatVector4( farStart, farLog, float( fp.slices ), 1.0f ) );
 			prog->uni1i( "volFarMode", 3 | ( ( s.red & 16777216 ) ? 4 : 0 ) );
 			prog->uni1i( "volLayerBase", kSlices );
+			prog->uni1i( "volTemporal", 0 );	// BATCH1: PERF2's history is the near grid's only
+			prog->uni1b( "volHistOk", false );
 			prog->uni1i( "volTerms", s.terms & 9 );
 			prog->uni1i( "volDepthSkip", 0 );
+			prog->uni4f( "volDrift", FloatVector4( 0.0f, kDriftFade0, 1.0f, dr.mean ) );	// lane FOGDRIFT1: the far air stays smooth
 			fn->glUniform4i( prog->uniLocation( "volClusterDims" ), 0, 0, kClusterCols, kClusterSlices );
 			static quint32 frame = 0;
 			prog->uni1f( "volJitter", jitter ? float( ( ++frame * 2654435761u ) >> 8 ) / 16777216.0f - 0.5f : 0.0f );
@@ -1172,6 +1603,8 @@ static void vaPassInner( Scene * scene, bool run )
 	r->stopProgram();
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );
+	fn->glBindTexture( GL_TEXTURE_3D, 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kClusterUnit ) );
 	fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGbufUnit ) );
@@ -1185,6 +1618,19 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	g.ready = true;
 	g.doc = scene->nifModel;
+	if ( temporal ) {
+		g.histCur ^= 1;
+		g.histOk = true;
+		g.frame++;
+		std::copy( &curV[0][0], &curV[0][0] + 12, &g.prevV[0][0] );
+		std::copy( curGrid, curGrid + 4, g.prevGrid );
+		g.prevScale = distScale;
+		// an interactive window paints until every stratum is fresh (3 more frames after a paint of its own)
+		if ( s.settlePending )
+			s.settlePending = false;
+		else
+			s.settleLeft = 3;
+	}
 	g.near = nearD;
 	g.logRatio = logRatio;
 	g.med[0] = M.sigma0;
@@ -1194,6 +1640,9 @@ static void vaPassInner( Scene * scene, bool run )
 	const float layerV[4] = { G.w, G.zn, G.invHn, G.s }, groundV[4] = { G.zg, G.invHg, 0.0f, 0.0f };
 	std::copy( layerV, layerV + 4, g.layer );
 	std::copy( groundV, groundV + 4, g.ground );
+	std::copy( &ph.w[0][0], &ph.w[0][0] + 12, &g.phase[0][0] );	// lane VOLPART1
+	std::copy( ph.gi, ph.gi + 4, g.gi );
+	g.csm = csm;
 	double ms = -1.0;
 	if ( timed ) {
 		fn->glFinish();
@@ -1209,12 +1658,13 @@ static void vaPassInner( Scene * scene, bool run )
 		.arg( cellLightCountV ).arg( cellGiOnV ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 );
 	// the optimisation's echo: the mode, the clusters (all / non-empty / mean list over the non-empty), the CPU build,
 	// the depth skip (0 off, 1 on, 2 the red)
-	const QString optNote = QStringLiteral( "opt=%1 clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8" )
+	const QString optNote = QStringLiteral( "opt=%1 clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8 temporal=%9" )
 		.arg( s.opt ).arg( clOn ? cl.ncx * cl.ncy * cl.ncz : 0 ).arg( clOn ? cl.nonEmpty : 0 )
 		.arg( clOn && cl.nonEmpty ? double( cl.refs ) / double( cl.nonEmpty ) : 0.0, 0, 'f', 2 ).arg( clMs, 0, 'f', 3 )
 		.arg( depthOn ? ( ( s.red & 8192 ) ? 2 : 1 ) : 0 )
 		.arg( !tileOn ? QStringLiteral( "none" ) : zDepth ? QStringLiteral( "depth" ) : QStringLiteral( "colour" ) )
-		.arg( g.tileValid && !( s.red & 2097152 ) ? 1 : 0 );
+		.arg( g.tileValid && !( s.red & 2097152 ) ? 1 : 0 )
+		.arg( g.tmode );	// lane PERF2: 0 the 4 sub-steps, 1 temporal reprojected, 2 temporal, camera unchanged
 	// the ground layer's echo: what was applied (the near share, the strength, thickness and anchor) and its source
 	const QString groundNote = QStringLiteral( "nearw=%1 ground=%2 thick=%3 zg=%4 recx=%5%6" )
 		.arg( double( G.w ), 0, 'f', 2 ).arg( double( G.s ), 0, 'g', 4 )
@@ -1231,12 +1681,16 @@ static void vaPassInner( Scene * scene, bool run )
 			.arg( double( farEnd ), 0, 'f', 0 ).arg( fp.refresh ).arg( g.farBuilds ).arg( g.farGpuMs, 0, 'f', 3 )
 			.arg( volMb, 0, 'f', 1 ).arg( [] { WwTerrainShadowMap t; return wwTerrainShadowMap( t ) ? 1 : 0; }() );
 	s.last.chop( 1 );
-	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() ) + QStringLiteral( ")" );
+	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + ( s.farTier > 0 ? QStringLiteral( " " ) + farNote : QString() )
+		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( ")" );
 
 	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */
 	if ( !s.dump.isEmpty() ) {
-		QFile f( s.dump );
+		// lane PERF2 gates: WW_CELL_AIR_DUMP_FRAMES=1 keeps one file per camera-path frame (<file>.<frame>)
+		static const bool perFrame = qEnvironmentVariableIntValue( "WW_CELL_AIR_DUMP_FRAMES" ) == 1;
+		const int pf = wwCellPostPathFrame();
+		QFile f( perFrame && pf >= 0 ? s.dump + QStringLiteral( ".%1" ).arg( pf, 3, 10, QLatin1Char( '0' ) ) : s.dump );
 		if ( f.open( QIODevice::WriteOnly ) ) {
 			const qint32 hd[3] = { cols, rows, kSlices };
 			f.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
@@ -1276,6 +1730,12 @@ static void vaPassInner( Scene * scene, bool run )
 			o += QStringLiteral( "csm %1\nterms %2\nred %3\nmedNote %4\nms %5\n" ).arg( csm ? 1 : 0 )
 				.arg( s.terms ).arg( s.red ).arg( medNote ).arg( ms, 0, 'f', 3 );
 			o += QStringLiteral( "opt %1\n" ).arg( optNote );
+			// lane FOGDRIFT1: the density factor 1 + amp x fade x (a + 0.5 fade b) / 1.5, a b = noise - mean (cell_volair.frag airDrift)
+			o += QStringLiteral( "drift %1 amp %2 mean %3 span %4 fade %5 %6 tile %7 %8 ofs %9 %10 %11 %12 %13 %14\n" ).arg( dr.note )
+				.arg( double( driftAmp ), 0, 'g', 9 ).arg( double( dr.mean ), 0, 'g', 9 ).arg( double( dr.span ), 0, 'g', 9 )
+				.arg( double( kDriftFade0 ) ).arg( double( kDriftFade1 ) ).arg( double( kDriftTile ) ).arg( double( kDriftTile * kDriftDetail ) )
+				.arg( double( dr.ofs[0][0] ), 0, 'g', 9 ).arg( double( dr.ofs[0][1] ), 0, 'g', 9 ).arg( double( dr.ofs[0][2] ), 0, 'g', 9 )
+				.arg( double( dr.ofs[1][0] ), 0, 'g', 9 ).arg( double( dr.ofs[1][1] ), 0, 'g', 9 ).arg( double( dr.ofs[1][2] ), 0, 'g', 9 );
 			o += QStringLiteral( "airLayer %1\nairGround %2\nrecx %3\nrecxConflict %4\n" ).arg( v( layerV, 4 ), v( groundV, 4 ), G.recx,
 				G.conflict.isEmpty() ? QStringLiteral( "none" ) : G.conflict );
 			// lane LAMPAIR1: every light the air sees (world pos, radius, linear colour with fade, spot cos, shape,
@@ -1283,7 +1743,10 @@ static void vaPassInner( Scene * scene, bool run )
 			if ( L )
 				for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
 					const WwCellLight & l = L->lights.at( i );
-					const float a[13] = { l.pos[0], l.pos[1], l.pos[2], l.radius, l.color[0], l.color[1], l.color[2],
+					float dim, off[3];	// lane LIGHTFLICKER1: this frame's flicker, as the light buffer holds it
+					wwCellFlickerOf( scene->nifModel, i, &dim, off );
+					const float a[13] = { l.pos[0] + off[0], l.pos[1] + off[1], l.pos[2] + off[2], l.radius, l.color[0] * dim,
+						l.color[1] * dim, l.color[2] * dim,
 						l.spot ? l.cosOuter : -2.0f, float( l.shape ), float( l.shadow ), l.bias, l.scale, l.exponent };
 					o += QStringLiteral( "light %1 %2 %3\n" ).arg( i ).arg( v( a, 13 ) ).arg( l.ref, 8, 16, QLatin1Char( '0' ) );
 				}
@@ -1364,10 +1827,10 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	VaState & s = vs();
 	if ( s.inPass )
 		return;
-	static const bool fogProbeFrame = [] {
-		const auto p = qgetenv( "WW_LOOKDEV_FOGPROBE" ).split( ',' );
+	WW_SWITCH_STATIC( bool, fogProbeFrame, [] {
+		const auto p = wwEnv( "WW_LOOKDEV_FOGPROBE" ).split( ',' );
 		return p.size() >= 3 && p[2].trimmed().toFloat() > 8.5f;
-	}();
+	}() );
 	const bool probeFrame = s.probe == 1 || s.probe == 2 || fogProbeFrame;
 	if ( probes != probeFrame )
 		return;
@@ -1452,4 +1915,127 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	fn->glDepthMask( depthMask );
 	note( probes ? QStringLiteral( "probes (red nosky %1)" ).arg( ( s.red & 65536 ) ? 1 : 0 )
 		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) );
+}
+
+/* ---- lane VOLPART1: volumetric particles (cellvolair.h, res/shaders/particles.frag) ---- */
+namespace
+{
+struct VpState
+{
+	bool loaded = false;
+	bool on = false, pinned = false;
+	int red = 0;
+};
+
+VpState & vps()
+{
+	static VpState s;
+	if ( !s.loaded ) {
+		s.loaded = true;
+		const QByteArray pin = qgetenv( "WW_CELL_VOLPART" );
+		if ( !pin.isEmpty() ) {
+			s.pinned = true;
+			s.on = pin.trimmed() != "0";
+		} else {
+			s.on = QSettings().value( QStringLiteral( "WW/VolPart" ), false ).toBool();
+		}
+		for ( const QByteArray & t : qgetenv( "WW_CELL_VOLPART_RED" ).split( ',' ) ) {
+			const QByteArray r = t.trimmed();
+			s.red |= r == "flat" ? 1 : r == "nothick" ? 2 : r == "nosoft" ? 4 : r == "nolights" ? 8 : r == "white" ? 16
+				: r == "nofog" ? 32 : r == "noshadow" ? 64 : r == "noedge" ? 128 : r == "nophase" ? 256 : r == "nonear" ? 512 : 0;
+		}
+	}
+	return s;
+}
+}	// namespace
+
+bool wwVolPartOn()
+{
+	return vps().on;
+}
+
+namespace
+{
+int vpFxFlags = 0;	// the effect card being set up: 1 a volumetric card, 2 its soft fade on (depth ALWAYS)
+}
+
+void wwVolPartFxSet( int flags )
+{
+	vpFxFlags = flags;
+}
+
+int wwVolPartFx()
+{
+	return vpFxFlags;
+}
+
+bool wwVolPartHidden()
+{
+	static const bool hide = qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1;
+	return hide;
+}
+
+void wwVolPartSetOn( bool on )
+{
+	VpState & s = vps();
+	if ( s.pinned )
+		return;
+	s.on = on;
+	QSettings().setValue( QStringLiteral( "WW/VolPart" ), on );
+}
+
+int wwVolPartRed()
+{
+	return vps().red;
+}
+
+bool wwVolPartUniforms( Scene * scene )
+{
+	if ( !scene || !scene->renderer )
+		return false;
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
+	if ( !prog || prog->uniLocation( "volPart" ) < 0 )
+		return false;
+	const VpState & s = vps();
+	prog->uni1i( "volPart", s.on ? 1 : 0 );
+	prog->uni1i( "volPartDump", 0 );
+	if ( !s.on )
+		return false;
+	// the air's medium and phase this frame; no air drawn: a clear medium (the light alone) and the phase the air
+	// would take (the cell's god-ray record indoors, the weather's outdoors, else the fallback)
+	const VaGpu & g = vaGpus()[r];
+	const bool air = vs().on && g.ready && g.doc == scene->nifModel;
+	VaPhase fb;
+	if ( !air ) {
+		const WwCellLighting * L = wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr;
+		float med[12] = { 0.60f, 1.52f, 3.31f, 2, 2, 2, 1, 1, 1, 0.75f, 0, 1 };
+		if ( L && L->interior )
+			std::copy( L->godRay, L->godRay + 12, med );
+		else
+			wwLookdevGodRays( med, nullptr );
+		fb = vaPhase( med, ( vs().red & 524288 ) != 0 );
+	}
+	prog->uni4f( "airMed", air ? FloatVector4( g.med[0], g.med[1], g.med[2], g.med[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 1e30f ) );
+	// the landed air's layered law (its near band, its ground layer) and its GPU reds (roomstep, physcol), as the pass
+	prog->uni4f( "airLayer", air ? FloatVector4( g.layer[0], g.layer[1], g.layer[2], g.layer[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+	prog->uni4f( "airGround", air ? FloatVector4( g.ground[0], g.ground[1], g.ground[2], g.ground[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+	prog->uni1i( "volRed", vs().red & ~1 );
+	for ( int k = 0; k < 3; k++ ) {
+		const float * w = air ? g.phase[k] : fb.w[k];
+		prog->uni4f_l( prog->uniLocation( "volPhase[%d]", k ), FloatVector4( w[0], w[1], w[2], w[3] ) );
+	}
+	const float * gi = air ? g.gi : fb.gi;
+	prog->uni4f( "volGi", FloatVector4( gi[0], gi[1], gi[2], gi[3] ) );
+	prog->uni1b( "volCsm", air ? g.csm : wwSunShadowWanted( scene ) );
+	prog->uni1i( "volTerms", vs().terms );
+	prog->uni1i( "volPartRed", s.red );
+	return true;
+}
+
+QString wwVolPartSummary()
+{
+	const VpState & s = vps();
+	return QStringLiteral( "volpart=%1%2 red=%3" ).arg( s.on ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
+		.arg( s.pinned ? QStringLiteral( "(pinned)" ) : QString() ).arg( s.red );
 }

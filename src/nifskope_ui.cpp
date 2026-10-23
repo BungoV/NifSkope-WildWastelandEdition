@@ -32,6 +32,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "gamemanager.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "celldoorlive.h"	// lane DOORLIVE1: a path frame poses the live door
 #include "lodgen.h"
 #include "lodgengpu.h"
 #include "lodgenlayout.h"
@@ -47,6 +49,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "starterscene.h"
 #include "harnesswindow.h"
 #include "gl/campath.h"		// lane MOTION1: WW_RENDER_PATH
+#include "gl/lookdevstage.h"	// lane SHADOWCACHE1: the path's hour step
 #include "gl/gametaa.h"
 #include "gl/cellpost.h"	// lane GRASSMB1
 #include "gl/cellbloom.h"	// lane BLOOM1b
@@ -215,6 +218,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <functional>
 #include <QtEndian>
 #include "ui/opencellmenu.h"
+#include "gl/cellpasstime.h"	// lane STREAM1
 #include <vector>
 
 namespace {
@@ -1436,7 +1440,7 @@ static QPoint wwHeadlessWindowOrigin( QString * arm = nullptr )
 	const QScreen * primary = QGuiApplication::primaryScreen();
 	const QRect primaryGeom = primary ? primary->geometry() : QRect();
 
-	const QString at = qEnvironmentVariable( "WW_WINDOW_AT" );
+	const QString at = wwEnvStr( "WW_WINDOW_AT" );
 	const QStringList xy = at.split( QLatin1Char( ',' ) );
 	if ( xy.size() == 2 ) {
 		bool okX = false, okY = false;
@@ -1533,7 +1537,7 @@ static WwCardTimes & wwCardT()
 void wwCardTimesMainEntry()
 {
 	WwCardTimes & t = wwCardT();
-	t.file = qEnvironmentVariable( "WW_CARDBAKE_TIMES" );
+	t.file = wwEnvStr( "WW_CARDBAKE_TIMES" );
 	t.on = !t.file.isEmpty();
 	t.clock.start();
 }
@@ -1617,7 +1621,7 @@ void NifSkope::wwPlaceHeadlessWindow( QWidget * w )
 		const QScreen * s = QGuiApplication::screenAt( g.center() );
 		if ( s && s != QGuiApplication::primaryScreen() && s->geometry().contains( g ) ) {
 			w->setAttribute( Qt::WA_ShowWithoutActivating, true );
-			if ( qEnvironmentVariableIntValue( "WW_WINDOW_VISIBLE" ) != 1 )
+			if ( wwEnvInt( "WW_WINDOW_VISIBLE" ) != 1 )
 				w->setWindowOpacity( 0.0 );
 			return;
 		}
@@ -1633,7 +1637,7 @@ void NifSkope::wwPlaceHeadlessWindow( QWidget * w )
 	 * this window was just placed on.  See src/harnesswindow.cpp. */
 	wwApplyHarnessWindow( w );
 	w->setAttribute( Qt::WA_ShowWithoutActivating, true );
-	if ( qEnvironmentVariableIntValue( "WW_WINDOW_VISIBLE" ) != 1 )
+	if ( wwEnvInt( "WW_WINDOW_VISIBLE" ) != 1 )
 		w->setWindowOpacity( 0.0 );
 	wwHeadlessPlacementArm() = arm;
 }
@@ -2123,7 +2127,7 @@ static qint64 wwCellStreamSettle( GLView * ogl, int minFrames, qint64 waitMs )
  * the texture and GPU caches dropped, and the far-LOD coverage at the loaded border. The last step is the shot. */
 static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const QString & out )
 {
-	QString dumpPath = qEnvironmentVariable( "WW_CELL_STREAM_DUMP" );
+	QString dumpPath = wwEnvStr( "WW_CELL_STREAM_DUMP" );
 	if ( dumpPath.isEmpty() )
 		dumpPath = QFileInfo( out ).path() + QLatin1Char( '/' ) + QFileInfo( out ).completeBaseName() + QStringLiteral( "_stream.txt" );
 	QFile dump( dumpPath );
@@ -2151,14 +2155,15 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 			st.fov = f[6].toFloat();
 		steps.append( st );
 	}
-	const qint64 waitMs = qEnvironmentVariableIsSet( "WW_CELL_STREAM_WAIT" ) ? qEnvironmentVariableIntValue( "WW_CELL_STREAM_WAIT" ) : 600000;
-	const bool shots = qEnvironmentVariableIntValue( "WW_CELL_STREAM_SHOTS" ) != 0;
+	const qint64 waitMs = wwEnvIsSet( "WW_CELL_STREAM_WAIT" ) ? wwEnvInt( "WW_CELL_STREAM_WAIT" ) : 600000;
+	const bool shots = wwEnvInt( "WW_CELL_STREAM_SHOTS" ) != 0;
 	const CellStreamStats s0 = cellStreamStats( nullptr, true );
 	if ( dumpOk )
 		log << "stream " << ( s0.on ? "on" : "off" ) << " steps " << steps.size() << " path " << pathFile << "\n";
 	for ( int i = 0; i < steps.size(); i++ ) {
 		ogl->wwSetPathCamera( true, steps[i].eye, steps[i].at, steps[i].fov );
 		cellStreamStats( nullptr, true );
+		PassTime::stream1Hitch( nullptr, nullptr, nullptr, true );	// lane STREAM1: this step's paints only
 		const qint64 waited = wwCellStreamSettle( ogl, 10, waitMs );
 		wwCellStreamSettle( ogl, 4, waitMs );   // transforms and the far tiles' data, drawn once
 		// lane CELLSTREAM1: and long enough for the textures of the cells that left to be freed (the view's rule)
@@ -2178,7 +2183,14 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		// lane CELLSTREAM1: memory as it stands (textures the view freed included); WW_CELL_STREAM_FLUSH=1 also reads it
 		// after dropping every texture and cached mesh
 		const qint64 privLive = cellStreamPrivateBytes();
-		if ( qEnvironmentVariableIntValue( "WW_CELL_STREAM_FLUSH" ) > 0 )
+		// lane STREAM1: the step's worst paint, paints over 33.3 ms, and the memory line (before any flush)
+		double hitchMs = 0.0;
+		int hitchOver = 0, hitchFrames = 0;
+		PassTime::stream1Hitch( &hitchMs, &hitchOver, &hitchFrames, false );
+		ogl->makeCurrent();
+		const QString s1mem = PassTime::stream1MemLine( "walk" );
+		ogl->doneCurrent();
+		if ( wwEnvInt( "WW_CELL_STREAM_FLUSH" ) > 0 )
 			ogl->wwCellStreamFlush();
 		const qint64 priv = cellStreamPrivateBytes();
 		qint64 heapBusy = 0, heapHeld = 0;   // lane CELLSTREAM1: a real leak grows busy; held free pages grow held
@@ -2205,7 +2217,9 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " shapes " << s.sceneShapes << " top " << s.persistentTop
 				<< " | holes " << holes << " doubles " << doubles << " samples " << samples
 				<< " | " << cov
-				<< " | expected " << s.expected << " | loaded " << s.loaded;
+				<< " | expected " << s.expected << " | loaded " << s.loaded
+				<< " | hitchMaxMs " << QString::asprintf( "%.1f", hitchMs ) << " over33 " << hitchOver
+				<< " hitchFrames " << hitchFrames << " | " << s1mem;
 			if ( !s.lastError.isEmpty() )
 				log << " | error " << s.lastError;
 			log << "\n";
@@ -2285,7 +2299,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	auto frameName = [&fi, &frameExt]( int k ) {
 		return fi.path() + QLatin1Char( '/' ) + fi.completeBaseName() + QString::asprintf( "_%03d.", k ) + frameExt;
 	};
-	int ss = qEnvironmentVariableIntValue( "WW_RENDER_SS" );
+	int ss = wwEnvInt( "WW_RENDER_SS" );
 	if ( ss > 0 && wwGameTaaOn() ) {
 		// the supersampled grab draws into its own target at another size: the history would start again
 		if ( sideOk )
@@ -2313,18 +2327,32 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	float fov = 70.0f;
 	path.sample( 0, eye, at, fov );
 	ogl->wwSetPathCamera( true, eye, at, fov );
+	wwDoorLiveStep( ogl->getScene(), 0.0 );	// lane DOORLIVE1: the preroll sees the door at its first frame
 	for ( int k = 0; k < preroll; k++ ) {
 		wwGameTaaSetFrame( k );
 		wwCellPostSetPath( k, float( path.fps() ) );	// lane GRASSMB1: the motion blur's frame and frame time
 		pump();
 	}
+	/* lane SHADOWCACHE1: WW_RENDER_PATH_HOURSTEP=<hours a frame> moves the sun along the path too (frame k at the
+	 * pinned hour + k * step); only with WW_LOOKDEV_HOUR set, so the stepped hour is never saved */
+	const double hourStep = qEnvironmentVariable( "WW_RENDER_PATH_HOURSTEP" ).toDouble();
+	const bool stepHour = hourStep != 0.0 && qEnvironmentVariableIsSet( "WW_LOOKDEV_HOUR" );
+	const double hour0 = wwLookdevHour();
+	if ( sideOk && hourStep != 0.0 )
+		log << "hourstep " << QString::asprintf( "%.6f", hourStep ) << ( stepHour ? " on" : " refused (WW_LOOKDEV_HOUR unset)" ) << "\n";
 	for ( int k = 0; k < frames; k++ ) {
+		if ( stepHour )
+			wwLookdevSetHour( hour0 + double( k ) * hourStep );
 		path.sample( k, eye, at, fov );
 		ogl->wwSetPathCamera( true, eye, at, fov );
 		wwGameTaaSetFrame( preroll + k );
 		wwCellPostSetPath( preroll + k, float( path.fps() ) );
+		// lane DOORLIVE1: the live door at this frame's time (posed and relit before the frame draws)
+		const QString door = wwDoorLiveStep( ogl->getScene(), path.fps() > 0 ? double( k ) / double( path.fps() ) : 0.0 );
 		pump();
 		const QImage img = ss > 0 ? ogl->grabSupersampled( ss ) : ogl->grabFramebuffer();
+		if ( sideOk && !door.isEmpty() )
+			log << "frame " << k << " " << door << "\n";
 		img.save( frameName( k ) );
 		if ( sideOk )
 			log << "frame " << k << " eye " << QString::asprintf( "%.6f %.6f %.6f", eye[0], eye[1], eye[2] )
@@ -2333,7 +2361,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 				<< " | " << wwSunShadowSummary() << " | " << wwCellPostEcho() << " | " << wwCellBloomEcho() << "\n";
 	}
 	// lane PERF1: WW_RENDER_GPUMS=<frames> times that many repaints at the path's last camera (as the still shot does)
-	if ( const int gpuFrames = qEnvironmentVariableIntValue( "WW_RENDER_GPUMS" ); gpuFrames > 0 && frames > 0 ) {
+	if ( const int gpuFrames = wwEnvInt( "WW_RENDER_GPUMS" ); gpuFrames > 0 && frames > 0 ) {
 		QFile gf( out + QStringLiteral( ".gpums.txt" ) );
 		if ( gf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 			QTextStream( &gf ) << ogl->wwGpuMs( gpuFrames ) << "\n";
@@ -2342,7 +2370,7 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	wwCellPostSetPath( -1, 0.0f );
 	ogl->wwSetPathCamera( false );
 	if ( video ) {
-		QString ff = qEnvironmentVariable( "WW_FFMPEG" );
+		QString ff = wwEnvStr( "WW_FFMPEG" );
 		if ( ff.isEmpty() )
 			ff = QStringLiteral( "ffmpeg" );
 		const QString pattern = fi.path() + QLatin1Char( '/' ) + fi.completeBaseName() + QStringLiteral( "_%03d.png" );
@@ -2356,6 +2384,231 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		if ( sideOk )
 			log << "video " << out << " ffmpeg rc " << rc << "\n";
 	}
+}
+
+/* lane TESTDRIVER1 (2026-10-22): THE LIVE DRIVER. bungo 10-22: "by relaunching nifskope, you introduce a significant
+ * delay by loading everything again". One loaded scene, many rows: a step sets or unsets a WW_* switch (the store,
+ * wwswitch.h) and the stage that switch owes runs before the next picture: the shader programs reload, or the cell
+ * document re-opens in this window (the shot handler runs again: window, camera, options, the cells settled). A
+ * relaunch-stage set is refused, and the harness gives that row a launch of its own.
+ * Steps (WW_LIVE_STEPS=<file>, one a line, or "NifSkope::live <step>" on the --port):
+ *   row NAME | set NAME=VALUE | unset NAME | reset [NAME] | apply | wait FRAMES | settle | shot OUT | path FILE OUT
+ *   | gpums FRAMES OUT | status | quit   (reset: back to the launch value; no name: every switch set so far)        ("env NAME=VALUE" is HARNESSMIN1's spelling of set) */
+namespace
+{
+struct WwLiveState
+{
+	float shotT = 1.0f;
+	int owed = 0;			// 1 shaders, 2 reopen
+	QStringList owedNames;
+	bool reopening = false, reopenDone = false;
+	bool rowRefused = false;	// a set of this row was refused: its pictures are not taken
+};
+
+WwLiveState & wwLive()
+{
+	static WwLiveState l;
+	return l;
+}
+
+void wwLivePump( GLView * ogl, int frames )
+{
+	for ( int i = 0; i < frames; i++ ) {
+		ogl->update();
+		qApp->processEvents();
+	}
+}
+
+//! Runs the stages the sets since the last picture owe; the reply says what was redone
+QString wwLiveApply( NifSkope * skope )
+{
+	WwLiveState & L = wwLive();
+	if ( !L.owed )
+		return QStringLiteral( "nothing owed" );
+	QElapsedTimer t;
+	t.start();
+	const int owed = L.owed;
+	const QString names = L.owedNames.join( QLatin1Char( ',' ) );
+	L.owed = 0;
+	L.owedNames.clear();
+	QStringList did;
+	if ( owed & 1 ) {
+		skope->getGLView()->updateShaders();
+		did << QStringLiteral( "shaders" );
+	}
+	if ( owed & 2 ) {
+		// the handler's next run ends at the hook (wwLiveReopenHook) once the cells are in
+		L.reopening = true;
+		L.reopenDone = false;
+		QMetaObject::invokeMethod( skope, "reload", Qt::QueuedConnection );
+		QEventLoop loop;
+		QTimer tick;
+		QElapsedTimer w;
+		w.start();
+		QObject::connect( &tick, &QTimer::timeout, &loop, [&]() {
+			if ( L.reopenDone || w.elapsed() > 900000 )
+				loop.quit();
+		} );
+		tick.start( 20 );
+		loop.exec();
+		L.reopening = false;
+		did << ( L.reopenDone ? QStringLiteral( "reopen" ) : QStringLiteral( "reopen TIMED OUT" ) );
+	}
+	return QStringLiteral( "redone %1 for %2 in %3 ms" ).arg( did.join( QLatin1Char( '+' ) ), names ).arg( t.elapsed() );
+}
+} // namespace
+
+//! The shot handler calls this after the cells settle: true when a live reopen was waiting for it (the handler returns)
+static bool wwLiveReopenHook( float shotT )
+{
+	WwLiveState & L = wwLive();
+	L.shotT = shotT;
+	if ( !L.reopening )
+		return false;
+	L.reopenDone = true;
+	return true;
+}
+
+QString wwLiveCommand( NifSkope * skope, const QString & line )
+{
+	WwLiveState & L = wwLive();
+	const QString s = line.trimmed();
+	if ( s.isEmpty() || s.startsWith( QLatin1Char( '#' ) ) )
+		return QString();
+	const QString verb = s.section( QLatin1Char( ' ' ), 0, 0 );
+	const QString rest = s.section( QLatin1Char( ' ' ), 1 ).trimmed();
+	GLView * ogl = skope ? skope->getGLView() : nullptr;
+	if ( !ogl )
+		return QStringLiteral( "refused no view" );
+	if ( verb == QLatin1StringView( "row" ) ) {
+		L.rowRefused = false;
+		return QStringLiteral( "row %1" ).arg( rest );
+	}
+	if ( verb == QLatin1StringView( "set" ) || verb == QLatin1StringView( "env" ) || verb == QLatin1StringView( "unset" ) ) {
+		const bool unset = verb == QLatin1StringView( "unset" );
+		const int eq = rest.indexOf( QLatin1Char( '=' ) );
+		const QByteArray name = ( unset || eq < 0 ? rest : rest.left( eq ) ).trimmed().toLatin1();
+		if ( !name.startsWith( "WW_" ) || ( !unset && eq < 0 ) )
+			return QStringLiteral( "refused bad step: %1" ).arg( s );
+		const QByteArray value = unset ? QByteArray() : rest.mid( eq + 1 ).toLocal8Bit();
+		WwSwitchStage stage = WwSwitchStage::Live;
+		const QString r = wwSwitchSet( name, value, unset, &stage );
+		if ( r.startsWith( QLatin1StringView( "refused" ) ) ) {
+			L.rowRefused = true;
+			return r;
+		}
+		if ( r.startsWith( QLatin1StringView( "ok" ) ) && ( stage == WwSwitchStage::Shaders || stage == WwSwitchStage::Reopen ) ) {
+			L.owed |= stage == WwSwitchStage::Shaders ? 1 : 2;
+			L.owedNames << QString::fromLatin1( name );
+		}
+		return r;
+	}
+	if ( verb == QLatin1StringView( "reset" ) ) {
+		QList<std::pair<QByteArray, WwSwitchStage>> moved;
+		const QString r = wwSwitchReset( rest.toLatin1(), &moved );
+		for ( const auto & m : moved )
+			if ( m.second == WwSwitchStage::Shaders || m.second == WwSwitchStage::Reopen ) {
+				L.owed |= m.second == WwSwitchStage::Shaders ? 1 : 2;
+				L.owedNames << QString::fromLatin1( m.first );
+			}
+		return r;
+	}
+	if ( verb == QLatin1StringView( "status" ) )
+		return QStringLiteral( "gen %1 owed %2 %3" ).arg( wwSwitchGen() ).arg( L.owed ).arg( L.owedNames.join( QLatin1Char( ',' ) ) );
+	if ( verb == QLatin1StringView( "quit" ) ) {
+		QTimer::singleShot( 0, qApp, &QApplication::quit );
+		return QStringLiteral( "quit" );
+	}
+	if ( L.rowRefused && verb != QLatin1StringView( "apply" ) )
+		return QStringLiteral( "skipped (a set of this row was refused: relaunch)" );
+	const QString applied = wwLiveApply( skope );
+	if ( verb == QLatin1StringView( "apply" ) )
+		return applied;
+	QElapsedTimer t;
+	t.start();
+	if ( verb == QLatin1StringView( "wait" ) ) {
+		wwLivePump( ogl, std::max( 1, rest.toInt() ) );
+		return QStringLiteral( "%1; waited %2 frames" ).arg( applied, rest );
+	}
+	if ( verb == QLatin1StringView( "settle" ) ) {
+		const qint64 ms = cellStreamBusy( nullptr ) ? wwCellStreamSettle( ogl, 16, 600000 ) : 0;
+		return QStringLiteral( "%1; settled in %2 ms" ).arg( applied ).arg( ms );
+	}
+	if ( verb == QLatin1StringView( "shot" ) ) {
+		ogl->setSceneTime( L.shotT );
+		wwLivePump( ogl, 2 );
+		const int renderSS = wwEnvInt( "WW_RENDER_SS" );
+		const QImage img = renderSS > 0 ? ogl->grabSupersampled( renderSS ) : ogl->grabFramebuffer();
+		const bool ok = img.save( rest );
+		return QStringLiteral( "%1; shot %2 %3" ).arg( applied, rest, ok ? QStringLiteral( "saved" ) : QStringLiteral( "NOT SAVED" ) );
+	}
+	if ( verb == QLatin1StringView( "path" ) ) {
+		const QString file = rest.section( QLatin1Char( ' ' ), 0, 0 ), out = rest.section( QLatin1Char( ' ' ), 1 ).trimmed();
+		if ( file.isEmpty() || out.isEmpty() )
+			return QStringLiteral( "refused bad step: %1" ).arg( s );
+		wwRenderPathRun( ogl, file, out, L.shotT );
+		return QStringLiteral( "%1; path %2 -> %3 in %4 ms" ).arg( applied, file, out ).arg( t.elapsed() );
+	}
+	if ( verb == QLatin1StringView( "gpums" ) ) {
+		const int frames = rest.section( QLatin1Char( ' ' ), 0, 0 ).toInt();
+		const QString out = rest.section( QLatin1Char( ' ' ), 1 ).trimmed();
+		if ( frames < 1 || out.isEmpty() )
+			return QStringLiteral( "refused bad step: %1" ).arg( s );
+		QFile gf( out );
+		if ( !gf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+			return QStringLiteral( "refused cannot write %1" ).arg( out );
+		QTextStream( &gf ) << ogl->wwGpuMs( frames ) << "\n";
+		return QStringLiteral( "%1; gpums %2 frames -> %3" ).arg( applied ).arg( frames ).arg( out );
+	}
+	return QStringLiteral( "refused unknown verb: %1" ).arg( verb );
+}
+
+/* WW_LIVE_STEPS=<file>: every step in order; <file>.log gets "<ms since start>\t<step ms>\t<step>\t<reply>" and
+ * a "row NAME ms N" line when a row ends (the next row, or the end) */
+static void wwLiveStepsRun( NifSkope * skope, const QString & stepsFile )
+{
+	QFile in( stepsFile );
+	QFile logf( stepsFile + QStringLiteral( ".log" ) );
+	const bool logOk = logf.open( QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate );
+	QTextStream log( &logf );
+	if ( !in.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
+		if ( logOk )
+			log << "refused cannot read " << stepsFile << "\n";
+		return;
+	}
+	const QStringList lines = QString::fromUtf8( in.readAll() ).split( QLatin1Char( '\n' ) );
+	QElapsedTimer all, row;
+	all.start();
+	QString rowName;
+	auto endRow = [&]() {
+		if ( !rowName.isEmpty() && logOk ) {
+			log << "row " << rowName << " ms " << row.elapsed() << "\n";
+			log.flush();
+		}
+	};
+	for ( const QString & raw : lines ) {
+		const QString step = raw.trimmed();
+		if ( step.isEmpty() || step.startsWith( QLatin1Char( '#' ) ) )
+			continue;
+		if ( step.startsWith( QLatin1StringView( "row " ) ) ) {
+			endRow();
+			rowName = step.mid( 4 ).trimmed();
+			row.start();
+		}
+		QElapsedTimer t;
+		t.start();
+		const QString reply = wwLiveCommand( skope, step );
+		fprintf( stderr, "live: %s -> %s\n", qPrintable( step ), qPrintable( reply ) );
+		if ( logOk ) {
+			log << all.elapsed() << "\t" << t.elapsed() << "\t" << step << "\t" << reply << "\n";
+			log.flush();
+		}
+		if ( step == QLatin1StringView( "quit" ) )
+			break;
+	}
+	endRow();
+	if ( logOk )
+		log << "end ms " << all.elapsed() << "\n";
 }
 
 /* CARDBAKE2 step 1: ONE PROCESS FOR EVERY BASE (WW_IMPOSTOR_BATCH=<cands list>). Archives, the resource stack,
@@ -2382,7 +2635,7 @@ static WwCardBatch & wwCardBatch()
 }
 bool wwCardBatchOn()
 {
-	return qEnvironmentVariableIsSet( "WW_IMPOSTOR_BATCH" );
+	return wwEnvIsSet( "WW_IMPOSTOR_BATCH" );
 }
 static void wwCardBatchSay( const QString & line )
 {
@@ -2466,9 +2719,9 @@ static void wwCardBatchNext()
 bool wwCardBatchStart()
 {
 	WwCardBatch & b = wwCardBatch();
-	QFile lf( qEnvironmentVariable( "WW_IMPOSTOR_BATCH" ) );
-	b.out = QDir::fromNativeSeparators( qEnvironmentVariable( "WW_IMPOSTOR_BATCH_OUT" ) );
-	b.work = QDir::fromNativeSeparators( qEnvironmentVariable( "WW_IMPOSTOR_BATCH_WORK" ) );
+	QFile lf( wwEnvStr( "WW_IMPOSTOR_BATCH" ) );
+	b.out = QDir::fromNativeSeparators( wwEnvStr( "WW_IMPOSTOR_BATCH_OUT" ) );
+	b.work = QDir::fromNativeSeparators( wwEnvStr( "WW_IMPOSTOR_BATCH_WORK" ) );
 	if ( b.out.isEmpty() || b.work.isEmpty() || !lf.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
 		fprintf( stderr, "WW_IMPOSTOR_BATCH needs a readable list, WW_IMPOSTOR_BATCH_OUT and WW_IMPOSTOR_BATCH_WORK\n" );
 		return false;
@@ -2476,8 +2729,8 @@ bool wwCardBatchStart()
 	b.lines = QString::fromUtf8( lf.readAll() ).split( QChar( '\n' ), Qt::SkipEmptyParts );
 	QDir().mkpath( b.out );
 	QDir().mkpath( b.work );
-	b.dataRoot = QDir::fromNativeSeparators( qEnvironmentVariable( "WW_IMPOSTOR_BATCH_DATAROOT" ) );
-	b.extract = qEnvironmentVariableIntValue( "WW_IMPOSTOR_BATCH_EXTRACT" ) == 1;
+	b.dataRoot = QDir::fromNativeSeparators( wwEnvStr( "WW_IMPOSTOR_BATCH_DATAROOT" ) );
+	b.extract = wwEnvInt( "WW_IMPOSTOR_BATCH_EXTRACT" ) == 1;
 	b.style = QApplication::style()->name();
 	b.sheet = qApp->styleSheet();
 	b.palette = QApplication::palette();
@@ -2600,7 +2853,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		 */
 		const bool headlessRun = NifSkope::wwHeadlessRun();
 		const bool headlessHidden = headlessRun
-			&& qEnvironmentVariableIntValue( "WW_WINDOW_VISIBLE" ) != 1;
+			&& wwEnvInt( "WW_WINDOW_VISIBLE" ) != 1;
 
 		if ( headlessRun ) {
 			/* AGAIN, because restoreUi() above just overwrote both: its
@@ -2631,7 +2884,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			 *
 			 * Interactive only now: every WW_* run is placed by the branch above.
 			 */
-			const QString at = qEnvironmentVariable( "WW_WINDOW_AT" );
+			const QString at = wwEnvStr( "WW_WINDOW_AT" );
 			const QStringList xy = at.split( QLatin1Char( ',' ) );
 			if ( xy.size() == 2 ) {
 				skope->move( xy.at( 0 ).toInt(), xy.at( 1 ).toInt() );
@@ -2669,7 +2922,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// bug is fixed): after the file loads, grow "Vertex Data" on the first
 	// skinned BSTriShape by one row, probe the new row's structure/conditions,
 	// dump to ww_extrude_test.log next to the exe, then quit.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_EXTRUDE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_EXTRUDE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QFile logf( QApplication::applicationDirPath() + "/ww_extrude_test.log" );
 			if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
@@ -2939,7 +3192,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *
 	 * Writes ww_facebones_test.log next to the exe and quits.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_FACEBONES_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_FACEBONES_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 500, skope, [skope, ok, fname]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_facebones_test.log" );
@@ -3074,7 +3327,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				};
 
 				const QString outPath = QString::fromLocal8Bit(
-					qgetenv( "WW_TEST_FACEBONES_OUT" ) );
+					wwEnv( "WW_TEST_FACEBONES_OUT" ) );
 				do {
 					if ( !ok || !nif ) { check( "the source file loaded", false ); break; }
 					if ( outPath.isEmpty() ) {
@@ -3102,7 +3355,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< nif->get<QString>( pShape, "Name" ) << "', "
 						<< nif->rowCount( nif->getIndex( pShape, "Vertex Data" ) ) << " verts, "
 						<< boneNames( nif, pShape ).size() << " bones\n";
-					log << "donor:  " << QString::fromLocal8Bit( qgetenv( "WW_TEST_DONOR" ) ) << "\n";
+					log << "donor:  " << QString::fromLocal8Bit( wwEnv( "WW_TEST_DONOR" ) ) << "\n";
 					log << "out:    " << outPath << "\n\n";
 					log.flush();
 
@@ -3370,7 +3623,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * nothing about the append-only pipeline.
 					 */
 					NifModel don;
-					const QString donorPath = QString::fromLocal8Bit( qgetenv( "WW_TEST_DONOR" ) );
+					const QString donorPath = QString::fromLocal8Bit( wwEnv( "WW_TEST_DONOR" ) );
 					if ( don.loadFromFile( donorPath ) ) {
 						QModelIndex dShape;
 						QByteArray dRemap;
@@ -3509,7 +3762,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// <input>_transferred.nif. WW_TEST_PICKNODE=<substring> picks a
 	// non-default bind node (the mesh must not move for ANY choice). Dumps
 	// ww_createskin_test.log next to the exe and quits.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_CREATESKIN_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_CREATESKIN_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 500, skope, [skope, ok, fname]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_createskin_test.log" );
@@ -3524,7 +3777,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( !w || qobject_cast<QProgressDialog *>( w ) )
 						return;
 					if ( auto * in = qobject_cast<QInputDialog *>( w ) ) {
-						const QByteArray pick = qgetenv( "WW_TEST_PICKNODE" );
+						const QByteArray pick = wwEnv( "WW_TEST_PICKNODE" );
 						auto * combo = in->findChild<QComboBox *>();
 						if ( stage == 1 && combo && !pick.isEmpty() ) {
 							for ( int i = 0; i < combo->count(); i++ ) {
@@ -3616,7 +3869,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< ": " << outSkinned << "\n";
 					log.flush();
 
-					if ( !qEnvironmentVariableIsSet( "WW_TEST_DONOR" ) )
+					if ( !wwEnvIsSet( "WW_TEST_DONOR" ) )
 						break;
 					stage = 2;
 					skope->castSpell( QLatin1String( "Rigging/Transfer Bones and Weights..." ), pShape );
@@ -3641,7 +3894,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// TEST HARNESS (WW_ISOLATE_TEST=1): drive the visibility menu's isolate /
 	// restore paths headlessly and verify BOTH the state (hiddenNodes,
 	// per-shape isHidden) and the pixels (framebuffer diff) actually change.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_ISOLATE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_ISOLATE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_isolate_test.log" );
@@ -3710,7 +3963,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// the over-cap new-shape path, confirm auto-answered Yes), times
 	// duplicateElements(); =2 times object-mode duplicateSelection(). Logs
 	// block-count delta + elapsed to ww_dupfreeze_test.log, quits.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DUPFREEZE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_DUPFREEZE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_dupfreeze_test.log" );
@@ -3752,7 +4005,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// WW_DUPFREEZE_TEST=2 → object-mode duplicate (same clone,
 					// no edit overlay) to isolate whether the clone or the
 					// edit-mode machinery is the freeze
-					if ( qgetenv( "WW_DUPFREEZE_TEST" ) == "2" ) {
+					if ( wwEnv( "WW_DUPFREEZE_TEST" ) == "2" ) {
 						const int before = nif->getBlockCount();
 						log << "object mode; blocks before " << before << "\n";
 						log.flush();
@@ -3783,8 +4036,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							<< nif->get<QString>( nif->getBlockIndex( newBlk ), "Name" ) << "' verts "
 							<< nif->get<int>( nif->getBlockIndex( newBlk ), "Num Vertices" ) << " tris "
 							<< nif->get<int>( nif->getBlockIndex( newBlk ), "Num Triangles" ) << "\n";
-					if ( qEnvironmentVariableIsSet( "WW_TEST_SAVE" ) ) {
-						QString out = qEnvironmentVariable( "WW_TEST_SAVE" );
+					if ( wwEnvIsSet( "WW_TEST_SAVE" ) ) {
+						QString out = wwEnvStr( "WW_TEST_SAVE" );
 						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
 					}
 				} while ( false );
@@ -3801,7 +4054,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// one whole NiNode branch, runs deleteBlocks with the confirm
 	// auto-clicked, verifies the branch closure was removed and no dangling -1
 	// child link remains, saves (WW_TEST_SAVE) and quits.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DELETE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_DELETE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 600, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_delete_test.log" );
@@ -3879,8 +4132,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "dangling -1 child links after delete: " << dangling
 						<< ( ( before - after == expectRemoved.size() && dangling == 0 )
 							? "  PASS\n" : "  CHECK\n" );
-					if ( qEnvironmentVariableIsSet( "WW_TEST_SAVE" ) ) {
-						QString out = qEnvironmentVariable( "WW_TEST_SAVE" );
+					if ( wwEnvIsSet( "WW_TEST_SAVE" ) ) {
+						QString out = wwEnvStr( "WW_TEST_SAVE" );
 						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
 					}
 				} while ( false );
@@ -3909,7 +4162,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	//   - no pasted block has a child link pointing back into the original
 	//     blocks (internal links were remapped, not left dangling).
 	// Saves (WW_TEST_SAVE) and quits. Log: release/ww_copypaste_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COPYPASTE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_COPYPASTE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 600, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_copypaste_test.log" );
@@ -4033,8 +4286,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						&& backLinks == 0;
 					log << ( pass ? "PASS\n" : "CHECK: one or more invariants failed\n" );
 
-					if ( qEnvironmentVariableIsSet( "WW_TEST_SAVE" ) ) {
-						QString out = qEnvironmentVariable( "WW_TEST_SAVE" );
+					if ( wwEnvIsSet( "WW_TEST_SAVE" ) ) {
+						QString out = wwEnvStr( "WW_TEST_SAVE" );
 						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
 					}
 				} while ( false );
@@ -4056,7 +4309,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	//     not left pointing into a source's old shorter list),
 	//   - segments cover [0, Num Triangles) with Sum(Num Primitives) == tris.
 	// Saves (WW_TEST_SAVE) and quits. Log: release/ww_join_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_JOIN_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_JOIN_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_join_test.log" );
@@ -4075,7 +4328,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				auto flagsOf = [nif]( int b ) {
 					return quint16( ( nif->get<BSVertexDesc>( nif->getBlockIndex( b ), "Vertex Desc" ).Value() >> 44 ) & 0xFFFF );
 				};
-				const int mode = QString::fromLocal8Bit( qgetenv( "WW_JOIN_TEST" ) ).toInt();
+				const int mode = QString::fromLocal8Bit( wwEnv( "WW_JOIN_TEST" ) ).toInt();
 				const quint16 fillable = quint16( VF_COLORS | VF_SKINNED | VF_EYEDATA );
 				do {
 					if ( !ok || !nif ) { log << "load failed\n"; break; }
@@ -4240,8 +4493,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						&& segDataOk && sumPrim == gotT && contiguous && colorOk;
 					log << ( pass ? "PASS\n" : "CHECK: one or more invariants failed\n" );
 
-					if ( qEnvironmentVariableIsSet( "WW_TEST_SAVE" ) ) {
-						QString out = qEnvironmentVariable( "WW_TEST_SAVE" );
+					if ( wwEnvIsSet( "WW_TEST_SAVE" ) ) {
+						QString out = wwEnvStr( "WW_TEST_SAVE" );
 						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
 					}
 				} while ( false );
@@ -4276,7 +4529,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// each appear TWICE in BSVertexData (Vector3/float vs HalfVector3/hfloat),
 	// so a by-name lookup cannot tell the variants apart.
 	// Log: release/ww_vertexflags_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_VERTEXFLAGS_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_VERTEXFLAGS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_vertexflags_test.log" );
@@ -4284,7 +4537,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					return;
 				QTextStream log( &logf );
 				NifModel * nif = skope->getNifModel();
-				const int mode = QString::fromLocal8Bit( qgetenv( "WW_VERTEXFLAGS_TEST" ) ).toInt();
+				const int mode = QString::fromLocal8Bit( wwEnv( "WW_VERTEXFLAGS_TEST" ) ).toInt();
 				const bool fullPrec = ( mode == 2 );
 				// checkbox order matches spEditVertexDesc's flagNames list
 				const int chkIndex = fullPrec ? 10 : 5;
@@ -4423,8 +4676,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << ( pass ? "in-model: PASS\n"
 						: "in-model: FAIL — desc, row layout or vertex values diverged\n" );
 
-					if ( qEnvironmentVariableIsSet( "WW_TEST_SAVE" ) ) {
-						QString out = qEnvironmentVariable( "WW_TEST_SAVE" );
+					if ( wwEnvIsSet( "WW_TEST_SAVE" ) ) {
+						QString out = wwEnvStr( "WW_TEST_SAVE" );
 						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
 					}
 				} while ( false );
@@ -4461,7 +4714,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// sequence appeared, then drives Apply and confirms it ran. UI over the API
 	// that WW_POSE_TEST / the CLI already prove numerically.
 	// Log: release/ww_posedock_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSEDOCK_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSEDOCK_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1000, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_posedock_test.log" );
@@ -4557,7 +4810,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// tree populates, that each filter narrows the way its tooltip claims, and that
 	// search filters. Read-only, so it cannot damage the file it opens.
 	// Log: release/ww_skeleton_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SKELETON_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SKELETON_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_skeleton_test.log" );
@@ -4661,10 +4914,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// view back off. WW_SKELETON_SHOT=<png> grabs the viewport with the
 					// dock up, so the octahedral bones, the names and the relationship
 					// lines can actually be looked at rather than assumed.
-					const QString shot = qEnvironmentVariable( "WW_SKELETON_SHOT" );
+					const QString shot = wwEnvStr( "WW_SKELETON_SHOT" );
 					if ( !shot.isEmpty() && skope->ogl ) {
 						skope->ogl->setSkeletonView( true );
-						int viewIdx = qEnvironmentVariableIntValue( "WW_SKELETON_VIEW" );
+						int viewIdx = wwEnvInt( "WW_SKELETON_VIEW" );
 						if ( viewIdx <= 0 || viewIdx > int( GLView::ViewWalk ) )
 							viewIdx = int( GLView::ViewFront );
 						skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
@@ -4707,7 +4960,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// checks the bone list built, and confirms poseBoneAt() resolves a bone at
 	// a drawn bone's screen position.
 	// Log: release/ww_posedraw_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSEDRAW_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSEDRAW_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_posedraw_test.log" );
@@ -4893,7 +5146,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// enable proportional editing, begin a move, confirm neighbours were gathered
 	// with a distance-decreasing falloff.
 	// Log: release/ww_poseextras_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSEEXTRAS_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSEEXTRAS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1000, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_poseextras_test.log" );
@@ -4962,7 +5215,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// returns to the posed orientation — proving export/import are exact
 	// inverses. Also parse-imports a real PA pose file if WW_OSPOSE_FILE is set.
 	// Log: release/ww_ospose_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_OSPOSE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_OSPOSE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1000, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_ospose_test.log" );
@@ -5016,7 +5269,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						fails << "OS pose export->import did not reproduce the bone rotation";
 
 					// optional: parse a real PA pose file, count matched bones
-					const QByteArray real = qgetenv( "WW_OSPOSE_FILE" );
+					const QByteArray real = wwEnv( "WW_OSPOSE_FILE" );
 					if ( !real.isEmpty() ) {
 						int applied = skope->ogl->poseImportOutfitStudio(
 							QString::fromLocal8Bit( real ), 1.0f, &err );
@@ -5077,7 +5330,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *            against an independent accumulation and photographed.
 	 * Log: release/ww_sampose_test.log.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SAMPOSE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SAMPOSE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 1000, skope, [skope, ok, fname]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_sampose_test.log" );
@@ -5086,7 +5339,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				QTextStream log( &logf );
 				NifModel * nif = skope->getNifModel();
 				QStringList fails;
-				const QString mode = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_MODE" ) );
+				const QString mode = QString::fromLocal8Bit( wwEnv( "WW_SAMPOSE_MODE" ) );
 				log << "mode: " << ( mode.isEmpty() ? QStringLiteral( "convention" ) : mode ) << "\n";
 				do {
 					if ( !ok || !nif ) { fails << "load failed"; break; }
@@ -5160,7 +5413,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * pass, because a pixel delta cannot tell a pose from a crumple.
 					 */
 					if ( mode == QLatin1String( "refuse" ) ) {
-						const QString real = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_FILE" ) );
+						const QString real = QString::fromLocal8Bit( wwEnv( "WW_SAMPOSE_FILE" ) );
 						if ( real.isEmpty() || !QFile::exists( real ) ) {
 							fails << "the refusal phase needs a real pose in WW_SAMPOSE_FILE";
 							break;
@@ -5240,8 +5493,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * node list misses this by whole limb lengths.
 					 */
 					if ( mode == QLatin1String( "merge" ) ) {
-						const QString real = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_FILE" ) );
-						const QString frame = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_FRAME" ) );
+						const QString real = QString::fromLocal8Bit( wwEnv( "WW_SAMPOSE_FILE" ) );
+						const QString frame = QString::fromLocal8Bit( wwEnv( "WW_SAMPOSE_FRAME" ) );
 						if ( real.isEmpty() || !QFile::exists( real ) ) {
 							fails << "the merge phase needs a real pose in WW_SAMPOSE_FILE";
 							break;
@@ -5539,7 +5792,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * WHAT IS MEASURED. Not the pixels. Distances and a scale, all read
 						 * off world transforms walked up the Parent links.
 						 */
-						const QString weaponList = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_WEAPON" ) );
+						const QString weaponList = QString::fromLocal8Bit( wwEnv( "WW_SAMPOSE_WEAPON" ) );
 						QStringList parts;
 						for ( const QString & p : weaponList.split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) ) {
 							const QString t = p.trimmed();
@@ -5917,7 +6170,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					qApp->processEvents();
 
 					// optional: a real SAM pose from the corpus
-					const QString real = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_FILE" ) );
+					const QString real = QString::fromLocal8Bit( wwEnv( "WW_SAMPOSE_FILE" ) );
 					if ( real.isEmpty() || !QFile::exists( real ) ) {
 						log << "no real SAM pose (WW_SAMPOSE_FILE) — skipped\n";
 						break;
@@ -5954,7 +6207,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									shotDelta++;
 					}
 					log << "framebuffer pixels changed by the real pose: " << shotDelta << "\n";
-					if ( qEnvironmentVariableIsSet( "WW_SAMPOSE_SHOT" ) && shotDelta <= 0 )
+					if ( wwEnvIsSet( "WW_SAMPOSE_SHOT" ) && shotDelta <= 0 )
 						fails << "real pose changed no pixels on a geometry fixture";
 					const QModelIndex iBA = blockFor( QStringLiteral( "Back_Armor" ) );
 					if ( !iBA.isValid() ) {
@@ -6012,7 +6265,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// apply path is wired, not just the underlying OS import/export. Finally
 	// clicks Delete (auto-answering the confirm) and checks the file is gone.
 	// Log: release/ww_poselib_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSELIB_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSELIB_TEST" ) ) {
 		// A persistent modal answerer: Delete pops a Yes/No confirm and any error
 		// pops a warning; keep one running so a click that spins a nested event
 		// loop never hangs the harness. Prefers Yes, then Ok/Discard/No/first.
@@ -6199,7 +6452,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// Manager dock and checks its folder label updates to the same folder,
 	// proving the settings tab and the dock's Folder... button share one key.
 	// Log: release/ww_posesettings_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSESETTINGS_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSESETTINGS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_posesettings_test.log" );
@@ -6285,7 +6538,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// exactly the key the bake reads (lodgenGpuSettingEnabled), and round-trip
 	// on -> off. Pictures of the NIF tab in both states beside the exe.
 	// Log: <exe dir>/ww_usegpu_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_USEGPU_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_USEGPU_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				const QString dir = QApplication::applicationDirPath();
@@ -6366,7 +6619,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// (a timer rejects whatever modal it shows). The archive EXTRACTION itself is
 	// the NIF Browser's own proven path (extractConfiguredNifBytes), and needs
 	// configured game archives to exercise for real. Log: ww_mergearch_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_MERGEARCH_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_MERGEARCH_TEST" ) ) {
 		// auto-answer any modal the picker raises (its QDialog, or a "no archives"
 		// info box), and decline the save-on-quit prompt so nothing hangs
 		QTimer * mergeArchModal = new QTimer( skope );
@@ -6464,7 +6717,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	//      overwrite. Proven by rotating three separate bones and watching the
 	//      skinned bounds keep changing.
 	// Log: release/ww_posehier_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSEHIER_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSEHIER_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_posehier_test.log" );
@@ -6607,7 +6860,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// Restores the bone afterwards and re-checks, so a false positive from some
 	// unrelated per-frame jitter is caught.
 	// Log: release/ww_pose_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_POSE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_pose_test.log" );
@@ -6786,7 +7039,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// column's display text, that the ★ pinned-only filter hides exactly the
 	// unpinned rows, and that unpinning undoes all of it.
 	// Log: release/ww_pinned_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_PINNED_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_PINNED_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_pinned_test.log" );
@@ -6934,7 +7187,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * (does the ghost actually render translucent?).
 	 * Log: release/ww_workspace_test.log, ww_workspace_list.png / _view.png.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_WORKSPACE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_WORKSPACE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_workspace_test.log" );
@@ -6957,7 +7210,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				do {
 					if ( !ok ) { log << "load failed\n"; break; }
 					const QStringList files =
-						qEnvironmentVariable( "WW_WORKSPACE_TEST" ).split( QLatin1Char( ';' ),
+						wwEnvStr( "WW_WORKSPACE_TEST" ).split( QLatin1Char( ';' ),
 							Qt::SkipEmptyParts );
 					int added = 0;
 					for ( const QString & f : files )
@@ -6985,7 +7238,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// WW_WORKSPACE_MODES=1;2 sets each document's mode explicitly
 					// (0 hidden, 1 solid, 2 ghost); default is first solid, rest ghost
 					const QStringList modes =
-						qEnvironmentVariable( "WW_WORKSPACE_MODES" ).split( QLatin1Char( ';' ),
+						wwEnvStr( "WW_WORKSPACE_MODES" ).split( QLatin1Char( ';' ),
 							Qt::SkipEmptyParts );
 					for ( int i = 0; i < added; i++ ) {
 						const int m = ( i < modes.size() ) ? modes.at( i ).toInt()
@@ -7083,7 +7336,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * It ends in a modal summary, so a driver dismisses it; that also
 					 * means the real code path runs, dialog included.
 					 */
-					if ( added >= 2 && qEnvironmentVariableIsSet( "WW_WORKSPACE_MERGE" ) ) {
+					if ( added >= 2 && wwEnvIsSet( "WW_WORKSPACE_MERGE" ) ) {
 						auto * dismiss = new QTimer( skope );
 						QObject::connect( dismiss, &QTimer::timeout, skope, []() {
 							if ( auto * mb = qobject_cast<QMessageBox *>(
@@ -7110,7 +7363,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							return restored;
 						};
 
-						if ( qEnvironmentVariableIsSet( "WW_WORKSPACE_SKELETON_CONTRACT" ) ) {
+						if ( wwEnvIsSet( "WW_WORKSPACE_SKELETON_CONTRACT" ) ) {
 							check( "the skeleton contract fixture has two clothes and one skeleton",
 								added >= 3 );
 							if ( added >= 3 ) {
@@ -7237,7 +7490,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * nifSnapshotOp), and a direct set<> (which does not).
 	 * Log: release/ww_revert_test.log.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_REVERT_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_REVERT_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 900, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_revert_test.log" );
@@ -7273,7 +7526,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the primary document has an undo stack", nif->undoStack != nullptr );
 
 					// --- path 1: a pose import, the operation this workflow is for
-					const QString donor = qEnvironmentVariable( "WW_REVERT_TEST" );
+					const QString donor = wwEnvStr( "WW_REVERT_TEST" );
 					if ( QFileInfo::exists( donor ) && donor.endsWith( QStringLiteral( ".xml" ) ) ) {
 						QString err;
 						const int n = skope->ogl->poseImportOutfitStudio( donor, 1.0f, &err );
@@ -7346,11 +7599,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * while someone else is using the machine. WW_SHOT_VIEW=front|left|top picks
 	 * the camera; the default is whatever the file opens with.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SHOT" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SHOT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				if ( ok ) {
-					const QString view = qEnvironmentVariable( "WW_SHOT_VIEW" );
+					const QString view = wwEnvStr( "WW_SHOT_VIEW" );
 					if ( view == QLatin1String( "front" ) )
 						skope->ui->aViewFront->trigger();
 					else if ( view == QLatin1String( "left" ) )
@@ -7368,8 +7621,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * integrate frame to frame and cannot be evaluated at an
 					 * arbitrary t the way a keyframe controller can.
 					 */
-					if ( qEnvironmentVariableIsSet( "WW_SHOT_TIME" ) ) {
-						const float want = qEnvironmentVariable( "WW_SHOT_TIME" ).toFloat();
+					if ( wwEnvIsSet( "WW_SHOT_TIME" ) ) {
+						const float want = wwEnvStr( "WW_SHOT_TIME" ).toFloat();
 						const float step = 1.0f / 30.0f;
 						for ( float t = 0.0f; t < want; t += step ) {
 							skope->ogl->setSceneTime( std::min( t + step, want ) );
@@ -7379,7 +7632,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QTimer::singleShot( 300, &settle, &QEventLoop::quit );
 						settle.exec();
 					}
-					skope->ogl->grabFramebuffer().save( qEnvironmentVariable( "WW_SHOT" ) );
+					skope->ogl->grabFramebuffer().save( wwEnvStr( "WW_SHOT" ) );
 				}
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );
@@ -7397,7 +7650,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * bake reproduces it" are different claims, and this checks the second.
 	 * Log: release/ww_boltbake_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_BOLTBAKE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_BOLTBAKE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_boltbake_test.log" );
@@ -7421,8 +7674,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 					// Stepped, not jumped: particle systems integrate frame to frame,
 					// so the scene has to be walked to the instant.
-					const float want = qEnvironmentVariableIsSet( "WW_BOLTBAKE_TIME" )
-						? qEnvironmentVariable( "WW_BOLTBAKE_TIME" ).toFloat() : 2.5f;
+					const float want = wwEnvIsSet( "WW_BOLTBAKE_TIME" )
+						? wwEnvStr( "WW_BOLTBAKE_TIME" ).toFloat() : 2.5f;
 					for ( float t = 0.0f; t < want; t += 1.0f / 30.0f ) {
 						skope->ogl->setSceneTime( std::min( t + 1.0f / 30.0f, want ) );
 						QApplication::processEvents();
@@ -7504,7 +7757,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * is the only claim that matters — "the effect is where it looked".
 	 * Log: release/ww_effectbake_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_EFFECTBAKE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_EFFECTBAKE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_effectbake_test.log" );
@@ -7530,8 +7783,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->ogl->setAnimationEnabled( true );
 					QApplication::processEvents();
 
-					const float want = qEnvironmentVariableIsSet( "WW_EFFECTBAKE_TIME" )
-						? qEnvironmentVariable( "WW_EFFECTBAKE_TIME" ).toFloat() : 2.5f;
+					const float want = wwEnvIsSet( "WW_EFFECTBAKE_TIME" )
+						? wwEnvStr( "WW_EFFECTBAKE_TIME" ).toFloat() : 2.5f;
 					// Stepped, not jumped: sprite positions integrate frame to frame.
 					for ( float t = 0.0f; t < want; t += 1.0f / 30.0f ) {
 						skope->ogl->setSceneTime( std::min( t + 1.0f / 30.0f, want ) );
@@ -7589,7 +7842,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "no emitter blocks remain", leftover == 0 );
 
 					// --- the round trip ---------------------------------------
-					const QString out = qEnvironmentVariable( "WW_EFFECTBAKE_TEST" );
+					const QString out = wwEnvStr( "WW_EFFECTBAKE_TEST" );
 					check( "the model saved", nif->saveToFile( out ) );
 
 					NifModel back;
@@ -7707,7 +7960,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * only from the angles you did not check.
 	 * Log: release/ww_normals_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_NORMALS_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_NORMALS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_normals_test.log" );
@@ -7937,12 +8190,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * and nothing at all if the button is not found — which is itself the failure
 	 * this is here to catch.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SHOT_UI" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SHOT_UI" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope]() {
-				const QString out = qEnvironmentVariable( "WW_SHOT_UI" );
-				const QString btnName = qEnvironmentVariableIsSet( "WW_SHOT_UI_BTN" )
-					? qEnvironmentVariable( "WW_SHOT_UI_BTN" )
+				const QString out = wwEnvStr( "WW_SHOT_UI" );
+				const QString btnName = wwEnvIsSet( "WW_SHOT_UI_BTN" )
+					? wwEnvStr( "WW_SHOT_UI_BTN" )
 					: QStringLiteral( "ViewAnimationButton" );
 
 				if ( QToolBar * tb = skope->findChild<QToolBar *>( QStringLiteral( "tView" ) ) )
@@ -8001,10 +8254,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * view never shows. So: pick a side, step the animation to an instant, paint,
 	 * save. Sized from WW_SHOT_SIZE=<w>x<h> so the image is worth looking at.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SHOT_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SHOT_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
-				const QString out = qEnvironmentVariable( "WW_SHOT_TEST" );
+				const QString out = wwEnvStr( "WW_SHOT_TEST" );
 				if ( ok ) {
 					skope->ogl->setAnimationEnabled( true );
 					QApplication::processEvents();
@@ -8014,7 +8267,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// walks the animation on past the instant that was asked for, and
 					// the first version of this harness saved a frame with no arcs in
 					// it at all.
-					const QString v = qEnvironmentVariable( "WW_SHOT_VIEW" ).toLower();
+					const QString v = wwEnvStr( "WW_SHOT_VIEW" ).toLower();
 					GLView::ViewState vs = GLView::ViewFront;
 					if ( v == QLatin1String( "back" ) )       vs = GLView::ViewBack;
 					else if ( v == QLatin1String( "left" ) )  vs = GLView::ViewLeft;
@@ -8030,19 +8283,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * same geometry can therefore disagree about whether anything is
 					 * there. WW_SHOT_AT=x,y,z centres, WW_SHOT_DIST=<units> zooms.
 					 */
-					if ( qEnvironmentVariableIsSet( "WW_SHOT_AT" ) ) {
-						const QStringList xyz = qEnvironmentVariable( "WW_SHOT_AT" ).split( QLatin1Char( ',' ) );
+					if ( wwEnvIsSet( "WW_SHOT_AT" ) ) {
+						const QStringList xyz = wwEnvStr( "WW_SHOT_AT" ).split( QLatin1Char( ',' ) );
 						if ( xyz.size() == 3 )
 							skope->ogl->setPosition( Vector3( -xyz.at( 0 ).toFloat(),
 							                                 -xyz.at( 1 ).toFloat(),
 							                                 -xyz.at( 2 ).toFloat() ) );
 					}
-					if ( qEnvironmentVariableIsSet( "WW_SHOT_DIST" ) )
-						skope->ogl->setDistance( qEnvironmentVariable( "WW_SHOT_DIST" ).toFloat() );
+					if ( wwEnvIsSet( "WW_SHOT_DIST" ) )
+						skope->ogl->setDistance( wwEnvStr( "WW_SHOT_DIST" ).toFloat() );
 					QApplication::processEvents();
 
-					const float want = qEnvironmentVariableIsSet( "WW_SHOT_TIME" )
-						? qEnvironmentVariable( "WW_SHOT_TIME" ).toFloat() : 2.5f;
+					const float want = wwEnvIsSet( "WW_SHOT_TIME" )
+						? wwEnvStr( "WW_SHOT_TIME" ).toFloat() : 2.5f;
 					// Stepped, not jumped: sprite positions integrate frame to frame.
 					for ( float t = 0.0f; t < want; t += 1.0f / 30.0f ) {
 						skope->ogl->setSceneTime( std::min( t + 1.0f / 30.0f, want ) );
@@ -8093,7 +8346,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * leg-height captures in the same file is what says the per-limb stubs worked.
 	 * Log: release/ww_livefx_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_LIVEFX_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_LIVEFX_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_livefx_test.log" );
@@ -8140,8 +8393,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->ogl->setAnimationEnabled( true );
 					QApplication::processEvents();
 
-					const float want = qEnvironmentVariableIsSet( "WW_LIVEFX_TIME" )
-						? qEnvironmentVariable( "WW_LIVEFX_TIME" ).toFloat() : 2.5f;
+					const float want = wwEnvIsSet( "WW_LIVEFX_TIME" )
+						? wwEnvStr( "WW_LIVEFX_TIME" ).toFloat() : 2.5f;
 					// Stepped, not jumped: sprite positions integrate frame to frame.
 					for ( float t = 0.0f; t < want; t += 1.0f / 30.0f ) {
 						skope->ogl->setSceneTime( std::min( t + 1.0f / 30.0f, want ) );
@@ -8195,8 +8448,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					fx.sort();
 					for ( const QString & line : std::as_const( fx ) )
 						log << "  fx " << line << "\n";
-					if ( qEnvironmentVariableIsSet( "WW_LIVEFX_DUMP" ) ) {
-						QFile df( qEnvironmentVariable( "WW_LIVEFX_DUMP" ) );
+					if ( wwEnvIsSet( "WW_LIVEFX_DUMP" ) ) {
+						QFile df( wwEnvStr( "WW_LIVEFX_DUMP" ) );
 						if ( df.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
 							QTextStream ds( &df );
 							for ( const QString & line : std::as_const( fx ) )
@@ -8274,7 +8527,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * apart.
 	 * Log: release/ww_wsfix_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_WSFIX_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_WSFIX_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_wsfix_test.log" );
@@ -8357,7 +8610,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * checked here against a file with a deliberately broken texture path.
 	 * Log: release/ww_unfuckpanel_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_UNFUCKPANEL_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_UNFUCKPANEL_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_unfuckpanel_test.log" );
@@ -8603,7 +8856,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * renderer is now actually animating.
 	 * Log: release/ww_animplay_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_ANIMPLAY_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_ANIMPLAY_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_animplay_test.log" );
@@ -8703,7 +8956,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * how `mode_weightpaint` came to be byte-identical to `brush`.
 	 * Log: release/ww_topbar_test.log
 	 */
-	if ( qEnvironmentVariableIsSet( "WW_TOPBAR_TEST" ) ) {
+	if ( wwEnvIsSet( "WW_TOPBAR_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_topbar_test.log" );
@@ -9094,7 +9347,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * would report a change for the whole tail on any death.
 	 * Log: release/ww_subtex_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SUBTEX_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SUBTEX_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_subtex_test.log" );
@@ -9203,7 +9456,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * too slow to prove anything, above means the cap is not being read.
 	 * Log: release/ww_particlecap_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_PARTICLECAP_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_PARTICLECAP_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_particlecap_test.log" );
@@ -9389,7 +9642,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * measure, on real authored data.
 	 * Log: release/ww_cycletype_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_CYCLETYPE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_CYCLETYPE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_cycletype_test.log" );
@@ -9548,7 +9801,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * points a selection colour back at "danger".
 	 * Log: release/ww_selcolour_test.log
 	 */
-	if ( qEnvironmentVariableIsSet( "WW_SELCOLOUR_TEST" ) ) {
+	if ( wwEnvIsSet( "WW_SELCOLOUR_TEST" ) ) {
 		QTimer::singleShot( 1200, skope, [skope]() {
 			QFile logf( QApplication::applicationDirPath() + "/ww_selcolour_test.log" );
 			if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
@@ -9615,7 +9868,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * second half of this test.
 	 * Log: release/ww_docks_test.log
 	 */
-	if ( qEnvironmentVariableIsSet( "WW_DOCKS_TEST" ) ) {
+	if ( wwEnvIsSet( "WW_DOCKS_TEST" ) ) {
 		QTimer::singleShot( 1500, skope, [skope]() {
 			QFile logf( QApplication::applicationDirPath() + "/ww_docks_test.log" );
 			if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
@@ -9790,7 +10043,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * always used the selection passes the first and destroys work on the second.
 	 * Log: release/ww_multisel_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_MULTISEL_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_MULTISEL_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_multisel_test.log" );
@@ -9882,7 +10135,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *     different pages
 	 * Log: release/ww_menutree_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_MENUTREE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_MENUTREE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_menutree_test.log" );
@@ -10235,7 +10488,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * wwSpellPalette is called, so it fires once exec() is already running.
 	 * Log: release/ww_spellsearch_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SPELLSEARCH_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SPELLSEARCH_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_spellsearch_test.log" );
@@ -10452,7 +10705,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * seen by looking at the file in the viewport.
 	 * Log: release/ww_collcompiled_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLCOMPILED_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_COLLCOMPILED_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_collcompiled_test.log" );
@@ -10591,7 +10844,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *
 	 * Log: release/ww_collundo_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLUNDO_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_COLLUNDO_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_collundo_test.log" );
@@ -10782,7 +11035,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * so "Space opens search" is only right if it is also scoped to the viewport.
 	 * Log: release/ww_quickfav_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_QUICKFAV_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_QUICKFAV_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_quickfav_test.log" );
@@ -11026,7 +11279,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * in QSettings, so a run that inherited real ones would measure those.
 	 * Log: release/ww_navkeys_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_NAVKEYS_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_NAVKEYS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_navkeys_test.log" );
@@ -11183,7 +11436,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * control that was simply deleted, which is the failure this is for.
 	 * Log: release/ww_collpanel_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLPANEL_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_COLLPANEL_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_collpanel_test.log" );
@@ -11827,7 +12080,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * Box collision, because it is the create path with no modal on it.
 	 * Log: release/ww_collpershape_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLPERSHAPE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_COLLPERSHAPE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_collpershape_test.log" );
@@ -11887,7 +12140,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * menu-spell path, and is also the only create with no modal on
 					 * it, which is what makes it usable with nobody at the keyboard.
 					 */
-					const QString mode = qEnvironmentVariable( "WW_COLLPERSHAPE_TEST" );
+					const QString mode = wwEnvStr( "WW_COLLPERSHAPE_TEST" );
 					const bool control = ( mode == QLatin1String( "control" ) );
 					if ( !control )
 						setBlockListSelection( shapes );
@@ -12062,10 +12315,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * FOR THIS FILE'S VERSION. Fields come and go between game versions, so the
 	 * report is true of the NIF it was run on and says which that was.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DROPAUDIT" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_DROPAUDIT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
-				QFile out( qEnvironmentVariable( "WW_DROPAUDIT" ) );
+				QFile out( wwEnvStr( "WW_DROPAUDIT" ) );
 				if ( !out.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
 				QTextStream rep( &out );
 				NifModel * nif = skope->getNifModel();
@@ -12160,7 +12413,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *
 	 * Log: release/ww_loadednifs_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_LOADEDNIFS_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_LOADEDNIFS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok, fname]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_loadednifs_test.log" );
@@ -12214,7 +12467,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				strayModals->start( 100 );
 				do {
 					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
-					const QString add = qEnvironmentVariable( "WW_LOADEDNIFS_TEST" );
+					const QString add = wwEnvStr( "WW_LOADEDNIFS_TEST" );
 					const QString openedHere = QFileInfo( fname ).fileName();
 					log << "primary: " << openedHere << ", adding: "
 						<< QFileInfo( add ).fileName() << "\n";
@@ -14075,7 +14328,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * Log: release/ww_weaponmark_test.log; pictures: release/ww_weaponmark_list.png
 	 * (the marked rows) and release/ww_weaponmark_kit.png (the assembled gun).
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_WEAPONMARK_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_WEAPONMARK_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok, fname]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_weaponmark_test.log" );
@@ -14123,7 +14376,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				do {
 					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
 					QStringList files;
-					for ( const QString & part : qEnvironmentVariable( "WW_WEAPONMARK_FILES" )
+					for ( const QString & part : wwEnvStr( "WW_WEAPONMARK_FILES" )
 							.split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) )
 						if ( !part.trimmed().isEmpty() )
 							files << part.trimmed();
@@ -14924,7 +15177,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 */
 					NifModel * primary = skope->getNifModel();
 					NifModel * follower = skope->workspaceDocumentModel( PlainDonor );
-					const QString posePath = qEnvironmentVariable( "WW_WEAPONMARK_POSE" );
+					const QString posePath = wwEnvStr( "WW_WEAPONMARK_POSE" );
 					if ( primary && follower && !posePath.isEmpty() && QFile::exists( posePath ) ) {
 						// nothing else may be snapping while this is measured
 						skope->setWorkspaceSkeletonDocument( -1 );
@@ -15228,7 +15481,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * WW_FLATTEN_POSE names a SAM pose. Log: release/ww_flatten_test.log;
 	 * pictures: release/ww_flatten_baked.png and release/ww_flatten_rest.png.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_FLATTEN_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_FLATTEN_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok, fname]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_flatten_test.log" );
@@ -15254,11 +15507,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( !skeleton ) { check( "the primary is a model", false ); break; }
 
 					QStringList files;
-					for ( const QString & part : qEnvironmentVariable( "WW_FLATTEN_FILES" )
+					for ( const QString & part : wwEnvStr( "WW_FLATTEN_FILES" )
 							.split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) )
 						if ( !part.trimmed().isEmpty() )
 							files << part.trimmed();
-					const QString posePath = qEnvironmentVariable( "WW_FLATTEN_POSE" );
+					const QString posePath = wwEnvStr( "WW_FLATTEN_POSE" );
 					log << "primary: " << QFileInfo( fname ).fileName() << "\n";
 					for ( const QString & f : std::as_const( files ) )
 						log << "  fixture: " << QFileInfo( f ).fileName() << "\n";
@@ -15567,7 +15820,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		}, Qt::SingleShotConnection );
 	}
 
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLDROP_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_COLLDROP_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_colldrop_test.log" );
@@ -16213,7 +16466,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * target whatever is at the top of the list while still looking like a pass.
 	 * Log: release/ww_blockdnd_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_BLOCKDND_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_BLOCKDND_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_blockdnd_test.log" );
@@ -17537,9 +17790,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * Off by default: it builds thousands of blocks, which is not
 					 * what the rest of this harness is for.
 					 */
-					if ( qEnvironmentVariableIsSet( "WW_BLOCKDND_BENCH" ) ) {
+					if ( wwEnvIsSet( "WW_BLOCKDND_BENCH" ) ) {
 						const int n = qMax( 100,
-							qEnvironmentVariable( "WW_BLOCKDND_BENCH" ).toInt() );
+							wwEnvStr( "WW_BLOCKDND_BENCH" ).toInt() );
 						QList<qint32> made;
 						for ( int i = 0; i < n; i++ ) {
 							const qint32 b = nif->getBlockNumber(
@@ -18163,7 +18416,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * the block type and double-clicking it means "expand".
 	 * Log: release/ww_blockrename_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_BLOCKRENAME_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_BLOCKRENAME_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_blockrename_test.log" );
@@ -18260,7 +18513,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 */
 					{
 						const bool wantHierarchy =
-							qEnvironmentVariable( "WW_BLOCKRENAME_TEST" ) != QLatin1String( "list" );
+							wwEnvStr( "WW_BLOCKRENAME_TEST" ) != QLatin1String( "list" );
 						const bool isHierarchy = ( list->model() == skope->proxy );
 						const QString mode = isHierarchy
 							? QStringLiteral( "hierarchy" ) : QStringLiteral( "list" );
@@ -18363,7 +18616,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							QEventLoop spin;
 							// A/B (WW_NO_SPIN): does this 1.8 s of event loop, sitting
 							// right before the region that used to hang, hide the hang?
-							QTimer::singleShot( qEnvironmentVariableIsSet( "WW_NO_SPIN" ) ? 1 : 1800,
+							QTimer::singleShot( wwEnvIsSet( "WW_NO_SPIN" ) ? 1 : 1800,
 								&spin, &QEventLoop::quit );
 							spin.exec();
 							QFile barked( QApplication::applicationDirPath()
@@ -18616,7 +18869,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * process down, and a buffered log of a crashed process says nothing.
 	 * Log: release/ww_flatlist_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_FLATLIST_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_FLATLIST_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_flatlist_test.log" );
@@ -18694,7 +18947,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				 * quietly measure the other mode and pass.
 				 */
 				const bool wantList =
-					qEnvironmentVariable( "WW_FLATLIST_TEST_MODE" ) == QLatin1String( "list" );
+					wwEnvStr( "WW_FLATLIST_TEST_MODE" ) == QLatin1String( "list" );
 				check( "the app started in the mode under test",
 					( modeName() == QLatin1String( "list" ) ) == wantList );
 
@@ -18790,7 +19043,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				 * only mode that shows the summary column, so data() runs code there
 				 * that the tree never reaches.
 				 */
-				const int cycles = qMax( 2, qEnvironmentVariable( "WW_FLATLIST_TEST" ).toInt() );
+				const int cycles = qMax( 2, wwEnvStr( "WW_FLATLIST_TEST" ).toInt() );
 				say( QStringLiteral( "-- %1 switch cycles" ).arg( cycles ) );
 				for ( int c = 0; c < cycles; c++ ) {
 					const bool toList = ( list->model() == skope->proxy );
@@ -18844,11 +19097,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * E:\dragfx.nif. The next session to reach for it found the file gone and the
 	 * run dead before it started.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DRAGFIXTURE" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_DRAGFIXTURE" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				NifModel * nif = skope->getNifModel();
-				const QString out = qEnvironmentVariable( "WW_DRAGFIXTURE" );
+				const QString out = wwEnvStr( "WW_DRAGFIXTURE" );
 				if ( !ok || !nif ) { qApp->quit(); return; }
 
 				auto node = [&]( const QString & name, qint32 parent ) {
@@ -18904,7 +19157,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * the loop. Driving a REAL mouse from outside the process does reach it, and
 	 * to do that something has to say where the rows are on screen.
 	 */
-	if ( !fname.isEmpty() && !qEnvironmentVariable( "WW_DRAG_LOG" ).isEmpty() ) {
+	if ( !fname.isEmpty() && !wwEnvStr( "WW_DRAG_LOG" ).isEmpty() ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			if ( !ok )
 				return;
@@ -18933,7 +19186,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * pinning the interpolation to one implementation.
 	 * Log: release/ww_rotkey_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_ROTKEY_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_ROTKEY_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_rotkey_test.log" );
@@ -19065,7 +19318,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *
 	 * Log: release/ww_scrub_test.log
 	 */
-	if ( qEnvironmentVariableIsSet( "WW_SCRUB_TEST" ) ) {
+	if ( wwEnvIsSet( "WW_SCRUB_TEST" ) ) {
 		QTimer::singleShot( 1200, skope, [skope]() {
 			QFile logf( QApplication::applicationDirPath() + "/ww_scrub_test.log" );
 			if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
@@ -19529,7 +19782,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *
 	 * Log: release/ww_gizmonum_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_GIZMONUM_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_GIZMONUM_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_gizmonum_test.log" );
@@ -19693,7 +19946,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * real result, not an absence of evidence -- check 4 depends on it.
 	 * Log: release/ww_destructive_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DESTRUCTIVE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_DESTRUCTIVE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_destructive_test.log" );
@@ -19942,7 +20195,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * Log: release/ww_seqbind_test.log, plus release/ww_seqbind_debug.log with
 	 * WW_SEQBIND_DEBUG=1 for the per-row detail.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SEQBIND_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SEQBIND_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_seqbind_test.log" );
@@ -20026,7 +20279,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * have no effect at all, even while it is being posed.
 	 * Log: release/ww_groupskel_test.log
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_GROUPSKEL_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_GROUPSKEL_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_groupskel_test.log" );
@@ -20087,7 +20340,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return n;
 					};
 
-					const QString skelFile = qEnvironmentVariable( "WW_GROUPSKEL_TEST" );
+					const QString skelFile = wwEnvStr( "WW_GROUPSKEL_TEST" );
 					check( "the skeleton joined the workspace",
 						skope->addWorkspaceDocumentFromFile( skelFile ) );
 					NifModel * skel = skope->workspaceDocumentModel( 0 );
@@ -20259,7 +20512,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * two sets would differ; that is the failure this is looking for.
 	 * Log: release/ww_skelmerge_test.log, screenshot ww_skelmerge_test.png.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SKELMERGE_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SKELMERGE_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_skelmerge_test.log" );
@@ -20276,7 +20529,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				};
 				do {
 					if ( !ok || !nif ) { log << "load failed\n"; break; }
-					const QString donor = qEnvironmentVariable( "WW_SKELMERGE_TEST" );
+					const QString donor = wwEnvStr( "WW_SKELMERGE_TEST" );
 					if ( !QFileInfo::exists( donor ) ) { log << "no donor: " << donor << "\n"; break; }
 
 					int sb = -1, best = -1;
@@ -20471,7 +20724,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * 'Cube', a shader property and a texture set. No game corpus.
 	 * Log: release/ww_blockvis_test.log.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_BLOCKVIS_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_BLOCKVIS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 900, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_blockvis_test.log" );
@@ -20497,7 +20750,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( !ok || !nif || !list || !ogl ) { log << "load failed\n"; break; }
 
 					const bool wantHierarchy =
-						qEnvironmentVariable( "WW_BLOCKVIS_TEST" ) != QLatin1String( "list" );
+						wwEnvStr( "WW_BLOCKVIS_TEST" ) != QLatin1String( "list" );
 					const bool isHierarchy = ( list->model() == skope->proxy );
 					const QString mode = isHierarchy ? QStringLiteral( "hierarchy" )
 					                                 : QStringLiteral( "list" );
@@ -21067,7 +21320,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * scale round trip, which needs a colour CHANGED inside the dialog.
 	 * Log: release/ww_texcolor_test.log.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_TEXCOLOR_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_TEXCOLOR_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_texcolor_test.log" );
@@ -21277,7 +21530,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	//   - source tris + new tris == the original triangle count (nothing lost),
 	//   - all verts retained on both, no per-vertex weight zeroed.
 	// Saves (WW_SEP_SAVE) and quits. Log: release/ww_sep_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SEP_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SEP_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_sep_test.log" );
@@ -21334,11 +21587,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// any BSTriShape — most files people run Separate on are plain ones,
 					// and the skin and segment checks below now skip themselves rather
 					// than failing when the structures are absent.
-					const char * wantType = qEnvironmentVariableIsSet( "WW_SEP_ANY" )
+					const char * wantType = wwEnvIsSet( "WW_SEP_ANY" )
 						? "BSTriShape" : "BSSubIndexTriShape";
 					int sb = -1, sbVerts = -1;
-					if ( qEnvironmentVariableIsSet( "WW_SEP_BLOCK" ) ) {
-						int req = QString::fromLocal8Bit( qgetenv( "WW_SEP_BLOCK" ) ).toInt();
+					if ( wwEnvIsSet( "WW_SEP_BLOCK" ) ) {
+						int req = QString::fromLocal8Bit( wwEnv( "WW_SEP_BLOCK" ) ).toInt();
 						if ( req >= 0 && req < nif->getBlockCount()
 							&& nif->blockInherits( nif->getBlockIndex( req ), wantType ) )
 							sb = req;
@@ -21434,8 +21687,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// WW_SEP_MODE: 0 = Selection (default), 1 = By Loose Parts, 2 = By
 					// Segment. The last two split N ways, so everything below validates
 					// a LIST of outputs rather than a source/new pair.
-					const int sepMode = qEnvironmentVariableIsSet( "WW_SEP_MODE" )
-						? QString::fromLocal8Bit( qgetenv( "WW_SEP_MODE" ) ).toInt() : 0;
+					const int sepMode = wwEnvIsSet( "WW_SEP_MODE" )
+						? QString::fromLocal8Bit( wwEnv( "WW_SEP_MODE" ) ).toInt() : 0;
 
 					// build the scene, enter edit mode, select the first half of faces
 					skope->ogl->grabFramebuffer();
@@ -21567,8 +21820,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< " colorOk=" << colorOk << " trimmed=" << trimmed << " modeOk=" << modeOk << "\n";
 					log << ( pass ? "PASS\n" : "CHECK: one or more invariants failed\n" );
 
-					if ( qEnvironmentVariableIsSet( "WW_SEP_SAVE" ) ) {
-						QString out = qEnvironmentVariable( "WW_SEP_SAVE" );
+					if ( wwEnvIsSet( "WW_SEP_SAVE" ) ) {
+						QString out = wwEnvStr( "WW_SEP_SAVE" );
 						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
 					}
 
@@ -21606,7 +21859,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// ViewportWeightPaintAction, and checks the paint mode actually engaged (the
 	// old handler silently reverted to Object Mode when no mesh was pre-selected).
 	// Log: release/ww_wp_test.log.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_WP_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_WP_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 800, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_wp_test.log" );
@@ -21639,11 +21892,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// No fname requirement: the starter document emits completeLoading too, so
 	// this now works on the startup scene, which is the only way to eyeball the
 	// docks in that state.
-	if ( qEnvironmentVariableIsSet( "WW_UI_SHOT" ) ) {
+	if ( wwEnvIsSet( "WW_UI_SHOT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 2500, skope, [skope]() {
 				// WW_UI_SHOT_DOCK=<objectName> opens that dock before the grab.
-				const QByteArray dockName = qgetenv( "WW_UI_SHOT_DOCK" );
+				const QByteArray dockName = wwEnv( "WW_UI_SHOT_DOCK" );
 				if ( !dockName.isEmpty() ) {
 					if ( QDockWidget * d = skope->findChild<QDockWidget *>( QString::fromLocal8Bit( dockName ) ) ) {
 						d->show();
@@ -21653,8 +21906,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				}
 				// lane MAGDROP1: WW_RENDER_SELECT=<block> selects that block first, so
 				// Block Details and the Collision panel show it.
-				if ( qEnvironmentVariableIsSet( "WW_RENDER_SELECT" ) && skope->nif ) {
-					const int sb = qEnvironmentVariableIntValue( "WW_RENDER_SELECT" );
+				if ( wwEnvIsSet( "WW_RENDER_SELECT" ) && skope->nif ) {
+					const int sb = wwEnvInt( "WW_RENDER_SELECT" );
 					if ( sb >= 0 && sb < skope->nif->getBlockCount() ) {
 						// the Blocks page holds Block List + Block Details
 						if ( skope->leftColumnSelector )
@@ -21666,16 +21919,16 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				// WW_UI_SHOT_SIZE=WxH resizes the window (and WW_UI_SHOT_LEFT=px widens
 				// the left column) so Block Details fits beside the viewport.
 				{
-					const QStringList wh = qEnvironmentVariable( "WW_UI_SHOT_SIZE" ).split( QLatin1Char( 'x' ) );
+					const QStringList wh = wwEnvStr( "WW_UI_SHOT_SIZE" ).split( QLatin1Char( 'x' ) );
 					if ( wh.size() == 2 && wh[0].toInt() > 0 && wh[1].toInt() > 0 )
 						skope->resize( wh[0].toInt(), wh[1].toInt() );
-					const int lw = qEnvironmentVariableIntValue( "WW_UI_SHOT_LEFT" );
+					const int lw = wwEnvInt( "WW_UI_SHOT_LEFT" );
 					if ( lw > 0 && skope->dLeft )
 						skope->resizeDocks( { skope->dLeft }, { lw }, Qt::Horizontal );
 					qApp->processEvents();
 				}
 				// WW_UI_SHOT_POSE=1 flips the viewport into Pose Mode first.
-				if ( qEnvironmentVariableIsSet( "WW_UI_SHOT_POSE" ) ) {
+				if ( wwEnvIsSet( "WW_UI_SHOT_POSE" ) ) {
 					skope->ogl->setPoseMode( true );
 					qApp->processEvents();
 					skope->ogl->update();
@@ -21686,12 +21939,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				 * honour WW_RENDER_COLLISION / WW_RENDER_BG first, so a block-view
 				 * capture shows the model and its collision next to the details. */
 				if ( Scene * sc = skope->ogl ? skope->ogl->getScene() : nullptr ) {
-					if ( qEnvironmentVariableIsSet( "WW_RENDER_COLLISION" ) && qEnvironmentVariableIntValue( "WW_RENDER_COLLISION" ) != 0 ) {
+					if ( wwEnvIsSet( "WW_RENDER_COLLISION" ) && wwEnvInt( "WW_RENDER_COLLISION" ) != 0 ) {
 						sc->options |= Scene::ShowCollision;
 						Scene::collisionOnlySetting = false;
 					}
-					if ( qEnvironmentVariableIsSet( "WW_RENDER_BG" ) ) {
-						const QStringList c = qEnvironmentVariable( "WW_RENDER_BG" ).split( QLatin1Char( ',' ) );
+					if ( wwEnvIsSet( "WW_RENDER_BG" ) ) {
+						const QStringList c = wwEnvStr( "WW_RENDER_BG" ).split( QLatin1Char( ',' ) );
 						if ( c.size() >= 3 )
 							skope->ogl->setBackground( Color4( c[0].toFloat(), c[1].toFloat(), c[2].toFloat(), 1.0f ) );
 					}
@@ -21727,10 +21980,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * WW_WINDOW_AT=x,y places the window before it is shown, so a run can be put
 	 * on a second monitor and never take focus from what the user is doing.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_PHYSICS_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_PHYSICS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 2000, skope, [skope]() {
-				QString outPath = qEnvironmentVariable( "WW_PHYSICS_TEST" );
+				QString outPath = wwEnvStr( "WW_PHYSICS_TEST" );
 				if ( outPath.isEmpty() || outPath == QStringLiteral( "1" ) )
 					outPath = QApplication::applicationDirPath() + "/ww_physics_test.txt";
 				QStringList log;
@@ -23221,10 +23474,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// floored WW_RENDER_SIZE and the harness measured the machine.
 	wwImpostorPreviewStart( skope, skope->ogl, skope->viewportHeader );
 
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_RENDER_SHOT" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_RENDER_SHOT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 2500, skope, [skope]() {
-				QString out = qEnvironmentVariable( "WW_RENDER_SHOT" );
+				QString out = wwEnvStr( "WW_RENDER_SHOT" );
 				if ( out.isEmpty() || out == QStringLiteral( "1" ) )
 					out = QApplication::applicationDirPath() + "/ww_render_shot.png";
 
@@ -23234,7 +23487,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				// stopped guarding. WW_RENDER_SIZE=WxH overrides.
 				{
 					int rw = 1280, rh = 800;
-					const QString szEnv = qEnvironmentVariable( "WW_RENDER_SIZE" );
+					const QString szEnv = wwEnvStr( "WW_RENDER_SIZE" );
 					if ( szEnv.contains( QLatin1Char( 'x' ) ) ) {
 						const QStringList parts = szEnv.split( QLatin1Char( 'x' ) );
 						if ( parts.size() == 2 ) {
@@ -23324,7 +23577,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( pin.active ) {
 						skope->ogl->wwApplyCameraPin( pin );
 					} else {
-						int	viewIdx = qEnvironmentVariableIntValue( "WW_RENDER_VIEW" );
+						int	viewIdx = wwEnvInt( "WW_RENDER_VIEW" );
 						// ViewUser (the Blender-style startup view) sits past
 						// ViewWalk, so the old bound silently rewrote it to Front:
 						// a capture that looked like a passing test of a view it
@@ -23352,8 +23605,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						// Refraction defaults ON so the established regression cases
 						// cannot inherit a disabled user preference. An explicit 0 is
 						// available for paired distortion-on/off captures.
-						sc->showRefraction = !qEnvironmentVariableIsSet( "WW_RENDER_REFRACTION" )
-							|| qEnvironmentVariableIntValue( "WW_RENDER_REFRACTION" ) != 0;
+						sc->showRefraction = !wwEnvIsSet( "WW_RENDER_REFRACTION" )
+							|| wwEnvInt( "WW_RENDER_REFRACTION" ) != 0;
 						// WW_RENDER_PARTICLES=0 turns them off for a paired capture (lane
 						// PBRR0); unset keeps the old forced-on.
 						sc->showParticles = wwRenderParticlesPin();
@@ -23374,7 +23627,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * object read 27 px when the object itself was 11, and a
 						 * span sweep looked as if it saturated. The bake has
 						 * always turned it off; a clean render now does too. */
-						if ( qEnvironmentVariableIntValue( "WW_RENDER_CLEAN" ) != 0 ) {
+						if ( wwEnvInt( "WW_RENDER_CLEAN" ) != 0 ) {
 							sc->options &= ~( Scene::ShowGrid | Scene::ShowAxes | Scene::ShowNodes );
 							skope->ogl->showCursor = false;
 						}
@@ -23387,21 +23640,21 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * WW_RENDER_BG=r,g,b (0..1) pins the clear colour (a grey
 						 * backdrop, never his black). WW_RENDER_SELECT=<block> selects
 						 * that block, which the viewport draws highlighted. */
-						if ( qEnvironmentVariableIsSet( "WW_RENDER_COLLISION" ) ) {
-							if ( qEnvironmentVariableIntValue( "WW_RENDER_COLLISION" ) != 0 ) {
+						if ( wwEnvIsSet( "WW_RENDER_COLLISION" ) ) {
+							if ( wwEnvInt( "WW_RENDER_COLLISION" ) != 0 ) {
 								sc->options |= Scene::ShowCollision;
 								Scene::collisionOnlySetting = false;
 							} else {
 								sc->options &= ~Scene::ShowCollision;
 							}
 						}
-						if ( qEnvironmentVariableIsSet( "WW_RENDER_BG" ) ) {
-							const QStringList c = qEnvironmentVariable( "WW_RENDER_BG" ).split( QLatin1Char( ',' ) );
+						if ( wwEnvIsSet( "WW_RENDER_BG" ) ) {
+							const QStringList c = wwEnvStr( "WW_RENDER_BG" ).split( QLatin1Char( ',' ) );
 							if ( c.size() >= 3 )
 								skope->ogl->setBackground( Color4( c[0].toFloat(), c[1].toFloat(), c[2].toFloat(), 1.0f ) );
 						}
-						if ( qEnvironmentVariableIsSet( "WW_RENDER_SELECT" ) && skope->nif ) {
-							const int sb = qEnvironmentVariableIntValue( "WW_RENDER_SELECT" );
+						if ( wwEnvIsSet( "WW_RENDER_SELECT" ) && skope->nif ) {
+							const int sb = wwEnvInt( "WW_RENDER_SELECT" );
 							if ( sb >= 0 && sb < skope->nif->getBlockCount() )
 								skope->select( skope->nif->getBlockIndex( sb ) );
 						}
@@ -23422,9 +23675,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						/* WW_LOD_CHANNEL=<1..7> drives the same channel preview the
 						 * World LOD Generator's Preview box sets, so the shader path
 						 * has a headless test rather than only a GUI one. */
-						if ( qEnvironmentVariableIsSet( "WW_LOD_CHANNEL" ) )
-							wwLodChannelView = qEnvironmentVariableIntValue( "WW_LOD_CHANNEL" );
-						if ( qEnvironmentVariableIntValue( "WW_RENDER_FLAT" ) != 0 ) {
+						if ( wwEnvIsSet( "WW_LOD_CHANNEL" ) )
+							wwLodChannelView = wwEnvInt( "WW_LOD_CHANNEL" );
+						if ( wwEnvInt( "WW_RENDER_FLAT" ) != 0 ) {
 							sc->options |= Scene::DoVertexColors;
 							sc->options &= ~( Scene::DoTexturing | Scene::DoLighting
 								| Scene::DoSpecular | Scene::DoGlow | Scene::DoNormalMap
@@ -23437,7 +23690,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * colour, and the lit path multiplies it in only with
 						 * vertex colours ON -- an option persisted from the
 						 * user's last tick, so the switch forces it. */
-						if ( qEnvironmentVariableIntValue( "WW_LODL_AO" ) != 0 )
+						if ( wwEnvInt( "WW_LODL_AO" ) != 0 )
 							sc->options |= Scene::DoVertexColors;
 						/* WW_LODL_CHANNEL=<name> is the same picture of a vertex
 						 * payload, one baked channel at a time (lane CHANVIEW1), so
@@ -23445,7 +23698,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * channel is in the document and invisible, which is the
 						 * shape of "a dial whose two settings render identically"
 						 * (root MISTAKES 05:1x) with nothing wrong in the builder. */
-						if ( !qEnvironmentVariable( "WW_LODL_CHANNEL" ).trimmed().isEmpty() )
+						if ( !wwEnvStr( "WW_LODL_CHANNEL" ).trimmed().isEmpty() )
 							sc->options |= Scene::DoVertexColors;
 					}
 
@@ -23456,12 +23709,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				 * WW_HKXANIM_ROOTMOTION=1 turns the root motion on for the shot.
 				 */
 				if ( Scene * hsc = skope->ogl->getScene(); hsc && hsc->hkx ) {
-					const QString hkxPath = qEnvironmentVariable( "WW_HKXANIM_CLIP" );
+					const QString hkxPath = wwEnvStr( "WW_HKXANIM_CLIP" );
 					if ( !hkxPath.isEmpty() ) {
 						QStringList hkxAdded;
 						const QString hkxErr = hsc->hkx->load( hkxPath, &hkxAdded );
 						hsc->hkx->setRootMotion(
-							qEnvironmentVariableIntValue( "WW_HKXANIM_ROOTMOTION" ) != 0 );
+							wwEnvInt( "WW_HKXANIM_ROOTMOTION" ) != 0 );
 						if ( hkxErr.isEmpty() && !hkxAdded.isEmpty() )
 							skope->ogl->setSceneSequence( hkxAdded.first() );
 					}
@@ -23473,7 +23726,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * picture of the armature would otherwise depend on whatever
 					 * the user last ticked -- which is not reproducible.
 					 */
-					if ( qEnvironmentVariableIntValue( "WW_SKELETON_OVERLAY" ) != 0 )
+					if ( wwEnvInt( "WW_SKELETON_OVERLAY" ) != 0 )
 						skope->ogl->setSkeletonOverlay( true );
 
 					/* lane SKEL2: the armature's own switches, on the same
@@ -23483,32 +23736,32 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * WW_SKELOVERLAY_DUMP (read in GLView::drawSkeletonOverlay)
 					 * writes every drawn node's screen position for THIS frame.
 					 */
-					if ( qEnvironmentVariableIsSet( "WW_SKELETON_DISPLAY" ) )
+					if ( wwEnvIsSet( "WW_SKELETON_DISPLAY" ) )
 						skope->ogl->setArmatureDisplay(
-							qEnvironmentVariableIntValue( "WW_SKELETON_DISPLAY" ) );
-					if ( qEnvironmentVariableIsSet( "WW_SKELETON_XRAY" ) )
+							wwEnvInt( "WW_SKELETON_DISPLAY" ) );
+					if ( wwEnvIsSet( "WW_SKELETON_XRAY" ) )
 						skope->ogl->setArmatureXray(
-							qEnvironmentVariableIntValue( "WW_SKELETON_XRAY" ) != 0 );
-					if ( qEnvironmentVariableIsSet( "WW_SKELETON_NAMES" ) )
+							wwEnvInt( "WW_SKELETON_XRAY" ) != 0 );
+					if ( wwEnvIsSet( "WW_SKELETON_NAMES" ) )
 						skope->ogl->setArmatureNames(
-							qEnvironmentVariableIntValue( "WW_SKELETON_NAMES" ) );
-					if ( qEnvironmentVariableIsSet( "WW_SKELETON_CHIP" )
-						 || qEnvironmentVariableIsSet( "WW_SKELETON_SEARCH" ) )
+							wwEnvInt( "WW_SKELETON_NAMES" ) );
+					if ( wwEnvIsSet( "WW_SKELETON_CHIP" )
+						 || wwEnvIsSet( "WW_SKELETON_SEARCH" ) )
 						skope->ogl->setSkeletonOverlayFilter(
-							qEnvironmentVariableIntValue( "WW_SKELETON_CHIP" ),
-							qEnvironmentVariable( "WW_SKELETON_SEARCH" ) );
+							wwEnvInt( "WW_SKELETON_CHIP" ),
+							wwEnvStr( "WW_SKELETON_SEARCH" ) );
 
 
 				// WW_RENDER_SEQ=<name> selects a sequence. Without it the
 					// scene takes animGroups.first(), which on FO4 VFX files is
 					// the one-shot "autoPlay" — sequence-gated effects (the
 					// procedural lightning's Generation keys) never fire there.
-					const QString seq = qEnvironmentVariable( "WW_RENDER_SEQ" );
+					const QString seq = wwEnvStr( "WW_RENDER_SEQ" );
 					if ( !seq.isEmpty() )
 						skope->ogl->setSceneSequence( seq );
 
 					bool	timeOk = false;
-					float	t = qEnvironmentVariable( "WW_RENDER_TIME" ).toFloat( &timeOk );
+					float	t = wwEnvStr( "WW_RENDER_TIME" ).toFloat( &timeOk );
 					const float shotT = timeOk ? t : 1.0f;
 
 					/* WW_RENDER_FRAMES=<n> [WW_RENDER_FPS=<f>, default 30]: an
@@ -23524,8 +23777,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * otherwise move the sim between steps) and the sim is pre-rolled
 					 * from 0 in 1/f steps. Unset keeps the one-jump shot, so no
 					 * existing baseline changes. */
-					const int renderFrames = qEnvironmentVariableIntValue( "WW_RENDER_FRAMES" );
-					float renderFps = qEnvironmentVariable( "WW_RENDER_FPS" ).toFloat();
+					const int renderFrames = wwEnvInt( "WW_RENDER_FRAMES" );
+					float renderFps = wwEnvStr( "WW_RENDER_FPS" ).toFloat();
 					if ( !( renderFps > 0.0f ) )
 						renderFps = 30.0f;
 					if ( renderFrames > 0 ) {
@@ -23597,7 +23850,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * quoted -- anything logged earlier is a claim about intent. */
 					skope->ogl->wwLogCameraCensus( "grab" );
 					// lane CELLSTREAM1: a stepped path through the streamed cells, else the shot waits for them
-					const QString streamPath = qEnvironmentVariable( "WW_CELL_STREAM_PATH" );
+					const QString streamPath = wwEnvStr( "WW_CELL_STREAM_PATH" );
 					if ( !streamPath.isEmpty() ) {
 						wwCellStreamPathRun( skope->ogl, streamPath, out );
 						qApp->quit();
@@ -23605,14 +23858,26 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 					if ( cellStreamBusy( nullptr ) )
 						wwCellStreamSettle( skope->ogl, 16, 600000 );
+					// lane TESTDRIVER1: a live reopen ends here (window, camera and options applied again, the cells in)
+					if ( wwLiveReopenHook( shotT ) )
+						return;
+					// lane TESTDRIVER1: WW_LIVE_STEPS=<file>: the scene loaded once, each row sets switches then shoots;
+					// WW_LIVE_SERVE=1 keeps the window up for "NifSkope::live <step>" on the --port
+					if ( const QString steps = wwEnvStr( "WW_LIVE_STEPS" ); !steps.isEmpty() || wwEnvStr( "WW_LIVE_SERVE" ) == QLatin1StringView( "1" ) ) {
+						if ( !steps.isEmpty() )
+							wwLiveStepsRun( skope, steps );
+						if ( wwEnvStr( "WW_LIVE_SERVE" ) != QLatin1StringView( "1" ) )
+							qApp->quit();
+						return;
+					}
 					// lane MOTION1: a camera path renders its own frames (wwRenderPathRun above)
-					const QString renderPath = qEnvironmentVariable( "WW_RENDER_PATH" );
+					const QString renderPath = wwEnvStr( "WW_RENDER_PATH" );
 					if ( !renderPath.isEmpty() ) {
 						wwRenderPathRun( skope->ogl, renderPath, out, shotT );
 						qApp->quit();
 						return;
 					}
-					const int renderSS = qEnvironmentVariableIntValue( "WW_RENDER_SS" );
+					const int renderSS = wwEnvInt( "WW_RENDER_SS" );
 					const QImage shotImage = renderSS > 0
 						? skope->ogl->grabSupersampled( renderSS )
 						: skope->ogl->grabFramebuffer();
@@ -23636,7 +23901,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						shotImage.save( out );
 					}
 					// lane FARVIEW1: WW_RENDER_GPUMS=<frames> times that many repaints of the view just grabbed
-					if ( const int gpuFrames = qEnvironmentVariableIntValue( "WW_RENDER_GPUMS" ); gpuFrames > 0 ) {
+					if ( const int gpuFrames = wwEnvInt( "WW_RENDER_GPUMS" ); gpuFrames > 0 ) {
 						QFile gf( out + QStringLiteral( ".gpums.txt" ) );
 						if ( gf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 							QTextStream( &gf ) << skope->ogl->wwGpuMs( gpuFrames ) << "\n";
@@ -23644,7 +23909,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// TEMP DIAGNOSTIC (WW_GRID_PROBE): bracket the grab so the log
 					// shows which paintGL frames precede it, and whether any grid
 					// draw belongs to the frame actually captured.
-					if ( qEnvironmentVariableIsSet( "WW_GRID_PROBE" ) ) {
+					if ( wwEnvIsSet( "WW_GRID_PROBE" ) ) {
 						QFile pf( QApplication::applicationDirPath() + "/ww_grid_probe.log" );
 						if ( pf.open( QIODevice::Append | QIODevice::Text ) )
 							QTextStream( &pf ) << ">> GRAB done (image saved) <<\n";
@@ -23666,7 +23931,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * (docs/LODGEN_PLAN.md rung 3). Grid and axes are forced off: the matte
 	 * cancels only CONSTANT background, and a grid line would bake into the
 	 * card as geometry. */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_IMPOSTOR_BAKE" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_IMPOSTOR_BAKE" ) ) {
 		wwCardStamp( QStringLiteral( "window" ) );
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
 			wwCardStamp( QStringLiteral( "loaded" ) );
@@ -23675,7 +23940,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				QElapsedTimer lap;
 				lap.start();
 				WwCardTimes & ct = wwCardT();
-				const QString outDir = qEnvironmentVariable( "WW_IMPOSTOR_BAKE" );
+				const QString outDir = wwEnvStr( "WW_IMPOSTOR_BAKE" );
 				do {
 					if ( !ok || outDir.isEmpty() || !skope->ogl )
 						break;
@@ -23687,7 +23952,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * nothing the sheets hold depends on it, and the gate proves
 						 * that by baking at two sizes and comparing the bytes. */
 						int bw = 560, bh = 560;
-						const QStringList ws = qEnvironmentVariable( "WW_IMPOSTOR_WINDOW" ).split( QLatin1Char( 'x' ) );
+						const QStringList ws = wwEnvStr( "WW_IMPOSTOR_WINDOW" ).split( QLatin1Char( 'x' ) );
 						if ( ws.size() == 2 && ws[0].toInt() >= 320 && ws[1].toInt() >= 240 ) {
 							bw = ws[0].toInt();
 							bh = ws[1].toInt();
@@ -23739,7 +24004,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * restores the old perspective camera exactly, and the sidecar
 					 * NAMES the arm that served, so a set is never silently one or
 					 * the other. It is the control the gates fail against. */
-					const bool bakePersp = qEnvironmentVariableIntValue( "WW_IMPOSTOR_PERSP" ) == 1;
+					const bool bakePersp = wwEnvInt( "WW_IMPOSTOR_PERSP" ) == 1;
 					skope->ogl->setProjection( bakePersp );
 					/* The matte's two clears are the hook's, not the settings':
 					 * without the lock every paint put the viewport grey back and
@@ -23877,7 +24142,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					{
 						Scene * sc = skope->ogl->getScene();
 						const NifModel * nif = sc ? sc->nifModel : nullptr;
-						const QString looseRoot = qEnvironmentVariable( "WW_LODGEN_DATA_ROOT" );
+						const QString looseRoot = wwEnvStr( "WW_LODGEN_DATA_ROOT" );
 						auto readLodm = [&]( const QString & candidate, QByteArray & out ) {
 							out.clear();
 							if ( !looseRoot.isEmpty() ) {
@@ -24167,7 +24432,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * view. The channel renders keep texturing ON so the leaf cards'
 					 * alpha test still cuts. Near and far sit symmetric about the
 					 * bound centre, so window z 0.5 is the card plane. */
-					const int octN = qEnvironmentVariableIntValue( "WW_IMPOSTOR_OCT" );
+					const int octN = wwEnvInt( "WW_IMPOSTOR_OCT" );
 					/* THE HORIZON RING (lane CARDFIX1 step 5 = IMPOSTORRING1; bungo 2026-09-23
 					 * 04:4x, RULED: "for fo4cs use the convention was 22.5 degrees per take").
 					 * WW_IMPOSTOR_RING=V photographs V azimuths at elevation 0, frame v at
@@ -24175,11 +24440,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * 3a), not a third one. It wins over WW_IMPOSTOR_OCT. Everything else -- the
 					 * matte, the 4x offscreen arm, per-frame offsets, one scale, the size ladder,
 					 * the coverage contract -- is the grid bake's, frame for frame. */
-					const int ringV = qEnvironmentVariableIntValue( "WW_IMPOSTOR_RING" );
+					const int ringV = wwEnvInt( "WW_IMPOSTOR_RING" );
 					const bool ringOn = ringV >= 4 && ringV <= 64;
 					const int gCols = ringOn ? ringV : octN, gRows = ringOn ? 1 : octN;
 					if ( ringOn || ( octN >= 2 && octN <= 16 ) ) {
-						int tile = qEnvironmentVariableIntValue( "WW_IMPOSTOR_TILE" );
+						int tile = wwEnvInt( "WW_IMPOSTOR_TILE" );
 						if ( tile < 32 || tile > 512 )
 							tile = 256;	// 8 x 8 at 2k (bungo 2026-09-23, lane DEFAULTS2); was 128
 						/* To a multiple of 32: the size ladder below halves this up
@@ -24191,8 +24456,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * it cannot know this; the candidate listing reports every
 						 * base's extent and the driver hands down the maximum.
 						 * Unset means no size ladder: every base at full size. */
-						const float refExtent = qEnvironmentVariableIsSet( "WW_IMPOSTOR_REF" )
-							? qEnvironmentVariable( "WW_IMPOSTOR_REF" ).toFloat() : 0.0f;
+						const float refExtent = wwEnvIsSet( "WW_IMPOSTOR_REF" )
+							? wwEnvStr( "WW_IMPOSTOR_REF" ).toFloat() : 0.0f;
 						skope->ogl->setOrientation( GLView::ViewFront, true );	// fit Dist to the bound once
 						qApp->processEvents();
 						/* The sheet is OCT*OCT views, each drawn twice for the
@@ -24333,8 +24598,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * weighted, window-size independent. WW_IMPOSTOR_AA=K picks K
 						 * (1..8; 2 is IMPOSTORAA1's bake exactly), =0 the window
 						 * photograph. The fill is K^2 per texel: 4x the 2x arm's. */
-						const int aaK = qEnvironmentVariableIsSet( "WW_IMPOSTOR_AA" )
-							? qBound( 0, qEnvironmentVariableIntValue( "WW_IMPOSTOR_AA" ), 8 ) : 4;
+						const int aaK = wwEnvIsSet( "WW_IMPOSTOR_AA" )
+							? qBound( 0, wwEnvInt( "WW_IMPOSTOR_AA" ), 8 ) : 4;
 						const bool aaOn = aaK > 0;
 						const int p1Size = qMax( 1024, 2 * tile );		// pass one's offscreen matte, square
 						float aaCentreErr = 0.0f;						// worst silhouette-centre miss, output texels
@@ -25225,7 +25490,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * otherwise make frame 1 and the settled frame agree by both being empty of
 	 * the effect under test.
 	 */
-	if ( qEnvironmentVariableIsSet( "WW_FIRSTFRAME_TEST" ) ) {
+	if ( wwEnvIsSet( "WW_FIRSTFRAME_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			if ( skope->ogl ) {
 				if ( Scene * sc = skope->ogl->getScene() ) {
@@ -25235,8 +25500,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// is what lets a driver render the paired
 					// refraction-on/refraction-off FIRST frames and prove the
 					// effect was in frame 1 at all.
-					sc->showRefraction = !qEnvironmentVariableIsSet( "WW_RENDER_REFRACTION" )
-						|| qEnvironmentVariableIntValue( "WW_RENDER_REFRACTION" ) != 0;
+					sc->showRefraction = !wwEnvIsSet( "WW_RENDER_REFRACTION" )
+						|| wwEnvInt( "WW_RENDER_REFRACTION" ) != 0;
 					sc->showParticles = true;
 				}
 			}
@@ -25285,8 +25550,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *
 	 * Log: release/ww_archivebrowse_test.log
 	 */
-	if ( qEnvironmentVariableIsSet( "WW_ARCHIVEBROWSE_TEST" ) ) {
-		const QString browseTarget = qEnvironmentVariable( "WW_ARCHIVEBROWSE_TEST" );
+	if ( wwEnvIsSet( "WW_ARCHIVEBROWSE_TEST" ) ) {
+		const QString browseTarget = wwEnvStr( "WW_ARCHIVEBROWSE_TEST" );
 		QTimer::singleShot( 1500, skope, [skope, browseTarget]() {
 			QFile logf( QApplication::applicationDirPath() + "/ww_archivebrowse_test.log" );
 			if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
@@ -25358,7 +25623,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				 * GeneratedMeshes report — 1,007 .bto indexed, none reportedly
 				 * shown — so that class of loss has a check that can fail.
 				 */
-				const QString expectList = qEnvironmentVariable( "WW_ARCHIVEBROWSE_EXPECT" );
+				const QString expectList = wwEnvStr( "WW_ARCHIVEBROWSE_EXPECT" );
 				if ( !expectList.isEmpty() ) {
 					for ( const QString & ext : expectList.split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 						const QString suffix = QLatin1String( "." ) + ext.trimmed();
@@ -25394,7 +25659,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// its expanded folders across the load-triggered repopulate. Expands the first
 	// folder, repopulates (exactly what completeLoading does), and checks the
 	// folder is still open. -> ww_browser_test.log, quit.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_BROWSER_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_BROWSER_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 2500, skope, [skope]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_browser_test.log" );
@@ -25459,7 +25724,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// TEMP DIAGNOSTIC (WW_PERF_TEST=1, remove when the slow click-select is
 	// fixed): after the file loads, time every stage of the click-select
 	// pipeline on the largest BSTriShape, dump to ww_perf_test.log, quit.
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_PERF_TEST" ) ) {
 		// launch -> loaded wall time (includes window construction and the
 		// synchronous UI-thread NIF parse)
 		auto launchTimer = std::make_shared<QElapsedTimer>();
@@ -25715,7 +25980,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			// WW_STARTER_SHOT=<png>: prove the document startup builds actually
 			// renders, then quit. The startup path cannot be checked any other way
 			// without leaving a window up.
-			const QString starterShot = qEnvironmentVariable( "WW_STARTER_SHOT" );
+			const QString starterShot = wwEnvStr( "WW_STARTER_SHOT" );
 			if ( !starterShot.isEmpty() && skope->ogl ) {
 				QTimer::singleShot( 0, skope, [skope, starterShot, nif]() {
 					QFile logf( QApplication::applicationDirPath() + "/ww_starter_test.log" );
@@ -25883,7 +26148,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			 * application filter directly begins immediately below that boundary;
 			 * acceptDrops on the main/container widgets is checked separately.
 			 */
-			if ( qEnvironmentVariableIsSet( "WW_EXTERNAL_DROP_TEST" ) ) {
+			if ( wwEnvIsSet( "WW_EXTERNAL_DROP_TEST" ) ) {
 				QTimer::singleShot( 300, skope, [skope]() {
 					QFile logf( QApplication::applicationDirPath()
 						+ QStringLiteral( "/ww_external_drop_test.log" ) );
@@ -25903,7 +26168,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						loop.exec();
 						QApplication::processEvents();
 					};
-					const QStringList files = qEnvironmentVariable( "WW_EXTERNAL_DROP_TEST" )
+					const QStringList files = wwEnvStr( "WW_EXTERNAL_DROP_TEST" )
 						.split( QLatin1Char( ';' ), Qt::SkipEmptyParts );
 					log << "paths: " << files.join( QStringLiteral( " | " ) ) << "\n";
 					log.flush();
@@ -26369,7 +26634,7 @@ void NifSkope::initActions()
 		QElapsedTimer perfT;	// TEMP DIAGNOSTIC (WW_PERF_TEST)
 		perfT.start();
 		auto perfMark = [&perfT]() {
-			if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+			if ( wwEnvIsSet( "WW_PERF_TEST" ) ) {
 				QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
 				if ( f.open( QIODevice::Append | QIODevice::Text ) )
 					QTextStream( &f ) << "    [list mirror: " << perfT.elapsed() << " ms]\n";
@@ -26706,12 +26971,12 @@ void NifSkope::initDockWidgets()
 		 * the placement table describes is built by that load, and it ticks
 		 * the master itself: a harness forces the state it measures rather
 		 * than inheriting it from QSettings. */
-		if ( !qgetenv( "WW_CELLPICK_TEST" ).isEmpty() ) {
+		if ( !wwEnv( "WW_CELLPICK_TEST" ).isEmpty() ) {
 			aCellPick->setChecked( true );
 			connect( this, &NifSkope::completeLoading, this,
 				[this, cellPick]( bool, QString & ) {
 					cellPickSelfTest( nif, cellPick, QString::fromLocal8Bit(
-						qgetenv( "WW_CELLPICK_TEST" ) ) );
+						wwEnv( "WW_CELLPICK_TEST" ) ) );
 				} );
 		}
 	}
@@ -30395,7 +30660,7 @@ void NifSkope::initMenu()
 		 * block the harness; a timer takes the picture and closes it.
 		 * Log: release/ww_unfuck_test.log, shot: release/ww_unfuck_dialog.png
 		 */
-		if ( qEnvironmentVariableIsSet( "WW_LODGEN_TEST" ) ) {
+		if ( wwEnvIsSet( "WW_LODGEN_TEST" ) ) {
 			QObject::connect( this, &NifSkope::completeLoading, this,
 				[this]( bool ok, QString & ) {
 				QTimer::singleShot( 800, this, [this, ok]() {
@@ -31631,7 +31896,7 @@ void NifSkope::initMenu()
 						 * so the group is snapshotted here and restored at the end,
 						 * keys that did not exist removed. A harness forces the state it
 						 * measures and leaves nobody's panel rearranged. */
-						if ( qEnvironmentVariableIntValue( "WW_LODGEN_RUN" ) == 1 ) {
+						if ( wwEnvInt( "WW_LODGEN_RUN" ) == 1 ) {
 							QMap<QString, QVariant> savedGroup;
 							{
 								QSettings s;
@@ -31773,7 +32038,7 @@ void NifSkope::initMenu()
 									line1 != line2 );
 								/* THE RESULT-LINE PICTURE: the action bar on its own,
 								 * with the four times in it. */
-								const QByteArray rshot = qgetenv( "WW_LODGEN_SHOT_RESULT" );
+								const QByteArray rshot = wwEnv( "WW_LODGEN_SHOT_RESULT" );
 								if ( !rshot.isEmpty() ) {
 									if ( auto * bar = findChild<QWidget *>( QStringLiteral( "LodgenActionBar" ) ) ) {
 										const bool sv = bar->grab().save( QString::fromLocal8Bit( rshot ) );
@@ -31812,7 +32077,7 @@ void NifSkope::initMenu()
 						 * R2). Settings are put back as the run leg puts them back.
 						 * Every line carries "MO2DISK"; tests/spells/lodgen_panel_mo2.sh
 						 * counts its own. */
-						if ( qEnvironmentVariableIntValue( "WW_LODGEN_MO2DISK" ) == 1 ) {
+						if ( wwEnvInt( "WW_LODGEN_MO2DISK" ) == 1 ) {
 							QMap<QString, QVariant> savedGroup3;
 							{
 								QSettings s;
@@ -31859,8 +32124,8 @@ void NifSkope::initMenu()
 									&& status3->text().contains( QLatin1String( "C:/no/such/profile" ) ) );
 								check( "MO2DISK and Generate is refused with it", !gen3->isEnabled() );
 								// the profile under test
-								mods3->setText( qEnvironmentVariable( "WW_LODGEN_MO2_MODS" ) );
-								prof3->setText( qEnvironmentVariable( "WW_LODGEN_MO2_PROFILE" ) );
+								mods3->setText( wwEnvStr( "WW_LODGEN_MO2_MODS" ) );
+								prof3->setText( wwEnvStr( "WW_LODGEN_MO2_PROFILE" ) );
 								const qint64 wsMs = pumpWs( 120000 );
 								const int np = plugins3->count();
 								log << "  MO2DISK status: '" << status3->text() << "'\n";
@@ -31880,10 +32145,10 @@ void NifSkope::initMenu()
 									np > 0 && plugins3->item( 0 )->text().endsWith( QLatin1String( "/Fallout4.esm" ), Qt::CaseInsensitive )
 									&& QFileInfo( plugins3->item( 0 )->text() ).isAbsolute() );
 								check( QString( "MO2DISK every listed plugin is an existing full path (%1)" ).arg( np ), allFull );
-								const int wantP = qEnvironmentVariableIntValue( "WW_LODGEN_MO2_NPLUGINS" );
+								const int wantP = wwEnvInt( "WW_LODGEN_MO2_NPLUGINS" );
 								check( QString( "MO2DISK the list holds the expected %1 plugins (%2)" ).arg( wantP ).arg( np ),
 									wantP > 0 && np == wantP );
-								const int wantS = qEnvironmentVariableIntValue( "WW_LODGEN_MO2_NSTACK" );
+								const int wantS = wwEnvInt( "WW_LODGEN_MO2_NSTACK" );
 								check( QString( "MO2DISK the mod order shows the expected %1 rows, game Data first (%2)" )
 									.arg( wantS ).arg( stack3->count() ),
 									stack3->isVisible() && wantS > 0 && stack3->count() == wantS
@@ -31897,7 +32162,7 @@ void NifSkope::initMenu()
 								check( "MO2DISK the status line says what it read",
 									status3->text().contains( QLatin1String( "plugins" ) )
 									&& status3->text().contains( QLatin1String( "mods enabled" ) ) );
-								const QByteArray shot3 = qgetenv( "WW_LODGEN_MO2_SHOT" );
+								const QByteArray shot3 = wwEnv( "WW_LODGEN_MO2_SHOT" );
 								if ( !shot3.isEmpty() ) {
 									if ( auto * dock3 = findChild<QDockWidget *>( QStringLiteral( "LodGenerationDock" ) ) ) {
 										if ( auto * sa3 = dock3->findChild<QScrollArea *>() ) {
@@ -31911,7 +32176,7 @@ void NifSkope::initMenu()
 											<< QString::fromLocal8Bit( shot3 ) << "\n";
 									}
 								}
-								const QString out3 = qEnvironmentVariable( "WW_LODGEN_MO2_OUT" );
+								const QString out3 = wwEnvStr( "WW_LODGEN_MO2_OUT" );
 								if ( !out3.isEmpty() ) {
 									auto * target3 = findChild<QComboBox *>( QStringLiteral( "LodgenTargetBox" ) );
 									auto * outE3 = findChild<QLineEdit *>( QStringLiteral( "LodgenOutputEdit" ) );
@@ -32021,7 +32286,7 @@ void NifSkope::initMenu()
 						 *
 						 * Opt-in: this is 50-odd bakes. `tests/spells/lodgen_byte_gate.sh`
 						 * is the spell, and it carries the budget. */
-						if ( qEnvironmentVariableIntValue( "WW_LODGEN_GATE" ) == 1 ) {
+						if ( wwEnvInt( "WW_LODGEN_GATE" ) == 1 ) {
 							QMap<QString, QVariant> savedGate;
 							{
 								QSettings s;
@@ -32223,8 +32488,8 @@ void NifSkope::initMenu()
 								QStringList sameRows, refusedRows, movedRows, notHereRows;
 								QElapsedTimer gateClock;
 								gateClock.start();
-								const int gateBudgetMs = qEnvironmentVariableIntValue( "WW_LODGEN_GATE_MS" ) > 0
-									? qEnvironmentVariableIntValue( "WW_LODGEN_GATE_MS" ) : 2400000;
+								const int gateBudgetMs = wwEnvInt( "WW_LODGEN_GATE_MS" ) > 0
+									? wwEnvInt( "WW_LODGEN_GATE_MS" ) : 2400000;
 								int done = 0;
 								/* the settings key an OBJECT name belongs to, so a dependent
 								 * row can name the row it hangs off in plain language */
@@ -32479,7 +32744,7 @@ void NifSkope::initMenu()
 							 * picture used, so no existing grab moves. The width the dock ACTUALLY
 							 * took is logged either way: resizeDocks() is advisory, and the main
 							 * window own width has been clamping it to 497. */
-							const QByteArray wEnv = qgetenv( "WW_LODGEN_SHOT_W" );
+							const QByteArray wEnv = wwEnv( "WW_LODGEN_SHOT_W" );
 							int want = 640;
 							if ( wEnv == QByteArray( "min" ) )
 								want = qMax( dock->minimumSizeHint().width(), dock->minimumWidth() );
@@ -32524,7 +32789,7 @@ void NifSkope::initMenu()
 								QApplication::processEvents();
 							}
 						};
-						const QByteArray shot = qgetenv( "WW_LODGEN_SHOT" );
+						const QByteArray shot = wwEnv( "WW_LODGEN_SHOT" );
 						if ( !shot.isEmpty() && dock ) {
 							if ( auto * full = findChild<QRadioButton *>( QStringLiteral( "LodgenLodtFullRadio" ) ) )
 								full->setChecked( true );
@@ -32548,7 +32813,7 @@ void NifSkope::initMenu()
 						 * widget. An expander is named Lodgen<key>Expander and its body
 						 * Lodgen<key>Body, which is how one is matched to the other without
 						 * LodgenSection being visible from this file. */
-						const QByteArray shotFull = qgetenv( "WW_LODGEN_SHOT_FULL" );
+						const QByteArray shotFull = wwEnv( "WW_LODGEN_SHOT_FULL" );
 						if ( !shotFull.isEmpty() && dock ) {
 							if ( auto * full = findChild<QRadioButton *>( QStringLiteral( "LodgenLodtFullRadio" ) ) )
 								full->setChecked( true );
@@ -32589,7 +32854,7 @@ void NifSkope::initMenu()
 						 * differs by target now, so one picture cannot show both; this
 						 * switches, grabs, and switches back so the panel is left where
 						 * it was found. */
-						const QByteArray shotStock = qgetenv( "WW_LODGEN_SHOT_STOCK" );
+						const QByteArray shotStock = wwEnv( "WW_LODGEN_SHOT_STOCK" );
 						if ( !shotStock.isEmpty() && dock ) {
 							if ( auto * tb = findChild<QComboBox *>( QStringLiteral( "LodgenTargetBox" ) ) ) {
 								const int keep = tb->currentIndex();
@@ -32611,7 +32876,7 @@ void NifSkope::initMenu()
 				} );
 			} );
 		}
-		if ( qEnvironmentVariableIsSet( "WW_UNFUCK_TEST" ) ) {
+		if ( wwEnvIsSet( "WW_UNFUCK_TEST" ) ) {
 			QObject::connect( this, &NifSkope::completeLoading, this,
 				[this, spellsMenu]( bool ok, QString & ) {
 				QTimer::singleShot( 800, this, [this, spellsMenu, ok]() {
@@ -33675,7 +33940,7 @@ void NifSkope::saveUi() const
 	 * the way back. Saving the Cell layout left the next launch, which always
 	 * opens Default, with no block list and nothing to bring it back (bungo
 	 * 2026-10-03). WW_CELL_WSRESTORE_RED is the gate's red control only. */
-	const bool wsRed = qEnvironmentVariableIsSet( "WW_CELL_WSRESTORE_RED" );
+	const bool wsRed = wwEnvIsSet( "WW_CELL_WSRESTORE_RED" );
 	settings.setValue( "Window State"_uip, ( workspaceLayoutSaved && !wsRed )
 		? workspaceLayoutBefore : saveState( 0x074 ) );
 	settings.setValue( "Window Geometry"_uip, saveGeometry() );
@@ -33790,7 +34055,7 @@ void NifSkope::restoreUi()
 	 * the Cell workspace (every build before this lane) replays it hidden, with
 	 * the Cell dock up, into a window that opens in Default; put both right so
 	 * such a saved layout heals on its own. */
-	if ( dLeft && !qEnvironmentVariableIsSet( "WW_CELL_WSRESTORE_RED" ) ) {
+	if ( dLeft && !wwEnvIsSet( "WW_CELL_WSRESTORE_RED" ) ) {
 		const bool hiding = workspaceIndex >= 0 && workspaceIndex < workspaceDefs.size()
 			&& workspaceDefs.at( workspaceIndex ).hideNifDocks;
 		if ( !hiding ) {

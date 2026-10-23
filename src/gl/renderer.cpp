@@ -31,6 +31,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "renderer.h"
+#include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
+#include "gl/celldrawstate.h"	// lane PERF3
+#include "gl/cellvrs.h"	// lane VRS1
+#include "gl/cellfxres.h"	// lane FXRES1
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "message.h"
 #include "nifskope.h"
@@ -47,6 +52,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellssr.h"
+#include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellssgi.h"
 #include "esmweather.h"
 #include "io/material.h"
@@ -54,7 +60,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/settingsdialog.h"
 #include "gl/BSMesh.h"
 #include "gl/cellhdr.h"
+#include "gl/cellfogbloom.h"
 #include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
+#include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 
@@ -87,15 +95,23 @@ struct SetupMemo
 	qint64 hits = 0, runs = 0, checked = 0, bad = 0, arms = 0;
 	SetupMemo()
 	{
-		const QByteArray v = qgetenv( "WW_SETUP_MEMO" );
+		const QByteArray v = wwEnv( "WW_SETUP_MEMO" );
 		mode = v.isEmpty() ? 1 : v.toInt();
-		check = qEnvironmentVariableIntValue( "WW_SETUP_MEMO_CHECK" ) != 0;
+		check = wwEnvInt( "WW_SETUP_MEMO_CHECK" ) != 0;
 	}
 };
 
 SetupMemo & setupMemo()
 {
 	static SetupMemo m;
+	static quint64 liveGen = 0;
+	if ( wwSwitchMoved( liveGen ) ) {	// lane TESTDRIVER1: any live set may move a uniform the memo would skip; old stamps are void
+		const QByteArray v = wwEnv( "WW_SETUP_MEMO" );
+		m.mode = v.isEmpty() ? 1 : v.toInt();
+		m.check = wwEnvInt( "WW_SETUP_MEMO_CHECK" ) != 0;
+		m.epoch++;
+		m.stamps.clear();
+	}
 	return m;
 }
 
@@ -176,6 +192,77 @@ int glSnapDiff( const GlSnap & a, const GlSnap & b, bool print )
 		d++;
 	return d;
 }
+}
+
+namespace {
+struct OpaqueCut
+{
+	unsigned serial = 1;
+	bool armed = false;
+	const char * pass = "";
+	long long drawn = 0, skips = 0, wrong = 0;	// check mode, this armed run
+	int saw = -1;
+	QSet<QString> writers;
+};
+OpaqueCut & opaqueCut()
+{
+	static OpaqueCut c;
+	return c;
+}
+}
+
+void wwOpaqueCutNewFrame()
+{
+	opaqueCut().serial++;
+}
+
+bool wwOpaqueCutChecking()
+{
+	static const bool on = qEnvironmentVariableIntValue( "WW_CELL_OPAQUE_CUT_CHECK" ) == 1;
+	return on;
+}
+
+void wwOpaqueCutArm( bool on, const char * pass )
+{
+	OpaqueCut & c = opaqueCut();
+	if ( !on && c.armed && wwOpaqueCutChecking() )
+		std::fprintf( stderr, "opaque cut check (%s): sorted draws=%lld predicted skips=%lld wrong=%lld (must be 0)\n",
+			c.pass, c.drawn, c.skips, c.wrong );
+	c.armed = on;
+	c.pass = pass;
+	c.drawn = c.skips = c.wrong = 0;
+}
+
+bool wwOpaqueCutArmed()
+{
+	return opaqueCut().armed;
+}
+
+bool wwOpaqueCutSkips( const Shape * s )
+{
+	// a record from this or the last two passes' frames (an edit shows at most that late); none: draw
+	const OpaqueCut & c = opaqueCut();
+	return c.armed && s->wwCutStamp != 0 && c.serial - s->wwCutStamp <= 2 && !s->wwCutWrote;
+}
+
+void wwOpaqueCutSaw( bool opaque )
+{
+	opaqueCut().saw = opaque ? 1 : 0;
+}
+
+void wwOpaqueCutCheckNote( bool predictedSkip, const QString & name )
+{
+	OpaqueCut & c = opaqueCut();
+	const bool wrote = c.saw != 0;	// -1 (the pass never judged it): counted as written, never skippable
+	c.saw = -1;
+	c.drawn++;
+	c.skips += predictedSkip ? 1 : 0;
+	c.wrong += ( predictedSkip && wrote ) ? 1 : 0;
+	// the sorted shapes that write in the opaque pass (unblended, cell-lit): what the old full cut dropped
+	if ( wrote && c.writers.size() < 64 && !c.writers.contains( name ) ) {
+		c.writers.insert( name );
+		std::fprintf( stderr, "opaque cut writer (%s): '%s'\n", c.pass, qPrintable( name ) );
+	}
 }
 
 void wwSetupMemoArm( bool on )
@@ -310,8 +397,94 @@ static Scene * wwAoScene = nullptr;	// lane AO1: the drawing scene, set by setup
  * whose colour or share came out non-finite draws green, everything else black). */
 static int wwLandSplatDbg()
 {
-	static const int v = qgetenv( "WW_TERRBLEND_PROBE" ) == "edge" ? 2 : qgetenv( "WW_TERRBLEND_RED" ) == "edgepass" ? 1 : 0;
+	WW_SWITCH_STATIC( int, v, wwEnv( "WW_TERRBLEND_PROBE" ) == "edge" ? 2 : wwEnv( "WW_TERRBLEND_RED" ) == "edgepass" ? 1 : 0 );
 	return v;
+}
+
+// lane PERF3: the per-draw GL query cache (celldrawstate.h)
+namespace {
+struct DrawGlCache
+{
+	int depth = 0;
+	int blend = -1;
+	GLint active = -1;
+	GLint vp[4] = { 0, 0, 1, 1 };
+	bool vpOk = false;
+};
+DrawGlCache & drawGl() { static DrawGlCache c; return c; }
+bool envOn( const char * sw, const char * red )
+{
+	return qgetenv( sw ).trimmed() != "0" && qgetenv( red ).trimmed() != "1" && qgetenv( "WW_PERF3_RED" ).trimmed() != "1";
+}
+bool drawGlOn() { static const bool on = envOn( "WW_DRAW_GLCACHE", "WW_DRAW_GLCACHE_RED" ); return on; }
+}
+
+WwDrawGlScope::WwDrawGlScope()
+{
+	DrawGlCache & c = drawGl();
+	if ( drawGlOn() && c.depth++ == 0 ) {
+		c.blend = -1;
+		c.active = -1;
+		c.vpOk = false;
+	}
+}
+
+WwDrawGlScope::~WwDrawGlScope()
+{
+	if ( drawGlOn() )
+		drawGl().depth--;
+}
+
+bool wwDrawBlend()
+{
+	DrawGlCache & c = drawGl();
+	if ( !c.depth )
+		return glIsEnabled( GL_BLEND );
+	if ( c.blend < 0 )
+		c.blend = glIsEnabled( GL_BLEND ) ? 1 : 0;
+	return c.blend != 0;
+}
+
+int wwDrawActiveTexture()
+{
+	DrawGlCache & c = drawGl();
+	if ( !c.depth || c.active < 0 ) {
+		GLint a = 0;
+		glGetIntegerv( GL_ACTIVE_TEXTURE, &a );
+		if ( !c.depth )
+			return int( a );
+		c.active = a;
+	}
+	return int( c.active );
+}
+
+void wwDrawViewport( int vp[4] )
+{
+	DrawGlCache & c = drawGl();
+	if ( !c.depth ) {
+		GLint v[4] = { 0, 0, 1, 1 };
+		glGetIntegerv( GL_VIEWPORT, v );
+		for ( int i = 0; i < 4; i++ )
+			vp[i] = int( v[i] );
+		return;
+	}
+	if ( !c.vpOk ) {
+		glGetIntegerv( GL_VIEWPORT, c.vp );
+		c.vpOk = true;
+	}
+	for ( int i = 0; i < 4; i++ )
+		vp[i] = int( c.vp[i] );
+}
+
+void wwDrawGlCacheDirty()
+{
+	drawGl().blend = -1;
+}
+
+bool wwCellAoLean()
+{
+	static const bool on = envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" );
+	return on;
 }
 
 static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, Shape * mesh,
@@ -319,6 +492,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	int msn, int lodLand, NifSkopeOpenGLContext::Program * program,
 	const FloatVector4 & lightViewDir )
 {
+	const WwDrawGlScope drawGlScope;	// lane PERF3
 	/* lane IMGS1: the imagespace's measure pass holds the cell-lit fragments' linear light. Any
 	 * other program (sky, debug) writes neither colour nor depth there; glview.cpp
 	 * restores both masks after the pass. The stencil: bit 0 = a cell-lit fragment landed here (the
@@ -338,7 +512,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 			glDepthMask( GL_FALSE );
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( cell ? 0x03 : 0x02 );
-		glStencilFunc( GL_ALWAYS, !cell ? 2 : glIsEnabled( GL_BLEND ) ? 3 : 1, 0xFF );
+		glStencilFunc( GL_ALWAYS, !cell ? 2 : wwDrawBlend() ? 3 : 1, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
 	} else if ( wwCellHdrActive() ) {
 		// lane HDR1: the linear frame (cellhdr.h). The stencil keeps who wrote a pixel last: 1 a cell program or a
@@ -346,21 +520,38 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		// WATERHDR1: and the water, which writes linear light too (it was written back raw: the creek ~6/255)
 		const bool lin = program && ( wwIsCellProgramName( program->name ) || program->name == std::string_view( "fo4_effectcell.prog" )
 			|| wwIsCellDecalProgramName( program->name )	// lane DECALLIT1
+			|| program->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1: the layer's (composited as 1)
 			|| ( program->name == std::string_view( "fo4_water.prog" ) && wwCellWaterWritesLinear() ) );
+		// lane FOGBLOOM1 (cellfogbloom.h): a blended linear draw (an effect, glass) also sets bit 2, the bloom it takes in fog
+		const bool fogMark = lin && wwCellFogBloomMarks() && glIsEnabled( GL_BLEND )
+			&& program->name != std::string_view( "fo4_water.prog" ) && !wwIsCellDecalProgramName( program->name );
 		glEnable( GL_STENCIL_TEST );
-		glStencilMask( 0x03 );
-		glStencilFunc( GL_ALWAYS, lin ? 1 : 2, 0xFF );
+		glStencilMask( wwCellFogBloomMarks() ? 0x07 : 0x03 );
+		glStencilFunc( GL_ALWAYS, ( lin ? 1 : 2 ) | ( fogMark ? 4 : 0 ), 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	}
+	// lane FXRES1: in the soft-effect layer, a draw it cannot hold exactly is masked and drawn in place after it
+	if ( mesh && wwCellFxResDrawing() )
+		wwCellFxResDrawHook( mesh, program ? program->name : std::string_view() );
+	// lane PERF2FIX1: what this draw writes in the obscurance/reflection opaque passes (their own test, below)
+	if ( mesh && wwKind ) {
+		mesh->wwCutWrote = program && wwIsCellProgramName( program->name ) && !glIsEnabled( GL_BLEND );
+		mesh->wwCutStamp = opaqueCut().serial;
 	}
 	// lane AO1: the obscurance's opaque pass (normal + depth from the opaque cell-lit draws only), and every
 	// other cell-lit draw reads this frame's obscurance (celllights.h)
 	if ( mesh && wwAoScene )
 		wwCellAoDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	// lane SSR1: the reflections' scene pass, and the reflection a flagged opaque draw reads (cellssr.h)
-	if ( mesh && wwAoScene )
+	// lane PERF3: not in the AO opaque pass (the main pass sets them again per draw)
+	const bool aoLean = wwCellAoInPass() && wwCellAoLean();
+	if ( mesh && wwAoScene && !aoLean )
 		wwCellSsrDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
-	// lane SSGI1: the screen-space bounce a cell-lit opaque draw reads (cellssgi.h)
+	// lane REFLPROBE1: the placed probes a cell-lit env-mapped draw reads (cellreflprobe.h)
 	if ( mesh && wwAoScene )
+		wwCellReflProbeDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
+	// lane SSGI1: the screen-space bounce a cell-lit opaque draw reads (cellssgi.h)
+	if ( mesh && wwAoScene && !aoLean )
 		wwCellSsgiDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
 	/* WW_PBRM_CENSUS (lane PBRR0) rides the same exits: every return of
 	 * setupProgram passes through here with the program it actually bound,
@@ -389,7 +580,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	static int	armed = -1;
 	static QString	censusPath;
 	if ( armed < 0 ) {
-		QString	p = QString::fromLocal8Bit( qgetenv( "WW_PROGRAM_CENSUS" ) ).trimmed();
+		QString	p = QString::fromLocal8Bit( wwEnv( "WW_PROGRAM_CENSUS" ) ).trimmed();
 		armed = ( !p.isEmpty() && QDir::isAbsolutePath( p ) ) ? 1 : 0;
 		censusPath = p;
 	}
@@ -484,12 +675,19 @@ float wwCellCubeDecodeMode()
 
 NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program * hint )
 {
+	PassTime::DrawCpuScope wwSetupT( PassTime::CpuSetup );	// lane PERF2
 	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
 	wwAoScene = mesh->scene;	// lane AO1
+	if ( wwCellVrsActive() ) {	// lane VRS1: a draw that can discard (alpha test, effect, PBR composition) shades 1x1
+		const Material * vm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
+		wwCellVrsDraw( ( mesh->alphaProperty && mesh->alphaProperty->hasAlphaTest() ) || ( vm && vm->hasAlphaTest() ) || mesh->bsesp
+			|| ( mesh->bslsp && mesh->bslsp->pbrmValid ) );
+	}
 	{	// lane SSR1: the draw's reflection flag (an environment-mapped material file with its reflections switch on)
 		const Material * sm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
 		wwCellSsrNote( sm && sm->isShaderMaterial() && sm->bEnvironmentMapping && sm->bScreenSpaceReflections );
+		wwCellReflProbeNote( mesh->bslsp && mesh->bslsp->greyscaleColor );	// lane REFLPROBE1: the palette owns GreyscaleMap
 	}
 
 	/* Read here, not inside wwProgramCensus: `Shape::bslsp` is protected and
@@ -630,6 +828,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		/* lane DECALLIT1: an effect decal takes fo4_effectdecal.prog (the game draws it into the surface under it, lit as that
 		 * surface; + the cascades while the map is built); red WW_CELL_DECALLIT_RED=unlit keeps it a self-lit effect */
 		if ( p->name == std::string_view( "fo4_effectshader.prog" ) || p->name == std::string_view( "fo4_effectcell.prog" )
+			|| p->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1
 			|| wwIsCellDecalProgramName( p->name ) ) {
 			const bool cellFx = wwCellLightsWanted( mesh->scene ) && !( wwCellFxRed() & 1 );
 			/* lane GIDARK1: an exterior's lit effect takes the same program, lit by the spot it stands in (fxRoomLit) */
@@ -637,7 +836,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			const char * want = !cellFx ? "fo4_effectshader.prog"
 				: ( ( mesh->effectDecal && !wwCellDecalLitRed() ) || roomLit )
 					? ( wwSunShadowWanted( mesh->scene ) ? "fo4_effectdecalcsm.prog" : "fo4_effectdecal.prog" )
-				: "fo4_effectcell.prog";
+				: wwCellFxResDrawing() ? "fo4_effectcellfx.prog" : "fo4_effectcell.prog";	// lane FXRES1: the layer's outputs
 			if ( p->name == std::string_view( want ) )
 				return p;
 			Program * q = useProgram( want );
@@ -1192,8 +1391,8 @@ bool Renderer::setupProgramCE2( const NifModel * nif, Program * prog, Shape * me
  * refused by name on stderr and changes nothing. Echoed once, so a picture under it can be told apart. */
 bool wwLegacyRouteRed()
 {
-	static const bool v = []() {
-		const QString s = qEnvironmentVariable( "WW_LEGACYROUTE_RED" ).trimmed().toLower();
+	WW_SWITCH_STATIC( bool, v, []() {
+		const QString s = wwEnvStr( "WW_LEGACYROUTE_RED" ).trimmed().toLower();
 		if ( s.isEmpty() )
 			return false;
 		const bool on = ( s == QLatin1StringView( "oldroute" ) );
@@ -1202,7 +1401,7 @@ bool wwLegacyRouteRed()
 			   : "REFUSED: unknown value (known: oldroute); legacy materials draw their legacy program" );
 		fflush( stderr );
 		return on;
-	}();
+	}() );
 	return v;
 }
 
@@ -1690,7 +1889,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		/* lane FIXPACK1 (REDFIX1): WW_R2A_RED=nomsn now breaks the _msn read where it lives since LEGACYROUTE1
 		 * (this legacy program, every renderer mode): the far ground's model-space sheet is read as tangent
 		 * space again. FARLOD3's red sat in pbrm_default.frag, which no vanilla material reaches any more. */
-		static const bool redNoMsn = qgetenv( "WW_R2A_RED" ) == "nomsn";
+		WW_SWITCH_STATIC( bool, redNoMsn, wwEnv( "WW_R2A_RED" ) == "nomsn" );
 		prog->uni1i( "hasModelSpaceNormals",
 			int( !redNoMsn && forced == &emptyString
 				&& lsp->hasSF1( ShaderFlags::SLSF1_Model_Space_Normals ) ) );
@@ -1918,10 +2117,27 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		/* lane EFX2 (fo4_effectcell only): a Soft effect fades where it nears the opaque surface behind it and
 		 * near the eye, from the depth of the opaque pass, grabbed once per second pass */
 		if ( prog->uniLocation( "fxSoft" ) >= 0 ) {
-			const bool soft = esp->soft && esp->falloff.softDepth > 0.0f && !( wwCellFxRed() & 2 )
-				&& scene->grabEffectDepth();
+			/* lane VOLPART1: a LIT effect card while Volumetric Particles is on (cellvolair.h) is lit as a puff of the
+			 * air (cell_volpart.glsl) and always soft: a slab of the card's soft depth (else kVpCardDepth units)
+			 * against the opaque pass's depth, drawn with no depth test (BSShape reads wwVolPartFx) */
+			constexpr float kVpCardDepth = 64.0f;
+			const bool fxLit = wwCellFxLitFor( scene->nifModel, mesh->id() ) != nullptr;
+			const bool vp = wwVolPartUniforms( scene ) && fxLit;
+			if ( !vp && prog->uniLocation( "volPart" ) >= 0 )
+				prog->uni1i( "volPart", 0 );
+			const bool espSoft = esp->soft && esp->falloff.softDepth > 0.0f;
+			const bool soft = ( espSoft || vp ) && !( wwCellFxRed() & 2 ) && scene->grabEffectDepth();
 			prog->uni1b( "fxSoft", soft );
-			prog->uni1f( "fxSoftDepth", std::max( esp->falloff.softDepth, 1.0f ) );
+			prog->uni1f( "fxSoftDepth", espSoft ? std::max( esp->falloff.softDepth, 1.0f ) : vp ? kVpCardDepth : 1.0f );
+			wwVolPartFxSet( vp ? 1 | ( soft && !( wwVolPartRed() & 4 ) ? 2 : 0 ) : 0 );
+			if ( vp ) {
+				static QString said;
+				const QString now = wwVolPartSummary() + QStringLiteral( " soft=%1" ).arg( soft ? 1 : 0 );
+				if ( now != said ) {
+					said = now;
+					fprintf( stderr, "cell effects volumetric: %s\n", qPrintable( now ) );
+				}
+			}
 			fn->glActiveTexture( GL_TEXTURE0 + texunit );
 			fn->glBindTexture( GL_TEXTURE_2D, soft ? scene->fxDepthTexId : 0 );
 			prog->uni1i_l( prog->uniLocation( "fxDepth" ), texunit++ );
@@ -1938,7 +2154,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		if ( nifVersion >= 130 ) {
 
 			prog->uni1f( "lightingInfluence", esp->lightingInfluence );
-			if ( wwCellFxLitProbeShape( scene, mesh->id() ) && qEnvironmentVariableIsSet( "WW_CELL_FXLIT_DUMP" ) ) {
+			if ( wwCellFxLitProbeShape( scene, mesh->id() ) && wwEnvIsSet( "WW_CELL_FXLIT_DUMP" ) ) {
 				// lane FXLIT1: what each lit effect's probe drew with, once per shape (the gate's dump)
 				static QSet<int> said;
 				if ( !said.contains( mesh->id() ) ) {
@@ -2077,7 +2293,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	 * where the layer's share is small, hard-edged where its quads stop (bungo's circled ground at -19,23, on his
 	 * stack: Boston Natural Surroundings' material-backed sets). The game's landscape shader never reads the BGSM's
 	 * alpha. WW_TERRBLEND_RED=matalpha puts the material back in charge, so the gate is shown to fail on it. */
-	static const bool landMatAlphaRed = qgetenv( "WW_TERRBLEND_RED" ) == "matalpha";
+	WW_SWITCH_STATIC( bool, landMatAlphaRed, wwEnv( "WW_TERRBLEND_RED" ) == "matalpha" );
 	const bool landSplatPass = !landMatAlphaRed && scene && wwCellLandIs( scene->nifModel, mesh->id() );
 	if ( landSplatPass ) {
 		AlphaProperty::glProperty( mesh->alphaProperty, prog );
@@ -2108,7 +2324,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			 * lives under a trees/ folder at that threshold instead of the
 			 * BGSM's own (80/82 on the tree LOD sets). The BGSM wins over the
 			 * NiAlphaProperty here, so this is the only place the dial bites. */
-			static const int treeDial = qEnvironmentVariableIntValue( "WW_LODL_TREE_ALPHA" );
+			WW_SWITCH_STATIC( int, treeDial, wwEnvInt( "WW_LODL_TREE_ALPHA" ) );
 			if ( treeDial >= 1 && treeDial <= 255 && !mat->textureList.isEmpty()
 				&& QString( mat->textureList.at( 0 ) ).replace( QChar( '\\' ), QChar( '/' ) )
 					.contains( QLatin1String( "/trees/" ), Qt::CaseInsensitive ) )
@@ -2158,6 +2374,10 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
 	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
 		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
+	if ( ( wwVolPartFx() & 1 ) && ( wwVolPartRed() & 64 ) && prog->name == std::string_view( "fo4_effectcell.prog" ) ) {
+		prog->uni1b( "cellShadowOn", false );	// lane VOLPART1 red noshadow: the placed lights' cubes too
+		setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)
+	}
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 	if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 		// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)

@@ -9,6 +9,7 @@
  * the splat loop around it, the weights and the cross-fade stay as they are. */
 
 #include "terrainpreview.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmdata.h"
 #include "lodgen.h"
@@ -1007,7 +1008,7 @@ bool buildBlend( GL * gl, const LodtFile & L, int cx0, int cy0, int cx1, int cy1
 	/* WW_BLEND_DUMP=<file> (lane TERRLIVE2's outline gate): "BLDW" v1, then i32 wn hn,
 	 * f32 res x0 yN, i32 qx0 qy0 qw qh, then wn*hn f32 weights (row 0 = north), then
 	 * qw*qh u8 painted quadrants (row 0 = south). */
-	const QByteArray dumpPath = qgetenv( "WW_BLEND_DUMP" );
+	const QByteArray dumpPath = wwEnv( "WW_BLEND_DUMP" );
 	if ( !dumpPath.isEmpty() ) {
 		QFile df( QString::fromLocal8Bit( dumpPath ) );
 		if ( df.open( QIODevice::WriteOnly ) ) {

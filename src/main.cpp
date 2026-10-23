@@ -31,8 +31,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "lodgen.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "lodgengpu.h"
 #include "proberelight.h"
+#include "celldoorlive.h"	// lane DOORLIVE1: the port's NifSkope::door
+#include "glview.h"
 #include "nifcli.h"
 #include "nifskope.h"
 #include "hkxanimui.h"
@@ -54,6 +57,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSettings>
 #include <QStack>
 #include <QSurfaceFormat>
+#include <QTimer>
 #include <QUdpSocket>
 #include <QUrl>
 #include <cstdio>	// lane PERF1: setvbuf
@@ -108,7 +112,7 @@ int main( int argc, char * argv[] )
 	/* lane PERF1: WW_STDERR_BUFFER=1 (timing harnesses only) holds stderr in a 4 MB buffer, written when full and at
 	 * exit. A harness redirects stderr to a file, and there each line cost the frame that printed it ~0.3 s, so the
 	 * frame timers measured the harness's writes. Set before any output, as setvbuf asks; a refusal flushes first. */
-	if ( qEnvironmentVariableIntValue( "WW_STDERR_BUFFER" ) == 1 )
+	if ( wwEnvInt( "WW_STDERR_BUFFER" ) == 1 )
 		std::setvbuf( stderr, nullptr, _IOFBF, 4 << 20 );
 	PassTime::profileFromStart();	// lane PERF1: WW_PROF_SAMPLE_ALL=1, the load profiled too
 
@@ -122,15 +126,15 @@ int main( int argc, char * argv[] )
 	 * anything reads one (each feature reads its pin once, lazily). A pin already set wins (WW_CELL_SSR_EXT=0 beside
 	 * WW_ALL_ON=1 keeps that one off). Not in it: the GPU relight (a measurement run: it relights twice and times
 	 * it) and Scene mode Lookdev itself (WW_LOOKDEV, the weather that lights an exterior). */
-	if ( qEnvironmentVariableIntValue( "WW_ALL_ON" ) == 1 ) {
+	if ( wwEnvInt( "WW_ALL_ON" ) == 1 ) {
 		static const char * const kAllOn[] = { "WW_CELL_LIT", "WW_CELL_GI", "WW_CELL_FAR", "WW_CELL_IS", "WW_TAA",
 			"WW_CELL_CULL", "WW_CELL_AO", "WW_CELL_SHADOW", "WW_CELL_WATER", "WW_CELL_SSR", "WW_CELL_SSR_EXT",
-			"WW_CELL_AODECAL", "WW_LOOKDEV_SHADOWS", "WW_LOOKDEV_FOG", "WW_CELL_AIR", "WW_CELL_PARTICLES", "WW_CELL_PREVIS",
+			"WW_CELL_AODECAL", "WW_LOOKDEV_SHADOWS", "WW_LOOKDEV_FOG", "WW_CELL_AIR", "WW_CELL_VOLPART", "WW_CELL_PARTICLES", "WW_CELL_PREVIS",
 			"WW_CELL_FARLOD", "WW_CELL_GRASS", "WW_CELL_DOF", "WW_CELL_MBLUR" };	// final merge: FARLOD1 + GRASSMB1
 		QByteArray set, kept;
 		for ( const char * k : kAllOn ) {
-			if ( qEnvironmentVariableIsSet( k ) ) {
-				kept += QByteArray( " " ) + k + "=" + qgetenv( k );
+			if ( wwEnvIsSet( k ) ) {
+				kept += QByteArray( " " ) + k + "=" + wwEnv( k );
 				continue;
 			}
 			qputenv( k, "1" );
@@ -240,10 +244,10 @@ int main( int argc, char * argv[] )
 		 * the profile's plugins.txt instead. */
 		{
 			QStringList stack;
-			const QString env = qEnvironmentVariable( "WW_LODGEN_RESOURCES" );
+			const QString env = wwEnvStr( "WW_LODGEN_RESOURCES" );
 			if ( !env.isEmpty() )
 				stack = env.split( QChar( ';' ), Qt::SkipEmptyParts );
-			if ( qEnvironmentVariableIntValue( "WW_LODGEN_MO2" ) == 1 ) {
+			if ( wwEnvInt( "WW_LODGEN_MO2" ) == 1 ) {
 				const QString data = Game::GameManager::path( Game::FALLOUT_4 ) + QStringLiteral( "/Data" );
 				QString perr;
 				stack = lodgenMo2Stack( data, lodgenReadPluginsTxt( lodgenPluginsTxtPath(), &perr ) ) + stack;
@@ -262,7 +266,7 @@ int main( int argc, char * argv[] )
 		/* lane BAKEINCR1: WW_CELL_BAKEINCR_CHECK=... is the incremental probe bake's check: it runs here,
 		 * after the game manager and the resource stack are set exactly as a bake sets them, and before
 		 * any window, then exits (src/probeincr.cpp). */
-		if ( !qEnvironmentVariableIsEmpty( "WW_CELL_BAKEINCR_CHECK" ) )
+		if ( !wwEnvIsEmpty( "WW_CELL_BAKEINCR_CHECK" ) )
 			return ProbeIncr::checkMain();
 
 		int port = NIFSKOPE_IPC_PORT;
@@ -290,7 +294,7 @@ int main( int argc, char * argv[] )
 		if ( parser.isSet( pathOption ) ) {
 			const QString pf = QFileInfo( parser.value( pathOption ) ).absoluteFilePath();
 			qputenv( "WW_RENDER_PATH", pf.toLocal8Bit() );
-			if ( !qEnvironmentVariableIsSet( "WW_RENDER_SHOT" ) ) {
+			if ( !wwEnvIsSet( "WW_RENDER_SHOT" ) ) {
 				const QFileInfo fi( pf );
 				qputenv( "WW_RENDER_SHOT", ( fi.path() + QLatin1Char( '/' ) + fi.completeBaseName() + QStringLiteral( ".png" ) ).toLocal8Bit() );
 			}
@@ -377,6 +381,36 @@ IPCsocket::~IPCsocket()
 	delete socket;
 }
 
+/* lane TESTDRIVER1: "NifSkope::live <step>" runs one live-driver step (wwswitch.h) in the visible window and sends
+ * "<step> -> <reply>" back to the sender (UTF-16, as the commands). A step runs the event loop (a reopen, a path), so
+ * steps that arrive meanwhile queue and run in order when it returns. */
+namespace
+{
+struct WwLiveCmd { QString step; QHostAddress host; quint16 port; };
+QList<WwLiveCmd> g_wwLiveQueue;
+bool g_wwLiveBusy = false;
+
+void wwLiveDrain( QUdpSocket * socket )
+{
+	if ( g_wwLiveBusy )
+		return;
+	g_wwLiveBusy = true;
+	while ( !g_wwLiveQueue.isEmpty() ) {
+		const WwLiveCmd c = g_wwLiveQueue.takeFirst();
+		NifSkope * win = nullptr;
+		for ( NifSkope * doc : NifSkope::openDocuments() )
+			if ( doc && doc->isVisible() && doc->getGLView() ) {
+				win = doc;
+				break;
+			}
+		const QString reply = c.step + QStringLiteral( " -> " ) + ( win ? wwLiveCommand( win, c.step ) : QStringLiteral( "refused no window" ) );
+		fprintf( stderr, "live(port): %s\n", qPrintable( reply ) );
+		socket->writeDatagram( (const char *)reply.constData(), reply.size() * qsizetype( sizeof( QChar ) ), c.host, c.port );
+	}
+	g_wwLiveBusy = false;
+}
+} // namespace
+
 void IPCsocket::processDatagram()
 {
 	while ( socket->hasPendingDatagrams() ) {
@@ -390,6 +424,11 @@ void IPCsocket::processDatagram()
 		if ( host == QHostAddress( QHostAddress::LocalHost ) && (data.size() % sizeof( QChar )) == 0 ) {
 			QString cmd;
 			cmd.setUnicode( (QChar *)data.data(), data.size() / sizeof( QChar ) );
+			if ( cmd.startsWith( QLatin1StringView( "NifSkope::live " ) ) ) {	// lane TESTDRIVER1
+				g_wwLiveQueue.append( { cmd.mid( 15 ), host, port } );
+				QTimer::singleShot( 0, this, [this]() { wwLiveDrain( socket ); } );
+				continue;
+			}
 			execCommand( cmd );
 		}
 	}
@@ -399,6 +438,13 @@ void IPCsocket::execCommand( const QString & cmd )
 {
 	if ( cmd.startsWith( "NifSkope::open" ) ) {
 		openNif( cmd.right( cmd.length() - 15 ) );
+	} else if ( cmd.startsWith( "NifSkope::door " ) ) {
+		// lane DOORLIVE1: NifSkope::door <open|close|cycle|t=<s>|state> drives the visible window's live door
+		for ( NifSkope * doc : NifSkope::openDocuments() )
+			if ( doc && doc->isVisible() && doc->getGLView() ) {
+				fprintf( stderr, "%s\n", qPrintable( wwDoorLiveCommand( doc->getGLView()->getScene(), cmd.mid( 15 ) ) ) );
+				break;
+			}
 	}
 }
 

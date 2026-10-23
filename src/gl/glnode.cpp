@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glnode.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "nifskope.h"
 #include "gl/controllers.h"
@@ -1566,7 +1567,7 @@ void Node::drawHavok()
 				 * wire only (no fill), so a render shows the textured mesh under
 				 * its collision. Render harness only; his Solid setting is not
 				 * read or written. */
-				static const bool hullThin = qEnvironmentVariableIntValue( "WW_RENDER_HULL_THIN" ) != 0;
+				WW_SWITCH_STATIC( bool, hullThin, wwEnvInt( "WW_RENDER_HULL_THIN" ) != 0 );
 				const bool solidCollision = !hullThin && collisionSettings.value( "CollisionManager/Solid", true ).toBool();
 				const bool xrayCollision = collisionSettings.value( "CollisionManager/XRay", false ).toBool();
 				const int colourMode = collisionSettings.value( "CollisionManager/ColourBy", 0 ).toInt();

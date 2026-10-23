@@ -30,3 +30,13 @@ STATUS: DONE
 
 - MISTAKES.md does not exist in the repo.
 - The cell list has no "name" for localized masters such as Fallout4.esm, because no strings-table reader exists. Should one be added?
+
+## Follow-up (lane LEFTOVERS1, 2026-10-22)
+
+- Strings tables: done. A localized plugin's FULL names come from `Strings\<plugin>_<lang>.STRINGS` (and DL/IL), loose
+  or inside `<plugin> - *.ba2`; Language box in the dialog, default `en`. Off `WW_OPENCELL_STRINGS=0`, red
+  `WW_OPENCELL_RED=strings`. Synthetic tables and a BA2 in the test; 30/30 checks.
+- .esl: confirmed. `.esl` files rank with the masters, light-flagged `.esp` files with the plugins, and both are read.
+  One of each is in the synthetic test. The reader now numbers light plugins as the game does: FE + slot among the light plugins in load
+  order + 12-bit local ID, and full plugins' references to them resolve there too (red `WW_ESM_LIGHT_RED=full`). Checked
+  on crafted plugins only, not yet on a real .esl.

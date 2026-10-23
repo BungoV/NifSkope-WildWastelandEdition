@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "controllers.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/glshape.h"
 #include "gl/glparticles.h"
@@ -270,7 +271,7 @@ void ControllerManager::setSequence( const QString & seqname )
 						if ( !node )
 							seqBindStats.unresolved++;
 
-						if ( qEnvironmentVariableIsSet( "WW_SEQBIND_DEBUG" ) ) {
+						if ( wwEnvIsSet( "WW_SEQBIND_DEBUG" ) ) {
 							QFile f( QApplication::applicationDirPath() + "/ww_seqbind_debug.log" );
 							if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
 								QTextStream( &f )
@@ -2310,7 +2311,7 @@ void ProcLightningController::regenerate( quint32 tick, quint32 offsetTick )
 	 * without anyone having to judge a picture.
 	 * tests/anim/lightning_shape.sh asserts them.
 	 */
-	if ( qEnvironmentVariableIsSet( "WW_BOLT_DEBUG" ) ) {
+	if ( wwEnvIsSet( "WW_BOLT_DEBUG" ) ) {
 		QFile f( QApplication::applicationDirPath() + "/ww_bolt_debug.log" );
 		if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
 			QTextStream ts( &f );
@@ -2507,7 +2508,7 @@ bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vec
 	const Transform & tt = target->worldTrans();
 	const Vector3 A = tt.translation;
 	const Vector3 B = A + tt.rotation * Vector3( 0.0f, effLength, 0.0f );
-	if ( !ribbonReported && qEnvironmentVariableIsSet( "WW_BOLT_DEBUG" ) ) {
+	if ( !ribbonReported && wwEnvIsSet( "WW_BOLT_DEBUG" ) ) {
 		ribbonReported = true;
 		QFile f( QApplication::applicationDirPath() + "/ww_bolt_debug.log" );
 		if ( f.open( QIODevice::Append | QIODevice::Text ) ) {

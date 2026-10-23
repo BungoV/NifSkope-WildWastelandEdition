@@ -72,6 +72,7 @@
    Lane ARCHLOCK1, 2026-09-17. */
 
 #include "nifskope.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "glview.h"
 #include "gamemanager.h"
 #include "model/nifmodel.h"
@@ -197,7 +198,7 @@ void wwRun( NifSkope * skope, WwAlState * st )
 	 * other-games fallback is turned OFF so the two lists cannot be merged and
 	 * make the parent's dataPaths non-empty for the wrong reason. */
 	const QStringList roots =
-		qEnvironmentVariable( "WW_ARCHLOCK_RESOURCES" ).split( QLatin1Char( ';' ), Qt::SkipEmptyParts );
+		wwEnvStr( "WW_ARCHLOCK_RESOURCES" ).split( QLatin1Char( ';' ), Qt::SkipEmptyParts );
 	wwCheck( *st, QStringLiteral( "(setup) WW_ARCHLOCK_RESOURCES names at least one root" ),
 			 !roots.isEmpty() );
 	GameManager::update_other_games_fallback( false );
@@ -340,15 +341,15 @@ void wwRun( NifSkope * skope, WwAlState * st )
 
 void wwArchLockHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_ARCHLOCK_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_ARCHLOCK_TEST" ) )
 		return;
 
 	auto * st = new WwAlState;
 	st->logPath = QApplication::applicationDirPath() + QStringLiteral( "/ww_archlock_test.log" );
-	st->nifPath = qEnvironmentVariable( "WW_ARCHLOCK_NIF" );
-	st->texture = qEnvironmentVariable( "WW_ARCHLOCK_TEXTURE" );
-	st->shot = qEnvironmentVariable( "WW_ARCHLOCK_SHOT" );
-	st->windowShot = qEnvironmentVariable( "WW_ARCHLOCK_WINDOW_SHOT" );
+	st->nifPath = wwEnvStr( "WW_ARCHLOCK_NIF" );
+	st->texture = wwEnvStr( "WW_ARCHLOCK_TEXTURE" );
+	st->shot = wwEnvStr( "WW_ARCHLOCK_SHOT" );
+	st->windowShot = wwEnvStr( "WW_ARCHLOCK_WINDOW_SHOT" );
 	QFile::remove( st->logPath );
 
 	/* No document is opened on the command line, so there is no completeLoading

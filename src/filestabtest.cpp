@@ -65,6 +65,7 @@
    Lane FILESTAB, 2026-09-10. */
 
 #include "filestab.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "nifskope.h"
 #include "glview.h"
@@ -641,13 +642,13 @@ void wwGrab( NifSkope * skope, WwFtState & st )
 
 void wwFilesTabHarness( NifSkope * skope )
 {
-	if ( !skope || !qEnvironmentVariableIsSet( "WW_FILESTAB_TEST" ) )
+	if ( !skope || !wwEnvIsSet( "WW_FILESTAB_TEST" ) )
 		return;
 
 	auto * st = new WwFtState;
-	st->clipPath = qEnvironmentVariable( "WW_FILESTAB_CLIP" );
-	st->shot = qEnvironmentVariable( "WW_FILESTAB_SHOT" );
-	const QStringList exp = qEnvironmentVariable( "WW_FILESTAB_EXPECT",
+	st->clipPath = wwEnvStr( "WW_FILESTAB_CLIP" );
+	st->shot = wwEnvStr( "WW_FILESTAB_SHOT" );
+	const QStringList exp = wwEnvStr( "WW_FILESTAB_EXPECT",
 		QStringLiteral( "78,17,4" ) ).split( QLatin1Char( ',' ) );
 	if ( exp.count() == 3 ) {
 		st->expMatched = exp.at( 0 ).toInt();
@@ -663,7 +664,7 @@ void wwFilesTabHarness( NifSkope * skope )
 	 * populate; his own settings are never saved over, because this only calls
 	 * update_folders() in memory.
 	 */
-	const QString roots = qEnvironmentVariable( "WW_FILESTAB_RESOURCES" );
+	const QString roots = wwEnvStr( "WW_FILESTAB_RESOURCES" );
 	if ( !roots.isEmpty() ) {
 		const QStringList list = roots.split( QLatin1Char( ';' ), Qt::SkipEmptyParts );
 		Game::GameManager::update_folders( Game::FALLOUT_4, list );

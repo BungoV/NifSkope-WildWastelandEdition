@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glshape.h"
+#include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 
 #include "gl/controllers.h"
@@ -40,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/renderer.h"
 #include "gl/celllights.h"
 #include "gl/cellwater.h"	// lane WATER1
+#include "gl/cellfxlit.h"	// lane FXRES1: wwCellFxRoomLit
 #include "gl/glmesh.h"
 #include "glview.h"
 
@@ -620,7 +622,7 @@ void Shape::resetSkeletonData()
 bool Shape::wwDecalDrawsFirst() const
 {
 	// lane FXD1: the game draws its decals before its sorted blended pass. Red control WW_CELL_FXD_RED=late: never
-	static const bool late = qgetenv( "WW_CELL_FXD_RED" ) == "late";
+	WW_SWITCH_STATIC( bool, late, wwEnv( "WW_CELL_FXD_RED" ) == "late" );
 	return surfaceDecal && drawInSecondPass && !late && wwCellLightsWanted( scene );
 }
 
@@ -628,6 +630,13 @@ bool Shape::wwWaterDraws() const
 {
 	// lane WATER1: a registered water surface, drawn by src/gl/cellwater.h while the Cell lights row is on
 	return wwCellWaterWanted( scene, id() );
+}
+
+bool Shape::wwFxResSoft() const
+{
+	// lane FXRES1 (src/gl/cellfxres.h): the effects the soft fade reads the opaque depth for; the layer keeps no depth
+	return bsesp && !bslsp && bsesp->soft && bsesp->falloff.softDepth > 0.0f && drawInSecondPass && !effectDecal
+		&& !surfaceDecal && !depthWrite && !wwCellFxRoomLit( scene, id() );
 }
 
 bool Shape::wwMaterialClearsBlend() const
@@ -641,7 +650,7 @@ bool Shape::wwMaterialClearsBlend() const
 	 * over the steam: dark spots with the haze cut out at their outline.
 	 * The lighting-shader draw already takes its blend state from the material (renderer.cpp).
 	 * Red control WW_MATALPHA_RED=nif: the NIF blend bit wins again. */
-	static const bool red = qgetenv( "WW_MATALPHA_RED" ) == "nif";
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_MATALPHA_RED" ) == "nif" );
 	if ( red || !bslsp || bslsp->bsVersion >= 170 )
 		return false;
 	Material * mat = bslsp->getMaterial();
@@ -732,23 +741,19 @@ void Shape::setUniforms( NifSkopeOpenGLContext::Program * prog ) const
 	/* lane FARLOD1: the tree-animation flag the far field's sway reads (fo4_default.vert), for every program
 	 * that has it -- the PBR path (pbrm_*) never set it, so its far trees stood still. The legacy path sets
 	 * the same value again in its own setup. WW_CELL_FARLOD_RED=pbrnosway is the old path, the red control. */
-	static const bool farlod1PbrNoSway = qgetenv( "WW_CELL_FARLOD_RED" ) == "pbrnosway";
+	WW_SWITCH_STATIC( bool, farlod1PbrNoSway, wwEnv( "WW_CELL_FARLOD_RED" ) == "pbrnosway" );
 	if ( const int l = farlod1PbrNoSway ? -1 : prog->uniLocation( "lodTreeAnim" ); l >= 0 )
 		prog->uni1i_l( l, isVertexAlphaAnimation ? 1 : 0 );
 }
 
-bool Shape::bindShape() const
+// lane GPUDRIVEN1: the attribute table bindShape uploads (0 = no geometry)
+std::uint64_t Shape::wwVertexAttrs( const float ** vertexAttrs ) const
 {
-	NifSkopeOpenGLContext *	context = scene->renderer;
-	if ( !context ) [[unlikely]]
-		return false;
-
 	qsizetype	numVerts = verts.size();
 	qsizetype	numTriangles = triangles.size();
 	if ( !( numVerts > 0 && numTriangles > 0 ) ) [[unlikely]]
-		return false;
+		return 0;
 
-	const float *	vertexAttrs[16];
 	vertexAttrs[0] = &( verts.constFirst()[0] );
 	std::uint64_t	attrModeMask = 3U;
 
@@ -790,14 +795,37 @@ bool Shape::bindShape() const
 		}
 	}
 	attrModeMask |= tmp;
+	return attrModeMask;
+}
 
-	size_t	elementDataSize = size_t( numTriangles ) * sizeof( Triangle );
+const NifSkopeOpenGLContext::ShapeDataHash * Shape::wwDataHash( const float ** vertexAttrs ) const
+{
+	const float *	own[16];
+	const float **	attrs = vertexAttrs ? vertexAttrs : own;
+	const std::uint64_t	attrModeMask = wwVertexAttrs( attrs );
+	if ( !attrModeMask ) [[unlikely]]
+		return nullptr;
+	const qsizetype	numVerts = verts.size();
+	size_t	elementDataSize = size_t( triangles.size() ) * sizeof( Triangle );
 	if ( !( dataHash.attrMask && numVerts == dataHash.numVerts && elementDataSize == dataHash.elementBytes ) ) {
 		dataHash = NifSkopeOpenGLContext::ShapeDataHash( std::uint32_t( numVerts ), attrModeMask, elementDataSize,
-															vertexAttrs, triangles.constData() );
+															attrs, triangles.constData() );
 	}
+	return &dataHash;
+}
 
-	context->bindShape( dataHash, vertexAttrs, triangles.constData() );
+bool Shape::bindShape() const
+{
+	NifSkopeOpenGLContext *	context = scene->renderer;
+	if ( !context ) [[unlikely]]
+		return false;
+
+	const float *	vertexAttrs[16];
+	const NifSkopeOpenGLContext::ShapeDataHash *	h = wwDataHash( vertexAttrs );
+	if ( !h ) [[unlikely]]
+		return false;
+
+	context->bindShape( *h, vertexAttrs, triangles.constData() );
 
 	return true;
 }

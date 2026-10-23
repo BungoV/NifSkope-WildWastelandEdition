@@ -61,6 +61,10 @@ The contact shadows (res/shaders/ww_contact.frag) are a port of Bend Studio's sc
 (bend_sss_gpu.h), Copyright 2023 Sony Interactive Entertainment, under the
 [Apache 2 License](http://www.apache.org/licenses/LICENSE-2.0.html).
 
+The screen-space GI's blue noise sheet (res/ssgi/fast_2uges.rg8) is from
+[FastNoise](https://github.com/electronicarts/fastnoise), copyright (c) 2023 Electronic Arts Inc.,
+BSD 3-Clause License (res/ssgi/FASTNOISE_LICENSE.txt).
+
 NOTICE
 
 Parts of NifSkope (i.e. included libraries) might be subject to

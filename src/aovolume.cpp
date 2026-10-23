@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "aovolume.h"
 #include "probebvh.h"	// the probe soup's tracer (fp-contract off for the whole file)
+#include "bakert.h"	// lane RTBAKE1: the bake pools' worker count, the GPU ray back end
 
 #include <QCryptographicHash>
 #include <QElapsedTimer>
@@ -51,7 +52,7 @@ const double kPi = 3.14159265358979323846;
 
 void parallelFor( size_t n, const std::function<void( size_t )> & fn )
 {
-	const int nThreads = std::max( 1, int( std::thread::hardware_concurrency() ) );
+	const int nThreads = bakert::threads();
 	std::atomic<size_t> next( 0 );
 	std::vector<std::thread> pool;
 	for ( int i = 0; i < nThreads; i++ )
