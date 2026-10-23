@@ -2602,6 +2602,41 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 	return true;
 }
 
+/* lane DECK1: gi_lights.txt, the placed lights the relight lit the surfels with (tests/path_reference.cpp reads it):
+ *   clear <fixtureClear>
+ *   light px py pz radius r g b spot dx dy dz cosOuter bias scale exponent cone shape box[3][4]   (colour linear, fade in) */
+bool probeGiDumpLights( const WwCellLighting & lighting, const ProbeGiSpec & spec, const QString & dir, QString * err )
+{
+	QDir().mkpath( dir );
+	QFile f( QDir( dir ).filePath( QStringLiteral( "gi_lights.txt" ) ) );
+	if ( !f.open( QIODevice::WriteOnly ) ) {
+		*err = QStringLiteral( "cannot write %1" ).arg( f.fileName() );
+		return false;
+	}
+	auto g = []( double v ) { return QString::number( v, 'g', 9 ); };
+	QString t = QStringLiteral( "clear %1\n" ).arg( g( spec.fixtureClear ) );
+	for ( const WwCellLight & l : lighting.lights ) {
+		QStringList v { QStringLiteral( "light" ) };
+		for ( int k = 0; k < 3; k++ )
+			v << g( l.pos[k] );
+		v << g( l.radius );
+		for ( int k = 0; k < 3; k++ )
+			v << g( l.color[k] );
+		v << QString::number( l.spot ? 1 : 0 );
+		for ( int k = 0; k < 3; k++ )
+			v << g( l.dir[k] );
+		v << g( l.cosOuter ) << g( l.bias ) << g( l.scale ) << g( l.exponent ) << g( l.cone ) << QString::number( l.shape );
+		for ( int k = 0; k < 12; k++ )
+			v << g( l.box[k / 4][k % 4] );
+		t += v.join( QLatin1Char( ' ' ) ) + QLatin1Char( '\n' );
+	}
+	if ( lighting.interior && lighting.hasDirectional )	// the relight adds it; the tracer does not read it yet
+		t += QStringLiteral( "directional %1 %2 %3 %4 %5 %6\n" ).arg( g( lighting.dirTo[0] ), g( lighting.dirTo[1] ), g( lighting.dirTo[2] ),
+			g( lighting.dirColor[0] ), g( lighting.dirColor[1] ), g( lighting.dirColor[2] ) );
+	f.write( t.toUtf8() );
+	return true;
+}
+
 // lane ROOMCLAMP1: `probegi --soup <f> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b [--light ...]
 // [--spacing s] [--rays n] [--passes n] [--red noclamp|...] [--rooms-red conn26|boxes|glasswall|nomask] [--pinch u]
 // [--cell u]`: place, bake (<dir>/bake), relight as an interior lit by the lights given, dump into <dir>
@@ -2701,7 +2736,7 @@ int probeGiCli( const QStringList & args )
 		std::fprintf( stderr, "probegi: %s\n", qPrintable( gr.error ) );
 		return 1;
 	}
-	if ( !probeGiDump( gr, gs, outDir, &err ) ) {
+	if ( !probeGiDump( gr, gs, outDir, &err ) || !probeGiDumpLights( L, gs, outDir, &err ) ) {
 		std::fprintf( stderr, "probegi: %s\n", qPrintable( err ) );
 		return 1;
 	}

@@ -218,6 +218,8 @@ void probeGiRoomsOffer( const ProbeSoup & soup, const ProbeRoomSpec & spec, Prob
 QString probeGiCensusText( const ProbeGiResult & r );
 //! The gate's dump: gi_surfels.bin, gi_probes.bin, gi_grid.bin in `dir` (layouts in probegi.cpp).
 bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QString & dir, QString * err );
+//! lane DECK1: gi_lights.txt in `dir`, the placed lights as the relight lit them (the path-traced reference's input).
+bool probeGiDumpLights( const WwCellLighting & lighting, const ProbeGiSpec & spec, const QString & dir, QString * err );
 /*! lane ROOMCLAMP1: `probegi` places, bakes and relights a dumped soup by the lights given (an interior), then
  *  dumps (the synthetic rooms gate, tests/spells/cell_rooms.sh) */
 int probeGiCli( const QStringList & args );
