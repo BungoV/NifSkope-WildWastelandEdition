@@ -109,12 +109,16 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | IDENT2 | IDENT2: stable landmark group ids, several occluder boxes, row-house far-shadow check. M | PARTIAL 10-23: stable ids + several occluder boxes already on main (4c418ff6 MERGE2); row-house far-shadow check NOT DONE: needs a new chunk harness (s9.2a fixed to chunk 4,-12) |
 | EPHEM1 | EPHEM1: real Boston sun/moon/phase/date, same numbers as FO4CS Solar (atmores1/RESEARCH.md:609). M | CODE DONE 10-23 GAPLOOK2 gaplook2-20261023 0e98fc5f (includes GAPLOOK1 f7a13e6a: merge after it); OFF by default; live rows notes/gaplook2/rows_live.txt wait for LIVESET1; matches FO4CS Solar 288/288 |
 | ATMO1 | ATMO1: physical sky model (LUTs, sun disc, haze from weather fog); ATMO2/SKYGI1/NIGHT1/EXPO1 depend on it. L | APPROVED 10-23 bungo "go to it": code on atmo1-20261023 38775457; live rows notes/atmo1/rows_live.txt queued after the LIVESET1 check |
-| ATMO2 | aerial-perspective volume: distant geometry gets the physical sky haze (needs ATMO1). M | RUNNING 10-23 lane SKYA on atmo1 |
-| ATMOSUN1 | sun + ambient colour from the ATMO1 transmittance table. S | RUNNING 10-23 lane SKYA on atmo1 |
-| NIGHT1 | moon phase + stars dimmed through the transmittance (needs ATMO1). M | RUNNING 10-23 lane SKYA on atmo1 |
-| EXPO1 | exposure from sky brightness (needs ATMO1). S | RUNNING 10-23 lane SKYA on atmo1 |
-| SKYGI1 | GI sky light from the ATMO1 sky-view table. M | RUNNING 10-23 lane SKYGI1 on atmo1 |
-| ATMOCHECK1 | ATMO1 cross-check vs Bruneton 2017; optional mode keeping the vanilla weather tint. S | RUNNING 10-23 lane SKYA on atmo1 |
+| ATMO2 | aerial-perspective volume: distant geometry gets the physical sky haze (needs ATMO1). M | BUILT, NOT LANDED 10-23 lane SKYA: skya-20261023 c214d3b7 + fix 5da89b7c (one fog path, no double haze: notes/skya/AP_FOG_SPLIT.md); row Aerial Perspective, ships Off; live rows notes/skya/rows_live.txt |
+| ATMOSUN1 | sun + ambient colour from the ATMO1 transmittance table. S | BUILT, NOT LANDED 10-23 lane SKYA: skya-20261023 46932278; row Sunlight From Sky (Off/Tint/Full), ships Off |
+| NIGHT1 | moon phase + stars dimmed through the transmittance (needs ATMO1). M | BUILT, NOT LANDED 10-23 lane SKYA: skya-20261023 8796953f; row Moon Phase and Stars, ships Off |
+| EXPO1 | exposure from sky brightness (needs ATMO1). S | BUILT, NOT LANDED 10-23 lane SKYA: skya-20261023 5ff72b1f; row Exposure From Sky, ships Off |
+| SKYGI1 | GI sky light from the ATMO1 sky-view table. M | BUILT, NOT LANDED 10-23 lane SKYA: skya-20261023 ef660d04; row GI Sky From Physical Sky, ships Off (Off = today's bake) |
+| ATMOCHECK1 | ATMO1 cross-check vs Bruneton 2017; optional mode keeping the vanilla weather tint. S | BUILT, NOT LANDED 10-23 lane SKYA: skya-20261023 8da41b2f; tests/spells/atmo_bruneton_check.py (3 gates PASS, red noozone fails); row Sky Color (Physical/Weather Tint), ships Physical |
+| SKYAROWS1 | SKYA live rows: notes/skya/rows_live.txt (43 rows: live/fresh pairs, the sky x fog x far LOD matrix at c3 + mem, reds, a GPU-ms cost row), exe release/snap_skya a9deff9a. S | PLANNED: next batch hold (no GUI in lane SKYA) |
+| EXPO2 | Exposure From Sky counts the sky pixels actually in view (EXPO1 takes the hemisphere mean for every non-cell pixel). S | PLANNED (lane SKYA follow-on) |
+| SKYGI2 | offline GL gate for SKYGI1: render the probes' 6-face physical-sky capture in the hidden context (atmo_lut_check.py style) and check its +Z cosine sum against the model's sky irradiance; the far-LOD bake's sky term (probefar.cpp) from the physical sky too. M | PLANNED (lane SKYA follow-on) |
+| SKYTINT2 | Weather Tint for the air and the ambient: today only the sky's pixels take the weather colors (the aerial perspective and Sunlight From Sky stay physical). S | PLANNED (lane SKYA follow-on) |
 | WX1 | WX1: .recx readers for atmosphere/clouds/night. S | BLOCKED 10-23: needs the atmosphere/clouds/night blocks ratified in FO4-Extension-Formats first (GAPLOOK2) |
 | XEMI1 | XEMI1: ref emittance colour tints effect + lamp glow. S | PLANNED: own lane (REFR XEMI parse + per-ref emissive + effect tint; Vault111Cryo 7-fixture gate, audit1/FIX_LANES.md s4). ATMO1 and GAPLOOK1 both judged it lane-sized |
 | MINOR1 | MINOR1: lens flares, gobos, light fade distance, per-room volumetric light. M | PLANNED: own lane; research first (lens flares: no LENS reader; gobos: LIGH NAM0 parsed, not drawn; light distance fade; per-room god rays). ATMO1 notes/atmo1/STATUS.md |
