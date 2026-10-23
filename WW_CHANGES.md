@@ -2,6 +2,32 @@
 
 ## Lane SKYA (2026-10-23, branch skya-20261023): the physical sky reaches the world, every part off by default
 
+### SKYGI1: the probes' sky light from the physical sky
+- **What:** the probe bake's sky term (lane SKYPIC1, `src/probesky.cpp`: a 6-face capture of the drawn sky, each
+  texel's solid angle x cosine summed per probe axis and octant) captured the weather dome even with Physical Sky
+  on, so the bounce light kept the dome's colors under a physical sky. With this row on, the capture draws the
+  physical sky (`lookdevstage.cpp` wwLookdevCaptureSky calls drawAtmo in capture mode: the sky-view LUTs of the sun
+  and the moon, Weather Tint if that row is on, linear light at exposure 1; no sun disc, the sun is the bake's own
+  term), then the stars and clouds as before. Below the horizon the probes keep the weather's ground-facing color
+  (SKYPIC1's rule). The capture key gains `|atmo gi tier T tint X red R`, so turning the row (or Physical Sky, or
+  Sky Color) relights the probes live.
+  - A capture face is not a frame: `wwAtmoDrawSky` skips the GPU timer pair, the Exposure From Sky read-back and the
+    aerial-perspective volume for it (`WwAtmoInputs::capture`).
+  - The sky is captured at the camera's height when it is taken (the key does not follow the camera; a few meters
+    move it by far less than a gray level).
+- **Row:** Render > Scene > GI Sky From Physical Sky (Off / On), key `Settings/Render/Scene/GI Sky From Physical Sky`,
+  live; needs Physical Sky on. `WW_ATMO_GI=0|1` pins it; red `WW_ATMO_GI_RED=dome` (the row on, the dome still
+  captured: the probes' sky must then match the Off rows, and the "gi skypic" note says sky:dome).
+- **Off = today's bake byte for byte:** with the row Off or Physical Sky Off the capture key is the same string
+  (the suffix is added only while active), the capture draws `drawDome` through the unchanged branch
+  (`phys` is false before drawAtmo is called), and the frame's own sky pass runs every step it ran before
+  (`capture` is false there).
+- **Cost:** none per frame; per capture (only when its key changes) 6 x the sky pass at the capture size (64 x 64 a
+  face) plus the sky-view LUTs, under 1 ms GPU (estimate); no memory kept. stderr: the existing `gi skypic:` line
+  names what was drawn (`sky:physical(...)`) and the open-sky drawn / weather ratio per axis.
+- **Not offline-gated:** the capture is GL only; the rows in notes/skya/rows_live.txt (gi on / off / red dome at
+  Concord noon) read the `gi skypic:` lines.
+
 ### ATMOCHECK1: the model checked against Bruneton 2017, and a Weather Tint sky color
 - **Cross-check:** `tests/spells/atmo_bruneton_check.py` ports Bruneton 2017's reference numerics
   ("Precomputed Atmospheric Scattering: a New Implementation", functions.glsl: the trapezoidal optical length,

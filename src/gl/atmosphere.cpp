@@ -27,6 +27,7 @@ constexpr const char * kSunKey = "Settings/Render/Scene/Sunlight From Sky";	// l
 constexpr const char * kNightKey = "Settings/Render/Scene/Moon Phase and Stars";	// lane SKYA (NIGHT1)
 constexpr const char * kExpoKey = "Settings/Render/Scene/Exposure From Sky";	// lane SKYA (EXPO1)
 constexpr const char * kTintKey = "Settings/Render/Scene/Sky Color";	// lane SKYA (ATMOCHECK1)
+constexpr const char * kGiKey = "Settings/Render/Scene/GI Sky From Physical Sky";	// lane SKYA (SKYGI1)
 static_assert( kTintN == 17, "WwAtmoInputs::tint and atmo_sky.frag atTint[17]" );
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 constexpr int kTransW = 256, kTransH = 64;
@@ -58,6 +59,8 @@ struct AtState
 	quint64 frame = 0, skyFrame = 0;	// EXPO1: the frame count (wwAtmoApFrame) and the frame skyMean was read in
 	int tint = 0;	// lane SKYA (ATMOCHECK1): the Sky Color row, 0 Physical / 1 Weather Tint (pin WW_ATMO_TINT)
 	bool tintPinned = false;
+	int gi = 0;	// lane SKYA (SKYGI1): the GI Sky From Physical Sky row, 0 Off / 1 On (pin WW_ATMO_GI)
+	bool giPinned = false;
 };
 
 //! lane SKYA: one row's value from its pin (already read by the caller: the survey needs literal names), a harness
@@ -117,6 +120,7 @@ AtState & as()
 		s.night = rowValue( wwEnvStr( "WW_ATMO_NIGHT" ), kNightKey, { "off", "on" }, s.nightPinned );
 		s.expo = rowValue( wwEnvStr( "WW_ATMO_EXPO" ), kExpoKey, { "off", "on" }, s.expoPinned );
 		s.tint = rowValue( wwEnvStr( "WW_ATMO_TINT" ), kTintKey, { "physical", "weather" }, s.tintPinned );
+		s.gi = rowValue( wwEnvStr( "WW_ATMO_GI" ), kGiKey, { "off", "on" }, s.giPinned );
 	}
 	return s;
 }
@@ -409,9 +413,11 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	}
 	if ( !g.q[0] )
 		fn->glGenQueries( 4, g.q );
-	timeRead( fn, g, 1 - g.cur, false );
-	timeRead( fn, g, g.cur, true );
-	fn->glQueryCounter( g.q[g.cur * 2], kTimestamp );
+	if ( !in.capture ) {	// SKYGI1: the probes' capture is not a frame (its six faces would scramble the timer pairs)
+		timeRead( fn, g, 1 - g.cur, false );
+		timeRead( fn, g, g.cur, true );
+		fn->glQueryCounter( g.q[g.cur * 2], kTimestamp );
+	}
 
 	const int vw = s.tier == 1 ? 96 : s.tier == 4 ? 256 : 192;
 	const int vh = s.tier == 1 ? 54 : s.tier == 4 ? 144 : 108;
@@ -514,7 +520,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	if ( ok && moonK > 0.0f )
 		view( g.moonView, moonW );
 	// 2a. lane SKYA (EXPO1): the last frame's read-back tables give the sky's mean; this frame's are queued
-	if ( g.fence ) {
+	if ( g.fence && !in.capture ) {
 		fn->glClientWaitSync( g.fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64( 1000000000 ) );
 		fn->glDeleteSync( g.fence );
 		g.fence = nullptr;
@@ -535,7 +541,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			s.skyFrame = s.frame;
 		}
 	}
-	if ( ok && s.expo > 0 ) {
+	if ( ok && s.expo > 0 && !in.capture ) {
 		if ( !g.pbo[0] )
 			fn->glGenBuffers( 2, g.pbo );
 		GLint prevTex = 0;
@@ -559,8 +565,9 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	}
 	// 2b. lane SKYA (ATMO2): the aerial-perspective volume over this view's frustum (Hillaire 2020 sec. 5.4)
 	QString apLine;	// empty while the row is off: the sky line stays ATMO1's
-	g.ap.valid = false;
-	if ( ok && s.ap > 0 ) {
+	if ( !in.capture )	// SKYGI1: a capture face keeps the frame's volume
+		g.ap.valid = false;
+	if ( ok && s.ap > 0 && !in.capture ) {
 		const bool built = buildAp( scene, g, msN, camR, sunW, moonW, sunK, moonK, noOzone, noMs );
 		apLine = built ? QString( "ap=%1x%2x%3@%4km" ).arg( g.ap.w ).arg( g.ap.h ).arg( g.ap.n ).arg( double( kApMaxKm ), 0, 'f', 0 )
 			: QStringLiteral( "ap=refused(atmo_ap.prog or its target)" );
@@ -618,9 +625,11 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	if ( wasStencil )
 		fn->glEnable( GL_STENCIL_TEST );
 	fn->glDepthMask( depthMask );
-	fn->glQueryCounter( g.q[g.cur * 2 + 1], kTimestamp );
-	g.pending[g.cur] = true;
-	g.cur = 1 - g.cur;
+	if ( !in.capture ) {
+		fn->glQueryCounter( g.q[g.cur * 2 + 1], kTimestamp );
+		g.pending[g.cur] = true;
+		g.cur = 1 - g.cur;
+	}
 	g_last = ok ? &g : nullptr;
 
 	const float sunEl = std::asin( std::clamp( sunW[2], -1.0f, 1.0f ) ) * 180.0f / kPi;
@@ -796,6 +805,36 @@ void wwAtmoApFrame()
 	for ( AtGpu & g : gpus() )
 		g.ap.valid = false;
 	as().frame++;
+}
+
+int wwAtmoGi()
+{
+	return as().gi;
+}
+
+void wwAtmoSetGi( int on )
+{
+	AtState & s = as();
+	if ( s.giPinned )
+		return;
+	s.gi = on ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kGiKey ), s.gi );
+}
+
+bool wwAtmoGiPinned()
+{
+	return as().giPinned;
+}
+
+bool wwAtmoGiActive()
+{
+	const AtState & s = as();
+	return s.gi > 0 && s.tier > 0;
+}
+
+bool wwAtmoGiRedDome()
+{
+	return wwEnvStr( "WW_ATMO_GI_RED" ).trimmed().toLower() == QLatin1StringView( "dome" );
 }
 
 int wwAtmoTint()

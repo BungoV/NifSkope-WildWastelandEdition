@@ -1669,7 +1669,7 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 }
 
 //! lane ATMO1: the physical sky in place of the dome (gl/atmosphere.h); the vanilla sun quad and glare then stay off
-bool drawAtmo( Scene * scene, QStringList & drew )
+bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 {
 	LdState & s = st();
 	if ( wwAtmoTier() <= 0 || !s.haveWeather )
@@ -1716,7 +1716,8 @@ bool drawAtmo( Scene * scene, QStringList & drew )
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
 	for ( int j = 0; j < 3; j++ )
 		in.camZ -= vt.rotation( j, 2 ) * vt.translation[j] / sc;
-	in.disc = s.sun;
+	in.disc = s.sun && !capture;	// lane SKYA (SKYGI1): the probes' capture has no disc (the sun is the bake's own term)
+	in.capture = capture;
 	in.exposure = skyExposure();
 	in.viewTransform = skyViewTransform();
 	// lane SKYA (ATMOCHECK1): the weather dome's colors by elevation for the Sky Color row's Weather Tint; the rings come
@@ -2078,7 +2079,10 @@ QString wwLookdevSkyPictureKey()
 	// the cloud clock is left out: in the window it runs, and the probes would never stand still (the capture
 	// follows the weather, the hour, the day and the rows; the clouds are where they were at that moment)
 	return QStringLiteral( "%1|%2|%3|day %4|sky %5 clouds %6|%7" ).arg( s.plugin, s.weatherKey ).arg( s.hour, 0, 'f', 4 )
-		.arg( s.gameDay, 0, 'f', 2 ).arg( int( s.sky ) ).arg( int( s.clouds ) ).arg( s.haveWeather ? 1 : 0 );
+		.arg( s.gameDay, 0, 'f', 2 ).arg( int( s.sky ) ).arg( int( s.clouds ) ).arg( s.haveWeather ? 1 : 0 )
+		// lane SKYA (SKYGI1): only while the probes take the physical sky (Off: today's key, character for character)
+		+ ( wwAtmoGiActive() ? QStringLiteral( "|atmo gi tier %1 tint %2 red %3" ).arg( wwAtmoTier() ).arg( wwAtmoTint() )
+			.arg( wwAtmoGiRedDome() ? 1 : 0 ) : QString() );
 }
 
 bool wwLookdevCaptureSky( Scene * scene, int n, const float * flatRgb, WwSkyPicture & out, QString * why )
@@ -2165,7 +2169,9 @@ bool wwLookdevCaptureSky( Scene * scene, int n, const float * flatRgb, WwSkyPict
 			fn->glClear( GL_COLOR_BUFFER_BIT );
 			if ( !flatRgb ) {
 				QStringList d;
-				if ( drawDome( scene, f, 1.0f, d ) ) {
+				// lane SKYA (SKYGI1): the physical sky in place of the dome (its row and Physical Sky on; red "dome" keeps it)
+				const bool phys = wwAtmoGiActive() && !wwAtmoGiRedDome() && drawAtmo( scene, d, true );
+				if ( phys || drawDome( scene, f, 1.0f, d ) ) {
 					drawStars( scene, f, d );
 					if ( sx.clouds )
 						drawClouds( scene, f, 1.0f, d );
@@ -2206,7 +2212,7 @@ bool wwLookdevCaptureSky( Scene * scene, int n, const float * flatRgb, WwSkyPict
 	out.drew = flatRgb ? QStringLiteral( "flat(%1,%2,%3)" ).arg( double( flatRgb[0] ) ).arg( double( flatRgb[1] ) )
 		.arg( double( flatRgb[2] ) ) : drew.join( QChar( '|' ) );
 	out.ms = double( clock.nsecsElapsed() ) / 1.0e6;
-	if ( !flatRgb && !out.drew.contains( QStringLiteral( "sky:dome(" ) ) )
+	if ( !flatRgb && !out.drew.contains( QStringLiteral( "sky:dome(" ) ) && !out.drew.contains( QStringLiteral( "sky:physical(" ) ) )
 		return fail( QStringLiteral( "the dome did not draw (%1)" ).arg( out.drew ) );
 	return true;
 }

@@ -30,6 +30,7 @@ struct WwAtmoInputs
 	int viewTransform = 0;
 	float tint[17][3] = {};	//!< lane SKYA (ATMOCHECK1): the weather dome's linear color at atmomath.h's tint elevations
 	bool tintOk = false;	//!< the table is filled (the dome resolved); else Weather Tint draws the physical color
+	bool capture = false;	//!< lane SKYA (SKYGI1): the probes' sky capture; no timing, no exposure read-back, no air
 };
 
 //! draws the sky full screen in place of the dome; false when it cannot (the caller falls back to the dome)
@@ -98,6 +99,17 @@ int wwAtmoTint();
 void wwAtmoSetTint( int mode );	//!< refused while WW_ATMO_TINT pins it
 bool wwAtmoTintPinned();
 bool wwAtmoTintRedFlat();	//!< the red: the horizon's color at every elevation (the gradient lost)
+
+/* lane SKYA (SKYGI1): the probes' sky light from the physical sky. The probe bake's sky term (src/probesky.h, lane
+ * SKYPIC1) integrates a 6-face capture of the drawn sky; with this row on and Physical Sky on, the capture draws the
+ * physical sky (its sky-view LUTs, no sun disc: the sun is the bake's own term) in place of the weather dome. Row
+ * Render > Scene > GI Sky From Physical Sky: Off / On, ships Off; Off (or Physical Sky Off) = today's capture, key
+ * and bake byte for byte. Pin WW_ATMO_GI (0/1), red WW_ATMO_GI_RED = dome (the row on, the dome still captured). */
+int wwAtmoGi();
+void wwAtmoSetGi( int on );	//!< refused while WW_ATMO_GI pins it
+bool wwAtmoGiPinned();
+bool wwAtmoGiActive();	//!< the row on and Physical Sky on: the capture takes the physical sky
+bool wwAtmoGiRedDome();
 
 QString wwAtmoSummary();
 
