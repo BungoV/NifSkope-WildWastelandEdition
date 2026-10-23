@@ -103,6 +103,12 @@ Main now: 9c624f47 (10-21 night, MERGEALL1 landing). Detail of old audits: overn
 | IDENT2 | IDENT2: stable landmark group ids, several occluder boxes, row-house far-shadow check. M | PARTIAL 10-23: stable ids + several occluder boxes already on main (4c418ff6 MERGE2); row-house far-shadow check NOT DONE: needs a new chunk harness (s9.2a fixed to chunk 4,-12) |
 | EPHEM1 | EPHEM1: real Boston sun/moon/phase/date, same numbers as FO4CS Solar (atmores1/RESEARCH.md:609). M | CODE DONE 10-23 GAPLOOK2 gaplook2-20261023 0e98fc5f (includes GAPLOOK1 f7a13e6a: merge after it); OFF by default; live rows notes/gaplook2/rows_live.txt wait for LIVESET1; matches FO4CS Solar 288/288 |
 | ATMO1 | ATMO1: physical sky model (LUTs, sun disc, haze from weather fog); ATMO2/SKYGI1/NIGHT1/EXPO1 depend on it. L | CODE DONE 10-23 ATMO1 atmo1-20261023 38775457; OFF by default (Render > Scene > Physical Sky); offline gates PASS; live rows notes/atmo1/rows_live.txt wait for LIVESET1 |
+| ATMO2 | aerial-perspective volume: distant geometry gets the physical sky haze (needs ATMO1). M | PLANNED |
+| ATMOSUN1 | sun + ambient colour from the ATMO1 transmittance table. S | PLANNED |
+| NIGHT1 | moon phase + stars dimmed through the transmittance (needs ATMO1). M | PLANNED |
+| EXPO1 | exposure from sky brightness (needs ATMO1). S | PLANNED |
+| SKYGI1 | GI sky light from the ATMO1 sky-view table. M | PLANNED |
+| ATMOCHECK1 | ATMO1 cross-check vs Bruneton 2017; optional mode keeping the vanilla weather tint. S | PLANNED |
 | WX1 | WX1: .recx readers for atmosphere/clouds/night. S | BLOCKED 10-23: needs the atmosphere/clouds/night blocks ratified in FO4-Extension-Formats first (GAPLOOK2) |
 | XEMI1 | XEMI1: ref emittance colour tints effect + lamp glow. S | PLANNED: own lane (REFR XEMI parse + per-ref emissive + effect tint; Vault111Cryo 7-fixture gate, audit1/FIX_LANES.md s4). ATMO1 and GAPLOOK1 both judged it lane-sized |
 | MINOR1 | MINOR1: lens flares, gobos, light fade distance, per-room volumetric light. M | PLANNED: own lane; research first (lens flares: no LENS reader; gobos: LIGH NAM0 parsed, not drawn; light distance fade; per-room god rays). ATMO1 notes/atmo1/STATUS.md |
