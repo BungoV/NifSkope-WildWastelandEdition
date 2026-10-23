@@ -77,6 +77,9 @@ struct CellDecalMesh
 {
 	QString name;
 	QString diffuse, normal, spec;
+	QString height;			//!< lane DECALS1: the base's TX04 (empty = no parallax)
+	float parallaxScale = 0.0f;	//!< DODT parallax scale and passes, as the game reads them
+	int parallaxPasses = 0;
 	std::vector<CellDecalVert> verts;
 	std::vector<quint32> tris;
 	int decals = 0;

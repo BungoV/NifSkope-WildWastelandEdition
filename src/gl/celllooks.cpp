@@ -27,6 +27,8 @@ const LookRow kRows[] = {
 	{ "Real sun and moon", "WW/SkyEphemeris" },
 	{ "Actors outdoors", "WW/CellActorsOutdoors" },
 	{ "Weapon mod parts", "WW/CellWeaponParts" },
+	{ "Decal distance fade", "WW/CellDecalFade" },
+	{ "Decal parallax", "WW/CellDecalParallax" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -92,6 +94,14 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WEAP_PARTS" ).trimmed() );
 		return p;
 	}
+	case WwLook::DecalFade: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_DECAL_FADE" ).trimmed() );
+		return p;
+	}
+	case WwLook::DecalParallax: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_DECAL_POM" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -118,6 +128,8 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::Ephemeris: return "WW_SKY_EPHEM";
 	case WwLook::ActorsOutdoors: return "WW_CELL_ACTORS_OUT";
 	case WwLook::WeaponParts: return "WW_CELL_WEAP_PARTS";
+	case WwLook::DecalFade: return "WW_CELL_DECAL_FADE";
+	case WwLook::DecalParallax: return "WW_CELL_DECAL_POM";
 	default: return "";
 	}
 }

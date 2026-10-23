@@ -51,6 +51,8 @@ bool esmDecalBase( const EsmWorld & world, quint32 txstForm, EsmDecalBase & out 
 			out.normal = zString( f );
 		} else if ( f == "TX07" ) {
 			out.spec = zString( f );
+		} else if ( f == "TX04" ) {
+			out.height = zString( f );
 		} else if ( f == "MNAM" ) {
 			out.material = zString( f );
 		} else if ( f == "DODT" && f.size() >= 36 ) {

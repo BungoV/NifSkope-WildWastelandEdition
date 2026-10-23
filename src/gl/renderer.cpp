@@ -52,6 +52,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellwater.h"	// lane WATER1
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 #include "gl/cellgrass.h"	// lane GRASSMB1
+#include "gl/cellcull.h"	// lane DECALS1: the placed decals' parallax
+#include "gl/celllooks.h"
 #include "gl/cellssr.h"
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellssgi.h"
@@ -2379,6 +2381,12 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
 	if ( prog->uniLocation( "editorBrdf" ) >= 0 )	// lane VANILLADEF1: Shading > Editor BRDF (off = vanilla)
 		prog->uni1b( "editorBrdf", scene->editorBrdf );
+	if ( prog->uniLocation( "wwDecalPom" ) >= 0 ) {	// lane DECALS1: (scale x 0.1, step cap); x = 0 is the old draw
+		float sc = 0.0f, steps = 0.0f;
+		const bool on = wwLookOn( WwLook::DecalParallax ) && wwCellDecalPomFor( scene->nifModel, mesh->id(), sc, steps );
+		WW_SWITCH_STATIC( bool, deep, wwEnv( "WW_CELL_DECAL_POM_RED" ).trimmed() == "deep" );
+		prog->uni2f( "wwDecalPom", on ? sc * ( deep ? 4.0f : 1.0f ) : 0.0f, steps );
+	}
 	if ( ( wwVolPartFx() & 1 ) && ( wwVolPartRed() & 64 ) && prog->name == std::string_view( "fo4_effectcell.prog" ) ) {
 		prog->uni1b( "cellShadowOn", false );	// lane VOLPART1 red noshadow: the placed lights' cubes too
 		setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)

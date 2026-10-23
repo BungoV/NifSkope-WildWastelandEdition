@@ -20,6 +20,8 @@ enum class WwLook : int
 	Ephemeris,			// EPHEM1 (GAPLOOK2): Sun Path Real uses FO4CS Solar's sun + the real moon, phase, date (WW_SKY_EPHEM)
 	ActorsOutdoors,		// PLACED1 (GAPLOOK2): placed actors in exterior cells, not only interiors (WW_CELL_ACTORS_OUT)
 	WeaponParts,		// MISS1 (GAPLOOK2): placed weapons get their default mod parts on the connect points (WW_CELL_WEAP_PARTS)
+	DecalFade,		// DECALS1: decal-flag model shapes fade out with distance, the game's LOD rule (WW_CELL_DECAL_FADE)
+	DecalParallax,	// DECALS1: placed decals with a height map (TX04) get the game's parallax (WW_CELL_DECAL_POM)
 	Count
 };
 

@@ -21,6 +21,7 @@ struct EsmDecalBase
 	bool hasDecalData = false;  //!< it carries decal data
 	QString edid;
 	QString diffuse, normal, spec;   //!< its own texture slots 0, 1, 7 (relative to textures/)
+	QString height;                  //!< lane DECALS1: TX04, the parallax height map (TX03 is the glow)
 	QString material;                //!< a material file path; when set the textures come from it
 	float minWidth = 0.0f, maxWidth = 0.0f, minHeight = 0.0f, maxHeight = 0.0f;
 	float depth = 0.0f, shininess = 0.0f, parallaxScale = 0.0f;

@@ -117,6 +117,22 @@ void wwCellCullBegin( const void * nif );
 void wwCellCullShape( const void * nif, int block, std::vector<WwCullRun> && runs );
 // lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
 void wwCellCullForget( const void * nif, int block );
+/*! Lane DECALS1 (2026-10-23): THE GAME'S DECAL LOD FADE. A model shape with the Decal / Dynamic_Decal lighting
+ *  flags fades per placement: x = distance x (FOV / 80) / (mult x 7200); alpha 1 up to x = 0.05, linear to 0 at
+ *  0.06, not drawn past it. mult = fLODFadeOutMultObjects (30 in bungo's Prefs; pin WW_CELL_DECAL_FADE_MULT).
+ *  Placed TXST decals never fade (they go with their receiver). Row "Decal distance fade" (WwLook::DecalFade).
+ *  Red WW_CELL_DECAL_FADE_RED=near: mult 1 (fades at ~410-490 units, FOV 70). */
+void wwCellDecalFadeShape( const void * nif, int block, const std::vector<WwCullRun> & runs );
+/*! The fade's ranges: `keep` drawn whole, `band` (first, count) pairs drawn with `bandAlpha` each. False = not a
+ *  fading decal shape (draw as before). The Culling row's frustum applies too; previs does not. */
+bool wwCellDecalFadeRanges( Scene * scene, const Shape * sh, int block, std::int64_t numTris,
+	std::vector<std::uint32_t> & keep, std::vector<std::uint32_t> & band, std::vector<float> & bandAlpha );
+/*! Lane DECALS1: a placed decal shape whose texture set has a height map (TX04): the parallax scale and passes
+ *  of its DODT. Row "Decal parallax" (WwLook::DecalParallax). */
+void wwCellDecalPomShape( const void * nif, int block, float scale, int passes );
+//! (scale x 0.1, the step cap clamp(passes, 16, 72)) for the shape, or false.
+bool wwCellDecalPomFor( const void * nif, int block, float & scale, float & steps );
+
 //! The shape's runs, or null (not a cell shape, or one run only).
 const std::vector<WwCullRun> * wwCellCullRuns( const void * nif, int block );
 

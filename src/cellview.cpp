@@ -205,6 +205,9 @@ struct Bucket
 	int fxLit = -1;
 	bool decal = false;   // lane PLACED1: a placed decal's pieces (src/celldecal.h): Decal flag, no depth write
 	quint32 decalSF1 = 0;   // lane GAPFIX1: a lighting source's own Decal / Dynamic_Decal bits (the model's flags), kept
+	QString heightTex;      // lane DECALS1: a placed decal's TX04 height map (texture slot 2; no glow on decals)
+	float pomScale = 0.0f;  // lane DECALS1: its DODT parallax scale and passes
+	int pomPasses = 0;
 	/* Lane WATER1: a water surface of one WATR record (the cell's plane or a placed water mesh); its shapes are
 	 * registered with src/gl/cellwater.h, which draws them the game's way while the Cell lights row is on. */
 	bool water = false;
@@ -546,9 +549,13 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 				runs.push_back( r );
 				s0 = s1;
 			}
+			if ( b.decalSF1 && !b.decal )	// lane DECALS1: the game's decal LOD fade, per placement (gl/cellcull.h)
+				wwCellDecalFadeShape( nif, nif->getBlockNumber( iShape ), runs );
 			wwCellCullShape( nif, nif->getBlockNumber( iShape ), std::move( runs ) );
 		}
 		emitLap( 2 );
+		if ( b.decal && !b.heightTex.isEmpty() )   // lane DECALS1: the renderer runs the decal parallax on this shape
+			wwCellDecalPomShape( nif, nif->getBlockNumber( iShape ), b.pomScale, b.pomPasses );
 		if ( b.water )        // lane WATER1: the renderer draws this shape with the game's water terms
 			wwCellWaterShape( nif, nif->getBlockNumber( iShape ), b.waterRec );
 		if ( b.landSplat )    // lane TERRBLEND1: the renderer tells the shader the alpha is a share
@@ -668,6 +675,8 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 				nif->set<QString>( nif->getIndex( iArr, 1 ), b.normalTex );
 			if ( !b.specTex.isEmpty() )
 				nif->set<QString>( nif->getIndex( iArr, 7 ), b.specTex );
+			if ( !b.heightTex.isEmpty() )	// lane DECALS1: read through GlowMap (no new sampler; shader type 0 = no glow)
+				nif->set<QString>( nif->getIndex( iArr, 2 ), b.heightTex );
 		} else {
 			/* No material at all: the ground, the water and the cell grid,
 			 * which carry their whole appearance in the vertex colours.
@@ -5069,6 +5078,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			b.matString = m.diffuse;
 			b.normalTex = m.normal;
 			b.specTex = m.spec;
+			b.heightTex = m.height;	// lane DECALS1
+			b.pomScale = m.parallaxScale;
+			b.pomPasses = m.parallaxPasses;
 			b.decal = true;
 			b.hasAlpha = true;       // blended; the vertex alpha carries the angle fade
 			b.alphaThreshold = 0;

@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane DECALS1 (2026-10-23, branch decals1-20261023): decal distance fade and decal parallax (both off by default)
+
+- **Placed decals (TXST references) never fade with distance in the game:** they stay until the surface under them
+  is not drawn. The cell view already did that; nothing changed for them.
+- **Row Decal distance fade** (Show menu, key `WW/CellDecalFade`, pin `WW_CELL_DECAL_FADE`, live): model shapes flagged
+  Decal / Dynamic Decal fade out the game's way. x = distance x (FOV / 80) / (mult x 7200); full until x = 0.05, faded
+  to nothing at 0.06, not drawn beyond. mult = `WW_CELL_DECAL_FADE_MULT` (default 30, bungo's Fallout4Prefs.ini
+  fLODFadeOutMultObjects; the game's default is 4.5). Red `WW_CELL_DECAL_FADE_RED=near` (mult 1) fades them close by.
+  Differences: the placement centre stands in for the fade-node centre; which FOV axis the game uses is unknown
+  (horizontal here).
+- **Row Decal parallax** (key `WW/CellDecalParallax`, pin `WW_CELL_DECAL_POM`, live): placed decals whose TXST has a
+  height map (TX04) get the game's parallax: 16..72 steps (fewer face-on), scale x 0.1, one refine step, clipped to the
+  decal's square. The height map rides texture slot 2 (no new sampler). Red `WW_CELL_DECAL_POM_RED=deep` (4x depth).
+  Not done: the self-shadow variant (DODT flag 0x01) and the depth clip. Only 3 Fallout4.esm TXSTs carry a height map
+  (most refs in CorvegaAssemblyPlant01, FensParkviewApartments02, InstituteOldRobotics01); none in Concord or Goodneighbor.
+- GPU at 1080p (estimate): fade about 0 ms (fewer triangles); parallax under 0.1 ms, only on parallax-decal pixels.
+
 ## Lane FXPARITY1 (2026-10-23, branch fxparity1-20261023): particles follow the game's rules (off by default)
 
 - **Row:** Scene window > Particle Game Rules (off), key `WW/FxParity`, live in every mode. `WW_FX_PARITY=1` / `=0`

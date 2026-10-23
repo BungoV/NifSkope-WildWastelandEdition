@@ -144,6 +144,9 @@ struct CullState
 	QString lastUmbraLine;
 	float depthKey[19] = {};
 	bool depthKeyValid = false;
+	// lane DECALS1: the decal-flag shapes' placements (the fade) and the placed decals' parallax
+	QHash<const void *, QHash<int, std::vector<WwCullRun>>> decalFade;
+	QHash<const void *, QHash<int, std::pair<float, int>>> decalPom;
 };
 
 CullState & st()
@@ -718,6 +721,8 @@ void wwCellCullBegin( const void * nif )
 	st().pc = PrevisCache();
 	st().umbra.remove( nif );	// lane UMBRA1
 	st().umbraLast = nullptr;
+	st().decalFade.remove( nif );	// lane DECALS1
+	st().decalPom.remove( nif );
 	st().depthKeyValid = false;
 }
 
@@ -893,6 +898,91 @@ void wwCellCullForget( const void * nif, int block )
 	auto d = st().docs.find( nif );
 	if ( d != st().docs.end() )
 		d->remove( block );
+	auto f = st().decalFade.find( nif );	// lane DECALS1
+	if ( f != st().decalFade.end() )
+		f->remove( block );
+	auto pm = st().decalPom.find( nif );
+	if ( pm != st().decalPom.end() )
+		pm->remove( block );
+}
+
+void wwCellDecalFadeShape( const void * nif, int block, const std::vector<WwCullRun> & runs )
+{
+	if ( !runs.empty() )
+		st().decalFade[nif].insert( block, runs );
+}
+
+bool wwCellDecalFadeRanges( Scene * scene, const Shape * sh, int block, std::int64_t numTris,
+	std::vector<std::uint32_t> & keep, std::vector<std::uint32_t> & band, std::vector<float> & bandAlpha )
+{
+	CullState & s = st();
+	if ( !scene || !sh || !scene->renderer || numTris <= 0 || s.decalFade.isEmpty() || s.probing )
+		return false;
+	auto d = s.decalFade.constFind( scene->nifModel );
+	if ( d == s.decalFade.constEnd() )
+		return false;
+	auto it = d->constFind( block );
+	if ( it == d->constEnd() )
+		return false;
+	WW_SWITCH_STATIC( float, multPin, wwEnv( "WW_CELL_DECAL_FADE_MULT" ).trimmed().toFloat() );
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_DECAL_FADE_RED" ).trimmed() == "near" );
+	// fLODFadeOutMultObjects: bungo's Prefs 30 (the exe's default 4.5); the game takes 0.2 for a value <= 0
+	const float mult = red ? 1.0f : ( multPin > 0.0f ? multPin : 30.0f );
+	const auto & pm = scene->renderer->globalUniforms->projectionMatrix;	// pm[column][row]
+	// the game's FOV / 80 with the horizontal FOV (which axis the game passes is not known)
+	const float fov = pm[0][0] > 0.0f ? 2.0f * std::atan( 1.0f / pm[0][0] ) * 57.29578f : 80.0f;
+	const float k = ( fov / 80.0f ) / ( mult * 7200.0f );
+	float pl[4][4];
+	if ( s.on )
+		cameraPlanes( scene, pl );
+	const Transform & vt = sh->viewTrans();
+	const float vs = std::fabs( vt.scale ) > 0.0f ? std::fabs( vt.scale ) : 1.0f;
+	keep.clear();
+	band.clear();
+	bandAlpha.clear();
+	for ( const WwCullRun & r : *it ) {
+		if ( std::int64_t( r.first ) >= numTris )
+			break;
+		const std::uint32_t cnt = std::uint32_t( std::min<std::int64_t>( r.count, numTris - std::int64_t( r.first ) ) );
+		const Vector3 v = vt * r.center;
+		if ( s.on && !insidePlanes( pl, v, r.radius * vs ) )
+			continue;
+		const float x = v.length() / vs * k;	// the placement's centre stands in for its fade node's
+		if ( x > 0.06f )
+			continue;
+		if ( x <= 0.05f ) {
+			if ( !keep.empty() && keep[keep.size() - 2] + keep[keep.size() - 1] == r.first )
+				keep[keep.size() - 1] += cnt;
+			else {
+				keep.push_back( r.first );
+				keep.push_back( cnt );
+			}
+		} else {
+			band.push_back( r.first );
+			band.push_back( cnt );
+			bandAlpha.push_back( ( x - 0.06f ) / ( 0.05f - 0.06f ) );
+		}
+	}
+	return true;
+}
+
+void wwCellDecalPomShape( const void * nif, int block, float scale, int passes )
+{
+	st().decalPom[nif].insert( block, std::make_pair( scale, passes ) );
+}
+
+bool wwCellDecalPomFor( const void * nif, int block, float & scale, float & steps )
+{
+	const CullState & s = st();
+	auto d = s.decalPom.constFind( nif );
+	if ( d == s.decalPom.constEnd() )
+		return false;
+	auto it = d->constFind( block );
+	if ( it == d->constEnd() )
+		return false;
+	scale = it->first * 0.1f;
+	steps = float( std::clamp( it->second, 16, 72 ) );
+	return true;
 }
 
 const std::vector<WwCullRun> * wwCellCullRuns( const void * nif, int block )
