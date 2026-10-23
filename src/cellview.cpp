@@ -201,6 +201,7 @@ struct Bucket
 	//! Lane FXLIT1: one placement's lit effect shapes; the placed model's serial in src/gl/cellfxlit.h, -1 = none.
 	int fxLit = -1;
 	bool decal = false;   // lane PLACED1: a placed decal's pieces (src/celldecal.h): Decal flag, no depth write
+	quint32 decalSF1 = 0;   // lane GAPFIX1: a lighting source's own Decal / Dynamic_Decal bits (the model's flags), kept
 	/* Lane WATER1: a water surface of one WATR record (the cell's plane or a placed water mesh); its shapes are
 	 * registered with src/gl/cellwater.h, which draws them the game's way while the Cell lights row is on. */
 	bool water = false;
@@ -647,7 +648,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		 * way the game does, instead of showing its normal-map diffuse as a solid swirled disk. */
 		nif->set<quint32>( iShader, "Shader Flags 1",
 			( b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) ) | ( b.refract ? 0x8000U : 0U )
-			| ( b.decal ? 0x04000000U : 0U ) );   // lane PLACED1: Decal
+			| ( b.decal ? 0x04000000U : 0U ) | b.decalSF1 );   // lane PLACED1: Decal; lane GAPFIX1: the model's own
 		if ( b.refract )
 			nif->set<float>( iShader, "Refraction Strength", b.refractStrength );
 		nif->set<quint32>( iShader, "Shader Flags 2", ( b.withColour ? 0x25U : 5U ) & ( b.decal ? ~1U : ~0U ) );
@@ -2396,6 +2397,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	int effectBuckets = 0;                  //!< 2026-10-01: BGEM buckets drawn by the effect shader
 	int inlineFxBuckets = 0;                //!< lane EFX1: BGEM-less effect buckets, the source block written back
 	int refractBuckets = 0;                 //!< lane EFX1: Refraction-flagged buckets, drawn by the refraction preview
+	int decalFlagBuckets = 0, decalFlagShapes = 0;   //!< lane GAPFIX1: lighting buckets keeping the model's decal flags
+	// lane GAPFIX1 red (gates only): the welded lighting shapes drop the model's decal flags again
+	const bool fxdNoFlag = wwEnv( "WW_CELL_FXD_RED" ).trimmed() == "noflag";
 	/* Lane GLOW1: billboard shapes turned to the camera, and those welded flat (the red
 	 * WW_CELL_GLOW_RED=1 welds all of them, as before; past the cap the rest weld flat too). */
 	const bool glowRed = wwEnvInt( "WW_CELL_GLOW_RED" ) != 0;
@@ -2671,7 +2675,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			.arg( s.ownEmit ? 1 : 0 ).arg( withColour ? 1 : 0 )
 			.arg( ( mat.isEmpty() && s.matUnreadable ) ? 1 : 0 ).arg( double( alpha ) )
 			+ own;   // lane GLOW1: a billboard placement's own bucket
-		auto it = buckets.find( key );
+		// lane GAPFIX1: the game honours a model's Decal flag without a material file; keyed only when set
+		const quint32 decalBits = ( effect || inlineFx || refract || fxdNoFlag ) ? 0U : ( s.shaderSF1 & 0x0C000000U );
+		const QString keyD = decalBits ? key + QStringLiteral( "|D%1" ).arg( decalBits ) : key;
+		decalFlagShapes += decalBits ? 1 : 0;
+		auto it = buckets.find( keyD );
 		if ( it != buckets.end() )
 			return it.value();
 		Bucket b;
@@ -2711,7 +2719,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			b.refractStrength = s.refractStrength;
 			refractBuckets++;
 		}
-		return buckets.insert( key, b ).value();
+		b.decalSF1 = decalBits;
+		decalFlagBuckets += decalBits ? 1 : 0;
+		return buckets.insert( keyD, b ).value();
 	};
 
 	const bool colouring = spec.overlay != CellOverlay::None;
@@ -6062,7 +6072,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		     "resolved to nothing, " << blendBuckets << " blended (glass) buckets, "
 		  << effectBuckets << " drawn by the effect shader (BGEM), "
 		  << inlineFxBuckets << " by the effect shader as the NIF sets it (lane EFX1), "
-		  << refractBuckets << " refraction buckets (lane EFX1)";
+		  << refractBuckets << " refraction buckets (lane EFX1), "
+		  << decalFlagBuckets << " lighting buckets with the model's decal flag from " << decalFlagShapes << " shapes"
+		  << ( fxdNoFlag ? " RED noflag" : "" ) << " (lane GAPFIX1)";
 		if ( !unreadableMatNames.isEmpty() )
 			s << " (" << unreadableMatNames.join( QLatin1String( ", " ) ) << ")";
 		s << "\n";
