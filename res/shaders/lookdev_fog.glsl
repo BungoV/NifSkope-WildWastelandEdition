@@ -20,6 +20,43 @@ uniform vec4 fogProbe;		// gates only: .z = 0 off, 1 alpha, 2 colour / 2, 3 hb (
 				// 6 / 7 per fragment (lane FOG2): (alpha, hb, 0) / colour ^ 1/2.2; 8 the geometry, wide (d / 16384, 0.5 + z / 32768)
 uniform int fogRed;		// gates only: 1 maxclamp, 2 noescape, 4 height0
 
+/* lane SKYA (ATMO2): the physical sky's aerial perspective (src/gl/atmosphere.h, Hillaire 2020 sec. 5.4). atApTex
+ * holds per froxel the light the air sends toward the eye from the camera to slice k (rgb, the sky's scene units)
+ * and the mean transmittance (a); slice k's centre sits at maxKm ((k + 0.5) / n)^2, so the texture's depth
+ * coordinate is sqrt(d / maxKm). Off (atAp.x 0): every path below is the one before the lane. */
+#include "atmo_apfog.glsl"
+uniform sampler3D atApTex;
+uniform vec4 atAp;		// 1 = on, maxKm, km per view unit, slices
+uniform vec4 atApProj;		// the projection the volume was built for: P00, P11, P20, P21
+uniform float atApDouble;	// red "double": the fog laid over the whole aerial perspective
+
+bool wwApOn()
+{
+	return atAp.x > 0.5;
+}
+
+// (L, T) of the sky's air between the eye and posView (view space)
+vec4 wwAtmoApAt( vec3 posView )
+{
+	float dKm = length( posView ) * atAp.z;
+	float zv = max( -posView.z, 1e-6 );
+	vec2 ndc = vec2( atApProj.x * posView.x + atApProj.z * posView.z, atApProj.y * posView.y + atApProj.w * posView.z ) / zv;
+	vec2 uv = clamp( ndc * 0.5 + 0.5, 0.0, 1.0 );
+	float n = atAp.w;
+	float s = sqrt( clamp( dKm / atAp.y, 0.0, 1.0 ) );
+	vec4 v;
+	if ( s < 0.5 / n ) {
+		// nearer than slice 0's centre: its (L, 1 - T) scaled by the distance (both linear there)
+		v = texture( atApTex, vec3( uv, 0.5 / n ) );
+		float f = s * n * 2.0;
+		f *= f;
+		v = vec4( v.rgb * f, 1.0 - ( 1.0 - v.a ) * f );
+	} else {
+		v = texture( atApTex, vec3( uv, s ) );
+	}
+	return vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
+}
+
 // fog alpha, height blend and colour (before the sun term) of one fragment
 float wwFogEval( float d, float z, out float hb, out vec3 fogCol )
 {
@@ -344,10 +381,13 @@ float wwVolAirSunT( vec3 posView )
 }
 
 vec3 wwFogBase( vec3 preFog, vec3 posView );
+vec3 wwFogAp( vec3 preFog, vec3 posView );	// lane SKYA
 
 // linear in, linear out
 vec3 wwFog( vec3 preFog, vec3 posView )
 {
+	if ( wwApOn() )
+		return wwFogAp( preFog, posView );
 	if ( !fogOn )
 		return preFog;
 	if ( volOn && volSlices.w > 0.5 ) {
@@ -394,11 +434,62 @@ vec3 wwFogBase( vec3 preFog, vec3 posView )
 	return mix( preFog, resolved, alpha );
 }
 
+/* lane SKYA (ATMO2): the surface through the sky's air, then through the cell fog's residual (atmo_apfog.glsl: the
+ * combined transmittance is the min of the two, no haze counted twice). The fog off: the sky's air alone. */
+vec3 wwFogAp( vec3 preFog, vec3 posView )
+{
+	vec4 ap = wwAtmoApAt( posView );
+	vec3 c = preFog * ap.a + ap.rgb;
+	if ( !fogOn )
+		return c;
+	bool dbl = atApDouble > 0.5;
+	if ( volOn && volSlices.w > 0.5 ) {
+		vec4 a = wwVolAirAt( posView );
+		float tr = wwApFogResidualT( ap.a, a.a, dbl );
+		return c * tr + ( dbl ? a.rgb : wwApFogResidualL( a.rgb, a.a, tr ) );
+	}
+	// the game's fog, its alpha cut to the residual: 1 - alpha' = min(1, (1 - alpha) / Tap)
+	float d = length( posView ) * fogDistScale;
+	float z = dot( fogView.xyz, posView ) + fogView.w;
+	float hb;
+	vec3 fogCol;
+	float alpha = 1.0 - wwApFogResidualT( ap.a, 1.0 - wwFogEval( d, z, hb, fogCol ), dbl );
+	vec3 viewDir = posView / max( length( posView ), 1e-6 );
+	float sunW = pow( max( dot( viewDir, fogSun.xyz ), 0.0 ), fogSunColour.w ) * fogSun.w;
+	vec3 sunlit = mix( fogCol, fogSunColour.rgb, sunW );
+	float gray = dot( c, vec3( 1.0 / 3.0 ) );
+	vec3 resolved = alpha < fogK[2].w ? mix( sunlit, vec3( gray ), gray ) : sunlit;
+	return mix( c, resolved, alpha );
+}
+
+// lane SKYA (ATMO2): an effect through the same air (wwFogFx's split): an additive one takes the transmittance only
+vec3 wwFogFxAp( vec3 lin, vec3 posView, bool additive )
+{
+	if ( !additive )
+		return max( wwFogAp( lin, posView ), vec3( 0.0 ) );
+	float tAp = wwAtmoApAt( posView ).a;
+	if ( !fogOn )
+		return lin * tAp;
+	float tFog;
+	if ( volOn && volSlices.w > 0.5 && ( volAirFlags & 16 ) != 0 ) {
+		tFog = wwVolAirAt( posView ).a;
+	} else {
+		float hb;
+		vec3 fc;
+		tFog = 1.0 - wwFogEval( length( posView ) * fogDistScale, dot( fogView.xyz, posView ) + fogView.w, hb, fc );
+	}
+	return lin * tAp * wwApFogResidualT( tAp, tFog, atApDouble > 0.5 );
+}
+
 // lane VOLAIR1: an effect's or a particle's linear colour through the same fog as the opaque draws (wwFog), so a
 // card on a far wall fades with the wall. An additive draw takes the transmittance only: its light adds over a
 // surface that already holds the in-scatter. Red fxfog (flag 16 clear) and the air off: the game's fog alone, as before.
+vec3 wwFogFxAp( vec3 lin, vec3 posView, bool additive );	// lane SKYA
+
 vec3 wwFogFx( vec3 lin, vec3 posView, bool additive )
 {
+	if ( wwApOn() )
+		return wwFogFxAp( lin, posView, additive );
 	if ( !fogOn )
 		return lin;
 	float hb;

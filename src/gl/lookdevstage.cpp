@@ -521,6 +521,7 @@ void wwLookdevFogUniforms( Scene * scene )
 	if ( !prog || prog->uniLocation( "fogOn" ) < 0 )
 		return;
 	wwVolAirUniforms( scene );	// lane VOLAIR1: every program that holds the fog holds the air's sampler
+	wwAtmoApUniforms( scene );	// lane SKYA: and the sky's aerial perspective (read with the fog row off too)
 	LdState & s = st();
 	const bool on = wwLookdevFogWanted( scene );
 	prog->uni1b( "fogOn", on );
@@ -1678,6 +1679,7 @@ bool drawAtmo( Scene * scene, QStringList & drew )
 
 bool wwLookdevDrawBackground( Scene * scene )
 {
+	wwAtmoApFrame();	// lane SKYA: last frame's aerial perspective is stale (drawAtmo builds this frame's)
 	if ( !scene || !scene->renderer || scene->selecting || scene->hasVisMode( Scene::VisSilhouette ) )
 		return false;
 	Renderer * r = scene->renderer;

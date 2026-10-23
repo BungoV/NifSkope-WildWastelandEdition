@@ -45,6 +45,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/gltex.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
+#include "gl/atmosphere.h"	// lane SKYA
 #include "gl/sunshadow.h"
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
@@ -847,7 +848,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			&& p->name != std::string_view( "fo4_csm.prog" ) && p->name != std::string_view( "fo4_fogcsm.prog" ) )
 			return p;
 		// red fognoswap: never swap, so the legacy path cannot fog
-		const bool fog = wwLookdevFogWanted( mesh->scene ) && !wwLookdevRed( "fognoswap" );
+		// lane SKYA: the sky's aerial perspective reads the fog program too (with the Fog row off)
+		const bool fog = ( wwLookdevFogWanted( mesh->scene ) || wwAtmoApActive() ) && !wwLookdevRed( "fognoswap" );
 		/* lane PRTP3: a cell-lit draw takes fo4_cell.prog (the same shader with the cell's lights,
 		 * and the fog, compiled in); the row off never reaches it */
 		const char * want = wwCellLightsWanted( mesh->scene )

@@ -432,7 +432,7 @@ void main()
 		cellDirVis = wwSunShadow( -ViewDir );
 #endif
 		vec3 lin = fxDecalLin( alb, Ng );
-		if ( fogOn )
+		if ( fogOn || wwApOn() )	// lane SKYA: the sky's aerial perspective with the fog off too
 			lin = max( wwFog( lin, -ViewDir ), vec3( 0.0 ) );
 		float a = fxDecalProbe ? 1.0 : color.a;
 		if ( cellProbe == 6 )

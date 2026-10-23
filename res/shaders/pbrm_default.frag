@@ -726,7 +726,7 @@ void main()
 	if ( cellOn )
 		color.rgb *= cellAoFactor();
 	// lane FOG2: a cell-lit draw fogs here, once (the interior's fog, or the Lookdev weather's outdoors)
-	if ( cellOn && fogOn )
+	if ( cellOn && ( fogOn || wwApOn() ) )	// lane SKYA: the sky's aerial perspective with the fog off too
 		color.rgb = wwFog( max( color.rgb, vec3( 0.0 ) ), -ViewDir );
 	// lane IMGS1: the cell's imagespace in place of the viewer's curve; probe 6 writes the linear colour raw
 	vec3 cellHdr = max( color.rgb, vec3( 0.0 ) );

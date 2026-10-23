@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SKYA (2026-10-23, branch skya-20261023): the physical sky reaches the world, every part off by default
+
+### ATMO2: aerial perspective (Hillaire 2020 sec. 5.4)
+- **What:** the physical sky's own air on every surface: a froxel volume (RGBA16F 3D: in-scatter + transmittance)
+  built each frame from the sky's medium and LUTs, out to 16 km (quadratic slices, slice 0 at 4 m).
+  - Read in `lookdev_fog.glsl` `wwFog` / `wwFogFx`, so near meshes, the far LOD, the cell-lit far cards, the far
+    dots, water and effects all take it in the same linear frame: no seam at the LOD ring.
+  - Built for the main view only; reflection probes and captures read none.
+- **With the cell fog on (our fog leads):** both describe the same air, so the fog keeps only the share the aerial
+  perspective has not taken (`res/shaders/atmo_apfog.glsl`). Whole transmittance = min of the two, never the
+  product. The same rule holds for the Volumetric Air over the physical sky's pixels (`cell_volsky.frag`).
+  Notes: `notes/skya/AP_FOG_SPLIT.md`.
+- **Row:** Render > Scene > Aerial Perspective (Off / On), key `Settings/Render/Scene/Aerial Perspective`, live;
+  needs Physical Sky on. `WW_ATMO_AP=0|1` pins it (a harness run forces 0).
+  `WW_ATMO_AP_RED=nosunt|double` are the reds. Off = today's picture exactly.
+- **Cost:** 32 KB (Low 16x16x16) / 128 KB (Medium 32x32x16) / 256 KB (High 32x32x32) / 1 MB (Ultra 64x64x32);
+  16 march steps a froxel; about 0.05 ms at High (estimate). Inside the `atmo: gpu X ms` stderr line; the
+  `atmo:` summary adds `ap=WxHxN@16km`.
+- **Checks:** `tests/spells/atmo_lut_check.py` gate 4 (froxels vs the model's march; red nosunt fails) and gate 5 (AP +
+  fog: summed optical depth = the larger of the two at 40 points; red double fails by 1.46).
+
 ## Lane ATMO1 (2026-10-23, branch atmo1-20261023): a physical sky (Hillaire 2020), off by default
 
 - **What:** the cell view's sky can be drawn from a physical atmosphere model instead of the weather dome.

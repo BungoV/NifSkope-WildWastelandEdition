@@ -41,6 +41,18 @@ unsigned wwAtmoSkyViewTex();
 //! the CPU transmittance (the LUT's math) from height km along cos zenith, haze from the last drawn frame
 void wwAtmoTransmittance( float heightKm, float cosZenith, float out[3] );
 
+/* lane SKYA (ATMO2): the aerial perspective (Hillaire 2020 sec. 5.4), a froxel volume over the view built with the
+ * sky's own medium and LUTs, read by every surface through lookdev_fog.glsl's wwFog (near geometry, the far LOD, the
+ * far cards: one linear frame). Row Render > Scene > Aerial Perspective: Off / On, ships Off, needs Physical Sky on.
+ * Pin WW_ATMO_AP (0/1), red WW_ATMO_AP_RED = nosunt | double. With the cell fog on, the fog keeps only the share
+ * the air has not already taken (combined transmittance = min of the two: no haze counted twice). */
+int wwAtmoAp();
+void wwAtmoSetAp( int on );	//!< refused while WW_ATMO_AP pins it
+bool wwAtmoApPinned();
+void wwAtmoApFrame();	//!< the frame's start: last frame's volume is no longer valid
+bool wwAtmoApActive();	//!< this frame drew a volume (Renderer then picks the fog program with the Fog row off)
+void wwAtmoApUniforms( Scene * scene );	//!< the current program's atAp* uniforms and its sampler (unit AtmoAp)
+
 QString wwAtmoSummary();
 
 #endif

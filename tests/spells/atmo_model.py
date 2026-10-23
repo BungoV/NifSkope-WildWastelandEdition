@@ -94,15 +94,19 @@ def phase_hg(g, c):
     return (1 - g * g) / (4 * math.pi * np.power(1 + g * g - 2 * g * c, 1.5))
 
 
-def integrate(P, r0, vdir, sdir, n, psi=None, iso=False, ground=False):
+def integrate(P, r0, vdir, sdir, n, psi=None, iso=False, ground=False, dmax=None, want_T=False):
     """Hillaire's IntegrateScatteredLuminance for many rays at once. r0 scalar (camera on +z), vdir (N,3), sdir (3,)
-    or (N,3). Returns L (N,3) and, for the MS pass, the fms integrand (N,3)."""
+    or (N,3). Returns L (N,3) and, for the MS pass, the fms integrand (N,3). Lane SKYA (aerial perspective): dmax
+    stops the march there (no ground term); want_T also returns the transmittance over the march."""
     N = vdir.shape[0]
     sdir = np.broadcast_to(sdir, (N, 3))
     mu = vdir[:, 2]
     r0a = np.full(N, r0)
     gnd = hits_ground(r0a, mu)
     d = np.where(gnd, dist_ground(r0a, mu), dist_top(r0a, mu))
+    if dmax is not None:
+        d = np.minimum(dist_top(r0a, mu), dmax)   # through the ground as the GPU froxel does (the medium clamps h)
+        gnd = np.zeros(N, bool)
     L = np.zeros((N, 3))
     F = np.zeros((N, 3))
     thr = np.ones((N, 3))
@@ -135,6 +139,8 @@ def integrate(P, r0, vdir, sdir, n, psi=None, iso=False, ground=False):
         Tg = transmittance(P, np.full(N, RB + 1e-4), mus)
         add = thr * Tg * np.maximum(mus, 0)[:, None] * P['albedo'] / math.pi
         L += np.where(gnd[:, None], add, 0)
+    if want_T:
+        return L, F, thr
     return L, F
 
 

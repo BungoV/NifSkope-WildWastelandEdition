@@ -242,6 +242,7 @@ HEADERS += \
 	src/gl/cellbloom.h \
 	src/gl/cellfogbloom.h \
 	src/gl/atmosphere.h \
+	src/gl/atmomath.h \
 	src/gl/cellprobeview.h \
 	src/gl/cellvolumeview.h \
 	src/gl/cellssr.h \

@@ -1,10 +1,12 @@
 """Lane ATMO1: render the physical sky's LUT shaders through the real GL driver (hidden 4.1 core context, the loader's
 #include expansion) and compare the read-back texels with the numpy model (atmo_model.py). Runs no NifSkope.
 
-    python -I tests/spells/atmo_lut_check.py [shaders dir] [--red noms|noozone]
+    python -I tests/spells/atmo_lut_check.py [shaders dir] [--red noms|noozone|nosunt|double]
 
 Gates: transmittance texels vs the exact optical-depth integral (< 1 %); multiple-scattering texels vs the model's
 Psi (< 3 %); sky-view texels at sun 30 and 5 deg vs the model's march with the same Psi (< 2 %).
+Lane SKYA: the aerial-perspective froxels vs the model's march stopped at each slice (< 3 %, |T| < 0.005; red
+nosunt), and the AP + cell fog combine: summed optical depth = the larger of the two, never the sum (red double).
 Exit 0 only when every gate passes; each red must make one fail.
 """
 import ctypes, math, os, sys
@@ -19,11 +21,12 @@ gl = S.gl
 GLuint, GLint, GLenum = ctypes.c_uint, ctypes.c_int, ctypes.c_uint
 
 
-def build(sdir, prog):
-    files = [l.split()[1:] for l in open(os.path.join(sdir, prog)) if l.startswith('shaders')][0]
+def build(sdir, prog, paths=None):
+    files = paths or [os.path.join(sdir, f) for f in
+                      [l.split()[1:] for l in open(os.path.join(sdir, prog)) if l.startswith('shaders')][0]]
     p = S.fn('glCreateProgram', GLuint)()
     for f in files:
-        src = S.expand(os.path.join(sdir, f))
+        src = S.expand(f)
         s = S.fn('glCreateShader', GLuint, GLenum)(0x8B30 if f.endswith('frag') else 0x8B31)
         b = ctypes.c_char_p(src.encode('latin-1'))
         S.fn('glShaderSource', None, GLuint, ctypes.c_int, ctypes.POINTER(ctypes.c_char_p), ctypes.c_void_p)(s, 1, ctypes.byref(b), None)
@@ -78,7 +81,7 @@ class Gl:
         self.fbtex(0x8D40, 0x8CE0, 0x0DE1, t, 0)
         return t.value, fb.value
 
-    def draw(self, prog, fb, w, h, uni, texs):
+    def draw(self, prog, fb, w, h, uni, texs, alpha=False):
         self.bindfb(0x8D40, fb)
         gl.glViewport(0, 0, w, h)
         self.use(prog)
@@ -101,7 +104,7 @@ class Gl:
         gl.glDrawArrays(5, 0, 4)   # GL_TRIANGLE_STRIP
         buf = (ctypes.c_float * (w * h * 4))()
         gl.glReadPixels(0, 0, w, h, 0x1908, 0x1406, buf)
-        return np.frombuffer(buf, np.float32).reshape(h, w, 4)[..., :3].astype(np.float64)
+        return np.frombuffer(buf, np.float32).reshape(h, w, 4)[..., :4 if alpha else 3].astype(np.float64)
 
 
 def sub_to_unit(u, n):
@@ -208,6 +211,87 @@ def main():
                 print('    sun %g texel %d,%d elev %.2f: GPU %s model %s err %.4f' % (se, x, y, 90 - math.degrees(za), np.round(V[y, x], 6), np.round(ref, 6), e))
             worst = max(worst, e)
     gate('sky-view', worst < 0.02, 'worst relative error at 14 texels (sun 30, 5 deg) = %.4f (< 0.02)' % worst)
+
+    # 4. lane SKYA (ATMO2): the aerial-perspective volume (Hillaire 2020 sec. 5.4), slice by slice into a 2D target,
+    # vs the model's march stopped at the slice's distance; a hazy fixture (fog 20 km, Max 0.6: the layer the camera
+    # stands in) and the clear air; the in-scatter (rgb) and the transmittance (a, the mean of the three channels)
+    aw = ah = an = 32
+    pa = build(sdir, 'atmo_ap.prog')
+    at_, afb = g.target(aw, ah)
+    f0, fx, fy = np.array([1.0, -0.5, -0.05]), np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 0.4])
+    sw = np.array([math.cos(math.radians(30)) * math.cos(math.radians(40)),
+                   math.cos(math.radians(30)) * math.sin(math.radians(40)), math.sin(math.radians(30))])
+    worstL = worstT = 0.0
+    hazy = []   # (distance km, GPU in-scatter, GPU transmittance) of the hazy weather, for gate 5
+    for hz in ((0.0, 1.0, 0.0), A.haze_from_fog(20000.0 / A.UNIT_M, 0.6)):
+        Pa = A.params(haze=hz)
+        ua = dict(base, atHaze=tuple(hz), atMsSize=(float(mw), float(mh)), atApDims=(float(aw), float(ah), float(an)),
+                  atApMaxKm=(32.0,), atFrustum0=tuple(f0), atFrustumX=tuple(fx), atFrustumY=tuple(fy), atCamR=(camR,),
+                  atSunW=tuple(sw), atMoonW=(0.0, 0.0, 1.0), atSunK=(1.0,), atMoonK=(0.0,),
+                  atMsOn=(0.0 if red == 'noms' else 1.0,), atApNoSunT=(1.0 if red == 'nosunt' else 0.0,))
+        # the transmittance and MS LUTs of this haze (the MS LUT of the clear air is kept: Psi barely moves near
+        # the ground and the model reads the same table)
+        g.draw(pt, tfb, tw, th, dict(base, atHaze=tuple(hz)), [])
+        for k in (0, 6, 15, 31):
+            Va = g.draw(pa, afb, aw, ah, dict(ua, atApSlice=(float(k),)), [('atTransTex', tt), ('atMsTex', mt)], alpha=True)
+            D = 32.0 * ((k + 0.5) / an) ** 2
+            pts = ((0, 0), (31, 31), (16, 4), (5, 27), (24, 12))
+            dirs = []
+            for (x, y) in pts:
+                v = f0 + (x + 0.5) / aw * fx + (y + 0.5) / ah * fy
+                dirs.append(v / np.linalg.norm(v))
+            Lm, _, Tm = A.integrate(Pa, camR, np.array(dirs), sw, 400, psi=psi_sub, dmax=D, want_T=True)
+            for i, (x, y) in enumerate(pts):
+                eL = A.rel(Va[y, x, :3], Lm[i]).max()
+                eT = abs(Va[y, x, 3] - Tm[i].mean())
+                if '-v' in a:
+                    print('    haze %.4f slice %d (%.2f km) texel %d,%d: GPU %s a %.4f model %s T %.4f' % (
+                        hz[0], k, D, x, y, np.round(Va[y, x, :3], 7), Va[y, x, 3], np.round(Lm[i], 7), Tm[i].mean()))
+                worstL, worstT = max(worstL, eL), max(worstT, eT)
+                if hz[0] > 0:
+                    hazy.append((D, Va[y, x, :3].copy(), float(Va[y, x, 3])))
+    g.draw(pt, tfb, tw, th, base, [])
+    gate('aerial-perspective', worstL < 0.03 and worstT < 0.005,
+         'worst relative in-scatter error = %.4f (< 0.03), worst |transmittance| = %.5f (< 0.005) at 40 froxels'
+         % (worstL, worstT))
+
+    # 5. lane SKYA: the aerial perspective with the cell fog on (atmo_apfog.glsl, the shipped combine). One weather:
+    # the hazy fixture above (Day Far 20 km, Max 0.6: the AP's haze rung is built from these numbers) with its own
+    # game fog (linear from 0 to Far, capped at Max), plus a ground fog record (Far 3 km, Max 0.95) that is thicker
+    # than the sky's air near the camera. Both media describe the SAME air, so the summed optical depth with both on
+    # must be the larger of the two (min transmittance), never their sum; the fog's colour fills the residual only.
+    # Red "double" (the fog laid on top at full strength) must fail.
+    pf = build(sdir, None, [os.path.join(sdir, 'cell_ao.vert'), os.path.join(HERE, 'atmo_apfog_check.frag')])
+    cf, cfb = g.target(64, 1)
+    ap4, fog4, want = [], [], []
+    fogC = np.array([0.55, 0.6, 0.65])
+    for (farKm, mx) in ((20.0, 0.6), (3.0, 0.95)):
+        for (D, Lg, Tg) in hazy:
+            tfog = 1.0 - min(mx, mx * D / farKm)
+            ap4.append((*Lg, Tg))
+            fog4.append((*(fogC * (1.0 - tfog)), tfog))
+            tc = min(Tg, tfog)
+            tres = tc / Tg
+            want.append((Lg * tres + fogC * (1.0 - tres), tc))
+    n = len(ap4)
+    u4 = S.fn('glUniform4fv', None, GLint, ctypes.c_int, ctypes.POINTER(ctypes.c_float))
+    g.use(pf)
+    for name, arr in (('apIn', ap4), ('fogIn', fog4)):
+        flat = (ctypes.c_float * (4 * n))(*[c for v in arr for c in v])
+        u4(g.loc(pf, name.encode()), n, flat)
+    g.u1i(g.loc(pf, b'doubled'), 1 if red == 'double' else 0)
+    C = g.draw(pf, cfb, 64, 1, {}, [], alpha=True)[0, :n]
+    eOD = eL = 0.0
+    for i in range(n):
+        odw, odg = -math.log(max(want[i][1], 1e-9)), -math.log(max(C[i, 3], 1e-9))
+        eOD = max(eOD, abs(odg - odw))
+        eL = max(eL, np.abs(C[i, :3] - want[i][0]).max())
+        if '-v' in a:
+            print('    apfog %2d: Tap %.4f Tfog %.4f -> T %.4f (want %.4f) OD %.4f vs max(OD) %.4f' % (
+                i, ap4[i][3], fog4[i][3], C[i, 3], want[i][1], odg, odw))
+    gate('aerial-perspective + fog', eOD < 1e-3 and eL < 1e-3,
+         'summed optical depth vs max(AP, fog) worst %.5f (< 0.001), in-scatter worst %.5f (< 0.001) at %d points'
+         % (eOD, eL, n))
     return 1 if fails else 0
 
 

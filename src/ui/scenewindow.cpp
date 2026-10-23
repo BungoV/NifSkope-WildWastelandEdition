@@ -164,6 +164,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	physicalSkyBox->setCurrentIndex( std::clamp( wwAtmoTier(), 0, 4 ) );
 	wwMatchFieldStyle( physicalSkyBox );
 	row( tr( "Physical Sky" ), physicalSkyBox, true );
+	// lane SKYA (ATMO2): the physical sky's air on the surfaces (needs Physical Sky), Off / On, ships Off
+	aerialPerspectiveBox = new QComboBox( tree );
+	aerialPerspectiveBox->setObjectName( QStringLiteral( "aerialPerspective" ) );
+	aerialPerspectiveBox->addItems( { tr( "Off" ), tr( "On" ) } );
+	aerialPerspectiveBox->setCurrentIndex( std::clamp( wwAtmoAp(), 0, 1 ) );
+	wwMatchFieldStyle( aerialPerspectiveBox );
+	row( tr( "Aerial Perspective" ), aerialPerspectiveBox, true );
 	liveCheck( cloudsBox, "lookdevClouds", tr( "Clouds" ), wwLookdevClouds() );
 	liveCheck( sunBox, "lookdevSun", tr( "Sun" ), wwLookdevSun() );
 	// lane TERRSHADOW1: Engine (the sky clock's arc) or Real (Boston's solar path); ships Engine
@@ -338,6 +345,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	};
 	liveTier( sunPathBox, &wwSunPathSetMode );
 	liveTier( physicalSkyBox, &wwAtmoSetTier );	// lane ATMO1
+	liveTier( aerialPerspectiveBox, &wwAtmoSetAp );	// lane SKYA
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
 	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );
@@ -406,6 +414,7 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( moonBox ), static_cast<QWidget *>( gameDayBox ),
 			static_cast<QWidget *>( fogBox ), static_cast<QWidget *>( shadowsBox ),
 			static_cast<QWidget *>( sunPathBox ), static_cast<QWidget *>( physicalSkyBox ),
+			static_cast<QWidget *>( aerialPerspectiveBox ),
 			static_cast<QWidget *>( cascadeQualityBox ),
 			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ),
 			static_cast<QWidget *>( shadowParBox ), static_cast<QWidget *>( shadowDistanceBox ) } )

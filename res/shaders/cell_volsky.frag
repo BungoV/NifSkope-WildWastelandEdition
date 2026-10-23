@@ -11,8 +11,13 @@
 
 #include "uniforms.glsl"
 #include "lookdev_fog.glsl"
+#include "atmo_common.glsl"
 
 uniform int volSkyMode;
+// lane SKYA (ATMO2): with the aerial perspective on, the physical sky behind already holds the air along its ray to
+// space; the air over it keeps only its residual (atmo_apfog.glsl), the same rule the surfaces use
+uniform sampler2D atSkyTransTex;
+uniform float atSkyCamR;
 uniform bool volSkyOn;
 
 out vec4 fragColor;
@@ -39,6 +44,15 @@ void main()
 		return;
 	}
 	vec4 a = volSkyOn ? wwVolAirSky( wwSkyRay() ) : vec4( 0.0, 0.0, 0.0, 1.0 );
+	if ( volSkyMode == 0 && wwApOn() && atSkyCamR > 0.0 ) {
+		vec3 vr = wwSkyRay();
+		float mu = dot( vr, viewMatrix[2] );	// world up: viewMatrix's columns are the world axes in view space
+		float muH = -sqrt( max( 0.0, 1.0 - kRb * kRb / ( atSkyCamR * atSkyCamR ) ) );
+		vec3 ts = atTrans( atSkyTransTex, atSkyCamR, max( mu, muH + 1e-4 ) );	// below the horizon: the horizon's
+		float tSky = dot( ts, vec3( 1.0 / 3.0 ) );
+		float tr = wwApFogResidualT( tSky, a.a, atApDouble > 0.5 );
+		a = vec4( atApDouble > 0.5 ? a.rgb : wwApFogResidualL( a.rgb, a.a, tr ), tr );
+	}
 	if ( volSkyMode == 1 ) {
 		fragColor = vec4( volProbe == 1 ? a.rgb : vec3( a.a ), 1.0 );
 		return;

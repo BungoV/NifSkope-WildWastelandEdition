@@ -71,6 +71,7 @@ public:
 	// lane TERRSHADOW1: the unified shadow set (gl/shadowset.h)
 	QComboBox * sunPathBox = nullptr;
 	QComboBox * physicalSkyBox = nullptr;	// lane ATMO1
+	QComboBox * aerialPerspectiveBox = nullptr;	// lane SKYA (ATMO2)
 	QComboBox * cascadeQualityBox = nullptr;
 	QComboBox * contactShadowsBox = nullptr;
 	QComboBox * terrainShadowsBox = nullptr;
