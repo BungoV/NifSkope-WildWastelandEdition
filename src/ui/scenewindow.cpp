@@ -14,6 +14,8 @@ BSD License - see nifskope.h
 #include "gl/gametaa.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1
 #include "gl/cellssgi.h"	// lane SSGI1
+#include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row
+#include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row
 #include "esmweather.h"
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
@@ -86,9 +88,6 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		it->setFlags( enabled ? Qt::ItemIsEnabled : Qt::NoItemFlags );
 		w->setEnabled( enabled );
 		tree->setItemWidget( it, 1, w );
-	};
-	auto placeholderCheck = [&]( const QString & name ) {
-		row( name, new QCheckBox( tree ), false );
 	};
 
 	/* ---- Mode (R2a: real) ---- */
@@ -217,9 +216,17 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	shadowDistanceBox->setValue( wwShadowDistance() );
 	wwMakeScrubField( shadowDistanceBox );
 	row( tr( "Shadow Distance" ), shadowDistanceBox, true );
-	placeholderCheck( tr( "SSAO" ) );
+	// lane GAPTOOL1: SSAO and Bloom were greyed placeholders; now the cell view's own AO and bloom mode (a pin greys them)
+	liveCheck( aoBox, "cellAo", tr( "SSAO" ), wwCellAoOn() );
+	aoBox->setEnabled( !wwCellAoPinned() );
 	liveCheck( ssgiBox, "cellSsgi", tr( "SSGI" ), wwCellSsgiOn() );	// lane SSGI1: ships off
-	placeholderCheck( tr( "Bloom" ) );
+	bloomBox = new QComboBox( tree );
+	bloomBox->setObjectName( QStringLiteral( "cellBloom" ) );
+	bloomBox->addItems( { tr( "Vanilla" ), tr( "FO4CS" ) } );
+	bloomBox->setCurrentIndex( wwCellBloomSettings().fo4cs ? 1 : 0 );
+	wwMatchFieldStyle( bloomBox );
+	row( tr( "Bloom" ), bloomBox, true );
+	bloomBox->setEnabled( !wwCellBloomPinned( "mode" ) );
 	heading( tr( "Diagnostics" ) );
 	liveCheck( frameTimersBox, "frameTimers", tr( "Frame Timers" ), PassTime::on() );	// lane PERF1: ships off
 
@@ -318,6 +325,17 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	liveToggle( taaBox, &wwGameTaaSetOn );
 	liveToggle( ssgiBox, &wwCellSsgiSetOn );
+	liveToggle( aoBox, &wwCellAoSetOn );
+	connect( bloomBox, qOverload<int>( &QComboBox::currentIndexChanged ), this, [this, live]( int i ) {
+		if ( live ) {
+			WwCellBloomSettings s = wwCellBloomSettings();
+			s.fo4cs = i == 1;
+			wwCellBloomSet( s );
+		}
+		refreshStatus();
+		if ( m_repaint )
+			m_repaint();
+	} );
 	liveToggle( frameTimersBox, &PassTime::setOn );	// lane PERF1
 	auto liveTier = [this, live]( QComboBox * box, void ( *set )( int ) ) {
 		connect( box, qOverload<int>( &QComboBox::currentIndexChanged ), this, [this, live, set]( int i ) {

@@ -53,6 +53,12 @@ BSD License - see nifskope.h
          pre-seeded scope, then a shot, pbr_wx1_gates.sh "persist").
          Red: WW_R2A_RED=nolive (the rows never reach the state): FAILS.
          Red: WW_R2A_RED=nosave (nothing is written): the (save) checks FAIL.
+     WW_SCENE_TEST_ROWS=1
+         (no placeholder rows, lane GAPTOOL1) every Scene window row has a
+         named, enabled-capable widget (a placeholder had neither); the SSAO
+         row reaches the cell AO and its WW/CellAo setting, the Bloom row the
+         bloom mode (Vanilla | FO4CS). Red: the batch4 exe (SSAO + Bloom
+         greyed, unnamed) FAILS the first check.
      WW_SCENE_TEST_LOG=<path>
 
    REFUSAL: the harness writes settings, so it runs ONLY inside a scratch
@@ -69,6 +75,8 @@ BSD License - see nifskope.h
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "model/nifmodel.h"
 #include "ui/scenewindow.h"
+#include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row
+#include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row
 
 #include <QAction>
 #include <QApplication>
@@ -84,6 +92,7 @@ BSD License - see nifskope.h
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QTreeWidget>
 #include <QUndoStack>
 
 #include <cmath>
@@ -777,6 +786,54 @@ void shadowsLeg( NifSkope * skope, WwScState & st )
 	pump();
 }
 
+void rowsLeg( NifSkope * skope, WwScState & st )
+{
+	QWidget * w = skope->findChild<QWidget *>( QStringLiteral( "SceneWindow" ) );
+	auto * tree = w ? w->findChild<QTreeWidget *>( QStringLiteral( "SceneRows" ) ) : nullptr;
+	check( st, QStringLiteral( "(floor) the Scene window's rows exist (rows leg)" ), tree != nullptr );
+	if ( !tree )
+		return;
+	int rows = 0;
+	QStringList dead;
+	for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
+		QTreeWidgetItem * it = tree->topLevelItem( i );
+		QWidget * cw = tree->itemWidget( it, 1 );
+		if ( !cw )
+			continue;	// a heading
+		rows++;
+		if ( cw->objectName().isEmpty() || it->flags() == Qt::NoItemFlags )
+			dead << it->text( 0 );
+	}
+	say( st, QStringLiteral( "  %1 rows; placeholders (no name or never enabled): %2" ).arg( rows )
+		.arg( dead.isEmpty() ? QStringLiteral( "none" ) : dead.join( QLatin1String( ", " ) ) ) );
+	check( st, QStringLiteral( "(rows) no placeholder rows (%1 found)" ).arg( dead.size() ), rows > 0 && dead.isEmpty() );
+	auto * ao = w->findChild<QCheckBox *>( QStringLiteral( "cellAo" ) );
+	check( st, QStringLiteral( "(floor) the SSAO row exists" ), ao != nullptr );
+	if ( ao && !wwCellAoPinned() ) {
+		const bool was = wwCellAoOn();
+		check( st, QStringLiteral( "(rows) the SSAO row shows the cell AO state" ), ao->isChecked() == was );
+		ao->setChecked( !was );
+		pump();
+		check( st, QStringLiteral( "(live) the SSAO row reached the cell AO and saved it" ), wwCellAoOn() == !was
+			&& QSettings().value( QStringLiteral( "WW/CellAo" ) ).toBool() == !was );
+		ao->setChecked( was );
+		pump();
+		check( st, QStringLiteral( "(live) the SSAO row back restores the cell AO" ), wwCellAoOn() == was );
+	}
+	auto * bl = w->findChild<QComboBox *>( QStringLiteral( "cellBloom" ) );
+	check( st, QStringLiteral( "(floor) the Bloom row exists" ), bl != nullptr );
+	if ( bl && !wwCellBloomPinned( "mode" ) ) {
+		const int was = bl->currentIndex();
+		check( st, QStringLiteral( "(rows) the Bloom row shows the bloom mode" ), ( was == 1 ) == wwCellBloomSettings().fo4cs );
+		bl->setCurrentIndex( 1 - was );
+		pump();
+		check( st, QStringLiteral( "(live) the Bloom row reached the bloom mode" ), wwCellBloomSettings().fo4cs == ( was == 0 ) );
+		bl->setCurrentIndex( was );
+		pump();
+		check( st, QStringLiteral( "(live) the Bloom row back restores the mode" ), wwCellBloomSettings().fo4cs == ( was == 1 ) );
+	}
+}
+
 void restartLeg( NifSkope * skope, WwScState & st )
 {
 	QRect want;
@@ -858,6 +915,8 @@ void run( NifSkope * skope, WwScState * st )
 		fogLeg( skope, *st );
 	if ( wwEnvStr( "WW_SCENE_TEST_SHADOWS" ) == QLatin1StringView( "1" ) )
 		shadowsLeg( skope, *st );
+	if ( wwEnvStr( "WW_SCENE_TEST_ROWS" ) == QLatin1StringView( "1" ) )
+		rowsLeg( skope, *st );
 	restartLeg( skope, *st );
 }
 

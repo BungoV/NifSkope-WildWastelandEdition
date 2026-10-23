@@ -240,6 +240,7 @@ void wwCellGiSetOn( bool on );
  *  WW_CELL_GI_GPU (read when a cell opens: the row reopens it). */
 bool wwCellAoOn();
 void wwCellAoSetOn( bool on );
+bool wwCellAoPinned();	// lane GAPTOOL1: the Scene window's SSAO row greys on the pin
 bool wwCellShadowOn();
 void wwCellShadowSetOn( bool on );
 bool wwCellGiGpuOn();
