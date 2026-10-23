@@ -1862,10 +1862,16 @@ bool wwLookdevDrawBackground( Scene * scene )
 			// the dome is never fogged (ruling); red "fogsky": Fog ON darkens the dome, the sky gate must fail
 			dome = physical || drawDome( scene, f, ( sx.fog && wwLookdevRed( "fogsky" ) ) ? 0.97f : 1.0f, drew );
 		}
-		if ( !dome && !drawCube( scene, !sx.sun ) )
+		/* SKY2 SKYGREY1 (bungo 10-23: the cube only where the game uses it, never as the sky or the void): no dome
+		 * = the viewport's own grey clear, the sun/moon/cloud rows still draw over it. Red cubesky: the cube as before. */
+		const bool cubeSky = wwLookdevRed( "cubesky" );
+		if ( !dome && cubeSky && !drawCube( scene, !sx.sun ) )
 			return false;
+		if ( !dome && !cubeSky )
+			glClear( GL_COLOR_BUFFER_BIT );
 		if ( !dome )	// lane SKYFULL1: the cube is only ever the named fallback
-			drew << ( sx.sky ? QStringLiteral( "cube:fallback(the dome refused)" ) : QStringLiteral( "cube(sky row off)" ) );
+			drew << ( cubeSky ? ( sx.sky ? QStringLiteral( "cube:fallback(the dome refused)" ) : QStringLiteral( "cube(sky row off)" ) )
+							  : ( sx.sky ? QStringLiteral( "grey(the dome refused)" ) : QStringLiteral( "grey(sky row off)" ) ) );
 		else
 			drawStars( scene, f, drew );	// lane SKYFULL1: on the dome, under the moon (its shadow disc hides them)
 		if ( !sx.sky && wwLookdevRed( "skyleak" ) )
@@ -1892,7 +1898,8 @@ bool wwLookdevDrawBackground( Scene * scene )
 		glDepthMask( GL_TRUE );
 		return true;
 	}
-	return drawCube( scene, true );
+	// SKY2 SKYGREY1: nothing on (or ortho) = the grey clear (the caller clears); red cubesky draws the cube
+	return wwLookdevRed( "cubesky" ) && drawCube( scene, true );
 }
 
 namespace
