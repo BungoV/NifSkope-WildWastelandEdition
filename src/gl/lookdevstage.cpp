@@ -658,6 +658,11 @@ double wwLookdevHour()
 	return st().hour;
 }
 
+void wwLookdevClimateTnam( unsigned char out[4] )
+{
+	std::copy( st().tnam, st().tnam + 4, out );
+}
+
 void wwLookdevSetHour( double h )
 {
 	LdState & s = st();

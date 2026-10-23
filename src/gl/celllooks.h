@@ -10,6 +10,8 @@
 enum class WwLook : int
 {
 	AirClusters = 0,	// LIGHTSYS-4: the fog reads the surface light clusters (WW_CELL_AIR_CLUSTERS)
+	AirMultiScatter,	// FOGEXTRAS: the sun's multiple-scattering octaves in the air (WW_CELL_AIR_MS)
+	GroundBurnOff,		// FOGEXTRAS: the ground fog layer burns off after sunrise (WW_CELL_AIR_BURNOFF)
 	Count
 };
 

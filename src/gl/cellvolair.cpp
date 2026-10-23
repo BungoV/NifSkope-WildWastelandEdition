@@ -810,6 +810,19 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 	}
 	L.s = float( str );
 	L.invHg = float( 1.0 / thick );
+	// lane GAPLOOK1 (FOGEXTRAS): a file without hour keys burns off after sunrise (notes/fog-layer-and-fogmap-research.md
+	// section 0: gone 2-5 h after sunrise, the top coming down; pooling again from about 1 h after sunset)
+	if ( wwLookOn( WwLook::GroundBurnOff ) && g.value( QStringLiteral( "hours" ) ).toObject().isEmpty() ) {
+		unsigned char tn[4];
+		wwLookdevClimateTnam( tn );
+		const bool red = wwEnvStr( "WW_CELL_AIR_BURNOFF_RED" ) == QLatin1String( "noon" );	// red: burnt at every hour
+		const double rise = ( tn[0] + tn[1] ) / 12.0, set = tn[3] / 6.0 + 1.0;
+		auto smooth = []( double x ) { x = std::clamp( x, 0.0, 1.0 ); return x * x * ( 3.0 - 2.0 * x ); };
+		const double burnt = red ? 1.0 : smooth( ( hour - rise ) / 3.5 ) * ( 1.0 - smooth( ( hour - set ) / 2.0 ) );
+		L.s = float( str * ( 1.0 - burnt ) );
+		L.invHg = float( 1.0 / ( thick * ( 1.0 - 0.75 * burnt ) ) );
+		L.recx += QStringLiteral( "(burn-off %1)" ).arg( burnt, 0, 'f', 2 );
+	}
 }
 
 }	// namespace
@@ -1318,6 +1331,9 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1b( "volSurfClusters", surfCl );
 	prog->uni2f( "volSurfPx", float( vp[2] ) / float( std::max( cols, 1 ) ), float( vp[3] ) / float( std::max( rows, 1 ) ) );
 	prog->uni1b( "volSurfRed", surfCl && wwEnvStr( "WW_CELL_AIR_CLUSTERS_RED" ) == QLatin1String( "drop" ) );
+	// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octaves a = b = c = 1/2 (Oz 2013's); red hard: shadows not lifted
+	prog->uni4f( "volMs", wwLookOn( WwLook::AirMultiScatter ) ? FloatVector4( 0.5f, 0.5f, 0.5f,
+		wwEnvStr( "WW_CELL_AIR_MS_RED" ) == QLatin1String( "hard" ) ? 0.0f : 1.0f ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 	if ( !surfCl && ( s.opt & 1 ) && g.optUnitsOk && ( s.terms & 2 ) && !( s.red & 16 ) && uniI( "cellOn" ) ) {
 		const std::vector<float> * sp = wwCellLightSpheres( scene );
 		const int nL = uniI( "cellLightCount" );

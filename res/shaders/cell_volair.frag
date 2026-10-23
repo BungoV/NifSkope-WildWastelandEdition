@@ -54,6 +54,7 @@ uniform vec3 volLightShift;		// gates only (WW_CELL_AIR_LIGHTSHIFT): the air see
 uniform bool volSurfClusters;	// lane GAPLOOK1 (LIGHTSYS-4): the lights from the surfaces' lists (cell_cluster.glsl)
 uniform vec2 volSurfPx;			// the main viewport's pixels a froxel column (x, y)
 uniform bool volSurfRed;		// red drop: each walk leaves out its first light
+uniform vec4 volMs;				// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octaves a, b, c, w 1 = shadows lift (x 0: off)
 // lane FOGDRIFT1 (cellvolair.h): x amp / span (0: smooth air), y the fade's start, z 1 / its length, w the noise's mean
 uniform vec4 volDrift;
 uniform vec4 volDriftOfs[2];	// per octave: xyz the wind's offset (world units), w 1 / its tile
@@ -101,6 +102,25 @@ float airFarVis( vec3 posView )
 	return min( c, t ) * airCloudShadow( posView );
 }
 
+/* lane GAPLOOK1 (FOGEXTRAS): the multiple-scattering octaves (Wrenninge, Kulla, Lundqvist, "Oz: The Great and
+ * Volumetric", SIGGRAPH 2013): octave i scatters a^i, sees the optical depth to the sun x b^i and the phase's g x c^i;
+ * vis the sun's shadow, lifted toward 1 as b^i shrinks (w 1). Octave 0 is the single scattering. */
+vec3 airMsSum( float vis, float T, float c )
+{
+	vec3 r = vis * T * volPhasePi( c );
+	float a = 1.0, b = 1.0, g = 1.0;
+	for ( int i = 1; i < 3; i++ ) {
+		a *= volMs.x;
+		b *= volMs.y;
+		g *= volMs.z;
+		float v = volMs.w > 0.5 ? mix( 1.0, vis, b ) : vis;
+		vec3 ph = PI * ( volPhase[0].rgb * ( 3.0 / ( 16.0 * PI ) ) * ( 1.0 + c * c )
+			+ volPhase[1].rgb * volHg( c, volPhase[1].w * g ) + volPhase[2].rgb * volHg( c, volPhase[2].w * g ) );
+		r += a * v * pow( T, b ) * ph;
+	}
+	return r;
+}
+
 // the directional light the air at posView (height z) scatters toward the eye
 vec3 airSun( vec3 posView, vec3 dirView, float z )
 {
@@ -111,12 +131,16 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		vec3 to = normalize( cellDirTo );
 		float vis = ( volFarMode != 0 && !cellInterior ) ? airFarVis( posView )
 			: ( !cellInterior && volCsm && ( volRed & 8 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
+		if ( volMs.x > 0.0 )
+			return cellDirColor * airMsSum( vis, airTup( z, to.z ), dot( to, cellWorldDir( dirView ) ) );
 		return cellDirColor * vis * airTup( z, to.z ) * volPhasePi( dot( to, cellWorldDir( dirView ) ) );
 	}
 	if ( fogSun.w > 0.0 ) {
 		// Lookdev without the cell's lights: its sun (view space)
 		float vis = volFarMode != 0 ? airFarVis( posView ) : ( volCsm && ( volRed & 8 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
 		float mu = dot( fogView.xyz, fogSun.xyz ) / length( fogView.xyz );
+		if ( volMs.x > 0.0 )
+			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTup( z, mu ), dot( dirView, fogSun.xyz ) );
 		return fogSunColour.rgb * fogSun.w * vis * airTup( z, mu ) * volPhasePi( dot( dirView, fogSun.xyz ) );
 	}
 	return vec3( 0.0 );

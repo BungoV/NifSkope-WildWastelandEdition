@@ -17,6 +17,8 @@ struct LookRow
 // the order of WwLook
 const LookRow kRows[] = {
 	{ "Fog light clusters", "WW/CellAirClusters" },
+	{ "Fog multiple scattering", "WW/CellAirMultiScatter" },
+	{ "Ground fog burn-off", "WW/CellAirBurnOff" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -42,6 +44,14 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_AIR_CLUSTERS" ).trimmed() );
 		return p;
 	}
+	case WwLook::AirMultiScatter: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_AIR_MS" ).trimmed() );
+		return p;
+	}
+	case WwLook::GroundBurnOff: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_AIR_BURNOFF" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -58,6 +68,8 @@ const char * wwLookPinName( WwLook l )
 {
 	switch ( l ) {
 	case WwLook::AirClusters: return "WW_CELL_AIR_CLUSTERS";
+	case WwLook::AirMultiScatter: return "WW_CELL_AIR_MS";
+	case WwLook::GroundBurnOff: return "WW_CELL_AIR_BURNOFF";
 	default: return "";
 	}
 }

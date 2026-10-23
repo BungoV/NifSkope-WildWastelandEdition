@@ -92,6 +92,7 @@ QString wwLookdevWeatherKey();
 bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStringList & files, QString & dataDir );
 void wwLookdevSetWeather( const QString & key );
 double wwLookdevHour();
+void wwLookdevClimateTnam( unsigned char out[4] );	// lane GAPLOOK1: the climate's TNAM sunrise/sunset bytes (10 min units)
 void wwLookdevSetHour( double h );
 bool wwLookdevGround();
 void wwLookdevSetGround( bool on );
