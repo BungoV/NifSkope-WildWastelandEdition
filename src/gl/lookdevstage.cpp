@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include "gl/scenelighting.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "gl/atmosphere.h"	// lane ATMO1: the physical sky
+#include "gl/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
 #include "gl/sunshadow.h"
 #include "model/nifmodel.h"
 
@@ -329,6 +330,7 @@ struct LdLight
 };
 
 LdLight computeLight();
+WwFog currentFog();
 
 /* lane PERF1: every shape's program setup asks for the light several times a frame; it is a pure function of
  * the resolved weather (gen), the hour and the Sun row, so it is computed once per change of those */
@@ -339,12 +341,16 @@ LdLight currentLight()
 	static quint64 gen = 0;
 	static double hour = -1.0;
 	static bool sun = false;
+	static int atmoSun = 0;	// lane SKYA (ATMOSUN1): the Sunlight From Sky row, its red and the Physical Sky tier
 	static LdLight memo;
-	if ( gen != s.gen || hour != s.hour || sun != s.sun ) {
+	// lane SKYA (NIGHT1): the Moon Phase and Stars row with the moon's phase (the game day moves it)
+	const int atmoKey = wwAtmoSunKey() + 3 * 16 * wwAtmoNightKey( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey ) {
 		memo = computeLight();
 		gen = s.gen;
 		hour = s.hour;
 		sun = s.sun;
+		atmoSun = atmoKey;
 	}
 	return memo;
 }
@@ -399,6 +405,30 @@ LdLight computeLight()
 		} else {
 			for ( int c = 0; c < 3; c++ )
 				L.dalc[a][c] = L.amb[c];	// NAM0 Ambient: the flat fallback
+		}
+	}
+	if ( wwAtmoSunKey() > 0 ) {
+		/* lane SKYA (ATMOSUN1): the key and the ambient through the physical sky's air toward the light (the moon by
+		 * night, as the engine's light is), the brightness anchored on the weather's Day (Night) key at 45 degrees */
+		const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
+		const bool night = s.hour < raw.A || s.hour > raw.D;
+		WwTodKeys k;
+		k.a = k.b = night ? WwTodNight : WwTodDay;
+		k.t = 0.0f;
+		EsmWeather::blendRowLab( s.w, WwRowSunlight, k, rgb );
+		const float keyLum = 0.2126f * lin( rgb[0] ) + 0.7152f * lin( rgb[1] ) + 0.0722f * lin( rgb[2] );
+		const float len = std::sqrt( L.sunDir[0] * L.sunDir[0] + L.sunDir[1] * L.sunDir[1] + L.sunDir[2] * L.sunDir[2] );
+		const WwFog fog = currentFog();
+		const float fogIn[4] = { fog.effOff ? 0.0f : fog.fogFar, fog.effOff ? 0.0f : fog.maxv, fog.fMid, fog.fRange };
+		wwAtmoKeyLight( len > 0.0f ? L.sunDir[2] / len : 1.0f, fogIn, keyLum, L.sun, L.amb, L.dalc );
+	}
+	if ( wwAtmoNightOn() ) {
+		// lane SKYA (NIGHT1): by night the engine's key light is the moon's: its phase dims it
+		const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
+		if ( s.hour < raw.A || s.hour > raw.D ) {
+			const float k = wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+			for ( int c = 0; c < 3; c++ )
+				L.sun[c] *= k;
 		}
 	}
 	return L;
@@ -521,6 +551,7 @@ void wwLookdevFogUniforms( Scene * scene )
 	if ( !prog || prog->uniLocation( "fogOn" ) < 0 )
 		return;
 	wwVolAirUniforms( scene );	// lane VOLAIR1: every program that holds the fog holds the air's sampler
+	wwAtmoApUniforms( scene );	// lane SKYA: and the sky's aerial perspective (read with the fog row off too)
 	LdState & s = st();
 	const bool on = wwLookdevFogWanted( scene );
 	prog->uni1b( "fogOn", on );
@@ -1424,7 +1455,13 @@ void drawMoon( Scene * scene, const SkyFrame & f, float mul, QStringList & drew 
 		const bool shOk = drawBill( scene, f.c.sunPos, half, sh, shadowTint, full ? shadowA : mul, false );
 		const QString tex = QString( "textures/sky/%1_%2.dds" ).arg( QString::fromLatin1( m.name ),
 			QString::fromLatin1( wwMoonPhaseSuffix( phase ) ) );
-		if ( drawBill( scene, f.c.sunPos, half, tex, f.moonGlare, full ? alpha : mul, false ) )
+		// lane SKYA (NIGHT1): the disc through the air toward it (Moon Phase and Stars on; else 1, today's disc)
+		float glare[3], ext[3];
+		const float ml = std::sqrt( f.c.sunPos[0] * f.c.sunPos[0] + f.c.sunPos[1] * f.c.sunPos[1] + f.c.sunPos[2] * f.c.sunPos[2] );
+		wwAtmoStarExtinction( ml > 0.0f ? f.c.sunPos[2] / ml : 1.0f, ext );
+		for ( int c = 0; c < 3; c++ )
+			glare[c] = f.moonGlare[c] * ext[c];
+		if ( drawBill( scene, f.c.sunPos, half, tex, glare, full ? alpha : mul, false ) )
 			drew << QString( "moon:%1(alpha=%2,shadow=%3%4)" ).arg( tex, f3( full ? alpha : mul ), f3( full ? shadowA : mul ),
 				shOk ? QString() : QStringLiteral( ",no moonshadow.dds" ) );
 		else
@@ -1610,7 +1647,21 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 	prog->uni1f( "skyScale", f.skyScale );
 	prog->uni1f( "sceneExposure", skyExposure() );
 	prog->uni1i( "viewTransform", skyViewTransform() );
-	const float * attrs[8] = { pos.constData(), m->col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
+	// lane SKYA (NIGHT1): each star through the air toward it (Moon Phase and Stars on: the horizon fades and reddens)
+	QVector<float> colExt;
+	if ( wwAtmoNightOn() && m->nv > 0 && m->col.size() == int( m->nv ) * 4 && pos.size() == int( m->nv ) * 3 ) {
+		colExt = m->col;
+		for ( int v = 0; v < int( m->nv ); v++ ) {
+			const float * p = pos.constData() + v * 3;
+			const float l = std::sqrt( p[0] * p[0] + p[1] * p[1] + p[2] * p[2] );
+			float ext[3];
+			wwAtmoStarExtinction( l > 0.0f ? p[2] / l : 1.0f, ext );
+			for ( int c = 0; c < 3; c++ )
+				colExt[v * 4 + c] *= ext[c];
+		}
+	}
+	const float * attrs[8] = { pos.constData(), colExt.isEmpty() ? m->col.constData() : colExt.constData(), nullptr,
+		nullptr, nullptr, nullptr, nullptr,
 		m->uv.constData() };
 	r->drawShape( m->nv, 0x20000043ULL, unsigned( m->idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, m->idx.constData() );
 	r->stopProgram();
@@ -1618,7 +1669,7 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 }
 
 //! lane ATMO1: the physical sky in place of the dome (gl/atmosphere.h); the vanilla sun quad and glare then stay off
-bool drawAtmo( Scene * scene, QStringList & drew )
+bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 {
 	LdState & s = st();
 	if ( wwAtmoTier() <= 0 || !s.haveWeather )
@@ -1653,7 +1704,7 @@ bool drawAtmo( Scene * scene, QStringList & drew )
 	};
 	const float scale = wwLookdevSunlightScale();
 	in.sunLum = keyLum( WwTodDay ) * scale;
-	in.moonLum = keyLum( WwTodNight ) * scale;
+	in.moonLum = keyLum( WwTodNight ) * scale * wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
 	const WwFog fog = currentFog();
 	if ( !fog.effOff ) {
 		in.fogFar = fog.fogFar;
@@ -1665,9 +1716,37 @@ bool drawAtmo( Scene * scene, QStringList & drew )
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
 	for ( int j = 0; j < 3; j++ )
 		in.camZ -= vt.rotation( j, 2 ) * vt.translation[j] / sc;
-	in.disc = s.sun;
+	in.disc = s.sun && !capture;	// lane SKYA (SKYGI1): the probes' capture has no disc (the sun is the bake's own term)
+	in.capture = capture;
 	in.exposure = skyExposure();
 	in.viewTransform = skyViewTransform();
+	// lane SKYA (ATMOCHECK1): the weather dome's colors by elevation for the Sky Color row's Weather Tint; the rings come
+	// from the dome mesh's vertex weights once per mesh, the colors from this hour's weather each frame
+	if ( wwAtmoTint() > 0 ) {
+		QString why;
+		const SkyMesh * m = domeMesh( scene, &why );
+		const int cs = m && m->nv > 0 ? int( m->col.size() ) / int( m->nv ) : 0;
+		if ( m && cs >= 3 && m->pos.size() >= int( m->nv ) * 3 ) {
+			static const void * ringsFor = nullptr;
+			static quint32 ringsNv = 0;
+			static std::vector<float> ringEl, ringW;
+			if ( ringsFor != m || ringsNv != m->nv ) {
+				std::vector<float> el( m->nv ), w( size_t( m->nv ) * 3 );
+				for ( quint32 i = 0; i < m->nv; i++ ) {
+					const float * p = m->pos.constData() + size_t( i ) * 3;
+					el[i] = std::atan2( p[2], std::hypot( p[0], p[1] ) ) * 57.2957795f;
+					for ( int c = 0; c < 3; c++ )
+						w[size_t( i ) * 3 + size_t( c )] = m->col[int( i ) * cs + c];
+				}
+				WwAtmoMath::tintRings( el.data(), reinterpret_cast<const float ( * )[3]>( w.data() ), int( m->nv ), ringEl, ringW );
+				ringsFor = m;
+				ringsNv = m->nv;
+			}
+			const SkyFrame f = skyFrame();
+			WwAtmoMath::tintTable( ringEl, ringW, f.hz, f.lo, f.up, f.skyScale, wwAtmoTintRedFlat(), in.tint );
+			in.tintOk = true;
+		}
+	}
 	QString line;
 	const bool ok = wwAtmoDrawSky( scene, in, &line );
 	drew << QStringLiteral( "sky:" ) + line;
@@ -1678,6 +1757,7 @@ bool drawAtmo( Scene * scene, QStringList & drew )
 
 bool wwLookdevDrawBackground( Scene * scene )
 {
+	wwAtmoApFrame();	// lane SKYA: last frame's aerial perspective is stale (drawAtmo builds this frame's)
 	if ( !scene || !scene->renderer || scene->selecting || scene->hasVisMode( Scene::VisSilhouette ) )
 		return false;
 	Renderer * r = scene->renderer;
@@ -1999,7 +2079,10 @@ QString wwLookdevSkyPictureKey()
 	// the cloud clock is left out: in the window it runs, and the probes would never stand still (the capture
 	// follows the weather, the hour, the day and the rows; the clouds are where they were at that moment)
 	return QStringLiteral( "%1|%2|%3|day %4|sky %5 clouds %6|%7" ).arg( s.plugin, s.weatherKey ).arg( s.hour, 0, 'f', 4 )
-		.arg( s.gameDay, 0, 'f', 2 ).arg( int( s.sky ) ).arg( int( s.clouds ) ).arg( s.haveWeather ? 1 : 0 );
+		.arg( s.gameDay, 0, 'f', 2 ).arg( int( s.sky ) ).arg( int( s.clouds ) ).arg( s.haveWeather ? 1 : 0 )
+		// lane SKYA (SKYGI1): only while the probes take the physical sky (Off: today's key, character for character)
+		+ ( wwAtmoGiActive() ? QStringLiteral( "|atmo gi tier %1 tint %2 red %3" ).arg( wwAtmoTier() ).arg( wwAtmoTint() )
+			.arg( wwAtmoGiRedDome() ? 1 : 0 ) : QString() );
 }
 
 bool wwLookdevCaptureSky( Scene * scene, int n, const float * flatRgb, WwSkyPicture & out, QString * why )
@@ -2086,7 +2169,9 @@ bool wwLookdevCaptureSky( Scene * scene, int n, const float * flatRgb, WwSkyPict
 			fn->glClear( GL_COLOR_BUFFER_BIT );
 			if ( !flatRgb ) {
 				QStringList d;
-				if ( drawDome( scene, f, 1.0f, d ) ) {
+				// lane SKYA (SKYGI1): the physical sky in place of the dome (its row and Physical Sky on; red "dome" keeps it)
+				const bool phys = wwAtmoGiActive() && !wwAtmoGiRedDome() && drawAtmo( scene, d, true );
+				if ( phys || drawDome( scene, f, 1.0f, d ) ) {
 					drawStars( scene, f, d );
 					if ( sx.clouds )
 						drawClouds( scene, f, 1.0f, d );
@@ -2127,7 +2212,7 @@ bool wwLookdevCaptureSky( Scene * scene, int n, const float * flatRgb, WwSkyPict
 	out.drew = flatRgb ? QStringLiteral( "flat(%1,%2,%3)" ).arg( double( flatRgb[0] ) ).arg( double( flatRgb[1] ) )
 		.arg( double( flatRgb[2] ) ) : drew.join( QChar( '|' ) );
 	out.ms = double( clock.nsecsElapsed() ) / 1.0e6;
-	if ( !flatRgb && !out.drew.contains( QStringLiteral( "sky:dome(" ) ) )
+	if ( !flatRgb && !out.drew.contains( QStringLiteral( "sky:dome(" ) ) && !out.drew.contains( QStringLiteral( "sky:physical(" ) ) )
 		return fail( QStringLiteral( "the dome did not draw (%1)" ).arg( out.drew ) );
 	return true;
 }

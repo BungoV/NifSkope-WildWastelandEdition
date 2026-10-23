@@ -16,6 +16,132 @@
   far LOD or probe-marker rebuild drops the held cell-light shadow slots, the lamp shadow store and the sun shadow
   cache layers, as a fresh open has none (wwCellShadowsForget, wwSunShadowForget). Far cards and the SSR memo print a
   `switch:` line when they read their value again.
+## Lane SKYA (2026-10-23, branch skya-20261023): the physical sky reaches the world, every part off by default
+
+### SKYGI1: the probes' sky light from the physical sky
+- **What:** the probe bake's sky term (lane SKYPIC1, `src/probesky.cpp`: a 6-face capture of the drawn sky, each
+  texel's solid angle x cosine summed per probe axis and octant) captured the weather dome even with Physical Sky
+  on, so the bounce light kept the dome's colors under a physical sky. With this row on, the capture draws the
+  physical sky (`lookdevstage.cpp` wwLookdevCaptureSky calls drawAtmo in capture mode: the sky-view LUTs of the sun
+  and the moon, Weather Tint if that row is on, linear light at exposure 1; no sun disc, the sun is the bake's own
+  term), then the stars and clouds as before. Below the horizon the probes keep the weather's ground-facing color
+  (SKYPIC1's rule). The capture key gains `|atmo gi tier T tint X red R`, so turning the row (or Physical Sky, or
+  Sky Color) relights the probes live.
+  - A capture face is not a frame: `wwAtmoDrawSky` skips the GPU timer pair, the Exposure From Sky read-back and the
+    aerial-perspective volume for it (`WwAtmoInputs::capture`).
+  - The sky is captured at the camera's height when it is taken (the key does not follow the camera; a few meters
+    move it by far less than a gray level).
+- **Row:** Render > Scene > GI Sky From Physical Sky (Off / On), key `Settings/Render/Scene/GI Sky From Physical Sky`,
+  live; needs Physical Sky on. `WW_ATMO_GI=0|1` pins it; red `WW_ATMO_GI_RED=dome` (the row on, the dome still
+  captured: the probes' sky must then match the Off rows, and the "gi skypic" note says sky:dome).
+- **Off = today's bake byte for byte:** with the row Off or Physical Sky Off the capture key is the same string
+  (the suffix is added only while active), the capture draws `drawDome` through the unchanged branch
+  (`phys` is false before drawAtmo is called), and the frame's own sky pass runs every step it ran before
+  (`capture` is false there).
+- **Cost:** none per frame; per capture (only when its key changes) 6 x the sky pass at the capture size (64 x 64 a
+  face) plus the sky-view LUTs, under 1 ms GPU (estimate); no memory kept. stderr: the existing `gi skypic:` line
+  names what was drawn (`sky:physical(...)`) and the open-sky drawn / weather ratio per axis.
+- **Not offline-gated:** the capture is GL only; the rows in notes/skya/rows_live.txt (gi on / off / red dome at
+  Concord noon) read the `gi skypic:` lines.
+
+### ATMOCHECK1: the model checked against Bruneton 2017, and a Weather Tint sky color
+- **Cross-check:** `tests/spells/atmo_bruneton_check.py` ports Bruneton 2017's reference numerics
+  ("Precomputed Atmospheric Scattering: a New Implementation", functions.glsl: the trapezoidal optical length,
+  ComputeSingleScattering, GetTransmittance's ratio, the Rayleigh and Cornette-Shanks phases) and runs them against
+  `atmo_model.py` (Hillaire 2020; the GPU LUTs are gated against it by `atmo_lut_check.py`) on the same medium (his
+  demo constants are Hillaire's). Transmittance worst 0.00011 at 8 zenith angles (gate 0.002), Rayleigh single
+  scattering 0.0010 and Rayleigh + Mie 0.0020 at 12 view/sun pairs (gate 0.005). Reported, not gated: Cornette-Shanks
+  against our Henyey-Greenstein differs by up to 7 % (a phase choice), and Bruneton's demo count of 50 samples is
+  up to 11 % off 400 for a low sun through the 1.2 km Mie layer (his sampling, not the model). Red `--red noozone`
+  (his side without ozone) fails all three. The stars' horizon dimming (NIGHT1) follows Bruneton & Neyret 2008's
+  transmittance ratio and is gated in `atmomath_check.py`.
+- **What (row):** Sky Color = Weather Tint keeps the physical sky's luminance (so the light, Exposure From Sky and
+  the bloom see the same brightness) and takes the weather's own sky colors at each elevation: the dome mesh's
+  Horizon / Sky-Lower / Sky-Upper weights are grouped into rings once, the hour's weather colors make a 17-entry
+  table each frame (`atmomath.h` tintRings / tintTable / weatherTint), and `atmo_sky.frag` atWeatherTint applies it
+  to the sky's pixels. The sun disc keeps the physical color; the air (Aerial Perspective) and the key light are
+  not tinted.
+- **Row:** Render > Scene > Sky Color (Physical / Weather Tint), key `Settings/Render/Scene/Sky Color`, live; needs
+  Physical Sky on. `WW_ATMO_TINT=physical|weather` (0/1) pins it; red `WW_ATMO_TINT_RED=flat` (the horizon's color
+  at every elevation). Physical = today's sky exactly (the shader branch is skipped). stderr: the sky line gains
+  `,tint=weather` (or `,tint=refused(no dome)`).
+- **Cost:** one uniform array (17 vec3) and a few ALU per sky pixel, well under 0.01 ms at 1080p (estimate); CPU
+  17 lerps a frame plus a one-time ring sort of the dome's vertices; no memory.
+- **Checks:** `atmomath_check.py` gate "weather tint" (a synthetic 5-ring dome: luminance kept to 5e-8, the zenith
+  takes Sky-Upper's chromaticity, the horizon and below the Horizon's; red `tintflat` fails the zenith).
+  `atmo_sky.prog` links in all 3 modes.
+
+### EXPO1: the eye adaptation counts the sky
+- **What:** the imagespace measure (the game's eye adaptation) averages only the cell-lit pixels, so an open view
+  of a bright sky adapts as if the sky were not there. With this row on, the rest of the frame counts at the
+  physical sky's mean luminance over the upper hemisphere: the sun's (and by night the moon's) sky-view table is
+  read back a frame late (PBO + fence, no stall), averaged by solid angle (24 x 24 directions, bilinear) and scaled
+  by the sky pass's own pi k. Both measure paths (`cellhdr.cpp` isApply, `glview.cpp` the full-size pass) go
+  through `wwAtmoAdapted`. Math in `src/gl/atmomath.h` (`skyDirToUv`, `skyViewMeanLum`, `adaptedWithSky`).
+  - The sky counts at its hemisphere mean, not at the pixels actually in view (those are not in the measure's
+    buffer): a first step, said as such.
+  - Interiors, or the Physical Sky just turned off: no sky read within two frames, the scene alone (today's).
+- **Row:** Render > Scene > Exposure From Sky (Off / On), key `Settings/Render/Scene/Exposure From Sky`, live; needs
+  Physical Sky on. `WW_ATMO_EXPO=0|1` pins it; reds `WW_ATMO_EXPO_RED=skyzero` (the sky counted as nothing) and
+  `zenithw` (the hemisphere mean not weighted by solid angle). Off = today's exposure exactly.
+- **Cost:** one or two texture read-backs a frame (192x108 RGBA32F = 324 KB each at High, 576 KB at Ultra; the PBOs
+  hold that), well under 0.05 ms GPU (estimate); CPU 576 bilinear samples. stderr `atmo expo: scene ... cover ...
+  sky ... -> ...` every 600th frame.
+- **Checks:** `tests/spells/atmomath_check.py` gates "sky mean" (a synthetic table of cos zenith averages to 0.50026,
+  want 1/2; red zenithw 0.637 fails) and "exposure" (red skyzero fails).
+
+### NIGHT1: the moon's phase and the stars through the air
+- **What:** with the Physical Sky on, the moon's light follows its phase (the engine's own phase on the game day,
+  esmweather `wwMoonPhase`): the night key light and the sky's moonlight are scaled by the phase's brightness against
+  the full moon (Krisciunas & Schaefer 1991 eq. 20: quarter 0.091, new 0.0003). The stars and the moon disc are
+  dimmed and reddened toward the horizon by the air: T(mu) / T(zenith) (Bruneton & Neyret 2008 sec. 4), so the
+  zenith keeps today's colours. Math in `src/gl/atmomath.h` (`moonPhaseFactor`, `starExtinction`).
+- **Row:** Render > Scene > Moon Phase and Stars (Off / On), key `Settings/Render/Scene/Moon Phase and Stars`, live;
+  needs Physical Sky on. `WW_ATMO_NIGHT=0|1` pins it; reds `WW_ATMO_NIGHT_RED=nophase` (every phase as bright as the
+  full moon) and `noext` (no horizon dimming). Off = today's night exactly.
+- **Cost:** no GPU pass, no memory beyond a 33-entry table; CPU: one extinction lookup per star vertex a frame (the
+  stars mesh), the table rebuilt when the haze changes (well under 1 ms).
+- **Checks:** `tests/spells/atmomath_check.py` gates "moon phase" (red phase fails) and "stars" (vs the model's T
+  ratio, worst 0.00004; red noext fails).
+
+### ATMOSUN1: sunlight and ambient from the sky's air
+- **What:** the key light (the sun, or the moon by night) and the ambient (NAM0 Ambient and every DALC side) take
+  their colour from the physical sky's air: the key through the transmittance toward the light (Hillaire 2020 sec. 4),
+  the ambient through the sky's irradiance on level ground (single scattering, cosine-weighted). Haze from the
+  weather's fog, as the sky uses. Math in `src/gl/atmomath.h` (`skyKeyLight`, `skyIrradiance`).
+  - Tint: the weather's own key brightness, the air's colour (a 3-degree sun turns orange, R/B 1.3 -> 22.9).
+  - Full: the air's colour and brightness, anchored so a 45-degree sun keeps the weather's Day key; a low sun dims
+    (3 deg = 0.21 of 45 deg); 0 under the horizon.
+  - Ambient (both): the weather's ambient brightness kept, its colour turned by the sky irradiance's colour against
+    45 degrees (R/B x2.4 at 3 deg, where the sun's is x17).
+- **Row:** Render > Scene > Sunlight From Sky (Off / Tint / Full), key `Settings/Render/Scene/Sunlight From Sky`,
+  live; needs Physical Sky on. `WW_ATMO_SUN=off|tint|full` pins it; red `WW_ATMO_SUN_RED=flat` (the air's colour held
+  at 45 degrees: a low sun no warmer). Off = today's light exactly (the code is skipped).
+- **Cost:** no GPU pass, no memory. CPU about 1-2 ms each time the light is recomputed (hour, weather or row change;
+  cached in between). stderr `atmo sun: mode=... mu=... key ... -> ... amb -> ...` (first and every 240th recompute).
+- **Checks:** `tests/spells/atmomath_check.py <scratch>` builds `tests/atmomath/atmomath_dump.cpp` (MSYS2 g++) and
+  gates the shipped functions: transmittance vs `atmo_model.py`, sun tint, sun full, ambient, sky irradiance colour
+  vs the model's full sky (worst 0.104 < 0.15). Red flat fails 3 gates; irrflat (the checker's own) fails one.
+
+### ATMO2: aerial perspective (Hillaire 2020 sec. 5.4)
+- **What:** the physical sky's own air on every surface: a froxel volume (RGBA16F 3D: in-scatter + transmittance)
+  built each frame from the sky's medium and LUTs, out to 16 km (quadratic slices, slice 0 at 4 m).
+  - Read in `lookdev_fog.glsl` `wwFog` / `wwFogFx`, so near meshes, the far LOD, the cell-lit far cards, the far
+    dots, water and effects all take it in the same linear frame: no seam at the LOD ring.
+  - Built for the main view only; reflection probes and captures read none.
+- **With the cell fog on (our fog leads):** both describe the same air, so the fog keeps only the share the aerial
+  perspective has not taken (`res/shaders/atmo_apfog.glsl`). Whole transmittance = min of the two, never the
+  product. The same rule holds for the Volumetric Air over the physical sky's pixels (`cell_volsky.frag`).
+  Notes: `notes/skya/AP_FOG_SPLIT.md`.
+- **Row:** Render > Scene > Aerial Perspective (Off / On), key `Settings/Render/Scene/Aerial Perspective`, live;
+  needs Physical Sky on. `WW_ATMO_AP=0|1` pins it (a harness run forces 0).
+  `WW_ATMO_AP_RED=nosunt|double` are the reds. Off = today's picture exactly.
+- **Cost:** 32 KB (Low 16x16x16) / 128 KB (Medium 32x32x16) / 256 KB (High 32x32x32) / 1 MB (Ultra 64x64x32);
+  16 march steps a froxel; about 0.05 ms at High (estimate). Inside the `atmo: gpu X ms` stderr line; the
+  `atmo:` summary adds `ap=WxHxN@16km`.
+- **Checks:** `tests/spells/atmo_lut_check.py` gate 4 (froxels vs the model's march; red nosunt fails) and gate 5 (AP +
+  fog: summed optical depth = the larger of the two at 40 points; red double fails by 1.46).
+
 ## Lane ATMO1 (2026-10-23, branch atmo1-20261023): a physical sky (Hillaire 2020), off by default
 
 - **What:** the cell view's sky can be drawn from a physical atmosphere model instead of the weather dome.

@@ -164,6 +164,48 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	physicalSkyBox->setCurrentIndex( std::clamp( wwAtmoTier(), 0, 4 ) );
 	wwMatchFieldStyle( physicalSkyBox );
 	row( tr( "Physical Sky" ), physicalSkyBox, true );
+	// lane SKYA (ATMO2): the physical sky's air on the surfaces (needs Physical Sky), Off / On, ships Off
+	aerialPerspectiveBox = new QComboBox( tree );
+	aerialPerspectiveBox->setObjectName( QStringLiteral( "aerialPerspective" ) );
+	aerialPerspectiveBox->addItems( { tr( "Off" ), tr( "On" ) } );
+	aerialPerspectiveBox->setCurrentIndex( std::clamp( wwAtmoAp(), 0, 1 ) );
+	wwMatchFieldStyle( aerialPerspectiveBox );
+	row( tr( "Aerial Perspective" ), aerialPerspectiveBox, true );
+	// lane SKYA (ATMOSUN1): the key light and the ambient coloured by the air (needs Physical Sky), ships Off
+	sunlightFromSkyBox = new QComboBox( tree );
+	sunlightFromSkyBox->setObjectName( QStringLiteral( "sunlightFromSky" ) );
+	sunlightFromSkyBox->addItems( { tr( "Off" ), tr( "Tint" ), tr( "Full" ) } );
+	sunlightFromSkyBox->setCurrentIndex( std::clamp( wwAtmoSun(), 0, 2 ) );
+	wwMatchFieldStyle( sunlightFromSkyBox );
+	row( tr( "Sunlight From Sky" ), sunlightFromSkyBox, true );
+	// lane SKYA (NIGHT1): the moon's phase in its light, stars and moon dimmed by the air (needs Physical Sky), ships Off
+	moonPhaseStarsBox = new QComboBox( tree );
+	moonPhaseStarsBox->setObjectName( QStringLiteral( "moonPhaseStars" ) );
+	moonPhaseStarsBox->addItems( { tr( "Off" ), tr( "On" ) } );
+	moonPhaseStarsBox->setCurrentIndex( std::clamp( wwAtmoNight(), 0, 1 ) );
+	wwMatchFieldStyle( moonPhaseStarsBox );
+	row( tr( "Moon Phase and Stars" ), moonPhaseStarsBox, true );
+	// lane SKYA (EXPO1): the eye adaptation counts the sky (needs Physical Sky), ships Off
+	exposureFromSkyBox = new QComboBox( tree );
+	exposureFromSkyBox->setObjectName( QStringLiteral( "exposureFromSky" ) );
+	exposureFromSkyBox->addItems( { tr( "Off" ), tr( "On" ) } );
+	exposureFromSkyBox->setCurrentIndex( std::clamp( wwAtmoExpo(), 0, 1 ) );
+	wwMatchFieldStyle( exposureFromSkyBox );
+	row( tr( "Exposure From Sky" ), exposureFromSkyBox, true );
+	// lane SKYA (ATMOCHECK1): the physical sky's luminance in the weather's colors (needs Physical Sky), ships Physical
+	skyColorBox = new QComboBox( tree );
+	skyColorBox->setObjectName( QStringLiteral( "skyColor" ) );
+	skyColorBox->addItems( { tr( "Physical" ), tr( "Weather Tint" ) } );
+	skyColorBox->setCurrentIndex( std::clamp( wwAtmoTint(), 0, 1 ) );
+	wwMatchFieldStyle( skyColorBox );
+	row( tr( "Sky Color" ), skyColorBox, true );
+	// lane SKYA (SKYGI1): the probes' sky light from the physical sky (needs Physical Sky), ships Off
+	giSkyFromPhysicalBox = new QComboBox( tree );
+	giSkyFromPhysicalBox->setObjectName( QStringLiteral( "giSkyFromPhysicalSky" ) );
+	giSkyFromPhysicalBox->addItems( { tr( "Off" ), tr( "On" ) } );
+	giSkyFromPhysicalBox->setCurrentIndex( std::clamp( wwAtmoGi(), 0, 1 ) );
+	wwMatchFieldStyle( giSkyFromPhysicalBox );
+	row( tr( "GI Sky From Physical Sky" ), giSkyFromPhysicalBox, true );
 	liveCheck( cloudsBox, "lookdevClouds", tr( "Clouds" ), wwLookdevClouds() );
 	liveCheck( sunBox, "lookdevSun", tr( "Sun" ), wwLookdevSun() );
 	// lane TERRSHADOW1: Engine (the sky clock's arc) or Real (Boston's solar path); ships Engine
@@ -338,6 +380,12 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	};
 	liveTier( sunPathBox, &wwSunPathSetMode );
 	liveTier( physicalSkyBox, &wwAtmoSetTier );	// lane ATMO1
+	liveTier( aerialPerspectiveBox, &wwAtmoSetAp );	// lane SKYA
+	liveTier( sunlightFromSkyBox, &wwAtmoSetSun );
+	liveTier( moonPhaseStarsBox, &wwAtmoSetNight );
+	liveTier( exposureFromSkyBox, &wwAtmoSetExpo );
+	liveTier( skyColorBox, &wwAtmoSetTint );
+	liveTier( giSkyFromPhysicalBox, &wwAtmoSetGi );
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
 	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );
@@ -406,6 +454,9 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( moonBox ), static_cast<QWidget *>( gameDayBox ),
 			static_cast<QWidget *>( fogBox ), static_cast<QWidget *>( shadowsBox ),
 			static_cast<QWidget *>( sunPathBox ), static_cast<QWidget *>( physicalSkyBox ),
+			static_cast<QWidget *>( aerialPerspectiveBox ), static_cast<QWidget *>( sunlightFromSkyBox ),
+			static_cast<QWidget *>( moonPhaseStarsBox ), static_cast<QWidget *>( exposureFromSkyBox ),
+			static_cast<QWidget *>( skyColorBox ), static_cast<QWidget *>( giSkyFromPhysicalBox ),
 			static_cast<QWidget *>( cascadeQualityBox ),
 			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ),
 			static_cast<QWidget *>( shadowParBox ), static_cast<QWidget *>( shadowDistanceBox ) } )

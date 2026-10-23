@@ -1,5 +1,7 @@
 #include "atmosphere.h"
+#include "atmomath.h"
 #include "wwswitch.h"
+#include "gl/cellunits.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
@@ -17,15 +19,21 @@
 namespace
 {
 
+using namespace WwAtmoMath;	// lane SKYA: the constants and the CPU math, shared with the offline unit test
+
 constexpr const char * kKey = "Settings/Render/Scene/Physical Sky";
+constexpr const char * kApKey = "Settings/Render/Scene/Aerial Perspective";
+constexpr const char * kSunKey = "Settings/Render/Scene/Sunlight From Sky";	// lane SKYA (ATMOSUN1)
+constexpr const char * kNightKey = "Settings/Render/Scene/Moon Phase and Stars";	// lane SKYA (NIGHT1)
+constexpr const char * kExpoKey = "Settings/Render/Scene/Exposure From Sky";	// lane SKYA (EXPO1)
+constexpr const char * kTintKey = "Settings/Render/Scene/Sky Color";	// lane SKYA (ATMOCHECK1)
+constexpr const char * kGiKey = "Settings/Render/Scene/GI Sky From Physical Sky";	// lane SKYA (SKYGI1)
+static_assert( kTintN == 17, "WwAtmoInputs::tint and atmo_sky.frag atTint[17]" );
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
-constexpr float kRb = 6360.0f, kRt = 6460.0f;
-constexpr float kUnitKm = 0.0142875f / 1000.0f;	// one game unit (70 = 1 m)
-constexpr float kRay[3] = { 5.802e-3f, 13.558e-3f, 33.1e-3f };
-constexpr float kMieS = 3.996e-3f, kMieE = 4.40e-3f, kMieG = 0.8f;
-constexpr float kOzone[3] = { 0.650e-3f, 1.881e-3f, 0.085e-3f };
-constexpr float kPi = 3.14159265f;
 constexpr int kTransW = 256, kTransH = 64;
+/* lane SKYA (ATMO2): the aerial-perspective volume's reach. A Fallout 4 worldspace is ~4 km across (64 cells of
+ * 58.5 m) and its far LOD a few km more: 16 km covers it with slice 0's centre at 4 m (quadratic slices) */
+constexpr float kApMaxKm = 16.0f;
 // the disc's display cap (scene units): bloom (post) still sees a bright disc, never an unbounded one
 constexpr float kDiscCap = 48.0f;
 
@@ -37,7 +45,43 @@ struct AtState
 	bool pinned = false;
 	float haze[3] = { 0.0f, 1.0f, 0.0f };	// last drawn: ground extinction /km, scale height km, plateau top km
 	QString last = QStringLiteral( "off" );
+	int ap = 0;	// lane SKYA (ATMO2): the Aerial Perspective row, 0 Off / 1 On (pin WW_ATMO_AP)
+	bool apPinned = false;
+	int sun = 0;	// lane SKYA (ATMOSUN1): the Sunlight From Sky row, 0 Off / 1 Tint / 2 Full (pin WW_ATMO_SUN)
+	bool sunPinned = false;
+	int night = 0;	// lane SKYA (NIGHT1): the Moon Phase and Stars row, 0 Off / 1 On (pin WW_ATMO_NIGHT)
+	bool nightPinned = false;
+	float extHaze[4] = { -1.0f, -1.0f, -1.0f, -1.0f };	// NIGHT1: the haze (+ red) the extinction table was built for
+	float ext[33][3] = {};	// T(mu) / T(1) at mu = 0, 1/32 .. 1
+	int expo = 0;	// lane SKYA (EXPO1): the Exposure From Sky row, 0 Off / 1 On (pin WW_ATMO_EXPO)
+	bool expoPinned = false;
+	float skyMean = -1.0f;	// EXPO1: the sky's mean luminance over the upper hemisphere, scene units (< 0 = none)
+	quint64 frame = 0, skyFrame = 0;	// EXPO1: the frame count (wwAtmoApFrame) and the frame skyMean was read in
+	int tint = 0;	// lane SKYA (ATMOCHECK1): the Sky Color row, 0 Physical / 1 Weather Tint (pin WW_ATMO_TINT)
+	bool tintPinned = false;
+	int gi = 0;	// lane SKYA (SKYGI1): the GI Sky From Physical Sky row, 0 Off / 1 On (pin WW_ATMO_GI)
+	bool giPinned = false;
 };
+
+//! lane SKYA: one row's value from its pin (already read by the caller: the survey needs literal names), a harness
+//! run (0, pinned) or its QSettings key
+int rowValue( const QString & pin, const char * key, const QStringList & names, bool & pinned )
+{
+	const QString e = pin.trimmed().toLower();
+	pinned = true;
+	if ( !e.isEmpty() ) {
+		bool ok = false;
+		const int v = e.toInt( &ok );
+		if ( ok )
+			return std::clamp( v, 0, int( names.size() ) - 1 );
+		const int i = int( names.indexOf( e ) );
+		return i >= 0 ? i : 0;
+	}
+	if ( wwHarnessRun() )
+		return 0;
+	pinned = false;
+	return std::clamp( QSettings().value( QLatin1StringView( key ), 0 ).toInt(), 0, int( names.size() ) - 1 );
+}
 
 AtState & as()
 {
@@ -60,6 +104,23 @@ AtState & as()
 		} else {
 			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), 0 ).toInt(), 0, 4 );
 		}
+		// lane SKYA (ATMO2): the Aerial Perspective row (the prefix above re-reads it live)
+		const QString a = wwEnvStr( "WW_ATMO_AP" ).trimmed().toLower();
+		s.apPinned = true;
+		if ( !a.isEmpty() )
+			s.ap = ( a == QLatin1StringView( "1" ) || a == QLatin1StringView( "on" ) ) ? 1 : 0;
+		else if ( wwHarnessRun() )
+			s.ap = 0;
+		else {
+			s.apPinned = false;
+			s.ap = QSettings().value( QLatin1StringView( kApKey ), 0 ).toInt() ? 1 : 0;
+		}
+		// lane SKYA: the rows after ATMO2 (the same prefix re-reads them live)
+		s.sun = rowValue( wwEnvStr( "WW_ATMO_SUN" ), kSunKey, { "off", "tint", "full" }, s.sunPinned );
+		s.night = rowValue( wwEnvStr( "WW_ATMO_NIGHT" ), kNightKey, { "off", "on" }, s.nightPinned );
+		s.expo = rowValue( wwEnvStr( "WW_ATMO_EXPO" ), kExpoKey, { "off", "on" }, s.expoPinned );
+		s.tint = rowValue( wwEnvStr( "WW_ATMO_TINT" ), kTintKey, { "physical", "weather" }, s.tintPinned );
+		s.gi = rowValue( wwEnvStr( "WW_ATMO_GI" ), kGiKey, { "off", "on" }, s.giPinned );
 	}
 	return s;
 }
@@ -69,21 +130,59 @@ bool red( const char * word )
 	return wwEnvStr( "WW_ATMO_RED" ).trimmed().toLower() == QLatin1StringView( word );
 }
 
+//! lane SKYA (ATMO2): the aerial perspective's reds: nosunt (the in-scatter ignores the sun's transmittance), double
+//! (the cell fog laid over the full aerial perspective: the haze counted twice)
+bool apRed( const char * word )
+{
+	return wwEnvStr( "WW_ATMO_AP_RED" ).trimmed().toLower() == QLatin1StringView( word );
+}
+
+//! lane SKYA (NIGHT1): nophase (the moon's light at every phase = the full moon's), noext (the stars and the moon disc
+//! not dimmed toward the horizon)
+bool nightRed( const char * word )
+{
+	return wwEnvStr( "WW_ATMO_NIGHT_RED" ).trimmed().toLower() == QLatin1StringView( word );
+}
+
+//! lane SKYA (EXPO1): skyzero (the sky counted as nothing), zenithw (the hemisphere mean not weighted by solid angle)
+bool expoRed( const char * word )
+{
+	return wwEnvStr( "WW_ATMO_EXPO_RED" ).trimmed().toLower() == QLatin1StringView( word );
+}
+
 struct Target
 {
 	GLuint tex = 0, fbo = 0;
 	int w = 0, h = 0;
 };
 
+struct Volume	// lane SKYA (ATMO2): the aerial-perspective froxels, RGBA16F 3D, one FBO a slice at a time
+{
+	GLuint tex = 0, fbo = 0;
+	int w = 0, h = 0, n = 0;
+	bool valid = false;	// drawn this frame (wwAtmoApFrame clears it)
+	float view[9] = {};	// the view rotation and projection it was built for: other views (probes) read none
+	float proj[4] = {};	// P00, P11, P20, P21
+	float kmPerView = 0.0f;
+	float camR = 0.0f;	// km from the planet's centre (the sky's air reads the transmittance LUT from here)
+};
+
 struct AtGpu
 {
 	Target trans, ms, sunView, moonView;
+	Volume ap;
 	QString transKey, msKey;
 	GLuint q[4] = { 0, 0, 0, 0 };	// two timestamp pairs, read a frame late
 	bool pending[2] = { false, false };
 	int cur = 0;
 	double ms_ = -1.0;
 	int frames = 0;
+	// lane SKYA (EXPO1): the sun's and the moon's sky-view tables read back a frame late (no stall), with the scales
+	// and the size they were drawn with
+	GLuint pbo[2] = { 0, 0 };
+	GLsync fence = nullptr;
+	int rbW = 0, rbH = 0;
+	float rbSunK = 0.0f, rbMoonK = 0.0f, rbCamR = 0.0f;
 };
 
 QHash<Renderer *, AtGpu> & gpus()
@@ -147,61 +246,7 @@ void bindTex( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Pr
 	p->uni1i( name, unit );
 }
 
-/* the haze rung (RESEARCH.md sec. 7): the fog reaches Max at Far; Koschmieder's visibility in its general form,
- * sigma = -ln(1 - min(Max, 0.98)) / Far, less the clear air's ground extinction, is a haze layer flat up to the
- * fog's Far Height Mid and e-folding over its Range (atmo_model.py haze_from_fog) */
-void hazeFromFog( const WwAtmoInputs & in, float out[3] )
-{
-	out[0] = 0.0f;
-	out[1] = 1.0f;
-	out[2] = 0.0f;
-	if ( in.fogFar <= 0.0f || in.fogMax <= 0.0f || red( "nohaze" ) )
-		return;
-	const float vKm = in.fogFar * kUnitKm;
-	const float sigma = -std::log( 1.0f - std::min( in.fogMax, 0.98f ) ) / vKm;
-	out[0] = std::clamp( sigma - kRay[1] - kMieE, 0.0f, 50.0f );
-	out[1] = std::max( 0.02f, in.fogRange * kUnitKm );
-	out[2] = std::max( 0.0f, in.fogMid * kUnitKm );
-}
-
-void odAt( float h, const float haze[3], bool noOzone, float e[3] )
-{
-	h = std::max( h, 0.0f );
-	const float dr = std::exp( -h / 8.0f ), dm = std::exp( -h / 1.2f );
-	const float dz = std::max( 0.0f, 1.0f - std::fabs( h - 25.0f ) / 15.0f );
-	const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
-	for ( int c = 0; c < 3; c++ )
-		e[c] = kRay[c] * dr + kMieE * dm + dh + ( noOzone ? 0.0f : kOzone[c] ) * dz;
-}
-
-void cpuTrans( float hKm, float mu, const float haze[3], bool noOzone, float out[3] )
-{
-	const float r = kRb + std::max( hKm, 0.0f );
-	if ( mu < 0.0f && r * r * ( mu * mu - 1.0f ) + kRb * kRb >= 0.0f ) {
-		out[0] = out[1] = out[2] = 0.0f;
-		return;
-	}
-	const float d = std::max( 0.0f, -r * mu + std::sqrt( std::max( 0.0f, r * r * ( mu * mu - 1.0f ) + kRt * kRt ) ) );
-	constexpr int N = 256;
-	double od[3] = { 0, 0, 0 };
-	for ( int i = 0; i < N; i++ ) {
-		// packed toward the start: the haze layer sits at the bottom
-		const float a0 = float( i ) / N, a1 = float( i + 1 ) / N, am = 0.5f * ( a0 + a1 );
-		const float t = d * am * am, w = d * ( a1 * a1 - a0 * a0 );
-		const float rr = std::sqrt( r * r + t * t + 2.0f * r * mu * t );
-		float e[3];
-		odAt( rr - kRb, haze, noOzone, e );
-		for ( int c = 0; c < 3; c++ )
-			od[c] += double( e[c] ) * w;
-	}
-	for ( int c = 0; c < 3; c++ )
-		out[c] = float( std::exp( -od[c] ) );
-}
-
-float lum( const float c[3] )
-{
-	return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
-}
+// the haze rung, the CPU transmittance and lum(): src/gl/atmomath.h (moved there by lane SKYA, unchanged)
 
 void norm( float v[3] )
 {
@@ -233,6 +278,106 @@ const char * tierName( int t )
 {
 	static const char * n[5] = { "Off", "Low", "Medium", "High", "Ultra" };
 	return n[std::clamp( t, 0, 4 )];
+}
+
+/* lane SKYA (ATMO2): the aerial-perspective volume (atmo_ap.frag) over the current view's frustum, every frame (the
+ * camera and the sun move). Froxels per tier: Low 16x16x16, Medium 32x32x16, High 32x32x32, Ultra 64x64x32. The
+ * caller has saved the framebuffer, the viewport and the state; the transmittance and MS LUTs are this frame's. */
+bool buildAp( Scene * scene, AtGpu & g, int msN, float camR, const float sunW[3], const float moonW[3], float sunK,
+	float moonK, bool noOzone, bool noMs )
+{
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	const AtState & s = as();
+	const auto & gu = *r->globalUniforms;
+	if ( gu.projectionMatrix[3][3] == 1.0f )
+		return false;	// orthographic: no frustum to slice
+	const int w = s.tier >= 4 ? 64 : s.tier >= 2 ? 32 : 16;
+	const int n = s.tier >= 3 ? 32 : 16;
+	Volume & v = g.ap;
+	if ( !v.tex || v.w != w || v.h != w || v.n != n ) {
+		if ( !v.fbo )
+			fn->glGenFramebuffers( 1, &v.fbo );
+		if ( v.tex )
+			fn->glDeleteTextures( 1, &v.tex );
+		fn->glGenTextures( 1, &v.tex );
+		fn->glBindTexture( GL_TEXTURE_3D, v.tex );
+		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, w, w, n, 0, GL_RGBA, GL_FLOAT, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0 );
+		fn->glBindTexture( GL_TEXTURE_3D, 0 );
+		v.w = v.h = w;
+		v.n = n;
+	}
+	auto p = r->useProgram( "atmo_ap.prog" );
+	if ( !p )
+		return false;
+	// the frustum's world rays (atmo_sky.frag's: view ray ((x + P20) / P00, (y + P21) / P11, -1), world = vr x viewMatrix)
+	const float P00 = gu.projectionMatrix[0][0], P11 = gu.projectionMatrix[1][1];
+	const float P20 = gu.projectionMatrix[2][0], P21 = gu.projectionMatrix[2][1];
+	auto ray = [&]( float x, float y, float o[3] ) {
+		const float vr[3] = { ( x + P20 ) / P00, ( y + P21 ) / P11, -1.0f };
+		for ( int c = 0; c < 3; c++ )
+			o[c] = vr[0] * gu.viewMatrix[c][0] + vr[1] * gu.viewMatrix[c][1] + vr[2] * gu.viewMatrix[c][2];
+	};
+	float f0[3], fx[3], fy[3];
+	ray( -1.0f, -1.0f, f0 );
+	ray( 1.0f, -1.0f, fx );
+	ray( -1.0f, 1.0f, fy );
+	for ( int c = 0; c < 3; c++ ) {
+		fx[c] -= f0[c];
+		fy[c] -= f0[c];
+	}
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, v.fbo );
+	glViewport( 0, 0, w, w );
+	medium( p, s.haze, noOzone );
+	p->uni2f( "atMsSize", float( msN ), float( msN ) );
+	p->uni3f( "atApDims", float( w ), float( w ), float( n ) );
+	p->uni1f( "atApMaxKm", kApMaxKm );
+	p->uni3f( "atFrustum0", f0[0], f0[1], f0[2] );
+	p->uni3f( "atFrustumX", fx[0], fx[1], fx[2] );
+	p->uni3f( "atFrustumY", fy[0], fy[1], fy[2] );
+	p->uni1f( "atCamR", camR );
+	p->uni3f( "atSunW", sunW[0], sunW[1], sunW[2] );
+	p->uni3f( "atMoonW", moonW[0], moonW[1], moonW[2] );
+	p->uni1f( "atSunK", sunK );
+	p->uni1f( "atMoonK", moonK );
+	p->uni1f( "atMsOn", noMs ? 0.0f : 1.0f );
+	p->uni1f( "atApNoSunT", apRed( "nosunt" ) ? 1.0f : 0.0f );
+	bindTex( fn, p, 0, "atTransTex", g.trans.tex );
+	bindTex( fn, p, 1, "atMsTex", g.ms.tex );
+	const GLenum one = GL_COLOR_ATTACHMENT0;
+	bool ok = true;
+	for ( int k = 0; k < n && ok; k++ ) {
+		fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, v.tex, 0, k );
+		if ( k == 0 ) {
+			fn->glDrawBuffers( 1, &one );
+			ok = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+			if ( !ok )
+				break;
+		}
+		p->uni1f( "atApSlice", float( k ) );
+		quad( r );
+	}
+	r->stopProgram();
+	if ( !ok )
+		return false;
+	for ( int c = 0; c < 3; c++ )
+		for ( int k = 0; k < 3; k++ )
+			v.view[c * 3 + k] = gu.viewMatrix[c][k];
+	v.proj[0] = P00;
+	v.proj[1] = P11;
+	v.proj[2] = P20;
+	v.proj[3] = P21;
+	const float sc = scene->view.scale != 0.0f ? scene->view.scale : 1.0f;
+	v.kmPerView = kUnitKm / sc;
+	v.camR = camR;
+	v.valid = true;
+	return true;
 }
 
 }	// namespace
@@ -268,15 +413,17 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	}
 	if ( !g.q[0] )
 		fn->glGenQueries( 4, g.q );
-	timeRead( fn, g, 1 - g.cur, false );
-	timeRead( fn, g, g.cur, true );
-	fn->glQueryCounter( g.q[g.cur * 2], kTimestamp );
+	if ( !in.capture ) {	// SKYGI1: the probes' capture is not a frame (its six faces would scramble the timer pairs)
+		timeRead( fn, g, 1 - g.cur, false );
+		timeRead( fn, g, g.cur, true );
+		fn->glQueryCounter( g.q[g.cur * 2], kTimestamp );
+	}
 
 	const int vw = s.tier == 1 ? 96 : s.tier == 4 ? 256 : 192;
 	const int vh = s.tier == 1 ? 54 : s.tier == 4 ? 144 : 108;
 	const int msN = s.tier == 1 ? 16 : 32;
 	const bool noOzone = red( "noozone" ), noMs = red( "noms" );
-	hazeFromFog( in, s.haze );
+	hazeFromFog( in.fogFar, in.fogMax, in.fogMid, in.fogRange, red( "nohaze" ), s.haze );
 	const float hKm = std::clamp( in.camZ * kUnitKm, 0.002f, 80.0f );
 	const float camR = kRb + hKm;
 	float sunW[3] = { in.sunW[0], in.sunW[1], in.sunW[2] };
@@ -372,6 +519,59 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	}
 	if ( ok && moonK > 0.0f )
 		view( g.moonView, moonW );
+	// 2a. lane SKYA (EXPO1): the last frame's read-back tables give the sky's mean; this frame's are queued
+	if ( g.fence && !in.capture ) {
+		fn->glClientWaitSync( g.fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64( 1000000000 ) );
+		fn->glDeleteSync( g.fence );
+		g.fence = nullptr;
+		const GLsizeiptr bytes = GLsizeiptr( size_t( g.rbW ) * size_t( g.rbH ) * 4 * sizeof( float ) );
+		float mean = 0.0f;
+		bool got = true;
+		for ( int t = 0; t < ( g.rbMoonK > 0.0f ? 2 : 1 ); t++ ) {
+			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pbo[t] );
+			const auto * px = static_cast<const float *>( fn->glMapBufferRange( GL_PIXEL_PACK_BUFFER, 0, bytes, GL_MAP_READ_BIT ) );
+			if ( px )
+				mean += ( t ? g.rbMoonK : g.rbSunK ) * skyViewMeanLum( px, g.rbW, g.rbH, g.rbCamR, expoRed( "zenithw" ) );
+			got = got && px;
+			fn->glUnmapBuffer( GL_PIXEL_PACK_BUFFER );
+		}
+		fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+		if ( got ) {
+			s.skyMean = mean;
+			s.skyFrame = s.frame;
+		}
+	}
+	if ( ok && s.expo > 0 && !in.capture ) {
+		if ( !g.pbo[0] )
+			fn->glGenBuffers( 2, g.pbo );
+		GLint prevTex = 0;
+		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
+		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+		for ( int t = 0; t < ( moonK > 0.0f ? 2 : 1 ); t++ ) {
+			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pbo[t] );
+			fn->glBufferData( GL_PIXEL_PACK_BUFFER, GLsizeiptr( size_t( vw ) * size_t( vh ) * 4 * sizeof( float ) ), nullptr,
+				GL_STREAM_READ );
+			fn->glBindTexture( GL_TEXTURE_2D, t ? g.moonView.tex : g.sunView.tex );
+			fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, nullptr );
+		}
+		fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+		fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+		g.fence = fn->glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+		g.rbW = vw;
+		g.rbH = vh;
+		g.rbSunK = sunK;
+		g.rbMoonK = moonK;
+		g.rbCamR = camR;
+	}
+	// 2b. lane SKYA (ATMO2): the aerial-perspective volume over this view's frustum (Hillaire 2020 sec. 5.4)
+	QString apLine;	// empty while the row is off: the sky line stays ATMO1's
+	if ( !in.capture )	// SKYGI1: a capture face keeps the frame's volume
+		g.ap.valid = false;
+	if ( ok && s.ap > 0 && !in.capture ) {
+		const bool built = buildAp( scene, g, msN, camR, sunW, moonW, sunK, moonK, noOzone, noMs );
+		apLine = built ? QString( "ap=%1x%2x%3@%4km" ).arg( g.ap.w ).arg( g.ap.h ).arg( g.ap.n ).arg( double( kApMaxKm ), 0, 'f', 0 )
+			: QStringLiteral( "ap=refused(atmo_ap.prog or its target)" );
+	}
 
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
@@ -396,6 +596,12 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			p->uni1f( "atDiscCap", in.disc ? kDiscCap : 0.0f );
 			p->uni1f( "sceneExposure", in.exposure );
 			p->uni1i( "viewTransform", in.viewTransform );
+			// lane SKYA (ATMOCHECK1): the Sky Color row's Weather Tint (atWeatherTint); 0 = the physical color, as before
+			const bool tintOn = s.tint > 0 && in.tintOk;
+			p->uni1f( "atTintOn", tintOn ? 1.0f : 0.0f );
+			const GLint tintLoc = p->uniLocation( "atTint" );
+			if ( tintOn && tintLoc >= 0 )
+				fn->glUniform3fv( tintLoc, kTintN, &in.tint[0][0] );
 			quad( r );
 			r->stopProgram();
 		} else {
@@ -419,9 +625,11 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	if ( wasStencil )
 		fn->glEnable( GL_STENCIL_TEST );
 	fn->glDepthMask( depthMask );
-	fn->glQueryCounter( g.q[g.cur * 2 + 1], kTimestamp );
-	g.pending[g.cur] = true;
-	g.cur = 1 - g.cur;
+	if ( !in.capture ) {
+		fn->glQueryCounter( g.q[g.cur * 2 + 1], kTimestamp );
+		g.pending[g.cur] = true;
+		g.cur = 1 - g.cur;
+	}
 	g_last = ok ? &g : nullptr;
 
 	const float sunEl = std::asin( std::clamp( sunW[2], -1.0f, 1.0f ) ) * 180.0f / kPi;
@@ -429,10 +637,17 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	for ( const char * w : { "noozone", "noms", "nohaze" } )
 		if ( red( w ) )
 			reds = QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
+	for ( const char * w : { "nosunt", "double" } )
+		if ( apRed( w ) )
+			reds += QStringLiteral( ",AP_RED=%1" ).arg( QLatin1StringView( w ) );
+	if ( s.tint > 0 )	// lane SKYA (ATMOCHECK1)
+		reds += in.tintOk ? ( wwAtmoTintRedFlat() ? QStringLiteral( ",tint=weather,TINT_RED=flat" ) : QStringLiteral( ",tint=weather" ) )
+			: QStringLiteral( ",tint=refused(no dome)" );
 	s.last = ok ? QString( "physical(tier=%1,view=%2x%3,ms=%4,haze=%5/km@%6km,sun_elev=%7,k=%8,moon=%9%10)" )
 			.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( vw ).arg( vh ).arg( msN )
 			.arg( double( s.haze[0] ), 0, 'f', 3 ).arg( double( s.haze[1] ), 0, 'f', 3 ).arg( double( sunEl ), 0, 'f', 1 )
 			.arg( double( sunK / kPi ), 0, 'f', 3 ).arg( moonK > 0.0f ? QStringLiteral( "up" ) : QStringLiteral( "down" ) ).arg( reds )
+			+ ( apLine.isEmpty() ? QString() : QStringLiteral( "," ) + apLine )
 		: QString( "physical:refused(%1)" ).arg( why );
 	if ( line )
 		*line = s.last;
@@ -457,6 +672,282 @@ unsigned wwAtmoSkyViewTex()
 void wwAtmoTransmittance( float heightKm, float cosZenith, float out[3] )
 {
 	cpuTrans( heightKm, cosZenith, as().haze, red( "noozone" ), out );
+}
+
+int wwAtmoAp()
+{
+	return as().ap;
+}
+
+void wwAtmoSetAp( int on )
+{
+	AtState & s = as();
+	if ( s.apPinned )
+		return;
+	s.ap = on ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kApKey ), s.ap );
+}
+
+bool wwAtmoApPinned()
+{
+	return as().apPinned;
+}
+
+int wwAtmoSun()
+{
+	return as().sun;
+}
+
+void wwAtmoSetSun( int mode )
+{
+	AtState & s = as();
+	if ( s.sunPinned )
+		return;
+	s.sun = std::clamp( mode, 0, 2 );
+	QSettings().setValue( QLatin1StringView( kSunKey ), s.sun );
+}
+
+bool wwAtmoSunPinned()
+{
+	return as().sunPinned;
+}
+
+int wwAtmoSunKey()
+{
+	const AtState & s = as();
+	return s.tier > 0 ? s.sun + 3 * ( wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" ) )
+		: 0;
+}
+
+int wwAtmoNight()
+{
+	return as().night;
+}
+
+void wwAtmoSetNight( int on )
+{
+	AtState & s = as();
+	if ( s.nightPinned )
+		return;
+	s.night = on ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kNightKey ), s.night );
+}
+
+bool wwAtmoNightPinned()
+{
+	return as().nightPinned;
+}
+
+bool wwAtmoNightOn()
+{
+	const AtState & s = as();
+	return s.tier > 0 && s.night > 0;
+}
+
+int wwAtmoNightKey( int phase )
+{
+	return wwAtmoNightOn() ? 1 + ( phase & 7 ) + 8 * int( nightRed( "nophase" ) ) : 0;
+}
+
+float wwAtmoMoonFactor( int phase )
+{
+	return wwAtmoNightOn() ? moonPhaseFactor( phase, nightRed( "nophase" ) ) : 1.0f;
+}
+
+void wwAtmoStarExtinction( float mu, float out[3] )
+{
+	out[0] = out[1] = out[2] = 1.0f;
+	AtState & s = as();
+	if ( !wwAtmoNightOn() )
+		return;
+	const float key[4] = { s.haze[0], s.haze[1], s.haze[2], nightRed( "noext" ) ? 1.0f : 0.0f };
+	if ( !std::equal( key, key + 4, s.extHaze ) ) {
+		std::copy( key, key + 4, s.extHaze );
+		for ( int i = 0; i <= 32; i++ )
+			starExtinction( float( i ) / 32.0f, s.haze, key[3] > 0.0f, s.ext[i] );
+	}
+	const float x = std::clamp( mu, 0.0f, 1.0f ) * 32.0f;
+	const int i = std::min( int( x ), 31 );
+	const float t = x - float( i );
+	for ( int c = 0; c < 3; c++ )
+		out[c] = s.ext[i][c] * ( 1.0f - t ) + s.ext[i + 1][c] * t;
+}
+
+bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float sun[3], float amb[3], float dalc[6][3] )
+{
+	const AtState & s = as();
+	if ( s.tier <= 0 || s.sun <= 0 )
+		return false;
+	const bool flat = wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" );
+	float haze[3];
+	hazeFromFog( fog[0], fog[1], fog[2], fog[3], red( "nohaze" ), haze );
+	float rows[7][3];
+	std::copy( amb, amb + 3, rows[0] );
+	for ( int a = 0; a < 6; a++ )
+		std::copy( dalc[a], dalc[a] + 3, rows[1 + a] );
+	const float was[3] = { sun[0], sun[1], sun[2] };
+	skyKeyLight( s.sun, muLight, haze, keyLum45, flat, sun, rows, 7 );
+	std::copy( rows[0], rows[0] + 3, amb );
+	for ( int a = 0; a < 6; a++ )
+		std::copy( rows[1 + a], rows[1 + a] + 3, dalc[a] );
+	// stderr: the first change and every 240th after (the light is recomputed once per hour/weather change)
+	static int n = 0;
+	if ( n++ % 240 == 0 )
+		fprintf( stderr, "atmo sun: mode=%s%s mu=%.3f key %.4f,%.4f,%.4f -> %.4f,%.4f,%.4f amb -> %.4f,%.4f,%.4f\n",
+			s.sun == 2 ? "full" : "tint", flat ? ",RED=flat" : "", double( muLight ), double( was[0] ), double( was[1] ),
+			double( was[2] ), double( sun[0] ), double( sun[1] ), double( sun[2] ), double( amb[0] ), double( amb[1] ),
+			double( amb[2] ) );
+	return true;
+}
+
+void wwAtmoApFrame()
+{
+	for ( AtGpu & g : gpus() )
+		g.ap.valid = false;
+	as().frame++;
+}
+
+int wwAtmoGi()
+{
+	return as().gi;
+}
+
+void wwAtmoSetGi( int on )
+{
+	AtState & s = as();
+	if ( s.giPinned )
+		return;
+	s.gi = on ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kGiKey ), s.gi );
+}
+
+bool wwAtmoGiPinned()
+{
+	return as().giPinned;
+}
+
+bool wwAtmoGiActive()
+{
+	const AtState & s = as();
+	return s.gi > 0 && s.tier > 0;
+}
+
+bool wwAtmoGiRedDome()
+{
+	return wwEnvStr( "WW_ATMO_GI_RED" ).trimmed().toLower() == QLatin1StringView( "dome" );
+}
+
+int wwAtmoTint()
+{
+	return as().tint;
+}
+
+void wwAtmoSetTint( int mode )
+{
+	AtState & s = as();
+	if ( s.tintPinned )
+		return;
+	s.tint = mode ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kTintKey ), s.tint );
+}
+
+bool wwAtmoTintPinned()
+{
+	return as().tintPinned;
+}
+
+bool wwAtmoTintRedFlat()
+{
+	return wwEnvStr( "WW_ATMO_TINT_RED" ).trimmed().toLower() == QLatin1StringView( "flat" );
+}
+
+int wwAtmoExpo()
+{
+	return as().expo;
+}
+
+void wwAtmoSetExpo( int on )
+{
+	AtState & s = as();
+	if ( s.expoPinned )
+		return;
+	s.expo = on ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kExpoKey ), s.expo );
+}
+
+bool wwAtmoExpoPinned()
+{
+	return as().expoPinned;
+}
+
+float wwAtmoAdapted( float sceneMean, int counted, int total )
+{
+	const AtState & s = as();
+	// the sky read within the last two frames only (an interior, or the Physical Sky just turned off: the scene alone)
+	if ( s.tier <= 0 || s.expo <= 0 || s.skyMean < 0.0f || total <= 0 || s.frame > s.skyFrame + 2 )
+		return sceneMean;
+	const float a = adaptedWithSky( sceneMean, float( counted ) / float( total ), s.skyMean, expoRed( "skyzero" ) );
+	static int n = 0;
+	if ( n++ % 600 == 0 )
+		fprintf( stderr, "atmo expo: scene %.5f cover %.3f sky %.5f -> %.5f%s\n", double( sceneMean ),
+			double( counted ) / double( total ), double( s.skyMean ), double( a ),
+			expoRed( "skyzero" ) ? ",RED=skyzero" : expoRed( "zenithw" ) ? ",RED=zenithw" : "" );
+	return a;
+}
+
+bool wwAtmoApActive()
+{
+	const AtState & s = as();
+	if ( s.ap <= 0 || s.tier <= 0 )
+		return false;
+	for ( const AtGpu & g : gpus() )
+		if ( g.ap.valid )
+			return true;
+	return false;
+}
+
+void wwAtmoApUniforms( Scene * scene )
+{
+	if ( !scene || !scene->renderer )
+		return;
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
+	if ( !prog || prog->uniLocation( "atAp" ) < 0 )
+		return;
+	const AtState & s = as();
+	auto it = gpus().find( r );
+	const Volume * v = it != gpus().end() ? &it->ap : nullptr;
+	bool on = v && v->valid && s.ap > 0 && s.tier > 0 && !scene->selecting;
+	if ( on ) {
+		// only the view the volume was built for (a reflection probe's face or a capture reads none)
+		const auto & gu = *r->globalUniforms;
+		for ( int c = 0; c < 3 && on; c++ )
+			for ( int k = 0; k < 3 && on; k++ )
+				on = v->view[c * 3 + k] == gu.viewMatrix[c][k];
+		on = on && v->proj[0] == gu.projectionMatrix[0][0] && v->proj[1] == gu.projectionMatrix[1][1]
+			&& v->proj[2] == gu.projectionMatrix[2][0] && v->proj[3] == gu.projectionMatrix[2][1];
+	}
+	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
+	GLint prevActive = 0;
+	r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AtmoAp ) );
+	r->fn->glBindTexture( GL_TEXTURE_3D, on ? v->tex : 0 );
+	r->fn->glActiveTexture( GLenum( prevActive ) );
+	prog->uni1i( "atApTex", WwCellUnit::AtmoAp );
+	prog->uni4f( "atAp", FloatVector4( on ? 1.0f : 0.0f, kApMaxKm, on ? v->kmPerView : 0.0f, on ? float( v->n ) : 1.0f ) );
+	if ( prog->uniLocation( "atSkyTransTex" ) >= 0 ) {
+		// the sky's air (cell_volsky.frag): the physical sky already holds the air along its ray to space, so the
+		// Volumetric Air over it keeps only its residual (atmo_apfog.glsl); the ray's transmittance from this LUT
+		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AtmoTrans ) );
+		r->fn->glBindTexture( GL_TEXTURE_2D, on ? it->trans.tex : 0 );
+		r->fn->glActiveTexture( GLenum( prevActive ) );
+		prog->uni1i( "atSkyTransTex", WwCellUnit::AtmoTrans );
+		prog->uni1f( "atSkyCamR", on ? v->camR : 0.0f );
+	}
+	if ( !on )
+		return;
+	prog->uni4f( "atApProj", FloatVector4( v->proj[0], v->proj[1], v->proj[2], v->proj[3] ) );
+	prog->uni1f( "atApDouble", apRed( "double" ) ? 1.0f : 0.0f );
 }
 
 QString wwAtmoSummary()

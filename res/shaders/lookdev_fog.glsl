@@ -20,6 +20,43 @@ uniform vec4 fogProbe;		// gates only: .z = 0 off, 1 alpha, 2 colour / 2, 3 hb (
 				// 6 / 7 per fragment (lane FOG2): (alpha, hb, 0) / colour ^ 1/2.2; 8 the geometry, wide (d / 16384, 0.5 + z / 32768)
 uniform int fogRed;		// gates only: 1 maxclamp, 2 noescape, 4 height0
 
+/* lane SKYA (ATMO2): the physical sky's aerial perspective (src/gl/atmosphere.h, Hillaire 2020 sec. 5.4). atApTex
+ * holds per froxel the light the air sends toward the eye from the camera to slice k (rgb, the sky's scene units)
+ * and the mean transmittance (a); slice k's centre sits at maxKm ((k + 0.5) / n)^2, so the texture's depth
+ * coordinate is sqrt(d / maxKm). Off (atAp.x 0): every path below is the one before the lane. */
+#include "atmo_apfog.glsl"
+uniform sampler3D atApTex;
+uniform vec4 atAp;		// 1 = on, maxKm, km per view unit, slices
+uniform vec4 atApProj;		// the projection the volume was built for: P00, P11, P20, P21
+uniform float atApDouble;	// red "double": the fog laid over the whole aerial perspective
+
+bool wwApOn()
+{
+	return atAp.x > 0.5;
+}
+
+// (L, T) of the sky's air between the eye and posView (view space)
+vec4 wwAtmoApAt( vec3 posView )
+{
+	float dKm = length( posView ) * atAp.z;
+	float zv = max( -posView.z, 1e-6 );
+	vec2 ndc = vec2( atApProj.x * posView.x + atApProj.z * posView.z, atApProj.y * posView.y + atApProj.w * posView.z ) / zv;
+	vec2 uv = clamp( ndc * 0.5 + 0.5, 0.0, 1.0 );
+	float n = atAp.w;
+	float s = sqrt( clamp( dKm / atAp.y, 0.0, 1.0 ) );
+	vec4 v;
+	if ( s < 0.5 / n ) {
+		// nearer than slice 0's centre: its (L, 1 - T) scaled by the distance (both linear there)
+		v = texture( atApTex, vec3( uv, 0.5 / n ) );
+		float f = s * n * 2.0;
+		f *= f;
+		v = vec4( v.rgb * f, 1.0 - ( 1.0 - v.a ) * f );
+	} else {
+		v = texture( atApTex, vec3( uv, s ) );
+	}
+	return vec4( max( v.rgb, vec3( 0.0 ) ), clamp( v.a, 0.0, 1.0 ) );
+}
+
 // fog alpha, height blend and colour (before the sun term) of one fragment
 float wwFogEval( float d, float z, out float hb, out vec3 fogCol )
 {
@@ -343,18 +380,29 @@ float wwVolAirSunT( vec3 posView )
 	return exp( -volAirMed.x * wwAirCol( lo, volAirMed.w ) / mu );
 }
 
-vec3 wwFogBase( vec3 preFog, vec3 posView );
+vec3 wwFogBase( vec3 preFog, vec3 posView, float tAp, bool apOn );
 
-// linear in, linear out
+/* linear in, linear out. Lane SKYA (ATMO2): with the aerial perspective on, the surface goes through the sky's air
+ * first, then through the cell fog's residual (atmo_apfog.glsl: the combined transmittance is the min of the two, no
+ * haze counted twice); one fog path for both, so no program carries the fog code twice. AP off: today's math. */
 vec3 wwFog( vec3 preFog, vec3 posView )
 {
+	bool apOn = wwApOn();
+	vec4 ap = apOn ? wwAtmoApAt( posView ) : vec4( 0.0, 0.0, 0.0, 1.0 );
+	if ( apOn )
+		preFog = preFog * ap.a + ap.rgb;
 	if ( !fogOn )
 		return preFog;
 	if ( volOn && volSlices.w > 0.5 ) {
 		vec4 a = wwVolAirAt( posView );
+		if ( apOn ) {
+			bool dbl = atApDouble > 0.5;
+			float tr = wwApFogResidualT( ap.a, a.a, dbl );
+			return preFog * tr + ( dbl ? a.rgb : wwApFogResidualL( a.rgb, a.a, tr ) );
+		}
 		vec3 lit = preFog * a.a + a.rgb;
 		if ( volFogBlend == 1 )
-			return wwFogBase( lit, posView );
+			return wwFogBase( lit, posView, 1.0, false );
 		if ( volFogBlend == 2 ) {	// red blendnear (gates only): weighted by the air's 1 - T, which has no start distance
 			float hb;
 			vec3 fc;
@@ -363,7 +411,7 @@ vec3 wwFog( vec3 preFog, vec3 posView )
 		}
 		return lit;
 	}
-	return wwFogBase( preFog, posView );
+	return wwFogBase( preFog, posView, ap.a, apOn );
 }
 
 vec3 wwAirRecordColour( float d, float z, vec3 dirView, out bool ok )
@@ -378,14 +426,16 @@ vec3 wwAirRecordColour( float d, float z, vec3 dirView, out bool ok )
 	return ok ? c / lc : vec3( 1.0 );
 }
 
-// the game's fog alone
-vec3 wwFogBase( vec3 preFog, vec3 posView )
+// the game's fog alone; with the aerial perspective on, its alpha cut to the residual: 1 - alpha' = min(1, (1 - alpha) / Tap)
+vec3 wwFogBase( vec3 preFog, vec3 posView, float tAp, bool apOn )
 {
 	float d = length( posView ) * fogDistScale;
 	float z = dot( fogView.xyz, posView ) + fogView.w;
 	float hb;
 	vec3 fogCol;
 	float alpha = wwFogEval( d, z, hb, fogCol );
+	if ( apOn )
+		alpha = 1.0 - wwApFogResidualT( tAp, 1.0 - alpha, atApDouble > 0.5 );
 	vec3 viewDir = posView / max( length( posView ), 1e-6 );
 	float sunW = pow( max( dot( viewDir, fogSun.xyz ), 0.0 ), fogSunColour.w ) * fogSun.w;
 	vec3 sunlit = mix( fogCol, fogSunColour.rgb, sunW );
@@ -397,18 +447,31 @@ vec3 wwFogBase( vec3 preFog, vec3 posView )
 // lane VOLAIR1: an effect's or a particle's linear colour through the same fog as the opaque draws (wwFog), so a
 // card on a far wall fades with the wall. An additive draw takes the transmittance only: its light adds over a
 // surface that already holds the in-scatter. Red fxfog (flag 16 clear) and the air off: the game's fog alone, as before.
+// Lane SKYA (ATMO2): with the aerial perspective on, a lit effect takes wwFog's split; an additive one the sky's
+// transmittance times the fog's residual.
 vec3 wwFogFx( vec3 lin, vec3 posView, bool additive )
 {
-	if ( !fogOn )
+	bool apOn = wwApOn();
+	if ( !fogOn && !apOn )
 		return lin;
+	bool volFx = volOn && volSlices.w > 0.5 && ( volAirFlags & 16 ) != 0;
+	if ( !additive && ( volFx || apOn ) )
+		return max( wwFog( lin, posView ), vec3( 0.0 ) );
+	float tAp = apOn ? wwAtmoApAt( posView ).a : 1.0;
+	if ( !fogOn )
+		return lin * tAp;
 	float hb;
 	vec3 fc;
 	float f = wwFogEval( length( posView ) * fogDistScale, dot( fogView.xyz, posView ) + fogView.w, hb, fc );
-	if ( !volOn || volSlices.w < 0.5 || ( volAirFlags & 16 ) == 0 )
+	if ( !volFx ) {
+		if ( apOn )
+			return lin * tAp * wwApFogResidualT( tAp, 1.0 - f, atApDouble > 0.5 );
 		return additive ? lin * ( 1.0 - f ) : mix( lin, fc, f );
-	if ( !additive )
-		return max( wwFog( lin, posView ), vec3( 0.0 ) );
-	lin *= wwVolAirAt( posView ).a;
+	}
+	float tv = wwVolAirAt( posView ).a;
+	if ( apOn )
+		return lin * tAp * wwApFogResidualT( tAp, tv, atApDouble > 0.5 );
+	lin *= tv;
 	return volFogBlend == 1 ? lin * ( 1.0 - f ) : lin;
 }
 

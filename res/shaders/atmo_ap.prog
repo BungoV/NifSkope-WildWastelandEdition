@@ -1,0 +1,4 @@
+# lane SKYA (ATMO2): the aerial-perspective volume, one slice a draw into its own 3D target (src/gl/atmosphere.cpp).
+# No conditions: never picked for a shape; selected by name.
+
+shaders cell_ao.vert atmo_ap.frag

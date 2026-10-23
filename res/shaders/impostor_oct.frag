@@ -744,7 +744,7 @@ void main()
 		lc = cellLit( lc, colour.rgb, nView, cardPosView, V, 0.0, vec3( 0.0 ), 1.0, 0.5, vec3( 0.0 ), vec3( 0.0 ) );
 #endif
 #ifdef WW_FOG
-	if ( fogOn )
+	if ( fogOn || wwApOn() )	// lane SKYA: the sky's aerial perspective with the fog off too (the far cards)
 		lc = sqrt( max( wwFog( lc * lc, cardPosView ), vec3( 0.0 ) ) );
 #endif
 #ifdef WW_CELLLIGHTS

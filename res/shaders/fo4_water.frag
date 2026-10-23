@@ -293,7 +293,7 @@ void main()
 		lin = mix( lin, refrOff, shore );
 	}
 	lin = max( lin, vec3( 0.0 ) );
-	if ( fogOn )
+	if ( fogOn || wwApOn() )	// lane SKYA: the sky's aerial perspective with the fog off too
 		lin = max( wwFog( lin, posView ), vec3( 0.0 ) );
 
 	vec3 s = sqrt( lin );

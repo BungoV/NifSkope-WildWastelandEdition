@@ -693,7 +693,7 @@ void main()
 	// lane FOG1 (Lookdev weather fog): this colour is sqrt of linear light (tonemap squares it),
 	// so the fog runs on its square, before the exposure and the curve
 #ifdef WW_FOG
-	if ( fogOn )
+	if ( fogOn || wwApOn() )	// lane SKYA: the sky's aerial perspective with the fog off too
 		color.rgb = sqrt( max( wwFog( color.rgb * color.rgb, -ViewDir ), vec3( 0.0 ) ) );
 #endif
 #ifdef WW_CELLLIGHTS
