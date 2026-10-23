@@ -93,6 +93,7 @@ struct CellChunk
 	bool started = false;
 	QPersistentModelIndex iGround;
 	std::vector<std::pair<int, int>> fxShapes;     //!< written block, local model serial
+	std::vector<std::pair<int, quint32>> xemiShapes;   //!< lane LIGHTS2 (XEMI1): written block, emittance colour
 	qint64 shapes = 0, verts = 0, tris = 0;
 };
 

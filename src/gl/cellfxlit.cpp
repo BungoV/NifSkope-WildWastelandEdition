@@ -261,3 +261,47 @@ void wwCellFxLitMerge( float a[4], const float b[4] )
 		a[k] += ( b[k] - a[k] ) * t;
 	a[3] = r;
 }
+
+// ---- lane LIGHTS2 (XEMI1): the placement emittance colour of each written shape, by document and block
+namespace
+{
+QHash<const void *, QHash<int, quint32>> & xemiDocs()
+{
+	static QHash<const void *, QHash<int, quint32>> d;
+	return d;
+}
+}
+
+void wwCellXemiBegin( const void * nif )
+{
+	xemiDocs().remove( nif );
+}
+
+void wwCellXemiShape( const void * nif, int block, quint32 rgb )
+{
+	xemiDocs()[nif].insert( block, rgb );
+}
+
+void wwCellXemiForget( const void * nif, int block )
+{
+	auto d = xemiDocs().find( nif );
+	if ( d != xemiDocs().end() )
+		d->remove( block );
+}
+
+bool wwCellXemiFor( const void * nif, int block, float rgb[3] )
+{
+	const auto d = xemiDocs().constFind( nif );
+	if ( d == xemiDocs().constEnd() )
+		return false;
+	const auto it = d->constFind( block );
+	if ( it == d->constEnd() )
+		return false;
+	// red: magenta on every tinted shape, so the picture shows which shapes the rule reached
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_CELL_XEMI_RED" ).trimmed() );
+	const quint32 c = red == "magenta" ? 0xFF00FFU : ( it.value() & 0xFFFFFFU );
+	rgb[0] = float( ( c >> 16 ) & 0xFF ) / 255.0f;
+	rgb[1] = float( ( c >> 8 ) & 0xFF ) / 255.0f;
+	rgb[2] = float( c & 0xFF ) / 255.0f;
+	return true;
+}

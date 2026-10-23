@@ -1420,6 +1420,7 @@ struct LodSrcShape
 	bool effectBlend = false;
 	bool effectMatRead = false;          //!< the BGEM read (cell view effect buckets)
 	bool effectLit = false;              //!< lane FXLIT1: the effect-lighting flag, the BGEM's or the property's (cell view only)
+	bool extEmit = false;                //!< lane LIGHTS2 (XEMI1): External Emittance, the BGSM's or SF1 bit 29 (cell view only)
 	QByteArray effectBlock;              //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
 	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
 	float refractStrength = 0.0f;        //!< lane EFX1: the lighting property's Refraction Strength (cell view only)
@@ -2682,6 +2683,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					const quint32 sf2 = src.get<quint32>( iShader, "Shader Flags 2" );
 					s.shaderSF1 = sf1;
 					s.shaderSF2 = sf2;
+					s.extEmit = ( sf1 & ( 1U << 29 ) ) != 0;   // lane LIGHTS2 (XEMI1)
 					nf.effectShader = src.blockInherits( iShader, "BSEffectShaderProperty" );
 					nf.waterShader = src.blockInherits( iShader, "BSWaterShaderProperty" );   // lane WATER1
 					if ( !nf.effectShader && ( sf1 & ( 1U << 15 ) ) )
@@ -2758,6 +2760,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.emitColor = sm.emittanceColor();
 							s.emitMult = sm.emittanceMultiple();
 							s.ownEmit = sm.emitEnabled();
+							s.extEmit = ( sm.shaderFlags2() & 0x400U ) != 0;   // lane LIGHTS2 (XEMI1): bExternalEmittance
 							// lane EMISSIVEGI1: glproperty.cpp's slot rule (9 entries: slot 5; 10: slot 4)
 							s.glowFlag = sm.glowmapEnabled();
 							s.glowTex = t.size() == 9 ? t[5] : t.size() == 10 ? t[4] : QString();
@@ -3059,6 +3062,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.effectBlend = s.effectBlend; n.matAlpha = s.matAlpha;
 		n.effectMatRead = s.effectMatRead; n.shaderSF1 = s.shaderSF1; n.shaderSF2 = s.shaderSF2;
 		n.effectLit = s.effectLit;	// lane FXLIT1
+		n.extEmit = s.extEmit;	// lane LIGHTS2 (XEMI1)
 		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;	// lane EFX1
 		n.refractStrength = s.refractStrength;
 		n.bakeBlend = s.bakeBlend; n.bakeBlendSrc = s.bakeBlendSrc; n.bakeBlendDst = s.bakeBlendDst;	// lane BAKE4

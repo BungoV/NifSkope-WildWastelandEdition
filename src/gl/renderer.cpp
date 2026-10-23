@@ -1955,7 +1955,11 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		}
 		prog->uni1i( "hasEmit", hasEmit );
 		prog->uni1i( "hasGlowMap", lsp->hasGlowMap );
-		prog->uni3f( "glowColor", lsp->emissiveColor.red(), lsp->emissiveColor.green(), lsp->emissiveColor.blue() );
+		float xemi[3];	// lane LIGHTS2 (XEMI1): a placement's emittance colour replaces the emissive colour, as the game's does
+		if ( wwCellXemiFor( scene->nifModel, mesh->id(), xemi ) )
+			prog->uni3f( "glowColor", xemi[0], xemi[1], xemi[2] );
+		else
+			prog->uni3f( "glowColor", lsp->emissiveColor.red(), lsp->emissiveColor.green(), lsp->emissiveColor.blue() );
 
 		// Specular params
 		float s = ( scene->hasOption(Scene::DoSpecular) && scene->hasOption(Scene::DoLighting) ) ? lsp->specularStrength : 0.0;
@@ -2108,6 +2112,12 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		// Glow params
 
 		prog->uni4f( "glowColor", FloatVector4( esp->emissiveColor ) );
+		if ( prog->uniLocation( "fxEmit" ) >= 0 ) {	// lane LIGHTS2 (XEMI1): the placement's emittance colour ^2.2; w 0 = none
+			float xe[3];
+			const bool on = wwCellXemiFor( scene->nifModel, mesh->id(), xe );
+			prog->uni4f( "fxEmit", on ? FloatVector4( std::pow( xe[0], 2.2f ), std::pow( xe[1], 2.2f ), std::pow( xe[2], 2.2f ), 1.0f )
+				: FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+		}
 		prog->uni1f( "glowMult", scene->hasOption(Scene::DoGlow) ? esp->emissiveMult : 0.0f );
 
 		// Falloff params

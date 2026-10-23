@@ -85,6 +85,16 @@ bool wwCellFxLitProbeShape( Scene * scene, int block );
  *  fxRoomLitMul), so a lens inside a dark shop follows the room. Red WW_CELL_FXROOM_RED=game: the game's base. */
 bool wwCellFxRoomLit( Scene * scene, int block );
 
+/*! Lane LIGHTS2 (XEMI1): a placement's emittance colour (REFR XEMI -> its LIGH's colour, 0xRRGGBB) on a written shape.
+ *  Lighting shapes with External Emittance draw it as their emissive colour; unlit effects with the flag are tinted
+ *  c = mix( c, c x colour^2.2, lighting influence ). Look row "Placement emittance" (WW_CELL_XEMI); red
+ *  WW_CELL_XEMI_RED=magenta. */
+void wwCellXemiBegin( const void * nif );
+void wwCellXemiShape( const void * nif, int block, quint32 rgb );
+void wwCellXemiForget( const void * nif, int block );
+//! The shape's colour in 0..1 (the red applied), or false (none).
+bool wwCellXemiFor( const void * nif, int block, float rgb[3] );
+
 //! Bounding sphere of `count` points (xyz, stride 3 floats): the box centre, the farthest point.
 void wwCellFxLitSphere( const float * xyz, size_t count, float out[4] );
 //! Grow sphere `a` (xyz, radius; radius < 0 = empty) to hold sphere `b`, as a scene node merges its children's.

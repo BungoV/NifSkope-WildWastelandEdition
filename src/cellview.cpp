@@ -203,6 +203,7 @@ struct Bucket
 	int bbMode = 0;
 	//! Lane FXLIT1: one placement's lit effect shapes; the placed model's serial in src/gl/cellfxlit.h, -1 = none.
 	int fxLit = -1;
+	quint32 xemi = 0;   // lane LIGHTS2 (XEMI1): the placement's emittance colour, 0x01RRGGBB (bit 24 = set), 0 = none
 	bool decal = false;   // lane PLACED1: a placed decal's pieces (src/celldecal.h): Decal flag, no depth write
 	quint32 decalSF1 = 0;   // lane GAPFIX1: a lighting source's own Decal / Dynamic_Decal bits (the model's flags), kept
 	/* Lane WATER1: a water surface of one WATR record (the cell's plane or a placed water mesh); its shapes are
@@ -509,6 +510,10 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			g_cellChunkEmit->fxShapes.emplace_back( nif->getBlockNumber( iShape ), b.fxLit );
 		else if ( b.fxLit >= 0 )   // lane FXLIT1: the renderer asks for this shape's four lights by block
 			wwCellFxLitShape( nif, nif->getBlockNumber( iShape ), b.fxLit );
+		if ( b.xemi && g_cellChunkEmit )   // lane LIGHTS2 (XEMI1): the renderer asks for the colour by block
+			g_cellChunkEmit->xemiShapes.emplace_back( nif->getBlockNumber( iShape ), b.xemi );
+		else if ( b.xemi )
+			wwCellXemiShape( nif, nif->getBlockNumber( iShape ), b.xemi );
 		emitLap( 5 );   // the shape's take (counted in 1) plus the fx registration
 		if ( !b.billboard && !b.runStart.empty() ) {   // lane SUNCELL1: the part's culling runs, spheres in its own space
 			std::vector<WwCullRun> runs;
@@ -1866,6 +1871,7 @@ void liveCut( NifModel * nif, LiveDoc & d, int first )
 		wwCellLandForget( nif, b );
 		wwCellGrassForget( nif, b );
 		wwCellFxLitForget( nif, b );
+		wwCellXemiForget( nif, b );   // lane LIGHTS2 (XEMI1)
 	}
 	const QModelIndex iRoot = nif->getBlockIndex( d.rootBlock );
 	for ( const qint32 l : nif->getLinkArray( nif->getIndex( iRoot, "Children" ) ) )
@@ -2247,6 +2253,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		quint32 ref = 0;
 		int part = -1;
 		quint32 swap = 0;   //!< lane PRTPPLACE: the MSWP this placement draws with (ref XMSP, else the base's MODS)
+		quint32 xemi = 0;   //!< lane LIGHTS2 (XEMI1): XEMI's LIGH colour, 0x01RRGGBB (bit 24 = set); 0 none or a region
 		int cellX = 0, cellY = 0;
 		bool persistent = false;
 		bool disabled = false;
@@ -2341,6 +2348,21 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	}
 	int boothDropped = 0;
 	QSet<quint32> boothSeen;
+	/* lane LIGHTS2 (XEMI1): a reference's XEMI names a LIGH (its colour; the game returns the light's colour member, read
+	 * here as DATA bytes / 255) or a REGN (a region colour the plugin does not state for FO4: counted, not drawn). */
+	int xemiRefs = 0, xemiLigh = 0, xemiOther = 0;
+	auto xemiOf = [&]( quint32 form ) -> quint32 {
+		if ( !form )
+			return 0;
+		xemiRefs++;
+		const EsmLight & el = world.light( form );
+		if ( !el.exists ) {
+			xemiOther++;
+			return 0;
+		}
+		xemiLigh++;
+		return 0x01000000U | ( quint32( el.color[0] ) << 16 ) | ( quint32( el.color[1] ) << 8 ) | quint32( el.color[2] );
+	};
 	auto pushRefr = [&]( const EsmRefr & r, int cellX, int cellY, bool persistent ) {
 		if ( !boothRefs.isEmpty() ) {
 			if ( !boothRefs.contains( r.formID ) ) {
@@ -2517,6 +2539,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					out.enableParentOppositeFlag = r.enableParentOpposite;
 #endif
 					out.swap = r.materialSwap ? r.materialSwap : world.lodBase( part.base ).materialSwap;
+					out.xemi = xemiOf( r.emittance );
 					placements.append( out );
 				}
 			}
@@ -2541,6 +2564,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		out.enableParentOppositeFlag = r.enableParentOpposite;
 #endif
 		out.swap = r.materialSwap ? r.materialSwap : lb.materialSwap;
+		out.xemi = xemiOf( r.emittance );
 		out.loadDoor = r.teleport != 0;
 		placements.append( out );
 	};
@@ -2763,8 +2787,13 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const int fxLitCap = 4096;
 	int fxLitModels = 0, fxLitShapes = 0;
 	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
+	/* lane LIGHTS2 (XEMI1): a placement's emittance colour on the shapes that ask for it (External Emittance): a lighting
+	 * shape's emissive colour is replaced, an UNLIT effect is tinted (lit effect variants never read it). Read at build. */
+	const bool xemiOn = wwLookOn( WwLook::PlacementEmittance ) && spec.overlay == CellOverlay::None;
+	int xemiShapesLit = 0, xemiShapesFx = 0, xemiNoFlag = 0;
 	if ( !chunk ) {
 		wwCellFxLitBegin( nif );
+		wwCellXemiBegin( nif );   // lane LIGHTS2 (XEMI1)
 		wwCellCullBegin( nif );   // lane SUNCELL1
 	}
 
@@ -4354,6 +4383,16 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			}
 			if ( isActor )
 				bbOwn += QLatin1String( "|ACTOR" );   // lane PLACED1: own buckets; no decal lands on an actor
+			quint32 xemiHere = 0;   // lane LIGHTS2 (XEMI1): a bucket per colour
+			if ( xemiOn && p.xemi && !isActor && !( s.nearFacts.effectShader && s.effectLit ) ) {
+				if ( s.extEmit ) {
+					xemiHere = p.xemi;
+					bbOwn += QStringLiteral( "|XE|%1" ).arg( p.xemi, 8, 16, QLatin1Char( '0' ) );
+					( s.nearFacts.effectShader ? xemiShapesFx : xemiShapesLit )++;
+				} else {
+					xemiNoFlag++;
+				}
+			}
 			/* lane CABLES1: a cable whose base has wind sensibility sways: the game draws it with its grass shader
 			 * (the wind, the colour's 2.2 power) and its wave period is the base's wind flexibility. One bucket per
 			 * base; the vertex alpha is the weight. The grass FADE is not applied (not measured for cables). */
@@ -4402,6 +4441,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			}
 			if ( fxLitSerial >= 0 && bbOwn.contains( QLatin1String( "|FL|" ) ) )
 				b.fxLit = fxLitSerial;
+			if ( xemiHere )
+				b.xemi = xemiHere;
 			if ( bb ) {
 				b.billboard = true;
 				b.bbPos = p.pos + p.rot * ( bbPivot * p.scale );
@@ -6426,6 +6467,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		s << "  lit effects: " << fxLitShapes << " shapes of " << fxLitModels
 		  << " placed models take their four placed lights"
 		  << ( spec.interior ? "" : fxLitOn ? " (exterior: the sun is the base)" : " (exterior off: RED=indoors)" ) << "\n";
+		// lane LIGHTS2 (XEMI1)
+		s << "  placement emittance: " << ( xemiOn ? "on" : "off" ) << ", " << xemiRefs << " placements carry XEMI ("
+		  << xemiLigh << " a light, " << xemiOther << " a region: not drawn); " << xemiShapesLit << " lighting + "
+		  << xemiShapesFx << " unlit effect shapes take it, " << xemiNoFlag << " shapes lack External Emittance\n";
 		if ( groundNote.isEmpty() ) {   // lane CELLVIEW2
 			s << "  ground: " << landsDrawn << " LAND cells, vertex colour only"
 			  << " (the splat layers are NOT sampled -- that is the terrain bake's compositor)\n";
