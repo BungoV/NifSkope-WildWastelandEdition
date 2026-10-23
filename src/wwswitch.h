@@ -19,6 +19,7 @@
 #include <QtGlobal>
 
 #include <atomic>
+#include <cstdio>
 #include <initializer_list>
 #include <mutex>
 #include <utility>
@@ -98,6 +99,14 @@ private:
 	std::atomic<quint64> seen { ~quint64( 0 ) };
 	std::mutex mutex;
 };
+
+//! lane LIVESET1: one stderr line each time a reader takes its value again (the row's notes show the state moved)
+inline bool wwSwitchEcho( const char * what, bool on )
+{
+	std::fprintf( stderr, "switch: %s %s\n", what, on ? "on" : "off" );
+	std::fflush( stderr );
+	return on;
+}
 
 //! `static const T var = expr;` becomes `WW_SWITCH_STATIC( T, var, expr );`
 #define WW_SWITCH_STATIC( T, var, ... ) \

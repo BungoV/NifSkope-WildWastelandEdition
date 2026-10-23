@@ -976,6 +976,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	// ---- objects, ring by ring: the authored slot of each, the ring inside cut out
 	const QString lodi = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodi" ) );
 	qint64 oPlaced = 0, oTris = 0, oSway = 0, oDropped = 0, oRefs = 0;
+	// lane LIVESET1: the budget charges the far field's own estimate, never the process working set (a live
+	// rebuild reuses freed pages, so a measured delta built ring 1 there and not at the open)
+	double usedMB = double( tVerts ) * kBytesPerVert / ( 1024.0 * 1024.0 );
 	// lane FARLOD2: per ring, for the census against the game's object LOD in the same region
 	std::vector<qint64> ringTris( rings.size(), 0 ), ringPlaced( rings.size(), 0 );
 	std::vector<QString> ringState( rings.size(), QStringLiteral( "not reached" ) );
@@ -1008,9 +1011,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			}
 			double wsR = 0, pkR = 0;
 			memNow( wsR, pkR );
-			if ( wsR - ws0 > budgetMB ) {
-				say( QStringLiteral( "far lod: objects ring %1 NOT BUILT -- working set +%2 MB is past the far "
-					"field's budget of %3 MB" ).arg( int( i ) ).arg( wsR - ws0, 0, 'f', 0 ).arg( budgetMB, 0, 'f', 0 ) );
+			if ( usedMB > budgetMB ) {
+				say( QStringLiteral( "far lod: objects ring %1 NOT BUILT -- the far field's estimate %2 MB is past its "
+					"budget of %3 MB" ).arg( int( i ) ).arg( usedMB, 0, 'f', 0 ).arg( budgetMB, 0, 'f', 0 ) );
 				ringState[i] = QStringLiteral( "NOT BUILT (budget)" );
 				break;
 			}
@@ -1043,7 +1046,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			 * ring 0 636345 tris +1514 MB, ring 1 1282884 tris +3131 MB -- 2.4 KB a triangle, rounded up. */
 			const bool sideMesh = cellMeshOn();
 			const double kBytesPerTri = sideMesh ? kSideBytesPerTri : 2560.0;
-			const double leftMB = budgetMB - ( wsR - ws0 );
+			const double leftMB = budgetMB - usedMB;
 			os.maxTris = std::max<qint64>( 1, qint64( leftMB * 1024.0 * 1024.0 / kBytesPerTri ) );
 			LodiAppendCounts oc;
 			QString oerr, onotes;
@@ -1073,6 +1076,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			ringTris[i] = oc.tris;
 			ringPlaced[i] = oc.placed;
 			ringState[i] = QStringLiteral( "built" );
+			usedMB += double( oc.tris ) * kBytesPerTri / ( 1024.0 * 1024.0 );
 			oPlaced += oc.placed;
 			oTris += oc.tris;
 			oSway += oc.swayVerts;

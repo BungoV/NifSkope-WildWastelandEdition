@@ -11,6 +11,11 @@
 - NifModel::removeTailBlocks drops a document's last blocks in one pass.
 - tools/wwswitch_survey.py: the converted switches classify live; CellModelAhead's reads are reopen.
 - tests/liveswitch: a changed value rebuilds once, an unchanged value does not; the stage table red fails.
+- Same state, same frame (10-23 rows): the far LOD's object-ring budget charges the far field's own size estimate, not
+  the process working set (a live rebuild reused freed memory and built ring 1 where a fresh open did not). A live
+  far LOD or probe-marker rebuild drops the held cell-light shadow slots, the lamp shadow store and the sun shadow
+  cache layers, as a fresh open has none (wwCellShadowsForget, wwSunShadowForget). Far cards and the SSR memo print a
+  `switch:` line when they read their value again.
 
 ## Lane RTBAKEOPT1 (2026-10-23, branch rtbakeopt1-20261023): the GPU ray-traced bake is an option, off by default
 

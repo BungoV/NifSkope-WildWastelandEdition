@@ -1557,6 +1557,16 @@ void wwSunShadowUniforms( Scene * scene )
 	wwShadowSetUniforms( scene, prog, s.valid, texel );
 }
 
+void wwSunShadowForget()
+{
+	ShadowCache::State & s = ShadowCache::st();
+	for ( int i = 0; i < kCascades; i++ ) {
+		s.c[i] = ShadowCache::Layer();
+		s.haveL[i] = false;
+	}
+	s.track.clear();
+}
+
 QString wwSunShadowSummary()
 {
 	const CsmState & s = cs();

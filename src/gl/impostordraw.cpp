@@ -958,7 +958,7 @@ void instGlCreate( Scene * scene, InstGl & g )
 
 bool ImpostorDraw::instancedOn( Scene * scene )
 {
-	WW_SWITCH_STATIC( bool, off, qgetenv( "WW_FARCARD" ) == "0" || qgetenv( "WW_FARCARD_RED" ) == "percard" );	// lane LIVESET1: per frame
+	WW_SWITCH_STATIC( bool, off, !wwSwitchEcho( "far cards instanced", !( qgetenv( "WW_FARCARD" ) == "0" || qgetenv( "WW_FARCARD_RED" ) == "percard" ) ) );	// lane LIVESET1: per frame
 	if ( off || !scene || !scene->renderer )
 		return false;
 	static GLint units = -1;

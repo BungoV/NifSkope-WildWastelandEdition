@@ -46,6 +46,7 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 #include "gl/celllights.h"
+#include "gl/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1
 #include "gl/cellvolumeview.h"	// lane VOLFIT1
 #include "probevolumes.h"	// lane VOLFIT1: the Space stage
@@ -2008,6 +2009,10 @@ int cellLiveSections( NifModel * nif, QString * why )
 			w = w.isEmpty() || p == 2 ? pw : w + QStringLiteral( "; " ) + pw;
 		r = std::max( r, p );
 	}
+	if ( r == 1 ) {	// held shadow maps still hold the old casters: drop them as a fresh open has none
+		wwCellShadowsForget( nif );
+		wwSunShadowForget();
+	}
 	if ( why )
 		*why = w;
 	return r;
@@ -2028,6 +2033,10 @@ int cellLiveProbesShow( NifModel * nif, bool show, QString * why )
 	const int r = liveMarkers( nif, d, &w );
 	if ( r == 2 )
 		d.probesBand = was;
+	if ( r == 1 ) {
+		wwCellShadowsForget( nif );
+		wwSunShadowForget();
+	}
 	if ( why )
 		*why = w;
 	return r == 2 ? 2 : 1;

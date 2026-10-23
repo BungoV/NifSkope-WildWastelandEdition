@@ -2551,6 +2551,16 @@ void wwCellShadowKick( const void * nif )
 	shadowKicks()[nif]++;
 }
 
+void wwCellShadowsForget( const void * nif )
+{
+	for ( Gpu & g : gpus() ) {	// the next pass empties the slots and the lamp store, as a fresh open's first pass
+		if ( g.shDoc == nif )
+			g.shDoc = nullptr;
+		if ( g.lsDoc == nif )
+			g.lsDoc = nullptr;
+	}
+}
+
 void wwCellShadowPass( Scene * scene )
 {
 	if ( !wwCellLightsWanted( scene ) )

@@ -354,7 +354,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 	/* lane PERF2: the pass is CPU-bound per draw. memo: the scene-global setters once per program; opaque: the sorted
 	 * draws that wrote nothing here last frame are skipped (PERF2FIX1), the water pass draws the water alone.
 	 * =0 or *_RED=1: the old path */
-	WW_SWITCH_STATIC( bool, memo, qgetenv( "WW_CELL_SSR_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_MEMO_RED" ) );
+	WW_SWITCH_STATIC( bool, memo, wwSwitchEcho( "ssr memo", qgetenv( "WW_CELL_SSR_MEMO" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_MEMO_RED" ) ) );
 	WW_SWITCH_STATIC( bool, opaqueOnly, qgetenv( "WW_CELL_SSR_OPAQUE" ) != "0" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_OPAQUE_RED" ) );
 	NodeList sceneSecond;
 	const GLfloat none4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
