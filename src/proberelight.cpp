@@ -550,6 +550,71 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 			break;
 		}
 	}
+	// lane GPURELIGHT1 (10-23): Probe sharing, probegi.cpp's sums in its order (the closed doors cut like the blend's)
+	if ( st.share && X.shareStart.size() == nP + 1 ) {
+		QElapsedTimer sc;
+		sc.start();
+		std::vector<double> nu( nP ), PS( nP * 18 );
+		parallelFor( nP, [&]( size_t j ) {
+			double sum = 0.0, sq = 0.0;
+			for ( int k = X.linkStart[j]; k < X.linkStart[j + 1]; k++ ) {
+				const double * B = &Bk[size_t( X.linkSurf[size_t( k )] ) * 3];
+				const double * tint = &X.linkTint[size_t( k ) * 3];
+				const double omega = X.linkOmega[size_t( k )];
+				const double * cosA = &X.linkCos[size_t( k ) * 6];
+				const int * dr = &X.linkDoor[size_t( k ) * 2];
+				double f[3] = { 1.0, 1.0, 1.0 };
+				if ( doors && anyClosed( dr, closed ) )
+					for ( int c = 0; c < 3; c++ )
+						f[c] = doorFactor( dr, &X.linkT[size_t( k ) * 8], c, false, closed, red );
+				double cs = 0.0;
+				for ( int a = 0; a < 6; a++ )
+					cs += cosA[a];
+				const double x = probeShareLum( B[0] * tint[0] * omega * f[0], B[1] * tint[1] * omega * f[1],
+					B[2] * tint[2] * omega * f[2] ) * cs / 6.0;
+				sum += x;
+				sq += x * x;
+			}
+			double sky = 0.0;
+			if ( X.skyOn && !placed ) {
+				for ( int a = 0; a < 6; a++ )
+					sky += probeShareLum( X.skyE[j * 18 + size_t( a ) * 3], X.skyE[j * 18 + size_t( a ) * 3 + 1],
+						X.skyE[j * 18 + size_t( a ) * 3 + 2] );
+				sky /= 6.0;
+			}
+			nu[j] = probeShareNu( sum, sq, X.kUnl[j], sky );
+		} );
+		parallelFor( nP, [&]( size_t j ) {
+			double acc[18], as = 0.0;
+			std::memcpy( acc, &PE[j * 18], sizeof acc );
+			for ( int k = X.shareStart[j]; k < X.shareStart[j + 1]; k++ ) {
+				const int * dr = &X.shareDoor[size_t( k ) * 2];
+				double vf = 1.0;
+				if ( doors && anyClosed( dr, closed ) )
+					vf = doorFactor( dr, &X.shareT[size_t( k ) * 8], 0, true, closed, red );
+				const double a = nu[j] * X.shareG[size_t( k )] * vf;
+				if ( a <= 0.0 )
+					continue;
+				as += a;
+				const double * P = &PE[size_t( X.shareProbe[size_t( k )] ) * 18];
+				for ( int q = 0; q < 18; q++ )
+					acc[q] += a * P[q];
+			}
+			for ( int q = 0; q < 18; q++ )
+				PS[j * 18 + size_t( q )] = acc[q] / ( 1.0 + as );
+		} );
+		double num = 0.0, den = 0.0, nus = 0.0;
+		for ( size_t q = 0; q < PE.size(); q++ ) {
+			num += std::fabs( PS[q] - PE[q] );
+			den += std::fabs( PE[q] );
+		}
+		for ( double n : nu )
+			nus += n;
+		O.shareMoved = den > 0.0 ? num / den : 0.0;
+		O.shareNuMean = nP ? nus / double( nP ) : 0.0;
+		PE.swap( PS );
+		O.msShare = sc.nsecsElapsed() / 1e6;
+	}
 	O.B.assign( Bk.begin(), Bk.end() );
 	O.E.assign( PE.begin(), PE.end() );
 	if ( st.wantE ) {
@@ -890,6 +955,69 @@ void main()
 }
 )";
 
+/* lane GPURELIGHT1 (10-23) Probe sharing, 1: each probe's nu (proberelight.h probeShareNu) from the last pass's B
+ * (Bsrc) through its links; written to Bdst (bound to the nu buffer) */
+const char * kGlslNu = R"(
+void main()
+{
+	int j = int( gl_GlobalInvocationID.x );
+	if ( j >= uN )
+		return;
+	float sum = 0.0, sq = 0.0;
+	for ( int k = linkStart[j]; k < linkStart[j + 1]; k++ ) {
+		int o = k * 12;
+		int s = floatBitsToInt( links[o] );
+		int rec = floatBitsToInt( links[o + 11] );
+		vec3 w = vec3( bsrc[s * 4], bsrc[s * 4 + 1], bsrc[s * 4 + 2] ) * vec3( links[o + 2], links[o + 3], links[o + 4] ) * links[o + 1];
+		if ( rec >= 0 )
+			w *= vec3( doorF( rec, 0, false ), doorF( rec, 1, false ), doorF( rec, 2, false ) );
+		float cs = 0.0;
+		for ( int a = 0; a < 6; a++ )
+			cs += links[o + 5 + a];
+		float x = dot( w, vec3( 0.2126, 0.7152, 0.0722 ) ) * cs / 6.0;
+		sum += x;
+		sq += x * x;
+	}
+	float sky = 0.0;
+	if ( uSkyOn != 0 ) {
+		for ( int a = 0; a < 6; a++ )
+			sky += dot( vec3( probeK[j * 20 + 2 + a * 3], probeK[j * 20 + 3 + a * 3], probeK[j * 20 + 4 + a * 3] ),
+				vec3( 0.2126, 0.7152, 0.0722 ) );
+		sky /= 6.0;
+	}
+	float kU = probeK[j * 20];
+	float m1 = kU * sum + sky;
+	bdst[j] = m1 > 0.0 ? min( kU * sqrt( sq ) / m1, 1.0 ) : 0.0;
+}
+)";
+
+// 2: E' = (E + sum nu g vf E_j) / (1 + sum nu g vf); FeedStart / Feed hold the share lists, Bsrc the output (18 a probe)
+const char * kGlslShare = R"(
+void main()
+{
+	int j = int( gl_GlobalInvocationID.x );
+	if ( j >= uN )
+		return;
+	float acc[18];
+	for ( int q = 0; q < 18; q++ )
+		acc[q] = pe[j * 18 + q];
+	float as = 0.0, nu = bdst[j];
+	for ( int k = feedStart[j]; k < feedStart[j + 1]; k++ ) {
+		int rec = floatBitsToInt( feed[k * 4 + 2] );
+		float vf = rec >= 0 ? doorF( rec, 0, true ) : 1.0;
+		float a = nu * feed[k * 4 + 1] * vf;
+		if ( a <= 0.0 )
+			continue;
+		as += a;
+		int p = floatBitsToInt( feed[k * 4] );
+		for ( int q = 0; q < 18; q++ )
+			acc[q] += a * pe[p * 18 + q];
+	}
+	for ( int q = 0; q < 18; q++ )
+		bsrc[j * 18 + q] = acc[q] / ( 1.0 + as );
+}
+)";
+
 }	// namespace
 
 struct ProbeRelightGpu::Impl
@@ -898,12 +1026,13 @@ struct ProbeRelightGpu::Impl
 	QOpenGLContext * ctx = nullptr;
 	QOpenGLFunctions_4_3_Core * gl = nullptr;
 	QString renderer;
-	GLuint prog[5] = { 0, 0, 0, 0, 0 };   // direct, gather, feed, blend, grow
+	GLuint prog[7] = { 0, 0, 0, 0, 0, 0, 0 };   // direct, gather, feed, blend, grow, share nu, share
 	enum { bSurf, bPairStart, bPairs, bDoorRec, bLights, bCtl, bLinkStart, bLinks, bProbeK, bPE, bBa, bBb, bFeedStart,
-		bFeed, bSlots, bGrid, bBlendStart, bBlend, bGrowStart, bGrowSlot, bGrowSrc, bCount };
+		bFeed, bSlots, bGrid, bBlendStart, bBlend, bGrowStart, bGrowSlot, bGrowSrc, bShareStart, bShare, bNu, bPES, bCount };
 	GLuint buf[bCount] = {};
 	const ProbeRelightOps * ops = nullptr;
 	int nS = 0, nP = 0, nSlot = 0, nGrow = 0, nDoor = 0;
+	bool shareRec = false;   // the ops carry the share lists
 	double msUp = 0;
 	QOpenGLContext * prevCtx = nullptr;
 	QSurface * prevSurf = nullptr;
@@ -998,8 +1127,8 @@ bool ProbeRelightGpu::init( QString * why )
 	}
 	auto * gl = d->gl;
 	d->renderer = QString::fromLatin1( reinterpret_cast<const char *>( gl->glGetString( GL_RENDERER ) ) );
-	const char * bodies[5] = { kGlslDirect, kGlslGather, kGlslFeed, kGlslBlend, kGlslGrow };
-	for ( int p = 0; p < 5; p++ ) {
+	const char * bodies[7] = { kGlslDirect, kGlslGather, kGlslFeed, kGlslBlend, kGlslGrow, kGlslNu, kGlslShare };
+	for ( int p = 0; p < 7; p++ ) {
 		const QByteArray src = QByteArray( kGlslHead ) + bodies[p];
 		const char * s = src.constData();
 		GLuint sh = gl->glCreateShader( GL_COMPUTE_SHADER );
@@ -1114,6 +1243,13 @@ bool ProbeRelightGpu::upload( const ProbeRelightOps & X, QString * why )
 		blend[k * 4 + 1] = float( X.blendW[k] );
 		blend[k * 4 + 2] = fbits( addRec( &X.blendDoor[k * 2], &X.blendT[k * 8] ) );
 	}
+	d->shareRec = X.shareStart.size() == size_t( d->nP ) + 1;
+	std::vector<float> share( X.shareProbe.size() * 4, 0.0f );
+	for ( size_t k = 0; k < X.shareProbe.size(); k++ ) {
+		share[k * 4] = fbits( X.shareProbe[k] );
+		share[k * 4 + 1] = float( X.shareG[k] );
+		share[k * 4 + 2] = fbits( addRec( &X.shareDoor[k * 2], &X.shareT[k * 8] ) );
+	}
 	std::vector<int> slotv( size_t( d->nSlot ) * 2 );
 	for ( int s = 0; s < d->nSlot; s++ ) {
 		slotv[size_t( s ) * 2] = X.slotVox[size_t( s )];
@@ -1143,6 +1279,10 @@ bool ProbeRelightGpu::upload( const ProbeRelightOps & X, QString * why )
 	d->data( Impl::bGrowStart, X.growStart.data(), X.growStart.size() * 4 );
 	d->data( Impl::bGrowSlot, X.growSlot.data(), X.growSlot.size() * 4 );
 	d->data( Impl::bGrowSrc, X.growSrc.data(), X.growSrc.size() * 4 );
+	d->data( Impl::bShareStart, X.shareStart.data(), X.shareStart.size() * 4 );
+	d->data( Impl::bShare, share.data(), share.size() * 4 );
+	d->data( Impl::bNu, nullptr, size_t( d->nP ) * 4 );
+	d->data( Impl::bPES, nullptr, d->shareRec ? size_t( d->nP ) * 18 * 4 : 0 );
 	d->gl->glFinish();
 	const bool ok = d->gl->glGetError() == GL_NO_ERROR;
 	d->restore();
@@ -1294,6 +1434,23 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 			}
 		}
 	}
+	// lane GPURELIGHT1 (10-23): Probe sharing (nu from the last B, still on binding 10; then the shared E into bPES)
+	const bool share = st.share && d->shareRec;
+	if ( share ) {
+		k.restart();
+		d->bind( 11, Impl::bNu );
+		common( 5, d->nP );
+		d->dispatch( d->nP );
+		d->bind( 12, Impl::bShareStart );
+		d->bind( 13, Impl::bShare );
+		d->bind( 10, Impl::bPES );
+		common( 6, d->nP );
+		d->dispatch( d->nP );
+		gl->glFinish();
+		O.msShare = k.nsecsElapsed() / 1e6;
+		k.restart();
+		d->bind( 9, Impl::bPES );
+	}
 	// 4. the grid: blend (the feed bindings hold the blend lists), then the two rings
 	d->bind( 12, Impl::bBlendStart );
 	d->bind( 13, Impl::bBlend );
@@ -1327,8 +1484,9 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 			O.B[size_t( i ) * 3 + size_t( c )] = b4[size_t( i ) * 4 + size_t( c )];
 		}
 	O.E.resize( size_t( d->nP ) * 18 );
-	gl->glBindBuffer( GL_SHADER_STORAGE_BUFFER, d->buf[Impl::bPE] );
+	gl->glBindBuffer( GL_SHADER_STORAGE_BUFFER, d->buf[share ? Impl::bPES : Impl::bPE] );
 	gl->glGetBufferSubData( GL_SHADER_STORAGE_BUFFER, 0, GLsizeiptr( O.E.size() * 4 ), O.E.data() );
+	d->bind( 9, Impl::bPE );   // the next run's gather writes bPE
 	if ( readGrid ) {
 		std::vector<float> g( X.nVox * 48 );
 		gl->glBindBuffer( GL_SHADER_STORAGE_BUFFER, d->buf[Impl::bGrid] );
@@ -2244,6 +2402,101 @@ int probeRelightCli( const QStringList & args )
 			QStringLiteral( "%1 rays, %2 through the pane, %3 of them tinted exactly (%4, %5, %6)/255, %7 otherwise" ).arg( t[2].n )
 				.arg( t[2].through ).arg( t[2].tinted ).arg( S.tint[0] ).arg( S.tint[1] ).arg( S.tint[2] ).arg( t[2].other ) );
 	}
+	// ---- lane GPURELIGHT1 (10-23): Probe sharing. S: the lists cross the middle wall only at a doorway (x = 520 plane)
+	std::vector<double> msShareCpu, msShareGpu;
+	{
+		const size_t nP = X.kUnl.size();
+		auto wallCount = [&]( const ProbeGiResult & r, int * leak, int * door ) {
+			*leak = *door = 0;
+			for ( size_t i = 0; i + 1 < r.shareStart.size(); i++ )
+				for ( int k = r.shareStart[i]; k < r.shareStart[i + 1]; k++ ) {
+					const float * a = &r.probeCube[i * 21];
+					const float * b = &r.probeCube[size_t( r.shareProbe[size_t( k )] ) * 21];
+					if ( ( a[0] < 520.0f ) == ( b[0] < 520.0f ) )
+						continue;
+					const double t = ( 520.0 - double( a[0] ) ) / double( b[0] - a[0] );
+					const double y = a[1] + t * double( b[1] - a[1] ), z = a[2] + t * double( b[2] - a[2] );
+					bool open = false;
+					for ( double c : kDoorY )
+						open = open || ( std::fabs( y - c ) < 48.0 && z < 192.0 );
+					( open ? *door : *leak )++;
+				}
+		};
+		int leak = 0, door = 0;
+		wallCount( rRec, &leak, &door );
+		int perDoor[3] = { 0, 0, 0 };
+		for ( size_t k = 0; k * 2 < X.shareDoor.size(); k++ )
+			for ( int s = 0; s < 2; s++ )
+				if ( X.shareDoor[k * 2 + size_t( s )] >= 0 && X.shareDoor[k * 2 + size_t( s )] < 3 )
+					perDoor[X.shareDoor[k * 2 + size_t( s )]]++;
+		gate( QStringLiteral( "S wall" ), X.shareStart.size() == nP + 1 && rRec.shareEntries > 0 && door > 0 && leak == 0,
+			QStringLiteral( "%1 entries over %2 probes (reach %3 u; %4 segments tested, %5 blocked, %6 other room); %7 cross the "
+				"middle wall at a doorway, %8 elsewhere" ).arg( rRec.shareEntries ).arg( nP ).arg( rRec.shareReach, 0, 'f', 0 )
+				.arg( rRec.shareRays ).arg( rRec.shareBlocked ).arg( rRec.shareOtherRoom ).arg( door ).arg( leak ) );
+		gate( QStringLiteral( "S doors" ), perDoor[0] > 0 && perDoor[1] > 0 && perDoor[2] > 0,
+			QStringLiteral( "share entries recorded through door 0 (solid) %1, 1 (hole) %2, 2 (glass) %3" )
+				.arg( perDoor[0] ).arg( perDoor[1] ).arg( perDoor[2] ) );
+		ProbeGiSpec gn = gs;
+		gn.share = true;
+		gn.shareRed = QStringLiteral( "nowall" );
+		ProbeGiResult rn;
+		probeGiRelight( soup, bakeDir, lit, gn, &rn );
+		int leakN = 0, doorN = 0;
+		wallCount( rn, &leakN, &doorN );
+		gate( QStringLiteral( "S red nowall" ), leakN == 0, QStringLiteral( "no room or wall test: %1 entries cross the wall, %2 at a "
+			"doorway" ).arg( leakN ).arg( doorN ), true );
+		// P share: the CPU from the operators = the relight with rays, sharing on (the baked lights)
+		ProbeGiSpec gsS = gs;
+		gsS.share = true;
+		ProbeGiResult refS;
+		probeGiRelight( soup, bakeDir, lit, gsS, &refS );
+		ProbeRelightState sst = states[0].st;
+		sst.share = true;
+		ProbeRelightOut cs;
+		std::vector<double> t;
+		for ( int r = 0; r < repeats; r++ ) {
+			probeRelightCpu( X, sst, &cs, &err );
+			t.push_back( cs.msShare );
+		}
+		msShareCpu.push_back( median( t ) );
+		const std::vector<float> rE = column( refS.probeCube, 21, 3, 18 );
+		const double dE = relDiff( cs.E, rE ), dB = relDiff( cs.B, refS.surfelBounce ),
+			dG = std::max( relDiff( cs.grid, refS.grid ), relDiff( cs.grid2, refS.grid2 ) );
+		const double worst = std::max( dE, std::max( dB, dG ) );
+		gate( QStringLiteral( "P share" ), worst <= 1e-6 && cs.passes == refS.passes && refS.shareOn,
+			QStringLiteral( "CPU vs the ray relight, sharing: B %1, E %2, grid %3 (gate 1e-6), passes %4/%5; mean nu %6 / %7, E moved "
+				"%8 % / %9 %" ).arg( dB, 0, 'g', 3 ).arg( dE, 0, 'g', 3 ).arg( dG, 0, 'g', 3 ).arg( cs.passes ).arg( refS.passes )
+				.arg( cs.shareNuMean, 0, 'f', 4 ).arg( refS.shareNuMean, 0, 'f', 4 ).arg( 100.0 * cs.shareMoved, 0, 'f', 3 )
+				.arg( 100.0 * refS.shareMoved, 0, 'f', 3 ) );
+		gate( QStringLiteral( "P red noshare" ), relDiff( cpuOut[states[0].name].E, rE ) <= 1e-6,
+			QStringLiteral( "the CPU without sharing vs the ray relight with it: E %1" ).arg( relDiff( cpuOut[states[0].name].E, rE ), 0, 'g', 3 ), true );
+		// G share: the GPU = the CPU, doors open and every door closed
+		for ( size_t si : { size_t( 0 ), states.size() - 1 } ) {
+			if ( !gpuOk )
+				break;
+			ProbeRelightState cst = states[si].st;
+			cst.share = true;
+			ProbeRelightOut co;
+			probeRelightCpu( X, cst, &co, &err );
+			ProbeRelightState gst = cst;
+			gst.passes = co.passes;
+			ProbeRelightOut go;
+			std::vector<double> tg;
+			for ( int r = 0; r < repeats && gpuOk; r++ ) {
+				gpuOk = gpu.run( gst, &go, &why, true );
+				tg.push_back( go.msShare );
+			}
+			if ( !gpuOk )
+				break;
+			msShareGpu.push_back( median( tg ) );
+			const double gE = relDiff( go.E, co.E ), gB = relDiff( go.B, co.B ),
+				gG = std::max( relDiff( go.grid, co.grid ), relDiff( go.grid2, co.grid2 ) );
+			gate( QStringLiteral( "G share %1" ).arg( states[si].name ), std::max( gE, std::max( gB, gG ) ) <= 1e-4,
+				QStringLiteral( "GPU vs CPU, sharing: B %1, E %2, grid %3 (gate 1e-4); share %4 ms GPU vs %5 ms CPU; E moved %6 %" )
+					.arg( gB, 0, 'g', 3 ).arg( gE, 0, 'g', 3 ).arg( gG, 0, 'g', 3 ).arg( median( tg ), 0, 'f', 3 )
+					.arg( co.msShare, 0, 'f', 2 ).arg( 100.0 * co.shareMoved, 0, 'f', 3 ) );
+		}
+	}
 	// ---- the shared record
 	{
 		QString census;
@@ -2272,6 +2525,9 @@ int probeRelightCli( const QStringList & args )
 		.arg( median( msCpu ), 0, 'f', 2 ).arg( msGpu.empty() ? -1.0 : median( msGpu ), 0, 'f', 2 ).arg( gpu.msUpload(), 0, 'f', 2 );
 	G << timing;
 	std::printf( "%s\n", qPrintable( timing ) );
+	G << QStringLiteral( "share timings (median): CPU %1 ms, GPU %2 ms (the share step only)" )
+		.arg( msShareCpu.empty() ? -1.0 : median( msShareCpu ), 0, 'f', 3 ).arg( msShareGpu.empty() ? -1.0 : median( msShareGpu ), 0, 'f', 3 );
+	std::printf( "%s\n", qPrintable( G.back() ) );
 	G << QStringLiteral( "%1 failures" ).arg( failures );
 	writeFile( out.filePath( QStringLiteral( "gates.txt" ) ), ( G.join( QStringLiteral( "\n" ) ) + QStringLiteral( "\n" ) ).toUtf8(), &err );
 	std::printf( "gpurelight: %d failures\n", failures );

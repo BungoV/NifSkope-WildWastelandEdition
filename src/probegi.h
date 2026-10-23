@@ -146,6 +146,12 @@ struct ProbeGiResult
 	std::vector<float> surfelBrick;     //!< per unique surfel: rgb, its brick's mean of pass 1's B (the Pass view)
 	bool fineOn = false;                //!< lane EMISSIVEGRID1: spec.emissiveGrid asked for the fine boxes
 	ProbeGiFine fine;                   //!< lane EMISSIVEGRID1 (src/probegifine.h)
+	//! lane GPURELIGHT1 (10-23) Probe sharing: entries kept, segments tested, of them blocked, other-room refusals
+	bool shareOn = false;
+	qint64 shareEntries = 0, shareRays = 0, shareBlocked = 0, shareOtherRoom = 0;
+	double shareNuMean = 0, shareMoved = 0, shareReach = 0, msShare = 0;
+	std::vector<int> shareStart, shareProbe;   //!< per probe its kept neighbours (the dump's gi_share.bin)
+	std::vector<float> shareG, shareNu;
 };
 
 struct ProbeGiSpec
@@ -202,6 +208,11 @@ struct ProbeGiSpec
 	//! lane EMISSIVEGRID1: the fine boxes round bright glow (WW_CELL_EMISSIVEGRID / the row); red WW_CELL_EMISSIVEGRID_RED
 	bool emissiveGrid = false;
 	QString emissiveGridRed;
+	/*! lane GPURELIGHT1 (10-23): Probe sharing (the Show row, WW_CELL_GI_SHARE; off = byte for byte as before): after
+	 *  the last gather each probe takes nu x its clear same-room neighbours' light (proberelight.h probeShareNu).
+	 *  shareRed (WW_CELL_GI_SHARE_RED): "nowall" skips the room and wall tests (the leak gate's red) */
+	bool share = false;
+	QString shareRed;
 };
 
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.

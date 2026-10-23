@@ -28,6 +28,7 @@ const LookRow kRows[] = {
 	{ "Actors outdoors", "WW/CellActorsOutdoors" },
 	{ "Weapon mod parts", "WW/CellWeaponParts" },
 	{ "Wide exposure range", "WW/CellExposureWide" },
+	{ "Probe sharing", "WW/CellGiShare" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -97,6 +98,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_EXPOSURE_WIDE" ).trimmed() );
 		return p;
 	}
+	case WwLook::ProbeShare: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_GI_SHARE" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -124,6 +129,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::ActorsOutdoors: return "WW_CELL_ACTORS_OUT";
 	case WwLook::WeaponParts: return "WW_CELL_WEAP_PARTS";
 	case WwLook::ExposureWide: return "WW_CELL_EXPOSURE_WIDE";
+	case WwLook::ProbeShare: return "WW_CELL_GI_SHARE";
 	default: return "";
 	}
 }
