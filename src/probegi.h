@@ -211,6 +211,9 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 void probeGiRoomsInto( ProbeGiResult & r, struct WwCellGi & gi );
 //! lane AODECAL1: when the relight built the copy-free grids, they take the grids' place (before probeGiRoomsInto)
 void probeGiAoFreeSwap( ProbeGiResult & r );
+/*! lane GAPPERF1: the Space stage's ROOMCLAMP1 grid offered to the relight's memo (kept grids left out); a relight
+ *  over the same soup with the same room spec (clip, cell) takes it instead of building it again. Off: WW_GI_ROOMSHARE=0. */
+void probeGiRoomsOffer( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeRooms & rooms );
 //! One census line.
 QString probeGiCensusText( const ProbeGiResult & r );
 //! The gate's dump: gi_surfels.bin, gi_probes.bin, gi_grid.bin in `dir` (layouts in probegi.cpp).
