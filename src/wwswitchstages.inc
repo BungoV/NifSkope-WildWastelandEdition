@@ -229,7 +229,7 @@
 { "WW_CELL_FARLOD_NEAR", 0, "- | hand: wwCellFarLodNear: re-read per frame" },
 { "WW_CELL_FARLOD_NEARONLY", 0, "src/cellfarlod.cpp:344 cellFarLodAppend | hand: rebuilt in place (live section)" },
 { "WW_CELL_FARLOD_OURS", 0, "src/cellfarlod.cpp:480 cellFarLodAppend | hand: rebuilt in place (live section)" },
-{ "WW_CELL_FARLOD_RED", 0, "src/cellfarlod.cpp:1383 wwCellFarLodFrame | hand: rebuilt in place (live section); ownstack/refusemissing/nobakeroots owe a reopen" },
+{ "WW_CELL_FARLOD_RED", 0, "src/cellfarlod.cpp:1383 wwCellFarLodFrame | hand: rebuilt in place (live section); ownstack/refusemissing/nobakeroots owe a reopen; perbase (FAR3) rebuilt in place" },
 { "WW_CELL_FARLOD_RINGS", 0, "- | hand: rebuilt in place (live section)" },
 { "WW_CELL_FARLOD_SKYCENSUS", 0, "src/cellfarlod.cpp:1473 wwCellFarLodSkyCensus | hand: wwCellFarLodSkyCensus: re-read per frame" },
 { "WW_CELL_FARLOD_SKYMASK", 0, "src/cellfarlod.cpp:1561 wwCellFarLodSkyCensus | hand: wwCellFarLodSkyCensus: re-read per frame" },
