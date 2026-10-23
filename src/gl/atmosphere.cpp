@@ -24,6 +24,7 @@ using namespace WwAtmoMath;	// lane SKYA: the constants and the CPU math, shared
 constexpr const char * kKey = "Settings/Render/Scene/Physical Sky";
 constexpr const char * kApKey = "Settings/Render/Scene/Aerial Perspective";
 constexpr const char * kSunKey = "Settings/Render/Scene/Sunlight From Sky";	// lane SKYA (ATMOSUN1)
+constexpr const char * kNightKey = "Settings/Render/Scene/Moon Phase and Stars";	// lane SKYA (NIGHT1)
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 constexpr int kTransW = 256, kTransH = 64;
 /* lane SKYA (ATMO2): the aerial-perspective volume's reach. A Fallout 4 worldspace is ~4 km across (64 cells of
@@ -44,6 +45,10 @@ struct AtState
 	bool apPinned = false;
 	int sun = 0;	// lane SKYA (ATMOSUN1): the Sunlight From Sky row, 0 Off / 1 Tint / 2 Full (pin WW_ATMO_SUN)
 	bool sunPinned = false;
+	int night = 0;	// lane SKYA (NIGHT1): the Moon Phase and Stars row, 0 Off / 1 On (pin WW_ATMO_NIGHT)
+	bool nightPinned = false;
+	float extHaze[4] = { -1.0f, -1.0f, -1.0f, -1.0f };	// NIGHT1: the haze (+ red) the extinction table was built for
+	float ext[33][3] = {};	// T(mu) / T(1) at mu = 0, 1/32 .. 1
 };
 
 //! lane SKYA: one row's value from its pin (already read by the caller: the survey needs literal names), a harness
@@ -100,6 +105,7 @@ AtState & as()
 		}
 		// lane SKYA: the rows after ATMO2 (the same prefix re-reads them live)
 		s.sun = rowValue( wwEnvStr( "WW_ATMO_SUN" ), kSunKey, { "off", "tint", "full" }, s.sunPinned );
+		s.night = rowValue( wwEnvStr( "WW_ATMO_NIGHT" ), kNightKey, { "off", "on" }, s.nightPinned );
 	}
 	return s;
 }
@@ -114,6 +120,13 @@ bool red( const char * word )
 bool apRed( const char * word )
 {
 	return wwEnvStr( "WW_ATMO_AP_RED" ).trimmed().toLower() == QLatin1StringView( word );
+}
+
+//! lane SKYA (NIGHT1): nophase (the moon's light at every phase = the full moon's), noext (the stars and the moon disc
+//! not dimmed toward the horizon)
+bool nightRed( const char * word )
+{
+	return wwEnvStr( "WW_ATMO_NIGHT_RED" ).trimmed().toLower() == QLatin1StringView( word );
 }
 
 struct Target
@@ -619,6 +632,60 @@ int wwAtmoSunKey()
 	const AtState & s = as();
 	return s.tier > 0 ? s.sun + 3 * ( wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" ) )
 		: 0;
+}
+
+int wwAtmoNight()
+{
+	return as().night;
+}
+
+void wwAtmoSetNight( int on )
+{
+	AtState & s = as();
+	if ( s.nightPinned )
+		return;
+	s.night = on ? 1 : 0;
+	QSettings().setValue( QLatin1StringView( kNightKey ), s.night );
+}
+
+bool wwAtmoNightPinned()
+{
+	return as().nightPinned;
+}
+
+bool wwAtmoNightOn()
+{
+	const AtState & s = as();
+	return s.tier > 0 && s.night > 0;
+}
+
+int wwAtmoNightKey( int phase )
+{
+	return wwAtmoNightOn() ? 1 + ( phase & 7 ) + 8 * int( nightRed( "nophase" ) ) : 0;
+}
+
+float wwAtmoMoonFactor( int phase )
+{
+	return wwAtmoNightOn() ? moonPhaseFactor( phase, nightRed( "nophase" ) ) : 1.0f;
+}
+
+void wwAtmoStarExtinction( float mu, float out[3] )
+{
+	out[0] = out[1] = out[2] = 1.0f;
+	AtState & s = as();
+	if ( !wwAtmoNightOn() )
+		return;
+	const float key[4] = { s.haze[0], s.haze[1], s.haze[2], nightRed( "noext" ) ? 1.0f : 0.0f };
+	if ( !std::equal( key, key + 4, s.extHaze ) ) {
+		std::copy( key, key + 4, s.extHaze );
+		for ( int i = 0; i <= 32; i++ )
+			starExtinction( float( i ) / 32.0f, s.haze, key[3] > 0.0f, s.ext[i] );
+	}
+	const float x = std::clamp( mu, 0.0f, 1.0f ) * 32.0f;
+	const int i = std::min( int( x ), 31 );
+	const float t = x - float( i );
+	for ( int c = 0; c < 3; c++ )
+		out[c] = s.ext[i][c] * ( 1.0f - t ) + s.ext[i + 1][c] * t;
 }
 
 bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float sun[3], float amb[3], float dalc[6][3] )

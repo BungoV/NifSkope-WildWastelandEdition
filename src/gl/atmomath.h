@@ -95,6 +95,22 @@ inline float moonPhaseFactor( int phase, bool redNoPhase )
 	return std::pow( 10.0f, -0.4f * ( 0.026f * a + 4e-9f * a * a * a * a ) );
 }
 
+/* NIGHT1: a star's or the moon disc's light through the air toward cos zenith mu, against the zenith's (the weather's
+ * star and moon colours are the zenith look): T(mu) / T(1), so the zenith keeps today's colour and the horizon fades
+ * and reddens (Bruneton & Neyret 2008 sec. 4: a light outside the air reaches the eye times T). mu held at 0 or
+ * above. Red "noext": 1 everywhere (today's flat stars), which must fail its gate. */
+inline void starExtinction( float mu, const float haze[3], bool redNoExt, float out[3] )
+{
+	out[0] = out[1] = out[2] = 1.0f;
+	if ( redNoExt )
+		return;
+	float tz[3], t[3];
+	cpuTrans( 0.0f, 1.0f, haze, false, tz );
+	cpuTrans( 0.0f, std::max( mu, 0.0f ), haze, false, t );
+	for ( int c = 0; c < 3; c++ )
+		out[c] = tz[c] > 1e-6f ? std::min( 1.0f, t[c] / tz[c] ) : 0.0f;
+}
+
 /* ATMOSUN1: the key light's colour from the transmittance toward the light (Hillaire 2020 sec. 4: the sun's
  * illuminance at a point = E_sun x T(mu)). k = the weather's Day key luminance / the 45-degree transmittance's
  * luminance, the same k the sky uses (atmosphere.cpp), so a 45-degree sun keeps the weather's Day brightness.

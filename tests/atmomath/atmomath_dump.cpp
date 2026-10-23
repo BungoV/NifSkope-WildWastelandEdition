@@ -60,6 +60,13 @@ int main()
 	// NIGHT1
 	for ( int p = 0; p < 8; p++ )
 		std::printf( "moon %d %.4f %.7g %.7g\n", p, moonPhaseAlpha( p ), moonPhaseFactor( p, false ), moonPhaseFactor( p, true ) );
+	// NIGHT1: the stars' extinction against the zenith, with and without red "noext"
+	for ( int redNoExt = 0; redNoExt < 2; redNoExt++ )
+		for ( float mu : { 1.0f, 0.5f, 0.1f, 0.03f } ) {
+			float e[3];
+			starExtinction( mu, hz[1], redNoExt != 0, e );
+			std::printf( "star %d %.4f %.7g %.7g %.7g\n", redNoExt, mu, e[0], e[1], e[2] );
+		}
 	// EXPO1
 	std::printf( "expo %.7g %.7g %.7g\n", adaptedWithSky( 0.2f, 0.6f, 1.5f, false ), adaptedWithSky( 0.2f, 0.6f, 1.5f, true ),
 		adaptedWithSky( 0.2f, 1.0f, 1.5f, false ) );

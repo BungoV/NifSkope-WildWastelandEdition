@@ -65,6 +65,19 @@ int wwAtmoSunKey();	//!< 0 when it changes nothing; else a memo key of the mode 
 //! Height Range; keyLum45 = the weather's Day (Night) key luminance. False (nothing changed) when the row is Off.
 bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float sun[3], float amb[3], float dalc[6][3] );
 
+/* lane SKYA (NIGHT1): the moon's phase in its light (Krisciunas & Schaefer 1991: a quarter moon ~0.09 of the full),
+ * the night key light and the sky's moonlight both; the stars and the moon disc dimmed and reddened toward the
+ * horizon by the air (T(mu) / T(zenith)). Row Render > Scene > Moon Phase and Stars: Off / On, ships Off, needs
+ * Physical Sky on. Pin WW_ATMO_NIGHT (0/1), red WW_ATMO_NIGHT_RED = nophase | noext. The phase is the engine's
+ * (esmweather wwMoonPhase on the game day). */
+int wwAtmoNight();
+void wwAtmoSetNight( int on );	//!< refused while WW_ATMO_NIGHT pins it
+bool wwAtmoNightPinned();
+bool wwAtmoNightOn();	//!< the row on and the Physical Sky on
+int wwAtmoNightKey( int phase );	//!< 0 when off; else a memo key of the phase and red (lookdevstage's light cache)
+float wwAtmoMoonFactor( int phase );	//!< the moon's light against the full moon's (1 when off)
+void wwAtmoStarExtinction( float mu, float out[3] );	//!< T(mu) / T(1) from the drawn sky's haze (1 when off)
+
 QString wwAtmoSummary();
 
 #endif

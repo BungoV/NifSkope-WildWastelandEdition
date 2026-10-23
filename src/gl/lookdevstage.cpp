@@ -342,7 +342,8 @@ LdLight currentLight()
 	static bool sun = false;
 	static int atmoSun = 0;	// lane SKYA (ATMOSUN1): the Sunlight From Sky row, its red and the Physical Sky tier
 	static LdLight memo;
-	const int atmoKey = wwAtmoSunKey();
+	// lane SKYA (NIGHT1): the Moon Phase and Stars row with the moon's phase (the game day moves it)
+	const int atmoKey = wwAtmoSunKey() + 3 * 16 * wwAtmoNightKey( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
 	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey ) {
 		memo = computeLight();
 		gen = s.gen;
@@ -419,6 +420,15 @@ LdLight computeLight()
 		const WwFog fog = currentFog();
 		const float fogIn[4] = { fog.effOff ? 0.0f : fog.fogFar, fog.effOff ? 0.0f : fog.maxv, fog.fMid, fog.fRange };
 		wwAtmoKeyLight( len > 0.0f ? L.sunDir[2] / len : 1.0f, fogIn, keyLum, L.sun, L.amb, L.dalc );
+	}
+	if ( wwAtmoNightOn() ) {
+		// lane SKYA (NIGHT1): by night the engine's key light is the moon's: its phase dims it
+		const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
+		if ( s.hour < raw.A || s.hour > raw.D ) {
+			const float k = wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+			for ( int c = 0; c < 3; c++ )
+				L.sun[c] *= k;
+		}
 	}
 	return L;
 }
@@ -1444,7 +1454,13 @@ void drawMoon( Scene * scene, const SkyFrame & f, float mul, QStringList & drew 
 		const bool shOk = drawBill( scene, f.c.sunPos, half, sh, shadowTint, full ? shadowA : mul, false );
 		const QString tex = QString( "textures/sky/%1_%2.dds" ).arg( QString::fromLatin1( m.name ),
 			QString::fromLatin1( wwMoonPhaseSuffix( phase ) ) );
-		if ( drawBill( scene, f.c.sunPos, half, tex, f.moonGlare, full ? alpha : mul, false ) )
+		// lane SKYA (NIGHT1): the disc through the air toward it (Moon Phase and Stars on; else 1, today's disc)
+		float glare[3], ext[3];
+		const float ml = std::sqrt( f.c.sunPos[0] * f.c.sunPos[0] + f.c.sunPos[1] * f.c.sunPos[1] + f.c.sunPos[2] * f.c.sunPos[2] );
+		wwAtmoStarExtinction( ml > 0.0f ? f.c.sunPos[2] / ml : 1.0f, ext );
+		for ( int c = 0; c < 3; c++ )
+			glare[c] = f.moonGlare[c] * ext[c];
+		if ( drawBill( scene, f.c.sunPos, half, tex, glare, full ? alpha : mul, false ) )
 			drew << QString( "moon:%1(alpha=%2,shadow=%3%4)" ).arg( tex, f3( full ? alpha : mul ), f3( full ? shadowA : mul ),
 				shOk ? QString() : QStringLiteral( ",no moonshadow.dds" ) );
 		else
@@ -1630,7 +1646,21 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 	prog->uni1f( "skyScale", f.skyScale );
 	prog->uni1f( "sceneExposure", skyExposure() );
 	prog->uni1i( "viewTransform", skyViewTransform() );
-	const float * attrs[8] = { pos.constData(), m->col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
+	// lane SKYA (NIGHT1): each star through the air toward it (Moon Phase and Stars on: the horizon fades and reddens)
+	QVector<float> colExt;
+	if ( wwAtmoNightOn() && m->nv > 0 && m->col.size() == int( m->nv ) * 4 && pos.size() == int( m->nv ) * 3 ) {
+		colExt = m->col;
+		for ( int v = 0; v < int( m->nv ); v++ ) {
+			const float * p = pos.constData() + v * 3;
+			const float l = std::sqrt( p[0] * p[0] + p[1] * p[1] + p[2] * p[2] );
+			float ext[3];
+			wwAtmoStarExtinction( l > 0.0f ? p[2] / l : 1.0f, ext );
+			for ( int c = 0; c < 3; c++ )
+				colExt[v * 4 + c] *= ext[c];
+		}
+	}
+	const float * attrs[8] = { pos.constData(), colExt.isEmpty() ? m->col.constData() : colExt.constData(), nullptr,
+		nullptr, nullptr, nullptr, nullptr,
 		m->uv.constData() };
 	r->drawShape( m->nv, 0x20000043ULL, unsigned( m->idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, m->idx.constData() );
 	r->stopProgram();
@@ -1673,7 +1703,7 @@ bool drawAtmo( Scene * scene, QStringList & drew )
 	};
 	const float scale = wwLookdevSunlightScale();
 	in.sunLum = keyLum( WwTodDay ) * scale;
-	in.moonLum = keyLum( WwTodNight ) * scale;
+	in.moonLum = keyLum( WwTodNight ) * scale * wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
 	const WwFog fog = currentFog();
 	if ( !fog.effOff ) {
 		in.fogFar = fog.fogFar;

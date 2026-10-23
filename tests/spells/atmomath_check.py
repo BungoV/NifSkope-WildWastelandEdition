@@ -1,7 +1,7 @@
 """Lane SKYA: the physical sky's CPU math (src/gl/atmomath.h) against the numpy model and published numbers.
 Runs no NifSkope. Builds tests/atmomath/atmomath_dump.cpp with the MSYS2 UCRT64 g++ into a scratch folder.
 
-    python -I tests/spells/atmomath_check.py <scratch dir> [--red flat|irrflat|phase|skyzero]
+    python -I tests/spells/atmomath_check.py <scratch dir> [--red flat|irrflat|phase|noext|skyzero]
 
 Gates:
   transmittance   cpuTrans (the key light's T, ATMOSUN1) vs atmo_model.transmittance (< 0.005 absolute)
@@ -14,6 +14,8 @@ Gates:
   ambient         45 deg: the weather's ambient exactly; 3 deg: same luminance, warmer
   moon phase      full = 1; quarter (90 deg) 0.07..0.12 of full (Krisciunas & Schaefer 1991 eq. 20; the quarter moon
                   about 1/10 of the full one, Allen's Astrophysical Quantities); new < 0.01; red "nophase" all 1
+  stars           T(mu) / T(zenith) (starExtinction): 1 at the zenith; matches the model's T ratio (< 0.005) at
+                  mu 0.5, 0.1, 0.03; at mu 0.03 the light is under half and redder (R/B up) -- Bruneton & Neyret 2008
   exposure        the frame mean with the sky = cover x scene + (1 - cover) x sky; full cover = the scene alone
 The sun/ambient gates read skyKeyLight, the function the build ships (atmosphere.cpp wwAtmoKeyLight).
 Each red must make one gate fail: flat (WW_ATMO_SUN_RED=flat: T held at 45 deg, a low sun no warmer), phase (the
@@ -121,6 +123,15 @@ def main():
             worst = max(worst, abs(got / want - 1))
     gate('sky irradiance', worst < 0.15, 'colour change vs 45 deg against the model, worst %.3f (< 0.15) at 20/10/3 deg'
          % worst)
+    rx = '1' if red == 'noext' else '0'
+    st = {float(s[1]): np.array([float(x) for x in s[2:5]]) for s in D['star'] if s[0] == rx}
+    tz = A.transmittance(P, np.array([A.RB]), np.array([1.0]), 4000)[0]
+    err = max(np.abs(st[mu] - A.transmittance(P, np.array([A.RB]), np.array([mu]), 4000)[0] / tz).max()
+              for mu in (0.5, 0.1, 0.03))
+    lo = st[0.03]
+    gate('stars', np.abs(st[1.0] - 1).max() < 1e-6 and err < 0.005 and lum(lo) < 0.5 and lo[0] / lo[2] > 1.1,
+         'zenith %s, worst vs the model %.5f (< 0.005), mu 0.03: luminance %.3f (< 0.5), R/B %.3f (> 1.1)'
+         % (np.round(st[1.0], 6), err, lum(lo), lo[0] / lo[2]))
     e = [float(x) for x in D['expo'][0]]
     want = 0.6 * 0.2 + 0.4 * 1.5
     got = e[1] if red == 'skyzero' else e[0]

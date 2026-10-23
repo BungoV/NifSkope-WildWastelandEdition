@@ -2,6 +2,20 @@
 
 ## Lane SKYA (2026-10-23, branch skya-20261023): the physical sky reaches the world, every part off by default
 
+### NIGHT1: the moon's phase and the stars through the air
+- **What:** with the Physical Sky on, the moon's light follows its phase (the engine's own phase on the game day,
+  esmweather `wwMoonPhase`): the night key light and the sky's moonlight are scaled by the phase's brightness against
+  the full moon (Krisciunas & Schaefer 1991 eq. 20: quarter 0.091, new 0.0003). The stars and the moon disc are
+  dimmed and reddened toward the horizon by the air: T(mu) / T(zenith) (Bruneton & Neyret 2008 sec. 4), so the
+  zenith keeps today's colours. Math in `src/gl/atmomath.h` (`moonPhaseFactor`, `starExtinction`).
+- **Row:** Render > Scene > Moon Phase and Stars (Off / On), key `Settings/Render/Scene/Moon Phase and Stars`, live;
+  needs Physical Sky on. `WW_ATMO_NIGHT=0|1` pins it; reds `WW_ATMO_NIGHT_RED=nophase` (every phase as bright as the
+  full moon) and `noext` (no horizon dimming). Off = today's night exactly.
+- **Cost:** no GPU pass, no memory beyond a 33-entry table; CPU: one extinction lookup per star vertex a frame (the
+  stars mesh), the table rebuilt when the haze changes (well under 1 ms).
+- **Checks:** `tests/spells/atmomath_check.py` gates "moon phase" (red phase fails) and "stars" (vs the model's T
+  ratio, worst 0.00004; red noext fails).
+
 ### ATMOSUN1: sunlight and ambient from the sky's air
 - **What:** the key light (the sun, or the moon by night) and the ambient (NAM0 Ambient and every DALC side) take
   their colour from the physical sky's air: the key through the transmittance toward the light (Hillaire 2020 sec. 4),

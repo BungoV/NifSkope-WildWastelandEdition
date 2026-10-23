@@ -178,6 +178,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	sunlightFromSkyBox->setCurrentIndex( std::clamp( wwAtmoSun(), 0, 2 ) );
 	wwMatchFieldStyle( sunlightFromSkyBox );
 	row( tr( "Sunlight From Sky" ), sunlightFromSkyBox, true );
+	// lane SKYA (NIGHT1): the moon's phase in its light, stars and moon dimmed by the air (needs Physical Sky), ships Off
+	moonPhaseStarsBox = new QComboBox( tree );
+	moonPhaseStarsBox->setObjectName( QStringLiteral( "moonPhaseStars" ) );
+	moonPhaseStarsBox->addItems( { tr( "Off" ), tr( "On" ) } );
+	moonPhaseStarsBox->setCurrentIndex( std::clamp( wwAtmoNight(), 0, 1 ) );
+	wwMatchFieldStyle( moonPhaseStarsBox );
+	row( tr( "Moon Phase and Stars" ), moonPhaseStarsBox, true );
 	liveCheck( cloudsBox, "lookdevClouds", tr( "Clouds" ), wwLookdevClouds() );
 	liveCheck( sunBox, "lookdevSun", tr( "Sun" ), wwLookdevSun() );
 	// lane TERRSHADOW1: Engine (the sky clock's arc) or Real (Boston's solar path); ships Engine
@@ -354,6 +361,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveTier( physicalSkyBox, &wwAtmoSetTier );	// lane ATMO1
 	liveTier( aerialPerspectiveBox, &wwAtmoSetAp );	// lane SKYA
 	liveTier( sunlightFromSkyBox, &wwAtmoSetSun );
+	liveTier( moonPhaseStarsBox, &wwAtmoSetNight );
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
 	liveTier( terrainShadowsBox, &wwShadowSetTerrainTier );
@@ -423,6 +431,7 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( fogBox ), static_cast<QWidget *>( shadowsBox ),
 			static_cast<QWidget *>( sunPathBox ), static_cast<QWidget *>( physicalSkyBox ),
 			static_cast<QWidget *>( aerialPerspectiveBox ), static_cast<QWidget *>( sunlightFromSkyBox ),
+			static_cast<QWidget *>( moonPhaseStarsBox ),
 			static_cast<QWidget *>( cascadeQualityBox ),
 			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ),
 			static_cast<QWidget *>( shadowParBox ), static_cast<QWidget *>( shadowDistanceBox ) } )
