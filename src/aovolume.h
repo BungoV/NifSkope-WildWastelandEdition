@@ -77,7 +77,7 @@ struct Volume
 	std::vector<std::uint8_t> payload;	//!< z, y, x, 9 bytes (u8 share, 8 x s8)
 	std::vector<float> k;		//!< the payload dequantised: (z dy + y) dx + x, 9 floats
 	// the bake's census (not in the file)
-	int tris = 0, insideVoxels = 0, gpuRays = 0;	// gpuRays: lane RTGI1, 1 = its rays went as whole GPU batches
+	int tris = 0, insideVoxels = 0;
 	double msBake = 0.0;
 
 	float cell( int a ) const { return ( hi[a] - lo[a] ) / float( dims[a] ); }

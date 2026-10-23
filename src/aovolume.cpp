@@ -40,7 +40,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
-#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <thread>
@@ -223,70 +222,29 @@ bool bake( const std::vector<float> & tris, Volume * out, QString * why, int ray
 	const double scale = ( 4.0 * kPi / double( rays ) ) / ( 2.0 * std::sqrt( kPi ) );
 	std::vector<double> k( nv * 9, 0.0 );
 	std::vector<char> valid( nv, 1 );
-	auto centre = [&]( size_t i, double C[3] ) {
+	parallelFor( nv, [&]( size_t i ) {
 		const int x = int( i % size_t( dx ) ), y = int( ( i / size_t( dx ) ) % size_t( dy ) ), z = int( i / ( size_t( dx ) * size_t( dy ) ) );
-		C[0] = lo[0] + ( x + 0.5 ) * cell[0];
-		C[1] = lo[1] + ( y + 0.5 ) * cell[1];
-		C[2] = lo[2] + ( z + 0.5 ) * cell[2];
-	};
-	// lane RTGI1: the voxels' rays in whole GPU batches (bakert::Scene::cast answers what bvh.ray answers), opt-in
-	// like every bake ray (pickPath); about 1 M rays a batch
-	std::unique_ptr<bakert::Scene> rt;
-	if ( bakert::pickPath() != bakert::Path::Cpu ) {
-		rt = bakert::Scene::make( bvh );
-		if ( !rt->whole() )
-			rt.reset();
-	}
-	V.gpuRays = rt ? 1 : 0;
-	const size_t chunk = rt ? std::max<size_t>( 1, ( size_t( 1 ) << 20 ) / size_t( std::max( rays, 1 ) ) ) : nv;
-	std::vector<bakert::XRay> xr;
-	std::vector<bakert::XHit> xh;
-	for ( size_t c0 = 0; c0 < nv; c0 += chunk ) {
-		const size_t c1 = std::min( nv, c0 + chunk );
-		if ( rt ) {
-			xr.resize( ( c1 - c0 ) * size_t( rays ) );
-			xh.resize( xr.size() );
-			for ( size_t i = c0; i < c1; i++ ) {
-				double C[3];
-				centre( i, C );
-				for ( int r = 0; r < rays; r++ ) {
-					const double * d = &D[size_t( r ) * 3];
-					xr[( i - c0 ) * size_t( rays ) + size_t( r )] = { { C[0], C[1], C[2] }, 1e30, { d[0], d[1], d[2] }, 0.0 };
-				}
-			}
-			rt->cast( xr.data(), xr.size(), xh.data() );
-		}
-		parallelFor( c1 - c0, [&]( size_t ic ) {
-			const size_t i = c0 + ic;
-			double C[3];
-			centre( i, C );
-			double acc[9] = {};
-			int hits = 0, back = 0;
-			for ( int r = 0; r < rays; r++ ) {
-				const double * d = &D[size_t( r ) * 3];
-				double th;
-				int tri = -1;
-				if ( rt )
-					tri = xh[ic * size_t( rays ) + size_t( r )].tri;
-				else if ( !bvh.ray( C, d, 1e30, &th, &tri ) )
-					continue;
-				if ( tri < 0 )
-					continue;
-				hits++;
-				const double * n = &tn[size_t( tri ) * 3];
-				if ( n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0.0 )
-					back++;
-				const double * yv = &Y[size_t( r ) * 9];
-				for ( int j = 0; j < 9; j++ )
-					acc[j] += yv[j];
-			}
+		const double C[3] = { lo[0] + ( x + 0.5 ) * cell[0], lo[1] + ( y + 0.5 ) * cell[1], lo[2] + ( z + 0.5 ) * cell[2] };
+		double acc[9] = {};
+		int hits = 0, back = 0;
+		for ( int r = 0; r < rays; r++ ) {
+			const double * d = &D[size_t( r ) * 3];
+			double th;
+			int tri = -1;
+			if ( !bvh.ray( C, d, 1e30, &th, &tri ) )
+				continue;
+			hits++;
+			const double * n = &tn[size_t( tri ) * 3];
+			if ( n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0.0 )
+				back++;
+			const double * yv = &Y[size_t( r ) * 9];
 			for ( int j = 0; j < 9; j++ )
-				k[i * 9 + size_t( j )] = acc[j] * scale;
-			valid[i] = !( hits > 0 && 2 * back > hits );
-		} );
-	}
-	if ( rt )	// lane RTGI1: the GPU census (traced, re-cast, check) on stderr for the CLI and gate logs
-		std::fprintf( stderr, "%s\n", bakert::census( "aovol bake", *rt ).c_str() );
+				acc[j] += yv[j];
+		}
+		for ( int j = 0; j < 9; j++ )
+			k[i * 9 + size_t( j )] = acc[j] * scale;
+		valid[i] = !( hits > 0 && 2 * back > hits );
+	} );
 	for ( char c : valid )
 		V.insideVoxels += c ? 0 : 1;
 	if ( size_t( V.insideVoxels ) >= nv ) {

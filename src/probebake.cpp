@@ -1464,6 +1464,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	 * rounds over the probes still taking batches: round b traces batch b of each, re-tests every hit in double and
 	 * runs SMOOTHN1's noise test on the same light-free estimate pass 1 reads, so the batch counts come out as pass 1's
 	 * own (checked below). Passes 1 and 2 then read the cached answers. Secondary legs stay on the CPU. */
+	QElapsedTimer tmGpu;	// lane RTGI1: the GPU batches' share of the rays time
+	tmGpu.start();
 	std::vector<int> rtMult;
 	std::unique_ptr<bakert::Scene> rtScene;
 	if ( bakert::pickPath() != bakert::Path::Cpu ) {
@@ -1549,7 +1551,11 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			active.swap( still );
 		}
 	}
+	if ( !rcache.empty() )
+		R.msGpuRays = double( tmGpu.nsecsElapsed() ) / 1e6;
+	tmGpu.restart();
 	runAll( surfelChunk );
+	R.msSurfelPass = double( tmGpu.nsecsElapsed() ) / 1e6;
 	if ( !rtMult.empty() ) {
 		int off = 0;
 		for ( size_t p = 0; p < probes.size(); p++ )
@@ -2295,7 +2301,11 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 	for ( int h : r.backHist )
 		t << " " << h;
 	t << "\n";
-	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite ) << "\n";
+	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite );
+	if ( r.msGpuRays >= 0 )
+		t << " (of the rays, the GPU batches " << qRound( r.msGpuRays ) << ")";
+	t << " (surfel pass " << qRound( r.msSurfelPass ) << ")";
+	t << "\n";
 	t << "bake rays: " << ( r.rtNote.isEmpty() ? QStringLiteral( "cpu" ) : r.rtNote ) << "\n";   // lane RTBAKE1
 	// lane SMOOTHN1
 	t << "bake smooth normals: soup triangles with vertex normals " << r.smoothTris << ", surfel hits given one "
