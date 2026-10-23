@@ -982,7 +982,7 @@ static int cellProbeKindOf( const ProbePoint & q )
  *              Z (azimuth from +Y, clockwise), degrees -- ASSUMED, the PRTP4 capture is the refuter */
 static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, const CellSceneSpec & spec,
 	const QVector<EsmRefr> & lightRefs, const QHash<quint32, EsmRefr> & primRefs, const Vector3 & center,
-	WwCellLighting * chunkOut = nullptr )
+	WwCellLighting * chunkOut = nullptr, const QHash<quint32, bool> * startOffOf = nullptr )
 {
 	WwCellLighting L;
 	L.interior = spec.interior;
@@ -1054,13 +1054,17 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			lightBoost.insert( id, qMakePair( f.value( 1 ).toFloat(), f.size() >= 3 ? f.value( 2 ).toFloat() : 1.0f ) );
 	}
 	int lightBoostHit = 0;
+	int parentMoved = 0;
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
 			continue;
 		const bool pinOff = lightOffPin == "all" || lightOffRefs.contains( r.formID );
 		lightOffHit += pinOff ? 1 : 0;
-		const bool startOff = r.initiallyDisabled || ( b.flags & 0x20 ) || pinOff;
+		// lane GAPFIX1: a placed light starts in its enable parent's state, as every other ref does (MISS1)
+		const bool refOff = startOffOf ? startOffOf->value( r.formID, r.initiallyDisabled ) : r.initiallyDisabled;
+		parentMoved += refOff != r.initiallyDisabled ? 1 : 0;
+		const bool startOff = refOff || ( b.flags & 0x20 ) || pinOff;
 		if ( startOff ) {
 			off++;
 			if ( !giKeepOff || ( b.flags & 0x100000 ) )
@@ -1396,6 +1400,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		+ QStringLiteral( " norim=%1 ignorerough=%2" )	// lane RIM1: the lights whose shader drops the back-light
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.noRim; } ) )
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )
+		+ QStringLiteral( " parentstate=%1" ).arg( parentMoved )	// lane GAPFIX1: lights an enable parent turned on/off
 		+ QStringLiteral( " ambientonly=%1" ).arg( ambientOnly )	// lane AMBO1: skipped, no direct light in game
 		+ QStringLiteral( " ambientvolumes=%1" ).arg( L.ambientLights.size() )	// lane AMBO2: they scale the ambient
 		+ QStringLiteral( " shapes=hemisphere %1 box %2 (box link unresolved %3) ambientboxes=%4" ).arg( hemi ).arg( box )
@@ -1969,6 +1974,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * list is what the cell CONTAINS, as the ref table is. WW_CELL_LIGHTS dumps it
 	 * and the gate compares it with an independent walk of the plugin. */
 	QVector<EsmRefr> lightRefs;
+	QHash<quint32, bool> lightStartOff;	// lane GAPFIX1: each placed light's start state, its enable parent's included
 	std::vector<CellDecalRef> decalRefs;   // lane PLACED1: placed decals, projected after the weld
 	CellActors actors( world, dataRoot );  // lane PLACED1: placed actors, built at rest
 	int actorPlacements = 0;
@@ -2026,8 +2032,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			boothSeen.insert( r.formID );
 		}
 		refsRead++;
-		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 )
+		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 ) {
 			lightRefs.append( r );
+			lightStartOff.insert( r.formID, refsRed == "lightparent" ? r.initiallyDisabled : startsDisabled( r ) );	// red: the old rule
+		}
 		if ( !r.deleted && r.hasPrim )
 			primRefs.insert( r.formID, r );
 
@@ -5379,7 +5387,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	// ---- emit
 	CellSpeed::mark( "ground, water, lights, probes" );
 	if ( chunk ) {	// lane CELLSTREAM1: a streamed cell stops here; src/cellstream.cpp writes it in slices
-		cellPublishLighting( nullptr, world, spec, lightRefs, primRefs, origin, &chunk->lights );
+		cellPublishLighting( nullptr, world, spec, lightRefs, primRefs, origin, &chunk->lights, &lightStartOff );
 		chunk->buckets = std::make_shared<CellChunkBuckets>();
 		chunk->buckets->keys = buckets.keys();
 		std::sort( chunk->buckets->keys.begin(), chunk->buckets->keys.end() );
@@ -5657,7 +5665,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	}
 
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
-	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin );
+	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin, nullptr, &lightStartOff );
 	wwCellFxLitPick( nif );   // lane FXLIT1: each lit effect model's four placed lights
 	if ( streamInit ) {	// lane CELLSTREAM1: the cells themselves come from the streamer, round the camera
 		seed.origin = origin;
