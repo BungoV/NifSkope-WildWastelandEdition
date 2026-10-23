@@ -936,6 +936,7 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	emitters.clear();
 	gravities.clear();
 	drags.clear();
+	bombs.clear();
 	inherits.clear();
 	hasColorMod = false;
 	hasColorGradient = false;
@@ -1147,6 +1148,9 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			g.axis.normalize();
 			g.strength = nif->get<float>( iMod, "Strength" );
 			g.spherical = nif->get<int>( iMod, "Force Type" ) == 1;		// FORCE_SPHERICAL
+			g.decay = nif->get<float>( iMod, "Decay" );
+			g.turbulence = nif->get<float>( iMod, "Turbulence" );
+			g.turbulenceScale = nif->get<float>( iMod, "Turbulence Scale" );
 			QModelIndex iGObj = nif->getBlockIndex( nif->getLink( iMod, "Gravity Object" ) );
 			if ( iGObj.isValid() ) {
 				if ( Node * n = target->scene->getNode( nif, iGObj ) ) {
@@ -1163,12 +1167,34 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			d.percentage = nif->get<float>( iMod, "Percentage" );
 			d.axis = nif->get<Vector3>( iMod, "Drag Axis" );
 			d.axis.normalize();
+			d.range = nif->get<float>( iMod, "Range" );
+			d.falloff = nif->get<float>( iMod, "Range Falloff" );
 			QModelIndex iDObj = nif->getBlockIndex( nif->getLink( iMod, "Drag Object" ) );
 			if ( iDObj.isValid() ) {
-				if ( Node * n = target->scene->getNode( nif, iDObj ) )
+				if ( Node * n = target->scene->getNode( nif, iDObj ) ) {
 					d.axis = n->worldTrans().rotation * d.axis;
+					d.origin = n->worldTrans().translation;
+					d.hasOrigin = true;
+				}
 			}
 			drags.append( d );
+		} else if ( mtype == QLatin1String( "NiPSysBombModifier" ) ) {
+			BombMod b;
+			b.name = modActive.last().name;
+			b.axis = nif->get<Vector3>( iMod, "Bomb Axis" );
+			b.decay = nif->get<float>( iMod, "Decay" );
+			b.deltaV = nif->get<float>( iMod, "Delta V" );
+			b.decayType = nif->get<int>( iMod, "Decay Type" );
+			b.symmetry = nif->get<int>( iMod, "Symmetry Type" );
+			QModelIndex iBObj = nif->getBlockIndex( nif->getLink( iMod, "Bomb Object" ) );
+			if ( iBObj.isValid() ) {
+				if ( Node * n = target->scene->getNode( nif, iBObj ) ) {
+					b.axis = n->worldTrans().rotation * b.axis;
+					b.origin = n->worldTrans().translation;
+					b.hasOrigin = true;
+				}
+			}
+			bombs.append( b );
 		} else if ( mtype == QLatin1String( "BSPSysSimpleColorModifier" ) ) {
 			hasColorMod = true;
 			colorName = modActive.last().name;
@@ -1714,9 +1740,34 @@ void PSysSimController::updateTime( float time )
 	 */
 	Vector3 gPlanar;
 	QVarLengthArray<QPair<Vector3, float>, 4> gSpherical;	// (origin, strength), psys-local
+	/* lane FXPARITY2: under the game rule each gravity is evaluated per particle (fxparityrules.h gravityDelta:
+	 * strength x 1.6, spherical toward the centre, decay, turbulence); the sums below are then left empty */
+	struct GameGravity { Vector3 centre, axis; float strength, decay, turb; bool spherical; };
+	QVarLengthArray<GameGravity, 4> gGame;
+	struct GameBomb { Vector3 origin, axis; float decay, deltaV; int decayType, symmetry; };
+	QVarLengthArray<GameBomb, 2> bGame;
+	if ( fxRules & WwFxBomb ) {
+		for ( const BombMod & b : bombs ) {
+			if ( !b.hasOrigin || !modIsActive( b.name ) )
+				continue;	// the game: no bomb object, no force
+			Vector3 ax = psysFromWorld * b.axis;
+			if ( ax.length() > 0.0f )
+				ax.normalize();
+			bGame.append( { psysFromWorld * ( ( b.origin - pw.translation ) / psysScale ), ax, b.decay, b.deltaV,
+				b.decayType, b.symmetry } );
+		}
+	}
 	for ( const GravityMod & g : gravities ) {
 		if ( g.strength == 0.0f || !modIsActive( g.name ) )
 			continue;
+		if ( fxRules & WwFxGravity ) {
+			Vector3 ax = psysFromWorld * g.axis;
+			if ( ax.length() > 0.0f )
+				ax.normalize();
+			gGame.append( { g.hasOrigin ? psysFromWorld * ( ( g.origin - pw.translation ) / psysScale ) : Vector3(), ax,
+				g.strength, g.decay, g.turbulence * g.turbulenceScale * 500.0f, g.spherical } );
+			continue;
+		}
 		if ( g.spherical && g.hasOrigin ) {
 			gSpherical.append( { psysFromWorld * ( ( g.origin - pw.translation ) / psysScale ),
 								 g.strength } );
@@ -1727,7 +1778,7 @@ void PSysSimController::updateTime( float time )
 			gPlanar += ( psysFromWorld * g.axis ) * g.strength;
 		}
 	}
-	const bool gravityOn = gPlanar.length() > 0.0f || !gSpherical.isEmpty();
+	const bool gravityOn = gPlanar.length() > 0.0f || !gSpherical.isEmpty() || !gGame.isEmpty() || !bGame.isEmpty();
 
 	/* Drag, per axis.
 	 *
@@ -1761,6 +1812,9 @@ void PSysSimController::updateTime( float time )
 	}
 
 	QVarLengthArray<QPair<Vector3, float>, 6> dragAxes;		// (axis, 1 - exp(...)), psys-local
+	// lane FXPARITY2: a drag with a finite range is evaluated per particle (its share depends on the distance)
+	struct RangedDrag { Vector3 axis, centre; float percentage, range, falloff; };
+	QVarLengthArray<RangedDrag, 2> dragRanged;
 	for ( const DragMod & d : drags ) {
 		if ( d.percentage <= 0.0f || !modIsActive( d.name ) )
 			continue;
@@ -1768,6 +1822,11 @@ void PSysSimController::updateTime( float time )
 		if ( ax.length() <= 0.0f )
 			continue;
 		ax.normalize();
+		if ( ( fxRules & WwFxDragRange ) && ( fxRules & WwFxDrag ) && d.hasOrigin && d.range < 1.0e30f ) {
+			dragRanged.append( { ax, psysFromWorld * ( ( d.origin - pw.translation ) / psysScale ), d.percentage, d.range,
+				d.falloff } );
+			continue;
+		}
 		// lane FXPARITY1: the game's drag is linear in the step and capped at 1 (fxparityrules.h)
 		dragAxes.append( { ax, ( fxRules & WwFxDrag ) ? FxRules::dragShare( d.percentage, dt )
 			: 1.0f - std::exp( -d.percentage * 30.0f * dt ) } );
@@ -1805,9 +1864,27 @@ void PSysSimController::updateTime( float time )
 				if ( len > 1.0e-4f )
 					p.vel += d * ( s.second * dt / len );
 			}
+			for ( const GameGravity & g : gGame ) {	// lane FXPARITY2
+				const float turb[3] = { g.turb != 0.0f ? ( random( 2.0f ) - 1.0f ) * g.turb : 0.0f,
+					g.turb != 0.0f ? ( random( 2.0f ) - 1.0f ) * g.turb : 0.0f, g.turb != 0.0f ? ( random( 2.0f ) - 1.0f ) * g.turb : 0.0f };
+				float o[3];
+				FxRules::gravityDelta( &p.pos[0], &g.centre[0], &g.axis[0], g.strength, g.decay, g.spherical, turb, dt, o );
+				p.vel += Vector3( o[0], o[1], o[2] );
+			}
+			for ( const GameBomb & b : bGame ) {
+				const Vector3 r = p.pos - b.origin;
+				float o[3];
+				FxRules::bombDelta( &r[0], &b.axis[0], b.decay, b.deltaV, b.decayType, b.symmetry, dt, o );
+				p.vel += Vector3( o[0], o[1], o[2] );
+			}
 		}
 		for ( const auto & d : dragAxes )
 			p.vel -= d.first * ( Vector3::dotproduct( p.vel, d.first ) * d.second );
+		for ( const RangedDrag & d : dragRanged ) {	// lane FXPARITY2
+			const float k = FxRules::dragShare( d.percentage * FxRules::dragRangeTerm( ( p.pos - d.centre ).length(), d.range,
+				d.falloff ), dt );
+			p.vel -= d.axis * ( Vector3::dotproduct( p.vel, d.axis ) * k );
+		}
 		if ( subtexOn && ( fxRules & WwFxSubTex ) ) {
 			// lane FXPARITY1: one frame per step of the life, Frame Count steps in all (fxparityrules.h)
 			int f = int( p.frame );
