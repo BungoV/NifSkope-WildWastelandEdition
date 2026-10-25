@@ -115,15 +115,17 @@ vec3 cellFxLight( int i, vec3 P )
 	float a = 1.0 - q * q;
 	if ( ( fxLitMode & 4 ) == 0 )
 		a = pow( a, 2.2 );
-	vec3 g = vec3( 1.0 );	// lane LIGHTS5 (GOBO-FX): the spot's pattern, as on surfaces
+	vec3 g = vec3( 1.0 );	// lane LIGHTS5 (GOBO-FX): the light's pattern, as on surfaces (GOBO2: every shape)
+	vec3 gAx = vec3( 0.0 );
 	if ( t1.w > -1.5 ) {	// a spot: the game's cone, its cosine + 0.001
 		vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
 		float c = clamp( dot( -Lv / max( d, 0.001 ), t2.xyz ), 0.0, 1.0 );
 		float base = clamp( 1.0 - ( 1.0 - c ) / max( 1.0 - ( t1.w + 0.001 ), 1e-4 ), 0.0, 1.0 );
 		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
-		if ( a > 0.0 )
-			g = cellGobo( i, -Lv, t2.xyz );
+		gAx = t2.xyz;
 	}
+	if ( a > 0.0 )
+		g = cellGobo( i, -Lv, gAx, t1.w > -1.5 );
 	return t1.rgb * g * a;
 }
 

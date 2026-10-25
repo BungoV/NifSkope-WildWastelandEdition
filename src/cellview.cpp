@@ -1195,6 +1195,17 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			spot++;
 		} else {
 			omni++;
+			if ( !b.gobo.isEmpty() ) {	// lane GOBO2: an omni/box pattern's frame, the ref's local x, y, z
+				l.gobo = b.gobo;
+				Matrix rm;
+				rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+				const Vector3 x = rm * Vector3( 1, 0, 0 ), y = rm * Vector3( 0, 1, 0 ), z = rm * Vector3( 0, 0, 1 );
+				for ( int k = 0; k < 3; k++ ) {
+					l.goboX[k] = x[k];
+					l.goboY[k] = y[k];
+					l.goboZ[k] = z[k];
+				}
+			}
 		}
 		/* lane HEMI1: the shape (celllights.h). A hemisphere is clipped to its +X half space (dir above); a
 		 * light linked by LightBoxLink to a primitive ref to that ref's box: rotation Rz(-z) Rx(-x) Ry(-y) of

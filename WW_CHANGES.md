@@ -1,5 +1,14 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GOBO2 (2026-10-26, branch gobo2-20261026): light patterns on omni and box lights
+
+- **Light patterns (Show menu, still off; off = drawn exactly as before)** now also draw on omni, hemisphere and box
+  lights (in the masters: 5869 omni and 177 box lights name a pattern), on surfaces, effects and particles.
+  Their pattern textures are two squares stacked (two half-sphere views). NifSkope maps them as a dual paraboloid about
+  the light's own z axis, top half = up. The game's own mapping is not known: test pin `WW_CELL_GOBO_OMNI`
+  (`off` = spots only, as LIGHTS5; 1 swaps the halves, 2 takes the light's x axis, 4 uses world axes; they add).
+  `WW_CELL_GOBO_RED=flat` covers them too. Census "cell gobo: ... omni/box N".
+
 ## Lane LIGHTS5 (2026-10-25, branch lights5-20261025): bounce emittance live, light patterns, fog strength per light
 
 - **Emittance in bounce light is live:** the bake keeps which emitter each glowing surfel belongs to, and the row

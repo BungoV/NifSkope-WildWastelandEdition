@@ -105,8 +105,9 @@ struct WwCellLight
 	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;
 	float flickerAxes[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };	//!< the ref's local x, y, z in world, x its scale
 	//! lane LIGHTS5 (GOBO1): a spot's LIGH NAM0 pattern, the ref's local y and z in world, tan(FOV / 2)
+	//! GOBO2: an omni, hemisphere or box light's pattern too, with its local x (a spot keeps goboX unread)
 	QString gobo;
-	float goboY[3] = { 0, 1, 0 }, goboZ[3] = { 0, 0, 1 };
+	float goboX[3] = { 1, 0, 0 }, goboY[3] = { 0, 1, 0 }, goboZ[3] = { 0, 0, 1 };
 	float goboTan = 0.0f;
 	//! lane LIGHTS5 (FOGSCALE1): the .recx keys of fog.scale: the LIGH (plugin file, local id, EditorID) and the placed ref
 	QString recxBasePlugin, recxBaseEdid, recxRefPlugin;
