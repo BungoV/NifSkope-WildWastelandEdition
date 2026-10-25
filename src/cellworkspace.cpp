@@ -564,6 +564,22 @@ void CellWorkspacePanel::buildUi()
 		}
 	}
 	cellShadowBudget->setEnabled( !wwCellShadowBudgetPinned() );
+	// lane LIGHTPHYS1: the light intensity curve, ships Off (curve 1)
+	cellLightCurve = showMenu->addMenu( tr( "Light intensity curve" ) );
+	cellLightCurve->setObjectName( QStringLiteral( "CellWorkspaceLightCurve" ) );
+	cellLightCurveGroup = new QActionGroup( cellLightCurve );
+	cellLightCurveGroup->setExclusive( true );
+	{
+		const double vals[] = { 1.0, 0.75, 1.25, 1.5, 2.0 };
+		for ( double v : vals ) {
+			QAction * a = cellLightCurve->addAction( v == 1.0 ? tr( "Off" ) : QString::number( v ) );
+			a->setCheckable( true );
+			a->setData( v );
+			a->setChecked( float( v ) == wwCellLightCurve() );
+			cellLightCurveGroup->addAction( a );
+		}
+	}
+	cellLightCurve->setEnabled( !wwCellLightCurvePinned() );
 	// lane GAPLOOK1: the gap sweep's look ticks, each Off by default
 	for ( int k = 0; k < int( WwLook::Count ); k++ ) {
 		const WwLook l = WwLook( k );
@@ -872,6 +888,11 @@ void CellWorkspacePanel::buildUi()
 			glView->update();
 		return true;
 	};
+	connect( cellLightCurveGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {	// lane LIGHTPHYS1
+		wwCellLightCurveSet( float( a->data().toDouble() ) );
+		if ( glView )
+			glView->update();
+	} );
 	for ( int k = 0; k < lookActions.size(); k++ )
 		connect( lookActions.at( k ), &QAction::toggled, this, [this, l = WwLook( lookActions.at( k )->data().toInt() ), liveFirst]( bool on ) {
 			wwLookSet( l, on );

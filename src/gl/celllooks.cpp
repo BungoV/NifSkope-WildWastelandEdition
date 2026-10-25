@@ -1,6 +1,7 @@
 #include "celllooks.h"
 
 #include "wwswitch.h"
+#include "gl/lightphys.h"
 
 #include <QSettings>
 
@@ -47,6 +48,9 @@ const LookRow kRows[] = {
 	{ "Probe depth visibility", "WW/CellGiDepthVis" },
 	{ "Probe light smoothing", "WW/CellGiSmooth" },
 	{ "Probes out of walls", "WW/CellProbeClear" },
+	{ "Physical light falloff", "WW/CellLightPhys" },
+	{ "Advanced light model", "WW/CellLightAdvanced" },
+	{ "Area lights", "WW/CellLightArea" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -184,6 +188,18 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_PROBE_CLEAR" ).trimmed() );
 		return p;
 	}
+	case WwLook::LightPhysFalloff: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LIGHT_PHYS" ).trimmed() );
+		return p;
+	}
+	case WwLook::LightAdvanced: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LIGHT_ADV" ).trimmed() );
+		return p;
+	}
+	case WwLook::LightArea: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LIGHT_AREA" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -230,6 +246,9 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::ProbeDepthVis: return "WW_CELL_GI_DEPTHVIS";
 	case WwLook::ProbeSmooth: return "WW_CELL_GI_SMOOTH";
 	case WwLook::ProbeClear: return "WW_CELL_PROBE_CLEAR";
+	case WwLook::LightPhysFalloff: return "WW_CELL_LIGHT_PHYS";
+	case WwLook::LightAdvanced: return "WW_CELL_LIGHT_ADV";
+	case WwLook::LightArea: return "WW_CELL_LIGHT_AREA";
 	default: return "";
 	}
 }
@@ -308,4 +327,55 @@ bool wwCellShadowBudgetRedWorst()
 {
 	WW_SWITCH_STATIC( QByteArray, r, wwEnv( "WW_CELL_SHADOWBUDGET_RED" ).trimmed() );
 	return r == "worst";
+}
+
+// ---- LIGHTPHYS1
+namespace {
+float & curveRow()
+{
+	static float v = -1.0f;
+	if ( v < 0.0f )
+		v = std::max( QSettings().value( QStringLiteral( "WW/CellLightCurve" ), 1.0 ).toFloat(), 0.0f );
+	return v;
+}
+}	// namespace
+
+bool wwCellLightCurvePinned()
+{
+	WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LIGHT_CURVE" ).trimmed() );
+	return !p.isEmpty();
+}
+
+float wwCellLightCurve()
+{
+	WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LIGHT_CURVE" ).trimmed() );
+	const float c = p.isEmpty() ? curveRow() : p.toFloat();
+	return c > 0.0f ? c : 1.0f;
+}
+
+void wwCellLightCurveSet( float curve )
+{
+	if ( wwCellLightCurvePinned() )
+		return;
+	curveRow() = curve > 0.0f ? curve : 1.0f;
+	QSettings().setValue( QStringLiteral( "WW/CellLightCurve" ), double( curveRow() ) );
+}
+
+wwlp::Params wwLightPhysParams()
+{
+	wwlp::Params p;
+	p.mode = wwLookOn( WwLook::LightAdvanced ) ? wwlp::Advanced : wwLookOn( WwLook::LightPhysFalloff ) ? wwlp::Physical : wwlp::Vanilla;
+	p.advNumerator = wwlp::vanillaFlux() * wwlp::kAdvCalibration;
+	p.curve = wwCellLightCurve();
+	p.areaWorld = wwLookOn( WwLook::LightArea ) ? wwlp::kSourceWorld : 0.0f;
+	// the reds, read at the use (each moves its own row's picture)
+	if ( wwEnvStr( "WW_CELL_LIGHT_PHYS_RED" ) == QLatin1String( "noanchor" ) )
+		p.red |= 1;
+	if ( wwEnvStr( "WW_CELL_LIGHT_ADV_RED" ) == QLatin1String( "nowindow" ) )
+		p.red |= 2;
+	if ( wwEnvStr( "WW_CELL_LIGHT_AREA_RED" ) == QLatin1String( "nowiden" ) )
+		p.red |= 4;
+	if ( wwEnvStr( "WW_CELL_LIGHT_CURVE_RED" ) == QLatin1String( "nopivot" ) )
+		p.red |= 8;
+	return p;
 }

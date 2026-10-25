@@ -343,25 +343,27 @@ vec3 specAlbedo( Surface s, vec2 dfg, vec3 ms )
 	return mix( diel, metl, s.metal ) * ms;
 }
 
-// One directional light: diffuse and specular BRDF x NoL (radiance per unit irradiance)
-void directLight( Surface s, vec3 L, vec3 V, vec3 ms, out vec3 dDiff, out vec3 dSpec )
+// One directional light: diffuse and specular BRDF x NoL (radiance per unit irradiance). Lane LIGHTPHYS1: the
+// specular lobe takes Ls and roughness rS (an area light's representative point); the diffuse keeps L.
+void directLightA( Surface s, vec3 L, vec3 Ls, float rS, vec3 V, vec3 ms, out vec3 dDiff, out vec3 dSpec )
 {
-	vec3 H = normalize( L + V );
+	vec3 H = normalize( Ls + V );
 	float NoL = clamp( dot( s.N, L ), 0.0, 1.0 );
+	float NoLs = clamp( dot( s.N, Ls ), 0.0, 1.0 );
 	float NoV = clamp( dot( s.N, V ), 1e-4, 1.0 );
 	float NoH = clamp( dot( s.N, H ), 0.0, 1.0 );
 	float VoH = clamp( dot( V, H ), 0.0, 1.0 );
 	float LoH = clamp( dot( L, H ), 0.0, 1.0 );
 
-	float alpha = s.rough * s.rough;
+	float alpha = rS * rS;
 	float a2 = alpha * alpha;
 	float d = max( NoH * NoH * ( a2 - 1.0 ) + 1.0, 1e-4 );
 	float D = a2 / ( M_PI * d * d );
-	float lambdaV = NoL * sqrt( NoV * NoV * ( 1.0 - a2 ) + a2 );
-	float lambdaL = NoV * sqrt( NoL * NoL * ( 1.0 - a2 ) + a2 );
+	float lambdaV = NoLs * sqrt( NoV * NoV * ( 1.0 - a2 ) + a2 );
+	float lambdaL = NoV * sqrt( NoLs * NoLs * ( 1.0 - a2 ) + a2 );
 	float Vis = 0.5 / max( lambdaV + lambdaL, 1e-4 );
 	vec3 F = surfaceF( s, VoH );
-	dSpec = D * Vis * F * ms * NoL;
+	dSpec = D * Vis * F * ms * NoLs;
 
 	vec3 rho = ( 1.0 - s.metal ) * s.base;
 	vec3 keep = clamp( vec3( 1.0 ) - F, 0.0, 1.0 );
@@ -384,6 +386,11 @@ void directLight( Surface s, vec3 L, vec3 V, vec3 ms, out vec3 dDiff, out vec3 d
 			fd = 1.0;
 		dDiff = keep * rho / M_PI * fd * NoL;
 	}
+}
+
+void directLight( Surface s, vec3 L, vec3 V, vec3 ms, out vec3 dDiff, out vec3 dSpec )
+{
+	directLightA( s, L, L, s.rough, V, ms, dDiff, dSpec );
 }
 
 void main()
@@ -629,7 +636,11 @@ void main()
 			if ( E.r + E.g + E.b <= 0.0 )
 				continue;
 			vec3 dD, dS;
-			directLight( sw, Lw, Vw, ms, dD, dS );
+			vec3 Ls = Lw;
+			float rS = sw.rough;
+			if ( cellLightPhysB.y > 0.0 && !noSpec )	// lane LIGHTPHYS1: Area lights
+				cellAreaSpec( i, Pw, sw.N, Vw, Ls, rS );
+			directLightA( sw, Lw, Ls, rS, Vw, ms, dD, dS );
 			cE += E * max( dot( sw.N, Lw ), 0.0 );
 			cDiff += dD * E * M_PI;
 			if ( !noSpec )

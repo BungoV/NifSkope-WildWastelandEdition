@@ -60,6 +60,8 @@ vec3 cellFxLight( int i, vec3 P )
 	float a = 1.0 - q * q;
 	if ( ( fxLitMode & 4 ) == 0 )
 		a = pow( a, 2.2 );
+	if ( cellLightPhys.x > 0.5 && ( fxLitMode & 4 ) == 0 )	// lane LIGHTPHYS1: the surfaces' physical curve, so effects and air agree
+		a = cellPhysFalloff( a, q, t0.w, vec3( 0.0, 1.0, 2.0 ) );
 	if ( t1.w > -1.5 ) {	// a spot: the game's cone, its cosine + 0.001
 		vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
 		float c = clamp( dot( -Lv / max( d, 0.001 ), t2.xyz ), 0.0, 1.0 );
