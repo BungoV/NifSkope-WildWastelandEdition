@@ -111,6 +111,7 @@ struct CellChunk
 	std::vector<Pfx> pfx;
 	bool pfxDone = false;
 	int pfxCopies = 0;
+	std::vector<std::pair<int, quint32>> xemiShapes;   //!< lane LIGHTS2 (XEMI1): written block, emittance colour
 	qint64 shapes = 0, verts = 0, tris = 0;
 };
 

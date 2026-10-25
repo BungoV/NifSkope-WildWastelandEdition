@@ -38,6 +38,7 @@ const LookRow kRows[] = {
 	{ "Cable shadows sway", "WW/CableShadowSway" },
 	{ "Game LOD trees sway", "WW/FarLodBtoSway" },
 	{ "Far tree card shadows", "WW/ShadowFarCards" },
+	{ "Placement emittance", "WW/CellPlacementEmittance" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -139,6 +140,8 @@ QByteArray pinOf( WwLook l )
 	}
 	case WwLook::FarCardShadows: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_SHADOW_FARCARDS" ).trimmed() );
+	case WwLook::PlacementEmittance: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_XEMI" ).trimmed() );
 		return p;
 	}
 	default:
@@ -178,6 +181,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::CableShadowSway: return "WW_CELL_CABLES_SHADOWSWAY";
 	case WwLook::BtoSway: return "WW_CELL_FARLOD_BTOSWAY";
 	case WwLook::FarCardShadows: return "WW_SHADOW_FARCARDS";
+	case WwLook::PlacementEmittance: return "WW_CELL_XEMI";
 	default: return "";
 	}
 }
@@ -190,7 +194,8 @@ bool wwLookPinned( WwLook l )
 bool wwLookReopens( WwLook l )
 {
 	// BtoSway rewrites the .bto shapes' vertices while the far field is built
-	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::AnimObjects || l == WwLook::BtoSway;
+	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::AnimObjects || l == WwLook::BtoSway
+		|| l == WwLook::PlacementEmittance;
 }
 
 bool wwLookHasRow( WwLook l )

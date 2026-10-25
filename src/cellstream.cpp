@@ -562,6 +562,7 @@ void Stream::unload( StreamCell & c )
 		wwCellLandForget( nif, b );
 		wwCellGrassForget( nif, b );
 		wwCellFxLitForget( nif, b );
+		wwCellXemiForget( nif, b );   // lane LIGHTS2 (XEMI1)
 		( isNodeType( tk.second ) ? nodeBlocks : propBlocks ).insert( b );
 	}
 	std::vector<Node *> ns;
@@ -735,6 +736,8 @@ void Stream::rebuild()
 		for ( const auto & fs : k.fxShapes )
 			if ( fs.second >= 0 && fs.second < serial.size() )
 				wwCellFxLitShape( nif, fs.first, serial[fs.second] );
+		for ( const auto & xs : k.xemiShapes )
+			wwCellXemiShape( nif, xs.first, xs.second );   // lane LIGHTS2 (XEMI1)
 	}
 	refs.tallyCells();
 	wwCellLightsPublish( nif, L );

@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIGHTS2 (2026-10-23, branch lights2-20261023): placement emittance colour (off by default)
+
+- **Row:** Show > Placement emittance, key `WW/CellPlacementEmittance`, pin `WW_CELL_XEMI=1` / `=0`. Read when the cell
+  is built, so the tick reopens the cell. Off = drawn exactly as before.
+- **On:** a placed reference's emittance (its XEMI names a light) colours the shapes that ask for it with External
+  Emittance (BGSM flag, or shader flag 1 bit 29 on NIF/BGEM shapes): a lit shape's emissive colour is replaced, an unlit
+  effect card is tinted by the colour to the power 2.2, scaled by its lighting influence. Lit effect variants are left
+  alone. References whose XEMI names a region are counted, not drawn (what colour a region gives is not known).
+- **Red:** `WW_CELL_XEMI_RED=magenta` paints every taken shape's colour magenta.
+- **Census:** the cell notes gain a "placement emittance:" line (placements carrying XEMI, light vs region, shapes
+  taking it, shapes without the flag).
+
 ## Lane FAR5 (2026-10-25, branch far5-20261023): far LOD leftovers -- five new looks, all OFF
 
 Each is a Show-menu tick (src/gl/celllooks.*) with its own pin and red; off draws exactly what it drew before.

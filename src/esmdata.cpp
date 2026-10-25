@@ -622,6 +622,8 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 					} else if ( f == "XMSP" && f.size() >= 4 ) {
 						// lane SWAP1: the placement's material swap (MSWP)
 						ref.materialSwap = esm->mapFormID( *r, f.readUInt32() );
+					} else if ( f == "XEMI" && f.size() >= 4 ) {
+						ref.emittance = esm->mapFormID( *r, f.readUInt32() );   // lane LIGHTS2 (XEMI1)
 					} else if ( f == "XRDS" && f.size() >= 4 ) {
 						ref.radius = f.readFloat();      // lane PRTP1
 						ref.hasRadius = true;

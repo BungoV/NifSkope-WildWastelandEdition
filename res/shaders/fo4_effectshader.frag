@@ -102,6 +102,7 @@ uniform int fxLitMode;			// 0 an unlit effect; 1 lit; red controls: 2 every ligh
 uniform vec4 fxLit;				// indices into cellLights, -1 = none
 uniform vec4 fxLitScale;		// 1 (a red control's per-light ratio)
 uniform vec3 fxLitId;			// probe 70: the model's serial + 1, 24 bits
+uniform vec4 fxEmit;			// lane LIGHTS2 (XEMI1): the placement's emittance colour ^2.2 on an unlit effect; w 0 = none
 
 // one placed light on a lit effect at world point P, as the game's lit effect shader sums it
 vec3 cellFxLight( int i, vec3 P )
@@ -367,6 +368,10 @@ void main()
 	if ( !cellOn )	// lane EFX2: the cell view's emit colour is white, so the lighting influence changes nothing
 #endif
 	color.rgb = mix( color.rgb, color.rgb * D.rgb, lightingInfluence );
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && fxEmit.a > 0.0 )	// lane LIGHTS2 (XEMI1): the game's unlit effect, c = mix( c, c x emit, influence )
+		color.rgb = mix( color.rgb, color.rgb * fxEmit.rgb, lightingInfluence );
+#endif
 
 	// Specular
 	float g = 1.0;
@@ -384,6 +389,10 @@ void main()
 		if ( !cellOn )
 #endif
 		cube.rgb = mix( cube.rgb, cube.rgb * D.rgb, lightingInfluence );
+#ifdef WW_CELLLIGHTS
+		if ( cellOn && fxEmit.a > 0.0 )
+			cube.rgb = mix( cube.rgb, cube.rgb * fxEmit.rgb, lightingInfluence );
+#endif
 
 		color.rgb += cube.rgb * falloff;
 	}
