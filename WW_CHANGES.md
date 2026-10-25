@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane DECK1 (2026-10-23, branch deck1-20261023): a path-traced reference picture to judge the GI against
+
+- **New offline tool `tests/path_reference.cpp`** (plain g++, no Qt, opens no window): a per-pixel multi-bounce path
+  tracer over the probe bake's soup (.psp with its albedo, glass, two-sided, alpha mask, glow, smooth-normal and neon
+  tails). It shoots either a camera (`cam="eye target fov" size=WxH`, the cell view's camera law) or the very pixels of a
+  cell-view frame (`gbuf=`, decoded from probe shots 2/3/4). The sun, the sky, the placed lamps and the glow are kept
+  apart per bounce (0 = direct ... 3+), in E units (pi x what a white wall shows), so the cell view's GI terms compare
+  one by one. Same seed = same picture at any thread count.
+- **Gate `path_reference fixture`:** seven scenes whose answer is arithmetic (open sky, white furnace, sun on a plane,
+  lamp behind a blocker, a glowing square's view factor, a glass pane, the camera law): 17 checks pass at 4096 paths;
+  each `red=` (albedo 1, uniform sky, no glass, bounce order, flat sky) fails the checks it should.
+- **The GI dump now also writes `gi_lights.txt`** (the placed lights the relight lit the surfels with: position,
+  radius, colour, fade law, spot cone, shape box), from both `WW_CELL_GI_DUMP` and the `probegi` command line, so the
+  tracer uses the same lamps. Nothing drawn changes.
+- Speed: Memory Den night 960x540 at 256 paths a pixel, 4 bounces: 115 s; Concord 320x180 at 64 paths: 7 s.
+- Lane notes: notes/deck1 (compare scripts, hold rows, RESULTS.md).
+
 ## Lane PERF4 (2026-10-23, branch perf4-20261023): two hidden-work cuts in the cell view (first part of FLYPERF1)
 
 - **Far cards stop hidden fragments early:** the card shader writes its own depth, so the card's early depth test was

@@ -6287,6 +6287,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				QString derr;
 				if ( !dump.isEmpty() && !probeGiDump( gr, gs, dump, &derr ) )
 					probeNotes += QStringLiteral( "  gi dump FAILED: %1\n" ).arg( derr );
+				if ( !dump.isEmpty() && !probeGiDumpLights( *L, gs, dump, &derr ) )	// lane DECK1
+					probeNotes += QStringLiteral( "  gi lights dump FAILED: %1\n" ).arg( derr );
 				if ( !gr.aoGate.isEmpty() )
 					probeNotes += QStringLiteral( "  %1\n" ).arg( gr.aoGate );
 				probeGiAoFreeSwap( gr );	// lane AODECAL1: the decals darken; the grid no longer does it twice
