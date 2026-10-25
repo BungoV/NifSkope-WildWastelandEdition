@@ -56,6 +56,7 @@ import sys
 import zlib
 
 CELL_UNITS = 4096.0
+WATER_NO_HEIGHT = (0xFF7FFFFF, 0x7F7FFFFF, 0x4F7FFFC9)   # XCLW values that mean: the worldspace default
 SAMPLE_NAMED = ("Vault111Cryo", "CabotHouse01")
 
 
@@ -143,7 +144,8 @@ def cells_in(p, start, end, out, depth=0):
                     edid = zstr(d)
                 elif typ == b"XCLC" and len(d) >= 8:
                     grid = struct.unpack_from("<ii", d, 0)
-            last = {"form": it[4], "edid": edid, "grid": grid, "children": None, "nested": depth > 0}
+            last = {"form": it[4], "edid": edid, "grid": grid, "children": None, "nested": depth > 0,
+                    "rec": (it[1], it[3], it[5])}
             out.append(last)
         else:
             _, off, gend, label, gtype = it
@@ -198,14 +200,20 @@ class Model:
         self.duplicates = 0
         self._pers = None
         self._own = {}
+        self.def_land, self.def_water = None, None   # the worldspace's DNAM: default land and water height
         if world and b"WRLD" in self.p.tops:
             want = None
             for it in self.p.items(*self.p.tops[b"WRLD"]):
                 if it[0] == "R" and it[2] == b"WRLD":
                     want = None
+                    dnam = None
                     for typ, d in self.p.fields(self.p.data(it[1], it[3], it[5])):
                         if typ == b"EDID" and zstr(d).lower() == world.lower():
                             want = it[4]
+                        elif typ == b"DNAM" and len(d) >= 8:
+                            dnam = struct.unpack_from("<ff", d, 0)
+                    if want is not None and dnam is not None:
+                        self.def_land, self.def_water = dnam
                 elif it[0] == "G" and it[4] == 1 and want is not None and it[3] == want:
                     found = []
                     cells_in(self.p, it[1] + 24, it[2], found)
@@ -279,6 +287,77 @@ class Model:
                 refs += 1
                 lights += 1 if r[2] else 0
         return (refs, lights)
+
+    def cell_water(self, x, y):
+        """(has water, water height) of one exterior cell: CELL DATA flag 0x0002, XCLW unless it is one of
+        the engine's 'no height' values, else the worldspace default (src/esmdata.cpp EsmWorld::cellWater)."""
+        c = self.exteriors.get((x, y))
+        if c is None:
+            return False, self.def_water
+        has, height = False, self.def_water
+        for typ, d in self.p.fields(self.p.data(*c["rec"])):
+            if typ == b"DATA" and len(d) >= 2:
+                has = (struct.unpack_from("<H", d, 0)[0] & 0x0002) != 0
+            elif typ == b"XCLW" and len(d) >= 4:
+                raw = struct.unpack_from("<I", d, 0)[0]
+                if raw not in WATER_NO_HEIGHT:
+                    height = struct.unpack_from("<f", d, 0)[0]
+        return has, height
+
+    def land_top(self, x, y):
+        """The highest of the cell's 33x33 LAND heights (VHGT, the engine's decode in src/esmdata.cpp), or
+        None when the cell has no LAND height field (the ground is then the worldspace default)."""
+        c = self.exteriors.get((x, y))
+        if c is None or not c["children"]:
+            return None
+        top = None
+        stack = [c["children"]]
+        while stack:
+            s, e = stack.pop()
+            for it in self.p.items(s, e):
+                if it[0] == "G":
+                    stack.append((it[1] + 24, it[2]))
+                    continue
+                if it[2] != b"LAND" or it[3] & 0x20:
+                    continue
+                for typ, d in self.p.fields(self.p.data(it[1], it[3], it[5])):
+                    if typ != b"VHGT" or len(d) < 4 + 33 * 33:
+                        continue
+                    row_start = struct.unpack_from("<f", d, 0)[0]
+                    deltas = struct.unpack_from("<%db" % (33 * 33), d, 4)
+                    for row in range(33):
+                        row_start += deltas[row * 33]
+                        v = row_start
+                        hi = v
+                        for col in range(1, 33):
+                            v += deltas[row * 33 + col]
+                            hi = max(hi, v)
+                        top = hi * 8.0 if top is None else max(top, hi * 8.0)
+        return top
+
+    def open_water(self, keys, tile, block):
+        """(open water?, reason) of one exterior unit: every cell has water, no cell's LAND reaches above
+        that cell's water height, and the unit's own block places nothing (persistent references included)."""
+        tx, ty = [int(v) for v in tile.split(",")]
+        refs = self.block_counts(tx, ty, block)[0]
+        if refs:
+            return False, "%d placed references" % refs
+        tops = []
+        for k in keys:
+            x, y = grid_of(k)
+            has, wh = self.cell_water(x, y)
+            if not has or wh is None:
+                return False, "cell %d,%d has no water" % (x, y)
+            top = self.land_top(x, y)
+            top = self.def_land if top is None else top
+            if top is None or top > wh:
+                return False, "cell %d,%d: land %.0f above its water %.0f" % (x, y, top if top is not None else float("nan"), wh)
+            tops.append((top - wh, x, y))
+        if not tops:
+            return False, "no cells"
+        gap, x, y = max(tops)
+        return True, "open water: %d cells, 0 placed references, highest land %.0f below the water (cell %d,%d)" % (
+            len(tops), -gap, x, y)
 
     def interior_counts(self, form):
         for c in self.interiors:
@@ -639,6 +718,45 @@ def do_rows(m, t, census_path, keys_path, plan_path, block, margin, slices):
     t.check(ok_rows > 0, "at least one sampled cell was drawn", "%d of %d (%d count only)" % (ok_rows, len(keys), count_only))
 
 
+def do_skipped(m, t, skipped_path, keys_path, block, complete):
+    """Lane PRTP6: the units a bake plan skipped as open water. Each one is re-measured from the plugin (its own
+    cells, its own block), none of its cells is keyed, and with `complete` every unit is keyed or skipped."""
+    named = set(read_keys(keys_path))
+    order, cells, _ = units_of(m.order(), block, None, 1)
+    skipped = []
+    if skipped_path and os.path.isfile(skipped_path):
+        for line in open(skipped_path, encoding="utf-8", errors="replace"):
+            p = line.rstrip("\r\n").split("\t")
+            if len(p) >= 3 and p[0][:2] == "T:":
+                skipped.append((p[0], int(p[1]) if p[1].isdigit() else -1))
+    known = set(cells)
+    bad, wrong_n, unknown = [], [], []
+    for u, n in skipped:
+        if u not in known:
+            unknown.append(u)
+            continue
+        if n != len(cells[u]):
+            wrong_n.append(u)
+        ok, why = m.open_water(cells[u], u.rsplit(":", 1)[1], block)
+        if not ok:
+            bad.append("%s (%s)" % (u, why))
+    t.check(not unknown, "every skipped unit is a unit of the plugin", "%d unknown%s" % (
+        len(unknown), (": " + ", ".join(unknown[:3])) if unknown else ""))
+    t.check(not bad, "every skipped unit is open water by the plugin (no LAND above its water, nothing placed)",
+            "%d of %d are not%s" % (len(bad), len(skipped), (": " + "; ".join(bad[:3])) if bad else ""))
+    t.check(not wrong_n, "every skipped unit names its cell count", "%d wrong" % len(wrong_n))
+    gone = set(u for u, _ in skipped)
+    keyed_skips = sorted(k for u in gone if u in cells for k in cells[u] if k in named)
+    t.check(not keyed_skips, "no skipped cell is also walked", "%d cells%s" % (
+        len(keyed_skips), (": " + ", ".join(keyed_skips[:3])) if keyed_skips else ""))
+    if complete:
+        left = [u for u in order if u not in gone and not all(k in named for k in cells[u])]
+        t.check(not left, "every unit of the plugin is walked or skipped as open water", "%d units neither%s" % (
+            len(left), (": " + ", ".join(left[:3])) if left else ""))
+    print("open water, skipped: %d units, %d cells (by plan; re-measured here)" % (
+        len(gone), sum(len(cells[u]) for u in gone if u in cells)))
+
+
 def tbk_version(path):
     """The version a .tbk sector file says it is: 4 bytes `TBK1`, then a little-endian 32-bit number."""
     with open(path, "rb") as f:
@@ -790,7 +908,8 @@ def main(argv):
         return 2
     mode, plugin = argv[1], argv[2]
     rest, opts = [], {"--world": "Commonwealth", "--interiors": "18", "--center": "-20,7", "--block": "5",
-                      "--margin": "0", "--slices": "1", "--only": "", "--plan": "", "--tbk": "5"}
+                      "--margin": "0", "--slices": "1", "--only": "", "--plan": "", "--tbk": "5",
+                      "--skipped": "", "--complete": "0"}
     small = False
     i = 3
     while i < len(argv):
@@ -822,6 +941,8 @@ def main(argv):
         do_plan(m, t, rest[0], block, slices, set(read_keys(opts["--only"])) if opts["--only"] else None)
     elif mode == "rows" and len(rest) >= 2:
         do_rows(m, t, rest[0], rest[1], opts["--plan"], block, margin, slices)
+        if opts["--skipped"]:
+            do_skipped(m, t, opts["--skipped"], rest[1], block, opts["--complete"] == "1")
     elif mode == "check" and len(rest) >= 3:
         do_plan(m, t, rest[1], block, slices, set(read_keys(rest[2])))
         do_rows(m, t, rest[0], rest[2], rest[1], block, margin, slices)

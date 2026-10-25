@@ -443,5 +443,8 @@ void wwCellAoPass( Scene * scene, bool run );
 void wwCellAoDraw( Scene * scene, bool cellProgram );
 //! lane PERF3: the opaque pass is drawing
 bool wwCellAoInPass();
+/*! lane PRTP6: a cell water shape (cellwater.h) drawn through a cell program reads no probe GI (water is dynamic);
+ *  called per draw after wwCellAoDraw. Red WW_CELL_WATER_PRTP_RED=1: it reads the GI as before. */
+void wwCellGiWaterDraw( Scene * scene, int block, bool cellProgram );
 
 #endif
