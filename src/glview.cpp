@@ -49,6 +49,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
+#include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)
 #include "gl/gametaa.h"	// lane MOTION1: the game's temporal AA
 #include "gl/taainputs.h"	// lane TAAINPUTS1: velocity + reactive mask for a temporal resolve
 #include "gl/cellpost.h"	// lane GRASSMB1: the game's depth of field + motion blur
@@ -4284,6 +4285,7 @@ void GLView::paintGL()
 				wwCellFarLodCards( scene, true, true );	// lane FARLOD1: the far tree cards, lit, into the linear frame
 				PassTime::subEnd( PassTime::FarCardsLit );
 				PassTime::end( PassTime::FarCards );
+				wwCellLensFlareGrab( scene );	// lane LIGHTS3: the opaque depth for the flares' occlusion test
 				PassTime::begin( PassTime::ToneMap );
 				wwCellHdrEnd( scene );
 				PassTime::end( PassTime::ToneMap );
@@ -4301,6 +4303,7 @@ void GLView::paintGL()
 				PassTime::Scope pt( PassTime::Post );	// lane PERF1
 				wwTaaInputsPass( scene );	// lane TAAINPUTS1: inert unless asked for (gl/taainputs.h)
 				wwCellPostApply( scene );
+				wwCellLensFlareDraw( scene );	// lane LIGHTS3 (LENSFLARE1): the lights' flares, a screen pass; inert when off
 				wwGameTaaResolve( scene );
 				wwTaaInputsView( scene );	// lane TAAINPUTS1: the inputs' debug view (WW_TAAINPUTS_VIEW)
 				wwCellGrassFrameEnd();	// lane GRASSMB1: the grass wind's clock steps once per frame

@@ -25,6 +25,7 @@ BSD License - see nifskope.h
 #include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/celllooks.h"	// lane GAPLOOK1
+#include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 
 #include <QElapsedTimer>
@@ -2017,7 +2018,8 @@ QString wwCellLightsEcho( Scene * scene )
 		o += QStringLiteral( " pass=%1(asked=%2 %3, sky=%4, pvred=%5)" ).arg( scene ? wwCellPassFor( scene->nifModel ) : 0 )
 			.arg( s.pass ).arg( wwCellPassNames().value( s.pass ) ).arg( G && !G->sky.empty() ? 1 : 0 ).arg( s.passRed );
 	return o + QLatin1Char( ' ' ) + wwCellShadowEcho( scene )
-		+ ( wwVolAirOn() ? QStringLiteral( " " ) + wwVolAirSummary() : QString() );	// lane VOLAIR1
+		+ ( wwVolAirOn() ? QStringLiteral( " " ) + wwVolAirSummary() : QString() )	// lane VOLAIR1
+		+ ( wwLookOn( WwLook::LensFlares ) ? QStringLiteral( " " ) + wwCellLensFlareEcho( scene ) : QString() );	// lane LIGHTS3
 }
 
 //! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change (the gate's light list)

@@ -55,6 +55,7 @@ BSD License - see nifskope.h
 #include "probevolumes.h"	// lane VOLFIT1: the Space stage
 #include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
 #include "gl/cellfxlit.h"
+#include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellcull.h"	// lane SUNCELL1: the per-placement culling runs
@@ -1160,7 +1161,12 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			if ( wwGodRaysRead( *world.plugin(), b.godRays, gr ) )
 				l.godRay = gr.intensity;
 		}
-		l.nearClip = std::max( b.nearClip + ( r.xligCount >= 5 ? r.xlig[4] : 0.0f ), 0.0f );
+		// lane LIGHTS3 (LENSFLARE1): the base's LENS, read once into the flare pass's table
+		if ( b.lens && world.plugin() && wwCellLensKnown( b.lens, *world.plugin() ) )
+			l.lens = b.lens;
+		for ( int c = 0; c < 3; c++ )
+			l.byteColor[c] = float( b.color[c] ) / 255.0f;
+		l.nearClip =std::max( b.nearClip + ( r.xligCount >= 5 ? r.xlig[4] : 0.0f ), 0.0f );
 		l.shadowBias = r.xligCount >= 4 ? r.xlig[3] : 0.0f;
 		if ( l.spot || ( b.flags & 0x800 ) ) {
 			Matrix rm;
@@ -2444,13 +2450,19 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	QSet<quint32> boothSeen;
 	/* lane LIGHTS2 (XEMI1): a reference's XEMI names a LIGH (its colour; the game returns the light's colour member, read
 	 * here as DATA bytes / 255) or a REGN (a region colour the plugin does not state for FO4: counted, not drawn). */
-	int xemiRefs = 0, xemiLigh = 0, xemiOther = 0;
+	int xemiRefs = 0, xemiLigh = 0, xemiOther = 0, xemiRegn = 0;
 	auto xemiOf = [&]( quint32 form ) -> quint32 {
 		if ( !form )
 			return 0;
 		xemiRefs++;
 		const EsmLight & el = world.light( form );
 		if ( !el.exists ) {
+			// lane LIGHTS3 (XEMI-REGN): a region gives its weather's Effect Lighting at the hour (look row of its own)
+			const ESMFile::ESMRecord * rr = world.plugin() ? world.plugin()->findRecord( form ) : nullptr;
+			if ( rr && *rr == "REGN" ) {
+				xemiRegn++;
+				return wwCellXemiRegionCode( form );
+			}
 			xemiOther++;
 			return 0;
 		}
@@ -2884,6 +2896,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	/* lane LIGHTS2 (XEMI1): a placement's emittance colour on the shapes that ask for it (External Emittance): a lighting
 	 * shape's emissive colour is replaced, an UNLIT effect is tinted (lit effect variants never read it). Read at build. */
 	const bool xemiOn = wwLookOn( WwLook::PlacementEmittance ) && spec.overlay == CellOverlay::None;
+	const bool xemiRegnOn = wwLookOn( WwLook::RegionEmittance ) && spec.overlay == CellOverlay::None;   // lane LIGHTS3
 	int xemiShapesLit = 0, xemiShapesFx = 0, xemiNoFlag = 0;
 	if ( !chunk ) {
 		wwCellFxLitBegin( nif );
@@ -3329,6 +3342,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	QHash<QString, int> glowMapOf;   // lower-case path -> into probeSoup.glow.maps; -1 = unread
 	QHash<QString, int> emitterOf;
 	int emShapes = 0, emShapesBlack = 0, emShapesUnread = 0, emShapesNoUv = 0, emOffShapes = 0;
+	int emXemiShapes = 0;   // lane LIGHTS3 (XEMI-GI): shapes whose glow is their placement's emittance
 	QSet<quint32> emRefs, emRefsNearLight, emNearLights;
 	QString emModels;   // census: model, material, map, color x mult, lights within 256 units
 	/* lane NEONGI1: the effect surfaces that glow (the soup's veils). WW_CELL_EMISSIVE_RED=noeffects (gates only) lists
@@ -4243,7 +4257,17 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					/* lane EMISSIVEGI1: does this shape glow, as the renderer draws it (fo4_default.frag: emissive =
 					 * hasEmit ? glowColor x glowMult x (hasGlowMap ? glowMap.rgb : 1) : 0)? -1 = no */
 					int emIdx = -1;
-					const float emC[3] = { s.emitColor[0] * s.emitMult, s.emitColor[1] * s.emitMult, s.emitColor[2] * s.emitMult };
+					float emC[3] = { s.emitColor[0] * s.emitMult, s.emitColor[1] * s.emitMult, s.emitColor[2] * s.emitMult };
+					/* lane LIGHTS3 (XEMI-GI): a placement's emittance replaces the emissive colour on the drawn shape, so
+					 * the bounce takes it too (a region's colour at the bake's hour: the bake does not follow the clock) */
+					float xeC[3];
+					if ( wwLookOn( WwLook::BounceEmittance ) && p.xemi && s.extEmit && s.ownEmit
+						&& !s.nearFacts.effectShader && ( ( p.xemi & 0x02000000U ) ? xemiRegnOn : xemiOn )
+						&& wwCellXemiCode( p.xemi, xeC ) ) {
+						for ( int k = 0; k < 3; k++ )
+							emC[k] = xeC[k] * s.emitMult;
+						emXemiShapes++;
+					}
 					const bool emColor = emC[0] > 0.0f || emC[1] > 0.0f || emC[2] > 0.0f;
 					if ( !emitPin && emColor && !s.ownEmit )
 						emOffShapes++;
@@ -4485,7 +4509,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			if ( isActor )
 				bbOwn += QLatin1String( "|ACTOR" );   // lane PLACED1: own buckets; no decal lands on an actor
 			quint32 xemiHere = 0;   // lane LIGHTS2 (XEMI1): a bucket per colour
-			if ( xemiOn && p.xemi && !isActor && !( s.nearFacts.effectShader && s.effectLit ) ) {
+			const bool xemiRowOn = ( p.xemi & 0x02000000U ) ? xemiRegnOn : xemiOn;   // lane LIGHTS3: a region has its own row
+			if ( xemiRowOn && p.xemi && !isActor && !( s.nearFacts.effectShader && s.effectLit ) ) {
 				if ( s.extEmit ) {
 					xemiHere = p.xemi;
 					bbOwn += QStringLiteral( "|XE|%1" ).arg( p.xemi, 8, 16, QLatin1Char( '0' ) );
@@ -5647,7 +5672,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			  << ", those lights " << emNearLights.size() << "), triangles " << int( probeSoup.glow.tris.size() )
 			  << ", emitters " << int( probeSoup.glow.emitters.size() ) << ", glow maps " << int( probeSoup.glow.maps.size() )
 			  << "; left dark: glow flag with no map " << emShapesBlack << ", map unread " << emShapesUnread << ", no UVs "
-			  << emShapesNoUv << "; a color without Own-Emit " << emOffShapes << "\n" << emModels;
+			  << emShapesNoUv << "; a color without Own-Emit " << emOffShapes << "; emittance colour (row "
+			  << ( wwLookOn( WwLook::BounceEmittance ) ? "on" : "off" ) << ") " << emXemiShapes << "\n" << emModels;
 			// lane NEONGI1: the effect surfaces that glow
 			t << "  probe soup emissive effects" << ( emitPin || emitRed == "noeffects" ? " OFF" : "" ) << ": shapes " << veilShapes
 			  << " (placements " << veilRefs.size() << ", with a placed light lit within 256 units " << veilRefsNearLight.size()
@@ -5997,6 +6023,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			QPersistentModelIndex iPfx;
 			int pfxCopies = 0, pfxSystems = 0, pfxModels = 0, pfxRefused = 0, pfxCapped = 0;
 			int pfxLitSystems = 0, pfxLitModels = 0, pfxLitCapped = 0;
+			int pfxXemiSystems = 0, pfxXemiNoFlag = 0, pfxXemiLit = 0;	// lane LIGHTS3 (XEMI-PARTICLES)
 			QHash<QString, bool> pfxBgemLit;	// a BGEM path (lower case) -> lit
 			QString pfxWhy;
 			for ( const Placement & p : placements ) {
@@ -6094,6 +6121,32 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						pfxLitSystems += litBlocks.size();
 					}
 				}
+				/* lane LIGHTS3 (XEMI-PARTICLES): an UNLIT system with External Emittance (SF1 bit 29) takes the placement's
+				 * emittance as an unlit effect card does; the game's lit effect variants never read it. */
+				const bool pfxXemiRow = ( p.xemi & 0x02000000U ) ? xemiRegnOn : xemiOn;
+				if ( n > 0 && p.xemi && pfxXemiRow && wwLookOn( WwLook::ParticleEmittance ) ) {
+					NifModel & sm = *it.value();
+					for ( const CellPfxSystem & f : copied ) {
+						const QModelIndex iSh = sm.getBlockIndex( f.srcShader );
+						if ( !iSh.isValid() || !sm.blockInherits( iSh, "BSEffectShaderProperty" ) )
+							continue;
+						if ( !( sm.get<quint32>( iSh, "Shader Flags 1" ) & ( 1U << 29 ) ) ) {
+							pfxXemiNoFlag++;
+							continue;
+						}
+						const QString mat = sm.get<QString>( iSh, "Name" );
+						const bool lit = mat.endsWith( QStringLiteral( ".bgem" ), Qt::CaseInsensitive )
+							? lodgenEffectMaterialLit( dataRoot, mat )
+							: ( ( sm.get<quint32>( iSh, "Shader Flags 2" ) & 0x40000000U )
+								&& sm.get<quint8>( iSh, "Lighting Influence" ) > 0 );
+						if ( lit ) {
+							pfxXemiLit++;
+							continue;
+						}
+						wwCellXemiShape( nif, f.block, p.xemi );
+						pfxXemiSystems++;
+					}
+				}
 				if ( n > 0 ) {
 					pfxCopies++;
 					pfxSystems += n;
@@ -6107,6 +6160,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			fprintf( stderr, "cell particles lit: %d systems of %d placed models registered with their placed lights%s (%d past the lit cap)\n",
 				pfxLitSystems, pfxLitModels, fxLitOn ? ( spec.interior ? " (interior)" : " (exterior: the sun is the base)" )
 					: " (off: exterior self-lit, red WW_CELL_FXLIT_EXT_RED=indoors)", pfxLitCapped );
+			fprintf( stderr, "cell particles emittance: %s, %d unlit systems take their placement's colour (%d lack External "
+				"Emittance, %d lit: the game's lit variants never read it)\n",
+				wwLookOn( WwLook::ParticleEmittance ) ? "on" : "off", pfxXemiSystems, pfxXemiNoFlag, pfxXemiLit );
 		} else {
 			fprintf( stderr, "cell particles: off (the Particles row)\n" );
 		}
@@ -6705,7 +6761,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		  << ( spec.interior ? "" : fxLitOn ? " (exterior: the sun is the base)" : " (exterior off: RED=indoors)" ) << "\n";
 		// lane LIGHTS2 (XEMI1)
 		s << "  placement emittance: " << ( xemiOn ? "on" : "off" ) << ", " << xemiRefs << " placements carry XEMI ("
-		  << xemiLigh << " a light, " << xemiOther << " a region: not drawn); " << xemiShapesLit << " lighting + "
+		  << xemiLigh << " a light, " << xemiRegn << " a region (region emittance " << ( xemiRegnOn ? "on" : "off" )
+		  << "), " << xemiOther << " other: not drawn); " << xemiShapesLit << " lighting + "
 		  << xemiShapesFx << " unlit effect shapes take it, " << xemiNoFlag << " shapes lack External Emittance\n";
 		if ( groundNote.isEmpty() ) {   // lane CELLVIEW2
 			s << "  ground: " << landsDrawn << " LAND cells, vertex colour only"

@@ -142,6 +142,10 @@ bool wwLookdevDalc( float rgb[6][3] );
  *  Sunlight row. The game's sun carries it beside its diffuse and lit effects take it instead of the sunlight.
  *  False (rgb = the sunlight) without a weather. */
 bool wwLookdevEffectLight( float rgb[3] );
+/*! Lane LIGHTS3 (XEMI-REGN): the emittance colour a REGN gives at the hour: its weather's Effect Lighting row,
+ *  CIELab-blended at the clock's keys, as bytes / 255 (what XEMI from a LIGH gives). False when not a REGN or the
+ *  plugins are not loaded. */
+bool wwLookdevRegionEmit( quint32 regn, float rgb[3] );
 /*! Lane SUNCELL1: the weather's imagespace at the hour: the IMSP slots of the two colour keys, their HNAM /
  *  CNAM / TNAM blended linearly at the keys' t (as the Sky Scale), and both LUT paths with that t. False when
  *  no weather is loaded or neither key's IMGS read. `key` changes whenever any of it does. */

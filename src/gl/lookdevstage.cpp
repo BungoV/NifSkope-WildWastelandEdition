@@ -33,6 +33,7 @@ BSD License - see nifskope.h
 #include <QFile>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QHash>
 #include <QRegularExpression>
 #include <QSettings>
 
@@ -968,6 +969,50 @@ bool wwLookdevEffectLight( float rgb[3] )
 	const LdLight L = currentLight();
 	std::copy( L.effect, L.effect + 3, rgb );
 	return L.fromWeather;
+}
+
+bool wwLookdevRegionEmit( quint32 regn, float rgb[3] )
+{
+	struct Region
+	{
+		bool ok = false;
+		WwWeatherData w;
+		int a = -1, b = -1;
+		float t = -1.0f;
+		float rgb[3] = { 0, 0, 0 };
+	};
+	static QHash<quint32, Region> cache;
+	static quint64 gen = ~quint64( 0 );
+	resolve();
+	LdState & s = st();
+	if ( gen != s.gen ) {
+		gen = s.gen;
+		cache.clear();
+	}
+	auto it = cache.find( regn );
+	if ( it == cache.end() ) {
+		Region g;
+		if ( s.loadRefusal.isEmpty() ) {
+			const quint32 w = s.esm.regionWeather( regn );
+			QString why;
+			g.ok = w && s.esm.read( w, g.w, &why );
+		}
+		it = cache.insert( regn, g );
+	}
+	if ( !it->ok )
+		return false;
+	const WwTodKeys k = currentLight().keys;
+	if ( it->a != k.a || it->b != k.b || it->t != k.t ) {
+		// the game: Sky::FillColorBlend of colour 9 (Effect Lighting) for the region's weather, the sky's own blend
+		it->a = k.a;
+		it->b = k.b;
+		it->t = k.t;
+		EsmWeather::blendRowLab( it->w, WwRowEffectLighting, k, it->rgb );
+		for ( float & c : it->rgb )
+			c = std::clamp( c / 255.0f, 0.0f, 1.0f );
+	}
+	std::copy( it->rgb, it->rgb + 3, rgb );
+	return true;
 }
 
 bool wwLookdevDalc( float rgb[6][3] )

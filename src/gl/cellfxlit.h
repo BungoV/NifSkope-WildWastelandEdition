@@ -98,6 +98,11 @@ void wwCellXemiShape( const void * nif, int block, quint32 rgb );
 void wwCellXemiForget( const void * nif, int block );
 //! The shape's colour in 0..1 (the red applied), or false (none).
 bool wwCellXemiFor( const void * nif, int block, float rgb[3] );
+/*! Lane LIGHTS3 (XEMI-REGN): the code a REGN-sourced placement stores (0x02000000 | slot): its colour is read at
+ *  draw time from the region's weather at the clock (wwLookdevRegionEmit), so it follows the hour. */
+quint32 wwCellXemiRegionCode( quint32 regn );
+//! A stored code's colour in 0..1 (the red applied); false when a region's colour cannot be read.
+bool wwCellXemiCode( quint32 code, float rgb[3] );
 
 //! Bounding sphere of `count` points (xyz, stride 3 floats): the box centre, the farthest point.
 void wwCellFxLitSphere( const float * xyz, size_t count, float out[4] );

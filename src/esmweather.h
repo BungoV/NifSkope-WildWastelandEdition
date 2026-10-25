@@ -232,6 +232,26 @@ WwGodRayMedium wwGodRayMix( const WwGodRayMedium & a, const WwGodRayMedium & b, 
 //! read one GDRY; false when `formID` is not one
 bool wwGodRaysRead( ESMFile & esm, quint32 formID, WwGodRays & out );
 
+/* lane LIGHTS3 (LENSFLARE1): a LENS record (wbDefinitionsFO4 layout). Absent CNAM / DNAM keep the form's own
+ * defaults, 0 and 1 (the constructor and loader, read in the exe; vanilla's 35 store neither). */
+struct WwLensSprite
+{
+	QString texture;		//!< FNAM, as stored (under textures/)
+	float tint[3] = { 1, 1, 1 };
+	float width = 0, height = 0, position = 0, angularFade = 0, opacity = 0;
+	quint32 flags = 0;		//!< 1 Rotates, 2 Shrinks When Occluded
+};
+struct WwLens
+{
+	quint32 formID = 0;
+	QString edid;
+	float colorInfluence = 0.0f;	//!< CNAM
+	float fadeRadiusScale = 1.0f;	//!< DNAM, Fade Distance Radius Scale
+	QVector<WwLensSprite> sprites;
+};
+//! read one LENS; false when `formID` is not one
+bool wwLensRead( ESMFile & esm, quint32 formID, WwLens & out );
+
 struct WwWeatherData
 {
 	quint32 formID = 0;
@@ -347,6 +367,9 @@ public:
 	bool climate( quint32 formID, unsigned char tnam[4], QString * edid, QString * why );
 	//! the whole climate the engine clock needs (TNAM 6 bytes, FNAM, GNAM); 0 = DefaultClimate
 	bool climateData( quint32 formID, WwClimateData & out, QString * why );
+	/*! lane LIGHTS3 (XEMI-REGN): the weather a REGN's emittance follows: its RDAT type 3 (RDWT) list, the highest
+	 *  chance (the game picks by chance at random); none listed = DefaultWeather 0000015E. 0 = not a REGN. */
+	quint32 regionWeather( quint32 regn, int * listed = nullptr );
 	//! the sky GMSTs of the loaded plugins, exe defaults where none sets one
 	WwSkyGmst gmst();
 

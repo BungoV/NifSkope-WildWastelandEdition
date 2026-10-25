@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIGHTS3 (2026-10-23, branch lights3-20261023): more emittance, lens flares (all off by default)
+
+- **Rows (Show menu, all off; off = drawn exactly as before):**
+  - Region emittance, key `WW/CellRegionEmittance`, pin `WW_CELL_XEMI_REGN`. A placement whose XEMI names a region
+    takes the region weather's Effect Lighting colour at the current hour (the weather is the region's most likely
+    one). Reopens the cell.
+  - Emittance on particles, key `WW/CellParticleEmittance`, pin `WW_CELL_XEMI_PART`. Unlit effect particle systems
+    with External Emittance on an emittance placement are tinted the same way as its effect cards. Reopens the cell.
+  - Emittance in bounce light, key `WW/CellBounceEmittance`, pin `WW_CELL_XEMI_GI`. An emissive shape that takes the
+    placement's colour also gives that colour to the bounce light. Reopens the cell.
+  - Lens flares, key `WW/CellLensFlares`, pin `WW_CELL_LENSFLARE`. Lights with a LENS record draw its sprites as a
+    post-process after the tone map (no drawn glow): up to 16 nearest lights, faded past the light's radius, along
+    the light's view angle, dimmed and (if the sprite says so) shrunk by how much of the light is hidden. Live.
+- **Reds:** `WW_CELL_XEMI_RED=magenta` also covers the region and particle colours; `WW_CELL_LENSFLARE_RED=noocclude`
+  draws every flare as fully seen.
+- **Census:** the cell notes count region placements, recoloured particle systems ("cell particles emittance:"),
+  emissives giving the colour to the bounce ("emittance colour (row ...)"); the light echo adds "lens flares:".
+
 ## Lane LIGHTS2 (2026-10-23, branch lights2-20261023): placement emittance colour (off by default)
 
 - **Row:** Show > Placement emittance, key `WW/CellPlacementEmittance`, pin `WW_CELL_XEMI=1` / `=0`. Read when the cell

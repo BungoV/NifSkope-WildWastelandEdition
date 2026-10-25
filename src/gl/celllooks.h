@@ -32,6 +32,10 @@ enum class WwLook : int
 	BtoSway,			// FAR5: the game's .bto trees sway with the far wind (WW_CELL_FARLOD_BTOSWAY)
 	FarCardShadows,		// FAR5: far tree cards cast into the terrain shadow map (WW_SHADOW_FARCARDS)
 	PlacementEmittance,	// XEMI1 (LIGHTS2): a placement's emittance colour tints its effects and lamp glow (WW_CELL_XEMI)
+	RegionEmittance,	// XEMI-REGN (LIGHTS3): region-sourced emittance, the region weather's Effect Lighting (WW_CELL_XEMI_REGN)
+	ParticleEmittance,	// XEMI-PARTICLES (LIGHTS3): particle systems of an emittance placement take its colour (WW_CELL_XEMI_PART)
+	BounceEmittance,	// XEMI-GI (LIGHTS3): the bounce light of a recoloured emissive uses the emittance colour (WW_CELL_XEMI_GI)
+	LensFlares,			// LENSFLARE1 (LIGHTS3): LENS sprites of lights, a post-process pass (WW_CELL_LENSFLARE)
 	Count
 };
 
