@@ -4277,7 +4277,8 @@ void GLView::paintGL()
 				// lane GRASSMB1: the game's depth of field + motion blur BEFORE the temporal AA, as the engine's image-space pass
 				// runs them (3 HDR/tone map, 6 DoF, 10 motion blur, then 17/18 FXAA/TAA); inert when off
 				PassTime::Scope pt( PassTime::Post );	// lane PERF1
-				wwTaaInputsPass( scene );	// lane TAAINPUTS1: inert unless asked for (gl/taainputs.h)
+				if ( !wwGameTaaInputsRan() )	// lane TAA3: the before-tone-map resolve ran it already
+					wwTaaInputsPass( scene );	// lane TAAINPUTS1: inert unless asked for (gl/taainputs.h)
 				wwCellPostApply( scene );
 				wwGameTaaResolve( scene );
 				wwTaaInputsView( scene );	// lane TAAINPUTS1: the inputs' debug view (WW_TAAINPUTS_VIEW)
