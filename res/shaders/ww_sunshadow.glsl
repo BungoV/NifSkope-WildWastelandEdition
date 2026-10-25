@@ -50,6 +50,7 @@ uniform vec2 ussTerrSize;		// the far and near tiers' texels across (near 0: off
 uniform vec4 ussTerrNearXform;		// the near window: u = x X.x + X.y, v = y X.z + X.w
 uniform vec4 ussTerrPen;		// x the disc penumbra on, y the far texel, z tan(elev - sun radius), w tan(elev + sun radius)
 uniform vec4 ussTerrBias;		// x FO4CS's slope bias on, y max(sin elev, sin 1 deg), z the strength (low sun, moon), w the near texel
+uniform vec4 ussTerrExtra;		// lane FAR5: v offsets of the terrain-only heights and sweep (0: none), their v scale, the ground band
 uniform vec2 ussDim;			// the ambient / specular dimming in terrain shadow (FO4CS 0.5 / 0.5; 0 off)
 uniform int ussPbrDim;			// lane GAPLOOK1: 1 the PBR path dims its ambient + environment too, 2 red (the sun too)
 float ussLastTerr = 1.0;		// the terrain visibility of the last composition (cell_lights.glsl dims by it)
@@ -184,7 +185,7 @@ float ussCascades( vec3 posView, vec3 dPx, vec3 dPy, out float w )
 //! one tier's uv into the shared texture (lane SHADOWPAR1: the near tier sits under the far map)
 vec2 ussTerrAtlasUv( vec2 uv, int tier )
 {
-	if ( ussTerrSize.y <= 0.0 )
+	if ( ussTerrSize.y <= 0.0 && ussTerrExtra.z <= 0.0 )
 		return uv;	// one tier: the map as TERRSHADOW1 made it
 	float n = tier == 0 ? ussTerrSize.x : ussTerrSize.y;
 	uv = clamp( uv, vec2( 0.5 / n ), vec2( 1.0 - 0.5 / n ) );	// no bleed across the tiers' seam
@@ -225,6 +226,31 @@ float ussTerrTier( vec2 uv, int tier, float z, float texel, bool pen )
 	return sum / 9.0;
 }
 
+//! lane FAR5: a far-grid uv into one of the extra blocks under the tiers (v offset off)
+vec2 ussTerrExtraUv( vec2 uv, float off )
+{
+	uv = clamp( uv, vec2( 0.5 / ussTerrSize.x ), vec2( 1.0 - 0.5 / ussTerrSize.x ) );
+	return vec2( uv.x, off + uv.y * ussTerrExtra.z );
+}
+
+//! lane FAR5: the terrain-only height at uv (x; w 0 = none), the most its 4 neighbours differ (y) and FO4CS's
+//! LocalGradient max(|hE - hW|, |hS - hN|) / 2 texels (z; 0 where a neighbour has no height)
+vec4 ussTerrHeights( vec2 uv )
+{
+	float d = 1.0 / ussTerrSize.x;
+	float c = texture( ussTerrMap, ussTerrExtraUv( uv, ussTerrExtra.x ) ).r;
+	float hE = texture( ussTerrMap, ussTerrExtraUv( uv + vec2( d, 0.0 ), ussTerrExtra.x ) ).r;
+	float hW = texture( ussTerrMap, ussTerrExtraUv( uv - vec2( d, 0.0 ), ussTerrExtra.x ) ).r;
+	float hN = texture( ussTerrMap, ussTerrExtraUv( uv + vec2( 0.0, d ), ussTerrExtra.x ) ).r;
+	float hS = texture( ussTerrMap, ussTerrExtraUv( uv - vec2( 0.0, d ), ussTerrExtra.x ) ).r;
+	if ( c <= 0.0 || min( min( hE, hW ), min( hN, hS ) ) <= 0.0 )
+		return vec4( ussTerrRange.x + c * ussTerrRange.y, 0.0, 0.0, c > 0.0 ? 1.0 : 0.0 );
+	float s = ussTerrRange.y;
+	float relief = max( max( abs( hE - c ), abs( hW - c ) ), max( abs( hN - c ), abs( hS - c ) ) ) * s;
+	float g = max( abs( hE - hW ), abs( hS - hN ) ) * s / max( 2.0 * ussTerrPen.y, 1e-6 );
+	return vec4( ussTerrRange.x + c * s, relief, g, 1.0 );
+}
+
 //! (C) the terrain's shadow-height map; inMap = 1 inside it. grad: the receiver's slope (rise over run, the slope
 //! bias); pen: the disc penumbra (off for the air's many taps)
 float ussTerrain( vec3 posView, out float inMap, float grad, bool pen )
@@ -237,6 +263,13 @@ float ussTerrain( vec3 posView, out float inMap, float grad, bool pen )
 	if ( any( lessThan( uv, vec2( 0.0 ) ) ) || any( greaterThan( uv, vec2( 1.0 ) ) ) )
 		return 1.0;
 	inMap = 1.0;
+	// lane FAR5: bias.x 2 = FO4CS's LocalGradient from the terrain-only heights instead of the screen slope; 3 = 0.
+	// Surface receivers only (pen): the air's taps would push the decal/GI-march programs over the instruction limit
+	vec4 h = vec4( 0.0 );
+	if ( pen && ( ussTerrBias.x > 1.5 || ussTerrExtra.y > 0.0 ) )
+		h = ussTerrHeights( uv );
+	if ( pen && ussTerrBias.x > 1.5 )
+		grad = ussTerrBias.x > 2.5 ? 0.0 : h.z;
 	// lane SHADOWPAR1: FO4CS's bias 12 (1 + slope) / sin(elevation); else TERRSHADOW1's 0.05 T + 4
 	float z = wp.z + ( ussTerrBias.x > 0.5 ? 12.0 * ( 1.0 + clamp( grad, 0.0, 4.0 ) ) / ussTerrBias.y : ussTerrRange.z );
 	float vis = ussTerrTier( uv, 0, z, ussTerrPen.y, pen );
@@ -247,6 +280,16 @@ float ussTerrain( vec3 posView, out float inMap, float grad, bool pen )
 		float w = smoothstep( 0.0, 1.0, clamp( min( en.x, en.y ), 0.0, 1.0 ) );
 		if ( w > 0.0 )
 			vis = mix( vis, ussTerrTier( un, 1, z, ussTerrBias.w, pen ), w );
+	}
+	if ( ussTerrExtra.y > 0.0 ) {
+		// lane FAR5 (FO4CS FarFieldMaskCS, the ground-band branch): a receiver above the ground band melts to the
+		// terrain-only sweep, so object-LOD casters shade only the ground under them
+		if ( h.w > 0.0 ) {
+			float m = ussTerrExtra.w < 0.0 ? 1.0
+				: smoothstep( 0.75 * ussTerrExtra.w, 1.25 * ussTerrExtra.w, wp.z - h.x - min( h.y, 4.0 * ussTerrPen.y ) );
+			if ( m > 0.0 )
+				vis = mix( vis, ussTerrVis( texture( ussTerrMap, ussTerrExtraUv( uv, ussTerrExtra.y ) ).rg, z ), m );
+		}
 	}
 	vec2 e = min( uv, 1.0 - uv ) / max( ussTerrRange.w, 1e-6 );
 	vis = mix( 1.0, vis, clamp( min( e.x, e.y ), 0.0, 1.0 ) );

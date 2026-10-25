@@ -641,6 +641,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					.arg( v.shapes ).arg( v.terrainTris ).arg( v.clipTris ).arg( v.objectTris ).arg( v.droppedTris )
 					.arg( v.snapped ).arg( v.snapMax, 0, 'f', 1 ).arg( int( v.waterBlocks.size() ) ).arg( wReg )
 					+ QStringLiteral( ", %1 land shaders LOD landscape -> default, %2 skirt tris on the clip lines" ).arg( v.landRetyped ).arg( v.skirtTris )
+				+ ( v.btoSwayShapes < 0 ? QString() : QStringLiteral( ", bto sway: %1 trees in %2 shapes (%3 skipped: shared shader)" )
+					.arg( v.btoSwayTrees ).arg( v.btoSwayShapes ).arg( v.btoSwayShared ) )
 				+ ( v.notes.isEmpty() ? QString() : QStringLiteral( " -- " ) + v.notes.join( QLatin1String( "; " ) ) ) );
 			sOurs += v.chunksOurs;
 			sVan += v.chunksVanilla;

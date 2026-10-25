@@ -26,6 +26,11 @@ enum class WwLook : int
 	ProbeShare,			// GPURELIGHT1: neighbouring probes share light, never across a wall (WW_CELL_GI_SHARE)
 	DecalFade,		// DECALS1: decal-flag model shapes fade out with distance, the game's LOD rule (WW_CELL_DECAL_FADE)
 	DecalParallax,	// DECALS1: placed decals with a height map (TX04) get the game's parallax (WW_CELL_DECAL_POM)
+	TerrSlopeMap,		// FAR5: the terrain shadow's slope bias from the height map's gradient (WW_SHADOW_SLOPEMAP)
+	TerrGroundGate,		// FAR5: object-LOD shadows land on ground receivers only, FO4CS's ground band (WW_SHADOW_GROUNDGATE)
+	CableShadowSway,	// FAR5: a wind cable's shadow follows its sway (WW_CELL_CABLES_SHADOWSWAY)
+	BtoSway,			// FAR5: the game's .bto trees sway with the far wind (WW_CELL_FARLOD_BTOSWAY)
+	FarCardShadows,		// FAR5: far tree cards cast into the terrain shadow map (WW_SHADOW_FARCARDS)
 	Count
 };
 
