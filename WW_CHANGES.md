@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GIPROBE2 (2026-10-25, branch giprobe2-20261025): probe GI leftovers — out of walls, smoothing, depth visibility, wide sharing
+
+- **Rows** (cell view Show menu, all off, live):
+  - Probes out of walls (`WW/CellProbeClear`, pin `WW_CELL_PROBE_CLEAR`): at bake time, a probe nearer than 32 u to a
+    front face (256 rays) steps away from it, up to 4 steps and 140 u in all. A step is kept only if the path is clear,
+    the probe gets clearer, it stays in the same room and it does not end up behind walls. It changes the bake, so it
+    acts when a cell is baked; the bake record counts it. Red `--red clear` (probebake CLI) pushes toward the faces.
+  - Probe light smoothing (`WW/CellGiSmooth`, `WW_CELL_GI_SMOOTH`): after a relight (hour, weather, light), the GI grid
+    fades to the new values over about 1 s instead of jumping; bigger changes fade faster. It ends after 4 s at the latest.
+  - Probe depth visibility (`WW/CellGiDepthVis`, `WW_CELL_GI_DEPTHVIS`): DDGI-style (Majercik et al. 2019) per-probe
+    8x8 octahedral mean and mean-square distance; a point past what the probe sees is weighted down by the Chebyshev
+    bound (floor 0.05). Red `WW_CELL_GI_DEPTHVIS_RED=flat`.
+  - Wide probe sharing (`WW/CellGiShareWide`, `WW_CELL_GI_SHARE_WIDE`): probe sharing run 3 times, so light reaches
+    further; turns sharing on by itself.
+- Gates (`-no-gui gpurelight`): V known / V red flat / V cuts, OFF depthvis record, P and G depthvis, P and G wide 2/3,
+  red wide1. Offline museum bake: 147 of 181 too-close probes moved, none got worse; red fails; off = the base exe byte
+  for byte.
+- Cost: +0 ms per frame for all but smoothing; smoothing re-uploads the GI grid at most every 66 ms during a fade.
+- Known limits: a door animating live keeps its depth-visibility setting until its next setup; smoothing works on the GI
+  grid, not per probe.
+
 ## Lane GPURELIGHT1 round 2 (2026-10-23, branch gpurelight1-20261023): neighbouring probes share irradiance
 
 - **Row:** cell view Show menu > Probe sharing (off), key `WW/CellGiShare`, live. `WW_CELL_GI_SHARE=1` / `=0` pins it.

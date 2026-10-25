@@ -22,6 +22,10 @@ enum class WwLook : int
 	WeaponParts,		// MISS1 (GAPLOOK2): placed weapons get their default mod parts on the connect points (WW_CELL_WEAP_PARTS)
 	ExposureWide,		// GIBAKE2 (GISHADE1): the eye may open past the imagespace's exposure cap, to 16 (WW_CELL_EXPOSURE_WIDE)
 	ProbeShare,			// GPURELIGHT1: neighbouring probes share light, never across a wall (WW_CELL_GI_SHARE)
+	ProbeShareWide,		// GIPROBE2: the sharing step runs 3 times, so light reaches further (WW_CELL_GI_SHARE_WIDE)
+	ProbeDepthVis,		// GIPROBE2: a probe's light is weighted by what its rays saw (DDGI depth test) (WW_CELL_GI_DEPTHVIS)
+	ProbeSmooth,		// GIPROBE2: a relit grid fades in per voxel instead of popping (WW_CELL_GI_SMOOTH)
+	ProbeClear,			// GIPROBE2: the bake pushes probes standing in or against a wall out to clear air (WW_CELL_PROBE_CLEAR)
 	Count
 };
 

@@ -29,6 +29,10 @@ const LookRow kRows[] = {
 	{ "Weapon mod parts", "WW/CellWeaponParts" },
 	{ "Wide exposure range", "WW/CellExposureWide" },
 	{ "Probe sharing", "WW/CellGiShare" },
+	{ "Wide probe sharing", "WW/CellGiShareWide" },
+	{ "Probe depth visibility", "WW/CellGiDepthVis" },
+	{ "Probe light smoothing", "WW/CellGiSmooth" },
+	{ "Probes out of walls", "WW/CellProbeClear" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -102,6 +106,22 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_GI_SHARE" ).trimmed() );
 		return p;
 	}
+	case WwLook::ProbeShareWide: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_GI_SHARE_WIDE" ).trimmed() );
+		return p;
+	}
+	case WwLook::ProbeDepthVis: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_GI_DEPTHVIS" ).trimmed() );
+		return p;
+	}
+	case WwLook::ProbeSmooth: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_GI_SMOOTH" ).trimmed() );
+		return p;
+	}
+	case WwLook::ProbeClear: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_PROBE_CLEAR" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -130,6 +150,10 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::WeaponParts: return "WW_CELL_WEAP_PARTS";
 	case WwLook::ExposureWide: return "WW_CELL_EXPOSURE_WIDE";
 	case WwLook::ProbeShare: return "WW_CELL_GI_SHARE";
+	case WwLook::ProbeShareWide: return "WW_CELL_GI_SHARE_WIDE";
+	case WwLook::ProbeDepthVis: return "WW_CELL_GI_DEPTHVIS";
+	case WwLook::ProbeSmooth: return "WW_CELL_GI_SMOOTH";
+	case WwLook::ProbeClear: return "WW_CELL_PROBE_CLEAR";
 	default: return "";
 	}
 }
@@ -141,7 +165,8 @@ bool wwLookPinned( WwLook l )
 
 bool wwLookReopens( WwLook l )
 {
-	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts;
+	// ProbeClear moves probes at bake time: the cell's own bake runs again when it reopens
+	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::ProbeClear;
 }
 
 bool wwLookOn( WwLook l )

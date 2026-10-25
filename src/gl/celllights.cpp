@@ -93,6 +93,7 @@ struct ClState
 	bool giOn = false, giPinned = false;
 	QHash<const void *, WwCellGi> gi;
 	QHash<const void *, int> giVersion;
+	QHash<const void *, int> giFadeVersion;	// lane GIPROBE2: the grid's rgba edited in place (Probe light smoothing)
 	bool farOn = false, farPinned = false;	// lane FARVIEW1
 	int dotsLast = -1;	// lane FARVIEW1: the dots the last frame drew (-1 none tried)
 	int farRed = 0;
@@ -251,6 +252,7 @@ struct Gpu
 	GLuint giTex = 0;
 	const void * giDoc = nullptr;
 	int giVersion = 0;
+	int giFadeVersion = 0;	// lane GIPROBE2: the in-place rgba edit last uploaded
 	GLuint slotTex = 0, roomTex = 0;	// lane ROOMCLAMP1: uploaded with the GI grid (the same document and version)
 	const void * roomDoc = nullptr;
 	int roomVersion = 0, units = -1;
@@ -453,6 +455,24 @@ const WwCellGi * wwCellGiFor( const void * nif )
 	ClState & s = st();
 	auto it = s.gi.constFind( nif );
 	return it == s.gi.constEnd() ? nullptr : &*it;
+}
+
+std::vector<float> * wwCellGiRgbaEdit( const void * nif )
+{
+	ClState & s = st();
+	auto it = s.gi.find( nif );
+	return it == s.gi.end() ? nullptr : &it->rgba;
+}
+
+void wwCellGiRgbaEdited( const void * nif )
+{
+	ClState & s = st();
+	s.giFadeVersion.insert( nif, s.nextVersion++ );
+}
+
+int wwCellGiVersion( const void * nif )
+{
+	return st().giVersion.value( nif );
 }
 
 bool wwCellGiOn()
@@ -1085,6 +1105,15 @@ void wwCellLightsUniforms( Scene * scene )
 		g.giSpecSky = specSky;
 		g.giDoc = scene->nifModel;
 		g.giVersion = s.giVersion.value( scene->nifModel );
+		g.giFadeVersion = s.giFadeVersion.value( scene->nifModel );
+	} else if ( G && pass != 2 && !G->rgba.empty() && g.giTex && g.giFadeVersion != s.giFadeVersion.value( scene->nifModel ) ) {
+		// lane GIPROBE2: a smoothing step changed the grid's values only: its slabs again, nothing else
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
+		fn->glBindTexture( GL_TEXTURE_3D, g.giTex );
+		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+		const int slabs = G->slotRooms.empty() ? 6 : 12;
+		fn->glTexSubImage3D( GL_TEXTURE_3D, 0, 0, 0, 0, G->dims[0], G->dims[1], G->dims[2] * slabs, GL_RGBA, GL_FLOAT, G->rgba.data() );
+		g.giFadeVersion = s.giFadeVersion.value( scene->nifModel );
 	}
 	const bool skyDraw = G && pass == 2 && g.skyTex && g.skyDoc == scene->nifModel;
 	const bool giDraw = skyDraw || ( G && pass != 2 && g.giTex && g.giDoc == scene->nifModel );

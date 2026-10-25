@@ -88,6 +88,9 @@ struct ProbeBakeSpec
 	 *  sphere stands outside the shell: moved to the nearest clear point under it, or dropped (>= 1: off). */
 	float backMax = 0.25f;
 	QString backDump;   //!< the gate's list of every probe's share and fate (empty: none)
+	//! lane GIPROBE2: a probe whose nearest front face is under this many units is pushed into clear air (0: off)
+	float probeClear = 0;
+	QString clearDump;  //!< the gate's list: each probe's nearest front face before/after and where it went
 	/*! lane SMOOTHN1: noise-driven ray counts. Every probe casts `rays` (today's set); one whose light-free
 	 *  estimate is still noisy (an octant's standard error over max(adaptRel x its mean, adaptAbs)) takes
 	 *  another batch of `rays`, turned at random, up to adaptMax batches. 1 = the base set alone (the
@@ -173,6 +176,12 @@ struct ProbeBakeResult
 	int backMoved = 0, backDropped = 0;
 	double backShareMax = 0;
 	std::vector<int> backHist;              //!< probes per 0.05 of back-face share (20 bins), before the rule
+	// lane GIPROBE2: probes out of walls
+	bool clearRule = false;
+	float clearMin = 0;
+	qint64 clearTested = 0;
+	int clearShort = 0, clearMoved = 0, clearStill = 0;
+	double clearMoveMax = 0;
 	// lane SMOOTHN1
 	qint64 smoothTris = 0, nmapTris = 0;    //!< soup triangles with vertex normals; with a tangent-space normal map
 	qint64 smoothHits = 0, nmapHits = 0;    //!< surfel hits given a smooth normal; samples a normal map bent

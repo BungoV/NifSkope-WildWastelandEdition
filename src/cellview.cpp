@@ -5589,6 +5589,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				if ( wwEnvIsSet( "WW_CELL_PROBE_BACKMAX" ) )
 					bs.backMax = wwEnvStr( "WW_CELL_PROBE_BACKMAX" ).toFloat();
 				bs.backDump = wwEnvStr( "WW_CELL_PROBE_BACKDUMP" );
+				// lane GIPROBE2: Probes out of walls (Show menu; the row reopens the cell, so this bake sees it)
+				bs.probeClear = wwLookOn( WwLook::ProbeClear ) ? 32.0f : 0.0f;
+				bs.clearDump = wwEnvStr( "WW_CELL_PROBE_CLEAR_DUMP" );
 				bs.waterDump = wwEnvStr( "WW_CELL_WATER_BAKEDUMP" );   // lane WATER1
 				for ( const QString & q : wwEnvStr( "WW_CELL_WATER_BAKEDUMP_PROBES" ).split( ';', Qt::SkipEmptyParts ) ) {
 					const QStringList c = q.split( ',' );
@@ -6059,8 +6062,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			gs.rooms.red = QString::fromLatin1( wwEnv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
 			gs.space = volGiOn ? volGi : nullptr;   // lane VOLFIT1: WW_CELL_VOLUMES_GI=1, the Space rooms are the GI's rooms
 			// lane GPURELIGHT1 (10-23): Probe sharing (Show menu); a later tick relights through probesky.cpp
-			gs.share = wwLookOn( WwLook::ProbeShare );
+			gs.share = wwLookOn( WwLook::ProbeShare ) || wwLookOn( WwLook::ProbeShareWide );   // GIPROBE2: wide implies sharing
 			gs.shareRed = wwEnvStr( "WW_CELL_GI_SHARE_RED" ).trimmed();
+			// lane GIPROBE2: Wide probe sharing (3 steps) and Probe depth visibility, both relit live by probesky.cpp
+			gs.sharePasses = wwLookOn( WwLook::ProbeShareWide ) ? 3 : 1;
+			gs.depthVis = wwLookOn( WwLook::ProbeDepthVis );
+			gs.depthVisRed = wwEnvStr( "WW_CELL_GI_DEPTHVIS_RED" ).trimmed();
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
 			// lane SKYINT1: and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
 			const quint16 cf = spec.interior ? cellInteriorFlags( world.interior() ) : quint16( 0 );

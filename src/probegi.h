@@ -152,6 +152,11 @@ struct ProbeGiResult
 	double shareNuMean = 0, shareMoved = 0, shareReach = 0, msShare = 0;
 	std::vector<int> shareStart, shareProbe;   //!< per probe its kept neighbours (the dump's gi_share.bin)
 	std::vector<float> shareG, shareNu;
+	int sharePasses = 1;
+	//! lane GIPROBE2 depth visibility: weights tested, of them cut (< 1), the mean factor over the tested, its build ms
+	bool depthVisOn = false;
+	qint64 depthVisTested = 0, depthVisCut = 0;
+	double depthVisMean = 0, msDepthVis = 0;
 };
 
 struct ProbeGiSpec
@@ -213,6 +218,13 @@ struct ProbeGiSpec
 	 *  shareRed (WW_CELL_GI_SHARE_RED): "nowall" skips the room and wall tests (the leak gate's red) */
 	bool share = false;
 	QString shareRed;
+	//! lane GIPROBE2: Wide probe sharing: the share step runs this many times with nu kept (1 = one step, as before)
+	int sharePasses = 1;
+	/*! lane GIPROBE2: Probe depth visibility (DDGI, Majercik 2019): each probe keeps an 8x8 octahedral map of the mean and
+	 *  mean square distance its links see; a point past the mean takes the Chebyshev bound (cubed, floor 0.05) on its
+	 *  blend and feed weight. depthVisRed (WW_CELL_GI_DEPTHVIS_RED): "flat" every texel the probe's mean (no direction) */
+	bool depthVis = false;
+	QString depthVisRed;
 };
 
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.

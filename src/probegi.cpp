@@ -1164,6 +1164,41 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		ph[Key3 { floorDiv( float( up[i].p[0] ), float( rad ) ), floorDiv( float( up[i].p[1] ), float( rad ) ),
 			floorDiv( float( up[i].p[2] ), float( rad ) ) }].push_back( int( i ) );
 
+	// lane GIPROBE2: Probe depth visibility, each probe's distance moments from its links (proberelight.h)
+	const bool dvOn = spec.depthVis;
+	const int dvT = 2 * kDepthVisN * kDepthVisN;
+	std::vector<float> dvM;
+	std::atomic<qint64> dvTested( 0 ), dvCut( 0 );
+	std::atomic<qint64> dvSum( 0 );
+	const double dvBias = 0.5 * v;
+	if ( dvOn ) {
+		const double d0 = clock.nsecsElapsed() / 1e6;
+		dvM.assign( up.size() * size_t( dvT ), 0.0f );
+		const bool flat = spec.depthVisRed == QLatin1String( "flat" );
+		parallelFor( up.size(), [&]( size_t j ) {
+			const int k0 = R.probeLinkStart[j], k1 = R.probeLinkStart[j + 1];
+			std::vector<double> lv( size_t( k1 - k0 ) * 3 ), lw( size_t( k1 - k0 ) );
+			for ( int k = k0; k < k1; k++ ) {
+				const double * s = us[size_t( R.probeLinks[size_t( k )] )].p;
+				for ( int a = 0; a < 3; a++ )
+					lv[size_t( k - k0 ) * 3 + size_t( a )] = s[a] - up[j].p[a];
+				lw[size_t( k - k0 )] = lks[size_t( k )].omega;
+			}
+			probeDepthVisBuild( lv.data(), lw.data(), lw.size(), 8.0 * rad, flat, &dvM[j * size_t( dvT )] );
+		} );
+		R.depthVisOn = true;
+		R.msDepthVis = clock.nsecsElapsed() / 1e6 - d0;
+	}
+	auto dvWeight = [&]( int j, const double o[3] ) -> double {
+		const double q[3] = { o[0] - up[size_t( j )].p[0], o[1] - up[size_t( j )].p[1], o[2] - up[size_t( j )].p[2] };
+		const double w = probeDepthVisWeight( &dvM[size_t( j ) * size_t( dvT )], q, dvBias );
+		dvTested++;
+		if ( w < 1.0 )
+			dvCut++;
+		dvSum += qint64( std::llround( w * 1e6 ) );   // the census mean, in millionths
+		return w;
+	};
+
 	/* ---- lane BOUNCE2: more than one bounce (probegi.h). What each surfel reads: the probes within the radius
 	 * it can see from its own point and that stand in its room, else the closest such within twice the radius. */
 	const double msBefore = clock.nsecsElapsed() / 1e6;
@@ -1235,7 +1270,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				}
 				if ( inRadius ) {
 					const double t = 1.0 - c.first / ( rad * rad );
-					feed[i].emplace_back( c.second, float( t * t ) );
+					feed[i].emplace_back( c.second, float( dvOn ? t * t * dvWeight( c.second, o ) : t * t ) );
 				} else {
 					feed[i].emplace_back( c.second, 1.0f );
 					closest++;
@@ -1555,32 +1590,47 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				}
 				nu[j] = probeShareNu( sum, sq, P.kUnl, sky );
 			} );
-			parallelFor( up.size(), [&]( size_t j ) {
-				double acc[18], as = 0.0;
-				std::memcpy( acc, up[j].E, sizeof acc );
-				for ( int k = R.shareStart[j]; k < R.shareStart[j + 1]; k++ ) {
-					const double a = nu[j] * shareGd[size_t( k )];
-					if ( a <= 0.0 )
-						continue;
-					as += a;
-					const double * Q = &up[size_t( R.shareProbe[size_t( k )] )].E[0][0];
-					for ( int q = 0; q < 18; q++ )
-						acc[q] += a * Q[q];
-				}
-				for ( int q = 0; q < 18; q++ )
-					ES[j * 18 + size_t( q )] = acc[q] / ( 1.0 + as );
-			} );
+			// lane GIPROBE2: Wide probe sharing repeats the step with nu kept; the census compares with the unshared E
+			const int sp = std::max( 1, spec.sharePasses );
+			std::vector<double> E0;
+			if ( sp > 1 )
+				for ( const UP & P : up )
+					E0.insert( E0.end(), &P.E[0][0], &P.E[0][0] + 18 );
 			double num = 0.0, den = 0.0, nus = 0.0;
-			for ( size_t j = 0; j < up.size(); j++ ) {
-				double * E = &up[j].E[0][0];
-				for ( int q = 0; q < 18; q++ ) {
-					num += std::fabs( ES[j * 18 + size_t( q )] - E[q] );
-					den += std::fabs( E[q] );
-					E[q] = ES[j * 18 + size_t( q )];
+			for ( int pass = 0; pass < sp; pass++ ) {
+				parallelFor( up.size(), [&]( size_t j ) {
+					double acc[18], as = 0.0;
+					std::memcpy( acc, up[j].E, sizeof acc );
+					for ( int k = R.shareStart[j]; k < R.shareStart[j + 1]; k++ ) {
+						const double a = nu[j] * shareGd[size_t( k )];
+						if ( a <= 0.0 )
+							continue;
+						as += a;
+						const double * Q = &up[size_t( R.shareProbe[size_t( k )] )].E[0][0];
+						for ( int q = 0; q < 18; q++ )
+							acc[q] += a * Q[q];
+					}
+					for ( int q = 0; q < 18; q++ )
+						ES[j * 18 + size_t( q )] = acc[q] / ( 1.0 + as );
+				} );
+				const bool last = pass + 1 == sp;
+				for ( size_t j = 0; j < up.size(); j++ ) {
+					double * E = &up[j].E[0][0];
+					for ( int q = 0; q < 18; q++ ) {
+						if ( last ) {
+							const double e0 = sp > 1 ? E0[j * 18 + size_t( q )] : E[q];
+							num += std::fabs( ES[j * 18 + size_t( q )] - e0 );
+							den += std::fabs( e0 );
+						}
+						E[q] = ES[j * 18 + size_t( q )];
+					}
 				}
+			}
+			for ( size_t j = 0; j < up.size(); j++ ) {
 				nus += nu[j];
 				R.shareNu.push_back( float( nu[j] ) );
 			}
+			R.sharePasses = sp;
 			R.shareOn = true;
 			R.shareMoved = den > 0.0 ? num / den : 0.0;
 			R.shareNuMean = nus / double( up.size() );
@@ -1739,7 +1789,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 									}
 								}
 								const double t = 1.0 - d2 / ( r * r );
-								const double w = t * t;
+								const double w = dvOn ? t * t * dvWeight( j, o ) : t * t;
 								wsum += w;
 								if ( REC ) {
 									RecBlend rb;
@@ -2206,6 +2256,9 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		for ( const double * a : { u.p, u.n, u.a, u.B } )
 			for ( int c = 0; c < 3; c++ )
 				R.surfelOut.push_back( float( a[c] ) );
+	R.depthVisTested = dvTested;   // lane GIPROBE2
+	R.depthVisCut = dvCut;
+	R.depthVisMean = dvTested ? double( dvSum ) / 1e6 / double( dvTested ) : 1.0;
 	R.probeCube.reserve( up.size() * 21 );
 	for ( const UP & P : up ) {
 		for ( int c = 0; c < 3; c++ )
@@ -2584,7 +2637,11 @@ QString probeGiCensusText( const ProbeGiResult & r )
 		+ ( r.shareOn ? QStringLiteral( "\n  gi share: %1 neighbour entries within %2 u (%3 segments tested, %4 blocked, %5 other room); "
 			"mean nu %6, E moved %7 %, %8 ms" ).arg( r.shareEntries ).arg( r.shareReach, 0, 'f', 0 ).arg( r.shareRays )
 			.arg( r.shareBlocked ).arg( r.shareOtherRoom ).arg( r.shareNuMean, 0, 'f', 4 ).arg( 100.0 * r.shareMoved, 0, 'f', 3 )
-			.arg( r.msShare, 0, 'f', 1 ) : QString() );   // lane GPURELIGHT1
+			.arg( r.msShare, 0, 'f', 1 ) + ( r.sharePasses > 1 ? QStringLiteral( ", %1 steps (Wide probe sharing)" )
+			.arg( r.sharePasses ) : QString() ) : QString() )   // lane GPURELIGHT1
+		+ ( r.depthVisOn ? QStringLiteral( "\n  gi depth visibility: %1 blend and feed weights tested, %2 cut below 1, mean "
+			"factor %3, moments built in %4 ms" ).arg( r.depthVisTested ).arg( r.depthVisCut ).arg( r.depthVisMean, 0, 'f', 4 )
+			.arg( r.msDepthVis, 0, 'f', 1 ) : QString() );   // lane GIPROBE2
 }
 
 /* The dump (little-endian):
@@ -2790,6 +2847,9 @@ int probeGiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--rooms-red" ) ) { gs.rooms.red = nx; i++; }
 		else if ( a == QLatin1String( "--share" ) ) { gs.share = nx.toInt() != 0; i++; }   // lane GPURELIGHT1: Probe sharing
 		else if ( a == QLatin1String( "--share-red" ) ) { gs.shareRed = nx; i++; }
+		else if ( a == QLatin1String( "--share-passes" ) ) { gs.sharePasses = nx.toInt(); i++; }   // lane GIPROBE2
+		else if ( a == QLatin1String( "--depthvis" ) ) { gs.depthVis = nx.toInt() != 0; i++; }
+		else if ( a == QLatin1String( "--depthvis-red" ) ) { gs.depthVisRed = nx; i++; }
 		else if ( a == QLatin1String( "--room-split" ) ) { bs.roomSplit = nx.toInt() != 0; i++; }   // lane GAPBAKE1
 		else if ( a == QLatin1String( "--pinch" ) ) { gs.rooms.pinch = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--cell" ) ) { gs.rooms.cell = nx.toFloat(); i++; }
