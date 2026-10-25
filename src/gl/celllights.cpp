@@ -265,6 +265,7 @@ struct Gpu
 	int bufCurveRed = 0;
 	int bufGobo = -1;	// lane LIGHTS5 (GOBO1): the Light patterns row the buffer was built with
 	bool goboAny = false;
+	int goboTbl = 0;	// lane GOBO2: the texel of the per-light table of omni/box pattern records (0 none)
 	// lane LIGHTS5 (FOGSCALE1): each light's fog.scale (empty = every light 1), re-read at most every half second
 	std::vector<float> fogVals;
 	quint64 fogStamp = 0, bufFogStamp = 0, fogRecxGen = ~0ULL, fogSwitchGen = ~0ULL;
@@ -1202,11 +1203,15 @@ void wwCellLightsUniforms( Scene * scene )
 		 * (header w h, mean, rows), a spot's texel 5.w = 1 + its header; FOGSCALE1: the scales, 4 a texel. */
 		std::vector<float> x;
 		const size_t per = kTexelsPerLight * 4, nL = size_t( L->lights.size() ), lightTexels = t.size() / 4;
-		int goboSpots = 0, goboUnread = 0;
+		int goboSpots = 0, goboUnread = 0, goboOmni = 0;
 		QHash<QString, int> goboAt;
+		/* lane GOBO2: an omni, hemisphere or box light's pattern: a record of 3 texels (local x + 1 + its header, y, z);
+		 * pin WW_CELL_GOBO_OMNI=off keeps spots only (LIGHTS5) */
+		WW_SWITCH_STATIC( bool, omniOff, wwEnv( "WW_CELL_GOBO_OMNI" ).trimmed() == "off" );
+		std::vector<float> omniRec( nL, 0.0f );
 		for ( size_t i = 0; goboOn && i < nL; i++ ) {
 			const WwCellLight & l = L->lights.at( qsizetype( i ) );
-			if ( !l.spot || l.gobo.isEmpty() )
+			if ( l.gobo.isEmpty() || ( !l.spot && omniOff ) )
 				continue;
 			const QString key = l.gobo.toLower();
 			int at = goboAt.value( key, -2 );
@@ -1226,16 +1231,33 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 			if ( at < 0 )
 				continue;
+			if ( !l.spot ) {
+				goboOmni++;
+				omniRec[i] = float( lightTexels + x.size() / 4 + 1 );
+				const float rec[12] = { l.goboX[0], l.goboX[1], l.goboX[2], float( at + 1 ), l.goboY[0], l.goboY[1], l.goboY[2], 0,
+					l.goboZ[0], l.goboZ[1], l.goboZ[2], 0 };
+				x.insert( x.end(), rec, rec + 12 );
+				continue;
+			}
 			goboSpots++;
 			const float t56[8] = { l.goboY[0], l.goboY[1], l.goboY[2], float( at + 1 ), l.goboZ[0], l.goboZ[1], l.goboZ[2], l.goboTan };
 			for ( size_t o = i * per; o + per <= t.size(); o += nL * per )	// every copy
 				std::copy( t56, t56 + 8, t.begin() + std::ptrdiff_t( o + 20 ) );
 		}
-		g.goboAny = goboSpots > 0;
+		g.goboTbl = 0;
+		if ( goboOmni ) {	// lane GOBO2: 1 + each light's record (every copy), 4 a texel
+			g.goboTbl = int( lightTexels + x.size() / 4 );
+			for ( size_t j = 0; j < t.size() / per; j++ )
+				x.push_back( omniRec[j % nL] );
+			while ( x.size() % 4 )
+				x.push_back( 0.0f );
+		}
+		g.goboAny = goboSpots + goboOmni > 0;
 		{
-			const QByteArray echo = QStringLiteral( "cell gobo: %1 spots with a pattern, %2 textures (%3 unread)%4" )
+			const QByteArray echo = QStringLiteral( "cell gobo: %1 spots with a pattern, %2 textures (%3 unread)%4; omni/box %5%6" )
 				.arg( goboSpots ).arg( goboAt.size() - goboUnread ).arg( goboUnread )
-				.arg( goboOn ? QString() : QStringLiteral( " (Light patterns off)" ) ).toUtf8();
+				.arg( goboOn ? QString() : QStringLiteral( " (Light patterns off)" ) )
+				.arg( goboOmni ).arg( omniOff ? QStringLiteral( " (pin off)" ) : QString() ).toUtf8();
 			static QByteArray said;
 			if ( echo != said ) {
 				said = echo;
@@ -1723,6 +1745,10 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni1b( "cellGoboOn", g.goboAny );
 		prog->uni1i( "cellGoboRot", goboRot );
 		prog->uni1b( "cellGoboFlat", goboFlat );
+		// lane GOBO2: the omni/box records and the mapping guess (WW_CELL_GOBO_OMNI 0-7, the game's is unknown)
+		WW_SWITCH_STATIC( int, goboMap, wwEnvInt( "WW_CELL_GOBO_OMNI" ) & 7 );
+		prog->uni1i( "cellGoboTbl", g.goboTbl );
+		prog->uni1i( "cellGoboMap", goboMap );
 		prog->uni1b( "cellFogScaleOn", g.fogBase >= 0 );
 		prog->uni1i( "cellFogScaleBase", std::max( g.fogBase, 0 ) );
 	}
