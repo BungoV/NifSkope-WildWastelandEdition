@@ -55,7 +55,6 @@ int main()
 		std::printf( "%s %s live\n", live ? "PASS" : "FAIL", n );
 		g_fail += live ? 0 : 1;
 	}
-	check( wwSwitchStageOf( "WW_CELL_FARLOD" ) == WwSwitchStage::Reopen, "WW_CELL_FARLOD on/off stays reopen" );
 	// lane FAR6: Game LOD trees sway rebuilds the far section in place; the self-test rides the ground-gate row
 	for ( const char * n : { "WW_CELL_FARLOD_BTOSWAY", "WW_CELL_FARLOD_BTOSWAY_RED", "WW_SHADOW_GROUNDGATE",
 			"WW_SHADOW_GROUNDGATE_RED", "WW_SHADOW_SLOPEMAP", "WW_SHADOW_SLOPEMAP_RED" } ) {
@@ -67,6 +66,20 @@ int main()
 	wwSwitchSet( "WW_CELL_FARLOD_BTOSWAY", "1", false );
 	check( wwSwitchMovedFor( far, { "WW_CELL_FARLOD" } ), "far section sees WW_CELL_FARLOD_BTOSWAY" );
 	check( wwSwitchStageOf( "WW_CELL_SPEED_RED" ) == WwSwitchStage::Reopen, "WW_CELL_SPEED_RED reopen (was relaunch)" );
+
+	// LIVESET4: far on/off + type, the per-cell switches (streamed cells stream again) and the weather plugin list
+	for ( const char * n : { "WW_CELL_FARLOD", "WW_CELL_FARLOD_TYPE", "WW_CELL_ACTORS_OUT", "WW_CELL_ACTORS_OUT_RED",
+			"WW_CELL_WEAP_PARTS", "WW_CELL_WEAP_PARTS_RED", "WW_LOOKDEV_PLUGINS" } ) {
+		const bool live = wwSwitchStageOf( n ) == WwSwitchStage::Live;
+		std::printf( "%s %s live\n", live ? "PASS" : "FAIL", n );
+		g_fail += live ? 0 : 1;
+	}
+	check( wwSwitchStageOf( "WW_MSAA" ) == WwSwitchStage::Relaunch, "WW_MSAA stays relaunch (the GL surface's samples)" );
+	quint64 cells = wwSwitchGen(), probes2 = wwSwitchGen();
+	wwSwitchSet( "WW_CELL_ACTORS_OUT", "0", false );
+	check( wwSwitchMovedFor( cells, { "WW_CELL_FARLOD", "WW_CELL_ACTORS_OUT", "WW_CELL_WEAP_PARTS" } ),
+		"cell section sees WW_CELL_ACTORS_OUT" );
+	check( !wwSwitchMovedFor( probes2, { "WW_CELL_PROBES_HIDE" } ), "probe section ignores WW_CELL_ACTORS_OUT" );
 
 	std::printf( "%s (%d failed)\n", g_fail ? "LIVESWITCH FAIL" : "LIVESWITCH PASS", g_fail );
 	return g_fail ? 1 : 0;

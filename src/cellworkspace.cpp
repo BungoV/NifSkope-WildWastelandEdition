@@ -839,7 +839,7 @@ void CellWorkspacePanel::buildUi()
 		if ( glView )
 			glView->update();
 	} );
-	// lane FAR6 (bungo: settings update live, like games): the far LOD rebuilds in place when it can
+	// lane LIVESET4 (bungo: settings update live, like games): the far LOD and the streamed cells rebuild in place
 	auto liveFirst = [this]() {
 		QString why;
 		const int r = cellLiveRebuild( nif, &why );
@@ -855,7 +855,7 @@ void CellWorkspacePanel::buildUi()
 		connect( lookActions.at( k ), &QAction::toggled, this, [this, k, liveFirst]( bool on ) {
 			wwLookSet( WwLook( k ), on );
 			if ( wwLookReopens( WwLook( k ) ) && !syncing && !g_path.isEmpty() ) {	// lane GAPLOOK2: built when the cell opens
-				if ( WwLook( k ) == WwLook::BtoSway && liveFirst() )
+				if ( liveFirst() )
 					return;
 				g_over = g_spec;
 				g_haveOverrides = true;
@@ -946,18 +946,22 @@ void CellWorkspacePanel::buildUi()
 			glView->update();
 	} );
 	// lane FARLOD1: the far field is document geometry, so the cell is built again with (or without) it
-	connect( cellFarLodTypeGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+	connect( cellFarLodTypeGroup, &QActionGroup::triggered, this, [this, liveFirst]( QAction * a ) {
 		cellFarLodSetType( a->data().toInt() == 0 ? WwFarLodVanilla : WwFarLodFo4cs );
 		if ( syncing || g_path.isEmpty() || !cellFarLodWanted() )
+			return;
+		if ( liveFirst() )
 			return;
 		g_over = g_spec;
 		g_haveOverrides = true;
 		say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
 		emit reopenRequested( g_path );
 	} );
-	connect( cellFarLod, &QAction::toggled, this, [this]( bool on ) {
+	connect( cellFarLod, &QAction::toggled, this, [this, liveFirst]( bool on ) {
 		cellFarLodSetWanted( on );
 		if ( syncing || g_path.isEmpty() )
+			return;
+		if ( liveFirst() )
 			return;
 		g_over = g_spec;
 		g_haveOverrides = true;

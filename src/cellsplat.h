@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 
 #include <vector>
 
+#include "cellblockmap.h"
 #include "cellground.h"
 
 class EsmWorld;
@@ -200,6 +201,8 @@ void wwCellLandBegin( const void * nif );
 void wwCellLandShape( const void * nif, int block );
 // lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
 void wwCellLandForget( const void * nif, int block );
+//! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)
+void wwCellLandRemap( const void * nif, const WwBlockMap & m );
 bool wwCellLandIs( const void * nif, int block );
 
 //! The one-line summary for the scene notes, in the shape cellGroundLegend uses.

@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FAR7 (2026-10-26, branch far7-20261025): FAR6 follow-ups -- sway live in a streamed view, a lower relief edge
+
+- **Game LOD trees sway is live in a streamed view too** (`WW_CELL_FARLOD_BTOSWAY`): the branch merges LIVESET4,
+  whose liveFirst tries the in-place rebuild for every look that reopens (FAR6 tried it for this look only) and whose
+  far section rebuild suspends the streamer, rebuilds the far tail and streams the cells again. FAR6's streamed
+  views reopened the cell. The merge kept both lanes' copies of `cellLiveRebuild`; one is dropped.
+- **Object LOD shadows on ground only: the relief gate's low edge is 2 far texels** (`WW_SHADOW_GROUNDGATE`, still
+  OFF): 256 u at Ultra, 320 u at Low-High (FO4CS: 293 u). FAR6's 4 texels (512/640 u) dropped real house shadows on
+  the ground by the terrace; an offline model of the map (notes/far7/relief) cut the shadow error from 19.8 to 8.3
+  points (Ultra) and 32.7 to 8.6 (High) with no new false dark; 1.5 texels and below brought the map's self-shadow
+  back on the ground at High. Red `WW_SHADOW_GROUNDGATE_RED=far6` (4 texels). Off draws what it drew.
+
 ## Lane FAR6 (2026-10-25, branch far6-20261025): FAR5 leftovers -- one look made live, the self-test, the terrace check
 
 - **Game LOD trees sway is live** (`WW_CELL_FARLOD_BTOSWAY`): ticking it rebuilds the far LOD in place
@@ -68,6 +80,54 @@ Each is a Show-menu tick (src/gl/celllooks.*) with its own pin and red; off draw
   triangles, kept array bytes and what the process paid (private bytes, peak).
 - GPU: ring 1 now draws (about 3.6 M more triangles at Concord) in far fewer draws; expected about 1 ms at 1080p,
   not yet measured (rows in the lane notes).
+## Lane LIVESET4 (2026-10-25, branch liveset4-20261025): far LOD on/off and streamed cells live
+
+- **Far LOD on/off and its type are live (WW_CELL_FARLOD, WW_CELL_FARLOD_TYPE, the menu rows):** the far section is
+  added, cut or rebuilt in place. The near cells keep the plugin stack they loaded; when a set would change that stack
+  (an adopted far stack with other plugins, a stack red), the reply names it and the window reopens as before.
+- **Actors outdoors and weapon parts are live in a streamed view (WW_CELL_ACTORS_OUT, WW_CELL_WEAP_PARTS, their reds):**
+  the streamed cells are dropped and streamed again with the new value. A fixed block (harness, bake, interior) welds
+  them with the statics and still reopens, with the reason in the reply.
+- **Streamed particle blocks are reused:** particles copied into a streamed cell take their blocks from the stream's
+  pool, so roaming no longer grows the document.
+- **WW_LOOKDEV_PLUGINS is live:** a set or unset loads the weather plugins again.
+- The 176 switches that still need a relaunch are all test-only (harness rows, shot and bake drivers, startup reads);
+  the list with a reason each is in the lane notes.
+
+## Lane LIVESET3 (2026-10-23, branch liveset3-20261023): live sets in the middle of the cell, streamed cells
+
+- **Blocks removed or moved from the middle of a cell document, deterministically:** `NifModel::removeBlockRange` and
+  `moveBlockRange`, and every side table keyed by block number (land, cull, fx lights, grass, water, highlight, live
+  door) follows the renumbering (src/cellblockmap.h). The document after a live set is the one a fresh open builds.
+- **Show probes is live everywhere (WW_CELL_PROBES_HIDE):** the probe markers are put back exactly where a fresh open
+  builds them, or cut from there; before, markers built at open owed a reopen.
+- **Far LOD live with streamed cells (FARSTREAM):** a live far LOD set drops the streamed cells with it, rebuilds the
+  far LOD and starts the streamer again from the open's tables.
+- **Particles in streamed cells (STREAMPSYS1):** cells streamed while the camera moves get the same placed particle
+  systems a fresh open copies (same filter; WW_CELL_PARTICLES_MAX over the whole stream).
+- **Reopen keeps the view (FARSTACK):** far LOD on/off, its type and the stack reds change which plugins the near cells
+  load, so the cells are welded again; the reopen in the same window now keeps the camera where it was.
+- **Stage fixes:** WW_CELL_ACTORS_OUT, WW_CELL_WEAP_PARTS(_RED) were marked live but are welded at build: they now
+  reopen. WW_CELL_PARTICLES_RED, WW_CELL_SHADOW_RED and the WW_LODI_GROUP_* knobs re-read after a set (were relaunch).
+
+## Lane LIVESET2 (2026-10-23, branch liveset2-20261023): live-set crashes, fog bloom, far budget
+
+- **Crash on a live WW_TONEMAP1_RED=1 or WW_CELL_HDR_STEX_RED=1 set (TONEMAPCRASH1, STEXCRASH1, one bug):** both reds
+  make the linear frame's depth / stencil a renderbuffer, so the GPU-driven occlusion pass finally saw 24 depth bits and
+  ran. Its occluder list kept `&f.recs[sh]` while later inserts grew that QHash, which moves its values; the next frame
+  read freed memory. The pointers are now taken after the last insert. Offline proof: notes/liveset2/unit/qhashref.cpp
+  (Qt 6.11: 3032 of 4000 kept pointers moved).
+- **Fog bloom always fell back (GL error 1282):** the frame's depth / stencil is a texture by default (TONEMAP1), and the
+  fog bloom attached it as a renderbuffer. It now attaches a texture as a texture. The fog bloom row draws what it was
+  meant to; its cost is the measured pass (`WW_CELL_FOGBLOOM_TIME=1`).
+- **GPU-driven occlusion in the default view (speed, on with GPU-driven B):** the depth-format query on the linear
+  frame's depth / stencil texture reads 0 bits, so occlusion never ran outside the reds. It now takes the frame's own
+  format. `WW_GPUDRIVEN_B_FMT_RED=1` is the old 0-bit path (test red); `WW_GPUDRIVEN_B_OCC=0` still turns occlusion off.
+  Its 1080p cost is not measured yet (rows c3_ls2_ref / _fmtred / _occoff with WW_GPUDRIVEN_CENSUS=1).
+- **Vanilla far budget (LIVESET-VANBUDGET):** the vanilla far chunks stopped at a working-set rise, so a live far rebuild
+  (freed pages reused) placed more chunks than a fresh open. The budget now charges an estimate: our built rings'
+  vertices plus the vanilla triangles appended so far (2.4 KB a triangle, FINALFIX g3). Same state, same far field.
+  `WW_CELL_FARLOD_VANBUDGET_RED=1` is the working set as before.
 
 ## Lane FXPARITY1 (2026-10-23, branch fxparity1-20261023): particles follow the game's rules (off by default)
 

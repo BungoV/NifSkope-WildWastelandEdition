@@ -674,6 +674,19 @@ void wwCellGrassForget( const void * nif, int block )
 		w->remove( block );
 }
 
+void wwCellGrassRemap( const void * nif, const WwBlockMap & m )
+{
+	auto s = gs().shapes.find( nif );
+	if ( s != gs().shapes.end() )
+		wwRemapKeys( *s, m );
+	auto w = gs().wave.find( nif );
+	if ( w != gs().wave.end() )
+		wwRemapKeys( *w, m );
+	auto f = gs().noFade.find( nif );
+	if ( f != gs().noFade.end() )
+		wwRemapKeys( *f, m );
+}
+
 bool wwCellGrassWind( float wind[4], float wind2[4] )
 {
 	quint8 w[4] = { 0, 0, 0, 0 };

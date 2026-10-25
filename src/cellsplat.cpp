@@ -601,6 +601,14 @@ void wwCellLandForget( const void * nif, int block )
 		d->remove( block );
 }
 
+void wwCellLandRemap( const void * nif, const WwBlockMap & m )
+{
+	QMutexLocker lock( &landMutex() );
+	auto d = landDocs().find( nif );
+	if ( d != landDocs().end() )
+		wwRemapKeys( *d, m );
+}
+
 void wwCellLandShape( const void * nif, int block )
 {
 	QMutexLocker lock( &landMutex() );

@@ -61,12 +61,15 @@ struct StreamCell
 	bool emitted = false;                           //!< every block written; links and hookup still to do
 	size_t linked = 0;                              //!< containers whose links are updated
 	double writeMs = 0.0;
+	int pfx = 0;                                    //!< lane LIVESET3: particle copies it holds (the stream's cap)
 };
 
 bool isNodeType( const QString & t )
 {
 	return t == QLatin1String( "BSTriShape" ) || t == QLatin1String( "NiNode" ) || t == QLatin1String( "BSOrderedNode" )
-		|| t == QLatin1String( "NiBillboardNode" );
+		|| t == QLatin1String( "NiBillboardNode" ) || t == QLatin1String( "NiParticleSystem" )
+		|| t == QLatin1String( "BSStripParticleSystem" ) || t == QLatin1String( "NiParticles" )
+		|| t == QLatin1String( "BSMasterParticleSystem" );
 }
 
 const char * g_phase = "idle";   // the tick step a traced line came from
@@ -171,6 +174,23 @@ public:
 	}
 
 	double wireOwedMs() const override { return sliceNodes * wirePerNodeMs; }
+
+	QHash<QString, std::shared_ptr<NifModel>> pfxSrc;   //!< lane LIVESET3: particle models, one parse a stream
+	int pfxLive = 0;                                    //!< particle copies in the attached cells
+
+	void adopt( NifModel * m, int block ) override
+	{
+		if ( writing )
+			writing->takes.emplace_back( block, m->itemName( m->getBlockIndex( block ) ) );
+	}
+
+	QHash<QString, std::shared_ptr<NifModel>> * pfxModels() override { return &pfxSrc; }
+
+	int pfxRoom() const override
+	{
+		WW_SWITCH_STATIC( int, cap, wwEnvIsSet( "WW_CELL_PARTICLES_MAX" ) ? wwEnvInt( "WW_CELL_PARTICLES_MAX" ) : 512 );
+		return cap - pfxLive;
+	}
 
 	bool tick( Scene * sc, const Vector3 & eye );
 	bool busy() const;
@@ -467,6 +487,15 @@ bool Stream::write( StreamCell & c, double budget )
 	g_phase = "wire";
 	const size_t before = c.nodes.size();
 	wire( c );
+	if ( done && c.chunk && c.chunk->pfxCopies > c.pfx ) {
+		// lane LIVESET3 (STREAMPSYS1): the copied branches' nodes were made with their parent; the cell keeps them
+		pfxLive += c.chunk->pfxCopies - c.pfx;
+		c.pfx = c.chunk->pfxCopies;
+		for ( const auto & tk : c.takes )
+			if ( isNodeType( tk.second ) && !c.nodes.contains( tk.first ) )
+				if ( Node * pn = scene->nodes.get( nif->getBlockIndex( tk.first ) ) )
+					c.nodes.insert( tk.first, pn );
+	}
 	const int made = int( c.nodes.size() - before );
 	if ( made > 0 )
 		wirePerNodeMs = 0.7 * wirePerNodeMs + 0.3 * ( ( msOf( t ) - emitMs ) / made );
@@ -570,6 +599,8 @@ void Stream::unload( StreamCell & c )
 			.arg( c.x ).arg( c.y ).arg( msOf( t ), 0, 'f', 1 ).arg( msForget, 0, 'f', 1 ).arg( msShapes - msForget, 0, 'f', 1 )
 			.arg( msNodes - msShapes, 0, 'f', 1 ).arg( msOf( t ) - msNodes, 0, 'f', 1 ).arg( ns.size() ).arg( props.size() ) );
 	toReset.insert( toReset.end(), c.takes.begin(), c.takes.end() );
+	pfxLive -= c.pfx;
+	c.pfx = 0;
 	c.takes.clear();
 	c.takesSeen = 0;
 	c.nodes.clear();
@@ -930,6 +961,24 @@ void cellStreamStop( NifModel * nif )
 	auto it = m.find( nif );
 	if ( it != m.end() )
 		m.erase( it );   // joins its worker
+}
+
+std::shared_ptr<CellStreamSeed> cellStreamSuspend( NifModel * nif )
+{
+	auto & m = streams();
+	auto it = m.find( nif );
+	if ( it == m.end() )
+		return nullptr;
+	Stream & s = *it->second;
+	std::shared_ptr<CellStreamSeed> seed = s.seed;
+	// the tables as the open left them: the streamed cells' refs, picks, lights and fx shapes go with their blocks
+	cellRefTableMutable() = s.baseRefs;
+	cellPickTableMutable() = s.basePicks;
+	wwCellFxLitBegin( nif );
+	wwCellLightsPublish( nif, seed->base );
+	wwCellFxLitPick( nif );
+	m.erase( it );   // joins its worker
+	return seed;
 }
 
 bool cellStreamTick( NifModel * nif, Scene * scene, const Vector3 & eye )

@@ -122,6 +122,13 @@ void wwCellFxLitForget( const void * nif, int block )
 		d->shapeModel.remove( block );
 }
 
+void wwCellFxLitRemap( const void * nif, const WwBlockMap & m )
+{
+	auto d = st().docs.find( nif );
+	if ( d != st().docs.end() )
+		wwRemapKeys( d->shapeModel, m );
+}
+
 void wwCellFxLitNoOffset( const void * nif, int index, float ratio )
 {
 	if ( st().red & 8 )

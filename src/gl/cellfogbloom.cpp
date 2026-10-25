@@ -123,7 +123,7 @@ bool wwCellFogBloomMarks()
 	return s.on && !s.red;
 }
 
-bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int H, int S, unsigned dsFormat )
+bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int H, int S, unsigned dsFormat, bool dsTexture )
 {
 	FbState & s = fs();
 	s.ran = false;
@@ -216,7 +216,12 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 	if ( ok ) {
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, g.target, 0 );
-		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, GLuint( ds ) );
+		// lane LIVESET2: the frame's depth / stencil is a texture by default (TONEMAP1); a texture name given as a
+		// renderbuffer was GL error 1282 and the fog bloom always fell back to the uniform one
+		if ( dsTexture )
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, GLuint( ds ), 0 );
+		else
+			fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, GLuint( ds ) );
 		fn->glDrawBuffers( 1, &one );
 		if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
 			ok = false;
@@ -262,7 +267,10 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kDepthUnit ) );
 			fn->glBindTexture( GL_TEXTURE_2D, 0 );
 		}
-		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0 );
+		if ( dsTexture )
+			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, 0, 0 );
+		else
+			fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0 );
 		if ( const GLenum e = fn->glGetError(); ok && e != GL_NO_ERROR ) {
 			ok = false;
 			why = QStringLiteral( "the pass failed, GL error %1" ).arg( e );

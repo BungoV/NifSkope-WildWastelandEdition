@@ -140,6 +140,13 @@ void wwCellWaterForget( const void * nif, int block )
 		d->shapeBody.remove( block );
 }
 
+void wwCellWaterRemap( const void * nif, const WwBlockMap & m )
+{
+	auto d = st().docs.find( nif );
+	if ( d != st().docs.end() )
+		wwRemapKeys( d->shapeBody, m );
+}
+
 bool wwCellWaterOn()
 {
 	return !st().pinOff;

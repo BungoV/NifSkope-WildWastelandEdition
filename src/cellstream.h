@@ -32,6 +32,7 @@
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
 
+#include <QHash>
 #include <QPersistentModelIndex>
 #include <QString>
 #include <QVector>
@@ -68,6 +69,12 @@ public:
 	virtual QModelIndex take( NifModel * nif, const QString & type ) = 0;
 	//! The scene-node wiring still owed for this slice's blocks: the writer stops when it would overrun.
 	virtual double wireOwedMs() const { return 0.0; }
+	//! lane LIVESET3 (STREAMPSYS1): a block the writer appended itself (a copied particle branch) joins the cell
+	virtual void adopt( NifModel * nif, int block ) { Q_UNUSED( nif ); Q_UNUSED( block ); }
+	//! lane LIVESET3: particle models parsed once for the whole stream (null = no particles)
+	virtual QHash<QString, std::shared_ptr<NifModel>> * pfxModels() { return nullptr; }
+	//! lane LIVESET3: particle copies still allowed under WW_CELL_PARTICLES_MAX
+	virtual int pfxRoom() const { return 0; }
 };
 
 struct CellChunkBuckets;    // cellview.cpp: the welded buckets, freed as they are written
@@ -93,6 +100,17 @@ struct CellChunk
 	bool started = false;
 	QPersistentModelIndex iGround;
 	std::vector<std::pair<int, int>> fxShapes;     //!< written block, local model serial
+	//! lane LIVESET3 (STREAMPSYS1): placed models with particle systems (the open's filter), copied after the buckets
+	struct Pfx
+	{
+		QString model;
+		Vector3 at;
+		Matrix rot;
+		float scale = 1.0f;
+	};
+	std::vector<Pfx> pfx;
+	bool pfxDone = false;
+	int pfxCopies = 0;
 	qint64 shapes = 0, verts = 0, tris = 0;
 };
 
@@ -102,6 +120,9 @@ bool cellStreamWanted();
 void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed );
 //! This document is about to be rebuilt or closed: drop its streamer (waits for its worker).
 void cellStreamStop( NifModel * nif );
+//! lane LIVESET3: a live set rebuilds the far LOD and the streamed cells after it: drop the streamer, its tables back
+//! to the open's, and hand back its seed to start again
+std::shared_ptr<CellStreamSeed> cellStreamSuspend( NifModel * nif );
 //! One frame (GLView): follow the eye (world units). True when the document or the scene changed.
 bool cellStreamTick( NifModel * nif, Scene * scene, const Vector3 & eye );
 //! Cells queued, building or being written (a shot waits for false). Null = any document.

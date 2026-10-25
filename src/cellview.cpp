@@ -1571,7 +1571,8 @@ struct CellPfxSystem
 };
 
 static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, NifModel & src,
-	const Vector3 & at, const Matrix & rot, float scale, QString * why, QVector<CellPfxSystem> * copied = nullptr )
+	const Vector3 & at, const Matrix & rot, float scale, QString * why, QVector<CellPfxSystem> * copied = nullptr,
+	CellBlockSource * pool = nullptr, QVector<qint32> * written = nullptr )
 {
 	const QList<int> roots = src.getRootLinks();
 	if ( roots.isEmpty() || !src.blockInherits( src.getBlockIndex( roots.first() ), "NiNode" ) ) {
@@ -1620,9 +1621,25 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
 	QMap<qint32, qint32> map;	// every source block named: a link to one left out becomes none
 	for ( qint32 b = 0; b < src.getBlockCount(); b++ )
 		map.insert( b, -1 );
-	for ( int i = 0; i < order.size(); i++ )
-		map.insert( order.at( i ), base + i );
-	for ( const qint32 b : order ) {
+	// lane LIVESET4: a streamed cell takes freed blocks of each type first (the pool), so roaming does not grow the document
+	QVector<qint32> dst;
+	for ( int i = 0; i < order.size(); i++ ) {
+		qint32 to = base + i;
+		if ( pool ) {
+			const QModelIndex ti = pool->take( nif, src.createRTTIName( src.getBlockIndex( order.at( i ) ) ) );
+			to = ti.isValid() ? nif->getBlockNumber( ti ) : -1;
+			if ( to < 0 ) {
+				*why = QStringLiteral( "no block for source %1" ).arg( order.at( i ) );
+				return -1;
+			}
+			if ( written )
+				written->append( to );
+		}
+		map.insert( order.at( i ), to );
+		dst.append( to );
+	}
+	for ( int oi = 0; oi < order.size(); oi++ ) {
+		const qint32 b = order.at( oi );
 		const QModelIndex ib = src.getBlockIndex( b );
 		const QString type = src.createRTTIName( ib );
 		QStringList strings = serializeStrings( &src, ib, type );
@@ -1633,7 +1650,8 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
 			return -1;
 		}
 		buf.close();
-		const QModelIndex nb = buf.open( QIODevice::ReadOnly ) ? nif->insertNiBlock( type ) : QModelIndex();
+		const QModelIndex nb = !buf.open( QIODevice::ReadOnly ) ? QModelIndex()
+			: pool ? nif->getBlockIndex( dst.at( oi ) ) : nif->insertNiBlock( type );
 		if ( !nb.isValid() || !nif->loadAndMapLinks( buf, nb, map ) ) {
 			*why = QStringLiteral( "%1 %2 would not load" ).arg( type ).arg( b );
 			return -1;
@@ -1644,11 +1662,11 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
 	t.rotation = rot;
 	t.translation = at;
 	t.scale = scale;
-	t.writeBack( nif, nif->getBlockIndex( base ) );
-	addLink( nif, iParent, QStringLiteral( "Children" ), base );
+	t.writeBack( nif, nif->getBlockIndex( dst.first() ) );
+	addLink( nif, iParent, QStringLiteral( "Children" ), dst.first() );
 	if ( copied )
 		for ( CellPfxSystem f : found ) {
-			f.block += base;
+			f.block = dst.at( f.block );
 			copied->append( f );
 		}
 	return systems;
@@ -1799,10 +1817,12 @@ static void cellProbeMarkerBuckets( const std::vector<ProbePoint> & probes, cons
 	flush();
 }
 
-/* lane LIVESET1 (bungo 10-23: "In games, if you change a setting, that setting updates live"). The far LOD and the
- * probe markers are the document's last sections: a live set cuts the document from the section on and appends it
- * again, so the rest of the cell stays as built. Anything that cannot (the streamer's cells after the far LOD, a
- * switch that moves the near cells' load order, markers built inside the document) asks for the reopen as before. */
+/* lane LIVESET1 (bungo 10-23: "In games, if you change a setting, that setting updates live"). The far LOD is the
+ * document's last section: a live set cuts the document from the section on and appends it again, so the rest of the
+ * cell stays as built. lane LIVESET3: the probe markers sit inside the document; they are cut from the middle or put
+ * back where a fresh open builds them (liveRemove/liveMoveTo renumber every block-keyed side table), and the
+ * streamer's cells after the far LOD are dropped with it and streamed again. A switch that moves the near cells' load
+ * order still asks for the reopen. */
 namespace
 {
 struct LiveDoc
@@ -1811,7 +1831,7 @@ struct LiveDoc
 	int tailEnd = -1;              //!< the block count our last step left: anything else appended = not our tail
 	bool interior = false;
 	bool farWanted = false;        //!< the far LOD was built (exterior, Far LOD on)
-	bool farLive = false;          //!< ... with no streamer: a set rebuilds it
+	bool streamed = false;         //!< the cells come from the streamer, after the far LOD
 	QByteArray farType, farRed;    //!< the inputs that also move the near cells' load order (the bake's stack)
 	int farFirst = -1;             //!< the block count before the far section
 	std::shared_ptr<EsmWorld> world;
@@ -1820,10 +1840,15 @@ struct LiveDoc
 	Vector3 origin;
 	std::vector<ProbePoint> probes;
 	bool probesBand = true;        //!< the PRTP band's Show probes (before WW_CELL_PROBES_HIDE)
-	bool markersShown = false;
-	int markersFirst = -1;         //!< >= 0: appended live, the tail from there
+	int markersAt = -1;            //!< where a fresh open puts the probe markers (shown or not)
+	int markersCount = 0;          //!< their blocks there (0 = hidden)
 	quint64 farSeen = 0, probesSeen = 0;
 	QByteArray farKey;             //!< liveFarKey() the far LOD was built with
+	// lane LIVESET4: Far LOD on/off and type stay live while the near cells' stack is the one they were loaded with
+	QString askedPlugins;          //!< the plugins the cell asked, before the far stack step and the mod pick
+	QString specRoot;              //!< the spec's data root (empty: the resource stack's first)
+	QByteArray stackSig;           //!< liveSigOf() of the stack the near cells were loaded with
+	QByteArray cellsKey;           //!< liveCellsKey(): actors outdoors and weapon parts as built
 };
 
 std::map<const NifModel *, LiveDoc> & liveDocs()
@@ -1850,18 +1875,47 @@ QByteArray liveFarKey()
 	return k;
 }
 
-bool liveStackRed( const QByteArray & r )
+//! The near cells' load order as one key: the plugins, the resource stack, the far field's lent roots
+QByteArray liveSigOf( const QString & plugins, const QStringList & stack, const QByteArray & lend )
 {
-	return r == "ownstack" || r == "refusemissing" || r == "nobakeroots";	// cellFarLodStackFor / LendRoots
+	return plugins.toUtf8() + '\x1f' + stack.join( QLatin1Char( '|' ) ).toUtf8() + '\x1f' + lend;
 }
 
-//! Drops blocks `first`.. (our tail) and the root's links to them, with the side tables keyed by those blocks
-void liveCut( NifModel * nif, LiveDoc & d, int first )
+QByteArray liveLendKey( const QStringList & bakeRoots )
+{
+	return bakeRoots.join( QLatin1Char( '|' ) ).toUtf8() + ( wwEnv( "WW_CELL_FARLOD_RED" ) == "nobakeroots" ? "|0" : "|1" );
+}
+
+//! The values the near cells read per build that a live set re-streams: weapon parts, actors outdoors (exterior)
+QByteArray liveCellsKey( bool interior )
+{
+	QByteArray k = wwLookOn( WwLook::WeaponParts ) ? "w1|" : "w0|";
+	k += wwEnv( "WW_CELL_WEAP_PARTS_RED" ) + '|';
+	if ( !interior )
+		k += ( wwLookOn( WwLook::ActorsOutdoors ) ? "a1|" : "a0|" ) + wwEnv( "WW_CELL_ACTORS_OUT_RED" );
+	return k;
+}
+
+//! Every side table keyed by block number follows the document's renumbering (a removal or move in the middle)
+void liveRemapTables( NifModel * nif, const WwBlockMap & m )
+{
+	wwCellCullRemap( nif, m );
+	wwCellWaterRemap( nif, m );
+	wwCellLandRemap( nif, m );
+	wwCellGrassRemap( nif, m );
+	wwCellFxLitRemap( nif, m );
+	wwDoorLiveRemap( nif, m );
+	cellHighlightRemap( m );
+}
+
+//! Drops blocks first..first+count-1 from anywhere in the document, the root's links to them and their side tables
+void liveRemove( NifModel * nif, LiveDoc & d, int first, int count )
 {
 	const int n = nif->getBlockCount();
-	if ( first < 0 || first >= n )
+	count = std::min( count, n - first );
+	if ( first < 0 || count <= 0 )
 		return;
-	for ( int b = first; b < n; b++ ) {
+	for ( int b = first; b < first + count; b++ ) {
 		cellMeshDrop( nif, b );
 		wwCellCullForget( nif, b );
 		wwCellWaterForget( nif, b );
@@ -1871,15 +1925,47 @@ void liveCut( NifModel * nif, LiveDoc & d, int first )
 	}
 	const QModelIndex iRoot = nif->getBlockIndex( d.rootBlock );
 	for ( const qint32 l : nif->getLinkArray( nif->getIndex( iRoot, "Children" ) ) )
-		if ( l >= first )
+		if ( l >= first && l < first + count )
 			delLink( nif, iRoot, QStringLiteral( "Children" ), l );
-	nif->removeTailBlocks( first );
+	nif->removeBlockRange( first, count );
+	if ( first + count < n )
+		liveRemapTables( nif, wwBlockMapRemove( first, count ) );
 }
 
-QString liveAppendFar( NifModel * nif, LiveDoc & d )
+//! Drops blocks `first`.. (our tail)
+void liveCut( NifModel * nif, LiveDoc & d, int first )
+{
+	liveRemove( nif, d, first, nif->getBlockCount() - first );
+}
+
+//! Blocks first..first+count-1 (just appended) moved to start at `dst`, where a fresh open writes them; the root's
+//! Children keep block order, as a fresh open adds them
+void liveMoveTo( NifModel * nif, LiveDoc & d, int first, int count, int dst )
+{
+	if ( count <= 0 || dst < 0 || dst >= first )
+		return;
+	nif->moveBlockRange( first, count, dst );
+	liveRemapTables( nif, wwBlockMapMove( first, count, dst ) );
+	const QModelIndex iRoot = nif->getBlockIndex( d.rootBlock );
+	const QVector<qint32> links = nif->getLinkArray( iRoot, "Children" );
+	QVector<qint32> moved, rest;
+	for ( const qint32 l : links )
+		( l >= dst && l < dst + count ? moved : rest ).append( l );
+	int at = 0;
+	while ( at < rest.size() && rest.at( at ) < dst )
+		at++;
+	for ( int i = 0; i < moved.size(); i++ )
+		rest.insert( at + i, moved.at( i ) );
+	if ( rest != links ) {
+		nif->setLinkArray( nif->getBlockItem( d.rootBlock ), QStringLiteral( "Children" ), rest );
+		nif->updateBlockLinks( d.rootBlock );
+	}
+}
+
+QString liveAppendFar( NifModel * nif, LiveDoc & d, CellFarStream * stream )
 {
 	d.farFirst = nif->getBlockCount();
-	return cellFarLodAppend( nif, nif->getBlockIndex( d.rootBlock ), *d.world, d.ws, d.cx, d.cy, d.n, d.lodl, d.origin, nullptr );
+	return cellFarLodAppend( nif, nif->getBlockIndex( d.rootBlock ), *d.world, d.ws, d.cx, d.cy, d.n, d.lodl, d.origin, stream );
 }
 
 void liveAppendMarkers( NifModel * nif, LiveDoc & d )
@@ -1888,7 +1974,6 @@ void liveAppendMarkers( NifModel * nif, LiveDoc & d )
 	cellProbeMarkerBuckets( d.probes, d.origin, buckets );
 	QStringList keys = buckets.keys();
 	std::sort( keys.begin(), keys.end() );
-	d.markersFirst = nif->getBlockCount();
 	qint64 shapes = 0, verts = 0, tris = 0;
 	const QModelIndex iRoot = nif->getBlockIndex( d.rootBlock );
 	for ( const QString & k : keys )
@@ -1900,68 +1985,151 @@ int liveMarkers( NifModel * nif, LiveDoc & d, QString * why )
 {
 	const bool want = d.probesBand && wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) && !d.probes.empty();
 	wwCellProbeViewSetShown( nif, d.probesBand && wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) );
-	if ( want == d.markersShown )
+	if ( want == ( d.markersCount > 0 ) )
 		return 0;
-	if ( nif->getBlockCount() != d.tailEnd || ( !want && d.markersFirst < 0 ) ) {
-		*why = !want && d.markersFirst < 0 ? QStringLiteral( "probe markers built inside the cell document" )
+	if ( d.markersAt < 0 || d.streamed || nif->getBlockCount() != d.tailEnd ) {
+		*why = d.markersAt < 0 ? QStringLiteral( "no place for the probe markers in this document" )
+			: d.streamed ? QStringLiteral( "probe markers under streamed cells" )
 			: QStringLiteral( "blocks were added after the live sections" );
 		return 2;
 	}
 	nif->holdUpdates( true );
 	if ( want ) {
+		const int tail = nif->getBlockCount();
 		liveAppendMarkers( nif, d );
+		const int count = nif->getBlockCount() - tail;
+		liveMoveTo( nif, d, tail, count, d.markersAt );
+		d.markersCount = count;
+		if ( d.farFirst >= d.markersAt )
+			d.farFirst += count;
 	} else {
-		liveCut( nif, d, d.markersFirst );
-		d.markersFirst = -1;
+		liveRemove( nif, d, d.markersAt, d.markersCount );
+		if ( d.farFirst >= d.markersAt + d.markersCount )
+			d.farFirst -= d.markersCount;
+		d.markersCount = 0;
 	}
 	nif->holdUpdates( false );
 	nif->updateModel();
-	d.markersShown = want;
 	d.tailEnd = nif->getBlockCount();
 	*why = QStringLiteral( "probe markers %1 in place" ).arg( want ? QStringLiteral( "shown" ) : QStringLiteral( "hidden" ) );
 	return 1;
 }
 
-//! The far LOD again from the switches: 0 nothing to do, 1 rebuilt, 2 a reopen is needed
+//! The data root a build would resolve now (the spec's, else the resource stack's first), as cellBuild does
+QString liveRootNow( const LiveDoc & d )
+{
+	const QStringList stack = lodgenResourceSearchPaths();
+	return d.specRoot.isEmpty() && !stack.isEmpty() ? stack.first() : d.specRoot;
+}
+
+/*! lane LIVESET4: the near cells' stack an open with the switches now would load (cellBuild's far stack step, then
+ *  the mod pick), as liveSigOf(); empty with `refusal` set when it cannot be told without loading */
+QByteArray liveStackNow( const LiveDoc & d, bool farOn, QString * viewNote, QString * lines, QString * refusal )
+{
+	QString plugins = d.askedPlugins, lodb;
+	QStringList present;
+	QByteArray lend;
+	const QStringList stack = lodgenResources();
+	if ( farOn ) {
+		QStringList searched;
+		const CellFarStack fs = cellFarLodStackFor( d.ws, cellFarLodl( d.ws, liveRootNow( d ), searched ), plugins );
+		lodb = fs.lodb;
+		present = fs.bakePresent;
+		*lines += QStringLiteral( "  " ) + fs.line + QLatin1Char( '\n' );
+		if ( fs.adopt ) {
+			plugins = fs.plugins;
+			if ( !fs.resources.isEmpty() && fs.resources != stack ) {
+				*refusal = QStringLiteral( "Far LOD: the bake's resource roots are not the loaded ones (the near cells load again)" );
+				return QByteArray();
+			}
+		} else if ( !fs.bakeRoots.isEmpty() ) {
+			lend = liveLendKey( fs.bakeRoots );
+		}
+	}
+	const CellModApplied mp = cellModPickApply( d.ws, plugins, lodb, present );
+	*lines += QStringLiteral( "  " ) + mp.line + QLatin1Char( '\n' );
+	*viewNote = mp.viewNote;
+	return liveSigOf( mp.plugins, mp.resources.isEmpty() ? stack : mp.resources, lend );
+}
+
+/*! The far LOD, and the streamed cells after it, again from the switches: 0 nothing to do, 1 rebuilt, 2 a reopen is
+ *  needed. lane LIVESET4: on/off, type and the stack reds too while the near stack holds; actors and weapon parts by
+ *  streaming the cells again (a fixed block welds them with its statics) */
 int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 {
 	const QByteArray red = wwEnv( "WW_CELL_FARLOD_RED" );
 	const bool wanted = !d.interior && cellFarLodWanted();
-	if ( wanted != d.farWanted ) {
-		*why = QStringLiteral( "WW_CELL_FARLOD on/off (the bake's stack sets the near cells' load order)" );
-		return 2;
-	}
-	if ( liveFarType() != d.farType ) {
-		*why = QStringLiteral( "WW_CELL_FARLOD_TYPE (the type sets the near cells' load order)" );
-		return 2;
-	}
-	if ( red != d.farRed && ( liveStackRed( red ) || liveStackRed( d.farRed ) ) ) {
-		*why = QStringLiteral( "WW_CELL_FARLOD_RED=%1 (a stack red sets the near cells' load order)" ).arg( QString::fromLatin1( red ) );
-		return 2;
-	}
-	if ( !d.farWanted || liveFarKey() == d.farKey )
+	const QByteArray type = liveFarType(), key = liveFarKey(), cells = liveCellsKey( d.interior );
+	const bool farMoved = wanted != d.farWanted || ( wanted && ( type != d.farType || red != d.farRed || key != d.farKey ) );
+	const bool cellsMoved = cells != d.cellsKey;
+	if ( !farMoved && !cellsMoved )
 		return 0;	// no far LOD either way, or no build-time value moved
-	if ( !d.farLive || nif->getBlockCount() != d.tailEnd ) {
-		*why = !d.farLive ? QStringLiteral( "far LOD under streamed cells (the streamer holds its blocks)" )
-			: QStringLiteral( "blocks were added after the live sections" );
+	if ( cellsMoved && !d.streamed ) {
+		*why = d.interior ? QStringLiteral( "weapon parts: an interior is one fixed block, its weapons welded with the statics" )
+			: QStringLiteral( "actors outdoors / weapon parts: this fixed block (a harness or bake open) welds them with the "
+				"statics; a streamed view rebuilds them live" );
+		return 2;
+	}
+	QString viewNote, lines;
+	if ( farMoved ) {	// the stack the near cells load: live only while it is the one they were loaded with
+		QString refusal;
+		const QByteArray sig = liveStackNow( d, wanted, &viewNote, &lines, &refusal );
+		if ( sig.isEmpty() || sig != d.stackSig ) {
+			*why = !refusal.isEmpty() ? refusal : QStringLiteral( "Far LOD on/off, type or stack red: the near cells' load "
+				"order (the bake's stack) is not the one they were loaded with" );
+			return 2;
+		}
+	}
+	if ( !d.streamed && nif->getBlockCount() != d.tailEnd ) {
+		*why = QStringLiteral( "blocks were added after the live sections" );
+		return 2;
+	}
+	if ( wanted && !d.world ) {
+		*why = QStringLiteral( "no worldspace index kept for this document" );
 		return 2;
 	}
 	QElapsedTimer t;
 	t.start();
-	const bool markers = d.markersFirst >= 0;
+	// lane LIVESET3 (FARSTREAM): the streamed cells sit after the far LOD; they go with it and stream in again
+	const std::shared_ptr<CellStreamSeed> seed = d.streamed ? cellStreamSuspend( nif ) : nullptr;
+	CellFarStream fs;
+	if ( seed )
+		fs.roam = seed->roam;
 	nif->holdUpdates( true );
 	liveCut( nif, d, d.farFirst );
-	d.markersFirst = -1;
-	const QString notes = liveAppendFar( nif, d );
-	if ( markers )
-		liveAppendMarkers( nif, d );
+	cellFarLodForget( nif );
+	QString notes;
+	if ( wanted ) {
+		QStringList searched;
+		d.lodl = cellFarLodl( d.ws, liveRootNow( d ), searched );
+		notes = liveAppendFar( nif, d, seed ? &fs : nullptr );
+	}
 	nif->holdUpdates( false );
 	nif->updateModel();
+	if ( seed ) {
+		auto next = std::make_shared<CellStreamSeed>( *seed );
+		next->farHand = fs.handBlocks;
+		next->farLand = fs.landBlocks;
+		cellStreamStart( nif, next );
+	}
+	if ( farMoved )
+		cellModPickSetViewNote( nif, viewNote );
+	const bool onOff = wanted != d.farWanted;
+	d.farWanted = wanted;
+	d.farType = type;
 	d.farRed = red;
-	d.farKey = liveFarKey();
+	d.farKey = key;
+	d.cellsKey = cells;
 	d.tailEnd = nif->getBlockCount();
-	qInfo().noquote() << notes.trimmed();
-	*why = QStringLiteral( "far LOD rebuilt in place in %1 ms" ).arg( t.elapsed() );
+	if ( !lines.isEmpty() )
+		qInfo().noquote() << lines.trimmed();
+	if ( !notes.isEmpty() )
+		qInfo().noquote() << notes.trimmed();
+	*why = QStringLiteral( "%1 in place in %2 ms%3" )
+		.arg( onOff ? ( wanted ? QStringLiteral( "far LOD added" ) : QStringLiteral( "far LOD removed" ) )
+			: farMoved ? QStringLiteral( "far LOD rebuilt" ) : QStringLiteral( "cells rebuilt (actors outdoors / weapon parts)" ) )
+		.arg( t.elapsed() )
+		.arg( seed ? QStringLiteral( " (streamed cells dropped and streamed again)" ) : QString() );
 	return 1;
 }
 
@@ -1971,19 +2139,24 @@ void liveForget( const NifModel * nif )
 }
 
 void liveKeep( NifModel * nif, const CellSceneSpec & spec, const std::shared_ptr<EsmWorld> & world, const QString & lodl,
-	int farFirst, const Vector3 & origin, int rootBlock, bool streamed, std::vector<ProbePoint> probes )
+	int farFirst, const Vector3 & origin, int rootBlock, bool streamed, std::vector<ProbePoint> probes, int markersAt,
+	int markersCount, const QString & askedPlugins, const QByteArray & stackSig )
 {
 	LiveDoc d;
 	d.rootBlock = rootBlock;
 	d.interior = spec.interior;
 	d.farWanted = !spec.interior && cellFarLodWanted();
-	d.farLive = d.farWanted && !streamed;
+	d.streamed = streamed;
 	d.farType = liveFarType();
 	d.farRed = wwEnv( "WW_CELL_FARLOD_RED" );
 	d.farKey = liveFarKey();
 	d.farFirst = farFirst;
-	if ( d.farLive )
-		d.world = world;	// read-only to a build (a stream holds it the same way)
+	if ( !spec.interior )
+		d.world = world;	// read-only to a build (a stream holds it the same way); Far LOD on needs it later
+	d.askedPlugins = askedPlugins;
+	d.specRoot = spec.dataRoot;
+	d.stackSig = stackSig;
+	d.cellsKey = liveCellsKey( spec.interior );
 	d.ws = spec.world;
 	d.lodl = lodl;
 	d.cx = spec.cx;
@@ -1991,7 +2164,8 @@ void liveKeep( NifModel * nif, const CellSceneSpec & spec, const std::shared_ptr
 	d.n = spec.n;
 	d.origin = origin;
 	d.probesBand = spec.probesShow || spec.probesHiddenByEnv;
-	d.markersShown = spec.probesShow && !probes.empty();
+	d.markersAt = markersAt;
+	d.markersCount = markersCount;
 	d.probes = std::move( probes );
 	d.tailEnd = nif->getBlockCount();
 	d.farSeen = d.probesSeen = wwSwitchGen();
@@ -2019,7 +2193,7 @@ int cellLiveSections( NifModel * nif, QString * why )
 	if ( !nif || it == liveDocs().end() )
 		return 0;
 	LiveDoc & d = it->second;
-	const bool farMoved = wwSwitchMovedFor( d.farSeen, { "WW_CELL_FARLOD" } );
+	const bool farMoved = wwSwitchMovedFor( d.farSeen, { "WW_CELL_FARLOD", "WW_CELL_ACTORS_OUT", "WW_CELL_WEAP_PARTS" } );
 	const bool probesMoved = wwSwitchMovedFor( d.probesSeen, { "WW_CELL_PROBES_HIDE" } );
 	int r = farMoved ? liveFar( nif, d, &w ) : 0;
 	if ( r != 2 && probesMoved ) {
@@ -2030,6 +2204,25 @@ int cellLiveSections( NifModel * nif, QString * why )
 		r = std::max( r, p );
 	}
 	if ( r == 1 ) {	// held shadow maps still hold the old casters: drop them as a fresh open has none
+		wwCellShadowsForget( nif );
+		wwSunShadowForget();
+	}
+	if ( why )
+		*why = w;
+	return r;
+}
+
+int cellLiveRebuild( NifModel * nif, QString * why )
+{
+	auto it = liveDocs().find( nif );
+	if ( !nif || it == liveDocs().end() ) {
+		if ( why )
+			*why = QStringLiteral( "no live cell document" );
+		return 2;
+	}
+	QString w;
+	const int r = liveFar( nif, it->second, &w );
+	if ( r == 1 ) {
 		wwCellShadowsForget( nif );
 		wwSunShadowForget();
 	}
@@ -2060,25 +2253,6 @@ int cellLiveProbesShow( NifModel * nif, bool show, QString * why )
 	if ( why )
 		*why = w;
 	return r == 2 ? 2 : 1;
-}
-
-int cellLiveRebuild( NifModel * nif, QString * why )
-{
-	auto it = liveDocs().find( nif );
-	if ( !nif || it == liveDocs().end() ) {
-		if ( why )
-			*why = QStringLiteral( "no live cell document" );
-		return 2;
-	}
-	QString w;
-	const int r = liveFar( nif, it->second, &w );
-	if ( r == 1 ) {
-		wwCellShadowsForget( nif );
-		wwSunShadowForget();
-	}
-	if ( why )
-		*why = w;
-	return r;
 }
 
 // lane CELLSTREAM1: the builder; `chunk` set = one streamed cell (n = 1), no document touched, stops before emit
@@ -2126,6 +2300,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * load order and resources the far LOD was baked from (its .lodb record), so a mod's trees are the mod's
 	 * trees on both sides of the block edge. Decided before the worldspace loads; the line goes in the notes. */
 	QString farStackNote;
+	const QString liveAsked = spec.plugins;	// lane LIVESET4: the live stack key's inputs
+	QByteArray liveLend;
 	QString modLodb;               // lane MODPICK1: the shown bake's record, empty when none
 	QStringList modBakePresent;    // lane MODPICK1: its plugins still on disk
 	if ( !chunk && !spec.interior && cellFarLodWanted() ) {   // a streamed cell: the open's plugins (the seed)
@@ -2144,6 +2320,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		} else if ( !fs.bakeRoots.isEmpty() ) {
 			// lane FARLOD3: not adopted, but the far field's own models still need the bake's roots
 			const QString lend = cellFarLodLendRoots( fs.bakeRoots );
+			liveLend = liveLendKey( fs.bakeRoots );
 			farStackNote += QStringLiteral( "  " ) + lend + QLatin1Char( '\n' );
 			qInfo().noquote() << lend;
 		}
@@ -2163,6 +2340,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		modPickViewNote = mp.viewNote;
 		qInfo().noquote() << mp.line;
 	}
+	const QByteArray liveStack = chunk ? QByteArray() : liveSigOf( spec.plugins, lodgenResources(), liveLend );
 	// lane BAKEINCR1: an exterior bake records every asset it reads, for its bakeincr.txt
 	const bool incrRecord = !chunk && bakeExterior && !spec.interior && wwEnvIsEmpty( "WW_CELL_GI_FROM" );
 	if ( incrRecord )
@@ -5735,6 +5913,13 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		chunk->buckets->keys = buckets.keys();
 		std::sort( chunk->buckets->keys.begin(), chunk->buckets->keys.end() );
 		chunk->buckets->buckets = std::move( buckets );
+		for ( const Placement & p : placements ) {	// lane LIVESET3 (STREAMPSYS1): the particle step's filter below
+			if ( !p.actorKey.isEmpty() || p.disabled )
+				continue;
+			const QString model = world.lodBase( p.base ).model;
+			if ( !model.isEmpty() && lodgenModelHasParticles( model ) )
+				chunk->pfx.push_back( { model, p.pos - origin, p.rot, p.scale } );
+		}
 		chunk->ok = true;
 		return true;
 	}
@@ -5758,7 +5943,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		bucketMaxVerts = qMax( bucketMaxVerts, nvb );
 	}
 	QPersistentModelIndex iGround;
+	// lane LIVESET3: where the probe markers' buckets go (shown or not), so a live Show probes puts them there
+	int liveMarkersAt = -1, liveMarkersEnd = -1;
 	for ( const QString & k : keys ) {
+		const bool markerKey = k.startsWith( QLatin1String( "\x01probes" ) );
+		if ( liveMarkersAt < 0 && ( markerKey || k.compare( QLatin1String( "\x01probes" ) ) > 0 ) )
+			liveMarkersAt = nif->getBlockCount();
+		if ( liveMarkersAt >= 0 && liveMarkersEnd < 0 && !markerKey )
+			liveMarkersEnd = nif->getBlockCount();
 		QModelIndex iParent = iRoot;
 		if ( k.startsWith( QLatin1String( "\x01land" ) ) ) {
 			if ( !iGround.isValid() ) {
@@ -5792,6 +5984,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			break;
 		}
 	}
+	if ( liveMarkersAt < 0 )
+		liveMarkersAt = nif->getBlockCount();
+	if ( liveMarkersEnd < 0 )
+		liveMarkersEnd = nif->getBlockCount();
 
 	/* lane SUNCELL1: THE PARTICLES. The weld takes triangle shapes only (lodgen.cpp), so a placed model's
 	 * particle systems (steam, smoke, fire, sparks, dust) never reached the cell, and a model of particles alone
@@ -5993,7 +6189,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	nif->updateModel();
 	CellSpeed::mark( "document updateModel" );
 	// lane LIVESET1: what a live set of the far LOD or the probe markers rebuilds from
-	liveKeep( nif, spec, worldOwn, liveFarLodl, liveFarFirst, origin, nif->getBlockNumber( iRoot ), streamInit, std::move( liveProbes ) );
+	liveKeep( nif, spec, worldOwn, liveFarLodl, liveFarFirst, origin, nif->getBlockNumber( iRoot ), streamInit, std::move( liveProbes ),
+		liveMarkersAt, liveMarkersEnd - liveMarkersAt, liveAsked, liveStack );
 	// lane MODPICK1: "Mods differ from the far LOD bake", over the view, for as long as this document is the cell
 	cellModPickSetViewNote( nif, modPickViewNote );
 	{
@@ -6700,6 +6897,57 @@ void cellChunkBuild( CellChunk & c )
 	c.buildMs = t.elapsed();
 }
 
+/* lane LIVESET3 (STREAMPSYS1): a streamed cell's particle systems, copied as the open copies its own (the particle
+ * step in cellBuild): one "particles" node under the cell and WW_CELL_PARTICLES_MAX over the whole stream. The
+ * effect-light table (FXLIT1) stays as an exterior open leaves it: off outdoors. */
+static void cellChunkParticles( NifModel * nif, CellChunk & c, CellBlockSource & src, const QModelIndex & iCell )
+{
+	c.pfxDone = true;
+	QHash<QString, std::shared_ptr<NifModel>> * cache = src.pfxModels();
+	if ( c.pfx.empty() || !cache || !wwCellParticlesOn() )
+		return;
+	QVector<qint32> written;	// lane LIVESET4: taken from the stream's pool (it records them for the cell)
+	QPersistentModelIndex iPfx;
+	QString why;
+	for ( const CellChunk::Pfx & p : c.pfx ) {
+		if ( c.pfxCopies >= src.pfxRoom() )
+			break;
+		const QString key = p.model.toLower();
+		auto it = cache->find( key );
+		if ( it == cache->end() ) {
+			auto m = std::make_shared<NifModel>();
+			QByteArray bytes;
+			QBuffer dev( &bytes );
+			bool good = lodgenReadModelBytes( c.seed->dataRoot, p.model, bytes ) && dev.open( QIODevice::ReadOnly )
+				&& m->load( dev, p.model.toLocal8Bit().constData() );
+			if ( good ) {
+				m->resetState();
+				good = m->getVersionNumber() == nif->getVersionNumber() && m->getBSVersion() == nif->getBSVersion();
+			}
+			if ( !good )
+				m.reset();
+			it = cache->insert( key, m );
+		}
+		if ( !it.value() )
+			continue;
+		if ( !iPfx.isValid() ) {
+			QModelIndex iP = src.take( nif, QStringLiteral( "NiNode" ) );
+			if ( !iP.isValid() )
+				break;
+			written.append( nif->getBlockNumber( iP ) );
+			nif->set<QString>( iP, "Name", QStringLiteral( "particles" ) );
+			nif->set<quint32>( iP, "Flags", 14 );
+			nif->set<float>( iP, "Scale", 1.0f );
+			addLink( nif, iCell, QStringLiteral( "Children" ), nif->getBlockNumber( iP ) );
+			iPfx = iP;
+		}
+		if ( cellCopyParticleBranch( nif, QModelIndex( iPfx ), *it.value(), p.at, p.rot, p.scale, &why, nullptr, &src, &written ) > 0 )
+			c.pfxCopies++;
+	}
+	for ( const qint32 b : written )
+		nif->updateBlockLinks( b );
+}
+
 // lane CELLSTREAM1: the cell's buckets written under its node, as the open writes them, a slice at a time
 bool cellChunkEmit( NifModel * nif, CellChunk & c, CellBlockSource & src, const QModelIndex & iCell,
 	double budgetMs, QString * error )
@@ -6760,6 +7008,8 @@ bool cellChunkEmit( NifModel * nif, CellChunk & c, CellBlockSource & src, const 
 		return true;
 	}
 	if ( c.next >= B.keys.size() ) {
+		if ( !c.pfxDone )
+			cellChunkParticles( nif, c, src, iCell );
 		c.buckets.reset();
 		return true;
 	}

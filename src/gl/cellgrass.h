@@ -1,6 +1,8 @@
 #ifndef CELLGRASS_H
 #define CELLGRASS_H
 
+#include "cellblockmap.h"
+
 #include <QString>
 #include <QtGlobal>
 
@@ -89,6 +91,8 @@ void wwCellGrassBegin( const void * nif );
 void wwCellGrassShape( const void * nif, int block, float wavePeriod, bool fade = true );
 // lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
 void wwCellGrassForget( const void * nif, int block );
+//! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)
+void wwCellGrassRemap( const void * nif, const WwBlockMap & m );
 void wwCellGrassNote( const void * nif, const QString & line );
 QString wwCellGrassEcho( const void * nif );
 
