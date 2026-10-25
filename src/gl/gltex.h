@@ -243,6 +243,7 @@ public:
 	//! lane PERF5: a new frame trusts no shadowed parameter (glview.cpp); prints the shadow's counts when they move
 	void wwParamFrame();
 	bool wwParamCaller = false;	//!< lane PERF5: set around the shadowed bind; any other bind forgets its texture
+	void wwParamArm( GLuint id ) { paramId = id; }	//!< lane GAPPERF-BINDLESS: a replayed bind's texture (celldrawpacket.h)
 	/*! lane STREAM1 (TEXSTREAM1): uploads the streaming read-ahead's ready files, up to `budgetBytes` of them this
 	 *  frame (at least one), before anything draws, so a streamed cell's first frame finds them loaded. Returns
 	 *  how many went up. The same loadTex as a bind's, so what a draw sees is the same texture. */

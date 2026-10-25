@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glproperty.h"
 #include "harnesswindow.h"
 #include "cellpasstime.h"	// lane PERF1
+#include "celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 
 #include <QElapsedTimer>
@@ -804,50 +805,66 @@ void NifSkopeOpenGLContext::Program::uni1i( const char * name, int x )
 {
 	UniformLocationMapItem	key( name, 0 );
 
-	f->glUniform1i( uniLocation( key ), x );
+	const int l = uniLocation( key );
+	f->glUniform1i( l, x );
+	WWDP( WwDp::U1i, l, 0, &x, 1 );
 }
 
 void NifSkopeOpenGLContext::Program::uni1f( const char * name, float x )
 {
 	UniformLocationMapItem	key( name, 0 );
 
-	f->glUniform1f( uniLocation( key ), x );
+	const int l = uniLocation( key );
+	f->glUniform1f( l, x );
+	WWDP( WwDp::U1f, l, 0, &x, 1 );
 }
 
 void NifSkopeOpenGLContext::Program::uni1b_l( int l, bool x )
 {
 	f->glUniform1i( l, int(x) );
+	const int v = int( x );
+	WWDP( WwDp::U1i, l, 0, &v, 1 );
 }
 
 void NifSkopeOpenGLContext::Program::uni1i_l( int l, int x )
 {
 	f->glUniform1i( l, x );
+	WWDP( WwDp::U1i, l, 0, &x, 1 );
 }
 
 void NifSkopeOpenGLContext::Program::uni1f_l( int l, float x )
 {
 	f->glUniform1f( l, x );
+	WWDP( WwDp::U1f, l, 0, &x, 1 );
 }
 
 void NifSkopeOpenGLContext::Program::uni2f_l( int l, float x, float y )
 {
 	f->glUniform2f( l, x, y );
+	const float v[2] = { x, y };
+	WWDP( WwDp::U2f, l, 0, v, 2 );
 }
 
 void NifSkopeOpenGLContext::Program::uni3f_l( int l, float x, float y, float z )
 {
 	f->glUniform3f( l, x, y, z );
+	const float v[3] = { x, y, z };
+	WWDP( WwDp::U3f, l, 0, v, 3 );
 }
 
 void NifSkopeOpenGLContext::Program::uni4f_l( int l, FloatVector4 x )
 {
 	f->glUniform4f( l, x[0], x[1], x[2], x[3] );
+	const float v[4] = { x[0], x[1], x[2], x[3] };
+	WWDP( WwDp::U4f, l, 0, v, 4 );
 }
 
 void NifSkopeOpenGLContext::Program::uni4srgb_l( int l, FloatVector4 x )
 {
 	x = DDSTexture16::srgbExpand( x );
 	f->glUniform4f( l, x[0], x[1], x[2], x[3] );
+	const float v[4] = { x[0], x[1], x[2], x[3] };
+	WWDP( WwDp::U4f, l, 0, v, 4 );
 }
 
 void NifSkopeOpenGLContext::Program::uni4c_l( int l, std::uint32_t c, bool isSRGB )
@@ -857,6 +874,8 @@ void NifSkopeOpenGLContext::Program::uni4c_l( int l, std::uint32_t c, bool isSRG
 	if ( isSRGB )
 		x = DDSTexture16::srgbExpand( x );
 	f->glUniform4f( l, x[0], x[1], x[2], x[3] );
+	const float v[4] = { x[0], x[1], x[2], x[3] };
+	WWDP( WwDp::U4f, l, 0, v, 4 );
 }
 
 void NifSkopeOpenGLContext::Program::uni1bv_l( int l, const bool * x, size_t n )
@@ -866,31 +885,37 @@ void NifSkopeOpenGLContext::Program::uni1bv_l( int l, const bool * x, size_t n )
 	for ( size_t i = 0; i < n; i++ )
 		tmp[i] = GLint( x[i] );
 	f->glUniform1iv( l, GLsizei(n), tmp );
+	WWDP( WwDp::U1iv, l, int( n ), tmp, int( n ) );
 }
 
 void NifSkopeOpenGLContext::Program::uni1iv_l( int l, const int * x, size_t n )
 {
 	f->glUniform1iv( l, GLsizei(n), x );
+	WWDP( WwDp::U1iv, l, int( n ), x, int( n ) );
 }
 
 void NifSkopeOpenGLContext::Program::uni1fv_l( int l, const float * x, size_t n )
 {
 	f->glUniform1fv( l, GLsizei(n), x );
+	WWDP( WwDp::U1fv, l, int( n ), x, int( n ) );
 }
 
 void NifSkopeOpenGLContext::Program::uni4fv_l( int l, const FloatVector4 * x, size_t n )
 {
 	f->glUniform4fv( l, GLsizei(n), &(x[0][0]) );
+	WWDP( WwDp::U4fv, l, int( n ), &(x[0][0]), int( n ) * 4 );
 }
 
 void NifSkopeOpenGLContext::Program::uni3m_l( int l, const Matrix & val )
 {
 	f->glUniformMatrix3fv( l, 1, 0, val.data() );
+	WWDP( WwDp::UM3, l, 1, val.data(), 9 );
 }
 
 void NifSkopeOpenGLContext::Program::uni4m_l( int l, const Matrix4 & val )
 {
 	f->glUniformMatrix4fv( l, 1, 0, val.data() );
+	WWDP( WwDp::UM4, l, 1, val.data(), 16 );
 }
 
 void NifSkopeOpenGLContext::Program::uniSampler_l( int l, int firstTextureUnit, int textureCnt, int arraySize )
@@ -904,6 +929,7 @@ void NifSkopeOpenGLContext::Program::uniSampler_l( int l, int firstTextureUnit, 
 	for ( ; i < arraySize; i++ )
 		tmp[i] = firstTextureUnit;
 	f->glUniform1iv( l, arraySize, tmp );
+	WWDP( WwDp::U1iv, l, arraySize, tmp, arraySize );
 }
 
 bool NifSkopeOpenGLContext::Program::uniSampler( BSShaderLightingProperty * bsprop, const char * var,
@@ -916,6 +942,7 @@ bool NifSkopeOpenGLContext::Program::uniSampler( BSShaderLightingProperty * bspr
 	if ( texunit >= TexCache::num_texture_units ) [[unlikely]]
 		return false;
 	f->glActiveTexture( GL_TEXTURE0 + texunit );
+	WWDP( WwDp::ActiveTex, GL_TEXTURE0 + texunit );
 
 	// TODO: On stream 155 bsprop->fileName can reference incorrect strings because
 	// the BSSTS is not filled out nor linked from the BSSP
@@ -942,6 +969,7 @@ bool NifSkopeOpenGLContext::Program::uniSampler( BSShaderLightingProperty * bspr
 		return false;
 	} while ( false );
 
+	WWDP( WwDp::U1i, uniSamp, 0, &texunit, 1 );
 	f->glUniform1i( uniSamp, texunit++ );
 	return true;
 }

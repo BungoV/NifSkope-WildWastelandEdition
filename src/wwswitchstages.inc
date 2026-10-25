@@ -498,6 +498,8 @@
 { "WW_DRAG_LOG", 2, "src/nifskope_ui.cpp:19355 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_DRAW_GLCACHE", 1, "- | name passed through a variable: conservative" },
 { "WW_DRAW_GLCACHE_RED", 1, "- | name passed through a variable: conservative" },
+{ "WW_DRAW_PACKET_CHECK", 0, "src/gl/celldrawpacket.cpp:37 WwDp::mode | re-read per frame or per call (a)" },
+{ "WW_DRAW_PACKET_RED", 0, "src/gl/celldrawpacket.cpp:37 WwDp::mode | re-read per frame or per call (a)" },
 { "WW_DRAW_TEXSHADOW_CHECK", 0, "src/gl/gltex.cpp:393 wwTexShadowMode | re-read per frame or per call (a)" },
 { "WW_DRAW_TEXSHADOW_RED", 0, "src/gl/gltex.cpp:393 wwTexShadowMode | re-read per frame or per call (a)" },
 { "WW_DROPAUDIT", 2, "src/nifskope_ui.cpp:12513 NifSkope::createWindow | createWindow: picks which harness the window runs" },
