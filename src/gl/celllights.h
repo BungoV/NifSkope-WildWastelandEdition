@@ -203,6 +203,12 @@ struct WwCellGi
 	 *  dims[1] a layer, fineLayers layers, rgba), uploaded after the grid's own layers; empty: none (the row off) */
 	std::vector<float> fineBox, fine;
 	int fineLayers = 0;
+	/*! SKY2 FOGSLICE1 (src/probegi.h ProbeGiResult::air): the air's own volume, six slabs of airDims[2] each, x fastest,
+	 *  rgba (a = 1), every voxel filled; empty: none (the air reads the grid) */
+	std::vector<float> air;
+	float airOrigin[3] = { 0, 0, 0 };
+	float airVoxel = 0.0f;
+	int airDims[3] = { 0, 0, 0 };
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
 /*! lane EMISSIVEGRID1: the Emissive GI grid row (ships off): WW/CellEmissiveGrid, pin WW_CELL_EMISSIVEGRID (read when a

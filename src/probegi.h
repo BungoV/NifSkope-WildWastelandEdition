@@ -144,6 +144,13 @@ struct ProbeGiResult
 	std::vector<float> brickCube;       //!< per probe: probeCube's layout, gathered from the bricks (last pass)
 	std::vector<float> linkCube;        //!< per probe: the same, gathered from the links
 	std::vector<float> surfelBrick;     //!< per unique surfel: rgb, its brick's mean of pass 1's B (the Pass view)
+	/*! SKY2 FOGSLICE1 (the deck's air volume, D2 s55 / D9 s61): over the grid's box at 3/4 of the probe spacing, every
+	 *  voxel the probes' mean irradiance (the grid's layout: six slabs, rgba, a = 1), for the air; airNote = its census */
+	std::vector<float> air;
+	float airOrigin[3] = { 0, 0, 0 };
+	float airVoxel = 0.0f;
+	int airDims[3] = { 0, 0, 0 };
+	QString airNote;
 	bool fineOn = false;                //!< lane EMISSIVEGRID1: spec.emissiveGrid asked for the fine boxes
 	ProbeGiFine fine;                   //!< lane EMISSIVEGRID1 (src/probegifine.h)
 };

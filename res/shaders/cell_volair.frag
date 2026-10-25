@@ -63,6 +63,8 @@ uniform sampler3D volNoise;
 layout ( location = 0 ) out vec4 fragColor;
 layout ( location = 1 ) out vec4 volMrt[7];	// stage 3: layers volLayer + 1 .. + 6, then the carry; stage 1 temporal: the 4 strata
 
+// SKY2 FOGSLICE1: the air pass reads the air volume (cell_airmed.glsl); the lit particles keep the grid
+#define WW_AIR_GIVOL 1
 #include "cell_airmed.glsl"
 
 /* lane FOGDRIFT1: the density factor at distance t along dirView, around 1 (the texture's exact mean subtracted, so
