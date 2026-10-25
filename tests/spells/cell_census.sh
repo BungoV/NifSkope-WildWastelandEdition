@@ -67,6 +67,8 @@ ESM="${ESM:-X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm}"
 DATA="${DATA:-E:/Tools/Fallout 4/DataUnpacked/Data}"
 WORLD="${WORLD:-Commonwealth}"
 BLOCK="${BLOCK:-5}"
+# PRTP5-RUNNER: the ring of neighbor cells loaded around a tile (0-4), handed to the window and the checker
+MARGIN="${MARGIN:-0}"
 CENTER="${CENTER:--20,7}"
 RED=""; FRESH=0; WHOLE=0; CELLS=""; SLICES=""; SLICE=""; MERGE=0; PART="all"
 while [ $# -gt 0 ]; do
@@ -178,7 +180,7 @@ run_window() {   # <census> <i> <N> <plan file> [more environment, which wins]
 	local census="$1" i="$2" n="$3" plan="$4"; shift 4
 	rm -f "$plan" "$(runlog_of "$i" "$n")"
 	env WW_CELL_CENSUS_TEST="$(winpath "$census")" WW_CELL_CENSUS_PLUGINS="$ESM" \
-		WW_CELL_CENSUS_WORLD="$WORLD" WW_CELL_CENSUS_BLOCK="$BLOCK" WW_CELL_CENSUS_SLICE="$i/$n" \
+		WW_CELL_CENSUS_WORLD="$WORLD" WW_CELL_CENSUS_BLOCK="$BLOCK" WW_CELL_CENSUS_MARGIN="$MARGIN" WW_CELL_CENSUS_SLICE="$i/$n" \
 		WW_CELL_CENSUS_PLAN="$(winpath "$plan")" WW_CELL_CENSUS_BUDGET="$BUDGET" \
 		WW_CELL_DATAROOT="$DATA" "$@" \
 		WW_SETTINGS_SCOPE="$(fresh_scope)" timeout "${WTIMEOUT:-$((BUDGET + 400))}" "$EXE" --port "$PORT" > "$OUT/run_$i.out" 2>&1
@@ -224,8 +226,9 @@ runenv=()
 [ "$RED" = "dropcell" ] && runenv+=( WW_CELL_CENSUS_MAX=0 )   # the plan is what this red breaks
 if [ "$WHOLE" != "1" ]; then
 	# the sample is walked by name and keeps a picture and the builder's notes per load
-	mkdir -p "$OUT/shots"
-	runenv+=( WW_CELL_CENSUS_ONLY="$(winpath "$KEYS")" WW_CELL_CENSUS_SHOTS="$(winpath "$OUT/shots")" )
+	runenv+=( WW_CELL_CENSUS_ONLY="$(winpath "$KEYS")" )
+	# SHOTS=0 (the map-tile runner): rows only, no picture a load
+	[ "${SHOTS:-1}" != "0" ] && { mkdir -p "$OUT/shots"; runenv+=( WW_CELL_CENSUS_SHOTS="$(winpath "$OUT/shots")" ); }
 fi
 
 left=0; alldone=1
@@ -307,7 +310,7 @@ for i in $(seq 1 "$SLICES"); do
 done
 [ -z "$RED" ] && check "the windows' own checks pass, over every window that built this census ($npass windows, $walkchecks checks, $walkfails failures)" \
 	"$([ "$walkfails" = "0" ] && [ "$walkbad" = "0" ] && [ "$walkchecks" -gt 0 ] && echo 1 || echo 0)"
-out="$(python "$CHECK" check "$ESM" "$CENSUS" "$PLAN" "$KEYS" --world "$WORLD" --block "$BLOCK" --slices "$SLICES" 2>&1)"
+out="$(python "$CHECK" check "$ESM" "$CENSUS" "$PLAN" "$KEYS" --world "$WORLD" --block "$BLOCK" --margin "$MARGIN" --slices "$SLICES" 2>&1)"
 echo "$out" > "$OUT/check.out"
 echo "$out" | grep -v '^PASS' | head -40 | cut -c1-300 | sed 's/^/  /' | tee -a "$LOG"
 checkline="$(echo "$out" | tail -1)"
