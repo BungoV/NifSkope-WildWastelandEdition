@@ -96,6 +96,29 @@ inline WwWaterMaterial wwWaterMaterial( const WwWaterRecord & r )
 	return m;
 }
 
+/*! lane FXPARITY2: the noise layers' scroll at `seconds` of the world clock (s0 = layers 1, 2; s1.xy = layer 3). Layer k
+ *  moves along its wind direction (degrees, the compass: 0 = +Y) at its wind speed in UV units a second, wrapped to one
+ *  tile (the noise maps wrap). INFERRED: the game's writer of the material's scroll was not found; Fallout4.esm's
+ *  records hold 0..360 directions and 0.004..0.35 speeds. */
+inline void wwWaterScroll( const WwWaterRecord & r, double seconds, float s0[4], float s1[4] )
+{
+	float o[6];
+	for ( int k = 0; k < 3; k++ ) {
+		const double a = double( r.windDirection[k] ) * 3.14159265358979323846 / 180.0;
+		const double d = double( r.windSpeed[k] ) * seconds;
+		o[k * 2 + 0] = float( std::fmod( d * std::sin( a ), 1.0 ) );
+		o[k * 2 + 1] = float( std::fmod( d * std::cos( a ), 1.0 ) );
+	}
+	s0[0] = o[0];
+	s0[1] = o[1];
+	s0[2] = o[2];
+	s0[3] = o[3];
+	s1[0] = o[4];
+	s1[1] = o[5];
+	s1[2] = 0.0f;
+	s1[3] = 0.0f;
+}
+
 //! one line per record for the notes and the reader gate: "WATR <form> <edid> <the material, %.6g each>"
 QString wwWaterDescribe( const WwWaterRecord & r );
 

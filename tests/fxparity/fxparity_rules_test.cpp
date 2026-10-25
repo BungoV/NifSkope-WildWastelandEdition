@@ -44,7 +44,31 @@ void colorUnderTest( const float f[6], const float col[3][4], float u, float o[4
 	o[0] = c[0]; o[1] = c[1]; o[2] = c[2]; o[3] = a > 0.0f ? a : 0.0f;
 }
 float dragUnderTest( float p, float dt ) { return 1.0f - std::exp( -p * 30.0f * dt ); }
+float rangeUnderTest( float, float, float ) { return 1.0f; }	// no range term
+void bombUnderTest( const float *, const float *, float, float, int, int, float, float o[3] ) { o[0] = o[1] = o[2] = 0.0f; }	// no bomb
+void gravityUnderTest( const float p[3], const float c[3], const float a[3], float s, float, bool sph, const float *, float dt, float o[3] )
+{
+	// the old viewer: strength as written, spherical pushes away from the centre, no decay, no turbulence
+	float d[3] = { a[0], a[1], a[2] };
+	if ( sph ) {
+		const float v[3] = { p[0] - c[0], p[1] - c[1], p[2] - c[2] };
+		const float l = std::sqrt( v[0] * v[0] + v[1] * v[1] + v[2] * v[2] );
+		for ( int i = 0; i < 3; i++ )
+			d[i] = l > 0.0f ? v[i] / l : 0.0f;
+	}
+	for ( int i = 0; i < 3; i++ )
+		o[i] = d[i] * s * dt;
+}
 #else
+float rangeUnderTest( float d, float r, float f ) { return FxRules::dragRangeTerm( d, r, f ); }
+void bombUnderTest( const float r[3], const float a[3], float dc, float dv, int dt_, int sym, float dt, float o[3] )
+{
+	FxRules::bombDelta( r, a, dc, dv, dt_, sym, dt, o );
+}
+void gravityUnderTest( const float p[3], const float c[3], const float a[3], float s, float dc, bool sph, const float * t, float dt, float o[3] )
+{
+	FxRules::gravityDelta( p, c, a, s, dc, sph, t, dt, o );
+}
 void colorUnderTest( const float f[6], const float col[3][4], float u, float o[4] ) { FxRules::simpleColor( f, col, u, o ); }
 float dragUnderTest( float p, float dt ) { return FxRules::dragShare( p, dt ); }
 #endif
@@ -147,6 +171,36 @@ int main()
 		for ( int i = 0; ok && i < 4; i++ )
 			ok = seq[i] == want[i] && at[i] == wantAt[i];
 		check( ok, "flipbook frames 2 3 4 1 at u 0 .25 .5 .75 (count of changes)", changes, 4 );
+	}
+
+	// lane FXPARITY2: drag range (full inside, half midway, none past the falloff)
+	check( rangeUnderTest( 5.0f, 10.0f, 20.0f ) == 1.0f, "drag range inside", rangeUnderTest( 5.0f, 10.0f, 20.0f ), 1.0 );
+	check( std::fabs( rangeUnderTest( 15.0f, 10.0f, 20.0f ) - 0.5f ) < 1e-6f, "drag range midway",
+		rangeUnderTest( 15.0f, 10.0f, 20.0f ), 0.5 );
+	check( rangeUnderTest( 25.0f, 10.0f, 20.0f ) == 0.0f, "drag range past the falloff", rangeUnderTest( 25.0f, 10.0f, 20.0f ), 0.0 );
+
+	// bomb: spherical linear at half the decay = half of deltaV x dt, pointing away; planar below the plane points down
+	{
+		const float up[3] = { 0, 0, 1 }, r[3] = { 5, 0, 0 }, rb[3] = { 3, 4, -2 };
+		float o[3];
+		bombUnderTest( r, up, 10.0f, 4.0f, 1, 0, 0.5f, o );
+		check( std::fabs( o[0] - 1.0f ) < 1e-6f, "bomb spherical linear x", o[0], 1.0 );
+		bombUnderTest( rb, up, 0.0f, 2.0f, 0, 2, 1.0f, o );
+		check( std::fabs( o[2] + 2.0f ) < 1e-6f, "bomb planar below the plane z", o[2], -2.0 );
+		bombUnderTest( rb, up, 0.0f, 2.0f, 0, 1, 1.0f, o );	// cylindrical: (3,4) radial, unit (0.6,0.8)
+		check( std::fabs( o[1] - 1.6f ) < 1e-6f && o[2] == 0.0f, "bomb cylindrical y", o[1], 1.6 );
+	}
+
+	// gravity: planar x1.6; spherical toward the centre; decay
+	{
+		const float z0[3] = { 0, 0, 0 }, down[3] = { 0, 0, -1 }, p[3] = { 2, 0, 0 };
+		float o[3];
+		gravityUnderTest( p, z0, down, 10.0f, 0.0f, false, z0, 0.5f, o );
+		check( std::fabs( o[2] + 8.0f ) < 1e-5f, "gravity planar z, strength x1.6", o[2], -8.0 );
+		gravityUnderTest( p, z0, down, 1.0f, 0.0f, true, z0, 1.0f, o );
+		check( std::fabs( o[0] + 1.6f ) < 1e-5f, "gravity spherical pulls in", o[0], -1.6 );
+		gravityUnderTest( p, z0, down, 1.0f, 0.5f, true, z0, 1.0f, o );
+		check( std::fabs( o[0] + 1.6f * std::exp( -1.0f ) ) < 1e-5f, "gravity spherical decay", o[0], -1.6 * std::exp( -1.0 ) );
 	}
 
 	std::printf( fails ? "FXPARITY RULES: %d FAILED\n" : "FXPARITY RULES: PASS (%d failed)\n", fails );

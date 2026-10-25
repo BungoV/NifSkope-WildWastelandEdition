@@ -30,7 +30,8 @@ FxpState & fxp()
 		for ( const QByteArray & t : wwEnv( "WW_FX_PARITY_RED" ).split( ',' ) ) {
 			const QByteArray r = t.trimmed();
 			s.reds |= r == "color" ? WwFxColor : r == "drag" ? WwFxDrag : r == "subtex" ? WwFxSubTex
-				: r == "law" ? WwFxLaw : r == "soft" ? WwFxSoft : 0;
+				: r == "law" ? WwFxLaw : r == "soft" ? WwFxSoft : r == "range" ? WwFxDragRange : r == "bomb" ? WwFxBomb
+				: r == "gravity" ? WwFxGravity : 0;
 		}
 	}
 	return s;

@@ -64,6 +64,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifsnapshot.h"
 #include "probesky.h"	// lane SKY1: one call a frame
 #include "celldoorlive.h"	// lane DOORLIVE1: one call a frame
+#include "cellworldanim.h"	// lane FXPARITY2: the cell's world clock
 #include "shortcutregistry.h"
 #include "wwskin.h"
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1
@@ -3986,6 +3987,7 @@ void GLView::paintGL()
 	// every scene that snaps to it. No-op, and costs one branch, when unmarked.
 	applyWorkspaceSkeleton( viewTrans );
 	wwDoorLiveTick( scene, this );	// lane DOORLIVE1: the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
+	wwCellWorldAnimFrame( scene, time );	// lane FXPARITY2: a cell's world clock (a no-op unless World animation)
 	scene->transform( viewTrans, time );
 
 	// Setup projection mode (lane MOTION1: the one projection a frame the temporal AA jitters)
@@ -22341,6 +22343,8 @@ void GLView::advanceGears()
 	wwCellStreamFrame();   // lane CELLSTREAM1: a few ms of the cells round the camera a frame
 	if ( wwCellFlickerWantsFrames( scene ) )
 		update();	// lane LIGHTFLICKER1: a flickering lamp needs a frame every tick
+	if ( wwCellWorldAnimWantsFrames( scene ) )
+		update();	// lane FXPARITY2: the world clock moves the cell
 
 	dT = std::clamp< float >( dT, 0.0f, 1.0f );
 	physicsTick( dT );

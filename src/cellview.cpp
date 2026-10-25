@@ -17,6 +17,7 @@ BSD License - see nifskope.h
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
 #include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
+#include "cellworldanim.h"		// lane FXPARITY2: Animated objects
 #include "cellweapon.h"		// lane MISS1 (GAPLOOK2)
 #include "cellcable.h"		// lane CABLES1
 #include "celldecal.h"		// lane PLACED1
@@ -1658,8 +1659,20 @@ static int cellCopyParticleBranch( NifModel * nif, const QModelIndex & iParent, 
  * carries the placement; the copied root's own transform is cleared as the weld ignores it. Collision and lights are
  * left out. Returns the blocks copied (the root first), 0 or less on a refusal. */
 static int cellCopyDoorBranch( NifModel * nif, const QModelIndex & iParent, NifModel & src, const Vector3 & at,
-	const Matrix & rot, float scale, quint32 ref, qint32 * wrapper, qint32 * rootOut, QString * why )
+	const Matrix & rot, float scale, quint32 ref, qint32 * wrapper, qint32 * rootOut, QString * why,
+	QString * animLoop = nullptr )
 {
+	/* lane FXPARITY2: with animLoop (an animated object) the particle systems stay out (the Particles row copies them)
+	 * and so does a manager without a looping sequence (a door's Open / Close: the copy rests); the first looping
+	 * sequence's name goes to *animLoop */
+	auto managerLoops = [&]( const QModelIndex & ib ) -> QString {
+		for ( const qint32 l : src.getLinkArray( ib, "Controller Sequences" ) ) {
+			const QModelIndex iSeq = src.getBlockIndex( l, "NiControllerSequence" );
+			if ( iSeq.isValid() && src.get<int>( iSeq, "Cycle Type" ) == 0 )
+				return src.get<QString>( iSeq, "Name" );
+		}
+		return QString();
+	};
 	const QList<int> roots = src.getRootLinks();
 	if ( roots.isEmpty() || !src.blockInherits( src.getBlockIndex( roots.first() ), "NiNode" ) ) {
 		*why = QStringLiteral( "no NiNode root" );
@@ -1675,6 +1688,15 @@ static int cellCopyDoorBranch( NifModel * nif, const QModelIndex & iParent, NifM
 		if ( !ib.isValid() || src.blockInherits( ib, "NiCollisionObject" ) || src.blockInherits( ib, "NiLight" )
 			|| src.blockInherits( ib, "bhkSerializable" ) )
 			return;
+		if ( animLoop && src.blockInherits( ib, "NiParticleSystem" ) )
+			return;
+		if ( animLoop && src.blockInherits( ib, "NiControllerManager" ) ) {
+			const QString loop = managerLoops( ib );
+			if ( loop.isEmpty() )
+				return;
+			if ( animLoop->isEmpty() )
+				*animLoop = loop;
+		}
 		order.append( b );
 		for ( const int c : src.getChildLinks( b ) )
 			walk( c );
@@ -1706,7 +1728,7 @@ static int cellCopyDoorBranch( NifModel * nif, const QModelIndex & iParent, NifM
 	}
 	Transform().writeBack( nif, nif->getBlockIndex( base ) );
 	const QModelIndex iW = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
-	nif->set<QString>( iW, "Name", QStringLiteral( "doorlive %1" ).arg( ref, 8, 16, QLatin1Char( '0' ) ) );
+	nif->set<QString>( iW, "Name", QStringLiteral( "%1 %2" ).arg( animLoop ? "animobj" : "doorlive" ).arg( ref, 8, 16, QLatin1Char( '0' ) ) );
 	nif->set<quint32>( iW, "Flags", 14 );
 	nif->set<float>( iW, "Scale", 1.0f );
 	Transform t;
@@ -3306,6 +3328,13 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const bool bakeLean = probing && !bakeEnv.isEmpty() && wwEnvIsEmpty( "WW_CELL_LIT" )
 		&& wwEnvIsEmpty( "WW_CELL_GI_DUMP" ) && wwEnv( "WW_CELL_SPEED_RED" ) != "nolean";
 	int leanSkipped = 0;
+	/* lane FXPARITY2: THE ANIMATED OBJECTS row (src/cellworldanim.h). A placed model that moves alone (lodgenModelMoves)
+	 * is left out of the weld and copied whole after it, as the live door; WW_CELL_ANIMOBJ_MAX (256) caps the copies.
+	 * The probe soup above still takes its triangles, so the GI is the same. Not in streamed chunks. */
+	const bool animObjOn = !chunk && !bakeLean && wwLookOn( WwLook::AnimObjects );
+	WW_SWITCH_STATIC( int, animObjCap, wwEnvIsSet( "WW_CELL_ANIMOBJ_MAX" ) ? wwEnvInt( "WW_CELL_ANIMOBJ_MAX" ) : 256 );
+	QSet<quint32> animObjRefs, animObjCapped;
+	int animObjShapes = 0;
 	auto soupLeavesOut = [&]( const Placement & p, bool counted ) -> bool {
 		const EsmLodBase & lb = world.lodBase( p.base );
 		if ( !p.actorKey.isEmpty() ) {   // a placed actor (lane PLACED1) never enters the soup
@@ -4388,6 +4417,21 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				}
 				pick.triangles += quint32( s.geom.tris.size() / 3 );
 				doorLiveShapes++;
+				continue;
+			}
+			if ( animObjOn && !isActor && !animObjRefs.contains( p.ref ) && !animObjCapped.contains( p.ref )
+				&& lodgenModelMoves( model ) )
+				( animObjRefs.size() < animObjCap ? animObjRefs : animObjCapped ).insert( p.ref );
+			if ( animObjOn && !isActor && animObjRefs.contains( p.ref ) ) {   // lane FXPARITY2: drawn by its copy
+				for ( size_t v = 0; v < nv; v++ ) {
+					const Vector3 wp = p.pos + p.rot * ( Vector3( s.geom.pos[v * 3 + 0], s.geom.pos[v * 3 + 1], s.geom.pos[v * 3 + 2] ) * p.scale );
+					for ( int k = 0; k < 3; k++ ) {
+						lo[k] = qMin( lo[k], wp[k] );
+						hi[k] = qMax( hi[k], wp[k] );
+					}
+				}
+				pick.triangles += quint32( s.geom.tris.size() / 3 );
+				animObjShapes++;
 				continue;
 			}
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
@@ -5934,6 +5978,62 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			: QStringLiteral( "not copied: %1" ).arg( why );
 		wwDoorLiveSetBranch( nif, doorLiveRef, model, count > 0 ? wrapper : -1, count > 0 ? root : -1, count, note );
 		fprintf( stderr, "door live: ref %08x model %s: %s\n", doorLiveRef, qPrintable( model ), qPrintable( note ) );
+	}
+
+	/* lane FXPARITY2: THE ANIMATED OBJECTS, copied whole under nodes carrying their placements (cellCopyDoorBranch with
+	 * animLoop); the world clock binds each copy's looping sequence and runs its free controllers (cellworldanim.cpp). */
+	if ( ok && nif && !chunk ) {
+		QVector<WwAnimObjRoot> roots;
+		if ( animObjOn ) {
+			QHash<QString, std::shared_ptr<NifModel>> srcs;	// one parse a model; null = unusable
+			int blocks = 0, refused = 0, looping = 0;
+			QString why;
+			for ( const Placement & p : placements ) {
+				if ( !animObjRefs.contains( p.ref ) || !p.actorKey.isEmpty() )
+					continue;
+				const QString model = world.lodBase( p.base ).model;
+				const QString key = model.toLower();
+				auto it = srcs.find( key );
+				if ( it == srcs.end() ) {
+					auto m = std::make_shared<NifModel>();
+					QByteArray bytes;
+					QBuffer dev( &bytes );
+					bool good = !model.isEmpty() && lodgenReadModelBytes( dataRoot, model, bytes ) && dev.open( QIODevice::ReadOnly )
+						&& m->load( dev, model.toLocal8Bit().constData() );
+					if ( good ) {
+						m->resetState();
+						good = m->getVersionNumber() == nif->getVersionNumber() && m->getBSVersion() == nif->getBSVersion();
+					}
+					if ( !good ) {
+						m.reset();
+						why = QStringLiteral( "%1 unreadable or not this version" ).arg( model );
+					}
+					it = srcs.insert( key, m );
+				}
+				if ( !it.value() ) {
+					refused++;
+					continue;
+				}
+				qint32 wrapper = -1, root = -1;
+				QString loop;
+				const int n = cellCopyDoorBranch( nif, iRoot, *it.value(), p.pos - origin, p.rot, p.scale, p.ref, &wrapper,
+					&root, &why, &loop );
+				if ( n <= 0 ) {
+					refused++;
+					continue;
+				}
+				WwAnimObjRoot r;
+				r.root = root;
+				r.loopSeq = loop;
+				roots.append( r );
+				blocks += n;
+				looping += loop.isEmpty() ? 0 : 1;
+			}
+			fprintf( stderr, "cell animated objects: %d copies of %d models (%d blocks, %d with a looping sequence), %d welded shapes"
+				" left out, %d refused%s%s, %d past the cap of %d\n", int( roots.size() ), int( srcs.size() ), blocks, looping,
+				animObjShapes, refused, why.isEmpty() ? "" : ": last ", qPrintable( why ), int( animObjCapped.size() ), animObjCap );
+		}
+		wwCellAnimObjSet( nif, roots );
 	}
 
 	/* THE PICK HIGHLIGHT (lane CELLVIEW2) -- created ONCE, here, and MOVED on

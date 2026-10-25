@@ -86,6 +86,8 @@ QString lodgenNativeCacheMemLine();
 /*! lane SUNCELL1: did this model's parse (lodgenLoadModel, this process) find a particle system? The cell view
  *  copies those systems into its document (the welded load takes triangle shapes only). */
 bool lodgenModelHasParticles( const QString & model );
+//! lane FXPARITY2: did this model's parse find a looping sequence or a controller no sequence drives (it moves alone)?
+bool lodgenModelMoves( const QString & model );
 //! lane SUNCELL1: a model's file bytes, found the way the model loader finds them (loose, then the archives)
 bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByteArray & bytes );
 //! lane SUNCELL1: a previs file (`vis/<plugin>/<form>.uvd`), loose or from the archives

@@ -90,7 +90,7 @@ GrassState & gs()
 			s.timePinned = true;
 			s.tCur = t;
 			s.tPrev = t - 1.0 / 60.0;
-		} else if ( wwHarnessRun() ) {	// a harness never reads the wall clock: t = 0, run to run identical
+		} else if ( !wwWorldClockLive() ) {	// a harness never reads the wall clock: t = 0, run to run identical
 			s.timePinned = true;
 			s.tCur = 0.0;
 			s.tPrev = -1.0 / 60.0;
@@ -733,7 +733,7 @@ void wwCellGrassFrameEnd()
 bool wwCellGrassWantsRepaint()
 {
 	GrassState & s = gs();
-	const bool want = s.windDrawn && !s.timePinned && !wwHarnessRun();
+	const bool want = s.windDrawn && !s.timePinned && wwWorldClockLive();
 	s.windDrawn = false;
 	return want;
 }
