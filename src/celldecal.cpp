@@ -433,6 +433,11 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 				m.diffuse = t.diffuse;
 				m.normal = t.normal;
 				m.spec = t.spec;
+				if ( !b.height.isEmpty() ) {	// lane DECALS1: the game binds the set's height texture whatever the material
+					m.height = slashed( b.height, "textures" );
+					m.parallaxScale = b.parallaxScale;
+					m.parallaxPasses = b.parallaxPasses;
+				}
 				mi = int( out.meshes.size() );
 				out.meshes.push_back( m );
 				meshOfBase.insert( r.base, mi );

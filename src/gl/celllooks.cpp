@@ -31,6 +31,8 @@ const LookRow kRows[] = {
 	{ "Animated objects", "WW/CellAnimObjects" },
 	{ "Wide exposure range", "WW/CellExposureWide" },
 	{ "Probe sharing", "WW/CellGiShare" },
+	{ "Decal distance fade", "WW/CellDecalFade" },
+	{ "Decal parallax", "WW/CellDecalParallax" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -108,6 +110,12 @@ QByteArray pinOf( WwLook l )
 	}
 	case WwLook::ProbeShare: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_GI_SHARE" ).trimmed() );
+	case WwLook::DecalFade: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_DECAL_FADE" ).trimmed() );
+		return p;
+	}
+	case WwLook::DecalParallax: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_DECAL_POM" ).trimmed() );
 		return p;
 	}
 	default:
@@ -140,6 +148,8 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::AnimObjects: return "WW_CELL_ANIMOBJ";
 	case WwLook::ExposureWide: return "WW_CELL_EXPOSURE_WIDE";
 	case WwLook::ProbeShare: return "WW_CELL_GI_SHARE";
+	case WwLook::DecalFade: return "WW_CELL_DECAL_FADE";
+	case WwLook::DecalParallax: return "WW_CELL_DECAL_POM";
 	default: return "";
 	}
 }

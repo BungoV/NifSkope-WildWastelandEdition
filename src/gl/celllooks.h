@@ -24,6 +24,8 @@ enum class WwLook : int
 	AnimObjects,		// FXPARITY2: placed models with controllers are copied whole, not welded (WW_CELL_ANIMOBJ)
 	ExposureWide,		// GIBAKE2 (GISHADE1): the eye may open past the imagespace's exposure cap, to 16 (WW_CELL_EXPOSURE_WIDE)
 	ProbeShare,			// GPURELIGHT1: neighbouring probes share light, never across a wall (WW_CELL_GI_SHARE)
+	DecalFade,		// DECALS1: decal-flag model shapes fade out with distance, the game's LOD rule (WW_CELL_DECAL_FADE)
+	DecalParallax,	// DECALS1: placed decals with a height map (TX04) get the game's parallax (WW_CELL_DECAL_POM)
 	Count
 };
 

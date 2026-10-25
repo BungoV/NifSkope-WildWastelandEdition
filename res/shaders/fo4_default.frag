@@ -36,6 +36,7 @@ uniform vec3 glowColor;
 uniform float glowMult;
 
 uniform float alpha;
+uniform vec2 wwDecalPom;	// lane DECALS1: placed decal parallax (DODT scale x 0.1, step cap); x = 0 off
 uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
 uniform bool landSplat;		// lane TERRBLEND1: vertex alpha = this blended-ground pass's share
 uniform int landSplatDbg;	// lane ALLON2: 0 edge guard, 1 red WW_TERRBLEND_RED=edgepass (no guard), 2 probe WW_TERRBLEND_PROBE=edge
@@ -283,6 +284,39 @@ vec3 tonemap(vec3 x)
 #include "cell_grass.glsl"
 #endif
 
+/* lane DECALS1: the game's decal parallax. Height = the set's TX04 (bound as GlowMap, red); the eye ray in the
+ * decal's unit uv axes x tan(angle) x scale, linear search from the top in n steps, then one secant step. */
+vec2 wwDecalPomUv( vec2 uv0, vec3 P, vec3 N, vec3 E )
+{
+	vec3 dpx = dFdx( P ), dpy = dFdy( P );
+	vec2 dux = dFdx( uv0 ), duy = dFdy( uv0 );
+	float det = dux.x * duy.y - duy.x * dux.y;
+	if ( abs( det ) < 1e-12 )
+		return uv0;
+	vec3 T = normalize( ( dpx * duy.y - dpy * dux.y ) / det );	// +u on the surface
+	vec3 B = normalize( ( dpy * dux.x - dpx * duy.x ) / det );	// +v
+	float ez = max( dot( E, N ), 1e-3 );
+	vec2 ofs = -vec2( dot( E, T ), dot( E, B ) ) / ez * wwDecalPom.x;
+	float n = min( 72.0 - 56.0 * clamp( dot( N, E ), 0.0, 1.0 ), wwDecalPom.y );
+	float stepH = 1.0 / n;
+	float layer = 1.0, prevLayer = 1.0, h = 0.0, prevH = 1.0;
+	vec2 uv = uv0;
+	for ( int i = 0; i < 72; i++ ) {
+		if ( float( i ) >= n )
+			break;
+		uv = uv0 + ofs * ( 1.0 - layer );
+		h = textureGrad( GlowMap, uv, dux, duy ).r;
+		if ( layer < h )
+			break;
+		prevLayer = layer;
+		prevH = h;
+		layer -= stepH;
+	}
+	float d0 = prevLayer - prevH, d1 = layer - h;
+	float t = ( d0 - d1 ) != 0.0 ? prevLayer + ( layer - prevLayer ) * d0 / ( d0 - d1 ) : layer;
+	return uv0 + ofs * ( 1.0 - t );
+}
+
 void main()
 {
 #ifdef WW_CELLLIGHTS
@@ -292,6 +326,11 @@ void main()
 		discard;
 #endif
 	vec2 offset = texCoord.st * uvScale + uvOffset;
+	if ( wwDecalPom.x > 0.0 ) {	// lane DECALS1: the uv leaving the decal's rect is clipped, as the game's decal pass does
+		offset = wwDecalPomUv( offset, -ViewDir, normalize( btnMatrix[2] ), normalize( ViewDir ) );
+		if ( any( lessThan( offset, vec2( 0.0 ) ) ) || any( greaterThan( offset, vec2( 1.0 ) ) ) )
+			discard;
+	}
 #ifdef WW_SUNSHADOW
 	/* lane SUNCELL1: the cascades on the SUN only (CSM1 spec 2.8). Every D.rgb below is the sun: D = sqrt(the
 	 * linear sun), so D x sqrt(f) is the sun x f in the linear light the tonemap squares back. The macro takes

@@ -5,6 +5,7 @@
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellcull.h"	// lane SUNCELL1
+#include "gl/celllooks.h"	// lane DECALS1: the Decal distance fade row
 #include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "gl/cellhdr.h"	// finalfix: blended draws single-sample outside the linear frame
 #include "gl/cellpasstime.h"	// lane PERF1
@@ -440,7 +441,69 @@ void BSShape::drawShapes( NodeList * secondPass )
 	static std::vector<std::uint32_t> cullRanges;
 	if ( !selectionFlags )
 		GpuDrivenB::learn( this, shader );	// step B: the state this draw runs with
-	if ( numTriangles > 0 && !hiddenT && !selectionFlags && GpuDrivenB::draw( scene, this, numTriangles ) ) {
+	static std::vector<std::uint32_t> fadeKeep, fadeBand;	// lane DECALS1
+	static std::vector<float> fadeAlpha;
+	if ( numTriangles > 0 && !hiddenT && !selectionFlags && wwLookOn( WwLook::DecalFade )
+		&& !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene )
+		&& wwCellDecalFadeRanges( scene, this, id(), std::int64_t( numTriangles ), fadeKeep, fadeBand, fadeAlpha ) ) {
+		// lane DECALS1: a decal-flag shape's near placements whole, the fading band one draw each with its alpha
+		static std::vector<GLsizei> fadeCounts;
+		static std::vector<const void *> fadeOffsets;
+		fadeCounts.clear();
+		fadeOffsets.clear();
+		for ( size_t k = 0; k + 1 < fadeKeep.size(); k += 2 ) {
+			fadeCounts.push_back( GLsizei( fadeKeep[k + 1] * 3 ) );
+			fadeOffsets.push_back( (const void *) ( size_t( fadeKeep[k] ) * 6 ) );
+		}
+		if ( !fadeCounts.empty() ) {
+			context->fn->glMultiDrawElements( GL_TRIANGLES, fadeCounts.data(), GL_UNSIGNED_SHORT, fadeOffsets.data(),
+				GLsizei( fadeCounts.size() ) );
+			PassTime::countDraw( qint64( fadeCounts.size() ) );
+		}
+		if ( !fadeAlpha.empty() ) {
+			auto * cur = context->getCurrentProgram();
+			const int la = cur ? cur->uniLocation( "alpha" ) : -1;
+			const int lf = cur ? cur->uniLocation( "alphaFlags" ) : -1;
+			GLint aFlags = 0;
+			GLfloat a0 = 1.0f;
+			if ( lf >= 0 )
+				context->fn->glGetUniformiv( cur->id, lf, &aFlags );
+			if ( la >= 0 )
+				context->fn->glGetUniformfv( cur->id, la, &a0 );
+			// a blended shape scales its own alpha; any other blends by a constant alpha for the band
+			const bool viaAlpha = la >= 0 && ( aFlags & 8 ) != 0 && glIsEnabled( GL_BLEND );
+			GLint prevBlend[4] = { GL_ONE, GL_ZERO, GL_ONE, GL_ZERO };
+			GLfloat prevColor[4] = { 0, 0, 0, 0 };
+			const bool blendWas = glIsEnabled( GL_BLEND );
+			if ( !viaAlpha ) {
+				glGetIntegerv( GL_BLEND_SRC_RGB, &prevBlend[0] );
+				glGetIntegerv( GL_BLEND_DST_RGB, &prevBlend[1] );
+				glGetIntegerv( GL_BLEND_SRC_ALPHA, &prevBlend[2] );
+				glGetIntegerv( GL_BLEND_DST_ALPHA, &prevBlend[3] );
+				glGetFloatv( GL_BLEND_COLOR, prevColor );
+				glEnable( GL_BLEND );
+				glBlendFunc( GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA );
+			}
+			for ( size_t k = 0; k < fadeAlpha.size(); k++ ) {
+				if ( viaAlpha )
+					cur->uni1f_l( la, a0 * fadeAlpha[k] );
+				else
+					context->fn->glBlendColor( 0.0f, 0.0f, 0.0f, fadeAlpha[k] );
+				context->fn->glDrawElements( GL_TRIANGLES, GLsizei( fadeBand[2 * k + 1] * 3 ), GL_UNSIGNED_SHORT,
+					(void *) ( size_t( fadeBand[2 * k] ) * 6 ) );
+			}
+			PassTime::countDraw( qint64( fadeAlpha.size() ) );
+			if ( viaAlpha ) {
+				cur->uni1f_l( la, a0 );
+			} else {
+				context->fn->glBlendFuncSeparate( GLenum( prevBlend[0] ), GLenum( prevBlend[1] ), GLenum( prevBlend[2] ),
+					GLenum( prevBlend[3] ) );
+				context->fn->glBlendColor( prevColor[0], prevColor[1], prevColor[2], prevColor[3] );
+				if ( !blendWas )
+					glDisable( GL_BLEND );
+			}
+		}
+	} else if ( numTriangles > 0 && !hiddenT && !selectionFlags && GpuDrivenB::draw( scene, this, numTriangles ) ) {
 		// step B drew it: its clusters from the GPU cull's commands (gl/cellgpucull.h)
 	} else if ( numTriangles > 0 && !hiddenT && !selectionFlags && !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene )
 		&& wwCellCullCamera( scene, this, id(), std::int64_t( numTriangles ), cullRanges ) ) {
