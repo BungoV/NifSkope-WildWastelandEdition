@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FAR6 (2026-10-25, branch far6-20261025): FAR5 leftovers -- one look made live, the self-test, the terrace check
+
+- **Game LOD trees sway is live** (`WW_CELL_FARLOD_BTOSWAY`): ticking it rebuilds the far LOD in place
+  (`cellLiveRebuild`, the shape of LIVESET4's) instead of reopening the cell. The tick and its red go into the far
+  section's key (`liveFarKey`); the survey marks both names live by hand (a liveFarKey read is a build-time read to
+  its rules). A streamed view still reopens until LIVESET4 lands.
+- **Object LOD shadows on ground only now runs FO4CS's light-space self-test** (`WW_SHADOW_GROUNDGATE`, OFF): the
+  full sweep's shadow counts by FarLodOcclusionFade (past a self margin of 4 quanta + min(1.5 texels of slope, 100))
+  times FarLodReliefGate (smoothstep of the caster's height over the receiver, low edge 4 far texels), composed
+  with the terrain-only sweep by min(), as FarFieldMaskCS does. The caster height per texel rides the unused G
+  channel of the FAR5 heights block, so there is no new GPU memory. Reds `WW_SHADOW_GROUNDGATE_RED=band` (FAR5's
+  ground band, = FO4CS's self-test 0), `=norelief` (no relief gate), `=allup` (as before). Off draws what it drew.
+- Unit pins: tests/liveswitch checks both BTOSWAY names and the GROUNDGATE / SLOPEMAP names are live.
+- The row-house terrace far-shadow check (IDENT2 c) is an offline harness in the lane notes (notes/far6/ident2c).
+
 ## Lane LIGHTS5 (2026-10-25, branch lights5-20261025): bounce emittance live, light patterns, fog strength per light
 
 - **Emittance in bounce light is live:** the bake keeps which emitter each glowing surfel belongs to, and the row
@@ -193,7 +208,6 @@
 - **Red:** `WW_CELL_XEMI_RED=magenta` paints every taken shape's colour magenta.
 - **Census:** the cell notes gain a "placement emittance:" line (placements carrying XEMI, light vs region, shapes
   taking it, shapes without the flag).
-
 ## Lane FAR5 (2026-10-25, branch far5-20261023): far LOD leftovers -- five new looks, all OFF
 
 Each is a Show-menu tick (src/gl/celllooks.*) with its own pin and red; off draws exactly what it drew before.

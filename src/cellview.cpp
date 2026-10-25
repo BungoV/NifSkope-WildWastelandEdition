@@ -1943,6 +1943,8 @@ QByteArray liveFarKey()
 			"WW_CELL_FARLOD_L1", "WW_CELL_FARLOD_L2", "WW_CELL_FARLOD_TREE_DIST", "WW_CELL_FARLOD_RINGS",
 			"WW_CELL_FARLOD_BUDGET_MB", "WW_CELL_FARLOD_OURS", "WW_CELL_FARLOD_SWAY" } )
 		k += wwEnv( n ) + '\x1f';
+	// lane FAR6: Game LOD trees sway is written into the .bto shapes at build; its menu tick lives in the settings
+	k += QByteArray( wwLookOn( WwLook::BtoSway ) ? "1" : "0" ) + wwEnv( "WW_CELL_FARLOD_BTOSWAY_RED" ) + '\x1f';
 	return k;
 }
 

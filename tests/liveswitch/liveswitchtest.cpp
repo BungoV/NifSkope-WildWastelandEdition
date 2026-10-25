@@ -55,6 +55,16 @@ int main()
 		std::printf( "%s %s live\n", live ? "PASS" : "FAIL", n );
 		g_fail += live ? 0 : 1;
 	}
+	// lane FAR6: Game LOD trees sway rebuilds the far section in place; the self-test rides the ground-gate row
+	for ( const char * n : { "WW_CELL_FARLOD_BTOSWAY", "WW_CELL_FARLOD_BTOSWAY_RED", "WW_SHADOW_GROUNDGATE",
+			"WW_SHADOW_GROUNDGATE_RED", "WW_SHADOW_SLOPEMAP", "WW_SHADOW_SLOPEMAP_RED" } ) {
+		const bool live = wwSwitchStageOf( n ) == WwSwitchStage::Live;
+		std::printf( "%s %s live\n", live ? "PASS" : "FAIL", n );
+		g_fail += live ? 0 : 1;
+	}
+	far = wwSwitchGen();
+	wwSwitchSet( "WW_CELL_FARLOD_BTOSWAY", "1", false );
+	check( wwSwitchMovedFor( far, { "WW_CELL_FARLOD" } ), "far section sees WW_CELL_FARLOD_BTOSWAY" );
 	check( wwSwitchStageOf( "WW_CELL_SPEED_RED" ) == WwSwitchStage::Reopen, "WW_CELL_SPEED_RED reopen (was relaunch)" );
 
 	// LIVESET4: far on/off + type, the per-cell switches (streamed cells stream again) and the weather plugin list

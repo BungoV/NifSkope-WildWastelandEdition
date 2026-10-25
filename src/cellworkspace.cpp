@@ -876,7 +876,7 @@ void CellWorkspacePanel::buildUi()
 		if ( glView )
 			glView->update();
 	} );
-	// lane LIVESET4 (bungo: settings update live, like games): the far LOD and the streamed cells rebuild in place
+	// lane LIVESET4 (bungo: settings update live, like games): the far LOD and the streamed cells rebuild in place; lane FAR6: Game LOD trees sway too
 	auto liveFirst = [this]() {
 		QString why;
 		const int r = cellLiveRebuild( nif, &why );
