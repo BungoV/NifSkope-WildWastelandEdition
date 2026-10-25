@@ -202,6 +202,10 @@ struct ProbeGiSpec
 	//! lane EMISSIVEGRID1: the fine boxes round bright glow (WW_CELL_EMISSIVEGRID / the row); red WW_CELL_EMISSIVEGRID_RED
 	bool emissiveGrid = false;
 	QString emissiveGridRed;
+	/*! lane LIGHTS5: the "Emittance in bounce light" state the bake took (-1 = no other state kept) and the one
+	 *  wanted now; they differ = take emitalt_*.bin. emitStale (red WW_CELL_XEMI_GI_RED=stale) keeps the baked Le. */
+	int emitBaked = -1, emitWant = -1;
+	bool emitStale = false;
 };
 
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.

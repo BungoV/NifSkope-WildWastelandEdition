@@ -25,6 +25,7 @@ enum class WwLook : int
 	ParticleEmittance,	// XEMI-PARTICLES (LIGHTS3): particle systems of an emittance placement take its colour (WW_CELL_XEMI_PART)
 	BounceEmittance,	// XEMI-GI (LIGHTS3): the bounce light of a recoloured emissive uses the emittance colour (WW_CELL_XEMI_GI)
 	LensFlares,			// LENSFLARE1 (LIGHTS3): LENS sprites of lights, a post-process pass (WW_CELL_LENSFLARE)
+	LightPatterns,		// GOBO1 (LIGHTS5): a spot light's pattern texture (LIGH gobo) on surfaces, effects and air (WW_CELL_GOBO)
 	Count
 };
 
@@ -36,6 +37,8 @@ bool wwLookPinned( WwLook l );
 //! true when the look is read while the cell is built: the menu row reopens the cell
 bool wwLookReopens( WwLook l );
 void wwLookSet( WwLook l, bool on );
+//! lane LIGHTS5: red WW_CELL_XEMI_GI_RED=stale, the bounce emittance row's live flip keeps the baked Le
+bool wwLookBounceEmitRedStale();
 
 /* LIGHTSYS-3: the lamp-shadow budget. 0 Off (the 16 nearest shadow lights, as before); else at most N slots, ranked
  * by brightness x radius / distance with 20 % hysteresis; a light's shadow fades out over the last 25 % of score

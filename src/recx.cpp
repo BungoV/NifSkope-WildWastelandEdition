@@ -34,6 +34,7 @@ struct RecxCategory
 	QVector<RecxFile> files;
 	QString summary;
 	QElapsedTimer checked;
+	quint64 generation = 0;	// lane LIGHTS5: moves each time the files are re-read
 };
 
 QHash<QString, RecxCategory> & cats()
@@ -83,6 +84,7 @@ void rescan( RecxCategory & c, const QStringList & roots, const QString & catego
 		return;
 	c.signature = sig;
 	c.roots = roots;
+	c.generation++;
 	c.files.clear();
 	QStringList lines;
 	for ( int i = 0; i < paths.size(); i++ ) {
@@ -249,6 +251,15 @@ WwRecxHit wwRecxFind( const QStringList & roots, const QStringList & pluginFiles
 		}
 	}
 	return hit;
+}
+
+quint64 wwRecxScan( const QStringList & roots, const QString & category, int * files )
+{
+	RecxCategory & c = cats()[category];
+	rescan( c, roots, category );
+	if ( files )
+		*files = int( c.files.size() );
+	return c.generation;
 }
 
 QString wwRecxScanSummary( const QString & category )

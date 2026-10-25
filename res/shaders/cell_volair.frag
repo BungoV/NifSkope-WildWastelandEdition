@@ -59,6 +59,13 @@ uniform vec4 volMs;				// lane GAPLOOK1 (FOGEXTRAS): the sun's scattering octave
 uniform vec4 volDrift;
 uniform vec4 volDriftOfs[2];	// per octave: xyz the wind's offset (world units), w 1 / its tile
 uniform sampler3D volNoise;
+// lane LIGHTS5 (FOGSCALE1): a light's fog.scale (.recx), 4 a texel from cellFogScaleBase; off = 1 for every light
+uniform bool cellFogScaleOn;
+uniform int cellFogScaleBase;
+float cellFogK( int i )
+{
+	return cellFogScaleOn ? texelFetch( cellLights, cellFogScaleBase + i / 4 )[i % 4] : 1.0;
+}
 
 layout ( location = 0 ) out vec4 fragColor;
 layout ( location = 1 ) out vec4 volMrt[7];	// stage 3: layers volLayer + 1 .. + 6, then the carry; stage 1 temporal: the 4 strata
@@ -228,7 +235,7 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 					continue;
 				vec3 L = ( t0.xyz - Pl ) / d, Lo;
 				bool noSpec;
-				vec3 e = cellLightE( i, Pl, L, Lo, noSpec );	// N = L: no N.L, the shadow lifted toward the light
+				vec3 e = cellLightE( i, Pl, L, Lo, noSpec ) * cellFogK( i );	// N = L: no N.L, the shadow lifted toward the light
 				if ( all( equal( e, vec3( 0.0 ) ) ) )
 					continue;
 				J += e * exp( -airOd( z, t0.z + zOff, d ) ) * volPhasePi( dot( L, dW ) );
@@ -254,7 +261,7 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 					continue;
 				vec3 L = ( t0.xyz - Pk ) / d, Lo;
 				bool noSpec;
-				vec3 e = cellLightE( i, Pk, L, Lo, noSpec );	// N = L: no N.L, the shadow lifted toward the light
+				vec3 e = cellLightE( i, Pk, L, Lo, noSpec ) * cellFogK( i );	// N = L: no N.L, the shadow lifted toward the light
 				if ( all( equal( e, vec3( 0.0 ) ) ) )
 					continue;
 				Ji += e * exp( -airOd( Pk.z + zOff, t0.z + zOff, d ) ) * volPhasePi( dot( L, dW ) );
@@ -345,7 +352,7 @@ void airLightsQ( vec3 posView, vec3 dirView, float z, float sA, float sB, int ne
 				continue;
 			vec3 L = ( t0.xyz - Pk ) / d, Lo;
 			bool noSpec;
-			vec3 e = cellLightE( i, Pk, L, Lo, noSpec );
+			vec3 e = cellLightE( i, Pk, L, Lo, noSpec ) * cellFogK( i );
 			if ( all( equal( e, vec3( 0.0 ) ) ) )
 				continue;
 			Jq[k] += e * exp( -airOd( Pk.z + zOff, t0.z + zOff, d ) ) * volPhasePi( dot( L, dW ) ) * share;

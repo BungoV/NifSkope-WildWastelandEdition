@@ -28,6 +28,7 @@ BSD License - see nifskope.h
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -541,9 +542,54 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 	}
 	R.surfels = int( us.size() );
+	/* lane LIGHTS5: the bake kept the other "Emittance in bounce light" state's Le in emitalt_*.bin; a live toggle
+	 * overlays it on each file's list, so the relight equals a fresh bake under that state. */
+	std::vector<std::map<quint32, std::array<float, 3>>> emitAlt;
+	if ( spec.emitBaked >= 0 && spec.emitWant >= 0 && spec.emitWant != spec.emitBaked && !spec.noGlow && !spec.emitStale ) {
+		emitAlt.resize( tbks.size() );
+		bool ok = true;
+		for ( size_t f = 0; f < tbks.size() && ok; f++ ) {
+			std::map<quint32, std::array<float, 3>> & m = emitAlt[f];
+			for ( const TbkEmit & e : tbks[f].emits )
+				m[e.surfel] = { e.le[0], e.le[1], e.le[2] };
+			QFile af( QDir( bakeDir ).filePath( QString( names[int( f )] ).replace( QLatin1String( "sector_" ), QLatin1String( "emitalt_" ) ).replace( QLatin1String( ".tbk" ), QLatin1String( ".bin" ) ) ) );
+			if ( !af.open( QIODevice::ReadOnly ) )
+				continue;   // no file: no surfel of this sector differs
+			char mg[8];
+			quint32 ah[3] = { 0, 0, 0 };
+			ok = af.read( mg, 8 ) == 8 && std::memcmp( mg, "EMALT1\0\0", 8 ) == 0 && af.read( reinterpret_cast<char *>( ah ), 12 ) == 12
+				&& ah[1] == tbks[f].surfels.size() && ah[2] == tbks[f].back.size() && af.size() == 20 + qint64( ah[0] ) * 16;
+			for ( quint32 i = 0; ok && i < ah[0]; i++ ) {
+				TbkEmit a;
+				ok = af.read( reinterpret_cast<char *>( &a ), 16 ) == 16;
+				if ( ok && ( a.le[0] > 0 || a.le[1] > 0 || a.le[2] > 0 ) )
+					m[a.surfel] = { a.le[0], a.le[1], a.le[2] };
+				else if ( ok )
+					m.erase( a.surfel );
+			}
+		}
+		if ( !ok )
+			emitAlt.clear();
+		std::fprintf( stderr, "gi emittance: baked %d, want %d, %s\n", spec.emitBaked, spec.emitWant,
+			ok ? "the kept other state applied" : "the kept state does not match this bake (left as baked)" );
+	}
 	/* lane EMISSIVEGI1: the glowing surfels (each file names its own; a surfel in two files glows the same in both).
 	 * Read once into B after the direct light, never inside the bounce passes (they rebuild from B: counted once). */
-	for ( size_t f = 0; f < tbks.size(); f++ )
+	for ( size_t f = 0; f < tbks.size() && !emitAlt.empty(); f++ )
+		for ( const auto & e : emitAlt[f] ) {
+			const bool back = ( e.first & 0x80000000u ) != 0;
+			const size_t i = size_t( e.first & 0x7fffffffu );
+			const std::vector<int> & fs = ( back ? fileBack : fileSurfel )[f];
+			if ( i >= fs.size() )
+				continue;
+			US & u = us[size_t( fs[i] )];
+			if ( !u.emits )
+				R.surfelsEmit++;
+			u.emits = true;
+			for ( int c = 0; c < 3; c++ )
+				u.Le[c] = e.second[size_t( c )];
+		}
+	for ( size_t f = 0; f < tbks.size() && emitAlt.empty(); f++ )
 		for ( const TbkEmit & e : tbks[f].emits ) {
 			if ( spec.noGlow )	// lane FARVIEW1
 				break;

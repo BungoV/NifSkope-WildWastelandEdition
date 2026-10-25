@@ -402,7 +402,7 @@ int farLightDots( const ProbeSoup & soup, ProbeRelightOps & ops, float clear, QS
 	std::vector<G> glow;
 	const size_t nT = soup.tris.size() / 9;
 	for ( size_t t = 0; t < nT; t++ ) {
-		if ( !soup.glow.emits( int( t ) ) )
+		if ( !soup.glow.lit( int( t ) ) )
 			continue;
 		const float * v = &soup.tris[t * 9];
 		double e1[3], e2[3];

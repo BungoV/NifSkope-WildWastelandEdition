@@ -9,6 +9,7 @@
 #include "gl/lookdevstage.h"
 #include "gl/scenelighting.h"
 #include "probegi.h"
+#include "gl/celllooks.h"	// lane LIGHTS5: the emittance row's live flip
 
 #include <QDir>
 #include <QFile>
@@ -217,6 +218,7 @@ struct Kept
 	QString bakeDir;
 	ProbeGiSpec spec;
 	ProbeSkyLight wanted;
+	bool skyKept = true;      // lane LIGHTS5: false = kept only for the emittance row (no weather relight)
 	QPointer<QTimer> timer;   // the view's child: it goes with the window
 	QPointer<QWindow> view;
 };
@@ -280,11 +282,11 @@ void skyPicRelit( const ProbeGiResult & gr, const ProbeGiSpec & spec )
 	}
 }
 
-void relightKept()
+void relightKept( bool emitOnly = false )
 {
 	Kept & k = kept();
 	const WwCellLighting * L = k.nif ? wwCellLightsFor( k.nif ) : nullptr;
-	if ( !L || ( L->interior && !k.spec.interiorSky ) )   // lane SKYINT1: an interior that shows the sky too
+	if ( !L || ( L->interior && !k.spec.interiorSky && !emitOnly ) )   // lane SKYINT1: an interior that shows the sky too
 		return;
 	k.spec.sky = k.wanted;
 	ProbeGiResult gr;
@@ -347,20 +349,34 @@ void probeSkyForget()
 	picNow() = PicNow();
 }
 
-void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec )
+void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec, bool skyKept )
 {
 	Kept & k = kept();   // one exterior at a time: the latest relit
 	k.nif = nif;
 	k.soup = soup;
 	k.bakeDir = bakeDir;
 	k.spec = spec;
+	k.spec.record = nullptr;   // lane LIGHTS5: the load's record is gone by the next relight
 	k.wanted = spec.sky;
+	k.skyKept = skyKept;
 }
 
 void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 {
 	Kept & k = kept();
 	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
+		return;
+	if ( k.spec.emitBaked >= 0 ) {   // lane LIGHTS5: the "Emittance in bounce light" row, relit from the kept other state
+		const int want = wwLookOn( WwLook::BounceEmittance ) ? 1 : 0;
+		const bool stale = wwLookBounceEmitRedStale();
+		if ( want != k.spec.emitWant || stale != k.spec.emitStale ) {
+			k.spec.emitWant = want;
+			k.spec.emitStale = stale;
+			relightKept( true );
+			return;
+		}
+	}
+	if ( !k.skyKept )
 		return;
 	bool firstPic = false;
 	if ( skyPicOn() && wwLookdevActive() ) {   // lane SKYPIC1: capture the drawn sky when it changed

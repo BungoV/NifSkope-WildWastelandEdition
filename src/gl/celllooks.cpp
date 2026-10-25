@@ -32,6 +32,7 @@ const LookRow kRows[] = {
 	{ "Emittance on particles", "WW/CellParticleEmittance" },
 	{ "Emittance in bounce light", "WW/CellBounceEmittance" },
 	{ "Lens flares", "WW/CellLensFlares" },
+	{ "Light patterns", "WW/CellLightPatterns" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -117,6 +118,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LENSFLARE" ).trimmed() );
 		return p;
 	}
+	case WwLook::LightPatterns: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_GOBO" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -148,6 +153,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::ParticleEmittance: return "WW_CELL_XEMI_PART";
 	case WwLook::BounceEmittance: return "WW_CELL_XEMI_GI";
 	case WwLook::LensFlares: return "WW_CELL_LENSFLARE";
+	case WwLook::LightPatterns: return "WW_CELL_GOBO";
 	default: return "";
 	}
 }
@@ -160,7 +166,14 @@ bool wwLookPinned( WwLook l )
 bool wwLookReopens( WwLook l )
 {
 	// lane LIGHTS4: the placement, region and particle emittance rows are read at draw time (live)
-	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::BounceEmittance;
+	// lane LIGHTS5: the bounce emittance row relights from the bake's kept other state (probesky.cpp)
+	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts;
+}
+
+bool wwLookBounceEmitRedStale()
+{
+	WW_SWITCH_STATIC( bool, stale, wwEnv( "WW_CELL_XEMI_GI_RED" ).trimmed() == "stale" );
+	return stale;
 }
 
 bool wwLookOn( WwLook l )

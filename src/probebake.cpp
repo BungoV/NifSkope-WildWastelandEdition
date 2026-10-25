@@ -198,10 +198,12 @@ struct Bin
 	quint32 n2 = 0;
 	double le[3] = { 0, 0, 0 };   // lane EMISSIVEGI1: the summed emitted light (linear) of the hits that glowed
 	double nrmS[3] = { 0, 0, 0 };   // lane SMOOTHN1: the smooth normal at each hit (the tri way's stored normal)
+	double leAlt[3] = { 0, 0, 0 };   // lane LIGHTS5: le under the other emittance state (summed only when the soup has one)
 	void add( const Bin & o )
 	{
 		for ( int k = 0; k < 3; k++ ) {
 			le[k] += o.le[k];
+			leAlt[k] += o.leAlt[k];
 			pos[k] += o.pos[k];
 			nrm[k] += o.nrm[k];
 			alb[k] += o.alb[k];
@@ -267,6 +269,8 @@ struct Final
 	double n[3];    //!< the stored (quantized) normal, what the facing rule tests
 	bool emits = false;               //!< lane EMISSIVEGI1: some hit in the cell's side glowed
 	float le[3] = { 0, 0, 0 };        //!< the mean emitted light over the side's hits (linear)
+	bool emitsAlt = false;            //!< lane LIGHTS5: the same two under the other emittance state
+	float leAlt[3] = { 0, 0, 0 };
 };
 
 /* lane EMISSIVEGI1: the `.tbk` v4 emissive tail, after the room boxes, only when a surfel glows (header
@@ -397,6 +401,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	R.decalTris = decalOn ? int( soup.decal.size() / 9 ) : 0;
 	const bool glowOn = !soup.glow.empty();   // lane EMISSIVEGI1: no glowing triangle = every byte as before
 	R.emitTris = int( soup.glow.tris.size() );
+	const bool glowAlt = glowOn && soup.glow.hasAlt();   // lane LIGHTS5: also sum the other state's Le
 	/* lane WATER1: the water surfaces (v4 only: v3 is FO4CS's file exactly). Reds: "water" bakes as if no water,
 	 * "waterfog" drops the underwater fog, "waterfresnel" keeps F at F0 (no angle) */
 	bool waterOn = v4 && spec.red != QLatin1String( "water" ) && !soup.water.empty()
@@ -1232,6 +1237,11 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 						soup.glow.le( triL, b1, b2, L );
 						for ( int k = 0; k < 3; k++ )
 							s.le[k] += L[k];
+						if ( glowAlt ) {
+							soup.glow.leAlt( triL, b1, b2, L );
+							for ( int k = 0; k < 3; k++ )
+								s.leAlt[k] += L[k];
+						}
 						ch.emitHits++;
 					}
 					lap( tp, ch.pf[4] );
@@ -1258,6 +1268,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 							}
 							for ( int k = 0; k < 3; k++ )
 								s.le[k] += soup.veil.le[size_t( vt ) * 3 + size_t( k )];
+							if ( glowAlt )
+								for ( int k = 0; k < 3; k++ )
+									s.leAlt[k] += soup.veil.le[size_t( vt ) * 3 + size_t( k )];
 							ch.veilHits++;
 						}
 					}
@@ -1802,6 +1815,11 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			f.emits = true;
 			for ( int c = 0; c < 3; c++ )
 				f.le[c] = float( a.le[c] / a.n );
+		}
+		if ( a.leAlt[0] > 0 || a.leAlt[1] > 0 || a.leAlt[2] > 0 ) {   // lane LIGHTS5: the same rule
+			f.emitsAlt = true;
+			for ( int c = 0; c < 3; c++ )
+				f.leAlt[c] = float( a.leAlt[c] / a.n );
 		}
 		const double ql = std::sqrt( double( sr.normal[0] ) * sr.normal[0] + double( sr.normal[1] ) * sr.normal[1]
 			+ double( sr.normal[2] ) * sr.normal[2] );
@@ -2375,7 +2393,15 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 		std::vector<TbkSurfel> sfs, bks;
 		std::vector<TbkEmit> ems;   // lane EMISSIVEGI1
+		std::vector<TbkEmit> alts;  // lane LIGHTS5: surfels whose Le differs under the other emittance state
 		auto emitOf = [&]( const Final & fl, quint32 idx ) {
+			if ( glowAlt && ( fl.emitsAlt != fl.emits || fl.le[0] != fl.leAlt[0] || fl.le[1] != fl.leAlt[1] || fl.le[2] != fl.leAlt[2] ) ) {
+				TbkEmit a;
+				a.surfel = idx;
+				for ( int c = 0; c < 3; c++ )
+					a.le[c] = fl.emitsAlt ? fl.leAlt[c] : 0.0f;
+				alts.push_back( a );
+			}
 			if ( !fl.emits )
 				return;
 			TbkEmit e;
@@ -2411,6 +2437,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		if ( !v4 ) {   // v3 (FO4CS's file) has no place for it
 			R.emitDropped += int( ems.size() );
 			ems.clear();
+			alts.clear();
 		}
 		std::vector<TbkRoomBox> bxs;
 		if ( v4 && roomBoxes && !redRooms )
@@ -2464,6 +2491,23 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 		R.emitSurfels += int( ems.size() );
 		f.close();
+		{   // lane LIGHTS5: the other state's Le beside the tbk ("EMALT1", surfel + back counts, 16-byte entries)
+			char an[64];
+			std::snprintf( an, sizeof an, "emitalt_%+05d_%+05d.bin", h.cellX, h.cellY );
+			const QString ap = QDir( outDir ).filePath( QString::fromLatin1( an ) );
+			if ( alts.empty() ) {
+				QFile::remove( ap );
+			} else {
+				QFile af( ap );
+				if ( af.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+					const quint32 ah[4] = { quint32( alts.size() ), quint32( sfs.size() ), quint32( bks.size() ), 0u };
+					af.write( "EMALT1\0\0", 8 );
+					af.write( reinterpret_cast<const char *>( ah ), 12 );
+					af.write( reinterpret_cast<const char *>( alts.data() ), qint64( alts.size() * sizeof( TbkEmit ) ) );
+					R.emitAltSurfels += int( alts.size() );
+				}
+			}
+		}
 		R.files.append( path );
 		R.sectors++;
 		R.surfels += int( sfs.size() );
@@ -2551,7 +2595,9 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 		  << ", surfels that glow (written) " << r.emitSurfels << ", their Le summed (linear) "
 		  << QString::number( r.emitLeSum[0], 'g', 6 ) << "," << QString::number( r.emitLeSum[1], 'g', 6 ) << ","
 		  << QString::number( r.emitLeSum[2], 'g', 6 ) << ( r.emitDropped ? ", DROPPED by v3 " : "" )
-		  << ( r.emitDropped ? QString::number( r.emitDropped ) : QString() ) << "\n";
+		  << ( r.emitDropped ? QString::number( r.emitDropped ) : QString() )
+		  << ( r.emitAltSurfels ? ", other emittance state differs on " : "" )
+		  << ( r.emitAltSurfels ? QString::number( r.emitAltSurfels ) : QString() ) << "\n";
 	if ( r.veilTris )   // lane NEONGI1
 		t << "bake: emissive effects (neon): triangles " << r.veilTris << ", pass-1 crossings added to the surface behind "
 		  << r.veilHits << ", crossed from behind (one-sided, not drawn) " << r.veilBack

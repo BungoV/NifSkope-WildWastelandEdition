@@ -1665,6 +1665,22 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		}
 		sizedEnd();
 	}
+	// lane LIGHTS5: each emitter's colour under the other "Emittance in bounce light" state (u32 emitter + 3 f32)
+	if ( !soup.glow.empty() && soup.glow.hasAlt() ) {
+		quint32 n = 0;
+		for ( const ProbeEmit::Emitter & em : soup.glow.emitters )
+			n += em.hasAlt ? 1 : 0;
+		sizedBegin( 0x31414D45u /* 'EMA1' */, n );
+		for ( size_t i = 0; i < soup.glow.emitters.size(); i++ ) {
+			const ProbeEmit::Emitter & em = soup.glow.emitters[i];
+			if ( !em.hasAlt )
+				continue;
+			const quint32 e = quint32( i );
+			f.write( reinterpret_cast<const char *>( &e ), 4 );
+			f.write( reinterpret_cast<const char *>( em.alt ), 12 );
+		}
+		sizedEnd();
+	}
 	return true;
 }
 
@@ -1746,7 +1762,7 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			}
 			end = f.pos() + qint64( bytes );
 			if ( tail[0] == 0x314B4D41u || tail[0] == 0x324B4D41u || tail[0] == 0x31544D45u || tail[0] == 0x314D4E56u
-				|| tail[0] == 0x31475244u || tail[0] == 0x32475244u || tail[0] == 0x31564D45u )
+				|| tail[0] == 0x31475244u || tail[0] == 0x32475244u || tail[0] == 0x31564D45u || tail[0] == 0x31414D45u )
 				return;
 			more = f.seek( end ) && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
 		}
@@ -1998,6 +2014,27 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 			}
 			if ( ok && f.pos() == end )
 				soup->veil = std::move( v );
+		}
+		next();
+	}
+	// lane LIGHTS5: the emitters' other-state colours (a short or broken tail leaves none)
+	if ( more && tail[0] == 0x31414D45u ) {
+		const qint64 n = qint64( tail[1] );
+		if ( n * 16 == qint64( bytes ) && !soup->glow.empty() ) {
+			std::vector<ProbeEmit::Emitter> ems = soup->glow.emitters;
+			bool ok = true;
+			for ( qint64 i = 0; i < n && ok; i++ ) {
+				quint32 e = 0;
+				float a[3];
+				ok = f.read( reinterpret_cast<char *>( &e ), 4 ) == 4 && f.read( reinterpret_cast<char *>( a ), 12 ) == 12
+					&& e < ems.size();
+				if ( ok ) {
+					ems[e].hasAlt = true;
+					std::copy( a, a + 3, ems[e].alt );
+				}
+			}
+			if ( ok && f.pos() == end )
+				soup->glow.emitters = std::move( ems );
 		}
 		next();
 	}

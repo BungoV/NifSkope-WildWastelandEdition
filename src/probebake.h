@@ -150,6 +150,7 @@ struct ProbeBakeResult
 	int probesRoomed = 0, boxesWritten = 0; //!< probes standing in an enclosed room; room boxes written (summed over files)
 	// lane EMISSIVEGI1: glowing surfaces
 	int emitTris = 0, emitSurfels = 0, emitDropped = 0;   //!< the soup's glowing triangles; surfels written with Le; lost to v3
+	int emitAltSurfels = 0;                 //!< lane LIGHTS5: surfels in emitalt_*.bin (Le differs under the other state)
 	qint64 emitHits = 0;                    //!< pass-1 hits on a glowing triangle
 	// lane NEONGI1: glowing effect surfaces (the soup's veils): triangles; pass-1 crossings added to the surface behind,
 	// crossed from behind (one-sided), crossed over a surfel cell in front of the surface

@@ -1066,6 +1066,15 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	}
 	int lightBoostHit = 0;
 	int parentMoved = 0;
+	// lane LIGHTS5 (FOGSCALE1): the load order, for each light's .recx keys (celllights.cpp reads fog.scale live)
+	for ( const QString & pl : world.pluginList().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
+		L.recxPlugins << pl.trimmed();
+	L.recxData = EsmWeather::gameDataDir();
+	auto recxKey = [&]( quint32 f, QString & plugin, quint32 & local ) {
+		const quint32 idx = world.plugin() ? world.plugin()->getFormIDFile( f ) : ( f >> 24 );
+		plugin = idx < quint32( L.recxPlugins.size() ) ? QFileInfo( L.recxPlugins.at( int( idx ) ) ).fileName() : QString();
+		local = ESMFile::getFormIDLocal( f );
+	};
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
@@ -1174,6 +1183,15 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			const Vector3 d = rm * ( axisRed ? Vector3( 0, 0, -1 ) : Vector3( 1, 0, 0 ) );
 			for ( int k = 0; k < 3; k++ )
 				l.dir[k] = d[k];
+			if ( !b.gobo.isEmpty() ) {	// lane LIGHTS5 (GOBO1): the pattern's frame, the ref's local y and z
+				l.gobo = b.gobo;
+				const Vector3 y = rm * Vector3( 0, 1, 0 ), z = rm * Vector3( 0, 0, 1 );
+				for ( int k = 0; k < 3; k++ ) {
+					l.goboY[k] = y[k];
+					l.goboZ[k] = z[k];
+				}
+				l.goboTan = std::tan( fov * 0.5f * 3.14159265f / 180.0f );
+			}
 			spot++;
 		} else {
 			omni++;
@@ -1195,6 +1213,9 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			}
 		}
 		l.ref = r.formID;
+		recxKey( r.base, l.recxBasePlugin, l.recxBaseLocal );	// lane LIGHTS5 (FOGSCALE1)
+		recxKey( r.formID, l.recxRefPlugin, l.recxRefLocal );
+		l.recxBaseEdid = b.edid;
 		/* lane LIGHTS4 (XEMI-LIGHT): the game's cell update multiplies a placed light's colour by its XEMI source's colour
 		 * (a LIGH's bytes, a region's weather at the hour; notes/lights4); celllights.cpp applies it each frame */
 		if ( r.emittance ) {
@@ -2813,6 +2834,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * shape's emissive colour is replaced, an UNLIT effect is tinted (lit effect variants never read it). Read at build. */
 	const bool xemiOn = wwLookOn( WwLook::PlacementEmittance ) && spec.overlay == CellOverlay::None;
 	const bool xemiRegnOn = wwLookOn( WwLook::RegionEmittance ) && spec.overlay == CellOverlay::None;   // lane LIGHTS3
+	const bool xemiGiOn = wwLookOn( WwLook::BounceEmittance );   // lane LIGHTS5: read once; the other state rides the soup
 	const bool xemiBuild = spec.overlay == CellOverlay::None;   // lane LIGHTS4: registered always; the rows are read at draw time
 	int xemiShapesLit = 0, xemiShapesFx = 0, xemiNoFlag = 0;
 	if ( !chunk ) {
@@ -4171,17 +4193,22 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					/* lane LIGHTS3 (XEMI-GI): a placement's emittance replaces the emissive colour on the drawn shape, so
 					 * the bounce takes it too (a region's colour at the bake's hour: the bake does not follow the clock) */
 					float xeC[3];
-					if ( wwLookOn( WwLook::BounceEmittance ) && p.xemi && s.extEmit && s.ownEmit
+					// lane LIGHTS5: emA = the colour under the other row state, kept so the row can flip live
+					float emA[3] = { emC[0], emC[1], emC[2] };
+					if ( p.xemi && s.extEmit && s.ownEmit
 						&& !s.nearFacts.effectShader && ( ( p.xemi & 0x02000000U ) ? xemiRegnOn : xemiOn )
 						&& wwCellXemiCode( p.xemi, xeC ) ) {
 						for ( int k = 0; k < 3; k++ )
-							emC[k] = xeC[k] * s.emitMult;
-						emXemiShapes++;
+							( xemiGiOn ? emC : emA )[k] = xeC[k] * s.emitMult;
+						if ( xemiGiOn )
+							emXemiShapes++;
 					}
 					const bool emColor = emC[0] > 0.0f || emC[1] > 0.0f || emC[2] > 0.0f;
+					const bool emAlt = emA[0] != emC[0] || emA[1] != emC[1] || emA[2] != emC[2];
+					const bool emAltColor = emAlt && ( emA[0] > 0.0f || emA[1] > 0.0f || emA[2] > 0.0f );
 					if ( !emitPin && emColor && !s.ownEmit )
 						emOffShapes++;
-					if ( !emitPin && emColor && ( s.ownEmit || emitRed == "noflag" ) ) {
+					if ( !emitPin && ( emColor || emAltColor ) && ( s.ownEmit || emitRed == "noflag" ) ) {
 						const bool useMap = s.glowFlag && emitRed != "nomask";
 						int gm = -1;
 						if ( useMap && s.glowTex.isEmpty() ) {
@@ -4191,30 +4218,38 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						} else if ( useMap && ( gm = glowMapIdx( s.glowTex ) ) < 0 ) {
 							emShapesUnread++;
 						} else {
-							const QString ek = QStringLiteral( "%1|%2|%3|%4" ).arg( double( emC[0] ) ).arg( double( emC[1] ) )
+							QString ek = QStringLiteral( "%1|%2|%3|%4" ).arg( double( emC[0] ) ).arg( double( emC[1] ) )
 								.arg( double( emC[2] ) ).arg( gm );
+							if ( emAlt )
+								ek += QStringLiteral( "|a%1|%2|%3" ).arg( double( emA[0] ) ).arg( double( emA[1] ) ).arg( double( emA[2] ) );
 							auto eit = emitterOf.constFind( ek );
 							if ( eit == emitterOf.constEnd() ) {
 								ProbeEmit::Emitter em;
-								for ( int k = 0; k < 3; k++ )
+								for ( int k = 0; k < 3; k++ ) {
 									em.e[k] = emC[k];
+									em.alt[k] = emA[k];
+								}
+								em.hasAlt = emAlt;
 								em.map = gm;
 								eit = emitterOf.insert( ek, int( probeSoup.glow.emitters.size() ) );
 								probeSoup.glow.emitters.push_back( em );
 							}
 							emIdx = *eit;
-							emShapes++;
-							emRefs.insert( p.ref );
+							emShapes += emColor ? 1 : 0;
+							if ( emColor )
+								emRefs.insert( p.ref );
 							// the double-count census: placed lights within 256 units of this placement
 							int near = 0;
 							for ( const EsmRefr & lr : lightRefs ) {
+								if ( !emColor )
+									break;
 								const float dx = lr.pos[0] - p.pos[0], dy = lr.pos[1] - p.pos[1], dz = lr.pos[2] - p.pos[2];
 								if ( dx * dx + dy * dy + dz * dz <= 256.0f * 256.0f && !startsDisabled( lr ) ) {
 									near++;
 									emNearLights.insert( lr.formID );
 								}
 							}
-							if ( emShapes <= 200 )
+							if ( emColor && emShapes <= 200 )
 								emModels += QStringLiteral( "    %1 | %2 | %3 | e %4,%5,%6 | lights within 256: %7\n" )
 								.arg( model, s.matName, useMap ? s.glowTex : QStringLiteral( "(whole surface)" ) )
 								.arg( double( emC[0] ), 0, 'f', 3 ).arg( double( emC[1] ), 0, 'f', 3 ).arg( double( emC[2] ), 0, 'f', 3 )
@@ -5564,7 +5599,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			  << ", emitters " << int( probeSoup.glow.emitters.size() ) << ", glow maps " << int( probeSoup.glow.maps.size() )
 			  << "; left dark: glow flag with no map " << emShapesBlack << ", map unread " << emShapesUnread << ", no UVs "
 			  << emShapesNoUv << "; a color without Own-Emit " << emOffShapes << "; emittance colour (row "
-			  << ( wwLookOn( WwLook::BounceEmittance ) ? "on" : "off" ) << ") " << emXemiShapes << "\n" << emModels;
+			  << ( xemiGiOn ? "on" : "off" ) << ") " << emXemiShapes << "\n" << emModels;
 			// lane NEONGI1: the effect surfaces that glow
 			t << "  probe soup emissive effects" << ( emitPin || emitRed == "noeffects" ? " OFF" : "" ) << ": shapes " << veilShapes
 			  << " (placements " << veilRefs.size() << ", with a placed light lit within 256 units " << veilRefsNearLight.size()
@@ -6136,6 +6171,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			// lane SKYINT1: and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
 			const quint16 cf = spec.interior ? cellInteriorFlags( world.interior() ) : quint16( 0 );
 			gs.interiorSky = ( cf & 0x0080u ) != 0;
+			if ( probeSoup.glow.hasAlt() )   // lane LIGHTS5: the bake keeps the other emittance state for a live flip
+				gs.emitBaked = gs.emitWant = xemiGiOn ? 1 : 0;
 			gs.interiorSun = gs.interiorSky && ( cf & 0x0900u ) == 0x0900u;
 			if ( !spec.interior || gs.interiorSky ) {
 				gs.sky = probeSkyLightNow();
@@ -6384,8 +6421,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						wwCellFarPublish( nif, fr );
 					}
 				}
-				if ( !spec.interior || gs.interiorSky )
-					probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather relights it
+				if ( !spec.interior || gs.interiorSky || gs.emitBaked >= 0 )   // lane LIGHTS5: or the emittance row flips it
+					probeSkyKeep( nif, probeSoup, giBakeDir, gs, !spec.interior || gs.interiorSky );   // a later change of weather relights it
 				PassTime::memLog( "GI relit" );	// lane PERF1
 				WwCellProbeView pv;	// lane PROBEVIEW1: the surfel and probe previews
 				pv.surfelCell = gr.surfelCell;

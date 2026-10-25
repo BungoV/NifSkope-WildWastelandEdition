@@ -58,7 +58,8 @@ void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const P
 	bool redNoTint, double E[6][3] );
 
 //! The cell view hands over the exterior it just relit, so a later change of weather relights it.
-void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec );
+//! Lane LIGHTS5: skyKept false = kept only so the emittance row can flip it live (an interior without sky).
+void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec, bool skyKept = true );
 //! One call a frame: relights the kept bake when the view's weather light has changed. Lane SKYPIC1: with
 //! WW_CELL_SKYPIC=1 it also captures the drawn sky (the view's GL context is current here) when it has changed,
 //! and the first capture relights at once (the cell opened before any frame was drawn).

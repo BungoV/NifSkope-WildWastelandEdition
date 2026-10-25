@@ -28,6 +28,8 @@ BSD License - see nifskope.h
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
 #include "gl/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
+#include "probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
+#include "recx.h"	// lane LIGHTS5 (FOGSCALE1): fog.scale
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -41,6 +43,7 @@ BSD License - see nifskope.h
 #include <cstdio>
 #include "cellunits.h"
 #include <cstring>
+#include <map>
 #include <vector>
 
 namespace
@@ -241,6 +244,14 @@ struct Gpu
 	bool texAttached = false;	// lane PERF1: the buffer texture keeps its buffer across glBufferData; attached once
 	quint64 bufLiveGen = 0;	// lane TESTDRIVER1: a live set (light copies, reds) rebuilds the buffer
 	std::uint64_t bufXemiStamp = 0;	// lane LIGHTS4: the XEMI light factors the buffer was built with
+	int bufGobo = -1;	// lane LIGHTS5 (GOBO1): the Light patterns row the buffer was built with
+	bool goboAny = false;
+	// lane LIGHTS5 (FOGSCALE1): each light's fog.scale (empty = every light 1), re-read at most every half second
+	std::vector<float> fogVals;
+	quint64 fogStamp = 0, bufFogStamp = 0, fogRecxGen = ~0ULL, fogSwitchGen = ~0ULL;
+	int fogBase = -1, fogVersion = -1;
+	const void * fogDoc = nullptr;
+	QElapsedTimer fogClock;
 	const void * doc = nullptr;
 	int version = 0;
 	int count = 0;
@@ -963,6 +974,109 @@ void wwCellXemiLightsFrame( Scene * scene )
 	}
 }
 
+/* lane LIGHTS5 (GOBO1): a spot's pattern, decoded once by path (at most 128 texels across), ^2.2 of the stored value
+ * like the light colours; a map with only its first channel set drives all three. w 0 = unread. */
+struct GoboPat
+{
+	int w = 0, h = 0;
+	std::vector<float> rgb;
+	float mean[3] = { 1, 1, 1 };
+};
+
+static const GoboPat & goboPattern( const QString & dataRoot, const QString & path )
+{
+	static std::map<QString, GoboPat> cache;	// a map: references stay valid across inserts
+	const QString key = dataRoot + QLatin1Char( '|' ) + path.toLower();
+	const auto it = cache.find( key );
+	if ( it != cache.end() )
+		return it->second;
+	GoboPat p;
+	int w = 0, h = 0;
+	std::vector<unsigned char> b;
+	if ( ProbeAlbedo( dataRoot ).rgbBytes( path, &w, &h, &b, 128 ) && w > 0 && h > 0 ) {
+		bool one = true;
+		for ( size_t k = 0; k < b.size() && one; k += 3 )
+			one = !b[k + 1] && !b[k + 2];
+		p.w = w;
+		p.h = h;
+		p.rgb.resize( b.size() );
+		double s[3] = { 0, 0, 0 };
+		for ( size_t k = 0; k < b.size(); k++ ) {
+			p.rgb[k] = std::pow( float( one ? b[k - k % 3] : b[k] ) / 255.0f, 2.2f );
+			s[k % 3] += p.rgb[k];
+		}
+		for ( int c = 0; c < 3; c++ )
+			p.mean[c] = float( s[c] / ( double( w ) * double( h ) ) );
+	}
+	return cache.emplace( key, std::move( p ) ).first->second;
+}
+
+/* lane LIGHTS5 (FOGSCALE1): each light's fog.scale (.recx category Lights, block fog): a placed lamp's `reference` claim
+ * wins over its LIGH's `light` claim, else 1 (the .nifx light rung waits for a .nifx lights reader). Pin WW_CELL_FOGSCALE:
+ * off = the files ignored, a number = that scale on every light. Re-read when the files or the document move. */
+static void fogScaleTick( Gpu & g, const void * doc, int version, const WwCellLighting & L )
+{
+	WW_SWITCH_STATIC( QByteArray, pin, wwEnv( "WW_CELL_FOGSCALE" ).trimmed() );
+	const bool same = g.fogDoc == doc && g.fogVersion == version && g.fogSwitchGen == wwSwitchGen();
+	if ( same && g.fogClock.isValid() && g.fogClock.elapsed() < 500 )
+		return;
+	g.fogClock.start();
+	const QStringList roots = wwRecxRoots( L.recxPlugins, L.recxData );
+	int files = 0;
+	const quint64 gen = pin.isEmpty() ? wwRecxScan( roots, QStringLiteral( "Lights" ), &files ) : 0;
+	if ( same && gen == g.fogRecxGen )
+		return;
+	g.fogDoc = doc;
+	g.fogVersion = version;
+	g.fogSwitchGen = wwSwitchGen();
+	g.fogRecxGen = gen;
+	const qsizetype n = L.lights.size();
+	std::vector<float> v;
+	int placed = 0, record = 0;
+	bool ok = false;
+	const float forced = pin == "off" ? 1.0f : pin.toFloat( &ok );
+	if ( ok ) {
+		v.assign( size_t( n ), std::clamp( forced, 0.0f, 8.0f ) );
+	} else if ( pin.isEmpty() && files > 0 ) {
+		v.assign( size_t( n ), 1.0f );
+		auto scaleOf = []( const WwRecxHit & h, float & s ) {
+			if ( !h.ok || !h.block.value( QStringLiteral( "scale" ) ).isDouble() )
+				return false;
+			s = std::clamp( float( h.block.value( QStringLiteral( "scale" ) ).toDouble() ), 0.0f, 8.0f );
+			return true;
+		};
+		for ( qsizetype i = 0; i < n; i++ ) {
+			const WwCellLight & l = L.lights.at( i );
+			float s = 1.0f;
+			if ( !l.recxRefPlugin.isEmpty() && scaleOf( wwRecxFind( roots, L.recxPlugins, QStringLiteral( "Lights" ),
+				QStringLiteral( "reference" ), l.recxRefPlugin, l.recxRefLocal, QString(), QStringLiteral( "fog" ) ), s ) ) {
+				v[size_t( i )] = s;
+				placed++;
+			} else if ( scaleOf( wwRecxFind( roots, L.recxPlugins, QStringLiteral( "Lights" ), QStringLiteral( "light" ),
+				l.recxBasePlugin, l.recxBaseLocal, l.recxBaseEdid, QStringLiteral( "fog" ) ), s ) ) {
+				v[size_t( i )] = s;
+				record++;
+			}
+		}
+		if ( placed + record == 0 )
+			v.clear();
+	}
+	const QByteArray echo = QStringLiteral( "cell fogscale: %1 lights, %2 (placed lamp %3, light record %4, recx Lights files %5)" )
+		.arg( n ).arg( ok ? QStringLiteral( "pinned %1" ).arg( double( v.empty() ? 1.0f : v[0] ) )
+			: pin == "off" ? QStringLiteral( "files ignored (pin off)" ) : v.empty() ? QStringLiteral( "every light 1" )
+			: QStringLiteral( "%1 scaled" ).arg( placed + record ) )
+		.arg( placed ).arg( record ).arg( files ).toUtf8();
+	static QByteArray said;
+	if ( echo != said ) {
+		said = echo;
+		std::fprintf( stderr, "%s\n", echo.constData() );
+	}
+	if ( v != g.fogVals ) {
+		g.fogVals = std::move( v );
+		g.fogStamp++;
+	}
+}
+
 void wwCellLightsUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuCellUni );	// lane PERF2
@@ -979,9 +1093,15 @@ void wwCellLightsUniforms( Scene * scene )
 	Gpu & g = gpus()[r];
 	const WwCellLighting * L = on ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	const bool flick = L && s.flickerOn && !s.flickerRed;	// lane LIGHTFLICKER1
+	const int goboOn = wwLookOn( WwLook::LightPatterns ) ? 1 : 0;	// lane LIGHTS5 (GOBO1)
+	if ( L )
+		fogScaleTick( g, scene->nifModel, s.version.value( scene->nifModel ), *L );	// lane LIGHTS5 (FOGSCALE1)
 	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp
-	            || g.bufLiveGen != wwSwitchGen() || g.flickOn != flick || g.bufXemiStamp != xemiStampOf( scene->nifModel ) ) ) {
+	            || g.bufLiveGen != wwSwitchGen() || g.flickOn != flick || g.bufXemiStamp != xemiStampOf( scene->nifModel )
+	            || g.bufGobo != goboOn || g.bufFogStamp != g.fogStamp ) ) {
 		g.bufLiveGen = wwSwitchGen();
+		g.bufGobo = goboOn;
+		g.bufFogStamp = g.fogStamp;
 		// lane LIGHTS4: this frame's XEMI factors (wwCellXemiLightsFrame), folded into each light's colour
 		const auto xd = xemiDocs().constFind( scene->nifModel );
 		const std::vector<float> * xm = xd != xemiDocs().constEnd() && xd->version == s.version.value( scene->nifModel )
@@ -1028,6 +1148,66 @@ void wwCellLightsUniforms( Scene * scene )
 			for ( int c = 1; c < copies; c++ )
 				t.insert( t.end(), t.begin(), t.begin() + std::ptrdiff_t( one ) );
 		}
+		/* lane LIGHTS5: data after the lights (the cluster lists and spheres never read it). GOBO1: each pattern once
+		 * (header w h, mean, rows), a spot's texel 5.w = 1 + its header; FOGSCALE1: the scales, 4 a texel. */
+		std::vector<float> x;
+		const size_t per = kTexelsPerLight * 4, nL = size_t( L->lights.size() ), lightTexels = t.size() / 4;
+		int goboSpots = 0, goboUnread = 0;
+		QHash<QString, int> goboAt;
+		for ( size_t i = 0; goboOn && i < nL; i++ ) {
+			const WwCellLight & l = L->lights.at( qsizetype( i ) );
+			if ( !l.spot || l.gobo.isEmpty() )
+				continue;
+			const QString key = l.gobo.toLower();
+			int at = goboAt.value( key, -2 );
+			if ( at == -2 ) {
+				const GoboPat & p = goboPattern( L->dataRoot, l.gobo );
+				at = p.w > 0 ? int( lightTexels + x.size() / 4 ) : -1;
+				goboUnread += at < 0 ? 1 : 0;
+				if ( at >= 0 ) {
+					const float hd[8] = { float( p.w ), float( p.h ), 0, 0, p.mean[0], p.mean[1], p.mean[2], 0 };
+					x.insert( x.end(), hd, hd + 8 );
+					for ( size_t k = 0; k + 3 <= p.rgb.size(); k += 3 ) {
+						x.insert( x.end(), p.rgb.begin() + std::ptrdiff_t( k ), p.rgb.begin() + std::ptrdiff_t( k + 3 ) );
+						x.push_back( 1.0f );
+					}
+				}
+				goboAt.insert( key, at );
+			}
+			if ( at < 0 )
+				continue;
+			goboSpots++;
+			const float t56[8] = { l.goboY[0], l.goboY[1], l.goboY[2], float( at + 1 ), l.goboZ[0], l.goboZ[1], l.goboZ[2], l.goboTan };
+			for ( size_t o = i * per; o + per <= t.size(); o += nL * per )	// every copy
+				std::copy( t56, t56 + 8, t.begin() + std::ptrdiff_t( o + 20 ) );
+		}
+		g.goboAny = goboSpots > 0;
+		{
+			const QByteArray echo = QStringLiteral( "cell gobo: %1 spots with a pattern, %2 textures (%3 unread)%4" )
+				.arg( goboSpots ).arg( goboAt.size() - goboUnread ).arg( goboUnread )
+				.arg( goboOn ? QString() : QStringLiteral( " (Light patterns off)" ) ).toUtf8();
+			static QByteArray said;
+			if ( echo != said ) {
+				said = echo;
+				std::fprintf( stderr, "%s\n", echo.constData() );
+			}
+		}
+		// red WW_CELL_FOGSCALE_RED=surfaces: the scale on the light itself, so the surfaces change too
+		WW_SWITCH_STATIC( bool, fogRed, wwEnvStr( "WW_CELL_FOGSCALE_RED" ) == QLatin1String( "surfaces" ) );
+		g.fogBase = -1;
+		if ( nL && g.fogVals.size() == nL ) {
+			if ( fogRed ) {
+				for ( size_t o = 0, j = 0; o + per <= t.size(); o += per, j++ )
+					for ( int k = 4; k < 7; k++ )
+						t[o + size_t( k )] *= g.fogVals[j % nL];
+			} else {
+				g.fogBase = int( lightTexels + x.size() / 4 );
+				for ( size_t j = 0; j < t.size() / per; j++ )
+					x.push_back( g.fogVals[j % nL] );
+				while ( x.size() % 4 )
+					x.push_back( 1.0f );
+			}
+		}
 		g.bufShStamp = g.shStamp;
 		g.spheres.clear();
 		for ( size_t o = 0; o + 4 <= t.size(); o += kTexelsPerLight * 4 )
@@ -1039,7 +1219,13 @@ void wwCellLightsUniforms( Scene * scene )
 			fn->glGenTextures( 1, &g.tex );
 		}
 		fn->glBindBuffer( GL_TEXTURE_BUFFER, g.buf );
-		fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( t.size() * sizeof( float ) ), t.data(), GL_STATIC_DRAW );
+		if ( x.empty() ) {
+			fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( t.size() * sizeof( float ) ), t.data(), GL_STATIC_DRAW );
+		} else {	// lane LIGHTS5: the lights, then the patterns and fog scales
+			fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( ( t.size() + x.size() ) * sizeof( float ) ), nullptr, GL_STATIC_DRAW );
+			fn->glBufferSubData( GL_TEXTURE_BUFFER, 0, GLsizeiptr( t.size() * sizeof( float ) ), t.data() );
+			fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( t.size() * sizeof( float ) ), GLsizeiptr( x.size() * sizeof( float ) ), x.data() );
+		}
 		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		g.doc = scene->nifModel;
 		g.version = s.version.value( scene->nifModel );
@@ -1442,6 +1628,15 @@ void wwCellLightsUniforms( Scene * scene )
 	if ( !L )
 		return;
 	prog->uni1i( "cellLightCount", g.count );
+	{	// lane LIGHTS5: GOBO1's pattern (pin WW_CELL_GOBO_ROT turns it, red WW_CELL_GOBO_RED=flat its mean) and FOGSCALE1
+		WW_SWITCH_STATIC( int, goboRot, wwEnvInt( "WW_CELL_GOBO_ROT" ) & 7 );
+		WW_SWITCH_STATIC( bool, goboFlat, wwEnvStr( "WW_CELL_GOBO_RED" ) == QLatin1String( "flat" ) );
+		prog->uni1b( "cellGoboOn", g.goboAny );
+		prog->uni1i( "cellGoboRot", goboRot );
+		prog->uni1b( "cellGoboFlat", goboFlat );
+		prog->uni1b( "cellFogScaleOn", g.fogBase >= 0 );
+		prog->uni1i( "cellFogScaleBase", std::max( g.fogBase, 0 ) );
+	}
 	// world = R^T (posView - t) / sc  (lookdevstage.cpp's fog uses the same inverse)
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;

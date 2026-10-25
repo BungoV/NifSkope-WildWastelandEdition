@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIGHTS5 (2026-10-25, branch lights5-20261025): bounce emittance live, light patterns, fog strength per light
+
+- **Emittance in bounce light is live:** the bake keeps which emitter each glowing surfel belongs to, and the row
+  relights the bounce light from the kept bake (no reopen). Red `WW_CELL_XEMI_GI_RED=stale` skips that relight.
+- **Light patterns (Show menu, off; off = drawn exactly as before):** key `WW/CellLightPatterns`, pin `WW_CELL_GOBO`.
+  A spot light whose record names a pattern texture (LIGH NAM0, "gobo") throws that pattern: on surfaces, effects,
+  particles and the air. Test pins: `WW_CELL_GOBO_ROT` (bits 1 flip u, 2 flip v, 4 swap; the game's own orientation
+  is not known yet), red `WW_CELL_GOBO_RED=flat` (each pattern's mean colour). Census "cell gobo:".
+- **Fog strength per light (.recx Lights, block `fog: { scale }`):** a light's strength in the air only, 0..8, from a
+  placed lamp's `reference` entry, else its light record's entry, else 1. No file = drawn exactly as before; files are
+  read again when they change. Pin `WW_CELL_FOGSCALE` (`off` = ignore the files, a number = that scale on every
+  light), red `WW_CELL_FOGSCALE_RED=surfaces`. Census "cell fogscale:". Spec: FO4-Extension-Formats branch
+  fogscale1-20261025.
+
 ## Lane LIGHTS4 (2026-10-25, branch lights4-20261025): emittance rows live, placed lights recoloured, sun flare
 
 - **Live rows:** Placement emittance, Region emittance and Emittance on particles no longer reopen the cell. The

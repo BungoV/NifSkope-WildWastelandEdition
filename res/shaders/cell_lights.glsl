@@ -1122,6 +1122,38 @@ float cellAmbShare( vec3 P, vec3 N )
 	return clamp( cellGiSample( P, N ).a, 0.0, 1.0 );
 }
 
+/* lane LIGHTS5 (GOBO1): a spot's pattern (LIGH NAM0) at D = P - the light, axis = its direction. Texel 5 = (local y,
+ * 1 + the pattern's header texel; 0 none), texel 6 = (local z, tan(FOV / 2)); header (w, h), mean, then rows. */
+uniform bool cellGoboOn;
+uniform int cellGoboRot;	// WW_CELL_GOBO_ROT: bit 0 flips u, bit 1 flips v, bit 2 swaps them
+uniform bool cellGoboFlat;	// red flat: each pattern's mean
+vec3 cellGobo( int i, vec3 D, vec3 axis )
+{
+	vec4 t5 = texelFetch( cellLights, i * CELL_TPL + 5 );
+	if ( !cellGoboOn || t5.w < 0.5 )
+		return vec3( 1.0 );
+	vec4 t6 = texelFetch( cellLights, i * CELL_TPL + 6 );
+	int h = int( t5.w + 0.5 ) - 1;
+	if ( cellGoboFlat )
+		return texelFetch( cellLights, h + 1 ).rgb;
+	vec2 uv = vec2( dot( D, t6.xyz ), dot( D, t5.xyz ) ) / ( 2.0 * max( dot( D, axis ), 1e-3 ) * max( t6.w, 1e-4 ) ) + 0.5;
+	if ( ( cellGoboRot & 4 ) != 0 )
+		uv = uv.yx;
+	if ( ( cellGoboRot & 1 ) != 0 )
+		uv.x = 1.0 - uv.x;
+	if ( ( cellGoboRot & 2 ) != 0 )
+		uv.y = 1.0 - uv.y;
+	ivec2 sz = ivec2( texelFetch( cellLights, h ).xy + 0.5 );
+	vec2 p = clamp( uv, 0.0, 1.0 ) * vec2( sz ) - 0.5;
+	ivec2 q = ivec2( floor( p ) );
+	vec2 f = p - vec2( q );
+	ivec2 q0 = clamp( q, ivec2( 0 ), sz - 1 ), q1 = clamp( q + 1, ivec2( 0 ), sz - 1 );
+	int b = h + 2;
+	vec3 c0 = mix( texelFetch( cellLights, b + q0.y * sz.x + q0.x ).rgb, texelFetch( cellLights, b + q0.y * sz.x + q1.x ).rgb, f.x );
+	vec3 c1 = mix( texelFetch( cellLights, b + q1.y * sz.x + q0.x ).rgb, texelFetch( cellLights, b + q1.y * sz.x + q1.x ).rgb, f.x );
+	return mix( c0, c1, f.y );
+}
+
 /* lane HEMI1: the game draws a hemisphere or box light as an omni light clipped by its volume (celllights.h):
  * true when P lies inside light i's. shape = texel 1.w (-3 hemisphere, -4 box; anything else has none). */
 bool cellShapeIn( int i, vec3 P, vec3 Lpos, float shape )
@@ -1153,15 +1185,18 @@ vec3 cellLightE( int i, vec3 P, vec3 N, out vec3 L, out bool noSpec )
 		return vec3( 0.0 );	// lane HEMI1
 	vec4 t3 = texelFetch( cellLights, i * CELL_TPL + 3 );
 	float a = cellRadial( d, t0.w, t3.xyz );
+	vec3 g = vec3( 1.0 );	// lane LIGHTS5 (GOBO1)
 	if ( t1.w > -1.5 ) {
 		vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
 		float base = clamp( 1.0 - ( 1.0 - dot( -L, t2.xyz ) ) / max( 1.0 - t1.w, 1e-4 ), 0.0, 1.0 );
 		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
+		if ( a > 0.0 )
+			g = cellGobo( i, -Lv, t2.xyz );
 	}
 	if ( a > 0.0 )
 		a *= cellShadowF( i, P, N );
 	noSpec = ( int( t3.w + 0.5 ) & 1 ) != 0;
-	return t1.rgb * a;
+	return t1.rgb * g * a;
 }
 
 /* lane FARVIEW1: the far blend at world point P, 0 near, 1 far (red noblend: a hard switch at the band's middle) */
@@ -1458,15 +1493,18 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 			continue;	// lane HEMI1
 		vec4 t3 = texelFetch( cellLights, i * CELL_TPL + 3 );
 		float a = cellRadial( d, t0.w, t3.xyz );
+		vec3 g = vec3( 1.0 );	// lane LIGHTS5 (GOBO1)
 		if ( t1.w > -1.5 ) {
 			// PRTP2 section 2: base = saturate(1 - (1 - dot(-L, dir)) / (1 - cosOuter)), cone = min(base^falloff, 1)
 			vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
 			float base = clamp( 1.0 - ( 1.0 - dot( -L, t2.xyz ) ) / max( 1.0 - t1.w, 1e-4 ), 0.0, 1.0 );
 			a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
+			if ( a > 0.0 )
+				g = cellGobo( i, -Lv, t2.xyz );
 		}
 		if ( a > 0.0 )
 			a *= cellShadowF( i, P, N ) * cellContactLocal( i, P );	// lane SHADOW1; GAPLOOK1 (C8)
-		vec3 E = t1.rgb * a * NdotL;
+		vec3 E = t1.rgb * g * a * NdotL;
 		diff += E;
 		// lane RIM1: No Rim Lighting (2) drops the back-light; Ignore Roughness (4) also takes Lambert's diffuse
 		int fl = int( t3.w + 0.5 ) & ( ( cellRed & 64 ) != 0 ? 1 : 7 );	// WW_CELL_LIT_RED=rimflags

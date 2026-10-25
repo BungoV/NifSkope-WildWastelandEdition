@@ -51,6 +51,10 @@ QStringList wwRecxRoots( const QStringList & pluginFiles, const QString & gameDa
 WwRecxHit wwRecxFind( const QStringList & roots, const QStringList & pluginFiles, const QString & category,
 	const QString & key, const QString & plugin, quint32 localId, const QString & edid, const QString & block );
 
+/*! lane LIGHTS5: re-scan `category` (at most every half second) and return a count that moves whenever its files were
+ *  re-read; `files` = how many there are. A caller that walks many records asks again only when it moved. */
+quint64 wwRecxScan( const QStringList & roots, const QString & category, int * files = nullptr );
+
 //! the files read and the parse errors of the last scan of `category`, one line each (the census)
 QString wwRecxScanSummary( const QString & category );
 
