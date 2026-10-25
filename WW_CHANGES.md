@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane MOTION1-FMT2 (2026-10-26, branch motion1fmt2-20261025): the game TAA's history in RGBA8 (test pin, default unchanged)
+
+- **Pin `WW_TAA_HIST=8|rgba8`** (live, no reopen): the "Temporal AA" row's history pair in RGBA8, the game's own format
+  (a RenderDoc capture of the game: the resolve's two targets are RGBA8). The default stays RGBA16F; without the pin
+  the row draws exactly as before. Red `WW_TAA_RED=hist8nearest` (RGBA8 read unfiltered: it must smear more).
+- **Measured offline:** fed the captured frame's own inputs, the copy with an RGBA8 history gives the game's picture on
+  99.9% of the comparable pixels (98.1% at RGBA16F). On the synthetic chart both formats give the same ghost (0.067),
+  shimmer (0.0068) and error; the red errs more when moving (0.0159 vs 0.0124). Cost at 1080p: 0.231 vs 0.233 ms,
+  history memory 15.8 MB vs 31.6 MB.
+- The default changes only after a live side-by-side with the game.
+
 ## Lane GOBO2 (2026-10-26, branch gobo2-20261026): light patterns on omni and box lights
 
 - **Light patterns (Show menu, still off; off = drawn exactly as before)** now also draw on omni, hemisphere and box

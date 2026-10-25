@@ -34,8 +34,12 @@ class Transform;
  *                              output of the resolve, raw, plus the numbers (taa.txt) -- the numpy rebuild's food
  *  Divergences, stated: the history target is RGBA16F and the vectors RG32F (lane TAA2 MOTION1-FMT: the game's
  *  vectors are R16G16_FLOAT and its frame R11G11B10_FLOAT before the pass, RGBA8 after it, per FO4CS's RenderDoc
- *  notes; its history's format is still owed to a capture); the vectors are the camera's alone; no dynamic
- *  resolution (c0.zw = c5.zw = 1).
+ *  notes); the vectors are the camera's alone; no dynamic resolution (c0.zw = c5.zw = 1).
+ *  Lane MOTION1-FMT2 (2026-10-25): the game's history pair is RGBA8 (AirOn.rdc, its resolve's two targets). Fed
+ *  that frame's own inputs, this copy with an RGBA8 history gives the game's picture on 99.9% of the comparable
+ *  pixels (98.1% at RGBA16F). It stays a test pin until a live side-by-side with the game:
+ *   WW_TAA_HIST=8|rgba8        the history pair in RGBA8 (default RGBA16F)
+ *   WW_TAA_RED=hist8nearest    RGBA8, read unfiltered (the pin's red)
  *
  *  Lane TAA2 (2026-10-23): "Modern temporal AA", Off | Low | Medium | High | Ultra, beside the row above. A tier
  *  above Off jitters the frame (the same Halton) and replaces the game's resolve with res/shaders/taa2.frag

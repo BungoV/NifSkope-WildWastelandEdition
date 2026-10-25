@@ -123,18 +123,24 @@ QByteArray pinOf( WwLook l )
 	}
 	case WwLook::AnimObjects: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_ANIMOBJ" ).trimmed() );
+		return p;
+	}
 	case WwLook::ExposureWide: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_EXPOSURE_WIDE" ).trimmed() );
 		return p;
 	}
 	case WwLook::ProbeShare: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_GI_SHARE" ).trimmed() );
+		return p;
+	}
 	case WwLook::DecalFade: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_DECAL_FADE" ).trimmed() );
 		return p;
 	}
 	case WwLook::DecalParallax: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_DECAL_POM" ).trimmed() );
+		return p;
+	}
 	case WwLook::TerrSlopeMap: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_SHADOW_SLOPEMAP" ).trimmed() );
 		return p;
@@ -153,6 +159,8 @@ QByteArray pinOf( WwLook l )
 	}
 	case WwLook::FarCardShadows: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_SHADOW_FARCARDS" ).trimmed() );
+		return p;
+	}
 	case WwLook::PlacementEmittance: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_XEMI" ).trimmed() );
 		return p;

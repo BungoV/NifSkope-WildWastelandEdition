@@ -171,6 +171,7 @@ struct TaaGpu
 	GLuint lock[2] = { 0, 0 };	// lane TAA3: the thin-feature lock (r flip rate, g sign), ping-pong with hist2
 	GLenum curFormat = 0;	// lane TAA3: t0's format (RGBA8, or the linear frame's before the tone map)
 	GLenum outFormat = 0;
+	GLenum histFormat = 0, histFilter = 0;	// lane MOTION1-FMT2: the game resolve's history pair (RGBA16F, or RGBA8 pinned)
 };
 
 struct TaaState
@@ -179,6 +180,7 @@ struct TaaState
 	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	bool on = false, pinned = false;
 	bool redNoClamp = false, redWrongJitter = false;
+	bool hist8 = false, redHist8Nearest = false;	// lane MOTION1-FMT2: the game's RGBA8 history (test pin) and its red
 	QString dumpDir;
 	int dumpFrame = 8;
 	// lane TAA2: the Modern temporal AA tier (0 Off = the game's resolve), its reds and its dump
@@ -237,6 +239,11 @@ TaaState & ts()
 		const QString red = wwEnvStr( "WW_TAA_RED" ).trimmed();
 		s.redNoClamp = red.contains( QLatin1StringView( "noclamp" ) );
 		s.redWrongJitter = red.contains( QLatin1StringView( "wrongjitter" ) );
+		// lane MOTION1-FMT2: WW_TAA_HIST=8|rgba8 keeps the history pair in RGBA8 as the game does (AirOn.rdc); the red
+		// hist8nearest reads it unfiltered. Not a row: the default stays RGBA16F until a live side-by-side with the game
+		const QString hist = wwEnvStr( "WW_TAA_HIST" ).trimmed();
+		s.redHist8Nearest = red.contains( QLatin1StringView( "hist8nearest" ) );
+		s.hist8 = s.redHist8Nearest || hist == QLatin1StringView( "8" ) || hist.compare( QLatin1StringView( "rgba8" ), Qt::CaseInsensitive ) == 0;
 		s.dumpDir = wwEnvStr( "WW_TAA_DUMP" ).trimmed();
 		bool ok = false;
 		const int df = wwEnvStr( "WW_TAA_DUMP_FRAME" ).toInt( &ok );
@@ -629,7 +636,10 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 	TaaGpu & g = taaGpus()[r];
 	// lane TAA3: before the tone map t0 takes the linear frame's own format (a multisample blit needs it) and t_out half floats
 	const GLenum curFormat = linear ? linearFormat : GLenum( GL_RGBA8 ), outFormat = linear ? GLenum( GL_RGBA16F ) : GLenum( GL_RGBA8 );
-	const bool resized = !g.inFbo || g.w != W || g.h != H || g.dsFormat != dsFormat || g.curFormat != curFormat || g.outFormat != outFormat;
+	const GLenum histFormat = s.hist8 ? GLenum( GL_RGBA8 ) : GLenum( GL_RGBA16F );
+	const GLenum histFilter = s.redHist8Nearest ? GLenum( GL_NEAREST ) : GLenum( GL_LINEAR );
+	const bool resized = !g.inFbo || g.w != W || g.h != H || g.dsFormat != dsFormat || g.curFormat != curFormat || g.outFormat != outFormat
+		|| g.histFormat != histFormat || g.histFilter != histFilter;
 	if ( resized ) {
 		freeGpu( r, g );
 		if ( !g.inFbo ) {
@@ -646,8 +656,11 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 		g.curFormat = curFormat;
 		g.outFormat = outFormat;
 		s.taa2Fresh = true;	// lane TAA3: the Modern history went with the old targets
-		g.hist[0] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );		// t1 BILERP
-		g.hist[1] = makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_LINEAR );
+		for ( GLuint & t : g.hist )	// t1 BILERP
+			t = s.hist8 ? makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, histFilter )
+				: makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, histFilter );
+		g.histFormat = histFormat;
+		g.histFilter = histFilter;
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.inFbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.cur, 0 );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, dsFmt == GL_DEPTH_STENCIL ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
@@ -878,6 +891,7 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 			  << "\nproj_uploaded " << mat( uploaded )
 			  << "\nreproj " << mat( reproj4 )
 			  << "\nreset " << ( reset ? 1 : 0 )
+			  << "\nhist " << ( s.hist8 ? ( s.redHist8Nearest ? "rgba8 nearest" : "rgba8" ) : "rgba16f" )
 			  << "\nred " << ( s.redNoClamp ? "noclamp" : s.redWrongJitter ? "wrongjitter" : "none" ) << '\n';
 		}
 		note( s, QStringLiteral( "dumped frame %1 to %2" ).arg( s.frame ).arg( s.dumpDir ) );
@@ -1079,7 +1093,8 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 	}
 	note( s, QStringLiteral( "frame %1 n=%2 off=(%3,%4)px%5%6" ).arg( s.frame ).arg( s.n )
 		.arg( f9( px ), f9( py ), reset ? QStringLiteral( " history-reset" ) : QString(),
-			s.redNoClamp ? QStringLiteral( " RED noclamp" ) : s.redWrongJitter ? QStringLiteral( " RED wrongjitter" ) : QString() ) );
+			s.redNoClamp ? QStringLiteral( " RED noclamp" ) : s.redWrongJitter ? QStringLiteral( " RED wrongjitter" ) : QString() )
+		+ ( s.redHist8Nearest ? QStringLiteral( " history rgba8 RED hist8nearest" ) : s.hist8 ? QStringLiteral( " history rgba8" ) : QString() ) );
 	return true;
 }
 
