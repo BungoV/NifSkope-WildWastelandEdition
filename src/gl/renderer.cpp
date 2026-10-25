@@ -33,6 +33,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "renderer.h"
 #include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "gl/celldrawstate.h"	// lane PERF3
+#include "gl/celldrawpacket.h"	// lane GAPPERF-BINDLESS
+#include "gl/cellqueue.h"	// lane GAPPERF-BINDLESS: the sampler census reads every bind
 #include "gl/cellvrs.h"	// lane VRS1
 #include "gl/cellfxres.h"	// lane FXRES1
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
@@ -174,22 +176,22 @@ void glSnap( Renderer * r, GLuint prog, GlSnap & o )
 	}
 }
 
-int glSnapDiff( const GlSnap & a, const GlSnap & b, bool print )
+int glSnapDiff( const GlSnap & a, const GlSnap & b, bool print, const char * tag = "setup memo" )
 {
 	int d = ( a.active != b.active ) ? 1 : 0;
 	if ( d && print )
-		std::fprintf( stderr, "setup memo: MISMATCH active texture %d -> %d\n", a.active, b.active );
+		std::fprintf( stderr, "%s: MISMATCH active texture %d -> %d\n", tag, a.active, b.active );
 	for ( size_t i = 0; i < a.tex.size() && i < b.tex.size(); i++ )
 		if ( a.tex[i] != b.tex[i] ) {
 			d++;
 			if ( print )
-				std::fprintf( stderr, "setup memo: MISMATCH unit %d target %d texture %d -> %d\n", int( i / 7 ), int( i % 7 ), a.tex[i], b.tex[i] );
+				std::fprintf( stderr, "%s: MISMATCH unit %d target %d texture %d -> %d\n", tag, int( i / 7 ), int( i % 7 ), a.tex[i], b.tex[i] );
 		}
 	for ( size_t i = 0; i < a.uni.size() && i < b.uni.size(); i++ )
 		if ( a.uni[i].second != b.uni[i].second ) {
 			d++;
 			if ( print )
-				std::fprintf( stderr, "setup memo: MISMATCH uniform %s\n", a.uni[i].first.c_str() );
+				std::fprintf( stderr, "%s: MISMATCH uniform %s\n", tag, a.uni[i].first.c_str() );
 		}
 	if ( a.uni.size() != b.uni.size() || a.tex.size() != b.tex.size() )
 		d++;
@@ -1860,6 +1862,87 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 
 	const QString & default_n = (nifVersion >= 151) ? ::default_ns : ::default_n;
 
+	const auto ce1Tail = [this, scene, prog, mesh]( int texunit ) -> bool {
+		wwSceneGlobals( this, scene, texunit, [scene]() {	// lane PERF1: once per program and pass
+			wwLookdevFogUniforms( scene );	// lane FOG1: fo4_default reads it; fogOn is false outside Lookdev
+			wwCellLightsUniforms( scene );	// lane PRTP3: a no-op unless this is fo4_cell.prog
+			wwSunShadowUniforms( scene );	// lane SUNCELL1: a no-op unless this is a cascade program (fo4_cellcsm, fo4_csm, fo4_fogcsm)
+		} );
+		if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
+			prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
+		if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
+			prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
+		if ( prog->uniLocation( "editorBrdf" ) >= 0 )	// lane VANILLADEF1: Shading > Editor BRDF (off = vanilla)
+			prog->uni1b( "editorBrdf", scene->editorBrdf );
+		if ( prog->uniLocation( "wwDecalPom" ) >= 0 ) {	// lane DECALS1: (scale x 0.1, step cap); x = 0 is the old draw
+			float sc = 0.0f, steps = 0.0f;
+			const bool on = wwLookOn( WwLook::DecalParallax ) && wwCellDecalPomFor( scene->nifModel, mesh->id(), sc, steps );
+			WW_SWITCH_STATIC( bool, deep, wwEnv( "WW_CELL_DECAL_POM_RED" ).trimmed() == "deep" );
+			prog->uni2f( "wwDecalPom", on ? sc * ( deep ? 4.0f : 1.0f ) : 0.0f, steps );
+		}
+		if ( ( wwVolPartFx() & 1 ) && ( wwVolPartRed() & 64 ) && prog->name == std::string_view( "fo4_effectcell.prog" ) ) {
+			prog->uni1b( "cellShadowOn", false );	// lane VOLPART1 red noshadow: the placed lights' cubes too
+			setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)
+		}
+		wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
+		if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
+			// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
+			GLint dst = 0;
+			glGetIntegerv( GL_BLEND_DST_RGB, &dst );
+			prog->uni1b( "fxAdditive", glIsEnabled( GL_BLEND ) && dst == GL_ONE );
+			if ( prog->uniLocation( "fxDecalProbe" ) >= 0 )	// lane DECALLIT1: the gate's light probe
+				prog->uni1b( "fxDecalProbe", wwCellDecalLitProbe() && mesh->effectDecal && wwCellProbePass( scene ) );
+			if ( prog->uniLocation( "fxRoomLit" ) >= 0 )	// lane GIDARK1: an exterior's lit effect, lit by its spot
+				prog->uni1b( "fxRoomLit", !mesh->effectDecal && wwCellFxRoomLit( scene, mesh->id() ) );
+			if ( wwCellFxLitProbeShape( scene, mesh->id() ) ) {
+				// lane FXLIT1: its probes write the lit effects opaque, the nearest card winning: layered cards drawn
+				// without a depth write leave the last one drawn, which differed between the five probe runs
+				glDisable( GL_BLEND );
+				glEnable( GL_DEPTH_TEST );
+				glDepthFunc( GL_LEQUAL );
+				glDepthMask( GL_TRUE );
+			}
+		}
+		return true;
+	};
+	/* lane GAPPERF-BINDLESS (PERF5-DRAWPACKETS): a cell-lit shape's setup up to the scene globals, recorded by the
+	 * frame's first pass and replayed by its later ones (celldrawpacket.h); the tail above runs every time */
+	WwDp::Packet * dpSlot = nullptr;
+	if ( lsp && nifVersion >= 130 && nifVersion < 151 && !scene->selecting && !( lsp->hasRefraction && scene->showRefraction )
+		&& ( prog->name == std::string_view( "fo4_cell.prog" ) || prog->name == std::string_view( "fo4_cellcsm.prog" ) )
+		&& !GpuDriven::census() )
+		dpSlot = WwDp::slot( mesh, prog );
+	int dpMismatch = -1;
+	GlSnap dpA;
+	WwDp::FixedSnap dpFixA;
+	WwDp::Packet dpOld;
+	if ( dpSlot && WwDp::valid( *dpSlot, prog ) ) {
+		std::pair<Shape *, Program *> dpLive( mesh, prog );
+		WwDp::replay( *dpSlot, fn, scene->textures, []( void * c ) {
+			auto * l = static_cast<std::pair<Shape *, Program *> *>( c );
+			l->first->setUniforms( l->second );
+		}, &dpLive );
+		if ( WwDp::mode() != 2 ) {
+			WwDp::counted( true, -1 );
+			return ce1Tail( dpSlot->texunit );
+		}
+		glSnap( this, prog->id, dpA );
+		WwDp::snapFixed( fn, dpFixA );
+		dpOld = *dpSlot;
+		dpMismatch = 0;
+	}
+	struct DpGuard
+	{
+		bool on;
+		~DpGuard()
+		{
+			if ( on )
+				WwDp::end( false, 0 );	// a failed setup keeps no packet
+		}
+	} dpGuard{ dpSlot != nullptr };
+	if ( dpSlot )
+		WwDp::begin( *dpSlot, prog );
+
 	// texturing
 
 	TexClampMode clamp = bsprop->clampMode;
@@ -2028,6 +2111,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			hasCubeMap = false;
 		} else {
 			fn->glActiveTexture( GL_TEXTURE0 + texunit );
+			WWDP( WwDp::ActiveTex, GL_TEXTURE0 + texunit );
 			QString	fname = bsprop->fileName( 4 );
 			const QString *	cube = &fname;
 			if ( hasCubeMap && ( fname.isEmpty() || !scene->bindCube( fname ) ) ) {
@@ -2037,6 +2121,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			ownCube = hasCubeMap && cube == &fname;
 			if ( !hasCubeMap ) [[unlikely]]
 				scene->bindCube( grayCube, 1 );
+			WWDP( WwDp::U1i, uniCubeMap, 0, &texunit, 1 );
 			fn->glUniform1i( uniCubeMap, texunit++ );
 			if ( nifVersion >= 151 && ( uniCubeMap = prog->uniLocation( "CubeMap2" ) ) >= 0 ) {
 				// Fallout 76: load second cube map for diffuse lighting
@@ -2234,7 +2319,13 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		}
 	}
 
-	mesh->setUniforms( prog );
+	{
+		WwDp::Packet * dpRec = WwDp::rec;	// lane GAPPERF-BINDLESS: the transforms are never recorded
+		WwDp::rec = nullptr;
+		mesh->setUniforms( prog );
+		WwDp::rec = dpRec;
+		WWDP( WwDp::Live, 0 );
+	}
 	{
 		FloatVector4	c( 0.0f );
 
@@ -2297,9 +2388,12 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 
 	if ( mesh->isDoubleSided ) {
 		glDisable( GL_CULL_FACE );
+		WWDP( WwDp::Disable, GL_CULL_FACE );
 	} else {
 		glEnable( GL_CULL_FACE );
 		glCullFace( GL_BACK );
+		WWDP( WwDp::Enable, GL_CULL_FACE );
+		WWDP( WwDp::CullFace, GL_BACK );
 	}
 
 	// setup blending
@@ -2327,8 +2421,13 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			fn->glBlendFuncSeparate( blendMap[mat->iAlphaSrc], blendMap[mat->iAlphaDst],
 										GL_ONE, blendMap[mat->iAlphaDst] );
 			alphaFlags = 8;
+			const GLint bf[4] = { GLint( blendMap[mat->iAlphaSrc] ), GLint( blendMap[mat->iAlphaDst] ), GL_ONE,
+				GLint( blendMap[mat->iAlphaDst] ) };
+			WWDP( WwDp::Enable, GL_BLEND );
+			WWDP( WwDp::BlendSep, 0, 0, bf, 4 );
 		} else {
 			glDisable( GL_BLEND );
+			WWDP( WwDp::Disable, GL_BLEND );
 		}
 
 		float	alphaThreshold = 0.0f;
@@ -2353,6 +2452,11 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		if ( mat->bDecal ) {
 			glEnable( GL_POLYGON_OFFSET_FILL );
 			glPolygonOffset( -1.0f, -1.0f );
+			if ( WwDp::rec ) {
+				const float o[2] = { -1.0f, -1.0f };
+				WWDP( WwDp::Enable, GL_POLYGON_OFFSET_FILL );
+				WWDP( WwDp::PolyOffset, 0, 0, o, 2 );
+			}
 		}
 
 	} else {
@@ -2360,6 +2464,11 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		if ( mesh->translucent && scene->hasOption(Scene::DoBlending) ) {
 			glEnable( GL_BLEND );
 			fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
+			if ( WwDp::rec ) {
+				const GLint bf[4] = { GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA };
+				WWDP( WwDp::Enable, GL_BLEND );
+				WWDP( WwDp::BlendSep, 0, 0, bf, 4 );
+			}
 			// If mesh is alpha tested, override threshold
 			prog->uni1i( "alphaFlags", ( mesh->alphaProperty && mesh->alphaProperty->hasAlphaTest() ? 12 : 8 ) );
 			prog->uni1f( "alphaThreshold", 0.1f );
@@ -2370,59 +2479,46 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		if ( bsprop->hasSF1( ShaderFlags::SF1( ShaderFlags::SLSF1_Decal | ShaderFlags::SLSF1_Dynamic_Decal ) ) ) {
 			glEnable( GL_POLYGON_OFFSET_FILL );
 			glPolygonOffset( -1.0f, -1.0f );
+			if ( WwDp::rec ) {
+				const float o[2] = { -1.0f, -1.0f };
+				WWDP( WwDp::Enable, GL_POLYGON_OFFSET_FILL );
+				WWDP( WwDp::PolyOffset, 0, 0, o, 2 );
+			}
 		}
 	}
 
 	if ( !mesh->depthTest ) {
 		glDisable( GL_DEPTH_TEST );
+		WWDP( WwDp::Disable, GL_DEPTH_TEST );
 	} else {
 		glEnable( GL_DEPTH_TEST );
 		glDepthFunc( GL_LEQUAL );
+		WWDP( WwDp::Enable, GL_DEPTH_TEST );
+		WWDP( WwDp::DepthFunc, GL_LEQUAL );
 	}
 	glDepthMask( !mesh->depthWrite || mesh->translucent ? GL_FALSE : GL_TRUE );
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+	WWDP( WwDp::DepthMask, !mesh->depthWrite || mesh->translucent ? GL_FALSE : GL_TRUE );
+	WWDP( WwDp::PolyMode, GL_FRONT_AND_BACK, GL_FILL );
 
-	wwSceneGlobals( this, scene, texunit, [scene]() {	// lane PERF1: once per program and pass
-		wwLookdevFogUniforms( scene );	// lane FOG1: fo4_default reads it; fogOn is false outside Lookdev
-		wwCellLightsUniforms( scene );	// lane PRTP3: a no-op unless this is fo4_cell.prog
-		wwSunShadowUniforms( scene );	// lane SUNCELL1: a no-op unless this is a cascade program (fo4_cellcsm, fo4_csm, fo4_fogcsm)
-	} );
-	if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
-		prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
-	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
-		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
-	if ( prog->uniLocation( "editorBrdf" ) >= 0 )	// lane VANILLADEF1: Shading > Editor BRDF (off = vanilla)
-		prog->uni1b( "editorBrdf", scene->editorBrdf );
-	if ( prog->uniLocation( "wwDecalPom" ) >= 0 ) {	// lane DECALS1: (scale x 0.1, step cap); x = 0 is the old draw
-		float sc = 0.0f, steps = 0.0f;
-		const bool on = wwLookOn( WwLook::DecalParallax ) && wwCellDecalPomFor( scene->nifModel, mesh->id(), sc, steps );
-		WW_SWITCH_STATIC( bool, deep, wwEnv( "WW_CELL_DECAL_POM_RED" ).trimmed() == "deep" );
-		prog->uni2f( "wwDecalPom", on ? sc * ( deep ? 4.0f : 1.0f ) : 0.0f, steps );
-	}
-	if ( ( wwVolPartFx() & 1 ) && ( wwVolPartRed() & 64 ) && prog->name == std::string_view( "fo4_effectcell.prog" ) ) {
-		prog->uni1b( "cellShadowOn", false );	// lane VOLPART1 red noshadow: the placed lights' cubes too
-		setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)
-	}
-	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
-	if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
-		// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
-		GLint dst = 0;
-		glGetIntegerv( GL_BLEND_DST_RGB, &dst );
-		prog->uni1b( "fxAdditive", glIsEnabled( GL_BLEND ) && dst == GL_ONE );
-		if ( prog->uniLocation( "fxDecalProbe" ) >= 0 )	// lane DECALLIT1: the gate's light probe
-			prog->uni1b( "fxDecalProbe", wwCellDecalLitProbe() && mesh->effectDecal && wwCellProbePass( scene ) );
-		if ( prog->uniLocation( "fxRoomLit" ) >= 0 )	// lane GIDARK1: an exterior's lit effect, lit by its spot
-			prog->uni1b( "fxRoomLit", !mesh->effectDecal && wwCellFxRoomLit( scene, mesh->id() ) );
-		if ( wwCellFxLitProbeShape( scene, mesh->id() ) ) {
-			// lane FXLIT1: its probes write the lit effects opaque, the nearest card winning: layered cards drawn
-			// without a depth write leave the last one drawn, which differed between the five probe runs
-			glDisable( GL_BLEND );
-			glEnable( GL_DEPTH_TEST );
-			glDepthFunc( GL_LEQUAL );
-			glDepthMask( GL_TRUE );
+	if ( dpSlot ) {
+		dpGuard.on = false;
+		WwDp::end( true, texunit );
+		if ( dpMismatch >= 0 ) {	// the check: the replay left the state this full setup leaves
+			GlSnap b;
+			WwDp::FixedSnap fb;
+			glSnap( this, prog->id, b );
+			WwDp::snapFixed( fn, fb );
+			static int said = 0;
+			dpMismatch += glSnapDiff( dpA, b, said < 20, "draw packets" ) + ( dpFixA.v != fb.v ? 1 : 0 )
+				+ ( WwDp::sameOps( dpOld, *dpSlot ) ? 0 : 1 );
+			if ( dpMismatch && said++ < 20 )
+				std::fprintf( stderr, "draw packets: MISMATCH shape %d fixed=%d ops=%d\n", mesh->id(), dpFixA.v != fb.v ? 1 : 0,
+					WwDp::sameOps( dpOld, *dpSlot ) ? 0 : 1 );
+			WwDp::counted( true, dpMismatch );
 		}
 	}
-	return true;
+	return ce1Tail( texunit );
 }
 
 bool Renderer::setupProgramFO3( const NifModel * nif, Program * prog, Shape * mesh )
