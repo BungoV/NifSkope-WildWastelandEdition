@@ -28,7 +28,7 @@ OVERRIDES = {
     'WW_LIVE_STEPS': ('relaunch', 'the driver itself'),
     'WW_TESTDRIVER_RED': ('relaunch', 'the driver red: read once when the driver starts'),
     'WW_CELL_OPEN': ('reopen', 'the cell spec: the reopen builds the new rectangle in the same window'),
-    'WW_LOOKDEV_PLUGINS': ('relaunch', 'weather plugin list: LdState keeps the parsed climate for the process'),
+    'WW_LOOKDEV_PLUGINS': ('live', 'st() re-reads it on a live set; a changed list loads the plugins again (LIVESET4)'),
     'WW_CELL_SPEED_REOPEN': ('relaunch', 'the speed harness own reopen list, taken once'),
     'WW_LIVE_SERVE': ('relaunch', 'the driver: keeps the window for port commands after the steps'),
     'WW_CELL_GI_VIS': ('shaders', 'march mode is a #define every shader gets at load (Shader::load)'),
@@ -37,8 +37,10 @@ OVERRIDES = {
     'WW_SETUP_MEMO_CHECK': ('live', 'setupMemo() re-reads it on any live set'),
     'WW_CELL_HDR_RED': ('live', 'a member default; hst() re-reads it on a live set'),
     # lane LIVESET1: cellLiveSections rebuilds the far LOD / the probe markers in place (the document's tail);
-    # on/off, TYPE and the stack reds still reopen (they set the near cells' load order), named in the reply
-    'WW_CELL_FARLOD_RED': ('live', 'rebuilt in place (live section); ownstack/refusemissing/nobakeroots owe a reopen'),
+    # lane LIVESET4: on/off, TYPE and the stack reds too, while the near cells' stack stays the one they loaded
+    'WW_CELL_FARLOD': ('live', 'far section added/cut in place (LIVESET4); a changed near stack owes a reopen, named in the reply'),
+    'WW_CELL_FARLOD_TYPE': ('live', 'far section rebuilt in place (LIVESET4); a changed near stack owes a reopen, named in the reply'),
+    'WW_CELL_FARLOD_RED': ('live', 'rebuilt in place (live section); a stack red that changes the near stack owes a reopen'),
     'WW_CELL_FARLOD_NEARONLY': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_MAX': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_L0': ('live', 'rebuilt in place (live section)'),
@@ -55,11 +57,12 @@ OVERRIDES = {
     'WW_CELL_FARLOD_SKYCENSUS': ('live', 'wwCellFarLodSkyCensus: re-read per frame'),
     'WW_CELL_FARLOD_SKYMASK': ('live', 'wwCellFarLodSkyCensus: re-read per frame'),
     'WW_CELL_PROBES_HIDE': ('live', 'probe markers put back or cut in place where a fresh open builds them (LIVESET3); streamed cells owe a reopen'),
-    # lane LIVESET3: actors and weapon parts are welded into the statics' material buckets and feed the enable facts,
-    # so a set needs the whole weld again: the reopen (they read them in cellBuild, not per frame)
-    'WW_CELL_ACTORS_OUT': ('reopen', 'actors are welded into the shared buckets at build; the reopen welds again'),
-    'WW_CELL_WEAP_PARTS': ('reopen', 'weapon parts are welded into the shared buckets at build; the reopen welds again'),
-    'WW_CELL_WEAP_PARTS_RED': ('reopen', 'weapon parts are welded into the shared buckets at build; the reopen welds again'),
+    # lane LIVESET4: a streamed view's cells are built per cell, so a set streams them again in place; a fixed block
+    # (harness, bake, interior) welds actors and weapons into the statics' buckets and owes the reopen, named in the reply
+    'WW_CELL_ACTORS_OUT': ('live', 'streamed cells streamed again in place (LIVESET4); a fixed block owes a reopen'),
+    'WW_CELL_ACTORS_OUT_RED': ('live', 'streamed cells streamed again in place (LIVESET4); a fixed block owes a reopen'),
+    'WW_CELL_WEAP_PARTS': ('live', 'streamed cells streamed again in place (LIVESET4); a fixed block owes a reopen'),
+    'WW_CELL_WEAP_PARTS_RED': ('live', 'streamed cells streamed again in place (LIVESET4); a fixed block owes a reopen'),
     'WW_STREAM1_RED': ('relaunch', 'its reds pick load-time upload formats of every texture/mesh already resident'),
     'WW_PBRM_AUTHORPATH_RED': ('relaunch', 'every loaded property keeps its resolved .pbrm; a measuring red, not a setting'),
     'WW_MSAA': ('relaunch', 'the GL surface format is chosen when the window is made'),

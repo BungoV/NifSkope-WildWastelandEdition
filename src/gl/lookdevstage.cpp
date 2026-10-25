@@ -67,6 +67,7 @@ struct LdState
 	bool init = false;
 	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
 	QStringList pinPlugins;
+	QString livePins;               //!< lane LIVESET4: WW_LOOKDEV_PLUGINS as last read (empty = not set)
 	QString pinPlugin;
 	bool pinWeather = false, pinHour = false, pinGround = false, pinCube = false;
 	QString plugin;			// the chosen plugin (full path); empty = Data/Fallout4.esm
@@ -157,9 +158,14 @@ LdState & st()
 			s.plugin.clear();
 		for ( float & f : s.fogProbe )
 			f = 0.0f;
+		// lane LIVESET4: a live set (or unset) of the list loads the plugins again, as a launch with it would
 		const QString pl = wwEnvStr( "WW_LOOKDEV_PLUGINS" ).trimmed();
+		const QStringList oldPins = s.pinPlugins;
 		if ( !pl.isEmpty() )
 			s.pinPlugins = pl.split( QChar( ',' ), Qt::SkipEmptyParts );
+		else if ( again && !s.livePins.isEmpty() )
+			s.pinPlugins.clear();
+		s.livePins = pl;
 		s.pinPlugin = wwEnvStr( "WW_LOOKDEV_PLUGIN" ).trimmed();
 		if ( !s.pinPlugin.isEmpty() )
 			s.plugin = s.pinPlugin;
@@ -219,7 +225,7 @@ LdState & st()
 			s.cloudClock.start();
 		else {
 			s.dirtyWeather = true;
-			if ( s.plugin != oldPlugin )
+			if ( s.plugin != oldPlugin || s.pinPlugins != oldPins )
 				s.dirtyLoad = true;
 		}
 	}

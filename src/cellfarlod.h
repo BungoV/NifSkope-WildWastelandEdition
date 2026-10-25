@@ -53,6 +53,8 @@ enum WwCellFarLodType { WwFarLodAuto = 0, WwFarLodVanilla = 1, WwFarLodFo4cs = 2
 int cellFarLodTypePinned();                  //!< the setting: auto, vanilla or fo4cs
 void cellFarLodSetType( int type );
 int cellFarLodLastType();                    //!< what the last build resolved to (the drop-down shows it on auto)
+//! lane LIVESET4: a live set cut the document's far section: the draw forgets its far field
+void cellFarLodForget( const void * nif );
 
 /*! lane FARLOD2: ONE STACK FOR NEAR AND FAR. The FO4CS far LOD was baked from a load order and a resource
  *  stack, and the bake recorded both (`<ws>.lodb` beside the `.lodl`: one `plugin` line a plugin, one

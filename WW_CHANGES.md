@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIVESET4 (2026-10-25, branch liveset4-20261025): far LOD on/off and streamed cells live
+
+- **Far LOD on/off and its type are live (WW_CELL_FARLOD, WW_CELL_FARLOD_TYPE, the menu rows):** the far section is
+  added, cut or rebuilt in place. The near cells keep the plugin stack they loaded; when a set would change that stack
+  (an adopted far stack with other plugins, a stack red), the reply names it and the window reopens as before.
+- **Actors outdoors and weapon parts are live in a streamed view (WW_CELL_ACTORS_OUT, WW_CELL_WEAP_PARTS, their reds):**
+  the streamed cells are dropped and streamed again with the new value. A fixed block (harness, bake, interior) welds
+  them with the statics and still reopens, with the reason in the reply.
+- **Streamed particle blocks are reused:** particles copied into a streamed cell take their blocks from the stream's
+  pool, so roaming no longer grows the document.
+- **WW_LOOKDEV_PLUGINS is live:** a set or unset loads the weather plugins again.
+- The 176 switches that still need a relaunch are all test-only (harness rows, shot and bake drivers, startup reads);
+  the list with a reason each is in the lane notes.
+
 ## Lane LIVESET3 (2026-10-23, branch liveset3-20261023): live sets in the middle of the cell, streamed cells
 
 - **Blocks removed or moved from the middle of a cell document, deterministically:** `NifModel::removeBlockRange` and

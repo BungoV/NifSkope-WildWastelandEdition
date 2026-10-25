@@ -304,6 +304,12 @@ int cellFarLodLastType()
 	return farlod1LastType();
 }
 
+void cellFarLodForget( const void * nif )
+{
+	if ( docs().remove( nif ) )
+		ImpostorChunk::forgetCellFar();
+}
+
 QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWorld & world,
 	const QString & ws, int cx, int cy, int n, const QString & lodlPath, const Vector3 & origin,
 	CellFarStream * stream )
