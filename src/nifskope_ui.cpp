@@ -2343,11 +2343,12 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		if ( sideOk )
 			log << pre << "\n";
 	}
-	auto pump = [ogl]() {
-		for ( int i = 0; i < 2; i++ ) {
-			ogl->update();
-			qApp->processEvents();
-		}
+	int unpainted = 0;	// lane HOLDFIX1: frames whose pumps painted nothing (the side file says how many)
+	auto pump = [ogl, &unpainted]() {
+		bool painted = false;
+		for ( int i = 0; i < 2; i++ )
+			painted |= ogl->wwPaintNow();
+		unpainted += painted ? 0 : 1;
 	};
 	Vector3 eye, at;
 	float fov = 70.0f;
@@ -2394,6 +2395,11 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 		if ( gf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 			QTextStream( &gf ) << ogl->wwGpuMs( gpuFrames ) << "\n";
 	}
+	// lane HOLDFIX1: the stepped hour went on into every later row of the launch; put the pinned hour back
+	if ( stepHour )
+		wwLookdevSetHour( hour0 );
+	if ( sideOk )
+		log << "paints " << ( preroll + frames - unpainted ) << " of " << ( preroll + frames ) << " frames painted\n";
 	wwGameTaaSetFrame( -1 );
 	wwCellPostSetPath( -1, 0.0f );
 	wwCellSsgiSetPath( -1 );
@@ -2460,10 +2466,8 @@ WwLiveState & wwLive()
 
 void wwLivePump( GLView * ogl, int frames )
 {
-	for ( int i = 0; i < frames; i++ ) {
-		ogl->update();
-		qApp->processEvents();
-	}
+	for ( int i = 0; i < frames; i++ )
+		ogl->wwPaintNow();	// lane HOLDFIX1: a pumped frame must really paint (see GLView::wwPaintNow)
 }
 
 /* fix 10-22: a live hour set starts time-of-day work in the background that a launch finished while loading: the probe

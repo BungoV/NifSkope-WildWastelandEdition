@@ -543,6 +543,8 @@ public:
 	//! degrees. Off gives the camera back untouched (the orbit state was never written).
 	void wwSetPathCamera( bool on, const Vector3 & eye = Vector3(), const Vector3 & at = Vector3(), float fov = 70.0f );
 	bool wwPathCameraActive() const { return wwPathActive; }
+	//! lane HOLDFIX1: one requested repaint that really paints (a harness pump); false when none came in 2 s
+	bool wwPaintNow();
 	//! lane CELLSTREAM1: one streaming step for the view's cells (src/cellstream.h); true when the scene changed
 	bool wwCellStreamFrame();
 	//! lane CELLSTREAM1: drop the texture and GPU caches (a memory reading that does not count the caches)

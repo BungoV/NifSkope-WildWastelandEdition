@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane HOLDFIX1 (2026-10-25, branch holdfix1-20261025): test-run fixes from the hold 4 triage
+
+- **Memory Den far plane held still:** a cell's far plane is rounded up to whole steps of 8192 units. Inside one launch the
+  scene bounds gave two far planes 72 units apart (34808 and 34880) and the depth of every frame flipped between them.
+  Both now give 40960. The notes say `cell projection: far N (bounds gave M)` once per change. Plain NIFs are unchanged.
+  Cell pictures move a little from earlier references (new depth range), so references are shot again.
+- **Frames that never painted:** the path and live-step pumps now ask for a paint and wait until one really happens
+  (`GLView::wwPaintNow`, at most 2 s). After the hour-step rows a pumped request was swallowed: rows ran in 6.5 s
+  instead of 15 and the TAA history reset on every frame. The path side file now says `paints N of M frames painted`.
+- **Hour step put back:** `WW_RENDER_PATH_HOURSTEP` leaves the pinned hour as it was after its path, so later rows of
+  the launch no longer start at the stepped hour.
+- **`WW_STREAM1_TEXCHECK` is re-read on a set:** the reopen that the stage table lists for it now loads the textures
+  again with the check on (it was read once at start). The notes say `switch: stream1 texcheck on|off`.
+
 ## Lane FXPARITY1 (2026-10-23, branch fxparity1-20261023): particles follow the game's rules (off by default)
 
 - **Row:** Scene window > Particle Game Rules (off), key `WW/FxParity`, live in every mode. `WW_FX_PARITY=1` / `=0`

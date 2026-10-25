@@ -954,7 +954,8 @@ GLuint TexCache::texLoadDDS( const QString & filepath, GLenum & target, QByteArr
 #ifndef Q_OS_MACOS
 	// lane STREAM1 (LOAD1): the images go up from the file's bytes (red WW_STREAM1_RED=texcopy: from a copy)
 	static const bool inPlace = !PassTime::stream1Red( "texcopy" );
-	static const bool check = qEnvironmentVariableIntValue( "WW_STREAM1_TEXCHECK" ) == 1;
+	// lane HOLDFIX1: re-read on a set, so the textures a reopen loads again are checked (it was read once at start)
+	WW_SWITCH_STATIC( bool, check, wwSwitchEcho( "stream1 texcheck", qEnvironmentVariableIntValue( "WW_STREAM1_TEXCHECK" ) == 1 ) );
 	DdsView	view;
 	if ( inPlace && fn )
 		load_if_valid( data.constData(), data.size(), &view );
