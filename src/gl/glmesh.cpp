@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glmesh.h"
 
 #include "message.h"
+#include "gl/cellqueue.h"	// lane GPUFIX1
 #include "gl/controllers.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -753,6 +754,9 @@ void Mesh::drawShapes( NodeList * secondPass )
 		secondPass->add( this );
 		return;
 	}
+	// lane GPUFIX1: while the walk fills the render queues every shape waits for the flush, so tree order holds
+	if ( secondPass && GpuDriven::mainTake( this, GpuDriven::Rest ) )
+		return;
 
 	auto	nif = NifModel::fromIndex( iBlock );
 	auto	context = scene->renderer;

@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GPUFIX1 (2026-10-25, branch gpufix1-20261025): GPU-driven draws match "off" exactly
+
+- **Render queues keep tree order (GPUDRIVEN1, ships on):** the main pass sorted its shapes into queues (opaque,
+  two-sided, alpha-tested, rest) and drew them queue by queue. Where two surfaces sit at the same depth the first one
+  drawn stays, so the default picture differed from the queues off (hold4: 23 px Concord, 1079 px Memory Den). The
+  flush now draws every taken shape in the order the walk met it; the queues are still filled and counted for the
+  census and step B. Older meshes (NiTriShape), BSMesh and opaque particles now wait for the flush too, so nothing
+  draws ahead of its place. Red `WW_GPUDRIVEN_RED=queueorder` is the old queue-by-queue draw. Cost: none expected
+  (the main pass never batched calls; same calls, same state changes as with the queues off).
+- **Occlusion (GPUDRIVEN1B) and fog bloom (FOGBLOOM1):** merged from LIVESET2 (liveset2-20261023), which fixed both:
+  the depth-size query on the frame's stencil-sampled depth texture reads 0 bits, so occlusion never ran; the fog bloom
+  attached that texture as a renderbuffer (GL error 1282). Offline proof through the driver:
+  notes/gpufix1/gl_probe.txt (DEPTH24_STENCIL8 texture: depthBits 0; as renderbuffer err 1282, as texture err 0).
+
 ## Lane LIVESET2 (2026-10-23, branch liveset2-20261023): live-set crashes, fog bloom, far budget
 
 - **Crash on a live WW_TONEMAP1_RED=1 or WW_CELL_HDR_STEX_RED=1 set (TONEMAPCRASH1, STEXCRASH1, one bug):** both reds
