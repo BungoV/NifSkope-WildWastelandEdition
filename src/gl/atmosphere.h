@@ -90,6 +90,9 @@ void wwAtmoSetExpo( int on );	//!< refused while WW_ATMO_EXPO pins it
 bool wwAtmoExpoPinned();
 //! the adapted mean: sceneMean over `counted` of `total` pixels, the rest at the sky's mean (sceneMean when off)
 float wwAtmoAdapted( float sceneMean, int counted, int total );
+/* lane SKY2B (EXPO2): the same from the measure's quarter mip (rgb = light, a = the lit share): the sky's share of each
+ * texel is looked up along that texel's own ray, so only the sky in view counts. Red WW_ATMO_EXPO_RED=hemi = EXPO1. */
+float wwAtmoAdaptedInView( Scene * scene, float sceneMean, const float * px, int qw, int qh );
 
 /* lane SKYA (ATMOCHECK1): the Sky Color row. Physical = the model's color (today's); Weather Tint keeps the physical
  * sky's luminance (the light, the exposure and the bloom see the same brightness) and takes the weather's own sky
@@ -99,6 +102,8 @@ int wwAtmoTint();
 void wwAtmoSetTint( int mode );	//!< refused while WW_ATMO_TINT pins it
 bool wwAtmoTintPinned();
 bool wwAtmoTintRedFlat();	//!< the red: the horizon's color at every elevation (the gradient lost)
+//! SKY2B (SKYTINT2) red WW_ATMO_TINT_RED=physical: the aerial perspective and the ambient keep the physical color
+bool wwAtmoTintRedPhysical();
 
 /* lane SKYA (SKYGI1): the probes' sky light from the physical sky. The probe bake's sky term (src/probesky.h, lane
  * SKYPIC1) integrates a 6-face capture of the drawn sky; with this row on and Physical Sky on, the capture draws the

@@ -124,3 +124,40 @@ vec2 atSkyDirToUv( float r, float cosZ, float cosAz, vec2 n )
 	uv.x = sqrt( clamp( -cosAz * 0.5 + 0.5, 0.0, 1.0 ) );
 	return vec2( atUnitToSub( uv.x, n.x ), atUnitToSub( uv.y, n.y ) );
 }
+
+// lane SKY2B: one view ray's march (Hillaire 2020 sec. 5.3: single scattering + the MS term, 30 quadratic steps),
+// shared by the sky-view LUT and the per-pixel sky (red WW_ATMO_RED=perpixel). ground = 1 adds the lit ground
+// (albedo kAlbedo, as the MS pass does) where the ray ends on the planet: without it high cameras saw a black earth.
+vec3 atSkyMarch( sampler2D T, sampler2D M, vec2 msSize, float msOn, float ground, float r, vec3 v, vec3 s )
+{
+	bool gnd = atHitsGround( r, v.z );
+	float d = gnd ? atDistGround( r, v.z ) : atDistTop( r, v.z );
+	float cvs = dot( v, s );
+	float pr = atPhaseR( cvs ), pm = atPhaseHg( atG, cvs );
+	const int N = 30;
+	vec3 thr = vec3( 1.0 ), L = vec3( 0.0 );
+	float t0 = 0.0;
+	for ( int i = 0; i < N; i++ ) {
+		float a = float( i + 1 ) / float( N );
+		float t1 = d * a * a;
+		float dt = t1 - t0;
+		float t = t0 + dt * 0.5;
+		t0 = t1;
+		vec3 p = vec3( v.xy * t, r + v.z * t );
+		float rp = length( p );
+		vec3 up = p / rp;
+		float mus = dot( up, s );
+		vec3 rs, ms, e;
+		atMedium( rp - kRb, rs, ms, e );
+		vec3 Ts = atTrans( T, rp, mus );
+		vec3 S = Ts * ( rs * pr + ms * pm ) + msOn * texture( M, atMsUv( rp, mus, msSize ) ).rgb * ( rs + ms );
+		vec3 Tst = exp( -e * dt );
+		L += thr * S * ( 1.0 - Tst ) / max( e, vec3( 1e-9 ) );
+		thr *= Tst;
+	}
+	if ( gnd && ground > 0.5 ) {
+		float c = dot( normalize( vec3( v.xy * d, r + v.z * d ) ), s );
+		L += thr * atTrans( T, kRb + 1e-4, c ) * max( c, 0.0 ) * kAlbedo / kPi;
+	}
+	return L;
+}

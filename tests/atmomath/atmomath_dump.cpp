@@ -91,6 +91,31 @@ int main()
 				p[3] = 1.0f;
 			}
 		std::printf( "skymean %.7g %.7g\n", skyViewMeanLum( t.data(), w, h, r, false ), skyViewMeanLum( t.data(), w, h, r, true ) );
+		// SKY2B (EXPO2): the sky in view on the same table, a 50-degree 16:9 camera at pitch 85 and 0 (all sky / the
+		// upper half sky); the checker rebuilds max(cos zenith, 0) per texel ray from the printed frustum
+		const int qw = 120, qh = 68;
+		const float * tabs[2] = { t.data(), nullptr };
+		const float K[2] = { 1.0f, 0.0f }, light[2][3] = { { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } };
+		for ( int c = 0; c < 3; c++ ) {
+			const float p = ( c == 0 ? 85.0f : 0.0f ) * kPi / 180.0f, th = std::tan( 25.0f * kPi / 180.0f );
+			const float fw[3] = { std::cos( p ), 0.0f, std::sin( p ) }, rt[3] = { 0.0f, -1.0f, 0.0f };
+			const float up[3] = { -std::sin( p ), 0.0f, std::cos( p ) };
+			float f0[3], fx[3], fy[3];
+			for ( int k = 0; k < 3; k++ ) {
+				f0[k] = fw[k] - th * 16.0f / 9.0f * rt[k] - th * up[k];
+				fx[k] = 2.0f * th * 16.0f / 9.0f * rt[k];
+				fy[k] = 2.0f * th * up[k];
+			}
+			std::vector<float> sh( size_t( qw ) * size_t( qh ), 1.0f );
+			if ( c == 1 )
+				for ( int y = 0; y < qh / 2; y++ )
+					for ( int x = 0; x < qw; x++ )
+						sh[size_t( y ) * size_t( qw ) + size_t( x )] = 0.0f;
+			float so = 0.0f;
+			const float m = skyMeanInView( sh.data(), qw, qh, f0, fx, fy, tabs, K, light, w, h, r, &so );
+			std::printf( "viewmean %d %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g\n", c, m, so, f0[0], f0[1], f0[2],
+				fx[0], fx[1], fx[2], fy[0], fy[1], fy[2] );
+		}
 	}
 	// ATMOCHECK1: a synthetic dome (rings at 0, 10, 30, 60, 90 deg; Horizon at 0 fading to Sky-Upper at 90, two
 	// vertices a ring with a 0.01 deg jitter that must merge) and a blue physical color, tinted at 0, 20, 90 deg

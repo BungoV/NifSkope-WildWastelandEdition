@@ -1,7 +1,7 @@
 """Lane SKYA: the physical sky's CPU math (src/gl/atmomath.h) against the numpy model and published numbers.
 Runs no NifSkope. Builds tests/atmomath/atmomath_dump.cpp with the MSYS2 UCRT64 g++ into a scratch folder.
 
-    python -I tests/spells/atmomath_check.py <scratch dir> [--red flat|irrflat|phase|noext|zenithw|skyzero|tintflat]
+    python -I tests/spells/atmomath_check.py <scratch dir> [--red flat|irrflat|phase|noext|zenithw|skyzero|tintflat|hemi]
 
 Gates:
   transmittance   cpuTrans (the key light's T, ATMOSUN1) vs atmo_model.transmittance (< 0.005 absolute)
@@ -18,6 +18,9 @@ Gates:
                   mu 0.5, 0.1, 0.03; at mu 0.03 the light is under half and redder (R/B up) -- Bruneton & Neyret 2008
   sky mean        skyViewMeanLum on a synthetic table of max(cos zenith, 0): the solid-angle mean is 1/2 (< 0.01);
                   red zenithw (bands weighted alike) gives 2/pi
+  sky in view     (SKY2B EXPO2) skyMeanInView on the same table, a 50-degree camera at pitch 85 (all sky) and 0
+                  (all sky; upper half sky) vs max(cos zenith, 0) averaged over the sky texels' own rays (< 0.01);
+                  red hemi (EXPO1's hemisphere mean, 1/2) fails the pitch-85 camera
   exposure        the frame mean with the sky = cover x scene + (1 - cover) x sky; full cover = the scene alone
   weather tint    (ATMOCHECK1, the Sky Color row's Weather Tint) a synthetic dome of 5 rings (10 jittered vertices
                   merge to 5): the physical luminance kept exactly at every elevation; the chromaticity = the
@@ -141,6 +144,23 @@ def main():
     sm = [float(x) for x in D['skymean'][0]]
     got = sm[1] if red == 'zenithw' else sm[0]
     gate('sky mean', abs(got - 0.5) < 0.01, 'hemisphere mean of cos zenith %.5f (want 0.5, < 0.01)' % got)
+    # SKY2B (EXPO2): the sky in view = the mean of max(cos zenith, 0) over the sky texels' own rays
+    werr, says = 0.0, []
+    for v in D['viewmean']:
+        c, m, so = int(v[0]), float(v[1]), float(v[2])
+        f0, fx, fy = (np.array([float(x) for x in v[k:k + 3]]) for k in (3, 6, 9))
+        qw, qh = 120, 68
+        a = (np.arange(qw) + 0.5) / qw
+        b = (np.arange(qh) + 0.5) / qh
+        d = f0[None, None, :] + fx[None, None, :] * a[None, :, None] + fy[None, None, :] * b[:, None, None]
+        cz = np.maximum(d[..., 2] / np.linalg.norm(d, axis=2), 0)
+        if c == 1:
+            cz = cz[qh // 2:]
+        ref = float(cz.mean())
+        got = 0.5 if red == 'hemi' else m
+        werr = max(werr, abs(got - ref))
+        says.append('%d: %.4f vs %.4f (share %.3f)' % (c, got, ref, so))
+    gate('sky in view', werr < 0.01, 'skyMeanInView vs the texel rays, worst %.4f (< 0.01); %s' % (werr, '; '.join(says)))
     e = [float(x) for x in D['expo'][0]]
     want = 0.6 * 0.2 + 0.4 * 1.5
     got = e[1] if red == 'skyzero' else e[0]

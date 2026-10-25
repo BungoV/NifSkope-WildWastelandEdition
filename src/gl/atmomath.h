@@ -302,6 +302,68 @@ inline float skyViewMeanLum( const float * rgba, int w, int h, float r, bool red
 	return wsum > 0.0 ? float( acc / wsum ) : 0.0f;
 }
 
+/* EXPO2: one table's luminance at (u, v), bilinear like the GPU (skyViewMeanLum's lookup). */
+inline float tableLumAt( const float * rgba, int w, int h, float u, float v )
+{
+	const float x = std::clamp( u * float( w ) - 0.5f, 0.0f, float( w - 1 ) );
+	const float y = std::clamp( v * float( h ) - 0.5f, 0.0f, float( h - 1 ) );
+	const int x0 = std::min( int( x ), std::max( w - 2, 0 ) ), y0 = std::min( int( y ), std::max( h - 2, 0 ) );
+	const int x1 = std::min( x0 + 1, w - 1 ), y1 = std::min( y0 + 1, h - 1 );
+	const float fx = x - float( x0 ), fy = y - float( y0 );
+	auto at = [&]( int px, int py ) {
+		const float * p = rgba + ( size_t( py ) * size_t( w ) + size_t( px ) ) * 4;
+		return 0.2125f * p[0] + 0.7154f * p[1] + 0.0721f * p[2];
+	};
+	return ( at( x0, y0 ) * ( 1.0f - fx ) + at( x1, y0 ) * fx ) * ( 1.0f - fy ) + ( at( x0, y1 ) * ( 1.0f - fx ) + at( x1, y1 ) * fx ) * fy;
+}
+
+/* EXPO2: the mean luminance of the sky pixels actually in view (EXPO1 took the whole upper hemisphere). share = the
+ * measure's sky share per texel (qw x qh, row 0 = the bottom); a texel's world ray = f0 + fx (x + .5) / qw + fy (y + .5)
+ * / qh (the frustum's corner rays, atmosphere.cpp buildAp). Blocks of up to 8 x 8 texels sum their share and look the
+ * table up once at the block's centre (64 x 34 lookups at 1080p). tabs/K/light: the sun's and the moon's tables (a null
+ * table is skipped), as atmo_sky.frag atLookup reads them. Returns -1 when no texel is sky. */
+inline float skyMeanInView( const float * share, int qw, int qh, const float f0[3], const float fx[3], const float fy[3],
+	const float * const tabs[2], const float K[2], const float light[2][3], int w, int h, float r, float * shareOut = nullptr )
+{
+	const int bx = std::max( 1, ( qw + 63 ) / 64 ), by = std::max( 1, ( qh + 63 ) / 64 );
+	double acc = 0.0, wsum = 0.0;
+	for ( int y0 = 0; y0 < qh; y0 += by )
+		for ( int x0 = 0; x0 < qw; x0 += bx ) {
+			const int x1 = std::min( x0 + bx, qw ), y1 = std::min( y0 + by, qh );
+			double s = 0.0;
+			for ( int y = y0; y < y1; y++ )
+				for ( int x = x0; x < x1; x++ )
+					s += std::clamp( share[size_t( y ) * size_t( qw ) + size_t( x )], 0.0f, 1.0f );
+			if ( !( s > 0.0 ) )
+				continue;
+			const float a = 0.5f * float( x0 + x1 ) / float( qw ), b = 0.5f * float( y0 + y1 ) / float( qh );
+			float d[3];
+			for ( int c = 0; c < 3; c++ )
+				d[c] = f0[c] + fx[c] * a + fy[c] * b;
+			const float n = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
+			if ( !( n > 1e-12f ) )
+				continue;
+			const float la = std::sqrt( d[0] * d[0] + d[1] * d[1] );
+			float l = 0.0f;
+			for ( int t = 0; t < 2; t++ ) {
+				if ( !tabs[t] || !( K[t] > 0.0f ) )
+					continue;
+				const float lb = std::sqrt( light[t][0] * light[t][0] + light[t][1] * light[t][1] );
+				const float cosAz = la > 1e-5f * n && lb > 1e-5f ? ( d[0] * light[t][0] + d[1] * light[t][1] ) / ( la * lb ) : 1.0f;
+				float u, v;
+				skyDirToUv( r, d[2] / n, cosAz, w, h, u, v );
+				l += K[t] * tableLumAt( tabs[t], w, h, u, v );
+			}
+			if ( std::isfinite( l ) ) {
+				acc += s * double( l );
+				wsum += s;
+			}
+		}
+	if ( shareOut )
+		*shareOut = float( wsum / std::max( 1.0, double( qw ) * double( qh ) ) );
+	return wsum > 0.0 ? float( acc / wsum ) : -1.0f;
+}
+
 /* EXPO1: the frame's mean luminance with the sky in it. The imagespace measure (celllights.h THE IMAGESPACE) averages
  * the cell-lit pixels only; the sky's pixels (the rest of the frame, share 1 - cover) are taken at the sky-view
  * table's mean luminance over the upper hemisphere (sr-weighted), in the same scene units as the surfaces.

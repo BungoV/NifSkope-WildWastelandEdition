@@ -338,8 +338,9 @@ void isApply( Scene * scene, const float * px, int qw, int qh )
 			if ( std::isfinite( px[i * 4 + c] ) )
 				sum += wgt[c] * px[i * 4 + c];
 	}
-	wwCellImageSpaceSetAdapted( scene, wwAtmoAdapted( cover > 0.0 ? float( sum / cover ) : 0.0f, int( std::lround( cover ) ),
-		qw * qh ), int( std::lround( cover ) ) );
+	// SKY2B (EXPO2): the sky pixels in view, each along its own ray
+	wwCellImageSpaceSetAdapted( scene, wwAtmoAdaptedInView( scene, cover > 0.0 ? float( sum / cover ) : 0.0f, px, qw, qh ),
+		int( std::lround( cover ) ) );
 	wwCellImageSpaceSetBloom( scene, px, qw, qh, 1 );
 	WW_SWITCH_STATIC( bool, echo, wwEnvInt( "WW_IS_MEASURE_ECHO" ) == 1 );
 	static QString said;
