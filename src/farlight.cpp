@@ -140,6 +140,7 @@ bool farLightBake( const ProbeRelightOps & X, const QString & dir, const FarLigh
 		st.passes = passes;
 		st.placedOnly = true;
 		st.wantE = true;
+		st.lightPhys = spec.lightPhys;	// lane LIGHTPHYS4: the far light bounces on the surfaces' curve
 		return probeRelightCpu( X, st, ro, err );
 	};
 	// 1. the pass count: the all-on relight's settled count; 2. the all-on light at exactly that count
@@ -150,6 +151,10 @@ bool farLightBake( const ProbeRelightOps & X, const QString & dir, const FarLigh
 	O.passes = settle.passes;
 	if ( !run( allOn, O.passes, &full ) )
 		return false;
+	if ( spec.keepAllOn ) {
+		O.allOnE = full.Es;
+		O.allOnB1 = full.B1;
+	}
 	// 3. a layer per group at the same count (red "settle": each by its own stop rule)
 	const bool redSettle = spec.red == QLatin1String( "settle" ), redDrop = spec.red == QLatin1String( "drop" );
 	std::vector<std::vector<double>> layer( keys.size() );

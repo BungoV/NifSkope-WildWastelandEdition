@@ -2340,6 +2340,93 @@ int cellLiveProbesShow( NifModel * nif, bool show, QString * why )
 	return r == 2 ? 2 : 1;
 }
 
+namespace
+{
+//! lane LIGHTPHYS4: the far light's inputs from the cell's bake, kept so a change of the light rows rebakes it live
+struct CellFarLive
+{
+	const void * nif = nullptr;
+	std::unique_ptr<ProbeRelightOps> ops;
+	QString dir;
+	FarLightBakeSpec fs;
+	ProbeGiSpec gp;
+	WwCellLighting lp;
+};
+
+CellFarLive & cellFarLive()
+{
+	static CellFarLive f;
+	return f;
+}
+}
+
+//! lane FARVIEW1 (a function since LIGHTPHYS4): the far tables for the group state, and the GI's placed share; the notes
+static QString cellFarLightPublish( const void * nif, const QString & farDir, const ProbeSoup & probeSoup,
+	const QString & giBakeDir, const WwCellLighting & lp, const ProbeGiSpec & gp )
+{
+	FarLightSet set;
+	QString ferr;
+	if ( !farLightLoad( farDir, &set, &ferr ) )
+		return QStringLiteral( "  far light load FAILED: %1\n" ).arg( ferr );
+	// WW_CELL_FARLIGHT_STATE: start (each group as the game starts it; the default) | all | none
+	const QByteArray st = wwEnv( "WW_CELL_FARLIGHT_STATE" ).trimmed();
+	auto on = [&]( quint64, bool onAtStart ) { return st == "all" ? true : st == "none" ? false : onAtStart; };
+	std::vector<float> E;
+	farLightSum( set, on, E );
+	WwCellFar fr;
+	farLightTables( set, E, fr.slotTab, fr.recs, &fr.bits, &fr.maxProbe );
+	fr.cell = set.cell;
+	fr.records = int( set.recs.size() );
+	const QStringList band = QString::fromLatin1( wwEnv( "WW_CELL_FAR_BAND" ) ).split( QLatin1Char( ',' ) );
+	if ( band.size() == 2 && band[0].toFloat() > 0.0f && band[1].toFloat() > band[0].toFloat() ) {
+		fr.band[0] = band[0].toFloat();
+		fr.band[1] = band[1].toFloat();
+	}
+	for ( const FarLightSet::Dot & d : set.dots )
+		if ( on( d.group, d.onAtStart ) )
+			fr.dots.insert( fr.dots.end(), { d.pos[0], d.pos[1], d.pos[2], 0.0f, d.I[0], d.I[1], d.I[2], 0.0f } );
+	ProbeGiResult gq;
+	if ( probeGiRelight( probeSoup, giBakeDir, lp, gp, &gq ) && !gq.grid.empty() ) {
+		fr.placed = std::move( gq.grid );
+		for ( int k = 0; k < 3; k++ ) {
+			fr.placedOrigin[k] = gq.origin[k];
+			fr.placedDims[k] = gq.dims[k];
+		}
+		fr.placedVoxel = gq.voxel;
+	}
+	fr.summary = QStringLiteral( "%1 records, table 2^%2 (walk %3), %4 dots, band %5-%6, placed grid %7 (%8 passes), state %9" )
+		.arg( fr.records ).arg( fr.bits ).arg( fr.maxProbe ).arg( fr.dots.size() / 8 ).arg( double( fr.band[0] ) )
+		.arg( double( fr.band[1] ) ).arg( fr.placed.empty() ? QStringLiteral( "none" ) : QStringLiteral( "%1x%2x%3" )
+		.arg( fr.placedDims[0] ).arg( fr.placedDims[1] ).arg( fr.placedDims[2] ) ).arg( gq.passes )
+		.arg( st.isEmpty() ? QStringLiteral( "start" ) : QString::fromLatin1( st ) );
+	const QString note = QStringLiteral( "  far light published: %1; %2\n" ).arg( fr.summary, set.census );
+	wwCellFarPublish( nif, fr );
+	return note;
+}
+
+bool cellFarLightRelit( const void * nif, const ProbeSoup & soup, const QString & giBakeDir )
+{
+	CellFarLive & f = cellFarLive();
+	if ( !f.ops || f.nif != nif )
+		return false;
+	const wwlp::Params now = wwLightPhysParams();
+	if ( wwlp::sameBounce( now, f.fs.lightPhys ) )
+		return false;
+	QElapsedTimer t;
+	t.start();
+	f.fs.lightPhys = now;
+	f.gp.lightPhys = now;
+	FarLightBakeOut fo;
+	QString err, note;
+	if ( farLightBake( *f.ops, f.dir, f.fs, &fo, &err ) )
+		note = fo.census + QLatin1Char( ';' ) + cellFarLightPublish( nif, f.dir, soup, giBakeDir, f.lp, f.gp ).trimmed();
+	else
+		note = QStringLiteral( "far light bake FAILED: %1" ).arg( err );
+	fprintf( stderr, "far light relit for the light rows (%lld ms): %s\n", qint64( t.elapsed() ), qPrintable( note ) );
+	fflush( stderr );
+	return true;
+}
+
 // lane CELLSTREAM1: the builder; `chunk` set = one streamed cell (n = 1), no document touched, stops before emit
 static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChunk * chunk,
 	QString * error, QString * notes )
@@ -6697,6 +6784,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						? QStringLiteral( "  %1\n" ).arg( rcensus ) : QStringLiteral( "  gi records FAILED: %1\n" ).arg( rerr );
 				}
 			}
+			cellFarLive() = CellFarLive();	// lane LIGHTPHYS4: a new cell's far light replaces the kept one
 			if ( !farDir.isEmpty() && ok && relOps.built ) {	// lane FARVIEW1: the dots, the light record, the layers
 				relOps.interior = spec.interior;
 				QString fc, ferr;
@@ -6711,8 +6799,16 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					FarLightBakeSpec fs;
 					fs.red = QString::fromLatin1( wwEnv( "WW_CELL_FARLIGHT_RED" ) ).trimmed();
 					fs.dump = !wwEnv( "WW_CELL_FARLIGHT_DUMP" ).isEmpty();
+					fs.lightPhys = gs.lightPhys;	// lane LIGHTPHYS4: the far light bounces on the near bounce's curve
 					FarLightBakeOut fo;
 					farBaked = farLightBake( relOps, farDir, fs, &fo, &ferr );
+					if ( farBaked ) {
+						CellFarLive & fl = cellFarLive();
+						fl.nif = nif;
+						fl.ops.reset( new ProbeRelightOps( relOps ) );
+						fl.dir = farDir;
+						fl.fs = fs;
+					}
 					probeNotes += farBaked ? QStringLiteral( "  %1\n" ).arg( fo.census ) : QStringLiteral( "  far light bake FAILED: %1\n" ).arg( ferr );
 				}
 			}
@@ -6769,58 +6865,22 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				}
 				wwCellAoDecalPublish( nif, gs.aoDecals );	// lane AODECAL1 (null: no decals)
 				if ( farBaked ) {	// lane FARVIEW1: the far tables for the group state, and the GI's placed share
-					FarLightSet set;
-					QString ferr;
-					if ( !farLightLoad( farDir, &set, &ferr ) ) {
-						probeNotes += QStringLiteral( "  far light load FAILED: %1\n" ).arg( ferr );
-					} else {
-						// WW_CELL_FARLIGHT_STATE: start (each group as the game starts it; the default) | all | none
-						const QByteArray st = wwEnv( "WW_CELL_FARLIGHT_STATE" ).trimmed();
-						auto on = [&]( quint64, bool onAtStart ) { return st == "all" ? true : st == "none" ? false : onAtStart; };
-						std::vector<float> E;
-						farLightSum( set, on, E );
-						WwCellFar fr;
-						farLightTables( set, E, fr.slotTab, fr.recs, &fr.bits, &fr.maxProbe );
-						fr.cell = set.cell;
-						fr.records = int( set.recs.size() );
-						const QStringList band = QString::fromLatin1( wwEnv( "WW_CELL_FAR_BAND" ) ).split( QLatin1Char( ',' ) );
-						if ( band.size() == 2 && band[0].toFloat() > 0.0f && band[1].toFloat() > band[0].toFloat() ) {
-							fr.band[0] = band[0].toFloat();
-							fr.band[1] = band[1].toFloat();
-						}
-						for ( const FarLightSet::Dot & d : set.dots )
-							if ( on( d.group, d.onAtStart ) )
-								fr.dots.insert( fr.dots.end(), { d.pos[0], d.pos[1], d.pos[2], 0.0f, d.I[0], d.I[1], d.I[2], 0.0f } );
-						// the GI grid relit by the placed lights alone, at the grid's own pass count: no sky, sun, directional or glow
-						ProbeGiSpec gp = gs;
-						gp.record = nullptr;
-						gp.recordExtra.clear();
-						gp.recordRef.clear();
-						gp.recordGroup.clear();
-						gp.sky = ProbeSkyLight();
-						gp.skyRed.clear();
-						gp.interiorSky = gp.interiorSun = false;
-						gp.noGlow = true;
-						gp.passes = gr.passes;
-						WwCellLighting lp = *L;
-						lp.hasDirectional = false;
-						ProbeGiResult gq;
-						if ( probeGiRelight( probeSoup, giBakeDir, lp, gp, &gq ) && !gq.grid.empty() ) {
-							fr.placed = std::move( gq.grid );
-							for ( int k = 0; k < 3; k++ ) {
-								fr.placedOrigin[k] = gq.origin[k];
-								fr.placedDims[k] = gq.dims[k];
-							}
-							fr.placedVoxel = gq.voxel;
-						}
-						fr.summary = QStringLiteral( "%1 records, table 2^%2 (walk %3), %4 dots, band %5-%6, placed grid %7 (%8 passes), state %9" )
-							.arg( fr.records ).arg( fr.bits ).arg( fr.maxProbe ).arg( fr.dots.size() / 8 ).arg( double( fr.band[0] ) )
-							.arg( double( fr.band[1] ) ).arg( fr.placed.empty() ? QStringLiteral( "none" ) : QStringLiteral( "%1x%2x%3" )
-							.arg( fr.placedDims[0] ).arg( fr.placedDims[1] ).arg( fr.placedDims[2] ) ).arg( gq.passes )
-							.arg( st.isEmpty() ? QStringLiteral( "start" ) : QString::fromLatin1( st ) );
-						probeNotes += QStringLiteral( "  far light published: %1; %2\n" ).arg( fr.summary, set.census );
-						wwCellFarPublish( nif, fr );
-					}
+					// the GI grid relit by the placed lights alone, at the grid's own pass count: no sky, sun, directional or glow
+					ProbeGiSpec gp = gs;
+					gp.record = nullptr;
+					gp.recordExtra.clear();
+					gp.recordRef.clear();
+					gp.recordGroup.clear();
+					gp.sky = ProbeSkyLight();
+					gp.skyRed.clear();
+					gp.interiorSky = gp.interiorSun = false;
+					gp.noGlow = true;
+					gp.passes = gr.passes;
+					WwCellLighting lp = *L;
+					lp.hasDirectional = false;
+					probeNotes += cellFarLightPublish( nif, farDir, probeSoup, giBakeDir, lp, gp );
+					cellFarLive().gp = gp;	// lane LIGHTPHYS4
+					cellFarLive().lp = lp;
 				}
 				// a later change of weather (sky-lit cells) or of Probe sharing (every cell, lane GPURELIGHT1) relights it; lane LIGHTS5: so does the emittance row (gs.emitBaked); lane LIGHTPHYS2: and the light rows
 				probeSkyKeep( nif, probeSoup, giBakeDir, gs, !spec.interior || gs.interiorSky );

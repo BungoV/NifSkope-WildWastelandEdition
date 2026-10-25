@@ -11,7 +11,15 @@ formulas written out below (NOT from src/gl/lightphys.h), and compares with the 
   L2 calib     the twin's advanced B1 at calibration 2 = 2 x at calibration 1 to 1e-7 (scene.json prints the
                numerator to 9 digits) and the CPU's does the same to 1e-6
 
-Doors are open in these states (no door or glass triangles). usage: python lightphys2_bounce.py <out dir>
+Doors are open in these states (no door or glass triangles).
+
+Lane LIGHTPHYS4 adds twin/lp4.json (the far light's all-on B1 per rows, a solid door shut under the rows):
+  F/D3 <state> twin = CPU as L1 (a shut solid door's triangles block the twin's rays)
+  F red farcurve   the twin's physical far light against the CPU's game far light must FAIL
+  D3 red dooropen  the door state re-traced with the door open must FAIL
+  D3 red doorrows  the twin's physical door against the CPU's door on the game's curve must FAIL
+
+usage: python lightphys2_bounce.py <out dir>
 exit 0 all pass, 1 a gate failed, 2 bad input
 """
 import json
@@ -101,10 +109,12 @@ def scale_of(ph, col):
     return (lum / piv) ** (ph['curve'] - 1.0) if lum > 0 and piv > 0 else 1.0
 
 
-def twin_b1(tw, sc, state, ph):
+def twin_b1(tw, sc, state, ph, extra=None):
     surf = load(tw, 'surf.f32', np.float32, 9).astype(np.float64)
     P, N, A = surf[:, 0:3], surf[:, 3:6], surf[:, 6:9]
     soup = load(tw, 'soup_tris.f32', np.float32, 9).astype(np.float64)
+    if extra is not None:
+        soup = np.vstack([soup, extra])
     st = sc['states'][state]
     E = np.zeros_like(P)
     for li, L in enumerate(sc['lights']):
@@ -142,6 +152,32 @@ def gate(name, mine, theirs, red=False):
     return passed
 
 
+def lp4(tw, sc):
+    # lane LIGHTPHYS4: the far light and the live door under the rows
+    p = os.path.join(tw, 'lp4.json')
+    if not os.path.exists(p):
+        print('FAIL: the dump has no lp4.json (an exe before lane LIGHTPHYS4?)')
+        return False
+    s4 = dict(sc, states=json.load(open(p))['states'])
+    door = load(tw, 'door_tris.f32', np.float32, 9).astype(np.float64)
+    did = load(tw, 'door_id.i32', np.int32)
+    cpu = lambda s: load(tw, 'b1_lp4_%s.f32' % s, np.float32, 3).astype(np.float64)
+    need = ('fargame', 'farphysical', 'faradvanced', 'doorphys', 'doorgame')
+    if any(s not in s4['states'] for s in need):
+        print('FAIL: lp4.json lacks a state of %s' % (need,))
+        return False
+    ok, tw4 = True, {}
+    for state, st in s4['states'].items():
+        shut = [k for k, c in enumerate(st['closed']) if c]
+        tw4[state] = twin_b1(tw, s4, state, st['phys'], door[np.isin(did, shut)] if shut else None)
+        ok &= gate('%s %s' % ('F' if state.startswith('far') else 'D3', state), tw4[state], cpu(state))
+    ok &= gate('F red farcurve', tw4['farphysical'], cpu('fargame'), red=True)
+    ph = s4['states']['doorphys']['phys']
+    ok &= gate('D3 red dooropen', twin_b1(tw, s4, 'doorphys', ph), cpu('doorphys'), red=True)
+    ok &= gate('D3 red doorrows', tw4['doorphys'], cpu('doorgame'), red=True)
+    return ok
+
+
 def main():
     if len(sys.argv) != 2:
         print(__doc__)
@@ -170,6 +206,7 @@ def main():
     k = d_twin <= 1e-7 and d_cpu <= 1e-6 and np.abs(c2).max() > 0
     print('%s green L2 calib: calibration 2 / 1 = 2 (twin %.3g, CPU %.3g of the brightest)' % ('OK  ' if k else 'FAIL', d_twin, d_cpu))
     ok &= k
+    ok &= lp4(tw, sc)
     print('%d states re-traced; %s' % (n, 'PASS' if ok else 'FAIL'))
     return 0 if ok else 1
 

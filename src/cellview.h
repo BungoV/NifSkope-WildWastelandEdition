@@ -227,4 +227,9 @@ int cellLiveRebuild( NifModel * nif, QString * why );
 bool wwCellParticlesOn();
 void wwCellParticlesSetOn( bool on );
 
+struct ProbeSoup;
+/*! lane LIGHTPHYS4: a change of the light rows rebakes the far light's layers (WW_CELL_FARLIGHT) under the new curve
+ *  and republishes the far tables; probesky's tick calls it with its kept soup. true = it relit. */
+bool cellFarLightRelit( const void * nif, const ProbeSoup & soup, const QString & giBakeDir );
+
 #endif // CELLVIEW_H

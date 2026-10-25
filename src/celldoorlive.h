@@ -19,6 +19,7 @@ class NifModel;
 class QWindow;
 class Scene;
 struct ProbeRelightOps;
+struct ProbeRelightOut;
 struct WwCellGi;
 
 //! a door's box as the probe soup tagged it
@@ -50,5 +51,11 @@ QString wwDoorLiveStep( Scene * scene, double seconds );
 QString wwDoorLiveCommand( Scene * scene, const QString & arg );
 //! The census line (door ref, state, open fraction, relight ms)
 QString wwDoorLiveEcho();
+
+//! lane LIGHTPHYS4: the published grid's door share, rgba += shut run - all-open run (grid, and grid2 when rgba holds both)
+void wwDoorLiveDelta( std::vector<float> & rgba, size_t nVox, const ProbeRelightOut & shut, const ProbeRelightOut & open );
+/*! lane LIGHTPHYS4: the light rows changed; probesky relit the bake (`relit` = its new grid, null when it did not).
+ *  The live door takes that grid as its base and the current rows, and relights at the next frame. */
+void wwDoorLiveRowsRelit( const void * nif, const WwCellGi * relit );
 
 #endif // CELLDOORLIVE_H

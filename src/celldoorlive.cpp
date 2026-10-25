@@ -80,7 +80,7 @@ struct Kept
 	bool haveOpen = false;
 	bool share = false;	// lane GPURELIGHT1: Probe sharing as the base was relit (the runs match the base)
 	int sharePasses = 1;	// lane GIPROBE2: Wide probe sharing's steps, as the base was relit
-	wwlp::Params lightPhys;	// lane LIGHTPHYS2: the curve the published bake was lit with (a later row set waits for the next setup)
+	wwlp::Params lightPhys;	// lane LIGHTPHYS2: the curve the published bake was lit with (LIGHTPHYS4: re-taken on a row set)
 	int slot = -1;
 	float floorP[3] = { 0, 0, 0 };
 	bool haveFloor = false;
@@ -456,14 +456,7 @@ void relight( Kept & k, float shut )
 			k.giWhy = QStringLiteral( "the relight failed: %1" ).arg( why );
 			return;
 		}
-		auto add = [&]( size_t at, const std::vector<float> & S, const std::vector<float> & O ) {
-			for ( size_t i = 0; i + 3 < S.size() && i + 3 < O.size() && at + i + 3 < gi.rgba.size(); i += 4 )
-				for ( int c = 0; c < 3; c++ )
-					gi.rgba[at + i + size_t( c )] = std::max( 0.0f, gi.rgba[at + i + size_t( c )] + S[i + size_t( c )] - O[i + size_t( c )] );
-		};
-		add( 0, o.grid, k.open.grid );
-		if ( gi.rgba.size() >= nVox * 48 )
-			add( nVox * 24, o.grid2, k.open.grid2 );
+		wwDoorLiveDelta( gi.rgba, nVox, o, k.open );
 		/* SKY3: the air volume follows the door as the grid does: each voxel adds its recorded probes' change (shut run
 		 * minus open run). It kept the bake's air before. Red WW_CELL_DOORLIVE_AIR_RED=1: the bake's air, as before. */
 		k.airMoved = 0;
@@ -738,6 +731,38 @@ QString wwDoorLiveKeepGi( const void * nif, const ProbeRelightOps & ops, const W
 		.arg( double( k.floorP[0] ), 0, 'f', 1 ).arg( double( k.floorP[1] ), 0, 'f', 1 ).arg( double( k.floorP[2] ), 0, 'f', 1 )
 		.arg( k.mode == ModeOpen ? QStringLiteral( "open" ) : k.mode == ModeClose ? QStringLiteral( "close" ) : QStringLiteral( "cycle" ) );
 	return notes;
+}
+
+void wwDoorLiveDelta( std::vector<float> & rgba, size_t nVox, const ProbeRelightOut & shut, const ProbeRelightOut & open )
+{
+	auto add = [&]( size_t at, const std::vector<float> & S, const std::vector<float> & O ) {
+		for ( size_t i = 0; i + 3 < S.size() && i + 3 < O.size() && at + i + 3 < rgba.size(); i += 4 )
+			for ( int c = 0; c < 3; c++ )
+				rgba[at + i + size_t( c )] = std::max( 0.0f, rgba[at + i + size_t( c )] + S[i + size_t( c )] - O[i + size_t( c )] );
+	};
+	add( 0, shut.grid, open.grid );
+	if ( rgba.size() >= nVox * 48 )
+		add( nVox * 24, shut.grid2, open.grid2 );
+}
+
+void wwDoorLiveRowsRelit( const void * nif, const WwCellGi * relit )
+{
+	Kept & k = kept();
+	if ( !k.giKept || !k.nif || static_cast<const void *>( k.nif.data() ) != nif || !k.base )
+		return;
+	const wwlp::Params now = wwLightPhysParams();
+	if ( wwlp::sameBounce( now, k.lightPhys ) && !relit )
+		return;
+	const bool rebased = relit && relit->rgba.size() == k.base->rgba.size();
+	if ( rebased )
+		*k.base = *relit;	// the bake under the new rows: the door's share is added to it again
+	k.lightPhys = now;
+	k.haveOpen = false;	// the all-open run under the new rows
+	k.relitAny = false;
+	fprintf( stderr, "door live: light rows taken (%s)\n", rebased ? "new base" : "base kept" );
+	fflush( stderr );
+	if ( k.view )
+		k.view->requestUpdate();
 }
 
 void wwDoorLiveTick( Scene * scene, QWindow * view )

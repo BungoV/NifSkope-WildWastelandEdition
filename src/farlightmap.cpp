@@ -106,7 +106,7 @@ QString farKnobs()
 	QStringList k;
 	const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
 	for ( const QString & n : env.keys() )
-		if ( n.startsWith( QLatin1String( "WW_CELL_FARLIGHT_" ) ) )
+		if ( n.startsWith( QLatin1String( "WW_CELL_FARLIGHT_" ) ) || n.startsWith( QLatin1String( "WW_CELL_LIGHT_" ) ) )   // lane LIGHTPHYS4: the light rows' pins
 			k << n + QLatin1Char( '=' ) + env.value( n );
 	k.sort();
 	return k.isEmpty() ? QStringLiteral( "-" ) : k.join( QLatin1Char( ' ' ) );

@@ -12,6 +12,8 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "probebake.h"
 #include "probegi.h"
+#include "celldoorlive.h"	// lane LIGHTPHYS4: the live door's grid share (gate D3)
+#include "farlight.h"		// lane LIGHTPHYS4: the far light under the rows (gate F)
 
 #include <QCoreApplication>
 #include <QDir>
@@ -2815,6 +2817,133 @@ int probeRelightCli( const QStringList & args )
 					QStringLiteral( "GPU vs CPU, depth visibility: E %1, grid %2 (gate 1e-4)" ).arg( gE, 0, 'g', 3 ).arg( gG, 0, 'g', 3 ) );
 			}
 		}
+	}
+	// ---- lane LIGHTPHYS4: F the far light bakes on the rows' curve; D3 a live door re-takes the rows. Own files only
+	// (twin/lp4.json, twin/b1_lp4_*.f32, far_*): every file above stays as LIGHTPHYS2 wrote it
+	{
+		QStringList lp4;
+		auto stateJs = [&]( const QString & name, const std::vector<float> & color, const std::vector<int> & closed,
+			const wwlp::Params & lp, int passes ) {
+			QStringList c, r, d;
+			for ( float v : color )
+				c << QString::number( double( v ), 'g', 9 );
+			for ( const ProbeRelightOps::Light & l : X.lights )
+				r << QString::number( double( l.radius ), 'g', 9 );
+			for ( size_t k = 0; k < X.doorRefs.size(); k++ )
+				d << QString::number( k < closed.size() ? closed[k] : 0 );
+			const QString phys = QStringLiteral( "{\"mode\": %1, \"anchor\": %2, \"s\": %3, \"adv\": %4, \"advMin\": %5, \"curve\": %6, "
+				"\"pivot\": %7, \"red\": %8}" ).arg( lp.mode ).arg( double( lp.anchor ), 0, 'g', 9 ).arg( double( lp.sourceFraction ), 0, 'g', 9 )
+				.arg( double( lp.advNumerator ), 0, 'g', 9 ).arg( double( lp.advMinMetres ), 0, 'g', 9 ).arg( double( lp.curve ), 0, 'g', 9 )
+				.arg( double( lp.pivot ), 0, 'g', 9 ).arg( lp.red );
+			lp4 << QStringLiteral( "\"%1\": {\"color\": [%2], \"radius\": [%3], \"closed\": [%4], \"passes\": %5, \"phys\": %6}" )
+				.arg( name, c.join( ", " ), r.join( ", " ), d.join( ", " ) ).arg( passes ).arg( phys );
+		};
+		auto toF = []( const std::vector<double> & v ) { return std::vector<float>( v.begin(), v.end() ); };
+		wwlp::Params pPhys, pAdv;
+		pPhys.mode = wwlp::Physical;
+		pAdv.mode = wwlp::Advanced;
+		pAdv.advNumerator = wwlp::vanillaFlux();
+		// F: each rows' far bake (every light on, the switched one too) against the placed-only relight under the same rows
+		const char * farNames[3] = { "fargame", "farphysical", "faradvanced" };
+		const wwlp::Params farP[3] = { wwlp::Params(), pPhys, pAdv };
+		std::vector<float> allOn;
+		for ( const ProbeRelightOps::Light & l : X.lights )
+			allOn.insert( allOn.end(), l.color, l.color + 3 );
+		std::vector<float> farE[3];
+		QByteArray fvl[3];
+		for ( int m = 0; m < 3; m++ ) {
+			const QString name = QString::fromLatin1( farNames[m] ), dir = out.filePath( QStringLiteral( "far_" ) + name );
+			QDir( dir ).removeRecursively();
+			FarLightBakeSpec fs;
+			fs.lightPhys = farP[m];
+			fs.keepAllOn = true;
+			FarLightBakeOut fo;
+			QString rc;
+			if ( !probeRelightWriteRecords( X, dir, { QStringLiteral( "Fallout4.esm" ), QStringLiteral( "Synthetic.esp" ) }, &err, &rc )
+				|| !farLightBake( X, dir, fs, &fo, &err ) ) {
+				gate( QStringLiteral( "F %1" ).arg( name ), false, QStringLiteral( "the far bake failed: %1" ).arg( err ) );
+				continue;
+			}
+			ProbeRelightState st;
+			st.color = allOn;
+			st.passes = fo.passes;
+			st.placedOnly = true;
+			st.wantE = true;
+			st.lightPhys = farP[m];
+			ProbeRelightOut ro;
+			probeRelightCpu( X, st, &ro, &err );
+			farE[m] = toF( fo.allOnE );
+			const double d = relDiff( farE[m], toF( ro.Es ) );
+			gate( QStringLiteral( "F %1" ).arg( name ), d <= 1e-6 && fo.gateL <= 1e-6 && !farE[m].empty(),
+				QStringLiteral( "the far bake's all-on E vs the placed-only relight under the same rows %1, its layers' sum %2 "
+					"(both 1e-6); %3 groups, %4 passes, %5 records" ).arg( d, 0, 'g', 3 ).arg( fo.gateL, 0, 'g', 3 ).arg( fo.groups )
+					.arg( fo.passes ).arg( fo.records ) );
+			for ( const QFileInfo & fi : QDir( dir ).entryInfoList( { QStringLiteral( "farlight_*.fvl" ) }, QDir::Files, QDir::Name ) ) {
+				QFile f( fi.filePath() );
+				if ( f.open( QIODevice::ReadOnly ) )
+					fvl[m] += f.readAll();
+			}
+			putF32( QDir( tw ).filePath( QStringLiteral( "b1_lp4_%1.f32" ).arg( name ) ), fo.allOnB1 );
+			stateJs( name, allOn, {}, farP[m], fo.passes );
+		}
+		if ( !farE[0].empty() && !farE[1].empty() ) {
+			const double d = relDiff( farE[0], farE[1] );
+			gate( QStringLiteral( "F red farcurve" ), d <= 1e-6,
+				QStringLiteral( "the far light left on the game's curve against the physical rows: E %1" ).arg( d, 0, 'g', 3 ), true );
+		}
+		gate( QStringLiteral( "F files" ), !fvl[0].isEmpty() && fvl[0] != fvl[1] && fvl[0] != fvl[2] && fvl[1] != fvl[2],
+			QStringLiteral( "the far layers (.fvl) differ per rows: game %1, physical %2, advanced %3 bytes" ).arg( fvl[0].size() )
+				.arg( fvl[1].size() ).arg( fvl[2].size() ) );
+		// D3: the solid door shut live after a row set = the new rows' bake + (shut run - open run) under the new rows
+		{
+			const std::vector<float> baked = colors( { L0, L1, L3, off2 } );
+			const size_t nVox = X.nVox;
+			auto runDoor = [&]( const wwlp::Params & p, bool shut, ProbeRelightOut * o ) {
+				ProbeRelightState st;
+				st.color = baked;
+				st.lightPhys = p;
+				if ( shut ) {
+					st.doorShut.assign( X.doorRefs.size(), 0.0f );
+					st.doorShut[0] = 1.0f;
+				}
+				return probeRelightCpu( X, st, o, &err );
+			};
+			auto layout = [&]( const std::vector<float> & g, const std::vector<float> & g2 ) {
+				std::vector<float> v = g;
+				if ( g.size() == nVox * 24 && g2.size() == nVox * 24 )
+					v.insert( v.end(), g2.begin(), g2.end() );
+				return v;
+			};
+			auto bake = [&]( const wwlp::Params & p ) {   // the bake a row set publishes (probesky: the kept bake relit)
+				ProbeGiSpec g = gs;
+				g.lightPhys = p;
+				ProbeGiResult r;
+				probeGiRelight( soup, bakeDir, lit, g, &r );
+				return layout( r.grid, r.grid2 );
+			};
+			ProbeRelightOut sP, oP, sG, oG;
+			const bool ran = runDoor( pPhys, true, &sP ) && runDoor( pPhys, false, &oP ) && runDoor( wwlp::Params(), true, &sG )
+				&& runDoor( wwlp::Params(), false, &oG );
+			const std::vector<float> baseP = bake( pPhys ), baseG = bake( wwlp::Params() ), truth = layout( sP.grid, sP.grid2 );
+			std::vector<float> live = baseP, stale = baseG, rebased = baseG;
+			wwDoorLiveDelta( live, nVox, sP, oP );
+			wwDoorLiveDelta( stale, nVox, sG, oG );
+			wwDoorLiveDelta( rebased, nVox, sP, oP );
+			const double moved = relDiff( sP.grid, oP.grid ), dLive = relDiff( live, truth );
+			gate( QStringLiteral( "D3 rows" ), ran && dLive <= 1e-6 && moved > 1e-3 && !truth.empty(),
+				QStringLiteral( "a live door after a row set (new bake + shut - open under the new rows) vs the shut relight: %1 "
+					"(gate 1e-6); the door moves the grid %2" ).arg( dLive, 0, 'g', 3 ).arg( moved, 0, 'g', 3 ) );
+			gate( QStringLiteral( "D3 red doorrows" ), relDiff( stale, truth ) <= 1e-6,
+				QStringLiteral( "the door kept its setup rows: %1" ).arg( relDiff( stale, truth ), 0, 'g', 3 ), true );
+			gate( QStringLiteral( "D3 red doorbase" ), relDiff( rebased, truth ) <= 1e-6,
+				QStringLiteral( "new rows on the old bake: %1" ).arg( relDiff( rebased, truth ), 0, 'g', 3 ), true );
+			putF32( QDir( tw ).filePath( QStringLiteral( "b1_lp4_doorphys.f32" ) ), sP.B1 );
+			putF32( QDir( tw ).filePath( QStringLiteral( "b1_lp4_doorgame.f32" ) ), sG.B1 );
+			stateJs( QStringLiteral( "doorphys" ), baked, { 1, 0, 0 }, pPhys, sP.passes );
+			stateJs( QStringLiteral( "doorgame" ), baked, { 1, 0, 0 }, wwlp::Params(), sG.passes );
+		}
+		writeFile( QDir( tw ).filePath( QStringLiteral( "lp4.json" ) ), QStringLiteral( "{\n\"states\": {%1}\n}\n" )
+			.arg( lp4.join( QStringLiteral( ",\n" ) ) ).toUtf8(), &err );
 	}
 	// ---- the shared record
 	{

@@ -501,7 +501,7 @@ void wwCellGiRgbaEdited( const void * nif )
 
 int wwCellGiVersion( const void * nif )
 {
-	return st().giVersion.value( nif );
+	return st().giVersion.value( nif, 0 );
 }
 
 bool wwCellGiOn()
