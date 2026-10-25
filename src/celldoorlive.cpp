@@ -2,7 +2,7 @@
 #include "wwswitch.h"	// lane LIVESET1: the request follows a live set
 
 #include "gl/celllights.h"
-#include "gl/celllooks.h"	// lane GPURELIGHT1: Probe sharing
+#include "gl/celllooks.h"	// lane GPURELIGHT1: Probe sharing; lane LIGHTPHYS2: the bake's light curve, taken at setup
 #include "gl/glcontroller.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -80,6 +80,7 @@ struct Kept
 	bool haveOpen = false;
 	bool share = false;	// lane GPURELIGHT1: Probe sharing as the base was relit (the runs match the base)
 	int sharePasses = 1;	// lane GIPROBE2: Wide probe sharing's steps, as the base was relit
+	wwlp::Params lightPhys;	// lane LIGHTPHYS2: the curve the published bake was lit with (a later row set waits for the next setup)
 	int slot = -1;
 	float floorP[3] = { 0, 0, 0 };
 	bool haveFloor = false;
@@ -404,8 +405,10 @@ bool gpuReady( Kept & k, QString * why )
 	return k.gpuOk;
 }
 
-bool runState( Kept & k, const ProbeRelightState & st, ProbeRelightOut * out, QString * why )
+bool runState( Kept & k, const ProbeRelightState & st0, ProbeRelightOut * out, QString * why )
 {
+	ProbeRelightState st = st0;
+	st.lightPhys = k.lightPhys;
 	if ( gpuReady( k, why ) )
 		return k.gpu->run( st, out, why );
 	return probeRelightCpu( *k.ops, st, out, why );	// no GL 4.3: the CPU reference (slow; the census says so)
@@ -708,6 +711,7 @@ QString wwDoorLiveKeepGi( const void * nif, const ProbeRelightOps & ops, const W
 	k.gpu.reset();
 	k.gpuTried = k.gpuOk = false;
 	k.haveOpen = false;
+	k.lightPhys = wwLightPhysParams();
 	k.giKept = true;
 	k.giWhy.clear();
 	k.haveFloor = false;

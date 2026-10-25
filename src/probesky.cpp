@@ -5,7 +5,7 @@
 
 #include "esmweather.h"
 #include "gl/celllights.h"
-#include "gl/celllooks.h"	// lane GPURELIGHT1: Probe sharing
+#include "gl/celllooks.h"	// lane GPURELIGHT1: Probe sharing; lane LIGHTPHYS2: the light physics rows, compared live
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"
 #include "gl/atmosphere.h"	// SKY3: the physical sky's capture height
@@ -497,8 +497,24 @@ void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bak
 	k.fade = Fade();   // lane GIPROBE2: a new cell's grid is published whole
 }
 
+//! lane LIGHTPHYS2: a set of the light physics rows relights the kept bake at once (the lamp term only, no rebake)
+static bool lightPhysRelit( const void * nif )
+{
+	Kept & k = kept();
+	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
+		return false;
+	const wwlp::Params now = wwLightPhysParams();
+	if ( wwlp::sameBounce( now, k.spec.lightPhys ) )
+		return false;
+	k.spec.lightPhys = now;
+	relightKept( true );
+	return true;
+}
+
 void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 {
+	if ( lightPhysRelit( nif ) )
+		return;
 	Kept & k = kept();
 	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
 		return;

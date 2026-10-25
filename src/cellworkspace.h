@@ -233,6 +233,8 @@ private:
 	QActionGroup * cellShadowBudgetGroup = nullptr;
 	QMenu * cellLightCurve = nullptr;	// lane LIGHTPHYS1: Off | 0.75 | 1.25 | 1.5 | 2
 	QActionGroup * cellLightCurveGroup = nullptr;
+	QMenu * cellLightCalib = nullptr;	// lane LIGHTPHYS3: 0.5 | 0.75 | 1 | 1.5 | 2
+	QActionGroup * cellLightCalibGroup = nullptr;
 	QList<QAction *> lookActions;	// lane GAPLOOK1: one tick a WwLook (gl/celllooks.h)
 	QAction * cellSsr = nullptr;
 	QAction * cellSsrExt = nullptr;

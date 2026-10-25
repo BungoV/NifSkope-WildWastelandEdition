@@ -41,6 +41,7 @@
 
 #include "probebvh.h"
 #include "probeplace.h"
+#include "gl/lightphys.h"
 
 struct WwCellLight;
 
@@ -194,6 +195,7 @@ std::vector<float> probeRelightShut( const ProbeRelightState & st, size_t nDoors
 	bool wantE = false;                     //!< lane FARVIEW1: fill ProbeRelightOut::Es
 	bool share = false;                     //!< lane GPURELIGHT1 (10-23): Probe sharing after the last gather (needs ops.shareStart)
 	int sharePasses = 1;                    //!< lane GIPROBE2: Wide probe sharing, the share step this many times (nu kept)
+	wwlp::Params lightPhys;                 //!< lane LIGHTPHYS2: the falloff and intensity curve (default: the game's)
 };
 
 struct ProbeRelightOut

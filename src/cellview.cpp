@@ -6540,6 +6540,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			if ( wwEnvIsSet( "WW_CELL_GI_BRICK_EDGE" ) )
 				gs.brickEdge = wwEnvStr( "WW_CELL_GI_BRICK_EDGE" ).toFloat();
 			gs.passes = wwEnvInt( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
+			gs.lightPhys = wwLightPhysParams();   // lane LIGHTPHYS2: the bounce takes the surfaces' falloff and intensity curve
 			gs.rooms.red = QString::fromLatin1( wwEnv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
 			gs.space = volGiOn ? volGi : nullptr;   // lane VOLFIT1: WW_CELL_VOLUMES_GI=1, the Space rooms are the GI's rooms
 			// lane GPURELIGHT1 (10-23): Probe sharing (Show menu); a later tick relights through probesky.cpp
@@ -6810,7 +6811,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						wwCellFarPublish( nif, fr );
 					}
 				}
-				// a later change of weather (sky-lit cells) or of Probe sharing (every cell, lane GPURELIGHT1) relights it; lane LIGHTS5: so does the emittance row (gs.emitBaked)
+				// a later change of weather (sky-lit cells) or of Probe sharing (every cell, lane GPURELIGHT1) relights it; lane LIGHTS5: so does the emittance row (gs.emitBaked); lane LIGHTPHYS2: and the light rows
 				probeSkyKeep( nif, probeSoup, giBakeDir, gs, !spec.interior || gs.interiorSky );
 				PassTime::memLog( "GI relit" );	// lane PERF1
 				WwCellProbeView pv;	// lane PROBEVIEW1: the surfel and probe previews

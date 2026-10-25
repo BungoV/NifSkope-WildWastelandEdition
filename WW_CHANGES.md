@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIGHTPHYS2 + LIGHTPHYS3 (2026-10-25, branch lightphys2-20261025): light rows reach the bounce light; calibration row
+
+- **Bounce light follows the light rows, live:** Physical light falloff and Light intensity curve now also shape the
+  probe GI bounce. A row set relights the kept bake at once (lamp term only, no re-trace, no reopen). One shared curve
+  (src/gl/lightphys.h keepsGame / lightTerm / sameBounce) feeds probegi, the CPU relight and the GPU direct kernel.
+  Rows off = the old code in every path (byte-identical dumps vs LIGHTPHYS1).
+- **Advanced light calibration** (Show submenu, 0.5 / 0.75 / 1 / 1.5 / 2, default 1; key `WW/CellLightCalibration`,
+  pin `WW_CELL_LIGHT_ADV_CALIB`, red `WW_CELL_LIGHT_ADV_CALIB_RED=ignore`): FO4CS fCalibrationScale (0.05-20), scales
+  the Advanced model on surfaces and in the bounce, live.
+- Interior cells are now kept for the live relight too. Known limits: far lights keep the game curve in the bounce;
+  door-live runs take the rows at their setup.
+- Gates: `-no-gui gpurelight` new states physical/advanced/advcalib2/curve15/physcurve (P 0, G ~1e-7, reds lampcurve
+  fail, K calibration 2 = 2x); tests/spells/lightphys2_bounce.py independent twin; tests/lightphys/lightterm_test.cpp.
+
 ## Lane PRTP6 (2026-10-25, branch prtp6-20261025): no PRTP on open water
 
 - **Bake plan skips open water:** a 3x3 unit is skipped when the plugin says every cell of it is water with no LAND
@@ -47,7 +61,6 @@
   read again when they change. Pin `WW_CELL_FOGSCALE` (`off` = ignore the files, a number = that scale on every
   light), red `WW_CELL_FOGSCALE_RED=surfaces`. Census "cell fogscale:". Spec: FO4-Extension-Formats branch
   fogscale1-20261025.
-
 ## Lane LIGHTPHYS1 (2026-10-25, branch lightphys1-20261025): light physics rows (all off by default)
 
 - **Rows (Show menu, all off; off = drawn exactly as before; all live, no reopen):**
