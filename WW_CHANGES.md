@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FAR4 (2026-10-23, branch far4-20261023): moving sun shadows keep their far casters (fix, on)
+
+- **TERRBLACK1, the cause found in the code:** the shadow cache's scroll (SHADOWCACHE1) copies the last frame's
+  sun-shadow map onto the moved window. That copy only holds the casters that fitted the last frame's light-depth
+  range (nothing clamps depth), so when the camera moves with the light or turns, the deeper slab's casters are
+  never drawn in the copied part and the ground there loses its shadows along a straight line.
+- **Fix:** a cascade whose light-depth range grew is drawn whole that frame instead of scrolled. The census line
+  (WW_SHADOWCACHE_CENSUS=1) counts these as "grew N". Red `WW_SHADOWCACHE_RED=scrollgrow` keeps the old scroll.
+  Cost: while flying, cascades 1-2 redraw as with the cache's scroll off; a still camera is unchanged.
+
 ## Lane FAR3 (2026-10-23, branch far3-20261023): far object rings fit their budget (speed/memory, on)
 
 - **FARGAP1, the measured cause:** the far object rings cost about 43 KB of document blocks per SHAPE (one shape per

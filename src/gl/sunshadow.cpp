@@ -425,7 +425,7 @@ struct Layer
 struct State
 {
 	bool init = false, on = true, census = false;
-	int red = 0;		// 1 full, 2 stale
+	int red = 0;		// 1 full, 2 stale, 3 scrollgrow
 	int mask = 6;		// the cascades that scroll and hold the sun
 	double holdDeg = 0.05, holdCos = 1.0;
 	qint64 dynFrames = 120;
@@ -460,7 +460,8 @@ State & st()
 		s.init = true;
 		s.on = qEnvironmentVariable( "WW_SHADOWCACHE" ).trimmed() != QLatin1StringView( "0" );
 		const QString r = qEnvironmentVariable( "WW_SHADOWCACHE_RED" ).trimmed().toLower();
-		s.red = ( r == QLatin1StringView( "full" ) || r == QLatin1StringView( "1" ) ) ? 1 : r == QLatin1StringView( "stale" ) ? 2 : 0;
+		s.red = ( r == QLatin1StringView( "full" ) || r == QLatin1StringView( "1" ) ) ? 1 : r == QLatin1StringView( "stale" ) ? 2
+			: r == QLatin1StringView( "scrollgrow" ) ? 3 : 0;
 		bool ok = false;
 		const int m = qEnvironmentVariable( "WW_SHADOWCACHE_SCROLL" ).toInt( &ok );
 		if ( ok )
@@ -988,6 +989,7 @@ static void sunShadowPassImpl( Scene * scene )
 		stateSig = ht.h;
 	}
 	bool anyScroll = false;
+	int grew = 0;
 	for ( int i = 0; i < kCascades && cacheOn; i++ ) {
 		const Cascade & c = s.c[i];
 		const ShadowCache::Layer & L = cst.c[i];
@@ -1022,6 +1024,13 @@ static void sunShadowPassImpl( Scene * scene )
 		const double wzNew = c.far - kNear;
 		if ( wzNew <= 0.0 )
 			continue;
+		// lane FAR4 TERRBLACK1: the old layer holds only casters inside ITS light-depth range (no depth clamp), so a
+		// range that grew (camera moved along the light, or turned) would lose the new slab's casters: draw it whole
+		const double newNear = c.pb[2] + kNear;
+		if ( cst.red != 3 && ( newNear < L.nearZ || newNear + wzNew > L.nearZ + L.wz ) ) {
+			grew++;
+			continue;
+		}
 		mode[i] = ShadowCache::Scroll;
 		anyScroll = true;
 		srcOff[i][0] = dx;
@@ -1422,9 +1431,9 @@ static void sunShadowPassImpl( Scene * scene )
 	}
 	if ( cst.census ) {
 		static const char * const names[] = { "off", "skip", "hit", "full", "scroll" };
-		GpuDriven::censusLine( "shadowcache", QStringLiteral( "c0 %1 c1 %2 c2 %3 static %4 dynamic %5 jobs %6 strips %7,%8" )
+		GpuDriven::censusLine( "shadowcache", QStringLiteral( "c0 %1 c1 %2 c2 %3 static %4 dynamic %5 jobs %6 strips %7,%8 grew %9" )
 			.arg( names[mode[0]] ).arg( names[mode[1]] ).arg( names[mode[2]] ).arg( nStatic )
-			.arg( qint64( casters.size() ) - nStatic ).arg( qint64( jobs.size() ) ).arg( nStrip[1] ).arg( nStrip[2] ) );
+			.arg( qint64( casters.size() ) - nStatic ).arg( qint64( jobs.size() ) ).arg( nStrip[1] ).arg( nStrip[2] ).arg( grew ) );
 	}
 	if ( cst.on )
 		ShadowCache::sweep();
