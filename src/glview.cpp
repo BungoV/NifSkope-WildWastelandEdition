@@ -4100,6 +4100,7 @@ void GLView::paintGL()
 		wwSunShadowPass( scene );
 	}
 	wwCellFlickerFrame( scene );	// lane LIGHTFLICKER1: this frame's flicker, before any pass reads the lights
+	wwCellXemiLightsFrame( scene );	// lane LIGHTS4: placed lights recoloured by their XEMI source, before the lights are read
 	// lane SHADOW1: the cell lights' depth cubes (a no-op unless the document draws cell-lit)
 	PassTime::begin( PassTime::CellShadows );	// lane PERF1
 	wwCellShadowPass( scene );

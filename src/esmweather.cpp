@@ -640,6 +640,7 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 	out.nam0Tods = out.formVersion >= 111 ? 8 : 4;
 	QVector<QByteArray> dalcs;
 	QByteArray pnam, jnam, qnam, rnam, onam, imsp, wgdr;
+	quint32 gnam = 0;
 	quint32 present = 0;
 	for ( int i = 0; i < 32; i++ )
 		out.cloudSpeedX[i] = out.cloudSpeedY[i] = 127;
@@ -667,6 +668,8 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 				imsp = bytes();
 			else if ( f == "WGDR" )	// lane VOLFOG1
 				wgdr = bytes();
+			else if ( f == "GNAM" && f.size() >= 4 )	// lane LIGHTS4: the sun's lens flare
+				std::memcpy( &gnam, f.data(), 4 );
 			else if ( f == "PNAM" )
 				pnam = bytes();
 			else if ( f == "JNAM" )
@@ -849,6 +852,9 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 			out.godRayFound++;
 		}
 	}
+	out.sunLensForm = gnam ? esm->mapFormID( *r, gnam ) : 0;
+	if ( out.sunLensForm && !wwLensRead( *esm, out.sunLensForm, out.sunLens ) )
+		out.sunLens = WwLens();
 	if ( why )
 		why->clear();
 	return true;

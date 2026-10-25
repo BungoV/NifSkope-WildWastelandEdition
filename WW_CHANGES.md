@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIGHTS4 (2026-10-25, branch lights4-20261025): emittance rows live, placed lights recoloured, sun flare
+
+- **Live rows:** Placement emittance, Region emittance and Emittance on particles no longer reopen the cell. The
+  cell keeps every emittance placement in its own draw list and the draw reads the row each frame. Emittance in
+  bounce light still reopens (its colour is baked into the bounce data when the cell opens).
+- **Placed lights:** a placed light with emittance (XEMI) now takes that colour itself (the light's colour times the
+  emittance colour, linear), a light source or a region weather's colour at the current hour, following the same two
+  rows live. The cell notes say how many ("cell xemi lights:", "xemilights=").
+- **Sun lens flare:** with Lens flares on, the sun draws the flare its weather names (the weather's Sun Glare Lens
+  Flare); seen only where nothing stands in front of it, while it is above the horizon and the Sun row is on. The
+  echo adds "sun flare <name>".
+
 ## Lane HOLDFIX1 (2026-10-25, branch holdfix1-20261025): test-run fixes from the hold 4 triage
 
 - **Memory Den far plane held still:** a cell's far plane is rounded up to whole steps of 8192 units. Inside one launch the
@@ -100,7 +112,6 @@
   the depth-size query on the frame's stencil-sampled depth texture reads 0 bits, so occlusion never ran; the fog bloom
   attached that texture as a renderbuffer (GL error 1282). Offline proof through the driver:
   notes/gpufix1/gl_probe.txt (DEPTH24_STENCIL8 texture: depthBits 0; as renderbuffer err 1282, as texture err 0).
-
 ## Lane LIGHTS3 (2026-10-23, branch lights3-20261023): more emittance, lens flares (all off by default)
 
 - **Rows (Show menu, all off; off = drawn exactly as before):**

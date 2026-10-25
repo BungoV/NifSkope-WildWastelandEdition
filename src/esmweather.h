@@ -272,6 +272,9 @@ struct WwWeatherData
 
 	// lane PBRWX1: the sky, sun glare and cloud fields
 	quint8 sunGlare = 0;	// DATA byte 4 (/255 = the glare strength)
+	// lane LIGHTS4: GNAM, the Sun Glare Lens Flare (a LENS; wbDefinitionsFO4 WTHR), read with the weather
+	quint32 sunLensForm = 0;
+	WwLens sunLens;
 	// lane GRASSMB1: the wind, DATA bytes 0 (speed), 17 (direction), 18 (direction range), 19 (turbulence); /255 each
 	quint8 windSpeed = 0, windDir = 0, windDirRange = 0, windTurb = 0;
 	bool hasWind = false;

@@ -243,9 +243,9 @@ bool wwLookReopens( WwLook l )
 {
 	// BtoSway rewrites the .bto shapes' vertices while the far field is built
 	// ProbeClear moves probes at bake time: the cell's own bake runs again when it reopens
+	// lane LIGHTS4: the placement, region and particle emittance rows are read at draw time (live)
 	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::AnimObjects || l == WwLook::BtoSway
-		|| l == WwLook::PlacementEmittance || l == WwLook::RegionEmittance || l == WwLook::ParticleEmittance || l == WwLook::BounceEmittance
-		|| l == WwLook::ProbeClear;
+		|| l == WwLook::BounceEmittance || l == WwLook::ProbeClear;
 }
 
 bool wwLookHasRow( WwLook l )

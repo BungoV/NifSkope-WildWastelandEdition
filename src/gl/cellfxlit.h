@@ -96,7 +96,8 @@ bool wwCellFxRoomLit( Scene * scene, int block );
 void wwCellXemiBegin( const void * nif );
 void wwCellXemiShape( const void * nif, int block, quint32 rgb );
 void wwCellXemiForget( const void * nif, int block );
-//! The shape's colour in 0..1 (the red applied), or false (none).
+/*! The shape's colour in 0..1 (the red applied), or false (none, or its row off). Lane LIGHTS4: the rows are read
+ *  here (code bit 0x04000000 = a particle system, which also needs the particle row), so they update live. */
 bool wwCellXemiFor( const void * nif, int block, float rgb[3] );
 /*! Lane LIGHTS3 (XEMI-REGN): the code a REGN-sourced placement stores (0x02000000 | slot): its colour is read at
  *  draw time from the region's weather at the clock (wwLookdevRegionEmit), so it follows the hour. */

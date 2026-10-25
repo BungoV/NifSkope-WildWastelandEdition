@@ -1205,6 +1205,14 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			}
 		}
 		l.ref = r.formID;
+		/* lane LIGHTS4 (XEMI-LIGHT): the game's cell update multiplies a placed light's colour by its XEMI source's colour
+		 * (a LIGH's bytes, a region's weather at the hour; notes/lights4); celllights.cpp applies it each frame */
+		if ( r.emittance ) {
+			const EsmLight & xl = world.light( r.emittance );
+			const ESMFile::ESMRecord * xr = xl.exists || !world.plugin() ? nullptr : world.plugin()->findRecord( r.emittance );
+			l.xemi = xl.exists ? 0x01000000U | ( quint32( xl.color[0] ) << 16 ) | ( quint32( xl.color[1] ) << 8 ) | quint32( xl.color[2] )
+				: xr && *xr == "REGN" ? wwCellXemiRegionCode( r.emittance ) : 0U;
+		}
 		// lane LIGHTFLICKER1: the game tests 0x8 first, then 0x180; the offset is in the light's local frame
 		l.flicker = ( b.flags & 0x8 ) ? 1 : ( b.flags & 0x180 ) ? 2 : 0;
 		if ( l.flicker ) {
@@ -1427,6 +1435,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.noRim; } ) )
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )
 		+ QStringLiteral( " parentstate=%1" ).arg( parentMoved )	// lane GAPFIX1: lights an enable parent turned on/off
+		+ QStringLiteral( " xemilights=%1" )	// lane LIGHTS4: lights whose placement names an emittance source
+			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.xemi != 0; } ) )
 		+ QStringLiteral( " ambientonly=%1" ).arg( ambientOnly )	// lane AMBO1: skipped, no direct light in game
 		+ QStringLiteral( " ambientvolumes=%1" ).arg( L.ambientLights.size() )	// lane AMBO2: they scale the ambient
 		+ QStringLiteral( " shapes=hemisphere %1 box %2 (box link unresolved %3) ambientboxes=%4" ).arg( hemi ).arg( box )
@@ -3031,6 +3041,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * shape's emissive colour is replaced, an UNLIT effect is tinted (lit effect variants never read it). Read at build. */
 	const bool xemiOn = wwLookOn( WwLook::PlacementEmittance ) && spec.overlay == CellOverlay::None;
 	const bool xemiRegnOn = wwLookOn( WwLook::RegionEmittance ) && spec.overlay == CellOverlay::None;   // lane LIGHTS3
+	const bool xemiBuild = spec.overlay == CellOverlay::None;   // lane LIGHTS4: registered always; the rows are read at draw time
 	int xemiShapesLit = 0, xemiShapesFx = 0, xemiNoFlag = 0;
 	if ( !chunk ) {
 		wwCellFxLitBegin( nif );
@@ -4643,8 +4654,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			if ( isActor )
 				bbOwn += QLatin1String( "|ACTOR" );   // lane PLACED1: own buckets; no decal lands on an actor
 			quint32 xemiHere = 0;   // lane LIGHTS2 (XEMI1): a bucket per colour
-			const bool xemiRowOn = ( p.xemi & 0x02000000U ) ? xemiRegnOn : xemiOn;   // lane LIGHTS3: a region has its own row
-			if ( xemiRowOn && p.xemi && !isActor && !( s.nearFacts.effectShader && s.effectLit ) ) {
+			if ( xemiBuild && p.xemi && !isActor && !( s.nearFacts.effectShader && s.effectLit ) ) {
 				if ( s.extEmit ) {
 					xemiHere = p.xemi;
 					bbOwn += QStringLiteral( "|XE|%1" ).arg( p.xemi, 8, 16, QLatin1Char( '0' ) );
@@ -6260,8 +6270,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				}
 				/* lane LIGHTS3 (XEMI-PARTICLES): an UNLIT system with External Emittance (SF1 bit 29) takes the placement's
 				 * emittance as an unlit effect card does; the game's lit effect variants never read it. */
-				const bool pfxXemiRow = ( p.xemi & 0x02000000U ) ? xemiRegnOn : xemiOn;
-				if ( n > 0 && p.xemi && pfxXemiRow && wwLookOn( WwLook::ParticleEmittance ) ) {
+				if ( n > 0 && p.xemi && xemiBuild ) {	// lane LIGHTS4: the particle row is read at draw time (bit 0x04000000)
 					NifModel & sm = *it.value();
 					for ( const CellPfxSystem & f : copied ) {
 						const QModelIndex iSh = sm.getBlockIndex( f.srcShader );
@@ -6280,7 +6289,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 							pfxXemiLit++;
 							continue;
 						}
-						wwCellXemiShape( nif, f.block, p.xemi );
+						wwCellXemiShape( nif, f.block, p.xemi | 0x04000000U );
 						pfxXemiSystems++;
 					}
 				}

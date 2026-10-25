@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "gl/lookdevstage.h"	// lane LIGHTS3: a region's emittance at the clock
+#include "gl/celllooks.h"	// lane LIGHTS4: the emittance rows, read at draw time
 
 #include <QFile>
 #include <QHash>
@@ -341,5 +342,10 @@ bool wwCellXemiFor( const void * nif, int block, float rgb[3] )
 	const auto it = d->constFind( block );
 	if ( it == d->constEnd() )
 		return false;
-	return wwCellXemiCode( it.value(), rgb );
+	// lane LIGHTS4: every shape registers at build; its row is read here, so a toggle needs no reopen
+	const quint32 code = it.value();
+	if ( !wwLookOn( ( code & 0x02000000U ) ? WwLook::RegionEmittance : WwLook::PlacementEmittance )
+		|| ( ( code & 0x04000000U ) && !wwLookOn( WwLook::ParticleEmittance ) ) )
+		return false;
+	return wwCellXemiCode( code, rgb );
 }
