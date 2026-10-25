@@ -24,8 +24,9 @@ bool wwCellFogBloomPinned();
 //! True while the frame's blended linear draws should set stencil bit 0x04 (on and not red flat).
 bool wwCellFogBloomMarks();
 /*! In wwCellHdrEnd, before the tone map: the intensity target from the linear frame's fbo, its multisampled
- *  depth / stencil renderbuffer ds (the same format both sides). True when the tone map should read it. */
-bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int w, int h, int samples, unsigned dsFormat );
+ *  depth / stencil ds (the same format both sides; a texture when dsTexture, else a renderbuffer). True when the
+ *  tone map should read it. */
+bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int w, int h, int samples, unsigned dsFormat, bool dsTexture );
 //! The tone map's uniforms (cell_hdr.prog current), the target on `unit`; cellFogBloomOn false when the run did not.
 void wwCellFogBloomFinal( Renderer * r, int unit, bool ran );
 void wwCellFogBloomDone( Renderer * r, int unit );
