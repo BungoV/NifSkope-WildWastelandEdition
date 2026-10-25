@@ -1,0 +1,4 @@
+# lane TAAINPUTS1: the debug view of the velocity and mask textures (WW_TAAINPUTS_VIEW; src/gl/taainputs.h).
+# Never picked for a shape; taainputs.cpp selects it by name.
+
+shaders cell_ao.vert taa_inputs_view.frag

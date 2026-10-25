@@ -1,0 +1,4 @@
+# lane TAAINPUTS1: the reactive / composition mask (src/gl/taainputs.h): the see-through pass's shapes and
+# particles redrawn into the mask's R and G by MAX. Never picked for a shape; taainputs.cpp selects it by name.
+
+shaders taa_reactive.vert taa_reactive.frag
