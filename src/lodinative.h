@@ -10,6 +10,9 @@ BSD License - see nifskope.h
 #include <QModelIndex>
 #include <QSet>
 #include <QString>
+#include <QStringList>
+
+class QTextStream;
 
 class NifModel;
 
@@ -80,6 +83,9 @@ struct LodiSceneSpec
 	/*! lane FARLOD2: the shapes keep their vertex and triangle arrays BESIDE the document (src/cellmesh.h)
 	 *  instead of as rows -- the far rings' representation. Ignored under WW_CELL_SPEED_RED=slow. */
 	bool sideMesh = false;
+	/*! lane FAR3 (FARGAP1): one bucket per MATERIAL instead of per (base, material). Each shape costs ~43 KB of
+	 *  document blocks, most of a far ring's memory; the far rings set it (red WW_CELL_FARLOD_RED=perbase). */
+	bool mergeBases = false;
 };
 
 //! lane FARLOD1: what one append put in, counted at the push.
@@ -88,7 +94,14 @@ struct LodiAppendCounts
 	qint64 placed = 0, holeSkipped = 0, treesDropped = 0, refsSkipped = 0;
 	qint64 tris = 0, swayVerts = 0;
 	bool overBudget = false;   //!< spec.maxTris refused the write
+	//! lane FAR3: what the ring keeps after the build (the far-field budget charges these, not a guess a triangle)
+	qint64 shapes = 0, verts = 0, keptBytes = 0;
 };
+
+/*! lane FAR3: `NifSkope -no-gui farobjcensus <ws.lodi> --ring x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot ...` builds the far
+ *  object rings into one headless document, the cell view's way, and prints per ring what it kept and what the
+ *  process paid (private bytes, peak). The offline proof of the far field's memory a triangle. */
+int lodiFarObjCensusCli( const QStringList & args, QTextStream & out );
 
 //! `WW_LODI_REGION="x0,y0,x1,y1"` (cells), `WW_LODI_LEVEL=n`, `WW_LODI_BOXES=1`.
 //! False when none of them is set; each is read on its own.

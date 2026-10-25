@@ -43,6 +43,7 @@ See the LICENSE.md file for the full license text.
 #include "nativeemit.h"
 #include "nearlib.h"
 #include "lodifile.h"
+#include "lodinative.h"	// lane FAR3: farobjcensus
 #include "lodofile.h"
 #include "lodpbake.h"
 #include "lodpplace.h"
@@ -7994,6 +7995,14 @@ int nifskopeCliMain( const QStringList & args )
 		return rc;
 	}
 	// lane FARLIGHTMAP1: `farlightmap` runs the cell view's probe GI bake over a worldspace, writing the far-light set
+	// lane FAR3: `farobjcensus` builds the far object rings headless and prints what each kept and cost
+	if ( cmd == QLatin1String( "farobjcensus" ) ) {
+		if ( !initModelLayer() ) { err().flush(); return 1; }
+		const int rc = lodiFarObjCensusCli( a, out() );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	if ( cmd == QLatin1String( "farlightmap" ) ) {
 		const int rc = farLightMapCli( a );
 		out().flush();
