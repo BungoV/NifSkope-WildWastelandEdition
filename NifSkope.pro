@@ -237,6 +237,7 @@ HEADERS += \
 	src/gl/cellcull.h \
 	src/gl/cellumbra.h \
 	src/gl/cellwater.h \
+	src/gl/cellwatergi.h \
 	src/gl/cellgrass.h \
 	src/gl/cellpost.h \
 	src/gl/cellhdr.h \

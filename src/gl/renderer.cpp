@@ -543,6 +543,9 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	// other cell-lit draw reads this frame's obscurance (celllights.h)
 	if ( mesh && wwAoScene )
 		wwCellAoDraw( wwAoScene, program && ( wwIsCellProgramName( program->name ) ) );
+	// lane PRTP6: a water shape drawn through a cell program reads no probe GI (water is dynamic)
+	if ( mesh && wwAoScene )
+		wwCellGiWaterDraw( wwAoScene, mesh->id(), program && wwIsCellProgramName( program->name ) );
 	// lane SSR1: the reflections' scene pass, and the reflection a flagged opaque draw reads (cellssr.h)
 	// lane PERF3: not in the AO opaque pass (the main pass sets them again per draw)
 	const bool aoLean = wwCellAoInPass() && wwCellAoLean();

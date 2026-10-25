@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "gl/lookdevstage.h"	// lane SUNCELL1
 #include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
+#include "gl/cellwatergi.h"	// lane PRTP6: water reads no probe GI
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
@@ -39,6 +40,13 @@ BSD License - see nifskope.h
 #include "cellunits.h"
 #include <cstring>
 #include <vector>
+
+// lane PRTP6 (cellwatergi.h): the GI switches a water draw zeroed, per program
+static WwWaterGiGuard & waterGi()
+{
+	static WwWaterGiGuard g;
+	return g;
+}
 
 namespace
 {
@@ -1252,6 +1260,7 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 		}
 	}
+	waterGi().passSet( prog );	// lane PRTP6: the values just set are the ones a water draw gives back
 	// lane IMGS1: the imagespace, once this document has a measure; its LUT bound like the grid above
 	const float adapted = s.adapted.value( scene->nifModel, -1.0f );
 	int isStamp = 0;	// lane SUNCELL1: an exterior's imagespace is the weather's (isLighting)
@@ -3720,6 +3729,45 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		prog->uni4f_l( prog->uniLocation( "cellAoRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}
+}
+
+void wwCellGiWaterDraw( Scene * scene, int block, bool cellProgram )
+{
+	if ( !scene || !scene->renderer )
+		return;
+	NifSkopeOpenGLContext::Program * prog = scene->renderer->getCurrentProgram();
+	if ( !prog || prog->uniLocation( "cellGiOn" ) < 0 )
+		return;
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_WATER_PRTP_RED" ).trimmed() == "1" );	// red: water reads the GI as before
+	const bool water = cellProgram && !red && wwCellWaterIsShape( scene->nifModel, block );
+	static const char * const names[WwWaterGiGuard::kN] = { "cellGiOn", "cellGiSky", "cellSpecOcc", "cellGiFineOn" };
+	auto fn = scene->renderer->fn;
+	switch ( waterGi().draw( prog, water ) ) {
+	case WwWaterGiGuard::Zero: {
+		int live[WwWaterGiGuard::kN] = {};
+		for ( int k = 0; k < WwWaterGiGuard::kN; k++ ) {
+			const int l = prog->uniLocation( names[k] );
+			if ( l >= 0 )
+				fn->glGetUniformiv( prog->id, l, &live[k] );
+		}
+		waterGi().save( prog, live );
+		for ( int k = 0; k < WwWaterGiGuard::kN; k++ )
+			if ( prog->uniLocation( names[k] ) >= 0 )
+				prog->uni1i( names[k], 0 );
+		break;
+	}
+	case WwWaterGiGuard::Restore: {
+		const int * v = waterGi().restore( prog );
+		for ( int k = 0; k < WwWaterGiGuard::kN; k++ )
+			if ( prog->uniLocation( names[k] ) >= 0 )
+				prog->uni1i( names[k], v[k] );
+		break;
+	}
+	case WwWaterGiGuard::None:
+		break;
+	}
+	if ( water && prog->uniLocation( "cellGiHalfOn" ) >= 0 )
+		prog->uni1b( "cellGiHalfOn", false );	// the half-res GI is set per draw (wwCellAoDraw), so no restore
 }
 
 bool wwCellAoInPass()

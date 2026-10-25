@@ -7,9 +7,13 @@ This cuts that pass into MAP TILES: a run of whole units in plan order, sized by
 with its own cell list, census file and check. tests/spells/cell_census_tiles.sh runs them one at a time.
 
   plan   <plugin> <root> [--world W] [--block 5] [--margin 0] [--refs-max 6500] [--target-s 1800]
-         [--rss-max 4000] [--steps census|census,bake] [--model high|low]
+         [--rss-max 4000] [--steps census|census,bake] [--model high|low] [--no-skip-water]
          cuts the game into map tiles: <root>/tiles.tsv (one line a tile, with its projected seconds and
-         memory), <root>/tiles/<id>/cells.keys, <root>/all.keys, <root>/knobs.txt; prints the projection
+         memory), <root>/tiles/<id>/cells.keys, <root>/all.keys, <root>/knobs.txt; prints the projection.
+         With a bake step, OPEN WATER is skipped (lane PRTP6, bungo 10-25: water is dynamic, so the open sea
+         gets no PRTP): an exterior unit none of whose cells has LAND above its water height and whose own
+         block places nothing, measured from the plugin (cell_census_check.py Model.open_water). Those units
+         get no tile; <root>/skipped.tsv names each with its reason. --no-skip-water bakes every unit (the red).
   pick   <plugin> <root> [same options]
          a PROOF plan of three small tiles (a few small interiors; one exterior unit with something placed;
          one exterior unit with nothing placed) for the next hold
@@ -55,7 +59,8 @@ def cost(model, kind, refs, steps):
     bake = "bake" in steps
     if model == "high":
         if refs == 0:
-            return 0.003
+            # a bake still builds the far soup and bakes the sea: 11.6 s measured (BAKEALL1, tile -80,-80)
+            return 11.6 if bake and kind != "I" else 0.003
         if kind == "I":
             s = 3.5 + 0.0190 * refs
         elif kind == "C":
@@ -79,6 +84,8 @@ class Opts:
         self.world, self.block, self.margin, self.refs_max = "Commonwealth", 5, 0, 6500
         self.target_s, self.rss_max, self.steps, self.model = 1800.0, 4000.0, "census", "high"
         self.exe, self.tries, self.partial = "", 3, False
+        self.skip_water = None   # None = on when the steps bake; --no-skip-water = off (the red)
+        self.skip_red = ""       # --skip-red land: also skip the first unit that is NOT open water (checker red)
         self.rest = []
         i = 0
         while i < len(argv):
@@ -95,6 +102,9 @@ class Opts:
             elif a == "--exe": self.exe = nx; i += 1
             elif a == "--tries": self.tries = int(nx); i += 1
             elif a == "--partial": self.partial = True
+            elif a == "--no-skip-water": self.skip_water = False
+            elif a == "--skip-water": self.skip_water = True
+            elif a == "--skip-red": self.skip_red = nx; i += 1
             else: self.rest.append(a)
             i += 1
 
@@ -103,9 +113,12 @@ class Opts:
             self._exe_sha = sha1(self.exe) if self.exe and os.path.isfile(self.exe) else "-"
         return self._exe_sha
 
+    def skipping(self):
+        return self.skip_water if self.skip_water is not None else "bake" in self.steps
+
     def knobs(self):
-        return "block=%d margin=%d refs_max=%d steps=%s world=%s" % (self.block, self.margin, self.refs_max,
-                                                                     self.steps, self.world)
+        return "block=%d margin=%d refs_max=%d steps=%s world=%s skip_water=%d" % (
+            self.block, self.margin, self.refs_max, self.steps, self.world, 1 if self.skipping() else 0)
 
 
 def units(m, o):
@@ -180,9 +193,54 @@ def write_plan(root, o, tiles, m):
     return hi_tot, lo_tot
 
 
+def open_water_units(m, o, us):
+    """[(unit, keys, reason)] of the exterior units the plan skips as open water, in plan order."""
+    if not o.skipping():
+        return []
+    out, red = [], o.skip_red == "land"
+    for u, kind, keys, _ in us:
+        if kind != "E":
+            continue
+        ok, why = m.open_water(keys, u.rsplit(":", 1)[1], o.block)
+        if ok:
+            out.append((u, keys, why))
+        elif red and keys:
+            out.append((u, keys, "RED (not open water: %s)" % why))
+            red = False
+    return out
+
+
+def write_skipped(root, skipped):
+    with open(os.path.join(root, "skipped.tsv"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("# units the plan gives no tile (lane PRTP6): open water gets no PRTP; measured from the plugin\n")
+        f.write("unit\tcells\treason\n")
+        for u, keys, why in skipped:
+            f.write("%s\t%d\t%s\n" % (u, len(keys), why))
+
+
+def read_skipped(root):
+    out = []
+    path = os.path.join(root, "skipped.tsv")
+    if os.path.isfile(path):
+        for line in open(path, encoding="utf-8"):
+            p = line.rstrip("\r\n").split("\t")
+            if len(p) >= 3 and p[0][:2] == "T:":
+                out.append((p[0], int(p[1]), p[2]))
+    return out
+
+
 def do_plan(plugin, root, o, pick=False):
     m = cc.Model(plugin, o.world)
     us = units(m, o)
+    skipped = open_water_units(m, o, us)
+    gone = set(u for u, _, _ in skipped)
+    all_s = {"high": 0.0, "low": 0.0}
+    for u in us:
+        for model in all_s:
+            all_s[model] += sum(cost(model, k, r, o.steps) for k, r in u[3]) if u[0] in gone else 0.0
+    us = [u for u in us if u[0] not in gone]
+    os.makedirs(root, exist_ok=True)
+    write_skipped(root, skipped)
     tiles = []
     if pick:
         ints = [u for u in us if u[1] == "I" and 40 <= u[3][0][1] <= 300][:3]
@@ -204,12 +262,23 @@ def do_plan(plugin, root, o, pick=False):
                 n += 1
                 tiles.append(("%s%03d" % (kind, n), kind, cur))
     hi, lo = write_plan(root, o, tiles, m)
+    # lane PRTP6: only a whole-game plan asks the merge to prove every unit walked or skipped (a pick is a sample)
+    whole = os.path.join(root, "plan.whole")
+    if pick:
+        if os.path.exists(whole):
+            os.remove(whole)
+    else:
+        with open(whole, "w", encoding="utf-8", newline="\n") as f:
+            f.write("every unit of %s is in tiles.tsv or skipped.tsv\n" % o.world)
     nint = sum(1 for t in tiles if t[1] == "I")
     print("plan: %d map tiles (%d of interiors, %d of exterior units), %d units, %d cells; %s"
           % (len(tiles), nint, len(tiles) - nint, sum(len(t[2]) for t in tiles),
              sum(len(u[2]) for t in tiles for u in t[2]), o.knobs()))
     print("projected, one window at a time: high %.1f h (%.2f days), low %.1f h (%.2f days)"
           % (hi / 3600, hi / 86400, lo / 3600, lo / 86400))
+    print("open water, skipped: %d units, %d cells (skipped.tsv; their loads would have cost %.1f h high, %.1f h low)%s"
+          % (len(skipped), sum(len(k) for _, k, _ in skipped), all_s["high"] / 3600, all_s["low"] / 3600,
+             "" if o.skipping() else "; skipping is OFF (--no-skip-water or no bake step)"))
     return 0
 
 
@@ -288,6 +357,8 @@ def do_status(root, o):
         print("%s\t%s\t%s cells\tproj %s s (low %s)\t%s" % (t["id"], st, t["cells"], t["proj_s_high"], t["proj_s_low"], why))
     print("tiles: %s; left: %.1f h high, %.1f h low" % (", ".join("%s %d" % kv for kv in sorted(tally.items())),
                                                        left_hi / 3600, left_lo / 3600))
+    sk = read_skipped(root)
+    print("open water, skipped: %d units, %d cells (no tile, by plan)" % (len(sk), sum(n for _, n, _ in sk)))
     return 0
 
 

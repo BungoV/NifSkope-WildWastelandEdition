@@ -53,7 +53,11 @@ case "$mode" in
 		py merge "$root" "$out" "$@" || exit 2
 		knobs="$(cat "$root/knobs.txt")"
 		block="$(echo "$knobs" | sed -n 's/.*block=\([0-9]*\).*/\1/p')"; margin="$(echo "$knobs" | sed -n 's/.*margin=\([0-9]*\).*/\1/p')"
-		python -I "$CHECK" rows "$ESM" "$out" "$out.keys" --world "$WORLD" --block "$block" --margin "$margin" --slices 1 > "$root/whole_check.out" 2>&1
+		# open water the plan skipped (skipped.tsv) is no gap: the checker re-measures each skip and, unless
+		# --partial (or a pick, which writes no plan.whole), proves every unit is walked or skipped
+		complete=0; [ -f "$root/plan.whole" ] && complete=1; case " $* " in *" --partial "*) complete=0 ;; esac
+		python -I "$CHECK" rows "$ESM" "$out" "$out.keys" --world "$WORLD" --block "$block" --margin "$margin" --slices 1 \
+			--skipped "$root/skipped.tsv" --complete "$complete" > "$root/whole_check.out" 2>&1
 		grep -v '^PASS' "$root/whole_check.out" | head -20
 		tail -1 "$root/whole_check.out"
 		tail -1 "$root/whole_check.out" | grep -q 'PASS$'; exit $? ;;

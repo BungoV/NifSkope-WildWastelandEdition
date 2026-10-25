@@ -3140,6 +3140,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * normal map. It is no surface: it leaves the bake's soup (every albedo way, the cube included) and
 	 * is counted. WW_CELL_BAKE_REFRACT_RED=keep keeps it as a solid surface (the gate's red only). */
 	const bool refractKeepRed = wwEnvStr( "WW_CELL_BAKE_REFRACT_RED" ) == QLatin1String( "keep" );
+	// lane PRTP6: a water-shader shape is dynamic, so it is no surfel surface; WW_CELL_BAKE_WATER_SOUP_RED=1 keeps it (red)
+	const bool waterSoupRed = wwEnvStr( "WW_CELL_BAKE_WATER_SOUP_RED" ) == QLatin1String( "1" );
 	/* lane GICAL1: the decals and alpha-blended surfaces the soup leaves out still color the surface under them in
 	 * game (Vault111Cryo view w1: they change 36% of the surface pixels and darken the drawn albedo by 12%).
 	 * They, and the placed decals (TXST, projected below), are folded into the surfel albedo (ProbeSoup::decal).
@@ -3160,6 +3162,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	int soupWaterCells = 0;
 	int soupDecalShapes = 0, soupPlacedDecals = 0, soupPlacedDecalTris = 0;
 	int soupRefractShapes = 0, soupRefractTris = 0;
+	int soupWaterShapes = 0, soupWaterTris = 0;	// lane PRTP6
 	QMap<QString, int> soupRefractModels;
 	QHash<QString, int> matTexIdx;
 	auto matTexOf = [&]( const QString & tex ) -> qint32 {
@@ -3879,7 +3882,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					soupRefractTris += int( s.geom.tris.size() / 3 );
 					soupRefractModels[model]++;
 				}
-				if ( refractOnly || s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
+				const bool waterSurf = s.nearFacts.waterShader && !waterSoupRed;
+				if ( waterSurf ) {
+					soupWaterShapes++;
+					soupWaterTris += int( s.geom.tris.size() / 3 );
+				}
+				if ( refractOnly || waterSurf || s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
 					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest && !foliageKeep ) ) {
 					soupShapesDropped++;
 					/* lane NEONGI1: an ADDITIVE effect surface (neon tubes: NeonRed01.BGEM, blend source alpha / one) can only
@@ -5496,6 +5504,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				t << " " << it.key() << " " << it.value() << ";";
 			t << "\n" << veilModels;
 			// lane CAPTURE1: refraction-only shapes left out of the soup, per model
+			t << "  probe soup water-shader shapes left out " << soupWaterShapes << " (" << soupWaterTris << " triangles)"
+			  << ( waterSoupRed ? " RED: kept as surfaces" : "" ) << "\n";	// lane PRTP6
 			t << "  probe soup refraction-only shapes left out " << soupRefractShapes << " (" << soupRefractTris
 			  << " triangles)" << ( refractKeepRed ? " RED keep: kept as surfaces" : "" );
 			for ( auto it = soupRefractModels.cbegin(); it != soupRefractModels.cend(); ++it )

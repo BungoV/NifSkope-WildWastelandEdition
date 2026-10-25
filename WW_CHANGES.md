@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane PRTP6 (2026-10-25, branch prtp6-20261025): no PRTP on open water
+
+- **Bake plan skips open water:** a 3x3 unit is skipped when the plugin says every cell of it is water with no LAND
+  above it (VHGT top <= the cell's water height, XCLW or the worldspace default) and nothing is placed in it
+  (persistent references counted). Measured, never by name: 2103 of 4096 Commonwealth units (18,927 cells).
+  The plan writes `skipped.tsv` (each unit, its cells, its reason); `--no-skip-water` is the red that bakes every
+  tile; `--skip-red land` plants a wrong skip the checker must refuse.
+- **Projection, bake at 3x3 + ring 1:** 88 tiles, 51.7 h (high) / 33.1 h (low), against 100 tiles, 58.6 / 42.3 h
+  for every tile. The old 42-47 h counted an empty-tile bake as free; it costs 11.6 s (BAKEALL1, tile -80,-80).
+- **Merge and checker:** `cell_census_check.py rows --skipped <tsv> [--complete 1]` re-measures each skip from the
+  plugin and prints `open water, skipped: N units, M cells`; the merge of a whole plan (plan.whole) proves every unit
+  is walked or skipped.
+- **Water receives no probe GI:** normal cell water (fo4_water) never read it. The fallback draw (Water row off, the
+  probe pass) goes through the cell program; there the GI switches are zeroed for the water shape and given back to
+  the next shape (src/gl/cellwatergi.h). `WW_CELL_WATER_PRTP_RED=1` = the old read. No shader change, GPU cost 0.
+- **No water surfels:** water-shader shapes are left out of the bake soup and counted (`probe soup water-shader
+  shapes left out N`); today N = 0 (water bases are already out). `WW_CELL_BAKE_WATER_SOUP_RED=1` keeps them.
+- **Unit gate:** tests/watergi (plain g++); `-DWW_WATERGI_STALE_RED` must fail.
+
 ## Lane PRTP5-RUNNER (2026-10-25, branch prtp5runner-20261025): the whole cell walk in map tiles (test scripts only)
 
 - **What:** the game-wide cell walk (tests/spells/cell_census.sh --whole, never run) is cut into MAP TILES that run
