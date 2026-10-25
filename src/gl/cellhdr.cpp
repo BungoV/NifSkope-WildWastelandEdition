@@ -636,6 +636,99 @@ QString wwCellHdrEcho()
 	return hst().last;
 }
 
+namespace {
+struct DepthMaxGpu
+{
+	GLuint fbo = 0, tex = 0;
+	int w = 0, h = 0;
+	bool ok = false;
+};
+}
+
+unsigned int wwCellHdrDepthMax( Scene * scene )
+{
+	HdrState & s = hst();
+	if ( !s.active || s.scene != scene || !scene || !scene->renderer )
+		return 0;
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	HdrGpu & g = hdrGpus()[r];
+	if ( !g.dsTex || !g.ds )
+		return 0;
+	static QHash<Renderer *, DepthMaxGpu> gpus;
+	DepthMaxGpu & d = gpus[r];
+	GLint prevDraw = 0, prevActive = 0, vp[4] = { 0, 0, 1, 1 };
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+	if ( !d.fbo || d.w != s.w || d.h != s.h ) {
+		if ( !d.fbo )
+			fn->glGenFramebuffers( 1, &d.fbo );
+		if ( d.tex )
+			fn->glDeleteTextures( 1, &d.tex );
+		fn->glGenTextures( 1, &d.tex );
+		fn->glBindTexture( GL_TEXTURE_2D, d.tex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R32F, s.w, s.h, 0, GL_RED, GL_FLOAT, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, d.fbo );
+		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, d.tex, 0 );
+		d.ok = fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+		d.w = s.w;
+		d.h = s.h;
+		if ( !d.ok )
+			qInfo().noquote() << "far cards: the depth reject's target is incomplete; cards march every fragment";
+	}
+	if ( !d.ok )
+		return 0;
+	auto prog = r->useProgram( "cell_depthmax.prog" );
+	if ( !prog )
+		return 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	GLboolean colorMask[4], depthMask = GL_TRUE;
+	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST ),
+		wasBlend = fn->glIsEnabled( GL_BLEND ), wasCull = fn->glIsEnabled( GL_CULL_FACE ),
+		wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, d.fbo );
+	fn->glViewport( 0, 0, s.w, s.h );
+	fn->glDisable( GL_DEPTH_TEST );
+	fn->glDisable( GL_STENCIL_TEST );
+	fn->glDisable( GL_BLEND );
+	fn->glDisable( GL_CULL_FACE );
+	fn->glDisable( GL_SCISSOR_TEST );
+	fn->glDepthMask( GL_FALSE );
+	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+	// the frame's depth / stencil texture reads stencil for the tone map (TONEMAP1): depth for this one draw
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CardDepth ) );
+	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.ds );
+	fn->glTexParameteri( GL_TEXTURE_2D_MULTISAMPLE, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_DEPTH_COMPONENT );
+	prog->uni1i( "depthMs", WwCellUnit::CardDepth );
+	prog->uni1i( "depthSamples", std::max( s.samples, 1 ) );
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
+	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	fn->glTexParameteri( GL_TEXTURE_2D_MULTISAMPLE, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_STENCIL_INDEX );
+	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
+	r->stopProgram();
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+	fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
+	fn->glColorMask( colorMask[0], colorMask[1], colorMask[2], colorMask[3] );
+	fn->glDepthMask( depthMask );
+	if ( wasDepth ) fn->glEnable( GL_DEPTH_TEST );
+	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST );
+	if ( wasBlend ) fn->glEnable( GL_BLEND );
+	if ( wasCull ) fn->glEnable( GL_CULL_FACE );
+	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	return d.tex;
+}
+
 bool wwCellHdrBegin( Scene * scene )
 {
 	HdrState & s = hst();
