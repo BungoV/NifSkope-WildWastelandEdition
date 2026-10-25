@@ -1,5 +1,6 @@
 #include "BSMesh.h"
 #include "message.h"
+#include "gl/cellqueue.h"	// lane GPUFIX1
 #include "gl/controllers.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -42,6 +43,9 @@ void BSMesh::drawShapes( NodeList * secondPass )
 		secondPass->add(this);
 		return;
 	}
+	// lane GPUFIX1: while the walk fills the render queues every shape waits for the flush, so tree order holds
+	if ( secondPass && GpuDriven::mainTake( this, GpuDriven::Rest ) )
+		return;
 
 	auto nif = scene->nifModel;
 	if ( !nif )

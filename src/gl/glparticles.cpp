@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cstdio>
 
 #include "gl/cellhdr.h"	// lane SUNCELL1: the HDR frame's stencil
+#include "gl/cellqueue.h"	// lane GPUFIX1
 #include "gl/celllights.h"	// lane SUNCELL1: the cell effect law
 #include "gl/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights
 #include "gl/cellvolair.h"	// lane VOLPART1: volumetric particles
@@ -583,6 +584,9 @@ void Particles::drawShapes( NodeList * secondPass )
 		secondPass->add( this );
 		return;
 	}
+	// lane GPUFIX1: while the walk fills the render queues every shape waits for the flush, so tree order holds
+	if ( secondPass && GpuDriven::mainTake( this, GpuDriven::Rest ) )
+		return;
 
 	/* lane SUNCELL1: in the cell view a particle draws with the cell's effect law (particles_cell.prog: linear, the
 	 * fog, the HDR frame or the imagespace), as the game draws its particles with the effect shader. Red

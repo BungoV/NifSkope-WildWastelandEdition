@@ -34,7 +34,7 @@ namespace
 
 struct Switches
 {
-	bool on = true, csm = true, main = true, perdraw = false, order = false, census = false;
+	bool on = true, csm = true, main = true, perdraw = false, order = false, byQueue = false, census = false;
 	Switches()
 	{
 		on = qEnvironmentVariable( "WW_GPUDRIVEN", QStringLiteral( "1" ) ).trimmed() != QLatin1String( "0" );
@@ -42,6 +42,7 @@ struct Switches
 		for ( const QString & r : reds ) {
 			perdraw = perdraw || r.trimmed() == QLatin1String( "perdraw" );
 			order = order || r.trimmed() == QLatin1String( "order" );
+			byQueue = byQueue || r.trimmed() == QLatin1String( "queueorder" );	// lane GPUFIX1: the old queue-by-queue draw
 		}
 		csm = on && !perdraw && qEnvironmentVariable( "WW_GPUDRIVEN_CSM", QStringLiteral( "1" ) ).trimmed() != QLatin1String( "0" );
 		main = on && !perdraw && qEnvironmentVariable( "WW_GPUDRIVEN_MAIN", QStringLiteral( "1" ) ).trimmed() != QLatin1String( "0" );
@@ -117,6 +118,7 @@ struct MainQueues
 {
 	bool armed = false, flushing = false;
 	std::vector<Node *> q[QueueCount];
+	std::vector<Node *> walk;	// lane GPUFIX1: every taken shape in tree order, the order the flush draws
 	qint64 sizes[QueueCount] = {};
 };
 
@@ -136,6 +138,7 @@ bool mainBegin( Scene * scene )
 	m.armed = true;
 	for ( auto & v : m.q )
 		v.clear();
+	m.walk.clear();
 	return true;
 }
 
@@ -151,6 +154,7 @@ bool mainTake( Node * shape, int queue )
 	if ( !m.armed || m.flushing || queue < 0 || queue >= QueueCount )
 		return false;
 	m.q[queue].push_back( shape );
+	m.walk.push_back( shape );
 	return true;
 }
 
@@ -161,10 +165,18 @@ void mainFlush( Scene * scene, NodeList * secondPass )
 		return;
 	m.flushing = true;
 	GpuDrivenB::prepare( scene );	// step B: the prepass, the Hi-Z and the cluster cull, before the queues draw
-	for ( int k = 0; k < QueueCount; k++ ) {
-		if ( redOrder() )
-			redShuffle( m.q[k], unsigned( k ) );
-		for ( Node * n : m.q[k] )
+	/* lane GPUFIX1: drawn in tree order, as with the queues off: of two surfaces at one depth the first drawn stays
+	 * (LEQUAL), so the queue-by-queue order moved pixels (hold4: 23 px Concord, 1079 px Memory Den). Reds keep the
+	 * queue-by-queue draw: queueorder as it was, order shuffled inside every queue. */
+	if ( redOrder() || sw().byQueue ) {
+		for ( int k = 0; k < QueueCount; k++ ) {
+			if ( redOrder() )
+				redShuffle( m.q[k], unsigned( k ) );
+			for ( Node * n : m.q[k] )
+				n->drawShapes( secondPass );
+		}
+	} else {
+		for ( Node * n : m.walk )
 			n->drawShapes( secondPass );
 	}
 	GpuDrivenB::finish();

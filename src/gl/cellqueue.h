@@ -10,11 +10,13 @@
  *    A depth-only LEQUAL pass keeps the nearest depth whatever the order, so the queues are exact by construction.
  *    CPU-skinned casters keep today's per-draw path.
  *  - the main walks (opaque, AO, reflections): opaque, two-sided, alpha-tested, and the rest (skinned, blended,
- *    decals, x-ray, hidden triangles) in that order, each in tree order. Blended shapes stay in the sorted pass.
+ *    decals, x-ray, hidden triangles), sorted and counted; the flush draws them in tree order (lane GPUFIX1:
+ *    equal-depth ties then match the queues off). Blended shapes stay in the sorted pass.
  *
  * Switches: WW_GPUDRIVEN=0 (all of it off, the 4.2 context again), WW_GPUDRIVEN_CSM=0, WW_GPUDRIVEN_MAIN=0.
  * Reds (WW_GPUDRIVEN_RED, comma list): perdraw = today's per-draw paths and their cost on the new context;
- * order = a fixed-seed shuffle inside every queue (the main pass must change, the cascades must not).
+ * order = a fixed-seed shuffle inside every queue (the main pass must change, the cascades must not);
+ * queueorder = the main pass drawn queue by queue (before lane GPUFIX1: moves equal-depth pixels).
  * WW_GPUDRIVEN_CENSUS=1 prints queue sizes, calls and commands, and the textures bound with more than one sampler
  * state (what bindless textures, a later step, must keep apart). */
 
@@ -51,7 +53,7 @@ bool mainBegin( Scene * scene );
 //! BSShape::drawShapes: true when the shape was queued (the caller returns and is drawn again at the flush).
 bool mainArmed();
 bool mainTake( Node * shape, int queue );
-//! Draw the queues in order, each in tree order (shuffled under red order), and disarm.
+//! Draw every taken shape in tree order (the reds: queue by queue, shuffled under order), and disarm.
 void mainFlush( Scene * scene, NodeList * secondPass );
 
 // ---- the cascades' shared geometry pool
