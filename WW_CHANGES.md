@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIGHTPHYS4 (2026-10-26, branch lightphys4-20261026): far lights and live doors follow the light rows
+
+- **Far lights bounce on the rows' curve, live:** the far light bake (WW_CELL_FARLIGHT) now runs its placed-only
+  relights with the light rows (Physical light falloff, Light intensity curve, Advanced calibration). A row set re-bakes
+  the far light of the open cell once (CPU, a one-off cost printed as `far light relit for the light rows (N ms)`) and
+  republishes its tables; nothing is reopened. The whole-map far light identity also hashes the WW_CELL_LIGHT_ pins.
+- **A live door re-takes the rows:** a door run (WW_CELL_DOOR_ANIM) keeps its base grid and its rows from the setup.
+  After a row set it takes the relit bake as its new base and re-runs its open/shut relights under the new rows
+  (`door live: light rows taken` in the notes).
+- Rows off = LIGHTPHYS2 byte for byte (every twin/ and records/ dump of `-no-gui gpurelight` identical). No shader change.
+- Gates: `-no-gui gpurelight` gate F (fargame/farphysical/faradvanced: far all-on E vs the placed-only relight 1e-6;
+  red farcurve; .fvl bytes differ per rows) and gate D3 (live door after a row set = shut relight 1e-6; reds doorrows,
+  doorbase); twin/lp4.json + tests/spells/lightphys2_bounce.py re-trace both (reds dooropen, doorrows, farcurve).
+
 ## Lane LIGHTPHYS2 + LIGHTPHYS3 (2026-10-25, branch lightphys2-20261025): light rows reach the bounce light; calibration row
 
 - **Bounce light follows the light rows, live:** Physical light falloff and Light intensity curve now also shape the

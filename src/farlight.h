@@ -29,6 +29,8 @@
  *  a group state (farLightSum), and the GPU tables (farLightTables): an open-addressed hash on (world cell, side)
  *  -> record, and the records (position, E). The bulb dots come from the .wlt's lights with flag 32. */
 
+#include "gl/lightphys.h"
+
 #include <QString>
 #include <QStringList>
 #include <QtGlobal>
@@ -46,6 +48,8 @@ struct FarLightBakeSpec
 	double trimAlways = 1e-4;     //!< x the sector's all-on p99 (FARVIEW1b 3.5)
 	double trimSwitched = 3e-5;
 	bool dump = false;            //!< farcheck_X_Y.bin beside: per record the all-on and start-state E (the file checker)
+	wwlp::Params lightPhys;       //!< lane LIGHTPHYS4: the light rows' falloff and intensity curve (default: the game's)
+	bool keepAllOn = false;       //!< lane LIGHTPHYS4: fill FarLightBakeOut::allOnE and allOnB1 (the gpurelight gate)
 };
 
 struct FarLightBakeOut
@@ -58,6 +62,8 @@ struct FarLightBakeOut
 	qint64 bytes = 0;
 	double ms = 0.0;
 	QString census;
+	std::vector<double> allOnE;   //!< lane LIGHTPHYS4: the all-on run's E (3 a surfel; spec.keepAllOn)
+	std::vector<float> allOnB1;   //!< its direct light B1 (3 a surfel)
 };
 
 bool farLightBake( const ProbeRelightOps & ops, const QString & dir, const FarLightBakeSpec & spec, FarLightBakeOut * out,

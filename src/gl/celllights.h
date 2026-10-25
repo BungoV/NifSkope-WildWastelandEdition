@@ -227,6 +227,8 @@ int wwCellPassFor( const void * nif );
 void wwCellSetPass( int pass );
 int wwCellPassRed();
 const WwCellGi * wwCellGiFor( const void * nif );
+//! lane LIGHTPHYS4: moves on each wwCellGiPublish for the document (0: none yet)
+int wwCellGiVersion( const void * nif );
 //! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
 bool wwCellGiOn();
 /*! lane PERF1: the GI's visibility, WW_CELL_GI_VIS: 0 the volumes (default: the pixel's volume, the threshold blend),

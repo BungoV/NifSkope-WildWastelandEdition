@@ -453,6 +453,11 @@ const WwCellGi * wwCellGiFor( const void * nif )
 	return it == s.gi.constEnd() ? nullptr : &*it;
 }
 
+int wwCellGiVersion( const void * nif )
+{
+	return st().giVersion.value( nif, 0 );
+}
+
 bool wwCellGiOn()
 {
 	return st().giOn;

@@ -360,16 +360,24 @@ void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bak
 }
 
 //! lane LIGHTPHYS2: a set of the light physics rows relights the kept bake at once (the lamp term only, no rebake)
+bool cellFarLightRelit( const void * nif, const ProbeSoup & soup, const QString & giBakeDir );	// lane LIGHTPHYS4 (cellview.h)
+void wwDoorLiveRowsRelit( const void * nif, const WwCellGi * relit );	// lane LIGHTPHYS4 (celldoorlive.h)
+
 static bool lightPhysRelit( const void * nif )
 {
 	Kept & k = kept();
-	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
+	if ( !k.nif || k.nif != nif )
 		return false;
+	const bool far = cellFarLightRelit( nif, k.soup, k.bakeDir );	// lane LIGHTPHYS4: the far light keeps its own rows
+	if ( !wwCellGiOn() )
+		return far;
 	const wwlp::Params now = wwLightPhysParams();
 	if ( wwlp::sameBounce( now, k.spec.lightPhys ) )
-		return false;
+		return far;
 	k.spec.lightPhys = now;
+	const int was = wwCellGiVersion( nif );
 	relightKept( true );
+	wwDoorLiveRowsRelit( nif, wwCellGiVersion( nif ) != was ? wwCellGiFor( nif ) : nullptr );	// lane LIGHTPHYS4
 	return true;
 }
 
