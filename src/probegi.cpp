@@ -249,6 +249,14 @@ double radial( double d, double r, const WwCellLight & l )
 	return std::pow( k, 2.2 );
 }
 
+// lane LIGHTPHYS2: the curve the surfaces draw (src/gl/lightphys.h); the game's curve stays radial() bit for bit
+double radialPhys( const wwlp::Params & p, double d, double r, const WwCellLight & l )
+{
+	if ( wwlp::keepsGame( p, l.bias, l.scale, l.exponent ) )
+		return radial( d, r, l );
+	return double( wwlp::falloff( p, float( d ), float( r ), l.bias, l.scale, l.exponent ) );
+}
+
 void parallelFor( size_t n, const std::function<void( size_t )> & fn )
 {
 	const int nThreads = bakert::threads();
@@ -630,6 +638,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			add( &spec.fixtureClear, 4 );
 			const char ns = redNoShadow ? 1 : 0;
 			add( &ns, 1 );
+			add( &spec.lightPhys, sizeof spec.lightPhys );	// lane LIGHTPHYS2: the curve is part of the placed lights' sum
 		};
 		if ( keyRed ) {
 			QCryptographicHash h( QCryptographicHash::Sha1 );
@@ -651,6 +660,10 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		}
 	}
 	const double scKeyMs = scClock.nsecsElapsed() / 1e6;
+	std::vector<double> lightKs( size_t( nLive ), 1.0 );	// lane LIGHTPHYS2: the intensity curve per light (1: off)
+	if ( spec.lightPhys.curve != 1.0f )
+		for ( int li = 0; li < nLive; li++ )
+			lightKs[size_t( li )] = double( wwlp::intensityScale( spec.lightPhys, lights[li].color ) );
 	parallelFor( us.size(), [&]( size_t i ) {
 		US & u = us[i];
 		const double o[3] = { u.p[0] + u.n[0] * 2.0, u.p[1] + u.n[1] * 2.0, u.p[2] + u.n[2] * 2.0 };
@@ -676,7 +689,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			const double nl = u.n[0] * L[0] + u.n[1] * L[1] + u.n[2] * L[2];
 			if ( nl <= 0.0 )
 				continue;
-			double a = radial( d, l.radius, l );
+			double a = radialPhys( spec.lightPhys, d, l.radius, l );
 			double dlRec = 0.0;
 			if ( l.spot ) {
 				const double dl = -( L[0] * l.dir[0] + L[1] * l.dir[1] + L[2] * l.dir[2] );
@@ -713,7 +726,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				continue;
 			any = true;
 			for ( int c = 0; c < 3; c++ )
-				E[c] += l.color[c] * a * nl;
+				E[c] += l.color[c] * lightKs[size_t( li )] * a * nl;
 		}
 		if ( !scHit && lighting.interior && lighting.hasDirectional ) {
 			double dl = std::sqrt( double( lighting.dirTo[0] ) * lighting.dirTo[0] + double( lighting.dirTo[1] ) * lighting.dirTo[1]

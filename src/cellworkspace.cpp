@@ -580,6 +580,22 @@ void CellWorkspacePanel::buildUi()
 		}
 	}
 	cellLightCurve->setEnabled( !wwCellLightCurvePinned() );
+	// lane LIGHTPHYS3: the Advanced light model's calibration, ships 1 (FO4CS's default)
+	cellLightCalib = showMenu->addMenu( tr( "Advanced light calibration" ) );
+	cellLightCalib->setObjectName( QStringLiteral( "CellWorkspaceLightCalibration" ) );
+	cellLightCalibGroup = new QActionGroup( cellLightCalib );
+	cellLightCalibGroup->setExclusive( true );
+	{
+		const double vals[] = { 0.5, 0.75, 1.0, 1.5, 2.0 };
+		for ( double v : vals ) {
+			QAction * a = cellLightCalib->addAction( QString::number( v ) );
+			a->setCheckable( true );
+			a->setData( v );
+			a->setChecked( float( v ) == wwCellLightCalibration() );
+			cellLightCalibGroup->addAction( a );
+		}
+	}
+	cellLightCalib->setEnabled( !wwCellLightCalibrationPinned() );
 	// lane GAPLOOK1: the gap sweep's look ticks, each Off by default
 	for ( int k = 0; k < int( WwLook::Count ); k++ ) {
 		const WwLook l = WwLook( k );
@@ -857,6 +873,11 @@ void CellWorkspacePanel::buildUi()
 	} );
 	connect( cellLightCurveGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {	// lane LIGHTPHYS1
 		wwCellLightCurveSet( float( a->data().toDouble() ) );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellLightCalibGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {	// lane LIGHTPHYS3
+		wwCellLightCalibrationSet( float( a->data().toDouble() ) );
 		if ( glView )
 			glView->update();
 	} );

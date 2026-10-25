@@ -55,6 +55,12 @@ bool wwCellShadowBudgetRedWorst();
 float wwCellLightCurve();
 bool wwCellLightCurvePinned();
 void wwCellLightCurveSet( float curve );
+/* lane LIGHTPHYS3: the Advanced light model's calibration (FO4CS fCalibrationScale), 0.05-20, 1 = as LIGHTPHYS1. Row:
+ * Advanced light calibration (0.5 | 0.75 | 1 | 1.5 | 2), WW/CellLightCalibration; pin WW_CELL_LIGHT_ADV_CALIB=<scale>;
+ * red WW_CELL_LIGHT_ADV_CALIB_RED=ignore (the row's value never reaches the lights). */
+float wwCellLightCalibration();
+bool wwCellLightCalibrationPinned();
+void wwCellLightCalibrationSet( float scale );
 //! this frame's light-physics values for the shaders and the light buffer (src/gl/lightphys.h)
 wwlp::Params wwLightPhysParams();
 

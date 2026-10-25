@@ -5,6 +5,7 @@
 
 #include "esmweather.h"
 #include "gl/celllights.h"
+#include "gl/celllooks.h"	// lane LIGHTPHYS2: the light physics rows, compared live
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"
 #include "gl/scenelighting.h"
@@ -280,11 +281,11 @@ void skyPicRelit( const ProbeGiResult & gr, const ProbeGiSpec & spec )
 	}
 }
 
-void relightKept()
+void relightKept( bool emitOnly = false )
 {
 	Kept & k = kept();
 	const WwCellLighting * L = k.nif ? wwCellLightsFor( k.nif ) : nullptr;
-	if ( !L || ( L->interior && !k.spec.interiorSky ) )   // lane SKYINT1: an interior that shows the sky too
+	if ( !L || ( L->interior && !k.spec.interiorSky && !emitOnly ) )   // lane SKYINT1: an interior that shows the sky too
 		return;
 	k.spec.sky = k.wanted;
 	ProbeGiResult gr;
@@ -354,11 +355,28 @@ void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bak
 	k.soup = soup;
 	k.bakeDir = bakeDir;
 	k.spec = spec;
+	k.spec.record = nullptr;   // lane LIGHTS5: the load's record is gone by the next relight
 	k.wanted = spec.sky;
+}
+
+//! lane LIGHTPHYS2: a set of the light physics rows relights the kept bake at once (the lamp term only, no rebake)
+static bool lightPhysRelit( const void * nif )
+{
+	Kept & k = kept();
+	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
+		return false;
+	const wwlp::Params now = wwLightPhysParams();
+	if ( wwlp::sameBounce( now, k.spec.lightPhys ) )
+		return false;
+	k.spec.lightPhys = now;
+	relightKept( true );
+	return true;
 }
 
 void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 {
+	if ( lightPhysRelit( nif ) )
+		return;
 	Kept & k = kept();
 	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
 		return;

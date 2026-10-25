@@ -155,6 +155,54 @@ inline float areaWidenedRough( float rough, float d, float size )
 	return std::sqrt( sat( a ) );
 }
 
+// ---- lane LIGHTPHYS2: the probe GI bounce takes the same curve (probegi.cpp, proberelight.cpp CPU + GPU)
+
+//! falloff() returns the game's curve for this light (row off, an authored curve that is no falloff, or no fit)
+inline bool keepsGame( const Params & p, float bias, float scale, float exponent )
+{
+	if ( p.mode == Vanilla || notAFalloff( p.anchor, bias, scale, exponent ) )
+		return true;
+	return p.mode == Physical && !( p.red & 1 ) && !( parityScale( p.anchor, p.sourceFraction, bias, scale, exponent ) > 0.0f );
+}
+
+//! the parts of p the bounce reads (area lights widen specular only); equal = the bounce needs no relight
+inline bool sameBounce( const Params & a, const Params & b )
+{
+	if ( a.mode != b.mode || a.curve != b.curve )
+		return false;
+	if ( a.mode == Physical && ( a.anchor != b.anchor || a.sourceFraction != b.sourceFraction || ( a.red & 1 ) != ( b.red & 1 ) ) )
+		return false;
+	if ( a.mode == Advanced && ( a.advNumerator != b.advNumerator || a.advMinMetres != b.advMinMetres || ( a.red & 2 ) != ( b.red & 2 ) ) )
+		return false;
+	return a.curve == 1.0f || ( a.pivot == b.pivot && ( a.red & 8 ) == ( b.red & 8 ) );
+}
+
+/*! one light's falloff with the per-light decision taken, for a kernel that evaluates it per pair:
+ *  kind 0 the game's curve, 1 k x physRaw(x, s), 2 advanced k x window(x) / max(x0, x)^2 (k = N / den), 3 advanced unwindowed */
+struct LightTerm
+{
+	int kind = 0;
+	float k = 0.0f, s = 0.0f, x0 = 0.0f;
+};
+
+inline LightTerm lightTerm( const Params & p, float r, float bias, float scale, float exponent )
+{
+	LightTerm t;
+	if ( keepsGame( p, bias, scale, exponent ) )
+		return t;
+	if ( p.mode == Advanced ) {
+		t.x0 = advMinFraction( p.advMinMetres, r );
+		const float den = 0.5f * ( 1.0f + kAdvWindowStart ) - ( 2.0f / 3.0f ) * t.x0;
+		t.k = den > 0.0f ? p.advNumerator / den : 0.0f;
+		t.kind = ( p.red & 2 ) ? 3 : 2;
+		return t;
+	}
+	t.kind = 1;
+	t.s = p.sourceFraction;
+	t.k = ( p.red & 1 ) ? 1.0f : parityScale( p.anchor, p.sourceFraction, bias, scale, exponent );
+	return t;
+}
+
 }	// namespace wwlp
 
 #endif // LIGHTPHYS_H

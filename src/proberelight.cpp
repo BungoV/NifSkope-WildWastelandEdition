@@ -64,6 +64,20 @@ double radialL( double d, double r, const ProbeRelightOps::Light & l )
 	return std::pow( k, 2.2 );
 }
 
+// lane LIGHTPHYS2: probegi.cpp's radialPhys() term for term (the game's curve stays radialL())
+double radialPhysL( const wwlp::Params & p, double d, double r, const ProbeRelightOps::Light & l )
+{
+	if ( wwlp::keepsGame( p, l.bias, l.scale, l.exponent ) )
+		return radialL( d, r, l );
+	return double( wwlp::falloff( p, float( d ), float( r ), l.bias, l.scale, l.exponent ) );
+}
+
+//! lane LIGHTPHYS2: the intensity curve on a live colour (1: off, the colour untouched)
+double lightKsOf( const wwlp::Params & p, const float c[3] )
+{
+	return p.curve != 1.0f ? double( wwlp::intensityScale( p, c ) ) : 1.0;
+}
+
 enum RedMode { RedNone = 0, RedBlanket = 1, RedGlassOpaque = 2, RedDoorOpen = 3 };
 
 //! the state's red, tokens joined by '+' ("glassclear" is the D1 gate's knob, not a defect)
@@ -382,11 +396,16 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 	for ( size_t l = 0; l < nL; l++ ) {
 		const ProbeRelightOps::Light & L = X.lights[l];
 		bool any = false;
+		float cf[3];
 		for ( int c = 0; c < 3; c++ ) {
-			col[l * 3 + size_t( c )] = st.color.size() == nL * 3 ? double( st.color[l * 3 + size_t( c )] ) : double( L.onAtStart ? L.color[c] : 0.0f );
+			cf[c] = st.color.size() == nL * 3 ? st.color[l * 3 + size_t( c )] : ( L.onAtStart ? L.color[c] : 0.0f );
+			col[l * 3 + size_t( c )] = double( cf[c] );
 			any = any || col[l * 3 + size_t( c )] != 0.0;
 		}
 		on[l] = any;
+		const double ks = lightKsOf( st.lightPhys, cf );	// lane LIGHTPHYS2: x 1.0 when off (exact)
+		for ( int c = 0; c < 3; c++ )
+			col[l * 3 + size_t( c )] *= ks;
 		double r = L.radius;
 		if ( st.radius.size() == nL ) {
 			r = st.radius[l];
@@ -418,7 +437,7 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 			const double d = X.pairD[size_t( k )], nl = X.pairNL[size_t( k )];
 			if ( d >= rad[li] )
 				continue;
-			double a = radialL( d, rad[li], L );
+			double a = radialPhysL( st.lightPhys, d, rad[li], L );
 			if ( L.spot ) {
 				const double dl = X.pairDL[size_t( k )];
 				const double base = std::min( std::max( 1.0 - ( 1.0 - dl ) / std::max( 1.0 - L.cosOuter, 1e-4 ), 0.0 ), 1.0 );
@@ -652,7 +671,7 @@ layout( std430, binding = 0 ) buffer Surf { float surf[]; };          // 16 a su
 layout( std430, binding = 1 ) readonly buffer PairStart { int pairStart[]; };
 layout( std430, binding = 2 ) readonly buffer Pairs { float pairs[]; };   // 8: light, d, nl, dl, doorRec, -, -, -
 layout( std430, binding = 3 ) readonly buffer DoorRec { float doorRec[]; }; // 12: door0, door1, -, -, T[8]
-layout( std430, binding = 4 ) readonly buffer Lights { float lights[]; }; // 16: pos, radius, color, bias, scale, exp, cone, cosOuter, spot
+layout( std430, binding = 4 ) readonly buffer Lights { float lights[]; }; // 16: pos, radius, color, bias, scale, exp, cone, cosOuter, spot, k, s|x0, kind
 layout( std430, binding = 5 ) coherent buffer Ctl { uint ctl[]; };       // 0 max change, 1 max B, 2.. door closed
 layout( std430, binding = 6 ) readonly buffer LinkStart { int linkStart[]; };
 layout( std430, binding = 7 ) readonly buffer Links { float links[]; };   // 12: surf, omega, tint, cos[6], doorRec
@@ -724,9 +743,22 @@ void main()
 		if ( col == vec3( 0.0 ) || d >= r )
 			continue;
 		float x = clamp( d / max( r, 0.001 ), 0.0, 1.0 );
-		float xe = lights[lo + 9] > 0.0 ? pow( x, lights[lo + 9] ) : 1.0;
-		float kk = 1.0 - clamp( lights[lo + 8] * xe + lights[lo + 7], 0.0, 1.0 );
-		float a = kk > 0.0 ? pow( kk, 2.2 ) : 0.0;
+		float a;
+		float kind = lights[lo + 15];   // lane LIGHTPHYS2: wwlp::lightTerm, decided per light on the CPU
+		if ( kind < 0.5 ) {
+			float xe = lights[lo + 9] > 0.0 ? pow( x, lights[lo + 9] ) : 1.0;
+			float kk = 1.0 - clamp( lights[lo + 8] * xe + lights[lo + 7], 0.0, 1.0 );
+			a = kk > 0.0 ? pow( kk, 2.2 ) : 0.0;
+		} else if ( kind < 1.5 ) {   // wwlp::physRaw
+			float s = lights[lo + 14], x2 = x * x;
+			float w = clamp( 1.0 - x2 * x2, 0.0, 1.0 ), den = x2 + s * s;
+			a = den > 0.0 ? lights[lo + 13] * ( w * w / den ) : 0.0;
+		} else {   // wwlp::advAtt
+			float t = clamp( ( x - 0.8 ) / ( 1.0 - 0.8 ), 0.0, 1.0 );
+			float w = kind > 2.5 ? 1.0 : 1.0 - t * t * ( 3.0 - 2.0 * t );
+			float m = max( lights[lo + 14], x );
+			a = lights[lo + 13] * w / ( m * m );
+		}
 		if ( lights[lo + 12] > 0.5 ) {
 			float base = clamp( 1.0 - ( 1.0 - dl ) / max( 1.0 - lights[lo + 11], 1e-4 ), 0.0, 1.0 );
 			a *= base > 0.0 ? min( pow( base, max( lights[lo + 10], 1e-3 ) ), 1.0 ) : 0.0;
@@ -1178,6 +1210,10 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 			p[c] = L.pos[c];
 			p[4 + c] = st.color.size() == nL * 3 ? st.color[l * 3 + size_t( c )] : ( L.onAtStart ? L.color[c] : 0.0f );
 		}
+		const double ks = lightKsOf( st.lightPhys, p + 4 );	// lane LIGHTPHYS2: the intensity curve (off: untouched)
+		if ( ks != 1.0 )
+			for ( int c = 0; c < 3; c++ )
+				p[4 + c] = float( double( p[4 + c] ) * ks );
 		float r = L.radius;
 		if ( st.radius.size() == nL ) {
 			r = st.radius[l];
@@ -1193,6 +1229,10 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 		p[10] = L.cone;
 		p[11] = L.cosOuter;
 		p[12] = L.spot ? 1.0f : 0.0f;
+		const wwlp::LightTerm lt = wwlp::lightTerm( st.lightPhys, r, L.bias, L.scale, L.exponent );	// lane LIGHTPHYS2
+		p[13] = lt.k;
+		p[14] = lt.kind >= 2 ? lt.x0 : lt.s;
+		p[15] = float( lt.kind );
 	}
 	gl->glBindBuffer( GL_SHADER_STORAGE_BUFFER, d->buf[Impl::bLights] );
 	if ( !lights.empty() )
@@ -2035,6 +2075,20 @@ int probeRelightCli( const QStringList & args )
 		s.st.color = colors( { L0, L1, L3, L2 } );
 		s.live = { L0, L1, L3, L2 };
 		states.push_back( s );
+		// lane LIGHTPHYS2: the light physics rows on the lamp term (the ray reference relights with the same curve)
+		s.st.color = colors( { L0, L1, L3, off2 } );
+		s.live = { L0, L1, L3 };
+		const char * physNames[5] = { "physical", "advanced", "advcalib2", "curve15", "physcurve" };
+		for ( int m = 0; m < 5; m++ ) {
+			wwlp::Params p;
+			p.mode = ( m == 0 || m == 4 ) ? wwlp::Physical : m == 3 ? wwlp::Vanilla : wwlp::Advanced;
+			p.advNumerator = wwlp::vanillaFlux() * ( m == 2 ? 2.0f : 1.0f );
+			p.curve = m >= 3 ? 1.5f : 1.0f;
+			s.name = QString::fromLatin1( physNames[m] );
+			s.st.lightPhys = p;
+			states.push_back( s );
+		}
+		s.st.lightPhys = wwlp::Params();
 		s.name = QStringLiteral( "doorsclosed" );
 		s.st.color = colors( { L0, L1, L3, off2 } );
 		s.st.doorClosed = { 1, 1, 1 };
@@ -2108,15 +2162,22 @@ int probeRelightCli( const QStringList & args )
 				r << QString::number( double( s.st.radius.size() == X.lights.size() ? s.st.radius[l] : X.lights[l].radius ), 'g', 9 );
 			for ( size_t k = 0; k < X.doorRefs.size(); k++ )
 				d << QString::number( k < s.st.doorClosed.size() ? s.st.doorClosed[k] : 0 );
-			stateJson << QStringLiteral( "\"%1\": {\"color\": [%2], \"radius\": [%3], \"closed\": [%4], \"passes\": %5}" )
-				.arg( s.name, c.join( ", " ), r.join( ", " ), d.join( ", " ) ).arg( co.passes );
+			const wwlp::Params & lp = s.st.lightPhys;	// lane LIGHTPHYS2: the twin re-derives the curve from these
+			const QString phys = QStringLiteral( "{\"mode\": %1, \"anchor\": %2, \"s\": %3, \"adv\": %4, \"advMin\": %5, \"curve\": %6, "
+				"\"pivot\": %7, \"red\": %8}" ).arg( lp.mode ).arg( double( lp.anchor ), 0, 'g', 9 ).arg( double( lp.sourceFraction ), 0, 'g', 9 )
+				.arg( double( lp.advNumerator ), 0, 'g', 9 ).arg( double( lp.advMinMetres ), 0, 'g', 9 ).arg( double( lp.curve ), 0, 'g', 9 )
+				.arg( double( lp.pivot ), 0, 'g', 9 ).arg( lp.red );
+			stateJson << QStringLiteral( "\"%1\": {\"color\": [%2], \"radius\": [%3], \"closed\": [%4], \"passes\": %5, \"phys\": %6}" )
+				.arg( s.name, c.join( ", " ), r.join( ", " ), d.join( ", " ) ).arg( co.passes ).arg( phys );
 		}
 		if ( s.reference ) {   // P: the CPU relight from the operators = the relight with rays
 			WwCellLighting L = lit;
 			L.lights = s.live;
 			ProbeGiResult ref;
+			ProbeGiSpec gsP = gs;
+			gsP.lightPhys = s.st.lightPhys;	// lane LIGHTPHYS2
 			clock.restart();
-			probeGiRelight( soup, bakeDir, L, gs, &ref );
+			probeGiRelight( soup, bakeDir, L, gsP, &ref );
 			msRefs.push_back( clock.nsecsElapsed() / 1e6 );
 			const std::vector<float> rB1 = column( ref.surfelOut, 12, 9, 3 ), rE = column( ref.probeCube, 21, 3, 18 );
 			const double dB1 = relDiff( co.B1, rB1 ), dB = relDiff( co.B, ref.surfelBounce ), dE = relDiff( co.E, rE ),
@@ -2133,6 +2194,21 @@ int probeRelightCli( const QStringList & args )
 				probeRelightCpu( X, rs, &ro, &err );
 				const double d = relDiff( ro.B, ref.surfelBounce );
 				gate( QStringLiteral( "P red nobounce" ), d <= 1e-6, QStringLiteral( "B %1" ).arg( d, 0, 'g', 3 ), true );
+			}
+			if ( s.name == QLatin1String( "physical" ) ) {   // lane LIGHTPHYS2 red: the bounce left on the game's curve
+				ProbeGiResult r0v;
+				probeGiRelight( soup, bakeDir, L, gs, &r0v );
+				const double d = relDiff( co.B1, column( r0v.surfelOut, 12, 9, 3 ) );
+				gate( QStringLiteral( "P red lampcurve" ), d <= 1e-6, QStringLiteral( "B1 %1" ).arg( d, 0, 'g', 3 ), true );
+			}
+			if ( s.name == QLatin1String( "advcalib2" ) && cpuOut.count( QStringLiteral( "advanced" ) ) ) {   // known answer
+				const ProbeRelightOut & a1 = cpuOut[QStringLiteral( "advanced" )];
+				std::vector<float> twice( a1.B1.size() );
+				for ( size_t i = 0; i < twice.size(); i++ )
+					twice[i] = 2.0f * a1.B1[i];
+				const double d = relDiff( co.B1, twice );
+				gate( QStringLiteral( "K calibration 2" ), d <= 1e-6 && !twice.empty(),
+					QStringLiteral( "B1 at calibration 2 vs 2 x B1 at 1: %1 (gate 1e-6; no sun, no glow)" ).arg( d, 0, 'g', 3 ) );
 			}
 		}
 		if ( gpuOk ) {   // G: the GPU = the CPU (float32 against double), the same pass count
@@ -2167,6 +2243,14 @@ int probeRelightCli( const QStringList & args )
 				gpu.run( rs, &ro, &why, true );
 				const double d = relDiff( ro.B1, co.B1 );
 				gate( QStringLiteral( "G red dooropen" ), d <= 1e-4, QStringLiteral( "B1 %1" ).arg( d, 0, 'g', 3 ), true );
+			}
+			if ( s.name == QLatin1String( "advanced" ) ) {   // lane LIGHTPHYS2 red: a GPU kernel on the game's curve
+				ProbeRelightState rs = gst;
+				rs.lightPhys = wwlp::Params();
+				ProbeRelightOut ro;
+				gpu.run( rs, &ro, &why, true );
+				const double d = relDiff( ro.B1, co.B1 );
+				gate( QStringLiteral( "G red lampcurve" ), d <= 1e-4, QStringLiteral( "B1 %1" ).arg( d, 0, 'g', 3 ), true );
 			}
 		}
 	}

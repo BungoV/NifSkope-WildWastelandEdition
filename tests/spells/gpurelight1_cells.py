@@ -209,7 +209,10 @@ def main():
     sc = json.load(open(os.path.join(tw, 'scene.json')))
     ok = True
     for state in sc['states']:
-        cpu = load(tw, 'b1_cpu_%s.f32' % state, np.float32, 3).astype(np.float64)
+        ph = sc['states'][state].get('phys')
+        if ph and (ph['mode'] != 0 or ph['curve'] != 1.0):
+            continue   # lane LIGHTPHYS2: the light physics states have their own twin (lightphys2_bounce.py)
+        cpu =load(tw, 'b1_cpu_%s.f32' % state, np.float32, 3).astype(np.float64)
         ok &= gate_b1('T1 %s' % state, twin_b1(tw, sc, state), cpu)
     twc = twin_b1(tw, sc, 'doorsclosed')
     for red in ('glassopaque', 'doorblanket'):

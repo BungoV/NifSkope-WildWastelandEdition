@@ -269,11 +269,49 @@ void wwCellLightCurveSet( float curve )
 	QSettings().setValue( QStringLiteral( "WW/CellLightCurve" ), double( curveRow() ) );
 }
 
+// ---- LIGHTPHYS3: the Advanced model's calibration (FO4CS fCalibrationScale, src/Lights/AdvancedLighting.h: 0.05-20, 1)
+namespace {
+float clampCalib( float v )
+{
+	return v > 0.0f ? std::min( std::max( v, 0.05f ), 20.0f ) : 1.0f;
+}
+
+float & calibRow()
+{
+	static float v = -1.0f;
+	if ( v < 0.0f )
+		v = clampCalib( QSettings().value( QStringLiteral( "WW/CellLightCalibration" ), 1.0 ).toFloat() );
+	return v;
+}
+}	// namespace
+
+bool wwCellLightCalibrationPinned()
+{
+	WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LIGHT_ADV_CALIB" ).trimmed() );
+	return !p.isEmpty();
+}
+
+float wwCellLightCalibration()
+{
+	if ( wwEnvStr( "WW_CELL_LIGHT_ADV_CALIB_RED" ) == QLatin1String( "ignore" ) )
+		return 1.0f;	// the red: the row's value never reaches the lights
+	WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LIGHT_ADV_CALIB" ).trimmed() );
+	return p.isEmpty() ? calibRow() : clampCalib( p.toFloat() );
+}
+
+void wwCellLightCalibrationSet( float scale )
+{
+	if ( wwCellLightCalibrationPinned() )
+		return;
+	calibRow() = clampCalib( scale );
+	QSettings().setValue( QStringLiteral( "WW/CellLightCalibration" ), double( calibRow() ) );
+}
+
 wwlp::Params wwLightPhysParams()
 {
 	wwlp::Params p;
 	p.mode = wwLookOn( WwLook::LightAdvanced ) ? wwlp::Advanced : wwLookOn( WwLook::LightPhysFalloff ) ? wwlp::Physical : wwlp::Vanilla;
-	p.advNumerator = wwlp::vanillaFlux() * wwlp::kAdvCalibration;
+	p.advNumerator = wwlp::vanillaFlux() * wwCellLightCalibration();	// lane LIGHTPHYS3: 1 = kAdvCalibration, the same float
 	p.curve = wwCellLightCurve();
 	p.areaWorld = wwLookOn( WwLook::LightArea ) ? wwlp::kSourceWorld : 0.0f;
 	// the reds, read at the use (each moves its own row's picture)

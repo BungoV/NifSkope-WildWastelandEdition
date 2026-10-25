@@ -40,6 +40,7 @@
 
 #include "probebvh.h"
 #include "probeplace.h"
+#include "gl/lightphys.h"
 
 struct WwCellLight;
 
@@ -180,6 +181,7 @@ std::vector<float> probeRelightShut( const ProbeRelightState & st, size_t nDoors
 	 *  layers (src/farlight.h) are linear in the placed lights only with these out; false = as before */
 	bool placedOnly = false;
 	bool wantE = false;                     //!< lane FARVIEW1: fill ProbeRelightOut::Es
+	wwlp::Params lightPhys;                 //!< lane LIGHTPHYS2: the falloff and intensity curve (default: the game's)
 };
 
 struct ProbeRelightOut

@@ -6130,6 +6130,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			if ( wwEnvIsSet( "WW_CELL_GI_BRICK_EDGE" ) )
 				gs.brickEdge = wwEnvStr( "WW_CELL_GI_BRICK_EDGE" ).toFloat();
 			gs.passes = wwEnvInt( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
+			gs.lightPhys = wwLightPhysParams();   // lane LIGHTPHYS2: the bounce takes the surfaces' falloff and intensity curve
 			gs.rooms.red = QString::fromLatin1( wwEnv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
 			gs.space = volGiOn ? volGi : nullptr;   // lane VOLFIT1: WW_CELL_VOLUMES_GI=1, the Space rooms are the GI's rooms
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
@@ -6384,8 +6385,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						wwCellFarPublish( nif, fr );
 					}
 				}
-				if ( !spec.interior || gs.interiorSky )
-					probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather relights it
+				probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather (outdoors) or light rows relights it
 				PassTime::memLog( "GI relit" );	// lane PERF1
 				WwCellProbeView pv;	// lane PROBEVIEW1: the surfel and probe previews
 				pv.surfelCell = gr.surfelCell;
