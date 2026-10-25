@@ -1461,6 +1461,132 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		for ( const auto & pr : probeRoom )
 			R.probeRooms.insert( R.probeRooms.end(), { pr[0], pr[1] } );
 	}
+	/* lane GPURELIGHT1 (10-23): Probe sharing (probegi.h ProbeGiSpec::share). Neighbours within kProbeShareReach x the
+	 * median spacing, in a common room (ROOMCLAMP1) and with a clear segment, so the share never crosses a wall. */
+	std::vector<double> shareGd;
+	if ( ( spec.share || REC ) && !up.empty() ) {
+		const double s0 = clock.nsecsElapsed() / 1e6;
+		const bool noWall = spec.shareRed == QLatin1String( "nowall" );
+		const double rs = kProbeShareReach * med;
+		const int reach = int( std::ceil( rs / rad ) );
+		auto roomsMeet = [&]( size_t i, size_t j ) {
+			const std::array<int, 2> & a = probeRoom[i];
+			const std::array<int, 2> & b = probeRoom[j];
+			if ( a[0] < 0 || b[0] < 0 )
+				return true;
+			for ( int x : a )
+				for ( int y : b )
+					if ( x >= 0 && x == y )
+						return true;
+			return false;
+		};
+		std::vector<std::vector<std::pair<int, double>>> nbr( up.size() );
+		std::atomic<qint64> sRays( 0 ), sBlocked( 0 ), sOther( 0 );
+		parallelFor( up.size(), [&]( size_t i ) {
+			const UP & P = up[i];
+			const Key3 ck { floorDiv( float( P.p[0] ), float( rad ) ), floorDiv( float( P.p[1] ), float( rad ) ), floorDiv( float( P.p[2] ), float( rad ) ) };
+			for ( int dz = -reach; dz <= reach; dz++ )
+				for ( int dy = -reach; dy <= reach; dy++ )
+					for ( int dx = -reach; dx <= reach; dx++ ) {
+						auto it = ph.find( Key3 { ck.x + dx, ck.y + dy, ck.z + dz } );
+						if ( it == ph.end() )
+							continue;
+						for ( int j : it->second ) {
+							if ( size_t( j ) == i )
+								continue;
+							double d2 = 0.0;
+							for ( int a = 0; a < 3; a++ )
+								d2 += ( up[size_t( j )].p[a] - P.p[a] ) * ( up[size_t( j )].p[a] - P.p[a] );
+							if ( d2 >= rs * rs )
+								continue;
+							if ( !noWall ) {
+								if ( !roomsMeet( i, size_t( j ) ) ) {
+									sOther++;
+									continue;
+								}
+								sRays++;
+								if ( blocked( P.p, up[size_t( j )].p, 0.0 ) ) {
+									sBlocked++;
+									continue;
+								}
+							}
+							const double t = 1.0 - d2 / ( rs * rs );
+							nbr[i].push_back( { j, t * t } );
+						}
+					}
+			std::sort( nbr[i].begin(), nbr[i].end() );
+		} );
+		R.shareStart.assign( 1, 0 );
+		for ( const auto & l : nbr ) {
+			for ( const auto & e : l ) {
+				R.shareProbe.push_back( e.first );
+				R.shareG.push_back( float( e.second ) );
+				shareGd.push_back( e.second );
+			}
+			R.shareStart.push_back( int( R.shareProbe.size() ) );
+		}
+		R.shareEntries = qint64( R.shareProbe.size() );
+		R.shareRays = sRays;
+		R.shareBlocked = sBlocked;
+		R.shareOtherRoom = sOther;
+		R.shareReach = rs;
+		if ( spec.share ) {
+			// nu: how far a probe's own gather is from settled (proberelight.h probeShareNu), from the last pass's B
+			std::vector<double> nu( up.size() ), ES( up.size() * 18 );
+			parallelFor( up.size(), [&]( size_t j ) {
+				const UP & P = up[j];
+				double sum = 0.0, sq = 0.0;
+				for ( int k = R.probeLinkStart[j]; k < R.probeLinkStart[j + 1]; k++ ) {
+					const LK & L = lks[size_t( k )];
+					const double * B = &Bk[size_t( R.probeLinks[size_t( k )] ) * 3];
+					double cs = 0.0;
+					for ( int a = 0; a < 6; a++ )
+						cs += L.cosA[a];
+					const double x = probeShareLum( B[0] * L.tint[0] * L.omega, B[1] * L.tint[1] * L.omega,
+						B[2] * L.tint[2] * L.omega ) * cs / 6.0;
+					sum += x;
+					sq += x * x;
+				}
+				double sky = 0.0;
+				if ( skyOn ) {
+					for ( int a = 0; a < 6; a++ )
+						sky += probeShareLum( P.S[a][0], P.S[a][1], P.S[a][2] );
+					sky /= 6.0;
+				}
+				nu[j] = probeShareNu( sum, sq, P.kUnl, sky );
+			} );
+			parallelFor( up.size(), [&]( size_t j ) {
+				double acc[18], as = 0.0;
+				std::memcpy( acc, up[j].E, sizeof acc );
+				for ( int k = R.shareStart[j]; k < R.shareStart[j + 1]; k++ ) {
+					const double a = nu[j] * shareGd[size_t( k )];
+					if ( a <= 0.0 )
+						continue;
+					as += a;
+					const double * Q = &up[size_t( R.shareProbe[size_t( k )] )].E[0][0];
+					for ( int q = 0; q < 18; q++ )
+						acc[q] += a * Q[q];
+				}
+				for ( int q = 0; q < 18; q++ )
+					ES[j * 18 + size_t( q )] = acc[q] / ( 1.0 + as );
+			} );
+			double num = 0.0, den = 0.0, nus = 0.0;
+			for ( size_t j = 0; j < up.size(); j++ ) {
+				double * E = &up[j].E[0][0];
+				for ( int q = 0; q < 18; q++ ) {
+					num += std::fabs( ES[j * 18 + size_t( q )] - E[q] );
+					den += std::fabs( E[q] );
+					E[q] = ES[j * 18 + size_t( q )];
+				}
+				nus += nu[j];
+				R.shareNu.push_back( float( nu[j] ) );
+			}
+			R.shareOn = true;
+			R.shareMoved = den > 0.0 ? num / den : 0.0;
+			R.shareNuMean = nus / double( up.size() );
+		}
+		R.msShare = clock.nsecsElapsed() / 1e6 - s0;
+	}
 	// lane ROOMCLAMP1: per near voxel, the rooms of the surfaces reading it (at most four), how many read it from
 	// each, and each room's eye: its sample point (surface + half a voxel along its normal) nearest the voxel's
 	// centre, where a fragment of that room reading the voxel stands
@@ -2329,6 +2455,22 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			} );
 		for ( size_t k = 0; k < R.feedProbe.size(); k++ )
 			census( 2, &X.feedDoor[k * 2], &X.feedT[k * 8], 4, true );
+		// 3b. lane GPURELIGHT1: the share lists (probe to probe, a visibility entry like the blend's)
+		X.shareStart = R.shareStart;
+		X.shareProbe = R.shareProbe;
+		X.shareG = shareGd;
+		X.shareDoor.assign( R.shareProbe.size() * 2, -1 );
+		X.shareT.assign( R.shareProbe.size() * 8, 1.0f );
+		if ( doorTr.any() && !R.shareStart.empty() )
+			parallelFor( up.size(), [&]( size_t j ) {
+				for ( int k = R.shareStart[j]; k < R.shareStart[j + 1]; k++ ) {
+					int over = 0;
+					doorTr.crossed( up[j].p, up[size_t( R.shareProbe[size_t( k )] )].p, 0.0, &X.shareDoor[size_t( k ) * 2],
+						&X.shareT[size_t( k ) * 8], &over );
+					if ( over )
+						recOver += over;
+				}
+			} );
 		X.passes = R.passes;
 		X.fixedPasses = spec.passes > 0;
 		X.maxPasses = spec.passes > 0 ? spec.passes : std::max( 1, spec.maxPasses );
@@ -2542,7 +2684,11 @@ QString probeGiCensusText( const ProbeGiResult & r )
 		+ ( r.surfelsEmit ? QStringLiteral( "\n  gi emissive: %1 of %2 surfels glow (their Le added once to B)" )
 			.arg( r.surfelsEmit ).arg( r.surfels ) : QString() )   // lane EMISSIVEGI1
 		+ ( r.fineOn ? QStringLiteral( "\n  " ) + probeGiFineCensusText( r.fine ) : QString() )   // lane EMISSIVEGRID1
-		+ ( r.airNote.isEmpty() ? QString() : QStringLiteral( "\n  " ) + r.airNote );   // SKY2 FOGSLICE1
+		+ ( r.airNote.isEmpty() ? QString() : QStringLiteral( "\n  " ) + r.airNote )   // SKY2 FOGSLICE1
+		+ ( r.shareOn ? QStringLiteral( "\n  gi share: %1 neighbour entries within %2 u (%3 segments tested, %4 blocked, %5 other room); "
+			"mean nu %6, E moved %7 %, %8 ms" ).arg( r.shareEntries ).arg( r.shareReach, 0, 'f', 0 ).arg( r.shareRays )
+			.arg( r.shareBlocked ).arg( r.shareOtherRoom ).arg( r.shareNuMean, 0, 'f', 4 ).arg( 100.0 * r.shareMoved, 0, 'f', 3 )
+			.arg( r.msShare, 0, 'f', 1 ) : QString() );   // lane GPURELIGHT1
 }
 
 /* The dump (little-endian):
@@ -2617,6 +2763,20 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 		f.write( i32( r.probes ) );
 		f.write( reinterpret_cast<const char *>( r.probeLinkStart.data() ), qint64( r.probeLinkStart.size() * 4 ) );
 		f.write( reinterpret_cast<const char *>( r.probeLinks.data() ), qint64( r.probeLinks.size() * 4 ) );
+	}
+	/* lane GPURELIGHT1: gi_share.bin (Probe sharing on): int32 n, int32 start[n + 1], per entry int32 probe + float32
+	 * g, then float32 nu[n] */
+	if ( r.shareOn ) {
+		QFile f( QDir( dir ).filePath( QStringLiteral( "gi_share.bin" ) ) );
+		if ( !f.open( QIODevice::WriteOnly ) ) {
+			*err = QStringLiteral( "cannot write %1" ).arg( f.fileName() );
+			return false;
+		}
+		f.write( i32( r.probes ) );
+		f.write( reinterpret_cast<const char *>( r.shareStart.data() ), qint64( r.shareStart.size() * 4 ) );
+		for ( size_t k = 0; k < r.shareProbe.size(); k++ )
+			f.write( i32( r.shareProbe[k] ) + f32( r.shareG[k] ) );
+		f.write( reinterpret_cast<const char *>( r.shareNu.data() ), qint64( r.shareNu.size() * 4 ) );
 	}
 	/* lane BOUNCE2: the passes
 	 *   gi_bounce.bin  int32 n, int32 passes, then n x 3 float32: each surfel's B after the last pass
@@ -2767,6 +2927,8 @@ int probeGiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--passes" ) ) { gs.passes = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--red" ) ) { gs.red = nx; i++; }
 		else if ( a == QLatin1String( "--rooms-red" ) ) { gs.rooms.red = nx; i++; }
+		else if ( a == QLatin1String( "--share" ) ) { gs.share = nx.toInt() != 0; i++; }   // lane GPURELIGHT1: Probe sharing
+		else if ( a == QLatin1String( "--share-red" ) ) { gs.shareRed = nx; i++; }
 		else if ( a == QLatin1String( "--room-split" ) ) { bs.roomSplit = nx.toInt() != 0; i++; }   // lane GAPBAKE1
 		else if ( a == QLatin1String( "--pinch" ) ) { gs.rooms.pinch = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--cell" ) ) { gs.rooms.cell = nx.toFloat(); i++; }
@@ -2808,7 +2970,8 @@ int probeGiCli( const QStringList & args )
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || ( L.lights.isEmpty() && !gs.sky.on ) ) {
 		std::fprintf( stderr, "usage: probegi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --light x,y,z,radius,r,g,b "
 			"[--light ...] [--spacing s] [--rays n] [--adapt n] [--passes n] [--red noclamp|noeye|novis|...] "
-			"[--rooms-red conn26|boxes|glasswall|nomask] [--room-split 0|1] [--pinch u] [--cell u] [--sun tx,ty,tz,r,g,b] [--sky r,g,b]\n" );
+			"[--rooms-red conn26|boxes|glasswall|nomask] [--room-split 0|1] [--pinch u] [--cell u] [--sun tx,ty,tz,r,g,b] [--sky r,g,b] "
+			"[--share 0|1] [--share-red nowall]\n" );
 		return 2;
 	}
 	ps.minX = rc[0].toFloat();

@@ -5,6 +5,7 @@
 
 #include "esmweather.h"
 #include "gl/celllights.h"
+#include "gl/celllooks.h"	// lane GPURELIGHT1: Probe sharing
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"
 #include "gl/scenelighting.h"
@@ -217,6 +218,7 @@ struct Kept
 	QString bakeDir;
 	ProbeGiSpec spec;
 	ProbeSkyLight wanted;
+	bool skyKept = true;   // lane GPURELIGHT1: false = a cell kept only for Probe sharing (no weather relight)
 	QPointer<QTimer> timer;   // the view's child: it goes with the window
 	QPointer<QWindow> view;
 };
@@ -284,9 +286,10 @@ void relightKept()
 {
 	Kept & k = kept();
 	const WwCellLighting * L = k.nif ? wwCellLightsFor( k.nif ) : nullptr;
-	if ( !L || ( L->interior && !k.spec.interiorSky ) )   // lane SKYINT1: an interior that shows the sky too
+	if ( !L || ( k.skyKept && L->interior && !k.spec.interiorSky ) )   // lane SKYINT1: an interior that shows the sky too
 		return;
-	k.spec.sky = k.wanted;
+	if ( k.skyKept )
+		k.spec.sky = k.wanted;
 	ProbeGiResult gr;
 	if ( !probeGiRelight( k.soup, k.bakeDir, *L, k.spec, &gr ) )
 		return;
@@ -347,20 +350,33 @@ void probeSkyForget()
 	picNow() = PicNow();
 }
 
-void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec )
+void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec, bool sky )
 {
-	Kept & k = kept();   // one exterior at a time: the latest relit
+	Kept & k = kept();   // one cell at a time: the latest relit
 	k.nif = nif;
 	k.soup = soup;
 	k.bakeDir = bakeDir;
 	k.spec = spec;
+	k.spec.record = nullptr;   // the caller's operators live on its stack; a later relight records nothing
 	k.wanted = spec.sky;
+	k.skyKept = sky;
 }
 
 void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 {
 	Kept & k = kept();
 	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
+		return;
+	// lane GPURELIGHT1: a Probe sharing tick relights at once (a toggle, nothing to wait out)
+	const bool share = wwLookOn( WwLook::ProbeShare );
+	const QString shareRed = wwEnvStr( "WW_CELL_GI_SHARE_RED" ).trimmed();
+	if ( share != k.spec.share || shareRed != k.spec.shareRed ) {
+		k.spec.share = share;
+		k.spec.shareRed = shareRed;
+		relightKept();
+		return;
+	}
+	if ( !k.skyKept )
 		return;
 	bool firstPic = false;
 	if ( skyPicOn() && wwLookdevActive() ) {   // lane SKYPIC1: capture the drawn sky when it changed

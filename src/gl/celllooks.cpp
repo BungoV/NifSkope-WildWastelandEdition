@@ -29,6 +29,8 @@ const LookRow kRows[] = {
 	{ "Weapon mod parts", "WW/CellWeaponParts" },
 	{ "World animation", "WW/CellWorldAnim" },
 	{ "Animated objects", "WW/CellAnimObjects" },
+	{ "Wide exposure range", "WW/CellExposureWide" },
+	{ "Probe sharing", "WW/CellGiShare" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -100,6 +102,12 @@ QByteArray pinOf( WwLook l )
 	}
 	case WwLook::AnimObjects: {
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_ANIMOBJ" ).trimmed() );
+	case WwLook::ExposureWide: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_EXPOSURE_WIDE" ).trimmed() );
+		return p;
+	}
+	case WwLook::ProbeShare: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_GI_SHARE" ).trimmed() );
 		return p;
 	}
 	default:
@@ -130,6 +138,8 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::WeaponParts: return "WW_CELL_WEAP_PARTS";
 	case WwLook::WorldAnim: return "WW_CELL_WORLDANIM";
 	case WwLook::AnimObjects: return "WW_CELL_ANIMOBJ";
+	case WwLook::ExposureWide: return "WW_CELL_EXPOSURE_WIDE";
+	case WwLook::ProbeShare: return "WW_CELL_GI_SHARE";
 	default: return "";
 	}
 }

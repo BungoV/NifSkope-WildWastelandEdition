@@ -36,6 +36,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
+#include <cmath>
 #include <vector>
 
 #include "probebvh.h"
@@ -148,6 +149,12 @@ struct ProbeRelightOps
 	std::vector<int> growSlot;              //!< grown slots in their order (ring 1, then ring 2)
 	std::vector<int> growStart, growSrc;    //!< per grown slot: the neighbour slots averaged
 	int growRing0 = 0;                      //!< growSlot[0 .. growRing0) = ring 1, the rest ring 2
+	/* lane GPURELIGHT1 (10-23) Probe sharing (probeShareNu, probegi.h ProbeGiSpec::share): per probe its neighbours
+	 * (same room, a clear segment), the spatial weight and the door crossings (visibility rule); empty = not recorded */
+	std::vector<int> shareStart, shareProbe;
+	std::vector<double> shareG;
+	std::vector<int> shareDoor;             //!< 2 an entry
+	std::vector<float> shareT;              //!< 8 an entry
 	// ---- doors
 	std::vector<quint32> doorRefs;          //!< door slot -> the door's ref
 	qint64 doorRays = 0;                    //!< census: entries re-traced against a door's real geometry
@@ -180,6 +187,7 @@ std::vector<float> probeRelightShut( const ProbeRelightState & st, size_t nDoors
 	 *  layers (src/farlight.h) are linear in the placed lights only with these out; false = as before */
 	bool placedOnly = false;
 	bool wantE = false;                     //!< lane FARVIEW1: fill ProbeRelightOut::Es
+	bool share = false;                     //!< lane GPURELIGHT1 (10-23): Probe sharing after the last gather (needs ops.shareStart)
 };
 
 struct ProbeRelightOut
@@ -197,7 +205,24 @@ struct ProbeRelightOut
 	int radiusClamped = 0;
 	double ms = 0;                          //!< wall time of the run
 	double msKernel[5] = { 0, 0, 0, 0, 0 }; //!< GPU: direct, gather (all), feed (all), grid, readback
+	double msShare = 0;                     //!< lane GPURELIGHT1 (10-23): Probe sharing (GPU: its two kernels)
+	double shareNuMean = 0, shareMoved = 0; //!< mean weight of the probes' own noise; sum |E' - E| / sum E
 };
+
+/* lane GPURELIGHT1 (10-23) Probe sharing: a probe gathered from few bright links is noisy (its estimate's relative
+ * error ~ sqrt(sum L^2) / sum L, the SVGF variance guide); it takes nu x its clear same-room neighbours' light in one
+ * normalized step: E' = (E + sum nu g E_j) / (1 + sum nu g). Sky-lit probes (m1 holds the sky) keep nu near 0. */
+constexpr double kProbeShareReach = 1.5;   // x the median probe spacing: the 6 face neighbours of a lattice, not the 12 edge ones
+inline double probeShareLum( double r, double g, double b ) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
+//! nu from a probe's link sums (sum, sum of squares of the per-link luminance), its unlinked factor and its sky luminance
+inline double probeShareNu( double sum, double sq, double kUnl, double skyLum )
+{
+	const double m1 = kUnl * sum + skyLum;
+	if ( m1 <= 0.0 )
+		return 0.0;
+	const double nu = kUnl * std::sqrt( sq ) / m1;
+	return nu < 1.0 ? nu : 1.0;
+}
 
 //! The relight from the operators, in double (the CPU reference; the same sums as probeGiRelight)
 bool probeRelightCpu( const ProbeRelightOps & ops, const ProbeRelightState & st, ProbeRelightOut * out, QString * err );

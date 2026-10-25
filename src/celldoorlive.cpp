@@ -2,6 +2,7 @@
 #include "wwswitch.h"	// lane LIVESET1: the request follows a live set
 
 #include "gl/celllights.h"
+#include "gl/celllooks.h"	// lane GPURELIGHT1: Probe sharing
 #include "gl/glcontroller.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -77,6 +78,7 @@ struct Kept
 	std::unique_ptr<WwCellGi> base;
 	ProbeRelightOut open;	// the all-open run (the bake's state)
 	bool haveOpen = false;
+	bool share = false;	// lane GPURELIGHT1: Probe sharing as the base was relit (the runs match the base)
 	int slot = -1;
 	float floorP[3] = { 0, 0, 0 };
 	bool haveFloor = false;
@@ -426,6 +428,7 @@ void relight( Kept & k, float shut )
 	QString why;
 	if ( !k.haveOpen ) {
 		ProbeRelightState st;
+		st.share = k.share;
 		k.haveOpen = runState( k, st, &k.open, &why );
 		if ( !k.haveOpen ) {
 			k.giKept = false;
@@ -437,6 +440,7 @@ void relight( Kept & k, float shut )
 	const size_t nVox = size_t( k.ops->nVox );
 	if ( shut > 0.0f ) {
 		ProbeRelightState st;
+		st.share = k.share;
 		st.doorShut.assign( k.ops->doorRefs.size(), 0.0f );
 		st.doorShut[size_t( k.slot )] = shut;
 		ProbeRelightOut o;
@@ -647,6 +651,7 @@ QString wwDoorLiveKeepGi( const void * nif, const ProbeRelightOps & ops, const W
 	}
 	k.ops = std::make_unique<ProbeRelightOps>( ops );
 	k.base = std::make_unique<WwCellGi>( gi );
+	k.share = wwLookOn( WwLook::ProbeShare );
 	k.gpu.reset();
 	k.gpuTried = k.gpuOk = false;
 	k.haveOpen = false;

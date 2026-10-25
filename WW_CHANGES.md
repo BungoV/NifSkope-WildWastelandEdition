@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GPURELIGHT1 round 2 (2026-10-23, branch gpurelight1-20261023): neighbouring probes share irradiance
+
+- **Row:** cell view Show menu > Probe sharing (off), key `WW/CellGiShare`, live. `WW_CELL_GI_SHARE=1` / `=0` pins it.
+  On, a probe whose own gather is thin (few or uneven bounce links, little sky) borrows irradiance from neighbouring
+  probes within 1.5 x the probe spacing. A neighbour counts only in the same room (ROOMCLAMP1) and with the soup segment
+  between them clear; closed doors cut the link as the grid blend's do. Probes under open sky keep their value. Off = the
+  old relight bit for bit.
+- Runs as one step after the last bounce pass in the ray relight, the CPU relight and the GPU relight (two new compute
+  kernels). Toggling it relights at once (probesky keeps every cell's relight now, not only sky-lit ones).
+- Red `WW_CELL_GI_SHARE_RED=nowall`: no room or wall test (light crosses walls; must look wrong).
+- Gates (`-no-gui gpurelight`): S wall (14 entries cross the test wall, all at doorways, 0 elsewhere; the red: 4
+  through the wall), S doors, P share (CPU = ray relight, 0), G share (GPU = CPU, 1.0e-6). Share step 1.2 ms GPU per
+  relight on the test scene; nothing is added to the per-frame draw.
+- Dump: `gi_share.bin` (lists, weights, strength per probe) beside the other GI dumps when sharing is on.
+- Known limit: a door animating live keeps the sharing state it started with until its next setup.
+
+## Lane GIBAKE2 (2026-10-23, branch gibake2-20261023): bake soup census, GPU ray edges, wide exposure
+
+- **Row:** cell view Show menu > Wide exposure range (off), key `WW/CellExposureWide`, live. `WW_CELL_EXPOSURE_WIDE=1` / `=0`
+  pins it. On, the eye may open up to 16 instead of the imagespace's own cap (about 3.25 at noon), so a dim room lit
+  only by GI is not held dark. Off = the game's clamp, as before.
+- **GPU bake rays at triangle edges (RTGI1-CONCORD):** the hardware triangles are grown in their own plane by
+  4e-6 x (scene size + 1) units (0.4 u at Concord) so the float ray test reports every triangle the double re-test
+  can accept; answers still come from the true triangles. The bake census prints `BLAS grown ...`. Red
+  `WW_BAKE_RT_INFLATE_RED=off`. Check mode prints the first 20 rays whose GPU and CPU answers differ.
+  Unit gate tests/bakert_grow_gate.cpp (plain g++): 630917 edge rays, 0 missed (red: 16989). Rays within 0.1 degree
+  of the triangle's plane can still differ; the CPU walk catches them only if flagged unsure.
+- **Bake soup census:** two new lines, placed weapons (in the soup / with mod parts) and placed particle effects left
+  out (with a lit placed light within 256 units). Weapons stay out (pick-up items, BAKE4); particles stay out because
+  the placed light carries the fire's light (NEONGI1).
+
 ## Lane DECK1 (2026-10-23, branch deck1-20261023): a path-traced reference picture to judge the GI against
 
 - **New offline tool `tests/path_reference.cpp`** (plain g++, no Qt, opens no window): a per-pixel multi-bounce path

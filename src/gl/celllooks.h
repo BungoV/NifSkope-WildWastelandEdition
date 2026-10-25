@@ -22,6 +22,8 @@ enum class WwLook : int
 	WeaponParts,		// MISS1 (GAPLOOK2): placed weapons get their default mod parts on the connect points (WW_CELL_WEAP_PARTS)
 	WorldAnim,			// FXPARITY2: the cell's world clock runs controllers, particles, water scroll (WW_CELL_WORLDANIM)
 	AnimObjects,		// FXPARITY2: placed models with controllers are copied whole, not welded (WW_CELL_ANIMOBJ)
+	ExposureWide,		// GIBAKE2 (GISHADE1): the eye may open past the imagespace's exposure cap, to 16 (WW_CELL_EXPOSURE_WIDE)
+	ProbeShare,			// GPURELIGHT1: neighbouring probes share light, never across a wall (WW_CELL_GI_SHARE)
 	Count
 };
 

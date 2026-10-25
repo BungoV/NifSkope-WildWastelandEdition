@@ -5539,6 +5539,38 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			for ( auto it = veilLeftOut.constBegin(); it != veilLeftOut.constEnd(); ++it )
 				t << " " << it.key() << " " << it.value() << ";";
 			t << "\n" << veilModels;
+			/* lane GIBAKE2: placed weapons and placed particles, counted. A weapon is a pick-up item (BAKE4: left
+			 * out); let in by WW_CELL_PROBE_SOUP_RED=items it carries its mod parts when the Weapon mod parts row is on.
+			 * Particles stay out: a placed light within 256 units carries the fire's light (NEONGI1's rule). */
+			{
+				int wTotal = 0, wSoup = 0, wParts = 0, pfxRefs = 0, pfxNear = 0;
+				QSet<QString> pfxModelSet;
+				for ( const Placement & p : placements ) {
+					if ( !p.actorKey.isEmpty() || p.disabled || p.cable )
+						continue;
+					const EsmLodBase & lb = world.lodBase( p.base );
+					if ( CellPickTable::typeName( lb.type ) == QLatin1String( "WEAP" ) ) {
+						wTotal++;
+						wSoup += soupRole( QStringLiteral( "WEAP" ) ) == 1 ? 1 : 0;
+						wParts += weapons.wants( p.base ) ? 1 : 0;
+					}
+					if ( lb.model.isEmpty() || !lodgenModelHasParticles( lb.model ) )
+						continue;
+					pfxRefs++;
+					pfxModelSet.insert( lb.model.toLower() );
+					for ( const EsmRefr & lr : lightRefs ) {
+						const float dx = lr.pos[0] - p.pos[0], dy = lr.pos[1] - p.pos[1], dz = lr.pos[2] - p.pos[2];
+						if ( dx * dx + dy * dy + dz * dz <= 256.0f * 256.0f && !startsDisabled( lr ) ) {
+							pfxNear++;
+							break;
+						}
+					}
+				}
+				t << "  probe soup placed weapons: " << wTotal << " (in the soup " << wSoup << ", with mod parts " << wParts
+				  << ( wwLookOn( WwLook::WeaponParts ) ? "" : "; Weapon mod parts row off" ) << ")\n";
+				t << "  probe soup placed particles left out: placements " << pfxRefs << " of " << pfxModelSet.size()
+				  << " models (models loaded this build only), with a placed light lit within 256 units " << pfxNear << "\n";
+			}
 			// lane CAPTURE1: refraction-only shapes left out of the soup, per model
 			t << "  probe soup refraction-only shapes left out " << soupRefractShapes << " (" << soupRefractTris
 			  << " triangles)" << ( refractKeepRed ? " RED keep: kept as surfaces" : "" );
@@ -6126,6 +6158,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			gs.passes = wwEnvInt( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
 			gs.rooms.red = QString::fromLatin1( wwEnv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
 			gs.space = volGiOn ? volGi : nullptr;   // lane VOLFIT1: WW_CELL_VOLUMES_GI=1, the Space rooms are the GI's rooms
+			// lane GPURELIGHT1 (10-23): Probe sharing (Show menu); a later tick relights through probesky.cpp
+			gs.share = wwLookOn( WwLook::ProbeShare );
+			gs.shareRed = wwEnvStr( "WW_CELL_GI_SHARE_RED" ).trimmed();
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
 			// lane SKYINT1: and an interior whose cell shows the sky (the sun where Use Sky Lighting + Sunlight Shadows)
 			const quint16 cf = spec.interior ? cellInteriorFlags( world.interior() ) : quint16( 0 );
@@ -6218,6 +6253,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				probeNotes += QStringLiteral( "  %1\n" ).arg( probeRelightCensusText( relOps ) );
 				ProbeRelightState open, shut;
 				shut.doorClosed.assign( relOps.doorRefs.size(), 1 );
+				open.share = shut.share = gs.share;   // lane GPURELIGHT1: the timings with Probe sharing as drawn
 				ProbeRelightOut co, cs, go, gsh;
 				QString why;
 				const bool cok = probeRelightCpu( relOps, open, &co, &why ) && probeRelightCpu( relOps, shut, &cs, &why );
@@ -6248,6 +6284,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						.arg( go.msKernel[1], 0, 'f', 1 ).arg( gpu.msUpload(), 0, 'f', 1 ).arg( rel( go.B, co.B ), 0, 'g', 3 )
 						.arg( relOps.doorRefs.size() ).arg( cs.ms, 0, 'f', 1 ).arg( gsh.ms, 0, 'f', 1 ).arg( rel( gsh.B, cs.B ), 0, 'g', 3 )
 						.arg( cs.slotsEmptied ).arg( sum( cs.B ) / std::max( sum( co.B ), 1e-30 ), 0, 'f', 4 );
+				if ( cok && gok && gs.share )
+					probeNotes += QStringLiteral( "  gi relight share (GPURELIGHT1): GPU %1 ms, CPU %2 ms, mean nu %3, E moved %4 %, GPU vs CPU E %5\n" )
+						.arg( go.msShare, 0, 'f', 2 ).arg( co.msShare, 0, 'f', 1 ).arg( co.shareNuMean, 0, 'f', 4 )
+						.arg( 100.0 * co.shareMoved, 0, 'f', 3 ).arg( rel( go.E, co.E ), 0, 'g', 3 );
 				const QString recDir = QString::fromLocal8Bit( wwEnv( "WW_CELL_GI_RECORDS" ) );
 				if ( !recDir.isEmpty() ) {
 					QString rerr, rcensus;
@@ -6380,8 +6420,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						wwCellFarPublish( nif, fr );
 					}
 				}
-				if ( !spec.interior || gs.interiorSky )
-					probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather relights it
+				// a later change of weather (sky-lit cells) or of Probe sharing (every cell, lane GPURELIGHT1) relights it
+				probeSkyKeep( nif, probeSoup, giBakeDir, gs, !spec.interior || gs.interiorSky );
 				PassTime::memLog( "GI relit" );	// lane PERF1
 				WwCellProbeView pv;	// lane PROBEVIEW1: the surfel and probe previews
 				pv.surfelCell = gr.surfelCell;
