@@ -103,6 +103,7 @@ struct Kept
 	float frac = 0.0f;		// the open fraction now
 	float relitShut = 0.0f;	// the shut fraction the GI shows (the bake: open)
 	bool relitAny = false;
+	size_t airMoved = 0;	// SKY3: air voxels the last relight moved
 	bool pending = false;
 	double relightMs = 0;
 	int relights = 0;
@@ -457,8 +458,46 @@ void relight( Kept & k, float shut )
 		add( 0, o.grid, k.open.grid );
 		if ( gi.rgba.size() >= nVox * 48 )
 			add( nVox * 24, o.grid2, k.open.grid2 );
+		/* SKY3: the air volume follows the door as the grid does: each voxel adds its recorded probes' change (shut run
+		 * minus open run). It kept the bake's air before. Red WW_CELL_DOORLIVE_AIR_RED=1: the bake's air, as before. */
+		k.airMoved = 0;
+		const size_t kT = size_t( ProbeRelightOps::kAirTaps );
+		const size_t na = size_t( gi.airDims[0] ) * size_t( gi.airDims[1] ) * size_t( gi.airDims[2] );
+		const size_t np = size_t( k.ops->probes );
+		if ( wwEnv( "WW_CELL_DOORLIVE_AIR_RED" ).trimmed() != "1" && na > 0 && gi.air.size() == na * 24
+			&& k.ops->airProbe.size() == na * kT && o.E.size() == np * 18 && k.open.E.size() == np * 18 ) {
+			std::vector<quint8> moved( np, 0 );
+			for ( size_t p = 0; p < np; p++ )
+				for ( int e = 0; e < 18 && !moved[p]; e++ )
+					moved[p] = o.E[p * 18 + size_t( e )] != k.open.E[p * 18 + size_t( e )] ? 1 : 0;
+			size_t airMoved = 0;
+			for ( size_t v = 0; v < na; v++ ) {
+				double d[6][3] = {};
+				bool any = false;
+				for ( size_t t = 0; t < kT; t++ ) {
+					const int p = k.ops->airProbe[v * kT + t];
+					if ( p < 0 || size_t( p ) >= np || !moved[size_t( p )] )
+						continue;
+					any = true;
+					const double w = k.ops->airW[v * kT + t];
+					for ( int a = 0; a < 6; a++ )
+						for ( int c = 0; c < 3; c++ )
+							d[a][c] += w * ( double( o.E[size_t( p ) * 18 + size_t( a * 3 + c )] ) - k.open.E[size_t( p ) * 18 + size_t( a * 3 + c )] );
+				}
+				if ( !any )
+					continue;
+				airMoved++;
+				for ( int a = 0; a < 6; a++ )
+					for ( int c = 0; c < 3; c++ ) {
+						float & A = gi.air[( size_t( a ) * na + v ) * 4 + size_t( c )];
+						A = std::max( 0.0f, float( double( A ) + d[a][c] ) );
+					}
+			}
+			k.airMoved = airMoved;
+		}
 		k.floorE = k.haveFloor ? upE( gi.rgba, nVox, voxelOf( gi, k.floorP ) ) : -1.0f;
 	} else {
+		k.airMoved = 0;
 		k.floorE = k.haveFloor ? upE( gi.rgba, nVox, voxelOf( gi, k.floorP ) ) : -1.0f;	// fully open: the bake exactly
 	}
 	wwCellGiPublish( k.nif.data(), gi );
@@ -472,7 +511,7 @@ QString echoOf( const Kept & k )
 {
 	const char * red = req().red == RedStatic ? "static" : req().red == RedSnap ? "snap" : "none";
 	return QStringLiteral( "door live: ref %1 state %2 open %3 relight %4 ms (%5, relights %6) gi %7 shut %8 floor E %9 "
-		"| drive %10 seq %11 red %12" )
+		"| drive %10 seq %11 red %12 | air moved %13" )
 		.arg( k.ref, 8, 16, QLatin1Char( '0' ) ).arg( k.state ).arg( double( k.frac ), 0, 'f', 3 )
 		.arg( k.relightMs, 0, 'f', 2 ).arg( k.gpuOk ? QStringLiteral( "gpu" ) : k.gpuTried ? QStringLiteral( "cpu" ) : QStringLiteral( "-" ) )
 		.arg( k.relights )
@@ -481,7 +520,7 @@ QString echoOf( const Kept & k )
 		.arg( k.hinge ? QStringLiteral( "hinge fallback (no Open/Close sequence)" ) : QStringLiteral( "sequence" ) )
 		.arg( k.hinge ? QStringLiteral( "-" ) : ( k.seqOpen.isEmpty() ? QStringLiteral( "Close reversed" ) : k.seqOpen )
 			+ QLatin1Char( '/' ) + ( k.seqClose.isEmpty() ? QStringLiteral( "Open reversed" ) : k.seqClose ) )
-		.arg( QLatin1String( red ) );
+		.arg( QLatin1String( red ) ).arg( qint64( k.airMoved ) );
 }
 
 //! poses the door at clock s; returns true when the pose (open fraction) changed

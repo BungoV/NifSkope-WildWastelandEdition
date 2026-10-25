@@ -1063,6 +1063,7 @@ bool drawCube( Scene * scene, bool glow );
  * write light, not a display picture: exposure 1 and view transform 3 (lookdev_output.glsl: linear, unclamped).
  * Otherwise these are the view's own, so every drawn frame is unchanged. */
 bool g_skyCapture = false;
+float g_skyCaptureZ = NAN;	// SKY3: the probes' height for the physical sky's capture (NaN: the view's, as before)
 float skyExposure()
 {
 	return g_skyCapture ? 1.0f : wwSceneExposureScale();
@@ -1779,6 +1780,8 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
 	for ( int j = 0; j < 3; j++ )
 		in.camZ -= vt.rotation( j, 2 ) * vt.translation[j] / sc;
+	if ( capture && std::isfinite( g_skyCaptureZ ) )
+		in.camZ = g_skyCaptureZ;	// SKY3: the probes see the sky from where they stand, not from the view camera
 	in.disc = s.sun && !capture;	// lane SKYA (SKYGI1): the probes' capture has no disc (the sun is the bake's own term)
 	in.capture = capture;
 	in.exposure = skyExposure();
@@ -2153,6 +2156,11 @@ QString wwLookdevSkyPictureKey()
 		// lane SKYA (SKYGI1): only while the probes take the physical sky (Off: today's key, character for character)
 		+ ( wwAtmoGiActive() ? QStringLiteral( "|atmo gi tier %1 tint %2 red %3" ).arg( wwAtmoTier() ).arg( wwAtmoTint() )
 			.arg( wwAtmoGiRedDome() ? 1 : 0 ) : QString() );
+}
+
+void wwLookdevSetSkyCaptureZ( float z )
+{
+	g_skyCaptureZ = z;
 }
 
 bool wwLookdevCaptureSky( Scene * scene, int n, const float * flatRgb, WwSkyPicture & out, QString * why )

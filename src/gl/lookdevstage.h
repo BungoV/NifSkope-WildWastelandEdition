@@ -206,5 +206,7 @@ void wwSkyPictureFace( int face, float F[3], float R[3], float U[3] );
 QString wwLookdevSkyPictureKey();
 //! needs the view's GL context current. flatRgb (a control): a sky of that one colour, nothing drawn.
 bool wwLookdevCaptureSky( Scene * scene, int n, const float * flatRgb, WwSkyPicture & out, QString * why );
+//! SKY3: the world z the physical sky is captured from (the probes' median height); NaN = the view camera's
+void wwLookdevSetSkyCaptureZ( float z );
 
 #endif

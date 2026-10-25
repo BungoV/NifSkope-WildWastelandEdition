@@ -37,6 +37,10 @@
 #ifndef WW_SUNSHADOW
 #include "ww_sunshadow.glsl"
 #endif
+// SKY3: a puff reads the air's own filled volume as the air pass does, not the grid's shell (red WW_CELL_PARTICLES_AIR_RED=1)
+#ifndef WW_AIR_GIVOL
+#define WW_AIR_GIVOL 1
+#endif
 #include "cell_airmed.glsl"
 uniform int volPart;			// 0 off: the law above, as before; 1 on
 uniform int volPartRed;			// gates only: 1 flat, 2 nothick, 4 nosoft, 8 nolights, 16 white, 32 nofog, 64 noshadow,

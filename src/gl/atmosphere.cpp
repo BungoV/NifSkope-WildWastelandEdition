@@ -878,6 +878,11 @@ bool wwAtmoGiRedDome()
 	return wwEnvStr( "WW_ATMO_GI_RED" ).trimmed().toLower() == QLatin1StringView( "dome" );
 }
 
+bool wwAtmoGiRedCamZ()
+{
+	return wwEnvStr( "WW_ATMO_GI_RED" ).trimmed().toLower() == QLatin1StringView( "camz" );
+}
+
 int wwAtmoTint()
 {
 	return as().tint;

@@ -115,6 +115,7 @@ void wwAtmoSetGi( int on );	//!< refused while WW_ATMO_GI pins it
 bool wwAtmoGiPinned();
 bool wwAtmoGiActive();	//!< the row on and Physical Sky on: the capture takes the physical sky
 bool wwAtmoGiRedDome();
+bool wwAtmoGiRedCamZ();	//!< SKY3 red: the capture from the view camera's height, not the probes'
 
 QString wwAtmoSummary();
 

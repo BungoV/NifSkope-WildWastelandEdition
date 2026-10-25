@@ -675,6 +675,8 @@ void Particles::drawShapes( NodeList * secondPass )
 			 * program, the opaque pass's depth for the soft ball; off: volPart 0 and nothing else read */
 			wwSunShadowUniforms( scene );
 			volPart = wwVolPartUniforms( scene );
+			if ( wwEnv( "WW_CELL_PARTICLES_AIR_RED" ).trimmed() == "1" )
+				prog->uni1b( "cellGiAirOn", false );	// SKY3 red: the puff reads the grid's shell, as before
 			{
 				/* lane FXPARITY1: under the game's soft rule a particle whose effect shader is Soft fades near the
 				 * opaque surface behind it, as an effect card does (fo4_effectshader.frag cellFxFade) */
