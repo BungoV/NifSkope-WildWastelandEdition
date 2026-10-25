@@ -11,6 +11,7 @@
 #include "gl/atmosphere.h"	// SKY3: the physical sky's capture height
 #include "gl/scenelighting.h"
 #include "probegi.h"
+#include "gl/celllooks.h"	// lane LIGHTS5: the emittance row's live flip
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -244,7 +245,7 @@ struct Kept
 	QString bakeDir;
 	ProbeGiSpec spec;
 	ProbeSkyLight wanted;
-	bool skyKept = true;   // lane GPURELIGHT1: false = a cell kept only for Probe sharing (no weather relight)
+	bool skyKept = true;   // lane GPURELIGHT1: false = a cell kept only for Probe sharing or, lane LIGHTS5, for the emittance row (no weather relight)
 	QPointer<QTimer> timer;   // the view's child: it goes with the window
 	QPointer<QWindow> view;
 	Fade fade;   // lane GIPROBE2
@@ -402,11 +403,11 @@ void skyPicRelit( const ProbeGiResult & gr, const ProbeGiSpec & spec )
 	}
 }
 
-void relightKept()
+void relightKept( bool emitOnly = false )
 {
 	Kept & k = kept();
 	const WwCellLighting * L = k.nif ? wwCellLightsFor( k.nif ) : nullptr;
-	if ( !L || ( k.skyKept && L->interior && !k.spec.interiorSky ) )   // lane SKYINT1: an interior that shows the sky too
+	if ( !L || ( k.skyKept && L->interior && !k.spec.interiorSky && !emitOnly ) )   // lane SKYINT1: an interior that shows the sky too
 		return;
 	if ( k.skyKept )
 		k.spec.sky = k.wanted;
@@ -483,7 +484,7 @@ void probeSkyForget()
 	picNow() = PicNow();
 }
 
-void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec, bool sky )
+void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec, bool skyKept )
 {
 	Kept & k = kept();   // one cell at a time: the latest relit
 	k.nif = nif;
@@ -492,7 +493,7 @@ void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bak
 	k.spec = spec;
 	k.spec.record = nullptr;   // the caller's operators live on its stack; a later relight records nothing
 	k.wanted = spec.sky;
-	k.skyKept = sky;
+	k.skyKept = skyKept;
 	k.fade = Fade();   // lane GIPROBE2: a new cell's grid is published whole
 }
 
@@ -523,6 +524,16 @@ void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 			k.view = view;   // the fade's repaints
 		relightKept();
 		return;
+	}
+	if ( k.spec.emitBaked >= 0 ) {   // lane LIGHTS5: the "Emittance in bounce light" row, relit from the kept other state
+		const int want = wwLookOn( WwLook::BounceEmittance ) ? 1 : 0;
+		const bool stale = wwLookBounceEmitRedStale();
+		if ( want != k.spec.emitWant || stale != k.spec.emitStale ) {
+			k.spec.emitWant = want;
+			k.spec.emitStale = stale;
+			relightKept( true );
+			return;
+		}
 	}
 	if ( !k.skyKept )
 		return;

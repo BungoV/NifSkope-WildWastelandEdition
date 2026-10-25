@@ -44,6 +44,7 @@ enum class WwLook : int
 	LightPhysFalloff,	// LIGHTPHYS1: windowed 1/d^2 for placed lights, surfaces + effects + air (WW_CELL_LIGHT_PHYS)
 	LightAdvanced,		// LIGHTPHYS1: inverse square with a minimum distance; wins over the physical row (WW_CELL_LIGHT_ADV)
 	LightArea,			// LIGHTPHYS1: PBR specular from a sphere of 8 units, not a point (WW_CELL_LIGHT_AREA)
+	LightPatterns,		// GOBO1 (LIGHTS5): a spot light's pattern texture (LIGH gobo) on surfaces, effects and air (WW_CELL_GOBO)
 	Count
 };
 
@@ -58,6 +59,8 @@ bool wwLookHasRow( WwLook l );
 //! true when the look is read while the cell is built: the menu row reopens the cell
 bool wwLookReopens( WwLook l );
 void wwLookSet( WwLook l, bool on );
+//! lane LIGHTS5: red WW_CELL_XEMI_GI_RED=stale, the bounce emittance row's live flip keeps the baked Le
+bool wwLookBounceEmitRedStale();
 
 /* LIGHTSYS-3: the lamp-shadow budget. 0 Off (the 16 nearest shadow lights, as before); else at most N slots, ranked
  * by brightness x radius / distance with 20 % hysteresis; a light's shadow fades out over the last 25 % of score

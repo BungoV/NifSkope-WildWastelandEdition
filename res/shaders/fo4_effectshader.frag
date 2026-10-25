@@ -117,13 +117,16 @@ vec3 cellFxLight( int i, vec3 P )
 		a = pow( a, 2.2 );
 	if ( cellLightPhys.x > 0.5 && ( fxLitMode & 4 ) == 0 )	// lane LIGHTPHYS1: the surfaces' physical curve, so effects and air agree
 		a = cellPhysFalloff( a, q, t0.w, vec3( 0.0, 1.0, 2.0 ) );
+	vec3 g = vec3( 1.0 );	// lane LIGHTS5 (GOBO-FX): the spot's pattern, as on surfaces
 	if ( t1.w > -1.5 ) {	// a spot: the game's cone, its cosine + 0.001
 		vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
 		float c = clamp( dot( -Lv / max( d, 0.001 ), t2.xyz ), 0.0, 1.0 );
 		float base = clamp( 1.0 - ( 1.0 - c ) / max( 1.0 - ( t1.w + 0.001 ), 1e-4 ), 0.0, 1.0 );
 		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
+		if ( a > 0.0 )
+			g = cellGobo( i, -Lv, t2.xyz );
 	}
-	return t1.rgb * a;
+	return t1.rgb * g * a;
 }
 
 // what a lit effect's colour is multiplied by at P: mix( 1, directional + its lights, lighting influence )

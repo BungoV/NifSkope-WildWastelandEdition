@@ -232,6 +232,10 @@ struct ProbeGiSpec
 	 *  blend and feed weight. depthVisRed (WW_CELL_GI_DEPTHVIS_RED): "flat" every texel the probe's mean (no direction) */
 	bool depthVis = false;
 	QString depthVisRed;
+	/*! lane LIGHTS5: the "Emittance in bounce light" state the bake took (-1 = no other state kept) and the one
+	 *  wanted now; they differ = take emitalt_*.bin. emitStale (red WW_CELL_XEMI_GI_RED=stale) keeps the baked Le. */
+	int emitBaked = -1, emitWant = -1;
+	bool emitStale = false;
 };
 
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.

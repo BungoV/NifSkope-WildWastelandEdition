@@ -154,11 +154,11 @@ bool ProbeAlbedo::alphaBytes( const QString & tex, int * w, int * h, std::vector
 	return true;
 }
 
-bool ProbeAlbedo::rgbBytes( const QString & tex, int * w, int * h, std::vector<unsigned char> * rgb )
+bool ProbeAlbedo::rgbBytes( const QString & tex, int * w, int * h, std::vector<unsigned char> * rgb, int cap )
 {
 	if ( tex.isEmpty() )
 		return false;
-	DDSTexture16 * t = decode( tex, 1024 );
+	DDSTexture16 * t = decode( tex, cap );
 	if ( !t )
 		return false;
 	*w = t->getWidth();

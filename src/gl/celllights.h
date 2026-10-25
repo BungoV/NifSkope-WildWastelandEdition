@@ -104,6 +104,13 @@ struct WwCellLight
 	int flicker = 0;
 	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;
 	float flickerAxes[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };	//!< the ref's local x, y, z in world, x its scale
+	//! lane LIGHTS5 (GOBO1): a spot's LIGH NAM0 pattern, the ref's local y and z in world, tan(FOV / 2)
+	QString gobo;
+	float goboY[3] = { 0, 1, 0 }, goboZ[3] = { 0, 0, 1 };
+	float goboTan = 0.0f;
+	//! lane LIGHTS5 (FOGSCALE1): the .recx keys of fog.scale: the LIGH (plugin file, local id, EditorID) and the placed ref
+	QString recxBasePlugin, recxBaseEdid, recxRefPlugin;
+	quint32 recxBaseLocal = 0, recxRefLocal = 0;
 };
 
 //! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
@@ -172,6 +179,8 @@ struct WwCellLighting
 	 * back g, post), from XGDR, else the lighting template's WGDR, else the engine's fallback */
 	float godRay[12] = { 0.60f, 1.52f, 3.31f, 2, 2, 2, 1, 1, 1, 0.75f, 0, 1 };
 	QString godRayNote = QStringLiteral( "fallback" );
+	QStringList recxPlugins;			//!< lane LIGHTS5 (FOGSCALE1): the load order's files (recx.h roots and merge order)
+	QString recxData;					//!< the game's Data folder
 	QString summary;                    //!< one census line
 };
 

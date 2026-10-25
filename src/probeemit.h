@@ -58,6 +58,9 @@ struct ProbeEmit
 	{
 		float e[3] = { 0, 0, 0 };   // glowColor x glowMult (sqrt-of-linear)
 		int map = -1;               // into `maps`; -1 = the whole surface glows
+		// lane LIGHTS5: the colour under the other "Emittance in bounce light" state, so the bake can keep both
+		bool hasAlt = false;
+		float alt[3] = { 0, 0, 0 };
 	};
 	struct Tri
 	{
@@ -71,15 +74,34 @@ struct ProbeEmit
 	std::vector<Tri> tris;
 
 	bool empty() const { return tris.empty(); }
+	bool hasAlt() const
+	{
+		for ( const Emitter & em : emitters )
+			if ( em.hasAlt )
+				return true;
+		return false;
+	}
 	bool emits( int tri ) const { return tri >= 0 && size_t( tri ) < triOf.size() && triOf[size_t( tri )] >= 0; }
+	//! lane LIGHTS5: emits() with a colour now (an emitter kept only for the other state has e = 0)
+	bool lit( int tri ) const
+	{
+		if ( !emits( tri ) )
+			return false;
+		const float * e = emitters[size_t( tris[size_t( triOf[size_t( tri )] )].emitter )].e;
+		return e[0] != 0.0f || e[1] != 0.0f || e[2] != 0.0f;
+	}
 	//! Linear Le at barycentrics (b1, b2) of soup triangle `tri` (adds nothing for a triangle that does not glow).
-	void le( int tri, double b1, double b2, double out[3] ) const
+	void le( int tri, double b1, double b2, double out[3] ) const { leOf( tri, b1, b2, out, false ); }
+	//! The same under the other state's colour (an emitter without one keeps its own).
+	void leAlt( int tri, double b1, double b2, double out[3] ) const { leOf( tri, b1, b2, out, true ); }
+	void leOf( int tri, double b1, double b2, double out[3], bool alt ) const
 	{
 		out[0] = out[1] = out[2] = 0.0;
 		if ( !emits( tri ) )
 			return;
 		const Tri & t = tris[size_t( triOf[size_t( tri )] )];
 		const Emitter & em = emitters[size_t( t.emitter )];
+		const float * ec = alt && em.hasAlt ? em.alt : em.e;
 		double g[3] = { 1.0, 1.0, 1.0 };
 		if ( em.map >= 0 ) {
 			const Map & mp = maps[size_t( em.map )];
@@ -95,7 +117,7 @@ struct ProbeEmit
 				g[k] = p[k] / 255.0;
 		}
 		for ( int k = 0; k < 3; k++ ) {
-			const double e = double( em.e[k] ) * g[k];
+			const double e = double( ec[k] ) * g[k];
 			out[k] = e * e;
 		}
 	}
