@@ -3864,6 +3864,23 @@ void GLView::paintGL()
 		glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
 		return;
 	}
+	// lane VIEWFULL1: Clean View masks the overlay options for this frame only (the menus keep theirs), as
+	// WW_RENDER_CLEAN does for harness shots; the selection goes too (Scene::cleanView)
+	struct CleanViewMask
+	{
+		QVector<QPair<Scene *, Scene::SceneOptions>> saved;
+		void add( Scene * s, bool on )
+		{
+			s->cleanView = on;
+			if ( !on )
+				return;
+			saved.append( { s, s->options } );
+			s->options = s->options & ~( Scene::ShowAxes | Scene::ShowGrid | Scene::ShowNodes | Scene::ShowCollision
+				| Scene::ShowConstraints | Scene::ShowMarkers );
+		}
+		~CleanViewMask() { for ( const auto & p : saved ) p.first->options = p.second; }
+	} cleanMask;
+	cleanMask.add( scene, cleanView );
 
 	// DO NOT add a per-frame scene->renderer->setViewport( 0, 0, pixelWidth,
 	// pixelHeight ) here. Tried 2026-07-27 as "harmless hardening" for the startup
@@ -4086,7 +4103,7 @@ void GLView::paintGL()
 		wwLookdevDrawGround( scene );
 	PassTime::end( PassTime::Background );
 
-	if ( drawLightPos ) {
+	if ( drawLightPos && !cleanView ) {
 		glEnable( GL_DEPTH_TEST );
 		glDepthMask( GL_TRUE );
 		glDepthFunc( GL_LESS );
@@ -4176,6 +4193,7 @@ void GLView::paintGL()
 				continue;
 			ws->transformDirty = true;
 			ws->transform( viewTrans, time );
+			cleanMask.add( ws, cleanView );
 			workspaceDrawScenes.append( ws );
 		}
 	}
@@ -4312,6 +4330,7 @@ void GLView::paintGL()
 	wwCellProbeViewDraw( scene, viewTrans );
 	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds (WW_CELL_VOLUMES_VIEW=1)
 
+	if ( !cleanView ) {	// lane VIEWFULL1: Clean View hides the paint helpers (block kept at its old indent)
 	// Selected-bone weight heatmap. Per-corner colours are supplied by the
 	// Rigging Manager, while the viewport owns only an ephemeral triangle soup.
 	if ( !riggingWeightPreviewSoup.isEmpty()
@@ -4505,6 +4524,7 @@ void GLView::paintGL()
 			glDepthFunc( GL_LESS );
 		}
 	}
+	}	// lane VIEWFULL1: end of the Clean View paint helpers
 
 	// Other open NIF documents form a neutral, read-only scene assembly around
 	// the active document. They do not participate in picking or saving. The
@@ -4555,7 +4575,7 @@ void GLView::paintGL()
 	// space. It is deliberately outside Scene, so it cannot be picked, saved,
 	// skinned, or confused with target blocks. Cyan distinguishes it from the
 	// amber Collision Manager preview and orange target selection.
-	if ( !riggingDonorPreviewSoup.isEmpty() && !scene->selecting
+	if ( !riggingDonorPreviewSoup.isEmpty() && !scene->selecting && !cleanView
 		&& ( riggingDonorPreviewFilled || riggingDonorPreviewWireframe ) ) {
 		glEnable( GL_DEPTH_TEST );
 		glDepthFunc( GL_LEQUAL );
@@ -4832,6 +4852,7 @@ void GLView::paintGL()
 		glDisable( GL_BLEND );
 	}
 
+	if ( !cleanView ) {	// lane VIEWFULL1: Clean View hides outlines, gizmos, wire/edit overlays, skeletons, origins
 	// Blender-style selection outlines around the object-mode selection
 	if ( model && !editMode && !objSelection.isEmpty() && !scene->selecting )
 		drawObjectOutlines();
@@ -5619,6 +5640,7 @@ void GLView::paintGL()
 		glDepthMask( GL_TRUE );
 		glEnable( GL_DEPTH_TEST );
 	}
+	}	// lane VIEWFULL1: end of the Clean View helpers
 
 	// The old GL corner axes indicator is replaced by the Blender-style
 	// navigation gizmo drawn with QPainter at the end of paintGL().
@@ -5643,7 +5665,7 @@ void GLView::paintGL()
 	// lane PERF1: the Frame Timers overlay (never in a harness grab: WW_RENDER_CLEAN keeps the frame clean)
 	WW_SWITCH_STATIC( bool, passTimeClean, wwEnvInt( "WW_RENDER_CLEAN" ) == 1 );
 	const QStringList passTimeLines = ( passTimeClean || scene->selecting ) ? QStringList() : PassTime::overlay();
-	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() ) {
+	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() ) ) {
 		// The scene passes (esp. collision wireframe) leave GL state that
 		// QPainter inherits: depth test on (so filled overlay shapes get
 		// depth-rejected against the geometry, while text glyphs survive - the
@@ -5832,8 +5854,8 @@ void GLView::paintGL()
 				painter.drawEllipse( sp, 1.8, 1.8 );
 			}
 		}
-		if ( freeCamera ) {
-			// fly-mode crosshair at the exact screen centre (always visible)
+		if ( freeCamera && showCrosshair ) {
+			// fly-mode crosshair at the exact screen centre (menu row "Crosshair", on by default)
 			painter.setRenderHint( QPainter::Antialiasing, true );
 			painter.setPen( QPen( QColor( 255, 255, 255, 220 ), 1.6 ) );
 			QPointF c( width() * 0.5, height() * 0.5 );
@@ -7236,6 +7258,13 @@ float GLView::gizmoSizeMul = 1.75f;
 float GLView::wireWidthMul = 1.0f;
 float GLView::vertexPointSize = 5.0f;
 float GLView::selLineWidth = 2.0f;
+
+bool GLView::escapeHasUse() const
+{
+	return freeCamera || gizmoMode != 0 || elemTransform || boxSelecting || circleSelecting || knifeActive
+		|| loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || physicsPreview.active()
+		|| ( editMode && !pickedElems.isEmpty() );
+}
 
 void GLView::setFreeCamera( bool on )
 {
@@ -23989,7 +24018,7 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 	}
 
 	// hover highlighting of the navigation gizmo balls
-	if ( !mouseButtonState && scene->hasOption( Scene::ShowAxes ) ) {
+	if ( !mouseButtonState && scene->hasOption( Scene::ShowAxes ) && !cleanView ) {
 		int h = navGizmoHitTest( getQMouseEventPosition( event ) );
 		int hoverBall = ( h >= 0 && h < 6 ) ? h : -1;
 		if ( hoverBall != navGizmoHover ) {
@@ -23999,7 +24028,7 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 	}
 
 	// hover highlighting of the gizmo handles
-	if ( gizmoHandlesOn && !mouseButtonState && model ) {
+	if ( gizmoHandlesOn && !cleanView && !mouseButtonState && model ) {
 		int h = gizmoHandleHitTest( getQMouseEventPosition( event ) );
 		if ( h != gizmoHover ) {
 			gizmoHover = h;
@@ -24250,7 +24279,7 @@ void GLView::mousePressEvent( QMouseEvent * event )
 	// Blender-style navigation gizmo: click an axis ball to snap the view,
 	// or click/drag the surrounding ring to orbit. Only plain left-clicks are
 	// intercepted so Shift/Ctrl multi-select clicks always reach the viewport.
-	if ( event->button() == Qt::LeftButton && scene->hasOption( Scene::ShowAxes )
+	if ( event->button() == Qt::LeftButton && scene->hasOption( Scene::ShowAxes ) && !cleanView
 		&& !( event->modifiers() & ( Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier ) ) ) {
 		int h = navGizmoHitTest( getQMouseEventPosition( event ) );
 		if ( h >= 0 && h < 6 ) {
@@ -24271,7 +24300,7 @@ void GLView::mousePressEvent( QMouseEvent * event )
 	// checked before element picking so the handles stay usable in edit mode.
 	// Ctrl is allowed: holding it from the start means "drag with snapping"
 	// (Blender), and it previously blocked the drag from ever starting.
-	if ( gizmoHandlesOn && event->button() == Qt::LeftButton && view != ViewWalk
+	if ( gizmoHandlesOn && !cleanView && event->button() == Qt::LeftButton && view != ViewWalk
 		&& !kbdState && !( event->modifiers() & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
 		auto p = getQMouseEventPosition( event );
 		int h = gizmoHandleHitTest( p );

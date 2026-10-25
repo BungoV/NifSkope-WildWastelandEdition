@@ -9784,6 +9784,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		wwWaterUiHarness( skope );
 	}
 
+	{
+		// lane VIEWFULL1: the full-screen viewport's gate (WW_VIEWFULL_TEST=1), src/viewfulltest.cpp
+		extern void wwViewFullHarness( NifSkope * );
+		wwViewFullHarness( skope );
+	}
+
 	// TEST HARNESS (WW_FILESTAB_TEST=1): lane FILESTAB's Files-tab gates.
 	// The whole harness is src/filestabtest.cpp; this is its only line here.
 	wwFilesTabHarness( skope );
@@ -23926,6 +23932,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( wwEnvInt( "WW_SKELETON_OVERLAY" ) != 0 )
 						skope->ogl->setSkeletonOverlay( true );
 
+					// lane VIEWFULL1: Clean View, the crosshair and flight pinned for a capture (never saved)
+					if ( wwEnvIsSet( "WW_CLEAN_VIEW" ) )
+						skope->ogl->cleanView = wwEnvInt( "WW_CLEAN_VIEW" ) != 0;
+					if ( wwEnvIsSet( "WW_CROSSHAIR" ) )
+						skope->ogl->showCrosshair = wwEnvInt( "WW_CROSSHAIR" ) != 0;
+					if ( wwEnvInt( "WW_RENDER_FREECAM" ) != 0 )
+						skope->ogl->freeCamera = true;
+
 					/* lane SKEL2: the armature's own switches, on the same
 					 * grounds -- a picture of a display mode, an X-ray state or
 					 * a Skeleton Manager chip has to be reproducible, and a
@@ -28724,6 +28738,27 @@ void NifSkope::initDockWidgets()
 			ogl->update();
 		} );
 		m->addAction( aOrigins );
+		// lane VIEWFULL1: the fly-mode crosshair, and Clean View (Blender's Overlays switch: the world only)
+		QAction * aCrosshair = new QAction( tr( "Crosshair" ), this );
+		aCrosshair->setObjectName( QStringLiteral( "aCrosshair" ) );
+		aCrosshair->setCheckable( true );
+		aCrosshair->setChecked( true );
+		connect( aCrosshair, &QAction::toggled, [this]( bool on ) {
+			ogl->showCrosshair = on;
+			ogl->update();
+		} );
+		m->addAction( aCrosshair );
+		QAction * aCleanView = new QAction( tlMakeIcon( QStringLiteral( "clean_view" ), icoColHdr ), tr( "Clean View" ), this );
+		aCleanView->setObjectName( QStringLiteral( "aCleanView" ) );
+		aCleanView->setCheckable( true );
+		aCleanView->setShortcut( QKeySequence( Qt::SHIFT | Qt::ALT | Qt::Key_Z ) );
+		connect( aCleanView, &QAction::toggled, [this]( bool on ) {
+			ogl->cleanView = on;
+			ogl->update();
+		} );
+		addAction( aCleanView );	// the key works while the header is hidden (full screen)
+		m->addSeparator();
+		m->addAction( aCleanView );
 
 		// checked rows read as filled, so an icon-bearing toggle still shows
 		// its state even though QMenu gives the checkmark no column of its own
@@ -28747,6 +28782,8 @@ void NifSkope::initDockWidgets()
 			persist( aBillboard,    QStringLiteral( "GLView/Display/Billboards" ) );
 			persist( aOrbitSel,     QStringLiteral( "GLView/Display/OrbitSelection" ) );
 			persist( aShowSkeleton, QStringLiteral( "GLView/Display/ShowSkeleton" ) );	// lane SKELOVERLAY
+			persist( aCrosshair,    QStringLiteral( "GLView/Display/Crosshair" ) );	// lane VIEWFULL1
+			persist( aCleanView,    QStringLiteral( "GLView/Display/CleanView" ) );	// lane VIEWFULL1
 		}
 
 		/* Everything else in here loses its colour.
@@ -29229,6 +29266,13 @@ void NifSkope::initDockWidgets()
 		wwGroupBreak( ui->tRender );
 		if ( auto * overlays = findChild<QToolButton *>( QStringLiteral( "ViewportOverlaysButton" ) ) )
 			ui->tRender->addWidget( overlays );
+		if ( auto * aClean = findChild<QAction *>( QStringLiteral( "aCleanView" ) ) ) {	// lane VIEWFULL1
+			QToolButton * cleanButton = new QToolButton( this );
+			cleanButton->setObjectName( QStringLiteral( "ViewportCleanViewButton" ) );
+			cleanButton->setDefaultAction( aClean );
+			cleanButton->setAutoRaise( true );
+			ui->tRender->addWidget( cleanButton );
+		}
 
 		// Blender-style X-ray (Alt+Z): combines with any shading mode; sits
 		// left of the shading buttons like Blender's header
@@ -29590,6 +29634,21 @@ void NifSkope::initDockWidgets()
 			sceneButton->setDefaultAction( aScene );
 			sceneButton->setAutoRaise( true );
 			ui->tRender->addWidget( sceneButton );
+		}
+		// lane VIEWFULL1: the viewport fills the screen; F11 or Esc leaves
+		{
+			QAction * aFull = new QAction( tlMakeIcon( QStringLiteral( "fullscreen" ), icoColHdr ), tr( "Full Screen" ), this );
+			aFull->setObjectName( QStringLiteral( "aViewportFullScreen" ) );
+			aFull->setShortcut( QKeySequence( Qt::Key_F11 ) );
+			connect( aFull, &QAction::triggered, this, [this]() { toggleViewportFullScreen(); } );
+			addAction( aFull );	// the key works while every bar is hidden
+			if ( ui->mView )
+				ui->mView->addAction( aFull );
+			QToolButton * fullButton = new QToolButton( this );
+			fullButton->setObjectName( QStringLiteral( "ViewportFullScreenButton" ) );
+			fullButton->setDefaultAction( aFull );
+			fullButton->setAutoRaise( true );
+			ui->tRender->addWidget( fullButton );
 		}
 
 		auto currentShadeMode = std::make_shared<int>( 2 );
@@ -34992,6 +35051,14 @@ void NifSkope::applyShortcutOverrides()
 	settings.endGroup();
 }
 
+void NifSkope::toggleViewportFullScreen()
+{
+	viewFull.setExtraChrome( { viewportHeader } );
+	viewFull.toggle();
+	if ( ogl )
+		ogl->update();
+}
+
 bool NifSkope::eventFilter( QObject * o, QEvent * e )
 {
 	/* EVERY top-level window of a headless run, not just the main one
@@ -35283,6 +35350,17 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		 * why it read as "the decimal key does not work".
 		 */
 		const bool modalTransform = ogl && ( ogl->gizmoMode || ogl->elemTransform );
+		// lane VIEWFULL1: Esc leaves the full-screen viewport unless a viewport mode owns Esc (flight exits first)
+		const bool keyIsMine = o == ogl || o == windowHandle()
+			|| ( o->isWidgetType() && static_cast<QWidget *>( o )->window() == this );
+		if ( ke->key() == Qt::Key_Escape && ke->modifiers() == Qt::NoModifier && viewFull.active() && keyIsMine
+			&& !keyFocusIsTextInput && !QApplication::activePopupWidget() && !QApplication::activeModalWidget()
+			&& !( ogl && ogl->escapeHasUse() ) ) {
+			if ( e->type() == QEvent::KeyPress )
+				toggleViewportFullScreen();
+			e->accept();
+			return true;
+		}
 		// loop cut is modal: Esc cancels, Enter confirms, digits/+/-/Backspace
 		// set the cut count; every other single-key viewport shortcut stays
 		// inert while it is armed
