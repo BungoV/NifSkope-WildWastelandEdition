@@ -218,6 +218,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 int cellLiveSections( NifModel * nif, QString * why );
 //! lane LIVESET1: the PRTP band's Show probes in place; 1 done, 2 a reopen is needed
 int cellLiveProbesShow( NifModel * nif, bool show, QString * why );
+/*! lane FAR6 (the shape of LIVESET4's): a menu look built into the far LOD (Game LOD trees sway) in place;
+ *  0 nothing moved, 1 rebuilt, 2 a reopen is needed (`why` says why) */
+int cellLiveRebuild( NifModel * nif, QString * why );
 
 /*! lane SUNCELL1: the Particles row (WW/CellParticles, env pin WW_CELL_PARTICLES, ships OFF): a placed model's
  *  particle systems are copied into the cell (read when the cell opens). */

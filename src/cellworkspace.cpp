@@ -839,10 +839,24 @@ void CellWorkspacePanel::buildUi()
 		if ( glView )
 			glView->update();
 	} );
+	// lane FAR6 (bungo: settings update live, like games): the far LOD rebuilds in place when it can
+	auto liveFirst = [this]() {
+		QString why;
+		const int r = cellLiveRebuild( nif, &why );
+		if ( r == 2 )
+			return false;	// the reopen below
+		if ( r == 1 )
+			say( why, false );
+		if ( glView )
+			glView->update();
+		return true;
+	};
 	for ( int k = 0; k < lookActions.size(); k++ )
-		connect( lookActions.at( k ), &QAction::toggled, this, [this, k]( bool on ) {
+		connect( lookActions.at( k ), &QAction::toggled, this, [this, k, liveFirst]( bool on ) {
 			wwLookSet( WwLook( k ), on );
 			if ( wwLookReopens( WwLook( k ) ) && !syncing && !g_path.isEmpty() ) {	// lane GAPLOOK2: built when the cell opens
+				if ( WwLook( k ) == WwLook::BtoSway && liveFirst() )
+					return;
 				g_over = g_spec;
 				g_haveOverrides = true;
 				say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );

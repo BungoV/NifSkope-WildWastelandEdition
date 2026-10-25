@@ -49,6 +49,8 @@ OVERRIDES = {
     'WW_CELL_FARLOD_BUDGET_MB': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_OURS': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_SWAY': ('live', 'rebuilt in place (live section); the draw re-reads it per frame'),
+    'WW_CELL_FARLOD_BTOSWAY': ('live', 'rebuilt in place (live section, lane FAR6)'),
+    'WW_CELL_FARLOD_BTOSWAY_RED': ('live', 'rebuilt in place (live section, lane FAR6)'),
     'WW_CELL_FARLOD_NEAR': ('live', 'wwCellFarLodNear: re-read per frame'),
     'WW_CELL_FARLOD_SWAYTIME': ('live', 'swayTime: re-read per frame'),
     'WW_CELL_FARLOD_CARDSWAY': ('live', 'wwCellFarLodCards: re-read per frame'),

@@ -1845,6 +1845,8 @@ QByteArray liveFarKey()
 			"WW_CELL_FARLOD_L1", "WW_CELL_FARLOD_L2", "WW_CELL_FARLOD_TREE_DIST", "WW_CELL_FARLOD_RINGS",
 			"WW_CELL_FARLOD_BUDGET_MB", "WW_CELL_FARLOD_OURS", "WW_CELL_FARLOD_SWAY" } )
 		k += wwEnv( n ) + '\x1f';
+	// lane FAR6: Game LOD trees sway is written into the .bto shapes at build; its menu tick lives in the settings
+	k += QByteArray( wwLookOn( WwLook::BtoSway ) ? "1" : "0" ) + wwEnv( "WW_CELL_FARLOD_BTOSWAY_RED" ) + '\x1f';
 	return k;
 }
 
@@ -2058,6 +2060,25 @@ int cellLiveProbesShow( NifModel * nif, bool show, QString * why )
 	if ( why )
 		*why = w;
 	return r == 2 ? 2 : 1;
+}
+
+int cellLiveRebuild( NifModel * nif, QString * why )
+{
+	auto it = liveDocs().find( nif );
+	if ( !nif || it == liveDocs().end() ) {
+		if ( why )
+			*why = QStringLiteral( "no live cell document" );
+		return 2;
+	}
+	QString w;
+	const int r = liveFar( nif, it->second, &w );
+	if ( r == 1 ) {
+		wwCellShadowsForget( nif );
+		wwSunShadowForget();
+	}
+	if ( why )
+		*why = w;
+	return r;
 }
 
 // lane CELLSTREAM1: the builder; `chunk` set = one streamed cell (n = 1), no document touched, stops before emit

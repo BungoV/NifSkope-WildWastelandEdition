@@ -141,6 +141,10 @@ struct Terrain
 	// lane FAR5: extra far-grid blocks under the tiers: 1 = the terrain-only heights (slope, ground band), 2 = also
 	// the terrain-only sweep (what an elevated receiver sees without the object-LOD casters)
 	int extra = 0, Nx = 0, pubExtra = 0;
+	// lane FAR6: per ray the height of the caster that set the lower-limb horizon, per texel encoded (the self-test)
+	std::vector<float> gCast;
+	std::vector<std::uint16_t> castOut;
+	bool wantCast = false;
 	int cards = -1;	// far cards cast this set (-1: Far tree card shadows off)
 
 	// GL
@@ -699,6 +703,8 @@ void startSweep( Terrain & t, const double toSun[3], bool flip, bool nodecay )
 	t.gHi.assign( size_t( rays ), kNoHeight );
 	t.nLo.assign( size_t( t.N ), kNoHeight );	// the current line's heights
 	t.out.assign( size_t( t.N ) * size_t( t.N ) * 2, 0 );
+	t.gCast.assign( t.wantCast ? size_t( rays ) : 0, kNoHeight );
+	t.castOut.assign( t.wantCast ? size_t( t.N ) * size_t( t.N ) : 0, 0 );
 	t.line = 0;
 	t.running = true;
 	t.sweepMs = 0;
@@ -758,11 +764,15 @@ void sweepLines( Terrain & t, int count, int & aLo, int & aHi )
 			const size_t o = ( size_t( j ) * size_t( N ) + size_t( i ) ) * 2;
 			t.out[o + 0] = encodeS( sLo, zmin, span );	// .x lit above (the lower limb clears)
 			t.out[o + 1] = encodeS( sHi, zmin, span );	// .y shadowed below (the upper limb is hidden)
+			if ( !t.castOut.empty() )
+				t.castOut[size_t( j ) * size_t( N ) + size_t( i )] = encodeS( pick( t.gCast ), zmin, span );
 		}
 		// then every ray meets the terrain under it on this line
 		for ( int r = 0; r < R; r++ ) {
 			const float h = sampleLine( t.nLo, double( r ) + c );
 			if ( h > kNoHeight ) {
+				if ( !t.gCast.empty() && h >= t.gLo[size_t( r )] )
+					t.gCast[size_t( r )] = h;
 				t.gLo[size_t( r )] = std::max( t.gLo[size_t( r )], h );
 				t.gHi[size_t( r )] = std::max( t.gHi[size_t( r )], h );
 			}
@@ -900,6 +910,7 @@ void runTerrJob( TerrJob * j )
 		rasterTerrain( wn, j->srcKept, j->stop );
 		j->rasterNear = false;
 	}
+	w.wantCast = j->extra >= 2;	// lane FAR6: the self-test reads the casters' heights
 	startSweep( w, j->toSun, j->flip, j->nodecay );
 	QElapsedTimer sw;
 	sw.start();
@@ -968,6 +979,9 @@ void runTerrJob( TerrJob * j )
 		j->hOut.assign( n * 2, 0 );
 		for ( size_t k = 0; k < n; k++ )
 			j->hOut[k * 2] = encodeS( w0.H[k], w.swLo, w.swSpan );
+		if ( w.castOut.size() == n )	// lane FAR6: the heights block's G = the full sweep's caster heights
+			for ( size_t k = 0; k < n; k++ )
+				j->hOut[k * 2 + 1] = w.castOut[k];
 		if ( j->extra >= 2 ) {
 			w0.encLo = w.swLo;
 			w0.encSpan = w.swSpan;
@@ -1322,7 +1336,8 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 		.arg( t.frameMax, 0, 'f', 3 ).arg( t.upMs, 0, 'f', 3 ).arg( s.tmTerrain.ms, 0, 'f', 4 ).arg( t.sweeps )
 		.arg( t.valid ? 1 : 0 ).arg( double( t.N ) * ( t.N + t.Nn + t.Nx ) * 4.0 * 2.0 / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
 		.arg( double( j.w.H.size() * 4 + j.w.out.size() * 2 + j.wn.H.size() * 4 + j.wn.out.size() * 2 + t.pubOut.size() * 2
-			+ j.prevOut.size() * 2 + j.prevNear.size() * 2 + j.w0.H.size() * 4 + j.w0.out.size() * 2 + j.hOut.size() * 2 )
+			+ j.prevOut.size() * 2 + j.prevNear.size() * 2 + j.w0.H.size() * 4 + j.w0.out.size() * 2 + j.hOut.size() * 2
+			+ j.w.castOut.size() * 2 + j.w.gCast.size() * 4 )
 			/ ( 1024.0 * 1024.0 ), 0, 'f', 1 )
 		.arg( t.Nn > 0 ? QStringLiteral( "%1x%2@%3(%4,%5)" ).arg( t.Nn ).arg( t.Nn ).arg( t.nT ).arg( t.nx0, 0, 'f', 0 ).arg( t.ny0, 0, 'f', 0 )
 			: QStringLiteral( "off" ) )
@@ -1952,6 +1967,12 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 				t.pubExtra >= 2 && !volume ? float( 2 * t.pubN + t.pubNn ) / rowsAll : 0.0f,
 				float( t.pubN ) / rowsAll, gateUp ? -1.0f : 250.0f )
 			: FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+		// lane FAR6: FO4CS's light-space self-test (bFarMapLightSpaceSelfTest, on in its ini) in place of the band:
+		// relief band 4 far texels, margin cap 100, the height quantum; reds =band (FO4CS's 0) and =norelief
+		const QString gateRed = wwEnvStr( "WW_SHADOW_GROUNDGATE_RED" );
+		const bool selfOn = t.pubExtra >= 2 && !volume && !gateUp && gateRed != QLatin1String( "band" );
+		prog->uni4f( "ussTerrSelf", FloatVector4( selfOn ? 1.0f : 0.0f,
+			gateRed == QLatin1String( "norelief" ) ? 0.0f : float( 4.0 * t.pubT ), 100.0f, t.pubSpan / 65535.0f ) );
 		prog->uni2f( "ussTerrSize", float( t.pubN ), float( t.pubNn ) );
 		// the disc penumbra and FO4CS's slope bias: surfaces only (the fog's froxels keep the plain lookup)
 		prog->uni4f( "ussTerrPen", FloatVector4( wwShadowPar( WwParPenumbra ) && !volume ? 1.0f : 0.0f, float( t.pubT ),

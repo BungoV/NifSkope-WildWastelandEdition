@@ -51,6 +51,7 @@ uniform vec4 ussTerrNearXform;		// the near window: u = x X.x + X.y, v = y X.z +
 uniform vec4 ussTerrPen;		// x the disc penumbra on, y the far texel, z tan(elev - sun radius), w tan(elev + sun radius)
 uniform vec4 ussTerrBias;		// x FO4CS's slope bias on, y max(sin elev, sin 1 deg), z the strength (low sun, moon), w the near texel
 uniform vec4 ussTerrExtra;		// lane FAR5: v offsets of the terrain-only heights and sweep (0: none), their v scale, the ground band
+uniform vec4 ussTerrSelf;		// lane FAR6: x the self-test on, y the relief band's low edge (0: no gate), z the margin cap, w the quantum
 uniform vec2 ussDim;			// the ambient / specular dimming in terrain shadow (FO4CS 0.5 / 0.5; 0 off)
 uniform int ussPbrDim;			// lane GAPLOOK1: 1 the PBR path dims its ambient + environment too, 2 red (the sun too)
 float ussLastTerr = 1.0;		// the terrain visibility of the last composition (cell_lights.glsl dims by it)
@@ -251,6 +252,27 @@ vec4 ussTerrHeights( vec2 uv )
 	return vec4( ussTerrRange.x + c * s, relief, g, 1.0 );
 }
 
+/*! lane FAR6 (FO4CS FarFieldMaskCS, the light-space self-test it ships on): how much of the full sweep's shadow counts
+ *  here -- FarLodOcclusionFade past the self margin times FarLodReliefGate on the caster's height over the receiver */
+float ussTerrSelfWeight( vec2 uv, float wz, vec4 h )
+{
+	vec2 rg = texture( ussTerrMap, ussTerrAtlasUv( uv, 0 ) ).rg;
+	float cast = texture( ussTerrMap, ussTerrExtraUv( uv, ussTerrExtra.x ) ).g;
+	if ( rg.x <= 0.0 || cast <= 0.0 )
+		return 1.0;
+	float s = ussTerrRange.x + rg.x * ussTerrRange.y;
+	float hc = ussTerrRange.x + cast * ussTerrRange.y;
+	float tanE = max( ussTerrPen.z, 1e-4 );
+	float cosE = inversesqrt( 1.0 + tanE * tanE );
+	// the gap to the first hit along the light: the caster's distance (s = hc - d tanE) over cos(elevation)
+	float delta = max( hc - s, 0.0 ) / ( tanE * cosE );
+	float grad = ussTerrPen.y * cosE * ( 1.0 + h.z * tanE );	// the stored depth's change per texel here
+	float margin = 4.0 * ussTerrSelf.w + min( 1.5 * grad, ussTerrSelf.z );
+	float fade = clamp( ( delta - margin ) / max( grad, 8.0 * ussTerrSelf.w ), 0.0, 1.0 );
+	float lo = ussTerrSelf.y;
+	return lo > 0.0 ? fade * smoothstep( 0.0, 1.0, ( hc - wz - lo ) / lo ) : fade;
+}
+
 //! (C) the terrain's shadow-height map; inMap = 1 inside it. grad: the receiver's slope (rise over run, the slope
 //! bias); pen: the disc penumbra (off for the air's many taps)
 float ussTerrain( vec3 posView, out float inMap, float grad, bool pen )
@@ -284,7 +306,11 @@ float ussTerrain( vec3 posView, out float inMap, float grad, bool pen )
 	if ( ussTerrExtra.y > 0.0 ) {
 		// lane FAR5 (FO4CS FarFieldMaskCS, the ground-band branch): a receiver above the ground band melts to the
 		// terrain-only sweep, so object-LOD casters shade only the ground under them
-		if ( h.w > 0.0 ) {
+		if ( h.w > 0.0 && ussTerrSelf.x > 0.5 ) {
+			// lane FAR6: FO4CS composes its terrain sweep and the self-tested LOD term by min()
+			vis = min( ussTerrVis( texture( ussTerrMap, ussTerrExtraUv( uv, ussTerrExtra.y ) ).rg, z ),
+				mix( 1.0, vis, ussTerrSelfWeight( uv, wp.z, h ) ) );
+		} else if ( h.w > 0.0 ) {
 			float m = ussTerrExtra.w < 0.0 ? 1.0
 				: smoothstep( 0.75 * ussTerrExtra.w, 1.25 * ussTerrExtra.w, wp.z - h.x - min( h.y, 4.0 * ussTerrPen.y ) );
 			if ( m > 0.0 )
