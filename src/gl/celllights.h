@@ -99,6 +99,7 @@ struct WwCellLight
 	float godRay = 0.0f;            //!< lane VOLFOG1: a shaft emitter (a shadow flag AND a WGDR): its GDRY's intensity; 0 none
 	quint32 lens = 0;               //!< lane LIGHTS3 (LENSFLARE1): the base's LENS (0 none)
 	float byteColor[3] = { 0, 0, 0 };   //!< lane LIGHTS3: DATA colour bytes / 255 (the lens flare's colour influence)
+	quint32 xemi = 0;                   //!< lane LIGHTS4: the placement's XEMI code (cellfxlit.h wwCellXemiCode), 0 none
 	//! lane LIGHTFLICKER1: 0 steady, 1 flicker (LIGH flag 0x8), 2 pulse (0x80 | 0x100), with DATA's Flicker Effect
 	int flicker = 0;
 	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;
@@ -317,6 +318,9 @@ void wwCellFlickerFrame( Scene * scene );
 bool wwCellFlickerWantsFrames( Scene * scene );
 //! light i's value this frame (dimmer on its colour, world offset); false (1, 0) when it is steady
 bool wwCellFlickerOf( const void * nif, qsizetype i, float * dimmer, float offset[3] );
+/*! lane LIGHTS4 (XEMI-LIGHT): once a frame, the colour factor of each light whose placement has XEMI: its source's
+ *  colour^2.2 when its row (Placement / Region emittance) is on, else 1. A change rebuilds the light buffer. */
+void wwCellXemiLightsFrame( Scene * scene );
 
 //! this scene draws cell-lit: the row on, the scene's document published, a perspective non-picking draw
 bool wwCellLightsWanted( Scene * scene );

@@ -159,8 +159,8 @@ bool wwLookPinned( WwLook l )
 
 bool wwLookReopens( WwLook l )
 {
-	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::PlacementEmittance
-		|| l == WwLook::RegionEmittance || l == WwLook::ParticleEmittance || l == WwLook::BounceEmittance;
+	// lane LIGHTS4: the placement, region and particle emittance rows are read at draw time (live)
+	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::BounceEmittance;
 }
 
 bool wwLookOn( WwLook l )

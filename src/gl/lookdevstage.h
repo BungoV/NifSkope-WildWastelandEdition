@@ -75,6 +75,7 @@ BSD License - see nifskope.h
 
 class Scene;
 struct WwWeatherEntry;
+struct WwLens;
 
 //! Scene mode Lookdev is the one switch
 bool wwLookdevActive();
@@ -113,6 +114,8 @@ bool wwLookdevShadows();
 void wwLookdevSetShadows( bool on );
 //! the light as it is shaded (TO the light, floored) and the unfloored disc position, world
 void wwLookdevShadowLight( float sunDir[3], float disc[3] );
+//! lane LIGHTS4: the weather's sun lens flare (WTHR GNAM), the sun (TO it, world) and its linear colour; false = none
+bool wwLookdevSunLens( const WwLens *& lens, float sunDir[3], float sunColor[3] );
 //! the ground frame the ground quad sits on; true = the ground draws (so it casts)
 bool wwLookdevGroundFrame( Scene * scene, float & z, float xy[2], float & half );
 double wwLookdevGameDay();

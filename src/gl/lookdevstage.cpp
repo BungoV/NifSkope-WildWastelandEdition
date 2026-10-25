@@ -805,6 +805,22 @@ void wwLookdevShadowLight( float sunDir[3], float disc[3] )
 	}
 }
 
+bool wwLookdevSunLens( const WwLens *& lens, float sunDir[3], float sunColor[3] )
+{
+	resolve();
+	const LdState & s = st();
+	lens = nullptr;
+	if ( !s.haveWeather || !s.sun || s.w.sunLens.sprites.isEmpty() )
+		return false;
+	const LdLight L = currentLight();
+	for ( int c = 0; c < 3; c++ ) {
+		sunDir[c] = L.sunDir[c];
+		sunColor[c] = L.sun[c];
+	}
+	lens = &s.w.sunLens;
+	return true;
+}
+
 bool wwLookdevGroundFrame( Scene * scene, float & z, float xy[2], float & half )
 {
 	LdState & s = st();

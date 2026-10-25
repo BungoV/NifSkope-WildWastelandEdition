@@ -26,6 +26,7 @@ BSD License - see nifskope.h
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
+#include "gl/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 
 #include <QElapsedTimer>
@@ -34,6 +35,7 @@ BSD License - see nifskope.h
 #include <QSettings>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -238,6 +240,7 @@ struct Gpu
 	GLuint buf = 0, tex = 0;
 	bool texAttached = false;	// lane PERF1: the buffer texture keeps its buffer across glBufferData; attached once
 	quint64 bufLiveGen = 0;	// lane TESTDRIVER1: a live set (light copies, reds) rebuilds the buffer
+	std::uint64_t bufXemiStamp = 0;	// lane LIGHTS4: the XEMI light factors the buffer was built with
 	const void * doc = nullptr;
 	int version = 0;
 	int count = 0;
@@ -879,6 +882,87 @@ struct InputsLast
 };
 }
 
+namespace
+{
+// lane LIGHTS4 (XEMI-LIGHT): per document, the lights with XEMI and this frame's factor (3 a light, all lights)
+struct XemiDoc
+{
+	int version = -1;
+	std::vector<int> idx;
+	std::vector<float> mul;
+	std::uint64_t stamp = 1;
+	QByteArray echo;
+};
+QHash<const void *, XemiDoc> & xemiDocs()
+{
+	static QHash<const void *, XemiDoc> d;
+	return d;
+}
+std::uint64_t xemiStampOf( const void * doc )
+{
+	const auto it = xemiDocs().constFind( doc );
+	return it == xemiDocs().constEnd() ? 0 : it->stamp;
+}
+}	// namespace
+
+void wwCellXemiLightsFrame( Scene * scene )
+{
+	if ( !scene || !wwCellLightsWanted( scene ) )
+		return;
+	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	if ( !L )
+		return;
+	XemiDoc & d = xemiDocs()[scene->nifModel];
+	const int ver = st().version.value( scene->nifModel );
+	if ( d.version != ver ) {
+		d.version = ver;
+		d.idx.clear();
+		for ( qsizetype i = 0; i < L->lights.size(); i++ )
+			if ( L->lights.at( i ).xemi )
+				d.idx.push_back( int( i ) );
+		d.mul.assign( size_t( L->lights.size() ) * 3, 1.0f );
+		d.stamp++;
+	}
+	if ( d.idx.empty() )
+		return;
+	QHash<quint32, std::array<float, 3>> byCode;	// a few sources for many lights: each colour read once a frame
+	bool moved = false;
+	int byLight = 0, byRegion = 0;
+	for ( const int i : d.idx ) {
+		const quint32 code = L->lights.at( i ).xemi;
+		std::array<float, 3> f = { 1.0f, 1.0f, 1.0f };
+		const auto c = byCode.constFind( code );
+		if ( c != byCode.constEnd() ) {
+			f = c.value();
+		} else {
+			float rgb[3];
+			if ( wwLookOn( ( code & 0x02000000U ) ? WwLook::RegionEmittance : WwLook::PlacementEmittance )
+				&& wwCellXemiCode( code, rgb ) )
+				for ( int k = 0; k < 3; k++ )
+					f[size_t( k )] = std::pow( std::max( rgb[k], 0.0f ), 2.2f );
+			byCode.insert( code, f );
+		}
+		if ( f[0] != 1.0f || f[1] != 1.0f || f[2] != 1.0f )
+			( ( code & 0x02000000U ) ? byRegion : byLight )++;
+		for ( int k = 0; k < 3; k++ ) {
+			float & m = d.mul[size_t( i ) * 3 + size_t( k )];
+			if ( std::abs( m - f[size_t( k )] ) > 1.0e-4f ) {
+				m = f[size_t( k )];
+				moved = true;
+			}
+		}
+	}
+	if ( moved )
+		d.stamp++;
+	const QByteArray echo = QByteArray( "cell xemi lights: " ) + QByteArray::number( qulonglong( d.idx.size() ) )
+		+ " with XEMI, recoloured " + QByteArray::number( byLight ) + " by a light, " + QByteArray::number( byRegion )
+		+ " by a region (" + QByteArray::number( byCode.size() ) + " sources)";
+	if ( echo != d.echo ) {
+		d.echo = echo;
+		std::fprintf( stderr, "%s\n", echo.constData() );
+	}
+}
+
 void wwCellLightsUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuCellUni );	// lane PERF2
@@ -896,8 +980,13 @@ void wwCellLightsUniforms( Scene * scene )
 	const WwCellLighting * L = on ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	const bool flick = L && s.flickerOn && !s.flickerRed;	// lane LIGHTFLICKER1
 	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp
-	            || g.bufLiveGen != wwSwitchGen() || g.flickOn != flick ) ) {
+	            || g.bufLiveGen != wwSwitchGen() || g.flickOn != flick || g.bufXemiStamp != xemiStampOf( scene->nifModel ) ) ) {
 		g.bufLiveGen = wwSwitchGen();
+		// lane LIGHTS4: this frame's XEMI factors (wwCellXemiLightsFrame), folded into each light's colour
+		const auto xd = xemiDocs().constFind( scene->nifModel );
+		const std::vector<float> * xm = xd != xemiDocs().constEnd() && xd->version == s.version.value( scene->nifModel )
+			&& xd->mul.size() == size_t( L->lights.size() ) * 3 ? &xd->mul : nullptr;
+		g.bufXemiStamp = xd != xemiDocs().constEnd() ? xd->stamp : 0;
 		// lane SHADOW1: the slot each light holds (the slots belong to the document the shadow pass last saw)
 		std::vector<float> slotOf( size_t( L->lights.size() ), -1.0f );
 		if ( g.shDoc == scene->nifModel && g.shVersion == s.version.value( scene->nifModel ) )
@@ -911,9 +1000,13 @@ void wwCellLightsUniforms( Scene * scene )
 			float dir[3] = { l.dir[0], l.dir[1], l.dir[2] };
 			// lane HEMI1: texel 1.w = cos(FOV / 2) for a spot, else the shape: -2 omni, -3 hemisphere, -4 box
 			const float shape = l.spot ? l.cosOuter : l.shape == 1 ? -3.0f : l.shape == 2 ? -4.0f : -2.0f;
+			float col[3] = { l.color[0], l.color[1], l.color[2] };
+			if ( xm && l.xemi )
+				for ( int k = 0; k < 3; k++ )
+					col[k] *= ( *xm )[size_t( i ) * 3 + size_t( k )];
 			const float tex[kTexelsPerLight * 4] = {
 				l.pos[0], l.pos[1], l.pos[2], l.radius,
-				l.color[0], l.color[1], l.color[2], shape,
+				col[0], col[1], col[2], shape,
 				dir[0], dir[1], dir[2], l.cone,
 				l.bias, l.scale, l.exponent,
 				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) ),	// lane RIM1

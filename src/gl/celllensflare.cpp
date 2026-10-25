@@ -8,6 +8,7 @@
 #include "gl/celllights.h"
 #include "gl/celllooks.h"
 #include "gl/glscene.h"
+#include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 
 #include <QHash>
@@ -28,6 +29,8 @@ struct LfState
 	QHash<quint32, WwLens> lens;	// LENS form -> record; a form read and refused maps to no sprites
 	int lastLights = 0, lastSprites = 0;
 	bool grabbed = false;
+	QString sunLens;	// lane LIGHTS4: the weather's sun flare (EDID), empty = none
+	bool sunShown = false;
 };
 
 LfState & st()
@@ -70,7 +73,10 @@ void wwCellLensFlareGrab( Scene * scene )
 	if ( !scene || !flareOn() || !scene->renderer )
 		return;
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
-	if ( !L || !std::any_of( L->lights.cbegin(), L->lights.cend(), []( const WwCellLight & l ) { return l.lens != 0; } ) )
+	const WwLens * sun = nullptr;
+	float sd[3], sc[3];
+	if ( !L || ( !std::any_of( L->lights.cbegin(), L->lights.cend(), []( const WwCellLight & l ) { return l.lens != 0; } )
+	             && !wwLookdevSunLens( sun, sd, sc ) ) )
 		return;
 	s.grabbed = scene->grabEffectDepth();	// the opaque depth (translucent draws write none), viewport-sized
 }
@@ -107,11 +113,12 @@ int wwCellLensFlareDraw( Scene * scene )
 
 	struct Pick
 	{
-		const WwCellLight * l;
+		const float * tint;	// the colour CNAM pulls the sprites toward (a light's byte colour, the sun's colour)
 		const WwLens * lens;
 		float d, alpha, ang, ndc[3], viewZ;
 	};
 	std::vector<Pick> picks;
+	s.sunShown = false;
 	for ( const WwCellLight & l : L->lights ) {
 		if ( !l.lens )
 			continue;
@@ -142,16 +149,40 @@ int wwCellLensFlareDraw( Scene * scene )
 			clip[i] = pm[0][i] * pv[0] + pm[1][i] * pv[1] + pm[2][i] * pv[2] + pm[3][i];
 		if ( !( clip[3] > 1e-6f ) )
 			continue;
-		Pick p { &l, &lt.value(), d, alpha, ang, { clip[0] / clip[3], clip[1] / clip[3], clip[2] / clip[3] }, -pv[2] };
+		Pick p { l.byteColor, &lt.value(), d, alpha, ang, { clip[0] / clip[3], clip[1] / clip[3], clip[2] / clip[3] }, -pv[2] };
 		if ( std::abs( p.ndc[0] ) > 1.0f || std::abs( p.ndc[1] ) > 1.0f )
 			continue;
 		picks.push_back( p );
 	}
-	if ( picks.empty() )
-		return 0;
 	std::sort( picks.begin(), picks.end(), []( const Pick & a, const Pick & b ) { return a.d < b.d; } );
 	if ( picks.size() > size_t( kMaxLights ) )
 		picks.resize( size_t( kMaxLights ) );
+	/* lane LIGHTS4: the sun's own slot, its LENS from the weather (WTHR GNAM). Inferred: a point at infinity along
+	 * the sun direction, seen only where the opaque depth is clear, with the placed lights' sprite rule */
+	const WwLens * sunLens = nullptr;
+	float sunTint[3], sunDir[3];
+	s.sunLens.clear();
+	if ( wwLookdevSunLens( sunLens, sunDir, sunTint ) ) {
+		s.sunLens = sunLens->edid.isEmpty() ? QStringLiteral( "%1" ).arg( sunLens->formID, 8, 16, QChar( '0' ) ) : sunLens->edid;
+		for ( int c = 0; c < 3; c++ )
+			sunTint[c] = std::clamp( sunTint[c], 0.0f, 1.0f );
+		const float ang = sunDir[0] * fwd[0] + sunDir[1] * fwd[1] + sunDir[2] * fwd[2];
+		float pv[3];
+		for ( int j = 0; j < 3; j++ )
+			pv[j] = vt.rotation( j, 0 ) * sunDir[0] + vt.rotation( j, 1 ) * sunDir[1] + vt.rotation( j, 2 ) * sunDir[2];
+		float clip[4];
+		for ( int i = 0; i < 4; i++ )
+			clip[i] = pm[0][i] * pv[0] + pm[1][i] * pv[1] + pm[2][i] * pv[2];
+		if ( sunDir[2] > 0.0f && ang > 0.0f && clip[3] > 1e-6f ) {
+			Pick p { sunTint, sunLens, 0.0f, 1.0f, ang, { clip[0] / clip[3], clip[1] / clip[3], 1.0f }, 1e30f };
+			if ( std::abs( p.ndc[0] ) <= 1.0f && std::abs( p.ndc[1] ) <= 1.0f ) {
+				picks.push_back( p );
+				s.sunShown = true;
+			}
+		}
+	}
+	if ( picks.empty() )
+		return 0;
 
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_lensflare.prog" );
 	if ( !prog )
@@ -181,11 +212,10 @@ int wwCellLensFlareDraw( Scene * scene )
 	static const float corner[4][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };	// +-1: inferred
 	int sprites = 0;
 	for ( const Pick & p : picks ) {
-		const WwCellLight & l = *p.l;
 		const WwLens & lens = *p.lens;
 		float infl[3];	// white + (light colour - white) x CNAM
 		for ( int c = 0; c < 3; c++ )
-			infl[c] = 1.0f + ( l.byteColor[c] - 1.0f ) * lens.colorInfluence;
+			infl[c] = 1.0f + ( p.tint[c] - 1.0f ) * lens.colorInfluence;
 		// the light's screen angle from the centre, x corrected by the aspect (Rotates)
 		const float sx = p.ndc[0] * 0.5f, sy = p.ndc[1] * 0.5f;
 		const float angle = std::atan2( sy * aspectHW, sx );
@@ -248,7 +278,9 @@ QString wwCellLensFlareEcho( Scene * scene )
 	int withLens = 0;
 	if ( const WwCellLighting * L = scene ? wwCellLightsFor( scene->nifModel ) : nullptr )
 		withLens = int( std::count_if( L->lights.cbegin(), L->lights.cend(), []( const WwCellLight & l ) { return l.lens != 0; } ) );
-	return QStringLiteral( "lens flares: %1, %2 lights with a LENS, %3 flaring last frame, %4 sprites%5" )
+	return QStringLiteral( "lens flares: %1, %2 lights with a LENS, %3 flaring last frame, %4 sprites%5, sun flare %6%7" )
 		.arg( flareOn() ? QStringLiteral( "on" ) : QStringLiteral( "off" ) ).arg( withLens ).arg( s.lastLights )
-		.arg( s.lastSprites ).arg( s.grabbed ? QString() : QStringLiteral( " (no depth kept: unoccluded)" ) );
+		.arg( s.lastSprites ).arg( s.grabbed ? QString() : QStringLiteral( " (no depth kept: unoccluded)" ) )
+		.arg( s.sunLens.isEmpty() ? QStringLiteral( "none" ) : s.sunLens )
+		.arg( s.sunShown ? QStringLiteral( " (in view)" ) : QString() );
 }

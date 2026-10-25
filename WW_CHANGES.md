@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIGHTS4 (2026-10-25, branch lights4-20261025): emittance rows live, placed lights recoloured, sun flare
+
+- **Live rows:** Placement emittance, Region emittance and Emittance on particles no longer reopen the cell. The
+  cell keeps every emittance placement in its own draw list and the draw reads the row each frame. Emittance in
+  bounce light still reopens (its colour is baked into the bounce data when the cell opens).
+- **Placed lights:** a placed light with emittance (XEMI) now takes that colour itself (the light's colour times the
+  emittance colour, linear), a light source or a region weather's colour at the current hour, following the same two
+  rows live. The cell notes say how many ("cell xemi lights:", "xemilights=").
+- **Sun lens flare:** with Lens flares on, the sun draws the flare its weather names (the weather's Sun Glare Lens
+  Flare); seen only where nothing stands in front of it, while it is above the horizon and the Sun row is on. The
+  echo adds "sun flare <name>".
+
 ## Lane LIGHTS3 (2026-10-23, branch lights3-20261023): more emittance, lens flares (all off by default)
 
 - **Rows (Show menu, all off; off = drawn exactly as before):**

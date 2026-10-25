@@ -12,7 +12,10 @@
  * At most 16 flare lights (the nearest; the game's pick order is unknown).
  * Inferred, not read: the sprite centre at the light's screen point x (1 - 2 x Position), the quad's corners at
  * +-1, the occlusion test (a 5 x 5 depth kernel round the light; the game averages its own test over 4 frames),
- * the colour added to the tone-mapped frame. Red WW_CELL_LENSFLARE_RED=noocclude (every flare unoccluded). */
+ * the colour added to the tone-mapped frame. Red WW_CELL_LENSFLARE_RED=noocclude (every flare unoccluded).
+ * Lane LIGHTS4: the sun's flare in its own slot, the LENS the weather names (WTHR GNAM, Sun Glare Lens Flare), the
+ * sun colour as the CNAM pull; inferred: the sun at infinity, seen where the opaque depth is clear, while above the
+ * horizon and the Sun row is on. */
 
 #include <QString>
 #include <QtGlobal>
