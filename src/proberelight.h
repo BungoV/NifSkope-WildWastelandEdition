@@ -193,6 +193,7 @@ std::vector<float> probeRelightShut( const ProbeRelightState & st, size_t nDoors
 	bool placedOnly = false;
 	bool wantE = false;                     //!< lane FARVIEW1: fill ProbeRelightOut::Es
 	bool share = false;                     //!< lane GPURELIGHT1 (10-23): Probe sharing after the last gather (needs ops.shareStart)
+	int sharePasses = 1;                    //!< lane GIPROBE2: Wide probe sharing, the share step this many times (nu kept)
 };
 
 struct ProbeRelightOut
@@ -228,6 +229,19 @@ inline double probeShareNu( double sum, double sq, double kUnl, double skyLum )
 	const double nu = kUnl * std::sqrt( sq ) / m1;
 	return nu < 1.0 ? nu : 1.0;
 }
+
+/* lane GIPROBE2: DDGI depth visibility (Majercik et al. 2019, JCGT 8(2)): per probe an 8x8 octahedral map of the mean
+ * and mean square distance to what it sees; a point past the mean gets the Chebyshev bound var / (var + (d - mean)^2) */
+constexpr int kDepthVisN = 8;
+constexpr double kDepthVisFloor = 0.05;   // our floor: a probe never drops out entirely (the binary wall test does that)
+//! a unit direction's texel (0 .. kDepthVisN^2 - 1) on the octahedral map
+int probeDepthVisTexel( const double d[3] );
+/*! the map (2 floats a texel: mean, mean square) from n links: v = 3 a link (seen point - probe), w = its solid angle.
+ *  A texel's 3x3 block that the links cover less than its area takes `far` for the rest (a miss: sky or nothing).
+ *  flat: every texel gets the whole sphere's moments (the gate's red: no direction) */
+void probeDepthVisBuild( const double * v, const double * w, size_t n, double far, bool flat, float out[2 * kDepthVisN * kDepthVisN] );
+//! the weight for point offset v (point - probe): 1 up to the mean (minus bias), then the Chebyshev bound cubed
+double probeDepthVisWeight( const float m[2 * kDepthVisN * kDepthVisN], const double v[3], double bias );
 
 //! The relight from the operators, in double (the CPU reference; the same sums as probeGiRelight)
 bool probeRelightCpu( const ProbeRelightOps & ops, const ProbeRelightState & st, ProbeRelightOut * out, QString * err );

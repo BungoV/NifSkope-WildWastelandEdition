@@ -360,6 +360,97 @@ void ProbeDoorTracer::linkMean( const double probe[3], const double p[3], const 
 	}
 }
 
+// ======================================================================== lane GIPROBE2: depth visibility
+
+int probeDepthVisTexel( const double d[3] )
+{
+	const double s = std::fabs( d[0] ) + std::fabs( d[1] ) + std::fabs( d[2] );
+	double x = s > 0.0 ? d[0] / s : 0.0, y = s > 0.0 ? d[1] / s : 0.0;
+	if ( d[2] < 0.0 ) {   // the lower half folds onto the corners
+		const double ox = x;
+		x = ( 1.0 - std::fabs( y ) ) * ( ox >= 0.0 ? 1.0 : -1.0 );
+		y = ( 1.0 - std::fabs( ox ) ) * ( y >= 0.0 ? 1.0 : -1.0 );
+	}
+	const int N = kDepthVisN;
+	const int i = std::min( N - 1, std::max( 0, int( ( x * 0.5 + 0.5 ) * N ) ) );
+	const int j = std::min( N - 1, std::max( 0, int( ( y * 0.5 + 0.5 ) * N ) ) );
+	return j * N + i;
+}
+
+void probeDepthVisBuild( const double * v, const double * w, size_t n, double far, bool flat, float out[2 * kDepthVisN * kDepthVisN] )
+{
+	constexpr int N = kDepthVisN, T = N * N;
+	double W[T] = {}, M1[T] = {}, M2[T] = {}, aw = 0.0, a1 = 0.0, a2 = 0.0;
+	for ( size_t k = 0; k < n; k++ ) {
+		const double * q = v + k * 3;
+		const double d = std::sqrt( q[0] * q[0] + q[1] * q[1] + q[2] * q[2] );
+		if ( !( d > 1e-9 ) || !( w[k] > 0.0 ) )
+			continue;
+		const double u[3] = { q[0] / d, q[1] / d, q[2] / d };
+		const int t = probeDepthVisTexel( u );
+		W[t] += w[k];
+		M1[t] += w[k] * d;
+		M2[t] += w[k] * d * d;
+		aw += w[k];
+		a1 += w[k] * d;
+		a2 += w[k] * d * d;
+	}
+	// octahedral texels are not equal in solid angle (the +-X/Y corners are about half): measure each once
+	static const std::vector<double> texArea = [] {
+		std::vector<double> a( T, 0.0 );
+		const int s = 1 << 18;
+		const double gold = 3.14159265358979323846 * ( 3.0 - std::sqrt( 5.0 ) );
+		for ( int k = 0; k < s; k++ ) {
+			const double z = 1.0 - ( 2.0 * k + 1.0 ) / s, r = std::sqrt( std::max( 0.0, 1.0 - z * z ) );
+			const double d[3] = { r * std::cos( gold * k ), r * std::sin( gold * k ), z };
+			a[probeDepthVisTexel( d )] += 4.0 * 3.14159265358979323846 / s;
+		}
+		return a;
+	}();
+	for ( int j = 0; j < N; j++ )
+		for ( int i = 0; i < N; i++ ) {
+			double ww = 0.0, m1 = 0.0, m2 = 0.0, cover = 0.0;
+			if ( flat ) {
+				ww = aw, m1 = a1, m2 = a2, cover = 4.0 * 3.14159265358979323846;
+			} else {
+				for ( int dj = -1; dj <= 1; dj++ )
+					for ( int di = -1; di <= 1; di++ ) {
+						const int ii = i + di, jj = j + dj;
+						if ( ii < 0 || jj < 0 || ii >= N || jj >= N )
+							continue;
+						const int t = jj * N + ii;
+						ww += W[t];
+						m1 += M1[t];
+						m2 += M2[t];
+						cover += texArea[t];
+					}
+			}
+			const double miss = std::max( 0.0, cover - ww );   // directions no link covers: a miss, far away
+			ww += miss;
+			m1 += miss * far;
+			m2 += miss * far * far;
+			const int t = j * N + i;
+			out[t * 2] = float( ww > 0.0 ? m1 / ww : far );
+			out[t * 2 + 1] = float( ww > 0.0 ? m2 / ww : far * far );
+		}
+}
+
+double probeDepthVisWeight( const float m[2 * kDepthVisN * kDepthVisN], const double v[3], double bias )
+{
+	const double d = std::sqrt( v[0] * v[0] + v[1] * v[1] + v[2] * v[2] );
+	if ( !( d > 1e-9 ) )
+		return 1.0;
+	const double u[3] = { v[0] / d, v[1] / d, v[2] / d };
+	const int t = probeDepthVisTexel( u );
+	const double mu = m[t * 2], r = d - bias;
+	if ( r <= mu )
+		return 1.0;
+	const double var = std::max( double( m[t * 2 + 1] ) - mu * mu, 1.0 ), x = r - mu;
+	double c = var / ( var + x * x );
+	c = c * c * c;
+	return c > kDepthVisFloor ? c : kDepthVisFloor;
+}
+
 // ======================================================================== the CPU relight
 
 bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, ProbeRelightOut * out, QString * err )
@@ -584,29 +675,39 @@ bool probeRelightCpu( const ProbeRelightOps & X, const ProbeRelightState & st, P
 			}
 			nu[j] = probeShareNu( sum, sq, X.kUnl[j], sky );
 		} );
-		parallelFor( nP, [&]( size_t j ) {
-			double acc[18], as = 0.0;
-			std::memcpy( acc, &PE[j * 18], sizeof acc );
-			for ( int k = X.shareStart[j]; k < X.shareStart[j + 1]; k++ ) {
-				const int * dr = &X.shareDoor[size_t( k ) * 2];
-				double vf = 1.0;
-				if ( doors && anyClosed( dr, closed ) )
-					vf = doorFactor( dr, &X.shareT[size_t( k ) * 8], 0, true, closed, red );
-				const double a = nu[j] * X.shareG[size_t( k )] * vf;
-				if ( a <= 0.0 )
-					continue;
-				as += a;
-				const double * P = &PE[size_t( X.shareProbe[size_t( k )] ) * 18];
+		// lane GIPROBE2: Wide probe sharing repeats the step (nu kept); the census compares with the unshared E
+		const int sp = std::max( 1, st.sharePasses );
+		std::vector<double> PE0;
+		if ( sp > 1 )
+			PE0 = PE;
+		for ( int pass = 0; pass < sp; pass++ ) {
+			if ( pass )
+				PE.swap( PS );
+			parallelFor( nP, [&]( size_t j ) {
+				double acc[18], as = 0.0;
+				std::memcpy( acc, &PE[j * 18], sizeof acc );
+				for ( int k = X.shareStart[j]; k < X.shareStart[j + 1]; k++ ) {
+					const int * dr = &X.shareDoor[size_t( k ) * 2];
+					double vf = 1.0;
+					if ( doors && anyClosed( dr, closed ) )
+						vf = doorFactor( dr, &X.shareT[size_t( k ) * 8], 0, true, closed, red );
+					const double a = nu[j] * X.shareG[size_t( k )] * vf;
+					if ( a <= 0.0 )
+						continue;
+					as += a;
+					const double * P = &PE[size_t( X.shareProbe[size_t( k )] ) * 18];
+					for ( int q = 0; q < 18; q++ )
+						acc[q] += a * P[q];
+				}
 				for ( int q = 0; q < 18; q++ )
-					acc[q] += a * P[q];
-			}
-			for ( int q = 0; q < 18; q++ )
-				PS[j * 18 + size_t( q )] = acc[q] / ( 1.0 + as );
-		} );
+					PS[j * 18 + size_t( q )] = acc[q] / ( 1.0 + as );
+			} );
+		}
+		const std::vector<double> & ref = sp > 1 ? PE0 : PE;
 		double num = 0.0, den = 0.0, nus = 0.0;
 		for ( size_t q = 0; q < PE.size(); q++ ) {
-			num += std::fabs( PS[q] - PE[q] );
-			den += std::fabs( PE[q] );
+			num += std::fabs( PS[q] - ref[q] );
+			den += std::fabs( ref[q] );
 		}
 		for ( double n : nu )
 			nus += n;
@@ -1436,6 +1537,7 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 	}
 	// lane GPURELIGHT1 (10-23): Probe sharing (nu from the last B, still on binding 10; then the shared E into bPES)
 	const bool share = st.share && d->shareRec;
+	int shareOut = Impl::bPE;
 	if ( share ) {
 		k.restart();
 		d->bind( 11, Impl::bNu );
@@ -1443,13 +1545,19 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 		d->dispatch( d->nP );
 		d->bind( 12, Impl::bShareStart );
 		d->bind( 13, Impl::bShare );
-		d->bind( 10, Impl::bPES );
-		common( 6, d->nP );
-		d->dispatch( d->nP );
+		// lane GIPROBE2: Wide probe sharing ping-pongs bPE / bPES (nu kept on binding 11)
+		const int sp = std::max( 1, st.sharePasses );
+		for ( int pass = 0; pass < sp; pass++ ) {
+			d->bind( 9, pass % 2 ? Impl::bPES : Impl::bPE );
+			d->bind( 10, pass % 2 ? Impl::bPE : Impl::bPES );
+			common( 6, d->nP );
+			d->dispatch( d->nP );
+		}
+		shareOut = sp % 2 ? Impl::bPES : Impl::bPE;
 		gl->glFinish();
 		O.msShare = k.nsecsElapsed() / 1e6;
 		k.restart();
-		d->bind( 9, Impl::bPES );
+		d->bind( 9, shareOut );
 	}
 	// 4. the grid: blend (the feed bindings hold the blend lists), then the two rings
 	d->bind( 12, Impl::bBlendStart );
@@ -1484,7 +1592,7 @@ bool ProbeRelightGpu::run( const ProbeRelightState & st, ProbeRelightOut * out, 
 			O.B[size_t( i ) * 3 + size_t( c )] = b4[size_t( i ) * 4 + size_t( c )];
 		}
 	O.E.resize( size_t( d->nP ) * 18 );
-	gl->glBindBuffer( GL_SHADER_STORAGE_BUFFER, d->buf[share ? Impl::bPES : Impl::bPE] );
+	gl->glBindBuffer( GL_SHADER_STORAGE_BUFFER, d->buf[shareOut] );
 	gl->glGetBufferSubData( GL_SHADER_STORAGE_BUFFER, 0, GLsizeiptr( O.E.size() * 4 ), O.E.data() );
 	d->bind( 9, Impl::bPE );   // the next run's gather writes bPE
 	if ( readGrid ) {
@@ -2497,6 +2605,133 @@ int probeRelightCli( const QStringList & args )
 					.arg( co.msShare, 0, 'f', 2 ).arg( 100.0 * co.shareMoved, 0, 'f', 3 ) );
 		}
 	}
+	// ---- lane GIPROBE2: Wide probe sharing (the share step repeated) and Probe depth visibility
+	std::vector<double> msWideCpu, msWideGpu;
+	{
+		for ( int sp : { 2, 3 } ) {
+			ProbeGiSpec gw = gs;
+			gw.share = true;
+			gw.sharePasses = sp;
+			ProbeGiResult refW;
+			probeGiRelight( soup, bakeDir, lit, gw, &refW );
+			ProbeRelightState wst = states[0].st;
+			wst.share = true;
+			wst.sharePasses = sp;
+			ProbeRelightOut cw;
+			std::vector<double> t;
+			for ( int r = 0; r < repeats; r++ ) {
+				probeRelightCpu( X, wst, &cw, &err );
+				t.push_back( cw.msShare );
+			}
+			msWideCpu.push_back( median( t ) );
+			const std::vector<float> rE = column( refW.probeCube, 21, 3, 18 );
+			const double dE = relDiff( cw.E, rE ), dB = relDiff( cw.B, refW.surfelBounce ),
+				dG = std::max( relDiff( cw.grid, refW.grid ), relDiff( cw.grid2, refW.grid2 ) );
+			gate( QStringLiteral( "P wide %1" ).arg( sp ), std::max( dE, std::max( dB, dG ) ) <= 1e-6 && refW.sharePasses == sp,
+				QStringLiteral( "CPU vs the ray relight, %1 share steps: B %2, E %3, grid %4 (gate 1e-6); E moved %5 % (CPU) / %6 % (rays)" )
+					.arg( sp ).arg( dB, 0, 'g', 3 ).arg( dE, 0, 'g', 3 ).arg( dG, 0, 'g', 3 ).arg( 100.0 * cw.shareMoved, 0, 'f', 3 )
+					.arg( 100.0 * refW.shareMoved, 0, 'f', 3 ) );
+			if ( sp == 3 ) {
+				ProbeRelightState one = wst;
+				one.sharePasses = 1;
+				ProbeRelightOut c1;
+				probeRelightCpu( X, one, &c1, &err );
+				gate( QStringLiteral( "P red wide1" ), relDiff( c1.E, rE ) <= 1e-6,
+					QStringLiteral( "one share step vs the ray relight with 3: E %1 (E moved %2 % vs %3 %)" ).arg( relDiff( c1.E, rE ), 0, 'g', 3 )
+						.arg( 100.0 * c1.shareMoved, 0, 'f', 3 ).arg( 100.0 * cw.shareMoved, 0, 'f', 3 ), true );
+			}
+			for ( size_t si : { size_t( 0 ), states.size() - 1 } ) {
+				if ( !gpuOk )
+					break;
+				ProbeRelightState cst = states[si].st;
+				cst.share = true;
+				cst.sharePasses = sp;
+				ProbeRelightOut co;
+				probeRelightCpu( X, cst, &co, &err );
+				ProbeRelightState gst = cst;
+				gst.passes = co.passes;
+				ProbeRelightOut go;
+				std::vector<double> tg;
+				for ( int r = 0; r < repeats && gpuOk; r++ ) {
+					gpuOk = gpu.run( gst, &go, &why, true );
+					tg.push_back( go.msShare );
+				}
+				if ( !gpuOk )
+					break;
+				msWideGpu.push_back( median( tg ) );
+				const double gE = relDiff( go.E, co.E ), gB = relDiff( go.B, co.B ),
+					gG = std::max( relDiff( go.grid, co.grid ), relDiff( go.grid2, co.grid2 ) );
+				gate( QStringLiteral( "G wide %1 %2" ).arg( sp ).arg( states[si].name ), std::max( gE, std::max( gB, gG ) ) <= 1e-4,
+					QStringLiteral( "GPU vs CPU, %1 share steps: B %2, E %3, grid %4 (gate 1e-4); share %5 ms GPU vs %6 ms CPU" ).arg( sp )
+						.arg( gB, 0, 'g', 3 ).arg( gE, 0, 'g', 3 ).arg( gG, 0, 'g', 3 ).arg( median( tg ), 0, 'f', 3 ).arg( co.msShare, 0, 'f', 2 ) );
+			}
+		}
+		// V known: a wall 100 u off along +X (the links of a 4096-ray sphere that meet it), nothing else
+		auto known = [&]( bool flat, double w[4] ) {
+			const int n = 4096;
+			std::vector<double> lv, lw;
+			const double gold = 3.14159265358979323846 * ( 3.0 - std::sqrt( 5.0 ) );
+			for ( int i = 0; i < n; i++ ) {
+				const double z = 1.0 - ( 2.0 * i + 1.0 ) / n, r = std::sqrt( std::max( 0.0, 1.0 - z * z ) );
+				const double d[3] = { r * std::cos( gold * i ), r * std::sin( gold * i ), z };
+				if ( d[0] <= 0.5 )
+					continue;
+				const double t = 100.0 / d[0];
+				lv.insert( lv.end(), { d[0] * t, d[1] * t, d[2] * t } );
+				lw.push_back( 4.0 * 3.14159265358979323846 / n );
+			}
+			float m[2 * kDepthVisN * kDepthVisN];
+			probeDepthVisBuild( lv.data(), lw.data(), lw.size(), 2000.0, flat, m );
+			const double pts[4][3] = { { 50, 0, 0 }, { 150, 0, 0 }, { -150, 0, 0 }, { 0, 0, 150 } };
+			for ( int k = 0; k < 4; k++ )
+				w[k] = probeDepthVisWeight( m, pts[k], 4.0 );
+			return w[0] == 1.0 && w[1] < 0.2 && w[2] == 1.0 && w[3] == 1.0;
+		};
+		double kw[4], kf[4];
+		const bool kOk = known( false, kw ), kRed = known( true, kf );
+		gate( QStringLiteral( "V known" ), kOk, QStringLiteral( "wall 100 u along +X: weight in front (50) %1, behind (150) %2, the open side "
+			"(-150) %3, up (150) %4 (want 1, < 0.2, 1, 1)" ).arg( kw[0] ).arg( kw[1], 0, 'f', 4 ).arg( kw[2] ).arg( kw[3] ) );
+		gate( QStringLiteral( "V red flat" ), kRed, QStringLiteral( "no direction: in front %1, behind %2, open %3, up %4" ).arg( kf[0] )
+			.arg( kf[1], 0, 'f', 4 ).arg( kf[2] ).arg( kf[3] ), true );
+		// P / G depthvis: record with it on; the CPU from those operators = the ray relight, the GPU = the CPU
+		ProbeGiSpec gd = gs;
+		gd.depthVis = true;
+		ProbeGiResult refD, recD;
+		probeGiRelight( soup, bakeDir, lit, gd, &refD );
+		ProbeRelightOps XD;
+		ProbeGiSpec gdRec = gsRec;
+		gdRec.depthVis = true;
+		gdRec.record = &XD;
+		probeGiRelight( soup, bakeDir, lit, gdRec, &recD );
+		gate( QStringLiteral( "V cuts" ), refD.depthVisOn && refD.depthVisCut > 0 && refD.grid != r0.grid,
+			QStringLiteral( "%1 weights tested, %2 cut, mean factor %3, %4 ms; the grid moves" ).arg( refD.depthVisTested )
+				.arg( refD.depthVisCut ).arg( refD.depthVisMean, 0, 'f', 4 ).arg( refD.msDepthVis, 0, 'f', 1 ) );
+		gate( QStringLiteral( "OFF depthvis record" ), refD.probeCube == recD.probeCube && refD.grid == recD.grid && refD.grid2 == recD.grid2,
+			QStringLiteral( "recording with depth visibility on leaves probes and grid identical" ) );
+		ProbeRelightOut cd;
+		probeRelightCpu( XD, states[0].st, &cd, &err );
+		const double dE = relDiff( cd.E, column( refD.probeCube, 21, 3, 18 ) ), dB = relDiff( cd.B, refD.surfelBounce ),
+			dG = std::max( relDiff( cd.grid, refD.grid ), relDiff( cd.grid2, refD.grid2 ) );
+		gate( QStringLiteral( "P depthvis" ), XD.built && std::max( dE, std::max( dB, dG ) ) <= 1e-6,
+			QStringLiteral( "CPU from the depth-visibility operators vs the ray relight: B %1, E %2, grid %3 (gate 1e-6)" )
+				.arg( dB, 0, 'g', 3 ).arg( dE, 0, 'g', 3 ).arg( dG, 0, 'g', 3 ) );
+		const double dG0 = std::max( relDiff( cpuOut[states[0].name].grid, refD.grid ), relDiff( cpuOut[states[0].name].grid2, refD.grid2 ) );
+		gate( QStringLiteral( "P red novis" ), dG0 <= 1e-6, QStringLiteral( "the operators without depth visibility vs the ray relight "
+			"with it: grid %1" ).arg( dG0, 0, 'g', 3 ), true );
+		if ( gpuOk && XD.built && gpu.upload( XD, &why ) ) {
+			for ( size_t si : { size_t( 0 ), states.size() - 1 } ) {
+				ProbeRelightOut co, go;
+				probeRelightCpu( XD, states[si].st, &co, &err );
+				ProbeRelightState gst = states[si].st;
+				gst.passes = co.passes;
+				if ( !gpu.run( gst, &go, &why, true ) )
+					break;
+				const double gE = relDiff( go.E, co.E ), gG = std::max( relDiff( go.grid, co.grid ), relDiff( go.grid2, co.grid2 ) );
+				gate( QStringLiteral( "G depthvis %1" ).arg( states[si].name ), std::max( gE, gG ) <= 1e-4,
+					QStringLiteral( "GPU vs CPU, depth visibility: E %1, grid %2 (gate 1e-4)" ).arg( gE, 0, 'g', 3 ).arg( gG, 0, 'g', 3 ) );
+			}
+		}
+	}
 	// ---- the shared record
 	{
 		QString census;
@@ -2527,6 +2762,9 @@ int probeRelightCli( const QStringList & args )
 	std::printf( "%s\n", qPrintable( timing ) );
 	G << QStringLiteral( "share timings (median): CPU %1 ms, GPU %2 ms (the share step only)" )
 		.arg( msShareCpu.empty() ? -1.0 : median( msShareCpu ), 0, 'f', 3 ).arg( msShareGpu.empty() ? -1.0 : median( msShareGpu ), 0, 'f', 3 );
+	std::printf( "%s\n", qPrintable( G.back() ) );
+	G << QStringLiteral( "wide share timings (median, 2 and 3 steps): CPU %1 ms, GPU %2 ms (the share step only)" )   // lane GIPROBE2
+		.arg( msWideCpu.empty() ? -1.0 : median( msWideCpu ), 0, 'f', 3 ).arg( msWideGpu.empty() ? -1.0 : median( msWideGpu ), 0, 'f', 3 );
 	std::printf( "%s\n", qPrintable( G.back() ) );
 	G << QStringLiteral( "%1 failures" ).arg( failures );
 	writeFile( out.filePath( QStringLiteral( "gates.txt" ) ), ( G.join( QStringLiteral( "\n" ) ) + QStringLiteral( "\n" ) ).toUtf8(), &err );

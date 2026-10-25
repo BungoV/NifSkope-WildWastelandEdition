@@ -79,6 +79,7 @@ struct Kept
 	ProbeRelightOut open;	// the all-open run (the bake's state)
 	bool haveOpen = false;
 	bool share = false;	// lane GPURELIGHT1: Probe sharing as the base was relit (the runs match the base)
+	int sharePasses = 1;	// lane GIPROBE2: Wide probe sharing's steps, as the base was relit
 	int slot = -1;
 	float floorP[3] = { 0, 0, 0 };
 	bool haveFloor = false;
@@ -430,6 +431,7 @@ void relight( Kept & k, float shut )
 	if ( !k.haveOpen ) {
 		ProbeRelightState st;
 		st.share = k.share;
+		st.sharePasses = k.sharePasses;
 		k.haveOpen = runState( k, st, &k.open, &why );
 		if ( !k.haveOpen ) {
 			k.giKept = false;
@@ -442,6 +444,7 @@ void relight( Kept & k, float shut )
 	if ( shut > 0.0f ) {
 		ProbeRelightState st;
 		st.share = k.share;
+		st.sharePasses = k.sharePasses;
 		st.doorShut.assign( k.ops->doorRefs.size(), 0.0f );
 		st.doorShut[size_t( k.slot )] = shut;
 		ProbeRelightOut o;
@@ -700,7 +703,8 @@ QString wwDoorLiveKeepGi( const void * nif, const ProbeRelightOps & ops, const W
 	}
 	k.ops = std::make_unique<ProbeRelightOps>( ops );
 	k.base = std::make_unique<WwCellGi>( gi );
-	k.share = wwLookOn( WwLook::ProbeShare );
+	k.share = wwLookOn( WwLook::ProbeShare ) || wwLookOn( WwLook::ProbeShareWide );
+	k.sharePasses = wwLookOn( WwLook::ProbeShareWide ) ? 3 : 1;   // lane GIPROBE2
 	k.gpu.reset();
 	k.gpuTried = k.gpuOk = false;
 	k.haveOpen = false;

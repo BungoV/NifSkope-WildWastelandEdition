@@ -4,6 +4,7 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellview.h"
+#include "gl/celllooks.h"
 #include "esmdata.h"
 #include "lodgen.h"
 
@@ -346,6 +347,9 @@ QStringList identityKnobs()
 			continue;
 		out.append( k + QLatin1Char( '=' ) + env.value( k ) );
 	}
+	// lane GIPROBE2: the menu row moves probes like its pin does, so it is a knob too (off: the identity is unchanged)
+	if ( !env.contains( QStringLiteral( "WW_CELL_PROBE_CLEAR" ) ) && wwLookOn( WwLook::ProbeClear ) )
+		out.append( QStringLiteral( "WW_CELL_PROBE_CLEAR=1" ) );
 	out.sort();
 	return out;
 }

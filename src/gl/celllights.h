@@ -213,6 +213,11 @@ struct WwCellGi
 	int airDims[3] = { 0, 0, 0 };
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
+/*! lane GIPROBE2: Probe light smoothing. The published grid's rgba, to change in place (null: none), then Edited:
+ *  only the grid slabs are uploaded again (rooms, sky and fine boxes stay); the publish version is kept. */
+std::vector<float> * wwCellGiRgbaEdit( const void * nif );
+void wwCellGiRgbaEdited( const void * nif );
+int wwCellGiVersion( const void * nif );   //!< bumped by every publish (0: none)
 /*! lane EMISSIVEGRID1: the Emissive GI grid row (ships off): WW/CellEmissiveGrid, pin WW_CELL_EMISSIVEGRID (read when a
  *  cell opens: the row reopens it). Red WW_CELL_EMISSIVEGRID_RED=1|old: nothing built or drawn (the old path and cost);
  *  =noseen|nosub: the shader's refuters (no seen test; no coarse share taken out). */

@@ -36,6 +36,10 @@ enum class WwLook : int
 	ParticleEmittance,	// XEMI-PARTICLES (LIGHTS3): particle systems of an emittance placement take its colour (WW_CELL_XEMI_PART)
 	BounceEmittance,	// XEMI-GI (LIGHTS3): the bounce light of a recoloured emissive uses the emittance colour (WW_CELL_XEMI_GI)
 	LensFlares,			// LENSFLARE1 (LIGHTS3): LENS sprites of lights, a post-process pass (WW_CELL_LENSFLARE)
+	ProbeShareWide,		// GIPROBE2: the sharing step runs 3 times, so light reaches further (WW_CELL_GI_SHARE_WIDE)
+	ProbeDepthVis,		// GIPROBE2: a probe's light is weighted by what its rays saw (DDGI depth test) (WW_CELL_GI_DEPTHVIS)
+	ProbeSmooth,		// GIPROBE2: a relit grid fades in per voxel instead of popping (WW_CELL_GI_SMOOTH)
+	ProbeClear,			// GIPROBE2: the bake pushes probes standing in or against a wall out to clear air (WW_CELL_PROBE_CLEAR)
 	Count
 };
 

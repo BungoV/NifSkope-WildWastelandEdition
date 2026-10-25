@@ -13,6 +13,7 @@
 #include "probegi.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QPointer>
 #include <QTimer>
@@ -22,6 +23,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 
 bool ProbeSkyLight::same( const ProbeSkyLight & o ) const
 {
@@ -217,6 +219,24 @@ void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const P
 namespace
 {
 
+/* lane GIPROBE2: Probe light smoothing. A relight no longer pops: the published grid fades toward the new one, each
+ * texel with its own time constant tau = kFadeTau / (1 + 4 c), c its relative luminance change (a big change settles
+ * faster; the per-texel rate is our own choice after DDGI's per-probe hysteresis). Steps at most every kFadeStepMs,
+ * then the exact new grid at kFadeEndMs (4 tau: within 2 %). Another publish (a door run, a reopen) ends it. */
+constexpr double kFadeTau = 1.0;
+constexpr qint64 kFadeStepMs = 66, kFadeEndMs = 4000;
+
+struct Fade
+{
+	const void * nif = nullptr;
+	std::vector<float> to, rate;   // the target grid; per texel 1 / tau in 1/s
+	QElapsedTimer clock;
+	qint64 lastMs = 0;
+	int ver = 0;                   // the publish this fade edits
+	int steps = 0;
+	double msSteps = 0;
+};
+
 struct Kept
 {
 	const void * nif = nullptr;
@@ -227,6 +247,7 @@ struct Kept
 	bool skyKept = true;   // lane GPURELIGHT1: false = a cell kept only for Probe sharing (no weather relight)
 	QPointer<QTimer> timer;   // the view's child: it goes with the window
 	QPointer<QWindow> view;
+	Fade fade;   // lane GIPROBE2
 };
 
 Kept & kept()
@@ -260,6 +281,72 @@ float captureZNow()
 		seenSize = pv->probes.size();
 	}
 	return z;
+}
+
+//! lane GIPROBE2: one smoothing step (or the snap to the target); false when no fade runs
+bool fadeStep( Kept & k, bool snap )
+{
+	Fade & f = k.fade;
+	if ( !f.nif )
+		return false;
+	std::vector<float> * cur = wwCellGiRgbaEdit( f.nif );
+	if ( !cur || wwCellGiVersion( f.nif ) != f.ver || cur->size() != f.to.size() ) {
+		f = Fade();   // another publish took the grid over
+		return false;
+	}
+	const qint64 now = f.clock.elapsed();
+	if ( !snap && now - f.lastMs < kFadeStepMs )
+		return true;
+	const bool end = snap || now >= kFadeEndMs;
+	const double dt = double( now - f.lastMs ) / 1000.0;
+	f.lastMs = now;
+	QElapsedTimer t;
+	t.start();
+	if ( end ) {
+		*cur = f.to;
+	} else {
+		const size_t n = f.rate.size();
+		const int nt = int( std::max( 1u, std::min( 8u, std::thread::hardware_concurrency() ) ) );
+		std::vector<std::thread> pool;
+		for ( int w = 0; w < nt; w++ )
+			pool.emplace_back( [&, w]() {
+				for ( size_t i = n * size_t( w ) / size_t( nt ), e = n * size_t( w + 1 ) / size_t( nt ); i < e; i++ ) {
+					const float a = float( 1.0 - std::exp( -dt * double( f.rate[i] ) ) );
+					for ( size_t c = 0; c < 4; c++ ) {
+						float & v = ( *cur )[i * 4 + c];
+						v += a * ( f.to[i * 4 + c] - v );
+					}
+				}
+			} );
+		for ( std::thread & th : pool )
+			th.join();
+	}
+	f.steps++;
+	f.msSteps += double( t.nsecsElapsed() ) / 1e6;
+	wwCellGiRgbaEdited( f.nif );
+	if ( end ) {
+		std::fprintf( stderr, "gi smooth: %d steps over %lld ms%s, CPU ms a step %.2f, texels %zu\n", f.steps, now,
+			snap ? " (snapped)" : "", f.msSteps / std::max( 1, f.steps ), f.rate.size() );
+		f = Fade();
+	}
+	return true;
+}
+
+//! lane GIPROBE2: start a fade from the grid on screen to `to` (moved in); gi.rgba becomes the grid on screen
+void fadeBegin( Kept & k, const WwCellGi & was, WwCellGi & gi )
+{
+	Fade & f = k.fade;
+	f = Fade();
+	f.to = std::move( gi.rgba );
+	gi.rgba = was.rgba;
+	const size_t n = f.to.size() / 4;
+	f.rate.resize( n );
+	for ( size_t i = 0; i < n; i++ ) {
+		const float * a = &gi.rgba[i * 4], * b = &f.to[i * 4];
+		const double la = 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2], lb = 0.2126 * b[0] + 0.7152 * b[1] + 0.0722 * b[2];
+		const double c = std::abs( lb - la ) / std::max( { std::abs( la ), std::abs( lb ), 1e-6 } );
+		f.rate[i] = float( ( 1.0 + 4.0 * std::min( c, 1.0 ) ) / kFadeTau );
+	}
 }
 
 //! lane SKYPIC1: the relight that took the drawn sky states it, and a gate's dump folder gets it beside the bake's
@@ -341,7 +428,19 @@ void relightKept()
 	gi.rgba = std::move( gr.grid );
 	gi.sky = std::move( gr.gridSky );	// the Pass drop-down's sky share (weather-free, carried over)
 	probeGiRoomsInto( gr, gi );   // lane ROOMCLAMP1
+	// lane GIPROBE2: Probe light smoothing: the same grid shape on screen fades toward this relight
+	const WwCellGi * was = wwLookOn( WwLook::ProbeSmooth ) ? wwCellGiFor( k.nif ) : nullptr;
+	const bool fading = was && was->rgba.size() == gi.rgba.size() && was->rgba != gi.rgba && was->voxel == gi.voxel
+		&& std::equal( was->dims, was->dims + 3, gi.dims ) && std::equal( was->origin, was->origin + 3, gi.origin );
+	k.fade = Fade();
+	if ( fading )
+		fadeBegin( k, *was, gi );   // copies the old values before the publish replaces them
 	wwCellGiPublish( k.nif, gi );
+	if ( fading ) {
+		k.fade.nif = k.nif;
+		k.fade.ver = wwCellGiVersion( k.nif );
+		k.fade.clock.start();
+	}
 	// the surfel and probe previews carry the relit light: publish them again, keeping Show probes
 	WwCellProbeView pv;
 	if ( const WwCellProbeView * old = wwCellProbeViewFor( k.nif ) )
@@ -380,6 +479,7 @@ void probeSkyForget()
 	if ( k.timer )
 		k.timer->stop();
 	k.nif = nullptr;
+	k.fade = Fade();   // lane GIPROBE2
 	picNow() = PicNow();
 }
 
@@ -393,6 +493,7 @@ void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bak
 	k.spec.record = nullptr;   // the caller's operators live on its stack; a later relight records nothing
 	k.wanted = spec.sky;
 	k.skyKept = sky;
+	k.fade = Fade();   // lane GIPROBE2: a new cell's grid is published whole
 }
 
 void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
@@ -400,12 +501,26 @@ void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 	Kept & k = kept();
 	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
 		return;
+	// lane GIPROBE2: a smoothing step while a fade runs (the row off: the exact grid at once); keep painting until done
+	if ( fadeStep( k, !wwLookOn( WwLook::ProbeSmooth ) ) && view )
+		view->requestUpdate();
 	// lane GPURELIGHT1: a Probe sharing tick relights at once (a toggle, nothing to wait out)
-	const bool share = wwLookOn( WwLook::ProbeShare );
+	// lane GIPROBE2: and so do Wide probe sharing (3 steps, implies sharing) and Probe depth visibility
+	const bool wide = wwLookOn( WwLook::ProbeShareWide );
+	const bool share = wwLookOn( WwLook::ProbeShare ) || wide;
+	const int sharePasses = wide ? 3 : 1;
 	const QString shareRed = wwEnvStr( "WW_CELL_GI_SHARE_RED" ).trimmed();
-	if ( share != k.spec.share || shareRed != k.spec.shareRed ) {
+	const bool depthVis = wwLookOn( WwLook::ProbeDepthVis );
+	const QString depthVisRed = wwEnvStr( "WW_CELL_GI_DEPTHVIS_RED" ).trimmed();
+	if ( share != k.spec.share || shareRed != k.spec.shareRed || sharePasses != k.spec.sharePasses
+		|| depthVis != k.spec.depthVis || depthVisRed != k.spec.depthVisRed ) {
 		k.spec.share = share;
 		k.spec.shareRed = shareRed;
+		k.spec.sharePasses = sharePasses;
+		k.spec.depthVis = depthVis;
+		k.spec.depthVisRed = depthVisRed;
+		if ( view )
+			k.view = view;   // the fade's repaints
 		relightKept();
 		return;
 	}

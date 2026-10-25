@@ -703,6 +703,129 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			R.error = QStringLiteral( "every probe stood outside the shell" );
 			return false;
 		}
+
+		/* lane GIPROBE2: PROBES OUT OF WALLS (DDGI probe relocation, Majercik et al. 2019 / RTXGI). A probe whose nearest
+		 * front-facing hit is closer than spec.probeClear is pushed away from the close faces (the sum of their ray
+		 * directions, each by how far inside the clearance), up to 4 steps and kClearMove in all. A step is kept only if
+		 * its segment is clear, the nearest hit grows, the room box stays and the back-face share stays under the bar. */
+		const bool clearOn = spec.probeClear > 0;
+		const bool clearRed = spec.red == QLatin1String( "clear" );   // red: pushed TOWARD the faces (the gate must fail)
+		const double clearMin = spec.probeClear, kClearMove = 140.0;
+		const size_t nq = probesOwn.size();
+		std::vector<double> nearBefore( nq, 0.0 ), nearAfter( nq, 0.0 );
+		std::vector<std::array<double, 3>> clearTo( nq ), clearFrom( nq );
+		std::vector<char> clearFate( nq, 0 );   // 0 clear already, 1 moved, 2 short and could not move
+		auto roomAt = [&]( const double w[3] ) -> int {
+			if ( roomBoxes )
+				for ( const ProbeRoomBox & b : *roomBoxes )
+					if ( w[0] >= b.lo[0] && w[0] <= b.hi[0] && w[1] >= b.lo[1] && w[1] <= b.hi[1] && w[2] >= b.lo[2] && w[2] <= b.hi[2] )
+						return int( b.room );
+			return -1;
+		};
+		// the nearest front hit over the full set, and the push away from the front hits inside clearMin
+		auto frontNear = [&]( const double c[3], double push[3] ) -> double {
+			double nr = 1e300;
+			push[0] = push[1] = push[2] = 0;
+			for ( int i = 0; i < NB; i++ ) {
+				const double * d = &bd[size_t( i ) * 3];
+				double t = 0;
+				int tri = -1;
+				if ( !bvh.ray( c, d, spec.rayMax, &t, &tri ) || tri < 0 )
+					continue;
+				if ( !soup.isTwoSided( size_t( tri ) ) ) {
+					const float * p = &bvh.t[size_t( tri ) * 9];
+					const double e1[3] = { double( p[3] ) - p[0], double( p[4] ) - p[1], double( p[5] ) - p[2] };
+					const double e2[3] = { double( p[6] ) - p[0], double( p[7] ) - p[1], double( p[8] ) - p[2] };
+					const double nn[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+					if ( nn[0] * d[0] + nn[1] * d[1] + nn[2] * d[2] > 0 )
+						continue;   // a back: ROOMCLAMP1's business
+				}
+				nr = std::min( nr, t );
+				if ( t < clearMin )
+					for ( int k = 0; k < 3; k++ )
+						push[k] -= d[k] * ( clearMin - t );
+			}
+			return nr;
+		};
+		if ( clearOn ) {
+			next = 0;
+			runPool( [&]() {
+				for ( size_t pi; ( pi = next++ ) < nq; ) {
+					double pl[3], push[3];
+					probeAt( pi, pl );
+					double nr = frontNear( pl, push );
+					nearBefore[pi] = nearAfter[pi] = nr;
+					clearTo[pi] = clearFrom[pi] = { pl[0], pl[1], pl[2] };
+					if ( !( nr < clearMin ) )
+						continue;
+					const double w0[3] = { pl[0] + O[0], pl[1] + O[1], pl[2] };
+					const int room0 = roomAt( w0 );
+					double c[3] = { pl[0], pl[1], pl[2] }, moved = 0;
+					for ( int it = 0; it < 4 && nr < clearMin; it++ ) {
+						const double pn = std::sqrt( push[0] * push[0] + push[1] * push[1] + push[2] * push[2] );
+						if ( !( pn > 1e-9 ) )
+							break;
+						const double sgn = clearRed ? -1.0 : 1.0;
+						const double dir[3] = { sgn * push[0] / pn, sgn * push[1] / pn, sgn * push[2] / pn };
+						const double len = std::min( clearMin - nr + 1.0, kClearMove - moved );
+						if ( !( len > 0.5 ) )
+							break;
+						double t = 0;
+						int tri = -1;
+						if ( bvh.ray( c, dir, len + 1.0, &t, &tri ) && tri >= 0 )
+							break;   // the step would cross a face
+						const double cn[3] = { c[0] + dir[0] * len, c[1] + dir[1] * len, c[2] + dir[2] * len };
+						const double wn[3] = { cn[0] + O[0], cn[1] + O[1], cn[2] };
+						double pushN[3], dummy = 0;
+						const double nrN = frontNear( cn, pushN );
+						if ( !clearRed && !( nrN > nr ) )
+							break;
+						if ( roomAt( wn ) != room0 || ( ruleOn && backShare( cn, NB, &dummy ) > double( spec.backMax ) ) )
+							break;
+						for ( int k = 0; k < 3; k++ ) {
+							c[k] = cn[k];
+							push[k] = pushN[k];
+						}
+						nr = nrN;
+						moved += len;
+					}
+					nearAfter[pi] = nr;
+					clearFate[pi] = moved > 0 ? 1 : 2;
+					clearTo[pi] = { c[0], c[1], c[2] };
+				}
+			} );
+			for ( size_t pi = 0; pi < nq; pi++ ) {
+				if ( nearBefore[pi] < clearMin )
+					R.clearShort++;
+				if ( clearFate[pi] == 1 ) {
+					R.clearMoved++;
+					const auto & pl = clearFrom[pi];
+					const double dx = clearTo[pi][0] - pl[0], dy = clearTo[pi][1] - pl[1], dz = clearTo[pi][2] - pl[2];
+					R.clearMoveMax = std::max( R.clearMoveMax, std::sqrt( dx * dx + dy * dy + dz * dz ) );
+					probesOwn[pi].pos[0] = float( clearTo[pi][0] + O[0] );
+					probesOwn[pi].pos[1] = float( clearTo[pi][1] + O[1] );
+					probesOwn[pi].pos[2] = float( clearTo[pi][2] );
+				}
+				if ( nearAfter[pi] < clearMin )
+					R.clearStill++;
+			}
+		}
+		R.clearRule = clearOn;
+		R.clearMin = float( clearMin );
+		R.clearTested = clearOn ? qint64( nq ) : 0;
+		if ( clearOn && !spec.clearDump.isEmpty() ) {   // the gate's list: index, where it stood, nearest front hit before/after, where it went
+			QFile f( spec.clearDump );
+			if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) ) {
+				QTextStream ts( &f );
+				ts << "# probe\tx\ty\tz\tnear\tfate\tnx\tny\tnz\tnearafter\tclear " << clearMin << ( clearRed ? " RED clear" : "" ) << "\n";
+				for ( size_t pi = 0; pi < nq; pi++ ) {
+					const auto & pl = clearFrom[pi];
+					ts << pi << "\t" << pl[0] + O[0] << "\t" << pl[1] + O[1] << "\t" << pl[2] << "\t" << nearBefore[pi] << "\t"
+					   << ( clearFate[pi] == 0 ? "clear" : clearFate[pi] == 1 ? "moved" : "stuck" ) << "\t"
+					   << clearTo[pi][0] + O[0] << "\t" << clearTo[pi][1] + O[1] << "\t" << clearTo[pi][2] << "\t" << nearAfter[pi] << "\n";
+				}
+			}
+		}
 	}
 
 	/* lane GAPBAKE1: a probe's room for the split: the soup's rooms grid when given (its cell, else the nearest air
@@ -2563,6 +2686,10 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 	for ( int h : r.backHist )
 		t << " " << h;
 	t << "\n";
+	if ( r.clearRule )   // lane GIPROBE2: probes out of walls (off: no line, the census as before)
+		t << "bake: out of walls (nearest front face under " << QString::number( r.clearMin, 'f', 0 ) << " u): " << r.clearShort
+		  << " of " << r.clearTested << " probes too close, moved " << r.clearMoved << " (furthest " << QString::number( r.clearMoveMax, 'f', 1 )
+		  << " u), still too close after " << r.clearStill << "\n";
 	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite );
 	if ( r.msGpuRays >= 0 )
 		t << " (of the rays, the GPU batches " << qRound( r.msGpuRays ) << ")";
@@ -2625,14 +2752,17 @@ int probeBakeCli( const QStringList & args )
 		// lane ROOMCLAMP1: the back-face rule's threshold and list, the placer's red (floor)
 		else if ( a == QLatin1String( "--back-max" ) ) { bs.backMax = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--back-dump" ) ) { bs.backDump = nx; i++; }
+		// lane GIPROBE2: probes out of walls (clearance in units, 0 = off) and its list
+		else if ( a == QLatin1String( "--clear" ) ) { bs.probeClear = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--clear-dump" ) ) { bs.clearDump = nx; i++; }
 		else if ( a == QLatin1String( "--place-red" ) ) { ps.red = nx; i++; }
 		else if ( a == QLatin1String( "--room-split" ) ) { bs.roomSplit = nx.toInt() != 0; i++; }   // lane GAPBAKE1
 	}
 	const QStringList rc = rect.split( ',' );
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 ) {
 		std::fprintf( stderr, "usage: probebake --soup <file> --rect minX,minY,maxX,maxY --out <dir> "
-			"[--rays n] [--adapt n] [--threads n] [--spacing s] [--red octant|normal|oneside|rooms|glass|backface] [--no-sky] [--no-spill] [--tbk 3|4|5] "
-			"[--max-links n] [--no-openings] [--no-rooms] [--back-max f] [--back-dump tsv] [--place-red floor|...] [--room-split 0|1]\n" );
+			"[--rays n] [--adapt n] [--threads n] [--spacing s] [--red octant|normal|oneside|rooms|glass|backface|clear] [--no-sky] [--no-spill] [--tbk 3|4|5] "
+			"[--max-links n] [--no-openings] [--no-rooms] [--back-max f] [--back-dump tsv] [--clear u] [--clear-dump tsv] [--place-red floor|...] [--room-split 0|1]\n" );
 		return 2;
 	}
 	ps.minX = rc[0].toFloat();
