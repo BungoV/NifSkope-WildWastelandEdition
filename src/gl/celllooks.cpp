@@ -154,15 +154,22 @@ bool wwLookReopens( WwLook l )
 	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::AnimObjects;
 }
 
+bool wwLookHasRow( WwLook l )
+{
+	return l != WwLook::AirClusters;
+}
+
 bool wwLookOn( WwLook l )
 {
 	const QByteArray p = pinOf( l );
-	return p.isEmpty() ? rowVal( l ) != 0 : p != "0";
+	if ( p.isEmpty() )
+		return wwLookHasRow( l ) ? rowVal( l ) != 0 : true;
+	return p != "0";
 }
 
 void wwLookSet( WwLook l, bool on )
 {
-	if ( wwLookPinned( l ) )
+	if ( wwLookPinned( l ) || !wwLookHasRow( l ) )
 		return;
 	rowVal( l ) = on ? 1 : 0;
 	QSettings().setValue( QLatin1String( kRows[size_t( l )].key ), on );
