@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FAR7 (2026-10-26, branch far7-20261025): FAR6 follow-ups -- sway live in a streamed view, a lower relief edge
+
+- **Game LOD trees sway is live in a streamed view too** (`WW_CELL_FARLOD_BTOSWAY`): the branch merges LIVESET4,
+  whose liveFirst tries the in-place rebuild for every look that reopens (FAR6 tried it for this look only) and whose
+  far section rebuild suspends the streamer, rebuilds the far tail and streams the cells again. FAR6's streamed
+  views reopened the cell. The merge kept both lanes' copies of `cellLiveRebuild`; one is dropped.
+- **Object LOD shadows on ground only: the relief gate's low edge is 2 far texels** (`WW_SHADOW_GROUNDGATE`, still
+  OFF): 256 u at Ultra, 320 u at Low-High (FO4CS: 293 u). FAR6's 4 texels (512/640 u) dropped real house shadows on
+  the ground by the terrace; an offline model of the map (notes/far7/relief) cut the shadow error from 19.8 to 8.3
+  points (Ultra) and 32.7 to 8.6 (High) with no new false dark; 1.5 texels and below brought the map's self-shadow
+  back on the ground at High. Red `WW_SHADOW_GROUNDGATE_RED=far6` (4 texels). Off draws what it drew.
+
 ## Lane LIGHTPHYS2 + LIGHTPHYS3 (2026-10-25, branch lightphys2-20261025): light rows reach the bounce light; calibration row
 
 - **Bounce light follows the light rows, live:** Physical light falloff and Light intensity curve now also shape the

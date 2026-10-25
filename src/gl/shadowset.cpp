@@ -1968,11 +1968,13 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 				float( t.pubN ) / rowsAll, gateUp ? -1.0f : 250.0f )
 			: FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 		// lane FAR6: FO4CS's light-space self-test (bFarMapLightSpaceSelfTest, on in its ini) in place of the band:
-		// relief band 4 far texels, margin cap 100, the height quantum; reds =band (FO4CS's 0) and =norelief
+		// relief band, margin cap 100, the height quantum; reds =band (FO4CS's 0) and =norelief
+		// lane FAR7: relief low edge 2 far texels (256/320 u, FO4CS 293), measured in notes/far7/relief; red =far6 (4)
 		const QString gateRed = wwEnvStr( "WW_SHADOW_GROUNDGATE_RED" );
 		const bool selfOn = t.pubExtra >= 2 && !volume && !gateUp && gateRed != QLatin1String( "band" );
+		const double reliefTexels = gateRed == QLatin1String( "far6" ) ? 4.0 : 2.0;
 		prog->uni4f( "ussTerrSelf", FloatVector4( selfOn ? 1.0f : 0.0f,
-			gateRed == QLatin1String( "norelief" ) ? 0.0f : float( 4.0 * t.pubT ), 100.0f, t.pubSpan / 65535.0f ) );
+			gateRed == QLatin1String( "norelief" ) ? 0.0f : float( reliefTexels * t.pubT ), 100.0f, t.pubSpan / 65535.0f ) );
 		prog->uni2f( "ussTerrSize", float( t.pubN ), float( t.pubNn ) );
 		// the disc penumbra and FO4CS's slope bias: surfaces only (the fog's froxels keep the plain lookup)
 		prog->uni4f( "ussTerrPen", FloatVector4( wwShadowPar( WwParPenumbra ) && !volume ? 1.0f : 0.0f, float( t.pubT ),
