@@ -581,7 +581,23 @@ void CellWorkspacePanel::buildUi()
 	section( tr( "Effects" ), "effects" );
 	cellIs = tick( showMenu, tr( "Imagespace" ), "CellWorkspaceCellImageSpace", wwCellImageSpaceOn() );
 	// lane MOTION1: the game's temporal AA, the same state as the Scene popup's Temporal AA row; ships off
-	cellTaa = tick( showMenu, tr( "Temporal AA" ), "CellWorkspaceTemporalAa", wwGameTaaOn() );
+	cellTaa = tick( showMenu, tr( "Temporal AA" ), "CellWorkspaceTemporalAa", wwGameTaaRowOn() );
+	// lane TAA2: our own resolve in place of the game's, Off | Low | Medium | High | Ultra; ships Off
+	cellModernTaa = showMenu->addMenu( tr( "Modern temporal AA" ) );
+	cellModernTaa->setObjectName( QStringLiteral( "CellWorkspaceModernTaa" ) );
+	cellModernTaa->setEnabled( !wwTaa2Pinned() );
+	cellModernTaaGroup = new QActionGroup( cellModernTaa );
+	cellModernTaaGroup->setExclusive( true );
+	{
+		const QStringList names = { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = cellModernTaa->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == wwTaa2Tier() );
+			cellModernTaaGroup->addAction( a );
+		}
+	}
 	cellSsr = tick( showMenu, tr( "SSR" ), "CellWorkspaceSsr", wwCellSsrOn() );
 	cellSsrExt = tick( showMenu, tr( "SSR outdoors" ), "CellWorkspaceSsrOutdoors", wwCellSsrExteriorOn() );
 	cellReflProbe = tick( showMenu, tr( "Reflection probes" ), "CellWorkspaceReflProbe", wwCellReflProbeOn() );	// lane REFLPROBE1
@@ -852,6 +868,11 @@ void CellWorkspacePanel::buildUi()
 			if ( glView )
 				glView->update();
 		} );
+	connect( cellModernTaaGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		wwTaa2SetTier( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
 	connect( cellSsgiQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwCellSsgiSetQuality( a->data().toInt() );
 		if ( glView )
