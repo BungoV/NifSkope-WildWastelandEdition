@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FAR5 (2026-10-25, branch far5-20261023): far LOD leftovers -- five new looks, all OFF
+
+Each is a Show-menu tick (src/gl/celllooks.*) with its own pin and red; off draws exactly what it drew before.
+- **Terrain shadow slope from heights** (`WW_SHADOW_SLOPEMAP`, row "Terrain shadow slope from heights"): FO4CS's
+  slope bias (FarFieldMaskCS `LocalGradient`) read from a terrain-only height block under the terrain shadow map
+  instead of the screen-space slope. Needs the FO4CS slope-bias part of SHADOWPAR on. Red `WW_SHADOW_SLOPEMAP_RED=flat`
+  (gradient 0).
+- **Object LOD shadows on ground only** (`WW_SHADOW_GROUNDGATE`): FO4CS's ground-band branch (`fFarMapGroundBand`
+  250, smoothstep 0.75-1.25 band, relief allowance min(4 neighbours, 4 texels)). A receiver above the band reads a
+  second sweep made from the terrain alone, so object-LOD and card casters darken only the ground under them. FO4CS
+  ships its light-space self-test (identity) on by default; this ports only the fallback branch, without identity or
+  boxes. Red `WW_SHADOW_GROUNDGATE_RED=allup` (every receiver treated as elevated).
+- **Far tree card shadows** (`WW_SHADOW_FARCARDS`): the far cards join the terrain shadow's height raster as
+  pyramids (apex at the card's centre + half height, base +-half width). The crown shape is ours; the game's cards
+  cast nothing. Red `WW_SHADOW_FARCARDS_RED=tall` (apex x3).
+- **Cable shadows sway** (`WW_CELL_CABLES_SHADOWSWAY`): wind cables cast their sun shadow where the grass wind puts
+  them (fo4_default.vert's formula on the CPU). Red `WW_CELL_CABLES_SHADOWSWAY_RED=double`. How the game fades
+  cables with distance is unknown (no source); not coded.
+- **Game LOD trees sway** (`WW_CELL_FARLOD_BTOSWAY`, reopens the cell): the Vanilla far type's .bto trees get a
+  wind weight (triangle islands at least 256 tall and half as tall as wide; weight hF^2 (0.35 + 0.65 rF)) and
+  Tree_Anim. The game's .bto trees do not sway; the rule is ours. Shapes sharing a lighting shader are skipped
+  and counted. Red `WW_CELL_FARLOD_BTOSWAY_RED=rigid`.
+- The slope and gate looks act on surface receivers only; the fog's air taps keep the old terrain read (the
+  height taps there pushed fo4_effectdecalcsm with the GI march over the driver's instruction limit).
+- Memory with the slope or gate look on: one or two extra far-grid blocks (RG16, 2 textures): Low 2 / Med 8 /
+  High 32 / Ultra 128 MB per block, plus the CPU copies; the status line prints `extra= pub_extra= cards=`.
+
 ## Lane FAR4 (2026-10-23, branch far4-20261023): moving sun shadows keep their far casters (fix, on)
 
 - **TERRBLACK1, the cause found in the code:** the shadow cache's scroll (SHADOWCACHE1) copies the last frame's

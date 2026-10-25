@@ -706,6 +706,17 @@ bool wwCellGrassWind( float wind[4], float wind2[4] )
 	return true;
 }
 
+bool wwCellGrassCableWind( const void * nif, int block, float wind[4], float wind2[4] )
+{
+	const GrassState & s = gs();
+	const auto nf = s.noFade.constFind( nif );
+	if ( nf == s.noFade.constEnd() || !nf->contains( block ) || !wwCellGrassWind( wind, wind2 ) )
+		return false;
+	const auto wit = s.wave.constFind( nif );
+	wind[3] = wwCellGrassPhase( s.tCur, wit != s.wave.constEnd() ? wit->value( block, 0.0f ) : 0.0f );
+	return true;
+}
+
 float wwCellGrassPhaseOffset( const WwGrassBlade & b )
 {
 	// the vertex shader's add v5.y, v5.x then * 0.0078125 (the blade's block-relative position halves)

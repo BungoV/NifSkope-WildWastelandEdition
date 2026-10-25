@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 
 #include "impostorcard.h"
 #include "gl/impostordraw.h"
+#include "data/niftypes.h"	// lane FAR5: Triangle (the card casters)
 
 #include <QSet>
 #include <QString>
@@ -120,6 +121,18 @@ int armCellFar( NifModel * nif, const QStringList & chunkPaths, const float shif
 int drawCellFar( Scene * scene, const ImpostorDraw::Options & opt );
 void forgetCellFar();
 int cellFarCount();
+
+/* lane FAR5: the far cards as terrain-shadow casters, in the cell scene's frame (world minus the shift). Each card is
+ * a 4-sided pyramid: apex at its centre + halfH, base +-halfW at its centre's height (our crown rule, not the game's:
+ * the game's far trees are in its .bto and its cards cast nothing). Pieces of at most 13000 cards (16-bit indices).
+ * apexScale scales the apex height (a red). Returns the cards used; cellFarGen() changes on every arm and forget. */
+struct FarCasterPiece
+{
+	QVector<Vector3> verts;
+	QVector<Triangle> tris;
+};
+int cellFarCasters( QVector<FarCasterPiece> & out, float apexScale = 1.0f );
+quint64 cellFarGen();
 
 } // namespace ImpostorChunk
 

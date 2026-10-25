@@ -20,6 +20,11 @@ enum class WwLook : int
 	Ephemeris,			// EPHEM1 (GAPLOOK2): Sun Path Real uses FO4CS Solar's sun + the real moon, phase, date (WW_SKY_EPHEM)
 	ActorsOutdoors,		// PLACED1 (GAPLOOK2): placed actors in exterior cells, not only interiors (WW_CELL_ACTORS_OUT)
 	WeaponParts,		// MISS1 (GAPLOOK2): placed weapons get their default mod parts on the connect points (WW_CELL_WEAP_PARTS)
+	TerrSlopeMap,		// FAR5: the terrain shadow's slope bias from the height map's gradient (WW_SHADOW_SLOPEMAP)
+	TerrGroundGate,		// FAR5: object-LOD shadows land on ground receivers only, FO4CS's ground band (WW_SHADOW_GROUNDGATE)
+	CableShadowSway,	// FAR5: a wind cable's shadow follows its sway (WW_CELL_CABLES_SHADOWSWAY)
+	BtoSway,			// FAR5: the game's .bto trees sway with the far wind (WW_CELL_FARLOD_BTOSWAY)
+	FarCardShadows,		// FAR5: far tree cards cast into the terrain shadow map (WW_SHADOW_FARCARDS)
 	Count
 };
 

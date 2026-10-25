@@ -648,3 +648,34 @@ int ImpostorChunk::cellFarCount()
 {
 	return farSt().cards.placed.size();
 }
+
+quint64 ImpostorChunk::cellFarGen()
+{
+	return farGen();
+}
+
+int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScale )
+{
+	out.clear();
+	const CellFarState & F = farSt();
+	const ChunkState & s = F.cards;
+	int used = 0;
+	for ( const Placed & p : s.placed ) {
+		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() || !s.sets.at( p.setIndex ).ok )
+			continue;
+		if ( out.isEmpty() || out.last().verts.size() >= 13000 * 5 )
+			out.append( FarCasterPiece() );
+		FarCasterPiece & k = out.last();
+		const float sc = std::fabs( p.scale );
+		const float cx = p.world[0] - F.shift[0] + p.c.center[0] * sc, cy = p.world[1] - F.shift[1] + p.c.center[1] * sc;
+		const float cz = p.world[2] - F.shift[2] + p.c.center[2] * sc;
+		const float w = p.c.halfW * sc, h = p.c.halfH * sc;
+		const int b = int( k.verts.size() );
+		k.verts << Vector3( cx, cy, cz + h * apexScale ) << Vector3( cx - w, cy - w, cz ) << Vector3( cx + w, cy - w, cz )
+			<< Vector3( cx + w, cy + w, cz ) << Vector3( cx - w, cy + w, cz );
+		for ( int f = 0; f < 4; f++ )
+			k.tris << Triangle( quint16( b ), quint16( b + 1 + f ), quint16( b + 1 + ( f + 1 ) % 4 ) );
+		used++;
+	}
+	return used;
+}

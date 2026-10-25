@@ -101,6 +101,8 @@ bool wwCellGrassIsShape( const void * nif, int block );
 //! The wind constants from the loaded weather (the engine's wind update): wind = (angle, 0, 0, 0), wind2 = (min * 300,
 //! max * 300, frequency, 1); false without a weather.
 bool wwCellGrassWind( float wind[4], float wind2[4] );
+//! lane FAR5: a swaying cable's (a no-fade block's) wind with its current phase in wind[3]; false for any other block
+bool wwCellGrassCableWind( const void * nif, int block, float wind[4], float wind2[4] );
 //! The blade's phase offset, (h0 + h1) * 0.0078125: the weld carries it in the bitangent's length (1024 + it).
 float wwCellGrassPhaseOffset( const WwGrassBlade & b );
 //! One shape's phase at time t: ((t * 0.0016666667) * 6.2831802) * the GRAS wave period, float32.

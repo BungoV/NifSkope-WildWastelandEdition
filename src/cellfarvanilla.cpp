@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "cellfarvanilla.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "gl/celllooks.h"	// lane FAR5: Game LOD trees sway
 
 #include "gamemanager.h"
 #include "lodgen.h"
@@ -568,6 +569,122 @@ void fvShape( NifModel & src, const QModelIndex & iS, FvKind kind, const FvRect 
 
 } // namespace
 
+/* lane FAR5: the game's LOD trees sway (a look, ours: FO4's .bto trees are still and it has no .btt). A tree = a
+ * triangle island at least 256 tall and at least half as tall as it is wide (our rule, not the game's); its weight
+ * hF^2 (0.35 + 0.65 rF) goes to vertex alpha with SLSF2 Tree_Anim, the far tree buckets' wind (glshape.cpp).
+ * Red WW_CELL_FARLOD_BTOSWAY_RED=rigid weighs every tree vertex 1 (the trunk slides). Returns the trees found. */
+int fvTreeSway( NifModel & src, const QModelIndex & iS, const Transform & xf, bool rigid )
+{
+	const quint32 nv = src.get<quint32>( iS, "Num Vertices" );
+	const QModelIndex iVD = src.getIndex( iS, "Vertex Data" );
+	const QModelIndex iTri = src.getIndex( iS, "Triangles" );
+	if ( !nv || !iVD.isValid() || !iTri.isValid() )
+		return 0;
+	const BSVertexDesc desc = src.get<BSVertexDesc>( iS, "Vertex Desc" );
+	const quint16 flags = quint16( ( desc.Value() >> 44 ) & 0xFFFF );
+	if ( flags & ( VF_SKINNED | VF_EYEDATA | VF_LANDDATA ) )
+		return 0;
+	const bool fullPrec = ( flags & VF_FULLPREC ) != 0, hasC = ( flags & VF_COLORS ) != 0;
+	const QVector<Triangle> tris = src.getArray<Triangle>( iTri );
+	std::vector<Vector3> w( nv );
+	for ( quint32 v = 0; v < nv; v++ ) {
+		const QModelIndex row = src.index( int( v ), 0, iVD );
+		w[v] = xf * ( fullPrec ? src.get<Vector3>( row, "Vertex" ) : Vector3( src.get<HalfVector3>( row, "Vertex" ) ) );
+	}
+	// the islands: vertices joined by triangles
+	std::vector<quint32> up( nv );
+	for ( quint32 v = 0; v < nv; v++ )
+		up[v] = v;
+	auto root = [&]( quint32 a ) {
+		while ( up[a] != a ) {
+			up[a] = up[up[a]];
+			a = up[a];
+		}
+		return a;
+	};
+	std::vector<bool> used( nv, false );
+	for ( const Triangle & t : tris ) {
+		if ( t.v1() >= nv || t.v2() >= nv || t.v3() >= nv )
+			continue;
+		used[t.v1()] = used[t.v2()] = used[t.v3()] = true;
+		up[root( t.v1() )] = root( t.v2() );
+		up[root( t.v2() )] = root( t.v3() );
+	}
+	std::vector<std::array<float, 6>> box( nv, { 1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f } );
+	for ( quint32 v = 0; v < nv; v++ ) {
+		if ( !used[v] )
+			continue;
+		std::array<float, 6> & b = box[root( v )];
+		for ( int k = 0; k < 3; k++ ) {
+			b[size_t( k )] = std::min( b[size_t( k )], w[v][k] );
+			b[size_t( k + 3 )] = std::max( b[size_t( k + 3 )], w[v][k] );
+		}
+	}
+	auto isTree = [&]( const std::array<float, 6> & b ) {
+		const float h = b[5] - b[2];
+		return b[3] >= b[0] && h >= 256.0f && h >= 0.5f * std::max( b[3] - b[0], b[4] - b[1] );
+	};
+	int trees = 0;
+	for ( quint32 v = 0; v < nv; v++ )
+		if ( used[v] && root( v ) == v && isTree( box[v] ) )
+			trees++;
+	if ( !trees )
+		return 0;
+	std::vector<float> alpha( nv, 0.0f );
+	for ( quint32 v = 0; v < nv; v++ ) {
+		if ( !used[v] )
+			continue;
+		const std::array<float, 6> & b = box[root( v )];
+		if ( !isTree( b ) )
+			continue;
+		const float hF = std::clamp( ( w[v][2] - b[2] ) / std::max( b[5] - b[2], 1.0f ), 0.0f, 1.0f );
+		const float cx = 0.5f * ( b[0] + b[3] ), cy = 0.5f * ( b[1] + b[4] );
+		const float rMax = std::max( 0.5f * std::max( b[3] - b[0], b[4] - b[1] ), 1.0f );
+		const float rF = std::clamp( std::hypot( w[v][0] - cx, w[v][1] - cy ) / rMax, 0.0f, 1.0f );
+		alpha[v] = rigid ? 1.0f : hF * hF * ( 0.35f + 0.65f * rF );
+	}
+	if ( !hasC ) {
+		// the colours join the layout: every row's fields read out, the array rebuilt, the fields written back
+		std::vector<std::vector<std::pair<QString, NifValue>>> keep( nv );
+		for ( quint32 v = 0; v < nv; v++ ) {
+			const QModelIndex row = src.index( int( v ), 0, iVD );
+			for ( int c = 0; c < src.rowCount( row ); c++ ) {
+				const QModelIndex f = src.index( c, 0, row );
+				keep[v].emplace_back( src.itemName( f ), src.getValue( f ) );
+			}
+		}
+		BSVertexDesc nd = desc;
+		nd.SetFlag( VertexFlags::VF_COLORS );
+		nd.ResetAttributeOffsets( 130 );
+		src.set<quint32>( iS, "Num Vertices", 0 );
+		src.updateArraySize( iVD );
+		src.set<BSVertexDesc>( iS, "Vertex Desc", nd.Value() );
+		src.set<quint32>( iS, "Num Vertices", nv );
+		src.set<quint32>( iS, "Data Size", quint32( nv * nd.GetVertexSize() + quint32( tris.size() ) * 6u ) );
+		const QModelIndex iVD2 = src.getIndex( iS, "Vertex Data" );
+		src.updateArraySize( iVD2 );
+		for ( quint32 v = 0; v < nv; v++ ) {
+			const QModelIndex row = src.index( int( v ), 0, iVD2 );
+			for ( const auto & f : keep[v] ) {
+				const QModelIndex i = src.getIndex( row, f.first );
+				if ( i.isValid() )
+					src.setIndexValue( i, f.second );
+			}
+			src.set<ByteColor4>( row, "Vertex Colors", ByteColor4( FloatVector4( Color4( 1, 1, 1, alpha[v] ) ) ) );
+		}
+	} else {
+		for ( quint32 v = 0; v < nv; v++ ) {
+			const QModelIndex row = src.index( int( v ), 0, iVD );
+			Color4 c( src.get<ByteColor4>( row, "Vertex Colors" ) );
+			c[3] = alpha[v];
+			src.set<ByteColor4>( row, "Vertex Colors", ByteColor4( FloatVector4( c ) ) );
+		}
+	}
+	const QModelIndex iSh = src.getBlockIndex( src.getLink( iS, "Shader Property" ) );
+	src.set<quint32>( iSh, "Shader Flags 2", src.get<quint32>( iSh, "Shader Flags 2" ) | ( 1u << 29 ) );
+	return trees;
+}
+
 bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString & ws, const float shift[3],
 	std::vector<WwFarVanRing> & rings, const std::function<bool( float, float, float * )> & landZ,
 	const std::function<bool()> & overBudget, QString * error )
@@ -667,6 +784,32 @@ bool wwFarVanAppend( NifModel * nif, const QModelIndex & parent, const QString &
 						fvShape( src, i, kind == 0 ? FvTerrain : FvObjects, outer, cut, ours,
 							water[size_t( k )] ? noLand : landZ, r,
 							kind != 0 || water[size_t( k )] ? 0 : ( &r == &rings.back() ? 1 : 2 ) );
+					}
+					// lane FAR5: Game LOD trees sway -- only shapes whose lighting shader no other shape shares
+					if ( kind != 0 && wwLookOn( WwLook::BtoSway ) ) {
+						if ( r.btoSwayShapes < 0 )
+							r.btoSwayShapes = 0;
+						const bool rigid = wwEnvStr( "WW_CELL_FARLOD_BTOSWAY_RED" ) == QLatin1String( "rigid" );
+						QHash<int, int> users;
+						for ( int k = 0; k < shapes.size(); k++ )
+							users[src.getLink( src.getBlockIndex( shapes[k] ), "Shader Property" )]++;
+						for ( int k = 0; k < shapes.size(); k++ ) {
+							const QModelIndex i = src.getBlockIndex( shapes[k] );
+							const int sp = src.getLink( i, "Shader Property" );
+							const QModelIndex iSh = src.getBlockIndex( sp );
+							if ( water[size_t( k )] || ( src.get<quint32>( i, "Flags" ) & 1u ) || !iSh.isValid()
+								|| !src.isNiBlock( iSh, "BSLightingShaderProperty" ) )
+								continue;
+							if ( users.value( sp ) > 1 ) {
+								r.btoSwayShared++;
+								continue;
+							}
+							const int n = fvTreeSway( src, i, world[size_t( k )], rigid );
+							if ( n > 0 ) {
+								r.btoSwayShapes++;
+								r.btoSwayTrees += n;
+							}
+						}
 					}
 					for ( int b = 0; b < src.getBlockCount(); b++ ) {
 						const QModelIndex i = src.getBlockIndex( b );

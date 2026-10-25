@@ -10,6 +10,8 @@ BSD License - see nifskope.h
 #include "gametaa.h"
 #include "gl/cellwater.h"	// lane SUNCELL1: water never casts
 #include "gl/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
+#include "gl/cellgrass.h"	// lane FAR5: a wind cable's shadow sways with it
+#include "gl/celllooks.h"
 #include "gl/cellpasstime.h"	// lane PERF1: the casters' draw count
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the casters' render queues
 
@@ -95,6 +97,7 @@ struct CsmState
 	double rc[3] = { 1, 0, 0 }, uc[3] = { 0, 1, 0 };	// the camera's right and up rows (world)
 	double split[2] = { kSplit0, kSplit1 };
 	int casters = 0, tris = 0, atCasters = 0;
+	int swayCables = -1;	// lane FAR5: wind cables cast where they sway (-1 = Cable shadows sway off)
 	int slopeClamp = 0;	// lane SHADOWPAR1: 1 the caster bias clamped (FO4CS's slope 4), -1 no glPolygonOffsetClamp
 	// lane TERRSHADOW1: the fit's numbers, CSM1's constants unless Cascade Quality picks a preset
 	double baseD = kDefaultDistance, split0 = kSplit0, split1 = kSplit1, blend = kBlend, lightBack = kLightBack;
@@ -316,6 +319,36 @@ struct Caster
 	bool dynamic = false;		// lane SHADOWCACHE1: drawn over the cached static layer every pass
 	std::uint64_t sig = 0;
 };
+
+// lane FAR5: fo4_default.vert's grass wind on the CPU (model space) for a wind cable; false for any other shape.
+// Red WW_CELL_CABLES_SHADOWSWAY_RED=double casts at twice the offset.
+bool cableSway( const Scene * scene, const Shape * sh, std::vector<Vector3> & out )
+{
+	float wind[4], wind2[4];
+	if ( sh->colors.size() != sh->verts.size() || !wwCellGrassCableWind( scene->nifModel, sh->id(), wind, wind2 ) )
+		return false;
+	const float k = wwEnvStr( "WW_CELL_CABLES_SHADOWSWAY_RED" ) == QLatin1String( "double" ) ? 2.0f : 1.0f;
+	const float half = ( wind2[1] - wind2[0] ) * 0.5f;
+	const float dx = std::cos( wind[0] ), dy = std::sin( wind[0] );
+	const bool hasB = sh->bitangents.size() == sh->verts.size();
+	out.resize( size_t( sh->verts.size() ) );
+	for ( qsizetype v = 0; v < sh->verts.size(); v++ ) {
+		const float L = hasB ? sh->bitangents.at( v ).length() : 1.0f;
+		const float off = L > 2.0f ? L - 1024.0f : 0.0f;
+		const float p = ( wind[3] - off ) * wind2[2];
+		const float sp = std::sin( p ), cp = std::cos( p );
+		float w = std::sin( sp * 3.14159274f ) + std::sin( sp * 6.28318548f );
+		w = w * 0.3f + std::cos( cp * 3.14159274f ) * 0.2f + 1.0f;
+		w = w * half + wind2[0];
+		const float a = sh->colors.at( v ).alpha();
+		w *= a * a * 0.5f * k;
+		Vector3 q = sh->verts.at( v );
+		q[0] += dx * w;
+		q[1] += dy * w;
+		out[size_t( v )] = q;
+	}
+	return true;
+}
 
 bool ensureTargets( CsmState & s, Renderer * r, QString & why )
 {
@@ -832,6 +865,8 @@ static void sunShadowPassImpl( Scene * scene )
 	std::vector<Caster> casters;
 	s.tris = 0;
 	const bool cpuSkin = scene->hasOption( Scene::DoSkinning );
+	const bool cableSwayOn = wwLookOn( WwLook::CableShadowSway );
+	s.swayCables = cableSwayOn ? 0 : -1;
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
 		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
@@ -856,8 +891,11 @@ static void sunShadowPassImpl( Scene * scene )
 			for ( qsizetype v = 0; v < sh->verts.size(); v++ )
 				c.skinned[size_t( v )] = sh->skinVertex( int( v ), sh->verts.at( v ) );
 		}
+		if ( cableSwayOn && c.skinned.empty() && cableSway( scene, sh, c.skinned ) )
+			s.swayCables++;
 		if ( cst.on )
-			c.dynamic = !ShadowCache::classify( sh, sh->wwGpuSkinned(), c.twoSided, c.alphaTested, c.sig );
+			c.dynamic = !ShadowCache::classify( sh, sh->wwGpuSkinned() || !c.skinned.empty(), c.twoSided, c.alphaTested,
+				c.sig );
 		s.tris += int( sh->triangles.size() );
 		casters.push_back( std::move( c ) );
 	}
@@ -1601,6 +1639,8 @@ QString wwSunShadowSummary()
 		o += QString( " m%1=%2" ).arg( i ).arg( m.join( QChar( ',' ) ) );
 	}
 	o += QString( " csmat=%1 slopeclamp=%2" ).arg( s.atCasters ).arg( s.slopeClamp );	// lane VOLAIR1: -1 = no program (they cast solid)
+	if ( s.swayCables >= 0 )
+		o += QString( " cablesway=%1" ).arg( s.swayCables );	// lane FAR5: the wind cables cast where they sway
 	// lane VOLAIR1: the receiver constants a judge needs to predict the factor from WW_CSM_DUMP's map
 	o += QString( " recv=%1,%2,%3,%4" ).arg( g( kOffsetA ), g( kOffsetB ), g( kBlend ), g( kNear ) );
 	o += QString( " casters=%1 tris=%2 ground=%3 probe=%4 force=%5 red=%6" ).arg( s.casters ).arg( s.tris ).arg( s.groundCast ? 1 : 0 )

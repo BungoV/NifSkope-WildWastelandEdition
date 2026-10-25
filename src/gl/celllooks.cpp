@@ -27,6 +27,11 @@ const LookRow kRows[] = {
 	{ "Real sun and moon", "WW/SkyEphemeris" },
 	{ "Actors outdoors", "WW/CellActorsOutdoors" },
 	{ "Weapon mod parts", "WW/CellWeaponParts" },
+	{ "Terrain shadow slope from heights", "WW/ShadowSlopeMap" },
+	{ "Object LOD shadows on ground only", "WW/ShadowGroundGate" },
+	{ "Cable shadows sway", "WW/CableShadowSway" },
+	{ "Game LOD trees sway", "WW/FarLodBtoSway" },
+	{ "Far tree card shadows", "WW/ShadowFarCards" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -92,6 +97,26 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WEAP_PARTS" ).trimmed() );
 		return p;
 	}
+	case WwLook::TerrSlopeMap: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_SHADOW_SLOPEMAP" ).trimmed() );
+		return p;
+	}
+	case WwLook::TerrGroundGate: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_SHADOW_GROUNDGATE" ).trimmed() );
+		return p;
+	}
+	case WwLook::CableShadowSway: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_CABLES_SHADOWSWAY" ).trimmed() );
+		return p;
+	}
+	case WwLook::BtoSway: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_FARLOD_BTOSWAY" ).trimmed() );
+		return p;
+	}
+	case WwLook::FarCardShadows: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_SHADOW_FARCARDS" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -118,6 +143,11 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::Ephemeris: return "WW_SKY_EPHEM";
 	case WwLook::ActorsOutdoors: return "WW_CELL_ACTORS_OUT";
 	case WwLook::WeaponParts: return "WW_CELL_WEAP_PARTS";
+	case WwLook::TerrSlopeMap: return "WW_SHADOW_SLOPEMAP";
+	case WwLook::TerrGroundGate: return "WW_SHADOW_GROUNDGATE";
+	case WwLook::CableShadowSway: return "WW_CELL_CABLES_SHADOWSWAY";
+	case WwLook::BtoSway: return "WW_CELL_FARLOD_BTOSWAY";
+	case WwLook::FarCardShadows: return "WW_SHADOW_FARCARDS";
 	default: return "";
 	}
 }
@@ -129,7 +159,8 @@ bool wwLookPinned( WwLook l )
 
 bool wwLookReopens( WwLook l )
 {
-	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts;
+	// BtoSway rewrites the .bto shapes' vertices while the far field is built
+	return l == WwLook::ActorsOutdoors || l == WwLook::WeaponParts || l == WwLook::BtoSway;
 }
 
 bool wwLookOn( WwLook l )
