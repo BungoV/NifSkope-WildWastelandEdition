@@ -54,7 +54,12 @@ OVERRIDES = {
     'WW_CELL_FARLOD_CARDSWAY': ('live', 'wwCellFarLodCards: re-read per frame'),
     'WW_CELL_FARLOD_SKYCENSUS': ('live', 'wwCellFarLodSkyCensus: re-read per frame'),
     'WW_CELL_FARLOD_SKYMASK': ('live', 'wwCellFarLodSkyCensus: re-read per frame'),
-    'WW_CELL_PROBES_HIDE': ('live', 'probe markers appended/cut in place (live section); hiding markers built at open owes a reopen'),
+    'WW_CELL_PROBES_HIDE': ('live', 'probe markers put back or cut in place where a fresh open builds them (LIVESET3); streamed cells owe a reopen'),
+    # lane LIVESET3: actors and weapon parts are welded into the statics' material buckets and feed the enable facts,
+    # so a set needs the whole weld again: the reopen (they read them in cellBuild, not per frame)
+    'WW_CELL_ACTORS_OUT': ('reopen', 'actors are welded into the shared buckets at build; the reopen welds again'),
+    'WW_CELL_WEAP_PARTS': ('reopen', 'weapon parts are welded into the shared buckets at build; the reopen welds again'),
+    'WW_CELL_WEAP_PARTS_RED': ('reopen', 'weapon parts are welded into the shared buckets at build; the reopen welds again'),
     'WW_STREAM1_RED': ('relaunch', 'its reds pick load-time upload formats of every texture/mesh already resident'),
     'WW_PBRM_AUTHORPATH_RED': ('relaunch', 'every loaded property keeps its resolved .pbrm; a measuring red, not a setting'),
     'WW_MSAA': ('relaunch', 'the GL surface format is chosen when the window is made'),

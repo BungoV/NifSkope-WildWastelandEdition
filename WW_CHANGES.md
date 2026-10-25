@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIVESET3 (2026-10-23, branch liveset3-20261023): live sets in the middle of the cell, streamed cells
+
+- **Blocks removed or moved from the middle of a cell document, deterministically:** `NifModel::removeBlockRange` and
+  `moveBlockRange`, and every side table keyed by block number (land, cull, fx lights, grass, water, highlight, live
+  door) follows the renumbering (src/cellblockmap.h). The document after a live set is the one a fresh open builds.
+- **Show probes is live everywhere (WW_CELL_PROBES_HIDE):** the probe markers are put back exactly where a fresh open
+  builds them, or cut from there; before, markers built at open owed a reopen.
+- **Far LOD live with streamed cells (FARSTREAM):** a live far LOD set drops the streamed cells with it, rebuilds the
+  far LOD and starts the streamer again from the open's tables.
+- **Particles in streamed cells (STREAMPSYS1):** cells streamed while the camera moves get the same placed particle
+  systems a fresh open copies (same filter; WW_CELL_PARTICLES_MAX over the whole stream).
+- **Reopen keeps the view (FARSTACK):** far LOD on/off, its type and the stack reds change which plugins the near cells
+  load, so the cells are welded again; the reopen in the same window now keeps the camera where it was.
+- **Stage fixes:** WW_CELL_ACTORS_OUT, WW_CELL_WEAP_PARTS(_RED) were marked live but are welded at build: they now
+  reopen. WW_CELL_PARTICLES_RED, WW_CELL_SHADOW_RED and the WW_LODI_GROUP_* knobs re-read after a set (were relaunch).
+
 ## Lane LIVESET2 (2026-10-23, branch liveset2-20261023): live-set crashes, fog bloom, far budget
 
 - **Crash on a live WW_TONEMAP1_RED=1 or WW_CELL_HDR_STEX_RED=1 set (TONEMAPCRASH1, STEXCRASH1, one bug):** both reds

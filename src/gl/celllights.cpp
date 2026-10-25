@@ -2171,7 +2171,7 @@ static bool cubeCasterAt( const Shape * sh )
 
 static bool cubeSkipsCaster( const Shape * sh )
 {
-	static const bool atRed = wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "atskip";
+	WW_SWITCH_STATIC( bool, atRed, wwEnv( "WW_CELL_SHADOW_RED" ).trimmed() == "atskip" );	// lane LIVESET3: live
 	return sh->wwAlphaTested() && ( atRed || !cubeCasterAt( sh ) );
 }
 

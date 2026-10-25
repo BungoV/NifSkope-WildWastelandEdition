@@ -1,6 +1,8 @@
 #ifndef CELLWATER_H
 #define CELLWATER_H
 
+#include "cellblockmap.h"
+
 #include <QString>
 
 class Scene;
@@ -33,6 +35,8 @@ void wwCellWaterBegin( const void * nif );
 void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec );
 // lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
 void wwCellWaterForget( const void * nif, int block );
+//! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)
+void wwCellWaterRemap( const void * nif, const WwBlockMap & m );
 //! True when `block` draws as water this frame (the row on, not pinned off, a registered water shape).
 bool wwCellWaterWanted( Scene * scene, int block );
 //! Lane SUNCELL1: `block` is a registered water surface (row or not): it never casts a sun shadow, as in the game.

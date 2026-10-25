@@ -1259,7 +1259,7 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 		iExtras.append( iCtlr );
 		// lane GAPFIX1: BSPSysMultiTargetEmitterCtlr (MPS fire/smoke) IS an emitter controller (nif.xml inherits
 		// NiPSysEmitterCtlr); the exact-name match left its birth rate 0. Red WW_CELL_PARTICLES_RED=nomulti.
-		static const bool multiRed = wwEnv( "WW_CELL_PARTICLES_RED" ).trimmed() == "nomulti";
+		WW_SWITCH_STATIC( bool, multiRed, wwEnv( "WW_CELL_PARTICLES_RED" ).trimmed() == "nomulti" );	// lane LIVESET3: live
 		if ( multiRed ? nif->itemName( iCtlr ) == QLatin1String( "NiPSysEmitterCtlr" )
 			: nif->blockInherits( iCtlr, "NiPSysEmitterCtlr" ) ) {
 			QString modName = nif->resolveString( iCtlr, "Modifier Name" );

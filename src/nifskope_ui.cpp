@@ -30641,8 +30641,20 @@ void NifSkope::initDockWidgets()
 			 * `.wwcell` through the proven open path. It does not repaint: the
 			 * overlay colours are welded into vertex colours when the scene is
 			 * built, so there is nothing in the document to recolour. */
-			connect( cellWs, &CellWorkspacePanel::reopenRequested, this,
-				[this]( const QString & path ) { loadFile( path ); } );
+			/* lane LIVESET3 (FARSTACK): a switch that moves the near cells' load order (far LOD on/off, its TYPE, the
+			 * stack reds) welds every cell again; the reopen keeps the view where the person left it. */
+			connect( cellWs, &CellWorkspacePanel::reopenRequested, this, [this]( const QString & path ) {
+				if ( ogl ) {
+					const GLView::CameraKeep keep = ogl->keepCamera();
+					auto once = std::make_shared<QMetaObject::Connection>();
+					*once = connect( this, &NifSkope::completeLoading, this, [this, keep, once]( bool ok, QString & ) {
+						disconnect( *once );
+						if ( ok && ogl )
+							ogl->restoreCamera( keep );
+					} );
+				}
+				loadFile( path );
+			} );
 
 			WorkspaceDef d;
 			d.dock = dCellWs;

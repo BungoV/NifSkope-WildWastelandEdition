@@ -1969,6 +1969,25 @@ public:
 	float cameraDistance() const { return Dist; }
 	//! camera position, so a test can show free-camera flight actually travelled
 	Vector3 cameraPosition() const { return Pos; }
+	//! lane LIVESET3 (FARSTACK): the whole camera, kept over a reopen of the same cell
+	struct CameraKeep
+	{
+		Vector3 pos, rot;
+		float dist = 0.0f;
+		double zoom = 1.0;
+		int view = 0;
+	};
+	CameraKeep keepCamera() const { return { Pos, Rot, Dist, Zoom, int( view ) }; }
+	void restoreCamera( const CameraKeep & k )
+	{
+		Pos = k.pos;
+		Rot = k.rot;
+		Dist = k.dist;
+		Zoom = k.zoom;
+		view = ViewState( k.view );
+		doCenter = false;
+		update();
+	}
 private:
 	Vector3 Pos;
 	Vector3 Rot;

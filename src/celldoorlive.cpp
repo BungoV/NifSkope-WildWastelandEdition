@@ -538,6 +538,16 @@ void wwDoorLiveSetBranch( NifModel * nif, quint32 ref, const QString & model, qi
 	k.frac = 0.0f;
 }
 
+void wwDoorLiveRemap( const void * nif, const WwBlockMap & m )
+{
+	Kept & k = kept();
+	if ( !nif || k.nif.data() != nif )
+		return;
+	k.wrapper = k.wrapper >= 0 ? m( k.wrapper ) : -1;
+	k.root = k.root >= 0 ? m( k.root ) : -1;
+	k.boundScene = nullptr;	// the scene is made again from the renumbered document: bind afresh
+}
+
 QString wwDoorLiveKeepGi( const void * nif, const ProbeRelightOps & ops, const WwCellGi & gi,
 	const std::vector<WwDoorLiveBox> & boxes )
 {

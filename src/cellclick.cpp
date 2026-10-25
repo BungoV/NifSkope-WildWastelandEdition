@@ -301,6 +301,12 @@ void cellHighlightHide( NifModel * nif )
 	writeBars( nif, pts );
 }
 
+void cellHighlightRemap( const WwBlockMap & m )
+{
+	if ( g_block >= 0 )
+		g_block = m( g_block );
+}
+
 void cellHighlightForget()
 {
 	g_block = -1;

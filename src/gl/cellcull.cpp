@@ -895,6 +895,16 @@ void wwCellCullForget( const void * nif, int block )
 		d->remove( block );
 }
 
+void wwCellCullRemap( const void * nif, const WwBlockMap & m )
+{
+	auto d = st().docs.find( nif );
+	if ( d != st().docs.end() )
+		wwRemapKeys( *d, m );
+	auto u = st().umbra.find( nif );
+	if ( u != st().umbra.end() && u.value() )
+		u.value()->gov.clear();	// a cache by shape block, filled again on the next draw
+}
+
 const std::vector<WwCullRun> * wwCellCullRuns( const void * nif, int block )
 {
 	CullState & s = st();
