@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane PRTP5-RUNNER (2026-10-25, branch prtp5runner-20261025): the whole cell walk in map tiles (test scripts only)
+
+- **What:** the game-wide cell walk (tests/spells/cell_census.sh --whole, never run) is cut into MAP TILES that run
+  one at a time: `tests/spells/cell_census_tiles.sh plan|run|status|merge <root>` with the planner
+  `cell_census_tiles.py`. A tile = whole walk units in plan order (interiors, or 5x5 exterior tiles), about 30-45
+  minutes each by the measured fits; 19 tiles for Fallout4.esm (8 of interiors, 11 of the Commonwealth).
+- **Resumable:** a tile with a valid DONE (census sha1, knobs, exe sha1) is skipped; a killed or unfinished tile reruns
+  and the window resumes its rows; a tile changed after its check is moved aside and run fresh; a tile that makes no
+  new rows in 3 tries is FAILED and the run goes on. Each tile is checked by cell_census_check.py before DONE;
+  `merge` joins the done tiles and checks the joined file over every cell.
+- **Gate:** `cell_census.sh` takes MARGIN (the ring, to the window and the checker) and SHOTS=0 (rows only).
+  No product code changed; the exe is untouched.
+- **Proof without a window:** `cell_census_tiles_synth.py` stands in for the window (rows from the plugin); 12 of 12
+  runner checks (kill/resume, skip, stale, merge, 3 reds) and a whole-map synth run: 19 tiles, 38,059 rows,
+  199,863 checks PASS.
+
 ## Lane GIPROBE2 (2026-10-25, branch giprobe2-20261025): probe GI leftovers — out of walls, smoothing, depth visibility, wide sharing
 
 - **Rows** (cell view Show menu, all off, live):
