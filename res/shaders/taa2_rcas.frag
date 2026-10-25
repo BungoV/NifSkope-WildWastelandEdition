@@ -18,10 +18,21 @@
 
 uniform sampler2D srcTex;
 uniform float rcasSharp;	// exp2(-stops): 1 = the strongest
+uniform int rcasLinear;	// lane TAA3: 1 the source is the linear (HDR) frame: sharpen in c / (1 + max(c)), write linear
+uniform float rcasExpose;	// lane TAA3: the linear frame's scale to about display level
 
 out vec4 fragColor;
 
 const float kRcasLimit = 0.25 - 1.0 / 16.0;
+
+vec3 tap( ivec2 q )
+{
+	vec3 c = texelFetch( srcTex, q, 0 ).rgb;
+	if ( rcasLinear == 0 )
+		return c;
+	c = max( c, vec3( 0.0 ) ) * rcasExpose;
+	return c / ( 1.0 + max( c.r, max( c.g, c.b ) ) );
+}
 
 void main()
 {
@@ -30,11 +41,11 @@ void main()
 	//    b
 	//  d e f
 	//    h
-	vec3 b = texelFetch( srcTex, clamp( p + ivec2( 0, 1 ), ivec2( 0 ), size - 1 ), 0 ).rgb;
-	vec3 d = texelFetch( srcTex, clamp( p + ivec2( -1, 0 ), ivec2( 0 ), size - 1 ), 0 ).rgb;
-	vec3 e = texelFetch( srcTex, p, 0 ).rgb;
-	vec3 f = texelFetch( srcTex, clamp( p + ivec2( 1, 0 ), ivec2( 0 ), size - 1 ), 0 ).rgb;
-	vec3 h = texelFetch( srcTex, clamp( p + ivec2( 0, -1 ), ivec2( 0 ), size - 1 ), 0 ).rgb;
+	vec3 b = tap( clamp( p + ivec2( 0, 1 ), ivec2( 0 ), size - 1 ) );
+	vec3 d = tap( clamp( p + ivec2( -1, 0 ), ivec2( 0 ), size - 1 ) );
+	vec3 e = tap( p );
+	vec3 f = tap( clamp( p + ivec2( 1, 0 ), ivec2( 0 ), size - 1 ) );
+	vec3 h = tap( clamp( p + ivec2( 0, -1 ), ivec2( 0 ), size - 1 ) );
 	// luma times 2 for the noise test
 	float bL = b.b * 0.5 + ( b.r * 0.5 + b.g ), dL = d.b * 0.5 + ( d.r * 0.5 + d.g ), eL = e.b * 0.5 + ( e.r * 0.5 + e.g );
 	float fL = f.b * 0.5 + ( f.r * 0.5 + f.g ), hL = h.b * 0.5 + ( h.r * 0.5 + h.g );
@@ -52,5 +63,10 @@ void main()
 	float lobe = max( -kRcasLimit, min( max( lobeRGB.r, max( lobeRGB.g, lobeRGB.b ) ), 0.0 ) ) * rcasSharp;
 	lobe *= nz;
 	float rcpL = 1.0 / ( 4.0 * lobe + 1.0 );
-	fragColor = vec4( clamp( ( lobe * ( b + d + f + h ) + e ) * rcpL, 0.0, 1.0 ), 1.0 );
+	vec3 o = clamp( ( lobe * ( b + d + f + h ) + e ) * rcpL, 0.0, 1.0 );
+	if ( rcasLinear != 0 ) {
+		o = min( o, vec3( 0.999 ) );
+		o = o / ( ( 1.0 - max( o.r, max( o.g, o.b ) ) ) * max( rcasExpose, 1e-6 ) );
+	}
+	fragColor = vec4( o, 1.0 );
 }

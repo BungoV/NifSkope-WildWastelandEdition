@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane TAA3 (2026-10-25, branch taa3-20261025): Modern temporal AA reads TAAINPUTS1, resolves before the tone map, keeps still wires
+
+- **Inputs (Ultra):** the Modern resolve asks TAAINPUTS1 for its velocity and mask (`wwTaaInputsRequest`) and reads
+  them on units 13/14: object vectors where mask B is set (no depth-disocclusion reset there), reactive mask R lowers
+  the history weight (a flickering particle follows this frame), composition G (water, glass) caps it at half. Low..High do not
+  ask, so they make no extra pass. Red `WW_TAA2_RED=noinputs`.
+- **Flicker lock (all tiers, part of the Modern recipe):** a third target (RG16F, ping-pong) counts how often a pixel's
+  clip box flips; a pixel that keeps flipping while the camera stands still (a sub-pixel wire under the jitter) keeps
+  its history instead of being clipped. Offline: still 0.5 px wire detail 0.99 of the ideal (was 0.20; the game 0.35).
+  It fades out as motion reaches 4 px/frame and where mask R or B is set. Red `WW_TAA2_RED=nolock`.
+- **Before the tone map (new row "Modern temporal AA before tone map", ships Off, live; key
+  `Settings/Render/Modern temporal AA before tone map`, pin `WW_TAA2_HDR=0|1`, harness default off):** in the cell HDR
+  path the resolve runs on the linear frame (after the SSR frame copy, before the image-space tone map) with a
+  reversible tone map around the blend (Karis 2014) and the exposure of the adapted luminance; RCAS runs in the same
+  space. The later display-space resolve then skips. With the row on, DoF and motion blur act on the resolved frame.
+- **Offline gates (notes/taa3/sim/gates.txt, real shaders, hidden GL 4.1):** every tier and both HDR tiers keep ghost and
+  shimmer at or under the game TAA; reds noclip/nobicubic/wrongjitter/nolock fail as they must; the inputs cut the
+  self-moving bar's error 0.074 -> 0.055 and the reactive square's lag 0.18 -> 0.001. GPU at 1080p: Ultra 0.185 ms,
+  Ultra before tone map 0.209 ms, game 0.139 ms (resolve + final pass).
+- **Echo:** the note line adds ` before-tone-map` and ` inputs N`; `taa2.txt` (WW_TAA2_DUMP) adds `hdr N inputs N`, and
+  a before-tone-map row dumps `out_` only (its input is linear).
+
 ## Lane LIVESET4 (2026-10-25, branch liveset4-20261025): far LOD on/off and streamed cells live
 
 - **Far LOD on/off and its type are live (WW_CELL_FARLOD, WW_CELL_FARLOD_TYPE, the menu rows):** the far section is
@@ -200,7 +222,6 @@ Each is a Show-menu tick (src/gl/celllooks.*) with its own pin and red; off draw
 - WW_CELL_AIR_TIME=0 now turns the air's glFinish pair off (any set value turned it on before). The Memory Den
   runner sets it to 1: the two glFinish calls drain the frame into the air zone, which is where the ~3.7 ms no
   sub-timer covered most likely went. Rows measure it both ways.
-
 ## Lane TAAINPUTS1 (2026-10-23, branch taainputs1-20261023): motion vectors per object and a reactive mask (inputs only)
 
 - **What:** src/gl/taainputs.h/.cpp produce two textures a temporal resolve or the motion blur can read; nothing reads

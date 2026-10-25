@@ -460,7 +460,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 			"World/Grass", "World/Particles", "World/Previs", "World/Culling", "World/Far LOD", "World/Far LOD source",
 			"Lighting/Cell lights", "Lighting/GI", "Lighting/Sky visibility", "Lighting/Far light", "Lighting/Far light mode",
 			"Lighting/Light shadows", "Lighting/AO", "Lighting/AO decals", "Lighting/GPU relight",
-			"Effects/Imagespace", "Effects/Temporal AA", "Effects/Modern temporal AA", "Effects/SSR", "Effects/SSR outdoors",
+			"Effects/Imagespace", "Effects/Temporal AA", "Effects/Modern temporal AA", "Effects/Modern temporal AA before tone map", "Effects/SSR", "Effects/SSR outdoors",
 			"Effects/Depth of field", "Effects/Motion blur", "Effects/Bloom" };
 		add( "SHOWMENU1: the Show dropdown holds every viewport switch in its section, in order",
 			layout == want, layout.join( QLatin1Char( '|' ) ) );

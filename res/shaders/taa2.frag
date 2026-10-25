@@ -4,27 +4,36 @@
  * (game_taa.frag). Published recipe, no game code:
  *   Karis 2014 (SIGGRAPH Advances, "High Quality Temporal Supersampling"): full-colour YCoCg history, clip toward
  *     the current value, the jitter-aware Blackman-Harris current filter (its Gaussian fit exp(-2.29 d^2)),
- *     luma-weighted blend against flicker;
+ *     luma-weighted blend against flicker, the reversible tone map c / (1 + max(c)) for an HDR input;
  *   Salvi 2016 (GDC, "An Excursion in Temporal Supersampling"): the variance clip box (mean +/- gamma sigma);
- *   Jimenez 2016 (SIGGRAPH Advances, "Filmic SMAA"): the 5-tap Catmull-Rom history fetch.
+ *   Jimenez 2016 (SIGGRAPH Advances, "Filmic SMAA"): the 5-tap Catmull-Rom history fetch;
+ *   AMD FSR 2 (GPUOpen docs, "thin feature locking"): a lock that keeps a sub-pixel feature's history (TAA3).
  * Tier 1 Low: centre sample, variance clip (gamma 1.25), bilinear history. 2 Medium: + filter, gamma 1, Catmull-Rom.
- * 3 High: + luma weights, depth disocclusion. 4 Ultra: + a tighter box while moving (gamma 1 -> 0.75).
+ * 3 High: + luma weights, depth disocclusion. 4 Ultra: + a tighter box while moving (gamma 1 -> 0.75), and
+ * TAAINPUTS1's velocity / mask when present (TAA3).
  * Every tier: a history the clip moved far gets less weight (offline ghost gate, notes/taa2/sim).
- * Outputs: o0 the next history (rgb, a = 1 - the closest depth), o1 the picture. */
+ * Outputs: o0 the next history (rgb, a = 1 - the closest depth), o1 the picture, o2 the lock (r flip rate, g sign). */
 
 uniform sampler2D curTex;	// this frame, NEAREST
 uniform sampler2D histTex;	// the history, LINEAR (RGBA16F)
 uniform sampler2D mvTex;	// previous minus current, texture units (game_taa_mv.frag)
 uniform sampler2D depthTex;
+uniform sampler2D lockTex;	// lane TAA3: last frame's o2, NEAREST
+uniform sampler2D velTex;	// lane TAA3: TAAINPUTS1 velocity (the mvTex convention, with things that move on their own)
+uniform sampler2D maskTex;	// lane TAA3: TAAINPUTS1 mask: r reactive, g composition, b own motion
 uniform vec2 invSize;
 uniform vec2 jitterPx;	// how far this frame's content moved (pixels, x right, y up): pixel p saw the scene at p - jitterPx
 uniform int taa2Tier;
-uniform int taa2Red;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter (the filter told the opposite jitter)
+uniform int taa2Red;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter (the filter told the opposite jitter), 8 nolock
 uniform int taa2NoHist;	// 1: no history this frame (first frame, reset, size change)
+uniform int taa2Inputs;	// lane TAA3: bits 1 velTex bound, 2 maskTex bound
+uniform int taa2Linear;	// lane TAA3: 1 the input is the linear (HDR) frame, before the tone map
+uniform float taa2Expose;	// lane TAA3: the linear frame's scale to about display level (last frame's exposure)
 uniform mat4 reproj;	// current unjittered clip -> previous unjittered clip
 
 layout ( location = 0 ) out vec4 o0;
 layout ( location = 1 ) out vec4 o1;
+layout ( location = 2 ) out vec4 o2;
 
 vec3 toYCoCg( vec3 c )
 {
@@ -34,6 +43,23 @@ vec3 toYCoCg( vec3 c )
 vec3 toRgb( vec3 y )
 {
 	return vec3( y.x + y.y - y.z, y.x + y.z, y.x - y.y - y.z );
+}
+
+// Karis 2014: the resolve runs on c / (1 + max(c)), so one bright sample cannot take the box or the blend over
+vec3 tonemapIn( vec3 c )
+{
+	if ( taa2Linear == 0 )
+		return c;
+	c = max( c, vec3( 0.0 ) ) * taa2Expose;
+	return c / ( 1.0 + max( c.r, max( c.g, c.b ) ) );
+}
+
+vec3 tonemapOut( vec3 t )
+{
+	if ( taa2Linear == 0 )
+		return clamp( t, 0.0, 1.0 );
+	t = clamp( t, 0.0, 0.999 );
+	return t / ( ( 1.0 - max( t.r, max( t.g, t.b ) ) ) * max( taa2Expose, 1e-6 ) );
 }
 
 // Jimenez 2016: Catmull-Rom from 5 bilinear taps (the four corner taps dropped, weights renormalised)
@@ -84,7 +110,7 @@ void main()
 	for ( int dy = -1; dy <= 1; dy++ ) {
 		for ( int dx = -1; dx <= 1; dx++ ) {
 			ivec2 q = clamp( ip + ivec2( dx, dy ), ivec2( 0 ), size - 1 );
-			vec3 c = toYCoCg( texelFetch( curTex, q, 0 ).rgb );
+			vec3 c = toYCoCg( tonemapIn( texelFetch( curTex, q, 0 ).rgb ) );
 			float d = texelFetch( depthTex, q, 0 ).r;
 			if ( d < dMin ) {
 				dMin = d;
@@ -104,11 +130,16 @@ void main()
 	}
 	vec3 cur = taa2Tier >= 2 ? sumC / sumW : cC;
 
-	vec2 mv = texelFetch( mvTex, dTap, 0 ).xy;
+	// lane TAA3: TAAINPUTS1's vectors know what moved on its own; its mask what the history cannot hold
+	vec2 mv = ( taa2Inputs & 1 ) != 0 ? texelFetch( velTex, dTap, 0 ).xy : texelFetch( mvTex, dTap, 0 ).xy;
+	vec3 msk = vec3( 0.0 );
+	if ( ( taa2Inputs & 2 ) != 0 )
+		msk = vec3( texelFetch( maskTex, ip, 0 ).rg, texelFetch( maskTex, dTap, 0 ).b );
 	vec2 huv = uv + mv;
 	float motionPx = length( mv * vec2( size ) );
 	bool offscreen = any( lessThan( huv, vec2( 0.0 ) ) ) || any( greaterThan( huv, vec2( 1.0 ) ) );
 	vec3 res = cur;
+	vec2 lockOut = vec2( 0.0 );
 	if ( taa2NoHist == 0 && !offscreen ) {
 		bool bicubic = taa2Tier >= 2 && ( taa2Red & 2 ) == 0;
 		vec3 h = toYCoCg( bicubic ? histCatmullRom( huv ) : texture( histTex, huv ).rgb );
@@ -122,18 +153,33 @@ void main()
 			bmn = max( mn, mu - gamma * sigma );
 			bmx = min( mx, mu + gamma * sigma );
 		}
+		/* lane TAA3: a sub-pixel wire the jitter hits every other frame empties the 3x3 on the misses, and the clip
+		 * threw its history away (detail 0.17 vs the game's 0.29). Where the current keeps flipping sides of the
+		 * history (aliasing, not change) the history is kept; a real change flips once, so the clip still takes it. */
+		vec2 lk = texelFetch( lockTex, clamp( ivec2( huv * vec2( size ) ), ivec2( 0 ), size - 1 ), 0 ).rg;
+		float dY = cur.x - h0.x;
+		float sgn = abs( dY ) > 0.02 ? sign( dY ) : lk.g;
+		float flipRate = mix( lk.r, sgn * lk.g < 0.0 ? 1.0 : 0.0, 0.2 );
+		lockOut = vec2( flipRate, sgn );
+		float keep = ( taa2Red & 8 ) == 0 ? smoothstep( 0.25, 0.5, flipRate ) * ( 1.0 - clamp( motionPx / 4.0, 0.0, 1.0 ) ) : 0.0;
+		keep *= 1.0 - max( msk.r, msk.b );	// an effect or a thing moving on its own is no thin wire
+		vec3 hc = h;
 		if ( ( taa2Red & 1 ) == 0 )
-			h = clipToward( h, clamp( cur, bmn, bmx ), bmn, bmx );
+			hc = clipToward( h, clamp( cur, bmn, bmx ), bmn, bmx );
+		h = mix( hc, h0, keep );
 		// a history the box had to pull far is likely stale (an unvectored mover): trust it less, so trails die fast
-		float rej = clamp( length( h0 - h ) / max( length( bmx - bmn ), 1e-3 ), 0.0, 1.0 );
+		float rej = clamp( length( h0 - hc ) / max( length( bmx - bmn ), 1e-3 ), 0.0, 1.0 ) * ( 1.0 - keep );
 		float rest = taa2Tier >= 2 ? 0.93 : 0.9;
 		float alpha = mix( rest, 0.8, clamp( motionPx / 32.0, 0.0, 1.0 ) ) * ( 1.0 - rej );
+		alpha *= 1.0 - msk.r;	// reactive: particles and effects follow this frame
+		alpha = min( alpha, mix( alpha, 0.5, msk.g ) );	// water, glass: their depth is the thing behind them
 		if ( taa2Tier >= 3 ) {
 			// disoccluded: the history there was clearly nearer than where this pixel's surface was last frame
+			// (only for the camera's own vectors: a thing that moved on its own was not where reproj puts it)
 			vec4 p = reproj * vec4( ( vec2( dTap ) + 0.5 ) * invSize * 2.0 - 1.0, dMin * 2.0 - 1.0, 1.0 );
 			float expect = 1.0 - ( p.z / p.w * 0.5 + 0.5 );
 			float was = texelFetch( histTex, clamp( ivec2( huv * vec2( size ) ), ivec2( 0 ), size - 1 ), 0 ).a;
-			if ( was > expect * 1.05 + 1e-4 )
+			if ( msk.b < 0.5 && was > expect * 1.05 + 1e-4 )
 				alpha = 0.0;
 			// Karis 2014: each side weighted by 1 / (1 + luma), so a lone bright sample cannot flicker the pixel
 			float wc = ( 1.0 - alpha ) / ( 1.0 + cur.x ), wh = alpha / ( 1.0 + h.x );
@@ -144,5 +190,6 @@ void main()
 	}
 	vec3 rgb = max( toRgb( res ), vec3( 0.0 ) );
 	o0 = vec4( rgb, 1.0 - min( dMin, 1.0 ) );
-	o1 = vec4( clamp( rgb, 0.0, 1.0 ), 1.0 );
+	o1 = vec4( tonemapOut( rgb ), 1.0 );
+	o2 = vec4( lockOut, 0.0, 1.0 );
 }

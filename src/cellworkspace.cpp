@@ -601,6 +601,8 @@ void CellWorkspacePanel::buildUi()
 			cellModernTaaGroup->addAction( a );
 		}
 	}
+	// lane TAA3: the Modern resolve on the linear frame, before the tone map; ships Off
+	cellModernTaaHdr = tick( showMenu, tr( "Modern temporal AA before tone map" ), "CellWorkspaceModernTaaHdr", wwTaa2HdrOn() );
 	cellSsr = tick( showMenu, tr( "SSR" ), "CellWorkspaceSsr", wwCellSsrOn() );
 	cellSsrExt = tick( showMenu, tr( "SSR outdoors" ), "CellWorkspaceSsrOutdoors", wwCellSsrExteriorOn() );
 	cellReflProbe = tick( showMenu, tr( "Reflection probes" ), "CellWorkspaceReflProbe", wwCellReflProbeOn() );	// lane REFLPROBE1
@@ -922,6 +924,11 @@ void CellWorkspacePanel::buildUi()
 	} );
 	connect( cellTaa, &QAction::toggled, this, [this]( bool on ) {
 		wwGameTaaSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellModernTaaHdr, &QAction::toggled, this, [this]( bool on ) {	// lane TAA3
+		wwTaa2SetHdrOn( on );
 		if ( glView )
 			glView->update();
 	} );

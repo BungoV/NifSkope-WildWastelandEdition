@@ -256,6 +256,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		row( label, box, true );
 	};
 	tierBox( modernTaaBox, "modernTaa", tr( "Modern temporal AA" ), wwTaa2Tier() );	// lane TAA2: ships Off
+	liveCheck( modernTaaHdrBox, "modernTaaHdr", tr( "Modern temporal AA before tone map" ), wwTaa2HdrOn() );	// lane TAA3: ships Off
 	tierBox( cascadeQualityBox, "cascadeQuality", tr( "Cascade Quality" ), wwShadowCascadeTier() );
 	tierBox( contactShadowsBox, "contactShadows", tr( "Contact Shadows" ), wwShadowContactTier() );
 	tierBox( terrainShadowsBox, "terrainShadows", tr( "Terrain Shadows" ), wwShadowTerrainTier() );
@@ -378,6 +379,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( fogDriftBox, &wwVolAirSetDriftOn );	// lane FOGDRIFT1
 	liveToggle( shadowsBox, &wwLookdevSetShadows );
 	liveToggle( taaBox, &wwGameTaaSetOn );
+	liveToggle( modernTaaHdrBox, &wwTaa2SetHdrOn );	// lane TAA3
 	liveToggle( ssgiBox, &wwCellSsgiSetOn );
 	liveToggle( aoBox, &wwCellAoSetOn );
 	connect( bloomBox, qOverload<int>( &QComboBox::currentIndexChanged ), this, [this, live]( int i ) {

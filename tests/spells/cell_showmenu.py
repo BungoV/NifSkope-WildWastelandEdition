@@ -16,7 +16,7 @@ WANT = [
                'Previs', 'Culling', 'Far LOD', 'Far LOD source']),
     ('Lighting', ['Cell lights', 'GI', 'Sky visibility', 'Far light', 'Far light mode', 'Light shadows', 'AO',
                   'AO decals', 'GPU relight']),
-    ('Effects', ['Imagespace', 'Temporal AA', 'Modern temporal AA', 'SSR', 'SSR outdoors', 'Depth of field', 'Motion blur', 'Bloom']),
+    ('Effects', ['Imagespace', 'Temporal AA', 'Modern temporal AA', 'Modern temporal AA before tone map', 'SSR', 'SSR outdoors', 'Depth of field', 'Motion blur', 'Bloom']),
 ]
 # what the old panel called the two drop-downs' jobs: their current values / item names
 COMBO_WORDS = {'Vanilla', 'FO4CS', 'Combined'}
