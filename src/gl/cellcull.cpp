@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QFile>
 #include <QHash>
+#include <QPair>
 #include <QSettings>
 
 #include <algorithm>
@@ -120,6 +121,21 @@ struct UmbraDoc
 	int queried = 0, noStart = 0, cells = 0, visible = 0, objects = 0, govUid = 0, govComb = 0, decoded = 0;
 };
 
+//! lane PERF5: one shape's camera cull this frame, replayed by a later pass with the same camera and switches
+struct CullMemo
+{
+	const void * nif = nullptr;
+	const std::vector<WwCullRun> * runs = nullptr;
+	size_t nRuns = 0, occN = 0;
+	std::int64_t numTris = 0;
+	std::uint64_t frame = ~std::uint64_t( 0 );	// kept across frames so the vectors keep their memory
+	int flags = 0;
+	float key[29] = {};
+	std::vector<std::uint32_t> out;
+	Counts d;
+	std::vector<std::pair<int, int>> hits;	// occluder index, the runs it hid
+};
+
 struct CullState
 {
 	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
@@ -144,6 +160,10 @@ struct CullState
 	QString lastUmbraLine;
 	float depthKey[19] = {};
 	bool depthKeyValid = false;
+	// lane PERF5: the camera cull's memo of this frame (WW_CELL_CULL_MEMO_RED=1: none; WW_CELL_CULL_MEMO_CHECK=1: compare)
+	QHash<QPair<const void *, int>, CullMemo> memo;
+	std::int64_t memoHits = 0, memoMisses = 0, memoBad = 0, memoBadAll = 0;
+	QString lastMemoLine;
 };
 
 CullState & st()
@@ -343,6 +363,35 @@ bool previsPlanesPerRun()
 {
 	WW_SWITCH_STATIC( bool, v, wwEnv( "WW_CELL_PREVIS_RED" ).trimmed() == "perrun" );
 	return v;
+}
+
+//! lane PERF5: 0 = no memo (the red), 1 = memo, 2 = memo checked against a full cull every hit
+int cullMemoMode()
+{
+	WW_SWITCH_STATIC( int, m, wwEnvInt( "WW_CELL_CULL_MEMO_RED" ) != 0 ? 0 : ( wwEnvInt( "WW_CELL_CULL_MEMO_CHECK" ) != 0 ? 2 : 1 ) );
+	return m;
+}
+
+void countsAdd( Counts & a, const Counts & b, std::int64_t sg )
+{
+	a.shapes += sg * b.shapes;
+	a.runs += sg * b.runs;
+	a.drawn += sg * b.drawn;
+	a.culled += sg * b.culled;
+	a.calls += sg * b.calls;
+	a.tris += sg * b.tris;
+	a.trisAll += sg * b.trisAll;
+	a.occluded += sg * b.occluded;
+	a.roomCulled += sg * b.roomCulled;
+	a.casterHidden += sg * b.casterHidden;
+	a.tomeDrawn += sg * b.tomeDrawn;
+	a.tomeCulled += sg * b.tomeCulled;
+	a.ungoverned += sg * b.ungoverned;
+	a.tomeCasterHidden += sg * b.tomeCasterHidden;
+	for ( int i = 0; i < 3; i++ ) {
+		a.cDrawn[i] += sg * b.cDrawn[i];
+		a.cCulled[i] += sg * b.cCulled[i];
+	}
 }
 
 //! the camera's four side planes in view space (Gribb-Hartmann from the column-major projection), normalised
@@ -713,6 +762,7 @@ bool invert4( const double m[4][4], double out[4][4] )
 
 void wwCellCullBegin( const void * nif )
 {
+	st().memo.clear();	// lane PERF5
 	st().docs.remove( nif );
 	st().previs.remove( nif );	// lane SUNCELL1
 	st().pc = PrevisCache();
@@ -724,6 +774,7 @@ void wwCellCullBegin( const void * nif )
 void wwCellUmbraSet( const void * nif, std::vector<WwUmbraBlockIn> && blocks )
 {
 	CullState & s = st();
+	s.memo.clear();	// lane PERF5
 	auto doc = std::make_shared<UmbraDoc>();
 	for ( WwUmbraBlockIn & in : blocks ) {
 		UmbraBlock b;
@@ -858,6 +909,7 @@ void wwCellUmbraDepthWrite( Scene * scene, const float * depth, int w, int h )
 
 void wwCellPrevisSet( const void * nif, WwPrevisScene && sc )
 {
+	st().memo.clear();	// lane PERF5
 	st().previs.insert( nif, std::move( sc ) );
 	st().pc = PrevisCache();
 }
@@ -883,6 +935,7 @@ int wwCellPrevisRed()
 
 void wwCellCullShape( const void * nif, int block, std::vector<WwCullRun> && runs )
 {
+	st().memo.clear();	// lane PERF5
 	if ( runs.size() < 2 )
 		return;	// one run: nothing to cull inside the shape
 	st().docs[nif].insert( block, std::move( runs ) );
@@ -890,6 +943,7 @@ void wwCellCullShape( const void * nif, int block, std::vector<WwCullRun> && run
 
 void wwCellCullForget( const void * nif, int block )
 {
+	st().memo.clear();	// lane PERF5
 	auto d = st().docs.find( nif );
 	if ( d != st().docs.end() )
 		d->remove( block );
@@ -961,6 +1015,40 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	if ( previs )
 		previsBuild( s, scene, pl );
 	const Transform & vt = sh->viewTrans();
+	// lane PERF5: every pass of a frame culls the same shape for the same camera; the later ones replay the first
+	const int memoMode = cullMemoMode();
+	const int flags = ( s.on ? 1 : 0 ) | ( previs ? 2 : 0 ) | ( umbra ? 4 : 0 ) | ( previsPlanesPerRun() ? 8 : 0 );
+	float key[29];
+	for ( int r = 0; r < 3; r++ )
+		for ( int c = 0; c < 3; c++ )
+			key[r * 3 + c] = vt.rotation( r, c );
+	for ( int i = 0; i < 3; i++ )
+		key[9 + i] = vt.translation[i];
+	key[12] = vt.scale;
+	std::memcpy( key + 13, pl, sizeof( pl ) );
+	const QPair<const void *, int> memoId( sh, block );
+	const CullMemo * hit = nullptr;
+	if ( memoMode ) {
+		auto m = s.memo.constFind( memoId );
+		if ( m != s.memo.constEnd() && m->frame == s.frame && m->nif == scene->nifModel && m->runs == runs && m->nRuns == runs->size()
+			&& m->numTris == numTris && m->flags == flags && m->occN == s.pc.occHits.size()
+			&& ( !previs || s.pc.nif == scene->nifModel ) && std::memcmp( m->key, key, sizeof( key ) ) == 0 )
+			hit = &( *m );
+	}
+	if ( hit && memoMode == 1 ) {
+		out = hit->out;
+		countsAdd( s.cur, hit->d, 1 );
+		for ( const auto & h : hit->hits )
+			s.pc.occHits[size_t( h.first )] += h.second;
+		s.any = true;
+		s.memoHits++;
+		return true;
+	}
+	const Counts memoBefore = s.cur;
+	static std::vector<int> hitsBefore;	// scratch: the GL thread alone culls
+	hitsBefore.clear();
+	if ( memoMode && previs )
+		hitsBefore = s.pc.occHits;
 	std::int64_t drawnTris = 0, occluded = 0, roomCulled = 0, tomeDrawn = 0, tomeCulled = 0, ungoverned = 0;
 	const std::vector<UmbraGov> * gov = umbra ? &umbraGovFor( *ud, sh, block, *runs ) : nullptr;
 	const std::int64_t culled = collect( *runs, numTris, [&]( const WwCullRun & r ) {
@@ -1001,6 +1089,37 @@ bool wwCellCullCamera( Scene * scene, const Shape * sh, int block, std::int64_t 
 	s.cur.calls += out.empty() ? 0 : 1;	// finalfix: the kept ranges are one glMultiDrawElements (bsshape.cpp)
 	s.cur.tris += drawnTris;
 	s.cur.trisAll += numTris;
+	if ( memoMode ) {
+		Counts d = s.cur;
+		countsAdd( d, memoBefore, -1 );
+		static std::vector<std::pair<int, int>> hitsNow;
+		hitsNow.clear();
+		if ( !hitsBefore.empty() && hitsBefore.size() == s.pc.occHits.size() )
+			for ( size_t i = 0; i < hitsBefore.size(); i++ )
+				if ( s.pc.occHits[i] != hitsBefore[i] )
+					hitsNow.push_back( { int( i ), s.pc.occHits[i] - hitsBefore[i] } );
+		if ( hit ) {	// the check: the replay must equal the full cull, ranges, counters and occluder hits alike
+			s.memoHits++;
+			if ( !( hit->out == out && hit->d == d && hit->hits == hitsNow ) ) {
+				s.memoBad++;
+				s.memoBadAll++;
+			}
+		} else {
+			CullMemo & e = s.memo[memoId];
+			e.frame = s.frame;
+			e.nif = scene->nifModel;
+			e.runs = runs;
+			e.nRuns = runs->size();
+			e.occN = s.pc.occHits.size();
+			e.numTris = numTris;
+			e.flags = flags;
+			std::memcpy( e.key, key, sizeof( key ) );
+			e.out = out;
+			e.d = d;
+			e.hits = hitsNow;
+			s.memoMisses++;
+		}
+	}
 	return true;
 }
 
@@ -1152,6 +1271,16 @@ void wwCellCullFrame()
 			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );
 		}
 	}
+	if ( s.memoHits || s.memoMisses ) {	// lane PERF5: printed when it changes
+		const QString line = QStringLiteral( "cell cull memo: %1 hits=%2 misses=%3 mismatches=%4 (all frames %5)" )
+			.arg( cullMemoMode() == 2 ? QStringLiteral( "check" ) : QStringLiteral( "on" ) ).arg( qint64( s.memoHits ) )
+			.arg( qint64( s.memoMisses ) ).arg( qint64( s.memoBad ) ).arg( qint64( s.memoBadAll ) );
+		if ( line != s.lastMemoLine && wwFrameLog() ) {
+			s.lastMemoLine = line;
+			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );
+		}
+	}
+	s.memoHits = s.memoMisses = s.memoBad = 0;
 	if ( !s.any ) {
 		if ( !s.printed && !s.docs.isEmpty() ) {
 			std::fprintf( stderr, "cell cull: %s\n", s.on ? "on, no runs drawn this frame" : "off, no runs drawn this frame" );
