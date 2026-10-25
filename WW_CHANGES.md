@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane TAAINPUTS1 (2026-10-23, branch taainputs1-20261023): motion vectors per object and a reactive mask (inputs only)
+
+- **What:** src/gl/taainputs.h/.cpp produce two textures a temporal resolve or the motion blur can read; nothing reads
+  them yet, so no picture changes and there is no row (notes/taainputs1/INTERFACE.md is the contract with TAA2).
+  The pass runs only when a consumer calls `wwTaaInputsRequest()`, the debug view is on, or `WW_TAAINPUTS=1`;
+  otherwise it makes no GL call.
+- **Velocity (RG16F, previous minus current in uv, unjittered):** the camera's reprojection everywhere (game_taa_mv,
+  the game TAA's own math), then object vectors over it, depth-tested against the frame: skinned shapes (CPU skin now
+  and last step), shapes whose world transform moved (controllers, animated nodes, billboards), and the cell's grass
+  wind (fo4_default.vert's offset at this and last frame's phase).
+- **Mask (RGBA8):** R reactive (particles, effect shapes, alpha-blended lit shapes: their alpha), G composition
+  (water, blended lit glass), B = 1 where the velocity is an object vector. Combined by MAX; decals left out.
+- **Not done:** particle and water vectors (no identity across frames / no moving surface), far LOD sway (about
+  0.2 units a frame at 20,000+ units, under a hundredth of a pixel).
+- **Switches (all live):** `WW_TAAINPUTS` (1 always / 0 never), `WW_TAAINPUTS_VIEW=velocity|mask|both`,
+  `WW_TAAINPUTS_VIEW_SCALE` (px a frame at full colour, 8), `WW_TAAINPUTS_RED=camonly|noreactive`,
+  `WW_TAAINPUTS_DUMP=<dir>` + `_DUMP_FRAME` (vel.bin, mask.bin, inputs.txt). Echo line `taa inputs: ...` with counts
+  and GPU/CPU ms (timestamp pairs).
+- **Hooks:** glview.cpp (the pass before the DoF/motion blur, the view after the game TAA), glscene.cpp (the blended
+  list, no GL call). New shaders taa_objvel, taa_reactive, taa_inputs_view.
+
 ## Lane TAA2 (2026-10-23, branch taa2-20261023): Modern temporal AA (off by default)
 
 - **Row:** "Modern temporal AA" Off | Low | Medium | High | Ultra, in the cell view's Show menu (Effects, under

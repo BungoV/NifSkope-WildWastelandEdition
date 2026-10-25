@@ -229,6 +229,7 @@ HEADERS += \
 	src/gl/fxparity.h \
 	src/gl/fxparityrules.h \
 	src/gl/gametaa.h \
+	src/gl/taainputs.h \
 	src/gl/campath.h \
 	src/gl/celllights.h \
 	src/gl/cellcluster.h \
@@ -512,6 +513,7 @@ SOURCES += \
 	src/gl/shadowset.cpp \
 	src/gl/fxparity.cpp \
 	src/gl/gametaa.cpp \
+	src/gl/taainputs.cpp \
 	src/gl/campath.cpp \
 	src/gl/celllights.cpp \
 	src/gl/cellcluster.cpp \
