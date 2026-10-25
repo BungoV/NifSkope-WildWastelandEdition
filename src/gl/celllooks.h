@@ -6,6 +6,7 @@
  * Rows, pins, reds and costs: WW_CHANGES "GAPLOOK1". */
 
 #include <QString>
+#include "gl/lightphys.h"
 
 enum class WwLook : int
 {
@@ -25,6 +26,9 @@ enum class WwLook : int
 	ParticleEmittance,	// XEMI-PARTICLES (LIGHTS3): particle systems of an emittance placement take its colour (WW_CELL_XEMI_PART)
 	BounceEmittance,	// XEMI-GI (LIGHTS3): the bounce light of a recoloured emissive uses the emittance colour (WW_CELL_XEMI_GI)
 	LensFlares,			// LENSFLARE1 (LIGHTS3): LENS sprites of lights, a post-process pass (WW_CELL_LENSFLARE)
+	LightPhysFalloff,	// LIGHTPHYS1: windowed 1/d^2 for placed lights, surfaces + effects + air (WW_CELL_LIGHT_PHYS)
+	LightAdvanced,		// LIGHTPHYS1: inverse square with a minimum distance; wins over the physical row (WW_CELL_LIGHT_ADV)
+	LightArea,			// LIGHTPHYS1: PBR specular from a sphere of 8 units, not a point (WW_CELL_LIGHT_AREA)
 	Count
 };
 
@@ -46,5 +50,12 @@ int wwCellShadowBudget();
 bool wwCellShadowBudgetPinned();
 void wwCellShadowBudgetSet( int n );
 bool wwCellShadowBudgetRedWorst();
+/* lane LIGHTPHYS1: the light intensity curve, colour x pow(luminance / 0.1043, curve - 1). Row: Light intensity curve
+ * (Off | 0.75 | 1.25 | 1.5 | 2), WW/CellLightCurve; pin WW_CELL_LIGHT_CURVE=<curve>, 1 = off. */
+float wwCellLightCurve();
+bool wwCellLightCurvePinned();
+void wwCellLightCurveSet( float curve );
+//! this frame's light-physics values for the shaders and the light buffer (src/gl/lightphys.h)
+wwlp::Params wwLightPhysParams();
 
 #endif // CELLLOOKS_H

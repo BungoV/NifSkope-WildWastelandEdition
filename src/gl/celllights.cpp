@@ -241,6 +241,8 @@ struct Gpu
 	bool texAttached = false;	// lane PERF1: the buffer texture keeps its buffer across glBufferData; attached once
 	quint64 bufLiveGen = 0;	// lane TESTDRIVER1: a live set (light copies, reds) rebuilds the buffer
 	std::uint64_t bufXemiStamp = 0;	// lane LIGHTS4: the XEMI light factors the buffer was built with
+	float bufCurve = 1.0f;	// lane LIGHTPHYS1: the intensity curve folded into the colours (menu sets bump no switch generation)
+	int bufCurveRed = 0;
 	const void * doc = nullptr;
 	int version = 0;
 	int count = 0;
@@ -979,9 +981,13 @@ void wwCellLightsUniforms( Scene * scene )
 	Gpu & g = gpus()[r];
 	const WwCellLighting * L = on ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	const bool flick = L && s.flickerOn && !s.flickerRed;	// lane LIGHTFLICKER1
+	const wwlp::Params phys = wwLightPhysParams();	// lane LIGHTPHYS1
 	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp
-	            || g.bufLiveGen != wwSwitchGen() || g.flickOn != flick || g.bufXemiStamp != xemiStampOf( scene->nifModel ) ) ) {
+	            || g.bufLiveGen != wwSwitchGen() || g.flickOn != flick || g.bufXemiStamp != xemiStampOf( scene->nifModel )
+	            || g.bufCurve != phys.curve || g.bufCurveRed != ( phys.red & 8 ) ) ) {
 		g.bufLiveGen = wwSwitchGen();
+		g.bufCurve = phys.curve;
+		g.bufCurveRed = phys.red & 8;
 		// lane LIGHTS4: this frame's XEMI factors (wwCellXemiLightsFrame), folded into each light's colour
 		const auto xd = xemiDocs().constFind( scene->nifModel );
 		const std::vector<float> * xm = xd != xemiDocs().constEnd() && xd->version == s.version.value( scene->nifModel )
@@ -1004,6 +1010,11 @@ void wwCellLightsUniforms( Scene * scene )
 			if ( xm && l.xemi )
 				for ( int k = 0; k < 3; k++ )
 					col[k] *= ( *xm )[size_t( i ) * 3 + size_t( k )];
+			if ( phys.curve != 1.0f ) {	// lane LIGHTPHYS1: the intensity curve, once here for every consumer
+				const float ks = wwlp::intensityScale( phys, col );
+				for ( int k = 0; k < 3; k++ )
+					col[k] *= ks;
+			}
 			const float tex[kTexelsPerLight * 4] = {
 				l.pos[0], l.pos[1], l.pos[2], l.radius,
 				col[0], col[1], col[2], shape,
@@ -1683,6 +1694,9 @@ void wwCellLightsUniforms( Scene * scene )
 		? std::max( wwEnv( "WW_CELL_LIT_PROBE_GAIN" ).toFloat(), 0.0f ) : 1.0f );
 	prog->uni1f( "cellProbeGain", s.measuring ? 1.0f : probeGain );
 	prog->uni1i( "cellRed", s.red );
+	// lane LIGHTPHYS1: all zero = the game's curve and point lights (cell_lights.glsl cellPhysFalloff, cellAreaSpec)
+	prog->uni4f_l( prog->uniLocation( "cellLightPhys" ), FloatVector4( float( phys.mode ), phys.anchor, phys.sourceFraction, phys.advNumerator ) );
+	prog->uni4f_l( prog->uniLocation( "cellLightPhysB" ), FloatVector4( phys.advMinMetres, phys.areaWorld, float( phys.red ), 0.0f ) );
 	// WW_CELL_CAM_DUMP=<file>: the camera in world units, rewritten when it moves (the fog and diffuse gates measure from it)
 	WW_SWITCH_STATIC( QString, camDump, QString::fromLocal8Bit( wwEnv( "WW_CELL_CAM_DUMP" ) ) );
 	static QString camLast;

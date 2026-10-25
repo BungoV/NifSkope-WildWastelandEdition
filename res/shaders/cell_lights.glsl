@@ -36,6 +36,8 @@ uniform int cellAmboCount;
 uniform vec4 cellAmbo[16];
 uniform vec4 cellAmboK[16];
 uniform vec4 cellAmboBox[48];		// lane HEMI1: where cellAmboK[i].w is 1 the volume is a box, rows i * 3 .. i * 3 + 2
+uniform vec4 cellLightPhys;			// lane LIGHTPHYS1 (src/gl/lightphys.h): x falloff 0 game / 1 physical / 2 advanced, y anchor,
+uniform vec4 cellLightPhysB;		// z source fraction, w advanced numerator; B: x advanced min metres, y area size (0 off), z red bits
 uniform int cellRed;				// 1 linear: the radial curve without its 2.2; 8 lambert, 16 normalised, 32 norim,
 									// 64 rimflags (the lights' rim / roughness flags ignored); 512 cubeold (lane CUBE1)
 // lane PRTPGI: the bake relit by these lights (src/probegi.h), six axis slabs of dims.z each, x fastest;
@@ -162,13 +164,54 @@ vec3 cellWorldDir( vec3 dirView )
 	return normalize( vec3( dot( cellRow[0].xyz, dirView ), dot( cellRow[1].xyz, dirView ), dot( cellRow[2].xyz, dirView ) ) );
 }
 
+float cellAttVan( float x, vec3 c )
+{
+	float xe = c.z > 0.0 ? pow( x, c.z ) : 1.0;
+	return pow( 1.0 - clamp( c.y * xe + c.x, 0.0, 1.0 ), 2.2 );
+}
+
+float cellPhysRaw( float x, float s )
+{
+	float x2 = x * x;
+	float w = clamp( 1.0 - x2 * x2, 0.0, 1.0 );
+	float den = x2 + s * s;
+	return den > 0.0 ? w * w / den : 0.0;
+}
+
+// lane LIGHTPHYS1: the physical or advanced falloff for the game's value `van` at x = d / r (lightphys.h falloff)
+float cellPhysFalloff( float van, float x, float r, vec3 c )
+{
+	float a = clamp( cellLightPhys.y, 0.0, 1.0 );
+	if ( !( c.z > 0.0 ) || !( clamp( c.y + c.x, 0.0, 1.0 ) > clamp( c.x, 0.0, 1.0 ) ) || cellAttVan( 1.0, c ) >= 1.0 / 255.0 )
+		return van;	// an authored curve that is no falloff keeps the game's
+	float vA = cellAttVan( a, c );
+	float b = 1.0 - a * a;
+	if ( vA > ( b > 0.0 ? pow( b, 1.1 ) : 0.0 ) )
+		return van;
+	int red = int( cellLightPhysB.z + 0.5 );
+	if ( cellLightPhys.x > 1.5 ) {
+		float x0 = r > 0.0 ? clamp( max( max( cellLightPhysB.x, 0.001 ), max( 0.1 * r / 69.99, 0.2 ) ) * 69.99 / r, 1e-4, 0.5 ) : 0.5;
+		float den = 0.5 * ( 1.0 + 0.8 ) - ( 2.0 / 3.0 ) * x0;
+		float t = clamp( ( x - 0.8 ) / ( 1.0 - 0.8 ), 0.0, 1.0 );
+		float w = ( red & 2 ) != 0 ? 1.0 : 1.0 - t * t * ( 3.0 - 2.0 * t );
+		float m = max( x0, x );
+		return den > 0.0 ? ( cellLightPhys.w / den ) * w / ( m * m ) : 0.0;
+	}
+	float s = cellLightPhys.z;
+	float raw = cellPhysRaw( a, s );
+	float k = ( red & 1 ) != 0 ? 1.0 : raw > 0.0 ? vA / raw : 0.0;
+	return k > 0.0 ? k * cellPhysRaw( x, s ) : van;
+}
+
 // PRTP2 section 1: x = saturate(d / r); atten = pow(1 - saturate(scale * x^exponent + bias), 2.2)
 float cellRadial( float d, float r, vec3 bse )
 {
 	float x = clamp( d / max( r, 0.001 ), 0.0, 1.0 );
 	float xe = bse.z > 0.0 ? pow( x, bse.z ) : 1.0;
 	float k = 1.0 - clamp( bse.y * xe + bse.x, 0.0, 1.0 );
-	return ( cellRed & 1 ) != 0 ? k : pow( k, 2.2 );
+	if ( ( cellRed & 1 ) != 0 )
+		return k;
+	return cellLightPhys.x > 0.5 ? cellPhysFalloff( pow( k, 2.2 ), x, r, bse ) : pow( k, 2.2 );
 }
 
 /* lane SHADOW1: light i's shadow factor at P (normal N, facing it): 1 lit, 0 shadowed. The point lifted
@@ -1162,6 +1205,21 @@ vec3 cellLightE( int i, vec3 P, vec3 N, out vec3 L, out bool noSpec )
 		a *= cellShadowF( i, P, N );
 	noSpec = ( int( t3.w + 0.5 ) & 1 ) != 0;
 	return t1.rgb * a;
+}
+
+// lane LIGHTPHYS1 Area lights: the specular direction to a sphere's closest point to the reflected ray, its widened roughness
+void cellAreaSpec( int i, vec3 P, vec3 N, vec3 V, inout vec3 Ls, inout float rS )
+{
+	vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
+	vec3 Lv = t0.xyz - P;
+	float d = length( Lv );
+	float R = clamp( min( cellLightPhysB.y, t0.w * cellLightPhys.z ), 2.0, 32.0 );
+	vec3 r = reflect( -V, N );
+	vec3 c = dot( Lv, r ) * r - Lv;
+	vec3 p = Lv + c * clamp( R / max( length( c ), 1e-4 ), 0.0, 1.0 );
+	Ls = normalize( p );
+	if ( ( int( cellLightPhysB.z + 0.5 ) & 4 ) == 0 )
+		rS = sqrt( clamp( min( max( rS * rS, 1e-4 ) + R / max( 2.0 * d, 1e-4 ), 0.9999 ), 0.0, 1.0 ) );
 }
 
 /* lane FARVIEW1: the far blend at world point P, 0 near, 1 far (red noblend: a hard switch at the band's middle) */

@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIGHTPHYS1 (2026-10-25, branch lightphys1-20261025): light physics rows (all off by default)
+
+- **Rows (Show menu, all off; off = drawn exactly as before; all live, no reopen):**
+  - Physical light falloff, key `WW/CellLightPhys`, pin `WW_CELL_LIGHT_PHYS`. Placed lights fade as a windowed
+    1/d^2 instead of the game's (1 - (d/r)^2)^2.2, matched to the old curve at 0.38164 of the radius (source size 0.3
+    of the radius), so a room keeps its overall brightness: brighter near the bulb, darker at the edge. Lights whose
+    authored curve is not a falloff (flat, lit at their own edge) keep the game's. The same curve lights surfaces,
+    effects, particles and the volumetric air. Red `WW_CELL_LIGHT_PHYS_RED=noanchor` (no brightness match).
+  - Advanced light model, key `WW/CellLightAdvanced`, pin `WW_CELL_LIGHT_ADV`. Inverse square with a minimum distance
+    (0.05 m, at least 0.2 m or a tenth of the radius), a smooth fade over the last fifth of the radius, and the game
+    curve's total light kept (calibration 1). Wins over the physical row when both are on.
+    Red `WW_CELL_LIGHT_ADV_RED=nowindow` (a hard edge at the radius).
+  - Area lights, key `WW/CellLightArea`, pin `WW_CELL_LIGHT_AREA`. PBR materials' highlights come from a sphere of
+    8 units (at most 0.3 of the radius), not a point: wider, softer highlights on smooth surfaces. Vanilla materials
+    are unchanged. Red `WW_CELL_LIGHT_AREA_RED=nowiden` (the sphere's point without the widening).
+  - Light intensity curve (Off | 0.75 | 1.25 | 1.5 | 2), key `WW/CellLightCurve`, pin `WW_CELL_LIGHT_CURVE=<curve>`.
+    Each light's colour x (luminance / 0.1043)^(curve - 1): above 1 bright lights get brighter and dim ones dimmer.
+    Off is curve 1. Red `WW_CELL_LIGHT_CURVE_RED=nopivot` (pivot 1).
+- **Code:** src/gl/lightphys.h (the math), res/shaders/cell_lights.glsl (cellPhysFalloff, cellAreaSpec), the PBR
+  program's directLightA, the two effect programs, the light buffer (intensity folded into the colour).
+- **Gates:** tests/lightphys (620 checks against values computed from the reference source; red fails 198),
+  every shader program linked offline in 3 modes. Bounce light (probe GI) keeps the game's curve (a later lane).
+- **GPU:** a few instructions per light per pixel when on, 0 when off; expected under 0.05 ms at 1080p.
+
 ## Lane LIGHTS4 (2026-10-25, branch lights4-20261025): emittance rows live, placed lights recoloured, sun flare
 
 - **Live rows:** Placement emittance, Region emittance and Emittance on particles no longer reopen the cell. The
