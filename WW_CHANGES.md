@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane PERF5 (2026-10-25, branch perf5-20261023): three CPU cuts in the cell view (speed changes, no menu rows)
+
+- **Reflections from last frame's colour by default:** the PERF3 path that reflects the previous frame's lit colour
+  instead of drawing the scene a second time is now on whenever the reflections are. `WW_CELL_SSR_PREV=0`,
+  `WW_CELL_SSR_PREV_RED=1` or `WW_PERF3_RED=1` = the second scene pass as before (test reds only).
+- **Camera cull memo:** every pass of a frame culled the same shape for the same camera again; the first cull of a
+  shape this frame is kept (keyed on the view transform, frustum planes and switches) and later passes replay it,
+  counters and occluder hits included. `WW_CELL_CULL_MEMO_RED=1` = no memo; `WW_CELL_CULL_MEMO_CHECK=1` culls in full
+  each hit and counts mismatches ("cell cull memo: ... mismatches=").
+- **Texture parameter shadow:** the lighting property's bind set wrap, filter and anisotropy on its texture every
+  draw; it now skips them when this frame already set the same values on that texture. Any other bind of the texture
+  forgets it. `WW_DRAW_TEXSHADOW_RED=1` = always set; `WW_DRAW_TEXSHADOW_CHECK=1` reads GL back and counts mismatches.
+- The full per-shape draw packet (PERF4-DRAWPACKETS) is not done: the shape setup's state comes from many property
+  binds with side effects; only the texture parameters are shadowed so far. Live rows: notes/perf5/rows.in, hold.sh.
+
 ## Lane FOGPERF1 + SPEEDDEFAULT1 (2026-10-23, branch fogperf1-20261023): fog cost named, speed switches on
 
 ### Speed switches ride with their feature (bungo 10-23: "speed change should never have an off as default")
@@ -171,7 +186,6 @@
   tracer uses the same lamps. Nothing drawn changes.
 - Speed: Memory Den night 960x540 at 256 paths a pixel, 4 bounces: 115 s; Concord 320x180 at 64 paths: 7 s.
 - Lane notes: notes/deck1 (compare scripts, hold rows, RESULTS.md).
-
 ## Lane PERF4 (2026-10-23, branch perf4-20261023): two hidden-work cuts in the cell view (first part of FLYPERF1)
 
 - **Far cards stop hidden fragments early:** the card shader writes its own depth, so the card's early depth test was

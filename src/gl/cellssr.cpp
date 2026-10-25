@@ -103,8 +103,9 @@ struct SsrGpu
 
 bool ssrPrevOn()
 {
-	WW_SWITCH_STATIC( bool, on, qgetenv( "WW_CELL_SSR_PREV" ).trimmed() == "1" && !qEnvironmentVariableIntValue( "WW_CELL_SSR_PREV_RED" )
-		&& !qEnvironmentVariableIntValue( "WW_PERF3_RED" ) );	// lane LIVESET1: follows a live set
+	// lane PERF5: a speed change, on with the reflections; WW_CELL_SSR_PREV=0 or a red is the test way back
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_CELL_SSR_PREV" ).trimmed() != "0" && wwEnvInt( "WW_CELL_SSR_PREV_RED" ) == 0
+		&& wwEnvInt( "WW_PERF3_RED" ) == 0 );	// lane LIVESET1: follows a live set
 	return on;
 }
 

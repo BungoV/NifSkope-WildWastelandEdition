@@ -42,6 +42,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QString>
 #include <QStringView>
 
+#include <vector>
+
 
 //! @file gltex.h TexCache etc. header
 
@@ -211,6 +213,19 @@ protected:
 	std::uint16_t loadTex( Tex & tx, const NifModel * nif );
 	bool draining = false;	// lane PERF1: loadTex is uploading the read-ahead's ready files
 	bool pumpOwnsDrain = false;	// lane STREAM1
+	// lane PERF5: the texture parameter shadow, by GL texture id
+	struct ParamShadow
+	{
+		std::uint32_t epoch = 0;
+		int wrapS = 0, wrapT = 0, minFilter = 0;
+		float aniso = 0.0f;
+	};
+	std::vector<ParamShadow> paramShadow;
+	std::uint32_t paramEpoch = 1;
+	GLuint paramId = 0;	// the 2D texture the shadowed bind just bound (0: none)
+	qint64 paramSkips = 0, paramSets = 0, paramBad = 0, paramBadAll = 0;
+	QString paramLine;
+	void paramForget( GLuint id );
 
 public:
 	void setOpenGLContext( NifSkopeOpenGLContext * context );
@@ -222,6 +237,12 @@ public:
 	void setUseTick( std::uint32_t t ) { useTick = t; }
 	//! lane CELLSTREAM1: frees the GL textures of files last bound before tick (they load again when next bound)
 	int evictUnused( std::uint32_t tick, QStringList * names = nullptr );
+	/*! lane PERF5: BSShaderLightingProperty::bind sets the same wrap, filter and anisotropy on a texture every draw;
+	 *  false = this frame already set them on the texture its bind just bound (WW_DRAW_TEXSHADOW_RED=1: always true) */
+	bool wwParamsNeeded( int wrapS, int wrapT, int minFilter, float aniso );
+	//! lane PERF5: a new frame trusts no shadowed parameter (glview.cpp); prints the shadow's counts when they move
+	void wwParamFrame();
+	bool wwParamCaller = false;	//!< lane PERF5: set around the shadowed bind; any other bind forgets its texture
 	/*! lane STREAM1 (TEXSTREAM1): uploads the streaming read-ahead's ready files, up to `budgetBytes` of them this
 	 *  frame (at least one), before anything draws, so a streamed cell's first frame finds them loaded. Returns
 	 *  how many went up. The same loadTex as a bind's, so what a draw sees is the same texture. */

@@ -48,6 +48,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSettings>
 
 #include <algorithm>
+#include <cstdio>
+
+#ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
+#endif
 
 
 //! @file gltex.cpp TexCache management
@@ -353,6 +358,7 @@ TexCache::Tex * TexCache::rehashTextures( Tex * p )
 
 int TexCache::bind( const QStringView & fname, const NifModel * nif )
 {
+	paramId = 0;	// lane PERF5
 	Tex *	tx = insertTex( fname );
 	if ( !tx ) [[unlikely]]
 		return 0;
@@ -367,8 +373,79 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 	if ( !tx->target ) [[unlikely]]
 		tx->target = GL_TEXTURE_2D;
 	glBindTexture( tx->target, tx->id[0] );
+	// lane PERF5: the shadow follows its own caller's binds; any other caller may set other parameters
+	if ( wwParamCaller && tx->target == GL_TEXTURE_2D )
+		paramId = tx->id[0];
+	else
+		paramForget( tx->id[0] );
 
 	return tx->mipmaps;
+}
+
+void TexCache::paramForget( GLuint id )
+{
+	if ( id < paramShadow.size() )
+		paramShadow[id].epoch = 0;
+}
+
+static int wwTexShadowMode()	// lane PERF5: 0 = the red (always set), 1 = the shadow, 2 = the shadow read back and compared
+{
+	WW_SWITCH_STATIC( int, m, wwEnvInt( "WW_DRAW_TEXSHADOW_RED" ) != 0 ? 0 : ( wwEnvInt( "WW_DRAW_TEXSHADOW_CHECK" ) != 0 ? 2 : 1 ) );
+	return m;
+}
+
+bool TexCache::wwParamsNeeded( int wrapS, int wrapT, int minFilter, float aniso )
+{
+	const GLuint id = paramId;
+	paramId = 0;
+	const int mode = wwTexShadowMode();
+	if ( !mode || !id || id >= ( 1U << 22 ) )
+		return true;
+	if ( id >= paramShadow.size() )
+		paramShadow.resize( size_t( id ) + 1024 );
+	ParamShadow & e = paramShadow[id];
+	if ( e.epoch == paramEpoch && e.wrapS == wrapS && e.wrapT == wrapT && e.minFilter == minFilter && e.aniso == aniso ) {
+		paramSkips++;
+		if ( mode == 1 )
+			return false;
+		// the check: what GL holds must be what the shadow believes; the parameters are set again all the same
+		GLint s = 0, t = 0, mn = 0, mg = 0;
+		GLfloat a = 0.0f;
+		glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &s );
+		glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &t );
+		glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &mn );
+		glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &mg );
+		glGetTexParameterfv( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &a );
+		if ( s != wrapS || t != wrapT || mn != minFilter || mg != GL_LINEAR || a != aniso ) {
+			paramBad++;
+			paramBadAll++;
+		}
+		return true;
+	}
+	e.epoch = paramEpoch;
+	e.wrapS = wrapS;
+	e.wrapT = wrapT;
+	e.minFilter = minFilter;
+	e.aniso = aniso;
+	paramSets++;
+	return true;
+}
+
+void TexCache::wwParamFrame()
+{
+	if ( ++paramEpoch == 0 )
+		paramEpoch = 1;
+	if ( paramSkips || paramSets ) {
+		extern bool wwFrameLog();	// gl/cellcull.cpp: WW_FRAME_LOG=0 keeps the per-camera lines out
+		const QString line = QStringLiteral( "draw texshadow: %1 skips=%2 sets=%3 mismatches=%4 (all frames %5)" )
+			.arg( wwTexShadowMode() == 2 ? QStringLiteral( "check" ) : QStringLiteral( "on" ) ).arg( paramSkips )
+			.arg( paramSets ).arg( paramBad ).arg( paramBadAll );
+		if ( line != paramLine && wwFrameLog() ) {
+			paramLine = line;
+			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );
+		}
+	}
+	paramSkips = paramSets = paramBad = 0;
 }
 
 bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSecondTexture )
@@ -443,6 +520,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 
 	if ( !t->id[0] )
 		glGenTextures( 1, t->id );
+	paramForget( t->id[0] );	// lane PERF5: a load sets its own parameters
 
 	if ( t->target )
 		glBindTexture( t->target, t->id[0] );
@@ -477,6 +555,7 @@ int TexCache::bind( const QModelIndex & iSource )
 					try
 					{
 						glGenTextures( 1, tx.id );
+						paramForget( tx.id[0] );	// lane PERF5
 						glBindTexture( GL_TEXTURE_2D, tx.id[0] );
 						i->mipmaps = texLoad( iData, i->format, tx.target, i->width, i->height, tx.id );
 						tx.mipmaps = std::uint16_t( i->mipmaps );
@@ -487,6 +566,7 @@ int TexCache::bind( const QModelIndex & iSource )
 				} else {
 					glBindTexture( GL_TEXTURE_2D, tx.id[0] );
 				}
+				paramForget( tx.id[0] );	// lane PERF5: not the shadowed bind
 
 				return tx.mipmaps;
 			}
@@ -500,6 +580,7 @@ int TexCache::bind( const QModelIndex & iSource )
 
 void TexCache::flush()
 {
+	paramShadow.clear();	// lane PERF5
 	for ( size_t i = 0; i <= textureHashMask; i++ ) {
 		Tex &	tx = textures[i];
 		if ( tx.isLoaded() ) {
@@ -532,6 +613,7 @@ int TexCache::evictUnused( std::uint32_t tick, QStringList * names )
 		if ( !tx.nameLen || !tx.isLoaded() || !tx.mipmaps || tx.useTick >= tick )
 			continue;
 		PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
+		paramForget( tx.id[0] );	// lane PERF5
 		glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
 		tx.id[0] = tx.id[1] = 0;
 		tx.mipmaps = 0;
