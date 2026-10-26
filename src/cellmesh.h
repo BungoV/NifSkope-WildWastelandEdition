@@ -32,6 +32,22 @@
 class NifItem;
 class NifModel;
 
+/* lane FARDRAW1: an instanced far ring shape (gl/cellfarinst.h). Each base mesh is held ONCE in mesh-local space and
+ * every placement is a 64-byte row, so memory grows with the unique meshes, not with the placements. */
+struct CellMeshInst
+{
+	struct Cmd { quint32 count = 0, instanceCount = 0, firstIndex = 0; qint32 baseVertex = 0; quint32 baseInstance = 0; };
+	struct Tile { Vector3 centre; float radius = 0.0f; int firstCmd = 0, cmdCount = 0; };
+	QByteArray vbo;          //!< 36 B a vertex: pos 3f, colour RGBA8, normal/tangent/bitangent 2_10_10_10, uv 2f
+	QVector<quint16> ebo;    //!< mesh-local indices; each sub-mesh adds its base vertex in its command
+	QVector<float> inst;     //!< 16 floats a placement: rows 0-2 of (scale*R | t), then (uMid, r, g, b + 2 if mirrored)
+	QVector<Cmd> cmds;       //!< by tile, then sub-mesh; baseInstance points into `inst`
+	QVector<Tile> tiles;     //!< 4x4-cell groups, culled against the camera as a whole
+	quint64 id = 0;          //!< the GPU copy's key (unique per build)
+	qint64 instances = 0, uniqueVerts = 0, uniqueTris = 0, drawnTris = 0;
+	bool alphaTested = false;
+};
+
 struct CellMesh
 {
 	QVector<Vector3> verts, norms, tangents, bitangents;
@@ -41,6 +57,7 @@ struct CellMesh
 	//! lane FARLOD2: the far objects' UV 2 (0, layer); empty = the shape has no UV 2 stream
 	QVector<float> uv2y;
 	bool withColour = false;       //!< the shape's vertex format carries the color stream
+	QSharedPointer<CellMeshInst> inst;   //!< lane FARDRAW1: set = no arrays above; never written as rows
 };
 
 //! False under WW_CELL_SPEED_RED=slow: the caller writes every row into the document, as before.

@@ -8,7 +8,16 @@ uniform mat4 modelViewMatrix;
 
 layout ( location = 0 ) in vec3 vertexPosition;
 
+// lane FARDRAW1: an instanced far ring's placement rows (fo4_default.vert); false = every other caster
+uniform bool farInst;
+layout ( location = 10 ) in vec4 farInstRow0;
+layout ( location = 11 ) in vec4 farInstRow1;
+layout ( location = 12 ) in vec4 farInstRow2;
+
 void main()
 {
-	gl_Position = csmClipFromView * ( modelViewMatrix * vec4( vertexPosition, 1.0 ) );
+	vec4 v = vec4( vertexPosition, 1.0 );
+	if ( farInst )
+		v.xyz = vec3( dot( farInstRow0, v ), dot( farInstRow1, v ), dot( farInstRow2, v ) );
+	gl_Position = csmClipFromView * ( modelViewMatrix * v );
 }

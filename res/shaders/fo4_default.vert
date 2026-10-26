@@ -45,6 +45,13 @@ layout ( location = 2 ) in vec3	normalVector;
 layout ( location = 3 ) in vec3	tangentVector;
 layout ( location = 4 ) in vec3	bitangentVector;
 layout ( location = 7 ) in vec2	multiTexCoord0;
+// lane FARDRAW1: an instanced far ring (gl/cellfarinst.h): rows 0-2 of the placement's (scale*R | t), then
+// (u mirror sum, r, g, b + 2 when mirrored). false (the default) = every other shape, untouched
+uniform bool farInst;
+layout ( location = 10 ) in vec4	farInstRow0;
+layout ( location = 11 ) in vec4	farInstRow1;
+layout ( location = 12 ) in vec4	farInstRow2;
+layout ( location = 13 ) in vec4	farInstExtra;
 
 #include "bonetransform.glsl"
 
@@ -59,6 +66,22 @@ void main()
 		boneTransform( v, n, t, b );
 
 	vec4 vc = vertexColor;
+	vec2 uv0 = multiTexCoord0;
+	vec2 farXY = vertexPosition.xy;
+	if ( farInst ) {
+		mat3 Mt = mat3( farInstRow0.xyz, farInstRow1.xyz, farInstRow2.xyz );	// n * Mt = M n
+		v.xyz = vec3( dot( farInstRow0, v ), dot( farInstRow1, v ), dot( farInstRow2, v ) );
+		n = n * Mt;
+		t = t * Mt;
+		b = b * Mt;
+		farXY = v.xy;	// the sway phase by the placed position, as the flat copy had it
+		float e = farInstExtra.w;
+		if ( e > 1.5 ) {
+			uv0.x = farInstExtra.x - uv0.x;
+			e -= 2.0;
+		}
+		vc.rgb *= vec3( farInstExtra.yz, e );
+	}
 	if ( wwGrassWind2.w > 0.5 ) {
 		float L = length( b );
 		float off = L > 2.0 ? L - 1024.0 : 0.0;
@@ -88,12 +111,12 @@ void main()
 	vec3 farRel = transpose( viewMatrix ) * ( v.xyz - farSwayBlock.xyz );	// world-axis offset from the block's centre
 	if ( farSwayAmp > 0.0 && lodTreeAnim && max( abs( farRel.x ), abs( farRel.y ) ) > farSwayBlock.w ) {
 		// world-horizontal offset, phase by the vertex's own place so a forest does not move as one
-		float ph = dot( vertexPosition.xy, vec2( 0.0021, 0.0017 ) );
+		float ph = dot( farXY, vec2( 0.0021, 0.0017 ) );
 		vec3 w = vec3( sin( farSwayTime * 1.3 + ph ), cos( farSwayTime * 0.9 + ph * 1.7 ) * 0.6, 0.0 );
 		v.xyz += viewMatrix * ( w * ( farSwayAmp * vertexColor.a ) );
 	}
 	gl_Position = projectionMatrix * v;
-	texCoord = multiTexCoord0;
+	texCoord = uv0;
 
 	btnMatrix[2] = normalize( n * normalMatrix );
 	btnMatrix[1] = normalize( t * normalMatrix );

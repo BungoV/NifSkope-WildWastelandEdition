@@ -11,6 +11,7 @@
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
 #include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
+#include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings
 #include "gl/glproperty.h"
 #include "cellmesh.h"
 #include "cellspeed.h"
@@ -67,6 +68,7 @@ void BSShape::updateData( const NifModel * nif )
 
 	// Fill vertex data
 	resetVertexData();
+	wwFarInst.reset();
 	// lane SPEED1: a welded cell shape's arrays wait beside the document (src/cellmesh.h) in the values the
 	// document would hand back; taken as they are (shared, not copied)
 	if ( const QSharedPointer<CellMesh> cm = cellMeshFor( nif, iBlock ) ) {
@@ -82,6 +84,7 @@ void BSShape::updateData( const NifModel * nif )
 		coords.append( cm->coords );
 		resetSkeletonData();
 		triangles = cm->triangles;
+		wwFarInst = cm->inst;
 		removeInvalidIndices();
 		updateLodLevel();
 		return;
@@ -305,6 +308,24 @@ void BSShape::drawShapes( NodeList * secondPass )
 	// lane WATER1: a cell water surface draws after the opaque frame it refracts (src/gl/cellwater.h)
 	if ( secondPass && wwCellWaterWanted( scene, id() ) ) {
 		secondPass->add( this );
+		return;
+	}
+	// lane FARDRAW1: an instanced far ring has no vertex rows; its visible tiles draw in one indirect call
+	if ( wwFarInst ) {
+		if ( secondPass && GpuDriven::mainArmed() && GpuDriven::mainTake( this, GpuDriven::Rest ) )
+			return;
+		if ( scene->selecting || !scene->nifModel )
+			return;
+		glEnable( GL_POLYGON_OFFSET_FILL );
+		glPolygonOffset( 1.0f, 2.0f );
+		if ( scene->nifModel->getBSVersion() >= 151 )
+			glEnable( GL_FRAMEBUFFER_SRGB );
+		else
+			glDisable( GL_FRAMEBUFFER_SRGB );
+		shader = scene->renderer->setupProgram( this, shader );
+		if ( shader )
+			CellFarInst::draw( scene->renderer, scene, *wwFarInst, shader, viewTrans() );
+		glDisable( GL_POLYGON_OFFSET_FILL );
 		return;
 	}
 	/* lane GPUDRIVEN1: the walk queues the shape by render state (gl/cellqueue.h) and draws it at the flush. A shape

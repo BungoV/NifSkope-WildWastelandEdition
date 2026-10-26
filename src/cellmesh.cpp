@@ -192,6 +192,8 @@ bool cellMeshMaterialize( NifModel * nif, const QModelIndex & index )
 	if ( mit == it->byBlock.end() )
 		return false;
 	const QSharedPointer<CellMesh> mesh = mit.value();
+	if ( mesh->inst )
+		return false;   // lane FARDRAW1: an instanced far shape has no rows to write; it stays drawn from here
 	it->byBlock.erase( mit );   // first: from here on the document is the shape's one source
 	recount();
 	const QModelIndex iShape = nif->getBlockIndex( nif->getBlockNumber( block ) );
@@ -224,7 +226,10 @@ qint64 cellMeshBytes( const CellMesh & m )
 	return qint64( m.verts.capacity() + m.norms.capacity() + m.tangents.capacity() + m.bitangents.capacity() )
 		* qint64( sizeof( Vector3 ) ) + qint64( m.colors.capacity() ) * qint64( sizeof( Color4 ) )
 		+ qint64( m.coords.capacity() ) * qint64( sizeof( Vector2 ) ) + qint64( m.triangles.capacity() )
-		* qint64( sizeof( Triangle ) ) + qint64( m.uv2y.capacity() ) * qint64( sizeof( float ) );
+		* qint64( sizeof( Triangle ) ) + qint64( m.uv2y.capacity() ) * qint64( sizeof( float ) )
+		+ ( m.inst ? qint64( m.inst->vbo.size() ) + qint64( m.inst->ebo.size() ) * 2
+			+ qint64( m.inst->inst.size() ) * 4 + qint64( m.inst->cmds.size() ) * qint64( sizeof( CellMeshInst::Cmd ) )
+			+ qint64( m.inst->tiles.size() ) * qint64( sizeof( CellMeshInst::Tile ) ) : 0 );
 }
 
 int cellMeshCount( const NifModel * nif )

@@ -38,6 +38,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glcontext.hpp"
 
 #include <QPersistentModelIndex>
+#include <QSharedPointer>
 #include <QVector>
 #include <QString>
 
@@ -160,6 +161,8 @@ public:
 	float wwAlphaThreshold() const;
 	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)
 	bool wwGpuSkinned() const { return isSkinned && !transformRigid && !boneTransforms.empty(); }
+	//! lane FARDRAW1: the instanced far ring this shape draws, or null
+	const struct CellMeshInst * wwFarInstData() const { return wwFarInst.data(); }
 protected:
 	//! Number of triangles to render at the current level of detail
 	qsizetype lodTriangleCount = 0;
@@ -191,6 +194,8 @@ protected:
 
 	//! Holds the shader program used by this shape
 	NifSkopeOpenGLContext::Program * shader = nullptr;
+	//! lane FARDRAW1: set = an instanced far ring shape (cellmesh.h CellMeshInst): no vertex arrays, drawn by gl/cellfarinst
+	QSharedPointer<struct CellMeshInst> wwFarInst;
 
 	//! Shader property
 	BSShaderLightingProperty * bssp = nullptr;

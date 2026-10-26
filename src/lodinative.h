@@ -86,6 +86,10 @@ struct LodiSceneSpec
 	/*! lane FAR3 (FARGAP1): one bucket per MATERIAL instead of per (base, material). Each shape costs ~43 KB of
 	 *  document blocks, most of a far ring's memory; the far rings set it (red WW_CELL_FARLOD_RED=perbase). */
 	bool mergeBases = false;
+	/*! lane FARDRAW1: with sideMesh + mergeBases, each base mesh is held once and every placement is a row of an
+	 *  instance table (CellMeshInst), drawn instanced; no maxTris drop. Views that store a value per vertex per
+	 *  placement (vertex AO stream, sky/ground streams) stay flat. Red WW_CELL_FARLOD_RED=flat. */
+	bool instanced = false;
 };
 
 //! lane FARLOD1: what one append put in, counted at the push.
@@ -96,6 +100,9 @@ struct LodiAppendCounts
 	bool overBudget = false;   //!< spec.maxTris refused the write
 	//! lane FAR3: what the ring keeps after the build (the far-field budget charges these, not a guess a triangle)
 	qint64 shapes = 0, verts = 0, keptBytes = 0;
+	//! lane FARDRAW1: instanced rings -- placements drawn, the unique mesh copy, and the bytes of each half
+	bool instanced = false;
+	qint64 instancesDrawn = 0, uniqueVerts = 0, uniqueTris = 0, geoBytes = 0, instBytes = 0;
 };
 
 /*! lane FAR3: `NifSkope -no-gui farobjcensus <ws.lodi> --ring x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot ...` builds the far
