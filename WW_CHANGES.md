@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CLOUD1 (2026-10-26, branch cloud1-20261026): the cloud map interface (stub)
+
+- **New header `src/gl/cloudmap.h`:** the per-weather cloud map that the volume clouds (CLOUD2) and the cloud
+  shadows will read: one texture (R Low, G Mid, B the Low band's sheet share, A High), its size, its world square,
+  and per band the coverage, base and top height, density, sheet share and tint. Stable from this commit; changes are
+  written in notes/cloud1/INTERFACE.md.
+- **The stub:** `wwCloudMapUpdate` unions the weather's active 2D layer alphas (1 - prod(1 - a)) into the Low band as
+  a 1x1 map. Pin `WW_CLOUDMAP` (off/low/medium/high/ultra or 0..4) turns it on; nothing reads it yet. Off (the
+  default) builds nothing and draws nothing: the picture is the base's.
+- `lookdevstage` gives the map the layers it draws now (`wwLookdevCloudLayers`: texture, JNAM alpha, PNAM colour,
+  scroll offset and the Clouds.nif shape).
+
 ## Lane LIGHTPHYS4 (2026-10-26, branch lightphys4-20261026): far lights and live doors follow the light rows
 
 - **Far lights bounce on the rows' curve, live:** the far light bake (WW_CELL_FARLIGHT) now runs its placed-only
