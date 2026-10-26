@@ -9,6 +9,8 @@
  *  Reds: WW_CELL_DOORLIVE_RED=static (the GI stays at the bake while the mesh moves) | snap (the GI flips at half open).
  *  Off (unset): nothing here runs and the cell builds as before. */
 
+#include "cellblockmap.h"
+
 #include <QString>
 
 #include <vector>
@@ -34,6 +36,8 @@ bool wwDoorLiveWantsGi();
 //! cellBuild: the door's branch was copied in under `wrapper` (its root at `root`, `count` blocks from there)
 void wwDoorLiveSetBranch( NifModel * nif, quint32 ref, const QString & model, qint32 wrapper, qint32 root, qint32 count,
 	const QString & note );
+//! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)
+void wwDoorLiveRemap( const void * nif, const WwBlockMap & m );
 //! cellBuild: the relight's operators and the grid just published; returns census lines for the notes
 QString wwDoorLiveKeepGi( const void * nif, const ProbeRelightOps & ops, const WwCellGi & gi,
 	const std::vector<WwDoorLiveBox> & boxes );

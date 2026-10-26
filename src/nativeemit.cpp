@@ -38,6 +38,7 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <mutex>
 #include <set>
 #include <unordered_map>
 #include <functional>
@@ -2072,9 +2073,11 @@ struct GroupKnobs
 	{
 		const QByteArray c = wwEnv( "WW_LODI_GROUP_COMPONENT" );
 		if ( !c.isEmpty() ) {
-			static QByteArray held;
-			held = c;
-			archComponent = held.constData();
+			// lane LIVESET3: every value kept for good, so an older knob set read by a running bake stays valid
+			static std::set<QByteArray> held;
+			static std::mutex heldMutex;
+			std::lock_guard<std::mutex> lock( heldMutex );
+			archComponent = held.insert( c ).first->constData();
 		}
 		bool okv = false;
 		const float t = wwEnv( "WW_LODI_GROUP_TOLERANCE" ).toFloat( &okv );
@@ -2099,8 +2102,13 @@ struct GroupKnobs
 			occRays = rays;
 	}
 };
-//! The one instance. Every knob turned here, nowhere else.
-static const GroupKnobs KNOB;
+//! The one instance. Every knob turned here, nowhere else. lane LIVESET3: read again after a switch set
+static const GroupKnobs & groupKnobs()
+{
+	WW_SWITCH_STATIC( GroupKnobs, k, GroupKnobs() );
+	return k;
+}
+#define KNOB groupKnobs()
 
 /* ---- IDENT2 (2026-09-29): THE NAMED LANDMARKS. bungo's ruling during MERGE1
  * (HANDOFF top block, item 1): Diamond City -> "Landmark rule". The contact

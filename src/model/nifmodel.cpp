@@ -964,13 +964,45 @@ void NifModel::removeNiBlock( int blocknum )
 
 void NifModel::removeTailBlocks( int first )
 {
+	removeBlockRange( first, getBlockCount() - first );
+}
+
+void NifModel::removeBlockRange( int first, int count )
+{
 	const int n = getBlockCount();
-	if ( first < 0 || first >= n )
+	if ( first < 0 || count <= 0 || first + count > n )
 		return;
-	adjustLinks( root, first, -( n - first ) );	// every link into the range: -1
-	beginRemoveRows( QModelIndex(), first + 1, n );
-	root->removeChildren( first + 1, n - first );
+	adjustLinks( root, first, -count );	// links into the range: -1; links past it move down by `count`
+	beginRemoveRows( QModelIndex(), first + 1, first + count );
+	root->removeChildren( first + 1, count );
 	endRemoveRows();
+	updateLinks();
+	updateHeader();
+	updateFooter();
+	emit linksChanged();
+}
+
+void NifModel::moveBlockRange( int first, int count, int dst )
+{
+	const int n = getBlockCount();
+	if ( first < 0 || count <= 0 || first + count > n || dst < 0 || dst >= first )
+		return;
+	std::vector<NifItem *> items;
+	items.reserve( size_t( count ) );
+	beginRemoveRows( QModelIndex(), first + 1, first + count );
+	for ( int i = 0; i < count; i++ )
+		items.push_back( root->takeChild( first + 1 ) );
+	endRemoveRows();
+	beginInsertRows( QModelIndex(), dst + 1, dst + count );
+	for ( int i = 0; i < count; i++ )
+		root->insertChild( items[size_t( i )], dst + 1 + i );
+	endInsertRows();
+	QMap<qint32, qint32> map;
+	for ( int b = dst; b < first; b++ )
+		map.insert( b, b + count );
+	for ( int i = 0; i < count; i++ )
+		map.insert( first + i, dst + i );
+	mapLinks( root, map );
 	updateLinks();
 	updateHeader();
 	updateFooter();

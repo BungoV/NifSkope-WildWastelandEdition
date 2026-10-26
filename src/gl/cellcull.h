@@ -1,6 +1,7 @@
 #ifndef CELLCULL_H
 #define CELLCULL_H
 
+#include "cellblockmap.h"
 #include "data/niftypes.h"
 
 #include <QByteArray>
@@ -117,6 +118,8 @@ void wwCellCullBegin( const void * nif );
 void wwCellCullShape( const void * nif, int block, std::vector<WwCullRun> && runs );
 // lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
 void wwCellCullForget( const void * nif, int block );
+//! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)
+void wwCellCullRemap( const void * nif, const WwBlockMap & m );
 //! The shape's runs, or null (not a cell shape, or one run only).
 const std::vector<WwCullRun> * wwCellCullRuns( const void * nif, int block );
 
