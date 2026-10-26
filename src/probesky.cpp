@@ -5,6 +5,7 @@
 
 #include "esmweather.h"
 #include "gl/celllights.h"
+#include "gl/cellnifxlights.h"	// lane NIFXLIGHT2: Mesh lights relight the GI; the bulbs light the bounce
 #include "gl/celllooks.h"	// lane GPURELIGHT1: Probe sharing; lane LIGHTPHYS2: the light physics rows, compared live
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"
@@ -254,6 +255,7 @@ struct Kept
 	QPointer<QTimer> timer;   // the view's child: it goes with the window
 	QPointer<QWindow> view;
 	Fade fade;   // lane GIPROBE2
+	int nifxStamp = 0;   // lane NIFXLIGHT2: the Mesh lights publish the kept bake was last relit with (0: as built)
 };
 
 Kept & kept()
@@ -417,7 +419,9 @@ void relightKept( bool emitOnly = false )
 	if ( k.skyKept )
 		k.spec.sky = k.wanted;
 	ProbeGiResult gr;
-	if ( !probeGiRelight( k.soup, k.bakeDir, *L, k.spec, &gr ) )
+	WwCellLighting withBulbs;   // lane NIFXLIGHT2: a .nifx bulb-tier light lights the bounce (never a surface directly)
+	const WwCellLighting & lit = wwNifxGiLights( *L, wwNifxLightsRed(), withBulbs ) ? withBulbs : *L;
+	if ( !probeGiRelight( k.soup, k.bakeDir, lit, k.spec, &gr ) )
 		return;
 	if ( k.spec.sky.pic )
 		skyPicRelit( gr, k.spec );
@@ -486,6 +490,7 @@ void probeSkyForget()
 		k.timer->stop();
 	k.nif = nullptr;
 	k.fade = Fade();   // lane GIPROBE2
+	k.nifxStamp = 0;   // lane NIFXLIGHT2
 	picNow() = PicNow();
 }
 
@@ -500,6 +505,7 @@ void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bak
 	k.wanted = spec.sky;
 	k.skyKept = skyKept;
 	k.fade = Fade();   // lane GIPROBE2: a new cell's grid is published whole
+	k.nifxStamp = 0;   // lane NIFXLIGHT2: the bake traced the lights as built
 }
 
 //! lane LIGHTPHYS2: a set of the light physics rows relights the kept bake at once (the lamp term only, no rebake)
@@ -524,9 +530,27 @@ static bool lightPhysRelit( const void * nif )
 	return true;
 }
 
+/* lane NIFXLIGHT2: a Mesh lights (.nifx) publish (the row toggled, a sidecar edited) relights the kept bake at once, as
+ * the light physics rows do: the lamp term only, no rebake. Red WW_NIFX_LIGHTS_RED=norelight: the GI keeps the old lights. */
+static bool nifxRelit( const void * nif )
+{
+	Kept & k = kept();
+	if ( !k.nif || k.nif != nif || !wwCellGiOn() )
+		return false;
+	const int stamp = wwCellLightsNifxStamp( nif );
+	if ( stamp == k.nifxStamp || ( wwNifxLightsRed() & WwNifxRedNoRelight ) )
+		return false;
+	k.nifxStamp = stamp;
+	const int was = wwCellGiVersion( nif );
+	relightKept( true );
+	wwDoorLiveRowsRelit( nif, wwCellGiVersion( nif ) != was ? wwCellGiFor( nif ) : nullptr );
+	std::fprintf( stderr, "nifx lights: GI relit (publish %d)\n", stamp );
+	return true;
+}
+
 void probeSkyTick( Scene * scene, const void * nif, QWindow * view )
 {
-	if ( lightPhysRelit( nif ) )
+	if ( lightPhysRelit( nif ) || nifxRelit( nif ) )
 		return;
 	Kept & k = kept();
 	if ( !k.nif || k.nif != nif || !wwCellGiOn() )

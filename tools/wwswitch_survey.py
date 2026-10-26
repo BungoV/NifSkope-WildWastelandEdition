@@ -20,6 +20,7 @@ RANK = {'tool': 0, 'live': 1, 'shaders': 2, 'reopen': 3, 'relaunch': 4}
 OVERRIDES = {
     'WW_SUNPATH': ('live', 'read through tier() in shadowset.cpp ss(), which re-reads when a live set moves WW_SUNPATH; the cached light (lookdevstage currentLight) keys on wwSunPathKey() (GAPTOOL2)'),
     'WW_SETTINGS_SCOPE': ('relaunch', 'QSettings scope chosen in main() before any window'),
+    'WW_NIFX_ROOT': ('live', 'celllights.cpp nifxTick re-reads it every tick; a moved root makes the live scan look at every folder (NIFXLIGHT3)'),
     'WW_STDERR_BUFFER': ('relaunch', 'stderr buffering set once in main()'),
     'WW_WINDOW_VISIBLE': ('relaunch', 'window placement (opacity, z-order) when each window is first shown (FLYFIX1)'),
     'WW_RENDER_SHOT': ('live', 'the steps verb "shot <out>" names the file; the launch value only arms the handler'),

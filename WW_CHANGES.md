@@ -1,5 +1,67 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
+
+- **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,
+  and picks up a `.nifx` made, changed or removed while the cell is open, with no reopen. A moved `WW_NIFX_ROOT` (now
+  live) looks at every folder at once. With no `.nifx` left the placed lights come back as a fresh open has them. Census:
+  `nifx lights: live: ...`, `nifx lights: no .nifx left`.
+- **Dimmers play:** with the World animation row on, a `.nifx` light that follows a `NiLight` (or an edited `NiLight`)
+  follows the mesh's looping `NiLightDimmerController` keys each frame, timed as NifSkope plays controllers. Only the
+  changed lights' rows of the light buffer are patched. The game's own dimmer timing is unknown. The GI keeps the
+  still-view dimmer (no per-frame relight).
+- **Bulbs flicker:** a bulb that took over a flickering placed light flickers with it (the placed light's own rule).
+- **Dark bulbs live:** a bulb that took a start-off placed light stays dark after a live edit, as on a fresh open.
+- Off = NIFXLIGHT2 exactly: tests/nifxapply's dumps on NIFXLIGHT1's and NIFXLIGHT2's fixtures are byte-identical.
+- Reds (`WW_NIFX_LIGHTS_RED`, added): `staticdim`, `nobulbflicker`, `nolivenew`, `nooffkept` (each fails tests/nifxapply).
+- Cost (estimate, not measured): the dimmer patch is one 20-float buffer write per changed light per frame, well under
+  0.01 ms at 1080p; the folder scan about 1.5 ms of CPU every 500 ms. Hold rows measure both.
+
+## Lane NIFXLIGHT2 (2026-10-26, branch nifxlight2-20261026): mesh lights follow dimmers, scale, bulbs light GI + fog
+
+- **Dimmers still bind:** the cell build reads each `NiLight`'s dimmer as the lamp is placed (on): the last key of the
+  mesh's `On` sequence for that light (`NiLightDimmerController`), else the `NiLight`'s `Dimmer`. A `.nifx` light that
+  `follows` a `NiLight`, and a `NiLight` edited in place, are multiplied by it; an unbound `follows` stays full. The
+  census adds `nifx lights: <mesh>: N lights scaled by a NiLight dimmer, M dimmer sequences bound` when either is non-zero.
+- **Placed scale:** a fixture placed at scale s gives its `.nifx` lights s x the converted radius (clamped 16..16384).
+- **Bulb tier wired:** bulb lights are never drawn on surfaces; they go into the light buffer after the lights (index
+  `cellBulbBase + j`, `cellBulbCount`) and cell_volair.frag walks them after the cluster or surface list (fog glow,
+  their own `fog.scale`), and the GI relight adds them as lights (the bounce). A bulb that took over a start-off placed
+  light is dark (`nifx lights: N bulb-tier lights dark (took a start-off light)`).
+- **Live GI:** every Mesh lights publish (row on, a `.nifx` edited, row off) bumps a stamp; src/probesky.cpp relights the
+  kept bake at once, as the light rows do (no rebake), and prints `nifx lights: GI relit (publish N)`.
+- Off = NIFXLIGHT1 exactly: no bulbs, scale 1 and dimmer 1 give the old numbers (tests/nifxapply's dump on NIFXLIGHT1's
+  fixtures is byte-identical). With no bulbs the air loops run as before (count 0).
+- Reds (`WW_NIFX_LIGHTS_RED`, added): `noscale`, `nofollow`, `bulbsurface`, `bulblit`, `nobulbgi` (tests/nifxapply, each
+  fails), `norelight` (hold rows only).
+- Cost (estimate, not measured): about 0.01-0.02 ms per bulb at 1080p (walked by every froxel, no culling); one GI
+  relight per publish (not per frame). Normal and hero tiers as NIFXLIGHT1.
+- Left as rows: per-frame dimmer animation (the cell view plays none), bulb flicker, a live switch for a dark bulb, a
+  `.nifx` created after the cell is built (seen on reopen).
+
+## Lane NIFXLIGHT1 (2026-10-26, branch nifxlight1-20261026): real lights from a lamp mesh's .nifx (with FOGSCALE2)
+
+- **Mesh lights (.nifx)** (Show menu row, key `WW/CellNifxLights`, pin `WW_CELL_NIFX_LIGHTS`; ships OFF, live): a lamp or
+  fixture mesh's `.nifx` `lights` section (FO4-Extension-Formats nifx/SPEC.md "lights", proposed key names on spec branch
+  nifxlights1-20261026) gives the cell real lights. Lumens, kelvin and tint become FO4's colour bytes, fade and radius
+  (the spec's 7 steps); a tint never dims. Tier `hero` takes a shadow slot (spot, hemisphere or omni cube), `normal` has
+  no shadow, `bulb` is kept apart (GI and fog only; not wired yet, never drawn on surfaces).
+- **Placed lights inside a fixture:** a placed light within 64 units of a fixture's `.nifx` light is switched off; the
+  nearest `.nifx` light takes over its flicker or pulse, its start-off state and its `.recx` keys. A `node` that names a
+  `NiLight` edits that light in place (same frame); `follows` ships the On state only.
+- **Live:** the cell remembers its fixtures at build. With the row on, each fixture's `.nifx` is re-read when its size or
+  time changes (500 ms at most) and applied to a copy of the built lights; off restores them. A census line per mesh goes
+  to stderr (`nifx lights: <mesh>: placed N, ok; ...`); `WW_NIFX_LIGHTS_DUMP=<file>` writes it with every made light.
+  `WW_NIFX_ROOT=<folder>` (read at cell build) looks for test `.nifx` files there before the data folder.
+- **FOGSCALE2:** a light's `fog.scale` now has the `.nifx` rung: the placed lamp's `.recx` reference, then the `.nifx`
+  light, then the light record's `.recx`, then 1 (air only). The `cell fogscale:` echo adds ` .nifx light N` only when
+  a `.nifx` light exists, so it reads as before without one.
+- Off = the base exactly: with the row off the published lights are the built ones; with no `.nifx` in reach nothing
+  is kept or applied (the build only checks one file per unique model). No shader change.
+- Reds (`WW_NIFX_LIGHTS_RED`, comma list): `ignore`, `tintdims`, `keepplaced`, `precedence`; each fails its gate.
+- Gates: tests/nifxconform (the spec's cases + conversion known answers), tests/nifxapply (two vanilla fixture meshes'
+  node frames from `nifskope-cli world`, test `.nifx` files kept out of the repo: 24 checks, the four reds fail).
+
 ## Lane CLOUD3 (2026-10-26, branch cloud3-20261026): cloud shadows, light shafts, GI shade
 
 - **Row Render > Scene > Cloud Shadows** (Off / Low / Medium / High / Ultra), ships Off, sets live. Pin `WW_CLOUDSHADOW`

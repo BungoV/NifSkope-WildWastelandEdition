@@ -262,6 +262,7 @@ HEADERS += \
 	src/gl/cellssgi.h \
 	src/gl/celllampshadow.h \
 	src/gl/celllooks.h \
+	src/gl/cellnifxlights.h \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
 	src/gl/cellpasstime.h \
@@ -279,6 +280,7 @@ HEADERS += \
 	src/io/pbrmfile.h \
 	src/io/pbrmresolve.h \
 	src/io/nifxfile.h \
+	src/io/nifxlights.h \
 	src/io/lodmfile.h \
 	src/io/lodvfile.h \
 	src/io/loddecal.h \
@@ -550,6 +552,7 @@ SOURCES += \
 	src/gl/cellssgi.cpp \
 	src/gl/celllampshadow.cpp \
 	src/gl/celllooks.cpp \
+	src/gl/cellnifxlights.cpp \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \
 	src/gl/cellpasstime.cpp \
@@ -561,6 +564,7 @@ SOURCES += \
 	src/io/pbrmfile.cpp \
 	src/io/pbrmresolve.cpp \
 	src/io/nifxfile.cpp \
+	src/io/nifxlights.cpp \
 	src/io/lodmfile.cpp \
 	src/io/lodvfile.cpp \
 	src/io/loddecal.cpp \

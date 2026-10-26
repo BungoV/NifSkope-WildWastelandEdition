@@ -48,6 +48,7 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <cmath>
+#include <memory>
 #include <string_view>
 #include <vector>
 
@@ -76,6 +77,18 @@ bool wwCellDecalLitRed();
 //! lane DECALLIT1: WW_CELL_DECALLIT_PROBE=1 (gates only): the probe passes draw the effect decals, white and opaque
 //! where they show, so probe 6 holds the light they take
 bool wwCellDecalLitProbe();
+
+/* lane NIFXLIGHT3: a NiLight's dimmer over time (its NiLightDimmerController's float keys), timed as NifSkope times
+ * every controller the World animation row plays (glcontroller.cpp ctrlTime: frequency x T + phase, then the cycle) */
+struct WwNifxDimTrack
+{
+	std::vector<float> t, v, fwd, bwd;	//!< key times and values; quadratic keys' Forward and Backward
+	int interp = 1;						//!< 1 linear, 2 quadratic, 5 constant (any other reads linear)
+	float start = 0.0f, stop = 0.0f, frequency = 1.0f, phase = 0.0f;
+	int cycle = 0;						//!< flags (f & 6) >> 1: 0 loop, 1 reverse, 2 clamp
+	bool scaled = true, backwards = false;	//!< flags 0x40 (frequency, phase and cycle apply) and 0x10
+	QString sequence;					//!< the looping sequence that plays it (empty: the NiLight's own controller)
+};
 
 struct WwCellLight
 {
@@ -112,6 +125,45 @@ struct WwCellLight
 	//! lane LIGHTS5 (FOGSCALE1): the .recx keys of fog.scale: the LIGH (plugin file, local id, EditorID) and the placed ref
 	QString recxBasePlugin, recxBaseEdid, recxRefPlugin;
 	quint32 recxBaseLocal = 0, recxRefLocal = 0;
+	//! lane NIFXLIGHT1: a mesh's .nifx light (0 hero, 1 normal, 2 bulb; -1 a placed LIGH) and its fog.scale (-1 none)
+	int tier = -1;
+	float nifxFog = -1.0f;
+	QString nifxName;
+	//! lane NIFXLIGHT3: the NiLight dimmer the light follows over time (null: steady) and the dimmer its colour holds
+	std::shared_ptr<const WwNifxDimTrack> nifxDim;
+	float nifxDimRest = 1.0f;
+};
+
+/* lane NIFXLIGHT1: a model whose .nifx sidecar exists, with its named nodes' frames in the model's root space
+ * (columns 0-2 the rotation x scale, column 3 the translation; the root's own transform is the placement's) */
+struct WwNifxNode
+{
+	QString name;
+	float m[3][4] = { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 } };
+	bool niLight = false;
+	//! lane NIFXLIGHT2: a NiLight's dimmer in the state drawn (the On sequence's last dimmer key, else its Dimmer)
+	//! and the NiControllerSequences whose dimmer blocks name it
+	float dimmer = 1.0f;
+	int sequences = 0;
+	std::shared_ptr<const WwNifxDimTrack> track;	//!< lane NIFXLIGHT3: the dimmer over time (null: none plays)
+};
+struct WwNifxModel
+{
+	QString model, sidecar;	//!< the Data path, the .nifx file found (WW_NIFX_ROOT, then the data root)
+	QVector<WwNifxNode> nodes;
+};
+//! one placed fixture: the placement in world space (P = pos + rot (scale p)) and its reference's .recx key
+struct WwNifxFixture
+{
+	std::shared_ptr<const WwNifxModel> model;
+	float pos[3] = { 0, 0, 0 };
+	float rot[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+	float scale = 1.0f;
+	quint32 ref = 0;
+	QString refPlugin;
+	quint32 refLocal = 0;
+	//! lane NIFXLIGHT3: every placed model is kept (model null: no .nifx yet), so one made later is found live
+	QString modelPath, dataRoot;
 };
 
 //! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
@@ -182,12 +234,19 @@ struct WwCellLighting
 	QString godRayNote = QStringLiteral( "fallback" );
 	QStringList recxPlugins;			//!< lane LIGHTS5 (FOGSCALE1): the load order's files (recx.h roots and merge order)
 	QString recxData;					//!< the game's Data folder
+	//! lane NIFXLIGHT1: the fixtures with a .nifx (src/gl/cellnifxlights.cpp applies them while Mesh lights is on),
+	//! the start-off placed lights the list above skipped (their state carries over), and the bulb-tier lights
+	QVector<WwNifxFixture> nifxFixtures;
+	QVector<WwCellLight> nifxOffPlaced, nifxBulbs;
+	QVector<WwCellLight> nifxOffBulbs;	//!< lane NIFXLIGHT3: bulb-tier lights dark with the start-off light they took
 	QString summary;                    //!< one census line
 };
 
 //! the cell view publishes the lighting of the document it just built (replacing that document's last)
 void wwCellLightsPublish( const void * nif, const WwCellLighting & lighting );
 const WwCellLighting * wwCellLightsFor( const void * nif );
+//! lane NIFXLIGHT2: moves on each Mesh lights (.nifx) publish for the document (0: the lights as built)
+int wwCellLightsNifxStamp( const void * nif );
 
 /*! THE BOUNCE (lane PRTPGI, src/probegi.h): the bake relit by these lights, as a voxel grid of
  *  probe ambient cubes. Six slabs (+X -X +Y -Y +Z -Z) of dims[2] each, x fastest, (rgb x valid,

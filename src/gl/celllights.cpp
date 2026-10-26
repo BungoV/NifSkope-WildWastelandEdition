@@ -31,9 +31,13 @@ BSD License - see nifskope.h
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
 #include "probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
 #include "recx.h"	// lane LIGHTS5 (FOGSCALE1): fog.scale
+#include "gl/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
+#include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
 
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QHash>
 #include <QSettings>
 
@@ -93,6 +97,17 @@ struct ClBloom
 	int lit = 0;            // texels the bright pass passed (the echo)
 };
 
+//! lane NIFXLIGHT1: a document with .nifx fixtures: its lights as built, and whether the shown copy has them applied
+struct ClNifx
+{
+	WwCellLighting base;
+	bool applied = false;
+	QByteArray key;
+	QElapsedTimer clock;
+	WwNifxLive live;	// lane NIFXLIGHT3: the folders a placed model's .nifx would sit in, looked at in turn
+	bool liveInit = false, ticked = false;
+};
+
 struct ClState
 {
 	bool loaded = false;
@@ -102,6 +117,9 @@ struct ClState
 	int probe = 0;
 	int red = 0;            // bit 1 linear, 2 axis, 4 nodalc
 	QHash<const void *, WwCellLighting> docs;
+	QHash<const void *, ClNifx> nifx;	// lane NIFXLIGHT1
+	QHash<const void *, int> nifxStamp;	// lane NIFXLIGHT2: moves on each Mesh lights publish (none: as built)
+	int nextNifxStamp = 1;
 	QHash<const void *, int> version;
 	int nextVersion = 1;
 	bool giOn = false, giPinned = false;
@@ -266,6 +284,7 @@ struct Gpu
 	int bufGobo = -1;	// lane LIGHTS5 (GOBO1): the Light patterns row the buffer was built with
 	bool goboAny = false;
 	int goboTbl = 0;	// lane GOBO2: the texel of the per-light table of omni/box pattern records (0 none)
+	int bulbBase = 0, bulbs = 0;	// lane NIFXLIGHT2: the bulb-tier lights' first index (after the lights) and count
 	// lane LIGHTS5 (FOGSCALE1): each light's fog.scale (empty = every light 1), re-read at most every half second
 	std::vector<float> fogVals;
 	quint64 fogStamp = 0, bufFogStamp = 0, fogRecxGen = ~0ULL, fogSwitchGen = ~0ULL;
@@ -343,6 +362,7 @@ struct Gpu
 	std::vector<float> flickBase, flickLive;
 	std::uint64_t flickStamp = 0;
 	bool flickOn = false;
+	bool dimOn = false;	// lane NIFXLIGHT3: .nifx lights follow their dimmer on the world clock (the bulbs patched too)
 	Gpu()
 	{
 		std::fill( shSlot, shSlot + kShadowSlots, -1 );
@@ -463,6 +483,22 @@ void wwCellLightsPublish( const void * nif, const WwCellLighting & lighting )
 	ClState & s = st();
 	s.docs.insert( nif, lighting );
 	s.version.insert( nif, s.nextVersion++ );
+	s.nifxStamp.remove( nif );	// lane NIFXLIGHT2
+	if ( lighting.nifxFixtures.isEmpty() ) {	// lane NIFXLIGHT1: the tick applies the fixtures to a copy
+		s.nifx.remove( nif );
+	} else {
+		ClNifx & x = s.nifx[nif];
+		x.base = lighting;
+		x.applied = false;
+		x.key.clear();
+		x.liveInit = false;	// lane NIFXLIGHT3: the tick lines the new fixtures up with what it has seen
+		x.ticked = false;
+	}
+}
+
+int wwCellLightsNifxStamp( const void * nif )
+{
+	return st().nifxStamp.value( nif, 0 );
 }
 
 const WwCellLighting * wwCellLightsFor( const void * nif )
@@ -569,8 +605,10 @@ struct FlickPhase
 struct FlickDoc
 {
 	int version = -1;
-	std::vector<int> idx;			// the flickering lights
-	std::vector<float> val;			// 4 a light (dimmer, world offset), all lights
+	int mode = 0;					// lane NIFXLIGHT3: 1 flicker, 2 dimmer tracks, 4 the bulbs flicker too
+	int flickN = 0, dimN = 0;
+	std::vector<int> idx;			// the flickering lights (NIFXLIGHT3: and dimming ones; lights + j = bulb j)
+	std::vector<float> val;			// 4 a light (dimmer, world offset), all lights then the bulbs
 	QHash<quint32, FlickPhase> phase;	// by ref, so a streamed republish keeps each light's phase
 	std::uint64_t stamp = 1;
 	int moving = 0;
@@ -605,6 +643,14 @@ bool flickLive( Scene * scene )
 	const ClState & s = st();
 	return s.flickerOn && !s.flickerRed && wwCellLightsWanted( scene );
 }
+//! lane NIFXLIGHT3: what a frame changes: 1 flicker, 2 the .nifx dimmer tracks (World animation row), 4 bulbs flicker
+int frameMode( Scene * scene )
+{
+	const int red = wwNifxLightsRed();
+	const bool fl = flickLive( scene );
+	const bool dl = wwLookOn( WwLook::NifxLights ) && wwCellWorldAnimOn() && !( red & WwNifxRedStaticDim ) && wwCellLightsWanted( scene );
+	return ( fl ? 1 : 0 ) | ( dl ? 2 : 0 ) | ( fl && !( red & WwNifxRedNoBulbFlicker ) ? 4 : 0 );
+}
 }	// namespace
 
 bool wwCellFlickerOn()
@@ -628,34 +674,52 @@ void wwCellFlickerFrame( Scene * scene )
 	const Clock::time_point now = Clock::now();
 	float dt = std::clamp( std::chrono::duration<float>( now - last ).count(), 0.0f, 0.25f );
 	last = now;
-	if ( !flickLive( scene ) )
+	const int mode = frameMode( scene );
+	if ( !mode ) {
+		const auto was = flickDocs().find( scene->nifModel );
+		if ( was != flickDocs().end() ) {
+			was->mode = 0;	// lane NIFXLIGHT3: nothing live; the next live frame lists the lights again
+			was->version = -1;
+		}
 		return;
+	}
 	const ClState & s = st();
 	if ( s.flickerStep > 0.0f )
 		dt = s.flickerStep;
 	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
 	FlickDoc & d = flickDocs()[scene->nifModel];
 	const int ver = s.version.value( scene->nifModel );
-	if ( d.version != ver ) {
+	const qsizetype nLit = L->lights.size();
+	if ( d.version != ver || d.mode != mode ) {
 		d.version = ver;
-		d.idx.clear();
+		d.mode = mode;
+		d.idx = wwNifxFrameList( *L, mode & 1, mode & 4, mode & 2, &d.flickN, &d.dimN );
 		d.moving = 0;
-		for ( qsizetype i = 0; i < L->lights.size(); i++ )
-			if ( L->lights.at( i ).flicker ) {
-				d.idx.push_back( int( i ) );
+		for ( const int i : d.idx )
+			if ( i < nLit && ( mode & 1 ) && L->lights.at( i ).flicker )
 				d.moving += L->lights.at( i ).flickerMovement != 0.0f && !L->lights.at( i ).shadow ? 1 : 0;
-			}
-		d.val.assign( size_t( L->lights.size() ) * 4, 0.0f );
+		d.val.assign( size_t( nLit + L->nifxBulbs.size() ) * 4, 0.0f );
 		for ( size_t i = 0; i < d.val.size(); i += 4 )
 			d.val[i] = 1.0f;
 	}
 	if ( d.idx.empty() )
 		return;
+	const double worldT = ( mode & 2 ) ? wwCellWorldSeconds() : 0.0;
 	constexpr float kTwoPi = 6.2831855f;
 	QFile dump( s.flickerDump );
 	const bool dumping = !s.flickerDump.isEmpty() && dump.open( QIODevice::Append | QIODevice::Text );
 	for ( int i : d.idx ) {
-		const WwCellLight & l = L->lights.at( i );
+		const WwCellLight & l = i < nLit ? L->lights.at( i ) : L->nifxBulbs.at( i - nLit );
+		float * out = d.val.data() + size_t( i ) * 4;
+		// lane NIFXLIGHT3: a bulb flickers like the placed light it took over (its fields came with the carrier)
+		if ( !( ( mode & 1 ) && l.flicker && ( i < nLit || ( mode & 4 ) ) ) ) {
+			out[0] = ( mode & 2 ) ? wwNifxDimFactor( l, worldT ) : 1.0f;
+			out[1] = out[2] = out[3] = 0.0f;
+			if ( dumping )
+				dump.write( QStringLiteral( "%1 dim %2 %3 %4 %5\n" ).arg( d.frames ).arg( worldT, 0, 'f', 4 ).arg( i )
+					.arg( l.ref, 8, 16, QLatin1Char( '0' ) ).arg( double( out[0] ), 0, 'f', 6 ).toLatin1() );
+			continue;
+		}
 		FlickPhase & ph = d.phase[l.ref];
 		if ( !ph.rng )
 			ph.rng = 0x9E3779B9u ^ ( l.ref * 2654435761u ) ^ quint32( i + 1 );
@@ -690,8 +754,7 @@ void wwCellFlickerFrame( Scene * scene )
 			local[1] = m * n;
 			local[2] = m * n * c;
 		}
-		float * out = d.val.data() + size_t( i ) * 4;
-		out[0] = 1.0f - A + A * v;
+		out[0] = ( 1.0f - A + A * v ) * ( ( mode & 2 ) ? wwNifxDimFactor( l, worldT ) : 1.0f );
 		// a shadow-casting light keeps its place: its depth cube is drawn from there, not redrawn each frame
 		for ( int k = 0; k < 3; k++ )
 			out[1 + k] = l.shadow ? 0.0f
@@ -707,11 +770,15 @@ void wwCellFlickerFrame( Scene * scene )
 
 bool wwCellFlickerWantsFrames( Scene * scene )
 {
-	if ( !flickLive( scene ) )
+	const int mode = frameMode( scene );
+	if ( !mode )
 		return false;
 	const auto it = flickDocs().constFind( scene->nifModel );
 	// before the first frame has listed them: ask once, the frame lists them
-	return it == flickDocs().constEnd() || it->version != st().version.value( scene->nifModel ) || !it->idx.empty();
+	if ( it == flickDocs().constEnd() || it->version != st().version.value( scene->nifModel ) || it->mode != mode )
+		return true;
+	// lane NIFXLIGHT3: a dimmer track moves only while the world clock does
+	return ( ( mode & 1 ) && it->flickN ) || ( ( mode & 2 ) && it->dimN && wwCellWorldAnimWantsFrames( scene ) );
 }
 
 bool wwCellFlickerOf( const void * nif, qsizetype i, float * dimmer, float offset[3] )
@@ -719,10 +786,9 @@ bool wwCellFlickerOf( const void * nif, qsizetype i, float * dimmer, float offse
 	*dimmer = 1.0f;
 	offset[0] = offset[1] = offset[2] = 0.0f;
 	const ClState & s = st();
-	if ( !s.flickerOn || s.flickerRed )
-		return false;
 	const auto it = flickDocs().constFind( nif );
-	if ( it == flickDocs().constEnd() || it->version != s.version.value( nif ) || i < 0 || size_t( i ) * 4 + 4 > it->val.size() )
+	// lane NIFXLIGHT3: the frame's values whenever a frame wrote them (the flicker, or a .nifx light's dimmer)
+	if ( it == flickDocs().constEnd() || !it->mode || it->version != s.version.value( nif ) || i < 0 || size_t( i ) * 4 + 4 > it->val.size() )
 		return false;
 	const float * v = it->val.data() + size_t( i ) * 4;
 	*dimmer = v[0];
@@ -1054,8 +1120,8 @@ static const GoboPat & goboPattern( const QString & dataRoot, const QString & pa
 	return cache.emplace( key, std::move( p ) ).first->second;
 }
 
-/* lane LIGHTS5 (FOGSCALE1): each light's fog.scale (.recx category Lights, block fog): a placed lamp's `reference` claim
- * wins over its LIGH's `light` claim, else 1 (the .nifx light rung waits for a .nifx lights reader). Pin WW_CELL_FOGSCALE:
+/* lane LIGHTS5 (FOGSCALE1): each light's fog.scale (.recx category Lights, block fog): a placed lamp's `reference` claim,
+ * then (NIFXLIGHT1) a .nifx light's own fog.scale, then its LIGH's `light` claim, else 1. Pin WW_CELL_FOGSCALE:
  * off = the files ignored, a number = that scale on every light. Re-read when the files or the document move. */
 static void fogScaleTick( Gpu & g, const void * doc, int version, const WwCellLighting & L )
 {
@@ -1073,14 +1139,17 @@ static void fogScaleTick( Gpu & g, const void * doc, int version, const WwCellLi
 	g.fogVersion = version;
 	g.fogSwitchGen = wwSwitchGen();
 	g.fogRecxGen = gen;
-	const qsizetype n = L.lights.size();
+	const qsizetype nLit = L.lights.size(), n = nLit + L.nifxBulbs.size();	// lane NIFXLIGHT2: then the bulbs
 	std::vector<float> v;
-	int placed = 0, record = 0;
+	int placed = 0, record = 0, mesh = 0;
 	bool ok = false;
 	const float forced = pin == "off" ? 1.0f : pin.toFloat( &ok );
+	const bool nifx = !L.nifxBulbs.isEmpty()
+		|| std::any_of( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.tier >= 0; } );
+	WW_SWITCH_STATIC( bool, redOrder, ( wwNifxRedOf( wwEnv( "WW_NIFX_LIGHTS_RED" ) ) & WwNifxRedPrecedence ) != 0 );
 	if ( ok ) {
 		v.assign( size_t( n ), std::clamp( forced, 0.0f, 8.0f ) );
-	} else if ( pin.isEmpty() && files > 0 ) {
+	} else if ( pin.isEmpty() && ( files > 0 || nifx ) ) {
 		v.assign( size_t( n ), 1.0f );
 		auto scaleOf = []( const WwRecxHit & h, float & s ) {
 			if ( !h.ok || !h.block.value( QStringLiteral( "scale" ) ).isDouble() )
@@ -1089,26 +1158,39 @@ static void fogScaleTick( Gpu & g, const void * doc, int version, const WwCellLi
 			return true;
 		};
 		for ( qsizetype i = 0; i < n; i++ ) {
-			const WwCellLight & l = L.lights.at( i );
+			const WwCellLight & l = i < nLit ? L.lights.at( i ) : L.nifxBulbs.at( i - nLit );
 			float s = 1.0f;
-			if ( !l.recxRefPlugin.isEmpty() && scaleOf( wwRecxFind( roots, L.recxPlugins, QStringLiteral( "Lights" ),
-				QStringLiteral( "reference" ), l.recxRefPlugin, l.recxRefLocal, QString(), QStringLiteral( "fog" ) ), s ) ) {
+			const bool own = l.tier >= 0 && l.nifxFog >= 0.0f;
+			auto recordClaim = [&] {
+				return files > 0 && ( l.tier < 0 || !l.recxBasePlugin.isEmpty() || !l.recxBaseEdid.isEmpty() ) && scaleOf( wwRecxFind( roots,
+					L.recxPlugins, QStringLiteral( "Lights" ), QStringLiteral( "light" ), l.recxBasePlugin, l.recxBaseLocal,
+					l.recxBaseEdid, QStringLiteral( "fog" ) ), s );
+			};
+			const int rung = wwNifxFogRung( [&] {
+				return files > 0 && !l.recxRefPlugin.isEmpty() && scaleOf( wwRecxFind( roots, L.recxPlugins, QStringLiteral( "Lights" ),
+					QStringLiteral( "reference" ), l.recxRefPlugin, l.recxRefLocal, QString(), QStringLiteral( "fog" ) ), s );
+			}, own, recordClaim, redOrder );
+			if ( rung == WwNifxFogRef ) {
 				v[size_t( i )] = s;
 				placed++;
-			} else if ( scaleOf( wwRecxFind( roots, L.recxPlugins, QStringLiteral( "Lights" ), QStringLiteral( "light" ),
-				l.recxBasePlugin, l.recxBaseLocal, l.recxBaseEdid, QStringLiteral( "fog" ) ), s ) ) {
+			} else if ( rung == WwNifxFogMesh ) {
+				v[size_t( i )] = std::clamp( l.nifxFog, 0.0f, 8.0f );
+				mesh++;
+			} else if ( rung == WwNifxFogRecord ) {
 				v[size_t( i )] = s;
 				record++;
 			}
 		}
-		if ( placed + record == 0 )
+		if ( placed + record + mesh == 0 )
 			v.clear();
 	}
 	const QByteArray echo = QStringLiteral( "cell fogscale: %1 lights, %2 (placed lamp %3, light record %4, recx Lights files %5)" )
 		.arg( n ).arg( ok ? QStringLiteral( "pinned %1" ).arg( double( v.empty() ? 1.0f : v[0] ) )
 			: pin == "off" ? QStringLiteral( "files ignored (pin off)" ) : v.empty() ? QStringLiteral( "every light 1" )
-			: QStringLiteral( "%1 scaled" ).arg( placed + record ) )
-		.arg( placed ).arg( record ).arg( files ).toUtf8();
+			: QStringLiteral( "%1 scaled" ).arg( placed + record + mesh ) )
+		.arg( placed ).arg( record ).arg( files ).toUtf8()
+		+ ( nifx ? QStringLiteral( " .nifx light %1%2" ).arg( mesh ).arg( redOrder ? QStringLiteral( " (red precedence)" )
+			: QString() ).toUtf8() : QByteArray() );
 	static QByteArray said;
 	if ( echo != said ) {
 		said = echo;
@@ -1118,6 +1200,101 @@ static void fogScaleTick( Gpu & g, const void * doc, int version, const WwCellLi
 		g.fogVals = std::move( v );
 		g.fogStamp++;
 	}
+}
+
+int wwNifxLightsRed()
+{
+	WW_SWITCH_STATIC( int, red, wwNifxRedOf( wwEnv( "WW_NIFX_LIGHTS_RED" ) ) );
+	return red;
+}
+
+/* lane NIFXLIGHT1: Mesh lights (.nifx), pin WW_CELL_NIFX_LIGHTS. Off: the document shows its lights as built. On: each
+ * fixture's .nifx is read again when its size or time moves (every 500 ms at most) and applied to a copy of them. */
+static void nifxTick( const void * nif )
+{
+	ClState & s = st();
+	auto it = s.nifx.find( nif );
+	if ( it == s.nifx.end() )
+		return;
+	ClNifx & x = *it;
+	if ( !wwLookOn( WwLook::NifxLights ) ) {
+		if ( x.applied ) {
+			x.applied = false;
+			x.key.clear();
+			s.docs.insert( nif, x.base );
+			s.version.insert( nif, s.nextVersion++ );
+			s.nifxStamp.remove( nif );	// lane NIFXLIGHT2: the GI relights to the lights as built
+			std::fprintf( stderr, "nifx lights: off, %lld lights as built\n", qint64( x.base.lights.size() ) );
+		}
+		x.ticked = false;
+		return;
+	}
+	if ( x.ticked && x.clock.isValid() && x.clock.elapsed() < 500 )
+		return;
+	x.clock.start();
+	x.ticked = true;
+	const int red = wwNifxLightsRed();
+	/* lane NIFXLIGHT3: a .nifx made, moved or removed after the build is seen here, no reopen: the folders the placed
+	 * models' .nifx would sit in are looked at in turn (about 1.5 ms a tick; every folder when WW_NIFX_ROOT moves) */
+	if ( !x.liveInit ) {
+		wwNifxLiveInit( x.live, x.base.nifxFixtures );
+		x.liveInit = true;
+	}
+	if ( !( red & WwNifxRedNoLiveNew ) ) {
+		const qint64 found = x.live.found, lost = x.live.lost;
+		const int moved = wwNifxLiveScan( x.live, x.base.nifxFixtures, { wwEnvStr( "WW_NIFX_ROOT" ), x.live.dataRoot }, 1.5,
+			wwCellNifxModelLoad );
+		if ( moved )
+			std::fprintf( stderr, "nifx lights: live: %d models' .nifx changed (%lld found, %lld gone), %lld folders, %lld looks\n",
+				moved, x.live.found - found, x.live.lost - lost, qint64( x.live.dirs.size() ), x.live.looks );
+	}
+	QStringList files;
+	for ( const WwNifxFixture & f : x.base.nifxFixtures )
+		if ( f.model && !files.contains( f.model->sidecar ) )
+			files << f.model->sidecar;
+	if ( files.isEmpty() ) {	// lane NIFXLIGHT3: no .nifx (yet): the lights as built, and no GI relight for nothing
+		if ( x.applied ) {
+			x.applied = false;
+			s.docs.insert( nif, x.base );
+			s.version.insert( nif, s.nextVersion++ );
+			s.nifxStamp.insert( nif, s.nextNifxStamp++ );
+			std::fprintf( stderr, "nifx lights: no .nifx left, %lld lights as built\n", qint64( x.base.lights.size() ) );
+		}
+		x.key.clear();
+		return;
+	}
+	QByteArray key = QByteArray::number( red );
+	for ( const QString & p : files ) {
+		const QFileInfo fi( p );
+		key += '|' + p.toUtf8() + ':' + QByteArray::number( fi.exists() ? fi.size() : -1 ) + ':'
+			+ QByteArray::number( fi.exists() ? fi.lastModified().toMSecsSinceEpoch() : 0 );
+	}
+	if ( x.applied && key == x.key )
+		return;
+	QHash<QString, nifxl::Lights> docs;
+	for ( const QString & p : files ) {
+		QFile f( p );
+		if ( !f.open( QIODevice::ReadOnly ) )
+			continue;
+		const QByteArray b = f.read( qint64( nifxl::kMaxBytes ) + 1 );
+		docs.insert( p, nifxl::read( std::string( b.constData(), size_t( b.size() ) ) ) );
+	}
+	WwCellLighting L = x.base;
+	QStringList census;
+	wwNifxLightsApply( L, docs, red, &census );
+	for ( const QString & c : census )
+		std::fprintf( stderr, "%s\n", c.toUtf8().constData() );
+	const QString dump = wwEnvStr( "WW_NIFX_LIGHTS_DUMP" );
+	if ( !dump.isEmpty() ) {
+		QFile o( dump );
+		if ( o.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+			o.write( ( census.join( QLatin1Char( '\n' ) ) + QLatin1Char( '\n' ) + wwNifxLightsDump( L ) ).toUtf8() );
+	}
+	x.applied = true;
+	x.key = key;
+	s.docs.insert( nif, L );
+	s.version.insert( nif, s.nextVersion++ );
+	s.nifxStamp.insert( nif, s.nextNifxStamp++ );	// lane NIFXLIGHT2: src/probesky.cpp relights the GI
 }
 
 void wwCellLightsUniforms( Scene * scene )
@@ -1134,14 +1311,18 @@ void wwCellLightsUniforms( Scene * scene )
 	auto fn = r->fn;
 	ClState & s = st();
 	Gpu & g = gpus()[r];
+	if ( on && !s.nifx.isEmpty() )
+		nifxTick( scene->nifModel );	// lane NIFXLIGHT1
 	const WwCellLighting * L = on ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	const bool flick = L && s.flickerOn && !s.flickerRed;	// lane LIGHTFLICKER1
+	// lane NIFXLIGHT3: the .nifx dimmer tracks play on the world clock (the buffer keeps a copy to patch, as for flicker)
+	const bool dimAnim = L && wwLookOn( WwLook::NifxLights ) && wwCellWorldAnimOn() && !( wwNifxLightsRed() & WwNifxRedStaticDim );
 	const wwlp::Params phys = wwLightPhysParams();	// lane LIGHTPHYS1
 	const int goboOn = wwLookOn( WwLook::LightPatterns ) ? 1 : 0;	// lane LIGHTS5 (GOBO1)
 	if ( L )
 		fogScaleTick( g, scene->nifModel, s.version.value( scene->nifModel ), *L );	// lane LIGHTS5 (FOGSCALE1)
 	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp
-	            || g.bufLiveGen != wwSwitchGen() || g.flickOn != flick || g.bufXemiStamp != xemiStampOf( scene->nifModel )
+	            || g.bufLiveGen != wwSwitchGen() || g.flickOn != flick || g.dimOn != dimAnim || g.bufXemiStamp != xemiStampOf( scene->nifModel )
 	            || g.bufCurve != phys.curve || g.bufCurveRed != ( phys.red & 8 )
 	            || g.bufGobo != goboOn || g.bufFogStamp != g.fogStamp ) ) {
 		g.bufLiveGen = wwSwitchGen();
@@ -1202,8 +1383,32 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 		/* lane LIGHTS5: data after the lights (the cluster lists and spheres never read it). GOBO1: each pattern once
 		 * (header w h, mean, rows), a spot's texel 5.w = 1 + its header; FOGSCALE1: the scales, 4 a texel. */
+		/* lane NIFXLIGHT2: the bulb-tier lights (.nifx) sit right after the lights, index cellBulbBase + j: only the air
+		 * walks them (the fog glow), the surfaces stop at cellLightCount. No shadow, no pattern (a 0 in the table). */
+		const size_t nB = size_t( L->nifxBulbs.size() );
+		if ( nB && t.empty() )
+			t.assign( kTexelsPerLight * 4, 0.0f );	// the dummy light first, so the bulbs keep index 1 + j
 		std::vector<float> x;
 		const size_t per = kTexelsPerLight * 4, nL = size_t( L->lights.size() ), lightTexels = t.size() / 4;
+		g.bulbBase = int( t.size() / per );
+		g.bulbs = int( nB );
+		for ( size_t b = 0; b < nB; b++ ) {
+			const WwCellLight & l = L->nifxBulbs.at( qsizetype( b ) );
+			const float shape = l.spot ? l.cosOuter : l.shape == 1 ? -3.0f : -2.0f;
+			float col[3] = { l.color[0], l.color[1], l.color[2] };
+			if ( phys.curve != 1.0f ) {
+				const float ks = wwlp::intensityScale( phys, col );
+				for ( int k = 0; k < 3; k++ )
+					col[k] *= ks;
+			}
+			const float tex[kTexelsPerLight * 4] = {
+				l.pos[0], l.pos[1], l.pos[2], l.radius,
+				col[0], col[1], col[2], shape,
+				l.dir[0], l.dir[1], l.dir[2], l.cone,
+				l.bias, l.scale, l.exponent, 0.0f,
+				-1.0f, 0.0f, l.nearClip, l.shadowBias };
+			x.insert( x.end(), tex, tex + kTexelsPerLight * 4 );
+		}
 		int goboSpots = 0, goboUnread = 0, goboOmni = 0;
 		QHash<QString, int> goboAt;
 		/* lane GOBO2: an omni, hemisphere or box light's pattern: a record of 3 texels (local x + 1 + its header, y, z);
@@ -1250,6 +1455,7 @@ void wwCellLightsUniforms( Scene * scene )
 			g.goboTbl = int( lightTexels + x.size() / 4 );
 			for ( size_t j = 0; j < t.size() / per; j++ )
 				x.push_back( omniRec[j % nL] );
+			x.insert( x.end(), nB, 0.0f );	// lane NIFXLIGHT2: the bulbs have no pattern
 			while ( x.size() % 4 )
 				x.push_back( 0.0f );
 		}
@@ -1268,7 +1474,7 @@ void wwCellLightsUniforms( Scene * scene )
 		// red WW_CELL_FOGSCALE_RED=surfaces: the scale on the light itself, so the surfaces change too
 		WW_SWITCH_STATIC( bool, fogRed, wwEnvStr( "WW_CELL_FOGSCALE_RED" ) == QLatin1String( "surfaces" ) );
 		g.fogBase = -1;
-		if ( nL && g.fogVals.size() == nL ) {
+		if ( nL + nB && g.fogVals.size() == nL + nB ) {
 			if ( fogRed ) {
 				for ( size_t o = 0, j = 0; o + per <= t.size(); o += per, j++ )
 					for ( int k = 4; k < 7; k++ )
@@ -1276,14 +1482,15 @@ void wwCellLightsUniforms( Scene * scene )
 			} else {
 				g.fogBase = int( lightTexels + x.size() / 4 );
 				for ( size_t j = 0; j < t.size() / per; j++ )
-					x.push_back( g.fogVals[j % nL] );
+					x.push_back( nL ? g.fogVals[j % nL] : 1.0f );
+				x.insert( x.end(), g.fogVals.begin() + std::ptrdiff_t( nL ), g.fogVals.end() );	// lane NIFXLIGHT2: the bulbs
 				while ( x.size() % 4 )
 					x.push_back( 1.0f );
 			}
 		}
 		g.bufShStamp = g.shStamp;
 		g.spheres.clear();
-		for ( size_t o = 0; o + 4 <= t.size(); o += kTexelsPerLight * 4 )
+		for ( size_t o = 0; nL && o + 4 <= t.size(); o += kTexelsPerLight * 4 )
 			g.spheres.insert( g.spheres.end(), t.begin() + std::ptrdiff_t( o ), t.begin() + std::ptrdiff_t( o + 4 ) );
 		if ( t.empty() )
 			t.assign( kTexelsPerLight * 4, 0.0f );	// a buffer texture must have a store
@@ -1304,12 +1511,21 @@ void wwCellLightsUniforms( Scene * scene )
 		g.version = s.version.value( scene->nifModel );
 		g.count = int( t.size() / ( kTexelsPerLight * 4 ) ) - ( L->lights.isEmpty() ? 1 : 0 );
 		g.flickOn = flick;
+		g.dimOn = dimAnim;
 		g.flickStamp = 0;
 		g.flickBase.clear();
 		g.flickLive.clear();
-		if ( flick && !L->lights.isEmpty() ) {
+		bool tracks = false;	// lane NIFXLIGHT3: a dimmer track or a flickering bulb needs the patch copy too
+		for ( const QVector<WwCellLight> * v : { &L->lights, &L->nifxBulbs } )
+			for ( const WwCellLight & l : *v )
+				tracks |= ( dimAnim && l.nifxDim ) || ( flick && v == &L->nifxBulbs && l.flicker );
+		if ( ( flick && !L->lights.isEmpty() ) || tracks ) {
 			g.flickBase = t;
-			g.flickLive = t;
+			// lane NIFXLIGHT3: the bulb-tier lights follow the lights in the buffer (x starts with them)
+			g.flickBase.insert( g.flickBase.end(), x.begin(), x.begin() + std::ptrdiff_t( std::min( x.size(), nB * per ) ) );
+			g.flickLive = g.flickBase;
+		}
+		if ( flick && !L->lights.isEmpty() ) {
 			// lane LIGHTFLICKER1: the cluster lists see a moving light's whole reach (|offset| <= 0.87 Movement x scale)
 			const size_t per = kTexelsPerLight * 4, n = size_t( L->lights.size() );
 			for ( size_t j = 0; j * per < t.size(); j++ ) {
@@ -1328,28 +1544,38 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	/* lane LIGHTFLICKER1: this frame's flicker (wwCellFlickerFrame) patched into the buffer once, as the range of the
 	 * flickering lights: the surfaces, the effects and the air read the same texels */
-	if ( L && g.flickOn && g.doc == scene->nifModel && !g.flickBase.empty() ) {
+	if ( L && ( g.flickOn || g.dimOn ) && g.doc == scene->nifModel && !g.flickBase.empty() ) {
 		const auto fd = flickDocs().constFind( scene->nifModel );
-		if ( fd != flickDocs().constEnd() && fd->version == g.version && fd->stamp != g.flickStamp && !fd->idx.empty() ) {
+		if ( fd != flickDocs().constEnd() && fd->mode && fd->version == g.version && fd->stamp != g.flickStamp && !fd->idx.empty() ) {
 			g.flickStamp = fd->stamp;
 			const size_t per = kTexelsPerLight * 4, n = size_t( L->lights.size() );
 			const size_t total = g.flickLive.size() / per;
+			// lane NIFXLIGHT3: the lights (and their copies) end at the bulbs; bulb j sits at cellBulbBase + j, no copies
+			const size_t lightTotal = n ? std::min( size_t( g.bulbBase ), total ) : 0;
 			size_t lo = total, hi = 0;
-			for ( size_t c = 0; c * n < total; c++ )
-				for ( int i : fd->idx ) {
-					const size_t j = c * n + size_t( i ), o = j * per;
-					if ( j >= total || size_t( i ) * 4 + 4 > fd->val.size() )
-						continue;
-					const float * v = fd->val.data() + size_t( i ) * 4;
-					for ( int k = 0; k < 3; k++ ) {
-						g.flickLive[o + size_t( k )] = g.flickBase[o + size_t( k )] + v[1 + k];
-						g.flickLive[o + 4 + size_t( k )] = g.flickBase[o + 4 + size_t( k )] * v[0];
-						if ( j * 4 + 3 < g.spheres.size() )
-							g.spheres[j * 4 + size_t( k )] = g.flickLive[o + size_t( k )];
-					}
-					lo = std::min( lo, j );
-					hi = std::max( hi, j );
+			auto patch = [&]( size_t j, const float * v, bool sphere ) {
+				const size_t o = j * per;
+				for ( int k = 0; k < 3; k++ ) {
+					g.flickLive[o + size_t( k )] = g.flickBase[o + size_t( k )] + v[1 + k];
+					g.flickLive[o + 4 + size_t( k )] = g.flickBase[o + 4 + size_t( k )] * v[0];
+					if ( sphere && j * 4 + 3 < g.spheres.size() )
+						g.spheres[j * 4 + size_t( k )] = g.flickLive[o + size_t( k )];
 				}
+				lo = std::min( lo, j );
+				hi = std::max( hi, j );
+			};
+			for ( int i : fd->idx ) {
+				if ( size_t( i ) * 4 + 4 > fd->val.size() )
+					continue;
+				const float * v = fd->val.data() + size_t( i ) * 4;
+				if ( size_t( i ) < n ) {
+					for ( size_t c = 0; c * n < lightTotal; c++ )
+						if ( c * n + size_t( i ) < lightTotal )
+							patch( c * n + size_t( i ), v, true );
+				} else if ( size_t( g.bulbBase ) + ( size_t( i ) - n ) < total ) {
+					patch( size_t( g.bulbBase ) + ( size_t( i ) - n ), v, false );
+				}
+			}
 			if ( lo <= hi && g.buf ) {
 				fn->glBindBuffer( GL_TEXTURE_BUFFER, g.buf );
 				fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( lo * per * sizeof( float ) ), GLsizeiptr( ( hi - lo + 1 ) * per * sizeof( float ) ),
@@ -1743,6 +1969,8 @@ void wwCellLightsUniforms( Scene * scene )
 	if ( !L )
 		return;
 	prog->uni1i( "cellLightCount", g.count );
+	prog->uni1i( "cellBulbBase", g.bulbBase );	// lane NIFXLIGHT2: the air's bulb-tier lights
+	prog->uni1i( "cellBulbCount", g.bulbs );
 	{	// lane LIGHTS5: GOBO1's pattern (pin WW_CELL_GOBO_ROT turns it, red WW_CELL_GOBO_RED=flat its mean) and FOGSCALE1
 		WW_SWITCH_STATIC( int, goboRot, wwEnvInt( "WW_CELL_GOBO_ROT" ) & 7 );
 		WW_SWITCH_STATIC( bool, goboFlat, wwEnvStr( "WW_CELL_GOBO_RED" ) == QLatin1String( "flat" ) );
