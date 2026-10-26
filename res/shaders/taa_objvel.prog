@@ -1,0 +1,4 @@
+# lane TAAINPUTS1: the object motion vectors (src/gl/taainputs.h): shapes that moved on their own, redrawn
+# against the frame's depth. No conditions: never picked for a shape; taainputs.cpp selects it by name.
+
+shaders taa_objvel.vert taa_objvel.frag
