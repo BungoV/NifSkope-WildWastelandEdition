@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane NIFXLIGHT2 (2026-10-26, branch nifxlight2-20261026): mesh lights follow dimmers, scale, bulbs light GI + fog
+
+- **Dimmers still bind:** the cell build reads each `NiLight`'s dimmer as the lamp is placed (on): the last key of the
+  mesh's `On` sequence for that light (`NiLightDimmerController`), else the `NiLight`'s `Dimmer`. A `.nifx` light that
+  `follows` a `NiLight`, and a `NiLight` edited in place, are multiplied by it; an unbound `follows` stays full. The
+  census adds `nifx lights: <mesh>: N lights scaled by a NiLight dimmer, M dimmer sequences bound` when either is non-zero.
+- **Placed scale:** a fixture placed at scale s gives its `.nifx` lights s x the converted radius (clamped 16..16384).
+- **Bulb tier wired:** bulb lights are never drawn on surfaces; they go into the light buffer after the lights (index
+  `cellBulbBase + j`, `cellBulbCount`) and cell_volair.frag walks them after the cluster or surface list (fog glow,
+  their own `fog.scale`), and the GI relight adds them as lights (the bounce). A bulb that took over a start-off placed
+  light is dark (`nifx lights: N bulb-tier lights dark (took a start-off light)`).
+- **Live GI:** every Mesh lights publish (row on, a `.nifx` edited, row off) bumps a stamp; src/probesky.cpp relights the
+  kept bake at once, as the light rows do (no rebake), and prints `nifx lights: GI relit (publish N)`.
+- Off = NIFXLIGHT1 exactly: no bulbs, scale 1 and dimmer 1 give the old numbers (tests/nifxapply's dump on NIFXLIGHT1's
+  fixtures is byte-identical). With no bulbs the air loops run as before (count 0).
+- Reds (`WW_NIFX_LIGHTS_RED`, added): `noscale`, `nofollow`, `bulbsurface`, `bulblit`, `nobulbgi` (tests/nifxapply, each
+  fails), `norelight` (hold rows only).
+- Cost (estimate, not measured): about 0.01-0.02 ms per bulb at 1080p (walked by every froxel, no culling); one GI
+  relight per publish (not per frame). Normal and hero tiers as NIFXLIGHT1.
+- Left as rows: per-frame dimmer animation (the cell view plays none), bulb flicker, a live switch for a dark bulb, a
+  `.nifx` created after the cell is built (seen on reopen).
+
 ## Lane NIFXLIGHT1 (2026-10-26, branch nifxlight1-20261026): real lights from a lamp mesh's .nifx (with FOGSCALE2)
 
 - **Mesh lights (.nifx)** (Show menu row, key `WW/CellNifxLights`, pin `WW_CELL_NIFX_LIGHTS`; ships OFF, live): a lamp or

@@ -17,9 +17,18 @@ enum WwNifxRed
 	WwNifxRedIgnore = 1,		//!< "ignore": the reader ignores `lights`
 	WwNifxRedTintDims = 2,		//!< "tintdims": the fade skips its / Y, so a tint dims the light
 	WwNifxRedKeepPlaced = 4,	//!< "keepplaced": the placed light inside a fixture stays on
-	WwNifxRedPrecedence = 8		//!< "precedence": the light record's fog.scale wins over the .nifx light's
+	WwNifxRedPrecedence = 8,	//!< "precedence": the light record's fog.scale wins over the .nifx light's
+	// lane NIFXLIGHT2
+	WwNifxRedNoScale = 16,		//!< "noscale": the radius ignores the fixture's placed scale
+	WwNifxRedNoFollow = 32,		//!< "nofollow": follows and NiLight edits ignore the NiLight's dimmer
+	WwNifxRedBulbSurface = 64,	//!< "bulbsurface": a bulb-tier light is drawn on surfaces like a normal one
+	WwNifxRedBulbLit = 128,		//!< "bulblit": a bulb that took a start-off light stays lit
+	WwNifxRedNoRelight = 256,	//!< "norelight": a Mesh lights change does not relight the GI (src/probesky.cpp)
+	WwNifxRedNoBulbGi = 512		//!< "nobulbgi": the GI relight leaves the bulbs out
 };
 int wwNifxRedOf( const QByteArray & words );
+//! lane NIFXLIGHT2: WW_NIFX_LIGHTS_RED as bits, read live (src/gl/celllights.cpp)
+int wwNifxLightsRed();
 
 //! a light's fog.scale rung (nifx/SPEC.md): the placed lamp's .recx reference, the .nifx light, the light record, else 1
 enum WwNifxFogRungs { WwNifxFogRef, WwNifxFogMesh, WwNifxFogRecord, WwNifxFogNone };
@@ -45,5 +54,9 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 
 //! one line per drawn, off and bulb .nifx light (the WW_NIFX_LIGHTS_DUMP file and the unit gate read it)
 QString wwNifxLightsDump( const WwCellLighting & L );
+
+/*! lane NIFXLIGHT2: the lights the GI relight traces: the drawn lights, then the bulb-tier lights (a bulb lights the
+ *  bounce and the fog only). False (no bulbs, or the red nobulbgi): the caller traces L as it is. */
+bool wwNifxGiLights( const WwCellLighting & L, int red, WwCellLighting & out );
 
 #endif // WW_CELLNIFXLIGHTS_H

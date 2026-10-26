@@ -1,8 +1,10 @@
 // NIFXLIGHT1 unit gate: a fixture's .nifx lights applied to a cell's lights (src/gl/cellnifxlights.cpp), the
 // conversion against hand-worked answers, the 64-unit takeover and its carried state, and the fog.scale rungs.
-// Usage: nifxapply <frames dir> <nifx dir> [--red words] [--dump file]; exit 0 = every check passed.
+// Usage: nifxapply <frames dir> <nifx dir> [--red words] [--dump file] [--two <frames dir> <nifx dir>]; exit 0 = every
+// check passed. --two (lane NIFXLIGHT2): NifxLight2Lamp's placed scale, NiLight dimmers and bulb-tier rules.
 // <frames dir>/<Model>.frames: one node a line, "name|niLight 0/1|m00 m01 m02 m03 m10 .. m23" (the mesh's world
-// frames, from `nifskope-cli world`); <nifx dir>/<Model>.nifx: the test lights.
+// frames, from `nifskope-cli world`), then optionally "|dimmer|sequences" (lane NIFXLIGHT2, a NiLight's On-state
+// dimmer and its dimmer sequences); <nifx dir>/<Model>.nifx: the test lights.
 
 #include "cellnifxlights.h"
 
@@ -38,11 +40,15 @@ std::shared_ptr<WwNifxModel> loadModel( const QString & framesDir, const QString
 	QTextStream in( &f );
 	while ( !in.atEnd() ) {
 		const QStringList p = in.readLine().split( QLatin1Char( '|' ) );
-		if ( p.size() != 3 )
+		if ( p.size() < 3 )
 			continue;
 		WwNifxNode n;
 		n.name = p[0];
 		n.niLight = p[1] == QLatin1String( "1" );
+		if ( p.size() > 3 )
+			n.dimmer = p[3].toFloat();
+		if ( p.size() > 4 )
+			n.sequences = p[4].toInt();
 		const QStringList v = p[2].split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
 		for ( int i = 0; i < 12 && i < v.size(); i++ )
 			n.m[i / 4][i % 4] = v[i].toFloat();
@@ -285,6 +291,70 @@ int main( int argc, char ** argv )
 	int recordCalls = 0;
 	wwNifxFogRung( yes, true, [&] { recordCalls++; return true; }, redPrec );
 	check( recordCalls == 0, QStringLiteral( "fog: a won rung reads no lower file" ) );
+
+	// lane NIFXLIGHT2: one fixture placed at scale 2 with two NiLights (dimmers 0.5 and 0.25), a start-off placed light
+	// under its first bulb-tier light
+	const int ti = int( a.indexOf( QStringLiteral( "--two" ) ) );
+	if ( ti > 0 && ti + 2 < a.size() ) {
+		const auto two = loadModel( a[ti + 1], a[ti + 2], QStringLiteral( "NifxLight2Lamp.nif" ) );
+		QHash<QString, nifxl::Lights> d2;
+		QFile f( two->sidecar );
+		check( two->nodes.size() == 3 && f.open( QIODevice::ReadOnly ), QStringLiteral( "two: %1 nodes, read %2" )
+			.arg( two->nodes.size() ).arg( two->sidecar ) );
+		const QByteArray b = f.readAll();
+		d2.insert( two->sidecar, nifxl::read( std::string( b.constData(), size_t( b.size() ) ) ) );
+		const nifxl::Lights & dt = d2[two->sidecar];
+		const nifxl::Light * xf = dt.find( "Follow" ), * xe = dt.find( "Edit" ), * xu = dt.find( "Unbound" ), * x2 = dt.find( "Bulb2" );
+		if ( !xf || !xe || !xu || !x2 || !dt.find( "Bulb3" ) ) {
+			std::printf( "FAIL the two .nifx lacks Follow/Edit/Unbound/Bulb2/Bulb3\nNIFXAPPLY FAIL\n" );
+			return 1;
+		}
+		WwCellLighting T;
+		WwNifxFixture D = fixtureAt( two, 0, 0, 0, 0, 0xD0 );
+		D.scale = 2.0f;
+		T.nifxFixtures = { D };
+		double pF[3], pE[3], pU[3], p2[3];
+		expectWorld( D, *two, *xf, pF );
+		expectWorld( D, *two, *xe, pE );
+		expectWorld( D, *two, *xu, pU );
+		expectWorld( D, *two, *x2, p2 );
+		T.offLights = { placed( p2, 1, 0xD1, 0 ) };
+		QStringList c2;
+		wwNifxLightsApply( T, d2, red, &c2 );
+		for ( const QString & c : c2 )
+			std::printf( "  %s\n", c.toUtf8().constData() );
+		const double r800 = 69.99 * std::sqrt( 800.0 / ( 4 * 3.14159265358979323846 ) );
+		const float fF[3] = { float( pF[0] ), float( pF[1] ), float( pF[2] ) };
+		const float fE[3] = { float( pE[0] ), float( pE[1] ), float( pE[2] ) };
+		const float fU[3] = { float( pU[0] ), float( pU[1] ), float( pU[2] ) };
+		const WwCellLight * tf = byName( T.lights, QStringLiteral( "Follow" ), fF );
+		const WwCellLight * te = byName( T.lights, QStringLiteral( "Edit" ), fE );
+		const WwCellLight * tu = byName( T.lights, QStringLiteral( "Unbound" ), fU );
+		check( tf && te && tu, QStringLiteral( "two: Follow, Edit, Unbound drawn where the scale-2 placement puts them" ) );
+		check( tf && near( tf->radius, 2 * r800 ) && tu && near( tu->radius, 2 * r800 ),
+			QStringLiteral( "two: radius x placed scale 2 (%1, want %2)" ).arg( tf ? tf->radius : -1.0f ).arg( 2 * r800 ) );
+		check( tf && near( tf->color[0], 0.5 ) && near( tf->color[2], 0.5 ),
+			QStringLiteral( "two: follows LampLight takes its dimmer 0.5 (got %1)" ).arg( tf ? tf->color[0] : -1.0f ) );
+		check( te && near( te->color[0], 0.25 ),
+			QStringLiteral( "two: a NiLight edited in place keeps its own dimmer 0.25 (got %1)" ).arg( te ? te->color[0] : -1.0f ) );
+		check( tu && near( tu->color[0], 1.0 ), QStringLiteral( "two: an unbound follows stays at full strength" ) );
+		check( !byName( T.lights, QStringLiteral( "Bulb2" ) ) && !byName( T.lights, QStringLiteral( "Bulb3" ) )
+			&& !byName( T.offLights, QStringLiteral( "Bulb2" ) ), QStringLiteral( "two: no bulb-tier light on the surfaces" ) );
+		check( T.nifxBulbs.size() == 1 && T.nifxBulbs[0].nifxName == QLatin1String( "Bulb3" ) && T.offLights.isEmpty(),
+			QStringLiteral( "two: Bulb2 dark with the start-off light it took, Bulb3 kept for the GI and fog (%1 bulbs)" )
+			.arg( T.nifxBulbs.size() ) );
+		WwCellLighting G;
+		const bool gi = wwNifxGiLights( T, red, G );
+		check( gi && G.lights.size() == T.lights.size() + T.nifxBulbs.size() && byName( G.lights, QStringLiteral( "Bulb3" ) )
+			&& G.nifxBulbs.size() == T.nifxBulbs.size(), QStringLiteral( "two: the GI's lights take the bulbs (%1 of %2)" )
+			.arg( G.lights.size() ).arg( T.lights.size() + T.nifxBulbs.size() ) );
+		WwCellLighting none, G0;
+		check( !wwNifxGiLights( none, 0, G0 ), QStringLiteral( "two: no bulbs, the GI keeps the lights as they are" ) );
+		const QString all2 = c2.join( QLatin1Char( '\n' ) );
+		check( all2.contains( QStringLiteral( "2 lights scaled by a NiLight dimmer, 2 dimmer sequences bound" ) )
+			&& all2.contains( QStringLiteral( "1 bulb-tier lights dark (took a start-off light)" ) ),
+			QStringLiteral( "two: census counts the dimmers, sequences and the dark bulb" ) );
+	}
 
 	std::printf( "NIFXAPPLY %s %d checks, %d failed%s\n", fails ? "FAIL" : "PASS", checks, fails,
 		red ? qPrintable( QStringLiteral( " (red %1)" ).arg( red ) ) : "" );

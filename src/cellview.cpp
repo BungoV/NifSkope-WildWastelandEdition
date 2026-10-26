@@ -1022,6 +1022,8 @@ static std::shared_ptr<const WwNifxModel> cellNifxModel( const QString & dataRoo
 		WwNifxNode n;
 		n.name = src.get<QString>( ib, "Name" );
 		n.niLight = src.blockInherits( ib, "NiLight" );
+		if ( n.niLight )
+			n.dimmer = src.get<float>( ib, "Dimmer" );	// lane NIFXLIGHT2
 		for ( int r = 0; r < 3; r++ ) {
 			for ( int c = 0; c < 3; c++ )
 				n.m[r][c] = here.rotation( r, c ) * here.scale;
@@ -1033,6 +1035,36 @@ static std::shared_ptr<const WwNifxModel> cellNifxModel( const QString & dataRoo
 	};
 	if ( !roots.isEmpty() )
 		walk( roots.first(), Transform() );
+	/* lane NIFXLIGHT2: the sequences whose dimmer blocks name a NiLight (they still bind: an edit keeps the name), and the
+	 * dimmer the cell view draws: the On sequence's last key (the lamp as placed is on), else the NiLight's Dimmer */
+	for ( int b = 0; b < src.getBlockCount(); b++ ) {
+		const QModelIndex is = src.getBlockIndex( b );
+		if ( !is.isValid() || !src.blockInherits( is, "NiControllerSequence" ) )
+			continue;
+		const bool onSeq = src.get<QString>( is, "Name" ).compare( QLatin1String( "On" ), Qt::CaseInsensitive ) == 0;
+		const QModelIndex arr = src.getIndex( is, "Controlled Blocks" );
+		for ( int r = 0; arr.isValid() && r < src.rowCount( arr ); r++ ) {
+			const QModelIndex cb = src.getIndex( arr, r );
+			if ( src.resolveString( cb, "Controller Type" ) != QLatin1String( "NiLightDimmerController" ) )
+				continue;
+			const QString node = src.resolveString( cb, "Node Name" );
+			for ( WwNifxNode & n : m->nodes ) {
+				if ( !n.niLight || n.name.compare( node, Qt::CaseInsensitive ) != 0 )
+					continue;
+				n.sequences++;
+				const QModelIndex ip = src.getBlockIndex( src.getLink( cb, "Interpolator" ) );
+				if ( !onSeq || !ip.isValid() || !src.blockInherits( ip, "NiFloatInterpolator" ) )
+					continue;
+				float v = src.get<float>( ip, "Value" );
+				const QModelIndex fd = src.getBlockIndex( src.getLink( ip, "Data" ) );
+				const QModelIndex keys = fd.isValid() ? src.getIndex( src.getIndex( fd, "Data" ), "Keys" ) : QModelIndex();
+				if ( keys.isValid() && src.rowCount( keys ) > 0 )
+					v = src.get<float>( src.getIndex( keys, src.rowCount( keys ) - 1 ), "Value" );
+				if ( std::isfinite( v ) && std::fabs( v ) < 1e30f )
+					n.dimmer = v;
+			}
+		}
+	}
 	return m;
 }
 

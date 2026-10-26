@@ -62,6 +62,10 @@ uniform sampler3D volNoise;
 // lane LIGHTS5 (FOGSCALE1): a light's fog.scale (.recx), 4 a texel from cellFogScaleBase; off = 1 for every light
 uniform bool cellFogScaleOn;
 uniform int cellFogScaleBase;
+// lane NIFXLIGHT2: the .nifx bulb-tier lights (GI and fog only), texels from cellBulbBase after the lights; walked after
+// the cluster or surface list, every froxel (no culling: a few at most). 0 = none: the loops as before
+uniform int cellBulbBase;
+uniform int cellBulbCount;
 float cellFogK( int i )
 {
 	return cellFogScaleOn ? texelFetch( cellLights, cellFogScaleBase + i / 4 )[i % 4] : 1.0;
@@ -226,10 +230,16 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 			base = texelFetch( volClusters, 2 * ci ).r;
 			n = texelFetch( volClusters, 2 * ci + 1 ).r;
 		}
-		for ( int j = 0; surf || j < n; j++ ) {
-			int i = surf ? volSurfNext( sp, se ) : base < 0 ? j : texelFetch( volClusters, base + j ).r;
-			if ( i < 0 )
-				break;
+		int jb = 0;
+		for ( int j = 0; surf || j < n || jb < cellBulbCount; j++ ) {
+			int i = surf ? volSurfNext( sp, se ) : j < n ? ( base < 0 ? j : texelFetch( volClusters, base + j ).r ) : -1;
+			if ( i < 0 ) {
+				if ( jb >= cellBulbCount )
+					break;
+				i = cellBulbBase + jb++;	// lane NIFXLIGHT2: then the bulbs
+				surf = false;
+				j = n;
+			}
 			vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 			if ( ( volRed & 262144 ) != 0 ) {	// red lightmid: the light at the slice's middle only (a small light
 				float d = length( t0.xyz - Pl );	// between two middles adds nothing)
@@ -330,10 +340,16 @@ void airLightsQ( vec3 posView, vec3 dirView, float z, float sA, float sB, int ne
 		base = texelFetch( volClusters, 2 * ci ).r;
 		n = texelFetch( volClusters, 2 * ci + 1 ).r;
 	}
-	for ( int j = 0; surf || j < n; j++ ) {
-		int i = surf ? volSurfNext( sp, se ) : base < 0 ? j : texelFetch( volClusters, base + j ).r;
-		if ( i < 0 )
-			break;
+	int jb = 0;
+	for ( int j = 0; surf || j < n || jb < cellBulbCount; j++ ) {
+		int i = surf ? volSurfNext( sp, se ) : j < n ? ( base < 0 ? j : texelFetch( volClusters, base + j ).r ) : -1;
+		if ( i < 0 ) {
+			if ( jb >= cellBulbCount )
+				break;
+			i = cellBulbBase + jb++;	// lane NIFXLIGHT2: then the bulbs
+			surf = false;
+			j = n;
+		}
 		vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 		vec3 m = Pl - t0.xyz;
 		float qa = dot( Dw, Dw ), qb = dot( Dw, m ), qc = dot( m, m ) - t0.w * t0.w;

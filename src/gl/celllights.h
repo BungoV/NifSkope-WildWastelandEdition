@@ -126,6 +126,10 @@ struct WwNifxNode
 	QString name;
 	float m[3][4] = { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 } };
 	bool niLight = false;
+	//! lane NIFXLIGHT2: a NiLight's dimmer in the state drawn (the On sequence's last dimmer key, else its Dimmer)
+	//! and the NiControllerSequences whose dimmer blocks name it
+	float dimmer = 1.0f;
+	int sequences = 0;
 };
 struct WwNifxModel
 {
@@ -222,6 +226,8 @@ struct WwCellLighting
 //! the cell view publishes the lighting of the document it just built (replacing that document's last)
 void wwCellLightsPublish( const void * nif, const WwCellLighting & lighting );
 const WwCellLighting * wwCellLightsFor( const void * nif );
+//! lane NIFXLIGHT2: moves on each Mesh lights (.nifx) publish for the document (0: the lights as built)
+int wwCellLightsNifxStamp( const void * nif );
 
 /*! THE BOUNCE (lane PRTPGI, src/probegi.h): the bake relit by these lights, as a voxel grid of
  *  probe ambient cubes. Six slabs (+X -X +Y -Y +Z -Z) of dims[2] each, x fastest, (rgb x valid,

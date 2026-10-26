@@ -13,7 +13,10 @@ int wwNifxRedOf( const QByteArray & words )
 	for ( const QByteArray & w : words.split( ',' ) ) {
 		const QByteArray t = w.trimmed().toLower();
 		r |= t == "ignore" ? WwNifxRedIgnore : t == "tintdims" ? WwNifxRedTintDims
-			: t == "keepplaced" ? WwNifxRedKeepPlaced : t == "precedence" ? WwNifxRedPrecedence : 0;
+			: t == "keepplaced" ? WwNifxRedKeepPlaced : t == "precedence" ? WwNifxRedPrecedence
+			: t == "noscale" ? WwNifxRedNoScale : t == "nofollow" ? WwNifxRedNoFollow
+			: t == "bulbsurface" ? WwNifxRedBulbSurface : t == "bulblit" ? WwNifxRedBulbLit
+			: t == "norelight" ? WwNifxRedNoRelight : t == "nobulbgi" ? WwNifxRedNoBulbGi : 0;
 	}
 	return r;
 }
@@ -32,6 +35,7 @@ struct MeshCount
 {
 	int placed = 0, perPlacement = 0, hero = 0, normal = 0, bulb = 0, tookOver = 0, niLight = 0, nodeMiss = 0;
 	int followsOn = 0, followsUnbound = 0, warnings = 0;
+	int dimmed = 0, sequences = 0;	// lane NIFXLIGHT2: lights a NiLight's dimmer scaled; dimmer sequences bound to them
 	QString state;
 };
 
@@ -95,8 +99,17 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 			} else if ( x.hasNode && node->niLight ) {
 				c.niLight += c.placed == 1;	// edited in place: the NiLight's frame, these values
 			}
+			/* lane NIFXLIGHT2: the dimmer. follows copies the named NiLight's; an edited NiLight keeps its own (the values
+			 * are the full-on light, the sequence's dimmer scales it). The cell view draws the On state: the dimmer
+			 * there (src/cellview.cpp cellNifxModel). An unbound follows stays at full strength. */
+			const WwNifxNode * dimNode = x.hasFollows ? findNode( m, x.follows, true ) : x.hasNode && node->niLight ? node : nullptr;
 			if ( x.hasFollows && c.placed == 1 )
-				( findNode( m, x.follows, true ) ? c.followsOn : c.followsUnbound )++;
+				( dimNode ? c.followsOn : c.followsUnbound )++;
+			const float dim = dimNode && !( red & WwNifxRedNoFollow ) ? dimNode->dimmer : 1.0f;
+			if ( c.placed == 1 && dimNode ) {
+				c.dimmed += dim != 1.0f;
+				c.sequences += dimNode->sequences;
+			}
 			double lp[3], ld[3];
 			apply3( node->m, x.position, true, lp );
 			apply3( node->m, x.direction, false, ld );
@@ -118,10 +131,11 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 			for ( int r = 0; r < 3 && dn > 0; r++ )
 				l.dir[r] = float( l.dir[r] / dn );
 			const nifxl::Converted cv = nifxl::convert( x, ( red & WwNifxRedTintDims ) != 0 );
-			l.radius = float( cv.radius );
+			// lane NIFXLIGHT2: the reach grows with the fixture's placed scale, as its position does (then the spec's range)
+			l.radius = ( red & WwNifxRedNoScale ) ? float( cv.radius ) : std::clamp( float( cv.radius ) * f.scale, 16.0f, 16384.0f );
 			for ( int k = 0; k < 3; k++ ) {
 				l.byteColor[k] = float( cv.color[k] ) / 255.0f;
-				l.color[k] = std::pow( float( cv.color[k] ) / 255.0f, 2.2f ) * float( cv.fade );
+				l.color[k] = std::pow( float( cv.color[k] ) / 255.0f, 2.2f ) * float( cv.fade ) * dim;
 			}
 			l.spot = x.type == nifxl::Spot;
 			if ( l.spot )
@@ -173,7 +187,7 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 			}
 		}
 	}
-	int tookOver = 0, dark = 0;
+	int tookOver = 0, dark = 0, bulbDark = 0;
 	for ( Made & o : made ) {
 		if ( o.carrier < 0 )
 			continue;
@@ -202,8 +216,12 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 			*lists[li] = keep;
 	}
 	for ( const Made & o : made ) {
-		if ( o.l.tier == nifxl::Bulb )
+		if ( o.l.tier == nifxl::Bulb && o.carrierList >= 1 && !( red & WwNifxRedBulbLit ) )
+			bulbDark++;	// lane NIFXLIGHT2: a bulb that took a start-off light is dark with it (the bulb has no live switch)
+		else if ( o.l.tier == nifxl::Bulb && !( red & WwNifxRedBulbSurface ) )
 			L.nifxBulbs.append( o.l );
+		else if ( o.l.tier == nifxl::Bulb )
+			L.lights.append( o.l );	// the red: drawn on surfaces
 		else if ( o.carrierList == 1 )
 			L.offLights.append( o.l );	// starts off with the light it took over (kept for a live switch)
 		else if ( o.carrierList == 2 )
@@ -220,14 +238,28 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 			.arg( it.key() ).arg( c.placed ).arg( c.state ).arg( c.perPlacement ).arg( c.hero / std::max( c.placed, 1 ) )
 			.arg( c.normal / std::max( c.placed, 1 ) ).arg( c.bulb / std::max( c.placed, 1 ) ).arg( c.niLight ).arg( c.nodeMiss )
 			.arg( c.followsOn ).arg( c.followsUnbound ).arg( c.warnings ).arg( c.tookOver ) );
+		if ( c.dimmed || c.sequences )	// lane NIFXLIGHT2
+			census->append( QStringLiteral( "nifx lights: %1: %2 lights scaled by a NiLight dimmer, %3 dimmer sequences bound" )
+				.arg( it.key() ).arg( c.dimmed ).arg( c.sequences ) );
 	}
 	for ( auto it = fileWarn.cbegin(); it != fileWarn.cend(); ++it )
 		for ( const QString & w : it.value() )
 			census->append( QStringLiteral( "nifx lights: %1: %2" ).arg( QFileInfo( it.key() ).fileName(), w ) );
 	census->append( QStringLiteral( "nifx lights: %1 fixtures, %2 lights made (%3 drawn, %4 bulb), %5 placed lights switched off, "
 		"%6 dark (took a start-off light)%7" ).arg( L.nifxFixtures.size() ).arg( made.size() )
-		.arg( made.size() - L.nifxBulbs.size() - dark ).arg( L.nifxBulbs.size() ).arg( tookOver ).arg( dark )
+		.arg( made.size() - L.nifxBulbs.size() - dark - bulbDark ).arg( L.nifxBulbs.size() ).arg( tookOver ).arg( dark )
 		.arg( red ? QStringLiteral( " red %1" ).arg( red ) : QString() ) );
+	if ( bulbDark )	// lane NIFXLIGHT2
+		census->append( QStringLiteral( "nifx lights: %1 bulb-tier lights dark (took a start-off light)" ).arg( bulbDark ) );
+}
+
+bool wwNifxGiLights( const WwCellLighting & L, int red, WwCellLighting & out )
+{
+	if ( L.nifxBulbs.isEmpty() || ( red & WwNifxRedNoBulbGi ) )
+		return false;
+	out = L;
+	out.lights += L.nifxBulbs;
+	return true;
 }
 
 QString wwNifxLightsDump( const WwCellLighting & L )
