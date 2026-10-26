@@ -350,15 +350,18 @@ LdLight currentLight()
 	static double hour = -1.0;
 	static bool sun = false;
 	static int atmoSun = 0;	// lane SKYA (ATMOSUN1): the Sunlight From Sky row, its red and the Physical Sky tier
+	static WwSunPathKey sunPath;	// lane GAPTOOL2: a live WW_SUNPATH set (or the Sun Path row) moves the light
 	static LdLight memo;
 	// lane SKYA (NIGHT1): the Moon Phase and Stars row with the moon's phase (the game day moves it)
 	const int atmoKey = wwAtmoSunKey() + 3 * 16 * wwAtmoNightKey( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
-	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey ) {
+	const WwSunPathKey sunKey = wwSunPathKey();
+	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) ) {
 		memo = computeLight();
 		gen = s.gen;
 		hour = s.hour;
 		sun = s.sun;
 		atmoSun = atmoKey;
+		sunPath = sunKey;
 	}
 	return memo;
 }

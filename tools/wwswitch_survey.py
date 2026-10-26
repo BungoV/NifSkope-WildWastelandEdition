@@ -18,7 +18,7 @@ RANK = {'tool': 0, 'live': 1, 'shaders': 2, 'reopen': 3, 'relaunch': 4}
 
 # name -> (stage, why). Names a rule gets wrong, or the harness depends on; checked by hand.
 OVERRIDES = {
-    'WW_SUNPATH': ('live', 'read through tier() in shadowset.cpp ss(), which re-reads when a live set moves WW_SUNPATH (GAPTOOL1 twin rows)'),
+    'WW_SUNPATH': ('live', 'read through tier() in shadowset.cpp ss(), which re-reads when a live set moves WW_SUNPATH; the cached light (lookdevstage currentLight) keys on wwSunPathKey() (GAPTOOL2)'),
     'WW_SETTINGS_SCOPE': ('relaunch', 'QSettings scope chosen in main() before any window'),
     'WW_STDERR_BUFFER': ('relaunch', 'stderr buffering set once in main()'),
     'WW_WINDOW_VISIBLE': ('relaunch', 'window placement (opacity, z-order) when each window is first shown (FLYFIX1)'),

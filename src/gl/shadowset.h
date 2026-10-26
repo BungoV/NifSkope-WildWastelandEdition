@@ -50,6 +50,15 @@ void wwShadowSetTerrainTier( int tier );
 //! 0 Engine (the sky clock), 1 Real (the solar path)
 int wwSunPathMode();
 void wwSunPathSetMode( int mode );
+//! lane GAPTOOL2: what the Sun Path answer depends on besides the clock (row, pin, ephemeris); a cached light keys on it
+struct WwSunPathKey
+{
+	int mode = -1;
+	bool pin = false, ephem = false, june = false;
+	double elev = 0.0, az = 0.0;
+	bool operator==( const WwSunPathKey & ) const = default;
+};
+WwSunPathKey wwSunPathKey();
 
 //! (D) the real sun, TO the sun, world (x east, y north, z up), unit; returns the elevation in degrees
 double wwSunPathReal( double hour, double gameDay, double out[3] );

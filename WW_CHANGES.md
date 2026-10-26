@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GAPTOOL2 (2026-10-26, branch gaptool2-20261026): Sun Path moves the light live
+
+- **A live WW_SUNPATH set (or the Sun Path row) now moves the light, not only the disc:** the scene light was cached
+  (currentLight) on the weather, the hour, the clock row and the sky rows, so a live Sun Path change redrew the sun disc
+  and glare while the shading and shadows kept the old direction. The cache now also keys on the Sun Path inputs
+  (`wwSunPathKey()`: the row, WW_SUNPATH_PIN, the "Real sun and moon" row and its june red). An unchanged value
+  rebuilds nothing.
+- Sun Path never set = the old build at the same calls (unit trace byte-equal to the base). No shader change.
+- Unit: notes/gaptool2/unit/unit.sh (green PASS, red = the base's currentLight, 5 FAIL). Hold rows: notes/gaptool2.
+
 ## Lane LIGHTPHYS4 (2026-10-26, branch lightphys4-20261026): far lights and live doors follow the light rows
 
 - **Far lights bounce on the rows' curve, live:** the far light bake (WW_CELL_FARLIGHT) now runs its placed-only
