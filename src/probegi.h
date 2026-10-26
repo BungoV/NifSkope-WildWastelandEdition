@@ -51,6 +51,7 @@ struct ProbeGiResult
 	float origin[3] = { 0, 0, 0 };      //!< the grid's min corner (world)
 	float voxel = 64.0f;
 	int dims[3] = { 0, 0, 0 };
+	int pad = 5;                        //!< lane GIEDGE1: edge voxels each side past the probes' reach (kPad); the shader fades x/y over them
 	float radius = 0.0f;                //!< the probe blend radius
 	int voxelsNear = 0, voxelsValid = 0;
 	qint64 visRays = 0, visBlocked = 0;

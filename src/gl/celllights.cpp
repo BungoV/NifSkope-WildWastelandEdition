@@ -1622,6 +1622,9 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
 		prog->uni1f( "cellGiVoxel", G->voxel );
 		prog->uni3f( "cellGiDims", float( G->dims[0] ), float( G->dims[1] ), float( G->dims[2] ) );
+		// lane GIEDGE1: the x/y edge fade; red WW_CELL_GI_RED=clampedge = the old CLAMP_TO_EDGE read past the box
+		WW_SWITCH_STATIC( bool, giClampEdge, wwEnvStr( "WW_CELL_GI_RED" ).split( ',' ).contains( QStringLiteral( "clampedge" ) ) );
+		prog->uni1f( "cellGiPad", giClampEdge ? 0.0f : float( G->pad ) );
 	}
 	{	// lane EMISSIVEGRID1: the fine boxes (their atlas rides the grid's texture, after its layers)
 		const bool fineDraw = giDraw && !skyDraw && !G->fine.empty();

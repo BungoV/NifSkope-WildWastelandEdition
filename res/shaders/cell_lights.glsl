@@ -47,6 +47,7 @@ uniform sampler3D cellGi;
 uniform vec3 cellGiOrigin;
 uniform float cellGiVoxel;
 uniform vec3 cellGiDims;
+uniform float cellGiPad;		// lane GIEDGE1: the grid's x/y edge voxels past the probes' reach (probegi kPad); 0 = the clampedge red
 // lane ROOMCLAMP1 (src/proberooms.h): with rooms the grid holds 12 slabs (slot 0's six, then slot 1's); cellGiSlots
 // per voxel and cellRooms per fine cell hold two rooms packed as (a + 1) x 4096 + (b + 1), -1 none
 uniform bool cellGiRooms;
@@ -651,6 +652,16 @@ vec4 cellGiStrandAnswer( vec3 P, vec3 N, ivec2 L, vec3 C, out int path )
 	path = indoor ? 9 : 5;
 	return indoor ? vec4( 0.0, 0.0, 0.0, 1.0 ) : vec4( -1.0 );
 }
+/* lane GIEDGE1: 1 inside the box, falling to 0 across its x/y edge voxels (g in voxels). CLAMP_TO_EDGE smeared the
+ * edge column's sky-filled ground layers sideways into a sheet at a fixed world z (GISTRIPE1); past the box the
+ * weather ambient applies alone. Exactly 1 more than cellGiPad voxels in. */
+float cellGiEdgeFade( vec2 g )
+{
+	if ( cellGiPad <= 0.0 )
+		return 1.0;
+	vec2 e = min( g, cellGiDims.xy - g );
+	return clamp( min( e.x, e.y ) / cellGiPad, 0.0, 1.0 );
+}
 // the hardware trilinear of the one grid (slot 0): the bake's own light at P, walls not seen
 vec4 cellGiTrilinear( vec3 P, vec3 N )
 {
@@ -659,9 +670,11 @@ vec4 cellGiTrilinear( vec3 P, vec3 N )
 	float z = clamp( g.z, 0.5, cellGiDims.z - 0.5 );
 	float depth = float( textureSize( cellGi, 0 ).z );	// lanes EMISSIVEGRID1 + SPECOCC1: the fine atlas / sky slabs may follow
 	vec3 n2 = N * N;
-	return n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
+	vec4 s = n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
 	     + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )
 	     + n2.z * texture( cellGi, vec3( xy, ( z + ( N.z >= 0.0 ? 4.0 : 5.0 ) * cellGiDims.z ) / depth ) );
+	float f = cellGiEdgeFade( g.xy );
+	return f < 1.0 ? s * f : s;
 }
 /* lane GIBLACK2: every reached cell indoors: the indoor room; only the outdoors: room 0; both: the nearer, and when
  * they lie within a cell of each other (the room grid cannot tell which side of a thin wall the surface is on: the
@@ -962,7 +975,9 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 			return tr;
 		}
 	}
-	return s;
+	// lane GIEDGE1: the voxels' answer fades over the pad as the trilinear does (no lit skin a voxel past the face)
+	float fe = cellGiEdgeFade( g.xy + 0.5 );
+	return fe < 1.0 ? s * fe : s;
 }
 
 // the screen GI's upsample: the 4 screen texels round this pixel; false: none is this surface
@@ -1150,7 +1165,8 @@ float cellSpecSky( vec3 P, vec3 N, vec3 R, float rough )
 	}
 	if ( a.y < 0.01 )
 		return 1.0;
-	float v = 1.0 + cellSkyVis * ( clamp( a.x / a.y, 0.0, 1.0 ) - 1.0 );
+	float f = cellGiEdgeFade( t.xy );	// lane GIEDGE1: no occlusion read off the clamped edge column
+	float v = 1.0 + ( f < 1.0 ? f * cellSkyVis : cellSkyVis ) * ( clamp( a.x / a.y, 0.0, 1.0 ) - 1.0 );
 	return cellSpecOcc == 2 ? mix( 1.0, v, r ) : v;
 }
 

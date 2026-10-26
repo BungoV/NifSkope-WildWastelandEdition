@@ -197,6 +197,7 @@ struct WwCellGi
 	float origin[3] = { 0, 0, 0 };
 	float voxel = 64.0f;
 	int dims[3] = { 0, 0, 0 };
+	int pad = 5;	//!< lane GIEDGE1: edge voxels each side past the probes' reach (probegi kPad); the shader fades x/y over them
 	std::vector<float> rgba;
 	std::vector<float> sky;	// lane PROBEVIEW1: the same layout, rgb = the probes' open-sky share, a = valid
 	QString summary;
