@@ -56,12 +56,13 @@ constexpr int FarGroundDecal = 52;	// the decal records, bins and lists (sampler
 constexpr int FarGroundAtlas = 53;	// the decal pieces' colour (sampler2D)
 constexpr int FarGroundPages = 54;	// the cached option's pages (sampler2DArray)
 constexpr int FarGroundHeight = 55;	// the stamp's heights (sampler2D)
+constexpr int FarGroundPagesFar = 56;	// lane FARPAGES1: the far pool's pages (FarGroundPages = the near pool)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
 	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans, ContactGbuf, GiAir, CardDepth,
 	CloudShadow, CloudBuildShape, CloudBuildDetail, CloudBuildMap, FarGroundGrid, FarGroundLtex, FarGroundDecal, FarGroundAtlas,
-	FarGroundPages, FarGroundHeight };
+	FarGroundPages, FarGroundHeight, FarGroundPagesFar };
 
 constexpr bool distinct()
 {

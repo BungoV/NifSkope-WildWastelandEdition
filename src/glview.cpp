@@ -158,6 +158,7 @@ private:
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellpasstime.h"	// lane PERF1
+#include "gl/cellfarground.h"	// lane FARPAGES1
 #include "gl/cloudvol.h"	// lane CLOUD2B: the volume clouds' depth test
 
 // NOTE: The FPS define is a frame limiter,
@@ -22391,6 +22392,8 @@ void GLView::advanceGears()
 		update();	// lane LIGHTFLICKER1: a flickering lamp needs a frame every tick
 	if ( wwCellWorldAnimWantsFrames( scene ) )
 		update();	// lane FXPARITY2: the world clock moves the cell
+	if ( CellFarGround::wantsFrames( scene ) )
+		update();	// lane FARPAGES1: far ground pages still painting or fading in
 
 	dT = std::clamp< float >( dT, 0.0f, 1.0f );
 	physicsTick( dT );

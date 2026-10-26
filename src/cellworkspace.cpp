@@ -490,7 +490,7 @@ void CellWorkspacePanel::buildUi()
 	cellFarGroundQGroup = new QActionGroup( cellFarGroundQ );
 	cellFarGroundQGroup->setExclusive( true );
 	{
-		const QStringList names = { tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		const QStringList names = { tr( "Low" ), tr( "Medium" ), tr( "High" ) };	// FARPAGES1: Ultra dropped
 		for ( int k = 0; k < names.size(); k++ ) {
 			QAction * a = cellFarGroundQ->addAction( names.at( k ) );
 			a->setCheckable( true );

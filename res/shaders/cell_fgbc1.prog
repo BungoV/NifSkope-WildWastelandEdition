@@ -1,0 +1,4 @@
+# lane FARPAGES1: a far ground page compressed to BC1 on the GPU, one fragment a 4x4 block
+# (src/gl/cellfarground.cpp). No conditions: selected by name.
+
+shaders cell_ao.vert cell_fgbc1.frag
