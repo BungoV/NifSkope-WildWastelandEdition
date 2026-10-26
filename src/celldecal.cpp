@@ -373,7 +373,8 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 	/* RED CONTROL (WW_CELL_DECAL_RED): "none" draws no decal, "wide" doubles every
 	 * box's width and height, "axis" projects along the wrong local axis. Each one
 	 * breaks a different claim of tests/spells/cell_decal.sh. "vertexangle" (lane DECALANGLE)
-	 * draws the old per-vertex angle fade instead of the game's per-pixel rule. */
+	 * draws the old per-vertex angle fade instead of the game's per-pixel rule; "nonormalmap" (lane DECALANGLE2)
+	 * reads the interpolated vertex normal instead of the drawn, normal-mapped one. */
 	const QByteArray red = wwEnv( "WW_CELL_DECAL_RED" ).trimmed().toLower();
 	out.red = QString::fromLatin1( red );
 	const bool redNone = red == "none" || red == "1";
@@ -381,6 +382,7 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 	const bool redAxis = red == "axis";
 	const bool redVertexAngle = red == "vertexangle";
 	out.vertexAngle = redVertexAngle;
+	out.mapped = !redVertexAngle && red != "nonormalmap";
 
 	TriGrid grid;
 	bool gridBuilt = false;
@@ -525,7 +527,7 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 			if ( dot( face, nr[0] + nr[1] + nr[2] ) < 0.0f )
 				face = face * -1.0f;
 			const float gd = dot( face, against );
-			if ( gd <= 0.0f )
+			if ( gd <= 0.0f && !out.mapped )	// lane DECALANGLE2: a drawn normal can lean a wall's pixel over (the cull below)
 				continue;
 			ClipVert poly[16];
 			float fadeMax = 0.0f, dotMax = -1.0f, un[3][3];
@@ -545,7 +547,9 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 			}
 			// a steep face: the old rule drops it when no corner passes, the game's only when no pixel can
 			if ( gd < celldecalangle::kMin
-				&& ( redVertexAngle ? fadeMax <= 0.0f : !celldecalangle::mayPass( dotMax, un[0], un[1], un[2] ) ) )
+				&& ( redVertexAngle ? fadeMax <= 0.0f
+					: out.mapped ? !celldecalangle::mayPassMapped( dotMax )	// a normal map can lean a pixel over
+					: !celldecalangle::mayPass( dotMax, un[0], un[1], un[2] ) ) )
 				continue;
 			const int count = clipToBox( poly, 3, half );
 			if ( count < 3 )
@@ -567,6 +571,7 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 				v.uv[1] = poly[k].l[1] / height + 0.5f;
 				v.alpha = poly[k].fade;
 				v.angle = celldecalangle::vertexValue( gd, dot( n, against ) );
+				v.dir[0] = against.x; v.dir[1] = against.y; v.dir[2] = against.z;
 				mesh.verts.push_back( v );
 			}
 			for ( int k = 1; k + 1 < count; k++ ) {

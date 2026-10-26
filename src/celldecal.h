@@ -33,8 +33,8 @@
  *
  * NAMED DIFFERENCES from the game: the ray meets the DRAWN opaque triangles,
  * not the collision, and starts 1 unit behind the reference so that a decal
- * placed exactly on its surface still meets it; the angle rule's N is the receiver's interpolated vertex
- * normal without the receiver's normal map (the game reads the drawn normal); cutout (alpha-tested) surfaces do not receive; no distance
+ * placed exactly on its surface still meets it; the angle rule's N is the drawn normal of the shared opaque
+ * pass (lane DECALANGLE2), the interpolated vertex normal where that pass is absent or shows another surface; cutout (alpha-tested) surfaces do not receive; no distance
  * fade and no parallax. */
 
 #include <QString>
@@ -72,6 +72,7 @@ struct CellDecalVert
 	float uv[2];
 	float alpha;    //!< the angle fade, per vertex (the bake's coverage; red "vertexangle" draws it)
 	float angle;    //!< lane DECALANGLE: what the draw's vertex alpha carries (src/celldecalangle.h)
+	float dir[3];   //!< lane DECALANGLE2: D (minus the projection axis), for the drawn-normal rule
 };
 
 //! The decals of one texture set, welded.
@@ -109,6 +110,7 @@ struct CellDecalResult
 	int withPrimitive = 0, byRay = 0;
 	QString red;                        //!< the red control in force, empty when none
 	bool vertexAngle = false;           //!< lane DECALANGLE red "vertexangle": the old per-vertex fade is drawn
+	bool mapped = true;                 //!< lane DECALANGLE2: the rule reads the drawn (normal-mapped) normal; red "nonormalmap"
 };
 
 /*! Project every decal reference onto the receivers. `origin` is what the

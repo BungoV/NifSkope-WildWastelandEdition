@@ -84,6 +84,38 @@ inline bool mayPass( float dMax, const float n0[3], const float n1[3], const flo
 	return dMax > kMin * std::min( lenLow, 1.0f ) * 0.999f;
 }
 
+/* lane DECALANGLE2: the DRAWN normal (the receiver's normal map), as the game reads its G-buffer. The decal pass reads
+ * the cell view's shared opaque pass (view normal per pixel, src/gl/celllights.cpp) and needs D itself, carried in
+ * the vertex colour's rgb as a signed byte: byte = round(127 d + 128), d = (byte - 128) / 127 (0 and +-1 exact). */
+inline float dirToColour( float d )
+{
+	return std::round( 127.0f * std::max( -1.0f, std::min( 1.0f, d ) ) + 128.0f ) / 255.0f;
+}
+
+inline float dirFromColour( float c )
+{
+	return ( c * 255.0f - 128.0f ) / 127.0f;
+}
+
+//! The face passes when every corner carries 1 (vertexValue): the interpolated value then stays 1.
+constexpr float kFacePass = 254.5f / 255.0f;
+
+//! The term on the drawn normal: value = the interpolated vertex value, gDot = dot(drawn unit normal, D).
+inline float mappedTerm( float value, float gDot )
+{
+	return value >= kFacePass ? 1.0f : sat( ( gDot - kMin ) / kFade );
+}
+
+/* A normal map leans the drawn normal off the vertex normal; up to kLean (45 degrees) a pixel can pass only while the
+ * interpolated vertex normal's angle to D is under acos(0.3) + 45 deg, i.e. its dot over -0.46. The interpolated
+ * normal's normalised dot is at most dMax / length <= dMax when dMax < 0, so dMax <= kLeanDot rejects safely. */
+constexpr float kLeanDot = -0.4625f;   // just under cos(acos(0.3) + 45 deg) = -0.4624
+
+inline bool mayPassMapped( float dMax )
+{
+	return dMax > kLeanDot;
+}
+
 }	// namespace celldecalangle
 
 #endif

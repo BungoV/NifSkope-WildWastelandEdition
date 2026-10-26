@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane DECALANGLE2 (2026-10-26, branch decalangle-20261026): the decal angle rule reads the drawn normal map
+
+- **The drawn normal, as the game's G-buffer:** the angle fade now reads the receiver's normal-mapped normal per pixel
+  from the cell view's shared opaque pass (the one ambient occlusion, reflections and contact shadows already read;
+  view normal and depth). Each piece vertex carries D in its colour (a signed byte) and the face test in its alpha.
+  Where the pass shows another, nearer surface (or there is no pass) the vertex normal rule is used.
+- **Walls too:** with a normal map a wall or overhang inside a decal box can lean a pixel over the 0.3 threshold, as in
+  the game; such faces are now kept when any pixel can pass (normal map lean up to 45 degrees).
+- The shared opaque pass is kept while a cell holds such a decal (census: `shared opaque pass kept for ... decalangle`).
+- Red: `WW_CELL_DECAL_RED=nonormalmap` reads the vertex normal (lane DECALANGLE's rule); `vertexangle` stays.
+- Offline gate: `tests/decalangle_gate.cpp` (e)-(g), a normal-mapped fixture (leans to 40 degrees, two decal
+  directions); reds `-DMAPPED_RED`, `-DMCULL_RED`. Drawn vs game: worst 0.008 per pixel; the vertex normal rule
+  misses by up to 1.0.
+- Cost: no extra memory (the pass is shared); one texture read per decal pixel that is not on a flat-passing face.
+  GPU ms owed from the live rows (the shared pass costs its own draw when nothing else keeps it).
+
 ## Lane DECALANGLE (2026-10-26, branch decalangle-20261026): placed decals fade on steep faces per pixel, as the game
 
 - **The game's angle rule, per pixel:** a placed decal covers a pixel whole when the flat face looks back at the decal
@@ -9,7 +25,7 @@
   vertex and interpolated, which lets it reach further down a smoothed stair riser (the long riser streaks).
 - **Fallout 4 paints smoothed risers too:** on the Vault 111 hall stairs (V111HallStairs01) the game's rule still
   covers about 39% of the riser area inside the decal boxes; the old rule covered about 45%.
-- **Named difference:** the receiver's normal map is not read (the game reads the drawn normal).
+- **Named difference:** the receiver's normal map is not read (the game reads the drawn normal); closed by DECALANGLE2.
 - The pre-cull keeps every triangle any of whose pixels can pass (a bound on the interpolated normal's length).
 - Red: `WW_CELL_DECAL_RED=vertexangle` draws the old per-vertex fade (read at cell build: a launch key).
 - Offline gate: `tests/decalangle_gate.cpp` (a smoothed 6-step stair under a decal box); reds `-DANGLE_RED`, `-DCULL_RED`.

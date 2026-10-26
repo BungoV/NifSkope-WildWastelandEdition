@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include "cellweapon.h"		// lane MISS1 (GAPLOOK2)
 #include "cellcable.h"		// lane CABLES1
 #include "celldecal.h"		// lane PLACED1
+#include "celldecalangle.h"	// lane DECALANGLE2
 #include "esmdata.h"
 #include "esmfile.hpp"		// lane LEFTOVERS1: light-plugin form IDs back to their file
 #include "esmweather.h"		// lane FOG2: the fog packing
@@ -210,6 +211,7 @@ struct Bucket
 	quint32 xemi = 0;   // lane LIGHTS2 (XEMI1): the placement's emittance colour, 0x01RRGGBB (bit 24 = set), 0 = none
 	bool decal = false;   // lane PLACED1: a placed decal's pieces (src/celldecal.h): Decal flag, no depth write
 	bool decalAngle = false;   // lane DECALANGLE: its vertex alpha is dot(N, D); the shader runs the angle rule
+	bool decalMapped = false;  // lane DECALANGLE2: its vertex rgb is D; the rule reads the drawn normal
 	quint32 decalSF1 = 0;   // lane GAPFIX1: a lighting source's own Decal / Dynamic_Decal bits (the model's flags), kept
 	QString heightTex;      // lane DECALS1: a placed decal's TX04 height map (texture slot 2; no glow on decals)
 	float pomScale = 0.0f;  // lane DECALS1: its DODT parallax scale and passes
@@ -565,7 +567,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		}
 		emitLap( 2 );
 		if ( b.decalAngle )   // lane DECALANGLE: the renderer runs the game's angle rule per pixel on this shape
-			wwCellDecalAngleShape( nif, nif->getBlockNumber( iShape ) );
+			wwCellDecalAngleShape( nif, nif->getBlockNumber( iShape ), b.decalMapped );
 		if ( b.decal && !b.heightTex.isEmpty() )   // lane DECALS1: the renderer runs the decal parallax on this shape
 			wwCellDecalPomShape( nif, nif->getBlockNumber( iShape ), b.pomScale, b.pomPasses );
 		if ( b.water )        // lane WATER1: the renderer draws this shape with the game's water terms
@@ -5784,6 +5786,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			b.pomPasses = m.parallaxPasses;
 			b.decal = true;
 			b.decalAngle = !decalResult.vertexAngle;   // lane DECALANGLE
+			b.decalMapped = b.decalAngle && decalResult.mapped;   // lane DECALANGLE2
 			b.hasAlpha = true;       // blended; the vertex alpha carries the angle fade (or its dot, decalAngle)
 			b.alphaThreshold = 0;
 			b.withColour = true;
@@ -5796,6 +5799,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				o.bit = Vector3( v.bit[0], v.bit[1], v.bit[2] );
 				o.uv = Vector2( v.uv[0], v.uv[1] );
 				o.chan[3] = b.decalAngle ? v.angle : v.alpha;
+				for ( int c = 0; b.decalMapped && c < 3; c++ )   // lane DECALANGLE2: D as a signed byte
+					o.chan[c] = celldecalangle::dirToColour( v.dir[c] );
 				b.verts.push_back( o );
 			}
 			for ( size_t t = 0; t + 2 < m.tris.size(); t += 3 )

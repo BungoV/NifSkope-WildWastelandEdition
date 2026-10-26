@@ -1030,9 +1030,28 @@ void wwCellDecalPomShape( const void * nif, int block, float scale, int passes )
 	st().decalPom[nif].insert( block, std::make_pair( scale, passes ) );
 }
 
-void wwCellDecalAngleShape( const void * nif, int block )
+void wwCellDecalAngleShape( const void * nif, int block, bool mapped )
 {
-	st().decalAngle[nif].insert( block, true );
+	st().decalAngle[nif].insert( block, mapped );
+}
+
+bool wwCellDecalMappedFor( const void * nif, int block )
+{
+	const CullState & s = st();
+	auto d = s.decalAngle.constFind( nif );
+	return d != s.decalAngle.constEnd() && d->value( block, false );
+}
+
+bool wwCellDecalMappedHas( const void * nif )
+{
+	const CullState & s = st();
+	auto d = s.decalAngle.constFind( nif );
+	if ( d == s.decalAngle.constEnd() )
+		return false;
+	for ( bool m : *d )
+		if ( m )
+			return true;
+	return false;
 }
 
 bool wwCellDecalAngleFor( const void * nif, int block )
