@@ -258,6 +258,7 @@ HEADERS += \
 	src/gl/cellvolair.h \
 	src/gl/cellpasstime.h \
 	src/gl/cellqueue.h \
+	src/gl/celldrawpacket.h \
 	src/gl/cellgpucull.h \
 	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
@@ -541,6 +542,7 @@ SOURCES += \
 	src/gl/cellvolair.cpp \
 	src/gl/cellpasstime.cpp \
 	src/gl/cellqueue.cpp \
+	src/gl/celldrawpacket.cpp \
 	src/gl/cellgpucull.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \

@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellspeed.h"
 #include "celltexahead.h"
 #include "cellpasstime.h"	// lane STREAM1
+#include "celldrawpacket.h"	// lane GAPPERF-BINDLESS
 
 #include "message.h"
 #include "gl/glscene.h"
@@ -373,11 +374,14 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 	if ( !tx->target ) [[unlikely]]
 		tx->target = GL_TEXTURE_2D;
 	glBindTexture( tx->target, tx->id[0] );
+	WWDP( WwDp::BindTex, GLint( tx->target ), GLint( tx->id[0] ) );	// lane GAPPERF-BINDLESS
 	// lane PERF5: the shadow follows its own caller's binds; any other caller may set other parameters
-	if ( wwParamCaller && tx->target == GL_TEXTURE_2D )
+	if ( wwParamCaller && tx->target == GL_TEXTURE_2D ) {
 		paramId = tx->id[0];
-	else
+	} else {
 		paramForget( tx->id[0] );
+		WwDp::abortRecording();
+	}
 
 	return tx->mipmaps;
 }
@@ -433,6 +437,7 @@ bool TexCache::wwParamsNeeded( int wrapS, int wrapT, int minFilter, float aniso 
 
 void TexCache::wwParamFrame()
 {
+	WwDp::frame();	// lane GAPPERF-BINDLESS: last frame's draw packets are void
 	if ( ++paramEpoch == 0 )
 		paramEpoch = 1;
 	if ( paramSkips || paramSets ) {
@@ -470,6 +475,7 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 	}
 
 	glBindTexture( tx->target, tx->id[size_t(useSecondTexture)] );
+	WWDP( WwDp::BindTex, GLint( tx->target ), GLint( tx->id[size_t(useSecondTexture)] ) );	// lane GAPPERF-BINDLESS
 
 	if ( !tx->mipmaps ) [[unlikely]]
 		return false;
@@ -481,12 +487,20 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 	glTexParameteri( GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
 	glTexParameteri( GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	glTexParameteri( GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+	if ( WwDp::rec ) {
+		WWDP( WwDp::Enable, GL_TEXTURE_CUBE_MAP_SEAMLESS );
+		const GLint cp[5][2] = { { GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE }, { GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE },
+			{ GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE }, { GL_TEXTURE_MAG_FILTER, GL_LINEAR }, { GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR } };
+		for ( const auto & q : cp )
+			WwDp::put( WwDp::TexParamI, GL_TEXTURE_CUBE_MAP, q[0], &q[1], 1 );
+	}
 
 	return true;
 }
 
 std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 {
+	WwDp::abortRecording();	// lane GAPPERF-BINDLESS: a load is never replayed
 	Tex *	t = &txIn;
 	Tex::ImageInfo *	i = t->imageInfo;
 	CellSpeed::Acc speedAcc( "texture loads (find, decode, upload)" );   // lane SPEED1
@@ -581,6 +595,7 @@ int TexCache::bind( const QModelIndex & iSource )
 void TexCache::flush()
 {
 	paramShadow.clear();	// lane PERF5
+	WwDp::invalidate();	// lane GAPPERF-BINDLESS: packets name these textures
 	for ( size_t i = 0; i <= textureHashMask; i++ ) {
 		Tex &	tx = textures[i];
 		if ( tx.isLoaded() ) {
@@ -614,6 +629,7 @@ int TexCache::evictUnused( std::uint32_t tick, QStringList * names )
 			continue;
 		PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
 		paramForget( tx.id[0] );	// lane PERF5
+		WwDp::invalidate();	// lane GAPPERF-BINDLESS
 		glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
 		tx.id[0] = tx.id[1] = 0;
 		tx.mipmaps = 0;

@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GAPPERF-BINDLESS (2026-10-25, branch bindless-20261025): draw packets in the cell view (speed change, no menu row)
+
+- **Draw packets (PERF5-DRAWPACKETS):** a cell-lit shape's material setup (every uniform, texture bind, texture
+  parameter and blend/cull/depth call of the legacy FO4 setup, up to the scene globals) is recorded the first time
+  the shape is set up in a frame (the obscurance pass) and replayed in the frame's later passes, so the main pass
+  skips the texture name lookups. The shape's own transforms are set live. Packets last one frame, are dropped when
+  a texture is deleted and are never kept when a texture had to load. Only fo4_cell / fo4_cellcsm, FO4 materials,
+  no refraction, not while selecting. `WW_DRAW_PACKET_RED=1` = the setup every time (test red only);
+  `WW_DRAW_PACKET_CHECK=1` replays, runs the full setup anyway and counts what differs (uniforms, the 32 units'
+  bindings, the blend/cull/depth state, the material units' sampler state and the call list): "draw packets: ...
+  mismatches=" must stay 0. New files src/gl/celldrawpacket.{h,cpp}.
+- **Bindless textures: not shipped.** A sampler handle freezes the texture's wrap/filter state, and the same texture is
+  bound with other states elsewhere, so the picture could change. The shader side was proven identical offline
+  (the bindless_sampler qualifier compiles to the same NVIDIA machine code); notes in the lane folder.
+
 ## Lane PERF5 (2026-10-25, branch perf5-20261023): three CPU cuts in the cell view (speed changes, no menu rows)
 
 - **Reflections from last frame's colour by default:** the PERF3 path that reflects the previous frame's lit colour

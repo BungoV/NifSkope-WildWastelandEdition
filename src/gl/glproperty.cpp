@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the sampler census
+#include "gl/celldrawpacket.h"	// lane GAPPERF-BINDLESS
 
 /*! Which vertex-colour channel the viewport previews, or 0 for normal shading.
  *  It lives here because this is where the vertex-colour uniforms are set: the
@@ -312,8 +313,12 @@ void AlphaProperty::glProperty( AlphaProperty * p, NifSkopeOpenGLContext::Progra
 		glEnable( GL_BLEND );
 		prog->f->glBlendFuncSeparate( p->alphaSrc, p->alphaDst, GL_ONE, p->alphaDst );
 		alphaFlags = 8;
+		const GLint bf[4] = { GLint( p->alphaSrc ), GLint( p->alphaDst ), GL_ONE, GLint( p->alphaDst ) };
+		WWDP( WwDp::Enable, GL_BLEND );
+		WWDP( WwDp::BlendSep, 0, 0, bf, 4 );
 	} else {
 		glDisable( GL_BLEND );
+		WWDP( WwDp::Disable, GL_BLEND );
 	}
 
 	if ( !prog )
@@ -1662,6 +1667,12 @@ bool BSShaderLightingProperty::bind( const QStringView & fname, bool forceTextur
 	GLint wrapS = clampModes[i];
 	GLint wrapT = clampModes[i + 1];
 	const GLint minFilter = mipmaps > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR;
+	if ( WwDp::rec ) {	// lane GAPPERF-BINDLESS: the replay asks the shadow again for the texture just bound
+		const float an = TexCache::get_max_anisotropy();
+		std::int32_t w[4] = { wrapS, wrapT, minFilter, 0 };
+		std::memcpy( &w[3], &an, 4 );
+		WwDp::put( WwDp::TexParamNeeded, 0, WwDp::lastBound(), w, 4 );
+	}
 	if ( scene->textures->wwParamsNeeded( wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() ) ) {
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT );
