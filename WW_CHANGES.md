@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane TAA4 (2026-10-26, branch taa4-20261026): modern TAA still shimmer and lag under the game's
+
+- **Still Ultra shimmer fixed (0.0349 -> 0.0094, game 0.0122):** TAAINPUTS1 decided "same frame again" from the camera
+  and the clock only. The path runner holds the clock, so on a still path every frame counted as a repeat, the previous
+  view matrix went stale and the vectors read hundreds of px (crop mean 213 px). Ultra (the only tier reading them)
+  threw its history away and showed the raw jittered frame. The step key is now the TAA frame index
+  (`wwGameTaaFrame`); a skipped index is a cut (no previous view); the pass forgets its view while it is off.
+  Red: `WW_TAAINPUTS_RED=stalestep` (live still shimmer 0.0511). inputs.txt prints taaframe / cut / stalestep.
+- **Lag under the game's on every tier** (slow / fast lag vs the game's 0.0366 / 0.0367): Low 0.0291 / 0.0241,
+  Medium 0.0346 / 0.0309, High 0.0328 / 0.0290, Ultra 0.0336 / 0.0294. taa2.frag: the history weight falls to 0.4 by
+  2 px of motion a frame (was 0.8 by 32 px), and the current filter is exp(-4 d^2) (was the 2.29 Blackman-Harris fit).
+  Still shimmer stays under the game's (Low 0.0076, Medium 0.0052, High 0.0089, Ultra 0.0094). Reds:
+  `WW_TAA2_RED=oldmotion` (Medium slow lag 0.0449) and `WW_TAA2_RED=oldfilter` (0.0425), both over the game's.
+- **WW_TAA2_DUMP:** the crop of a linear (before-tone-map) resolve is float and read from the linear frame the resolve
+  wrote (it read another picture: detail 0.003); cur_ is dumped for linear frames too; new mv_/msk_/dep_ crops (the
+  vectors, mask and depth the resolve read) and expose + reproj in taa2.txt, so a hold replays offline through the real
+  shader (notes taa4/sim/replay.py: moving rows within 0.0001 lag of live).
+- GPU: Ultra resolve 0.11-0.12 ms (1080p, live); the linear-frame rows 0.48-0.51 ms as on the base.
+
 ## Lane LIGHTPHYS4 (2026-10-26, branch lightphys4-20261026): far lights and live doors follow the light rows
 
 - **Far lights bounce on the rows' curve, live:** the far light bake (WW_CELL_FARLIGHT) now runs its placed-only

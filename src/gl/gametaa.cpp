@@ -186,7 +186,7 @@ struct TaaState
 	// lane TAA2: the Modern temporal AA tier (0 Off = the game's resolve), its reds and its dump
 	int taa2 = 0;
 	bool taa2Pinned = false, taa2Fresh = true;
-	int taa2Red = 0;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter, 8 nolock, 16 noinputs (lane TAA3)
+	int taa2Red = 0;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter, 8 nolock, 16 noinputs (lane TAA3), 32 oldmotion, 64 oldfilter (TAA4)
 	bool taa2Hdr = false, taa2HdrPinned = false;	// lane TAA3: resolve the linear frame before its tone map
 	bool hdrTook = false, inputsRan = false;	// lane TAA3: this frame's linear resolve ran / ran the inputs pass
 	QString taa2Dump;
@@ -266,7 +266,8 @@ TaaState & ts()
 		const QString red2 = wwEnvStr( "WW_TAA2_RED" ).trimmed();
 		s.taa2Red = ( red2.contains( QLatin1StringView( "noclip" ) ) ? 1 : 0 ) | ( red2.contains( QLatin1StringView( "nobicubic" ) ) ? 2 : 0 )
 			| ( red2.contains( QLatin1StringView( "wrongjitter" ) ) ? 4 : 0 ) | ( red2.contains( QLatin1StringView( "nolock" ) ) ? 8 : 0 )
-			| ( red2.contains( QLatin1StringView( "noinputs" ) ) ? 16 : 0 );
+			| ( red2.contains( QLatin1StringView( "noinputs" ) ) ? 16 : 0 )
+			| ( red2.contains( QLatin1StringView( "oldmotion" ) ) ? 32 : 0 ) | ( red2.contains( QLatin1StringView( "oldfilter" ) ) ? 64 : 0 );
 		s.taa2Dump = wwEnvStr( "WW_TAA2_DUMP" ).trimmed();
 		// lane TAA3: WW_TAA2_HDR=0|1 pins the before-tone-map resolve; a harness without it resolves the toned frame
 		const QString pinHdr = wwEnvStr( "WW_TAA2_HDR" ).trimmed();
@@ -357,7 +358,7 @@ bool dumpFloat( const QString & path, int w, int h, int ch, const std::vector<fl
 	return true;
 }
 
-std::vector<float> readFloat( Renderer * r, GLuint fbo, GLenum attachment, GLenum format, int ch, int w, int h )
+std::vector<float> readFloat( Renderer * r, GLuint fbo, GLenum attachment, GLenum format, int ch, int w, int h, int x = 0, int y = 0 )
 {
 	auto fn = r->fn;
 	std::vector<float> v( size_t( w ) * size_t( h ) * size_t( ch ) );
@@ -365,7 +366,7 @@ std::vector<float> readFloat( Renderer * r, GLuint fbo, GLenum attachment, GLenu
 	if ( attachment != GL_DEPTH_ATTACHMENT )
 		fn->glReadBuffer( attachment );
 	fn->glPixelStorei( GL_PACK_ALIGNMENT, 1 );
-	fn->glReadPixels( 0, 0, w, h, format, GL_FLOAT, v.data() );
+	fn->glReadPixels( x, y, w, h, format, GL_FLOAT, v.data() );
 	return v;
 }
 
@@ -507,6 +508,15 @@ bool wwGameTaaJitter( float & offX, float & offY )
 		return false;
 	offX = s.offX;
 	offY = s.offY;
+	return true;
+}
+
+bool wwGameTaaFrame( int & frame )
+{
+	const TaaState & s = ts();
+	if ( !s.jittered )
+		return false;
+	frame = s.frame;
 	return true;
 }
 
@@ -902,6 +912,7 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 	const float jpx = s.offX * 0.5f * float( W ), jpy = s.offY * 0.5f * float( H );	// pixel p saw the scene at p - j
 	bool noHist2 = false;
 	int taa2Inputs = 0;	// lane TAA3: bits 1 velocity, 2 mask read this frame
+	GLuint taa2Vel = 0, taa2Mask = 0;	// lane TAA4: the vectors / mask the resolve read (WW_TAA2_DUMP's mv_, msk_)
 	if ( ok && modern ) {
 		if ( !g.hist2[0] ) {
 			for ( int i = 0; i < 2; i++ ) {
@@ -974,6 +985,8 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 			prog->uni1i( "maskTex", kUnitMask );
 			prog->uni1i( "taa2Inputs", inputs );
 			taa2Inputs = inputs;
+			taa2Vel = ( inputs & 1 ) ? velTex : g.mv;
+			taa2Mask = ( inputs & 2 ) ? maskTex : 0;
 			prog->uni1i( "taa2Linear", linear ? 1 : 0 );
 			prog->uni1f( "taa2Expose", linear ? expose : 1.0f );
 			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
@@ -1033,23 +1046,45 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 		QDir().mkpath( s.taa2Dump );
 		const QString d = s.taa2Dump + QLatin1Char( '/' );
 		const int x0 = ( W - kTaa2Crop ) / 2, y0 = ( H - kTaa2Crop ) / 2;
-		const GLuint crop = makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, kTaa2Crop, kTaa2Crop, GL_NEAREST );
+		// lane TAA4: a linear frame is cropped in float (RGBA8 clamped it to 1)
+		const GLuint crop = linear ? makeTex( r, GL_RGBA32F, GL_RGBA, GL_FLOAT, kTaa2Crop, kTaa2Crop, GL_NEAREST )
+			: makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, kTaa2Crop, kTaa2Crop, GL_NEAREST );
 		GLuint cropFbo = 0;
 		fn->glGenFramebuffers( 1, &cropFbo );
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, cropFbo );
 		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, crop, 0 );
 		const GLenum one = GL_COLOR_ATTACHMENT0;
 		fn->glDrawBuffers( 1, &one );
-		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );	// a multisampled frame resolves here
+		// lane TAA4: a linear resolve wrote into the linear frame; prevDraw still held another picture (detail 0.003)
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, linear ? linearFbo : GLuint( prevDraw ) );	// a multisampled frame resolves here
+		if ( linear )
+			fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
 		fn->glBlitFramebuffer( x0, y0, x0 + kTaa2Crop, y0 + kTaa2Crop, 0, 0, kTaa2Crop, kTaa2Crop, GL_COLOR_BUFFER_BIT, GL_NEAREST );
 		const QString tag = QString::number( s.frame - s.dumpFrame ).rightJustified( 2, QLatin1Char( '0' ) );
 		dumpFloat( d + "out_" + tag + ".bin", kTaa2Crop, kTaa2Crop, 4, readFloat( r, cropFbo, GL_COLOR_ATTACHMENT0, GL_RGBA, 4, kTaa2Crop, kTaa2Crop ) );
-		if ( !linear ) {	// lane TAA3: before the tone map the frame's input is linear (out_ only; the metrics take that)
-			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.inFbo );
-			fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
-			fn->glBlitFramebuffer( x0, y0, x0 + kTaa2Crop, y0 + kTaa2Crop, 0, 0, kTaa2Crop, kTaa2Crop, GL_COLOR_BUFFER_BIT, GL_NEAREST );
-			dumpFloat( d + "cur_" + tag + ".bin", kTaa2Crop, kTaa2Crop, 4, readFloat( r, cropFbo, GL_COLOR_ATTACHMENT0, GL_RGBA, 4, kTaa2Crop, kTaa2Crop ) );
+		// the frame as it came in (lane TAA4: a linear one too; the metrics put both through one display transform)
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.inFbo );
+		fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
+		fn->glBlitFramebuffer( x0, y0, x0 + kTaa2Crop, y0 + kTaa2Crop, 0, 0, kTaa2Crop, kTaa2Crop, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+		dumpFloat( d + "cur_" + tag + ".bin", kTaa2Crop, kTaa2Crop, 4, readFloat( r, cropFbo, GL_COLOR_ATTACHMENT0, GL_RGBA, 4, kTaa2Crop, kTaa2Crop ) );
+		// lane TAA4: the vectors the resolve read and the frame's depth, same crop (the offline replay reads them)
+		if ( taa2Vel ) {
+			GLuint velFbo = 0;
+			fn->glGenFramebuffers( 1, &velFbo );
+			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, velFbo );
+			fn->glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, taa2Vel, 0 );
+			dumpFloat( d + "mv_" + tag + ".bin", kTaa2Crop, kTaa2Crop, 2,
+				readFloat( r, velFbo, GL_COLOR_ATTACHMENT0, GL_RG, 2, kTaa2Crop, kTaa2Crop, x0, y0 ) );
+			if ( taa2Mask ) {	// TAAINPUTS1's mask (r reactive, g composition, b own motion)
+				fn->glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, taa2Mask, 0 );
+				dumpFloat( d + "msk_" + tag + ".bin", kTaa2Crop, kTaa2Crop, 4,
+					readFloat( r, velFbo, GL_COLOR_ATTACHMENT0, GL_RGBA, 4, kTaa2Crop, kTaa2Crop, x0, y0 ) );
+			}
+			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
+			fn->glDeleteFramebuffers( 1, &velFbo );
 		}
+		dumpFloat( d + "dep_" + tag + ".bin", kTaa2Crop, kTaa2Crop, 1,
+			readFloat( r, g.inFbo, GL_DEPTH_ATTACHMENT, GL_DEPTH_COMPONENT, 1, kTaa2Crop, kTaa2Crop, x0, y0 ) );
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, 0 );
 		fn->glDeleteFramebuffers( 1, &cropFbo );
 		fn->glDeleteTextures( 1, &crop );
@@ -1058,7 +1093,8 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 			QTextStream t( &f );
 			t << "frame " << s.frame << " tier " << s.taa2 << " gameRow " << ( s.on ? 1 : 0 ) << " red " << s.taa2Red
 			  << " jitterPx " << f9( jpx ) << ' ' << f9( jpy ) << " noHist " << ( noHist2 ? 1 : 0 ) << " reset " << ( reset ? 1 : 0 )
-			  << " ms " << f9( s.taa2Ms ) << " W " << W << " H " << H << " hdr " << ( linear ? 1 : 0 ) << " inputs " << taa2Inputs << '\n';
+			  << " ms " << f9( s.taa2Ms ) << " W " << W << " H " << H << " hdr " << ( linear ? 1 : 0 ) << " inputs " << taa2Inputs
+			  << " expose " << f9( linear ? expose : 1.0f ) << " reproj " << mat( reproj4 ) << '\n';
 		}
 	}
 
