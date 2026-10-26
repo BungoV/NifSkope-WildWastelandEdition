@@ -158,6 +158,7 @@ private:
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellpasstime.h"	// lane PERF1
+#include "gl/cloudvol.h"	// lane CLOUD2B: the volume clouds' depth test
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -4288,6 +4289,8 @@ void GLView::paintGL()
 			PassTime::end( PassTime::Background );
 			scene->draw();	// lane PERF1: opaque / sorted / effects timed inside (Scene::drawShapes)
 			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)
+			if ( !hdr )
+				wwCloudVolLookdevFront( scene );	// lane CLOUD2C: clouds in front of a single NIF (its opaque depth)
 			if ( hdr ) {
 				PassTime::begin( PassTime::FarCards );
 				PassTime::subBegin( PassTime::FarDots );	// lane PERF2: far LOD measured (proposal only)
@@ -4298,9 +4301,11 @@ void GLView::paintGL()
 				PassTime::subEnd( PassTime::FarCardsLit );
 				PassTime::end( PassTime::FarCards );
 				wwCellLensFlareGrab( scene );	// lane LIGHTS3: the opaque depth for the flares' occlusion test
+				wwCloudVolSceneDepth( scene );	// lane CLOUD2B: the depth the volume clouds test against
 				PassTime::begin( PassTime::ToneMap );
 				wwCellHdrEnd( scene );
 				PassTime::end( PassTime::ToneMap );
+				wwCloudVolFront( scene );	// lane CLOUD2B: clouds in front of the scene (a ridge behind them)
 			}
 			// lane FARLOD1: the cards when the frame is not HDR (lit and toned by their own program), then the
 			// census a gate reads

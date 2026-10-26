@@ -199,6 +199,7 @@ QHash<Renderer *, AtGpu> & gpus()
 }
 
 AtGpu * g_last = nullptr;
+WwAtmoFrame g_frame;	// lane CLOUD2
 
 bool ensure( NifSkopeOpenGLContext::GLFunctions * fn, Target & t, int w, int h )
 {
@@ -665,6 +666,22 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		g.cur = 1 - g.cur;
 	}
 	g_last = ok ? &g : nullptr;
+	if ( !in.capture ) {	// lane CLOUD2: what the volume clouds light with
+		WwAtmoFrame & f = g_frame;
+		f.valid = ok;
+		std::copy( sunW, sunW + 3, f.sunW );
+		std::copy( moonW, moonW + 3, f.moonW );
+		f.sunK = sunK;
+		f.moonK = moonK;
+		f.camR = camR;
+		std::copy( s.haze, s.haze + 3, f.haze );
+		f.trans = g.trans.tex;
+		f.sunView = g.sunView.tex;
+		f.moonView = moonK > 0.0f ? g.moonView.tex : g.sunView.tex;
+		f.viewW = vw;
+		f.viewH = vh;
+		f.frame = s.frame;
+	}
 
 	const float sunEl = std::asin( std::clamp( sunW[2], -1.0f, 1.0f ) ) * 180.0f / kPi;
 	QString reds;
@@ -697,6 +714,11 @@ unsigned wwAtmoTransmittanceTex()
 unsigned wwAtmoMultiScatterTex()
 {
 	return g_last ? g_last->ms.tex : 0;
+}
+
+const WwAtmoFrame & wwAtmoFrame()
+{
+	return g_frame;
 }
 
 unsigned wwAtmoSkyViewTex()
@@ -845,6 +867,7 @@ void wwAtmoApFrame()
 {
 	for ( AtGpu & g : gpus() )
 		g.ap.valid = false;
+	g_frame.valid = false;	// lane CLOUD2: this frame's sky refills it
 	as().frame++;
 }
 

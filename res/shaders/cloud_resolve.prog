@@ -1,0 +1,3 @@
+# lane CLOUD2: the volume clouds (src/gl/cloudvol.cpp), selected by name.
+
+shaders cell_ao.vert cloud_resolve.frag

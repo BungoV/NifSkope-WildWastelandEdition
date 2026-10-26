@@ -41,6 +41,20 @@ unsigned wwAtmoTransmittanceTex();
 unsigned wwAtmoMultiScatterTex();
 unsigned wwAtmoSkyViewTex();
 
+//! lane CLOUD2: the last drawn (non-capture) sky's frame values, for the volume clouds; valid = false otherwise
+struct WwAtmoFrame
+{
+	bool valid = false;
+	float sunW[3] = { 0, 0, 1 }, moonW[3] = { 0, 0, 1 };	//!< world, TO the light, normalised
+	float sunK = 0.0f, moonK = 0.0f;	//!< scene units per unit LUT radiance (moonK 0 = the moon is down)
+	float camR = 0.0f;	//!< km from the planet's centre, as the sky-view tables were drawn
+	float haze[3] = { 0.0f, 1.0f, 0.0f };
+	unsigned trans = 0, sunView = 0, moonView = 0;
+	int viewW = 0, viewH = 0;
+	unsigned long long frame = 0;	//!< wwAtmoApFrame's count when drawn
+};
+const WwAtmoFrame & wwAtmoFrame();
+
 //! the CPU transmittance (the LUT's math) from height km along cos zenith, haze from the last drawn frame
 void wwAtmoTransmittance( float heightKm, float cosZenith, float out[3] );
 

@@ -248,6 +248,10 @@ HEADERS += \
 	src/gl/cellbloom.h \
 	src/gl/cellfogbloom.h \
 	src/gl/atmosphere.h \
+	src/gl/cloudmap.h \
+	src/gl/cloudnoise.h \
+	src/gl/cloudvol.h \
+	src/gl/cloudvolmath.h \
 	src/gl/atmomath.h \
 	src/gl/cellprobeview.h \
 	src/gl/cellvolumeview.h \
@@ -534,6 +538,8 @@ SOURCES += \
 	src/gl/cellbloom.cpp \
 	src/gl/cellfogbloom.cpp \
 	src/gl/atmosphere.cpp \
+	src/gl/cloudmap.cpp \
+	src/gl/cloudvol.cpp \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellvolumeview.cpp \
 	src/gl/cellssr.cpp \

@@ -1,5 +1,92 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CLOUD2C (2026-10-26, branch cloud2c-20261026): volume clouds in the linear frame, first paint, lookdev, tops, wind
+
+- **Clouds in front of terrain go into the linear HDR frame** before the tone map (premultiplied, stencil = the cell's
+  pixels), so the cell's imagespace treats them as it treats the terrain behind them. Red `WW_CLOUDVOL_RED=display`
+  keeps CLOUD2B's pass after the tone map.
+- **The first paint clips at this frame's depth:** with no depth yet (a fresh open) or in a harness run, the march and
+  resolve run again after the scene with this frame's depth, so a fresh open draws what a live set draws. The notes line
+  says `clip=last|this|none`. Red `firstpaint`.
+- **Single-NIF lookdev** (outside the cell HDR frame): the scene's opaque depth (Scene::grabEffectDepth) ends the march
+  and the clouds draw over geometry they are in front of (`wwCloudVolLookdevFront`, hooked in src/glview.cpp).
+  Red `lookdevback`.
+- **Cloud tops lit from below:** the light the cloud layer reflects up (two-stream diffuse reflectance, Meador & Weaver
+  1980; Coakley & Chylek 1975) is added to the multiple-scattering floor. GLSL `cvRdir`, C++ `msDiffuseR`. Red `notop`.
+- **Readers get the wind:** `wwCloudVolBindDensity` hands readers the offset the last draw used (it was 0), so CLOUD3's
+  shadows can move with the clouds (notes/cloud2/INTERFACE.md, 2026-10-26). Red `wind0`.
+- The albedo is not counted twice (the two-stream terms carry it for the scatters above, the phase for the last one);
+  the High band stays 2D (the census has no High data). Off draws exactly as before.
+- **Offline gate:** `tests/spells/cloudvol_check.py` adds gates H (linear composite), R (tops vs a Monte Carlo) and W
+  (reader density == drawn density); gate E times the linear composite.
+
+## Lane CLOUD2B (2026-10-26, branch cloud2b-20261026): volume clouds, the dark core, band tints, terrain in front
+
+- **Thick cloud cores** were 19x too dark (gate C 0.053 of a Monte Carlo reference). The key light's phase now has a
+  multiple-scattering floor: the two-stream diffuse transmittance of the layer above the sample (Meador & Weaver 1980,
+  delta-Eddington scaled, Joseph, Wiscombe & Weinman 1976), with the droplet phase's analytic mean cosine (Draine 2003).
+  GLSL `cvTdif` in res/shaders/cloud_march.frag, its C++ twin `msDiffuseT` in src/gl/cloudvolmath.h. Gate C: 0.695.
+- **CLOUD1's band tint** now colours the volume's Low/Mid/High light and the Low tier's 2D layers.
+- **Terrain in front of / behind clouds** (cell view, HDR frame): the march ends at the scene's depth (last frame's),
+  and a second composite after the tone map draws the clouds over geometry they are in front of, never over the sky
+  (`wwCloudVolSceneDepth` / `wwCloudVolFront` in src/gl/cloudvol.h, hooked in src/glview.cpp).
+- The High band stays a 2D sheet. Off draws exactly as before.
+- **Offline gate:** `tests/spells/cloudvol_check.py` adds gates G (tint) and F (ridge). New reds:
+  `WW_CLOUDVOL_RED=noms|nodepth|notint`.
+
+## Lane CLOUD2 (2026-10-26, branch cloud2-20261026): volume clouds (after Schneider, Nubis 2015)
+
+- **Row Render > Scene > Volume Clouds** (Off / Low / Medium / High / Ultra), ships Off, sets live. Pin `WW_CLOUDVOL`
+  (0..4 or the names). Off draws the sky exactly as before. Harness runs read Off unless pinned.
+- **Low** keeps the 2D cloud layers and colours them from the sky model (sun transmittance + sky light at the band).
+  **Medium/High/Ultra** march a volume over the sky instead of the 2D layers: Medium and High at 1/4 resolution
+  (48 steps 3 light taps / 64 steps 6 taps), Ultra at 1/2 (96 steps 6 taps), one pixel in 16 refreshed a frame and the
+  rest reprojected from the history (res/shaders/cloud_march, cloud_resolve, cloud_composite).
+- **Density:** one function, `cloudDensity(p)` in res/shaders/cloud_common.glsl, with every band height in one struct
+  (`CloudBands`). Perlin-Worley 128^3 shape and Worley 32^3 detail noise built on the CPU at first use
+  (src/gl/cloudnoise.h, MIT notice kept), mipped by the reader's footprint. CLOUD1's map gives the coverage per band,
+  calibrated so the volume's projected cover equals the map (src/gl/cloudvolmath.h).
+- **Light:** Frostbite energy-conserving step integration (Hillaire 2015), Wrenninge multiple-scatter octaves, the
+  Jendersie-d'Eon droplet phase (res/shaders/ww_droplet_phase.glsl), sun light through the atmosphere's transmittance.
+- **For CLOUD3/CLOUD4:** `wwCloudVolBindDensity(scene, firstUnit)` (src/gl/cloudvol.h) binds the density to any program.
+- **Offline gate:** `python -I tests/spells/cloudvol_check.py <scratch> [--red nocal|nooctaves|noreproj|flatkey]`
+  (builds tests/cloudvol/cloudvol_dump.cpp with g++; real shaders through the driver; no NifSkope).
+- Reds: `WW_CLOUDVOL_RED=nocal|nooctaves|noreproj|everypixel`.
+
+## Lane CLOUD1 (2026-10-26, branch cloud1-20261026): the cloud map
+
+- **Row Render > Scene > Cloud Map** (Off / Low 256 / Medium 512 / High 512 / Ultra 1024 texels a side), ships Off,
+  sets live. Pin `WW_CLOUDMAP`. Off builds nothing and draws nothing.
+- **What it is:** each frame the weather's active cloud layers (the same Clouds.nif shapes, textures, JNAM alpha and
+  scroll the sky draws) are projected from the dome onto one flat plane per band (Low, Mid, High) and unioned
+  (1 - prod(1 - c)) into an RGBA8 map (R Low, G Mid, B Low sheet, A High), 48 km a side around the eye
+  (res/shaders/cloudmap.*). Nothing draws it yet: the cloud volumes (CLOUD2) read it through `src/gl/cloudmap.h`.
+- **Band numbers from a texture census:** `src/gl/cloudcensus.inc` (generated offline from the vanilla archives:
+  derived numbers only, no game bytes) gives each of the 47 vanilla cloud textures its type (Fill, Lower, LowerLight,
+  Upper, Horizon) and mean alpha, and each Clouds.nif layer its share of the dome. A band's coverage is the union of
+  JNAM alpha x mean alpha x share. Checked offline against the drawn dome for all 107 vanilla weathers: worst 3.2 %.
+  A texture the census never saw (a mod's) takes its type from its name and half coverage, and says so
+  (`uncensused=N` in the line).
+- **Weather changes blend the band parameters** (coverage, heights, density, sheet, tint), never colours
+  (`src/gl/cloudmath.h`, shared with the unit test tests/cloudmap/cloudmath_dump.cpp). `WW_CLOUDMAP_TRANSITION=<0..1>`
+  freezes the blend, `WW_CLOUDMAP_FADE=<s>` gives it a length (default: a snap, like the 2D layers).
+- Reds: `WW_CLOUDMAP_RED=max` (largest layer instead of the union), `=colorblend` (the tint blended as a colour).
+  Pins `WW_CLOUDMAP_ECHO=1` (channel means), `WW_CLOUDMAP_SHOW=1` (the map in the top-right corner).
+- Cost: one pass of the active layers into the map; `cloudmap: gpu N ms` every 120 builds. Memory 256 KB / 1 MB / 1 MB
+  / 4 MB for Low / Medium / High / Ultra.
+
+## Lane CLOUD1 (2026-10-26, branch cloud1-20261026): the cloud map interface (stub)
+
+- **New header `src/gl/cloudmap.h`:** the per-weather cloud map that the volume clouds (CLOUD2) and the cloud
+  shadows will read: one texture (R Low, G Mid, B the Low band's sheet share, A High), its size, its world square,
+  and per band the coverage, base and top height, density, sheet share and tint. Stable from this commit; changes are
+  written in notes/cloud1/INTERFACE.md.
+- **The stub:** `wwCloudMapUpdate` unions the weather's active 2D layer alphas (1 - prod(1 - a)) into the Low band as
+  a 1x1 map. Pin `WW_CLOUDMAP` (off/low/medium/high/ultra or 0..4) turns it on; nothing reads it yet. Off (the
+  default) builds nothing and draws nothing: the picture is the base's.
+- `lookdevstage` gives the map the layers it draws now (`wwLookdevCloudLayers`: texture, JNAM alpha, PNAM colour,
+  scroll offset and the Clouds.nif shape).
+
 ## Lane GOBO3 (2026-10-26, branch gobo3-20261026): light patterns mapped the way the game maps them
 
 - **Light patterns (Show menu, still off; off = drawn exactly as before)** now follow the game's own mapping, read

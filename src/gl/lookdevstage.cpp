@@ -19,6 +19,8 @@ BSD License - see nifskope.h
 #include "gl/scenelighting.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "gl/atmosphere.h"	// lane ATMO1: the physical sky
+#include "gl/cloudmap.h"	// lane CLOUD1: the cloud map
+#include "gl/cloudvol.h"	// lane CLOUD2: the volume clouds
 #include "gl/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
 #include "gl/skyephem.h"	// lane EPHEM1: the real moon's phase texture
 #include "gl/sunshadow.h"
@@ -1628,7 +1630,12 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		const int li = ( quint32( i ) >= s.w.cloudLayers ) ? 0 : i;
 		const float sx = EsmWeather::cloudSpeed( s.w.cloudSpeedX[li], s.gmst );
 		const float sy = EsmWeather::cloudSpeed( s.w.cloudSpeedY[li], s.gmst );
-		prog->uni3f( "colLin", lin( rgb[0] ), lin( rgb[1] ), lin( rgb[2] ) );
+		float lc[3];	// lane CLOUD2: Volume Clouds Low lights the layers by the model (sky units / skyScale)
+		if ( wwCloudVolLowColour( lc ) )
+			prog->uni3f( "colLin", lc[0] / std::max( f.skyScale, 1e-6f ), lc[1] / std::max( f.skyScale, 1e-6f ),
+				lc[2] / std::max( f.skyScale, 1e-6f ) );
+		else
+			prog->uni3f( "colLin", lin( rgb[0] ), lin( rgb[1] ), lin( rgb[2] ) );
 		prog->uni1f( "alpha", alpha < 0.0f ? a : alpha );
 		prog->uni2f( "uvOffset", wwCloudOffset( sx, secs ), wwCloudOffset( sy, secs ) );
 		prog->uni1f( "skyScale", f.skyScale );
@@ -1707,6 +1714,78 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		skipped.isEmpty() ? QString() : QStringLiteral( " skipped=" ) + skipped.join( QChar( ',' ) ) )
 		.arg( secs, 0, 'f', 3 );
 }
+
+} // namespace
+
+bool wwLookdevCloudLayers( Scene * scene, QVector<WwCloudLayerIn> & out, QString & key, float eye[3], QString * why )
+{
+	out.clear();
+	resolve();
+	LdState & s = st();
+	if ( !s.haveWeather ) {
+		if ( why )
+			*why = s.weatherRefusal;
+		return false;
+	}
+	const SkyFrame f = skyFrame();
+	QString mwhy;
+	const QVector<SkyMesh> * ms = scene ? cloudMeshes( scene, &mwhy ) : nullptr;
+	const double secs = wwLookdevCloudSeconds();
+	key = QStringLiteral( "%1|%2|%3" ).arg( s.plugin, s.weatherKey ).arg( s.gen );
+	eye[0] = eye[1] = eye[2] = 0.0f;
+	if ( scene ) {
+		const Transform & vt = scene->view;
+		const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+		for ( int i = 0; i < 3; i++ )
+			for ( int j = 0; j < 3; j++ )
+				eye[i] -= vt.rotation( j, i ) * vt.translation[j] / sc;
+	}
+	const int n = ms ? std::min( int( ms->size() ), 32 ) : 32;
+	for ( int i = 0; i < n; i++ ) {
+		if ( s.w.cloudDisabled & ( 1u << i ) )
+			continue;
+		WwCloudLayerIn L;
+		L.layer = i;
+		EsmWeather::blendCloud( s.w, i, f.c.keys, L.rgb, &L.alpha );
+		if ( L.alpha <= 0.0f || s.w.cloudTex[i].isEmpty() )
+			continue;
+		L.tex = skyTexPath( s.w.cloudTex[i] );
+		const int li = ( quint32( i ) >= s.w.cloudLayers ) ? 0 : i;
+		L.uvOffset[0] = wwCloudOffset( EsmWeather::cloudSpeed( s.w.cloudSpeedX[li], s.gmst ), secs );
+		L.uvOffset[1] = wwCloudOffset( EsmWeather::cloudSpeed( s.w.cloudSpeedY[li], s.gmst ), secs );
+		if ( ms && !ms->at( i ).idx.isEmpty() ) {
+			const SkyMesh & m = ms->at( i );
+			L.pos = m.pos.constData();
+			L.col = m.col.constData();
+			L.uv = m.uv.constData();
+			L.nv = int( m.nv );
+			L.idx = m.idx.constData();
+			L.nIdx = int( m.idx.size() );
+		}
+		out << L;
+	}
+	if ( why )
+		*why = ( scene && !ms ) ? mwhy : QString();
+	return true;
+}
+
+bool wwLookdevCloudMesh( Scene * scene, WwCloudLayerIn & io )
+{
+	const QVector<SkyMesh> * ms = scene ? cloudMeshes( scene, nullptr ) : nullptr;
+	if ( !ms || io.layer < 0 || io.layer >= ms->size() || ms->at( io.layer ).idx.isEmpty() )
+		return false;
+	const SkyMesh & m = ms->at( io.layer );
+	io.pos = m.pos.constData();
+	io.col = m.col.constData();
+	io.uv = m.uv.constData();
+	io.nv = int( m.nv );
+	io.idx = m.idx.constData();
+	io.nIdx = int( m.idx.size() );
+	return true;
+}
+
+namespace
+{
 
 /*! lane SKYFULL1: the night sky. The stars shape (sky object type 5) takes the weather's Stars colour row as
  * its tint and the sky clock's stars alpha; it is hidden at alpha 0 or a black row (as the game does). Its
@@ -1957,10 +2036,15 @@ bool wwLookdevDrawBackground( Scene * scene )
 		if ( sunMul > 0.0f )
 			drawSunQuad( scene, f, false, sunMul, drew );
 		const float cloudMul = sx.clouds ? 1.0f : ( wwLookdevRed( "cloudleak" ) ? 0.02f : 0.0f );
-		if ( cloudMul > 0.0f )
+		// lane CLOUD2: Volume Clouds Medium+ draw the volume in place of the 2D layers (false = the layers, as before)
+		const bool volume = cloudMul >= 1.0f && wwCloudVolTier() > 0
+			&& wwCloudVolDraw( scene, { skyExposure(), skyViewTransform(), wwLookdevCloudSeconds(), g_skyCapture }, drew );
+		if ( cloudMul > 0.0f && !volume )
 			drawClouds( scene, f, cloudMul, drew );
 		if ( sunMul > 0.0f )
 			drawSunQuad( scene, f, true, sunMul, drew );
+		if ( wwCloudMapTier() > 0 )
+			wwCloudMapUpdate( scene );	// lane CLOUD1: Off builds nothing
 		const QString line = drew.isEmpty() ? QStringLiteral( "nothing" ) : drew.join( QChar( '|' ) );
 		static const QRegularExpression clock( QStringLiteral( " t=[0-9.]+" ) );
 		if ( QString( sx.skyLast ).remove( clock ) != QString( line ).remove( clock ) )

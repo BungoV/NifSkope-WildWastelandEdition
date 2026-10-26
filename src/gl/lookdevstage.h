@@ -125,6 +125,26 @@ float wwLookdevMoonShadowTerm( bool invertClear, QString * why );
 void wwLookdevSetGameDay( double d );
 //! seconds on the cloud scroll clock (the pin, 0 in a harness run, else real time since Clouds went on)
 double wwLookdevCloudSeconds();
+//! lane CLOUD1: one weather cloud layer as drawClouds draws it now, for gl/cloudmap.cpp
+struct WwCloudLayerIn
+{
+	int layer = 0;
+	QString tex;	//!< the texture as the cache takes it (textures/sky/x.dds)
+	float alpha = 0.0f;	//!< JNAM at the colour keys (blendCloud)
+	float rgb[3] = {};	//!< PNAM at the keys, 0..255 (CIELab blend)
+	float uvOffset[2] = {};	//!< the scroll at the cloud clock
+	const float * pos = nullptr;	//!< the Clouds.nif shape, world (dome) space; null without a scene or the mesh
+	const float * col = nullptr;	//!< rgba 0..1 (alpha = the edge fade)
+	const float * uv = nullptr;
+	int nv = 0;
+	const unsigned short * idx = nullptr;
+	int nIdx = 0;
+};
+/*! the active layers (not disabled, alpha > 0, a texture), key = plugin|weather|load generation, eye = the view's
+ *  world position (game units); false + why when no weather resolved */
+bool wwLookdevCloudLayers( Scene * scene, QVector<WwCloudLayerIn> & out, QString & key, float eye[3], QString * why );
+//! lane CLOUD1: fills io's mesh pointers for layer io.layer (a previous weather's layer during a transition)
+bool wwLookdevCloudMesh( Scene * scene, WwCloudLayerIn & io );
 //! the scene cube (the material's own EnvmapTexture wins per shape, in the renderer)
 QString wwLookdevCubePath();
 //! stored plugin/weather/hour/ground -> state; pins win
