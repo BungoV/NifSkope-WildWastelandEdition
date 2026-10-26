@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "gl/cellssr.h"	// lane CELLALL1: the SSR rows
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
 #include "gl/cellssgi.h"	// lane SSGI1
+#include "gl/cellfarground.h"	// lane FARDRAW1: the Far ground rows
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/cellwater.h"	// lane CELLALL1: the Water row
@@ -465,6 +466,37 @@ void CellWorkspacePanel::buildUi()
 			a->setData( k );
 			a->setChecked( k == ( t == WwFarLodVanilla ? 0 : 1 ) );
 			cellFarLodTypeGroup->addAction( a );
+		}
+	}
+	// lane FARDRAW1: ring 0's ground -- the baked sheet (today), live layers + shader decals, or live layers + cached pages
+	cellFarGround = showMenu->addMenu( tr( "Far ground" ) );
+	cellFarGround->setObjectName( QStringLiteral( "CellWorkspaceFarGround" ) );
+	cellFarGround->setEnabled( !CellFarGround::modePinned() );
+	cellFarGroundGroup = new QActionGroup( cellFarGround );
+	cellFarGroundGroup->setExclusive( true );
+	{
+		const QStringList names = { tr( "Baked" ), tr( "Live, shader decals" ), tr( "Live, cached pages" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = cellFarGround->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == CellFarGround::mode() );
+			cellFarGroundGroup->addAction( a );
+		}
+	}
+	cellFarGroundQ = showMenu->addMenu( tr( "Far ground pages" ) );
+	cellFarGroundQ->setObjectName( QStringLiteral( "CellWorkspaceFarGroundPages" ) );
+	cellFarGroundQ->setEnabled( !CellFarGround::qualityPinned() );
+	cellFarGroundQGroup = new QActionGroup( cellFarGroundQ );
+	cellFarGroundQGroup->setExclusive( true );
+	{
+		const QStringList names = { tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = cellFarGroundQ->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == CellFarGround::quality() );
+			cellFarGroundQGroup->addAction( a );
 		}
 	}
 	section( tr( "Lighting" ), "lighting" );
@@ -931,6 +963,16 @@ void CellWorkspacePanel::buildUi()
 		} );
 	connect( cellModernTaaGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwTaa2SetTier( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellFarGroundGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {	// lane FARDRAW1
+		CellFarGround::setMode( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellFarGroundQGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		CellFarGround::setQuality( a->data().toInt() );
 		if ( glView )
 			glView->update();
 	} );

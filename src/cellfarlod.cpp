@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #define FARLOD1_HAVE_CULL 1
 #endif
 #include "gl/cellwater.h"
+#include "gl/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "model/nifmodel.h"
@@ -313,6 +314,7 @@ void cellFarLodForget( const void * nif )
 {
 	if ( docs().remove( nif ) )
 		ImpostorChunk::forgetCellFar();
+	CellFarGround::forget( nif );
 }
 
 QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWorld & world,
@@ -328,6 +330,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	clock.start();
 	docs().remove( nif );
 	ImpostorChunk::forgetCellFar();
+	CellFarGround::forget( nif );
 
 	// the gates' red controls: nocut | nosnap | watercut | nowater (cardsafter, nocardcull, pbrnosway act at draw)
 	const QByteArray red = wwEnv( "WW_CELL_FARLOD_RED" );
@@ -547,11 +550,20 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		if ( ours && terrOk ) {
 			std::vector<LodlFarRing> one( 1, r );
 			const qint64 left = maxVerts > 0 ? std::max<qint64>( 1, maxVerts - runVerts ) : 0;
+			const int blocksBefore = nif->getBlockCount();
 			if ( !nifAppendLodlFarRings( nif, iFar, lodlPath, shift, one, left, &terr ) ) {
 				terrOk = false;
 				say( QStringLiteral( "far lod: terrain REFUSED -- %1" ).arg( terr ) );
 			} else {
 				r = one[0];
+				if ( i == 0 && !stream && r.built ) {	// lane FARDRAW1: ring 0's live ground (the Far ground row)
+					QStringList fg;
+					CellFarGround::prepare( nif, world, lodlPath, blocksBefore, nif->getBlockCount(),
+						std::max( r.x0, r.ox0 ), std::max( r.y0, r.oy0 ), std::min( r.x1, r.ox1 ), std::min( r.y1, r.oy1 ),
+						r.cx0, r.cy0, r.cx1, r.cy1, &fg );
+					for ( const QString & l : fg )
+						say( l );
+				}
 				if ( r.built )
 					runVerts += r.verts;
 				if ( stream && i == 0 ) {

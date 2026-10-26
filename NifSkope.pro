@@ -270,6 +270,7 @@ HEADERS += \
 	src/gl/celldrawpacket.h \
 	src/gl/cellgpucull.h \
 	src/gl/cellfarinst.h \
+	src/gl/cellfarground.h \
 	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
@@ -534,6 +535,7 @@ SOURCES += \
 	src/gl/celllensflare.cpp \
 	src/gl/cellcull.cpp \
 	src/gl/cellfarinst.cpp \
+	src/gl/cellfarground.cpp \
 	src/gl/cellumbra.cpp \
 	src/gl/cellwater.cpp \
 	src/gl/cellgrass.cpp \

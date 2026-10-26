@@ -58,7 +58,8 @@ class Scene;
  *  pbrm_cellcsm (the same shaders with the Lookdev sun shadows compiled in, chosen while the map is built) */
 inline bool wwIsCellProgramName( std::string_view n )
 {
-	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog";
+	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog"
+		|| n == "fo4_cellfgl.prog" || n == "fo4_cellfgc.prog" || n == "fo4_cellcsmfgl.prog" || n == "fo4_cellcsmfgc.prog";	// lane FARDRAW1
 }
 
 /*! lane DECALLIT1: an effect decal's program by name -- fo4_effectdecal and its cascade variant fo4_effectdecalcsm.

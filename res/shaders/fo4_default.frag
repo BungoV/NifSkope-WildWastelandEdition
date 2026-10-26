@@ -283,6 +283,9 @@ vec3 tonemap(vec3 x)
 #include "cell_ssr.glsl"
 #include "cell_grass.glsl"
 #endif
+#ifdef WW_FARGROUND	// lane FARDRAW1: the far ring 0's live ground
+#include "cell_farground.glsl"
+#endif
 
 /* lane DECALS1: the game's decal parallax. Height = the set's TX04 (bound as GlowMap, red); the eye ray in the
  * decal's unit uv axes x tan(angle) x scale, linear search from the top in n steps, then one secant step. */
@@ -352,6 +355,9 @@ void main()
 #endif
 
 	vec4 baseMap = texture( BaseMap, offset );
+#ifdef WW_FARGROUND
+	baseMap.rgb = fgGround( cellWorldPos( -ViewDir ), baseMap.rgb );
+#endif
 
 	vec4 color = vec4( baseMap.rgb, 1.0 );
 	if ( alphaFlags > 0 ) {

@@ -219,6 +219,10 @@ private:
 	QAction * cellFarLod = nullptr;   // lane FARLOD1: the far field around the block (cellfarlod.h)
 	QMenu * cellFarLodType = nullptr;
 	QActionGroup * cellFarLodTypeGroup = nullptr;   // lane FARLOD1: Vanilla | FO4CS
+	QMenu * cellFarGround = nullptr;   // lane FARDRAW1: Baked | Live, shader decals | Live, cached pages
+	QActionGroup * cellFarGroundGroup = nullptr;
+	QMenu * cellFarGroundQ = nullptr;   // lane FARDRAW1: the cached pages' sharpness
+	QActionGroup * cellFarGroundQGroup = nullptr;
 	QAction * cellTaa = nullptr;      // lane MOTION1: the game's temporal AA (one state with the Scene popup's row)
 	QMenu * cellModernTaa = nullptr;	// lane TAA2: Off | Low | Medium | High | Ultra
 	QActionGroup * cellModernTaaGroup = nullptr;
