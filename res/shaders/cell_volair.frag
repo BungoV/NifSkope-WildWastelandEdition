@@ -87,10 +87,11 @@ float airDrift( vec3 dirView, float t )
 	return 1.0 + volDrift.x * f * ( a + 0.5 * f * b ) * ( 1.0 / 1.5 );
 }
 
-// lane FARGRID1: the cloud shadow's input (ATMORES1 feeds it later): 1 = no clouds
+// lane FARGRID1: the cloud shadow's input, 1 = no clouds; lane CLOUD3 feeds it (ww_sunshadow.glsl ussCloudT: 1 when the
+// row is off or its red noinject keeps the clouds out of the air)
 float airCloudShadow( vec3 posView )
 {
-	return 1.0;
+	return ussCloudT( posView );
 }
 
 // lane FARGRID1: the sun's visibility with the far grid on: min(cascades where they reach, the terrain's shadow-height
@@ -106,7 +107,7 @@ float airFarVis( vec3 posView )
 		if ( ( volFarMode & 6 ) != 6 )
 			t = ussTerrain( posView, inMap, 0.0, false );	// SHADOWPAR1's 4-argument form, as the air tail calls it
 	} else if ( volCsm ) {
-		c = wwSunShadow( posView );
+		c = wwSunShadowGeo( posView );	// lane CLOUD3: the clouds once, below
 	}
 	return min( c, t ) * airCloudShadow( posView );
 }
@@ -139,14 +140,15 @@ vec3 airSun( vec3 posView, vec3 dirView, float z )
 		// the cell's directional light (outdoors the weather's sun, indoors the lighting template's): world space
 		vec3 to = normalize( cellDirTo );
 		float vis = ( volFarMode != 0 && !cellInterior ) ? airFarVis( posView )
-			: ( !cellInterior && volCsm && ( volRed & 8 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
+			: ( cellInterior || ( volRed & 8 ) != 0 ) ? 1.0 : volCsm ? wwSunShadow( posView ) : airCloudShadow( posView );
 		if ( volMs.x > 0.0 )
 			return cellDirColor * airMsSum( vis, airTup( z, to.z ), dot( to, cellWorldDir( dirView ) ) );
 		return cellDirColor * vis * airTup( z, to.z ) * volPhasePi( dot( to, cellWorldDir( dirView ) ) );
 	}
 	if ( fogSun.w > 0.0 ) {
 		// Lookdev without the cell's lights: its sun (view space)
-		float vis = volFarMode != 0 ? airFarVis( posView ) : ( volCsm && ( volRed & 8 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
+		float vis = volFarMode != 0 ? airFarVis( posView ) : ( volRed & 8 ) != 0 ? 1.0
+			: volCsm ? wwSunShadow( posView ) : airCloudShadow( posView );
 		float mu = dot( fogView.xyz, fogSun.xyz ) / length( fogView.xyz );
 		if ( volMs.x > 0.0 )
 			return fogSunColour.rgb * fogSun.w * airMsSum( vis, airTup( z, mu ), dot( dirView, fogSun.xyz ) );

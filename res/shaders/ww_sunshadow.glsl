@@ -54,6 +54,11 @@ uniform vec4 ussTerrExtra;		// lane FAR5: v offsets of the terrain-only heights 
 uniform vec4 ussTerrSelf;		// lane FAR6: x the self-test on, y the relief band's low edge (0: no gate), z the margin cap, w the quantum
 uniform vec2 ussDim;			// the ambient / specular dimming in terrain shadow (FO4CS 0.5 / 0.5; 0 off)
 uniform int ussPbrDim;			// lane GAPLOOK1: 1 the PBR path dims its ambient + environment too, 2 red (the sun too)
+// lane CLOUD3: the clouds' Beer shadow map (gl/cloudshadow.h); ussCloudOn 0 = no clouds, the factor exactly 1
+uniform int ussCloudOn;
+uniform sampler2D ussCloudMap;		// x height (km) where the cloud starts from the sun, y mean extinction /km, z whole depth
+uniform mat4 ussCloudFromView;		// view space -> (u, v, height km); u, v across the sun
+uniform vec4 ussCloudFar;		// x transmittance past the map, y edge fade (uv), z the air tail's cloud taps (Ultra), w the air's ambient share
 float ussLastTerr = 1.0;		// the terrain visibility of the last composition (cell_lights.glsl dims by it)
 
 // spec 2.5: the 16 Poisson taps on [0,1]^2, used as (p - 0.5) x 6 texels
@@ -358,8 +363,20 @@ float ussCompose( vec3 posView )
 	return min( min( c, terr ), con );
 }
 
-//! the sun's shadow factor: 1 lit, 0 fully shadowed
-float wwSunShadow( vec3 posView )
+//! lane CLOUD3: the clouds' transmittance toward the sun at posView, OD = min(whole, mean x depth below the top)
+float ussCloudT( vec3 posView )
+{
+	if ( ussCloudOn == 0 )
+		return 1.0;
+	vec3 q = ( ussCloudFromView * vec4( posView, 1.0 ) ).xyz;
+	vec3 m = textureLod( ussCloudMap, q.xy, 0.0 ).xyz;
+	float t = exp( -min( m.z, m.y * max( m.x - q.z, 0.0 ) ) );
+	vec2 e = abs( q.xy - 0.5 ) * 2.0;
+	return mix( t, ussCloudFar.x, smoothstep( 1.0 - ussCloudFar.y, 1.0, max( e.x, e.y ) ) );
+}
+
+//! the geometry's shadow factor (cascades, terrain, contact): 1 lit, 0 fully shadowed
+float wwSunShadowGeo( vec3 posView )
 {
 	if ( ( csmRed & 8 ) != 0 )
 		return 0.5;
@@ -377,6 +394,12 @@ float wwSunShadow( vec3 posView )
 		sh = 1.0 - ( 1.0 - sh ) * ( 1.0 - s2 * s2 );
 	}
 	return sh;
+}
+
+//! the sun's shadow factor: the geometry's x the clouds' (lane CLOUD3; x exactly 1 with the row off)
+float wwSunShadow( vec3 posView )
+{
+	return wwSunShadowGeo( posView ) * ussCloudT( posView );
 }
 
 //! the probe views (WW_CSM_PROBE); false = draw normally. `shaded` is the display colour.
@@ -434,18 +457,22 @@ bool wwSunShadowProbe( vec3 posView, vec3 shaded, out vec3 outc )
 #ifdef WW_LOOKDEV_FOG_GLSL	// fo4_csm.frag casts without the fog
 float wwAirTailShadow( vec3 dirView, float t0, float t1, float tau )
 {
-	if ( ussOn == 0 || ussTail.x <= 0.0 || ussTerrOn == 0 || t1 <= t0 )
+	bool terr = ussOn != 0 && ussTail.x > 0.0 && ussTerrOn != 0;
+	bool cloud = ussCloudOn != 0 && ussCloudFar.z > 0.0;	// lane CLOUD3: Ultra's cloud taps (the far aerial perspective)
+	if ( ( !terr && !cloud ) || t1 <= t0 )
 		return 1.0;
-	float a = clamp( ussTail.y, 0.0, 1.0 );
+	float a = clamp( terr ? ussTail.y : ussCloudFar.w, 0.0, 1.0 );
 	float inMap;
-	float v0 = ussTerrain( dirView * ( t0 / fogDistScale ), inMap, 0.0, false );
+	vec3 p0 = dirView * ( t0 / fogDistScale );
+	float v0 = ( terr ? ussTerrain( p0, inMap, 0.0, false ) : 1.0 ) * ( cloud ? ussCloudT( p0 ) : 1.0 );
 	float e = 1.0 - exp( -max( tau, 0.0 ) );
 	float jit = ussIgn( gl_FragCoord.xy );
 	float acc = 0.0;
 	for ( int i = 0; i < 8; i++ ) {
 		float q = ( float( i ) + jit ) / 8.0;
 		float u = tau > 1e-4 ? -log( max( 1.0 - q * e, 1e-6 ) ) / tau : q;
-		acc += ussTerrain( dirView * ( mix( t0, t1, clamp( u, 0.0, 1.0 ) ) / fogDistScale ), inMap, 0.0, false );
+		vec3 p = dirView * ( mix( t0, t1, clamp( u, 0.0, 1.0 ) ) / fogDistScale );
+		acc += ( terr ? ussTerrain( p, inMap, 0.0, false ) : 1.0 ) * ( cloud ? ussCloudT( p ) : 1.0 );
 	}
 	return ( a + ( 1.0 - a ) * acc / 8.0 ) / max( a + ( 1.0 - a ) * v0, 0.25 );
 }

@@ -84,6 +84,7 @@ public:
 	QComboBox * giSkyFromPhysicalBox = nullptr;	// lane SKYA (SKYGI1)
 	QComboBox * cloudMapBox = nullptr;	// lane CLOUD1
 	QComboBox * volumeCloudsBox = nullptr;	// lane CLOUD2
+	QComboBox * cloudShadowsBox = nullptr;	// lane CLOUD3
 	QComboBox * cascadeQualityBox = nullptr;
 	QComboBox * contactShadowsBox = nullptr;
 	QComboBox * terrainShadowsBox = nullptr;

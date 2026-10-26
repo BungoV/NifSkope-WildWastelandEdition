@@ -46,10 +46,15 @@ constexpr int AtmoTrans = 42;	// lane SKYA (ATMO2): the sky's transmittance LUT,
 constexpr int ContactGbuf = 43;	// lane GAPLOOK1 (C8): the lamps' contact march reads the shared opaque pass (sampler2D; 41 in the lane, SKYA holds it)
 constexpr int GiAir = 44;		// SKY2 FOGSLICE1: the air's own volume of the probes' irradiance (sampler3D, the air pass only)
 constexpr int CardDepth = 45;	// lane PERF4: the far cards' early reject reads the scene's farthest depth per pixel (44 in the lane; renumbered at MERGE1025) (sampler2D)
+constexpr int CloudShadow = 46;	// lane CLOUD3: the clouds' Beer shadow map, read by every sun receiver (sampler2D)
+constexpr int CloudBuildShape = 47;	// lane CLOUD3: the shadow map's build reads the volume's noise and the cloud map (47-49)
+constexpr int CloudBuildDetail = 48;
+constexpr int CloudBuildMap = 49;
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
-	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans, ContactGbuf, GiAir, CardDepth };
+	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans, ContactGbuf, GiAir, CardDepth,
+	CloudShadow, CloudBuildShape, CloudBuildDetail, CloudBuildMap };
 
 constexpr bool distinct()
 {
