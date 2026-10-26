@@ -194,6 +194,39 @@ inline float octaves( const Droplet & p, float cosT, float tauL, int n )
 	return s;
 }
 
+/*! lane CLOUD2B: the droplet phase's mean cosine, analytic: HG's is g, Draine's g (1 + a (3 + 2 g^2) / 5) /
+ *  (1 + a (1 + 2 g^2) / 3) (Draine 2003, eq. 6); blended by wD as the phase (0.879 at 20 um). */
+inline float msMeanCosine( const Droplet & p )
+{
+	const float g = p.gD, a = p.alpha;
+	const float gDr = g * ( 1.0f + a * ( 3.0f + 2.0f * g * g ) / 5.0f ) / ( 1.0f + a * ( 1.0f + 2.0f * g * g ) / 3.0f );
+	return ( 1.0f - p.wD ) * p.gHg + p.wD * gDr;
+}
+
+/*! lane CLOUD2B: the diffuse transmission of a slab of optical depth tau, per unit flux on its top, sun at mu0:
+ *  delta-Eddington scaling (Joseph, Wiscombe & Weinman 1976) + the two-stream solution for albedo w < 1 (Meador &
+ *  Weaver 1980, Eddington coefficients), the direct e^(-tau'/mu0) taken out. Twin of cloud_march.frag cvTdif. */
+inline float msDiffuseT( float tau, float mu0, float g, float w )
+{
+	const float f = g * g;
+	const float wp = ( 1.0f - f ) * w / ( 1.0f - f * w );
+	const float tp = ( 1.0f - f * w ) * tau;
+	const float gp = g / ( 1.0f + g );
+	const float g1 = ( 7.0f - wp * ( 4.0f + 3.0f * gp ) ) * 0.25f;
+	const float g2 = -( 1.0f - wp * ( 4.0f - 3.0f * gp ) ) * 0.25f;
+	const float g3 = ( 2.0f - 3.0f * gp * mu0 ) * 0.25f;
+	const float g4 = 1.0f - g3;
+	const float a1 = g1 * g4 + g2 * g3;
+	const float k = std::sqrt( std::max( g1 * g1 - g2 * g2, 1e-8f ) );
+	if ( std::fabs( 1.0f - k * mu0 ) < 1e-3f )
+		mu0 += 2e-3f;
+	const float em = std::exp( -k * tp ), e0 = std::exp( -tp / mu0 );
+	const float den = ( 1.0f - k * k * mu0 * mu0 ) * ( ( k + g1 ) + ( k - g1 ) * em * em );
+	const float num = ( 1.0f + k * mu0 ) * ( a1 + k * g4 ) * e0 - ( 1.0f - k * mu0 ) * ( a1 - k * g4 ) * em * em * e0
+		- 2.0f * k * ( g4 + a1 * mu0 ) * em;
+	return std::max( -wp * num / den, 0.0f );
+}
+
 /*! the Low preset: the 2D layers' colour from the model, in the sky's scene units (displayed = this x the layer
  *  texture). The key light through the air to the cloud base (T at the base toward the light) plus the sky's mean
  *  radiance E / pi (E = the sky irradiance per unit sun, atmomath skyIrradiance), times the cloud's albedo. */

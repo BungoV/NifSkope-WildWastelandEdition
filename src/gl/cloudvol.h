@@ -5,7 +5,7 @@
  * CLOUD1's map (cloudmap.h). Row Render > Scene > Volume Clouds: Off / Low / Medium / High / Ultra, ships Off.
  * Low keeps the 2D layers, lit by the model; Medium+ march Perlin-Worley density at 1/4 (Ultra 1/2) resolution,
  * 1/16 of the pixels a frame, the rest reprojected. Pin WW_CLOUDVOL (tier name or 0..4), red WW_CLOUDVOL_RED =
- * noreproj | nooctaves | nocal | everypixel. The density is ONE GLSL function, cloudDensity(p) in
+ * noreproj | nooctaves | nocal | everypixel (CLOUD2B adds noms | nodepth | notint). The density is ONE GLSL function, cloudDensity(p) in
  * res/shaders/cloud_common.glsl; readers (CLOUD3 shadows, CLOUD4) bind it with wwCloudVolBindDensity.
  * Changes after the first push are written in notes/cloud2/INTERFACE.md. */
 
@@ -40,5 +40,10 @@ bool wwCloudVolLowColour( float out[3] );
  *  program and binds cvShape, cvDetail, cvMap to units firstUnit .. firstUnit + 2. False (nothing bound) when the volume
  *  has no map this frame. Needs the GL context current; call after wwCloudMapUpdate. */
 bool wwCloudVolBindDensity( Scene * scene, int firstUnit );
+
+/*! lane CLOUD2B, the cell HDR frame only: wwCloudVolSceneDepth grabs the scene's depth after the last draw (before the
+ *  tone map); wwCloudVolFront, after it, draws the volume over geometry it is in front of (a ridge behind a cloud). */
+void wwCloudVolSceneDepth( Scene * scene );
+void wwCloudVolFront( Scene * scene );
 
 #endif

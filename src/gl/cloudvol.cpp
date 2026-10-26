@@ -4,6 +4,7 @@
 #include "cloudvolmath.h"
 #include "atmosphere.h"
 #include "atmomath.h"
+#include "cellhdr.h"
 #include "wwswitch.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -125,6 +126,15 @@ struct CvGpu
 	int calKey[2][4] = { { -1, 0, 0, 0 }, { -1, 0, 0, 0 } };
 	bool calRed[2] = { false, false };
 	float cal[2][V::kCalN] = {};
+	// lane CLOUD2B: the scene's depth (wwCloudVolSceneDepth, before the tone map) and what the pass over the scene needs
+	bool drewNow = false;	// the volume drew in this frame's backdrop
+	GLuint sceneTex = 0;	// the linear frame's farthest window depth (cellhdr.cpp owns it)
+	int sceneW = 0, sceneH = 0;
+	unsigned long long sceneFrame = ~0ull;	// g.frame at the grab
+	float sceneZ[3] = {};	// projection [2][2], [3][2]; km per view unit
+	int frontHist = 0;
+	float frontProj[4] = {}, frontExposure = 1.0f;
+	int frontVt = 0;
 };
 
 QHash<Renderer *, CvGpu> & gpus()
@@ -221,6 +231,7 @@ struct Bands
 	float baseKm[3], topKm[3], density[3], coverage[3], sheet;
 	float rect[4];
 	bool mapBound;
+	float tint[3][3];	// lane CLOUD2B: CLOUD1's band tints (the march only; not in cloud_common's struct)
 };
 
 Bands bandsOf( const WwCloudMap & m )
@@ -231,6 +242,8 @@ Bands bandsOf( const WwCloudMap & m )
 		b.topKm[i] = std::max( m.band[i].topZ * kUnitKm, b.baseKm[i] + 1e-3f );
 		b.density[i] = m.band[i].layers > 0 ? m.band[i].density : 0.0f;
 		b.coverage[i] = m.band[i].coverage;
+		for ( int c = 0; c < 3; c++ )
+			b.tint[i][c] = red( "notint" ) ? 1.0f : m.band[i].tint[c];
 	}
 	b.sheet = m.band[0].sheet;
 	const float he = std::max( m.halfExtent * kUnitKm, 1e-3f );
@@ -407,6 +420,9 @@ bool wwCloudVolLowColour( float out[3] )
 			for ( float & e : E )
 				e *= WwAtmoMath::kPi;	// lowColour takes the irradiance
 			V::lowColour( k, T, w[2], k, E, s.low );
+			if ( m.valid )
+				for ( int c = 0; c < 3; c++ )
+					s.low[c] *= red( "notint" ) ? 1.0f : m.band[0].tint[c];	// lane CLOUD2B: CLOUD1's Low band tint
 		}
 	}
 	if ( s.lowOk )
@@ -513,7 +529,10 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	const int slot = everyPixel ? 0 : bayer[frameNo];
 	const float phase[2] = { float( slot % 4 ), float( slot / 4 ) };
 	const Bands b = bandsOf( m );
-	const bool noOct = red( "nooctaves" ), noReproj = red( "noreproj" );
+	const bool noOct = red( "nooctaves" ), noReproj = red( "noreproj" ), noMs = noOct || red( "noms" );
+	// lane CLOUD2B: the last frame's scene depth ends the march (grabbed right after the last draw, same viewport)
+	const bool sceneOn = !red( "nodepth" ) && g.sceneTex && g.sceneW == vp[2] && g.sceneH == vp[3] && g.sceneFrame == g.frame;
+	g.drewNow = false;
 	const V::Droplet drop = V::dropletParams( V::kDropletUm );
 	float amb[3];
 	skyAmbient( s, keyW[2], f.haze, amb );
@@ -562,6 +581,16 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			p->uni1f( "cvMaxKm", pr.maxKm );
 			p->uni1f( "cvSlab", 0.0f );
 			p->uni1i( "cvProbe", 0 );
+			p->uni1f( "cvMsOn", noMs ? 0.0f : 1.0f );
+			p->uni1f( "cvMsG", V::msMeanCosine( drop ) );
+			for ( int i = 0; i < 3; i++ ) {
+				const QByteArray n = QByteArrayLiteral( "cvTint[" ) + QByteArray::number( i ) + ']';
+				p->uni3f( n.constData(), b.tint[i][0], b.tint[i][1], b.tint[i][2] );
+			}
+			fn->glActiveTexture( GL_TEXTURE6 );
+			fn->glBindTexture( GL_TEXTURE_2D, sceneOn ? g.sceneTex : 0 );
+			p->uni1i( "cvScene", 6 );
+			p->uni4f( "cvSceneZ", FloatVector4( g.sceneZ[0], g.sceneZ[1], g.sceneZ[2], sceneOn ? 1.0f : 0.0f ) );
 			quad( r );
 			r->stopProgram();
 		} else {
@@ -618,6 +647,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			p->uni4f( "cvRect", FloatVector4( float( vp[0] ), float( vp[1] ), 1.0f / float( vp[2] ), 1.0f / float( vp[3] ) ) );
 			p->uni1f( "sceneExposure", view.exposure );
 			p->uni1i( "viewTransform", view.viewTransform );
+			p->uni1i( "cvFront", 0 );
 			fn->glEnable( GL_BLEND );
 			fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE );	// as the 2D layers
 			quad( r );
@@ -628,7 +658,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			why = QStringLiteral( "cloud_composite.prog did not link" );
 		}
 	}
-	for ( int u = 5; u >= 0; u-- ) {
+	for ( int u = 6; u >= 0; u-- ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 		fn->glBindTexture( GL_TEXTURE_3D, 0 );
@@ -650,6 +680,12 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	g.qcur = 1 - g.qcur;
 
 	if ( ok ) {
+		// what wwCloudVolFront needs after the scene drew
+		g.drewNow = true;
+		g.frontHist = cur;
+		std::copy( cam.proj, cam.proj + 4, g.frontProj );
+		g.frontExposure = view.exposure;
+		g.frontVt = view.viewTransform;
 		g.cur = prev;
 		g.histOk = true;
 		g.frame++;
@@ -662,7 +698,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	// memory: noise 128^3 + mips, 32^3 + mips; two histories and the march, 12 bytes a pixel each
 	const double mb = ( 128.0 * 128 * 128 * 8 / 7 + 32.0 * 32 * 32 * 8 / 7 + ( 2.0 * hw * hh + double( mw ) * mh ) * 12.0 ) / 1048576.0;
 	QString reds;
-	for ( const char * w : { "noreproj", "nooctaves", "nocal", "everypixel" } )
+	for ( const char * w : { "noreproj", "nooctaves", "nocal", "everypixel", "noms", "nodepth", "notint" } )
 		if ( red( w ) )
 			reds += QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
 	s.last = ok ? QStringLiteral( "volclouds:%1(hist=%2x%3,march=%4x%5,steps=%6,taps=%7,key=%8,map=%9,mem=%10MB%11)" )
@@ -672,4 +708,89 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		: refusal( s, why );
 	drew << s.last;
 	return ok;
+}
+
+void wwCloudVolSceneDepth( Scene * scene )
+{
+	if ( !scene || !scene->renderer || !gpus().contains( scene->renderer ) )
+		return;
+	CvGpu & g = gpus()[scene->renderer];
+	g.sceneTex = 0;
+	if ( cs().tier < 2 || !g.drewNow || red( "nodepth" ) )
+		return;
+	g.sceneTex = wwCellHdrDepthMax( scene );
+	if ( !g.sceneTex )
+		return;
+	wwCellHdrFrameSize( g.sceneW, g.sceneH );
+	g.sceneFrame = g.frame;	// the next draw's frame number: the march reads it one frame late
+	const auto & pm = scene->renderer->globalUniforms->projectionMatrix;	// pm[column][row]
+	const float sc = scene->view.scale != 0.0f ? scene->view.scale : 1.0f;
+	g.sceneZ[0] = pm[2][2];
+	g.sceneZ[1] = pm[3][2];
+	g.sceneZ[2] = kUnitKm / sc;
+}
+
+void wwCloudVolFront( Scene * scene )
+{
+	if ( !scene || !scene->renderer || !gpus().contains( scene->renderer ) )
+		return;
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	CvGpu & g = gpus()[r];
+	const bool go = g.drewNow && g.sceneTex && !red( "nodepth" );
+	g.drewNow = false;
+	if ( !go )
+		return;	// the red: the volume stays behind all geometry, as CLOUD2
+	NifSkopeOpenGLContext::Program * p = r->useProgram( "cloud_composite.prog" );
+	if ( !p )
+		return;
+	GLint vp[4] = { 0, 0, 1, 1 }, prevActive = 0;
+	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
+	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+	GLboolean depthMask = GL_TRUE;
+	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+	GLint bf[4] = { GL_ONE, GL_ZERO, GL_ONE, GL_ZERO };
+	fn->glGetIntegerv( GL_BLEND_SRC_RGB, &bf[0] );
+	fn->glGetIntegerv( GL_BLEND_DST_RGB, &bf[1] );
+	fn->glGetIntegerv( GL_BLEND_SRC_ALPHA, &bf[2] );
+	fn->glGetIntegerv( GL_BLEND_DST_ALPHA, &bf[3] );
+	fn->glDisable( GL_DEPTH_TEST );
+	fn->glDisable( GL_CULL_FACE );
+	fn->glDisable( GL_STENCIL_TEST );
+	fn->glDepthMask( GL_FALSE );
+	const GLuint tex[3] = { g.hist[g.frontHist].col, g.hist[g.frontHist].dep, g.sceneTex };
+	for ( int u = 0; u < 3; u++ ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+		fn->glBindTexture( GL_TEXTURE_2D, tex[u] );
+	}
+	p->uni1i( "cvHist", 0 );
+	p->uni1i( "cvHistDepth", 1 );
+	p->uni1i( "cvScene", 2 );
+	p->uni1i( "cvFront", 1 );
+	p->uni4f( "cvSceneZ", FloatVector4( g.sceneZ[0], g.sceneZ[1], g.sceneZ[2], 1.0f ) );
+	p->uni4f( "cvProj", FloatVector4( g.frontProj[0], g.frontProj[1], g.frontProj[2], g.frontProj[3] ) );
+	p->uni4f( "cvRect", FloatVector4( float( vp[0] ), float( vp[1] ), 1.0f / float( vp[2] ), 1.0f / float( vp[3] ) ) );
+	p->uni1f( "sceneExposure", g.frontExposure );
+	p->uni1i( "viewTransform", g.frontVt );
+	fn->glEnable( GL_BLEND );
+	fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE );
+	quad( r );
+	r->stopProgram();
+	fn->glBlendFuncSeparate( GLenum( bf[0] ), GLenum( bf[1] ), GLenum( bf[2] ), GLenum( bf[3] ) );
+	for ( int u = 2; u >= 0; u-- ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	}
+	fn->glActiveTexture( GLenum( prevActive ) );
+	if ( !wasBlend )
+		fn->glDisable( GL_BLEND );
+	if ( wasDepth )
+		fn->glEnable( GL_DEPTH_TEST );
+	if ( wasCull )
+		fn->glEnable( GL_CULL_FACE );
+	if ( wasStencil )
+		fn->glEnable( GL_STENCIL_TEST );
+	fn->glDepthMask( depthMask );
 }

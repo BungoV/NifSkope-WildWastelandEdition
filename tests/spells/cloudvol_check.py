@@ -2,7 +2,7 @@
 hidden 4.1 core context (shader_link_check.py), with the exe's own noise bytes and calibration tables (tests/cloudvol/
 cloudvol_dump.cpp, built here with g++), the sky's LUTs from the real atmo_*.prog (atmo_skyrender.Sky). No NifSkope.
 
-    python -I tests/spells/cloudvol_check.py <scratch dir> [--red nocal|nooctaves|noreproj|flatkey] [--only A,B,..]
+    python -I tests/spells/cloudvol_check.py <scratch dir> [--red nocal|nooctaves|noms|noreproj|flatkey|notint|nodepth] [--only A,B,..]
 
 Gates (bars written before the first run):
   A coverage   the volume's column opacity seen from straight above, in five map stripes of coverage 0.1 .. 0.9, Low and
@@ -12,12 +12,16 @@ Gates (bars written before the first run):
                flatkey (a white transmittance LUT) fails.
   C dark core  a 0.25 km slab of tau 10, sun 60 deg up, seen straight up from below (ambient off): the underside
                radiance >= 0.25 x a Monte Carlo reference (the same droplet phase, albedo 0.99, multiple scattering).
-               Red nooctaves (single scattering) fails.
+               Red nooctaves (single scattering) fails; red noms (CLOUD2B's multiple-scattering floor off) fails.
+               CLOUD2B: msDiffuseT (cloudvolmath.h) == the checker's own two-stream transcription to 1e-4.
   D flicker    a fly path (0.5 m and 0.4 deg of yaw a frame, 48 frames): the resolved history's frame-to-frame change
                minus the clouds' own (a full march of every pixel, averaged over 8 jitter frames), relative mean of
                the luminance, frames 17..47, <= 0.08. Red noreproj fails. (Amended after the first runs: see RESULTS.)
   E cost       GPU ms of march + resolve at 1080p per preset (Medium, High, Ultra), an overcast map, a camera on the
                ground looking 8 deg up: INFO, against the brief's budgets 0.5 / 0.8 / 1.5 ms.
+  G tint       (CLOUD2B) CLOUD1's band tint: a tinted band's march == the white march x the tint. Red notint fails.
+  F ridge      (CLOUD2B) a scene depth (a ridge) at 2 km in front of the 1.5 km slab: the march ends at it, the
+               composite over the scene draws only where the cloud is in front, never over the sky. Red nodepth fails.
 Exit 0 only when every gate run passes.
 """
 import ctypes, math, os, subprocess, sys, time
@@ -42,7 +46,7 @@ MID = (5.0, 6.5, 0.6)
 args = sys.argv[1:]
 scratch = args[0] if args and not args[0].startswith('--') else os.path.join(TREE, '..', 'cloudvol_scratch')
 red = args[args.index('--red') + 1] if '--red' in args else ''
-only = set(args[args.index('--only') + 1].split(',')) if '--only' in args else set('ABCDE')
+only = set(args[args.index('--only') + 1].split(',')) if '--only' in args else set('ABCDEFG')
 os.makedirs(scratch, exist_ok=True)
 
 
@@ -63,7 +67,30 @@ def dump(bands, nocal=False):
     out = subprocess.run(argv, capture_output=True, text=True, env=env, check=True).stdout.split('\n')
     cal = [list(map(float, l.split()[2:])) for l in out if l.startswith('cal ')]
     drop = [float(x) for l in out if l.startswith('drop ') for x in l.split()[1:]]
+    global MSG, TDIF
+    MSG = [float(l.split()[1]) for l in out if l.startswith('msg ')][0]
+    TDIF = [tuple(map(float, l.split()[1:])) for l in out if l.startswith('tdif ')]
     return cal, drop
+
+
+def tdif_w(tau, mu0, g, w=ALBEDO):
+    """CLOUD2B: the checker's own transcription of delta-Eddington (Joseph, Wiscombe & Weinman 1976) + the two-stream
+    w < 1 solution (Meador & Weaver 1980, Table 1 Eddington, eqs. 14-15), in its textbook e^(+k tau) form, direct out"""
+    f = g * g
+    wp, tp, gp = (1 - f) * w / (1 - f * w), (1 - f * w) * tau, (g - f) / (1 - f)
+    g1, g2 = (7 - wp * (4 + 3 * gp)) / 4, -(1 - wp * (4 - 3 * gp)) / 4
+    g3 = (2 - 3 * gp * mu0) / 4
+    g4 = 1 - g3
+    a1 = g1 * g4 + g2 * g3
+    k = math.sqrt(max(g1 * g1 - g2 * g2, 1e-12))
+    if abs(1 - k * mu0) < 1e-3:
+        mu0 += 2e-3
+    if k * tp > 600:
+        return 0.0
+    ek, em, e0 = math.exp(k * tp), math.exp(-k * tp), math.exp(-tp / mu0)
+    den = (1 - k * k * mu0 * mu0) * ((k + g1) * ek + (k - g1) * em)
+    tt = e0 - wp / den * ((1 + k * mu0) * (a1 + k * g4) * ek * e0 - (1 - k * mu0) * (a1 - k * g4) * em * e0 - 2 * k * (g4 + a1 * mu0))
+    return max(0.0, tt - e0)
 
 
 sky = R.Sky(SDIR)
@@ -202,13 +229,23 @@ def march_uni(cam, camKm, hist, stride, phase, sun_el, sun_az=0.0, steps=64, tap
             'cvProj': (f * hist[1] / hist[0], f, 0.0, 0.0), 'cvCamKm': camKm, 'cvHistSize': (float(hist[0]), float(hist[1])),
             'cvStride': (float(stride),), 'cvPhase': phase, 'cvSteps': steps, 'cvTaps': taps, 'cvOctaves': octaves,
             'cvLightKm': (lightKm,), 'cvPhasePrm': tuple(drop), 'cvAmb': (amb, amb, amb), 'cvAmbOn': (1.0 if amb > 0 else 0.0,),
-            'cvApOn': (ap,), 'cvFrame': (frame,), 'cvMaxKm': (maxKm,), 'cvSlab': (slab,), 'cvProbe': 0}
+            'cvApOn': (ap,), 'cvFrame': (frame,), 'cvMaxKm': (maxKm,), 'cvSlab': (slab,), 'cvProbe': 0,
+            # CLOUD2B: the multiple-scattering floor (off in the reds noms and nooctaves), white tints, no scene depth
+            'cvMsOn': (0.0 if red in ('noms', 'nooctaves') else 1.0,), 'cvMsG': (MSG,),
+            'cvTint[0]': (1.0, 1.0, 1.0), 'cvTint[1]': (1.0, 1.0, 1.0), 'cvTint[2]': (1.0, 1.0, 1.0),
+            'cvSceneZ': (0.0, 0.0, 0.0, 0.0)}
 
 
-def march_texs(trans, sunview):
+SCENE1 = None
+
+
+def march_texs(trans, sunview, scene=None):
+    global SCENE1
     sh, de = textures()
+    if SCENE1 is None:
+        SCENE1 = tex2d(np.ones((1, 1, 4)), linear=False)   # window depth 1: all sky
     return [('cvShape', 0x806F, sh), ('cvDetail', 0x806F, de), ('cvMap', 0x0DE1, MAP), ('cvTrans', 0x0DE1, trans),
-            ('cvSunView', 0x0DE1, sunview), ('cvMoonView', 0x0DE1, sunview)]
+            ('cvSunView', 0x0DE1, sunview), ('cvMoonView', 0x0DE1, sunview), ('cvScene', 0x0DE1, scene or SCENE1)]
 
 
 results = []
@@ -299,7 +336,7 @@ def mc_underside(tau, mu0, prm, n=200000, cone=0.97, seed=7):
     pdf = droplet(prm, cs) * 2 * math.pi
     cdf = np.concatenate([[0], np.cumsum((pdf[1:] + pdf[:-1]) / 2 * np.diff(cs))])
     cdf /= cdf[-1]
-    z = np.full(n, tau)    # optical height above the bottom
+    z = np.full(n, float(tau))    # optical height above the bottom (float: an int tau made an int array, CLOUD2B)
     d = np.tile([math.sqrt(1 - mu0 * mu0), 0.0, -mu0], (n, 1))
     w = np.ones(n)
     alive = np.ones(n, bool)
@@ -349,8 +386,84 @@ if 'C' in only:
     lum = lambda c: float(np.dot(c, [0.2126, 0.7152, 0.0722]))
     under = lum(o[24:40, 24:40, :3].reshape(-1, 3).mean(0)) / lum(T)
     ref = mc_underside(tau, mu0, drop) * ALBEDO ** 0
-    gate('C dark core', under >= 0.25 * ref,
-         'tau %.0f slab underside %.4g x sun vs Monte Carlo %.4g (ratio %.3f, bar >= 0.25)' % (tau, under, ref, under / max(ref, 1e-12)))
+    # CLOUD2B: the floor's C++ twin (msDiffuseT, through the dump) against this file's own transcription
+    twin = max(abs(t - tdif_w(a, m, MSG)) for a, m, t in TDIF)
+    gate('C dark core', under >= 0.25 * ref and twin <= 1e-4,
+         'tau %.0f slab underside %.4g x sun vs Monte Carlo %.4g (ratio %.3f, bar >= 0.25) | twin msDiffuseT vs the '
+         'checker worst |d| %.2g (bar 1e-4), droplet mean cosine %.4f' % (tau, under, ref, under / max(ref, 1e-12), twin, MSG))
+
+# ---- G: CLOUD1's band tints multiply the light (a linear albedo factor) -------------------------------------------
+if 'G' in only:
+    W, H = 32, 32
+    tgt = Mrt(W, H)
+    slab = (1.5, 1.75, 1.0)
+    tint = (0.6, 0.8, 1.0)
+    got = []
+    for t in ((1.0, 1.0, 1.0), tint):
+        u = dict(bands_uni(slab, (9.0, 9.1, 0.0), cal, cov=(1.0, 0.0, 0.0)),
+                 **march_uni(camera(180, 89.5), (0, 0, 0.5), (W, H), 1, (0, 0), 60.0, steps=64, slab=1.0, drop=drop,
+                             vfov=10.0, amb=0.05))
+        if red != 'notint':
+            u['cvTint[0]'] = t
+        draw(P_MARCH, tgt, u, march_texs(trans, trans))
+        got.append(tgt.read()[8:24, 8:24, :3].reshape(-1, 3).mean(0))
+    k = got[1] / got[0]
+    e = float(np.max(np.abs(k - np.array(tint))))
+    gate('G tint', e <= 1e-3, 'Low tint %s -> light ratio %.4f %.4f %.4f; worst |d| %.2g (bar 1e-3)' % (tint, k[0], k[1], k[2], e))
+
+# ---- F: a ridge in front: the scene depth ends the march; the composite over the scene draws only clouds in front --
+if 'F' in only:
+    W, H = 96, 64
+    vfov, pitch, camKm = 20.0, 4.0, (0.0, 0.0, 0.5)
+    slab = (1.5, 1.75, 1.0)
+    near, far = 0.001, 1000.0   # view units = km (cvSceneZ.z = 1)
+    P22, P32 = -(far + near) / (far - near), -2 * far * near / (far - near)
+    fy = 1.0 / math.tan(math.radians(vfov) / 2)
+    fx = fy * H / W
+    ys, xs = np.mgrid[0:H, 0:W]
+    nx, ny = (xs + 0.5) / W * 2 - 1, (ys + 0.5) / H * 2 - 1   # row 0 = the bottom, as GL
+    vlen = np.sqrt((nx / fx) ** 2 + (ny / fy) ** 2 + 1)
+    ridge = ny < 0.0   # the lower half: pitch below 4 deg (rays from 0 to 4 deg up still meet the slab, 14+ km out)
+
+    def depth_tex(dist_km):
+        Z = dist_km / vlen
+        z = np.where(ridge, ((-P22 + P32 / Z) + 1) / 2, 1.0)
+        img = np.zeros((H, W, 4))
+        img[..., 0] = z
+        return tex2d(img, linear=False), z
+
+    P_COMP = C.build(SDIR, 'cloud_composite.prog')
+    march, comp = Mrt(W, H), Mrt(W, H)
+    on = 0.0 if red == 'nodepth' else 1.0
+    base = dict(bands_uni(slab, (9.0, 9.1, 0.0), cal, cov=(1.0, 0.0, 0.0)),
+                **march_uni(camera(0, pitch), camKm, (W, H), 1, (0, 0), 30.0, steps=96, slab=1.0, drop=drop, vfov=vfov,
+                            amb=0.05, maxKm=100.0))
+    draw(P_MARCH, march, base, march_texs(trans, trans))
+    free = march.read()
+    cloud = (1 - free[..., 3]) > 0.5
+    out = {}
+    for name, dist, clip in (('behind', 2.0, 1.0), ('late', 2.0, 0.0), ('front', 200.0, 1.0)):
+        tex, z = depth_tex(dist)
+        sz = (P22, P32, 1.0, on * clip)
+        draw(P_MARCH, march, dict(base, cvSceneZ=sz), march_texs(trans, trans, tex))
+        m = march.read()
+        cu = {'cvHist': 0, 'cvRect': (0.0, 0.0, 1.0 / W, 1.0 / H), 'sceneExposure': (1.0,), 'viewTransform': 3,
+              'cvFront': 1, 'cvSceneZ': (P22, P32, 1.0, on), 'cvProj': base['cvProj']}
+        g.bindfb(0x8D40, comp.fb)
+        gl.glClearColor(0, 0, 0, 0)
+        gl.glClear(0x4000)
+        draw(P_COMP, comp, cu, [('cvHist', 0x0DE1, march.col), ('cvHistDepth', 0x0DE1, march.dep), ('cvScene', 0x0DE1, tex)])
+        out[name] = (m, comp.read())
+    sel = ridge & cloud
+    a_behind = float(out['behind'][1][..., 3][sel].max())
+    a_late = float(out['late'][1][..., 3][sel].max())
+    a_front = float(np.abs(out['front'][1][..., 3][sel] - (1 - free[..., 3][sel])).mean())
+    sky_d = float(np.abs(out['behind'][0][~ridge] - free[~ridge]).max())
+    sky_c = float(out['behind'][1][..., 3][~ridge].max())
+    ok = sel.sum() > 50 and a_behind <= 0.01 and a_late <= 0.01 and a_front <= 0.02 and sky_d == 0.0 and sky_c == 0.0
+    gate('F ridge', ok, '%d ridge px with cloud behind: composite alpha over a 2 km ridge max %.4f (march clipped) / %.4f '
+         '(march not clipped: the last frame depth) (bar 0.01); a 200 km ridge: |alpha - unclipped| %.4f (bar 0.02); sky: '
+         'march change %.3g, composite alpha %.3g (bar 0)' % (int(sel.sum()), a_behind, a_late, a_front, sky_d, sky_c))
 
 # ---- D: flicker under a fly path ---------------------------------------------------------------------------------------
 if 'D' in only:
@@ -450,7 +563,28 @@ if 'E' in only:
             ms.append(ns.value / 1e6 / reps)
         mem = (128 ** 3 * 8 / 7 + 32 ** 3 * 8 / 7 + (2 * W * H + mw * mh) * 12) / 1048576
         lines.append('%s %.3f ms (march %.3f + resolve %.3f; hist %dx%d, %.1f MB)' % (name, sum(ms), ms[0], ms[1], W, H, mem))
-    print('E cost       INFO  ' + '; '.join(lines) + '; composite at 1920x1080 not timed (one bilinear read a pixel)')
+    # CLOUD2B: the composites at 1920x1080 over the high history: the sky pass, and the pass over the scene (depth test)
+    PC = C.build(SDIR, 'cloud_composite.prog')
+    scr = Mrt(1920, 1080)
+    dimg = np.zeros((1080, 1920, 4))
+    dimg[:540, :, 0] = 0.999   # the lower half scene, the upper half sky
+    dimg[540:, :, 0] = 1.0
+    dtex = tex2d(dimg, linear=False)
+    cms = []
+    for front in (0, 1):
+        cu = {'cvRect': (0.0, 0.0, 1 / 1920.0, 1 / 1080.0), 'sceneExposure': (1.0,), 'viewTransform': 3, 'cvFront': front,
+              'cvSceneZ': (-1.000002, -0.002, 1.0, 1.0), 'cvProj': base['cvProj']}
+        draw(PC, scr, cu, [('cvHist', 0x0DE1, hist[0].col), ('cvHistDepth', 0x0DE1, hist[0].dep), ('cvScene', 0x0DE1, dtex)])
+        gl.glFinish()
+        begq(0x88BF, q)
+        for _ in range(20):
+            gl.glDrawArrays(5, 0, 4)
+        endq(0x88BF)
+        ns = ctypes.c_uint64()
+        getq(q, 0x8866, ctypes.byref(ns))
+        cms.append(ns.value / 1e6 / 20)
+    print('E cost       INFO  ' + '; '.join(lines) + '; composite at 1920x1080 (ultra history): over the sky %.3f ms, over '
+          'the scene %.3f ms (no blend here; the frame depth pass it reads not timed)' % (cms[0], cms[1]))
 
 print('CLOUDVOL-CHECK %s%s' % ('PASS' if all(results) else 'FAIL', (' (red %s)' % red) if red else ''))
 if __name__ == '__main__':

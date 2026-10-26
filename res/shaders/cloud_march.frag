@@ -41,6 +41,11 @@ uniform float cvSlab;	// > 0: a uniform slab of this density in the Low band (th
 uniform int cvProbe;
 uniform vec4 cvProbeRect;	// world km: x0, y0, dx, dy per fragment
 uniform int cvProbeBand;
+uniform float cvMsOn;	// lane CLOUD2B: the multiple-scattering floor (0 = the reds noms and nooctaves)
+uniform float cvMsG;	// the droplet phase's mean cosine (uncapped), for the delta-Eddington scaling
+uniform vec3 cvTint[3];	// CLOUD1's band tints (Low, Mid, High): a linear albedo factor, white by default
+uniform sampler2D cvScene;	// lane CLOUD2B: the scene's window depth (the last frame's), r = farthest sample
+uniform vec4 cvSceneZ;	// the projection's [2][2], [3][2]; km per view unit; 1 = clip the march at the scene
 
 layout ( location = 0 ) out vec4 cvOut;
 layout ( location = 1 ) out vec4 cvDepth;
@@ -107,6 +112,31 @@ float cvOctaveSum( float cosT, float tauL )
 	return s;
 }
 
+/* lane CLOUD2B: the light the octaves miss in a thick cloud. Delta-Eddington scaling (Joseph, Wiscombe & Weinman 1976)
+ * and the two-stream diffuse transmission for albedo w < 1 (Meador & Weaver 1980, Eddington coefficients) of a slab as
+ * thick as the optical depth above the sample, per unit flux on its top. Written with e^(-k tau) only (no overflow).
+ * Twin: cloudvolmath.h msDiffuseT. */
+float cvTdif( float tau, float mu0, float g, float w )
+{
+	float f = g * g;
+	float wp = ( 1.0 - f ) * w / ( 1.0 - f * w );
+	float tp = ( 1.0 - f * w ) * tau;
+	float gp = g / ( 1.0 + g );
+	float g1 = ( 7.0 - wp * ( 4.0 + 3.0 * gp ) ) * 0.25;
+	float g2 = -( 1.0 - wp * ( 4.0 - 3.0 * gp ) ) * 0.25;
+	float g3 = ( 2.0 - 3.0 * gp * mu0 ) * 0.25;
+	float g4 = 1.0 - g3;
+	float a1 = g1 * g4 + g2 * g3;
+	float k = sqrt( max( g1 * g1 - g2 * g2, 1e-8 ) );
+	if ( abs( 1.0 - k * mu0 ) < 1e-3 )
+		mu0 += 2e-3;	// the closed form's removable singularity at k mu0 = 1
+	float em = exp( -k * tp ), e0 = exp( -tp / mu0 );
+	float den = ( 1.0 - k * k * mu0 * mu0 ) * ( ( k + g1 ) + ( k - g1 ) * em * em );
+	float num = ( 1.0 + k * mu0 ) * ( a1 + k * g4 ) * e0 - ( 1.0 - k * mu0 ) * ( a1 - k * g4 ) * em * em * e0
+		- 2.0 * k * ( g4 + a1 * mu0 ) * em;
+	return max( -wp * num / den, 0.0 );	// the total transmission minus the direct e0
+}
+
 void main()
 {
 	if ( cvProbe == 1 ) {
@@ -149,6 +179,16 @@ void main()
 		t1 = ( sb.x > 0.0 ) ? sb.x : st.y;
 	}
 	t1 = min( min( t1, tGround ), t0 + cvMaxKm );
+	// lane CLOUD2B: the scene in front ends the ray (a ridge hides what is behind it; what is in front still draws)
+	float tScene = 1e9;
+	if ( cvSceneZ.w > 0.5 ) {
+		float z = texture( cvScene, ( q + 0.5 ) / cvHistSize ).r;
+		if ( z < 1.0 ) {
+			vec3 v = vec3( ( ndc.x + cvProj.z ) / cvProj.x, ( ndc.y + cvProj.w ) / cvProj.y, -1.0 );
+			tScene = length( v ) * cvSceneZ.y / ( 2.0 * z - 1.0 + cvSceneZ.x ) * cvSceneZ.z;
+			t1 = min( t1, tScene );
+		}
+	}
 
 	vec3 L = vec3( 0.0 );
 	float T = 1.0, wsum = 0.0, dsum = 0.0;
@@ -175,8 +215,14 @@ void main()
 				tauL += cvDens( pl ) * kCvSigma * dk;
 			}
 			float hf = clamp( ( p.z - lo ) / max( hi - lo, 1e-3 ), 0.0, 1.0 );
-			vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, dot( up, cvKeyW ) );
-			vec3 S = kCvAlbedo * ( key * cvOctaveSum( cosT, tauL ) + cvAmbOn * cvAmb * mix( 0.5, 1.0, hf ) );
+			float mu0 = dot( up, cvKeyW );
+			vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, mu0 );
+			float ph = cvOctaveSum( cosT, tauL );
+			// lane CLOUD2B: the octaves' floor: the diffuse light through the cloud above, as a slab of tauL mu0 (gate C)
+			if ( cvMsOn > 0.5 && mu0 > 0.01 )
+				ph = max( ph, mu0 * cvTdif( tauL * mu0, mu0, cvMsG, kCvAlbedo ) / kPi );
+			vec3 tint = p.z < cvBands.topKm.x ? cvTint[0] : cvTint[1];
+			vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * cvAmb * mix( 0.5, 1.0, hf ) );
 			float tr = exp( -dens * kCvSigma * dt );
 			float w = T * ( 1.0 - tr );
 			L += S * w;	// Frostbite: S (1 - e^(-sigma dt)) / sigma x sigma_s, sigma_s = albedo sigma
@@ -190,7 +236,7 @@ void main()
 	// the High band: a thin sheet at its base, behind the volume
 	vec2 sh = cvSphere( o.z, d, kRb + cvBands.baseKm.z );
 	float th = o.z < cvBands.baseKm.z ? sh.y : -1.0;
-	if ( cvBands.density.z > 0.0 && th > 0.0 && th < tGround && th < 200.0 && T > 0.005 ) {
+	if ( cvBands.density.z > 0.0 && th > 0.0 && th < tGround && th < tScene && th < 200.0 && T > 0.005 ) {
 		vec3 p = o + d * th;
 		vec3 up;
 		p.z = cvHeight( o, d, th, up );
@@ -200,7 +246,7 @@ void main()
 		float tau = 2.0 * cvBands.density.z * a;
 		float al = 1.0 - exp( -tau );
 		vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, dot( up, cvKeyW ) );
-		vec3 S = kCvAlbedo * ( key * cvOctaveSum( cosT, 0.5 * tau ) + cvAmbOn * cvAmb );
+		vec3 S = kCvAlbedo * cvTint[2] * ( key * cvOctaveSum( cosT, 0.5 * tau ) + cvAmbOn * cvAmb );
 		L += T * al * S;
 		dsum += T * al * th;
 		wsum += T * al;

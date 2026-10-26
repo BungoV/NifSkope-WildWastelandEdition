@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CLOUD2B (2026-10-26, branch cloud2b-20261026): volume clouds, the dark core, band tints, terrain in front
+
+- **Thick cloud cores** were 19x too dark (gate C 0.053 of a Monte Carlo reference). The key light's phase now has a
+  multiple-scattering floor: the two-stream diffuse transmittance of the layer above the sample (Meador & Weaver 1980,
+  delta-Eddington scaled, Joseph, Wiscombe & Weinman 1976), with the droplet phase's analytic mean cosine (Draine 2003).
+  GLSL `cvTdif` in res/shaders/cloud_march.frag, its C++ twin `msDiffuseT` in src/gl/cloudvolmath.h. Gate C: 0.695.
+- **CLOUD1's band tint** now colours the volume's Low/Mid/High light and the Low tier's 2D layers.
+- **Terrain in front of / behind clouds** (cell view, HDR frame): the march ends at the scene's depth (last frame's),
+  and a second composite after the tone map draws the clouds over geometry they are in front of, never over the sky
+  (`wwCloudVolSceneDepth` / `wwCloudVolFront` in src/gl/cloudvol.h, hooked in src/glview.cpp).
+- The High band stays a 2D sheet. Off draws exactly as before.
+- **Offline gate:** `tests/spells/cloudvol_check.py` adds gates G (tint) and F (ridge). New reds:
+  `WW_CLOUDVOL_RED=noms|nodepth|notint`.
+
 ## Lane CLOUD2 (2026-10-26, branch cloud2-20261026): volume clouds (after Schneider, Nubis 2015)
 
 - **Row Render > Scene > Volume Clouds** (Off / Low / Medium / High / Ultra), ships Off, sets live. Pin `WW_CLOUDVOL`

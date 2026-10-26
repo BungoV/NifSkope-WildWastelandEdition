@@ -35,5 +35,11 @@ int main( int argc, char ** argv )
 	}
 	const auto d = WwCloudVolMath::dropletParams( WwCloudVolMath::kDropletUm );
 	std::printf( "drop %.9g %.9g %.9g %.9g\n", double( d.gHg ), double( d.gD ), double( d.alpha ), double( d.wD ) );
+	// lane CLOUD2B: the multiple-scattering floor's inputs (the checker compares msDiffuseT with its own transcription)
+	const float g = WwCloudVolMath::msMeanCosine( d );
+	std::printf( "msg %.9g\n", double( g ) );
+	for ( float tau : { 0.5f, 2.0f, 8.0f, 30.0f, 400.0f } )
+		for ( float mu : { 0.1f, 0.5f, 0.866f } )
+			std::printf( "tdif %g %g %.9g\n", double( tau ), double( mu ), double( WwCloudVolMath::msDiffuseT( tau, mu, g, WwCloudVolMath::kAlbedo ) ) );
 	return 0;
 }
