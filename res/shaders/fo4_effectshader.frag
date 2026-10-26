@@ -179,6 +179,14 @@ vec3 fxDecalLin( vec3 albedo, vec3 normal )
 	vec3 Pw = cellWorldPos( Pv );
 	vec3 Nw = cellWorldDir( normal );
 	vec3 color;
+#ifdef WW_CELL_GI_MARCH
+	// MERGE1025: the sky share read once (each cellGiSkyK call inlines the whole march: three took this program past the
+	// driver's instruction limit); the same call on the same point, so the same value
+	float kSky = cellGiSky ? cellGiSkyK( Pw, Nw ) : 0.0;
+#define WW_FX_DECAL_SKYK kSky
+#else
+#define WW_FX_DECAL_SKYK cellGiSkyK( Pw, Nw )
+#endif
 	if ( !cellInterior && cellHasDir ) {
 		vec3 Ax = A.rgb;
 		if ( cellExtDalc )
@@ -186,16 +194,16 @@ vec3 fxDecalLin( vec3 albedo, vec3 normal )
 		cellExtAmb = Ax * Ax;
 		color = Ax * albedo;
 		if ( cellGiSky && ( cellRed & 131072 ) == 0 ) {
-			float k = cellGiSkyK( Pw, Nw );
+			float k = WW_FX_DECAL_SKYK;
 			color *= sqrt( 1.0 - k );
 			cellExtAmb *= 1.0 - k;
 		}
 	} else {
 		color = albedo * ( A.rgb + D.rgb * max( dot( normal, normalize( LightDir ) ), 0.0 ) );
 		if ( cellGiSky && ( cellRed & 131072 ) == 0 )
-			color -= ( 1.0 - sqrt( 1.0 - cellGiSkyK( Pw, Nw ) ) ) * A.rgb * albedo;
+			color -= ( 1.0 - sqrt( 1.0 - WW_FX_DECAL_SKYK ) ) * A.rgb * albedo;
 		else if ( cellGiSky )
-			color -= cellGiSkyK( Pw, Nw ) * A.rgb * albedo;
+			color -= WW_FX_DECAL_SKYK * A.rgb * albedo;
 	}
 	cellExtSpec = vec3( 0.0 );
 	vec3 lit = cellLit( color, albedo, normal, Pv, Vv, 0.0, vec3( 0.0 ), 1.0, 0.0, vec3( 0.0 ), vec3( 0.0 ) );
