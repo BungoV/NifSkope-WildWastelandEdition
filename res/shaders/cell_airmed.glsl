@@ -115,8 +115,37 @@ vec4 volRoomAxis( ivec3 c0, vec3 f, ivec2 L, int a, vec4 plain, ivec3 dm )
 	return ws >= wMin ? s / ws : ( s + ( wMin - ws ) * plain ) / wMin;
 }
 
+/* SKY2 FOGSLICE1 (bungo 10-23, fog slices when flying up and down): the grid is valid only within the probes' reach of
+ * surfaces; the air above it takes the flat ambient. The valid share fell 1 -> 0 over one voxel (70 u at Concord) while the
+ * probe GI and the ambient differ (0.0099 vs 0.0182 at the Concord street), so the air held world-anchored layers at the
+ * shell's edges. The share is now read over the probes' reach (8 taps at +-volShell voxels, a 4-voxel ramp) and the GI
+ * value comes in by that share, so the air blends GI -> ambient continuously. volShell 0 (red shellstep) = the old law. */
+uniform float volShell;
+#ifdef WW_AIR_GIVOL
+/* SKY2 FOGSLICE1, the fix at the cause (Division deck D2 s55, D9 s61): the air samples its own filled volume of the
+ * probes' mean irradiance (WwCellGi::air, 3/4 of the probe spacing, every voxel filled, the edge clamped), so open air
+ * reads the probes' sky and no flat ambient takes over above the grid's shell. Reds: noairvol (the shell law above),
+ * shellstep (the old law). */
+uniform sampler3D cellGiAir;
+uniform bool cellGiAirOn;
+uniform vec3 cellGiAirOrigin;
+uniform float cellGiAirVoxel;
+uniform vec3 cellGiAirDims;
+#endif
+
 void volCubeAll( vec3 P, out vec3 E[6], out float share[6] )
 {
+#ifdef WW_AIR_GIVOL
+	if ( cellGiAirOn ) {
+		vec3 ga = ( P - cellGiAirOrigin ) / cellGiAirVoxel;
+		float za = clamp( ga.z, 0.5, cellGiAirDims.z - 0.5 );
+		for ( int a = 0; a < 6; a++ ) {
+			E[a] = max( texture( cellGiAir, vec3( ga.xy / cellGiAirDims.xy, ( za + float( a ) * cellGiAirDims.z ) / ( 6.0 * cellGiAirDims.z ) ) ).rgb, vec3( 0.0 ) );
+			share[a] = 1.0;
+		}
+		return;
+	}
+#endif
 	ivec3 dm = ivec3( cellGiDims );
 	vec3 g = ( P - cellGiOrigin ) / cellGiVoxel;
 	vec2 xy = g.xy / cellGiDims.xy;
@@ -187,6 +216,24 @@ void volCubeAll( vec3 P, out vec3 E[6], out float share[6] )
 				}
 			}
 		}
+	}
+	if ( volShell > 0.0 && cellGiSky ) {
+		vec4 wide[6];
+		for ( int a = 0; a < 6; a++ )
+			wide[a] = vec4( 0.0 );
+		for ( int k = 0; k < 8; k++ ) {
+			vec3 q = g + ( vec3( k & 1, ( k >> 1 ) & 1, ( k >> 2 ) & 1 ) * 2.0 - 1.0 ) * volShell;
+			float qz = clamp( q.z, 0.5, cellGiDims.z - 0.5 );
+			for ( int a = 0; a < 6; a++ )
+				wide[a] += 0.125 * texture( cellGi, vec3( q.xy / cellGiDims.xy, ( qz + float( a ) * cellGiDims.z ) / depth ) );
+		}
+		for ( int a = 0; a < 6; a++ ) {
+			// the GI's own value (P's room answer, else the wide mean), weighted by the wide share; the ambient takes the rest
+			vec3 v = r[a].a > 0.01 ? r[a].rgb / r[a].a : ( wide[a].a > 1e-4 ? wide[a].rgb / wide[a].a : vec3( 0.0 ) );
+			share[a] = clamp( wide[a].a, 0.0, 1.0 );
+			E[a] = max( v * share[a], vec3( 0.0 ) );
+		}
+		return;
 	}
 	for ( int a = 0; a < 6; a++ ) {
 		// as cellGiE0: a sky grid keeps the valid share, else the mean over the valid share
