@@ -196,7 +196,7 @@ VaDrift & vd()
 		if ( ok ) {	// a fixed clock (the shots' frames): the drift integrated from 0 to t in fixed steps
 			d.timePinned = true;
 			d.tPin = std::max( t, 0.0 );
-		} else if ( wwHarnessRun() ) {	// a harness never reads the wall clock
+		} else if ( !wwWorldClockLive() ) {	// a harness never reads the wall clock
 			d.timePinned = true;
 		}
 	}
@@ -887,7 +887,7 @@ void wwVolAirSetDriftOn( bool on )
 bool wwVolAirWantsRepaint()
 {
 	VaDrift & d = vd();
-	const bool want = d.moving && vs().on && d.on && !d.timePinned && !wwHarnessRun();
+	const bool want = d.moving && vs().on && d.on && !d.timePinned && wwWorldClockLive();
 	d.moving = false;
 	return want;
 }

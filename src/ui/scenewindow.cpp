@@ -492,7 +492,7 @@ void SceneWindow::syncCloudTimer()
 	if ( !m_cloudTimer )
 		return;
 	// a harness run pins the cloud clock (WW_LOOKDEV_CLOUDTIME, else 0 s): nothing to animate
-	const bool run = modeBox && modeBox->currentIndex() == 2 && wwLookdevClouds() && !wwHarnessRun();
+	const bool run = modeBox && modeBox->currentIndex() == 2 && wwLookdevClouds() && wwWorldClockLive();
 	if ( run && !m_cloudTimer->isActive() )
 		m_cloudTimer->start();
 	else if ( !run && m_cloudTimer->isActive() )

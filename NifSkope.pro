@@ -399,6 +399,7 @@ HEADERS += \
 	src/probevolumesgi.h \
 	src/probesky.h \
 	src/celldoorlive.h \
+	src/cellworldanim.h \
 	src/probeplace.h \
 	src/cellrefs.h \
 	src/cellactor.h \
@@ -702,6 +703,7 @@ SOURCES += \
 	src/probevolumesgi.cpp \
 	src/probesky.cpp \
 	src/celldoorlive.cpp \
+	src/cellworldanim.cpp \
 	src/probefar.cpp \
 	src/probeincr.cpp \
 	src/probeplace.cpp \

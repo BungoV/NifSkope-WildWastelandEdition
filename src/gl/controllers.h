@@ -417,6 +417,7 @@ class PSysSimController final : public Controller
 		float strength = 0;
 		bool spherical = false;	//!< Force Type FORCE_SPHERICAL
 		bool hasOrigin = false;
+		float decay = 0, turbulence = 0, turbulenceScale = 1;	//!< lane FXPARITY2: read by the game rule only
 	};
 	QVector<GravityMod> gravities;
 
@@ -436,8 +437,22 @@ class PSysSimController final : public Controller
 		QString name;
 		Vector3 axis;			//!< world space, drag object's rotation applied
 		float percentage = 0;
+		Vector3 origin;			//!< lane FXPARITY2: world space, the drag object's position (the range's centre)
+		bool hasOrigin = false;
+		float range = 0, falloff = 0;
 	};
 	QVector<DragMod> drags;
+
+	//! lane FXPARITY2: one NiPSysBombModifier (applied only by the game rule WwFxBomb)
+	struct BombMod
+	{
+		QString name;
+		Vector3 axis, origin;	//!< world space
+		bool hasOrigin = false;
+		float decay = 0, deltaV = 0;
+		int decayType = 0, symmetry = 0;
+	};
+	QVector<BombMod> bombs;
 
 	/*! BSPSysInheritVelocityModifier — new particles are thrown by whatever is
 	 *  carrying the emitter.

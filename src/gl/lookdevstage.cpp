@@ -878,7 +878,7 @@ double wwLookdevCloudSeconds()
 	LdState & s = st();
 	if ( s.pinCloudTime >= 0.0 )
 		return s.pinCloudTime;
-	if ( wwHarnessRun() )
+	if ( !wwWorldClockLive() )
 		return 0.0;
 	return double( s.cloudClock.elapsed() ) / 1000.0;
 }

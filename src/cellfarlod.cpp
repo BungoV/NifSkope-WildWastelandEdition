@@ -1386,7 +1386,7 @@ void wwCellFarLodFrame( Scene * scene )
 	swayMoving = amp > 0.0f && !pinned && !stillRed;
 	static QString said;
 	const QString line = QStringLiteral( "far lod: sway amp %1 on %2 programs: %3; repaints itself %4" ).arg( double( amp ), 0, 'f', 1 )
-		.arg( set.size() ).arg( set.join( QLatin1Char( ' ' ) ) ).arg( swayMoving ? ( wwHarnessRun() ? "1 (held: harness)" : "1" ) : "0" );
+		.arg( set.size() ).arg( set.join( QLatin1Char( ' ' ) ) ).arg( swayMoving ? ( !wwWorldClockLive() ? "1 (held: harness)" : "1" ) : "0" );
 	if ( line != said ) {
 		said = line;
 		qInfo().noquote() << line;
@@ -1395,7 +1395,7 @@ void wwCellFarLodFrame( Scene * scene )
 
 bool wwCellFarLodWantsRepaint()
 {
-	const bool want = swayMoving && !wwHarnessRun();
+	const bool want = swayMoving && wwWorldClockLive();
 	swayMoving = false;
 	return want;
 }
