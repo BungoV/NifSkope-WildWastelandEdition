@@ -41,5 +41,12 @@ int main( int argc, char ** argv )
 	for ( float tau : { 0.5f, 2.0f, 8.0f, 30.0f, 400.0f } )
 		for ( float mu : { 0.1f, 0.5f, 0.866f } )
 			std::printf( "tdif %g %g %.9g\n", double( tau ), double( mu ), double( WwCloudVolMath::msDiffuseT( tau, mu, g, WwCloudVolMath::kAlbedo ) ) );
+	// lane CLOUD2C: the top reflection's twin; the wind offset the draw uses and the one the readers' bind hands out
+	for ( float tau : { 0.5f, 2.0f, 8.0f, 30.0f, 400.0f } )
+		for ( float mu : { 0.1f, 0.5f, 0.866f } )
+			std::printf( "rdir %g %g %.9g\n", double( tau ), double( mu ), double( WwCloudVolMath::msDiffuseR( tau, mu, g, WwCloudVolMath::kAlbedo ) ) );
+	const bool wind0 = std::getenv( "CLOUDVOL_WIND0" ) != nullptr;
+	for ( double t : { 0.0, 60.0, 600.0, 3600.0, 86400.0 } )
+		std::printf( "wind %g %.9g %.9g\n", t, double( WwCloudVolMath::windKm( t ) ), double( WwCloudVolMath::readerWindKm( t, wind0 ) ) );
 	return 0;
 }

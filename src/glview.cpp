@@ -4289,6 +4289,8 @@ void GLView::paintGL()
 			PassTime::end( PassTime::Background );
 			scene->draw();	// lane PERF1: opaque / sorted / effects timed inside (Scene::drawShapes)
 			wwVolAirSkyDraw( scene, true );	// lane VOLAIR1: the sky's air probes (gates only; no GL call otherwise)
+			if ( !hdr )
+				wwCloudVolLookdevFront( scene );	// lane CLOUD2C: clouds in front of a single NIF (its opaque depth)
 			if ( hdr ) {
 				PassTime::begin( PassTime::FarCards );
 				PassTime::subBegin( PassTime::FarDots );	// lane PERF2: far LOD measured (proposal only)

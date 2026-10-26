@@ -2,7 +2,7 @@
 hidden 4.1 core context (shader_link_check.py), with the exe's own noise bytes and calibration tables (tests/cloudvol/
 cloudvol_dump.cpp, built here with g++), the sky's LUTs from the real atmo_*.prog (atmo_skyrender.Sky). No NifSkope.
 
-    python -I tests/spells/cloudvol_check.py <scratch dir> [--red nocal|nooctaves|noms|noreproj|flatkey|notint|nodepth] [--only A,B,..]
+    python -I tests/spells/cloudvol_check.py <scratch dir> [--red nocal|nooctaves|noms|noreproj|flatkey|notint|nodepth|notop|display|wind0] [--only A,B,..]
 
 Gates (bars written before the first run):
   A coverage   the volume's column opacity seen from straight above, in five map stripes of coverage 0.1 .. 0.9, Low and
@@ -22,6 +22,13 @@ Gates (bars written before the first run):
   G tint       (CLOUD2B) CLOUD1's band tint: a tinted band's march == the white march x the tint. Red notint fails.
   F ridge      (CLOUD2B) a scene depth (a ridge) at 2 km in front of the 1.5 km slab: the march ends at it, the
                composite over the scene draws only where the cloud is in front, never over the sky. Red nodepth fails.
+  (CLOUD2C) H linear  the pass over the scene inside the cell's linear frame: out == L + T x frame (premultiplied
+               over, HDR values), exposure and view transform ignored, sky pixels and the frame's alpha untouched. Red
+               display (CLOUD2B's display-space pass) fails.
+  (CLOUD2C) R top     a tau-10 slab seen straight down, sun 60 and 30 deg: the top's radiance within 0.75 .. 1.33 x a
+               Monte Carlo reflection (same phase and albedo). Red notop fails. msDiffuseR twin == the checker's to 1e-4.
+  (CLOUD2C) W wind    a reader's column opacity with the bind's wind offset == the drawn one's at 0, 60, 600, 3600 and
+               86400 s (1e-6); the field must move between 0 and 600 s. Red wind0 (the old bind) fails.
 Exit 0 only when every gate run passes.
 """
 import ctypes, math, os, subprocess, sys, time
@@ -46,7 +53,7 @@ MID = (5.0, 6.5, 0.6)
 args = sys.argv[1:]
 scratch = args[0] if args and not args[0].startswith('--') else os.path.join(TREE, '..', 'cloudvol_scratch')
 red = args[args.index('--red') + 1] if '--red' in args else ''
-only = set(args[args.index('--only') + 1].split(',')) if '--only' in args else set('ABCDEFG')
+only = set(args[args.index('--only') + 1].split(',')) if '--only' in args else set('ABCDEFGHRW')
 os.makedirs(scratch, exist_ok=True)
 
 
@@ -64,12 +71,16 @@ def dump(bands, nocal=False):
     env = dict(os.environ, PATH='C:/msys64/ucrt64/bin;' + os.environ['PATH'])
     if nocal:
         env['CLOUDVOL_NOCAL'] = '1'
+    if red == 'wind0':
+        env['CLOUDVOL_WIND0'] = '1'   # CLOUD2C: the readers' bind as it was (wind 0)
     out = subprocess.run(argv, capture_output=True, text=True, env=env, check=True).stdout.split('\n')
     cal = [list(map(float, l.split()[2:])) for l in out if l.startswith('cal ')]
     drop = [float(x) for l in out if l.startswith('drop ') for x in l.split()[1:]]
-    global MSG, TDIF
+    global MSG, TDIF, RDIR, WIND
     MSG = [float(l.split()[1]) for l in out if l.startswith('msg ')][0]
     TDIF = [tuple(map(float, l.split()[1:])) for l in out if l.startswith('tdif ')]
+    RDIR = [tuple(map(float, l.split()[1:])) for l in out if l.startswith('rdir ')]
+    WIND = [tuple(map(float, l.split()[1:])) for l in out if l.startswith('wind ')]
     return cal, drop
 
 
@@ -91,6 +102,25 @@ def tdif_w(tau, mu0, g, w=ALBEDO):
     den = (1 - k * k * mu0 * mu0) * ((k + g1) * ek + (k - g1) * em)
     tt = e0 - wp / den * ((1 + k * mu0) * (a1 + k * g4) * ek * e0 - (1 - k * mu0) * (a1 - k * g4) * em * e0 - 2 * k * (g4 + a1 * mu0))
     return max(0.0, tt - e0)
+
+
+def rdir_w(tau, mu0, g, w=ALBEDO):
+    """CLOUD2C: the checker's own transcription of the same slab's reflection of a beam (Meador & Weaver 1980 eq. 14,
+    alpha2 = g1 g3 + g2 g4), delta-Eddington scaled, in its textbook e^(+k tau) form"""
+    f = g * g
+    wp, tp, gp = (1 - f) * w / (1 - f * w), (1 - f * w) * tau, (g - f) / (1 - f)
+    g1, g2 = (7 - wp * (4 + 3 * gp)) / 4, -(1 - wp * (4 - 3 * gp)) / 4
+    g3 = (2 - 3 * gp * mu0) / 4
+    g4 = 1 - g3
+    a2 = g1 * g3 + g2 * g4
+    k = math.sqrt(max(g1 * g1 - g2 * g2, 1e-12))
+    if abs(1 - k * mu0) < 1e-3:
+        mu0 += 2e-3
+    if k * tp > 600:
+        return wp * (a2 + k * g3) / ((1 + k * mu0) * (k + g1))
+    ek, em, e0 = math.exp(k * tp), math.exp(-k * tp), math.exp(-tp / mu0)
+    den = (1 - k * k * mu0 * mu0) * ((k + g1) * ek + (k - g1) * em)
+    return wp / den * ((1 - k * mu0) * (a2 + k * g3) * ek - (1 + k * mu0) * (a2 - k * g3) * em - 2 * k * (g3 - a2 * mu0) * e0)
 
 
 sky = R.Sky(SDIR)
@@ -233,7 +263,9 @@ def march_uni(cam, camKm, hist, stride, phase, sun_el, sun_az=0.0, steps=64, tap
             # CLOUD2B: the multiple-scattering floor (off in the reds noms and nooctaves), white tints, no scene depth
             'cvMsOn': (0.0 if red in ('noms', 'nooctaves') else 1.0,), 'cvMsG': (MSG,),
             'cvTint[0]': (1.0, 1.0, 1.0), 'cvTint[1]': (1.0, 1.0, 1.0), 'cvTint[2]': (1.0, 1.0, 1.0),
-            'cvSceneZ': (0.0, 0.0, 0.0, 0.0)}
+            'cvSceneZ': (0.0, 0.0, 0.0, 0.0),
+            # CLOUD2C: the light the cloud below reflects up (off in the red notop)
+            'cvTopOn': (0.0 if red == 'notop' else 1.0,)}
 
 
 SCENE1 = None
@@ -329,8 +361,9 @@ def droplet(prm, c, k=1.0):
     return (1 - prm[3]) * hg(gh, c) + prm[3] * dr
 
 
-def mc_underside(tau, mu0, prm, n=200000, cone=0.97, seed=7):
-    """radiance leaving the slab's bottom straight down (within acos(cone)), per unit sun irradiance on a normal plane"""
+def mc_underside(tau, mu0, prm, n=200000, cone=0.97, seed=7, top=False):
+    """radiance leaving the slab's bottom straight down (within acos(cone)), per unit sun irradiance on a normal plane;
+    top=True (CLOUD2C): the radiance leaving its top straight up (the slab's reflection)"""
     rng = np.random.default_rng(seed)
     cs = np.linspace(-1, 1, 20001)
     pdf = droplet(prm, cs) * 2 * math.pi
@@ -349,7 +382,10 @@ def mc_underside(tau, mu0, prm, n=200000, cone=0.97, seed=7):
         nz = z[idx] + d[idx, 2] * s
         out_b = nz < 0
         out_t = nz > tau
-        if out_b.any():
+        if top and out_t.any():
+            ot = idx[out_t]
+            hit += float((w[ot] * (d[ot, 2] >= cone)).sum())
+        if out_b.any() and not top:
             ob = idx[out_b]
             hit += float((w[ob] * (-d[ob, 2] >= cone)).sum())
         gone = idx[out_b | out_t]
@@ -391,6 +427,55 @@ if 'C' in only:
     gate('C dark core', under >= 0.25 * ref and twin <= 1e-4,
          'tau %.0f slab underside %.4g x sun vs Monte Carlo %.4g (ratio %.3f, bar >= 0.25) | twin msDiffuseT vs the '
          'checker worst |d| %.2g (bar 1e-4), droplet mean cosine %.4f' % (tau, under, ref, under / max(ref, 1e-12), twin, MSG))
+
+# ---- W: CLOUD2C: a reader's density at time t == the drawn density at t (the wind offset through the bind) -----------
+if 'W' in only:
+    # the column opacity probe (a vertical reader, as a cloud shadow) over an overcast-ish Low band; the drawn field takes
+    # windKm(t) (the march's densityUniforms), the reader's takes readerWindKm(t) (wwCloudVolBindDensity), both from the
+    # dump (cloudvolmath.h). Control: the field at 600 s differs from the one at 0 s, so the gate can fail.
+    W, H = 240, 120
+    tgt = Mrt(W, H)
+    MAP = tex2d(np.full((1, 1, 4), 0.5), linear=True)
+
+    def column(wind):
+        u = dict(bands_uni(LOW, MID, cal, rect=(-50.0, -50.0, 0.01, 1.0), wind=(wind, 0.0, 0.0)),
+                 **march_uni(camera(0, 10), (0, 0, 0.0), (W, H), 1, (0, 0), 30.0, drop=drop))
+        u.update({'cvProbe': 1, 'cvProbeRect': (0.0, 0.0, 12.0 / W, 6.0 / H), 'cvProbeBand': 0})
+        draw(P_MARCH, tgt, u, march_texs(trans, trans))
+        return tgt.read()[..., 0]
+    worst, rows = 0.0, []
+    for t, dw, rw in WIND:
+        dd = float(np.abs(column(dw) - column(rw)).max())
+        worst = max(worst, dd)
+        rows.append('%gs %.4f/%.4f km' % (t, dw, rw))
+    moved = float(np.abs(column(WIND[2][1]) - column(WIND[0][1])).mean())
+    gate('W wind', worst <= 1e-6 and moved > 0.01, 'drawn/reader offset %s; reader vs drawn column opacity worst |d| %.3g '
+         '(bar 1e-6) | control: the field at %gs vs 0s mean |d| %.3f (> 0.01)' % ('; '.join(rows), worst, WIND[2][0], moved))
+    MAP = tex2d(np.zeros((1, 1, 4)))
+
+# ---- R: CLOUD2C: a thick top seen from above vs the Monte Carlo reflection -------------------------------------------
+if 'R' in only:
+    W, H = 64, 64
+    tgt = Mrt(W, H)
+    slab = (1.5, 1.75, 1.0)
+    tau = SIGMA * (slab[1] - slab[0])
+    lum = lambda c: float(np.dot(c, [0.2126, 0.7152, 0.0722]))
+    rows = []
+    for sun_el in (60.0, 30.0):
+        mu0 = math.sin(math.radians(sun_el))
+        u = dict(bands_uni(slab, (9.0, 9.1, 0.0), cal, cov=(1.0, 0.0, 0.0)),
+                 **march_uni(camera(180, -89.5), (0, 0, 2.25), (W, H), 1, (0, 0), sun_el, steps=128, taps=6,
+                             octaves=1 if red == 'nooctaves' else 4, slab=1.0, drop=drop, vfov=10.0))
+        draw(P_MARCH, tgt, u, march_texs(trans, trans))
+        o = tgt.read()
+        T = A.transmittance(sky.P, np.array([6360.0 + slab[1]]), np.array([mu0]), 400)[0]
+        top = lum(o[24:40, 24:40, :3].reshape(-1, 3).mean(0)) / lum(T)
+        ref = mc_underside(tau, mu0, drop, top=True)
+        rows.append((sun_el, top, ref, top / max(ref, 1e-12)))
+    twin = max(abs(t - rdir_w(a, m, MSG)) for a, m, t in RDIR)
+    ok = all(0.75 <= r[3] <= 1.33 for r in rows) and twin <= 1e-4
+    gate('R top', ok, '; '.join('sun %g deg: tau %.0f top %.4g x sun vs Monte Carlo %.4g (ratio %.3f)' % (r[0], tau, r[1], r[2], r[3])
+                                for r in rows) + ' (bar 0.75 .. 1.33; the first bar 0.5 .. 1.5 let the red notop pass at 0.63 / 0.71) | twin msDiffuseR vs the checker worst |d| %.2g (bar 1e-4)' % twin)
 
 # ---- G: CLOUD1's band tints multiply the light (a linear albedo factor) -------------------------------------------
 if 'G' in only:
@@ -464,6 +549,47 @@ if 'F' in only:
     gate('F ridge', ok, '%d ridge px with cloud behind: composite alpha over a 2 km ridge max %.4f (march clipped) / %.4f '
          '(march not clipped: the last frame depth) (bar 0.01); a 200 km ridge: |alpha - unclipped| %.4f (bar 0.02); sky: '
          'march change %.3g, composite alpha %.3g (bar 0)' % (int(sel.sum()), a_behind, a_late, a_front, sky_d, sky_c))
+
+# ---- H: CLOUD2C: the pass over the scene inside the linear frame: plain linear "over", no exposure, no view transform --
+if 'H' in only:
+    W, H = 64, 48
+    rng = np.random.default_rng(3)
+    trn = rng.uniform(0.0, 1.0, (H, W))   # the history's transmittance
+    lit = rng.uniform(0.0, 4.0, (H, W, 3)) * (1 - trn)[..., None]   # light, premultiplied, HDR (above 1)
+    hist = np.concatenate([lit, trn[..., None]], -1)
+    hdep = np.full((H, W, 4), 1.0)   # the clouds' mean depth: 1 km
+    near, far = 0.001, 1000.0
+    P22, P32 = -(far + near) / (far - near), -2 * far * near / (far - near)
+    Z = 5.0   # the scene 5 km away (view z) in the left half, sky in the right half
+    zimg = np.zeros((H, W, 4))
+    zimg[..., 0] = np.where(np.arange(W)[None, :] < W // 2, ((-P22 + P32 / Z) + 1) / 2, 1.0)
+    bg = rng.uniform(0.0, 3.0, (H, W, 4)).astype(np.float32)
+    bg[..., 3] = 0.25
+    bg32 = np.ascontiguousarray(bg)   # held: a temporary's .ctypes.data dangles before the upload reads it
+    bg = bg32.astype(np.float64)
+    P_COMP = C.build(SDIR, 'cloud_composite.prog')
+    tgt = Mrt(W, H)
+    disp = red == 'display'
+    cu = {'cvRect': (0.0, 0.0, 1.0 / W, 1.0 / H), 'sceneExposure': (5.0,), 'viewTransform': 0, 'cvFront': 1 if disp else 2,
+          'cvSceneZ': (P22, P32, 1.0, 1.0), 'cvProj': (1.0, 1.0, 0.0, 0.0)}
+    bgt = tex2d(bg, linear=False)
+    # fill the target with the background (a copy draw through the composite would blend; upload instead)
+    gl.glBindTexture(0x0DE1, tgt.col)
+    gl.glTexImage2D(0x0DE1, 0, 0x8814, W, H, 0, 0x1908, 0x1406, bg32.ctypes.data)
+    gl.glEnable(0x0BE2)
+    S.fn('glBlendFuncSeparate', None, GLenum, GLenum, GLenum, GLenum)(*((0x0302, 0x0303) if disp else (1, 0x0303)), 0, 1)
+    draw(P_COMP, tgt, cu, [('cvHist', 0x0DE1, tex2d(hist, linear=False)), ('cvHistDepth', 0x0DE1, tex2d(hdep, linear=False)),
+                           ('cvScene', 0x0DE1, tex2d(zimg, linear=False))])
+    gl.glDisable(0x0BE2)
+    o = tgt.read()
+    scene = np.arange(W)[None, :].repeat(H, 0) < W // 2
+    want = lit + trn[..., None] * bg[..., :3]
+    e_scene = float(np.abs(o[..., :3][scene] - want[scene]).max() / want[scene].max())
+    e_sky = float(np.abs(o[~scene] - bg[~scene]).max())
+    e_a = float(np.abs(o[..., 3] - 0.25).max())
+    gate('H linear', e_scene <= 1e-3 and e_sky == 0.0 and e_a == 0.0,
+         'scene px: |out - (L + T x frame)| / max %.3g (bar 1e-3; exposure 5 and view transform 0 set, must be ignored); '
+         'sky px changed %.3g, frame alpha changed %.3g (bar 0)' % (e_scene, e_sky, e_a))
 
 # ---- D: flicker under a fly path ---------------------------------------------------------------------------------------
 if 'D' in only:
@@ -571,7 +697,7 @@ if 'E' in only:
     dimg[540:, :, 0] = 1.0
     dtex = tex2d(dimg, linear=False)
     cms = []
-    for front in (0, 1):
+    for front in (0, 1, 2):
         cu = {'cvRect': (0.0, 0.0, 1 / 1920.0, 1 / 1080.0), 'sceneExposure': (1.0,), 'viewTransform': 3, 'cvFront': front,
               'cvSceneZ': (-1.000002, -0.002, 1.0, 1.0), 'cvProj': base['cvProj']}
         draw(PC, scr, cu, [('cvHist', 0x0DE1, hist[0].col), ('cvHistDepth', 0x0DE1, hist[0].dep), ('cvScene', 0x0DE1, dtex)])
@@ -584,7 +710,8 @@ if 'E' in only:
         getq(q, 0x8866, ctypes.byref(ns))
         cms.append(ns.value / 1e6 / 20)
     print('E cost       INFO  ' + '; '.join(lines) + '; composite at 1920x1080 (ultra history): over the sky %.3f ms, over '
-          'the scene %.3f ms (no blend here; the frame depth pass it reads not timed)' % (cms[0], cms[1]))
+          'the scene %.3f ms (display) / %.3f ms (CLOUD2C linear frame) (no blend or stencil here; the frame depth pass it '
+          'reads and the march redo of a first or harness paint (= the march above) not timed)' % (cms[0], cms[1], cms[2]))
 
 print('CLOUDVOL-CHECK %s%s' % ('PASS' if all(results) else 'FAIL', (' (red %s)' % red) if red else ''))
 if __name__ == '__main__':

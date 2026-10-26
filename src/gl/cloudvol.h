@@ -38,12 +38,18 @@ bool wwCloudVolLowColour( float out[3] );
 
 /*! For readers of the density (CLOUD3, CLOUD4): sets cloud_common.glsl's uniforms (cvBands, cvCal) on the CURRENT
  *  program and binds cvShape, cvDetail, cvMap to units firstUnit .. firstUnit + 2. False (nothing bound) when the volume
- *  has no map this frame. Needs the GL context current; call after wwCloudMapUpdate. */
+ *  has no map this frame. Needs the GL context current; call after wwCloudMapUpdate.
+ *  lane CLOUD2C (2026-10-26): cvBands.windKm is the offset the last draw used (it was 0), so a reader's density at the
+ *  drawn clock is the drawn density; a reader that caches what it built must rebuild while the wind moves. */
 bool wwCloudVolBindDensity( Scene * scene, int firstUnit );
 
 /*! lane CLOUD2B, the cell HDR frame only: wwCloudVolSceneDepth grabs the scene's depth after the last draw (before the
- *  tone map); wwCloudVolFront, after it, draws the volume over geometry it is in front of (a ridge behind a cloud). */
+ *  tone map); wwCloudVolFront, after it, draws the volume over geometry it is in front of (a ridge behind a cloud).
+ *  lane CLOUD2C: wwCloudVolSceneDepth draws them itself, into the linear frame; wwCloudVolFront only for the red display. */
 void wwCloudVolSceneDepth( Scene * scene );
 void wwCloudVolFront( Scene * scene );
+/*! lane CLOUD2C: the frames outside the cell HDR frame (single-NIF lookdev): after the scene drew, its opaque depth
+ *  (Scene::grabEffectDepth) ends the march and the clouds draw over the geometry they are in front of. */
+void wwCloudVolLookdevFront( Scene * scene );
 
 #endif

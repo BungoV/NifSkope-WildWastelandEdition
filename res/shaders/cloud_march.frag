@@ -46,6 +46,7 @@ uniform float cvMsG;	// the droplet phase's mean cosine (uncapped), for the delt
 uniform vec3 cvTint[3];	// CLOUD1's band tints (Low, Mid, High): a linear albedo factor, white by default
 uniform sampler2D cvScene;	// lane CLOUD2B: the scene's window depth (the last frame's), r = farthest sample
 uniform vec4 cvSceneZ;	// the projection's [2][2], [3][2]; km per view unit; 1 = clip the march at the scene
+uniform float cvTopOn;	// lane CLOUD2C: the light the cloud below reflects back up (0 = the red notop)
 
 layout ( location = 0 ) out vec4 cvOut;
 layout ( location = 1 ) out vec4 cvDepth;
@@ -137,6 +138,29 @@ float cvTdif( float tau, float mu0, float g, float w )
 	return max( -wp * num / den, 0.0 );	// the total transmission minus the direct e0
 }
 
+/* lane CLOUD2C: the same two-stream slab's reflection of a beam at mu0 (Meador & Weaver 1980 eq. 14, alpha2 =
+ * g1 g3 + g2 g4), delta-Eddington scaled, e^(-k tau) only. Twin: cloudvolmath.h msDiffuseR. */
+float cvRdir( float tau, float mu0, float g, float w )
+{
+	float f = g * g;
+	float wp = ( 1.0 - f ) * w / ( 1.0 - f * w );
+	float tp = ( 1.0 - f * w ) * tau;
+	float gp = g / ( 1.0 + g );
+	float g1 = ( 7.0 - wp * ( 4.0 + 3.0 * gp ) ) * 0.25;
+	float g2 = -( 1.0 - wp * ( 4.0 - 3.0 * gp ) ) * 0.25;
+	float g3 = ( 2.0 - 3.0 * gp * mu0 ) * 0.25;
+	float g4 = 1.0 - g3;
+	float a2 = g1 * g3 + g2 * g4;
+	float k = sqrt( max( g1 * g1 - g2 * g2, 1e-8 ) );
+	if ( abs( 1.0 - k * mu0 ) < 1e-3 )
+		mu0 += 2e-3;
+	float em = exp( -k * tp ), e0 = exp( -tp / mu0 );
+	float den = ( 1.0 - k * k * mu0 * mu0 ) * ( ( k + g1 ) + ( k - g1 ) * em * em );
+	float num = ( 1.0 - k * mu0 ) * ( a2 + k * g3 ) - ( 1.0 + k * mu0 ) * ( a2 - k * g3 ) * em * em
+		- 2.0 * k * ( g3 - a2 * mu0 ) * e0 * em;
+	return clamp( wp * num / den, 0.0, 1.0 );
+}
+
 void main()
 {
 	if ( cvProbe == 1 ) {
@@ -219,8 +243,26 @@ void main()
 			vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, mu0 );
 			float ph = cvOctaveSum( cosT, tauL );
 			// lane CLOUD2B: the octaves' floor: the diffuse light through the cloud above, as a slab of tauL mu0 (gate C)
-			if ( cvMsOn > 0.5 && mu0 > 0.01 )
-				ph = max( ph, mu0 * cvTdif( tauL * mu0, mu0, cvMsG, kCvAlbedo ) / kPi );
+			if ( cvMsOn > 0.5 && mu0 > 0.01 ) {
+				float fd = mu0 * cvTdif( tauL * mu0, mu0, cvMsG, kCvAlbedo );
+				/* lane CLOUD2C: what the cloud UNDER the sample sends back up (a thick top seen from above): its slab
+				 * reflection (cvRdir) of the light reaching the sample, the direct beam and fd, the slab's depth from
+				 * taps straight down. Seen along d it weighs (1 - g d.z) / 2: the phase's share of up-going light
+				 * scattered toward the eye (Coakley & Chylek 1975: a backscatter fraction (1 - g) / 2). Gate R. */
+				if ( cvTopOn > 0.5 ) {
+					float tauB = 0.0;
+					for ( int k = 0; k < cvTaps; k++ ) {
+						float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );
+						float tk = cvLightKm * 0.5 * ( a * a + b * b ), dk = cvLightKm * ( b * b - a * a );
+						vec3 pb = p - up * tk;
+						pb.z = p.z - tk;
+						tauB += cvDens( pb ) * kCvSigma * dk;
+					}
+					float fu = cvRdir( tauB, mu0, cvMsG, kCvAlbedo ) * ( mu0 * exp( -tauL ) + fd );
+					fd += 0.5 * ( 1.0 - cvMsG * d.z ) * fu;
+				}
+				ph = max( ph, fd / kPi );
+			}
 			vec3 tint = p.z < cvBands.topKm.x ? cvTint[0] : cvTint[1];
 			vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * cvAmb * mix( 0.5, 1.0, hf ) );
 			float tr = exp( -dens * kCvSigma * dt );

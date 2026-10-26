@@ -227,6 +227,43 @@ inline float msDiffuseT( float tau, float mu0, float g, float w )
 	return std::max( -wp * num / den, 0.0f );
 }
 
+/*! lane CLOUD2C: the same slab's reflection of a beam at mu0 (Meador & Weaver 1980 eq. 14, alpha2 = g1 g3 + g2 g4),
+ *  delta-Eddington scaled, written with e^(-k tau) only. Twin of cloud_march.frag cvRdir. */
+inline float msDiffuseR( float tau, float mu0, float g, float w )
+{
+	const float f = g * g;
+	const float wp = ( 1.0f - f ) * w / ( 1.0f - f * w );
+	const float tp = ( 1.0f - f * w ) * tau;
+	const float gp = g / ( 1.0f + g );
+	const float g1 = ( 7.0f - wp * ( 4.0f + 3.0f * gp ) ) * 0.25f;
+	const float g2 = -( 1.0f - wp * ( 4.0f - 3.0f * gp ) ) * 0.25f;
+	const float g3 = ( 2.0f - 3.0f * gp * mu0 ) * 0.25f;
+	const float g4 = 1.0f - g3;
+	const float a2 = g1 * g3 + g2 * g4;
+	const float k = std::sqrt( std::max( g1 * g1 - g2 * g2, 1e-8f ) );
+	if ( std::fabs( 1.0f - k * mu0 ) < 1e-3f )
+		mu0 += 2e-3f;
+	const float em = std::exp( -k * tp ), e0 = std::exp( -tp / mu0 );
+	const float den = ( 1.0f - k * k * mu0 * mu0 ) * ( ( k + g1 ) + ( k - g1 ) * em * em );
+	const float num = ( 1.0f - k * mu0 ) * ( a2 + k * g3 ) - ( 1.0f + k * mu0 ) * ( a2 - k * g3 ) * em * em
+		- 2.0f * k * ( g3 - a2 * mu0 ) * e0 * em;
+	return std::clamp( wp * num / den, 0.0f, 1.0f );
+}
+
+/*! lane CLOUD2C: the noise's drift (8 m/s along +x) on the 2D layers' clock, wrapped to 64 shape periods. */
+constexpr float kWindKmS = 0.008f;
+inline float windKm( double secs )
+{
+	return float( std::fmod( secs * double( kWindKmS ), double( kShapeKm ) * 64.0 ) );
+}
+
+/*! lane CLOUD2C: the offset wwCloudVolBindDensity hands a reader: the one the last draw used (its clock), so a cloud
+ *  shadow moves with the drawn clouds. red = the old bind (0: shadows stood still while the clouds drifted). */
+inline float readerWindKm( double drawnSecs, bool red )
+{
+	return red ? 0.0f : windKm( drawnSecs );
+}
+
 /*! the Low preset: the 2D layers' colour from the model, in the sky's scene units (displayed = this x the layer
  *  texture). The key light through the air to the cloud base (T at the base toward the light) plus the sky's mean
  *  radiance E / pi (E = the sky irradiance per unit sun, atmomath skyIrradiance), times the cloud's albedo. */

@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CLOUD2C (2026-10-26, branch cloud2c-20261026): volume clouds in the linear frame, first paint, lookdev, tops, wind
+
+- **Clouds in front of terrain go into the linear HDR frame** before the tone map (premultiplied, stencil = the cell's
+  pixels), so the cell's imagespace treats them as it treats the terrain behind them. Red `WW_CLOUDVOL_RED=display`
+  keeps CLOUD2B's pass after the tone map.
+- **The first paint clips at this frame's depth:** with no depth yet (a fresh open) or in a harness run, the march and
+  resolve run again after the scene with this frame's depth, so a fresh open draws what a live set draws. The notes line
+  says `clip=last|this|none`. Red `firstpaint`.
+- **Single-NIF lookdev** (outside the cell HDR frame): the scene's opaque depth (Scene::grabEffectDepth) ends the march
+  and the clouds draw over geometry they are in front of (`wwCloudVolLookdevFront`, hooked in src/glview.cpp).
+  Red `lookdevback`.
+- **Cloud tops lit from below:** the light the cloud layer reflects up (two-stream diffuse reflectance, Meador & Weaver
+  1980; Coakley & Chylek 1975) is added to the multiple-scattering floor. GLSL `cvRdir`, C++ `msDiffuseR`. Red `notop`.
+- **Readers get the wind:** `wwCloudVolBindDensity` hands readers the offset the last draw used (it was 0), so CLOUD3's
+  shadows can move with the clouds (notes/cloud2/INTERFACE.md, 2026-10-26). Red `wind0`.
+- The albedo is not counted twice (the two-stream terms carry it for the scatters above, the phase for the last one);
+  the High band stays 2D (the census has no High data). Off draws exactly as before.
+- **Offline gate:** `tests/spells/cloudvol_check.py` adds gates H (linear composite), R (tops vs a Monte Carlo) and W
+  (reader density == drawn density); gate E times the linear composite.
+
 ## Lane CLOUD2B (2026-10-26, branch cloud2b-20261026): volume clouds, the dark core, band tints, terrain in front
 
 - **Thick cloud cores** were 19x too dark (gate C 0.053 of a Monte Carlo reference). The key light's phase now has a
