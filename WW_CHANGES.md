@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GAPTOOL2 (2026-10-26, branch gaptool2-20261026): Sun Path moves the light live
+
+- **A live WW_SUNPATH set (or the Sun Path row) now moves the light, not only the disc:** the scene light was cached
+  (currentLight) on the weather, the hour, the clock row and the sky rows, so a live Sun Path change redrew the sun disc
+  and glare while the shading and shadows kept the old direction. The cache now also keys on the Sun Path inputs
+  (`wwSunPathKey()`: the row, WW_SUNPATH_PIN, the "Real sun and moon" row and its june red). An unchanged value
+  rebuilds nothing.
+- Sun Path never set = the old build at the same calls (unit trace byte-equal to the base). No shader change.
+- Unit: notes/gaptool2/unit/unit.sh (green PASS, red = the base's currentLight, 5 FAIL). Hold rows: notes/gaptool2.
+
 ## Lane TAA4 (2026-10-26, branch taa4-20261026): modern TAA still shimmer and lag under the game's
 
 - **Still Ultra shimmer fixed (0.0349 -> 0.0094, game 0.0122):** TAAINPUTS1 decided "same frame again" from the camera

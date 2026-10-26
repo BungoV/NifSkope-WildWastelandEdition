@@ -1454,6 +1454,22 @@ void wwSunPathSetMode( int mode )
 	setTier( s.sunPath, std::clamp( mode, 0, 1 ), s.pinSunPath, kSunPathKey );
 }
 
+WwSunPathKey wwSunPathKey()
+{
+	const SetState & s = ss();
+	WwSunPathKey k;
+	k.mode = s.sunPath;
+	k.pin = s.sunPin;
+	if ( s.sunPin ) {
+		k.elev = s.pinElev;
+		k.az = s.pinAz;
+	} else if ( s.sunPath == 1 && wwLookOn( WwLook::Ephemeris ) ) {
+		k.ephem = true;
+		k.june = wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" );
+	}
+	return k;
+}
+
 // ---- (D) the sun ----
 
 namespace {
