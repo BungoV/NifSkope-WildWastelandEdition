@@ -4,6 +4,8 @@
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
+#include "gl/weatherrecx.h"	// lane WX1
+#include "gl/weatherrecxmath.h"
 #include "harnesswindow.h"
 
 #include <QElapsedTimer>
@@ -181,20 +183,39 @@ Draw drawOf( const WwCloudLayerIn & L )
 	return d;
 }
 
-void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax )
+void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax, const WwWeatherRecx * wx = nullptr,
+	float eyeZ = 0.0f )
 {
 	std::vector<int> role;
 	std::vector<float> cover;
 	std::vector<std::array<float, 3>> tint;
+	std::vector<std::array<float, 2>> height;	// lane WX1: clouds.layers.<n>.base/top, above the eye
+	bool own = false;
 	for ( const Draw & d : ds ) {
 		role.push_back( d.role );
 		cover.push_back( d.cover );
 		std::array<float, 3> t;
 		tintOfLayerColor( d.in.rgb, t.data() );
 		tint.push_back( t );
+		std::array<float, 2> h = { -1.0f, -1.0f };
+		if ( wx && wx->layers > 0 && d.in.layer >= 0 && d.in.layer < 32 && wx->layerBase[d.in.layer] >= 0.0f ) {
+			WwWeatherRecxMath::layerAboveEye( wx->layerBase[d.in.layer], wx->layerTop[d.in.layer], eyeZ / kUnitsPerM, h[0], h[1] );
+			own = true;
+		}
+		height.push_back( h );
 	}
 	bandsOf( role.data(), cover.data(), reinterpret_cast<const float( * )[3]>( tint.data() ), int( role.size() ), out,
-		redMax );
+		redMax, own ? reinterpret_cast<const float( * )[2]>( height.data() ) : nullptr );
+	if ( !wx || !wx->on )
+		return;
+	// lane WX1: clouds.coverage (each band keeps its share) and clouds.density
+	float c[3] = { out[0].coverage, out[1].coverage, out[2].coverage };
+	float d[3] = { out[0].density, out[1].density, out[2].density };
+	WwWeatherRecxMath::cloudsFromFile( c, d, wx->coverage, wx->density, wx->recordFirst );
+	for ( int b = 0; b < 3; b++ ) {
+		out[b].coverage = c[b];
+		out[b].density = d[b];
+	}
 }
 
 bool ensureTarget( NifSkopeOpenGLContext::GLFunctions * fn, CmState & s, int n )
@@ -479,7 +500,8 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 	for ( const WwCloudLayerIn & L : layers )
 		cur << drawOf( L );
 	BandParams now[3];
-	paramsOf( cur, now, redMax );
+	const WwWeatherRecx & wx = wwWeatherRecx();	// lane WX1: the weather .recx clouds block (Weather .recx row)
+	paramsOf( cur, now, redMax, wx.on ? &wx : nullptr, eye[2] );
 
 	// the transition: a new weather starts from the parameters shown at the change
 	if ( wkey != s.weather ) {
@@ -526,6 +548,8 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 	QString key = QStringLiteral( "%1|%2|%3|%4%5|%6" ).arg( wkey ).arg( n ).arg( double( t ), 0, 'f', 4 )
 		.arg( redMax ? QStringLiteral( "max" ) : QString() ).arg( redColor ? QStringLiteral( "color" ) : QString() )
 		.arg( ds.size() );
+	if ( wx.on )
+		key += QStringLiteral( "|wx:" ) + wx.key;	// lane WX1: a file's value moves the map
 	for ( const Draw & d : ds )
 		key += QStringLiteral( "|%1:%2,%3,%4" ).arg( d.in.layer ).arg( double( d.in.alpha ), 0, 'f', 5 )
 			.arg( double( d.in.uvOffset[0] ), 0, 'f', 5 ).arg( double( d.in.uvOffset[1] ), 0, 'f', 5 );

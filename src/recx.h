@@ -49,7 +49,10 @@ QStringList wwRecxRoots( const QStringList & pluginFiles, const QString & gameDa
  *  pluginFiles (load order) set the providers' merge order. Re-scans the roots when a file changed (at most every
  *  half second); logs every override once on stderr. */
 WwRecxHit wwRecxFind( const QStringList & roots, const QStringList & pluginFiles, const QString & category,
-	const QString & key, const QString & plugin, quint32 localId, const QString & edid, const QString & block );
+	const QString & key, const QString & plugin, quint32 localId, const QString & edid, const QString & block,
+	bool caseFree = false );
+//! lane WX1: `block` spelled any case (the spec's rule); the exact spelling first (Qt keeps no file order for the rest)
+QJsonValue wwRecxBlockValue( const QJsonObject & entry, const QString & block, bool caseFree );
 
 /*! lane LIGHTS5: re-scan `category` (at most every half second) and return a count that moves whenever its files were
  *  re-read; `files` = how many there are. A caller that walks many records asks again only when it moved. */

@@ -249,6 +249,8 @@ HEADERS += \
 	src/gl/cellfogbloom.h \
 	src/gl/atmosphere.h \
 	src/gl/cloudmap.h \
+	src/gl/weatherrecx.h \
+	src/gl/weatherrecxmath.h \
 	src/gl/cloudnoise.h \
 	src/gl/cloudvol.h \
 	src/gl/cloudshadow.h \
@@ -543,6 +545,7 @@ SOURCES += \
 	src/gl/cellfogbloom.cpp \
 	src/gl/atmosphere.cpp \
 	src/gl/cloudmap.cpp \
+	src/gl/weatherrecx.cpp \
 	src/gl/cloudvol.cpp \
 	src/gl/cloudshadow.cpp \
 	src/gl/cellprobeview.cpp \

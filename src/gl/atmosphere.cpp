@@ -1,5 +1,6 @@
 #include "atmosphere.h"
 #include "atmomath.h"
+#include "gl/weatherrecx.h"	// lane WX1: the weather .recx atmosphere block
 #include "wwswitch.h"
 #include "gl/cellunits.h"
 #include "gl/glscene.h"
@@ -234,6 +235,8 @@ void quad( Renderer * r )
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 }
 
+float g_ozone = 1.0f;	// lane WX1: atmosphere.ozone of the drawn sky (1 = the record's air, exact)
+
 void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzone )
 {
 	p->uni3f( "atRay", kRay[0], kRay[1], kRay[2] );
@@ -243,7 +246,7 @@ void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzo
 	if ( noOzone )
 		p->uni3f( "atOzone", 0.0f, 0.0f, 0.0f );
 	else
-		p->uni3f( "atOzone", kOzone[0], kOzone[1], kOzone[2] );
+		p->uni3f( "atOzone", kOzone[0] * g_ozone, kOzone[1] * g_ozone, kOzone[2] * g_ozone );
 	p->uni3f( "atHaze", haze[0], haze[1], haze[2] );
 }
 
@@ -440,6 +443,10 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	// earth (a dark band under the horizon from a high camera). The red "perpixel" marches every sky pixel (SKYBLUR1).
 	const bool noGround = red( "noground" ), perPixel = red( "perpixel" );
 	hazeFromFog( in.fogFar, in.fogMax, in.fogMid, in.fogRange, red( "nohaze" ), s.haze );
+	// lane WX1: a weather .recx visibility / hazeHeight wins over the fog-derived haze (Weather .recx row)
+	if ( !red( "nohaze" ) )
+		wwWeatherRecxHaze( s.haze, in.fogFar > 0.0f && in.fogMax > 0.0f, kRay[1] + kMieE );
+	g_ozone = wwWeatherRecxOzone();
 	const float hKm = std::clamp( in.camZ * kUnitKm, 0.002f, 80.0f );
 	const float camR = kRb + hKm;
 	float sunW[3] = { in.sunW[0], in.sunW[1], in.sunW[2] };
@@ -448,7 +455,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	norm( moonW );
 	// scene units: displayed = pi k L, k = the Day sunlight luminance / the 45-degree sun's transmittance
 	float t45[3];
-	cpuTrans( 0.0f, 0.70710678f, s.haze, noOzone, t45 );
+	cpuTrans( 0.0f, 0.70710678f, s.haze, noOzone, t45, g_ozone );
 	const float tl = std::max( 1e-4f, lum( t45 ) );
 	const float sunK = kPi * in.sunLum / tl;
 	const float moonK = in.moonUp ? kPi * in.moonLum / tl : 0.0f;
@@ -476,7 +483,8 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	if ( !ok )
 		why = QStringLiteral( "a LUT target is incomplete" );
 	const QString hazeKey = QString( "%1,%2,%3,%4" ).arg( double( s.haze[0] ), 0, 'g', 6 ).arg( double( s.haze[1] ), 0, 'g', 6 )
-		.arg( double( s.haze[2] ), 0, 'g', 6 ).arg( noOzone );
+		.arg( double( s.haze[2] ), 0, 'g', 6 ).arg( noOzone )
+		+ ( g_ozone != 1.0f ? QStringLiteral( ",oz%1" ).arg( double( g_ozone ) ) : QString() );
 	// 1. transmittance and multiple scattering: only when the medium moves (weather, hour through the fog keys)
 	if ( ok && g.transKey != hazeKey ) {
 		auto p = r->useProgram( "atmo_transmittance.prog" );
@@ -728,7 +736,7 @@ unsigned wwAtmoSkyViewTex()
 
 void wwAtmoTransmittance( float heightKm, float cosZenith, float out[3] )
 {
-	cpuTrans( heightKm, cosZenith, as().haze, red( "noozone" ), out );
+	cpuTrans( heightKm, cosZenith, as().haze, red( "noozone" ), out, g_ozone );
 }
 
 int wwAtmoAp()
@@ -839,6 +847,8 @@ bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float su
 	const bool flat = wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" );
 	float haze[3];
 	hazeFromFog( fog[0], fog[1], fog[2], fog[3], red( "nohaze" ), haze );
+	if ( !red( "nohaze" ) )
+		wwWeatherRecxHaze( haze, fog[0] > 0.0f && fog[1] > 0.0f, kRay[1] + kMieE );	// lane WX1
 	float rows[7][3];
 	std::copy( amb, amb + 3, rows[0] );
 	for ( int a = 0; a < 6; a++ )

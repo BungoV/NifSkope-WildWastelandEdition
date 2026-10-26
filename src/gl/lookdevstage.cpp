@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include "gl/scenelighting.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "gl/atmosphere.h"	// lane ATMO1: the physical sky
+#include "gl/weatherrecx.h"	// lane WX1: the weather .recx night block
 #include "gl/cloudmap.h"	// lane CLOUD1: the cloud map
 #include "gl/cloudvol.h"	// lane CLOUD2: the volume clouds
 #include "gl/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
@@ -353,12 +354,15 @@ LdLight currentLight()
 	static bool sun = false;
 	static int atmoSun = 0;	// lane SKYA (ATMOSUN1): the Sunlight From Sky row, its red and the Physical Sky tier
 	static WwSunPathKey sunPath;	// lane GAPTOOL2: a live WW_SUNPATH set (or the Sun Path row) moves the light
+	static unsigned long long wxStamp = 0;	// lane WX1: a weather .recx value (visibility, moonlight) moves the light
 	static LdLight memo;
 	// lane SKYA (NIGHT1): the Moon Phase and Stars row with the moon's phase (the game day moves it)
 	const int atmoKey = wwAtmoSunKey() + 3 * 16 * wwAtmoNightKey( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
 	const WwSunPathKey sunKey = wwSunPathKey();
-	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) ) {
+	const unsigned long long wx = wwWeatherRecx().stamp;
+	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) || wxStamp != wx ) {
 		memo = computeLight();
+		wxStamp = wx;
 		gen = s.gen;
 		hour = s.hour;
 		sun = s.sun;
@@ -443,6 +447,14 @@ LdLight computeLight()
 			for ( int c = 0; c < 3; c++ )
 				L.sun[c] *= k;
 		}
+	}
+	// lane WX1: night.moonlight of the weather's .recx scales the moon's light on the ground (Weather .recx row)
+	const WwWeatherRecx & wx = wwWeatherRecx();
+	if ( wx.on && wx.moonlight >= 0.0f ) {
+		const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
+		if ( s.hour < raw.A || s.hour > raw.D )
+			for ( int c = 0; c < 3; c++ )
+				L.sun[c] *= wx.moonlight;
 	}
 	return L;
 }
@@ -1854,7 +1866,13 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 	skyState( r, true, false );
 	prog->uni1i( "Tex", 0 );
 	prog->uni1b( "probe", false );
-	prog->uni3f( "colLin", f.stars[0], f.stars[1], f.stars[2] );
+	// lane WX1: night.stars of the weather's .recx, a multiple of the weather's star colour
+	const WwWeatherRecx & wx = wwWeatherRecx();
+	const float starK = wx.on && wx.stars >= 0.0f ? wx.stars : 1.0f;
+	if ( starK != 1.0f )
+		prog->uni3f( "colLin", f.stars[0] * starK, f.stars[1] * starK, f.stars[2] * starK );
+	else
+		prog->uni3f( "colLin", f.stars[0], f.stars[1], f.stars[2] );
 	prog->uni1f( "alpha", a );
 	prog->uni2f( "uvOffset", 0.0f, 0.0f );
 	prog->uni1f( "skyScale", f.skyScale );
@@ -1918,6 +1936,8 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 	const float scale = wwLookdevSunlightScale();
 	in.sunLum = keyLum( WwTodDay ) * scale;
 	in.moonLum = keyLum( WwTodNight ) * scale * wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+	if ( wwWeatherRecx().on && wwWeatherRecx().moonlight >= 0.0f )
+		in.moonLum *= wwWeatherRecx().moonlight;	// lane WX1: night.moonlight, the glow round the moon
 	const WwFog fog = currentFog();
 	if ( !fog.effOff ) {
 		in.fogFar = fog.fogFar;

@@ -87,8 +87,9 @@ struct BandParams
 /* the band parameters of one weather from its layers (role, cover); heights, density and tint are coverage-weighted
  * means, sheet = the share of the band's coverage that sheet layers give */
 inline void bandsOf( const int * role, const float * cover, const float ( *tint )[3], int n, BandParams out[3],
-	bool redMax = false )
+	bool redMax = false, const float ( *heightM )[2] = nullptr )
 {
+	// lane WX1: heightM[i] = a layer's own base/top above the eye (a weather .recx clouds.layers entry), < 0 = its role's
 	for ( int b = 0; b < 3; b++ ) {
 		float cs[32], sheetC[32];
 		int k = 0, ks = 0;
@@ -101,8 +102,9 @@ inline void bandsOf( const int * role, const float * cover, const float ( *tint 
 			if ( r.sheet )
 				sheetC[ks++] = cover[i];
 			w += cover[i];
-			base += cover[i] * r.baseM;
-			top += cover[i] * r.topM;
+			const bool own = heightM && heightM[i][0] >= 0.0f;
+			base += cover[i] * ( own ? heightM[i][0] : r.baseM );
+			top += cover[i] * ( own ? heightM[i][1] : r.topM );
 			den += cover[i] * r.density;
 			for ( int c = 0; c < 3; c++ )
 				t[c] += cover[i] * ( tint ? tint[i][c] : 1.0f );
