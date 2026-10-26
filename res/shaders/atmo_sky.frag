@@ -23,6 +23,11 @@ uniform float sceneExposure;
 uniform int viewTransform;
 uniform float atTintOn;	// lane SKYA (ATMOCHECK1): 1 = the Sky Color row's Weather Tint
 uniform vec3 atTint[17];	// the weather dome's linear color at 90 (i / 16)^2 degrees (gl/atmomath.h tintTable)
+uniform sampler2D atMsTex;	// lane SKY2B (SKYBLUR1): the per-pixel sky marches each pixel (red WW_ATMO_RED=perpixel)
+uniform vec2 atMsSize;
+uniform float atMsOn;
+uniform float atGround;
+uniform float atPerPixel;	// 1 = march per pixel instead of the sky-view LUT (the LUT's resolution measured against it)
 
 out vec4 fragColor;
 
@@ -56,9 +61,16 @@ void main()
 	vec3 vr = normalize( vec3( ( ndc.x + projectionMatrix[2][0] ) / projectionMatrix[0][0],
 		( ndc.y + projectionMatrix[2][1] ) / projectionMatrix[1][1], -1.0 ) );
 	vec3 d = normalize( vr * viewMatrix );	// view to world: the transpose of the rotation
-	vec3 c = atSunK * atLookup( atSunView, d, atSunW );
-	if ( atMoonK > 0.0 )
-		c += atMoonK * atLookup( atMoonView, d, atMoonW );
+	vec3 c;
+	if ( atPerPixel > 0.5 ) {
+		c = atSunK * atSkyMarch( atTransTex, atMsTex, atMsSize, atMsOn, atGround, atCamR, d, atSunW );
+		if ( atMoonK > 0.0 )
+			c += atMoonK * atSkyMarch( atTransTex, atMsTex, atMsSize, atMsOn, atGround, atCamR, d, atMoonW );
+	} else {
+		c = atSunK * atLookup( atSunView, d, atSunW );
+		if ( atMoonK > 0.0 )
+			c += atMoonK * atLookup( atMoonView, d, atMoonW );
+	}
 	if ( atTintOn > 0.5 )	// the disc below keeps the physical color
 		c = atWeatherTint( c, degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ) );
 	float cs = dot( d, atSunW );

@@ -1,7 +1,7 @@
 """Lane ATMO1: render the physical sky's LUT shaders through the real GL driver (hidden 4.1 core context, the loader's
 #include expansion) and compare the read-back texels with the numpy model (atmo_model.py). Runs no NifSkope.
 
-    python -I tests/spells/atmo_lut_check.py [shaders dir] [--red noms|noozone|nosunt|double]
+    python -I tests/spells/atmo_lut_check.py [shaders dir] [--red noms|noozone|nosunt|double|noground|notint]
 
 Gates: transmittance texels vs the exact optical-depth integral (< 1 %); multiple-scattering texels vs the model's
 Psi (< 3 %); sky-view texels at sun 30 and 5 deg vs the model's march with the same Psi (< 2 %).
@@ -212,6 +212,24 @@ def main():
             worst = max(worst, e)
     gate('sky-view', worst < 0.02, 'worst relative error at 14 texels (sun 30, 5 deg) = %.4f (< 0.02)' % worst)
 
+    # 3b. lane SKY2B (SKYSTRIPE1): rays that end on the planet see its lit ground (albedo 0.3, the MS pass's own);
+    # a camera 1 km up, texels under the horizon vs the model's march with ground=True (red noground: the black earth)
+    camR = A.RB + 1.0
+    worst = 0.0
+    V = g.draw(pv, vfb, vw, vh, dict(base, atMsSize=(float(mw), float(mh)), atViewSize=(float(vw), float(vh)),
+                                     atCamR=(camR,), atLightMu=(math.sin(math.radians(30.0)),), atMsOn=(1.0,),
+                                     atGround=(0.0 if red == 'noground' else 1.0,)), [('atTransTex', tt), ('atMsTex', mt)])
+    for (x, y) in ((60, 56), (120, 62), (10, 80), (180, 100), (96, 70)):
+        ux, uy = sub_to_unit((x + 0.5) / vw, vw), sub_to_unit((y + 0.5) / vh, vh)
+        beta = math.acos(math.sqrt(camR ** 2 - A.RB ** 2) / camR)
+        za = math.pi - beta + beta * (uy * 2 - 1) ** 2
+        cz, caz = math.cos(za), -(ux * ux * 2 - 1)
+        sz = math.sqrt(max(0, 1 - cz * cz))
+        d = np.array([[sz * caz, sz * math.sqrt(max(0, 1 - caz * caz)), cz]])
+        ref = A.integrate(P, camR, d, A.sun_dir(30.0), 400, psi=psi_sub, ground=True)[0][0]
+        worst = max(worst, A.rel(V[y, x], ref).max())
+    gate('sky-view ground', worst < 0.02, 'worst relative error at 5 texels under the horizon, camera 1 km = %.4f (< 0.02)' % worst)
+
     # 4. lane SKYA (ATMO2): the aerial-perspective volume (Hillaire 2020 sec. 5.4), slice by slice into a 2D target,
     # vs the model's march stopped at the slice's distance; a hazy fixture (fog 20 km, Max 0.6: the layer the camera
     # stands in) and the clear air; the in-scatter (rgb) and the transmittance (a, the mean of the three channels)
@@ -254,6 +272,26 @@ def main():
     gate('aerial-perspective', worstL < 0.03 and worstT < 0.005,
          'worst relative in-scatter error = %.4f (< 0.03), worst |transmittance| = %.5f (< 0.005) at 40 froxels'
          % (worstL, worstT))
+    # 4b. lane SKY2B (SKYTINT2): under Weather Tint the volume's in-scatter keeps its luminance and takes the dome's
+    # chromaticity at the froxel ray's elevation (atmo_sky.frag's law); red notint draws the physical color
+    tint = [np.array([1.0, 0.45, 0.15]) * (1 - i / 16.0) + np.array([0.15, 0.6, 1.0]) * (i / 16.0) for i in range(17)]
+    ut = dict(ua, atApSlice=(15.0,), atTintOn=(0.0 if red == 'notint' else 1.0,))
+    ut.update({'atTint[%d]' % i: tuple(tint[i]) for i in range(17)})
+    Vp = g.draw(pa, afb, aw, ah, dict(ua, atApSlice=(15.0,), atTintOn=(0.0,)), [('atTransTex', tt), ('atMsTex', mt)], alpha=True)
+    Vt = g.draw(pa, afb, aw, ah, ut, [('atTransTex', tt), ('atMsTex', mt)], alpha=True)
+    Y = np.array([0.2126, 0.7152, 0.0722])
+    lerr = cerr = 0.0
+    for (x, y) in ((0, 0), (31, 31), (16, 4), (5, 27), (24, 12)):
+        v = f0 + (x + 0.5) / aw * fx + (y + 0.5) / ah * fy
+        el = math.degrees(math.asin(max(-1.0, min(1.0, v[2] / np.linalg.norm(v)))))
+        t = math.sqrt(min(max(el, 0.0), 90.0) / 90.0) * 16.0
+        i = min(int(t), 15)
+        w = tint[i] * (1 - (t - i)) + tint[i + 1] * (t - i)
+        lerr = max(lerr, abs(Vt[y, x, :3] @ Y - Vp[y, x, :3] @ Y) / max(Vp[y, x, :3] @ Y, 1e-12))
+        cerr = max(cerr, np.abs(Vt[y, x, :3] / Vt[y, x, :3].sum() - w / w.sum()).max())
+    gate('aerial-perspective tint', lerr < 1e-3 and cerr < 1e-3,
+         'Weather Tint on the volume: luminance kept to %.5f, chromaticity vs the dome at the ray elevation %.5f (< 1e-3)'
+         % (lerr, cerr))
 
     # 5. lane SKYA: the aerial perspective with the cell fog on (atmo_apfog.glsl, the shipped combine). One weather:
     # the hazy fixture above (Day Far 20 km, Max 0.6: the AP's haze rung is built from these numbers) with its own

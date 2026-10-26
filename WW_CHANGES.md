@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SKY2B (2026-10-23, branch sky2b-20261023): the high-camera band, sky in view, Weather Tint on the haze
+
+### SKYSTRIPE1: no dark band under the horizon from a high camera
+- Symptom (bungo): flying very high on a clear day, a dark navy band under the clouds, a thin white line inside it.
+- Cause: the sky-view march stopped at the planet with no ground term, so every ray that ends on the ground saw a
+  black earth (offline at z 0.43 km: rows under the horizon 94,126,171 down to 37,53,79; 540 rows darker than half
+  the horizon sky). The bright line is the grazing horizon above it (likely; not proven from his picture).
+- Fix: one shared march (atmo_common.glsl atSkyMarch) adds the lit ground at albedo 0.3, the MS pass's own value
+  (Hillaire 2020 sec. 5). Offline: 0 dark rows at 0.43/1/3 km. A defect fix: on, red WW_ATMO_RED=noground (== the old
+  picture, max |d| 0). Gate: atmo_lut_check.py "sky-view ground" 0.0018 (< 0.02), the red 0.98. The picture changes
+  only where a ray ends on the planet with nothing drawn in front. The cubemap is never the fallback.
+
+### SKYBLUR1: measured, no default changed
+- The sky-view LUT is not the blur: 1080p per-pixel vs 192x108 LUT mean 0.07-0.09/255, p99 1/255; a test red
+  WW_ATMO_RED=perpixel marches every sky pixel (0.63 ms vs 0.033 ms).
+- The game's TAA resolve (game_taa.frag, offline on a chart): keeps the sky gradient and edges; it averages
+  sub-pixel detail (0.5 px wire depth 0.78 -> 0.29) and softens fine texture, more under slow motion (0.7 px grain
+  kept 0.48 still, 0.33 at 0.5 px/frame). The game's preset INIs set TAA from Medium up (Low.ini has none).
+
+### EXPO2: Exposure From Sky counts the sky actually in view
+- The measure's quarter mip gives each texel's sky share (1 - lit share); its ray is looked up in the read-back
+  sky-view tables (atmomath.h skyMeanInView, 8x8-texel blocks, ~2300 lookups at 1080p). EXPO1 took the whole upper
+  hemisphere's mean. Red WW_ATMO_EXPO_RED=hemi. glview.cpp's old measure path keeps EXPO1.
+- Gate: atmomath_check.py "sky in view" worst 0.0001 (< 0.01); red hemi 0.40.
+
+### SKYTINT2: Weather Tint also for the aerial perspective and the ambient
+- The AP volume's in-scatter keeps its luminance and takes the dome's color at the ray's elevation (the sky's law);
+  the ambient and DALC keep the weather's own color (the sun is still tinted). Red WW_ATMO_TINT_RED=physical.
+- Gate: atmo_lut_check.py "aerial-perspective tint" luminance 0.00000, chroma 0.00000; red notint 0.49.
+
+### SKYAFIX1 / SKYGI2
+- "atmo sun:" and "atmo expo:" print on every change (every 240th / 600th call hid live values); the nohaze red now
+  moves the sun key.
+- Offline: the 6-face physical-sky capture's cosine sum about +Z matches the model's sky irradiance within 0.6 %
+  at sun 45/15/4 deg (notes gate, not in the repo).
+
 ## Lane SKY2 (2026-10-23, branch sky2-20261023): fog slices and the grey sky fallback
 
 ### FOGSLICE1: the air samples its own filled probe-irradiance volume (5a7c4a55)

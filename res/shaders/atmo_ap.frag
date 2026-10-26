@@ -24,6 +24,8 @@ uniform float atSunK;	// pi k for the sun (atmosphere.cpp)
 uniform float atMoonK;	// 0 = no moon term
 uniform float atMsOn;
 uniform float atApNoSunT;	// red "nosunt": the in-scatter ignores the sun's transmittance (must fail the AP gate)
+uniform float atTintOn;	// SKY2B (SKYTINT2): 1 = the Sky Color row's Weather Tint (0 under red WW_ATMO_TINT_RED=physical)
+uniform vec3 atTint[17];	// the weather dome's linear color at 90 (i / 16)^2 degrees (gl/atmomath.h tintTable)
 
 out vec4 fragColor;
 
@@ -34,6 +36,17 @@ vec3 atLightS( vec3 up, float rp, vec3 rs, vec3 ms, vec3 v, vec3 l, float k )
 	vec3 Ts = atApNoSunT > 0.5 ? vec3( 1.0 ) : atTrans( atTransTex, rp, mus );
 	return k * ( Ts * ( rs * atPhaseR( c ) + ms * atPhaseHg( atG, c ) )
 		+ atMsOn * texture( atMsTex, atMsUv( rp, mus, atMsSize ) ).rgb * ( rs + ms ) );
+}
+
+// atmo_sky.frag atWeatherTint's twin (gl/atmomath.h weatherTint): the luminance kept, the dome's color at this elevation
+vec3 atWeatherTint( vec3 c, float elevDeg )
+{
+	float t = sqrt( clamp( elevDeg, 0.0, 90.0 ) / 90.0 ) * 16.0;
+	int i = min( int( t ), 15 );
+	vec3 w = mix( atTint[i], atTint[i + 1], t - float( i ) );
+	const vec3 y = vec3( 0.2126, 0.7152, 0.0722 );
+	float lw = dot( w, y );
+	return lw > 1e-8 ? w * ( dot( c, y ) / lw ) : c;
 }
 
 void main()
@@ -63,5 +76,7 @@ void main()
 		L += thr * S * ( 1.0 - Tst ) / max( e, vec3( 1e-9 ) );
 		thr *= Tst;
 	}
+	if ( atTintOn > 0.5 )
+		L = atWeatherTint( L, degrees( asin( clamp( v.z, -1.0, 1.0 ) ) ) );
 	fragColor = vec4( L, dot( thr, vec3( 1.0 / 3.0 ) ) );
 }

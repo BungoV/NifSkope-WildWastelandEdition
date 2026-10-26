@@ -59,6 +59,7 @@ struct AtState
 	quint64 frame = 0, skyFrame = 0;	// EXPO1: the frame count (wwAtmoApFrame) and the frame skyMean was read in
 	int tint = 0;	// lane SKYA (ATMOCHECK1): the Sky Color row, 0 Physical / 1 Weather Tint (pin WW_ATMO_TINT)
 	bool tintPinned = false;
+	bool tintDrawn = false;	// SKY2B (SKYTINT2): the last sky drew Weather Tint (the dome resolved): the ambient keeps the weather's color
 	int gi = 0;	// lane SKYA (SKYGI1): the GI Sky From Physical Sky row, 0 Off / 1 On (pin WW_ATMO_GI)
 	bool giPinned = false;
 };
@@ -183,6 +184,12 @@ struct AtGpu
 	GLsync fence = nullptr;
 	int rbW = 0, rbH = 0;
 	float rbSunK = 0.0f, rbMoonK = 0.0f, rbCamR = 0.0f;
+	float rbLight[2][3] = {};	// SKY2B (EXPO2): the sun's and the moon's directions the queued tables were drawn for
+	// EXPO2: CPU copies of the last read-back tables, so the measure can look up the sky pixels actually in view
+	std::vector<float> tab[2];
+	int tabW = 0, tabH = 0;
+	float tabK[2] = { 0.0f, 0.0f }, tabCamR = 0.0f, tabLight[2][3] = {};
+	quint64 tabFrame = 0;
 };
 
 QHash<Renderer *, AtGpu> & gpus()
@@ -284,7 +291,7 @@ const char * tierName( int t )
  * camera and the sun move). Froxels per tier: Low 16x16x16, Medium 32x32x16, High 32x32x32, Ultra 64x64x32. The
  * caller has saved the framebuffer, the viewport and the state; the transmittance and MS LUTs are this frame's. */
 bool buildAp( Scene * scene, AtGpu & g, int msN, float camR, const float sunW[3], const float moonW[3], float sunK,
-	float moonK, bool noOzone, bool noMs )
+	float moonK, bool noOzone, bool noMs, const float ( *tint )[3] )
 {
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
@@ -348,6 +355,11 @@ bool buildAp( Scene * scene, AtGpu & g, int msN, float camR, const float sunW[3]
 	p->uni1f( "atMoonK", moonK );
 	p->uni1f( "atMsOn", noMs ? 0.0f : 1.0f );
 	p->uni1f( "atApNoSunT", apRed( "nosunt" ) ? 1.0f : 0.0f );
+	// SKY2B (SKYTINT2): under Weather Tint the haze in front of distant geometry takes the dome's color like the sky
+	p->uni1f( "atTintOn", tint ? 1.0f : 0.0f );
+	const GLint tintLoc = p->uniLocation( "atTint" );
+	if ( tint && tintLoc >= 0 )
+		fn->glUniform3fv( tintLoc, kTintN, &tint[0][0] );
 	bindTex( fn, p, 0, "atTransTex", g.trans.tex );
 	bindTex( fn, p, 1, "atMsTex", g.ms.tex );
 	const GLenum one = GL_COLOR_ATTACHMENT0;
@@ -423,6 +435,9 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	const int vh = s.tier == 1 ? 54 : s.tier == 4 ? 144 : 108;
 	const int msN = s.tier == 1 ? 16 : 32;
 	const bool noOzone = red( "noozone" ), noMs = red( "noms" );
+	// lane SKY2B (SKYSTRIPE1): rays that end on the planet see its lit ground; the red "noground" brings back the black
+	// earth (a dark band under the horizon from a high camera). The red "perpixel" marches every sky pixel (SKYBLUR1).
+	const bool noGround = red( "noground" ), perPixel = red( "perpixel" );
 	hazeFromFog( in.fogFar, in.fogMax, in.fogMid, in.fogRange, red( "nohaze" ), s.haze );
 	const float hKm = std::clamp( in.camZ * kUnitKm, 0.002f, 80.0f );
 	const float camR = kRb + hKm;
@@ -507,6 +522,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		p->uni1f( "atCamR", camR );
 		p->uni1f( "atLightMu", l[2] );
 		p->uni1f( "atMsOn", noMs ? 0.0f : 1.0f );
+		p->uni1f( "atGround", noGround ? 0.0f : 1.0f );
 		bindTex( fn, p, 0, "atTransTex", g.trans.tex );
 		bindTex( fn, p, 1, "atMsTex", g.ms.tex );
 		quad( r );
@@ -530,8 +546,10 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		for ( int t = 0; t < ( g.rbMoonK > 0.0f ? 2 : 1 ); t++ ) {
 			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pbo[t] );
 			const auto * px = static_cast<const float *>( fn->glMapBufferRange( GL_PIXEL_PACK_BUFFER, 0, bytes, GL_MAP_READ_BIT ) );
-			if ( px )
+			if ( px ) {
 				mean += ( t ? g.rbMoonK : g.rbSunK ) * skyViewMeanLum( px, g.rbW, g.rbH, g.rbCamR, expoRed( "zenithw" ) );
+				g.tab[t].assign( px, px + size_t( g.rbW ) * size_t( g.rbH ) * 4 );
+			}
 			got = got && px;
 			fn->glUnmapBuffer( GL_PIXEL_PACK_BUFFER );
 		}
@@ -539,6 +557,13 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		if ( got ) {
 			s.skyMean = mean;
 			s.skyFrame = s.frame;
+			g.tabW = g.rbW;
+			g.tabH = g.rbH;
+			g.tabCamR = g.rbCamR;
+			g.tabK[0] = g.rbSunK;
+			g.tabK[1] = g.rbMoonK;
+			std::copy( &g.rbLight[0][0], &g.rbLight[0][0] + 6, &g.tabLight[0][0] );
+			g.tabFrame = s.frame;
 		}
 	}
 	if ( ok && s.expo > 0 && !in.capture ) {
@@ -562,13 +587,16 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		g.rbSunK = sunK;
 		g.rbMoonK = moonK;
 		g.rbCamR = camR;
+		std::copy( sunW, sunW + 3, g.rbLight[0] );
+		std::copy( moonW, moonW + 3, g.rbLight[1] );
 	}
 	// 2b. lane SKYA (ATMO2): the aerial-perspective volume over this view's frustum (Hillaire 2020 sec. 5.4)
 	QString apLine;	// empty while the row is off: the sky line stays ATMO1's
 	if ( !in.capture )	// SKYGI1: a capture face keeps the frame's volume
 		g.ap.valid = false;
 	if ( ok && s.ap > 0 && !in.capture ) {
-		const bool built = buildAp( scene, g, msN, camR, sunW, moonW, sunK, moonK, noOzone, noMs );
+		const bool tintAp = s.tint > 0 && in.tintOk && !wwAtmoTintRedPhysical();
+		const bool built = buildAp( scene, g, msN, camR, sunW, moonW, sunK, moonK, noOzone, noMs, tintAp ? in.tint : nullptr );
 		apLine = built ? QString( "ap=%1x%2x%3@%4km" ).arg( g.ap.w ).arg( g.ap.h ).arg( g.ap.n ).arg( double( kApMaxKm ), 0, 'f', 0 )
 			: QStringLiteral( "ap=refused(atmo_ap.prog or its target)" );
 	}
@@ -584,6 +612,11 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			bindTex( fn, p, 0, "atTransTex", g.trans.tex );
 			bindTex( fn, p, 1, "atSunView", g.sunView.tex );
 			bindTex( fn, p, 2, "atMoonView", g.moonView.tex );
+			bindTex( fn, p, 3, "atMsTex", g.ms.tex );
+			p->uni2f( "atMsSize", float( msN ), float( msN ) );
+			p->uni1f( "atMsOn", noMs ? 0.0f : 1.0f );
+			p->uni1f( "atGround", noGround ? 0.0f : 1.0f );
+			p->uni1f( "atPerPixel", perPixel ? 1.0f : 0.0f );
 			p->uni2f( "atViewSize", float( vw ), float( vh ) );
 			p->uni4f( "atRect", FloatVector4( float( vp[0] ), float( vp[1] ), 1.0f / float( std::max( vp[2], 1 ) ),
 				1.0f / float( std::max( vp[3], 1 ) ) ) );
@@ -598,6 +631,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			p->uni1i( "viewTransform", in.viewTransform );
 			// lane SKYA (ATMOCHECK1): the Sky Color row's Weather Tint (atWeatherTint); 0 = the physical color, as before
 			const bool tintOn = s.tint > 0 && in.tintOk;
+			s.tintDrawn = tintOn;
 			p->uni1f( "atTintOn", tintOn ? 1.0f : 0.0f );
 			const GLint tintLoc = p->uniLocation( "atTint" );
 			if ( tintOn && tintLoc >= 0 )
@@ -609,7 +643,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			why = QStringLiteral( "atmo_sky.prog did not link" );
 		}
 	}
-	for ( int u = 2; u >= 0; u-- ) {
+	for ( int u = 3; u >= 0; u-- ) {	// SKY2B: unit 3 = the sky pass's MS table
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	}
@@ -641,7 +675,8 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		if ( apRed( w ) )
 			reds += QStringLiteral( ",AP_RED=%1" ).arg( QLatin1StringView( w ) );
 	if ( s.tint > 0 )	// lane SKYA (ATMOCHECK1)
-		reds += in.tintOk ? ( wwAtmoTintRedFlat() ? QStringLiteral( ",tint=weather,TINT_RED=flat" ) : QStringLiteral( ",tint=weather" ) )
+		reds += in.tintOk ? ( wwAtmoTintRedFlat() ? QStringLiteral( ",tint=weather,TINT_RED=flat" )
+			: wwAtmoTintRedPhysical() ? QStringLiteral( ",tint=weather,TINT_RED=physical" ) : QStringLiteral( ",tint=weather(ap,amb)" ) )
 			: QStringLiteral( ",tint=refused(no dome)" );
 	s.last = ok ? QString( "physical(tier=%1,view=%2x%3,ms=%4,haze=%5/km@%6km,sun_elev=%7,k=%8,moon=%9%10)" )
 			.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( vw ).arg( vh ).arg( msN )
@@ -715,8 +750,9 @@ bool wwAtmoSunPinned()
 int wwAtmoSunKey()
 {
 	const AtState & s = as();
+	// lane SKY2B (SKYAFIX1): the red nohaze changes the key's haze too, so it moves the key (a live set kept the old one)
 	return s.tier > 0 ? s.sun + 3 * ( wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" ) )
-		: 0;
+		+ 6 * red( "nohaze" ) : 0;
 }
 
 int wwAtmoNight()
@@ -786,17 +822,22 @@ bool wwAtmoKeyLight( float muLight, const float fog[4], float keyLum45, float su
 	for ( int a = 0; a < 6; a++ )
 		std::copy( dalc[a], dalc[a] + 3, rows[1 + a] );
 	const float was[3] = { sun[0], sun[1], sun[2] };
-	skyKeyLight( s.sun, muLight, haze, keyLum45, flat, sun, rows, 7 );
+	// SKY2B (SKYTINT2): under Weather Tint the ambient (and the DALC) keeps the weather's own color; the sun is still tinted
+	const bool tintAmb = s.tint > 0 && s.tintDrawn && !wwAtmoTintRedPhysical();
+	skyKeyLight( s.sun, muLight, haze, keyLum45, flat, sun, rows, tintAmb ? 0 : 7 );
 	std::copy( rows[0], rows[0] + 3, amb );
 	for ( int a = 0; a < 6; a++ )
 		std::copy( rows[1 + a], rows[1 + a] + 3, dalc[a] );
-	// stderr: the first change and every 240th after (the light is recomputed once per hour/weather change)
-	static int n = 0;
-	if ( n++ % 240 == 0 )
-		fprintf( stderr, "atmo sun: mode=%s%s mu=%.3f key %.4f,%.4f,%.4f -> %.4f,%.4f,%.4f amb -> %.4f,%.4f,%.4f\n",
-			s.sun == 2 ? "full" : "tint", flat ? ",RED=flat" : "", double( muLight ), double( was[0] ), double( was[1] ),
+	// stderr: every change of the light's inputs (SKY2B: every 240th call printed a stale mu beside a live hour change)
+	static float last[4] = { -9.0f, -9.0f, -9.0f, -9.0f };
+	const float now[4] = { muLight, float( s.sun ) + ( flat ? 4.0f : 0.0f ) + ( tintAmb ? 8.0f : 0.0f ), haze[0], keyLum45 };
+	if ( !std::equal( now, now + 4, last ) ) {
+		std::copy( now, now + 4, last );
+		fprintf( stderr, "atmo sun: mode=%s%s%s mu=%.3f key %.4f,%.4f,%.4f -> %.4f,%.4f,%.4f amb -> %.4f,%.4f,%.4f\n",
+			s.sun == 2 ? "full" : "tint", flat ? ",RED=flat" : "", tintAmb ? ",amb=weather" : "", double( muLight ), double( was[0] ), double( was[1] ),
 			double( was[2] ), double( sun[0] ), double( sun[1] ), double( sun[2] ), double( amb[0] ), double( amb[1] ),
 			double( amb[2] ) );
+	}
 	return true;
 }
 
@@ -861,6 +902,11 @@ bool wwAtmoTintRedFlat()
 	return wwEnvStr( "WW_ATMO_TINT_RED" ).trimmed().toLower() == QLatin1StringView( "flat" );
 }
 
+bool wwAtmoTintRedPhysical()
+{
+	return wwEnvStr( "WW_ATMO_TINT_RED" ).trimmed().toLower() == QLatin1StringView( "physical" );
+}
+
 int wwAtmoExpo()
 {
 	return as().expo;
@@ -887,11 +933,65 @@ float wwAtmoAdapted( float sceneMean, int counted, int total )
 	if ( s.tier <= 0 || s.expo <= 0 || s.skyMean < 0.0f || total <= 0 || s.frame > s.skyFrame + 2 )
 		return sceneMean;
 	const float a = adaptedWithSky( sceneMean, float( counted ) / float( total ), s.skyMean, expoRed( "skyzero" ) );
-	static int n = 0;
-	if ( n++ % 600 == 0 )
+	// stderr: when the cover or the sky's mean moves by 1 % (SKY2B: every 600th call hid the live set's own value)
+	static float lastCover = -1.0f, lastSky = -1.0f;
+	const float cover = float( counted ) / float( std::max( total, 1 ) );
+	if ( std::fabs( cover - lastCover ) > 0.01f || std::fabs( s.skyMean - lastSky ) > 0.01f * std::max( lastSky, 1e-6f ) ) {
+		lastCover = cover;
+		lastSky = s.skyMean;
 		fprintf( stderr, "atmo expo: scene %.5f cover %.3f sky %.5f -> %.5f%s\n", double( sceneMean ),
 			double( counted ) / double( total ), double( s.skyMean ), double( a ),
 			expoRed( "skyzero" ) ? ",RED=skyzero" : expoRed( "zenithw" ) ? ",RED=zenithw" : "" );
+	}
+	return a;
+}
+
+float wwAtmoAdaptedInView( Scene * scene, float sceneMean, const float * px, int qw, int qh )
+{
+	double cover = 0.0;
+	for ( size_t i = 0; i < size_t( qw ) * size_t( qh ); i++ )
+		cover += px[i * 4 + 3] > 0.0f ? double( px[i * 4 + 3] ) : 0.0;
+	const int counted = int( std::lround( cover ) ), total = qw * qh;
+	const AtState & s = as();
+	// the red "hemi" (and no table, no camera) keeps EXPO1: the sky at its whole upper hemisphere's mean
+	if ( expoRed( "hemi" ) || !scene || !scene->renderer || s.tier <= 0 || s.expo <= 0 || total <= 0 )
+		return wwAtmoAdapted( sceneMean, counted, total );
+	auto it = gpus().find( scene->renderer );
+	const auto & gu = *scene->renderer->globalUniforms;
+	if ( it == gpus().end() || it->tab[0].empty() || s.frame > it->tabFrame + 2 || gu.projectionMatrix[3][3] == 1.0f )
+		return wwAtmoAdapted( sceneMean, counted, total );
+	const AtGpu & g = *it;
+	// the frustum's corner rays (buildAp's): the measure's texel (x, y) looks along f0 + fx x/qw + fy y/qh
+	const float P00 = gu.projectionMatrix[0][0], P11 = gu.projectionMatrix[1][1];
+	const float P20 = gu.projectionMatrix[2][0], P21 = gu.projectionMatrix[2][1];
+	auto ray = [&]( float x, float y, float o[3] ) {
+		const float vr[3] = { ( x + P20 ) / P00, ( y + P21 ) / P11, -1.0f };
+		for ( int c = 0; c < 3; c++ )
+			o[c] = vr[0] * gu.viewMatrix[c][0] + vr[1] * gu.viewMatrix[c][1] + vr[2] * gu.viewMatrix[c][2];
+	};
+	float f0[3], fx[3], fy[3];
+	ray( -1.0f, -1.0f, f0 );
+	ray( 1.0f, -1.0f, fx );
+	ray( -1.0f, 1.0f, fy );
+	for ( int c = 0; c < 3; c++ ) {
+		fx[c] -= f0[c];
+		fy[c] -= f0[c];
+	}
+	std::vector<float> share( static_cast<size_t>( total ) );
+	for ( size_t i = 0; i < share.size(); i++ )
+		share[i] = 1.0f - std::clamp( px[i * 4 + 3], 0.0f, 1.0f );
+	const float * tabs[2] = { g.tab[0].data(), g.tabK[1] > 0.0f && !g.tab[1].empty() ? g.tab[1].data() : nullptr };
+	const float inView = skyMeanInView( share.data(), qw, qh, f0, fx, fy, tabs, g.tabK, g.tabLight, g.tabW, g.tabH, g.tabCamR );
+	const float sky = inView >= 0.0f ? inView : 0.0f;
+	const float a = adaptedWithSky( sceneMean, float( counted ) / float( total ), sky, expoRed( "skyzero" ) );
+	static float lastCover = -1.0f, lastSky = -1.0f;
+	const float cv = float( counted ) / float( total );
+	if ( std::fabs( cv - lastCover ) > 0.01f || std::fabs( sky - lastSky ) > 0.01f * std::max( lastSky, 1e-6f ) ) {
+		lastCover = cv;
+		lastSky = sky;
+		fprintf( stderr, "atmo expo: scene %.5f cover %.3f sky in view %.5f (hemisphere %.5f) -> %.5f%s\n", double( sceneMean ),
+			double( cv ), double( sky ), double( s.skyMean ), double( a ), expoRed( "skyzero" ) ? ",RED=skyzero" : "" );
+	}
 	return a;
 }
 
