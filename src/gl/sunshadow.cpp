@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the unified set (presets, terrain, contact, composition)
+#include "gl/cloudshadow.h"	// lane CLOUD3
 
 #include <QDir>
 #include <QFile>
@@ -757,6 +758,7 @@ void wwSunShadowPass( Scene * scene )
 		return;
 	sunShadowPassImpl( scene );
 	wwShadowSetFrame( scene );	// lane TERRSHADOW1: the terrain sweep's step, whatever the Shadows row says
+	wwCloudShadowPass( scene );	// lane CLOUD3: the clouds' shadow map rows, whatever the Shadows row says
 	csmEchoFrame();
 }
 

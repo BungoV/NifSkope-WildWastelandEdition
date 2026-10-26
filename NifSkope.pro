@@ -251,6 +251,8 @@ HEADERS += \
 	src/gl/cloudmap.h \
 	src/gl/cloudnoise.h \
 	src/gl/cloudvol.h \
+	src/gl/cloudshadow.h \
+	src/gl/cloudshadowmath.h \
 	src/gl/cloudvolmath.h \
 	src/gl/atmomath.h \
 	src/gl/cellprobeview.h \
@@ -540,6 +542,7 @@ SOURCES += \
 	src/gl/atmosphere.cpp \
 	src/gl/cloudmap.cpp \
 	src/gl/cloudvol.cpp \
+	src/gl/cloudshadow.cpp \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellvolumeview.cpp \
 	src/gl/cellssr.cpp \

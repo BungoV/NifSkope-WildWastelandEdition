@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CLOUD3 (2026-10-26, branch cloud3-20261026): cloud shadows, light shafts, GI shade
+
+- **Row Render > Scene > Cloud Shadows** (Off / Low / Medium / High / Ultra), ships Off, sets live. Pin `WW_CLOUDSHADOW`
+  (0..4 or the names); harness runs read Off unless pinned. Needs the Cloud Map row on. Off draws exactly as before
+  (every receiver multiplies by exactly 1).
+- **One Beer shadow map** (Hillaire 2016, Frostbite sky/cloud course, sec. 5.5) along the sun, centred on the eye and
+  snapped to 1/8 of its side; one texel per line toward the sun stores where the cloud starts, the mean extinction and
+  the whole optical depth (src/gl/cloudshadow.cpp, src/gl/cloudshadowmath.h, res/shaders/cloud_shadowmap.frag).
+  Medium and up read the volume's density (`cloudDensity` through `wwCloudVolBindDensity`, needs Volume Clouds at
+  Medium or up); Low, or without the volume, reads CLOUD1's map coverage. 1/16 of the rows are rebuilt a frame; the
+  whole map only when the fit moves or the sun turns 0.25 deg.
+- Presets: Low 512^2 map, Medium 512^2 x 12 steps, High 1024^2 x 16, Ultra 1024^2 x 16 + the far air tail's cloud
+  taps (aerial perspective shadowing). RGBA16F: 2 MB at 512^2, 8 MB at 1024^2 (High/Ultra are over the 2 MB budget).
+- **Receivers** (res/shaders/ww_sunshadow.glsl `ussCloudT`): surfaces through `wwSunShadow` (= the old factor, now
+  `wwSunShadowGeo`, x the clouds), the fog froxels' sun term (cell_volair `airCloudShadow`: light shafts under gaps),
+  and the probe GI's sun (src/probesky.cpp: the clouds' mean transmittance over the eye, 1/32 steps, relights once
+  per step; no rebake).
+- Reds `WW_CLOUDSHADOW_RED` = vertical (shadow straight under the cloud), noinject (no clouds in the air),
+  everyframe (no amortisation), nogi (GI ignores the clouds); all live.
+- Offline gate: tests/spells/cloudshadow_check.py (+ tests/cloudshadow/): centroid along the sun, volume shift between
+  base and top, shafts that tilt with the sun, off exact, wiring, cost. Units 46-49 (cellunits.h).
+
 ## Lane CLOUD2C (2026-10-26, branch cloud2c-20261026): volume clouds in the linear frame, first paint, lookdev, tops, wind
 
 - **Clouds in front of terrain go into the linear HDR frame** before the tone map (premultiplied, stencil = the cell's
@@ -33,7 +55,6 @@
 - The High band stays a 2D sheet. Off draws exactly as before.
 - **Offline gate:** `tests/spells/cloudvol_check.py` adds gates G (tint) and F (ridge). New reds:
   `WW_CLOUDVOL_RED=noms|nodepth|notint`.
-
 ## Lane CLOUD2 (2026-10-26, branch cloud2-20261026): volume clouds (after Schneider, Nubis 2015)
 
 - **Row Render > Scene > Volume Clouds** (Off / Low / Medium / High / Ultra), ships Off, sets live. Pin `WW_CLOUDVOL`

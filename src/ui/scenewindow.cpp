@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 #include "gl/atmosphere.h"	// lane ATMO1
 #include "gl/cloudmap.h"	// lane CLOUD1
 #include "gl/cloudvol.h"	// lane CLOUD2
+#include "gl/cloudshadow.h"	// lane CLOUD3
 #include "gl/cellssgi.h"	// lane SSGI1
 #include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row
 #include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row
@@ -223,6 +224,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	volumeCloudsBox->setCurrentIndex( std::clamp( wwCloudVolTier(), 0, 4 ) );
 	wwMatchFieldStyle( volumeCloudsBox );
 	row( tr( "Volume Clouds" ), volumeCloudsBox, true );
+	// lane CLOUD3: the clouds' shadows on the ground, in the fog and in the GI's sun; ships Off
+	cloudShadowsBox = new QComboBox( tree );
+	cloudShadowsBox->setObjectName( QStringLiteral( "cloudShadows" ) );
+	cloudShadowsBox->addItems( { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) } );
+	cloudShadowsBox->setCurrentIndex( std::clamp( wwCloudShadowTier(), 0, 4 ) );
+	wwMatchFieldStyle( cloudShadowsBox );
+	row( tr( "Cloud Shadows" ), cloudShadowsBox, true );
 	liveCheck( sunBox, "lookdevSun", tr( "Sun" ), wwLookdevSun() );
 	// lane TERRSHADOW1: Engine (the sky clock's arc) or Real (Boston's solar path); ships Engine
 	sunPathBox = new QComboBox( tree );
@@ -428,6 +436,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveTier( giSkyFromPhysicalBox, &wwAtmoSetGi );
 	liveTier( cloudMapBox, &wwCloudMapSetTier );	// lane CLOUD1
 	liveTier( volumeCloudsBox, &wwCloudVolSetTier );	// lane CLOUD2
+	liveTier( cloudShadowsBox, &wwCloudShadowSetTier );	// lane CLOUD3
 	liveTier( modernTaaBox, &wwTaa2SetTier );	// lane TAA2
 	liveTier( cascadeQualityBox, &wwShadowSetCascadeTier );
 	liveTier( contactShadowsBox, &wwShadowSetContactTier );
@@ -501,6 +510,7 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( moonPhaseStarsBox ), static_cast<QWidget *>( exposureFromSkyBox ),
 			static_cast<QWidget *>( skyColorBox ), static_cast<QWidget *>( giSkyFromPhysicalBox ),
 			static_cast<QWidget *>( cloudMapBox ), static_cast<QWidget *>( volumeCloudsBox ),
+			static_cast<QWidget *>( cloudShadowsBox ),
 			static_cast<QWidget *>( cascadeQualityBox ),
 			static_cast<QWidget *>( contactShadowsBox ), static_cast<QWidget *>( terrainShadowsBox ),
 			static_cast<QWidget *>( shadowParBox ), static_cast<QWidget *>( shadowDistanceBox ) } )

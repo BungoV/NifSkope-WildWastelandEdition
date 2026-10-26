@@ -9,6 +9,7 @@
 #include "gl/cellprobeview.h"
 #include "gl/lookdevstage.h"
 #include "gl/atmosphere.h"	// SKY3: the physical sky's capture height
+#include "gl/cloudshadow.h"	// lane CLOUD3: the clouds over the eye dim the bounce's sun
 #include "gl/scenelighting.h"
 #include "probegi.h"
 #include "gl/celllooks.h"	// lane LIGHTS5: the emittance row's live flip
@@ -149,6 +150,10 @@ ProbeSkyLight probeSkyLightNow()
 		s.sunTo[c] = float( dir[c] / std::max( dl, 1e-9 ) );
 		s.sun[c] = dif[c] * sunScale;
 	}
+	// lane CLOUD3: in 1/32 steps, so a change relights once (exactly 1 with Cloud Shadows off or red nogi)
+	if ( const float cloud = wwCloudShadowGiFactor(); cloud != 1.0f )
+		for ( float & v : s.sun )
+			v *= cloud;
 	s.label = QStringLiteral( "%1 hour %2%3" ).arg( wwLookdevWeatherKey() ).arg( wwLookdevHour(), 0, 'f', 2 )
 		.arg( fromWeather ? QString() : QStringLiteral( " (no weather record: the neutral light)" ) );
 	s.on = true;

@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
+#include "gl/cloudshadow.h"	// lane CLOUD3: the clouds' shadow map joins the composition
 #include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
 #include "gl/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
 #include "gl/gametaa.h"
@@ -1908,7 +1909,8 @@ bool wwShadowSetActive( Scene * scene )
 	// a pinned debug view draws even when the terrain has nothing to cast (sun under the horizon: the view shows lit).
 	// Red WW_SHADOW_RED=viewidle brings back the old rule (no view at all, the plain shaded picture).
 	const bool viewPinned = s.view > 0 && ( s.terrain > 0 || s.contact > 0 ) && !wwShadowRed( "viewidle" );
-	return ( s.t.valid && s.terrain > 0 ) || ( s.c.valid && s.c.doc == scene->nifModel ) || viewPinned;
+	return ( s.t.valid && s.terrain > 0 ) || ( s.c.valid && s.c.doc == scene->nifModel ) || viewPinned
+		|| wwCloudShadowValid();	// lane CLOUD3: the clouds alone also need the receivers
 }
 
 void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool csmValid, const float csmTexel[3] )
@@ -1943,6 +1945,8 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 		prog->uni1i( "ussTerrMap", WwCellUnit::TerrShadow );
 		prog->uni1i( "ussContactMap", WwCellUnit::ContactShadow );
 	}
+	// lane CLOUD3: before the early out, so the clouds' factor (or its 0) reaches every receiver
+	wwCloudShadowUniforms( scene, prog, volume, s.airAmb );
 	if ( !on )
 		return;
 	prog->uni1i( "ussCsmOn", csmValid ? 1 : 0 );
