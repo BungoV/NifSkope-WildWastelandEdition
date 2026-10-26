@@ -78,6 +78,18 @@ bool wwCellDecalLitRed();
 //! where they show, so probe 6 holds the light they take
 bool wwCellDecalLitProbe();
 
+/* lane NIFXLIGHT3: a NiLight's dimmer over time (its NiLightDimmerController's float keys), timed as NifSkope times
+ * every controller the World animation row plays (glcontroller.cpp ctrlTime: frequency x T + phase, then the cycle) */
+struct WwNifxDimTrack
+{
+	std::vector<float> t, v, fwd, bwd;	//!< key times and values; quadratic keys' Forward and Backward
+	int interp = 1;						//!< 1 linear, 2 quadratic, 5 constant (any other reads linear)
+	float start = 0.0f, stop = 0.0f, frequency = 1.0f, phase = 0.0f;
+	int cycle = 0;						//!< flags (f & 6) >> 1: 0 loop, 1 reverse, 2 clamp
+	bool scaled = true, backwards = false;	//!< flags 0x40 (frequency, phase and cycle apply) and 0x10
+	QString sequence;					//!< the looping sequence that plays it (empty: the NiLight's own controller)
+};
+
 struct WwCellLight
 {
 	float pos[3] = { 0, 0, 0 };     //!< world
@@ -117,6 +129,9 @@ struct WwCellLight
 	int tier = -1;
 	float nifxFog = -1.0f;
 	QString nifxName;
+	//! lane NIFXLIGHT3: the NiLight dimmer the light follows over time (null: steady) and the dimmer its colour holds
+	std::shared_ptr<const WwNifxDimTrack> nifxDim;
+	float nifxDimRest = 1.0f;
 };
 
 /* lane NIFXLIGHT1: a model whose .nifx sidecar exists, with its named nodes' frames in the model's root space
@@ -130,6 +145,7 @@ struct WwNifxNode
 	//! and the NiControllerSequences whose dimmer blocks name it
 	float dimmer = 1.0f;
 	int sequences = 0;
+	std::shared_ptr<const WwNifxDimTrack> track;	//!< lane NIFXLIGHT3: the dimmer over time (null: none plays)
 };
 struct WwNifxModel
 {
@@ -146,6 +162,8 @@ struct WwNifxFixture
 	quint32 ref = 0;
 	QString refPlugin;
 	quint32 refLocal = 0;
+	//! lane NIFXLIGHT3: every placed model is kept (model null: no .nifx yet), so one made later is found live
+	QString modelPath, dataRoot;
 };
 
 //! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
@@ -220,6 +238,7 @@ struct WwCellLighting
 	//! the start-off placed lights the list above skipped (their state carries over), and the bulb-tier lights
 	QVector<WwNifxFixture> nifxFixtures;
 	QVector<WwCellLight> nifxOffPlaced, nifxBulbs;
+	QVector<WwCellLight> nifxOffBulbs;	//!< lane NIFXLIGHT3: bulb-tier lights dark with the start-off light they took
 	QString summary;                    //!< one census line
 };
 

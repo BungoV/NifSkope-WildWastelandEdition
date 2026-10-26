@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
+
+- **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,
+  and picks up a `.nifx` made, changed or removed while the cell is open, with no reopen. A moved `WW_NIFX_ROOT` (now
+  live) looks at every folder at once. With no `.nifx` left the placed lights come back as a fresh open has them. Census:
+  `nifx lights: live: ...`, `nifx lights: no .nifx left`.
+- **Dimmers play:** with the World animation row on, a `.nifx` light that follows a `NiLight` (or an edited `NiLight`)
+  follows the mesh's looping `NiLightDimmerController` keys each frame, timed as NifSkope plays controllers. Only the
+  changed lights' rows of the light buffer are patched. The game's own dimmer timing is unknown. The GI keeps the
+  still-view dimmer (no per-frame relight).
+- **Bulbs flicker:** a bulb that took over a flickering placed light flickers with it (the placed light's own rule).
+- **Dark bulbs live:** a bulb that took a start-off placed light stays dark after a live edit, as on a fresh open.
+- Off = NIFXLIGHT2 exactly: tests/nifxapply's dumps on NIFXLIGHT1's and NIFXLIGHT2's fixtures are byte-identical.
+- Reds (`WW_NIFX_LIGHTS_RED`, added): `staticdim`, `nobulbflicker`, `nolivenew`, `nooffkept` (each fails tests/nifxapply).
+- Cost (estimate, not measured): the dimmer patch is one 20-float buffer write per changed light per frame, well under
+  0.01 ms at 1080p; the folder scan about 1.5 ms of CPU every 500 ms. Hold rows measure both.
+
 ## Lane NIFXLIGHT2 (2026-10-26, branch nifxlight2-20261026): mesh lights follow dimmers, scale, bulbs light GI + fog
 
 - **Dimmers still bind:** the cell build reads each `NiLight`'s dimmer as the lamp is placed (on): the last key of the

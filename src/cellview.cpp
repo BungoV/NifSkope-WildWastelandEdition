@@ -50,6 +50,7 @@ BSD License - see nifskope.h
 #include "spells/blocks.h"
 #include "gl/celllights.h"
 #include "io/nifxfile.h"	// lane NIFXLIGHT1: a model's .nifx path
+#include "gl/cellnifxlights.h"	// lane NIFXLIGHT3: the .nifx path rule, kept live by src/gl/celllights.cpp
 #include "gl/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1
 #include "gl/cellvolumeview.h"	// lane VOLFIT1
@@ -989,18 +990,40 @@ static int cellProbeKindOf( const ProbePoint & q )
  * and, when there is one, every NiAVObject's name and frame in the model (the root's own transform is the placement's) */
 static std::shared_ptr<const WwNifxModel> cellNifxModel( const QString & dataRoot, const QString & model )
 {
-	QString rel = QDir::fromNativeSeparators( model );
-	if ( !rel.startsWith( QLatin1String( "meshes/" ), Qt::CaseInsensitive ) )
-		rel = QStringLiteral( "Meshes/" ) + rel;
-	const QString side = nifxPathForNif( rel );
-	QString found;
-	for ( const QString & root : { wwEnvStr( "WW_NIFX_ROOT" ), dataRoot } )
-		if ( !side.isEmpty() && !root.isEmpty() && QFileInfo::exists( root + QLatin1Char( '/' ) + side ) ) {
-			found = QDir::cleanPath( root + QLatin1Char( '/' ) + side );
-			break;
-		}
+	// lane NIFXLIGHT3: the same rule as nifxPathForNif, shared with the live scan (src/gl/cellnifxlights.cpp)
+	const QString found = wwNifxSidecarFind( { wwEnvStr( "WW_NIFX_ROOT" ), dataRoot }, model );
 	if ( found.isEmpty() )
 		return nullptr;
+	return wwCellNifxModelLoad( dataRoot, model, found );
+}
+
+/* lane NIFXLIGHT3: a dimmer key group (NiFloatData "Data") as a track, timed by its controller's flags; null under 2 keys */
+static std::shared_ptr<WwNifxDimTrack> cellNifxDimKeys( NifModel & src, const QModelIndex & ip, int flags )
+{
+	if ( !ip.isValid() || !src.blockInherits( ip, "NiFloatInterpolator" ) )
+		return nullptr;
+	const QModelIndex fd = src.getBlockIndex( src.getLink( ip, "Data" ) );
+	const QModelIndex grp = fd.isValid() ? src.getIndex( fd, "Data" ) : QModelIndex();
+	const QModelIndex keys = grp.isValid() ? src.getIndex( grp, "Keys" ) : QModelIndex();
+	if ( !keys.isValid() || src.rowCount( keys ) < 2 )
+		return nullptr;
+	auto k = std::make_shared<WwNifxDimTrack>();
+	k->interp = src.get<int>( grp, "Interpolation" );
+	for ( int r = 0; r < src.rowCount( keys ); r++ ) {
+		const QModelIndex ik = src.getIndex( keys, r );
+		k->t.push_back( src.get<float>( ik, "Time" ) );
+		k->v.push_back( src.get<float>( ik, "Value" ) );
+		k->fwd.push_back( src.get<float>( ik, "Forward" ) );
+		k->bwd.push_back( src.get<float>( ik, "Backward" ) );
+	}
+	k->cycle = ( flags & 6 ) >> 1;
+	k->backwards = ( flags & 0x10 ) != 0;
+	k->scaled = ( flags & 0x40 ) != 0;
+	return k;
+}
+
+std::shared_ptr<const WwNifxModel> wwCellNifxModelLoad( const QString & dataRoot, const QString & model, const QString & found )
+{
 	auto m = std::make_shared<WwNifxModel>();
 	m->model = model;
 	m->sidecar = found;
@@ -1013,6 +1036,7 @@ static std::shared_ptr<const WwNifxModel> cellNifxModel( const QString & dataRoo
 	src.resetState();
 	const QList<int> roots = src.getRootLinks();
 	QSet<qint32> seen;
+	QHash<int, qint32> lightBlock;	// lane NIFXLIGHT3: node row -> its NiLight block (its own dimmer controller)
 	std::function<void( qint32, const Transform & )> walk = [&]( qint32 b, const Transform & up ) {
 		const QModelIndex ib = b < 0 || seen.contains( b ) ? QModelIndex() : src.getBlockIndex( b );
 		if ( !ib.isValid() || !src.blockInherits( ib, "NiAVObject" ) )
@@ -1022,8 +1046,10 @@ static std::shared_ptr<const WwNifxModel> cellNifxModel( const QString & dataRoo
 		WwNifxNode n;
 		n.name = src.get<QString>( ib, "Name" );
 		n.niLight = src.blockInherits( ib, "NiLight" );
-		if ( n.niLight )
+		if ( n.niLight ) {
 			n.dimmer = src.get<float>( ib, "Dimmer" );	// lane NIFXLIGHT2
+			lightBlock.insert( int( m->nodes.size() ), b );
+		}
 		for ( int r = 0; r < 3; r++ ) {
 			for ( int c = 0; c < 3; c++ )
 				n.m[r][c] = here.rotation( r, c ) * here.scale;
@@ -1064,6 +1090,68 @@ static std::shared_ptr<const WwNifxModel> cellNifxModel( const QString & dataRoo
 					n.dimmer = v;
 			}
 		}
+	}
+	/* lane NIFXLIGHT3: the dimmer over time, as NifSkope plays it (src/gl/controllers.cpp ControllerManager::setSequence):
+	 * a light a sequence binds follows the model's first looping sequence (start, stop, frequency and phase from the
+	 * sequence, the flags from its controller); an unbound light its own active NiLightDimmerController */
+	QModelIndex loopSeq;
+	for ( int b = 0; b < src.getBlockCount() && !loopSeq.isValid(); b++ ) {
+		const QModelIndex im = src.getBlockIndex( b );
+		if ( !im.isValid() || !src.blockInherits( im, "NiControllerManager" ) )
+			continue;
+		for ( const qint32 l : src.getLinkArray( im, "Controller Sequences" ) ) {
+			const QModelIndex iSeq = src.getBlockIndex( l, "NiControllerSequence" );
+			if ( iSeq.isValid() && src.get<int>( iSeq, "Cycle Type" ) == 0 ) {
+				loopSeq = iSeq;
+				break;
+			}
+		}
+	}
+	auto ownDimmer = [&]( qint32 lb ) {
+		QSet<qint32> seenC;
+		for ( qint32 c = src.getLink( src.getBlockIndex( lb ), "Controller" ); c >= 0 && !seenC.contains( c ); ) {
+			seenC.insert( c );
+			const QModelIndex ic = src.getBlockIndex( c );
+			if ( !ic.isValid() )
+				break;
+			if ( src.blockInherits( ic, "NiLightDimmerController" ) )
+				return ic;
+			c = src.getLink( ic, "Next Controller" );
+		}
+		return QModelIndex();
+	};
+	for ( auto it = lightBlock.cbegin(); it != lightBlock.cend(); ++it ) {
+		WwNifxNode & n = m->nodes[it.key()];
+		const QModelIndex own = ownDimmer( it.value() );
+		std::shared_ptr<WwNifxDimTrack> k;
+		if ( n.sequences > 0 && loopSeq.isValid() ) {
+			const QModelIndex arr = src.getIndex( loopSeq, "Controlled Blocks" );
+			for ( int r = 0; arr.isValid() && r < src.rowCount( arr ) && !k; r++ ) {
+				const QModelIndex cb = src.getIndex( arr, r );
+				if ( src.resolveString( cb, "Controller Type" ) != QLatin1String( "NiLightDimmerController" )
+					|| src.resolveString( cb, "Node Name" ).compare( n.name, Qt::CaseInsensitive ) != 0 )
+					continue;
+				const QModelIndex ic = src.getBlockIndex( src.getLink( cb, "Controller" ) );
+				const int flags = ic.isValid() ? src.get<int>( ic, "Flags" ) : own.isValid() ? src.get<int>( own, "Flags" ) : 76;
+				k = cellNifxDimKeys( src, src.getBlockIndex( src.getLink( cb, "Interpolator" ) ), flags );
+				if ( k ) {
+					k->start = src.get<float>( loopSeq, "Start Time" );
+					k->stop = src.get<float>( loopSeq, "Stop Time" );
+					k->frequency = src.get<float>( loopSeq, "Frequency" );
+					k->phase = src.get<float>( loopSeq, "Phase" );	// absent in Fallout 4 files: 0, as NifSkope reads it
+					k->sequence = src.get<QString>( loopSeq, "Name" );
+				}
+			}
+		} else if ( n.sequences == 0 && own.isValid() && ( src.get<int>( own, "Flags" ) & 0x08 ) ) {
+			k = cellNifxDimKeys( src, src.getBlockIndex( src.getLink( own, "Interpolator" ) ), src.get<int>( own, "Flags" ) );
+			if ( k ) {
+				k->start = src.get<float>( own, "Start Time" );
+				k->stop = src.get<float>( own, "Stop Time" );
+				k->frequency = src.get<float>( own, "Frequency" );
+				k->phase = src.get<float>( own, "Phase" );
+			}
+		}
+		n.track = k;
 	}
 	return m;
 }
@@ -1165,9 +1253,13 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	for ( const QString & pl : world.pluginList().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
 		L.recxPlugins << pl.trimmed();
 	L.recxData = EsmWeather::gameDataDir();
+	QHash<quint32, QString> pluginFile;	// lane NIFXLIGHT3: every placed model is a fixture now, so name each plugin once
 	auto recxKey = [&]( quint32 f, QString & plugin, quint32 & local ) {
 		const quint32 idx = world.plugin() ? world.plugin()->getFormIDFile( f ) : ( f >> 24 );
-		plugin = idx < quint32( L.recxPlugins.size() ) ? QFileInfo( L.recxPlugins.at( int( idx ) ) ).fileName() : QString();
+		auto pf = pluginFile.constFind( idx );
+		if ( pf == pluginFile.cend() )
+			pf = pluginFile.insert( idx, idx < quint32( L.recxPlugins.size() ) ? QFileInfo( L.recxPlugins.at( int( idx ) ) ).fileName() : QString() );
+		plugin = *pf;
 		local = ESMFile::getFormIDLocal( f );
 	};
 	// what a .nifx light takes over from a placed light (lane NIFXLIGHT1): its keys, its flicker or pulse
@@ -1205,7 +1297,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		if ( startOff ) {
 			off++;
 			if ( !giKeepOff || ( b.flags & 0x100000 ) ) {
-				if ( nifx && !nifx->isEmpty() && !( b.flags & 0x100000 ) ) {	// lane NIFXLIGHT1: its state carries over
+				// lane NIFXLIGHT1: its state carries over (NIFXLIGHT3: kept for a .nifx made later too)
+				if ( nifx && wwNifxKeepStartOff( *nifx, wwNifxLightsRed() ) && !( b.flags & 0x100000 ) ) {
 					WwCellLight l;
 					for ( int k = 0; k < 3; k++ )
 						l.pos[k] = r.pos[k];
@@ -6318,7 +6411,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			liveProbes = pr.probes;	// lane LIVESET1
 	}
 
-	// lane NIFXLIGHT1: the placed fixtures whose model has a .nifx (src/gl/celllights.cpp reads and applies it live)
+	/* lane NIFXLIGHT1: the placed fixtures whose model has a .nifx (src/gl/celllights.cpp reads and applies it live).
+	 * NIFXLIGHT3: every placed model is kept (model null without one), so a .nifx made later is found live. */
 	QVector<WwNifxFixture> nifxFix;
 	{
 		QHash<QString, std::shared_ptr<const WwNifxModel>> models;
@@ -6329,10 +6423,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			auto it = models.constFind( model.toLower() );
 			if ( it == models.cend() )
 				it = models.insert( model.toLower(), cellNifxModel( dataRoot, model ) );
-			if ( !*it )
-				continue;
 			WwNifxFixture f;
 			f.model = *it;
+			f.modelPath = model;
+			f.dataRoot = dataRoot;
 			for ( int r = 0; r < 3; r++ ) {
 				f.pos[r] = p.pos[r];
 				for ( int c = 0; c < 3; c++ )

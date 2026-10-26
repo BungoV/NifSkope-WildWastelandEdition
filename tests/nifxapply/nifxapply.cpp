@@ -2,16 +2,22 @@
 // conversion against hand-worked answers, the 64-unit takeover and its carried state, and the fog.scale rungs.
 // Usage: nifxapply <frames dir> <nifx dir> [--red words] [--dump file] [--two <frames dir> <nifx dir>]; exit 0 = every
 // check passed. --two (lane NIFXLIGHT2): NifxLight2Lamp's placed scale, NiLight dimmers and bulb-tier rules.
+// --three <frames dir> <nifx dir> (lane NIFXLIGHT3): dimmer tracks, bulb flicker, a .nifx made after the build.
 // <frames dir>/<Model>.frames: one node a line, "name|niLight 0/1|m00 m01 m02 m03 m10 .. m23" (the mesh's world
 // frames, from `nifskope-cli world`), then optionally "|dimmer|sequences" (lane NIFXLIGHT2, a NiLight's On-state
-// dimmer and its dimmer sequences); <nifx dir>/<Model>.nifx: the test lights.
+// dimmer and its dimmer sequences), then "|interp cycle scaled backwards start stop frequency phase|t:v:fwd:bwd,..."
+// (lane NIFXLIGHT3, its dimmer track); <nifx dir>/<Model>.nifx: the test lights.
 
 #include "cellnifxlights.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QTemporaryDir>
 #include <QTextStream>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -49,6 +55,29 @@ std::shared_ptr<WwNifxModel> loadModel( const QString & framesDir, const QString
 			n.dimmer = p[3].toFloat();
 		if ( p.size() > 4 )
 			n.sequences = p[4].toInt();
+		if ( p.size() > 6 ) {	// lane NIFXLIGHT3
+			auto k = std::make_shared<WwNifxDimTrack>();
+			const QStringList h = p[5].split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+			if ( h.size() >= 8 ) {
+				k->interp = h[0].toInt();
+				k->cycle = h[1].toInt();
+				k->scaled = h[2] == QLatin1String( "1" );
+				k->backwards = h[3] == QLatin1String( "1" );
+				k->start = h[4].toFloat();
+				k->stop = h[5].toFloat();
+				k->frequency = h[6].toFloat();
+				k->phase = h[7].toFloat();
+			}
+			for ( const QString & key : p[6].split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
+				const QStringList q = key.split( QLatin1Char( ':' ) );
+				k->t.push_back( q.value( 0 ).toFloat() );
+				k->v.push_back( q.value( 1 ).toFloat() );
+				k->fwd.push_back( q.value( 2 ).toFloat() );
+				k->bwd.push_back( q.value( 3 ).toFloat() );
+			}
+			k->sequence = QStringLiteral( "Loop" );
+			n.track = k;
+		}
 		const QStringList v = p[2].split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
 		for ( int i = 0; i < 12 && i < v.size(); i++ )
 			n.m[i / 4][i % 4] = v[i].toFloat();
@@ -354,6 +383,160 @@ int main( int argc, char ** argv )
 		check( all2.contains( QStringLiteral( "2 lights scaled by a NiLight dimmer, 2 dimmer sequences bound" ) )
 			&& all2.contains( QStringLiteral( "1 bulb-tier lights dark (took a start-off light)" ) ),
 			QStringLiteral( "two: census counts the dimmers, sequences and the dark bulb" ) );
+	}
+
+	// lane NIFXLIGHT3: dimmer tracks, bulb flicker, a .nifx made after the build (live == fresh)
+	const int hi = int( a.indexOf( QStringLiteral( "--three" ) ) );
+	if ( hi > 0 && hi + 2 < a.size() ) {
+		const QString fr3 = a[hi + 1], nx3 = a[hi + 2];
+		// the track's time rule, worked by hand (NifSkope's ctrlTime + interpolate)
+		WwNifxDimTrack lin;
+		lin.t = { 0, 1, 2 };
+		lin.v = { 0.5f, 1.0f, 0.5f };
+		lin.fwd = lin.bwd = { 0, 0, 0 };
+		lin.start = 0;
+		lin.stop = 2;
+		check( near( wwNifxDimAt( lin, 0.5 ), 0.75, 1e-6 ) && near( wwNifxDimAt( lin, 2.5 ), 0.75, 1e-6 )
+			&& near( wwNifxDimAt( lin, 3.25 ), 0.875, 1e-6 ), QStringLiteral( "three: linear loop 0.5 -> %1, 2.5 -> %2, 3.25 -> %3" )
+			.arg( wwNifxDimAt( lin, 0.5 ) ).arg( wwNifxDimAt( lin, 2.5 ) ).arg( wwNifxDimAt( lin, 3.25 ) ) );
+		WwNifxDimTrack her = lin;
+		her.t = { 0, 1 };
+		her.v = { 0.25f, 1.0f };
+		her.fwd = her.bwd = { 0, 0 };
+		her.interp = 2;
+		her.cycle = 1;
+		her.stop = 1;
+		check( near( wwNifxDimAt( her, 0.5 ), 0.625, 1e-6 ) && near( wwNifxDimAt( her, 1.25 ), 0.8828125, 1e-6 ),
+			QStringLiteral( "three: quadratic ping-pong 0.5 -> %1, 1.25 -> %2 (back at 0.75)" )
+			.arg( wwNifxDimAt( her, 0.5 ) ).arg( wwNifxDimAt( her, 1.25 ) ) );
+		WwNifxDimTrack clamp = lin, still = lin, back = lin, con = lin;
+		clamp.cycle = 2;
+		still.scaled = false;
+		still.frequency = 3;
+		back.backwards = true;
+		con.interp = 5;
+		check( near( wwNifxDimAt( clamp, 5 ), 0.5, 1e-6 ) && near( wwNifxDimAt( clamp, 1.5 ), 0.75, 1e-6 )
+			&& near( wwNifxDimAt( still, 0.5 ), 0.75, 1e-6 ) && near( wwNifxDimAt( back, 0.25 ), 0.625, 1e-6 )
+			&& near( wwNifxDimAt( con, 0.4 ), 0.5, 1e-6 ) && near( wwNifxDimAt( con, 0.6 ), 1.0, 1e-6 ),
+			QStringLiteral( "three: clamp, unscaled, backwards and constant keys" ) );
+
+		auto load3 = [&]( const QString &, const QString & model, const QString & sidecar ) -> std::shared_ptr<const WwNifxModel> {
+			auto m = loadModel( fr3, nx3, QFileInfo( QDir::fromNativeSeparators( model ) ).fileName() );
+			if ( m->nodes.isEmpty() )
+				return nullptr;
+			m->model = model;
+			m->sidecar = sidecar;
+			return m;
+		};
+		auto docsOf = [&]( const QVector<WwNifxFixture> & fx ) {
+			QHash<QString, nifxl::Lights> d;
+			for ( const WwNifxFixture & f : fx )
+				if ( f.model && !d.contains( f.model->sidecar ) ) {
+					QFile in( f.model->sidecar );
+					if ( in.open( QIODevice::ReadOnly ) ) {
+						const QByteArray b = in.readAll();
+						d.insert( f.model->sidecar, nifxl::read( std::string( b.constData(), size_t( b.size() ) ) ) );
+					}
+				}
+			return d;
+		};
+		const QString modelPath = QStringLiteral( "SetDressing\\NifxLight3Lamp.nif" );
+		const QString srcNifx = nx3 + QStringLiteral( "/NifxLight3Lamp.nifx" );
+		QTemporaryDir root( QDir::currentPath() + QStringLiteral( "/nifx3_XXXXXX" ) ), root2( QDir::currentPath() + QStringLiteral( "/nifx3_XXXXXX" ) ),
+			data( QDir::currentPath() + QStringLiteral( "/nifx3_XXXXXX" ) );	// beside the run, not in the system temp folder
+		const QString rel = wwNifxSidecarRel( modelPath );
+		check( rel == QLatin1String( "Meshes/SetDressing/NifxLight3Lamp.nifx" ) && root.isValid() && root2.isValid(),
+			QStringLiteral( "three: the .nifx path of %1 is %2" ).arg( modelPath, rel ) );
+		const QString side = QDir::cleanPath( root.path() + QLatin1Char( '/' ) + rel );
+		// the cell as built: a placed start-off light under Dark, a flickering placed light under Flick
+		auto cellOf = [&]( const WwNifxFixture & f ) {
+			WwCellLighting C;
+			C.nifxFixtures = { f };
+			const double pd[3] = { 0, 0, 300 }, pk[3] = { 0, -200, 0 };
+			if ( wwNifxKeepStartOff( C.nifxFixtures, red ) )
+				C.nifxOffPlaced = { placed( pd, 1, 0xE1, 0 ) };
+			C.lights = { placed( pk, 2, 0xE2, 1 ) };
+			return C;
+		};
+		WwNifxFixture F = fixtureAt( nullptr, 0, 0, 0, 0, 0xE0 );
+		F.modelPath = modelPath;
+		F.dataRoot = data.path();
+
+		// fresh: the .nifx was there when the cell was built
+		QDir().mkpath( QFileInfo( side ).path() );
+		check( QFile::copy( srcNifx, side ), QStringLiteral( "three: the test .nifx put under a temporary root" ) );
+		WwNifxFixture Ff = F;
+		Ff.model = load3( F.dataRoot, modelPath, wwNifxSidecarFind( { root.path() }, modelPath ) );
+		WwCellLighting fresh = cellOf( Ff );
+		QStringList cf;
+		wwNifxLightsApply( fresh, docsOf( fresh.nifxFixtures ), red, &cf );
+		const QString freshDump = wwNifxLightsDump( fresh );
+		const WwCellLight * df = byName( fresh.lights, QStringLiteral( "Follow" ) );
+		const WwCellLight * de = byName( fresh.lights, QStringLiteral( "Edit" ) );
+		const WwCellLight * ds = byName( fresh.lights, QStringLiteral( "Steady" ) );
+		check( df && df->nifxDim && near( df->nifxDimRest, 0.5 ) && near( wwNifxDimFactor( *df, 0.5 ), 1.5, 1e-6 )
+			&& df->nifxDim->sequence == QLatin1String( "Loop" ),
+			QStringLiteral( "three: follows LampLight carries its track (factor at 0.5 s %1, want 1.5)" )
+			.arg( df ? wwNifxDimFactor( *df, 0.5 ) : -1.0f ) );
+		check( de && de->nifxDim && near( wwNifxDimFactor( *de, 0.5 ), 2.5, 1e-6 ) && ds && !ds->nifxDim && near( wwNifxDimFactor( *ds, 0.5 ), 1.0 ),
+			QStringLiteral( "three: the edited NiLight plays its own track (%1, want 2.5), a plain light none" )
+			.arg( de ? wwNifxDimFactor( *de, 0.5 ) : -1.0f ) );
+		check( fresh.nifxOffBulbs.size() == 1 && fresh.nifxOffBulbs[0].nifxName == QLatin1String( "Dark" )
+			&& fresh.nifxBulbs.size() == 1 && fresh.nifxBulbs[0].nifxName == QLatin1String( "Flick" ) && fresh.nifxBulbs[0].flicker == 1
+			&& freshDump.contains( QStringLiteral( "offbulb Dark" ) ),
+			QStringLiteral( "three: Dark kept dark (%1), Flick carries the flicker it took" ).arg( fresh.nifxOffBulbs.size() ) );
+		const bool bulbFlicker = !( red & WwNifxRedNoBulbFlicker );	// as celllights.cpp frameMode reads it
+		int fN = 0, dN = 0;
+		const std::vector<int> idx = wwNifxFrameList( fresh, true, bulbFlicker, true, &fN, &dN );
+		const int flickAt = int( fresh.lights.size() );
+		check( fN == 1 && dN == 2 && std::find( idx.begin(), idx.end(), flickAt ) != idx.end(),
+			QStringLiteral( "three: a frame changes the flickering bulb (index %1) and the 2 dimmer tracks (%2 flicker, %3 dim)" )
+			.arg( flickAt ).arg( fN ).arg( dN ) );
+		int f0 = 0, d0 = 0;
+		check( wwNifxFrameList( fresh, false, false, false, &f0, &d0 ).empty() && !f0 && !d0,
+			QStringLiteral( "three: nothing live, no light in a frame" ) );
+
+		// live: the cell was built before the .nifx existed
+		QFile::remove( side );
+		QDir( root.path() ).removeRecursively();
+		QDir().mkpath( root.path() );
+		WwCellLighting live = cellOf( F );
+		WwNifxLive watch;
+		wwNifxLiveInit( watch, live.nifxFixtures );
+		const int before0 = wwNifxLiveScan( watch, live.nifxFixtures, { root.path() }, 1.5, load3 );
+		QDir().mkpath( QFileInfo( side ).path() );
+		QFile::copy( srcNifx, side );
+		int moved = 0;
+		if ( !( red & WwNifxRedNoLiveNew ) )	// as celllights.cpp nifxTick reads it
+			moved = wwNifxLiveScan( watch, live.nifxFixtures, { root.path() }, 1.5, load3 );
+		wwNifxLightsApply( live, docsOf( live.nifxFixtures ), red, nullptr );
+		const QString liveDump = wwNifxLightsDump( live );
+		check( before0 == 0 && moved == 1 && live.nifxFixtures[0].model && live.nifxFixtures[0].model->sidecar == side,
+			QStringLiteral( "three: the new .nifx seen live (%1 then %2 changed, %3 folders)" ).arg( before0 ).arg( moved ).arg( watch.dirs.size() ) );
+		check( liveDump == freshDump, QStringLiteral( "three: live == fresh (dark bulb, tracks, flicker): %1 vs %2 bytes" )
+			.arg( liveDump.size() ).arg( freshDump.size() ) );
+		if ( liveDump != freshDump )
+			std::printf( "--- live\n%s--- fresh\n%s", liveDump.toUtf8().constData(), freshDump.toUtf8().constData() );
+
+		// a second root set live (WW_NIFX_ROOT): every folder at once, the first root wins
+		const QString side2 = QDir::cleanPath( root2.path() + QLatin1Char( '/' ) + rel );
+		QDir().mkpath( QFileInfo( side2 ).path() );
+		QFile::copy( srcNifx, side2 );
+		const int moved2 = wwNifxLiveScan( watch, live.nifxFixtures, { root2.path(), root.path() }, 0.0, load3 );
+		check( moved2 == 1 && live.nifxFixtures[0].model && live.nifxFixtures[0].model->sidecar == side2,
+			QStringLiteral( "three: a root set live takes over (%1)" ).arg( live.nifxFixtures[0].model ? live.nifxFixtures[0].model->sidecar : QString() ) );
+		// both removed: the model goes back to none
+		QDir( root.path() + QStringLiteral( "/Meshes" ) ).removeRecursively();
+		QDir( root2.path() + QStringLiteral( "/Meshes" ) ).removeRecursively();
+		int moved3 = 0;
+		for ( int k = 0; k < 2; k++ )
+			moved3 += wwNifxLiveScan( watch, live.nifxFixtures, { root2.path(), root.path() }, 1.5, load3 );
+		check( moved3 == 1 && !live.nifxFixtures[0].model && watch.lost == 1, QStringLiteral( "three: a removed .nifx drops live (lost %1)" ).arg( watch.lost ) );
+		// a reopen's fixtures line up with what the scan has seen
+		QVector<WwNifxFixture> again = { F };
+		WwNifxLive seen = watch;
+		wwNifxLiveInit( seen, again );
+		check( !again[0].model && seen.dirs.size() == 1, QStringLiteral( "three: a republish keeps the live view" ) );
 	}
 
 	std::printf( "NIFXAPPLY %s %d checks, %d failed%s\n", fails ? "FAIL" : "PASS", checks, fails,
