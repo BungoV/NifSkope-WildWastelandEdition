@@ -1760,6 +1760,21 @@ bool wwLookdevCloudLayers( Scene * scene, QVector<WwCloudLayerIn> & out, QString
 	return true;
 }
 
+bool wwLookdevCloudMesh( Scene * scene, WwCloudLayerIn & io )
+{
+	const QVector<SkyMesh> * ms = scene ? cloudMeshes( scene, nullptr ) : nullptr;
+	if ( !ms || io.layer < 0 || io.layer >= ms->size() || ms->at( io.layer ).idx.isEmpty() )
+		return false;
+	const SkyMesh & m = ms->at( io.layer );
+	io.pos = m.pos.constData();
+	io.col = m.col.constData();
+	io.uv = m.uv.constData();
+	io.nv = int( m.nv );
+	io.idx = m.idx.constData();
+	io.nIdx = int( m.idx.size() );
+	return true;
+}
+
 namespace
 {
 

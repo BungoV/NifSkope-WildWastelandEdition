@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CLOUD1 (2026-10-26, branch cloud1-20261026): the cloud map
+
+- **Row Render > Scene > Cloud Map** (Off / Low 256 / Medium 512 / High 512 / Ultra 1024 texels a side), ships Off,
+  sets live. Pin `WW_CLOUDMAP`. Off builds nothing and draws nothing.
+- **What it is:** each frame the weather's active cloud layers (the same Clouds.nif shapes, textures, JNAM alpha and
+  scroll the sky draws) are projected from the dome onto one flat plane per band (Low, Mid, High) and unioned
+  (1 - prod(1 - c)) into an RGBA8 map (R Low, G Mid, B Low sheet, A High), 48 km a side around the eye
+  (res/shaders/cloudmap.*). Nothing draws it yet: the cloud volumes (CLOUD2) read it through `src/gl/cloudmap.h`.
+- **Band numbers from a texture census:** `src/gl/cloudcensus.inc` (generated offline from the vanilla archives:
+  derived numbers only, no game bytes) gives each of the 47 vanilla cloud textures its type (Fill, Lower, LowerLight,
+  Upper, Horizon) and mean alpha, and each Clouds.nif layer its share of the dome. A band's coverage is the union of
+  JNAM alpha x mean alpha x share. Checked offline against the drawn dome for all 107 vanilla weathers: worst 3.2 %.
+  A texture the census never saw (a mod's) takes its type from its name and half coverage, and says so
+  (`uncensused=N` in the line).
+- **Weather changes blend the band parameters** (coverage, heights, density, sheet, tint), never colours
+  (`src/gl/cloudmath.h`, shared with the unit test tests/cloudmap/cloudmath_dump.cpp). `WW_CLOUDMAP_TRANSITION=<0..1>`
+  freezes the blend, `WW_CLOUDMAP_FADE=<s>` gives it a length (default: a snap, like the 2D layers).
+- Reds: `WW_CLOUDMAP_RED=max` (largest layer instead of the union), `=colorblend` (the tint blended as a colour).
+  Pins `WW_CLOUDMAP_ECHO=1` (channel means), `WW_CLOUDMAP_SHOW=1` (the map in the top-right corner).
+- Cost: one pass of the active layers into the map; `cloudmap: gpu N ms` every 120 builds. Memory 256 KB / 1 MB / 1 MB
+  / 4 MB for Low / Medium / High / Ultra.
+
 ## Lane CLOUD1 (2026-10-26, branch cloud1-20261026): the cloud map interface (stub)
 
 - **New header `src/gl/cloudmap.h`:** the per-weather cloud map that the volume clouds (CLOUD2) and the cloud

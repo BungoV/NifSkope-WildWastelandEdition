@@ -1,0 +1,4 @@
+# lane CLOUD1: the cloud map, each weather layer projected onto its band plane (src/gl/cloudmap.cpp).
+# No conditions: never picked for a shape; selected by name.
+
+shaders cloudmap.vert cloudmap.frag
