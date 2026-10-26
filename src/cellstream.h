@@ -59,6 +59,8 @@ struct CellStreamSeed
 	WwCellLighting base;                //!< the open's published lighting (no cell lights)
 	std::vector<std::array<int, 3>> farHand;    //!< far ring-0 shapes: block, cell x, cell y
 	int farLand = 0;                    //!< how many of them (the first) are terrain; the rest are water
+	//! lane FARHOLE: the far objects' triangles by placement cell { block, x, y, first, count } (CellFarStream::objTris)
+	std::vector<std::array<int, 5>> farObj;
 };
 
 //! The block numbers a streamed cell is written into: a freed one of the type when there is one, else new.

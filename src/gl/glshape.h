@@ -227,6 +227,11 @@ public:
 	{
 		dataHash.attrMask = 0;
 	}
+	//! lane FARHOLE: the side arrays (cellmesh.h) changed; the next transform takes them again
+	inline void wwRefreshData()
+	{
+		needUpdateData = true;
+	}
 };
 
 #endif

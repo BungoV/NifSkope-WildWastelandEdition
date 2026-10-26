@@ -103,6 +103,9 @@ struct CellFarStream
 	std::vector<std::array<int, 3>> handBlocks;     //!< out: each ring-0 terrain/water shape's block, cell x, y
 	int landBlocks = 0;                             //!< out: how many of them (the first) are terrain
 	int objX0 = 0, objY0 = 0, objX1 = -1, objY1 = -1;   //!< out: the far objects' and cards' hole (cells)
+	//! lane FARHOLE: out: the far objects' triangles by placement cell { block, x, y, first, count }; a streamed
+	//! cell hides its own when it loads (past the hole the camera can roam on, the far field had it drawn twice)
+	std::vector<std::array<int, 5>> objTris;
 };
 
 QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWorld & world,

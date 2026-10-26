@@ -4,6 +4,7 @@
 
 #include "cellmesh.h"
 #include "cellsplat.h"
+#include "impostorchunk.h"	// lane FARHOLE: a loaded cell hides the far cards placed in it
 #include "gl/bsshape.h"
 #include "gl/cellcull.h"
 #include "gl/cellgrass.h"
@@ -127,6 +128,10 @@ public:
 	Scene * scene = nullptr;
 	QPointer<Node> root;
 	std::vector<FarTile> farTiles;
+	// lane FARHOLE: seed->farObj by placement cell, and the triangles a loaded cell hid (restored when it leaves)
+	std::map<Key, std::vector<int>> farObjOf;
+	std::map<Key, std::vector<QVector<Triangle>>> farObjSaved;
+	qint64 farObjHidden = 0, farObjMissed = 0;
 	CellRefTable baseRefs;
 	CellPickTable basePicks;
 	bool dirty = false;
@@ -209,6 +214,7 @@ private:
 	void wire( StreamCell & c );
 	bool attach( StreamCell & c, const QElapsedTimer & t, double budget );
 	void showFar( int x, int y, bool show );
+	void hideFarObj( int x, int y, bool hide );
 	void rebuild();
 	Node * makeNode( const QModelIndex & idx, const QString & type );
 	void setRootSlot( int from, int to );
@@ -406,6 +412,64 @@ void Stream::showFar( int x, int y, bool show )
 	}
 }
 
+/* lane FARHOLE: the far objects and cards leave out only the cells round the OPEN's centre (roam + 2); the stream
+ * follows the camera without a limit, so past that a loaded cell drew its buildings twice, the far field's coarse
+ * copy inside the full one (bungo 10-26, Boston). The cell hides the far triangles placed in it (degenerate, the
+ * arrays beside the document keep their length) and its cards, and gives them back when it leaves.
+ * WW_CELL_STREAM_RED=nohandobj: the old behaviour (the gate's red). */
+void Stream::hideFarObj( int x, int y, bool hide )
+{
+	if ( red == QLatin1String( "nohandobj" ) || !nif || !seed )
+		return;
+	ImpostorChunk::cellFarHideCell( x, y, hide );
+	if ( farObjOf.empty() )
+		for ( int i = 0; i < int( seed->farObj.size() ); i++ )
+			farObjOf[Key( seed->farObj[i][1], seed->farObj[i][2] )].push_back( i );
+	const Key k( x, y );
+	const auto it = farObjOf.find( k );
+	if ( it == farObjOf.end() || hide == ( farObjSaved.count( k ) > 0 ) )
+		return;
+	std::vector<QVector<Triangle>> saved;
+	const std::vector<QVector<Triangle>> * back = hide ? nullptr : &farObjSaved[k];
+	QSet<int> touched;
+	for ( size_t n = 0; n < it->second.size(); n++ ) {
+		const std::array<int, 5> & r = seed->farObj[size_t( it->second[n] )];
+		const QSharedPointer<CellMesh> cm = cellMeshFor( nif, nif->getBlockIndex( r[0] ) );
+		if ( !cm || r[3] < 0 || r[3] + r[4] > cm->triangles.size() ) {
+			if ( hide ) {
+				saved.emplace_back();
+				farObjMissed += r[4];
+			}
+			continue;
+		}
+		Triangle * t = cm->triangles.data();
+		if ( hide ) {
+			saved.push_back( cm->triangles.mid( r[3], r[4] ) );
+			for ( int j = r[3]; j < r[3] + r[4]; j++ ) {
+				const quint16 v = t[j][0];
+				t[j] = Triangle( v, v, v );
+			}
+			farObjHidden += r[4];
+		} else {
+			const QVector<Triangle> & sv = ( *back )[n];
+			if ( sv.size() != r[4] )
+				continue;
+			for ( int j = 0; j < r[4]; j++ )
+				t[r[3] + j] = sv[j];
+			farObjHidden -= r[4];
+		}
+		touched.insert( r[0] );
+	}
+	if ( hide )
+		farObjSaved[k] = std::move( saved );
+	else
+		farObjSaved.erase( k );
+	for ( const int b : touched )
+		if ( Shape * sh = scene ? dynamic_cast<Shape *>( scene->findNode( nif, nif->getBlockIndex( b ) ) ) : nullptr )
+			sh->wwRefreshData();
+	dirty = true;
+}
+
 void Stream::wire( StreamCell & c )
 {
 	for ( size_t i = c.takesSeen; i < c.takes.size(); i++ ) {
@@ -536,6 +600,7 @@ bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 		c.cellNode->makeParent( root.data() );
 	if ( red != QLatin1String( "nohandover" ) )
 		showFar( c.x, c.y, false );   // the near ground replaces the far tile in the same step: no overlap
+	hideFarObj( c.x, c.y, true );   // lane FARHOLE: and the near buildings their far copies
 	c.st = CellState::Attached;
 	st.attaches++;
 	trace( QStringLiteral( "attach %1,%2 block %3 after %4 ms of writing" ).arg( c.x ).arg( c.y ).arg( c.cellBlock ).arg( c.writeMs, 0, 'f', 1 ) );
@@ -553,6 +618,7 @@ void Stream::unload( StreamCell & c )
 	if ( c.cellBlock >= 0 && c.st == CellState::Attached )
 		setRootSlot( c.cellBlock, -1 );
 	showFar( c.x, c.y, true );
+	hideFarObj( c.x, c.y, false );
 	QSet<int> nodeBlocks, propBlocks;
 	for ( const auto & tk : c.takes ) {
 		const int b = tk.first;
@@ -1207,8 +1273,43 @@ QString cellStreamCoverage( const NifModel * nif, int * holes, int * doubles, in
 		*doubles = nD;
 	if ( samples )
 		*samples = nS;
+	/* lane FARHOLE: far objects inside the loaded cells. `placed` = triangles of far objects PLACED in a loaded
+	 * cell that the scene still draws (the defect: 0 when handed over); `centred` = any drawn far object triangle
+	 * whose centre lies in a loaded cell (a neighbour's building may reach in); cards placed there still drawn. */
+	qint64 objPlaced = 0, objCentred = 0;
+	QSet<qint64> attachedKeys;
+	for ( const Key & a : attached )
+		attachedKeys.insert( ImpostorChunk::cellFarCellKey( a.first, a.second ) );
+	QSet<int> objBlocks;
+	auto shapeOf = [s]( int b ) {
+		return dynamic_cast<Shape *>( s->scene->findNode( s->nif, s->nif->getBlockIndex( b ) ) );
+	};
+	auto drawn = []( const Triangle & tr ) { return !( tr[0] == tr[1] && tr[1] == tr[2] ); };
+	for ( const auto & r : s->seed->farObj ) {
+		objBlocks.insert( r[0] );
+		const Shape * sh = attached.count( Key( r[1], r[2] ) ) ? shapeOf( r[0] ) : nullptr;
+		for ( int t = r[3]; sh && t < r[3] + r[4] && t < sh->triangles.size(); t++ )
+			objPlaced += drawn( sh->triangles.at( t ) ) ? 1 : 0;
+	}
+	for ( const int b : objBlocks ) {
+		const Shape * sh = shapeOf( b );
+		if ( !sh || !sh->parentNode() )
+			continue;
+		const Transform w = sh->worldTrans();
+		const qsizetype nv = sh->verts.size();
+		for ( const Triangle & tr : sh->triangles ) {
+			if ( !drawn( tr ) || tr[0] >= nv || tr[1] >= nv || tr[2] >= nv )
+				continue;
+			const Vector3 c = w * ( ( sh->verts.at( tr[0] ) + sh->verts.at( tr[1] ) + sh->verts.at( tr[2] ) ) / 3.0f );
+			if ( attached.count( Key( int( std::floor( c[0] / kCell ) ), int( std::floor( c[1] / kCell ) ) ) ) )
+				objCentred++;
+		}
+	}
 	return QStringLiteral( "coverage edges %1 samples %2 holes %3 doubles %4 nearTris %5 farTris %6" )
-		.arg( edges ).arg( nS ).arg( nH ).arg( nD ).arg( nearT.size() ).arg( farT.size() );
+		.arg( edges ).arg( nS ).arg( nH ).arg( nD ).arg( nearT.size() ).arg( farT.size() )
+		+ QStringLiteral( " | farobjPlaced %1 farobjCentred %2 farobjHidden %3 farobjMissed %4 farobjRuns %5 farcardsPlaced %6" )
+		.arg( objPlaced ).arg( objCentred ).arg( s->farObjHidden ).arg( s->farObjMissed ).arg( qint64( s->seed->farObj.size() ) )
+		.arg( ImpostorChunk::cellFarCardsShownIn( attachedKeys ) );
 }
 
 qint64 cellStreamPrivateBytes()

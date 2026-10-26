@@ -12,6 +12,9 @@ BSD License - see nifskope.h
 #include <QString>
 #include <QStringList>
 
+#include <array>
+#include <vector>
+
 class QTextStream;
 
 class NifModel;
@@ -86,6 +89,9 @@ struct LodiSceneSpec
 	/*! lane FAR3 (FARGAP1): one bucket per MATERIAL instead of per (base, material). Each shape costs ~43 KB of
 	 *  document blocks, most of a far ring's memory; the far rings set it (red WW_CELL_FARLOD_RED=perbase). */
 	bool mergeBases = false;
+	/*! lane FARHOLE: with sideMesh, each emitted shape's triangles by the placement cell they came from, as
+	 *  { block, cell x, cell y, first triangle, count } -- what a streamed near cell hides when it loads. */
+	std::vector<std::array<int, 5>> * cellTris = nullptr;
 };
 
 //! lane FARLOD1: what one append put in, counted at the push.

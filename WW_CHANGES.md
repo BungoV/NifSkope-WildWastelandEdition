@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FARHOLE (2026-10-26, branch farhole-20261026): far buildings no longer draw inside the loaded cells
+
+- **Cause (bungo 10-26, Boston, high free camera):** the far objects and far cards leave out only the cells round
+  the OPEN's centre (roam + 2 = 6 cells each way). The stream follows the camera with no limit, so once he flew 5 or
+  more cells from where he opened, the loaded 5x5 sat partly over far objects that were never cut out: the far
+  field's coarse building drew inside the full one. Offline count on the Sep 29 bake: 0 drawn inside for 0-4 cells,
+  28 to 631 instances at 5 cells, 866 to 2811 at 8 cells (notes/farhole/tools/fly_census.py).
+- **Fix:** the far object build records each shape's triangles by the cell they were placed in
+  (`LodiSceneSpec::cellTris`, side-array shapes only). A streamed cell that loads hides its own far triangles
+  (made degenerate in the side arrays, length kept) and its far cards; when it leaves they come back.
+  The live far rebuild hands the new runs to the stream.
+- Notes: `far lod: stream hand-over of objects: N triangle runs over M cells`. The stream walk's coverage line adds
+  `farobjPlaced` (far triangles placed in a loaded cell still drawn: 0 when handed over), `farobjCentred` (any drawn
+  far triangle whose centre is in a loaded cell: a neighbour's building reaching in), `farobjHidden`,
+  `farobjMissed`, `farobjRuns`, `farcardsPlaced`.
+- Red: `WW_CELL_STREAM_RED=nohandobj` (the old behaviour).
+- Not done: far terrain rings past ring 0 still overlap loaded cells after a long flight; the Vanilla type's game
+  .bto objects are not handed over; a cached sun shadow may keep a hidden far object's shadow until it refreshes.
+
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
 - **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,

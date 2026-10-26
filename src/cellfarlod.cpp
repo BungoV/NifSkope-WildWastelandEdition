@@ -44,6 +44,7 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <map>
 #include <memory>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -343,6 +344,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const int ox1 = stream ? cx + sr : bx1, oy1 = stream ? cy + sr : by1;
 	if ( stream ) {
 		stream->handBlocks.clear();
+		stream->objTris.clear();
 		stream->objX0 = ox0;
 		stream->objY0 = oy0;
 		stream->objX1 = ox1;
@@ -1071,6 +1073,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.dropY = ctrY;
 			os.sway = swayAmp() > 0.0f;
 			os.skipRefs = &cardRefs;
+			os.cellTris = stream ? &stream->objTris : nullptr;   // lane FARHOLE
 			/* FINALFIX: the ring's triangles are counted before the document grows; a ring that would take the
 			 * far field past its budget is not written. Measured on the merged build (g3, Commonwealth -17,23):
 			 * ring 0 636345 tris +1514 MB, ring 1 1282884 tris +3131 MB -- 2.4 KB a triangle, rounded up. */
@@ -1141,6 +1144,13 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		say( QStringLiteral( "far lod: stream hand-over %1 ring-0 shapes (one a cell), %2 vertices on the LAND, objects and cards out of cells %3,%4..%5,%6" )
 			.arg( int( stream->handBlocks.size() ) ).arg( rings.empty() ? 0 : rings[0].snappedAll )
 			.arg( ox0 ).arg( oy0 ).arg( ox1 ).arg( oy1 ) );
+	if ( stream ) {   // lane FARHOLE
+		std::set<std::pair<int, int>> cellsSeen;
+		for ( const auto & r : stream->objTris )
+			cellsSeen.insert( { r[1], r[2] } );
+		say( QStringLiteral( "far lod: stream hand-over of objects: %1 triangle runs over %2 cells (a streamed cell hides its own)" )
+			.arg( int( stream->objTris.size() ) ).arg( int( cellsSeen.size() ) ) );
+	}
 
 	// ---- the draw's view of it
 	FarDoc fd;

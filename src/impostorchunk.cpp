@@ -65,7 +65,14 @@ struct CellFarState
 {
 	ChunkState cards;
 	float shift[3] = { 0.0f, 0.0f, 0.0f };
+	QSet<qint64> hidden;     //!< lane FARHOLE: cells a streamed near cell holds; their cards do not draw
+	quint64 hideGen = 0;     //!< lane FARHOLE: bumped when `hidden` changes (the shadow casters rebuild)
 };
+//! lane FARHOLE: the cell a card is placed in, as armCellFar's hole test reads it
+qint64 cardCell( const ImpostorChunk::Placed & p )
+{
+	return ImpostorChunk::cellFarCellKey( int( std::floor( p.world[0] / 4096.0f ) ), int( std::floor( p.world[1] / 4096.0f ) ) );
+}
 CellFarState & farSt()
 {
 	static CellFarState s;
@@ -557,6 +564,8 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	for ( const Placed & p : std::as_const( s.placed ) ) {
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() )
 			continue;
+		if ( !F.hidden.isEmpty() && F.hidden.contains( cardCell( p ) ) )   // lane FARHOLE: the near cell draws it
+			continue;
 		if ( cull ) {
 			const float sc = std::fabs( p.scale );
 			const Vector3 cw( p.world[0] - F.shift[0] + p.c.center[0] * sc, p.world[1] - F.shift[1] + p.c.center[1] * sc,
@@ -651,7 +660,32 @@ int ImpostorChunk::cellFarCount()
 
 quint64 ImpostorChunk::cellFarGen()
 {
-	return farGen();
+	return farGen() + ( farSt().hideGen << 32 );
+}
+
+void ImpostorChunk::cellFarHideCell( int x, int y, bool hide )
+{
+	CellFarState & F = farSt();
+	const qint64 k = cellFarCellKey( x, y );
+	if ( hide == F.hidden.contains( k ) )
+		return;
+	if ( hide )
+		F.hidden.insert( k );
+	else
+		F.hidden.remove( k );
+	F.hideGen++;
+}
+
+int ImpostorChunk::cellFarCardsShownIn( const QSet<qint64> & cells )
+{
+	const CellFarState & F = farSt();
+	int n = 0;
+	for ( const Placed & p : F.cards.placed ) {
+		const qint64 k = cardCell( p );
+		if ( cells.contains( k ) && !F.hidden.contains( k ) )
+			n++;
+	}
+	return n;
 }
 
 int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScale )
@@ -662,6 +696,8 @@ int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScal
 	int used = 0;
 	for ( const Placed & p : s.placed ) {
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() || !s.sets.at( p.setIndex ).ok )
+			continue;
+		if ( !F.hidden.isEmpty() && F.hidden.contains( cardCell( p ) ) )   // lane FARHOLE
 			continue;
 		if ( out.isEmpty() || out.last().verts.size() >= 13000 * 5 )
 			out.append( FarCasterPiece() );

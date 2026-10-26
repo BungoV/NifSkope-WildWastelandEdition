@@ -2430,6 +2430,7 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 		auto next = std::make_shared<CellStreamSeed>( *seed );
 		next->farHand = fs.handBlocks;
 		next->farLand = fs.landBlocks;
+		next->farObj = std::move( fs.objTris );   // lane FARHOLE: the new far field's runs
 		cellStreamStart( nif, next );
 	}
 	if ( farMoved )
@@ -6883,6 +6884,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			seed.base = *L;
 		seed.farHand = farStream.handBlocks;
 		seed.farLand = farStream.landBlocks;
+		seed.farObj = std::move( farStream.objTris );   // lane FARHOLE
 		cellStreamStart( nif, seedPtr );
 	}
 

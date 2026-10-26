@@ -100,6 +100,8 @@ struct Bucket
 	bool sway = false;
 	std::vector<OutVert> verts;
 	std::vector<Triangle> tris;
+	//! lane FARHOLE: { cell x, cell y, first triangle, end } in `tris`, in fill order (LodiSceneSpec::cellTris)
+	std::vector<std::array<int, 4>> cellRuns;
 };
 
 //! `a op b` on 3x3 row-major times a column vector.
@@ -209,7 +211,7 @@ void appendWireBox( std::vector<OutVert> & verts, std::vector<Triangle> & tris,
  *  Splits at MAX_SHAPE_VERTS, because a BSTriShape counts vertices in a u16. */
 bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 	const Vector3 & origin, qint64 & shapesOut, qint64 & vertsOut, QString * error, bool side = false,
-	qint64 * keptBytes = nullptr )
+	qint64 * keptBytes = nullptr, std::vector<std::array<int, 5>> * cellTris = nullptr )
 {
 	auto fail = [error]( const QString & m ) {
 		if ( error )
@@ -236,7 +238,9 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 	 * triangles pointing across the cut. */
 	size_t first = 0;
 	int part = 0;
+	size_t run = 0;   // lane FARHOLE: the first cell run not yet handed to a part
 	while ( first < b.tris.size() ) {
+		const size_t partFirst = first;
 		QHash<int, quint16> remap;
 		std::vector<OutVert> pv;
 		std::vector<Triangle> pt;
@@ -326,6 +330,19 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			if ( keptBytes )
 				*keptBytes += cellMeshBytes( *m );
 			cellMeshPut( nif, iShape, m );
+			// lane FARHOLE: this part's triangles [partFirst, first) by placement cell, in the part's numbering
+			if ( cellTris ) {
+				const int block = nif->getBlockNumber( iShape );
+				while ( run < b.cellRuns.size() && size_t( b.cellRuns[run][3] ) <= partFirst )
+					run++;
+				for ( size_t r = run; r < b.cellRuns.size() && size_t( b.cellRuns[r][2] ) < first; r++ ) {
+					const size_t a = std::max( size_t( b.cellRuns[r][2] ), partFirst );
+					const size_t e = std::min( size_t( b.cellRuns[r][3] ), first );
+					if ( e > a )
+						cellTris->push_back( { { block, b.cellRuns[r][0], b.cellRuns[r][1], int( a - partFirst ),
+							int( e - a ) } } );
+				}
+			}
 		}
 		QModelIndex iVertexData = side ? QModelIndex() : nif->getIndex( iShape, "Vertex Data" );
 		if ( !side )
@@ -1145,6 +1162,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					full.verts.swap( fv );
 					full.tris.swap( ft );
 					spilled[bkey].append( std::move( full ) );
+					bk.cellRuns.clear();   // lane FARHOLE: they went with the set-aside triangles
 				}
 				const size_t vstart = bk.verts.size();
 				// lane PERF1: grow by doubling; an exact reserve a placement copied the whole bucket each time (14 s)
@@ -1197,9 +1215,17 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				}
 				if ( bk.tris.size() + p.tris.size() > bk.tris.capacity() )
 					bk.tris.reserve( std::max( bk.tris.size() + p.tris.size(), bk.tris.capacity() * 2 ) );
+				const int tstart = int( bk.tris.size() );
 				for ( const Triangle & t : p.tris )
 					bk.tris.push_back( Triangle( quint16( vstart + t[0] ),
 						quint16( vstart + t[1] ), quint16( vstart + t[2] ) ) );
+				if ( spec.cellTris && int( bk.tris.size() ) > tstart ) {   // lane FARHOLE
+					auto & cr = bk.cellRuns;
+					if ( !cr.empty() && cr.back()[0] == cellX && cr.back()[1] == cellY && cr.back()[3] == tstart )
+						cr.back()[3] = int( bk.tris.size() );
+					else
+						cr.push_back( { { cellX, cellY, tstart, int( bk.tris.size() ) } } );
+				}
 			}
 
 			basesSeen.insert( inst.baseId );
@@ -1249,14 +1275,16 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 		auto sit = spilled.find( key );
 		for ( int s = 0; sit != spilled.end() && s < sit.value().size(); s++ ) {
 			Bucket & full = sit.value()[s];
-			ok = ok && emitBucket( nif, iRoot, full, shapeOrigin, shapes, verts, error, side, &kept );
+			ok = ok && emitBucket( nif, iRoot, full, shapeOrigin, shapes, verts, error, side, &kept,
+				side ? spec.cellTris : nullptr );
 			cnt.tris += qint64( full.tris.size() );
 			std::vector<OutVert>().swap( full.verts );   // lane FAR3: emitted buckets free as they go
 			std::vector<Triangle>().swap( full.tris );
 		}
 		Bucket & bkEmit = buckets[key];
 		cnt.tris += qint64( bkEmit.tris.size() );
-		const bool emitted = ok && emitBucket( nif, iRoot, bkEmit, shapeOrigin, shapes, verts, error, side, &kept );
+		const bool emitted = ok && emitBucket( nif, iRoot, bkEmit, shapeOrigin, shapes, verts, error, side, &kept,
+			side ? spec.cellTris : nullptr );
 		std::vector<OutVert>().swap( bkEmit.verts );
 		std::vector<Triangle>().swap( bkEmit.tris );
 		if ( !emitted ) {
