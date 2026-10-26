@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VIEWFULL1 (2026-10-23, branch viewfull1-20261023): full-screen viewport, Clean View, Crosshair row
+- **Full Screen** (View menu and a header button, F11): the 3D view fills the screen with no menu, status bar,
+  docks, toolbars or viewport header. F11 again or Esc leaves and puts back the exact window geometry and dock
+  layout (saveGeometry + saveState). Esc goes to a viewport mode that owns it first (flight, modal transform, box or
+  circle select, knife, loop cut, paint modes, physics sim, edit-mode picks); the next Esc leaves full screen.
+  The water window's full screen now uses the same helper (src/wwfullscreen.h/.cpp, WwFullScreen).
+  Flip View gave up its stale F11 in nifskope.ui; it stays on Numpad 9 (Blender's opposite view), and the
+  self-test checks no other action holds F11 (two actions on one key make Qt fire neither).
+- **Clean View** (Overlays menu row and a header toggle, Shift+Alt+Z; Blender's Overlays switch): only the world is
+  drawn. It hides the grid, axes and navigation gizmo, nodes, collision, constraints, markers, the selection and
+  its outlines, transform gizmos, wireframe/edit overlays, skeletons, origins, the 3D cursor, the light marker,
+  paint helpers, the crosshair and on-screen text. The overlay options are masked for the frame only, so every
+  other menu row keeps its state; off = today's overlays exactly. Live, saved as GLView/Display/CleanView.
+- **Crosshair** (Overlays menu row, on by default, GLView/Display/Crosshair): the fly-mode crosshair.
+- Harness pins for captures: WW_CLEAN_VIEW, WW_CROSSHAIR, WW_RENDER_FREECAM. Self-test WW_VIEWFULL_TEST
+  (src/viewfulltest.cpp): full screen entered, chrome hidden, the view covers the screen, Esc order, geometry and
+  dock layout restored exactly, with a red, in a normal and a maximized window.
+
 ## Lane FXPARITY1 (2026-10-23, branch fxparity1-20261023): particles follow the game's rules (off by default)
 
 - **Row:** Scene window > Particle Game Rules (off), key `WW/FxParity`, live in every mode. `WW_FX_PARITY=1` / `=0`
@@ -25,7 +43,6 @@
   be clicked and maximised). WW_WINDOW_VISIBLE=0 asks for the old opacity 0; =1 leaves the window alone. The window
   log adds `zabove=N zabove_overlap=N zbelow=N foreground=0|1`.
 - Live verb `camera PATHFILE` puts the view at a path's first key and keeps it (the path's fov is not applied).
-
 ## Lane LIVESET1 (2026-10-23, branch liveset1-20261023): a changed setting updates live
 - bungo 10-23: "In games, if you change a setting, that setting updates live." Switches that needed a relaunch now
   re-read on a live set and rebuild only their own part: shadow cache, CSM echo, GPU-driven queues and culling, HDR

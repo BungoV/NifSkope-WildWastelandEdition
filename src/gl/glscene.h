@@ -413,6 +413,9 @@ public:
 	//! Screen-space refraction preview toggle (lighting options)
 	bool showRefraction = true;
 
+	//! lane VIEWFULL1: set by GLView per frame while Clean View is on; no selection is drawn
+	bool cleanView = false;
+
 	//! lane VANILLADEF1: fo4_default's material-editor BRDF (GGX, F0 0.04, 1 - F); off = the upstream law
 	bool editorBrdf = false;
 

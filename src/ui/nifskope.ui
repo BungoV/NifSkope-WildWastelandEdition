@@ -1083,7 +1083,7 @@
     <string>Flip View</string>
    </property>
    <property name="shortcut">
-    <string>F11</string>
+    <string>Num+9</string>
    </property>
   </action>
   <action name="aViewPerspective">

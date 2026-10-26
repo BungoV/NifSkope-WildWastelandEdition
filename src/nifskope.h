@@ -47,6 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <data/nifvalue.h>
 #include "btdterrain.h"
+#include "wwfullscreen.h"	// lane VIEWFULL1
 
 /* lane FILESTAB (2026-09-10): the Files tab. Defined by the hook-up so that
  * src/filestabtest.cpp compiles both BEFORE the hook-up (its two seam calls
@@ -319,6 +320,9 @@ public:
 	{
 		return graphicsView;
 	}
+	//! lane VIEWFULL1: the viewport fills the screen (F11; Esc or F11 leaves) and every dock, bar and menu comes back
+	void toggleViewportFullScreen();
+	bool viewportFullScreen() const { return viewFull.active(); }
 	inline NifModel * getNifModel() const
 	{
 		return nif;
@@ -1090,6 +1094,7 @@ private:
 	 *  QMainWindow::restoreState has replayed the saved layout.
 	 */
 	QWidget * viewportHeader = nullptr;
+	WwFullScreen viewFull{ this };	// lane VIEWFULL1
 	QTabBar * documentTabs = nullptr;
 	QList<NifSkope *> documentTabWindows;
 	bool sessionPreviewVisible = true;

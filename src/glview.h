@@ -1451,6 +1451,12 @@ public:
 	void setFreeCamera( bool on );
 	//! Fly-mode movement speed multiplier, adjusted with the scroll wheel
 	float freeCamSpeed = 1.0f;
+	//! lane VIEWFULL1: Clean View (Blender's Overlays switch) draws the world only; live, menu row "Clean View"
+	bool cleanView = false;
+	//! lane VIEWFULL1: the fly-mode crosshair (menu row "Crosshair"); Clean View hides it too
+	bool showCrosshair = true;
+	//! lane VIEWFULL1: a viewport mode owns Esc (flight, a modal tool, a paint mode, picks), so full screen keeps it
+	bool escapeHasUse() const;
 	//! First-person look that pivots at the camera eye (free camera mouse-look)
 	void freeCameraLook( float dPitch, float dYaw );
 
