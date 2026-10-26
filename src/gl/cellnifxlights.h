@@ -32,7 +32,10 @@ enum WwNifxRed
 	WwNifxRedStaticDim = 1024,	//!< "staticdim": a light keeps its still dimmer while the World animation row plays
 	WwNifxRedNoBulbFlicker = 2048,	//!< "nobulbflicker": bulb-tier lights never flicker
 	WwNifxRedNoLiveNew = 4096,	//!< "nolivenew": a .nifx made (or removed) after the build is not seen live
-	WwNifxRedNoOffKept = 8192	//!< "nooffkept": start-off placed lights kept only when a .nifx was found at the build
+	WwNifxRedNoOffKept = 8192,	//!< "nooffkept": start-off placed lights kept only when a .nifx was found at the build
+	// lane NIFXCAL1
+	WwNifxRedAnchor800 = 16384,	//!< "anchor800": 800 lm is fade 1.0 again (the guess before the census)
+	WwNifxRedRadius1Lux = 32768	//!< "radius1lux": the radius law reaches 1 lux again (69.99 per sqrt candela)
 };
 int wwNifxRedOf( const QByteArray & words );
 //! lane NIFXLIGHT2: WW_NIFX_LIGHTS_RED as bits, read live (src/gl/celllights.cpp)

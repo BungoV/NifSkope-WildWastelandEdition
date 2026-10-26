@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane NIFXCAL1 (2026-10-27, branch nifxcal1-20261026): mesh light lumens match vanilla bulbs
+
+- **Anchor 637 lm per fade 1.0** (was 800): the median vanilla household bulb (1,710 lights under 18 ceiling, cage
+  and sconce meshes) set equal to a 60 W bulb, 800 lm. The old anchor drew every .nifx light 1.26x too dim.
+- **Radius law 15.1 x sqrt(candela)** (was 69.99, a 1-lux cut that put an 800 lm bulb's edge at 558; now 120, vanilla
+  ceiling lamps 113). New optional .nifx key `radius` (16..16384, x placed scale) overrides the law.
+- **Pick panel readout:** each light near a picked object gets `Light N` and `Light N as .nifx` rows: lumens, kelvin,
+  gel colour, type / cone / light box, shadow, flicker, pulse, tier and radius, the way a .nifx would write it.
+- Reds `WW_NIFX_LIGHTS_RED=anchor800`,
+  `radius1lux`. Tests: tests/nifxcal (new, colour bytes through kelvin + tint within 1 byte), nifxconform, nifxapply.
+
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
 - **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,

@@ -1,6 +1,6 @@
 // Runs the FO4-Extension-Formats .nifx test cases against src/io/nifxlights (lane NIFXLIGHT1), plus the conversion
 // known answers. Build: g++ -std=c++17 -I<tree>/src tests/nifxconform/nifxconform.cpp src/io/nifxlights.cpp
-// Run: nifxconform <spec>/tests/cases [--red ignore-lights|tint-dims]   (a red must FAIL)
+// Run: nifxconform <spec>/tests/cases [--red ignore-lights|tint-dims|anchor800|radius1lux]   (a red must FAIL)
 
 #include "io/nifxlights.h"
 
@@ -17,6 +17,12 @@ namespace fs = std::filesystem;
 using nifxl::Json;
 
 static std::string red;
+// red anchor800 / radius1lux: the guessed constants from before lane NIFXCAL1
+static nifxl::Converted conv( const nifxl::Light & l )
+{
+	return nifxl::convert( l, red == "tint-dims", red == "anchor800" ? nifxl::kLumensPerFadeOld : nifxl::kLumensPerFade,
+		red == "radius1lux" ? nifxl::kRadiusPerSqrtCandelaOld : nifxl::kRadiusPerSqrtCandela );
+}
 
 static std::string slurp( const fs::path & p )
 {
@@ -109,6 +115,7 @@ static Json lightJson( const nifxl::Light & l )
 		f.obj.emplace_back( "scale", num( l.fogScale ) );
 		put( "fog", f );
 	}
+	if ( l.hasRadius ) put( "radius", num( l.radius ) );
 	return j;
 }
 
@@ -255,7 +262,7 @@ static bool runCase( const fs::path & dir, std::string & why )
 			}
 			if ( !l )
 				continue;
-			const auto cv = nifxl::convert( *l, red == "tint-dims" );
+			const auto cv = conv( *l );
 			Json gotC;
 			gotC.kind = Json::Object;
 			double col[3] = { double( cv.color[0] ), double( cv.color[1] ), double( cv.color[2] ) };
@@ -284,9 +291,9 @@ static int conversionTests()
 	};
 	nifxl::Light white;
 	white.lumens = 800;
-	auto w = nifxl::convert( white, red == "tint-dims" );
-	check( "800 lm white omni = 255,255,255 fade 1 radius 558.4394",
-		w.color[0] == 255 && w.color[1] == 255 && w.color[2] == 255 && std::fabs( w.fade - 1 ) < 1e-9 && std::fabs( w.radius - 558.4394 ) < 1e-3 );
+	auto w = conv( white );
+	check( "800 lm white omni = 255,255,255 fade 1.255887 radius 120.4806 (anchor 637 lm, 15.1 per sqrt cd)",
+		w.color[0] == 255 && w.color[1] == 255 && w.color[2] == 255 && std::fabs( w.fade - 1.2558870 ) < 1e-6 && std::fabs( w.radius - 120.4806 ) < 1e-3 );
 	// The same lumens in any colour: luminance(colour) x fade is the same (the tint never dims).
 	double worst = 0;
 	const double tints[][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { 1, 0.1, 0.6 }, { 0, 0, 0.25 }, { 0.3, 0.3, 0.3 } };
@@ -297,36 +304,36 @@ static int conversionTests()
 			l.hasTint = true;
 			l.hasKelvin = k > 0;
 			l.kelvin = k;
-			auto c = nifxl::convert( l, red == "tint-dims" );
+			auto c = conv( l );
 			double y = 0.2126 * std::pow( c.color[0] / 255.0, 2.2 ) + 0.7152 * std::pow( c.color[1] / 255.0, 2.2 ) + 0.0722 * std::pow( c.color[2] / 255.0, 2.2 );
-			worst = std::max( worst, std::fabs( y * c.fade - 1 ) );
+			worst = std::max( worst, std::fabs( y * c.fade * nifxl::kLumensPerFade / 800 - 1 ) );
 		}
 	char b[160];
-	std::snprintf( b, sizeof b, "tint never dims (30 colours, worst |Y*fade-1| = %.3g)", worst );
+	std::snprintf( b, sizeof b, "tint never dims (30 colours, worst |Y*fade*637/800-1| = %.3g)", worst );
 	check( b, worst < 1e-9 );
 	nifxl::Light spot = white;
 	spot.type = nifxl::Spot;
 	spot.lumens = 1200;
 	spot.cone = 100;
-	auto sp = nifxl::convert( spot );
-	check( "1200 lm white spot cone 100 = fade 8.398365 radius 1618.354", std::fabs( sp.fade - 8.398365 ) < 1e-5 && std::fabs( sp.radius - 1618.354 ) < 1e-3 );
+	auto sp = conv( spot );
+	check( "1200 lm white spot cone 100 = fade 10.547397 radius 349.1519", std::fabs( sp.fade - 10.547397 ) < 1e-5 && std::fabs( sp.radius - 349.1519 ) < 1e-3 );
 	nifxl::Light bulb = white;
 	bulb.hasKelvin = true;
 	bulb.kelvin = 2700;
-	auto bu = nifxl::convert( bulb );
+	auto bu = conv( bulb );
 	check( "800 lm 2700 K = 255,171,90", bu.color[0] == 255 && bu.color[1] == 171 && bu.color[2] == 90 );
 	nifxl::Light big = white;
-	big.lumens = 1e6;
+	big.lumens = 1e9;
 	nifxl::Light dark = white;
 	dark.lumens = 0;
-	check( "radius clamps 16..16384", nifxl::convert( big ).radius == 16384 && nifxl::convert( dark ).radius == 16 );
+	check( "radius clamps 16..16384", conv( big ).radius == 16384 && conv( dark ).radius == 16 );
 	return fails;
 }
 
 int main( int argc, char ** argv )
 {
 	if ( argc < 2 ) {
-		std::printf( "usage: nifxconform <spec>/tests/cases [--red ignore-lights|tint-dims]\n" );
+		std::printf( "usage: nifxconform <spec>/tests/cases [--red ignore-lights|tint-dims|anchor800|radius1lux]\n" );
 		return 2;
 	}
 	for ( int k = 2; k + 1 < argc; ++k )

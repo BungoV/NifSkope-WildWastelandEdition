@@ -522,7 +522,7 @@ const char * triple( const Json & v )
 }
 
 const std::vector<std::string> kLightKeys = { "type", "lumens", "kelvin", "tint", "tier", "node", "follows",
-	"position", "direction", "cone", "fog" };
+	"position", "direction", "cone", "fog", "radius" };
 const std::vector<std::string> kTypes = { "omni", "spot", "hemisphere" };
 const std::vector<std::string> kTiers = { "hero", "normal", "bulb" };
 const std::vector<std::string> kFogKeys = { "scale" };
@@ -571,13 +571,13 @@ bool readLight( const Json & entry, const std::string & at, Warn & warn, Light &
 				out.tier = w;
 				out.hasTier = true;
 			}
-		} else if ( name == "lumens" || name == "kelvin" || name == "cone" ) {
+		} else if ( name == "lumens" || name == "kelvin" || name == "cone" || name == "radius" ) {
 			if ( !finiteNumber( v ) ) {
 				warn.value( at, key, "not-number" );
 				continue;
 			}
-			const double lo = name == "lumens" ? 0 : name == "kelvin" ? 1667 : 1;
-			const double hi = name == "lumens" ? 1000000 : name == "kelvin" ? 25000 : 170;
+			const double lo = name == "lumens" ? 0 : name == "kelvin" ? 1667 : name == "radius" ? 16 : 1;
+			const double hi = name == "lumens" ? 1000000 : name == "kelvin" ? 25000 : name == "radius" ? 16384 : 170;
 			double x = v.num;
 			if ( !( lo <= x && x <= hi ) ) {
 				warn.value( at, key, "clamped" );
@@ -589,6 +589,9 @@ bool readLight( const Json & entry, const std::string & at, Warn & warn, Light &
 			} else if ( name == "kelvin" ) {
 				out.kelvin = x;
 				out.hasKelvin = true;
+			} else if ( name == "radius" ) {
+				out.radius = x;
+				out.hasRadius = true;
 			} else {
 				out.cone = x;
 				out.hasCone = true;
@@ -837,10 +840,11 @@ Lights read( const std::string & bytes )
 
 // ---- converting (nifx/SPEC.md, Converting)
 
-void kelvinRgb( double kelvin, double rgb[3] )
+namespace {
+
+void kelvinXy( double kelvin, double & x, double & y )
 {
 	const double t = std::min( 25000.0, std::max( 1667.0, kelvin ) );
-	double x, y;
 	if ( t <= 4000 )
 		x = -0.2661239e9 / ( t * t * t ) - 0.2343589e6 / ( t * t ) + 0.8776956e3 / t + 0.179910;
 	else
@@ -851,6 +855,31 @@ void kelvinRgb( double kelvin, double rgb[3] )
 		y = -0.9549476 * x * x * x - 1.37418593 * x * x + 2.09137015 * x - 0.16748867;
 	else
 		y = 3.0817580 * x * x * x - 5.87338670 * x * x + 3.75112997 * x - 0.37001483;
+}
+
+// CIE 1960 uv of an xy point (the space correlated colour temperature is measured in)
+void xyUv( double x, double y, double & u, double & v )
+{
+	const double d = -2 * x + 12 * y + 3;
+	u = 4 * x / d;
+	v = 6 * y / d;
+}
+
+double solidAngle( int type, double cone )
+{
+	if ( type == Omni )
+		return 4 * kPi;
+	if ( type == Hemisphere )
+		return 2 * kPi;
+	return 2 * kPi * ( 1 - std::cos( cone * kPi / 180 / 2 ) );
+}
+
+} // namespace
+
+void kelvinRgb( double kelvin, double rgb[3] )
+{
+	double x, y;
+	kelvinXy( kelvin, x, y );
 	const double X = x / y, Y = 1.0, Z = ( 1.0 - x - y ) / y;
 	rgb[0] = 3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z;
 	rgb[1] = -0.9692660 * X + 1.8760108 * Y + 0.0415560 * Z;
@@ -864,18 +893,11 @@ void kelvinRgb( double kelvin, double rgb[3] )
 		rgb[k] /= m;
 }
 
-Converted convert( const Light & l, bool redTintDims )
+Converted convert( const Light & l, bool redTintDims, double lumensPerFade, double radiusPerSqrtCandela )
 {
-	double omega;
-	if ( l.type == Omni )
-		omega = 4 * kPi;
-	else if ( l.type == Hemisphere )
-		omega = 2 * kPi;
-	else
-		omega = 2 * kPi * ( 1 - std::cos( l.cone * kPi / 180 / 2 ) );
-	const double intensity = l.lumens / omega;
+	const double intensity = l.lumens / solidAngle( l.type, l.cone );
 	Converted c;
-	c.radius = std::min( 16384.0, std::max( 16.0, 69.99 * std::sqrt( intensity ) ) );
+	c.radius = l.hasRadius ? l.radius : std::min( 16384.0, std::max( 16.0, radiusPerSqrtCandela * std::sqrt( intensity ) ) );
 	double rgb[3] = { 1, 1, 1 };
 	if ( l.hasKelvin )
 		kelvinRgb( l.kelvin, rgb );
@@ -893,10 +915,91 @@ Converted convert( const Light & l, bool redTintDims )
 		lin[k] = std::pow( c.color[k] / 255.0, 2.2 );
 	}
 	const double lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
-	c.fade = intensity / ( 800 / ( 4 * kPi ) );
+	c.fade = intensity / ( lumensPerFade / ( 4 * kPi ) );
 	if ( !redTintDims )
 		c.fade /= lum;	// a tint never dims: the same lumens whatever the colour
 	return c;
+}
+
+Light fromVanilla( const int color[3], double fade, double radius, int type, double cone, bool shadow,
+	double lumensPerFade, double radiusPerSqrtCandela )
+{
+	Light l;
+	l.type = type;
+	l.hasType = type != Omni;
+	l.cone = std::min( 170.0, std::max( 1.0, cone ) );
+	l.hasCone = type == Spot;
+	l.tier = shadow ? Hero : Normal;
+	l.hasTier = shadow;
+	double lin[3], m = 0;
+	for ( int k = 0; k < 3; ++k ) {
+		lin[k] = std::pow( std::min( 255, std::max( 0, color[k] ) ) / 255.0, 2.2 );
+		m = std::max( m, lin[k] );
+	}
+	const double lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+	const double omega = solidAngle( type, l.cone );
+	l.lumens = std::min( 1000000.0, std::max( 0.0, lumensPerFade * fade * lum * omega / ( 4 * kPi ) ) );
+	int hue[3];	// the colour scaled to a brightest 255, as convert() writes every colour
+	for ( int k = 0; k < 3; ++k )
+		hue[k] = m > 0 ? int( std::floor( 255 * std::pow( lin[k] / m, 1 / 2.2 ) + 0.5 ) ) : 255;
+	auto same = [&]( const Light & t ) {
+		const Converted c = convert( t, false, lumensPerFade, radiusPerSqrtCandela );
+		return c.color[0] == hue[0] && c.color[1] == hue[1] && c.color[2] == hue[2];
+	};
+	if ( m > 0 && !same( l ) ) {
+		// the nearest black body to the colour's chromaticity, in uv; the tint is what the black body lacks
+		const double X = 0.4124564 * lin[0] + 0.3575761 * lin[1] + 0.1804375 * lin[2];
+		const double Y = 0.2126729 * lin[0] + 0.7151522 * lin[1] + 0.0721750 * lin[2];
+		const double Z = 0.0193339 * lin[0] + 0.1191920 * lin[1] + 0.9503041 * lin[2];
+		double u0, v0;
+		xyUv( X / ( X + Y + Z ), Y / ( X + Y + Z ), u0, v0 );
+		auto dist = [&]( double t ) {
+			double x, y, u, v;
+			kelvinXy( t, x, y );
+			xyUv( x, y, u, v );
+			return ( u - u0 ) * ( u - u0 ) + ( v - v0 ) * ( v - v0 );
+		};
+		double best = 1667, bd = 1e30;
+		for ( double t = 1667; t <= 25000; t *= 1.01 )
+			if ( dist( t ) < bd ) {
+				bd = dist( t );
+				best = t;
+			}
+		double lo = std::max( 1667.0, best / 1.01 ), hi = std::min( 25000.0, best * 1.01 );
+		for ( int it = 0; it < 60; ++it ) {
+			const double a = lo + ( hi - lo ) / 3, b = hi - ( hi - lo ) / 3;
+			if ( dist( a ) < dist( b ) )
+				hi = b;
+			else
+				lo = a;
+		}
+		double t = std::round( ( lo + hi ) / 2 ), w[3];
+		kelvinRgb( t, w );
+		// a channel the colour has and the black body lacks (blue at 1667 K): warm the kelvin up until it has some
+		for ( int k = 0; k < 3; ++k )
+			while ( lin[k] > 0 && w[k] < 1e-3 && t < 25000 ) {
+				t = std::min( 25000.0, std::round( t * 1.02 ) );
+				kelvinRgb( t, w );
+			}
+		l.kelvin = t;
+		l.hasKelvin = true;
+		if ( !same( l ) ) {
+			double tm = 0;
+			for ( int k = 0; k < 3; ++k ) {
+				l.tint[k] = w[k] > 0 ? lin[k] / w[k] : 0;
+				tm = std::max( tm, l.tint[k] );
+			}
+			for ( int k = 0; k < 3; ++k )
+				l.tint[k] = std::min( 1.0, l.tint[k] / tm );
+			l.hasTint = true;
+		}
+	}
+	const double law = std::min( 16384.0, std::max( 16.0, radiusPerSqrtCandela * std::sqrt( l.lumens / omega ) ) );
+	if ( std::fabs( law - radius ) > 1e-4 * radius ) {
+		l.radius = std::min( 16384.0, std::max( 16.0, radius ) );
+		l.hasRadius = true;
+	}
+	return l;
 }
 
 } // namespace nifxl
