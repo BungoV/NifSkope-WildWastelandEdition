@@ -1,7 +1,7 @@
 """lane CLOUD3: offline gate of the cloud shadow map (src/gl/cloudshadow.cpp, res/shaders/cloud_shadowmap.frag) and its
 receivers (res/shaders/ww_sunshadow.glsl ussCloudT / wwSunShadow), through the real driver, no NifSkope.
 
-  python -I tests/spells/cloudshadow_check.py <scratch> [--red vertical|noinject|nofade] [--only CVSOWT]
+  python -I tests/spells/cloudshadow_check.py <scratch> [--red vertical|noinject|nofade|wind0] [--only CVSOWTM]
 
 The light space (basis, fit, matrix) comes from src/gl/cloudshadowmath.h through tests/cloudshadow/cloudshadow_dump.cpp;
 the noise and calibration from cloudvol_check's dump (the exe's bytes). The judge computes every expectation from the sun
@@ -11,6 +11,8 @@ direction and the fixture alone (never from the basis).
   S  shafts: a gap in a full deck lights a tilted shaft in a vertical air slice (the froxels' points), following the sun
   O  off: ussCloudOn 0 gives T == 1.0 exactly and wwSunShadow == wwSunShadowGeo exactly; on: wwSunShadow == Geo x T
   W  wiring: the froxel pass (cell_volair) reads ussCloudT; the noinject red zeroes it for volume programs only
+  M  (MERGE1026) wind: a volume-mode map built with the reader's wind at t + 600 s is the t map's field moved 4.8 km
+     along x (T(t+600, x) == T(t, x + 4.8 km)); red wind0 (the bind without the wind) leaves it unmoved
   T  cost: GL_TIME_ELAPSED of the build per preset, full and one 1/16 row block (this machine's GPU, offline)
 Reds: vertical (the C++ basis' own red: the shadow straight under the cloud) fails C, V and S; noinject (ussCloudOn 0
 in the air) fails S.
@@ -22,7 +24,7 @@ TREE = os.path.dirname(os.path.dirname(HERE))
 args = sys.argv[1:]
 scratch = args[0] if args and not args[0].startswith('--') else os.path.join(TREE, '..', 'cloudshadow_scratch')
 red = args[args.index('--red') + 1] if '--red' in args else ''
-only = set(args[args.index('--only') + 1]) if '--only' in args else set('CVSOWT')
+only = set(args[args.index('--only') + 1]) if '--only' in args else set('CVSOWTM')
 os.makedirs(scratch, exist_ok=True)
 
 sys.path.insert(0, HERE)
@@ -113,12 +115,13 @@ def disc_map(n, half, centre, radius, value=1.0, inside=True):
     return img
 
 
-def build_map(L, size, mode, mapimg, half, steps=12, cov_out=0.0, rows=None, time_q=None):
+def build_map(L, size, mode, mapimg, half, steps=12, cov_out=0.0, rows=None, time_q=None, wind=0.0):
     """runs cloud_shadowmap.prog as cloudshadow.cpp does; returns the RGBA16F texture, its fb and the texels"""
     tex, fb = target(size, size)
     mtex = K.tex2d(mapimg)
     sh, de = K.textures()
-    uni = K.bands_uni(LOW, (5.0, 6.5, 0.0), K.cal, cov=(cov_out, 0.0, 0.0), rect=(-half, -half, 1.0 / (2 * half), 1.0))
+    uni = K.bands_uni(LOW, (5.0, 6.5, 0.0), K.cal, cov=(cov_out, 0.0, 0.0), rect=(-half, -half, 1.0 / (2 * half), 1.0),
+                      wind=(wind, 0.0, 0.0))
     uni.update({'csE1': tuple(L['e1']), 'csE2': tuple(L['e2']), 'csS': tuple(L['s']), 'csFit': tuple(L['fit']),
                 'csSize': (float(size), float(size)), 'csMode': mode, 'csSteps': max(steps, 1)})
     g.bindfb(0x8D40, fb)
@@ -296,6 +299,42 @@ if 'W' in only:
     gate('W wiring', bool(fn) and uses >= 3 and bool(noinj) and call,
          'cell_volair airCloudShadow -> ussCloudT %s, its uses %d (>= 3: the march, the far tail, the no-cascade sun), '
          'noinject only for volume programs %s, shadowset passes volume %s' % (bool(fn), uses, bool(noinj), call))
+
+# ---- M: MERGE1026: the volume-mode map follows the drawn wind (CLOUD2C's bind x CLOUD3's map) ----------------------
+if 'M' in only:
+    # the reader's offsets come from cloudvolmath.h readerWindKm through cloudvol_check's dump (wind0 = the old bind)
+    K.red = 'wind0' if red == 'wind0' else ''
+    K.dump([(LOW[0], LOW[1], LOW[2], 0.0), (5.0, 6.5, 0.6, 0.0)])
+    wind = {t: rw for t, dw, rw in K.WIND}
+    N = 512
+    L = light(SUN, EYE, EXT, N, vert)
+    img = disc_map(512, HALF, (0.0, 0.0), 1e3, value=0.7)   # coverage everywhere: only the noise (the wind) moves
+    tex0, _, _ = build_map(L, N, 1, img, HALF, steps=12, wind=wind[0.0])
+    tex1, _, _ = build_map(L, N, 1, img, HALF, steps=12, wind=wind[600.0])
+    G, span = 400, 16.0                                     # 0.08 km a probe: 4.8 km = 60 probes
+    grid = (-span / UNIT_KM, -span / UNIT_KM, 2 * span / G / UNIT_KM, 2 * span / G / UNIT_KM)
+    T0 = probe(L, tex0, G, G, 0, grid, (0.0, 0.0, 0.0))[..., 0]
+    T1 = probe(L, tex1, G, G, 0, grid, (0.0, 0.0, 0.0))[..., 0]
+    km = 2 * span / G
+
+    def err(dx, dy):   # mean |T1(x, y) - T0(x + dx, y + dy)| over the overlap (dx, dy in probes)
+        a = T1[max(0, -dy):G - max(0, dy), max(0, -dx):G - max(0, dx)]
+        b = T0[max(0, dy):G - max(0, -dy), max(0, dx):G - max(0, -dx)]
+        return float(np.abs(a - b).mean())
+    # the target is the DRAWN clouds' move (windKm, the march); the maps are built with the READER's offsets
+    drawn = {t: dw for t, dw, rw in K.WIND}
+    want = int(round((drawn[600.0] - drawn[0.0]) / km))
+    best = min(((err(dx, dy), dx, dy) for dx in range(-80, 81) for dy in range(-4, 5)), key=lambda e: e[0])
+    ew, e0 = err(want, 0), err(0, 0)
+    # the shape noise tiles every 6 km (cloudvolmath.h kShapeKm), so x + 4.8 also matches at x - 1.2: judge the wanted
+    # shift itself against the best match and against no move (in the field of 0 s moved by 4.8 km)
+    e0w = float(np.abs(T0[:, :G - want] - T0[:, want:]).mean())
+    near = [err(want + d, dy) for d in (-3, 0, 3) for dy in (-3, 0, 3) if (d, dy) != (0, 0)]
+    gate('M wind', want == 60 and ew < 0.25 * e0w and ew < min(near),
+         'drawn wind 0/600 s %.3f/%.3f km, reader %.3f/%.3f km; T(600 s, x) vs T(0 s, x + %.2f km) mean |d| %.4f vs the '
+         'unmoved field %.4f (bar < 0.25x); a minimum: 0.24 km off it in x/y >= %.4f (best match %.4f at x %+.2f y %+.2f km, '
+         'the 6 km tile alias)' % (drawn[0.0], drawn[600.0], wind[0.0], wind[600.0], want * km, ew, e0w, min(near), best[0],
+                                   best[1] * km, best[2] * km))
 
 # ---- T: cost ---------------------------------------------------------------------------------------------------------
 if 'T' in only:

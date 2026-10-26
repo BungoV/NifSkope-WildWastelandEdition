@@ -182,7 +182,8 @@ void worldFromView( const Transform & vt, double m[16] )
 	m[15] = 1.0;
 }
 
-//! the map mode's cloud_common.glsl band uniforms (cloudvol.cpp bandsOf, the same numbers); windKm 0 as the bind's
+//! the map mode's cloud_common.glsl band uniforms (cloudvol.cpp bandsOf, the same numbers); windKm 0: the map
+//! mode reads coverage only (the wind moves only the noise). Mode 1 gets the drawn wind from wwCloudVolBindDensity.
 void mapUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, const WwCloudMap & m )
 {
 	auto fn = r->fn;
