@@ -153,6 +153,7 @@ struct InState
 	int view = 0;	// 0 off, 1 velocity, 2 mask, 3 both
 	float viewScale = 8.0f;
 	bool redCamOnly = false, redNoReactive = false;
+	bool redStaleStep = false;	// lane TAA4: the step key without the TAA frame (the stale-camera bug)
 	QString dumpDir;
 	int dumpFrame = 8;
 
@@ -164,6 +165,7 @@ struct InState
 	float keyP[16] = {};
 	Transform keyView;
 	float keyTime = 0.0f;
+	int keyFrame = -1;	// lane TAA4: the TAA frame index of the last step (-1 none)
 	quint64 step = 0;
 	bool haveVP = false;
 	Dmat curVP = Dmat::identity(), prevVP = Dmat::identity();
@@ -192,6 +194,7 @@ InState & st()
 		const QString red = wwEnvStr( "WW_TAAINPUTS_RED" );
 		s.redCamOnly = red.contains( QLatin1StringView( "camonly" ) );
 		s.redNoReactive = red.contains( QLatin1StringView( "noreactive" ) );
+		s.redStaleStep = red.contains( QLatin1StringView( "stalestep" ) );
 		s.dumpDir = wwEnvStr( "WW_TAAINPUTS_DUMP" ).trimmed();
 		const int df = wwEnvStr( "WW_TAAINPUTS_DUMP_FRAME" ).toInt( &ok );
 		s.dumpFrame = ok ? df : 8;
@@ -353,6 +356,8 @@ void wwTaaInputsPass( Scene * scene )
 			note( s, QStringLiteral( "off (nobody asked)" ), QStringLiteral( "off" ) );
 		s.last = QStringLiteral( "off" );
 		s.haveKey = false;
+		if ( !s.redStaleStep )
+			s.haveVP = false;	// lane TAA4: the next pass starts from its own camera, not the one it last saw
 		s.shapes.clear();
 		return;
 	}
@@ -406,17 +411,25 @@ void wwTaaInputsPass( Scene * scene )
 	}
 	const Dmat curVP = fromColumnMajor( Pun.data() ) * fromTransform( scene->view );
 
-	// the step: the same camera and time again is a repaint of the same step (its "previous" stays)
-	const bool repeat = s.haveKey && std::memcmp( s.keyP, Pun.data(), sizeof( s.keyP ) ) == 0
+	// the step: the same camera and time again is a repaint of the same step (its "previous" stays).
+	// lane TAA4: and the same TAA frame. The camera path holds the time, so on a still path every frame was a
+	// "repaint" and prevVP stayed a stale camera: Ultra's vectors read hundreds of px. The step now follows the TAA
+	// history: next frame = a step, same frame = a repaint, any other frame = a cut (no previous).
+	int taaFrame = -1;
+	const bool haveFrame = !s.redStaleStep && wwGameTaaFrame( taaFrame );
+	const bool sameCam = s.haveKey && std::memcmp( s.keyP, Pun.data(), sizeof( s.keyP ) ) == 0
 		&& sameTransform( s.keyView, scene->view ) && s.keyTime == scene->time;
+	const bool repeat = sameCam && ( !haveFrame || taaFrame == s.keyFrame );
+	const bool cut = haveFrame && s.haveKey && !repeat && s.keyFrame >= 0 && taaFrame != s.keyFrame + 1;
 	std::memcpy( s.keyP, Pun.data(), sizeof( s.keyP ) );
 	s.keyView = scene->view;
 	s.keyTime = scene->time;
+	s.keyFrame = haveFrame ? taaFrame : -1;
 	const bool hadKey = s.haveKey;
 	s.haveKey = true;
 	if ( !repeat ) {
-		s.step++;
-		s.prevVP = s.haveVP ? s.curVP : curVP;
+		s.step += cut ? 2 : 1;	// a cut: no shape was seen on the step before
+		s.prevVP = s.haveVP && ( s.redStaleStep || ( hadKey && !cut ) ) ? s.curVP : curVP;
 	}
 	const bool camOk = hadKey && s.haveVP;
 	s.curVP = curVP;
@@ -750,7 +763,8 @@ void wwTaaInputsPass( Scene * scene )
 			t << "pass " << s.passes << "\nstep " << s.step << "\nrepeat " << ( repeat ? 1 : 0 ) << "\nW " << W << "\nH " << H
 			  << "\njitter " << jx << ' ' << jy << "\nshapes " << nShapes << "\nmovers " << movers.size() << "\nskinned " << nSkinned
 			  << "\ngrass " << nGrass << "\nrigid " << nRigid << "\nblended " << nBlend << "\nparticles " << nPart
-			  << "\nred " << ( s.redCamOnly ? "camonly" : s.redNoReactive ? "noreactive" : "none" ) << '\n';
+			  << "\nred " << ( s.redCamOnly ? "camonly" : s.redNoReactive ? "noreactive" : "none" ) << "\ntaaframe " << taaFrame
+			  << "\ncut " << ( cut ? 1 : 0 ) << "\nstalestep " << ( s.redStaleStep ? 1 : 0 ) << '\n';
 		}
 	}
 
@@ -787,7 +801,8 @@ void wwTaaInputsPass( Scene * scene )
 	}
 	const QString counts = QStringLiteral( "%1 movers (%2 skinned, %3 grass, %4 rigid) of %5 shapes; %6 blended, %7 particle systems%8" )
 		.arg( movers.size() ).arg( nSkinned ).arg( nGrass ).arg( nRigid ).arg( nShapes ).arg( nBlend ).arg( nPart )
-		.arg( s.redCamOnly ? QStringLiteral( " RED camonly" ) : s.redNoReactive ? QStringLiteral( " RED noreactive" ) : QString() );
+		.arg( ( s.redCamOnly ? QStringLiteral( " RED camonly" ) : s.redNoReactive ? QStringLiteral( " RED noreactive" ) : QString() )
+			+ ( s.redStaleStep ? QStringLiteral( " RED stalestep" ) : QString() ) );
 	note( s, QStringLiteral( "%1x%2 %3; gpu %4 ms cpu %5 ms" ).arg( W ).arg( H ).arg( counts )
 		.arg( s.gpuMs < 0.0 ? QStringLiteral( "?" ) : QString::number( s.gpuMs, 'f', 3 ) ).arg( s.cpuMs, 0, 'f', 3 ),
 		QStringLiteral( "on %1x%2 %3" ).arg( W ).arg( H ).arg( counts ) );

@@ -83,6 +83,8 @@ void wwGameTaaJitterProjection( Scene * scene, Matrix4 & proj );
 bool wwGameTaaUnjittered( Matrix4 & proj );
 //! Lane GRASSMB1: this frame's jitter in NDC (the offsets the projection got); false when not jittered.
 bool wwGameTaaJitter( float & offX, float & offY );
+//! lane TAA4: this frame's TAA frame index (the history's step key); false when not jittered.
+bool wwGameTaaFrame( int & frame );
 
 //! After the scene's draw (and the cell view's one tone map): the vectors, the resolve, the frame back.
 void wwGameTaaResolve( Scene * scene );

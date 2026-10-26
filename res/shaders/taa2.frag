@@ -24,7 +24,8 @@ uniform sampler2D maskTex;	// lane TAA3: TAAINPUTS1 mask: r reactive, g composit
 uniform vec2 invSize;
 uniform vec2 jitterPx;	// how far this frame's content moved (pixels, x right, y up): pixel p saw the scene at p - jitterPx
 uniform int taa2Tier;
-uniform int taa2Red;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter (the filter told the opposite jitter), 8 nolock
+uniform int taa2Red;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter (the filter told the opposite jitter), 8 nolock,
+						// 32 oldmotion, 64 oldfilter (lane TAA4: the TAA2 motion weight / current filter width)
 uniform int taa2NoHist;	// 1: no history this frame (first frame, reset, size change)
 uniform int taa2Inputs;	// lane TAA3: bits 1 velTex bound, 2 maskTex bound
 uniform int taa2Linear;	// lane TAA3: 1 the input is the linear (HDR) frame, before the tone map
@@ -121,7 +122,9 @@ void main()
 			mn = min( mn, c );
 			mx = max( mx, c );
 			vec2 o = vec2( dx, dy ) - jit;	// where that pixel's sample lies, from this pixel's centre
-			float w = exp( -2.29 * dot( o, o ) );
+			// lane TAA4: 4.0, not the Blackman-Harris fit 2.29: the wider filter kept the picture 10-21% behind the
+			// frame (live lag vs the game's), the narrower one stays under the game's still shimmer
+			float w = exp( -( ( taa2Red & 64 ) != 0 ? 2.29 : 4.0 ) * dot( o, o ) );
 			sumC += c * w;
 			sumW += w;
 			if ( dx == 0 && dy == 0 )
@@ -170,7 +173,9 @@ void main()
 		// a history the box had to pull far is likely stale (an unvectored mover): trust it less, so trails die fast
 		float rej = clamp( length( h0 - hc ) / max( length( bmx - bmn ), 1e-3 ), 0.0, 1.0 ) * ( 1.0 - keep );
 		float rest = taa2Tier >= 2 ? 0.93 : 0.9;
-		float alpha = mix( rest, 0.8, clamp( motionPx / 32.0, 0.0, 1.0 ) ) * ( 1.0 - rej );
+		// lane TAA4: moving, the history weight falls to 0.4 by 2 px a frame (was 0.8 by 32 px: the lag over the game's)
+		bool oldMotion = ( taa2Red & 32 ) != 0;
+		float alpha = mix( rest, oldMotion ? 0.8 : 0.4, clamp( motionPx / ( oldMotion ? 32.0 : 2.0 ), 0.0, 1.0 ) ) * ( 1.0 - rej );
 		alpha *= 1.0 - msk.r;	// reactive: particles and effects follow this frame
 		alpha = min( alpha, mix( alpha, 0.5, msk.g ) );	// water, glass: their depth is the thing behind them
 		if ( taa2Tier >= 3 ) {
