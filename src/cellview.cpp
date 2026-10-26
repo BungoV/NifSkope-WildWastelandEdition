@@ -43,6 +43,7 @@ BSD License - see nifskope.h
 #include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
 #include "cellaodecal.h"		// lane AODECAL1: baked AO decals under big movable statics
 #include "cellstream.h"		// lane CELLSTREAM1: the cells round the camera
+#include "cellspawn.h"		// lane CELLSPAWN1: where the camera starts
 
 #include <limits>
 
@@ -2571,6 +2572,13 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			keptWorld = worldOwn;
 			keptKey = worldKey;
 		}
+	}
+	// lane CELLSPAWN1: where the window stands the camera when this open is a tab's first document (src/cellspawn.h)
+	QString spawnNote;
+	if ( !chunk ) {
+		const CellSpawn spawn = cellSpawnCompute( world, spec );
+		cellSpawnPublish( nif, spawn );
+		spawnNote = QStringLiteral( "  %1\n" ).arg( spawn.line() );
 	}
 
 	/* WHERE MODELS COME FROM. The spec's data root when it names one, else the
@@ -7125,6 +7133,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		s << probeNotes;   // lane PRTPPLACE, empty unless WW_CELL_PROBES
 		s << farLodNotes;  // lane FARLOD1, empty unless the Far LOD row
 		s << modPickNote;  // lane MODPICK1, exteriors
+		s << spawnNote;    // lane CELLSPAWN1
 		s << "  built in " << clock.elapsed() << " ms\n";
 #ifndef ESM_HAS_CELL_FIELDS
 		s << "  NOTE: built without the esmdata cell fields (XLYR, XESP, editor ids and "
@@ -7405,4 +7414,10 @@ bool cellChunkEmit( NifModel * nif, CellChunk & c, CellBlockSource & src, const 
 		return true;
 	}
 	return false;
+}
+
+// lane CELLSPAWN1: the marker test for src/cellspawn.cpp (isMarkerModel lives in this file's anonymous namespace)
+bool cellIsMarkerModel( const QString & model )
+{
+	return isMarkerModel( model );
 }

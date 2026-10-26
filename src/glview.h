@@ -648,6 +648,8 @@ public:
 	QString wwFlyRefocusCheck();
 	//! lane FLYFIX1: the view at eye looking at at, kept after (the live verb "camera PATHFILE"); residuals returned
 	QString wwPlaceCamera( const Vector3 & eye, const Vector3 & at );
+	//! lane CELLSPAWN1: a level view standing at eye, looking along yawDeg (0 north, 90 east); a cell's first open
+	QString wwSpawnAt( const Vector3 & eye, float yawDeg );
 
 	//! Where the timeline is parked right now.
 	/*! The freeze dialog seeds itself from this, so "scrub until it looks right,

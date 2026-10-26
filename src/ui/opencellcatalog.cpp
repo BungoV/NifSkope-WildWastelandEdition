@@ -380,6 +380,16 @@ void openCellSetStringsLanguage( const QString & lang )
 	QSettings().setValue( settingsKey( "Language" ), lang.trimmed() );
 }
 
+quint32 openCellShownForm( quint32 form, int ownerFile, const QVector<bool> & light )
+{
+	if ( ( form >> 24 ) == 0xFEU || ownerFile < 0 || ownerFile >= light.size() || light[ownerFile] )
+		return form;    // a light plugin's FE + slot form is already the game's
+	int full = 0;
+	for ( int i = 0; i < ownerFile; i++ )
+		full += !light[i];
+	return ( quint32( full ) << 24 ) | ( form & 0x00FFFFFFU );
+}
+
 bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QString * error,
 	const OpenCellReadOptions & opt )
 {
@@ -405,6 +415,25 @@ bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QStr
 	};
 	try {
 		ESMFile esm( paths.join( QLatin1Char( ',' ) ).toLocal8Bit().constData() );
+		for ( const QString & p : paths )
+			out.plugins.append( QFileInfo( p ).fileName() );
+		// The reader's light slots: FE + slot names file lightFiles[slot]; the first slot past the end reads past the
+		// list (or, with no light plugin, the FE byte itself).
+		QVector<bool> light( paths.size(), false );
+		for ( quint32 s = 0; s < 0x1000U; s++ ) {
+			const unsigned int f = esm.getFormIDFile( 0xFE000000U | ( s << 12 ) );
+			if ( f >= unsigned( paths.size() ) || light[int( f )] )
+				break;
+			light[int( f )] = true;
+		}
+		// One record per form: an override replaces the master's data in place, so `r` is already the winner
+		// (its srcFile is the last plugin to edit it) and its names are the ones the CK shows.
+		auto stamp = [&]( OpenCellCell & c, const ESMFile::ESMRecord & r ) {
+			const unsigned int ownerFile = esm.getFormIDFile( r.formID );
+			c.owner = ownerFile < unsigned( paths.size() ) ? int( ownerFile ) : -1;
+			c.lastEdit = r.srcFile < unsigned( paths.size() ) ? int( r.srcFile ) : -1;
+			c.shownForm = openCellShownForm( r.formID, c.owner, light );
+		};
 		QSet<quint32> seen;
 		// Group ids are dense from 0x80000000: every group of every plugin, linked or not.
 		for ( quint32 k = 0;; k++ ) {
@@ -435,6 +464,7 @@ bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QStr
 					OpenCellCell c;
 					c.form = r->formID;
 					readNames( esm, *r, stringsOf( *r ), c.edid, c.name, &c.x, &c.y );
+					stamp( c, *r );
 					if ( interiorBlock )
 						out.interiors.append( c );
 					else

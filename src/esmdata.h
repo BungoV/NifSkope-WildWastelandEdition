@@ -542,6 +542,11 @@ public:
 	quint32 cellForm( int cx, int cy ) const;
 	//! The worldspace's persistent-cell REFRs, grid-filtered by world position.
 	QVector<EsmRefr> persistentRefrsIn( float minX, float minY, float maxX, float maxY ) const;
+	//! lane CELLSPAWN1: a base form's OBND (object bounds, base-local units), false when it has none
+	bool objectBounds( quint32 baseForm, float lo[3], float hi[3] ) const;
+	//! lane CELLSPAWN1: the REFR `doorRef`'s XTEL arrival point (where the game puts the player who uses the
+	//! OTHER side's door), false when that REFR or its XTEL is absent
+	bool teleportArrival( quint32 doorRef, float pos[3], float rot[3] ) const;
 
 	//! LOD model info for a base object, cached. Never null.
 	const EsmLodBase & lodBase( quint32 baseFormID ) const;

@@ -23,10 +23,13 @@ struct OpenCellWorld
 
 struct OpenCellCell
 {
-	quint32 form = 0;
+	quint32 form = 0;       //!< the reader's form (what a spec line names)
+	quint32 shownForm = 0;  //!< lane CELLSPAWN1: the load-order FormID as the game and the CK show it
 	QString edid;
-	QString name;
+	QString name;           //!< the winning record's FULL, as the CK shows it
 	int x = 0, y = 0;
+	int owner = -1;         //!< lane CELLSPAWN1: the plugin that adds the cell, an index into OpenCellCatalog::plugins
+	int lastEdit = -1;      //!< lane CELLSPAWN1: the last plugin that edits it (the winning record's file)
 };
 
 //! Everything the dialog lists, read in one pass over the load order.
@@ -36,7 +39,12 @@ struct OpenCellCatalog
 	QHash<quint32, QVector<OpenCellCell>> cells;    //!< exterior cells by worldspace form, sorted by (y, x)
 	QVector<OpenCellCell> interiors;                //!< sorted by editor ID
 	QStringList noStrings;                          //!< localized plugins whose string tables were not found
+	QStringList plugins;                            //!< the read load order's file names (owner / lastEdit index it)
 };
+
+//! lane CELLSPAWN1: the game's FormID for a reader form: a full plugin's top byte counts full plugins only.
+//! `light[i]` says whether file i of the load order is a light plugin.
+quint32 openCellShownForm( quint32 form, int ownerFile, const QVector<bool> & light );
 
 //! How a catalog read finds a localized plugin's names.
 struct OpenCellReadOptions

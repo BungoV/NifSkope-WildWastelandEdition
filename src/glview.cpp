@@ -22573,6 +22573,26 @@ QString GLView::wwGpuMs( int frames )
  * jumped, and one gears tick after a 5 s stall moves the camera at most 0.1 s worth. The view is put back after. */
 /* lane FLYFIX1: the view put at a path key for good (the path camera is an override that ends with its path), so a
  * flight starts there. Pitch and yaw are searched (grid, then finer) to match the look-at's rows; residuals returned. */
+QString GLView::wwSpawnAt( const Vector3 & eye, float yawDeg )
+{
+	// a perspective User view at eye height, the orbit pivot 2 x Dist ahead; View > Center still frames the scene
+	doCenter = false;
+	view = ViewUser;
+	perspectiveMode = true;
+	Zoom = 1.0;
+	Dist = 64.0f;
+	Rot = Vector3( -90.0f, 0.0f, yawDeg );
+	Matrix m;
+	m.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+	Pos = Vector3() - eye + m.inverted() * Vector3( 0.0f, 0.0f, 2.0f * float( Dist ) );
+	updateViewpoint();
+	update();
+	const Vector3 back = viewTransform() * eye;	// the eye must land at the view's origin
+	return QStringLiteral( "camera spawn eye %1,%2,%3 yaw %4 | eye residual %5" )
+		.arg( double( eye[0] ), 0, 'f', 2 ).arg( double( eye[1] ), 0, 'f', 2 ).arg( double( eye[2] ), 0, 'f', 2 )
+		.arg( double( yawDeg ), 0, 'f', 2 ).arg( double( back.length() ), 0, 'f', 3 );
+}
+
 QString GLView::wwPlaceCamera( const Vector3 & eye, const Vector3 & at )
 {
 	Vector3 f = at - eye;

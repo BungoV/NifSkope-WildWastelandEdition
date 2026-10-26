@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLSPAWN1 (2026-10-26, branch cellspawn1-20261026): a cell opens standing on its ground; File > Open Cell lists like the CK
+
+- **Spawn:** a freshly opened exterior puts the camera at the opened cell's centre on its LAND (or on the water when
+  the water is higher) at the player's eye height (120.48, node 'Camera' of the 1st-person skeleton), level, looking
+  north. If placed objects stand on the centre, the nearest open terrain point of the cell is used. An interior starts
+  at its COC marker, else at its first load door's arrival point. src/cellspawn.cpp; `-no-gui cellspawn "<spec>" --check`.
+- Pinned harness cameras and View > Center keep the old framing. Reds WW_CELL_SPAWN_RED=old|z0.
+- **Open Cell list:** Editor ID, Name, X, Y, FormID (load order), owner plugin and last edit; "Wilderness" for unnamed
+  exterior cells; one search over EDID / name / FormID / grid; a Filters menu; "All Cells" in the worldspace selector.
+  Harness WW_OPENCELL_SHOT grabs the dialog and its Filters menu. Unit test tests/opencell (85 checks; red 18 failed).
+
 ## Lane LIGHTPHYS4 (2026-10-26, branch lightphys4-20261026): far lights and live doors follow the light rows
 
 - **Far lights bounce on the rows' curve, live:** the far light bake (WW_CELL_FARLIGHT) now runs its placed-only

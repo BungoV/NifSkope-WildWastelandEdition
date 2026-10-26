@@ -782,6 +782,43 @@ QVector<EsmRefr> EsmWorld::persistentRefrsIn( float minX, float minY, float maxX
 	return out;
 }
 
+bool EsmWorld::objectBounds( quint32 baseForm, float lo[3], float hi[3] ) const
+{
+	const ESMFile::ESMRecord * br = baseForm ? esm->findRecord( baseForm ) : nullptr;
+	if ( !br || br->type == GRUP )
+		return false;
+	ESMFile::ESMField f( *esm, *br );
+	while ( f.next() ) {
+		if ( f == "OBND" && f.size() >= 12 ) {
+			for ( int i = 0; i < 3; i++ )
+				lo[i] = float( f.readInt16() );
+			for ( int i = 0; i < 3; i++ )
+				hi[i] = float( f.readInt16() );
+			return true;
+		}
+	}
+	return false;
+}
+
+bool EsmWorld::teleportArrival( quint32 doorRef, float pos[3], float rot[3] ) const
+{
+	const ESMFile::ESMRecord * r = doorRef ? esm->findRecord( doorRef ) : nullptr;
+	if ( !r || r->type == GRUP || !( *r == "REFR" ) )
+		return false;
+	ESMFile::ESMField f( *esm, *r );
+	while ( f.next() ) {
+		if ( f == "XTEL" && f.size() >= 28 ) {
+			(void) f.readUInt32();   // the destination door
+			for ( int i = 0; i < 3; i++ )
+				pos[i] = f.readFloat();
+			for ( int i = 0; i < 3; i++ )
+				rot[i] = f.readFloat();
+			return true;
+		}
+	}
+	return false;
+}
+
 const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 {
 	auto it = lodBaseCache.constFind( baseFormID );
