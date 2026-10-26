@@ -49,8 +49,8 @@ void wwCellSsrNote( bool flagged );
 //! called with every program setupProgram binds: the scene pass's masks, and the reflection a flagged draw reads
 void wwCellSsrDraw( Scene * scene, bool cellProgram );
 
-/*! Lane PERF3: WW_CELL_SSR_PREV=1 (a look change, ships off; WW_CELL_SSR_PREV_RED=1 or WW_PERF3_RED=1: the second
- *  scene pass as before). The reflections draw no second scene pass: the obscurance pass writes the flag into
+/*! Lane PERF3, on since PERF5 (a speed change; WW_CELL_SSR_PREV=0, WW_CELL_SSR_PREV_RED=1 or WW_PERF3_RED=1: the
+ *  second scene pass as before). The reflections draw no second scene pass: the obscurance pass writes the flag into
  *  stencil bit 0x01 of its depth buffer, and a hit samples the previous frame's linear color (kept at the end of
  *  the HDR frame) reprojected into its camera. Falls back to the scene pass when there is no previous frame of
  *  this size and document, when the water's rays or the bounce need the pass. */

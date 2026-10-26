@@ -1641,7 +1641,9 @@ const CE2Material * BSShaderLightingProperty::createDefaultSFMaterial()
 
 bool BSShaderLightingProperty::bind( const QStringView & fname, bool forceTexturing, TexClampMode mode )
 {
+	scene->textures->wwParamCaller = true;	// lane PERF5: the parameter shadow (gltex.h)
 	GLuint mipmaps = scene->bindTexture( fname, forceTexturing );
+	scene->textures->wwParamCaller = false;
 
 	if ( !mipmaps )
 		return false;
@@ -1659,12 +1661,15 @@ bool BSShaderLightingProperty::bind( const QStringView & fname, bool forceTextur
 	unsigned int i = std::min< unsigned int >( (unsigned int) mode, 6U ) << 1;
 	GLint wrapS = clampModes[i];
 	GLint wrapT = clampModes[i + 1];
-	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS );
-	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT );
+	const GLint minFilter = mipmaps > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR;
+	if ( scene->textures->wwParamsNeeded( wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() ) ) {
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT );
 
-	glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, TexCache::get_max_anisotropy() );
-	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmaps > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR );
+		glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, TexCache::get_max_anisotropy() );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter );
+	}
 	// lane GPUDRIVEN1: which textures are bound with more than one wrap mode (bindless needs a handle per state)
 	if ( GpuDriven::census() ) {
 		GLint tex = 0;

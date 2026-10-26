@@ -3816,6 +3816,8 @@ void GLView::paintGL()
 	} wwPaintTime{ wwPaintClock };
 	// lane PERF1: the frame's per-pass timers (one bool test while the Frame Timers row is off)
 	PassTime::frameBegin();
+	if ( scene && scene->textures )
+		scene->textures->wwParamFrame();	// lane PERF5: the texture parameter shadow trusts nothing from an older frame
 	struct WwPassFrame
 	{
 		~WwPassFrame()
