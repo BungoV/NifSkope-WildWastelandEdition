@@ -219,6 +219,14 @@ int cellMeshMaterializeAll( NifModel * nif )
 	return n;
 }
 
+qint64 cellMeshBytes( const CellMesh & m )
+{
+	return qint64( m.verts.capacity() + m.norms.capacity() + m.tangents.capacity() + m.bitangents.capacity() )
+		* qint64( sizeof( Vector3 ) ) + qint64( m.colors.capacity() ) * qint64( sizeof( Color4 ) )
+		+ qint64( m.coords.capacity() ) * qint64( sizeof( Vector2 ) ) + qint64( m.triangles.capacity() )
+		* qint64( sizeof( Triangle ) ) + qint64( m.uv2y.capacity() ) * qint64( sizeof( float ) );
+}
+
 int cellMeshCount( const NifModel * nif )
 {
 	auto it = table().constFind( nif );

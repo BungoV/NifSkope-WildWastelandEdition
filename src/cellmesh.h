@@ -58,6 +58,8 @@ bool cellMeshMaterialize( NifModel * nif, const QModelIndex & index );
 int cellMeshMaterializeAll( NifModel * nif );
 //! Shapes of this document still waiting here.
 int cellMeshCount( const NifModel * nif );
+//! lane FAR3: the heap bytes this shape's arrays hold (the far field's budget charges it)
+qint64 cellMeshBytes( const CellMesh & m );
 //! The file bytes of a waiting shape's unwritten rows (its "Data Size"); -1 for every other block.
 //! NifModel::updateHeader asks, so that it leaves those row arrays alone and still states the block's size.
 int cellMeshWaitingBytes( const NifModel * nif, const NifItem * block );

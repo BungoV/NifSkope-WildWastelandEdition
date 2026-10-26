@@ -28,6 +28,14 @@ BSD License - see nifskope.h
 #include <cstring>
 #include <vector>
 
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#endif
+
 namespace
 {
 
@@ -200,7 +208,8 @@ void appendWireBox( std::vector<OutVert> & verts, std::vector<Triangle> & tris,
 /*! Write one bucket's geometry as one or more BSTriShapes under `iRoot`.
  *  Splits at MAX_SHAPE_VERTS, because a BSTriShape counts vertices in a u16. */
 bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
-	const Vector3 & origin, qint64 & shapesOut, qint64 & vertsOut, QString * error, bool side = false )
+	const Vector3 & origin, qint64 & shapesOut, qint64 & vertsOut, QString * error, bool side = false,
+	qint64 * keptBytes = nullptr )
 {
 	auto fail = [error]( const QString & m ) {
 		if ( error )
@@ -314,6 +323,8 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			m->triangles.reserve( int( pt.size() ) );
 			for ( const Triangle & t : pt )
 				m->triangles.append( t );
+			if ( keptBytes )
+				*keptBytes += cellMeshBytes( *m );
 			cellMeshPut( nif, iShape, m );
 		}
 		QModelIndex iVertexData = side ? QModelIndex() : nif->getIndex( iShape, "Vertex Data" );
@@ -1060,13 +1071,21 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					}
 					uMid = uLo + uHi;
 				}
-				const quint32 bkey = ( quint32( inst.baseId ) << 16 ) | quint32( p.materialId );
+				/* lane FAR3: merged buckets key on the material plus the mesh's colour/alpha stream bits, so every
+				 * shape flag stays what the per-base bucket had; the per-base key sets bit 31 apart from them */
+				const quint32 bkey = spec.mergeBases
+					? ( quint32( p.materialId ) | ( ( meshRow.flags & LODO_MESH_VERTEX_COLOUR ) ? 0x10000u : 0u )
+						| ( ( meshRow.flags & LODO_MESH_VERTEX_ALPHA ) ? 0x20000u : 0u ) )
+					: ( 0x80000000u | ( quint32( inst.baseId ) << 16 ) | quint32( p.materialId ) );
 				auto bit = buckets.find( bkey );
 				if ( bit == buckets.end() ) {
 					Bucket nb;
 					nb.baseId = inst.baseId;
 					nb.materialId = p.materialId;
 					const QString model = lib.stringAt( base.modelStringOffset );
+					if ( spec.mergeBases )
+						nb.name = spec.namePrefix + QString( "m%1 %2" ).arg( p.materialId ).arg( bkey >> 16 );
+					else
 					nb.name = spec.namePrefix + QString( "%1 %2 m%3" )
 						.arg( QString::number( base.formId, 16 ).rightJustified( 8, QChar( '0' ) ) )
 						.arg( model.isEmpty() ? QStringLiteral( "?" )
@@ -1117,10 +1136,15 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				 * split runs after the wrap and cannot undo it, so a bucket that the
 				 * next part would overflow is set aside whole and a fresh one begun. */
 				if ( bk.verts.size() + p.verts.size() > size_t( 65535 ) && !bk.verts.empty() ) {
+					// lane FAR3: the arrays MOVE to the set-aside bucket; a copy kept both until the end
+					std::vector<OutVert> fv;
+					std::vector<Triangle> ft;
+					fv.swap( bk.verts );
+					ft.swap( bk.tris );
 					Bucket full = bk;
-					bk.verts.clear();
-					bk.tris.clear();
-					spilled[bkey].append( full );
+					full.verts.swap( fv );
+					full.tris.swap( ft );
+					spilled[bkey].append( std::move( full ) );
 				}
 				const size_t vstart = bk.verts.size();
 				// lane PERF1: grow by doubling; an exact reserve a placement copied the whole bucket each time (14 s)
@@ -1199,7 +1223,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 
 	const qint64 msRead = timer.elapsed();
 
-	qint64 shapes = 0, verts = 0;
+	qint64 shapes = 0, verts = 0, kept = 0;
 	const bool side = spec.sideMesh && cellMeshOn();   // lane FARLOD2
 	QList<quint32> keys = buckets.keys();
 	std::sort( keys.begin(), keys.end() );
@@ -1222,12 +1246,20 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	}
 	for ( quint32 key : keys ) {
 		bool ok = true;
-		for ( const Bucket & full : spilled.value( key ) ) {
-			ok = ok && emitBucket( nif, iRoot, full, shapeOrigin, shapes, verts, error, side );
+		auto sit = spilled.find( key );
+		for ( int s = 0; sit != spilled.end() && s < sit.value().size(); s++ ) {
+			Bucket & full = sit.value()[s];
+			ok = ok && emitBucket( nif, iRoot, full, shapeOrigin, shapes, verts, error, side, &kept );
 			cnt.tris += qint64( full.tris.size() );
+			std::vector<OutVert>().swap( full.verts );   // lane FAR3: emitted buckets free as they go
+			std::vector<Triangle>().swap( full.tris );
 		}
-		cnt.tris += qint64( buckets[key].tris.size() );
-		if ( !ok || !emitBucket( nif, iRoot, buckets[key], shapeOrigin, shapes, verts, error, side ) ) {
+		Bucket & bkEmit = buckets[key];
+		cnt.tris += qint64( bkEmit.tris.size() );
+		const bool emitted = ok && emitBucket( nif, iRoot, bkEmit, shapeOrigin, shapes, verts, error, side, &kept );
+		std::vector<OutVert>().swap( bkEmit.verts );
+		std::vector<Triangle>().swap( bkEmit.tris );
+		if ( !emitted ) {
 			if ( dump.device() ) {
 				dump.flush();
 				dumpFile.close();
@@ -1235,6 +1267,10 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			return false;
 		}
 	}
+
+	cnt.shapes += shapes;   // lane FAR3
+	cnt.verts += verts;
+	cnt.keptBytes += kept;
 
 	// the occluder boxes, drawn ONLY on request and then as wire boxes
 	qint64 boxes = 0;
@@ -1406,4 +1442,122 @@ bool nifCreateLodiObjectScene( NifModel * nif, const QString & lodiPath,
 	nif->holdUpdates( false );
 	nif->updateModel();
 	return ok;
+}
+
+
+namespace {
+//! the process's private bytes, working set and peak working set, in MB
+void farCensusMem( double & privMB, double & wsMB, double & peakMB )
+{
+	privMB = wsMB = peakMB = 0.0;
+#ifdef Q_OS_WIN
+	PROCESS_MEMORY_COUNTERS_EX pmc;
+	if ( GetProcessMemoryInfo( GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS *>( &pmc ), sizeof( pmc ) ) ) {
+		privMB = double( pmc.PrivateUsage ) / ( 1024.0 * 1024.0 );
+		wsMB = double( pmc.WorkingSetSize ) / ( 1024.0 * 1024.0 );
+		peakMB = double( pmc.PeakWorkingSetSize ) / ( 1024.0 * 1024.0 );
+	}
+#endif
+}
+} // namespace
+
+int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
+{
+	QString lodi;
+	struct Ring { int r[9]; };
+	QVector<Ring> rings;
+	bool perBase = false;
+	for ( int i = 0; i < args.size(); i++ ) {
+		if ( args[i] == QLatin1String( "--perbase" ) ) {
+			perBase = true;
+		} else if ( args[i] == QLatin1String( "--ring" ) && i + 1 < args.size() ) {
+			const QStringList p = args[++i].split( QLatin1Char( ',' ) );
+			if ( p.size() != 9 ) {
+				out << "farobjcensus: --ring wants x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot\n";
+				return 2;
+			}
+			Ring g;
+			for ( int k = 0; k < 9; k++ )
+				g.r[k] = p[k].toInt();
+			rings << g;
+		} else if ( lodi.isEmpty() ) {
+			lodi = args[i];
+		}
+	}
+	if ( lodi.isEmpty() || rings.isEmpty() ) {
+		out << "usage: farobjcensus <ws.lodi> --ring x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot [--ring ...]\n";
+		return 2;
+	}
+	double p0 = 0, w0 = 0, k0 = 0;
+	farCensusMem( p0, w0, k0 );
+	NifModel nif;
+	if ( !nif.createNew( 0x14020007, 12, 130 ) ) {
+		out << "farobjcensus: could not create a Fallout 4 document\n";
+		return 1;
+	}
+	nif.holdUpdates( true );
+	const QModelIndex iRoot = nif.insertNiBlock( QStringLiteral( "NiNode" ) );
+	nif.set<QString>( iRoot, "Name", QStringLiteral( "FarLOD" ) );
+	qint64 allTris = 0, allKept = 0;
+	for ( int i = 0; i < rings.size(); i++ ) {
+		const Ring & g = rings[i];
+		LodiSceneSpec os;
+		os.x0 = g.r[0];
+		os.y0 = g.r[1];
+		os.x1 = g.r[2];
+		os.y1 = g.r[3];
+		os.haveRegion = true;
+		os.valid = true;
+		os.haveHole = true;
+		os.hx0 = g.r[4];
+		os.hy0 = g.r[5];
+		os.hx1 = g.r[6];
+		os.hy1 = g.r[7];
+		os.slot = g.r[8];
+		os.namePrefix = QStringLiteral( "FarLOD r%1 " ).arg( i );
+		os.sideMesh = true;
+		os.sway = true;
+		os.mergeBases = !perBase;
+		double pa = 0, wa = 0, ka = 0, pb = 0, wb = 0, kb = 0;
+		farCensusMem( pa, wa, ka );
+		const int blocks0 = nif.getBlockCount();
+		QElapsedTimer t;
+		t.start();
+		LodiAppendCounts c;
+		QString e;
+		if ( !nifAppendLodiObjects( &nif, iRoot, lodi, os, &e, nullptr, &c ) ) {
+			out << "farobjcensus: ring " << i << " REFUSED -- " << e << "\n";
+			return 1;
+		}
+		farCensusMem( pb, wb, kb );
+		allTris += c.tris;
+		allKept += c.keptBytes;
+		out << QString( "farobjcensus ring %1 slot %2 cells %3,%4..%5,%6 hole %7,%8..%9,%10: %11 placed, %12 tris, %13 verts, "
+			"%14 shapes, %15 blocks; arrays kept %16 MB (%17 B a tri); private %18 -> %19 MB (+%20, %21 B a tri), "
+			"peak working set %22 MB, %23 ms\n" )
+			.arg( i ).arg( g.r[8] ).arg( g.r[0] ).arg( g.r[1] ).arg( g.r[2] ).arg( g.r[3] )
+			.arg( g.r[4] ).arg( g.r[5] ).arg( g.r[6] ).arg( g.r[7] )
+			.arg( c.placed ).arg( c.tris ).arg( c.verts ).arg( c.shapes ).arg( nif.getBlockCount() - blocks0 )
+			.arg( double( c.keptBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
+			.arg( c.tris > 0 ? double( c.keptBytes ) / double( c.tris ) : 0.0, 0, 'f', 0 )
+			.arg( pa, 0, 'f', 0 ).arg( pb, 0, 'f', 0 ).arg( pb - pa, 0, 'f', 0 )
+			.arg( c.tris > 0 ? ( pb - pa ) * 1024.0 * 1024.0 / double( c.tris ) : 0.0, 0, 'f', 0 )
+			.arg( kb, 0, 'f', 0 ).arg( t.elapsed() );
+		out.flush();
+	}
+	double p1 = 0, w1 = 0, k1 = 0;
+	farCensusMem( p1, w1, k1 );
+	nif.holdUpdates( false );
+	nif.updateModel();
+	double p2 = 0, w2 = 0, k2 = 0;
+	farCensusMem( p2, w2, k2 );
+	out << QString( "farobjcensus total: %1 tris, arrays kept %2 MB, private %3 -> %4 MB (+%5, %6 B a tri), "
+		"after the model update %7 MB, peak working set %8 MB\n" )
+		.arg( allTris ).arg( double( allKept ) / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
+		.arg( p0, 0, 'f', 0 ).arg( p1, 0, 'f', 0 ).arg( p1 - p0, 0, 'f', 0 )
+		.arg( allTris > 0 ? ( p1 - p0 ) * 1024.0 * 1024.0 / double( allTris ) : 0.0, 0, 'f', 0 )
+		.arg( p2, 0, 'f', 0 ).arg( k2, 0, 'f', 0 );
+	out.flush();
+	cellMeshClear( &nif );
+	return 0;
 }

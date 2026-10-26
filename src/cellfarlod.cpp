@@ -62,6 +62,9 @@ constexpr float kCell = 4096.0f;
  * (src/cellmesh.h) instead of as rows. Rows were 2.4 KB a triangle (FINALFIX g3). MEASURED: see the
  * "B a triangle measured" telemetry and notes/finalfix/farlod2.md; the largest ring's figure, rounded up. */
 constexpr double kSideBytesPerTri = 560.0;	// measured 10-06 a1: 545 / 238 / 498 / 81 B rings 0-3 (Sanctuary), largest rounded up
+/* lane FAR3 (FARGAP1): one shape per material, not per (base, material): the ~43 KB of document blocks a shape
+ * was most of that cost. farobjcensus, Concord rings 0-2: 210 / 159 / 199 B a triangle (per base 430 / 247 / 769) */
+constexpr double kMergedBytesPerTri = 256.0;
 
 //! What one cell document's far field is, for the draw (keyed by the document).
 struct FarDoc
@@ -325,6 +328,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const bool waterCut = red == "watercut";
 	const bool noWater = red == "nowater";
 	const bool vanBoth = red == "vanboth";   // the vanilla fill drawn over our chunks too (the mixed gate's red)
+	const bool perBaseRed = red == "perbase";   // lane FAR3: the far objects' old per-base shapes and charge
 	const int h = std::max( 0, ( n - 1 ) / 2 );
 	const int bx0 = cx - h, by0 = cy - h, bx1 = cx + h, by1 = cy + h;
 	// lane CELLSTREAM1: objects and cards leave out every cell a 5x5 round any roam position can load
@@ -1054,6 +1058,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.shift[2] = shift[2];
 			os.dropTreesBeyond = treeDist;   // 0 = no cut (lane FARLOD2)
 			os.sideMesh = true;              // lane FARLOD2: arrays beside the document, not rows
+			os.mergeBases = !perBaseRed;     // lane FAR3: one shape per material
 			os.dropX = ctrX;
 			os.dropY = ctrY;
 			os.sway = swayAmp() > 0.0f;
@@ -1062,7 +1067,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			 * far field past its budget is not written. Measured on the merged build (g3, Commonwealth -17,23):
 			 * ring 0 636345 tris +1514 MB, ring 1 1282884 tris +3131 MB -- 2.4 KB a triangle, rounded up. */
 			const bool sideMesh = cellMeshOn();
-			const double kBytesPerTri = sideMesh ? kSideBytesPerTri : 2560.0;
+			const double kBytesPerTri = !sideMesh ? 2560.0 : perBaseRed ? kSideBytesPerTri : kMergedBytesPerTri;
 			const double leftMB = budgetMB - usedMB;
 			os.maxTris = std::max<qint64>( 1, qint64( leftMB * 1024.0 * 1024.0 / kBytesPerTri ) );
 			LodiAppendCounts oc;

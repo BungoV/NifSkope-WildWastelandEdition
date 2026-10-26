@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FAR3 (2026-10-23, branch far3-20261023): far object rings fit their budget (speed/memory, on)
+
+- **FARGAP1, the measured cause:** the far object rings cost about 43 KB of document blocks per SHAPE (one shape per
+  base and material), not the triangles: Concord ring 1 was 2367 shapes, and the 560 B a triangle charge refused it
+  ("objects ring 1 NOT BUILT", the band of missing LOD objects and buildings with missing parts).
+- **Fix:** the far rings bucket per MATERIAL (plus the mesh's colour/alpha stream bits, so every shape flag stays),
+  not per (base, material). Ring 1 at Concord: 2367 -> 275 shapes, private memory +846 -> +544 MB; rings 0-2 together
+  1527 -> 765 MB private, peak working set 1516 -> 750 MB. Spilled buckets move their arrays (no copy) and each bucket
+  frees as soon as it is emitted. The charge is now the measured 256 B a triangle (rings 0-2: 210 / 159 / 199 B), so
+  ring 1 (3.2 M triangles) builds inside the unchanged 2048 MB budget. No menu row (speed change).
+- **Red:** `WW_CELL_FARLOD_RED=perbase` = the old per-base shapes and 560 B charge (rebuilt in place, live).
+- **Offline census:** `NifSkope -no-gui farobjcensus <ws.lodi> --ring x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot ... [--perbase]`
+  builds the far object rings the cell view's way into one headless document and prints per ring the shapes,
+  triangles, kept array bytes and what the process paid (private bytes, peak).
+- GPU: ring 1 now draws (about 3.6 M more triangles at Concord) in far fewer draws; expected about 1 ms at 1080p,
+  not yet measured (rows in the lane notes).
+
 ## Lane FOGPERF1 + SPEEDDEFAULT1 (2026-10-23, branch fogperf1-20261023): fog cost named, speed switches on
 
 ### Speed switches ride with their feature (bungo 10-23: "speed change should never have an off as default")
