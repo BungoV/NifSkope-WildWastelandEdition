@@ -2,6 +2,7 @@
 #include "cloudmap.h"
 #include "cloudnoise.h"
 #include "cloudvolmath.h"
+#include "cloudfly.h"
 #include "atmosphere.h"
 #include "atmomath.h"
 #include "cellhdr.h"
@@ -396,7 +397,8 @@ QHash<Renderer *, CvRedo> & redos()
 bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f, const WwCloudMap & m, GLuint sceneTex )
 {
 	auto fn = r->fn;
-	NifSkopeOpenGLContext::Program * p = r->useProgram( "cloud_march.prog" );
+	const bool fly = wwCloudFlyActive( r );	// lane CLOUD4: the march with the fly-through box
+	NifSkopeOpenGLContext::Program * p = r->useProgram( fly ? "cloud_fly.prog" : "cloud_march.prog" );
 	if ( !p )
 		return false;
 	const Preset & pr = preset( d.tier );
@@ -451,8 +453,12 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	fn->glBindTexture( GL_TEXTURE_2D, sceneTex );
 	p->uni1i( "cvScene", 6 );
 	p->uni4f( "cvSceneZ", FloatVector4( g.sceneZ[0], g.sceneZ[1], g.sceneZ[2], sceneTex ? 1.0f : 0.0f ) );
+	if ( fly )
+		wwCloudFlyUniforms( r, p, 7 );
 	quad( r );
 	r->stopProgram();
+	if ( fly )
+		wwCloudFlyRelease( r, 7 );
 	return true;
 }
 
@@ -696,6 +702,23 @@ bool wwCloudVolBindDensity( Scene * scene, int firstUnit )
 	return true;
 }
 
+bool wwCloudVolBindDensityAt( Scene * scene, int firstUnit, double secs )
+{
+	if ( !scene || !scene->renderer || cs().tier < 2 )
+		return false;
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * p = r->getCurrentProgram();
+	const WwCloudMap & m = wwCloudMap();
+	if ( !p || !m.valid )
+		return false;
+	CvGpu & g = gpus()[r];
+	if ( !ensureNoise( r, g ) )
+		return false;
+	densityUniforms( r, p, g, bandsOf( m ), m, V::windKm( secs ), firstUnit );
+	r->fn->glActiveTexture( GL_TEXTURE0 );
+	return true;
+}
+
 bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & drew )
 {
 	CvState & s = cs();
@@ -814,6 +837,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	std::copy( g.prevProj, g.prevProj + 4, d.prevProj );
 	std::copy( g.prevKm, g.prevKm + 3, d.prevKm );
 
+	if ( ok )	// lane CLOUD4: the fly-through box over the camera (its own FBO; the march binds its own after)
+		wwCloudFlyPrepare( scene, cam.km, view.cloudSeconds );
 	// 1. the march: one fragment a history pixel of this frame's phase; 2. the resolve into this frame's history
 	if ( ok && !marchPass( r, g, d, f, m, sceneOn ? g.sceneTex : 0 ) ) {
 		ok = false;
@@ -905,6 +930,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			.arg( m.stub ? QStringLiteral( "stub" ) : QString::number( m.size ) ).arg( mb, 0, 'f', 1 ).arg( clip )
 			.arg( double( V::kWindKmS ), 0, 'g', 3 ).arg( reds )
 		: refusal( s, why );
+	if ( ok && wwCloudFlyTier() > 0 )	// lane CLOUD4
+		s.last += QStringLiteral( " fly=" ) + wwCloudFlySummary();
 	drew << s.last;
 	return ok;
 }

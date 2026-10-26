@@ -1,5 +1,6 @@
 #include "cloudmap.h"
 #include "cloudmath.h"
+#include "cloudfly.h"
 #include "wwswitch.h"
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
@@ -181,7 +182,8 @@ Draw drawOf( const WwCloudLayerIn & L )
 	return d;
 }
 
-void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax )
+void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax,
+	const std::vector<std::array<float, 2>> * heights = nullptr )
 {
 	std::vector<int> role;
 	std::vector<float> cover;
@@ -194,7 +196,7 @@ void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax )
 		tint.push_back( t );
 	}
 	bandsOf( role.data(), cover.data(), reinterpret_cast<const float( * )[3]>( tint.data() ), int( role.size() ), out,
-		redMax );
+		redMax, heights ? reinterpret_cast<const float( * )[2]>( heights->data() ) : nullptr );
 }
 
 bool ensureTarget( NifSkopeOpenGLContext::GLFunctions * fn, CmState & s, int n )
@@ -479,7 +481,25 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 	for ( const WwCloudLayerIn & L : layers )
 		cur << drawOf( L );
 	BandParams now[3];
-	paramsOf( cur, now, redMax );
+	/* lane CLOUD4: with Fly-through Clouds on, the bands sit at metres above sea level (the layer types' heights, the
+	 * weather's .recx clouds.layers.<n>.base/top, the pin WW_CLOUDFLY_BAND for the Low band), not above the eye */
+	const bool world = wwCloudFlyWorldHeights();
+	if ( world ) {
+		float lh[32][2];
+		wwCloudFlyLayerHeights( wkey, lh );
+		std::vector<std::array<float, 2>> h;
+		for ( const Draw & d : cur )
+			h.push_back( d.in.layer >= 0 && d.in.layer < 32 ? std::array<float, 2>{ lh[d.in.layer][0], lh[d.in.layer][1] }
+															 : std::array<float, 2>{ 0.0f, 0.0f } );
+		paramsOf( cur, now, redMax, &h );
+		float pb = 0.0f, pt = 0.0f;
+		if ( wwCloudFlyBandPin( pb, pt ) ) {
+			now[0].baseM = pb;
+			now[0].topM = pt;
+		}
+	} else {
+		paramsOf( cur, now, redMax );
+	}
 
 	// the transition: a new weather starts from the parameters shown at the change
 	if ( wkey != s.weather ) {
@@ -530,12 +550,16 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		key += QStringLiteral( "|%1:%2,%3,%4" ).arg( d.in.layer ).arg( double( d.in.alpha ), 0, 'f', 5 )
 			.arg( double( d.in.uvOffset[0] ), 0, 'f', 5 ).arg( double( d.in.uvOffset[1] ), 0, 'f', 5 );
 
+	if ( world )	// lane CLOUD4: the projection follows the heights
+		for ( int b = 0; b < 3; b++ )
+			key += QStringLiteral( "|w%1,%2" ).arg( double( shown[b].baseM ), 0, 'f', 1 ).arg( double( shown[b].topM ), 0, 'f', 1 );
+
 	WwCloudMap & m = s.map;
 	m.centerX = eye[0];	// the sky follows the camera: only the square moves
 	m.centerY = eye[1];
 	for ( int b = 0; b < 3; b++ ) {
-		m.band[b].baseZ = eye[2] + shown[b].baseM * kUnitsPerM;
-		m.band[b].topZ = eye[2] + shown[b].topM * kUnitsPerM;
+		m.band[b].baseZ = ( world ? 0.0f : eye[2] ) + shown[b].baseM * kUnitsPerM;
+		m.band[b].topZ = ( world ? 0.0f : eye[2] ) + shown[b].topM * kUnitsPerM;
 	}
 	if ( key != s.key || !m.valid ) {
 		Renderer * r = scene->renderer;

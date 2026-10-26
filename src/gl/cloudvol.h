@@ -42,6 +42,8 @@ bool wwCloudVolLowColour( float out[3] );
  *  lane CLOUD2C (2026-10-26): cvBands.windKm is the offset the last draw used (it was 0), so a reader's density at the
  *  drawn clock is the drawn density; a reader that caches what it built must rebuild while the wind moves. */
 bool wwCloudVolBindDensity( Scene * scene, int firstUnit );
+//! lane CLOUD4: the same with the wind at clock secs (the fly-through grid bakes at its own clock)
+bool wwCloudVolBindDensityAt( Scene * scene, int firstUnit, double secs );
 
 /*! lane CLOUD2B, the cell HDR frame only: wwCloudVolSceneDepth grabs the scene's depth after the last draw (before the
  *  tone map); wwCloudVolFront, after it, draws the volume over geometry it is in front of (a ridge behind a cloud).

@@ -1,0 +1,3 @@
+# lane CLOUD4: the fly-through grid occupancy bake (src/gl/cloudfly.cpp), selected by name.
+
+shaders cell_ao.vert cloud_flybake.frag
