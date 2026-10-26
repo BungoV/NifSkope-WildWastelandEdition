@@ -37,6 +37,7 @@ uniform float glowMult;
 
 uniform float alpha;
 uniform vec2 wwDecalPom;	// lane DECALS1: placed decal parallax (DODT scale x 0.1, step cap); x = 0 off
+uniform bool wwDecalAngle;	// lane DECALANGLE: a placed decal whose vertex alpha is dot(N, D) (src/celldecalangle.h)
 uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
 uniform bool landSplat;		// lane TERRBLEND1: vertex alpha = this blended-ground pass's share
 uniform int landSplatDbg;	// lane ALLON2: 0 edge guard, 1 red WW_TERRBLEND_RED=edgepass (no guard), 2 probe WW_TERRBLEND_PROBE=edge
@@ -284,6 +285,15 @@ vec3 tonemap(vec3 x)
 #include "cell_grass.glsl"
 #endif
 
+/* lane DECALANGLE: the game's decal angle rule, per pixel. The vertex alpha is dot(unit N, D) at each piece corner
+ * (1 where the face itself passes); over the interpolated normal's length it is dot(normalize(N), D). */
+float wwDecalVertexA( float vertexA )
+{
+	if ( !wwDecalAngle )
+		return vertexA;
+	return clamp( ( vertexA / max( length( btnMatrix[2] ), 1.0e-4 ) - 0.3 ) / 0.25, 0.0, 1.0 );
+}
+
 /* lane DECALS1: the game's decal parallax. Height = the set's TX04 (bound as GlowMap, red); the eye ray in the
  * decal's unit uv axes x tan(angle) x scale, linear search from the top in n steps, then one secant step. */
 vec2 wwDecalPomUv( vec2 uv0, vec3 P, vec3 N, vec3 E )
@@ -361,11 +371,13 @@ void main()
 		 * silhouette, the thing you are looking at, is gone. Hence the preview
 		 * early-out sits AFTER this and not at the top of main(). */
 #ifdef WW_CELLLIGHTS
-		float	a = wwGrassVertexA( C.a ) * baseMap.a * alpha;
+		float	a = wwGrassVertexA( wwDecalVertexA( C.a ) ) * baseMap.a * alpha;
 		a *= wwGrassK;	// lane GRASSMB1: the grass fades out through its own alpha test
 #else
-		float	a = C.a * baseMap.a * alpha;
+		float	a = wwDecalVertexA( C.a ) * baseMap.a * alpha;
 #endif
+		if ( wwDecalAngle && a < 4.0 / 255.0 )	// lane DECALANGLE: the game drops texture alpha x term under 4/255
+			discard;
 		// 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
 		int	m = ( a < alphaThreshold ? 0x2B2B : ( a > alphaThreshold ? 0x7171 : 0x4D4D ) );
 		if ( ( m & ( 1 << alphaFlags ) ) == 0 )

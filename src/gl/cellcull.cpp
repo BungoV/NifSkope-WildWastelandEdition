@@ -167,6 +167,7 @@ struct CullState
 	// lane DECALS1: the decal-flag shapes' placements (the fade) and the placed decals' parallax
 	QHash<const void *, QHash<int, std::vector<WwCullRun>>> decalFade;
 	QHash<const void *, QHash<int, std::pair<float, int>>> decalPom;
+	QHash<const void *, QHash<int, bool>> decalAngle;	// lane DECALANGLE
 };
 
 CullState & st()
@@ -773,6 +774,7 @@ void wwCellCullBegin( const void * nif )
 	st().umbraLast = nullptr;
 	st().decalFade.remove( nif );	// lane DECALS1
 	st().decalPom.remove( nif );
+	st().decalAngle.remove( nif );	// lane DECALANGLE
 	st().depthKeyValid = false;
 }
 
@@ -958,6 +960,9 @@ void wwCellCullForget( const void * nif, int block )
 	auto pm = st().decalPom.find( nif );
 	if ( pm != st().decalPom.end() )
 		pm->remove( block );
+	auto da = st().decalAngle.find( nif );	// lane DECALANGLE
+	if ( da != st().decalAngle.end() )
+		da->remove( block );
 }
 
 void wwCellDecalFadeShape( const void * nif, int block, const std::vector<WwCullRun> & runs )
@@ -1025,6 +1030,18 @@ void wwCellDecalPomShape( const void * nif, int block, float scale, int passes )
 	st().decalPom[nif].insert( block, std::make_pair( scale, passes ) );
 }
 
+void wwCellDecalAngleShape( const void * nif, int block )
+{
+	st().decalAngle[nif].insert( block, true );
+}
+
+bool wwCellDecalAngleFor( const void * nif, int block )
+{
+	const CullState & s = st();
+	auto d = s.decalAngle.constFind( nif );
+	return d != s.decalAngle.constEnd() && d->contains( block );
+}
+
 bool wwCellDecalPomFor( const void * nif, int block, float & scale, float & steps )
 {
 	const CullState & s = st();
@@ -1050,6 +1067,9 @@ void wwCellCullRemap( const void * nif, const WwBlockMap & m )
 	auto pm = st().decalPom.find( nif );
 	if ( pm != st().decalPom.end() )
 		wwRemapKeys( *pm, m );
+	auto da = st().decalAngle.find( nif );	// lane DECALANGLE
+	if ( da != st().decalAngle.end() )
+		wwRemapKeys( *da, m );
 	auto u = st().umbra.find( nif );
 	if ( u != st().umbra.end() && u.value() )
 		u.value()->gov.clear();	// a cache by shape block, filled again on the next draw

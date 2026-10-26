@@ -135,6 +135,10 @@ bool wwCellDecalFadeRanges( Scene * scene, const Shape * sh, int block, std::int
 void wwCellDecalPomShape( const void * nif, int block, float scale, int passes );
 //! (scale x 0.1, the step cap clamp(passes, 16, 72)) for the shape, or false.
 bool wwCellDecalPomFor( const void * nif, int block, float & scale, float & steps );
+/*! Lane DECALANGLE: a placed decal shape whose vertex alpha is dot(N, D) (src/celldecalangle.h): the shader runs
+ *  the game's angle rule per pixel. Off for the red WW_CELL_DECAL_RED=vertexangle. */
+void wwCellDecalAngleShape( const void * nif, int block );
+bool wwCellDecalAngleFor( const void * nif, int block );
 
 //! The shape's runs, or null (not a cell shape, or one run only).
 const std::vector<WwCullRun> * wwCellCullRuns( const void * nif, int block );

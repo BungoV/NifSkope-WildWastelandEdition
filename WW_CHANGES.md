@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane DECALANGLE (2026-10-26, branch decalangle-20261026): placed decals fade on steep faces per pixel, as the game
+
+- **The game's angle rule, per pixel:** a placed decal covers a pixel whole when the flat face looks back at the decal
+  by 0.3 or more; otherwise it fades with the surface's smoothed normal at that pixel over 0.3 to 0.55, and texture
+  alpha x that term under 4/255 is dropped. The cell view now does the same per pixel (each piece vertex carries
+  dot(N, D), the shader divides by the interpolated normal's length and fades). Before, the fade was computed per
+  vertex and interpolated, which lets it reach further down a smoothed stair riser (the long riser streaks).
+- **Fallout 4 paints smoothed risers too:** on the Vault 111 hall stairs (V111HallStairs01) the game's rule still
+  covers about 39% of the riser area inside the decal boxes; the old rule covered about 45%.
+- **Named difference:** the receiver's normal map is not read (the game reads the drawn normal).
+- The pre-cull keeps every triangle any of whose pixels can pass (a bound on the interpolated normal's length).
+- Red: `WW_CELL_DECAL_RED=vertexangle` draws the old per-vertex fade (read at cell build: a launch key).
+- Offline gate: `tests/decalangle_gate.cpp` (a smoothed 6-step stair under a decal box); reds `-DANGLE_RED`, `-DCULL_RED`.
+- Cost (estimate, not measured): one divide, one length and one compare per decal pixel; other shapes drawn by
+  fo4_default.frag add one uniform branch.
+
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
 - **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,
