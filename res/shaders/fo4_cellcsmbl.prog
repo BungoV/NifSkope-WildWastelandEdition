@@ -1,0 +1,4 @@
+# fo4_cellcsm with the draw's matrices and maps read from the per-draw row (lane BINDLESS2). No conditions:
+# Renderer::setupProgram swaps it in by name for fo4_cellcsm.prog while the Bindless draws row is on.
+
+shaders fo4_defaultbl.vert fo4_cellcsmbl.frag

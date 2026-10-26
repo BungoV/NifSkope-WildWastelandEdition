@@ -21,7 +21,8 @@ enum Kind : std::uint8_t
 {
 	U1i, U1f, U2f, U3f, U4f, U1iv, U1fv, U4fv, UM3, UM4,
 	ActiveTex, BindTex, TexParamNeeded, TexParamI, Enable, Disable,
-	CullFace, BlendSep, PolyOffset, DepthFunc, DepthMask, PolyMode, Live
+	CullFace, BlendSep, PolyOffset, DepthFunc, DepthMask, PolyMode, Live,
+	BlTex	// lane BINDLESS2: a = the map's slot, data = its 64-bit handle
 };
 
 struct Op

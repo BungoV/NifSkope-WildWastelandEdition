@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "celltexahead.h"
 #include "cellpasstime.h"	// lane STREAM1
 #include "celldrawpacket.h"	// lane GAPPERF-BINDLESS
+#include "cellbindless.h"	// lane BINDLESS2
 
 #include "message.h"
 #include "gl/glscene.h"
@@ -438,6 +439,7 @@ bool TexCache::wwParamsNeeded( int wrapS, int wrapT, int minFilter, float aniso 
 void TexCache::wwParamFrame()
 {
 	WwDp::frame();	// lane GAPPERF-BINDLESS: last frame's draw packets are void
+	WwBl::frame();	// lane BINDLESS2: the census line, the pool's stale spans
 	if ( ++paramEpoch == 0 )
 		paramEpoch = 1;
 	if ( paramSkips || paramSets ) {
@@ -596,6 +598,7 @@ void TexCache::flush()
 {
 	paramShadow.clear();	// lane PERF5
 	WwDp::invalidate();	// lane GAPPERF-BINDLESS: packets name these textures
+	WwBl::forgetAll();	// lane BINDLESS2: no handle may stay resident on a deleted texture
 	for ( size_t i = 0; i <= textureHashMask; i++ ) {
 		Tex &	tx = textures[i];
 		if ( tx.isLoaded() ) {
@@ -630,6 +633,8 @@ int TexCache::evictUnused( std::uint32_t tick, QStringList * names )
 		PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
 		paramForget( tx.id[0] );	// lane PERF5
 		WwDp::invalidate();	// lane GAPPERF-BINDLESS
+		WwBl::forget( tx.id[0] );	// lane BINDLESS2
+		WwBl::forget( tx.id[1] );
 		glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
 		tx.id[0] = tx.id[1] = 0;
 		tx.mipmaps = 0;

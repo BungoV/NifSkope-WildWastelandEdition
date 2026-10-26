@@ -18,8 +18,15 @@ flat out mat3 reflMatrix;
 
 #include "uniforms.glsl"
 
+#ifdef WW_BINDLESS
+// lane BINDLESS2: the draw's matrices from its row of the per-draw buffer (the same values the uniforms carry)
+#include "ww_bindless.glsl"
+#define modelViewMatrix ( wwDraws[wwDrawIdx].mv )
+#define normalMatrix mat3( wwDraws[wwDrawIdx].nm[0].xyz, wwDraws[wwDrawIdx].nm[1].xyz, wwDraws[wwDrawIdx].nm[2].xyz )
+#else
 uniform mat3 normalMatrix;			// in row-major order
 uniform mat4 modelViewMatrix;
+#endif
 
 uniform vec4 vertexColorOverride;	// components greater than zero replace the vertex color
 

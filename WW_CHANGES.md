@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BINDLESS2 (2026-10-26, branch bindless2-20261026): bindless draws (Show menu row "Bindless draws", off by default)
+
+- **Maps and matrices from one buffer:** with the row on (pin WW_BINDLESS, live), a cell-lit FO4 lighting draw uses the
+  bindless twin of fo4_cell / fo4_cellcsm (fo4_cellbl, fo4_cellcsmbl). Its texture maps are resident handles and its
+  model-view and normal matrices sit in a per-draw row of one persistent buffer (binding 12, 8 x 8192 rows of 176 bytes,
+  11.0 MiB, fenced per segment); the shader reads the row through `uniform uint wwDrawIdx`. The bound path is the red.
+- **Geometry from arenas:** each vertex layout has one vertex array with one float vertex buffer per attribute and one
+  16-bit index buffer; a draw uses the BaseVertex calls into it. GPU-driven indirect draws keep the shape's own arrays.
+- A handle freezes a texture's sampler state, so later sampler sets on it are skipped and counted (`conflicts=` in the
+  per-frame `bindless:` line). The draw packets record a BlTex op per map; WW_DRAW_PACKET_CHECK also compares the
+  per-draw row.
+- Row off = the old programs (driver binaries identical but the stamp and source hash) and the old C++ path.
+  Reds: WW_BINDLESS_RED=sampler (a mirrored nearest sampler handle), pooloff1 (pool offset one draw off), nopool.
+- Gates: tests/bindlesspool (pool offsets, red POOL FAIL), offline link sweep 3 modes, hold rows in the lane notes.
+
 ## Lane LIGHTPHYS4 (2026-10-26, branch lightphys4-20261026): far lights and live doors follow the light rows
 
 - **Far lights bounce on the rows' curve, live:** the far light bake (WW_CELL_FARLIGHT) now runs its placed-only

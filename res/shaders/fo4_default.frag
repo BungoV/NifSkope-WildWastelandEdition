@@ -16,6 +16,17 @@
 #include "ww_sunshadow.glsl"
 #endif
 
+#ifdef WW_BINDLESS
+// lane BINDLESS2: the material's maps as resident handles in the draw's row (slots of src/gl/cellbindless.h)
+#include "ww_bindless.glsl"
+#define BaseMap sampler2D( wwDraws[wwDrawIdx].tex[0] )
+#define NormalMap sampler2D( wwDraws[wwDrawIdx].tex[1] )
+#define GlowMap sampler2D( wwDraws[wwDrawIdx].tex[2] )
+#define BacklightMap sampler2D( wwDraws[wwDrawIdx].tex[3] )
+#define SpecularMap sampler2D( wwDraws[wwDrawIdx].tex[4] )
+#define GreyscaleMap sampler2D( wwDraws[wwDrawIdx].tex[5] )
+#define EnvironmentMap sampler2D( wwDraws[wwDrawIdx].tex[6] )
+#else
 uniform sampler2D BaseMap;
 uniform sampler2D NormalMap;
 uniform sampler2D GlowMap;
@@ -23,6 +34,7 @@ uniform sampler2D BacklightMap;
 uniform sampler2D SpecularMap;
 uniform sampler2D GreyscaleMap;
 uniform sampler2D EnvironmentMap;
+#endif
 uniform samplerCube CubeMap;
 
 uniform vec3 specColor;

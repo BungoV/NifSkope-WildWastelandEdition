@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "gl/cellgpucull.h"
+#include "gl/cellbindless.h"	// lane BINDLESS2
 
 #include "gl/cellcull.h"
 #include "gl/cellgrass.h"
@@ -1157,6 +1158,7 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 	auto fn = scene->renderer->fn;
 	Gpu * gp = rec.indirect ? gpuOf() : nullptr;
 	if ( gp && qsizetype( rec.numTris ) == numTriangles ) {
+		WwBl::unpoolForIndirect( fn );	// lane BINDLESS2: the commands hold the shape's own offsets
 		gp->g->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, gp->cmds );
 		gp->g->glMultiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT,
 			(const void *) ( std::size_t( rec.cmdFirst ) * sizeof( GpuDriven::DrawCmd ) ), GLsizei( rec.cmdCount ),
@@ -1169,8 +1171,7 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 	}
 	// the CPU cull's ranges, as BSShape::drawShapes draws them (the cull was asked once, in prepare)
 	if ( rec.whole ) {
-		fn->glDrawElements( GL_TRIANGLES, GLsizei( std::min< qsizetype >( numTriangles, rec.numTris ) * 3 ), GL_UNSIGNED_SHORT,
-			(void *) 0 );
+		WwBl::drawElements( fn, GLsizei( std::min< qsizetype >( numTriangles, rec.numTris ) * 3 ), 0 );
 		PassTime::countDraw( 1 );
 	} else {
 		static std::vector<GLsizei> counts;
@@ -1182,7 +1183,7 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 			offsets.push_back( (const void *) ( std::size_t( rec.ranges[k] ) * 6 ) );
 		}
 		if ( !counts.empty() ) {
-			fn->glMultiDrawElements( GL_TRIANGLES, counts.data(), GL_UNSIGNED_SHORT, offsets.data(), GLsizei( counts.size() ) );
+			WwBl::multiDrawElements( fn, counts.data(), offsets.data(), GLsizei( counts.size() ) );
 			PassTime::countDraw( qint64( counts.size() ) );
 		}
 	}
