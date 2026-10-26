@@ -48,6 +48,7 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <cmath>
+#include <memory>
 #include <string_view>
 #include <vector>
 
@@ -112,6 +113,35 @@ struct WwCellLight
 	//! lane LIGHTS5 (FOGSCALE1): the .recx keys of fog.scale: the LIGH (plugin file, local id, EditorID) and the placed ref
 	QString recxBasePlugin, recxBaseEdid, recxRefPlugin;
 	quint32 recxBaseLocal = 0, recxRefLocal = 0;
+	//! lane NIFXLIGHT1: a mesh's .nifx light (0 hero, 1 normal, 2 bulb; -1 a placed LIGH) and its fog.scale (-1 none)
+	int tier = -1;
+	float nifxFog = -1.0f;
+	QString nifxName;
+};
+
+/* lane NIFXLIGHT1: a model whose .nifx sidecar exists, with its named nodes' frames in the model's root space
+ * (columns 0-2 the rotation x scale, column 3 the translation; the root's own transform is the placement's) */
+struct WwNifxNode
+{
+	QString name;
+	float m[3][4] = { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 } };
+	bool niLight = false;
+};
+struct WwNifxModel
+{
+	QString model, sidecar;	//!< the Data path, the .nifx file found (WW_NIFX_ROOT, then the data root)
+	QVector<WwNifxNode> nodes;
+};
+//! one placed fixture: the placement in world space (P = pos + rot (scale p)) and its reference's .recx key
+struct WwNifxFixture
+{
+	std::shared_ptr<const WwNifxModel> model;
+	float pos[3] = { 0, 0, 0 };
+	float rot[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+	float scale = 1.0f;
+	quint32 ref = 0;
+	QString refPlugin;
+	quint32 refLocal = 0;
 };
 
 //! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
@@ -182,6 +212,10 @@ struct WwCellLighting
 	QString godRayNote = QStringLiteral( "fallback" );
 	QStringList recxPlugins;			//!< lane LIGHTS5 (FOGSCALE1): the load order's files (recx.h roots and merge order)
 	QString recxData;					//!< the game's Data folder
+	//! lane NIFXLIGHT1: the fixtures with a .nifx (src/gl/cellnifxlights.cpp applies them while Mesh lights is on),
+	//! the start-off placed lights the list above skipped (their state carries over), and the bulb-tier lights
+	QVector<WwNifxFixture> nifxFixtures;
+	QVector<WwCellLight> nifxOffPlaced, nifxBulbs;
 	QString summary;                    //!< one census line
 };
 

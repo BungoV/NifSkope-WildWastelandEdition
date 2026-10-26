@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane NIFXLIGHT1 (2026-10-26, branch nifxlight1-20261026): real lights from a lamp mesh's .nifx (with FOGSCALE2)
+
+- **Mesh lights (.nifx)** (Show menu row, key `WW/CellNifxLights`, pin `WW_CELL_NIFX_LIGHTS`; ships OFF, live): a lamp or
+  fixture mesh's `.nifx` `lights` section (FO4-Extension-Formats nifx/SPEC.md "lights", proposed key names on spec branch
+  nifxlights1-20261026) gives the cell real lights. Lumens, kelvin and tint become FO4's colour bytes, fade and radius
+  (the spec's 7 steps); a tint never dims. Tier `hero` takes a shadow slot (spot, hemisphere or omni cube), `normal` has
+  no shadow, `bulb` is kept apart (GI and fog only; not wired yet, never drawn on surfaces).
+- **Placed lights inside a fixture:** a placed light within 64 units of a fixture's `.nifx` light is switched off; the
+  nearest `.nifx` light takes over its flicker or pulse, its start-off state and its `.recx` keys. A `node` that names a
+  `NiLight` edits that light in place (same frame); `follows` ships the On state only.
+- **Live:** the cell remembers its fixtures at build. With the row on, each fixture's `.nifx` is re-read when its size or
+  time changes (500 ms at most) and applied to a copy of the built lights; off restores them. A census line per mesh goes
+  to stderr (`nifx lights: <mesh>: placed N, ok; ...`); `WW_NIFX_LIGHTS_DUMP=<file>` writes it with every made light.
+  `WW_NIFX_ROOT=<folder>` (read at cell build) looks for test `.nifx` files there before the data folder.
+- **FOGSCALE2:** a light's `fog.scale` now has the `.nifx` rung: the placed lamp's `.recx` reference, then the `.nifx`
+  light, then the light record's `.recx`, then 1 (air only). The `cell fogscale:` echo adds ` .nifx light N` only when
+  a `.nifx` light exists, so it reads as before without one.
+- Off = the base exactly: with the row off the published lights are the built ones; with no `.nifx` in reach nothing
+  is kept or applied (the build only checks one file per unique model). No shader change.
+- Reds (`WW_NIFX_LIGHTS_RED`, comma list): `ignore`, `tintdims`, `keepplaced`, `precedence`; each fails its gate.
+- Gates: tests/nifxconform (the spec's cases + conversion known answers), tests/nifxapply (two vanilla fixture meshes'
+  node frames from `nifskope-cli world`, test `.nifx` files kept out of the repo: 24 checks, the four reds fail).
+
 ## Lane LIGHTPHYS4 (2026-10-26, branch lightphys4-20261026): far lights and live doors follow the light rows
 
 - **Far lights bounce on the rows' curve, live:** the far light bake (WW_CELL_FARLIGHT) now runs its placed-only

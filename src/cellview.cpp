@@ -49,6 +49,7 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 #include "gl/celllights.h"
+#include "io/nifxfile.h"	// lane NIFXLIGHT1: a model's .nifx path
 #include "gl/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1
 #include "gl/cellvolumeview.h"	// lane VOLFIT1
@@ -984,6 +985,57 @@ static int cellProbeKindOf( const ProbePoint & q )
 	}
 }
 
+/* lane NIFXLIGHT1: a placed model's .nifx (WW_NIFX_ROOT first, then the data root; Meshes\ added when the path lacks it)
+ * and, when there is one, every NiAVObject's name and frame in the model (the root's own transform is the placement's) */
+static std::shared_ptr<const WwNifxModel> cellNifxModel( const QString & dataRoot, const QString & model )
+{
+	QString rel = QDir::fromNativeSeparators( model );
+	if ( !rel.startsWith( QLatin1String( "meshes/" ), Qt::CaseInsensitive ) )
+		rel = QStringLiteral( "Meshes/" ) + rel;
+	const QString side = nifxPathForNif( rel );
+	QString found;
+	for ( const QString & root : { wwEnvStr( "WW_NIFX_ROOT" ), dataRoot } )
+		if ( !side.isEmpty() && !root.isEmpty() && QFileInfo::exists( root + QLatin1Char( '/' ) + side ) ) {
+			found = QDir::cleanPath( root + QLatin1Char( '/' ) + side );
+			break;
+		}
+	if ( found.isEmpty() )
+		return nullptr;
+	auto m = std::make_shared<WwNifxModel>();
+	m->model = model;
+	m->sidecar = found;
+	NifModel src;
+	QByteArray bytes;
+	QBuffer dev( &bytes );
+	if ( !lodgenReadModelBytes( dataRoot, model, bytes ) || !dev.open( QIODevice::ReadOnly )
+		|| !src.load( dev, model.toLocal8Bit().constData() ) )
+		return m;
+	src.resetState();
+	const QList<int> roots = src.getRootLinks();
+	QSet<qint32> seen;
+	std::function<void( qint32, const Transform & )> walk = [&]( qint32 b, const Transform & up ) {
+		const QModelIndex ib = b < 0 || seen.contains( b ) ? QModelIndex() : src.getBlockIndex( b );
+		if ( !ib.isValid() || !src.blockInherits( ib, "NiAVObject" ) )
+			return;
+		seen.insert( b );
+		const Transform here = b != roots.first() ? up * Transform( &src, ib ) : up;
+		WwNifxNode n;
+		n.name = src.get<QString>( ib, "Name" );
+		n.niLight = src.blockInherits( ib, "NiLight" );
+		for ( int r = 0; r < 3; r++ ) {
+			for ( int c = 0; c < 3; c++ )
+				n.m[r][c] = here.rotation( r, c ) * here.scale;
+			n.m[r][3] = here.translation[r];
+		}
+		m->nodes.append( n );
+		for ( const int c : src.getChildLinks( b ) )
+			walk( c, here );
+	};
+	if ( !roots.isEmpty() )
+		walk( roots.first(), Transform() );
+	return m;
+}
+
 /* LANE PRTP3 -- THE CELL'S LIGHTING, for the renderer (src/gl/celllights.h).
  *
  * Every placed light that is on at load: not initially disabled, not "Off By Default" (0x20).
@@ -1003,7 +1055,8 @@ static int cellProbeKindOf( const ProbePoint & q )
  *              Z (azimuth from +Y, clockwise), degrees -- ASSUMED, the PRTP4 capture is the refuter */
 static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, const CellSceneSpec & spec,
 	const QVector<EsmRefr> & lightRefs, const QHash<quint32, EsmRefr> & primRefs, const Vector3 & center,
-	WwCellLighting * chunkOut = nullptr, const QHash<quint32, bool> * startOffOf = nullptr )
+	WwCellLighting * chunkOut = nullptr, const QHash<quint32, bool> * startOffOf = nullptr,
+	const QVector<WwNifxFixture> * nifx = nullptr )
 {
 	WwCellLighting L;
 	L.interior = spec.interior;
@@ -1085,6 +1138,28 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		plugin = idx < quint32( L.recxPlugins.size() ) ? QFileInfo( L.recxPlugins.at( int( idx ) ) ).fileName() : QString();
 		local = ESMFile::getFormIDLocal( f );
 	};
+	// what a .nifx light takes over from a placed light (lane NIFXLIGHT1): its keys, its flicker or pulse
+	auto carry = [&]( const EsmRefr & r, const EsmLight & b, WwCellLight & l ) {
+		l.ref = r.formID;
+		recxKey( r.base, l.recxBasePlugin, l.recxBaseLocal );	// lane LIGHTS5 (FOGSCALE1)
+		recxKey( r.formID, l.recxRefPlugin, l.recxRefLocal );
+		l.recxBaseEdid = b.edid;
+		// lane LIGHTFLICKER1: the game tests 0x8 first, then 0x180; the offset is in the light's local frame
+		l.flicker = ( b.flags & 0x8 ) ? 1 : ( b.flags & 0x180 ) ? 2 : 0;
+		if ( l.flicker ) {
+			l.flickerPeriod = b.flickerPeriod;
+			l.flickerIntensity = b.flickerIntensity;
+			l.flickerMovement = b.flickerMovement;
+			Matrix rm;
+			rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+			const float sc = r.scale > 0.0f ? r.scale : 1.0f;
+			for ( int a = 0; a < 3; a++ ) {
+				const Vector3 d = rm * Vector3( a == 0 ? 1.0f : 0.0f, a == 1 ? 1.0f : 0.0f, a == 2 ? 1.0f : 0.0f );
+				for ( int k = 0; k < 3; k++ )
+					l.flickerAxes[a][k] = d[k] * sc;
+			}
+		}
+	};
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
@@ -1097,8 +1172,16 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		const bool startOff = refOff || ( b.flags & 0x20 ) || pinOff;
 		if ( startOff ) {
 			off++;
-			if ( !giKeepOff || ( b.flags & 0x100000 ) )
+			if ( !giKeepOff || ( b.flags & 0x100000 ) ) {
+				if ( nifx && !nifx->isEmpty() && !( b.flags & 0x100000 ) ) {	// lane NIFXLIGHT1: its state carries over
+					WwCellLight l;
+					for ( int k = 0; k < 3; k++ )
+						l.pos[k] = r.pos[k];
+					carry( r, b, l );
+					L.nifxOffPlaced.append( l );
+				}
 				continue;
+			}
 		}
 		// lane AMBO1: an Ambient Only light (0x100000) adds no light of its own in game; it scales the cell's
 		// ambient where it applies. Lane AMBO2: inside a sphere of 1.22077 x its radius, each channel of the
@@ -1233,10 +1316,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 				l.shape = shapeRed ? 0 : 2;
 			}
 		}
-		l.ref = r.formID;
-		recxKey( r.base, l.recxBasePlugin, l.recxBaseLocal );	// lane LIGHTS5 (FOGSCALE1)
-		recxKey( r.formID, l.recxRefPlugin, l.recxRefLocal );
-		l.recxBaseEdid = b.edid;
+		carry( r, b, l );
 		/* lane LIGHTS4 (XEMI-LIGHT): the game's cell update multiplies a placed light's colour by its XEMI source's colour
 		 * (a LIGH's bytes, a region's weather at the hour; notes/lights4); celllights.cpp applies it each frame */
 		if ( r.emittance ) {
@@ -1245,21 +1325,6 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			l.xemi = xl.exists ? 0x01000000U | ( quint32( xl.color[0] ) << 16 ) | ( quint32( xl.color[1] ) << 8 ) | quint32( xl.color[2] )
 				: xr && *xr == "REGN" ? wwCellXemiRegionCode( r.emittance ) : 0U;
 		}
-		// lane LIGHTFLICKER1: the game tests 0x8 first, then 0x180; the offset is in the light's local frame
-		l.flicker = ( b.flags & 0x8 ) ? 1 : ( b.flags & 0x180 ) ? 2 : 0;
-		if ( l.flicker ) {
-			l.flickerPeriod = b.flickerPeriod;
-			l.flickerIntensity = b.flickerIntensity;
-			l.flickerMovement = b.flickerMovement;
-			Matrix rm;
-			rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
-			const float sc = r.scale > 0.0f ? r.scale : 1.0f;
-			for ( int a = 0; a < 3; a++ ) {
-				const Vector3 d = rm * Vector3( a == 0 ? 1.0f : 0.0f, a == 1 ? 1.0f : 0.0f, a == 2 ? 1.0f : 0.0f );
-				for ( int k = 0; k < 3; k++ )
-					l.flickerAxes[a][k] = d[k] * sc;
-			}
-		}
 		if ( startOff ) {   // lane GPURELIGHT1: recorded, lights nothing at the start
 			L.offLights.append( l );
 			continue;
@@ -1267,6 +1332,11 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		L.lights.append( l );
 		if ( !chunkOut )
 			wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // lane FXLIT1: a red control's data
+	}
+	if ( nifx && !nifx->isEmpty() ) {	// lane NIFXLIGHT1: the fixtures, with their reference's .recx key
+		L.nifxFixtures = *nifx;
+		for ( WwNifxFixture & f : L.nifxFixtures )
+			recxKey( f.ref, f.refPlugin, f.refLocal );
 	}
 	if ( chunkOut ) {	// lane CELLSTREAM1: one streamed cell's lights, merged and published by src/cellstream.cpp
 		*chunkOut = L;
@@ -6216,10 +6286,36 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			liveProbes = pr.probes;	// lane LIVESET1
 	}
 
+	// lane NIFXLIGHT1: the placed fixtures whose model has a .nifx (src/gl/celllights.cpp reads and applies it live)
+	QVector<WwNifxFixture> nifxFix;
+	{
+		QHash<QString, std::shared_ptr<const WwNifxModel>> models;
+		for ( const Placement & p : placements ) {
+			const QString model = p.disabled || !p.actorKey.isEmpty() ? QString() : world.lodBase( p.base ).model;
+			if ( model.isEmpty() )
+				continue;
+			auto it = models.constFind( model.toLower() );
+			if ( it == models.cend() )
+				it = models.insert( model.toLower(), cellNifxModel( dataRoot, model ) );
+			if ( !*it )
+				continue;
+			WwNifxFixture f;
+			f.model = *it;
+			for ( int r = 0; r < 3; r++ ) {
+				f.pos[r] = p.pos[r];
+				for ( int c = 0; c < 3; c++ )
+					f.rot[r][c] = p.rot( r, c );
+			}
+			f.scale = p.scale;
+			f.ref = p.ref;
+			nifxFix.append( f );
+		}
+	}
+
 	// ---- emit
 	CellSpeed::mark( "ground, water, lights, probes" );
 	if ( chunk ) {	// lane CELLSTREAM1: a streamed cell stops here; src/cellstream.cpp writes it in slices
-		cellPublishLighting( nullptr, world, spec, lightRefs, primRefs, origin, &chunk->lights, &lightStartOff );
+		cellPublishLighting( nullptr, world, spec, lightRefs, primRefs, origin, &chunk->lights, &lightStartOff, &nifxFix );
 		chunk->buckets = std::make_shared<CellChunkBuckets>();
 		chunk->buckets->keys = buckets.keys();
 		std::sort( chunk->buckets->keys.begin(), chunk->buckets->keys.end() );
@@ -6606,7 +6702,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	}
 
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
-	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin, nullptr, &lightStartOff );
+	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin, nullptr, &lightStartOff, &nifxFix );
 	wwCellFxLitPick( nif );   // lane FXLIT1: each lit effect model's four placed lights
 	if ( streamInit ) {	// lane CELLSTREAM1: the cells themselves come from the streamer, round the camera
 		seed.origin = origin;

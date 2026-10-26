@@ -724,6 +724,8 @@ void Stream::rebuild()
 		L.lights += k.lights.lights;
 		L.ambientLights += k.lights.ambientLights;
 		L.offLights += k.lights.offLights;
+		L.nifxFixtures += k.lights.nifxFixtures;	// lane NIFXLIGHT1
+		L.nifxOffPlaced += k.lights.nifxOffPlaced;
 		for ( int i = 0; i < k.refs.size(); i++ )
 			refs.append( k.refs.at( i ) );
 		for ( int i = 0; i < k.refs.cellCount(); i++ )
