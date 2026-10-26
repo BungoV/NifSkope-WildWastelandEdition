@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane REDFIX1 (2026-10-26, branch redfix1-20261026): light patterns read, emittance census counts every shape, lens flare echo
+
+- **Light patterns (gobos) read again:** a light's pattern texture is stored as `data\textures\gobo\...`. The bake and
+  cell view's texture reader (ProbeAlbedo::decode) put `textures/` in front of it, so it looked for
+  `textures/data/textures/...` and every pattern read nothing (MERGE1025: `0 textures (3 unread)`). It now uses the
+  shared path rule (GameManager::get_full_path: strip what comes before `textures/`, add it only when absent).
+  New CLI `gobocensus --data <Data> <paths...>` reads pattern textures the same way (`--red prepend` = the old lookup).
+  DLC04BottlingPlant01 + EastBostonPrep01's 7 pattern textures: 7 of 7 read; the old lookup reads 0 of 7.
+- **Emittance census counts the lit effect shapes:** `placement emittance:` now ends `..., N lit effect shapes skip it
+  (the game's lit effect never reads it)`. Memory Den's 34 XEMI placements are all lit effect cards (glow fills, mists,
+  light beams: 37 shapes), which the game never tints, so the old line read 0/0/0 and looked like a defect. Drawing is
+  unchanged.
+- **Lens flare echo per path frame:** the `lens flares:` echo (wwCellLensFlareEcho) had no caller. The path frame log
+  now prints it when the Lens flares row is on. The row was already live (stage 0, read per draw); no reader changed.
+- No shader change.
+
 ## Lane LIGHTPHYS4 (2026-10-26, branch lightphys4-20261026): far lights and live doors follow the light rows
 
 - **Far lights bounce on the rows' curve, live:** the far light bake (WW_CELL_FARLIGHT) now runs its placed-only
