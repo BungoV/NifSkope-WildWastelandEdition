@@ -3593,6 +3593,17 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		nr = std::max< GLdouble >( nr, scale() );
 		// ensure distance
 		fr = std::max< GLdouble >( fr, nr + scale() );
+		// lane HOLDFIX1: a cell's far plane in whole steps of 8192 units, so a node whose bounds wobble (Memory Den: two
+		// far planes 72 units apart inside one launch) no longer moves the depth of every frame
+		if ( wwCellLightsFor( scene->nifModel ) ) {
+			const GLdouble raw = fr;
+			fr = std::ceil( fr / 8192.0 ) * 8192.0;
+			static GLdouble said = -1.0;
+			if ( fr != said ) {
+				said = fr;
+				qInfo().noquote() << QStringLiteral( "cell projection: far %1 (bounds gave %2)" ).arg( fr, 0, 'f', 0 ).arg( raw, 0, 'f', 1 );
+			}
+		}
 		// lane FARLOD1: the far field is outside the bounds; the far plane reaches it, the near plane
 		// rises to the game's own order (fNearDistance 15) so the depth holds 250000 units. 0 = no far field.
 		if ( const float farReach = wwCellFarLodReach( scene ); farReach > 0.0f ) {
@@ -6141,6 +6152,26 @@ void GLView::update()
 			QCoreApplication::postEvent( this, new QEvent( QEvent::UpdateRequest ), Qt::HighEventPriority );
 		updatePending = 10;
 	}
+}
+
+bool GLView::wwPaintNow()
+{
+	const quint64 before = wwPaintCounter;
+	update();
+	QCoreApplication::processEvents();
+	if ( wwPaintCounter != before )
+		return true;
+	/* lane HOLDFIX1: after the hour-step rows a pumped frame painted nothing (rows ran in 6.5 s instead of 15, the
+	 * TAA note stayed at the first pre-roll frame): a swallowed request leaves updatePending set, so ask Qt itself */
+	updatePending = 0;
+	QOpenGLWindow::update();
+	static bool lastPainted = true;	// a window that never paints (hidden) waits 2 s once, not every pump
+	QElapsedTimer t;
+	t.start();
+	while ( wwPaintCounter == before && t.elapsed() < ( lastPainted ? 2000 : 50 ) )
+		QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
+	lastPainted = wwPaintCounter != before;
+	return lastPainted;
 }
 
 
