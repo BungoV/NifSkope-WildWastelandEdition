@@ -1016,8 +1016,9 @@ void wwCellXemiLightsFrame( Scene * scene )
 	}
 }
 
-/* lane LIGHTS5 (GOBO1): a spot's pattern, decoded once by path (at most 128 texels across), ^2.2 of the stored value
- * like the light colours; a map with only its first channel set drives all three. w 0 = unread. */
+/* lane LIGHTS5 (GOBO1): a spot's pattern, decoded once by path (at most 128 texels across); a map with only its first
+ * channel set drives all three. w 0 = unread. GOBO3: the stored value as read (Todd's treat loads it linear, every
+ * vanilla pattern is BC1 unorm); the shader's red WW_CELL_GOBO_GAMMA=2.2 takes it ^2.2 as LIGHTS5 did. */
 struct GoboPat
 {
 	int w = 0, h = 0;
@@ -1044,7 +1045,7 @@ static const GoboPat & goboPattern( const QString & dataRoot, const QString & pa
 		p.rgb.resize( b.size() );
 		double s[3] = { 0, 0, 0 };
 		for ( size_t k = 0; k < b.size(); k++ ) {
-			p.rgb[k] = std::pow( float( one ? b[k - k % 3] : b[k] ) / 255.0f, 2.2f );
+			p.rgb[k] = float( one ? b[k - k % 3] : b[k] ) / 255.0f;
 			s[k % 3] += p.rgb[k];
 		}
 		for ( int c = 0; c < 3; c++ )
@@ -1742,11 +1743,13 @@ void wwCellLightsUniforms( Scene * scene )
 	{	// lane LIGHTS5: GOBO1's pattern (pin WW_CELL_GOBO_ROT turns it, red WW_CELL_GOBO_RED=flat its mean) and FOGSCALE1
 		WW_SWITCH_STATIC( int, goboRot, wwEnvInt( "WW_CELL_GOBO_ROT" ) & 7 );
 		WW_SWITCH_STATIC( bool, goboFlat, wwEnvStr( "WW_CELL_GOBO_RED" ) == QLatin1String( "flat" ) );
+		WW_SWITCH_STATIC( bool, goboGam, wwEnv( "WW_CELL_GOBO_GAMMA" ).trimmed() == "2.2" );	// GOBO3 red
 		prog->uni1b( "cellGoboOn", g.goboAny );
 		prog->uni1i( "cellGoboRot", goboRot );
 		prog->uni1b( "cellGoboFlat", goboFlat );
-		// lane GOBO2: the omni/box records and the mapping guess (WW_CELL_GOBO_OMNI 0-7, the game's is unknown)
-		WW_SWITCH_STATIC( int, goboMap, wwEnvInt( "WW_CELL_GOBO_OMNI" ) & 7 );
+		prog->uni1b( "cellGoboGam", goboGam );
+		// lane GOBO2: the omni/box records and the mapping (WW_CELL_GOBO_OMNI 0-15; GOBO3: 0 = the game's, Todd's treat)
+		WW_SWITCH_STATIC( int, goboMap, wwEnvInt( "WW_CELL_GOBO_OMNI" ) & 15 );
 		prog->uni1i( "cellGoboTbl", g.goboTbl );
 		prog->uni1i( "cellGoboMap", goboMap );
 		prog->uni1b( "cellFogScaleOn", g.fogBase >= 0 );
