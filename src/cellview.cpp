@@ -53,6 +53,7 @@ BSD License - see nifskope.h
 #include "gl/cellnifxlights.h"	// lane NIFXLIGHT3: the .nifx path rule, kept live by src/gl/celllights.cpp
 #include "gl/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1
+#include "gl/lookdevstage.h"	// lane SKYTOP1: the cell's load order feeds the weather
 #include "gl/cellvolumeview.h"	// lane VOLFIT1
 #include "probevolumes.h"	// lane VOLFIT1: the Space stage
 #include "probevolumesgi.h"	// lane VOLFIT1: its rooms as the GI's volumes
@@ -2748,6 +2749,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		qInfo().noquote() << mp.line;
 	}
 	const QByteArray liveStack = chunk ? QByteArray() : liveSigOf( spec.plugins, lodgenResources(), liveLend );
+	if ( !chunk )	// lane SKYTOP1: the lookdev weather reads this cell's load order (the last plugin's record wins)
+		wwLookdevSetCellPlugins( spec.plugins.split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) );
 	// lane BAKEINCR1: an exterior bake records every asset it reads, for its bakeincr.txt
 	const bool incrRecord = !chunk && bakeExterior && !spec.interior && wwEnvIsEmpty( "WW_CELL_GI_FROM" );
 	if ( incrRecord )

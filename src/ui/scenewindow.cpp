@@ -345,7 +345,10 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	} );
 	connect( pluginBox, qOverload<int>( &QComboBox::activated ), this, [this, live]( int i ) {
 		QString path = pluginBox->itemData( i ).toString();
-		if ( path.isEmpty() ) {
+		const bool order = path == QLatin1StringView( "<load order>" );	// lane SKYTOP1
+		if ( order )
+			path.clear();
+		else if ( path.isEmpty() ) {
 			// "Browse..."
 			path = QFileDialog::getOpenFileName( this, tr( "Plugin" ), EsmWeather::gameDataDir(),
 				QStringLiteral( "Plugins (*.esm *.esp *.esl)" ) );
@@ -542,9 +545,12 @@ void SceneWindow::refreshPlugins()
 	QStringList all = wwLookdevAvailablePlugins();
 	if ( !cur.isEmpty() && !all.contains( cur, Qt::CaseInsensitive ) )
 		all.prepend( cur );
-	int at = -1;
+	// lane SKYTOP1: the first row reads the weather from the whole load order (the default); a plugin row overrides it
+	pluginBox->addItem( tr( "Load order" ), QStringLiteral( "<load order>" ) );
+	int at = cur.isEmpty() ? 0 : -1;
 	for ( const QString & p : all ) {
-		if ( QFileInfo( p ).absoluteFilePath().compare( QFileInfo( cur ).absoluteFilePath(), Qt::CaseInsensitive ) == 0 )
+		if ( !cur.isEmpty()
+			&& QFileInfo( p ).absoluteFilePath().compare( QFileInfo( cur ).absoluteFilePath(), Qt::CaseInsensitive ) == 0 )
 			at = pluginBox->count();
 		pluginBox->addItem( QFileInfo( p ).fileName(), p );
 	}

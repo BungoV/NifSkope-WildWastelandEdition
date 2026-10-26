@@ -82,8 +82,13 @@ bool wwLookdevActive();
 
 //! plugin rows: the Data folder's plugins (masters first), and the chosen one (full path)
 QStringList wwLookdevAvailablePlugins();
+//! lane SKYTOP1: the Plugin row's override (full path); empty = "Load order" (the default)
 QString wwLookdevPlugin();
 void wwLookdevSetPlugin( const QString & path );
+/*! lane SKYTOP1: the open cell's load order (full paths). With the Plugin row on "Load order" the weather (sky, sun,
+ *  fog, clouds, imagespace) is the last plugin's record across this list, as in the game; before any cell opens the
+ *  list is the active MO2 profile / plugins.txt (cellModSource). */
+void wwLookdevSetCellPlugins( const QStringList & plugins );
 //! the loaded weathers, "EDID [FormID]" order as the Scene window lists them
 QVector<WwWeatherEntry> wwLookdevWeathers();
 QString wwLookdevWeatherKey();

@@ -358,6 +358,15 @@ public:
 	 *  nothing loaded, for a missing or out-of-order master, > 256 files, or a
 	 *  file that is not a TES4 plugin. */
 	bool load( const QStringList & files, QString * refusal );
+	/*! lane SKYTOP1: the same load from the whole load order, reading of each plugin only its TES4 header and
+	 *  the top groups the lookdev reads (WTHR CLMT IMGS GMST GDRY LENS REGN), never the whole file. Every plugin
+	 *  stays in the list (the FormID masters map by position), and the last plugin's version of a record wins,
+	 *  as in the game. Red WW_LOOKDEV_RED=firstwins drops each later plugin's overrides (the first one wins). */
+	bool loadGroups( const QStringList & files, QString * refusal );
+	//! after loadGroups: bytes held in memory, bytes the files hold in all, milliseconds the read took
+	qint64 groupBytes() const { return imgBytes; }
+	qint64 fileBytes() const { return allBytes; }
+	qint64 loadMs() const { return ms; }
 	bool isLoaded() const { return bool( esm ); }
 	QStringList files() const { return loaded; }
 	QString loadSummary() const;
@@ -402,6 +411,8 @@ public:
 	static float cloudSpeed( quint8 b, const WwSkyGmst & g );
 
 private:
+	std::vector<QByteArray> images;	// lane SKYTOP1: loadGroups' plugin images; declared before esm (it outlives them)
+	qint64 imgBytes = 0, allBytes = 0, ms = 0;
 	std::unique_ptr<ESMFile> esm;
 	QStringList loaded;
 };

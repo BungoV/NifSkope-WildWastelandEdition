@@ -9,8 +9,10 @@ BSD License - see nifskope.h
 
 #include "esmfile.hpp"
 #include "gamemanager.h"
+#include "cellmodsource.h"	// lane SKYTOP1: weather --load-order
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
@@ -534,6 +536,122 @@ bool EsmWeather::load( const QStringList & files, QString * refusal )
 		return false;
 	}
 	loaded = files;
+	if ( refusal )
+		refusal->clear();
+	return true;
+}
+
+namespace {
+// lane SKYTOP1: one plugin as its TES4 record plus only the wanted top groups (each skipped by its size)
+bool groupImage( const QString & path, QByteArray & out, qint64 & fileSize, bool dropOverrides, QString * why )
+{
+	static const char * const kWanted[] = { "WTHR", "CLMT", "IMGS", "GMST", "GDRY", "LENS", "REGN" };
+	out.clear();
+	QFile f( path );
+	if ( !f.open( QIODevice::ReadOnly ) ) {
+		*why = QString( "cannot open %1" ).arg( QFileInfo( path ).fileName() );
+		return false;
+	}
+	fileSize = f.size();
+	const QByteArray hdr = f.read( 24 );
+	if ( hdr.size() < 24 || std::memcmp( hdr.constData(), "TES4", 4 ) != 0 ) {
+		*why = QString( "%1 is not a TES4 plugin" ).arg( QFileInfo( path ).fileName() );
+		return false;
+	}
+	quint32 size = 0;
+	std::memcpy( &size, hdr.constData() + 4, 4 );
+	out = hdr + f.read( qint64( size ) );
+	if ( out.size() != 24 + qsizetype( size ) ) {
+		*why = QString( "%1: short TES4 header" ).arg( QFileInfo( path ).fileName() );
+		return false;
+	}
+	const int masters = dropOverrides ? EsmWeather::mastersOf( path ).size() : 0;
+	qint64 pos = 24 + qint64( size );
+	while ( pos + 24 <= fileSize ) {
+		f.seek( pos );
+		const QByteArray g = f.read( 24 );
+		if ( g.size() < 24 || std::memcmp( g.constData(), "GRUP", 4 ) != 0 )
+			break;
+		quint32 gsize = 0;
+		std::memcpy( &gsize, g.constData() + 4, 4 );
+		if ( gsize < 24 )
+			break;
+		bool want = false;
+		for ( const char * w : kWanted )
+			want = want || std::memcmp( g.constData() + 8, w, 4 ) == 0;
+		if ( want ) {
+			QByteArray body = f.read( qint64( gsize ) - 24 );
+			if ( dropOverrides && masters > 0 ) {
+				// the red: a record whose FormID names one of the file's masters overrides it; drop it
+				QByteArray kept;
+				for ( qsizetype p = 0; p + 24 <= body.size(); ) {
+					quint32 rsize = 0, fid = 0;
+					std::memcpy( &rsize, body.constData() + p + 4, 4 );
+					std::memcpy( &fid, body.constData() + p + 12, 4 );
+					const bool grup = std::memcmp( body.constData() + p, "GRUP", 4 ) == 0;
+					const qsizetype n = grup ? qsizetype( rsize ) : 24 + qsizetype( rsize );
+					if ( grup || int( fid >> 24 ) >= masters )
+						kept += body.mid( p, n );
+					p += n;
+				}
+				body = kept;
+				gsize = quint32( body.size() + 24 );
+			}
+			QByteArray gh = g;
+			std::memcpy( gh.data() + 4, &gsize, 4 );
+			out += gh + body;
+		}
+		std::memcpy( &gsize, g.constData() + 4, 4 );	// the file's own size, not the red's trimmed one
+		pos += qint64( gsize );
+	}
+	return true;
+}
+}
+
+bool EsmWeather::loadGroups( const QStringList & files, QString * refusal )
+{
+	QElapsedTimer t;
+	t.start();
+	esm.reset();
+	images.clear();
+	loaded.clear();
+	imgBytes = allBytes = ms = 0;
+	const QString why = checkMasters( files );
+	if ( !why.isEmpty() ) {
+		if ( refusal )
+			*refusal = why;
+		return false;
+	}
+	const bool red = wwLookdevRed( "firstwins" );
+	std::vector<std::pair<const unsigned char *, size_t>> mem;
+	QStringList native;
+	images.resize( size_t( files.size() ) );
+	for ( int i = 0; i < files.size(); i++ ) {
+		QString w;
+		qint64 fsz = 0;
+		if ( !groupImage( files.at( i ), images[size_t( i )], fsz, red && i > 0, &w ) ) {
+			images.clear();
+			if ( refusal )
+				*refusal = w;
+			return false;
+		}
+		imgBytes += images[size_t( i )].size();
+		allBytes += fsz;
+		native << QDir::toNativeSeparators( files.at( i ) );
+	}
+	for ( const QByteArray & b : images )
+		mem.emplace_back( reinterpret_cast<const unsigned char *>( b.constData() ), size_t( b.size() ) );
+	try {
+		esm = std::make_unique<ESMFile>( native.join( QChar( ',' ) ).toLocal8Bit().constData(), mem );
+	} catch ( std::exception & e ) {
+		esm.reset();
+		images.clear();
+		if ( refusal )
+			*refusal = QString::fromLatin1( e.what() );
+		return false;
+	}
+	loaded = files;
+	ms = t.elapsed();
 	if ( refusal )
 		refusal->clear();
 	return true;
@@ -1347,6 +1465,7 @@ int cmdWeather( const QStringList & args )
 	QString plugins, plugin, dataDir, weather, hours, tnamArg, climateArg, daysArg;
 	QString fogProbeArg;
 	bool census = false, doList = false, sky = false, fog = false;
+	bool groups = false, loadOrder = false;	// lane SKYTOP1
 	double cloudTime = 0.0;
 	for ( int i = 0; i < args.size(); i++ ) {
 		const QString & a = args.at( i );
@@ -1367,6 +1486,10 @@ int cmdWeather( const QStringList & args )
 			climateArg = next();
 		else if ( a == "--census" )
 			census = true;
+		else if ( a == "--groups" )	// lane SKYTOP1: read only the weather's record groups (as the lookdev does)
+			groups = true;
+		else if ( a == "--load-order" )	// lane SKYTOP1: the active MO2 profile / plugins.txt
+			loadOrder = true;
 		else if ( a == "--list" )
 			doList = true;
 		else if ( a == "--sky" )
@@ -1429,7 +1552,12 @@ int cmdWeather( const QStringList & args )
 	}
 
 	QStringList files;
-	if ( !plugin.isEmpty() ) {
+	if ( loadOrder ) {
+		const CellModSource m = cellModSource();
+		files = m.plugins;
+		say( QString( "# load order from %1: %2 plugins%3" ).arg( m.label ).arg( files.size() )
+			.arg( m.error.isEmpty() ? QString() : QStringLiteral( " error=" ) + m.error ) );
+	} else if ( !plugin.isEmpty() ) {
 		QString p = plugin;
 		if ( !QFileInfo::exists( p ) && !dataDir.isEmpty() )
 			p = QDir( dataDir ).filePath( plugin );
@@ -1448,12 +1576,16 @@ int cmdWeather( const QStringList & args )
 	}
 	EsmWeather ew;
 	QString refusal;
-	if ( !ew.load( files, &refusal ) ) {
+	QElapsedTimer lt;
+	lt.start();
+	if ( !( groups ? ew.loadGroups( files, &refusal ) : ew.load( files, &refusal ) ) ) {
 		say( QString( "load refused reason=\"%1\" records=0" ).arg( refusal ) );
 		return 3;
 	}
 	const QVector<WwWeatherEntry> all = ew.list();
 	say( QString( "load ok files=%1 wthr=%2" ).arg( ew.loadSummary() ).arg( all.size() ) );
+	say( QString( "load cost mode=%1 ms=%2 held=%3MB of %4MB" ).arg( groups ? "groups" : "whole" ).arg( lt.elapsed() )
+		.arg( double( ew.groupBytes() ) / 1048576.0, 0, 'f', 1 ).arg( double( ew.fileBytes() ) / 1048576.0, 0, 'f', 1 ) );
 
 	if ( doList )
 		for ( const WwWeatherEntry & e : all )

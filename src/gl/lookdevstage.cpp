@@ -29,6 +29,7 @@ BSD License - see nifskope.h
 #include "gamemanager.h"
 #include "harnesswindow.h"
 #include "lodgen.h"
+#include "cellmodsource.h"	// lane SKYTOP1: the active load order
 
 #include <QBuffer>
 #include <QDir>
@@ -36,6 +37,10 @@ BSD License - see nifskope.h
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QHash>
+#include <QDebug>
+#include <QMap>
+#include <QMutex>
+#include <atomic>
 #include <QRegularExpression>
 #include <QSettings>
 
@@ -47,7 +52,9 @@ BSD License - see nifskope.h
 namespace
 {
 
-const char * const kPluginKey = "Settings/Render/Scene/Lookdev Plugin";
+// lane SKYTOP1: the old key ("Lookdev Plugin", a plugin that defaulted to Fallout4.esm) is no longer read; the
+// override key's empty value is "Load order"
+const char * const kPluginKey = "Settings/Render/Scene/Lookdev Plugin Override";
 const char * const kWeatherKey = "Settings/Render/Scene/Lookdev Weather";
 const char * const kHourKey = "Settings/Render/Scene/Lookdev Hour";
 const char * const kGroundKey = "Settings/Render/Scene/Lookdev Ground";
@@ -65,6 +72,17 @@ const char * const kGroundN = "textures/landscape/ground/commonwealthdefault01_n
 constexpr float kTile = 512.0f;		// research_lookdev_scene.md: UV tiled about every 512 units
 constexpr float kGroundHalf = 4096.0f;	// an ~8192-unit quad
 
+// lane SKYTOP1: the open cell's load order (set by the cell build, read by resolve)
+QMutex cellMx;
+QStringList cellOrder;
+std::atomic<quint64> cellOrderGen { 0 };
+
+QStringList cellOrderNow()
+{
+	QMutexLocker l( &cellMx );
+	return cellOrder;
+}
+
 struct LdState
 {
 	bool init = false;
@@ -81,6 +99,9 @@ struct LdState
 
 	// resolved
 	bool dirtyLoad = true, dirtyWeather = true;
+	quint64 cellSeen = 0;	// lane SKYTOP1: the cell load order generation the last load read
+	QString loadSource;	// lane SKYTOP1: where the plugin list came from, for the echo
+	qint64 loadMs = 0, loadHeld = 0, loadFiles = 0;
 	quint64 gen = 1;	// bumped whenever resolve() reloads (lane PERF1: the per-shape memos below key on it)
 	EsmWeather esm;
 	QString loadRefusal;
@@ -240,45 +261,99 @@ QString hex8( quint32 v )
 	return QString( "%1" ).arg( v, 8, 16, QChar( '0' ) ).toUpper();
 }
 
-QStringList resolveList( const LdState & s )
+QStringList resolveList( const LdState & s, bool & groups, QString & source )
 {
+	groups = false;
 	const QString data = EsmWeather::gameDataDir();
-	if ( !s.pinPlugins.isEmpty() ) {
+	auto inData = [&data]( const QStringList & names ) {
 		QStringList files;
-		for ( const QString & p0 : s.pinPlugins ) {
+		for ( const QString & p0 : names ) {
 			QString p = p0.trimmed();
 			if ( !QFileInfo::exists( p ) && !data.isEmpty() && QFileInfo::exists( QDir( data ).filePath( p ) ) )
 				p = QDir( data ).filePath( p );
 			files << p;
 		}
 		return files;
+	};
+	if ( !s.pinPlugins.isEmpty() ) {
+		source = QStringLiteral( "pinned" );
+		return inData( s.pinPlugins );
 	}
 	QString plugin = s.plugin;
+	/* lane SKYTOP1 (bungo 10-26: "the weather should be read from just any plugin"): no override = the load order,
+	 * the last plugin's record wins. Red WW_LOOKDEV_RED=oldresolve: Fallout4.esm and its masters, as before. */
+	if ( plugin.isEmpty() && !wwLookdevRed( "oldresolve" ) ) {
+		QStringList order = cellOrderNow();
+		QString from = QStringLiteral( "the cell" );
+		if ( order.isEmpty() ) {
+			const CellModSource m = cellModSource();
+			order = m.plugins;
+			from = m.label;
+		}
+		if ( !order.isEmpty() ) {
+			groups = true;
+			source = QString( "load order (%1, %2 plugins)" ).arg( from ).arg( order.size() );
+			return inData( order );
+		}
+	}
 	if ( plugin.isEmpty() && !data.isEmpty() )
 		plugin = QDir( data ).filePath( QStringLiteral( "Fallout4.esm" ) );
 	if ( plugin.isEmpty() )
 		return {};
+	source = s.plugin.isEmpty() ? QStringLiteral( "Fallout4.esm" ) : QFileInfo( plugin ).fileName();
 	return EsmWeather::loadListFor( plugin, data );
+}
+
+//! lane SKYTOP1: one line per load naming the plugin whose version of each weather won
+void loadCensus( const LdState & s )
+{
+	QMap<QString, int> per;
+	QStringList each;
+	for ( const WwWeatherEntry & e : s.list ) {
+		per[e.srcFile]++;
+		each << e.edid + QLatin1Char( '=' ) + e.srcFile;
+	}
+	QStringList counts;
+	for ( auto it = per.cbegin(); it != per.cend(); ++it )
+		counts << QString( "%1:%2" ).arg( it.key() ).arg( it.value() );
+	qInfo().noquote() << QString( "lookdev census: source=%1 files=%2 weathers=%3 ms=%4 held=%5MB of %6MB; won %7; %8" )
+		.arg( s.loadSource ).arg( s.esm.files().size() ).arg( s.list.size() ).arg( s.loadMs )
+		.arg( double( s.loadHeld ) / 1048576.0, 0, 'f', 1 ).arg( double( s.loadFiles ) / 1048576.0, 0, 'f', 1 )
+		.arg( counts.join( QChar( ',' ) ), each.join( QChar( ' ' ) ) );
 }
 
 void resolve()
 {
 	LdState & s = st();
+	// lane SKYTOP1: a cell opened with another load order reloads the weather (only while the row is "Load order")
+	if ( cellOrderGen.load() != s.cellSeen ) {
+		s.cellSeen = cellOrderGen.load();
+		if ( s.pinPlugins.isEmpty() && s.plugin.isEmpty() )
+			s.dirtyLoad = true;
+	}
 	if ( s.dirtyLoad || s.dirtyWeather )
 		s.gen++;
 	if ( s.dirtyLoad ) {
 		s.dirtyLoad = false;
 		s.dirtyWeather = true;
 		s.list.clear();
-		const QStringList files = resolveList( s );
+		bool groups = false;
+		QElapsedTimer lt;
+		lt.start();
+		const QStringList files = resolveList( s, groups, s.loadSource );
 		if ( files.isEmpty() ) {
 			s.loadRefusal = QStringLiteral( "no Fallout 4 Data folder (set the game path)" );
-		} else if ( !s.esm.load( files, &s.loadRefusal ) ) {
+		} else if ( !( groups ? s.esm.loadGroups( files, &s.loadRefusal ) : s.esm.load( files, &s.loadRefusal ) ) ) {
 			if ( s.loadRefusal.isEmpty() )
 				s.loadRefusal = QStringLiteral( "the plugins did not load" );
 		} else {
 			s.loadRefusal.clear();
+			s.loadMs = lt.elapsed();
+			s.loadHeld = groups ? s.esm.groupBytes() : 0;
+			s.loadFiles = groups ? s.esm.fileBytes() : 0;
 			s.list = s.esm.list();
+			if ( groups )
+				loadCensus( s );
 			s.gmst = s.esm.gmst();
 			QString cwhy;
 			if ( !s.esm.climateData( 0, s.clim, &cwhy ) )
@@ -640,17 +715,22 @@ QStringList wwLookdevAvailablePlugins()
 
 QString wwLookdevPlugin()
 {
-	const LdState & s = st();
-	if ( !s.plugin.isEmpty() )
-		return s.plugin;
-	const QString data = EsmWeather::gameDataDir();
-	return data.isEmpty() ? QString() : QDir( data ).filePath( QStringLiteral( "Fallout4.esm" ) );
+	return st().plugin;
+}
+
+void wwLookdevSetCellPlugins( const QStringList & plugins )
+{
+	QMutexLocker l( &cellMx );
+	if ( plugins == cellOrder )
+		return;
+	cellOrder = plugins;
+	cellOrderGen++;
 }
 
 void wwLookdevSetPlugin( const QString & path )
 {
 	LdState & s = st();
-	if ( QDir::cleanPath( path ) == QDir::cleanPath( wwLookdevPlugin() ) && s.pinPlugins.isEmpty() )
+	if ( QDir::cleanPath( path ) == QDir::cleanPath( s.plugin ) && s.pinPlugins.isEmpty() )
 		return;
 	s.plugin = path;
 	s.pinPlugins.clear();
@@ -951,7 +1031,8 @@ QString wwLookdevSummary()
 	const LdLight L = currentLight();
 	QString head;
 	if ( s.haveWeather ) {
-		head = QString( "weather=%1 [%2] src=%3" ).arg( s.w.edid, hex8( s.w.formID ), s.w.srcFile );
+		head = QString( "weather=%1 [%2] src=%3 from=\"%4\" load=%5ms" ).arg( s.w.edid, hex8( s.w.formID ), s.w.srcFile,
+			s.loadSource ).arg( s.loadMs );
 	} else {
 		head = QString( "refused=\"%1\" neutral-sun" ).arg( s.weatherRefusal );
 	}

@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SKYTOP1 (2026-10-26, branch skytop1-20261026): the weather comes from the whole load order
+
+- **Weather from any plugin (bungo 10-26):** the lookdev weather (sky, sun and ambient, fog, clouds, imagespace) is the
+  last plugin's record across the whole load order, as in the game. A cell uses the cell's own load order; a single NIF
+  uses the active MO2 profile / plugins.txt. Before, it read Fallout4.esm and its masters only, so a weather mod's sky
+  never showed.
+- **Plugin row:** its first item is "Load order" (the default). A plugin row is an override and is live. The setting moved
+  to the key `Lookdev Plugin Override`; the old `Lookdev Plugin` key is no longer read.
+- **Only the needed groups are read:** WTHR, CLMT, IMGS, GMST, GDRY, LENS and REGN from each plugin, plus its header.
+  bungo's 43 plugins: 0.9 MB held of 471.7 MB on disk, 177 ms (the whole read: 133 ms, every record indexed).
+- **Census:** one `lookdev census:` line per load names the plugin whose version of each weather won. The echo adds
+  `from=` and `load=`. CLI: `weather --load-order [--groups]`.
+- Box set to a plugin (or `WW_LOOKDEV_PLUGIN` / `WW_LOOKDEV_PLUGINS`): the old resolve, unchanged.
+- Reds (`WW_LOOKDEV_RED`, added): `oldresolve` (Fallout4.esm and its masters), `firstwins` (later plugins' overrides
+  dropped).
+
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
 - **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,
