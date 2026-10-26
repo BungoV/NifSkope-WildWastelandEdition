@@ -1186,9 +1186,12 @@ float cellAmbShare( vec3 P, vec3 N )
 uniform bool cellGoboOn;
 uniform int cellGoboRot;	// WW_CELL_GOBO_ROT: bit 0 flips u, bit 1 flips v, bit 2 swaps them
 uniform bool cellGoboFlat;	// red flat: each pattern's mean
-/* lane GOBO2: an omni/hemisphere/box light's pattern. Its textures are two squares stacked (two half-sphere views);
- * the guess is a dual paraboloid about the ref's local z, top half = +z. The game's mapping is unknown: pin
- * WW_CELL_GOBO_OMNI (cellGoboMap) bit 0 swaps the halves, bit 1 takes local x as the pole, bit 2 world axes. */
+uniform bool cellGoboGam;	// GOBO3 red WW_CELL_GOBO_GAMMA=2.2: the stored value ^2.2 (the game reads it linear)
+/* lane GOBO2: an omni/hemisphere/box light's pattern. Its textures are two squares stacked (two half-sphere views).
+ * GOBO3, from Todd's treat: a dual paraboloid about the ref's local x (the axis a spot shines along); u from local z,
+ * v from local y; the top half is +x, the bottom half (more than 1 unit behind) has u mirrored. Pin WW_CELL_GOBO_OMNI
+ * (cellGoboMap), reds: 1 no mirror, 2 u/v axes swapped, 4 world axes; 8 + bits = GOBO2's guess (pole local z,
+ * top +z; then 1 swaps the halves, 2 takes local x as the pole, 4 world axes). */
 uniform int cellGoboTbl;	// texel of the per-light table: 1 + the light's record (local x + 1 + header, y, z); 0 none
 uniform int cellGoboMap;
 vec3 cellGobo( int i, vec3 D, vec3 axis, bool spot )
@@ -1213,14 +1216,23 @@ vec3 cellGobo( int i, vec3 D, vec3 axis, bool spot )
 			return vec3( 1.0 );
 		vec4 a0 = texelFetch( cellLights, r );
 		h = int( a0.w + 0.5 ) - 1;
-		vec3 d = ( cellGoboMap & 4 ) != 0 ? D : vec3( dot( D, a0.xyz ), dot( D, texelFetch( cellLights, r + 1 ).xyz ),
+		vec3 l = ( cellGoboMap & 4 ) != 0 ? D : vec3( dot( D, a0.xyz ), dot( D, texelFetch( cellLights, r + 1 ).xyz ),
 		                                              dot( D, texelFetch( cellLights, r + 2 ).xyz ) );
-		d = normalize( ( cellGoboMap & 2 ) != 0 ? d.yzx : d );
-		hf = ( d.z >= 0.0 ) == ( ( cellGoboMap & 1 ) == 0 ) ? 0 : 1;
-		uv = d.xy / ( 1.0 + abs( d.z ) ) * 0.5 + 0.5;
+		if ( ( cellGoboMap & 8 ) != 0 ) {	// GOBO2's guess (red)
+			vec3 d = normalize( ( cellGoboMap & 2 ) != 0 ? l.yzx : l );
+			hf = ( d.z >= 0.0 ) == ( ( cellGoboMap & 1 ) == 0 ) ? 0 : 1;
+			uv = d.xy / ( 1.0 + abs( d.z ) ) * 0.5 + 0.5;
+		} else {
+			vec3 d = normalize( l );
+			hf = l.x < -1.0 ? 1 : 0;
+			vec2 e = ( cellGoboMap & 2 ) != 0 ? d.yz : d.zy;
+			if ( hf == 1 && ( cellGoboMap & 1 ) == 0 )
+				e.x = -e.x;
+			uv = e / max( hf == 1 ? 1.0 - d.x : 1.0 + d.x, 1e-4 ) * 0.5 + 0.5;
+		}
 	}
 	if ( cellGoboFlat )
-		return texelFetch( cellLights, h + 1 ).rgb;
+		return cellGoboGam ? pow( texelFetch( cellLights, h + 1 ).rgb, vec3( 2.2 ) ) : texelFetch( cellLights, h + 1 ).rgb;
 	if ( ( cellGoboRot & 4 ) != 0 )
 		uv = uv.yx;
 	if ( ( cellGoboRot & 1 ) != 0 )
@@ -1236,7 +1248,7 @@ vec3 cellGobo( int i, vec3 D, vec3 axis, bool spot )
 	int b = h + 2 + max( hf, 0 ) * pz.y * sz.x;
 	vec3 c0 = mix( texelFetch( cellLights, b + q0.y * sz.x + q0.x ).rgb, texelFetch( cellLights, b + q0.y * sz.x + q1.x ).rgb, f.x );
 	vec3 c1 = mix( texelFetch( cellLights, b + q1.y * sz.x + q0.x ).rgb, texelFetch( cellLights, b + q1.y * sz.x + q1.x ).rgb, f.x );
-	return mix( c0, c1, f.y );
+	return cellGoboGam ? pow( mix( c0, c1, f.y ), vec3( 2.2 ) ) : mix( c0, c1, f.y );
 }
 
 /* lane HEMI1: the game draws a hemisphere or box light as an omni light clipped by its volume (celllights.h):

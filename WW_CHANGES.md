@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GOBO3 (2026-10-26, branch gobo3-20261026): light patterns mapped the way the game maps them
+
+- **Light patterns (Show menu, still off; off = drawn exactly as before)** now follow the game's own mapping, read
+  from Todd's treat and the game's light shaders instead of guessed:
+  - **Omni, hemisphere and box lights:** the 1:2 pattern is a dual paraboloid about the light's local x (the axis a
+    spot shines along). u comes from local z, v from local y. The top square is the +x half; the bottom square is the
+    far half (more than 1 unit behind the light) with u mirrored. Every non-spot light gets the same pattern camera.
+  - **Spots:** unchanged; LIGHTS5's mapping already equals the game's (u from local z, v from local y, the frustum's
+    half angle = the spot's, row 0 = the texture's top row).
+  - **Brightness:** the pattern multiplies the light as stored, without the ^2.2 LIGHTS5 applied (the game loads it
+    linear; every vanilla pattern is BC1 unorm).
+- Reds (pins, live): `WW_CELL_GOBO_OMNI` 1 = far half not mirrored, 2 = u/v axes swapped, 4 = world axes, 8 + bits =
+  GOBO2's guess (pole local z); `WW_CELL_GOBO_ROT` 1/2/4 = flip u / flip v / swap (spots and omni);
+  new `WW_CELL_GOBO_GAMMA=2.2` = the old ^2.2. `WW_CELL_GOBO_OMNI=off` still keeps spots only.
+- Gate: the offline fixture (lane notes) runs the game's Euler-to-matrix code on its real instructions, then the
+  pattern camera and the shaders' maths, for 45 light rotations: the default matches to 0.000000 in uv on 4500 spot
+  and 2700 omni samples; every red differs by 0.58-0.99.
+
 ## Lane GIEDGE1 (2026-10-26, branch giedge1-20261026): no GI stripe past the probe grid's edge
 
 - **The horizontal GI band on far houses is gone.** Past the GI grid's x/y box the shader read the box's edge column
