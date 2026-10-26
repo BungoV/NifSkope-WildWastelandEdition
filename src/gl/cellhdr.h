@@ -44,5 +44,9 @@ bool wwCellDrawProbeOn();
 bool wwCellImageSpaceMeasureByPass( Scene * scene );
 //! One line for the notes: what the last frame did (or why it did not).
 QString wwCellHdrEcho();
+/*! lane PERF4: the linear frame's FARTHEST depth per pixel (max over its samples) as of now, in an R32F texture the
+ *  size of the frame; 0 when there is no frame or its depth is a renderbuffer (WW_CELL_HDR_STEX_RED). The far cards
+ *  read it to stop a fragment that every sample's depth test would refuse before it marches its sheets. */
+unsigned int wwCellHdrDepthMax( Scene * scene );
 
 #endif

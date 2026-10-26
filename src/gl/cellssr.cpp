@@ -48,6 +48,7 @@ struct SsrState
 	bool waterRay = false;	// lane WATER2: the water ray pass is drawing
 	unsigned int gbuf = 0;
 	bool flagged = false;	// the draw being set up carries the flag
+	int zreuse = 0;			// lane PERF4: the scene pass tests against the obscurance pass's depth (1; 2 = its red)
 	bool on = true, ext = false, pinOn = false, pinExt = false;	// lane CELLALL1: the rows (cellssr.h)
 	int lastVerdict = -1;	// lane CELLALL1: the telemetry line prints when it changes
 };
@@ -389,7 +390,23 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glClearBufferfv( GL_COLOR, 0, none4 );
 	if ( wantEmit )
 		fn->glClearBufferfv( GL_COLOR, 1, none4 );
-	fn->glClear( GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
+	/* lane PERF4: THE DEPTH KEPT. The obscurance pass just wrote this buffer from the same opaque draws (same programs,
+	 * same masks, same cut), so it already holds the depth this pass would build. Testing against it (GL_LEQUAL, no
+	 * write) shades only the fragment that ends visible, early-Z on, instead of every layer; the last fragment to pass
+	 * is the same one, so the colour is the same. WW_CELL_SSR_ZREUSE=0: clear and build it as before.
+	 * WW_CELL_SSR_ZREUSE_RED=1 (gates only): GL_LESS against the kept depth, every surface fails, the picture changes. */
+	WW_SWITCH_STATIC( bool, zreuseOn, wwEnv( "WW_CELL_SSR_ZREUSE" ) != "0" );
+	WW_SWITCH_STATIC( bool, zreuseRed, wwEnv( "WW_CELL_SSR_ZREUSE_RED" ) == "1" );
+	s.zreuse = zreuseOn ? ( zreuseRed ? 2 : 1 ) : 0;
+	{
+		static int said = -1;
+		if ( s.zreuse != said ) {
+			said = s.zreuse;
+			std::fprintf( stderr, "cell ssr: scene pass depth %s\n", s.zreuse == 0 ? "own (WW_CELL_SSR_ZREUSE=0)"
+				: s.zreuse == 1 ? "kept from the obscurance pass (shades the visible layer only)" : "kept, RED less" );
+		}
+	}
+	fn->glClear( s.zreuse ? GLbitfield( GL_STENCIL_BUFFER_BIT ) : GLbitfield( GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT ) );
 	fn->glDisable( GL_BLEND );
 	fn->glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );	// wwCellSsrDraw opens it for the opaque cell-lit draws
 	s.pass = true;
@@ -405,6 +422,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 	if ( opaqueOnly )
 		wwOpaqueCutArm( false, "ssr" );
 	s.pass = false;
+	if ( s.zreuse == 2 )
+		fn->glDepthFunc( GL_LEQUAL );
+	s.zreuse = 0;
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 	fn->glDepthMask( GL_TRUE );
 	fn->glDisable( GL_STENCIL_TEST );
@@ -633,8 +653,10 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 		// the game's opaque (deferred) pass: no blended draw, no effect, nothing that is not cell-lit
 		const bool opaque = cellProgram && !wwDrawBlend();
 		glColorMask( opaque, opaque, opaque, opaque );
-		if ( !opaque )
-			glDepthMask( GL_FALSE );
+		if ( !opaque || s.zreuse )
+			glDepthMask( GL_FALSE );	// lane PERF4: with the kept depth no draw writes it (it is already final)
+		if ( opaque && s.zreuse == 2 )
+			glDepthFunc( GL_LESS );
 		wwOpaqueCutSaw( opaque );	// lane PERF2FIX1 (the cut's check)
 		if ( cellProgram ) {
 			prog->uni1i( "cellProbe", 60 );

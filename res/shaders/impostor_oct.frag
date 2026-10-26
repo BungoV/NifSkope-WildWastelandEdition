@@ -54,6 +54,15 @@ uniform mat4 modelViewMatrix;      // the same one the vertex stage used
 #define CARD_IN uniform
 #endif
 
+#ifdef WW_CARDINST
+/* lane PERF4: the depth reject (src/gl/impostordraw.cpp drawCardsInstanced). The scene's farthest depth per pixel,
+ * taken before the first card; a fragment whose NEAREST possible depth is behind it fails every sample's GL_LEQUAL
+ * test whatever the march finds, so it stops here. */
+uniform bool      cardZcull;
+uniform bool      cardZcullRed;         // gates only: the bound takes the card's far end (the picture must change)
+uniform sampler2D cardSceneDepth;
+#endif
+
 // --- the four sheets of spec 42..48 -----------------------------------------
 uniform sampler2D ColourSheet;     // _d / _bc : RGB colour (unlit), A coverage
 uniform sampler2D NormalSheet;     // _n       : R nX, G nY, B height, A sway
@@ -340,6 +349,23 @@ void main()
 	float cutW     = -1.0;
 
 	vec3 ray = normalize( cardViewRay );
+
+#ifdef WW_CARDINST
+	/* Section 2 writes the depth of cardPosModel + ray x (height - 0.5) x cardDepthSpan, height in 0..1, or the quad's
+	 * own depth: every value lies on this segment, whose ends are taken a little wider (1 % and one unit), and a
+	 * depth is monotonic along a view ray. The 4 / 2^24 is the depth buffer's rounding, the min( 1 ) its clamp. */
+	if ( cardZcull ) {
+		float zt = 0.5 * cardDepthSpan * 1.01 + 1.0;
+		vec4  z0 = projectionMatrix * ( modelViewMatrix * vec4( cardPosModel - ray * zt, 1.0 ) );
+		vec4  z1 = projectionMatrix * ( modelViewMatrix * vec4( cardPosModel + ray * zt, 1.0 ) );
+		if ( z0.w > 0.0 && z1.w > 0.0 ) {
+			float za = z0.z / z0.w, zb = z1.z / z1.w;
+			float zn = min( ( cardZcullRed ? max( za, zb ) : min( za, zb ) ) * 0.5 + 0.5, 1.0 );
+			if ( zn > texelFetch( cardSceneDepth, ivec2( gl_FragCoord.xy ), 0 ).r + 4.0 / 16777216.0 )
+				discard;
+		}
+	}
+#endif
 
 	/* The stipple's noise (1b): one value per texel of the CARD, not of the
 	 * screen, so it is fixed to the object and does not swim when the camera

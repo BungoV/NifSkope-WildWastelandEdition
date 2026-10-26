@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 
 #include "gamemanager.h"
 #include "gl/celllights.h"
+#include "gl/cellhdr.h"
 #include "gl/cellpasstime.h"
 #include "gl/cellunits.h"
 #include "gl/lookdevstage.h"
@@ -975,6 +976,26 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		return false;
 	Renderer * r = scene->renderer;
 	auto * fn = r->fn;
+	/* lane PERF4: THE DEPTH REJECT. The card writes gl_FragDepth, so the hardware's early depth test is off and every
+	 * fragment, hidden or not, marched its sheets. The scene's farthest depth per pixel (taken here, before the first
+	 * card) lets impostor_oct.frag stop a fragment whose nearest possible depth is behind it: under GL_LEQUAL every
+	 * sample would refuse that fragment anyway (stencil KEEP on a depth fail), so the picture is the same.
+	 * WW_FARCARD_ZCULL=0: every fragment marches, as before. WW_FARCARD_ZCULL_RED=1 (gates only): the bound takes the
+	 * card's FAR end, so fragments that would pass are thrown away and the picture must change. */
+	WW_SWITCH_STATIC( bool, zcullOn, wwEnv( "WW_FARCARD_ZCULL" ) != "0" );
+	WW_SWITCH_STATIC( bool, zcullRed, wwEnv( "WW_FARCARD_ZCULL_RED" ) == "1" );
+	const unsigned int zTex = zcullOn ? wwCellHdrDepthMax( scene ) : 0u;
+	{
+		static QString said;
+		const QString line = !zcullOn ? QStringLiteral( "far cards: depth reject off (WW_FARCARD_ZCULL=0)" )
+			: zTex ? QStringLiteral( "far cards: depth reject on (the scene's farthest depth per pixel)%1" )
+				.arg( zcullRed ? QStringLiteral( ", RED far end" ) : QString() )
+			: QStringLiteral( "far cards: depth reject idle (no linear frame with a depth texture)" );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+	}
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( "impostor_cellinst.prog" );
 	if ( !prog )
 		return false;
@@ -1064,6 +1085,13 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	}
 	prog->uni1i( "cardData", WwCellUnit::CardData );
 	prog->uni1i( "cardFrames", WwCellUnit::CardFrames );
+	if ( zTex ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CardDepth ) );
+		fn->glBindTexture( GL_TEXTURE_2D, GLuint( zTex ) );
+	}
+	prog->uni1i( "cardSceneDepth", WwCellUnit::CardDepth );
+	prog->uni1b( "cardZcull", zTex != 0 );
+	prog->uni1b( "cardZcullRed", zcullRed );
 	prog->uni4m( "modelViewMatrix", scene->view.toMatrix4() );
 	prog->uni3f( "cardEyeModel", eye[0], eye[1], eye[2] );
 	prog->uni1b( "cardOrtho", false );
@@ -1114,6 +1142,10 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 
 	fn->glBindVertexArray( 0 );
 	r->stopProgram();
+	if ( zTex ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CardDepth ) );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	}
 	fn->glActiveTexture( GL_TEXTURE0 );
 	if ( stats )
 		*stats = st;
