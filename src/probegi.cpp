@@ -1217,6 +1217,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		R.origin[c] = float( std::floor( mn[c] - ( 2.0 + kPad ) * v ) );
 	}
 	// the blend radius from the probes' spacing
+	R.pad = kPad;
 	R.radius = float( std::max( reach, 2.0 * v ) );
 	const double rad = R.radius;
 	std::unordered_map<Key3, std::vector<int>, Key3Hash> ph;

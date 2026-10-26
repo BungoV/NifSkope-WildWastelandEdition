@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GIEDGE1 (2026-10-26, branch giedge1-20261026): no GI stripe past the probe grid's edge
+
+- **The horizontal GI band on far houses is gone.** Past the GI grid's x/y box the shader read the box's edge column
+  through CLAMP_TO_EDGE; since GIDARK1's edge sky fill those pad voxels hold a few lit ground layers, so far houses got a
+  lit sheet at a fixed world z (Concord c3: z 5880-6270, GISTRIPE1). The GI read (the voxels' answer in
+  `cellGiVolume`, `cellGiTrilinear`, and the specular occlusion `cellSpecSky`) now fades to 0 across the 5 pad voxels in
+  x/y (`cellGiEdgeFade`, uniform `cellGiPad` = probegi's kPad); past the box the weather ambient applies alone.
+  More than 5 voxels inside the faces the result is the same value as before.
+- Red `WW_CELL_GI_RED=clampedge` (live; the name stays stage reopen for its bake tokens): the old unfaded read.
+- Offline gates on the merge1025 c3 dump (notes/giedge1/gate_edge.py): outside the box k > 0.05 on 0.00% (red 51.6%,
+  k > 0.5 20.9%); per 50-u z bin 5800-6700 spread 0.000 (red 0.857); 1,351,794 inner pixels unchanged. 282/282
+  programs link in the three modes. GPU ms: a few ALU ops per GI read, estimated unchanged.
+
 ## Lane LIGHTPHYS4 (2026-10-26, branch lightphys4-20261026): far lights and live doors follow the light rows
 
 - **Far lights bounce on the rows' curve, live:** the far light bake (WW_CELL_FARLIGHT) now runs its placed-only

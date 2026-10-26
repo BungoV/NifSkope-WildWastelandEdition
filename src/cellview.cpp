@@ -6819,6 +6819,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					gi.dims[k] = gr.dims[k];
 				}
 				gi.voxel = gr.voxel;
+				gi.pad = gr.pad;
 				gi.summary = QStringLiteral( "grid %1x%2x%3 voxel %4" ).arg( gr.dims[0] ).arg( gr.dims[1] ).arg( gr.dims[2] )
 					.arg( double( gr.voxel ), 0, 'f', 1 );
 				const QString dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_GI_DUMP" ) );
