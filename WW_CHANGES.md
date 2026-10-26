@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LIVESET2 (2026-10-23, branch liveset2-20261023): live-set crashes, fog bloom, far budget
+
+- **Crash on a live WW_TONEMAP1_RED=1 or WW_CELL_HDR_STEX_RED=1 set (TONEMAPCRASH1, STEXCRASH1, one bug):** both reds
+  make the linear frame's depth / stencil a renderbuffer, so the GPU-driven occlusion pass finally saw 24 depth bits and
+  ran. Its occluder list kept `&f.recs[sh]` while later inserts grew that QHash, which moves its values; the next frame
+  read freed memory. The pointers are now taken after the last insert. Offline proof: notes/liveset2/unit/qhashref.cpp
+  (Qt 6.11: 3032 of 4000 kept pointers moved).
+- **Fog bloom always fell back (GL error 1282):** the frame's depth / stencil is a texture by default (TONEMAP1), and the
+  fog bloom attached it as a renderbuffer. It now attaches a texture as a texture. The fog bloom row draws what it was
+  meant to; its cost is the measured pass (`WW_CELL_FOGBLOOM_TIME=1`).
+- **GPU-driven occlusion in the default view (speed, on with GPU-driven B):** the depth-format query on the linear
+  frame's depth / stencil texture reads 0 bits, so occlusion never ran outside the reds. It now takes the frame's own
+  format. `WW_GPUDRIVEN_B_FMT_RED=1` is the old 0-bit path (test red); `WW_GPUDRIVEN_B_OCC=0` still turns occlusion off.
+  Its 1080p cost is not measured yet (rows c3_ls2_ref / _fmtred / _occoff with WW_GPUDRIVEN_CENSUS=1).
+- **Vanilla far budget (LIVESET-VANBUDGET):** the vanilla far chunks stopped at a working-set rise, so a live far rebuild
+  (freed pages reused) placed more chunks than a fresh open. The budget now charges an estimate: our built rings'
+  vertices plus the vanilla triangles appended so far (2.4 KB a triangle, FINALFIX g3). Same state, same far field.
+  `WW_CELL_FARLOD_VANBUDGET_RED=1` is the working set as before.
+
 ## Lane GIBAKE2 (2026-10-23, branch gibake2-20261023): bake soup census, GPU ray edges, wide exposure
 
 - **Row:** cell view Show menu > Wide exposure range (off), key `WW/CellExposureWide`, live. `WW_CELL_EXPOSURE_WIDE=1` / `=0`
