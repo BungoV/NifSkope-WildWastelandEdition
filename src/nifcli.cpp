@@ -12,6 +12,7 @@ See the LICENSE.md file for the full license text.
 #include "nifcli.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "probeplace.h"
+#include "probealbedo.h"	// lane REDFIX1: gobocensus
 #include "cellaodecal.h"	// lane AODECAL1: aobake
 #include "probebake.h"
 #include "pgiwrite.h"
@@ -489,6 +490,48 @@ int cmdPbrmResolve( const QString & file )
 	}
 
 	out() << shaders << " shader properties, " << adopted << " would adopt a pbrm" << Qt::endl;
+	return 0;
+}
+
+/*! `gobocensus --data <Data folder> <texture path>...` (lane REDFIX1): reads each light pattern texture the way
+ * the cell view's goboPattern does (ProbeAlbedo::rgbBytes, cap 128) and prints `read <path> <w> <h>` or
+ * `UNREAD <path>`, then `gobocensus: N paths, R read, U unread`. A path may be given as the LIGH NAM0 stores it
+ * (data\textures\gobo\...). Red `--red prepend`: the old decode's lookup string (textures/ put in front of any path
+ * that does not start with it), which must read nothing for a data\ path. */
+int cmdGoboCensus( const QStringList & args )
+{
+	QString root;
+	QStringList paths;
+	bool redPrepend = false;
+	for ( int i = 0; i < args.size(); i++ ) {
+		if ( args.at( i ) == QLatin1String( "--data" ) && i + 1 < args.size() )
+			root = args.at( ++i );
+		else if ( args.at( i ) == QLatin1String( "--red" ) && i + 1 < args.size() )
+			redPrepend = args.at( ++i ) == QLatin1String( "prepend" );
+		else
+			paths << args.at( i );
+	}
+	if ( root.isEmpty() || paths.isEmpty() ) {
+		err() << "gobocensus: needs --data <Data folder> and one or more texture paths" << Qt::endl;
+		return 2;
+	}
+	// -no-gui opens no game archive: read through the Data folder's own archives (the cell view's stack has it first)
+	lodgenSetResources( QStringList{ root } );
+	int read = 0;
+	for ( const QString & p : paths ) {
+		int w = 0, h = 0;
+		std::vector<unsigned char> b;
+		const QString q = redPrepend && !p.startsWith( QLatin1String( "textures/" ), Qt::CaseInsensitive )
+			? QStringLiteral( "textures/" ) + p : p;
+		if ( ProbeAlbedo( root ).rgbBytes( q, &w, &h, &b, 128 ) && w > 0 && h > 0 ) {
+			out() << "read " << p << " " << w << " " << h << Qt::endl;
+			read++;
+		} else {
+			out() << "UNREAD " << p << Qt::endl;
+		}
+	}
+	out() << "gobocensus: " << paths.size() << " paths, " << read << " read, " << ( paths.size() - read ) << " unread"
+		<< ( redPrepend ? " (red prepend)" : "" ) << Qt::endl;
 	return 0;
 }
 
@@ -7949,6 +7992,12 @@ int nifskopeCliMain( const QStringList & args )
 	if ( cmd == QLatin1String( "convex" ) ) {	// lane MAGDROP1
 		if ( !initModelLayer() ) { err().flush(); return 1; }
 		const int rc = cmdConvex( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	if ( cmd == QLatin1String( "gobocensus" ) ) {	// lane REDFIX1: no NIF, no model layer
+		const int rc = cmdGoboCensus( a );
 		out().flush();
 		err().flush();
 		return rc;
