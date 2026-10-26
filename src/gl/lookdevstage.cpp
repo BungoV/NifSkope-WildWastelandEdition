@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the Sun Path row
 #include "gl/atmosphere.h"	// lane ATMO1: the physical sky
 #include "gl/cloudmap.h"	// lane CLOUD1: the cloud map
+#include "gl/cloudvol.h"	// lane CLOUD2: the volume clouds
 #include "gl/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
 #include "gl/skyephem.h"	// lane EPHEM1: the real moon's phase texture
 #include "gl/sunshadow.h"
@@ -1626,7 +1627,12 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		const int li = ( quint32( i ) >= s.w.cloudLayers ) ? 0 : i;
 		const float sx = EsmWeather::cloudSpeed( s.w.cloudSpeedX[li], s.gmst );
 		const float sy = EsmWeather::cloudSpeed( s.w.cloudSpeedY[li], s.gmst );
-		prog->uni3f( "colLin", lin( rgb[0] ), lin( rgb[1] ), lin( rgb[2] ) );
+		float lc[3];	// lane CLOUD2: Volume Clouds Low lights the layers by the model (sky units / skyScale)
+		if ( wwCloudVolLowColour( lc ) )
+			prog->uni3f( "colLin", lc[0] / std::max( f.skyScale, 1e-6f ), lc[1] / std::max( f.skyScale, 1e-6f ),
+				lc[2] / std::max( f.skyScale, 1e-6f ) );
+		else
+			prog->uni3f( "colLin", lin( rgb[0] ), lin( rgb[1] ), lin( rgb[2] ) );
 		prog->uni1f( "alpha", alpha < 0.0f ? a : alpha );
 		prog->uni2f( "uvOffset", wwCloudOffset( sx, secs ), wwCloudOffset( sy, secs ) );
 		prog->uni1f( "skyScale", f.skyScale );
@@ -2027,7 +2033,10 @@ bool wwLookdevDrawBackground( Scene * scene )
 		if ( sunMul > 0.0f )
 			drawSunQuad( scene, f, false, sunMul, drew );
 		const float cloudMul = sx.clouds ? 1.0f : ( wwLookdevRed( "cloudleak" ) ? 0.02f : 0.0f );
-		if ( cloudMul > 0.0f )
+		// lane CLOUD2: Volume Clouds Medium+ draw the volume in place of the 2D layers (false = the layers, as before)
+		const bool volume = cloudMul >= 1.0f && wwCloudVolTier() > 0
+			&& wwCloudVolDraw( scene, { skyExposure(), skyViewTransform(), wwLookdevCloudSeconds(), g_skyCapture }, drew );
+		if ( cloudMul > 0.0f && !volume )
 			drawClouds( scene, f, cloudMul, drew );
 		if ( sunMul > 0.0f )
 			drawSunQuad( scene, f, true, sunMul, drew );

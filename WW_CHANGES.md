@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CLOUD2 (2026-10-26, branch cloud2-20261026): volume clouds (after Schneider, Nubis 2015)
+
+- **Row Render > Scene > Volume Clouds** (Off / Low / Medium / High / Ultra), ships Off, sets live. Pin `WW_CLOUDVOL`
+  (0..4 or the names). Off draws the sky exactly as before. Harness runs read Off unless pinned.
+- **Low** keeps the 2D cloud layers and colours them from the sky model (sun transmittance + sky light at the band).
+  **Medium/High/Ultra** march a volume over the sky instead of the 2D layers: Medium and High at 1/4 resolution
+  (48 steps 3 light taps / 64 steps 6 taps), Ultra at 1/2 (96 steps 6 taps), one pixel in 16 refreshed a frame and the
+  rest reprojected from the history (res/shaders/cloud_march, cloud_resolve, cloud_composite).
+- **Density:** one function, `cloudDensity(p)` in res/shaders/cloud_common.glsl, with every band height in one struct
+  (`CloudBands`). Perlin-Worley 128^3 shape and Worley 32^3 detail noise built on the CPU at first use
+  (src/gl/cloudnoise.h, MIT notice kept), mipped by the reader's footprint. CLOUD1's map gives the coverage per band,
+  calibrated so the volume's projected cover equals the map (src/gl/cloudvolmath.h).
+- **Light:** Frostbite energy-conserving step integration (Hillaire 2015), Wrenninge multiple-scatter octaves, the
+  Jendersie-d'Eon droplet phase (res/shaders/ww_droplet_phase.glsl), sun light through the atmosphere's transmittance.
+- **For CLOUD3/CLOUD4:** `wwCloudVolBindDensity(scene, firstUnit)` (src/gl/cloudvol.h) binds the density to any program.
+- **Offline gate:** `python -I tests/spells/cloudvol_check.py <scratch> [--red nocal|nooctaves|noreproj|flatkey]`
+  (builds tests/cloudvol/cloudvol_dump.cpp with g++; real shaders through the driver; no NifSkope).
+- Reds: `WW_CLOUDVOL_RED=nocal|nooctaves|noreproj|everypixel`.
+
 ## Lane CLOUD1 (2026-10-26, branch cloud1-20261026): the cloud map
 
 - **Row Render > Scene > Cloud Map** (Off / Low 256 / Medium 512 / High 512 / Ultra 1024 texels a side), ships Off,
