@@ -1965,6 +1965,43 @@ QByteArray liveSigOf( const QString & plugins, const QStringList & stack, const 
 	return plugins.toUtf8() + '\x1f' + stack.join( QLatin1Char( '|' ) ).toUtf8() + '\x1f' + lend;
 }
 
+/*! lane LIVESET5: what moved between two liveSigOf() keys, for the reopen reason. A bake made from another load
+ *  order (MERGE1025 c3: the 09-29 Commonwealth bake, 44 plugins, against today's 45) moves the plugins on every far
+ *  on/off set; the reason names them so a judge can tell a data drift from a code one */
+QString liveSigDiff( const QByteArray & was, const QByteArray & now )
+{
+	const QList<QByteArray> a = was.split( '\x1f' ), b = now.split( '\x1f' );
+	if ( a.size() != 3 || b.size() != 3 )
+		return QString();
+	auto names = []( const QByteArray & s ) {
+		QStringList out;
+		for ( const QByteArray & p : s.split( ',' ) )
+			if ( !p.isEmpty() )
+				out << QFileInfo( QString::fromUtf8( p ) ).fileName().toLower();
+		return out;
+	};
+	auto count = []( const QByteArray & s ) { return s.isEmpty() ? 0 : int( s.count( '|' ) ) + 1; };
+	QStringList parts;
+	if ( a[0] != b[0] ) {
+		const QStringList pa = names( a[0] ), pb = names( b[0] );
+		QStringList d;
+		for ( const QString & n : pb )
+			if ( !pa.contains( n ) )
+				d << QLatin1Char( '+' ) + n;
+		for ( const QString & n : pa )
+			if ( !pb.contains( n ) )
+				d << QLatin1Char( '-' ) + n;
+		parts << QStringLiteral( "plugins %1 -> %2%3" ).arg( pa.size() ).arg( pb.size() )
+			.arg( d.isEmpty() ? QStringLiteral( " (same files, another order)" ) : QStringLiteral( ": " ) + d.join( QLatin1Char( ' ' ) ) );
+	}
+	if ( a[1] != b[1] )
+		parts << QStringLiteral( "resource roots %1 -> %2" ).arg( count( a[1] ) ).arg( count( b[1] ) );
+	if ( a[2] != b[2] )
+		parts << QStringLiteral( "bake roots lent %1 -> %2" ).arg( a[2].isEmpty() ? QStringLiteral( "none" ) : QStringLiteral( "yes" ) )
+			.arg( b[2].isEmpty() ? QStringLiteral( "none" ) : QStringLiteral( "yes" ) );
+	return parts.join( QLatin1String( "; " ) );
+}
+
 QByteArray liveLendKey( const QStringList & bakeRoots )
 {
 	return bakeRoots.join( QLatin1Char( '|' ) ).toUtf8() + ( wwEnv( "WW_CELL_FARLOD_RED" ) == "nobakeroots" ? "|0" : "|1" );
@@ -2162,6 +2199,9 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 		if ( sig.isEmpty() || sig != d.stackSig ) {
 			*why = !refusal.isEmpty() ? refusal : QStringLiteral( "Far LOD on/off, type or stack red: the near cells' load "
 				"order (the bake's stack) is not the one they were loaded with" );
+			const QString moved = sig.isEmpty() ? QString() : liveSigDiff( d.stackSig, sig );	// lane LIVESET5
+			if ( !moved.isEmpty() )
+				*why += QStringLiteral( " (" ) + moved + QLatin1Char( ')' );
 			return 2;
 		}
 	}
