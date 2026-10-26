@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FOGPERF1 + SPEEDDEFAULT1 (2026-10-23, branch fogperf1-20261023): fog cost named, speed switches on
+
+### Speed switches ride with their feature (bungo 10-23: "speed change should never have an off as default")
+- Fog light clusters (LIGHTSYS-4): the air reads the surface light clusters whenever the fog is on. The shader's
+  cluster walk is exact against the flat loop (conservative cull, same ascending order). Menu row removed;
+  WW_CELL_AIR_CLUSTERS=0 stays as the test red. Where the surfaces build no clusters the air builds its own as before.
+- GI static cache (STATICCACHE1): its relight is the full relight byte for byte (tests/spells/cell_staticcache.sh),
+  so it is on; WW_CELL_GI_STATICCACHE=0 is the red.
+- Listed, not flipped (they change the picture or are not a speed win): WW_CELL_VOLAIR_TEMPORAL, WW_CELL_VRS,
+  WW_CELL_FXRES, the GPU relight row (WW_CELL_GI_GPU), WW_PARALLEL_LINK (slower), the Culling row (probably exact,
+  on/off compare row written first), the Previs row.
+
+### The air pass timed stage by stage
+- New GPU subs air-pre (before stage 0: state, uniforms, clusters), air-far, air-post (after the integrate), beside
+  air-tile / air-inject / air-integrate. New CPU subs air-state, air-setup, air-clusters, air-tile, air-inject,
+  air-integrate, air-far, air-tail, air-echo: they sum to the air zone's CPU time ("| cpu <name> ms n=").
+- WW_CELL_AIR_TIME=0 now turns the air's glFinish pair off (any set value turned it on before). The Memory Den
+  runner sets it to 1: the two glFinish calls drain the frame into the air zone, which is where the ~3.7 ms no
+  sub-timer covered most likely went. Rows measure it both ways.
+
 ## Lane TAAINPUTS1 (2026-10-23, branch taainputs1-20261023): motion vectors per object and a reactive mask (inputs only)
 
 - **What:** src/gl/taainputs.h/.cpp produce two textures a temporal resolve or the motion blur can read; nothing reads
@@ -137,7 +157,6 @@
   moves the sun key.
 - Offline: the 6-face physical-sky capture's cosine sum about +Z matches the model's sky irradiance within 0.6 %
   at sun 45/15/4 deg (notes gate, not in the repo).
-
 ## Lane SKY2 (2026-10-23, branch sky2-20261023): fog slices and the grey sky fallback
 
 ### FOGSLICE1: the air samples its own filled probe-irradiance volume (5a7c4a55)

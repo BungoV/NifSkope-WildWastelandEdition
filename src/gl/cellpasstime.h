@@ -47,10 +47,14 @@ void countDraw( qint64 ranges );
 //! lane PERF2: GPU-only sub-stages inside a pass (two timestamps each), logged after the passes as "sub <name> <ms>".
 enum Sub { AirTile, AirInject, AirIntegrate, AoGeometry, AoStages, AoGi, ToneBlit, ToneMeasure, ToneBloom, ToneQuads,
 	FarDots, FarCardsLit, ToneVrs,	// lane VRS1: ToneVrs, the rate images' build after the tone map
-	FxResDown, FxResLayer, FxResComp, SubCount };	// lane FXRES1: the soft-effect layer's depth, draws and composite
+	FxResDown, FxResLayer, FxResComp,	// lane FXRES1: the soft-effect layer's depth, draws and composite
+	AirPre, AirFar, AirPost, SubCount };	// lane FOGPERF1: the air before stage 0 (depth blit), its far grid, after it
 void subBegin( int sub );
 //! lane PERF2: CPU time inside the per-draw setup (setupProgram and the cell's uniform calls), summed per frame
-enum CpuSub { CpuSetup, CpuCellUni, CpuSunUni, CpuFogUni, CpuAoDraw, CpuSsrDraw, CpuSubCount };
+enum CpuSub { CpuSetup, CpuCellUni, CpuSunUni, CpuFogUni, CpuAoDraw, CpuSsrDraw,
+	// lane FOGPERF1: the air pass's CPU, stage by stage (they sum to the air zone's CPU)
+	CpuAirState, CpuAirSetup, CpuAirClusters, CpuAirTile, CpuAirInject, CpuAirInteg, CpuAirFar, CpuAirTail, CpuAirEcho,
+	CpuSubCount };
 qint64 nowNs();
 void cpuSubAdd( int sub, qint64 ns );
 class DrawCpuScope

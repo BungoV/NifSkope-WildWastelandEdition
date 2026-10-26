@@ -580,7 +580,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	const int nLive = lights.size();
 	const int nAll = nLive + ( REC ? spec.recordExtra.size() : 0 );
 	// lane STATICCACHE1: the key of what the placed lights' stage reads (never with the GPU record: it wants the pairs)
-	const bool scOn = wwEnvInt( "WW_CELL_GI_STATICCACHE" ) == 1 && !REC;
+	// lane FOGPERF1 (SPEEDDEFAULT1): byte for byte the full relight (STATICCACHE1 gate), so on; =0 is the test red
+	const bool scOn = wwEnvStr( "WW_CELL_GI_STATICCACHE" ) != QLatin1String( "0" ) && !REC;
 	const bool scRedWithSun = scOn && wwEnv( "WW_CELL_GI_STATICCACHE_RED" ).trimmed() == "withsun";
 	StaticLightCache & SC = staticLightCache();
 	QByteArray scKey;
