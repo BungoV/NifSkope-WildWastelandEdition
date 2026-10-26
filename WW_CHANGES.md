@@ -387,6 +387,7 @@ Each is a Show-menu tick (src/gl/celllooks.*) with its own pin and red; off draw
 - WW_CELL_AIR_TIME=0 now turns the air's glFinish pair off (any set value turned it on before). The Memory Den
   runner sets it to 1: the two glFinish calls drain the frame into the air zone, which is where the ~3.7 ms no
   sub-timer covered most likely went. Rows measure it both ways.
+
 ## Lane TAAINPUTS1 (2026-10-23, branch taainputs1-20261023): motion vectors per object and a reactive mask (inputs only)
 
 - **What:** src/gl/taainputs.h/.cpp produce two textures a temporal resolve or the motion blur can read; nothing reads
@@ -470,6 +471,7 @@ Each is a Show-menu tick (src/gl/celllooks.*) with its own pin and red; off draw
   load, so the cells are welded again; the reopen in the same window now keeps the camera where it was.
 - **Stage fixes:** WW_CELL_ACTORS_OUT, WW_CELL_WEAP_PARTS(_RED) were marked live but are welded at build: they now
   reopen. WW_CELL_PARTICLES_RED, WW_CELL_SHADOW_RED and the WW_LODI_GROUP_* knobs re-read after a set (were relaunch).
+
 ## Lane LIVESET2 (2026-10-23, branch liveset2-20261023): live-set crashes, fog bloom, far budget
 
 - **Crash on a live WW_TONEMAP1_RED=1 or WW_CELL_HDR_STEX_RED=1 set (TONEMAPCRASH1, STEXCRASH1, one bug):** both reds
@@ -535,6 +537,7 @@ Each is a Show-menu tick (src/gl/celllooks.*) with its own pin and red; off draw
   tracer uses the same lamps. Nothing drawn changes.
 - Speed: Memory Den night 960x540 at 256 paths a pixel, 4 bounces: 115 s; Concord 320x180 at 64 paths: 7 s.
 - Lane notes: notes/deck1 (compare scripts, hold rows, RESULTS.md).
+
 ## Lane PERF4 (2026-10-23, branch perf4-20261023): two hidden-work cuts in the cell view (first part of FLYPERF1)
 
 - **Far cards stop hidden fragments early:** the card shader writes its own depth, so the card's early depth test was
@@ -548,6 +551,7 @@ Each is a Show-menu tick (src/gl/celllooks.*) with its own pin and red; off draw
 - **Measured:** the frame is CPU-bound by the draw submission (about 4800 draws a frame, 20 ms of per-draw setup,
   6.5 ms camera cull), so these two cuts stay inside the run-to-run spread (still_close5 about 61 to 68 ms either
   way). Profile, numbers and the next rows: notes/perf4/RESULTS.md (lane notes).
+
 ## Lane SKY2B (2026-10-23, branch sky2b-20261023): the high-camera band, sky in view, Weather Tint on the haze
 
 ### SKYSTRIPE1: no dark band under the horizon from a high camera
