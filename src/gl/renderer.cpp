@@ -750,7 +750,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	/* lane WATER1: a cell water surface (src/gl/cellwater.h) takes fo4_water.prog by name while the draw is
 	 * cell-lit: the matrices, the cell's uniforms and the fog through the lighting setup, then the record's */
 	if ( mesh->bslsp && wwLodChannelView == 0 && wwCellWaterWanted( mesh->scene, mesh->id() ) ) {
-		if ( Program * program = useProgram( wwCellWaterProgram() ) ) {	// lane WATERCOMBINE1: or the water looks' twin
+		Program * waterProg = useProgram( wwCellWaterProgram() );	// lane WATERCOMBINE1: or the water looks' twin
+		if ( !waterProg && std::string_view( wwCellWaterProgram() ) == "fo4_waterlookd.prog" )
+			waterProg = useProgram( "fo4_waterlook.prog" );	// lane WATERLOOK1 step 2: the displaced twin refused, the flat one
+		if ( Program * program = waterProg ) {
 			if ( setupProgramCE1( nif, program, mesh ) && wwCellWaterUniforms( mesh->scene, mesh->id(), 0 ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );

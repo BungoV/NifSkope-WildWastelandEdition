@@ -1,0 +1,5 @@
+# fo4_waterlook with the water's vertices moved by the wave spectrum near the camera (lane WATERLOOK1 step 2): the
+# triangles split by fo4_waterdisp.tesc, moved by fo4_waterdisp.tese. Picked by name while the Ocean waves row is on
+# (src/gl/cellwater.cpp wwCellWaterProgram); a program with a .tese draws GL_PATCHES (glcontext.h drawPrim).
+
+shaders fo4_default.vert fo4_waterdisp.tesc fo4_waterdisp.tese fo4_waterlookd.frag

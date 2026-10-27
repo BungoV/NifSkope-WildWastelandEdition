@@ -456,7 +456,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			fadeOffsets.push_back( (const void *) ( size_t( fadeKeep[k] ) * 6 ) );
 		}
 		if ( !fadeCounts.empty() ) {
-			context->fn->glMultiDrawElements( GL_TRIANGLES, fadeCounts.data(), GL_UNSIGNED_SHORT, fadeOffsets.data(),
+			context->fn->glMultiDrawElements( GLenum( context->triMode() ), fadeCounts.data(), GL_UNSIGNED_SHORT, fadeOffsets.data(),
 				GLsizei( fadeCounts.size() ) );
 			PassTime::countDraw( qint64( fadeCounts.size() ) );
 		}
@@ -489,7 +489,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 					cur->uni1f_l( la, a0 * fadeAlpha[k] );
 				else
 					context->fn->glBlendColor( 0.0f, 0.0f, 0.0f, fadeAlpha[k] );
-				context->fn->glDrawElements( GL_TRIANGLES, GLsizei( fadeBand[2 * k + 1] * 3 ), GL_UNSIGNED_SHORT,
+				context->fn->glDrawElements( GLenum( context->triMode() ), GLsizei( fadeBand[2 * k + 1] * 3 ), GL_UNSIGNED_SHORT,
 					(void *) ( size_t( fadeBand[2 * k] ) * 6 ) );
 			}
 			PassTime::countDraw( qint64( fadeAlpha.size() ) );
@@ -517,12 +517,13 @@ void BSShape::drawShapes( NodeList * secondPass )
 			cullOffsets.push_back( (const void *) ( size_t( cullRanges[k] ) * 6 ) );
 		}
 		if ( !cullCounts.empty() ) {
-			context->fn->glMultiDrawElements( GL_TRIANGLES, cullCounts.data(), GL_UNSIGNED_SHORT, cullOffsets.data(),
+			context->fn->glMultiDrawElements( GLenum( context->triMode() ), cullCounts.data(), GL_UNSIGNED_SHORT, cullOffsets.data(),
 				GLsizei( cullCounts.size() ) );
 			PassTime::countDraw( qint64( cullCounts.size() ) );	// lane PERF1
 		}
 	} else if ( numTriangles > 0 && !hiddenT ) {
-		context->fn->glDrawElements( GL_TRIANGLES, GLsizei( numTriangles * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
+		// lane WATERLOOK1 step 2: GL_PATCHES under a program with a tessellation stage (the displaced water)
+		context->fn->glDrawElements( GLenum( context->triMode() ), GLsizei( numTriangles * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
 		PassTime::countDraw( 1 );	// lane PERF1
 	} else if ( numTriangles > 0 ) {
 		qsizetype runStart = 0;
@@ -530,7 +531,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			bool hid = ( i < numTriangles ) && hiddenT->contains( int( i ) );
 			if ( hid || i == numTriangles ) {
 				if ( i > runStart )
-					context->fn->glDrawElements( GL_TRIANGLES, GLsizei( ( i - runStart ) * 3 ),
+					context->fn->glDrawElements( GLenum( context->triMode() ), GLsizei( ( i - runStart ) * 3 ),
 						GL_UNSIGNED_SHORT, (void *) ( size_t( runStart ) * 6 ) );
 				runStart = i + 1;
 			}

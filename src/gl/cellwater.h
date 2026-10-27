@@ -79,7 +79,7 @@ bool wwCellWaterLookOn();
 //! any water program (the looks' twin or the default)
 inline bool wwIsCellWaterProgramName( std::string_view n )
 {
-	return n == "fo4_water.prog" || n == "fo4_waterlook.prog";
+	return n == "fo4_water.prog" || n == "fo4_waterlook.prog" || n == "fo4_waterlookd.prog";
 }
 //! One census line: how many shapes and records this document registered.
 QString wwCellWaterEcho( const void * nif );

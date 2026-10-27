@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 2 (2026-10-27, branch waterlook1-20261027): the waves move the water near the camera
+
+- **Displacement near** (Ocean waves row). While the spectrum is built, the baked water draws with
+  fo4_waterlookd.prog: its triangles are split near the camera (fo4_waterdisp.tesc: about 8 px an edge, at most 64
+  times a 4096 u quad, none past 8192 u; crack-free, an edge's level depends on the edge alone) and every new vertex
+  is lifted and pushed sideways by the same cascades the normals read (fo4_waterdisp.tese, water_ocean.glsl
+  wwWaterOceanDisp), full out to one cell, none past two. The pixel still reads the spectrum at the undisplaced point.
+  The FFT's final pass writes a third array for it (heights + chop, unit 70). A refused link falls back to the flat
+  water. Shapes under a program with a tessellation stage draw GL_PATCHES (Program::patches, triMode).
+- Red WW_CELL_WATER_OCEAN_RED=flat (no displacement); nochop also keeps the vertices from moving sideways.
+- Offline (no window): no cracks over 176 shared edges, bit for bit (red: a one-sided level opens 62); every output
+  triangle keeps its turn; nothing moves or splits past the fade; 4 std(z) near the camera 0.91 of the sea's Hs over
+  64 places (the finest cascade's mips lose a little); row off moves and splits nothing; all 106 programs link.
+
 ## Lane WATERLOOK1 (2026-10-27, branch waterlook1-20261027): the wind's wave spectrum on the baked water
 
 - **Ocean waves row** (Show menu, WW/CellWaterOcean; pin WW_CELL_WATER_OCEAN). The wind's wave spectrum (JONSWAP with

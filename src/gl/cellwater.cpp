@@ -517,7 +517,10 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 const char * wwCellWaterProgram()
 {
 	// lane WATERCOMBINE1: one twin carries every water look, each switched by its own uniform (wwCellWaterUniforms)
-	return wwCellWaterLookOn() ? "fo4_waterlook.prog" : "fo4_water.prog";
+	// lane WATERLOOK1 step 2: and its displaced form while the spectrum is built (the Ocean waves row, red not old/flat)
+	if ( !wwCellWaterLookOn() )
+		return "fo4_water.prog";
+	return wwCellOceanDispOn() ? "fo4_waterlookd.prog" : "fo4_waterlook.prog";
 }
 
 bool wwCellWaterLookOn()

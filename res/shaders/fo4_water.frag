@@ -112,6 +112,9 @@ uniform int waterProbe;
 #ifdef WW_WATER_OCEAN	// lane WATERLOOK1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_ocean.glsl"
 #endif
+#ifdef WW_WATER_DISP	// lane WATERLOOK1 step 2: fo4_waterlookd.prog, the displaced water: the undisplaced world xy (u)
+in vec2 wwOcBase;
+#endif
 
 vec3 tonemap( vec3 x )	// fo4_default.frag's
 {
@@ -281,8 +284,13 @@ void main()
 #endif
 #ifdef WW_WATER_OCEAN
 	// lane WATERLOOK1: on a baked body the wind's spectrum replaces the noise layers and the swell (slope space)
-	vec2 ocDx = dFdx( P.xy ), ocDy = dFdy( P.xy );
-	WwOcean oc = waterOceanOn ? wwWaterOcean( P.xy, ocDx, ocDy ) : WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
+#ifdef WW_WATER_DISP
+	vec2 ocP = wwOcBase;	// the spectrum is defined on the undisplaced grid
+#else
+	vec2 ocP = P.xy;
+#endif
+	vec2 ocDx = dFdx( ocP ), ocDy = dFdy( ocP );
+	WwOcean oc = waterOceanOn ? wwWaterOcean( ocP, ocDx, ocDy ) : WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
 	if ( oc.w > 0.0 )
 		N = normalize( vec3( mix( N.xy / max( N.z, 1e-3 ), oc.slope, oc.w ), 1.0 ) );
 #endif

@@ -97,7 +97,7 @@ def main():
             src = src.replace('NUM_TEXTURE_UNITS', str(units), 1)
         if dump and f.endswith('frag'):
             open(dump, 'w').write(src)
-        s = createShader({'frag': 0x8B30, 'geom': 0x8DD9}.get(f.rsplit('.', 1)[-1], 0x8B31))
+        s = createShader({'frag': 0x8B30, 'geom': 0x8DD9, 'tesc': 0x8E88, 'tese': 0x8E87}.get(f.rsplit('.', 1)[-1], 0x8B31))
         b = ctypes.c_char_p(src.encode('latin-1'))
         shaderSource(s, 1, ctypes.byref(b), None)
         compileShader(s)

@@ -146,6 +146,7 @@ public:
 		QString cacheFile;	// lane PERF1: the program binary cache file of this source, empty when off
 		int linkFrom = 0;	// 0 none, 1 linked from the source, 2 loaded from the cache
 		bool wwShadowFrame = false;	// lane PERF3: reads the cascades from the wwShadowFrame block (binding 2)
+		bool patches = false;	// lane WATERLOOK1 step 2: has a tessellation stage, so it draws GL_PATCHES (triMode)
 
 		ConditionGroup conditions;
 
@@ -343,6 +344,11 @@ public:
 	//! Stop shader program
 	void stopProgram();
 	//! Get the currently used shader program (nullptr if none)
+	//! lane WATERLOOK1 step 2: the primitive a shape's triangle list draws as under the bound program
+	inline unsigned int triMode() const
+	{
+		return ( currentProgram && currentProgram->patches ) ? GL_PATCHES : GL_TRIANGLES;
+	}
 	inline Program * getCurrentProgram()
 	{
 		return currentProgram;
