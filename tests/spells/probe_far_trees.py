@@ -123,8 +123,9 @@ class Trees(object):
         if os.path.exists(p):
             for ln in open(p, encoding='utf-8', errors='replace'):
                 c = ln.rstrip('\n').split(' ')
-                if not ln.startswith('#') and len(c) >= 10:
-                    side.setdefault(_source(c[-2]), (c[1], int(c[2])))
+                # v5: 10 columns, a set per family; v6 (LODMNAME1): + familyLayer, the slice of the family's sheets
+                if not ln.startswith('#') and len(c) >= 10 and c[0] == 'legacy':
+                    side.setdefault(_source(c[8]), (c[1], int(c[10]) if len(c) >= 11 else int(c[2])))
         mats = set()
         for i in self.bases:
             for r in self.slots(i):

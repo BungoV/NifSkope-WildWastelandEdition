@@ -167,8 +167,8 @@ def check(what, cond):
 
 OCT, FW, FH = 2, 8, 16
 SW, SH = OCT * FW, OCT * FH
-base = os.path.join(W, 'tex', 'Objects', 'Commonwealth.LodgenCards.legacy.%dx%d' % (SW, SH))
-game = 'data\\Textures\\Terrain\\Commonwealth\\Objects\\Commonwealth.LodgenCards.legacy.%dx%d' % (SW, SH)
+base = os.path.join(W, 'tex', 'Objects', 'Commonwealth.LodgenCards.%dx%d' % (SW, SH))
+game = 'data\\Textures\\Terrain\\Commonwealth\\Objects\\Commonwealth.LodgenCards.%dx%d' % (SW, SH)
 
 # 1. the arrays: DX10 BC3 (BC1 for the emissive), two layers, the mip chain the
 #    SETS' OWN SPACING buys, and an exact size.
@@ -229,10 +229,12 @@ else:
     print('  cardArray lodm: %s' % json.dumps(lm, separators=(',', ':'))[:300])
     tex = lm.get('textures', {})
     arr = lm.get('array', {})
-    check('the .lodm is a lodm 1 legacy cardArray naming the four sheets',
-          lm.get('lodm') == 1 and lm.get('family') == 'legacy' and lm.get('kind') == 'cardArray'
-          and tex.get('diffuse') == game + '_d.DDS' and tex.get('normal') == game + '_n.DDS'
-          and tex.get('gsaos') == game + '_gsaos.DDS' and tex.get('emissive') == game + '_g.DDS')
+    # LODMNAME1 (2026-10-27): one .lodm per size, payload lodm 3; the `_n` is shared, colour/mask per family.
+    ft = tex.get('legacy', {})
+    check('the .lodm is a lodm 3 legacy cardArray naming the four sheets',
+          lm.get('lodm') == 3 and lm.get('family') == 'legacy' and lm.get('kind') == 'cardArray'
+          and ft.get('diffuse') == game + '_d.DDS' and tex.get('normal') == game + '_n.DDS'
+          and ft.get('gsaos') == game + '_gsaos.DDS' and ft.get('emissive') == game + '_g.DDS')
     check('the .lodm carries the size class, the grid, the frame and the mip cap',
           arr.get('class') == [SW, SH] and arr.get('oct') == OCT
           and arr.get('frame') == [FW, FH] and arr.get('mips') == MIPS)
@@ -247,6 +249,9 @@ else:
     print('  layers: %s' % ids)
     check('one layer per card set, in the order the array holds them',
           len(layers) == 2 and sorted(ids) == sorted([id1, id2]))
+    check('every layer is legacy at its own slice of the shared normal and of the family sheets',
+          all(l.get('family') == 'legacy' and l.get('normalLayer') == i and l.get('familyLayer') == i
+              for i, l in enumerate(layers)))
     geom = all(l.get('half') == [64.0, 128.0] and l.get('center') == [0.0, 0.0, 128.0]
                and l.get('depthSpan') == 3072.0 for l in layers)
     check('every layer carries the card geometry of its set (half, centre, depth span)', geom)
@@ -396,7 +401,7 @@ _g = GAP
 while _g >= 2:
     MIPS += 1; _g //= 2
 MIPS = max(1, MIPS)
-stem = 'Commonwealth.LodgenCards.legacy.%dx%d' % (SW, SH)
+stem = 'Commonwealth.LodgenCards.%dx%d' % (SW, SH)
 full = os.path.join(W, 'tex', 'Objects', stem)
 half = os.path.join(W, 'texh', 'Objects', stem)
 

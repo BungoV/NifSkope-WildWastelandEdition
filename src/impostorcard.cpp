@@ -221,8 +221,9 @@ QStringList ImpostorCardSet::notes() const
 	}
 	out << QString( "family: %1 (%2)" ).arg( pbr ? "pbr" : "legacy",
 			pbr ? "mask = RMAOS" : "mask = GSAOS" );
-	out << QString( "kind: %1%2" ).arg( kind,
-			( layer >= 0 ) ? QString( ", layer %1" ).arg( layer ) : QString() );
+	out << QString( "kind: %1%2%3" ).arg( kind,
+			( layer >= 0 ) ? QString( ", layer %1" ).arg( layer ) : QString(),
+			( normalLayer >= 0 ) ? QString( ", normal layer %1" ).arg( normalLayer ) : QString() );
 	if ( ring() )
 		out << QString( "grid: RING of %1 views at 360/%1 degrees, one row = %1 frames" ).arg( views );
 	else
@@ -360,6 +361,23 @@ ImpostorCardSet impostorCardLoad( const QString & lodmPath, int layer )
 			return set;
 		}
 		set.layer = want;
+		// lodm 3 (LODMNAME1): the layer's own family picks the colour/mask/emissive
+		// sheets and its slice in them; the `_n` slice stays the layer's index
+		QString colourPath = mat.color, maskPath = mat.mask, emissivePath = mat.emissive;
+		if ( mat.payloadVersion == 3 ) {
+			bool lp = false;
+			int fl = -1;
+			if ( !lodmArrayLayer( mat, want, &lp, &fl ) ) {
+				set.error = QString( "%1: layer %2 has no family" ).arg( lodmPath ).arg( want );
+				return set;
+			}
+			set.pbr = lp;
+			set.normalLayer = want;
+			set.layer = fl;
+			colourPath = mat.fam[lp].color;
+			maskPath = mat.fam[lp].mask;
+			emissivePath = mat.fam[lp].emissive;
+		}
 
 		set.oct  = arr.value( "oct" ).toInt( 0 );
 		if ( !readRing( arr, set, lodmPath ) )
@@ -403,10 +421,10 @@ ImpostorCardSet impostorCardLoad( const QString & lodmPath, int layer )
 		if ( want < es.size() && es.at( want ).isDouble() )
 			set.emissiveScale = float( es.at( want ).toDouble() );
 
-		fillSheet( set.colour,   dir, mat.color );
+		fillSheet( set.colour,   dir, colourPath );
 		fillSheet( set.normal,   dir, mat.normal );
-		fillSheet( set.mask,     dir, mat.mask );
-		fillSheet( set.emissive, dir, mat.emissive );
+		fillSheet( set.mask,     dir, maskPath );
+		fillSheet( set.emissive, dir, emissivePath );
 
 	} else {
 		set.error = QString( "%1: kind is \"%2\" -- this preview draws \"card\" and \"cardArray\" only"

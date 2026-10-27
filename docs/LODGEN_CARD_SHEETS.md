@@ -53,16 +53,18 @@ The bake's own intermediate is a set of PNGs
 `_oct_s.png`) plus a `<id>.txt` sidecar (§5). Those are inputs to
 `lodgenCard` and to the array packer, not a shipped format.
 
-### 1.2 Card arrays — one per (family, sheet size)
+### 1.2 Card arrays — one per sheet size (both families, since 2026-10-27)
 
 ```
-Data\FO4CSLOD\<ws>\Objects\<ws>.LodgenCards.legacy.<SW>x<SH>_d.DDS
-                                   <ws>.LodgenCards.legacy.<SW>x<SH>_n.DDS
-                                   <ws>.LodgenCards.legacy.<SW>x<SH>_gsaos.DDS
-                                   <ws>.LodgenCards.legacy.<SW>x<SH>_g.DDS
-                                   <ws>.LodgenCards.legacy.<SW>x<SH>.lodm
-                                   <ws>.LodgenCards.pbr.<SW>x<SH>_bc.DDS  … _e.DDS, .lodm
+Data\FO4CSLOD\<ws>\Objects\<ws>.LodgenCards.<SW>x<SH>_n.DDS        shared, every layer, legacy first
+                                   <ws>.LodgenCards.<SW>x<SH>_d.DDS        legacy  (_gsaos, _g)
+                                   <ws>.LodgenCards.<SW>x<SH>_bc.DDS       pbr     (_rmaos, _e)
+                                   <ws>.LodgenCards.<SW>x<SH>.lodm         cardArray, lodm 3
 ```
+
+Ring sets add `.ring` after the size. Until 2026-10-27 the name carried the family
+(`<ws>.LodgenCards.legacy|pbr.<SW>x<SH>`, each with its own `_n`); the reader still takes
+those, and `tools/lodgen_migrate_arrays.py` rewrites them. `docs/LODGEN_LODM_FORMAT.md` §4.1.
 
 **`<SW>x<SH>` is the WHOLE SHEET size** (`oct·frameW` by `oct·frameH`), not the
 frame and not a per-layer texture class. That differs from the mesh texture

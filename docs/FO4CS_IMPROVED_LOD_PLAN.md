@@ -156,8 +156,8 @@ composition is owed this change** -- it is the reader half of the same ruling.
 | `Data\FO4CSLOD\<EDID>\<EDID>.VT.<dim>.lodt` | one terrain-texture PYRAMID container per level: colour, model-space normal, mask, optional height, optional emissive | VT 3.1, VT 2.2 | ~~**no** — VT 7: nothing has ever been written to disk~~ (struck 2026-09-23) **The first whole-Commonwealth pyramid was written 2026-09-23 08:17 by lane VTBAKE1**, into `scratchpad/vtbake1_20260923/bake/FO4CSLOD/Commonwealth/`: 5 levels, 12,276 tiles, about 4.0 GB, height sheet ON, cover OFF. Its validation is still running, and it is not in any mod folder |
 | `Data\FO4CSLOD\<EDID>\<EDID>.VT.lodm` | the pyramid INDEX: which containers, which sheets, the corpus hashes, the cover normalisation | VT 4, LODM 5 | ~~**no** — VT 7~~ (struck 2026-09-23) yes, from the same VTBAKE1 bake: `Commonwealth.VT.lodm`, 2,505 B. VT 4 still prints the old `Data\Terrain\` path. The writer uses this one |
 | `Data\FO4CSLOD\Cards\<formid8hex>_oct*.DDS` + `.lodm` | per-base octahedral impostor CARD sets | CARDS 1.1, LODM 3 | four libraries of 19 Sanctuary trees exist (CARDS 9). **All four were baked 2026-09-09, before the orthographic camera, the coverage contract and the 2026-09-19 azimuth repair, so every one is owed a re-bake** (private notes 2026-09-19 09:5x; §5 row 22; found 2026-09-23); **no worldspace bake has ever written a card layer** — NATIVE 11, Deviation 5 |
-| `<ws>.LodgenCards.<family>.<SW>x<SH>_*.DDS` + `.lodm` | CARD ARRAYS, one per (family, sheet size) | CARDS 1.2, LODM 4 | no |
-| `<ws>.LodgenArrays[PBR].<W>x<H>_*.DDS` + `.lodm` | mesh LOD TEXTURE ARRAYS, one per (family, texture size class) | ARRAYS 1, LODM 4 | **no** — ARRAYS 10 |
+| `<ws>.LodgenCards.<SW>x<SH>_*.DDS` + `.lodm` | CARD ARRAYS, one per sheet size, both families (lodm 3 since 2026-10-27) | CARDS 1.2, LODM 4.1 | no |
+| `<ws>.LodgenArrays.<W>x<H>_*.DDS` + `.lodm` | mesh LOD TEXTURE ARRAYS, one per texture size class, both families (`PBR` stem until 2026-10-27) | ARRAYS 1, LODM 4.1 | **no** — ARRAYS 10 |
 | `<chunk>.bto.manifest.txt` | the per-placement manifest beside each stock `.BTO` | MANIFEST 1 | v2 has never been written to disk — MANIFEST 10 |
 
 Two of those the module reads **only while its stock-fallback arm is serving**:
@@ -1682,15 +1682,16 @@ contradicted it.
   * Refuse: `LDTX`, by name; anything outside 1..3. Row 0 is SOUTH. **The shipped FO4CS parser pins
     `kVersion = 1u`** (§5 item 16), and whether the new module accepts v1 is §6 (r).
 * **`.lodm`**
-  * Writer: envelope **1**, payload **1**, `src/io/lodmfile.cpp` `static const quint32 LODM_VERSION = 1;`.
-  * Reader accepts: 1.
-  * Refuse: a third `family` word. That is a hard refusal, not a fallback. New optional keys since 2026-09-11:
+  * Writer: envelope **1**, payload **1**, `src/io/lodmfile.cpp` `static const quint32 LODM_VERSION = 1;`;
+    payload **2** on a swaying card, **3** on every `array` / `cardArray` since 2026-10-27 (LODM 4.1).
+  * Reader accepts: payload 1, 2 and 3 (3 on array / cardArray only).
+  * Refuse: a third `family` word (`"mixed"` is allowed on payload 3 only). That is a hard refusal, not a fallback. New optional keys since 2026-09-11:
     `card.conv` / layer `conv`, and `kind: "aggregate"`. `"nlayout": 2` arrives only if the `_n` swap is ruled.
 * **manifest**
   * Writer: `# lodgen manifest 2`.
   * Refuse: a v1 manifest, which has no header line at all and whose rows carry only eight fields.
 * **texture arrays**
-  * Writer: sidecar `# lodgen texture arrays 5`.
+  * Writer: sidecar `# lodgen texture arrays 6` (5 until 2026-10-27; 6 appends `familyLayer`).
   * Refuse: nothing listed.
 
 **Every `.lodo` / `.lodi` bump since v3: what it added, and the rung that reads it.** The authority is the

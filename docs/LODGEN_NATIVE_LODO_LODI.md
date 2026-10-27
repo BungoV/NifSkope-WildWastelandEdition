@@ -2435,7 +2435,8 @@ value, so no file on disk means anything else by them.
 **Where the numbers come from.** A `--native --impostors <dir> --arrays` bake
 builds the chunks, then the card-arrays pass packs every octahedral card set a
 chunk's `C` line stands on into DX10 arrays
-(`<mod>/FO4CSLOD/<ws>/Objects/<ws>.LodgenCards.<family>.<WxH>` -- a
+(`<mod>/FO4CSLOD/<ws>/Objects/<ws>.LodgenCards.<WxH>` (`.<family>.` before the size until
+2026-10-27) -- a
 `cardArray` `.lodm` and four DDS) and appends `<array .lodm> <layer>` to each
 `C` line it placed (twelve tokens; ten = a card in no array). Only then is the
 pair written: `lodgenNativeLinkCards()` (`src/nativeemit.cpp`) reads the

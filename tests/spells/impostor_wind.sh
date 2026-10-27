@@ -176,7 +176,7 @@ v=$( "$PY" "$here/impostor_wind.py" lodm "$WORK/elm/cards/${FID}_oct.lodm" 2>&1 
 case "$v" in "lodm 2 kind card sway model leafAmplitude "[0-9]*) ok "G3 the elm card is $v" ;; *) bad "G3 the elm card: $v" ;; esac
 arr=$( find "$WORK/elm/tex" -iname '*LodgenCards*.lodm' 2>/dev/null | head -1 )
 if [ -n "$arr" ]; then v=$( "$PY" "$here/impostor_wind.py" lodm "$arr" 2>&1 )
-	case "$v" in "lodm 2 kind cardArray"*"array sway ['model'"*) ok "G3 its card array: $v" ;; *) bad "G3 its card array: $v" ;; esac
+	case "$v" in "lodm 3 kind cardArray"*"array sway ['model'"*) ok "G3 its card array: $v" ;; *) bad "G3 its card array: $v" ;; esac
 else bad "G3 no card array .lodm under $WORK/elm"; fi
 v=$( "$PY" "$here/impostor_wind.py" lodm "$WORK/hero/cards/${FID}_oct.lodm" 2>&1 )
 case "$v" in "lodm 1 kind card sway None"*) ok "G3 Hero stays $v" ;; *) bad "G3 Hero: $v" ;; esac

@@ -5965,13 +5965,15 @@ bool lodgenWriteDdsArray( const QString & path, int w, int h,
  *     strength), AO neutral (the chunk carries it per vertex), subsurface
  *     mask 1 for a source an alpha-tested shape uses, and `_g` the EMISSIVE:
  *     the vanilla glow rule, the diffuse times its own alpha where the shape
- *     is not alpha-tested and black where it is, BC1. Files
- *     `<ws>.LodgenArrays.<WxH>_d/_n/_gsaos/_g.DDS`.
+ *     is not alpha-tested and black where it is, BC1. Sheets `_d/_gsaos/_g`.
  *   - PBR, from a source `.lodm` of family pbr (lodmSourceCandidate): `_bc`
  *     its base colour, `_n` its normal (blue = height when it says so),
  *     `_rmaos` its third texture raw, `_e` its emissive texture raw (black
  *     when it names none - a pbr source has no vanilla glow to fall back on).
- *     Files `<ws>.LodgenArraysPBR.<WxH>_bc/_n/_rmaos/_e.DDS`.
+ *     Sheets `_bc/_rmaos/_e`.
+ *  Both families of one size are ONE set, `<ws>.LodgenArrays.<WxH>` (lodm 3, lane
+ *  LODMNAME1): one `_n` over every layer, colour/mask/emissive per family. Before
+ *  2026-10-27 a pbr set was its own `<ws>.LodgenArraysPBR.<WxH>`.
  *  A legacy `.lodm` supplies its own textures, the third and the emissive raw, under
  *  the legacy names. A set whose emissive is black on every layer writes no
  *  `_g`/`_e` and its `.lodm` names no `textures.emissive` (lane TIDY1,
@@ -6298,9 +6300,9 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	if ( !side.open( QIODevice::WriteOnly | QIODevice::Text ) )
 		return fail( QStringLiteral( "could not write the array sidecar" ) );
 	QTextStream ss( &side );
-	// version 5: emissiveScale appended on the END, so a reader that indexes the
-	// first nine columns by position is unaffected (the C lines' rule, again)
-	ss << "# lodgen texture arrays 5: family class layer lodm color normal mask emissive source emissiveScale (docs/LODGEN_IMPOSTOR_SPEC.md)\n";
+	// version 6 (LODMNAME1): `layer` is the slice of the ONE shared `_n` sheet and
+	// familyLayer, appended on the END, the slice of the family's own colour/mask sheets
+	ss << "# lodgen texture arrays 6: family class layer lodm color normal mask emissive source emissiveScale familyLayer (docs/LODGEN_IMPOSTOR_SPEC.md)\n";
 	int arrays = 0, textures = 0, legacyClasses = 0, pbrClasses = 0, blackEmissiveDropped = 0;
 	/* A BLACK EMISSIVE IS NOT WRITTEN (lane TIDY1, 2026-09-27). Vanilla LOD has
 	 * no glow source (tools/lod_emission_probe.py: 0 of 121 LOD materials, 0 of
@@ -6313,45 +6315,92 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	 * sheets already have it. A set with one lit texel ships the sheet whole.
 	 * Gate-only way back: WW_LODGEN_KEEP_BLACK_EMISSIVE=1. */
 	const bool keepBlackEmissive = !wwEnv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty();
+	/* ONE SET PER SIZE (lane LODMNAME1, bungo 2026-10-27): `<ws>.LodgenArrays.<WxH>`,
+	 * no family in the name. Both families share the `_n` sheet (legacy layers first,
+	 * so a legacy-only set keeps every index it had); colour and mask stay per family
+	 * and hold only that family's layers. lodm 3, docs/LODGEN_LODM_FORMAT.md 4.1. */
+	QMap<QString, QPair<ArrayClass *, ArrayClass *>> bySize;	// WxH -> (legacy, pbr)
 	for ( auto it = classes.begin(); it != classes.end(); ++it ) {
-		ArrayClass & cls = it.value();
 		const QString sizeKey = it.key().mid( it.key().indexOf( QChar( '|' ) ) + 1 );
-		const QString stem = QString( "%1.%2" ).arg( cls.pbr ? QStringLiteral( "PBR" ) : QString() ).arg( sizeKey );
+		( it.value().pbr ? bySize[sizeKey].second : bySize[sizeKey].first ) = &it.value();
+	}
+	for ( auto it = bySize.begin(); it != bySize.end(); ++it ) {
+		const QString & sizeKey = it.key();
+		ArrayClass * fams[2] = { it.value().first, it.value().second };
+		const ArrayClass & any = *( fams[0] ? fams[0] : fams[1] );
+		const QString stem = QStringLiteral( "." ) + sizeKey;
 		const QString fileBase = arrayFileBase + stem, gameBase = arrayGameBase + stem;
-		const QString colorSfx = QLatin1String( lodmColorSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
-		const QString maskSfx = QLatin1String( lodmMaskSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
-		const QString emSfx = QLatin1String( lodmEmissiveSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
-		const bool writeEmissive = keepBlackEmissive || !lodgenEmissiveShipsBlack( cls.em, cls.w, cls.h );
-		if ( !writeEmissive )
-			blackEmissiveDropped++;
-		const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; } sheets[4] = {
-			{ colorSfx, &cls.bc, true }, { QStringLiteral( "_n.DDS" ), &cls.n, true },
-			{ maskSfx, &cls.rm, true },
-			// the emissive is BC1: three channels and no alpha to carry
-			{ emSfx, &cls.em, false } };
-		for ( const auto & s : sheets ) {
-			if ( s.px == &cls.em && !writeEmissive )
-				continue;
-			if ( !lodgenWriteDdsArray( fileBase + s.suffix, cls.w, cls.h, *s.px, s.bc3 ) )
-				return fail( QString( "could not write %1" ).arg( fileBase + s.suffix ) );
-			arrays++;
-		}
-		// the set's .lodm: family, the three arrays, the source per layer
+		// the shared normal sheet: every layer, legacy then pbr
+		std::vector<std::vector<quint32>> nAll;
+		for ( ArrayClass * c : fams )
+			if ( c )
+				nAll.insert( nAll.end(), c->n.begin(), c->n.end() );
+		if ( !lodgenWriteDdsArray( fileBase + QStringLiteral( "_n.DDS" ), any.w, any.h, nAll, true ) )
+			return fail( QString( "could not write %1" ).arg( fileBase + QStringLiteral( "_n.DDS" ) ) );
+		arrays++;
 		QJsonObject root, tex, arr;
-		root.insert( QStringLiteral( "lodm" ), 1 );
-		root.insert( QStringLiteral( "family" ), cls.pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) );
+		root.insert( QStringLiteral( "lodm" ), 3 );
+		root.insert( QStringLiteral( "family" ), ( fams[0] && fams[1] ) ? QStringLiteral( "mixed" )
+			: fams[1] ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) );
 		root.insert( QStringLiteral( "kind" ), QStringLiteral( "array" ) );
-		tex.insert( QLatin1String( lodmColorKey( cls.pbr ) ), gameBase + colorSfx );
 		tex.insert( QStringLiteral( "normal" ), gameBase + QStringLiteral( "_n.DDS" ) );
-		tex.insert( QLatin1String( lodmMaskKey( cls.pbr ) ), gameBase + maskSfx );
-		if ( writeEmissive )
-			tex.insert( QStringLiteral( "emissive" ), gameBase + emSfx );
+		for ( int f = 0; f < 2; ++f ) {
+			if ( !fams[f] )
+				continue;
+			ArrayClass & cls = *fams[f];
+			const QString colorSfx = QLatin1String( lodmColorSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
+			const QString maskSfx = QLatin1String( lodmMaskSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
+			const QString emSfx = QLatin1String( lodmEmissiveSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
+			const bool writeEmissive = keepBlackEmissive || !lodgenEmissiveShipsBlack( cls.em, cls.w, cls.h );
+			if ( !writeEmissive )
+				blackEmissiveDropped++;
+			const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; } sheets[3] = {
+				{ colorSfx, &cls.bc, true }, { maskSfx, &cls.rm, true },
+				// the emissive is BC1: three channels and no alpha to carry
+				{ emSfx, &cls.em, false } };
+			for ( const auto & s : sheets ) {
+				if ( s.px == &cls.em && !writeEmissive )
+					continue;
+				if ( !lodgenWriteDdsArray( fileBase + s.suffix, cls.w, cls.h, *s.px, s.bc3 ) )
+					return fail( QString( "could not write %1" ).arg( fileBase + s.suffix ) );
+				arrays++;
+			}
+			QJsonObject ft;
+			ft.insert( QLatin1String( lodmColorKey( cls.pbr ) ), gameBase + colorSfx );
+			ft.insert( QLatin1String( lodmMaskKey( cls.pbr ) ), gameBase + maskSfx );
+			if ( writeEmissive )
+				ft.insert( QStringLiteral( "emissive" ), gameBase + emSfx );
+			tex.insert( cls.pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ), ft );
+			( cls.pbr ? pbrClasses : legacyClasses )++;
+		}
 		root.insert( QStringLiteral( "textures" ), tex );
-		arr.insert( QStringLiteral( "class" ), QJsonArray{ cls.w, cls.h } );
+		arr.insert( QStringLiteral( "class" ), QJsonArray{ any.w, any.h } );
+		const QString lodmGame = gameBase + QStringLiteral( ".lodm" );
 		QJsonArray layers, scales;
-		for ( const Layer & l : cls.layers ) {
-			layers.append( l.color );
-			scales.append( double( l.emissiveScale ) );
+		int unified = 0;
+		for ( int f = 0; f < 2; ++f ) {
+			if ( !fams[f] )
+				continue;
+			ArrayClass & cls = *fams[f];
+			const int first = unified;
+			for ( int l = 0; l < cls.layers.size(); l++, unified++ ) {
+				const Layer & L = cls.layers[l];
+				layers.append( QJsonObject{ { QStringLiteral( "color" ), L.color },
+					{ QStringLiteral( "family" ), cls.pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) },
+					{ QStringLiteral( "normalLayer" ), unified }, { QStringLiteral( "familyLayer" ), l } } );
+				scales.append( double( L.emissiveScale ) );
+				layerOf.insert( L.key, qMakePair( lodmGame, unified ) );
+				ss << ( cls.pbr ? "pbr" : "legacy" ) << ' ' << sizeKey << ' ' << unified << ' ' << lodmGame << ' '
+				   << L.color << ' ' << ( L.normal.isEmpty() ? QStringLiteral( "-" ) : L.normal ) << ' '
+				   << ( L.mask.isEmpty() ? QStringLiteral( "-" ) : L.mask ) << ' '
+				   << ( L.emissiveFrom.isEmpty() ? QStringLiteral( "-" ) : L.emissiveFrom ) << ' '
+				   << ( L.lodm.isEmpty() ? L.key : L.lodm ) << ' '
+				   << L.emissiveScale << ' ' << l << '\n';
+				textures++;
+			}
+			// the other spellings of a merged layer resolve to it (no sidecar line: one line per layer)
+			for ( auto a = cls.alias.constBegin(); a != cls.alias.constEnd(); ++a )
+				layerOf.insert( a.key(), qMakePair( lodmGame, first + a.value() ) );
 		}
 		arr.insert( QStringLiteral( "layers" ), layers );
 		// one multiple per layer, parallel to `layers`: two layers of one array
@@ -6360,21 +6409,6 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 		root.insert( QStringLiteral( "array" ), arr );
 		if ( !lodmWriteFile( fileBase + QStringLiteral( ".lodm" ), root ) )
 			return fail( QString( "could not write %1" ).arg( fileBase + QStringLiteral( ".lodm" ) ) );
-		const QString lodmGame = gameBase + QStringLiteral( ".lodm" );
-		( cls.pbr ? pbrClasses : legacyClasses )++;
-		for ( int l = 0; l < cls.layers.size(); l++ ) {
-			layerOf.insert( cls.layers[l].key, qMakePair( lodmGame, l ) );
-			ss << ( cls.pbr ? "pbr" : "legacy" ) << ' ' << sizeKey << ' ' << l << ' ' << lodmGame << ' '
-			   << cls.layers[l].color << ' ' << ( cls.layers[l].normal.isEmpty() ? QStringLiteral( "-" ) : cls.layers[l].normal ) << ' '
-			   << ( cls.layers[l].mask.isEmpty() ? QStringLiteral( "-" ) : cls.layers[l].mask ) << ' '
-			   << ( cls.layers[l].emissiveFrom.isEmpty() ? QStringLiteral( "-" ) : cls.layers[l].emissiveFrom ) << ' '
-			   << ( cls.layers[l].lodm.isEmpty() ? cls.layers[l].key : cls.layers[l].lodm ) << ' '
-			   << cls.layers[l].emissiveScale << '\n';
-			textures++;
-		}
-		// the other spellings of a merged layer resolve to it (no sidecar line: one line per layer)
-		for ( auto a = cls.alias.constBegin(); a != cls.alias.constEnd(); ++a )
-			layerOf.insert( a.key(), qMakePair( lodmGame, a.value() ) );
 	}
 	side.close();
 
@@ -21486,52 +21520,85 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 	// pass 3: the arrays and their .lodm; the layer of every card
 	QHash<QString, QPair<QString, int>> layerOf;   // card lodm (lower) -> (array lodm game path, layer)
 	int arrays = 0, sets = 0, blackEmissiveDropped = 0;
+	/* ONE SET PER SIZE (lane LODMNAME1, bungo 2026-10-27): `<ws>.LodgenCards.<WxH>(.ring)`,
+	 * no family in the name, one shared `_n` (legacy layers first) and the colour and
+	 * mask per family, as the mesh arrays have it. lodm 3, docs/LODGEN_LODM_FORMAT.md 4.1. */
+	QMap<QString, QPair<Group *, Group *>> bySize;	// WxH(.ring) -> (legacy, pbr)
 	for ( auto it = groups.begin(); it != groups.end(); ++it ) {
 		Group & g = it.value();
 		/* The size in the FILE NAME: WxH, and ".ring" for a horizon-ring group. Never the
 		 * group key's tail -- that is joined with '|', which no Windows file name may hold. */
 		const QString sizeKey = QStringLiteral( "%1x%2" ).arg( g.w ).arg( g.h )
 			+ ( g.ring ? QStringLiteral( ".ring" ) : QString() );
-		const QString stem = QString( ".%1.%2" ).arg( g.pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) ).arg( sizeKey );
-		const QString fileBase = arrayFileBase + stem, gameBase = arrayGameBase + stem;
-		const QString colorSfx = QLatin1String( lodmColorSuffix( g.pbr ) ) + QStringLiteral( ".DDS" );
-		const QString maskSfx = QLatin1String( lodmMaskSuffix( g.pbr ) ) + QStringLiteral( ".DDS" );
-		const QString emSfx = QLatin1String( lodmEmissiveSuffix( g.pbr ) ) + QStringLiteral( ".DDS" );
-		// a black emissive is not written, as the mesh arrays have it (lane TIDY1);
-		// WW_LODGEN_KEEP_BLACK_EMISSIVE=1 is the gate's way back
-		// black as SHIPPED: the BC1 sheet at the aux size and mip count it is written with
-		const bool writeEmissive = !wwEnv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty()
-			|| !lodgenEmissiveShipsBlack( g.emis, g.aw, g.ah, g.auxMips );
-		if ( !writeEmissive )
-			blackEmissiveDropped++;
-		// `_n` is BC7, as the per-card set is (lane IMPOSTORDEPTH2)
-		const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; bool aux; bool bc7; } sheets[4] = {
-			{ colorSfx, &g.color, true, false, false }, { QStringLiteral( "_n.DDS" ), &g.n, true, true, true },
-			{ maskSfx, &g.mask, true, true, false },
-			// the emissive is BC1: three channels and no alpha to carry
-			{ emSfx, &g.emis, false, true, false } };
-		for ( const auto & s : sheets ) {
-			if ( s.px == &g.emis && !writeEmissive )
-				continue;
-			const int sw = s.aux ? g.aw : g.w, sh = s.aux ? g.ah : g.h;
-			const int sm = s.aux ? g.auxMips : g.mips;
-			if ( !lodgenWriteDdsArray( fileBase + s.suffix, sw, sh, *s.px, s.bc3, sm, s.bc7 ) )
-				return fail( QString( "could not write %1" ).arg( fileBase + s.suffix ) );
-			arrays++;
+		( g.pbr ? bySize[sizeKey].second : bySize[sizeKey].first ) = &g;
+	}
+	for ( auto it = bySize.begin(); it != bySize.end(); ++it ) {
+		Group * fams[2] = { it.value().first, it.value().second };
+		const Group & g = *( fams[0] ? fams[0] : fams[1] );
+		// both families share the `_n` sheet and the one array block: their layout must agree
+		if ( fams[0] && fams[1] ) {
+			const Group & p = *fams[1];
+			if ( p.oct != g.oct || p.fw != g.fw || p.fh != g.fh || p.padX != g.padX || p.padY != g.padY
+				|| p.gapX != g.gapX || p.gapY != g.gapY || p.mips != g.mips || p.aw != g.aw || p.ah != g.ah
+				|| p.auxMips != g.auxMips )
+				return fail( QString( "card arrays %1: the legacy and pbr sets disagree on the layout (oct, frame, "
+					"pad, gap or mips) and cannot share one array" ).arg( it.key() ) );
 		}
+		const QString stem = QStringLiteral( "." ) + it.key();
+		const QString fileBase = arrayFileBase + stem, gameBase = arrayGameBase + stem;
+		// `_n` is BC7, as the per-card set is (lane IMPOSTORDEPTH2); every layer, legacy then pbr
+		std::vector<std::vector<quint32>> nAll;
+		for ( Group * c : fams )
+			if ( c )
+				nAll.insert( nAll.end(), c->n.begin(), c->n.end() );
+		if ( !lodgenWriteDdsArray( fileBase + QStringLiteral( "_n.DDS" ), g.aw, g.ah, nAll, true, g.auxMips, true ) )
+			return fail( QString( "could not write %1" ).arg( fileBase + QStringLiteral( "_n.DDS" ) ) );
+		arrays++;
 		QJsonObject root, tex, arr;
-		// version 2 only when a layer's sway is its model's (IMPOSTORWIND1 sway A)
+		// the sway arrays only when a layer's sway is its model's (IMPOSTORWIND1 sway A)
 		bool anySwayModel = false;
-		for ( const Layer & L : g.layers )
-			anySwayModel = anySwayModel || L.swayModel;
-		root.insert( QStringLiteral( "lodm" ), anySwayModel ? 2 : 1 );
-		root.insert( QStringLiteral( "family" ), g.pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) );
+		for ( Group * c : fams )
+			if ( c )
+				for ( const Layer & L : c->layers )
+					anySwayModel = anySwayModel || L.swayModel;
+		root.insert( QStringLiteral( "lodm" ), 3 );
+		root.insert( QStringLiteral( "family" ), ( fams[0] && fams[1] ) ? QStringLiteral( "mixed" )
+			: fams[1] ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) );
 		root.insert( QStringLiteral( "kind" ), QStringLiteral( "cardArray" ) );
-		tex.insert( QLatin1String( lodmColorKey( g.pbr ) ), gameBase + colorSfx );
 		tex.insert( QStringLiteral( "normal" ), gameBase + QStringLiteral( "_n.DDS" ) );
-		tex.insert( QLatin1String( lodmMaskKey( g.pbr ) ), gameBase + maskSfx );
-		if ( writeEmissive )
-			tex.insert( QStringLiteral( "emissive" ), gameBase + emSfx );
+		for ( Group * c : fams ) {
+			if ( !c )
+				continue;
+			const QString colorSfx = QLatin1String( lodmColorSuffix( c->pbr ) ) + QStringLiteral( ".DDS" );
+			const QString maskSfx = QLatin1String( lodmMaskSuffix( c->pbr ) ) + QStringLiteral( ".DDS" );
+			const QString emSfx = QLatin1String( lodmEmissiveSuffix( c->pbr ) ) + QStringLiteral( ".DDS" );
+			// a black emissive is not written, as the mesh arrays have it (lane TIDY1);
+			// WW_LODGEN_KEEP_BLACK_EMISSIVE=1 is the gate's way back
+			// black as SHIPPED: the BC1 sheet at the aux size and mip count it is written with
+			const bool writeEmissive = !wwEnv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty()
+				|| !lodgenEmissiveShipsBlack( c->emis, c->aw, c->ah, c->auxMips );
+			if ( !writeEmissive )
+				blackEmissiveDropped++;
+			const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; bool aux; } sheets[3] = {
+				{ colorSfx, &c->color, true, false }, { maskSfx, &c->mask, true, true },
+				// the emissive is BC1: three channels and no alpha to carry
+				{ emSfx, &c->emis, false, true } };
+			for ( const auto & s : sheets ) {
+				if ( s.px == &c->emis && !writeEmissive )
+					continue;
+				const int sw = s.aux ? c->aw : c->w, sh = s.aux ? c->ah : c->h;
+				const int sm = s.aux ? c->auxMips : c->mips;
+				if ( !lodgenWriteDdsArray( fileBase + s.suffix, sw, sh, *s.px, s.bc3, sm, false ) )
+					return fail( QString( "could not write %1" ).arg( fileBase + s.suffix ) );
+				arrays++;
+			}
+			QJsonObject ft;
+			ft.insert( QLatin1String( lodmColorKey( c->pbr ) ), gameBase + colorSfx );
+			ft.insert( QLatin1String( lodmMaskKey( c->pbr ) ), gameBase + maskSfx );
+			if ( writeEmissive )
+				ft.insert( QStringLiteral( "emissive" ), gameBase + emSfx );
+			tex.insert( c->pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ), ft );
+		}
 		root.insert( QStringLiteral( "textures" ), tex );
 		arr.insert( QStringLiteral( "class" ), QJsonArray{ g.w, g.h } );
 		if ( g.ring ) {
@@ -21552,43 +21619,48 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 			arr.insert( QStringLiteral( "auxClass" ), QJsonArray{ g.aw, g.ah } );
 			arr.insert( QStringLiteral( "auxMips" ), g.auxMips );
 		}
-		QJsonArray layers, scales;
+		QJsonArray layers, scales, sw, amp, frq;
 		const QString lodmGame = gameBase + QStringLiteral( ".lodm" );
-		for ( int l = 0; l < g.layers.size(); l++ ) {
-			const Layer & L = g.layers[l];
-			QJsonObject o;
-			o.insert( QStringLiteral( "id" ), L.id );
-			o.insert( QStringLiteral( "half" ), QJsonArray{ double( L.halfW ), double( L.halfH ) } );
-			o.insert( QStringLiteral( "center" ), QJsonArray{ double( L.center[0] ), double( L.center[1] ), double( L.center[2] ) } );
-			o.insert( QStringLiteral( "depthSpan" ), double( L.span ) );
-			if ( !L.frameOff.isEmpty() )
-				o.insert( QStringLiteral( "frameOffset" ), L.frameOff );
-			if ( !L.projection.isEmpty() )
-				o.insert( QStringLiteral( "projection" ), L.projection );
-			// the view convention this layer's frames were photographed under;
-			// absent = the pre-2026-09-19 bake, azimuth turned by 180 degrees
-			if ( !L.conv.isEmpty() )
-				o.insert( QStringLiteral( "conv" ), L.conv );
-			if ( !L.coverage.isEmpty() )
-				o.insert( QStringLiteral( "coverage" ), L.coverage );
-			if ( !L.source.isEmpty() )
-				o.insert( QStringLiteral( "source" ), L.source );
-			layers.append( o );
-			scales.append( double( L.emissiveScale ) );
-			layerOf.insert( L.lodmGame, qMakePair( lodmGame, l ) );
-			sets++;
+		int unified = 0;
+		for ( Group * c : fams ) {
+			if ( !c )
+				continue;
+			for ( int l = 0; l < c->layers.size(); l++, unified++ ) {
+				const Layer & L = c->layers[l];
+				QJsonObject o;
+				o.insert( QStringLiteral( "id" ), L.id );
+				o.insert( QStringLiteral( "half" ), QJsonArray{ double( L.halfW ), double( L.halfH ) } );
+				o.insert( QStringLiteral( "center" ), QJsonArray{ double( L.center[0] ), double( L.center[1] ), double( L.center[2] ) } );
+				o.insert( QStringLiteral( "depthSpan" ), double( L.span ) );
+				if ( !L.frameOff.isEmpty() )
+					o.insert( QStringLiteral( "frameOffset" ), L.frameOff );
+				if ( !L.projection.isEmpty() )
+					o.insert( QStringLiteral( "projection" ), L.projection );
+				// the view convention this layer's frames were photographed under;
+				// absent = the pre-2026-09-19 bake, azimuth turned by 180 degrees
+				if ( !L.conv.isEmpty() )
+					o.insert( QStringLiteral( "conv" ), L.conv );
+				if ( !L.coverage.isEmpty() )
+					o.insert( QStringLiteral( "coverage" ), L.coverage );
+				if ( !L.source.isEmpty() )
+					o.insert( QStringLiteral( "source" ), L.source );
+				o.insert( QStringLiteral( "family" ), c->pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) );
+				o.insert( QStringLiteral( "normalLayer" ), unified );
+				o.insert( QStringLiteral( "familyLayer" ), l );
+				layers.append( o );
+				scales.append( double( L.emissiveScale ) );
+				sw.append( L.swayModel ? QStringLiteral( "model" ) : QStringLiteral( "synthetic" ) );
+				amp.append( L.leafAmplitude );
+				frq.append( L.leafFrequency );
+				layerOf.insert( L.lodmGame, qMakePair( lodmGame, unified ) );
+				sets++;
+			}
 		}
 		arr.insert( QStringLiteral( "layers" ), layers );
 		// one multiple per layer, parallel to `layers`, as the mesh arrays have it
 		arr.insert( QStringLiteral( "emissiveScale" ), scales );
-		// the sway source and leaf numbers, parallel to `layers` too -- version 2 only
+		// the sway source and leaf numbers, parallel to `layers` too, when any layer's is the model's
 		if ( anySwayModel ) {
-			QJsonArray sw, amp, frq;
-			for ( const Layer & L : g.layers ) {
-				sw.append( L.swayModel ? QStringLiteral( "model" ) : QStringLiteral( "synthetic" ) );
-				amp.append( L.leafAmplitude );
-				frq.append( L.leafFrequency );
-			}
 			arr.insert( QStringLiteral( "sway" ), sw );
 			arr.insert( QStringLiteral( "leafAmplitude" ), amp );
 			arr.insert( QStringLiteral( "leafFrequency" ), frq );

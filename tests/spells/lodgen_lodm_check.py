@@ -97,8 +97,11 @@ def parse(raw):
         raise Refused('malformed JSON payload: %s' % e)
     if not isinstance(root, dict):
         raise Refused('payload is not a JSON object')
-    if root.get('lodm') != VERSION:
-        raise Refused('payload is not a lodm 1 object')
+    # payload 2: a card or array carrying model sway; 3 (LODMNAME1): an array/cardArray with per-family sheets
+    if root.get('lodm') not in (1, 2, 3):
+        raise Refused('payload lodm %r is not 1, 2 or 3' % root.get('lodm'))
+    if root.get('lodm') == 3 and root.get('kind') not in ('array', 'cardArray'):
+        raise Refused('a lodm 3 payload of kind %r (only array/cardArray)' % root.get('kind'))
     return root
 
 
@@ -154,8 +157,9 @@ class Checker(object):
             return None
         bad = []
         fam = root.get('family')
-        if fam not in FAMILIES:
-            bad.append('family %r is not legacy or pbr' % fam)
+        v3 = root.get('lodm') == 3
+        if fam not in FAMILIES + (('mixed',) if v3 else ()):
+            bad.append('family %r is not legacy or pbr%s' % (fam, ' or mixed' if v3 else ''))
         kind = root.get('kind', 'source')
         if kind not in KINDS:
             bad.append('kind %r is not one of %s' % (kind, '/'.join(KINDS)))
@@ -181,6 +185,17 @@ class Checker(object):
         elif not isinstance(tex, dict) or not tex:
             bad.append('no textures object')
             tex = {}
+        elif v3:
+            # one shared `normal`, the colour/mask/emissive under each family present
+            flat = {'normal': tex.get('normal')}
+            for f, sub in tex.items():
+                if f == 'normal':
+                    continue
+                if f not in FAMILIES or not isinstance(sub, dict):
+                    bad.append('textures.%s is not a family table' % f)
+                    continue
+                flat.update(('%s.%s' % (f, k), v) for k, v in sub.items())
+            tex = flat
         for key, val in sorted(tex.items()):
             if not isinstance(val, str) or not val:
                 bad.append('texture %s is empty' % key)
@@ -212,6 +227,8 @@ class Checker(object):
                         and len(scales) != len(layers):
                     bad.append('array.emissiveScale has %d entries for %d layers'
                                % (len(scales), len(layers)))
+        if v3 and isinstance(root.get('array'), dict):
+            bad += self.links(root['array'].get('layers') or [], root.get('textures') or {})
         if not quiet or bad:
             self.check('%s: %s, %s%s'
                        % (name, fam, kind,
@@ -220,6 +237,21 @@ class Checker(object):
         else:
             self.checks += 1
         return root
+
+    def links(self, layers, tex):
+        """lodm 3: layer i is slice i of the shared `_n` and slice familyLayer of its family's sheets"""
+        bad, nth = [], {}
+        for i, l in enumerate(layers):
+            f = l.get('family') if isinstance(l, dict) else None
+            if f not in tex:
+                bad.append('layer %d family %r names no texture table' % (i, f))
+                continue
+            if l.get('normalLayer') != i:
+                bad.append('layer %d normalLayer %r' % (i, l.get('normalLayer')))
+            if l.get('familyLayer') != nth.get(f, 0):
+                bad.append('layer %d familyLayer %r, the %s count says %d' % (i, l.get('familyLayer'), f, nth.get(f, 0)))
+            nth[f] = nth.get(f, 0) + 1
+        return bad
 
     def card(self, c):
         if not isinstance(c, dict):
@@ -362,6 +394,9 @@ def refute(path):
         bad += payload('one gap made odd',
                        lambda d: d['card'].__setitem__(
                            'gap', [d['card']['gap'][0] + 1, d['card']['gap'][1]]))
+    if root.get('lodm') == 3:
+        bad += payload('a layer\'s normalLayer moved off its own index',
+                       lambda d: d['array']['layers'][0].__setitem__('normalLayer', 1))
     if root.get('kind') == 'terrainVT':
         # The per-kind textures rule above is only as good as this: a terrainVT
         # sidecar that lost its terrain object, or a field of it, must still be

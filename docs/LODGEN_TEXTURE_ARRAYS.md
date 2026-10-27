@@ -1,12 +1,14 @@
-# Mesh LOD texture arrays v5 — `<ws>.LodgenArrays*`
+# Mesh LOD texture arrays v6 — `<ws>.LodgenArrays*`
 
-**Contract version: sidecar `# lodgen texture arrays 5`; the `.lodm` beside each
-set is `kind: "array"` v1.**
+**Contract version: sidecar `# lodgen texture arrays 6`; the `.lodm` beside each
+set is `kind: "array"` payload `lodm` 3 (`docs/LODGEN_LODM_FORMAT.md` §4.1, since
+2026-10-27). Version 5 sidecars and `lodm` 1 sets under the old names still read.**
 **Status: SHIPPED, gated, never flown in a game.** Writer
 `lodgenBuildTextureArrays()` in `src/lodgen.cpp`; container writer
 `lodgenWriteDdsArray()` in the same file.
 
-One DX10 texture array per **texture size class** and **family** over every
+One set of DX10 texture arrays per **texture size class** (both families in it:
+one shared `_n`, colour and mask per family) over every
 source texture the object chunks reference — tiling or not, which an atlas
 cannot do. The layer index rides in **UV2.y** of every vertex of the shape, and
 each chunk's manifest gains an `A` line naming the shape's layer and array.
@@ -25,19 +27,25 @@ shared with `docs/LODGEN_CARD_SHEETS.md` §6. The design record is
 ## 1. Files
 
 ```
-Data\Textures\Terrain\<ws>\Objects\<ws>.LodgenArrays.<W>x<H>_d.DDS       legacy  BC3
-                                   <ws>.LodgenArrays.<W>x<H>_n.DDS               BC3
-                                   <ws>.LodgenArrays.<W>x<H>_gsaos.DDS           BC3
-                                   <ws>.LodgenArrays.<W>x<H>_g.DDS               BC1
-                                   <ws>.LodgenArrays.<W>x<H>.lodm        kind "array"
-
-                                   <ws>.LodgenArraysPBR.<W>x<H>_bc.DDS   pbr     BC3
-                                   <ws>.LodgenArraysPBR.<W>x<H>_n.DDS            BC3
-                                   <ws>.LodgenArraysPBR.<W>x<H>_rmaos.DDS        BC3
-                                   <ws>.LodgenArraysPBR.<W>x<H>_e.DDS            BC1
-                                   <ws>.LodgenArraysPBR.<W>x<H>.lodm     kind "array"
+Data\Textures\Terrain\<ws>\Objects\<ws>.LodgenArrays.<W>x<H>_n.DDS       shared  BC3   every layer, legacy first
+                                   <ws>.LodgenArrays.<W>x<H>_d.DDS       legacy  BC3
+                                   <ws>.LodgenArrays.<W>x<H>_gsaos.DDS   legacy  BC3
+                                   <ws>.LodgenArrays.<W>x<H>_g.DDS       legacy  BC1
+                                   <ws>.LodgenArrays.<W>x<H>_bc.DDS      pbr     BC3
+                                   <ws>.LodgenArrays.<W>x<H>_rmaos.DDS   pbr     BC3
+                                   <ws>.LodgenArrays.<W>x<H>_e.DDS       pbr     BC1
+                                   <ws>.LodgenArrays.<W>x<H>.lodm        kind "array", lodm 3
 
                                    <ws>.LodgenArrays.txt                 one sidecar for the run
+```
+
+A family's sheets exist only when the size has a layer of that family; a set whose
+emissive is black on every layer has no `_g` / `_e` (TIDY1). The `_n` has one slice per
+layer of the set; each family sheet has one slice per layer of that family. Until
+2026-10-27 the pbr layers were a separate set, `<ws>.LodgenArraysPBR.<W>x<H>`, with its own
+`_n`; `tools/lodgen_migrate_arrays.py` rewrites such a bake in place.
+
+```
 ```
 
 **`<W>x<H>` is the PER-LAYER TEXTURE SIZE**, e.g. `256x256`. That is the
@@ -120,14 +128,14 @@ constant — `docs/LODGEN_VERTEX_PACKING.md` §Objects.
 One header line, then one line per layer, space-separated:
 
 ```
-# lodgen texture arrays 5: family class layer lodm color normal mask emissive source emissiveScale (docs/LODGEN_IMPOSTOR_SPEC.md)
+# lodgen texture arrays 6: family class layer lodm color normal mask emissive source emissiveScale familyLayer (docs/LODGEN_IMPOSTOR_SPEC.md)
 ```
 
 | # | column | meaning |
 |---|---|---|
 | 0 | `family` | `legacy` or `pbr` |
 | 1 | `class` | `<W>x<H>` |
-| 2 | `layer` | the layer index in that array |
+| 2 | `layer` | the layer index in the SET: the `_n` slice, and what UV2.y and the `A` line carry |
 | 3 | `lodm` | the array `.lodm` game path |
 | 4 | `color` | the source colour texture |
 | 5 | `normal` | the source normal texture |
@@ -135,10 +143,12 @@ One header line, then one line per layer, space-separated:
 | 7 | `emissive` | the emissive texture's path where a `.lodm` named one; **the COLOUR texture's path** where the glow rule composed it; `-` where the layer emits nothing |
 | 8 | `source` | the source material or diffuse the layer was keyed on |
 | 9 | `emissiveScale` | the multiple |
+| 10 | `familyLayer` | the layer's slice of its family's `_d`/`_gsaos`/`_g` or `_bc`/`_rmaos`/`_e`; equals `layer` for legacy |
 
 **`emissiveScale` is column 9 and it went on the END** at version 5, so a reader
 that indexes the first nine columns by position is unaffected. That is the same
-rule the manifest's `C` line follows.
+rule the manifest's `C` line follows. Version 6 (2026-10-27) appended `familyLayer` the
+same way.
 
 ---
 
@@ -238,12 +248,12 @@ multi-site mip row was re-derived by hand inside `lodgenEncodeArrayLayer`.
 
 | claim | line | anchor |
 |---|---|---|
-| file stem `.<W>x<H>` / `PBR.<W>x<H>` | `lodgen.cpp:4580` | `QString( "%1.%2" ).arg( cls.pbr ? QStringLiteral( "PBR" ) : QString() ).arg( sizeKey )` |
+| file stem `.<W>x<H>`, both families (2026-10-27) | `lodgen.cpp:6318-6331` | `const QString stem = QStringLiteral( "." ) + sizeKey;` |
 | grouping key `family\|<W>x<H>`, W/H = layer size | `lodgen.cpp:4144` | `classes[QString( "%1\|%2x%3" )…arg( w ).arg( h )]` |
 | the four sheets and their suffixes | `lodgen.cpp:4585-4589` | `const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; } sheets[4]` |
 | `textures.emissive` always written on an array | `lodgen.cpp:4602-4603` | `lodmMaskKey( cls.pbr ) ), gameBase + maskSfx` then `tex.insert( QStringLiteral( "emissive" ), gameBase + emSfx );` — the card-array pass writes that second line verbatim, so the mask line above it is the address |
 | `array.emissiveScale` parallel to `layers` | `lodgen.cpp:4612-4613` | `two layers of one array` (the comment above it) then `arr.insert( QStringLiteral( "emissiveScale" ), scales );` — the card-array pass writes the same insert under a different comment |
-| sidecar version 5 header and column order | `lodgen.cpp:4575` | `ss << "# lodgen texture arrays 5: family class layer lodm color normal mask emissive source emissiveScale` |
+| sidecar version 6 header and column order | `lodgen.cpp:6305` | `ss << "# lodgen texture arrays 6: family class layer lodm color normal mask emissive source emissiveScale familyLayer` |
 | layer written into UV2.y; `shapesWithoutUv2` | `lodgen.cpp:4664-4670` | `nif.set<HalfVector2>( row, "UV 2", HalfVector2( Vector2( uv2[0], float( lit.value().second ) ) ) )` |
 | `A` line appended to the manifest | `lodgen.cpp:4669` | `lines.append( QString( "A %1 %2 %3" ).arg( b ).arg( lit.value().second )` |
 | the channel laws, legacy and pbr | `lodgen.cpp:4346-4367` | doc comment on `lodgenBuildTextureArrays` |
