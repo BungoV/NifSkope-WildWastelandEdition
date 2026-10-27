@@ -3683,6 +3683,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	if ( !chunk ) {
 		wwCellWaterBegin( nif );   // lane WATER1: forget the last cell's water shapes
 		wwCellLandBegin( nif );    // lane TERRBLEND1: forget the last cell's blended-ground shapes
+		wwCellLandOrigin( nif, spec.interior ? QString() : spec.world, origin[0], origin[1] );	// lane LANDSPEC2
 		wwCellGrassBegin( nif );   // lane GRASSMB1: and its grass shapes
 	}
 	QHash<quint32, WwWaterRecord> placedWaterRecs;   // lane WATER1: WNAM form -> its record (form 0 = unreadable)

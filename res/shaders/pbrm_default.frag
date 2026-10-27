@@ -15,6 +15,8 @@
 #include "land_shore.glsl"
 #define WW_CELL_FOGGED cellOn	// lane FOG2: a cell-lit draw fogged before its imagespace
 uniform sampler2D CellSpecMap;	// lane CUBE1: a legacy material's specular map (R scale, G smoothness), for the cube term
+uniform vec4 landLod;	// lane LANDSPEC2: as fo4_default.frag (src/landlodspec.h), for ground with a .pbrm
+uniform vec4 landLodK;
 #else
 #define WW_CELL_FOGGED false
 #endif
@@ -530,6 +532,15 @@ void main()
 	s.metal = clamp( s.metal, 0.0, 1.0 );
 	s.weight = clamp( s.weight, 0.0, 1.0 );
 	s.diffRough = clamp( pbrDiffuseRoughness, 0.0, 1.0 );
+#if defined( WW_CELLLIGHTS ) && !defined( WW_LANDSPEC_NONE )
+	// lane LANDSPEC2: the LOD land spec law; gloss 0.22 taken as roughness 0.78
+	float landLodV = landLod.x > 1.5 ? 1.0 : ( landLod.x > 0.5
+		? 1.0 - clamp( ( landLodK.z - distance( cellWorldPos( -ViewDir ).xy, landLod.yz ) ) * landLodK.w, 0.0, 1.0 ) : 0.0 );
+	s.rough = mix( s.rough, 1.0 - landLodK.x, landLodV );
+	s.weight = mix( s.weight, landLodK.y, landLodV );
+#elif defined( WW_CELLLIGHTS )
+	const float landLodV = 0.0;
+#endif
 
 	vec3 V = ViewDir_norm;
 	vec3 R = reflect( -V, s.N );
@@ -686,7 +697,8 @@ void main()
 			if ( hasCubeMap ) {
 				if ( cellCubeGameOn() && ( cellRed & 512 ) == 0 ) {
 					vec2 sg = texture( CellSpecMap, offset ).rg;
-					cubeK = cellCubeGame( CubeMap, reflMatrix * R, cellCubeMat.y * sg.g, cellCubeMat.x * sg.r, envReflection, -ViewDir );
+					cubeK = cellCubeGame( CubeMap, reflMatrix * R, mix( cellCubeMat.y * sg.g, landLodK.x, landLodV ),
+					                      mix( cellCubeMat.x * sg.r, landLodK.y, landLodV ), envReflection, -ViewDir );
 				} else {
 					vec3 cube = textureLod( CubeMap, reflMatrix * R, s.rough * 8.0 ).rgb;
 					cubeK = cube * cube * envReflection * Espec * s.ao;
@@ -695,7 +707,8 @@ void main()
 			// lane SSR1: the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
 			if ( cellSsrOn || cellProbe == 60 ) {
 				vec2 sg = texture( CellSpecMap, offset ).rg;
-				cubeK = cellSsrMix( cubeK, cellCubeMat.y * sg.g, cellCubeMat.x * sg.r, envReflection );
+				cubeK = cellSsrMix( cubeK, mix( cellCubeMat.y * sg.g, landLodK.x, landLodV ),
+				                    mix( cellCubeMat.x * sg.r, landLodK.y, landLodV ), envReflection );
 			}
 			outSpec += cubeK * cE;
 		} else if ( cellGiSky ) {

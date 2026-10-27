@@ -207,6 +207,9 @@ void wwCellLandForget( const void * nif, int block );
 //! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)
 void wwCellLandRemap( const void * nif, const WwBlockMap & m );
 bool wwCellLandIs( const void * nif, int block );
+//! lane LANDSPEC2: the cell document's worldspace (EDID; empty = interior) and scene origin, for the land-LOD band
+void wwCellLandOrigin( const void * nif, const QString & ws, float ox, float oy );
+bool wwCellLandOriginOf( const void * nif, QString * ws, float * ox, float * oy );
 
 //! lane DUNESAND1: WW_TERRBLEND_RED=nospec drops the ground's TX07 map (the old smoothness 1, mask 1 ground)
 bool cellSplatSpecRed();

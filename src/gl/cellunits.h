@@ -69,6 +69,12 @@ constexpr int WaterOceanB = 68;	// lane WATERLOOK1: the wave spectrum's slopes +
 constexpr int WaterOceanC = 69;	// lane WATERLOOK1: its slope moments (sampler2DArray RGBA32F)
 constexpr int WaterSkyIndex = 70;	// lane WATERSKYVISFAR1: the .lodl sky plane's tile index (usampler2D R32UI)
 constexpr int WaterSkyAtlas = 71;	// its sparse tiles (usampler2D R8UI)
+constexpr int LandLodDiff0 = 72;	// lane LANDSPEC2: the near ground's band, the 2 x 2 level-4 LOD diffuse chunks
+constexpr int LandLodDiff1 = 73;
+constexpr int LandLodDiff2 = 74;
+constexpr int LandLodDiff3 = 75;
+constexpr int LandLodNoise = 76;	// Textures\Terrain\Noise.dds
+constexpr int LandLodDetail = 77;	// Textures\Terrain\DetailNormals.dds
 constexpr int WaterFlowAtlas = 67;	// lane WATERFLOWBAKE1: its sparse tiles (usampler2D R32UI; was 11, under Bloom)	// lane WATERWETBAKE1: its sparse tiles (usampler2D R8UI; 47 in the lane)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
@@ -77,7 +83,8 @@ constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, R
 	CloudShadow, CloudBuildShape, CloudBuildDetail, CloudBuildMap, FarGroundGrid, FarGroundLtex, FarGroundDecal, FarGroundAtlas,
 	FarGroundPages, FarGroundHeight, FarGroundPagesFar,
 	WaterMoment0, WaterMoment1, WaterMoment2, WaterCloudMap,
-	LandShoreIndex, LandShoreAtlas, WaterFlowIndex, WaterFlowAtlas, WaterOceanB, WaterOceanC, WaterSkyIndex, WaterSkyAtlas, AirTerrain };
+	LandShoreIndex, LandShoreAtlas, WaterFlowIndex, WaterFlowAtlas, WaterOceanB, WaterOceanC, WaterSkyIndex, WaterSkyAtlas, AirTerrain,
+	LandLodDiff0, LandLodDiff1, LandLodDiff2, LandLodDiff3, LandLodNoise, LandLodDetail };
 
 constexpr bool distinct()
 {
