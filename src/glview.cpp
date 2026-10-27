@@ -4004,6 +4004,7 @@ void GLView::paintGL()
 	wwDoorLiveTick( scene, this );	// lane DOORLIVE1: the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
 	wwCellWorldAnimFrame( scene, time );	// lane FXPARITY2: a cell's world clock (a no-op unless World animation)
 	scene->transform( viewTrans, time );
+	wwCellCamDump( scene );	// lane CELLSPAWN2: the eye, with or without the Cell lights row (a no-op when unset)
 
 	// Setup projection mode (lane MOTION1: the one projection a frame the temporal AA jitters)
 	wwGameTaaArmJitter( true );

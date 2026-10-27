@@ -1119,6 +1119,34 @@ static void fogScaleTick( Gpu & g, const void * doc, int version, const WwCellLi
 	}
 }
 
+/* WW_CELL_CAM_DUMP=<file>: the camera in world units, rewritten when it moves (the fog and diffuse gates measure from it).
+ * lane CELLSPAWN2: called by GLView::paintGL every frame, so a cell drawn with the Cell lights row off (fo4_default.prog,
+ * no cell uniforms) still says where its eye is; the CELLSPAWN1 hold read "drawn camera none" on every row. */
+void wwCellCamDump( Scene * scene )
+{
+	WW_SWITCH_STATIC( QString, camDump, QString::fromLocal8Bit( wwEnv( "WW_CELL_CAM_DUMP" ) ) );
+	if ( camDump.isEmpty() || !scene )
+		return;
+	const ClState & s = st();
+	const Transform & cv = scene->view;
+	const float csc = cv.scale != 0.0f ? cv.scale : 1.0f;
+	float camW[3];
+	for ( int k = 0; k < 3; k++ ) {
+		float w = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			w -= cv.rotation( j, k ) * cv.translation[j];
+		camW[k] = w / csc;
+	}
+	static QString camLast;
+	const QString line = QStringLiteral( "cam=%1,%2,%3 fogprobe=%4 probe=%5\n" ).arg( double( camW[0] ), 0, 'f', 2 )
+		.arg( double( camW[1] ), 0, 'f', 2 ).arg( double( camW[2] ), 0, 'f', 2 ).arg( s.fogProbe ).arg( s.probe );
+	QFile f( camDump );
+	if ( line != camLast && f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+		f.write( line.toUtf8() );
+		camLast = line;
+	}
+}
+
 void wwCellLightsUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuCellUni );	// lane PERF2
@@ -1736,31 +1764,6 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1i( "cellLights", kTextureUnit );
 	// the cluster lists: their sampler bound on every draw, the lists only on a lit one
 	wwCellClusterUniforms( scene, L ? &g.texels : nullptr, L ? g.count : 0, g.texelStamp );
-	/* WW_CELL_CAM_DUMP=<file>: the camera in world units, rewritten when it moves (the fog and diffuse gates measure
-	 * from it). lane CELLSPAWN2: written before the lights' early return, so a cell drawn with the Cell lights row off
-	 * (a fresh scope) still says where its eye is; the spawn hold read "drawn camera none" on every row without it. */
-	{
-		const Transform & cv = scene->view;
-		const float csc = cv.scale != 0.0f ? cv.scale : 1.0f;
-		float camW[3];
-		for ( int k = 0; k < 3; k++ ) {
-			float w = 0.0f;
-			for ( int j = 0; j < 3; j++ )
-				w -= cv.rotation( j, k ) * cv.translation[j];
-			camW[k] = w / csc;
-		}
-		WW_SWITCH_STATIC( QString, camDump, QString::fromLocal8Bit( wwEnv( "WW_CELL_CAM_DUMP" ) ) );
-		static QString camLast;
-		if ( !camDump.isEmpty() ) {
-			const QString line = QStringLiteral( "cam=%1,%2,%3 fogprobe=%4 probe=%5\n" ).arg( double( camW[0] ), 0, 'f', 2 )
-				.arg( double( camW[1] ), 0, 'f', 2 ).arg( double( camW[2] ), 0, 'f', 2 ).arg( s.fogProbe ).arg( s.probe );
-			QFile f( camDump );
-			if ( line != camLast && f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
-				f.write( line.toUtf8() );
-				camLast = line;
-			}
-		}
-	}
 	if ( !L )
 		return;
 	prog->uni1i( "cellLightCount", g.count );
@@ -2019,7 +2022,7 @@ void wwCellLightsUniforms( Scene * scene )
 	// lane LIGHTPHYS1: all zero = the game's curve and point lights (cell_lights.glsl cellPhysFalloff, cellAreaSpec)
 	prog->uni4f_l( prog->uniLocation( "cellLightPhys" ), FloatVector4( float( phys.mode ), phys.anchor, phys.sourceFraction, phys.advNumerator ) );
 	prog->uni4f_l( prog->uniLocation( "cellLightPhysB" ), FloatVector4( phys.advMinMetres, phys.areaWorld, float( phys.red ), 0.0f ) );
-	// WW_CELL_CAM_DUMP: written above, before the early return (lane CELLSPAWN2)
+	// WW_CELL_CAM_DUMP: wwCellCamDump, once a frame from GLView::paintGL (lane CELLSPAWN2)
 	/* lane FOG2: an interior's fog in place of the Lookdev weather fog (whose uniforms ran just before): the
 	 * same formula, the cell's packing, height = world z. No fog sun indoors (INFERRED: the game's directional
 	 * fog term follows the sun, which an interior lacks). */
