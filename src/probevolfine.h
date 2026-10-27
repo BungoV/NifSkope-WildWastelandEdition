@@ -11,10 +11,14 @@
 
 #include "probevolumes.h"
 
+#include <functional>
 #include <vector>
 
 namespace probebvh {
 struct Bvh;
+}
+namespace bakert {
+class Scene;
 }
 
 //! the coarse room grid as the fine fit reads it
@@ -25,6 +29,11 @@ struct ProbeFineGrid
 	int dims[3] = { 0, 0, 0 };
 	float origin[3] = { 0, 0, 0 };
 	float cell = 16.0f;
+	const std::vector<ProbeVolumeShape> * cuts = nullptr;   //!< threshold boxes: no flood crosses one
+	const float * anchors = nullptr;   //!< 3 per room: the room's flood starts at its own air nearest the anchor
+	bakert::Scene * scene = nullptr;   //!< the per-point rays on the GPU (null: the CPU tree; the answers are the same)
+	std::function<bool( int, const double * )> backFace;   //!< ray direction d met triangle tri's back (solid rule)
+	std::function<double( int, const double * )> facing;  //!< cosine of triangle tri's normal and direction d
 };
 
 struct ProbeFineSpec
@@ -32,15 +41,28 @@ struct ProbeFineSpec
 	double h = 16.0;                //!< the lattice step
 	qint64 maxPoints = 6000000;     //!< per room; the step grows past it
 	int maxBoxes = 64;              //!< per room
-	double minGain = 12288.0;       //!< u3 a box must add to the room's cover
+	double minGain = 65536.0;       //!< u3 a box must add to the room's cover (a 40-unit cube)
 	double poke = 3.0;              //!< a face may stand this far past the triangle in front of it
 	int ownerReach = 3;             //!< coarse cells a room's air owns into the solid and void around it
+	double grow = 4.0;              //!< coarse cells past the owned ones the room may grow into enclosed air
+	bool exactEdges = false;        //!< cast every edge (no coarse-air shortcut)
+	bool freeD = true;              //!< boxes may take points no flood reaches (inside furniture, walls)
+	double margin = 0.85;           //!< a point this near volcheck's solid limit stops the floods (1 = exact)
+	double marginOpen = 1.0;        //!< the same for the outdoor limit
+	double ownedOut = 2.0;          //!< the room's own grid points stop the flood this far past the outdoor limit (0 never)
+	double snapSteps = 2.0;         //!< a face reaches a wall (or threshold) this many steps away when all its points meet one
+	int checkPasses = 2;            //!< refits after volcheck's flood over the boxes (room points it misses go foreign)
+	int sphereK = 32;               //!< the indoor rule (volcheck's): K rays, at most skyMax of the upper ones
+	double skyMax = 0.25, openMax = 0.25, openReach = 1536.0;   //!< miss the world, at most openMax miss or pass reach
 };
 
 struct ProbeFineStats
 {
 	qint64 points = 0, rays = 0, freeEdges = 0, snapRays = 0;
 	qint64 roomPts = 0, coveredPts = 0, foreignPts = 0;
+	qint64 encTests = 0, encGrown = 0;   //!< indoor-rule tests, points grown past the owned cells
+	qint64 checkLost = 0;                //!< room points the check flood missed (made foreign before a refit)
+	qint64 pruned = 0;                   //!< snapped boxes the others covered within minGain (dropped)
 	int rooms = 0, boxes = 0;
 	double msOwner = 0, msRays = 0, msCover = 0;
 };

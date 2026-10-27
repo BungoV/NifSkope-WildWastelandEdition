@@ -887,6 +887,32 @@ int probeVolCheckCli( const QStringList & args )
 			reachCount[size_t( i )]++;
 	}
 
+	// ---- a gate's look at one room's flood: WW_VOLCHECK_DUMP=<tsv> WW_VOLCHECK_DUMPROOM=<cell:0xID>
+	// WW_VOLCHECK_DUMPBOX=x0,y0,z0,x1,y1,z1: every lattice point in the box, reached by that room, solid, enclosed, its shapes
+	if ( qEnvironmentVariableIsSet( "WW_VOLCHECK_DUMP" ) ) {
+		const QString want = qEnvironmentVariable( "WW_VOLCHECK_DUMPROOM" );
+		const QStringList bx = qEnvironmentVariable( "WW_VOLCHECK_DUMPBOX" ).split( QLatin1Char( ',' ) );
+		QFile df( qEnvironmentVariable( "WW_VOLCHECK_DUMP" ) );
+		for ( int ri = 0; ri < NR && bx.size() == 6; ri++ ) {
+			if ( rooms[size_t( ri )].name() != want || !df.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+				continue;
+			QTextStream ds( &df );
+			ds << "x\ty\tz\treached\tsolid\tenclosed\tin\trooms\n";
+			const std::vector<int> & got = reached[size_t( ri )];
+			for ( size_t i = 0; i < P; i++ ) {
+				const double * p = L.at( i );
+				bool in = true;
+				for ( int k = 0; k < 3; k++ )
+					in = in && p[k] >= bx[k].toDouble() && p[k] <= bx[3 + k].toDouble();
+				if ( !in )
+					continue;
+				ds << f0( p[0] ) << '\t' << f0( p[1] ) << '\t' << f0( p[2] ) << '\t'
+				   << int( std::binary_search( got.begin(), got.end(), int( i ) ) ) << '\t' << int( solid[i] ) << '\t'
+				   << int( enclosed[i] ) << '\t' << int( holds( i, ri ) ) << '\t' << nRooms( i ) << '\n';
+			}
+		}
+	}
+
 	// ---- the air's components (thresholds do not cut them: an opening is air)
 	Dsu D( P );
 	for ( size_t i = 0; i < P; i++ ) {

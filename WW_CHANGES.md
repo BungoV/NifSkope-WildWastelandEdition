@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLFIT2 (2026-10-27, branch volfit2-20261027): GI room volumes fitted on a fine lattice
+
+- **Fine room fit:** each room's boxes now come from an h=16 lattice in the room's own frame, classified by
+  volcheck's own solid/indoor ray rule. Faces snap onto the wall or threshold in front of them, and boxes the others
+  already cover are dropped. Rooms with wedge or cylinder shapes keep the ray-refined grid fit. Pokes fall sharply on
+  real cells (Goodneighbor 79M -> 9M u3, museum 10M -> 1M), but gaps stay well above 0 and shape counts rise. Tuning
+  pin `WW_VOLFIT_SPEC`; red `nofine` restores the VOLRAY1 refine.
+- **Gates:** cell_volray adds the `turned` (30 degree room) and `shelf` (thin board + step) scenes, which the VOLRAY1
+  fitter fails; red `nofine`. The census line reports fine boxes, pruned, lost, rays, ms.
+
 ## Lane VOLRAY1 (2026-10-27, branch volray1-20261027): rays check that the GI volumes fill each interior
 
 - **`nifskope-cli volcheck`:** measures a `.space` against the probe soup on an h=16 lattice. Per room and per cell it

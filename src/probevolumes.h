@@ -135,6 +135,12 @@ struct ProbeVolumes
 	double doorWidth = 0;       //!< the median door box's narrow side (the pinch's check)
 	double msRooms = 0, msSky = 0, msClassify = 0, msThresholds = 0, msFit = 0, msTotal = 0;
 	qint64 refineRays = 0;      //!< rays the fit's refine cast onto the triangles (lane VOLRAY1)
+	qint64 fineRays = 0;        //!< rays of the fine lattice fit (lane VOLFIT2)
+	int fineBoxes = 0;
+	qint64 fineGrown = 0;       //!< fine points grown past the owned cells by the indoor rule
+	qint64 finePruned = 0;      //!< fine boxes dropped (the others covered them within minGain)
+	qint64 fineLost = 0;        //!< room points the check flood missed
+	double msFine = 0;
 	QString roomsLine;
 
 	size_t index( int x, int y, int z ) const

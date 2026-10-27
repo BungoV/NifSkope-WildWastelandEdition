@@ -9,7 +9,7 @@
 #   red     every red below, each run must FAIL
 #   cell    one real soup: OUT= folder, SOUP= soup.psp, SPACE= .space folder or file, ARGS= extra volcheck flags
 #
-# RED CONTROLS (each must FAIL): known nomutate norefine
+# RED CONTROLS (each must FAIL): known nomutate norefine nofine
 #
 # USAGE  bash tests/spells/cell_volray.sh [synth|red|cell]     OUT= the run folder
 
@@ -22,7 +22,7 @@ EXE="${EXE:-$REPO/release/NifSkope.exe}"
 PHASE="${1:-synth}"
 OUT="${OUT:-$REPO/scratchpad/volray1/gate}"
 CHECK="$REPO/tests/spells/cell_volray_check.py"
-REDS="known nomutate norefine"
+REDS="known nomutate norefine nofine"
 mkdir -p "$OUT"
 LOG="$OUT/cell_volray_${PHASE}.log"
 : > "$LOG"

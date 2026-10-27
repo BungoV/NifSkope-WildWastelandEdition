@@ -10,16 +10,19 @@ Space stage's shapes against the soup's real triangles.
                 twins_over    A's box runs 64 into B through the doorway wall: FAIL, a cross-wall overlap
                 twins_exact   both rooms filled, the doorway a threshold: PASS
     fitted    the fitter's own output (`volumes --interior`) on lroom, church (sloped roof), thin (a 2-unit wall
-              between two rooms), twins (a doorway), house (door + window): its numbers per scene, and each
+              between two rooms), twins (a doorway), house (door + window), turned (a room at 30 degrees),
+              shelf (a 2-unit board and a raised floor; lane VOLFIT2): its numbers per scene, and each
               must PASS (0 gap blobs over the tolerance, 0 pokes, 0 overlaps)
     mutate    the fitted lroom / twins / church with --mutate grow:24, shift:48, drop: each must FAIL
     gpu       with --rays both: the GPU and the CPU answers equal on every lattice point of lroom (skipped, named,
               when no RT device)
   Reds (each must FAIL): known (the checker's known-answer rows read as the opposite verdict), nomutate (the mutate
-  rows run unmutated), norefine (the fitter without its ray refine of the faces: the cell-wide inset is a gap).
+  rows run unmutated), norefine (the fitter without its ray refine of the faces: the cell-wide inset is a gap),
+  nofine (VOLFIT2: the grid fit with VOLRAY1's face refine instead of the fine lattice fit: turned and shelf gap).
 """
 
 import json
+import math
 import os
 import re
 import shutil
@@ -45,6 +48,26 @@ def scene_thin():
     tris += cv.sbox(600, 0, 0, 602, 500, h)
     tris += cv.sbox(-T, -T, h, 1200 + T, 500 + T, h + T)
     return dict(tris=tris, rooms={'A': [(300, 250, 150)], 'B': [(900, 250, 150)]}, outside=[(300, -400, 150)])
+
+
+def scene_turned():
+    """Lane VOLFIT2: a room turned 30 degrees (the coarse grid's stair-stepped walls leave gap blobs)."""
+    a = math.radians(30)
+    room = cv.room(-400, -300, 400, 300, 300, {'-y': [(-64, 64, 0, 220)]})
+
+    def rot(p):
+        return (p[0] * math.cos(a) - p[1] * math.sin(a), p[0] * math.sin(a) + p[1] * math.cos(a), p[2])
+    tris = cv.ground(-1200, -1200, 1600, 1600) + [tuple(rot(p) for p in t) for t in room]
+    return dict(tris=tris, rooms={'A': [(0, 0, 150)]}, outside=[(0, -900, 150)])
+
+
+def scene_shelf():
+    """Lane VOLFIT2: a 2-unit shelf board off a wall and a 40-unit raised floor over half the room."""
+    tris = cv.ground(-800, -800, 1600, 1400)
+    tris += cv.room(0, 0, 800, 600, 300, {'-y': [(300, 428, 0, 220)]})
+    tris += cv.sbox(0, 300, 120, 400, 302, 124)
+    tris += cv.sbox(500, 0, 0, 800, 600, 40)
+    return dict(tris=tris, rooms={'A': [(200, 150, 150)]}, outside=[(400, -400, 150)])
 
 
 def space_file(path, key, rooms, thresholds=()):
@@ -168,14 +191,14 @@ def synth(exe, work, red, rays):
 
     # ---- the fitter's output
     scenes = dict(lroom=cv.scene_lroom(), church=cv.scene_church(), thin=scene_thin(), twins=cv.scene_twins(),
-                  house=cv.scene_house())
+                  house=cv.scene_house(), turned=scene_turned(), shelf=scene_shelf())
     fitted = {}
     for name, s in scenes.items():
         soup = soup_of('fit_' + name, s)
         out = os.path.join(work, 'fit_' + name)
         if os.path.isdir(out):
             shutil.rmtree(out)
-        rc, text = cv.run(exe, soup, out, name, 'norefine' if red == 'norefine' else '')
+        rc, text = cv.run(exe, soup, out, name, red if red in ('norefine', 'nofine') else '')
         if rc != 0:
             fails.append('fitted %s: volumes rc %d: %s' % (name, rc, text[-300:]))
             continue

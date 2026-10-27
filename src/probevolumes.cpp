@@ -13,6 +13,8 @@ BSD License - see nifskope.h
 #include "probevolumesgi.h"
 #include "probegi.h"
 #include "probebvh.h"
+#include "probevolfine.h"
+#include "bakert.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -30,6 +32,7 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <functional>
 #include <map>
+#include <memory>
 #include <thread>
 #include <unordered_map>
 
@@ -1191,6 +1194,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 	// lane VOLRAY1: a cell any triangle touches is solid, so every grown face stops about a cell short of the wall.
 	// Rays from inside each face, along its normal, move it onto the real triangles (src/probevolcheck.cpp judges it).
 	const bool refineOn = red != QLatin1String( "norefine" ) && !soup.tris.empty();
+	// lane VOLFIT2: the fine lattice fit replaces the per-face refine (red "nofine" keeps the VOLRAY1 refine)
+	const bool fineOn = refineOn && red != QLatin1String( "nofine" );
 	const double rC = double( C );
 	probebvh::Bvh rb;
 	double rO[2] = { 0, 0 };
@@ -1524,6 +1529,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 				}
 			}
 	};
+	std::vector<double> roomYaw( V.rooms.size(), 0.0 );
+	std::vector<char> keepGrid( V.rooms.size(), 0 );
 	for ( size_t r = 0; r < V.rooms.size(); r++ ) {
 		ProbeVolumeRoom & rm = V.rooms[r];
 		const int room = int( r ) + 1;
@@ -1551,6 +1558,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		double th = footprintYaw( pts, &a0, &aBest );
 		if ( a0 <= aBest * 1.03 || std::fabs( th ) < 2.0 * kPi / 180.0 || std::fabs( th - kPi / 2 ) < 2.0 * kPi / 180.0 )
 			th = 0.0;   // the grid's own axes unless the turn saves over 3 % (rooms are mostly square to the world)
+		roomYaw[r] = th;
 		const double ct = std::cos( th ), sn = std::sin( th );
 		// the local grid (u, v, z) at the room's cell size: 1 room, 2 other air, 3 solid / outside
 		double ulo = 1e300, uhi = -1e300, vlo = 1e300, vhi = -1e300;
@@ -1918,7 +1926,12 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 				os = ps;
 			}
 		}
-		if ( refineOn && !shapes.empty() ) {
+		// a room the grid fitted with slopes or rounds keeps them (the fine fit's boxes step along a slope): refined here
+		bool curved = false;
+		for ( const ProbeVolumeShape & s : shapes )
+			curved = curved || s.type != ProbeShapeType::Box;
+		keepGrid[r] = curved;
+		if ( refineOn && ( !fineOn || curved ) && !shapes.empty() ) {
 			const std::vector<ProbeVolumeShape> grid = shapes;
 			for ( size_t k = 0; k < shapes.size(); k++ ) {
 				std::vector<const ProbeVolumeShape *> sib;
@@ -2046,6 +2059,92 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			t.shape.rotation[0] = t.shape.rotation[1] = 0.0f;
 			t.shape.rotation[2] = float( psi );
 		}
+	// lane VOLFIT2: the rooms refitted on a fine lattice; the fitted thresholds part the floods (the threshold fit reads
+	// only the rooms' yaw, which the fine shapes keep)
+	if ( fineOn ) {
+		QElapsedTimer fc;
+		fc.start();
+		std::vector<ProbeVolumeShape> cuts;
+		for ( const ProbeVolumeThreshold & t : V.thresholds )
+			cuts.push_back( t.shape );
+		ProbeFineGrid fg;
+		fg.labels = V.labels.data();
+		fg.state = st.data();
+		for ( int c = 0; c < 3; c++ ) {
+			fg.dims[c] = V.dims[c];
+			fg.origin[c] = V.origin[c];
+		}
+		fg.cell = C;
+		fg.cuts = &cuts;
+		std::vector<float> anchors;
+		for ( const ProbeVolumeRoom & rm : V.rooms )
+			anchors.insert( anchors.end(), rm.anchor, rm.anchor + 3 );
+		fg.anchors = anchors.data();
+		// volcheck's per-point rays, on the GPU when the bake would take it (the answers are the CPU tree's)
+		std::unique_ptr<bakert::Scene> scene;
+		if ( bakert::pickPath() != bakert::Path::Cpu ) {
+			scene = bakert::Scene::make( rb );
+			if ( scene && scene->path() != bakert::Path::Cpu )
+				fg.scene = scene.get();
+		}
+		const size_t nSoupTris = soup.tris.size() / 9;
+		fg.backFace = [&]( int tri, const double * d ) -> bool {   // a one-sided face seen from behind (volcheck's)
+			if ( tri < 0 || size_t( tri ) >= nSoupTris || soup.isTwoSided( size_t( tri ) ) )
+				return false;
+			const float * p = &rb.t[size_t( tri ) * 9];
+			const double e1[3] = { double( p[3] ) - p[0], double( p[4] ) - p[1], double( p[5] ) - p[2] };
+			const double e2[3] = { double( p[6] ) - p[0], double( p[7] ) - p[1], double( p[8] ) - p[2] };
+			const double n[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+			return n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0;
+		};
+		fg.facing = [&]( int tri, const double * d ) -> double {
+			if ( tri < 0 || size_t( tri ) >= nSoupTris )
+				return 1.0;
+			const float * p = &rb.t[size_t( tri ) * 9];
+			const double e1[3] = { double( p[3] ) - p[0], double( p[4] ) - p[1], double( p[5] ) - p[2] };
+			const double e2[3] = { double( p[6] ) - p[0], double( p[7] ) - p[1], double( p[8] ) - p[2] };
+			const double n[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+			const double l = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+			return l > 0 ? ( n[0] * d[0] + n[1] * d[1] + n[2] * d[2] ) / l : 1.0;
+		};
+		ProbeFineSpec spec;
+		// a tuning pin for the gate runs: WW_VOLFIT_SPEC=h=16,boxes=64,gain=12288,grow=4,reach=3
+		for ( const QString & kv : qEnvironmentVariable( "WW_VOLFIT_SPEC" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
+			const QString k = kv.section( QLatin1Char( '=' ), 0, 0 ).trimmed();
+			const double x = kv.section( QLatin1Char( '=' ), 1 ).toDouble();
+			if ( k == QLatin1String( "h" ) && x > 0 ) spec.h = x;
+			else if ( k == QLatin1String( "boxes" ) && x > 0 ) spec.maxBoxes = int( x );
+			else if ( k == QLatin1String( "gain" ) ) spec.minGain = x;
+			else if ( k == QLatin1String( "grow" ) ) spec.grow = x;
+			else if ( k == QLatin1String( "reach" ) ) spec.ownerReach = int( x );
+			else if ( k == QLatin1String( "exact" ) ) spec.exactEdges = x != 0;
+			else if ( k == QLatin1String( "free" ) ) spec.freeD = x != 0;
+			else if ( k == QLatin1String( "check" ) ) spec.checkPasses = int( x );
+			else if ( k == QLatin1String( "margin" ) && x > 0 ) spec.margin = x;
+			else if ( k == QLatin1String( "marginopen" ) && x > 0 ) spec.marginOpen = x;
+			else if ( k == QLatin1String( "ownedout" ) ) spec.ownedOut = x;
+			else if ( k == QLatin1String( "snap" ) && x > 0 ) spec.snapSteps = x;
+		}
+		ProbeFineStats fs;
+		const std::vector<std::vector<ProbeVolumeShape>> fine = probeVolumesFineFit( rb, rO, fg, int( V.rooms.size() ), roomYaw, spec, &fs );
+		for ( size_t r = 0; r < V.rooms.size() && r < fine.size(); r++ ) {
+			if ( fine[r].empty() || keepGrid[r] )
+				continue;
+			ProbeVolumeRoom & rm = V.rooms[r];
+			rm.shapes = fine[r];
+			float cov = 0, oa = 0, os = 0;
+			measure( int( r ) + 1, rm.shapes, &cov, &oa, &os );
+			rm.coverage = cov;
+			rm.overshootAir = oa;
+			rm.overshootSolid = os;
+		}
+		V.fineBoxes = fs.boxes;
+		V.fineRays = fs.rays + fs.snapRays + fs.encTests * spec.sphereK;
+		V.fineGrown = fs.encGrown;
+		V.finePruned = fs.pruned;
+		V.fineLost = fs.checkLost;
+		V.msFine = fc.nsecsElapsed() / 1e6;
+	}
 	V.refineRays = refineRays;
 	V.msFit = clock.nsecsElapsed() / 1e6;
 	V.msTotal = total.nsecsElapsed() / 1e6;
@@ -2211,7 +2310,8 @@ QString probeVolumesCensusText( const ProbeVolumes & v )
 		.arg( v.thresholds.size() ).arg( doors ).arg( windows ).arg( portals ).arg( v.tinyThresholds )
 		.arg( v.skyCells ).arg( v.skyCoarse ).arg( v.doorWidth, 0, 'f', 0 )
 		.arg( qRound( v.msRooms ) ).arg( qRound( v.msSky ) ).arg( qRound( v.msClassify ) ).arg( qRound( v.msThresholds ) )
-		.arg( qRound( v.msFit ) ).arg( qRound( v.msTotal ) ).arg( v.merged );
+		.arg( qRound( v.msFit ) ).arg( qRound( v.msTotal ) ).arg( v.merged )
+		+ ( v.msFine > 0 ? QStringLiteral( "; fine boxes %1 pruned %5 lost %6 rays %2 grown %3 ms %4" ).arg( v.fineBoxes ).arg( v.fineRays ).arg( v.fineGrown ).arg( qRound( v.msFine ) ).arg( v.finePruned ).arg( v.fineLost ) : QString() );
 }
 
 // ---------------------------------------------------------------- files
