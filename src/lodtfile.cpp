@@ -9,6 +9,8 @@ BSD License - see nifskope.h
 #include "watermark.h"	// lane WATERFLOWBAKE1: WaterFlowGrid, the per-texel river solve
 #include "esmdata.h"
 #include "lodgenlayout.h"
+#include "lodgenao.h"	// lane WATERSKYVISFAR1: the bake's sky law for the sky plane
+#include "lodgenparallel.h"
 #include "data/niftypes.h"   // lane WATER1: Matrix, for placed water refs
 
 /* Only for LODTEX_MAGIC: this reader must be able to NAME a terrain
@@ -57,7 +59,7 @@ namespace
  * section offsets, so 0x00..0x97 is unchanged and every offset a version 1
  * reader uses still sits where it did; only the first section moved, and it is
  * addressed by an offset in the header. The writer emits 2; both are read. */
-constexpr quint32 LODL_VERSION = 3;
+constexpr quint32 LODL_VERSION = 4;
 constexpr quint32 LODL_VERSION_MIN = 1;
 constexpr qsizetype LODL_HEADER_V1 = 0x98;
 constexpr qsizetype LODL_HEADER_V2 = 0xA0;
@@ -75,6 +77,9 @@ constexpr qsizetype LODL_HEADER_V2 = 0xA0;
  * always writes 0x100. */
 constexpr qsizetype LODL_HEADER_V3 = 0x100;
 constexpr qsizetype LODL_HEADER_V3_OLD = 0xF8;
+/* Version 4 (lane WATERSKYVISFAR1) = version 3 + the sky plane's u64 offset at 0x100, its u32 rate at 0x108 and a
+ * reserved u32. Written only when the sky plane is; a file without it stays version 3, byte for byte. */
+constexpr qsizetype LODL_HEADER_V4 = 0x110;
 
 /*! Header size by version -- a TABLE, not a ternary.
  *
@@ -91,6 +96,7 @@ static inline qsizetype lodtHeaderBytes( int version )
 	case 1:  return LODL_HEADER_V1;
 	case 2:  return LODL_HEADER_V2;
 	case 3:  return LODL_HEADER_V3;
+	case 4:  return LODL_HEADER_V4;
 	default: return 0;
 	}
 }
@@ -104,10 +110,11 @@ constexpr quint32 SECT_FLOW = LODL_SECT_FLOW;
 constexpr quint32 SECT_SHORE = LODL_SECT_SHORE;
 constexpr quint32 SECT_STROKE = LODL_SECT_STROKE;
 constexpr quint32 SECT_SURFACE = LODL_SECT_SURFACE;
+constexpr quint32 SECT_SKY = LODL_SECT_SKY;
 //! Every section bit this build knows; the reader refuses any other.
 constexpr quint32 SECT_KNOWN = LODL_SECT_COLOUR | LODL_SECT_GROUNDCOVER | LODL_SECT_AO
 	| LODL_SECT_WATER | LODL_SECT_BODIES | LODL_SECT_FLOW | LODL_SECT_SHORE
-	| LODL_SECT_STROKE | LODL_SECT_DYE | LODL_SECT_SURFACE;
+	| LODL_SECT_STROKE | LODL_SECT_DYE | LODL_SECT_SURFACE | LODL_SECT_SKY;
 
 //! Two pi, spelled out: M_PI is not standard C++ and is absent under /std:c++.
 constexpr double kTwoPi = 6.283185307179586476925286766559;
@@ -436,6 +443,9 @@ struct WaterOut
 	std::vector<qint32> cellSloped;
 	//! Per sloped mesh: its REFERENCE height (the lowest surface over its wet texels).
 	std::vector<float> meshRefH;
+	//! Lane WATERSKYVISFAR1: the sky plane, packed right after the surface plane; empty when not asked for.
+	QByteArray skyPlane;
+	int skySamples = 0;
 };
 
 /*! One maximal run of wet texels with one (height, type) key, in one row. */
@@ -1784,6 +1794,99 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				}
 			}
 		}, &uniformSurf );
+	pos += quint64( out.surfacePlane.size() );
+
+	/* Lane WATERSKYVISFAR1: the SKY plane, at the body rate. Each wet sample casts the bake's 56 sky rays
+	 * (LodgenAoScene::skyVisibilityFace, the CPU reference; the GPU ray path has no heightfield) from its water
+	 * surface over the terrain within kSkyReach. Byte = 1 + round(vis * 254), dry 0. Terrain only. */
+	qint64 uniformSky = 0, skyWet = 0, skyShade = 0, skyMs = 0;
+	if ( in.opt.skyVis ) {
+		QElapsedTimer skyClock;
+		skyClock.start();
+		const float kSkyReach = 10000.0f, kSkyScale = 4.0f;   // world units; world units a scene unit
+		const qint64 gwB = qint64( cellsX ) * bodyS, ghB = qint64( cellsY ) * bodyS;
+		std::vector<quint16> hB( size_t( gwB * ghB ) );
+		{
+			std::vector<quint16> row( size_t( gw ), quint16( 0 ) );
+			for ( qint64 yb = 0; yb < ghB; yb++ ) {
+				in.heightRow( int( yb * stepB ), row.data() );
+				for ( qint64 xb = 0; xb < gwB; xb++ )
+					hB[size_t( yb * gwB + xb )] = row[size_t( xb * stepB )];
+			}
+		}
+		const float texel = 4096.0f / float( bodyS );
+		const int mrg = int( std::ceil( kSkyReach / texel ) ) + 1;
+		const int hn = bodyS + 2 * mrg;
+		float allOpen = 1.0f;
+		{
+			LodgenAoScene none;
+			allOpen = none.skyVisibilityFace( Vector3( 0.0f, 0.0f, 0.0f ), Vector3( 0.0f, 0.0f, 1.0f ), 1.0f );
+		}
+		std::vector<quint8> sky( size_t( gwB * ghB ), quint8( 0 ) );
+		std::atomic<qint64> nWet( 0 ), nShade( 0 );
+		lodgenParallelFor( cellsX * cellsY, [&]( int c ) {
+			const int cx = c % cellsX, cy = c / cellsX;
+			bool any = false;
+			for ( int j = 0; j < bodyS && !any; j++ )
+				for ( int i = 0; i < bodyS && !any; i++ )
+					any = grid[size_t( ( qint64( cy ) * spc + qint64( j ) * stepB ) * gw
+						+ qint64( cx ) * spc + qint64( i ) * stepB )] != 0;
+			if ( !any )
+				return;
+			LodgenAoScene sc;
+			sc.hn = hn;
+			sc.hSpacing = texel / kSkyScale;
+			sc.span = float( hn - 1 ) * sc.hSpacing;
+			sc.hgt.resize( size_t( hn ) * size_t( hn ) );
+			for ( int b = 0; b < hn; b++ ) {
+				const qint64 yb = qBound( qint64( 0 ), qint64( cy ) * bodyS - mrg + b, ghB - 1 );
+				for ( int a = 0; a < hn; a++ ) {
+					const qint64 xb = qBound( qint64( 0 ), qint64( cx ) * bodyS - mrg + a, gwB - 1 );
+					sc.hgt[size_t( b ) * size_t( hn ) + size_t( a )] =
+						( float( hB[size_t( yb * gwB + xb )] ) - 32767.0f ) * in.quantum / kSkyScale;
+				}
+			}
+			sc.prepareGround();
+			qint64 w = 0, s = 0;
+			for ( int j = 0; j < bodyS; j++ ) {
+				const qint64 gy = qint64( cy ) * spc + qint64( j ) * stepB;
+				for ( int i = 0; i < bodyS; i++ ) {
+					const qint64 gx = qint64( cx ) * spc + qint64( i ) * stepB;
+					const qint64 at = gy * gw + gx;
+					const quint16 b = grid[size_t( at )];
+					if ( !b )
+						continue;
+					float z = bodies[size_t( b ) - 1].wh;
+					if ( stx ) {
+						auto it = std::lower_bound( stx->begin(), stx->end(), at,
+							[]( const LodtSurfTexel & t, qint64 v ) { return t.at < v; } );
+						if ( it != stx->end() && it->at == at && sWet[size_t( it - stx->begin() )] )
+							z = it->z;
+					}
+					const Vector3 p( float( mrg + i ) * sc.hSpacing, float( mrg + j ) * sc.hSpacing, z / kSkyScale );
+					const float vis = qBound( 0.0f, sc.skyVisibilityFace( p, Vector3( 0.0f, 0.0f, 1.0f ),
+						kSkyReach / kSkyScale ) / allOpen, 1.0f );
+					const int v = 1 + int( std::lround( vis * 254.0f ) );
+					sky[size_t( ( qint64( cy ) * bodyS + j ) * gwB + qint64( cx ) * bodyS + i )] = quint8( v );
+					w++;
+					if ( v < 255 )
+						s++;
+				}
+			}
+			nWet += w;
+			nShade += s;
+		} );
+		out.skySamples = bodyS;
+		out.skyPlane = lodtPackPlane( cellsX, cellsY, bodyS, 1, pos,
+			[&]( int tx, int ty, quint8 * dst ) {
+				for ( int j = 0; j < bodyS; j++ )
+					for ( int i = 0; i < bodyS; i++ )
+						dst[j * bodyS + i] = sky[size_t( ( qint64( ty ) * bodyS + j ) * gwB + qint64( tx ) * bodyS + i )];
+			}, &uniformSky );
+		skyWet = nWet;
+		skyShade = nShade;
+		skyMs = skyClock.elapsed();
+	}
 
 	// ---- the census -------------------------------------------------------
 	{
@@ -1915,6 +2018,11 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			"%4 texel(s) wet under a sloped mesh, %5 sample(s) off their body's plane" )
 			.arg( out.surfacePlane.size() ).arg( uniformSurf )
 			.arg( qint64( cellsX ) * cellsY ).arg( slopedWet ).arg( surfNonZero );
+		if ( in.opt.skyVis )
+			out.summary += QString( "; sky plane %1 bytes, %2 of %3 tiles uniform, %4 wet sample(s), %5 below open "
+				"sky, %6 ms" )
+				.arg( out.skyPlane.size() ).arg( uniformSky ).arg( qint64( cellsX ) * cellsY )
+				.arg( skyWet ).arg( skyShade ).arg( skyMs );
 		if ( in.opt.shore && in.opt.shoreLand )
 			out.summary += QString( "; shore plane land side: %1 dry sample(s) within %2 units of water" )
 				.arg( landNear ).arg( 255 * int( LODL_SHORE_QUANTUM ) );
@@ -2235,6 +2343,8 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 	const bool wantWater = opts.water.enabled;
 	if ( wantWater && version < 3 )
 		version = 3;
+	if ( wantWater && opts.water.skyVis && version < 4 )
+		version = 4;   // lane WATERSKYVISFAR1: the sky plane needs the version-4 header
 	/* The old spelling is REFUSED, not ignored. A run that still says
 	 * WW_LODT_VERSION was written for the format this file used to be called,
 	 * and silently writing version 2 bytes for it is the failure the rename
@@ -2335,6 +2445,7 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 	qsizetype offIdRateAt = 0, offIdAt = 0, offFlowRateAt = 0, offFlowAt = 0;
 	qsizetype offShoreRateAt = 0, offShoreAt = 0, offStrokeAt = 0, offStrokeLenAt = 0;
 	qsizetype offSurfAt = 0;
+	qsizetype offSkyAt = 0, offSkyRateAt = 0;
 	if ( version >= 3 ) {
 		offBodyAt = h.size();       h.u64( 0 );
 		offBodyCountAt = h.size();  h.u32( 0 ); h.u32( quint32( LODL_BODY_RECORD ) );
@@ -2351,6 +2462,10 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		offStrokeLenAt = h.size();  h.u32( 0 );
 		h.u32( 0 );                                            // reserved (the dye plane's, watermark writes it)
 		offSurfAt = h.size();       h.u64( 0 );                // lane WATER1: the surface plane, 0xF8
+	}
+	if ( version >= 4 ) {
+		offSkyAt = h.size();        h.u64( 0 );                // lane WATERSKYVISFAR1: the sky plane, 0x100
+		offSkyRateAt = h.size();    h.u32( 0 ); h.u32( 0 );    // its rate, reserved
 	}
 	/* The header size is what every section offset is measured against, so it
 	 * is checked here rather than asserted in a debug build nobody runs. */
@@ -2632,6 +2747,7 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		wi.defaultWaterType = src.defaultWaterType;
 		wi.defaultWaterHeight = src.defaultWaterHeight;
 		wi.opt = opts.water;
+		wi.opt.skyVis = opts.water.skyVis && version >= 4;
 		wi.surface = surface.texels.empty() ? nullptr : &surface;   // lane WATER1
 		/* One decoded cell per cell per row, out of the same cache the pyramid
 		 * used, so the two passes over the world cost cache hits and not LAND
@@ -2770,6 +2886,12 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		patch64( hdr, offSurfAt, pos );
 		wr( wo.surfacePlane );
 		sect |= SECT_SURFACE;
+		if ( !wo.skyPlane.isEmpty() ) {   // packed right after the surface plane
+			patch32( hdr, offSkyRateAt, quint32( wo.skySamples ) );
+			patch64( hdr, offSkyAt, pos );
+			wr( wo.skyPlane );
+			sect |= SECT_SKY;
+		}
 		// the name blob stays empty until something names a body
 		patch64( hdr, offNameAt, 0 );
 		patch32( hdr, offNameLenAt, 0 );
@@ -3657,6 +3779,8 @@ bool LodtFile::open( const QString & path, QString * error )
 	if ( sect & ~SECT_KNOWN )
 		return fail( QStringLiteral( "unknown section bit(s) 0x%1; this reader knows 0x%2" )
 			.arg( sect & ~SECT_KNOWN, 0, 16 ).arg( SECT_KNOWN, 0, 16 ) );
+	if ( ( sect & LODL_SECT_SKY ) && ver < 4 )
+		return fail( QStringLiteral( "section sky is declared in a version %1 file; it needs version 4" ).arg( ver ) );
 
 	ltex.resize( nLtex );
 	for ( int i = 0; i < nLtex; i++ )
@@ -3826,6 +3950,20 @@ bool LodtFile::open( const QString & path, QString * error )
 				"the body-ID plane has %2; they must match" )
 				.arg( surfStore.tileEdge ).arg( bodyS ) );
 		surfS = surfStore.tileEdge;
+	}
+	skyS = 0;
+	skyStore = PlaneStore();
+	if ( ver >= 4 && ( sect & LODL_SECT_SKY ) ) {
+		// lane WATERSKYVISFAR1: one byte a sample on the body plane's grid
+		const quint64 oSky = rd<quint64>( buf, 0x100 );
+		if ( !oSky || !( sect & LODL_SECT_BODIES ) || !bodyS )
+			return fail( QStringLiteral( "section sky is declared present without its offset or a body-ID plane" ) );
+		if ( !readPlaneStore( oSky, 1, skyStore, error ) )
+			return false;
+		if ( skyStore.tileEdge != bodyS || int( rd<quint32>( buf, 0x108 ) ) != bodyS )
+			return fail( QStringLiteral( "the sky plane declares %1 samples a cell where the body-ID plane has %2" )
+				.arg( skyStore.tileEdge ).arg( bodyS ) );
+		skyS = skyStore.tileEdge;
 	}
 
 	if ( error )
@@ -4025,6 +4163,11 @@ quint8 LodtFile::shoreAt( int sx, int sy ) const
 	return quint8( planeSampleOf( shoreStore, sx, sy, 255 ) );
 }
 
+quint8 LodtFile::skyAt( int bx, int by ) const
+{
+	return quint8( planeSampleOf( skyStore, bx, by, 0 ) );
+}
+
 quint32 LodtFile::dyeWordAt( int dx, int dy ) const
 {
 	// 0 = no dye, which is also what an absent plane answers
@@ -4033,13 +4176,15 @@ quint32 LodtFile::dyeWordAt( int dx, int dy ) const
 
 int LodtFile::waterTileEdge( int plane ) const
 {
-	const PlaneStore & s = plane == 0 ? idStore : plane == 1 ? shoreStore : plane == 3 ? flowStore : surfStore;
+	const PlaneStore & s = plane == 0 ? idStore : plane == 1 ? shoreStore : plane == 3 ? flowStore
+		: plane == 4 ? skyStore : surfStore;
 	return s.ok ? s.tileEdge : 0;
 }
 
 bool LodtFile::waterTileUniform( int plane, int tx, int ty, quint32 & value ) const
 {
-	const PlaneStore & s = plane == 0 ? idStore : plane == 1 ? shoreStore : plane == 3 ? flowStore : surfStore;
+	const PlaneStore & s = plane == 0 ? idStore : plane == 1 ? shoreStore : plane == 3 ? flowStore
+		: plane == 4 ? skyStore : surfStore;
 	if ( !s.ok || s.tileEdge <= 0 ) {
 		value = plane == 1 ? 255u : 0u;
 		return true;
@@ -4847,7 +4992,7 @@ bool lodtWaterSlopeSelfTest( const QString & outPath, const QString & flatPath,
 	lf.setBlockCacheSize( 16 );
 	check( QString( "version 3 with the surface bit, plane at the body rate (%1 = %2)" )
 			.arg( lf.surfacePlaneSamples() ).arg( lf.bodyIdSamples() ),
-		lf.headerVersion() == 3 && ( lf.sectionFlags() & LODL_SECT_SURFACE )
+		lf.headerVersion() >= 3 && ( lf.sectionFlags() & LODL_SECT_SURFACE )
 			&& lf.surfacePlaneSamples() > 0 && lf.surfacePlaneSamples() == lf.bodyIdSamples() );
 	Measure m;
 	measure( lf, m );

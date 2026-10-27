@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERSKYVISFAR1 (2026-10-27, branch waterskyvisfar1-20261027): far water reads a baked sky visibility
+
+- **Why:** water beyond the probe grid read sky visibility 1, so far water under a cliff or a high bank reflected the
+  whole open sky (WATER4 plan 1.7, the WATERLOOK1 step-10 leftover).
+- **Bake:** the .lodl far bake writes one sky-visibility byte per wet sample at the body rate (`.lodl` version 4,
+  section bit 10, header 0x100 offset / 0x108 rate). Each wet sample casts the bake's 56 sky rays from its water
+  surface over the terrain within 10,000 units (the CPU reference path; terrain only). Byte = 1 + round(vis x 254),
+  dry 0; stored as a sparse tiled plane. `--water-no-sky` (or WW_LODL_VERSION=3) writes the old version-3 bytes.
+- **Draw:** the cell view builds a sparse index + atlas from the plane (16 x 16 tiles, units 70/71) and the far water
+  look twin (`fo4_waterlook.prog`, `res/shaders/water_skyfar.glsl`) scales its sky term by the bilinear wet-texel
+  visibility. A bake without the plane reads 1, as before; `fo4_water.prog` keeps its machine code.
+- **Red:** `WW_CELL_WATER_SKYFAR_RED=one` reads 1 again (live, stage 0).
+- **Dump:** `lodl <file> --water-info <dir>` adds sky_census.txt (+ sky_index.u32, sky_atlas.u8).
+
 ## Lane STREAMMEM1 (2026-10-27, branch streammem1-20261027): streamed-out cells give their meshes back
 
 - **Why:** the stream walk's memory check (d) failed at x1.19 (11788 -> 14060 MB private over 20 crossings, bar 5%).

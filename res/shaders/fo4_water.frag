@@ -112,6 +112,9 @@ uniform int waterProbe;
 #ifdef WW_WATER_OCEAN	// lane WATERLOOK1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_ocean.glsl"
 #endif
+#ifdef WW_WATER_SKYFAR	// lane WATERSKYVISFAR1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
+#include "water_skyfar.glsl"
+#endif
 
 vec3 tonemap( vec3 x )	// fo4_default.frag's
 {
@@ -322,6 +325,9 @@ void main()
 	vec3 R = reflect( V, Ns );
 	vec3 sky = mix( waterSky[0].rgb, waterSky[1].rgb, clamp( R.z + 0.75, 0.0, 1.0 ) );
 	sky = mix( sky, waterSky[2].rgb, clamp( R.z * 1.9 + 0.35, 0.0, 1.0 ) );
+#ifdef WW_WATER_SKYFAR	// lane WATERSKYVISFAR1: the baked sky visibility of the far water (1 under water)
+	sky *= under ? 1.0 : wwWaterSkyFar( P );
+#endif
 #ifdef WW_WATER_REFL
 	vec3 reflSky = waterReflOn ? wwWaterCloudSky( sky, P, R ) : sky;	// lane WATERREFL1: before the game's SSR blend
 	vec4 reflRaw = vec4( 0.0 ), reflFin = vec4( 0.0 );
