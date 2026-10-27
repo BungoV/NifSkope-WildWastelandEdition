@@ -21,6 +21,7 @@ See the LICENSE.md file for the full license text.
 #include "farlightmap.h"	// lane FARLIGHTMAP1: farlightmap
 #include "proberelight.h"	// lane GPURELIGHT1: gpurelight
 #include "probevolumes.h"	// lane VOLFIT1: volumes
+#include "probevolcheck.h"	// lane VOLRAY1: volcheck
 
 #include "freezeanim.h"
 #include "gamemanager.h"
@@ -8066,6 +8067,13 @@ int nifskopeCliMain( const QStringList & args )
 		return rc;
 	}
 	// `volumes` builds the Space stage (rooms, thresholds, shapes) of a soup (lane VOLFIT1; src/probevolumes.cpp)
+	// `volcheck` checks a Space stage's shapes against the soup's real triangles by rays (lane VOLRAY1; src/probevolcheck.cpp)
+	if ( cmd == QLatin1String( "volcheck" ) ) {
+		const int rc = probeVolCheckCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	if ( cmd == QLatin1String( "volumes" ) ) {
 		const int rc = probeVolumesCli( a );
 		out().flush();

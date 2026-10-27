@@ -407,6 +407,7 @@ HEADERS += \
 	src/farlight.h \
 	src/farlightmap.h \
 	src/proberooms.h \
+	src/probevolcheck.h \
 	src/probevolumes.h \
 	src/probevolumesgi.h \
 	src/probesky.h \
@@ -719,6 +720,7 @@ SOURCES += \
 	src/farlight.cpp \
 	src/farlightmap.cpp \
 	src/proberooms.cpp \
+	src/probevolcheck.cpp \
 	src/probevolumes.cpp \
 	src/probevolumesgi.cpp \
 	src/probesky.cpp \

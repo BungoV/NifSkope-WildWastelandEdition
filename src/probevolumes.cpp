@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "gl/cellvolumeview.h"
 #include "probevolumesgi.h"
 #include "probegi.h"
+#include "probebvh.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -36,7 +37,7 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr int kSkyRays = 32, kWallRays = 16;
-constexpr int kStageVersion = 1;
+constexpr int kStageVersion = 2;   // 2: lane VOLRAY1 (ray refine, z clip)
 
 void volParallel( size_t n, const std::function<void( size_t )> & fn )
 {
@@ -1187,6 +1188,342 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		*oa = float( double( inOther ) / n );
 		*os = float( double( inSolid ) / double( std::max<qint64>( 1, inAll ) ) );
 	};
+	// lane VOLRAY1: a cell any triangle touches is solid, so every grown face stops about a cell short of the wall.
+	// Rays from inside each face, along its normal, move it onto the real triangles (src/probevolcheck.cpp judges it).
+	const bool refineOn = red != QLatin1String( "norefine" ) && !soup.tris.empty();
+	const double rC = double( C );
+	probebvh::Bvh rb;
+	double rO[2] = { 0, 0 };
+	if ( refineOn ) {
+		double mn[2] = { 1e300, 1e300 }, mx[2] = { -1e300, -1e300 };
+		for ( size_t i = 0; i < soup.tris.size(); i += 3 )
+			for ( int k = 0; k < 2; k++ ) {
+				mn[k] = std::min( mn[k], double( soup.tris[i + size_t( k )] ) );
+				mx[k] = std::max( mx[k], double( soup.tris[i + size_t( k )] ) );
+			}
+		for ( int k = 0; k < 2; k++ )
+			rO[k] = std::floor( ( mn[k] + mx[k] ) * 0.5 );
+		rb.t.reserve( soup.tris.size() + soup.glass.size() );
+		for ( const std::vector<float> * src : { &soup.tris, &soup.glass } )
+			for ( size_t i = 0; i < src->size(); i += 3 ) {
+				rb.t.push_back( float( double( ( *src )[i + 0] ) - rO[0] ) );
+				rb.t.push_back( float( double( ( *src )[i + 1] ) - rO[1] ) );
+				rb.t.push_back( ( *src )[i + 2] );
+			}
+		rb.build();
+		rb.mask = &soup.amask;
+	}
+	std::atomic<qint64> refineRays( 0 );
+	auto cast1 = [&]( const double p[3], const double d[3], double tmax ) -> double {
+		const double o[3] = { p[0] - rO[0], p[1] - rO[1], p[2] };
+		double t = 0;
+		refineRays++;
+		return rb.ray( o, d, tmax, &t ) ? t : HUGE_VAL;
+	};
+	struct RSample
+	{
+		double o[3], d[3], d0;
+	};
+	// the grid at a point: 1 the room's own air, 2 other air (another room, outdoors), 3 solid or off the grid
+	auto gridKind = [&]( const double p[3], int room ) -> int {
+		int g[3];
+		for ( int c = 0; c < 3; c++ ) {
+			g[c] = int( std::floor( ( p[c] - V.origin[c] ) / C ) );
+			if ( g[c] < 0 || g[c] >= V.dims[c] )
+				return 3;
+		}
+		const size_t i = V.index( g[0], g[1], g[2] );
+		return st[i] ? 3 : V.labels[i] == room ? 1 : V.labels[i] >= 0 ? 2 : 3;
+	};
+	// free run past each sample's face point: the first triangle, or 1 unit into a sibling shape the ray enters; a
+	// sample whose face already touches a sibling is inside the room's union and has no say (NaN). The grid guards
+	// both ways: a face point in the room's own air never shrinks (a lamp or a beam inside the room is not its wall),
+	// a grow stops where the grid turns to other air (a doorway), a shrink stops at the room's own air.
+	auto freeRuns = [&]( const std::vector<RSample> & smp, const std::vector<const ProbeVolumeShape *> & sib, int room ) {
+		std::vector<double> run( smp.size() );
+		volParallel( ( smp.size() + 255 ) / 256, [&]( size_t blk ) {
+			for ( size_t i = blk * 256; i < std::min( smp.size(), blk * 256 + 256 ); i++ ) {
+				const RSample & q = smp[i];
+				float f1[3];
+				for ( int k = 0; k < 3; k++ )
+					f1[k] = float( q.o[k] + q.d[k] * ( q.d0 + 1.0 ) );
+				bool inner = false;
+				for ( const ProbeVolumeShape * o : sib )
+					inner = inner || o->contains( f1 );
+				if ( inner ) {
+					run[i] = std::nan( "" );
+					continue;
+				}
+				double fp[3];
+				for ( int k = 0; k < 3; k++ )
+					fp[k] = q.o[k] + q.d[k] * q.d0;
+				double r;
+				if ( gridKind( fp, room ) == 1 ) {
+					// cast from inside the shape: a face point on or just past a wall would miss that wall
+					const double t = cast1( q.o, q.d, q.d0 + 2.0 * rC );
+					r = std::isfinite( t ) ? std::max( 0.0, t - q.d0 ) : HUGE_VAL;
+					// a grow ends inside the first solid cell: a ray that slips through a seam in that wall must not
+					// carry the face into the air beyond it
+					for ( double s = 0.5 * rC; s <= 2.0 * rC && s < r; s += 0.5 * rC ) {
+						double p[3];
+						for ( int k = 0; k < 3; k++ )
+							p[k] = fp[k] + q.d[k] * s;
+						const int g = gridKind( p, room );
+						if ( g == 2 ) {
+							r = std::max( 0.0, s - 0.5 * rC );
+							break;
+						}
+						if ( g == 3 ) {
+							r = std::min( r, s + 0.5 * rC );
+							break;
+						}
+					}
+				} else {
+					// no room air behind the face point within reach: solid the shape encloses (a pillar, a beam), not
+					// a wall the face went through, so the sample has no say
+					const double t = cast1( q.o, q.d, q.d0 + 2.0 * rC );
+					r = std::nan( "" );
+					for ( double s = 0.5 * rC; s <= 4.0 * rC; s += 0.5 * rC ) {
+						double p[3];
+						for ( int k = 0; k < 3; k++ )
+							p[k] = fp[k] - q.d[k] * s;
+						if ( gridKind( p, room ) == 1 ) {
+							r = std::max( std::isfinite( t ) ? t - q.d0 : HUGE_VAL, -s );
+							break;
+						}
+					}
+				}
+				for ( double s = 2.0; s <= 2.0 * rC && s < r; s += 2.0 ) {
+					float p[3];
+					for ( int k = 0; k < 3; k++ )
+						p[k] = float( q.o[k] + q.d[k] * ( q.d0 + s ) );
+					bool in = false;
+					for ( const ProbeVolumeShape * o : sib )
+						in = in || o->contains( p );
+					if ( in ) {
+						r = s + 1.0;
+						break;
+					}
+				}
+				run[i] = r;
+			}
+		} );
+		return run;
+	};
+	// the move that keeps 99 % of the samples with a say short of a triangle; 0 when too few have a say or most see
+	// nothing in reach
+	auto quantMove = [&]( const std::vector<double> & run, bool keepNeg ) -> double {
+		std::vector<double> v;
+		for ( double r : run )
+			if ( !std::isnan( r ) )
+				v.push_back( r );
+		// a floor or ceiling face point already past a triangle is a poke whatever the share that sees it
+		const bool pokes = keepNeg && std::count_if( v.begin(), v.end(), []( double r ) { return r < 0.0; } ) >= 2;
+		if ( !pokes && ( v.size() < 4 || v.size() * 10 < run.size() ) )
+			return 0.0;
+		// a minority of samples whose face point is already past a triangle (a corner in a sloped roof) is that
+		// corner's business, not this face's: they would hold the whole face off its wall
+		const size_t neg = size_t( std::count_if( v.begin(), v.end(), []( double r ) { return r < 0.0; } ) );
+		if ( !keepNeg && neg > 0 && neg * 2 < v.size() )
+			v.erase( std::remove_if( v.begin(), v.end(), []( double r ) { return r < 0.0; } ), v.end() );
+		std::sort( v.begin(), v.end() );
+		const double q = v[v.size() / 100];
+		if ( !std::isfinite( q ) )
+			return 0.0;
+		return std::clamp( q - 0.5, -3.0 * rC, 2.0 * rC );
+	};
+	auto refineShape = [&]( ProbeVolumeShape & s, const std::vector<const ProbeVolumeShape *> & sib, int room ) {
+		const double step = 8.0, inset = 2.0;
+		// floor and ceiling first, then the walls; 3 = a wedge's slope, 4 = a cylinder's side
+		std::vector<std::array<int, 2>> fl;
+		if ( s.type == ProbeShapeType::Box )
+			fl = { { 2, -1 }, { 2, 1 }, { 0, -1 }, { 0, 1 }, { 1, -1 }, { 1, 1 } };
+		else if ( s.type == ProbeShapeType::Wedge )
+			fl = { { 2, -1 }, { 0, -1 }, { 0, 1 }, { 1, -1 }, { 3, 0 } };
+		else if ( s.type == ProbeShapeType::Cylinder && s.size[0] == s.size[1] )
+			fl = { { 2, -1 }, { 2, 1 }, { 4, 0 } };
+		for ( int pass = 0; pass < 2; pass++ )
+			for ( const std::array<int, 2> & f : fl ) {
+				double m[3][3];
+				rotMatrix( s.rotation, m );
+				const double h[3] = { s.size[0] * 0.5, s.size[1] * 0.5, s.size[2] * 0.5 };
+				auto toWorld = [&]( const double l[3], double w[3], bool dirOnly ) {
+					for ( int k = 0; k < 3; k++ )
+						w[k] = ( dirOnly ? 0.0 : double( s.center[k] ) ) + m[k][0] * l[0] + m[k][1] * l[1] + m[k][2] * l[2];
+				};
+				auto toLocal = [&]( const double w[3], double l[3] ) {
+					const double d[3] = { w[0] - s.center[0], w[1] - s.center[1], w[2] - s.center[2] };
+					for ( int k = 0; k < 3; k++ )
+						l[k] = m[0][k] * d[0] + m[1][k] * d[1] + m[2][k] * d[2];
+				};
+				auto insideBy = [&]( const double l[3], double e ) {
+					switch ( s.type ) {
+					case ProbeShapeType::Wedge:
+						return std::fabs( l[0] ) <= h[0] - e && std::fabs( l[1] ) <= h[1] - e && l[2] >= -h[2] + e && h[1] > 0
+							&& l[2] <= -h[2] * l[1] / h[1] - e;
+					case ProbeShapeType::Cylinder:
+						return std::fabs( l[2] ) <= h[2] - e && std::hypot( l[0], l[1] ) <= h[0] - e;
+					default:
+						return std::fabs( l[0] ) <= h[0] - e && std::fabs( l[1] ) <= h[1] - e && std::fabs( l[2] ) <= h[2] - e;
+					}
+				};
+				std::vector<RSample> smp;
+				if ( f[0] < 3 ) {
+					const int a = f[0], b = ( a + 1 ) % 3, c = ( a + 2 ) % 3;
+					const double sg = f[1], d0 = std::min( 3.0 * rC, h[a] );
+					const double eb = h[b] - inset, ec = h[c] - inset;
+					if ( eb <= 0 || ec <= 0 || h[a] <= 1.0 )
+						continue;
+					const int nb = std::max( 1, int( std::ceil( 2 * eb / step ) ) ), nc = std::max( 1, int( std::ceil( 2 * ec / step ) ) );
+					double la[3] = { 0, 0, 0 };
+					la[a] = sg;
+					// the face's rim is sampled too: a corner is where a sloped roof first meets a ceiling
+					for ( int jc = 0; jc <= nc; jc++ )
+						for ( int ib = 0; ib <= nb; ib++ ) {
+							double l[3];
+							l[b] = -eb + ib * 2 * eb / nb;
+							l[c] = -ec + jc * 2 * ec / nc;
+							// a wall's top and bottom band meet the ceiling and floor (a sloped roof runs into the
+							// wall there): the floor and ceiling faces own that corner
+							if ( a != 2 && h[2] > 3.0 * rC && std::fabs( l[2] ) > h[2] - 2.0 * rC )
+								continue;
+							l[a] = sg * ( h[a] - inset );
+							if ( !insideBy( l, 0.5 ) )
+								continue;
+							double dd = d0;
+							l[a] = sg * ( h[a] - dd );
+							while ( !insideBy( l, 0.5 ) && dd > 4.0 ) {
+								dd *= 0.5;
+								l[a] = sg * ( h[a] - dd );
+							}
+							if ( !insideBy( l, 0.5 ) )
+								continue;
+							RSample q;
+							toWorld( l, q.o, false );
+							toWorld( la, q.d, true );
+							q.d0 = dd;
+							smp.push_back( q );
+						}
+					// a box's floor or ceiling owns its corners; a wedge's floor corner at the thin edge is the slope's
+					const double mv = quantMove( freeRuns( smp, sib, room ), a == 2 && s.type == ProbeShapeType::Box );
+					if ( mv == 0.0 )
+						continue;
+					const double hn = std::max( 1.0, h[a] + mv * 0.5 ), dh = hn - h[a];
+					s.size[a] = float( 2 * hn );
+					for ( int k = 0; k < 3; k++ )
+						s.center[k] = float( s.center[k] + sg * m[k][a] * dh );
+				} else if ( f[0] == 3 ) {
+					// the slope: a line through the hits (the roof's own pitch), shifted under 99 % of them
+					if ( h[0] <= inset || h[1] <= inset || h[2] <= 1.0 )
+						continue;
+					const double nl = std::sqrt( h[2] * h[2] / ( h[1] * h[1] ) + 1.0 );
+					const double n[3] = { 0, h[2] / h[1] / nl, 1.0 / nl };
+					const int nx = std::max( 1, int( std::ceil( 2 * ( h[0] - inset ) / step ) ) );
+					const int ny = std::max( 1, int( std::ceil( 2 * ( h[1] - inset ) / ( step * n[2] ) ) ) );
+					for ( int j = 0; j < ny; j++ )
+						for ( int i = 0; i < nx; i++ ) {
+							const double x = -( h[0] - inset ) + ( i + 0.5 ) * 2 * ( h[0] - inset ) / nx;
+							const double y = -( h[1] - inset ) + ( j + 0.5 ) * 2 * ( h[1] - inset ) / ny;
+							const double p[3] = { x, y, -h[2] * y / h[1] };
+							double d0 = 3.0 * rC, l[3];
+							for ( ;; ) {
+								for ( int k = 0; k < 3; k++ )
+									l[k] = p[k] - n[k] * d0;
+								if ( insideBy( l, 0.5 ) || d0 < 2.0 )
+									break;
+								d0 *= 0.5;
+							}
+							if ( d0 < 2.0 )
+								continue;
+							RSample q;
+							toWorld( l, q.o, false );
+							toWorld( n, q.d, true );
+							q.d0 = d0;
+							smp.push_back( q );
+						}
+					const std::vector<double> run = freeRuns( smp, sib, room );
+					std::vector<std::array<double, 2>> hp;   // hits in the wedge's (y, z)
+					size_t say = 0;
+					for ( size_t i = 0; i < smp.size(); i++ ) {
+						if ( std::isnan( run[i] ) )
+							continue;
+						say++;
+						if ( !std::isfinite( run[i] ) )
+							continue;
+						double w[3], l[3];
+						for ( int k = 0; k < 3; k++ )
+							w[k] = smp[i].o[k] + smp[i].d[k] * ( smp[i].d0 + run[i] );
+						toLocal( w, l );
+						hp.push_back( { l[1], l[2] } );
+					}
+					if ( hp.size() < 8 || hp.size() * 2 < say )
+						continue;
+					double sy = 0, sz = 0, syy = 0, syz = 0;
+					for ( const auto & q : hp ) {
+						sy += q[0];
+						sz += q[1];
+						syy += q[0] * q[0];
+						syz += q[0] * q[1];
+					}
+					const double nh = double( hp.size() ), den = nh * syy - sy * sy;
+					if ( den <= 1e-9 )
+						continue;
+					const double B = ( nh * syz - sy * sz ) / den;
+					double A = ( sz - B * sy ) / nh;
+					if ( B >= -1e-3 )
+						continue;   // no pitch down toward the thin edge: leave the slope
+					std::vector<double> res;
+					for ( const auto & q : hp )
+						res.push_back( q[1] - ( A + B * q[0] ) );
+					std::sort( res.begin(), res.end() );
+					A += res[res.size() / 100] - 0.5;
+					// the thin edge stops at the wall it runs into (a sliver under the tolerance may pass it)
+					double wall = HUGE_VAL;
+					for ( int i = 0; i < 3; i++ ) {
+						const double l2[3] = { ( i - 1 ) * h[0] * 0.5, -h[1] + std::min( h[1], rC ), -h[2] + 2.0 };
+						const double ly[3] = { 0, 1, 0 };
+						double o[3], d[3];
+						toWorld( l2, o, false );
+						toWorld( ly, d, true );
+						const double t = cast1( o, d, 2.0 * h[1] + 4.0 * rC );
+						if ( std::isfinite( t ) )
+							wall = std::min( wall, l2[1] + t );
+					}
+					const double ht = std::clamp( A - B * h[1] + h[2], std::max( 4.0, 2 * h[2] - 4 * rC ), 2 * h[2] + 4 * rC );
+					double ly = ( -h[2] - A ) / B + h[1];
+					ly = std::min( ly, wall + h[1] + 2.0 );
+					ly = std::clamp( ly, std::max( 8.0, 2 * h[1] - 4 * rC ), 2 * h[1] + 4 * rC );
+					const double lc2[3] = { 0, -h[1] + ly * 0.5, -h[2] + ht * 0.5 };
+					double c2[3];
+					toWorld( lc2, c2, false );
+					s.size[1] = float( ly );
+					s.size[2] = float( ht );
+					for ( int k = 0; k < 3; k++ )
+						s.center[k] = float( c2[k] );
+				} else {
+					const double r0 = h[0], d0 = std::min( 3.0 * rC, r0 );
+					if ( r0 <= 1.0 || h[2] <= inset )
+						continue;
+					const int na = std::max( 8, int( std::ceil( 2 * kPi * r0 / step ) ) );
+					const int nz = std::max( 1, int( std::ceil( 2 * ( h[2] - inset ) / step ) ) );
+					for ( int j = 0; j < nz; j++ )
+						for ( int i = 0; i < na; i++ ) {
+							const double ph = 2 * kPi * ( i + 0.5 ) / na;
+							const double dl[3] = { std::cos( ph ), std::sin( ph ), 0.0 };
+							const double l[3] = { ( r0 - d0 ) * dl[0], ( r0 - d0 ) * dl[1], -( h[2] - inset ) + ( j + 0.5 ) * 2 * ( h[2] - inset ) / nz };
+							RSample q;
+							toWorld( l, q.o, false );
+							toWorld( dl, q.d, true );
+							q.d0 = d0;
+							smp.push_back( q );
+						}
+					const double mv = quantMove( freeRuns( smp, sib, room ), false );
+					if ( mv == 0.0 )
+						continue;
+					s.size[0] = s.size[1] = float( 2 * std::max( 1.0, r0 + mv ) );
+				}
+			}
+	};
 	for ( size_t r = 0; r < V.rooms.size(); r++ ) {
 		ProbeVolumeRoom & rm = V.rooms[r];
 		const int room = int( r ) + 1;
@@ -1581,11 +1918,135 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 				os = ps;
 			}
 		}
+		if ( refineOn && !shapes.empty() ) {
+			const std::vector<ProbeVolumeShape> grid = shapes;
+			for ( size_t k = 0; k < shapes.size(); k++ ) {
+				std::vector<const ProbeVolumeShape *> sib;
+				for ( size_t j = 0; j < shapes.size(); j++ )
+					if ( j != k )
+						sib.push_back( &shapes[j] );
+				refineShape( shapes[k], sib, room );
+			}
+			// the rays may only move faces onto triangles: a fit that lost the room's own air or took other air on
+			// the grid moved past what the grid already knew, and the grid fit stands
+			float c2 = 0, o2 = 0, s2 = 0;
+			measure( room, shapes, &c2, &o2, &s2 );
+			if ( c2 >= cov - 0.03f && o2 <= oa + 0.01f ) {
+				cov = c2;
+				oa = o2;
+				os = s2;
+			} else {
+				shapes = grid;
+			}
+		}
 		rm.shapes = std::move( shapes );
 		rm.coverage = cov;
 		rm.overshootAir = oa;
 		rm.overshootSolid = os;
 	}
+	// lane VOLRAY1: a threshold from the cell faces leans with the stepped boundary and is one cell thick. Square it to
+	// its room, then fit it by rays to the opening: jamb to jamb, floor to lintel, through the wall.
+	if ( refineOn )
+		for ( ProbeVolumeThreshold & t : V.thresholds ) {
+			if ( std::fabs( t.normal[2] ) > 0.7 || t.opening == QLatin1String( "window" ) || t.a < 1 || t.a > int( V.rooms.size() ) )
+				continue;
+			double psi = t.shape.rotation[2];
+			const ProbeVolumeRoom & ra = V.rooms[size_t( t.a - 1 )];
+			if ( !ra.shapes.empty() ) {
+				const double rho = ra.shapes[0].rotation[2];
+				const double k = std::round( ( psi - rho ) / 90.0 );
+				if ( std::fabs( psi - ( rho + 90.0 * k ) ) <= 15.0 )
+					psi = rho + 90.0 * k;
+			}
+			const double pr = psi * kPi / 180.0;
+			const double ex[3] = { std::cos( pr ), std::sin( pr ), 0 }, ey[3] = { -std::sin( pr ), std::cos( pr ), 0 };
+			const double ez[3] = { 0, 0, 1 }, nx[3] = { -ex[0], -ex[1], 0 }, nz[3] = { 0, 0, -1 };
+			double c[3] = { t.shape.center[0], t.shape.center[1], t.shape.center[2] };
+			const double hw0 = t.shape.size[0] * 0.5, hh0 = t.shape.size[2] * 0.5;
+			auto at = [&]( double sx, double sy, double sz, double p[3] ) {
+				for ( int k = 0; k < 3; k++ )
+					p[k] = c[k] + ex[k] * sx + ey[k] * sy + ez[k] * sz;
+			};
+			double zlo = -hh0, zhi = hh0, xl = hw0, xr = hw0, ylo = -rC * 0.5, yhi = rC * 0.5;
+			bool ok = false;
+			for ( int round = 0; round < 2; round++ ) {
+				// floor and lintel: the middle of three columns
+				double dn[3], up[3];
+				for ( int s = 0; s < 3; s++ ) {
+					double p[3];
+					at( ( xr - xl ) * 0.5 + ( s - 1 ) * ( xl + xr ) * 0.25, 0, ( zlo + zhi ) * 0.5, p );
+					dn[s] = cast1( p, nz, hh0 * 2 + 4 * rC );
+					up[s] = cast1( p, ez, hh0 * 2 + 4 * rC );
+				}
+				std::sort( dn, dn + 3 );
+				std::sort( up, up + 3 );
+				if ( !std::isfinite( dn[1] ) )
+					break;
+				const double zm = ( zlo + zhi ) * 0.5;
+				zlo = zm - dn[1];
+				zhi = std::isfinite( up[1] ) ? zm + up[1] : zhi;
+				// jambs: the widest of three rows
+				double l = 0, r = 0;
+				for ( int s = 1; s <= 3; s++ ) {
+					double p[3];
+					at( ( xr - xl ) * 0.5, 0, zlo + ( zhi - zlo ) * s / 4.0, p );
+					const double a = cast1( p, nx, hw0 * 2 + 4 * rC ), b = cast1( p, ex, hw0 * 2 + 4 * rC );
+					const double xm = ( xr - xl ) * 0.5;
+					l = std::max( l, std::isfinite( a ) ? a - xm : xl );
+					r = std::max( r, std::isfinite( b ) ? b + xm : xr );
+				}
+				xl = l;
+				xr = r;
+				// the wall: the run of offsets across where a jamb or the lintel still stands close
+				const double half = ( xl + xr ) * 0.5, xm = ( xr - xl ) * 0.5, zm2 = ( zlo + zhi ) * 0.5;
+				auto wallAt = [&]( double y ) {
+					double p[3];
+					at( xm, y, zm2, p );
+					return cast1( p, nx, half + 4.0 ) <= half + 4.0 || cast1( p, ex, half + 4.0 ) <= half + 4.0
+						|| cast1( p, ez, zhi - zm2 + 4.0 ) <= zhi - zm2 + 4.0;
+				};
+				const int span = int( 4 * rC );
+				int best = -100000;
+				for ( int y = 0; y <= span && best == -100000; y++ ) {
+					if ( wallAt( y ) )
+						best = y;
+					else if ( wallAt( -y ) )
+						best = -y;
+				}
+				if ( best == -100000 )
+					break;
+				// a passage that stays narrow (a corridor, a low lintel) is not one wall: a threshold deeper than a cell
+				// carves the rooms' own air and parts each room's flood from its shapes
+				const int deep = int( rC );
+				int y0 = best, y1 = best;
+				while ( y1 < best + span && y1 - y0 < deep && wallAt( y1 + 1 ) )
+					y1++;
+				while ( y0 > best - span && y1 - y0 < deep && wallAt( y0 - 1 ) )
+					y0--;
+				ylo = y0 - 1.0;
+				yhi = y1 + 1.0;
+				// recentre on the passage, the next round measures from its middle
+				for ( int k = 0; k < 3; k++ )
+					c[k] += ey[k] * ( ylo + yhi ) * 0.5;
+				yhi -= ( ylo + yhi ) * 0.5;
+				ylo = -yhi;
+				ok = true;
+			}
+			// a jamb or lintel ray that missed widens the opening into a room and cuts it in two (museum 0x001B: 7.6M u3
+			// of its own shapes parted from its air): a jamb moves out at most a cell, else the grid's threshold stays
+			if ( !ok || xl > hw0 + rC || xr > hw0 + rC || zhi - zlo > 2.0 * hh0 + 2.0 * rC )
+				continue;
+			double p[3];
+			at( ( xr - xl ) * 0.5, 0, ( zlo + zhi ) * 0.5, p );
+			for ( int k = 0; k < 3; k++ )
+				t.shape.center[k] = float( p[k] );
+			t.shape.size[0] = float( xl + xr + 2.0 );
+			t.shape.size[1] = float( yhi - ylo );
+			t.shape.size[2] = float( zhi - zlo + 2.0 );
+			t.shape.rotation[0] = t.shape.rotation[1] = 0.0f;
+			t.shape.rotation[2] = float( psi );
+		}
+	V.refineRays = refineRays;
 	V.msFit = clock.nsecsElapsed() / 1e6;
 	V.msTotal = total.nsecsElapsed() / 1e6;
 	V.ok = true;

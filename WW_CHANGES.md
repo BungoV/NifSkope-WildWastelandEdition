@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLRAY1 (2026-10-27, branch volray1-20261027): rays check that the GI volumes fill each interior
+
+- **`nifskope-cli volcheck`:** measures a `.space` against the probe soup on an h=16 lattice. Per room and per cell it
+  reports real-air gaps (blobs over 4096 u3), pokes into solid with depth, cross-wall overlaps, thresholds, leaks,
+  volume in u3 and as a % of air, the worst spots and a PNG; exit 1 on a broken fit. `--rays gpu|cpu|both` casts
+  through the bake ray scene (RT card, else all CPU cores; CPU is the reference, `both` prints rays, ms and answers
+  that differ).
+- **Ray refine in the volume fitter:** each shape face casts from inside the shape to the room's walls, grows into its
+  own air only, stops inside the first solid cell and walks back up to four cells; a room keeps the refine only when
+  coverage and overshoot do not get worse. Threshold slabs stay one cell deep and a jamb moves out at most a cell.
+  `.recx` hand shapes still replace a room's fitted shapes. `--red norefine` is the old fitter.
+- **Rooms clipped to the cell's height:** room boxes no longer reach above or below the cell's own geometry.
+- **Gate:** `tests/spells/cell_volray.sh` (synthetic rooms reach 0 gaps, pokes and overlaps; mutations must fail; GPU
+  equals CPU). Real cells do not reach 0 yet: Goodneighbor pokes 118M -> 79M u3, the museum's real gaps drop, Concord's
+  overlaps grow. Numbers in the lane notes.
+
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
 - **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,

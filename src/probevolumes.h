@@ -134,6 +134,7 @@ struct ProbeVolumes
 	int handFixed = 0, idsKept = 0, idsNew = 0;
 	double doorWidth = 0;       //!< the median door box's narrow side (the pinch's check)
 	double msRooms = 0, msSky = 0, msClassify = 0, msThresholds = 0, msFit = 0, msTotal = 0;
+	qint64 refineRays = 0;      //!< rays the fit's refine cast onto the triangles (lane VOLRAY1)
 	QString roomsLine;
 
 	size_t index( int x, int y, int z ) const
