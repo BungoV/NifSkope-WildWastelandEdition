@@ -38,6 +38,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellqueue.h"	// lane GAPPERF-BINDLESS: the sampler census reads every bind
 #include "gl/cellvrs.h"	// lane VRS1
 #include "gl/cellfxres.h"	// lane FXRES1
+#include "gl/celluniform.h"	// lane CELLUNI1
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "message.h"
@@ -308,7 +309,11 @@ template <typename F> static void wwSceneGlobals( Renderer * r, Scene * scene, i
 		}
 	}
 	m.runs++;
+	WwCellUni::State & cu = WwCellUni::state();	// lane CELLUNI1: the pass's viewport, asked once per epoch
+	cu.vpEpoch = can ? m.epoch : 0;
+	cu.vpCheck = m.check;
 	run();
+	cu.vpEpoch = 0;
 	if ( can ) {
 		if ( m.mode == 1 )
 			m.stamps.clear();

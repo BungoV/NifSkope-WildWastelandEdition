@@ -160,6 +160,8 @@ void replay( const Packet & p, NifSkopeOpenGLContext::GLFunctions * f, TexCache 
 		const std::uint32_t * w = d + o.off;
 		const GLfloat * x = reinterpret_cast<const GLfloat *>( w );
 		const GLint * xi = reinterpret_cast<const GLint *>( w );
+		if ( o.kind <= UM4 && p.prog )	// lane CELLUNI1: a raw write the cell-uniform cache must not trust
+			static_cast<NifSkopeOpenGLContext::Program *>( const_cast<void *>( p.prog ) )->wwUni.forget( o.a, o.b > 0 ? o.b : 1 );
 		switch ( o.kind ) {
 		case U1i: f->glUniform1i( o.a, xi[0] ); break;
 		case U1f: f->glUniform1f( o.a, x[0] ); break;

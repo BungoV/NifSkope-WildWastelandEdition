@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLUNI1 (2026-10-27, branch celluni1-20261027): the cell lighting uniforms stop asking the driver
+
+- **Why:** wwCellLightsUniforms cost ~35 ms CPU per Concord frame (1941 calls x 18 us). Each call asked the driver for
+  GL_ACTIVE_TEXTURE three times (and GL_VIEWPORT once); under NVIDIA threaded optimization every glGet waits for the
+  driver thread. It also re-sent ~16 unchanged uniforms per call.
+- **Dedicated units by EXT_direct_state_access** (`src/gl/celluniform.h`, `WwCellUni::Units`): glBindMultiTextureEXT and
+  glTextureBufferEXT bind a (unit, target) without moving the active unit, so nothing asks for it. An upload that
+  must move it asks once (lazily) and puts it back; the LUT upload still leaves the unit where the old code left it.
+  The far slot/record buffer textures attach once per buffer (the old path re-attached every call). No DSA = the old
+  query per section. Same in the cluster uniforms (cellclustergl.cpp).
+- **Per-program uniform cache** (`Program::wwUni`): inside the cell scope a scalar/vector write of the bits the
+  location already holds is skipped. Writes outside the scope, array/matrix writes, the draw-packet replay and the raw
+  cellShadowFade write forget their locations; a recording draw packet always uploads; reset at every link.
+- **Viewport:** asked once per armed setup-memo epoch (the memo re-arms when a layer moves the viewport).
+  `WW_SETUP_MEMO_CHECK=1` asks anyway and counts a stale one (`vpstale=`).
+- **Line (every 60 frames, WW_FRAME_LOG):** `cell uni: calls= uploads= kept= unused= queries= dsa= vpstale=[ RED]`.
+- **Red:** `WW_CELL_UNI_RED=1` = the old GL call sequence exactly (live, stage 0).
+- **Offline gate:** tests/celluni (notes/celluni1/unit/unit.sh), 1941 calls x 30 frames over 4 programs on the real
+  driver: green == red pixels and texture state byte for byte; queries 5823 -> 1 per frame, glUniform 31056 -> 3883;
+  CPU 9.28 -> 0.54 ms per frame there (no threaded optimization). Controls: a stale cache entry and a missing restore
+  both change the picture; the header with forget() disabled prints CELLUNI FAIL.
+- **Cost:** 0 GPU ms, no shader change; under 1 MB CPU (one 20-byte slot per uniform location per program).
+
 ## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
 
 - **Why:** the far objects, far cards and far rings past ring 0 were cut once, round the open's centre. The stream
