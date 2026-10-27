@@ -7,7 +7,7 @@
  *  - height: the shape's least-squares mean plane at (x, y); a shape that is not one plane (residual > kFlatTol,
  *    e.g. one bucket of cell water quads at two heights) reads the covering triangle's own plane instead;
  *  - room: a non-water triangle crossing the vertical segment from the camera up to the surface means the camera is
- *    in a room below the water (a basement under a pond), not in it.
+ *    in a room below the water (a basement under a pond), not in it, if the room is also closed (wwWaterRoomOver).
  * oldRule = WATERUNDER1's rule (bounding box, highest vertex, no room test): the red. */
 
 #include <algorithm>
@@ -140,6 +140,79 @@ inline bool wwWaterRoofOver( const float * tri, size_t nTri, float x, float y, f
 			return true;
 	}
 	return false;
+}
+
+/* Lane WATERUNDER6: a roof alone is not a room. A sunken hull or a pier's underside over the camera stops the vertical
+ * segment too, but water reaches the camera round its edges. A room is closed: besides the roof over the camera, every
+ * ray of a cone (8 bearings at 45 and 15 degrees up) must meet a non-water surface before it rises to the water
+ * surface or runs kWwRoomReach sideways. One open ray = the camera is in the water. */
+constexpr double kWwRoomReach = 2048.0;	// game units sideways; a ray that runs this far unblocked is open
+
+//! the ray o + t d crosses triangle t (9 floats, either face) at t = tHit
+inline bool wwRayTri( const float * t, const double o[3], const double d[3], double & tHit )
+{
+	const double e1[3] = { double( t[3] ) - t[0], double( t[4] ) - t[1], double( t[5] ) - t[2] };
+	const double e2[3] = { double( t[6] ) - t[0], double( t[7] ) - t[1], double( t[8] ) - t[2] };
+	const double p[3] = { d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0] };
+	const double det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+	const double scale = std::sqrt( ( e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2] ) * ( p[0] * p[0] + p[1] * p[1] + p[2] * p[2] ) );
+	if ( !( std::fabs( det ) > 1e-12 * scale ) )
+		return false;
+	const double inv = 1.0 / det;
+	const double s[3] = { o[0] - t[0], o[1] - t[1], o[2] - t[2] };
+	const double u = ( s[0] * p[0] + s[1] * p[1] + s[2] * p[2] ) * inv;
+	if ( u < -1e-9 || u > 1.0 + 1e-9 )
+		return false;
+	const double q[3] = { s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0] };
+	const double v = ( d[0] * q[0] + d[1] * q[1] + d[2] * q[2] ) * inv;
+	if ( v < -1e-9 || u + v > 1.0 + 1e-9 )
+		return false;
+	tHit = ( e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2] ) * inv;
+	return true;
+}
+
+//! the horizontal reach of the cone for a camera `depth` below the surface (the candidate shapes' XY margin)
+inline double wwWaterRoomReach( double depth )
+{
+	return std::min( kWwRoomReach, depth / std::tan( 15.0 * 3.14159265358979 / 180.0 ) );
+}
+
+//! true when the camera (x, y, z) under a surface at h is in a closed room: a roof over it and every cone ray blocked
+inline bool wwWaterRoomOver( const float * tri, size_t nTri, float x, float y, float z, float h )
+{
+	if ( !wwWaterRoofOver( tri, nTri, x, y, z, h ) )
+		return false;
+	// only triangles inside the cone's cylinder (z .. h, reach sideways) can block a ray
+	const double reach = wwWaterRoomReach( double( h ) - z );
+	std::vector<float> nearT;
+	for ( size_t i = 0; i < nTri; i++ ) {
+		const float * t = tri + 9 * i;
+		const float zl = std::min( { t[2], t[5], t[8] } ), zh = std::max( { t[2], t[5], t[8] } );
+		const float xl = std::min( { t[0], t[3], t[6] } ), xh = std::max( { t[0], t[3], t[6] } );
+		const float yl = std::min( { t[1], t[4], t[7] } ), yh = std::max( { t[1], t[4], t[7] } );
+		if ( zh < z || zl > h || xh < x - reach || xl > x + reach || yh < y - reach || yl > y + reach )
+			continue;
+		nearT.insert( nearT.end(), t, t + 9 );
+	}
+	const size_t nNear = nearT.size() / 9;
+	const double o[3] = { x, y, z };
+	const double kPi = 3.14159265358979;
+	for ( const double elevDeg : { 15.0, 45.0 } ) {	// the low ring first: it escapes a hull or a pier soonest
+		const double el = elevDeg * kPi / 180.0, ce = std::cos( el ), se = std::sin( el );
+		const double tMax = std::min( ( double( h ) - z ) / se, kWwRoomReach / ce );
+		for ( int a = 0; a < 8; a++ ) {
+			const double az = a * kPi / 4.0;
+			const double d[3] = { ce * std::cos( az ), ce * std::sin( az ), se };
+			bool blocked = false;
+			for ( size_t i = 0; i < nNear && !blocked; i++ ) {
+				double t;
+				blocked = wwRayTri( &nearT[9 * i], o, d, t ) && t > 1e-3 && t < tMax;
+			}
+			if ( !blocked )
+				return false;
+		}
+	}
+	return true;
 }
 
 #endif

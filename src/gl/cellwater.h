@@ -130,7 +130,7 @@ bool wwCellWaterRecordOf( const void * nif, quint32 form, WwWaterRecord & rec );
  *  worldspace's default water. `oldRule` = WATERUNDER1's box and top vertex, no room test (the red). Cached per
  *  document, re-measured when its water shapes change. */
 bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDepth, float & height, WwWaterRecord & rec,
-	bool oldRule = false, bool * sea = nullptr, bool * roofed = nullptr );
+	bool oldRule = false, bool * sea = nullptr, bool * roofed = nullptr, bool roofOnly = false );
 //! Lane WATERUNDER5: the worldspace's default WATR for this document (0 = none, an interior)
 void wwCellWaterSetDefault( const void * nif, quint32 form );
 

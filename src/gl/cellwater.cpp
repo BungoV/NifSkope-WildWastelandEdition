@@ -54,7 +54,7 @@ struct WaterDoc
 	quint64 gen = 1, planesGen = 0;
 	std::vector<WwWaterPoly> planes;
 	// lane WATERUNDER5: the last room test (eye, surface, shape count) and its answer
-	float roofKey[4] = { 1e30f, 1e30f, 1e30f, 1e30f };
+	float roofKey[5] = { 1e30f, 1e30f, 1e30f, 1e30f, 1e30f };
 	int roofShapes = -1;
 	quint64 roofGen = 0;
 	bool roofed = false;
@@ -637,7 +637,7 @@ void wwCellWaterSetDefault( const void * nif, quint32 form )
 }
 
 bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDepth, float & height, WwWaterRecord & rec,
-	bool oldRule, bool * sea, bool * roofed )
+	bool oldRule, bool * sea, bool * roofed, bool roofOnly )
 {
 	WaterState & s = st();
 	if ( sea )
@@ -681,9 +681,9 @@ bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDe
 		return false;
 	if ( !oldRule ) {
 		// the room test: a non-water surface between the camera and the water above it = a room below the water
-		const float key[4] = { x, y, z, h };
-		if ( d.roofGen != d.planesGen || d.roofShapes != int( scene->shapes.size() ) || !std::equal( key, key + 4, d.roofKey ) ) {
-			std::copy( key, key + 4, d.roofKey );
+		const float key[5] = { x, y, z, h, roofOnly ? 1.0f : 0.0f };
+		if ( d.roofGen != d.planesGen || d.roofShapes != int( scene->shapes.size() ) || !std::equal( key, key + 5, d.roofKey ) ) {
+			std::copy( key, key + 5, d.roofKey );
 			d.roofGen = d.planesGen;
 			d.roofShapes = int( scene->shapes.size() );
 			d.roofed = false;
@@ -708,6 +708,29 @@ bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDe
 					}
 				}
 				d.roofed = wwWaterRoofOver( tri.data(), tri.size() / 9, x, y, z, h );
+			}
+			if ( d.roofed && !roofOnly ) {
+				// WATERUNDER6: a roof is a room only if closed all round (waterplanefit.h); candidates = shapes in the cone
+				const float reach = float( wwWaterRoomReach( double( h ) - z ) );
+				tri.clear();
+				for ( Shape * sh : scene->shapes ) {
+					if ( !sh || sh->isHidden() || sh->verts.isEmpty() || d.shapeBody.contains( sh->id() ) )
+						continue;
+					const BoundSphere bs = sh->bounds();
+					const float dx = bs.center[0] - x, dy = bs.center[1] - y, rr = bs.radius + reach;
+					if ( dx * dx + dy * dy > rr * rr || bs.center[2] - bs.radius >= h || bs.center[2] + bs.radius <= z )
+						continue;
+					const Transform & w = sh->worldTrans();
+					for ( const Triangle & t : sh->triangles ) {
+						if ( t[0] >= sh->verts.size() || t[1] >= sh->verts.size() || t[2] >= sh->verts.size() )
+							continue;
+						for ( int k = 0; k < 3; k++ ) {
+							const Vector3 q = w * sh->verts.at( t[k] );
+							tri.insert( tri.end(), { q[0], q[1], q[2] } );
+						}
+					}
+				}
+				d.roofed = wwWaterRoomOver( tri.data(), tri.size() / 9, x, y, z, h );
 			}
 		}
 		if ( d.roofed ) {

@@ -92,7 +92,7 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 				} else if ( f == "NAM2" && f.size() >= 4 ) {
 					// the worldspace's default water type; cells override it
 					// with XCWT. Commonwealth's is ExtOceanWater.
-					defWaterType = f.readUInt32();
+					defWaterType = esm->mapFormID( w, f.readUInt32() );	// lane WATERUNDER6: plugin id space
 				}
 			}
 		}
@@ -279,7 +279,7 @@ bool EsmWorld::cellWater( int cx, int cy, float & height,
 			hasWater = ( f.readUInt16() & 0x0002 ) != 0;
 		} else if ( f == "XCWT" && f.size() >= 4 ) {
 			if ( typeForm )
-				*typeForm = f.readUInt32();
+				*typeForm = esm->mapFormID( *cr, f.readUInt32() );	// lane WATERUNDER6: plugin id space
 		} else if ( f == "XCLW" && f.size() >= 4 ) {
 			const quint32 raw = f.readUInt32();
 			if ( raw != 0xFF7FFFFFU && raw != 0x7F7FFFFFU && raw != 0x4F7FFFC9U ) {

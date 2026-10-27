@@ -2,6 +2,8 @@
 // 1. the 7 vanilla masters: the 47 WATR name UnderwaterDefaultIS 19 / UnderwaterMurkyIS 18 / UnderwaterClearIS 10.
 // 2. A plugin written here (master Fallout4.esm) adds an IMGS and overrides a WATR whose INAM names it; loaded third
 //    (Fallout4.esm, DLCRobot.esm, plugin) the INAM must map to 02000800 = that IMGS. A raw read finds 01000800.
+// 3. (WATERUNDER6) the same for WRLD NAM2 (worldspace default water) and CELL XCWT (cell water): a plugin overrides
+//    Commonwealth and cell (0,0) with its own new WATR; both must read 02000801, a raw read finds 01000801.
 // Run: waterinam_test <Fallout 4 Data folder> <scratch folder>; red = build against the base esmdata.cpp (must fail).
 #include "esmdata.h"
 #include "esmwater.h"
@@ -92,6 +94,26 @@ static QByteArray group( const char * label, const QByteArray & body )
 	return h.b + body;
 }
 
+// a group with a numeric label and a type (1 world children, 4 exterior block, 5 exterior sub-block)
+static QByteArray subGroup( quint32 label, quint32 type, const QByteArray & body )
+{
+	Bytes h;
+	h.b.append( "GRUP", 4 );
+	h.u32( quint32( 24 + body.size() ) );
+	h.u32( label );
+	h.u32( type );
+	h.u32( 0 );
+	h.u32( 0 );
+	return h.b + body;
+}
+
+static QByteArray f32( float v )
+{
+	quint32 u;
+	std::memcpy( &u, &v, 4 );
+	return le32( u );
+}
+
 int main( int argc, char ** argv )
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -176,6 +198,65 @@ int main( int argc, char ** argv )
 			.arg( victimEdid, hex ) );
 		check( got && r.uwIsName == QLatin1String( isEdid ), QString( "override %1: names %2 (read \"%3\")" )
 			.arg( victimEdid, isEdid, r.uwIsName ) );
+	}
+
+	// 3. WRLD NAM2 and CELL XCWT: a plugin overrides Commonwealth (its default water) and cell (0,0) (its water)
+	const quint32 ws = 0x3C, newWatr = 0x01000801;
+	quint32 cell00 = 0, vanillaDefault = 0;
+	float defWaterH = 0;
+	{
+		EsmWorld w;
+		QString err;
+		check( w.load( fo4, ws, &err ), "Commonwealth opens (Fallout4.esm) " + err );
+		cell00 = w.cellForm( 0, 0 );
+		vanillaDefault = w.defaultWaterType();
+		defWaterH = w.defaultWaterHeight();
+		check( cell00 != 0 && vanillaDefault != 0, QString( "vanilla: cell (0,0) %1, default water %2" )
+			.arg( cell00, 8, 16, QChar( '0' ) ).arg( vanillaDefault, 8, 16, QChar( '0' ) ) );
+	}
+	const QString esp3 = scratch + "/WaterIdsTest.esp";
+	{
+		Bytes hedr;
+		hedr.u32( 0x3F800000 );
+		hedr.u32( 3 );
+		hedr.u32( 0x802 );
+		Bytes f;
+		f.field( "HEDR", hedr.b );
+		f.field( "MAST", zstr( "Fallout4.esm" ) );
+		f.field( "DATA", QByteArray( 8, 0 ) );
+		const QByteArray tes4 = record( "TES4", 0, f.b );
+		Bytes wa;
+		wa.field( "EDID", zstr( "UW6TestWater" ) );
+		Bytes wr;	// the WRLD override: EDID, DNAM (land, water height), NAM2 = the plugin's own WATR (raw)
+		wr.field( "EDID", zstr( "Commonwealth" ) );
+		wr.field( "DNAM", f32( -2048.0f ) + f32( defWaterH ) );
+		wr.field( "NAM2", le32( newWatr ) );
+		Bytes ce;	// the CELL (0,0) override: has water, height 123, XCWT = the plugin's own WATR (raw)
+		ce.field( "DATA", QByteArray( "\x02\x00", 2 ) );
+		ce.field( "XCLC", le32( 0 ) + le32( 0 ) + le32( 0 ) );
+		ce.field( "XCLW", f32( 123.0f ) );
+		ce.field( "XCWT", le32( newWatr ) );
+		const QByteArray cells = subGroup( ws, 1, subGroup( 0, 4, subGroup( 0, 5, record( "CELL", cell00, ce.b ) ) ) );
+		QFile out( esp3 );
+		if ( !out.open( QIODevice::WriteOnly ) ) {
+			std::printf( "FAIL cannot write %s\n", esp3.toLocal8Bit().constData() );
+			return 2;
+		}
+		out.write( tes4 + group( "WATR", record( "WATR", newWatr, wa.b ) )
+			+ group( "WRLD", record( "WRLD", ws, wr.b ) + cells ) );
+	}
+	{
+		EsmWorld w;
+		QString err;
+		check( cell00 && w.load( fo4 + "," + robot + "," + esp3, ws, &err ), "the 3-file Commonwealth opens " + err );
+		const QString nam2 = QString::number( w.defaultWaterType(), 16 ).rightJustified( 8, '0' );
+		check( w.defaultWaterType() == 0x02000801, QString( "WRLD NAM2 maps to 02000801 (read %1)" ).arg( nam2 ) );
+		float h = 0;
+		quint32 t = 0;
+		const bool has = w.cellWater( 0, 0, h, &t );
+		const QString xcwt = QString::number( t, 16 ).rightJustified( 8, '0' );
+		check( has && h == 123.0f, QString( "cell (0,0) override read: has water %1, height %2" ).arg( int( has ) ).arg( h ) );
+		check( t == 0x02000801, QString( "CELL XCWT maps to 02000801 (read %1)" ).arg( xcwt ) );
 	}
 
 	std::printf( "%s (%d failed)\n", fails ? "FAIL" : "PASS", fails );

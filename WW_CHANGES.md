@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERUNDER6 (2026-10-27, branch waterunder6-20261027): plugin water ids, and a roof is not a room
+
+- Fixed: a worldspace's default water (WRLD NAM2) and a cell's water (CELL XCWT) are now read through the plugin's
+  master list, as the underwater imagespace already was. A plugin (or a DLC loaded after another DLC) that points a
+  worldspace or a cell at its own water used to name the wrong record. The cell view's cell water, far water and
+  probe-bake water now get the right WATR for such cells; a Fallout4.esm-only load reads the same ids as before.
+- The room test under placed water no longer counts a sunken hull, a pier's underside or a sunken slab over the
+  camera as a room. A room must now be closed: besides the roof over the camera, every ray of a cone (8 bearings at
+  15 and 45 degrees up) must meet a surface before it rises to the water or runs 2048 units sideways. One open ray
+  means water reaches the camera, so it is under water. A closed basement under a pond still reads as a room.
+- Red (a new value of the existing key `WW_CELL_UNDERWATER_RED`): `roofonly` is the old rule, any roof over the
+  camera is a room. Its note reads "a roof over the camera (red roofonly)".
+- Unit tests (no window):
+  - `tests/waterinam`: adds a plugin that overrides Commonwealth and cell (0,0) with its own new water, loaded
+    third; both ids read 02000801. Built against the base esmdata.cpp they read 01000801 and it fails 2.
+  - `tests/waterplane`: 17 checks pass (hull, pier, deep slab, closed basement, basement with a wall gone); the
+    roof-only red (`-DWW_WATERROOM_ROOF_RED`) fails 4, the old-rule red still fails 6.
+- Not changed: weather transitions. The viewer holds one weather and swaps it at once, so there is no
+  previous weather for the water colour to blend from.
+- Cost: GPU 0 ms (no shader changed). CPU only when the camera is under placed water with a roof over it and moves:
+  the cone test takes about 0.01 ms for a plain room and up to about 2 ms with 20,000 triangles of clutter inside
+  the cone; it is cached while the camera stands still. Memory: a temporary list of the triangles near the camera.
+
 ## Lane WATERUNDER5 (2026-10-27, branch waterunder5-20261027): under water, which water and its colour
 
 - When no baked water body is at the camera, the under-water test now uses the placed water shape itself:

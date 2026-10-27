@@ -97,14 +97,14 @@ void eyeOf( const Scene * scene, double row[3][4], double eye[3] )
 
 /* WW_CELL_UNDERWATER_RED, re-read per call: notint 1, nofog 2, radial 4 (WATERUNDER3), maxdepth 8 (WATERUNDER4),
  * oldplane 16 (WATERUNDER5: the water shape's box and top vertex, no room test), oldcolour 32 (WATERUNDER5: half
- * horizon + half underwater colour, no WaterColorMult) */
+ * horizon + half underwater colour, no WaterColorMult), roofonly 64 (WATERUNDER6: any roof over the camera is a room) */
 int uwRed( QString * name = nullptr )
 {
 	const QString r = wwEnvStr( "WW_CELL_UNDERWATER_RED" ).trimmed();
 	if ( name )
 		*name = r;
-	static const char * const k[6] = { "notint", "nofog", "radial", "maxdepth", "oldplane", "oldcolour" };
-	for ( int i = 0; i < 6; i++ )
+	static const char * const k[7] = { "notint", "nofog", "radial", "maxdepth", "oldplane", "oldcolour", "roofonly" };
+	for ( int i = 0; i < 7; i++ )
 		if ( r == QLatin1String( k[i] ) )
 			return 1 << i;
 	return 0;
@@ -125,7 +125,7 @@ bool findWater( Scene * scene, float ex, float ey, float ez, float margin, WwWat
 	}
 	const bool oldPlane = uwRed() == 16;
 	bool sea = false, roofed = false;
-	if ( wwCellWaterPlaneOver( scene, ex, ey, ez - margin, 8192.0f, H, rec, oldPlane, &sea, &roofed ) ) {
+	if ( wwCellWaterPlaneOver( scene, ex, ey, ez - margin, 8192.0f, H, rec, oldPlane, &sea, &roofed, uwRed() == 64 ) ) {
 		if ( sea )
 			cls = 0;
 		via = oldPlane ? QStringLiteral( "water shape (red oldplane: box, top vertex)" )
@@ -133,7 +133,7 @@ bool findWater( Scene * scene, float ex, float ey, float ez, float margin, WwWat
 		return true;
 	}
 	if ( roofed )
-		via = QStringLiteral( "a room below the water" );
+		via = uwRed() == 64 ? QStringLiteral( "a roof over the camera (red roofonly)" ) : QStringLiteral( "a room below the water" );
 	return false;
 }
 
