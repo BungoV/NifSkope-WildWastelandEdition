@@ -77,6 +77,9 @@ uniform sampler2D waterSsrRaw;	// the march
 uniform sampler2D waterSsrFin;	// the march blurred
 uniform int waterSslr;		// 1: the reflection-ray pass (waterDepth is then the obscurance pass's linear depth)
 uniform int waterProbe;
+#ifdef WW_WATER_WAVES	// lane WATERWAVES1: fo4_waterwaves.prog only (fo4_water.prog keeps its machine code)
+#include "water_waves.glsl"
+#endif
 
 vec3 tonemap( vec3 x )	// fo4_default.frag's
 {
@@ -209,6 +212,13 @@ void main()
 	vec3 N = ( n1 - vec3( 0.0, 0.0, 1.0 ) ) * Amp.x + vec3( 0.0, 0.0, 1.0 );
 	N += ( n2 * Amp.y + n3 * Amp.z ) * dfade;
 	N = normalize( N );
+#ifdef WW_WATER_WAVES
+	// lane WATERWAVES1: the swell's slopes add to the noise layers' (slope-space blend), before the game's flatten
+	float swellFoot = max( length( dFdx( P.xy ) ), length( dFdy( P.xy ) ) );
+	vec4 swell = waterWavesOn != 0 ? wwWaterSwell( P.xy, waterWavesK.z, swellFoot ) : vec4( 0.0 );
+	if ( swell.z > 0.0 )
+		N = normalize( vec3( N.xy / max( N.z, 1e-3 ) + swell.xy, 1.0 ) );
+#endif
 	vec3 N0 = N;
 	N = normalize( flatten * ( N - vec3( 0.0, 0.0, 1.0 ) ) + vec3( 0.0, 0.0, 1.0 ) );
 
@@ -348,6 +358,10 @@ void main()
 				: waterProbe == 30 ? ( id != 0u ? vec3( 0.0, 1.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 ) )
 				: vec3( clamp( wi.y / 1024.0, 0.0, 1.0 ) );
 		}
+#endif
+#ifdef WW_WATER_WAVES
+		else if ( waterProbe == 34 )	// WATERWAVES1: (0.5 + 4 x the swell's slope x, y; its weight) at this pixel
+			o = vec3( clamp( 0.5 + 4.0 * swell.xy, 0.0, 1.0 ), swell.z );
 #endif
 		fragColor = vec4( o, 1.0 );
 	}

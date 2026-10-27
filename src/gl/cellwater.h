@@ -5,6 +5,8 @@
 
 #include <QString>
 
+#include <string_view>
+
 class Scene;
 struct WwWaterRecord;
 
@@ -53,5 +55,17 @@ bool wwCellWaterWritesLinear();
 bool wwCellWaterSsrWanted( Scene * scene );
 //! One census line: how many shapes and records this document registered.
 QString wwCellWaterEcho( const void * nif );
+/*! Lane WATERWAVES1: the program a water shape draws with. fo4_water.prog while the Water swell row is off (the
+ *  program as before, same machine code), else fo4_waterwaves.prog: the same shader with res/shaders/water_waves.glsl
+ *  compiled in, a calm swell sized by the baked body (class + area, cellwaterinfo.h), near and far alike.
+ *    WW_CELL_WATER_WAVES=0|1                    the row's pin (celllooks.h)
+ *    WW_CELL_WATER_WAVES_RED=flat|noshore|alias  every body the lake size / no shore fade / no footprint fade
+ *    WW_CELL_WATER_PROBE=34                     (0.5 + 4 x slope x, y; weight) at each water pixel */
+const char * wwCellWaterProgramName();
+//! fo4_water.prog or its swell twin
+inline bool wwIsWaterProgramName( std::string_view n )
+{
+	return n == std::string_view( "fo4_water.prog" ) || n == std::string_view( "fo4_waterwaves.prog" );
+}
 
 #endif
