@@ -881,12 +881,22 @@ bool cellSpecFromFile( const QString & path, CellSceneSpec & spec, QString * err
 		return false;
 	}
 	QTextStream in( &f );
+	bool read = false;
 	while ( !in.atEnd() ) {
 		const QString line = in.readLine().trimmed();
 		if ( line.isEmpty() || line.startsWith( QLatin1Char( '#' ) ) )
 			continue;
-		return cellSpecFromLine( line, spec, error );
+		if ( !read ) {
+			if ( !cellSpecFromLine( line, spec, error ) )
+				return false;
+			read = true;
+		} else if ( line.startsWith( QLatin1String( "resources|" ), Qt::CaseInsensitive ) ) {
+			// lane OPENCELLFIX1: the Mod Organizer profile's folders, lowest first, so a mod's models load
+			spec.resources = line.mid( 10 ).split( QLatin1Char( ';' ), Qt::SkipEmptyParts );
+		}
 	}
+	if ( read )
+		return true;
 	if ( error )
 		*error = QStringLiteral( "%1 has no spec line" ).arg( path );
 	return false;
@@ -2712,6 +2722,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	QByteArray liveLend;
 	QString modLodb;               // lane MODPICK1: the shown bake's record, empty when none
 	QStringList modBakePresent;    // lane MODPICK1: its plugins still on disk
+	if ( !chunk && !spec.resources.isEmpty() )
+		cellFarLodAdoptResources( spec.resources );	// lane OPENCELLFIX1: the picked load order's folders
 	if ( !chunk && !spec.interior && cellFarLodWanted() ) {   // a streamed cell: the open's plugins (the seed)
 		QString preRoot = spec.dataRoot;
 		if ( preRoot.isEmpty() && !lodgenResourceSearchPaths().isEmpty() )

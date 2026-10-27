@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "opencellcatalog.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "lodgenloadorder.h"	// lane OPENCELLFIX1: the masters and the MO2 profile, as the LOD panel reads them
 
 #include "ba2file.hpp"
 #include "esmfile.hpp"
@@ -256,6 +257,8 @@ bool openCellImportLoadOrder( const QString & pluginsTxt, QStringList & plugins,
 		return false;
 	}
 	plugins = openCellParsePluginsTxt( QString::fromUtf8( f.readAll() ) );
+	const bool red = wwEnvStr( "WW_OPENCELL_RED" ) == QLatin1String( "masters" );
+	src.resources.clear();
 	// An MO2 profile keeps modlist.txt beside plugins.txt; its mods live in <MO2>/mods.
 	const QDir profile = QFileInfo( pluginsTxt ).absoluteDir();
 	QFile ml( profile.filePath( QStringLiteral( "modlist.txt" ) ) );
@@ -267,7 +270,39 @@ bool openCellImportLoadOrder( const QString & pluginsTxt, QStringList & plugins,
 		src.modDirs.append( root.filePath( QStringLiteral( "overwrite" ) ) );
 		for ( const QString & m : openCellParseModlist( QString::fromUtf8( ml.readAll() ) ) )
 			src.modDirs.append( root.filePath( QStringLiteral( "mods/" ) + m ) );
+		ml.close();
+		if ( red )
+			return true;
+		// lane OPENCELLFIX1: the LOD panel's reader: masters first, Data from ModOrganizer.ini, the folder stack
+		const bool haveData = QFileInfo( QDir( src.dataDir ).filePath( QStringLiteral( "Fallout4.esm" ) ) ).isFile();
+		LodgenLoadOrder lo;
+		QString why;
+		if ( lodgenLoadOrderFromMo2( profile.absolutePath(), QString(), haveData ? src.dataDir : QString(), &lo, &why ) ) {
+			plugins.clear();
+			for ( const QString & p : lo.plugins )
+				plugins.append( QFileInfo( p ).fileName() );
+			if ( !haveData && !lo.dataDir.isEmpty() )
+				src.dataDir = QDir::cleanPath( lo.dataDir );
+			src.resources = lo.stack;
+			return true;
+		}
+		if ( !haveData && !src.dataDir.isEmpty() && error )
+			*error = why;	// kept for the caller's status; the plain list below still loads
 	}
+	if ( red )
+		return true;
+	// The masters the game loads whatever the file says, from the Data folder, ahead of the list.
+	QStringList lead;
+	QSet<QString> seen;
+	for ( const QString & m : lodgenLoadOrderMasters( src.dataDir ) ) {
+		const QString n = QFileInfo( m ).fileName();
+		lead.append( n );
+		seen.insert( n.toLower() );
+	}
+	for ( const QString & p : plugins )
+		if ( !seen.contains( p.toLower() ) )
+			lead.append( p );
+	plugins = lead;
 	return true;
 }
 

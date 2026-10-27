@@ -45,4 +45,9 @@ bool cellSpawnTake( const void * nif, CellSpawn & out );
 //! `nifskope-cli cellspawn "<spec line>" [--check]`: the spawn without a window, and the eye-height check
 int cellSpawnCli( const QStringList & args );
 
+/*! lane OPENCELLFIX1: `nifskope-cli cellrefs "<spec line>" | <file.wwcell>`: what an exterior open places, without a
+ *  window -- the references in its cells (and the persistent ones inside them), the cells with ground, the plugins.
+ *  Exit 0 when it places at least one reference, 1 when none, 2 when it cannot read the spec or the worldspace. */
+int cellRefsCli( const QStringList & args );
+
 #endif // CELLSPAWN_H

@@ -337,3 +337,60 @@ int cellSpawnCli( const QStringList & args )
 		double( s.eye[2] ), double( under ), qPrintable( how ), double( d ), double( cellEyeHeight ) );
 	return ok ? 0 : 1;
 }
+
+int cellRefsCli( const QStringList & args )
+{
+	const QString arg = args.isEmpty() ? QString() : args.first();
+	CellSceneSpec spec;
+	QString err;
+	const bool file = arg.endsWith( QLatin1String( ".wwcell" ), Qt::CaseInsensitive );
+	if ( arg.isEmpty() || !( file ? cellSpecFromFile( arg, spec, &err ) : cellSpecFromLine( arg, spec, &err ) ) ) {
+		std::fprintf( stderr, "cellrefs: usage: cellrefs \"plugins|world|x,y|n\" or <file.wwcell>%s%s\n",
+			err.isEmpty() ? "" : ": ", qPrintable( err ) );
+		return 2;
+	}
+	const QStringList plugins = spec.plugins.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+	bool master = false;
+	for ( const QString & p : plugins )
+		if ( p.trimmed().section( QLatin1Char( '/' ), -1 ).section( QLatin1Char( '\\' ), -1 )
+				.compare( QLatin1String( "Fallout4.esm" ), Qt::CaseInsensitive ) == 0 )
+			master = true;
+	std::printf( "cellrefs: plugins %d, Fallout4.esm %s, world %s\n", int( plugins.size() ), master ? "yes" : "no",
+		qPrintable( spec.interior ? QStringLiteral( "interior %1" ).arg( spec.interiorCell ) : spec.world ) );
+	if ( !spec.resources.isEmpty() )
+		std::printf( "cellrefs: resource roots %d\n", int( spec.resources.size() ) );
+	EsmWorld world;
+	if ( !openWorld( spec, world, &err ) ) {
+		std::printf( "cellrefs: refs 0 (%s)\n", qPrintable( err ) );
+		return 2;
+	}
+	if ( spec.interior ) {
+		std::printf( "cellrefs: interior opened\n" );
+		return 0;
+	}
+	int x0, y0, x1, y1;
+	spec.rect( x0, y0, x1, y1 );
+	QVector<EsmRefr> refs;
+	int cells = 0, ground = 0;
+	for ( int y = y0; y <= y1; y++ )
+		for ( int x = x0; x <= x1; x++ ) {
+			EsmLand land;
+			if ( world.land( x, y, land ) )
+				ground++;
+			if ( world.hasCell( x, y ) ) {
+				cells++;
+				refs += world.refrs( x, y );
+			}
+		}
+	refs += world.persistentRefrsIn( float( x0 ) * kCell, float( y0 ) * kCell, float( x1 + 1 ) * kCell, float( y1 + 1 ) * kCell );
+	QSet<quint32> seen;
+	int placed = 0;
+	for ( const EsmRefr & r : refs ) {
+		if ( r.deleted || seen.contains( r.formID ) )
+			continue;
+		seen.insert( r.formID );
+		placed++;
+	}
+	std::printf( "cellrefs: cells %d of %d, ground %d, refs %d\n", cells, ( x1 - x0 + 1 ) * ( y1 - y0 + 1 ), ground, placed );
+	return placed > 0 ? 0 : 1;
+}

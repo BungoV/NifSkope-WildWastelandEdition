@@ -20,4 +20,8 @@ class QWidget;
 void openCellInstallMenu( QMenu * file, QAction * openBefore, QAction * recentBefore, QWidget * parent,
 	const std::function<void( const QString & )> & open );
 
+/*! lane OPENCELLFIX1: "Open Cell..." shows the Cell dock's Cells tab (no separate window). The dock registers how;
+ *  until it has, the action does nothing. */
+void openCellSetShowPicker( const std::function<void()> & show );
+
 #endif // OPENCELLMENU_H
