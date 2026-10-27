@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellground.h"
+#include "cellsplat.h"
 
 #include "esmdata.h"
 
@@ -81,6 +82,14 @@ bool cellBuildGround( EsmWorld & world, int x0, int y0, int x1, int y1,
 		b.ltex = ltex;
 		b.diffuse = diffuse;
 		b.normal = normal;
+		// lane DUNESAND2: the mosaic binds the layer's TX07 _s like the blend (cellsplat.cpp); a .bgsm names its own
+		const EsmLtexTextureSet & set = world.ltexTextureSet( ltex );
+		if ( set.material.isEmpty() )
+			b.specWant = set.specular;
+		if ( !cellSplatSpecRed() )
+			b.spec = b.specWant;
+		if ( !b.spec.isEmpty() )
+			out.bucketsSpec++;
 		const int idx = out.buckets.size();
 		out.buckets.append( b );
 		bucketOfLtex.insert( ltex, idx );
@@ -256,6 +265,8 @@ QString cellGroundLegend( const CellGroundBuild & b )
 		.arg( b.layersRead );
 	if ( b.ltexUnresolved )
 		s += QString( "; %1 LTEX forms named no texture" ).arg( b.ltexUnresolved );
+	s += cellSplatSpecRed() ? QStringLiteral( "; RED CONTROL WW_TERRBLEND_RED=nospec: no TX07 map on the ground" )
+		: QString( "; %1 of %2 mosaic buckets carry their TX07 _s map" ).arg( b.bucketsSpec ).arg( b.buckets.size() );
 	/* WHY EACH BARE QUAD IS BARE (lane CELLVIEW3). Without this the number
 	 * "133 bare" was unreadable: it mixed quads the plugin never painted with
 	 * quads a null-form layer had blanked, and only the second kind was a

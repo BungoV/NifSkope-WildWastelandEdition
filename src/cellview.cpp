@@ -169,6 +169,7 @@ struct Bucket
 	QString name;
 	QString matString;          //!< a `.bgsm`/`.bgem`, or a diffuse texture path
 	QString normalTex, specTex; //!< only used when matString is a texture
+	QString groundSpec;         //!< lane DUNESAND2: a ground shape's TX07 even under the nospec red (live set)
 	/*! The shape NAMED a material and nothing resolved from it -- no BGSM, no
 	 *  BGEM, no texture set. Drawn neutral grey and counted in the census;
 	 *  magenta stays reserved for a genuinely missing file (lane CELLVIEW3). */
@@ -573,6 +574,8 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			wwCellWaterShape( nif, nif->getBlockNumber( iShape ), b.waterRec );
 		if ( b.landSplat )    // lane TERRBLEND1: the renderer tells the shader the alpha is a share
 			wwCellLandShape( nif, nif->getBlockNumber( iShape ) );
+		if ( !b.groundSpec.isEmpty() )
+			wwCellGroundSpecShape( nif, nif->getBlockNumber( iShape ), b.groundSpec );
 		if ( b.grass )        // lane GRASSMB1: the renderer fades this shape the game's grass way
 			wwCellGrassShape( nif, nif->getBlockNumber( iShape ), b.grassWave, !b.grassNoFade );
 		nif->set<QString>( iShape, "Name", part > 1
@@ -2142,6 +2145,8 @@ struct LiveDoc
 	QString specRoot;              //!< the spec's data root (empty: the resource stack's first)
 	QByteArray stackSig;           //!< liveSigOf() of the stack the near cells were loaded with
 	QByteArray cellsKey;           //!< liveCellsKey(): actors outdoors and weapon parts as built
+	QByteArray terrRed;            //!< lane DUNESAND2: WW_TERRBLEND_RED the ground was built with
+	quint64 terrSeen = 0;
 };
 
 std::map<const NifModel *, LiveDoc> & liveDocs()
@@ -2491,6 +2496,7 @@ void liveKeep( NifModel * nif, const CellSceneSpec & spec, const std::shared_ptr
 	d.specRoot = spec.dataRoot;
 	d.stackSig = stackSig;
 	d.cellsKey = liveCellsKey( spec.interior );
+	d.terrRed = wwEnv( "WW_TERRBLEND_RED" );
 	d.ws = spec.world;
 	d.lodl = lodl;
 	d.cx = spec.cx;
@@ -2502,7 +2508,7 @@ void liveKeep( NifModel * nif, const CellSceneSpec & spec, const std::shared_ptr
 	d.markersCount = markersCount;
 	d.probes = std::move( probes );
 	d.tailEnd = nif->getBlockCount();
-	d.farSeen = d.probesSeen = wwSwitchGen();
+	d.farSeen = d.probesSeen = d.terrSeen = wwSwitchGen();
 	liveDocs()[nif] = std::move( d );
 	static QSet<const void *> hooked;
 	if ( hooked.contains( nif ) )
@@ -2518,6 +2524,38 @@ void liveKeep( NifModel * nif, const CellSceneSpec & spec, const std::shared_ptr
 		hooked.remove( key );
 	} );
 }
+
+/*! lane DUNESAND2: WW_TERRBLEND_RED. nospec only drops the ground's TX07, swapped here in place; nearest and
+ *  facenormal are written into the ground's vertices at build (the reopen); edgepass and matalpha are per draw. */
+int liveTerrRed( NifModel * nif, LiveDoc & d, QString * why )
+{
+	const QByteArray now = wwEnv( "WW_TERRBLEND_RED" );
+	if ( now == d.terrRed )
+		return 0;
+	auto inVerts = []( const QByteArray & v ) { return v == "nearest" || v == "facenormal"; };
+	if ( inVerts( now ) || inVerts( d.terrRed ) ) {
+		*why = QStringLiteral( "WW_TERRBLEND_RED=%1 is written into the ground's vertices at build" )
+			.arg( QString::fromLatin1( inVerts( now ) ? now : d.terrRed ) );
+		return 2;
+	}
+	const bool was = d.terrRed == "nospec", is = now == "nospec";
+	d.terrRed = now;
+	if ( was == is )
+		return 0;
+	const QHash<int, QString> specs = wwCellGroundSpecs( nif );
+	nif->holdUpdates( true );
+	for ( auto it = specs.cbegin(); it != specs.cend(); ++it ) {
+		const QModelIndex iShape = nif->getBlockIndex( it.key() );
+		const QModelIndex iShader = nif->getBlockIndex( nif->getLink( iShape, "Shader Property" ) );
+		const QModelIndex iSet = nif->getBlockIndex( nif->getLink( iShader, "Texture Set" ) );
+		if ( iSet.isValid() )
+			nif->set<QString>( nif->getIndex( nif->getIndex( iSet, "Textures" ), 7 ), is ? QString() : it.value() );
+	}
+	nif->holdUpdates( false );
+	nif->updateModel();
+	*why = QStringLiteral( "ground TX07 %1 on %2 shapes" ).arg( is ? "dropped" : "bound" ).arg( specs.size() );
+	return 1;
+}
 } // namespace
 
 int cellLiveSections( NifModel * nif, QString * why )
@@ -2529,7 +2567,15 @@ int cellLiveSections( NifModel * nif, QString * why )
 	LiveDoc & d = it->second;
 	const bool farMoved = wwSwitchMovedFor( d.farSeen, { "WW_CELL_FARLOD", "WW_CELL_ACTORS_OUT", "WW_CELL_WEAP_PARTS" } );
 	const bool probesMoved = wwSwitchMovedFor( d.probesSeen, { "WW_CELL_PROBES_HIDE" } );
+	const bool terrMoved = wwSwitchMovedFor( d.terrSeen, { "WW_TERRBLEND_RED" } );
 	int r = farMoved ? liveFar( nif, d, &w ) : 0;
+	if ( r != 2 && terrMoved ) {
+		QString tw;
+		const int t = liveTerrRed( nif, d, &tw );
+		if ( t )
+			w = w.isEmpty() || t == 2 ? tw : w + QStringLiteral( "; " ) + tw;
+		r = std::max( r, t );
+	}
 	if ( r != 2 && probesMoved ) {
 		QString pw;
 		const int p = liveMarkers( nif, d, &pw );
@@ -5523,6 +5569,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						gbk.matString = src.diffuse;
 						gbk.normalTex = src.normal;
 						gbk.specTex = src.spec;	// lane DUNESAND1: slot 7, the LTEX's _s (cellsplat.cpp)
+						gbk.groundSpec = src.specWant;
 						gbk.withColour = true;
 						/* A layer pass is ADDED; a base pass is opaque and scaled by its
 						 * share in the shader (lane TERRBLEND1). */
@@ -5591,6 +5638,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						: QFileInfo( src.diffuse ).fileName();
 					gbk.matString = src.diffuse;
 					gbk.normalTex = src.normal;
+					gbk.specTex = src.spec;	// lane DUNESAND2: the mosaic binds the _s too
+					gbk.groundSpec = src.specWant;
 					gbk.withColour = true;
 				}
 				for ( const CellGroundQuad & q : gb.quads ) {

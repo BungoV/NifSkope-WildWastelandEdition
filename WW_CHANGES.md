@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane DUNESAND2 (2026-10-27, branch dunesand2-20261027): the mosaic ground binds its _s map; the spec red is live
+
+- **Why:** DUNESAND1 bound each layer's TX07 _s map on the blended ground (cellsplat) only. Past the splat's vertex cap
+  the cell view falls back to the hard-edged mosaic (`src/gl/cellground.cpp`), which still drew every ground shape at
+  the nif defaults (smoothness 1, spec mask 1).
+- **Fix:** mosaic buckets take the LTEX's TX07 (`world.ltexTextureSet`) into Textures[7], like the blend. The legend
+  says how many mosaic buckets carry their _s map.
+- **CLI:** `cellrefs <spec> --ground` past the splat cap (or with `WW_CELL_SPLAT_CAP=1`) also prints
+  `cellrefs: mosaic pass ltex ... | spec ...` and `mosaic passes N, with spec M`.
+- **Live:** `WW_TERRBLEND_RED=nospec` now drops / binds the ground shapes' TX07 in place (`src/cellview.cpp`
+  liveTerrRed, stage 0). `nearest` / `facenormal` still owe a cell reopen, and the reply says so.
+- **Red:** `WW_TERRBLEND_RED=nospec` (no TX07 on blend or mosaic ground).
+
 ## Lane FOGTERRAIN1 (2026-10-27, branch fogterrain1-20261027): the ground fog layer follows the terrain
 
 - **Why:** the ground fog layer (groundFog .recx, or FOGHEIGHT1's derived layer) was anchored at one absolute height,

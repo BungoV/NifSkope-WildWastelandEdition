@@ -69,7 +69,7 @@ int main()
 
 	// LIVESET4: far on/off + type, the per-cell switches (streamed cells stream again) and the weather plugin list
 	for ( const char * n : { "WW_CELL_FARLOD", "WW_CELL_FARLOD_TYPE", "WW_CELL_ACTORS_OUT", "WW_CELL_ACTORS_OUT_RED",
-			"WW_CELL_WEAP_PARTS", "WW_CELL_WEAP_PARTS_RED", "WW_LOOKDEV_PLUGINS" } ) {
+			"WW_CELL_WEAP_PARTS", "WW_CELL_WEAP_PARTS_RED", "WW_LOOKDEV_PLUGINS", "WW_TERRBLEND_RED" } ) {
 		const bool live = wwSwitchStageOf( n ) == WwSwitchStage::Live;
 		std::printf( "%s %s live\n", live ? "PASS" : "FAIL", n );
 		g_fail += live ? 0 : 1;

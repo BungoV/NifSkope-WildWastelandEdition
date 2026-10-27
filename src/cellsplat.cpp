@@ -351,8 +351,10 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 		 * ground drew at smoothness 1 / mask 1 and 1.4x brighter than a static with the same sand. A material-backed set's
 		 * .bgsm names its own. */
 		const EsmLtexTextureSet & set = world.ltexTextureSet( ltex );
-		if ( set.material.isEmpty() && !cellSplatSpecRed() )
-			b.spec = set.specular;
+		if ( set.material.isEmpty() )
+			b.specWant = set.specular;
+		if ( !cellSplatSpecRed() )
+			b.spec = b.specWant;
 		if ( !b.spec.isEmpty() )
 			out.bucketsSpec++;
 		b.order = order;
@@ -605,12 +607,30 @@ QHash<const void *, QSet<int>> & landDocs()
 	static QHash<const void *, QSet<int>> d;
 	return d;
 }
+QHash<const void *, QHash<int, QString>> & groundSpecDocs()
+{
+	static QHash<const void *, QHash<int, QString>> d;
+	return d;
+}
 } // namespace
 
 void wwCellLandBegin( const void * nif )
 {
 	QMutexLocker lock( &landMutex() );
 	landDocs().remove( nif );
+	groundSpecDocs().remove( nif );
+}
+
+void wwCellGroundSpecShape( const void * nif, int block, const QString & spec )
+{
+	QMutexLocker lock( &landMutex() );
+	groundSpecDocs()[nif].insert( block, spec );
+}
+
+QHash<int, QString> wwCellGroundSpecs( const void * nif )
+{
+	QMutexLocker lock( &landMutex() );
+	return groundSpecDocs().value( nif );
 }
 
 void wwCellLandForget( const void * nif, int block )
@@ -619,6 +639,9 @@ void wwCellLandForget( const void * nif, int block )
 	auto d = landDocs().find( nif );
 	if ( d != landDocs().end() )
 		d->remove( block );
+	auto g = groundSpecDocs().find( nif );
+	if ( g != groundSpecDocs().end() )
+		g->remove( block );
 }
 
 void wwCellLandRemap( const void * nif, const WwBlockMap & m )
@@ -627,6 +650,9 @@ void wwCellLandRemap( const void * nif, const WwBlockMap & m )
 	auto d = landDocs().find( nif );
 	if ( d != landDocs().end() )
 		wwRemapKeys( *d, m );
+	auto g = groundSpecDocs().find( nif );
+	if ( g != groundSpecDocs().end() )
+		wwRemapKeys( *g, m );
 }
 
 void wwCellLandShape( const void * nif, int block )

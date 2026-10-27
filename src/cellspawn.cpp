@@ -407,6 +407,31 @@ int cellRefsCli( const QStringList & args )
 			std::printf( "cellrefs: pass ltex %08X %s | %s | spec %s\n", b.ltex, qPrintable( b.diffuse ),
 				qPrintable( b.normal ), b.spec.isEmpty() ? "-" : qPrintable( b.spec ) );
 		std::printf( "cellrefs: ground passes %d, with spec %d\n", int( sb.buckets.size() ), sb.bucketsSpec );
+		/* lane DUNESAND2: past the splat's vertex cap the viewer draws the hard-edged mosaic instead; print its
+		 * passes too, under the same cap (CELL_MAX_TOTAL_VERTS in cellview.cpp, WW_CELL_SPLAT_CAP overrides) */
+		qint64 cap = 12000000;
+		bool capOk = false;
+		const qint64 capEnv = wwEnvInt( "WW_CELL_SPLAT_CAP", &capOk );
+		if ( capOk && capEnv > 0 )
+			cap = capEnv;
+		if ( cellSplatCountVerts( world, x0, y0, x1, y1 ) > cap ) {
+			CellGroundBuild gb;
+			if ( !cellBuildGround( world, x0, y0, x1, y1, 0.0f, 0.0f, CELL_GROUND_TILING, gb, &serr ) ) {
+				std::printf( "cellrefs: mosaic passes FAIL (%s)\n", qPrintable( serr ) );
+				return 1;
+			}
+			for ( const CellGroundBucket & b : gb.buckets )
+				if ( b.ltex && b.quads )
+					std::printf( "cellrefs: mosaic pass ltex %08X %s | %s | spec %s\n", b.ltex, qPrintable( b.diffuse ),
+						qPrintable( b.normal ), b.spec.isEmpty() ? "-" : qPrintable( b.spec ) );
+			int used = 0, usedSpec = 0;
+			for ( const CellGroundBucket & b : gb.buckets )
+				if ( b.ltex && b.quads ) {
+					used++;
+					usedSpec += b.spec.isEmpty() ? 0 : 1;
+				}
+			std::printf( "cellrefs: mosaic passes %d, with spec %d\n", used, usedSpec );
+		}
 	}
 	return placed > 0 ? 0 : 1;
 }

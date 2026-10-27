@@ -62,6 +62,7 @@ OVERRIDES = {
     'WW_CELL_FARLOD_CARDSWAY': ('live', 'wwCellFarLodCards: re-read per frame'),
     'WW_CELL_FARLOD_SKYCENSUS': ('live', 'wwCellFarLodSkyCensus: re-read per frame'),
     'WW_CELL_FARLOD_SKYMASK': ('live', 'wwCellFarLodSkyCensus: re-read per frame'),
+    'WW_TERRBLEND_RED': ('live', 'nospec swaps the ground shapes TX07 in place (cellview.cpp liveTerrRed); nearest/facenormal owe a reopen, named in the reply; edgepass/matalpha per draw (DUNESAND2)'),
     'WW_CELL_PROBES_HIDE': ('live', 'probe markers put back or cut in place where a fresh open builds them (LIVESET3); streamed cells owe a reopen'),
     # lane LIVESET4: a streamed view's cells are built per cell, so a set streams them again in place; a fixed block
     # (harness, bake, interior) welds actors and weapons into the statics' buckets and owes the reopen, named in the reply
