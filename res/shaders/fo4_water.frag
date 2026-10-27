@@ -35,7 +35,10 @@
  *   11/12 the noise taps (t0.x, t0.y, t1.x)  13/14 (t1.y, t2.x, t2.y)  15/16 the SSR read (rgb)  17/18 (a, 0, 0)
  *   19/20/21 the three bytes (high first) of 24-bit fixed ( dist / 16384, along / 4096, vertical / 4096 )
  *   22/23/24 likewise ( the offset texel's along / 4096, vertical / 4096, 1 where the depth pass covered it )
- *   25/26 (WATERHDR1) the linear light the water writes ( lin / 4 )  27 the water's pixels, magenta */
+ *   25/26 (WATERHDR1) the linear light the water writes ( lin / 4 )  27 the water's pixels, magenta
+ *   WATERDATA1, only in the WW_WATER_INFO_PROBE build (launch WW_CELL_WATER_INFO_PROBE=1), water_info.glsl:
+ *   28 (shore steps, depth code, lookup on) as bytes  29 (body id high byte, low byte, class + 1)
+ *   30 cyan where the lookup finds water, red where it finds none  31 depth / 1024 as grey */
 
 #define WW_FOG 1
 #define WW_CELLLIGHTS 1
@@ -55,6 +58,7 @@ out vec4 fragColor;
 #include "uniforms.glsl"
 #include "lookdev_fog.glsl"
 #include "cell_lights.glsl"
+#include "water_info.glsl"
 
 uniform vec4 waterMat[13];	// shallow, deep, reflection, underwater, light silt, dark silt, var, p1..p4, amplitude, uv scale
 uniform vec4 waterSky[3];	// horizon, lower, upper (linear)
@@ -334,6 +338,17 @@ void main()
 			o = waterProbe == 25 ? hi16( lin * 0.25 ) : lo16( lin * 0.25 );
 		else if ( waterProbe == 27 )	// WATERHDR1: the water's pixels, magenta
 			o = vec3( 1.0, 0.0, 1.0 );
+#ifdef WW_WATER_INFO_PROBE
+		else if ( waterProbe >= 28 && waterProbe <= 31 ) {	// WATERDATA1: the baked water info at this pixel
+			uint w = wwWaterInfoWord( P.xy );
+			vec4 wi = wwWaterInfo( P.xy );
+			uint id = w & 0xFFFFu;
+			o = waterProbe == 28 ? vec3( float( ( w >> 16 ) & 0xFFu ), float( w >> 24 ), waterInfoOn ? 255.0 : 0.0 ) / 255.0
+				: waterProbe == 29 ? vec3( float( id >> 8 ), float( id & 0xFFu ), wi.w + 1.0 ) / 255.0
+				: waterProbe == 30 ? ( id != 0u ? vec3( 0.0, 1.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 ) )
+				: vec3( clamp( wi.y / 1024.0, 0.0, 1.0 ) );
+		}
+#endif
 		fragColor = vec4( o, 1.0 );
 	}
 }

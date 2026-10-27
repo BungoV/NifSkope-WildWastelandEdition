@@ -373,6 +373,28 @@
 - **Gates:** tests/lightphys (620 checks against values computed from the reference source; red fails 198),
   every shader program linked offline in 3 modes. Bounce light (probe GI) keeps the game's curve (a later lane).
 - **GPU:** a few instructions per light per pixel when on, 0 when off; expected under 0.05 ms at 1080p.
+## Lane WATERDATA1 (2026-10-27, branch waterdata1-20261027): the baked water planes bound to the water shader (data only, no visible change)
+
+- **What it binds:** the worldspace .lodl's water planes (body id, shore distance, surface delta) and its body table,
+  plus a depth derived from them (body height + surface delta - ground), for every water surface fo4_water.prog draws,
+  near and far. New files src/gl/cellwaterinfo.{h,cpp} and res/shaders/water_info.glsl (`wwWaterInfo(worldXY)` =
+  shore distance, depth, body id, class). Later water look lanes (shore, depth, underwater, waves, caustics) read it.
+- **Layout:** one 32-bit word a 128 u texel (id | shore << 16 | depth code << 24, depth code = sqrt(depth / 8192)).
+  An index of 16 x 16-texel tiles (RG32UI) holds a uniform tile's word itself; only the other tiles go into an
+  atlas (R32UI, 64 tiles a row). A wet tile counts as uniform when its depths span 64 u or less (it keeps the mean).
+  Body table RGBA32F, 256 bodies a row. Commonwealth (10-24 bake): 13,688 of 147,456 tiles sparse, 14.51 MB on the
+  GPU, built on a worker thread in 1.5 s. A water pixel costs 2 fetches (index, atlas) plus 1 for the class.
+- **No visible change:** the default fo4_water program does not read the lookup, and its NVIDIA binary is the
+  same as main's in all 3 modes except the 8-byte source hash (offline, notes/waterdata1). The probes 28..31
+  (shore/depth bytes, body id + class, found-water cyan/red, depth grey) live only in the
+  `WW_CELL_WATER_INFO_PROBE=1` build. `WW_CELL_WATER_INFO_RED=off` (live) makes the lookup answer neutral values.
+- **Telemetry:** the cell census prints "water info: ..." (counts, bytes, build time), and the first upload logs
+  "water info uploaded: ..." with the sizes and formats read back from the GL.
+- **CLI:** `nifskope -no-gui lodl <file.lodl> --water-info <dir>` writes index.u32, atlas.u32, bodies.f32 and
+  census.txt. Offline gates: the dump equals an independent Python build word for word, and the shader lookup read
+  back on every texel of the map equals the reference (each gate with a red).
+- Also: LodtFile::waterTileEdge / waterTileUniform (a plane's tile store). The live hold is owed after the merge
+  (notes/waterdata1/hold.sh, rows.txt).
 
 ## Lane GAPPERF-BINDLESS (2026-10-25, branch bindless-20261025): draw packets in the cell view (speed change, no menu row)
 
@@ -399,6 +421,19 @@
 - **Sun lens flare:** with Lens flares on, the sun draws the flare its weather names (the weather's Sun Glare Lens
   Flare); seen only where nothing stands in front of it, while it is above the horizon and the Sun row is on. The
   echo adds "sun flare <name>".
+
+- **Reflections from last frame's colour by default:** the PERF3 path that reflects the previous frame's lit colour
+  instead of drawing the scene a second time is now on whenever the reflections are. `WW_CELL_SSR_PREV=0`,
+  `WW_CELL_SSR_PREV_RED=1` or `WW_PERF3_RED=1` = the second scene pass as before (test reds only).
+- **Camera cull memo:** every pass of a frame culled the same shape for the same camera again; the first cull of a
+  shape this frame is kept (keyed on the view transform, frustum planes and switches) and later passes replay it,
+  counters and occluder hits included. `WW_CELL_CULL_MEMO_RED=1` = no memo; `WW_CELL_CULL_MEMO_CHECK=1` culls in full
+  each hit and counts mismatches ("cell cull memo: ... mismatches=").
+- **Texture parameter shadow:** the lighting property's bind set wrap, filter and anisotropy on its texture every
+  draw; it now skips them when this frame already set the same values on that texture. Any other bind of the texture
+  forgets it. `WW_DRAW_TEXSHADOW_RED=1` = always set; `WW_DRAW_TEXSHADOW_CHECK=1` reads GL back and counts mismatches.
+- The full per-shape draw packet (PERF4-DRAWPACKETS) is not done: the shape setup's state comes from many property
+  binds with side effects; only the texture parameters are shadowed so far. Live rows: notes/perf5/rows.in, hold.sh.
 
 ## Lane HOLDFIX1 (2026-10-25, branch holdfix1-20261025): test-run fixes from the hold 4 triage
 
