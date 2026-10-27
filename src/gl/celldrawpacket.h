@@ -68,6 +68,10 @@ inline void put( Kind k, std::int32_t a, std::int32_t b = 0 )
 void replay( const Packet & p, NifSkopeOpenGLContext::GLFunctions * f, TexCache * tc, void ( *live )( void * ), void * ctx );
 //! the two recordings of one shape list the same calls with the same values
 bool sameOps( const Packet & a, const Packet & b );
+//! lane BINDLESSMDI1: the shape's packet slot if it has one (no insert), or null
+const Packet * peek( const Shape * shape );
+//! two shapes' packets set the same state but for their bindless map handles
+bool sameButHandles( const Packet & a, const Packet & b );
 
 //! the fixed-function state the setup sets, for the check
 struct FixedSnap

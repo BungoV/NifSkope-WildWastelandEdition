@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BINDLESSMDI1 (2026-10-27, branch bindlessmdi1-20261027): pooled bindless draws batched into one multi-draw
+
+- **Why:** with Bindless draws on, each pooled shape still made its own draw call (c3: ~5600 a frame). The pool puts
+  them in one vertex/index arena and the row ring already holds each draw's matrices and map handles, so runs of
+  like shapes can go out as one `glMultiDrawElementsIndirect`.
+- **How:** in the main pass flush, a pooled bindless draw looks ahead at the next shapes of the walk. A shape joins
+  while it uses the same program, the same recorded state except its map handles (draw packets), is opaque, rigid,
+  not water/grass/decal/terrain-mixed, and is not taken by the GPU-driven B path. Each joined shape gets its own row;
+  its command's base instance is its row minus the run's first (`wwDrawBase` + `gl_BaseInstanceARB` in
+  `ww_bindless.glsl`, handed to the fragment stage flat). A run of one rolls back and draws as before.
+  Commands sit in a persistent indirect ring beside the row ring (8 x 16384 commands, 2.5 MiB), reused under the
+  same fences. Only the bl twins' shaders changed; the other programs' sources are unchanged.
+- **Switch:** `WW_BINDLESS_MDI` (live; default ON, `0` = one draw a shape). Red: `WW_BINDLESS_MDI_RED=rowoff` (a
+  joined shape reads the row before its own: the picture must change). Frame line:
+  ` mdi: runs= merged= calls= longest= cmds=MB` on the `bindless:` line.
+- **Offline proof (notes/bindlessmdi1/probe.txt, real driver, 1080p, 5604 shapes / 557k triangles):** pixels of every
+  run length are byte-identical to one draw a shape; the rowoff red differs in 1.88 M px; a one-byte comparator
+  control differs. Per frame: one draw a shape 3.59 ms submit / 3.37 GPU ms; runs of 2: 2.26 / 1.53; 8: 0.80 / 0.13;
+  16: 0.29 / 0.13. A run of 1 (4.47 / 3.73) costs more, which is why it rolls back.
+- **Owed live:** c3 `WW_BINDLESS_MDI=0/1/0` rows in one launch (GPU + CPU ms, on == off pictures, rowoff red differs).
+
 ## Lane CELLSPIKE3 (2026-10-27, branch cellspike3-20261027): stream frames no longer stall on the item pool's lock
 
 - **Why:** the offline streamwalk still had 10-35 ms crossing frames in stages that do nearly nothing. A new

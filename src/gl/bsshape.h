@@ -39,6 +39,8 @@ protected:
 	void updateImpl( const NifModel * nif, const QModelIndex & index ) override;
 	void updateData( const NifModel * nif ) override;
 	void wwFarMask( const NifModel * nif );   // lane FARHOLE2
+	// lane BINDLESSMDI1: this pooled draw takes the flush's next shapes into one multi-draw (WwBl::mdiOn); false = draw alone
+	bool wwMdiDraw( const void * hint, const std::vector<std::uint32_t> * ranges, qsizetype numTris );
 };
 
 #endif // BSSHAPE_H

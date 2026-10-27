@@ -55,6 +55,9 @@ bool mainArmed();
 bool mainTake( Node * shape, int queue );
 //! Draw every taken shape in tree order (the reds: queue by queue, shuffled under order), and disarm.
 void mainFlush( Scene * scene, NodeList * secondPass );
+//! lane BINDLESSMDI1: the shape the tree-order flush draws next (null: none, or not a tree-order flush); skip = it is drawn
+Node * mainPeekNext();
+void mainSkipNext();
 
 // ---- the cascades' shared geometry pool
 

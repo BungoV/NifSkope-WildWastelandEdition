@@ -966,6 +966,15 @@ void wwCellDecalFadeShape( const void * nif, int block, const std::vector<WwCull
 		st().decalFade[nif].insert( block, runs );
 }
 
+bool wwCellDecalFadeHas( Scene * scene, int block )
+{
+	const CullState & s = st();
+	if ( !scene || s.decalFade.isEmpty() || s.probing )
+		return false;
+	auto d = s.decalFade.constFind( scene->nifModel );
+	return d != s.decalFade.constEnd() && d->contains( block );
+}
+
 bool wwCellDecalFadeRanges( Scene * scene, const Shape * sh, int block, std::int64_t numTris,
 	std::vector<std::uint32_t> & keep, std::vector<std::uint32_t> & band, std::vector<float> & bandAlpha )
 {

@@ -1158,6 +1158,12 @@ void learn( Shape * sh, const void * program )
 		&& !g->glIsEnabled( GL_SAMPLE_COVERAGE ) && !g->glIsEnabled( GL_SAMPLE_MASK ) && !g->glIsEnabled( GL_RASTERIZER_DISCARD );
 }
 
+bool takes( const Shape * sh )
+{
+	const Frame & f = fr();
+	return f.flushing && !wwCellAoInPass() && !wwCellSsrInPass() && f.recs.contains( const_cast<Shape *>( sh ) );
+}
+
 bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 {
 	Frame & f = fr();

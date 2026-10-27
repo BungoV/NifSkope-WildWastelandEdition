@@ -98,6 +98,8 @@ QString wwCellGrassEcho( const void * nif );
 
 //! Per draw (fo4_cell / pbrm_cell): the fade on a grass shape, zero on every other (a no-op without the uniform).
 void wwCellGrassUniforms( Scene * scene, int block );
+//! lane BINDLESSMDI1: a grass shape (its own uniforms per draw)
+bool wwCellGrassIs( Scene * scene, int block );
 
 //! lane GPUDRIVEN1 step B: the shape waves in the wind (its vertices leave its bounds), so no culling bound holds it.
 bool wwCellGrassIsShape( const void * nif, int block );

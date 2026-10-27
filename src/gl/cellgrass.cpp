@@ -785,6 +785,15 @@ bool wwCellGrassIsShape( const void * nif, int block )
 	return it != s.shapes.constEnd() && it->contains( block );
 }
 
+bool wwCellGrassIs( Scene * scene, int block )
+{
+	if ( !scene )
+		return false;
+	const GrassState & s = gs();
+	const auto it = s.shapes.constFind( scene->nifModel );
+	return it != s.shapes.constEnd() && it->contains( block );
+}
+
 void wwCellGrassUniforms( Scene * scene, int block )
 {
 	if ( !scene || !scene->renderer )

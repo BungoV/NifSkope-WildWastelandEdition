@@ -663,7 +663,7 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 			}
 			wwShadowFrame = false;	// lane PERF3: gl/sunshadow.cpp fills and binds the buffer
 			wwBindless = name.size() > 7 && name.substr( name.size() - 7 ) == std::string_view( "bl.prog" );	// lane BINDLESS2
-			wwDrawIdLoc = wwBindless ? f->glGetUniformLocation( id, "wwDrawIdx" ) : -1;
+			wwDrawIdLoc = wwBindless ? f->glGetUniformLocation( id, "wwDrawBase" ) : -1;	// lane BINDLESSMDI1: + base instance
 			if ( unsigned int l = f->glGetUniformBlockIndex( id, "wwShadowFrame" ); l != GL_INVALID_INDEX ) {
 				f->glUniformBlockBinding( id, l, 2 );
 				wwShadowFrame = true;

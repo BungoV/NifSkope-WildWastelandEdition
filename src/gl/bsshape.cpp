@@ -14,6 +14,12 @@
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
 #include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
 #include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings
+#include "gl/celldrawpacket.h"	// lane BINDLESSMDI1: the follower tests
+#include "gl/cellfxres.h"
+#include "gl/cellgrass.h"
+#include "gl/cellvrs.h"
+#include "gl/shadowset.h"
+#include "cellsplat.h"
 #include "cellfarhide.h"	// lane FARHOLE2: far triangles inside a streamed near cell
 #include "gl/glproperty.h"
 #include "cellmesh.h"
@@ -395,6 +401,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 	auto	context = scene->renderer;
 
 	qsizetype	numTriangles = std::clamp< qsizetype >( lodTriangleCount, 0, triangles.size() );
+	const void * const mdiHint = shader;	// lane BINDLESSMDI1: a follower must pick the same program from the same hint
 
 	if ( !selectionFlags ) [[likely]] {
 		if ( nif->getBSVersion() >= 151 )
@@ -571,13 +578,15 @@ void BSShape::drawShapes( NodeList * secondPass )
 			cullCounts.push_back( GLsizei( cullRanges[k + 1] * 3 ) );
 			cullOffsets.push_back( (const void *) ( size_t( cullRanges[k] ) * 6 ) );
 		}
-		if ( !cullCounts.empty() ) {
+		if ( !cullCounts.empty() && !wwMdiDraw( mdiHint, &cullRanges, numTriangles ) ) {
 			WwBl::multiDrawElements( context->fn, cullCounts.data(), cullOffsets.data(), GLsizei( cullCounts.size() ) );
 			PassTime::countDraw( qint64( cullCounts.size() ) );	// lane PERF1
 		}
 	} else if ( numTriangles > 0 && !hiddenT ) {
-		WwBl::drawElements( context->fn, GLsizei( numTriangles * 3 ), 0 );
-		PassTime::countDraw( 1 );	// lane PERF1
+		if ( !wwMdiDraw( mdiHint, nullptr, numTriangles ) ) {
+			WwBl::drawElements( context->fn, GLsizei( numTriangles * 3 ), 0 );
+			PassTime::countDraw( 1 );	// lane PERF1
+		}
 	} else if ( numTriangles > 0 ) {
 		qsizetype runStart = 0;
 		for ( qsizetype i = 0; i <= numTriangles; i++ ) {
@@ -613,6 +622,111 @@ void BSShape::drawShapes( NodeList * secondPass )
 
 	if ( selectionFlags & int( Scene::SelVertex ) ) [[unlikely]]
 		drawVerts();
+}
+
+bool BSShape::wwMdiDraw( const void * hint, const std::vector<std::uint32_t> * ranges, qsizetype numTris )
+{
+	if ( !WwBl::mdiOn() || !WwBl::geo.on || !hint || WwDp::mode() != 1 || !GpuDriven::mainPeekNext() )
+		return false;
+	auto * context = scene->renderer;
+	auto * prog = context->getCurrentProgram();
+	WW_SWITCH_STATIC( bool, census, !wwEnv( "WW_PROGRAM_CENSUS" ).trimmed().isEmpty() );
+	if ( !prog || !prog->wwBindless || prog != shader || census || scene->xRay || wwCellFxResDrawing() || wwPbrmCensusArmed()
+		|| wwOpaqueCutChecking() || wwCellDrawProbeOn() )
+		return false;
+	const WwDp::Packet * lp = WwDp::peek( this );
+	if ( !lp || !WwDp::valid( *lp, prog ) )
+		return false;
+	const void * nif = scene->nifModel;
+	float pomA = 0.0f, pomB = 0.0f;
+	if ( wwCellWaterIsShape( nif, id() ) || wwCellGrassIs( scene, id() ) || wwCellDecalPomFor( nif, id(), pomA, pomB ) )
+		return false;
+	// what setupProgram notes before it picks the program: the VRS rate, the SSR flag, the palette flag
+	const auto head = []( const BSShape * s ) -> int {
+		const Material * m = s->bslsp ? s->bslsp->getMaterial() : nullptr;
+		const bool vrs = ( s->alphaProperty && s->alphaProperty->hasAlphaTest() ) || ( m && m->hasAlphaTest() ) || s->bsesp
+			|| ( s->bslsp && s->bslsp->pbrmValid );
+		const bool ssr = m && m->isShaderMaterial() && m->hasEnvironmentMapping() && ( m->commonShaderFlags1() & 0x0040U );
+		return int( vrs ) | ( int( ssr ) << 1 ) | ( int( s->bslsp && s->bslsp->greyscaleColor ) << 2 );
+	};
+	const int leadHead = head( this );
+	const bool leadLand = wwCellLandIs( nif, id() ), leadTerr = wwCellIsTerrainShape( this );
+	const bool cullPass = !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene );
+	const bool fadeLook = cullPass && wwLookOn( WwLook::DecalFade );
+	const std::uint32_t nLead = ranges ? std::uint32_t( ranges->size() / 2 ) : 1u;
+	if ( !nLead || !WwBl::runOpen( context->fn, nLead ) )
+		return false;
+	const std::uintptr_t lOff = WwBl::geo.idxOff;
+	const std::int32_t lBv = WwBl::geo.baseVertex;
+	if ( ranges ) {
+		for ( size_t k = 0; k + 1 < ranges->size(); k += 2 )
+			WwBl::runCmd( GLsizei( ( *ranges )[k + 1] * 3 ), std::uintptr_t( ( *ranges )[k] ) * 6, lOff, lBv, 0 );
+	} else {
+		WwBl::runCmd( GLsizei( numTris * 3 ), 0, lOff, lBv, 0 );
+	}
+	static std::vector<BSShape *> joined;
+	static std::vector<std::uint32_t> fr;
+	joined.clear();
+	for ( ;; ) {
+		BSShape * f = dynamic_cast<BSShape *>( GpuDriven::mainPeekNext() );
+		if ( !f || f == this || f->scene != scene || f->isHidden() || f->drawInSecondPass || f->wwFarInst || f->isSkinned
+			|| f->surfaceDecal || f->effectDecal || f->bsesp || !f->bslsp || f->bslsp->hasRefraction || f->bslsp->pbrmValid
+			|| f->isGhosted() || !f->depthWrite || !f->depthTest || ( f->alphaProperty && f->alphaProperty->hasAlphaBlend() )
+			|| f->isDoubleSided != isDoubleSided || f->wwAlphaTested() != wwAlphaTested() || f->shader != hint
+			|| f->isVertexAlphaAnimation != isVertexAlphaAnimation || ( !f->transformRigid && !f->boneTransforms.empty() )
+			|| scene->hiddenTris.contains( f->nodeId ) || head( f ) != leadHead )
+			break;
+		if ( !scene->hasOption( Scene::ShowMarkers ) && f->name.contains( QLatin1StringView( "EditorMarker" ) ) )
+			break;
+		const int fid = f->id();
+		if ( wwCellWaterWanted( scene, fid ) || wwCellWaterIsShape( nif, fid ) || CellFarGround::twinFor( nif, fid ) != 0
+			|| CellFarGround::ring0( nif, fid ) || wwCellGrassIs( scene, fid ) || wwCellLandIs( nif, fid ) != leadLand
+			|| wwCellIsTerrainShape( f ) != leadTerr || wwOpaqueCutSkips( f ) || wwCellDecalPomFor( nif, fid, pomA, pomB )
+			|| ( fadeLook && wwCellDecalFadeHas( scene, fid ) ) || GpuDrivenB::takes( f ) )
+			break;
+		const WwDp::Packet * fp = WwDp::peek( f );
+		if ( !fp || !WwDp::valid( *fp, prog ) || !WwDp::sameButHandles( *lp, *fp ) )
+			break;
+		const qsizetype fTris = std::clamp< qsizetype >( f->lodTriangleCount, 0, f->triangles.size() );
+		const auto * runs = cullPass ? wwCellCullRuns( nif, fid ) : nullptr;
+		std::uintptr_t fOff = 0;
+		std::int32_t fBv = 0;
+		if ( fTris <= 0 || !WwBl::runRoom( runs ? std::uint32_t( runs->size() ) : 1u ) || !WwBl::runPoolPeek( f, fOff, fBv ) )
+			break;
+		// joined: its row as its own setup would stage it (the replay's handles, setUniforms' matrices)
+		for ( const WwDp::Op & o : fp->ops ) {
+			if ( o.kind != WwDp::BlTex )
+				continue;
+			std::uint64_t h = 0;
+			std::memcpy( &h, fp->data.data() + o.off, 8 );
+			WwBl::setSlot( o.a, h );
+		}
+		const Transform & v = f->viewTrans();
+		WwBl::setMatrices( v.rotation.data(), v.toMatrix4().data() );
+		const std::uint32_t rel = WwBl::runRow();
+		GpuDrivenB::learn( f, prog );
+		if ( cullPass && wwCellCullCamera( scene, f, fid, std::int64_t( fTris ), fr ) ) {
+			for ( size_t k = 0; k + 1 < fr.size(); k += 2 )
+				WwBl::runCmd( GLsizei( fr[k + 1] * 3 ), std::uintptr_t( fr[k] ) * 6, fOff, fBv, rel );
+		} else {
+			WwBl::runCmd( GLsizei( fTris * 3 ), 0, fOff, fBv, rel );
+		}
+		f->shader = prog;
+		f->wwCutWrote = wwCutWrote;
+		f->wwCutStamp = wwCutStamp;
+		WwDp::counted( true, -1 );
+		GpuDriven::mainSkipNext();
+		joined.push_back( f );
+	}
+	if ( !WwBl::runIssue( context->fn ) )
+		return false;
+	PassTime::countDraw( 1 );
+	// the geometry cache's use stamps, as each follower's own bind would leave them (no vertex array bind)
+	context->wwVaoDefer = true;
+	for ( BSShape * f : joined )
+		f->bindShape();
+	context->wwVaoDefer = false;
+	return true;
 }
 
 void BSShape::drawVerts() const

@@ -80,6 +80,22 @@ void drawElements( NifSkopeOpenGLContext::GLFunctions * f, GLsizei count, std::u
 void multiDrawElements( NifSkopeOpenGLContext::GLFunctions * f, const GLsizei * counts, const void * const * offs, GLsizei n );
 //! an indirect draw reads the shape's own buffers (its commands hold the shape's own offsets)
 void unpoolForIndirect( NifSkopeOpenGLContext::GLFunctions * f );
+/* lane BINDLESSMDI1: WW_BINDLESS_MDI. A pooled draw (the leader) takes the next shapes of the flush that would set no
+ * other GL state (followers): each gets its own row, and all go down as ONE glMultiDrawElementsIndirect whose commands
+ * carry the row as base instance. Red WW_BINDLESS_MDI_RED=rowoff: a follower reads the row before its own. */
+bool mdiOn();
+int mdiRed();
+//! the leader, after its row and pool bind; false = draw as before (no room for its `leaderCmds` commands)
+bool runOpen( NifSkopeOpenGLContext::GLFunctions * f, std::uint32_t leaderCmds );
+//! room for a follower's row and `cmds` commands in this segment
+bool runRoom( std::uint32_t cmds );
+//! a follower in the leader's layout, its geometry unchanged: its draw arguments
+bool runPoolPeek( const Shape * sh, std::uintptr_t & idxOff, std::int32_t & baseVertex );
+//! writes the staged row (a follower's) and returns its base instance
+std::uint32_t runRow();
+void runCmd( GLsizei count, std::uintptr_t offBytes, std::uintptr_t idxOff, std::int32_t baseVertex, std::uint32_t rel );
+//! one multi-draw for the run; false = no follower joined (the caller draws the leader as before)
+bool runIssue( NifSkopeOpenGLContext::GLFunctions * f );
 }
 
 #endif

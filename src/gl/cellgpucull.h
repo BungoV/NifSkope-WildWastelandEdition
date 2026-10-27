@@ -57,6 +57,8 @@ void learn( Shape * sh, const void * program );
 /*! BSShape::drawShapes, instead of the CPU cull's draw: true when the shape was drawn here (its clusters, or its CPU
  *  ranges when they do not fall on cluster bounds). False: not a prepared shape, draw as before. */
 bool draw( Scene * scene, Shape * sh, qsizetype numTriangles );
+//! lane BINDLESSMDI1: draw() would take the shape (no side effect)
+bool takes( const Shape * sh );
 
 }
 

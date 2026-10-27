@@ -7,6 +7,7 @@
 
 #include <QString>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <unordered_map>
@@ -80,6 +81,36 @@ Packet * slot( const Shape * shape, const void * prog )
 	if ( !mode() || !shape || !prog )
 		return nullptr;
 	return &st().packets[shape];
+}
+
+const Packet * peek( const Shape * shape )
+{
+	if ( !mode() || !shape )
+		return nullptr;
+	const auto & m = st().packets;
+	const auto it = m.find( shape );
+	return it == m.end() ? nullptr : &it->second;
+}
+
+bool sameButHandles( const Packet & a, const Packet & b )
+{
+	if ( a.ops.size() != b.ops.size() || a.data.size() != b.data.size() || a.texunit != b.texunit )
+		return false;
+	std::size_t from = 0;
+	for ( size_t i = 0; i < a.ops.size(); i++ ) {
+		const Op & x = a.ops[i];
+		const Op & y = b.ops[i];
+		if ( x.kind != y.kind || x.a != y.a || x.b != y.b || x.off != y.off )
+			return false;
+		if ( x.kind != BlTex )
+			continue;
+		// the handle's two words differ by design; everything before them must match
+		if ( x.off < from || x.off + 2 > a.data.size()
+			|| !std::equal( a.data.begin() + from, a.data.begin() + x.off, b.data.begin() + from ) )
+			return false;
+		from = x.off + 2;
+	}
+	return std::equal( a.data.begin() + from, a.data.end(), b.data.begin() + from );
 }
 
 bool valid( const Packet & p, const void * prog )
