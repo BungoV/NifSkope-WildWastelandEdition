@@ -11,6 +11,8 @@
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
 #include "cell_grass.glsl"
+// lane WATERWETBAKE1: the land side of the shore plane (no call yet: WATERWET1)
+#include "land_shore.glsl"
 #define WW_CELL_FOGGED cellOn	// lane FOG2: a cell-lit draw fogged before its imagespace
 uniform sampler2D CellSpecMap;	// lane CUBE1: a legacy material's specular map (R scale, G smoothness), for the cube term
 #else

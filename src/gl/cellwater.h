@@ -5,6 +5,8 @@
 
 #include <QString>
 
+#include <string_view>
+
 class Scene;
 struct WwWaterRecord;
 
@@ -41,6 +43,10 @@ void wwCellWaterRemap( const void * nif, const WwBlockMap & m );
 bool wwCellWaterWanted( Scene * scene, int block );
 //! Lane SUNCELL1: `block` is a registered water surface (row or not): it never casts a sun shadow, as in the game.
 bool wwCellWaterIsShape( const void * nif, int block );
+//! lane WATERLOOK1: the document registered any water shape (the ocean pass builds only then)
+bool wwCellWaterHasShapes( const void * nif );
+//! lane WATERLOOK1: the shore foam's drive (the weather's wind as 1-20 m/s, 5 with none; the sea swell in m)
+void wwCellWaterDrive( float & windMs, float & swellM );
 //! lane CELLALL1: the Water row (WW/CellWater, default on as before); the pin WW_CELL_WATER wins
 bool wwCellWaterOn();
 void wwCellWaterSetOn( bool on );
@@ -51,7 +57,37 @@ bool wwCellWaterUniforms( Scene * scene, int block, int firstTextureUnit );
 bool wwCellWaterWritesLinear();
 //! Lane WATER2: a water surface of this scene draws as water and its WATR's SSR flag is set (cellssr.h).
 bool wwCellWaterSsrWanted( Scene * scene );
+/*! lane WATERCOMBINE1 (2026-10-27): every water look row below draws through ONE twin, fo4_waterlook.prog (all four
+ *  defines compiled in), and each look reads its own uniform (waterDepthOn, waterCauOn, waterShoreOn bits 1 edge and
+ *  2 foam, waterWavesOn), so any set of ticks draws all of them together. All rows off = fo4_water.prog, its machine
+ *  code unchanged. Probes 32/33 depth, 34 swell, 35/36 caustics, 37 shore (fo4_water.frag's header).
+ *  lane WATERDEPTH1 (2026-10-27): the Water depth colour row (WwLook::WaterDepth, pin WW_CELL_WATER_DEPTH):
+ *  the depth colour from the baked bed depth (res/shaders/water_depth.glsl) where the frame has
+ *  no scene behind the water, pure water's absorption (Pope & Fry 1997) on the game's ramp, and the far colour
+ *  letting the body through by 1 - F. Off = fo4_water.prog as before. Red WW_CELL_WATER_DEPTH_RED=flat | noabsorb |
+ *  nearest; probes WW_CELL_WATER_PROBE=32 (the depth used) and 33 (who wins). */
+/*! lane WATERCAUSTICS1 (2026-10-27): the Water caustics row (WwLook::WaterCaustics, pin WW_CELL_WATER_CAUSTICS):
+ *  the sun's caustics on the drawn bed
+ *  under a baked water body (res/shaders/water_caustics.glsl), on the world clock, faded by depth, pure water's
+ *  absorption and the sun's cascades. Red WW_CELL_WATER_CAUSTICS_RED=nofade | noshadow | still | flat | lattice
+ *  (CAUSTICPATTERN1: the old four-sine law); probes WW_CELL_WATER_PROBE=35 (the factor / 2) and 36 (the net's E / 8,
+ *  envelope, sun share). CAUSTICPATTERN1 (10-27): the pattern is a warped, animated Voronoi net of thin filaments,
+ *  two octaves, the bed's mean light kept (notes causticpattern1). */
+const char * wwCellWaterProgram();
+//! lane WATERCOMBINE1: any water look row is on (the water draws with fo4_waterlook.prog)
+bool wwCellWaterLookOn();
+//! any water program (the looks' twin or the default)
+inline bool wwIsCellWaterProgramName( std::string_view n )
+{
+	return n == "fo4_water.prog" || n == "fo4_waterlook.prog";
+}
 //! One census line: how many shapes and records this document registered.
 QString wwCellWaterEcho( const void * nif );
+/*! Lane WATERSHORE1: the Water soft edge and Shore foam rows: res/shaders/water_shore.glsl in fo4_waterlook.prog,
+ *  read from the baked shore plane (cellwaterinfo.h), near and far alike.
+ *    WW_CELL_WATER_EDGE=0|1, WW_CELL_WATER_FOAM=0|1   the rows' pins (celllooks.h)
+ *    WW_CELL_WATER_SHORE_RED=nearest                  both read the nearest 128 u texel only (the staircase)
+ *    WW_CELL_WATER_PROBE=37                           (edge, foam, shore distance / 1024) at each water pixel
+ *                                                     (WATERCOMBINE1: was 32, which the depth probe holds) */
 
 #endif

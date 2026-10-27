@@ -50,6 +50,7 @@ See the LICENSE.md file for the full license text.
 #include "lodpplace.h"
 #include "lodbfile.h"
 #include "io/loddecal.h"
+#include "gl/cellwaterinfo.h"	// lane WATERDATA1: lodl --water-info
 #include "terrainpreview.h"
 #include <QDateTime>
 #include <QDirIterator>
@@ -7046,6 +7047,9 @@ int usage()
 		  << "  lodl <file.lodl> --water-mark-selftest  the MARKING tool's gates. It\n"
 		  << "                                          REWRITES the file it is given,\n"
 		  << "                                          so give it a copy\n"
+		  << "  lodl <file.lodl> --water-info <dir>     the water shader's sparse tables (index,\n"
+		  << "                                          atlas, bodies, census) into <dir>, and the\n"
+		  << "                                          land side's (land_index, land_atlas)\n"
 		  << "  lodl <out.lodl> --water-slope-selftest [--water-slope-flat <flat.lodl>]\n"
 		  << "                                          sloped-water known-answer test: it\n"
 		  << "                                          WRITES <out.lodl> (a tilted river\n"
@@ -8168,6 +8172,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool lodtWaterSelfTestOnly = false;
 	bool lodtWaterMarkSelfTestOnly = false;
 	bool lodtWaterSlopeSelfTestOnly = false;
+	QString lodlWaterInfoDir;	// lane WATERDATA1
 	QString lodtWaterSlopeFlat;
 	bool lgListWorldspaces = false;
 	quint32 lgWorldspace = 0;
@@ -8450,6 +8455,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-selftest" ) ) lodtWaterSelfTestOnly = true;
 		else if ( t == QLatin1String( "--water-mark-selftest" ) ) lodtWaterMarkSelfTestOnly = true;
 		else if ( t == QLatin1String( "--water-slope-selftest" ) ) lodtWaterSlopeSelfTestOnly = true;
+		else if ( t == QLatin1String( "--water-info" ) ) lodlWaterInfoDir = next();
 		else if ( t == QLatin1String( "--water-slope-flat" ) ) lodtWaterSlopeFlat = next();
 		else if ( t == QLatin1String( "--list-worldspaces" ) ) lgListWorldspaces = true;
 		else if ( t == QLatin1String( "--worldspace" ) ) lgWorldspace = next().toUInt( nullptr, 16 );
@@ -8800,6 +8806,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-body-samples" ) ) gLodlWater.bodySamples = next().toInt();
 		else if ( t == QLatin1String( "--water-flow-samples" ) ) gLodlWater.flowSamples = next().toInt();
 		else if ( t == QLatin1String( "--water-no-shore" ) ) gLodlWater.shore = false;
+		else if ( t == QLatin1String( "--water-no-shore-land" ) ) gLodlWater.shoreLand = false;
+		else if ( t == QLatin1String( "--water-flow-constant" ) ) gLodlWater.flowField = false;	// lane WATERFLOWBAKE1
 		else if ( t == QLatin1String( "--water-velocities" ) ) gLodlWater.velocityPlugin = next();
 		else if ( t == QLatin1String( "--water-report" ) ) gLodlWater.reportPath = next();
 		else if ( t == QLatin1String( "--dump-land" ) ) lgDumpLand = next();
@@ -9768,6 +9776,16 @@ int nifskopeCliMain( const QStringList & args )
 			const bool ok = lodtWaterMarkSelfTest( file, &report, &werr );
 			out() << report << Qt::endl;
 			if ( !ok && !werr.isEmpty() )
+				err() << "error: " << werr << Qt::endl;
+			rc = ok ? 0 : 1;
+		} else if ( !lodlWaterInfoDir.isEmpty() ) {
+			// lane WATERDATA1: the same build the cell view uploads, dumped for the offline gate
+			WwWaterInfoTables t;
+			QString werr;
+			const bool ok = wwWaterInfoBuild( file, t, &werr ) && wwWaterInfoDump( t, lodlWaterInfoDir, &werr );
+			if ( ok )
+				out() << wwWaterInfoCensus( t ) << Qt::endl << wwLandShoreCensus( t ) << Qt::endl;
+			else
 				err() << "error: " << werr << Qt::endl;
 			rc = ok ? 0 : 1;
 		} else if ( lodtWaterSlopeSelfTestOnly ) {

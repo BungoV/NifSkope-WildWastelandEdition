@@ -49,6 +49,14 @@ enum class WwLook : int
 	BindlessDraws,		// BINDLESS2: cell-lit draws read maps + matrices from one per-draw buffer, geometry from arenas (WW_BINDLESS)
 	WeatherRecx,		// WX1: the weather's .recx atmosphere / clouds / night blocks set the sky (WW_WEATHER_RECX)
 	GroundFogDerived,	// FOGHEIGHT1: no groundFog file -> a ground layer from the weather's own fog (WW_CELL_AIR_GROUND_DERIVED)
+	WaterDepth,			// WATERDEPTH1: water colour + absorption by the baked bed depth, near and far (WW_CELL_WATER_DEPTH)
+	WaterCaustics,		// WATERCAUSTICS1: the sun's moving caustics on the bed under shallow water (WW_CELL_WATER_CAUSTICS)
+	WaterSoftEdge,		// WATERSHORE1: water fades into the shore from the baked shore distance, near + far (WW_CELL_WATER_EDGE)
+	ShoreFoam,			// WATERSHORE1: a thin foam band with a travelling wave along shores, near + far (WW_CELL_WATER_FOAM)
+	WaterSwell,			// WATERWAVES1: a calm swell on lakes, rivers and the sea, sized by the baked body (WW_CELL_WATER_WAVES)
+	WaterRefl,			// WATERREFL1: physical Fresnel, scene reflections on every body, far water = near law (WW_CELL_WATER_REFL)
+	WaterGlint,			// WATERREFL1: the sun's glare from the wave slopes' roughness, no fixed sparkle (WW_CELL_WATER_GLINT)
+	WaterOcean,			// WATERLOOK1: the wind's wave spectrum (FFT) replaces the baked bodies' normal maps (WW_CELL_WATER_OCEAN)
 	Count
 };
 

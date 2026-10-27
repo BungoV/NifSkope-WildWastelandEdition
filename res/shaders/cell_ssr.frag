@@ -47,6 +47,14 @@ uniform vec2 ssrPrevProj;	// the previous projection's P00, P11
 
 out vec4 fragColor;
 
+#ifdef WW_SSR_WATER_LOOK	// lane WATERREFL1 (cell_ssrwater.prog): a water ray (stage 1 alpha 2) marches 64 steps, colour unclamped
+#define WW_SSR_STEPS ( waterLook ? 64 : 32 )
+#define WW_SSR_HITMAX ( waterLook ? 64.0 : 1.0 )
+#else
+#define WW_SSR_STEPS 32
+#define WW_SSR_HITMAX 1.0
+#endif
+
 // the game's load: outside the mip reads 0
 float zLoad( int m, vec2 cell )
 {
@@ -86,6 +94,9 @@ void main()
 		t.y = fullSize.y - 1 - t.y;
 		vec3 P, R;
 		float z;
+#ifdef WW_SSR_WATER_LOOK
+		float kind = 1.0;
+#endif
 		vec4 wr = haveWaterRay ? texelFetch( waterRay, t, 0 ) : vec4( 0.0 );
 		if ( wr.a > 0.0 ) {
 			// lane WATER2: the water lies in front here; its pass (02100) gated and wrote the ray already
@@ -94,6 +105,9 @@ void main()
 			z = wr.a;
 			P = vec3( ( 2.0 * uv.x - 1.0 ) * z / proj.x, ( 1.0 - 2.0 * uv.y ) * z / proj.y, -z );
 			R = wr.xyz;
+#ifdef WW_SSR_WATER_LOOK
+			kind = 2.0;
+#endif
 		} else {
 			if ( !opaqueRays || texelFetch( scene, t, 0 ).a * ssrK.w - 0.01 < 0.0 )
 				return;
@@ -115,6 +129,10 @@ void main()
 		vec2 uvq = vec2( 0.5 + 0.5 * proj.x * Q.x / zq, 0.5 - 0.5 * proj.y * Q.y / zq );
 		// the screen line is straight in (u, v, 1 / depth): run it back to depth = near
 		float s = ( 1.0 / ssrClip.x - 1.0 / z ) / ( 1.0 / zq - 1.0 / z );
+#ifdef WW_SSR_WATER_LOOK
+		fragColor = vec4( uv + ( uvq - uv ) * s, z, kind );
+		return;
+#endif
 		fragColor = vec4( uv + ( uvq - uv ) * s, z, 1.0 );
 		return;
 	}
@@ -125,6 +143,9 @@ void main()
 		if ( !( ssrClip.x < z0 ) )
 			return;
 		float dj = kDither[( q.y & 3 ) + 4 * ( q.x & 3 )];
+#ifdef WW_SSR_WATER_LOOK
+		bool waterLook = ray.w > 1.5;
+#endif
 		vec3 A = vec3( ray.xy, 1.0 / ssrClip.x + ( dj - 0.5 ) * 0.004 );
 		vec3 D = vec3( uv, 1.0 / z0 ) - A;
 		vec2 S = uv + D.xy * dj * 0.002;
@@ -145,7 +166,7 @@ void main()
 		bool alive = true, refused = false;
 		int count = 0;
 		float d = 0.0;
-		for ( int n = 1; n <= 32; n++ ) {
+		for ( int n = 1; n <= WW_SSR_STEPS; n++ ) {
 			alive = alive && level >= 1 && !rayOut( p );
 			if ( !alive )
 				break;
@@ -182,13 +203,19 @@ void main()
 			}
 			count = n;
 		}
-		if ( rayOut( p ) || count == 32 || refused )
+		if ( rayOut( p ) || count == WW_SSR_STEPS || refused )
 			return;
 		float c = 1.0 - pow( min( 2.0 * length( p.xy - 0.5 ), 1.0 ), 2.0 );
 		c *= max( 1.0 - 2.0 * length( S - p.xy ), 0.0 );
 		c *= clamp( 1.0 - 25.0 * ( d - zfirst ) / ( ssrClip.y - ssrClip.x ), 0.0, 1.0 );
 		if ( ( ssrRed & 4 ) != 0 )
 			c = 1.0;
+#ifdef WW_SSR_WATER_LOOK
+		if ( waterLook ) {	// the far bank half a screen away stays: the screen edges fade (10% a side), nothing else
+			vec2 e = min( p.xy, 1.0 - p.xy );
+			c = smoothstep( 0.0, 0.1, e.x ) * smoothstep( 0.0, 0.1, e.y );
+		}
+#endif
 		if ( ssrPrev ) {	// lane PERF3: the hit in the previous frame's view; off its screen or behind it: no hit
 			float zh = 1.0 / p.z;
 			vec3 H = vec3( ( 2.0 * p.x - 1.0 ) * zh / proj.x, ( 1.0 - 2.0 * p.y ) * zh / proj.y, -zh );
@@ -199,10 +226,10 @@ void main()
 			vec2 up = vec2( 0.5 + 0.5 * ssrPrevProj.x * Hp.x / zp, 0.5 - 0.5 * ssrPrevProj.y * Hp.y / zp );
 			if ( up.x <= 0.0 || up.x >= 1.0 || up.y <= 0.0 || up.y >= 1.0 )
 				return;
-			fragColor = vec4( clamp( textureLod( prevScene, vec2( up.x, 1.0 - up.y ), 0.0 ).rgb, 0.0, 1.0 ), c * c );
+			fragColor = vec4( clamp( textureLod( prevScene, vec2( up.x, 1.0 - up.y ), 0.0 ).rgb, 0.0, WW_SSR_HITMAX ), c * c );
 			return;
 		}
-		fragColor = vec4( clamp( textureLod( scene, vec2( p.x, 1.0 - p.y ), 0.0 ).rgb, 0.0, 1.0 ), c * c );
+		fragColor = vec4( clamp( textureLod( scene, vec2( p.x, 1.0 - p.y ), 0.0 ).rgb, 0.0, WW_SSR_HITMAX ), c * c );
 		return;
 	}
 

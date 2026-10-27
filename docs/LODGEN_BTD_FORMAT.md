@@ -858,8 +858,27 @@ bits 0..7    direction, 0..255 = 0..2pi measured from +X toward +Y in the
 bits 8..11   speed, 0..15, times the body's speed quantum = |mean flow| / 8,
              so 8 is the body's mean and 15 is ~1.9x it
 bits 12..15  confidence, 0..15: 15 = a stroke crosses this sample, 0 = the
-             body's own mean (cross-fade to `meanFlow`)
+             body's own mean (cross-fade to `meanFlow`), 8 = solved per
+             texel by the writer (lane WATERFLOWBAKE1, below)
 ```
+
+**The river flow field (lane WATERFLOWBAKE1, 2026-10-27; no version bump).**
+Every river (class 1) with a direction, at least 16 texels and a nonzero mean
+flow is solved for potential flow on its own mask (`WaterFlowGrid`, the marking
+tool's solver): conductance = water depth (height - bed, 8..1024 u), the sink
+at the outlet the rules below picked (the drain contact, else the far end along
+the mean flow), the source spread over the upstream end (the last tenth of the
+walking distance from the sink), plus one unit at every body that drains into
+it. The field must agree with the body's mean direction, or the river keeps the
+constant word. Each wet texel of the river then writes
+`dir | speed << 8 | 8 << 12`, the speed scaled so the river's MEDIAN speed is 8
+(= its |mean flow|); islets the solve never reaches keep the constant word.
+Lakes, the sea and any river that fails these checks keep the constant word
+(Commonwealth 10-27: 114 rivers solved, 138,611 texels; 3 kept the constant). A reader
+that ignores confidence still gets a direction and a speed in the same units.
+`--water-flow-constant` (panel row *Solve river flow* off) writes the file
+byte for byte as before. The marking tool keeps a solved word on texels nobody
+marked (`WaterMarkDoc::baseWord`).
 
 **Dry samples write 0, which is also "no flow", and the two are the same value
 on purpose**: a consumer that forgets to test the body-ID plane draws still
@@ -896,6 +915,15 @@ measured from a wet sample to the nearest sample that is **not in the same
 body** — dry land, or another body across a seam. A 3-4 chamfer, two passes,
 with the one rule that makes it per-body: a neighbour belonging to a different
 body counts as a shore at distance zero.
+
+**The land side (lane WATERWETBAKE1, 2026-10-27).** A DRY sample carries its
+distance to the nearest wet sample of any body, by the same chamfer and the same
+quantum, 255 = 8,160 units or more (far). A dry sample next to water reads 4
+(one 128-unit texel at 32 samples a cell). Written by default; `--water-no-shore-land`
+writes 255 on every dry sample, byte for byte the file from before. Wet samples
+are the same bytes either way (the wet rule never reads a dry value). An older
+file reads as "all land far". Readers that want the wet side alone test the body
+id plane: shore bytes of a sample whose id is 0 are land distances.
 
 Baked rather than derived because the runtime alternative is a search. **Depth
 stays derived**, exactly as the table further down says: `body.waterHeight -
@@ -1132,6 +1160,7 @@ lodgen <esm> --worldspace <id> --lodl <dir>      bodies ON by default (v3)
         [--water-bodies]            ON, and REFUSE rather than fall back to v2
         [--water-bridge N] [--water-near N]
         [--water-body-samples N] [--water-flow-samples N] [--water-no-shore]
+        [--water-no-shore-land]     dry samples 255 (the pre-WATERWETBAKE1 bytes)
         [--water-velocities <plugin>] [--water-report <file>]
 lodl <file.lodl> --water-census      the body table, read back out of the FILE
 lodl <file.lodl> --water-selftest    the classifier's known-answer control

@@ -57,6 +57,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellcull.h"	// lane DECALS1: the placed decals' parallax
 #include "gl/celllooks.h"
+#include "gl/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
+#include "gl/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
 #include "gl/cellssr.h"
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellssgi.h"
@@ -528,10 +530,10 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		const bool lin = program && ( wwIsCellProgramName( program->name ) || program->name == std::string_view( "fo4_effectcell.prog" )
 			|| wwIsCellDecalProgramName( program->name )	// lane DECALLIT1
 			|| program->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1: the layer's (composited as 1)
-			|| ( program->name == std::string_view( "fo4_water.prog" ) && wwCellWaterWritesLinear() ) );
+			|| ( wwIsCellWaterProgramName( program->name ) && wwCellWaterWritesLinear() ) );
 		// lane FOGBLOOM1 (cellfogbloom.h): a blended linear draw (an effect, glass) also sets bit 2, the bloom it takes in fog
 		const bool fogMark = lin && wwCellFogBloomMarks() && glIsEnabled( GL_BLEND )
-			&& program->name != std::string_view( "fo4_water.prog" ) && !wwIsCellDecalProgramName( program->name );
+			&& !wwIsCellWaterProgramName( program->name ) && !wwIsCellDecalProgramName( program->name );
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( wwCellFogBloomMarks() ? 0x07 : 0x03 );
 		glStencilFunc( GL_ALWAYS, ( lin ? 1 : 2 ) | ( fogMark ? 4 : 0 ), 0xFF );
@@ -750,7 +752,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	/* lane WATER1: a cell water surface (src/gl/cellwater.h) takes fo4_water.prog by name while the draw is
 	 * cell-lit: the matrices, the cell's uniforms and the fog through the lighting setup, then the record's */
 	if ( mesh->bslsp && wwLodChannelView == 0 && wwCellWaterWanted( mesh->scene, mesh->id() ) ) {
-		if ( Program * program = useProgram( "fo4_water.prog" ) ) {
+		if ( Program * program = useProgram( wwCellWaterProgram() ) ) {	// lane WATERCOMBINE1: or the water looks' twin
 			if ( setupProgramCE1( nif, program, mesh ) && wwCellWaterUniforms( mesh->scene, mesh->id(), 0 ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
@@ -826,7 +828,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			|| hint->name == std::string_view( "pbrm_csm.prog" )	// lane CSM1: the shadow variant is never a hint
 			|| hint->name == std::string_view( "pbrm_cell.prog" )	// lane PRTPGI: nor the cell-lit one
 			|| hint->name == std::string_view( "pbrm_cellcsm.prog" )	// lane SUNCELL1: nor its cascade variant
-			|| hint->name == std::string_view( "fo4_water.prog" ) );	// lane WATER1: nor the water's
+			|| wwIsCellWaterProgramName( hint->name ) );	// lane WATER1: nor the water's
 	/* Weather fog (lane FOG1) has its own program, fo4_fog.prog: the same
 	 * fo4_default.frag with WW_FOG defined. With the fog code merely present and
 	 * fogOn false, the driver compiled fo4_default differently -- 783 px of the
@@ -1791,6 +1793,8 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
 		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
+	if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: no default program reads it
+		wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
 
 	// Per-draw GL state, same as the spec/gloss path ends with. Omitting it made
 	// the shape inherit whatever blend/depth state the previous program left
@@ -1944,6 +1948,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 		if ( prog->uniLocation( "fgMode" ) >= 0 )	// lane FARDRAW1: a live-ground twin's grid, layers and decals
 			CellFarGround::uniforms( scene, prog );
+		if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: no default program reads it
+			wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
 		if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 			// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
 			GLint dst = 0;

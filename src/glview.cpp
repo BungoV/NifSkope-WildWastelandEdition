@@ -159,6 +159,7 @@ private:
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellfarground.h"	// lane FARPAGES1
+#include "gl/cellocean.h"	// lane WATERLOOK1
 #include "gl/cloudvol.h"	// lane CLOUD2B: the volume clouds' depth test
 
 // NOTE: The FPS define is a frame limiter,
@@ -4244,6 +4245,7 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Obscurance );	// lane PERF1: one bracket per pass
 	wwCellAoPass( scene, cellPasses );
 	PassTime::end( PassTime::Obscurance );
+	wwCellOceanPass( scene, cellPasses );	// lane WATERLOOK1: the wind's waves, before any pass that draws water
 	PassTime::begin( PassTime::Reflections );
 	wwCellSsrPass( scene, cellPasses );	// lane SSR1: needs that pass's depth
 	wwContactShadowPass( scene );	// lane TERRSHADOW1: the contact mask from that pass's depth (fails open without it)

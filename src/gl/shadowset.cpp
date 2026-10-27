@@ -1388,6 +1388,11 @@ void echoSummary()
 
 } // namespace
 
+bool wwCellIsTerrainShape( const Shape * sh )
+{
+	return sh && isTerrainShape( sh );
+}
+
 bool wwShadowRed( const char * name )
 {
 	return ss().reds.contains( QString::fromLatin1( name ) );

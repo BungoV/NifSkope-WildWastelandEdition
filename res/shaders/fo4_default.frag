@@ -300,6 +300,8 @@ vec3 tonemap(vec3 x)
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
 #include "cell_grass.glsl"
+// lane WATERWETBAKE1: the land side of the shore plane (no call yet: WATERWET1)
+#include "land_shore.glsl"
 #endif
 #ifdef WW_FARGROUND	// lane FARDRAW1: the far ring 0's live ground
 #include "cell_farground.glsl"

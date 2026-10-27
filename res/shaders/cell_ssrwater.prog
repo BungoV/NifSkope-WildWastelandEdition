@@ -1,0 +1,4 @@
+# cell_ssr with the water look (lane WATERREFL1; src/gl/cellssr.cpp picks it by name while Water reflections is on).
+# No conditions: never picked for a shape.
+
+shaders cell_ssr.vert cell_ssrwater.frag

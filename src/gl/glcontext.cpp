@@ -421,6 +421,10 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 			&& qgetenv( "WW_PERF3_RED" ).trimmed() != "1";
 		if ( frameUbo && data.startsWith( "#version" ) && data.contains( "WW_FRAME_UBO" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_FRAME_UBO 1\n" );
+		// lane WATERDATA1: the water-info probes' build (probes 28..31), harness only
+		const bool infoProbe = !qgetenv( "WW_CELL_WATER_INFO_PROBE" ).trimmed().isEmpty();
+		if ( infoProbe && data.startsWith( "#version" ) && data.contains( "_WATER_INFO_PROBE" ) )	// not a "WW_" literal: the switch survey would list it
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_WATER_INFO_PROBE 1\n" );
 
 		if ( name.ends_with( "frag" ) ) {
 			if ( qsizetype n = data.indexOf( "NUM_TEXTURE_UNITS" ); n >= 0 )

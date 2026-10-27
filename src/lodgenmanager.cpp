@@ -1781,6 +1781,11 @@ public:
 				tr( "Write the shore line" ), true,
 				tr( "The outline where each body meets the land.\n"
 					"Command line: --water-no-shore" ) );
+			xB( f, "LodgenWaterFlowFieldCheck", QStringLiteral( "waterFlowField" ),
+				tr( "Solve river flow" ), true,
+				tr( "Each river gets its own flow direction and speed per texel, following\n"
+					"its bends. Off writes one direction for the whole river.\n"
+					"Command line: --water-flow-constant" ) );
 			xP( f, "LodgenWaterVelocitiesEdit", QStringLiteral( "waterVelocities" ),
 				tr( "Velocity plugin" ), QString(),
 				tr( "A plugin that supplies measured water velocities instead of the writer's\n"
@@ -1789,7 +1794,7 @@ public:
 			auto sync = [this]() {
 				const bool on = waterBodiesCheck->isChecked();
 				for ( const char * k : { "waterBridge", "waterNear", "waterBodySamples",
-						"waterFlowSamples", "waterShore", "waterVelocities" } )
+						"waterFlowSamples", "waterShore", "waterFlowField", "waterVelocities" } )
 					enableExtra( k, on );
 			};
 			connect( waterBodiesCheck, &QCheckBox::toggled, this, sync );
@@ -3232,6 +3237,7 @@ private:
 				o.water.bodySamples = xi( "waterBodySamples" );
 				o.water.flowSamples = xi( "waterFlowSamples" );
 				o.water.shore = xb( "waterShore" );
+				o.water.flowField = xb( "waterFlowField" );
 				o.water.velocityPlugin = xs( "waterVelocities" );
 				/* The WATR NAM0 fallback floor, from the plugins this bake
 				 * loads -- what the command line has always done, so the panel
