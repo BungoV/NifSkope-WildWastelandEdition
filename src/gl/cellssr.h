@@ -22,8 +22,8 @@ class Scene;
  *  reflection, obscurance and fog; alpha = the flag) into a full-size float target, runs
  *  res/shaders/cell_ssr.frag over it and lane AO1's depth pyramid (one pyramid, not two), and the cell programs
  *  mix the bilinear sample into their cube term: cellSsrMix in res/shaders/cell_ssr.glsl is the ONE place the
- *  reflection enters the picture. Interiors only; part of the Cell lights row; needs the obscurance's pass
- *  (WW_CELL_AO=0 leaves none).
+ *  reflection enters the picture. Interiors only; part of the Cell lights row. The opaque pass and depth pyramid
+ *  run whenever SSR is on, whatever the Ambient Occlusion row or method (lane SSAO2: WW_CELL_AO_SSR_RED=old drops them).
  *  The march reads LINEAR light, before the imagespace's tone map (the cell view applies that per fragment,
  *  after the point the scene pass taps). When the frame becomes one linear target with a single tone map, it
  *  should read that same opaque linear frame before the reflection term, and cellSsrMix moves with the cube term.

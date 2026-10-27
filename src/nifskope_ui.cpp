@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ***** END LICENCE BLOCK *****/
 
+#include "ui/widgets/wwdropdown.h"
 #include "gamemanager.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "celldoorlive.h"	// lane DOORLIVE1: a path frame poses the live door
@@ -28147,10 +28148,8 @@ void NifSkope::initDockWidgets()
 		const QIcon physicsIcon = tlMakeIcon( QStringLiteral( "mode_physics" ), iconColor );
 		QToolButton * modeButton = new QToolButton( this );
 		modeButton->setObjectName( QStringLiteral( "ViewportModeButton" ) );
-		modeButton->setPopupMode( QToolButton::InstantPopup );
+		WwDropdown::applyStyle( modeButton );	// lane OPENCELLFIX2: THE dropdown look; the dock's dropdowns share it
 		modeButton->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
-		modeButton->setAutoRaise( false );
-		modeButton->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
 		modeButton->setToolTip( tr( "Viewport interaction mode. Tab toggles Object Mode and the last non-object mode." ) );
 
 		QMenu * modeMenu = new QMenu( modeButton );

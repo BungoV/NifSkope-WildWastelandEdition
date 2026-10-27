@@ -366,11 +366,126 @@ bool wwLookBounceEmitRedStale()
 	return stale;
 }
 
+// ---- lane OPENCELLFIX2: the group masters
+namespace {
+struct GroupRow
+{
+	const char * label;
+	const char * name;
+	const char * key;
+};
+const GroupRow kGroups[] = {
+	{ "Improved Lights", "IMPROVED_LIGHTS", "WW/CellImprovedLights" },
+	{ "Cell lights", "CELL_LIGHTS", "WW/CellGroupCellLights" },
+	{ "Shadows", "SHADOWS", "WW/CellGroupShadows" },
+	{ "Shadows", "SHADOWS_VANILLA", "WW/CellGroupShadowsVanilla" },
+	{ "Emittance", "EMITTANCE", "WW/CellGroupEmittance" },
+	{ "Screen-Space Reflections", "REFLECTIONS", "WW/CellGroupReflections" },
+	{ "Improved Sky", "SKY", "WW/CellGroupSky" },
+	{ "Improved Water", "WATER", "WW/CellGroupWater" },
+	{ "Decals", "DECALS", "WW/CellGroupDecals" },
+	{ "Camera", "CAMERA", "WW/CellGroupCamera" },
+	{ "Camera", "CAMERA_VANILLA", "WW/CellGroupCameraVanilla" },
+	{ "Bloom", "BLOOM_VANILLA", "WW/CellGroupBloomVanilla" },
+	{ "Objects", "OBJECTS", "WW/CellGroupObjects" },
+};
+static_assert( sizeof( kGroups ) / sizeof( kGroups[0] ) == size_t( WwGroup::Count ), "a row per group" );
+
+int & groupVal( WwGroup g )
+{
+	static int v[size_t( WwGroup::Count )];
+	static bool loaded = false;
+	if ( !loaded ) {
+		loaded = true;
+		QSettings s;
+		for ( int k = 0; k < int( WwGroup::Count ); k++ )
+			v[k] = s.value( QLatin1String( kGroups[k].key ), true ).toBool() ? 1 : 0;
+	}
+	return v[size_t( g )];
+}
+
+QByteArray groupRed()
+{
+	WW_SWITCH_STATIC( QByteArray, r, wwEnv( "WW_CELLGROUP_RED" ).trimmed() );
+	return r;
+}
+}	// namespace
+
+const char * wwGroupLabel( WwGroup g )
+{
+	return g < WwGroup::Count ? kGroups[size_t( g )].label : "";
+}
+
+const char * wwGroupName( WwGroup g )
+{
+	return g < WwGroup::Count ? kGroups[size_t( g )].name : "";
+}
+
+bool wwGroupOn( WwGroup g )
+{
+	return g >= WwGroup::Count || groupVal( g ) != 0;
+}
+
+void wwGroupSet( WwGroup g, bool on )
+{
+	if ( g >= WwGroup::Count )
+		return;
+	groupVal( g ) = on ? 1 : 0;
+	QSettings().setValue( QLatin1String( kGroups[size_t( g )].key ), on );
+}
+
+bool wwGroupLets( WwGroup g )
+{
+	return g >= WwGroup::Count || groupVal( g ) != 0 || groupRed() == wwGroupName( g );
+}
+
+WwGroup wwLookGroup( WwLook l )
+{
+	switch ( l ) {
+	case WwLook::LightPhysFalloff: case WwLook::LightAdvanced: case WwLook::LightArea:
+		return WwGroup::ImprovedLights;
+	case WwLook::NifxLights:
+		return WwGroup::CellLights;
+	case WwLook::ContactFar: case WwLook::ContactLocal: case WwLook::TerrMoonSky: case WwLook::TerrPbrDim:
+	case WwLook::TerrSlopeMap: case WwLook::TerrGroundGate: case WwLook::FarCardShadows:
+		return WwGroup::Shadows;
+	case WwLook::CableShadowSway:
+		return WwGroup::ShadowsVanilla;
+	case WwLook::PlacementEmittance: case WwLook::RegionEmittance: case WwLook::ParticleEmittance:
+		return WwGroup::Emittance;
+	case WwLook::Ephemeris: case WwLook::WeatherRecx:
+		return WwGroup::Sky;
+	case WwLook::WaterDepth: case WwLook::WaterCaustics: case WwLook::WaterSoftEdge: case WwLook::ShoreFoam:
+	case WwLook::WaterSwell: case WwLook::WaterRefl: case WwLook::WaterGlint: case WwLook::WaterOcean:
+		return WwGroup::Water;
+	case WwLook::DecalFade: case WwLook::DecalParallax:
+		return WwGroup::Decals;
+	case WwLook::ExposureWide:
+		return WwGroup::Camera;
+	case WwLook::LensFlares:
+		return WwGroup::BloomVanilla;
+	case WwLook::ActorsOutdoors: case WwLook::WeaponParts: case WwLook::WorldAnim: case WwLook::AnimObjects:
+		return WwGroup::Objects;
+	default:
+		return WwGroup::Count;
+	}
+}
+
+void wwCellSsrSetOn( bool on );	// gl/cellssr.cpp
+void wwCellSsrExteriorSetOn( bool on );
+
+void wwCellSsrRowSet( bool on )
+{
+	wwCellSsrSetOn( on );
+	if ( groupRed() != "ssr" )
+		wwCellSsrExteriorSetOn( on );
+}
+
 bool wwLookOn( WwLook l )
 {
 	const QByteArray p = pinOf( l );
 	if ( p.isEmpty() )
-		return wwLookHasRow( l ) ? rowVal( l ) != 0 : true;
+		return wwLookHasRow( l ) ? rowVal( l ) != 0 && wwGroupLets( wwLookGroup( l ) ) : true;
 	return p != "0";
 }
 
@@ -406,6 +521,8 @@ bool wwCellShadowBudgetPinned()
 int wwCellShadowBudget()
 {
 	WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_SHADOWBUDGET" ).trimmed() );
+	if ( p.isEmpty() && !wwGroupLets( WwGroup::Shadows ) )
+		return 0;	// lane OPENCELLFIX2: the Shadows master is off
 	return budgetClamp( p.isEmpty() ? budgetRow() : p.toInt() );
 }
 
@@ -443,6 +560,8 @@ bool wwCellLightCurvePinned()
 float wwCellLightCurve()
 {
 	WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LIGHT_CURVE" ).trimmed() );
+	if ( p.isEmpty() && !wwGroupLets( WwGroup::CellLights ) )
+		return 1.0f;	// lane OPENCELLFIX2: the Cell lights master is off
 	const float c = p.isEmpty() ? curveRow() : p.toFloat();
 	return c > 0.0f ? c : 1.0f;
 }

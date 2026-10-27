@@ -74,6 +74,37 @@ void wwLookSet( WwLook l, bool on );
 //! lane LIGHTS5: red WW_CELL_XEMI_GI_RED=stale, the bounce emittance row's live flip keeps the baked Le
 bool wwLookBounceEmitRedStale();
 
+/* lane OPENCELLFIX2 (bungo 10-27 notes 17, 18, 23-26): a Display group's master tick, a key of its own, ships on.
+ * Off, the group's rows read off and keep their own saved state; a row's env pin still wins. A group headed by a
+ * feature's own tick (Cell lights, Precomputed Radiance Transfer, LOD, ...) has no master. A group split between
+ * Vanilla and Fusion Shaders has a master per half. Red WW_CELLGROUP_RED=<wwGroupName>: that master gates nothing. */
+enum class WwGroup : int
+{
+	ImprovedLights = 0,	// WW/CellImprovedLights
+	CellLights,			// the Fusion Shaders half of Cell lights
+	Shadows,
+	ShadowsVanilla,
+	Emittance,
+	Reflections,		// Screen-Space Reflections' Fusion Shaders half
+	Sky,				// Improved Sky
+	Water,				// Improved Water
+	Decals,
+	Camera,
+	CameraVanilla,
+	BloomVanilla,
+	Objects,
+	Count
+};
+const char * wwGroupLabel( WwGroup g );
+const char * wwGroupName( WwGroup g );	//!< the menu action is CellWorkspaceGroup_<name>
+bool wwGroupOn( WwGroup g );	//!< the master's own tick
+void wwGroupSet( WwGroup g, bool on );
+bool wwGroupLets( WwGroup g );	//!< its rows may be on (Count: no group)
+WwGroup wwLookGroup( WwLook l );	//!< Count: not under a master
+/* note 20: the one Screen-Space Reflections row sets indoors and outdoors alike (cellssr.h's two setters).
+ * Red WW_CELLGROUP_RED=ssr: indoors only. */
+void wwCellSsrRowSet( bool on );
+
 /* LIGHTSYS-3: the lamp-shadow budget. 0 Off (the 16 nearest shadow lights, as before); else at most N slots, ranked
  * by brightness x radius / distance with 20 % hysteresis; a light's shadow fades out over the last 25 % of score
  * above the cut and by camera distance (kShadowFadeBegin..End), so a demoted light never pops.

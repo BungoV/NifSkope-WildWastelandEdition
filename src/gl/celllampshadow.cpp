@@ -2,6 +2,7 @@
 
 #include "gl/glshape.h"
 #include "wwswitch.h"	// fix TDFIX2: a live set re-reads the switches
+#include "gl/celllooks.h"	// lane OPENCELLFIX2: the Shadows master
 
 #include <QSettings>
 
@@ -74,7 +75,8 @@ float rayTri( const Vector3 & o, const Vector3 & d, const Vector3 & a, const Vec
 
 int wwCellLampShadowTier()
 {
-	return st().tier;
+	const LsState & s = st();
+	return s.pinned || wwGroupLets( WwGroup::Shadows ) ? s.tier : -1;	// lane OPENCELLFIX2: the Shadows master
 }
 
 void wwCellLampShadowSetTier( int tier )

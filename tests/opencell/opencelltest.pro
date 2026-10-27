@@ -9,11 +9,13 @@ ROOT = $$PWD/../..
 INCLUDEPATH += $$ROOT/src/ui $$ROOT/src $$ROOT/lib/libfo76utils/src
 !*msvc*:QMAKE_CXXFLAGS += -march=haswell
 
-HEADERS += $$ROOT/src/ui/opencellcatalog.h $$ROOT/src/ui/opencelldialog.h
+HEADERS += $$ROOT/src/ui/opencellcatalog.h $$ROOT/src/ui/opencelldialog.h \
+	$$ROOT/src/ui/widgets/wwdropdown.h
 SOURCES += opencelltest.cpp \
 	stubs.cpp \
 	$$ROOT/src/ui/opencellcatalog.cpp \
 	$$ROOT/src/ui/opencelldialog.cpp \
+	$$ROOT/src/ui/widgets/wwdropdown.cpp \
 	$$ROOT/src/wwswitch.cpp \
 	$$ROOT/src/lodgenloadorder.cpp \
 	$$ROOT/lib/libfo76utils/src/ba2file.cpp \
