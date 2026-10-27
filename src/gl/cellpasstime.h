@@ -48,7 +48,9 @@ void countDraw( qint64 ranges );
 enum Sub { AirTile, AirInject, AirIntegrate, AoGeometry, AoStages, AoGi, ToneBlit, ToneMeasure, ToneBloom, ToneQuads,
 	FarDots, FarCardsLit, ToneVrs,	// lane VRS1: ToneVrs, the rate images' build after the tone map
 	FxResDown, FxResLayer, FxResComp,	// lane FXRES1: the soft-effect layer's depth, draws and composite
-	AirPre, AirFar, AirPost, SubCount };	// lane FOGPERF1: the air before stage 0 (depth blit), its far grid, after it
+	AirPre, AirFar, AirPost,
+	FarGroundPaint, FarGroundDraw,	// lane FARPAGES1: the far ground's page paint + BC1, ring 0's ground draws
+	SubCount };	// lane FOGPERF1: the air before stage 0 (depth blit), its far grid, after it
 void subBegin( int sub );
 //! lane PERF2: CPU time inside the per-draw setup (setupProgram and the cell's uniform calls), summed per frame
 enum CpuSub { CpuSetup, CpuCellUni, CpuSunUni, CpuFogUni, CpuAoDraw, CpuSsrDraw,

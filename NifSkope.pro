@@ -278,6 +278,7 @@ HEADERS += \
 	src/gl/cellgpucull.h \
 	src/gl/cellfarinst.h \
 	src/gl/cellfarground.h \
+	src/gl/cellfgsched.h \
 	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \

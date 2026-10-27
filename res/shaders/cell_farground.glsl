@@ -3,6 +3,7 @@
  * with the .lodg/.lodd decals over it, in place of the baked sheet's colour. Two decal options:
  *   WW_FARGROUND 1  each pixel walks its 512-unit bin's record list (the preview's unproject, in record order)
  *   WW_FARGROUND 2  the decals were stamped once into a page a cell (premultiplied: ground x (1 - a) + rgb)
+ *   WW_FARGROUND 3  lane FARPAGES1: layers + decals painted once into a BC1 page a cell (cell_fgpage + cell_fgbc1)
  * The stamp (cell_fgstamp.frag) defines WW_FG_STAMP and runs option 1's walk into the pages. */
 
 uniform int fgMode;				// 0 = the sheet (the twin's uniforms not set), else the live ground
@@ -20,6 +21,12 @@ uniform vec4 fgBinN;			// bins x, y, the bins' first texel, the ids' first texel
 #endif
 #if !defined( WW_FG_STAMP ) && WW_FARGROUND == 2
 uniform sampler2DArray fgPages;
+#endif
+#if !defined( WW_FG_STAMP ) && WW_FARGROUND == 3
+// lane FARPAGES1: one page a cell holds layers + decals (BC1); r = pool (0 none, 1 near, 2 far), g = layer, b = fade
+uniform usampler2D fgCells;
+uniform sampler2DArray fgPagesN;
+uniform sampler2DArray fgPagesF;
 #endif
 
 vec3 fgQrot( vec4 q, vec3 v )
@@ -91,6 +98,21 @@ vec3 fgGround( vec3 w, vec3 sheet )
 {
 	if ( fgMode == 0 )
 		return sheet;
+#if WW_FARGROUND == 3
+	// no splat and no decal walk a frame: the cell's page, faded in over the sheet
+	vec2 rel = ( w.xy - fgGridMap.xy ) / 4096.0;
+	vec2 rdx = dFdx( rel ), rdy = dFdy( rel );
+	ivec2 cn = textureSize( fgCells, 0 );
+	ivec2 ci = ivec2( floor( rel ) );
+	if ( ci.x < 0 || ci.y < 0 || ci.x >= cn.x || ci.y >= cn.y )
+		return sheet;
+	uvec4 c = texelFetch( fgCells, ci, 0 );
+	if ( c.r == 0u || c.b == 0u )
+		return sheet;
+	vec3 uvl = vec3( rel - vec2( ci ), float( c.g ) );
+	vec3 page = c.r == 1u ? textureGrad( fgPagesN, uvl, rdx, rdy ).rgb : textureGrad( fgPagesF, uvl, rdx, rdy ).rgb;
+	return mix( sheet, page, float( c.b ) / 255.0 );
+#else
 	vec2 wdx = dFdx( w.xy ), wdy = dFdy( w.xy );
 	vec3 col = fgSplat( w.xy, wdx, wdy );
 	if ( fgDecalsOn == 0 )
@@ -109,5 +131,6 @@ vec3 fgGround( vec3 w, vec3 sheet )
 		d = textureGrad( fgPages, vec3( rel - cell, float( pg ) ), wdx / 4096.0, wdy / 4096.0 );
 #endif
 	return col * ( 1.0 - d.a ) + d.rgb;
+#endif
 }
 #endif

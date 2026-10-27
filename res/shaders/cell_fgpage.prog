@@ -1,0 +1,4 @@
+# lane FARPAGES1: a far ground page -- the live layers and the decals of one ring-0 cell, painted once
+# (src/gl/cellfarground.cpp). No conditions: selected by name.
+
+shaders cell_ao.vert cell_fgpage.frag

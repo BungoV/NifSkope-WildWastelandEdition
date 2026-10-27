@@ -3,6 +3,7 @@
 
 #include "gl/celllights.h"
 #include "gl/cellbindless.h"	// lane BINDLESS2
+#include "gl/cellfarground.h"
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellcull.h"	// lane SUNCELL1
@@ -455,6 +456,10 @@ void BSShape::drawShapes( NodeList * secondPass )
 		glDepthFunc( GL_ALWAYS );
 	}
 
+	// lane FARPAGES1: ring 0's ground draws, every Far ground option (the judge compares the total)
+	const bool fgZone = !selectionFlags && CellFarGround::ring0( nif, id() );
+	if ( fgZone )
+		PassTime::subBegin( PassTime::FarGroundDraw );
 	const bool singleSample = !wwCellHdrActive() && glIsEnabled( GL_BLEND ) && glIsEnabled( GL_MULTISAMPLE );	// lane PERF1: the cheap test first
 	if ( singleSample )
 		glDisable( GL_MULTISAMPLE );
@@ -567,6 +572,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 	WwBl::poolEnd( context->fn );	// lane BINDLESS2: the shape's own vertex array again
 	if ( singleSample )
 		glEnable( GL_MULTISAMPLE );
+	if ( fgZone )
+		PassTime::subEnd( PassTime::FarGroundDraw );
 	if ( vpFx & 2 )
 		glDepthFunc( GLenum( vpPrevDepth ) );
 	if ( ( vpFx & 1 ) && numTriangles > 0 && !hiddenT ) {

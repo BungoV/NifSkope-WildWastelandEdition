@@ -868,7 +868,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			&& p->name != std::string_view( "fo4_csm.prog" ) && p->name != std::string_view( "fo4_fogcsm.prog" )
 			&& p->name != std::string_view( "fo4_cellbl.prog" ) && p->name != std::string_view( "fo4_cellcsmbl.prog" )
 			&& p->name != std::string_view( "fo4_cellfgl.prog" ) && p->name != std::string_view( "fo4_cellfgc.prog" )	// lane FARDRAW1
-			&& p->name != std::string_view( "fo4_cellcsmfgl.prog" ) && p->name != std::string_view( "fo4_cellcsmfgc.prog" ) )
+			&& p->name != std::string_view( "fo4_cellcsmfgl.prog" ) && p->name != std::string_view( "fo4_cellcsmfgc.prog" )
+			&& p->name != std::string_view( "fo4_cellfgp.prog" ) && p->name != std::string_view( "fo4_cellcsmfgp.prog" ) )
 			return p;
 		// red fognoswap: never swap, so the legacy path cannot fog
 		// lane SKYA: the sky's aerial perspective reads the fog program too (with the Fog row off)
@@ -883,8 +884,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		const bool fgCsm = std::string_view( want ) == "fo4_cellcsm.prog";
 		bool fgTwin = false;	// MERGE1027: a far-ground twin draws as itself, never as a bindless twin
 		if ( fgCsm || std::string_view( want ) == "fo4_cell.prog" ) {
-			static const char * const kTwin[2][2] = { { "fo4_cellfgl.prog", "fo4_cellfgc.prog" },
-				{ "fo4_cellcsmfgl.prog", "fo4_cellcsmfgc.prog" } };
+			static const char * const kTwin[2][3] = { { "fo4_cellfgl.prog", "fo4_cellfgc.prog", "fo4_cellfgp.prog" },
+				{ "fo4_cellcsmfgl.prog", "fo4_cellcsmfgc.prog", "fo4_cellcsmfgp.prog" } };	// FARPAGES1: 3 = the BC1 pages
 			const int t = CellFarGround::twinFor( mesh->scene->nifModel, mesh->id() );
 			if ( t > 0 ) {
 				want = kTwin[fgCsm ? 1 : 0][t - 1];

@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FARPAGES1 (2026-10-26, branch farpages1-20261026): far ground cached pages the way shipped games do it
+
+- **One page a cell, layers and decals together:** "Live, cached pages" now paints each ring-0 cell's whole ground
+  (the four LTEX layers by weight, vertex colour, and the decals) once into a page, compressed to BC1 on the GPU
+  (cell_fgpage + cell_fgbc1, through a pixel buffer, GL 4.1). A cached cell draws with one page read and no splat or
+  decal walk (programs fo4_cellfgp / fo4_cellcsmfgp; the default programs are unchanged).
+- **Two page sizes by distance:** a near pool and a far pool, split where a page texel covers k screen pixels at the
+  view's own fov and height (k = 2 / 1 / 0.5 for Low / Medium / High). Far ground pages Low / Medium / High = near/far
+  sides 256/128, 512/256, 1024/512 px a cell; the pools are capped at 3.5 / 14 / 56 MB of BC1. Medium at fov 60:
+  9.33 MB (24 near + 128 far page slots); at any fov <= 13.92 MB. Ultra is gone (a pinned `ultra` reads as High).
+- **Repaint budget:** about 4 Medium near pages of texels a frame, nearest first, visible first; a cell with no page
+  shows Baked and fades to its page. The paint kit is freed after 240 idle frames. Notes line
+  `far ground pages: settled after N frames, M pages painted`.
+- GPU zones `far-ground-paint` and `far-ground-draw` (pass-time `| sub` lines) hold the page paint and ring 0's ground
+  draws for every option, so the pick compares the TOTAL ground cost. Reds `WW_CELL_FARGROUND_RED=oldpages`
+  (FARDRAW1's decal-only pages over the live splat) and `nocompress` (RGBA8 pools). Baked (default) and Live, shader
+  decals are unchanged.
+- Gates: tests/fgpages (VRAM from the code's own sizes + the scheduler), tests/spells/fgpages_gpu.py (page = live blend
+  + decals, BC1 within a reference encoder's error, through the real driver). Live pictures and the pick: notes/farpages1/hold.
+- Not yet: no border texels (a seam can show at cell edges under the far pool's minification).
+
 ## Lane FARDRAW1 (2026-10-26, branch fardraw1-20261026): the whole FO4CS far-LOD bake drawn, ring 0's ground live
 
 - **Every ring, every instance:** far object rings keep one GPU copy per base mesh plus a 64-byte row a placement,
