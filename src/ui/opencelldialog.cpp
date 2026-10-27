@@ -6,11 +6,11 @@ BSD License - see nifskope.h
 
 #include "opencelldialog.h"
 #include "wwswitch.h"	// lane CELLSPAWN1: WW_OPENCELL_RED=list, the shot harness
+#include "widgets/wwdropdown.h"	// lane OPENCELLFIX2: the dock's one dropdown
 
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
-#include <QComboBox>
 #include <QDateTime>
 #include <QDir>
 #include <QEvent>
@@ -19,11 +19,11 @@ BSD License - see nifskope.h
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
-#include <QPushButton>
 #include <QSettings>
 #include <QTimer>
 #include <QToolButton>
@@ -33,8 +33,6 @@ BSD License - see nifskope.h
 #include <algorithm>
 #include <limits>
 
-// src/ui/widgets/wwnumberfield.h: a selector styled as the number fields beside it (skill nifskope-ww-panel-style)
-void wwMatchFieldStyle( QWidget * selector );
 // src/wwskin.h: a section heading
 QLabel * wwHeading( const QString & text, QWidget * parent );
 
@@ -159,19 +157,7 @@ void OpenCellPicker::build()
 	orderRow->addWidget( orderEdit, 1 );
 	orderRow->addWidget( import );
 	g->addLayout( orderRow, row++, 1 );
-
-	label( g, tr( "Language" ) );
-	langCombo = new QComboBox( loPage );
-	langCombo->setObjectName( QStringLiteral( "OpenCellLanguage" ) );
-	langCombo->setEditable( true );   // the game's language codes; any other a mod ships can be typed
-	langCombo->setInsertPolicy( QComboBox::NoInsert );
-	langCombo->addItems( { QStringLiteral( "en" ), QStringLiteral( "de" ), QStringLiteral( "fr" ), QStringLiteral( "it" ),
-		QStringLiteral( "es" ), QStringLiteral( "pl" ), QStringLiteral( "ptbr" ), QStringLiteral( "ru" ),
-		QStringLiteral( "ja" ), QStringLiteral( "cn" ) } );
-	langCombo->setToolTip( tr( "Names of localized plugins come from Strings/<plugin>_<language>.STRINGS" ) );
-	langCombo->setCurrentText( openCellStringsLanguage() );
-	wwMatchFieldStyle( langCombo );
-	g->addWidget( langCombo, row++, 1 );
+	// lane OPENCELLFIX2 (bungo 10-27): no language box; the game's sLanguage picks the string tables
 	lo->addLayout( g );
 
 	auto * plHead = new QHBoxLayout;
@@ -199,9 +185,8 @@ void OpenCellPicker::build()
 	auto * cg = formGrid();
 	row = 0;
 	label( cg, tr( "Worldspace" ) );
-	worldCombo = new QComboBox( cellPage );
+	worldCombo = new WwDropdown( cellPage );	// OPENCELLFIX2: the Object Mode selector's look (note 7)
 	worldCombo->setObjectName( QStringLiteral( "OpenCellWorld" ) );
-	wwMatchFieldStyle( worldCombo );
 	cg->addWidget( worldCombo, row++, 1 );
 
 	// The block list's search bar: one field, a Filters menu beside it (src/nifskope.cpp, BlockListToolbar).
@@ -216,8 +201,7 @@ void OpenCellPicker::build()
 	searchRow->addWidget( filterEdit, 1 );
 	filterButton = new QToolButton( cellPage );
 	filterButton->setObjectName( QStringLiteral( "OpenCellFilters" ) );
-	filterButton->setPopupMode( QToolButton::InstantPopup );
-	filterButton->setAutoRaise( true );
+	WwDropdown::applyStyle( filterButton );
 	filterButton->setToolButtonStyle( Qt::ToolButtonTextOnly );
 	filterButton->setAccessibleName( tr( "Cell search filters" ) );
 	searchRow->addWidget( filterButton );
@@ -244,11 +228,10 @@ void OpenCellPicker::build()
 	xyEdit = new QLineEdit( cellPage );
 	xyEdit->setObjectName( QStringLiteral( "OpenCellXY" ) );
 	xyEdit->setPlaceholderText( QStringLiteral( "x, y" ) );
-	sizeCombo = new QComboBox( cellPage );
+	sizeCombo = new WwDropdown( cellPage );
 	sizeCombo->setObjectName( QStringLiteral( "OpenCellSize" ) );
 	for ( int n : { 1, 3, 5 } )
 		sizeCombo->addItem( QStringLiteral( "%1 x %1" ).arg( n ), n );
-	wwMatchFieldStyle( sizeCombo );
 	at->addWidget( xyEdit, 1 );
 	at->addWidget( new QLabel( tr( "Size" ), cellPage ) );
 	at->addWidget( sizeCombo );
@@ -260,13 +243,7 @@ void OpenCellPicker::build()
 	status->setWordWrap( true );
 	status->hide();
 	cl->addWidget( status );
-	auto * buttons = new QHBoxLayout;
-	buttons->addStretch( 1 );
-	openButton = new QPushButton( tr( "Open" ), cellPage );
-	openButton->setObjectName( QStringLiteral( "OpenCellOpen" ) );
-	openButton->setDefault( true );
-	buttons->addWidget( openButton );
-	cl->addLayout( buttons );
+	// lane OPENCELLFIX2 (bungo 10-27): no Open button; a double-click (or Enter) on a cell opens it
 
 	readTimer = new QTimer( this );
 	readTimer->setSingleShot( true );
@@ -292,24 +269,30 @@ void OpenCellPicker::build()
 		if ( QDir::cleanPath( dataEdit->text() ) != sources.dataDir )
 			setDataDir( dataEdit->text() );
 	} );
-	// lane OPENCELLFIX1: the language counts once picked or typed out, never per keystroke (it saved "e")
-	connect( langCombo, &QComboBox::activated, this, [this]( int i ) { setLanguage( langCombo->itemText( i ) ); } );
-	connect( langCombo->lineEdit(), &QLineEdit::editingFinished, this, [this]() { setLanguage( langCombo->currentText() ); } );
 	connect( pluginList, &QListWidget::itemChanged, this, &OpenCellPicker::pluginsChanged );
 	connect( pluginList->model(), &QAbstractItemModel::rowsMoved, this, &OpenCellPicker::pluginsChanged );
 	connect( readTimer, &QTimer::timeout, this, &OpenCellPicker::readNow );
-	connect( worldCombo, &QComboBox::currentIndexChanged, this, [this]() { fillCells(); saveSettings(); } );
+	connect( worldCombo, &WwDropdown::currentIndexChanged, this, [this]() { fillCells(); saveSettings(); } );
 	connect( filterEdit, &QLineEdit::textChanged, this, [this]() { searchTimer->start(); } );
 	connect( searchTimer, &QTimer::timeout, this, &OpenCellPicker::fillCells );
 	connect( cellTree->header(), &QHeaderView::sectionClicked, this, [this]( int col ) {
 		sortCells( col, col == sortColumn ? !sortDescending : false );
 	} );
 	connect( cellTree, &QTreeWidget::itemSelectionChanged, this, &OpenCellPicker::cellPicked );
-	connect( cellTree, &QTreeWidget::itemDoubleClicked, this, &OpenCellPicker::openClicked );
+	if ( wwEnvStr( "WW_OPENCELL_RED" ) != QLatin1String( "dblclick" ) ) {	// red: the double-click opens nothing
+		// the clicked row is made current first, so the cell opened is the one under the pointer
+		connect( cellTree, &QTreeWidget::itemDoubleClicked, this, [this]( QTreeWidgetItem * it ) {
+			if ( !it )
+				return;
+			if ( cellTree->currentItem() != it )
+				cellTree->setCurrentItem( it );
+			openClicked();
+		} );
+	}
 	connect( xyEdit, &QLineEdit::textChanged, this, [this]() { saveSettings(); } );
-	connect( sizeCombo, &QComboBox::currentIndexChanged, this, [this]() { saveSettings(); } );
-	connect( openButton, &QPushButton::clicked, this, &OpenCellPicker::openClicked );
+	connect( sizeCombo, &WwDropdown::currentIndexChanged, this, [this]() { saveSettings(); } );
 	cellPage->installEventFilter( this );
+	cellTree->installEventFilter( this );
 }
 
 bool OpenCellPicker::eventFilter( QObject * o, QEvent * e )
@@ -317,6 +300,13 @@ bool OpenCellPicker::eventFilter( QObject * o, QEvent * e )
 	// The catalog is read when the Cells page is first looked at, not at start: a full master takes seconds.
 	if ( o == cellPage && e->type() == QEvent::Show && readOwed )
 		readTimer->start( 0 );
+	if ( o == cellTree && e->type() == QEvent::KeyPress && cellTree->currentItem() ) {	// Enter opens, as the button did
+		const int k = static_cast<QKeyEvent *>( e )->key();
+		if ( k == Qt::Key_Return || k == Qt::Key_Enter ) {
+			openClicked();
+			return true;
+		}
+	}
 	return QWidget::eventFilter( o, e );
 }
 
@@ -495,22 +485,9 @@ void OpenCellPicker::setPluginsTicked( const QStringList & names )
 	pluginsChanged();
 }
 
-void OpenCellPicker::setLanguage( const QString & lang )
+QString OpenCellPicker::stringsLanguage() const
 {
-	const QString l = lang.trimmed();
-	if ( l.size() < 2 ) {	// lane OPENCELLFIX1: no game language is one letter; put the saved one back
-		QSignalBlocker b( langCombo );
-		langCombo->setCurrentText( openCellStringsLanguage() );
-		return;
-	}
-	if ( langCombo->currentText() != l ) {
-		QSignalBlocker b( langCombo );
-		langCombo->setCurrentText( l );
-	}
-	if ( l == openCellStringsLanguage() )
-		return;
-	openCellSetStringsLanguage( l );
-	pluginsChanged();
+	return openCellStringsLanguage( orderFile.isEmpty() ? QString() : QFileInfo( orderFile ).absolutePath() );
 }
 
 bool OpenCellPicker::importLoadOrder( const QString & pluginsTxt )
@@ -608,6 +585,7 @@ void OpenCellPicker::readNow()
 		QApplication::setOverrideCursor( Qt::WaitCursor );   // a full master takes seconds to index
 		OpenCellReadOptions opt;
 		opt.dataDir = sources.dataDir;
+		opt.lang = stringsLanguage();	// the profile's own inis first, as the game reads them
 		openCellReadCatalog( loadOrderPaths(), catalog, &err, opt );
 		QApplication::restoreOverrideCursor();
 	}
@@ -620,7 +598,7 @@ void OpenCellPicker::readNow()
 		setStatus( tr( "%n master(s) added", nullptr, added ) );
 	else if ( !catalog.noStrings.isEmpty() )
 		setStatus( tr( "No %1 strings for %2: names stay blank" )
-			.arg( openCellStringsLanguage(), catalog.noStrings.join( QStringLiteral( ", " ) ) ) );
+			.arg( stringsLanguage(), catalog.noStrings.join( QStringLiteral( ", " ) ) ) );
 	else
 		setStatus( QString() );
 	// the filter's plugin is kept by name while it is still in the load order

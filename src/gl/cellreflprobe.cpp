@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "cellreflprobe.h"
 #include "cellunits.h"
 #include "wwswitch.h"	// fix TDFIX2: a live set re-reads the switches
+#include "gl/celllooks.h"	// lane OPENCELLFIX2: the Reflections master
 
 #include "gl/celllights.h"
 #include "gl/cellssr.h"
@@ -303,7 +304,7 @@ bool inFace( int face, const float rel[3], float rad )
 
 bool wwCellReflProbeOn()
 {
-	return rps().on;
+	return rps().on && ( rps().pinOn || wwGroupLets( WwGroup::Reflections ) );	// lane OPENCELLFIX2: the group's master
 }
 
 void wwCellReflProbeSetOn( bool on )

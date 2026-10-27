@@ -106,6 +106,7 @@ See the LICENSE.md file for the full license text.
 #include "gl/gltools.h"
 #include "spells/blocks.h"
 #include "cellspawn.h"	// lane CELLSPAWN1
+int cellStreamWalkCli( const QStringList & args );	// lane CELLSPIKE2: src/cellstreamwalk.cpp
 class QWidget;
 QModelIndex tlCreateCollisionBody( NifModel * nif, const QModelIndex & targetNode );
 QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
@@ -8104,6 +8105,14 @@ int nifskopeCliMain( const QStringList & args )
 	// lane CELLSPAWN1: where a cell's camera starts, and the eye-height check (src/cellspawn.cpp)
 	if ( cmd == QLatin1String( "cellspawn" ) ) {
 		const int rc = cellSpawnCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// lane CELLSPIKE2: the cell stream's walk with no window, its worst crossing frame against the bar
+	if ( cmd == QLatin1String( "streamwalk" ) ) {
+		if ( !initModelLayer() ) { err().flush(); return 1; }
+		const int rc = cellStreamWalkCli( a );
 		out().flush();
 		err().flush();
 		return rc;

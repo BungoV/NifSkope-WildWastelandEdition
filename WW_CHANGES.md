@@ -23,6 +23,125 @@
   both change the picture; the header with forget() disabled prints CELLUNI FAIL.
 - **Cost:** 0 GPU ms, no shader change; under 1 MB CPU (one 20-byte slot per uniform location per program).
 
+## Lane STREAMMEM1 (2026-10-27, branch streammem1-20261027): streamed-out cells give their meshes back
+
+- **Why:** the stream walk's memory check (d) failed at x1.19 (11788 -> 14060 MB private over 20 crossings, bar 5%).
+  The walk's dump showed textures, scene nodes and properties back at their start figures. The geometry cache did not
+  return: 386 -> 1043 MB on the card, and 3537 -> 8119 cached meshes for 3882 in the scene. The cache only drops a
+  mesh after about 1800 undrawn paints, and STREAM1 gave it a 1.5 GB budget, so the meshes of every cell that
+  left (and every old far-mask copy, FARHOLE2) stayed for most of the walk. The driver keeps its pool at that high
+  mark, so private memory does not fall back afterwards.
+- **Fix:** while a document streams, the view frees cached meshes by the texture rule: undrawn for the keep and not
+  drawn by the last 3 paints, checked every 2 s (`NifSkopeOpenGLContext::evictUndrawnSince`, `src/gl/geokeepclock.h`).
+  Nothing a paint draws is freed, so the picture does not change; a mesh that comes back into view is uploaded again.
+  The 1.5 GB budget (`WW_GEOCACHE_MB`) stays as the named upper bound.
+- **Knob:** `WW_CELL_STREAM_GEOKEEP=<s>` (default: the texture keep, 5; 0 = the cache's own rule; at most 60). The
+  walk's dump line adds `geoEvicted`, and the step linger waits for the longer of the two keeps.
+- **Red:** `WW_STREAM1_RED=geokeep` keeps the old rule (the memory growth).
+- **Also:** the GPU cull's learned table (`gl/cellgpucull.cpp`) drops shapes unseen for 600 frames. A lookup needs a
+  shape seen within 2 frames, so nothing drawn changes, and a new shape at a freed address no longer inherits
+  stale state.
+- **Offline proof:** `tests/streammem` uses the real driver, a copy of the cache's list and rules, and the view's real
+  clock. Over 20 crossings out and back, green goes 763 -> 795 MB private (x1.042, no mesh of the last paint
+  uploaded again). The red goes 759 -> 2073 MB (x2.73) and FAILs.
+
+## Lane CELLSPIKE2 (2026-10-27, branch cellspike2-20261027): a cell unload no longer walks the whole scene
+
+- **Why:** MERGE1027's walk had one 81.5 ms crossing frame, all of it one cell unload (step 1, 5 unloads). When the
+  view makes the scene again (GLView modelChanged), the stream forgets each attached cell's scene nodes, and every
+  later unload then walked every scene node (`getBlockNumber` per node) to find its own. The first walk in a big
+  window touches cold memory.
+- **Fix (`Stream::resolve`):** right after a scene remake the attached cells' nodes are found again in ONE pass over
+  the new scene (about 1.3 ms for 3208 blocks offline), so an unload never walks the scene. Nothing else changes.
+- **Instrument:** the unload parts carry `wuScanned` (scene nodes walked), the stats carry `scannedNodes`, and the
+  GUI dump line prints the stages of the dearest frame and unload. Trace line `resolve: N cell node blocks found again`.
+- **Offline harness:** `NifSkope -no-gui streamwalk <path file> [--bar ms] [--dump file] [--trim] [--remake k]` walks
+  the stream with no window (WW_CELL_OPEN names the open) and prints one line a step and a verdict; `--remake k` makes
+  the scene again before step k, `--trim` pages the process out before each step.
+- **Red:** `WW_CELL_UNLOAD_RED=1` keeps the old per-unload scene walk. Live (read at each scene remake).
+
+## Lane OPENCELLFIX2 (2026-10-27, branch opencellfix2-20261027): the Cell dock's Display tab, presets and one dropdown
+
+- **Load order tab:** the language box is gone. The strings language is the game's `[General] sLanguage` from
+  Fallout4.ini, Fallout4Prefs.ini and Fallout4Custom.ini (a later file wins; an MO2 profile's own inis first; default en).
+  A plugin with no table for that language reads the en tables, so a bad saved value never blanks the names.
+- **Cells tab:** a double-click (or Enter) opens the cell; the Open button is gone.
+- **Display tab** (was Show): one row per feature with a tick, and a dropdown on the same row when the feature has
+  settings. Quality dropdowns are Low / Medium / High / Ultra. Extra number rows fold under the row. The rows sit in the
+  groups Editor, Vanilla and Fusion Shaders. The Show menu's actions stay the only truth (a tick calls `trigger()`), so
+  every change is live, and the WW_* keys and switch names are unchanged.
+- **Presets:** every saved Display state is a button at the top, in the Block List strip's segmented look, wrapping
+  onto more lines. One click applies it live, and the active one is highlighted. "+" saves the current state under a
+  typed name; right-click a preset for Save (overwrite), Rename and Delete. With no presets the strip is "+" alone.
+  They are kept in QSettings (`CellEditor/DisplayPresets`).
+- **Rows (round 2):** a row's dropdown sits right-aligned on the tick row, as tall as the tick, so every row has one
+  height. The fold arrow is the first thing on the row ("> [ ] Bloom"); rows with nothing to fold keep its width empty,
+  and the separate "... settings" rows are gone. "GI" reads "Precomputed Radiance Transfer", "SSGI" reads
+  "Screen-Space Global Illumination", "SSR" and "SSR outdoors" read "Screen-Space Reflections" and
+  "Screen-Space Reflections outdoors", "Lamp shadows" reads "Cached lamp shadows" (labels only), and "Debug view" (the old Far light mode, same switch) folds under
+  Precomputed Radiance Transfer; Far light is a plain tick.
+- **One dropdown:** `src/ui/widgets/wwdropdown.*` (WwDropdown) is the toolbar's Object Mode selector, text only. Every
+  dock dropdown and the mode button use `WwDropdown::applyStyle`.
+- **Removed:** the "Show" button to the right of the Color row.
+- **Groups (round 3):** every group is one row (fold arrow, tick, name) with its rows indented in its fold; all folds
+  start closed. Groups run by kind -- lighting, reflections, air, water, distance, surfaces, image, content -- then the
+  plain rows. A group headed by a feature's own tick (Cell lights in Vanilla, Precomputed Radiance Transfer, Improved
+  Volumetric Fog = Volumetric Air, LOD = Far LOD, Improved Temporal Anti-Aliasing, Bloom, Ambient Occlusion,
+  Screen-Space Reflections in Vanilla) has no new key. New masters (`gl/celllooks.h` WwGroup, ship on): Improved Lights
+  (`WW/CellImprovedLights`), Cell lights, Shadows, Emittance, Screen-Space Reflections (probes), Improved Sky, Improved
+  Water, Decals, Camera, Objects (`WW/CellGroup*`); Shadows, Camera and Bloom have a Vanilla master too. A master off
+  reads its rows off and keeps their own keys; an env pin still wins. Red `WW_CELLGROUP_RED=<name>`.
+- **Screen-Space Reflections** is one tick for indoors and outdoors (both keys; red `WW_CELLGROUP_RED=ssr`).
+- **Scene window:** full names (Temporal Anti-Aliasing, Improved Temporal Anti-Aliasing, Screen-Space Shadows,
+  Fusion Shaders Shadow Rules, Screen-Space Ambient Occlusion, Screen-Space Global Illumination, Bloom Fusion Shaders).
+  Its fog and shadow rows and the Display rows are one state, each following the other live (red
+  `WW_CELLSHOW_RED=livebind`).
+- **Ambient Occlusion** (merges lane SSAO2): the row's method dropdown inline -- Vanilla Screen-Space Ambient
+  Occlusion, Ground Truth Ambient Occlusion, Intel Xe Ground Truth Ambient Occlusion, Horizon-Based Ambient Occlusion
+  Plus (`WW/CellAoMethod`), greyed on the `WW_CELL_AO_METHOD` pin.
+- **Round 4:** fold arrows draw no frame when open, pressed or hovered (red `WW_CELLSHOW_RED=arrowframe`). A row's
+  dropdown (quality levels, method, source, Color) is now the first row of the row's fold, on the left where a
+  child row's tick starts; a row that only had a dropdown now has a fold arrow (red `dropright`). A choice inside a
+  fold has its dropdown on the left with its name after it. Long names are cut short with "..." in the closed box,
+  so the dropdown fits the panel; the list shows the full names (red `WW_DROPDOWN_RED=fit`). The Vanilla label
+  reads "Temporal Anti-Aliasing".
+- **Round 4 greying:** a Vanilla row is greyed while a Fusion Shaders row replaces it, and comes back when that row
+  is turned off. The tick keeps its value. Field `WwDisplayRow::overriddenBy`; red `override`. The only case the
+  code shows is Temporal Anti-Aliasing, which is replaced by Improved Temporal Anti-Aliasing at any level above Off
+  (gl/gametaa.cpp: `modern = s.taa2 > 0` skips the game resolve).
+- **Round 4 presets:** the Preset row is back and always shown: label, dropdown, Next, Save, Rename, Delete. The
+  dropdown lists the built-in presets Low / Medium / High / Ultra first, then the user's own. Built-in presets
+  change only the Fusion Shaders rows:
+  - Ultra, High and Medium turn every row on at that level.
+  - Low uses Low levels and turns the heavy rows off (`WwDisplayRow::heavy`: Precomputed Radiance Transfer,
+    Screen-Space Global Illumination, Volumetric Air, Far air, Particles).
+  - A built-in preset cannot be saved over, renamed or deleted.
+  - After a change by hand, the dropdown reads "Custom" (snapshot `CellEditor/DisplayPresetState`).
+  - Reds: `builtin`, `presetbar`.
+- **Tests:** tests/opencell, tests/cellshow and tests/cellgroups, with new rows in the in-app Cell workspace test. Reds:
+  `WW_OPENCELL_RED=lang|dblclick`, `WW_CELLSHOW_RED=ticks|groups|dropdown|presets|presetbar|inline|foldrows|showbutton|nest|livebind`,
+  `WW_CELLGROUP_RED=<group>|ssr`, `WW_DROPDOWN_RED=1`.
+
+## Lane SSAO2 (2026-10-27, branch ssao2-20261027): three more Ambient Occlusion methods, chosen in the Show menu
+
+- **Row:** "AO" is now "Ambient Occlusion", and a new "Ambient Occlusion method" menu sits under it. Its four
+  choices, in order: Vanilla Screen-Space Ambient Occlusion (the default; lane AO1's port of the game's own, unchanged),
+  Ground Truth Ambient Occlusion, Intel Xe Ground Truth Ambient Occlusion, Horizon-Based Ambient Occlusion Plus.
+- **Methods:** `res/shaders/cell_aox.frag` (+ `cell_aox_xe.glsl`, Intel's MIT licence kept) ports the FO4 Community
+  Shaders' GTAO, XeGTAO and HBAO+ passes to GLSL. They run at full resolution over lane AO1's opaque pass:
+  - a working depth pyramid (mip 0 the linear depth, 1-4 the FO4CS depth mip filter);
+  - the method's main pass, stored as 8 bits like FO4CS;
+  - its denoise (GTAO/HBAO+: two bilateral passes; XeGTAO: its edge-aware denoise, then one bilateral pass).
+  The FO4CS defaults: radius 38.4 units, falloff 0.615, intensity 1, power 1.5, 9 slices x 3 steps, denoise radius
+  2 sigma 0.08, XeGTAO blur beta 1.2. The cell programs read the result through the same `cellAo` sampler, so nothing
+  that consumes the term changed. `src/gl/cellaomethod.h` holds the stage order and the names.
+- **Switch:** `WW_CELL_AO_METHOD=vanilla|gtao|xegtao|hbao` (pin; else `WW/CellAoMethod`), live (stage 0).
+  Reds: `WW_CELL_AO_METHOD_RED=vanilla` (the method runs, vanilla's term is bound), `=raw` (no bilateral denoise).
+  `WW_CELL_AO_DUMP` writes `<file>.aox` (W H, the bound term) for a ported method.
+- **SSR:** the opaque pass and depth pyramid run whenever Screen-Space Reflections are on, whatever the Ambient Occlusion
+  row or method (the code already did since AOOFF1; the cellssr.h note said otherwise). The keep rule is now
+  `wwAoSharedPassRuns` (tests/aomethod). Red: `WW_CELL_AO_SSR_RED=old` (AO off leaves SSR no pass).
+- **Default:** vanilla runs the same passes in the same order as before, so the default picture does not change.
 ## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
 
 - **Why:** the far objects, far cards and far rings past ring 0 were cut once, round the open's centre. The stream

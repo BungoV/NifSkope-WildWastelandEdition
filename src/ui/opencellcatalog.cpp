@@ -404,15 +404,56 @@ OpenCellStrings openCellLoadStrings( const QString & pluginPath, const QString &
 	return out;
 }
 
-QString openCellStringsLanguage()
+/* lane OPENCELLFIX2 (bungo 10-27): the language box is gone; the game's own sLanguage says which tables to read, as
+ * the game does. A saved "e" made every localized name blank; nothing saved is read now. */
+static bool isGameLanguage( const QString & l )
 {
-	const QString l = QSettings().value( settingsKey( "Language" ) ).toString().trimmed();
-	return l.isEmpty() ? QStringLiteral( "en" ) : l;
+	if ( l.size() < 2 || l.size() > 6 )
+		return false;
+	for ( QChar c : l )
+		if ( c < QLatin1Char( 'a' ) || c > QLatin1Char( 'z' ) )
+			return false;
+	return true;
 }
 
-void openCellSetStringsLanguage( const QString & lang )
+QString openCellStringsLanguage( const QString & profileDir )
 {
-	QSettings().setValue( settingsKey( "Language" ), lang.trimmed() );
+	if ( wwEnvStr( "WW_OPENCELL_RED" ) == QLatin1String( "lang" ) ) {	// red: the old reader, the saved box value
+		const QString l = QSettings().value( settingsKey( "Language" ) ).toString().trimmed();
+		return l.isEmpty() ? QStringLiteral( "en" ) : l;
+	}
+	QString myGames = wwEnvStr( "WW_MODPICK_MYGAMES" );	// the same fixture the mod picker reads
+	if ( myGames.isEmpty() )
+		myGames = QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) + QStringLiteral( "/My Games/Fallout4" );
+	QStringList inis;
+	for ( const QString & dir : { profileDir, myGames } ) {	// an MO2 profile's own inis win, as in the game
+		if ( dir.isEmpty() )
+			continue;
+		const QStringList set{ dir + QStringLiteral( "/Fallout4.ini" ), dir + QStringLiteral( "/Fallout4Prefs.ini" ),
+			dir + QStringLiteral( "/Fallout4Custom.ini" ) };
+		if ( QFileInfo( set.at( 0 ) ).isFile() || QFileInfo( set.at( 2 ) ).isFile() ) {
+			inis = set;
+			break;
+		}
+	}
+	QString lang;
+	for ( const QString & ini : inis ) {	// a later ini overrides
+		QFile f( ini );
+		if ( !f.open( QIODevice::ReadOnly | QIODevice::Text ) )
+			continue;
+		bool general = false;
+		for ( const QByteArray & raw : f.readAll().split( '\n' ) ) {
+			const QString l = QString::fromLatin1( raw ).trimmed();
+			if ( l.startsWith( QLatin1Char( '[' ) ) ) {
+				general = l.compare( QLatin1String( "[General]" ), Qt::CaseInsensitive ) == 0;
+				continue;
+			}
+			const int eq = l.indexOf( QLatin1Char( '=' ) );
+			if ( general && eq > 0 && l.left( eq ).trimmed().compare( QLatin1String( "sLanguage" ), Qt::CaseInsensitive ) == 0 )
+				lang = l.mid( eq + 1 ).trimmed().toLower();
+		}
+	}
+	return isGameLanguage( lang ) ? lang : QStringLiteral( "en" );
 }
 
 quint32 openCellShownForm( quint32 form, int ownerFile, const QVector<bool> & light )
@@ -441,6 +482,8 @@ bool openCellReadCatalog( const QStringList & paths, OpenCellCatalog & out, QStr
 		bool found = false;
 		if ( localized[i] )
 			tables[i] = openCellLoadStrings( paths[i], lang, opt.dataDir, &found );
+		if ( localized[i] && !found && lang != QLatin1String( "en" ) && wwEnvStr( "WW_OPENCELL_RED" ) != QLatin1String( "lang" ) )
+			tables[i] = openCellLoadStrings( paths[i], QStringLiteral( "en" ), opt.dataDir, &found );	// OPENCELLFIX2: names show
 		if ( localized[i] && !found )
 			out.noStrings.append( QFileInfo( paths[i] ).fileName() );
 	}

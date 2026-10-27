@@ -21,6 +21,8 @@ BSD License - see nifskope.h
 
 #include "cellworkspace.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "ui/cellshowpanel.h"	// lane OPENCELLFIX2: the Display tab's groups and leftovers
+#include "ui/widgets/wwdropdown.h"
 
 #include "cellclick.h"
 #include "celldoorlive.h"	// lane DOORLIVE1: the door: step
@@ -460,10 +462,10 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		const QStringList want = {
 			"World/Cell borders", "World/Ground", "World/Water", "World/Markers", "World/Disabled references",
 			"World/Grass", "World/Particles", "World/Previs", "World/Culling", "World/Far LOD", "World/Far LOD source",
-			"Lighting/Cell lights", "Lighting/GI", "Lighting/Sky visibility", "Lighting/Far light", "Lighting/Far light mode",
-			"Lighting/Light shadows", "Lighting/AO", "Lighting/AO decals", "Lighting/GPU relight",
-			"Effects/Imagespace", "Effects/Temporal AA", "Effects/Modern temporal AA", "Effects/Modern temporal AA before tone map", "Effects/SSR", "Effects/SSR outdoors",
-			"Effects/Depth of field", "Effects/Motion blur", "Effects/Bloom" };
+			"Lighting/Cell lights", "Lighting/Precomputed Radiance Transfer", "Lighting/Sky visibility", "Lighting/Far light", "Lighting/Debug view",
+			"Lighting/Light shadows", "Lighting/Ambient Occlusion", "Lighting/Ambient Occlusion method", "Lighting/Ambient occlusion decals", "Lighting/GPU relight",
+			"Effects/Imagespace", "Effects/Temporal AA", "Effects/Improved Temporal Anti-Aliasing", "Effects/Before tone map", "Effects/Screen-Space Reflections",
+			"Effects/Depth of field", "Effects/Motion blur", "Effects/Bloom", "Effects/Groups" };	// OPENCELLFIX2 notes 19, 20, 18
 		add( "SHOWMENU1: the Show dropdown holds every viewport switch in its section, in order",
 			layout == want, layout.join( QLatin1Char( '|' ) ) );
 		int waters = 0, boxes = 0;
@@ -478,6 +480,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 					&& !w->objectName().startsWith( QLatin1String( "CellModPick" ) )
 					// lane OPENCELLFIX1: the Show tab's boxes drive the menu's actions; the picker's are the Cells tab's
 					&& !w->objectName().startsWith( QLatin1String( "CellShowTab_" ) )
+					&& !w->objectName().startsWith( QLatin1String( "CellDisplay" ) )	// OPENCELLFIX2: the Display tab's ticks
 					&& !w->objectName().startsWith( QLatin1String( "OpenCell" ) ) )
 					boxes++;
 		add( "SHOWMENU1: Water is one switch", waters == 1, QString::number( waters ) );
@@ -487,7 +490,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		QStringList srcItems;
 		for ( QAction * a : src ? src->actions() : QList<QAction *>() )
 			srcItems << a->text() + ( a->isChecked() ? QStringLiteral( "*" ) : QString() );
-		add( "SHOWMENU1: Far LOD source is a submenu of Vanilla and FO4CS, one ticked",
+		add( "SHOWMENU1: LOD source is a submenu of Vanilla and Fusion Shaders, one ticked",
 			srcItems.size() == 2 && srcItems.filter( QLatin1String( "*" ) ).size() == 1,
 			srcItems.join( QLatin1Char( '|' ) ) );
 		// lane BLOOM1b: Bloom is a submenu of Vanilla and FO4CS (one ticked), its eight rows and the glare tick
@@ -514,8 +517,8 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		QStringList names;
 		for ( int i = 0; i < tb->count(); i++ )
 			names << tb->tabText( i );
-		add( "OPENCELLFIX1: the Cell dock's tabs are Load order, Cells, References, Show",
-			names == QStringList{ "Load order", "Cells", "References", "Show" }, names.join( QLatin1Char( '|' ) ) );
+		add( "OPENCELLFIX2: the Cell dock's tabs are Load order, Cells, References, Display",
+			names == QStringList{ "Load order", "Cells", "References", "Display" }, names.join( QLatin1Char( '|' ) ) );
 		const QString was = panel ? panel->currentTab() : QString();
 		if ( panel )
 			panel->setCurrentTab( QStringLiteral( "show" ) );
@@ -525,8 +528,32 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		int shown = 0;
 		if ( panel && panel->showTabPanel() )
 			for ( QAbstractButton * b : panel->showTabPanel()->findChildren<QAbstractButton *>() )
-				shown += b->objectName().startsWith( QLatin1String( "CellShowTab_" ) );
-		add( "OPENCELLFIX1: the Show tab holds a box per Show row", shown >= 20, QString::number( shown ) );
+				shown += b->objectName().startsWith( QLatin1String( "CellDisplayTick_" ) );
+		add( "OPENCELLFIX2: the Display tab holds a tick per feature", shown >= 20, QString::number( shown ) );
+		/* lane OPENCELLFIX2 notes 5, 7, 8: the three groups, every menu row reached, no Show button by Color, and
+		 * every dock dropdown is the toolbar's Object Mode selector. Reds: WW_CELLSHOW_RED=showbutton|groups, WW_DROPDOWN_RED=1. */
+		QStringList groups;
+		for ( const QString & g : wwDisplayGroups() )
+			if ( panel && panel->showTabPanel()
+				&& panel->showTabPanel()->findChild<QWidget *>( QStringLiteral( "CellShowBody_" ) + QString( g ).remove( QLatin1Char( ' ' ) ) ) )
+				groups << g;
+		add( "OPENCELLFIX2: the Display groups are Editor, Vanilla, Fusion Shaders",
+			groups == QStringList{ "Editor", "Vanilla", "Fusion Shaders" }, groups.join( QLatin1Char( '|' ) ) );
+		const int left = panel ? wwDisplayLeftovers( panel->showTabPanel() ) : -1;
+		add( "OPENCELLFIX2: every Show-menu tick has its named Display row", left == 0, QString::number( left ) );
+		add( "OPENCELLFIX2: no Show button beside Color",
+			!dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceShowButton" ) ) );
+		add( "OPENCELLFIX2: no plain combo box in the Cell dock", dCell->findChildren<QComboBox *>().isEmpty(),
+			QString::number( dCell->findChildren<QComboBox *>().size() ) );
+		QWidget * mode = skope->findChild<QWidget *>( QStringLiteral( "ViewportModeButton" ) );
+		int drops = 0, same = 0;
+		for ( WwDropdown * d : dCell->findChildren<WwDropdown *>() ) {
+			drops++;
+			same += mode && WwDropdown::hasStyle( d ) && d->styleSheet() == mode->styleSheet();
+		}
+		add( "OPENCELLFIX2: every dock dropdown has the Object Mode selector's look",
+			mode && WwDropdown::hasStyle( mode ) && drops >= 4 && same == drops,
+			QStringLiteral( "%1 of %2" ).arg( same ).arg( drops ) );
 		if ( panel )
 			panel->setCurrentTab( was );
 	} else {
@@ -744,6 +771,8 @@ void smNext()
 	} else if ( step == QLatin1String( "menu" ) ) {
 		QMenu * m = smMenu();
 		QWidget * button = g_sm.skope->findChild<QWidget *>( QStringLiteral( "CellWorkspaceShowButton" ) );
+		if ( !button )	// OPENCELLFIX2: the button is gone (the Display tab); pop the menu at the dock
+			button = g_sm.skope->findChild<QDockWidget *>( QStringLiteral( "CellWorkspaceDock" ) );
 		if ( !m || !button ) {
 			smNote( QStringLiteral( "no Show menu" ) );
 			smNext();

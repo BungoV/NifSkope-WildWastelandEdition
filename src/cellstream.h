@@ -22,6 +22,7 @@
  *   WW_CELL_STREAM_ROAM=<cells>    how far from the open's centre the far ring 0 is built uncut (default 4)
  *   WW_CELL_STREAM_DUMP=<file>     one line a step: loaded vs expected, slice / frame ms, private bytes, coverage
  *   WW_CELL_STREAM_RED=nounload    cells that leave the block stay (the memory gate's red)
+ *   WW_STREAM1_RED=geokeep         lane STREAMMEM1: undrawn cached meshes stay ~1800 paints (the old memory growth)
  *                     =nohandover  the far ring-0 ground stays under loaded cells (the far-LOD gate's red)
  */
 
@@ -132,6 +133,11 @@ bool cellStreamBusy( const NifModel * nif );
 bool cellStreamOn( const NifModel * nif );
 //! lane CELLSTREAM1: seconds a file texture stays loaded unbound while streaming (WW_CELL_STREAM_TEXKEEP, 0 = kept)
 int cellStreamTexKeepSec();
+//! lane STREAMMEM1: seconds a cached mesh stays undrawn while streaming (WW_CELL_STREAM_GEOKEEP, default the texture
+//! keep, 0 = the cache's own rule, at most 60)
+int cellStreamGeoKeepSec();
+//! lane STREAMMEM1: cached meshes the view freed after they went undrawn (counted in the stats)
+void cellStreamCountGeoEvicted( const NifModel * nif, int n );
 //! lane CELLSTREAM1: file textures the view freed after they went unused (counted in the stats)
 void cellStreamCountEvicted( const NifModel * nif, int n );
 
@@ -147,9 +153,12 @@ struct CellStreamStats
 	double tickMaxMs = 0, sliceMaxMs = 0, unloadMaxMs = 0, drainMaxMs = 0, rebuildMaxMs = 0, buildMaxMs = 0;
 	int persistent = 0, sceneNodes = 0, sceneProps = 0, sceneShapes = 0;   //!< lane CELLSTREAM1: leak watch
 	qint64 texEvicted = 0;
+	qint64 geoEvicted = 0;   //!< lane STREAMMEM1
 	double buryMaxMs = 0;   //!< worst frame of freeing a left cell's scene nodes
 	qint64 quietResets = 0, loudResets = 0;   //!< freed blocks reset without / with row signals
 	QString persistentTop;              //!< the block types holding the most persistent indexes
+	QString worstTick, worstUnload;     //!< lane CELLSPIKE2: the stages of the dearest frame and unload
+	qint64 scannedNodes = 0;            //!< lane CELLSPIKE2: scene nodes unloads walked to find their own (since reset)
 	QString lastError;
 };
 CellStreamStats cellStreamStats( const NifModel * nif, bool resetMaxima );

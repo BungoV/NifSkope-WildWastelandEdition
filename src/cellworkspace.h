@@ -24,7 +24,7 @@ class QMenu;
 class QCheckBox;
 class QPushButton;
 class QToolButton;
-class QComboBox;
+class WwDropdown;
 class QLabel;
 class QLineEdit;
 class QStackedWidget;
@@ -204,9 +204,9 @@ private:
 	bool syncing = false;        //!< a selection we caused; do not echo it back
 
 	QLineEdit * filterText = nullptr;
-	QComboBox * filterType = nullptr;
+	WwDropdown * filterType = nullptr;	// lane OPENCELLFIX2: the dock's one dropdown
 	QTreeWidget * list = nullptr;
-	QComboBox * overlayBox = nullptr;
+	WwDropdown * overlayBox = nullptr;
 	/*! ONE HOME FOR THE CELL'S VIEW TOGGLES (bungo 2026-09-19: "a lot of visual
 	 *  / visibility toggles that will only live in the cell editor workspace,
 	 *  that are specific to cell stuff"). Blender's viewport Overlays popover
@@ -257,8 +257,7 @@ private:
 	QMenu * cellLightCalib = nullptr;	// lane LIGHTPHYS3: 0.5 | 0.75 | 1 | 1.5 | 2
 	QActionGroup * cellLightCalibGroup = nullptr;
 	QList<QAction *> lookActions;	// lane GAPLOOK1: one tick a WwLook (gl/celllooks.h)
-	QAction * cellSsr = nullptr;
-	QAction * cellSsrExt = nullptr;
+	QAction * cellSsr = nullptr;	// lane OPENCELLFIX2 note 20: indoors and outdoors alike
 	QAction * cellReflProbe = nullptr;	// lane REFLPROBE1
 	QAction * cellSsgi = nullptr;	// lane SSGI1
 	QMenu * cellSsgiQ = nullptr;

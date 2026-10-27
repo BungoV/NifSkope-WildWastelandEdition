@@ -274,6 +274,7 @@ HEADERS += \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
 	src/gl/cellpasstime.h \
+	src/gl/geokeepclock.h \
 	src/gl/cellqueue.h \
 	src/gl/celldrawpacket.h \
 	src/gl/cellbindless.h \
@@ -347,6 +348,7 @@ HEADERS += \
 	src/ui/opencelldialog.h \
 	src/ui/opencellmenu.h \
 	src/ui/cellshowpanel.h \
+	src/ui/widgets/wwdropdown.h \
 	src/ui/checkablemessagebox.h \
 	src/ui/settingsdialog.h \
 	src/ui/settingspane.h \
@@ -671,6 +673,7 @@ SOURCES += \
 	src/ui/opencellmenu.cpp \
 	src/ui/opencellfallback.cpp \
 	src/ui/cellshowpanel.cpp \
+	src/ui/widgets/wwdropdown.cpp \
 	src/ui/checkablemessagebox.cpp \
 	src/ui/settingsdialog.cpp \
 	src/ui/settingspane.cpp \
@@ -734,6 +737,7 @@ SOURCES += \
 	src/cellspeed.cpp \
 	src/cellstream.cpp \
 	src/cellspawn.cpp \
+	src/cellstreamwalk.cpp \
 	src/celltexahead.cpp \
 	src/cellmodelahead.cpp \
 	src/probealbedo.cpp \

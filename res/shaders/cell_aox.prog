@@ -1,0 +1,4 @@
+# lane SSAO2: the cell view's three ported ambient occlusion methods (GTAO, HBAO+, XeGTAO; src/gl/celllights.cpp).
+# Full-screen passes at full resolution. No conditions: never picked for a shape; celllights.cpp selects it by name.
+
+shaders cell_ao.vert cell_aox.frag

@@ -398,6 +398,9 @@ public:
 
 	void setCacheSize( size_t maxBytes );
 	void shrinkCache( bool deleteAll = false );
+	//! lane STREAMMEM1: the paint counter, and freeing the shapes no paint since `epoch` drew (streamed cells)
+	std::uint32_t wwCacheEpoch() const { return cacheEpoch; }
+	int evictUndrawnSince( std::uint32_t epoch );
 	inline void flushCache()
 	{
 		shrinkCache( true );

@@ -158,6 +158,7 @@ private:
 #include "gl/cellvolair.h"	// lane VOLAIR1
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellpasstime.h"	// lane PERF1
+#include "gl/geokeepclock.h"	// lane STREAMMEM1
 #include "gl/cellfarground.h"	// lane FARPAGES1
 #include "gl/cellocean.h"	// lane WATERLOOK1
 #include "gl/cloudvol.h"	// lane CLOUD2B: the volume clouds' depth test
@@ -7195,6 +7196,15 @@ void GLView::wwCellStreamEvict()
 		clock.start();
 	const std::uint32_t sec = std::uint32_t( clock.elapsed() / 1000 ) + 1U;
 	textures->setUseTick( sec );
+	// lane STREAMMEM1: cached meshes by the same rule (undrawn for the keep and by the last 3 paints), on the
+	// cache's paint counter; red WW_STREAM1_RED=geokeep leaves them to the cache's own ~1800 paints
+	static GeoKeepClock geoClock;
+	static const std::uint32_t geoKeep = std::uint32_t( cellStreamGeoKeepSec() );
+	static const bool geoRed = PassTime::stream1Red( "geokeep" );
+	if ( NifSkopeOpenGLContext * cx = scene ? scene->renderer : nullptr; cx && !geoRed ) {
+		if ( const std::uint32_t since = geoClock.paint( sec, cx->wwCacheEpoch(), geoKeep ) )
+			cellStreamCountGeoEvicted( model, cx->evictUndrawnSince( since ) );
+	}
 	paintSec[paints++ & 3U] = sec;
 	if ( !keep || paints < 4 || sec < nextEvict || sec <= keep )
 		return;

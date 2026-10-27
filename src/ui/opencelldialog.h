@@ -11,20 +11,20 @@ BSD License - see nifskope.h
 
 #include <QWidget>
 
+#include "widgets/wwdropdown.h"
+
 class QActionGroup;
-class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
 class QMenu;
-class QPushButton;
 class QTimer;
 class QToolButton;
 class QTreeWidget;
 
 /*! The Cell dock's first two tabs (lane OPENCELLFIX1; before it, the File > Open Cell... dialog).
- *  Load order: the Data folder, the load-order file (an MO2 profile's plugins.txt or the game's), the language and the
- *  plugin list. Cells: worldspace, search, the CK-style cell list, X, Y, size and Open.
+ *  Load order: the Data folder, the load-order file (an MO2 profile's plugins.txt or the game's) and the plugin list.
+ *  Cells: worldspace, search, the CK-style cell list, X, Y and size; a double-click (or Enter) on a cell opens it.
  *  lane CELLSPAWN1: the list reads as the CK's (Editor ID, name, grid, FormID, plugins), one search box matches
  *  Editor ID, name or FormID, and a Filters menu in the block list's design narrows it.
  *  Every choice is saved as it is made and restored on the next start; a load order whose saved folders are gone
@@ -45,7 +45,7 @@ public:
 
 	// Driven by the unit test as well as by the widgets.
 	void setDataDir( const QString & dir );
-	void setLanguage( const QString & lang );         //!< the string-table language of localized plugins
+	QString stringsLanguage() const;                  //!< the game's sLanguage (the profile's inis first)
 	void setPluginsTicked( const QStringList & names );
 	bool importLoadOrder( const QString & pluginsTxt );
 	void readNow();                                   //!< read the catalog now instead of after the debounce
@@ -78,7 +78,7 @@ public:
 	enum SearchField { SearchEditorId = 1, SearchName = 2, SearchFormId = 4 };
 
 signals:
-	//! Open was pressed (or a cell double-clicked) and the cell file is written.
+	//! A cell was double-clicked (or Enter pressed on it) and the cell file is written.
 	void openRequested( const QString & specPath );
 
 protected:
@@ -127,11 +127,10 @@ private:
 	QWidget * cellPage = nullptr;
 	QLineEdit * dataEdit = nullptr;
 	QLineEdit * orderEdit = nullptr;
-	QComboBox * langCombo = nullptr;
 	QListWidget * pluginList = nullptr;
 	QLabel * pluginCount = nullptr;
 	QLabel * loStatus = nullptr;
-	QComboBox * worldCombo = nullptr;
+	WwDropdown * worldCombo = nullptr;
 	QLineEdit * filterEdit = nullptr;
 	QToolButton * filterButton = nullptr;
 	QMenu * filterMenu = nullptr;
@@ -140,9 +139,8 @@ private:
 	QTreeWidget * cellTree = nullptr;
 	QLabel * countLabel = nullptr;
 	QLineEdit * xyEdit = nullptr;
-	QComboBox * sizeCombo = nullptr;
+	WwDropdown * sizeCombo = nullptr;
 	QLabel * status = nullptr;
-	QPushButton * openButton = nullptr;
 	QTimer * readTimer = nullptr;
 	QTimer * searchTimer = nullptr;
 	QTimer * dataTimer = nullptr;

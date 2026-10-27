@@ -1590,6 +1590,35 @@ void NifSkopeOpenGLContext::shrinkCache( bool deleteAll )
 	cacheEpoch++;
 }
 
+/*! lane STREAMMEM1: while cells stream, shapes no paint since `epoch` drew (cells that left, old far masks) go now;
+ *  shrinkCache alone kept them ~1800 paints under the 1.5 GB budget (+657 MB, private x1.19 in 20 crossings) */
+int NifSkopeOpenGLContext::evictUndrawnSince( std::uint32_t epoch )
+{
+	int	n = 0;
+	while ( cacheLastItem ) {
+		ShapeData *	d = cacheLastItem->next;	// the oldest: the list is in draw order
+		if ( d->usedEpoch == cacheEpoch || std::int32_t( d->usedEpoch - epoch ) >= 0 )
+			break;
+		cacheShapeCnt--;
+		cacheBytesUsed -= d->h.getBufferDataSize() + 24576;
+		if ( d->prev == d ) {
+			cacheLastItem = nullptr;
+		} else {
+			d->prev->next = d->next;
+			d->next->prev = d->prev;
+		}
+		delete d;
+		n++;
+	}
+	if ( n ) {
+		PassTime::cacheCounts().evicted += n;
+		PassTime::cacheCounts().usedBytes = qint64( cacheBytesUsed );
+		geometryCache.clear();
+		rehashCache();
+	}
+	return n;
+}
+
 void NifSkopeOpenGLContext::rehashCache()
 {
 	size_t	n = 256UL << std::bit_width( ( cacheShapeCnt * 3U ) >> 9U );

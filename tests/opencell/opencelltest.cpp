@@ -3,18 +3,23 @@
 // Red: WW_OPENCELL_RED=writer swaps x and y in the writer, and this test must then FAIL.
 // Red: WW_OPENCELL_RED=strings (and the off switch WW_OPENCELL_STRINGS=0) leave localized names blank: FAIL.
 // Red: WW_ESM_LIGHT_RED=full numbers light plugins as full ones (top byte = file index): FAIL.
+// Reds (OPENCELLFIX2): WW_OPENCELL_RED=lang (the saved box value, no en retry), =dblclick, WW_DROPDOWN_RED=1: FAIL.
 
 #include "opencellcatalog.h"
 #include "opencelldialog.h"
+#include "widgets/wwdropdown.h"
 #include "esmfile.hpp"
 
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
+#include <QPushButton>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTreeWidget>
 
 #include <cstdio>
 
@@ -223,11 +228,15 @@ QStringList sortedCopy( QStringList v )
 
 int main( int argc, char ** argv )
 {
+	std::setvbuf( stdout, nullptr, _IONBF, 0 );   // a crash still leaves the last line
 	qputenv( "QT_QPA_PLATFORM", "offscreen" );
 	QStandardPaths::setTestModeEnabled( true );   // keep QSettings away from the real profile
 	QApplication app( argc, argv );
 	QApplication::setOrganizationName( QStringLiteral( "opencelltest" ) );
 	QApplication::setApplicationName( QStringLiteral( "opencelltest" ) );
+	// the test's own settings scope: an ini beside the exe, never the registry
+	QSettings::setDefaultFormat( QSettings::IniFormat );
+	QSettings::setPath( QSettings::IniFormat, QSettings::UserScope, QCoreApplication::applicationDirPath() + QStringLiteral( "/settings" ) );
 
 	// --real <Data> <plugin> [lang]: the user's own installed plugin (nothing of it is in the repo). PASS when the
 	// plugin is localized, its tables are found and its worldspaces carry names.
@@ -328,6 +337,11 @@ int main( int argc, char ** argv )
 		p.setDataDir( QString::fromLocal8Bit( argv[2] ) );
 		p.importLoadOrder( QString::fromLocal8Bit( argv[3] ) );
 		p.readNow();
+		int named = 0;	// OPENCELLFIX2: names never blank ("EDID (name)" in the combo)
+		for ( const QString & w : p.worldItems() )
+			named += w.contains( QStringLiteral( " (" ) );
+		std::printf( "spec: language %s, worldspaces %d named %d\n", qPrintable( p.stringsLanguage() ),
+			int( p.worldItems().size() ), named );
 		p.selectWorld( QString::fromLocal8Bit( argv[4] ) );
 		const QStringList xy = QString::fromLocal8Bit( argv[5] ).split( QLatin1Char( ',' ) );
 		p.selectCell( xy.value( 0 ).toInt(), xy.value( 1 ).toInt(), QByteArray( argv[6] ).toInt() );
@@ -343,7 +357,9 @@ int main( int argc, char ** argv )
 		return ok ? 0 : 1;
 	}
 
+	QSettings().clear();	// every run starts from nothing saved
 	QTemporaryDir tmp;
+	qputenv( "WW_MODPICK_MYGAMES", QFile::encodeName( tmp.path() + QStringLiteral( "/MyGames" ) ) );	// never the real inis
 	const QString data = tmp.path() + QStringLiteral( "/Data" );
 	writeFile( data + QStringLiteral( "/Base.esm" ), basePlugin() );
 	writeFile( data + QStringLiteral( "/Mod.esp" ), modPlugin() );
@@ -445,9 +461,9 @@ int main( int argc, char ** argv )
 	fr.lang = QStringLiteral( "fr" );
 	OpenCellCatalog locFr;
 	openCellReadCatalog( { data + QStringLiteral( "/Loc.esm" ) }, locFr, nullptr, fr );
-	check( locFr.worlds.size() == 1 && locFr.worlds[0].name.isEmpty()
-		&& locFr.noStrings == QStringList{ QStringLiteral( "Loc.esm" ) },
-		QStringLiteral( "no table for the language: blank name (never the index), plugin reported" ) );
+	// OPENCELLFIX2: no table for the language falls back to the en tables (never a blank list)
+	checkEq( locFr.worlds.value( 0 ).name, QStringLiteral( "Localized World" ), QStringLiteral( "no table for the language: the en names" ) );
+	check( locFr.noStrings.isEmpty(), QStringLiteral( "no plugin reported when the en tables stand in" ) );
 	OpenCellCatalog arch;
 	openCellReadCatalog( { data + QStringLiteral( "/Loc2.esm" ) }, arch, nullptr, en );
 	checkEq( arch.worlds.value( 0 ).name, QStringLiteral( "Archived World" ), QStringLiteral( "a table inside <plugin> - *.ba2" ) );
@@ -496,6 +512,38 @@ int main( int argc, char ** argv )
 	checkEq( dlg.cellItems(), QStringList{ QStringLiteral( "AnotherRoom\t\t00000F11\tBase.esm\tBase.esm" ),
 		QStringLiteral( "TestInterior\tTest Interior\t00000F10\tBase.esm\tBase.esm" ) },
 		QStringLiteral( "interior list (no grid columns)" ) );
+
+	/* lane OPENCELLFIX2 notes 1, 2, 7: no language box, no Open button (a double-click opens), every dropdown is the
+	 * toolbar's Object Mode selector. Reds: WW_OPENCELL_RED=dblclick, WW_DROPDOWN_RED=1. */
+	std::printf( "dock look\n" );
+	{
+		check( !dlg.findChild<QWidget *>( QStringLiteral( "OpenCellLanguage" ) ), QStringLiteral( "no language box" ) );
+		check( !dlg.findChild<QWidget *>( QStringLiteral( "OpenCellOpen" ) ), QStringLiteral( "no Open button" ) );
+		checkEq( int( dlg.findChildren<QComboBox *>().size() ), 0, QStringLiteral( "no plain combo box left" ) );
+		checkEq( int( dlg.findChildren<QPushButton *>().size() ), 0, QStringLiteral( "no push button left" ) );
+		const auto drops = dlg.findChildren<WwDropdown *>();
+		int styled = 0;
+		for ( const WwDropdown * d : drops )
+			styled += WwDropdown::hasStyle( d );
+		check( drops.size() >= 2 && styled == int( drops.size() ),
+			QStringLiteral( "every dropdown has the Object Mode look (%1 of %2)" ).arg( styled ).arg( drops.size() ) );
+		check( WwDropdown::hasStyle( dlg.findChild<QToolButton *>( QStringLiteral( "OpenCellFilters" ) ) ),
+			QStringLiteral( "the Filters button has the same look" ) );
+
+		dlg.selectWorld( QStringLiteral( "TestWorld" ) );
+		QTreeWidget * tree = dlg.findChild<QTreeWidget *>( QStringLiteral( "OpenCellList" ) );
+		QTreeWidgetItem * row = tree ? tree->topLevelItem( 1 ) : nullptr;	// CellA, not the current row
+		dlg.selectCell( 5, -3, 1 );
+		dlg.writeSpec( tmp.path() + QStringLiteral( "/specs" ) );	// the recent folder: Open writes beside it
+		QString opened;
+		auto conn = QObject::connect( &dlg, &OpenCellPicker::openRequested, [&]( const QString & p ) { opened = p; } );
+		if ( row )
+			emit tree->itemDoubleClicked( row, 0 );
+		QObject::disconnect( conn );
+		check( !opened.isEmpty() && QFile::exists( opened ), QStringLiteral( "a double-click opens the cell (openRequested)" ) );
+		checkEq( dlg.specLine().section( QLatin1Char( '|' ), 1, 2 ), QStringLiteral( "TestWorld|0,0" ),
+			QStringLiteral( "the double-clicked row is the cell opened" ) );
+	}
 
 	std::printf( "search and filters\n" );
 	{
@@ -679,9 +727,29 @@ int main( int argc, char ** argv )
 		OpenCellPicker d;
 		checkEq( d.tickedPlugins().contains( QStringLiteral( "Extra.esp" ) ), true,
 			QStringLiteral( "a plugins.txt changed since the last start is read again" ) );
-		const QString before = openCellStringsLanguage();
-		d.setLanguage( QStringLiteral( "e" ) );
-		checkEq( openCellStringsLanguage(), before, QStringLiteral( "a one-letter language is not kept" ) );
+	}
+
+	/* lane OPENCELLFIX2 note 3: the strings language is the game's [General] sLanguage (Fallout4.ini, Prefs, Custom; a
+	 * later one wins; an MO2 profile's own inis first); default en. A saved "e" never blanks names. Red: WW_OPENCELL_RED=lang. */
+	std::printf( "strings language\n" );
+	{
+		const QString mg = tmp.path() + QStringLiteral( "/MyGames" ), prof = tmp.path() + QStringLiteral( "/Profile" );
+		qputenv( "WW_MODPICK_MYGAMES", QFile::encodeName( mg ) );
+		QSettings().setValue( QStringLiteral( "WW/OpenCell/Language" ), QStringLiteral( "e" ) );	// the old box's bad value
+		checkEq( openCellStringsLanguage(), QStringLiteral( "en" ), QStringLiteral( "no game ini (and a saved \"e\"): en" ) );
+		OpenCellCatalog saved;
+		openCellReadCatalog( { data + QStringLiteral( "/Loc.esm" ) }, saved, nullptr, OpenCellReadOptions() );
+		checkEq( saved.worlds.value( 0 ).name, QStringLiteral( "Localized World" ), QStringLiteral( "a saved \"e\" still reads en names" ) );
+		writeFile( mg + QStringLiteral( "/Fallout4.ini" ), "[Display]\nsLanguage=fr\n[General]\nsLanguage=de\n" );
+		checkEq( openCellStringsLanguage(), QStringLiteral( "de" ), QStringLiteral( "Fallout4.ini [General] sLanguage" ) );
+		writeFile( mg + QStringLiteral( "/Fallout4Custom.ini" ), "[General]\r\nsLanguage = FR\r\n" );
+		checkEq( openCellStringsLanguage(), QStringLiteral( "fr" ), QStringLiteral( "Fallout4Custom.ini wins (case, spaces, CRLF)" ) );
+		writeFile( mg + QStringLiteral( "/Fallout4Custom.ini" ), "[General]\nsLanguage=e\n" );
+		checkEq( openCellStringsLanguage(), QStringLiteral( "en" ), QStringLiteral( "an invalid sLanguage reads en" ) );
+		writeFile( prof + QStringLiteral( "/Fallout4.ini" ), "[General]\nsLanguage=pl\n" );
+		checkEq( openCellStringsLanguage( prof ), QStringLiteral( "pl" ), QStringLiteral( "the profile's own ini wins" ) );
+		QFile::remove( mg + QStringLiteral( "/Fallout4.ini" ) );
+		QFile::remove( mg + QStringLiteral( "/Fallout4Custom.ini" ) );
 	}
 
 	std::printf( "%d checks, %d failed\n%s\n", checks, fails, fails ? "FAIL" : "PASS" );

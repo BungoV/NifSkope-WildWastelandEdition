@@ -335,6 +335,11 @@ void wwCellGiSetOn( bool on );
 bool wwCellAoOn();
 void wwCellAoSetOn( bool on );
 bool wwCellAoPinned();	// lane GAPTOOL1: the Scene window's SSAO row greys on the pin
+/*! lane SSAO2: the Ambient Occlusion method (src/gl/cellaomethod.h WwAoMethod): WW/CellAoMethod, pin
+ *  WW_CELL_AO_METHOD=vanilla|gtao|xegtao|hbao; live (the next frame runs it) */
+int wwCellAoMethod();
+void wwCellAoSetMethod( int method );
+bool wwCellAoMethodPinned();
 bool wwCellShadowOn();
 void wwCellShadowSetOn( bool on );
 bool wwCellGiGpuOn();

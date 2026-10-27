@@ -1,5 +1,6 @@
 #include "cellpost.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "gl/celllooks.h"	// lane OPENCELLFIX2: the Camera master
 
 #include "esmdata.h"
 #include "gl/gametaa.h"
@@ -345,7 +346,7 @@ bool dofRecord( const PostState & s, float out[4], QString & src )
 
 bool wwCellDofOn()
 {
-	return ps().dof;
+	return ps().dof && ( ps().dofPinned || wwGroupLets( WwGroup::CameraVanilla ) );	// lane OPENCELLFIX2: the Camera master
 }
 
 void wwCellDofSetOn( bool on )
@@ -358,7 +359,7 @@ void wwCellDofSetOn( bool on )
 
 bool wwCellMotionBlurOn()
 {
-	return ps().mb;
+	return ps().mb && ( ps().mbPinned || wwGroupLets( WwGroup::CameraVanilla ) );
 }
 
 void wwCellMotionBlurSetOn( bool on )

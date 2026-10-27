@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ***** END LICENCE BLOCK *****/
 
+#include "ui/widgets/wwdropdown.h"
 #include "gamemanager.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "celldoorlive.h"	// lane DOORLIVE1: a path frame poses the live door
@@ -2194,10 +2195,11 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		const qint64 waited = wwCellStreamSettle( ogl, 10, waitMs );
 		wwCellStreamSettle( ogl, 4, waitMs );   // transforms and the far tiles' data, drawn once
 		// lane CELLSTREAM1: and long enough for the textures of the cells that left to be freed (the view's rule)
-		if ( cellStreamTexKeepSec() > 0 ) {
+		const int lingerSec = std::max( cellStreamTexKeepSec(), cellStreamGeoKeepSec() );   // lane STREAMMEM1: meshes too
+		if ( lingerSec > 0 ) {
 			QElapsedTimer linger;
 			linger.start();
-			while ( linger.elapsed() < ( cellStreamTexKeepSec() + 3 ) * 1000 ) {
+			while ( linger.elapsed() < ( lingerSec + 3 ) * 1000 ) {
 				ogl->wwCellStreamFrame();
 				ogl->update();
 				qApp->processEvents();
@@ -2240,7 +2242,7 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " | built " << s.built << " attaches " << s.attaches << " unloads " << s.unloads
 				<< " inserted " << s.inserted << " recycled " << s.recycled << " blocks " << s.blocks << " pooled " << s.pooled
 				<< " | private " << priv << " live " << privLive << " heapBusy " << heapBusy << " heapHeld " << heapHeld
-				<< " regions " << regions[0] << "/" << regions[1] << "/" << regions[2] << " texEvicted " << s.texEvicted
+				<< " regions " << regions[0] << "/" << regions[1] << "/" << regions[2] << " texEvicted " << s.texEvicted << " geoEvicted " << s.geoEvicted
 				<< " quietResets " << s.quietResets << " loudResets " << s.loudResets
 				<< " texAheadAgain " << texAgain << " texDrawRead " << texDrawRead	// lane GAPFIX1
 				<< " | persistent " << s.persistent << " nodes " << s.sceneNodes << " props " << s.sceneProps
@@ -2249,7 +2251,8 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " | " << cov
 				<< " | expected " << s.expected << " | loaded " << s.loaded
 				<< " | hitchMaxMs " << QString::asprintf( "%.1f", hitchMs ) << " over33 " << hitchOver
-				<< " hitchFrames " << hitchFrames << " | " << s1mem;
+				<< " hitchFrames " << hitchFrames << " | " << s1mem
+				<< " | " << s.worstTick << " | " << s.worstUnload << " scannedNodes " << s.scannedNodes;	// lane CELLSPIKE2: key-value pairs only
 			if ( !s.lastError.isEmpty() )
 				log << " | error " << s.lastError;
 			log << "\n";
@@ -28147,10 +28150,8 @@ void NifSkope::initDockWidgets()
 		const QIcon physicsIcon = tlMakeIcon( QStringLiteral( "mode_physics" ), iconColor );
 		QToolButton * modeButton = new QToolButton( this );
 		modeButton->setObjectName( QStringLiteral( "ViewportModeButton" ) );
-		modeButton->setPopupMode( QToolButton::InstantPopup );
+		WwDropdown::applyStyle( modeButton );	// lane OPENCELLFIX2: THE dropdown look; the dock's dropdowns share it
 		modeButton->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
-		modeButton->setAutoRaise( false );
-		modeButton->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
 		modeButton->setToolTip( tr( "Viewport interaction mode. Tab toggles Object Mode and the last non-object mode." ) );
 
 		QMenu * modeMenu = new QMenu( modeButton );
