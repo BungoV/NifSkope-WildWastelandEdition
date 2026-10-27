@@ -2459,7 +2459,7 @@ int wwCellFxRed()
 	WW_SWITCH_STATIC( int, red, [] {
 		int r = 0;
 		for ( const QByteArray & t : wwEnv( "WW_CELL_FX_RED" ).split( ',' ) )
-			r |= t == "legacy" ? 1 : t == "nosoft" ? 2 : t == "nolin" ? 4 : t == "hide" ? 8 : 0;
+			r |= t == "legacy" ? 1 : t == "nosoft" ? 2 : t == "nolin" ? 4 : t == "hide" ? 8 : t == "prewater" ? 16 : 0;
 		return r;
 	}() );
 	return red;

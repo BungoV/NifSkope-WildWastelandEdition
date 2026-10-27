@@ -3236,8 +3236,15 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				for ( int x = fx0; x <= fx1; x++ )
 					if ( world.hasCell( x, y ) )
 						note( world.refrs( x, y ) );
-			note( world.persistentRefrsIn( float( fx0 ) * CELL_UNITS, float( fy0 ) * CELL_UNITS,
-				float( fx1 + 1 ) * CELL_UNITS, float( fy1 + 1 ) * CELL_UNITS ) );
+			/* lane GLOWHAZE1: the world's persistent refs are always loaded in the game, wherever they stand, so a
+			 * parent outside the block still gives its state (Sanctuary: five MistLargeRoundDustyBrightish02 under the
+			 * initially-disabled marker VideoTempClouds one cell north drew as a white glow). Red
+			 * WW_CELL_REFS_RED=persistbox: only the block's persistent refs, as before. */
+			if ( refsRed == "persistbox" )
+				note( world.persistentRefrsIn( float( fx0 ) * CELL_UNITS, float( fy0 ) * CELL_UNITS,
+					float( fx1 + 1 ) * CELL_UNITS, float( fy1 + 1 ) * CELL_UNITS ) );
+			else
+				note( world.persistentRefrsIn( -1e30f, -1e30f, 1e30f, 1e30f ) );
 			note( actorRefs );   // lane GAPLOOK2: outdoor actors (empty with the row off)
 		}
 	}
