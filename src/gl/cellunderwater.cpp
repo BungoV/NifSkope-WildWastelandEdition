@@ -251,7 +251,8 @@ void wwCellUnderwaterPass( Scene * scene )
 		fogCol[c] = 0.5f * ( hor[c] + uw[c] );
 	const QString redS = wwEnvStr( "WW_CELL_UNDERWATER_RED" ).trimmed();
 	const int red = redS == QLatin1String( "notint" ) ? 1 : redS == QLatin1String( "nofog" ) ? 2
-		: redS == QLatin1String( "radial" ) ? 4 : 0;	// lane WATERUNDER3: radial = WATERUNDER1's distance
+		: redS == QLatin1String( "radial" ) ? 4 : redS == QLatin1String( "maxdepth" ) ? 8 : 0;	// lane WATERUNDER3: radial = WATERUNDER1's distance
+	// lane WATERUNDER4: maxdepth = every sample fogged from the pixel's farthest depth (silhouettes over-fogged)
 
 	GLint vp[4] = { 0, 0, 1, 1 }, prevActive = 0, prevTex = 0, bSrcRgb = 0, bDstRgb = 0, bSrcA = 0, bDstA = 0,
 		bEqRgb = 0, bEqA = 0;
@@ -270,10 +271,22 @@ void wwCellUnderwaterPass( Scene * scene )
 		wasBlend = fn->glIsEnabled( GL_BLEND ), wasCull = fn->glIsEnabled( GL_CULL_FACE ),
 		wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
 
+	/* lane WATERUNDER4: with MSAA the per-pixel draw fogs the samples near the farthest depth and the per-sample twin
+	 * the rest, each from its own depth (no twin: one draw from the farthest, as before) */
+	int samples = ( red & 8 ) ? 0 : wwCellHdrDepthMsBegin( scene, WwCellUnit::UnderDepthMs );
+	QString msWhy = ( red & 8 ) ? QStringLiteral( "red maxdepth" ) : samples ? QString() : QStringLiteral( "one sample" );
+	if ( samples > 0 && !r->useProgram( "cell_underwater_ms.prog" ) ) {
+		wwCellHdrDepthMsEnd( scene, WwCellUnit::UnderDepthMs );
+		samples = 0;
+		msWhy = QStringLiteral( "no per-sample program" );
+	}
+	prog = r->useProgram( "cell_underwater.prog" );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CardDepth ) );
 	fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
 	fn->glBindTexture( GL_TEXTURE_2D, depthTex );
 	prog->uni1i( "uwDepth", WwCellUnit::CardDepth );
+	prog->uni1i( "uwDepthMs", WwCellUnit::UnderDepthMs );
+	prog->uni1i( "uwSamples", samples );
 	float inv[16];
 	for ( int i = 0; i < 4; i++ )
 		for ( int j = 0; j < 4; j++ )
@@ -321,8 +334,32 @@ void wwCellUnderwaterPass( Scene * scene )
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	if ( samples > 0 ) {
+		auto prog2 = r->useProgram( "cell_underwater_ms.prog" );
+		prog2->uni1i( "uwDepth", WwCellUnit::CardDepth );
+		prog2->uni1i( "uwDepthMs", WwCellUnit::UnderDepthMs );
+		prog2->uni1i( "uwSamples", samples );
+		fn->glUniformMatrix4fv( prog2->uniLocation( "uwInvProj" ), 1, GL_FALSE, inv );
+		prog2->uni4fv( "uwRow", rows, 3 );
+		prog2->uni4f( "uwVp", FloatVector4( float( vp[0] ), float( vp[1] ), float( vp[2] ), float( vp[3] ) ) );
+		prog2->uni3f( "uwEye", ex, ey, ez );
+		prog2->uni4f( "uwFog", FloatVector4( rec.uwFogAmount, rec.uwFogNear, rec.uwFogFar, H ) );
+		prog2->uni3f( "uwColor", fogCol[0], fogCol[1], fogCol[2] );
+		prog2->uni3f( "uwTint", uw[0], uw[1], uw[2] );
+		prog2->uni1i( "uwRed", red );
+		prog2->uni1i( "uwLight", light ? 1 : 0 );
+		prog2->uni1i( "uwLightRed", lred );
+		prog2->uni4f( "uwSun", FloatVector4( sunCol[0], sunCol[1], sunCol[2], sunCos ) );
+		prog2->uni3f( "uwSky", 0.5f * ( skyH[0] + skyU[0] ), 0.5f * ( skyH[1] + skyU[1] ), 0.5f * ( skyH[2] + skyU[2] ) );
+		prog2->uni1i( "uwClass", cls );
+		prog2->uni2f( "uwMenK", 1.5f, 0.6f );
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	}
 	r->stopProgram();
+	if ( samples > 0 )
+		wwCellHdrDepthMsEnd( scene, WwCellUnit::UnderDepthMs );
 
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CardDepth ) );
 	fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
 	fn->glActiveTexture( GLenum( prevActive ) );
 	fn->glBlendFuncSeparate( GLenum( bSrcRgb ), GLenum( bDstRgb ), GLenum( bSrcA ), GLenum( bDstA ) );
@@ -342,7 +379,9 @@ void wwCellUnderwaterPass( Scene * scene )
 		.arg( rec.form, 8, 16, QLatin1Char( '0' ) ).arg( double( rec.uwFogAmount ), 0, 'g', 4 )
 		.arg( double( rec.uwFogNear ), 0, 'g', 6 ).arg( double( rec.uwFogFar ), 0, 'g', 6 )
 		.arg( double( fogCol[0] ), 0, 'f', 4 ).arg( double( fogCol[1] ), 0, 'f', 4 ).arg( double( fogCol[2] ), 0, 'f', 4 )
-		.arg( red ? QStringLiteral( " red %1" ).arg( redS ) : QString() )
+		.arg( ( red ? QStringLiteral( " red %1" ).arg( redS ) : QString() ) + ( samples > 0
+			? QStringLiteral( "; fog per sample at edges (%1 samples)" ).arg( samples )
+			: QStringLiteral( "; fog per pixel (%1)" ).arg( msWhy ) ) )
 		+ ( light ? QStringLiteral( "; light class %1 sun %2 %3 %4 at cos %5%6" ).arg( cls )
 			.arg( double( sunCol[0] ), 0, 'f', 3 ).arg( double( sunCol[1] ), 0, 'f', 3 ).arg( double( sunCol[2] ), 0, 'f', 3 )
 			.arg( double( sunCos ), 0, 'f', 3 ).arg( lred ? QStringLiteral( " red %1" ).arg( QString::fromLatin1( lr ) ) : QString() )

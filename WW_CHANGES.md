@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERUNDER4 (2026-10-27, branch waterunder4-20261027): under water, the edges
+
+- With MSAA on and the camera under water, the fog no longer over-fogs silhouettes. Before, every sample of an edge
+  pixel took the fog of the pixel's farthest depth, so a near pole against far water got a fogged halo. Now the
+  per-pixel draw fogs only the samples near the farthest depth, and a second, per-sample draw fogs the other samples
+  from their own depth. Pixels away from edges cost the same as before.
+- Red: `WW_CELL_UNDERWATER_RED=maxdepth` (a new value of the existing key) draws the old way, one fog per pixel from
+  the farthest depth. The pass note says which ran: "fog per sample at edges (N samples)" or "fog per pixel (why)".
+- Offline checks (no window): against a per-sample reference the new fog is within 1.6e-3 (fog law) and 4.1e-5
+  (Underwater light row) at 4x and 8x MSAA; the red is off by 0.35-0.55 there and is byte-equal to the previous
+  program; every sample is fogged exactly once (1.00014). Every shader program links in all 3 modes.
+- Cost at 1080p (synthetic scene, 61% of pixels with a depth spread; two runs on a shared GPU): 4x MSAA +0.07 to
+  +0.17 ms (0.24-0.31 -> 0.38-0.41), 8x +0.28 to +0.38 ms (0.48-0.54 -> 0.76-0.92); fogging every sample would cost
+  0.77 / 1.54 ms. Real scenes have far fewer edge pixels. Memory: none (one framebuffer, no textures).
+- Not done: the water-plane fallback (polygon, surface plane, rooms below the water), the outdoor water colour
+  multiplier, and a unit test of the INAM parse.
+
 ## Lane WATERUNDER3 (2026-10-27, branch waterunder3-20261027): under water, the leftovers
 
 - The water's INAM field is the imagespace the game uses while the camera is under that water (all 47 vanilla

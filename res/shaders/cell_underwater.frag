@@ -2,6 +2,8 @@
 
 // lane WATERUNDER1: the camera-underwater fog over the linear frame (src/gl/cellunderwater.cpp draws it with
 // glBlendFuncSeparate( GL_ONE, GL_SRC1_COLOR, GL_ZERO, GL_ONE ): frame = frame * mul + add, alpha kept).
+// lane WATERUNDER4: with the frame's depth per sample (uwSamples > 0) this draw fogs only the samples near the
+// pixel's farthest depth; its twin cell_underwater_ms.prog (WW_UW_SAMPLE) runs per sample and fogs the rest.
 
 #include "water_under.glsl"
 // lane WATERLOOK1 step 16 (WATERUNDER2): the Underwater light row, the clear colour's coefficients + the meniscus
@@ -11,6 +13,8 @@
 #include "water_underlight.glsl"
 
 uniform sampler2D uwDepth;	// R32F: the frame's farthest window depth per pixel (cellhdr.cpp wwCellHdrDepthMax)
+uniform sampler2DMS uwDepthMs;	// lane WATERUNDER4: the frame's depth per sample (cellhdr.cpp wwCellHdrDepthMsBegin)
+uniform int uwSamples;		// its samples; 0 = one fog per pixel from the farthest depth (one sample, or red maxdepth)
 uniform mat4 uwInvProj;		// clip -> view
 uniform vec4 uwRow[3];		// view -> world rows
 uniform vec4 uwVp;		// the viewport x, y, w, h
@@ -30,10 +34,49 @@ vec3 uwWorld( vec2 ndc, float z )
 	return vec3( dot( uwRow[0], p ), dot( uwRow[1], p ), dot( uwRow[2], p ) );
 }
 
+// a sample this near the farthest one takes its fog: the law moves under 1/512 over the gap
+float uwEdgeTol()
+{
+	float t = min( max( uwFog.z - uwFog.y, 1e-3 ), max( uwFog.z, 1e-3 ) ) / ( 512.0 * max( uwFog.x, 1e-3 ) );
+	if ( uwLight != 0 ) {
+		vec3 bb;
+		vec3 k = wwClearK( uwClass, bb );
+		t = min( t, 1.0 / ( 1536.0 * max( max( k.r, max( k.g, k.b ) ), 1e-6 ) * kWwUnitMetres ) );
+	}
+	return t;
+}
+
+// the same answer in both draws (precise), so every sample is fogged exactly once
+bool uwNearMax( vec2 ndc, float dMax, float dS, float tol )
+{
+	if ( ( dS >= 1.0 ) != ( dMax >= 1.0 ) )
+		return false;
+	precise vec3 a = uwWorld( ndc, dMax * 2.0 - 1.0 );
+	precise vec3 b = uwWorld( ndc, dS * 2.0 - 1.0 );
+	precise float e = distance( a, b );
+	return e <= tol;
+}
+
 void main()
 {
 	float d = texelFetch( uwDepth, ivec2( gl_FragCoord.xy ), 0 ).r;
 	vec2 ndc = ( gl_FragCoord.xy - uwVp.xy ) / uwVp.zw * 2.0 - 1.0;
+#ifdef WW_UW_SAMPLE
+	float dS = texelFetch( uwDepthMs, ivec2( gl_FragCoord.xy ), gl_SampleID ).r;
+	if ( uwNearMax( ndc, d, dS, uwEdgeTol() ) )
+		discard;
+	d = dS;
+#else
+	int mask = -1;
+	if ( uwSamples > 0 ) {
+		float tol = uwEdgeTol();
+		mask = 0;
+		for ( int i = 0; i < uwSamples; i++ )
+			if ( uwNearMax( ndc, d, texelFetch( uwDepthMs, ivec2( gl_FragCoord.xy ), i ).r, tol ) )
+				mask |= 1 << i;
+	}
+	gl_SampleMask[0] = mask;
+#endif
 	vec3 Pn = uwWorld( ndc, -1.0 );
 	vec3 Pw = uwWorld( ndc, d * 2.0 - 1.0 );
 	vec3 add, mul;
