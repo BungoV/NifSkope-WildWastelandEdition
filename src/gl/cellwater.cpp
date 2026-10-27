@@ -344,6 +344,11 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1i( "waterDepthRed", dr == "flat" ? 1 : dr == "noabsorb" ? 2 : dr == "nearest" ? 3 : 0 );
 		prog->uni1b( "waterDepthOn", wwLookOn( WwLook::WaterDepth ) );
 	}
+	if ( prog->uniLocation( "waterClearOn" ) >= 0 ) {	// lane WATERLOOK1 step 8: the Water clear colour row
+		prog->uni1b( "waterClearOn", wwLookOn( WwLook::WaterClear ) );
+		WW_SWITCH_STATIC( QByteArray, cl, wwEnv( "WW_CELL_WATER_CLEAR_RED" ).trimmed() );
+		prog->uni1i( "waterClearRed", cl == "noscatter" ? 1 : cl == "nodown" ? 2 : cl == "fast" ? 3 : 0 );
+	}
 	if ( prog->uniLocation( "waterCauTime" ) >= 0 ) {	// lane WATERCAUSTICS1: fo4_waterlook only
 		prog->uni1b( "waterCauOn", wwLookOn( WwLook::WaterCaustics ) );	// lane WATERCOMBINE1: its own row
 		WW_SWITCH_STATIC( QByteArray, cr, wwEnv( "WW_CELL_WATER_CAUSTICS_RED" ).trimmed() );
@@ -539,7 +544,8 @@ bool wwCellWaterLookOn()
 	return wwLookOn( WwLook::WaterDepth ) || wwLookOn( WwLook::WaterCaustics ) || wwLookOn( WwLook::WaterSoftEdge )
 		|| wwLookOn( WwLook::ShoreFoam ) || wwLookOn( WwLook::WaterSwell ) || wwLookOn( WwLook::WaterRefl )
 		|| wwLookOn( WwLook::WaterGlint )	// lane WATERREFL1
-		|| wwLookOn( WwLook::WaterOcean );	// lane WATERLOOK1
+		|| wwLookOn( WwLook::WaterOcean )	// lane WATERLOOK1
+		|| wwLookOn( WwLook::WaterClear );	// lane WATERLOOK1 step 8
 }
 
 bool wwCellWaterRecordOf( const void * nif, quint32 form, WwWaterRecord & rec )
@@ -657,6 +663,7 @@ QString wwCellWaterEcho( const void * nif )
 				+ ( wwLookOn( WwLook::WaterRefl ) ? QLatin1String( " reflections" ) : QLatin1String( "" ) )
 				+ ( wwLookOn( WwLook::WaterGlint ) ? QLatin1String( " glare" ) : QLatin1String( "" ) )
 				+ ( wwLookOn( WwLook::WaterOcean ) ? QLatin1String( " ocean" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterClear ) ? QLatin1String( " clear" ) : QLatin1String( "" ) )
 			: QString() )
 		// lane WATERLOOK1: what the spectrum built (said only while its row is on)
 		+ ( wwCellOceanEcho().isEmpty() ? QString() : QStringLiteral( "; " ) + wwCellOceanEcho() );

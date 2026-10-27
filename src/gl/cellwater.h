@@ -73,6 +73,10 @@ bool wwCellWaterSsrWanted( Scene * scene );
  *  (CAUSTICPATTERN1: the old four-sine law); probes WW_CELL_WATER_PROBE=35 (the factor / 2) and 36 (the net's E / 8,
  *  envelope, sun share). CAUSTICPATTERN1 (10-27): the pattern is a warped, animated Voronoi net of thin filaments,
  *  two octaves, the bed's mean light kept (notes causticpattern1). */
+/*! lane WATERLOOK1 step 8 (WATERCOLOR1, 2026-10-27): the Water clear colour row (WwLook::WaterClear, pin
+ *  WW_CELL_WATER_CLEAR): the water's own absorption and lit in-scatter by body class in place of the WATR's depth ramp
+ *  and silt (res/shaders/water_clear.glsl): the clear sea turquoise over sand at 1-3 m, blue past about 10 m; lakes
+ *  greener, rivers brown-green. Red WW_CELL_WATER_CLEAR_RED=noscatter | nodown | fast. */
 const char * wwCellWaterProgram();
 //! lane WATERCOMBINE1: any water look row is on (the water draws with fo4_waterlook.prog)
 bool wwCellWaterLookOn();

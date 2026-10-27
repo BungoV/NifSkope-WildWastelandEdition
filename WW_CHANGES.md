@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 8 (2026-10-27, branch waterlook1-20261027): the water's own colour (WATERCOLOR1)
+
+- **Water clear colour** (new Show row, pin `WW_CELL_WATER_CLEAR`, default off, live). Instead of the WATR's depth ramp
+  (which reaches "deep" within 0.7 to 3 m, in two nearly equal colours), the water takes its colour from how water
+  absorbs and scatters light, per body class from the water bake: the clear sea, lakes (greener) and rivers
+  (brown-green). Placed water with no bake counts as a lake. The bed is dimmed on the light's way down to it and on
+  the way back up the view. Deep water is lit blue from the frame's sun and the water's sky, so it follows the hour
+  and the weather and is never black. The WATR's silt is not added on top while the row is on. Where no bed is drawn,
+  the baked depth shows the class's bed colour, lit. New res/shaders/water_clear.glsl. It draws in the water looks'
+  twin. fo4_water.prog (all rows off) keeps its machine code.
+- Red `WW_CELL_WATER_CLEAR_RED`: `noscatter` (no in-scatter), `nodown` (the bed not dimmed on the way down), `fast`
+  (every coefficient x 5).
+- Offline (no window, the real shader against a model): the GPU matches the model to 0.4% of its tolerance, and so
+  does each red. The sea over sand is turquoise at 1, 2 and 3 m (hue 161, 176 and 181 degrees) and blue past 10 m
+  (202 to 220 degrees from 12 to 30 m; 198 at 10 m). The change is spread over 17.5 m (red fast: 2.2 m). Open water
+  is blue, scales with the light and is still sky-lit at night (red noscatter: black). At 5 m the lake is greener and
+  the river browner than the sea. A low sun dims the bed more than a high one (red nodown: equal). About 0.03 ms a
+  1080p pass. All programs link.
+
 ## Lane WATERLOOK1 step 7 (2026-10-27, branch waterlook1-20261027): the under-water view joins the water looks
 
 - Lane WATERUNDER1 (the Underwater fog row, below) is merged into the combined water branch, so the camera under a

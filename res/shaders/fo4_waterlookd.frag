@@ -9,5 +9,6 @@
 #define WW_WATER_WAVES 1
 #define WW_WATER_REFL 1
 #define WW_WATER_OCEAN 1
+#define WW_WATER_CLEAR 1
 #define WW_WATER_DISP 1
 #include "fo4_water.frag"

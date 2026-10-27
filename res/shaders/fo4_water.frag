@@ -78,6 +78,9 @@ out vec4 fragColor;
 #if defined( WW_WATER_DEPTH ) || defined( WW_WATER_CAUSTICS )
 #include "water_depth.glsl"
 #endif
+#ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8 (WATERCOLOR1): the water's own colour by body class (after water_depth)
+#include "water_clear.glsl"
+#endif
 #ifdef WW_WATER_CAUSTICS	// lane WATERCAUSTICS1: the sun's cascades at the bed, then the caustic law
 #include "ww_sunshadow.glsl"
 #include "water_caustics.glsl"
@@ -178,6 +181,10 @@ vec3 depthFog( vec3 c, float along, float vert )
 		return c;
 	vec4 P1 = waterMat[7], P3 = waterMat[9], P4 = waterMat[10];
 	float k = ( waterRed & 512 ) != 0 ? 0.0142875 : 1.0;	// the red: the distances taken in metres
+#ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: absorption + lit in-scatter replace the WATR's ramp
+	if ( waterClearOn )
+		return wwWaterClear( c, along, vert );
+#endif
 	float rzF = clamp( 1.0 - vert * k / P1.w, 0.0, 1.0 );
 	float rwF = clamp( 1.0 - along * k / P1.w, 0.0, 1.0 );
 	float xf = clamp( ( rwF - P3.y ) / ( P3.x - P3.y ), 0.0, 1.0 );
@@ -389,7 +396,13 @@ void main()
 #endif
 #ifdef WW_WATER_DEPTH
 	WwWaterBed bed = WwWaterBed( false, false, 1e9, 1e9 );	// lane WATERDEPTH1: the bed depth this pixel uses
+#ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: the clear colour reads the same bed, lit by this frame's sun and sky
+	if ( waterClearOn )
+		wwWaterClearSetup( P, V, D.rgb * D.rgb, normalize( cellWorldDir( LightDir ) ), waterSky[0].rgb, waterSky[2].rgb );
+	if ( waterDepthOn || waterClearOn )
+#else
 	if ( waterDepthOn )
+#endif
 		bed = wwWaterBedAt( P, V, vert, along );
 #endif
 	if ( !under && waterSslr == 0 ) {
@@ -407,7 +420,12 @@ void main()
 		}
 #endif
 #ifdef WW_WATER_DEPTH
+#ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: no bed drawn = the class's bed albedo, lit
+		refr = bed.baked ? depthFog( waterClearOn ? wwWaterClearBed() : waterMat[0].rgb, bed.along, bed.vert )
+			: depthFog( refr, along, vert );
+#else
 		refr = bed.baked ? depthFog( waterMat[0].rgb, bed.along, bed.vert ) : depthFog( refr, along, vert );
+#endif
 #else
 		refr = depthFog( refr, along, vert );
 #endif
@@ -430,7 +448,11 @@ void main()
 	}
 
 	vec3 silted = refr;
+#ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: the in-scatter is the water's murk; the WATR's silt is not added on top
+	if ( ( waterRed & 4 ) == 0 && !waterClearOn )
+#else
 	if ( ( waterRed & 4 ) == 0 )
+#endif
 		silted = refr + waterMat[4].w * ( 1.0 - alphaV ) * ( mix( waterMat[5].rgb, waterMat[4].rgb, refr ) - refr );
 
 	vec3 Ldir = normalize( cellWorldDir( LightDir ) );
