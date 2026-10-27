@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane REFLDRAWS1 (2026-10-27, branch refldraws1-20261027): the reflections pass stops re-walking the opaque scene
+
+- **Which pass:** the "reflections" row of the pass timer is the screen-space reflections (`wwCellSsrPass`,
+  src/gl/cellssr.cpp), not a planar or probe reflection: it can only show what is on screen. On Concord (exterior, SSR
+  outdoors on, water in view, Water reflections row off) it draws step 1 (the opaque frame once more, for the lit colour
+  the rays march) and step 1b (the water's rays).
+- **The waste:** step 1b drew only the water's sorted entries, unless the sorted list held a particle system. Then it
+  walked the WHOLE opaque scene again plus the sorted list (Concord: 72 particle systems, so always), with both masks
+  shut for every opaque draw. That is about half the pass's 1710 calls.
+- **Now:** with a particle in the list, step 1b draws step 1's sorted list again, in the old order, and skips the
+  opaque walk. No water draws in the opaque walk (a water surface always goes to the sorted list), so every opaque
+  draw there shut both masks and wrote nothing; a particle still inherits the mask of the draw before it, exactly as
+  before. Pixels: identical by construction; the in-frame check compares both walks' rays.
+- **Switches (live):** `WW_CELL_REFLDRAWS_RED=1` the old walk; `WW_CELL_REFLDRAWS_CHECK=1` draws both walks each frame
+  and prints `refldraws check: water rays differ px=N of M (old walk wrote K) frames= bad= (must be 0)`;
+  `WW_CELL_REFLDRAWS_RED=2` (check gate only) draws no sorted list, so the check must see a difference.
+  Telemetry: `cell ssr water rays: sorted list reused, no opaque walk` / `opaque scene walked again (RED=1)`.
+- **Gates:** offline mask-machine model (notes/refldraws1/model/maskmodel.py, 200000 sequences): green 0 differ, reds
+  `naive` (water alone) and `waterpart` (water + particles) FAIL. Live hold owed: notes/refldraws1/hold.sh + judge.py.
+
 ## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
 
 - **Why:** the far objects, far cards and far rings past ring 0 were cut once, round the open's centre. The stream
