@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLSPIKE3 (2026-10-27, branch cellspike3-20261027): stream frames no longer stall on the item pool's lock
+
+- **Why:** the offline streamwalk still had 10-35 ms crossing frames in stages that do nearly nothing. A new
+  instrument (`wtCpu`, the main thread's own processor ms in the dearest frame) showed those frames were 0.05-1 ms
+  on the processor: the thread was waiting, often exactly one clock tick (16 ms). Every NifItem slot comes from one
+  pool behind one mutex. The cell builder (a below-normal thread) took that lock once per item; when a busy machine
+  pre-empted it holding the lock, the main thread waited until it ran again.
+- **Fix 1 (lock):** the builder thread and the reaper take item slots a run per lock (`NifItemThreadCache`, as the
+  model read-ahead workers already did), so the main thread rarely meets the lock held.
+- **Fix 2 (drain):** a freed block's reset no longer frees its old rows in the frame: `resetNiBlock` hands them to the
+  stream (`g_nifResetGrave`), and the reaper thread frees them. A reset starts only if the dearest recent one still
+  fits the budget (the first of a frame may take half the budget).
+- **Fix 3 (write):** a write slice starts only if the dearest recent slice still ends under 2 budgets less 1 ms, or
+  at the very start of a frame.
+- **Red:** `WW_CELL_SPIKE3_RED` holds any of `lock`, `drain`, `write`: each brings that old path back. Live (read by
+  every stream tick and every new build job).
+- **Instrument:** the step line's worst-frame stages end with `wtCpu`.
+
 ## Lane CELLSPIKE2 (2026-10-27, branch cellspike2-20261027): a cell unload no longer walks the whole scene
 
 - **Why:** MERGE1027's walk had one 81.5 ms crossing frame, all of it one cell unload (step 1, 5 unloads). When the

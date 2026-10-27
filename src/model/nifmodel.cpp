@@ -901,6 +901,10 @@ QSet<int> NifModel::blocksWithPersistent() const
 	return r;
 }
 
+// lane CELLSPIKE3: while set, resetNiBlock hands a block's old rows here instead of freeing them; the cell
+// streamer frees them on its reaper thread (one reset's frees took 5-23 ms of a frame)
+std::vector<NifItem *> * g_nifResetGrave = nullptr;
+
 bool NifModel::resetNiBlock( int blocknum, bool quiet )
 {
 	NifItem * branch = getBlockItem( blocknum );
@@ -915,7 +919,12 @@ bool NifModel::resetNiBlock( int blocknum, bool quiet )
 	if ( n > 0 ) {
 		if ( !quiet )
 			beginRemoveRows( idx, 0, n - 1 );
-		branch->removeChildren( 0, n );
+		if ( g_nifResetGrave ) {
+			for ( int r = n - 1; r >= 0; r-- )
+				g_nifResetGrave->push_back( branch->takeChild( r ) );
+		} else {
+			branch->removeChildren( 0, n );
+		}
 		if ( !quiet )
 			endRemoveRows();
 	}
