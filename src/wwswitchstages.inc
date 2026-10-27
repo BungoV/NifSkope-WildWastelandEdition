@@ -340,6 +340,7 @@
 { "WW_CELL_NOGRID", 1, "src/cellview.cpp:902 cellApplyEnvModifiers | read while the cell document is built" },
 { "WW_CELL_NOTERRAIN", 1, "src/cellview.cpp:898 cellApplyEnvModifiers | read while the cell document is built" },
 { "WW_CELL_NOWATER", 1, "src/cellview.cpp:900 cellApplyEnvModifiers | read while the cell document is built" },
+{ "WW_CELL_LAND_SHORE_RED", 0, "src/gl/cellwaterinfo.cpp:335 landRed | re-read per frame or per call (a)" },
 { "WW_CELL_OPAQUE_CUT_CHECK", 0, "src/gl/renderer.cpp:224 wwOpaqueCutChecking | re-read per frame or per call (a)" },
 { "WW_CELL_OPEN", 1, "src/cellstream.cpp:925 cellStreamWanted | hand: the cell spec: the reopen builds the new rectangle in the same window" },
 { "WW_CELL_OVERLAY", 1, "src/cellview.cpp:880 cellApplyEnvModifiers | read while the cell document is built" },

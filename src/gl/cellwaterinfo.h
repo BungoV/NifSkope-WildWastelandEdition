@@ -46,7 +46,16 @@ struct WwWaterInfoTables
 	int uniformDry = 0, uniformWet = 0, sparseBody = 0, sparseShore = 0, sparseSurface = 0, sparseDepth = 0;
 	double buildSeconds = 0.0;
 
-	quint64 bytes() const;
+	/* Lane WATERWETBAKE1: the shore plane's LAND side (a dry texel's distance to the nearest wet texel, 32 u
+	 * steps, 255 = far, 0 on wet texels) for the terrain shaders (res/shaders/land_shore.glsl). The water words
+	 * above take 255 on every dry texel, so they are the same with or without the land side in the file. */
+	std::vector<uint32_t> landIndex;	// tilesY rows of tilesX: the uniform tile's byte, or (slot + 1) << 8
+	std::vector<uint8_t> landAtlas;	// landAtlasH rows of atlasW bytes, 64 tiles a row
+	int landAtlasH = 0, landSlots = 0, landUniformFar = 0, landUniformWet = 0, landUniformOther = 0;
+	qint64 landNearTexels = 0;	// dry texels under 255
+
+	quint64 bytes() const;	// the water tables
+	quint64 landBytes() const;
 };
 
 //! The packed depth code (0..255) of a depth in world units.
@@ -55,7 +64,10 @@ uint32_t wwWaterInfoDepthCode( double depth );
 bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * error );
 //! The census lines of a build (counts and bytes), as the CLI and the gate print them.
 QString wwWaterInfoCensus( const WwWaterInfoTables & t );
-//! index.u32, atlas.u32, bodies.f32, census.txt into `dir`.
+//! The land side's census line (lane WATERWETBAKE1).
+QString wwLandShoreCensus( const WwWaterInfoTables & t );
+//! index.u32, atlas.u32, bodies.f32, census.txt, and the land side's land_index.u32, land_atlas.u8,
+//! land_census.txt into `dir`.
 bool wwWaterInfoDump( const WwWaterInfoTables & t, const QString & dir, QString * error );
 
 //! The cell document's worldspace .lodl ("" = none, an interior). Starts the build on a worker thread.
@@ -63,6 +75,11 @@ void wwCellWaterInfoSet( const void * nif, const QString & lodl );
 //! With fo4_water.prog bound: uploads the tables once they are built and binds them at units unit..unit+2 when
 //! the program reads them. Returns the units it used (0 or 3).
 int wwCellWaterInfoUniforms( Scene * scene, int unit );
+/*! Lane WATERWETBAKE1: with a cell program bound (fo4_cell*, pbrm_cell* family), binds the land side at
+ *  WwCellUnit::LandShoreIndex/LandShoreAtlas when the program reads `landShoreIndex` (nothing reads it today:
+ *  the default programs drop the uniforms, and the call returns at once). `terrain` = the drawn shape is land
+ *  (near LAND or far terrain), uploaded as `landShoreTerrain`. Red WW_CELL_LAND_SHORE_RED=off: neutral (far). */
+void wwCellLandShoreUniforms( Scene * scene, bool terrain );
 //! One census line: what this document's water info is and what was uploaded (read back from the GL).
 QString wwCellWaterInfoEcho( const void * nif );
 

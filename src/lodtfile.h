@@ -112,6 +112,9 @@ struct LodtWaterOptions
 	int bodySamples = 0;         //!< body-ID plane rate; 0 = the file's own
 	int flowSamples = 0;         //!< flow plane rate; 0 = the file's own
 	bool shore = true;           //!< bake the shore-distance plane
+	/*! Lane WATERWETBAKE1: the shore plane's DRY texels carry their distance to the nearest wet texel (same
+	 *  3-4 chamfer, same 32-unit step, 255 = far). Off = every dry texel 255, byte for byte the old file. */
+	bool shoreLand = true;
 	/*! The plugin the WATR `NAM0` linear velocities are read from -- vanilla's
 	 *  ONLY flow signal, and the fallback floor under the automatic rules. Empty
 	 *  means the arm is unavailable, which the census SAYS rather than silently

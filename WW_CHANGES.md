@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERWETBAKE1 (2026-10-27, branch waterwetbake1-20261027): the shore distance on the land side, baked and bound to the terrain shaders (data only, no visible change)
+
+- **What it bakes:** the .lodl shore plane now also holds, on DRY ground, the distance to the nearest water, with the
+  same 3-4 chamfer and the same 32 u quantum (a dry texel next to water stores 4, 255 = 8160 u or more). Wet samples
+  are unchanged. `--water-no-shore-land` (option `shoreLand = false`) writes the old bytes: the Commonwealth .lodl
+  is then byte-identical to a WATERDATA1 bake. The lodgen summary adds "shore plane land side: N dry sample(s)".
+- **What it binds:** src/gl/cellwaterinfo builds a second sparse table from the same plane: a 16 x 16-texel tile
+  index (R32UI: the uniform byte, or slot + 1 << 8) and an R8UI atlas of 64 tiles a row. The water words mask dry
+  shore to 255, so the water index/atlas/bodies stay byte-identical. Commonwealth: 15,327 of 147,456 tiles sparse,
+  index 0.56 MB + atlas 3.75 MB = 4.31 MB; 3,141,842 dry texels near water. Units 46/47 (LandShoreIndex/Atlas).
+- **Shader side:** res/shaders/land_shore.glsl (`wwLandShore(worldXY)`, `wwLandShoreSmooth(worldXY)`, in world
+  units, 8160 when off) is included by fo4_default.frag and pbrm_default.frag under WW_CELLLIGHTS, near and far
+  terrain alike. Nothing calls it yet (WATERWET1 will), so the compiler drops it and no program binds the tables:
+  all 273 program/mode links are the same machine code as before. Red: `WW_CELL_LAND_SHORE_RED=off`.
+- **Gates (offline):** distance rises away from the waterline at Concord and the harbour coast, matches an
+  independent Euclidean distance within the chamfer's 8.5 %, steps at most 4 across cell and tile edges; the GL
+  lookup equals the dump at all 37.7 M texel centres. `--water-no-shore-land` fails the gate (all 255).
+
 ## Lane WATERDATA1 (2026-10-27, branch waterdata1-20261027): the baked water planes bound to the water shader (data only, no visible change)
 
 - **What it binds:** the worldspace .lodl's water planes (body id, shore distance, surface delta) and its body table,

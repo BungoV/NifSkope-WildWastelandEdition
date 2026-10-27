@@ -897,6 +897,15 @@ body** — dry land, or another body across a seam. A 3-4 chamfer, two passes,
 with the one rule that makes it per-body: a neighbour belonging to a different
 body counts as a shore at distance zero.
 
+**The land side (lane WATERWETBAKE1, 2026-10-27).** A DRY sample carries its
+distance to the nearest wet sample of any body, by the same chamfer and the same
+quantum, 255 = 8,160 units or more (far). A dry sample next to water reads 4
+(one 128-unit texel at 32 samples a cell). Written by default; `--water-no-shore-land`
+writes 255 on every dry sample, byte for byte the file from before. Wet samples
+are the same bytes either way (the wet rule never reads a dry value). An older
+file reads as "all land far". Readers that want the wet side alone test the body
+id plane: shore bytes of a sample whose id is 0 are land distances.
+
 Baked rather than derived because the runtime alternative is a search. **Depth
 stays derived**, exactly as the table further down says: `body.waterHeight -
 height(gx, gy)`, both sides in this file, nothing baked for it.
@@ -1132,6 +1141,7 @@ lodgen <esm> --worldspace <id> --lodl <dir>      bodies ON by default (v3)
         [--water-bodies]            ON, and REFUSE rather than fall back to v2
         [--water-bridge N] [--water-near N]
         [--water-body-samples N] [--water-flow-samples N] [--water-no-shore]
+        [--water-no-shore-land]     dry samples 255 (the pre-WATERWETBAKE1 bytes)
         [--water-velocities <plugin>] [--water-report <file>]
 lodl <file.lodl> --water-census      the body table, read back out of the FILE
 lodl <file.lodl> --water-selftest    the classifier's known-answer control
