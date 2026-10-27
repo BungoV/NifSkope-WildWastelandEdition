@@ -129,6 +129,8 @@ struct LdState
 	WwSkyGmst gmst;
 	WwClimateData clim;
 	QElapsedTimer cloudClock;
+	QElapsedTimer transClock;	// lane WEATHERBLEND1: the running weather change's wall clock
+	qint64 transMs = -1;	// its reading at the last pct step
 	QString skyLast = QStringLiteral( "pending" );	// what the last sky pass drew, for the echo
 
 	// the weather fog (lane FOG1)
@@ -326,6 +328,49 @@ void loadCensus( const LdState & s )
 		.arg( counts.join( QChar( ',' ) ), each.join( QChar( ' ' ) ) );
 }
 
+/* lane WEATHERBLEND1: the weather change. WW_WEATHER_BLEND_RED=snap is the old instant swap. The clock is the wall clock
+ * in a live window, WW_WEATHER_BLEND_TIME seconds since the change in a harness, else none (a harness snaps) */
+bool weatherBlendSnap()
+{
+	WW_SWITCH_STATIC( bool, snap, wwEnvStr( "WW_WEATHER_BLEND_RED" ).split( ',' ).contains( QStringLiteral( "snap" ) ) );
+	return snap;
+}
+
+//! seconds into the change; -1 = no clock (snap), -2 = still inside the last 15 ms step (no new pct)
+double transSeconds( LdState & s )
+{
+	WW_SWITCH_STATIC( double, pin, wwEnvStr( "WW_WEATHER_BLEND_TIME" ).isEmpty() ? -1.0
+		: std::max( 0.0, wwEnvStr( "WW_WEATHER_BLEND_TIME" ).toDouble() ) );
+	if ( pin >= 0.0 )
+		return pin;
+	if ( !wwWorldClockLive() )
+		return -1.0;
+	const qint64 ms = s.transClock.elapsed();
+	if ( s.transMs >= 0 && ms - s.transMs < 15 )	// about one step a frame: every memo keyed on gen rebuilds per step
+		return -2.0;
+	s.transMs = ms;
+	return double( ms ) / 1000.0;
+}
+
+//! the pct now; a new pct bumps gen (every memo rebuilds), the end drops the weather left behind
+void transTick( LdState & s )
+{
+	if ( !s.w.last )
+		return;
+	const double secs = weatherBlendSnap() ? -1.0 : transSeconds( s );
+	if ( secs == -2.0 )
+		return;
+	const float p = secs < 0.0 ? 1.0f : wwWeatherTransPct( wwWeatherTransGameHours( secs ), s.w.transDelta, s.gmst );
+	if ( p >= 1.0f ) {
+		s.w.last.reset();
+		s.w.transPct = 1.0f;
+		s.gen++;
+	} else if ( p != s.w.transPct ) {
+		s.w.transPct = p;
+		s.gen++;
+	}
+}
+
 void resolve()
 {
 	LdState & s = st();
@@ -335,6 +380,7 @@ void resolve()
 		if ( s.pinPlugins.isEmpty() && s.plugin.isEmpty() )
 			s.dirtyLoad = true;
 	}
+	const bool newLoad = s.dirtyLoad;	// lane WEATHERBLEND1: another load snaps (its records are others)
 	if ( s.dirtyLoad || s.dirtyWeather )
 		s.gen++;
 	if ( s.dirtyLoad ) {
@@ -373,6 +419,10 @@ void resolve()
 	}
 	if ( s.dirtyWeather ) {
 		s.dirtyWeather = false;
+		// lane WEATHERBLEND1: a change of weather keeps the one it leaves; a new load, a refusal or the snap red snaps
+		std::shared_ptr<WwWeatherData> prev;
+		if ( s.haveWeather && !newLoad && !weatherBlendSnap() )
+			prev = std::make_shared<WwWeatherData>( s.w );
 		s.haveWeather = false;
 		s.weatherRefusal.clear();
 		if ( !s.loadRefusal.isEmpty() ) {
@@ -387,7 +437,21 @@ void resolve()
 			else
 				s.haveWeather = true;
 		}
+		if ( prev && s.haveWeather ) {
+			if ( prev->formID == s.w.formID ) {	// the same weather read again: a running change goes on
+				s.w.last = prev->last;
+				s.w.transPct = prev->transPct;
+			} else {	// a pick during a change starts from the weather it was changing to (the game defers it)
+				prev->last.reset();
+				prev->transPct = 1.0f;
+				s.w.last = prev;
+				s.w.transPct = 0.0f;
+				s.transClock.start();
+				s.transMs = -1;
+			}
+		}
 	}
+	transTick( s );
 }
 
 float lin( float byte )
@@ -679,7 +743,9 @@ bool wwLookdevGodRays( float m[12], QString * note )
 	if ( !s.haveWeather )
 		return false;
 	const WwFog f = currentFog();
-	const WwGodRayMedium g = wwGodRayMix( s.w.godRay[f.keys.a], s.w.godRay[f.keys.b], float( f.keys.t ) );
+	WwGodRayMedium g = wwGodRayMix( s.w.godRay[f.keys.a], s.w.godRay[f.keys.b], float( f.keys.t ) );
+	if ( s.w.blending() )	// lane WEATHERBLEND1: the weather left behind x (1 - pct), the engine's four weights
+		g = wwGodRayMix( wwGodRayMix( s.w.last->godRay[f.keys.a], s.w.last->godRay[f.keys.b], float( f.keys.t ) ), g, s.w.transPct );
 	const float v[12] = { g.air[0], g.air[1], g.air[2], g.fwd[0], g.fwd[1], g.fwd[2], g.back[0], g.back[1], g.back[2],
 		g.gFwd, g.gBack, g.post };
 	std::copy( v, v + 12, m );
@@ -1111,6 +1177,9 @@ QString wwLookdevSummary()
 	if ( s.haveWeather ) {
 		head = QString( "weather=%1 [%2] src=%3 from=\"%4\" load=%5ms" ).arg( s.w.edid, hex8( s.w.formID ), s.w.srcFile,
 			s.loadSource ).arg( s.loadMs );
+		if ( s.w.blending() )	// lane WEATHERBLEND1
+			head += QString( " change=%1->%2 pct=%3 delta=%4" ).arg( s.w.last->edid, s.w.edid ).arg( double( s.w.transPct ), 0, 'f', 4 )
+				.arg( s.w.transDelta );
 	} else {
 		head = QString( "refused=\"%1\" neutral-sun" ).arg( s.weatherRefusal );
 	}
@@ -1275,6 +1344,34 @@ bool computeImageSpace( WwLookdevIs & o )
 	o.name = ( a == b || t <= 0.0f ) ? s.w.isEdid[a]
 		: QStringLiteral( "%1->%2 %3%" ).arg( s.w.isEdid[a], s.w.isEdid[b] ).arg( int( t * 100.0f + 0.5f ) );
 	o.key = QStringLiteral( "%1|%2|%3|%4" ).arg( s.weatherKey ).arg( a ).arg( b ).arg( double( t ), 0, 'g', 6 ) + loadKeyPart( s );
+	if ( s.w.blending() ) {
+		// lane WEATHERBLEND1: the weather left behind x (1 - pct), with its own one-key fallback
+		const WwWeatherData & W = *s.w.last;
+		int la = std::clamp( L.keys.a, 0, 7 ), lb = std::clamp( L.keys.b, 0, 7 );
+		float lt = std::clamp( L.keys.t, 0.0f, 1.0f );
+		const float p = s.w.transPct;
+		if ( W.isFound[la] || W.isFound[lb] ) {
+			if ( !W.isFound[la] ) {
+				la = lb;
+				lt = 0.0f;
+			} else if ( !W.isFound[lb] ) {
+				lb = la;
+				lt = 0.0f;
+			}
+			for ( int k = 0; k < 9; k++ )
+				o.hdr[k] = o.hdr[k] * p + ( W.isHdr[la][k] + ( W.isHdr[lb][k] - W.isHdr[la][k] ) * lt ) * ( 1.0f - p );
+			for ( int k = 0; k < 3; k++ )
+				o.cine[k] = o.cine[k] * p + ( W.isCine[la][k] + ( W.isCine[lb][k] - W.isCine[la][k] ) * lt ) * ( 1.0f - p );
+			for ( int k = 0; k < 4; k++ )
+				o.tint[k] = o.tint[k] * p + ( W.isTint[la][k] + ( W.isTint[lb][k] - W.isTint[la][k] ) * lt ) * ( 1.0f - p );
+			if ( p < 0.5f ) {	// two LUT slots here; the game weighs up to four (INFERRED swap at half way)
+				o.lutA = W.isLut[la];
+				o.lutB = W.isLut[lb];
+				o.t = ( o.lutA == o.lutB ) ? 0.0f : lt;
+			}
+		}
+		o.key += QStringLiteral( "|change %1 %2" ).arg( W.edid ).arg( double( p ), 0, 'g', 6 );
+	}
 	return true;
 }
 }	// namespace
@@ -1350,6 +1447,8 @@ SkyFrame skyFrame()
 		for ( int c = 0; c < 3; c++ )
 			std::swap( f.up[c], f.hz[c] );
 	f.glareAlpha = f.c.sunAlpha * float( s.w.sunGlare ) / 255.0f;
+	if ( s.w.blending() )	// lane WEATHERBLEND1: DATA byte 4 on pct (INFERRED: no game read of it was found)
+		f.glareAlpha = f.c.sunAlpha * ( float( s.w.sunGlare ) * s.w.transPct + float( s.w.last->sunGlare ) * ( 1.0f - s.w.transPct ) ) / 255.0f;
 	return f;
 }
 
@@ -1910,12 +2009,13 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 	const double secs = wwLookdevCloudSeconds();
 	const bool full = mul >= 1.0f;
 	QStringList drawn, skipped;
-	auto layerUniforms = [&]( NifSkopeOpenGLContext::Program * prog, int i, float alpha ) {
+	// lane WEATHERBLEND1: W = the weather whose texture and scroll a pass draws (s.w, or the one a change leaves)
+	auto layerUniforms = [&]( NifSkopeOpenGLContext::Program * prog, const WwWeatherData & W, int i, float alpha ) {
 		float rgb[3], a = 0.0f;
 		EsmWeather::blendCloud( s.w, i, f.c.keys, rgb, &a );
-		const int li = ( quint32( i ) >= s.w.cloudLayers ) ? 0 : i;
-		const float sx = EsmWeather::cloudSpeed( s.w.cloudSpeedX[li], s.gmst );
-		const float sy = EsmWeather::cloudSpeed( s.w.cloudSpeedY[li], s.gmst );
+		const int li = ( quint32( i ) >= W.cloudLayers ) ? 0 : i;
+		const float sx = EsmWeather::cloudSpeed( W.cloudSpeedX[li], s.gmst );
+		const float sy = EsmWeather::cloudSpeed( W.cloudSpeedY[li], s.gmst );
 		float lc[3];	// lane CLOUD2: Volume Clouds Low lights the layers by the model (sky units / skyScale)
 		if ( wwCloudVolLowColour( lc ) )
 			prog->uni3f( "colLin", lc[0] / std::max( f.skyScale, 1e-6f ), lc[1] / std::max( f.skyScale, 1e-6f ),
@@ -1929,11 +2029,11 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		prog->uni1i( "viewTransform", skyViewTransform() );
 		return a;
 	};
-	auto bindLayer = [&]( int i ) {
-		if ( i < 0 || i >= 32 || s.w.cloudTex[i].isEmpty() )
+	auto bindLayer = [&]( const WwWeatherData & W, int i ) {
+		if ( i < 0 || i >= 32 || W.cloudTex[i].isEmpty() )
 			return false;
 		r->fn->glActiveTexture( GL_TEXTURE0 );
-		if ( scene->bindTexture( QStringView( skyTexPath( s.w.cloudTex[i] ) ), true ) <= 0 )
+		if ( scene->bindTexture( QStringView( skyTexPath( W.cloudTex[i] ) ), true ) <= 0 )
 			return false;
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
@@ -1943,7 +2043,7 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 	if ( s.probe ) {
 		// the texel probe: one full-screen quad samples layer probeLayer at probeUV + the scroll offset
 		NifSkopeOpenGLContext::Program * prog = r->useProgram( "lookdev_clouds.prog" );
-		if ( !prog || !bindLayer( s.probeLayer ) ) {
+		if ( !prog || !bindLayer( s.w, s.probeLayer ) ) {
 			if ( prog )
 				r->stopProgram();
 			drew << QString( "cloudprobe:refused(layer %1 texture %2)" ).arg( s.probeLayer ).arg( s.w.cloudTex[s.probeLayer & 31] );
@@ -1953,7 +2053,7 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		prog->uni1i( "Tex", 0 );
 		prog->uni1b( "probe", true );
 		prog->uni2f( "probeUV", s.probeUV[0], s.probeUV[1] );
-		const float a = layerUniforms( prog, s.probeLayer, -1.0f );
+		const float a = layerUniforms( prog, s.w, s.probeLayer, -1.0f );
 		static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 		static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 		const float * attrs = quad;
@@ -1963,38 +2063,47 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		return;
 	}
 
+	/* lane WEATHERBLEND1: during a change each layer draws the left weather's texture x (1 - pct) under the new one's
+	 * x pct, each at its own scroll (the game cross-fades a layer's two textures); one pass otherwise */
+	const int nSrc = s.w.blending() ? 2 : 1;
 	for ( int i = 0; i < ms->size() && i < 32; i++ ) {
 		const SkyMesh & m = ms->at( i );
-		if ( s.w.cloudDisabled & ( 1u << i ) )
-			continue;
-		float rgb[3], a = 0.0f;
-		EsmWeather::blendCloud( s.w, i, f.c.keys, rgb, &a );
-		if ( full && a <= 0.0f )
-			continue;
-		if ( m.idx.isEmpty() ) {
-			skipped << QString( "%1(no mesh)" ).arg( i );
-			continue;
-		}
-		NifSkopeOpenGLContext::Program * prog = r->useProgram( "lookdev_clouds.prog" );
-		if ( !prog ) {
-			drew << QStringLiteral( "clouds:refused(lookdev_clouds.prog did not link)" );
-			return;
-		}
-		if ( !bindLayer( i ) ) {
+		for ( int src = nSrc - 1; src >= 0; src-- ) {
+			const WwWeatherData & W = src ? *s.w.last : s.w;
+			const float share = nSrc == 1 ? 1.0f : ( src ? 1.0f - s.w.transPct : s.w.transPct );
+			const QString tag = src ? QStringLiteral( "%1'" ).arg( i ) : QString::number( i );
+			if ( W.cloudDisabled & ( 1u << i ) )
+				continue;
+			float rgb[3], a = 0.0f;
+			EsmWeather::blendCloud( s.w, i, f.c.keys, rgb, &a );
+			a *= share;
+			if ( full && a <= 0.0f )
+				continue;
+			if ( m.idx.isEmpty() ) {
+				skipped << QString( "%1(no mesh)" ).arg( tag );
+				continue;
+			}
+			NifSkopeOpenGLContext::Program * prog = r->useProgram( "lookdev_clouds.prog" );
+			if ( !prog ) {
+				drew << QStringLiteral( "clouds:refused(lookdev_clouds.prog did not link)" );
+				return;
+			}
+			if ( !bindLayer( W, i ) ) {
+				r->stopProgram();
+				skipped << QString( "%1(%2 did not resolve)" ).arg( tag ).arg( skyTexPath( W.cloudTex[i] ) );
+				continue;
+			}
+			skyState( r, true, false );
+			prog->uni1i( "Tex", 0 );
+			prog->uni1b( "probe", false );
+			layerUniforms( prog, W, i, full ? a : mul * share );
+			const float * attrs[8] = { m.pos.constData(), m.col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
+				m.uv.constData() };
+			r->drawShape( m.nv, 0x20000043ULL, unsigned( m.idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs,
+				m.idx.constData() );
 			r->stopProgram();
-			skipped << QString( "%1(%2 did not resolve)" ).arg( i ).arg( skyTexPath( s.w.cloudTex[i] ) );
-			continue;
+			drawn << tag;
 		}
-		skyState( r, true, false );
-		prog->uni1i( "Tex", 0 );
-		prog->uni1b( "probe", false );
-		layerUniforms( prog, i, full ? a : mul );
-		const float * attrs[8] = { m.pos.constData(), m.col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
-			m.uv.constData() };
-		r->drawShape( m.nv, 0x20000043ULL, unsigned( m.idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs,
-			m.idx.constData() );
-		r->stopProgram();
-		drawn << QString::number( i );
 	}
 	drew << QString( "clouds:drawn=%1%2 t=%3" ).arg( drawn.isEmpty() ? QStringLiteral( "none" ) : drawn.join( QChar( ',' ) ),
 		skipped.isEmpty() ? QString() : QStringLiteral( " skipped=" ) + skipped.join( QChar( ',' ) ) )
@@ -2027,28 +2136,33 @@ bool wwLookdevCloudLayers( Scene * scene, QVector<WwCloudLayerIn> & out, QString
 				eye[i] -= vt.rotation( j, i ) * vt.translation[j] / sc;
 	}
 	const int n = ms ? std::min( int( ms->size() ), 32 ) : 32;
+	const int nSrc = s.w.blending() ? 2 : 1;	// lane WEATHERBLEND1: the left weather's layer x (1 - pct) first
 	for ( int i = 0; i < n; i++ ) {
-		if ( s.w.cloudDisabled & ( 1u << i ) )
-			continue;
-		WwCloudLayerIn L;
-		L.layer = i;
-		EsmWeather::blendCloud( s.w, i, f.c.keys, L.rgb, &L.alpha );
-		if ( L.alpha <= 0.0f || s.w.cloudTex[i].isEmpty() )
-			continue;
-		L.tex = skyTexPath( s.w.cloudTex[i] );
-		const int li = ( quint32( i ) >= s.w.cloudLayers ) ? 0 : i;
-		L.uvOffset[0] = wwCloudOffset( EsmWeather::cloudSpeed( s.w.cloudSpeedX[li], s.gmst ), secs );
-		L.uvOffset[1] = wwCloudOffset( EsmWeather::cloudSpeed( s.w.cloudSpeedY[li], s.gmst ), secs );
-		if ( ms && !ms->at( i ).idx.isEmpty() ) {
-			const SkyMesh & m = ms->at( i );
-			L.pos = m.pos.constData();
-			L.col = m.col.constData();
-			L.uv = m.uv.constData();
-			L.nv = int( m.nv );
-			L.idx = m.idx.constData();
-			L.nIdx = int( m.idx.size() );
+		for ( int src = nSrc - 1; src >= 0; src-- ) {
+			const WwWeatherData & W = src ? *s.w.last : s.w;
+			if ( W.cloudDisabled & ( 1u << i ) )
+				continue;
+			WwCloudLayerIn L;
+			L.layer = i;
+			EsmWeather::blendCloud( s.w, i, f.c.keys, L.rgb, &L.alpha );
+			L.alpha *= nSrc == 1 ? 1.0f : ( src ? 1.0f - s.w.transPct : s.w.transPct );
+			if ( L.alpha <= 0.0f || W.cloudTex[i].isEmpty() )
+				continue;
+			L.tex = skyTexPath( W.cloudTex[i] );
+			const int li = ( quint32( i ) >= W.cloudLayers ) ? 0 : i;
+			L.uvOffset[0] = wwCloudOffset( EsmWeather::cloudSpeed( W.cloudSpeedX[li], s.gmst ), secs );
+			L.uvOffset[1] = wwCloudOffset( EsmWeather::cloudSpeed( W.cloudSpeedY[li], s.gmst ), secs );
+			if ( ms && !ms->at( i ).idx.isEmpty() ) {
+				const SkyMesh & m = ms->at( i );
+				L.pos = m.pos.constData();
+				L.col = m.col.constData();
+				L.uv = m.uv.constData();
+				L.nv = int( m.nv );
+				L.idx = m.idx.constData();
+				L.nIdx = int( m.idx.size() );
+			}
+			out << L;
 		}
-		out << L;
 	}
 	if ( why )
 		*why = ( scene && !ms ) ? mwhy : QString();
@@ -2567,6 +2681,16 @@ bool wwLookdevImageSpaceDof( float a[4], float b[4], float & t, bool & haveA, bo
 	}
 	haveA = s.w.hasDof[ka];
 	haveB = s.w.hasDof[kb];
+	if ( s.w.blending() ) {	// lane WEATHERBLEND1: the left weather's DOF x (1 - pct)
+		const WwWeatherData & W = *s.w.last;
+		const float p = s.w.transPct;
+		for ( int i = 0; i < 4; i++ ) {
+			a[i] = a[i] * p + W.dof[ka][i] * ( 1.0f - p );
+			b[i] = b[i] * p + W.dof[kb][i] * ( 1.0f - p );
+		}
+		haveA = haveA || W.hasDof[ka];
+		haveB = haveB || W.hasDof[kb];
+	}
 	t = f.c.keys.t;
 	return true;
 }
@@ -2580,7 +2704,17 @@ bool wwLookdevWind( quint8 out[4] )
 	out[1] = s.w.windDir;
 	out[2] = s.w.windDirRange;
 	out[3] = s.w.windTurb;
+	if ( s.w.blending() && s.w.last->hasWind ) {	// lane WEATHERBLEND1: speed and turbulence blend on pct (the game's)
+		const float p = s.w.transPct;
+		out[0] = quint8( std::lround( float( s.w.windSpeed ) * p + float( s.w.last->windSpeed ) * ( 1.0f - p ) ) );
+		out[3] = quint8( std::lround( float( s.w.windTurb ) * p + float( s.w.last->windTurb ) * ( 1.0f - p ) ) );
+	}
 	return true;
+}
+
+bool wwLookdevWeatherChanging()
+{
+	return bool( st().w.last );
 }
 
 /* ------------------------------------------------------------------------
@@ -2611,7 +2745,9 @@ QString wwLookdevSkyPictureKey()
 		.arg( s.gameDay, 0, 'f', 2 ).arg( int( s.sky ) ).arg( int( s.clouds ) ).arg( s.haveWeather ? 1 : 0 ) + loadKeyPart( s )
 		// lane SKYA (SKYGI1): only while the probes take the physical sky (Off: today's key, character for character)
 		+ ( wwAtmoGiActive() ? QStringLiteral( "|atmo gi tier %1 tint %2 red %3" ).arg( wwAtmoTier() ).arg( wwAtmoTint() )
-			.arg( wwAtmoGiRedDome() ? 1 : 0 ) : QString() );
+			.arg( wwAtmoGiRedDome() ? 1 : 0 ) : QString() )
+		// lane WEATHERBLEND1: a change recaptures in 1% steps
+		+ ( s.w.blending() ? QStringLiteral( "|change %1 %2" ).arg( s.w.last->edid ).arg( double( s.w.transPct ), 0, 'f', 2 ) : QString() );
 }
 
 void wwLookdevSetSkyCaptureZ( float z )

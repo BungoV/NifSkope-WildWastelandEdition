@@ -202,6 +202,10 @@ bool wwLookdevImageSpaceDof( float a[4], float b[4], float & t, bool & haveA, bo
  *  false (out untouched) when no weather is loaded or its DATA is short */
 bool wwLookdevWind( quint8 out[4] );
 
+/*! lane WEATHERBLEND1: true while a weather change blends the weather left behind into the new one (the views ask
+ *  for frames until it ends) */
+bool wwLookdevWeatherChanging();
+
 //! cube background (replaces drawSkyBox in Lookdev); true = the colour buffer is written
 bool wwLookdevDrawBackground( Scene * scene );
 //! the ground quad at the lowest visible vertex; no-op when the Ground row is off
