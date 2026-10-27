@@ -14,8 +14,8 @@ import sys
 WANT = [
     ('World', ['Cell borders', 'Ground', 'Water', 'Markers', 'Disabled references', 'Grass', 'Particles',
                'Previs', 'Culling', 'Far LOD', 'Far LOD source']),
-    ('Lighting', ['Cell lights', 'Precomputed Radiance Transfer', 'Sky visibility', 'Far light', 'Debug view', 'Light shadows', 'AO',
-                  'AO decals', 'GPU relight']),
+    ('Lighting', ['Cell lights', 'Precomputed Radiance Transfer', 'Sky visibility', 'Far light', 'Debug view', 'Light shadows', 'Ambient Occlusion', 'Ambient Occlusion method',
+                  'Ambient occlusion decals', 'GPU relight']),
     ('Effects', ['Imagespace', 'Temporal AA', 'Improved Temporal Anti-Aliasing', 'Before tone map', 'Screen-Space Reflections', 'Depth of field', 'Motion blur', 'Bloom', 'Groups']),
 ]
 # what the old panel called the two drop-downs' jobs: their current values / item names

@@ -463,7 +463,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 			"World/Cell borders", "World/Ground", "World/Water", "World/Markers", "World/Disabled references",
 			"World/Grass", "World/Particles", "World/Previs", "World/Culling", "World/Far LOD", "World/Far LOD source",
 			"Lighting/Cell lights", "Lighting/Precomputed Radiance Transfer", "Lighting/Sky visibility", "Lighting/Far light", "Lighting/Debug view",
-			"Lighting/Light shadows", "Lighting/AO", "Lighting/AO decals", "Lighting/GPU relight",
+			"Lighting/Light shadows", "Lighting/Ambient Occlusion", "Lighting/Ambient Occlusion method", "Lighting/Ambient occlusion decals", "Lighting/GPU relight",
 			"Effects/Imagespace", "Effects/Temporal AA", "Effects/Improved Temporal Anti-Aliasing", "Effects/Before tone map", "Effects/Screen-Space Reflections",
 			"Effects/Depth of field", "Effects/Motion blur", "Effects/Bloom", "Effects/Groups" };	// OPENCELLFIX2 notes 19, 20, 18
 		add( "SHOWMENU1: the Show dropdown holds every viewport switch in its section, in order",

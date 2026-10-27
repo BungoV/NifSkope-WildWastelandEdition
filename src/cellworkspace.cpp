@@ -708,8 +708,29 @@ void CellWorkspacePanel::buildUi()
 		a->setData( k );
 		lookActions.append( a );
 	}
-	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
-	cellAoDecal = tick( showMenu, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
+	cellAo = tick( showMenu, tr( "Ambient Occlusion" ), "CellWorkspaceAo", wwCellAoOn() );	// note 25: no abbreviations
+	{	// lane OPENCELLFIX2 item 27 (lane SSAO2's methods): inline on the Ambient Occlusion row; a pin greys it
+		QMenu * m = showMenu->addMenu( tr( "Ambient Occlusion method" ) );
+		m->setObjectName( QStringLiteral( "CellWorkspaceAoMethod" ) );
+		auto * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		const QStringList names = { tr( "Vanilla Screen-Space Ambient Occlusion" ), tr( "Ground Truth Ambient Occlusion" ),
+			tr( "Intel Xe Ground Truth Ambient Occlusion" ), tr( "Horizon-Based Ambient Occlusion Plus" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == wwCellAoMethod() );
+			grp->addAction( a );
+		}
+		m->menuAction()->setEnabled( !wwCellAoMethodPinned() );
+		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
+			wwCellAoSetMethod( a->data().toInt() );	// WW/CellAoMethod
+			if ( glView )
+				glView->update();
+		} );
+	}
+	cellAoDecal = tick( showMenu, tr( "Ambient occlusion decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
 	cellSpecOcc = tick( showMenu, tr( "Sky specular occlusion" ), "CellWorkspaceSkySpecOcc", wwCellSpecOccOn() );	// lane SPECOCC1
 	cellSpecOcc->setEnabled( !wwCellSpecOccPinned() );
 	cellGiGpu = tick( showMenu, tr( "GPU relight" ), "CellWorkspaceGpuRelight", wwCellGiGpuOn() );
@@ -1141,7 +1162,7 @@ void CellWorkspacePanel::buildUi()
 		look( WwLook::TerrGroundGate, tr( "Object LOD shadows on ground only" ) );
 		look( WwLook::FarCardShadows, tr( "Far tree card shadows" ) );
 		look( WwLook::TerrPbrDim, tr( "PBR ambient in terrain shadow" ) );
-		head( F, "CellWorkspaceAo", "", -1, false, QStringList(), tr( "Ambient Occlusion" ) );
+		head( F, "CellWorkspaceAo", "CellWorkspaceAoMethod" );	// item 27: the method inline, right-aligned
 		head( F, "CellWorkspaceSsgi", "CellWorkspaceSsgiQuality", -1, true );
 		master( F, WwGroup::Reflections );
 		kid( "CellWorkspaceReflProbe", tr( "Probes" ) );

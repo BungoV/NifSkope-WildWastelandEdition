@@ -23,8 +23,25 @@
 - **One dropdown:** `src/ui/widgets/wwdropdown.*` (WwDropdown) is the toolbar's Object Mode selector, text only. Every
   dock dropdown and the mode button use `WwDropdown::applyStyle`.
 - **Removed:** the "Show" button to the right of the Color row.
-- **Tests:** tests/opencell and tests/cellshow, with new rows in the in-app Cell workspace test. Reds:
-  `WW_OPENCELL_RED=lang|dblclick`, `WW_CELLSHOW_RED=ticks|groups|dropdown|presets|presetbar|inline|foldrows|showbutton`, `WW_DROPDOWN_RED=1`.
+- **Groups (round 3):** every group is one row (fold arrow, tick, name) with its rows indented in its fold; all folds
+  start closed. Groups run by kind -- lighting, reflections, air, water, distance, surfaces, image, content -- then the
+  plain rows. A group headed by a feature's own tick (Cell lights in Vanilla, Precomputed Radiance Transfer, Improved
+  Volumetric Fog = Volumetric Air, LOD = Far LOD, Improved Temporal Anti-Aliasing, Bloom, Ambient Occlusion,
+  Screen-Space Reflections in Vanilla) has no new key. New masters (`gl/celllooks.h` WwGroup, ship on): Improved Lights
+  (`WW/CellImprovedLights`), Cell lights, Shadows, Emittance, Screen-Space Reflections (probes), Improved Sky, Improved
+  Water, Decals, Camera, Objects (`WW/CellGroup*`); Shadows, Camera and Bloom have a Vanilla master too. A master off
+  reads its rows off and keeps their own keys; an env pin still wins. Red `WW_CELLGROUP_RED=<name>`.
+- **Screen-Space Reflections** is one tick for indoors and outdoors (both keys; red `WW_CELLGROUP_RED=ssr`).
+- **Scene window:** full names (Temporal Anti-Aliasing, Improved Temporal Anti-Aliasing, Screen-Space Shadows,
+  Fusion Shaders Shadow Rules, Screen-Space Ambient Occlusion, Screen-Space Global Illumination, Bloom Fusion Shaders).
+  Its fog and shadow rows and the Display rows are one state, each following the other live (red
+  `WW_CELLSHOW_RED=livebind`).
+- **Ambient Occlusion** (merges lane SSAO2): the row's method dropdown inline -- Vanilla Screen-Space Ambient
+  Occlusion, Ground Truth Ambient Occlusion, Intel Xe Ground Truth Ambient Occlusion, Horizon-Based Ambient Occlusion
+  Plus (`WW/CellAoMethod`), greyed on the `WW_CELL_AO_METHOD` pin.
+- **Tests:** tests/opencell, tests/cellshow and tests/cellgroups, with new rows in the in-app Cell workspace test. Reds:
+  `WW_OPENCELL_RED=lang|dblclick`, `WW_CELLSHOW_RED=ticks|groups|dropdown|presets|presetbar|inline|foldrows|showbutton|nest|livebind`,
+  `WW_CELLGROUP_RED=<group>|ssr`, `WW_DROPDOWN_RED=1`.
 
 ## Lane SSAO2 (2026-10-27, branch ssao2-20261027): three more Ambient Occlusion methods, chosen in the Show menu
 
