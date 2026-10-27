@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERCAUSTICS1 (2026-10-27, branch watercaustics1-20261027): sunlight caustics on the bed of shallow water
+
+- **Show row "Water caustics"** (WW/CellWaterCaustics, pin WW_CELL_WATER_CAUSTICS, live, ships off). On, the water draws
+  with fo4_watercaustics.prog (or fo4_waterdepthcaustics.prog with the depth row on too): twins of fo4_water.frag with
+  WW_WATER_CAUSTICS, code in res/shaders/water_caustics.glsl. Off, fo4_water.prog / fo4_waterdepth.prog are unchanged
+  (NVIDIA binaries equal the base's in all 3 modes but the run stamp and the 8-byte source hash).
+- **Where:** the refracted bed seen through baked water (terrain and objects), shallow only: the factor fades with the
+  WATERDATA1/WATERDEPTH1 bed depth (0 from 700 u) and the water's absorption over the light path.
+- **Law (GPU Gems ch.2 / Crest / HDRP style, own code):** four sine ripples with deep-water dispersion; the focus is the
+  area ratio of the refracted sun beam (Jacobian of the ripple slope over the light path to the bed), weighted by the
+  sun's share of the light (sun x shadow vs sky). Animated on the world clock (64 s loop, 8192 u tile, deterministic).
+- **Reds:** WW_CELL_WATER_CAUSTICS_RED=nofade|noshadow|still|flat. Probes WW_CELL_WATER_PROBE=35 (factor / 2) and 36.
+- **Cost (offline, 1080p full screen of shallow bed):** +0.012 ms ALU, about +0.09 ms with a 32-tap shadow read.
+
 ## Lane WATERDEPTH1 (2026-10-27, branch waterdepth1-20261027): water coloured and absorbed by the true bed depth, near and far
 
 - **Show row "Water depth colour"** (WW/CellWaterDepth, pin WW_CELL_WATER_DEPTH, live, ships off). On, the water draws

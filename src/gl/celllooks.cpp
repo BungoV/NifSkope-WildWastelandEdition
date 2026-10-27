@@ -54,6 +54,7 @@ const LookRow kRows[] = {
 	{ "Light patterns", "WW/CellLightPatterns" },
 	{ "Mesh lights (.nifx)", "WW/CellNifxLights" },
 	{ "Water depth colour", "WW/CellWaterDepth" },
+	{ "Water caustics", "WW/CellWaterCaustics" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -223,6 +224,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_DEPTH" ).trimmed() );
 		return p;
 	}
+	case WwLook::WaterCaustics: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_CAUSTICS" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -275,6 +280,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::LightPatterns: return "WW_CELL_GOBO";
 	case WwLook::NifxLights: return "WW_CELL_NIFX_LIGHTS";
 	case WwLook::WaterDepth: return "WW_CELL_WATER_DEPTH";
+	case WwLook::WaterCaustics: return "WW_CELL_WATER_CAUSTICS";
 	default: return "";
 	}
 }

@@ -40,7 +40,9 @@
  *   28 (shore steps, depth code, lookup on) as bytes  29 (body id high byte, low byte, class + 1)
  *   30 cyan where the lookup finds water, red where it finds none  31 depth / 1024 as grey
  *   WATERDEPTH1, only in fo4_waterdepth (the Water depth colour row), water_depth.glsl: 32 the depth used / 1024
- *   as grey, 33 cyan where the bake wins, green where the scene does, red where no depth is known */
+ *   as grey, 33 cyan where the bake wins, green where the scene does, red where no depth is known
+ *   WATERCAUSTICS1, only in the caustic twins (the Water caustics row), water_caustics.glsl: 35 the factor on the
+ *   bed / 2 as grey, 36 (focus I / 8, depth envelope, sun share) (34 is WATERWAVES1's) */
 
 #define WW_FOG 1
 #define WW_CELLLIGHTS 1
@@ -61,8 +63,12 @@ out vec4 fragColor;
 #include "lookdev_fog.glsl"
 #include "cell_lights.glsl"
 #include "water_info.glsl"
-#ifdef WW_WATER_DEPTH
+#if defined( WW_WATER_DEPTH ) || defined( WW_WATER_CAUSTICS )
 #include "water_depth.glsl"
+#endif
+#ifdef WW_WATER_CAUSTICS	// lane WATERCAUSTICS1: the sun's cascades at the bed, then the caustic law
+#include "ww_sunshadow.glsl"
+#include "water_caustics.glsl"
 #endif
 
 uniform vec4 waterMat[13];	// shallow, deep, reflection, underwater, light silt, dark silt, var, p1..p4, amplitude, uv scale
@@ -183,6 +189,11 @@ void main()
 	// the opaque scene point behind this pixel
 	ivec2 px = ivec2( gl_FragCoord.xy ) - viewportDimensions.xy;
 	float vert = 1e9, along = 1e9;
+#ifdef WW_WATER_CAUSTICS
+	vec3 cauSv = vec3( 0.0 );	// lane WATERCAUSTICS1: the scene point behind, view space; its factor and probe values
+	vec3 cauDbg = vec3( 1.0, 0.0, 0.0 );
+	float cauC = 1.0;
+#endif
 	if ( waterSslr == 1 ) {
 		// the obscurance pass's target: .a = the opaque scene's view depth (game units), 0 where nothing drew
 		float gz = texelFetch( waterDepth, ivec2( gl_FragCoord.xy ), 0 ).a;
@@ -199,6 +210,9 @@ void main()
 			vec3 S = cellWorldPos( posView * ( sceneW / max( fragW, 1e-6 ) ) );
 			vert = abs( P.z - S.z );
 			along = length( S - P );
+#ifdef WW_WATER_CAUSTICS
+			cauSv = posView * ( sceneW / max( fragW, 1e-6 ) );
+#endif
 		}
 	}
 	float rz = clamp( 1.0 - vert / P1.w, 0.0, 1.0 );
@@ -262,10 +276,23 @@ void main()
 	// lane WATER2: the depth-colour pass already drawn into the copy: here at this pixel's own distances, at the
 	// offset texel at that texel's (its view ray met with the water's plane, where the water stands before the scene)
 	float offAlong = 0.0, offVert = 0.0, offHit = 0.0;
+#ifdef WW_WATER_CAUSTICS
+	// lane WATERCAUSTICS1: the sun's visibility at the bed (uniform flow: the cascades take derivatives)
+	float cauSh = waterCauShadow ? wwSunShadow( cauSv ) : 1.0;
+#endif
 #ifdef WW_WATER_DEPTH
 	WwWaterBed bed = wwWaterBedAt( P, V, vert, along );	// lane WATERDEPTH1: the bed depth this pixel uses
 #endif
 	if ( !under && waterSslr == 0 ) {
+#ifdef WW_WATER_CAUSTICS
+		// lane WATERCAUSTICS1: under a baked body, on the drawn bed (not the bake's), before the depth colour takes it
+		float cauBd = wwWaterBedDepth( P );
+		if ( cauBd >= 0.0 && vert < 1e8 && vert <= cauBd + 256.0 ) {
+			cauC = wwWaterCaustic( cellWorldPos( cauSv ), vert, normalize( cellWorldDir( LightDir ) ), D.rgb * D.rgb,
+				0.5 * ( waterSky[0].rgb + waterSky[2].rgb ), cauSh, cauDbg );
+			refr *= cauC;
+		}
+#endif
 #ifdef WW_WATER_DEPTH
 		refr = bed.baked ? depthFog( waterMat[0].rgb, bed.along, bed.vert ) : depthFog( refr, along, vert );
 #else
@@ -372,6 +399,10 @@ void main()
 		else if ( waterProbe == 32 || waterProbe == 33 )	// WATERDEPTH1: 32 the depth used / 1024 grey; 33 baked cyan, scene green, none red
 			o = waterProbe == 32 ? vec3( clamp( bed.vert / 1024.0, 0.0, 1.0 ) )
 				: bed.baked ? vec3( 0.0, 1.0, 1.0 ) : bed.known ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 );
+#endif
+#ifdef WW_WATER_CAUSTICS
+		else if ( waterProbe == 35 || waterProbe == 36 )	// WATERCAUSTICS1: 35 the factor / 2 grey; 36 (I / 8, env, share)
+			o = waterProbe == 35 ? vec3( clamp( cauC * 0.5, 0.0, 1.0 ) ) : vec3( cauDbg.x / 8.0, cauDbg.y, cauDbg.z );
 #endif
 		fragColor = vec4( o, 1.0 );
 	}

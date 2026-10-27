@@ -47,6 +47,7 @@ enum class WwLook : int
 	LightPatterns,		// GOBO1 (LIGHTS5): a spot light's pattern texture (LIGH gobo) on surfaces, effects and air (WW_CELL_GOBO)
 	NifxLights,			// NIFXLIGHT1: a fixture mesh's .nifx lights replace the placed lights inside it (WW_CELL_NIFX_LIGHTS)
 	WaterDepth,			// WATERDEPTH1: water colour + absorption by the baked bed depth, near and far (WW_CELL_WATER_DEPTH)
+	WaterCaustics,		// WATERCAUSTICS1: the sun's moving caustics on the bed under shallow water (WW_CELL_WATER_CAUSTICS)
 	Count
 };
 

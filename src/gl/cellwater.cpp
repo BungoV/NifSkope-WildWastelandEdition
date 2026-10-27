@@ -8,6 +8,7 @@
 #include "cellwaterinfo.h"	// lane WATERDATA1: the baked water planes
 #include "lookdevstage.h"
 #include "esmwater.h"
+#include "sunshadow.h"	// lane WATERCAUSTICS1: the caustics read the sun's cascades when they are built
 #include "cellworldanim.h"	// lane FXPARITY2: the world clock
 #include "gl/glscene.h"
 #include "gl/gltex.h"
@@ -21,6 +22,7 @@
 #include <QVector>
 
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -238,6 +240,14 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		WW_SWITCH_STATIC( QByteArray, dr, wwEnv( "WW_CELL_WATER_DEPTH_RED" ).trimmed() );
 		prog->uni1i( "waterDepthRed", dr == "flat" ? 1 : dr == "noabsorb" ? 2 : dr == "nearest" ? 3 : 0 );
 	}
+	if ( prog->uniLocation( "waterCauTime" ) >= 0 ) {	// lane WATERCAUSTICS1: the caustic twins only
+		WW_SWITCH_STATIC( QByteArray, cr, wwEnv( "WW_CELL_WATER_CAUSTICS_RED" ).trimmed() );
+		prog->uni1i( "waterCauRed", cr == "nofade" ? 1 : cr == "noshadow" ? 2 : cr == "still" ? 3 : cr == "flat" ? 4 : 0 );
+		// the water's own clock (its noise scroll's): pinned by WW_CELL_WORLDANIM_TIME, 0 with World animation off;
+		// wrapped in double at the shader's 64 s loop (kWwCauLoop) so a long session keeps a float-exact phase
+		prog->uni1f( "waterCauTime", wwCellWorldAnimOn() ? float( std::fmod( wwCellWorldSeconds(), 64.0 ) ) : 0.0f );
+		prog->uni1b( "waterCauShadow", wwSunShadowWanted( scene ) );
+	}
 	// the normals' scroll: lane FXPARITY2, wind direction x speed x the world clock (INFERRED); off: time 0 as before
 	if ( wwCellWorldAnimOn() ) {
 		float s0[4], s1[4];
@@ -320,7 +330,10 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 
 const char * wwCellWaterProgram()
 {
-	return wwLookOn( WwLook::WaterDepth ) ? "fo4_waterdepth.prog" : "fo4_water.prog";
+	const bool cau = wwLookOn( WwLook::WaterCaustics );	// lane WATERCAUSTICS1: its twins
+	if ( wwLookOn( WwLook::WaterDepth ) )
+		return cau ? "fo4_waterdepthcaustics.prog" : "fo4_waterdepth.prog";
+	return cau ? "fo4_watercaustics.prog" : "fo4_water.prog";
 }
 
 bool wwCellWaterWritesLinear()

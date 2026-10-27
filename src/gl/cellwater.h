@@ -58,11 +58,17 @@ bool wwCellWaterSsrWanted( Scene * scene );
  *  no scene behind the water, pure water's absorption (Pope & Fry 1997) on the game's ramp, and the far colour
  *  letting the body through by 1 - F. Off = fo4_water.prog as before. Red WW_CELL_WATER_DEPTH_RED=flat | noabsorb |
  *  nearest; probes WW_CELL_WATER_PROBE=32 (the depth used) and 33 (who wins). */
+/*! lane WATERCAUSTICS1 (2026-10-27): the Water caustics row (WwLook::WaterCaustics, pin WW_CELL_WATER_CAUSTICS) swaps
+ *  in fo4_watercaustics.prog (with the depth row: fo4_waterdepthcaustics.prog): the sun's caustics on the drawn bed
+ *  under a baked water body (res/shaders/water_caustics.glsl), on the world clock, faded by depth, pure water's
+ *  absorption and the sun's cascades. Red WW_CELL_WATER_CAUSTICS_RED=nofade | noshadow | still | flat; probes
+ *  WW_CELL_WATER_PROBE=35 (the factor / 2) and 36 (focus / 8, envelope, sun share). */
 const char * wwCellWaterProgram();
-//! either water program (the row's or the default)
+//! any water program (the rows' twins or the default)
 inline bool wwIsCellWaterProgramName( std::string_view n )
 {
-	return n == "fo4_water.prog" || n == "fo4_waterdepth.prog";
+	return n == "fo4_water.prog" || n == "fo4_waterdepth.prog" || n == "fo4_watercaustics.prog"
+		|| n == "fo4_waterdepthcaustics.prog";
 }
 //! One census line: how many shapes and records this document registered.
 QString wwCellWaterEcho( const void * nif );
