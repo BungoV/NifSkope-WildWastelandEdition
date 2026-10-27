@@ -13,6 +13,7 @@ struct LookRow
 {
 	const char * label;
 	const char * key;
+	bool defOn = false;	// the row's value before the menu ever set it
 };
 
 // the order of WwLook
@@ -53,7 +54,7 @@ const LookRow kRows[] = {
 	{ "Area lights", "WW/CellLightArea" },
 	{ "Light patterns", "WW/CellLightPatterns" },
 	{ "Mesh lights (.nifx)", "WW/CellNifxLights" },
-	{ "Bindless draws", "WW/CellBindless" },
+	{ "Bindless draws", "WW/CellBindlessDraws", true },	// BINDLESSPERF1: faster on c3 + Memory Den; new key so an old OFF does not stick
 	{ "Weather .recx (sky, clouds, night)", "WW/WeatherRecx" },
 	{ "Ground fog from weather", "WW/CellAirGroundDerived" },
 };
@@ -68,7 +69,7 @@ int & rowVal( WwLook l )
 		loaded = true;
 		QSettings s;
 		for ( int k = 0; k < int( WwLook::Count ); k++ )
-			v[k] = s.value( QLatin1String( kRows[k].key ), false ).toBool() ? 1 : 0;
+			v[k] = s.value( QLatin1String( kRows[k].key ), kRows[k].defOn ).toBool() ? 1 : 0;
 	}
 	return v[size_t( l )];
 }

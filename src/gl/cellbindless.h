@@ -9,7 +9,9 @@
  * texture are skipped and counted ("conflicts": the census gate is 0 of them).
  * Reds: WW_BINDLESS_RED=sampler (the handle samples a nearest, mirrored sampler), =pooloff1 (each pooled draw takes
  * the span allocated before its own), =nopool (handles and the buffer, the shapes' own buffers), =cellname (lane BINDLESS2FIX:
- * the twins not taken as cell programs, so no cell uniform reaches them -- the black, fogless frame of the MERGE1026 hold). */
+ * the twins not taken as cell programs, so no cell uniform reaches them -- the black, fogless frame of the MERGE1026 hold),
+ * =slow (lane BINDLESSPERF1: the per-draw path before it -- two vertex array queries, three binds, a texture query and
+ * restore per map; each query waits for the driver's thread, which made the pooled frame slower than the plain one). */
 
 #include "gl/glcontext.hpp"
 
@@ -28,8 +30,11 @@ int slotOf( const char * var );
 
 //! the look is on and this context has the extensions (and the program twins linked)
 bool on();
-//! 0 none, 1 sampler, 2 pooloff1, 3 nopool, 4 cellname
+//! 0 none, 1 sampler, 2 pooloff1, 3 nopool, 4 cellname, 5 slow
 int red();
+//! lane BINDLESSPERF1: on, pooling, and not the slow red: a draw binds its own vertex array only when it is not pooled
+bool fastOn();
+extern GLuint resolvedTex;	// lane BINDLESSPERF1: the 2D texture a bindless sampler's bind chain bound (0: ask GL)
 
 extern bool anyFrozen;	// a texture holds a handle (keeps the off path's test to one load)
 extern bool resolving;	// a bindless sampler resolves its bind (glproperty notes the bind's state)
@@ -70,7 +75,7 @@ struct Geo
 extern Geo geo;
 //! binds the shape's pooled geometry (uploading it when new or changed); false = draw with its own vertex array
 bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigned int ownVao );
-void poolEnd( NifSkopeOpenGLContext::GLFunctions * f );	// rebinds the shape's own vertex array
+void poolEnd( NifSkopeOpenGLContext::GLFunctions * f );	// rebinds the shape's own vertex array (the slow red only)
 void drawElements( NifSkopeOpenGLContext::GLFunctions * f, GLsizei count, std::uintptr_t off );
 void multiDrawElements( NifSkopeOpenGLContext::GLFunctions * f, const GLsizei * counts, const void * const * offs, GLsizei n );
 //! an indirect draw reads the shape's own buffers (its commands hold the shape's own offsets)

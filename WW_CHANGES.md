@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BINDLESSPERF1 (2026-10-27, branch bindlessperf1-20261027): Bindless draws are faster, and on by default
+
+- **Why ON was slower:** every bindless draw asked the driver for state (the bound texture, the bound vertex array, the
+  current program) and rebound the shape's own vertex array before the pool's. With the NVIDIA driver's threaded
+  optimization each such query waits for the driver thread: about 11 ms of CPU per Concord frame.
+- **Fix:** the texture handle comes from the texture the property just bound (no query); the shape's vertex array is
+  bound only when the draw is not pooled; the twin program comes from the cached base program. Draw packets in check
+  mode still restore every binding. Red `WW_BINDLESS_RED=slow` puts the old queries back. CPU subs `bl-geo`, `bl-row`.
+- **Measured (one launch per scene, rows interleaved, GPU ms medians):** Concord c3 5x5 off 121.3 / 122.5, on 117.5 /
+  117.4, old way 146.1 / 145.3. Memory Den off 46.7 / 46.5, on 45.8 / 46.0, old way 47.0 / 48.1. Pictures on == off to
+  the pixel on both scenes; draw packet check 0 mismatches (4190 and 646 draws checked).
+- **"Bindless draws" is now on by default** (new settings key WW/CellBindlessDraws, so an old saved OFF does not keep
+  it off). The pin WW_BINDLESS=0 or the Show-menu row turns it off.
+
 ## Lane OPENCELLFIX1 (2026-10-27, branch opencellfix1-20261027): Open Cell with an MO2 profile opens the whole cell; the Cell dock is tabs
 
 - **The bug:** importing an MO2 profile's plugins.txt listed the mods only. Fallout4.esm, the DLC and the Creation Club

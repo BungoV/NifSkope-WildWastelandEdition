@@ -56,6 +56,7 @@ void subBegin( int sub );
 enum CpuSub { CpuSetup, CpuCellUni, CpuSunUni, CpuFogUni, CpuAoDraw, CpuSsrDraw,
 	// lane FOGPERF1: the air pass's CPU, stage by stage (they sum to the air zone's CPU)
 	CpuAirState, CpuAirSetup, CpuAirClusters, CpuAirTile, CpuAirInject, CpuAirInteg, CpuAirFar, CpuAirTail, CpuAirEcho,
+	CpuBlGeo, CpuBlRow,	// lane BINDLESSPERF1: a bindless draw's pooled geometry bind and its row write
 	CpuSubCount };
 qint64 nowNs();
 void cpuSubAdd( int sub, qint64 ns );

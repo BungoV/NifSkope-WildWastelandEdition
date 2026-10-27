@@ -350,8 +350,17 @@ void BSShape::drawShapes( NodeList * secondPass )
 
 	auto nif = scene->nifModel;
 
-	if ( !nif || !bindShape() )
+	/* lane BINDLESSPERF1: a draw that may take the bindless pool finds its geometry without binding it; its own array is
+	 * bound below only when the draw is not pooled (no vertex array query, one bind a draw) */
+	const bool blDefer = !scene->selecting && scene->renderer && WwBl::fastOn();
+	if ( blDefer )
+		scene->renderer->wwVaoDefer = true;
+	const bool shapeBound = nif && bindShape();
+	if ( blDefer )
+		scene->renderer->wwVaoDefer = false;
+	if ( !shapeBound )
 		return;
+	const unsigned int blOwnVao = blDefer ? scene->renderer->wwShapeVao() : 0u;
 
 	int	selectionFlags = scene->selecting;
 	if ( ( selectionFlags & int(Scene::SelVertex) ) && drawInSecondPass ) [[unlikely]] {
@@ -465,7 +474,16 @@ void BSShape::drawShapes( NodeList * secondPass )
 		glDisable( GL_MULTISAMPLE );
 
 	// lane BINDLESS2: a bindless draw reads its geometry from its vertex layout's arena (one vertex array a layout)
-	if ( !selectionFlags && !hiddenT && numTriangles > 0 ) {
+	if ( blDefer ) {	// lane BINDLESSPERF1
+		bool pooled = false;
+		const auto * cp = context->getCurrentProgram();
+		if ( !hiddenT && numTriangles > 0 && cp && cp->wwBindless ) {
+			PassTime::DrawCpuScope blT( PassTime::CpuBlGeo );
+			pooled = WwBl::poolBind( this, context->fn, blOwnVao );
+		}
+		if ( !pooled )
+			context->fn->glBindVertexArray( blOwnVao );
+	} else if ( !selectionFlags && !hiddenT && numTriangles > 0 ) {
 		const auto * cp = context->getCurrentProgram();
 		if ( cp && cp->wwBindless ) {
 			GLint ownVao = 0;

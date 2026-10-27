@@ -1681,8 +1681,10 @@ bool BSShaderLightingProperty::bind( const QStringView & fname, bool forceTextur
 		GLint blTex = GLint( scene->textures->wwParamPeek() );
 		if ( !blTex )
 			glGetIntegerv( GL_TEXTURE_BINDING_2D, &blTex );
-		if ( WwBl::resolving )
+		if ( WwBl::resolving ) {
 			WwBl::noteKey( wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() );
+			WwBl::resolvedTex = GLuint( blTex );	// lane BINDLESSPERF1: handleOfBound takes it without a query
+		}
 		wwBlSkip = WwBl::anyFrozen && WwBl::frozenSkip( GLuint( blTex ), wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() );
 	}
 	if ( scene->textures->wwParamsNeeded( wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() ) && !wwBlSkip ) {
