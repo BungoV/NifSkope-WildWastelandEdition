@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
 #include "cellworldanim.h"		// lane FXPARITY2: Animated objects
 #include "cellweapon.h"		// lane MISS1 (GAPLOOK2)
+#include "cellvertexalpha.h"	// lane TERRAINBLOCK1
 #include "cellcable.h"		// lane CABLES1
 #include "celldecal.h"		// lane PLACED1
 #include "esmdata.h"
@@ -4994,8 +4995,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			}
 			/* THE MESH'S OWN VERTEX COLORS (lane PRTPPLACE, 2026-09-30): the loader kept them
 			 * (geom.rgba, only where the game applies them) and this view never drew them -- the
-			 * Concord pickup came out bare rust orange (bungo). An overlay still wins. RGB only:
-			 * the alpha channel's meaning varies by material and this view has no use for it. */
+			 * Concord pickup came out bare rust orange (bungo). An overlay still wins. Alpha: see
+			 * src/cellvertexalpha.h (lane TERRAINBLOCK1). */
 			const bool ownColor = !colouring && s.geom.rgba.size() == nv * 4;
 			shapesVertexColor += ownColor ? 1 : 0;
 			float paletteR = 1.0f;
@@ -5159,6 +5160,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				shapesFromEffectMat++;
 			}
 			const int base = int( b.verts.size() );
+			static const bool vaRed = qgetenv( "WW_CELL_VERTEXALPHA_RED" ) == "1";
+			const bool keepVa = wwCellKeepsVertexAlpha( ownColor, !b.effectMat.isEmpty() || !b.effectBlock.isEmpty(),
+				cableSway, s.geom.vertexAlpha, s.nearFacts.treeAnim, vaRed );
 			for ( size_t v = 0; v < nv; v++ ) {
 				const Vector3 lp( s.geom.pos[v * 3 + 0], s.geom.pos[v * 3 + 1],
 					s.geom.pos[v * 3 + 2] );
@@ -5189,8 +5193,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					o.chan[c] = ownColor ? float( s.geom.rgba[v * 4 + size_t( c )] ) / 255.0f : rgb[c];
 				if ( repaint )
 					o.chan[0] *= paletteR;
-				if ( ownColor && ( !b.effectMat.isEmpty() || !b.effectBlock.isEmpty() || cableSway ) )
-					o.chan[3] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f;   // the effect shader's vertex alpha; a cable's wind weight
+				if ( keepVa )
+					o.chan[3] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f;   // the shape's vertex alpha; a cable's wind weight
 				b.verts.push_back( o );
 				for ( int k = 0; k < 3; k++ ) {
 					lo[k] = qMin( lo[k], wp[k] );
