@@ -48,6 +48,7 @@ enum class WwLook : int
 	NifxLights,			// NIFXLIGHT1: a fixture mesh's .nifx lights replace the placed lights inside it (WW_CELL_NIFX_LIGHTS)
 	BindlessDraws,		// BINDLESS2: cell-lit draws read maps + matrices from one per-draw buffer, geometry from arenas (WW_BINDLESS)
 	WeatherRecx,		// WX1: the weather's .recx atmosphere / clouds / night blocks set the sky (WW_WEATHER_RECX)
+	GroundFogDerived,	// FOGHEIGHT1: no groundFog file -> a ground layer from the weather's own fog (WW_CELL_AIR_GROUND_DERIVED)
 	Count
 };
 

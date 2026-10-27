@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FOGHEIGHT1 (2026-10-27, branch fogheight1-20261027): ground fog from the weather's own fog
+
+- **New Show row "Ground fog from weather"** (pin `WW_CELL_AIR_GROUND_DERIVED`, live, ships off). When a weather has
+  no `groundFog` .recx entry, the air gets a ground layer derived from the weather's own fitted fog. Without the layer
+  the record's tall bands leave the air almost flat, about 0.95 of the ground's density at 500 m. With it, a fog
+  weather keeps 85 % of its extinction in a 60 m layer, and a hazy one (V > 5 km) keeps 50 % in 1.2 km.
+  `V = 3/sigma0`; the share and thickness are interpolated on ln V between 1 and 5 km. The street density stays the
+  game's.
+- Precedence: a .recx exact form > wildcard > derived. The FO4CS files shipped for every vanilla Commonwealth weather
+  still win.
+- The burn-off row thins the derived layer the same way it thins a file's layer.
+- The census reads `derived(V .. m share .. thickness .. m strength .. burn-off ..)`, followed by the reason no file
+  matched.
+- Off = today, bit for bit: tests/fogground (an offline gate on the real air code, 40 weather/hour cases × 3 .recx
+  roots × burn-off on/off) prints the same uniforms with the row off as the base code does.
+- Red `WW_CELL_AIR_GROUND_DERIVED_RED=drop` drops the derived layer (the gate's ON checks fail with it).
+- Cost: CPU only. The shader's existing ground term runs whenever s > 0, so the 1080p GPU cost is expected to be
+  about 0 ms. The hold rows measure it.
+
 ## Lane SHORE1 (2026-10-27, branch shore1-20261027): far water shore follows the coast, not the texel grid
 
 - **Far water shore law:** the far water rings used to make a texel wet from one corner sample, so every coast was a
