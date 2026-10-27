@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 3 (2026-10-27, branch waterlook1-20261027): ripples around whatever stands in the water
+
+- **Contact rings** (Ocean waves row). Posts, piers, rocks and actors standing in baked water now send ring trains
+  outward (0.3 m and 0.8 m, each at its own capillary-gravity speed), as strong as the short waves the spectrum
+  leaves unresolved there, fading over about three wavelengths; still water makes none. The contact comes from the
+  opaque scene behind the pixel (the soft edge's own depth): the face it lies on, met with the water's plane, gives the
+  distance and the direction, so every drawn object counts with no object list. A jump in the depth (an object's flank
+  against what lies behind) or a face seen edge-on draws no rings. A train finer than the pixel fades out and its
+  slope variance goes to the glare's roughness. New res/shaders/water_ripple.glsl; uniform waterOceanRip.
+- Red WW_CELL_WATER_OCEAN_RED=norip (no rings). fo4_water.prog (row off) keeps its machine code.
+- Offline (no window): a flat face's distance is exact (median error 1.1%; red, the depth alone: 31%); beside a thin
+  post 0.95 of the truth within 64 u; rings near the post on wavy water, none on calm water or with no depth; the rings
+  travel by the phase given (red: stand still); 6 of 484 jump pixels over what their true distance allows (red: 290);
+  coarse pixels draw no ring and hand its variance on exactly; all 106 programs link.
+
 ## Lane WATERLOOK1 step 2 (2026-10-27, branch waterlook1-20261027): the waves move the water near the camera
 
 - **Displacement near** (Ocean waves row). While the spectrum is built, the baked water draws with

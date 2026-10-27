@@ -111,6 +111,7 @@ uniform int waterProbe;
 #endif
 #ifdef WW_WATER_OCEAN	// lane WATERLOOK1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_ocean.glsl"
+#include "water_ripple.glsl"
 #endif
 #ifdef WW_WATER_DISP	// lane WATERLOOK1 step 2: fo4_waterlookd.prog, the displaced water: the undisplaced world xy (u)
 in vec2 wwOcBase;
@@ -216,6 +217,9 @@ void main()
 	// the opaque scene point behind this pixel
 	ivec2 px = ivec2( gl_FragCoord.xy ) - viewportDimensions.xy;
 	float vert = 1e9, along = 1e9;
+#ifdef WW_WATER_OCEAN
+	vec3 ripS = P;	// lane WATERLOOK1 step 3: the opaque point behind, world
+#endif
 #ifdef WW_WATER_CAUSTICS
 	vec3 cauSv = vec3( 0.0 );	// lane WATERCAUSTICS1: the scene point behind, view space; its factor and probe values
 	vec3 cauDbg = vec3( 1.0, 0.0, 0.0 );
@@ -228,6 +232,9 @@ void main()
 			vec3 S = cellWorldPos( posView * ( gz / max( -posView.z, 1e-6 ) ) );
 			vert = abs( P.z - S.z );
 			along = length( S - P );
+#ifdef WW_WATER_OCEAN
+			ripS = S;
+#endif
 		}
 	} else if ( waterHaveDepth ) {
 		float dz = texelFetch( waterDepth, px, 0 ).r;
@@ -237,6 +244,9 @@ void main()
 			vec3 S = cellWorldPos( posView * ( sceneW / max( fragW, 1e-6 ) ) );
 			vert = abs( P.z - S.z );
 			along = length( S - P );
+#ifdef WW_WATER_OCEAN
+			ripS = S;
+#endif
 #ifdef WW_WATER_CAUSTICS
 			cauSv = posView * ( sceneW / max( fragW, 1e-6 ) );
 #endif
@@ -293,6 +303,12 @@ void main()
 	WwOcean oc = waterOceanOn ? wwWaterOcean( ocP, ocDx, ocDy ) : WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
 	if ( oc.w > 0.0 )
 		N = normalize( vec3( mix( N.xy / max( N.z, 1e-3 ), oc.slope, oc.w ), 1.0 ) );
+	// step 3: the incident short waves reflect off what stands in the water (red norip); uniform flow (derivatives)
+	if ( waterOceanOn && ( waterOceanRed & 64 ) == 0 ) {
+		vec3 rip = wwContactRippleAt( vert, P, ripS, eye, oc.w * sqrt( oc.var ) );
+		N = normalize( vec3( N.xy / max( N.z, 1e-3 ) + rip.xy, 1.0 ) );
+		oc.var += rip.z;
+	}
 #endif
 	vec3 N0 = N;
 	N = normalize( flatten * ( N - vec3( 0.0, 0.0, 1.0 ) ) + vec3( 0.0, 0.0, 1.0 ) );

@@ -60,7 +60,7 @@ int redNow()
 {
 	WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_OCEAN_RED" ).trimmed() );
 	return rr == "old" ? 1 : rr == "tile" ? 2 : rr == "nopatch" ? 4 : rr == "novar" ? 8 : rr == "nochop" ? 16
-		: rr == "flat" ? 32 : 0;
+		: rr == "flat" ? 32 : rr == "norip" ? 64 : 0;
 }
 
 GLuint tex2d( NifSkopeOpenGLContext::GLFunctions * fn, GLint ifmt, int w, int h, GLenum fmt, const float * data )
@@ -353,9 +353,9 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 	if ( wasCull ) fn->glEnable( GL_CULL_FACE );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST );
 	restoreBindings();
-	static const char * const redName[6] = { "old", "tile", "nopatch", "novar", "nochop", "flat" };
+	static const char * const redName[7] = { "old", "tile", "nopatch", "novar", "nochop", "flat", "norip" };
 	QString red;
-	for ( int k = 1; k < 6; k++ )
+	for ( int k = 1; k < 7; k++ )
 		if ( s.red & ( 1 << k ) )
 			red = QStringLiteral( ", RED %1" ).arg( QLatin1String( redName[k] ) );
 	s.why = s.built ? QStringLiteral( "ocean: wind %1 m/s, swell %2 m, Hs sea %3 m, fresh %4 m, gpu %5 ms, displaced %6%7" )
@@ -419,6 +419,15 @@ void wwCellOceanUniforms( Scene * scene, float windDeg )
 		drift[k * 2 + 1] = -std::fmod( dy * run, per );
 	}
 	prog->uni4f( "waterOceanPatch", FloatVector4( float( drift[0] ), float( drift[1] ), float( drift[2] ), float( drift[3] ) ) );
+	/* step 3: the contact rings, 0.3 m and 0.8 m (engineering choices: the short band the eye reads as ripples), each
+	 * at its capillary-gravity speed w^2 = g k + sigma / rho k^3; the phase wrapped in double */
+	double rip[4];
+	for ( int k = 0; k < 2; k++ ) {
+		const double km = 2.0 * WwOcean::kPi / ( k ? 0.8 : 0.3 );	// rad / m
+		rip[k] = km * 0.0142875;	// rad / u
+		rip[2 + k] = std::fmod( std::sqrt( 9.81 * km + 7.4e-5 * km * km * km ) * t, 2.0 * WwOcean::kPi );
+	}
+	prog->uni4f( "waterOceanRip", FloatVector4( float( rip[0] ), float( rip[1] ), float( rip[2] ), float( rip[3] ) ) );
 }
 
 QString wwCellOceanEcho()
