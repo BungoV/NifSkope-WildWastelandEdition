@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 (2026-10-27, branch waterlook1-20261027): the wind's wave spectrum on the baked water
+
+- **Ocean waves row** (Show menu, WW/CellWaterOcean; pin WW_CELL_WATER_OCEAN). The wind's wave spectrum (JONSWAP with
+  directional spread, sea swell, Cox-Munk cap) replaces the vanilla normal maps on every baked body: 3 cascades for
+  the sea and 3 for lakes and rivers, evolved and transformed each frame by a fragment FFT (src/gl/cellocean.cpp,
+  src/gl/oceanspectrum.h, res/shaders/ocean_*.frag, water_ocean.glsl). The slope variance the tiles cannot show goes
+  into the glare's GGX roughness (LEAN), so far water keeps its roughness; whitecaps from the waves' Jacobian. Wind
+  and swell are the shore foam's (the weather's wind byte). Interior and placed water keep today's look.
+- Red WW_CELL_WATER_OCEAN_RED = old | tile | nopatch | novar | nochop; probes WW_CELL_WATER_PROBE=39/40.
+- Offline: FFT vs DFT 1.6e-6; Hs at 1/5/12 m/s within 0.1% of target; no repeat at 1 km; fo4_water.prog (row off)
+  machine code unchanged in 3 modes; build 0.14 ms a frame on an RTX 5070 Ti.
+
 ## Lane WATERFOAMDETAIL1 (2026-10-27, branch waterfoamdetail1-20261027): shore foam by wave energy, a soft waterline
 
 - **Shore foam follows the waves at the shore** (Shore foam row, water_shore.glsl wwShoreFoamWave). Wave height from
