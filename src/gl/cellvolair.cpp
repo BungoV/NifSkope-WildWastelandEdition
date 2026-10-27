@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "gl/cellpasstime.h"
 #include "gl/cellpost.h"
 #include "gl/cellssr.h"
+#include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground layer on the low-pass terrain
 #include "gl/glscene.h"
 #include "gl/glshape.h"	// lane CLOUDLOOK1: the shapes' spheres (vaShapesTop)
 #include "gl/lookdevstage.h"
@@ -365,6 +366,9 @@ struct VaGpu
 	float gi[4] = {};
 	bool csm = false;
 	GLuint noise = 0;	// lane FOGDRIFT1: the drift's noise (R8, repeat)
+	GLuint terr = 0;	// lane FOGTERRAIN1: the low-pass terrain (R32F, clamp)
+	std::uint64_t terrGen = 0;
+	QString terrNote = QStringLiteral( "off" );
 };
 
 /* THE CLUSTERED LIGHTS (coordinator 10-14). The inject evaluates the placed lights once per froxel, at the middle of
@@ -1326,6 +1330,44 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni4f( "airMed", FloatVector4( M.sigma0, M.zb, M.invH, zTop ) );
 	prog->uni4f( "airLayer", FloatVector4( G.w, G.zn, G.invHn, G.s ) );
 	prog->uni4f( "airGround", FloatVector4( G.zg, G.invHg, 0.0f, 0.0f ) );
+	{
+		/* lane FOGTERRAIN1: the ground layer stands on the low-pass terrain (cell_airmed.glsl airGroundAt): its anchor
+		 * rises by the local ground over the fog frame's ground. Exteriors with a layer and a published grid only;
+		 * red WW_FOG_TERRAIN_RED=absolute: the absolute anchor */
+		const WwFogTerrGrid & tg = wwFogTerrainGrid();
+		float gz = 0.0f, gxy[2] = { 0.0f, 0.0f }, gh = 0.0f;
+		const bool exterior = !( L && L->interior );
+		const bool want = wwFogTerrainWanted();
+		if ( want && exterior )
+			wwLookdevGroundFrame( scene, gz, gxy, gh );
+		const bool flat = tg.gen != 0 && wwFogTerrainFlatAt( tg, gz );
+		const bool on = want && exterior && G.s > 0.0f && tg.gen != 0 && tg.nx > 1 && tg.ny > 1 && !flat;
+		if ( on ) {
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirTerrain ) );
+			if ( !g.terr )
+				fn->glGenTextures( 1, &g.terr );
+			fn->glBindTexture( GL_TEXTURE_2D, g.terr );
+			if ( g.terrGen != tg.gen ) {
+				fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R32F, tg.nx, tg.ny, 0, GL_RED, GL_FLOAT, tg.H.data() );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+				g.terrGen = tg.gen;
+			}
+			prog->uni1i( "airTerr", WwCellUnit::AirTerrain );
+			const double sx = 1.0 / ( tg.cell * tg.nx ), sy = 1.0 / ( tg.cell * tg.ny );
+			prog->uni4f( "airTerrXf", FloatVector4( float( sx ), float( -tg.x0 * sx ), float( sy ), float( -tg.y0 * sy ) ) );
+			prog->uni1f( "airTerrRef", gz );
+		}
+		prog->uni1i( "airTerrOn", on ? 1 : 0 );
+		g.terrNote = on ? QStringLiteral( "on(%1x%2 cell=%3 sigma=%4 ref=%5)" ).arg( tg.nx ).arg( tg.ny ).arg( tg.cell, 0, 'f', 0 )
+				.arg( kFogTerrSigma, 0, 'f', 0 ).arg( double( gz ), 0, 'f', 1 )
+			: !want ? QStringLiteral( "off(red absolute)" ) : !exterior ? QStringLiteral( "off(interior)" )
+			: !( G.s > 0.0f ) ? QStringLiteral( "off(no ground layer)" ) : flat ? QStringLiteral( "off(flat at the frame's ground)" )
+			: QStringLiteral( "off(no terrain heights yet)" );
+	}
 	prog->uni1b( "volCsm", csm );
 	prog->uni1i( "volRed", s.red & ~1 );
 	prog->uni1f( "volShell", s.shellStep ? 0.0f : 1.0f );
@@ -1779,6 +1821,8 @@ static void vaPassInner( Scene * scene, bool run )
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirTerrain ) );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	if ( !complete ) {
 		s.last = QStringLiteral( "refused(froxel framebuffer incomplete)" );
 		restore();
@@ -1834,12 +1878,12 @@ static void vaPassInner( Scene * scene, bool run )
 		.arg( g.tileValid && !( s.red & 2097152 ) ? 1 : 0 )
 		.arg( g.tmode );	// lane PERF2: 0 the 4 sub-steps, 1 temporal reprojected, 2 temporal, camera unchanged
 	// the ground layer's echo: what was applied (the near share, the strength, thickness and anchor) and its source
-	const QString groundNote = QStringLiteral( "nearw=%1 ground=%2 thick=%3 zg=%4 recx=%5%6" )
+	const QString groundNote = QStringLiteral( "nearw=%1 ground=%2 thick=%3 zg=%4 terrain=%7 recx=%5%6" )
 		.arg( double( G.w ), 0, 'f', 2 ).arg( double( G.s ), 0, 'g', 4 )
 		.arg( G.invHg > 0.0f ? double( 1.0f / G.invHg ) : 0.0, 0, 'f', 1 ).arg( double( G.zg ), 0, 'f', 1 )
 		.arg( QString( G.recx ).replace( QLatin1Char( ' ' ), QLatin1Char( '_' ) ) )
 		.arg( G.conflict.isEmpty() ? QString() : G.conflict.startsWith( QStringLiteral( "conflict:" ) ) ? QStringLiteral( " recxconflict=1" )
-			: QStringLiteral( " recxoverride=1" ) );
+			: QStringLiteral( " recxoverride=1" ) ).arg( g.terrNote );
 	// lane FARGRID1: the far grid's echo (the grid, its range, builds, GPU ms of its last build, the volumes' bytes)
 	const double volMb = double( g.texW ) * g.texH * g.texD * 16.0 * 2.0 / ( 1024.0 * 1024.0 );
 	const QString farNote = !farOn ? QStringLiteral( "far=off(tier=%1%2)" ).arg( s.farTier )

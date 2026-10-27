@@ -6,6 +6,17 @@
 uniform vec4 airMed;			// sigma0 (per game unit), zb, 1 / H (0: uniform), the top (the fog's height frame)
 uniform vec4 airLayer;			// the near band's share w, zn, 1 / Hn, the ground layer's strength s (cellvolair.cpp VaLayer)
 uniform vec4 airGround;			// the ground layer's anchor zg, 1 / its thickness
+uniform int airTerrOn;			// FOGTERRAIN1: the ground layer follows the low-pass terrain (red absolute: 0)
+uniform sampler2D airTerr;		// the low-pass terrain height, world z (R32F, clamped at its edge)
+uniform vec4 airTerrXf;			// u = x X.x + X.y, v = y X.z + X.w (world)
+uniform float airTerrRef;		// the world z the absolute anchor stands on (the fog frame's 0)
+float airGz = 0.0;				// the local ground's rise over the frame's ground at the current sample (0: the absolute law)
+
+// FOGTERRAIN1: set the ground layer's anchor for world point Pw (the froxel pass; particles keep the absolute law)
+void airGroundAt( vec3 Pw )
+{
+	airGz = airTerrOn != 0 ? texture( airTerr, vec2( Pw.x * airTerrXf.x + airTerrXf.y, Pw.y * airTerrXf.z + airTerrXf.w ) ).r - airTerrRef : 0.0;
+}
 uniform int volRed;				// 2 gioff, 4 flat, 8 noshadow, 16 nolights, 256 physcol, 262144 lightmid, 524288 bluescatter, 4194304 roomstep (1 off, 32 wrongmed, 128 farfit: the CPU's)
 uniform vec4 volPhase[3];		// rgb: the weight of the air (Rayleigh), forward and back terms; w: the HG g (0 for air)
 uniform vec4 volGi;				// rgb: the phase's tint (the three weights summed), w: its L1 g
@@ -41,7 +52,7 @@ float airF( float z )
 // the density per unit sigma0 (lookdev_fog.glsl wwAirRhoLaw: the far band, the near band's share, the ground layer)
 float airRho( float z )
 {
-	return wwAirRhoLaw( z, airMed, airLayer, airGround );
+	return wwAirRhoLaw( z, airMed, airLayer, vec4( airGround.x + airGz, airGround.yzw ) );
 }
 
 // (1 - exp(-u)) / u, precise for small u
@@ -55,7 +66,7 @@ float airE1( float u )
 // near the horizon (the gate's R found it at Sanctuary's foggy band)
 float airCol( float lo, float hi )
 {
-	return wwAirColLaw( lo, hi, airMed, airLayer, airGround );
+	return wwAirColLaw( lo, hi, airMed, airLayer, vec4( airGround.x + airGz, airGround.yzw ) );
 }
 
 // the optical depth of a straight segment of length len (game units) from height za to height zb

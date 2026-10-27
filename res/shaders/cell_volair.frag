@@ -486,12 +486,16 @@ void main()
 	bool scatters = ( volRed & 536870912 ) != 0;
 	for ( int q = 0; q < 4; q++ ) {
 		float ta = mix( t0, t1, float( q ) * 0.25 ), tb = mix( t0, t1, float( q + 1 ) * 0.25 );
+		if ( airTerrOn != 0 )	// FOGTERRAIN1: the ground layer stands on the terrain under each sub-step
+			airGroundAt( cellWorldPos( dirView * ( 0.5 * ( ta + tb ) / fogDistScale ) ) );
 		tauQ[q] = airOd( zc + dzdt * ta, zc + dzdt * tb, tb - ta );
 		if ( volDrift.x > 0.0 )	// lane FOGDRIFT1: one noisy density for every term below (the lamps' glow too)
 			tauQ[q] *= airDrift( dirView, 0.5 * ( ta + tb ) );
 		scatters = scatters || air1mE( tauQ[q] ) > 0.0;
 	}
 	float keep = fogK[0].x + fogK[1].x + fogK[2].x + fogK[3].x + fogK[4].x + fogK[5].x;
+	if ( airTerrOn != 0 )	// the lights, sun and GI terms: the ground under the slice's middle
+		airGroundAt( cellWorldPos( dirView * ( tm / fogDistScale ) ) );
 	if ( volTemporal != 0 ) {
 		/* lane PERF2: temporal reuse, as shipped games reuse past fog frames. One stratum (sub-step) a frame is fresh: its
 		 * sun and its placed-light samples, the costly terms. The other three come from the history at this froxel's

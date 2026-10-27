@@ -273,6 +273,7 @@ HEADERS += \
 	src/gl/cellnifxlights.h \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
+	src/gl/fogterrain.h \
 	src/gl/cellpasstime.h \
 	src/gl/geokeepclock.h \
 	src/gl/cellqueue.h \
@@ -579,6 +580,7 @@ SOURCES += \
 	src/gl/cellnifxlights.cpp \
 	src/gl/cellaodecalgl.cpp \
 	src/gl/cellvolair.cpp \
+	src/gl/fogterrain.cpp \
 	src/gl/cellpasstime.cpp \
 	src/gl/cellqueue.cpp \
 	src/gl/celldrawpacket.cpp \
