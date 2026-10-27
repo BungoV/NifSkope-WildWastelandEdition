@@ -65,8 +65,10 @@ bool wwCellWaterSsrWanted( Scene * scene );
 /*! lane WATERCAUSTICS1 (2026-10-27): the Water caustics row (WwLook::WaterCaustics, pin WW_CELL_WATER_CAUSTICS):
  *  the sun's caustics on the drawn bed
  *  under a baked water body (res/shaders/water_caustics.glsl), on the world clock, faded by depth, pure water's
- *  absorption and the sun's cascades. Red WW_CELL_WATER_CAUSTICS_RED=nofade | noshadow | still | flat; probes
- *  WW_CELL_WATER_PROBE=35 (the factor / 2) and 36 (focus / 8, envelope, sun share). */
+ *  absorption and the sun's cascades. Red WW_CELL_WATER_CAUSTICS_RED=nofade | noshadow | still | flat | lattice
+ *  (CAUSTICPATTERN1: the old four-sine law); probes WW_CELL_WATER_PROBE=35 (the factor / 2) and 36 (the net's E / 8,
+ *  envelope, sun share). CAUSTICPATTERN1 (10-27): the pattern is a warped, animated Voronoi net of thin filaments,
+ *  two octaves, the bed's mean light kept (notes causticpattern1). */
 const char * wwCellWaterProgram();
 //! lane WATERCOMBINE1: any water look row is on (the water draws with fo4_waterlook.prog)
 bool wwCellWaterLookOn();

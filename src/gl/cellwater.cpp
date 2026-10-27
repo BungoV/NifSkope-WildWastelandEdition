@@ -250,7 +250,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	if ( prog->uniLocation( "waterCauTime" ) >= 0 ) {	// lane WATERCAUSTICS1: fo4_waterlook only
 		prog->uni1b( "waterCauOn", wwLookOn( WwLook::WaterCaustics ) );	// lane WATERCOMBINE1: its own row
 		WW_SWITCH_STATIC( QByteArray, cr, wwEnv( "WW_CELL_WATER_CAUSTICS_RED" ).trimmed() );
-		prog->uni1i( "waterCauRed", cr == "nofade" ? 1 : cr == "noshadow" ? 2 : cr == "still" ? 3 : cr == "flat" ? 4 : 0 );
+		prog->uni1i( "waterCauRed", cr == "nofade" ? 1 : cr == "noshadow" ? 2 : cr == "still" ? 3 : cr == "flat" ? 4
+			: cr == "lattice" ? 5 : 0 );	// lane CAUSTICPATTERN1: lattice = WATERCAUSTICS1's four-sine law
 		// the water's own clock (its noise scroll's): pinned by WW_CELL_WORLDANIM_TIME, 0 with World animation off;
 		// wrapped in double at the shader's 64 s loop (kWwCauLoop) so a long session keeps a float-exact phase
 		prog->uni1f( "waterCauTime", wwCellWorldAnimOn() ? float( std::fmod( wwCellWorldSeconds(), 64.0 ) ) : 0.0f );

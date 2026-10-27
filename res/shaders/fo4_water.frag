@@ -46,7 +46,7 @@
  *   wins, green where the scene does, red where no depth is known
  *   WATERWAVES1 (Water swell row), water_waves.glsl: 34 (0.5 + 4 x the swell's slope x, y; its weight)
  *   WATERCAUSTICS1 (Water caustics row), water_caustics.glsl: 35 the factor on the bed / 2 as grey,
- *   36 (focus I / 8, depth envelope, sun share)
+ *   36 (focus I / 8, depth envelope, sun share); CAUSTICPATTERN1: green channel, I = the net's light factor E
  *   WATERSHORE1 (Water soft edge, Shore foam rows), water_shore.glsl: 37 (edge, foam, shore distance / 1024)
  *   (was 32 in the shore lane's own twin, which clashed with the depth probe) */
 
@@ -306,6 +306,8 @@ void main()
 #ifdef WW_WATER_CAUSTICS
 	// lane WATERCAUSTICS1: the sun's visibility at the bed (uniform flow: the cascades take derivatives)
 	float cauSh = waterCauOn && waterCauShadow ? wwSunShadow( cauSv ) : 1.0;
+	// lane CAUSTICPATTERN1: the bed's footprint per pixel (u), widening the net's lines so they never sparkle
+	float cauFw = min( length( fwidth( cellWorldPos( cauSv ).xy ) ), 64.0 );
 #endif
 #ifdef WW_WATER_DEPTH
 	WwWaterBed bed = WwWaterBed( false, false, 1e9, 1e9 );	// lane WATERDEPTH1: the bed depth this pixel uses
@@ -317,9 +319,10 @@ void main()
 		// lane WATERCAUSTICS1: under a baked body, on the drawn bed (not the bake's), before the depth colour takes it
 		float cauBd = waterCauOn ? wwWaterBedDepth( P ) : -1.0;
 		if ( cauBd >= 0.0 && vert < 1e8 && vert <= cauBd + 256.0 ) {
-			cauC = wwWaterCaustic( cellWorldPos( cauSv ), vert, normalize( cellWorldDir( LightDir ) ), D.rgb * D.rgb,
-				0.5 * ( waterSky[0].rgb + waterSky[2].rgb ), cauSh, cauDbg );
-			refr *= cauC;
+			vec3 cauC3 = wwWaterCaustic( cellWorldPos( cauSv ), vert, normalize( cellWorldDir( LightDir ) ), D.rgb * D.rgb,
+				0.5 * ( waterSky[0].rgb + waterSky[2].rgb ), cauSh, cauFw, cauDbg );
+			cauC = cauC3.g;	// CAUSTICPATTERN1: per channel (the edges' colour split); the probes read green
+			refr *= cauC3;
 		}
 #endif
 #ifdef WW_WATER_DEPTH
