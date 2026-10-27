@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERDATA1 (2026-10-27, branch waterdata1-20261027): the baked water planes bound to the water shader (data only, no visible change)
+
+- **What it binds:** the worldspace .lodl's water planes (body id, shore distance, surface delta) and its body table,
+  plus a depth derived from them (body height + surface delta - ground), for every water surface fo4_water.prog draws,
+  near and far. New files src/gl/cellwaterinfo.{h,cpp} and res/shaders/water_info.glsl (`wwWaterInfo(worldXY)` =
+  shore distance, depth, body id, class). Later water look lanes (shore, depth, underwater, waves, caustics) read it.
+- **Layout:** one 32-bit word a 128 u texel (id | shore << 16 | depth code << 24, depth code = sqrt(depth / 8192)).
+  An index of 16 x 16-texel tiles (RG32UI) holds a uniform tile's word itself; only the other tiles go into an
+  atlas (R32UI, 64 tiles a row). A wet tile counts as uniform when its depths span 64 u or less (it keeps the mean).
+  Body table RGBA32F, 256 bodies a row. Commonwealth (10-24 bake): 13,688 of 147,456 tiles sparse, 14.51 MB on the
+  GPU, built on a worker thread in 1.5 s. A water pixel costs 2 fetches (index, atlas) plus 1 for the class.
+- **No visible change:** the default fo4_water program does not read the lookup, and its NVIDIA binary is the
+  same as main's in all 3 modes except the 8-byte source hash (offline, notes/waterdata1). The probes 28..31
+  (shore/depth bytes, body id + class, found-water cyan/red, depth grey) live only in the
+  `WW_CELL_WATER_INFO_PROBE=1` build. `WW_CELL_WATER_INFO_RED=off` (live) makes the lookup answer neutral values.
+- **Telemetry:** the cell census prints "water info: ..." (counts, bytes, build time), and the first upload logs
+  "water info uploaded: ..." with the sizes and formats read back from the GL.
+- **CLI:** `nifskope -no-gui lodl <file.lodl> --water-info <dir>` writes index.u32, atlas.u32, bodies.f32 and
+  census.txt. Offline gates: the dump equals an independent Python build word for word, and the shader lookup read
+  back on every texel of the map equals the reference (each gate with a red).
+- Also: LodtFile::waterTileEdge / waterTileUniform (a plane's tile store). The live hold is owed after the merge
+  (notes/waterdata1/hold.sh, rows.txt).
+
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
 - **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,

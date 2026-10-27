@@ -60,6 +60,7 @@ BSD License - see nifskope.h
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1)
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellwater.h"	// lane WATER1
+#include "gl/cellwaterinfo.h"	// lane WATERDATA1
 #include "gl/cellcull.h"	// lane SUNCELL1: the per-placement culling runs
 #include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
@@ -6845,6 +6846,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			streamInit ? &farStream : nullptr );
 		CellSpeed::mark( "far LOD appended" );
 	}
+	if ( !chunk ) {	// lane WATERDATA1: the worldspace's baked water planes, far LOD on or off ("" = interior)
+		QStringList infoSearched;
+		wwCellWaterInfoSet( nif, spec.interior ? QString() : !liveFarLodl.isEmpty() ? liveFarLodl
+			: cellFarLodl( spec.world, dataRoot, infoSearched ) );
+	}
 
 	nif->holdUpdates( false );
 	nif->updateModel();
@@ -7311,6 +7317,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		s << "  water: " << waterCells << " cells\n";
 		// lane WATER1: the surfaces the game's water terms draw, and the placed water meshes among them
 		s << "  " << wwCellWaterEcho( nif ) << "; placed water shapes " << placedWaterShapes << "\n";
+		s << "  " << wwCellWaterInfoEcho( nif ) << "\n";   // lane WATERDATA1
 		s << "  " << wwCellGrassEcho( nif ) << "\n";   // lane GRASSMB1
 		/* lane WATER1: the reader gate's records -- WW_CELL_WATER_DUMP_FORMS=<hex,hex,...> describes each into
 		 * WW_CELL_WATER_DUMP + ".forms" (a form that is no WATR: "WATR <form> NONE") */
