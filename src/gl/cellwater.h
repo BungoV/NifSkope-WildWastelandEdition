@@ -43,6 +43,10 @@ void wwCellWaterRemap( const void * nif, const WwBlockMap & m );
 bool wwCellWaterWanted( Scene * scene, int block );
 //! Lane SUNCELL1: `block` is a registered water surface (row or not): it never casts a sun shadow, as in the game.
 bool wwCellWaterIsShape( const void * nif, int block );
+//! lane WATERLOOK1: the document registered any water shape (the ocean pass builds only then)
+bool wwCellWaterHasShapes( const void * nif );
+//! lane WATERLOOK1: the shore foam's drive (the weather's wind as 1-20 m/s, 5 with none; the sea swell in m)
+void wwCellWaterDrive( float & windMs, float & swellM );
 //! lane CELLALL1: the Water row (WW/CellWater, default on as before); the pin WW_CELL_WATER wins
 bool wwCellWaterOn();
 void wwCellWaterSetOn( bool on );

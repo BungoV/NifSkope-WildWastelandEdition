@@ -13,6 +13,7 @@
 #include "cellworldanim.h"	// lane FXPARITY2: the world clock
 #include "cellunits.h"	// lane WATERREFL1: the noise layers' moment textures
 #include "cloudmap.h"	// lane WATERREFL1: the weather's clouds in the reflected sky
+#include "cellocean.h"	// lane WATERLOOK1: the wind's wave spectrum
 #include "gl/glscene.h"
 #include "gl/gltex.h"
 #include "gl/renderer.h"
@@ -275,6 +276,18 @@ bool wwCellWaterIsShape( const void * nif, int block )
 	return it != s.docs.constEnd() && it->shapeBody.contains( block );
 }
 
+bool wwCellWaterHasShapes( const void * nif )
+{
+	const WaterState & s = st();
+	const auto it = s.docs.constFind( nif );
+	return it != s.docs.constEnd() && !it->shapeBody.isEmpty();
+}
+
+void wwCellWaterDrive( float & windMs, float & swellM )
+{
+	foamDrive( st(), windMs, swellM );
+}
+
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 {
 	WaterState & s = st();
@@ -482,6 +495,9 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 			cm.band[WwCloudHigh].coverage, 0.0f ) );
 		prog->uni3f( "waterCloudTint", cm.band[WwCloudLow].tint[0], cm.band[WwCloudLow].tint[1], cm.band[WwCloudLow].tint[2] );
 	}
+	// lane WATERLOOK1 (water_ocean.glsl): the wind's spectrum, built this frame by wwCellOceanPass; the tiles run along the wind
+	if ( prog->uniLocation( "waterOceanOn" ) >= 0 )
+		wwCellOceanUniforms( scene, b.rec.windDirection[0] );
 	fn->glActiveTexture( GL_TEXTURE0 );
 
 	// an opaque surface: it composites the scene behind it itself
@@ -508,7 +524,8 @@ bool wwCellWaterLookOn()
 {
 	return wwLookOn( WwLook::WaterDepth ) || wwLookOn( WwLook::WaterCaustics ) || wwLookOn( WwLook::WaterSoftEdge )
 		|| wwLookOn( WwLook::ShoreFoam ) || wwLookOn( WwLook::WaterSwell ) || wwLookOn( WwLook::WaterRefl )
-		|| wwLookOn( WwLook::WaterGlint );	// lane WATERREFL1
+		|| wwLookOn( WwLook::WaterGlint )	// lane WATERREFL1
+		|| wwLookOn( WwLook::WaterOcean );	// lane WATERLOOK1
 }
 
 bool wwCellWaterWritesLinear()
@@ -567,5 +584,8 @@ QString wwCellWaterEcho( const void * nif )
 				.arg( wwLookOn( WwLook::WaterSwell ) ? QLatin1String( " swell" ) : QLatin1String( "" ) )
 				+ ( wwLookOn( WwLook::WaterRefl ) ? QLatin1String( " reflections" ) : QLatin1String( "" ) )
 				+ ( wwLookOn( WwLook::WaterGlint ) ? QLatin1String( " glare" ) : QLatin1String( "" ) )
-			: QString() );
+				+ ( wwLookOn( WwLook::WaterOcean ) ? QLatin1String( " ocean" ) : QLatin1String( "" ) )
+			: QString() )
+		// lane WATERLOOK1: what the spectrum built (said only while its row is on)
+		+ ( wwCellOceanEcho().isEmpty() ? QString() : QStringLiteral( "; " ) + wwCellOceanEcho() );
 }

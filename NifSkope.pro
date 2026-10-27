@@ -239,6 +239,8 @@ HEADERS += \
 	src/gl/cellcull.h \
 	src/gl/cellumbra.h \
 	src/gl/cellwater.h \
+	src/gl/cellocean.h \
+	src/gl/oceanspectrum.h \
 	src/gl/cellwatergi.h \
 	src/gl/cellwaterinfo.h \
 	src/gl/cellgrass.h \
@@ -535,6 +537,7 @@ SOURCES += \
 	src/gl/cellcull.cpp \
 	src/gl/cellumbra.cpp \
 	src/gl/cellwater.cpp \
+	src/gl/cellocean.cpp \
 	src/gl/cellwaterinfo.cpp \
 	src/gl/cellgrass.cpp \
 	src/gl/cellpost.cpp \
