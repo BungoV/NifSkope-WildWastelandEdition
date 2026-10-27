@@ -87,6 +87,7 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <memory>
+#include <vector>
 
 class ESMFile;
 
@@ -335,6 +336,16 @@ float wwWeatherTransPct( double gameHours, quint8 transDelta, const WwSkyGmst & 
 double wwWeatherTransGameHours( double seconds );
 //! the four colour weights: current keys a, b x pct, then the leaving weather's keys a, b x (1 - pct)
 void wwWeatherTransWeights( const WwTodKeys & k, float pct, float wt[4] );
+/*! lane WEATHERBLEND2: the game's imagespace slots (up to four LUTs): this weather's keys a, b x pct, the left one's x
+ *  (1 - pct); tc / tl = each weather's key t. A slot the game skips weighs 0 (b at t 0, the left ones at pct 1) */
+void wwImageSpaceSlots( float tc, float tl, float pct, bool last, float w[4] );
+//! up to four 16^3 RGB8 LUTs by weight, over the ones given (renormalised); empty when none
+void wwLutBlendN( const std::vector<unsigned char> * const lut[4], const float w[4], std::vector<unsigned char> & out );
+//! fWeatherTransAccel: once accelerated at pct `from` (>= 0), a change's pct runs (Accel + 1) times as fast from there
+float wwWeatherTransAccelPct( float raw, float from, const WwSkyGmst & g );
+//! what a weather pick does: the game's Sky::UpdateWeather / ForceWeather order
+enum WwWeatherPick { WwPickSnap, WwPickStart, WwPickDefer, WwPickKeep };
+int wwWeatherPickRule( bool changing, bool sameAsCurrent, bool interior, bool force );
 
 /*! The engine fog at one hour (lane FOG1, spec_fog.md 2.1-2.3): the FNAM floats
  *  blended day <-> night on the engine's fog day weight, the four NAM0 fog colours

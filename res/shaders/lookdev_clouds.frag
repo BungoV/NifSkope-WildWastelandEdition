@@ -9,6 +9,8 @@
 #include "uniforms.glsl"
 
 uniform sampler2D Tex;
+uniform sampler2D Tex2;	// lane WEATHERBLEND2: during a change Tex = the left weather's layer, Tex2 the new one's
+uniform float texBlend;	// pct; 0 = Tex alone
 uniform vec3 colLin;
 uniform float alpha;
 uniform float skyScale;
@@ -18,6 +20,7 @@ uniform int viewTransform;
 
 in vec4 vcol;
 in vec2 uv;
+in vec2 uv2;
 in vec2 ndc;
 
 out vec4 fragColor;
@@ -27,6 +30,8 @@ out vec4 fragColor;
 void main()
 {
 	vec4 t = texture( Tex, uv );
+	if ( texBlend > 0.0 )
+		t = mix( t, texture( Tex2, uv2 ), texBlend );
 	vec3 c = srgbToLinear( t.rgb ) * vcol.rgb * colLin * skyScale;
 	float a = t.a * vcol.a * alpha;
 	if ( probe ) {

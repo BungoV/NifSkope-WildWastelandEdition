@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WEATHERBLEND2 (2026-10-27, branch weatherblend2-20261027): the rest of the weather change, like the game
+
+- **Imagespace:** the LUTs no longer swap at half way. Up to four LUTs (each weather's two time-of-day keys) blend on
+  the game's slot weights: cur a (1-t)p, cur b tp, last a (1-t)(1-p), last b t(1-p). Each LUT is decoded once
+  (a small cache); a LUT that fails to load drops out and the others are renormalised.
+- **A pick during a change waits:** a new weather picked while a change runs is kept as pending and starts when the
+  running change ends, as the game does. Picking the weather already being changed to keeps the change.
+- **fWeatherTransAccel:** a pick during a change speeds the running change up from that point:
+  pct = s + (raw - s) x (Accel + 1). Fallout4.esm sets Accel 16. `WW_WEATHER_PICK=noaccel` leaves it out.
+- **Snaps:** a pick in an interior and a force-weather pick (`WW_WEATHER_PICK=force`, like the console) snap and drop
+  any running change, as the game does.
+- **Sun glare:** the game's read is confirmed (DATA[4] blended on pct); only the comment changed.
+- **Clouds:** one pass per layer during a change: the old layer's texture cross-faded to the new one by pct in the
+  shader (`res/shaders/lookdev_clouds.*`), in place of two alpha passes. A layer only one weather has draws alone at
+  its share. With no change running the draw is the old one.
+- **Telemetry:** the summary head adds ` pending=<edid>` and ` accel=<pct>`.
+- **Red:** `WW_WEATHER_BLEND_RED=snap` as before. `WW_WEATHER_PICK` is live (stage 0).
+- **Test:** `bash tests/weatherblend/run.sh <out>` (green PASS 0 of 42 failed; red against 50023dfa FAIL 16 of 42).
+
 ## Lane WEATHERBLEND1 (2026-10-27, branch weatherblend1-20261027): weather changes blend like the game
 
 - **Why:** a new lookdev weather snapped in at once. The game keeps the weather it leaves and blends old to new over

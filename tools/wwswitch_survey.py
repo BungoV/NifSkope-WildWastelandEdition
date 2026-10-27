@@ -32,6 +32,7 @@ OVERRIDES = {
     'WW_TESTDRIVER_RED': ('relaunch', 'the driver red: read once when the driver starts'),
     'WW_CELL_OPEN': ('reopen', 'the cell spec: the reopen builds the new rectangle in the same window'),
     'WW_LOOKDEV_PLUGINS': ('live', 'st() re-reads it on a live set; a changed list loads the plugins again (LIVESET4)'),
+    'WW_WEATHER_PICK': ('live', 'WW_SWITCH_STATIC read at each weather pick (WEATHERBLEND2)'),
     'WW_CELL_SPEED_REOPEN': ('relaunch', 'the speed harness own reopen list, taken once'),
     'WW_LIVE_SERVE': ('relaunch', 'the driver: keeps the window for port commands after the steps'),
     'WW_CELL_GI_VIS': ('shaders', 'march mode is a #define every shader gets at load (Shader::load)'),

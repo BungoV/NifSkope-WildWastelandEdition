@@ -5,9 +5,18 @@ import sys
 
 HELPERS = ['void wwRgbToLab(', 'void wwLabToRgb(', 'void wwLabBlend(', 'void wwLabBlend4(',
            'double wwWeatherTransHours(', 'float wwWeatherTransPct(', 'double wwWeatherTransGameHours(',
-           'void wwWeatherTransWeights(', 'void transSum(', 'float wwFogDayWeight(']
+           'void wwWeatherTransWeights(', 'void transSum(', 'float wwFogDayWeight(', 'void wwLutBlendN(']
 BLENDS = ['void EsmWeather::blendRow(', 'void EsmWeather::blendDalc(', 'void EsmWeather::blendRowLab(',
           'void EsmWeather::blendCloud(', 'float EsmWeather::blendSkyScale(', 'WwFog wwFogAt(']
+# lane WEATHERBLEND2: the laws, cut with the blends; a base without one gets the viewer's old behaviour (the red)
+LAWS = [('void wwImageSpaceSlots(',
+         'void wwImageSpaceSlots(float tc,float tl,float pct,bool last,float w[4])\n{\n'
+         '\tw[0]=w[1]=w[2]=w[3]=0.0f;\n'
+         '\tif(last&&pct<0.5f){w[2]=1.0f-tl;w[3]=tl;}else{w[0]=1.0f-tc;w[1]=tc;}\n}\n'),
+        ('float wwWeatherTransAccelPct(',
+         'float wwWeatherTransAccelPct(float raw,float,const WwSkyGmst&)\n{\n\treturn raw;\n}\n'),
+        ('int wwWeatherPickRule(',
+         'int wwWeatherPickRule(bool,bool same,bool,bool)\n{\n\treturn same?WwPickKeep:WwPickStart;\n}\n')]
 
 
 def cut(path, sig):
@@ -33,6 +42,9 @@ def main():
         if body is None:
             sys.exit('missing blend ' + sig)
         text.append(body)
+    for sig, stand in LAWS:
+        body = cut(blends, sig)
+        text.append(body if body is not None else '// stand-in: the base has no ' + sig + '\n' + stand)
     open(out, 'wb').write('\n'.join(text).encode('utf-8'))
     print('cut', len(HELPERS) + len(BLENDS), 'functions ->', out)
 

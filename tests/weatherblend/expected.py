@@ -57,3 +57,19 @@ print('cloud: a zero new colour takes the old one; old', OLD_DAY, 'new (0,0,0), 
 for d in (0, 128, 255):
     h = d / 255.0 * (3.0 - 0.01) + 0.01
     print('delta %3d: %.6f game hours, %.4f s; pct at half = 0.5 at %.4f s' % (d, h, h * 180.0, h * 90.0))
+
+# lane WEATHERBLEND2: the imagespace slots (cur a, cur b, last a, last b), t 0.25 both, pct 0.3 and 0.7
+for p in (0.3, 0.7):
+    print('slots pct %.1f' % p, ['%.4f' % v for v in weights(0.25, p)])
+# four LUT texels by the pct 0.3 weights; then without the third LUT (renormalised over the other three)
+LUTS = [(0, 100, 255), (255, 0, 10), (40, 40, 40), (200, 220, 0)]
+w = weights(0.25, 0.3)
+print('lut4', [round(sum(l[i] * x for l, x in zip(LUTS, w))) for i in range(3)])
+w3 = [w[0], w[1], 0.0, w[3]]
+print('lut3', [round(sum(l[i] * x for l, x in zip(LUTS, w3)) / sum(w3)) for i in range(3)])
+# fWeatherTransAccel 16 (Fallout4.esm): accelerated at pct s, pct = s + (raw - s) x 17
+for s, raw in ((0.2, 0.21), (0.2, 0.25), (0.5, 0.5)):
+    print('accel s %.2f raw %.2f -> %.4f' % (s, raw, min(1.0, s + (raw - s) * 17.0)))
+# delta 128: accelerated at half way (135.9776 s) it ends when raw = 0.5 + 0.5 / 17
+h = 128 / 255.0 * (3.0 - 0.01) + 0.01
+print('delta 128 accelerated at 0.5 ends at %.4f s (unaccelerated %.4f s)' % ((0.5 + 0.5 / 17.0) * h * 180.0, h * 180.0))
