@@ -84,6 +84,8 @@ struct ProbeFineStats
 	double msClass = 0, msGreedy = 0, msMoves = 0;   //!< VOLFIT4's profile (thread-summed, as msRays/msCover)
 	double msBig = 0, msWall = 0;                    //!< wall clock: the big rooms, the whole fit
 	qint64 edgeCast = 0;                             //!< VOLFIT5: edge rays sent to the scene
+	double msSmall = 0;                              //!< VOLFIT6: wall clock of the small rooms
+	QString prof;                                    //!< VOLFIT6: the census tail of the edge stage's profile
 };
 
 /*! Per room (index r = room r + 1): its boxes, empty where the room has no air on the lattice (keep the grid fit).

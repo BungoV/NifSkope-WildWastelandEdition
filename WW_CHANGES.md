@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLFIT6 (2026-10-27, branch volfit6-20261027): GI room fit about 2x faster again, same bytes
+
+- **Profiled first:** the fit now prints where its time goes (census tail "; fit ms pre .. rooms .. (refine ..)
+  .. scene .. fine .. measure ..; small ..; edge ms fl .. seg .. build .. cast (lock gpu post) .. scatter ..; class
+  lock gpu post"). On Concord the edge stage's GPU lock and GPU time were small (0.7 + 0.6 s summed); the biggest
+  wall cost was the room loop before the fine fit (11.5 s of 24.2 s), almost all of it the face ray refine run one
+  room after another.
+- **Rooms side by side:** that loop now fits the rooms at the same time, biggest first, each room whole on one core.
+  No byte changes: the .space files equal VOLFIT5's on all four real cells. `WW_VOLFIT_SPEC=roompar=0` restores
+  VOLFIT5's loop.
+- Same run, fit seconds VOLFIT5 path / VOLFIT6: museum 12.3 / 6.1, Goodneighbor 21.3 / 13.5, Sanctuary 6.0 / 2.8,
+  Concord 24.8 / 13.9. The VOLRAY1 fit (red nofine) shares the loop and dropped to 1.6 / 5.9 / 0.9 / 2.0 s (Concord was 12.7).
+- Cost: offline only, 0 GPU-ms and 0 memory at runtime.
+
 ## Lane LANDSPEC2 (2026-10-27, branch landspec2-20261027): the land-LOD band's textures, its glide, PBR mode, SSR
 
 - **Band textures:** inside the land-LOD blend band the near ground's albedo now lerps toward the level-4 LOD diffuse
@@ -72,7 +86,6 @@
 - **Telemetry:** the summary head adds ` pending=<edid>` and ` accel=<pct>`.
 - **Red:** `WW_WEATHER_BLEND_RED=snap` as before. `WW_WEATHER_PICK` is live (stage 0).
 - **Test:** `bash tests/weatherblend/run.sh <out>` (green PASS 0 of 42 failed; red against 50023dfa FAIL 16 of 42).
-
 ## Lane VOLFIT5 (2026-10-27, branch volfit5-20261027): GI room fit faster, same bytes
 
 - **Edge rays on the GPU:** the room fit's edge rays now go to the exact whole-ray tracer in batches instead of one at a

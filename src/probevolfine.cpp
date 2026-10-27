@@ -300,6 +300,9 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 
 	std::atomic<qint64> nRays( 0 ), nFree( 0 ), nSnap( 0 ), nPts( 0 ), nRoom( 0 ), nCov( 0 ), nForeign( 0 ), nEdgeCast( 0 );
 	std::atomic<qint64> nsRays( 0 ), nsCover( 0 ), nsClass( 0 ), nsGreedy( 0 ), nsMoves( 0 );
+	// VOLFIT6: the edge stage's profile (thread-summed over rooms; each part is the room's own wall)
+	std::atomic<qint64> nsEFl( 0 ), nsESeg( 0 ), nsEBuild( 0 ), nsECast( 0 ), nsEScat( 0 ), nsELock( 0 ), nsEGpu( 0 ), nsEPost( 0 );
+	std::atomic<qint64> nECalls( 0 ), nERecast( 0 ), nsSmallMax( 0 ), nsCLock( 0 ), nsCGpu( 0 ), nsCPost( 0 );
 	// VOLFIT3: per room the grid fit's score and the moved set's (u3 of uncovered room air + badW x foreign air held),
 	// and its extra lattice boxes with what each cuts
 	struct V3Room
@@ -402,6 +405,9 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 					fl[pidx( i, j, k )] = f;
 				}
 		} );
+		nsEFl += t0.nsecsElapsed();
+		const bakert::CastTimes ct0 = bakert::castTimes();
+		QElapsedTimer te;
 		// segments to the +u +v +z neighbour: cut when a triangle lies on them (only where the room owns an end).
 		// VOLFIT5: with a scene, a slab of slices gathers its rays and casts them as one batch (any-hit on the whole-ray
 		// tracer, whose answer is the CPU tree's); the cut bits come out the same
@@ -412,6 +418,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			const size_t k1 = std::min( size_t( nz ), k0 + slab );
 			std::vector<std::vector<bakert::XRay>> eRays( edgeCast ? k1 - k0 : 0 );
 			std::vector<std::vector<quint32>> eAt( edgeCast ? k1 - k0 : 0 );   // per ray: point a * 4 + axis, within the slice
+			te.start();
 			fineFor( k1 - k0, par, [&]( size_t ks ) {
 				const int k = int( k0 + ks );
 				qint64 nr = 0, nf = 0;
@@ -464,7 +471,9 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 				nRays += nr;
 				nFree += nf;
 			} );
+			nsESeg += te.nsecsElapsed();
 			if ( edgeCast ) {
+				te.start();
 				std::vector<size_t> at( k1 - k0 + 1, 0 );
 				for ( size_t s = 0; s < k1 - k0; s++ )
 					at[s + 1] = at[s] + eRays[s].size();
@@ -474,8 +483,12 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 					std::copy( eRays[s].begin(), eRays[s].end(), rays.begin() + std::ptrdiff_t( at[s] ) );
 					std::vector<bakert::XRay>().swap( eRays[s] );
 				}
+				nsEBuild += te.nsecsElapsed();
+				te.start();
 				if ( !rays.empty() )
 					g.scene->cast( rays.data(), rays.size(), hits.data(), g.scene->whole() );
+				nsECast += te.nsecsElapsed();
+				te.start();
 				nEdgeCast += qint64( rays.size() );
 				fineFor( k1 - k0, par, [&]( size_t s ) {
 					const size_t base = ( k0 + s ) * sk;
@@ -483,7 +496,16 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 						if ( hits[at[s] + x].tri >= 0 )
 							cut[base + eAt[s][x] / 4] |= quint8( 1 << ( eAt[s][x] & 3 ) );
 				} );
+				nsEScat += te.nsecsElapsed();
 			}
+		}
+		{
+			const bakert::CastTimes & ct1 = bakert::castTimes();
+			nsELock += ct1.lockNs - ct0.lockNs;
+			nsEGpu += ct1.gpuNs - ct0.gpuNs;
+			nsEPost += ct1.postNs - ct0.postNs;
+			nECalls += ct1.calls - ct0.calls;
+			nERecast += ct1.recast - ct0.recast;
 		}
 		nsRays += t0.nsecsElapsed();
 		t0.start();
@@ -509,6 +531,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		auto classify = [&]( const std::vector<size_t> & ids ) {
 			QElapsedTimer tc;
 			tc.start();
+			const bakert::CastTimes cc0 = bakert::castTimes();
 			const size_t K = sdirs.size(), per = std::max<size_t>( 1, size_t( par ? 4000000 / std::max( 1, tlFineShare ) : 500000 ) / K ), chunk = 256;
 			std::vector<bakert::XRay> rays;
 			std::vector<bakert::XHit> hits;
@@ -571,6 +594,10 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			}
 			nEnc += qint64( ids.size() );
 			nsClass += tc.nsecsElapsed();
+			const bakert::CastTimes & cc1 = bakert::castTimes();
+			nsCLock += cc1.lockNs - cc0.lockNs;
+			nsCGpu += cc1.gpuNs - cc0.gpuNs;
+			nsCPost += cc1.postNs - cc0.postNs;
 		};
 		{
 			std::vector<size_t> ids;
@@ -1433,7 +1460,16 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			fitRoom( r, true );
 	}
 	S.msBig = tb.nsecsElapsed() / 1e6;
-	fineFor( small.size(), true, [&]( size_t k ) { fitRoom( small[k], false ); } );
+	tb.start();
+	fineFor( small.size(), true, [&]( size_t k ) {
+		QElapsedTimer tr;
+		tr.start();
+		fitRoom( small[k], false );
+		const qint64 ns = tr.nsecsElapsed();
+		for ( qint64 m = nsSmallMax.load(); ns > m && !nsSmallMax.compare_exchange_weak( m, ns ); )
+			;
+	} );
+	S.msSmall = tb.nsecsElapsed() / 1e6;
 	if ( !spec.legacy && g.grid ) {
 		// VOLFIT3: each room the best of its grid fit and its moved set within the grid fit's count; then the extra boxes
 		// that cut the most score per shape, over all rooms, until the budget (budget x the grid fit's shapes)
@@ -1545,6 +1581,13 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	S.msGreedy = double( nsGreedy ) / 1e6;
 	S.msMoves = double( nsMoves ) / 1e6;
 	S.msWall = clock.nsecsElapsed() / 1e6;
+	S.prof = QStringLiteral( " small %1 (n %2 longest %3) big n %4; edge ms fl %5 seg %6 build %7 cast %8 (lock %9 gpu %10 post %11, calls %12 recast %13)"
+		" scatter %14; class lock %15 gpu %16 post %17" )
+		.arg( qRound( S.msSmall ) ).arg( small.size() ).arg( qRound( double( nsSmallMax ) / 1e6 ) ).arg( big.size() )
+		.arg( qRound( double( nsEFl ) / 1e6 ) ).arg( qRound( double( nsESeg ) / 1e6 ) ).arg( qRound( double( nsEBuild ) / 1e6 ) )
+		.arg( qRound( double( nsECast ) / 1e6 ) ).arg( qRound( double( nsELock ) / 1e6 ) ).arg( qRound( double( nsEGpu ) / 1e6 ) )
+		.arg( qRound( double( nsEPost ) / 1e6 ) ).arg( nECalls.load() ).arg( nERecast.load() ).arg( qRound( double( nsEScat ) / 1e6 ) )
+		.arg( qRound( double( nsCLock ) / 1e6 ) ).arg( qRound( double( nsCGpu ) / 1e6 ) ).arg( qRound( double( nsCPost ) / 1e6 ) );
 	if ( stats )
 		*stats = S;
 	return out;

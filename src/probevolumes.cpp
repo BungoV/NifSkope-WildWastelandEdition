@@ -42,8 +42,16 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr int kSkyRays = 32, kWallRays = 16;
 constexpr int kStageVersion = 2;   // 2: lane VOLRAY1 (ray refine, z clip)
 
+//! lane VOLFIT6: a worker of the room fan-out runs its inner fan-outs on itself
+thread_local bool tlVolSerial = false;
+
 void volParallel( size_t n, const std::function<void( size_t )> & fn )
 {
+	if ( tlVolSerial ) {
+		for ( size_t k = 0; k < n; k++ )
+			fn( k );
+		return;
+	}
 	using std::thread;
 	const int nThreads = std::max( 1, int( thread::hardware_concurrency() ) );
 	std::atomic<size_t> next( 0 );
@@ -1533,12 +1541,17 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 	};
 	std::vector<double> roomYaw( V.rooms.size(), 0.0 );
 	std::vector<char> keepGrid( V.rooms.size(), 0 );
-	for ( size_t r = 0; r < V.rooms.size(); r++ ) {
+	// lane VOLFIT6: the fit stage's profile (wall ms): before the rooms, the room loop and its ray refine, the thresholds
+	QElapsedTimer pf;
+	pf.start();
+	const double msPre = clock.nsecsElapsed() / 1e6;
+	std::atomic<qint64> nsRefine( 0 ), nsRoomMax( 0 );
+	auto fitRoom = [&]( size_t r ) {
 		ProbeVolumeRoom & rm = V.rooms[r];
 		const int room = int( r ) + 1;
 		const std::vector<size_t> & cells = cellsOf[r];
 		if ( cells.empty() )
-			continue;
+			return;
 		// the footprint frame
 		std::vector<std::array<double, 2>> pts;
 		{
@@ -1606,7 +1619,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 					roomN += lc[li] == 1;
 				}
 		if ( !roomN )
-			continue;
+			return;
 		// summed-volume tables
 		auto table = [&]( const std::function<bool( size_t )> & f ) {
 			std::vector<qint32> s( size_t( L.X + 1 ) * size_t( L.Y + 1 ) * size_t( L.Z + 1 ), 0 );
@@ -1935,6 +1948,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		keepGrid[r] = curved && legacyFine;
 		// VOLFIT3 starts every room's fine fit from its refined grid shapes
 		if ( refineOn && ( !fineOn || curved || !legacyFine ) && !shapes.empty() ) {
+			QElapsedTimer pr;
+			pr.start();
 			const std::vector<ProbeVolumeShape> grid = shapes;
 			for ( size_t k = 0; k < shapes.size(); k++ ) {
 				std::vector<const ProbeVolumeShape *> sib;
@@ -1954,12 +1969,40 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			} else {
 				shapes = grid;
 			}
+			nsRefine += pr.nsecsElapsed();
 		}
 		rm.shapes = std::move( shapes );
 		rm.coverage = cov;
 		rm.overshootAir = oa;
 		rm.overshootSolid = os;
+	};
+	// lane VOLFIT6: rooms side by side, the biggest first, each on one worker. A room reads only the shared grid and tree
+	// and writes only its own slots, so the order changes no byte (WW_VOLFIT_SPEC=roompar=0: one at a time, inner fan-outs)
+	bool roomPar = true;
+	for ( const QString & kv : qEnvironmentVariable( "WW_VOLFIT_SPEC" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
+		if ( kv.section( QLatin1Char( '=' ), 0, 0 ).trimmed() == QLatin1String( "roompar" ) )
+			roomPar = kv.section( QLatin1Char( '=' ), 1 ).toDouble() != 0;
+	if ( roomPar ) {
+		std::vector<size_t> order( V.rooms.size() );
+		for ( size_t r = 0; r < order.size(); r++ )
+			order[r] = r;
+		std::stable_sort( order.begin(), order.end(), [&]( size_t a, size_t b ) { return cellsOf[a].size() > cellsOf[b].size(); } );
+		volParallel( order.size(), [&]( size_t k ) {
+			QElapsedTimer tr;
+			tr.start();
+			tlVolSerial = true;
+			fitRoom( order[k] );
+			tlVolSerial = false;
+			const qint64 ns = tr.nsecsElapsed();
+			for ( qint64 m = nsRoomMax.load(); ns > m && !nsRoomMax.compare_exchange_weak( m, ns ); )
+				;
+		} );
+	} else {
+		for ( size_t r = 0; r < V.rooms.size(); r++ )
+			fitRoom( r );
 	}
+	const double msRooms = pf.nsecsElapsed() / 1e6;
+	pf.start();
 	// lane VOLRAY1: a threshold from the cell faces leans with the stepped boundary and is one cell thick. Square it to
 	// its room, then fit it by rays to the opening: jamb to jamb, floor to lintel, through the wall.
 	if ( refineOn )
@@ -2064,6 +2107,9 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		}
 	// lane VOLFIT2: the rooms refitted on a fine lattice; the fitted thresholds part the floods (the threshold fit reads
 	// only the rooms' yaw, which the fine shapes keep)
+	const double msThr = pf.nsecsElapsed() / 1e6;
+	QString prof = QStringLiteral( "; fit ms pre %1 rooms %2 (refine %3 summed, longest room %5) thresholds %4" ).arg( qRound( msPre ) )
+		.arg( qRound( msRooms ) ).arg( qRound( double( nsRefine.load() ) / 1e6 ) ).arg( qRound( msThr ) ).arg( qRound( double( nsRoomMax.load() ) / 1e6 ) );
 	if ( fineOn ) {
 		QElapsedTimer fc;
 		fc.start();
@@ -2091,6 +2137,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			if ( scene && ( scene->path() == bakert::Path::Rt || ( scene->path() != bakert::Path::Cpu && bakert::gpuWanted() ) ) )
 				fg.scene = scene.get();
 		}
+		const double msScene = fc.nsecsElapsed() / 1e6;
 		const size_t nSoupTris = soup.tris.size() / 9;
 		fg.backFace = [&]( int tri, const double * d ) -> bool {   // a one-sided face seen from behind (volcheck's)
 			if ( tri < 0 || size_t( tri ) >= nSoupTris || soup.isTwoSided( size_t( tri ) ) )
@@ -2148,6 +2195,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		}
 		ProbeFineStats fs;
 		const std::vector<std::vector<ProbeVolumeShape>> fine = probeVolumesFineFit( rb, rO, fg, int( V.rooms.size() ), roomYaw, spec, &fs );
+		pf.start();
 		for ( size_t r = 0; r < V.rooms.size() && r < fine.size(); r++ ) {
 			if ( fine[r].empty() || keepGrid[r] )
 				continue;
@@ -2171,7 +2219,10 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			.arg( qRound( fs.msBig ) ).arg( qRound( fs.msOwner ) ).arg( qRound( fs.msRays ) ).arg( qRound( fs.msClass ) ).arg( qRound( fs.msGreedy ) )
 			.arg( qRound( fs.msMoves ) ) + QStringLiteral( " edge casts %1" ).arg( fs.edgeCast );
 		V.msFine = fc.nsecsElapsed() / 1e6;
+		prof += QStringLiteral( " scene %1 fine %2 measure %3;" ).arg( qRound( msScene ) ).arg( qRound( fs.msWall ) ).arg( qRound( pf.nsecsElapsed() / 1e6 ) )
+			+ fs.prof;
 	}
+	V.fineNote += prof;
 	V.refineRays = refineRays;
 	V.msFit = clock.nsecsElapsed() / 1e6;
 	V.msTotal = total.nsecsElapsed() / 1e6;
