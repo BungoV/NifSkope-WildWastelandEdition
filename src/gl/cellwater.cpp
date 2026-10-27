@@ -299,6 +299,20 @@ void wwCellWaterDrive( float & windMs, float & swellM )
 	foamDrive( st(), windMs, swellM );
 }
 
+void wwCellWaterSurfConsts( float surfK[4], float shoreK2[4], float shoreK3[4] )
+{
+	float windMs = 0.0f, swellM = 0.0f;
+	foamDrive( st(), windMs, swellM );
+	const float k[4] = { 8.0f, 0.78f, 7.0f, 0.9f };
+	const float k2[4] = { windMs, swellM, 40.0f, 0.6f };
+	const float k3[4] = { 0.25f, 0.78f, 0.35f, 0.05f };
+	for ( int i = 0; i < 4; i++ ) {
+		surfK[i] = k[i];
+		shoreK2[i] = k2[i];
+		shoreK3[i] = k3[i];
+	}
+}
+
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 {
 	WaterState & s = st();
@@ -361,7 +375,9 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		WW_SWITCH_STATIC( QByteArray, sr, wwEnv( "WW_CELL_WATER_SURF_RED" ).trimmed() );
 		prog->uni1i( "waterSurfRed", ( sr.contains( "noshoal" ) ? 1 : 0 ) | ( sr.contains( "nobreak" ) ? 2 : 0 )
 			| ( sr.contains( "regular" ) ? 4 : 0 ) | ( sr.contains( "alias" ) ? 8 : 0 ) );
-		prog->uni4f( "waterSurfK", FloatVector4( 8.0f, 0.78f, 7.0f, 0.9f ) );
+		float sk[4], k2[4], k3[4];
+		wwCellWaterSurfConsts( sk, k2, k3 );	// step 14: shared with the land's Wave run-up row
+		prog->uni4f( "waterSurfK", FloatVector4( sk[0], sk[1], sk[2], sk[3] ) );
 	}
 	if ( prog->uniLocation( "waterContactOn" ) >= 0 ) {	// lane WATERLOOK1 step 12: the Contact foam row
 		/* the foam band 4 Hs wide (e-fold), each strike's foam lives 2 wave periods, the wind sea's period from its
@@ -468,11 +484,11 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		 * weather). Sea swell: WATERWAVES1's sea swell (a k 0.045 at 24 m = 0.34 m crest to trough) times its wind
 		 * factor. A river's fetch is its width, 40 m. Full foam at 0.6 m breakers; fresh water keeps 0.25 of it;
 		 * breaker index 0.78 (McCowan 1894); the lap line 0.35 opaque at most, from 5 cm waves (ripples run up clear). */
-		float windMs = 0.0f, swellM = 0.0f;
-		foamDrive( s, windMs, swellM );
+		float sk[4], k2[4], k3[4];
+		wwCellWaterSurfConsts( sk, k2, k3 );	// lane WATERLOOK1 step 14: shared with the land's Wave run-up row
 		prog->uni1i( "waterShoreLaw", s.foamOld ? 0 : 1 );
-		prog->uni4f( "waterShoreK2", FloatVector4( windMs, swellM, 40.0f, 0.6f ) );
-		prog->uni4f( "waterShoreK3", FloatVector4( 0.25f, 0.78f, 0.35f, 0.05f ) );
+		prog->uni4f( "waterShoreK2", FloatVector4( k2[0], k2[1], k2[2], k2[3] ) );
+		prog->uni4f( "waterShoreK3", FloatVector4( k3[0], k3[1], k3[2], k3[3] ) );
 		/* the soft contact: the water path to the scene behind fades the water out over 35 u (0.5 m) looking down to
 		 * 105 u (1.5 m) at a grazing view; the bake's distance counts 64 u (half a texel) more for its error */
 		prog->uni1i( "waterShoreEdgeLaw", s.edgeOld ? 0 : 1 );

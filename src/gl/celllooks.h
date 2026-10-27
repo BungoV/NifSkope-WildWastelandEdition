@@ -60,6 +60,7 @@ enum class WwLook : int
 	WaterSurf,			// WATERLOOK1 step 11: shore waves on the sea, shoaling and breaking, crest foam (WW_CELL_WATER_SURF)
 	WaterContact,			// WATERLOOK1 step 12: foam rings where waves strike anything standing in the water (WW_CELL_WATER_CONTACT)
 	LandWet,			// WATERLOOK1 step 13: the ground darkens and shines beside baked water (WW_CELL_LAND_WET)
+	LandSwash,			// WATERLOOK1 step 14: the waves run up the beach and drain back (WW_CELL_LAND_SWASH)
 	Count
 };
 

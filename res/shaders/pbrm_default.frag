@@ -14,6 +14,10 @@
 // lane WATERWETBAKE1: the land side of the shore plane; WATERLOOK1 step 13: the Wet shore band on it
 #include "land_shore.glsl"
 #include "land_wet.glsl"
+// lane WATERLOOK1 step 14: the Wave run-up row reads the baked water's bodies and wave heights too
+#include "water_info.glsl"
+#include "water_shore.glsl"
+#include "land_swash.glsl"
 #define WW_CELL_FOGGED cellOn	// lane FOG2: a cell-lit draw fogged before its imagespace
 uniform sampler2D CellSpecMap;	// lane CUBE1: a legacy material's specular map (R scale, G smoothness), for the cube term
 #else
@@ -532,10 +536,14 @@ void main()
 	s.weight = clamp( s.weight, 0.0, 1.0 );
 	s.diffRough = clamp( pbrDiffuseRoughness, 0.0, 1.0 );
 #ifdef WW_CELLLIGHTS
-	if ( cellOn && landWetOn ) {	// lane WATERLOOK1 step 13: the Wet shore row (land_wet.glsl)
-		vec2 wet = wwLandWet( cellWorldPos( -ViewDir ), cellWorldDir( normalize( tbn[2] ) ) );
+	if ( cellOn && ( landWetOn || landSwashOn ) ) {	// lane WATERLOOK1 steps 13-14: the Wet shore and Wave run-up rows
+		vec3 Pl = cellWorldPos( -ViewDir ), Nl = cellWorldDir( normalize( tbn[2] ) );
+		vec2 wet = wwLandWet( Pl, Nl );
+		vec4 sw = wwLandSwash( Pl, Nl, landSwashTime );
+		wet = max( wet, sw.zx );
 		float por = landShoreTerrain ? 1.0 - s.metal : 0.0;
 		s.base *= wwLandWetBase( wet.x, por );
+		s.base = mix( s.base, vec3( 0.8 ), sw.y );	// the run-up's foam
 		s.rough = max( wwLandWetRough( s.rough, wet, por ), 0.035 );
 	}
 #endif

@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 14 (2026-10-27, branch waterlook1-20261027): waves running up the beach (WATERSWASH1)
+
+- New row **Wave run-up** (WW_CELL_LAND_SWASH), a water row. Each wave that reaches the shore runs up the beach as a
+  thin sheet of water with foam at its front, then drains back. The ground it covers stays soaked.
+- The waves arrive on the Surf row's timing, so the run-up follows the surf waves breaking in front of it. The same
+  wave groups make some run-ups long and some short.
+- How far up a wave runs comes from the shore's wave height, the wave period and the beach slope (Stockdon et al.
+  2006, the standard field formula). Steeper beaches and bigger waves run higher. On a lake or river the waves are
+  small, so the run-up is a few centimetres at most.
+- The foam is bright on the way up and thins as the water drains; fresh water keeps less foam, as with the shore foam.
+- Drawn in the cell programs with the Wet shore row's code; the ground's slope comes from its own normal. With the
+  row off nothing changes; the programs outside cells keep their machine code. New res/shaders/land_swash.glsl.
+  The sea's constants (period, wind, swell) now come from one place for the water and the land.
+- Reds on WW_CELL_LAND_SWASH_RED (combinable): `still` (the water held at its highest), `nofoam`, `regular` (every
+  wave the same, no along-shore variation).
+- Offline (no window, the real shader on a synthetic beach):
+  - The highest run-up matches the formula within 1% for 0.5 / 1 / 2 m waves on slopes of 2%, 5% and 10%.
+  - A wave reaches the same spot every 8 s. With the groups on, the run-ups range from half to all of the highest.
+  - The foam on the way up is about 5x the foam on the way back. On a 300 m lake in a 5 m/s wind the run-up is 1.6 cm.
+  - Nothing changes with the row off. About 0.13 ms a 1080p pass with every pixel in the swash zone (in a real view
+    only a thin strip is). All 107 programs link.
+
 ## Lane WATERLOOK1 step 13 (2026-10-27, branch waterlook1-20261027): wet ground beside water (WATERWET1)
 
 - New row **Wet shore** (WW_CELL_LAND_WET). The ground beside baked water darkens and gains gloss, with a thin

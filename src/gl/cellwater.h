@@ -47,6 +47,10 @@ bool wwCellWaterIsShape( const void * nif, int block );
 bool wwCellWaterHasShapes( const void * nif );
 //! lane WATERLOOK1: the shore foam's drive (the weather's wind as 1-20 m/s, 5 with none; the sea swell in m)
 void wwCellWaterDrive( float & windMs, float & swellM );
+/*! lane WATERLOOK1 step 14: the sea constants the water and the land's Wave run-up row share: waterSurfK (period s,
+ *  breaker index, waves a group, foam opacity), waterShoreK2 (wind m/s, sea swell m, river fetch cap m, full-foam
+ *  height m), waterShoreK3 (fresh-water foam persistence, breaker index, lap line opacity, lap line onset m) */
+void wwCellWaterSurfConsts( float surfK[4], float shoreK2[4], float shoreK3[4] );
 //! lane CELLALL1: the Water row (WW/CellWater, default on as before); the pin WW_CELL_WATER wins
 bool wwCellWaterOn();
 void wwCellWaterSetOn( bool on );

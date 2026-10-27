@@ -285,6 +285,10 @@ vec3 tonemap(vec3 x)
 // lane WATERWETBAKE1: the land side of the shore plane; WATERLOOK1 step 13: the Wet shore band on it
 #include "land_shore.glsl"
 #include "land_wet.glsl"
+// lane WATERLOOK1 step 14: the Wave run-up row reads the baked water's bodies and wave heights too
+#include "water_info.glsl"
+#include "water_shore.glsl"
+#include "land_swash.glsl"
 #endif
 
 /* lane DECALS1: the game's decal parallax. Height = the set's TX04 (bound as GlowMap, red); the eye ray in the
@@ -575,12 +579,16 @@ void main()
 	// matte, which is not what the game does with it.
 	float specMask = s * specStrength;
 #ifdef WW_CELLLIGHTS
-	if ( cellOn && landWetOn ) {	// lane WATERLOOK1 step 13: the Wet shore row (land_wet.glsl)
-		vec2 wet = wwLandWet( cellWorldPos( -ViewDir ), cellWorldDir( btnMatrix_norm[2] ) );
+	if ( cellOn && ( landWetOn || landSwashOn ) ) {	// lane WATERLOOK1 steps 13-14: the Wet shore and Wave run-up rows
+		vec3 Pl = cellWorldPos( -ViewDir ), Nl = cellWorldDir( btnMatrix_norm[2] );
+		vec2 wet = wwLandWet( Pl, Nl );
+		vec4 sw = wwLandSwash( Pl, Nl, landSwashTime );
+		wet = max( wet, sw.zx );
 		float por = landShoreTerrain ? 1.0 : 0.0;
 		albedo *= pow( wwLandWetBase( wet.x, por ), 1.0 / 2.2 );	// the albedo is texture gamma here
 		smoothness = 1.0 - wwLandWetRough( 1.0 - smoothness, wet, por );
 		specMask = mix( specMask, max( specMask, 0.5 ), wet.y );
+		albedo = mix( albedo, vec3( 0.9 ), sw.y );	// the run-up's foam (texture gamma)
 	}
 #endif
 

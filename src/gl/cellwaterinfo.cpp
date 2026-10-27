@@ -1,6 +1,8 @@
 #include "cellwaterinfo.h"
 #include "wwswitch.h"
 #include "gl/celllooks.h"	// lane WATERLOOK1 step 13: the Wet shore row
+#include "gl/cellwater.h"	// lane WATERLOOK1 step 14: the sea constants of the Wave run-up row
+#include "cellworldanim.h"	// lane WATERLOOK1 step 14: the world clock
 
 #include "lodtfile.h"
 #include "gl/cellunits.h"
@@ -671,7 +673,26 @@ void wwCellLandShoreUniforms( Scene * scene, bool terrain )
 	 * is neutral and nothing is bound (the samplers keep their own units: no two sampler types on one unit). */
 	const bool wet = wwLookOn( WwLook::LandWet );
 	prog->uni1b( "landWetOn", wet );
-	if ( !wet ) {
+	/* lane WATERLOOK1 step 14: the Wave run-up row (land_swash.glsl) also reads the water lookup, at cell units 71-73
+	 * (always given their units: no two sampler types on one unit), and SURF1's sea constants. Its foam 0.8 opaque,
+	 * fading over 1 m along the ground behind the tip (a bore's foam front). */
+	const bool swashRead = prog->uniLocation( "landSwashOn" ) >= 0;
+	const bool swash = swashRead && wwLookOn( WwLook::LandSwash );
+	prog->uni1b( "landSwashOn", swash );
+	if ( swashRead )
+		wwCellWaterInfoUniforms( scene, WwCellUnit::LandWaterInfo );
+	if ( swash ) {
+		WW_SWITCH_STATIC( QByteArray, sr, wwEnv( "WW_CELL_LAND_SWASH_RED" ).trimmed() );
+		prog->uni1i( "landSwashRed", ( sr.contains( "still" ) ? 1 : 0 ) | ( sr.contains( "nofoam" ) ? 2 : 0 )
+			| ( sr.contains( "regular" ) ? 4 : 0 ) );
+		float sk[4], k2[4], k3[4];
+		wwCellWaterSurfConsts( sk, k2, k3 );
+		prog->uni4f( "landSwashK", FloatVector4( sk[0], sk[2], 0.8f, 1.0f ) );
+		prog->uni4f( "waterShoreK2", FloatVector4( k2[0], k2[1], k2[2], k2[3] ) );
+		prog->uni4f( "waterShoreK3", FloatVector4( k3[0], k3[1], k3[2], k3[3] ) );
+		prog->uni1f( "landSwashTime", wwCellWorldAnimOn() ? float( wwCellWorldSeconds() ) : 0.0f );
+	}
+	if ( !wet && !swash ) {
 		prog->uni1i_l( lIndex, WwCellUnit::LandShoreIndex );
 		prog->uni1i_l( prog->uniLocation( "landShoreAtlas" ), WwCellUnit::LandShoreAtlas );
 		prog->uni1b( "landShoreOn", false );
