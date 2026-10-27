@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the sampler census
 #include "gl/celldrawpacket.h"	// lane GAPPERF-BINDLESS
 #include "gl/cellbindless.h"	// lane BINDLESS2
+#include "gl/celluniform.h"	// lane CELLUNI3: the blend note
 
 /*! Which vertex-colour channel the viewport previews, or 0 for normal shading.
  *  It lives here because this is where the vertex-colour uniforms are set: the
@@ -313,12 +314,15 @@ void AlphaProperty::glProperty( AlphaProperty * p, NifSkopeOpenGLContext::Progra
 	if ( p && p->alphaBlend && p->scene->hasOption(Scene::DoBlending) ) {
 		glEnable( GL_BLEND );
 		prog->f->glBlendFuncSeparate( p->alphaSrc, p->alphaDst, GL_ONE, p->alphaDst );
+		WwCellUni::noteBlend( true );	// lane CELLUNI3
+		WwCellUni::noteBlendDst( int( p->alphaDst ) );
 		alphaFlags = 8;
 		const GLint bf[4] = { GLint( p->alphaSrc ), GLint( p->alphaDst ), GL_ONE, GLint( p->alphaDst ) };
 		WWDP( WwDp::Enable, GL_BLEND );
 		WWDP( WwDp::BlendSep, 0, 0, bf, 4 );
 	} else {
 		glDisable( GL_BLEND );
+		WwCellUni::noteBlend( false );	// lane CELLUNI3
 		WWDP( WwDp::Disable, GL_BLEND );
 	}
 

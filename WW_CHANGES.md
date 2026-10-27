@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLUNI3 (2026-10-27, branch celluni3-20261027): the CELLUNI2 leftovers on the uniform kit
+
+- **Blend per draw:** setupProgram forgets a blend note at its entry and every blend write up to the census notes
+  itself (`WwCellUni::noteBlend/noteBlendDst`, src/gl/celluniform.h). The draw scope takes the blend from the note
+  instead of asking GL; a draw whose setup wrote no blend still asks. `WW_SETUP_MEMO_CHECK=1` asks anyway and counts a
+  wrong note (`cell uni: ... blendstale=`).
+- **fxAdditive:** read from the note (destination factor known) with no ask; a composition write without a known factor
+  asks the factor only.
+- **Cube decode mode:** asked once per cube texture (TexCache's param shadow, forgotten on load and evict), before FO76.
+- **CE1 tail:** its scalar uploads go through the program's cache in a `tail` scope (the `cell uni:` line prints it).
+- **Sky, air, far ground:** texture binds through `WwCellUni::Units` (no unit ask with EXT DSA); the air's viewport once
+  per setup-memo epoch. Water's noise binding comes from the texture cache's own bind.
+- **Red:** `WW_CELL_UNI_RED=1` (live) restores every old ask and upload. No shader change.
+- Offline gate: tests/celluni3 (green == red pixels and texture state; four doctored controls fail).
+
 ## Lane FOGTERRAIN1 (2026-10-27, branch fogterrain1-20261027): the ground fog layer follows the terrain
 
 - **Why:** the ground fog layer (groundFog .recx, or FOGHEIGHT1's derived layer) was anchored at one absolute height,

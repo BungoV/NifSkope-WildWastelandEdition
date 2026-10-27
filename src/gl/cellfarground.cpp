@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "gl/cellfgsched.h"
 #include "gl/cellpasstime.h"
 #include "gl/cellunits.h"
+#include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "wwswitch.h"
@@ -1354,34 +1355,34 @@ void uniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog )
 	}
 	const Doc & d = *it;
 	auto fn = scene->renderer->fn;
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );	// lane CELLUNI3: no ask with DSA
+	u.section();
 	if ( d.gpu.ready == 3 ) {
-		bindUnit( fn, WwCellUnit::FarGroundGrid, GL_TEXTURE_2D, d.gpu.cellTex );
-		bindUnit( fn, WwCellUnit::FarGroundPages, GL_TEXTURE_2D_ARRAY, d.gpu.pagesN );
-		bindUnit( fn, WwCellUnit::FarGroundPagesFar, GL_TEXTURE_2D_ARRAY, d.gpu.pagesF );
+		u.bind( WwCellUnit::FarGroundGrid, GL_TEXTURE_2D, d.gpu.cellTex );
+		u.bind( WwCellUnit::FarGroundPages, GL_TEXTURE_2D_ARRAY, d.gpu.pagesN );
+		u.bind( WwCellUnit::FarGroundPagesFar, GL_TEXTURE_2D_ARRAY, d.gpu.pagesF );
 		prog->uni1i( "fgCells", WwCellUnit::FarGroundGrid );
 		prog->uni1i( "fgPagesN", WwCellUnit::FarGroundPages );
 		prog->uni1i( "fgPagesF", WwCellUnit::FarGroundPagesFar );
 		prog->uni4f( "fgGridMap", FloatVector4( d.ox, d.oy, 1.0f / kSpacing, lodgenLandTiling() ) );
 		prog->uni1i( "fgMode", 3 );
-		fn->glActiveTexture( GLenum( prevActive ) );
+		u.done();
 		return;
 	}
-	bindUnit( fn, WwCellUnit::FarGroundGrid, GL_TEXTURE_2D, d.gpu.grid );
-	bindUnit( fn, WwCellUnit::FarGroundLtex, GL_TEXTURE_2D_ARRAY, d.gpu.ltex );
+	u.bind( WwCellUnit::FarGroundGrid, GL_TEXTURE_2D, d.gpu.grid );
+	u.bind( WwCellUnit::FarGroundLtex, GL_TEXTURE_2D_ARRAY, d.gpu.ltex );
 	baseUniforms( prog, d );
 	prog->uni1i( "fgMode", d.gpu.ready );
 	prog->uni1i( "fgDecalsOn", st().redNoDecals ? 0 : 1 );
 	if ( d.gpu.ready == 1 ) {
-		bindUnit( fn, WwCellUnit::FarGroundDecal, GL_TEXTURE_BUFFER, d.gpu.dtex );
-		bindUnit( fn, WwCellUnit::FarGroundAtlas, GL_TEXTURE_2D, d.gpu.atlas );
+		u.bind( WwCellUnit::FarGroundDecal, GL_TEXTURE_BUFFER, d.gpu.dtex );
+		u.bind( WwCellUnit::FarGroundAtlas, GL_TEXTURE_2D, d.gpu.atlas );
 		decalUniforms( prog, d );
 	} else {
-		bindUnit( fn, WwCellUnit::FarGroundPages, GL_TEXTURE_2D_ARRAY, d.gpu.pages );
+		u.bind( WwCellUnit::FarGroundPages, GL_TEXTURE_2D_ARRAY, d.gpu.pages );
 		prog->uni1i( "fgPages", WwCellUnit::FarGroundPages );
 	}
-	fn->glActiveTexture( GLenum( prevActive ) );
+	u.done();
 }
 
 bool ring0( const void * nif, int block )

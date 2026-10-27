@@ -4,6 +4,7 @@
 #include "gl/glcontext.hpp"
 #include "gl/gltex.h"
 #include "gl/cellbindless.h"
+#include "gl/celluniform.h"	// lane CELLUNI3: a replayed blend write notes itself
 
 #include <QString>
 
@@ -219,10 +220,21 @@ void replay( const Packet & p, NifSkopeOpenGLContext::GLFunctions * f, TexCache 
 			}
 			break;
 		case TexParamI: f->glTexParameteri( GLenum( o.a ), GLenum( o.b ), xi[0] ); break;
-		case Enable: f->glEnable( GLenum( o.a ) ); break;
-		case Disable: f->glDisable( GLenum( o.a ) ); break;
+		case Enable:
+			f->glEnable( GLenum( o.a ) );
+			if ( o.a == GL_BLEND )
+				WwCellUni::noteBlend( true );
+			break;
+		case Disable:
+			f->glDisable( GLenum( o.a ) );
+			if ( o.a == GL_BLEND )
+				WwCellUni::noteBlend( false );
+			break;
 		case CullFace: f->glCullFace( GLenum( o.a ) ); break;
-		case BlendSep: f->glBlendFuncSeparate( GLenum( xi[0] ), GLenum( xi[1] ), GLenum( xi[2] ), GLenum( xi[3] ) ); break;
+		case BlendSep:
+			f->glBlendFuncSeparate( GLenum( xi[0] ), GLenum( xi[1] ), GLenum( xi[2] ), GLenum( xi[3] ) );
+			WwCellUni::noteBlendDst( xi[1] );
+			break;
 		case PolyOffset: f->glPolygonOffset( x[0], x[1] ); break;
 		case DepthFunc: f->glDepthFunc( GLenum( o.a ) ); break;
 		case DepthMask: f->glDepthMask( GLboolean( o.a ) ); break;

@@ -4,6 +4,7 @@
 #include "skydisc.h"
 #include "wwswitch.h"
 #include "gl/cellunits.h"
+#include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
@@ -1088,19 +1089,17 @@ void wwAtmoApUniforms( Scene * scene )
 			&& v->proj[2] == gu.projectionMatrix[2][0] && v->proj[3] == gu.projectionMatrix[2][1];
 	}
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
-	GLint prevActive = 0;
-	r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AtmoAp ) );
-	r->fn->glBindTexture( GL_TEXTURE_3D, on ? v->tex : 0 );
-	r->fn->glActiveTexture( GLenum( prevActive ) );
+	WwCellUni::Units<std::remove_pointer_t<decltype( r->fn )>> u( r->fn, wwCellUniDsa() );	// lane CELLUNI3: no ask with DSA
+	u.section();
+	u.bind( WwCellUnit::AtmoAp, GL_TEXTURE_3D, on ? v->tex : 0 );
+	u.done();
 	prog->uni1i( "atApTex", WwCellUnit::AtmoAp );
 	prog->uni4f( "atAp", FloatVector4( on ? 1.0f : 0.0f, kApMaxKm, on ? v->kmPerView : 0.0f, on ? float( v->n ) : 1.0f ) );
 	if ( prog->uniLocation( "atSkyTransTex" ) >= 0 ) {
 		// the sky's air (cell_volsky.frag): the physical sky already holds the air along its ray to space, so the
 		// Volumetric Air over it keeps only its residual (atmo_apfog.glsl); the ray's transmittance from this LUT
-		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AtmoTrans ) );
-		r->fn->glBindTexture( GL_TEXTURE_2D, on ? it->trans.tex : 0 );
-		r->fn->glActiveTexture( GLenum( prevActive ) );
+		u.bind( WwCellUnit::AtmoTrans, GL_TEXTURE_2D, on ? it->trans.tex : 0 );
+		u.done();
 		prog->uni1i( "atSkyTransTex", WwCellUnit::AtmoTrans );
 		prog->uni1f( "atSkyCamR", on ? v->camR : 0.0f );
 	}

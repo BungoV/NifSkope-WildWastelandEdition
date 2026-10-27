@@ -219,6 +219,7 @@ protected:
 		std::uint32_t epoch = 0;
 		int wrapS = 0, wrapT = 0, minFilter = 0;
 		float aniso = 0.0f;
+		std::int8_t cube = 0;	// lane CELLUNI3: a cube's decode mode (0: not asked since its load)
 	};
 	std::vector<ParamShadow> paramShadow;
 	std::uint32_t paramEpoch = 1;
@@ -228,6 +229,17 @@ protected:
 	void paramForget( GLuint id );
 
 public:
+	// lane CELLUNI3: the 2D texture bind() / the cube bindCube() last bound from a loaded entry (0: none, ask GL)
+	GLuint wwBound = 0, wwCubeBound = 0;
+	int wwCubeMode( GLuint id ) const { return id < paramShadow.size() ? paramShadow[id].cube : 0; }
+	void wwCubeModeSet( GLuint id, int mode )
+	{
+		if ( id >= ( 1U << 22 ) )
+			return;
+		if ( id >= paramShadow.size() )
+			paramShadow.resize( size_t( id ) + 1024 );
+		paramShadow[id].cube = std::int8_t( mode );
+	}
 	void setOpenGLContext( NifSkopeOpenGLContext * context );
 
 	const Tex::ImageInfo * getTextureInfo( const QStringView & file ) const;

@@ -361,6 +361,7 @@ TexCache::Tex * TexCache::rehashTextures( Tex * p )
 int TexCache::bind( const QStringView & fname, const NifModel * nif )
 {
 	paramId = 0;	// lane PERF5
+	wwBound = 0;	// lane CELLUNI3
 	Tex *	tx = insertTex( fname );
 	if ( !tx ) [[unlikely]]
 		return 0;
@@ -376,6 +377,7 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 		tx->target = GL_TEXTURE_2D;
 	glBindTexture( tx->target, tx->id[0] );
 	WWDP( WwDp::BindTex, GLint( tx->target ), GLint( tx->id[0] ) );	// lane GAPPERF-BINDLESS
+	wwBound = tx->target == GL_TEXTURE_2D ? tx->id[0] : 0;	// lane CELLUNI3
 	// lane PERF5: the shadow follows its own caller's binds; any other caller may set other parameters
 	if ( wwParamCaller && tx->target == GL_TEXTURE_2D ) {
 		paramId = tx->id[0];
@@ -389,8 +391,10 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 
 void TexCache::paramForget( GLuint id )
 {
-	if ( id < paramShadow.size() )
+	if ( id < paramShadow.size() ) {
 		paramShadow[id].epoch = 0;
+		paramShadow[id].cube = 0;	// lane CELLUNI3: a reload may change the format
+	}
 }
 
 static int wwTexShadowMode()	// lane PERF5: 0 = the red (always set), 1 = the shadow, 2 = the shadow read back and compared
@@ -478,6 +482,7 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 
 	glBindTexture( tx->target, tx->id[size_t(useSecondTexture)] );
 	WWDP( WwDp::BindTex, GLint( tx->target ), GLint( tx->id[size_t(useSecondTexture)] ) );	// lane GAPPERF-BINDLESS
+	wwCubeBound = ( tx->target == GL_TEXTURE_CUBE_MAP && !useSecondTexture ) ? tx->id[0] : 0;	// lane CELLUNI3
 
 	if ( !tx->mipmaps ) [[unlikely]]
 		return false;

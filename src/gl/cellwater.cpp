@@ -17,6 +17,7 @@
 #include "gl/glscene.h"
 #include "gl/gltex.h"
 #include "gl/renderer.h"
+#include "gl/celluniform.h"	// lane CELLUNI3: the blend note
 
 #include <QFile>
 #include <QHash>
@@ -387,7 +388,11 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
 		glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, ( s.red & 128 ) ? 1.0f : std::min( 16.0f, maxAniso ) );
 		noiseAniso = ( s.red & 128 ) ? 1.0f : std::min( 16.0f, maxAniso );
-		glGetIntegerv( GL_TEXTURE_BINDING_2D, &noiseTex[k] );
+		// lane CELLUNI3: the cache's own bind names it (a first load binds elsewhere: asked)
+		if ( scene->textures->wwBound && !wwCellUniRed() )
+			noiseTex[k] = GLint( scene->textures->wwBound );
+		else
+			glGetIntegerv( GL_TEXTURE_BINDING_2D, &noiseTex[k] );
 		prog->uni1i_l( prog->uniLocation( noiseUni[k] ), unit++ );
 	}
 	// the scene behind the water (the second pass's copy) and the opaque frame's depth; in the reflections' scene
@@ -515,6 +520,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 
 	// an opaque surface: it composites the scene behind it itself
 	glDisable( GL_BLEND );
+	WwCellUni::noteBlend( false );	// lane CELLUNI3
 	glEnable( GL_DEPTH_TEST );
 	glDepthFunc( GL_LEQUAL );
 	glDepthMask( GL_TRUE );

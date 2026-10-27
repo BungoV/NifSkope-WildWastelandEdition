@@ -4,7 +4,8 @@
 /* lane CELLUNI1: the cell lighting uniforms (wwCellLightsUniforms, wwCellClusterUniforms) without driver round trips.
  * A per-program value cache skips an upload that would write what the location already holds; the dedicated units
  * bind through EXT_direct_state_access, so the active unit is never asked for. WW_CELL_UNI_RED=1: the old path.
- * Lane CELLUNI2: the per-draw setters (AO, SSR, SSGI, reflection probes) and the scene globals (fog, sun) use it too. */
+ * Lane CELLUNI2: the per-draw setters (AO, SSR, SSGI, reflection probes) and the scene globals (fog, sun) use it too.
+ * Lane CELLUNI3: the CE1 tail scalars, the draw's blend (a note from its setup) and the sky / air / far units. */
 
 #include <cstdint>
 #include <cstring>
@@ -46,7 +47,7 @@ struct Counts
 };
 
 //! lane CELLUNI2: who opened the innermost scope (the telemetry splits the counts by it)
-enum Site { Lights, Draw, Globals, SiteCount };
+enum Site { Lights, Draw, Globals, Tail, SiteCount };
 
 struct State
 {
@@ -61,6 +62,7 @@ struct State
 	std::uint64_t vpEpoch = 0, vpHave = 0, vpStale = 0;
 	bool vpCheck = false;
 	int vp[4] = {};
+	std::uint64_t blendStale = 0;	// lane CELLUNI3: WW_SETUP_MEMO_CHECK=1 found the blend note wrong
 };
 inline State & state()
 {
@@ -147,6 +149,22 @@ inline void queried()
 	if ( state().inCall )
 		bump( &Counts::queries );
 }
+
+/* lane CELLUNI3: GL_BLEND (and the blend's RGB destination factor) as the draw's setup last wrote it. setupProgram
+ * forgets it on entry and every blend write between there and the census notes itself; -1 = not written (ask GL). */
+struct BlendNote
+{
+	int on = -1;
+	int dst = -1;
+};
+inline BlendNote & blendNote()
+{
+	static BlendNote b;
+	return b;
+}
+inline void noteBlend( bool on ) { blendNote().on = on ? 1 : 0; }
+inline void noteBlendDst( int dst ) { blendNote().dst = dst; }
+inline void forgetBlend() { blendNote() = BlendNote(); }
 
 //! once per frame: true when the last frame's counters should print
 inline bool frameTick( std::uint64_t f, std::uint64_t every )
