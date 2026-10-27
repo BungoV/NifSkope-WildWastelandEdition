@@ -1,0 +1,4 @@
+# lane WATERUNDER4: the underwater fog per sample at the frame's edges (cell_underwater.prog's twin). No conditions:
+# never picked for a shape; cellunderwater.cpp selects it by name when the frame's depth is read per sample.
+
+shaders cell_hdr.vert cell_underwater_ms.frag

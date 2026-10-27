@@ -2750,6 +2750,19 @@ bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] )
 	return true;
 }
 
+// lane WATERUNDER5: the game's sky colour type 14 is this row, blended like every sky colour and kept as stored (no gamma)
+bool wwLookdevWaterMult( float rgb[3] )
+{
+	if ( !st().haveWeather )
+		return false;
+	const SkyFrame f = skyFrame();
+	float c[3];
+	EsmWeather::blendRowLab( st().w, WwRowWaterMult, f.c.keys, c );
+	for ( int k = 0; k < 3; k++ )
+		rgb[k] = std::clamp( c[k] / 255.0f, 0.0f, 1.0f );
+	return true;
+}
+
 bool wwLookdevImageSpaceDof( float a[4], float b[4], float & t, bool & haveA, bool & haveB )
 {
 	if ( !st().haveWeather )

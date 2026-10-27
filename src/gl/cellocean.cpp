@@ -26,7 +26,7 @@ constexpr int kLevels = 8;	// 128 .. 1
 
 struct OceanGpu
 {
-	GLuint h0 = 0, q = 0, ping[2][2] = {}, fb[2] = {}, arrB = 0, arrC = 0, fbArr = 0, qry[4] = {};
+	GLuint h0 = 0, q = 0, ping[2][2] = {}, fb[2] = {}, arrB = 0, arrC = 0, arrD = 0, fbArr = 0, qry[4] = {};
 	bool ok = false, pending[2] = {};
 	int cur = 0;
 	double U = -1.0, swell = -1.0;	// the wind the uploaded h0 is for
@@ -36,9 +36,10 @@ struct OceanState
 {
 	WwOcean::SetParams P[2];
 	double tail[2] = {}, curv[2] = {};
+	double corr[2][2 * WwOcean::kCorrN] = {};	// step 5: the slope correlation tables (the flow's renormalisation)
 	double U = 5.0, swell = 0.344;
 	bool built = false;	// this frame
-	int red = 0;		// 1 old, 2 tile, 4 nopatch, 8 novar, 16 nochop
+	int red = 0;		// 1 old, 2 tile, 4 nopatch, 8 novar, 16 nochop, 32 flat (step 2: no displacement), ... 256 noflow
 	double ms = 0.0;
 	int frames = 0;
 	QString why;
@@ -59,7 +60,8 @@ QHash<Renderer *, OceanGpu> & gpus()
 int redNow()
 {
 	WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_OCEAN_RED" ).trimmed() );
-	return rr == "old" ? 1 : rr == "tile" ? 2 : rr == "nopatch" ? 4 : rr == "novar" ? 8 : rr == "nochop" ? 16 : 0;
+	return rr == "old" ? 1 : rr == "tile" ? 2 : rr == "nopatch" ? 4 : rr == "novar" ? 8 : rr == "nochop" ? 16
+		: rr == "flat" ? 32 : rr == "norip" ? 64 : rr == "noglow" ? 128 : rr == "noflow" ? 256 : 0;
 }
 
 GLuint tex2d( NifSkopeOpenGLContext::GLFunctions * fn, GLint ifmt, int w, int h, GLenum fmt, const float * data )
@@ -101,7 +103,7 @@ bool create( NifSkopeOpenGLContext::GLFunctions * fn, OceanGpu & g )
 	g.q = tex2d( fn, GL_R32F, kW, WwOcean::kN, GL_RED, nullptr );
 	fn->glGenFramebuffers( 2, g.fb );
 	fn->glGenFramebuffers( 1, &g.fbArr );
-	const GLenum bufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+	const GLenum bufs[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
 	bool ok = true;
 	for ( int i = 0; i < 2; i++ ) {
 		g.ping[i][0] = tex2d( fn, GL_RGBA32F, kW, WwOcean::kN, GL_RGBA, nullptr );
@@ -115,10 +117,12 @@ bool create( NifSkopeOpenGLContext::GLFunctions * fn, OceanGpu & g )
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	g.arrB = texArr( fn, GL_RGBA16F );
 	g.arrC = texArr( fn, GL_RGBA32F );
+	g.arrD = texArr( fn, GL_RGBA16F );	// step 2: the heights and the chop for the displaced water
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbArr );
 	fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.arrB, 0 );
 	fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, g.arrC, 0 );
-	fn->glDrawBuffers( 2, bufs );
+	fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, g.arrD, 0 );
+	fn->glDrawBuffers( 3, bufs );
 	ok = ok && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
 	fn->glGenQueries( 4, g.qry );
@@ -128,8 +132,10 @@ bool create( NifSkopeOpenGLContext::GLFunctions * fn, OceanGpu & g )
 void upload( NifSkopeOpenGLContext::GLFunctions * fn, OceanGpu & g, OceanState & s )
 {
 	WwOcean::params( s.U, s.swell, s.P );
-	for ( int k = 0; k < 2; k++ )
+	for ( int k = 0; k < 2; k++ ) {
 		WwOcean::tail( k, s.U, s.P[k], s.tail[k], s.curv[k] );
+		WwOcean::slopeCorr( k, s.P[k], s.corr[k] );
+	}
 	std::vector<float> h0, q;
 	WwOcean::h0Tiles( s.P, h0, q );
 	fn->glBindTexture( GL_TEXTURE_2D, g.h0 );
@@ -198,12 +204,12 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
 	OceanGpu & g = gpus()[r];
-	GLint prevDraw = 0, prevRead = 0, prevActive = 0, vp[4] = { 0, 0, 1, 1 }, prevTex[2][2] = {};
+	GLint prevDraw = 0, prevRead = 0, prevActive = 0, vp[4] = { 0, 0, 1, 1 }, prevTex[3][2] = {};
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
 	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	const int units[2] = { WwCellUnit::WaterOceanB, WwCellUnit::WaterOceanC };
-	for ( int k = 0; k < 2; k++ ) {
+	const int units[3] = { WwCellUnit::WaterOceanB, WwCellUnit::WaterOceanC, WwCellUnit::WaterOceanD };
+	for ( int k = 0; k < 3; k++ ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + units[k] ) );
 		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex[k][0] );
 		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D_ARRAY, &prevTex[k][1] );
@@ -211,7 +217,7 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 	auto restoreBindings = [&]() {
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
-		for ( int k = 0; k < 2; k++ ) {
+		for ( int k = 0; k < 3; k++ ) {
 			fn->glActiveTexture( GLenum( GL_TEXTURE0 + units[k] ) );
 			fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex[k][0] ) );
 			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, GLuint( prevTex[k][1] ) );
@@ -300,6 +306,7 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 			fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbArr );
 			fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.arrB, 0 );
 			fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, g.arrC, 0 );
+			fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, g.arrD, 0 );
 			fn->glViewport( 0, 0, WwOcean::kN, WwOcean::kN );
 			quad( r );
 			// the mips: a 2 x 2 mean a level (C's mean of squares keeps the lost variance), not glGenerateMipmap
@@ -307,14 +314,15 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 			if ( auto pMip = r->useProgram( "ocean_mip.prog" ) ) {
 				pMip->uni1i( "oceanB", units[0] );
 				pMip->uni1i( "oceanC", units[1] );
-				const GLuint arr[2] = { g.arrB, g.arrC };
-				for ( int k = 0; k < 2; k++ ) {
+				pMip->uni1i( "oceanD", units[2] );
+				const GLuint arr[3] = { g.arrB, g.arrC, g.arrD };
+				for ( int k = 0; k < 3; k++ ) {
 					fn->glActiveTexture( GLenum( GL_TEXTURE0 + units[k] ) );
 					fn->glBindTexture( GL_TEXTURE_2D, 0 );
 					fn->glBindTexture( GL_TEXTURE_2D_ARRAY, arr[k] );
 				}
 				for ( int lv = 1; lv < kLevels; lv++ ) {
-					for ( int k = 0; k < 2; k++ ) {
+					for ( int k = 0; k < 3; k++ ) {
 						fn->glActiveTexture( GLenum( GL_TEXTURE0 + units[k] ) );
 						fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, lv - 1 );
 						fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, lv - 1 );
@@ -322,9 +330,10 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 					fn->glViewport( 0, 0, WwOcean::kN >> lv, WwOcean::kN >> lv );
 					fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.arrB, lv );
 					fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, g.arrC, lv );
+					fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, g.arrD, lv );
 					quad( r );
 				}
-				for ( int k = 0; k < 2; k++ ) {
+				for ( int k = 0; k < 3; k++ ) {
 					fn->glActiveTexture( GLenum( GL_TEXTURE0 + units[k] ) );
 					fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0 );
 					fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, kLevels - 1 );
@@ -347,14 +356,15 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 	if ( wasCull ) fn->glEnable( GL_CULL_FACE );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST );
 	restoreBindings();
-	static const char * const redName[5] = { "old", "tile", "nopatch", "novar", "nochop" };
+	static const char * const redName[9] = { "old", "tile", "nopatch", "novar", "nochop", "flat", "norip", "noglow",
+		"noflow" };
 	QString red;
-	for ( int k = 1; k < 5; k++ )
+	for ( int k = 1; k < 9; k++ )
 		if ( s.red & ( 1 << k ) )
 			red = QStringLiteral( ", RED %1" ).arg( QLatin1String( redName[k] ) );
-	s.why = s.built ? QStringLiteral( "ocean: wind %1 m/s, swell %2 m, Hs sea %3 m, fresh %4 m, gpu %5 ms%6" )
+	s.why = s.built ? QStringLiteral( "ocean: wind %1 m/s, swell %2 m, Hs sea %3 m, fresh %4 m, gpu %5 ms, displaced %6%7" )
 			.arg( s.U, 0, 'f', 2 ).arg( s.swell, 0, 'f', 3 ).arg( s.P[0].hsSet, 0, 'f', 4 ).arg( s.P[1].hsSet, 0, 'f', 4 )
-			.arg( s.ms, 0, 'f', 4 ).arg( red )
+			.arg( s.ms, 0, 'f', 4 ).arg( wwCellOceanDispOn() ? 1 : 0 ).arg( red )
 		: QStringLiteral( "ocean: refused (a pass program did not link)" );
 }
 
@@ -376,8 +386,15 @@ void wwCellOceanUniforms( Scene * scene, float windDeg )
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g ? g->arrB : 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::WaterOceanC ) );
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g ? g->arrC : 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::WaterOceanD ) );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g ? g->arrD : 0 );
 	prog->uni1i( "waterOceanB", WwCellUnit::WaterOceanB );
 	prog->uni1i( "waterOceanC", WwCellUnit::WaterOceanC );
+	prog->uni1i( "waterOceanD", WwCellUnit::WaterOceanD );
+	/* step 2 (fo4_waterlookd.prog): full displacement out to 4096 u (one cell), none past 8192 u; an edge split to about
+	 * 8 px, at most 64 times (GL's least GL_MAX_TESS_GEN_LEVEL), so a 4096 u quad's finest step is 64 u (0.9 m).
+	 * Engineering choices: the waves' heights are a few metres at most, invisible as relief past two cells */
+	prog->uni4f( "waterOceanDisp", FloatVector4( 4096.0f, 8192.0f, 8.0f, 64.0f ) );
 	if ( !on )
 		return;
 	FloatVector4 invL[2], set[2], setB[2];
@@ -406,9 +423,35 @@ void wwCellOceanUniforms( Scene * scene, float windDeg )
 		drift[k * 2 + 1] = -std::fmod( dy * run, per );
 	}
 	prog->uni4f( "waterOceanPatch", FloatVector4( float( drift[0] ), float( drift[1] ), float( drift[2] ), float( drift[3] ) ) );
+	/* step 3: the contact rings, 0.3 m and 0.8 m (engineering choices: the short band the eye reads as ripples), each
+	 * at its capillary-gravity speed w^2 = g k + sigma / rho k^3; the phase wrapped in double */
+	double rip[4];
+	for ( int k = 0; k < 2; k++ ) {
+		const double km = 2.0 * WwOcean::kPi / ( k ? 0.8 : 0.3 );	// rad / m
+		rip[k] = km * 0.0142875;	// rad / u
+		rip[2 + k] = std::fmod( std::sqrt( 9.81 * km + 7.4e-5 * km * km * km ) * t, 2.0 * WwOcean::kPi );
+	}
+	prog->uni4f( "waterOceanRip", FloatVector4( float( rip[0] ), float( rip[1] ), float( rip[2] ), float( rip[3] ) ) );
+	/* step 5: the waves carried along the baked flow, two reads half a period apart (4 s, an engineering choice);
+	 * the clock wrapped in double. Read A moved for fA T, B half a period on; each weighted by its distance from its own restart */
+	const double T = 4.0, fA = std::fmod( t, T ) / T, wa = 1.0 - std::fabs( 2.0 * fA - 1.0 );
+	prog->uni4f( "waterOceanFlow", FloatVector4( float( fA * T ), float( std::fmod( fA + 0.5, 1.0 ) * T ), float( wa ),
+		float( 1.0 - wa ) ) );
+	FloatVector4 corr[WwOcean::kCorrN];	// 2 sets x 2 directions x 16 distances, 4 a vec4
+	for ( int k = 0; k < 2; k++ )
+		for ( int i = 0; i < 8; i++ )
+			corr[k * 8 + i] = FloatVector4( float( s.corr[k][i * 4] ), float( s.corr[k][i * 4 + 1] ),
+				float( s.corr[k][i * 4 + 2] ), float( s.corr[k][i * 4 + 3] ) );
+	prog->uni4fv( "waterOceanFlowCorr", corr, 16 );
 }
 
 QString wwCellOceanEcho()
 {
 	return os().why;
+}
+
+bool wwCellOceanDispOn()
+{
+	const OceanState & s = os();
+	return s.built && !( s.red & 32 );
 }

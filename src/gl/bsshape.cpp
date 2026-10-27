@@ -520,7 +520,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 			fadeOffsets.push_back( (const void *) ( size_t( fadeKeep[k] ) * 6 ) );
 		}
 		if ( !fadeCounts.empty() ) {
-			WwBl::multiDrawElements( context->fn, fadeCounts.data(), fadeOffsets.data(), GLsizei( fadeCounts.size() ) );
+			WwBl::multiDrawElements( context->fn, fadeCounts.data(), fadeOffsets.data(), GLsizei( fadeCounts.size() ),
+				GLenum( context->triMode() ) );
 			PassTime::countDraw( qint64( fadeCounts.size() ) );
 		}
 		if ( !fadeAlpha.empty() ) {
@@ -552,7 +553,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 					cur->uni1f_l( la, a0 * fadeAlpha[k] );
 				else
 					context->fn->glBlendColor( 0.0f, 0.0f, 0.0f, fadeAlpha[k] );
-				WwBl::drawElements( context->fn, GLsizei( fadeBand[2 * k + 1] * 3 ), size_t( fadeBand[2 * k] ) * 6 );
+				WwBl::drawElements( context->fn, GLsizei( fadeBand[2 * k + 1] * 3 ), size_t( fadeBand[2 * k] ) * 6,
+					GLenum( context->triMode() ) );
 			}
 			PassTime::countDraw( qint64( fadeAlpha.size() ) );
 			if ( viaAlpha ) {
@@ -579,12 +581,14 @@ void BSShape::drawShapes( NodeList * secondPass )
 			cullOffsets.push_back( (const void *) ( size_t( cullRanges[k] ) * 6 ) );
 		}
 		if ( !cullCounts.empty() && !wwMdiDraw( mdiHint, &cullRanges, numTriangles ) ) {
-			WwBl::multiDrawElements( context->fn, cullCounts.data(), cullOffsets.data(), GLsizei( cullCounts.size() ) );
+			WwBl::multiDrawElements( context->fn, cullCounts.data(), cullOffsets.data(), GLsizei( cullCounts.size() ),
+				GLenum( context->triMode() ) );
 			PassTime::countDraw( qint64( cullCounts.size() ) );	// lane PERF1
 		}
 	} else if ( numTriangles > 0 && !hiddenT ) {
+		// lane WATERLOOK1 step 2: GL_PATCHES under a program with a tessellation stage (the displaced water)
 		if ( !wwMdiDraw( mdiHint, nullptr, numTriangles ) ) {
-			WwBl::drawElements( context->fn, GLsizei( numTriangles * 3 ), 0 );
+			WwBl::drawElements( context->fn, GLsizei( numTriangles * 3 ), 0, GLenum( context->triMode() ) );
 			PassTime::countDraw( 1 );	// lane PERF1
 		}
 	} else if ( numTriangles > 0 ) {
@@ -593,7 +597,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			bool hid = ( i < numTriangles ) && hiddenT->contains( int( i ) );
 			if ( hid || i == numTriangles ) {
 				if ( i > runStart )
-					context->fn->glDrawElements( GL_TRIANGLES, GLsizei( ( i - runStart ) * 3 ),
+					context->fn->glDrawElements( GLenum( context->triMode() ), GLsizei( ( i - runStart ) * 3 ),
 						GL_UNSIGNED_SHORT, (void *) ( size_t( runStart ) * 6 ) );
 				runStart = i + 1;
 			}

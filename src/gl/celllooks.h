@@ -57,6 +57,15 @@ enum class WwLook : int
 	WaterRefl,			// WATERREFL1: physical Fresnel, scene reflections on every body, far water = near law (WW_CELL_WATER_REFL)
 	WaterGlint,			// WATERREFL1: the sun's glare from the wave slopes' roughness, no fixed sparkle (WW_CELL_WATER_GLINT)
 	WaterOcean,			// WATERLOOK1: the wind's wave spectrum (FFT) replaces the baked bodies' normal maps (WW_CELL_WATER_OCEAN)
+	Underwater,			// WATERUNDER1: the camera under a water surface sees the WATR's underwater fog (WW_CELL_UNDERWATER)
+	WaterClear,			// WATERLOOK1 step 8: the water's own colour by body class, not the WATR ramp (WW_CELL_WATER_CLEAR)
+	WaterSkyVis,			// WATERLOOK1 step 10: the water's sky reflection and glare where their sky is seen (WW_CELL_WATER_SKYVIS)
+	WaterSurf,			// WATERLOOK1 step 11: shore waves on the sea, shoaling and breaking, crest foam (WW_CELL_WATER_SURF)
+	WaterContact,			// WATERLOOK1 step 12: foam rings where waves strike anything standing in the water (WW_CELL_WATER_CONTACT)
+	LandWet,			// WATERLOOK1 step 13: the ground darkens and shines beside baked water (WW_CELL_LAND_WET)
+	LandSwash,			// WATERLOOK1 step 14: the waves run up the beach and drain back (WW_CELL_LAND_SWASH)
+	WaterRiverFoam,			// WATERLOOK1 step 15: foam streaks carried by the baked river flow (WW_CELL_WATER_RIVERFOAM)
+	WaterUnderLight,		// WATERLOOK1 step 16: under water: Snell's window, meniscus, the clear colour's water (WW_CELL_WATER_UNDERLIGHT)
 	Count
 };
 

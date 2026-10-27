@@ -151,6 +151,7 @@ public:
 		int wwDrawIdLoc = -1;	// its wwDrawIdx uniform
 		Program * wwTwin = nullptr;	// the program it stands in for (its sampler locations decide which maps bind)
 		WwCellUni::Cache wwUni;	// lane CELLUNI1: what the cell scope last wrote per location (reset at every link)
+		bool patches = false;	// lane WATERLOOK1 step 2: has a tessellation stage, so it draws GL_PATCHES (triMode)
 
 		ConditionGroup conditions;
 
@@ -350,6 +351,11 @@ public:
 	//! Stop shader program
 	void stopProgram();
 	//! Get the currently used shader program (nullptr if none)
+	//! lane WATERLOOK1 step 2: the primitive a shape's triangle list draws as under the bound program
+	inline unsigned int triMode() const
+	{
+		return ( currentProgram && currentProgram->patches ) ? GL_PATCHES : GL_TRIANGLES;
+	}
 	inline Program * getCurrentProgram()
 	{
 		return currentProgram;

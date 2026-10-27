@@ -1,5 +1,8 @@
 #include "cellwaterinfo.h"
 #include "wwswitch.h"
+#include "gl/celllooks.h"	// lane WATERLOOK1 step 13: the Wet shore row
+#include "gl/cellwater.h"	// lane WATERLOOK1 step 14: the sea constants of the Wave run-up row
+#include "cellworldanim.h"	// lane WATERLOOK1 step 14: the world clock
 
 #include "lodtfile.h"
 #include "gl/cellunits.h"
@@ -282,11 +285,13 @@ bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * er
 	t.bodyRows = ( n + 1 + WwWaterInfoTables::kBodiesPerRow - 1 ) / WwWaterInfoTables::kBodiesPerRow;
 	t.bodies.assign( size_t( t.bodyRows ) * WwWaterInfoTables::kBodiesPerRow * 4, 0.0f );
 	t.bodies[1] = -1.0f;	// body 0: none, class -1
+	t.bodyForms.assign( size_t( n ) + 1, 0u );
 	for ( int k = 1; k <= n; k++ ) {
 		LodtWaterBody B;
 		if ( !f.waterBody( k, B ) )
 			continue;
 		bh[k] = B.waterHeight;
+		t.bodyForms[size_t( k )] = B.watrForm;
 		float * o = &t.bodies[size_t( k ) * 4];
 		o[0] = B.waterHeight;
 		o[1] = float( B.cls );
@@ -805,6 +810,40 @@ void wwCellLandShoreUniforms( Scene * scene, bool terrain )
 	const int lIndex = prog->uniLocation( "landShoreIndex" );
 	if ( lIndex < 0 )
 		return;	// the default programs do not read the land side: nothing bound, nothing set
+	/* lane WATERLOOK1 step 13: the Wet shore row (land_wet.glsl). Full wet at the line to none 105 u (1.5 m) out or
+	 * 21 u (0.3 m) up the slope; a wet porous base x 0.2 (linear); the glossy film 18 u (0.25 m). Off, the land side
+	 * is neutral and nothing is bound (the samplers keep their own units: no two sampler types on one unit). */
+	const bool wet = wwLookOn( WwLook::LandWet );
+	prog->uni1b( "landWetOn", wet );
+	/* lane WATERLOOK1 step 14: the Wave run-up row (land_swash.glsl) also reads the water lookup, at cell units 79-81
+	 * (always given their units: no two sampler types on one unit), and SURF1's sea constants. Its foam 0.8 opaque,
+	 * fading over 1 m along the ground behind the tip (a bore's foam front). */
+	const bool swashRead = prog->uniLocation( "landSwashOn" ) >= 0;
+	const bool swash = swashRead && wwLookOn( WwLook::LandSwash );
+	prog->uni1b( "landSwashOn", swash );
+	if ( swashRead )
+		wwCellWaterInfoUniforms( scene, WwCellUnit::LandWaterInfo );
+	if ( swash ) {
+		WW_SWITCH_STATIC( QByteArray, sr, wwEnv( "WW_CELL_LAND_SWASH_RED" ).trimmed() );
+		prog->uni1i( "landSwashRed", ( sr.contains( "still" ) ? 1 : 0 ) | ( sr.contains( "nofoam" ) ? 2 : 0 )
+			| ( sr.contains( "regular" ) ? 4 : 0 ) );
+		float sk[4], k2[4], k3[4];
+		wwCellWaterSurfConsts( sk, k2, k3 );
+		prog->uni4f( "landSwashK", FloatVector4( sk[0], sk[2], 0.8f, 1.0f ) );
+		prog->uni4f( "waterShoreK2", FloatVector4( k2[0], k2[1], k2[2], k2[3] ) );
+		prog->uni4f( "waterShoreK3", FloatVector4( k3[0], k3[1], k3[2], k3[3] ) );
+		prog->uni1f( "landSwashTime", wwCellWorldAnimOn() ? float( wwCellWorldSeconds() ) : 0.0f );
+	}
+	if ( !wet && !swash ) {
+		prog->uni1i_l( lIndex, WwCellUnit::LandShoreIndex );
+		prog->uni1i_l( prog->uniLocation( "landShoreAtlas" ), WwCellUnit::LandShoreAtlas );
+		prog->uni1b( "landShoreOn", false );
+		return;
+	}
+	WW_SWITCH_STATIC( QByteArray, wr, wwEnv( "WW_CELL_LAND_WET_RED" ).trimmed() );
+	prog->uni1i( "landWetRed", ( wr.contains( "noslope" ) ? 1 : 0 ) | ( wr.contains( "nofilm" ) ? 2 : 0 )
+		| ( wr.contains( "nodark" ) ? 4 : 0 ) );
+	prog->uni4f( "landWetK", FloatVector4( 105.0f, 21.0f, 0.2f, 18.0f ) );
 	State & s = st();
 	QOpenGLContext * ctx = QOpenGLContext::currentContext();
 	const std::shared_ptr<Job> job = s.docs.value( scene->nifModel );
@@ -834,6 +873,38 @@ void wwCellLandShoreUniforms( Scene * scene, bool terrain )
 		prog->uni4f( "landShoreLayout", FloatVector4( float( t.tilesX ), float( t.tilesY ),
 			float( WwWaterInfoTables::kTileEdge ), float( WwWaterInfoTables::kTilesPerRow ) ) );
 	}
+}
+
+bool wwCellWaterInfoAt( const void * nif, float x, float y, WwWaterInfoHit & hit )
+{
+	hit = WwWaterInfoHit();
+	const std::shared_ptr<Job> job = st().docs.value( nif );
+	if ( !job || job->state.load( std::memory_order_acquire ) != 1 || infoRed() )
+		return false;
+	const WwWaterInfoTables & t = job->t;
+	const int E = WwWaterInfoTables::kTileEdge;
+	const double fx = std::floor( ( double( x ) - t.originX ) / t.texel ), fy = std::floor( ( double( y ) - t.originY ) / t.texel );
+	if ( fx < 0.0 || fy < 0.0 || fx >= double( t.tilesX ) * E || fy >= double( t.tilesY ) * E )
+		return true;	// off the map: dry
+	const int tx = int( fx ), ty = int( fy ), ti = ( ty / E ) * t.tilesX + tx / E;
+	const uint32_t slot = t.index[size_t( ti ) * 2];
+	uint32_t w = t.index[size_t( ti ) * 2 + 1];
+	if ( slot ) {
+		const int s = int( slot ) - 1, R = WwWaterInfoTables::kTilesPerRow;
+		w = t.atlas[size_t( ( s / R ) * E + ty % E ) * t.atlasW + ( s % R ) * E + tx % E];
+	}
+	hit.body = w & 0xFFFFu;
+	hit.shore = float( ( w >> 16 ) & 0xFFu ) * t.shoreQuantum;
+	const double code = double( w >> 24 ) / 255.0;
+	hit.depth = float( code * code * WwWaterInfoTables::kDepthMax );
+	if ( hit.body && hit.body <= uint32_t( t.bodyCount ) ) {
+		hit.height = t.bodies[size_t( hit.body ) * 4];
+		hit.cls = int( t.bodies[size_t( hit.body ) * 4 + 1] );
+		hit.form = hit.body < t.bodyForms.size() ? t.bodyForms[hit.body] : 0u;
+	} else {
+		hit.body = 0;
+	}
+	return true;
 }
 
 QString wwCellWaterInfoEcho( const void * nif )

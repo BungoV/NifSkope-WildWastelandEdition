@@ -13,6 +13,9 @@ uniform vec4 waterOceanSet[2];	// per set: Hs of its tiles (m), their wind sea's
 uniform vec4 waterOceanSetB[2];	// per set: the tiles' fetch (m), resolved curvature rms (1/m), patch cell (u), 0
 uniform vec4 waterOceanWind;	// the waves' travel direction x, y (unit), the wind (m/s), the caustic net's curvature (1/m)
 uniform vec4 waterOceanPatch;	// the wind patches' drift, sea x, y, fresh x, y (u, wrapped by their period)
+// step 2: the heights and the chop move the water's vertices near the camera (fo4_waterdisp.tesc / .tese)
+uniform sampler2DArray waterOceanD;	// ( h, Dx, Dy, 0 ) m, mipmapped (box means)
+uniform vec4 waterOceanDisp;	// full out to (u), none past (u), the split's target edge (px), the most a GPU splits an edge
 
 const float kOcMetre = 0.0142875;	// m a game unit
 const float kOcGrid = 2.3255814;	// triangle grid cells a tile (1 / 0.43)
@@ -119,12 +122,17 @@ float wwOcHw( float U, float F )
 	return min( 0.0016 * U * sqrt( F / 9.81 ), 0.21 * U * U / 9.81 );
 }
 
-/* the spectrum at world xy P (u); dPx, dPy its screen derivatives. The body from the 4 texels around P as the swell
- * reads it (water_waves.glsl): the sea takes the sea set, rivers and lakes the fresh one, each scaled by its own fetch
- * (sqrt of its baked area; a river's is its width, 40 m); tiny bodies, placed and interior water get w = 0. */
-WwOcean wwWaterOcean( vec2 P, vec2 dPx, vec2 dPy )
+/* the body at world xy P (u) from the 4 texels around it as the swell reads it (water_waves.glsl): the sea takes the
+ * sea set, rivers and lakes the fresh one, each scaled by its own fetch (sqrt of its baked area; a river's is its width,
+ * 40 m); tiny bodies, placed and interior water: -1. Out: the share of P on that set's corners, their blended gain,
+ * the cascades' wind patch gains, the patch factor and its weight. */
+int wwOcBody( vec2 P, out float ws, out float a, out vec3 gc, out float m, out float pw )
 {
-	WwOcean o = WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
+	ws = 0.0;
+	a = 0.0;
+	gc = vec3( 1.0 );
+	m = 1.0;
+	pw = 0.0;
 	float tex = waterInfoGrid.z;
 	vec2 g = ( P - waterInfoGrid.xy ) / tex - 0.5;
 	vec2 t0 = floor( g );
@@ -160,19 +168,35 @@ WwOcean wwWaterOcean( vec2 P, vec2 dPx, vec2 dPy )
 		}
 	}
 	if ( set < 0 )
-		return o;
+		return -1;
 	vec4 same = vec4( equal( cset, vec4( float( set ) ) ) );
-	float ws = dot( bw, same );
+	ws = dot( bw, same );
+	a = dot( bw * same, cgain ) / max( ws, 1e-6 );
+	m = ( waterOceanRed & 4 ) != 0 ? 1.0 : wwOcPatch( P, set );
+	pw = ( waterOceanRed & 4 ) != 0 ? 0.0 : 1.0 - 0.7 * clamp( ( U - 3.0 ) / 7.0, 0.0, 1.0 );
+	gc = vec3( 1.0, mix( 1.0, m, 0.5 * pw ), mix( 1.0, m, pw ) );
+	return set;
+}
+
+/* the spectrum at world xy P (u); dPx, dPy its screen derivatives; w = 0 off a baked body (today's water). Q: where
+ * the cascades are read (step 5: the flow carries the waves, so a river reads them upstream); the body is P's, its
+ * set (0 sea, 1 fresh, -1 none) in setOut */
+WwOcean wwWaterOceanQ( vec2 P, vec2 Q, vec2 dPx, vec2 dPy, out int setOut )
+{
+	WwOcean o = WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
+	float ws, a, m, pw;
+	vec3 gc;
+	int set = wwOcBody( P, ws, a, gc, m, pw );
+	setOut = set;
+	if ( set < 0 )
+		return o;
 	o.w = ws;
-	float a = dot( bw * same, cgain ) / max( ws, 1e-6 );
+	float U = waterOceanWind.z;
 
 	// the tiles run along the wind: rotate world metres into them, and the slopes back
 	vec2 d = waterOceanWind.xy, e = vec2( -d.y, d.x );
-	vec2 Pm = P * kOcMetre, gxm = dPx * kOcMetre, gym = dPy * kOcMetre;
+	vec2 Pm = Q * kOcMetre, gxm = dPx * kOcMetre, gym = dPy * kOcMetre;
 	vec2 q = vec2( dot( Pm, d ), dot( Pm, e ) ), qx = vec2( dot( gxm, d ), dot( gxm, e ) ), qy = vec2( dot( gym, d ), dot( gym, e ) );
-	float m = ( waterOceanRed & 4 ) != 0 ? 1.0 : wwOcPatch( P, set );
-	float pw = ( waterOceanRed & 4 ) != 0 ? 0.0 : 1.0 - 0.7 * clamp( ( U - 3.0 ) / 7.0, 0.0, 1.0 );
-	vec3 gc = vec3( 1.0, mix( 1.0, m, 0.5 * pw ), mix( 1.0, m, pw ) );
 	vec4 iL = waterOceanInvL[set];
 	vec4 B = vec4( 0.0 );
 	float dxy = 0.0, var = 0.0;
@@ -195,4 +219,63 @@ WwOcean wwWaterOcean( vec2 P, vec2 dPx, vec2 dPy )
 	o.white = ( 1.0 - smoothstep( 0.15, 0.55, J ) ) * smoothstep( 4.0, 8.0, U ) * ws;
 	o.cau = clamp( a * waterOceanSetB[set].y * gc.z / max( waterOceanWind.w, 1e-3 ), 0.0, 3.0 );
 	return o;
+}
+
+WwOcean wwWaterOcean( vec2 P, vec2 dPx, vec2 dPy )
+{
+	int set;
+	return wwWaterOceanQ( P, P, dPx, dPy, set );
+}
+
+// one cascade's ( h, Dx, Dy ) at tile uv and mip lod: the slopes' blend and offsets, so heights and normals agree
+vec3 wwOcCascadeD( vec2 uv, float lod, float layer, uint seed )
+{
+	if ( ( waterOceanRed & 2 ) != 0 )
+		return textureLod( waterOceanD, vec3( uv, layer ), lod ).xyz;
+	vec2 s = vec2( uv.x, -0.57735027 * uv.x + 1.15470054 * uv.y ) * kOcGrid;
+	ivec2 b = ivec2( floor( s ) );
+	vec2 f = s - vec2( b );
+	float z = 1.0 - f.x - f.y;
+	vec3 w;
+	ivec2 v0, v1, v2;
+	if ( z > 0.0 ) {
+		w = vec3( z, f.y, f.x );
+		v0 = b;
+		v1 = b + ivec2( 0, 1 );
+		v2 = b + ivec2( 1, 0 );
+	} else {
+		w = vec3( -z, 1.0 - f.y, 1.0 - f.x );
+		v0 = b + ivec2( 1, 1 );
+		v1 = b + ivec2( 1, 0 );
+		v2 = b + ivec2( 0, 1 );
+	}
+	vec3 D0 = textureLod( waterOceanD, vec3( uv + wwOcOffset( v0, seed ), layer ), lod ).xyz;
+	vec3 D1 = textureLod( waterOceanD, vec3( uv + wwOcOffset( v1, seed ), layer ), lod ).xyz;
+	vec3 D2 = textureLod( waterOceanD, vec3( uv + wwOcOffset( v2, seed ), layer ), lod ).xyz;
+	return ( w.x * D0 + w.y * D1 + w.z * D2 ) * inversesqrt( max( dot( w, w ), 1e-6 ) );
+}
+
+/* the water's displacement (u) at undisplaced world xy P: x, y the chop (lambda D, as the normals' Jacobian), z the
+ * height; step = the vertices' spacing there (u), which picks each cascade's mip (no wave shorter than two vertices) */
+vec3 wwWaterOceanDisp( vec2 P, float step )
+{
+	float ws, a, m, pw;
+	vec3 gc;
+	int set = wwOcBody( P, ws, a, gc, m, pw );
+	if ( set < 0 )
+		return vec3( 0.0 );
+	vec2 d = waterOceanWind.xy, e = vec2( -d.y, d.x );
+	vec2 Pm = P * kOcMetre;
+	vec2 q = vec2( dot( Pm, d ), dot( Pm, e ) );
+	vec4 iL = waterOceanInvL[set];
+	float texels = step * kOcMetre * 128.0;	// tile texels a vertex step, times the tile's 1 / L below
+	vec3 H = vec3( 0.0 );
+	for ( int c = 0; c < 3; c++ ) {
+		float il = iL[c];
+		H += gc[c] * wwOcCascadeD( q * il, max( log2( max( texels * il, 1e-6 ) ), 0.0 ), float( set * 3 + c ),
+			0x1b873593u * uint( set * 3 + c + 1 ) );
+	}
+	H *= a * ws;
+	float lam = ( waterOceanRed & 16 ) != 0 ? 0.0 : iL.w;
+	return vec3( lam * ( H.y * d + H.z * e ), H.x ) / kOcMetre;
 }

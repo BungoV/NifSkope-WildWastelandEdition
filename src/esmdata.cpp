@@ -92,7 +92,7 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 				} else if ( f == "NAM2" && f.size() >= 4 ) {
 					// the worldspace's default water type; cells override it
 					// with XCWT. Commonwealth's is ExtOceanWater.
-					defWaterType = f.readUInt32();
+					defWaterType = esm->mapFormID( w, f.readUInt32() );	// lane WATERUNDER6: plugin id space
 				}
 			}
 		}
@@ -279,7 +279,7 @@ bool EsmWorld::cellWater( int cx, int cy, float & height,
 			hasWater = ( f.readUInt16() & 0x0002 ) != 0;
 		} else if ( f == "XCWT" && f.size() >= 4 ) {
 			if ( typeForm )
-				*typeForm = f.readUInt32();
+				*typeForm = esm->mapFormID( *cr, f.readUInt32() );	// lane WATERUNDER6: plugin id space
 		} else if ( f == "XCLW" && f.size() >= 4 ) {
 			const quint32 raw = f.readUInt32();
 			if ( raw != 0xFF7FFFFFU && raw != 0x7F7FFFFFU && raw != 0x4F7FFFC9U ) {
@@ -317,6 +317,10 @@ bool EsmWorld::waterRecord( quint32 form, WwWaterRecord & r ) const
 			r.opacity = p[0];
 		} else if ( f == "NAM2" || f == "NAM3" || f == "NAM4" ) {
 			r.noise[f == "NAM2" ? 0 : f == "NAM3" ? 1 : 2] = str();
+		} else if ( f == "INAM" && n >= 4 ) {	// lane WATERUNDER3: the underwater imagespace
+			quint32 raw;
+			std::memcpy( &raw, p, 4 );
+			r.imageSpace = esm->mapFormID( *wr, raw );	// lane WATERUNDER5: a plugin's raw id is in its own master space
 		} else if ( f == "DNAM" ) {
 			r.dnamBytes = n;
 			int o = 0;
@@ -375,6 +379,19 @@ bool EsmWorld::waterRecord( quint32 form, WwWaterRecord & r ) const
 			if ( o < n )
 				r.ssr = p[o] != 0;
 		}
+	}
+	QByteArray h, c, t;
+	QString lut;
+	if ( r.imageSpace && imageSpace( r.imageSpace, r.uwIsName, h, c, t, lut ) && h.size() >= 36 ) {
+		r.hasUwIs = true;
+		std::memcpy( r.uwIsHdr, h.constData(), 36 );
+		std::fill( r.uwIsCine, r.uwIsCine + 3, 1.0f );
+		r.uwIsTint[0] = 0.0f;
+		std::fill( r.uwIsTint + 1, r.uwIsTint + 4, 1.0f );
+		if ( c.size() >= 12 )
+			std::memcpy( r.uwIsCine, c.constData(), 12 );
+		if ( t.size() >= 16 )
+			std::memcpy( r.uwIsTint, t.constData(), 16 );
 	}
 	return true;
 }

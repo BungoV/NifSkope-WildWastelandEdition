@@ -956,7 +956,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	/* lane WATER1: a cell water surface (src/gl/cellwater.h) takes fo4_water.prog by name while the draw is
 	 * cell-lit: the matrices, the cell's uniforms and the fog through the lighting setup, then the record's */
 	if ( mesh->bslsp && wwLodChannelView == 0 && wwCellWaterWanted( mesh->scene, mesh->id() ) ) {
-		if ( Program * program = useProgram( wwCellWaterProgram() ) ) {	// lane WATERCOMBINE1: or the water looks' twin
+		Program * waterProg = useProgram( wwCellWaterProgram() );	// lane WATERCOMBINE1: or the water looks' twin
+		if ( !waterProg && std::string_view( wwCellWaterProgram() ) == "fo4_waterlookd.prog" )
+			waterProg = useProgram( "fo4_waterlook.prog" );	// lane WATERLOOK1 step 2: the displaced twin refused, the flat one
+		if ( Program * program = waterProg ) {
 			if ( setupProgramCE1( nif, program, mesh ) && wwCellWaterUniforms( mesh->scene, mesh->id(), 0 ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
@@ -2001,7 +2004,7 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
 		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
-	if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: no default program reads it
+	if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)
 		wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
 	if ( prog->uniLocation( "landLod" ) >= 0 )	// lane LANDSPEC2: pbrm_cell, ground with a .pbrm
 		wwLandLodUniforms( scene, prog, mesh );
@@ -2176,7 +2179,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 		if ( prog->uniLocation( "fgMode" ) >= 0 )	// lane FARDRAW1: a live-ground twin's grid, layers and decals
 			CellFarGround::uniforms( scene, prog );
-		if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: no default program reads it
+		if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)
 			wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
 		if ( prog->uniLocation( "landLod" ) >= 0 )	// lane LANDSPEC1: the cell programs only
 			wwLandLodUniforms( scene, prog, mesh );

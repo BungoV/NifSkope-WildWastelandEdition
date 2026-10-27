@@ -25,6 +25,8 @@ BSD License - see nifskope.h
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "gl/lookdevstage.h"	// lane SUNCELL1
 #include "gl/cellwater.h"	// lane SUNCELL1: water casts no cube shadow
+#include "gl/cellunderwater.h"	// lane WATERUNDER3: the WATR INAM imagespace under water
+#include "esmwater.h"
 #include "gl/cellwatergi.h"	// lane PRTP6: water reads no probe GI
 #include "gl/celllampshadow.h"	// lane LAMPSHADOW1
 #include "gl/celllooks.h"	// lane GAPLOOK1
@@ -470,7 +472,7 @@ bool mixLuts( const WwLookdevIs & w, const QString & dataRoot, std::vector<unsig
 	return !out.empty();
 }
 
-const WwCellLighting * isLighting( const void * nif, int * stamp = nullptr )
+const WwCellLighting * isLightingBase( const void * nif, int * stamp )
 {
 	if ( stamp )
 		*stamp = 0;
@@ -522,6 +524,51 @@ const WwCellLighting * isLighting( const void * nif, int * stamp = nullptr )
 	if ( stamp )
 		*stamp = e.stamp;
 	return &e.L;
+}
+
+/* lane WATERUNDER3: THE CAMERA UNDER WATER TAKES THE WATR'S INAM IMAGESPACE (the game sets it as the imagespace base
+ * data on entering the water). Its tone-map fields, cinematic and tint replace the frame's; Sunlight/Sky Scale (the
+ * surfaces' light) and the LUT stay, so the LUT stamp is the base's. Only over a base that has an imagespace. */
+struct UwIs
+{
+	const WwCellLighting * src = nullptr;
+	int version = -1, stamp = -1;
+	quint32 form = 0;
+	WwCellLighting L;
+};
+
+const WwCellLighting * isLighting( const void * nif, int * stamp = nullptr )
+{
+	int bs = 0;
+	const WwCellLighting * L = isLightingBase( nif, &bs );
+	if ( stamp )
+		*stamp = bs;
+	const WwWaterRecord * w = L && L->hasImageSpace ? wwCellUnderwaterImageSpace( nif ) : nullptr;
+	if ( !w )
+		return L;
+	static QHash<const void *, UwIs> m;
+	UwIs & u = m[nif];
+	const int ver = st().version.value( nif, 0 );
+	if ( u.src != L || u.version != ver || u.stamp != bs || u.form != w->imageSpace ) {
+		u.src = L;
+		u.version = ver;
+		u.stamp = bs;
+		u.form = w->imageSpace;
+		u.L = *L;
+		for ( int i : { 0, 1, 2, 3, 4, 5, 8 } )
+			u.L.isHdr[i] = w->uwIsHdr[i];
+		std::copy( w->uwIsCine, w->uwIsCine + 3, u.L.isCine );
+		std::copy( w->uwIsTint, w->uwIsTint + 4, u.L.isTint );
+		u.L.isName = QStringLiteral( "underwater:" ) + w->uwIsName;
+		std::fprintf( stderr, "cell imagespace: underwater=%s over %s hdr=%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g"
+			" cine=%.9g,%.9g,%.9g tint=%.9g,%.9g,%.9g,%.9g\n", w->uwIsName.toLocal8Bit().constData(),
+			L->isName.toLocal8Bit().constData(), double( u.L.isHdr[0] ), double( u.L.isHdr[1] ), double( u.L.isHdr[2] ),
+			double( u.L.isHdr[3] ), double( u.L.isHdr[4] ), double( u.L.isHdr[5] ), double( u.L.isHdr[6] ),
+			double( u.L.isHdr[7] ), double( u.L.isHdr[8] ), double( u.L.isCine[0] ), double( u.L.isCine[1] ),
+			double( u.L.isCine[2] ), double( u.L.isTint[0] ), double( u.L.isTint[1] ), double( u.L.isTint[2] ),
+			double( u.L.isTint[3] ) );
+	}
+	return &u.L;
 }
 
 }	// namespace
@@ -1750,7 +1797,8 @@ void wwCellLightsUniforms( Scene * scene )
 		g.skyVersion = s.giVersion.value( scene->nifModel );
 	}
 	// lane SPECOCC1: with the sky specular occlusion on, the GI texture carries the sky grid's slot 0 after its own slabs
-	const bool specSky = G && wwCellSpecOccMode() > 0 && G->skyLit && G->sky.size() == G->rgba.size();
+	// lane WATERLOOK1 step 10: the Water sky visibility row reads the same slot
+	const bool specSky = G && ( wwCellSpecOccMode() > 0 || wwLookOn( WwLook::WaterSkyVis ) ) && G->skyLit && G->sky.size() == G->rgba.size();
 	if ( G && pass != 2 && !G->rgba.empty()
 		&& ( g.giDoc != scene->nifModel || g.giVersion != s.giVersion.value( scene->nifModel ) || g.giSpecSky != specSky ) ) {
 		if ( !g.giTex )
@@ -1964,8 +2012,7 @@ void wwCellLightsUniforms( Scene * scene )
 	// lane SPECOCC1: the sky grid's slabs start after the GI's own (6, or 12 with the rooms' second slot)
 	const bool specOccDraw = giDraw && !skyDraw && G->skyLit && g.giSpecSky;
 	prog->uni1i( "cellSpecOcc", specOccDraw ? wwCellSpecOccMode() : 0 );
-	if ( specOccDraw )
-		prog->uni1f( "cellSpecSkyBase", G->slotRooms.empty() ? 6.0f : 12.0f );
+	prog->uni1f( "cellSpecSkyBase", specOccDraw ? ( G->slotRooms.empty() ? 6.0f : 12.0f ) : 0.0f );	// 0: no sky slot (the water reads it)
 	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
 	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
 	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1

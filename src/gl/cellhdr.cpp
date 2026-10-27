@@ -731,6 +731,69 @@ unsigned int wwCellHdrDepthMax( Scene * scene )
 	return d.tex;
 }
 
+namespace {
+struct ColorOnlyGpu
+{
+	GLuint fbo = 0, color = 0;
+	int w = 0, h = 0, samples = 0;
+	bool ok = false;
+	GLint prevDraw = 0;
+};
+QHash<Renderer *, ColorOnlyGpu> & colorOnlyGpus()
+{
+	static QHash<Renderer *, ColorOnlyGpu> g;
+	return g;
+}
+}
+
+int wwCellHdrDepthMsBegin( Scene * scene, int unit )
+{
+	HdrState & s = hst();
+	if ( !s.active || s.scene != scene || !scene || !scene->renderer )
+		return 0;
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	HdrGpu & g = hdrGpus()[r];
+	if ( !g.dsTex || !g.ds || !g.color || g.samples < 2 )
+		return 0;
+	ColorOnlyGpu & c = colorOnlyGpus()[r];
+	GLint prev = 0;
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prev );
+	if ( !c.fbo )
+		fn->glGenFramebuffers( 1, &c.fbo );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, c.fbo );
+	// attached every call: a remade colour target can reuse the old texture name
+	fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, g.color, 0 );
+	if ( c.color != g.color || c.w != g.w || c.h != g.h || c.samples != g.samples ) {
+		c.ok = fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+		c.color = g.color;
+		c.w = g.w;
+		c.h = g.h;
+		c.samples = g.samples;
+	}
+	if ( !c.ok ) {
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prev ) );
+		return 0;
+	}
+	c.prevDraw = prev;
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
+	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.ds );
+	fn->glTexParameteri( GL_TEXTURE_2D_MULTISAMPLE, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_DEPTH_COMPONENT );
+	return g.samples;
+}
+
+void wwCellHdrDepthMsEnd( Scene * scene, int unit )
+{
+	if ( !scene || !scene->renderer )
+		return;
+	Renderer * r = scene->renderer;
+	auto fn = r->fn;
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
+	fn->glTexParameteri( GL_TEXTURE_2D_MULTISAMPLE, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_STENCIL_INDEX );
+	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( colorOnlyGpus()[r].prevDraw ) );
+}
+
 bool wwCellHdrBegin( Scene * scene )
 {
 	HdrState & s = hst();

@@ -162,6 +162,7 @@ private:
 #include "gl/geokeepclock.h"	// lane STREAMMEM1
 #include "gl/cellfarground.h"	// lane FARPAGES1
 #include "gl/cellocean.h"	// lane WATERLOOK1
+#include "gl/cellunderwater.h"	// lane WATERUNDER1
 #include "gl/cloudvol.h"	// lane CLOUD2B: the volume clouds' depth test
 
 // NOTE: The FPS define is a frame limiter,
@@ -4101,6 +4102,7 @@ void GLView::paintGL()
 	 * anything else this frame so the ground and the PBR shapes can receive.
 	 * A no-op with the Shadows row off (the default): no map, no program swap. */
 	wwCellCullFrame();	// lane SUNCELL1: the last frame's culling counts, printed when they change
+	wwCellUnderwaterFrame( scene );	// lane WATERUNDER3: the eye under water, decided before anything draws
 	if ( wwLookdevActive() ) {
 		PassTime::Scope pt( PassTime::SunShadows );	// lane PERF1
 		wwSunShadowPass( scene );
@@ -4308,6 +4310,7 @@ void GLView::paintGL()
 				PassTime::end( PassTime::FarCards );
 				wwCellLensFlareGrab( scene );	// lane LIGHTS3: the opaque depth for the flares' occlusion test
 				wwCloudVolSceneDepth( scene );	// lane CLOUD2B: the depth the volume clouds test against
+				wwCellUnderwaterPass( scene );	// lane WATERUNDER1: the camera under water (no GL call off or above it)
 				PassTime::begin( PassTime::ToneMap );
 				wwCellHdrEnd( scene );
 				PassTime::end( PassTime::ToneMap );

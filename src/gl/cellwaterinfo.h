@@ -47,6 +47,7 @@ struct WwWaterInfoTables
 	int atlasW = 0, atlasH = 0, slotCount = 0;	// not "slots": a Qt keyword macro
 	std::vector<float> bodies;	// bodyRows rows of kBodiesPerRow texels, 4 floats each
 	int bodyCount = 0, bodyRows = 0;
+	std::vector<quint32> bodyForms;	// lane WATERUNDER1: each body's WATR form (0 = none); not in the dump or bytes()
 	int uniformDry = 0, uniformWet = 0, sparseBody = 0, sparseShore = 0, sparseSurface = 0, sparseDepth = 0;
 	double buildSeconds = 0.0;
 
@@ -115,11 +116,24 @@ void wwCellWaterInfoSet( const void * nif, const QString & lodl );
 //! WW_CELL_WATER_SKYFAR_RED=one: the far water's sky visibility reads 1 (the bytes before the lane).
 int wwCellWaterInfoUniforms( Scene * scene, int unit );
 /*! Lane WATERWETBAKE1: with a cell program bound (fo4_cell*, pbrm_cell* family), binds the land side at
- *  WwCellUnit::LandShoreIndex/LandShoreAtlas when the program reads `landShoreIndex` (nothing reads it today:
- *  the default programs drop the uniforms, and the call returns at once). `terrain` = the drawn shape is land
+ *  WwCellUnit::LandShoreIndex/LandShoreAtlas when the program reads `landShoreIndex` (the cell programs' Wet shore
+ *  row, lane WATERLOOK1 step 13; with the row off only the sampler units are set and the land side is neutral; the
+ *  default programs drop the uniforms, and the call returns at once). WW_CELL_LAND_WET_RED=noslope|nofilm|nodark.
+ *  Step 14: with the Wave run-up row read, the water lookup too (WwCellUnit::LandWaterInfo, 79-81) and SURF1's sea
+ *  constants; red WW_CELL_LAND_SWASH_RED=still|nofoam|regular. `terrain` = the drawn shape is land
  *  (near LAND or far terrain), uploaded as `landShoreTerrain`. Red WW_CELL_LAND_SHORE_RED=off: neutral (far). */
 void wwCellLandShoreUniforms( Scene * scene, bool terrain );
 //! One census line: what this document's water info is and what was uploaded (read back from the GL).
 QString wwCellWaterInfoEcho( const void * nif );
+
+//! Lane WATERUNDER1: one texel of the lookup on the CPU (the same word water_info.glsl reads).
+struct WwWaterInfoHit
+{
+	quint32 body = 0, form = 0;
+	float height = 0.0f, depth = 0.0f, shore = 8160.0f;
+	int cls = -1;
+};
+//! The baked water at world (x, y) for this document; false when its tables are not built (or the info red is off).
+bool wwCellWaterInfoAt( const void * nif, float x, float y, WwWaterInfoHit & hit );
 
 #endif

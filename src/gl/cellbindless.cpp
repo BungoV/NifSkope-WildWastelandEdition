@@ -671,18 +671,19 @@ void poolEnd( NifSkopeOpenGLContext::GLFunctions * f )
 	geo.on = false;
 }
 
-void drawElements( NifSkopeOpenGLContext::GLFunctions * f, GLsizei count, std::uintptr_t off )
+void drawElements( NifSkopeOpenGLContext::GLFunctions * f, GLsizei count, std::uintptr_t off, GLenum mode )
 {
 	if ( geo.on )
-		f->glDrawElementsBaseVertex( GL_TRIANGLES, count, GL_UNSIGNED_SHORT, (const void *) ( off + geo.idxOff ), geo.baseVertex );
+		f->glDrawElementsBaseVertex( mode, count, GL_UNSIGNED_SHORT, (const void *) ( off + geo.idxOff ), geo.baseVertex );
 	else
-		f->glDrawElements( GL_TRIANGLES, count, GL_UNSIGNED_SHORT, (const void *) off );
+		f->glDrawElements( mode, count, GL_UNSIGNED_SHORT, (const void *) off );
 }
 
-void multiDrawElements( NifSkopeOpenGLContext::GLFunctions * f, const GLsizei * counts, const void * const * offs, GLsizei n )
+void multiDrawElements( NifSkopeOpenGLContext::GLFunctions * f, const GLsizei * counts, const void * const * offs, GLsizei n,
+	GLenum mode )
 {
 	if ( !geo.on ) {
-		f->glMultiDrawElements( GL_TRIANGLES, counts, GL_UNSIGNED_SHORT, offs, n );
+		f->glMultiDrawElements( mode, counts, GL_UNSIGNED_SHORT, offs, n );
 		return;
 	}
 	static std::vector<const void *> o;
@@ -691,7 +692,7 @@ void multiDrawElements( NifSkopeOpenGLContext::GLFunctions * f, const GLsizei * 
 	b.assign( size_t( n ), geo.baseVertex );
 	for ( GLsizei i = 0; i < n; i++ )
 		o[size_t( i )] = (const void *) ( std::uintptr_t( offs[i] ) + geo.idxOff );
-	f->glMultiDrawElementsBaseVertex( GL_TRIANGLES, const_cast<GLsizei *>( counts ), GL_UNSIGNED_SHORT,
+	f->glMultiDrawElementsBaseVertex( mode, const_cast<GLsizei *>( counts ), GL_UNSIGNED_SHORT,
 		const_cast<const void * const *>( o.data() ), n, b.data() );
 }
 

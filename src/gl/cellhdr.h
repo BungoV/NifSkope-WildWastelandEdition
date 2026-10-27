@@ -48,5 +48,11 @@ QString wwCellHdrEcho();
  *  size of the frame; 0 when there is no frame or its depth is a renderbuffer (WW_CELL_HDR_STEX_RED). The far cards
  *  read it to stop a fragment that every sample's depth test would refuse before it marches its sheets. */
 unsigned int wwCellHdrDepthMax( Scene * scene );
+/*! lane WATERUNDER4: the frame's depth per SAMPLE for one pass: binds its multisample depth texture in depth mode on
+ *  `unit` and a framebuffer holding only the frame's colour (sampling an attached depth is a feedback loop). Returns the
+ *  samples, 0 when there is one, the depth is a renderbuffer or no frame is bound; then nothing changed. */
+int wwCellHdrDepthMsBegin( Scene * scene, int unit );
+//! lane WATERUNDER4: after wwCellHdrDepthMsBegin returned > 0: stencil mode back, the frame's framebuffer bound again
+void wwCellHdrDepthMsEnd( Scene * scene, int unit );
 
 #endif

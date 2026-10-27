@@ -35,8 +35,13 @@ def judge_table(text):
     for n in names:
         if n not in listed:
             bad.append(f'{n} is not in kAll')
+    # lane WATERREBASE1: a run of units (LandWaterInfo 79-81) is listed as `Name + k`; each joins the clash check
+    base = dict(units)
     for n in listed:
-        if n not in names:
+        run = re.fullmatch(r'(\w+)\s*\+\s*(\d+)', n)
+        if run and run.group(1) in base:
+            units.append((run.group(1) + '+' + run.group(2), base[run.group(1)] + int(run.group(2))))
+        elif n not in names:
             bad.append(f'kAll names {n}, which the table does not define')
     seen = {}
     for n, v in units:
@@ -86,6 +91,11 @@ def main():
     _, rb = judge_table(red_dup)
     dup_fails = bool(rb)
     print(f'  red dup (AirVol on 21) -> T {"FAIL" if dup_fails else "PASS"} (must FAIL)' + (f': {rb[0]}' if rb else ''))
+    # lane WATERREBASE1: a unit inside a `Name + k` run (UnderDepthMs on LandWaterInfo + 1) must clash too
+    if re.search(r'UnderDepthMs = \d+;', table) and 'LandWaterInfo + 1' in table:
+        _, rr = judge_table(re.sub(r'UnderDepthMs = \d+;', 'UnderDepthMs = 80;', table))
+        dup_fails = dup_fails and bool(rr)
+        print(f'  red run (UnderDepthMs on LandWaterInfo + 1) -> T {"FAIL" if rr else "PASS"} (must FAIL)' + (f': {rr[0]}' if rr else ''))
     red_lit = dict(files)
     cl = red_lit.get('celllights.cpp', '')
     red_lit['celllights.cpp'] = cl + '\nstatic int wwRedDecal( int units ) { return units > 20 ? 20 : -1; }\n'

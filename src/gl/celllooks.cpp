@@ -65,6 +65,15 @@ const LookRow kRows[] = {
 	{ "Water reflections", "WW/CellWaterRefl" },
 	{ "Water sun glare", "WW/CellWaterGlint" },
 	{ "Ocean waves", "WW/CellWaterOcean" },
+	{ "Underwater fog", "WW/CellUnderwater" },
+	{ "Water clear colour", "WW/CellWaterClear" },
+	{ "Water sky visibility", "WW/CellWaterSkyVis" },
+	{ "Surf", "WW/CellWaterSurf" },
+	{ "Contact foam", "WW/CellWaterContact" },
+	{ "Wet shore", "WW/CellLandWet" },
+	{ "Wave run-up", "WW/CellLandSwash" },
+	{ "River foam", "WW/CellWaterRiverFoam" },
+	{ "Underwater light", "WW/CellWaterUnderLight" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -274,6 +283,42 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_OCEAN" ).trimmed() );
 		return p;
 	}
+	case WwLook::Underwater: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_UNDERWATER" ).trimmed() );
+		return p;
+	}
+	case WwLook::WaterClear: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_CLEAR" ).trimmed() );
+		return p;
+	}
+	case WwLook::WaterSkyVis: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_SKYVIS" ).trimmed() );
+		return p;
+	}
+	case WwLook::WaterSurf: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_SURF" ).trimmed() );
+		return p;
+	}
+	case WwLook::WaterContact: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_CONTACT" ).trimmed() );
+		return p;
+	}
+	case WwLook::LandWet: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LAND_WET" ).trimmed() );
+		return p;
+	}
+	case WwLook::LandSwash: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_LAND_SWASH" ).trimmed() );
+		return p;
+	}
+	case WwLook::WaterRiverFoam: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_RIVERFOAM" ).trimmed() );
+		return p;
+	}
+	case WwLook::WaterUnderLight: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_UNDERLIGHT" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -336,6 +381,15 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::WaterRefl: return "WW_CELL_WATER_REFL";
 	case WwLook::WaterGlint: return "WW_CELL_WATER_GLINT";
 	case WwLook::WaterOcean: return "WW_CELL_WATER_OCEAN";
+	case WwLook::Underwater: return "WW_CELL_UNDERWATER";
+	case WwLook::WaterClear: return "WW_CELL_WATER_CLEAR";
+	case WwLook::WaterSkyVis: return "WW_CELL_WATER_SKYVIS";
+	case WwLook::WaterSurf: return "WW_CELL_WATER_SURF";
+	case WwLook::WaterContact: return "WW_CELL_WATER_CONTACT";
+	case WwLook::LandWet: return "WW_CELL_LAND_WET";
+	case WwLook::LandSwash: return "WW_CELL_LAND_SWASH";
+	case WwLook::WaterRiverFoam: return "WW_CELL_WATER_RIVERFOAM";
+	case WwLook::WaterUnderLight: return "WW_CELL_WATER_UNDERLIGHT";
 	default: return "";
 	}
 }

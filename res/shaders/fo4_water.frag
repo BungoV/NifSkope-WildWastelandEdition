@@ -79,12 +79,23 @@ out vec4 fragColor;
 #if defined( WW_WATER_DEPTH ) || defined( WW_WATER_CAUSTICS )
 #include "water_depth.glsl"
 #endif
+#ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8 (WATERCOLOR1): the water's own colour by body class (after water_depth)
+#include "water_clear.glsl"
+#endif
+// lane WATERLOOK1 step 10 (WATERSKYVIS1): the sky reflection and the sun's glare where their sky is seen (after cell_lights)
+#ifdef WW_WATER_SKYVIS
+#include "water_skyvis.glsl"
+#endif
 #ifdef WW_WATER_CAUSTICS	// lane WATERCAUSTICS1: the sun's cascades at the bed, then the caustic law
 #include "ww_sunshadow.glsl"
 #include "water_caustics.glsl"
 #endif
 #ifdef WW_WATER_SHORE	// lane WATERSHORE1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_shore.glsl"
+#endif
+// lane WATERLOOK1 step 11 (WATERSURF1): shore waves on the sea (after water_shore)
+#ifdef WW_WATER_SURF
+#include "water_surf.glsl"
 #endif
 
 uniform vec4 waterMat[13];	// shallow, deep, reflection, underwater, light silt, dark silt, var, p1..p4, amplitude, uv scale
@@ -110,9 +121,43 @@ uniform int waterProbe;
 #endif
 #ifdef WW_WATER_REFL	// lane WATERREFL1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_refl.glsl"
+// lane WATERLOOK1 step 9 (WATERGLINT1): the glare as counted facets
+#include "water_glitter.glsl"
 #endif
 #ifdef WW_WATER_OCEAN	// lane WATERLOOK1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_ocean.glsl"
+#include "water_ripple.glsl"
+#include "water_sss.glsl"
+#include "water_flowwaves.glsl"
+#endif
+// lane WATERLOOK1 step 12 (WATERCONTACT1): foam where the water meets anything standing in it (after shore + ripple)
+#ifdef WW_WATER_CONTACT
+#include "water_contact.glsl"
+#endif
+// lane WATERLOOK1 step 15 (WATERFLOW1): foam streaks carried by the baked river flow (after water_info + water_shore)
+#ifdef WW_WATER_RIVERFOAM
+#include "water_riverfoam.glsl"
+#endif
+#ifdef WW_WATER_UNDER	// lane WATERLOOK1 step 16 (WATERUNDER2): Snell's window on the surface seen from below
+uniform bool waterUnderOn;	// the Underwater light row
+uniform int waterUnderRed;	// 1 nosnell, 2 oldsun
+uniform vec3 waterUnderSun;	// lane WATERUNDER3: the underwater pass's sun (cellunderwater.h wwCellUnderwaterSun)
+uniform vec3 waterUnderSunTo;	// world, normalized
+
+// water -> air Fresnel, unpolarised and exact: 1 past the critical angle (48.6 deg), total internal reflection
+float wwUnderFresnel( float ci )
+{
+	const float n = 1.333;
+	float st2 = n * n * ( 1.0 - ci * ci );
+	if ( st2 >= 1.0 )
+		return 1.0;
+	float ct = sqrt( 1.0 - st2 );
+	float rs = ( n * ci - ct ) / ( n * ci + ct ), rp = ( ci - n * ct ) / ( ci + n * ct );
+	return 0.5 * ( rs * rs + rp * rp );
+}
+#endif
+#ifdef WW_WATER_DISP	// lane WATERLOOK1 step 2: fo4_waterlookd.prog, the displaced water: the undisplaced world xy (u)
+in vec2 wwOcBase;
 #endif
 #ifdef WW_WATER_SKYFAR	// lane WATERSKYVISFAR1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_skyfar.glsl"
@@ -177,6 +222,10 @@ vec3 depthFog( vec3 c, float along, float vert )
 		return c;
 	vec4 P1 = waterMat[7], P3 = waterMat[9], P4 = waterMat[10];
 	float k = ( waterRed & 512 ) != 0 ? 0.0142875 : 1.0;	// the red: the distances taken in metres
+#ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: absorption + lit in-scatter replace the WATR's ramp
+	if ( waterClearOn )
+		return wwWaterClear( c, along, vert );
+#endif
 	float rzF = clamp( 1.0 - vert * k / P1.w, 0.0, 1.0 );
 	float rwF = clamp( 1.0 - along * k / P1.w, 0.0, 1.0 );
 	float xf = clamp( ( rwF - P3.y ) / ( P3.x - P3.y ), 0.0, 1.0 );
@@ -220,6 +269,9 @@ void main()
 	// the opaque scene point behind this pixel
 	ivec2 px = ivec2( gl_FragCoord.xy ) - viewportDimensions.xy;
 	float vert = 1e9, along = 1e9;
+#ifdef WW_WATER_OCEAN
+	vec3 ripS = P;	// lane WATERLOOK1 step 3: the opaque point behind, world
+#endif
 #ifdef WW_WATER_CAUSTICS
 	vec3 cauSv = vec3( 0.0 );	// lane WATERCAUSTICS1: the scene point behind, view space; its factor and probe values
 	vec3 cauDbg = vec3( 1.0, 0.0, 0.0 );
@@ -232,6 +284,9 @@ void main()
 			vec3 S = cellWorldPos( posView * ( gz / max( -posView.z, 1e-6 ) ) );
 			vert = abs( P.z - S.z );
 			along = length( S - P );
+#ifdef WW_WATER_OCEAN
+			ripS = S;
+#endif
 		}
 	} else if ( waterHaveDepth ) {
 		float dz = texelFetch( waterDepth, px, 0 ).r;
@@ -241,6 +296,9 @@ void main()
 			vec3 S = cellWorldPos( posView * ( sceneW / max( fragW, 1e-6 ) ) );
 			vert = abs( P.z - S.z );
 			along = length( S - P );
+#ifdef WW_WATER_OCEAN
+			ripS = S;
+#endif
 #ifdef WW_WATER_CAUSTICS
 			cauSv = posView * ( sceneW / max( fragW, 1e-6 ) );
 #endif
@@ -288,13 +346,43 @@ void main()
 #endif
 #ifdef WW_WATER_OCEAN
 	// lane WATERLOOK1: on a baked body the wind's spectrum replaces the noise layers and the swell (slope space)
-	vec2 ocDx = dFdx( P.xy ), ocDy = dFdy( P.xy );
-	WwOcean oc = waterOceanOn ? wwWaterOcean( P.xy, ocDx, ocDy ) : WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
+#ifdef WW_WATER_DISP
+	vec2 ocP = wwOcBase;	// the spectrum is defined on the undisplaced grid
+#else
+	vec2 ocP = P.xy;
+#endif
+	vec2 ocDx = dFdx( ocP ), ocDy = dFdy( ocP );
+	WwOcean oc = waterOceanOn ? wwWaterOceanFlowed( ocP, ocDx, ocDy ) : WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
 	if ( oc.w > 0.0 )
 		N = normalize( vec3( mix( N.xy / max( N.z, 1e-3 ), oc.slope, oc.w ), 1.0 ) );
+	// step 3: the incident short waves reflect off what stands in the water (red norip); uniform flow (derivatives)
+	if ( waterOceanOn && ( waterOceanRed & 64 ) == 0 ) {
+		vec3 rip = wwContactRippleAt( vert, P, ripS, eye, oc.w * sqrt( oc.var ) );
+		N = normalize( vec3( N.xy / max( N.z, 1e-3 ) + rip.xy, 1.0 ) );
+		oc.var += rip.z;
+	}
+#endif
+#ifdef WW_WATER_CONTACT
+	// lane WATERLOOK1 step 12: the contact foam's density, distance, trust, foot (uniform flow: derivatives)
+	vec4 contact = wwWaterContact( vert, P, ripS, eye, waterShoreTime );
+	if ( under )
+		contact.x = 0.0;
+#endif
+#ifdef WW_WATER_RIVERFOAM
+	// lane WATERLOOK1 step 15: river foam (density, alpha, C T, speed); the pixel's width (u) in uniform flow
+	vec4 rfoam = wwWaterRiverFoam( P.xy, waterShoreTime, sqrt( length( cross( dFdx( P ), dFdy( P ) ) ) ) );
+	if ( under )
+		rfoam = vec4( 0.0 );
 #endif
 	vec3 N0 = N;
 	N = normalize( flatten * ( N - vec3( 0.0, 0.0, 1.0 ) ) + vec3( 0.0, 0.0, 1.0 ) );
+#ifdef WW_WATER_SURF
+	// lane WATERLOOK1 step 11: the shore waves (slope space), after the game's flatten, which would erase them in the shallows
+	float surfFoot = max( length( dFdx( P.xy ) ), length( dFdy( P.xy ) ) );
+	WwSurf surf = under ? WwSurf( vec2( 0.0 ), 0.0, 0.0, 0.0 ) : wwWaterSurf( P.xy, waterShoreTime, surfFoot );
+	if ( surf.w > 0.0 )
+		N = normalize( vec3( N.xy / max( N.z, 1e-3 ) + surf.slope, 1.0 ) );
+#endif
 #ifdef WW_WATER_REFL	// lane WATERREFL1: GGX alpha^2 from the slopes the filtered noise lost + the footprint
 	float reflA2 = waterReflOn || waterGlintOn ? wwWaterAlpha2( wxy / UV.x + waterScroll0.xy, wxy / UV.y + waterScroll0.zw,
 		wxy / UV.z + waterScroll1.xy, tap0, tap1, tap2, Amp, dfade, flatten, Var.x, N, ( waterGlintRed & 2 ) == 0 ) : 0.0;
@@ -331,11 +419,25 @@ void main()
 	sky = mix( sky, waterSky[2].rgb, clamp( R.z * 1.9 + 0.35, 0.0, 1.0 ) );
 #ifdef WW_WATER_SKYFAR	// lane WATERSKYVISFAR1: the baked sky visibility of the far water (1 under water)
 	float skyFarV = under ? 1.0 : wwWaterSkyFar( P );
+#ifndef WW_WATER_SKYVIS	// lane WATERREBASE1: with the near grid compiled, its read carries the far byte (one factor)
 	sky *= skyFarV;
+#endif
 #endif
 #ifdef WW_WATER_REFL
 	vec3 reflSky = waterReflOn ? wwWaterCloudSky( sky, P, R ) : sky;	// lane WATERREFL1: before the game's SSR blend
 	vec4 reflRaw = vec4( 0.0 ), reflFin = vec4( 0.0 );
+#endif
+#ifdef WW_WATER_SKYVIS	// lane WATERLOOK1 step 10: the sky seen on the reflection's direction (the SSR over it is not dimmed)
+#ifndef WW_WATER_SKYFAR
+	const float skyFarV = 1.0;
+#endif
+#ifdef WW_WATER_REFL
+	float skyVis = under ? 1.0 : wwWaterSkyVis( P, Ns, R, sqrt( max( reflA2, 0.0 ) ), skyFarV );
+	reflSky *= skyVis;
+#else
+	float skyVis = under ? 1.0 : wwWaterSkyVis( P, Ns, R, 0.0, skyFarV );
+#endif
+	sky *= skyVis;
 #endif
 	// lane WATER2: the game's screen-space reflection over the sky (02102 lines 146-152)
 	vec4 ssr = vec4( 0.0 );
@@ -374,7 +476,13 @@ void main()
 #endif
 #ifdef WW_WATER_DEPTH
 	WwWaterBed bed = WwWaterBed( false, false, 1e9, 1e9 );	// lane WATERDEPTH1: the bed depth this pixel uses
+#ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: the clear colour reads the same bed, lit by this frame's sun and sky
+	if ( waterClearOn )
+		wwWaterClearSetup( P, V, D.rgb * D.rgb, normalize( cellWorldDir( LightDir ) ), waterSky[0].rgb, waterSky[2].rgb );
+	if ( waterDepthOn || waterClearOn )
+#else
 	if ( waterDepthOn )
+#endif
 		bed = wwWaterBedAt( P, V, vert, along );
 #endif
 	if ( !under && waterSslr == 0 ) {
@@ -392,7 +500,12 @@ void main()
 		}
 #endif
 #ifdef WW_WATER_DEPTH
+#ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: no bed drawn = the class's bed albedo, lit
+		refr = bed.baked ? depthFog( waterClearOn ? wwWaterClearBed() : waterMat[0].rgb, bed.along, bed.vert )
+			: depthFog( refr, along, vert );
+#else
 		refr = bed.baked ? depthFog( waterMat[0].rgb, bed.along, bed.vert ) : depthFog( refr, along, vert );
+#endif
 #else
 		refr = depthFog( refr, along, vert );
 #endif
@@ -415,7 +528,11 @@ void main()
 	}
 
 	vec3 silted = refr;
+#ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8: the in-scatter is the water's murk; the WATR's silt is not added on top
+	if ( ( waterRed & 4 ) == 0 && !waterClearOn )
+#else
 	if ( ( waterRed & 4 ) == 0 )
+#endif
 		silted = refr + waterMat[4].w * ( 1.0 - alphaV ) * ( mix( waterMat[5].rgb, waterMat[4].rgb, refr ) - refr );
 
 	vec3 Ldir = normalize( cellWorldDir( LightDir ) );
@@ -425,15 +542,26 @@ void main()
 #ifdef WW_WATER_REFL
 	// lane WATERREFL1: the sun's glare from the roughness (no fixed-direction sparkle); red game keeps today's spec
 	vec3 glare = vec3( 0.0 );
+	float glFoot = length( cross( dFdx( P ), dFdy( P ) ) );	// lane WATERLOOK1 step 9: the footprint (u^2), uniform flow
 	if ( waterGlintOn && ( waterGlintRed & 1 ) == 0 && !under ) {
-		glare = wwWaterGlare( Ns, V, Ldir, sun, max( reflA2, 1e-6 ), waterGlintK.y, ( waterGlintRed & 4 ) == 0 );
+		// step 9: the sun's disc in the lobe; the mean glare x the facets counted in this pixel, then the shoulder
+		float glA2 = max( reflA2, 1e-6 ) + wwGlitSunA2();
+		vec3 glH = normalize( Ldir - V );
+		float glX = wwWaterGlare( Ns, V, Ldir, vec3( 1.0 ), glA2, waterGlintK.y, false ).x
+			* wwWaterGlitter( P.xy, glFoot, glH.xy / max( glH.z, 1e-3 ) - Ns.xy / max( Ns.z, 1e-3 ), glA2, dot( glH, Ns ) );
+		if ( ( waterGlintRed & 4 ) == 0 )
+			glX = glX / ( 1.0 + glX / waterGlintK.x );
+		glare = sun * glX;
 		spec = glare;
 	}
 	float reflAlpha = sqrt( max( reflA2, 0.0 ) );
 	float reflF = wwWaterFresnel( dot( -V, Ns ), reflAlpha, waterGlintK.y );
 	vec3 reflEnv = wwWaterReflEnv( reflSky, reflRaw, reflFin, waterSsrOn && !under && ( waterRed & 256 ) == 0, reflAlpha );
 #endif
-#ifdef WW_WATER_SKYFAR
+#ifdef WW_WATER_SKYVIS
+	if ( !under )
+		spec *= wwWaterSkyVisSun( P, Ns, Ldir, skyFarV );	// lane WATERLOOK1 step 10: the glare where the sun's sky is seen
+#elif defined( WW_WATER_SKYFAR )
 	spec *= skyFarV;	// lane WATERSKYVISFAR2: the byte as specular occlusion (water walled in by cliffs glints less)
 #endif
 	if ( ( waterRed & 8 ) != 0 )
@@ -444,6 +572,17 @@ void main()
 		// the game's underwater variant: half the sky and half the underwater colour, the scene by 1 - F
 		vec3 refl = 0.5 * ( sky + waterMat[3].rgb );
 		lin = mix( refl, refr, 1.0 - F );
+#ifdef WW_WATER_UNDER
+		if ( waterUnderOn && ( waterUnderRed & 1 ) == 0 ) {
+			/* lane WATERLOOK1 step 16: Snell's window: the air's light comes through only inside the critical cone; past
+			 * it the surface mirrors the water below, the clear colour's deep water along the mirrored ray */
+			if ( ( waterUnderRed & 2 ) != 0 )
+				wwWaterClearSetup( P, V, D.rgb * D.rgb, normalize( cellWorldDir( LightDir ) ), waterSky[0].rgb, waterSky[2].rgb );
+			else
+				wwWaterClearSetup( P, V, waterUnderSun, waterUnderSunTo, waterSky[0].rgb, waterSky[2].rgb );
+			lin = mix( refr, wwWaterClear( vec3( 0.0 ), 1e9, 1e9 ), wwUnderFresnel( clamp( dot( -V, Ns ), 0.0, 1.0 ) ) );
+		}
+#endif
 	} else {
 		float wRefl = ( waterRed & 1 ) != 0 ? 0.0 : F * Var.y;
 		vec3 far = mix( waterMat[2].rgb, sky, waterMat[2].w );
@@ -466,8 +605,20 @@ void main()
 		 * 23(11)) lit by the sun and the water's upper sky row; opacity K1.w lets the water read through its holes */
 		vec3 foamLin = 0.55 * ( sun * clamp( Ldir.z, 0.0, 1.0 ) + waterSky[2].rgb );
 		lin = mix( lin, foamLin, shoreFoamV * waterShoreK1.w );
+#ifdef WW_WATER_SURF
+		lin = mix( lin, foamLin, wwSurfFoamAlpha( surf.foam, P.xy, surfFoot, waterShoreTime ) );	// step 11: the breakers' foam
+#endif
+#ifdef WW_WATER_CONTACT
+		lin = mix( lin, foamLin, wwContactFoamAlpha( contact.x, P.xy, contact.w, waterShoreTime ) );	// step 12: contact foam
+#endif
+#ifdef WW_WATER_RIVERFOAM
+		lin = mix( lin, foamLin, rfoam.y );	// step 15: river foam streaks
+#endif
 #endif
 #ifdef WW_WATER_OCEAN
+		// lane WATERLOOK1 step 4: sunlight through the crests, the body colour, near faces and far mean alike (red noglow)
+		if ( waterOceanOn && ( waterOceanRed & 128 ) == 0 && oc.w > 0.0 )
+			lin += ( 1.0 - F ) * oc.w * wwWaterCrestGlow( N0.xy / max( N0.z, 1e-3 ), oc.var, V, Ldir, sun, waterMat[0].rgb );
 		/* lane WATERLOOK1: whitecaps where the chop folds the surface (its Jacobian, Tessendorf 2001 section 4.4), from
 		 * 4 m/s; lit as WATERSHORE1's foam (albedo 0.55, Koepke 1984) */
 		if ( oc.white > 0.0 )
@@ -564,6 +715,14 @@ void main()
 		else if ( waterProbe == 39 || waterProbe == 40 )	// WATERLOOK1: the spectrum (header)
 			o = waterProbe == 39 ? vec3( clamp( 0.5 + 4.0 * oc.slope, 0.0, 1.0 ), oc.w )
 				: vec3( oc.white, sqrt( oc.var ) / 0.5, oc.cau / 3.0 );
+#endif
+#ifdef WW_WATER_CONTACT
+		else if ( waterProbe == 47 )	// WATERLOOK1 step 12: (contact foam density, distance / 1024, trust)
+			o = vec3( contact.x, clamp( contact.y / 1024.0, 0.0, 1.0 ), contact.z );
+#endif
+#ifdef WW_WATER_RIVERFOAM
+		else if ( waterProbe == 48 )	// WATERLOOK1 step 15: (river foam density, alpha, 0.5 + 0.5 C T)
+			o = vec3( rfoam.x, rfoam.y, clamp( 0.5 + 0.5 * rfoam.z, 0.0, 1.0 ) );
 #endif
 		fragColor = vec4( o, 1.0 );
 	}

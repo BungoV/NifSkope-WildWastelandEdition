@@ -1,5 +1,363 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERUNDER6 (2026-10-27, branch waterunder6-20261027): plugin water ids, and a roof is not a room
+
+- Fixed: a worldspace's default water (WRLD NAM2) and a cell's water (CELL XCWT) are now read through the plugin's
+  master list, as the underwater imagespace already was. A plugin (or a DLC loaded after another DLC) that points a
+  worldspace or a cell at its own water used to name the wrong record. The cell view's cell water, far water and
+  probe-bake water now get the right WATR for such cells; a Fallout4.esm-only load reads the same ids as before.
+- The room test under placed water no longer counts a sunken hull, a pier's underside or a sunken slab over the
+  camera as a room. A room must now be closed: besides the roof over the camera, every ray of a cone (8 bearings at
+  15 and 45 degrees up) must meet a surface before it rises to the water or runs 2048 units sideways. One open ray
+  means water reaches the camera, so it is under water. A closed basement under a pond still reads as a room.
+- Red (a new value of the existing key `WW_CELL_UNDERWATER_RED`): `roofonly` is the old rule, any roof over the
+  camera is a room. Its note reads "a roof over the camera (red roofonly)".
+- Unit tests (no window):
+  - `tests/waterinam`: adds a plugin that overrides Commonwealth and cell (0,0) with its own new water, loaded
+    third; both ids read 02000801. Built against the base esmdata.cpp they read 01000801 and it fails 2.
+  - `tests/waterplane`: 17 checks pass (hull, pier, deep slab, closed basement, basement with a wall gone); the
+    roof-only red (`-DWW_WATERROOM_ROOF_RED`) fails 4, the old-rule red still fails 6.
+- Not changed: weather transitions. The viewer holds one weather and swaps it at once, so there is no
+  previous weather for the water colour to blend from.
+- Cost: GPU 0 ms (no shader changed). CPU only when the camera is under placed water with a roof over it and moves:
+  the cone test takes about 0.01 ms for a plain room and up to about 2 ms with 20,000 triangles of clutter inside
+  the cone; it is cached while the camera stands still. Memory: a temporary list of the triangles near the camera.
+
+## Lane WATERUNDER5 (2026-10-27, branch waterunder5-20261027): under water, which water and its colour
+
+- When no baked water body is at the camera, the under-water test now uses the placed water shape itself:
+  the camera must be inside the shape's polygon (not just its bounding box), and the surface height is the shape's
+  mean plane (not its highest vertex). A shape that is not one flat plane (cell water at two heights) reads the
+  height of the triangle above the camera.
+- A room below the water (a basement under a pond) no longer reads as under water: any other surface between the
+  camera and the water above it means the camera is in a room. The pass note says "above water (a room below the
+  water)".
+- Placed water whose WATR record is the worldspace's default water now counts as sea. WATR records have no
+  sea/lake/river field, so that is the only source the records give.
+- The under-water fog colour now follows the game: the WATR's underwater colour times the water colour multiplier.
+  That multiplier is white in an interior without Show Sky. Otherwise it is the weather's Water Multiplier colour
+  row at the current hour, blended like the other sky colours. Before, the fog colour was half the horizon colour
+  plus half the WATR colour. The pass note prints the multiplier and where it came from.
+- Fixed: the WATR underwater imagespace (INAM) is now read through the plugin's master list. A plugin that
+  overrides a water and points it at its own imagespace used to name the wrong record.
+- Reds (new values of the existing key `WW_CELL_UNDERWATER_RED`): `oldplane` uses the bounding box and the top
+  vertex with no room test; `oldcolour` uses the old half-horizon fog colour.
+- Unit tests (no window):
+  - `tests/waterplane` (g++, pure header): 12 checks pass; its red (`-DWW_WATERPLANE_OLD_RED`) fails 6.
+  - `tests/waterinam` (qmake): the 47 vanilla WATR name Default 19 / Murky 18 / Clear 10, and an override in a
+    plugin loaded third maps to 02000800. Built against the base esmdata.cpp it reads 01000800 and fails.
+- Cost: GPU 0 ms at 1080p, since no shader changed (the fog colour is the same uniform with a new value).
+  - CPU, only under water and only on the placed-water path: the pick is about 0.003 ms.
+  - The room test reruns when the camera moves: up to about 0.23 ms in a worst case (20 shapes of 5000 triangles
+    over the camera's column), and cached while the camera stands still.
+  - Memory: the water shapes' world triangles, 36 bytes a triangle (76 KB for 17 shapes and 2080 triangles).
+
+## Lane WATERUNDER4 (2026-10-27, branch waterunder4-20261027): under water, the edges
+
+- With MSAA on and the camera under water, the fog no longer over-fogs silhouettes. Before, every sample of an edge
+  pixel took the fog of the pixel's farthest depth, so a near pole against far water got a fogged halo. Now the
+  per-pixel draw fogs only the samples near the farthest depth, and a second, per-sample draw fogs the other samples
+  from their own depth. Pixels away from edges cost the same as before.
+- Red: `WW_CELL_UNDERWATER_RED=maxdepth` (a new value of the existing key) draws the old way, one fog per pixel from
+  the farthest depth. The pass note says which ran: "fog per sample at edges (N samples)" or "fog per pixel (why)".
+- Offline checks (no window): against a per-sample reference the new fog is within 1.6e-3 (fog law) and 4.1e-5
+  (Underwater light row) at 4x and 8x MSAA; the red is off by 0.35-0.55 there and is byte-equal to the previous
+  program; every sample is fogged exactly once (1.00014). Every shader program links in all 3 modes.
+- Cost at 1080p (synthetic scene, 61% of pixels with a depth spread; two runs on a shared GPU): 4x MSAA +0.07 to
+  +0.17 ms (0.24-0.31 -> 0.38-0.41), 8x +0.28 to +0.38 ms (0.48-0.54 -> 0.76-0.92); fogging every sample would cost
+  0.77 / 1.54 ms. Real scenes have far fewer edge pixels. Memory: none (one framebuffer, no textures).
+- Not done: the water-plane fallback (polygon, surface plane, rooms below the water), the outdoor water colour
+  multiplier, and a unit test of the INAM parse.
+
+## Lane WATERUNDER3 (2026-10-27, branch waterunder3-20261027): under water, the leftovers
+
+- The water's INAM field is the imagespace the game uses while the camera is under that water (all 47 vanilla
+  waters carry one of three: default, murky, clear). With the **Underwater light** row on and the camera under
+  water, the frame now takes that imagespace's tone map, cinematic and tint; the cell's LUT and the surfaces'
+  sunlight and sky scales stay.
+- The underwater fog now ramps over the view depth (straight ahead), as the game's own underwater fog does, not
+  over the distance along each pixel's ray. The centre of the screen is unchanged; the edges get a little less fog.
+- The volume clouds are left out while the camera is under water (the fog already covers the far plane).
+- One sun under water: the surface seen from below and the underwater light now take the same sun (the weather sun
+  times the Sunlight Scale outdoors). Before, the surface used the viewport light without that scale.
+- Offline checks (no window): the fog matches an independent view-depth model to 2e-5; the old law (harness red)
+  is byte-identical to the previous program; the light row's checks still pass; both sun uniforms come from one
+  function (red: the previous sources fail the check). Cost: none measurable (0.093 ms the 1080p pass, as before).
+- Not done: the outdoor water colour multiplier the game applies to the fog colour, the fog amount, the water-plane
+  fallback's limits, the MSAA silhouette depth (see the lane notes).
+
+## Lane WATERLOOK1 step 16 (2026-10-27, branch waterlook1-20261027): light under water (WATERUNDER2)
+
+- New Display row **Underwater light** (default off). With the camera under water:
+  - The water itself takes the same colours as the Water clear colour row for its type (sea, river, lake): the sea
+    turns blue with distance and depth, a river browner, and both get darker the deeper you go, red first.
+  - Looking up, the surface shows Snell's window: the sky only inside a cone overhead; past about 49 degrees the
+    surface mirrors the water below (this replaces the old reflection term for the surface seen from below).
+  - Where the screen cuts the waterline (the camera half in), a thin dark band marks the meniscus.
+- It works with or without the Underwater fog row. Off: frames are byte-identical to before.
+- Offline checks (no window): row off matches the old pass byte for byte; the new light matches an independent
+  model to 1e-5; the mirror meets the water colour below at the seam; the Fresnel matches the textbook formula to
+  6e-6 with total reflection from 48.6 degrees; the band is 3 px and 0.6 dark. Cost: about 0.001 ms more than the
+  fog pass alone at 1080p, only under water.
+- Not done: what INAM means, the game's fog curve (needs a capture), limits of the water-plane fallback, fog on the
+  volume clouds, MSAA silhouette depth. Owed live check: the sun brightness under water against the lit surfaces.
+
+## Lane WATERLOOK1 step 15 (2026-10-27, branch waterlook1-20261027): foam streaks on rivers (WATERFLOW1)
+
+- New row **River foam** (WW_CELL_WATER_RIVERFOAM), a water row. Rivers get long, thin foam streaks that lie along
+  the baked flow and drift downstream with it. Only rivers get them; lakes and the sea are untouched.
+- Faster water makes more foam. At the bake's typical river speed the foam covers about 7% of the surface. The foam
+  gathers where the flow squeezes together and thins where it spreads out, as real river foam does.
+- The streaks follow the river through bends without breaking up or jumping. Each streak fades out and back in
+  over two minutes, so nothing slides forever or snaps back. Far away the streaks blend into an even pale tint
+  instead of flickering.
+- Drawn in the water look programs. With the row off nothing changes, and the plain water program keeps its machine
+  code. New file res/shaders/water_riverfoam.glsl. Probe 48 shows (foam amount, alpha, gathering).
+- Reds on WW_CELL_WATER_RIVERFOAM_RED (combinable): `nodiv` (no gathering), `still` (foam not carried), `iso`
+  (round blobs, not streaks), `alias` (no far fade).
+- Offline (no window, the real shader on synthetic rivers):
+  - The cover matches the asked amount within 0.02 at 5%, 15%, 30% and 50%, and stays within 0.02 through a whole
+    foam life.
+  - The foam moves at 19.95 u/s on a 20 u/s river; with each flow texel given its own noise it read 10 u/s.
+  - The streaks are 7 times longer than wide. On converging against diverging flow the cover ratio is 2.84 (law 2.85).
+  - In a bend, each strip's cover is within 0.03 of its amount. No frame-to-frame pop.
+  - About 0.27 ms a 1080p pass with every pixel on a river. All 107 programs link.
+
+## Lane WATERLOOK1 step 14 (2026-10-27, branch waterlook1-20261027): waves running up the beach (WATERSWASH1)
+
+- New row **Wave run-up** (WW_CELL_LAND_SWASH), a water row. Each wave that reaches the shore runs up the beach as a
+  thin sheet of water with foam at its front, then drains back. The ground it covers stays soaked.
+- The waves arrive on the Surf row's timing, so the run-up follows the surf waves breaking in front of it. The same
+  wave groups make some run-ups long and some short.
+- How far up a wave runs comes from the shore's wave height, the wave period and the beach slope (Stockdon et al.
+  2006, the standard field formula). Steeper beaches and bigger waves run higher. On a lake or river the waves are
+  small, so the run-up is a few centimetres at most.
+- The foam is bright on the way up and thins as the water drains; fresh water keeps less foam, as with the shore foam.
+- Drawn in the cell programs with the Wet shore row's code; the ground's slope comes from its own normal. With the
+  row off nothing changes; the programs outside cells keep their machine code. New res/shaders/land_swash.glsl.
+  The sea's constants (period, wind, swell) now come from one place for the water and the land.
+- Reds on WW_CELL_LAND_SWASH_RED (combinable): `still` (the water held at its highest), `nofoam`, `regular` (every
+  wave the same, no along-shore variation).
+- Offline (no window, the real shader on a synthetic beach):
+  - The highest run-up matches the formula within 1% for 0.5 / 1 / 2 m waves on slopes of 2%, 5% and 10%.
+  - A wave reaches the same spot every 8 s. With the groups on, the run-ups range from half to all of the highest.
+  - The foam on the way up is about 5x the foam on the way back. On a 300 m lake in a 5 m/s wind the run-up is 1.6 cm.
+  - Nothing changes with the row off. About 0.13 ms a 1080p pass with every pixel in the swash zone (in a real view
+    only a thin strip is). All 107 programs link.
+
+## Lane WATERLOOK1 step 13 (2026-10-27, branch waterlook1-20261027): wet ground beside water (WATERWET1)
+
+- New row **Wet shore** (WW_CELL_LAND_WET). The ground beside baked water darkens and gains gloss, with a thin
+  glossy film right at the waterline. It reads the land side of the shore plane (WATERWETBAKE1's distance to water).
+- The band is full at the waterline and gone 1.5 m out or 0.3 m above the water. The height is the distance times
+  the ground's slope, so a gentle beach wets wide and a steep bank stays narrow.
+- Terrain counts as porous: its colour falls to 0.2 of dry (linear) and its roughness drops halfway toward that, the
+  usual wet-surface rule. Other shapes (and metal PBR terrain) only get the film. The film (the last 0.25 m) is
+  near-mirror smooth on anything.
+- Drawn in the cell programs (fo4_cell*, pbrm_cell*). With the row off nothing is bound and the land side stays
+  neutral. The programs outside cells keep their machine code. New res/shaders/land_wet.glsl.
+- Reds on WW_CELL_LAND_WET_RED (combinable): `noslope` (the 1.5 m reach on any slope), `nofilm`, `nodark`.
+- Offline (no window, the real shader on a synthetic shore map):
+  - The wet and film values match the formula to 1e-6 at six slopes, through both tile types.
+  - The reach is 99 u on flat ground, 63 u at a 0.3 slope, 20 u at 45 degrees and 6 u at a 3:1 bank.
+  - At the waterline, terrain is x 0.2 and roughness 0.8 goes to 0.05. Nothing changes 300 u away, off the map, or
+    with the row off. About 0.05 ms a 1080p pass. All 107 programs link.
+
+## Lane WATERLOOK1 step 12 (2026-10-27, branch waterlook1-20261027): foam where waves hit things (WATERCONTACT1)
+
+- New row **Contact foam** (WW_CELL_WATER_CONTACT). Foam rings form around rocks, posts, piers, hulls and actors
+  standing in baked water. Each wave that hits the object leaves a patch of foam. The patch drifts outward and fades,
+  and the next wave lays a fresh one, so the rings pulse out once a wave period.
+- The contact is found from the depth behind each pixel (the ripples' contact distance), so it covers anything drawn,
+  with no object list.
+- The strength follows the shore foam's energy rule. Rough sea foams fully; calm water gets at most a thin lap line
+  at the object; fresh water keeps less foam. The band is 4 wave heights wide, and the period is the wind sea's for
+  that height.
+- Banks are left to the Shore foam row: where the baked shore field puts land as near as the contact, there is no
+  contact foam. Lit like the shore foam. New res/shaders/water_contact.glsl, probe 47.
+- Reds on WW_CELL_WATER_CONTACT_RED (combinable): `nodepth` (no contact found), `flat` (full strength on any
+  water), `still` (no pulse), `noshorecut` (banks foam too). fo4_water.prog (rows off) keeps its machine code.
+- Offline (no window, the real shader):
+  - The band's width is within 1% of 4 wave heights.
+  - The strength scales with the wave height to the power 2.5, within 2%; no foam on 1 cm water past the lap line.
+  - Rings arrive every 2.53 s and run out at 0.32 m/s for 0.4 m waves, as set.
+  - Around a post in 3 m of water, every trusted pixel within 16 u foams at 0.6 m waves. Calm water gives none, and
+    neither does a bank. About 0.03 ms a 1080p pass for the law. All programs link.
+
+## Lane WATERLOOK1 step 11 (2026-10-27, branch waterlook1-20261027): surf on the sea (WATERSURF1)
+
+- New row **Surf** (WW_CELL_WATER_SURF). Waves now roll in to the coast on seas. Rivers and lakes get none. They
+  run parallel to the shore, using the baked shore distance as their phase.
+- In the shallows they slow down and close up, as real waves do. On a 1:50 beach an 8 s swell runs at 5.4 m/s with
+  46 m between crests at 3 m deep, and 2.3 m/s with 22 m between them at 0.6 m.
+- They grow as they shoal. They break at 0.78 of the depth: the shore face steepens to about 4x the back, and each
+  broken crest leaves a foam trail behind it.
+- They come in groups (bigger and smaller sets), and their lines wander along the coast, so breaks are irregular.
+- Normal and foam only: the water surface stays flat. The height is the sea's wave height at the shore (wind and
+  swell), as the foam already uses. New res/shaders/water_surf.glsl.
+- Reds on WW_CELL_WATER_SURF_RED (combinable): `noshoal` (one deep wavelength and height), `nobreak` (no
+  steepening, no foam), `regular` (no groups, straight lines), `alias` (no fade when a wave is under 2 pixels).
+  fo4_water.prog (rows off) keeps its machine code.
+- Far water (WATERFAR1): no change needed. With Water reflections on, far water already uses the near law
+  (Fresnel times the sky, roughness from the footprint), with no 8192 u colour swap.
+- Offline (no window, the real shader, a plane beach against linear wave theory):
+  - Crest speed within 1.4% and crest spacing within 1.3% from 0.5 to 3 m deep.
+  - Height within 1% of theory before the break, exactly 0.78 of the depth after it.
+  - No foam outside the surf zone. Group heights range 0.29 to 0.82 m.
+  - About 0.05 ms a 1080p pass for the law. All programs link.
+
+## Lane WATERLOOK1 step 10 (2026-10-27, branch waterlook1-20261027): water under a bridge is darker (WATERSKYVIS1)
+
+- New row **Water sky visibility** (WW_CELL_WATER_SKYVIS). Water reflects the sky only where it can see the sky.
+  Under a bridge, a pier or an overhang, the sky in the reflection is dimmed by how much of the sky the baked probe
+  sky grid sees in the reflected direction. Calm water reads straight along the reflection; rough water reads closer
+  to straight up. The sun's glare is dimmed by the sky seen toward the sun. Screen-space reflections of the scene
+  are not dimmed.
+- It uses the same probe sky grid that the surfaces' specular occlusion reads. The row loads that grid on its own,
+  so the surfaces' row can stay off. Nothing changes indoors, under water, without a probe bake, or at the grid's
+  edge (the read fades out there). New res/shaders/water_skyvis.glsl.
+- Reds on WW_CELL_WATER_SKYVIS_RED: `one` (visibility 1: today's look), `nosun` (the glare not dimmed).
+  fo4_water.prog (rows off) keeps its machine code.
+- Offline (no window, the real shader, a bridge in a made-up probe grid):
+  - Under the deck the sky reflection reads 4% looking straight down, 39% at 60 degrees across the bridge, and 65%
+    at 60 degrees along it. Open water reads 100% at every angle. Every value matches the model.
+  - The read is exactly the surfaces' specular occlusion read at 4096 random points.
+  - The glare under the deck with the sun high: 11%. The edge fade matches. Every off case gives 1.
+  - About 0.05 ms a 1080p pass. All programs link.
+- Far water: the lodgen far bake has no sky visibility byte for water yet. Past the probe grid the water reads 1.
+
+## Lane WATERLOOK1 step 9 (2026-10-27, branch waterlook1-20261027): the sun glitters on near water (WATERGLINT1)
+
+- **Water sun glare** row. The glare is still the smooth average over everything one pixel covers, but it is now
+  also counted in facets. Water is made of small mirrors about 2 cm across, and a pixel sees the sun in a random
+  number of them. That number follows how many the pixel covers and how many point the sun into the eye. Near
+  water, where a pixel covers few, the glare breaks into specks, and only inside the glare. Far water, where a
+  pixel covers thousands, stays smooth. The average brightness is unchanged at every distance.
+- The specks are fixed to the water, not the screen. They change with the sun, the view and the waves. They do not
+  pop as the distance changes. The sun's disc (0.27 degrees) now widens the glare a little. New
+  res/shaders/water_glitter.glsl.
+- New reds on WW_CELL_WATER_GLINT_RED: `noglitter` (the average alone), `nodisc` (a point sun), `pixel` (the specks
+  tied to the screen), `nolodblend` (one cell size: specks pop). fo4_water.prog (rows off) keeps its machine code.
+- Offline (no window, the real shader):
+  - The average stays exact (within the counting noise) from 0.01 to 1000 facets lit per pixel, and the scatter is
+    as counting predicts.
+  - The share of pixels that glint matches. Far water's spread is 3%.
+  - Moving the camera keeps every speck on the water (red pixel: 20%).
+  - Stepping across a cell size keeps the pattern (correlation 1.000; red nolodblend: 0.003).
+  - Specks hold within the sun's cone and change outside it.
+  - About 0.03 ms a 1080p pass. All programs link.
+
+## Lane WATERLOOK1 step 8 (2026-10-27, branch waterlook1-20261027): the water's own colour (WATERCOLOR1)
+
+- **Water clear colour** (new Show row, pin `WW_CELL_WATER_CLEAR`, default off, live). Instead of the WATR's depth ramp
+  (which reaches "deep" within 0.7 to 3 m, in two nearly equal colours), the water takes its colour from how water
+  absorbs and scatters light, per body class from the water bake: the clear sea, lakes (greener) and rivers
+  (brown-green). Placed water with no bake counts as a lake. The bed is dimmed on the light's way down to it and on
+  the way back up the view. Deep water is lit blue from the frame's sun and the water's sky, so it follows the hour
+  and the weather and is never black. The WATR's silt is not added on top while the row is on. Where no bed is drawn,
+  the baked depth shows the class's bed colour, lit. New res/shaders/water_clear.glsl. It draws in the water looks'
+  twin. fo4_water.prog (all rows off) keeps its machine code.
+- Red `WW_CELL_WATER_CLEAR_RED`: `noscatter` (no in-scatter), `nodown` (the bed not dimmed on the way down), `fast`
+  (every coefficient x 5).
+- Offline (no window, the real shader against a model): the GPU matches the model to 0.4% of its tolerance, and so
+  does each red. The sea over sand is turquoise at 1, 2 and 3 m (hue 161, 176 and 181 degrees) and blue past 10 m
+  (202 to 220 degrees from 12 to 30 m; 198 at 10 m). The change is spread over 17.5 m (red fast: 2.2 m). Open water
+  is blue, scales with the light and is still sky-lit at night (red noscatter: black). At 5 m the lake is greener and
+  the river browner than the sea. A low sun dims the bed more than a high one (red nodown: equal). About 0.03 ms a
+  1080p pass. All programs link.
+
+## Lane WATERLOOK1 step 7 (2026-10-27, branch waterlook1-20261027): the under-water view joins the water looks
+
+- Lane WATERUNDER1 (the Underwater fog row, below) is merged into the combined water branch, so the camera under a
+  water surface and the WATERLOOK1 looks build as one. Both sides kept: the Show rows, the env pins and the water
+  lookups (the look twin's program choice beside the under-water plane search). No behaviour change to either side.
+- Offline: every program links (107), fo4_water.prog (rows off) keeps its machine code, the switch table regenerated.
+
+## Lane WATERLOOK1 step 6 (2026-10-27, branch waterlook1-20261027): finer near waves (the water quads pre-split)
+
+- Each cell's water plane is now built as a 4 x 4 grid of 1024 u quads on shared vertices, instead of one 4096 u
+  quad. The displaced water (Ocean waves row) can split an edge at most 64 times, so under the eye its finest step
+  falls from 64 u (0.9 m) to 16 u (23 cm). It is the same plane: the corners are bit for bit as before, and so are
+  the shape bounds (view planes, sun cascades). If the grid would cut the water into more than one shape (over 2600
+  water cells), it stays one quad a cell. src/cellview.cpp.
+- Offline (the real tessellation shaders, no window): finest step under the eye 16.25 u (one quad a cell: 65 u). No
+  cracks across 9 x 9 pre-split cells (red, an asymmetric level: 734 edges apart). The same area, every patch
+  counter-clockwise. No extra triangles past 12288 u.
+
+## Lane WATERLOOK1 step 5 (2026-10-27, branch waterlook1-20261027): waves carried along the river flow
+
+- **Waves travel with the current** (Ocean waves row). On water with a baked flow plane (WATERFLOWBAKE1), the wind's
+  waves now drift downstream at the current's speed. Two reads of the waves, half a 4 s period apart, each fading out
+  where it restarts, so no restart shows. The mix is rescaled by how alike the two reads are at their separation,
+  which comes from the wave spectrum itself, so the water does not turn smoother and rougher each period. The flow is
+  blended between bake texels, so the waves do not tear along texel edges. Still water reads the waves as before. New
+  res/shaders/water_flowwaves.glsl. src/gl/oceanspectrum.h computes the correlation table.
+- Wave heights (the step 2 vertices) are not carried. Fresh-water heights are centimetres.
+- Red WW_CELL_WATER_OCEAN_RED=noflow. fo4_water.prog (row off) keeps its machine code.
+- Offline (no window, the real spectrum and flow lookup): the mixed roughness stays within 4% of one read at every
+  phase, for 0 to 2 m/s along, across and at 45 degrees to the wind (red, no rescale: 33% swings). Waves move 17 px
+  for a wanted 17.5. Where a current starts, the difference from still water falls with the speed, to 0.8% at
+  1/256 u/s (red, a 30% seam: stays 30%). No step across flow texels beyond the bilinear ramp (red, nearest: a full
+  1 m/s jump). The correlation table matches the Python model to 5e-13. All programs link.
+
+## Lane WATERLOOK1 step 4 (2026-10-27, branch waterlook1-20261027): far colour from the spectrum
+
+- **Crest glow** (Ocean waves row). Sunlight entering the back of a wave scatters forward and leaves through the face
+  turned to the eye: baked water now shows its own body colour on wave faces, brightest looking towards a low sun,
+  none at night. Each pixel takes the expected glow over its resolved slope and the slopes the spectrum's mips lost,
+  so near water glows on its own faces and far water takes the spectrum's mean glow, with no shimmer and the same mean
+  at every distance. New res/shaders/water_sss.glsl.
+- Red WW_CELL_WATER_OCEAN_RED=noglow. fo4_water.prog (row off) keeps its machine code.
+- Offline (no window): far glow = the mean of the near glows inside it to 3e-5 (red, added parts: off by up to 171%);
+  far glow with no resolved slope = the spectrum's mean to 2e-7; towards a low sun 22 x the sun behind (red g 0: 1 x);
+  no glow at night (red: glows); a face turned away gives none; all 106 programs link.
+
+## Lane WATERLOOK1 step 3 (2026-10-27, branch waterlook1-20261027): ripples around whatever stands in the water
+
+- **Contact rings** (Ocean waves row). Posts, piers, rocks and actors standing in baked water now send ring trains
+  outward (0.3 m and 0.8 m, each at its own capillary-gravity speed), as strong as the short waves the spectrum
+  leaves unresolved there, fading over about three wavelengths; still water makes none. The contact comes from the
+  opaque scene behind the pixel (the soft edge's own depth): the face it lies on, met with the water's plane, gives the
+  distance and the direction, so every drawn object counts with no object list. A jump in the depth (an object's flank
+  against what lies behind) or a face seen edge-on draws no rings. A train finer than the pixel fades out and its
+  slope variance goes to the glare's roughness. New res/shaders/water_ripple.glsl; uniform waterOceanRip.
+- Red WW_CELL_WATER_OCEAN_RED=norip (no rings). fo4_water.prog (row off) keeps its machine code.
+- Offline (no window): a flat face's distance is exact (median error 1.1%; red, the depth alone: 31%); beside a thin
+  post 0.95 of the truth within 64 u; rings near the post on wavy water, none on calm water or with no depth; the rings
+  travel by the phase given (red: stand still); 6 of 484 jump pixels over what their true distance allows (red: 290);
+  coarse pixels draw no ring and hand its variance on exactly; all 106 programs link.
+
+## Lane WATERLOOK1 step 2 (2026-10-27, branch waterlook1-20261027): the waves move the water near the camera
+
+- **Displacement near** (Ocean waves row). While the spectrum is built, the baked water draws with
+  fo4_waterlookd.prog: its triangles are split near the camera (fo4_waterdisp.tesc: about 8 px an edge, at most 64
+  times a 4096 u quad, none past 8192 u; crack-free, an edge's level depends on the edge alone) and every new vertex
+  is lifted and pushed sideways by the same cascades the normals read (fo4_waterdisp.tese, water_ocean.glsl
+  wwWaterOceanDisp), full out to one cell, none past two. The pixel still reads the spectrum at the undisplaced point.
+  The FFT's final pass writes a third array for it (heights + chop, unit 70). A refused link falls back to the flat
+  water. Shapes under a program with a tessellation stage draw GL_PATCHES (Program::patches, triMode).
+- Red WW_CELL_WATER_OCEAN_RED=flat (no displacement); nochop also keeps the vertices from moving sideways.
+- Offline (no window): no cracks over 176 shared edges, bit for bit (red: a one-sided level opens 62); every output
+  triangle keeps its turn; nothing moves or splits past the fade; 4 std(z) near the camera 0.91 of the sea's Hs over
+  64 places (the finest cascade's mips lose a little); row off moves and splits nothing; all 106 programs link.
+
+## Lane WATERUNDER1 (2026-10-27, branch waterunder1-20261027): the camera under water
+
+- **Underwater fog:** with the new Show row **Underwater fog** (pin `WW_CELL_UNDERWATER`, default off, live), a cell-view
+  camera below a water surface gets one full-screen pass over the linear frame before the tone map. It draws the
+  WATR's underwater fog (amount, near and far over the view distance, ending where the ray leaves the water), coloured
+  half the water's sky horizon and half its underwater colour, and darkens and tints the scene by depth below the
+  surface (the underwater colour as a filter over the fog's far distance). The game's own use of these values is
+  not captured, so the curve is inferred. INAM is not read.
+- **Which water:** the baked body under the camera (WATERDATA1's lookup, its WATR form), else the lowest water shape of
+  the scene above the camera. The waterline splits per pixel, so a camera at the surface sees above and below.
+- **Off, or the camera above water:** no GL call (the default picture is unchanged). Notes: `cell underwater: ...`
+  on each change (water found, surface z, camera depth, form, fog), or `underwater: above water`.
+- Reds (`WW_CELL_UNDERWATER_RED`, harness only): `notint` (no darkening by depth), `nofog` (no view fog).
+- Gates: the fragment shader through the real driver against a Python model (green 5.7e-6, three reds, the waterline,
+  above water = the frame unchanged); every program links in all three modes.
+- Cost: about 0.09 ms at 1080p (offline timer), only while the camera is under water.
+
 ## Lane DECALANGLE2 (2026-10-26, branch decalangle-20261026): the decal angle rule reads the drawn normal map
 
 - **The drawn normal, as the game's G-buffer:** the angle fade now reads the receiver's normal-mapped normal per pixel
@@ -680,7 +1038,6 @@
   uniform cache keyed on the name pointer. Red WW_CLOUDVOL_RED=tintname.
 - Offline gates: tests/spells/cloudveil_check.py (T(30 deg) 0.78, red spheretop 0.0017) and
   tests/spells/uniform_name_check.py (0 heap names; origin/main had 1).
-
 ## Lane WATERLOOK1 (2026-10-27, branch waterlook1-20261027): the wind's wave spectrum on the baked water
 
 - **Ocean waves row** (Show menu, WW/CellWaterOcean; pin WW_CELL_WATER_OCEAN). The wind's wave spectrum (JONSWAP with

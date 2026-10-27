@@ -529,6 +529,7 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 
 		QStack<ConditionGroup *> chkgrps;
 		chkgrps.push( &conditions );
+		patches = false;
 
 		while ( !stream.atEnd() ) {
 			QString line = stream.readLine().trimmed();
@@ -549,6 +550,8 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 
 					if ( shader && shader->id ) {
 						if ( shader->status ) {
+							if ( nameStr.ends_with( "tese" ) )
+								patches = true;
 							f->glAttachShader( id, shader->id );
 							mix( QByteArray::number( qulonglong( shader->srcHash ), 16 ) );
 						}
@@ -1141,6 +1144,10 @@ NifSkopeOpenGLContext::Shader * NifSkopeOpenGLContext::createShader( const QStri
 		t = GL_GEOMETRY_SHADER;
 	else if ( nameStr.ends_with( "vert" ) )
 		t = GL_VERTEX_SHADER;
+	else if ( nameStr.ends_with( "tesc" ) )	// lane WATERLOOK1 step 2: the displaced water's split (fo4_waterdisp.*)
+		t = GL_TESS_CONTROL_SHADER;
+	else if ( nameStr.ends_with( "tese" ) )
+		t = GL_TESS_EVALUATION_SHADER;
 	else if ( !nameStr.ends_with( "prog" ) )
 		return nullptr;
 

@@ -14,7 +14,11 @@
 #include "cellunits.h"	// lane WATERREFL1: the noise layers' moment textures
 #include "cloudmap.h"	// lane WATERREFL1: the weather's clouds in the reflected sky
 #include "cellocean.h"	// lane WATERLOOK1: the wind's wave spectrum
+#include "cellunderwater.h"	// lane WATERUNDER3: the sun under water
+#include "waterplanefit.h"	// lane WATERUNDER5: the placed-water polygon, mean plane and room test
 #include "gl/glscene.h"
+#include "gl/glshape.h"
+#include "model/nifmodel.h"
 #include "gl/gltex.h"
 #include "gl/renderer.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the blend note
@@ -30,6 +34,7 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include <array>
 
 namespace
 {
@@ -47,11 +52,20 @@ struct WaterDoc
 	QHash<quint32, int> byForm;
 	QHash<int, int> shapeBody;	// written shape's block -> index into bodies
 	QSet<int> farMask;		// lane SHORE2: far shore-law water blocks (dry samples discarded)
+	// lane WATERUNDER1: the shapes' world surfaces, measured once per change of shapeBody (WATERUNDER5: polygons)
+	quint64 gen = 1, planesGen = 0;
+	std::vector<WwWaterPoly> planes;
+	// lane WATERUNDER5: the last room test (eye, surface, shape count) and its answer
+	float roofKey[5] = { 1e30f, 1e30f, 1e30f, 1e30f, 1e30f };
+	int roofShapes = -1;
+	quint64 roofGen = 0;
+	bool roofed = false;
 };
 
 struct WaterState
 {
 	QHash<const void *, WaterDoc> docs;
+	QHash<const void *, quint32> defaultForm;	// lane WATERUNDER5: the worldspace's default WATR (its water reads as sea)
 	bool pinOff = false;	// lane CELLALL1: off (the Water row, or the pin)
 	bool pinned = false;
 	int red = 0;		// 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 noshore, 32 nonormal,
@@ -222,6 +236,7 @@ void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec, b
 		d.farMask.insert( block );
 	else
 		d.farMask.remove( block );
+	d.gen++;
 }
 
 void wwCellWaterForget( const void * nif, int block )
@@ -230,6 +245,7 @@ void wwCellWaterForget( const void * nif, int block )
 	if ( d != st().docs.end() ) {
 		d->shapeBody.remove( block );
 		d->farMask.remove( block );
+		d->gen++;
 	}
 }
 
@@ -239,6 +255,7 @@ void wwCellWaterRemap( const void * nif, const WwBlockMap & m )
 	if ( d != st().docs.end() ) {
 		wwRemapKeys( d->shapeBody, m );
 		wwRemapKeys( d->farMask, m );
+		d->gen++;
 	}
 }
 
@@ -298,6 +315,20 @@ void wwCellWaterDrive( float & windMs, float & swellM )
 	foamDrive( st(), windMs, swellM );
 }
 
+void wwCellWaterSurfConsts( float surfK[4], float shoreK2[4], float shoreK3[4] )
+{
+	float windMs = 0.0f, swellM = 0.0f;
+	foamDrive( st(), windMs, swellM );
+	const float k[4] = { 8.0f, 0.78f, 7.0f, 0.9f };
+	const float k2[4] = { windMs, swellM, 40.0f, 0.6f };
+	const float k3[4] = { 0.25f, 0.78f, 0.35f, 0.05f };
+	for ( int i = 0; i < 4; i++ ) {
+		surfK[i] = k[i];
+		shoreK2[i] = k2[i];
+		shoreK3[i] = k3[i];
+	}
+}
+
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 {
 	WaterState & s = st();
@@ -342,6 +373,55 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		WW_SWITCH_STATIC( QByteArray, dr, wwEnv( "WW_CELL_WATER_DEPTH_RED" ).trimmed() );
 		prog->uni1i( "waterDepthRed", dr == "flat" ? 1 : dr == "noabsorb" ? 2 : dr == "nearest" ? 3 : 0 );
 		prog->uni1b( "waterDepthOn", wwLookOn( WwLook::WaterDepth ) );
+	}
+	if ( prog->uniLocation( "waterClearOn" ) >= 0 ) {	// lane WATERLOOK1 step 8: the Water clear colour row
+		prog->uni1b( "waterClearOn", wwLookOn( WwLook::WaterClear ) );
+		WW_SWITCH_STATIC( QByteArray, cl, wwEnv( "WW_CELL_WATER_CLEAR_RED" ).trimmed() );
+		prog->uni1i( "waterClearRed", cl == "noscatter" ? 1 : cl == "nodown" ? 2 : cl == "fast" ? 3 : 0 );
+	}
+	if ( prog->uniLocation( "waterSkyVisOn" ) >= 0 ) {	// lane WATERLOOK1 step 10: the Water sky visibility row
+		prog->uni1b( "waterSkyVisOn", wwLookOn( WwLook::WaterSkyVis ) );
+		WW_SWITCH_STATIC( QByteArray, sv, wwEnv( "WW_CELL_WATER_SKYVIS_RED" ).trimmed() );
+		prog->uni1i( "waterSkyVisRed", sv == "one" ? 1 : sv == "nosun" ? 2 : 0 );
+	}
+	if ( prog->uniLocation( "waterSurfOn" ) >= 0 ) {	// lane WATERLOOK1 step 11: the Surf row
+		/* an 8 s swell (the period of a coastal swell; WATERFOAMDETAIL1 gives the height), breaker index 0.78 (McCowan
+		 * 1894), 7 waves a group, the foam 0.9 opaque */
+		prog->uni1b( "waterSurfOn", wwLookOn( WwLook::WaterSurf ) );
+		WW_SWITCH_STATIC( QByteArray, sr, wwEnv( "WW_CELL_WATER_SURF_RED" ).trimmed() );
+		prog->uni1i( "waterSurfRed", ( sr.contains( "noshoal" ) ? 1 : 0 ) | ( sr.contains( "nobreak" ) ? 2 : 0 )
+			| ( sr.contains( "regular" ) ? 4 : 0 ) | ( sr.contains( "alias" ) ? 8 : 0 ) );
+		float sk[4], k2[4], k3[4];
+		wwCellWaterSurfConsts( sk, k2, k3 );	// step 14: shared with the land's Wave run-up row
+		prog->uni4f( "waterSurfK", FloatVector4( sk[0], sk[1], sk[2], sk[3] ) );
+	}
+	if ( prog->uniLocation( "waterContactOn" ) >= 0 ) {	// lane WATERLOOK1 step 12: the Contact foam row
+		/* the foam band 4 Hs wide (e-fold), each strike's foam lives 2 wave periods, the wind sea's period from its
+		 * height at a steepness Hs / L of 0.04 (a developing sea), the foam 0.9 opaque */
+		prog->uni1b( "waterContactOn", wwLookOn( WwLook::WaterContact ) );
+		WW_SWITCH_STATIC( QByteArray, cr, wwEnv( "WW_CELL_WATER_CONTACT_RED" ).trimmed() );
+		prog->uni1i( "waterContactRed", ( cr.contains( "nodepth" ) ? 1 : 0 ) | ( cr.contains( "flat" ) ? 2 : 0 )
+			| ( cr.contains( "still" ) ? 4 : 0 ) | ( cr.contains( "noshorecut" ) ? 8 : 0 ) );
+		prog->uni4f( "waterContactK", FloatVector4( 4.0f, 2.0f, 0.04f, 0.9f ) );
+	}
+	if ( prog->uniLocation( "waterRiverFoamOn" ) >= 0 ) {	// lane WATERLOOK1 step 15: the River foam row
+		/* foam lives 120 s, covers 12% where the source is full, half of that at 0.4 u/s (the bake's median river);
+		 * streaks 24 u wide and 8 times as long, edges 0.3 sd soft, the gathering capped at C T 0.8; 0.85 opaque */
+		prog->uni1b( "waterRiverFoamOn", wwLookOn( WwLook::WaterRiverFoam ) );
+		WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_RIVERFOAM_RED" ).trimmed() );
+		prog->uni1i( "waterRiverFoamRed", ( rr.contains( "nodiv" ) ? 1 : 0 ) | ( rr.contains( "still" ) ? 2 : 0 )
+			| ( rr.contains( "iso" ) ? 4 : 0 ) | ( rr.contains( "alias" ) ? 8 : 0 ) );
+		prog->uni4f( "waterRiverFoamK", FloatVector4( 120.0f, 0.12f, 0.4f, 0.85f ) );
+		prog->uni4f( "waterRiverFoamK2", FloatVector4( 24.0f, 8.0f, 0.3f, 0.8f ) );
+	}
+	if ( prog->uniLocation( "waterUnderOn" ) >= 0 ) {	// lane WATERLOOK1 step 16: the Underwater light row (Snell's window)
+		prog->uni1b( "waterUnderOn", wwLookOn( WwLook::WaterUnderLight ) );
+		WW_SWITCH_STATIC( QByteArray, ur, wwEnv( "WW_CELL_WATER_UNDERLIGHT_RED" ).trimmed() );
+		prog->uni1i( "waterUnderRed", ( ur.contains( "nosnell" ) ? 1 : 0 ) | ( ur.contains( "oldsun" ) ? 2 : 0 ) );
+		float to[3], col[3];	// lane WATERUNDER3: the underwater pass's sun, one source (cellunderwater.h)
+		wwCellUnderwaterSun( scene, to, col );
+		prog->uni3f( "waterUnderSun", col[0], col[1], col[2] );
+		prog->uni3f( "waterUnderSunTo", to[0], to[1], to[2] );
 	}
 	if ( prog->uniLocation( "waterCauTime" ) >= 0 ) {	// lane WATERCAUSTICS1: fo4_waterlook only
 		prog->uni1b( "waterCauOn", wwLookOn( WwLook::WaterCaustics ) );	// lane WATERCOMBINE1: its own row
@@ -447,11 +527,11 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		 * weather). Sea swell: WATERWAVES1's sea swell (a k 0.045 at 24 m = 0.34 m crest to trough) times its wind
 		 * factor. A river's fetch is its width, 40 m. Full foam at 0.6 m breakers; fresh water keeps 0.25 of it;
 		 * breaker index 0.78 (McCowan 1894); the lap line 0.35 opaque at most, from 5 cm waves (ripples run up clear). */
-		float windMs = 0.0f, swellM = 0.0f;
-		foamDrive( s, windMs, swellM );
+		float sk[4], k2[4], k3[4];
+		wwCellWaterSurfConsts( sk, k2, k3 );	// lane WATERLOOK1 step 14: shared with the land's Wave run-up row
 		prog->uni1i( "waterShoreLaw", s.foamOld ? 0 : 1 );
-		prog->uni4f( "waterShoreK2", FloatVector4( windMs, swellM, 40.0f, 0.6f ) );
-		prog->uni4f( "waterShoreK3", FloatVector4( 0.25f, 0.78f, 0.35f, 0.05f ) );
+		prog->uni4f( "waterShoreK2", FloatVector4( k2[0], k2[1], k2[2], k2[3] ) );
+		prog->uni4f( "waterShoreK3", FloatVector4( k3[0], k3[1], k3[2], k3[3] ) );
 		/* the soft contact: the water path to the scene behind fades the water out over 35 u (0.5 m) looking down to
 		 * 105 u (1.5 m) at a grazing view; the bake's distance counts 64 u (half a texel) more for its error */
 		prog->uni1i( "waterShoreEdgeLaw", s.edgeOld ? 0 : 1 );
@@ -487,7 +567,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1b( "waterReflOn", reflOn );
 		prog->uni1b( "waterGlintOn", glintOn );
 		prog->uni1i( "waterReflRed", rr == "record" ? 1 : rr == "farcolour" ? 2 : rr == "sharp" ? 4 : 0 );
-		prog->uni1i( "waterGlintRed", gr == "game" ? 1 : gr == "nolean" ? 2 : gr == "noshoulder" ? 4 : 0 );
+		prog->uni1i( "waterGlintRed", gr == "game" ? 1 : gr == "nolean" ? 2 : gr == "noshoulder" ? 4
+			: gr == "noglitter" ? 8 : gr == "nodisc" ? 16 : gr == "pixel" ? 32 : gr == "nolodblend" ? 64 : 0 );	// WATERLOOK1 step 9
 		prog->uni4f( "waterGlintK", FloatVector4( 16.0f, 0.0204f, 0.18f, 0.015f ) );
 		static const char * const momentUni[3] = { "waterMoment0", "waterMoment1", "waterMoment2" };
 		for ( int k = 0; k < 3; k++ ) {
@@ -536,7 +617,10 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 const char * wwCellWaterProgram()
 {
 	// lane WATERCOMBINE1: one twin carries every water look, each switched by its own uniform (wwCellWaterUniforms)
-	return wwCellWaterLookOn() ? "fo4_waterlook.prog" : "fo4_water.prog";
+	// lane WATERLOOK1 step 2: and its displaced form while the spectrum is built (the Ocean waves row, red not old/flat)
+	if ( !wwCellWaterLookOn() )
+		return "fo4_water.prog";
+	return wwCellOceanDispOn() ? "fo4_waterlookd.prog" : "fo4_waterlook.prog";
 }
 
 bool wwCellWaterLookOn()
@@ -544,7 +628,139 @@ bool wwCellWaterLookOn()
 	return wwLookOn( WwLook::WaterDepth ) || wwLookOn( WwLook::WaterCaustics ) || wwLookOn( WwLook::WaterSoftEdge )
 		|| wwLookOn( WwLook::ShoreFoam ) || wwLookOn( WwLook::WaterSwell ) || wwLookOn( WwLook::WaterRefl )
 		|| wwLookOn( WwLook::WaterGlint )	// lane WATERREFL1
-		|| wwLookOn( WwLook::WaterOcean );	// lane WATERLOOK1
+		|| wwLookOn( WwLook::WaterOcean )	// lane WATERLOOK1
+		|| wwLookOn( WwLook::WaterClear )	// lane WATERLOOK1 step 8
+		|| wwLookOn( WwLook::WaterSkyVis )	// lane WATERLOOK1 step 10
+		|| wwLookOn( WwLook::WaterSurf )	// lane WATERLOOK1 step 11
+		|| wwLookOn( WwLook::WaterContact )	// lane WATERLOOK1 step 12
+		|| wwLookOn( WwLook::WaterRiverFoam )	// lane WATERLOOK1 step 15
+		|| wwLookOn( WwLook::WaterUnderLight );	// lane WATERLOOK1 step 16
+}
+
+bool wwCellWaterRecordOf( const void * nif, quint32 form, WwWaterRecord & rec )
+{
+	const WaterState & s = st();
+	const auto it = s.docs.constFind( nif );
+	if ( it == s.docs.constEnd() || it->bodies.isEmpty() )
+		return false;
+	const int i = it->byForm.value( form, 0 );
+	rec = it->bodies[i].rec;
+	return true;
+}
+
+void wwCellWaterSetDefault( const void * nif, quint32 form )
+{
+	st().defaultForm.insert( nif, form );
+}
+
+bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDepth, float & height, WwWaterRecord & rec,
+	bool oldRule, bool * sea, bool * roofed, bool roofOnly )
+{
+	WaterState & s = st();
+	if ( sea )
+		*sea = false;
+	if ( roofed )
+		*roofed = false;
+	if ( !scene || !scene->nifModel )
+		return false;
+	const auto it = s.docs.find( scene->nifModel );
+	if ( it == s.docs.end() || it->shapeBody.isEmpty() )
+		return false;
+	WaterDoc & d = *it;
+	if ( d.planesGen != d.gen ) {
+		d.planes.clear();
+		bool whole = true;
+		std::vector<float> tri;
+		for ( auto b = d.shapeBody.constBegin(); b != d.shapeBody.constEnd(); ++b ) {
+			auto * sh = dynamic_cast<Shape *>( scene->findNode( scene->nifModel, scene->nifModel->getBlockIndex( b.key() ) ) );
+			if ( !sh || sh->verts.isEmpty() ) {
+				whole = false;	// not built yet: measured again next frame
+				continue;
+			}
+			const Transform & w = sh->worldTrans();
+			tri.clear();
+			for ( const Triangle & t : sh->triangles ) {
+				if ( t[0] >= sh->verts.size() || t[1] >= sh->verts.size() || t[2] >= sh->verts.size() )
+					continue;
+				for ( int k = 0; k < 3; k++ ) {
+					const Vector3 q = w * sh->verts.at( t[k] );
+					tri.insert( tri.end(), { q[0], q[1], q[2] } );
+				}
+			}
+			d.planes.push_back( wwWaterPolyFrom( tri, b.value() ) );
+		}
+		if ( whole )
+			d.planesGen = d.gen;
+	}
+	float h = 0.0f;
+	const int best = wwWaterPolyPick( d.planes, x, y, z, maxDepth, oldRule, h );
+	if ( best < 0 )
+		return false;
+	if ( !oldRule ) {
+		// the room test: a non-water surface between the camera and the water above it = a room below the water
+		const float key[5] = { x, y, z, h, roofOnly ? 1.0f : 0.0f };
+		if ( d.roofGen != d.planesGen || d.roofShapes != int( scene->shapes.size() ) || !std::equal( key, key + 5, d.roofKey ) ) {
+			std::copy( key, key + 5, d.roofKey );
+			d.roofGen = d.planesGen;
+			d.roofShapes = int( scene->shapes.size() );
+			d.roofed = false;
+			std::vector<float> tri;
+			for ( Shape * sh : scene->shapes ) {
+				if ( d.roofed )
+					break;
+				if ( !sh || sh->isHidden() || sh->verts.isEmpty() || d.shapeBody.contains( sh->id() ) )
+					continue;
+				const BoundSphere bs = sh->bounds();
+				const float dx = bs.center[0] - x, dy = bs.center[1] - y;
+				if ( dx * dx + dy * dy > bs.radius * bs.radius || bs.center[2] - bs.radius >= h || bs.center[2] + bs.radius <= z )
+					continue;
+				const Transform & w = sh->worldTrans();
+				tri.clear();
+				for ( const Triangle & t : sh->triangles ) {
+					if ( t[0] >= sh->verts.size() || t[1] >= sh->verts.size() || t[2] >= sh->verts.size() )
+						continue;
+					for ( int k = 0; k < 3; k++ ) {
+						const Vector3 q = w * sh->verts.at( t[k] );
+						tri.insert( tri.end(), { q[0], q[1], q[2] } );
+					}
+				}
+				d.roofed = wwWaterRoofOver( tri.data(), tri.size() / 9, x, y, z, h );
+			}
+			if ( d.roofed && !roofOnly ) {
+				// WATERUNDER6: a roof is a room only if closed all round (waterplanefit.h); candidates = shapes in the cone
+				const float reach = float( wwWaterRoomReach( double( h ) - z ) );
+				tri.clear();
+				for ( Shape * sh : scene->shapes ) {
+					if ( !sh || sh->isHidden() || sh->verts.isEmpty() || d.shapeBody.contains( sh->id() ) )
+						continue;
+					const BoundSphere bs = sh->bounds();
+					const float dx = bs.center[0] - x, dy = bs.center[1] - y, rr = bs.radius + reach;
+					if ( dx * dx + dy * dy > rr * rr || bs.center[2] - bs.radius >= h || bs.center[2] + bs.radius <= z )
+						continue;
+					const Transform & w = sh->worldTrans();
+					for ( const Triangle & t : sh->triangles ) {
+						if ( t[0] >= sh->verts.size() || t[1] >= sh->verts.size() || t[2] >= sh->verts.size() )
+							continue;
+						for ( int k = 0; k < 3; k++ ) {
+							const Vector3 q = w * sh->verts.at( t[k] );
+							tri.insert( tri.end(), { q[0], q[1], q[2] } );
+						}
+					}
+				}
+				d.roofed = wwWaterRoomOver( tri.data(), tri.size() / 9, x, y, z, h );
+			}
+		}
+		if ( d.roofed ) {
+			if ( roofed )
+				*roofed = true;
+			return false;
+		}
+	}
+	height = h;
+	rec = d.bodies[d.planes[size_t( best )].body].rec;
+	if ( sea )
+		*sea = !oldRule && rec.form != 0 && rec.form == s.defaultForm.value( scene->nifModel, 0 );
+	return true;
 }
 
 bool wwCellWaterWritesLinear()
@@ -604,6 +820,12 @@ QString wwCellWaterEcho( const void * nif )
 				+ ( wwLookOn( WwLook::WaterRefl ) ? QLatin1String( " reflections" ) : QLatin1String( "" ) )
 				+ ( wwLookOn( WwLook::WaterGlint ) ? QLatin1String( " glare" ) : QLatin1String( "" ) )
 				+ ( wwLookOn( WwLook::WaterOcean ) ? QLatin1String( " ocean" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterClear ) ? QLatin1String( " clear" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterSkyVis ) ? QLatin1String( " skyvis" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterSurf ) ? QLatin1String( " surf" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterContact ) ? QLatin1String( " contact" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterRiverFoam ) ? QLatin1String( " riverfoam" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterUnderLight ) ? QLatin1String( " underlight" ) : QLatin1String( "" ) )
 			: QString() )
 		// lane WATERLOOK1: what the spectrum built (said only while its row is on)
 		+ ( wwCellOceanEcho().isEmpty() ? QString() : QStringLiteral( "; " ) + wwCellOceanEcho() );

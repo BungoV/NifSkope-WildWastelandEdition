@@ -1174,11 +1174,12 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 		return false;
 	const Rec & rec = *it;
 	auto fn = scene->renderer->fn;
+	const GLenum mode = GLenum( scene->renderer->triMode() );	// lane WATERLOOK1 step 2: patches under the displaced water
 	Gpu * gp = rec.indirect ? gpuOf() : nullptr;
 	if ( gp && qsizetype( rec.numTris ) == numTriangles ) {
 		WwBl::unpoolForIndirect( fn );	// lane BINDLESS2: the commands hold the shape's own offsets
 		gp->g->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, gp->cmds );
-		gp->g->glMultiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT,
+		gp->g->glMultiDrawElementsIndirect( mode, GL_UNSIGNED_SHORT,
 			(const void *) ( std::size_t( rec.cmdFirst ) * sizeof( GpuDriven::DrawCmd ) ), GLsizei( rec.cmdCount ),
 			GLsizei( sizeof( GpuDriven::DrawCmd ) ) );
 		gp->g->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, 0 );
@@ -1189,7 +1190,7 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 	}
 	// the CPU cull's ranges, as BSShape::drawShapes draws them (the cull was asked once, in prepare)
 	if ( rec.whole ) {
-		WwBl::drawElements( fn, GLsizei( std::min< qsizetype >( numTriangles, rec.numTris ) * 3 ), 0 );
+		WwBl::drawElements( fn, GLsizei( std::min< qsizetype >( numTriangles, rec.numTris ) * 3 ), 0, mode );
 		PassTime::countDraw( 1 );
 	} else {
 		static std::vector<GLsizei> counts;
@@ -1201,7 +1202,7 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 			offsets.push_back( (const void *) ( std::size_t( rec.ranges[k] ) * 6 ) );
 		}
 		if ( !counts.empty() ) {
-			WwBl::multiDrawElements( fn, counts.data(), offsets.data(), GLsizei( counts.size() ) );
+			WwBl::multiDrawElements( fn, counts.data(), offsets.data(), GLsizei( counts.size() ), mode );
 			PassTime::countDraw( qint64( counts.size() ) );
 		}
 	}

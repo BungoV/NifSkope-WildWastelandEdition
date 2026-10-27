@@ -228,6 +228,38 @@ inline void tail( int s, double U, const SetParams & p, double & mssTail, double
 	curvRms = std::sqrt( m4 );
 }
 
+constexpr int kCorrN = 16;	// the slope correlation table's distances: d0 2^( i / 2 ), d0 = the finest cascade's texel
+
+/*! step 5: the correlation of the set's slope field at a separation d, E[ s( x ) . s( x + d ) ] / E[ s . s ] =
+ *  sum S K^2 cos( k . d ) / sum S K^2 (Wiener-Khinchin), along the wind (out[0..15]) and across it (out[16..31]); the
+ *  flow mixes two reads of the waves this far apart and renormalises by it (res/shaders/water_flowwaves.glsl) */
+inline void slopeCorr( int s, const SetParams & p, double out[2 * kCorrN] )
+{
+	double d[kCorrN];
+	for ( int i = 0; i < kCorrN; i++ ) {
+		d[i] = set( s ).L[2] / kN * std::pow( 2.0, 0.5 * i );
+		out[i] = out[kCorrN + i] = 0.0;
+	}
+	double norm = 0.0;
+	for ( int c = 0; c < 3; c++ ) {
+		const double dk = 2.0 * kPi / set( s ).L[c];
+		for ( int y = 0; y < kN; y++ )
+			for ( int x = 0; x < kN; x++ ) {
+				const double S = spectrum( s, c, x, y, p );
+				if ( S == 0.0 )
+					continue;
+				const double kx = freq( x ) * dk, ky = freq( y ) * dk, w = S * ( kx * kx + ky * ky ) * dk * dk;
+				norm += w;
+				for ( int i = 0; i < kCorrN; i++ ) {
+					out[i] += w * std::cos( kx * d[i] );
+					out[kCorrN + i] += w * std::cos( ky * d[i] );
+				}
+			}
+	}
+	for ( int i = 0; i < 2 * kCorrN; i++ )
+		out[i] = norm > 0.0 ? out[i] / norm : 0.0;
+}
+
 /*! h0 for the six tiles side by side: h0 RGBA = ( h0( k ), conj( h0( -k ) ) ), q = floor( w T / 2 pi ); both
  *  ( 6 x 128 ) x 128, row-major, x fastest (the textures' layout) */
 inline void h0Tiles( const SetParams P[2], std::vector<float> & h0, std::vector<float> & q )

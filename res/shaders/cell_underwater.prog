@@ -1,0 +1,4 @@
+# lane WATERUNDER1: the camera-underwater fog, a full-screen pass over the linear frame (src/gl/cellunderwater.h).
+# No conditions: never picked for a shape; cellunderwater.cpp selects it by name.
+
+shaders cell_hdr.vert cell_underwater.frag

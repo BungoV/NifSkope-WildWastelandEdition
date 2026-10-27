@@ -76,8 +76,10 @@ extern Geo geo;
 //! binds the shape's pooled geometry (uploading it when new or changed); false = draw with its own vertex array
 bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigned int ownVao );
 void poolEnd( NifSkopeOpenGLContext::GLFunctions * f );	// rebinds the shape's own vertex array (the slow red only)
-void drawElements( NifSkopeOpenGLContext::GLFunctions * f, GLsizei count, std::uintptr_t off );
-void multiDrawElements( NifSkopeOpenGLContext::GLFunctions * f, const GLsizei * counts, const void * const * offs, GLsizei n );
+//! mode: GL_PATCHES for the displaced water (lane WATERLOOK1 step 2, context->triMode())
+void drawElements( NifSkopeOpenGLContext::GLFunctions * f, GLsizei count, std::uintptr_t off, GLenum mode = GL_TRIANGLES );
+void multiDrawElements( NifSkopeOpenGLContext::GLFunctions * f, const GLsizei * counts, const void * const * offs, GLsizei n,
+	GLenum mode = GL_TRIANGLES );
 //! an indirect draw reads the shape's own buffers (its commands hold the shape's own offsets)
 void unpoolForIndirect( NifSkopeOpenGLContext::GLFunctions * f );
 /* lane BINDLESSMDI1: WW_BINDLESS_MDI. A pooled draw (the leader) takes the next shapes of the flush that would set no
