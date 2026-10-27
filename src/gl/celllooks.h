@@ -59,6 +59,7 @@ enum class WwLook : int
 	WaterSkyVis,			// WATERLOOK1 step 10: the water's sky reflection and glare where their sky is seen (WW_CELL_WATER_SKYVIS)
 	WaterSurf,			// WATERLOOK1 step 11: shore waves on the sea, shoaling and breaking, crest foam (WW_CELL_WATER_SURF)
 	WaterContact,			// WATERLOOK1 step 12: foam rings where waves strike anything standing in the water (WW_CELL_WATER_CONTACT)
+	LandWet,			// WATERLOOK1 step 13: the ground darkens and shines beside baked water (WW_CELL_LAND_WET)
 	Count
 };
 

@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 13 (2026-10-27, branch waterlook1-20261027): wet ground beside water (WATERWET1)
+
+- New row **Wet shore** (WW_CELL_LAND_WET). The ground beside baked water darkens and gains gloss, with a thin
+  glossy film right at the waterline. It reads the land side of the shore plane (WATERWETBAKE1's distance to water).
+- The band is full at the waterline and gone 1.5 m out or 0.3 m above the water. The height is the distance times
+  the ground's slope, so a gentle beach wets wide and a steep bank stays narrow.
+- Terrain counts as porous: its colour falls to 0.2 of dry (linear) and its roughness drops halfway toward that, the
+  usual wet-surface rule. Other shapes (and metal PBR terrain) only get the film. The film (the last 0.25 m) is
+  near-mirror smooth on anything.
+- Drawn in the cell programs (fo4_cell*, pbrm_cell*). With the row off nothing is bound and the land side stays
+  neutral. The programs outside cells keep their machine code. New res/shaders/land_wet.glsl.
+- Reds on WW_CELL_LAND_WET_RED (combinable): `noslope` (the 1.5 m reach on any slope), `nofilm`, `nodark`.
+- Offline (no window, the real shader on a synthetic shore map):
+  - The wet and film values match the formula to 1e-6 at six slopes, through both tile types.
+  - The reach is 99 u on flat ground, 63 u at a 0.3 slope, 20 u at 45 degrees and 6 u at a 3:1 bank.
+  - At the waterline, terrain is x 0.2 and roughness 0.8 goes to 0.05. Nothing changes 300 u away, off the map, or
+    with the row off. About 0.05 ms a 1080p pass. All 107 programs link.
+
 ## Lane WATERLOOK1 step 12 (2026-10-27, branch waterlook1-20261027): foam where waves hit things (WATERCONTACT1)
 
 - New row **Contact foam** (WW_CELL_WATER_CONTACT). Foam rings form around rocks, posts, piers, hulls and actors

@@ -282,8 +282,9 @@ vec3 tonemap(vec3 x)
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
 #include "cell_grass.glsl"
-// lane WATERWETBAKE1: the land side of the shore plane (no call yet: WATERWET1)
+// lane WATERWETBAKE1: the land side of the shore plane; WATERLOOK1 step 13: the Wet shore band on it
 #include "land_shore.glsl"
+#include "land_wet.glsl"
 #endif
 
 /* lane DECALS1: the game's decal parallax. Height = the set's TX04 (bound as GlowMap, red); the eye ray in the
@@ -573,6 +574,15 @@ void main()
 	// scalar Smoothness/Specular Strength authored used to render completely
 	// matte, which is not what the game does with it.
 	float specMask = s * specStrength;
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && landWetOn ) {	// lane WATERLOOK1 step 13: the Wet shore row (land_wet.glsl)
+		vec2 wet = wwLandWet( cellWorldPos( -ViewDir ), cellWorldDir( btnMatrix_norm[2] ) );
+		float por = landShoreTerrain ? 1.0 : 0.0;
+		albedo *= pow( wwLandWetBase( wet.x, por ), 1.0 / 2.2 );	// the albedo is texture gamma here
+		smoothness = 1.0 - wwLandWetRough( 1.0 - smoothness, wet, por );
+		specMask = mix( specMask, max( specMask, 0.5 ), wet.y );
+	}
+#endif
 
 	// FO4 encodes NO metallicity, so F0 is the dielectric constant and _s.R
 	// stays what it is authored as — a specular MASK, not a metalness channel.

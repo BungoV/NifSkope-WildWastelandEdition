@@ -101,8 +101,9 @@ void wwCellWaterInfoSet( const void * nif, const QString & lodl );
 //! WATERFLOWBAKE1). Returns the units it used (0, 2, 3 or 5).
 int wwCellWaterInfoUniforms( Scene * scene, int unit );
 /*! Lane WATERWETBAKE1: with a cell program bound (fo4_cell*, pbrm_cell* family), binds the land side at
- *  WwCellUnit::LandShoreIndex/LandShoreAtlas when the program reads `landShoreIndex` (nothing reads it today:
- *  the default programs drop the uniforms, and the call returns at once). `terrain` = the drawn shape is land
+ *  WwCellUnit::LandShoreIndex/LandShoreAtlas when the program reads `landShoreIndex` (the cell programs' Wet shore
+ *  row, lane WATERLOOK1 step 13; with the row off only the sampler units are set and the land side is neutral; the
+ *  default programs drop the uniforms, and the call returns at once). WW_CELL_LAND_WET_RED=noslope|nofilm|nodark. `terrain` = the drawn shape is land
  *  (near LAND or far terrain), uploaded as `landShoreTerrain`. Red WW_CELL_LAND_SHORE_RED=off: neutral (far). */
 void wwCellLandShoreUniforms( Scene * scene, bool terrain );
 //! One census line: what this document's water info is and what was uploaded (read back from the GL).

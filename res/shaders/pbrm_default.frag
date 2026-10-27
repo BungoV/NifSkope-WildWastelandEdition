@@ -11,8 +11,9 @@
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
 #include "cell_grass.glsl"
-// lane WATERWETBAKE1: the land side of the shore plane (no call yet: WATERWET1)
+// lane WATERWETBAKE1: the land side of the shore plane; WATERLOOK1 step 13: the Wet shore band on it
 #include "land_shore.glsl"
+#include "land_wet.glsl"
 #define WW_CELL_FOGGED cellOn	// lane FOG2: a cell-lit draw fogged before its imagespace
 uniform sampler2D CellSpecMap;	// lane CUBE1: a legacy material's specular map (R scale, G smoothness), for the cube term
 #else
@@ -530,6 +531,14 @@ void main()
 	s.metal = clamp( s.metal, 0.0, 1.0 );
 	s.weight = clamp( s.weight, 0.0, 1.0 );
 	s.diffRough = clamp( pbrDiffuseRoughness, 0.0, 1.0 );
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && landWetOn ) {	// lane WATERLOOK1 step 13: the Wet shore row (land_wet.glsl)
+		vec2 wet = wwLandWet( cellWorldPos( -ViewDir ), cellWorldDir( normalize( tbn[2] ) ) );
+		float por = landShoreTerrain ? 1.0 - s.metal : 0.0;
+		s.base *= wwLandWetBase( wet.x, por );
+		s.rough = max( wwLandWetRough( s.rough, wet, por ), 0.035 );
+	}
+#endif
 
 	vec3 V = ViewDir_norm;
 	vec3 R = reflect( -V, s.N );

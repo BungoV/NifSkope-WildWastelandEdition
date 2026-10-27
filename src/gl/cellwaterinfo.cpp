@@ -1,5 +1,6 @@
 #include "cellwaterinfo.h"
 #include "wwswitch.h"
+#include "gl/celllooks.h"	// lane WATERLOOK1 step 13: the Wet shore row
 
 #include "lodtfile.h"
 #include "gl/cellunits.h"
@@ -665,6 +666,21 @@ void wwCellLandShoreUniforms( Scene * scene, bool terrain )
 	const int lIndex = prog->uniLocation( "landShoreIndex" );
 	if ( lIndex < 0 )
 		return;	// the default programs do not read the land side: nothing bound, nothing set
+	/* lane WATERLOOK1 step 13: the Wet shore row (land_wet.glsl). Full wet at the line to none 105 u (1.5 m) out or
+	 * 21 u (0.3 m) up the slope; a wet porous base x 0.2 (linear); the glossy film 18 u (0.25 m). Off, the land side
+	 * is neutral and nothing is bound (the samplers keep their own units: no two sampler types on one unit). */
+	const bool wet = wwLookOn( WwLook::LandWet );
+	prog->uni1b( "landWetOn", wet );
+	if ( !wet ) {
+		prog->uni1i_l( lIndex, WwCellUnit::LandShoreIndex );
+		prog->uni1i_l( prog->uniLocation( "landShoreAtlas" ), WwCellUnit::LandShoreAtlas );
+		prog->uni1b( "landShoreOn", false );
+		return;
+	}
+	WW_SWITCH_STATIC( QByteArray, wr, wwEnv( "WW_CELL_LAND_WET_RED" ).trimmed() );
+	prog->uni1i( "landWetRed", ( wr.contains( "noslope" ) ? 1 : 0 ) | ( wr.contains( "nofilm" ) ? 2 : 0 )
+		| ( wr.contains( "nodark" ) ? 4 : 0 ) );
+	prog->uni4f( "landWetK", FloatVector4( 105.0f, 21.0f, 0.2f, 18.0f ) );
 	State & s = st();
 	QOpenGLContext * ctx = QOpenGLContext::currentContext();
 	const std::shared_ptr<Job> job = s.docs.value( scene->nifModel );

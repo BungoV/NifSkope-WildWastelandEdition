@@ -1,7 +1,7 @@
 // lane WATERWETBAKE1: the land side of the .lodl shore plane (src/gl/cellwaterinfo.h), for the terrain shaders:
 // a dry texel's distance to the nearest wet texel in 32 u steps (255 = 8160 u or more, 0 on wet texels).
 // One index texel per 16 x 16-texel tile (the uniform tile's byte, or (slot + 1) << 8), and for a non-uniform
-// tile one atlas texel. Nothing calls it in the default programs (the uniforms are dropped); WATERWET1 builds on it.
+// tile one atlas texel. The cell programs' Wet shore row reads it (land_wet.glsl, lane WATERLOOK1 step 13).
 uniform usampler2D landShoreIndex;	// R32UI: uniform byte, or (slot + 1) << 8
 uniform usampler2D landShoreAtlas;	// R8UI: the non-uniform tiles' bytes, 64 tiles a row
 uniform vec4 landShoreGrid;		// world x, y of texel (0, 0), world units a texel, world units a step
