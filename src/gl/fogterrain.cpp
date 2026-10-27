@@ -9,9 +9,9 @@
 #include <utility>
 
 void wwFogTerrainLowpass( const std::vector<float> & H, int N, double T, double x0, double y0, float noH, double sigma,
-	WwFogTerrGrid & out )
+	WwFogTerrGrid & out, double cell )
 {
-	const int k = std::max( 1, int( std::lround( kFogTerrCell / T ) ) );	// input texels per output texel
+	const int k = std::max( 1, int( std::lround( cell / T ) ) );	// input texels per output texel
 	const int n = ( N + k - 1 ) / k;
 	out.nx = out.ny = n;
 	out.cell = T * k;
@@ -136,10 +136,45 @@ WwFogTerrAct wwFogTerrainAct( const WwFogTerrFrame & f )
 	return f.setChanged || !f.haveGrid ? WwFogTerrAct::Raster : WwFogTerrAct::Idle;
 }
 
+int wwFogTerrainWaterMerge( std::vector<float> & H, const std::vector<float> & W, float noH )
+{
+	if ( W.size() != H.size() )
+		return 0;
+	int raised = 0;
+	for ( size_t k = 0; k < H.size(); k++ )
+		if ( W[k] > noH * 0.5f && !( H[k] >= W[k] ) ) {
+			H[k] = W[k];
+			raised++;
+		}
+	return raised;
+}
+
+void wwFogTerrainFine( const std::vector<float> & H, int N, double T, double x0, double y0, float noH, WwFogTerrGrid & g )
+{
+	WwFogTerrGrid f;
+	wwFogTerrainLowpass( H, N, T, x0, y0, noH, kFogTerrFineSigma, f, kFogTerrFineCell );
+	g.fnx = f.nx;
+	g.fx0 = f.x0;
+	g.fy0 = f.y0;
+	g.fcell = f.cell;
+	g.F = std::move( f.H );
+	if ( g.fnx > 0 && g.nx > 0 ) {
+		g.hmin = std::min( g.hmin, f.hmin );
+		g.hmax = std::max( g.hmax, f.hmax );
+	}
+}
+
 #ifndef WW_FOGTERRAIN_GATE
+WwFogTerrRed wwFogTerrainRed()
+{
+	WW_SWITCH_STATIC( int, red, wwEnvStr( "WW_FOG_TERRAIN_RED" ) == QLatin1StringView( "absolute" ) ? 1
+		: wwEnvStr( "WW_FOG_TERRAIN_RED" ) == QLatin1StringView( "seafloor" ) ? 2
+		: wwEnvStr( "WW_FOG_TERRAIN_RED" ) == QLatin1StringView( "coarse" ) ? 3 : 0 );
+	return WwFogTerrRed( red );
+}
+
 bool wwFogTerrainWanted()
 {
-	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_FOG_TERRAIN_RED" ) == QLatin1StringView( "absolute" ) );
-	return !red;
+	return wwFogTerrainRed() != WwFogTerrRed::Absolute;
 }
 #endif

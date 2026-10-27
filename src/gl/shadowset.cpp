@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "harnesswindow.h"
 #include "impostorchunk.h"	// lane FAR5: the far cards as terrain-shadow casters
+#include "gl/cellwater.h"	// lane FOGTERRAIN3: the water shapes the ground fog stands on
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground fog's low-pass terrain (FOGTERRAIN2: its own job here)
 
 #include <QDir>
@@ -188,6 +189,11 @@ struct FogJob
 {
 	Terrain t;	// the raster, freed once low-passed
 	std::vector<TerrSrc> next, src;	// the set last collected; the set in flight
+	// lane FOGTERRAIN3: the water shapes (raised over the terrain), the fine level's window and what the red leaves out
+	std::vector<TerrSrc> nextWater, srcWater;
+	Terrain ft;	// the fine level's raster (window set at dispatch)
+	double fx = 1e300, fy = 1e300;
+	bool water = true, fine = true;
 	WwFogTerrGrid grid;
 	std::future<void> fut;
 	std::atomic<bool> stop { false };
@@ -1025,11 +1031,33 @@ void runFogJob( FogJob * j )
 {
 	QElapsedTimer tm;
 	tm.start();
-	rasterTerrain( j->t, j->src, j->stop );
+	// lane FOGTERRAIN3: a level's raster = the terrain, raised by the water where the water is higher
+	int wet = 0;
+	auto level = [j, &wet]( Terrain & t ) {
+		rasterTerrain( t, j->src, j->stop );
+		if ( j->srcWater.empty() || j->stop.load( std::memory_order_relaxed ) )
+			return;
+		Terrain w;
+		w.N = t.N;
+		w.T = t.T;
+		w.x0 = t.x0;
+		w.y0 = t.y0;
+		rasterTerrain( w, j->srcWater, j->stop );
+		wet += wwFogTerrainWaterMerge( t.H, w.H, kNoHeight );
+	};
+	level( j->t );
 	if ( !j->stop.load( std::memory_order_relaxed ) )
 		wwFogTerrainLowpass( j->t.H, j->t.N, j->t.T, j->t.x0, j->t.y0, kNoHeight, kFogTerrSigma, j->grid );
 	j->grid.shapes = j->t.shapes;
 	j->t.H = std::vector<float>();	// 16 MB: the raster lives only while the job runs
+	if ( j->ft.N > 0 && !j->stop.load( std::memory_order_relaxed ) ) {
+		level( j->ft );
+		if ( !j->stop.load( std::memory_order_relaxed ) )
+			wwFogTerrainFine( j->ft.H, j->ft.N, j->ft.T, j->ft.x0, j->ft.y0, kNoHeight, j->grid );
+		j->ft.H = std::vector<float>();
+	}
+	j->grid.water = int( j->srcWater.size() );
+	j->grid.wet = wet;
 	j->ms = double( tm.nsecsElapsed() ) * 1e-6;
 	j->grid.ms = j->ms;
 }
@@ -1055,6 +1083,7 @@ void fogTerrainFrame( Scene * scene )
 		j.fut.get();
 		j.busy = false;
 		j.src.clear();
+		j.srcWater.clear();
 		if ( j.grid.nx > 0 ) {
 			wwFogTerrainPublish( std::move( j.grid ) );
 			j.haveGrid = true;
@@ -1087,6 +1116,30 @@ void fogTerrainFrame( Scene * scene )
 		const float noCut[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
 		collectTerrain( scene, shapes, isObj, sig, false, objCount, objSkipped, noCut );
 		sig ^= quint64( std::llround( j.cx ) ) * 31ull ^ quint64( std::llround( j.cy ) ) * 17ull;
+		// lane FOGTERRAIN3: the fine level's window (re-centred in its own eighths), the water shapes, the red
+		const double fspan = kFogTerrFineN * kFogTerrFineCell;
+		if ( std::fabs( cam[0] - j.fx ) > fspan / 4.0 || std::fabs( cam[1] - j.fy ) > fspan / 4.0 ) {
+			j.fx = std::round( cam[0] / ( fspan / 8.0 ) ) * ( fspan / 8.0 );
+			j.fy = std::round( cam[1] / ( fspan / 8.0 ) ) * ( fspan / 8.0 );
+		}
+		const WwFogTerrRed red = wwFogTerrainRed();
+		j.water = red != WwFogTerrRed::Seafloor;
+		j.fine = red != WwFogTerrRed::Coarse;
+		std::vector<const Shape *> water;
+		if ( j.water && !shapes.empty() )
+			for ( Node * node : scene->nodes.list() ) {
+				const Shape * sh = dynamic_cast<const Shape *>( node );
+				if ( sh && sh->isVisible() && !sh->verts.isEmpty() && !sh->triangles.isEmpty()
+					&& wwCellWaterIsShape( scene->nifModel, sh->id() ) ) {
+					water.push_back( sh );
+					const Transform & w = sh->worldTrans();
+					sig = ( sig ^ quint64( reinterpret_cast<quintptr>( sh ) ) ) * 1099511628211ull;
+					sig = ( sig ^ quint64( std::llround( double( w.translation[2] ) * 16.0 ) ) ) * 1099511628211ull;
+				}
+			}
+		sig ^= quint64( water.size() ) * 0x9e3779b97f4a7c15ull ^ ( j.fine ? 0x51ull : 0x52ull );
+		if ( j.fine )
+			sig ^= quint64( std::llround( j.fx ) ) * 131ull ^ quint64( std::llround( j.fy ) ) * 137ull;
 		j.shapes = int( shapes.size() );
 		if ( sig != j.sig ) {
 			j.sig = sig;
@@ -1094,6 +1147,9 @@ void fogTerrainFrame( Scene * scene )
 			j.next.reserve( shapes.size() );
 			for ( const Shape * sh : shapes )
 				j.next.push_back( { sh->worldTrans(), sh->verts, sh->triangles } );
+			j.nextWater.clear();
+			for ( const Shape * sh : water )
+				j.nextWater.push_back( { sh->worldTrans(), sh->verts, sh->triangles } );
 		}
 	}
 	WwFogTerrFrame f;
@@ -1107,9 +1163,12 @@ void fogTerrainFrame( Scene * scene )
 		stopFogJob( j );
 		j.next.clear();
 		j.src.clear();
+		j.nextWater.clear();
+		j.srcWater.clear();
 		j.grid = WwFogTerrGrid();
 		j.sig = j.rastered = 0;
 		j.cx = j.cy = 1e300;
+		j.fx = j.fy = 1e300;
 		j.checkIn = 0;
 		j.shapes = 0;
 		if ( j.haveGrid )
@@ -1127,7 +1186,15 @@ void fogTerrainFrame( Scene * scene )
 		j.t.T = kFogTerrRasterT;
 		j.t.x0 = j.cx - span * 0.5;
 		j.t.y0 = j.cy - span * 0.5;
+		j.ft = Terrain();
+		if ( j.fine ) {
+			j.ft.N = kFogTerrFineN;
+			j.ft.T = kFogTerrFineCell;
+			j.ft.x0 = j.fx - kFogTerrFineN * kFogTerrFineCell * 0.5;
+			j.ft.y0 = j.fy - kFogTerrFineN * kFogTerrFineCell * 0.5;
+		}
 		j.src = j.next;
+		j.srcWater = j.nextWater;
 		j.rastered = j.sig;
 		j.stop = false;
 		j.busy = true;

@@ -101,9 +101,11 @@ uniform int volAirFlags;	// 1 the surfaces' sun through the air (FOGSUN1; red no
 				// through the air (cell_volsky.frag; red nosky clears it), 16 the effects and particles through the
 				// air (wwFogFx; red fxfog clears it), 32 the tricubic read (FOGTRICUBIC1, WW_CELL_VOLAIR_TRICUBIC=1),
 				// 64 the ground layer on the terrain grid (FOGTERRAIN2; red WW_FOG_TERRAIN_RED=absolute clears it)
-uniform sampler2D volAirTerr;	// FOGTERRAIN2: the pass's low-pass terrain (cell_airmed.glsl airTerr), world z
+uniform sampler2DArray volAirTerr;	// FOGTERRAIN2: the pass's low-pass terrain (cell_airmed.glsl airTerr), world z
 uniform vec4 volAirTerrU;	// its uv at view point p: (dot( U.xyz, p ) + U.w, dot( V.xyz, p ) + V.w)
 uniform vec4 volAirTerrV;
+uniform vec4 volAirTerrFU;	// FOGTERRAIN3: the fine level's (layer 1; uv -1 everywhere: none)
+uniform vec4 volAirTerrFV;
 uniform float volAirTerrRef;	// the world z of the fog frame's ground (airTerrRef)
 
 // the column between heights lo < hi of one term B(z) = min(1, exp(-(z - z0) invH)): flat under z0, exponential
@@ -154,13 +156,59 @@ float wwAirRhoLaw( float z, vec4 med, vec4 layer, vec4 ground )
 	return r;
 }
 
+// FOGTERRAIN3: the ground at view point p (cell_airmed.glsl airTerrH): the fine level over the coarse one, faded at its edge
+float wwAirTerrH( vec3 p )
+{
+	vec2 uv = vec2( dot( volAirTerrU.xyz, p ) + volAirTerrU.w, dot( volAirTerrV.xyz, p ) + volAirTerrV.w );
+	vec2 uf = vec2( dot( volAirTerrFU.xyz, p ) + volAirTerrFU.w, dot( volAirTerrFV.xyz, p ) + volAirTerrFV.w );
+	float hc = texture( volAirTerr, vec3( uv, 0.0 ) ).r;
+	float wf = clamp( min( min( uf.x, 1.0 - uf.x ), min( uf.y, 1.0 - uf.y ) ) * 16.0, 0.0, 1.0 );
+	return wf > 0.0 ? mix( hc, texture( volAirTerr, vec3( uf, 1.0 ) ).r, wf ) : hc;
+}
+
 // FOGTERRAIN2: the ground layer's anchor at view point p, the froxels' (cell_airmed.glsl airGroundAt); flag 64 off: absolute
 vec4 wwAirGroundAt( vec3 p )
 {
 	if ( ( volAirFlags & 64 ) == 0 )
 		return volAirGround;
-	vec2 uv = vec2( dot( volAirTerrU.xyz, p ) + volAirTerrU.w, dot( volAirTerrV.xyz, p ) + volAirTerrV.w );
-	return vec4( volAirGround.x + texture( volAirTerr, uv ).r - volAirTerrRef, volAirGround.yzw );
+	return vec4( volAirGround.x + wwAirTerrH( p ) - volAirTerrRef, volAirGround.yzw );
+}
+
+/* FOGTERRAIN3: the anchor for a ray segment (the far tail, the sky): from view point p0 along unit view direction dirV for
+ * len fog units at elevation sine s, inside the grid's window. The column grows as the layer-weighted mean of exp(h / H)
+ * (weight exp(-s x / H), cut where it falls under e^-40). Six samples at the sixths of the wider exp(-s x / 3H), weighted
+ * back to the layer's own weight: a ground climbing with the ray far out still counts (notes/fogterrain3 rayexp). */
+vec4 wwAirGroundRay( vec3 p0, vec3 dirV, float len, float s )
+{
+	if ( ( volAirFlags & 64 ) == 0 )
+		return volAirGround;
+	float k = 1.0 / max( fogDistScale, 1e-12 );	// view units per fog unit
+	vec2 u0 = vec2( dot( volAirTerrU.xyz, p0 ) + volAirTerrU.w, dot( volAirTerrV.xyz, p0 ) + volAirTerrV.w );
+	vec2 du = vec2( dot( volAirTerrU.xyz, dirV ), dot( volAirTerrV.xyz, dirV ) ) * k;
+	vec2 ex = vec2( du.x > 0.0 ? ( 1.0 - u0.x ) / du.x : du.x < 0.0 ? -u0.x / du.x : 1e30,
+		du.y > 0.0 ? ( 1.0 - u0.y ) / du.y : du.y < 0.0 ? -u0.y / du.y : 1e30 );
+	float L = clamp( min( min( ex.x, ex.y ), min( len, 1e7 ) ), 0.0, 1e7 );
+	float H = volAirGround.y > 0.0 ? 1.0 / volAirGround.y : 1e9;
+	float Lt = min( L, 40.0 * H / max( abs( s ), 1e-9 ) ), xs = s < 0.0 ? L - Lt : 0.0;	// the weight's live span
+	float b = s * Lt / H, bp = b / 3.0, E = 1.0 - exp( -bp );
+	float a[6], t[6], m = -1e30;
+	for ( int q = 0; q < 6; q++ ) {
+		float f = ( float( q ) + 0.5 ) / 6.0;
+		t[q] = abs( bp ) < 1e-3 ? f : -log( 1.0 - f * E ) / bp;
+		a[q] = wwAirTerrH( p0 + dirV * ( ( xs + t[q] * Lt ) * k ) ) / H - ( b - bp ) * t[q];
+		m = max( m, a[q] );
+	}
+	// ln of the mean of exp(-c t) over t in 0..1 for c = b and bp: the importance weight's normalisers
+	float lf[2];
+	for ( int i = 0; i < 2; i++ ) {
+		float c = i == 0 ? b : bp;
+		lf[i] = abs( c ) < 1e-3 ? -0.5 * c : c > 0.0 ? log( ( 1.0 - exp( -c ) ) / c ) : -c + log( ( 1.0 - exp( c ) ) / -c );
+	}
+	float sum = 0.0;
+	for ( int q = 0; q < 6; q++ )
+		sum += exp( a[q] - m );
+	float zg = H * ( m + log( sum / 6.0 ) + lf[1] - lf[0] );
+	return vec4( volAirGround.x + zg - volAirTerrRef, volAirGround.yzw );
 }
 
 // the column of air between heights lo < hi per unit sigma0, the surfaces' copy of the pass's medium, its ground layer
@@ -223,7 +271,7 @@ vec4 wwVolAirAtFar( float d, vec2 uv, vec3 posView )
 	float z0 = zc + ( z1 - zc ) * ( far / d );
 	float len = d - far;
 	float dz = z1 - z0;
-	vec4 gT = wwAirGroundAt( posView * ( 0.5 * ( far + d ) / max( length( posView ) * fogDistScale, 1e-12 ) ) );	// the tail's middle
+	vec4 gT = wwAirGroundRay( posView * ( far / d ), posView / max( length( posView ), 1e-12 ), len, dz / max( len, 1e-6 ) );	// FOGTERRAIN3: along the tail
 	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0, gT ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ), gT ) / abs( dz );
 	float Tt = exp( -tau );
 	if ( ( volAirFlags & 4 ) != 0 ) {
@@ -305,7 +353,7 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 	float z0 = zc + ( z1 - zc ) * ( far / d );
 	float len = d - far;
 	float dz = z1 - z0;
-	vec4 gT = wwAirGroundAt( posView * ( 0.5 * ( far + d ) / max( length( posView ) * fogDistScale, 1e-12 ) ) );	// the tail's middle
+	vec4 gT = wwAirGroundRay( posView * ( far / d ), posView / max( length( posView ), 1e-12 ), len, dz / max( len, 1e-6 ) );	// FOGTERRAIN3: along the tail
 	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0, gT ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ), gT ) / abs( dz );
 	float Tt = exp( -tau );
 #ifdef WW_SUNSHADOW
@@ -365,8 +413,8 @@ vec4 wwVolAirSky( vec3 dirView )
 	float Tt, dEnd;
 	if ( s > 1e-4 ) {
 		dEnd = far + min( max( top - z0, 0.0 ) / s, 1e7 );
-		// FOGTERRAIN2: the ground under the climb's middle (a long level ray reads the window's clamped edge)
-		Tt = exp( -volAirMed.x * wwAirCol( z0, top, wwAirGroundAt( dirView * ( 0.5 * ( far + dEnd ) / max( fogDistScale, 1e-12 ) ) ) ) / s );
+		// FOGTERRAIN3: the ground along the climb, inside the grid's window (wwAirGroundRay)
+		Tt = exp( -volAirMed.x * wwAirCol( z0, top, wwAirGroundRay( dirView * ( far / max( fogDistScale, 1e-12 ) ), dirView, dEnd - far, s ) ) / s );
 	} else {
 		Tt = ( s >= 0.0 && z0 >= top ) ? 1.0 : 0.0;
 		dEnd = far + 1e7;

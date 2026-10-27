@@ -89,6 +89,14 @@ int main()
 	check( !wwFogTerrainWanted(), "fog terrain: a live set of the red gives the absolute anchor" );
 	wwSwitchSet( "WW_FOG_TERRAIN_RED", "", true );
 	check( wwFogTerrainWanted(), "fog terrain: the unset follows the terrain again" );
+	// FOGTERRAIN3: the water and fine-level reds, live too (shadowset.cpp reads them at each collect)
+	check( wwFogTerrainRed() == WwFogTerrRed::None, "fog terrain: no red by default" );
+	wwSwitchSet( "WW_FOG_TERRAIN_RED", "seafloor", false );
+	check( wwFogTerrainRed() == WwFogTerrRed::Seafloor && wwFogTerrainWanted(), "fog terrain: live seafloor drops the water only" );
+	wwSwitchSet( "WW_FOG_TERRAIN_RED", "coarse", false );
+	check( wwFogTerrainRed() == WwFogTerrRed::Coarse && wwFogTerrainWanted(), "fog terrain: live coarse drops the fine level only" );
+	wwSwitchSet( "WW_FOG_TERRAIN_RED", "", true );
+	check( wwFogTerrainRed() == WwFogTerrRed::None, "fog terrain: the unset clears the red" );
 
 	std::printf( "%s (%d failed)\n", g_fail ? "LIVESWITCH FAIL" : "LIVESWITCH PASS", g_fail );
 	return g_fail ? 1 : 0;
