@@ -1,6 +1,7 @@
 # `.lodm` v1 — the LOD material sidecar
 
-**Contract version: `lodm` payload version 1, envelope version 1.**
+**Contract version: `lodm` payload version 1 (2 on the card family with model sway, §3.3; 3 on every
+`array` / `cardArray`, §4.1, since 2026-10-27), envelope version 1.**
 **Status: SHIPPED.** Writer `src/io/lodmfile.cpp` (envelope) plus four payload
 builders in `src/lodgen.cpp`; reader `lodmParse()` in the same file. Consumers:
 the FO4CS *Improved LOD* module, and this generator itself when it reads a
@@ -42,11 +43,16 @@ A reader refuses — naming the field — on:
 4. declared payload > 4,194,304;
 5. declared payload != `fileSize − 12`;
 6. the payload is not well-formed JSON, or is not a JSON **object**;
-7. `lodm` is neither 1 nor 2; and `lodm` 2 on a kind outside the card family (card, cardArray,
-   aggregate), refused naming the version and the kind (§3.3);
-8. `family` is neither `"legacy"` nor `"pbr"` — **a third family word is a hard
-   refusal, not a fallback.** The terrain-VT index used to say `legacy` for that
-   reason alone; since 2026-09-11 it says `pbr` and means it (see §5).
+7. `lodm` is not 1, 2 or 3; `lodm` 2 on a kind outside the card family (card, cardArray,
+   aggregate), refused naming the version and the kind (§3.3); `lodm` 3 on a kind other than
+   `array` / `cardArray` (§4.1);
+8. `family` is neither `"legacy"` nor `"pbr"` (nor `"mixed"`, which only `lodm` 3 may say) — **a
+   further family word is a hard refusal, not a fallback.** The terrain-VT index used to say
+   `legacy` for that reason alone; since 2026-09-11 it says `pbr` and means it (see §5);
+9. on `lodm` 3: `family` disagreeing with the family tables under `textures`, a family table with
+   no colour sheet or no layer, a missing shared `normal`, or a layer whose `family` has no table,
+   whose `normalLayer` is not its own index, or whose `familyLayer` is not its family's running
+   count (§4.1).
 
 Everything else is defaulted, never refused: an absent `kind` reads as
 `"source"`, an absent `emissiveScale` as **1.0**, an absent `heightInBlue` as
@@ -63,7 +69,7 @@ emits a key whose value is the default (that is what keeps the file compact).
 | key | type | present on | meaning |
 |---|---|---|---|
 | `lodm` | int | every kind | payload version, **1** |
-| `family` | string | every kind | `"legacy"` or `"pbr"` — decides the texture key names and what the third texture's channels mean |
+| `family` | string | every kind | `"legacy"` or `"pbr"` — decides the texture key names and what the third texture's channels mean; a `lodm` 3 array holding both families says `"mixed"` (§4.1) |
 | `kind` | string | every kind | `"source"` \| `"card"` \| `"array"` \| `"cardArray"` \| `"aggregate"` \| `"terrainVT"`; **absent means `"source"`** |
 | `textures` | object | every kind but `terrainVT` | see §2.1 |
 | `emissiveScale` | number | `source`, `card`, `aggregate` | the multiple a consumer scales the emissive **sheet** by; absent = 1; **0 means this set emits nothing**, and an `aggregate` always writes 0 because it has no emissive sheet at all (§3a) |
@@ -262,7 +268,7 @@ At one tile it holds a quarter of an N8 sheet's pixels.
 **Card arrays** (section 4) carry the same keys on the array object: a ring set
 groups only with ring sets of its own sheet size (the group key gains `|ring`,
 and the file name gains `.ring` after its `WxH`:
-`<ws>.LodgenCards.legacy.2304x256.ring_d.DDS`; until 2026-09-25 the name took the
+`<ws>.LodgenCards.2304x256.ring_d.DDS` (`.legacy` after `LodgenCards` until 2026-10-27, §4.1); until 2026-09-25 the name took the
 key's `|` and the array could not be written at all).
 **The aggregate** (section 3a) composites from grid cards only; a ring set given
 to it is refused by name and counted (`aggregate cards: refused N horizon-ring
@@ -289,7 +295,7 @@ Because `_n.A` then MEANS something else, the payload version moves, on the card
 
 | key | on | type | meaning |
 |---|---|---|---|
-| `lodm` | card, cardArray | int | **2** when the set (any layer of an array) carries model sway; 1 otherwise, with none of the keys below |
+| `lodm` | card, cardArray | int | **2** when the set carries model sway; 1 otherwise, with none of the keys below. A cardArray is always **3** since 2026-10-27 (§4.1) and carries the `array.sway` keys whenever a layer has model sway |
 | `sway` | card | string | `"model"` -- `_n.A` is `W x h` |
 | `leafAmplitude`, `leafFrequency` | card | number | the placed base's own leaf numbers (STAT DNAM / TREE CNAM); both 0 in the record reads as 1 / 1 |
 | `array.sway`, `array.leafAmplitude`, `array.leafFrequency` | cardArray | list | one per layer, parallel to `layers`; a synthetic layer says `"synthetic"` and 1 / 1 |
@@ -448,6 +454,42 @@ A card set baked before the emissive sheet existed contributes a **black**
 emissive layer rather than being dropped, so a layer index always means what the
 manifest's `C` line says it means.
 
+### 4.1 `lodm` 3 -- one file per size, both families in it (2026-10-27, lane LODMNAME1)
+
+Every `array` and `cardArray` is written as payload `lodm` 3. The file name carries **no family
+word**: one set per size class (and `.ring`):
+
+    <ws>.LodgenArrays.<WxH>.lodm            mesh texture arrays      (was <ws>.LodgenArrays.<WxH> legacy,
+                                                                       <ws>.LodgenArraysPBR.<WxH> pbr)
+    <ws>.LodgenCards.<WxH>(.ring).lodm      card arrays              (was <ws>.LodgenCards.legacy|pbr.<WxH>(.ring))
+
+with the sheets beside it under the same stem: ONE shared `_n.DDS` holding both families' layers,
+legacy first, and per-family colour / mask / emissive sheets (`_d`, `_gsaos`, `_g` legacy;
+`_bc`, `_rmaos`, `_e` pbr). Grouping is now by `class` (and, for cards, `oct`, `frame` and ring),
+not by family.
+
+| key | meaning |
+|---|---|
+| `family` | `"legacy"` or `"pbr"` when one family is present, `"mixed"` when both are |
+| `textures.normal` | the shared `_n` array; slice `i` is layer `i` |
+| `textures.legacy` | `{ diffuse, gsaos, emissive? }`, present only when a legacy layer is |
+| `textures.pbr` | `{ baseColor, rmaos, emissive? }`, present only when a pbr layer is |
+| `array.layers[i].family` | the layer's family |
+| `array.layers[i].normalLayer` | always `i` (the `_n` slice) |
+| `array.layers[i].familyLayer` | the layer's slice of its family's colour / mask / emissive sheets: its rank among that family's layers |
+| `array.emissiveScale`, `sway`, ... | still one entry per layer, indexed by the SET's layer `i` |
+
+A mesh `array` layer is now an object `{ color, family, normalLayer, familyLayer }` (it was the bare
+colour path string). The set's layer index -- the `C` line's last token, the `A` line's layer, the
+UV2.y a merged shape carries, a `.lodo` base row's `cardLayer` low 11 bits -- is the SET's own layer
+`i`. A reader binds `_n` at `i` and the family sheets at `familyLayer`. Because legacy layers come
+first, a legacy layer's `familyLayer` equals `i`, and a file with one family is the old layout
+under a new name.
+
+A reader still accepts the old names and payloads 1 / 2 (each old file holds one family, layer =
+slice everywhere). An existing bake is converted in place, without a rebake, by
+`tools/lodgen_migrate_arrays.py` (dry run by default, `--apply --backup <dir>`).
+
 ---
 
 ## 5. `kind: "terrainVT"` — the pyramid index
@@ -519,7 +561,8 @@ textured shape of the model carries a pbr `.lodm`, else legacy.
 
 ## 7. Invariants a reader may assume
 
-1. `lodm == 1` and `family ∈ {legacy, pbr}` on every file that parsed.
+1. `lodm ∈ {1, 2, 3}` and `family ∈ {legacy, pbr}` on every file that parsed, or `mixed` on a
+   `lodm` 3 array (§4.1).
 2. `array.emissiveScale.size() == array.layers.size()` on `array` and
    `cardArray`.
 3. On a `cardArray`, every layer's sheet is `oct·frame[0]` × `oct·frame[1]`, and
@@ -592,7 +635,8 @@ before trusting a number here.**
 |---|---|---|
 | magic, envelope version, 4 MiB cap | `lodmfile.cpp:10` | `static const qsizetype LODM_PAYLOAD_CAP` |
 | 12-byte envelope, exact payload size | `lodmfile.cpp:16-38` | `bytes.size() < 12`, `declared != bytes.size() - 12` |
-| `lodm` 1 or 2 refusals | `lodmfile.cpp:46-63` | `payload is not a lodm 1 object`, `lodm 2 is the card family's version` |
+| `lodm` 1, 2 or 3 refusals | `lodmfile.cpp:46-74` | `payload is not a lodm 1 object`, `lodm 2 is the card family's version`, `lodm 3 is the array layout` |
+| `lodm` 3 family tables and layer links (2026-10-27) | `lodmfile.cpp:90-149` | `lodm 3 layer %1: normalLayer %2 familyLayer %3` |
 | family hard refusal | `lodmfile.cpp:52-54` | `family must be legacy or pbr` |
 | `kind` defaults to `source` | `lodmfile.cpp:56` | `.toString( QStringLiteral( "source" ) )` |
 | `emissiveScale` defaults to 1 | `lodmfile.cpp:63` | `.toDouble( 1.0 )` |

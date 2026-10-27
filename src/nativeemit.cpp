@@ -1182,6 +1182,8 @@ void lodgenNativeOfferLibraryReuse( const NativeReuseOffer & offer )
  *      emissive: the lower-cased file name's UTF-8 bytes, the file size as a
  *      little-endian u64, then every byte of the file. A set that names no
  *      emissive sheet (black everywhere, lane TIDY1) hashes the first four.
+ *      A lodm 3 set of BOTH families (LODMNAME1) then hashes the pbr colour,
+ *      mask and (when named) emissive; the first family is legacy.
  *   4. Every layer's `id` is the base's formID in 8 hex digits; a base in two
  *      layers is refused, and so is a `C` line whose (array, layer) is not
  *      the layer its base's id names. */
@@ -1320,14 +1322,21 @@ bool lodgenNativeLinkCards( const QStringList & btoPaths, const QString & cardAr
 		QString why;
 		if ( !hashFile( name, &why ) )
 			return fail( why );
-		const QString sheets[4] = { m.color, m.normal, m.mask, m.emissive };
-		static const char * const sheetRole[4] = { "colour", "normal", "mask", "emissive" };
-		for ( int k = 0; k < 4; k++ ) {
+		/* A lodm 3 set holding both families hashes the second family's colour,
+		 * mask and emissive after the first's four, so a one-family set hashes
+		 * exactly the files and order it always did (lane LODMNAME1). */
+		const bool second = m.mixed;
+		const QString sheets[7] = { m.color, m.normal, m.mask, m.emissive,
+			second ? m.fam[1].color : QString(), second ? m.fam[1].mask : QString(),
+			second ? m.fam[1].emissive : QString() };
+		static const char * const sheetRole[7] = { "colour", "normal", "mask", "emissive",
+			"pbr colour", "pbr mask", "pbr emissive" };
+		for ( int k = 0; k < ( second ? 7 : 4 ); k++ ) {
 			/* A set whose emissive is black on every layer names no emissive
 			 * sheet (lane TIDY1, 2026-09-27; vanilla LOD has no glow source):
 			 * it hashes four files, not five. Colour, normal and mask stay
 			 * required. */
-			if ( k == 3 && sheets[k].isEmpty() )
+			if ( ( k == 3 || k == 6 ) && sheets[k].isEmpty() )
 				continue;
 			if ( sheets[k].isEmpty() )
 				return fail( QString( "%1 names no %2 sheet" ).arg( name ).arg( QLatin1String( sheetRole[k] ) ) );

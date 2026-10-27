@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QJsonObject>
 #include <QString>
+#include <QVector>
 
 
 /*! `.lodm` — the LOD material. Ours, for LOD, compact by design.
@@ -22,8 +23,8 @@
  *
  * Payload — one flat object:
  *
- *   lodm      1
- *   family    "legacy" | "pbr"
+ *   lodm      1 (2: card family with model sway; 3: an array of BOTH families)
+ *   family    "legacy" | "pbr" ("mixed" on a lodm 3 array holding both)
  *   kind      "source" | "card" | "array" | "cardArray" | "terrainVT"
  *   textures  { diffuse|baseColor, normal, gsaos|rmaos,
  *               emissive }                                 game paths
@@ -69,6 +70,14 @@
  * layers, `array.emissiveScale`, on an `array` or `cardArray` one - two
  * layers of one array are two different materials and do not share it.
  *
+ * LODM 3 (lane LODMNAME1, bungo 2026-10-27) is the ARRAY layout with no family
+ * in the file name: one `<ws>.LodgenArrays.<WxH>.lodm` / `<ws>.LodgenCards.<WxH>.lodm`
+ * per size, ONE shared `_n` sheet over every layer, and the colour/mask/emissive
+ * sheets per family (`textures.legacy {diffuse, gsaos[, emissive]}`, `textures.pbr
+ * {baseColor, rmaos[, emissive]}`), each holding only its own family's layers.
+ * Every layer says `family`, `normalLayer` (= its index, the slice of `_n`) and
+ * `familyLayer` (its slice of its family's sheets). docs/LODGEN_LODM_FORMAT.md 4.1.
+ *
  * The generator WRITES one beside every set it makes and
  * READS one as a source override: a `<name>.lodm` beside a LOD material
  * (`<name>.bgsm`), or where a source shape names no material, the diffuse's
@@ -95,7 +104,20 @@ struct LodmMaterial
 	float emissiveScale = 1.0f;
 	bool heightInBlue = false;
 	QJsonObject root;			//!< the whole payload, for the card/array blocks
+	int payloadVersion = 0;		//!< the payload's `lodm`: 1, 2 (card sway) or 3 (array layout)
+	/*! lodm 3 only: the per-family sheets, [0] legacy and [1] pbr (`normal` above is
+	 *  the shared one). `color`/`mask`/`emissive` above hold the FIRST family present. */
+	struct FamilySheets { bool present = false; QString color, mask, emissive; int layers = 0; };
+	FamilySheets fam[2];
+	bool mixed = false;			//!< lodm 3 holding both families
+	QVector<qint8> layerPbr;		//!< lodm 3: per layer, its family (1 = pbr)
+	QVector<int> layerFamilyIndex;	//!< lodm 3: per layer, its slice in its family's sheets
 };
+
+/*! An array set's layer: its family and its slice in that family's colour/mask/emissive
+ *  sheets (the `_n` slice is always `layer`). Before lodm 3 every layer is the file's own
+ *  family at its own index. False when `layer` is out of range of a lodm 3 file. */
+bool lodmArrayLayer( const LodmMaterial & m, int layer, bool * pbr, int * familyLayer );
 
 //! Parse a .lodm from raw bytes. Never throws; inspect `ok`/`error`.
 LodmMaterial lodmParse( const QByteArray & bytes );

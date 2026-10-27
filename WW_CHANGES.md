@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LODMNAME1 (2026-10-27, branch lodmname1-20261027): far-LOD texture arrays lose the family word
+
+- **One set per size:** the far-LOD texture arrays are now `<ws>.LodgenArrays.<WxH>` and
+  `<ws>.LodgenCards.<WxH>(.ring)`, each with one `.lodm`. Before, there were separate legacy and pbr sets
+  (`LodgenArraysPBR`, `LodgenCards.legacy|pbr`).
+- **What a set holds:**
+  - One shared `_n` with every layer, legacy first.
+  - Colour, mask and emissive sheets per family.
+  - Each layer records `family`, `normalLayer` and `familyLayer`.
+  - The `.lodm` payload is `lodm` 3 (`docs/LODGEN_LODM_FORMAT.md` §4.1).
+  - The sidecar `<ws>.LodgenArrays.txt` is version 6, with `familyLayer` appended.
+- **Readers updated:** cell-view far cards and far objects, the census/verify card hash, and the spells.
+  A one-family set hashes the same files in the same order as before.
+- **Old bakes still read:** the old names and `lodm` 1/2 are still accepted.
+- **Migration tool:** `tools/lodgen_migrate_arrays.py` rewrites an existing bake in place with no rebake.
+  It is a dry run by default; `--apply --backup <dir>` writes, and it refuses unknown versions.
+- **Spell fix (already failing on main):** `lodgen_texture_arrays.sh`'s DX10-header floor was 4. Since TIDY1 a dark
+  set ships 3 sheets, so the check failed on main's exe too. The floor is now 3.
+
 ## Lane FARPAGES1 (2026-10-26, branch farpages1-20261026): far ground cached pages the way shipped games do it
 
 - **One page a cell, layers and decals together:** "Live, cached pages" now paints each ring-0 cell's whole ground

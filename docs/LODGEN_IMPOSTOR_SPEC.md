@@ -430,16 +430,20 @@ unaffected, which is why they go on the END and not in the middle.
 
 The per-card sets are one texture bind per tree type. `--arrays` together with
 `--impostors` packs every card set the chunks' `C` lines stand on into one
-DX10 array per texture (BC3; BC7 for `_n`; BC1 for the emissive), grouped by FAMILY and
-by SHEET SIZE (a card set's
+DX10 array per texture (BC3; BC7 for `_n`; BC1 for the emissive), grouped by SHEET SIZE
+(both families in one set since 2026-10-27: one shared `_n`, colour and mask per family;
+a card set's
 sheet is `oct x frameW` by `oct x frameH`; sets that differ in grid or frame
 cannot share an array — which is what the frame size classes above are for),
 so a consumer draws a whole ring's trees as one
 instanced quad per chunk:
 
-    Textures\Terrain\<ws>\Objects\<ws>.LodgenCards.legacy.<WxH>_d.DDS, _n.DDS, _gsaos.DDS, _g.DDS
-                                     <ws>.LodgenCards.pbr.<WxH>_bc.DDS, _n.DDS, _rmaos.DDS, _e.DDS
-                                     <ws>.LodgenCards.<family>.<WxH>.lodm
+    Textures\Terrain\<ws>\Objects\<ws>.LodgenCards.<WxH>_n.DDS                       shared
+                                     <ws>.LodgenCards.<WxH>_d.DDS, _gsaos.DDS, _g.DDS   legacy
+                                     <ws>.LodgenCards.<WxH>_bc.DDS, _rmaos.DDS, _e.DDS  pbr
+                                     <ws>.LodgenCards.<WxH>.lodm                        lodm 3
+
+(`.legacy` / `.pbr` after `LodgenCards` until 2026-10-27; docs/LODGEN_LODM_FORMAT.md §4.1)
 
 A card set baked before the emissive existed gets a BLACK layer, so a layer
 index still means what the `C` lines say it means. When every layer of an
@@ -486,10 +490,10 @@ second, the first is a field that is always zero.
 
 ## Mesh LOD (texture arrays)
 
-Files `Textures\Terrain\<ws>\Objects\<ws>.LodgenArrays.<WxH>_d.DDS`, `_n.DDS`,
-`_gsaos.DDS`, `_g.DDS` (legacy) and `<ws>.LodgenArraysPBR.<WxH>_bc.DDS`,
-`_n.DDS`, `_rmaos.DDS`, `_e.DDS` (pbr): one DX10 array per texture size class
-AND family over
+Files `Textures\Terrain\<ws>\Objects\<ws>.LodgenArrays.<WxH>_n.DDS` (shared),
+`_d.DDS`, `_gsaos.DDS`, `_g.DDS` (legacy) and `_bc.DDS`, `_rmaos.DDS`, `_e.DDS` (pbr), one
+set per texture size class (until 2026-10-27 the pbr layers were a separate
+`<ws>.LodgenArraysPBR.<WxH>` set with its own `_n`) over
 every source the chunks reference (BC3, and BC1 for the emissive), tiling or
 not, real mips, the layer in
 every vertex's UV2.y, a `<stem>.lodm` beside each set (its `array.layers`
@@ -498,9 +502,10 @@ multiple per layer), an `A <shape block> <layer>
 <lodm>` line per shape in the chunk's manifest, `M <shape block> <material>`
 lines naming each chunk shape's source material (the chunk shape itself
 names none, as vanilla's do not), and a sidecar `<ws>.LodgenArrays.txt`
-(version 5: `family class layer lodm color normal mask emissive source
-emissiveScale` — the new column goes on the END, so a reader that indexes
-the first nine by position is unaffected). Run
+(version 6: `family class layer lodm color normal mask emissive source
+emissiveScale familyLayer` — each new column goes on the END, so a reader that indexes
+the first nine by position is unaffected; `layer` is the set's `_n` slice, `familyLayer`
+the family sheets' slice). Run
 BEFORE the atlas; the stock engine reads none of it.
 
 - `_d` / `_bc`: the source's colour with its alpha.

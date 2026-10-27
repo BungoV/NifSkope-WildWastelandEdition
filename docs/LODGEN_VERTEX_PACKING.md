@@ -77,7 +77,7 @@ alpha = smoothness, resampled to the diffuse's size). The layer goes into
 **UV2.y** of every vertex of the shape, and the chunk's manifest gets
 `A <shape block> <layer> <array .lodm path>` per shape, so a chunk stays
 self-contained after the atlas pass repoints its diffuse (the arrays run
-BEFORE the atlas). A sidecar `<ws>.LodgenArrays.txt` (**version 5**:
+BEFORE the atlas). A sidecar `<ws>.LodgenArrays.txt` (**version 6** since 2026-10-27, `familyLayer` appended; was **version 5**:
 `family class layer lodm color normal mask emissive source emissiveScale`) lists
 every layer with its source paths — **the contract is
 `docs/LODGEN_TEXTURE_ARRAYS.md`; this paragraph said version 4 until

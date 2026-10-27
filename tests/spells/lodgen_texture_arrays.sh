@@ -3,8 +3,8 @@
 # Texture arrays for FO4CS under docs/LODGEN_IMPOSTOR_SPEC.md, in BOTH LOD
 # material families: per texture size class and family three DX10 BC3 arrays
 # plus a BC1 EMISSIVE array
-# (legacy: `<ws>.LodgenArrays.<WxH>_d/_n/_gsaos/_g`, pbr:
-# `<ws>.LodgenArraysPBR.<WxH>_bc/_n/_rmaos/_e`), a `.lodm` beside every set, the
+# (legacy `_d/_gsaos/_g`, pbr `_bc/_rmaos/_e`, one shared `_n`; LODMNAME1: all under
+# `<ws>.LodgenArrays.<WxH>`), one `.lodm` per size class, the
 # layer in UV2.y of every vertex, an `A <block> <layer> <lodm>` line per shape
 # in the chunk's manifest, `M <block> <material>` lines naming the source
 # materials, and a sidecar listing every layer.
@@ -117,12 +117,13 @@ def check(what, cond):
     global fails
     print(('  ok   ' if cond else '  FAIL ') + what)
     if not cond: fails += 1
-# sidecar 5: family class layer lodm color normal mask emissive source emissiveScale
+# sidecar 6 (LODMNAME1): family class layer lodm color normal mask emissive source emissiveScale familyLayer;
+# `layer` is the set's own (the shared `_n` slice), familyLayer the slice of the family's colour/mask/emissive
 rows = [l.split() for l in open(side).read().splitlines() if l.strip() and not l.startswith('#')]
-check('every sidecar row has the ten columns of version 5', bool(rows) and all(len(r) == 10 for r in rows))
-check('the sidecar header names version 5 and the emissiveScale column',
-      open(side).readline().startswith('# lodgen texture arrays 5:')
-      and 'emissiveScale' in open(side).readline())
+check('every sidecar row has the eleven columns of version 6', bool(rows) and all(len(r) == 11 for r in rows))
+check('the sidecar header names version 6 and the familyLayer column',
+      open(side).readline().startswith('# lodgen texture arrays 6:')
+      and 'familyLayer' in open(side).readline())
 
 # WHAT THE CHUNKS CARRY, from `lodgen --dump-shapes`: source key -> (ownEmit,
 # (r, g, b), multiple, alphaTested). The key is the pass's own - the shape's
@@ -246,32 +247,43 @@ for (fam, cls), lays in sets.items():
     pbr = fam == 'pbr'
     lodmGame = lays[0][3]
     lm = readLodm(local(lodmGame))
+    inSet = [r for r in rows if r[3] == lodmGame]      # both families' rows of this one .lodm
+    fams = sorted(set(r[0] for r in inSet))
     colorKey, maskKey = ('baseColor', 'rmaos') if pbr else ('diffuse', 'gsaos')
     colorSfx, maskSfx = ('_bc', '_rmaos') if pbr else ('_d', '_gsaos')
     emiSfx = '_e' if pbr else '_g'		# the key is `emissive` in both families
     stem = os.path.basename(lodmGame.replace('\\', '/'))[:-5]
     tex = lm.get('textures', {})
+    ft = tex.get(fam, {})
     # lane TIDY1 (2026-09-27): a set whose every layer emits nothing names NO emissive
     # and ships no _g/_e; a set with one emitting layer names it. Both halves asserted.
     allDark = all(r[7] == '-' for r in lays)
-    emiOk = (('emissive' not in tex and not os.path.exists(local(lodmGame)[:-5] + emiSfx + '.DDS'))
-             if allDark else tex.get('emissive', '').endswith(stem + emiSfx + '.DDS'))
+    emiOk = (('emissive' not in ft and not os.path.exists(local(lodmGame)[:-5] + emiSfx + '.DDS'))
+             if allDark else ft.get('emissive', '').endswith(stem + emiSfx + '.DDS'))
     darkSets += allDark
     darkDropped += (allDark and emiOk)
-    good = (lm.get('lodm') == 1 and lm.get('family') == fam and lm.get('kind') == 'array'
-            and tex.get(colorKey, '').endswith(stem + colorSfx + '.DDS') and tex.get('normal', '').endswith(stem + '_n.DDS')
-            and tex.get(maskKey, '').endswith(stem + maskSfx + '.DDS')
-            and emiOk
-            and lm.get('array', {}).get('class') == [w, h] and len(lm.get('array', {}).get('layers', [])) == len(lays)
+    # LODMNAME1: one .lodm per size class (lodm 3, family 'mixed' when both families share it), the name
+    # carries no family word, and each layer says its family, its `_n` slice and its family-sheet slice
+    lmLayers = lm.get('array', {}).get('layers', [])
+    layerLinks = all(int(r[2]) < len(lmLayers) and isinstance(lmLayers[int(r[2])], dict)
+                     and lmLayers[int(r[2])].get('family') == fam
+                     and lmLayers[int(r[2])].get('normalLayer') == int(r[2])
+                     and lmLayers[int(r[2])].get('familyLayer') == int(r[10]) for r in lays)
+    good = (lm.get('lodm') == 3 and lm.get('family') == (fam if len(fams) == 1 else 'mixed') and lm.get('kind') == 'array'
+            and ft.get(colorKey, '').endswith(stem + colorSfx + '.DDS') and tex.get('normal', '').endswith(stem + '_n.DDS')
+            and ft.get(maskKey, '').endswith(stem + maskSfx + '.DDS')
+            and emiOk and layerLinks
+            and sorted(int(r[10]) for r in lays) == list(range(len(lays)))
+            and lm.get('array', {}).get('class') == [w, h] and len(lmLayers) == len(inSet)
             and isinstance(lm.get('array', {}).get('emissiveScale'), list)
-            and len(lm['array']['emissiveScale']) == len(lays)
-            and (('PBR.' in stem) == pbr))
+            and len(lm['array']['emissiveScale']) == len(inSet)
+            and stem.endswith('.LodgenArrays.' + cls))
     print('  %s.lodm: family %s, %s layers listed, class %s, emissiveScale %s'
           % (stem, lm.get('family'), len(lm.get('array', {}).get('layers', [])),
              lm.get('array', {}).get('class'), lm.get('array', {}).get('emissiveScale')))
     lodmOk += good
-    for game, wantDxgi in ((tex.get(colorKey, ''), 77), (tex.get('normal', ''), 77),
-                           (tex.get(maskKey, ''), 77), (tex.get('emissive', ''), 71)):
+    for game, wantDxgi in ((ft.get(colorKey, ''), 77), (tex.get('normal', ''), 77),
+                           (ft.get(maskKey, ''), 77), (ft.get('emissive', ''), 71)):
         if wantDxgi == 71 and allDark:
             continue        # no emissive sheet on a set that emits nothing (asserted above)
         path = local(game)
@@ -283,28 +295,29 @@ for (fam, cls), lays in sets.items():
         fourcc = b[84:88]
         dxgi, dim, misc, asize, misc2 = struct.unpack_from('<IIIII', b, 128)
         perLayer, nmips = mipbytes(w, h, 16 if wantDxgi == 77 else 8)
+        want = len(inSet) if game == tex.get('normal') else len(lays)     # the `_n` holds both families
         ok = (magic == 0x20534444 and fourcc == b'DX10' and dxgi == wantDxgi and dim == 3
-              and asize == len(lays) and ww == w and hh == h and mips == nmips
+              and asize == want and ww == w and hh == h and mips == nmips
               and len(b) == 148 + asize * perLayer)
         print('  %s: %dx%d dxgi %d layers %d mips %d size %d (expected %d)' % (os.path.basename(path), ww, hh, dxgi, asize, mips, len(b), 148 + asize * perLayer))
         headersOk += ok; arraysSeen += 1
         if asize >= 2 and b[148:148 + 64] != b[148 + perLayer:148 + perLayer + 64]:
             distinct += 1
     # THE EMISSIVE, decoded against the law the sidecar's column names
-    colorPath, emiPath = local(tex.get(colorKey, '')), local(tex.get('emissive', ''))
+    colorPath, emiPath = local(ft.get(colorKey, '')), local(ft.get('emissive', ''))
     if os.path.exists(colorPath) and (allDark or os.path.exists(emiPath)):
         cb = open(colorPath, 'rb').read()
         eb = None if allDark else open(emiPath, 'rb').read()    # absent = black everywhere
         perC, _ = mipbytes(w, h, 16)
         perE, _ = mipbytes(w, h, 8)
         for r in lays:
-            l = int(r[2])
+            l, u = int(r[10]), int(r[2])        # the family-sheet slice; the set's own layer
             # THE MULTIPLE: the sidecar's tenth column and the .lodm's list, both
             # against the source the probe read off the chunk
             want = expectScale(r[8])
             if want is not None:
                 got = float(r[9])
-                gotL = float(lm['array']['emissiveScale'][l])
+                gotL = float(lm['array']['emissiveScale'][u])
                 scaleChecked += 1
                 if abs(got - want) < 1e-4 and abs(gotL - want) < 1e-4:
                     scaleOk += 1
@@ -367,7 +380,8 @@ for (fam, cls), lays in sets.items():
 check('every set\'s .lodm says its family, names its arrays (the emissive only where a layer emits) and lists a source per layer', lodmOk == len(sets))
 check('a set whose every layer emits nothing names no emissive and has no _g/_e file (%d of %d such sets)'
       % (darkDropped, darkSets), darkSets >= 1 and darkDropped == darkSets)
-check('every array carries a DX10 header (BC3, BC1 for the emissive) with the sidecar\'s layer count and an exact size', arraysSeen >= 4 and headersOk == arraysSeen)
+# floor 3: since TIDY1 a set that emits nothing ships no emissive sheet (it was 4, red on HEAD's own run 1)
+check('every array carries a DX10 header (BC3, BC1 for the emissive) with the sidecar\'s layer count and an exact size', arraysSeen >= 3 and headersOk == arraysSeen)
 check('layers differ within an array', distinct >= 1)
 check('a layer the sidecar says emits nothing decodes black (%d layers)' % blackChecked, blackOk == blackChecked)
 check('an OPAQUE source whose emissive colour is black decodes black although its diffuse x alpha does not (%d layers)'
@@ -404,8 +418,6 @@ for bto in btos:
             unknown += 1
         if layer < 0 and lodm not in layersOf:
             unknown += 1
-        if 'PBR.' in lodm:
-            pbrShapes += 1
         t, start, size = byIndex[blk]
         o = start + 4
         ne = struct.unpack_from('<I', data, o)[0]; o += 4 + 4 * ne
@@ -417,12 +429,14 @@ for bto in btos:
         stride = (desc & 0xF) * 4
         uv2Off = (desc >> 10) & 0x3C		# VA_TEXCOORD1 = 2: (desc >> (4*2+2)) & 0x3C
         okAll = (desc >> 44) & 0x4 != 0
+        vlay = set()
         for v in range(nv):
             hb = data[o + v * stride + uv2Off + 2: o + v * stride + uv2Off + 4]
             hval = struct.unpack('<H', hb)[0]
             s = -1.0 if hval & 0x8000 else 1.0
             e = (hval >> 10) & 0x1F; m = hval & 0x3FF
             f = s * m / (1 << 24) if e == 0 else s * (1 + m / 1024.0) * 2.0 ** (e - 15)
+            vlay.add(int(round(f)))
             if layer >= 0:
                 if abs(f - layer) > 1e-3:
                     okAll = False; break
@@ -430,6 +444,8 @@ for bto in btos:
                 okAll = False; break
         shapesChecked += 1
         if not okAll: badShapes += 1
+        if any(layerOf.get((lodm, x), ('',))[0] == 'pbr' for x in ([layer] if layer >= 0 else vlay)):
+            pbrShapes += 1
 print('  %d chunks, %d A lines (%d naming a PBR set), %d shapes checked, %d with a vertex not carrying its layer, %d naming an unknown layer' % (len(btos), aLines, pbrShapes, shapesChecked, badShapes, unknown))
 check('every A line names a listed set and layer', aLines >= 1 and unknown == 0)
 check('every chunk shape named in an A line carries its layer in UV2.y on every vertex', shapesChecked >= 4 and badShapes == 0)
@@ -441,7 +457,7 @@ if expectPbr:
             continue
         w, h = map(int, cls.split('x'))
         lm = readLodm(local(lays[0][3]))
-        bc = open(local(lm['textures']['baseColor']), 'rb').read(); rm = open(local(lm['textures']['rmaos']), 'rb').read()
+        bc = open(local(lm['textures']['pbr']['baseColor']), 'rb').read(); rm = open(local(lm['textures']['pbr']['rmaos']), 'rb').read()
         nblocks = ((w + 3) // 4) * ((h + 3) // 4)
         same = 0
         for k in range(nblocks):

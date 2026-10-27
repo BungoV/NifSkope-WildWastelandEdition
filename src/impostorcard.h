@@ -151,7 +151,11 @@ struct ImpostorCardSet
 	void frameOffsetOf( int i, int j, float * right, float * up ) const;
 
 	//! cardArray only: which layer of the arrays this set is. -1 for a `card`.
+	//! On a lodm 3 array it is the slice of the set's FAMILY sheets (colour, mask, emissive).
 	int layer = -1;
+	//! lodm 3 only: the slice of the shared `_n` sheet (the layer's index in the .lodm); -1 = `layer`
+	int normalLayer = -1;
+	int nLayer() const { return normalLayer >= 0 ? normalLayer : layer; }
 
 	ImpostorSheet colour, normal, mask, emissive;
 

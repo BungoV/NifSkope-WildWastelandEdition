@@ -718,7 +718,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	if ( !sameSet ) {
 		haveColour = bindSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer );
 		wwImpostorTrace( "C colour bound" );
-		haveNormal = bindSheet( scene, prog, "NormalSheet", set.normal, 1, set.layer );
+		haveNormal = bindSheet( scene, prog, "NormalSheet", set.normal, 1, set.nLayer() );
 		wwImpostorTrace( "D normal bound" );
 		const bool haveMask   = bindSheet( scene, prog, "MaskSheet",   set.mask,   2, set.layer );
 		const bool haveEmiss  = bindSheet( scene, prog, "EmissiveSheet", set.emissive, 3, set.layer );
@@ -1115,7 +1115,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	for ( int s = 0; s < sets.size(); s++ ) {
 		const ImpostorCardSet & set = *sets.at( s );
 		const bool haveColour = bindInstSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer, g );
-		const bool haveNormal = bindInstSheet( scene, prog, "NormalSheet", set.normal, 1, set.layer, g );
+		const bool haveNormal = bindInstSheet( scene, prog, "NormalSheet", set.normal, 1, set.nLayer(), g );
 		if ( !haveColour || !haveNormal ) {
 			if ( !st.refused )
 				st.firstWhy = QFileInfo( set.lodmPath ).fileName() + QStringLiteral( ": " ) + sheetRefusal( scene, set, haveColour );

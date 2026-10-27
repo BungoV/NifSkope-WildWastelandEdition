@@ -7,6 +7,7 @@
 #include "lodtsheets.h"
 #include "probebake.h"
 #include "io/lodvfile.h"
+#include "io/lodmfile.h"
 
 #include "ddstxt16.hpp"
 
@@ -93,6 +94,12 @@ QString treeSource( QString s )
 	return k > 0 ? s.mid( k ) : s;
 }
 
+// the file name of a game path: `Data\FO4CSLOD\<ws>\Objects\x.lodm` -> `x.lodm`
+static QString lastName( const QString & s )
+{
+	return s.mid( qMax( s.lastIndexOf( QChar( '\\' ) ), s.lastIndexOf( QChar( '/' ) ) ) + 1 );
+}
+
 class FarTrees
 {
 public:
@@ -110,9 +117,10 @@ private:
 	bool solidBoxes;
 	QDir dir;
 	QString world;
-	QHash<QString, QPair<QString, int>> layers;   // material -> the texture array's size class, its layer
+	QHash<QString, QPair<QString, int>> layers;   // material -> the array's .lodm file name, its layer there
 	bool manifestsRead = false;
-	QHash<QString, QByteArray> arrays;            // size class -> the array file
+	QHash<QString, QByteArray> arrays;            // colour sheet file name -> the array file
+	QHash<QString, LodmMaterial> lodms;           // array .lodm file name -> parsed
 	std::vector<std::unique_ptr<DDSTexture16>> textures;
 	std::map<quint16, TreeMat> mats;
 	std::map<quint32, TreeModel> models;
@@ -123,16 +131,17 @@ FarTrees::FarTrees( const LodoLibrary & l, const QString & lodiPath, bool boxes 
 	const QFileInfo fi( lodiPath );
 	dir = fi.absoluteDir();
 	world = fi.completeBaseName();
-	// Objects/<world>.LodgenArrays.txt: family class layer lodm color normal mask emissive source emissiveScale
+	// Objects/<world>.LodgenArrays.txt: family class layer lodm color normal mask emissive source
+	// emissiveScale [familyLayer]; the .lodm (column 3) says which sheet and slice a layer is
 	QFile list( dir.filePath( QStringLiteral( "Objects/%1.LodgenArrays.txt" ).arg( world ) ) );
 	if ( list.open( QIODevice::ReadOnly ) )
 		while ( !list.atEnd() ) {
 			const QStringList c = QString::fromUtf8( list.readLine() ).trimmed().split( QChar( ' ' ) );
 			if ( c.size() < 10 || c[0].startsWith( QChar( '#' ) ) )
 				continue;
-			const QString key = treeSource( c[c.size() - 2] );
+			const QString key = treeSource( c[8] );
 			if ( !layers.contains( key ) )
-				layers.insert( key, { c[1], c[2].toInt() } );
+				layers.insert( key, { lastName( c[3] ), c[2].toInt() } );
 		}
 }
 
@@ -156,10 +165,9 @@ void FarTrees::readManifests()
 					shape[ln.mid( 2, s - 2 )] = treeSource( QString::fromUtf8( ln.mid( s + 1 ) ) );
 			} else if ( ln.startsWith( "A " ) ) {
 				const QList<QByteArray> c = ln.split( ' ' );
-				// ...\<world>.LodgenArrays.<size class>.lodm
-				const QList<QByteArray> dot = c.size() >= 4 ? c.last().split( '.' ) : QList<QByteArray>();
-				if ( dot.size() >= 3 && c[2].toInt() >= 0 )
-					layer.insert( c[1], { QString::fromUtf8( dot[dot.size() - 2] ), c[2].toInt() } );
+				// A <shape> <layer> ...\<world>.LodgenArrays[PBR].<size class>.lodm
+				if ( c.size() >= 4 && c[2].toInt() >= 0 )
+					layer.insert( c[1], { lastName( QString::fromUtf8( c.last() ) ), c[2].toInt() } );
 			}
 		}
 		for ( const auto & s : shape )
@@ -182,18 +190,28 @@ const TreeMat & FarTrees::material( quint16 id )
 			readManifests();
 		const auto l = layers.constFind( key );
 		if ( l != layers.constEnd() ) {
-			if ( !arrays.contains( l->first ) ) {
-				QFile df( dir.filePath( QStringLiteral( "Objects/%1.LodgenArrays.%2_d.DDS" ).arg( world, l->first ) ) );
-				arrays.insert( l->first, df.open( QIODevice::ReadOnly ) ? df.readAll() : QByteArray() );
+			// the layer's colour sheet and slice: its family's, on a lodm 3 set (LODMNAME1)
+			if ( !lodms.contains( l->first ) ) {
+				QFile lf( dir.filePath( QStringLiteral( "Objects/" ) + l->first ) );
+				lodms.insert( l->first, lf.open( QIODevice::ReadOnly ) ? lodmParse( lf.readAll() ) : LodmMaterial() );
+			}
+			const LodmMaterial & lm = lodms[l->first];
+			bool lp = false;
+			int slice = -1;
+			const QString sheet = lm.ok && lodmArrayLayer( lm, l->second, &lp, &slice )
+				? lastName( lm.payloadVersion == 3 ? lm.fam[lp].color : lm.color ) : QString();
+			if ( !sheet.isEmpty() && !arrays.contains( sheet ) ) {
+				QFile df( dir.filePath( QStringLiteral( "Objects/" ) + sheet ) );
+				arrays.insert( sheet, df.open( QIODevice::ReadOnly ) ? df.readAll() : QByteArray() );
 			}
 			/* One layer as a texture of its own: the file's header, then that layer's bytes (the
 			 * decoder reads at most 256 layers of a file, and all of them). */
-			const QByteArray & dds = arrays[l->first];
+			const QByteArray dds = arrays.value( sheet );
 			const qint64 count = dds.size() > 148 && dds.mid( 84, 4 ) == "DX10"
 				? qint64( qFromLittleEndian<quint32>( reinterpret_cast<const uchar *>( dds.constData() ) + 140 ) ) : 0;
 			const qint64 per = count > 0 ? ( qint64( dds.size() ) - 148 ) / count : 0;
-			if ( per > 0 && l->second >= 0 && l->second < count ) {
-				const QByteArray one = dds.left( 148 ) + dds.mid( int( 148 + qint64( l->second ) * per ), int( per ) );
+			if ( per > 0 && slice >= 0 && slice < count ) {
+				const QByteArray one = dds.left( 148 ) + dds.mid( int( 148 + qint64( slice ) * per ), int( per ) );
 				try {
 					textures.emplace_back( new DDSTexture16( reinterpret_cast<const unsigned char *>( one.constData() ),
 						size_t( one.size() ) ) );

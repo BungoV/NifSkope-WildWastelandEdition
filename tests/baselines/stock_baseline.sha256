@@ -1,8 +1,8 @@
 # stock_baseline 1  (tests/spells/lodgen_native_baseline.sh --write)
-# exe 3138972ee87dc4cc431805ae8b771cd780bd89f51f8f177709d881d25aedef66 2026-10-01T18:44:50 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
-# git v0.3.3-467-g5a64e738
+# exe 3c69f96fa86ea0bd9e2ced8b092553d4cace21a8c0f08cc4f27488015842e2cb 2026-10-27T00:40:58 release/NifSkope.exe
+# git v0.3.3-1307-gbd50b528-dirty
 # profile ao=1 identity=1 arrays=1 atlas=1 slot-fallback=dim16 exclude=BTR
-# bake-seconds 20
+# bake-seconds 11
 # region (-20,24)d4 (-24,24)d8 (-32,16)d16+slot-fallback (-32,0)d32 region(-20,24..-19,25)d4+arrays+atlas
 74643693e5046ab17db04230baec5cf828e8dec2f7145fb0c999e25a43be568f  chunks/Commonwealth.16.-32.16.bto
 969b0faf439a4c10c24c4b4fc28d52e9a956f77b935ed2a8d7517dfcf5b2bf98  chunks/Commonwealth.16.-32.16.bto.manifest.txt
@@ -14,11 +14,11 @@ b0ef6d0ffa2a5ac939b0a3925d56af0aab21a18418c8f25300d9bbcbcd9ae004  chunks/Commonw
 a4b7707acd21ad77891d8c1fd8c097acb05c78d6c5073c02a7ac9f17a7263728  chunks/Commonwealth.8.-24.24.bto.manifest.txt
 db525b68e622b42adc8626fcce4df02343b762141da0c60ff231f0b6e5170979  region/Commonwealth.4.-20.24.BTO
 da09e5582ac7bad9b94e0a2795f5b10267e0225093d02c7ac092fc64cb76519c  region/Commonwealth.4.-20.24.BTO.manifest.txt
-b1e5f3f41c94a3e2a201c1ccb83ba76c382f12b23127d404f6bc30ae20676ec7  region/Objects/Commonwealth.LodgenArrays.256x256.lodm
+5c8b18c5a68e547e63d4d8343d8ec832e7c6cd84531368763238777ec2763609  region/Objects/Commonwealth.LodgenArrays.256x256.lodm
 ac9364b01b3217ee3736e3e27048075a0dff07651a6ec6fc71aa2e4012882b14  region/Objects/Commonwealth.LodgenArrays.256x256_d.DDS
 ed33db37fa38806f5754aa0e5aade6cffdd7f489f7456cd4a4005754e7a3d894  region/Objects/Commonwealth.LodgenArrays.256x256_gsaos.DDS
 172fdfb3fa61015bfda3b54c46bb83593dc7bde1ffbbb4a2c1f1ef6c5b957baa  region/Objects/Commonwealth.LodgenArrays.256x256_n.DDS
-1382289a4f23abe82f042b9659c316203ecf49523aa401ca4080fb64d030cb67  region/Objects/Commonwealth.LodgenArrays.txt
+984029efc01f61429cd90c88965915515435ed5137b533e313a7fe0a653f088b  region/Objects/Commonwealth.LodgenArrays.txt
 c53138c448b5794de81046fe7ea6f05d4f61138724490944e2d983ff5f933610  region/Objects/Commonwealth.LodgenObjects.DDS
 402b6fe36d5c93fd3dfbf0ef95283a54a5b8e0b5e4753042c28bdd5490531733  region/Objects/Commonwealth.LodgenObjects_n.DDS
 95cbc10c87d0e65593f5a83d5b27c4b7dfe7a253b9040b10b200351439d21d82  region/Objects/Commonwealth.LodgenObjects_s.DDS
