@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 6 (2026-10-27, branch waterlook1-20261027): finer near waves (the water quads pre-split)
+
+- Each cell's water plane is now built as a 4 x 4 grid of 1024 u quads on shared vertices, instead of one 4096 u
+  quad. The displaced water (Ocean waves row) can split an edge at most 64 times, so under the eye its finest step
+  falls from 64 u (0.9 m) to 16 u (23 cm). It is the same plane: the corners are bit for bit as before, and so are
+  the shape bounds (view planes, sun cascades). If the grid would cut the water into more than one shape (over 2600
+  water cells), it stays one quad a cell. src/cellview.cpp.
+- Offline (the real tessellation shaders, no window): finest step under the eye 16.25 u (one quad a cell: 65 u). No
+  cracks across 9 x 9 pre-split cells (red, an asymmetric level: 734 edges apart). The same area, every patch
+  counter-clockwise. No extra triangles past 12288 u.
+
 ## Lane WATERLOOK1 step 5 (2026-10-27, branch waterlook1-20261027): waves carried along the river flow
 
 - **Waves travel with the current** (Ocean waves row). On water with a baked flow plane (WATERFLOWBAKE1), the wind's

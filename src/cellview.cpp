@@ -5388,6 +5388,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 		Bucket waterAll;                       // every cell's water quad, in the old bucket's order
 		std::vector<quint32> waterQuadOwner;   // per quad: 0 = waterB, else the WATR form of its bucket
+		std::vector<Vector3> waterCellAt;      // lane WATERLOOK1: per quad its cell's corner x, y and the water height
+		std::vector<quint32> waterVert0, waterTri0;   // per quad: its first vertex and triangle in waterAll (+ end)
 		Bucket gridB;
 		gridB.name = QStringLiteral( "cell grid" );
 		gridB.withColour = true;
@@ -5637,7 +5639,6 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					waterCells++;
 					const float ox = float( x ) * CELL_UNITS - origin[0];
 					const float oy = float( y ) * CELL_UNITS - origin[1];
-					const float rgb[3] = { 0.18f, 0.32f, 0.42f };
 					Bucket * wb = &waterB;   // lane WATER1: the bucket of the cell's own WATR record
 					if ( waterForm != 0 && waterForm != world.defaultWaterType() ) {
 						auto rd = waterReadable.find( waterForm );
@@ -5658,12 +5659,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 							wb = &waterByForm[waterForm];
 					}
 					waterQuadOwner.push_back( wb == &waterB ? 0u : waterForm );
-					appendQuad( waterAll,
-						Vector3( ox, oy, wh ),
-						Vector3( ox + CELL_UNITS, oy, wh ),
-						Vector3( ox + CELL_UNITS, oy + CELL_UNITS, wh ),
-						Vector3( ox, oy + CELL_UNITS, wh ),
-						Vector3( 0.0f, 0.0f, 1.0f ), rgb );
+					waterCellAt.push_back( Vector3( ox, oy, wh ) );
 				}
 				if ( spec.grid ) {
 					/* The cell border as four thin vertical curtains, so the
@@ -5705,9 +5701,52 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			buckets.insert( QStringLiteral( "\x01land%1" )
 				.arg( bi, 3, 10, QLatin1Char( '0' ) ), groundBuckets[bi] );
 		}
+		/* lane WATERLOOK1: each cell's water a 4 x 4 grid of 1024 u quads on shared vertices, so the displaced
+		 * water's tessellator (at most 64 splits an edge) reaches 16 u steps near instead of 64 u. The same plane,
+		 * corners (bit for bit) and so the same bounds; neighbouring cells meet vertex to vertex. Past one shape's
+		 * vertices the grid would cut the water into more shapes (their bounds would move): one quad a cell then. */
+		const int wn = waterCellAt.size() * 25 <= size_t( MAX_SHAPE_VERTS ) ? 4 : 1;
+		const float rgbW[3] = { 0.18f, 0.32f, 0.42f };
+		for ( const Vector3 & c : waterCellAt ) {
+			waterVert0.push_back( quint32( waterAll.verts.size() ) );
+			waterTri0.push_back( quint32( waterAll.tris.size() ) );
+			if ( wn == 1 ) {
+				appendQuad( waterAll,
+					Vector3( c[0], c[1], c[2] ),
+					Vector3( c[0] + CELL_UNITS, c[1], c[2] ),
+					Vector3( c[0] + CELL_UNITS, c[1] + CELL_UNITS, c[2] ),
+					Vector3( c[0], c[1] + CELL_UNITS, c[2] ),
+					Vector3( 0.0f, 0.0f, 1.0f ), rgbW );
+				continue;
+			}
+			const quint32 base = quint32( waterAll.verts.size() );
+			for ( int j = 0; j <= wn; j++ )
+				for ( int i = 0; i <= wn; i++ ) {
+					OutVert v;
+					v.pos = Vector3( i == wn ? c[0] + CELL_UNITS : c[0] + float( i ) * ( CELL_UNITS / float( wn ) ),
+						j == wn ? c[1] + CELL_UNITS : c[1] + float( j ) * ( CELL_UNITS / float( wn ) ), c[2] );
+					v.nrm = Vector3( 0.0f, 0.0f, 1.0f );
+					v.tan = Vector3( 1.0f, 0.0f, 0.0f );
+					v.bit = Vector3( 0.0f, 1.0f, 0.0f );
+					v.uv = Vector2( float( i ) / float( wn ), float( j ) / float( wn ) );
+					v.chan[0] = rgbW[0];
+					v.chan[1] = rgbW[1];
+					v.chan[2] = rgbW[2];
+					waterAll.verts.push_back( v );
+				}
+			for ( int j = 0; j < wn; j++ )
+				for ( int i = 0; i < wn; i++ ) {	// counter-clockwise from +Z, appendQuad's diagonal
+					const quint32 a = base + quint32( j * ( wn + 1 ) + i ), b = a + 1;
+					const quint32 d = a + quint32( wn + 1 ), e = d + 1;
+					waterAll.tris.push_back( BucketTri{ { a, b, e } } );
+					waterAll.tris.push_back( BucketTri{ { a, e, d } } );
+				}
+		}
+		waterVert0.push_back( quint32( waterAll.verts.size() ) );
+		waterTri0.push_back( quint32( waterAll.tris.size() ) );
 		/* lane WATER1: every water bucket carries ALL the water quads' vertices, in the one order the single
-		 * water bucket had before the lane; a quad of another record keeps its four vertices through two
-		 * zero-area triangles (no fragment). Each shape's bounding sphere is then the old water shape's, bit
+		 * water bucket had before the lane; a quad of another record keeps its vertices through zero-area
+		 * triangles (no fragment). Each shape's bounding sphere is then the old water shape's, bit
 		 * for bit, so the scene's bounds -- and with them the view's near/far planes and the sun cascades --
 		 * do not move when the water splits by record (the Cell lights row off renders as before the lane). */
 		auto waterFill = [&]( Bucket & wb, quint32 owner ) {
@@ -5715,14 +5754,16 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			wb.tris.clear();
 			bool owns = false;
 			for ( size_t q = 0; q < waterQuadOwner.size(); q++ ) {
-				const quint32 b = quint32( q * 4 );
 				if ( waterQuadOwner[q] == owner ) {
-					wb.tris.push_back( waterAll.tris[q * 2] );
-					wb.tris.push_back( waterAll.tris[q * 2 + 1] );
+					for ( quint32 t = waterTri0[q]; t < waterTri0[q + 1]; t++ )
+						wb.tris.push_back( waterAll.tris[t] );
 					owns = true;
 				} else {
-					wb.tris.push_back( BucketTri{ { b, b + 1, b + 1 } } );
-					wb.tris.push_back( BucketTri{ { b + 2, b + 3, b + 3 } } );
+					const quint32 b = waterVert0[q], n = waterVert0[q + 1] - b;
+					for ( quint32 v = 0; v < n; v += 2 ) {
+						const quint32 w = b + qMin( v + 1, n - 1 );
+						wb.tris.push_back( BucketTri{ { b + v, w, w } } );
+					}
 				}
 			}
 			return owns;
