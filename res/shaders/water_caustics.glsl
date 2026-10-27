@@ -44,6 +44,8 @@ const float kWwCauR2 = 14.0;
 const float kWwCauRad = 0.25;	// the points' circle radius, cells
 const float kWwCauAw = 6.811;	// the warp, u per unit noise gradient
 const float kWwCauKmax = 0.995;	// the cells' darkness at the focus
+// lane WATERLOOK1: the sun path the net takes, x this factor (the spectrum's curvature over the net's own; 1 without it)
+float wwCauPathGain = 1.0;
 const float kWwCauLk = 77.57;	// u of sun path: k rises to kmax
 const float kWwCauW0w = 0.5358;	// the half-width: w0 + w1 L + wn exp( -L / Ln ), u
 const float kWwCauW1w = 0.007923;
@@ -223,7 +225,7 @@ vec3 wwWaterCaustic( vec3 S, float d, vec3 Ldir, vec3 sun, vec3 sky, float shado
 		float e = 0.05 + 0.002 * L;
 		I = vec3( min( sqrt( 1.0 + e * e ) * inversesqrt( det * det + e * e ), 8.0 ) );
 	} else if ( waterCauRed != 4 )
-		I = wwCauNet( X - kWwCauTile * floor( X / kWwCauTile ), L, fw, t );
+		I = wwCauNet( X - kWwCauTile * floor( X / kWwCauTile ), L * wwCauPathGain, fw, t );
 	float sh = waterCauRed == 2 ? 1.0 : shadow;
 	float Es = wwCauLum( sun ) * Ldir.z * sh;
 	float share = Es / max( Es + wwCauLum( sky ), 1e-6 );

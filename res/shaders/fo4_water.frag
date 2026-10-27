@@ -52,7 +52,9 @@
  *   (was 32 in the shore lane's own twin, which clashed with the depth probe)
  *   WATERREFL1 (Water reflections, Water sun glare rows), water_refl.glsl: 44 (F, sqrt( alpha ) / 0.5, SSR confidence)
  *   45/46 the glare alone ( lin / 16 )
- *   WATERFLOWBAKE1, same build: 41 the baked flow (was 32 in its lane: WATERDEPTH1 holds 32) ( vx / 4 x 0.5 + 0.5, vy / 4 x 0.5 + 0.5, flow lookup on ) */
+ *   WATERFLOWBAKE1, same build: 41 the baked flow (was 32 in its lane: WATERDEPTH1 holds 32) ( vx / 4 x 0.5 + 0.5, vy / 4 x 0.5 + 0.5, flow lookup on )
+ *   WATERLOOK1 (Ocean waves row), water_ocean.glsl: 39 (0.5 + 4 x the spectrum's slope x, y; its weight),
+ *   40 (whitecap cover, sqrt( lost slope variance ) / 0.5, the caustic net's path factor / 3) */
 
 #define WW_FOG 1
 #define WW_CELLLIGHTS 1
@@ -106,6 +108,9 @@ uniform int waterProbe;
 #endif
 #ifdef WW_WATER_REFL	// lane WATERREFL1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_refl.glsl"
+#endif
+#ifdef WW_WATER_OCEAN	// lane WATERLOOK1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
+#include "water_ocean.glsl"
 #endif
 
 vec3 tonemap( vec3 x )	// fo4_default.frag's
@@ -274,11 +279,28 @@ void main()
 	if ( swell.z > 0.0 )
 		N = normalize( vec3( N.xy / max( N.z, 1e-3 ) + swell.xy, 1.0 ) );
 #endif
+#ifdef WW_WATER_OCEAN
+	// lane WATERLOOK1: on a baked body the wind's spectrum replaces the noise layers and the swell (slope space)
+	vec2 ocDx = dFdx( P.xy ), ocDy = dFdy( P.xy );
+	WwOcean oc = waterOceanOn ? wwWaterOcean( P.xy, ocDx, ocDy ) : WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
+	if ( oc.w > 0.0 )
+		N = normalize( vec3( mix( N.xy / max( N.z, 1e-3 ), oc.slope, oc.w ), 1.0 ) );
+#endif
 	vec3 N0 = N;
 	N = normalize( flatten * ( N - vec3( 0.0, 0.0, 1.0 ) ) + vec3( 0.0, 0.0, 1.0 ) );
 #ifdef WW_WATER_REFL	// lane WATERREFL1: GGX alpha^2 from the slopes the filtered noise lost + the footprint
 	float reflA2 = waterReflOn || waterGlintOn ? wwWaterAlpha2( wxy / UV.x + waterScroll0.xy, wxy / UV.y + waterScroll0.zw,
 		wxy / UV.z + waterScroll1.xy, tap0, tap1, tap2, Amp, dfade, flatten, Var.x, N, ( waterGlintRed & 2 ) == 0 ) : 0.0;
+#endif
+#if defined( WW_WATER_OCEAN ) && defined( WW_WATER_REFL )
+	// lane WATERLOOK1: on a baked body the roughness is the spectrum's: the slopes the mips lost, the tail, the footprint
+	if ( waterOceanOn && ( waterReflOn || waterGlintOn ) ) {
+		vec2 ocS = N.xy / max( N.z, 0.05 );
+		vec2 ocSx = dFdx( ocS ), ocSy = dFdy( ocS );
+		bool ocLean = ( waterGlintRed & 2 ) == 0;
+		float ocFoot = ocLean ? min( 0.5 * ( dot( ocSx, ocSx ) + dot( ocSy, ocSy ) ), waterGlintK.z ) : 0.0;
+		reflA2 = mix( reflA2, 1e-4 + ( ocLean ? oc.var * flatten * flatten : 0.0 ) + ocFoot, oc.w );
+	}
 #endif
 
 	if ( waterSslr == 1 ) {
@@ -348,6 +370,9 @@ void main()
 #ifdef WW_WATER_CAUSTICS
 		// lane WATERCAUSTICS1: under a baked body, on the drawn bed (not the bake's), before the depth colour takes it
 		float cauBd = waterCauOn ? wwWaterBedDepth( P ) : -1.0;
+#ifdef WW_WATER_OCEAN
+		wwCauPathGain = mix( 1.0, oc.cau, oc.w );	// lane WATERLOOK1: the net focuses at the spectrum's own curvature
+#endif
 		if ( cauBd >= 0.0 && vert < 1e8 && vert <= cauBd + 256.0 ) {
 			vec3 cauC3 = wwWaterCaustic( cellWorldPos( cauSv ), vert, normalize( cellWorldDir( LightDir ) ), D.rgb * D.rgb,
 				0.5 * ( waterSky[0].rgb + waterSky[2].rgb ), cauSh, cauFw, cauDbg );
@@ -427,6 +452,12 @@ void main()
 		 * 23(11)) lit by the sun and the water's upper sky row; opacity K1.w lets the water read through its holes */
 		vec3 foamLin = 0.55 * ( sun * clamp( Ldir.z, 0.0, 1.0 ) + waterSky[2].rgb );
 		lin = mix( lin, foamLin, shoreFoamV * waterShoreK1.w );
+#endif
+#ifdef WW_WATER_OCEAN
+		/* lane WATERLOOK1: whitecaps where the chop folds the surface (its Jacobian, Tessendorf 2001 section 4.4), from
+		 * 4 m/s; lit as WATERSHORE1's foam (albedo 0.55, Koepke 1984) */
+		if ( oc.white > 0.0 )
+			lin = mix( lin, 0.55 * ( sun * clamp( Ldir.z, 0.0, 1.0 ) + waterSky[2].rgb ), 0.8 * oc.white );
 #endif
 	}
 	lin = max( lin, vec3( 0.0 ) );
@@ -510,6 +541,11 @@ void main()
 #ifdef WW_WATER_WAVES
 		else if ( waterProbe == 34 )	// WATERWAVES1: (0.5 + 4 x the swell's slope x, y; its weight) at this pixel
 			o = vec3( clamp( 0.5 + 4.0 * swell.xy, 0.0, 1.0 ), swell.z );
+#endif
+#ifdef WW_WATER_OCEAN
+		else if ( waterProbe == 39 || waterProbe == 40 )	// WATERLOOK1: the spectrum (header)
+			o = waterProbe == 39 ? vec3( clamp( 0.5 + 4.0 * oc.slope, 0.0, 1.0 ), oc.w )
+				: vec3( oc.white, sqrt( oc.var ) / 0.5, oc.cau / 3.0 );
 #endif
 		fragColor = vec4( o, 1.0 );
 	}
