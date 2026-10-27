@@ -51,6 +51,8 @@ enum class WwLook : int
 	WaterSoftEdge,		// WATERSHORE1: water fades into the shore from the baked shore distance, near + far (WW_CELL_WATER_EDGE)
 	ShoreFoam,			// WATERSHORE1: a thin foam band with a travelling wave along shores, near + far (WW_CELL_WATER_FOAM)
 	WaterSwell,			// WATERWAVES1: a calm swell on lakes, rivers and the sea, sized by the baked body (WW_CELL_WATER_WAVES)
+	WaterRefl,			// WATERREFL1: physical Fresnel, scene reflections on every body, far water = near law (WW_CELL_WATER_REFL)
+	WaterGlint,			// WATERREFL1: the sun's glare from the wave slopes' roughness, no fixed sparkle (WW_CELL_WATER_GLINT)
 	Count
 };
 

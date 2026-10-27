@@ -49,7 +49,9 @@
  *   36 (focus I / 8, depth envelope, sun share)
  *   WATERSHORE1 (Water soft edge, Shore foam rows), water_shore.glsl: 37 (edge, foam, shore distance / 1024);
  *   WATERFOAMDETAIL1 (the foam's wave-energy law): 38 (Hs / 64 u, energy amount, water column / 64 u)
- *   (was 32 in the shore lane's own twin, which clashed with the depth probe) */
+ *   (was 32 in the shore lane's own twin, which clashed with the depth probe)
+ *   WATERREFL1 (Water reflections, Water sun glare rows), water_refl.glsl: 44 (F, sqrt( alpha ) / 0.5, SSR confidence)
+ *   45/46 the glare alone ( lin / 16 ) */
 
 #define WW_FOG 1
 #define WW_CELLLIGHTS 1
@@ -100,6 +102,9 @@ uniform int waterSslr;		// 1: the reflection-ray pass (waterDepth is then the ob
 uniform int waterProbe;
 #ifdef WW_WATER_WAVES	// lane WATERWAVES1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_waves.glsl"
+#endif
+#ifdef WW_WATER_REFL	// lane WATERREFL1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
+#include "water_refl.glsl"
 #endif
 
 vec3 tonemap( vec3 x )	// fo4_default.frag's
@@ -270,6 +275,10 @@ void main()
 #endif
 	vec3 N0 = N;
 	N = normalize( flatten * ( N - vec3( 0.0, 0.0, 1.0 ) ) + vec3( 0.0, 0.0, 1.0 ) );
+#ifdef WW_WATER_REFL	// lane WATERREFL1: GGX alpha^2 from the slopes the filtered noise lost + the footprint
+	float reflA2 = waterReflOn || waterGlintOn ? wwWaterAlpha2( wxy / UV.x + waterScroll0.xy, wxy / UV.y + waterScroll0.zw,
+		wxy / UV.z + waterScroll1.xy, tap0, tap1, tap2, Amp, dfade, flatten, Var.x, N, ( waterGlintRed & 2 ) == 0 ) : 0.0;
+#endif
 
 	if ( waterSslr == 1 ) {
 		// the game's water ray pass (02100): half the flattening, the ray into the view, the 0.2 gate
@@ -290,12 +299,20 @@ void main()
 	vec3 R = reflect( V, Ns );
 	vec3 sky = mix( waterSky[0].rgb, waterSky[1].rgb, clamp( R.z + 0.75, 0.0, 1.0 ) );
 	sky = mix( sky, waterSky[2].rgb, clamp( R.z * 1.9 + 0.35, 0.0, 1.0 ) );
+#ifdef WW_WATER_REFL
+	vec3 reflSky = waterReflOn ? wwWaterCloudSky( sky, P, R ) : sky;	// lane WATERREFL1: before the game's SSR blend
+	vec4 reflRaw = vec4( 0.0 ), reflFin = vec4( 0.0 );
+#endif
 	// lane WATER2: the game's screen-space reflection over the sky (02102 lines 146-152)
 	vec4 ssr = vec4( 0.0 );
 	if ( waterSsrOn && !under ) {
 		vec2 suv = clamp( ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw ), 0.0, 1.0 );
 		vec2 st = vec2( suv.x, 1.0 - suv.y );
 		ssr = mix( textureLod( waterSsrRaw, st, 0.0 ), textureLod( waterSsrFin, st, 0.0 ), 0.9 );
+#ifdef WW_WATER_REFL
+		reflRaw = textureLod( waterSsrRaw, st, 0.0 );
+		reflFin = textureLod( waterSsrFin, st, 0.0 );
+#endif
 		if ( ( waterRed & 256 ) == 0 )
 			sky = mix( sky, ssr.rgb, ssr.a );
 	}
@@ -365,6 +382,17 @@ void main()
 	vec3 sun = D.rgb * D.rgb;
 	vec3 spec = sun * pow( clamp( dot( R, Ldir ), 0.0, 1.0 ), Var.x ) * waterMat[1].w
 		+ sun * pow( clamp( dot( N, vec3( -0.099, -0.099, 0.99 ) ), 0.0, 1.0 ), waterMat[0].w ) * P1.z;
+#ifdef WW_WATER_REFL
+	// lane WATERREFL1: the sun's glare from the roughness (no fixed-direction sparkle); red game keeps today's spec
+	vec3 glare = vec3( 0.0 );
+	if ( waterGlintOn && ( waterGlintRed & 1 ) == 0 && !under ) {
+		glare = wwWaterGlare( Ns, V, Ldir, sun, max( reflA2, 1e-6 ), waterGlintK.y, ( waterGlintRed & 4 ) == 0 );
+		spec = glare;
+	}
+	float reflAlpha = sqrt( max( reflA2, 0.0 ) );
+	float reflF = wwWaterFresnel( dot( -V, Ns ), reflAlpha, waterGlintK.y );
+	vec3 reflEnv = wwWaterReflEnv( reflSky, reflRaw, reflFin, waterSsrOn && !under && ( waterRed & 256 ) == 0, reflAlpha );
+#endif
 	if ( ( waterRed & 8 ) != 0 )
 		spec = vec3( 0.0 );
 
@@ -381,6 +409,10 @@ void main()
 #endif
 		lin = mix( silted, sky, wRefl );
 		lin = mix( far, lin, dfade ) + spec;
+#ifdef WW_WATER_REFL
+		if ( waterReflOn && ( waterRed & 1 ) == 0 )	// lane WATERREFL1: physical Fresnel, near law to the horizon
+			lin = wwWaterReflMix( silted, reflEnv, reflF, F, Var.y, far, dfade ) + spec;
+#endif
 		lin = mix( lin, refrOff, shore );
 #ifdef WW_WATER_SHORE
 		/* lane WATERFOAMDETAIL1: at the contact the water path is 0, so no depth colour, murk or shifted tap either: the
@@ -460,6 +492,12 @@ void main()
 			o = vec3( shoreEdgeV, shoreFoamV, clamp( shoreField.x / 1024.0, 0.0, 1.0 ) );
 		else if ( waterProbe == 38 )	// WATERFOAMDETAIL1: (Hs / 64 u, the energy amount, the column used / 64 u)
 			o = clamp( shoreFoamDbg, 0.0, 1.0 );
+#endif
+#ifdef WW_WATER_REFL
+		else if ( waterProbe == 44 )	// WATERREFL1: (F, sqrt( alpha ) / 0.5, SSR confidence); 45/46 the glare / 16
+			o = vec3( reflF, clamp( sqrt( reflAlpha ) * 2.0, 0.0, 1.0 ), clamp( mix( reflRaw.a, reflFin.a, 0.5 ), 0.0, 1.0 ) );
+		else if ( waterProbe == 45 || waterProbe == 46 )
+			o = waterProbe == 45 ? hi16( glare / 16.0 ) : lo16( glare / 16.0 );
 #endif
 #ifdef WW_WATER_WAVES
 		else if ( waterProbe == 34 )	// WATERWAVES1: (0.5 + 4 x the swell's slope x, y; its weight) at this pixel
