@@ -1,5 +1,6 @@
 #include "gl/cellfarinst.h"
 
+#include "cellfarhide.h"
 #include "cellmesh.h"
 #include "wwswitch.h"
 #include "gl/cellpasstime.h"
@@ -222,10 +223,11 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 		tallyFlush( tally, *cp );
 	float pl[4][4];
 	cameraPlanes( scene, pl );
+	const CellFarHide::View vw = CellFarHide::view( d );   // lane FARHOLE2: the rows a loaded near cell left out
 	std::vector<CellMeshInst::Cmd> cmds;
-	cmds.reserve( std::size_t( d.cmds.size() ) );
+	cmds.reserve( std::size_t( vw.cmds->size() ) );
 	qint64 tiles = 0, rows = 0, tris = 0;
-	for ( const CellMeshInst::Tile & t : d.tiles ) {
+	for ( const CellMeshInst::Tile & t : *vw.tiles ) {
 		if ( !redNoCull() ) {
 			const Vector3 v = viewTrans * t.centre;
 			const float rv = t.radius * std::fabs( viewTrans.scale );
@@ -237,7 +239,7 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 		}
 		tiles++;
 		for ( int j = 0; j < t.cmdCount; j++ ) {
-			const CellMeshInst::Cmd & m = d.cmds[t.firstCmd + j];
+			const CellMeshInst::Cmd & m = ( *vw.cmds )[t.firstCmd + j];
 			cmds.push_back( m );
 			rows += m.instanceCount;
 			tris += qint64( m.instanceCount ) * ( m.count / 3 );
@@ -271,9 +273,10 @@ bool drawCascade( NifSkopeOpenGLContext * r, const CellMeshInst & d, NifSkopeOpe
 	Copy * k = copyOf( r->fn, *cp, d );
 	if ( !k )
 		return false;
+	const CellFarHide::View vw = CellFarHide::view( d );   // lane FARHOLE2
 	std::vector<CellMeshInst::Cmd> cmds;
-	cmds.reserve( std::size_t( d.cmds.size() ) );
-	for ( const CellMeshInst::Tile & t : d.tiles ) {
+	cmds.reserve( std::size_t( vw.cmds->size() ) );
+	for ( const CellMeshInst::Tile & t : *vw.tiles ) {
 		if ( !redNoCull() ) {
 			// the cascade is orthographic: the tile's centre in clip space, its radius scaled per axis
 			const float x = m[0] * t.centre[0] + m[4] * t.centre[1] + m[8] * t.centre[2] + m[12];
@@ -284,7 +287,7 @@ bool drawCascade( NifSkopeOpenGLContext * r, const CellMeshInst & d, NifSkopeOpe
 				continue;
 		}
 		for ( int j = 0; j < t.cmdCount; j++ )
-			cmds.push_back( d.cmds[t.firstCmd + j] );
+			cmds.push_back( ( *vw.cmds )[t.firstCmd + j] );
 	}
 	if ( cmds.empty() )
 		return true;

@@ -134,6 +134,13 @@ struct FarCasterPiece
 int cellFarCasters( QVector<FarCasterPiece> & out, float apexScale = 1.0f );
 quint64 cellFarGen();
 
+/* lane FARHOLE2: the cells the stream holds loaded (cellfarhide.h); a far card placed in one does not draw nor cast.
+ * The key is the card's placement cell, armCellFar's hole test. Empty = every card. */
+inline qint64 cellFarCellKey( int x, int y ) { return ( qint64( x ) << 32 ) ^ qint64( quint32( y ) ); }
+void cellFarHideSet( const QSet<qint64> & cells );
+//! The armed cards placed in `cells` that still draw
+int cellFarCardsShownIn( const QSet<qint64> & cells );
+
 } // namespace ImpostorChunk
 
 #endif // IMPOSTORCHUNK_H

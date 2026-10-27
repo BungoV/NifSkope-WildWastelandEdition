@@ -232,6 +232,11 @@ public:
 	{
 		dataHash.attrMask = 0;
 	}
+	//! lane FARHOLE2: the far mask changed (cellfarhide.h); the next transform takes the arrays again
+	inline void wwRefreshData()
+	{
+		needUpdateData = true;
+	}
 };
 
 #endif

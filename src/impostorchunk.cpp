@@ -66,6 +66,27 @@ struct CellFarState
 	ChunkState cards;
 	float shift[3] = { 0.0f, 0.0f, 0.0f };
 };
+// lane FARHOLE2: cells a streamed near cell holds; their cards do not draw. Kept apart from CellFarState so a far
+// rebuild (forgetCellFar + arm) keeps the stream's cells. hideGen bumps on each change (the shadow casters rebuild).
+struct CardHide
+{
+	QSet<qint64> cells;
+	quint64 gen = 0;
+};
+CardHide & cardHide()
+{
+	static CardHide h;
+	return h;
+}
+qint64 cardCell( const ImpostorChunk::Placed & p )
+{
+	return ImpostorChunk::cellFarCellKey( int( std::floor( p.world[0] / 4096.0f ) ), int( std::floor( p.world[1] / 4096.0f ) ) );
+}
+bool cardHidden( const ImpostorChunk::Placed & p )
+{
+	const CardHide & h = cardHide();
+	return !h.cells.isEmpty() && h.cells.contains( cardCell( p ) );
+}
 CellFarState & farSt()
 {
 	static CellFarState s;
@@ -557,6 +578,8 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	for ( const Placed & p : std::as_const( s.placed ) ) {
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() )
 			continue;
+		if ( cardHidden( p ) )   // lane FARHOLE2: the near cell draws it
+			continue;
 		if ( cull ) {
 			const float sc = std::fabs( p.scale );
 			const Vector3 cw( p.world[0] - F.shift[0] + p.c.center[0] * sc, p.world[1] - F.shift[1] + p.c.center[1] * sc,
@@ -651,7 +674,25 @@ int ImpostorChunk::cellFarCount()
 
 quint64 ImpostorChunk::cellFarGen()
 {
-	return farGen();
+	return farGen() + ( cardHide().gen << 32 );
+}
+
+void ImpostorChunk::cellFarHideSet( const QSet<qint64> & cells )
+{
+	CardHide & h = cardHide();
+	if ( h.cells == cells )
+		return;
+	h.cells = cells;
+	h.gen++;
+}
+
+int ImpostorChunk::cellFarCardsShownIn( const QSet<qint64> & cells )
+{
+	int n = 0;
+	for ( const Placed & p : farSt().cards.placed )
+		if ( cells.contains( cardCell( p ) ) && !cardHidden( p ) )
+			n++;
+	return n;
 }
 
 int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScale )
@@ -662,6 +703,8 @@ int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScal
 	int used = 0;
 	for ( const Placed & p : s.placed ) {
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() || !s.sets.at( p.setIndex ).ok )
+			continue;
+		if ( cardHidden( p ) )   // lane FARHOLE2
 			continue;
 		if ( out.isEmpty() || out.last().verts.size() >= 13000 * 5 )
 			out.append( FarCasterPiece() );

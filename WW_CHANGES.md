@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
+
+- **Why:** the far objects, far cards and far rings past ring 0 were cut once, round the open's centre. The stream
+  follows the camera without a limit, so a few cells out the loaded cells also drew the far copies inside them. Since
+  FARDRAW1 draws far object rings instanced, FARHOLE's per-triangle hiding no longer reached them.
+- **New table, `src/cellfarhide.*`:** per document, the cells the stream holds loaded and the REFRs those cells list.
+  - Instanced far object rows (`gl/cellfarinst`): a row whose REFR a loaded cell lists does not draw (the near cell
+    draws that object). A row with no REFR goes by the cell it stands in. A neighbour's object reaching into a loaded
+    cell stays, because nothing near draws it. The build keeps a cell and a REFR per row (`CellMeshInst::rowCell/rowRef`).
+  - Every other far shape past the ring-0 hand tiles (ring 1+ terrain and water, the game's .btr/.bto chunks,
+    flattened object rings): triangles centred in a loaded cell are dropped when the shape takes its arrays
+    (`BSShape::wwFarMask`). Only the shapes whose span reaches the cell are re-taken on an attach or unload.
+  - Far cards placed in a loaded cell do not draw nor cast (`ImpostorChunk::cellFarHideSet`).
+  - The sun's cached shadow keys instanced far shapes on the rows drawn, so a hidden row's shadow goes too.
+- **Coverage line:** `farhideMode farinstRows farinstHidden farinstDouble farinstNoref farinstReach farmaskShapes
+  farmaskTris farmaskCentred farcardsPlaced` (Double, Noref, Centred and cardsPlaced must be 0).
+- **Offline gate:** `farobjcensus <ws.lodi> --ring ... [--instanced] --esm <plugins> [--wsform 0x3C] --loaded x0,y0,x1,y1 ...`
+  builds the rings headless, loads each 5x5 step's refs from the plugins, and prints one `farhide step` line per step
+  plus a `farhide: ... VERDICT` line.
+- **Red:** `WW_CELL_FARHIDE_RED=off` (nothing hidden), `=bypos` (rows by placement cell only), `=noshadow` (the shadow
+  cache is not told). Live (stage 0).
+
 ## Lane LODMNAME1 (2026-10-27, branch lodmname1-20261027): far-LOD texture arrays lose the family word
 
 - **One set per size:** the far-LOD texture arrays are now `<ws>.LodgenArrays.<WxH>` and
