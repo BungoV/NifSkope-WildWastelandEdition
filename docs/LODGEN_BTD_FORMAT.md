@@ -917,10 +917,11 @@ Measured on the Commonwealth: none 134, form NAM0 181, bed 2, drain 30.
 ### The shore-distance plane
 
 uint8, `shoreQuantum` (32) world units a step, saturating at 255 = 8,160 units,
-measured from a wet sample to the nearest sample that is **not in the same
-body** — dry land, or another body across a seam. A 3-4 chamfer, two passes,
-with the one rule that makes it per-body: a neighbour belonging to a different
-body counts as a shore at distance zero.
+measured from a wet sample to the nearest DRY sample, through water of any
+body. A 3-4 chamfer, two passes. Since lane WATERBODYSEAM1 (2026-10-27) a seam
+where two bodies touch (a river mouth, lake into sea) is not shore; the old
+per-body rule, where a neighbour of a different body counted as a shore at
+distance zero, is `--water-shore-per-body` (byte for byte the file from before).
 
 **The land side (lane WATERWETBAKE1, 2026-10-27).** A DRY sample carries its
 distance to the nearest wet sample of any body, by the same chamfer and the same
@@ -1200,6 +1201,7 @@ lodgen <esm> --worldspace <id> --lodl <dir>      bodies ON by default (v3)
         [--water-bridge N] [--water-near N]
         [--water-body-samples N] [--water-flow-samples N] [--water-no-shore]
         [--water-no-shore-land]     dry samples 255 (the pre-WATERWETBAKE1 bytes)
+        [--water-shore-per-body]    a body seam counts as shore (the pre-WATERBODYSEAM1 bytes)
         [--water-no-sky]            no sky plane: version 3, the pre-WATERSKYVISFAR1 bytes
         [--water-sky-terrain-only]  sky plane through the terrain only (the WATERSKYVISFAR1 bytes)
         [--water-sky-dump <file>]   the sky rays' terrain + stamped heights, for offline gates

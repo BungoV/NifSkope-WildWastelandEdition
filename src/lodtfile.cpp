@@ -1696,10 +1696,11 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 
 	// the shore sweep, on the full grid, before any subsampling
 	std::vector<quint16> shore;
+	qint64 seamEdges = 0;
 	if ( in.opt.shore ) {
-		/* A 3-4 chamfer, and the ONE thing that makes it per-body: a neighbour
-		 * belonging to a different body counts as a shore at distance zero, so
-		 * two bodies that touch each have their own shore along the seam. */
+		/* A 3-4 chamfer of each wet texel's distance to land through water. With
+		 * opt.shorePerBody (the old rule) a neighbour of a different body counts
+		 * as a shore at distance zero, so each body has a shore along a seam. */
 		const quint16 BIG = 60000;
 		/* Lane WATERWETBAKE1: with shoreLand the same sweep runs on the dry side too, so a land texel
 		 * carries its distance to the nearest wet texel; the wet rule never reads a dry value. */
@@ -1720,7 +1721,8 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 					shore[at] = dcand;
 				return;
 			}
-			const quint16 cand = ( grid[nat] == grid[at] )
+			// Lane WATERBODYSEAM1: another body's water is still water, so only land seeds the distance.
+			const quint16 cand = ( grid[nat] == grid[at] || ( grid[nat] && !in.opt.shorePerBody ) )
 				? quint16( qMin( int( shore[nat] ) + w, int( BIG ) ) )
 				: quint16( w );
 			if ( cand < shore[at] )
@@ -1740,6 +1742,14 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				step( y, x, y + 1, x + 1, 4 );
 				step( y, x, y, x + 1, 3 );
 			}
+		if ( !in.opt.shorePerBody )
+			for ( qint64 y = 0; y < gh; y++ )
+				for ( qint64 x = 0; x < gw; x++ ) {
+					const quint16 a = grid[size_t( y * gw + x )];
+					const quint16 r = ( x + 1 < gw ) ? grid[size_t( y * gw + x + 1 )] : a;
+					const quint16 d = ( y + 1 < gh ) ? grid[size_t( ( y + 1 ) * gw + x )] : a;
+					seamEdges += ( a && r && a != r ) + ( a && d && a != d );
+				}
 	}
 
 	quint64 pos = baseOffset + quint64( out.bodyTable.size() ) + quint64( out.strokeStore.size() );
@@ -2233,6 +2243,8 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 		if ( in.opt.shore && in.opt.shoreLand )
 			out.summary += QString( "; shore plane land side: %1 dry sample(s) within %2 units of water" )
 				.arg( landNear ).arg( 255 * int( LODL_SHORE_QUANTUM ) );
+		if ( in.opt.shore && !in.opt.shorePerBody )
+			out.summary += QString( "; shore to land only: %1 body seam edge(s) are not shore" ).arg( seamEdges );
 		if ( in.opt.flowField )
 			out.summary += QString( "; flow field %1 river(s), %2 texels, %3 constant" )
 				.arg( riversSolved ).arg( riverTexels ).arg( riversFellBack );

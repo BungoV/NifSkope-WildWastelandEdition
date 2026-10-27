@@ -123,6 +123,9 @@ struct LodtWaterOptions
 	/*! Lane WATERWETBAKE1: the shore plane's DRY texels carry their distance to the nearest wet texel (same
 	 *  3-4 chamfer, same 32-unit step, 255 = far). Off = every dry texel 255, byte for byte the old file. */
 	bool shoreLand = true;
+	/*! Lane WATERBODYSEAM1: the old rule, where a wet neighbour of ANOTHER body counted as shore (foam in open water
+	 *  at a river mouth). Off (default) = distance to land only; --water-shore-per-body = the old bytes. */
+	bool shorePerBody = false;
 	/*! Lane WATERFLOWBAKE1: solve each river's flow per texel (potential flow
 	 *  on its mask, confidence 8 in the word). Off = the constant word a body,
 	 *  byte for byte the file before it (--water-flow-constant). */

@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERBODYSEAM1 (2026-10-27, branch waterbodyseam1-20261027): the shore is land, not the next body
+
+- **Why:** the .lodl shore bake counted a neighbour of ANOTHER water body as shore at distance zero, so where two
+  bodies touch (a river mouth, lake into sea, a lake inlet) the shore edge and foam could show in open water.
+- **Fix:** `src/lodtfile.cpp` shore sweep: a wet texel's distance runs through water of any body to the nearest DRY
+  texel. The land side of the plane (WATERWETBAKE1) and every other plane are unchanged. The bake census adds
+  `shore to land only: N body seam edge(s) are not shore` (Commonwealth: 68).
+- **Commonwealth:** 17 touching body pairs, 159 seam texels; 221 wet texels changed (all near a seam), shore texels
+  (<= 256 u) within 1024 u of a seam 1162 -> 1081. Largest: Forest Grove marsh (sea/river), Cutler's Bend, the
+  sea/river seam near (-3,8), Quincy, the Fens, Lake Quannapowitt inlet (1,23), East Boston.
+- **Red:** `lodgen ... --water-shore-per-body` (option `shorePerBody`) writes the old bytes (Commonwealth .lodl
+  identical to the base exe's).
+
 ## Lane FOGWIND1 (2026-10-27, branch fogwind1-20261027): the fog drift follows the game's wind
 
 - **What the game does (Todd's treat, notes/fogwind1):** the weather's fog (WTHR FNAM) carries no wind and no flags of
