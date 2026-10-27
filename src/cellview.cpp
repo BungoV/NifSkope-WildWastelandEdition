@@ -2804,6 +2804,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	const bool xemiOn = wwLookOn( WwLook::PlacementEmittance ) && spec.overlay == CellOverlay::None;
 	const bool xemiRegnOn = wwLookOn( WwLook::RegionEmittance ) && spec.overlay == CellOverlay::None;   // lane LIGHTS3
 	int xemiShapesLit = 0, xemiShapesFx = 0, xemiNoFlag = 0;
+	int xemiLitFx = 0;   // lane REDFIX1: lit effect shapes on XEMI placements (skipped by rule, now counted)
 	if ( !chunk ) {
 		wwCellFxLitBegin( nif );
 		wwCellXemiBegin( nif );   // lane LIGHTS2 (XEMI1)
@@ -4417,6 +4418,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				} else {
 					xemiNoFlag++;
 				}
+			} else if ( xemiRowOn && p.xemi && !isActor ) {   // lane LIGHTS3: the row of this placement
+				xemiLitFx++;   // lane REDFIX1: Memory Den's 34 XEMI cards are all lit effects; the line said 0 of everything
 			}
 			/* lane CABLES1: a cable whose base has wind sensibility sways: the game draws it with its grass shader
 			 * (the wind, the colour's 2.2 power) and its wave period is the base's wind flexibility. One bucket per
@@ -6527,7 +6530,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		s << "  placement emittance: " << ( xemiOn ? "on" : "off" ) << ", " << xemiRefs << " placements carry XEMI ("
 		  << xemiLigh << " a light, " << xemiRegn << " a region (region emittance " << ( xemiRegnOn ? "on" : "off" )
 		  << "), " << xemiOther << " other: not drawn); " << xemiShapesLit << " lighting + "
-		  << xemiShapesFx << " unlit effect shapes take it, " << xemiNoFlag << " shapes lack External Emittance\n";
+		  << xemiShapesFx << " unlit effect shapes take it, " << xemiNoFlag << " shapes lack External Emittance, "
+		  << xemiLitFx << " lit effect shapes skip it (the game's lit effect never reads it)\n";
 		if ( groundNote.isEmpty() ) {   // lane CELLVIEW2
 			s << "  ground: " << landsDrawn << " LAND cells, vertex colour only"
 			  << " (the splat layers are NOT sampled -- that is the terrain bake's compositor)\n";
