@@ -150,6 +150,8 @@ struct CellStreamStats
 	double buryMaxMs = 0;   //!< worst frame of freeing a left cell's scene nodes
 	qint64 quietResets = 0, loudResets = 0;   //!< freed blocks reset without / with row signals
 	QString persistentTop;              //!< the block types holding the most persistent indexes
+	QString worstTick, worstUnload;     //!< lane CELLSPIKE2: the stages of the dearest frame and unload
+	qint64 scannedNodes = 0;            //!< lane CELLSPIKE2: scene nodes unloads walked to find their own (since reset)
 	QString lastError;
 };
 CellStreamStats cellStreamStats( const NifModel * nif, bool resetMaxima );
