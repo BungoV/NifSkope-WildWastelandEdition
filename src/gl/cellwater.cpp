@@ -4,6 +4,7 @@
 #include "cellhdr.h"
 #include "celllights.h"
 #include "cellssr.h"
+#include "cellwaterinfo.h"	// lane WATERDATA1: the baked water planes
 #include "lookdevstage.h"
 #include "esmwater.h"
 #include "cellworldanim.h"	// lane FXPARITY2: the world clock
@@ -295,6 +296,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	fn->glBindTexture( GL_TEXTURE_2D, ssrOn ? ssrFin : 0 );
 	prog->uni1i_l( prog->uniLocation( "waterSsrFin" ), unit++ );
 	prog->uni1b( "waterSsrOn", ssrOn );
+	unit += wwCellWaterInfoUniforms( scene, unit );	// lane WATERDATA1: units 7..9 when the program reads them
 	fn->glActiveTexture( GL_TEXTURE0 );
 
 	// an opaque surface: it composites the scene behind it itself
