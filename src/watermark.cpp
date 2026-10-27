@@ -336,6 +336,26 @@ bool WaterMarkDoc::open( const QString & path, QString * error )
 	 *  derives.  Taken here, after the locks and the strokes are read and
 	 *  before anything has solved, so it is the writer's own answer. */
 	tableAtOpen = table;
+	genFlow.clear();
+	{
+		const int fs = lodl->flowPlaneSamples(), fe = lodl->waterTileEdge( 3 );
+		const int fw = lodl->cellsX() * fs, fh = lodl->cellsY() * fs;
+		if ( fs > 0 && fe > 0 && fw % fe == 0 && fh % fe == 0 ) {
+			for ( int ty = 0; ty < fh / fe; ty++ )
+				for ( int tx = 0; tx < fw / fe; tx++ ) {
+					quint32 u = 0;
+					if ( lodl->waterTileUniform( 3, tx, ty, u )
+						&& ( ( u >> 12 ) & 0xF ) != quint32( kLodlFlowSolvedConfidence ) )
+						continue;
+					for ( int y = ty * fe; y < ty * fe + fe; y++ )
+						for ( int x = tx * fe; x < tx * fe + fe; x++ ) {
+							const quint16 w = lodl->flowWordAt( x, y );
+							if ( ( ( w >> 12 ) & 0xF ) == kLodlFlowSolvedConfidence )
+								genFlow.insert( quint32( y ) * quint32( fw ) + quint32( x ), w );
+						}
+				}
+		}
+	}
 
 	reader = new QFile( path );
 	if ( !reader->open( QIODevice::ReadOnly ) )
@@ -2480,7 +2500,8 @@ bool WaterMarkDoc::solve( WaterMarkSolve * out, QString * error )
 				const size_t at = size_t( y ) * size_t( F->w ) + size_t( x );
 				if ( !F->mask[at] )
 					continue;
-				if ( flowWordAt( F->px0 + x, F->py0 + y ) != autoWord )
+				if ( flowWordAt( F->px0 + x, F->py0 + y )
+						!= ( autoWord ? baseWord( F->px0 + x, F->py0 + y, quint16( it.key() ) ) : autoWord ) )
 					st.changedTexels++;
 			}
 	}
@@ -2610,6 +2631,19 @@ quint16 WaterMarkDoc::automaticWord( quint16 id ) const
 	return quint16( dir | ( 8 << 8 ) );
 }
 
+quint16 WaterMarkDoc::baseWord( int px, int py, quint16 id ) const
+{
+	const quint16 a = automaticWord( id );
+	const int fs = lodl ? lodl->flowPlaneSamples() : 0;
+	if ( !a || fs <= 0 || !idRate || genFlow.isEmpty() )
+		return a;
+	/* px/py are body-plane texels; the file's flow plane may sit at another
+	 * rate, so map the texel to its sample the way the writer sampled it. */
+	const qint64 fx = qint64( px ) * fs / qint64( idRate ), fy = qint64( py ) * fs / qint64( idRate );
+	const auto it = genFlow.constFind( quint32( fy * qint64( lodl->cellsX() ) * fs + fx ) );
+	return it != genFlow.constEnd() ? it.value() : a;
+}
+
 quint16 WaterMarkDoc::flowWordAt( int px, int py ) const
 {
 	syncRasters();
@@ -2633,7 +2667,7 @@ quint16 WaterMarkDoc::flowWordOf( int px, int py, quint16 id ) const
 	if ( it != fields.constEnd() ) {
 		const Field * F = it.value();
 		if ( F->dyeOnly )
-			return automaticWord( id );
+			return baseWord( px, py, id );
 		if ( F->zero )
 			return 0;
 		if ( F->holds( px, py ) ) {
@@ -2641,7 +2675,7 @@ quint16 WaterMarkDoc::flowWordOf( int px, int py, quint16 id ) const
 			if ( F->mask[at] ) {
 				const double vx = F->vx[at], vy = F->vy[at];
 				if ( std::fabs( vx ) < 1e-6 && std::fabs( vy ) < 1e-6 )
-					return automaticWord( id );
+					return baseWord( px, py, id );
 				double a = std::atan2( vy, vx );
 				if ( a < 0.0 )
 					a += kTwoPi;
@@ -2651,7 +2685,7 @@ quint16 WaterMarkDoc::flowWordOf( int px, int py, quint16 id ) const
 			}
 		}
 	}
-	return automaticWord( id );
+	return baseWord( px, py, id );
 }
 
 /*! Lane WATER6: the kind-10 raster layers, decoded from the marks when they
@@ -2706,7 +2740,7 @@ bool WaterMarkDoc::sweep( const std::function<void( int, int, quint16, quint16, 
 					const quint16 id = isUni ? quint16( uni )
 						: rd16( raw.constData() + ( qsizetype( j ) * e + i ) * 2 );
 					const int px = tx * e + i, py = ty * e + j;
-					cb( px, py, id, automaticWord( id ), flowWordOf( px, py, id ) );
+					cb( px, py, id, baseWord( px, py, id ), flowWordOf( px, py, id ) );
 				}
 			}
 		}
@@ -3171,6 +3205,7 @@ bool WaterMarkDoc::save( QString * error )
 	 * session last saved it", and removing a stroke would restore the stroke.
 	 * That is exactly what gate P3 caught, by 480 bytes. */
 	const QVector<LodtWaterBody> genTable = tableAtOpen;
+	const QHash<quint32, quint16> genWords = genFlow;
 	QString err;
 	if ( !open( keep, &err ) )
 		return fail( QStringLiteral( "the file was written but will not re-open: %1" ).arg( err ) );
@@ -3179,6 +3214,7 @@ bool WaterMarkDoc::save( QString * error )
 			.arg( wrote ).arg( marks.size() ) );
 	if ( genTable.size() == tableAtOpen.size() )
 		tableAtOpen = genTable;
+	genFlow = genWords;
 	/* Re-solve from the strokes that came back, so what the panel shows after a
 	 * save is what the file now holds. The solve is idempotent on its own
 	 * output -- the strokes and the speeds are unchanged, so it lands on the

@@ -51,7 +51,8 @@
  *   WATERFOAMDETAIL1 (the foam's wave-energy law): 38 (Hs / 64 u, energy amount, water column / 64 u)
  *   (was 32 in the shore lane's own twin, which clashed with the depth probe)
  *   WATERREFL1 (Water reflections, Water sun glare rows), water_refl.glsl: 44 (F, sqrt( alpha ) / 0.5, SSR confidence)
- *   45/46 the glare alone ( lin / 16 ) */
+ *   45/46 the glare alone ( lin / 16 )
+ *   WATERFLOWBAKE1, same build: 41 the baked flow (was 32 in its lane: WATERDEPTH1 holds 32) ( vx / 4 x 0.5 + 0.5, vy / 4 x 0.5 + 0.5, flow lookup on ) */
 
 #define WW_FOG 1
 #define WW_CELLLIGHTS 1
@@ -479,6 +480,10 @@ void main()
 				: waterProbe == 29 ? vec3( float( id >> 8 ), float( id & 0xFFu ), wi.w + 1.0 ) / 255.0
 				: waterProbe == 30 ? ( id != 0u ? vec3( 0.0, 1.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 ) )
 				: vec3( clamp( wi.y / 1024.0, 0.0, 1.0 ) );
+		}
+		else if ( waterProbe == 41 ) {	// WATERFLOWBAKE1: the baked flow at this pixel, u/s (32 in its lane)
+			vec2 fv = wwWaterFlow( P.xy );
+			o = vec3( clamp( fv * 0.125 + 0.5, 0.0, 1.0 ), waterFlowOn ? 1.0 : 0.0 );
 		}
 #endif
 #ifdef WW_WATER_DEPTH

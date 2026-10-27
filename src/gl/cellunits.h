@@ -55,13 +55,15 @@ constexpr int WaterMoment1 = 61;
 constexpr int WaterMoment2 = 62;
 constexpr int WaterCloudMap = 63;	// lane WATERREFL1: CLOUD1 map for the reflected sky
 constexpr int LandShoreIndex = 64;	// lane WATERWETBAKE1: the land side of the shore plane, tile index (usampler2D R32UI; 46 in the lane, CLOUD3 holds it)
-constexpr int LandShoreAtlas = 65;	// lane WATERWETBAKE1: its sparse tiles (usampler2D R8UI; 47 in the lane)
+constexpr int LandShoreAtlas = 65;
+constexpr int WaterFlowIndex = 66;	// lane WATERFLOWBAKE1: the flow plane's tile index (usampler2D RG32UI; was the next free material unit, 10, under Shadow)
+constexpr int WaterFlowAtlas = 67;	// lane WATERFLOWBAKE1: its sparse tiles (usampler2D R32UI; was 11, under Bloom)	// lane WATERWETBAKE1: its sparse tiles (usampler2D R8UI; 47 in the lane)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
 	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans, ContactGbuf, GiAir, CardDepth,
 	CloudShadow, CloudBuildShape, CloudBuildDetail, CloudBuildMap, WaterMoment0, WaterMoment1, WaterMoment2, WaterCloudMap,
-	LandShoreIndex, LandShoreAtlas };
+	LandShoreIndex, LandShoreAtlas, WaterFlowIndex, WaterFlowAtlas };
 
 constexpr bool distinct()
 {

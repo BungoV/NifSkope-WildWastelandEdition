@@ -355,6 +355,9 @@ private:
 		QByteArray & raw, quint32 & uniform, bool & isUniform ) const;
 	quint16 idAtTexel( int px, int py ) const;
 	quint16 automaticWord( quint16 id ) const;
+	/*! Lane WATERFLOWBAKE1: the word an UNMARKED texel keeps -- the file's own
+	 *  word where the writer solved the river (confidence 8), else automaticWord. */
+	quint16 baseWord( int px, int py, quint16 id ) const;
 	//! flowWordAt() once the id is already known -- the sweep and the packer have it.
 	quint16 flowWordOf( int px, int py, quint16 id ) const;
 	//! The flow plane, re-derived, as the bytes that would sit at `base`.
@@ -407,6 +410,11 @@ private:
 	 *  accumulated and removing a stroke could not reproduce the file it
 	 *  started from (gate P3, which failed by 1,021,405 bytes). */
 	QVector<LodtWaterBody> tableAtOpen;
+	/*! Lane WATERFLOWBAKE1: the writer's solved flow words (confidence 8) as
+	 *  READ, keyed by flow-plane sample (y * width + x). Carried across save()'s
+	 *  re-open like tableAtOpen, so removing a stroke gives the solved word back
+	 *  rather than whatever the stroke left in the saved file (gate P3). */
+	QHash<quint32, quint16> genFlow;
 	mutable QFile * reader = nullptr;         //!< our own handle on the planes
 	mutable QHash<quint64, QByteArray> idTiles;   //!< a tiny tile cache for picking
 	mutable QList<quint64> idTileOrder;

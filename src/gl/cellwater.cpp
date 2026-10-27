@@ -397,7 +397,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	fn->glBindTexture( GL_TEXTURE_2D, ssrOn ? ssrFin : 0 );
 	prog->uni1i_l( prog->uniLocation( "waterSsrFin" ), unit++ );
 	prog->uni1b( "waterSsrOn", ssrOn );
-	unit += wwCellWaterInfoUniforms( scene, unit );	// lane WATERDATA1: units 7..9 when the program reads them
+	unit += wwCellWaterInfoUniforms( scene, unit );	// lane WATERDATA1: units 7..9 when the program reads them (WATERFLOWBAKE1's flow: cell units 66/67)
 	if ( prog->uniLocation( "waterShoreOn" ) >= 0 ) {
 		/* lane WATERSHORE1 (fo4_waterlook.prog, water_shore.glsl). Engineering choices in world units, no game value
 		 * exists (the game draws no shore foam): the field reads 64 at the waterline (half a 128 u texel, a dry texel

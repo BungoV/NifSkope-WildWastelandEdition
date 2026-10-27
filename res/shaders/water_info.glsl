@@ -25,6 +25,32 @@ uint wwWaterInfoWord( vec2 worldXY )
 	return texelFetch( waterInfoAtlas, ivec2( slot % perRow, slot / perRow ) * E + ( t - tile * E ), 0 ).r;
 }
 
+// lane WATERFLOWBAKE1: the baked flow plane as a velocity, the same sparse layout at the flow plane's rate
+uniform usampler2D waterFlowIndex;	// RG32UI: slot + 1 (0 = uniform tile), the uniform tile's word
+uniform usampler2D waterFlowAtlas;	// R32UI: the non-uniform tiles' words, 64 tiles a row
+uniform vec4 waterFlowGrid;		// world x, y of texel (0, 0), world units a texel, counts a world unit a second
+uniform vec4 waterFlowLayout;		// tiles x, tiles y, texels a tile edge, tiles an atlas row
+uniform bool waterFlowOn;		// built, uploaded, the file has a flow plane, and not WW_CELL_WATER_INFO_RED=off
+
+// The water's velocity at a world position, world units a second (x east, y north); (0, 0) still, dry, off the map or off
+vec2 wwWaterFlow( vec2 worldXY )
+{
+	if ( !waterFlowOn )
+		return vec2( 0.0 );
+	ivec2 t = ivec2( floor( ( worldXY - waterFlowGrid.xy ) / waterFlowGrid.z ) );
+	int E = int( waterFlowLayout.z );
+	ivec2 tile = t / E;
+	if ( t.x < 0 || t.y < 0 || tile.x >= int( waterFlowLayout.x ) || tile.y >= int( waterFlowLayout.y ) )
+		return vec2( 0.0 );
+	uvec2 ix = texelFetch( waterFlowIndex, tile, 0 ).rg;
+	uint w = ix.g;
+	if ( ix.r != 0u ) {
+		int slot = int( ix.r ) - 1, perRow = int( waterFlowLayout.w );
+		w = texelFetch( waterFlowAtlas, ivec2( slot % perRow, slot / perRow ) * E + ( t - tile * E ), 0 ).r;
+	}
+	return vec2( float( int( w << 16u ) >> 16 ), float( int( w ) >> 16 ) ) / waterFlowGrid.w;
+}
+
 // (shore distance in world units, depth in world units, body id, class 0 sea 1 river 2 lake); neutral = (8160, 0, 0, -1)
 vec4 wwWaterInfo( vec2 worldXY )
 {
