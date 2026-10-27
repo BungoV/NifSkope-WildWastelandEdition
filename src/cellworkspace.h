@@ -246,6 +246,8 @@ private:
 	QAction * cellModernTaaHdr = nullptr;	// lane TAA3: Modern temporal AA before the tone map
 	// lane CELLALL1: the second row, the features that were env-only (their defaults unchanged; new ones ship off)
 	QAction * cellAo = nullptr;
+	QMenu * cellAoMethod = nullptr;	// lane SSAO2: Vanilla | GTAO | XeGTAO | HBAO+ (full names)
+	QActionGroup * cellAoMethodGroup = nullptr;
 	QAction * cellShadow = nullptr;
 	QAction * cellFlicker = nullptr;	// lane LIGHTFLICKER1: the lamps' LIGH flicker (ships off)
 	QMenu * cellLampShadow = nullptr;	// lane LAMPSHADOW1: Off | Low | Medium | High | Ultra

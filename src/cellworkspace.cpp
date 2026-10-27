@@ -710,7 +710,24 @@ void CellWorkspacePanel::buildUi()
 		a->setData( k );
 		lookActions.append( a );
 	}
-	cellAo = tick( showMenu, tr( "AO" ), "CellWorkspaceAo", wwCellAoOn() );
+	cellAo = tick( showMenu, tr( "Ambient Occlusion" ), "CellWorkspaceAo", wwCellAoOn() );
+	// lane SSAO2: the method; data = WwAoMethod (src/gl/cellaomethod.h), the menu in that order
+	cellAoMethod = showMenu->addMenu( tr( "Ambient Occlusion method" ) );
+	cellAoMethod->setObjectName( QStringLiteral( "CellWorkspaceAoMethod" ) );
+	cellAoMethodGroup = new QActionGroup( cellAoMethod );
+	cellAoMethodGroup->setExclusive( true );
+	{
+		const QStringList names = { tr( "Vanilla Screen-Space Ambient Occlusion" ), tr( "Ground Truth Ambient Occlusion" ),
+			tr( "Intel Xe Ground Truth Ambient Occlusion" ), tr( "Horizon-Based Ambient Occlusion Plus" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = cellAoMethod->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == wwCellAoMethod() );
+			cellAoMethodGroup->addAction( a );
+		}
+	}
+	cellAoMethod->setEnabled( !wwCellAoMethodPinned() );
 	cellAoDecal = tick( showMenu, tr( "AO decals" ), "CellWorkspaceAoDecals", aoDecalOn() );
 	cellSpecOcc = tick( showMenu, tr( "Sky specular occlusion" ), "CellWorkspaceSkySpecOcc", wwCellSpecOccOn() );	// lane SPECOCC1
 	cellSpecOcc->setEnabled( !wwCellSpecOccPinned() );
@@ -999,6 +1016,11 @@ void CellWorkspacePanel::buildUi()
 	fxLive( cellReflProbe, &wwCellReflProbeSetOn );
 	fxLive( cellSsgi, &wwCellSsgiSetOn );
 	fxLive( cellSpecOcc, &wwCellSpecOccSetOn );	// lane SPECOCC1: the GI texture re-uploads with or without the sky grid
+	connect( cellAoMethodGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {	// lane SSAO2
+		wwCellAoSetMethod( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
 	connect( cellLampShadowGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwCellLampShadowSetTier( a->data().toInt() );
 		if ( glView )
