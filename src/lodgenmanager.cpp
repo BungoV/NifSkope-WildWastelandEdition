@@ -3296,6 +3296,11 @@ private:
 						}
 						return true;
 					};
+					// lane WATERSKYVISFAR2: the placed statics' far-LOD tops, walls in the water sky plane
+					o.staticTops = [&w]( int cx0, int cy0, int cx1, int cy1,
+						const std::function<bool( int, int )> & want, LodtStaticTops & st ) {
+						return lodgenStaticTops( w, QString(), cx0, cy0, cx1, cy1, want, st );
+					};
 				}
 				QString written;
 				if ( !lodtWrite( w, job.outDir, o, &written, &err ) ) {

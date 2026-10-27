@@ -1124,6 +1124,16 @@ Written by default whenever the bodies are, which makes the file version 4. `--w
 version-4 file by its version; a version-4 reader reads a version-3 file as "no sky plane": the far water reads
 visibility 1 there, as before.
 
+**Placed statics (lane WATERSKYVISFAR2).** Since WATERSKYVISFAR2 the heights the rays march also hold the placed
+statics' far LOD meshes (the object AO's 128-unit height field: SCOL parts expanded, trees left out). A 128-unit
+square whose lowest LOD surface lies within 256 units of the ground is a WALL: its nearest sky sample's height
+rises to the square's highest surface. A square floating higher (a bridge deck) is a ceiling and stays out, since a
+height field holds no gap under it. Only cells within 10,000 units of a wet cell gather. The stamp only raises
+heights, so a byte never rises above the terrain-only one, and with no statics near it is unchanged.
+`--water-sky-terrain-only` writes the WATERSKYVISFAR1 bytes; `--water-sky-dump <file>` writes the terrain and the
+stamped heights ("SKYS", i32 width, height, min cell x, y, f32 texel, quantum, then two u16 planes). The writer's
+census adds `sky occluders: statics <census> (N square(s), M ceiling(s) left out, K grid point(s) raised), <ms> ms`.
+
 ### Refusals, by name
 
 Beside the version-1 list further down, a version-3 reader refuses — naming the
@@ -1182,6 +1192,8 @@ lodgen <esm> --worldspace <id> --lodl <dir>      bodies ON by default (v3)
         [--water-body-samples N] [--water-flow-samples N] [--water-no-shore]
         [--water-no-shore-land]     dry samples 255 (the pre-WATERWETBAKE1 bytes)
         [--water-no-sky]            no sky plane: version 3, the pre-WATERSKYVISFAR1 bytes
+        [--water-sky-terrain-only]  sky plane through the terrain only (the WATERSKYVISFAR1 bytes)
+        [--water-sky-dump <file>]   the sky rays' terrain + stamped heights, for offline gates
         [--water-velocities <plugin>] [--water-report <file>]
 lodl <file.lodl> --water-census      the body table, read back out of the FILE
 lodl <file.lodl> --water-selftest    the classifier's known-answer control

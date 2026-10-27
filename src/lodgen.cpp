@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #include "esmdata.h"
 #include "nativeemit.h"
 #include "lodgenlayout.h"
+#include "lodtfile.h"	// lane WATERSKYVISFAR2: LodtStaticTops, the sky plane's static occluders
 #include "io/material.h"
 #include "io/lodmfile.h"
 #include "io/lodvfile.h"
@@ -12400,8 +12401,10 @@ public:
 	 *  LOD mesh extent, and a placement gathered and then found to be out of
 	 *  reach costs one bounds test. */
 	void gather( const EsmWorld & world, const QString & dataRoot,
-		int cx0, int cy0, int cx1, int cy1 )
+		int cx0, int cy0, int cx1, int cy1, const std::function<bool( int, int )> & cellWanted = {},
+		bool skipTrees = false )
 	{
+		skipTreesM = skipTrees;   // lane WATERSKYVISFAR2: the water sky's walls leave the tree cards out
 		const int margin = 2;
 		gx0 = ( cx0 - margin ) * 32;
 		gy0 = ( cy0 - margin ) * 32;
@@ -12414,6 +12417,8 @@ public:
 		QSet<QString> loaded;
 		for ( int cy = cy0 - margin; cy <= cy1 + margin; cy++ ) {
 			for ( int cx = cx0 - margin; cx <= cx1 + margin; cx++ ) {
+				if ( cellWanted && !cellWanted( cx, cy ) )
+					continue;
 				for ( const EsmRefr & r : world.refrs( cx, cy ) ) {
 					if ( r.initiallyDisabled || r.deleted || !r.base )
 						continue;
@@ -12594,6 +12599,11 @@ private:
 		QString model = lb.models[0];
 		for ( int k = 1; k < 4 && model.isEmpty(); k++ )
 			model = lb.models[k];
+		if ( skipTreesM && ( std::memcmp( &lb.type, "TREE", 4 ) == 0
+				|| ( !model.isEmpty() && lodgenIsTreeModel( model ) ) ) ) {
+			treesSkipped++;
+			return;
+		}
 		if ( model.isEmpty() ) {
 			/* NO DISTANT LOD MESH -> NOT DRAWN AT DISTANCE -> DOES NOT SHADOW AT
 			 * DISTANCE. Refused by name, because a silent skip is the thing that
@@ -12674,6 +12684,21 @@ private:
 		}
 	}
 
+public:
+	//! Lane WATERSKYVISFAR2: hand the lattice out (it is moved, the field is empty after).
+	void takeTops( int & x0, int & y0, int & w, int & h, std::vector<float> & hi, std::vector<float> & lo )
+	{
+		x0 = gx0;
+		y0 = gy0;
+		w = gw;
+		h = gh;
+		hi = std::move( grid );
+		lo = std::move( gridMin );
+	}
+	qint64 treesSkipped = 0;
+
+private:
+	bool skipTreesM = false;
 	QHash<QString, QVector<LodSrcShape>> modelCache;
 	std::vector<float> grid;      //!< MAX object surface a square, `NONE` where empty
 	std::vector<float> gridMin;   //!< MIN object surface a square, `NONE_LOW` where empty
@@ -13579,6 +13604,18 @@ private:
 };
 
 } // namespace
+
+bool lodgenStaticTops( const EsmWorld & world, const QString & dataRoot, int cx0, int cy0, int cx1, int cy1,
+	const std::function<bool( int, int )> & cellWanted, LodtStaticTops & out )
+{
+	LodgenObjectHeightField f;
+	f.gather( world, dataRoot, cx0, cy0, cx1, cy1, cellWanted, true );
+	const LodgenObjectAoCensus & c = f.gatherCensus();
+	out.census = QString( "%1 placement(s), %2 LOD model(s), %3 tree(s) left out, %4 no LOD mesh, %5 would not load" )
+		.arg( c.placements ).arg( c.meshes ).arg( f.treesSkipped ).arg( c.refusedNoLod ).arg( c.refusedNoLoad );
+	f.takeTops( out.gx0, out.gy0, out.gw, out.gh, out.hi, out.lo );
+	return out.gw > 0 && out.gh > 0;
+}
 
 bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 	int dim, const QString & dataRoot, const QString & outDir,

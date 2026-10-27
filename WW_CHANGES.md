@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERSKYVISFAR2 (2026-10-27, branch waterskyvisfar2-20261027): cliffs and buildings darken the far water too
+
+- **Why:** WATERSKYVISFAR1's far-water sky byte saw the terrain only, so water under a cliff static, a rock
+  formation or a seawall of buildings still reflected the whole open sky.
+- **Bake:** the .lodl sky rays now march a height field that also holds the placed statics' far LOD meshes (the
+  object AO's 128-unit field, SCOL parts expanded, trees left out). A square whose lowest surface lies within 256
+  units of the ground is a wall: its nearest sky sample rises to the square's top. Higher squares (bridge decks) are
+  ceilings and stay out. Only cells within 10,000 units of water gather. Still the CPU path (the rays mostly leave at
+  the first step; a GPU triangle BVH of the height field would cost more than the 3 s of rays). Commonwealth: the
+  statics gather adds about 46 s to the .lodl stage; the sky plane grows from 837 KB to 974 KB.
+- **Flags:** `--water-sky-terrain-only` writes the WATERSKYVISFAR1 bytes exactly; `--water-sky-dump <file>` writes the
+  terrain and stamped heights for offline gates. The writer's census adds a `sky occluders:` line.
+- **Draw:** the far water look twin (`fo4_waterlook.prog`) now dims the sun's specular by the same byte (specular
+  occlusion), not only the sky. Probe 47 = (sky visibility, sun spec luminance / 16, 0). `fo4_water.prog` keeps its
+  machine code; 1080p cost +0.000 ms (0.287 ms both).
+- **CLI:** `lodl <file> --water-info <dir>` also prints the sky census line to stdout.
+- **Red:** `WW_CELL_WATER_SKYFAR_RED=one` (unchanged) reads 1 for both the sky and the spec.
+
 ## Lane FOGTERRAIN1 (2026-10-27, branch fogterrain1-20261027): the ground fog layer follows the terrain
 
 - **Why:** the ground fog layer (groundFog .recx, or FOGHEIGHT1's derived layer) was anchored at one absolute height,

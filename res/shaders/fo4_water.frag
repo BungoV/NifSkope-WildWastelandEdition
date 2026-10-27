@@ -52,6 +52,7 @@
  *   (was 32 in the shore lane's own twin, which clashed with the depth probe)
  *   WATERREFL1 (Water reflections, Water sun glare rows), water_refl.glsl: 44 (F, sqrt( alpha ) / 0.5, SSR confidence)
  *   45/46 the glare alone ( lin / 16 )
+ *   WATERSKYVISFAR2 (Water sky visibility), water_skyfar.glsl: 47 (sky visibility, sun spec luminance / 16, 0)
  *   WATERFLOWBAKE1, same build: 41 the baked flow (was 32 in its lane: WATERDEPTH1 holds 32) ( vx / 4 x 0.5 + 0.5, vy / 4 x 0.5 + 0.5, flow lookup on )
  *   WATERLOOK1 (Ocean waves row), water_ocean.glsl: 39 (0.5 + 4 x the spectrum's slope x, y; its weight),
  *   40 (whitecap cover, sqrt( lost slope variance ) / 0.5, the caustic net's path factor / 3) */
@@ -329,7 +330,8 @@ void main()
 	vec3 sky = mix( waterSky[0].rgb, waterSky[1].rgb, clamp( R.z + 0.75, 0.0, 1.0 ) );
 	sky = mix( sky, waterSky[2].rgb, clamp( R.z * 1.9 + 0.35, 0.0, 1.0 ) );
 #ifdef WW_WATER_SKYFAR	// lane WATERSKYVISFAR1: the baked sky visibility of the far water (1 under water)
-	sky *= under ? 1.0 : wwWaterSkyFar( P );
+	float skyFarV = under ? 1.0 : wwWaterSkyFar( P );
+	sky *= skyFarV;
 #endif
 #ifdef WW_WATER_REFL
 	vec3 reflSky = waterReflOn ? wwWaterCloudSky( sky, P, R ) : sky;	// lane WATERREFL1: before the game's SSR blend
@@ -430,6 +432,9 @@ void main()
 	float reflAlpha = sqrt( max( reflA2, 0.0 ) );
 	float reflF = wwWaterFresnel( dot( -V, Ns ), reflAlpha, waterGlintK.y );
 	vec3 reflEnv = wwWaterReflEnv( reflSky, reflRaw, reflFin, waterSsrOn && !under && ( waterRed & 256 ) == 0, reflAlpha );
+#endif
+#ifdef WW_WATER_SKYFAR
+	spec *= skyFarV;	// lane WATERSKYVISFAR2: the byte as specular occlusion (water walled in by cliffs glints less)
 #endif
 	if ( ( waterRed & 8 ) != 0 )
 		spec = vec3( 0.0 );
@@ -546,6 +551,10 @@ void main()
 			o = vec3( reflF, clamp( sqrt( reflAlpha ) * 2.0, 0.0, 1.0 ), clamp( mix( reflRaw.a, reflFin.a, 0.5 ), 0.0, 1.0 ) );
 		else if ( waterProbe == 45 || waterProbe == 46 )
 			o = waterProbe == 45 ? hi16( glare / 16.0 ) : lo16( glare / 16.0 );
+#endif
+#ifdef WW_WATER_SKYFAR
+		else if ( waterProbe == 47 )	// WATERSKYVISFAR2: (sky visibility, the sun spec's luminance / 16, 0)
+			o = vec3( skyFarV, clamp( dot( spec, vec3( 0.2126, 0.7152, 0.0722 ) ) / 16.0, 0.0, 1.0 ), 0.0 );
 #endif
 #ifdef WW_WATER_WAVES
 		else if ( waterProbe == 34 )	// WATERWAVES1: (0.5 + 4 x the swell's slope x, y; its weight) at this pixel
