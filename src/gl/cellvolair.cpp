@@ -369,6 +369,8 @@ struct VaGpu
 	GLuint terr = 0;	// lane FOGTERRAIN1: the low-pass terrain (R32F, clamp)
 	std::uint64_t terrGen = 0;
 	QString terrNote = QStringLiteral( "off" );
+	bool terrOn = false;	// lane FOGTERRAIN2: the pass stood on the grid; the surfaces and particles read the same
+	float terrXf[4] = { 0, 0, 0, 0 }, terrRef = 0.0f;
 };
 
 /* THE CLUSTERED LIGHTS (coordinator 10-14). The inject evaluates the placed lights once per froxel, at the middle of
@@ -1340,8 +1342,16 @@ static void vaPassInner( Scene * scene, bool run )
 		const bool want = wwFogTerrainWanted();
 		if ( want && exterior )
 			wwLookdevGroundFrame( scene, gz, gxy, gh );
+		if ( want && exterior && G.s > 0.0f )
+			wwFogTerrainRequest();	// lane FOGTERRAIN2: the grid's own job runs while asked (shadowset.cpp fogTerrainFrame)
+		if ( g.terr && tg.nx == 0 && g.terrGen != tg.gen ) {	// the job retired or the set emptied: free the 4 MB
+			fn->glDeleteTextures( 1, &g.terr );
+			g.terr = 0;
+			g.terrGen = tg.gen;
+		}
 		const bool flat = tg.gen != 0 && wwFogTerrainFlatAt( tg, gz );
 		const bool on = want && exterior && G.s > 0.0f && tg.gen != 0 && tg.nx > 1 && tg.ny > 1 && !flat;
+		g.terrOn = on;
 		if ( on ) {
 			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirTerrain ) );
 			if ( !g.terr )
@@ -1358,12 +1368,18 @@ static void vaPassInner( Scene * scene, bool run )
 			}
 			prog->uni1i( "airTerr", WwCellUnit::AirTerrain );
 			const double sx = 1.0 / ( tg.cell * tg.nx ), sy = 1.0 / ( tg.cell * tg.ny );
-			prog->uni4f( "airTerrXf", FloatVector4( float( sx ), float( -tg.x0 * sx ), float( sy ), float( -tg.y0 * sy ) ) );
+			g.terrXf[0] = float( sx );
+			g.terrXf[1] = float( -tg.x0 * sx );
+			g.terrXf[2] = float( sy );
+			g.terrXf[3] = float( -tg.y0 * sy );
+			g.terrRef = gz;
+			prog->uni4f( "airTerrXf", FloatVector4( g.terrXf[0], g.terrXf[1], g.terrXf[2], g.terrXf[3] ) );
 			prog->uni1f( "airTerrRef", gz );
 		}
 		prog->uni1i( "airTerrOn", on ? 1 : 0 );
-		g.terrNote = on ? QStringLiteral( "on(%1x%2 cell=%3 sigma=%4 ref=%5)" ).arg( tg.nx ).arg( tg.ny ).arg( tg.cell, 0, 'f', 0 )
-				.arg( kFogTerrSigma, 0, 'f', 0 ).arg( double( gz ), 0, 'f', 1 )
+		g.terrNote = on ? QStringLiteral( "on(%1x%2 cell=%3 sigma=%4 ref=%5 job shapes=%6 ms=%7)" ).arg( tg.nx ).arg( tg.ny )
+				.arg( tg.cell, 0, 'f', 0 ).arg( kFogTerrSigma, 0, 'f', 0 ).arg( double( gz ), 0, 'f', 1 ).arg( tg.shapes )
+				.arg( tg.ms, 0, 'f', 0 )
 			: !want ? QStringLiteral( "off(red absolute)" ) : !exterior ? QStringLiteral( "off(interior)" )
 			: !( G.s > 0.0f ) ? QStringLiteral( "off(no ground layer)" ) : flat ? QStringLiteral( "off(flat at the frame's ground)" )
 			: QStringLiteral( "off(no terrain heights yet)" );
@@ -1994,12 +2010,39 @@ void wwVolAirUniforms( Scene * scene )
 	const bool clamp = on && g.tileValid && !( s.red & 2097152 );
 	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
 	r->fn->glBindTexture( GL_TEXTURE_2D, clamp ? g.tile : 0 );
+	// lane FOGTERRAIN2: the pass's terrain grid, so the far tail, the sky and the sun stand on the same ground
+	const int terrLoc = prog->uniLocation( "volAirTerr" );
+	const bool terr = on && g.terrOn && g.terr && terrLoc >= 0;
+	if ( terrLoc >= 0 ) {
+		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirTerrain ) );
+		r->fn->glBindTexture( GL_TEXTURE_2D, terr ? g.terr : 0 );
+		prog->uni1i_l( terrLoc, WwCellUnit::AirTerrain );
+	}
 	r->fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "volTex", kVolTexUnit );
 	prog->uni1i( "volTile", kTileUnit );
 	prog->uni1i( "volFarClamp", clamp ? 1 : 0 );
 	if ( !on )
 		return;
+	if ( terr ) {
+		const Transform & vt = scene->view;
+		const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+		float row[2][4];
+		for ( int k = 0; k < 2; k++ ) {	// celllights.cpp cellRow: world = dot(row.xyz, posView) + row.w
+			float w = 0.0f;
+			for ( int j = 0; j < 3; j++ )
+				w -= vt.rotation( j, k ) * vt.translation[j];
+			row[k][0] = vt.rotation( 0, k ) / sc;
+			row[k][1] = vt.rotation( 1, k ) / sc;
+			row[k][2] = vt.rotation( 2, k ) / sc;
+			row[k][3] = w / sc;
+		}
+		float U[4], V[4];
+		wwFogTerrainViewRows( row[0], row[1], g.terrXf, U, V );
+		prog->uni4f( "volAirTerrU", FloatVector4( U[0], U[1], U[2], U[3] ) );
+		prog->uni4f( "volAirTerrV", FloatVector4( V[0], V[1], V[2], V[3] ) );
+		prog->uni1f( "volAirTerrRef", g.terrRef );
+	}
 	GLint vp[4] = { 0, 0, 1, 1 };
 	r->fn->glGetIntegerv( GL_VIEWPORT, vp );
 	prog->uni4f_l( prog->uniLocation( "volRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
@@ -2026,7 +2069,7 @@ void wwVolAirUniforms( Scene * scene )
 	const int fl = prog->uniLocation( "volAirFlags" );
 	if ( fl >= 0 )
 		prog->uni1i_l( fl, ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
-			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) );
+			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 ) );
 }
 
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never
@@ -2237,6 +2280,22 @@ bool wwVolPartUniforms( Scene * scene )
 	// the landed air's layered law (its near band, its ground layer) and its GPU reds (roomstep, physcol), as the pass
 	prog->uni4f( "airLayer", air ? FloatVector4( g.layer[0], g.layer[1], g.layer[2], g.layer[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 	prog->uni4f( "airGround", air ? FloatVector4( g.ground[0], g.ground[1], g.ground[2], g.ground[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+	// lane FOGTERRAIN2: the ground layer stands on the pass's terrain grid (cell_volpart.glsl vpLight airGroundAt)
+	const bool terr = air && g.terrOn && g.terr;
+	const int terrLoc = prog->uniLocation( "airTerr" );
+	if ( terrLoc >= 0 ) {
+		GLint prevActive = 0;
+		r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirTerrain ) );
+		r->fn->glBindTexture( GL_TEXTURE_2D, terr ? g.terr : 0 );
+		r->fn->glActiveTexture( GLenum( prevActive ) );
+		prog->uni1i_l( terrLoc, WwCellUnit::AirTerrain );
+	}
+	prog->uni1i( "airTerrOn", terr ? 1 : 0 );
+	if ( terr ) {
+		prog->uni4f( "airTerrXf", FloatVector4( g.terrXf[0], g.terrXf[1], g.terrXf[2], g.terrXf[3] ) );
+		prog->uni1f( "airTerrRef", g.terrRef );
+	}
 	prog->uni1i( "volRed", vs().red & ~1 );
 	prog->uni1f( "volShell", vs().shellStep ? 0.0f : 1.0f );
 	for ( int k = 0; k < 3; k++ ) {

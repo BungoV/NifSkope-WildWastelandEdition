@@ -102,6 +102,40 @@ const WwFogTerrGrid & wwFogTerrainGrid()
 	return grid();
 }
 
+namespace
+{
+int & idleFrames()
+{
+	static int n = kFogTerrIdleFrames;
+	return n;
+}
+}
+
+void wwFogTerrainRequest()
+{
+	idleFrames() = 0;
+}
+
+bool wwFogTerrainRequested()
+{
+	int & n = idleFrames();
+	if ( n >= kFogTerrIdleFrames )
+		return false;
+	n++;
+	return true;
+}
+
+WwFogTerrAct wwFogTerrainAct( const WwFogTerrFrame & f )
+{
+	if ( !f.requested )
+		return f.busy || f.haveGrid ? WwFogTerrAct::Retire : WwFogTerrAct::Idle;
+	if ( f.busy )
+		return WwFogTerrAct::Idle;	// a changed set rasters once this one lands
+	if ( f.shapes == 0 )
+		return f.haveGrid ? WwFogTerrAct::Empty : WwFogTerrAct::Idle;	// never a stale grid (interior, another worldspace)
+	return f.setChanged || !f.haveGrid ? WwFogTerrAct::Raster : WwFogTerrAct::Idle;
+}
+
 #ifndef WW_FOGTERRAIN_GATE
 bool wwFogTerrainWanted()
 {

@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FOGTERRAIN2 (2026-10-27, branch fogterrain2-20261027): all fog stands on the terrain, the grid has its own job
+
+- **Why:** FOGTERRAIN1 raised the ground fog layer over the terrain in the froxel air only. Particles and the surfaces'
+  far tail, sky and sun kept the absolute anchor, and the terrain grid existed only while the terrain shadow job ran
+  (exterior, sun up, terrain shadows on), so a night view had no grid.
+- **Same anchor everywhere:** the surfaces (`res/shaders/lookdev_fog.glsl` wwAirGroundAt: the tail at its middle, the
+  sky ray at its middle, the sun at the surface; flag 64), the sky and the particles (`res/shaders/cell_volpart.glsl`
+  vpLight calls airGroundAt) read the same low-pass grid (unit 57) as the froxels.
+- **Own job:** `src/gl/shadowset.cpp` fogTerrainFrame rasters the terrain-only heights for the fog on its own worker
+  (2048 texels of 256 u, re-centred in eighths, collected every 16 frames), independent of the sun and the shadow
+  tier; it is kept while the air asks for it (wwFogTerrainRequest) and retired 120 frames after the last ask.
+- **Sigma 256 u** (was 1024): the study kept hilltops within 2.5 % of the layer for 300-864 u layers (sigma 1024: 21 %
+  off at 300 u). The census line reads `terrain=on(... job shapes=N ms=M)`.
+- **Red:** `WW_FOG_TERRAIN_RED=absolute` (live, stage 0; the liveswitch unit checks it).
+- **Cost (offline, RTX 5070 Ti, 1080p):** +0.035 ms GPU (near froxels +0.019, far grid +0.016, surfaces +0.001 a
+  layer); memory 4 MB VRAM grid + 4 MB CPU published copy, while the worker runs 16 MB raster + about 32 MB of
+  low-pass doubles.
+
 ## Lane FOGTERRAIN1 (2026-10-27, branch fogterrain1-20261027): the ground fog layer follows the terrain
 
 - **Why:** the ground fog layer (groundFog .recx, or FOGHEIGHT1's derived layer) was anchored at one absolute height,

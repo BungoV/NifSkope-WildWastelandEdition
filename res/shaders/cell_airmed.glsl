@@ -12,7 +12,7 @@ uniform vec4 airTerrXf;			// u = x X.x + X.y, v = y X.z + X.w (world)
 uniform float airTerrRef;		// the world z the absolute anchor stands on (the fog frame's 0)
 float airGz = 0.0;				// the local ground's rise over the frame's ground at the current sample (0: the absolute law)
 
-// FOGTERRAIN1: set the ground layer's anchor for world point Pw (the froxel pass; particles keep the absolute law)
+// FOGTERRAIN1: set the ground layer's anchor for world point Pw (the froxel pass; FOGTERRAIN2: the particles too)
 void airGroundAt( vec3 Pw )
 {
 	airGz = airTerrOn != 0 ? texture( airTerr, vec2( Pw.x * airTerrXf.x + airTerrXf.y, Pw.y * airTerrXf.z + airTerrXf.w ) ).r - airTerrRef : 0.0;

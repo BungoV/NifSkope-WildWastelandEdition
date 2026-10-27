@@ -1,6 +1,7 @@
 // LIVESET1: the live-set mechanism each converted subsystem uses (WW_SWITCH_STATIC, wwSwitchMovedFor) rebuilds on a
 // changed value and not on an unchanged one; the converted switches read live in the stage table. Exit 0 = pass.
 #include "wwswitch.h"
+#include "gl/fogterrain.h"
 
 #include <cstdio>
 
@@ -80,6 +81,14 @@ int main()
 	check( wwSwitchMovedFor( cells, { "WW_CELL_FARLOD", "WW_CELL_ACTORS_OUT", "WW_CELL_WEAP_PARTS" } ),
 		"cell section sees WW_CELL_ACTORS_OUT" );
 	check( !wwSwitchMovedFor( probes2, { "WW_CELL_PROBES_HIDE" } ), "probe section ignores WW_CELL_ACTORS_OUT" );
+
+	// FOGTERRAIN2: the terrain-following fog's red flips the anchor live (fogterrain.cpp wwFogTerrainWanted)
+	check( wwSwitchStageOf( "WW_FOG_TERRAIN_RED" ) == WwSwitchStage::Live, "WW_FOG_TERRAIN_RED live" );
+	check( wwFogTerrainWanted(), "fog terrain: follows the terrain by default" );
+	wwSwitchSet( "WW_FOG_TERRAIN_RED", "absolute", false );
+	check( !wwFogTerrainWanted(), "fog terrain: a live set of the red gives the absolute anchor" );
+	wwSwitchSet( "WW_FOG_TERRAIN_RED", "", true );
+	check( wwFogTerrainWanted(), "fog terrain: the unset follows the terrain again" );
 
 	std::printf( "%s (%d failed)\n", g_fail ? "LIVESWITCH FAIL" : "LIVESWITCH PASS", g_fail );
 	return g_fail ? 1 : 0;

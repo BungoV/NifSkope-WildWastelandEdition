@@ -99,7 +99,12 @@ uniform vec4 volAirGround;	// (airGround): the ground layer's anchor zg, 1 / its
 uniform int volAirFlags;	// 1 the surfaces' sun through the air (FOGSUN1; red nosunt clears it), 2 the far tail (red
 				// froxonly clears it), 4 the records' colour on the tail (red physcol clears it), 8 the sky
 				// through the air (cell_volsky.frag; red nosky clears it), 16 the effects and particles through the
-				// air (wwFogFx; red fxfog clears it), 32 the tricubic read (FOGTRICUBIC1, WW_CELL_VOLAIR_TRICUBIC=1)
+				// air (wwFogFx; red fxfog clears it), 32 the tricubic read (FOGTRICUBIC1, WW_CELL_VOLAIR_TRICUBIC=1),
+				// 64 the ground layer on the terrain grid (FOGTERRAIN2; red WW_FOG_TERRAIN_RED=absolute clears it)
+uniform sampler2D volAirTerr;	// FOGTERRAIN2: the pass's low-pass terrain (cell_airmed.glsl airTerr), world z
+uniform vec4 volAirTerrU;	// its uv at view point p: (dot( U.xyz, p ) + U.w, dot( V.xyz, p ) + V.w)
+uniform vec4 volAirTerrV;
+uniform float volAirTerrRef;	// the world z of the fog frame's ground (airTerrRef)
 
 // the column between heights lo < hi of one term B(z) = min(1, exp(-(z - z0) invH)): flat under z0, exponential
 // above (invH 0: flat everywhere); no cancellation of two large columns. Shared with cell_volair.frag airCol.
@@ -149,10 +154,20 @@ float wwAirRhoLaw( float z, vec4 med, vec4 layer, vec4 ground )
 	return r;
 }
 
-// the column of air between heights lo < hi per unit sigma0, the surfaces' copy of the pass's medium
-float wwAirCol( float lo, float hi )
+// FOGTERRAIN2: the ground layer's anchor at view point p, the froxels' (cell_airmed.glsl airGroundAt); flag 64 off: absolute
+vec4 wwAirGroundAt( vec3 p )
 {
-	return wwAirColLaw( lo, hi, volAirMed, volAirLayer, volAirGround );
+	if ( ( volAirFlags & 64 ) == 0 )
+		return volAirGround;
+	vec2 uv = vec2( dot( volAirTerrU.xyz, p ) + volAirTerrU.w, dot( volAirTerrV.xyz, p ) + volAirTerrV.w );
+	return vec4( volAirGround.x + texture( volAirTerr, uv ).r - volAirTerrRef, volAirGround.yzw );
+}
+
+// the column of air between heights lo < hi per unit sigma0, the surfaces' copy of the pass's medium, its ground layer
+// anchored by `ground` (wwAirGroundAt)
+float wwAirCol( float lo, float hi, vec4 ground )
+{
+	return wwAirColLaw( lo, hi, volAirMed, volAirLayer, ground );
 }
 
 // the records' haze colour at distance d, height z, view direction dirView (cell_volair.frag airEnvColour), unit luminance
@@ -208,7 +223,8 @@ vec4 wwVolAirAtFar( float d, vec2 uv, vec3 posView )
 	float z0 = zc + ( z1 - zc ) * ( far / d );
 	float len = d - far;
 	float dz = z1 - z0;
-	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0 ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ) ) / abs( dz );
+	vec4 gT = wwAirGroundAt( posView * ( 0.5 * ( far + d ) / max( length( posView ) * fogDistScale, 1e-12 ) ) );	// the tail's middle
+	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0, gT ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ), gT ) / abs( dz );
 	float Tt = exp( -tau );
 	if ( ( volAirFlags & 4 ) != 0 ) {
 		vec3 dirV = posView / max( length( posView ), 1e-12 );
@@ -289,7 +305,8 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 	float z0 = zc + ( z1 - zc ) * ( far / d );
 	float len = d - far;
 	float dz = z1 - z0;
-	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0 ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ) ) / abs( dz );
+	vec4 gT = wwAirGroundAt( posView * ( 0.5 * ( far + d ) / max( length( posView ) * fogDistScale, 1e-12 ) ) );	// the tail's middle
+	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0, gT ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ), gT ) / abs( dz );
 	float Tt = exp( -tau );
 #ifdef WW_SUNSHADOW
 	J *= wwAirTailShadow( posView / max( length( posView ), 1e-12 ), far, d, tau );
@@ -347,8 +364,9 @@ vec4 wwVolAirSky( vec3 dirView )
 	float top = volAirMed.w;
 	float Tt, dEnd;
 	if ( s > 1e-4 ) {
-		Tt = exp( -volAirMed.x * wwAirCol( z0, top ) / s );
 		dEnd = far + min( max( top - z0, 0.0 ) / s, 1e7 );
+		// FOGTERRAIN2: the ground under the climb's middle (a long level ray reads the window's clamped edge)
+		Tt = exp( -volAirMed.x * wwAirCol( z0, top, wwAirGroundAt( dirView * ( 0.5 * ( far + dEnd ) / max( fogDistScale, 1e-12 ) ) ) ) / s );
 	} else {
 		Tt = ( s >= 0.0 && z0 >= top ) ? 1.0 : 0.0;
 		dEnd = far + 1e7;
@@ -377,7 +395,7 @@ float wwVolAirSunT( vec3 posView )
 	if ( lo >= volAirMed.w )
 		return 1.0;
 	float mu = max( dot( fogView.xyz, fogSun.xyz ) / max( length( fogView.xyz ), 1e-12 ), 0.02 );
-	return exp( -volAirMed.x * wwAirCol( lo, volAirMed.w ) / mu );
+	return exp( -volAirMed.x * wwAirCol( lo, volAirMed.w, wwAirGroundAt( posView ) ) / mu );
 }
 
 vec3 wwFogBase( vec3 preFog, vec3 posView, float tAp, bool apOn );
