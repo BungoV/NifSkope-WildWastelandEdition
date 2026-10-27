@@ -25,6 +25,10 @@ struct UnderState
 {
 	QString echo = QStringLiteral( "underwater: off" );
 	QString lastLogged;
+	// lane WATERUNDER3: decided before the scene draws (wwCellUnderwaterFrame), so the imagespace is not a frame late
+	const void * frameDoc = nullptr;
+	WwWaterRecord frameRec;
+	bool cloudsHidden = false;	// this frame's pass fogged a camera under water (the volume clouds draw after it)
 };
 
 UnderState & ust()
@@ -75,7 +79,112 @@ bool invert4( const double a[4][4], double o[4][4] )
 	return true;
 }
 
+//! the camera, world: world = R^T (v - t) / sc; row = view -> world
+void eyeOf( const Scene * scene, double row[3][4], double eye[3] )
+{
+	const Transform & vt = scene->view;
+	const double sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
+	for ( int i = 0; i < 3; i++ ) {
+		double c = 0.0;
+		for ( int j = 0; j < 3; j++ ) {
+			row[i][j] = double( vt.rotation( j, i ) ) / sc;
+			c -= double( vt.rotation( j, i ) ) * double( vt.translation[j] ) / sc;
+		}
+		row[i][3] = c;
+		eye[i] = c;
+	}
+}
+
+//! which water: the baked body at the camera, else the lowest registered water shape above it (`margin` = near plane)
+bool findWater( Scene * scene, float ex, float ey, float ez, float margin, WwWaterRecord & rec, float & H, int & cls,
+	QString & via )
+{
+	WwWaterInfoHit hit;
+	cls = 2;	// a placed water shape reads as a lake (the clear colour's rule)
+	if ( wwCellWaterInfoAt( scene->nifModel, ex, ey, hit ) && hit.body && ez < hit.height + margin
+		&& ez > hit.height - hit.depth - 256.0f && wwCellWaterRecordOf( scene->nifModel, hit.form, rec ) ) {
+		H = hit.height;
+		cls = hit.cls >= 0 && hit.cls <= 2 ? hit.cls : 2;
+		via = QStringLiteral( "baked body %1" ).arg( hit.body );
+		return true;
+	}
+	if ( wwCellWaterPlaneOver( scene, ex, ey, ez - margin, 8192.0f, H, rec ) ) {
+		via = QStringLiteral( "water shape" );
+		return true;
+	}
+	return false;
+}
+
+QByteArray lightRed()
+{
+	WW_SWITCH_STATIC( QByteArray, lr, wwEnv( "WW_CELL_WATER_UNDERLIGHT_RED" ).trimmed() );
+	return lr;
+}
+
 } // namespace
+
+void wwCellUnderwaterFrame( Scene * scene )
+{
+	UnderState & s = ust();
+	s.frameDoc = nullptr;
+	s.cloudsHidden = false;
+	if ( !scene || !scene->nifModel || scene->selecting || !wwCellWaterOn()
+		|| ( !wwLookOn( WwLook::Underwater ) && !wwLookOn( WwLook::WaterUnderLight ) ) )
+		return;
+	double row[3][4], eye[3];
+	eyeOf( scene, row, eye );
+	float H = 0.0f;
+	int cls = 2;
+	QString via;
+	if ( findWater( scene, float( eye[0] ), float( eye[1] ), float( eye[2] ), 0.0f, s.frameRec, H, cls, via )
+		&& float( eye[2] ) < H )
+		s.frameDoc = scene->nifModel;
+}
+
+const WwWaterRecord * wwCellUnderwaterImageSpace( const void * nif )
+{
+	const UnderState & s = ust();
+	if ( !nif || s.frameDoc != nif || !s.frameRec.hasUwIs || !wwLookOn( WwLook::WaterUnderLight )
+		|| lightRed().contains( "noimagespace" ) )
+		return nullptr;
+	return &s.frameRec;
+}
+
+bool wwCellUnderwaterHidesClouds()
+{
+	return ust().cloudsHidden && !lightRed().contains( "clouds" );
+}
+
+bool wwCellUnderwaterSun( Scene * scene, float to[3], float col[3] )
+{
+	for ( int c = 0; c < 3; c++ ) {
+		to[c] = c == 2 ? 1.0f : 0.0f;
+		col[c] = 0.0f;
+	}
+	const WwCellLighting * cl = scene ? wwCellLightsFor( scene->nifModel ) : nullptr;
+	if ( !cl )
+		return false;
+	float dif[4] = {}, amb[4] = {};
+	if ( !cl->interior && wwLookdevActive() ) {
+		wwLookdevLight( to, dif, amb );
+		for ( int c = 0; c < 3; c++ )
+			col[c] = dif[c] * wwLookdevSunlightScale();
+	} else if ( cl->hasDirectional ) {
+		for ( int c = 0; c < 3; c++ ) {
+			to[c] = cl->dirTo[c];
+			col[c] = cl->dirColor[c];
+		}
+	} else {
+		return false;
+	}
+	const float len = std::sqrt( to[0] * to[0] + to[1] * to[1] + to[2] * to[2] );
+	for ( int c = 0; c < 3; c++ )
+		to[c] = len > 0.0f ? to[c] / len : ( c == 2 ? 1.0f : 0.0f );
+	if ( to[2] <= 0.0f )	// below the horizon: no sun under the water
+		for ( int c = 0; c < 3; c++ )
+			col[c] = 0.0f;
+	return true;
+}
 
 void wwCellUnderwaterPass( Scene * scene )
 {
@@ -89,19 +198,9 @@ void wwCellUnderwaterPass( Scene * scene )
 		return;
 	Renderer * r = scene->renderer;
 
-	// the camera, world: world = R^T (v - t) / sc
-	const Transform & vt = scene->view;
-	const double sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
+	const double sc = scene->view.scale != 0.0f ? double( scene->view.scale ) : 1.0;
 	double row[3][4], eye[3];
-	for ( int i = 0; i < 3; i++ ) {
-		double c = 0.0;
-		for ( int j = 0; j < 3; j++ ) {
-			row[i][j] = double( vt.rotation( j, i ) ) / sc;
-			c -= double( vt.rotation( j, i ) ) * double( vt.translation[j] ) / sc;
-		}
-		row[i][3] = c;
-		eye[i] = c;
-	}
+	eyeOf( scene, row, eye );
 	// clip -> view (projectionMatrix is column-major: pm[col][row])
 	const auto & pm = r->globalUniforms->projectionMatrix;
 	double P[4][4], Pi[4][4];
@@ -126,21 +225,9 @@ void wwCellUnderwaterPass( Scene * scene )
 	// which water: the baked body at the camera, else the lowest registered water shape above it
 	WwWaterRecord rec;
 	float H = 0.0f;
-	bool found = false;
-	int cls = 2;	// a placed water shape reads as a lake (the clear colour's rule)
+	int cls = 2;
 	QString via;
-	WwWaterInfoHit hit;
-	if ( wwCellWaterInfoAt( scene->nifModel, ex, ey, hit ) && hit.body && ez < hit.height + float( margin )
-		&& ez > hit.height - hit.depth - 256.0f && wwCellWaterRecordOf( scene->nifModel, hit.form, rec ) ) {
-		H = hit.height;
-		found = true;
-		cls = hit.cls >= 0 && hit.cls <= 2 ? hit.cls : 2;
-		via = QStringLiteral( "baked body %1" ).arg( hit.body );
-	} else if ( wwCellWaterPlaneOver( scene, ex, ey, ez - float( margin ), 8192.0f, H, rec ) ) {
-		found = true;
-		via = QStringLiteral( "water shape" );
-	}
-	if ( !found ) {
+	if ( !findWater( scene, ex, ey, ez, float( margin ), rec, H, cls, via ) ) {
 		note( QStringLiteral( "underwater: above water" ) );
 		return;
 	}
@@ -163,7 +250,8 @@ void wwCellUnderwaterPass( Scene * scene )
 	for ( int c = 0; c < 3; c++ )
 		fogCol[c] = 0.5f * ( hor[c] + uw[c] );
 	const QString redS = wwEnvStr( "WW_CELL_UNDERWATER_RED" ).trimmed();
-	const int red = redS == QLatin1String( "notint" ) ? 1 : redS == QLatin1String( "nofog" ) ? 2 : 0;
+	const int red = redS == QLatin1String( "notint" ) ? 1 : redS == QLatin1String( "nofog" ) ? 2
+		: redS == QLatin1String( "radial" ) ? 4 : 0;	// lane WATERUNDER3: radial = WATERUNDER1's distance
 
 	GLint vp[4] = { 0, 0, 1, 1 }, prevActive = 0, prevTex = 0, bSrcRgb = 0, bDstRgb = 0, bSrcA = 0, bDstA = 0,
 		bEqRgb = 0, bEqA = 0;
@@ -204,32 +292,18 @@ void wwCellUnderwaterPass( Scene * scene )
 	/* lane WATERLOOK1 step 16: the Underwater light row: the class's coefficients, lit by the sun the cell surfaces
 	 * take (an exterior's weather sun x Sunlight Scale, else the cell's directional) and the water's sky; the meniscus
 	 * 1.5 px each side, 0.6 dark at its middle */
-	WW_SWITCH_STATIC( QByteArray, lr, wwEnv( "WW_CELL_WATER_UNDERLIGHT_RED" ).trimmed() );
+	const QByteArray lr = lightRed();
 	const int lred = ( lr.contains( "nomeniscus" ) ? 2 : 0 ) | ( lr.contains( "nocolor" ) ? 4 : 0 );
 	float skyH[3], skyL[3], skyU[3];	// the water program's two sky rows (the horizon and the upper row)
 	if ( !wwLookdevWaterSky( skyH, skyL, skyU ) )
 		for ( int c = 0; c < 3; c++ )
 			skyH[c] = skyU[c] = wwWaterLin( rec.reflection[c] );
-	float sunTo[3] = { 0.0f, 0.0f, 1.0f }, sunCol[3] = { 0.0f, 0.0f, 0.0f };
-	if ( const WwCellLighting * cl = wwCellLightsFor( scene->nifModel ) ) {
-		float dif[4] = {}, amb[4] = {};
-		if ( !cl->interior && wwLookdevActive() ) {
-			wwLookdevLight( sunTo, dif, amb );
-			for ( int c = 0; c < 3; c++ )
-				sunCol[c] = dif[c] * wwLookdevSunlightScale();
-		} else if ( cl->hasDirectional ) {
-			for ( int c = 0; c < 3; c++ ) {
-				sunTo[c] = cl->dirTo[c];
-				sunCol[c] = cl->dirColor[c];
-			}
-		}
-	}
-	const float sunLen = std::sqrt( sunTo[0] * sunTo[0] + sunTo[1] * sunTo[1] + sunTo[2] * sunTo[2] );
-	const float sunCos = sunLen > 0.0f ? sunTo[2] / sunLen : 0.0f;
+	float sunTo[3], sunCol[3];	// lane WATERUNDER3: one source with the water program's surface from below
+	wwCellUnderwaterSun( scene, sunTo, sunCol );
+	const float sunCos = std::max( sunTo[2], 0.0f );
 	prog->uni1i( "uwLight", light ? 1 : 0 );
 	prog->uni1i( "uwLightRed", lred );
-	prog->uni4f( "uwSun", FloatVector4( sunCos > 0.0f ? sunCol[0] : 0.0f, sunCos > 0.0f ? sunCol[1] : 0.0f,
-		sunCos > 0.0f ? sunCol[2] : 0.0f, std::max( sunCos, 0.0f ) ) );
+	prog->uni4f( "uwSun", FloatVector4( sunCol[0], sunCol[1], sunCol[2], sunCos ) );
 	prog->uni3f( "uwSky", 0.5f * ( skyH[0] + skyU[0] ), 0.5f * ( skyH[1] + skyU[1] ), 0.5f * ( skyH[2] + skyU[2] ) );
 	prog->uni1i( "uwClass", cls );
 	prog->uni2f( "uwMenK", 1.5f, 0.6f );
@@ -260,6 +334,8 @@ void wwCellUnderwaterPass( Scene * scene )
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST );
 	if ( wasCull ) fn->glEnable( GL_CULL_FACE );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST );
+	ust().cloudsHidden = ez < H;	// lane WATERUNDER3: the eye itself is under water (not only the near plane's margin)
+	const WwWaterRecord * uwIs = wwCellUnderwaterImageSpace( scene->nifModel );
 
 	note( QStringLiteral( "underwater: %1, surface z %2 (camera %3 below), WATR %4 fog %5 near %6 far %7, colour %8 %9 %10%11" )
 		.arg( via ).arg( double( H ), 0, 'f', 1 ).arg( double( H - ez ), 0, 'f', 1 )
@@ -270,7 +346,11 @@ void wwCellUnderwaterPass( Scene * scene )
 		+ ( light ? QStringLiteral( "; light class %1 sun %2 %3 %4 at cos %5%6" ).arg( cls )
 			.arg( double( sunCol[0] ), 0, 'f', 3 ).arg( double( sunCol[1] ), 0, 'f', 3 ).arg( double( sunCol[2] ), 0, 'f', 3 )
 			.arg( double( sunCos ), 0, 'f', 3 ).arg( lred ? QStringLiteral( " red %1" ).arg( QString::fromLatin1( lr ) ) : QString() )
-			: QString() ) );
+			: QString() )
+		+ ( uwIs ? QStringLiteral( "; imagespace %1 (INAM %2)" ).arg( uwIs->uwIsName )
+			.arg( uwIs->imageSpace, 8, 16, QLatin1Char( '0' ) ) : QString() )
+		+ ( ust().cloudsHidden ? ( wwCellUnderwaterHidesClouds() ? QStringLiteral( "; clouds fogged" )
+			: QStringLiteral( "; clouds kept (red)" ) ) : QString() ) );
 }
 
 QString wwCellUnderwaterEcho()

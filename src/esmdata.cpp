@@ -317,6 +317,8 @@ bool EsmWorld::waterRecord( quint32 form, WwWaterRecord & r ) const
 			r.opacity = p[0];
 		} else if ( f == "NAM2" || f == "NAM3" || f == "NAM4" ) {
 			r.noise[f == "NAM2" ? 0 : f == "NAM3" ? 1 : 2] = str();
+		} else if ( f == "INAM" && n >= 4 ) {	// lane WATERUNDER3: the underwater imagespace
+			std::memcpy( &r.imageSpace, p, 4 );
 		} else if ( f == "DNAM" ) {
 			r.dnamBytes = n;
 			int o = 0;
@@ -375,6 +377,19 @@ bool EsmWorld::waterRecord( quint32 form, WwWaterRecord & r ) const
 			if ( o < n )
 				r.ssr = p[o] != 0;
 		}
+	}
+	QByteArray h, c, t;
+	QString lut;
+	if ( r.imageSpace && imageSpace( r.imageSpace, r.uwIsName, h, c, t, lut ) && h.size() >= 36 ) {
+		r.hasUwIs = true;
+		std::memcpy( r.uwIsHdr, h.constData(), 36 );
+		std::fill( r.uwIsCine, r.uwIsCine + 3, 1.0f );
+		r.uwIsTint[0] = 0.0f;
+		std::fill( r.uwIsTint + 1, r.uwIsTint + 4, 1.0f );
+		if ( c.size() >= 12 )
+			std::memcpy( r.uwIsCine, c.constData(), 12 );
+		if ( t.size() >= 16 )
+			std::memcpy( r.uwIsTint, t.constData(), 16 );
 	}
 	return true;
 }

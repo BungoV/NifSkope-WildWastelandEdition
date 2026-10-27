@@ -14,6 +14,7 @@
 #include "cellunits.h"	// lane WATERREFL1: the noise layers' moment textures
 #include "cloudmap.h"	// lane WATERREFL1: the weather's clouds in the reflected sky
 #include "cellocean.h"	// lane WATERLOOK1: the wind's wave spectrum
+#include "cellunderwater.h"	// lane WATERUNDER3: the sun under water
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "model/nifmodel.h"
@@ -401,7 +402,11 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	if ( prog->uniLocation( "waterUnderOn" ) >= 0 ) {	// lane WATERLOOK1 step 16: the Underwater light row (Snell's window)
 		prog->uni1b( "waterUnderOn", wwLookOn( WwLook::WaterUnderLight ) );
 		WW_SWITCH_STATIC( QByteArray, ur, wwEnv( "WW_CELL_WATER_UNDERLIGHT_RED" ).trimmed() );
-		prog->uni1i( "waterUnderRed", ur.contains( "nosnell" ) ? 1 : 0 );
+		prog->uni1i( "waterUnderRed", ( ur.contains( "nosnell" ) ? 1 : 0 ) | ( ur.contains( "oldsun" ) ? 2 : 0 ) );
+		float to[3], col[3];	// lane WATERUNDER3: the underwater pass's sun, one source (cellunderwater.h)
+		wwCellUnderwaterSun( scene, to, col );
+		prog->uni3f( "waterUnderSun", col[0], col[1], col[2] );
+		prog->uni3f( "waterUnderSunTo", to[0], to[1], to[2] );
 	}
 	if ( prog->uniLocation( "waterCauTime" ) >= 0 ) {	// lane WATERCAUSTICS1: fo4_waterlook only
 		prog->uni1b( "waterCauOn", wwLookOn( WwLook::WaterCaustics ) );	// lane WATERCOMBINE1: its own row

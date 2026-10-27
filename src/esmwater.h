@@ -51,6 +51,11 @@ struct WwWaterRecord
 	bool ssr = true;
 	int dnamBytes = 0;		// how much DNAM the record carried (the fields past it keep xEdit's defaults)
 	QString noise[3];		// NAM2..NAM4, as stored
+	// lane WATERUNDER3: INAM, the imagespace the game applies while the camera is under this water, and its IMGS
+	quint32 imageSpace = 0;
+	bool hasUwIs = false;
+	float uwIsHdr[9] = {}, uwIsCine[3] = {}, uwIsTint[4] = {};
+	QString uwIsName;
 };
 
 struct WwWaterMaterial

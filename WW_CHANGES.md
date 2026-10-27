@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERUNDER3 (2026-10-27, branch waterunder3-20261027): under water, the leftovers
+
+- The water's INAM field is the imagespace the game uses while the camera is under that water (all 47 vanilla
+  waters carry one of three: default, murky, clear). With the **Underwater light** row on and the camera under
+  water, the frame now takes that imagespace's tone map, cinematic and tint; the cell's LUT and the surfaces'
+  sunlight and sky scales stay.
+- The underwater fog now ramps over the view depth (straight ahead), as the game's own underwater fog does, not
+  over the distance along each pixel's ray. The centre of the screen is unchanged; the edges get a little less fog.
+- The volume clouds are left out while the camera is under water (the fog already covers the far plane).
+- One sun under water: the surface seen from below and the underwater light now take the same sun (the weather sun
+  times the Sunlight Scale outdoors). Before, the surface used the viewport light without that scale.
+- Offline checks (no window): the fog matches an independent view-depth model to 2e-5; the old law (harness red)
+  is byte-identical to the previous program; the light row's checks still pass; both sun uniforms come from one
+  function (red: the previous sources fail the check). Cost: none measurable (0.093 ms the 1080p pass, as before).
+- Not done: the outdoor water colour multiplier the game applies to the fog colour, the fog amount, the water-plane
+  fallback's limits, the MSAA silhouette depth (see the lane notes).
+
 ## Lane WATERLOOK1 step 16 (2026-10-27, branch waterlook1-20261027): light under water (WATERUNDER2)
 
 - New Display row **Underwater light** (default off). With the camera under water:

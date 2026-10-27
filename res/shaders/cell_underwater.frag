@@ -40,7 +40,8 @@ void main()
 	if ( uwLight != 0 && ( uwLightRed & 4 ) == 0 )
 		wwUnderLight( uwEye, Pn, Pw, d >= 1.0, uwFog.w, add, mul );
 	else
-		wwUnderwater( uwEye, Pn, Pw, d >= 1.0, uwFog, uwColor, uwTint, uwRed, add, mul );
+		wwUnderwater( uwEye, Pn, Pw, d >= 1.0, uwFog, uwColor, uwTint, uwRed,
+			( uwRed & 4 ) != 0 ? vec3( 0.0 ) : -normalize( vec3( uwRow[0].z, uwRow[1].z, uwRow[2].z ) ), add, mul );
 	float men = wwUnderMeniscus( Pn.z - uwFog.w, fwidth( Pn.z ) * uwMenK.x );	// 0 with the row off
 	fragAdd = vec4( add * ( 1.0 - men ), 0.0 );
 	fragMul = vec4( mul * ( 1.0 - men ), 1.0 );

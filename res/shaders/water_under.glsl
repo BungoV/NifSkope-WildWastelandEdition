@@ -6,9 +6,11 @@
 //   tint   = the WATR underwater colour, linear: the filter the light takes over `far` units of water (the probe
 //            bake's glass rule, probebake.cpp waterFog), so the scene and the fog darken with depth below H
 //   red    = 1 notint (no depth darkening), 2 nofog (no view fog)
+//   fwd    = the camera's forward, world: the fog ramps over the view depth L . fwd, the game's (its image-space depth
+//            of field shader, lane WATERUNDER3); vec3( 0 ) = over the ray length (WATERUNDER1, red radial)
 // Out: the frame becomes scene * mul + add (dual-source blend, one pass).
 
-void wwUnderwater( vec3 eye, vec3 Pn, vec3 Pw, bool farPlane, vec4 uwFog, vec3 fogCol, vec3 tint, int red,
+void wwUnderwater( vec3 eye, vec3 Pn, vec3 Pw, bool farPlane, vec4 uwFog, vec3 fogCol, vec3 tint, int red, vec3 fwd,
 	out vec3 add, out vec3 mul )
 {
 	add = vec3( 0.0 );
@@ -25,7 +27,8 @@ void wwUnderwater( vec3 eye, vec3 Pn, vec3 Pw, bool farPlane, vec4 uwFog, vec3 f
 		L = min( L, ( H - eye.z ) / dir.z );	// the ray leaves the water at the surface (its underside is fogged too)
 	float far = max( uwFog.z, 1e-3 );
 	float span = max( uwFog.z - uwFog.y, 1e-3 );
-	float a = clamp( uwFog.x * clamp( ( L - uwFog.y ) / span, 0.0, 1.0 ), 0.0, 1.0 );
+	float Lf = dot( fwd, fwd ) > 0.0 ? L * max( dot( dir, fwd ), 0.0 ) : L;
+	float a = clamp( uwFog.x * clamp( ( Lf - uwFog.y ) / span, 0.0, 1.0 ), 0.0, 1.0 );
 	float dv = clamp( H - ( eye.z + dir.z * L ), 0.0, far );	// the light's path down to the point
 	float dc = clamp( H - eye.z, 0.0, far );	// and down to the eye: the fog's own light
 	vec3 Tv = vec3( 1.0 ) - clamp( uwFog.x, 0.0, 1.0 ) * ( dv / far ) * ( vec3( 1.0 ) - tint );

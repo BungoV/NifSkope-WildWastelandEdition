@@ -138,7 +138,9 @@ uniform int waterProbe;
 #endif
 #ifdef WW_WATER_UNDER	// lane WATERLOOK1 step 16 (WATERUNDER2): Snell's window on the surface seen from below
 uniform bool waterUnderOn;	// the Underwater light row
-uniform int waterUnderRed;	// 1 nosnell
+uniform int waterUnderRed;	// 1 nosnell, 2 oldsun
+uniform vec3 waterUnderSun;	// lane WATERUNDER3: the underwater pass's sun (cellunderwater.h wwCellUnderwaterSun)
+uniform vec3 waterUnderSunTo;	// world, normalized
 
 // water -> air Fresnel, unpolarised and exact: 1 past the critical angle (48.6 deg), total internal reflection
 float wwUnderFresnel( float ci )
@@ -556,7 +558,10 @@ void main()
 		if ( waterUnderOn && ( waterUnderRed & 1 ) == 0 ) {
 			/* lane WATERLOOK1 step 16: Snell's window: the air's light comes through only inside the critical cone; past
 			 * it the surface mirrors the water below, the clear colour's deep water along the mirrored ray */
-			wwWaterClearSetup( P, V, D.rgb * D.rgb, normalize( cellWorldDir( LightDir ) ), waterSky[0].rgb, waterSky[2].rgb );
+			if ( ( waterUnderRed & 2 ) != 0 )
+				wwWaterClearSetup( P, V, D.rgb * D.rgb, normalize( cellWorldDir( LightDir ) ), waterSky[0].rgb, waterSky[2].rgb );
+			else
+				wwWaterClearSetup( P, V, waterUnderSun, waterUnderSunTo, waterSky[0].rgb, waterSky[2].rgb );
 			lin = mix( refr, wwWaterClear( vec3( 0.0 ), 1e9, 1e9 ), wwUnderFresnel( clamp( dot( -V, Ns ), 0.0, 1.0 ) ) );
 		}
 #endif

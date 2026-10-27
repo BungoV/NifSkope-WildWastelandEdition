@@ -4098,6 +4098,7 @@ void GLView::paintGL()
 	 * anything else this frame so the ground and the PBR shapes can receive.
 	 * A no-op with the Shadows row off (the default): no map, no program swap. */
 	wwCellCullFrame();	// lane SUNCELL1: the last frame's culling counts, printed when they change
+	wwCellUnderwaterFrame( scene );	// lane WATERUNDER3: the eye under water, decided before anything draws
 	if ( wwLookdevActive() ) {
 		PassTime::Scope pt( PassTime::SunShadows );	// lane PERF1
 		wwSunShadowPass( scene );

@@ -5,6 +5,7 @@
 #include "atmosphere.h"
 #include "atmomath.h"
 #include "cellhdr.h"
+#include "cellunderwater.h"	// lane WATERUNDER3: no clouds over a camera under water
 #include "wwswitch.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -942,7 +943,7 @@ void wwCloudVolFront( Scene * scene )
 	if ( !scene || !scene->renderer || !gpus().contains( scene->renderer ) )
 		return;
 	CvGpu & g = gpus()[scene->renderer];
-	const bool go = g.drewNow && g.sceneTex && !red( "nodepth" );
+	const bool go = g.drewNow && g.sceneTex && !red( "nodepth" ) && !wwCellUnderwaterHidesClouds();
 	g.drewNow = false;
 	if ( go )
 		frontPass( scene->renderer, g, 1 );	// the red display (CLOUD2B); red nodepth: behind all geometry, as CLOUD2
