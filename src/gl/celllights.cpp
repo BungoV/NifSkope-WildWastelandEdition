@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include "gl/cellhdr.h"
 #include "gl/cellbloom.h"	// lane BLOOM1b
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
+#include "gl/cellaomethod.h"	// lane SSAO2
 #include "gl/cellpasstime.h"	// lane PERF2: sub-stage timers
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "gl/lookdevstage.h"	// lane SUNCELL1
@@ -3645,6 +3646,10 @@ struct AoState
 	bool pinned = false;	// lane CELLALL1: the AO row (WW/CellAo); the pin wins
 	int red = 0;			// 1 off (computed, not applied), 2 radius (halved), 4 noblur, 8 noreset
 	QString dump;			// WW_CELL_AO_DUMP
+	int method = WwAoVanilla;	// lane SSAO2: WW_CELL_AO_METHOD (pin) or WW/CellAoMethod
+	bool methodPinned = false;
+	int methodRed = 0;		// WW_CELL_AO_METHOD_RED: 1 vanilla (the method runs, vanilla's term bound), 2 raw (no denoise)
+	bool ssrRedOld = false;	// WW_CELL_AO_SSR_RED=old: AO off leaves the reflections no opaque pass (the old coupling)
 	bool pass = false;		// the opaque pass is drawing
 	QString last = QStringLiteral( "none yet" );
 };
@@ -3662,6 +3667,14 @@ AoState & ao()
 		const QByteArray red = wwEnv( "WW_CELL_AO_RED" ).trimmed();
 		a.red = red == "off" ? 1 : red == "radius" ? 2 : red == "noblur" ? 4 : red == "noreset" ? 8 : 0;
 		a.dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_AO_DUMP" ) );
+		const QByteArray mPin = wwEnv( "WW_CELL_AO_METHOD" ).trimmed().toLower();
+		const int pinned = wwAoMethodParse( mPin.constData() );
+		a.methodPinned = pinned >= 0;
+		a.method = pinned >= 0 ? pinned : std::max( 0, wwAoMethodParse( QSettings().value( QStringLiteral( "WW/CellAoMethod" ),
+			QStringLiteral( "vanilla" ) ).toString().toLatin1().constData() ) );
+		const QByteArray mRed = wwEnv( "WW_CELL_AO_METHOD_RED" ).trimmed();
+		a.methodRed = mRed == "vanilla" ? 1 : mRed == "raw" ? 2 : 0;
+		a.ssrRedOld = wwEnv( "WW_CELL_AO_SSR_RED" ).trimmed() == "old";
 	}
 	return a;
 }
@@ -3678,6 +3691,8 @@ struct AoGpu
 	GLuint gbufDepth = 0;
 	AoTarget mip[5];		// 1..4: the min-of-2x2 depth (R32F)
 	AoTarget raw, across, fin;	// half size: (A, key) RG32F, then the blurs; fin R32F, bilinear
+	AoTarget xz[5], xa, xb, xe;	// lane SSAO2, full size: the working depth mips (R32F), the term ping-pong (R8), XeGTAO's (term, edges)
+	GLuint aoTex = 0;		// lane SSAO2: the term the cell programs read this frame (fin, xa or xb)
 	const void * doc = nullptr;
 	bool ready = false;		// the opaque pass + depth pyramid of this frame (the shared g-buffer: SSR, the AO decal)
 	bool aoReady = false;	// lane AOOFF1: and the obscurance computed from it (false while the AO row is off)
@@ -3953,6 +3968,74 @@ void aoEcho( const QString & line )
 	std::fprintf( stderr, "cell ao: %s\n", qPrintable( line ) );
 }
 
+// lane SSAO2: FO4 Community Shaders' SSAO defaults (radius 1.2 x 32 units, falloff, intensity, power, quality, denoise)
+constexpr float kAoxRadius = 38.4f, kAoxFalloff = 0.615f, kAoxIntensity = 1.0f, kAoxPower = 1.5f;
+constexpr int kAoxSlices = 9, kAoxSteps = 3;
+constexpr float kAoxDenoiseRadius = 2.0f, kAoxDenoiseSigma = 0.08f, kAoxBlurBeta = 1.2f;
+
+//! lane SSAO2: a ported method's full-size passes (res/shaders/cell_aox.frag) over the opaque pass; sets g.aoTex
+const char * aoxPasses( Renderer * r, AoGpu & g, int method, int red, int W, int H, const int ms[5][2], float p00, float p11 )
+{
+	auto fn = r->fn;
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_aox.prog" );
+	if ( !prog ) {
+		if ( red != 1 )
+			g.aoTex = 0;
+		return "refused(no cell_aox.prog)";
+	}
+	const AoTarget * bound[6] = { &g.gbuf, &g.xz[0], &g.xz[1], &g.xz[2], &g.xz[3], &g.xz[4] };
+	for ( int u = 0; u < 6; u++ ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+		fn->glBindTexture( GL_TEXTURE_2D, bound[u]->tex );
+	}
+	prog->uni1i( "gbuf", 0 );
+	prog->uni1i( "xz0", 1 );
+	prog->uni1i( "xz1", 2 );
+	prog->uni1i( "xz2", 3 );
+	prog->uni1i( "xz3", 4 );
+	prog->uni1i( "xz4", 5 );
+	prog->uni1i( "src", 6 );
+	fn->glUniform2i( prog->uniLocation( "fullSize" ), W, H );
+	for ( int m = 0; m < 5; m++ )
+		fn->glUniform2i( prog->uniLocation( "mipSize[%d]", m ), ms[m][0], ms[m][1] );
+	// view space x right, y up, z forward; uv top row first (FO4CS's NDCToViewMul / NDCToViewAdd)
+	prog->uni4f( "ndcToView", FloatVector4( 2.0f / p00, -2.0f / p11, -1.0f / p00, 1.0f / p11 ) );
+	prog->uni4f( "aoxParams", FloatVector4( kAoxRadius, kAoxFalloff, kAoxIntensity, kAoxPower ) );
+	prog->uni2f( "aoxCounts", float( kAoxSlices ), float( kAoxSteps ) );
+	prog->uni3f( "aoxDenoise", kAoxDenoiseRadius, kAoxDenoiseSigma, kAoxBlurBeta );
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
+	auto pass = [&]( int stage, const AoTarget & out, const AoTarget * in ) {
+		fn->glActiveTexture( GL_TEXTURE6 );
+		fn->glBindTexture( GL_TEXTURE_2D, in ? in->tex : 0 );
+		prog->uni1i( "aoxStage", stage );
+		fn->glBindFramebuffer( GL_FRAMEBUFFER, out.fbo );
+		fn->glViewport( 0, 0, out.w, out.h );
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	};
+	pass( 1, g.xz[0], nullptr );
+	for ( int m = 1; m < 5; m++ ) {
+		prog->uni1i( "mipLevel", m );
+		pass( 2, g.xz[m], &g.xz[m - 1] );
+	}
+	const int * st = wwAoMethodStages( method );
+	const AoTarget * in = nullptr;
+	for ( int i = 0; st[i]; i++ ) {
+		if ( red == 2 && st[i] == 5 )
+			break;	// WW_CELL_AO_METHOD_RED=raw: the term before the bilateral denoise
+		const AoTarget & out = st[i] == 6 ? g.xe : in == &g.xa ? g.xb : g.xa;
+		pass( st[i], out, in );
+		in = &out;
+	}
+	r->stopProgram();
+	fn->glActiveTexture( GL_TEXTURE6 );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	if ( red != 1 && in )
+		g.aoTex = in->tex;
+	return nullptr;
+}
+
 }	// namespace
 
 bool wwCellAoOn()
@@ -3974,6 +4057,25 @@ bool wwCellAoPinned()
 	return ao().pinned;
 }
 
+int wwCellAoMethod()
+{
+	return ao().method;
+}
+
+void wwCellAoSetMethod( int method )
+{
+	AoState & a = ao();
+	if ( a.methodPinned || method < 0 || method >= WwAoMethodCount )
+		return;
+	a.method = method;
+	QSettings().setValue( QStringLiteral( "WW/CellAoMethod" ), QString::fromLatin1( wwAoMethodName( method ) ) );
+}
+
+bool wwCellAoMethodPinned()
+{
+	return ao().methodPinned;
+}
+
 void wwCellAoPass( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )
@@ -3984,6 +4086,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	g.ready = false;
 	g.aoReady = false;
 	g.giReady = false;
+	g.aoTex = 0;
 	if ( !run || !wwCellLightsWanted( scene ) )
 		return;
 	auto fn = r->fn;
@@ -4009,12 +4112,14 @@ void wwCellAoPass( Scene * scene, bool run )
 			.arg( forSsr ? QStringLiteral( " ssr" ) : QString() ).arg( forDecal ? QStringLiteral( " aodecal" ) : QString() )
 			.arg( forContact ? QStringLiteral( " contact" ) : QString() ).arg( forGi ? QStringLiteral( " gihalf" ) : QString() )
 			: QStringLiteral( "off (row); no opaque pass (nothing reads it)" ) );
-		if ( !forSsr && !forDecal && !forContact && !forGi ) {
+		// lane SSAO2: the keep rule lives in cellaomethod.h (tests/aomethod); its red drops SSR's claim
+		if ( !wwAoSharedPassRuns( false, forSsr, forDecal || forContact || forGi, a.ssrRedOld ) ) {
 			a.last = QStringLiteral( "off" );
 			return;
 		}
 	} else {
-		aoEcho( ( a.red & 1 ) ? QStringLiteral( "computed, not applied (RED=off)" ) : QStringLiteral( "on" ) );
+		aoEcho( ( ( a.red & 1 ) ? QStringLiteral( "computed, not applied (RED=off)" ) : QStringLiteral( "on" ) )
+			+ ( a.method != WwAoVanilla ? QStringLiteral( " method %1" ).arg( QString::fromLatin1( wwAoMethodName( a.method ) ) ) : QString() ) );
 	}
 	QElapsedTimer timer;
 	timer.start();
@@ -4055,6 +4160,15 @@ void wwCellAoPass( Scene * scene, bool run )
 	aoAlloc( fn, g.raw, hw, hh, GL_RG32F, GL_RG, false );
 	aoAlloc( fn, g.across, hw, hh, GL_RG32F, GL_RG, false );
 	aoAlloc( fn, g.fin, hw, hh, GL_R32F, GL_RED, true );
+	const int method = a.on ? a.method : WwAoVanilla;	// lane SSAO2
+	if ( method != WwAoVanilla ) {
+		for ( int m = 0; m < 5; m++ )
+			aoAlloc( fn, g.xz[m], ms[m][0], ms[m][1], GL_R32F, GL_RED, false );
+		aoAlloc( fn, g.xa, W, H, GL_R8, GL_RED, false );
+		aoAlloc( fn, g.xb, W, H, GL_R8, GL_RED, false );
+		if ( method == WwAoXeGtao )
+			aoAlloc( fn, g.xe, W, H, GL_RG32F, GL_RG, false );
+	}
 
 	// 1. the opaque cell-lit fragments: the view normal and the linear depth (probe 20); the background far away
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.gbuf.fbo );
@@ -4162,12 +4276,17 @@ void wwCellAoPass( Scene * scene, bool run )
 		prog->uni1i( "mipLevel", m );
 		pass( 1, g.mip[m], m > 1 ? &g.mip[m - 1] : nullptr );
 	}
-	if ( a.on ) {	// lane AOOFF1: the obscurance itself; the pyramid above is shared
+	// lane AOOFF1: the obscurance itself; the pyramid above is shared. lane SSAO2: a ported method skips it
+	if ( a.on && ( method == WwAoVanilla || a.methodRed == 1 ) ) {
 		pass( 2, g.raw, nullptr );
 		pass( 3, g.across, &g.raw );
 		pass( 4, g.fin, &g.across );
 	}
 	r->stopProgram();
+	g.aoTex = a.on ? g.fin.tex : 0;
+	const char * aoxRefused = nullptr;
+	if ( method != WwAoVanilla )
+		aoxRefused = aoxPasses( r, g, method, a.methodRed, W, H, ms, p00, p11 );
 	for ( int u = 0; u < 6; u++ ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
@@ -4180,10 +4299,17 @@ void wwCellAoPass( Scene * scene, bool run )
 	PassTime::subEnd( PassTime::AoGi );
 
 	g.ready = true;
-	g.aoReady = a.on;
+	g.aoReady = a.on && g.aoTex;
 	g.doc = scene->nifModel;
 	if ( !a.on ) {
 		a.last = QStringLiteral( "off (opaque pass %1x%2 kept, ms %3)" ).arg( W ).arg( H ).arg( timer.elapsed() );
+	} else if ( method != WwAoVanilla ) {
+		a.last = QStringLiteral( "on method %1 full %2x%3 radius %4 falloff %5 intensity %6 power %7 slices %8 steps %9 "
+			"bound %10 red %11 ms %12" ).arg( QString::fromLatin1( wwAoMethodName( method ) ) ).arg( W ).arg( H )
+			.arg( double( kAoxRadius ), 0, 'f', 2 ).arg( double( kAoxFalloff ), 0, 'f', 3 ).arg( double( kAoxIntensity ), 0, 'f', 2 )
+			.arg( double( kAoxPower ), 0, 'f', 2 ).arg( kAoxSlices ).arg( kAoxSteps )
+			.arg( aoxRefused ? QString::fromLatin1( aoxRefused ) : g.aoTex == g.fin.tex ? QStringLiteral( "vanilla(red)" )
+				: QStringLiteral( "aox" ) ).arg( a.methodRed ).arg( timer.elapsed() );
 	} else {
 		a.last = QStringLiteral( "on %1x%2 half %3x%4 radius %5 bias %6 intensity %7 angles %8 p00 %9 p11 %10 p20 %11 p21 %12 "
 			"unit %13 red %14 ms %15" ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( radius ), 0, 'f', 2 )
@@ -4194,7 +4320,31 @@ void wwCellAoPass( Scene * scene, bool run )
 
 	// WW_CELL_AO_DUMP=<file>: int32 W H hw hh, the opaque pass (W x H RGBA float, bottom row first), the raw
 	// (A, key) and the final obscurance (hw x hh, top row first); <file>.txt the numbers
-	if ( !a.dump.isEmpty() && g.aoReady ) {
+	// lane SSAO2: a ported method writes <file>.aox instead: int32 W H, the bound term (W x H float, top row first)
+	if ( !a.dump.isEmpty() && g.aoReady && method != WwAoVanilla && g.aoTex != g.fin.tex ) {
+		std::vector<std::uint8_t> t8( size_t( W ) * size_t( H ) );
+		std::vector<float> tf( t8.size() );
+		fn->glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.aoTex == g.xa.tex ? g.xa.fbo : g.xb.fbo );
+		fn->glReadPixels( 0, 0, W, H, GL_RED, GL_UNSIGNED_BYTE, t8.data() );
+		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+		double mean = 0.0;
+		for ( size_t i = 0; i < t8.size(); i++ ) {
+			tf[i] = float( t8[i] ) / 255.0f;
+			mean += double( tf[i] );
+		}
+		mean /= double( std::max<size_t>( tf.size(), 1 ) );
+		a.last += QStringLiteral( " mean %1" ).arg( mean, 0, 'f', 4 );
+		QFile f( a.dump + QStringLiteral( ".aox" ) );
+		if ( f.open( QIODevice::WriteOnly ) ) {
+			const qint32 hd[2] = { W, H };
+			f.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
+			f.write( reinterpret_cast<const char *>( tf.data() ), qint64( tf.size() * sizeof( float ) ) );
+		}
+		QFile t( a.dump + QStringLiteral( ".txt" ) );
+		if ( t.open( QIODevice::WriteOnly | QIODevice::Text ) )
+			t.write( ( QStringLiteral( "ao: " ) + a.last + QStringLiteral( "\n" ) ).toUtf8() );
+	} else if ( !a.dump.isEmpty() && g.aoReady ) {
 		std::vector<float> gb( size_t( W ) * size_t( H ) * 4 ), raw( size_t( hw ) * size_t( hh ) * 2 ),
 			fin( size_t( hw ) * size_t( hh ) );
 		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
@@ -4311,7 +4461,7 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
 	const GLint prevActive = wwDrawActiveTexture();	// lane PERF3
 	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + g.unit ) );
-	r->fn->glBindTexture( GL_TEXTURE_2D, on ? g.fin.tex : 0 );
+	r->fn->glBindTexture( GL_TEXTURE_2D, on ? g.aoTex : 0 );	// lane SSAO2: the method's term (fin for vanilla)
 	r->fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellAo", g.unit );
 	prog->uni1b( "cellAoOn", on );
