@@ -94,6 +94,16 @@ bool redNearest()
 	return on;
 }
 
+}	// namespace: cellSplatSpecRed is declared in cellsplat.h
+
+bool cellSplatSpecRed()
+{
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_TERRBLEND_RED" ) == "nospec" );
+	return on;
+}
+
+namespace {
+
 //! lane ALLON2: the red for the vertex normals -- every corner lit with its quad's face normal, as before
 bool redFaceNormal()
 {
@@ -337,6 +347,14 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 		b.ltex = ltex;
 		b.diffuse = diffuse;
 		b.normal = normal;
+		/* lane DUNESAND1: the game's Landscape shader samples each layer's TX07 _s (gloss, spec mask); without it the
+		 * ground drew at smoothness 1 / mask 1 and 1.4x brighter than a static with the same sand. A material-backed set's
+		 * .bgsm names its own. */
+		const EsmLtexTextureSet & set = world.ltexTextureSet( ltex );
+		if ( set.material.isEmpty() && !cellSplatSpecRed() )
+			b.spec = set.specular;
+		if ( !b.spec.isEmpty() )
+			out.bucketsSpec++;
 		b.order = order;
 		b.blend = blend;
 		const int idx = out.buckets.size();
@@ -555,6 +573,8 @@ QString cellSplatLegend( const CellSplatBuild & b )
 			"(its SW corner), the per-quad switching put back on purpose" );
 	if ( b.ltexUnresolved )
 		s += QString( "; %1 LTEX forms named no texture" ).arg( b.ltexUnresolved );
+	s += cellSplatSpecRed() ? QStringLiteral( "; RED CONTROL WW_TERRBLEND_RED=nospec: no TX07 map on the ground" )
+		: QString( "; %1 of %2 passes carry their TX07 _s map" ).arg( b.bucketsSpec ).arg( b.buckets.size() );
 	/* THE ONE THING A READER MUST NOT HAVE TO ASK. Without the ATXT layer index
 	 * the composite is in the order the layers happen to sit in the record,
 	 * which is not the engine's paint order and can put gravel under grass that

@@ -5522,6 +5522,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 							: QFileInfo( src.diffuse ).fileName();
 						gbk.matString = src.diffuse;
 						gbk.normalTex = src.normal;
+						gbk.specTex = src.spec;	// lane DUNESAND1: slot 7, the LTEX's _s (cellsplat.cpp)
 						gbk.withColour = true;
 						/* A layer pass is ADDED; a base pass is opaque and scaled by its
 						 * share in the shader (lane TERRBLEND1). */
