@@ -134,6 +134,10 @@ struct LodtWaterOptions
 	 *  as wall tops stamped into the ray heightfield. Off = terrain only, the WATERSKYVISFAR1 bytes
 	 *  (--water-sky-terrain-only). Needs LodtOptions::staticTops; without it the plane is terrain only. */
 	bool skyStatics = true;
+	/*! Lane WATERSKYVISFAR3: a wet texel a static covers (a pier deck, a bridge, a rock over its own point) casts
+	 *  through the statics as SLABS (lowest to highest surface) instead of the walls; every other texel keeps the
+	 *  wall bytes. Off = the WATERSKYVISFAR2 bytes (--water-sky-walls-only). */
+	bool skySlabs = true;
 	//! Lane WATERSKYVISFAR2: --water-sky-dump <file>, the ray heightfield before and after the statics (gate input).
 	QString skyDumpPath;
 	/*! The plugin the WATR `NAM0` linear velocities are read from -- vanilla's

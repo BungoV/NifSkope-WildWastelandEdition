@@ -8825,6 +8825,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-no-sky" ) ) gLodlWater.skyVis = false;	// lane WATERSKYVISFAR1: version 3
 		else if ( t == QLatin1String( "--water-sky-terrain-only" ) ) gLodlWater.skyStatics = false;	// lane WATERSKYVISFAR2
 		else if ( t == QLatin1String( "--water-sky-dump" ) ) gLodlWater.skyDumpPath = next();
+		else if ( t == QLatin1String( "--water-sky-walls-only" ) ) gLodlWater.skySlabs = false;	// lane WATERSKYVISFAR3
 		else if ( t == QLatin1String( "--water-velocities" ) ) gLodlWater.velocityPlugin = next();
 		else if ( t == QLatin1String( "--water-report" ) ) gLodlWater.reportPath = next();
 		else if ( t == QLatin1String( "--dump-land" ) ) lgDumpLand = next();

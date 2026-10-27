@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERSKYVISFAR3 (2026-10-27, branch waterskyvisfar3-20261027): water under a pier deck reads the deck's shade
+
+- **Why:** WATERSKYVISFAR2 stamped statics as walls only. A bridge or pier deck floating over the water was a
+  "ceiling" and was left out, so the water under it read the open sky. A static standing in the water buried its
+  own texel, so those texels sat on the 0.252 floor.
+- **Slabs:** every static square is now also kept as a slab at its grid point, from its lowest to its highest
+  surface. A wet texel whose own point has a slab top above the water casts the bake's 56 sky rays through the
+  terrain alone plus the slabs, marched square by square. A texel inside its own slab leaves its own square out.
+  Every other wet texel keeps the WATERSKYVISFAR2 byte exactly (21,724,077 of 21,755,123 on the Commonwealth).
+  Commonwealth: 31,043 covered texels. Under a deck the mean goes 0.628 -> 0.171; inside a static 0.441 -> 0.353.
+- **Statics gather on worker threads:** the distinct LOD models load once each on workers, and the placements
+  rasterise with atomic max/min, so the planes are the serial bytes. The refusal census replays in placement order.
+  Commonwealth gather: 46.0 s -> 16.5 s cold, 3.9 s -> 2.4 s warm. `WW_LODGEN_BAKESPEED_RED=1` runs the old serial walk.
+- **Flags:** `--water-sky-walls-only` writes the WATERSKYVISFAR2 bytes. With slabs on, `--water-sky-dump` appends two
+  more u16 planes (slab bottom, slab top). The census adds `sky slabs: N covered ... (U under, I inside)`.
+- **Cost:** no shader change, GPU +0 ms at 1080p. The sky plane grows 974 KB -> 988 KB. The .lodl stage's peak working
+  set goes 1.29 GB -> 1.43 GB. The slab march adds about 2.8 s to the sky stage (warm).
+
 ## Lane WATERSKYVISFAR2 (2026-10-27, branch waterskyvisfar2-20261027): cliffs and buildings darken the far water too
 
 - **Why:** WATERSKYVISFAR1's far-water sky byte saw the terrain only, so water under a cliff static, a rock
