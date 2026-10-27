@@ -79,7 +79,8 @@ bool invert4( const double a[4][4], double o[4][4] )
 
 void wwCellUnderwaterPass( Scene * scene )
 {
-	if ( !wwLookOn( WwLook::Underwater ) ) {
+	const bool light = wwLookOn( WwLook::WaterUnderLight );	// lane WATERLOOK1 step 16: the Underwater light row
+	if ( !wwLookOn( WwLook::Underwater ) && !light ) {
 		ust().echo = QStringLiteral( "underwater: off" );
 		return;
 	}
@@ -126,12 +127,14 @@ void wwCellUnderwaterPass( Scene * scene )
 	WwWaterRecord rec;
 	float H = 0.0f;
 	bool found = false;
+	int cls = 2;	// a placed water shape reads as a lake (the clear colour's rule)
 	QString via;
 	WwWaterInfoHit hit;
 	if ( wwCellWaterInfoAt( scene->nifModel, ex, ey, hit ) && hit.body && ez < hit.height + float( margin )
 		&& ez > hit.height - hit.depth - 256.0f && wwCellWaterRecordOf( scene->nifModel, hit.form, rec ) ) {
 		H = hit.height;
 		found = true;
+		cls = hit.cls >= 0 && hit.cls <= 2 ? hit.cls : 2;
 		via = QStringLiteral( "baked body %1" ).arg( hit.body );
 	} else if ( wwCellWaterPlaneOver( scene, ex, ey, ez - float( margin ), 8192.0f, H, rec ) ) {
 		found = true;
@@ -198,6 +201,38 @@ void wwCellUnderwaterPass( Scene * scene )
 	prog->uni3f( "uwColor", fogCol[0], fogCol[1], fogCol[2] );
 	prog->uni3f( "uwTint", uw[0], uw[1], uw[2] );
 	prog->uni1i( "uwRed", red );
+	/* lane WATERLOOK1 step 16: the Underwater light row: the class's coefficients, lit by the sun the cell surfaces
+	 * take (an exterior's weather sun x Sunlight Scale, else the cell's directional) and the water's sky; the meniscus
+	 * 1.5 px each side, 0.6 dark at its middle */
+	WW_SWITCH_STATIC( QByteArray, lr, wwEnv( "WW_CELL_WATER_UNDERLIGHT_RED" ).trimmed() );
+	const int lred = ( lr.contains( "nomeniscus" ) ? 2 : 0 ) | ( lr.contains( "nocolor" ) ? 4 : 0 );
+	float skyH[3], skyL[3], skyU[3];	// the water program's two sky rows (the horizon and the upper row)
+	if ( !wwLookdevWaterSky( skyH, skyL, skyU ) )
+		for ( int c = 0; c < 3; c++ )
+			skyH[c] = skyU[c] = wwWaterLin( rec.reflection[c] );
+	float sunTo[3] = { 0.0f, 0.0f, 1.0f }, sunCol[3] = { 0.0f, 0.0f, 0.0f };
+	if ( const WwCellLighting * cl = wwCellLightsFor( scene->nifModel ) ) {
+		float dif[4] = {}, amb[4] = {};
+		if ( !cl->interior && wwLookdevActive() ) {
+			wwLookdevLight( sunTo, dif, amb );
+			for ( int c = 0; c < 3; c++ )
+				sunCol[c] = dif[c] * wwLookdevSunlightScale();
+		} else if ( cl->hasDirectional ) {
+			for ( int c = 0; c < 3; c++ ) {
+				sunTo[c] = cl->dirTo[c];
+				sunCol[c] = cl->dirColor[c];
+			}
+		}
+	}
+	const float sunLen = std::sqrt( sunTo[0] * sunTo[0] + sunTo[1] * sunTo[1] + sunTo[2] * sunTo[2] );
+	const float sunCos = sunLen > 0.0f ? sunTo[2] / sunLen : 0.0f;
+	prog->uni1i( "uwLight", light ? 1 : 0 );
+	prog->uni1i( "uwLightRed", lred );
+	prog->uni4f( "uwSun", FloatVector4( sunCos > 0.0f ? sunCol[0] : 0.0f, sunCos > 0.0f ? sunCol[1] : 0.0f,
+		sunCos > 0.0f ? sunCol[2] : 0.0f, std::max( sunCos, 0.0f ) ) );
+	prog->uni3f( "uwSky", 0.5f * ( skyH[0] + skyU[0] ), 0.5f * ( skyH[1] + skyU[1] ), 0.5f * ( skyH[2] + skyU[2] ) );
+	prog->uni1i( "uwClass", cls );
+	prog->uni2f( "uwMenK", 1.5f, 0.6f );
 
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDisable( GL_STENCIL_TEST );
@@ -231,7 +266,11 @@ void wwCellUnderwaterPass( Scene * scene )
 		.arg( rec.form, 8, 16, QLatin1Char( '0' ) ).arg( double( rec.uwFogAmount ), 0, 'g', 4 )
 		.arg( double( rec.uwFogNear ), 0, 'g', 6 ).arg( double( rec.uwFogFar ), 0, 'g', 6 )
 		.arg( double( fogCol[0] ), 0, 'f', 4 ).arg( double( fogCol[1] ), 0, 'f', 4 ).arg( double( fogCol[2] ), 0, 'f', 4 )
-		.arg( red ? QStringLiteral( " red %1" ).arg( redS ) : QString() ) );
+		.arg( red ? QStringLiteral( " red %1" ).arg( redS ) : QString() )
+		+ ( light ? QStringLiteral( "; light class %1 sun %2 %3 %4 at cos %5%6" ).arg( cls )
+			.arg( double( sunCol[0] ), 0, 'f', 3 ).arg( double( sunCol[1] ), 0, 'f', 3 ).arg( double( sunCol[2] ), 0, 'f', 3 )
+			.arg( double( sunCos ), 0, 'f', 3 ).arg( lred ? QStringLiteral( " red %1" ).arg( QString::fromLatin1( lr ) ) : QString() )
+			: QString() ) );
 }
 
 QString wwCellUnderwaterEcho()

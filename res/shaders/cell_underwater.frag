@@ -4,6 +4,11 @@
 // glBlendFuncSeparate( GL_ONE, GL_SRC1_COLOR, GL_ZERO, GL_ONE ): frame = frame * mul + add, alpha kept).
 
 #include "water_under.glsl"
+// lane WATERLOOK1 step 16 (WATERUNDER2): the Underwater light row, the clear colour's coefficients + the meniscus
+#include "water_info.glsl"
+#include "water_depth.glsl"
+#include "water_clear.glsl"
+#include "water_underlight.glsl"
 
 uniform sampler2D uwDepth;	// R32F: the frame's farthest window depth per pixel (cellhdr.cpp wwCellHdrDepthMax)
 uniform mat4 uwInvProj;		// clip -> view
@@ -32,7 +37,11 @@ void main()
 	vec3 Pn = uwWorld( ndc, -1.0 );
 	vec3 Pw = uwWorld( ndc, d * 2.0 - 1.0 );
 	vec3 add, mul;
-	wwUnderwater( uwEye, Pn, Pw, d >= 1.0, uwFog, uwColor, uwTint, uwRed, add, mul );
-	fragAdd = vec4( add, 0.0 );
-	fragMul = vec4( mul, 1.0 );
+	if ( uwLight != 0 && ( uwLightRed & 4 ) == 0 )
+		wwUnderLight( uwEye, Pn, Pw, d >= 1.0, uwFog.w, add, mul );
+	else
+		wwUnderwater( uwEye, Pn, Pw, d >= 1.0, uwFog, uwColor, uwTint, uwRed, add, mul );
+	float men = wwUnderMeniscus( Pn.z - uwFog.w, fwidth( Pn.z ) * uwMenK.x );	// 0 with the row off
+	fragAdd = vec4( add * ( 1.0 - men ), 0.0 );
+	fragMul = vec4( mul * ( 1.0 - men ), 1.0 );
 }

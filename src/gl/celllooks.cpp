@@ -69,6 +69,7 @@ const LookRow kRows[] = {
 	{ "Wet shore", "WW/CellLandWet" },
 	{ "Wave run-up", "WW/CellLandSwash" },
 	{ "River foam", "WW/CellWaterRiverFoam" },
+	{ "Underwater light", "WW/CellWaterUnderLight" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -298,6 +299,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_RIVERFOAM" ).trimmed() );
 		return p;
 	}
+	case WwLook::WaterUnderLight: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_UNDERLIGHT" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -365,6 +370,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::LandWet: return "WW_CELL_LAND_WET";
 	case WwLook::LandSwash: return "WW_CELL_LAND_SWASH";
 	case WwLook::WaterRiverFoam: return "WW_CELL_WATER_RIVERFOAM";
+	case WwLook::WaterUnderLight: return "WW_CELL_WATER_UNDERLIGHT";
 	default: return "";
 	}
 }

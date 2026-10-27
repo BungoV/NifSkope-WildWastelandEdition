@@ -100,6 +100,11 @@ bool wwCellWaterSsrWanted( Scene * scene );
  *  WW_CELL_WATER_RIVERFOAM): foam streaks on baked rivers, laid along the baked flow and carried downstream by it
  *  (res/shaders/water_riverfoam.glsl). The moving water makes the foam; it gathers where the flow converges and thins
  *  where it spreads. Red WW_CELL_WATER_RIVERFOAM_RED=nodiv | still | iso | alias (combinable). */
+/*! lane WATERLOOK1 step 16 (WATERUNDER2, 2026-10-27): the Underwater light row (WwLook::WaterUnderLight, pin
+ *  WW_CELL_WATER_UNDERLIGHT). The surface seen from below shows the air only inside Snell's window (the exact
+ *  water-to-air Fresnel, total reflection past 48.6 deg, where it mirrors the water's own colour); the underwater pass
+ *  (cellunderwater.h) takes the Water clear colour's coefficients and draws a meniscus at the waterline.
+ *  Red WW_CELL_WATER_UNDERLIGHT_RED=nosnell | nomeniscus | nocolor (combinable). */
 const char * wwCellWaterProgram();
 //! lane WATERCOMBINE1: any water look row is on (the water draws with fo4_waterlook.prog)
 bool wwCellWaterLookOn();

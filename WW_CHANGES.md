@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 16 (2026-10-27, branch waterlook1-20261027): light under water (WATERUNDER2)
+
+- New Display row **Underwater light** (default off). With the camera under water:
+  - The water itself takes the same colours as the Water clear colour row for its type (sea, river, lake): the sea
+    turns blue with distance and depth, a river browner, and both get darker the deeper you go, red first.
+  - Looking up, the surface shows Snell's window: the sky only inside a cone overhead; past about 49 degrees the
+    surface mirrors the water below (this replaces the old reflection term for the surface seen from below).
+  - Where the screen cuts the waterline (the camera half in), a thin dark band marks the meniscus.
+- It works with or without the Underwater fog row. Off: frames are byte-identical to before.
+- Offline checks (no window): row off matches the old pass byte for byte; the new light matches an independent
+  model to 1e-5; the mirror meets the water colour below at the seam; the Fresnel matches the textbook formula to
+  6e-6 with total reflection from 48.6 degrees; the band is 3 px and 0.6 dark. Cost: about 0.001 ms more than the
+  fog pass alone at 1080p, only under water.
+- Not done: what INAM means, the game's fog curve (needs a capture), limits of the water-plane fallback, fog on the
+  volume clouds, MSAA silhouette depth. Owed live check: the sun brightness under water against the lit surfaces.
+
 ## Lane WATERLOOK1 step 15 (2026-10-27, branch waterlook1-20261027): foam streaks on rivers (WATERFLOW1)
 
 - New row **River foam** (WW_CELL_WATER_RIVERFOAM), a water row. Rivers get long, thin foam streaks that lie along

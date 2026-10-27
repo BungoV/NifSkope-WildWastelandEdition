@@ -398,6 +398,11 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni4f( "waterRiverFoamK", FloatVector4( 120.0f, 0.12f, 0.4f, 0.85f ) );
 		prog->uni4f( "waterRiverFoamK2", FloatVector4( 24.0f, 8.0f, 0.3f, 0.8f ) );
 	}
+	if ( prog->uniLocation( "waterUnderOn" ) >= 0 ) {	// lane WATERLOOK1 step 16: the Underwater light row (Snell's window)
+		prog->uni1b( "waterUnderOn", wwLookOn( WwLook::WaterUnderLight ) );
+		WW_SWITCH_STATIC( QByteArray, ur, wwEnv( "WW_CELL_WATER_UNDERLIGHT_RED" ).trimmed() );
+		prog->uni1i( "waterUnderRed", ur.contains( "nosnell" ) ? 1 : 0 );
+	}
 	if ( prog->uniLocation( "waterCauTime" ) >= 0 ) {	// lane WATERCAUSTICS1: fo4_waterlook only
 		prog->uni1b( "waterCauOn", wwLookOn( WwLook::WaterCaustics ) );	// lane WATERCOMBINE1: its own row
 		WW_SWITCH_STATIC( QByteArray, cr, wwEnv( "WW_CELL_WATER_CAUSTICS_RED" ).trimmed() );
@@ -599,7 +604,8 @@ bool wwCellWaterLookOn()
 		|| wwLookOn( WwLook::WaterSkyVis )	// lane WATERLOOK1 step 10
 		|| wwLookOn( WwLook::WaterSurf )	// lane WATERLOOK1 step 11
 		|| wwLookOn( WwLook::WaterContact )	// lane WATERLOOK1 step 12
-		|| wwLookOn( WwLook::WaterRiverFoam );	// lane WATERLOOK1 step 15
+		|| wwLookOn( WwLook::WaterRiverFoam )	// lane WATERLOOK1 step 15
+		|| wwLookOn( WwLook::WaterUnderLight );	// lane WATERLOOK1 step 16
 }
 
 bool wwCellWaterRecordOf( const void * nif, quint32 form, WwWaterRecord & rec )
@@ -722,6 +728,7 @@ QString wwCellWaterEcho( const void * nif )
 				+ ( wwLookOn( WwLook::WaterSurf ) ? QLatin1String( " surf" ) : QLatin1String( "" ) )
 				+ ( wwLookOn( WwLook::WaterContact ) ? QLatin1String( " contact" ) : QLatin1String( "" ) )
 				+ ( wwLookOn( WwLook::WaterRiverFoam ) ? QLatin1String( " riverfoam" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterUnderLight ) ? QLatin1String( " underlight" ) : QLatin1String( "" ) )
 			: QString() )
 		// lane WATERLOOK1: what the spectrum built (said only while its row is on)
 		+ ( wwCellOceanEcho().isEmpty() ? QString() : QStringLiteral( "; " ) + wwCellOceanEcho() );

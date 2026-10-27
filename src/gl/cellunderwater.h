@@ -17,7 +17,16 @@ class Scene;
  *  Which water: the baked body at the camera (cellwaterinfo.h, its WATR form), else the lowest registered water shape
  *  above it (cellwater.h). The waterline splits per pixel (each pixel's near-plane point against the surface).
  *  The Underwater fog row (WwLook::Underwater, pin WW_CELL_UNDERWATER), default off. Off, or the camera above water:
- *  no GL call. Harness only: WW_CELL_UNDERWATER_RED=notint (no depth darkening) | nofog (no view fog). */
+ *  no GL call. Harness only: WW_CELL_UNDERWATER_RED=notint (no depth darkening) | nofog (no view fog).
+ *
+ *  Lane WATERLOOK1 step 16 (WATERUNDER2): the Underwater light row (WwLook::WaterUnderLight, pin
+ *  WW_CELL_WATER_UNDERLIGHT, default off) runs this pass by itself or with the fog row. Under water it takes the
+ *  Water clear colour's coefficients for the body's class in place of the WATR fog (res/shaders/
+ *  water_underlight.glsl): transmission exp(-k L), single scattering of the sun and the sky each dimmed with depth,
+ *  the scene dimmed by the light's way down. At the waterline a dark meniscus band 1.5 px each side. The water
+ *  program draws Snell's window on the surface seen from below (cellwater.h). The sun is the cell's surfaces' sun
+ *  (the weather sun x Sunlight Scale outdoors), the sky the water's sky. Harness only:
+ *  WW_CELL_WATER_UNDERLIGHT_RED=nomeniscus | nocolor (the fog law stays). */
 
 //! Inside the linear frame, after the scene and before wwCellHdrEnd: the fog when the camera is under water.
 void wwCellUnderwaterPass( Scene * scene );

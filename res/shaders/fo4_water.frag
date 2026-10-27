@@ -136,6 +136,22 @@ uniform int waterProbe;
 #ifdef WW_WATER_RIVERFOAM
 #include "water_riverfoam.glsl"
 #endif
+#ifdef WW_WATER_UNDER	// lane WATERLOOK1 step 16 (WATERUNDER2): Snell's window on the surface seen from below
+uniform bool waterUnderOn;	// the Underwater light row
+uniform int waterUnderRed;	// 1 nosnell
+
+// water -> air Fresnel, unpolarised and exact: 1 past the critical angle (48.6 deg), total internal reflection
+float wwUnderFresnel( float ci )
+{
+	const float n = 1.333;
+	float st2 = n * n * ( 1.0 - ci * ci );
+	if ( st2 >= 1.0 )
+		return 1.0;
+	float ct = sqrt( 1.0 - st2 );
+	float rs = ( n * ci - ct ) / ( n * ci + ct ), rp = ( ci - n * ct ) / ( ci + n * ct );
+	return 0.5 * ( rs * rs + rp * rp );
+}
+#endif
 #ifdef WW_WATER_DISP	// lane WATERLOOK1 step 2: fo4_waterlookd.prog, the displaced water: the undisplaced world xy (u)
 in vec2 wwOcBase;
 #endif
@@ -536,6 +552,14 @@ void main()
 		// the game's underwater variant: half the sky and half the underwater colour, the scene by 1 - F
 		vec3 refl = 0.5 * ( sky + waterMat[3].rgb );
 		lin = mix( refl, refr, 1.0 - F );
+#ifdef WW_WATER_UNDER
+		if ( waterUnderOn && ( waterUnderRed & 1 ) == 0 ) {
+			/* lane WATERLOOK1 step 16: Snell's window: the air's light comes through only inside the critical cone; past
+			 * it the surface mirrors the water below, the clear colour's deep water along the mirrored ray */
+			wwWaterClearSetup( P, V, D.rgb * D.rgb, normalize( cellWorldDir( LightDir ) ), waterSky[0].rgb, waterSky[2].rgb );
+			lin = mix( refr, wwWaterClear( vec3( 0.0 ), 1e9, 1e9 ), wwUnderFresnel( clamp( dot( -V, Ns ), 0.0, 1.0 ) ) );
+		}
+#endif
 	} else {
 		float wRefl = ( waterRed & 1 ) != 0 ? 0.0 : F * Var.y;
 		vec3 far = mix( waterMat[2].rgb, sky, waterMat[2].w );
