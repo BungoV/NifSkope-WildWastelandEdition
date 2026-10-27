@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LANDSPEC1 (2026-10-27, branch landspec1-20261027): the far ground's specular and the land-LOD blend
+
+- **Why:** the game draws its LOD land with fLODLandSpecPower 0.22 (gloss) and fLODLandSpecScale 0.06 (spec mask), and
+  its near land shader lerps the ground's own gloss/spec toward those two by distance. The viewer drew the far ground
+  and the outer near cells with their own values (gloss up to 1).
+- **Law (from the game's shaders):** v = 1 - saturate((9625.6 - d) / 2662.4), d = the xy distance to the centre of the
+  camera's cell; 0 within 1.7 cells, whole from 2.35 cells. gloss = lerp(own, 0.22, v), spec = lerp(own, 0.06, v).
+  Far LOD terrain: v = 1. `src/landlodspec.h` holds it; `fo4_default.frag` (cell programs, uniforms `landLod`,
+  `landLodK`) runs it for the lit specular, the Oren-Nayar roughness and the SSR weight.
+- **Red:** `WW_LANDSPEC_RED=off` (live, stage 0) draws the ground as before. Specular view off sends a 0 spec target.
+- **Not done:** wetness. The law and the game's wetness clock are in the header, untested in pictures; the viewer reads
+  no precipitation yet. PBR mode (pbrm_cell) keeps the old ground spec.
+- **Test:** `tests/landspec` (green PASS; red `-DLANDSPEC_RED`, and the base's shader, FAIL).
+
 ## Lane DUNESAND3 (2026-10-27, branch dunesand3-20261027): the ground legend follows a live spec red
 
 - **Why:** DUNESAND2 made `WW_TERRBLEND_RED=nospec` swap the ground's TX07 in place, but the ground legend line was

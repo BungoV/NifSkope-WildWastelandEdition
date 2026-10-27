@@ -302,6 +302,9 @@ vec3 tonemap(vec3 x)
 #include "cell_grass.glsl"
 // lane WATERWETBAKE1: the land side of the shore plane (no call yet: WATERWET1)
 #include "land_shore.glsl"
+// lane LANDSPEC1: x 0 off, 1 near ground, 2 far LOD ground; yz the camera cell's centre (scene xy)
+uniform vec4 landLod;
+uniform vec4 landLodK;	// fLODLandSpecPower, fLODLandSpecScale (0: specular off), blend end, 1 / blend width
 #endif
 #ifdef WW_FARGROUND	// lane FARDRAW1: the far ring 0's live ground
 #include "cell_farground.glsl"
@@ -597,6 +600,16 @@ void main()
 	// scalar Smoothness/Specular Strength authored used to render completely
 	// matte, which is not what the game does with it.
 	float specMask = s * specStrength;
+#if defined( WW_CELLLIGHTS ) && !defined( WW_LANDSPEC_NONE )
+	/* lane LANDSPEC1 (src/landlodspec.h): the game's LOD land gloss/spec on the far ground, and on the near ground
+	 * lerped in from 1.7 to 2.35 cells off the camera cell's centre (its land-LOD blend) */
+	float landLodV = landLod.x > 1.5 ? 1.0 : ( landLod.x > 0.5
+		? 1.0 - clamp( ( landLodK.z - distance( cellWorldPos( -ViewDir ).xy, landLod.yz ) ) * landLodK.w, 0.0, 1.0 ) : 0.0 );
+	smoothness = mix( smoothness, landLodK.x, landLodV );
+	specMask = mix( specMask, landLodK.y, landLodV );
+#elif defined( WW_CELLLIGHTS )
+	const float landLodV = 0.0;
+#endif
 
 	// FO4 encodes NO metallicity, so F0 is the dielectric constant and _s.R
 	// stays what it is authored as — a specular MASK, not a metalness channel.
@@ -662,8 +675,8 @@ void main()
 		                        cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection );
 	// lane SSR1: the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
 	if ( cellOn )
-		cubeK = cellSsrMix( cubeK, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
-		                    cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection );
+		cubeK = cellSsrMix( cubeK, mix( cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ), landLodK.x, landLodV ),
+		                    mix( cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), landLodK.y, landLodV ), envReflection );
 	cubeK *= specSky;	// lane SPECOCC1: after the SSR mix, as FO4CS scales its reflection after the SSR blend
 #endif
 
