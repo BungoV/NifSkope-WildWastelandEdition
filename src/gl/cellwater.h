@@ -82,6 +82,11 @@ bool wwCellWaterSsrWanted( Scene * scene );
  *  lobe, the sun's glare along the sun (res/shaders/water_skyvis.glsl): water under a bridge or a pier is darker than
  *  open water at the same angle. The row packs the sky grid into cellGi as SPECOCC1 does (celllights.cpp).
  *  Red WW_CELL_WATER_SKYVIS_RED=one (visibility 1) | nosun. */
+/*! lane WATERLOOK1 step 11 (WATERSURF1, 2026-10-27): the Surf row (WwLook::WaterSurf, pin WW_CELL_WATER_SURF): shore
+ *  waves on baked seas (res/shaders/water_surf.glsl), normal and foam only. The shore distance is their phase, the
+ *  travel time integrated on the dispersion relation over the local beach slope; they shoal, steepen and break at
+ *  0.78 of the depth, with a foam trail behind each broken crest; groups and an along-shore noise break the
+ *  regularity. Red WW_CELL_WATER_SURF_RED=noshoal | nobreak | regular | alias (combinable). */
 const char * wwCellWaterProgram();
 //! lane WATERCOMBINE1: any water look row is on (the water draws with fo4_waterlook.prog)
 bool wwCellWaterLookOn();

@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 11 (2026-10-27, branch waterlook1-20261027): surf on the sea (WATERSURF1)
+
+- New row **Surf** (WW_CELL_WATER_SURF). Waves now roll in to the coast on seas. Rivers and lakes get none. They
+  run parallel to the shore, using the baked shore distance as their phase.
+- In the shallows they slow down and close up, as real waves do. On a 1:50 beach an 8 s swell runs at 5.4 m/s with
+  46 m between crests at 3 m deep, and 2.3 m/s with 22 m between them at 0.6 m.
+- They grow as they shoal. They break at 0.78 of the depth: the shore face steepens to about 4x the back, and each
+  broken crest leaves a foam trail behind it.
+- They come in groups (bigger and smaller sets), and their lines wander along the coast, so breaks are irregular.
+- Normal and foam only: the water surface stays flat. The height is the sea's wave height at the shore (wind and
+  swell), as the foam already uses. New res/shaders/water_surf.glsl.
+- Reds on WW_CELL_WATER_SURF_RED (combinable): `noshoal` (one deep wavelength and height), `nobreak` (no
+  steepening, no foam), `regular` (no groups, straight lines), `alias` (no fade when a wave is under 2 pixels).
+  fo4_water.prog (rows off) keeps its machine code.
+- Far water (WATERFAR1): no change needed. With Water reflections on, far water already uses the near law
+  (Fresnel times the sky, roughness from the footprint), with no 8192 u colour swap.
+- Offline (no window, the real shader, a plane beach against linear wave theory):
+  - Crest speed within 1.4% and crest spacing within 1.3% from 0.5 to 3 m deep.
+  - Height within 1% of theory before the break, exactly 0.78 of the depth after it.
+  - No foam outside the surf zone. Group heights range 0.29 to 0.82 m.
+  - About 0.05 ms a 1080p pass for the law. All programs link.
+
 ## Lane WATERLOOK1 step 10 (2026-10-27, branch waterlook1-20261027): water under a bridge is darker (WATERSKYVIS1)
 
 - New row **Water sky visibility** (WW_CELL_WATER_SKYVIS). Water reflects the sky only where it can see the sky.

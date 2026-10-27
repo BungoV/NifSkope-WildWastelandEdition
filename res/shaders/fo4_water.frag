@@ -92,6 +92,10 @@ out vec4 fragColor;
 #ifdef WW_WATER_SHORE	// lane WATERSHORE1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_shore.glsl"
 #endif
+// lane WATERLOOK1 step 11 (WATERSURF1): shore waves on the sea (after water_shore)
+#ifdef WW_WATER_SURF
+#include "water_surf.glsl"
+#endif
 
 uniform vec4 waterMat[13];	// shallow, deep, reflection, underwater, light silt, dark silt, var, p1..p4, amplitude, uv scale
 uniform vec4 waterSky[3];	// horizon, lower, upper (linear)
@@ -327,6 +331,13 @@ void main()
 #endif
 	vec3 N0 = N;
 	N = normalize( flatten * ( N - vec3( 0.0, 0.0, 1.0 ) ) + vec3( 0.0, 0.0, 1.0 ) );
+#ifdef WW_WATER_SURF
+	// lane WATERLOOK1 step 11: the shore waves (slope space), after the game's flatten, which would erase them in the shallows
+	float surfFoot = max( length( dFdx( P.xy ) ), length( dFdy( P.xy ) ) );
+	WwSurf surf = under ? WwSurf( vec2( 0.0 ), 0.0, 0.0, 0.0 ) : wwWaterSurf( P.xy, waterShoreTime, surfFoot );
+	if ( surf.w > 0.0 )
+		N = normalize( vec3( N.xy / max( N.z, 1e-3 ) + surf.slope, 1.0 ) );
+#endif
 #ifdef WW_WATER_REFL	// lane WATERREFL1: GGX alpha^2 from the slopes the filtered noise lost + the footprint
 	float reflA2 = waterReflOn || waterGlintOn ? wwWaterAlpha2( wxy / UV.x + waterScroll0.xy, wxy / UV.y + waterScroll0.zw,
 		wxy / UV.z + waterScroll1.xy, tap0, tap1, tap2, Amp, dfade, flatten, Var.x, N, ( waterGlintRed & 2 ) == 0 ) : 0.0;
@@ -527,6 +538,9 @@ void main()
 		 * 23(11)) lit by the sun and the water's upper sky row; opacity K1.w lets the water read through its holes */
 		vec3 foamLin = 0.55 * ( sun * clamp( Ldir.z, 0.0, 1.0 ) + waterSky[2].rgb );
 		lin = mix( lin, foamLin, shoreFoamV * waterShoreK1.w );
+#ifdef WW_WATER_SURF
+		lin = mix( lin, foamLin, wwSurfFoamAlpha( surf.foam, P.xy, surfFoot, waterShoreTime ) );	// step 11: the breakers' foam
+#endif
 #endif
 #ifdef WW_WATER_OCEAN
 		// lane WATERLOOK1 step 4: sunlight through the crests, the body colour, near faces and far mean alike (red noglow)
