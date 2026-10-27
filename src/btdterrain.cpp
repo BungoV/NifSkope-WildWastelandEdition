@@ -3403,6 +3403,248 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 	return true;
 }
 
+namespace {
+//! Lane SHORE1: a coast texel written per body sample (row-major stepT x stepT; id 0 = dry)
+struct FarShoreSplit
+{
+	int u = 0, v = 0;
+	std::vector<quint16> id;
+	std::vector<float> z;
+};
+
+/* Lane SHORE1: the far water as the sheet the terrain cuts. A texel's owner is its dominant body (most samples,
+ * the lower id on a tie) at that body's highest surface; a texel with no wet sample takes the highest owned
+ * 8-neighbour. A wet sample keeps its own body; a dry one is covered by the owner only where its ground stands at
+ * or above the surface (the terrain hides it and draws the shore; a valley below a dam stays dry). Texels whose
+ * samples all agree stay one entry of ids/surf; the rest go to `splits`. */
+template<class BodyOf>
+void farShoreLaw( const LodtFile & f, LodlFarWater & r, int W, int H, int stepT, int bx0, int by0,
+	const std::vector<quint8> & cut, std::vector<quint16> & ids, std::vector<float> & surf,
+	std::vector<FarShoreSplit> & splits, BodyOf bodyOf )
+{
+	struct Count { quint16 id; int n; float z; };
+	const int fullStep = std::max( 1, f.samplesPerCell() / std::max( 1, f.bodyIdSamples() ) );
+	const size_t nT = ids.size(), nS = size_t( stepT ) * size_t( stepT );
+	std::vector<quint16> ownId( nT, 0 );
+	std::vector<float> ownZ( nT, 0.0f );
+	std::vector<quint8> coast( nT, 0 );   // 1 = mixed, 2 = grown: resolved per sample
+	std::vector<std::vector<Count>> bodiesAt( nT );
+	r.wetTexels = r.grownTexels = r.splitTexels = 0;
+	r.bodies.clear();
+	std::vector<quint16> idB( nS );
+	std::vector<float> dB( nS );
+	// a cell's ground all above (1) or all below (-1) a surface, 0 = read the samples
+	auto groundSide = [&f]( int sx, int sy, float z ) {
+		float lo = 0, hi = 0, wh = 0;
+		quint16 wt = 0, fl = 0;
+		const int cx = f.cellMinX() + sx / std::max( 1, f.bodyIdSamples() ), cy = f.cellMinY() + sy / std::max( 1, f.bodyIdSamples() );
+		if ( !f.cell( cx, cy, lo, hi, wh, wt, fl ) )
+			return 0;
+		const float q = 2.0f * f.heightQuantum();
+		return lo - q >= z ? 1 : hi + q < z ? -1 : 0;
+	};
+	for ( int v = 0; v < H; v++ )
+		for ( int u = 0; u < W; u++ ) {
+			const size_t i = size_t( v ) * size_t( W ) + size_t( u );
+			if ( cut[i] )
+				continue;
+			const int sx = bx0 + u * stepT, sy = by0 + v * stepT;
+			quint16 tid = 0;
+			LodtWaterBody B;
+			if ( f.bodyTileUniform( sx, sy, tid ) ) {
+				if ( !tid || !bodyOf( tid, B ) )
+					continue;
+				float d = 0.0f;
+				float z = B.waterHeight;
+				if ( f.surfaceTileUniform( sx, sy, d ) ) {
+					z += d;
+				} else {
+					f.surfaceDeltaBlock( sx, sy, stepT, dB.data() );
+					z = B.waterHeight + dB[0];
+					for ( float e : dB )
+						z = std::max( z, B.waterHeight + e );
+				}
+				ownId[i] = tid;
+				ownZ[i] = z;
+				continue;
+			}
+			std::vector<Count> & c = bodiesAt[i];
+			f.bodyIdBlock( sx, sy, stepT, idB.data() );
+			f.surfaceDeltaBlock( sx, sy, stepT, dB.data() );
+			for ( size_t k = 0; k < nS; k++ ) {
+				const quint16 id = idB[k];
+				if ( !id || !bodyOf( id, B ) )
+					continue;
+				const float z = B.waterHeight + dB[k];
+				auto it = std::find_if( c.begin(), c.end(), [id]( const Count & e ) { return e.id == id; } );
+				if ( it == c.end() )
+					c.push_back( { id, 1, z } );
+				else {
+					it->n++;
+					it->z = std::max( it->z, z );
+				}
+			}
+			if ( c.empty() )
+				continue;
+			const Count * best = &c[0];
+			for ( const Count & k : c )
+				if ( k.n > best->n || ( k.n == best->n && k.id < best->id ) )
+					best = &k;
+			ownId[i] = best->id;
+			ownZ[i] = best->z;
+			coast[i] = size_t( best->n ) == nS ? 0 : 1;
+		}
+	// growth: a texel with no wet sample next to an owned one takes the highest owner round it
+	std::vector<quint16> gId( ownId );
+	std::vector<float> gZ( ownZ );
+	for ( int v = 0; v < H; v++ )
+		for ( int u = 0; u < W; u++ ) {
+			const size_t i = size_t( v ) * size_t( W ) + size_t( u );
+			if ( ownId[i] || cut[i] )
+				continue;
+			int bestJ = -1;
+			for ( int du = -1; du <= 1; du++ )
+				for ( int dv = -1; dv <= 1; dv++ ) {
+					const int uu = u + du, vv = v + dv;
+					if ( ( !du && !dv ) || uu < 0 || vv < 0 || uu >= W || vv >= H )
+						continue;
+					const int j = vv * W + uu;
+					if ( ownId[j] && ( bestJ < 0 || ownZ[j] > ownZ[bestJ] ) )
+						bestJ = j;
+				}
+			if ( bestJ >= 0 ) {
+				gId[i] = ownId[bestJ];
+				gZ[i] = ownZ[bestJ];
+				coast[i] = 2;
+				r.grownTexels++;
+			}
+		}
+	std::fill( ids.begin(), ids.end(), quint16( 0 ) );
+	std::fill( surf.begin(), surf.end(), 0.0f );
+	for ( int v = 0; v < H; v++ )
+		for ( int u = 0; u < W; u++ ) {
+			const size_t i = size_t( v ) * size_t( W ) + size_t( u );
+			if ( !gId[i] )
+				continue;
+			if ( coast[i] != 2 )
+				r.wetTexels++;
+			if ( !coast[i] ) {
+				ids[i] = gId[i];
+				surf[i] = gZ[i];
+				r.bodies.insert( gId[i] );
+				continue;
+			}
+			const int sx = bx0 + u * stepT, sy = by0 + v * stepT;
+			FarShoreSplit s;
+			s.u = u;
+			s.v = v;
+			s.id.assign( nS, 0 );
+			s.z.assign( nS, 0.0f );
+			bool uniform = true;
+			if ( coast[i] == 1 )
+				f.bodyIdBlock( sx, sy, stepT, idB.data() );
+			const int side = groundSide( sx, sy, gZ[i] );
+			for ( int b = 0; b < stepT; b++ )
+				for ( int a = 0; a < stepT; a++ ) {
+					const size_t k = size_t( b ) * size_t( stepT ) + size_t( a );
+					const quint16 id = coast[i] == 1 ? idB[k] : quint16( 0 );
+					auto it = std::find_if( bodiesAt[i].begin(), bodiesAt[i].end(), [id]( const Count & c ) { return c.id == id; } );
+					if ( id && it != bodiesAt[i].end() ) {
+						s.id[k] = id;
+						s.z[k] = it->z;
+					} else if ( side > 0 || ( side == 0 && f.height( ( sx + a ) * fullStep, ( sy + b ) * fullStep ) >= gZ[i] ) ) {
+						s.id[k] = gId[i];
+						s.z[k] = gZ[i];
+					}
+					if ( s.id[k] != gId[i] || s.z[k] != gZ[i] )
+						uniform = false;
+				}
+			if ( uniform ) {
+				ids[i] = gId[i];
+				surf[i] = gZ[i];
+				r.bodies.insert( gId[i] );
+				continue;
+			}
+			for ( quint16 id : s.id )
+				if ( id )
+					r.bodies.insert( id );
+			r.splitTexels++;
+			splits.push_back( std::move( s ) );
+		}
+}
+}
+
+int farWaterCensusCli( const QStringList & args, QTextStream & out )
+{
+	QString lodl, outPath;
+	int g[5] = { 0, 0, -1, -1, 8 };
+	bool grid = false, perCell = false;
+	for ( int i = 0; i < args.size(); i++ ) {
+		if ( args[i] == QLatin1String( "--grid" ) ) {
+			grid = true;
+		} else if ( args[i] == QLatin1String( "--percell" ) ) {
+			perCell = true;
+		} else if ( args[i] == QLatin1String( "--out" ) && i + 1 < args.size() ) {
+			outPath = args[++i];
+		} else if ( args[i] == QLatin1String( "--ring" ) && i + 1 < args.size() ) {
+			const QStringList p = args[++i].split( QLatin1Char( ',' ) );
+			if ( p.size() != 5 ) {
+				out << "farwatercensus: --ring wants x0,y0,x1,y1,texels\n";
+				return 2;
+			}
+			for ( int k = 0; k < 5; k++ )
+				g[k] = p[k].toInt();
+		} else if ( lodl.isEmpty() ) {
+			lodl = args[i];
+		}
+	}
+	if ( lodl.isEmpty() || outPath.isEmpty() || g[2] < g[0] ) {
+		out << "usage: farwatercensus <ws.lodl> --ring x0,y0,x1,y1,texels [--grid] [--percell] --out <quads.txt>\n";
+		return 2;
+	}
+	NifModel nif;
+	if ( !nif.createNew( 0x14020007, 12, 130 ) ) {
+		out << "farwatercensus: could not create a Fallout 4 document\n";
+		return 1;
+	}
+	nif.holdUpdates( true );
+	const QModelIndex iRoot = nif.insertNiBlock( QStringLiteral( "NiNode" ) );
+	std::vector<std::array<float, 6>> quads;
+	std::vector<LodlFarWater> rings( 1 );
+	LodlFarWater & w = rings[0];
+	w.x0 = g[0];
+	w.y0 = g[1];
+	w.x1 = g[2];
+	w.y1 = g[3];
+	w.texels = g[4];
+	w.noCut = true;
+	w.perCell = perCell;
+	w.gridLaw = grid;
+	w.dump = &quads;
+	const float shift[3] = { 0.0f, 0.0f, 0.0f };
+	QString e;
+	QElapsedTimer t;
+	t.start();
+	if ( !nifAppendLodlFarWater( &nif, iRoot, lodl, shift, rings, &e ) ) {
+		out << "farwatercensus: " << e << "\n";
+		return 1;
+	}
+	QFile f( outPath );
+	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) ) {
+		out << "farwatercensus: cannot write " << outPath << "\n";
+		return 1;
+	}
+	QTextStream s( &f );
+	for ( const auto & q : quads )
+		s << q[0] << ' ' << q[1] << ' ' << q[2] << ' ' << q[3] << ' ' << q[4] << ' ' << int( q[5] ) << '\n';
+	out << QStringLiteral( "farwatercensus cells %1,%2..%3,%4 at %5 a cell (%6): %7 quads, %8 shapes, %9" )
+		.arg( g[0] ).arg( g[1] ).arg( g[2] ).arg( g[3] ).arg( w.rate ).arg( grid ? "texel grid" : "shore law" )
+		.arg( w.quads ).arg( w.shapes )
+		.arg( QStringLiteral( "%1 wet texels, %2 grown, %3 per sample, %4 ms" ).arg( w.wetTexels ).arg( w.grownTexels )
+			.arg( w.splitTexels ).arg( t.elapsed() ) ) << "\n";
+	return 0;
+}
+
 /* Lane FARLOD1: the far field's water (btdterrain.h, LodlFarWater). One texel grid a ring over the ring's
  * rectangle at its rate; a texel is wet where the body plane names a body (sampled at the texel's first body
  * sample), dry inside the cut; then one growth step onto dry ground below a wet neighbour's surface; then each
@@ -3485,8 +3727,11 @@ bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QS
 				r.bodies.insert( id );
 			}
 		}
+		std::vector<FarShoreSplit> splits;
+		if ( !r.gridLaw )
+			farShoreLaw( f, r, W, H, stepT, ( x0 - minX ) * bodyS, ( y0 - minY ) * bodyS, cut, ids, surf, splits, bodyOf );
 		// one growth step onto dry ground below a wet neighbour's surface (the shore the depth test draws)
-		{
+		if ( r.gridLaw ) {
 			std::vector<quint16> gid( ids );
 			std::vector<float> gs( surf );
 			static const int N4[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
@@ -3549,6 +3794,48 @@ bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QS
 				r.quads++;
 				u = e;
 			}
+		}
+		// lane SHORE1: the coast texels' per-sample runs, never crossing their texel
+		const float sample = texel / float( stepT );
+		for ( const FarShoreSplit & s : splits ) {
+			for ( int b = 0; b < stepT; b++ ) {
+				int a = 0;
+				while ( a < stepT ) {
+					const size_t k = size_t( b ) * size_t( stepT ) + size_t( a );
+					const quint16 id = s.id[k];
+					if ( !id ) {
+						a++;
+						continue;
+					}
+					int e = a + 1;
+					while ( e < stepT && s.id[k + size_t( e - a )] == id && s.z[k + size_t( e - a )] == s.z[k] )
+						e++;
+					WaterQuad q;
+					q.x0 = float( x0 ) * 4096.0f + float( s.u ) * texel + float( a ) * sample - shift[0];
+					q.x1 = float( x0 ) * 4096.0f + float( s.u ) * texel + float( e ) * sample - shift[0];
+					q.y0 = float( y0 ) * 4096.0f + float( s.v ) * texel + float( b ) * sample - shift[1];
+					q.y1 = q.y0 + sample;
+					q.z = s.z[k] - shift[2];
+					q.rgba = 0xFF6B522Eu;
+					q.body = id;
+					LodtWaterBody B;
+					bodyOf( id, B );
+					if ( r.perCell )
+						byCell[{ qint64( B.watrForm ), qint64( x0 + s.u / rate ), qint64( y0 + s.v / rate ) }].push_back( q );
+					else
+						byForm[B.watrForm].push_back( q );
+					r.quads++;
+					a = e;
+				}
+			}
+		}
+		if ( r.dump ) {
+			for ( const auto & [form, quads] : byForm )
+				for ( const WaterQuad & q : quads )
+					r.dump->push_back( { q.x0, q.y0, q.x1, q.y1, q.z, float( q.body ) } );
+			for ( const auto & [key, quads] : byCell )
+				for ( const WaterQuad & q : quads )
+					r.dump->push_back( { q.x0, q.y0, q.x1, q.y1, q.z, float( q.body ) } );
 		}
 		for ( const auto & [form, quads] : byForm ) {
 			std::vector<float> readZ;
