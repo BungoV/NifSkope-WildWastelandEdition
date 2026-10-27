@@ -57,6 +57,9 @@ constexpr quint32 LODL_SECT_DYE         = 1u << 8;   //!< dye plane
  *  worldspace without any writes the plane all uniform 0. The version-3 header
  *  grew from 0xF8 to 0x100 for its u64 offset at 0xF8; the version stays 3. */
 constexpr quint32 LODL_SECT_SURFACE     = 1u << 9;   //!< surface plane
+/*! The SKY plane (lane WATERSKYVISFAR1): one byte a body-plane sample, the wet texel's sky visibility through
+ *  the terrain (1 + round(vis * 254)); 0 = dry. Version 4 only: its u64 offset and u32 rate sit at 0x100. */
+constexpr quint32 LODL_SECT_SKY         = 1u << 10;  //!< sky-visibility plane
 
 /*! One water BODY: a connected sheet of water with one plane height, one WATR
  *  form and one flow, addressed by the body-ID plane.
@@ -124,6 +127,9 @@ struct LodtWaterOptions
 	 *  on its mask, confidence 8 in the word). Off = the constant word a body,
 	 *  byte for byte the file before it (--water-flow-constant). */
 	bool flowField = true;
+	/*! Lane WATERSKYVISFAR1: bake each wet texel's sky visibility (the sky plane, version 4). Off = the version-3
+	 *  bytes of before (--water-no-sky). */
+	bool skyVis = true;
 	/*! The plugin the WATR `NAM0` linear velocities are read from -- vanilla's
 	 *  ONLY flow signal, and the fallback floor under the automatic rules. Empty
 	 *  means the arm is unavailable, which the census SAYS rather than silently
@@ -376,8 +382,12 @@ public:
 	int surfacePlaneSamples() const { return surfS; }
 	float surfaceDeltaAt( int bx, int by ) const;
 	bool waterSurfaceAt( int bx, int by, float & z ) const;
+	//! Lane WATERSKYVISFAR1: the sky plane's rate (0 = absent) and its byte at a body sample (0 = dry or absent).
+	int skyPlaneSamples() const { return skyS; }
+	quint8 skyAt( int bx, int by ) const;
 
-	/*! Lane WATERDATA1: a water plane's tile store, `plane` 0 body id, 1 shore, 2 surface (WATERFLOWBAKE1: 3 flow).
+	/*! Lane WATERDATA1: a water plane's tile store, `plane` 0 body id, 1 shore, 2 surface (WATERFLOWBAKE1: 3 flow,
+	 *  WATERSKYVISFAR1: 4 sky).
 	 *  The tile edge in samples (0 = the plane is absent), and whether tile (tx, ty) is stored UNIFORM, its one
 	 *  sample in `value` (an absent plane is uniform at its neutral value: 0, 255, 0, 0). */
 	int waterTileEdge( int plane ) const;
@@ -475,6 +485,7 @@ private:
 	int dyeS = 0;
 	quint64 dyeAt = 0;
 	int surfS = 0;
+	int skyS = 0;
 	float shoreQ = 32.0f;
 	quint32 flowEnc = 0;
 	int nStrokes = 0;
@@ -490,6 +501,7 @@ private:
 	PlaneStore idStore, flowStore, shoreStore;
 	PlaneStore dyeStore;
 	PlaneStore surfStore;
+	PlaneStore skyStore;
 	//! Read a plane container's head and directory; refuses by name.
 	bool readPlaneStore( quint64 at, int bytesPerSample, PlaneStore & s,
 		QString * error ) const;

@@ -17,7 +17,8 @@ no file on disk and in no command.
 `version 3` (header 0x100 = 256 bytes since lane WATER1, 2026-09-27, 0xF8 = 248
 before it; adding WATER BODIES - a body table, a per-texel body-ID plane, flow,
 shore distance, a stroke store and, since WATER1, a surface plane for sloped
-water).**
+water) and `version 4` (header 0x110 = 272 bytes, lane WATERSKYVISFAR1, 2026-10-27:
+version 3 plus the sky-visibility plane of the wet texels).**
 **Since lane WATER1 (2026-09-27) both front ends write version 3 by default**
 (the CLI and the LOD Generation panel switch the water module on); the reader
 accepts 1, 2 and 3. `--no-water-bodies` is the way back: it writes version 2,
@@ -173,10 +174,13 @@ refusal. The magic makes that a clean rejection whatever the file is named.
 | **0xF0** | uint32 | **v3 only** — stroke store bytes |
 | **0xF4** | uint32 | **v3 only** — the **dye plane** store offset, 32 bits (lane WATER4); 0 = none, and the generator always writes 0. A reader tests bit 8 of `0x44`, never this word |
 | **0xF8** | uint64 | **v3 only, since lane WATER1 (2026-09-27)** — offset: **surface plane** store (0 = none). Read only when bit 9 of `0x44` is set. See "The surface plane" |
+| **0x100** | uint64 | **v4 only** (lane WATERSKYVISFAR1) — offset: **sky plane** store. Read only when bit 10 of `0x44` is set. See "The sky plane" |
+| **0x108** | uint32 | **v4 only** — the sky plane's samples a cell (= the body-ID plane's rate) |
+| **0x10C** | uint32 | **v4 only** — reserved, 0 |
 
 Header is **0x98 = 152 bytes at version 1**, **0xA0 = 160 bytes at version 2**
 and **0x100 = 256 bytes at version 3** (0xF8 = 248 bytes before lane WATER1;
-the version did not change, see below). Every section offset is measured from the
+the version did not change, see below), **0x110 = 272 bytes at version 4**. Every section offset is measured from the
 start of the file, so the header size is not something a reader has to compute —
 but it **is** the floor a reader checks `blockDataOffset` against, and the
 writer refuses if its own assembled header is not the size its version declares.
@@ -211,7 +215,9 @@ plane together), bit 5 **flow**, bit 6 **shore distance**, bit 7 **strokes**, an
 bit 8 **dye** (`LODL_SECT_DYE`, `src/lodtfile.h`; its offset lives in the
 reserved word `0xF4`, and the generator always writes 0), and (lane WATER1,
 2026-09-27) bit 9 **surface** (`LODL_SECT_SURFACE`; its u64 offset is at
-`0xF8`; the generator writes it whenever it writes the bodies).
+`0xF8`; the generator writes it whenever it writes the bodies), and (version 4 only, lane
+WATERSKYVISFAR1) bit 10 **sky** (`LODL_SECT_SKY`; u64 offset at `0x100`, rate at `0x108`; a version-3 file
+carrying it is refused).
 A reader checks the bit, not the offset. Since WATER1 the reader also
 **refuses any bit it does not know** (bits 10..31), by name, rather than
 silently ignoring a section it cannot read.
@@ -1104,6 +1110,20 @@ world with no ribbon writes an all-uniform-0 plane; and the same river drawn as
 flat per-cell steps FAILS the first check (the refuter). It prints `N checks,
 M failures` and `PASS`/`FAIL`, and exits 0 only on PASS.
 
+### The sky plane (lane WATERSKYVISFAR1, 2026-10-27) — version 4
+
+uint8 a sample on the body-ID plane's grid and rate, the LAST section (right after the surface plane). A wet
+sample (body id != 0) holds `1 + round(vis * 254)`: `vis` is its sky visibility through the TERRAIN, the bake's
+sky law (`LodgenAoScene::skyVisibilityFace`: 56 fixed cosine-weighted rays, the same march as the native
+object bake) cast from the water surface (body height + surface delta) over the heights within 10,000 units,
+normalised so open sky is exactly 255. A dry sample is 0. Objects are not in it. Open sea reads 255 and its
+tiles are uniform, so the plane is small (sixteen bytes a uniform cell).
+
+Written by default whenever the bodies are, which makes the file version 4. `--water-no-sky` (or
+`WW_LODL_VERSION=3`) writes the version-3 bytes of before. A reader that knows version 3 only refuses a
+version-4 file by its version; a version-4 reader reads a version-3 file as "no sky plane": the far water reads
+visibility 1 there, as before.
+
 ### Refusals, by name
 
 Beside the version-1 list further down, a version-3 reader refuses — naming the
@@ -1161,6 +1181,7 @@ lodgen <esm> --worldspace <id> --lodl <dir>      bodies ON by default (v3)
         [--water-bridge N] [--water-near N]
         [--water-body-samples N] [--water-flow-samples N] [--water-no-shore]
         [--water-no-shore-land]     dry samples 255 (the pre-WATERWETBAKE1 bytes)
+        [--water-no-sky]            no sky plane: version 3, the pre-WATERSKYVISFAR1 bytes
         [--water-velocities <plugin>] [--water-report <file>]
 lodl <file.lodl> --water-census      the body table, read back out of the FILE
 lodl <file.lodl> --water-selftest    the classifier's known-answer control

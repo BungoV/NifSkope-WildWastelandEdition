@@ -71,9 +71,19 @@ struct WwWaterInfoTables
 	int flowUniformStill = 0, flowUniformMoving = 0;
 	qint64 flowMovingTexels = 0, flowSolvedTexels = 0;
 
+	/* Lane WATERSKYVISFAR1: the .lodl sky plane (version 4) for the far water's sky reflection, laid out as the land
+	 * side: index R32UI = the uniform tile's byte, or (slot + 1) << 8; atlas R8UI, 64 tiles a row, atlasW wide.
+	 * Byte 0 = dry, else 1 + round(vis * 254). haveSky false = no sky plane in the file: the shader reads 1. */
+	bool haveSky = false;
+	std::vector<uint32_t> skyIndex;	// tilesY rows of tilesX
+	std::vector<uint8_t> skyAtlas;	// skyAtlasH rows of atlasW bytes
+	int skyAtlasH = 0, skySlots = 0, skyUniformOpen = 0, skyUniformDry = 0, skyUniformOther = 0;
+	qint64 skyWetTexels = 0, skyBelowOpen = 0;
+
 	quint64 bytes() const;	// the water tables
 	quint64 landBytes() const;
 	quint64 flowBytes() const;
+	quint64 skyBytes() const;
 };
 
 //! A velocity (world units a second) as the flow table's texel word.
@@ -89,15 +99,20 @@ bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * er
 QString wwWaterInfoCensus( const WwWaterInfoTables & t );
 //! The land side's census line (lane WATERWETBAKE1).
 QString wwLandShoreCensus( const WwWaterInfoTables & t );
+//! The sky plane's census line (lane WATERSKYVISFAR1).
+QString wwWaterSkyCensus( const WwWaterInfoTables & t );
 //! index.u32, atlas.u32, bodies.f32, census.txt (+ WATERFLOWBAKE1 flowindex.u32, flowatlas.u32), and the
-//! land side's land_index.u32, land_atlas.u8, land_census.txt into `dir`.
+//! land side's land_index.u32, land_atlas.u8, land_census.txt (+ WATERSKYVISFAR1 sky_index.u32, sky_atlas.u8,
+//! sky_census.txt when the file has a sky plane) into `dir`.
 bool wwWaterInfoDump( const WwWaterInfoTables & t, const QString & dir, QString * error );
 
 //! The cell document's worldspace .lodl ("" = none, an interior). Starts the build on a worker thread.
 void wwCellWaterInfoSet( const void * nif, const QString & lodl );
 //! With fo4_water.prog bound: uploads the tables once they are built and binds them at units unit..unit+2 when
 //! the program reads them, and the flow tables at the next two units when it reads waterFlowIndex (lane
-//! WATERFLOWBAKE1). Returns the units it used (0, 2, 3 or 5).
+//! WATERFLOWBAKE1). Returns the units it used (0, 2, 3 or 5). Lane WATERSKYVISFAR1: the sky plane at
+//! WwCellUnit::WaterSkyIndex/WaterSkyAtlas when the program reads waterSkyIndex (fo4_waterlook only); red
+//! WW_CELL_WATER_SKYFAR_RED=one: the far water's sky visibility reads 1 (the bytes before the lane).
 int wwCellWaterInfoUniforms( Scene * scene, int unit );
 /*! Lane WATERWETBAKE1: with a cell program bound (fo4_cell*, pbrm_cell* family), binds the land side at
  *  WwCellUnit::LandShoreIndex/LandShoreAtlas when the program reads `landShoreIndex` (nothing reads it today:

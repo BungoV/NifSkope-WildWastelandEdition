@@ -38,6 +38,11 @@ quint64 WwWaterInfoTables::flowBytes() const
 	return quint64( flowIndex.size() + flowAtlas.size() ) * 4;
 }
 
+quint64 WwWaterInfoTables::skyBytes() const
+{
+	return quint64( skyIndex.size() ) * 4 + quint64( skyAtlas.size() );
+}
+
 uint32_t wwWaterFlowPack( double vx, double vy )
 {
 	auto q = []( double v ) {
@@ -162,6 +167,70 @@ void wwWaterFlowBuild( const LodtFile & f, WwWaterInfoTables & t )
 		for ( int y = 0; y < E; y++ )
 			std::copy_n( sparseWords.begin() + ( size_t( k ) * E + y ) * E, E,
 				t.flowAtlas.begin() + size_t( ay + y ) * t.flowAtlasW + ax );
+	}
+}
+
+/*! Lane WATERSKYVISFAR1: the sky tables from the version-4 sky plane, the land side's layout. Needs the body
+ *  plane's rate and tiles a multiple of E; otherwise (and with no sky plane) haveSky stays false. */
+void wwWaterSkyBuild( const LodtFile & f, WwWaterInfoTables & t )
+{
+	const int S = f.bodyIdSamples(), E = WwWaterInfoTables::kTileEdge, fe = f.waterTileEdge( 4 );
+	if ( S <= 0 || f.skyPlaneSamples() != S || fe <= 0 || fe % E )
+		return;
+	const int W = f.cellsX() * S, H = f.cellsY() * S;
+	if ( W % fe || H % fe || W / E != t.tilesX || H / E != t.tilesY )
+		return;
+	t.haveSky = true;
+	t.skyIndex.assign( size_t( t.tilesX ) * t.tilesY, 0u );
+	std::vector<uint8_t> b( size_t( fe ) * fe );
+	std::vector<int> tiles;
+	std::vector<uint8_t> words;
+	for ( int fy = 0; fy < H / fe; fy++ ) {
+		for ( int fx = 0; fx < W / fe; fx++ ) {
+			quint32 u = 0;
+			if ( f.waterTileUniform( 4, fx, fy, u ) )
+				std::fill( b.begin(), b.end(), uint8_t( u ) );
+			else
+				for ( int y = 0; y < fe; y++ )
+					for ( int x = 0; x < fe; x++ )
+						b[size_t( y ) * fe + x] = f.skyAt( fx * fe + x, fy * fe + y );
+			for ( uint8_t v : b ) {
+				t.skyWetTexels += v ? 1 : 0;
+				t.skyBelowOpen += v && v < 255 ? 1 : 0;
+			}
+			for ( int sy = 0; sy < fe / E; sy++ )
+				for ( int sx = 0; sx < fe / E; sx++ ) {
+					const int o = sy * E * fe + sx * E;
+					const int ti = ( fy * ( fe / E ) + sy ) * t.tilesX + fx * ( fe / E ) + sx;
+					bool same = true;
+					for ( int y = 0; y < E && same; y++ )
+						for ( int x = 0; x < E; x++ )
+							same = same && b[o + y * fe + x] == b[o];
+					if ( same ) {
+						t.skyIndex[size_t( ti )] = b[o];
+						( b[o] == 255 ? t.skyUniformOpen : b[o] == 0 ? t.skyUniformDry : t.skyUniformOther )++;
+						continue;
+					}
+					tiles.push_back( ti );
+					for ( int y = 0; y < E; y++ )
+						words.insert( words.end(), b.begin() + o + y * fe, b.begin() + o + y * fe + E );
+				}
+		}
+	}
+	std::vector<int> order( tiles.size() );
+	for ( size_t k = 0; k < order.size(); k++ )
+		order[k] = int( k );
+	std::sort( order.begin(), order.end(), [&]( int a, int c ) { return tiles[a] < tiles[c]; } );
+	const int R = WwWaterInfoTables::kTilesPerRow;
+	t.skySlots = int( order.size() );
+	t.skyAtlasH = ( t.skySlots + R - 1 ) / R * E;
+	t.skyAtlas.assign( size_t( t.atlasW ) * t.skyAtlasH, uint8_t( 0 ) );
+	for ( int s = 0; s < t.skySlots; s++ ) {
+		const int k = order[s];
+		t.skyIndex[size_t( tiles[k] )] = uint32_t( s + 1 ) << 8;
+		const int ax = ( s % R ) * E, ay = ( s / R ) * E;
+		for ( int y = 0; y < E; y++ )
+			std::copy_n( words.begin() + ( size_t( k ) * E + y ) * E, E, t.skyAtlas.begin() + size_t( ay + y ) * t.atlasW + ax );
 	}
 }
 
@@ -374,6 +443,7 @@ bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * er
 				t.landAtlas.begin() + size_t( ay + y ) * t.atlasW + ax );
 	}
 	wwWaterFlowBuild( f, t );	// lane WATERFLOWBAKE1
+	wwWaterSkyBuild( f, t );	// lane WATERSKYVISFAR1
 	t.buildSeconds = clk.elapsed() / 1000.0;
 	return true;
 }
@@ -400,6 +470,18 @@ QString wwLandShoreCensus( const WwWaterInfoTables & t )
 		.arg( double( t.landBytes() ) / 1048576.0, 0, 'f', 2 );
 }
 
+QString wwWaterSkyCensus( const WwWaterInfoTables & t )
+{
+	if ( !t.haveSky )
+		return QStringLiteral( "water sky: none (no sky plane in the file: the far water reads 1)" );
+	return QStringLiteral( "water sky: %1 x %2 tiles; uniform open %3 dry %4 other %5; sparse %6; atlas %7 x %8; "
+		"%9 wet texel(s), %10 below open sky; bytes index %11 atlas %12 total %13 (%14 MB)" )
+		.arg( t.tilesX ).arg( t.tilesY ).arg( t.skyUniformOpen ).arg( t.skyUniformDry ).arg( t.skyUniformOther )
+		.arg( t.skySlots ).arg( t.atlasW ).arg( t.skyAtlasH ).arg( t.skyWetTexels ).arg( t.skyBelowOpen )
+		.arg( quint64( t.skyIndex.size() ) * 4 ).arg( quint64( t.skyAtlas.size() ) ).arg( t.skyBytes() )
+		.arg( double( t.skyBytes() ) / 1048576.0, 0, 'f', 2 );
+}
+
 bool wwWaterInfoDump( const WwWaterInfoTables & t, const QString & dir, QString * error )
 {
 	QDir().mkpath( dir );
@@ -420,6 +502,12 @@ bool wwWaterInfoDump( const WwWaterInfoTables & t, const QString & dir, QString 
 		+ QStringLiteral( "flow tiles %1 %2 texel %3 scale %4\n" ).arg( t.flowTilesX ).arg( t.flowTilesY )
 			.arg( double( t.flowTexel ) ).arg( WwWaterInfoTables::kFlowScale ) ).toUtf8();
 	const QByteArray landCensus = ( wwLandShoreCensus( t ) + QStringLiteral( "\n" ) ).toUtf8();
+	const QByteArray skyCensus = ( wwWaterSkyCensus( t ) + QStringLiteral( "\n" ) ).toUtf8();
+	if ( !put( QStringLiteral( "sky_census.txt" ), skyCensus.constData(), skyCensus.size() ) )
+		return false;
+	if ( t.haveSky && !( put( QStringLiteral( "sky_index.u32" ), t.skyIndex.data(), qint64( t.skyIndex.size() ) * 4 )
+		&& put( QStringLiteral( "sky_atlas.u8" ), t.skyAtlas.data(), qint64( t.skyAtlas.size() ) ) ) )
+		return false;
 	return put( QStringLiteral( "index.u32" ), t.index.data(), qint64( t.index.size() ) * 4 )
 		&& put( QStringLiteral( "atlas.u32" ), t.atlas.data(), qint64( t.atlas.size() ) * 4 )
 		&& put( QStringLiteral( "bodies.f32" ), t.bodies.data(), qint64( t.bodies.size() ) * 4 )
@@ -445,6 +533,7 @@ struct Gpu
 {
 	GLuint tex[5] = { 0, 0, 0, 0, 0 };	// index, atlas, bodies, flow index, flow atlas
 	GLuint landTex[2] = { 0, 0 };	// lane WATERWETBAKE1: land index (R32UI), land atlas (R8UI)
+	GLuint skyTex[2] = { 0, 0 };	// lane WATERSKYVISFAR1: sky index (R32UI), sky atlas (R8UI)
 	std::shared_ptr<Job> job;
 	QString uploaded;	// the census of what the GL holds, read back
 };
@@ -472,6 +561,12 @@ bool infoRed()
 bool landRed()
 {
 	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_LAND_SHORE_RED" ).trimmed() == "off" );
+	return red;
+}
+
+bool skyRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_WATER_SKYFAR_RED" ).trimmed() == "one" );
 	return red;
 }
 
@@ -547,6 +642,30 @@ void upload( Renderer * r, Gpu & g, const std::shared_ptr<Job> & job )
 		landParts << QStringLiteral( "%1 %2x%3 %4" ).arg( QLatin1String( k ? "land atlas" : "land index" ) )
 			.arg( gw ).arg( gh ).arg( QLatin1String( gf == GL_R32UI ? "R32UI" : gf == GL_R8UI ? "R8UI" : "??" ) );
 	}
+	// lane WATERSKYVISFAR1: the sky plane, the same way; no plane = 1 x 1 zero (dry: the shader reads 1)
+	if ( !g.skyTex[0] )
+		fn->glGenTextures( 2, g.skyTex );
+	static const uint32_t dry[1] = { 0 };
+	qint64 skyBytes = 0;
+	for ( int k = 0; k < 2; k++ ) {
+		fn->glBindTexture( GL_TEXTURE_2D, g.skyTex[k] );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+		if ( k == 0 )
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R32UI, t.haveSky ? t.tilesX : 1, t.haveSky ? t.tilesY : 1, 0,
+				GL_RED_INTEGER, GL_UNSIGNED_INT, t.haveSky ? (const void *) t.skyIndex.data() : (const void *) dry );
+		else
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R8UI, t.skyAtlas.empty() ? 1 : t.atlasW, std::max( 1, t.skyAtlasH ), 0,
+				GL_RED_INTEGER, GL_UNSIGNED_BYTE, t.skyAtlas.empty() ? (const void *) dry : (const void *) t.skyAtlas.data() );
+		GLint gw = 0, gh = 0, gf = 0;
+		fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &gw );
+		fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &gh );
+		fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &gf );
+		skyBytes += qint64( gw ) * gh * ( gf == GL_R32UI ? 4 : gf == GL_R8UI ? 1 : 0 );
+	}
 	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, align );
 	fn->glBindTexture( GL_TEXTURE_2D, GLuint( was ) );
 	g.job = job;
@@ -555,7 +674,10 @@ void upload( Renderer * r, Gpu & g, const std::shared_ptr<Job> & job )
 		.arg( parts.join( QLatin1String( ", " ) ) ).arg( bytes ).arg( double( bytes ) / 1048576.0, 0, 'f', 2 )
 		.arg( t.slotCount ).arg( qint64( t.tilesX ) * t.tilesY ).arg( t.bodyCount )
 		.arg( landParts.join( QLatin1String( ", " ) ) ).arg( landBytes )
-		.arg( double( landBytes ) / 1048576.0, 0, 'f', 2 ).arg( t.landSlots );
+		.arg( double( landBytes ) / 1048576.0, 0, 'f', 2 ).arg( t.landSlots )
+		+ QStringLiteral( "; sky %1 bytes (%2 MB), %3 sparse tiles%4" ).arg( skyBytes )
+			.arg( double( skyBytes ) / 1048576.0, 0, 'f', 2 ).arg( t.skySlots )
+			.arg( t.haveSky ? QString() : QStringLiteral( " (no sky plane)" ) );
 	st().lastUpload = g.uploaded;
 	qInfo().noquote() << g.uploaded;
 }
@@ -612,6 +734,26 @@ int wwCellWaterInfoUniforms( Scene * scene, int unit )
 	prog->uni1b( "waterFlowOn", flowReady && !infoRed() );	// lane WATERFLOWBAKE1
 	const int lIndex = prog->uniLocation( "waterInfoIndex" );
 	const int lFlow = prog->uniLocation( "waterFlowIndex" );
+	const int lSky = prog->uniLocation( "waterSkyIndex" );
+	if ( lSky >= 0 ) {	// lane WATERSKYVISFAR1: the far water's sky plane (fo4_waterlook only)
+		const Gpu * gs = ready ? &s.gpu[ctx] : nullptr;
+		const bool skyOn = gs && job->t.haveSky && !skyRed();
+		const int loc[2] = { lSky, prog->uniLocation( "waterSkyAtlas" ) };
+		const int su[2] = { WwCellUnit::WaterSkyIndex, WwCellUnit::WaterSkyAtlas };
+		for ( int k = 0; k < 2; k++ ) {
+			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + su[k] ) );
+			r->fn->glBindTexture( GL_TEXTURE_2D, gs ? gs->skyTex[k] : 0 );
+			prog->uni1i_l( loc[k], su[k] );
+		}
+		r->fn->glActiveTexture( GL_TEXTURE0 );
+		prog->uni1b( "waterSkyOn", skyOn );
+		if ( skyOn ) {
+			const WwWaterInfoTables & t = job->t;
+			prog->uni4f( "waterSkyGrid", FloatVector4( t.originX, t.originY, t.texel, 254.0f ) );
+			prog->uni4f( "waterSkyLayout", FloatVector4( float( t.tilesX ), float( t.tilesY ),
+				float( WwWaterInfoTables::kTileEdge ), float( WwWaterInfoTables::kTilesPerRow ) ) );
+		}
+	}
 	if ( lIndex < 0 && lFlow < 0 )
 		return 0;	// the default program does not read the lookup: nothing bound
 	auto fn = r->fn;
@@ -712,5 +854,9 @@ QString wwCellWaterInfoEcho( const void * nif )
 		line += QStringLiteral( "; " ) + wwLandShoreCensus( job->t );
 	if ( landRed() )
 		line += QStringLiteral( "; WW_CELL_LAND_SHORE_RED=off (land side neutral)" );
+	if ( state == 1 )
+		line += QStringLiteral( "; " ) + wwWaterSkyCensus( job->t );
+	if ( skyRed() )
+		line += QStringLiteral( "; WW_CELL_WATER_SKYFAR_RED=one (far water sky visibility 1)" );
 	return line;
 }
