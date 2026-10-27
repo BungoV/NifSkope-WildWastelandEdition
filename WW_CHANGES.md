@@ -449,19 +449,6 @@
   Flare); seen only where nothing stands in front of it, while it is above the horizon and the Sun row is on. The
   echo adds "sun flare <name>".
 
-- **Reflections from last frame's colour by default:** the PERF3 path that reflects the previous frame's lit colour
-  instead of drawing the scene a second time is now on whenever the reflections are. `WW_CELL_SSR_PREV=0`,
-  `WW_CELL_SSR_PREV_RED=1` or `WW_PERF3_RED=1` = the second scene pass as before (test reds only).
-- **Camera cull memo:** every pass of a frame culled the same shape for the same camera again; the first cull of a
-  shape this frame is kept (keyed on the view transform, frustum planes and switches) and later passes replay it,
-  counters and occluder hits included. `WW_CELL_CULL_MEMO_RED=1` = no memo; `WW_CELL_CULL_MEMO_CHECK=1` culls in full
-  each hit and counts mismatches ("cell cull memo: ... mismatches=").
-- **Texture parameter shadow:** the lighting property's bind set wrap, filter and anisotropy on its texture every
-  draw; it now skips them when this frame already set the same values on that texture. Any other bind of the texture
-  forgets it. `WW_DRAW_TEXSHADOW_RED=1` = always set; `WW_DRAW_TEXSHADOW_CHECK=1` reads GL back and counts mismatches.
-- The full per-shape draw packet (PERF4-DRAWPACKETS) is not done: the shape setup's state comes from many property
-  binds with side effects; only the texture parameters are shadowed so far. Live rows: notes/perf5/rows.in, hold.sh.
-
 ## Lane HOLDFIX1 (2026-10-25, branch holdfix1-20261025): test-run fixes from the hold 4 triage
 
 - **Memory Den far plane held still:** a cell's far plane is rounded up to whole steps of 8192 units. Inside one launch the
