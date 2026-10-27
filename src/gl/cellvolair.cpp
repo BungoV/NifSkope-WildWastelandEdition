@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
 
+#include "gl/cellgrass.h"	// lane FOGWIND1: the game's wind angle, shared with the grass
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
@@ -173,7 +174,7 @@ struct VaDrift
 {
 	bool loaded = false, on = false, pinned = false;
 	quint64 liveGen = 0;		// fix TDFIX2: a live set of WW_CELL_FOGDRIFT* re-reads them
-	int red = 0;				// 1 still (no motion), 2 smooth (no noise)
+	int red = 0;				// 1 still (no motion), 2 smooth (no noise), 3 wobble (the pre-FOGWIND1 wind law)
 	bool timePinned = false;
 	double tPin = 0.0;
 	QElapsedTimer clock;
@@ -203,7 +204,7 @@ VaDrift & vd()
 			d.on = QSettings().value( QStringLiteral( "WW/VolAirDrift" ), false ).toBool();
 		}
 		const QByteArray red = qgetenv( "WW_CELL_FOGDRIFT_RED" ).trimmed();
-		d.red = red == "still" ? 1 : red == "smooth" ? 2 : 0;
+		d.red = red == "still" ? 1 : red == "smooth" ? 2 : red == "wobble" ? 3 : 0;
 		bool ok = false;
 		const double t = qEnvironmentVariable( "WW_CELL_FOGDRIFT_T" ).toDouble( &ok );
 		if ( ok ) {	// a fixed clock (the shots' frames): the drift integrated from 0 to t in fixed steps
@@ -271,8 +272,9 @@ void vaNoiseBuild( VaDrift & d )
 }
 
 /* the wind's offsets at time t (fixed steps of at most 1/30 s; a pinned clock restarts from 0, run to run identical).
- * Range and turbulence wobble the bearing and gust the speed; the velocity eases toward them (2 s), so a weather
- * change never jumps. The detail octave moves 1.35x faster and a little upward: the lumps change shape as they go. */
+ * FOGWIND1: the game's wind, a steady bearing (the grass's angle, 0 = +X counter-clockwise) at speed x magnitude; the
+ * game's turbulence only sways plants. Red wobble: the old law (range/turbulence wobble and gust, 0 = +Y clockwise).
+ * The velocity eases toward its target (2 s), so a weather change never jumps. The detail octave moves 1.35x faster. */
 void vaDriftAdvance( VaDrift & d, double t, const quint8 w[4] )
 {
 	if ( t < d.tDone ) {
@@ -284,16 +286,26 @@ void vaDriftAdvance( VaDrift & d, double t, const quint8 w[4] )
 		d.tDone = t - 1.0;	// an idle window: carry on from a second ago, no catch-up loop
 	const double twoPi = 6.283185307179586;
 	const double M = w[0] / 255.0, dir = w[1] / 255.0 * twoPi, range = w[2] / 255.0 * 0.5 * twoPi, T = w[3] / 255.0;
+	const float gameA = wwGameWindAngle( w[1] );
 	const int steps = int( std::ceil( ( t - d.tDone ) * 30.0 ) );
 	const double dt = steps > 0 ? ( t - d.tDone ) / steps : 0.0;
 	for ( int s = 0; s < steps; s++ ) {
-		const double u = d.tDone + dt * ( s + 0.5 );
-		const double a = dir + 0.5 * range * ( 0.6 * std::sin( twoPi * u / 23.0 ) + 0.4 * std::sin( twoPi * u / 9.1 ) );
-		const double gust = std::max( 0.0, 1.0 + T * ( 0.35 * std::sin( twoPi * u / 7.3 ) + 0.25 * std::sin( twoPi * u / 3.1 ) ) );
-		const double v = kDriftSpeed * M * gust;
 		const double e = 1.0 - std::exp( -dt / 2.0 );
-		d.vel[0] += float( ( v * std::sin( a ) - d.vel[0] ) * e );	// bearing: 0 = +Y (north), clockwise
-		d.vel[1] += float( ( v * std::cos( a ) - d.vel[1] ) * e );
+		double vx, vy;
+		if ( d.red == 3 ) {
+			const double u = d.tDone + dt * ( s + 0.5 );
+			const double a = dir + 0.5 * range * ( 0.6 * std::sin( twoPi * u / 23.0 ) + 0.4 * std::sin( twoPi * u / 9.1 ) );
+			const double gust = std::max( 0.0, 1.0 + T * ( 0.35 * std::sin( twoPi * u / 7.3 ) + 0.25 * std::sin( twoPi * u / 3.1 ) ) );
+			const double v = kDriftSpeed * M * gust;
+			vx = v * std::sin( a );
+			vy = v * std::cos( a );
+		} else {
+			const double v = kDriftSpeed * M;
+			vx = v * std::cos( double( gameA ) );
+			vy = v * std::sin( double( gameA ) );
+		}
+		d.vel[0] += float( ( vx - d.vel[0] ) * e );
+		d.vel[1] += float( ( vy - d.vel[1] ) * e );
 		for ( int o = 0; o < 2; o++ ) {
 			// wrapped at the octave's own tile: the texture repeats there, so the wrap is seamless
 			const float k = float( dt ) * ( o ? 1.35f : 1.0f ), tile = kDriftTile * ( o ? kDriftDetail : 1.0f );
@@ -1501,11 +1513,12 @@ static void vaPassInner( Scene * scene, bool run )
 			}
 			dr.moving = blows;
 			driftAmp = kDriftAmp / std::max( dr.span, 1e-3f );
-			dr.note = QStringLiteral( "on(wind=%1 dir=%2 range=%3 turb=%4 speed=%5 t=%6%7)" )
+			dr.note = QStringLiteral( "on(law=%8 wind=%1 dir=%2 range=%3 turb=%4 speed=%5 t=%6%7)" )
 				.arg( hasWind ? wind[0] / 255.0 : 0.0, 0, 'f', 3 ).arg( wind[1] / 255.0 * 360.0, 0, 'f', 1 )
 				.arg( wind[2] / 255.0 * 180.0, 0, 'f', 1 ).arg( wind[3] / 255.0, 0, 'f', 3 )
 				.arg( double( std::hypot( dr.vel[0], dr.vel[1] ) ), 0, 'f', 1 ).arg( dr.tDone, 0, 'f', 3 )
-				.arg( !blows ? ( dr.red == 1 ? QStringLiteral( " still(red)" ) : QStringLiteral( " still(no wind)" ) ) : QString() );
+				.arg( !blows ? ( dr.red == 1 ? QStringLiteral( " still(red)" ) : QStringLiteral( " still(no wind)" ) ) : QString() )
+				.arg( dr.red == 3 ? QStringLiteral( "wobble(red)" ) : QStringLiteral( "game" ) );
 		}
 	}
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kNoiseUnit ) );
