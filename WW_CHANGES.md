@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FOGWIND1 (2026-10-27, branch fogwind1-20261027): the fog drift follows the game's wind
+
+- **What the game does (Todd's treat, notes/fogwind1):** the weather's fog (WTHR FNAM) carries no wind and no flags of
+  its own, and the game's fog update reads neither the DATA wind bytes nor the DATA flags. The wind bytes feed only the
+  game's wind update: a steady bearing (direction byte, plus one random offset within the range, re-drawn only when the
+  weather's direction or range changes) at speed x magnitude; turbulence only sets the plants' sway band and frequency.
+  The flags (pleasant/cloudy/rainy/snow, aurora, rain occlusion, HUD rain) steer rain, snow, aurora, sounds and
+  conditions, never fog. So nothing new is applied from the flags.
+- **Drift on the game's law:** the near air's drifting lumps (FOGDRIFT1, `src/gl/cellvolair.cpp` vaDriftAdvance) now
+  move at the game's steady bearing, the grass's angle (0 = +X, counter-clockwise), at 400 u/s x speed byte / 255. The
+  old law wobbled the bearing with the range, gusted the speed with the turbulence and turned 0 = +Y clockwise, so the
+  fog and the grass blew different ways. The ground layer drifts with it in the near grid (the drift multiplies the
+  froxel's whole optical depth).
+- **Shared angle:** `wwGameWindAngle` (`src/gl/cellgrass.h`) is the grass's float32 angle code, now used by both; the
+  grass's constants are bit-identical.
+- **Red:** `WW_CELL_FOGDRIFT_RED=wobble` restores the old law, bit for bit; live like the other drift reds. The census
+  echo adds `law=game|wobble(red)`.
+- **Weather blend:** speed and turbulence come through `wwLookdevWind`, so a weather blend that eases them (WEATHERBLEND1,
+  another branch) reaches the drift with no change here; direction and range stay the current weather's, as in the game.
+- **Cost:** CPU only, a few float operations per frame (fewer than the old law's sines); 0 GPU ms, no memory.
+
 ## Lane FOGTERRAIN3 (2026-10-27, branch fogterrain3-20261027): fog on the water, a better far anchor, a fine level
 
 - **Fog stands on the water:** the fog job also rasters the scene's water shapes over the same window

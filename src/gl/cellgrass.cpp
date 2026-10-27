@@ -699,15 +699,8 @@ bool wwCellGrassWind( float wind[4], float wind2[4] )
 	const float freq = ( 1.0f - T ) * 0.5f + T * 4.0f;	// fWindLowestFrequency, fWindHighestFrequency
 	const float minSpeed = ( ( 1.0f - T ) + T * 0.0f ) * M;	// fWindSpeedLowestLowMultiplier
 	const float maxSpeed = ( ( 1.0f - T ) + T * 1.5f ) * M;	// fWindSpeedHighestHighMultiplier
-	const float dir = float( w[1] ) * k255 * 360.0f;
 	// the game adds the nearest of 4 BSRandom draws within +- range / 2 (not reproducible): offset 0 here
-	const float twoPi = 6.28318548f;
-	float angle = ( 0.0f + dir ) * 0.0174532924f;
-	if ( !( angle < twoPi ) )
-		angle -= twoPi;
-	else if ( angle < 0.0f )
-		angle += twoPi;
-	wind[0] = angle;
+	wind[0] = wwGameWindAngle( w[1] );
 	wind[1] = 0.0f;
 	wind[2] = 0.0f;	// the phases are per shape (wwCellGrassUniforms)
 	wind[3] = 0.0f;

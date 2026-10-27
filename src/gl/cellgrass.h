@@ -107,6 +107,20 @@ bool wwCellGrassIsShape( const void * nif, int block );
 //! The wind constants from the loaded weather (the engine's wind update): wind = (angle, 0, 0, 0), wind2 = (min * 300,
 //! max * 300, frequency, 1); false without a weather.
 bool wwCellGrassWind( float wind[4], float wind2[4] );
+//! lane FOGWIND1: the game's wind bearing from the weather's DATA direction byte, float32 in the engine's order (radians,
+//! 0 = +X, counter-clockwise; the random range offset is 0). Shared by the grass and the fog drift.
+inline float wwGameWindAngle( quint8 dirByte )
+{
+	const float k255 = 1.0f / 255.0f;	// 0x3b808081
+	const float dir = float( dirByte ) * k255 * 360.0f;
+	const float twoPi = 6.28318548f;
+	float angle = ( 0.0f + dir ) * 0.0174532924f;
+	if ( !( angle < twoPi ) )
+		angle -= twoPi;
+	else if ( angle < 0.0f )
+		angle += twoPi;
+	return angle;
+}
 //! lane FAR5: a swaying cable's (a no-fade block's) wind with its current phase in wind[3]; false for any other block
 bool wwCellGrassCableWind( const void * nif, int block, float wind[4], float wind2[4] );
 //! The blade's phase offset, (h0 + h1) * 0.0078125: the weld carries it in the bitangent's length (1024 + it).
