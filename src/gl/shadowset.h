@@ -68,6 +68,8 @@ bool wwSunPathApply( double hour, double gameDay, float sunDir[3], float disc[3]
 /*! lane EPHEM1: with Sun Path = Real and the row "Real sun and moon" on, the moon TO-vector (unit, world), its
  *  sun-moon elongation (0 new, 180 full) and lit fraction; false (nothing written) otherwise. */
 bool wwSkyMoonReal( double hour, double gameDay, double dir[3], double * elongDeg, double * litFraction );
+//! lane SKYDISC1: with wwSkyMoonReal, the sun's direction, the moon's spin pole (world) and its libration in longitude
+bool wwSkyMoonFrame( double hour, double gameDay, double moon[3], double sun[3], double pole[3], double * libLonDeg );
 
 //! (A) the upgraded cascades' preset; false = Off (CSM1's own numbers)
 struct WwCascadePreset

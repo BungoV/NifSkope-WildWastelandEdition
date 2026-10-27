@@ -1,6 +1,7 @@
 #include "atmosphere.h"
 #include "atmomath.h"
 #include "gl/weatherrecx.h"	// lane WX1: the weather .recx atmosphere block
+#include "skydisc.h"
 #include "wwswitch.h"
 #include "gl/cellunits.h"
 #include "gl/glscene.h"
@@ -634,8 +635,9 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			p->uni3f( "atMoonW", moonW[0], moonW[1], moonW[2] );
 			p->uni1f( "atSunK", sunK );
 			p->uni1f( "atMoonK", moonK );
-			p->uni1f( "atLimb", s.tier >= 3 ? 1.0f : 0.0f );
+			p->uni1f( "atLimb", ( s.tier >= 3 || in.discs ) ? 1.0f : 0.0f );
 			p->uni1f( "atDiscCap", in.disc ? kDiscCap : 0.0f );
+			p->uni1f( "atDiscHue", in.discs ? 1.0f : 0.0f );	// SKYDISC1: 0 = the per-channel min() as before
 			p->uni1f( "sceneExposure", in.exposure );
 			p->uni1i( "viewTransform", in.viewTransform );
 			// lane SKYA (ATMOCHECK1): the Sky Color row's Weather Tint (atWeatherTint); 0 = the physical color, as before
@@ -689,6 +691,9 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		f.viewW = vw;
 		f.viewH = vh;
 		f.frame = s.frame;
+		f.tintOn = s.tintDrawn && ok;
+		if ( f.tintOn )
+			std::copy( &in.tint[0][0], &in.tint[0][0] + kTintN * 3, &f.tint[0][0] );
 	}
 
 	const float sunEl = std::asin( std::clamp( sunW[2], -1.0f, 1.0f ) ) * 180.0f / kPi;
@@ -699,6 +704,8 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	for ( const char * w : { "nosunt", "double" } )
 		if ( apRed( w ) )
 			reds += QStringLiteral( ",AP_RED=%1" ).arg( QLatin1StringView( w ) );
+	if ( in.discs )
+		reds += wwAtmoDiscRed( "nophase" ) ? QStringLiteral( ",discs=ours,DISC_RED=nophase" ) : QStringLiteral( ",discs=ours" );
 	if ( s.tint > 0 )	// lane SKYA (ATMOCHECK1)
 		reds += in.tintOk ? ( wwAtmoTintRedFlat() ? QStringLiteral( ",tint=weather,TINT_RED=flat" )
 			: wwAtmoTintRedPhysical() ? QStringLiteral( ",tint=weather,TINT_RED=physical" ) : QStringLiteral( ",tint=weather(ap,amb)" ) )
@@ -818,6 +825,21 @@ int wwAtmoNightKey( int phase )
 float wwAtmoMoonFactor( int phase )
 {
 	return wwAtmoNightOn() ? moonPhaseFactor( phase, nightRed( "nophase" ) ) : 1.0f;
+}
+
+bool wwAtmoDiscRed( const char * word )
+{
+	return wwEnvStr( "WW_ATMO_DISC_RED" ).trimmed().toLower() == QLatin1StringView( word );
+}
+
+bool wwAtmoDiscs()
+{
+	return as().tier > 0 && !wwAtmoDiscRed( "vanilla" );
+}
+
+float wwAtmoMoonFactorDeg( float alphaDeg )
+{
+	return ( wwAtmoNightOn() && !nightRed( "nophase" ) ) ? float( wwskydisc::ksFactor( alphaDeg ) ) : 1.0f;
 }
 
 void wwAtmoStarExtinction( float mu, float out[3] )

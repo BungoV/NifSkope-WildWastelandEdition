@@ -1600,6 +1600,22 @@ bool wwSkyMoonReal( double hour, double gameDay, double dir[3], double * elongDe
 	return true;
 }
 
+bool wwSkyMoonFrame( double hour, double gameDay, double moon[3], double sun[3], double pole[3], double * libLonDeg )
+{
+	if ( !wwSkyMoonReal( hour, gameDay, moon, nullptr, nullptr ) )
+		return false;
+	double lon;
+	const wwephem::Date d = ephemDate( hour, gameDay, lon );
+	const wwephem::Body s = wwephem::sun( d, wwephem::kBostonLat, lon );
+	std::copy( s.dir, s.dir + 3, sun );
+	const double jd = wwephem::moon( d, wwephem::kBostonLat, lon ).julianDay;
+	const wwephem::Libration L = wwephem::libration( jd );
+	wwephem::eclipticToHorizontal( jd, L.poleLon, L.poleLat, wwephem::kBostonLat, lon, pole );
+	if ( libLonDeg )
+		*libLonDeg = L.lDeg;
+	return true;
+}
+
 // ---- (A) ----
 
 bool wwShadowCascadePreset( WwCascadePreset & p )

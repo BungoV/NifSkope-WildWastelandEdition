@@ -226,6 +226,7 @@ HEADERS += \
 	src/gl/sunshadow.h \
 	src/gl/shadowset.h \
 	src/gl/skyephem.h \
+	src/gl/skydisc.h \
 	src/gl/fxparity.h \
 	src/gl/fxparityrules.h \
 	src/gl/gametaa.h \
