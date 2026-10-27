@@ -3,7 +3,8 @@
 
 /* lane CELLUNI1: the cell lighting uniforms (wwCellLightsUniforms, wwCellClusterUniforms) without driver round trips.
  * A per-program value cache skips an upload that would write what the location already holds; the dedicated units
- * bind through EXT_direct_state_access, so the active unit is never asked for. WW_CELL_UNI_RED=1: the old path. */
+ * bind through EXT_direct_state_access, so the active unit is never asked for. WW_CELL_UNI_RED=1: the old path.
+ * Lane CELLUNI2: the per-draw setters (AO, SSR, SSGI, reflection probes) and the scene globals (fog, sun) use it too. */
 
 #include <cstdint>
 #include <cstring>
@@ -44,12 +45,17 @@ struct Counts
 	std::uint64_t calls = 0, uploads = 0, kept = 0, unused = 0, queries = 0;
 };
 
+//! lane CELLUNI2: who opened the innermost scope (the telemetry splits the counts by it)
+enum Site { Lights, Draw, Globals, SiteCount };
+
 struct State
 {
 	int depth = 0;	// inside a cached cell scope (never with the red)
 	int inCall = 0;	// inside a cell scope, red or not (the counters)
+	int site = Lights;
 	bool red = false;
-	Counts frame, last;
+	Counts frame, last;	// all sites
+	Counts sites[SiteCount], sitesLast[SiteCount];
 	std::uint64_t frameNo = 0;
 	// the viewport of an armed setup-memo pass: the memo re-arms when a layer changes the viewport, so one per epoch
 	std::uint64_t vpEpoch = 0, vpHave = 0, vpStale = 0;
@@ -62,14 +68,25 @@ inline State & state()
 	return s;
 }
 
+inline void bump( std::uint64_t Counts::*m )
+{
+	State & st = state();
+	st.frame.*m += 1;
+	st.sites[st.site].*m += 1;
+}
+
 struct Scope
 {
 	bool cached;
-	Scope() : cached( !state().red )
+	int prevSite;
+	explicit Scope( int site = Lights ) : cached( !state().red )
 	{
 		State & st = state();
+		prevSite = st.site;
+		st.site = site;
 		if ( !st.inCall++ )
 			st.frame.calls++;
+		st.sites[site].calls++;
 		if ( cached )
 			st.depth++;
 	}
@@ -77,6 +94,7 @@ struct Scope
 	{
 		State & st = state();
 		st.inCall--;
+		st.site = prevSite;
 		if ( cached )
 			st.depth--;
 	}
@@ -90,13 +108,13 @@ inline bool want( Cache & c, int l, Kind k, const void * v, int words, bool rec 
 	State & st = state();
 	if ( !st.depth ) {	// a write the scope does not see: the slot is unknown from now on
 		if ( st.inCall )
-			st.frame.uploads++;
+			bump( &Counts::uploads );
 		if ( l >= 0 && size_t( l ) < c.s.size() )
 			c.s[size_t( l )].kind = None;
 		return true;
 	}
 	if ( l < 0 ) {	// glUniform* at -1 writes nothing
-		st.frame.unused++;
+		bump( &Counts::unused );
 		return false;
 	}
 	if ( size_t( l ) >= c.s.size() )
@@ -105,12 +123,12 @@ inline bool want( Cache & c, int l, Kind k, const void * v, int words, bool rec 
 	std::uint32_t b[4] = {};
 	std::memcpy( b, v, size_t( words ) * 4 );
 	if ( !rec && sl.kind == k && std::memcmp( sl.v, b, sizeof b ) == 0 ) {	// a recording packet must see every call
-		st.frame.kept++;
+		bump( &Counts::kept );
 		return false;
 	}
 	sl.kind = k;
 	std::memcpy( sl.v, b, sizeof b );
-	st.frame.uploads++;
+	bump( &Counts::uploads );
 	return true;
 }
 
@@ -119,8 +137,15 @@ inline void wrote( Cache & c, int l, int n )
 {
 	State & st = state();
 	if ( st.inCall )
-		st.frame.uploads++;
+		bump( &Counts::uploads );
 	c.forget( l, n < 1 ? 1 : n );
+}
+
+//! lane CELLUNI2: a driver query made inside a scope (a blend or unit ask outside Units)
+inline void queried()
+{
+	if ( state().inCall )
+		bump( &Counts::queries );
 }
 
 //! once per frame: true when the last frame's counters should print
@@ -131,6 +156,10 @@ inline bool frameTick( std::uint64_t f, std::uint64_t every )
 		return false;
 	st.last = st.frame;
 	st.frame = Counts();
+	for ( int i = 0; i < SiteCount; i++ ) {
+		st.sitesLast[i] = st.sites[i];
+		st.sites[i] = Counts();
+	}
 	st.frameNo = f;
 	return every && f % every == 0;
 }
@@ -157,8 +186,10 @@ template <class F> struct Units
 		int a = 0;
 		fn->glGetIntegerv( 0x84E0, &a );	// GL_ACTIVE_TEXTURE
 		known = a;
-		state().frame.queries++;
+		bump( &Counts::queries );
 	}
+	//! lane CELLUNI2: the unit a per-draw cache already holds (no ask; the old path took it from there too)
+	void seed( int active ) { known = active; }
 	void section()
 	{
 		if ( !dsa )
@@ -227,7 +258,7 @@ template <class F> void viewport( F * fn, int vp[4] )
 		return;
 	}
 	fn->glGetIntegerv( 0x0BA2, vp );	// GL_VIEWPORT
-	st.frame.queries++;
+	bump( &Counts::queries );
 	if ( !st.red && st.vpEpoch ) {
 		st.vpHave = st.vpEpoch;
 		std::memcpy( st.vp, vp, sizeof st.vp );
@@ -239,5 +270,7 @@ template <class F> void viewport( F * fn, int vp[4] )
 const WwCellUni::Dsa * wwCellUniDsa();
 //! WW_CELL_UNI_RED=1 (live): the old path, a query per section and every upload
 bool wwCellUniRed();
+//! lane CELLUNI2: the per-frame tick and the `cell uni:` line (any scope's first call in a frame)
+void wwCellUniFrame();
 
 #endif

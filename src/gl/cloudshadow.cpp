@@ -4,6 +4,7 @@
 #include "gl/cloudvol.h"
 #include "gl/atmomath.h"
 #include "gl/cellunits.h"
+#include "gl/celluniform.h"	// lane CELLUNI2
 #include "gl/celllights.h"
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
@@ -514,11 +515,9 @@ void wwCloudShadowUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog
 	const bool on = valid && !( volume && red( "noinject" ) );
 	prog->uni1i( "ussCloudOn", on ? 1 : 0 );
 	auto fn = r->fn;
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CloudShadow ) );
-	fn->glBindTexture( GL_TEXTURE_2D, on ? it->tex : 0 );
-	fn->glActiveTexture( GLenum( prevActive ) );
+	WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );	// lane CELLUNI2: no query with DSA
+	u.bind( WwCellUnit::CloudShadow, GL_TEXTURE_2D, on ? it->tex : 0 );
+	u.done();
 	prog->uni1i( "ussCloudMap", WwCellUnit::CloudShadow );
 	if ( !on )
 		return;
@@ -529,7 +528,9 @@ void wwCloudShadowUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog
 	for ( int i = 0; i < 16; i++ )
 		mf[i] = float( cfv[i] );
 	const int l = prog->uniLocation( "ussCloudFromView" );
-	if ( l >= 0 )
+	if ( l >= 0 ) {
 		fn->glUniformMatrix4fv( l, 1, GL_FALSE, mf );
+		WwCellUni::wrote( prog->wwUni, l, 1 );	// lane CELLUNI2: a raw write
+	}
 	prog->uni4f( "ussCloudFar", FloatVector4( it->far[0], it->far[1], it->far[2], airAmb ) );
 }

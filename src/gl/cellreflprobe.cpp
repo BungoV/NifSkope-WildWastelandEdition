@@ -6,6 +6,8 @@ BSD License - see nifskope.h
 
 #include "cellreflprobe.h"
 #include "cellunits.h"
+#include "celluniform.h"	// lane CELLUNI2
+#include "gl/celldrawstate.h"
 #include "wwswitch.h"	// fix TDFIX2: a live set re-reads the switches
 #include "gl/celllooks.h"	// lane OPENCELLFIX2: the Reflections master
 
@@ -842,18 +844,17 @@ void wwCellReflProbeDraw( Scene * scene, bool cellProgram )
 	RpState & s = rps();
 	auto it = rpGpus().find( r );
 	const bool on = s.on && !( s.red & 1 ) && it != rpGpus().end() && it->ready && it->doc == scene->nifModel
-		&& !s.greyscale && !wwCellSsrInPass() && !r->fn->glIsEnabled( GL_BLEND ) && ( s.probe == 0 || s.probe == 66 );
+		&& !s.greyscale && !wwCellSsrInPass() && !( wwCellUniRed() ? r->fn->glIsEnabled( GL_BLEND ) : wwDrawBlend() )	// CELLUNI2
+		&& ( s.probe == 0 || s.probe == 66 );
 	prog->uni1b( "cellReflOn", on );
 	if ( !on )
 		return;
 	RpGpu & g = *it;
 	auto fn = r->fn;
 	// the atlas on its own unit, read through the idle GreyscaleMap sampler (the palette is off for this draw)
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::ReflProbe ) );
-	fn->glBindTexture( GL_TEXTURE_2D, g.atlas );
-	fn->glActiveTexture( GLenum( prevActive ) );
+	WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );	// lane CELLUNI2: no query with DSA
+	u.bind( WwCellUnit::ReflProbe, GL_TEXTURE_2D, g.atlas );
+	u.done();
 	prog->uni1i( "GreyscaleMap", WwCellUnit::ReflProbe );
 	quint64 & ps = g.progStamp[prog->id];
 	if ( ps == g.stamp )
@@ -861,9 +862,15 @@ void wwCellReflProbeDraw( Scene * scene, bool cellProgram )
 	ps = g.stamp;
 	prog->uni1i( "cellReflCount", g.count );
 	if ( g.count > 0 ) {
-		fn->glUniform4fv( prog->uniLocation( "cellReflPos[%d]", 0 ), g.count, g.uPos.data() );
-		fn->glUniform4fv( prog->uniLocation( "cellReflMin[%d]", 0 ), g.count, g.uMin.data() );
-		fn->glUniform4fv( prog->uniLocation( "cellReflMax[%d]", 0 ), g.count, g.uMax.data() );
+		const int lp = prog->uniLocation( "cellReflPos[%d]", 0 ), ln = prog->uniLocation( "cellReflMin[%d]", 0 ),
+			lx = prog->uniLocation( "cellReflMax[%d]", 0 );
+		fn->glUniform4fv( lp, g.count, g.uPos.data() );
+		fn->glUniform4fv( ln, g.count, g.uMin.data() );
+		fn->glUniform4fv( lx, g.count, g.uMax.data() );
+		// lane CELLUNI2: raw array writes, so the uniform cache forgets those locations
+		WwCellUni::wrote( prog->wwUni, lp, g.count );
+		WwCellUni::wrote( prog->wwUni, ln, g.count );
+		WwCellUni::wrote( prog->wwUni, lx, g.count );
 	}
 	prog->uni4f( "cellReflAtlas", FloatVector4( 1.0f / float( kCols * kFace ), 1.0f / float( kRows * kFace ), float( kFace ),
 		float( kCols ) ) );

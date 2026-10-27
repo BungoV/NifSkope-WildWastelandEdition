@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellssr.h"
 #include "cellunits.h"
+#include "celluniform.h"	// lane CELLUNI2
 #include "gl/celldrawstate.h"	// lane PERF3
 
 #include "gl/celllights.h"
@@ -601,10 +602,11 @@ void wwCellSsgiDraw( Scene * scene, bool cellProgram )
 	prog->uni1b( "cellSsgiOn", on );
 	if ( !have )
 		return;
-	const GLint prevActive = wwDrawActiveTexture();	// lane PERF3
-	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + it->unit ) );
-	r->fn->glBindTexture( GL_TEXTURE_2D, on ? it->fin.tex : 0 );
-	r->fn->glActiveTexture( GLenum( prevActive ) );
+	WwCellUni::Units<std::remove_pointer_t<decltype( r->fn )>> u( r->fn, wwCellUniDsa() );	// lane CELLUNI2: no query
+	if ( !u.dsa )
+		u.seed( wwDrawActiveTexture() );	// lane PERF3
+	u.bind( it->unit, GL_TEXTURE_2D, on ? it->fin.tex : 0 );
+	u.done();
 	prog->uni1i( "cellSsgi", it->unit );
 	if ( on ) {
 		int vp[4];

@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "sunshadow.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"
+#include "celluniform.h"	// lane CELLUNI2
 #include "gametaa.h"
 #include "gl/cellwater.h"	// lane SUNCELL1: water never casts
 #include "cellmesh.h"	// lane FARDRAW1: CellMeshInst
@@ -1583,11 +1584,9 @@ void wwSunShadowUniforms( Scene * scene )
 		return;
 	const CsmState & s = cs();
 	auto fn = r->fn;
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTextureUnit ) );
-	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, s.valid ? s.tex : 0 );
-	fn->glActiveTexture( GLenum( prevActive ) );
+	WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );	// lane CELLUNI2: no query with DSA
+	u.bind( kTextureUnit, GL_TEXTURE_2D_ARRAY, s.valid ? s.tex : 0 );
+	u.done();
 	prog->uni1i( "csmMap", kTextureUnit );
 	const bool nobias = red( "nobias" );
 	// red "bigbias": a 600-unit receiver offset, the peter-panning control (the shadow must detach)
@@ -1611,8 +1610,10 @@ void wwSunShadowUniforms( Scene * scene )
 	} else {
 		for ( int i = 0; i < kCascades; i++ ) {
 			const int l = prog->uniLocation( "csmMat[%d]", i );
-			if ( l >= 0 )
+			if ( l >= 0 ) {
 				fn->glUniformMatrix4fv( l, 1, GL_FALSE, s.c[i].uvdFromView );
+				WwCellUni::wrote( prog->wwUni, l, 1 );	// lane CELLUNI2: a raw write
+			}
 		}
 		prog->uni3f_l( prog->uniLocation( "csmInvRange" ), float( 1.0 / ( s.c[0].far - kNear ) ),
 			float( 1.0 / ( s.c[1].far - kNear ) ), float( 1.0 / ( s.c[2].far - kNear ) ) );

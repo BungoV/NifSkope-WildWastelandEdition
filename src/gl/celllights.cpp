@@ -1338,6 +1338,26 @@ bool wwCellUniRed()
 	return red;
 }
 
+// lane CELLUNI2: totals, then per site (lights = this file's scope, draw = the per-draw setters, globals = fog + sun)
+void wwCellUniFrame()
+{
+	if ( !WwCellUni::frameTick( wwGlPaintCount(), 60 ) || !wwFrameLog() )
+		return;
+	const WwCellUni::State & cs = WwCellUni::state();
+	const WwCellUni::Dsa * dsa = wwCellUniDsa();
+	QByteArray line = QByteArray( "cell uni: calls=" ) + QByteArray::number( cs.last.calls ) + " uploads="
+		+ QByteArray::number( cs.last.uploads ) + " kept=" + QByteArray::number( cs.last.kept ) + " unused="
+		+ QByteArray::number( cs.last.unused ) + " queries=" + QByteArray::number( cs.last.queries ) + " dsa="
+		+ QByteArray::number( dsa && dsa->bindMulti ? 1 : 0 ) + " vpstale=" + QByteArray::number( cs.vpStale );
+	static const char * const names[WwCellUni::SiteCount] = { "lights", "draw", "globals" };
+	for ( int i = 0; i < WwCellUni::SiteCount; i++ ) {
+		const WwCellUni::Counts & c = cs.sitesLast[i];
+		line += QByteArray( " | " ) + names[i] + " calls=" + QByteArray::number( c.calls ) + " uploads="
+			+ QByteArray::number( c.uploads ) + " kept=" + QByteArray::number( c.kept ) + " queries=" + QByteArray::number( c.queries );
+	}
+	std::fprintf( stderr, "%s%s\n", line.constData(), cs.red ? " RED" : "" );
+}
+
 const WwCellUni::Dsa * wwCellUniDsa()
 {
 	static const QOpenGLContext * last = nullptr;
@@ -1366,14 +1386,7 @@ void wwCellLightsUniforms( Scene * scene )
 	if ( !prog || prog->uniLocation( "cellOn" ) < 0 )
 		return;
 	WwCellUni::state().red = wwCellUniRed();	// lane CELLUNI1
-	if ( WwCellUni::frameTick( wwGlPaintCount(), 60 ) && wwFrameLog() ) {
-		const WwCellUni::State & cs = WwCellUni::state();
-		const WwCellUni::Dsa * dsa = wwCellUniDsa();
-		std::fprintf( stderr, "cell uni: calls=%llu uploads=%llu kept=%llu unused=%llu queries=%llu dsa=%d vpstale=%llu%s\n",
-			(unsigned long long)cs.last.calls, (unsigned long long)cs.last.uploads, (unsigned long long)cs.last.kept,
-			(unsigned long long)cs.last.unused, (unsigned long long)cs.last.queries, dsa && dsa->bindMulti ? 1 : 0,
-			(unsigned long long)cs.vpStale, cs.red ? " RED" : "" );
-	}
+	wwCellUniFrame();
 	const WwCellUni::Scope uniScope;
 	const bool on = wwCellLightsWanted( scene );
 	prog->uni1b( "cellOn", on );
@@ -4496,10 +4509,11 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	const bool on = g.aoReady && g.doc == scene->nifModel && !( a.red & 1 ) && ( !wwDrawBlend() || decalProg )
 		&& wwCellLightsWanted( scene );
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
-	const GLint prevActive = wwDrawActiveTexture();	// lane PERF3
-	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + g.unit ) );
-	r->fn->glBindTexture( GL_TEXTURE_2D, on ? g.aoTex : 0 );	// lane SSAO2: the method's term (fin for vanilla)
-	r->fn->glActiveTexture( GLenum( prevActive ) );
+	WwCellUni::Units<std::remove_pointer_t<decltype( r->fn )>> u( r->fn, wwCellUniDsa() );	// lane CELLUNI2: no query
+	if ( !u.dsa )
+		u.seed( wwDrawActiveTexture() );	// lane PERF3
+	u.bind( g.unit, GL_TEXTURE_2D, on ? g.aoTex : 0 );	// lane SSAO2: the method's term (fin for vanilla)
+	u.done();
 	prog->uni1i( "cellAo", g.unit );
 	prog->uni1b( "cellAoOn", on );
 	/* lane AODECAL1: the decal target multiplies the probe term (cellGiE). Opaque draws only, like the obscurance:
@@ -4507,10 +4521,11 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	const bool decalOn = g.ready && g.doc == scene->nifModel && g.decal && g.decalUnit >= 0 && ( !wwDrawBlend() || decalProg );
 	{
 		const int du = g.decalUnit >= 0 ? g.decalUnit : g.unit;
-		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + du ) );
 		if ( g.decalUnit >= 0 )
-			r->fn->glBindTexture( GL_TEXTURE_2D, decalOn ? g.decal : 0 );
-		r->fn->glActiveTexture( GLenum( prevActive ) );
+			u.bind( du, GL_TEXTURE_2D, decalOn ? g.decal : 0 );
+		else if ( !u.dsa )
+			u.raw( du );	// the old sequence moved the unit there and back
+		u.done();
 		prog->uni1i( "cellAoDecal", du );
 		prog->uni1b( "cellAoDecalOn", decalOn );
 		if ( decalOn ) {
@@ -4524,9 +4539,8 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		const auto & pm = r->globalUniforms->projectionMatrix;
 		const bool ctOn = wwLookOn( WwLook::ContactLocal ) && g.ready && g.doc == scene->nifModel && g.gbuf.tex
 			&& ( !wwDrawBlend() || decalProg ) && pm[3][3] != 1.0f;
-		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::ContactGbuf ) );
-		r->fn->glBindTexture( GL_TEXTURE_2D, ctOn ? g.gbuf.tex : 0 );
-		r->fn->glActiveTexture( GLenum( prevActive ) );
+		u.bind( WwCellUnit::ContactGbuf, GL_TEXTURE_2D, ctOn ? g.gbuf.tex : 0 );
+		u.done();
 		prog->uni1i( "cellCtGbuf", WwCellUnit::ContactGbuf );
 		prog->uni1b( "cellCtOn", ctOn );
 		if ( ctOn ) {
@@ -4543,11 +4557,9 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		const bool giOn = g.giReady && g.doc == scene->nifModel && ( wwCellGiRate() == 0 || wwCellGiRate() == 1 ) && wwCellGiVis() == 0
 			&& ( !wwDrawBlend() || decalProg ) && ( !probePic || g.volOn );
 		if ( g.giUnits ) {
-			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
-			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? ( probePic ? g.volMask.tex : g.giHalf.tex ) : 0 );
-			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalfKey ) );
-			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? g.giKey : 0 );
-			r->fn->glActiveTexture( GLenum( prevActive ) );
+			u.bind( WwCellUnit::GiHalf, GL_TEXTURE_2D, giOn ? ( probePic ? g.volMask.tex : g.giHalf.tex ) : 0 );
+			u.bind( WwCellUnit::GiHalfKey, GL_TEXTURE_2D, giOn ? g.giKey : 0 );
+			u.done();
 		}
 		prog->uni1b( "cellGiHalfOn", giOn );
 		if ( giOn ) {

@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLUNI2 (2026-10-27, branch celluni2-20261027): the per-draw setters and the scene globals on the uniform kit
+
+- **Why:** after CELLUNI1 the c3 frame still asked the driver ~5-7 times per draw (5852 draws): raw glIsEnabled(GL_BLEND)
+  in the census, the reflection probes, a GL_ACTIVE_TEXTURE ask around every AO/SSR/SSGI/probe bind, and 3 asks per
+  call in the sun chain (wwSunShadowUniforms, wwShadowSetUniforms, wwCloudShadowUniforms; 1940 calls). The fog uniforms
+  re-sent ~8 unchanged values per call.
+- **Binds through `WwCellUni::Units`** in wwCellAoDraw (AO, decal, contact G-buffer, GI half + key), cellssr.cpp,
+  cellssgi.cpp, cellreflprobe.cpp, sunshadow.cpp, shadowset.cpp, cloudshadow.cpp: DSA binds, no unit ask. Without DSA
+  `seed()` takes the active unit from the PERF3 per-draw cache, so the old sequence stays exact.
+- **Blend from the per-draw cache** (wwDrawBlend) in the census fog/cut sites and the reflection probes; the viewport
+  through the setup-memo epoch inside wwDrawViewport. Queries counted by `WwCellUni::queried()`.
+- **Uniform cache scopes:** the census (Draw) and wwSceneGlobals (Globals). The raw array/matrix writes in those scopes
+  (cellReflPos/Min/Max, csmMat, ussWorldFromView, ussCloudFromView) forget their locations.
+- **Line:** `cell uni:` now adds ` | lights|draw|globals calls= uploads= kept= queries=` per site.
+- **Red:** the same `WW_CELL_UNI_RED=1` (the old GL sequence, live).
+- **Offline gate:** tests/celluni2 (notes/celluni2/unit/unit.sh), a c3-shaped frame (5852 draws, 1952 globals) x 30
+  frames on the real driver: green == red pixels and texture state byte for byte, also without DSA; queries
+  35821 -> 5854 per frame (1 blend ask per draw), active-unit moves 71196 -> 0, glUniform ~135k -> ~25k; CPU 19.4 ->
+  16.8 ms there (draw-bound test, no threaded optimization). Controls: a stale cache entry (28 frames differ) and a
+  missing forget (22). The red header (forget disabled) prints CELLUNI2 FAIL; tests/celluni still PASS.
+- **Cost:** 0 GPU ms at 1080p, no shader change; under 1 MB CPU.
+
 ## Lane CELLUNI1 (2026-10-27, branch celluni1-20261027): the cell lighting uniforms stop asking the driver
 
 - **Why:** wwCellLightsUniforms cost ~35 ms CPU per Concord frame (1941 calls x 18 us). Each call asked the driver for

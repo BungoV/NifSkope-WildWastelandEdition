@@ -312,7 +312,11 @@ template <typename F> static void wwSceneGlobals( Renderer * r, Scene * scene, i
 	WwCellUni::State & cu = WwCellUni::state();	// lane CELLUNI1: the pass's viewport, asked once per epoch
 	cu.vpEpoch = can ? m.epoch : 0;
 	cu.vpCheck = m.check;
-	run();
+	{
+		cu.red = wwCellUniRed();
+		const WwCellUni::Scope uniScope( WwCellUni::Globals );	// lane CELLUNI2: fog + sun through the cache too
+		run();
+	}
 	cu.vpEpoch = 0;
 	if ( can ) {
 		if ( m.mode == 1 )
@@ -454,8 +458,10 @@ bool wwDrawBlend()
 	DrawGlCache & c = drawGl();
 	if ( !c.depth )
 		return glIsEnabled( GL_BLEND );
-	if ( c.blend < 0 )
+	if ( c.blend < 0 ) {
 		c.blend = glIsEnabled( GL_BLEND ) ? 1 : 0;
+		WwCellUni::queried();	// lane CELLUNI2: the `cell uni:` draw queries
+	}
 	return c.blend != 0;
 }
 
@@ -465,6 +471,7 @@ int wwDrawActiveTexture()
 	if ( !c.depth || c.active < 0 ) {
 		GLint a = 0;
 		glGetIntegerv( GL_ACTIVE_TEXTURE, &a );
+		WwCellUni::queried();
 		if ( !c.depth )
 			return int( a );
 		c.active = a;
@@ -483,7 +490,20 @@ void wwDrawViewport( int vp[4] )
 		return;
 	}
 	if ( !c.vpOk ) {
-		glGetIntegerv( GL_VIEWPORT, c.vp );
+		// lane CELLUNI2: inside an armed setup-memo pass the viewport is the epoch's (the memo re-arms on a change)
+		const SetupMemo & m = setupMemo();
+		WwCellUni::State & cu = WwCellUni::state();
+		if ( m.armed && !wwCellUniRed() ) {
+			struct GlGet { void glGetIntegerv( GLenum e, GLint * v ) { ::glGetIntegerv( e, v ); } } gl;
+			const quint64 was = cu.vpEpoch;
+			cu.vpEpoch = m.epoch;
+			cu.vpCheck = m.check;
+			WwCellUni::viewport( &gl, c.vp );
+			cu.vpEpoch = was;
+		} else {
+			glGetIntegerv( GL_VIEWPORT, c.vp );
+			WwCellUni::queried();
+		}
 		c.vpOk = true;
 	}
 	for ( int i = 0; i < 4; i++ )
@@ -507,6 +527,11 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	const FloatVector4 & lightViewDir )
 {
 	const WwDrawGlScope drawGlScope;	// lane PERF3
+	// lane CELLUNI2: the per-draw setters below upload through the uniform cache and bind without a unit query
+	const bool uniRed = wwCellUniRed();
+	WwCellUni::state().red = uniRed;
+	wwCellUniFrame();
+	const WwCellUni::Scope uniScope( WwCellUni::Draw );
 	/* lane IMGS1: the imagespace's measure pass holds the cell-lit fragments' linear light. Any
 	 * other program (sky, debug) writes neither colour nor depth there; glview.cpp
 	 * restores both masks after the pass. The stencil: bit 0 = a cell-lit fragment landed here (the
@@ -537,7 +562,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 			|| program->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1: the layer's (composited as 1)
 			|| ( wwIsCellWaterProgramName( program->name ) && wwCellWaterWritesLinear() ) );
 		// lane FOGBLOOM1 (cellfogbloom.h): a blended linear draw (an effect, glass) also sets bit 2, the bloom it takes in fog
-		const bool fogMark = lin && wwCellFogBloomMarks() && glIsEnabled( GL_BLEND )
+		const bool fogMark = lin && wwCellFogBloomMarks() && ( uniRed ? glIsEnabled( GL_BLEND ) : wwDrawBlend() )	// CELLUNI2
 			&& !wwIsCellWaterProgramName( program->name ) && !wwIsCellDecalProgramName( program->name );
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( wwCellFogBloomMarks() ? 0x07 : 0x03 );
@@ -549,7 +574,7 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		wwCellFxResDrawHook( mesh, program ? program->name : std::string_view() );
 	// lane PERF2FIX1: what this draw writes in the obscurance/reflection opaque passes (their own test, below)
 	if ( mesh && wwKind ) {
-		mesh->wwCutWrote = program && wwIsCellProgramName( program->name ) && !glIsEnabled( GL_BLEND );
+		mesh->wwCutWrote = program && wwIsCellProgramName( program->name ) && !( uniRed ? glIsEnabled( GL_BLEND ) : wwDrawBlend() );
 		mesh->wwCutStamp = opaqueCut().serial;
 	}
 	// lane AO1: the obscurance's opaque pass (normal + depth from the opaque cell-lit draws only), and every
