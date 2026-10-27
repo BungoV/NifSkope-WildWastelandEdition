@@ -657,6 +657,7 @@ struct VaLayer
 	float s = 0.0f, zg = 0.0f, invHg = 0.0f;	// the ground layer: strength (x sigma0), anchor, 1 / thickness
 	QString recx = QStringLiteral( "none" );	// the census: rung:file of the entry applied, or why none
 	QString conflict;	// "conflict: <losers>" (one provider claimed it twice) or "overrides: <losers>", "" when alone
+	bool derived = false;	// FOGHEIGHT1: the layer came from the record (vaDerived): the caller keeps the street density
 };
 
 double vaB( double z, double z0, double invH )
@@ -779,6 +780,56 @@ void vaRecxCensus( const QStringList & files, const QString & dataDir )
 		qPrintable( roots.join( QLatin1Char( ';' ) ) ) );
 }
 
+// how far the ground layer has burnt off at this hour, 0..1 (GAPLOOK1 FOGEXTRAS; red noon: burnt at every hour)
+double vaBurnt( double hour )
+{
+	unsigned char tn[4];
+	wwLookdevClimateTnam( tn );
+	const bool red = wwEnvStr( "WW_CELL_AIR_BURNOFF_RED" ) == QLatin1String( "noon" );
+	const double rise = ( tn[0] + tn[1] ) / 12.0, set = tn[3] / 6.0 + 1.0;
+	auto smooth = []( double x ) { x = std::clamp( x, 0.0, 1.0 ); return x * x * ( 3.0 - 2.0 * x ); };
+	return red ? 1.0 : smooth( ( hour - rise ) / 3.5 ) * ( 1.0 - smooth( ( hour - set ) / 2.0 ) );
+}
+
+// lane FOGHEIGHT1: with no groundFog entry, a layer from the weather's own street fog (formula + sources:
+// notes/fogheight1/RESULTS.md). V = 3 / sigma0 (Koschmieder); fog (V < 1 km) puts 85 % of the street air in a
+// 60 m layer, haze (V > 5 km) 50 % in 1.2 km; vaKeepStreet then keeps the game's density at the anchor.
+void vaDerived( const VaMedium & M, const QString & why, VaLayer & L )
+{
+	L.recx = why;
+	if ( !wwLookOn( WwLook::GroundFogDerived ) || !( M.sigma0 > 0.0f ) )
+		return;
+	if ( wwEnvStr( "WW_CELL_AIR_GROUND_DERIVED_RED" ) == QLatin1String( "drop" ) ) {	// red: the layer dropped
+		L.recx += QStringLiteral( " derived(red drop)" );
+		return;
+	}
+	const double upm = double( kUnitsPerKm ) / 1000.0;
+	const double vis = 3.0 / ( double( M.sigma0 ) * upm );	// metres
+	double t = std::clamp( ( std::log( vis ) - std::log( 1000.0 ) ) / ( std::log( 5000.0 ) - std::log( 1000.0 ) ), 0.0, 1.0 );
+	t = t * t * ( 3.0 - 2.0 * t );
+	const double share = 0.85 + ( 0.5 - 0.85 ) * t;
+	const double thickM = std::exp( std::log( 60.0 ) + ( std::log( 1200.0 ) - std::log( 60.0 ) ) * t );
+	double str = share / ( 1.0 - share ), thick = thickM * upm;
+	const double burnt = wwLookOn( WwLook::GroundBurnOff ) ? vaBurnt( wwLookdevHour() ) : 0.0;
+	str *= 1.0 - burnt;
+	thick *= 1.0 - 0.75 * burnt;
+	L.derived = true;
+	L.s = float( str );
+	L.invHg = float( 1.0 / thick );
+	L.recx = QStringLiteral( "derived(V %1 m share %2 thickness %3 m strength %4 burn-off %5) %6" )
+		.arg( vis, 0, 'f', 0 ).arg( share, 0, 'f', 3 ).arg( thick / upm, 0, 'f', 0 ).arg( str, 0, 'f', 3 )
+		.arg( burnt, 0, 'f', 2 ).arg( why );
+}
+
+// a derived layer keeps the game's density at its anchor: sigma0 x rho(zg) is what it was without the layer
+void vaKeepStreet( VaMedium & M, const VaLayer & G )
+{
+	auto b = []( float z, float z0, float ih ) { return ih > 0.0f ? std::min( 1.0f, std::exp( -( z - z0 ) * ih ) ) : 1.0f; };
+	const float rb = ( 1.0f - G.w ) * b( G.zg, M.zb, M.invH ) + G.w * b( G.zg, G.zn, G.invHn );
+	if ( G.derived && rb > 0.0f )
+		M.sigma0 *= rb / ( rb + G.s );
+}
+
 // the ground layer of the Lookdev weather from its .recx entry (recx.h); red nosidecar: the files ignored
 void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool ignoreFiles, VaLayer & L )
 {
@@ -789,7 +840,7 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 		return;
 	}
 	if ( ignoreFiles ) {
-		L.recx = QStringLiteral( "none(red nosidecar)" );
+		vaDerived( M, QStringLiteral( "none(red nosidecar)" ), L );
 		return;
 	}
 	quint32 formID = 0;
@@ -804,7 +855,7 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 	const WwRecxHit hit = wwRecxFind( wwRecxRoots( files, dataDir ), files, QStringLiteral( "Weathers" ), QStringLiteral( "weather" ),
 		owner, localId, edid, QStringLiteral( "groundFog" ) );
 	if ( !hit.ok ) {
-		L.recx = QStringLiteral( "none(no entry for %1|0x%2 %3)" ).arg( owner ).arg( localId, 8, 16, QLatin1Char( '0' ) ).arg( edid );
+		vaDerived( M, QStringLiteral( "none(no entry for %1|0x%2 %3)" ).arg( owner ).arg( localId, 8, 16, QLatin1Char( '0' ) ).arg( edid ), L );
 		return;
 	}
 	L.recx = hit.rung + QLatin1Char( ':' ) + hit.file.section( QLatin1Char( '/' ), -3 );
@@ -824,12 +875,7 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 	// lane GAPLOOK1 (FOGEXTRAS): a file without hour keys burns off after sunrise (notes/fog-layer-and-fogmap-research.md
 	// section 0: gone 2-5 h after sunrise, the top coming down; pooling again from about 1 h after sunset)
 	if ( wwLookOn( WwLook::GroundBurnOff ) && g.value( QStringLiteral( "hours" ) ).toObject().isEmpty() ) {
-		unsigned char tn[4];
-		wwLookdevClimateTnam( tn );
-		const bool red = wwEnvStr( "WW_CELL_AIR_BURNOFF_RED" ) == QLatin1String( "noon" );	// red: burnt at every hour
-		const double rise = ( tn[0] + tn[1] ) / 12.0, set = tn[3] / 6.0 + 1.0;
-		auto smooth = []( double x ) { x = std::clamp( x, 0.0, 1.0 ); return x * x * ( 3.0 - 2.0 * x ); };
-		const double burnt = red ? 1.0 : smooth( ( hour - rise ) / 3.5 ) * ( 1.0 - smooth( ( hour - set ) / 2.0 ) );
+		const double burnt = vaBurnt( hour );
 		L.s = float( str * ( 1.0 - burnt ) );
 		L.invHg = float( 1.0 / ( thick * ( 1.0 - 0.75 * burnt ) ) );
 		L.recx += QStringLiteral( "(burn-off %1)" ).arg( burnt, 0, 'f', 2 );
@@ -1135,6 +1181,7 @@ static void vaPassInner( Scene * scene, bool run )
 	} else if ( !( s.red & 16384 ) ) {
 		vaNearShare( K, M, G );
 		vaGround( K, M, L && L->interior, ( s.red & 32768 ) != 0, G );
+		vaKeepStreet( M, G );	// FOGHEIGHT1: the street keeps the game's density, the air above thins
 	} else {
 		G.recx = QStringLiteral( "none(red noground)" );
 	}
