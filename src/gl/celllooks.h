@@ -48,6 +48,8 @@ enum class WwLook : int
 	NifxLights,			// NIFXLIGHT1: a fixture mesh's .nifx lights replace the placed lights inside it (WW_CELL_NIFX_LIGHTS)
 	WaterDepth,			// WATERDEPTH1: water colour + absorption by the baked bed depth, near and far (WW_CELL_WATER_DEPTH)
 	WaterCaustics,		// WATERCAUSTICS1: the sun's moving caustics on the bed under shallow water (WW_CELL_WATER_CAUSTICS)
+	WaterSoftEdge,		// WATERSHORE1: water fades into the shore from the baked shore distance, near + far (WW_CELL_WATER_EDGE)
+	ShoreFoam,			// WATERSHORE1: a thin foam band with a travelling wave along shores, near + far (WW_CELL_WATER_FOAM)
 	Count
 };
 

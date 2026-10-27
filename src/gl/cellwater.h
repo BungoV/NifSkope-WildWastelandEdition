@@ -72,5 +72,17 @@ inline bool wwIsCellWaterProgramName( std::string_view n )
 }
 //! One census line: how many shapes and records this document registered.
 QString wwCellWaterEcho( const void * nif );
+/*! Lane WATERSHORE1: the program a water shape draws with. fo4_water.prog while the Water soft edge and Shore foam
+ *  rows are both off (the program as before, same machine code), else fo4_watershore.prog: the same shader with
+ *  res/shaders/water_shore.glsl compiled in, read from the baked shore plane (cellwaterinfo.h), near and far alike.
+ *    WW_CELL_WATER_EDGE=0|1, WW_CELL_WATER_FOAM=0|1   the rows' pins (celllooks.h)
+ *    WW_CELL_WATER_SHORE_RED=nearest                  both read the nearest 128 u texel only (the staircase)
+ *    WW_CELL_WATER_PROBE=32                           (edge, foam, shore distance / 1024) at each water pixel */
+const char * wwCellWaterProgramName();
+//! fo4_water.prog or its shore twin
+inline bool wwIsWaterProgramName( std::string_view n )
+{
+	return n == std::string_view( "fo4_water.prog" ) || n == std::string_view( "fo4_watershore.prog" );
+}
 
 #endif

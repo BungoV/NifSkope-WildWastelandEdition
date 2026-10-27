@@ -55,6 +55,8 @@ const LookRow kRows[] = {
 	{ "Mesh lights (.nifx)", "WW/CellNifxLights" },
 	{ "Water depth colour", "WW/CellWaterDepth" },
 	{ "Water caustics", "WW/CellWaterCaustics" },
+	{ "Water soft edge", "WW/CellWaterEdge" },
+	{ "Shore foam", "WW/CellWaterFoam" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -228,6 +230,14 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_CAUSTICS" ).trimmed() );
 		return p;
 	}
+	case WwLook::WaterSoftEdge: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_EDGE" ).trimmed() );
+		return p;
+	}
+	case WwLook::ShoreFoam: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_FOAM" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -281,6 +291,8 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::NifxLights: return "WW_CELL_NIFX_LIGHTS";
 	case WwLook::WaterDepth: return "WW_CELL_WATER_DEPTH";
 	case WwLook::WaterCaustics: return "WW_CELL_WATER_CAUSTICS";
+	case WwLook::WaterSoftEdge: return "WW_CELL_WATER_EDGE";
+	case WwLook::ShoreFoam: return "WW_CELL_WATER_FOAM";
 	default: return "";
 	}
 }

@@ -56,6 +56,36 @@
   back on every texel of the map equals the reference (each gate with a red).
 - Also: LodtFile::waterTileEdge / waterTileUniform (a plane's tile store). The live hold is owed after the merge
   (notes/waterdata1/hold.sh, rows.txt).
+## Lane WATERSHORE1 (2026-10-27, branch watershore1-20261027): water soft edge and shore foam, near and far
+
+- **Water soft edge** (Show row "Water soft edge", pin `WW_CELL_WATER_EDGE`, default off): the water fades into the
+  shore from the baked shore distance (WATERDATA1's lookup), so far water fades as near water does; the game's depth
+  term stays and the stronger of the two wins. 1 at the waterline (64 u: half a 128 u texel), 0 at 256 u in.
+- **Shore foam** (Show row "Shore foam", pin `WW_CELL_WATER_FOAM`, default off): a 192 u foam band with crests that
+  travel shoreward (96 u apart, one every 6 s on the world clock), broken up by procedural value noise; a Lambert white
+  of albedo 0.55 lit by the sun and the water's sky. The game draws no shore foam: a new look, no texture shipped.
+- Both rows off = `fo4_water.prog` as before, the same driver machine code in all three shader modes. Either row on
+  draws with the twin `fo4_watershore.prog` (`WW_WATER_SHORE` + `res/shaders/water_shore.glsl`). Both are live.
+- Water the bake does not know (placed, interior) keeps the game's edge; the plane has no land side, so a dry texel
+  counts as distance 0 and the field is bilinear between texel centres.
+- Red `WW_CELL_WATER_SHORE_RED=nearest` (the nearest texel only: a 128 u staircase). Probe `WW_CELL_WATER_PROBE=32`
+  = (edge, foam, shore distance / 1024). Census line adds `, shore look: edge on|off, foam on|off` when a row is on.
+- Cost: offline 0.068 ms for a full 1080p frame of shore water (GL readback of the lookup + edge + foam).
+
+## Lane SHORE1 (2026-10-27, branch shore1-20261027): far water shore follows the coast, not the texel grid
+
+- **Far water shore law:** the far water rings used to make a texel wet from one corner sample, so every coast was a
+  staircase of whole water texels (512-4096 units). Now each texel takes its dominant body at its highest surface,
+  grows one texel into its 8 neighbours, and coast texels are written per full-rate sample: a sample is wet where the
+  file has water or where the ground is under that surface. Offline on the harbour: shore edges on texel lines
+  46-58% -> 0%, square notches 2168 (ring 1) -> 0. Inland seams stay closed (stream ring 0 runs never cross a cell).
+- Switch `WW_CELL_FARLOD_SHORE` (default on; `=0` = the old texel grid, live). Red `WW_CELL_FARLOD_RED=watergrid`.
+  Notes line: `far lod: water ring ..., shore law: N coast texels per sample` (or `shore law OFF (texel grid)`).
+- Cost (offline upper bound from open 14,3): far water quads ~1.7k -> ~21.7k (about 43k triangles), GPU well under
+  0.05 ms at 1080p (estimate); build CPU ~70 -> ~720 ms over all rings.
+- CLI: `NifSkope -no-gui farwatercensus <ws.lodl> --ring x0,y0,x1,y1,texels [--grid] [--percell] [--out quads.txt]`.
+- Stream trace (`WW_CELL_STREAM_TRACE=1`): each `build` line names the eye cell, the pick's distance and the queue size.
+- New `.lodl` plane reads: tile-uniform tests and block reads for the body id and surface planes.
 
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
@@ -430,6 +460,28 @@
 - **Gates:** tests/lightphys (620 checks against values computed from the reference source; red fails 198),
   every shader program linked offline in 3 modes. Bounce light (probe GI) keeps the game's curve (a later lane).
 - **GPU:** a few instructions per light per pixel when on, 0 when off; expected under 0.05 ms at 1080p.
+## Lane WATERDATA1 (2026-10-27, branch waterdata1-20261027): the baked water planes bound to the water shader (data only, no visible change)
+
+- **What it binds:** the worldspace .lodl's water planes (body id, shore distance, surface delta) and its body table,
+  plus a depth derived from them (body height + surface delta - ground), for every water surface fo4_water.prog draws,
+  near and far. New files src/gl/cellwaterinfo.{h,cpp} and res/shaders/water_info.glsl (`wwWaterInfo(worldXY)` =
+  shore distance, depth, body id, class). Later water look lanes (shore, depth, underwater, waves, caustics) read it.
+- **Layout:** one 32-bit word a 128 u texel (id | shore << 16 | depth code << 24, depth code = sqrt(depth / 8192)).
+  An index of 16 x 16-texel tiles (RG32UI) holds a uniform tile's word itself; only the other tiles go into an
+  atlas (R32UI, 64 tiles a row). A wet tile counts as uniform when its depths span 64 u or less (it keeps the mean).
+  Body table RGBA32F, 256 bodies a row. Commonwealth (10-24 bake): 13,688 of 147,456 tiles sparse, 14.51 MB on the
+  GPU, built on a worker thread in 1.5 s. A water pixel costs 2 fetches (index, atlas) plus 1 for the class.
+- **No visible change:** the default fo4_water program does not read the lookup, and its NVIDIA binary is the
+  same as main's in all 3 modes except the 8-byte source hash (offline, notes/waterdata1). The probes 28..31
+  (shore/depth bytes, body id + class, found-water cyan/red, depth grey) live only in the
+  `WW_CELL_WATER_INFO_PROBE=1` build. `WW_CELL_WATER_INFO_RED=off` (live) makes the lookup answer neutral values.
+- **Telemetry:** the cell census prints "water info: ..." (counts, bytes, build time), and the first upload logs
+  "water info uploaded: ..." with the sizes and formats read back from the GL.
+- **CLI:** `nifskope -no-gui lodl <file.lodl> --water-info <dir>` writes index.u32, atlas.u32, bodies.f32 and
+  census.txt. Offline gates: the dump equals an independent Python build word for word, and the shader lookup read
+  back on every texel of the map equals the reference (each gate with a red).
+- Also: LodtFile::waterTileEdge / waterTileUniform (a plane's tile store). The live hold is owed after the merge
+  (notes/waterdata1/hold.sh, rows.txt).
 
 ## Lane GAPPERF-BINDLESS (2026-10-25, branch bindless-20261025): draw packets in the cell view (speed change, no menu row)
 
@@ -456,6 +508,19 @@
 - **Sun lens flare:** with Lens flares on, the sun draws the flare its weather names (the weather's Sun Glare Lens
   Flare); seen only where nothing stands in front of it, while it is above the horizon and the Sun row is on. The
   echo adds "sun flare <name>".
+
+- **Reflections from last frame's colour by default:** the PERF3 path that reflects the previous frame's lit colour
+  instead of drawing the scene a second time is now on whenever the reflections are. `WW_CELL_SSR_PREV=0`,
+  `WW_CELL_SSR_PREV_RED=1` or `WW_PERF3_RED=1` = the second scene pass as before (test reds only).
+- **Camera cull memo:** every pass of a frame culled the same shape for the same camera again; the first cull of a
+  shape this frame is kept (keyed on the view transform, frustum planes and switches) and later passes replay it,
+  counters and occluder hits included. `WW_CELL_CULL_MEMO_RED=1` = no memo; `WW_CELL_CULL_MEMO_CHECK=1` culls in full
+  each hit and counts mismatches ("cell cull memo: ... mismatches=").
+- **Texture parameter shadow:** the lighting property's bind set wrap, filter and anisotropy on its texture every
+  draw; it now skips them when this frame already set the same values on that texture. Any other bind of the texture
+  forgets it. `WW_DRAW_TEXSHADOW_RED=1` = always set; `WW_DRAW_TEXSHADOW_CHECK=1` reads GL back and counts mismatches.
+- The full per-shape draw packet (PERF4-DRAWPACKETS) is not done: the shape setup's state comes from many property
+  binds with side effects; only the texture parameters are shadowed so far. Live rows: notes/perf5/rows.in, hold.sh.
 
 ## Lane HOLDFIX1 (2026-10-25, branch holdfix1-20261025): test-run fixes from the hold 4 triage
 

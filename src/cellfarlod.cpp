@@ -335,6 +335,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const bool noWater = red == "nowater";
 	const bool vanBoth = red == "vanboth";   // the vanilla fill drawn over our chunks too (the mixed gate's red)
 	const bool perBaseRed = red == "perbase";   // lane FAR3: the far objects' old per-base shapes and charge
+	// lane SHORE1: the far water's old texel-grid shore (red watergrid, or the switch off)
+	const bool waterGrid = red == "watergrid" || ( wwEnvIsSet( "WW_CELL_FARLOD_SHORE" ) && wwEnvInt( "WW_CELL_FARLOD_SHORE" ) == 0 );
 	const int h = std::max( 0, ( n - 1 ) / 2 );
 	const int bx0 = cx - h, by0 = cy - h, bx1 = cx + h, by1 = cy + h;
 	// lane CELLSTREAM1: objects and cards leave out every cell a 5x5 round any roam position can load
@@ -723,6 +725,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				w.perCell = true;
 			}
 			w.texels = kWaterTexels[std::min( i, size_t( 4 ) )];
+			w.gridLaw = waterGrid;
 			wr.push_back( w );
 			hx0 = foot[i][0];
 			hy0 = foot[i][1];
@@ -763,7 +766,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					.arg( QStringLiteral( "%1 bodies, %2 wet texels, %3 grown onto the shore, cut %4,%5..%6,%7%8" )
 						.arg( w.bodies.size() ).arg( w.wetTexels ).arg( w.grownTexels )
 						.arg( w.cx0 ).arg( w.cy0 ).arg( w.cx1 ).arg( w.cy1 )
-						.arg( w.noCut ? QStringLiteral( " (RED watercut: not cut)" ) : QString() ) ) );
+						.arg( ( w.noCut ? QStringLiteral( " (RED watercut: not cut)" ) : QString() )
+							+ ( w.gridLaw ? QStringLiteral( ", shore law OFF (texel grid)" )
+								: QStringLiteral( ", shore law: %1 coast texels per sample" ).arg( w.splitTexels ) ) ) ) );
 				wQuads += w.quads;
 				wShapes += w.shapes;
 				wBodies.unite( w.bodies );

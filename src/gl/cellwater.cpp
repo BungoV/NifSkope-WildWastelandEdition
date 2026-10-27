@@ -5,6 +5,7 @@
 #include "celllights.h"
 #include "celllooks.h"	// lane WATERDEPTH1: the Water depth colour row
 #include "cellssr.h"
+#include "celllooks.h"	// lane WATERSHORE1: the Water soft edge and Shore foam rows
 #include "cellwaterinfo.h"	// lane WATERDATA1: the baked water planes
 #include "lookdevstage.h"
 #include "esmwater.h"
@@ -50,6 +51,7 @@ struct WaterState
 				// 64 nodepthfog, 128 nofar, 256 nossr, 512 fogunits (lane WATER2)
 				// 1024 hdrraw (WATERHDR1: the water's linear light written back untone-mapped, the old defect)
 	int probe = 0;
+	int shoreRed = 0;	// WATERSHORE1: 1 nearest (WW_CELL_WATER_SHORE_RED)
 	bool linear = false;	// WATERHDR1: the last water draw wrote linear light into the HDR frame
 	QString dump;
 	QSet<QString> missing;	// noise textures that did not bind (the census says so)
@@ -73,6 +75,7 @@ WaterState & st()
 			: r == "noshore" ? 16 : r == "nonormal" ? 32 : r == "nodepthfog" ? 64 : r == "nofar" ? 128
 			: r == "nossr" ? 256 : r == "fogunits" ? 512 : r == "hdrraw" ? 1024 : 0;
 		s->probe = wwEnvInt( "WW_CELL_WATER_PROBE" );
+		s->shoreRed = wwEnv( "WW_CELL_WATER_SHORE_RED" ).trimmed() == "nearest" ? 1 : 0;
 		s->dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_WATER_DUMP" ) );
 	}
 	return *s;
@@ -312,6 +315,20 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	prog->uni1i_l( prog->uniLocation( "waterSsrFin" ), unit++ );
 	prog->uni1b( "waterSsrOn", ssrOn );
 	unit += wwCellWaterInfoUniforms( scene, unit );	// lane WATERDATA1: units 7..9 when the program reads them
+	if ( prog->uniLocation( "waterShoreOn" ) >= 0 ) {
+		/* lane WATERSHORE1 (fo4_watershore.prog, water_shore.glsl). Engineering choices in world units, no game value
+		 * exists (the game draws no shore foam): the field reads 64 at the waterline (half a 128 u texel, a dry texel
+		 * counts 0), the edge fades over 256 u, the foam band is 192 u wide with soft 0.25 noise edges; crests 96 u
+		 * apart every 6 s, 0.3 of the foam between them, 0.85 opaque (Sea of Thieves 2018, Far Cry 5 2018 shapes) */
+		const float waterline = 64.0f, edgeWidth = 256.0f, foamWidth = 192.0f, foamSoft = 0.25f;
+		const float waveLength = 96.0f, wavePeriod = 6.0f, foamFloor = 0.3f, foamOpacity = 0.85f;
+		prog->uni1i( "waterShoreOn", ( wwLookOn( WwLook::WaterSoftEdge ) ? 1 : 0 ) | ( wwLookOn( WwLook::ShoreFoam ) ? 2 : 0 ) );
+		prog->uni1i( "waterShoreRed", s.shoreRed );
+		prog->uni4f( "waterShoreK0", FloatVector4( waterline, edgeWidth, foamWidth, foamSoft ) );
+		prog->uni4f( "waterShoreK1", FloatVector4( waveLength, wavePeriod, foamFloor, foamOpacity ) );
+		// the world clock as the normals' scroll reads it: frozen at 0 with the world's animation off
+		prog->uni1f( "waterShoreTime", wwCellWorldAnimOn() ? float( wwCellWorldSeconds() ) : 0.0f );
+	}
 	fn->glActiveTexture( GL_TEXTURE0 );
 
 	// an opaque surface: it composites the scene behind it itself
@@ -339,6 +356,11 @@ const char * wwCellWaterProgram()
 bool wwCellWaterWritesLinear()
 {
 	return st().linear;
+}
+
+const char * wwCellWaterProgramName()
+{
+	return wwLookOn( WwLook::WaterSoftEdge ) || wwLookOn( WwLook::ShoreFoam ) ? "fo4_watershore.prog" : "fo4_water.prog";
 }
 
 QString wwCellWaterEcho( const void * nif )

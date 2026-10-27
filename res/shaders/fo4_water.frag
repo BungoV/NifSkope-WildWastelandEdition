@@ -70,6 +70,9 @@ out vec4 fragColor;
 #include "ww_sunshadow.glsl"
 #include "water_caustics.glsl"
 #endif
+#ifdef WW_WATER_SHORE	// lane WATERSHORE1: fo4_watershore.prog only (fo4_water.prog keeps its machine code)
+#include "water_shore.glsl"
+#endif
 
 uniform vec4 waterMat[13];	// shallow, deep, reflection, underwater, light silt, dark silt, var, p1..p4, amplitude, uv scale
 uniform vec4 waterSky[3];	// horizon, lower, upper (linear)
@@ -221,6 +224,14 @@ void main()
 	float x = clamp( ( rw - P3.y ) / ( P3.x - P3.y ), 0.0, 1.0 );
 	float alphaV = pow( max( 1.0 - ( 3.0 - 2.0 * x ) * x * x, 0.0 ), 0.33 ) * ( P3.w - P3.z ) + P3.z;
 	float shore = ( waterRed & 16 ) != 0 ? 0.0 : smooth01( clamp( ( rz - P2.x ) / ( 1.0 - P2.x ), 0.0, 1.0 ) );
+#ifdef WW_WATER_SHORE
+	// lane WATERSHORE1: the baked shore distance also fades the edge, so far water (no depth term) fades as near does
+	vec2 shoreField = wwShoreField( P.xy );
+	float shoreEdgeV = ( waterShoreOn & 1 ) != 0 ? wwShoreEdge( shoreField ) : 0.0;
+	float shoreFoamV = ( waterShoreOn & 2 ) != 0 && !under ? wwShoreFoam( shoreField, P.xy, waterShoreTime ) : 0.0;
+	if ( ( waterRed & 16 ) == 0 )
+		shore = max( shore, shoreEdgeV );
+#endif
 	float flatten = ( 1.0 - smooth01( clamp( ( rz - P2.w ) / ( P2.z - P2.w ), 0.0, 1.0 ) ) ) * P2.y;
 
 	// the three noise layers
@@ -341,6 +352,12 @@ void main()
 		lin = mix( silted, sky, wRefl );
 		lin = mix( far, lin, dfade ) + spec;
 		lin = mix( lin, refrOff, shore );
+#ifdef WW_WATER_SHORE
+		/* lane WATERSHORE1: the foam, a Lambert white of albedo 0.55 (fresh sea foam, Koepke 1984, Applied Optics
+		 * 23(11)) lit by the sun and the water's upper sky row; opacity K1.w lets the water read through its holes */
+		vec3 foamLin = 0.55 * ( sun * clamp( Ldir.z, 0.0, 1.0 ) + waterSky[2].rgb );
+		lin = mix( lin, foamLin, shoreFoamV * waterShoreK1.w );
+#endif
 	}
 	lin = max( lin, vec3( 0.0 ) );
 	if ( fogOn || wwApOn() )	// lane SKYA: the sky's aerial perspective with the fog off too
@@ -403,6 +420,10 @@ void main()
 #ifdef WW_WATER_CAUSTICS
 		else if ( waterProbe == 35 || waterProbe == 36 )	// WATERCAUSTICS1: 35 the factor / 2 grey; 36 (I / 8, env, share)
 			o = waterProbe == 35 ? vec3( clamp( cauC * 0.5, 0.0, 1.0 ) ) : vec3( cauDbg.x / 8.0, cauDbg.y, cauDbg.z );
+#endif
+#ifdef WW_WATER_SHORE
+		else if ( waterProbe == 32 )	// WATERSHORE1: (edge, foam, shore distance / 1024) at this pixel
+			o = vec3( shoreEdgeV, shoreFoamV, clamp( shoreField.x / 1024.0, 0.0, 1.0 ) );
 #endif
 		fragColor = vec4( o, 1.0 );
 	}
