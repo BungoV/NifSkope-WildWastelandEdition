@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERUNDER1 (2026-10-27, branch waterunder1-20261027): the camera under water
+
+- **Underwater fog:** with the new Show row **Underwater fog** (pin `WW_CELL_UNDERWATER`, default off, live), a cell-view
+  camera below a water surface gets one full-screen pass over the linear frame before the tone map. It draws the
+  WATR's underwater fog (amount, near and far over the view distance, ending where the ray leaves the water), coloured
+  half the water's sky horizon and half its underwater colour, and darkens and tints the scene by depth below the
+  surface (the underwater colour as a filter over the fog's far distance). The game's own use of these values is
+  not captured, so the curve is inferred. INAM is not read.
+- **Which water:** the baked body under the camera (WATERDATA1's lookup, its WATR form), else the lowest water shape of
+  the scene above the camera. The waterline splits per pixel, so a camera at the surface sees above and below.
+- **Off, or the camera above water:** no GL call (the default picture is unchanged). Notes: `cell underwater: ...`
+  on each change (water found, surface z, camera depth, form, fog), or `underwater: above water`.
+- Reds (`WW_CELL_UNDERWATER_RED`, harness only): `notint` (no darkening by depth), `nofog` (no view fog).
+- Gates: the fragment shader through the real driver against a Python model (green 5.7e-6, three reds, the waterline,
+  above water = the frame unchanged); every program links in all three modes.
+- Cost: about 0.09 ms at 1080p (offline timer), only while the camera is under water.
+
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
 - **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,

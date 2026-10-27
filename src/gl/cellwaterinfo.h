@@ -43,6 +43,7 @@ struct WwWaterInfoTables
 	int atlasW = 0, atlasH = 0, slotCount = 0;	// not "slots": a Qt keyword macro
 	std::vector<float> bodies;	// bodyRows rows of kBodiesPerRow texels, 4 floats each
 	int bodyCount = 0, bodyRows = 0;
+	std::vector<quint32> bodyForms;	// lane WATERUNDER1: each body's WATR form (0 = none); not in the dump or bytes()
 	int uniformDry = 0, uniformWet = 0, sparseBody = 0, sparseShore = 0, sparseSurface = 0, sparseDepth = 0;
 	double buildSeconds = 0.0;
 
@@ -65,5 +66,15 @@ void wwCellWaterInfoSet( const void * nif, const QString & lodl );
 int wwCellWaterInfoUniforms( Scene * scene, int unit );
 //! One census line: what this document's water info is and what was uploaded (read back from the GL).
 QString wwCellWaterInfoEcho( const void * nif );
+
+//! Lane WATERUNDER1: one texel of the lookup on the CPU (the same word water_info.glsl reads).
+struct WwWaterInfoHit
+{
+	quint32 body = 0, form = 0;
+	float height = 0.0f, depth = 0.0f, shore = 8160.0f;
+	int cls = -1;
+};
+//! The baked water at world (x, y) for this document; false when its tables are not built (or the info red is off).
+bool wwCellWaterInfoAt( const void * nif, float x, float y, WwWaterInfoHit & hit );
 
 #endif
