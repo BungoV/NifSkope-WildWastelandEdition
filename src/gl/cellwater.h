@@ -123,9 +123,15 @@ QString wwCellWaterEcho( const void * nif );
  *                                                     (WATERCOMBINE1: was 32, which the depth probe holds) */
 //! Lane WATERUNDER1: the registered record of WATR `form` in this document (else its first one); false = none.
 bool wwCellWaterRecordOf( const void * nif, quint32 form, WwWaterRecord & rec );
-/*! Lane WATERUNDER1: the lowest registered water surface above world (x, y, z) whose bounds hold (x, y) and that is
- *  at most `maxDepth` above z: its height and record. The bounds (shape verts x world transform) are cached per
- *  document and re-measured when its water shapes change. */
-bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDepth, float & height, WwWaterRecord & rec );
+/*! Lane WATERUNDER1: the lowest registered water surface above world (x, y, z) whose polygon holds (x, y) and that is
+ *  at most `maxDepth` above z: its height and record. Lane WATERUNDER5 (gl/waterplanefit.h): the shape's triangles,
+ *  not its bounding box; the height of its mean plane, not its highest vertex; and false (`roofed` set) when a
+ *  non-water surface crosses the segment from z up to the water (a room below it). `sea` = the record is the
+ *  worldspace's default water. `oldRule` = WATERUNDER1's box and top vertex, no room test (the red). Cached per
+ *  document, re-measured when its water shapes change. */
+bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDepth, float & height, WwWaterRecord & rec,
+	bool oldRule = false, bool * sea = nullptr, bool * roofed = nullptr );
+//! Lane WATERUNDER5: the worldspace's default WATR for this document (0 = none, an interior)
+void wwCellWaterSetDefault( const void * nif, quint32 form );
 
 #endif

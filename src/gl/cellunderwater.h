@@ -18,8 +18,12 @@ struct WwWaterRecord;
  *
  *  Which water: the baked body at the camera (cellwaterinfo.h, its WATR form), else the lowest registered water shape
  *  above it (cellwater.h). The waterline splits per pixel (each pixel's near-plane point against the surface).
+ *  Lane WATERUNDER5: that shape's polygon and mean plane, not under it in a room below the water; the worldspace's
+ *  default water reads as sea. The fog colour = the WATR colour x the game's WaterColorMult (white indoors without
+ *  Show Sky, else the weather's Water Multiplier row).
  *  The Underwater fog row (WwLook::Underwater, pin WW_CELL_UNDERWATER), default off. Off, or the camera above water:
- *  no GL call. Harness only: WW_CELL_UNDERWATER_RED=notint (no depth darkening) | nofog (no view fog).
+ *  no GL call. Harness only: WW_CELL_UNDERWATER_RED=notint (no depth darkening) | nofog (no view fog) | oldplane
+ *  (box + top vertex, no room test) | oldcolour (fog colour = mean of horizon and WATR colour).
  *
  *  Lane WATERLOOK1 step 16 (WATERUNDER2): the Underwater light row (WwLook::WaterUnderLight, pin
  *  WW_CELL_WATER_UNDERLIGHT, default off) runs this pass by itself or with the fog row. Under water it takes the

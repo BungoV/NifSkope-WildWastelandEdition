@@ -95,12 +95,27 @@ void eyeOf( const Scene * scene, double row[3][4], double eye[3] )
 	}
 }
 
+/* WW_CELL_UNDERWATER_RED, re-read per call: notint 1, nofog 2, radial 4 (WATERUNDER3), maxdepth 8 (WATERUNDER4),
+ * oldplane 16 (WATERUNDER5: the water shape's box and top vertex, no room test), oldcolour 32 (WATERUNDER5: half
+ * horizon + half underwater colour, no WaterColorMult) */
+int uwRed( QString * name = nullptr )
+{
+	const QString r = wwEnvStr( "WW_CELL_UNDERWATER_RED" ).trimmed();
+	if ( name )
+		*name = r;
+	static const char * const k[6] = { "notint", "nofog", "radial", "maxdepth", "oldplane", "oldcolour" };
+	for ( int i = 0; i < 6; i++ )
+		if ( r == QLatin1String( k[i] ) )
+			return 1 << i;
+	return 0;
+}
+
 //! which water: the baked body at the camera, else the lowest registered water shape above it (`margin` = near plane)
 bool findWater( Scene * scene, float ex, float ey, float ez, float margin, WwWaterRecord & rec, float & H, int & cls,
 	QString & via )
 {
 	WwWaterInfoHit hit;
-	cls = 2;	// a placed water shape reads as a lake (the clear colour's rule)
+	cls = 2;	// a placed water shape reads as a lake (the clear colour's rule), the worldspace default as sea
 	if ( wwCellWaterInfoAt( scene->nifModel, ex, ey, hit ) && hit.body && ez < hit.height + margin
 		&& ez > hit.height - hit.depth - 256.0f && wwCellWaterRecordOf( scene->nifModel, hit.form, rec ) ) {
 		H = hit.height;
@@ -108,10 +123,17 @@ bool findWater( Scene * scene, float ex, float ey, float ez, float margin, WwWat
 		via = QStringLiteral( "baked body %1" ).arg( hit.body );
 		return true;
 	}
-	if ( wwCellWaterPlaneOver( scene, ex, ey, ez - margin, 8192.0f, H, rec ) ) {
-		via = QStringLiteral( "water shape" );
+	const bool oldPlane = uwRed() == 16;
+	bool sea = false, roofed = false;
+	if ( wwCellWaterPlaneOver( scene, ex, ey, ez - margin, 8192.0f, H, rec, oldPlane, &sea, &roofed ) ) {
+		if ( sea )
+			cls = 0;
+		via = oldPlane ? QStringLiteral( "water shape (red oldplane: box, top vertex)" )
+			: sea ? QStringLiteral( "water shape (worldspace default: sea)" ) : QStringLiteral( "water shape" );
 		return true;
 	}
+	if ( roofed )
+		via = QStringLiteral( "a room below the water" );
 	return false;
 }
 
@@ -228,7 +250,7 @@ void wwCellUnderwaterPass( Scene * scene )
 	int cls = 2;
 	QString via;
 	if ( !findWater( scene, ex, ey, ez, float( margin ), rec, H, cls, via ) ) {
-		note( QStringLiteral( "underwater: above water" ) );
+		note( via.isEmpty() ? QStringLiteral( "underwater: above water" ) : QStringLiteral( "underwater: above water (%1)" ).arg( via ) );
 		return;
 	}
 
@@ -246,13 +268,25 @@ void wwCellUnderwaterPass( Scene * scene )
 	if ( !wwLookdevWaterSky( hor, lo, up ) )
 		for ( int c = 0; c < 3; c++ )
 			hor[c] = wwWaterLin( rec.reflection[c] );	// the water draw's own fallback (cellwater.cpp)
-	float fogCol[3];
-	for ( int c = 0; c < 3; c++ )
-		fogCol[c] = 0.5f * ( hor[c] + uw[c] );
-	const QString redS = wwEnvStr( "WW_CELL_UNDERWATER_RED" ).trimmed();
-	const int red = redS == QLatin1String( "notint" ) ? 1 : redS == QLatin1String( "nofog" ) ? 2
-		: redS == QLatin1String( "radial" ) ? 4 : redS == QLatin1String( "maxdepth" ) ? 8 : 0;	// lane WATERUNDER3: radial = WATERUNDER1's distance
-	// lane WATERUNDER4: maxdepth = every sample fogged from the pixel's farthest depth (silhouettes over-fogged)
+	QString redS;
+	const int red = uwRed( &redS );
+	/* lane WATERUNDER5: the game's fog colour = the WATR underwater colour (linear) x WaterColorMult: white in an
+	 * interior without Show Sky, else the weather's Water Multiplier colour (NAM0 row 14, CIELab over the day, byte /
+	 * 255); white with no weather loaded. Red oldcolour: WATERUNDER1's half horizon + half underwater colour. */
+	float fogCol[3], mult[3] = { 1.0f, 1.0f, 1.0f };
+	QString multWhy;
+	if ( red == 32 ) {
+		for ( int c = 0; c < 3; c++ )
+			fogCol[c] = 0.5f * ( hor[c] + uw[c] );
+	} else {
+		const WwCellLighting * cl = wwCellLightsFor( scene->nifModel );
+		const bool sky = !cl || !cl->interior || cl->showSky;
+		multWhy = !sky ? QStringLiteral( "white (interior)" )
+			: wwLookdevWaterMult( mult ) ? QStringLiteral( "weather" ) : QStringLiteral( "white (no weather)" );
+		for ( int c = 0; c < 3; c++ )
+			fogCol[c] = uw[c] * mult[c];
+	}
+	// lane WATERUNDER3: radial = WATERUNDER1's distance; WATERUNDER4: maxdepth = the farthest depth per pixel
 
 	GLint vp[4] = { 0, 0, 1, 1 }, prevActive = 0, prevTex = 0, bSrcRgb = 0, bDstRgb = 0, bSrcA = 0, bDstA = 0,
 		bEqRgb = 0, bEqA = 0;
@@ -379,7 +413,11 @@ void wwCellUnderwaterPass( Scene * scene )
 		.arg( rec.form, 8, 16, QLatin1Char( '0' ) ).arg( double( rec.uwFogAmount ), 0, 'g', 4 )
 		.arg( double( rec.uwFogNear ), 0, 'g', 6 ).arg( double( rec.uwFogFar ), 0, 'g', 6 )
 		.arg( double( fogCol[0] ), 0, 'f', 4 ).arg( double( fogCol[1] ), 0, 'f', 4 ).arg( double( fogCol[2] ), 0, 'f', 4 )
-		.arg( ( red ? QStringLiteral( " red %1" ).arg( redS ) : QString() ) + ( samples > 0
+		.arg( ( red ? QStringLiteral( " red %1" ).arg( redS ) : QString() )
+			+ ( multWhy.isEmpty() ? QString() : QStringLiteral( " (water colour mult %1 %2 %3, %4)" )
+				.arg( double( mult[0] ), 0, 'f', 4 ).arg( double( mult[1] ), 0, 'f', 4 ).arg( double( mult[2] ), 0, 'f', 4 )
+				.arg( multWhy ) )
+			+ ( samples > 0
 			? QStringLiteral( "; fog per sample at edges (%1 samples)" ).arg( samples )
 			: QStringLiteral( "; fog per pixel (%1)" ).arg( msWhy ) ) )
 		+ ( light ? QStringLiteral( "; light class %1 sun %2 %3 %4 at cos %5%6" ).arg( cls )

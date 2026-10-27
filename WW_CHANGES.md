@@ -1,5 +1,34 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERUNDER5 (2026-10-27, branch waterunder5-20261027): under water, which water and its colour
+
+- When no baked water body is at the camera, the under-water test now uses the placed water shape itself:
+  the camera must be inside the shape's polygon (not just its bounding box), and the surface height is the shape's
+  mean plane (not its highest vertex). A shape that is not one flat plane (cell water at two heights) reads the
+  height of the triangle above the camera.
+- A room below the water (a basement under a pond) no longer reads as under water: any other surface between the
+  camera and the water above it means the camera is in a room. The pass note says "above water (a room below the
+  water)".
+- Placed water whose WATR record is the worldspace's default water now counts as sea. WATR records have no
+  sea/lake/river field, so that is the only source the records give.
+- The under-water fog colour now follows the game: the WATR's underwater colour times the water colour multiplier.
+  That multiplier is white in an interior without Show Sky. Otherwise it is the weather's Water Multiplier colour
+  row at the current hour, blended like the other sky colours. Before, the fog colour was half the horizon colour
+  plus half the WATR colour. The pass note prints the multiplier and where it came from.
+- Fixed: the WATR underwater imagespace (INAM) is now read through the plugin's master list. A plugin that
+  overrides a water and points it at its own imagespace used to name the wrong record.
+- Reds (new values of the existing key `WW_CELL_UNDERWATER_RED`): `oldplane` uses the bounding box and the top
+  vertex with no room test; `oldcolour` uses the old half-horizon fog colour.
+- Unit tests (no window):
+  - `tests/waterplane` (g++, pure header): 12 checks pass; its red (`-DWW_WATERPLANE_OLD_RED`) fails 6.
+  - `tests/waterinam` (qmake): the 47 vanilla WATR name Default 19 / Murky 18 / Clear 10, and an override in a
+    plugin loaded third maps to 02000800. Built against the base esmdata.cpp it reads 01000800 and fails.
+- Cost: GPU 0 ms at 1080p, since no shader changed (the fog colour is the same uniform with a new value).
+  - CPU, only under water and only on the placed-water path: the pick is about 0.003 ms.
+  - The room test reruns when the camera moves: up to about 0.23 ms in a worst case (20 shapes of 5000 triangles
+    over the camera's column), and cached while the camera stands still.
+  - Memory: the water shapes' world triangles, 36 bytes a triangle (76 KB for 17 shapes and 2080 triangles).
+
 ## Lane WATERUNDER4 (2026-10-27, branch waterunder4-20261027): under water, the edges
 
 - With MSAA on and the camera under water, the fog no longer over-fogs silhouettes. Before, every sample of an edge

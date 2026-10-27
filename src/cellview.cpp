@@ -3608,6 +3608,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		wwCellLandBegin( nif );    // lane TERRBLEND1: forget the last cell's blended-ground shapes
 		wwCellGrassBegin( nif );   // lane GRASSMB1: and its grass shapes
 	}
+	wwCellWaterSetDefault( nif, world.defaultWaterType() );	// lane WATERUNDER5: its placed water reads as sea under it
 	QHash<quint32, WwWaterRecord> placedWaterRecs;   // lane WATER1: WNAM form -> its record (form 0 = unreadable)
 	int placedWaterShapes = 0;
 	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors

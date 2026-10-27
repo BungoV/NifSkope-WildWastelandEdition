@@ -15,6 +15,7 @@
 #include "cloudmap.h"	// lane WATERREFL1: the weather's clouds in the reflected sky
 #include "cellocean.h"	// lane WATERLOOK1: the wind's wave spectrum
 #include "cellunderwater.h"	// lane WATERUNDER3: the sun under water
+#include "waterplanefit.h"	// lane WATERUNDER5: the placed-water polygon, mean plane and room test
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "model/nifmodel.h"
@@ -49,14 +50,20 @@ struct WaterDoc
 	QVector<WaterBody> bodies;
 	QHash<quint32, int> byForm;
 	QHash<int, int> shapeBody;	// written shape's block -> index into bodies
-	// lane WATERUNDER1: the shapes' world bounds (x0, y0, x1, y1, top z, body), measured once per change of shapeBody
+	// lane WATERUNDER1: the shapes' world surfaces, measured once per change of shapeBody (WATERUNDER5: polygons)
 	quint64 gen = 1, planesGen = 0;
-	QVector<std::array<float, 6>> planes;
+	std::vector<WwWaterPoly> planes;
+	// lane WATERUNDER5: the last room test (eye, surface, shape count) and its answer
+	float roofKey[4] = { 1e30f, 1e30f, 1e30f, 1e30f };
+	int roofShapes = -1;
+	quint64 roofGen = 0;
+	bool roofed = false;
 };
 
 struct WaterState
 {
 	QHash<const void *, WaterDoc> docs;
+	QHash<const void *, quint32> defaultForm;	// lane WATERUNDER5: the worldspace's default WATR (its water reads as sea)
 	bool pinOff = false;	// lane CELLALL1: off (the Water row, or the pin)
 	bool pinned = false;
 	int red = 0;		// 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 noshore, 32 nonormal,
@@ -624,9 +631,19 @@ bool wwCellWaterRecordOf( const void * nif, quint32 form, WwWaterRecord & rec )
 	return true;
 }
 
-bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDepth, float & height, WwWaterRecord & rec )
+void wwCellWaterSetDefault( const void * nif, quint32 form )
+{
+	st().defaultForm.insert( nif, form );
+}
+
+bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDepth, float & height, WwWaterRecord & rec,
+	bool oldRule, bool * sea, bool * roofed )
 {
 	WaterState & s = st();
+	if ( sea )
+		*sea = false;
+	if ( roofed )
+		*roofed = false;
 	if ( !scene || !scene->nifModel )
 		return false;
 	const auto it = s.docs.find( scene->nifModel );
@@ -636,6 +653,7 @@ bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDe
 	if ( d.planesGen != d.gen ) {
 		d.planes.clear();
 		bool whole = true;
+		std::vector<float> tri;
 		for ( auto b = d.shapeBody.constBegin(); b != d.shapeBody.constEnd(); ++b ) {
 			auto * sh = dynamic_cast<Shape *>( scene->findNode( scene->nifModel, scene->nifModel->getBlockIndex( b.key() ) ) );
 			if ( !sh || sh->verts.isEmpty() ) {
@@ -643,31 +661,65 @@ bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDe
 				continue;
 			}
 			const Transform & w = sh->worldTrans();
-			std::array<float, 6> p = { 1e30f, 1e30f, -1e30f, -1e30f, -1e30f, float( b.value() ) };
-			for ( const Vector3 & v : sh->verts ) {
-				const Vector3 q = w * v;
-				p[0] = std::min( p[0], q[0] );
-				p[1] = std::min( p[1], q[1] );
-				p[2] = std::max( p[2], q[0] );
-				p[3] = std::max( p[3], q[1] );
-				p[4] = std::max( p[4], q[2] );
+			tri.clear();
+			for ( const Triangle & t : sh->triangles ) {
+				if ( t[0] >= sh->verts.size() || t[1] >= sh->verts.size() || t[2] >= sh->verts.size() )
+					continue;
+				for ( int k = 0; k < 3; k++ ) {
+					const Vector3 q = w * sh->verts.at( t[k] );
+					tri.insert( tri.end(), { q[0], q[1], q[2] } );
+				}
 			}
-			d.planes.append( p );
+			d.planes.push_back( wwWaterPolyFrom( tri, b.value() ) );
 		}
 		if ( whole )
 			d.planesGen = d.gen;
 	}
-	int best = -1;
-	for ( int k = 0; k < d.planes.size(); k++ ) {
-		const auto & p = d.planes[k];
-		if ( x >= p[0] && x <= p[2] && y >= p[1] && y <= p[3] && p[4] > z && p[4] - z <= maxDepth
-			&& ( best < 0 || p[4] < d.planes[best][4] ) )
-			best = k;
-	}
+	float h = 0.0f;
+	const int best = wwWaterPolyPick( d.planes, x, y, z, maxDepth, oldRule, h );
 	if ( best < 0 )
 		return false;
-	height = d.planes[best][4];
-	rec = d.bodies[int( d.planes[best][5] )].rec;
+	if ( !oldRule ) {
+		// the room test: a non-water surface between the camera and the water above it = a room below the water
+		const float key[4] = { x, y, z, h };
+		if ( d.roofGen != d.planesGen || d.roofShapes != int( scene->shapes.size() ) || !std::equal( key, key + 4, d.roofKey ) ) {
+			std::copy( key, key + 4, d.roofKey );
+			d.roofGen = d.planesGen;
+			d.roofShapes = int( scene->shapes.size() );
+			d.roofed = false;
+			std::vector<float> tri;
+			for ( Shape * sh : scene->shapes ) {
+				if ( d.roofed )
+					break;
+				if ( !sh || sh->isHidden() || sh->verts.isEmpty() || d.shapeBody.contains( sh->id() ) )
+					continue;
+				const BoundSphere bs = sh->bounds();
+				const float dx = bs.center[0] - x, dy = bs.center[1] - y;
+				if ( dx * dx + dy * dy > bs.radius * bs.radius || bs.center[2] - bs.radius >= h || bs.center[2] + bs.radius <= z )
+					continue;
+				const Transform & w = sh->worldTrans();
+				tri.clear();
+				for ( const Triangle & t : sh->triangles ) {
+					if ( t[0] >= sh->verts.size() || t[1] >= sh->verts.size() || t[2] >= sh->verts.size() )
+						continue;
+					for ( int k = 0; k < 3; k++ ) {
+						const Vector3 q = w * sh->verts.at( t[k] );
+						tri.insert( tri.end(), { q[0], q[1], q[2] } );
+					}
+				}
+				d.roofed = wwWaterRoofOver( tri.data(), tri.size() / 9, x, y, z, h );
+			}
+		}
+		if ( d.roofed ) {
+			if ( roofed )
+				*roofed = true;
+			return false;
+		}
+	}
+	height = h;
+	rec = d.bodies[d.planes[size_t( best )].body].rec;
+	if ( sea )
+		*sea = !oldRule && rec.form != 0 && rec.form == s.defaultForm.value( scene->nifModel, 0 );
 	return true;
 }
 

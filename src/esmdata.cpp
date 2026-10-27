@@ -318,7 +318,9 @@ bool EsmWorld::waterRecord( quint32 form, WwWaterRecord & r ) const
 		} else if ( f == "NAM2" || f == "NAM3" || f == "NAM4" ) {
 			r.noise[f == "NAM2" ? 0 : f == "NAM3" ? 1 : 2] = str();
 		} else if ( f == "INAM" && n >= 4 ) {	// lane WATERUNDER3: the underwater imagespace
-			std::memcpy( &r.imageSpace, p, 4 );
+			quint32 raw;
+			std::memcpy( &raw, p, 4 );
+			r.imageSpace = esm->mapFormID( *wr, raw );	// lane WATERUNDER5: a plugin's raw id is in its own master space
 		} else if ( f == "DNAM" ) {
 			r.dnamBytes = n;
 			int o = 0;
