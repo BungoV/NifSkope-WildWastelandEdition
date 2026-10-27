@@ -57,6 +57,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellpost.h"	// lane GRASSMB1
 #include "gl/cellssgi.h"	// lane SSGI2FRAMES
 #include "gl/cellbloom.h"	// lane BLOOM1b
+#include "gl/celllensflare.h"	// lane REDFIX1: the lens flare echo per path frame
+#include "gl/celllooks.h"
 #include "gl/sunshadow.h"
 #include "ui_nifskope.h"
 
@@ -2386,7 +2388,10 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 			log << "frame " << k << " eye " << QString::asprintf( "%.6f %.6f %.6f", eye[0], eye[1], eye[2] )
 				<< " at " << QString::asprintf( "%.6f %.6f %.6f", at[0], at[1], at[2] )
 				<< " fov " << QString::asprintf( "%.6f", fov ) << " | taa " << wwGameTaaEcho()
-				<< " | " << wwSunShadowSummary() << " | " << wwCellPostEcho() << " | " << wwCellBloomEcho() << "\n";
+				<< " | " << wwSunShadowSummary() << " | " << wwCellPostEcho() << " | " << wwCellBloomEcho()
+				// lane REDFIX1: the switch is live (read per draw) but its echo had no caller; print it per frame
+				<< ( wwLookOn( WwLook::LensFlares ) ? QStringLiteral( " | " ) + wwCellLensFlareEcho( ogl->getScene() ) : QString() )
+				<< "\n";
 	}
 	// lane PERF1: WW_RENDER_GPUMS=<frames> times that many repaints at the path's last camera (as the still shot does)
 	if ( const int gpuFrames = wwEnvInt( "WW_RENDER_GPUMS" ); gpuFrames > 0 && frames > 0 ) {
