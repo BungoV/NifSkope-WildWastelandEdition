@@ -7,6 +7,9 @@
   so every cell-lit draw with the row on got none of them (MERGE1026 hold: Concord mean luma 21.5 -> 4.3).
 - **Fix:** the twins count as cell programs; the GPU-driven cull takes them as fo4_cell's transform; the far-field
   sway reaches them. Row off is the old code path (only the twin names are new).
+- **Second cause (model-space normals):** fo4_default.frag reads `normalMatrix` itself for `_msn` maps; the twins took
+  it from a uniform that is never set for them (zero matrix, NaN normal). The fragment stage now reads it from the
+  draw's row like the vertex stage. The default programs' driver binaries are unchanged but the stamp and source hash.
 - Red WW_BINDLESS_RED=cellname puts back the old rule. The per-frame `bindless:` line is printed again after each live
   set, so a row that repeats the previous row's numbers (the packet check row) still prints it.
 
