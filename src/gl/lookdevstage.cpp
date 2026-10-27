@@ -103,6 +103,7 @@ struct LdState
 	QString loadSource;	// lane SKYTOP1: where the plugin list came from, for the echo
 	qint64 loadMs = 0, loadHeld = 0, loadFiles = 0;
 	quint64 gen = 1;	// bumped whenever resolve() reloads (lane PERF1: the per-shape memos below key on it)
+	quint64 loadGen = 0;	// lane SKYLIVE1: bumped per plugin load; a key on the weather name alone misses a new source
 	EsmWeather esm;
 	QString loadRefusal;
 	QVector<WwWeatherEntry> list;
@@ -336,6 +337,7 @@ void resolve()
 	if ( s.dirtyLoad ) {
 		s.dirtyLoad = false;
 		s.dirtyWeather = true;
+		s.loadGen++;
 		s.list.clear();
 		bool groups = false;
 		QElapsedTimer lt;
@@ -1160,6 +1162,14 @@ bool wwLookdevImageSpace( WwLookdevIs & o )
 
 namespace
 {
+/* lane SKYLIVE1: the same weather name from another plugin (Plugin row, pinned list, cell load order) is another
+ * record, so the keys below carry the load; red WW_CELL_SKYLIVE_RED=stale keys on the name alone (the old cache) */
+QString loadKeyPart( const LdState & s )
+{
+	WW_SWITCH_STATIC( bool, stale, wwEnvStr( "WW_CELL_SKYLIVE_RED" ).split( ',' ).contains( QStringLiteral( "stale" ) ) );
+	return stale ? QString() : QStringLiteral( "|load %1" ).arg( s.loadGen );
+}
+
 bool computeImageSpace( WwLookdevIs & o )
 {
 	const LdLight L = currentLight();	// resolves the weather; the keys of the hour
@@ -1188,7 +1198,7 @@ bool computeImageSpace( WwLookdevIs & o )
 	o.t = ( o.lutA == o.lutB ) ? 0.0f : t;
 	o.name = ( a == b || t <= 0.0f ) ? s.w.isEdid[a]
 		: QStringLiteral( "%1->%2 %3%" ).arg( s.w.isEdid[a], s.w.isEdid[b] ).arg( int( t * 100.0f + 0.5f ) );
-	o.key = QStringLiteral( "%1|%2|%3|%4" ).arg( s.weatherKey ).arg( a ).arg( b ).arg( double( t ), 0, 'g', 6 );
+	o.key = QStringLiteral( "%1|%2|%3|%4" ).arg( s.weatherKey ).arg( a ).arg( b ).arg( double( t ), 0, 'g', 6 ) + loadKeyPart( s );
 	return true;
 }
 }	// namespace
@@ -2387,7 +2397,7 @@ QString wwLookdevSkyPictureKey()
 	// the cloud clock is left out: in the window it runs, and the probes would never stand still (the capture
 	// follows the weather, the hour, the day and the rows; the clouds are where they were at that moment)
 	return QStringLiteral( "%1|%2|%3|day %4|sky %5 clouds %6|%7" ).arg( s.plugin, s.weatherKey ).arg( s.hour, 0, 'f', 4 )
-		.arg( s.gameDay, 0, 'f', 2 ).arg( int( s.sky ) ).arg( int( s.clouds ) ).arg( s.haveWeather ? 1 : 0 )
+		.arg( s.gameDay, 0, 'f', 2 ).arg( int( s.sky ) ).arg( int( s.clouds ) ).arg( s.haveWeather ? 1 : 0 ) + loadKeyPart( s )
 		// lane SKYA (SKYGI1): only while the probes take the physical sky (Off: today's key, character for character)
 		+ ( wwAtmoGiActive() ? QStringLiteral( "|atmo gi tier %1 tint %2 red %3" ).arg( wwAtmoTier() ).arg( wwAtmoTint() )
 			.arg( wwAtmoGiRedDome() ? 1 : 0 ) : QString() );

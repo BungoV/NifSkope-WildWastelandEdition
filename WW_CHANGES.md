@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SKYLIVE1 (2026-10-27, branch skylive1-20261027): a live weather-source change relights like a fresh open
+
+- **Bug (found by SKYTOP1):** setting the Plugin row live (Load order -> Fallout4.esm, or a pinned list) moved the sky,
+  but lit walls kept part of the old weather's light. The cell imagespace (exposure, bloom, LUT) was cached on the
+  weather's name and the hour's keys only. Both plugins name the weather `CommonwealthClear [0002B52A]`, so the cache
+  kept the old plugin's imagespace (F76_ImageSpace_Appalachia_ClearDAY instead of CW_ClearDAY_MAY19).
+- **Fix:** the lookdev counts its plugin loads. The imagespace key and the drawn-sky capture key (the probes' sky)
+  now carry that count, so a new weather source rebuilds both, as a fresh open does. Nothing changes until the source
+  changes.
+- Red `WW_CELL_SKYLIVE_RED=stale`: both keys on the weather name alone again (the old cache).
+
 ## Lane SKYTOP1 (2026-10-26, branch skytop1-20261026): the weather comes from the whole load order
 
 - **Weather from any plugin (bungo 10-26):** the lookdev weather (sky, sun and ambient, fog, clouds, imagespace) is the
