@@ -128,6 +128,10 @@ uniform int waterProbe;
 #include "water_sss.glsl"
 #include "water_flowwaves.glsl"
 #endif
+// lane WATERLOOK1 step 12 (WATERCONTACT1): foam where the water meets anything standing in it (after shore + ripple)
+#ifdef WW_WATER_CONTACT
+#include "water_contact.glsl"
+#endif
 #ifdef WW_WATER_DISP	// lane WATERLOOK1 step 2: fo4_waterlookd.prog, the displaced water: the undisplaced world xy (u)
 in vec2 wwOcBase;
 #endif
@@ -328,6 +332,12 @@ void main()
 		N = normalize( vec3( N.xy / max( N.z, 1e-3 ) + rip.xy, 1.0 ) );
 		oc.var += rip.z;
 	}
+#endif
+#ifdef WW_WATER_CONTACT
+	// lane WATERLOOK1 step 12: the contact foam's density, distance, trust, foot (uniform flow: derivatives)
+	vec4 contact = wwWaterContact( vert, P, ripS, eye, waterShoreTime );
+	if ( under )
+		contact.x = 0.0;
 #endif
 	vec3 N0 = N;
 	N = normalize( flatten * ( N - vec3( 0.0, 0.0, 1.0 ) ) + vec3( 0.0, 0.0, 1.0 ) );
@@ -541,6 +551,9 @@ void main()
 #ifdef WW_WATER_SURF
 		lin = mix( lin, foamLin, wwSurfFoamAlpha( surf.foam, P.xy, surfFoot, waterShoreTime ) );	// step 11: the breakers' foam
 #endif
+#ifdef WW_WATER_CONTACT
+		lin = mix( lin, foamLin, wwContactFoamAlpha( contact.x, P.xy, contact.w, waterShoreTime ) );	// step 12: contact foam
+#endif
 #endif
 #ifdef WW_WATER_OCEAN
 		// lane WATERLOOK1 step 4: sunlight through the crests, the body colour, near faces and far mean alike (red noglow)
@@ -638,6 +651,10 @@ void main()
 		else if ( waterProbe == 39 || waterProbe == 40 )	// WATERLOOK1: the spectrum (header)
 			o = waterProbe == 39 ? vec3( clamp( 0.5 + 4.0 * oc.slope, 0.0, 1.0 ), oc.w )
 				: vec3( oc.white, sqrt( oc.var ) / 0.5, oc.cau / 3.0 );
+#endif
+#ifdef WW_WATER_CONTACT
+		else if ( waterProbe == 47 )	// WATERLOOK1 step 12: (contact foam density, distance / 1024, trust)
+			o = vec3( contact.x, clamp( contact.y / 1024.0, 0.0, 1.0 ), contact.z );
 #endif
 		fragColor = vec4( o, 1.0 );
 	}

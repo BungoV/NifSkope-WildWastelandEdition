@@ -87,6 +87,11 @@ bool wwCellWaterSsrWanted( Scene * scene );
  *  travel time integrated on the dispersion relation over the local beach slope; they shoal, steepen and break at
  *  0.78 of the depth, with a foam trail behind each broken crest; groups and an along-shore noise break the
  *  regularity. Red WW_CELL_WATER_SURF_RED=noshoal | nobreak | regular | alias (combinable). */
+/*! lane WATERLOOK1 step 12 (WATERCONTACT1, 2026-10-27): the Contact foam row (WwLook::WaterContact, pin
+ *  WW_CELL_WATER_CONTACT): foam where waves strike anything standing in baked water (res/shaders/water_contact.glsl).
+ *  The contact distance comes from the depth behind the pixel; each strike lays foam that drifts out and decays, so
+ *  rings pulse out once a wave period; the strength follows the shore foam's energy rule (calm: a thin lap line at
+ *  most); banks stay with the Shore foam row. Red WW_CELL_WATER_CONTACT_RED=nodepth | flat | still | noshorecut. */
 const char * wwCellWaterProgram();
 //! lane WATERCOMBINE1: any water look row is on (the water draws with fo4_waterlook.prog)
 bool wwCellWaterLookOn();

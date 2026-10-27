@@ -12,5 +12,6 @@
 #define WW_WATER_CLEAR 1
 #define WW_WATER_SKYVIS 1
 #define WW_WATER_SURF 1
+#define WW_WATER_CONTACT 1
 #define WW_WATER_DISP 1
 #include "fo4_water.frag"

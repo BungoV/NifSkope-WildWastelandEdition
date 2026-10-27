@@ -65,6 +65,7 @@ const LookRow kRows[] = {
 	{ "Water clear colour", "WW/CellWaterClear" },
 	{ "Water sky visibility", "WW/CellWaterSkyVis" },
 	{ "Surf", "WW/CellWaterSurf" },
+	{ "Contact foam", "WW/CellWaterContact" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -278,6 +279,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_SURF" ).trimmed() );
 		return p;
 	}
+	case WwLook::WaterContact: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_CONTACT" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -341,6 +346,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::WaterClear: return "WW_CELL_WATER_CLEAR";
 	case WwLook::WaterSkyVis: return "WW_CELL_WATER_SKYVIS";
 	case WwLook::WaterSurf: return "WW_CELL_WATER_SURF";
+	case WwLook::WaterContact: return "WW_CELL_WATER_CONTACT";
 	default: return "";
 	}
 }

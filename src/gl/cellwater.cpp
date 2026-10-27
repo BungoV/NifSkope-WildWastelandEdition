@@ -363,6 +363,15 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 			| ( sr.contains( "regular" ) ? 4 : 0 ) | ( sr.contains( "alias" ) ? 8 : 0 ) );
 		prog->uni4f( "waterSurfK", FloatVector4( 8.0f, 0.78f, 7.0f, 0.9f ) );
 	}
+	if ( prog->uniLocation( "waterContactOn" ) >= 0 ) {	// lane WATERLOOK1 step 12: the Contact foam row
+		/* the foam band 4 Hs wide (e-fold), each strike's foam lives 2 wave periods, the wind sea's period from its
+		 * height at a steepness Hs / L of 0.04 (a developing sea), the foam 0.9 opaque */
+		prog->uni1b( "waterContactOn", wwLookOn( WwLook::WaterContact ) );
+		WW_SWITCH_STATIC( QByteArray, cr, wwEnv( "WW_CELL_WATER_CONTACT_RED" ).trimmed() );
+		prog->uni1i( "waterContactRed", ( cr.contains( "nodepth" ) ? 1 : 0 ) | ( cr.contains( "flat" ) ? 2 : 0 )
+			| ( cr.contains( "still" ) ? 4 : 0 ) | ( cr.contains( "noshorecut" ) ? 8 : 0 ) );
+		prog->uni4f( "waterContactK", FloatVector4( 4.0f, 2.0f, 0.04f, 0.9f ) );
+	}
 	if ( prog->uniLocation( "waterCauTime" ) >= 0 ) {	// lane WATERCAUSTICS1: fo4_waterlook only
 		prog->uni1b( "waterCauOn", wwLookOn( WwLook::WaterCaustics ) );	// lane WATERCOMBINE1: its own row
 		WW_SWITCH_STATIC( QByteArray, cr, wwEnv( "WW_CELL_WATER_CAUSTICS_RED" ).trimmed() );
@@ -562,7 +571,8 @@ bool wwCellWaterLookOn()
 		|| wwLookOn( WwLook::WaterOcean )	// lane WATERLOOK1
 		|| wwLookOn( WwLook::WaterClear )	// lane WATERLOOK1 step 8
 		|| wwLookOn( WwLook::WaterSkyVis )	// lane WATERLOOK1 step 10
-		|| wwLookOn( WwLook::WaterSurf );	// lane WATERLOOK1 step 11
+		|| wwLookOn( WwLook::WaterSurf )	// lane WATERLOOK1 step 11
+		|| wwLookOn( WwLook::WaterContact );	// lane WATERLOOK1 step 12
 }
 
 bool wwCellWaterRecordOf( const void * nif, quint32 form, WwWaterRecord & rec )
@@ -683,6 +693,7 @@ QString wwCellWaterEcho( const void * nif )
 				+ ( wwLookOn( WwLook::WaterClear ) ? QLatin1String( " clear" ) : QLatin1String( "" ) )
 				+ ( wwLookOn( WwLook::WaterSkyVis ) ? QLatin1String( " skyvis" ) : QLatin1String( "" ) )
 				+ ( wwLookOn( WwLook::WaterSurf ) ? QLatin1String( " surf" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterContact ) ? QLatin1String( " contact" ) : QLatin1String( "" ) )
 			: QString() )
 		// lane WATERLOOK1: what the spectrum built (said only while its row is on)
 		+ ( wwCellOceanEcho().isEmpty() ? QString() : QStringLiteral( "; " ) + wwCellOceanEcho() );

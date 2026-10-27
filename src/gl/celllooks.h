@@ -58,6 +58,7 @@ enum class WwLook : int
 	WaterClear,			// WATERLOOK1 step 8: the water's own colour by body class, not the WATR ramp (WW_CELL_WATER_CLEAR)
 	WaterSkyVis,			// WATERLOOK1 step 10: the water's sky reflection and glare where their sky is seen (WW_CELL_WATER_SKYVIS)
 	WaterSurf,			// WATERLOOK1 step 11: shore waves on the sea, shoaling and breaking, crest foam (WW_CELL_WATER_SURF)
+	WaterContact,			// WATERLOOK1 step 12: foam rings where waves strike anything standing in the water (WW_CELL_WATER_CONTACT)
 	Count
 };
 

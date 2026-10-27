@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 12 (2026-10-27, branch waterlook1-20261027): foam where waves hit things (WATERCONTACT1)
+
+- New row **Contact foam** (WW_CELL_WATER_CONTACT). Foam rings form around rocks, posts, piers, hulls and actors
+  standing in baked water. Each wave that hits the object leaves a patch of foam. The patch drifts outward and fades,
+  and the next wave lays a fresh one, so the rings pulse out once a wave period.
+- The contact is found from the depth behind each pixel (the ripples' contact distance), so it covers anything drawn,
+  with no object list.
+- The strength follows the shore foam's energy rule. Rough sea foams fully; calm water gets at most a thin lap line
+  at the object; fresh water keeps less foam. The band is 4 wave heights wide, and the period is the wind sea's for
+  that height.
+- Banks are left to the Shore foam row: where the baked shore field puts land as near as the contact, there is no
+  contact foam. Lit like the shore foam. New res/shaders/water_contact.glsl, probe 47.
+- Reds on WW_CELL_WATER_CONTACT_RED (combinable): `nodepth` (no contact found), `flat` (full strength on any
+  water), `still` (no pulse), `noshorecut` (banks foam too). fo4_water.prog (rows off) keeps its machine code.
+- Offline (no window, the real shader):
+  - The band's width is within 1% of 4 wave heights.
+  - The strength scales with the wave height to the power 2.5, within 2%; no foam on 1 cm water past the lap line.
+  - Rings arrive every 2.53 s and run out at 0.32 m/s for 0.4 m waves, as set.
+  - Around a post in 3 m of water, every trusted pixel within 16 u foams at 0.6 m waves. Calm water gives none, and
+    neither does a bank. About 0.03 ms a 1080p pass for the law. All programs link.
+
 ## Lane WATERLOOK1 step 11 (2026-10-27, branch waterlook1-20261027): surf on the sea (WATERSURF1)
 
 - New row **Surf** (WW_CELL_WATER_SURF). Waves now roll in to the coast on seas. Rivers and lakes get none. They
