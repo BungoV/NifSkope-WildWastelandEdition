@@ -54,6 +54,7 @@ const LookRow kRows[] = {
 	{ "Light patterns", "WW/CellLightPatterns" },
 	{ "Mesh lights (.nifx)", "WW/CellNifxLights" },
 	{ "Bindless draws", "WW/CellBindless" },
+	{ "Weather .recx (sky, clouds, night)", "WW/WeatherRecx" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -223,6 +224,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_BINDLESS" ).trimmed() );
 		return p;
 	}
+	case WwLook::WeatherRecx: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_WEATHER_RECX" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -275,6 +280,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::LightPatterns: return "WW_CELL_GOBO";
 	case WwLook::NifxLights: return "WW_CELL_NIFX_LIGHTS";
 	case WwLook::BindlessDraws: return "WW_BINDLESS";
+	case WwLook::WeatherRecx: return "WW_WEATHER_RECX";
 	default: return "";
 	}
 }

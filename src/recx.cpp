@@ -128,11 +128,12 @@ bool parseFormKey( const QString & k, QString & plugin, quint32 & id )
 }
 
 // 0 form, 1 exact EditorID, 2 wildcard, -1 no claim
-int rankOf( const QJsonObject & e, const QString & key, const QString & plugin, quint32 localId, const QString & edid )
+int rankOf( const QJsonObject & e, const QString & key, const QString & plugin, quint32 localId, const QString & edid,
+	bool caseFree )
 {
 	int best = -1;
 	auto take = [&]( int r ) { if ( best < 0 || r < best ) best = r; };
-	const QString rk = e.value( key ).toString();
+	const QString rk = wwRecxBlockValue( e, key, caseFree ).toString();	// lane WX1: "Weather" too when case-free
 	if ( !rk.isEmpty() ) {
 		QString p;
 		quint32 id = 0;
@@ -143,7 +144,7 @@ int rankOf( const QJsonObject & e, const QString & key, const QString & plugin, 
 			take( 1 );
 		}
 	}
-	const QString ek = e.value( QStringLiteral( "editorId" ) ).toString();
+	const QString ek = wwRecxBlockValue( e, QStringLiteral( "editorId" ), caseFree ).toString();
 	if ( !ek.isEmpty() && !edid.isEmpty() ) {
 		if ( ek.contains( QLatin1Char( '*' ) ) || ek.contains( QLatin1Char( '?' ) ) ) {
 			const QRegularExpression re( QRegularExpression::wildcardToRegularExpression( ek ), QRegularExpression::CaseInsensitiveOption );
@@ -186,8 +187,20 @@ QStringList wwRecxRoots( const QStringList & pluginFiles, const QString & gameDa
 	return out;
 }
 
+QJsonValue wwRecxBlockValue( const QJsonObject & entry, const QString & block, bool caseFree )
+{
+	const QJsonValue v = entry.value( block );
+	if ( !caseFree || !v.isUndefined() )
+		return v;
+	for ( auto it = entry.constBegin(); it != entry.constEnd(); ++it )
+		if ( it.key().compare( block, Qt::CaseInsensitive ) == 0 )
+			return it.value();
+	return QJsonValue( QJsonValue::Undefined );
+}
+
 WwRecxHit wwRecxFind( const QStringList & roots, const QStringList & pluginFiles, const QString & category,
-	const QString & key, const QString & plugin, quint32 localId, const QString & edid, const QString & block )
+	const QString & key, const QString & plugin, quint32 localId, const QString & edid, const QString & block,
+	bool caseFree )
 {
 	RecxCategory & c = cats()[category];
 	rescan( c, roots, category );
@@ -208,9 +221,9 @@ WwRecxHit wwRecxFind( const QStringList & roots, const QStringList & pluginFiles
 	std::vector<Claim> claims;
 	for ( const RecxFile & f : std::as_const( c.files ) )
 		for ( int e = 0; e < f.entries.size(); e++ ) {
-			if ( !f.entries.at( e ).value( block ).isObject() )
+			if ( !wwRecxBlockValue( f.entries.at( e ), block, caseFree ).isObject() )
 				continue;
-			const int r = rankOf( f.entries.at( e ), key, plugin, localId, edid );
+			const int r = rankOf( f.entries.at( e ), key, plugin, localId, edid, caseFree );
 			if ( r >= 0 )
 				claims.push_back( { r, orderOf( f.provider ), e, &f } );
 		}
@@ -232,7 +245,7 @@ WwRecxHit wwRecxFind( const QStringList & roots, const QStringList & pluginFiles
 	const Claim & w = claims.front();
 	hit.ok = true;
 	hit.entry = w.f->entries.at( w.entry );
-	hit.block = hit.entry.value( block ).toObject();
+	hit.block = wwRecxBlockValue( hit.entry, block, caseFree ).toObject();
 	hit.file = w.f->path;
 	hit.provider = w.f->provider;
 	hit.rung = QString::fromLatin1( names[w.rank] );

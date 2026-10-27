@@ -89,6 +89,7 @@ struct BandParams
 inline void bandsOf( const int * role, const float * cover, const float ( *tint )[3], int n, BandParams out[3],
 	bool redMax = false, const float ( *heightM )[2] = nullptr )
 {
+	// lane WX1: heightM[i] = a layer's own base/top above the eye (a weather .recx clouds.layers entry), < 0 = its role's
 	for ( int b = 0; b < 3; b++ ) {
 		float cs[32], sheetC[32];
 		int k = 0, ks = 0;
@@ -101,8 +102,8 @@ inline void bandsOf( const int * role, const float * cover, const float ( *tint 
 			if ( r.sheet )
 				sheetC[ks++] = cover[i];
 			w += cover[i];
-			// lane CLOUD4: heightM[i] = {base, top} m from the weather's .recx (top > base > 0), else the type's height
-			const bool own = heightM && heightM[i][1] > heightM[i][0] && heightM[i][0] > 0.0f;
+			// lane CLOUD4: heightM[i] = {base, top} m from the weather's .recx (top > base > 0), else the type's height; WX1: base/top above the eye from the same keys, < 0 = none
+			const bool own = heightM && heightM[i][0] >= 0.0f && heightM[i][1] > heightM[i][0];
 			base += cover[i] * ( own ? heightM[i][0] : r.baseM );
 			top += cover[i] * ( own ? heightM[i][1] : r.topM );
 			den += cover[i] * r.density;

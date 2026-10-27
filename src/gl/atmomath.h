@@ -41,18 +41,18 @@ inline void hazeFromFog( float fogFar, float fogMax, float fogMid, float fogRang
 	out[2] = std::max( 0.0f, fogMid * kUnitKm );
 }
 
-inline void odAt( float h, const float haze[3], bool noOzone, float e[3] )
+inline void odAt( float h, const float haze[3], bool noOzone, float e[3], float ozone = 1.0f )
 {
 	h = std::max( h, 0.0f );
 	const float dr = std::exp( -h / 8.0f ), dm = std::exp( -h / 1.2f );
 	const float dz = std::max( 0.0f, 1.0f - std::fabs( h - 25.0f ) / 15.0f );
 	const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
 	for ( int c = 0; c < 3; c++ )
-		e[c] = kRay[c] * dr + kMieE * dm + dh + ( noOzone ? 0.0f : kOzone[c] ) * dz;
+		e[c] = kRay[c] * dr + kMieE * dm + dh + ( noOzone ? 0.0f : kOzone[c] * ozone ) * dz;	// WX1: ozone x 1 = exact
 }
 
 //! the transmittance LUT's math: from height hKm along cos zenith mu to the top; 0 when the ray hits the ground
-inline void cpuTrans( float hKm, float mu, const float haze[3], bool noOzone, float out[3] )
+inline void cpuTrans( float hKm, float mu, const float haze[3], bool noOzone, float out[3], float ozone = 1.0f )
 {
 	const float r = kRb + std::max( hKm, 0.0f );
 	if ( mu < 0.0f && r * r * ( mu * mu - 1.0f ) + kRb * kRb >= 0.0f ) {
@@ -68,7 +68,7 @@ inline void cpuTrans( float hKm, float mu, const float haze[3], bool noOzone, fl
 		const float t = d * am * am, w = d * ( a1 * a1 - a0 * a0 );
 		const float rr = std::sqrt( r * r + t * t + 2.0f * r * mu * t );
 		float e[3];
-		odAt( rr - kRb, haze, noOzone, e );
+		odAt( rr - kRb, haze, noOzone, e, ozone );
 		for ( int c = 0; c < 3; c++ )
 			od[c] += double( e[c] ) * w;
 	}

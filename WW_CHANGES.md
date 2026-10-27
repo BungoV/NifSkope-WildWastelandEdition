@@ -1,5 +1,30 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WX1 (2026-10-26, branch wx1-20261026): weather .recx blocks for the sky, clouds and night
+
+- **New Show row "Weather .recx (sky, clouds, night)"** (pin `WW_WEATHER_RECX`, ships off, live). With it on, the
+  Lookdev weather's `.recx` files (`Plugins\<Provider>\Weathers\<EditorID>.recx`, spec FO4-Extension-Formats branch
+  wx1-20261026, recx/SPEC.md "atmosphere, clouds, night") set, per key: the file's value > the record's own data >
+  the default.
+  - `atmosphere`: `visibility` (m, 100..400000; Koschmieder 3.912 / V less the clear air gives the ground haze),
+    `hazeHeight` (m, 20..20000: the haze's scale height), `ozone` (x the ozone layer, 0..4).
+  - `clouds`: `coverage` (0..1, the bands' union; each band keeps its share; a weather with no cloud stays clear),
+    `density` (x, 0..10), `layers.<n>.base/top` (metres above sea level, 600..20000, n = the weather's cloud layer
+    0..31; the band sits above the eye; flying through it is CLOUD4's).
+  - `night`: `stars` (x the weather's star colour, 0..10), `moonlight` (x the moon's light on the ground and its glow).
+  - `hours` on every block (not layers): keyed like groundFog's.
+- Block and key names match case-free (also `Weather`/`editorId` for these blocks: `wwRecxFind(..., caseFree)`).
+  Unknown keys warn with a did-you-mean; bad values are clamped or dropped and warned by name (not-number, clamped,
+  missing, below-base, not-layer, not-object). Providers merge block by block (recx.cpp). Files re-read on a change
+  (500 ms), no reopen.
+- Census on stderr: `weather recx: <EDID> <plugin>|0x<id> atmosphere <rung>:<file>|none clouds .. night .. -> <values>`.
+- Red `WW_WEATHER_RECX_RED`: `ignore` (no file read), `recordfirst` (the record's fog and cloud cover win: wrong order).
+- Off = the base: the row-off path returns the unset struct; ozone x 1.0 is exact; the LUT, cloud-map and light memo
+  keys grow only while a value is set. Gate: tests/weatherrecx/weatherrecx_gate.cpp (row off = record byte for byte,
+  every key, merge, ranks, bad values, case-free, hot reload; both reds fail).
+- Cost (estimate, not measured): no new GPU pass and no new memory; a set value re-renders the atmosphere LUTs and the
+  cloud map when it moves (as a weather change does); the reader costs well under 0.1 ms of CPU per 100 ms.
+
 ## Lane CLOUD4 (2026-10-26, branch cloud4-20261026): fly-through clouds
 
 - **New row Render > Scene > Fly-through Clouds** (Off / Low / Medium / High / Ultra, ships Off, live; needs Volume
