@@ -365,21 +365,129 @@ static bool wwFxEnvNone()
 
 /* lane LANDSPEC1: the game's LOD land spec on the ground (src/landlodspec.h): far LOD terrain whole, the cells' LAND by
  * the land-LOD blend round the camera's cell. Red WW_LANDSPEC_RED=off draws the ground as before. */
-static void wwLandLodUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, const Shape * mesh )
+static int wwLandLodMode( Scene * scene, const Shape * mesh )
 {
-	WW_SWITCH_STATIC( bool, off, qgetenv( "WW_LANDSPEC_RED" ).trimmed() == "off" );
 	int mode = LandLodSpec::Off;
-	for ( const Node * p = mesh; p && !off; p = p->parentNode() ) {
+	for ( const Node * p = mesh; p; p = p->parentNode() ) {
 		const QString & n = p->getName();
-		if ( n.startsWith( QLatin1StringView( "FarLOD terrain" ) ) ) {
-			mode = LandLodSpec::Far;
-			break;
-		}
+		if ( n.startsWith( QLatin1StringView( "FarLOD terrain" ) ) )
+			return LandLodSpec::Far;
 		if ( n.compare( QLatin1StringView( "ground" ), Qt::CaseInsensitive ) == 0 )
 			mode = LandLodSpec::Near;
 	}
-	if ( mode == LandLodSpec::Off && !off && wwCellLandIs( scene->nifModel, mesh->id() ) )
+	if ( mode == LandLodSpec::Off && wwCellLandIs( scene->nifModel, mesh->id() ) )
 		mode = LandLodSpec::Near;
+	return mode;
+}
+
+//! lane LANDSPEC2: WW_LANDSPEC_RED = off (no law) | ssr (land keeps a material's SSR flag) | snap (no glide) | notex
+static const QByteArray & wwLandSpecRed()
+{
+	WW_SWITCH_STATIC( QByteArray, v, qgetenv( "WW_LANDSPEC_RED" ).trimmed() );
+	return v;
+}
+
+/* lane LANDSPEC2: the blend centre's glide (src/landlodspec.h). Harness pins: WW_LANDSPEC_GLIDEFROM=dx,dy (cells) starts
+ * the first frame's glide that far from the camera's cell, WW_LANDSPEC_GLIDETIME=t freezes its elapsed seconds. */
+static LandLodSpec::Glide & wwLandGlide()
+{
+	static LandLodSpec::Glide g;
+	return g;
+}
+
+static double wwLandClock()
+{
+	return std::chrono::duration<double>( std::chrono::steady_clock::now().time_since_epoch() ).count();
+}
+
+static double wwLandGlidePin()
+{
+	WW_SWITCH_STATIC( double, t, [] {
+		bool ok = false;
+		const double v = qgetenv( "WW_LANDSPEC_GLIDETIME" ).trimmed().toDouble( &ok );
+		return ok ? std::max( v, 0.0 ) : -1.0;
+	}() );
+	return t;
+}
+
+static void wwLandGlideCentre( float cx, float cy, float & x, float & y )
+{
+	LandLodSpec::Glide & g = wwLandGlide();
+	WW_SWITCH_STATIC( QByteArray, from, qgetenv( "WW_LANDSPEC_GLIDEFROM" ).trimmed() );
+	static QByteArray fromSeen;
+	if ( from != fromSeen ) {	// a new pin restarts the glide from its first frame
+		fromSeen = from;
+		g.init = false;
+	}
+	const double pin = wwLandGlidePin();
+	const double now = wwLandClock();
+	if ( !g.init && !from.isEmpty() && wwLandSpecRed() != "snap" ) {
+		const QList<QByteArray> d = from.split( ',' );
+		const float dx = d.size() > 0 ? d[0].toFloat() : 0.0f, dy = d.size() > 1 ? d[1].toFloat() : 0.0f;
+		g = { true, cx + dx * LandLodSpec::kCell, cy + dy * LandLodSpec::kCell, cx, cy, now };
+	} else {
+		LandLodSpec::glideTo( g, cx, cy, now, wwLandSpecRed() == "snap" );
+	}
+	LandLodSpec::glideAt( g, pin >= 0.0 ? g.t0 + pin : now, x, y );
+}
+
+bool wwLandLodWantsRepaint()
+{
+	return wwLandGlidePin() < 0.0 && LandLodSpec::gliding( wwLandGlide(), wwLandClock() );
+}
+
+/* lane LANDSPEC2: the near ground's band textures: the 2 x 2 level-4 LOD diffuse chunks round the camera's cell, the
+ * terrain noise and the detail normals, bound on their own units. Red WW_LANDSPEC_RED=notex binds none. */
+static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool near, const float camScene[2] )
+{
+	const int lTex = prog->uniLocation( "landLodTex" );
+	if ( lTex < 0 )
+		return;
+	QString ws;
+	float ox = 0.0f, oy = 0.0f;
+	const bool on = near && wwLandSpecRed() != "notex" && wwCellLandOriginOf( scene->nifModel, &ws, &ox, &oy );
+	auto fn = scene->renderer->fn;
+	static const char * const names[6] = { "LandLodDiff0", "LandLodDiff1", "LandLodDiff2", "LandLodDiff3", "LandLodNoise",
+		"LandLodDetail" };
+	const int units[6] = { WwCellUnit::LandLodDiff0, WwCellUnit::LandLodDiff1, WwCellUnit::LandLodDiff2,
+		WwCellUnit::LandLodDiff3, WwCellUnit::LandLodNoise, WwCellUnit::LandLodDetail };
+	int bits = 0, fx = 0, fy = 0;
+	bool noise = false, detail = false;
+	if ( on ) {
+		fx = LandLodSpec::windowFirst( int( std::floor( ( camScene[0] + ox ) / LandLodSpec::kCell ) ) );
+		fy = LandLodSpec::windowFirst( int( std::floor( ( camScene[1] + oy ) / LandLodSpec::kCell ) ) );
+		const QString w = ws.toLower();
+		for ( int k = 0; k < 6; k++ ) {
+			QString path;
+			if ( k < 4 )
+				path = QStringLiteral( "textures\\terrain\\%1\\%1.4.%2.%3.dds" ).arg( w )
+					.arg( fx + LandLodSpec::kLodLevel * ( k & 1 ) ).arg( fy + LandLodSpec::kLodLevel * ( k >> 1 ) );
+			else
+				path = k == 4 ? QStringLiteral( "textures\\terrain\\noise.dds" ) : QStringLiteral( "textures\\terrain\\detailnormals.dds" );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + units[k] ) );
+			const bool b = scene->textures->bind( QStringView( path ), scene->nifModel ) > 0;
+			if ( !b )
+				fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			if ( k < 4 )
+				bits |= int( b ) << k;
+			else
+				( k == 4 ? noise : detail ) = b;
+			prog->uni1i_l( prog->uniLocation( names[k] ), units[k] );
+		}
+		fn->glActiveTexture( GL_TEXTURE0 );
+	} else {
+		for ( int k = 0; k < 6; k++ )
+			prog->uni1i_l( prog->uniLocation( names[k] ), units[k] );
+	}
+	prog->uni4f( "landLodTex", FloatVector4( ox, oy, ( bits && noise ) ? 1.0f : 0.0f, detail ? 1.0f : 0.0f ) );
+	prog->uni4f( "landLodWin", FloatVector4( float( fx ) * LandLodSpec::kCell, float( fy ) * LandLodSpec::kCell,
+		float( bits ), 0.0f ) );
+}
+
+static void wwLandLodUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, const Shape * mesh )
+{
+	const bool off = wwLandSpecRed() == "off";
+	const int mode = off ? int( LandLodSpec::Off ) : wwLandLodMode( scene, mesh );
 	// the camera in scene units: R^T (0 - t) / scale, as cellRow's w
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
@@ -388,10 +496,14 @@ static void wwLandLodUniforms( Scene * scene, NifSkopeOpenGLContext::Program * p
 		float w = 0.0f;
 		for ( int j = 0; j < 3; j++ )
 			w -= vt.rotation( j, k ) * vt.translation[j];
-		cam[k] = LandLodSpec::cellCentre( w / sc );
+		cam[k] = w / sc;
 	}
+	float gx = 0.0f, gy = 0.0f;
+	if ( mode != LandLodSpec::Off )
+		wwLandGlideCentre( LandLodSpec::cellCentre( cam[0] ), LandLodSpec::cellCentre( cam[1] ), gx, gy );
+	wwLandLodTextures( scene, prog, mode == LandLodSpec::Near, cam );
 	const bool specView = scene->hasOption( Scene::DoSpecular ) && scene->hasOption( Scene::DoLighting );
-	prog->uni4f( "landLod", FloatVector4( float( mode ), cam[0], cam[1], 0.0f ) );
+	prog->uni4f( "landLod", FloatVector4( float( mode ), gx, gy, 0.0f ) );
 	prog->uni4f( "landLodK", FloatVector4( LandLodSpec::kPower, specView ? LandLodSpec::kScale : 0.0f,
 		LandLodSpec::kBlendEnd, LandLodSpec::kBlendInv ) );
 }
@@ -787,7 +899,11 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	}
 	{	// lane SSR1: the draw's reflection flag (an environment-mapped material file with its reflections switch on)
 		const Material * sm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
-		wwCellSsrNote( sm && sm->isShaderMaterial() && sm->bEnvironmentMapping && sm->bScreenSpaceReflections );
+		bool ssr = sm && sm->isShaderMaterial() && sm->bEnvironmentMapping && sm->bScreenSpaceReflections;
+		// lane LANDSPEC2: the game's land pre-pass writes the flag only on wet ground; the viewer's land is dry
+		if ( ssr && !LandLodSpec::landSsr( 0.0f ) && wwLandSpecRed() != "ssr" && wwLandLodMode( mesh->scene, mesh ) != LandLodSpec::Off )
+			ssr = false;
+		wwCellSsrNote( ssr );
 		wwCellReflProbeNote( mesh->bslsp && mesh->bslsp->greyscaleColor );	// lane REFLPROBE1: the palette owns GreyscaleMap
 	}
 
@@ -1887,6 +2003,8 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 	if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: no default program reads it
 		wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
+	if ( prog->uniLocation( "landLod" ) >= 0 )	// lane LANDSPEC2: pbrm_cell, ground with a .pbrm
+		wwLandLodUniforms( scene, prog, mesh );
 
 	// Per-draw GL state, same as the spec/gloss path ends with. Omitting it made
 	// the shape inherit whatever blend/depth state the previous program left

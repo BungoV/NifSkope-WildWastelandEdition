@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LANDSPEC2 (2026-10-27, branch landspec2-20261027): the land-LOD band's textures, its glide, PBR mode, SSR
+
+- **Band textures:** inside the land-LOD blend band the near ground's albedo now lerps toward the level-4 LOD diffuse
+  chunk times the terrain noise (`noise * 3.777778 - 2.006`, uv world xy * 0.00025), and its normal toward
+  `DetailNormals.dds` (uv world xy * 0.00035) in the normal's own frame, by the same v, as the game's near land shader.
+  The 2 x 2 chunk window round the camera's cell (`textures\terrain\<ws>\<ws>.4.X.Y.dds`) binds on units 72-75, noise
+  and detail on 76-77 (`src/gl/cellunits.h`). A missing chunk keeps the ground's own albedo there.
+- **Glide:** the blend centre glides linearly over 5 s after a cell cross, and snaps on the first frame or a jump of
+  more than one cell; the view repaints while it glides. Harness pins: `WW_LANDSPEC_GLIDEFROM=dx,dy` (cells, the
+  first frame's start) and `WW_LANDSPEC_GLIDETIME=t` (frozen seconds), both live.
+- **PBR mode:** ground drawn by `pbrm_cell` (a .pbrm landscape) takes the same law: roughness toward 1 - 0.22,
+  specular weight toward 0.06, and the cube/SSR terms like the legacy program. Vanilla ground draws the legacy program
+  in every mode (LEGACYROUTE1), so it already had the law.
+- **SSR on dry land:** the game writes the reflection flag on land only when wet. The viewer's ground has no BGSM and
+  was never flagged; a land shape with a reflecting BGSM is now unflagged too.
+- **Per-layer wetness:** each layer's BGSM wet fields override the landscape defaults, but every term scales with
+  wetness: no change on dry ground, no code (the viewer has no precipitation yet).
+- **Reds (live):** `WW_LANDSPEC_RED=snap` (no glide), `notex` (no band textures), `ssr` (land keeps the flag), `off`.
+- **Test:** `tests/landspec` (green PASS; reds `-DLANDSPEC_RED`, `_GLIDE`, `_BAND`, `_SSR` and the base's shaders FAIL).
+
 ## Lane WATERBODYSEAM1 (2026-10-27, branch waterbodyseam1-20261027): the shore is land, not the next body
 
 - **Why:** the .lodl shore bake counted a neighbour of ANOTHER water body as shore at distance zero, so where two
@@ -218,7 +238,6 @@
 - **Cost (offline, RTX 5070 Ti, 1080p):** +0.035 ms GPU (near froxels +0.019, far grid +0.016, surfaces +0.001 a
   layer); memory 4 MB VRAM grid + 4 MB CPU published copy, while the worker runs 16 MB raster + about 32 MB of
   low-pass doubles.
-
 ## Lane LANDSPEC1 (2026-10-27, branch landspec1-20261027): the far ground's specular and the land-LOD blend
 
 - **Why:** the game draws its LOD land with fLODLandSpecPower 0.22 (gloss) and fLODLandSpecScale 0.06 (spec mask), and

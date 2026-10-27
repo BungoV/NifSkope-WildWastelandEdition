@@ -305,6 +305,28 @@ vec3 tonemap(vec3 x)
 // lane LANDSPEC1: x 0 off, 1 near ground, 2 far LOD ground; yz the camera cell's centre (scene xy)
 uniform vec4 landLod;
 uniform vec4 landLodK;	// fLODLandSpecPower, fLODLandSpecScale (0: specular off), blend end, 1 / blend width
+#ifndef WW_LANDSPEC_NONE
+// lane LANDSPEC2: xy the scene origin (world), z 1 = albedo toward the LOD diffuse x noise, w 1 = normal toward the
+// detail normals; landLodWin xy the 2 x 2 chunk window's corner (world), z its bound chunks (bits)
+uniform vec4 landLodTex;
+uniform vec4 landLodWin;
+uniform sampler2D LandLodDiff0;
+uniform sampler2D LandLodDiff1;
+uniform sampler2D LandLodDiff2;
+uniform sampler2D LandLodDiff3;
+uniform sampler2D LandLodNoise;
+uniform sampler2D LandLodDetail;
+vec3 landLodChunk( int k, vec2 uv, vec2 dx, vec2 dy )
+{
+	if ( k == 0 )
+		return textureGrad( LandLodDiff0, uv, dx, dy ).rgb;
+	if ( k == 1 )
+		return textureGrad( LandLodDiff1, uv, dx, dy ).rgb;
+	if ( k == 2 )
+		return textureGrad( LandLodDiff2, uv, dx, dy ).rgb;
+	return textureGrad( LandLodDiff3, uv, dx, dy ).rgb;
+}
+#endif
 #endif
 #ifdef WW_FARGROUND	// lane FARDRAW1: the far ring 0's live ground
 #include "cell_farground.glsl"
@@ -380,6 +402,29 @@ void main()
 	vec4 baseMap = texture( BaseMap, offset );
 #ifdef WW_FARGROUND
 	baseMap.rgb = fgGround( cellWorldPos( -ViewDir ), baseMap.rgb );
+#endif
+#if defined( WW_CELLLIGHTS ) && !defined( WW_LANDSPEC_NONE )
+	/* lane LANDSPEC2 (src/landlodspec.h): the near ground's land-LOD band, as the game's near land PS: v from the
+	 * (gliding) blend centre; the albedo toward the level-4 LOD diffuse x the noise, the normal (below) toward the
+	 * detail normals. Gradients first: the samples sit in a branch. */
+	vec2 landBandW = cellWorldPos( -ViewDir ).xy;
+	float landBandV = landLod.x > 0.5 && landLod.x < 1.5
+		? 1.0 - clamp( ( landLodK.z - distance( landBandW, landLod.yz ) ) * landLodK.w, 0.0, 1.0 ) : 0.0;
+	landBandW += landLodTex.xy;
+	vec2 landWdx = dFdx( landBandW );
+	vec2 landWdy = dFdy( landBandW );
+	if ( landLodTex.z > 0.5 && landBandV > 0.0 ) {
+		vec2 g = ( landBandW - landLodWin.xy ) * ( 1.0 / 16384.0 );
+		ivec2 ci = ivec2( floor( g ) );
+		int k = ci.x + 2 * ci.y;
+		if ( ci.x >= 0 && ci.y >= 0 && ci.x < 2 && ci.y < 2 && ( ( int( landLodWin.z ) >> k ) & 1 ) != 0 ) {
+			vec2 f = g - vec2( ci );
+			const vec2 flipV = vec2( 1.0, -1.0 ) / 16384.0;
+			vec3 lod = landLodChunk( k, vec2( f.x, 1.0 - f.y ), landWdx * flipV, landWdy * flipV );
+			vec3 noise = textureGrad( LandLodNoise, landBandW * 0.00025, landWdx * 0.00025, landWdy * 0.00025 ).rgb;
+			baseMap.rgb = mix( baseMap.rgb, lod * ( noise * 3.777778 - 2.006 ), landBandV );
+		}
+	}
 #endif
 
 	vec4 color = vec4( baseMap.rgb, 1.0 );
@@ -534,6 +579,15 @@ void main()
 		normal = normalMap.rgb * 2.0 - 1.0;
 		// Calculate missing blue channel
 		normal.b = sqrt(max(1.0 - dot(normal.rg, normal.rg), 0.0));
+#if defined( WW_CELLLIGHTS ) && !defined( WW_LANDSPEC_NONE )
+		if ( landLodTex.w > 0.5 && landBandV > 0.0 ) {	// lane LANDSPEC2: toward the detail normal in its own frame
+			vec2 dd = textureGrad( LandLodDetail, landBandW * 0.00035, landWdx * 0.00035, landWdy * 0.00035 ).rg * 2.0 - 1.0;
+			vec3 d = vec3( dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) );
+			vec3 t1 = normalize( cross( normal, cross( normal, vec3( 1.0, 0.0, 0.0 ) ) ) );
+			vec3 t2 = normalize( cross( normal, t1 ) );
+			normal = normalize( mix( normal, vec3( dot( t1, d ), dot( t2, d ), dot( normalize( normal ), d ) ), landBandV ) );
+		}
+#endif
 		normal = normalize( btnMatrix_norm * normal );
 	}
 	if ( !gl_FrontFacing )
@@ -603,8 +657,7 @@ void main()
 #if defined( WW_CELLLIGHTS ) && !defined( WW_LANDSPEC_NONE )
 	/* lane LANDSPEC1 (src/landlodspec.h): the game's LOD land gloss/spec on the far ground, and on the near ground
 	 * lerped in from 1.7 to 2.35 cells off the camera cell's centre (its land-LOD blend) */
-	float landLodV = landLod.x > 1.5 ? 1.0 : ( landLod.x > 0.5
-		? 1.0 - clamp( ( landLodK.z - distance( cellWorldPos( -ViewDir ).xy, landLod.yz ) ) * landLodK.w, 0.0, 1.0 ) : 0.0 );
+	float landLodV = landLod.x > 1.5 ? 1.0 : landBandV;	// lane LANDSPEC2: the band's v, worked out with the albedo
 	smoothness = mix( smoothness, landLodK.x, landLodV );
 	specMask = mix( specMask, landLodK.y, landLodV );
 #elif defined( WW_CELLLIGHTS )

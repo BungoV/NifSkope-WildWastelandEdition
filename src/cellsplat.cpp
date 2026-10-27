@@ -614,7 +614,35 @@ QHash<const void *, QHash<int, QString>> & groundSpecDocs()
 	static QHash<const void *, QHash<int, QString>> d;
 	return d;
 }
+struct LandOrigin
+{
+	QString ws;
+	float x = 0.0f, y = 0.0f;
+};
+QHash<const void *, LandOrigin> & landOrigins()
+{
+	static QHash<const void *, LandOrigin> d;
+	return d;
+}
 } // namespace
+
+void wwCellLandOrigin( const void * nif, const QString & ws, float ox, float oy )
+{
+	QMutexLocker lock( &landMutex() );
+	landOrigins().insert( nif, { ws, ox, oy } );
+}
+
+bool wwCellLandOriginOf( const void * nif, QString * ws, float * ox, float * oy )
+{
+	QMutexLocker lock( &landMutex() );
+	const auto it = landOrigins().constFind( nif );
+	if ( it == landOrigins().constEnd() || it->ws.isEmpty() )
+		return false;
+	*ws = it->ws;
+	*ox = it->x;
+	*oy = it->y;
+	return true;
+}
 
 void wwCellLandBegin( const void * nif )
 {
