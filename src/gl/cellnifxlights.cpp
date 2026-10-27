@@ -23,7 +23,8 @@ int wwNifxRedOf( const QByteArray & words )
 			: t == "norelight" ? WwNifxRedNoRelight : t == "nobulbgi" ? WwNifxRedNoBulbGi
 			: t == "staticdim" ? WwNifxRedStaticDim : t == "nobulbflicker" ? WwNifxRedNoBulbFlicker
 			: t == "nolivenew" ? WwNifxRedNoLiveNew : t == "nooffkept" ? WwNifxRedNoOffKept
-			: t == "anchor800" ? WwNifxRedAnchor800 : t == "radius1lux" ? WwNifxRedRadius1Lux : 0;
+			: t == "anchor800" ? WwNifxRedAnchor800 : t == "radius1lux" ? WwNifxRedRadius1Lux
+			: t == "nofollowdefault" ? WwNifxRedNoFollowDefault : t == "darkrest" ? WwNifxRedDarkRest : 0;
 	}
 	return r;
 }
@@ -43,6 +44,7 @@ struct MeshCount
 	int placed = 0, perPlacement = 0, hero = 0, normal = 0, bulb = 0, tookOver = 0, niLight = 0, nodeMiss = 0;
 	int followsOn = 0, followsUnbound = 0, warnings = 0;
 	int dimmed = 0, sequences = 0;	// lane NIFXLIGHT2: lights a NiLight's dimmer scaled; dimmer sequences bound to them
+	int followsSole = 0, trackLit = 0;	// lane NIFXFIX2: lights that follow the mesh's only NiLight; dark still dimmers a track lights
 	QString state;
 };
 
@@ -53,6 +55,20 @@ const WwNifxNode * findNode( const WwNifxModel & m, const std::string & name, bo
 		if ( ( !lightOnly || x.niLight ) && x.name.compare( n, Qt::CaseInsensitive ) == 0 )
 			return &x;
 	return nullptr;
+}
+
+// lane NIFXFIX2: the mesh's only NiLight when a track plays it (two or more NiLights: no default, the file must name one)
+const WwNifxNode * soleTrackedLight( const WwNifxModel & m )
+{
+	const WwNifxNode * one = nullptr;
+	for ( const WwNifxNode & x : m.nodes ) {
+		if ( !x.niLight )
+			continue;
+		if ( one )
+			return nullptr;
+		one = &x;
+	}
+	return one && one->track ? one : nullptr;
 }
 
 void apply3( const float m[3][4], const double v[3], bool point, double out[3] )
@@ -112,9 +128,21 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 			const WwNifxNode * dimNode = x.hasFollows ? findNode( m, x.follows, true ) : x.hasNode && node->niLight ? node : nullptr;
 			if ( x.hasFollows && c.placed == 1 )
 				( dimNode ? c.followsOn : c.followsUnbound )++;
-			const float dim = dimNode && !( red & WwNifxRedNoFollow ) ? dimNode->dimmer : 1.0f;
+			/* lane NIFXFIX2: a light that names no NiLight follows the mesh's own state (spec: the On/Off sequences); with
+			 * one NiLight that a track plays there is only one state to follow, so it does (it stayed steady before) */
+			if ( !dimNode && !x.hasFollows && !( red & WwNifxRedNoFollowDefault ) ) {
+				dimNode = soleTrackedLight( m );
+				c.followsSole += dimNode && c.placed == 1;
+			}
+			float dim = dimNode && !( red & WwNifxRedNoFollow ) ? dimNode->dimmer : 1.0f;
 			// lane NIFXLIGHT3: the NiLight's dimmer over time, played by the World animation row (celllights.cpp)
 			std::shared_ptr<const WwNifxDimTrack> track = dimNode && !( red & ( WwNifxRedNoFollow | WwNifxRedStaticDim ) ) ? dimNode->track : nullptr;
+			/* lane NIFXFIX2: a NiLight dark when still (Dimmer 0, no On sequence) that a track plays: the values are the
+			 * full-on light, so the colour holds dimmer 1 and the track scales it per frame (it was dark and never played) */
+			if ( track && !( dim > 0.0f ) && !( red & WwNifxRedDarkRest ) ) {
+				dim = 1.0f;
+				c.trackLit += c.placed == 1;
+			}
 			if ( c.placed == 1 && dimNode ) {
 				c.dimmed += dim != 1.0f;
 				c.sequences += dimNode->sequences;
@@ -255,6 +283,9 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 		if ( c.dimmed || c.sequences )	// lane NIFXLIGHT2
 			census->append( QStringLiteral( "nifx lights: %1: %2 lights scaled by a NiLight dimmer, %3 dimmer sequences bound" )
 				.arg( it.key() ).arg( c.dimmed ).arg( c.sequences ) );
+		if ( c.followsSole || c.trackLit )	// lane NIFXFIX2
+			census->append( QStringLiteral( "nifx lights: %1: %2 lights follow the mesh's only NiLight (no follows named), "
+				"%3 dark still dimmers lit for their track" ).arg( it.key() ).arg( c.followsSole ).arg( c.trackLit ) );
 	}
 	for ( auto it = fileWarn.cbegin(); it != fileWarn.cend(); ++it )
 		for ( const QString & w : it.value() )

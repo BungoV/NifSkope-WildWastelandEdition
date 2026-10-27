@@ -35,7 +35,10 @@ enum WwNifxRed
 	WwNifxRedNoOffKept = 8192,	//!< "nooffkept": start-off placed lights kept only when a .nifx was found at the build
 	// lane NIFXCAL1
 	WwNifxRedAnchor800 = 16384,	//!< "anchor800": 800 lm is fade 1.0 again (the guess before the census)
-	WwNifxRedRadius1Lux = 32768	//!< "radius1lux": the radius law reaches 1 lux again (69.99 per sqrt candela)
+	WwNifxRedRadius1Lux = 32768,	//!< "radius1lux": the radius law reaches 1 lux again (69.99 per sqrt candela)
+	// lane NIFXFIX2
+	WwNifxRedNoFollowDefault = 65536,	//!< "nofollowdefault": a light naming no NiLight ignores the mesh's only animated one
+	WwNifxRedDarkRest = 131072	//!< "darkrest": a NiLight dark when still stays dark although a track plays it
 };
 int wwNifxRedOf( const QByteArray & words );
 //! lane NIFXLIGHT2: WW_NIFX_LIGHTS_RED as bits, read live (src/gl/celllights.cpp)

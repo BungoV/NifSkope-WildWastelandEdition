@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane NIFXFIX2 (2026-10-27, branch nifxfix2-20261027): mesh lights no longer flood the street; flashers flash
+
+- **Orange street (Memory Den, night):** carries lane NIFXCAL1 (merged here): an 800 lm `.nifx` bulb now reaches
+  120 units (vanilla ceiling lamps: 113), not 558, and 637 lm is fade 1. Offline over the shot's 76 drawn lights:
+  the street got 46.95x vanilla's light on 44.6% of the ground; now 0.79x on 9.9% (vanilla 12.4%). Reds `radius1lux`,
+  `anchor800` (WW_NIFX_LIGHTS_RED, live).
+- **Dimmer with no effect:** a `.nifx` light that names no `NiLight` now follows the mesh's only `NiLight` when its
+  dimmer is animated (`WallEmergencyLight01FlashOmni`'s Bulb and Glow flash with it). A `NiLight` that rests at
+  Dimmer 0 and is animated is lit at full and scaled by its keys (it was dark and never played). Census line
+  `N lights follow the mesh's only NiLight (no follows named), M dark still dimmers lit for their track`.
+  Reds `nofollowdefault`, `darkrest` (live). Memory Den itself has no animated NiLight, so its dimmer rows stay equal.
+- **Test:** tests/nifxfix (street reach and brightness against the vanilla census; the flasher at 0.5/1.0/1.5 s;
+  two NiLights or an untracked one stay steady).
+
 ## Lane LODMNAME1 (2026-10-27, branch lodmname1-20261027): far-LOD texture arrays lose the family word
 
 - **One set per size:** the far-LOD texture arrays are now `<ws>.LodgenArrays.<WxH>` and
