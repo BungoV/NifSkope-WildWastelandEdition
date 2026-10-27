@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane PARTICLEHDR1 (2026-10-27, branch parthdr1-20261027): where cell particles draw against the tone map
+
+- **Measured (code order):** cell particles already draw INSIDE the linear (HDR) frame, before the tone map:
+  paintGL `wwCellHdrBegin` -> `scene->draw()` -> `Scene::drawDeferredShapes` (particles last of the blended pass) ->
+  `wwCellHdrEnd` (measure + bloom read the frame, then the tone quads). In that frame a particle writes linear light
+  (`cellIsLinear`) and stencil 1, so the exposure/bloom measure and tone-map mode 0 take it like any cell surface.
+  No move and no row: an "on" would draw the same picture as "off".
+- **Why it looked otherwise:** `cell particles drawn: ... plain frame` is said once per system at its FIRST draw,
+  which comes before the first linear frame opens, so every log read "plain". New line, once per frame kind:
+  `cell particles frame: first drawn into the <plain|hdr linear|measure> frame (...)`.
+- **Not in the linear frame:** particles of Loaded NIFs beside a cell (their own scenes draw after the tone map), and
+  the red `perfrag` / refused-HDR path (each fragment tone-mapped as drawn, no bloom).
+
 ## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
 
 - **Why:** the far objects, far cards and far rings past ring 0 were cut once, round the open's centre. The stream
