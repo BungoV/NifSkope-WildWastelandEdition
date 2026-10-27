@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CLOUDLOOK1 (2026-10-27, branch cloudlook1-20261027): the sky's air no longer veils the volume clouds
+
+- **Air top** (src/gl/cellvolair.cpp vaShapesTop): the Volumetric Air's top is the highest visible shape's own
+  sphere top (far LOD left out, never above the scene sphere), not the scene union sphere's (~1 km over the ground,
+  optical depth ~2.7 straight up under Overcast: one grey layer over the clouds). Echo `cell air top: ...`.
+  The sun's transmittance (wwVolAirSunT) reads the same top, so fog dims sunlit surfaces a little less.
+  Red WW_CELL_AIR_RED=spheretop.
+- **Cloud tints** (src/gl/cloudvol.cpp): the three cvTint names are literals; heap names all hit slot 0 through the
+  uniform cache keyed on the name pointer. Red WW_CLOUDVOL_RED=tintname.
+- Offline gates: tests/spells/cloudveil_check.py (T(30 deg) 0.78, red spheretop 0.0017) and
+  tests/spells/uniform_name_check.py (0 heap names; origin/main had 1).
+
 ## Lane WATERLOOK1 (2026-10-27, branch waterlook1-20261027): the wind's wave spectrum on the baked water
 
 - **Ocean waves row** (Show menu, WW/CellWaterOcean; pin WW_CELL_WATER_OCEAN). The wind's wave spectrum (JONSWAP with
