@@ -514,7 +514,7 @@
 { "WW_CELL_WATER_BAKEDUMP", 1, "src/cellview.cpp:6309 cellBuild | read while the cell document is built" },
 { "WW_CELL_WATER_BAKEDUMP_PROBES", 1, "src/cellview.cpp:6310 cellBuild | read while the cell document is built" },
 { "WW_CELL_WATER_CAUSTICS", 0, "src/gl/celllooks.cpp:231 pinOf | re-read per frame or per call (a)" },
-{ "WW_CELL_WATER_CAUSTICS_RED", 0, "src/gl/cellwater.cpp:250 wwCellWaterUniforms | re-read per frame or per call (a)" },
+{ "WW_CELL_WATER_CAUSTICS_RED", 0, "src/gl/cellwater.cpp:252 wwCellWaterUniforms | re-read per frame or per call (a)" },
 { "WW_CELL_WATER_DEPTH", 0, "src/gl/celllooks.cpp:227 pinOf | re-read per frame or per call (a)" },
 { "WW_CELL_WATER_DEPTH_RED", 0, "src/gl/cellwater.cpp:246 wwCellWaterUniforms | re-read per frame or per call (a)" },
 { "WW_CELL_WATER_DUMP", 1, "src/cellview.cpp:7325 cellBuild | read while the cell document is built" },

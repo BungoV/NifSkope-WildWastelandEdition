@@ -53,36 +53,35 @@ bool wwCellWaterUniforms( Scene * scene, int block, int firstTextureUnit );
 bool wwCellWaterWritesLinear();
 //! Lane WATER2: a water surface of this scene draws as water and its WATR's SSR flag is set (cellssr.h).
 bool wwCellWaterSsrWanted( Scene * scene );
-/*! lane WATERDEPTH1 (2026-10-27): the Water depth colour row (WwLook::WaterDepth, pin WW_CELL_WATER_DEPTH) swaps in
- *  fo4_waterdepth.prog: the depth colour from the baked bed depth (res/shaders/water_depth.glsl) where the frame has
+/*! lane WATERCOMBINE1 (2026-10-27): every water look row below draws through ONE twin, fo4_waterlook.prog (all four
+ *  defines compiled in), and each look reads its own uniform (waterDepthOn, waterCauOn, waterShoreOn bits 1 edge and
+ *  2 foam, waterWavesOn), so any set of ticks draws all of them together. All rows off = fo4_water.prog, its machine
+ *  code unchanged. Probes 32/33 depth, 34 swell, 35/36 caustics, 37 shore (fo4_water.frag's header).
+ *  lane WATERDEPTH1 (2026-10-27): the Water depth colour row (WwLook::WaterDepth, pin WW_CELL_WATER_DEPTH):
+ *  the depth colour from the baked bed depth (res/shaders/water_depth.glsl) where the frame has
  *  no scene behind the water, pure water's absorption (Pope & Fry 1997) on the game's ramp, and the far colour
  *  letting the body through by 1 - F. Off = fo4_water.prog as before. Red WW_CELL_WATER_DEPTH_RED=flat | noabsorb |
  *  nearest; probes WW_CELL_WATER_PROBE=32 (the depth used) and 33 (who wins). */
-/*! lane WATERCAUSTICS1 (2026-10-27): the Water caustics row (WwLook::WaterCaustics, pin WW_CELL_WATER_CAUSTICS) swaps
- *  in fo4_watercaustics.prog (with the depth row: fo4_waterdepthcaustics.prog): the sun's caustics on the drawn bed
+/*! lane WATERCAUSTICS1 (2026-10-27): the Water caustics row (WwLook::WaterCaustics, pin WW_CELL_WATER_CAUSTICS):
+ *  the sun's caustics on the drawn bed
  *  under a baked water body (res/shaders/water_caustics.glsl), on the world clock, faded by depth, pure water's
  *  absorption and the sun's cascades. Red WW_CELL_WATER_CAUSTICS_RED=nofade | noshadow | still | flat; probes
  *  WW_CELL_WATER_PROBE=35 (the factor / 2) and 36 (focus / 8, envelope, sun share). */
 const char * wwCellWaterProgram();
-//! any water program (the rows' twins or the default)
+//! lane WATERCOMBINE1: any water look row is on (the water draws with fo4_waterlook.prog)
+bool wwCellWaterLookOn();
+//! any water program (the looks' twin or the default)
 inline bool wwIsCellWaterProgramName( std::string_view n )
 {
-	return n == "fo4_water.prog" || n == "fo4_waterdepth.prog" || n == "fo4_watercaustics.prog"
-		|| n == "fo4_waterdepthcaustics.prog";
+	return n == "fo4_water.prog" || n == "fo4_waterlook.prog";
 }
 //! One census line: how many shapes and records this document registered.
 QString wwCellWaterEcho( const void * nif );
-/*! Lane WATERSHORE1: the program a water shape draws with. fo4_water.prog while the Water soft edge and Shore foam
- *  rows are both off (the program as before, same machine code), else fo4_watershore.prog: the same shader with
- *  res/shaders/water_shore.glsl compiled in, read from the baked shore plane (cellwaterinfo.h), near and far alike.
+/*! Lane WATERSHORE1: the Water soft edge and Shore foam rows: res/shaders/water_shore.glsl in fo4_waterlook.prog,
+ *  read from the baked shore plane (cellwaterinfo.h), near and far alike.
  *    WW_CELL_WATER_EDGE=0|1, WW_CELL_WATER_FOAM=0|1   the rows' pins (celllooks.h)
  *    WW_CELL_WATER_SHORE_RED=nearest                  both read the nearest 128 u texel only (the staircase)
- *    WW_CELL_WATER_PROBE=32                           (edge, foam, shore distance / 1024) at each water pixel */
-const char * wwCellWaterProgramName();
-//! fo4_water.prog or its shore twin
-inline bool wwIsWaterProgramName( std::string_view n )
-{
-	return n == std::string_view( "fo4_water.prog" ) || n == std::string_view( "fo4_watershore.prog" );
-}
+ *    WW_CELL_WATER_PROBE=37                           (edge, foam, shore distance / 1024) at each water pixel
+ *                                                     (WATERCOMBINE1: was 32, which the depth probe holds) */
 
 #endif

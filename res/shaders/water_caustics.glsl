@@ -1,5 +1,5 @@
 /* lane WATERCAUSTICS1 (src/gl/cellwater.h): the sun's caustics on the bed seen through the water.
- * Only the caustic twins compile this (WW_WATER_CAUSTICS: fo4_watercaustics, fo4_waterdepthcaustics); the default
+ * Only the combined water twin compiles this (WW_WATER_CAUSTICS: fo4_waterlook); the default
  * fo4_water program is the one it always was. Applied in the water shader to the refracted scene texel (the bed),
  * the way Crest and Unity HDRP water apply theirs: only water pixels pay, and the bed is lit by the scene already.
  *   waves     four directional ripples of our own (22-57 u, 0.5-1 u high), deep-water dispersion w = sqrt( g k ),
@@ -19,6 +19,7 @@
 uniform float waterCauTime;	// the world clock mod kWwCauLoop, seconds (0 with the World animation row off)
 uniform int waterCauRed;	// 1 nofade (env 1), 2 noshadow (the shadow ignored), 3 still (time 0), 4 flat (det without H)
 uniform bool waterCauShadow;	// the sun's cascades are bound this frame (wwSunShadowWanted)
+uniform bool waterCauOn;	// lane WATERCOMBINE1: the Water caustics row (fo4_waterlook carries every water look)
 
 const float kWwCauN = 1.333;
 const float kWwCauG = 686.6;	// 9.81 m/s^2 in units ( / 0.0142875 )

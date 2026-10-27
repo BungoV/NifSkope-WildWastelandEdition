@@ -1,4 +1,4 @@
-// lane WATERSHORE1: the shore look of fo4_watershore.prog from the baked shore plane (water_info.glsl), the same for
+// lane WATERSHORE1: the shore look of fo4_waterlook.prog from the baked shore plane (water_info.glsl), the same for
 // near and far water. The plane has no land side (every dry texel reads 255), so a dry texel counts as distance 0:
 // the field, bilinear between texel centres, then crosses the waterline halfway from a dry to a wet centre.
 uniform int waterShoreOn;	// 1 the soft edge (Water soft edge row), 2 the foam (Shore foam row)

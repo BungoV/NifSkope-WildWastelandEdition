@@ -1,0 +1,4 @@
+# fo4_water with every water look (lanes WATERDEPTH1, WATERCAUSTICS1, WATERSHORE1, WATERWAVES1; folded by WATERCOMBINE1).
+# Picked by name while any water look row is on (src/gl/cellwater.cpp wwCellWaterProgram); each look has its own uniform.
+
+shaders fo4_default.vert fo4_waterlook.frag

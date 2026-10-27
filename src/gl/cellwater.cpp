@@ -242,11 +242,13 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	prog->uni4fv( "waterSky", sk, 3 );
 	prog->uni1i( "waterRed", s.red );
 	prog->uni1i( "waterProbe", s.probe );
-	{	// lane WATERDEPTH1: its red (only fo4_waterdepth reads it)
+	{	// lane WATERDEPTH1: its red and (WATERCOMBINE1) its row (only fo4_waterlook reads them)
 		WW_SWITCH_STATIC( QByteArray, dr, wwEnv( "WW_CELL_WATER_DEPTH_RED" ).trimmed() );
 		prog->uni1i( "waterDepthRed", dr == "flat" ? 1 : dr == "noabsorb" ? 2 : dr == "nearest" ? 3 : 0 );
+		prog->uni1b( "waterDepthOn", wwLookOn( WwLook::WaterDepth ) );
 	}
-	if ( prog->uniLocation( "waterCauTime" ) >= 0 ) {	// lane WATERCAUSTICS1: the caustic twins only
+	if ( prog->uniLocation( "waterCauTime" ) >= 0 ) {	// lane WATERCAUSTICS1: fo4_waterlook only
+		prog->uni1b( "waterCauOn", wwLookOn( WwLook::WaterCaustics ) );	// lane WATERCOMBINE1: its own row
 		WW_SWITCH_STATIC( QByteArray, cr, wwEnv( "WW_CELL_WATER_CAUSTICS_RED" ).trimmed() );
 		prog->uni1i( "waterCauRed", cr == "nofade" ? 1 : cr == "noshadow" ? 2 : cr == "still" ? 3 : cr == "flat" ? 4 : 0 );
 		// the water's own clock (its noise scroll's): pinned by WW_CELL_WORLDANIM_TIME, 0 with World animation off;
@@ -319,7 +321,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	prog->uni1b( "waterSsrOn", ssrOn );
 	unit += wwCellWaterInfoUniforms( scene, unit );	// lane WATERDATA1: units 7..9 when the program reads them
 	if ( prog->uniLocation( "waterShoreOn" ) >= 0 ) {
-		/* lane WATERSHORE1 (fo4_watershore.prog, water_shore.glsl). Engineering choices in world units, no game value
+		/* lane WATERSHORE1 (fo4_waterlook.prog, water_shore.glsl). Engineering choices in world units, no game value
 		 * exists (the game draws no shore foam): the field reads 64 at the waterline (half a 128 u texel, a dry texel
 		 * counts 0), the edge fades over 256 u, the foam band is 192 u wide with soft 0.25 noise edges; crests 96 u
 		 * apart every 6 s, 0.3 of the foam between them, 0.85 opaque (Sea of Thieves 2018, Far Cry 5 2018 shapes) */
@@ -333,7 +335,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1f( "waterShoreTime", wwCellWorldAnimOn() ? float( wwCellWorldSeconds() ) : 0.0f );
 	}
 	if ( prog->uniLocation( "waterWavesOn" ) >= 0 ) {
-		/* lane WATERWAVES1 (fo4_waterwaves.prog, water_waves.glsl). Engineering choices in game units (70 u = 1 m); the
+		/* lane WATERWAVES1 (fo4_waterlook.prog, water_waves.glsl). Engineering choices in game units (70 u = 1 m); the
 		 * game draws no swell to match. Wavelength = the body's length (sqrt of its baked area) / a divisor, clamped:
 		 * lakes 1.5-8 m (/12), rivers 1-4 m (/16), the sea one 24 m swell. Total steepness a k 0.03 / 0.015 / 0.045:
 		 * calm water, far under the 0.44 breaking limit. It fades in from the waterline (64 u) over half a wavelength;
@@ -370,20 +372,19 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 
 const char * wwCellWaterProgram()
 {
-	const bool cau = wwLookOn( WwLook::WaterCaustics );	// lane WATERCAUSTICS1: its twins
-	if ( wwLookOn( WwLook::WaterDepth ) )
-		return cau ? "fo4_waterdepthcaustics.prog" : "fo4_waterdepth.prog";
-	return cau ? "fo4_watercaustics.prog" : "fo4_water.prog";
+	// lane WATERCOMBINE1: one twin carries every water look, each switched by its own uniform (wwCellWaterUniforms)
+	return wwCellWaterLookOn() ? "fo4_waterlook.prog" : "fo4_water.prog";
+}
+
+bool wwCellWaterLookOn()
+{
+	return wwLookOn( WwLook::WaterDepth ) || wwLookOn( WwLook::WaterCaustics ) || wwLookOn( WwLook::WaterSoftEdge )
+		|| wwLookOn( WwLook::ShoreFoam ) || wwLookOn( WwLook::WaterSwell );
 }
 
 bool wwCellWaterWritesLinear()
 {
 	return st().linear;
-}
-
-const char * wwCellWaterProgramName()
-{
-	return wwLookOn( WwLook::WaterSoftEdge ) || wwLookOn( WwLook::ShoreFoam ) ? "fo4_watershore.prog" : "fo4_water.prog";
 }
 
 QString wwCellWaterEcho( const void * nif )
@@ -399,5 +400,26 @@ QString wwCellWaterEcho( const void * nif )
 		.arg( it->bodies.size() ).arg( names.join( QLatin1String( ", " ) ) )
 		.arg( s.pinOff ? ( s.pinned ? QStringLiteral( ", pinned off (WW_CELL_WATER=0)" ) : QStringLiteral( ", off (row)" ) )
 			: QString() )
-		.arg( QLatin1String( wwCellWaterProgram() ) );	// lane WATERDEPTH1
+		.arg( QLatin1String( wwCellWaterProgram() ) )	// lane WATERDEPTH1
+		// lane WATERSHORE1: said only when a shore look is on, so the census line with both rows off is as before
+		+ ( wwLookOn( WwLook::WaterSoftEdge ) || wwLookOn( WwLook::ShoreFoam )
+			? QStringLiteral( ", shore look: edge %1, foam %2%3" )
+				.arg( wwLookOn( WwLook::WaterSoftEdge ) ? QLatin1String( "on" ) : QLatin1String( "off" ) )
+				.arg( wwLookOn( WwLook::ShoreFoam ) ? QLatin1String( "on" ) : QLatin1String( "off" ) )
+				.arg( s.shoreRed ? QLatin1String( " (red nearest)" ) : QLatin1String( "" ) )
+			: QString() )
+		// lane WATERWAVES1: said only while the swell is on, so the census line with the row off is as before
+		+ ( wwLookOn( WwLook::WaterSwell )
+			? QStringLiteral( ", swell on%1" ).arg( s.wavesRed == 1 ? QLatin1String( " (red flat)" )
+				: s.wavesRed == 2 ? QLatin1String( " (red noshore)" ) : s.wavesRed == 4 ? QLatin1String( " (red alias)" )
+				: QLatin1String( "" ) )
+			: QString() )
+		// lane WATERCOMBINE1: which looks the one twin draws this frame
+		+ ( wwCellWaterLookOn() ? QStringLiteral( ", looks:%1%2%3%4%5" )
+				.arg( wwLookOn( WwLook::WaterDepth ) ? QLatin1String( " depth" ) : QLatin1String( "" ) )
+				.arg( wwLookOn( WwLook::WaterCaustics ) ? QLatin1String( " caustics" ) : QLatin1String( "" ) )
+				.arg( wwLookOn( WwLook::WaterSoftEdge ) ? QLatin1String( " edge" ) : QLatin1String( "" ) )
+				.arg( wwLookOn( WwLook::ShoreFoam ) ? QLatin1String( " foam" ) : QLatin1String( "" ) )
+				.arg( wwLookOn( WwLook::WaterSwell ) ? QLatin1String( " swell" ) : QLatin1String( "" ) )
+			: QString() );
 }

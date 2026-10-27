@@ -1,5 +1,5 @@
 /* lane WATERDEPTH1 (src/gl/cellwater.h): the water's depth colour from the TRUE vertical bed depth.
- * Only fo4_waterdepth.frag compiles this (WW_WATER_DEPTH); the default fo4_water program is the one it always was.
+ * Only fo4_waterlook.frag compiles this (WW_WATER_DEPTH); the default fo4_water program is the one it always was.
  *   bed depth  the baked .lodl depth (water_info.glsl), bilinear over the 4 texels around P (128 u a texel); a dry
  *              texel counts 0 (the shore), a wet texel at or under the ground (sloped / placed water) counts 0.
  *              Known only when a tap is wet and P lies within 128 u of that body's height (else: a placed water
@@ -17,6 +17,7 @@
  * For later lanes (WATERCAUSTICS1): wwWaterBedDepth() is the vertical depth, wwWaterAbsorb() pure water's T. */
 
 uniform int waterDepthRed;	// 1 flat (the bed depth read as 0), 2 noabsorb (no pure-water term), 3 nearest (no bilinear)
+uniform bool waterDepthOn;	// lane WATERCOMBINE1: the Water depth colour row (fo4_waterlook carries every water look)
 
 const float kWwUnitMetres = 0.0142875;	// metres a game unit
 const vec3 kWwPureWater = vec3( 0.340, 0.0565, 0.00922 );	// Pope & Fry 1997, absorption 1/m at 650, 550, 450 nm

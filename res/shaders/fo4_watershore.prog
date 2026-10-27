@@ -1,4 +1,0 @@
-# The water with the shore look (lane WATERSHORE1; src/gl/cellwater.h). No conditions: Renderer::setupProgram takes it
-# by name (wwCellWaterProgramName) instead of fo4_water.prog while the Water soft edge or Shore foam row is on.
-
-shaders fo4_default.vert fo4_watershore.frag

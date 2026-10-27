@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERCOMBINE1 (2026-10-27, branch watercombine1-20261027): every water look draws together, one program
+
+- **Merged** watershore1 (Water soft edge + Shore foam) and waterwaves1 (Water swell) onto watercaustics1 (depth +
+  caustics). Before, each look had its own twin of fo4_water.frag and the picker chose one, so with two families
+  ticked only one drew (the shore and swell twins were never picked by the renderer's call at all).
+- **One twin, fo4_waterlook.prog** (fo4_waterlook.frag: all four defines + `#include "fo4_water.frag"`), picked while
+  any water row is on (cellwater.cpp wwCellWaterProgram / wwCellWaterLookOn). Each look reads its own uniform:
+  waterDepthOn (new), waterCauOn (new), waterShoreOn (bit 1 edge, bit 2 foam), waterWavesOn. The five old twins
+  (fo4_water{depth,caustics,depthcaustics,shore,waves}) are gone; wwIsCellWaterProgramName knows the two names.
+- **All rows off = fo4_water.prog, machine code unchanged** (NVIDIA binaries equal origin/main's and 8f31226e's in all
+  3 modes and the info-probe build, but the run stamp and the 8-byte source hash).
+- **Probes renumbered:** the shore probe was 32, which the depth probe already held: shore is now 37
+  (WW_CELL_WATER_PROBE=37: edge, foam, distance / 1024). Map: 28-31 water info, 32/33 depth, 34 swell, 35/36
+  caustics, 37 shore.
+- **Census line** adds `, looks: depth caustics edge foam swell` (the rows on) while any look is on.
+- **Gates (offline, the whole program through the driver, notes/watercombine1/tools/fullprog.py):** each single row
+  equals its lane's own twin (0 pixels over 1e-5; ~1200 pixels differ by <= 8e-6, compiler scheduling of a different
+  program), every one of the 31 row sets shows each ticked row (>= 50 px), the old picker and a "one family wins"
+  picker both fail exactly the sets they cannot draw; 300 of 300 programs x modes link.
+- **Cost (1080p, full screen of lake water):** fo4_water 0.129 ms; all four on 0.417 ms (+0.29 ms); a single row
+  through the combined program costs 0.02-0.05 ms more than its old twin did.
+
 ## Lane WATERCAUSTICS1 (2026-10-27, branch watercaustics1-20261027): sunlight caustics on the bed of shallow water
 
 - **Show row "Water caustics"** (WW/CellWaterCaustics, pin WW_CELL_WATER_CAUSTICS, live, ships off). On, the water draws

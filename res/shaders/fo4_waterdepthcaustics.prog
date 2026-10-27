@@ -1,4 +1,0 @@
-# fo4_water with the bed-depth colour and the bed caustics (lanes WATERDEPTH1 + WATERCAUSTICS1; src/gl/cellwater.h).
-# Picked by name while both the Water depth colour and the Water caustics rows are on.
-
-shaders fo4_default.vert fo4_waterdepthcaustics.frag
