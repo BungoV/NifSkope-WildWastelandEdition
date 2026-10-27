@@ -15,6 +15,8 @@
 #include "cloudmap.h"	// lane WATERREFL1: the weather's clouds in the reflected sky
 #include "cellocean.h"	// lane WATERLOOK1: the wind's wave spectrum
 #include "gl/glscene.h"
+#include "gl/glshape.h"
+#include "model/nifmodel.h"
 #include "gl/gltex.h"
 #include "gl/renderer.h"
 
@@ -29,6 +31,7 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include <array>
 
 namespace
 {
@@ -45,6 +48,9 @@ struct WaterDoc
 	QVector<WaterBody> bodies;
 	QHash<quint32, int> byForm;
 	QHash<int, int> shapeBody;	// written shape's block -> index into bodies
+	// lane WATERUNDER1: the shapes' world bounds (x0, y0, x1, y1, top z, body), measured once per change of shapeBody
+	quint64 gen = 1, planesGen = 0;
+	QVector<std::array<float, 6>> planes;
 };
 
 struct WaterState
@@ -216,20 +222,25 @@ void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec )
 		i = it.value();
 	}
 	d.shapeBody.insert( block, i );
+	d.gen++;
 }
 
 void wwCellWaterForget( const void * nif, int block )
 {
 	auto d = st().docs.find( nif );
-	if ( d != st().docs.end() )
+	if ( d != st().docs.end() ) {
 		d->shapeBody.remove( block );
+		d->gen++;
+	}
 }
 
 void wwCellWaterRemap( const void * nif, const WwBlockMap & m )
 {
 	auto d = st().docs.find( nif );
-	if ( d != st().docs.end() )
+	if ( d != st().docs.end() ) {
 		wwRemapKeys( d->shapeBody, m );
+		d->gen++;
+	}
 }
 
 bool wwCellWaterOn()
@@ -529,6 +540,64 @@ bool wwCellWaterLookOn()
 		|| wwLookOn( WwLook::ShoreFoam ) || wwLookOn( WwLook::WaterSwell ) || wwLookOn( WwLook::WaterRefl )
 		|| wwLookOn( WwLook::WaterGlint )	// lane WATERREFL1
 		|| wwLookOn( WwLook::WaterOcean );	// lane WATERLOOK1
+}
+
+bool wwCellWaterRecordOf( const void * nif, quint32 form, WwWaterRecord & rec )
+{
+	const WaterState & s = st();
+	const auto it = s.docs.constFind( nif );
+	if ( it == s.docs.constEnd() || it->bodies.isEmpty() )
+		return false;
+	const int i = it->byForm.value( form, 0 );
+	rec = it->bodies[i].rec;
+	return true;
+}
+
+bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDepth, float & height, WwWaterRecord & rec )
+{
+	WaterState & s = st();
+	if ( !scene || !scene->nifModel )
+		return false;
+	const auto it = s.docs.find( scene->nifModel );
+	if ( it == s.docs.end() || it->shapeBody.isEmpty() )
+		return false;
+	WaterDoc & d = *it;
+	if ( d.planesGen != d.gen ) {
+		d.planes.clear();
+		bool whole = true;
+		for ( auto b = d.shapeBody.constBegin(); b != d.shapeBody.constEnd(); ++b ) {
+			auto * sh = dynamic_cast<Shape *>( scene->findNode( scene->nifModel, scene->nifModel->getBlockIndex( b.key() ) ) );
+			if ( !sh || sh->verts.isEmpty() ) {
+				whole = false;	// not built yet: measured again next frame
+				continue;
+			}
+			const Transform & w = sh->worldTrans();
+			std::array<float, 6> p = { 1e30f, 1e30f, -1e30f, -1e30f, -1e30f, float( b.value() ) };
+			for ( const Vector3 & v : sh->verts ) {
+				const Vector3 q = w * v;
+				p[0] = std::min( p[0], q[0] );
+				p[1] = std::min( p[1], q[1] );
+				p[2] = std::max( p[2], q[0] );
+				p[3] = std::max( p[3], q[1] );
+				p[4] = std::max( p[4], q[2] );
+			}
+			d.planes.append( p );
+		}
+		if ( whole )
+			d.planesGen = d.gen;
+	}
+	int best = -1;
+	for ( int k = 0; k < d.planes.size(); k++ ) {
+		const auto & p = d.planes[k];
+		if ( x >= p[0] && x <= p[2] && y >= p[1] && y <= p[3] && p[4] > z && p[4] - z <= maxDepth
+			&& ( best < 0 || p[4] < d.planes[best][4] ) )
+			best = k;
+	}
+	if ( best < 0 )
+		return false;
+	height = d.planes[best][4];
+	rec = d.bodies[int( d.planes[best][5] )].rec;
+	return true;
 }
 
 bool wwCellWaterWritesLinear()

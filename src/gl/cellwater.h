@@ -89,5 +89,11 @@ QString wwCellWaterEcho( const void * nif );
  *    WW_CELL_WATER_SHORE_RED=nearest                  both read the nearest 128 u texel only (the staircase)
  *    WW_CELL_WATER_PROBE=37                           (edge, foam, shore distance / 1024) at each water pixel
  *                                                     (WATERCOMBINE1: was 32, which the depth probe holds) */
+//! Lane WATERUNDER1: the registered record of WATR `form` in this document (else its first one); false = none.
+bool wwCellWaterRecordOf( const void * nif, quint32 form, WwWaterRecord & rec );
+/*! Lane WATERUNDER1: the lowest registered water surface above world (x, y, z) whose bounds hold (x, y) and that is
+ *  at most `maxDepth` above z: its height and record. The bounds (shape verts x world transform) are cached per
+ *  document and re-measured when its water shapes change. */
+bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDepth, float & height, WwWaterRecord & rec );
 
 #endif

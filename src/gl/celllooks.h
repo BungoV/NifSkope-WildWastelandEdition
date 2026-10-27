@@ -54,6 +54,7 @@ enum class WwLook : int
 	WaterRefl,			// WATERREFL1: physical Fresnel, scene reflections on every body, far water = near law (WW_CELL_WATER_REFL)
 	WaterGlint,			// WATERREFL1: the sun's glare from the wave slopes' roughness, no fixed sparkle (WW_CELL_WATER_GLINT)
 	WaterOcean,			// WATERLOOK1: the wind's wave spectrum (FFT) replaces the baked bodies' normal maps (WW_CELL_WATER_OCEAN)
+	Underwater,			// WATERUNDER1: the camera under a water surface sees the WATR's underwater fog (WW_CELL_UNDERWATER)
 	Count
 };
 

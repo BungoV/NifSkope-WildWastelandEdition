@@ -159,6 +159,7 @@ private:
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellpasstime.h"	// lane PERF1
 #include "gl/cellocean.h"	// lane WATERLOOK1
+#include "gl/cellunderwater.h"	// lane WATERUNDER1
 #include "gl/cloudvol.h"	// lane CLOUD2B: the volume clouds' depth test
 
 // NOTE: The FPS define is a frame limiter,
@@ -4304,6 +4305,7 @@ void GLView::paintGL()
 				PassTime::end( PassTime::FarCards );
 				wwCellLensFlareGrab( scene );	// lane LIGHTS3: the opaque depth for the flares' occlusion test
 				wwCloudVolSceneDepth( scene );	// lane CLOUD2B: the depth the volume clouds test against
+				wwCellUnderwaterPass( scene );	// lane WATERUNDER1: the camera under water (no GL call off or above it)
 				PassTime::begin( PassTime::ToneMap );
 				wwCellHdrEnd( scene );
 				PassTime::end( PassTime::ToneMap );

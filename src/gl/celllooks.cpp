@@ -61,6 +61,7 @@ const LookRow kRows[] = {
 	{ "Water reflections", "WW/CellWaterRefl" },
 	{ "Water sun glare", "WW/CellWaterGlint" },
 	{ "Ocean waves", "WW/CellWaterOcean" },
+	{ "Underwater fog", "WW/CellUnderwater" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -258,6 +259,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_OCEAN" ).trimmed() );
 		return p;
 	}
+	case WwLook::Underwater: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_UNDERWATER" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -317,6 +322,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::WaterRefl: return "WW_CELL_WATER_REFL";
 	case WwLook::WaterGlint: return "WW_CELL_WATER_GLINT";
 	case WwLook::WaterOcean: return "WW_CELL_WATER_OCEAN";
+	case WwLook::Underwater: return "WW_CELL_UNDERWATER";
 	default: return "";
 	}
 }

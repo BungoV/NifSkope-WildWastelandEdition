@@ -213,11 +213,13 @@ bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * er
 	t.bodyRows = ( n + 1 + WwWaterInfoTables::kBodiesPerRow - 1 ) / WwWaterInfoTables::kBodiesPerRow;
 	t.bodies.assign( size_t( t.bodyRows ) * WwWaterInfoTables::kBodiesPerRow * 4, 0.0f );
 	t.bodies[1] = -1.0f;	// body 0: none, class -1
+	t.bodyForms.assign( size_t( n ) + 1, 0u );
 	for ( int k = 1; k <= n; k++ ) {
 		LodtWaterBody B;
 		if ( !f.waterBody( k, B ) )
 			continue;
 		bh[k] = B.waterHeight;
+		t.bodyForms[size_t( k )] = B.watrForm;
 		float * o = &t.bodies[size_t( k ) * 4];
 		o[0] = B.waterHeight;
 		o[1] = float( B.cls );
@@ -692,6 +694,38 @@ void wwCellLandShoreUniforms( Scene * scene, bool terrain )
 		prog->uni4f( "landShoreLayout", FloatVector4( float( t.tilesX ), float( t.tilesY ),
 			float( WwWaterInfoTables::kTileEdge ), float( WwWaterInfoTables::kTilesPerRow ) ) );
 	}
+}
+
+bool wwCellWaterInfoAt( const void * nif, float x, float y, WwWaterInfoHit & hit )
+{
+	hit = WwWaterInfoHit();
+	const std::shared_ptr<Job> job = st().docs.value( nif );
+	if ( !job || job->state.load( std::memory_order_acquire ) != 1 || infoRed() )
+		return false;
+	const WwWaterInfoTables & t = job->t;
+	const int E = WwWaterInfoTables::kTileEdge;
+	const double fx = std::floor( ( double( x ) - t.originX ) / t.texel ), fy = std::floor( ( double( y ) - t.originY ) / t.texel );
+	if ( fx < 0.0 || fy < 0.0 || fx >= double( t.tilesX ) * E || fy >= double( t.tilesY ) * E )
+		return true;	// off the map: dry
+	const int tx = int( fx ), ty = int( fy ), ti = ( ty / E ) * t.tilesX + tx / E;
+	const uint32_t slot = t.index[size_t( ti ) * 2];
+	uint32_t w = t.index[size_t( ti ) * 2 + 1];
+	if ( slot ) {
+		const int s = int( slot ) - 1, R = WwWaterInfoTables::kTilesPerRow;
+		w = t.atlas[size_t( ( s / R ) * E + ty % E ) * t.atlasW + ( s % R ) * E + tx % E];
+	}
+	hit.body = w & 0xFFFFu;
+	hit.shore = float( ( w >> 16 ) & 0xFFu ) * t.shoreQuantum;
+	const double code = double( w >> 24 ) / 255.0;
+	hit.depth = float( code * code * WwWaterInfoTables::kDepthMax );
+	if ( hit.body && hit.body <= uint32_t( t.bodyCount ) ) {
+		hit.height = t.bodies[size_t( hit.body ) * 4];
+		hit.cls = int( t.bodies[size_t( hit.body ) * 4 + 1] );
+		hit.form = hit.body < t.bodyForms.size() ? t.bodyForms[hit.body] : 0u;
+	} else {
+		hit.body = 0;
+	}
+	return true;
 }
 
 QString wwCellWaterInfoEcho( const void * nif )
