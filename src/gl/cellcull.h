@@ -135,6 +135,8 @@ bool wwCellDecalFadeRanges( Scene * scene, const Shape * sh, int block, std::int
 void wwCellDecalPomShape( const void * nif, int block, float scale, int passes );
 //! (scale x 0.1, the step cap clamp(passes, 16, 72)) for the shape, or false.
 bool wwCellDecalPomFor( const void * nif, int block, float & scale, float & steps );
+//! lane BINDLESSMDI1: wwCellDecalFadeRanges may draw the shape its own way (no side effect)
+bool wwCellDecalFadeHas( Scene * scene, int block );
 
 //! The shape's runs, or null (not a cell shape, or one run only).
 const std::vector<WwCullRun> * wwCellCullRuns( const void * nif, int block );

@@ -119,6 +119,8 @@ struct MainQueues
 	bool armed = false, flushing = false;
 	std::vector<Node *> q[QueueCount];
 	std::vector<Node *> walk;	// lane GPUFIX1: every taken shape in tree order, the order the flush draws
+	std::size_t at = 0;	// lane BINDLESSMDI1: the flush's place in walk
+	bool inWalk = false;
 	qint64 sizes[QueueCount] = {};
 };
 
@@ -158,6 +160,19 @@ bool mainTake( Node * shape, int queue )
 	return true;
 }
 
+Node * mainPeekNext()
+{
+	const MainQueues & m = mq();
+	return m.inWalk && m.at + 1 < m.walk.size() ? m.walk[m.at + 1] : nullptr;
+}
+
+void mainSkipNext()
+{
+	MainQueues & m = mq();
+	if ( m.inWalk && m.at + 1 < m.walk.size() )
+		m.at++;
+}
+
 void mainFlush( Scene * scene, NodeList * secondPass )
 {
 	MainQueues & m = mq();
@@ -176,8 +191,10 @@ void mainFlush( Scene * scene, NodeList * secondPass )
 				n->drawShapes( secondPass );
 		}
 	} else {
-		for ( Node * n : m.walk )
-			n->drawShapes( secondPass );
+		m.inWalk = true;	// lane BINDLESSMDI1: a multi-draw leader may draw the next shapes (mainSkipNext)
+		for ( m.at = 0; m.at < m.walk.size(); m.at++ )
+			m.walk[m.at]->drawShapes( secondPass );
+		m.inWalk = false;
 	}
 	GpuDrivenB::finish();
 	m.flushing = false;

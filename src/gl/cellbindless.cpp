@@ -26,6 +26,9 @@ bool wwFrameLog();	// gl/cellcull.cpp
 #ifndef GL_MAP_COHERENT_BIT
 #define GL_MAP_COHERENT_BIT 0x0080
 #endif
+#ifndef GL_DRAW_INDIRECT_BUFFER
+#define GL_DRAW_INDIRECT_BUFFER 0x8F3F
+#endif
 
 namespace WwBl
 {
@@ -40,8 +43,12 @@ typedef std::uint64_t ( APIENTRY * PfnTexHandle )( GLuint );
 typedef std::uint64_t ( APIENTRY * PfnTexSamplerHandle )( GLuint, GLuint );
 typedef void ( APIENTRY * PfnHandleResident )( std::uint64_t );
 typedef void ( APIENTRY * PfnBufferStorage )( GLenum, GLsizeiptr, const void *, GLbitfield );
+typedef void ( APIENTRY * PfnMdi )( GLenum, GLenum, const void *, GLsizei, GLsizei );
 
 constexpr std::uint32_t kSegRows = 8192, kSegs = 8, kRows = kSegRows * kSegs;
+// lane BINDLESSMDI1: a segment's indirect commands, reused under the same fence as its rows (2 a row: cull ranges)
+constexpr std::uint32_t kCmdSeg = kSegRows * 2, kCmds = kCmdSeg * kSegs, kCmdBytes = 20;
+constexpr bool kMdiDefault = true;
 
 struct Key
 {
@@ -78,6 +85,11 @@ struct Ctx
 	PfnTexSamplerHandle texSamplerHandle = nullptr;
 	PfnHandleResident resident = nullptr, nonResident = nullptr;
 	PfnBufferStorage bufferStorage = nullptr;
+	Class * boundCls = nullptr;	// the layout poolBind bound last
+	PfnMdi mdi = nullptr;	// lane BINDLESSMDI1: + GL_ARB_shader_draw_parameters (the row's base instance)
+	GLuint cmdBuf = 0;
+	unsigned char * cmdMap = nullptr;
+	std::uint32_t cmdCursor = 0;
 	std::unordered_map<GLuint, std::uint64_t> handles, redHandles;
 	std::unordered_map<GLuint, Key> frozen;
 	GLuint redSampler = 0, black = 0;
@@ -94,6 +106,7 @@ struct Ctx
 	// counters
 	long long draws = 0, pooled = 0, uploads = 0, waits = 0, conflicts = 0, fallbacks = 0, rebuilds = 0;
 	long long conflictsAll = 0;
+	long long runs = 0, merged = 0, mdiCalls = 0, longest = 0;	// lane BINDLESSMDI1
 	QString line;
 };
 
@@ -136,6 +149,8 @@ bool init( Ctx & c )
 	c.resident = reinterpret_cast<PfnHandleResident>( q->getProcAddress( "glMakeTextureHandleResidentARB" ) );
 	c.nonResident = reinterpret_cast<PfnHandleResident>( q->getProcAddress( "glMakeTextureHandleNonResidentARB" ) );
 	c.bufferStorage = reinterpret_cast<PfnBufferStorage>( q->getProcAddress( "glBufferStorage" ) );
+	if ( q->hasExtension( "GL_ARB_shader_draw_parameters" ) && q->hasExtension( "GL_ARB_multi_draw_indirect" ) )
+		c.mdi = reinterpret_cast<PfnMdi>( q->getProcAddress( "glMultiDrawElementsIndirect" ) );
 	c.ok = c.texHandle && c.texSamplerHandle && c.resident && c.nonResident && c.bufferStorage;
 	if ( !c.ok )
 		std::fprintf( stderr, "bindless: unsupported (entry points missing)\n" );
@@ -175,6 +190,22 @@ bool fastOn()
 {
 	const int r = red();
 	return r != 3 && r != 5 && on();
+}
+
+int mdiRed()
+{
+	WW_SWITCH_STATIC( int, r, wwEnv( "WW_BINDLESS_MDI_RED" ).trimmed() == "rowoff" ? 1 : 0 );
+	return r;
+}
+
+bool mdiOn()
+{
+	// WW_BINDLESS_MDI=0 is the per-draw path (one draw call a shape); no reds of the bindless path batch
+	WW_SWITCH_STATIC( bool, want, [] {
+		const QByteArray v = wwEnv( "WW_BINDLESS_MDI" ).trimmed();
+		return v.isEmpty() ? kMdiDefault : v != "0";
+	}() );
+	return want && red() == 0 && on() && cx().mdi;
 }
 
 bool frozenSkip( GLuint tex, int wrapS, int wrapT, int minFilter, float aniso )
@@ -312,6 +343,7 @@ void commit( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpenGLContext::Prog
 	}
 	const std::uint32_t idx = c.cursor;
 	if ( idx % kSegRows == 0 ) {
+		c.cmdCursor = ( idx / kSegRows ) * kCmdSeg;	// lane BINDLESSMDI1: the segment's commands, freed by the same fence
 		// entering a segment: the one before it is all issued (fence it), this one must be done on the GPU
 		const std::uint32_t seg = idx / kSegRows, prev = ( seg + kSegs - 1 ) % kSegs;
 		if ( c.fences[prev] )
@@ -331,6 +363,111 @@ void commit( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpenGLContext::Prog
 	f->glUniform1ui( prog->wwDrawIdLoc, GLuint( idx ) );
 	c.cursor = ( idx + 1 ) % kRows;
 	c.draws++;
+}
+
+namespace
+{
+struct Run
+{
+	bool open = false;
+	std::uint32_t base = 0, cmd0 = 0, cmdEnd = 0, rows = 0;
+} run;
+}
+
+bool runOpen( NifSkopeOpenGLContext::GLFunctions * f, std::uint32_t leaderCmds )
+{
+	run.open = false;
+	Ctx & c = cx();
+	if ( !geo.on || !c.ok || !c.ring || !c.mdi )
+		return false;
+	if ( !c.cmdBuf ) {
+		f->glGenBuffers( 1, &c.cmdBuf );
+		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, c.cmdBuf );
+		const GLbitfield fl = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+		c.bufferStorage( GL_DRAW_INDIRECT_BUFFER, GLsizeiptr( kCmds ) * kCmdBytes, nullptr, fl );
+		c.cmdMap = static_cast<unsigned char *>( f->glMapBufferRange( GL_DRAW_INDIRECT_BUFFER, 0,
+			GLsizeiptr( kCmds ) * kCmdBytes, fl ) );
+		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, 0 );
+		if ( !c.cmdMap ) {
+			std::fprintf( stderr, "bindless: the indirect command ring did not map\n" );
+			c.mdi = nullptr;
+			return false;
+		}
+	}
+	run.base = ( c.cursor + kRows - 1 ) % kRows;	// the leader's row (commit wrote it)
+	run.cmdEnd = ( run.base / kSegRows + 1 ) * kCmdSeg;
+	run.cmd0 = c.cmdCursor;
+	run.rows = 1;
+	if ( run.cmd0 < run.cmdEnd - kCmdSeg || run.cmd0 + leaderCmds > run.cmdEnd )
+		return false;
+	run.open = true;
+	return true;
+}
+
+bool runRoom( std::uint32_t cmds )
+{
+	return run.open && cx().cmdCursor + cmds <= run.cmdEnd && cx().cursor % kSegRows != 0;
+}
+
+void runCmd( GLsizei count, std::uintptr_t offBytes, std::uintptr_t idxOff, std::int32_t baseVertex, std::uint32_t rel )
+{
+	Ctx & c = cx();
+	const std::uint32_t w[5] = { std::uint32_t( count ), 1u, std::uint32_t( ( offBytes + idxOff ) / 2 ),
+		std::uint32_t( baseVertex ), rel };
+	std::memcpy( c.cmdMap + std::size_t( c.cmdCursor ) * kCmdBytes, w, kCmdBytes );
+	c.cmdCursor++;
+}
+
+std::uint32_t runRow()
+{
+	Ctx & c = cx();
+	const std::uint32_t idx = c.cursor;
+	std::memcpy( c.map + size_t( idx ) * sizeof( Row ), &row, sizeof( Row ) );
+	c.cursor = ( idx + 1 ) % kRows;
+	c.draws++;
+	c.pooled++;
+	run.rows++;
+	const std::uint32_t rel = idx - run.base;
+	return mdiRed() == 1 ? rel - 1 : rel;	// red rowoff: a follower reads the row before its own
+}
+
+bool runPoolPeek( const Shape * sh, std::uintptr_t & idxOff, std::int32_t & baseVertex )
+{
+	Ctx & c = cx();
+	const auto it = c.entries.find( sh );
+	if ( it == c.entries.end() || !it->second.cls || !geo.on )
+		return false;
+	Entry & e = it->second;
+	const NifSkopeOpenGLContext::ShapeDataHash * h = sh->wwDataHash( nullptr );
+	if ( !h || e.h0 != h->h[0] || e.h1 != h->h[1] || e.attrMask != h->attrMask || e.numVerts != h->numVerts
+		|| e.elementBytes != h->elementBytes || e.cls != c.boundCls )
+		return false;
+	e.lastFrame = c.frameNo;
+	WwBlPool::drawArgs( e.span, nullptr, idxOff, baseVertex );
+	return true;
+}
+
+bool runIssue( NifSkopeOpenGLContext::GLFunctions * f )
+{
+	Ctx & c = cx();
+	if ( !run.open )
+		return false;
+	run.open = false;
+	if ( run.rows < 2 ) {
+		c.cmdCursor = run.cmd0;	// the leader alone draws as before
+		return false;
+	}
+	const GLsizei n = GLsizei( c.cmdCursor - run.cmd0 );
+	if ( n > 0 ) {
+		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, c.cmdBuf );
+		c.mdi( GL_TRIANGLES, GL_UNSIGNED_SHORT, (const void *) ( std::size_t( run.cmd0 ) * kCmdBytes ), n, GLsizei( kCmdBytes ) );
+		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, 0 );
+		c.mdiCalls++;
+	}
+	c.runs++;
+	c.merged += run.rows - 1;
+	c.longest = std::max<long long>( c.longest, run.rows );
+	return true;
 }
 
 void forget( GLuint tex )
@@ -520,6 +657,7 @@ bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigne
 			prev = &it->second.span;
 	}
 	WwBlPool::drawArgs( e.span, prev, geo.idxOff, geo.baseVertex );
+	c.boundCls = &k;
 	geo.on = true;
 	c.pooled++;
 	return true;
@@ -600,13 +738,18 @@ void frame()
 			.arg( c.waits ).arg( c.conflicts ).arg( c.fallbacks ).arg( c.rebuilds ).arg( c.conflictsAll )
 			.arg( red() == 1 ? QStringLiteral( " RED sampler" ) : red() == 2 ? QStringLiteral( " RED pooloff1" )
 				: red() == 3 ? QStringLiteral( " RED nopool" ) : red() == 4 ? QStringLiteral( " RED cellname" )
-				: red() == 5 ? QStringLiteral( " RED slow" ) : QString() );
+				: red() == 5 ? QStringLiteral( " RED slow" ) : QString() )
+			// lane BINDLESSMDI1: runs = multi-draws of more than one shape, merged = the shapes that joined a leader
+			+ ( mdiOn() ? QStringLiteral( " mdi: runs=%1 merged=%2 calls=%3 longest=%4 cmds=%5MB%6" ).arg( c.runs ).arg( c.merged )
+				.arg( c.mdiCalls ).arg( c.longest ).arg( double( kCmds ) * kCmdBytes / 1048576.0, 0, 'f', 2 )
+				.arg( mdiRed() == 1 ? QStringLiteral( " RED rowoff" ) : QString() ) : QStringLiteral( " mdi: off" ) );
 		if ( line != c.line && wwFrameLog() ) {
 			c.line = line;
 			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );
 		}
 	}
 	c.draws = c.pooled = c.uploads = c.waits = c.conflicts = c.fallbacks = c.rebuilds = 0;
+	c.runs = c.merged = c.mdiCalls = c.longest = 0;
 }
 }
 
