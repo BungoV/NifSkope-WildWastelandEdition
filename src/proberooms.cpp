@@ -236,6 +236,26 @@ bool probeRoomsBuild( const ProbeSoup & soup, const ProbeRoomSpec & spec, ProbeR
 		R.error = QStringLiteral( "rooms: the soup is empty" );
 		return false;
 	}
+	// lane VOLRAY1: an x y clip with no z clip takes z from the triangles inside it, faces left open. A dumped
+	// exterior soup carries the far ring (Concord: z -6584..26304 against 4230..10458 in the block), which raised
+	// the cell from about 50 to 95 units.
+	if ( spec.clipLo[0] <= spec.clipHi[0] && spec.clipLo[1] <= spec.clipHi[1] && spec.clipLo[2] > spec.clipHi[2]
+		&& spec.red != QLatin1String( "soupbox" ) ) {
+		double zl = 1e30, zh = -1e30;
+		for ( const std::vector<float> * t : { &soup.tris, &soup.glass } )
+			for ( size_t i = 0; i + 8 < t->size(); i += 9 ) {
+				const float * v = t->data() + i;
+				if ( std::max( { v[0], v[3], v[6] } ) < spec.clipLo[0] || std::min( { v[0], v[3], v[6] } ) > spec.clipHi[0]
+					|| std::max( { v[1], v[4], v[7] } ) < spec.clipLo[1] || std::min( { v[1], v[4], v[7] } ) > spec.clipHi[1] )
+					continue;
+				zl = std::min( { zl, double( v[2] ), double( v[5] ), double( v[8] ) } );
+				zh = std::max( { zh, double( v[2] ), double( v[5] ), double( v[8] ) } );
+			}
+		if ( zl <= zh ) {
+			lo[2] = std::max( lo[2], zl - 256.0 );
+			hi[2] = std::min( hi[2], zh + 256.0 );
+		}
+	}
 	// lane GIBLACK2: the clip box (proberooms.h ProbeRoomSpec::clipLo). A face it cuts is not the open border.
 	bool openFace[6] = { true, true, true, true, true, true };   // -x +x -y +y -z +z
 	if ( spec.red != QLatin1String( "soupbox" ) )

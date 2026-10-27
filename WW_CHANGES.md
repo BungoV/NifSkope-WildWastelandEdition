@@ -1,5 +1,69 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLFIT5 (2026-10-27, branch volfit5-20261027): GI room fit faster, same bytes
+
+- **Edge rays on the GPU:** the room fit's edge rays now go to the exact whole-ray tracer in batches instead of one at a
+  time on the CPU. **Big rooms side by side:** the big rooms are fitted at the same time, sharing the cores. Neither
+  changes a byte: the .space files equal VOLFIT4's on all four real cells, GPU and CPU alike. Pins
+  `WW_VOLFIT_SPEC=edgegpu=0,bigpar=0` restore VOLFIT4's path.
+- Same run, fit seconds VOLRAY1 / VOLFIT4 / VOLFIT5: museum 2.6 / 7.7 / 6.2, Goodneighbor 4.8 / 20.5 / 12.1,
+  Sanctuary 3.3 / 4.7 / 4.7, Concord 12.7 / 25.9 / 25.2.
+- Cost: offline only, 0 GPU-ms and 0 memory at runtime. The census adds " edge casts N".
+
+## Lane VOLFIT4 (2026-10-27, branch volfit4-20261027): GI room fit stops growing through walls into other rooms, 2-5x faster
+
+- **Cross-wall overlap priced:** a room's face move now pays 16 (was 2) for every point it takes inside another room's
+  grid shape that its own air never reached. Museum overlaps 1.55 -> 0.20M u3 (VOLRAY1 1.41M), pokes 7.75 -> 3.73M;
+  Goodneighbor overlaps 0.55 -> 0.01M. All four real cells now beat VOLRAY1 on gap, pokes and overlaps with shapes
+  within x1.5. Pin `WW_VOLFIT_SPEC=bado=N`; red `volfit3` (bado = badw) restores VOLFIT3's fit.
+- **Fit speed:** the per-point rays (85-95% of the fit) take the GPU's exact whole-ray tracer whenever the machine has
+  RT hardware, without the bake row; `WW_BAKE_RT=0` pins the CPU. The .space files are byte-identical either way.
+  Same run, fit seconds VOLRAY1 / VOLFIT3 / VOLFIT4: museum 2.7 / 37.9 / 7.8, Goodneighbor 5.4 / 76.7 / 21.6,
+  Sanctuary 3.3 / 5.1 / 4.8, Concord 13.4 / 49.4 / 24.8.
+- Cost: offline only, 0 GPU-ms and 0 memory at runtime. The census adds "; fine ms wall .. big .. class .. moves ..".
+
+## Lane VOLFIT3 (2026-10-27, branch volfit3-20261027): GI room fit starts from the grid shapes and moves their faces
+
+- **Grid-first fine fit:** each room starts from its ray-refined grid shapes. Box faces move along volcheck's own
+  jittered h=16 lattice, scored as uncovered room air plus foreign points held. Faces then snap, near-boxes merge,
+  boxes that add little are dropped, and a few extra lattice boxes go in where they cut the most gap. Each room keeps the
+  grid fit or the moved set, whichever scores better. A shape budget across all rooms (`budget`, 1.45x the grid count)
+  keeps GI hull cost near VOLRAY1's. Curved rooms join the fit (their wedges and cylinders stay).
+- Real cells vs VOLRAY1:
+  - Goodneighbor: gap 44.3 -> 38.1 % (VOLFIT2 made it worse, 58.6 %); pokes 79 -> 64M u3.
+  - Concord: gap 50.8 -> 39.3 %; overlaps 3.8 -> 1.8M.
+  - Museum: gap 31.3 -> 19.8 %, but overlaps are 1.41 -> 1.55M (one room).
+  - Shapes are x0.9-1.45 (VOLFIT2: x2-8).
+- Cost: fitting is offline, 0 GPU-ms at runtime. Fit time is about x3-13 of VOLRAY1 on a busy machine, the same as VOLFIT2.
+- Tuning pin: `WW_VOLFIT_SPEC` badw/extras/budget/rounds/jitter. Red `volfit2` restores VOLFIT2's fit; the census line
+  ends "; volfit3 grid shapes ... rooms grid/moved ... extras ... merged".
+
+## Lane VOLFIT2 (2026-10-27, branch volfit2-20261027): GI room volumes fitted on a fine lattice
+
+- **Fine room fit:** each room's boxes now come from an h=16 lattice in the room's own frame, classified by
+  volcheck's own solid/indoor ray rule. Faces snap onto the wall or threshold in front of them, and boxes the others
+  already cover are dropped. Rooms with wedge or cylinder shapes keep the ray-refined grid fit. Pokes fall sharply on
+  real cells (Goodneighbor 79M -> 9M u3, museum 10M -> 1M), but gaps stay well above 0 and shape counts rise. Tuning
+  pin `WW_VOLFIT_SPEC`; red `nofine` restores the VOLRAY1 refine.
+- **Gates:** cell_volray adds the `turned` (30 degree room) and `shelf` (thin board + step) scenes, which the VOLRAY1
+  fitter fails; red `nofine`. The census line reports fine boxes, pruned, lost, rays, ms.
+
+## Lane VOLRAY1 (2026-10-27, branch volray1-20261027): rays check that the GI volumes fill each interior
+
+- **`nifskope-cli volcheck`:** measures a `.space` against the probe soup on an h=16 lattice. Per room and per cell it
+  reports real-air gaps (blobs over 4096 u3), pokes into solid with depth, cross-wall overlaps, thresholds, leaks,
+  volume in u3 and as a % of air, the worst spots and a PNG; exit 1 on a broken fit. `--rays gpu|cpu|both` casts
+  through the bake ray scene (RT card, else all CPU cores; CPU is the reference, `both` prints rays, ms and answers
+  that differ).
+- **Ray refine in the volume fitter:** each shape face casts from inside the shape to the room's walls, grows into its
+  own air only, stops inside the first solid cell and walks back up to four cells; a room keeps the refine only when
+  coverage and overshoot do not get worse. Threshold slabs stay one cell deep and a jamb moves out at most a cell.
+  `.recx` hand shapes still replace a room's fitted shapes. `--red norefine` is the old fitter.
+- **Rooms clipped to the cell's height:** room boxes no longer reach above or below the cell's own geometry.
+- **Gate:** `tests/spells/cell_volray.sh` (synthetic rooms reach 0 gaps, pokes and overlaps; mutations must fail; GPU
+  equals CPU). Real cells do not reach 0 yet: Goodneighbor pokes 118M -> 79M u3, the museum's real gaps drop, Concord's
+  overlaps grow. Numbers in the lane notes.
+
 ## Lane WATERSKYVISFAR3 (2026-10-27, branch waterskyvisfar3-20261027): water under a pier deck reads the deck's shade
 
 - **Why:** WATERSKYVISFAR2 stamped statics as walls only. A bridge or pier deck floating over the water was a
