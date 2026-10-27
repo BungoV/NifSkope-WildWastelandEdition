@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane OPENCELLFIX2 (2026-10-27, branch opencellfix2-20261027): the Cell dock's Display tab, presets and one dropdown
+
+- **Load order tab:** the language box is gone. The strings language is the game's `[General] sLanguage` from
+  Fallout4.ini, Fallout4Prefs.ini and Fallout4Custom.ini (a later file wins; an MO2 profile's own inis first; default en).
+  A plugin with no table for that language reads the en tables, so a bad saved value never blanks the names.
+- **Cells tab:** a double-click (or Enter) opens the cell; the Open button is gone.
+- **Display tab** (was Show): one row per feature with a tick, and a dropdown on the same row when the feature has
+  settings. Quality dropdowns are Low / Medium / High / Ultra. Extra number rows fold under the row. The rows sit in the
+  groups Editor, Vanilla and Fusion Shaders. The Show menu's actions stay the only truth (a tick calls `trigger()`), so
+  every change is live, and the WW_* keys and switch names are unchanged.
+- **Presets:** save, rename, overwrite and delete named Display states; a picker and a Next button at the top. They are
+  kept in QSettings (`CellEditor/DisplayPresets`), and applying one is live.
+- **One dropdown:** `src/ui/widgets/wwdropdown.*` (WwDropdown) is the toolbar's Object Mode selector, text only. Every
+  dock dropdown and the mode button use `WwDropdown::applyStyle`.
+- **Removed:** the "Show" button to the right of the Color row.
+- **Tests:** tests/opencell and tests/cellshow, with new rows in the in-app Cell workspace test. Reds:
+  `WW_OPENCELL_RED=lang|dblclick`, `WW_CELLSHOW_RED=ticks|groups|dropdown|presets|showbutton`, `WW_DROPDOWN_RED=1`.
+
 ## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
 
 - **Why:** the far objects, far cards and far rings past ring 0 were cut once, round the open's centre. The stream

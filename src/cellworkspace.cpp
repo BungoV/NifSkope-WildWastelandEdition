@@ -35,6 +35,8 @@ BSD License - see nifskope.h
 #include "ui/widgets/wwnumberfield.h"	// lane BLOOM1b: the Bloom rows
 #include "ui/opencelldialog.h"	// lane OPENCELLFIX1: the Load order and Cells tabs
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX1: the Show tab, the Show menu stays open
+#include "ui/widgets/wwdropdown.h"	// lane OPENCELLFIX2: the dock's one dropdown
+#include "wwswitch.h"
 #include "cellmodpick.h"
 
 #include <QAction>
@@ -355,7 +357,7 @@ void CellWorkspacePanel::buildUi()
 	addTab( tr( "Load order" ), "loadorder", loL->parentWidget() );
 	addTab( tr( "Cells" ), "cells", cellsL->parentWidget() );
 	addTab( tr( "References" ), "references", refsL->parentWidget() );
-	addTab( tr( "Show" ), "show", showScroll );
+	addTab( tr( "Display" ), "show", showScroll );	// lane OPENCELLFIX2: renamed; the id stays (saved tab)
 	outer->addWidget( tabs, 0 );
 	outer->addWidget( tabStack, 1 );
 
@@ -389,7 +391,7 @@ void CellWorkspacePanel::buildUi()
 	QHBoxLayout * fl = new QHBoxLayout( filterRow );
 	fl->setContentsMargins( 0, 0, 0, 0 );
 	fl->setSpacing( 4 );
-	filterType = new QComboBox( filterRow );
+	filterType = new WwDropdown( filterRow );
 	filterType->setObjectName( QStringLiteral( "CellWorkspaceTypeFilter" ) );
 	filterType->addItem( tr( "All" ) );
 	filterText = new QLineEdit( filterRow );
@@ -439,12 +441,9 @@ void CellWorkspacePanel::buildUi()
 	// ---- band 2: the view (the Show tab)
 	page = showL;
 
-	QWidget * viewRow = new QWidget( this );
-	QHBoxLayout * vl = new QHBoxLayout( viewRow );
-	vl->setContentsMargins( 0, 0, 0, 0 );
-	vl->setSpacing( 4 );
-	QLabel * overlayName = new QLabel( tr( "Color" ), viewRow );
-	overlayBox = new QComboBox( viewRow );
+	/* lane OPENCELLFIX2: Color is the Display tab's first Editor row (Textured = its tick off), and the Show button
+	 * that sat beside it is gone (bungo: "there is a redundant show on the right"). WW_CELLSHOW_RED=showbutton keeps it. */
+	overlayBox = new WwDropdown( this );
 	overlayBox->setObjectName( QStringLiteral( "CellWorkspaceOverlay" ) );
 	/* The names are the enum's own spellings (`cellOverlayName`), so the row,
 	 * the `WW_CELL_OVERLAY` variable, the notes line and the gate all say the
@@ -456,22 +455,18 @@ void CellWorkspacePanel::buildUi()
 			continue;
 		overlayBox->addItem( name, name );
 	}
-	vl->addWidget( overlayName );
-	vl->addWidget( overlayBox, 1 );
-	page->addWidget( viewRow );
 
-	/* THE SHOW POPOVER -- and it exists ONLY here. It is a child of this panel,
-	 * which is a child of the Cell workspace's dock, so it is on screen exactly
-	 * when that workspace is and can appear in no other workspace's menus. That
-	 * is not a rule to be enforced; it is where the widget lives. */
-	QToolButton * showButton = new QToolButton( viewRow );
-	showButton->setObjectName( QStringLiteral( "CellWorkspaceShowButton" ) );
-	showButton->setText( tr( "Show" ) );
-	showButton->setPopupMode( QToolButton::InstantPopup );
-	showButton->setToolButtonStyle( Qt::ToolButtonTextOnly );
-	showButton->setAutoRaise( false );
-	showButton->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
-	QMenu * showMenu = new QMenu( showButton );
+	/* THE SHOW MENU -- a child of this panel, so it lives only in the Cell workspace. Since OPENCELLFIX2 nothing pops
+	 * it: the Display tab is built from it and its actions stay the one truth. */
+	QToolButton * showButton = nullptr;
+	if ( wwEnvStr( "WW_CELLSHOW_RED" ) == QLatin1String( "showbutton" ) ) {
+		showButton = new QToolButton( this );
+		showButton->setObjectName( QStringLiteral( "CellWorkspaceShowButton" ) );
+		showButton->setText( tr( "Show" ) );
+		WwDropdown::applyStyle( showButton );
+		page->addWidget( showButton );
+	}
+	QMenu * showMenu = new QMenu( this );
 	showMenu->setObjectName( QStringLiteral( "CellWorkspaceShowMenu" ) );
 
 	/* LANE SHOWMENU1 (bungo 10-12, "Tidy that up"): the Show dropdown is the ONE home of every
@@ -918,8 +913,8 @@ void CellWorkspacePanel::buildUi()
 			} );
 		}
 	}
-	showButton->setMenu( showMenu );
-	vl->addWidget( showButton );
+	if ( showButton )
+		showButton->setMenu( showMenu );
 	/* lane OPENCELLFIX1 (bungo 10-27: "For show, don't close it when I click on one thing", "Maybe make that a sub
 	 * category with checkmarks"): a tick leaves the menu open, and the Show tab lays the same actions out as
 	 * folding check-box groups, values inline. The actions stay the one source of truth. */
@@ -929,7 +924,63 @@ void CellWorkspacePanel::buildUi()
 		ps.heading = []( const QString & t, QWidget * p ) { return wwHeading( t, p ); };
 		ps.number = []( QDoubleSpinBox * f ) { f->setMinimumWidth( 96 ); };
 		ps.foldGroup = QStringLiteral( "CellEditor/ShowFolds" );
-		showPanel = wwMenuAsPanel( showMenu, this, ps );
+		/* lane OPENCELLFIX2: the Display tab -- one row per feature (tick + dropdown), in three groups. A switch
+		 * no row names still gets a row in Fusion Shaders (wwDisplayLeftovers counts them; the self-test wants 0). */
+		const QStringList g = wwDisplayGroups();
+		auto row = []( const QString & group, const char * tick, const char * choices = "", int off = -1,
+			bool quality = false, const QStringList & extras = QStringList() ) {
+			WwDisplayRow r;
+			r.group = group;
+			r.tick = QLatin1String( tick );
+			r.choices = QLatin1String( choices );
+			r.off = off;
+			r.quality = quality;
+			r.extras = extras;
+			return r;
+		};
+		QList<WwDisplayRow> rows;
+		WwDisplayRow color;
+		color.group = g.at( 0 );
+		color.dropdown = overlayBox;
+		color.off = 0;	// Textured
+		color.label = tr( "Color" );
+		rows << color << row( g.at( 0 ), "CellWorkspaceShow_borders" ) << row( g.at( 0 ), "CellWorkspaceShow_markers" )
+			<< row( g.at( 0 ), "CellWorkspaceShow_disabled" ) << row( g.at( 0 ), "CellWorkspacePrevis" )
+			<< row( g.at( 0 ), "CellWorkspaceCulling" ) << row( g.at( 0 ), "CellWorkspaceLook_WW_BINDLESS" );
+		rows << row( g.at( 1 ), "CellWorkspaceShow_ground" ) << row( g.at( 1 ), "CellWorkspaceShow_water" )
+			<< row( g.at( 1 ), "CellWorkspaceCellGrass" ) << row( g.at( 1 ), "CellWorkspaceParticles" )
+			<< row( g.at( 1 ), "CellWorkspaceFarLod", "CellWorkspaceFarLodType" )
+			<< row( g.at( 1 ), "CellWorkspaceCellLights" ) << row( g.at( 1 ), "CellWorkspaceLightShadows" )
+			<< row( g.at( 1 ), "CellWorkspaceLightFlicker" ) << row( g.at( 1 ), "CellWorkspaceCellImageSpace" )
+			<< row( g.at( 1 ), "CellWorkspaceTemporalAa" ) << row( g.at( 1 ), "CellWorkspaceSsr" )
+			<< row( g.at( 1 ), "CellWorkspaceCellDof" ) << row( g.at( 1 ), "CellWorkspaceCellMotionBlur" );
+		rows << row( g.at( 2 ), "CellWorkspaceCellGi", "", -1, false, { QStringLiteral( "CellWorkspaceSkyVisRow" ) } )
+			<< row( g.at( 2 ), "CellWorkspaceCellFar", "CellWorkspaceCellPass" )
+			<< row( g.at( 2 ), "", "CellWorkspaceLampShadows", 0, true, { QStringLiteral( "CellWorkspaceShadowBudget" ) } )
+			<< row( g.at( 2 ), "", "CellWorkspaceLightCurve", 0 )
+			<< row( g.at( 2 ), "CellWorkspaceLook_WW_CELL_LIGHT_ADV", "", -1, false,
+				{ QStringLiteral( "CellWorkspaceLightCalibration" ) } )
+			<< row( g.at( 2 ), "CellWorkspaceAo" ) << row( g.at( 2 ), "CellWorkspaceAoDecals" )
+			<< row( g.at( 2 ), "CellWorkspaceSkySpecOcc" ) << row( g.at( 2 ), "CellWorkspaceGpuRelight" )
+			<< row( g.at( 2 ), "CellWorkspaceEmissiveGiGrid" )
+			<< row( g.at( 2 ), "", "CellWorkspaceModernTaa", 0, true ) << row( g.at( 2 ), "CellWorkspaceModernTaaHdr" )
+			<< row( g.at( 2 ), "CellWorkspaceSsrOutdoors" ) << row( g.at( 2 ), "CellWorkspaceReflProbe" )
+			<< row( g.at( 2 ), "CellWorkspaceSsgi", "CellWorkspaceSsgiQuality", -1, true )
+			<< row( g.at( 2 ), "", "CellWorkspaceBloom", 0 )
+			<< row( g.at( 2 ), "", "CellWorkspaceFarGround", 0, false, { QStringLiteral( "CellWorkspaceFarGroundPages" ) } );
+		// the look ticks: what the game itself draws goes under Vanilla, the rest is ours
+		const QList<WwLook> vanillaLooks = { WwLook::ActorsOutdoors, WwLook::WeaponParts, WwLook::WorldAnim,
+			WwLook::AnimObjects, WwLook::DecalFade, WwLook::DecalParallax, WwLook::CableShadowSway, WwLook::BtoSway,
+			WwLook::PlacementEmittance, WwLook::RegionEmittance, WwLook::ParticleEmittance, WwLook::LensFlares,
+			WwLook::LightPatterns };
+		for ( int k = 0; k < int( WwLook::Count ); k++ ) {
+			const WwLook l = WwLook( k );
+			if ( !wwLookHasRow( l ) || l == WwLook::BindlessDraws || l == WwLook::LightAdvanced )
+				continue;
+			const QByteArray name = QByteArray( "CellWorkspaceLook_" ) + wwLookPinName( l );
+			rows << row( g.at( vanillaLooks.contains( l ) ? 1 : 2 ), name.constData() );
+		}
+		showPanel = wwMenuAsDisplay( showMenu, rows, this, ps );
 		page->addWidget( showPanel );
 	}
 
@@ -1241,10 +1292,8 @@ void CellWorkspacePanel::buildUi()
 
 	connect( list, &QTreeWidget::itemSelectionChanged, this, &CellWorkspacePanel::rowClicked );
 	connect( filterText, &QLineEdit::textChanged, this, &CellWorkspacePanel::filterChanged );
-	connect( filterType, QOverload<int>::of( &QComboBox::currentIndexChanged ),
-		this, &CellWorkspacePanel::filterChanged );
-	connect( overlayBox, QOverload<int>::of( &QComboBox::currentIndexChanged ),
-		this, &CellWorkspacePanel::viewRowChanged );
+	connect( filterType, &WwDropdown::currentIndexChanged, this, &CellWorkspacePanel::filterChanged );
+	connect( overlayBox, &WwDropdown::currentIndexChanged, this, &CellWorkspacePanel::viewRowChanged );
 
 	// lane OPENCELLFIX1: the last tab comes back; the Show tab re-reads its actions when shown
 	connect( tabs, &QTabBar::currentChanged, this, [this]( int index ) {

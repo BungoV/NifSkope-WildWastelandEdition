@@ -347,6 +347,7 @@ HEADERS += \
 	src/ui/opencelldialog.h \
 	src/ui/opencellmenu.h \
 	src/ui/cellshowpanel.h \
+	src/ui/widgets/wwdropdown.h \
 	src/ui/checkablemessagebox.h \
 	src/ui/settingsdialog.h \
 	src/ui/settingspane.h \
@@ -671,6 +672,7 @@ SOURCES += \
 	src/ui/opencellmenu.cpp \
 	src/ui/opencellfallback.cpp \
 	src/ui/cellshowpanel.cpp \
+	src/ui/widgets/wwdropdown.cpp \
 	src/ui/checkablemessagebox.cpp \
 	src/ui/settingsdialog.cpp \
 	src/ui/settingspane.cpp \

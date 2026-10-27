@@ -6,3 +6,5 @@
 
 void wwMatchFieldStyle( QWidget * ) {}
 QLabel * wwHeading( const QString & text, QWidget * parent ) { return new QLabel( text, parent ); }
+// lane OPENCELLFIX2: the dropdown's boxed sheet (src/nifskope_ui.cpp); a stand-in string the look check compares.
+QString wwBoxedButtonQss( const QString & padding ) { return QStringLiteral( "QToolButton { padding: %1; }" ).arg( padding ); }

@@ -7,7 +7,10 @@ BSD License - see nifskope.h
 #ifndef CELLSHOWPANEL_H
 #define CELLSHOWPANEL_H
 
+#include <QList>
 #include <QString>
+#include <QStringList>
+#include <QVariantMap>
 
 #include <functional>
 
@@ -42,8 +45,45 @@ struct WwMenuPanelStyle
  *  WW_CELLSHOW_RED=sync: an action that changes does not move its box (the unit test's red). */
 QWidget * wwMenuAsPanel( QMenu * menu, QWidget * parent, const WwMenuPanelStyle & style );
 
-//! Every box and field of a panel from wwMenuAsPanel read again from its action or field (a change made while the
-//! signals were blocked).
+//! Every box and field of a panel from wwMenuAsPanel or wwMenuAsDisplay read again from its action or field (a change
+//! made while the signals were blocked).
 void wwMenuPanelSync( QWidget * panel );
+
+/* lane OPENCELLFIX2 (bungo 10-27): the Display tab. One row per feature: a tick, and a dropdown on the same row when
+ * the feature has settings (quality = Low / Medium / High / Ultra); anything finer folds under the row. Rows sit in
+ * three groups: Editor (what only the editor draws), Vanilla (what the game draws), Fusion Shaders (ours). The menu's
+ * actions stay the one truth, as in wwMenuAsPanel. */
+struct WwDisplayRow
+{
+	QString group;                 //!< one of wwDisplayGroups()
+	QString tick;                  //!< objectName of the checkable action the tick drives; empty: the choices' off item
+	QString choices;               //!< objectName of a submenu: its exclusive items fill the dropdown
+	QWidget * dropdown = nullptr;  //!< or a ready WwDropdown (the Color row); it moves into the row
+	int off = -1;                  //!< without a tick action: the item that means off (unticking picks it)
+	QString label;                 //!< empty: the tick's own text, else the submenu's title
+	bool quality = false;          //!< the dropdown is the four quality levels
+	QStringList extras;            //!< more of the menu (ticks, submenus, value rows) folded under the row
+};
+
+QStringList wwDisplayGroups();   //!< Editor, Vanilla, Fusion Shaders
+
+/*! The Display panel of `menu` laid out by `rows`, with the preset bar on top. A checkable action no row names gets a
+ *  row of its own in Fusion Shaders and is counted (wwDisplayLeftovers). Reds (WW_CELLSHOW_RED): `ticks` (a row
+ *  with settings has no tick), `groups` (one group), `dropdown` (the dropdowns lose the mode selector's look). */
+QWidget * wwMenuAsDisplay( QMenu * menu, const QList<WwDisplayRow> & rows, QWidget * parent, const WwMenuPanelStyle & style );
+int wwDisplayLeftovers( const QWidget * panel );
+
+/* Named presets of the whole Display state: every tick and choice of the menu, every value field, and the panel's
+ * own dropdowns (Color). Saved in QSettings CellEditor/DisplayPresets; applying one goes through the actions, so it
+ * is live. WW_CELLSHOW_RED=presets: a save writes nothing. */
+QVariantMap wwDisplayState( const QWidget * panel );
+void wwDisplaySetState( QWidget * panel, const QVariantMap & state );
+QStringList wwDisplayPresetNames();
+QString wwDisplayPresetCurrent();
+bool wwDisplayPresetSave( QWidget * panel, const QString & name );   //!< a new name, or overwrite one
+bool wwDisplayPresetApply( QWidget * panel, const QString & name );
+bool wwDisplayPresetRename( QWidget * panel, const QString & from, const QString & to );
+bool wwDisplayPresetDelete( QWidget * panel, const QString & name );
+QString wwDisplayPresetNext( QWidget * panel );   //!< applies the preset after the current one; its name
 
 #endif // CELLSHOWPANEL_H

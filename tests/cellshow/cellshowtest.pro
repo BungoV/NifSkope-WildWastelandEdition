@@ -8,7 +8,9 @@ CONFIG -= app_bundle
 ROOT = $$PWD/../..
 INCLUDEPATH += $$ROOT/src/ui $$ROOT/src
 
-HEADERS += $$ROOT/src/ui/cellshowpanel.h
+HEADERS += $$ROOT/src/ui/cellshowpanel.h $$ROOT/src/ui/widgets/wwdropdown.h
 SOURCES += cellshowtest.cpp \
+	stubs.cpp \
 	$$ROOT/src/ui/cellshowpanel.cpp \
+	$$ROOT/src/ui/widgets/wwdropdown.cpp \
 	$$ROOT/src/wwswitch.cpp
