@@ -3761,6 +3761,28 @@ quint32 LodtFile::dyeWordAt( int dx, int dy ) const
 	return planeSampleOf( dyeStore, dx, dy, 0 );
 }
 
+int LodtFile::waterTileEdge( int plane ) const
+{
+	const PlaneStore & s = plane == 0 ? idStore : plane == 1 ? shoreStore : surfStore;
+	return s.ok ? s.tileEdge : 0;
+}
+
+bool LodtFile::waterTileUniform( int plane, int tx, int ty, quint32 & value ) const
+{
+	const PlaneStore & s = plane == 0 ? idStore : plane == 1 ? shoreStore : surfStore;
+	if ( !s.ok || s.tileEdge <= 0 ) {
+		value = plane == 1 ? 255u : 0u;
+		return true;
+	}
+	if ( tx < 0 || ty < 0 || tx >= s.tilesX || ty >= s.tilesY )
+		return false;
+	const qsizetype e = ( qsizetype( ty ) * s.tilesX + tx ) * 16;
+	if ( rd<quint32>( s.dir, e + 8 ) )
+		return false;
+	value = rd<quint32>( s.dir, e + 12 );   // csize 0: the tile's one sample
+	return true;
+}
+
 float LodtFile::surfaceDeltaAt( int bx, int by ) const
 {
 	/* Exactly 0.0f for flat water, dry ground and an absent plane: the writer

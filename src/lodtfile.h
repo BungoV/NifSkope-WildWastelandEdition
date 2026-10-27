@@ -365,6 +365,12 @@ public:
 	float surfaceDeltaAt( int bx, int by ) const;
 	bool waterSurfaceAt( int bx, int by, float & z ) const;
 
+	/*! Lane WATERDATA1: a water plane's tile store, `plane` 0 body id, 1 shore, 2 surface. The tile edge in
+	 *  samples (0 = the plane is absent), and whether tile (tx, ty) is stored UNIFORM, its one sample in `value`
+	 *  (an absent plane is uniform at its neutral value: 0, 255, 0). */
+	int waterTileEdge( int plane ) const;
+	bool waterTileUniform( int plane, int tx, int ty, quint32 & value ) const;
+
 	//! How many strokes the store holds; 0 when there is no store.
 	int strokeCount() const { return nStrokes; }
 	//! The raw stroke store, exactly as written (empty when absent).
