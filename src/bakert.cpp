@@ -965,6 +965,12 @@ bool Scene::whole() const
 	return path_ == Path::Rt && d_ && d_->dsx != VK_NULL_HANDLE;
 }
 
+CastTimes & castTimes()
+{
+	thread_local CastTimes t;
+	return t;
+}
+
 namespace {
 
 // n jobs over the bake pool, in blocks
@@ -1027,13 +1033,17 @@ void Scene::cast( const XRay * rays, size_t n, XHit * out, bool anyHit )
 	}
 	traced += (long long)n;
 	Dev & D = dev();
+	CastTimes & ct = castTimes();
+	ct.calls++;
 	std::vector<uint32_t> ans( std::min( n, D.cap ) * 2 );
 	for ( size_t b0 = 0; b0 < n; b0 += D.cap ) {
 		const size_t m = std::min( D.cap, n - b0 );
 		bool ok;
 		{
+			const auto tw = std::chrono::steady_clock::now();
 			std::lock_guard<std::mutex> lk( D.m );
 			const auto t0 = std::chrono::steady_clock::now();
+			ct.lockNs += std::chrono::duration_cast<std::chrono::nanoseconds>( t0 - tw ).count();
 			std::memcpy( D.xrays.map, rays + b0, m * sizeof( XRay ) );
 			ok = begin( D );
 			if ( ok ) {
@@ -1051,7 +1061,9 @@ void Scene::cast( const XRay * rays, size_t n, XHit * out, bool anyHit )
 			if ( ok )
 				std::memcpy( ans.data(), D.xhits.map, m * 8 );
 			gpuUs += std::chrono::duration_cast<std::chrono::microseconds>( std::chrono::steady_clock::now() - t0 ).count();
+			ct.gpuNs += std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::steady_clock::now() - t0 ).count();
 		}
+		const auto tp = std::chrono::steady_clock::now();
 		if ( !ok )   // a lost device: this batch walks on the CPU
 			for ( size_t k = 0; k < m; k++ ) {
 				ans[k * 2] = 0xFFFFFFFFu;
@@ -1103,6 +1115,8 @@ void Scene::cast( const XRay * rays, size_t n, XHit * out, bool anyHit )
 		} );
 		sure += nSure.load();
 		recast += nRecast.load();
+		ct.recast += nRecast.load();
+		ct.postNs += std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::steady_clock::now() - tp ).count();
 		if ( check ) {
 			checked += nSure.load();
 			diff += nDiff.load();

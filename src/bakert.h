@@ -42,6 +42,10 @@ inline int threads()
 	return n;
 }
 
+//! lane VOLFIT6: where cast() spent the calling thread's time (ns): waiting for the GPU lock, holding it, the CPU pass
+struct CastTimes { long long lockNs = 0, gpuNs = 0, postNs = 0, calls = 0, recast = 0; };
+CastTimes & castTimes();   // this thread's running sums
+
 enum class Path { Cpu = 0, Compute = 1, Rt = 2 };
 const char * pathName( Path p );
 
