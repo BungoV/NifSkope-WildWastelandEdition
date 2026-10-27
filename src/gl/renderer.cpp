@@ -524,6 +524,12 @@ void wwDrawGlCacheDirty()
 	drawGl().blend = -1;
 }
 
+void wwDrawGlCacheBlend( bool on )
+{
+	DrawGlCache & c = drawGl();
+	c.blend = ( c.depth && !wwCellUniRed() ) ? ( on ? 1 : 0 ) : -1;	// lane CELLUNI4: the red asks again
+}
+
 bool wwCellAoLean()
 {
 	static const bool on = envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" );
@@ -2282,7 +2288,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				: lsp->hasSF1( ShaderFlags::SLSF1_Specular );
 			const bool specView = scene->hasOption( Scene::DoSpecular ) && scene->hasOption( Scene::DoLighting );
 			prog->uni4f( "cellCubeMat", FloatVector4( specOn && specView ? lsp->specularStrength : 0.0f, lsp->specularGloss,
-				ownCube ? wwCellCubeDecodeMode( nifVersion < 151 ? scene->textures : nullptr ) : 0.0f,	// CELLUNI3: FO76 binds CubeMap2 after
+				ownCube ? wwCellCubeDecodeMode( scene->textures ) : 0.0f,	// CELLUNI4: FO76's CubeMap2 (bound last) too
 				float( ownCube ? wwCellCubeTag( lsp->getName() ) : 0 ) ) );
 		}
 

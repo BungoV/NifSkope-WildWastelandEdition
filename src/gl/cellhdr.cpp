@@ -7,6 +7,7 @@
 #include "gl/cellfogbloom.h"
 #include "gl/celllights.h"
 #include "gl/cellssr.h"
+#include "gl/celluniform.h"	// lane CELLUNI4: the known state the frame end's passes take
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "gl/cellpasstime.h"
@@ -921,6 +922,25 @@ void wwCellHdrEnd( Scene * scene )
 		g.trusted = true;
 	PassTime::subEnd( PassTime::ToneBlit );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+	GlSnap sn;	// lane SYNC1: read once here for the measure and the tone quads (the measure and the bloom restore it)
+	if ( sync ) {
+		sn.measurePart( fn );
+		sn.quadsExtra( fn );
+	}
+	/* lane CELLUNI4: read before the SSR keep and the temporal AA too. Every pass from here to the tone quads restores
+	 * what it changed, so they take this instead of asking (WW_CELL_UNI_RED=1: they ask) */
+	WwCellUni::KnownGl known;
+	known.draw = s.prevDraw;
+	known.read = s.prevRead;
+	known.active = sn.active;
+	std::memcpy( known.vp, sn.vp, sizeof known.vp );
+	std::memcpy( known.clear, sn.clear, sizeof known.clear );
+	std::memcpy( known.colorMask, sn.colorMask, sizeof known.colorMask );
+	known.depthMask = sn.depthMask;
+	known.depth = sn.depth, known.blend = sn.blend, known.cull = sn.cull, known.stencil = sn.stencil, known.scissor = sn.scissor;
+	known.sFunc = sn.sFunc, known.sRef = sn.sRef, known.sMask = sn.sMask, known.sWrite = sn.sWrite;
+	known.sFail = sn.sFail, known.sZFail = sn.sZFail, known.sPass = sn.sPass;
+	WwCellUni::knownSlot() = sync && !wwCellUniRed() ? &known : nullptr;
 	wwCellSsrKeepFrame( scene, g.fbo, s.w, s.h );	// lane PERF3: WW_CELL_SSR_PREV's previous frame (else nothing)
 	{	// lane TAA3: the Modern temporal AA on this linear frame when its row says so (no GL call otherwise)
 		const float adapted = wwCellImageSpaceAdapted( scene );
@@ -1004,11 +1024,6 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	// lane PERF1: the exposure and the bloom from this linear frame (before the uniforms take them)
 	PassTime::subBegin( PassTime::ToneMeasure );
-	GlSnap sn;	// lane SYNC1: read once here for the measure and the tone quads (the measure and the bloom restore it)
-	if ( sync ) {
-		sn.measurePart( fn );
-		sn.quadsExtra( fn );
-	}
 	isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead, sync ? &sn : nullptr );
 	PassTime::subEnd( PassTime::ToneMeasure );
 	// lane BLOOM1b: the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
@@ -1017,6 +1032,7 @@ void wwCellHdrEnd( Scene * scene )
 	PassTime::subEnd( PassTime::ToneBloom );
 	// lane FOGBLOOM1: the per-pixel bloom strength from the air along each ray (cellfogbloom.h); off: no GL call
 	const bool fogBloom = wwCellFogBloomRun( scene, g.fbo, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
+	WwCellUni::knownSlot() = nullptr;	// lane CELLUNI4: the quads change the state
 
 	// lane PERF2: the quad at the far plane keeps the early tests (WW_CELL_HDR_EARLY_RED=1: depth written per sample)
 	WW_SWITCH_STATIC( bool, earlyRed, qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) != 0 );

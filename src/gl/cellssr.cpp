@@ -207,8 +207,13 @@ void wwCellSsrKeepFrame( Scene * scene, unsigned int hdrFbo, int w, int h )
 	SsrGpu & g = ssrGpus()[r];
 	auto fn = r->fn;
 	GLint prevDraw = 0, prevRead = 0;
-	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
-	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	if ( const WwCellUni::KnownGl * kn = WwCellUni::known( fn ) ) {	// lane CELLUNI4: the tone map's known state
+		prevDraw = kn->draw;
+		prevRead = kn->read;
+	} else {
+		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+		fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	}
 	ssrAlloc( fn, g.prev, w, h, true );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( hdrFbo ) );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.prev.fbo );
@@ -651,7 +656,7 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 		glDepthMask( GL_FALSE );
 		if ( water ) {
 			glDisable( GL_BLEND );
-			wwDrawGlCacheDirty();	// lane PERF3
+			wwDrawGlCacheBlend( false );	// lane PERF3; CELLUNI4: known off, no ask
 			glEnable( GL_DEPTH_TEST );
 			glDepthFunc( GL_LEQUAL );
 		}

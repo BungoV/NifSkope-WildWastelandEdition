@@ -3,6 +3,7 @@
 
 #include "gl/celllights.h"
 #include "gl/celllooks.h"
+#include "gl/celluniform.h"	// lane CELLUNI4: the tone map's known state
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
@@ -486,8 +487,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	}
 	BloomGpu & g = bloomGpus()[r];
 	const int S = std::max( samples, 1 );
+	bool made = false;
 	if ( !g.srcFbo || g.w != W || g.h != H || g.samples != S || g.mipCount != mipCount
 		|| ( mipCount && ( g.dims[0][0] != dims[0][0] || g.dims[0][1] != dims[0][1] ) ) ) {
+		made = true;
 		freeGpu( r, g );
 		if ( !g.srcFbo ) {
 			fn->glGenFramebuffers( 1, &g.srcFbo );
@@ -514,28 +517,23 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		g.mipCount = mipCount;
 	}
 
-	// state kept for the restore
-	GLint prevDraw = 0, prevRead = 0, prevActive = 0, vp[4] = { 0, 0, 1, 1 };
-	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
-	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glGetIntegerv( GL_VIEWPORT, vp );
-	GLboolean colorMask[4], depthMask = GL_TRUE;
-	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
-	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
-	GLfloat clear[4];
-	fn->glGetFloatv( GL_COLOR_CLEAR_VALUE, clear );
-	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
-	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
-	const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
-	GLint stFunc = GL_ALWAYS, stRef = 0, stValMask = 0xFF, stWriteMask = 0xFF, stFail = GL_KEEP, stZFail = GL_KEEP, stZPass = GL_KEEP;
-	fn->glGetIntegerv( GL_STENCIL_FUNC, &stFunc );
-	fn->glGetIntegerv( GL_STENCIL_REF, &stRef );
-	fn->glGetIntegerv( GL_STENCIL_VALUE_MASK, &stValMask );
-	fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &stWriteMask );
-	fn->glGetIntegerv( GL_STENCIL_FAIL, &stFail );
-	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_FAIL, &stZFail );
-	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_PASS, &stZPass );
+	/* state kept for the restore. lane CELLUNI4: the tone map's known state, unless the block above made the targets
+	 * (it bound its own framebuffer first, so the old asks read that one: kept as it was) */
+	WwCellUni::KnownGl kg;
+	if ( const WwCellUni::KnownGl * kn = made ? nullptr : WwCellUni::known( fn ) )
+		kg = *kn;
+	else
+		WwCellUni::askAll( fn, kg );
+	if ( made )
+		WwCellUni::knownSlot() = nullptr;	// the restore binds what was asked: the passes after it ask too
+	const GLint prevDraw = kg.draw, prevRead = kg.read, prevActive = kg.active;
+	const GLint * vp = kg.vp;
+	const GLboolean * colorMask = kg.colorMask;
+	const GLboolean depthMask = kg.depthMask;
+	const GLfloat * clear = kg.clear;
+	const bool wasDepth = kg.depth, wasBlend = kg.blend, wasCull = kg.cull, wasStencil = kg.stencil, wasScissor = kg.scissor;
+	const GLint stFunc = kg.sFunc, stRef = kg.sRef, stValMask = kg.sMask, stWriteMask = kg.sWrite;
+	const GLint stFail = kg.sFail, stZFail = kg.sZFail, stZPass = kg.sPass;
 
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDepthMask( GL_FALSE );

@@ -1,6 +1,7 @@
 #include "gametaa.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
+#include "gl/celluniform.h"	// lane CELLUNI4: the tone map's known state
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "gl/taainputs.h"	// lane TAA3: Ultra's velocity and mask
@@ -605,14 +606,27 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 	const bool linear = linearFbo != 0;
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
-	while ( fn->glGetError() != GL_NO_ERROR ) {
-	}
+	// lane CELLUNI4: before the tone map the state is the one cellhdr's End read (null: asked, as before)
+	const WwCellUni::KnownGl * kn = linear ? WwCellUni::known( fn ) : nullptr;
+	static WwCellUni::DepthCfg depthCfg;	// the frame's depth format, asked once per framebuffer and size
 
 	GLint prevDraw = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 };
-	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
-	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
-	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	if ( kn ) {
+		prevDraw = kn->draw;
+		prevRead = kn->read;
+		std::memcpy( vp, kn->vp, sizeof vp );
+	} else {
+		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+		fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+		fn->glGetIntegerv( GL_VIEWPORT, vp );
+	}
 	const int W = vp[2], H = vp[3];
+	const bool cfgHit = kn && depthCfg.hit( r, prevDraw, W, H );
+	const bool checkErr = !cfgHit || !depthCfg.trusted;	// errors read until a frame on this framebuffer raised none
+	if ( checkErr ) {
+		while ( fn->glGetError() != GL_NO_ERROR ) {
+		}
+	}
 	if ( W != s.W || H != s.H ) {
 		note( s, QStringLiteral( "refused (the viewport changed inside the frame)" ) );
 		return false;
@@ -620,11 +634,19 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 
 	// the frame's depth format: the depth goes over by a blit, which needs the same format both sides
 	GLint depthBits = 0, stencilBits = 0, compType = 0;
-	const GLenum att = prevDraw ? GL_DEPTH_ATTACHMENT : GL_DEPTH;
-	fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depthBits );
-	fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, prevDraw ? GL_STENCIL_ATTACHMENT : GL_STENCIL,
-		GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &stencilBits );
-	fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &compType );
+	if ( cfgHit ) {
+		depthBits = depthCfg.depthBits;
+		stencilBits = depthCfg.stencilBits;
+		compType = depthCfg.compType;
+	} else {
+		const GLenum att = prevDraw ? GL_DEPTH_ATTACHMENT : GL_DEPTH;
+		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depthBits );
+		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, prevDraw ? GL_STENCIL_ATTACHMENT : GL_STENCIL,
+			GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &stencilBits );
+		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &compType );
+		if ( kn )
+			depthCfg.keep( r, prevDraw, W, H, depthBits, stencilBits, compType );
+	}
 	GLenum dsFormat = 0, dsFmt = 0, dsType = 0;
 	GLbitfield blitBits = GL_DEPTH_BUFFER_BIT;
 	if ( stencilBits == 8 && depthBits == 24 && compType != GL_FLOAT ) {
@@ -743,13 +765,21 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 
 	// state kept for the restore
 	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	GLboolean colorMask[4], depthMask = GL_TRUE;
-	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
-	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
-	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
-	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
-	const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	bool wasDepth = false, wasBlend = false, wasCull = false, wasStencil = false, wasScissor = false;
+	if ( kn ) {	// lane CELLUNI4
+		prevActive = kn->active;
+		std::memcpy( colorMask, kn->colorMask, sizeof colorMask );
+		depthMask = kn->depthMask;
+		wasDepth = kn->depth, wasBlend = kn->blend, wasCull = kn->cull, wasStencil = kn->stencil, wasScissor = kn->scissor;
+	} else {
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+		fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+		fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+		wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
+		wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+		wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	}
 
 	// 1. the frame (resolved when multisampled) into t0 and t3 (lane TAA3: the colour from the linear frame when given)
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, linear ? linearFbo : GLuint( prevDraw ) );
@@ -757,7 +787,7 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 		fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
 	// lane MSAABLACK1: a pass that set the view's read buffer to GL_NONE makes this colour blit a silent no-op
 	// (no GL error, t0 stays zero, the frame saves black): give the frame its colour buffer back first
-	{
+	if ( !kn ) {	// lane CELLUNI4: before the tone map the read buffer was set just above
 		WW_SWITCH_STATIC( bool, msaaBlackRed, wwEnvInt( "WW_MSAABLACK1_RED" ) == 1 );
 		GLint rb = 0;
 		fn->glGetIntegerv( GL_READ_BUFFER, &rb );
@@ -778,7 +808,11 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 	if ( linear )
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );	// the depth went back to the frame (cellhdr)
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, g.depthBits, GL_NEAREST );
-	const GLenum blitErr = fn->glGetError();
+	const GLenum blitErr = checkErr ? fn->glGetError() : GLenum( GL_NO_ERROR );
+	if ( kn && blitErr != GL_NO_ERROR )
+		depthCfg.forget();	// lane CELLUNI4: asked again, and errors read, next frame
+	else if ( kn && checkErr && depthCfg.hit( r, prevDraw, W, H ) )
+		depthCfg.trusted = true;
 
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDepthMask( GL_FALSE );
