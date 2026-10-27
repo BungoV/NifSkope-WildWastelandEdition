@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 9 (2026-10-27, branch waterlook1-20261027): the sun glitters on near water (WATERGLINT1)
+
+- **Water sun glare** row. The glare is still the smooth average over everything one pixel covers, but it is now
+  also counted in facets. Water is made of small mirrors about 2 cm across, and a pixel sees the sun in a random
+  number of them. That number follows how many the pixel covers and how many point the sun into the eye. Near
+  water, where a pixel covers few, the glare breaks into specks, and only inside the glare. Far water, where a
+  pixel covers thousands, stays smooth. The average brightness is unchanged at every distance.
+- The specks are fixed to the water, not the screen. They change with the sun, the view and the waves. They do not
+  pop as the distance changes. The sun's disc (0.27 degrees) now widens the glare a little. New
+  res/shaders/water_glitter.glsl.
+- New reds on WW_CELL_WATER_GLINT_RED: `noglitter` (the average alone), `nodisc` (a point sun), `pixel` (the specks
+  tied to the screen), `nolodblend` (one cell size: specks pop). fo4_water.prog (rows off) keeps its machine code.
+- Offline (no window, the real shader):
+  - The average stays exact (within the counting noise) from 0.01 to 1000 facets lit per pixel, and the scatter is
+    as counting predicts.
+  - The share of pixels that glint matches. Far water's spread is 3%.
+  - Moving the camera keeps every speck on the water (red pixel: 20%).
+  - Stepping across a cell size keeps the pattern (correlation 1.000; red nolodblend: 0.003).
+  - Specks hold within the sun's cone and change outside it.
+  - About 0.03 ms a 1080p pass. All programs link.
+
 ## Lane WATERLOOK1 step 8 (2026-10-27, branch waterlook1-20261027): the water's own colour (WATERCOLOR1)
 
 - **Water clear colour** (new Show row, pin `WW_CELL_WATER_CLEAR`, default off, live). Instead of the WATR's depth ramp

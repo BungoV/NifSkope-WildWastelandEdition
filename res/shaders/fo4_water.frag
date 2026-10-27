@@ -111,6 +111,8 @@ uniform int waterProbe;
 #endif
 #ifdef WW_WATER_REFL	// lane WATERREFL1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_refl.glsl"
+// lane WATERLOOK1 step 9 (WATERGLINT1): the glare as counted facets
+#include "water_glitter.glsl"
 #endif
 #ifdef WW_WATER_OCEAN	// lane WATERLOOK1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_ocean.glsl"
@@ -462,8 +464,16 @@ void main()
 #ifdef WW_WATER_REFL
 	// lane WATERREFL1: the sun's glare from the roughness (no fixed-direction sparkle); red game keeps today's spec
 	vec3 glare = vec3( 0.0 );
+	float glFoot = length( cross( dFdx( P ), dFdy( P ) ) );	// lane WATERLOOK1 step 9: the footprint (u^2), uniform flow
 	if ( waterGlintOn && ( waterGlintRed & 1 ) == 0 && !under ) {
-		glare = wwWaterGlare( Ns, V, Ldir, sun, max( reflA2, 1e-6 ), waterGlintK.y, ( waterGlintRed & 4 ) == 0 );
+		// step 9: the sun's disc in the lobe; the mean glare x the facets counted in this pixel, then the shoulder
+		float glA2 = max( reflA2, 1e-6 ) + wwGlitSunA2();
+		vec3 glH = normalize( Ldir - V );
+		float glX = wwWaterGlare( Ns, V, Ldir, vec3( 1.0 ), glA2, waterGlintK.y, false ).x
+			* wwWaterGlitter( P.xy, glFoot, glH.xy / max( glH.z, 1e-3 ) - Ns.xy / max( Ns.z, 1e-3 ), glA2, dot( glH, Ns ) );
+		if ( ( waterGlintRed & 4 ) == 0 )
+			glX = glX / ( 1.0 + glX / waterGlintK.x );
+		glare = sun * glX;
 		spec = glare;
 	}
 	float reflAlpha = sqrt( max( reflA2, 0.0 ) );

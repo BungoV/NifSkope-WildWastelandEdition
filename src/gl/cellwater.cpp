@@ -485,7 +485,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1b( "waterReflOn", reflOn );
 		prog->uni1b( "waterGlintOn", glintOn );
 		prog->uni1i( "waterReflRed", rr == "record" ? 1 : rr == "farcolour" ? 2 : rr == "sharp" ? 4 : 0 );
-		prog->uni1i( "waterGlintRed", gr == "game" ? 1 : gr == "nolean" ? 2 : gr == "noshoulder" ? 4 : 0 );
+		prog->uni1i( "waterGlintRed", gr == "game" ? 1 : gr == "nolean" ? 2 : gr == "noshoulder" ? 4
+			: gr == "noglitter" ? 8 : gr == "nodisc" ? 16 : gr == "pixel" ? 32 : gr == "nolodblend" ? 64 : 0 );	// WATERLOOK1 step 9
 		prog->uni4f( "waterGlintK", FloatVector4( 16.0f, 0.0204f, 0.18f, 0.015f ) );
 		static const char * const momentUni[3] = { "waterMoment0", "waterMoment1", "waterMoment2" };
 		for ( int k = 0; k < 3; k++ ) {
