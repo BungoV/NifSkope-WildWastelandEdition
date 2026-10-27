@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERSKYVISFAR3 (2026-10-27, branch waterskyvisfar3-20261027): water under a pier deck reads the deck's shade
+
+- **Why:** WATERSKYVISFAR2 stamped statics as walls only. A bridge or pier deck floating over the water was a
+  "ceiling" and was left out, so the water under it read the open sky. A static standing in the water buried its
+  own texel, so those texels sat on the 0.252 floor.
+- **Slabs:** every static square is now also kept as a slab at its grid point, from its lowest to its highest
+  surface. A wet texel whose own point has a slab top above the water casts the bake's 56 sky rays through the
+  terrain alone plus the slabs, marched square by square. A texel inside its own slab leaves its own square out.
+  Every other wet texel keeps the WATERSKYVISFAR2 byte exactly (21,724,077 of 21,755,123 on the Commonwealth).
+  Commonwealth: 31,043 covered texels. Under a deck the mean goes 0.628 -> 0.171; inside a static 0.441 -> 0.353.
+- **Statics gather on worker threads:** the distinct LOD models load once each on workers, and the placements
+  rasterise with atomic max/min, so the planes are the serial bytes. The refusal census replays in placement order.
+  Commonwealth gather: 46.0 s -> 16.5 s cold, 3.9 s -> 2.4 s warm. `WW_LODGEN_BAKESPEED_RED=1` runs the old serial walk.
+- **Flags:** `--water-sky-walls-only` writes the WATERSKYVISFAR2 bytes. With slabs on, `--water-sky-dump` appends two
+  more u16 planes (slab bottom, slab top). The census adds `sky slabs: N covered ... (U under, I inside)`.
+- **Cost:** no shader change, GPU +0 ms at 1080p. The sky plane grows 974 KB -> 988 KB. The .lodl stage's peak working
+  set goes 1.29 GB -> 1.43 GB. The slab march adds about 2.8 s to the sky stage (warm).
+
+## Lane WATERSKYVISFAR2 (2026-10-27, branch waterskyvisfar2-20261027): cliffs and buildings darken the far water too
+
+- **Why:** WATERSKYVISFAR1's far-water sky byte saw the terrain only, so water under a cliff static, a rock
+  formation or a seawall of buildings still reflected the whole open sky.
+- **Bake:** the .lodl sky rays now march a height field that also holds the placed statics' far LOD meshes (the
+  object AO's 128-unit field, SCOL parts expanded, trees left out). A square whose lowest surface lies within 256
+  units of the ground is a wall: its nearest sky sample rises to the square's top. Higher squares (bridge decks) are
+  ceilings and stay out. Only cells within 10,000 units of water gather. Still the CPU path (the rays mostly leave at
+  the first step; a GPU triangle BVH of the height field would cost more than the 3 s of rays). Commonwealth: the
+  statics gather adds about 46 s to the .lodl stage; the sky plane grows from 837 KB to 974 KB.
+- **Flags:** `--water-sky-terrain-only` writes the WATERSKYVISFAR1 bytes exactly; `--water-sky-dump <file>` writes the
+  terrain and stamped heights for offline gates. The writer's census adds a `sky occluders:` line.
+- **Draw:** the far water look twin (`fo4_waterlook.prog`) now dims the sun's specular by the same byte (specular
+  occlusion), not only the sky. Probe 47 = (sky visibility, sun spec luminance / 16, 0). `fo4_water.prog` keeps its
+  machine code; 1080p cost +0.000 ms (0.287 ms both).
+- **CLI:** `lodl <file> --water-info <dir>` also prints the sky census line to stdout.
+- **Red:** `WW_CELL_WATER_SKYFAR_RED=one` (unchanged) reads 1 for both the sky and the spec.
+
 ## Lane CELLUNI4 (2026-10-27, branch celluni4-20261027): the CELLUNI3 leftovers on the uniform kit
 
 - **Frame end state read once:** the tone map's End reads its GlSnap before the SSR keep (it was after the temporal

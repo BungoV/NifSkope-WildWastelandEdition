@@ -416,6 +416,8 @@ struct WaterInput
 	/*! Lane WATER1: the sloped surface, or null. Null or empty = the pass is
 	 *  exactly what it was, texel for texel and byte for byte. */
 	const LodtWaterSurface * surface = nullptr;
+	//! Lane WATERSKYVISFAR2: the statics' tops over the input's own cells (LodtOptions::staticTops); empty = none.
+	std::function<bool( const std::function<bool( int, int )> & cellWanted, LodtStaticTops & out )> staticTops;
 };
 
 //! What the pass produces: the sections, already packed, and its own census.
@@ -649,6 +651,66 @@ static QByteArray lodtPackPlane( int tilesX, int tilesY, int tileEdge,
  *  `baseOffset` is where the first section will land in the file, because the
  *  plane directories store absolute offsets exactly as the block directory
  *  does. */
+/*! Lane WATERSKYVISFAR3: the sky byte of a wet texel a static covers. The bake's 56 rays (LodgenAoScene::skyDirs)
+ *  leave from the water + 8 u; a ray is blocked by the terrain-only scene `terr` (origin `o` in its units) or by a
+ *  SLAB: each grid point's 128 u square holds [lo, hi] (quantised; lo 0 = down to the ground, hi 0 = none). The
+ *  march is a DDA over the squares, centred on the grid points, and stops past `topMax` or the grid's edge. A
+ *  texel inside its own slab (lo <= z) leaves its own square out, or every ray would start blocked. */
+static float lodtSkySlabVis( const LodgenAoScene & terr, const Vector3 & o, float maxTScene, float kScale,
+	qint64 xb, qint64 yb, float z, const std::vector<quint16> & sLo, const std::vector<quint16> & sHi,
+	qint64 gwB, qint64 ghB, float texel, float quantum, float topMax, float allOpen )
+{
+	const LodgenAoScene::SkyDir * sd = LodgenAoScene::skyDirs();
+	const float maxT = maxTScene * kScale;   // world units
+	const float z0 = z + 8.0f;
+	const size_t k0 = size_t( yb * gwB + xb );
+	const bool inside = sHi[k0] && sLo[k0] != 0 && ( float( sLo[k0] ) - 32767.0f ) * quantum <= z0;
+	auto slabHit = [&]( const float * d ) -> bool {
+		const float ax = std::fabs( d[0] ), ay = std::fabs( d[1] );
+		const qint64 sx = d[0] > 0.0f ? 1 : -1, sy = d[1] > 0.0f ? 1 : -1;
+		const float inf = std::numeric_limits<float>::infinity();
+		const float dX = ax > 1.0e-7f ? texel / ax : inf, dY = ay > 1.0e-7f ? texel / ay : inf;
+		float tX = 0.5f * dX, tY = 0.5f * dY, tIn = 0.0f;
+		qint64 ix = xb, iy = yb;
+		for ( ;; ) {
+			const float tOut = qMin( qMin( tX, tY ), maxT );
+			const float zIn = z0 + d[2] * tIn, zOut = z0 + d[2] * tOut;
+			if ( zIn > topMax )
+				return false;
+			const size_t k = size_t( iy * gwB + ix );
+			if ( sHi[k] && !( inside && k == k0 ) ) {
+				const float hi = ( float( sHi[k] ) - 32767.0f ) * quantum;
+				const bool toGround = sLo[k] == 0;
+				const float lo = ( float( sLo[k] ) - 32767.0f ) * quantum;
+				if ( zIn <= hi && ( toGround || zOut >= lo ) )
+					return true;
+			}
+			if ( tOut >= maxT )
+				return false;
+			tIn = tOut;
+			if ( tX <= tY ) {
+				tX += dX;
+				ix += sx;
+			} else {
+				tY += dY;
+				iy += sy;
+			}
+			if ( ix < 0 || iy < 0 || ix >= gwB || iy >= ghB )
+				return false;
+		}
+	};
+	double open = 0.0;
+	for ( int r = 0; r < LodgenAoScene::SKY_RINGS * LodgenAoScene::RING_AZ; r++ ) {
+		const Vector3 d( sd[r].d[0], sd[r].d[1], sd[r].d[2] );
+		if ( terr.rayHitFace( o, d, maxTScene ) )
+			continue;
+		if ( slabHit( sd[r].d ) )
+			continue;
+		open += sd[r].w;
+	}
+	return qBound( 0.0f, float( open ) / allOpen, 1.0f );
+}
+
 static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 	WaterOut & out, QString * error )
 {
@@ -1798,8 +1860,11 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 
 	/* Lane WATERSKYVISFAR1: the SKY plane, at the body rate. Each wet sample casts the bake's 56 sky rays
 	 * (LodgenAoScene::skyVisibilityFace, the CPU reference; the GPU ray path has no heightfield) from its water
-	 * surface over the terrain within kSkyReach. Byte = 1 + round(vis * 254), dry 0. Terrain only. */
+	 * surface over the terrain within kSkyReach. Byte = 1 + round(vis * 254), dry 0. WATERSKYVISFAR2: plus the
+	 * statics' walls stamped into that heightfield (still the CPU path: the rays mostly leave at the first step). */
 	qint64 uniformSky = 0, skyWet = 0, skyShade = 0, skyMs = 0;
+	qint64 stMs = 0;   // lane WATERSKYVISFAR2: the statics' gather + stamp, inside skyMs
+	QString stNote;
 	if ( in.opt.skyVis ) {
 		QElapsedTimer skyClock;
 		skyClock.start();
@@ -1815,6 +1880,109 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			}
 		}
 		const float texel = 4096.0f / float( bodyS );
+		/* Lane WATERSKYVISFAR2: statics with a far LOD mesh stand on the terrain as WALLS. A 128 u square whose
+		 * lowest LOD surface comes within kWallGap of the ground raises its nearest grid point to its highest
+		 * surface; a square floating higher (a bridge deck) is a ceiling and stays out, since a heightfield holds
+		 * no gap under it. Only cells within reach of a wet cell gather. */
+		qint64 stSquares = 0, stCeil = 0, stRaised = 0;
+		stNote = QStringLiteral( "terrain only" );
+		/* Lane WATERSKYVISFAR3: every static square also goes in as a SLAB at its grid point (lowest to highest
+		 * surface; a dry point's wall reaches down to the ground), with the terrain-only heights beside: a wet texel
+		 * under or inside a static marches those (lodtSkySlabVis) instead of the walls that bury it. */
+		std::vector<quint16> hTerr, sLoQ, sHiQ;
+		const bool slabs = in.opt.skySlabs;
+		if ( in.opt.skyStatics && in.staticTops ) {
+			QElapsedTimer stClock;
+			stClock.start();
+			std::vector<quint8> wetC( size_t( cellsX ) * size_t( cellsY ), quint8( 0 ) );
+			for ( int c = 0; c < cellsX * cellsY; c++ ) {
+				const int cx = c % cellsX, cy = c / cellsX;
+				for ( int j = 0; j < bodyS && !wetC[size_t( c )]; j++ )
+					for ( int i = 0; i < bodyS && !wetC[size_t( c )]; i++ )
+						wetC[size_t( c )] = grid[size_t( ( qint64( cy ) * spc + qint64( j ) * stepB ) * gw
+							+ qint64( cx ) * spc + qint64( i ) * stepB )] != 0;
+			}
+			const int reachC = int( std::ceil( kSkyReach / 4096.0f ) );
+			std::vector<quint8> wantC( wetC.size(), quint8( 0 ) );
+			for ( int c = 0; c < cellsX * cellsY; c++ ) {
+				if ( !wetC[size_t( c )] )
+					continue;
+				const int cx = c % cellsX, cy = c / cellsX;
+				for ( int y = qMax( 0, cy - reachC ); y <= qMin( cellsY - 1, cy + reachC ); y++ )
+					for ( int x = qMax( 0, cx - reachC ); x <= qMin( cellsX - 1, cx + reachC ); x++ )
+						wantC[size_t( y ) * size_t( cellsX ) + size_t( x )] = 1;
+			}
+			LodtStaticTops tops;
+			const bool got = in.staticTops( [&]( int wcx, int wcy ) {
+				const int x = wcx - in.minX, y = wcy - in.minY;
+				return x >= 0 && y >= 0 && x < cellsX && y < cellsY && wantC[size_t( y ) * size_t( cellsX ) + size_t( x )];
+			}, tops );
+			if ( got && tops.gw > 0 && tops.gh > 0 && tops.hi.size() == size_t( tops.gw ) * size_t( tops.gh )
+				&& tops.lo.size() == tops.hi.size() ) {
+				const float kWallGap = 256.0f;
+				hTerr = hB;
+				const std::vector<quint16> & hT = hTerr;
+				if ( slabs ) {
+					sLoQ.assign( hB.size(), quint16( 65535 ) );
+					sHiQ.assign( hB.size(), quint16( 0 ) );
+				}
+				for ( int gy = 0; gy < tops.gh; gy++ )
+					for ( int gx = 0; gx < tops.gw; gx++ ) {
+						const size_t o = size_t( gy ) * size_t( tops.gw ) + size_t( gx );
+						const float hi = tops.hi[o];
+						if ( hi < -1.0e29f )
+							continue;
+						stSquares++;
+						const float wx = float( tops.gx0 + gx ) * 128.0f + 64.0f - float( in.minX ) * 4096.0f;
+						const float wy = float( tops.gy0 + gy ) * 128.0f + 64.0f - float( in.minY ) * 4096.0f;
+						const qint64 xb = qint64( std::lround( wx / texel ) ), yb = qint64( std::lround( wy / texel ) );
+						if ( xb < 0 || yb < 0 || xb >= gwB || yb >= ghB )
+							continue;
+						const size_t k = size_t( yb * gwB + xb );
+						if ( slabs ) {
+							const bool dry = grid[size_t( yb * stepB * gw + xb * stepB )] == 0;
+							const bool onGround = tops.lo[o] <= ( float( hT[k] ) - 32767.0f ) * in.quantum + kWallGap;
+							const quint16 qh = quint16( qBound( 1.0, 32767.0 + std::ceil( double( hi ) / double( in.quantum ) ),
+								65535.0 ) );
+							const quint16 ql = ( dry && onGround ) ? quint16( 0 ) : quint16( qBound( 1.0,
+								32767.0 + std::floor( double( tops.lo[o] ) / double( in.quantum ) ), 65535.0 ) );
+							sHiQ[k] = qMax( sHiQ[k], qh );
+							sLoQ[k] = qMin( sLoQ[k], ql );
+						}
+						if ( tops.lo[o] > ( float( hT[k] ) - 32767.0f ) * in.quantum + kWallGap ) {
+							stCeil++;
+							continue;
+						}
+						const quint16 q = quint16( qBound( 0.0, 32767.0 + std::ceil( double( hi ) / double( in.quantum ) ),
+							65535.0 ) );
+						if ( q > hB[k] )
+							hB[k] = q;
+					}
+				for ( size_t k = 0; k < hB.size(); k++ )
+					stRaised += hB[k] != hT[k];
+				if ( !in.opt.skyDumpPath.isEmpty() ) {
+					QFile df( in.opt.skyDumpPath );
+					if ( df.open( QIODevice::WriteOnly ) ) {
+						const qint32 hd[4] = { qint32( gwB ), qint32( ghB ), qint32( in.minX ), qint32( in.minY ) };
+						const float hf[2] = { texel, in.quantum };
+						df.write( "SKYS", 4 );
+						df.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
+						df.write( reinterpret_cast<const char *>( hf ), sizeof( hf ) );
+						df.write( reinterpret_cast<const char *>( hT.data() ), qint64( hT.size() * 2 ) );
+						df.write( reinterpret_cast<const char *>( hB.data() ), qint64( hB.size() * 2 ) );
+						if ( slabs ) {   // lane WATERSKYVISFAR3: + u16 slab bottom (0 = the ground) and top (0 = none)
+							df.write( reinterpret_cast<const char *>( sLoQ.data() ), qint64( sLoQ.size() * 2 ) );
+							df.write( reinterpret_cast<const char *>( sHiQ.data() ), qint64( sHiQ.size() * 2 ) );
+						}
+					}
+				}
+				stNote = QString( "statics %1 (%2 square(s), %3 ceiling(s) left out, %4 grid point(s) raised)" )
+					.arg( tops.census ).arg( stSquares ).arg( stCeil ).arg( stRaised );
+			} else {
+				stNote = QStringLiteral( "terrain only (the statics gather failed: %1)" ).arg( tops.census );
+			}
+			stMs = stClock.elapsed();
+		}
 		const int mrg = int( std::ceil( kSkyReach / texel ) ) + 1;
 		const int hn = bodyS + 2 * mrg;
 		float allOpen = 1.0f;
@@ -1823,7 +1991,11 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			allOpen = none.skyVisibilityFace( Vector3( 0.0f, 0.0f, 0.0f ), Vector3( 0.0f, 0.0f, 1.0f ), 1.0f );
 		}
 		std::vector<quint8> sky( size_t( gwB * ghB ), quint8( 0 ) );
-		std::atomic<qint64> nWet( 0 ), nShade( 0 );
+		std::atomic<qint64> nWet( 0 ), nShade( 0 ), nCov( 0 ), nCovIn( 0 );
+		float slabTop = -3.4e38f;   // lane WATERSKYVISFAR3: the highest slab top, where a slab march may stop
+		for ( quint16 q : sHiQ )
+			if ( q )
+				slabTop = qMax( slabTop, ( float( q ) - 32767.0f ) * in.quantum );
 		lodgenParallelFor( cellsX * cellsY, [&]( int c ) {
 			const int cx = c % cellsX, cy = c / cellsX;
 			bool any = false;
@@ -1847,7 +2019,9 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				}
 			}
 			sc.prepareGround();
-			qint64 w = 0, s = 0;
+			LodgenAoScene terr;   // lane WATERSKYVISFAR3: terrain only, built at this cell's first covered texel
+			bool terrUp = false;
+			qint64 w = 0, s = 0, cv = 0, cvIn = 0;
 			for ( int j = 0; j < bodyS; j++ ) {
 				const qint64 gy = qint64( cy ) * spc + qint64( j ) * stepB;
 				for ( int i = 0; i < bodyS; i++ ) {
@@ -1864,8 +2038,35 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 							z = it->z;
 					}
 					const Vector3 p( float( mrg + i ) * sc.hSpacing, float( mrg + j ) * sc.hSpacing, z / kSkyScale );
-					const float vis = qBound( 0.0f, sc.skyVisibilityFace( p, Vector3( 0.0f, 0.0f, 1.0f ),
-						kSkyReach / kSkyScale ) / allOpen, 1.0f );
+					const qint64 xb = qint64( cx ) * bodyS + i, yb = qint64( cy ) * bodyS + j;
+					const size_t kb = size_t( yb * gwB + xb );
+					float vis = 0.0f;
+					if ( !sHiQ.empty() && sHiQ[kb] && ( float( sHiQ[kb] ) - 32767.0f ) * in.quantum > z ) {
+						if ( !terrUp ) {
+							terr.hn = hn;
+							terr.hSpacing = sc.hSpacing;
+							terr.span = sc.span;
+							terr.hgt.resize( size_t( hn ) * size_t( hn ) );
+							for ( int b2 = 0; b2 < hn; b2++ ) {
+								const qint64 y2 = qBound( qint64( 0 ), qint64( cy ) * bodyS - mrg + b2, ghB - 1 );
+								for ( int a2 = 0; a2 < hn; a2++ ) {
+									const qint64 x2 = qBound( qint64( 0 ), qint64( cx ) * bodyS - mrg + a2, gwB - 1 );
+									terr.hgt[size_t( b2 ) * size_t( hn ) + size_t( a2 )] =
+										( float( hTerr[size_t( y2 * gwB + x2 )] ) - 32767.0f ) * in.quantum / kSkyScale;
+								}
+							}
+							terr.prepareGround();
+							terrUp = true;
+						}
+						vis = lodtSkySlabVis( terr, p + Vector3( 0.0f, 0.0f, 2.0f ), kSkyReach / kSkyScale, kSkyScale,
+							xb, yb, z, sLoQ, sHiQ, gwB, ghB, texel, in.quantum, slabTop, allOpen );
+						cv++;
+						if ( sLoQ[kb] != 0 && ( float( sLoQ[kb] ) - 32767.0f ) * in.quantum <= z + 8.0f )
+							cvIn++;
+					} else {
+						vis = qBound( 0.0f, sc.skyVisibilityFace( p, Vector3( 0.0f, 0.0f, 1.0f ),
+							kSkyReach / kSkyScale ) / allOpen, 1.0f );
+					}
 					const int v = 1 + int( std::lround( vis * 254.0f ) );
 					sky[size_t( ( qint64( cy ) * bodyS + j ) * gwB + qint64( cx ) * bodyS + i )] = quint8( v );
 					w++;
@@ -1875,6 +2076,8 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			}
 			nWet += w;
 			nShade += s;
+			nCov += cv;
+			nCovIn += cvIn;
 		} );
 		out.skySamples = bodyS;
 		out.skyPlane = lodtPackPlane( cellsX, cellsY, bodyS, 1, pos,
@@ -1885,6 +2088,9 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			}, &uniformSky );
 		skyWet = nWet;
 		skyShade = nShade;
+		if ( !sHiQ.empty() )
+			stNote += QString( "; sky slabs: %1 covered wet texel(s) marched through the slabs (%2 under, %3 inside)" )
+				.arg( qint64( nCov ) ).arg( qint64( nCov ) - qint64( nCovIn ) ).arg( qint64( nCovIn ) );
 		skyMs = skyClock.elapsed();
 	}
 
@@ -2022,7 +2228,8 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			out.summary += QString( "; sky plane %1 bytes, %2 of %3 tiles uniform, %4 wet sample(s), %5 below open "
 				"sky, %6 ms" )
 				.arg( out.skyPlane.size() ).arg( uniformSky ).arg( qint64( cellsX ) * cellsY )
-				.arg( skyWet ).arg( skyShade ).arg( skyMs );
+				.arg( skyWet ).arg( skyShade ).arg( skyMs )
+				+ QString( "; sky occluders: %1, %2 ms" ).arg( stNote ).arg( stMs );
 		if ( in.opt.shore && in.opt.shoreLand )
 			out.summary += QString( "; shore plane land side: %1 dry sample(s) within %2 units of water" )
 				.arg( landNear ).arg( 255 * int( LODL_SHORE_QUANTUM ) );
@@ -2748,6 +2955,9 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		wi.defaultWaterHeight = src.defaultWaterHeight;
 		wi.opt = opts.water;
 		wi.opt.skyVis = opts.water.skyVis && version >= 4;
+		if ( wi.opt.skyVis && opts.water.skyStatics && opts.staticTops )   // lane WATERSKYVISFAR2
+			wi.staticTops = [&opts, minX, minY, maxX, maxY]( const std::function<bool( int, int )> & want,
+				LodtStaticTops & o ) { return opts.staticTops( minX, minY, maxX, maxY, want, o ); };
 		wi.surface = surface.texels.empty() ? nullptr : &surface;   // lane WATER1
 		/* One decoded cell per cell per row, out of the same cache the pyramid
 		 * used, so the two passes over the world cost cache hits and not LAND

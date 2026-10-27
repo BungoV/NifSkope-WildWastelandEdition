@@ -440,6 +440,12 @@ void lodgenSetVanillaLodRoot( const QString & root );
 bool lodgenLandFillVanilla();
 void lodgenSetLandFillVanilla( bool on );
 bool lodgenVanillaCellHeights( const QString & ws, int cx, int cy, float * h33x33 );
+/*! Lane WATERSKYVISFAR2: the placed statics' far-LOD tops over cells [cx0, cx1] x [cy0, cy1] (plus the object
+ *  field's two-cell margin), trees left out, for the .lodl sky plane (LodtOptions::staticTops). `cellWanted`
+ *  false = that cell's refs are skipped. The object AO's own height field and loader. */
+struct LodtStaticTops;
+bool lodgenStaticTops( const EsmWorld & world, const QString & dataRoot, int cx0, int cy0, int cx1, int cy1,
+	const std::function<bool( int, int )> & cellWanted, LodtStaticTops & out );
 QString lodgenLandFillCensusLine();
 float lodgenLandShade();
 void lodgenSetLandShade( float kDiv );           // 0 = no crevice term

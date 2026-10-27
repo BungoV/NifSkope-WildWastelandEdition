@@ -3707,6 +3707,11 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					}
 					return true;
 				};
+				// lane WATERSKYVISFAR2: the placed statics' far-LOD tops, walls in the water sky plane
+				lopts.staticTops = [&world, waterDataRoot]( int cx0, int cy0, int cx1, int cy1,
+					const std::function<bool( int, int )> & want, LodtStaticTops & o ) {
+					return lodgenStaticTops( world, waterDataRoot, cx0, cy0, cx1, cy1, want, o );
+				};
 			}
 			QElapsedTimer landscapeTimer;
 			landscapeTimer.start();
@@ -7049,7 +7054,7 @@ int usage()
 		  << "                                          REWRITES the file it is given,\n"
 		  << "                                          so give it a copy\n"
 		  << "  lodl <file.lodl> --water-info <dir>     the water shader's sparse tables (index,\n"
-		  << "                                          atlas, bodies, census) into <dir>, and the\n"
+		  << "                                          atlas, bodies, census, sky line) into <dir>, and the\n"
 		  << "                                          land side's (land_index, land_atlas)\n"
 		  << "  lodl <out.lodl> --water-slope-selftest [--water-slope-flat <flat.lodl>]\n"
 		  << "                                          sloped-water known-answer test: it\n"
@@ -8818,6 +8823,9 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-no-shore-land" ) ) gLodlWater.shoreLand = false;
 		else if ( t == QLatin1String( "--water-flow-constant" ) ) gLodlWater.flowField = false;	// lane WATERFLOWBAKE1
 		else if ( t == QLatin1String( "--water-no-sky" ) ) gLodlWater.skyVis = false;	// lane WATERSKYVISFAR1: version 3
+		else if ( t == QLatin1String( "--water-sky-terrain-only" ) ) gLodlWater.skyStatics = false;	// lane WATERSKYVISFAR2
+		else if ( t == QLatin1String( "--water-sky-dump" ) ) gLodlWater.skyDumpPath = next();
+		else if ( t == QLatin1String( "--water-sky-walls-only" ) ) gLodlWater.skySlabs = false;	// lane WATERSKYVISFAR3
 		else if ( t == QLatin1String( "--water-velocities" ) ) gLodlWater.velocityPlugin = next();
 		else if ( t == QLatin1String( "--water-report" ) ) gLodlWater.reportPath = next();
 		else if ( t == QLatin1String( "--dump-land" ) ) lgDumpLand = next();
@@ -9794,7 +9802,8 @@ int nifskopeCliMain( const QStringList & args )
 			QString werr;
 			const bool ok = wwWaterInfoBuild( file, t, &werr ) && wwWaterInfoDump( t, lodlWaterInfoDir, &werr );
 			if ( ok )
-				out() << wwWaterInfoCensus( t ) << Qt::endl << wwLandShoreCensus( t ) << Qt::endl;
+				out() << wwWaterInfoCensus( t ) << Qt::endl << wwLandShoreCensus( t ) << Qt::endl
+					<< wwWaterSkyCensus( t ) << Qt::endl;   // lane WATERSKYVISFAR2
 			else
 				err() << "error: " << werr << Qt::endl;
 			rc = ok ? 0 : 1;

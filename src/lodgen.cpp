@@ -23,6 +23,8 @@ BSD License - see nifskope.h
 #include "esmdata.h"
 #include "nativeemit.h"
 #include "lodgenlayout.h"
+#include "lodtfile.h"	// lane WATERSKYVISFAR2: LodtStaticTops, the sky plane's static occluders
+#include "data/nifitemcache.h"	// lane WATERSKYVISFAR3: the statics gather's model loads on workers
 #include "io/material.h"
 #include "io/lodmfile.h"
 #include "io/lodvfile.h"
@@ -12400,8 +12402,10 @@ public:
 	 *  LOD mesh extent, and a placement gathered and then found to be out of
 	 *  reach costs one bounds test. */
 	void gather( const EsmWorld & world, const QString & dataRoot,
-		int cx0, int cy0, int cx1, int cy1 )
+		int cx0, int cy0, int cx1, int cy1, const std::function<bool( int, int )> & cellWanted = {},
+		bool skipTrees = false, bool parallel = false )
 	{
+		skipTreesM = skipTrees;   // lane WATERSKYVISFAR2: the water sky's walls leave the tree cards out
 		const int margin = 2;
 		gx0 = ( cx0 - margin ) * 32;
 		gy0 = ( cy0 - margin ) * 32;
@@ -12412,8 +12416,14 @@ public:
 		grid.assign( size_t( gw ) * size_t( gh ), NONE );
 		gridMin.assign( size_t( gw ) * size_t( gh ), NONE_LOW );
 		QSet<QString> loaded;
-		for ( int cy = cy0 - margin; cy <= cy1 + margin; cy++ ) {
+		// lane WATERSKYVISFAR3: the same planes and census on workers; WW_LODGEN_BAKESPEED_RED=1 = the serial walk
+		const bool par = parallel && !lodgenBakeSpeedRed();
+		if ( par )
+			gatherParallel( world, dataRoot, cx0 - margin, cy0 - margin, cx1 + margin, cy1 + margin, cellWanted );
+		for ( int cy = cy0 - margin; !par && cy <= cy1 + margin; cy++ ) {
 			for ( int cx = cx0 - margin; cx <= cx1 + margin; cx++ ) {
+				if ( cellWanted && !cellWanted( cx, cy ) )
+					continue;
 				for ( const EsmRefr & r : world.refrs( cx, cy ) ) {
 					if ( r.initiallyDisabled || r.deleted || !r.base )
 						continue;
@@ -12537,6 +12547,153 @@ private:
 			lo = z;
 	}
 
+	/*! spanInto for several workers at once (lane WATERSKYVISFAR3): the same max / min by compare-exchange. A max
+	 *  and a min do not depend on the order of their inputs, so the planes are the serial walk's bytes. */
+	void spanIntoAtomic( int gx, int gy, float z )
+	{
+		gx -= gx0;
+		gy -= gy0;
+		if ( gx < 0 || gy < 0 || gx >= gw || gy >= gh )
+			return;
+		const size_t o = size_t( gy ) * size_t( gw ) + size_t( gx );
+		std::atomic_ref<float> hi( grid[o] );
+		float cur = hi.load( std::memory_order_relaxed );
+		while ( z > cur && !hi.compare_exchange_weak( cur, z, std::memory_order_relaxed ) ) {
+		}
+		std::atomic_ref<float> lo( gridMin[o] );
+		cur = lo.load( std::memory_order_relaxed );
+		while ( z < cur && !lo.compare_exchange_weak( cur, z, std::memory_order_relaxed ) ) {
+		}
+	}
+	template<bool Atomic>
+	void span( int gx, int gy, float z )
+	{
+		if constexpr ( Atomic )
+			spanIntoAtomic( gx, gy, z );
+		else
+			spanInto( gx, gy, z );
+	}
+
+	/*! Lane WATERSKYVISFAR3: `gather`'s walk over cells [x0, x1] x [y0, y1] (margin included) in three steps.
+	 *  1. this thread walks the refs in the serial order and keeps the census as addPlacement does;
+	 *  2. the distinct LOD models load on workers, one throw-away cache a model (the cell view's read-ahead);
+	 *  3. the placements rasterise on workers through spanIntoAtomic.
+	 *  The would-not-load census is replayed in placement order, so the counts and the refusal list match. */
+	void gatherParallel( const EsmWorld & world, const QString & dataRoot, int x0, int y0, int x1, int y1,
+		const std::function<bool( int, int )> & cellWanted )
+	{
+		struct Placed
+		{
+			int model;        // index into models, -1 = a no-LOD refusal row (name in `refused`)
+			Vector3 pos;
+			Matrix rot;
+			float scale;
+			QString refused;
+		};
+		std::vector<Placed> placed;
+		QStringList models;
+		QHash<QString, int> modelIx;
+		// addPlacement's head, word for word, with the placement recorded instead of loaded
+		auto plan = [&]( quint32 base, const Vector3 & pos, const Matrix & rot, float scale ) {
+			const EsmLodBase & lb = world.lodBase( base );
+			QString model = lb.models[0];
+			for ( int k = 1; k < 4 && model.isEmpty(); k++ )
+				model = lb.models[k];
+			if ( skipTreesM && ( std::memcmp( &lb.type, "TREE", 4 ) == 0
+					|| ( !model.isEmpty() && lodgenIsTreeModel( model ) ) ) ) {
+				treesSkipped++;
+				return;
+			}
+			if ( model.isEmpty() ) {
+				cen.refusedNoLod++;
+				const QString nk = lb.model.toLower();
+				if ( !nk.isEmpty() && !noLodSeen.contains( nk ) ) {
+					noLodSeen.insert( nk );
+					cen.noLodBases++;
+					placed.push_back( Placed{ -1, Vector3(), Matrix(), 0.0f, lb.model } );
+				}
+				return;
+			}
+			cen.placements++;
+			const QString key = model.toLower();
+			auto it = modelIx.constFind( key );
+			int m = 0;
+			if ( it == modelIx.constEnd() ) {
+				m = int( models.size() );
+				modelIx.insert( key, m );
+				models << model;
+			} else {
+				m = it.value();
+			}
+			placed.push_back( Placed{ m, pos, rot, scale, QString() } );
+		};
+		for ( int cy = y0; cy <= y1; cy++ ) {
+			for ( int cx = x0; cx <= x1; cx++ ) {
+				if ( cellWanted && !cellWanted( cx, cy ) )
+					continue;
+				for ( const EsmRefr & r : world.refrs( cx, cy ) ) {
+					if ( r.initiallyDisabled || r.deleted || !r.base )
+						continue;
+					Matrix rm;
+					rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+					const Vector3 rp( r.pos[0], r.pos[1], r.pos[2] );
+					if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
+						for ( const EsmScolPart & part : world.scolParts( r.base ) )
+							for ( const EsmScolPlacement & pl : part.placements ) {
+								Matrix pm;
+								pm.fromEuler( -pl.rot[0], -pl.rot[1], -pl.rot[2] );
+								plan( part.base, rp + rm * ( Vector3( pl.pos[0], pl.pos[1], pl.pos[2] ) * r.scale ),
+									rm * pm, r.scale * pl.scale );
+							}
+						continue;
+					}
+					plan( r.base, rp, rm, r.scale );
+				}
+			}
+		}
+		lodgenWarmSharedIndices();   // the lazy indices and the first document, on this thread
+		std::vector<QVector<LodSrcShape>> shapes( size_t( models.size() ) );
+		lodgenParallelFor( int( models.size() ), [&]( int i ) {
+			NifItemThreadCache ownItems;
+			QHash<QString, QVector<LodSrcShape>> once;
+			shapes[size_t( i )] = lodgenLoadModel( dataRoot, models[i], once );
+		}, 8 );
+		QSet<QString> loaded;
+		std::vector<quint8> good( placed.size(), quint8( 0 ) );
+		for ( size_t p = 0; p < placed.size(); p++ ) {
+			const Placed & pl = placed[p];
+			if ( pl.model < 0 ) {
+				cen.addRefusal( "no-lod-mesh", pl.refused );
+				continue;
+			}
+			const QString & model = models[pl.model];
+			const QString key = model.toLower();
+			if ( shapes[size_t( pl.model )].isEmpty() ) {
+				if ( !loaded.contains( key ) ) {
+					loaded.insert( key );
+					cen.refusedNoLoad++;
+					cen.addRefusal( "would-not-load", model );
+				}
+				continue;
+			}
+			if ( !loaded.contains( key ) ) {
+				loaded.insert( key );
+				cen.meshes++;
+			}
+			good[p] = 1;
+		}
+		std::atomic<qint64> tris( 0 );
+		lodgenParallelFor( int( placed.size() ), [&]( int p ) {
+			const Placed & pl = placed[size_t( p )];
+			if ( good[size_t( p )] )
+				tris += rasterise<true>( shapes[size_t( pl.model )], pl.pos, pl.rot, pl.scale );
+		} );
+		cen.triangles += int( tris.load() );
+		parallelNote = QString( "%1 cell(s), %2 model(s) loaded and %3 placement row(s) rasterised on %4 thread(s)" )
+			.arg( qint64( x1 - x0 + 1 ) * ( y1 - y0 + 1 ) ).arg( models.size() ).arg( placed.size() )
+			.arg( lodgenThreadCount() );
+	}
+
 	/*! THE CENSUS WORD `objAoSlabSquares`: occupied squares whose LOWEST object
 	 *  surface stands more than one cell above the ESM terrain under them.
 	 *
@@ -12594,6 +12751,11 @@ private:
 		QString model = lb.models[0];
 		for ( int k = 1; k < 4 && model.isEmpty(); k++ )
 			model = lb.models[k];
+		if ( skipTreesM && ( std::memcmp( &lb.type, "TREE", 4 ) == 0
+				|| ( !model.isEmpty() && lodgenIsTreeModel( model ) ) ) ) {
+			treesSkipped++;
+			return;
+		}
 		if ( model.isEmpty() ) {
 			/* NO DISTANT LOD MESH -> NOT DRAWN AT DISTANCE -> DOES NOT SHADOW AT
 			 * DISTANCE. Refused by name, because a silent skip is the thing that
@@ -12623,6 +12785,15 @@ private:
 			loaded.insert( key );
 			cen.meshes++;
 		}
+		cen.triangles += int( rasterise<false>( src, pos, rot, scale ) );
+	}
+
+	//! The triangles of one placed model into the lattice. Lane WATERSKYVISFAR3: out of addPlacement, so the
+	//! parallel walk runs the same lines (Atomic = several workers on one lattice).
+	template<bool Atomic>
+	qint64 rasterise( const QVector<LodSrcShape> & src, const Vector3 & pos, const Matrix & rot, float scale )
+	{
+		qint64 tris = 0;
 		for ( const LodSrcShape & sh : src ) {
 			if ( sh.tris.isEmpty() || sh.pos.isEmpty() )
 				continue;
@@ -12636,16 +12807,16 @@ private:
 				const Vector3 & a = wp[size_t( t.v1() )];
 				const Vector3 & b = wp[size_t( t.v2() )];
 				const Vector3 & c = wp[size_t( t.v3() )];
-				cen.triangles++;
+				tris++;
 				/* TWO RULES, both max-Z, and the union is what "top-down" means
 				 * here. The SCAN puts the triangle's own plane height into every
 				 * lattice centre the triangle covers; the VERTEX SEED puts each
 				 * corner's height into the square that corner stands in, so a
 				 * pole or a railing thinner than 128 units cannot vanish between
 				 * two centres and leave a gap in the shadow it should cast. */
-				spanInto( int( std::floor( a[0] / CELL ) ), int( std::floor( a[1] / CELL ) ), a[2] );
-				spanInto( int( std::floor( b[0] / CELL ) ), int( std::floor( b[1] / CELL ) ), b[2] );
-				spanInto( int( std::floor( c[0] / CELL ) ), int( std::floor( c[1] / CELL ) ), c[2] );
+				span<Atomic>( int( std::floor( a[0] / CELL ) ), int( std::floor( a[1] / CELL ) ), a[2] );
+				span<Atomic>( int( std::floor( b[0] / CELL ) ), int( std::floor( b[1] / CELL ) ), b[2] );
+				span<Atomic>( int( std::floor( c[0] / CELL ) ), int( std::floor( c[1] / CELL ) ), c[2] );
 				const float e = ( b[0] - a[0] ) * ( c[1] - a[1] )
 					- ( b[1] - a[1] ) * ( c[0] - a[0] );
 				if ( e == 0.0f )
@@ -12667,13 +12838,30 @@ private:
 						if ( w0 < 0.0f || w1 < 0.0f || w2 < 0.0f )
 							continue;
 						// barycentric: w1 is A's weight, w2 is B's, w0 is C's
-						spanInto( gx, gy, a[2] * w1 + b[2] * w2 + c[2] * w0 );
+						span<Atomic>( gx, gy, a[2] * w1 + b[2] * w2 + c[2] * w0 );
 					}
 				}
 			}
 		}
+		return tris;
 	}
 
+public:
+	//! Lane WATERSKYVISFAR2: hand the lattice out (it is moved, the field is empty after).
+	void takeTops( int & x0, int & y0, int & w, int & h, std::vector<float> & hi, std::vector<float> & lo )
+	{
+		x0 = gx0;
+		y0 = gy0;
+		w = gw;
+		h = gh;
+		hi = std::move( grid );
+		lo = std::move( gridMin );
+	}
+	qint64 treesSkipped = 0;
+	QString parallelNote;   //!< lane WATERSKYVISFAR3: what the parallel walk ran on, empty after a serial one
+
+private:
+	bool skipTreesM = false;
 	QHash<QString, QVector<LodSrcShape>> modelCache;
 	std::vector<float> grid;      //!< MAX object surface a square, `NONE` where empty
 	std::vector<float> gridMin;   //!< MIN object surface a square, `NONE_LOW` where empty
@@ -13579,6 +13767,22 @@ private:
 };
 
 } // namespace
+
+bool lodgenStaticTops( const EsmWorld & world, const QString & dataRoot, int cx0, int cy0, int cx1, int cy1,
+	const std::function<bool( int, int )> & cellWanted, LodtStaticTops & out )
+{
+	LodgenObjectHeightField f;
+	QElapsedTimer clock;
+	clock.start();
+	f.gather( world, dataRoot, cx0, cy0, cx1, cy1, cellWanted, true, true );
+	fprintf( stderr, "lodgen: statics gather %lld ms (%s)\n", (long long) clock.elapsed(),
+		f.parallelNote.isEmpty() ? "serial" : f.parallelNote.toLocal8Bit().constData() );
+	const LodgenObjectAoCensus & c = f.gatherCensus();
+	out.census = QString( "%1 placement(s), %2 LOD model(s), %3 tree(s) left out, %4 no LOD mesh, %5 would not load" )
+		.arg( c.placements ).arg( c.meshes ).arg( f.treesSkipped ).arg( c.refusedNoLod ).arg( c.refusedNoLoad );
+	f.takeTops( out.gx0, out.gy0, out.gw, out.gh, out.hi, out.lo );
+	return out.gw > 0 && out.gh > 0;
+}
 
 bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 	int dim, const QString & dataRoot, const QString & outDir,

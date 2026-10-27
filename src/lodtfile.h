@@ -130,12 +130,32 @@ struct LodtWaterOptions
 	/*! Lane WATERSKYVISFAR1: bake each wet texel's sky visibility (the sky plane, version 4). Off = the version-3
 	 *  bytes of before (--water-no-sky). */
 	bool skyVis = true;
+	/*! Lane WATERSKYVISFAR2: placed statics with a far LOD mesh (cliffs, rocks, buildings) block the sky rays too,
+	 *  as wall tops stamped into the ray heightfield. Off = terrain only, the WATERSKYVISFAR1 bytes
+	 *  (--water-sky-terrain-only). Needs LodtOptions::staticTops; without it the plane is terrain only. */
+	bool skyStatics = true;
+	/*! Lane WATERSKYVISFAR3: a wet texel a static covers (a pier deck, a bridge, a rock over its own point) casts
+	 *  through the statics as SLABS (lowest to highest surface) instead of the walls; every other texel keeps the
+	 *  wall bytes. Off = the WATERSKYVISFAR2 bytes (--water-sky-walls-only). */
+	bool skySlabs = true;
+	//! Lane WATERSKYVISFAR2: --water-sky-dump <file>, the ray heightfield before and after the statics (gate input).
+	QString skyDumpPath;
 	/*! The plugin the WATR `NAM0` linear velocities are read from -- vanilla's
 	 *  ONLY flow signal, and the fallback floor under the automatic rules. Empty
 	 *  means the arm is unavailable, which the census SAYS rather than silently
 	 *  writing zeroes. */
 	QString velocityPlugin;
 	QString reportPath;          //!< --water-report <file>, empty = stdout only
+};
+
+/*! Lane WATERSKYVISFAR2: the placed statics' far-LOD surfaces over world-aligned 128 u squares
+ *  (square = floor( world / 128 ), row-major from gx0, gy0). hi = the highest surface, lo = the lowest;
+ *  hi < -1e29 = no static over the square. Filled by LodtOptions::staticTops (the lodgen object height field). */
+struct LodtStaticTops
+{
+	int gx0 = 0, gy0 = 0, gw = 0, gh = 0;
+	std::vector<float> hi, lo;
+	QString census;   //!< the gather's own line (refs, models, trees skipped, load failures)
 };
 
 /*! Writer for the `.lodl` whole-worldspace LANDSCAPE file.
@@ -217,6 +237,13 @@ struct LodtOptions
 	 *  that is counted, never fatal. The front ends answer it with the lodgen
 	 *  NIF loader, so this file never includes the loader itself. */
 	std::function<bool( const QString & model, std::vector<float> & tris )> placedWaterModel;
+
+	/*! Lane WATERSKYVISFAR2: the sky plane's static occluders. Asked once, by the water pass, for the cell
+	 *  rectangle [cx0, cx1] x [cy0, cy1] (world cells); `cellWanted( cx, cy )` false = skip that cell's refs.
+	 *  Empty = the sky plane is terrain only and the census says so. The front ends answer it with
+	 *  lodgenStaticTops (the object AO's height field), so this file never includes the loader. */
+	std::function<bool( int cx0, int cy0, int cx1, int cy1, const std::function<bool( int, int )> & cellWanted,
+		LodtStaticTops & out )> staticTops;
 
 	/*! Progress, for a GUI: phase 0 = pass one (done = cell rows, total =
 	 *  cell rows), phase 1 = blocks (done = blocks emitted, total = blocks;
