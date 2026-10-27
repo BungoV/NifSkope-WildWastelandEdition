@@ -2,6 +2,7 @@
 
 #include "bakert.h"
 #include "probebvh.h"
+#include "probevolopen.h"
 
 #include <QElapsedTimer>
 #include <QStringList>
@@ -266,6 +267,21 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		upper += z > 0;
 	}
 	const double skyLim = spec.skyMax * upper, openLim = spec.openMax * double( sdirs.size() );
+	// lane HALLINDOOR1: rays through a room's opening to the outside stay indoor (volcheck's rule; none = VOLRAY1's)
+	ProbeVolOpenings openings;
+	if ( g.openings ) {
+		for ( const ProbeVolumeShape & s : *g.openings ) {
+			const double a[3] = { s.rotation[0] * kFinePi / 180.0, s.rotation[1] * kFinePi / 180.0, s.rotation[2] * kFinePi / 180.0 };
+			const double ca = std::cos( a[0] ), sa = std::sin( a[0] ), cb = std::cos( a[1] ), sb = std::sin( a[1] );
+			const double cc = std::cos( a[2] ), sc = std::sin( a[2] );
+			const double m[3][3] = { { cc * cb, cc * sb * sa - sc * ca, cc * sb * ca + sc * sa },
+				{ sc * cb, sc * sb * sa + cc * ca, sc * sb * ca - cc * sa }, { -sb, cb * sa, cb * ca } };
+			const double c[3] = { s.center[0], s.center[1], s.center[2] };
+			const double h[3] = { s.size[0] * 0.5, s.size[1] * 0.5, s.size[2] * 0.5 };
+			openings.add( c, h, m );
+		}
+		openings.build( spec.openReach );
+	}
 	std::atomic<qint64> nEnc( 0 ), nGrown( 0 ), nLost( 0 ), nPruned( 0 );
 
 	// 2. each room's box in its footprint frame (u along the yaw, v across, z up)
@@ -547,16 +563,21 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 					for ( size_t x = b + ci * chunk; x < x1; x++ ) {
 						int sky = 0, open = 0, hit = 0, back = 0;
 						double minT = 1e30;
+						double w[3] = { 0, 0, 0 };
+						if ( !openings.empty() )
+							ptW( ids[x], w );
 						for ( size_t k = 0; k < K; k++ ) {
 							const bakert::XHit & z = hits[( x - b ) * K + k];
 							if ( z.tri < 0 ) {
+								if ( openings.through( w, sdirs[k].data(), 1e300 ) )
+									continue;
 								open++;
 								sky += sdirs[k][2] > 0;
 								continue;
 							}
 							hit++;
 							minT = std::min( minT, z.t );
-							open += z.t > spec.openReach;
+							open += z.t > spec.openReach && !openings.through( w, sdirs[k].data(), z.t );
 							back += g.backFace && g.backFace( z.tri, sdirs[k].data() );
 						}
 						// bits 4 and 8: near the solid or the outdoor limit by the margin (volcheck's own lattice, a few
@@ -884,7 +905,9 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		if ( !spec.legacy && g.grid && size_t( r ) < g.grid->size() ) {
 			t0.start();
 			V3Room & V = v3r[size_t( r )];
-			const double h3 = h * h * h, bw = spec.badW, bo = std::max( spec.badW, spec.badO );
+			const bool win = g.windowRooms && std::count( g.windowRooms->begin(), g.windowRooms->end(), r + 1 );
+			const double h3 = h * h * h, bw = win ? std::max( spec.badW, spec.badWin ) : spec.badW;
+			const double bo = std::max( spec.badW, spec.badO );
 			// what a shape holding the point costs: 1 room air (-1), 2 foreign air, 3 another room's grid shape (overlap)
 			auto cost = [&]( quint8 k ) { return k == 1 ? -1.0 : k == 2 ? bw : k == 3 ? bo : 0.0; };
 			const double yawDeg = std::atan2( s, c ) * 180.0 / kFinePi;

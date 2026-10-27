@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane HALLINDOOR1 (2026-10-28, branch hallindoor1-20261027): air under a glazed roof reads indoor
+
+- **The indoor rule's openings:** a point's sky ray (or a hit past the 1536-unit reach) that leaves through a room's
+  "window" threshold to the outside no longer counts as open. The museum's main hall (room 0x0019, under its
+  skylight) read 93% of its own air as "near outdoor"; that air is indoor now. Doors and plain openings still read
+  outdoor, and points above the roof still read outdoor (synth open-roof and above-roof cases). Both the room fit and
+  `volcheck` use it; `volcheck --indoor old` and the fit's red `oldindoor` give the old rule byte for byte.
+- **Rooms behind a window** price foreign air at 4 (was 2; `WW_VOLFIT_SPEC=badwin=N`), so the hall's new indoor
+  air does not pull its boxes through walls. Only rooms with a window threshold change: museum 3 of 40 rooms,
+  Concord 4 of 317, Goodneighbor and Sanctuary none.
+- Museum (new checker): leak 1.5M (VOLFIT5 shapes) / 8.9M (refit) vs 100.1M before; 0x0019 7.4M vs 98.7M; pokes
+  3.73 -> 1.56M; overlaps 0.20M both; gap 25.7 -> 23.1% (old checker 20.2 -> 20.8%). Concord gap 39.4 -> 39.5%, pokes 65.27 -> 64.90M.
+- Cost: offline only, 0 GPU-ms and 0 memory at runtime; fit time within noise (museum 6.2 -> 7.1 s). The volcheck
+  census ends "; indoor rule openings N" (or "old").
+
 ## Lane VOLFIT5 (2026-10-27, branch volfit5-20261027): GI room fit faster, same bytes
 
 - **Edge rays on the GPU:** the room fit's edge rays now go to the exact whole-ray tracer in batches instead of one at a
