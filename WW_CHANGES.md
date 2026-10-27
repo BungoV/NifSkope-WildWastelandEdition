@@ -31,6 +31,9 @@
   `merge` joins the done tiles and checks the joined file over every cell.
 - **Gate:** `cell_census.sh` takes MARGIN (the ring, to the window and the checker) and SHOTS=0 (rows only).
   No product code changed; the exe is untouched.
+- **Fix (FIX1025 10-27):** the census walk (`WW_CELL_CENSUS_TEST`) opens exterior blocks without `WW_CELL_OPEN`, so
+  the open STREAMED: nothing welded, the builder read 0 refs and 51 of 142 tile checks failed. `cellStreamWanted()`
+  now stays off under the census walk (src/cellstream.cpp, one line); `WW_CELL_STREAM` still overrides.
 - **Proof without a window:** `cell_census_tiles_synth.py` stands in for the window (rows from the plugin); 12 of 12
   runner checks (kill/resume, skip, stale, merge, 3 reds) and a whole-map synth run: 19 tiles, 38,059 rows,
   199,863 checks PASS.
