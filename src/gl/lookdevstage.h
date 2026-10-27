@@ -182,6 +182,8 @@ struct WwLookdevIs
 	float hdr[9] = {}, cine[3] = {}, tint[4] = {};
 	QString name, lutA, lutB, key;
 	float t = 0.0f;	// 0 = all lutA
+	QStringList lutMix;	// lane WEATHERBLEND2: during a weather change, the game's up to four LUTs (lutW) instead
+	float lutW[4] = {};
 };
 bool wwLookdevImageSpace( WwLookdevIs & out );
 /*! Lane BOUNCE1: the hour's imagespace Sunlight Scale (HNAM[6], wwLookdevImageSpace's hdr[6]): the game multiplies it

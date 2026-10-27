@@ -1313,6 +1313,54 @@ void wwWeatherTransWeights( const WwTodKeys & k, float pct, float wt[4] )
 	wt[3] = k.t * ( 1.0f - pct );
 }
 
+/* lane WEATHERBLEND2 (notes/weatherblend2/RESULTS.md): the game's imagespace, change pick and acceleration */
+void wwImageSpaceSlots( float tc, float tl, float pct, bool last, float w[4] )
+{
+	const bool old = last && pct < 1.0f;
+	w[0] = ( 1.0f - tc ) * pct;
+	w[1] = tc > 0.0f ? tc * pct : 0.0f;
+	w[2] = old ? ( 1.0f - tl ) * ( 1.0f - pct ) : 0.0f;
+	w[3] = ( old && tl > 0.0f ) ? tl * ( 1.0f - pct ) : 0.0f;
+}
+
+void wwLutBlendN( const std::vector<unsigned char> * const lut[4], const float w[4], std::vector<unsigned char> & out )
+{
+	double sum = 0.0;
+	size_t n = 0;
+	for ( int k = 0; k < 4; k++ )
+		if ( lut[k] && w[k] > 0.0f ) {
+			sum += double( w[k] );
+			n = n ? std::min( n, lut[k]->size() ) : lut[k]->size();
+		}
+	out.clear();
+	if ( !( sum > 0.0 ) )
+		return;
+	out.resize( n );
+	for ( size_t i = 0; i < n; i++ ) {
+		double v = 0.0;
+		for ( int k = 0; k < 4; k++ )
+			if ( lut[k] && w[k] > 0.0f )
+				v += double( ( *lut[k] )[i] ) * double( w[k] );
+		out[i] = (unsigned char) std::clamp( std::lround( v / sum ), 0L, 255L );
+	}
+}
+
+float wwWeatherTransAccelPct( float raw, float from, const WwSkyGmst & g )
+{
+	if ( from < 0.0f )
+		return raw;
+	return std::clamp( from + ( raw - from ) * ( g.transAccel + 1.0f ), 0.0f, 1.0f );
+}
+
+int wwWeatherPickRule( bool changing, bool sameAsCurrent, bool interior, bool force )
+{
+	if ( force || interior )	// ForceWeather / the interior sky mode: no change
+		return WwPickSnap;
+	if ( sameAsCurrent )
+		return WwPickKeep;
+	return changing ? WwPickDefer : WwPickStart;	// a running change keeps the pick until it ends
+}
+
 namespace
 {
 //! the four-weight linear sum of a byte colour (rows, DALC): this weather's keys, then the leaving one's

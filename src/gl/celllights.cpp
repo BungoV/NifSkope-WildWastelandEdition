@@ -30,6 +30,7 @@ BSD License - see nifskope.h
 #include "gl/celllensflare.h"	// lane LIGHTS3 (LENSFLARE1): its echo
 #include "gl/cellfxlit.h"	// lane LIGHTS4: a placement's emittance colour
 #include "gamemanager.h"	// lane SUNCELL1: the weather imagespace's LUT
+#include "esmweather.h"	// lane WEATHERBLEND2: wwLutBlendN
 #include "probealbedo.h"	// lane LIGHTS5 (GOBO1): a spot's pattern
 #include "recx.h"	// lane LIGHTS5 (FOGSCALE1): fog.scale
 #include "gl/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
@@ -431,6 +432,43 @@ bool loadLut( const QString & lut, const QString & dataRoot, std::vector<unsigne
 	return got && decodeLutStrip( dds, out );
 }
 
+//! lane WEATHERBLEND2: a weather change re-blends its LUTs every step; decode each file once
+bool loadLutCached( const QString & lut, const QString & dataRoot, std::vector<unsigned char> & out )
+{
+	static QHash<QString, std::vector<unsigned char>> cache;
+	const QString k = dataRoot + QLatin1Char( '|' ) + lut;
+	auto it = cache.constFind( k );
+	if ( it != cache.constEnd() ) {
+		out = it.value();
+		return !out.empty();
+	}
+	if ( cache.size() > 32 )
+		cache.clear();
+	if ( !loadLut( lut, dataRoot, out ) )
+		out.clear();
+	cache.insert( k, out );
+	return !out.empty();
+}
+
+//! lane WEATHERBLEND2: the change's up to four LUTs by the game's weights; false when none loaded
+bool mixLuts( const WwLookdevIs & w, const QString & dataRoot, std::vector<unsigned char> & out, QString & path )
+{
+	std::vector<unsigned char> got[4];
+	const std::vector<unsigned char> * lut[4] = {};
+	float wt[4] = {};
+	QStringList parts;
+	for ( int k = 0; k < w.lutMix.size() && k < 4; k++ ) {
+		if ( !loadLutCached( w.lutMix[k], dataRoot, got[k] ) )
+			continue;
+		lut[k] = &got[k];
+		wt[k] = w.lutW[k];
+		parts << QStringLiteral( "%1*%2" ).arg( w.lutMix[k] ).arg( double( w.lutW[k] ), 0, 'f', 4 );
+	}
+	wwLutBlendN( lut, wt, out );
+	path = parts.join( QLatin1Char( '+' ) );
+	return !out.empty();
+}
+
 const WwCellLighting * isLighting( const void * nif, int * stamp = nullptr )
 {
 	if ( stamp )
@@ -453,9 +491,14 @@ const WwCellLighting * isLighting( const void * nif, int * stamp = nullptr )
 		e.L.isLut.clear();
 		e.L.isLutPath.clear();
 		std::vector<unsigned char> a, b;
-		const bool gotA = loadLut( w.lutA, L->dataRoot, a );
-		const bool gotB = w.t > 0.0f && loadLut( w.lutB, L->dataRoot, b );
-		if ( gotA && gotB ) {	// the two keys' LUTs blended: the same as blending their outputs (linear sampling)
+		const bool mix = !w.lutMix.isEmpty();
+		QString mixPath;
+		const bool gotA = mix ? mixLuts( w, L->dataRoot, a, mixPath ) : loadLut( w.lutA, L->dataRoot, a );
+		const bool gotB = !mix && w.t > 0.0f && loadLut( w.lutB, L->dataRoot, b );
+		if ( mix && gotA ) {
+			e.L.isLut = a;
+			e.L.isLutPath = mixPath;
+		} else if ( gotA && gotB ) {	// the two keys' LUTs blended: the same as blending their outputs (linear sampling)
 			e.L.isLut.resize( a.size() );
 			for ( size_t i = 0; i < a.size(); i++ )
 				e.L.isLut[i] = (unsigned char) std::lround( float( a[i] ) + ( float( b[i] ) - float( a[i] ) ) * w.t );

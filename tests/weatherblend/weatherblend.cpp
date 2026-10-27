@@ -171,6 +171,55 @@ int main()
 		fails += same ? 0 : 1;
 	}
 
+	// 8. lane WEATHERBLEND2: the imagespace slots (four LUTs on the four weights, not a swap at half way)
+	{
+		const float ps[2] = { 0.3f, 0.7f };
+		const double want[2][4] = { { 0.225, 0.075, 0.525, 0.175 }, { 0.525, 0.175, 0.225, 0.075 } };
+		const char * nm[2][4] = { { "slot cur a 30%", "slot cur b 30%", "slot last a 30%", "slot last b 30%" },
+			{ "slot cur a 70%", "slot cur b 70%", "slot last a 70%", "slot last b 70%" } };
+		for ( int i = 0; i < 2; i++ ) {
+			float w[4];
+			wwImageSpaceSlots( 0.25f, 0.25f, ps[i], true, w );
+			for ( int k = 0; k < 4; k++ )
+				near1( nm[i][k], w[k], want[i][k], 1e-5 );
+		}
+		float w[4];
+		wwImageSpaceSlots( 0.0f, 0.0f, 1.0f, false, w );	// no change, one key: cur a alone
+		near1( "slot no change", w[0] + 10.0 * ( w[1] + w[2] + w[3] ), 1.0, 1e-6 );
+		const std::vector<unsigned char> L[4] = { { 0, 100, 255 }, { 255, 0, 10 }, { 40, 40, 40 }, { 200, 220, 0 } };
+		const std::vector<unsigned char> * lut[4] = { &L[0], &L[1], &L[2], &L[3] };
+		wwImageSpaceSlots( 0.25f, 0.25f, 0.3f, true, w );
+		std::vector<unsigned char> o;
+		wwLutBlendN( lut, w, o );
+		float got[3] = { float( o[0] ), float( o[1] ), float( o[2] ) };
+		near3( "four LUTs at 30%", got, 75.0, 82.0, 79.0, 0.0 );
+		lut[2] = nullptr;	// a LUT that did not load: the others renormalised
+		wwLutBlendN( lut, w, o );
+		float got3[3] = { float( o[0] ), float( o[1] ), float( o[2] ) };
+		near3( "three LUTs at 30%", got3, 114.0, 128.0, 122.0, 0.0 );
+	}
+
+	// 9. fWeatherTransAccel (Fallout4.esm 16): from the pct at the pick on, (Accel + 1) times as fast
+	{
+		WwSkyGmst g;
+		g.transMax = 3.0f;
+		g.transAccel = 16.0f;
+		near1( "accel 0.2 raw 0.21", wwWeatherTransAccelPct( 0.21f, 0.2f, g ), 0.37, 1e-5 );
+		near1( "accel 0.2 raw 0.25", wwWeatherTransAccelPct( 0.25f, 0.2f, g ), 1.0, 1e-6 );
+		near1( "no accel", wwWeatherTransAccelPct( 0.21f, -1.0f, g ), 0.21, 1e-6 );
+		const float raw = wwWeatherTransPct( wwWeatherTransGameHours( 143.9763 ), 128, g );
+		near1( "delta 128 accelerated at half way ends at 143.98 s", wwWeatherTransAccelPct( raw, 0.5f, g ), 1.0, 1e-4 );
+	}
+
+	// 10. the pick: a running change defers it; force-weather and an interior snap
+	{
+		near1( "pick during a change waits", wwWeatherPickRule( true, false, false, false ), WwPickDefer, 0.0 );
+		near1( "pick of the current weather keeps the change", wwWeatherPickRule( true, true, false, false ), WwPickKeep, 0.0 );
+		near1( "pick with no change starts one", wwWeatherPickRule( false, false, false, false ), WwPickStart, 0.0 );
+		near1( "pick in an interior snaps", wwWeatherPickRule( false, false, true, false ), WwPickSnap, 0.0 );
+		near1( "force-weather during a change snaps", wwWeatherPickRule( true, false, false, true ), WwPickSnap, 0.0 );
+	}
+
 	std::printf( "WEATHERBLEND %s %d of %d failed\n", fails ? "FAIL" : "PASS", fails, checks );
 	return fails ? 1 : 0;
 }
