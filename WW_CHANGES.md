@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SHORE2 (2026-10-27, branch shore2-20261027): far water stops on the .lodl's own shore
+
+- **Why:** SHORE1's shore law left extra water at rings 1-4: samples the .lodl calls dry (fine ground over the water
+  surface) where the coarse ring terrain sits below the sheet. Mean shore offset 24-441 u, runs to 3.3 km.
+- **Dry mask:** far water quads from the .lodl (`nifAppendLodlFarWater`, shore law on) are registered with
+  `wwCellWaterShape( ..., farMask = true )`. `fo4_water.frag` then discards a fragment whose world x,y the WATERDATA1
+  lookup calls body 0 (`wwFarWaterDry`, water_info.glsl). Full rate (128 u, the body plane's own rate). The quads stay.
+  No new memory: the lookup's 14.51 MB tables are already resident; three units are bound per far water draw.
+  Off for the vanilla far water, for the old texel grid (`WW_CELL_FARLOD_RED=watergrid` / `WW_CELL_FARLOD_SHORE=0`),
+  and until the lookup is built (~2 s after the open) or with `WW_CELL_WATER_INFO_RED=off`.
+- **Red:** `WW_CELL_FARWATER_RED=nomask` = SHORE1's quads drawn whole. Live (stage 0).
+- **`farwatercensus --cut cx0,cy0,cx1,cy1`:** the ring is cut like the cell view cuts it; the CLI also reads
+  `WW_CELL_FARLOD_RED=watergrid` and `WW_CELL_FARLOD_SHORE=0` through the same reader as the cell view
+  (`lodlFarWaterGridEnv`). Rings 1-4 of open 14,3 and Concord now equal the hold's build lines.
+- **`WW_CELL_STREAM_SNAP=1` (harness):** the path runner snaps the stream centre to the path eye's cell at each step.
+  The launch-to-launch noise of the 10-27 hold (111957 px between two off launches) was ours: the shot camera's refit
+  put the eye in cell 14,5 for one tick; the stream's shift hysteresis (half a cell + 2048 u) then kept centre 14,4
+  instead of 14,3, a different 5x5 block. Off by default (stage 0).
+- **Cost:** +0.010..0.012 ms for a 1080p frame that is all far water (offline GPU timer), 0 MB.
+
 ## Lane BINDLESSMDI1 (2026-10-27, branch bindlessmdi1-20261027): pooled bindless draws batched into one multi-draw
 
 - **Why:** with Bindless draws on, each pooled shape still made its own draw call (c3: ~5600 a frame). The pool puts

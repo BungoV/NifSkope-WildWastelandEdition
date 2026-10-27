@@ -342,7 +342,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const bool vanBoth = red == "vanboth";   // the vanilla fill drawn over our chunks too (the mixed gate's red)
 	const bool perBaseRed = red == "perbase";   // lane FAR3: the far objects' old per-base shapes and charge
 	// lane SHORE1: the far water's old texel-grid shore (red watergrid, or the switch off)
-	const bool waterGrid = red == "watergrid" || ( wwEnvIsSet( "WW_CELL_FARLOD_SHORE" ) && wwEnvInt( "WW_CELL_FARLOD_SHORE" ) == 0 );
+	const bool waterGrid = lodlFarWaterGridEnv();	// lane SHORE2: one reader with the farwatercensus CLI
 	const bool flatRed = red == "flat";   // lane FARDRAW1: the flattened rings and their budget refusals
 	const int h = std::max( 0, ( n - 1 ) / 2 );
 	const int bx0 = cx - h, by0 = cy - h, bx1 = cx + h, by1 = cy + h;
@@ -774,7 +774,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					const int how = recOk.value( form );
 					if ( how < 0 )
 						continue;
-					wwCellWaterShape( nif, block, how > 0 ? recs.value( form ) : def );
+					wwCellWaterShape( nif, block, how > 0 ? recs.value( form ) : def, !waterGrid );	// lane SHORE2: dry mask
 					wRegistered++;
 				}
 				say( QStringLiteral( "far lod: water ring %1 (%2 a cell) cells %3,%4..%5,%6: %7 quads, %8 shapes, %9" )

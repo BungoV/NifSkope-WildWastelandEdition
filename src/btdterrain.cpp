@@ -3574,14 +3574,30 @@ void farShoreLaw( const LodtFile & f, LodlFarWater & r, int W, int H, int stepT,
 }
 }
 
+bool lodlFarWaterGridEnv()
+{
+	return wwEnv( "WW_CELL_FARLOD_RED" ) == "watergrid"
+		|| ( wwEnvIsSet( "WW_CELL_FARLOD_SHORE" ) && wwEnvInt( "WW_CELL_FARLOD_SHORE" ) == 0 );
+}
+
 int farWaterCensusCli( const QStringList & args, QTextStream & out )
 {
 	QString lodl, outPath;
 	int g[5] = { 0, 0, -1, -1, 8 };
-	bool grid = false, perCell = false;
+	int c[4] = { 0, 0, -1, -1 };
+	bool grid = lodlFarWaterGridEnv(), perCell = false, cut = false;	// lane SHORE2: the cell view's env reds too
 	for ( int i = 0; i < args.size(); i++ ) {
 		if ( args[i] == QLatin1String( "--grid" ) ) {
 			grid = true;
+		} else if ( args[i] == QLatin1String( "--cut" ) && i + 1 < args.size() ) {
+			const QStringList p = args[++i].split( QLatin1Char( ',' ) );
+			if ( p.size() != 4 ) {
+				out << "farwatercensus: --cut wants cx0,cy0,cx1,cy1\n";
+				return 2;
+			}
+			for ( int k = 0; k < 4; k++ )
+				c[k] = p[k].toInt();
+			cut = true;
 		} else if ( args[i] == QLatin1String( "--percell" ) ) {
 			perCell = true;
 		} else if ( args[i] == QLatin1String( "--out" ) && i + 1 < args.size() ) {
@@ -3599,7 +3615,7 @@ int farWaterCensusCli( const QStringList & args, QTextStream & out )
 		}
 	}
 	if ( lodl.isEmpty() || outPath.isEmpty() || g[2] < g[0] ) {
-		out << "usage: farwatercensus <ws.lodl> --ring x0,y0,x1,y1,texels [--grid] [--percell] --out <quads.txt>\n";
+		out << "usage: farwatercensus <ws.lodl> --ring x0,y0,x1,y1,texels [--cut cx0,cy0,cx1,cy1] [--grid] [--percell] --out <quads.txt>\n";
 		return 2;
 	}
 	NifModel nif;
@@ -3617,7 +3633,13 @@ int farWaterCensusCli( const QStringList & args, QTextStream & out )
 	w.x1 = g[2];
 	w.y1 = g[3];
 	w.texels = g[4];
-	w.noCut = true;
+	w.noCut = !cut;
+	if ( cut ) {
+		w.cx0 = c[0];
+		w.cy0 = c[1];
+		w.cx1 = c[2];
+		w.cy1 = c[3];
+	}
 	w.perCell = perCell;
 	w.gridLaw = grid;
 	w.dump = &quads;
@@ -3641,7 +3663,9 @@ int farWaterCensusCli( const QStringList & args, QTextStream & out )
 		.arg( g[0] ).arg( g[1] ).arg( g[2] ).arg( g[3] ).arg( w.rate ).arg( grid ? "texel grid" : "shore law" )
 		.arg( w.quads ).arg( w.shapes )
 		.arg( QStringLiteral( "%1 wet texels, %2 grown, %3 per sample, %4 ms" ).arg( w.wetTexels ).arg( w.grownTexels )
-			.arg( w.splitTexels ).arg( t.elapsed() ) ) << "\n";
+			.arg( w.splitTexels ).arg( t.elapsed() ) )
+		<< ( cut ? QStringLiteral( ", %1 bodies, cut %2,%3..%4,%5" ).arg( w.bodies.size() )
+			.arg( w.cx0 ).arg( w.cy0 ).arg( w.cx1 ).arg( w.cy1 ) : QString() ) << "\n";
 	return 0;
 }
 

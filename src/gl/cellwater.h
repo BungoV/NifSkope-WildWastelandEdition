@@ -34,7 +34,8 @@ struct WwWaterRecord;
 //! A new scene for this document: its table is emptied.
 void wwCellWaterBegin( const void * nif );
 //! The written shape `block` is a water surface of record `rec`.
-void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec );
+//! lane SHORE2: `farMask` = far water that discards the samples the .lodl calls dry (WW_CELL_FARWATER_RED=nomask)
+void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec, bool farMask = false );
 // lane CELLSTREAM1: a streamed cell let go of this block (it is about to be reused)
 void wwCellWaterForget( const void * nif, int block );
 //! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)

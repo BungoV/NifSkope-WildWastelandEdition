@@ -25,6 +25,12 @@ uint wwWaterInfoWord( vec2 worldXY )
 	return texelFetch( waterInfoAtlas, ivec2( slot % perRow, slot / perRow ) * E + ( t - tile * E ), 0 ).r;
 }
 
+// lane SHORE2: a far water fragment on a sample the .lodl calls dry (body 0); never while the lookup is not built
+bool wwFarWaterDry( vec2 worldXY )
+{
+	return waterInfoOn && ( wwWaterInfoWord( worldXY ) & 0xFFFFu ) == 0u;
+}
+
 // lane WATERFLOWBAKE1: the baked flow plane as a velocity, the same sparse layout at the flow plane's rate
 uniform usampler2D waterFlowIndex;	// RG32UI: slot + 1 (0 = uniform tile), the uniform tile's word
 uniform usampler2D waterFlowAtlas;	// R32UI: the non-uniform tiles' words, 64 tiles a row
