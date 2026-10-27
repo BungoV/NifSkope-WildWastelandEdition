@@ -1,6 +1,7 @@
 /* lane PLACED1: placed decals, projected on the CPU. See celldecal.h for the rule. */
 
 #include "celldecal.h"
+#include "celldecalangle.h"	// lane DECALANGLE: the angle rule per pixel
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmdata.h"
@@ -25,8 +26,7 @@ constexpr float DECAL_RAY_LENGTH = 1000.0f;   // the game's reach for a decal wi
 /* Ours, not the game's: 22 of the Vault's 503 ray decals sit ON their surface (0 to 1 unit past the drawn
  * triangle), where a ray from the reference itself misses by rounding. The ray starts this far behind. */
 constexpr float DECAL_RAY_SLACK = 1.0f;
-constexpr float DECAL_ANGLE_MIN = 0.3f;      // the angle rule's threshold
-constexpr float DECAL_ANGLE_FADE = 0.25f;     // and its fade width
+// the angle rule's threshold and fade width: src/celldecalangle.h (lane DECALANGLE)
 
 struct V3
 {
@@ -372,12 +372,17 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 	out.fates.assign( refs.size(), CellDecalFate::Drawn );
 	/* RED CONTROL (WW_CELL_DECAL_RED): "none" draws no decal, "wide" doubles every
 	 * box's width and height, "axis" projects along the wrong local axis. Each one
-	 * breaks a different claim of tests/spells/cell_decal.sh. */
+	 * breaks a different claim of tests/spells/cell_decal.sh. "vertexangle" (lane DECALANGLE)
+	 * draws the old per-vertex angle fade instead of the game's per-pixel rule; "nonormalmap" (lane DECALANGLE2)
+	 * reads the interpolated vertex normal instead of the drawn, normal-mapped one. */
 	const QByteArray red = wwEnv( "WW_CELL_DECAL_RED" ).trimmed().toLower();
 	out.red = QString::fromLatin1( red );
 	const bool redNone = red == "none" || red == "1";
 	const bool redWide = red == "wide";
 	const bool redAxis = red == "axis";
+	const bool redVertexAngle = red == "vertexangle";
+	out.vertexAngle = redVertexAngle;
+	out.mapped = !redVertexAngle && red != "nonormalmap";
 
 	TriGrid grid;
 	bool gridBuilt = false;
@@ -522,10 +527,10 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 			if ( dot( face, nr[0] + nr[1] + nr[2] ) < 0.0f )
 				face = face * -1.0f;
 			const float gd = dot( face, against );
-			if ( gd <= 0.0f )
+			if ( gd <= 0.0f && !out.mapped )	// lane DECALANGLE2: a drawn normal can lean a wall's pixel over (the cull below)
 				continue;
 			ClipVert poly[16];
-			float fadeMax = 0.0f;
+			float fadeMax = 0.0f, dotMax = -1.0f, un[3][3];
 			for ( int k = 0; k < 3; k++ ) {
 				const V3 rel = p[k] - centre;
 				poly[k].l[0] = dot( rel, axW );
@@ -533,15 +538,18 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 				poly[k].l[2] = dot( rel, axD );
 				poly[k].pos = p[k];
 				poly[k].nrm = nr[k];
-				float f = 1.0f;
-				if ( gd < DECAL_ANGLE_MIN ) {
-					f = ( dot( unit( nr[k] ), against ) - DECAL_ANGLE_MIN ) / DECAL_ANGLE_FADE;
-					f = f < 0.0f ? 0.0f : ( f > 1.0f ? 1.0f : f );
-				}
-				poly[k].fade = f;
-				fadeMax = std::max( fadeMax, f );
+				const V3 n = unit( nr[k] );
+				un[k][0] = n.x; un[k][1] = n.y; un[k][2] = n.z;
+				const float d = dot( n, against );
+				dotMax = std::max( dotMax, d );
+				poly[k].fade = celldecalangle::vertexFade( gd, d );
+				fadeMax = std::max( fadeMax, poly[k].fade );
 			}
-			if ( fadeMax <= 0.0f )
+			// a steep face: the old rule drops it when no corner passes, the game's only when no pixel can
+			if ( gd < celldecalangle::kMin
+				&& ( redVertexAngle ? fadeMax <= 0.0f
+					: out.mapped ? !celldecalangle::mayPassMapped( dotMax )	// a normal map can lean a pixel over
+					: !celldecalangle::mayPass( dotMax, un[0], un[1], un[2] ) ) )
 				continue;
 			const int count = clipToBox( poly, 3, half );
 			if ( count < 3 )
@@ -562,6 +570,8 @@ void cellProjectDecals( const EsmWorld & world, const QString & dataRoot,
 				v.uv[0] = poly[k].l[0] / width + 0.5f;
 				v.uv[1] = poly[k].l[1] / height + 0.5f;
 				v.alpha = poly[k].fade;
+				v.angle = celldecalangle::vertexValue( gd, dot( n, against ) );
+				v.dir[0] = against.x; v.dir[1] = against.y; v.dir[2] = against.z;
 				mesh.verts.push_back( v );
 			}
 			for ( int k = 1; k + 1 < count; k++ ) {

@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include "gl/cellbloom.h"	// lane BLOOM1b
 #include "gl/cellaodecalgl.h"	// lane AODECAL1
 #include "gl/cellaomethod.h"	// lane SSAO2
+#include "gl/cellcull.h"	// lane DECALANGLE2: wwCellDecalMappedHas
 #include "gl/cellpasstime.h"	// lane PERF2: sub-stage timers
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "gl/lookdevstage.h"	// lane SUNCELL1
@@ -4192,6 +4193,7 @@ void wwCellAoPass( Scene * scene, bool run )
 	const bool forSsr = wwCellSsrWantsTargets( scene );
 	const bool forDecal = g.decalUnit >= 0 && wwCellAoDecalWanted( scene->nifModel );
 	const bool forContact = wwContactShadowWantsTargets( scene );	// lane TERRSHADOW1: contact shadows march its depth
+	const bool forDecalAngle = wwCellDecalMappedHas( scene->nifModel );	// lane DECALANGLE2: placed decals read its normal
 	// lane PERF1: the half-res GI reads it too (the GI row on, no probe pass, a GPU with the units)
 	const int giRate = wwCellGiRate();
 	const bool forGi = giRate != 2 && wwCellGiVis() == 0 && g.giUnits && wwCellGiOn() && wwCellPassFor( scene->nifModel ) == 0;
@@ -4202,12 +4204,13 @@ void wwCellAoPass( Scene * scene, bool run )
 	else if ( !g.giUnits )
 		giEcho( QStringLiteral( "full (the GPU has no unit %1)" ).arg( WwCellUnit::GiHalfKey ) );
 	if ( !a.on ) {
-		aoEcho( ( forSsr || forDecal || forContact || forGi ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2%3%4" )
+		aoEcho( ( forSsr || forDecal || forContact || forGi || forDecalAngle ) ? QStringLiteral( "off (row); the shared opaque pass kept for%1%2%3%4%5" )
 			.arg( forSsr ? QStringLiteral( " ssr" ) : QString() ).arg( forDecal ? QStringLiteral( " aodecal" ) : QString() )
 			.arg( forContact ? QStringLiteral( " contact" ) : QString() ).arg( forGi ? QStringLiteral( " gihalf" ) : QString() )
+			.arg( forDecalAngle ? QStringLiteral( " decalangle" ) : QString() )
 			: QStringLiteral( "off (row); no opaque pass (nothing reads it)" ) );
 		// lane SSAO2: the keep rule lives in cellaomethod.h (tests/aomethod); its red drops SSR's claim
-		if ( !wwAoSharedPassRuns( false, forSsr, forDecal || forContact || forGi, a.ssrRedOld ) ) {
+		if ( !wwAoSharedPassRuns( false, forSsr, forDecal || forContact || forGi || forDecalAngle, a.ssrRedOld ) ) {
 			a.last = QStringLiteral( "off" );
 			return;
 		}
@@ -4541,6 +4544,8 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 			prog->uni1b( "cellAoDecalOn", false );	// lane AODECAL1
 			if ( prog->uniLocation( "cellCtOn" ) >= 0 )
 				prog->uni1b( "cellCtOn", false );	// lane GAPLOOK1: this pass writes the depth C8 reads
+			if ( prog->uniLocation( "wwDecalGbufOn" ) >= 0 )
+				prog->uni1b( "wwDecalGbufOn", false );	// lane DECALANGLE2: nor may a decal read it while it is written
 		}
 		return;
 	}
@@ -4583,10 +4588,20 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		const auto & pm = r->globalUniforms->projectionMatrix;
 		const bool ctOn = wwLookOn( WwLook::ContactLocal ) && g.ready && g.doc == scene->nifModel && g.gbuf.tex
 			&& ( !wwDrawBlend() || decalProg ) && pm[3][3] != 1.0f;
-		u.bind( WwCellUnit::ContactGbuf, GL_TEXTURE_2D, ctOn ? g.gbuf.tex : 0 );
+		// lane DECALANGLE2: a placed decal reads the drawn normal under it from the same target
+		const bool dgOn = decalProg && g.ready && g.doc == scene->nifModel && g.gbuf.tex && prog->uniLocation( "wwDecalGbufOn" ) >= 0;
+		u.bind( WwCellUnit::ContactGbuf, GL_TEXTURE_2D, ( ctOn || dgOn ) ? g.gbuf.tex : 0 );
 		u.done();
 		prog->uni1i( "cellCtGbuf", WwCellUnit::ContactGbuf );
 		prog->uni1b( "cellCtOn", ctOn );
+		if ( prog->uniLocation( "wwDecalGbufOn" ) >= 0 ) {
+			prog->uni1b( "wwDecalGbufOn", dgOn );
+			if ( dgOn ) {
+				int dvp[4];
+				wwDrawViewport( dvp );
+				prog->uni4f( "wwDecalGbufRect", FloatVector4( float( dvp[0] ), float( dvp[1] ), float( g.gbuf.w ), float( g.gbuf.h ) ) );
+			}
+		}
 		if ( ctOn ) {
 			prog->uni4f( "cellCtProj", FloatVector4( pm[0][0], pm[1][1], pm[2][0], pm[2][1] ) );
 			prog->uni4f( "cellCtRect", FloatVector4( 0.0f, 0.0f, float( g.gbuf.w ), float( g.gbuf.h ) ) );

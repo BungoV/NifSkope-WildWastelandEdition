@@ -2160,6 +2160,15 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			WW_SWITCH_STATIC( bool, deep, wwEnv( "WW_CELL_DECAL_POM_RED" ).trimmed() == "deep" );
 			prog->uni2f( "wwDecalPom", on ? sc * ( deep ? 4.0f : 1.0f ) : 0.0f, steps );
 		}
+		if ( prog->uniLocation( "wwDecalAngle" ) >= 0 ) {	// lane DECALANGLE: the vertex alpha is dot(N, D) on this shape
+			const bool angle = wwCellDecalAngleFor( scene->nifModel, mesh->id() );
+			const bool mapped = angle && wwCellDecalMappedFor( scene->nifModel, mesh->id() );
+			prog->uni1b( "wwDecalAngle", angle );
+			if ( prog->uniLocation( "wwDecalMapped" ) >= 0 )
+				prog->uni1b( "wwDecalMapped", mapped );	// lane DECALANGLE2: the vertex rgb is D
+			if ( angle )	// the vertex colour is data here: never the display toggles' override
+				prog->uni4f( "vertexColorOverride", FloatVector4( 0.0f ) );
+		}
 		if ( ( wwVolPartFx() & 1 ) && ( wwVolPartRed() & 64 ) && prog->name == std::string_view( "fo4_effectcell.prog" ) ) {
 			prog->uni1b( "cellShadowOn", false );	// lane VOLPART1 red noshadow: the placed lights' cubes too
 			setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)

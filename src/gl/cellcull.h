@@ -137,6 +137,14 @@ void wwCellDecalPomShape( const void * nif, int block, float scale, int passes )
 bool wwCellDecalPomFor( const void * nif, int block, float & scale, float & steps );
 //! lane BINDLESSMDI1: wwCellDecalFadeRanges may draw the shape its own way (no side effect)
 bool wwCellDecalFadeHas( Scene * scene, int block );
+/*! Lane DECALANGLE: a placed decal shape whose vertex alpha is dot(N, D) (src/celldecalangle.h): the shader runs
+ *  the game's angle rule per pixel. Off for the red WW_CELL_DECAL_RED=vertexangle. */
+void wwCellDecalAngleShape( const void * nif, int block, bool mapped );
+bool wwCellDecalAngleFor( const void * nif, int block );
+//! Lane DECALANGLE2: the shape's vertex rgb is D and the rule reads the drawn normal of the shared opaque pass.
+bool wwCellDecalMappedFor( const void * nif, int block );
+//! Lane DECALANGLE2: any such shape in the document (the shared opaque pass is then kept for it).
+bool wwCellDecalMappedHas( const void * nif );
 
 //! The shape's runs, or null (not a cell shape, or one run only).
 const std::vector<WwCullRun> * wwCellCullRuns( const void * nif, int block );

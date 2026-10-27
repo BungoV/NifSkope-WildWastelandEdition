@@ -49,6 +49,8 @@ uniform float glowMult;
 
 uniform float alpha;
 uniform vec2 wwDecalPom;	// lane DECALS1: placed decal parallax (DODT scale x 0.1, step cap); x = 0 off
+uniform bool wwDecalAngle;	// lane DECALANGLE: a placed decal whose vertex alpha is dot(N, D) (src/celldecalangle.h)
+uniform bool wwDecalMapped;	// lane DECALANGLE2: and its vertex rgb is D as a signed byte (not a colour)
 uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
 uniform bool landSplat;		// lane TERRBLEND1: vertex alpha = this blended-ground pass's share
 uniform int landSplatDbg;	// lane ALLON2: 0 edge guard, 1 red WW_TERRBLEND_RED=edgepass (no guard), 2 probe WW_TERRBLEND_PROBE=edge
@@ -332,6 +334,34 @@ vec3 landLodChunk( int k, vec2 uv, vec2 dx, vec2 dy )
 #include "cell_farground.glsl"
 #endif
 
+/* lane DECALANGLE: the game's decal angle rule, per pixel. The vertex alpha is dot(unit N, D) at each piece corner
+ * (1 where the face itself passes); over the interpolated normal's length it is dot(normalize(N), D). */
+#ifdef WW_CELLLIGHTS
+uniform bool wwDecalGbufOn;	// lane DECALANGLE2: cellCtGbuf holds this view's shared opaque pass
+uniform vec4 wwDecalGbufRect;	// its origin in the viewport, its size
+#endif
+
+float wwDecalVertexA( float vertexA )
+{
+	if ( !wwDecalAngle )
+		return vertexA;
+#ifdef WW_CELLLIGHTS
+	// lane DECALANGLE2: N = the drawn (normal-mapped) normal under this pixel, as the game's g-buffer has it
+	if ( wwDecalMapped && wwDecalGbufOn && vertexA < 254.5 / 255.0 ) {
+		ivec2 q = ivec2( gl_FragCoord.xy - wwDecalGbufRect.xy );
+		if ( all( greaterThanEqual( q, ivec2( 0 ) ) ) && all( lessThan( q, ivec2( wwDecalGbufRect.zw ) ) ) ) {
+			vec4 g = texelFetch( cellCtGbuf, q, 0 );
+			float z = cellAoPassOut( vec3( 0.0, 0.0, 1.0 ), -ViewDir ).w;
+			if ( abs( g.a - z ) <= 0.5 + 0.005 * z ) {	// the surface under it, not a nearer one
+				vec3 d = normalize( ( ( C.rgb * 255.0 - 128.0 ) / 127.0 ) * normalMatrix );
+				return clamp( ( dot( g.xyz, d ) - 0.3 ) / 0.25, 0.0, 1.0 );
+			}
+		}
+	}
+#endif
+	return clamp( ( vertexA / max( length( btnMatrix[2] ), 1.0e-4 ) - 0.3 ) / 0.25, 0.0, 1.0 );
+}
+
 /* lane DECALS1: the game's decal parallax. Height = the set's TX04 (bound as GlowMap, red); the eye ray in the
  * decal's unit uv axes x tan(angle) x scale, linear search from the top in n steps, then one secant step. */
 vec2 wwDecalPomUv( vec2 uv0, vec3 P, vec3 N, vec3 E )
@@ -435,11 +465,13 @@ void main()
 		 * silhouette, the thing you are looking at, is gone. Hence the preview
 		 * early-out sits AFTER this and not at the top of main(). */
 #ifdef WW_CELLLIGHTS
-		float	a = wwGrassVertexA( C.a ) * baseMap.a * alpha;
+		float	a = wwGrassVertexA( wwDecalVertexA( C.a ) ) * baseMap.a * alpha;
 		a *= wwGrassK;	// lane GRASSMB1: the grass fades out through its own alpha test
 #else
-		float	a = C.a * baseMap.a * alpha;
+		float	a = wwDecalVertexA( C.a ) * baseMap.a * alpha;
 #endif
+		if ( wwDecalAngle && a < 4.0 / 255.0 )	// lane DECALANGLE: the game drops texture alpha x term under 4/255
+			discard;
 		// 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
 		int	m = ( a < alphaThreshold ? 0x2B2B : ( a > alphaThreshold ? 0x7171 : 0x4D4D ) );
 		if ( ( m & ( 1 << alphaFlags ) ) == 0 )
@@ -622,10 +654,10 @@ void main()
 
 	vec3 reflectedWS = reflMatrix * R;
 
-	vec3 albedo = baseMap.rgb * C.rgb;
+	vec3 albedo = baseMap.rgb * ( wwDecalAngle && wwDecalMapped ? vec3( 1.0 ) : C.rgb );	// lane DECALANGLE2: rgb is D there
 	vec3 diffuse = A.rgb + D.rgb * NdotL0;
 	if ( greyscaleColor )
-		albedo = textureLod( GreyscaleMap, vec2( baseMap.g, paletteScale * C.r ), 0.0 ).rgb;
+		albedo = textureLod( GreyscaleMap, vec2( baseMap.g, paletteScale * ( wwDecalAngle && wwDecalMapped ? 1.0 : C.r ) ), 0.0 ).rgb;
 
 	// Emissive
 	vec3 emissive = vec3(0.0);

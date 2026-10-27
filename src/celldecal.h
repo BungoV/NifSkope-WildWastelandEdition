@@ -25,15 +25,16 @@
  *   t = dot(Y, P - C) / depth + 0.5; nothing is drawn outside [0,1]^3.
  * THE ANGLE RULE: with D = -Y, a surface whose face normal has dot(G, D) >= 0.3
  *   takes the decal whole; otherwise it fades by saturate((dot(N, D) - 0.3) / 0.25)
- *   with N the shading normal, and is dropped at 0.
+ *   with N the shading normal, and is dropped at 0. Per pixel since lane
+ *   DECALANGLE (src/celldecalangle.h).
  * THE DICE: a base whose min and max sizes differ, or that does not take the
  *   whole texture (it picks one quarter of a 2x2 sheet at random), is decided
  *   by a random roll in game. Those are refused by name, not guessed.
  *
  * NAMED DIFFERENCES from the game: the ray meets the DRAWN opaque triangles,
  * not the collision, and starts 1 unit behind the reference so that a decal
- * placed exactly on its surface still meets it; the angle rule is applied per triangle and per vertex,
- * not per pixel; cutout (alpha-tested) surfaces do not receive; no distance
+ * placed exactly on its surface still meets it; the angle rule's N is the drawn normal of the shared opaque
+ * pass (lane DECALANGLE2), the interpolated vertex normal where that pass is absent or shows another surface; cutout (alpha-tested) surfaces do not receive; no distance
  * fade and no parallax. */
 
 #include <QString>
@@ -69,7 +70,9 @@ struct CellDecalVert
 	float tan[3];   //!< along +v
 	float bit[3];   //!< along +u
 	float uv[2];
-	float alpha;    //!< the angle fade
+	float alpha;    //!< the angle fade, per vertex (the bake's coverage; red "vertexangle" draws it)
+	float angle;    //!< lane DECALANGLE: what the draw's vertex alpha carries (src/celldecalangle.h)
+	float dir[3];   //!< lane DECALANGLE2: D (minus the projection axis), for the drawn-normal rule
 };
 
 //! The decals of one texture set, welded.
@@ -106,6 +109,8 @@ struct CellDecalResult
 	qint64 receiverTris = 0;
 	int withPrimitive = 0, byRay = 0;
 	QString red;                        //!< the red control in force, empty when none
+	bool vertexAngle = false;           //!< lane DECALANGLE red "vertexangle": the old per-vertex fade is drawn
+	bool mapped = true;                 //!< lane DECALANGLE2: the rule reads the drawn (normal-mapped) normal; red "nonormalmap"
 };
 
 /*! Project every decal reference onto the receivers. `origin` is what the
