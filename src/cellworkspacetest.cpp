@@ -46,6 +46,8 @@ BSD License - see nifskope.h
 #include <QTimer>
 #include <QTreeWidget>
 #include <QDoubleSpinBox>
+#include <QSettings>
+#include <QTabBar>
 #include <QWidgetAction>
 
 namespace {
@@ -473,7 +475,10 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 				if ( w->objectName() != QLatin1String( "CellWorkspaceProbesShow" )
 					&& w->objectName() != QLatin1String( "CellWorkspaceOverlay" )
 					&& w->objectName() != QLatin1String( "CellWorkspaceTypeFilter" )
-					&& !w->objectName().startsWith( QLatin1String( "CellModPick" ) ) )
+					&& !w->objectName().startsWith( QLatin1String( "CellModPick" ) )
+					// lane OPENCELLFIX1: the Show tab's boxes drive the menu's actions; the picker's are the Cells tab's
+					&& !w->objectName().startsWith( QLatin1String( "CellShowTab_" ) )
+					&& !w->objectName().startsWith( QLatin1String( "OpenCell" ) ) )
 					boxes++;
 		add( "SHOWMENU1: Water is one switch", waters == 1, QString::number( waters ) );
 		add( "SHOWMENU1: no viewport checkbox or drop-down is left in the panel", boxes == 0,
@@ -501,6 +506,31 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 			bloomItems.join( QLatin1Char( '|' ) ) + QStringLiteral( " rows=" ) + QString::number( bloomRows ) );
 	} else {
 		add( "SHOWMENU1: the Show dropdown exists", false );
+	}
+
+	/* lane OPENCELLFIX1: the dock is four tabs in a modder's order; the last tab comes back; the Show tab is the
+	 * Show menu as boxes; the reference parts show only with a cell open. */
+	if ( QTabBar * tb = dCell ? dCell->findChild<QTabBar *>( QStringLiteral( "CellWorkspaceTabs" ) ) : nullptr ) {
+		QStringList names;
+		for ( int i = 0; i < tb->count(); i++ )
+			names << tb->tabText( i );
+		add( "OPENCELLFIX1: the Cell dock's tabs are Load order, Cells, References, Show",
+			names == QStringList{ "Load order", "Cells", "References", "Show" }, names.join( QLatin1Char( '|' ) ) );
+		const QString was = panel ? panel->currentTab() : QString();
+		if ( panel )
+			panel->setCurrentTab( QStringLiteral( "show" ) );
+		add( "OPENCELLFIX1: the tab picked is saved for the next start",
+			QSettings().value( QStringLiteral( "CellEditor/Tab" ) ).toString() == QLatin1String( "show" ),
+			QSettings().value( QStringLiteral( "CellEditor/Tab" ) ).toString() );
+		int shown = 0;
+		if ( panel && panel->showTabPanel() )
+			for ( QAbstractButton * b : panel->showTabPanel()->findChildren<QAbstractButton *>() )
+				shown += b->objectName().startsWith( QLatin1String( "CellShowTab_" ) );
+		add( "OPENCELLFIX1: the Show tab holds a box per Show row", shown >= 20, QString::number( shown ) );
+		if ( panel )
+			panel->setCurrentTab( was );
+	} else {
+		add( "OPENCELLFIX1: the Cell dock has its tabs", false );
 	}
 
 	// ---- 6. the round trip, as bytes

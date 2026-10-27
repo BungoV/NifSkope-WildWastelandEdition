@@ -30683,6 +30683,19 @@ void NifSkope::initDockWidgets()
 				}
 				loadFile( path );
 			} );
+			/* lane OPENCELLFIX1: the Cells tab's Open, and File > Open Cell... (no separate window: it brings this
+			 * dock's Cells tab forward). */
+			connect( cellWs, &CellWorkspacePanel::openCellRequested, this, [this]( const QString & path ) {
+				QString f = path;
+				openFile( f );
+			} );
+			openCellSetShowPicker( [this, cellWs, dCellWs]() {
+				if ( wsCellIndex >= 0 )
+					setWorkspace( wsCellIndex );
+				dCellWs->show();
+				dCellWs->raise();
+				cellWs->showCellsTab();
+			} );
 
 			WorkspaceDef d;
 			d.dock = dCellWs;

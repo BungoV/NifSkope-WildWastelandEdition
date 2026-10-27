@@ -32,6 +32,9 @@ BSD License - see nifskope.h
 #include "gl/cellbloom.h"	// lane BLOOM1b
 #include "gl/cellfogbloom.h"
 #include "ui/widgets/wwnumberfield.h"	// lane BLOOM1b: the Bloom rows
+#include "ui/opencelldialog.h"	// lane OPENCELLFIX1: the Load order and Cells tabs
+#include "ui/cellshowpanel.h"	// lane OPENCELLFIX1: the Show tab, the Show menu stays open
+#include "cellmodpick.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -52,6 +55,10 @@ BSD License - see nifskope.h
 #include <QLabel>
 #include <QLineEdit>
 #include <QRegularExpression>
+#include <QDoubleSpinBox>
+#include <QScrollArea>
+#include <QStackedWidget>
+#include <QTabBar>
 #include <QSignalBlocker>
 #include <QStringList>
 #include <QTreeWidget>
@@ -306,12 +313,76 @@ void CellWorkspacePanel::setShowRow( int i, bool on )
 
 void CellWorkspacePanel::buildUi()
 {
-	QVBoxLayout * page = new QVBoxLayout( this );
-	page->setContentsMargins( 6, 6, 6, 6 );
-	page->setSpacing( 4 );
+	/* lane OPENCELLFIX1 (bungo 10-27: "So this whole thing needs a redo", "logical for modders to use"): the dock is
+	 * tabs on the block list's strip, in the order a modder works: Load order, Cells, References, Show. The bands
+	 * below keep their widgets; `page` points at the tab each band now lives in. */
+	QVBoxLayout * outer = new QVBoxLayout( this );
+	outer->setContentsMargins( 0, 0, 0, 0 );
+	outer->setSpacing( 0 );
+	tabs = new QTabBar( this );
+	tabs->setObjectName( QStringLiteral( "CellWorkspaceTabs" ) );
+	tabs->setDocumentMode( true );
+	tabs->setDrawBase( false );
+	tabs->setExpanding( true );
+	tabs->setUsesScrollButtons( false );
+	tabs->setStyleSheet( wwSegmentedTabBarQss() );
+	tabStack = new QStackedWidget( this );
+	tabStack->setObjectName( QStringLiteral( "CellWorkspaceStack" ) );
+	auto newPage = []( const char * id ) {
+		auto * w = new QWidget;
+		w->setObjectName( QStringLiteral( "CellWorkspaceTab_" ) + QLatin1String( id ) );
+		auto * l = new QVBoxLayout( w );
+		l->setContentsMargins( 6, 6, 6, 6 );
+		l->setSpacing( 4 );
+		return l;
+	};
+	auto addTab = [this]( const QString & name, const char * id, QWidget * w ) {
+		const int t = tabs->addTab( name );
+		tabs->setTabData( t, QString::fromLatin1( id ) );
+		tabStack->addWidget( w );
+	};
+	QVBoxLayout * loL = newPage( "loadorder" );
+	QVBoxLayout * cellsL = newPage( "cells" );
+	QVBoxLayout * refsL = newPage( "references" );
+	QVBoxLayout * showL = newPage( "show" );
+	auto * showScroll = new QScrollArea;
+	showScroll->setObjectName( QStringLiteral( "CellWorkspaceShowScroll" ) );
+	showScroll->setWidgetResizable( true );
+	showScroll->setFrameShape( QFrame::NoFrame );
+	showScroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	showScroll->setWidget( showL->parentWidget() );
+	addTab( tr( "Load order" ), "loadorder", loL->parentWidget() );
+	addTab( tr( "Cells" ), "cells", cellsL->parentWidget() );
+	addTab( tr( "References" ), "references", refsL->parentWidget() );
+	addTab( tr( "Show" ), "show", showScroll );
+	outer->addWidget( tabs, 0 );
+	outer->addWidget( tabStack, 1 );
 
-	// ---- band 1: the references
-	page->addWidget( wwHeading( tr( "References" ), this ) );
+	picker = new OpenCellPicker( this );
+	picker->hide();
+	loL->addWidget( picker->loadOrderPage(), 1 );
+	cellsL->addWidget( picker->cellsPage(), 1 );
+	connect( picker, &OpenCellPicker::openRequested, this, [this]( const QString & path ) {
+		/* The tabs' load order is the one the cell loads: a Mods choice saved for this worldspace (perhaps from a
+		 * load order that has since changed) would otherwise override it. */
+		CellSceneSpec s;
+		if ( cellSpecFromFile( path, s, nullptr ) && !s.interior && !s.world.isEmpty() && cellModPickTouched( s.world ) )
+			cellModPickReset( s.world );
+		emit openCellRequested( path );
+	} );
+
+	auto box = []( QVBoxLayout * into, const char * name, int stretch ) {
+		auto * w = new QWidget;
+		w->setObjectName( QLatin1String( name ) );
+		auto * l = new QVBoxLayout( w );
+		l->setContentsMargins( 0, 0, 0, 0 );
+		l->setSpacing( 4 );
+		into->addWidget( w, stretch );
+		return l;
+	};
+	QVBoxLayout * refsLay = box( refsL, "CellWorkspaceReferences", 1 );
+	refsBox = refsLay->parentWidget();
+	QVBoxLayout * page = refsLay;
 
 	QWidget * filterRow = new QWidget( this );
 	QHBoxLayout * fl = new QHBoxLayout( filterRow );
@@ -364,8 +435,8 @@ void CellWorkspacePanel::buildUi()
 	list->setStyleSheet( wwSelectionTreeQss() );
 	page->addWidget( list, 1 );
 
-	// ---- band 2: the view
-	page->addWidget( wwHeading( tr( "View" ), this ) );
+	// ---- band 2: the view (the Show tab)
+	page = showL;
 
 	QWidget * viewRow = new QWidget( this );
 	QHBoxLayout * vl = new QHBoxLayout( viewRow );
@@ -817,8 +888,22 @@ void CellWorkspacePanel::buildUi()
 	}
 	showButton->setMenu( showMenu );
 	vl->addWidget( showButton );
+	/* lane OPENCELLFIX1 (bungo 10-27: "For show, don't close it when I click on one thing", "Maybe make that a sub
+	 * category with checkmarks"): a tick leaves the menu open, and the Show tab lays the same actions out as
+	 * folding check-box groups, values inline. The actions stay the one source of truth. */
+	wwKeepMenuOpenOnTick( showMenu );
+	{
+		WwMenuPanelStyle ps;
+		ps.heading = []( const QString & t, QWidget * p ) { return wwHeading( t, p ); };
+		ps.number = []( QDoubleSpinBox * f ) { f->setMinimumWidth( 96 ); };
+		ps.foldGroup = QStringLiteral( "CellEditor/ShowFolds" );
+		showPanel = wwMenuAsPanel( showMenu, this, ps );
+		page->addWidget( showPanel );
+	}
 
 	// ---- band 3: PRTP (Precomputed Radiance Transfer Probes) -- the probe controls only
+	page = box( showL, "CellWorkspacePrtp", 0 );
+	prtpBox = page->parentWidget();
 	page->addWidget( wwHeading( tr( "PRTP" ), this ) );
 	QWidget * prtpRow = new QWidget( this );
 	QHBoxLayout * pl = new QHBoxLayout( prtpRow );
@@ -1062,6 +1147,8 @@ void CellWorkspacePanel::buildUi()
 
 	/* ---- lane MODPICK1: which mods the cells load (bungo 10-12). The list, the saved choice per worldspace
 	 * and the one-stack rule live in cellmodpick.h; Apply or Reset rebuilds the cell like the Far LOD row. */
+	page = box( loL, "CellWorkspaceMods", 1 );
+	modsBox = page->parentWidget();
 	page->addWidget( wwHeading( tr( "Mods" ), this ) );
 	modPick = new CellModPickBox( this );
 	modPick->onChoiceChanged = [this]() {
@@ -1074,7 +1161,8 @@ void CellWorkspacePanel::buildUi()
 	};
 	page->addWidget( modPick );
 
-	// ---- band 4: the legend
+	// ---- band 4: the legend (the References tab)
+	page = refsLay;
 	page->addWidget( wwHeading( tr( "Legend" ), this ) );
 	legend = new QTreeWidget( this );
 	legend->setObjectName( QStringLiteral( "CellWorkspaceLegend" ) );
@@ -1094,6 +1182,11 @@ void CellWorkspacePanel::buildUi()
 	/* PINNED under everything: the cell's one-line census, then the summary or
 	 * the refusal. Neither scrolls away -- the panel style's action-bar rule for
 	 * a panel whose only action is clicking. */
+	showL->addStretch( 1 );
+	page = new QVBoxLayout;
+	page->setContentsMargins( 6, 2, 6, 6 );
+	page->setSpacing( 2 );
+	outer->addLayout( page );
 	census = new QLabel( this );
 	census->setObjectName( QStringLiteral( "CellWorkspaceCensus" ) );
 	census->setWordWrap( true );
@@ -1111,6 +1204,52 @@ void CellWorkspacePanel::buildUi()
 	connect( overlayBox, QOverload<int>::of( &QComboBox::currentIndexChanged ),
 		this, &CellWorkspacePanel::viewRowChanged );
 
+	// lane OPENCELLFIX1: the last tab comes back; the Show tab re-reads its actions when shown
+	connect( tabs, &QTabBar::currentChanged, this, [this]( int index ) {
+		if ( index < 0 )
+			return;
+		tabStack->setCurrentIndex( index );
+		const QString id = tabs->tabData( index ).toString();
+		if ( id == QLatin1String( "show" ) )
+			wwMenuPanelSync( showPanel );
+		QSettings().setValue( QStringLiteral( "CellEditor/Tab" ), id );
+	} );
+	const QString savedTab = QSettings().value( QStringLiteral( "CellEditor/Tab" ), QStringLiteral( "loadorder" ) ).toString();
+	setCurrentTab( savedTab );
+	showCellParts( false );
+}
+
+QString CellWorkspacePanel::currentTab() const
+{
+	return tabs ? tabs->tabData( tabs->currentIndex() ).toString() : QString();
+}
+
+void CellWorkspacePanel::setCurrentTab( const QString & id )
+{
+	if ( !tabs )
+		return;
+	for ( int i = 0; i < tabs->count(); i++ )
+		if ( tabs->tabData( i ).toString() == id ) {
+			if ( tabs->currentIndex() == i ) {
+				tabStack->setCurrentIndex( i );
+				QSettings().setValue( QStringLiteral( "CellEditor/Tab" ), id );
+			} else {
+				tabs->setCurrentIndex( i );
+			}
+			return;
+		}
+}
+
+void CellWorkspacePanel::showCellParts( bool on )
+{
+	for ( QWidget * w : { refsBox, modsBox, prtpBox } )
+		if ( w )
+			w->setVisible( on );
+}
+
+bool CellWorkspacePanel::cellPartsShown() const
+{
+	return refsBox && !refsBox->isHidden();
 }
 
 void CellWorkspacePanel::setNif( NifModel * n )
@@ -1185,6 +1324,15 @@ QStringList CellWorkspacePanel::typeFilterNames() const
 
 void CellWorkspacePanel::onSceneChanged()
 {
+	/* lane OPENCELLFIX1: the parts that need a cell show once one is open, and a NEW cell (not a reopen of the same
+	 * one by a Show switch) brings the References tab forward. */
+	showCellParts( !g_path.isEmpty() );
+	if ( g_path.isEmpty() )
+		openedPath.clear();
+	else if ( g_path != openedPath ) {
+		openedPath = g_path;
+		setCurrentTab( QStringLiteral( "references" ) );
+	}
 	rebuildList();
 	rebuildLegendAndCensus();
 	if ( cellPass )	// lane PROBEVIEW1: a Pass needs this document's bake relit
@@ -1319,9 +1467,8 @@ void CellWorkspacePanel::filterChanged()
 	const int shown = visibleRows();
 	if ( total == 0 )
 		return;
-	say( shown == total
-		? tr( "%1 references" ).arg( total )
-		: tr( "%1 of %2 references" ).arg( shown ).arg( total ), false );
+	// lane OPENCELLFIX1: the census already counts them; the line speaks only while a filter hides some
+	say( shown == total ? QString() : tr( "%1 of %2 references" ).arg( shown ).arg( total ), false );
 }
 
 // ---- selection, both directions
@@ -1521,7 +1668,7 @@ void CellWorkspacePanel::rebuildLegendAndCensus()
 	if ( !refusal.isEmpty() )
 		say( refusal, true );
 	else
-		say( tr( "%1 references" ).arg( refs ), false );
+		say( QString(), false );	// lane OPENCELLFIX1: the census line above already says how many
 	rebuildProbeKinds();
 }
 
@@ -1636,6 +1783,7 @@ void CellWorkspacePanel::say( const QString & text, bool refusal )
 		return;
 	noteRefusal = refusal;
 	note->setText( text );
+	note->setVisible( !text.isEmpty() );
 	note->setStyleSheet( refusal
 		? QStringLiteral( "color: %1;" ).arg( wwSkinColor( "danger" ) )
 		: QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );

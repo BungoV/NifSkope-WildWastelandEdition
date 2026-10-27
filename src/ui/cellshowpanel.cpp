@@ -77,7 +77,11 @@ void installStayOpen( QMenu * m, QObject * filter )
 class EnabledEcho final : public QObject
 {
 public:
-	EnabledEcho( QWidget * from, QList<QWidget *> to ) : QObject( from ), mirrors( std::move( to ) ) {}
+	EnabledEcho( QWidget * from, const QList<QWidget *> & to ) : QObject( from )
+	{
+		for ( QWidget * w : to )
+			mirrors.append( w );
+	}
 	void apply( QWidget * from )
 	{
 		for ( QWidget * w : mirrors )
@@ -133,9 +137,10 @@ struct Builder
 		};
 		arrow->setChecked( open );
 		show( open );
-		QObject::connect( arrow, &QToolButton::toggled, arrow, [show, key, this]( bool on ) {
+		const bool keep = !style.foldGroup.isEmpty();	// by value: the builder is gone once the panel is up
+		QObject::connect( arrow, &QToolButton::toggled, arrow, [show, key, keep]( bool on ) {
 			show( on );
-			if ( !style.foldGroup.isEmpty() )
+			if ( keep )
 				QSettings().setValue( key, on );
 		} );
 		if ( enabler ) {	// a submenu greys as one (a Pass that needs a bake)

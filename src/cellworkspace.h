@@ -27,8 +27,11 @@ class QToolButton;
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QStackedWidget;
+class QTabBar;
 class QTreeWidget;
 class QTreeWidgetItem;
+class OpenCellPicker;
 
 /* ---------------------------------------------------------------------------
  * THE CELL WORKSPACE (lane CELLWORK1, 2026-09-19).
@@ -150,6 +153,18 @@ public:
 	void setProbesShown( bool on );
 	//! lane MODPICK1: the Mods band (the harness drives it through its own clicks).
 	CellModPickBox * modPicker() const;
+	/*! lane OPENCELLFIX1: the dock's tabs, in a modder's order: "loadorder", "cells", "references", "show".
+	 *  The last one shown is remembered; an open switches to References. */
+	QString currentTab() const;
+	void setCurrentTab( const QString & id );
+	//! File > Open Cell...: the Cells tab.
+	void showCellsTab() { setCurrentTab( QStringLiteral( "cells" ) ); }
+	//! The Load order and Cells tabs' picker (the harness drives it).
+	OpenCellPicker * cellPicker() const { return picker; }
+	//! The Show tab's switches (built from the Show menu; wwMenuAsPanel).
+	QWidget * showTabPanel() const { return showPanel; }
+	//! True while the parts that need an open cell (the reference list, Legend, Mods, PRTP) are shown.
+	bool cellPartsShown() const;
 
 public slots:
 	//! A cell scene was built, or the document changed: rebuild everything.
@@ -168,6 +183,8 @@ public slots:
 signals:
 	//! A view row changed: re-open this `.wwcell` through the ordinary path.
 	void reopenRequested( const QString & path );
+	//! lane OPENCELLFIX1: the Cells tab's Open wrote this `.wwcell`; open it through the ordinary path.
+	void openCellRequested( const QString & path );
 
 private slots:
 	void rowClicked();
@@ -260,6 +277,16 @@ private:
 	QTreeWidget * probeKinds = nullptr;
 	void rebuildProbeKinds();
 	CellModPickBox * modPick = nullptr;	// lane MODPICK1: the Mods band
+	// lane OPENCELLFIX1: the tabs, the picker they hold, and the parts hidden until a cell is open
+	QTabBar * tabs = nullptr;
+	QStackedWidget * tabStack = nullptr;
+	OpenCellPicker * picker = nullptr;
+	QWidget * showPanel = nullptr;
+	QWidget * refsBox = nullptr;
+	QWidget * modsBox = nullptr;
+	QWidget * prtpBox = nullptr;
+	QString openedPath;	//!< the cell the tabs last switched to References for
+	void showCellParts( bool on );
 	QLabel * census = nullptr;
 	QLabel * note = nullptr;
 	bool noteRefusal = false;
