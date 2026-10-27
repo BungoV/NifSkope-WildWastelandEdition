@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 #include "data/niftypes.h"
+#include "gl/celluniform.h"
 
 class NifModel;
 class QOpenGLContext;
@@ -149,6 +150,7 @@ public:
 		bool wwBindless = false;	// lane BINDLESS2: a *bl.prog twin (maps and matrices from the per-draw row)
 		int wwDrawIdLoc = -1;	// its wwDrawIdx uniform
 		Program * wwTwin = nullptr;	// the program it stands in for (its sampler locations decide which maps bind)
+		WwCellUni::Cache wwUni;	// lane CELLUNI1: what the cell scope last wrote per location (reset at every link)
 
 		ConditionGroup conditions;
 

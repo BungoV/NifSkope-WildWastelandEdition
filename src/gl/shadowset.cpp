@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
+#include "gl/celluniform.h"	// lane CELLUNI2
 #include "gl/cloudshadow.h"	// lane CLOUD3: the clouds' shadow map joins the composition
 #include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
 #include "gl/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
@@ -1956,13 +1957,10 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	prog->uni1i( "ussOn", on ? 1 : 0 );
 	const bool units = unitsOk( fn );
 	if ( units ) {
-		GLint prevActive = 0;
-		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::TerrShadow ) );
-		fn->glBindTexture( GL_TEXTURE_2D, terr ? s.t.tex[s.t.front] : 0 );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::ContactShadow ) );
-		fn->glBindTexture( GL_TEXTURE_2D, contact ? s.c.tex : 0 );
-		fn->glActiveTexture( GLenum( prevActive ) );
+		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );	// lane CELLUNI2: no query with DSA
+		u.bind( WwCellUnit::TerrShadow, GL_TEXTURE_2D, terr ? s.t.tex[s.t.front] : 0 );
+		u.bind( WwCellUnit::ContactShadow, GL_TEXTURE_2D, contact ? s.c.tex : 0 );
+		u.done();
 		prog->uni1i( "ussTerrMap", WwCellUnit::TerrShadow );
 		prog->uni1i( "ussContactMap", WwCellUnit::ContactShadow );
 	}
@@ -2046,8 +2044,10 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 		m[3] = m[7] = m[11] = 0.0f;
 		m[15] = 1.0f;
 		const int l = prog->uniLocation( "ussWorldFromView" );
-		if ( l >= 0 )
+		if ( l >= 0 ) {
 			fn->glUniformMatrix4fv( l, 1, GL_FALSE, m );
+			WwCellUni::wrote( prog->wwUni, l, 1 );	// lane CELLUNI2: a raw write
+		}
 	}
 	prog->uni1i( "ussContactOn", contact ? 1 : 0 );
 	if ( contact )

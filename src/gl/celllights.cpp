@@ -48,6 +48,8 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <cstdio>
 #include "cellunits.h"
+#include "celluniform.h"	// lane CELLUNI1
+#include <QOpenGLContext>
 #include <cstring>
 #include <map>
 #include <vector>
@@ -315,6 +317,7 @@ struct Gpu
 	int lutStamp = -1;	// lane SUNCELL1: the exterior imagespace's stamp the LUT was uploaded at
 	GLuint bloomTex = 0;
 	GLuint farSlotBuf = 0, farSlotTex = 0, farRecBuf = 0, farRecTex = 0, farPlacedTex = 0;	// lane FARVIEW1
+	GLuint farSlotAtt = 0, farRecAtt = 0;	// lane CELLUNI1: the buffer each far texture holds (kept across glBufferData)
 	const void * farDoc = nullptr;
 	int farVersion = 0;
 	const void * bloomDoc = nullptr;
@@ -1326,6 +1329,53 @@ void wwCellCamDump( Scene * scene )
 	}
 }
 
+quint64 wwGlPaintCount();	// glview.cpp
+bool wwFrameLog();	// gl/cellcull.cpp
+
+bool wwCellUniRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvInt( "WW_CELL_UNI_RED" ) == 1 );
+	return red;
+}
+
+// lane CELLUNI2: totals, then per site (lights = this file's scope, draw = the per-draw setters, globals = fog + sun)
+void wwCellUniFrame()
+{
+	if ( !WwCellUni::frameTick( wwGlPaintCount(), 60 ) || !wwFrameLog() )
+		return;
+	const WwCellUni::State & cs = WwCellUni::state();
+	const WwCellUni::Dsa * dsa = wwCellUniDsa();
+	QByteArray line = QByteArray( "cell uni: calls=" ) + QByteArray::number( cs.last.calls ) + " uploads="
+		+ QByteArray::number( cs.last.uploads ) + " kept=" + QByteArray::number( cs.last.kept ) + " unused="
+		+ QByteArray::number( cs.last.unused ) + " queries=" + QByteArray::number( cs.last.queries ) + " dsa="
+		+ QByteArray::number( dsa && dsa->bindMulti ? 1 : 0 ) + " vpstale=" + QByteArray::number( cs.vpStale );
+	static const char * const names[WwCellUni::SiteCount] = { "lights", "draw", "globals" };
+	for ( int i = 0; i < WwCellUni::SiteCount; i++ ) {
+		const WwCellUni::Counts & c = cs.sitesLast[i];
+		line += QByteArray( " | " ) + names[i] + " calls=" + QByteArray::number( c.calls ) + " uploads="
+			+ QByteArray::number( c.uploads ) + " kept=" + QByteArray::number( c.kept ) + " queries=" + QByteArray::number( c.queries );
+	}
+	std::fprintf( stderr, "%s%s\n", line.constData(), cs.red ? " RED" : "" );
+}
+
+const WwCellUni::Dsa * wwCellUniDsa()
+{
+	static const QOpenGLContext * last = nullptr;
+	static WwCellUni::Dsa d;
+	const QOpenGLContext * c = QOpenGLContext::currentContext();
+	if ( !c )
+		return nullptr;
+	if ( c != last ) {	// every GL context of the app is one driver: resolved again only when the context changes
+		d = WwCellUni::Dsa();
+		if ( c->hasExtension( QByteArrayLiteral( "GL_EXT_direct_state_access" ) ) ) {
+			d.bindMulti = reinterpret_cast<WwCellUni::BindMultiFn>( c->getProcAddress( "glBindMultiTextureEXT" ) );
+			d.texBuffer = reinterpret_cast<WwCellUni::TexBufferFn>( c->getProcAddress( "glTextureBufferEXT" ) );
+		}
+		last = c;
+	}
+	return &d;
+}
+
 void wwCellLightsUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuCellUni );	// lane PERF2
@@ -1335,6 +1385,9 @@ void wwCellLightsUniforms( Scene * scene )
 	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
 	if ( !prog || prog->uniLocation( "cellOn" ) < 0 )
 		return;
+	WwCellUni::state().red = wwCellUniRed();	// lane CELLUNI1
+	wwCellUniFrame();
+	const WwCellUni::Scope uniScope;
 	const bool on = wwCellLightsWanted( scene );
 	prog->uni1b( "cellOn", on );
 	auto fn = r->fn;
@@ -1615,17 +1668,17 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	/* The sampler is bound whether or not this draw lights: a samplerBuffer left on unit 0
 	 * beside BaseMap's sampler2D is a draw-time INVALID_OPERATION. */
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTextureUnit ) );
+	// lane CELLUNI1: bound by DSA, the active unit untouched (and never asked for); uploads move it and put it back
+	WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
+	u.section();
 	if ( g.tex && g.buf ) {
-		fn->glBindTexture( GL_TEXTURE_BUFFER, g.tex );
+		u.bind( kTextureUnit, GL_TEXTURE_BUFFER, g.tex );
 		if ( !g.texAttached ) {
-			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.buf );
+			u.texBuffer( g.tex, GL_RGBA32F, g.buf );
 			g.texAttached = true;
 		}
 	} else {
-		fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
+		u.bind( kTextureUnit, GL_TEXTURE_BUFFER, 0 );
 	}
 	// lane PRTPGI: the bounce grid, bound (like the buffer above) whether or not this draw uses it
 	// lane PROBEVIEW1: a Pass reads the grid with the GI row off too; Sky visibility binds the sky grid in its place
@@ -1638,7 +1691,7 @@ void wwCellLightsUniforms( Scene * scene )
 				sky[i] = sky[i + 1] = sky[i + 2] = sky[i + 3];
 		if ( !g.skyTex )
 			fn->glGenTextures( 1, &g.skyTex );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
+		u.raw( kGiUnit );
 		fn->glBindTexture( GL_TEXTURE_3D, g.skyTex );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
@@ -1657,7 +1710,7 @@ void wwCellLightsUniforms( Scene * scene )
 		&& ( g.giDoc != scene->nifModel || g.giVersion != s.giVersion.value( scene->nifModel ) || g.giSpecSky != specSky ) ) {
 		if ( !g.giTex )
 			fn->glGenTextures( 1, &g.giTex );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
+		u.raw( kGiUnit );
 		fn->glBindTexture( GL_TEXTURE_3D, g.giTex );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
@@ -1688,7 +1741,7 @@ void wwCellLightsUniforms( Scene * scene )
 		g.giFadeVersion = s.giFadeVersion.value( scene->nifModel );
 	} else if ( G && pass != 2 && !G->rgba.empty() && g.giTex && g.giFadeVersion != s.giFadeVersion.value( scene->nifModel ) ) {
 		// lane GIPROBE2: a smoothing step changed the grid's values only: its slabs again, nothing else
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
+		u.raw( kGiUnit );
 		fn->glBindTexture( GL_TEXTURE_3D, g.giTex );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
 		const int slabs = G->slotRooms.empty() ? 6 : 12;
@@ -1697,14 +1750,13 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	const bool skyDraw = G && pass == 2 && g.skyTex && g.skyDoc == scene->nifModel;
 	const bool giDraw = skyDraw || ( G && pass != 2 && g.giTex && g.giDoc == scene->nifModel );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
-	fn->glBindTexture( GL_TEXTURE_3D, skyDraw ? g.skyTex : giDraw ? g.giTex : 0 );
+	u.bind( kGiUnit, GL_TEXTURE_3D, skyDraw ? g.skyTex : giDraw ? g.giTex : 0 );
 	{	// SKY2 FOGSLICE1: the air volume (the deck's D2 s55), read by the air pass only (cell_airmed.glsl volCubeAll)
 		const bool airUp = giDraw && !skyDraw && G->skyLit && !G->air.empty();
 		if ( airUp && ( g.airDoc != scene->nifModel || g.airVersion != s.giVersion.value( scene->nifModel ) ) ) {
 			if ( !g.airTex )
 				fn->glGenTextures( 1, &g.airTex );
-			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiAir ) );
+			u.raw( WwCellUnit::GiAir );
 			fn->glBindTexture( GL_TEXTURE_3D, g.airTex );
 			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
@@ -1718,8 +1770,7 @@ void wwCellLightsUniforms( Scene * scene )
 			g.airVersion = s.giVersion.value( scene->nifModel );
 		}
 		const bool airDraw = airUp && g.airTex && g.airDoc == scene->nifModel;
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiAir ) );
-		fn->glBindTexture( GL_TEXTURE_3D, airDraw ? g.airTex : 0 );
+		u.bind( WwCellUnit::GiAir, GL_TEXTURE_3D, airDraw ? g.airTex : 0 );
 		prog->uni1i( "cellGiAir", WwCellUnit::GiAir );
 		prog->uni1b( "cellGiAirOn", airDraw );
 		if ( airDraw ) {
@@ -1748,7 +1799,7 @@ void wwCellLightsUniforms( Scene * scene )
 		auto up3 = [&]( GLuint & tex, int unit, const int * d, const std::vector<float> & v, bool rgba ) {
 			if ( !tex )
 				fn->glGenTextures( 1, &tex );
-			fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
+			u.raw( unit );
 			fn->glBindTexture( GL_TEXTURE_3D, tex );
 			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
@@ -1777,10 +1828,8 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	const bool roomsDraw = roomsUp && g.roomDoc == scene->nifModel;
 	if ( g.units > kRoomUnit ) {
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiSlotUnit ) );
-		fn->glBindTexture( GL_TEXTURE_3D, roomsDraw ? g.slotTex : 0 );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kRoomUnit ) );
-		fn->glBindTexture( GL_TEXTURE_3D, roomsDraw ? g.roomTex : 0 );
+		u.bind( kGiSlotUnit, GL_TEXTURE_3D, roomsDraw ? g.slotTex : 0 );
+		u.bind( kRoomUnit, GL_TEXTURE_3D, roomsDraw ? g.roomTex : 0 );
 		prog->uni1i( "cellGiSlots", kGiSlotUnit );
 		prog->uni1i( "cellRooms", kRoomUnit );
 	} else {	// two sampler3D may share a unit; a sampler3D on a 2D unit fails the draw
@@ -1811,7 +1860,7 @@ void wwCellLightsUniforms( Scene * scene )
 		if ( !Fr->placed.empty() ) {
 			if ( !g.farPlacedTex )
 				fn->glGenTextures( 1, &g.farPlacedTex );
-			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kFarPlacedUnit ) );
+			u.raw( kFarPlacedUnit );
 			fn->glBindTexture( GL_TEXTURE_3D, g.farPlacedTex );
 			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 			fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
@@ -1828,16 +1877,18 @@ void wwCellLightsUniforms( Scene * scene )
 	const bool farDraw = Fr && !Fr->slotTab.empty() && g.farSlotTex && g.farDoc == scene->nifModel;
 	const bool farPlacedDraw = farDraw && giDraw && !Fr->placed.empty() && g.farPlacedTex;
 	if ( g.units > kFarPlacedUnit ) {
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kFarSlotUnit ) );
-		fn->glBindTexture( GL_TEXTURE_BUFFER, g.farSlotTex );
-		if ( g.farSlotTex )
-			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.farSlotBuf );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kFarRecUnit ) );
-		fn->glBindTexture( GL_TEXTURE_BUFFER, g.farRecTex );
-		if ( g.farRecTex )
-			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_RGBA32F, g.farRecBuf );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kFarPlacedUnit ) );
-		fn->glBindTexture( GL_TEXTURE_3D, farPlacedDraw ? g.farPlacedTex : 0 );
+		// lane CELLUNI1: with DSA attached once per buffer (the old path attaches at every call)
+		u.bind( kFarSlotUnit, GL_TEXTURE_BUFFER, g.farSlotTex );
+		if ( g.farSlotTex && ( !u.dsa || g.farSlotAtt != g.farSlotBuf ) ) {
+			u.texBuffer( g.farSlotTex, GL_RGBA32F, g.farSlotBuf );
+			g.farSlotAtt = g.farSlotBuf;
+		}
+		u.bind( kFarRecUnit, GL_TEXTURE_BUFFER, g.farRecTex );
+		if ( g.farRecTex && ( !u.dsa || g.farRecAtt != g.farRecBuf ) ) {
+			u.texBuffer( g.farRecTex, GL_RGBA32F, g.farRecBuf );
+			g.farRecAtt = g.farRecBuf;
+		}
+		u.bind( kFarPlacedUnit, GL_TEXTURE_3D, farPlacedDraw ? g.farPlacedTex : 0 );
 		prog->uni1i( "cellFarSlots", kFarSlotUnit );
 		prog->uni1i( "cellFarRecs", kFarRecUnit );
 		prog->uni1i( "cellFarPlaced", kFarPlacedUnit );
@@ -1860,7 +1911,7 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni1f( "cellFarPlacedVoxel", Fr->placedVoxel );
 		prog->uni3f( "cellFarPlacedDims", float( Fr->placedDims[0] ), float( Fr->placedDims[1] ), float( Fr->placedDims[2] ) );
 	}
-	fn->glActiveTexture( GLenum( prevActive ) );
+	u.done();
 	prog->uni1i( "cellGi", kGiUnit );
 	prog->uni1b( "cellGiOn", giDraw );
 	prog->uni1b( "cellGiSky", giDraw && !skyDraw && G->skyLit );	// lane SKY1 (never on the sky-share grid)
@@ -1911,7 +1962,7 @@ void wwCellLightsUniforms( Scene * scene )
 		&& ( g.lutDoc != scene->nifModel || g.lutVersion != s.version.value( scene->nifModel ) || g.lutStamp != isStamp ) ) {
 		if ( !g.lutTex )
 			fn->glGenTextures( 1, &g.lutTex );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kLutUnit ) );
+		u.leave( kLutUnit );	// the old code left the unit here, and the binds below put it back to here
 		fn->glBindTexture( GL_TEXTURE_3D, g.lutTex );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
@@ -1926,10 +1977,9 @@ void wwCellLightsUniforms( Scene * scene )
 		g.lutStamp = isStamp;
 	}
 	const bool lutDraw = isDraw && g.lutTex && g.lutDoc == scene->nifModel && LI->isLut.size() == 16 * 16 * 16 * 3;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kLutUnit ) );
-	fn->glBindTexture( GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
-	fn->glActiveTexture( GLenum( prevActive ) );
+	u.section();
+	u.bind( kLutUnit, GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
+	u.done();
 	// lane BLOOM1: the measure's bloom, a quarter of the view, sampled at the fragment's place in the view
 	const ClBloom * B = nullptr;
 	if ( isDraw ) {
@@ -1940,7 +1990,7 @@ void wwCellLightsUniforms( Scene * scene )
 	if ( B && B->w > 0 && ( g.bloomDoc != scene->nifModel || g.bloomVersion != B->version ) ) {
 		if ( !g.bloomTex )
 			fn->glGenTextures( 1, &g.bloomTex );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kBloomUnit ) );
+		u.raw( kBloomUnit );
 		fn->glBindTexture( GL_TEXTURE_2D, g.bloomTex );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
@@ -1953,30 +2003,30 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	// lane BLOOM1b: the FO4CS bloom stands in for it this frame (FO4CS suppresses the engine bloom the same way)
 	const bool bloomDraw = B && B->w > 0 && g.bloomTex && g.bloomDoc == scene->nifModel && !( s.isRed & 8 ) && !wwCellBloomReplacing();
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kBloomUnit ) );
-	fn->glBindTexture( GL_TEXTURE_2D, bloomDraw ? g.bloomTex : 0 );
-	fn->glActiveTexture( GLenum( prevActive ) );
+	u.bind( kBloomUnit, GL_TEXTURE_2D, bloomDraw ? g.bloomTex : 0 );
+	u.done();
 	prog->uni1i( "cellIsBloom", kBloomUnit );
 	prog->uni1b( "cellIsBloomOn", bloomDraw );
 	if ( bloomDraw ) {
 		GLint vp[4] = { 0, 0, 1, 1 };
-		fn->glGetIntegerv( GL_VIEWPORT, vp );
+		WwCellUni::viewport( fn, vp );
 		prog->uni4f_l( prog->uniLocation( "cellIsBloomRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}
 	// lane SHADOW1: the depth cubes, bound (a sampler left on unit 0 beside BaseMap would be a type clash)
 	const bool shadowDraw = L && s.shadowOn && !s.shadowRed && g.shTex && g.shDoc == scene->nifModel;
-	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
-	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, shadowDraw ? g.shTex : 0 );
-	fn->glActiveTexture( GLenum( prevActive ) );
+	u.bind( kShadowUnit, GL_TEXTURE_CUBE_MAP_ARRAY, shadowDraw ? g.shTex : 0 );
+	u.done();
 	prog->uni1i( "cellShadow", kShadowUnit );
 	prog->uni1b( "cellShadowOn", shadowDraw );
 	prog->uni1f( "cellShadowTexel", 2.0f / float( g.shFace > 0 ? g.shFace : kShadowFace ) );	// lane LAMPSHADOW1: the tier's face
 	// lane GAPLOOK1 (LIGHTSYS-3): the budget's per-slot strengths; off, the shader keeps its old return
 	const bool fadeOn = shadowDraw && g.shBudget > 0;
 	prog->uni1b( "cellShadowFadeOn", fadeOn );
-	if ( fadeOn && prog->uniLocation( "cellShadowFade[0]" ) >= 0 )
+	if ( fadeOn && prog->uniLocation( "cellShadowFade[0]" ) >= 0 ) {
 		r->fn->glUniform1fv( prog->uniLocation( "cellShadowFade[0]" ), kShadowSlots, g.shFade );
+		prog->wwUni.forget( prog->uniLocation( "cellShadowFade[0]" ), kShadowSlots );	// lane CELLUNI1: a raw write
+	}
 	prog->uni1i( "cellIsLut", kLutUnit );
 	prog->uni1b( "cellIsOn", isDraw );
 	prog->uni1b( "cellIsLinear", isDraw && wwCellHdrActive() );	// lane HDR1: write linear light, tone-mapped once
@@ -4459,10 +4509,11 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	const bool on = g.aoReady && g.doc == scene->nifModel && !( a.red & 1 ) && ( !wwDrawBlend() || decalProg )
 		&& wwCellLightsWanted( scene );
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
-	const GLint prevActive = wwDrawActiveTexture();	// lane PERF3
-	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + g.unit ) );
-	r->fn->glBindTexture( GL_TEXTURE_2D, on ? g.aoTex : 0 );	// lane SSAO2: the method's term (fin for vanilla)
-	r->fn->glActiveTexture( GLenum( prevActive ) );
+	WwCellUni::Units<std::remove_pointer_t<decltype( r->fn )>> u( r->fn, wwCellUniDsa() );	// lane CELLUNI2: no query
+	if ( !u.dsa )
+		u.seed( wwDrawActiveTexture() );	// lane PERF3
+	u.bind( g.unit, GL_TEXTURE_2D, on ? g.aoTex : 0 );	// lane SSAO2: the method's term (fin for vanilla)
+	u.done();
 	prog->uni1i( "cellAo", g.unit );
 	prog->uni1b( "cellAoOn", on );
 	/* lane AODECAL1: the decal target multiplies the probe term (cellGiE). Opaque draws only, like the obscurance:
@@ -4470,10 +4521,11 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 	const bool decalOn = g.ready && g.doc == scene->nifModel && g.decal && g.decalUnit >= 0 && ( !wwDrawBlend() || decalProg );
 	{
 		const int du = g.decalUnit >= 0 ? g.decalUnit : g.unit;
-		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + du ) );
 		if ( g.decalUnit >= 0 )
-			r->fn->glBindTexture( GL_TEXTURE_2D, decalOn ? g.decal : 0 );
-		r->fn->glActiveTexture( GLenum( prevActive ) );
+			u.bind( du, GL_TEXTURE_2D, decalOn ? g.decal : 0 );
+		else if ( !u.dsa )
+			u.raw( du );	// the old sequence moved the unit there and back
+		u.done();
 		prog->uni1i( "cellAoDecal", du );
 		prog->uni1b( "cellAoDecalOn", decalOn );
 		if ( decalOn ) {
@@ -4487,9 +4539,8 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		const auto & pm = r->globalUniforms->projectionMatrix;
 		const bool ctOn = wwLookOn( WwLook::ContactLocal ) && g.ready && g.doc == scene->nifModel && g.gbuf.tex
 			&& ( !wwDrawBlend() || decalProg ) && pm[3][3] != 1.0f;
-		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::ContactGbuf ) );
-		r->fn->glBindTexture( GL_TEXTURE_2D, ctOn ? g.gbuf.tex : 0 );
-		r->fn->glActiveTexture( GLenum( prevActive ) );
+		u.bind( WwCellUnit::ContactGbuf, GL_TEXTURE_2D, ctOn ? g.gbuf.tex : 0 );
+		u.done();
 		prog->uni1i( "cellCtGbuf", WwCellUnit::ContactGbuf );
 		prog->uni1b( "cellCtOn", ctOn );
 		if ( ctOn ) {
@@ -4506,11 +4557,9 @@ void wwCellAoDraw( Scene * scene, bool cellProgram )
 		const bool giOn = g.giReady && g.doc == scene->nifModel && ( wwCellGiRate() == 0 || wwCellGiRate() == 1 ) && wwCellGiVis() == 0
 			&& ( !wwDrawBlend() || decalProg ) && ( !probePic || g.volOn );
 		if ( g.giUnits ) {
-			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
-			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? ( probePic ? g.volMask.tex : g.giHalf.tex ) : 0 );
-			r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalfKey ) );
-			r->fn->glBindTexture( GL_TEXTURE_2D, giOn ? g.giKey : 0 );
-			r->fn->glActiveTexture( GLenum( prevActive ) );
+			u.bind( WwCellUnit::GiHalf, GL_TEXTURE_2D, giOn ? ( probePic ? g.volMask.tex : g.giHalf.tex ) : 0 );
+			u.bind( WwCellUnit::GiHalfKey, GL_TEXTURE_2D, giOn ? g.giKey : 0 );
+			u.done();
 		}
 		prog->uni1b( "cellGiHalfOn", giOn );
 		if ( giOn ) {

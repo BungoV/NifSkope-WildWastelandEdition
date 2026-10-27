@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellcluster.h"
 #include "gl/cellunits.h"
+#include "gl/celluniform.h"	// lane CELLUNI1
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 
@@ -311,6 +312,8 @@ void wwCellClusterUniforms( Scene * scene, const std::vector<float> * texels, in
 	if ( !prog || prog->uniLocation( "cellClusterOn" ) < 0 )
 		return;
 	auto fn = r->fn;
+	WwCellUni::state().red = wwCellUniRed();
+	const WwCellUni::Scope uniScope;	// lane CELLUNI1
 	ClusterGpu & c = gpus()[r];
 	statsLine( c );
 	if ( c.units < 0 ) {
@@ -321,7 +324,7 @@ void wwCellClusterUniforms( Scene * scene, const std::vector<float> * texels, in
 	Slot * sl = nullptr;
 	if ( texels && count > 0 && settings().on && c.units > kClusterUnit ) {
 		GLint vp[4] = { 0, 0, 0, 0 };
-		fn->glGetIntegerv( GL_VIEWPORT, vp );
+		WwCellUni::viewport( fn, vp );
 		const Key k = keyFor( r, scene->view, vp, count, stamp );
 		sl = slotFor( r, c, k, *texels, count, scene->view );
 	}
@@ -329,15 +332,14 @@ void wwCellClusterUniforms( Scene * scene, const std::vector<float> * texels, in
 	{
 		// the last unit stands in on a GPU without kClusterUnit: the sampler must not share unit 0 with BaseMap
 		const int unit = std::min( kClusterUnit, c.units - 1 );
-		GLint prevActive = 0;
-		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-		fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
-		fn->glBindTexture( GL_TEXTURE_BUFFER, on ? sl->tex : 0 );
+		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );	// lane CELLUNI1: no query
+		u.section();
+		u.bind( unit, GL_TEXTURE_BUFFER, on ? sl->tex : 0 );
 		if ( on && ( !sl->attached || !settings().keep ) ) {
-			fn->glTexBuffer( GL_TEXTURE_BUFFER, GL_R32I, sl->buf );
+			u.texBuffer( sl->tex, GL_R32I, sl->buf );
 			sl->attached = true;
 		}
-		fn->glActiveTexture( GLenum( prevActive ) );
+		u.done();
 		prog->uni1i( "cellCluster", unit );
 	}
 	prog->uni1b( "cellClusterOn", on );

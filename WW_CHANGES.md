@@ -1,5 +1,50 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLUNI2 (2026-10-27, branch celluni2-20261027): the per-draw setters and the scene globals on the uniform kit
+
+- **Why:** after CELLUNI1 the c3 frame still asked the driver ~5-7 times per draw (5852 draws): raw glIsEnabled(GL_BLEND)
+  in the census, the reflection probes, a GL_ACTIVE_TEXTURE ask around every AO/SSR/SSGI/probe bind, and 3 asks per
+  call in the sun chain (wwSunShadowUniforms, wwShadowSetUniforms, wwCloudShadowUniforms; 1940 calls). The fog uniforms
+  re-sent ~8 unchanged values per call.
+- **Binds through `WwCellUni::Units`** in wwCellAoDraw (AO, decal, contact G-buffer, GI half + key), cellssr.cpp,
+  cellssgi.cpp, cellreflprobe.cpp, sunshadow.cpp, shadowset.cpp, cloudshadow.cpp: DSA binds, no unit ask. Without DSA
+  `seed()` takes the active unit from the PERF3 per-draw cache, so the old sequence stays exact.
+- **Blend from the per-draw cache** (wwDrawBlend) in the census fog/cut sites and the reflection probes; the viewport
+  through the setup-memo epoch inside wwDrawViewport. Queries counted by `WwCellUni::queried()`.
+- **Uniform cache scopes:** the census (Draw) and wwSceneGlobals (Globals). The raw array/matrix writes in those scopes
+  (cellReflPos/Min/Max, csmMat, ussWorldFromView, ussCloudFromView) forget their locations.
+- **Line:** `cell uni:` now adds ` | lights|draw|globals calls= uploads= kept= queries=` per site.
+- **Red:** the same `WW_CELL_UNI_RED=1` (the old GL sequence, live).
+- **Offline gate:** tests/celluni2 (notes/celluni2/unit/unit.sh), a c3-shaped frame (5852 draws, 1952 globals) x 30
+  frames on the real driver: green == red pixels and texture state byte for byte, also without DSA; queries
+  35821 -> 5854 per frame (1 blend ask per draw), active-unit moves 71196 -> 0, glUniform ~135k -> ~25k; CPU 19.4 ->
+  16.8 ms there (draw-bound test, no threaded optimization). Controls: a stale cache entry (28 frames differ) and a
+  missing forget (22). The red header (forget disabled) prints CELLUNI2 FAIL; tests/celluni still PASS.
+- **Cost:** 0 GPU ms at 1080p, no shader change; under 1 MB CPU.
+
+## Lane CELLUNI1 (2026-10-27, branch celluni1-20261027): the cell lighting uniforms stop asking the driver
+
+- **Why:** wwCellLightsUniforms cost ~35 ms CPU per Concord frame (1941 calls x 18 us). Each call asked the driver for
+  GL_ACTIVE_TEXTURE three times (and GL_VIEWPORT once); under NVIDIA threaded optimization every glGet waits for the
+  driver thread. It also re-sent ~16 unchanged uniforms per call.
+- **Dedicated units by EXT_direct_state_access** (`src/gl/celluniform.h`, `WwCellUni::Units`): glBindMultiTextureEXT and
+  glTextureBufferEXT bind a (unit, target) without moving the active unit, so nothing asks for it. An upload that
+  must move it asks once (lazily) and puts it back; the LUT upload still leaves the unit where the old code left it.
+  The far slot/record buffer textures attach once per buffer (the old path re-attached every call). No DSA = the old
+  query per section. Same in the cluster uniforms (cellclustergl.cpp).
+- **Per-program uniform cache** (`Program::wwUni`): inside the cell scope a scalar/vector write of the bits the
+  location already holds is skipped. Writes outside the scope, array/matrix writes, the draw-packet replay and the raw
+  cellShadowFade write forget their locations; a recording draw packet always uploads; reset at every link.
+- **Viewport:** asked once per armed setup-memo epoch (the memo re-arms when a layer moves the viewport).
+  `WW_SETUP_MEMO_CHECK=1` asks anyway and counts a stale one (`vpstale=`).
+- **Line (every 60 frames, WW_FRAME_LOG):** `cell uni: calls= uploads= kept= unused= queries= dsa= vpstale=[ RED]`.
+- **Red:** `WW_CELL_UNI_RED=1` = the old GL call sequence exactly (live, stage 0).
+- **Offline gate:** tests/celluni (notes/celluni1/unit/unit.sh), 1941 calls x 30 frames over 4 programs on the real
+  driver: green == red pixels and texture state byte for byte; queries 5823 -> 1 per frame, glUniform 31056 -> 3883;
+  CPU 9.28 -> 0.54 ms per frame there (no threaded optimization). Controls: a stale cache entry and a missing restore
+  both change the picture; the header with forget() disabled prints CELLUNI FAIL.
+- **Cost:** 0 GPU ms, no shader change; under 1 MB CPU (one 20-byte slot per uniform location per program).
+
 ## Lane DUNESAND1 (2026-10-27, branch dunesand1-20261027): the ground takes its texture set's _s map
 
 - **Why:** CoastDune02's sand drew darker than the ground beside it (0.166 vs 0.234 linear near the dune, ratio 0.71),
@@ -27,7 +72,6 @@
   `cell particles frame: first drawn into the <plain|hdr linear|measure> frame (...)`.
 - **Not in the linear frame:** particles of Loaded NIFs beside a cell (their own scenes draw after the tone map), and
   the red `perfrag` / refused-HDR path (each fragment tone-mapped as drawn, no bloom).
-
 ## Lane STREAMMEM1 (2026-10-27, branch streammem1-20261027): streamed-out cells give their meshes back
 
 - **Why:** the stream walk's memory check (d) failed at x1.19 (11788 -> 14060 MB private over 20 crossings, bar 5%).

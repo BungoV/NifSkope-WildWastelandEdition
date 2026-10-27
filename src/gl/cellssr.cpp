@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "cellunits.h"
+#include "celluniform.h"	// lane CELLUNI2
 
 #include "gl/celllights.h"
 #include "gl/cellwater.h"
@@ -683,10 +684,11 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 	if ( g.unit <= 0 )
 		return;
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
-	const GLint prevActive = wwDrawActiveTexture();	// lane PERF3
-	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + g.unit ) );
-	r->fn->glBindTexture( GL_TEXTURE_2D, on ? g.fin.tex : 0 );
-	r->fn->glActiveTexture( GLenum( prevActive ) );
+	WwCellUni::Units<std::remove_pointer_t<decltype( r->fn )>> u( r->fn, wwCellUniDsa() );	// lane CELLUNI2: no query
+	if ( !u.dsa )
+		u.seed( wwDrawActiveTexture() );	// lane PERF3
+	u.bind( g.unit, GL_TEXTURE_2D, on ? g.fin.tex : 0 );
+	u.done();
 	prog->uni1i( "cellSsr", g.unit );
 	if ( on ) {
 		int vp[4];

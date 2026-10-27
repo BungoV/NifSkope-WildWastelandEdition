@@ -41,6 +41,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellpasstime.h"	// lane PERF1
 #include "celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
 #include "cellbindless.h"	// lane BINDLESS2
+
+// lane CELLUNI1: inside the cell-uniform scope an unchanged value is not uploaded again (celluniform.h)
+#define WWCU( k, l, v, n ) WwCellUni::want( wwUni, l, WwCellUni::k, v, n, WwDp::rec != nullptr )
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 
 #include <QElapsedTimer>
@@ -488,6 +491,7 @@ NifSkopeOpenGLContext::Program::~Program()
 
 void NifSkopeOpenGLContext::Program::clear()
 {
+	wwUni.reset();
 	if ( id ) {
 		f->glDeleteProgram( id );
 		id = 0;
@@ -503,6 +507,7 @@ void NifSkopeOpenGLContext::Program::clear()
 
 bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpenGLContext * context )
 {
+	wwUni.reset();
 	linkFrom = 0;
 	cacheFile.clear();
 	try
@@ -618,6 +623,7 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 
 bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context )
 {
+	wwUni.reset();
 	try
 	{
 		GLint result;
@@ -813,7 +819,8 @@ void NifSkopeOpenGLContext::Program::uni1i( const char * name, int x )
 	UniformLocationMapItem	key( name, 0 );
 
 	const int l = uniLocation( key );
-	f->glUniform1i( l, x );
+	if ( WWCU( K1i, l, &x, 1 ) )
+		f->glUniform1i( l, x );
 	WWDP( WwDp::U1i, l, 0, &x, 1 );
 }
 
@@ -822,55 +829,63 @@ void NifSkopeOpenGLContext::Program::uni1f( const char * name, float x )
 	UniformLocationMapItem	key( name, 0 );
 
 	const int l = uniLocation( key );
-	f->glUniform1f( l, x );
+	if ( WWCU( K1f, l, &x, 1 ) )
+		f->glUniform1f( l, x );
 	WWDP( WwDp::U1f, l, 0, &x, 1 );
 }
 
 void NifSkopeOpenGLContext::Program::uni1b_l( int l, bool x )
 {
-	f->glUniform1i( l, int(x) );
 	const int v = int( x );
+	if ( WWCU( K1i, l, &v, 1 ) )
+		f->glUniform1i( l, v );
 	WWDP( WwDp::U1i, l, 0, &v, 1 );
 }
 
 void NifSkopeOpenGLContext::Program::uni1i_l( int l, int x )
 {
-	f->glUniform1i( l, x );
+	if ( WWCU( K1i, l, &x, 1 ) )
+		f->glUniform1i( l, x );
 	WWDP( WwDp::U1i, l, 0, &x, 1 );
 }
 
 void NifSkopeOpenGLContext::Program::uni1f_l( int l, float x )
 {
-	f->glUniform1f( l, x );
+	if ( WWCU( K1f, l, &x, 1 ) )
+		f->glUniform1f( l, x );
 	WWDP( WwDp::U1f, l, 0, &x, 1 );
 }
 
 void NifSkopeOpenGLContext::Program::uni2f_l( int l, float x, float y )
 {
-	f->glUniform2f( l, x, y );
 	const float v[2] = { x, y };
+	if ( WWCU( K2f, l, v, 2 ) )
+		f->glUniform2f( l, x, y );
 	WWDP( WwDp::U2f, l, 0, v, 2 );
 }
 
 void NifSkopeOpenGLContext::Program::uni3f_l( int l, float x, float y, float z )
 {
-	f->glUniform3f( l, x, y, z );
 	const float v[3] = { x, y, z };
+	if ( WWCU( K3f, l, v, 3 ) )
+		f->glUniform3f( l, x, y, z );
 	WWDP( WwDp::U3f, l, 0, v, 3 );
 }
 
 void NifSkopeOpenGLContext::Program::uni4f_l( int l, FloatVector4 x )
 {
-	f->glUniform4f( l, x[0], x[1], x[2], x[3] );
 	const float v[4] = { x[0], x[1], x[2], x[3] };
+	if ( WWCU( K4f, l, v, 4 ) )
+		f->glUniform4f( l, x[0], x[1], x[2], x[3] );
 	WWDP( WwDp::U4f, l, 0, v, 4 );
 }
 
 void NifSkopeOpenGLContext::Program::uni4srgb_l( int l, FloatVector4 x )
 {
 	x = DDSTexture16::srgbExpand( x );
-	f->glUniform4f( l, x[0], x[1], x[2], x[3] );
 	const float v[4] = { x[0], x[1], x[2], x[3] };
+	if ( WWCU( K4f, l, v, 4 ) )
+		f->glUniform4f( l, x[0], x[1], x[2], x[3] );
 	WWDP( WwDp::U4f, l, 0, v, 4 );
 }
 
@@ -880,8 +895,9 @@ void NifSkopeOpenGLContext::Program::uni4c_l( int l, std::uint32_t c, bool isSRG
 	x *= 1.0f / 255.0f;
 	if ( isSRGB )
 		x = DDSTexture16::srgbExpand( x );
-	f->glUniform4f( l, x[0], x[1], x[2], x[3] );
 	const float v[4] = { x[0], x[1], x[2], x[3] };
+	if ( WWCU( K4f, l, v, 4 ) )
+		f->glUniform4f( l, x[0], x[1], x[2], x[3] );
 	WWDP( WwDp::U4f, l, 0, v, 4 );
 }
 
@@ -892,36 +908,42 @@ void NifSkopeOpenGLContext::Program::uni1bv_l( int l, const bool * x, size_t n )
 	for ( size_t i = 0; i < n; i++ )
 		tmp[i] = GLint( x[i] );
 	f->glUniform1iv( l, GLsizei(n), tmp );
+	WwCellUni::wrote( wwUni, l, int( n ) );
 	WWDP( WwDp::U1iv, l, int( n ), tmp, int( n ) );
 }
 
 void NifSkopeOpenGLContext::Program::uni1iv_l( int l, const int * x, size_t n )
 {
 	f->glUniform1iv( l, GLsizei(n), x );
+	WwCellUni::wrote( wwUni, l, int( n ) );
 	WWDP( WwDp::U1iv, l, int( n ), x, int( n ) );
 }
 
 void NifSkopeOpenGLContext::Program::uni1fv_l( int l, const float * x, size_t n )
 {
 	f->glUniform1fv( l, GLsizei(n), x );
+	WwCellUni::wrote( wwUni, l, int( n ) );
 	WWDP( WwDp::U1fv, l, int( n ), x, int( n ) );
 }
 
 void NifSkopeOpenGLContext::Program::uni4fv_l( int l, const FloatVector4 * x, size_t n )
 {
 	f->glUniform4fv( l, GLsizei(n), &(x[0][0]) );
+	WwCellUni::wrote( wwUni, l, int( n ) );
 	WWDP( WwDp::U4fv, l, int( n ), &(x[0][0]), int( n ) * 4 );
 }
 
 void NifSkopeOpenGLContext::Program::uni3m_l( int l, const Matrix & val )
 {
 	f->glUniformMatrix3fv( l, 1, 0, val.data() );
+	WwCellUni::wrote( wwUni, l, 1 );
 	WWDP( WwDp::UM3, l, 1, val.data(), 9 );
 }
 
 void NifSkopeOpenGLContext::Program::uni4m_l( int l, const Matrix4 & val )
 {
 	f->glUniformMatrix4fv( l, 1, 0, val.data() );
+	WwCellUni::wrote( wwUni, l, 1 );
 	WWDP( WwDp::UM4, l, 1, val.data(), 16 );
 }
 
@@ -936,6 +958,7 @@ void NifSkopeOpenGLContext::Program::uniSampler_l( int l, int firstTextureUnit, 
 	for ( ; i < arraySize; i++ )
 		tmp[i] = firstTextureUnit;
 	f->glUniform1iv( l, arraySize, tmp );
+	WwCellUni::wrote( wwUni, l, arraySize );
 	WWDP( WwDp::U1iv, l, arraySize, tmp, arraySize );
 }
 
