@@ -526,10 +526,10 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		const bool lin = program && ( wwIsCellProgramName( program->name ) || program->name == std::string_view( "fo4_effectcell.prog" )
 			|| wwIsCellDecalProgramName( program->name )	// lane DECALLIT1
 			|| program->name == std::string_view( "fo4_effectcellfx.prog" )	// lane FXRES1: the layer's (composited as 1)
-			|| ( program->name == std::string_view( "fo4_water.prog" ) && wwCellWaterWritesLinear() ) );
+			|| ( wwIsWaterProgramName( program->name ) && wwCellWaterWritesLinear() ) );
 		// lane FOGBLOOM1 (cellfogbloom.h): a blended linear draw (an effect, glass) also sets bit 2, the bloom it takes in fog
 		const bool fogMark = lin && wwCellFogBloomMarks() && glIsEnabled( GL_BLEND )
-			&& program->name != std::string_view( "fo4_water.prog" ) && !wwIsCellDecalProgramName( program->name );
+			&& !wwIsWaterProgramName( program->name ) && !wwIsCellDecalProgramName( program->name );
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( wwCellFogBloomMarks() ? 0x07 : 0x03 );
 		glStencilFunc( GL_ALWAYS, ( lin ? 1 : 2 ) | ( fogMark ? 4 : 0 ), 0xFF );
@@ -748,7 +748,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	/* lane WATER1: a cell water surface (src/gl/cellwater.h) takes fo4_water.prog by name while the draw is
 	 * cell-lit: the matrices, the cell's uniforms and the fog through the lighting setup, then the record's */
 	if ( mesh->bslsp && wwLodChannelView == 0 && wwCellWaterWanted( mesh->scene, mesh->id() ) ) {
-		if ( Program * program = useProgram( "fo4_water.prog" ) ) {
+		if ( Program * program = useProgram( wwCellWaterProgramName() ) ) {	// lane WATERSHORE1: or its shore twin
 			if ( setupProgramCE1( nif, program, mesh ) && wwCellWaterUniforms( mesh->scene, mesh->id(), 0 ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
@@ -824,7 +824,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			|| hint->name == std::string_view( "pbrm_csm.prog" )	// lane CSM1: the shadow variant is never a hint
 			|| hint->name == std::string_view( "pbrm_cell.prog" )	// lane PRTPGI: nor the cell-lit one
 			|| hint->name == std::string_view( "pbrm_cellcsm.prog" )	// lane SUNCELL1: nor its cascade variant
-			|| hint->name == std::string_view( "fo4_water.prog" ) );	// lane WATER1: nor the water's
+			|| wwIsWaterProgramName( hint->name ) );	// lane WATER1: nor the water's (WATERSHORE1: or its twin)
 	/* Weather fog (lane FOG1) has its own program, fo4_fog.prog: the same
 	 * fo4_default.frag with WW_FOG defined. With the fog code merely present and
 	 * fogOn false, the driver compiled fo4_default differently -- 783 px of the

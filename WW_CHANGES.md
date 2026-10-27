@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERSHORE1 (2026-10-27, branch watershore1-20261027): water soft edge and shore foam, near and far
+
+- **Water soft edge** (Show row "Water soft edge", pin `WW_CELL_WATER_EDGE`, default off): the water fades into the
+  shore from the baked shore distance (WATERDATA1's lookup), so far water fades as near water does; the game's depth
+  term stays and the stronger of the two wins. 1 at the waterline (64 u: half a 128 u texel), 0 at 256 u in.
+- **Shore foam** (Show row "Shore foam", pin `WW_CELL_WATER_FOAM`, default off): a 192 u foam band with crests that
+  travel shoreward (96 u apart, one every 6 s on the world clock), broken up by procedural value noise; a Lambert white
+  of albedo 0.55 lit by the sun and the water's sky. The game draws no shore foam: a new look, no texture shipped.
+- Both rows off = `fo4_water.prog` as before, the same driver machine code in all three shader modes. Either row on
+  draws with the twin `fo4_watershore.prog` (`WW_WATER_SHORE` + `res/shaders/water_shore.glsl`). Both are live.
+- Water the bake does not know (placed, interior) keeps the game's edge; the plane has no land side, so a dry texel
+  counts as distance 0 and the field is bilinear between texel centres.
+- Red `WW_CELL_WATER_SHORE_RED=nearest` (the nearest texel only: a 128 u staircase). Probe `WW_CELL_WATER_PROBE=32`
+  = (edge, foam, shore distance / 1024). Census line adds `, shore look: edge on|off, foam on|off` when a row is on.
+- Cost: offline 0.068 ms for a full 1080p frame of shore water (GL readback of the lookup + edge + foam).
+
 ## Lane SHORE1 (2026-10-27, branch shore1-20261027): far water shore follows the coast, not the texel grid
 
 - **Far water shore law:** the far water rings used to make a texel wet from one corner sample, so every coast was a

@@ -46,6 +46,8 @@ enum class WwLook : int
 	LightArea,			// LIGHTPHYS1: PBR specular from a sphere of 8 units, not a point (WW_CELL_LIGHT_AREA)
 	LightPatterns,		// GOBO1 (LIGHTS5): a spot light's pattern texture (LIGH gobo) on surfaces, effects and air (WW_CELL_GOBO)
 	NifxLights,			// NIFXLIGHT1: a fixture mesh's .nifx lights replace the placed lights inside it (WW_CELL_NIFX_LIGHTS)
+	WaterSoftEdge,		// WATERSHORE1: water fades into the shore from the baked shore distance, near + far (WW_CELL_WATER_EDGE)
+	ShoreFoam,			// WATERSHORE1: a thin foam band with a travelling wave along shores, near + far (WW_CELL_WATER_FOAM)
 	Count
 };
 
