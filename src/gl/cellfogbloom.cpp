@@ -1,6 +1,7 @@
 #include "cellfogbloom.h"
 #include "wwswitch.h"	// lane LIVESET1: the pin and reds follow a live set
 
+#include "gl/celluniform.h"	// lane CELLUNI4: the tone map's known state
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
@@ -150,7 +151,9 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 		timeRead( fn, g, s, g.cur, true );
 		fn->glQueryCounter( g.q[g.cur * 2], kTimestamp );
 	}
+	bool made = false;
 	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != GLenum( dsFormat ) ) {
+		made = true;
 		if ( !g.fbo ) {
 			fn->glGenFramebuffers( 1, &g.fbo );
 			fn->glGenFramebuffers( 1, &g.depthFbo );
@@ -181,25 +184,39 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 		g.dsFormat = GLenum( dsFormat );
 	}
 	GLint prevDraw = 0, prevRead = 0, prevActive = 0;
-	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
-	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	GLfloat clear[4];
-	fn->glGetFloatv( GL_COLOR_CLEAR_VALUE, clear );
 	GLboolean colorMask[4], depthMask = GL_TRUE;
-	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
-	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
 	GLint stFunc = GL_ALWAYS, stRef = 0, stValMask = 0xFF, stWriteMask = 0xFF, stFail = GL_KEEP, stZFail = GL_KEEP, stZPass = GL_KEEP;
-	fn->glGetIntegerv( GL_STENCIL_FUNC, &stFunc );
-	fn->glGetIntegerv( GL_STENCIL_REF, &stRef );
-	fn->glGetIntegerv( GL_STENCIL_VALUE_MASK, &stValMask );
-	fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &stWriteMask );
-	fn->glGetIntegerv( GL_STENCIL_FAIL, &stFail );
-	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_FAIL, &stZFail );
-	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_PASS, &stZPass );
-	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
-	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
-	const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	bool wasDepth = false, wasBlend = false, wasCull = false, wasStencil = false, wasScissor = false;
+	// lane CELLUNI4: the tone map's known state, unless the block above made the targets (it bound its own framebuffer)
+	if ( const WwCellUni::KnownGl * kn = made ? nullptr : WwCellUni::known( fn ) ) {
+		prevDraw = kn->draw;
+		prevRead = kn->read;
+		prevActive = kn->active;
+		std::memcpy( clear, kn->clear, sizeof clear );
+		std::memcpy( colorMask, kn->colorMask, sizeof colorMask );
+		depthMask = kn->depthMask;
+		stFunc = kn->sFunc, stRef = kn->sRef, stValMask = kn->sMask, stWriteMask = kn->sWrite;
+		stFail = kn->sFail, stZFail = kn->sZFail, stZPass = kn->sPass;
+		wasDepth = kn->depth, wasBlend = kn->blend, wasCull = kn->cull, wasStencil = kn->stencil, wasScissor = kn->scissor;
+	} else {
+		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+		fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+		fn->glGetFloatv( GL_COLOR_CLEAR_VALUE, clear );
+		fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+		fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+		fn->glGetIntegerv( GL_STENCIL_FUNC, &stFunc );
+		fn->glGetIntegerv( GL_STENCIL_REF, &stRef );
+		fn->glGetIntegerv( GL_STENCIL_VALUE_MASK, &stValMask );
+		fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &stWriteMask );
+		fn->glGetIntegerv( GL_STENCIL_FAIL, &stFail );
+		fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_FAIL, &stZFail );
+		fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_PASS, &stZPass );
+		wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
+		wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+		wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	}
 
 	bool ok = true;
 	QString why;

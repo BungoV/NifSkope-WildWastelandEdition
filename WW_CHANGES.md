@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLUNI4 (2026-10-27, branch celluni4-20261027): the CELLUNI3 leftovers on the uniform kit
+
+- **Frame end state read once:** the tone map's End reads its GlSnap before the SSR keep (it was after the temporal
+  AA) and installs it as a known state (`WwCellUni::KnownGl`, src/gl/celluniform.h) until the fog bloom is done. The
+  SSR keep, the temporal AA, the FO4CS bloom and the fog bloom take their save/restore from it instead of asking GL.
+  A bloom or fog bloom frame that remakes its targets binds its own framebuffer before the save, so it still asks
+  (kept as it was) and the bloom then drops the known state for the passes after it.
+- **TAA:** about 17 asks per frame to 0 once warm. Its depth format is cached per (context, framebuffer, size), and
+  the error drain and blit error read are skipped after one clean frame on that key; a GL error forgets it.
+- **FO76 cubes:** the cube decode mode is cached for CubeMap2 (the second cube, bound last) too, forgotten on load and
+  evict like the first.
+- **Water-ray pass:** the SSR hook that disables blend now says so to the draw cache (no blend ask after it).
+- **Check:** `WW_SETUP_MEMO_CHECK=1` asks anyway and counts a wrong known state (`cell uni: ... knownstale=`).
+- **Red:** `WW_CELL_UNI_RED=1` (live) restores every old ask. No shader change.
+- Offline gate: tests/celluni4 (green == red == main pixels and state; five doctored controls fail).
+
+## Lane CELLUNI3 (2026-10-27, branch celluni3-20261027): the CELLUNI2 leftovers on the uniform kit
+
+- **Blend per draw:** setupProgram forgets a blend note at its entry and every blend write up to the census notes
+  itself (`WwCellUni::noteBlend/noteBlendDst`, src/gl/celluniform.h). The draw scope takes the blend from the note
+  instead of asking GL; a draw whose setup wrote no blend still asks. `WW_SETUP_MEMO_CHECK=1` asks anyway and counts a
+  wrong note (`cell uni: ... blendstale=`).
+- **fxAdditive:** read from the note (destination factor known) with no ask; a composition write without a known factor
+  asks the factor only.
+- **Cube decode mode:** asked once per cube texture (TexCache's param shadow, forgotten on load and evict), before FO76.
+- **CE1 tail:** its scalar uploads go through the program's cache in a `tail` scope (the `cell uni:` line prints it).
+- **Sky, air, far ground:** texture binds through `WwCellUni::Units` (no unit ask with EXT DSA); the air's viewport once
+  per setup-memo epoch. Water's noise binding comes from the texture cache's own bind.
+- **Red:** `WW_CELL_UNI_RED=1` (live) restores every old ask and upload. No shader change.
+- Offline gate: tests/celluni3 (green == red pixels and texture state; four doctored controls fail).
+
 ## Lane FOGTERRAIN3 (2026-10-27, branch fogterrain3-20261027): fog on the water, a better far anchor, a fine level
 
 - **Fog stands on the water:** the fog job also rasters the scene's water shapes over the same window

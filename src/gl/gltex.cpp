@@ -361,6 +361,7 @@ TexCache::Tex * TexCache::rehashTextures( Tex * p )
 int TexCache::bind( const QStringView & fname, const NifModel * nif )
 {
 	paramId = 0;	// lane PERF5
+	wwBound = 0;	// lane CELLUNI3
 	Tex *	tx = insertTex( fname );
 	if ( !tx ) [[unlikely]]
 		return 0;
@@ -376,6 +377,7 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 		tx->target = GL_TEXTURE_2D;
 	glBindTexture( tx->target, tx->id[0] );
 	WWDP( WwDp::BindTex, GLint( tx->target ), GLint( tx->id[0] ) );	// lane GAPPERF-BINDLESS
+	wwBound = tx->target == GL_TEXTURE_2D ? tx->id[0] : 0;	// lane CELLUNI3
 	// lane PERF5: the shadow follows its own caller's binds; any other caller may set other parameters
 	if ( wwParamCaller && tx->target == GL_TEXTURE_2D ) {
 		paramId = tx->id[0];
@@ -389,8 +391,10 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 
 void TexCache::paramForget( GLuint id )
 {
-	if ( id < paramShadow.size() )
+	if ( id < paramShadow.size() ) {
 		paramShadow[id].epoch = 0;
+		paramShadow[id].cube = 0;	// lane CELLUNI3: a reload may change the format
+	}
 }
 
 static int wwTexShadowMode()	// lane PERF5: 0 = the red (always set), 1 = the shadow, 2 = the shadow read back and compared
@@ -457,6 +461,7 @@ void TexCache::wwParamFrame()
 
 bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSecondTexture )
 {
+	wwCubeBound = 0;	// lane CELLUNI4: a bind that fails before glBindTexture leaves the unit unknown (ask GL)
 	Tex *	tx = insertTex( fname );
 	if ( !tx ) [[unlikely]]
 		return false;
@@ -478,6 +483,8 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 
 	glBindTexture( tx->target, tx->id[size_t(useSecondTexture)] );
 	WWDP( WwDp::BindTex, GLint( tx->target ), GLint( tx->id[size_t(useSecondTexture)] ) );	// lane GAPPERF-BINDLESS
+	// lane CELLUNI3; CELLUNI4: FO76's CubeMap2 (id[1]) too, forgotten at its load like id[0]
+	wwCubeBound = tx->target == GL_TEXTURE_CUBE_MAP ? tx->id[size_t( useSecondTexture )] : 0;
 
 	if ( !tx->mipmaps ) [[unlikely]]
 		return false;
@@ -550,6 +557,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	{
 		i->status = e;
 	}
+	paramForget( t->id[1] );	// lane CELLUNI4: FO76's second cube (a fresh name may reuse a freed one)
 
 	return t->mipmaps;
 }
@@ -632,6 +640,7 @@ int TexCache::evictUnused( std::uint32_t tick, QStringList * names )
 			continue;
 		PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
 		paramForget( tx.id[0] );	// lane PERF5
+		paramForget( tx.id[1] );	// lane CELLUNI4
 		WwDp::invalidate();	// lane GAPPERF-BINDLESS
 		WwBl::forget( tx.id[0] );	// lane BINDLESS2
 		WwBl::forget( tx.id[1] );

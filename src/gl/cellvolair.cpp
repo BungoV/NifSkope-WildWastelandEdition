@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellhdr.h"
 #include "gl/celllights.h"
+#include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
 #include "gl/celllooks.h"	// lane GAPLOOK1
 #include "gl/cellpasstime.h"
 #include "gl/cellpost.h"
@@ -2011,23 +2012,20 @@ void wwVolAirUniforms( Scene * scene )
 	if ( g.unitsOk <= 0 )
 		return;
 	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
-	GLint prevActive = 0;
-	r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + kVolTexUnit ) );
-	r->fn->glBindTexture( GL_TEXTURE_3D, on ? g.integ : 0 );
+	WwCellUni::Units<std::remove_pointer_t<decltype( r->fn )>> u( r->fn, wwCellUniDsa() );	// lane CELLUNI3: no ask with DSA
+	u.section();
+	u.bind( kVolTexUnit, GL_TEXTURE_3D, on ? g.integ : 0 );
 	// 10-16: and stage 0's column distances, the lookup's clamp (red nofarclamp: none)
 	const bool clamp = on && g.tileValid && !( s.red & 2097152 );
-	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + kTileUnit ) );
-	r->fn->glBindTexture( GL_TEXTURE_2D, clamp ? g.tile : 0 );
+	u.bind( kTileUnit, GL_TEXTURE_2D, clamp ? g.tile : 0 );
 	// lane FOGTERRAIN2: the pass's terrain grid, so the far tail, the sky and the sun stand on the same ground
 	const int terrLoc = prog->uniLocation( "volAirTerr" );
 	const bool terr = on && g.terrOn && g.terr && terrLoc >= 0;
 	if ( terrLoc >= 0 ) {
-		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirTerrain ) );
-		r->fn->glBindTexture( GL_TEXTURE_2D_ARRAY, terr ? g.terr : 0 );
+		u.bind( WwCellUnit::AirTerrain, GL_TEXTURE_2D_ARRAY, terr ? g.terr : 0 );
 		prog->uni1i_l( terrLoc, WwCellUnit::AirTerrain );
 	}
-	r->fn->glActiveTexture( GLenum( prevActive ) );
+	u.done();
 	prog->uni1i( "volTex", kVolTexUnit );
 	prog->uni1i( "volTile", kTileUnit );
 	prog->uni1i( "volFarClamp", clamp ? 1 : 0 );
@@ -2056,7 +2054,7 @@ void wwVolAirUniforms( Scene * scene )
 		prog->uni1f( "volAirTerrRef", g.terrRef );
 	}
 	GLint vp[4] = { 0, 0, 1, 1 };
-	r->fn->glGetIntegerv( GL_VIEWPORT, vp );
+	WwCellUni::viewport( r->fn, vp );	// lane CELLUNI3: once per armed setup-memo epoch
 	prog->uni4f_l( prog->uniLocation( "volRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 		1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	prog->uni4f( "volSlices", FloatVector4( g.near, g.logRatio, float( g.slices ), ( s.red & 1 ) ? 0.0f : 1.0f ) );

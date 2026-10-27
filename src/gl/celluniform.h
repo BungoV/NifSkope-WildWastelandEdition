@@ -4,7 +4,9 @@
 /* lane CELLUNI1: the cell lighting uniforms (wwCellLightsUniforms, wwCellClusterUniforms) without driver round trips.
  * A per-program value cache skips an upload that would write what the location already holds; the dedicated units
  * bind through EXT_direct_state_access, so the active unit is never asked for. WW_CELL_UNI_RED=1: the old path.
- * Lane CELLUNI2: the per-draw setters (AO, SSR, SSGI, reflection probes) and the scene globals (fog, sun) use it too. */
+ * Lane CELLUNI2: the per-draw setters (AO, SSR, SSGI, reflection probes) and the scene globals (fog, sun) use it too.
+ * Lane CELLUNI3: the CE1 tail scalars, the draw's blend (a note from its setup) and the sky / air / far units.
+ * Lane CELLUNI4: the frame end's passes (TAA, bloom, fog bloom) take the state cellhdr's End read once (KnownGl). */
 
 #include <cstdint>
 #include <cstring>
@@ -46,7 +48,7 @@ struct Counts
 };
 
 //! lane CELLUNI2: who opened the innermost scope (the telemetry splits the counts by it)
-enum Site { Lights, Draw, Globals, SiteCount };
+enum Site { Lights, Draw, Globals, Tail, SiteCount };
 
 struct State
 {
@@ -61,6 +63,8 @@ struct State
 	std::uint64_t vpEpoch = 0, vpHave = 0, vpStale = 0;
 	bool vpCheck = false;
 	int vp[4] = {};
+	std::uint64_t blendStale = 0;	// lane CELLUNI3: WW_SETUP_MEMO_CHECK=1 found the blend note wrong
+	std::uint64_t knownStale = 0;	// lane CELLUNI4: WW_SETUP_MEMO_CHECK=1 found the frame end's known state wrong
 };
 inline State & state()
 {
@@ -147,6 +151,22 @@ inline void queried()
 	if ( state().inCall )
 		bump( &Counts::queries );
 }
+
+/* lane CELLUNI3: GL_BLEND (and the blend's RGB destination factor) as the draw's setup last wrote it. setupProgram
+ * forgets it on entry and every blend write between there and the census notes itself; -1 = not written (ask GL). */
+struct BlendNote
+{
+	int on = -1;
+	int dst = -1;
+};
+inline BlendNote & blendNote()
+{
+	static BlendNote b;
+	return b;
+}
+inline void noteBlend( bool on ) { blendNote().on = on ? 1 : 0; }
+inline void noteBlendDst( int dst ) { blendNote().dst = dst; }
+inline void forgetBlend() { blendNote() = BlendNote(); }
 
 //! once per frame: true when the last frame's counters should print
 inline bool frameTick( std::uint64_t f, std::uint64_t every )
@@ -264,6 +284,89 @@ template <class F> void viewport( F * fn, int vp[4] )
 		std::memcpy( st.vp, vp, sizeof st.vp );
 	}
 }
+
+/* lane CELLUNI4: what a frame-end pass saves for its restore, as cellhdr's End read it once. Every pass between there
+ * and the tone quads restores what it changed, so the next one takes this instead of asking. */
+struct KnownGl
+{
+	int draw = 0, read = 0, active = 0x84C0, vp[4] = { 0, 0, 1, 1 };
+	float clear[4] = {};
+	unsigned char colorMask[4] = { 1, 1, 1, 1 }, depthMask = 1;
+	bool depth = false, blend = false, cull = false, stencil = false, scissor = false;
+	int sFunc = 0x0207, sRef = 0, sMask = 0xFF, sWrite = 0xFF, sFail = 0x1E00, sZFail = 0x1E00, sPass = 0x1E00;
+};
+inline bool same( const KnownGl & a, const KnownGl & b )
+{
+	return a.draw == b.draw && a.read == b.read && a.active == b.active && std::memcmp( a.vp, b.vp, sizeof a.vp ) == 0
+		&& std::memcmp( a.clear, b.clear, sizeof a.clear ) == 0 && std::memcmp( a.colorMask, b.colorMask, 4 ) == 0
+		&& a.depthMask == b.depthMask && a.depth == b.depth && a.blend == b.blend && a.cull == b.cull && a.stencil == b.stencil
+		&& a.scissor == b.scissor && a.sFunc == b.sFunc && a.sRef == b.sRef && a.sMask == b.sMask && a.sWrite == b.sWrite
+		&& a.sFail == b.sFail && a.sZFail == b.sZFail && a.sPass == b.sPass;
+}
+//! every field from the driver (the old path's asks; the check)
+template <class F> void askAll( F * fn, KnownGl & k )
+{
+	fn->glGetIntegerv( 0x8CA6, &k.draw );	// GL_DRAW_FRAMEBUFFER_BINDING
+	fn->glGetIntegerv( 0x8CAA, &k.read );	// GL_READ_FRAMEBUFFER_BINDING
+	fn->glGetIntegerv( 0x84E0, &k.active );
+	fn->glGetIntegerv( 0x0BA2, k.vp );
+	fn->glGetFloatv( 0x0C22, k.clear );	// GL_COLOR_CLEAR_VALUE
+	fn->glGetBooleanv( 0x0C23, k.colorMask );
+	fn->glGetBooleanv( 0x0B72, &k.depthMask );
+	k.depth = fn->glIsEnabled( 0x0B71 );
+	k.blend = fn->glIsEnabled( 0x0BE2 );
+	k.cull = fn->glIsEnabled( 0x0B44 );
+	k.stencil = fn->glIsEnabled( 0x0B90 );
+	k.scissor = fn->glIsEnabled( 0x0C11 );
+	const unsigned st[7] = { 0x0B92, 0x0B97, 0x0B93, 0x0B98, 0x0B94, 0x0B95, 0x0B96 };	// func, ref, mask, write, ops
+	int * to[7] = { &k.sFunc, &k.sRef, &k.sMask, &k.sWrite, &k.sFail, &k.sZFail, &k.sPass };
+	for ( int i = 0; i < 7; i++ )
+		fn->glGetIntegerv( st[i], to[i] );
+}
+//! set by cellhdr's End around the passes that may take it (null: they ask, as before)
+inline const KnownGl *& knownSlot()
+{
+	static const KnownGl * k = nullptr;
+	return k;
+}
+//! the known state, or null (ask). WW_SETUP_MEMO_CHECK=1 asks anyway, counts a wrong field and returns the driver's
+template <class F> const KnownGl * known( F * fn )
+{
+	const KnownGl * k = knownSlot();
+	if ( !k || !state().vpCheck )
+		return k;
+	static KnownGl real;
+	askAll( fn, real );
+	if ( !same( real, *k ) )
+		state().knownStale++;
+	return &real;
+}
+
+//! lane CELLUNI4: a framebuffer's depth format, asked once per (context, framebuffer, size); another key asks again
+struct DepthCfg
+{
+	const void * ctx = nullptr;
+	int fbo = -1, w = 0, h = 0;
+	int depthBits = 0, stencilBits = 0, compType = 0;
+	bool trusted = false;	// a frame on this key raised no GL error: its error reads are skipped
+	bool hit( const void * c, int f, int ww, int hh ) const { return fbo >= 0 && ctx == c && fbo == f && w == ww && h == hh; }
+	void keep( const void * c, int f, int ww, int hh, int d, int s, int t )
+	{
+		ctx = c;
+		fbo = f;
+		w = ww;
+		h = hh;
+		depthBits = d;
+		stencilBits = s;
+		compType = t;
+		trusted = false;
+	}
+	void forget()
+	{
+		fbo = -1;
+		trusted = false;
+	}
+};
 }
 
 //! the DSA entry points of the current context (null members: the extension is missing)

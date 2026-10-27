@@ -1348,8 +1348,9 @@ void wwCellUniFrame()
 	QByteArray line = QByteArray( "cell uni: calls=" ) + QByteArray::number( cs.last.calls ) + " uploads="
 		+ QByteArray::number( cs.last.uploads ) + " kept=" + QByteArray::number( cs.last.kept ) + " unused="
 		+ QByteArray::number( cs.last.unused ) + " queries=" + QByteArray::number( cs.last.queries ) + " dsa="
-		+ QByteArray::number( dsa && dsa->bindMulti ? 1 : 0 ) + " vpstale=" + QByteArray::number( cs.vpStale );
-	static const char * const names[WwCellUni::SiteCount] = { "lights", "draw", "globals" };
+		+ QByteArray::number( dsa && dsa->bindMulti ? 1 : 0 ) + " vpstale=" + QByteArray::number( cs.vpStale )
+		+ " blendstale=" + QByteArray::number( cs.blendStale ) + " knownstale=" + QByteArray::number( cs.knownStale );
+	static const char * const names[WwCellUni::SiteCount] = { "lights", "draw", "globals", "tail" };
 	for ( int i = 0; i < WwCellUni::SiteCount; i++ ) {
 		const WwCellUni::Counts & c = cs.sitesLast[i];
 		line += QByteArray( " | " ) + names[i] + " calls=" + QByteArray::number( c.calls ) + " uploads="

@@ -478,6 +478,15 @@ WwDrawGlScope::WwDrawGlScope()
 		c.blend = -1;
 		c.active = -1;
 		c.vpOk = false;
+		// lane CELLUNI3: the blend as this draw's setup wrote it (no ask); WW_SETUP_MEMO_CHECK=1 asks and counts a wrong note
+		const WwCellUni::BlendNote & bn = WwCellUni::blendNote();
+		if ( bn.on >= 0 && !wwCellUniRed() ) {
+			c.blend = bn.on;
+			if ( setupMemo().check && ( glIsEnabled( GL_BLEND ) ? 1 : 0 ) != bn.on ) {
+				WwCellUni::state().blendStale++;
+				c.blend = -1;
+			}
+		}
 	}
 }
 
@@ -547,6 +556,12 @@ void wwDrawViewport( int vp[4] )
 void wwDrawGlCacheDirty()
 {
 	drawGl().blend = -1;
+}
+
+void wwDrawGlCacheBlend( bool on )
+{
+	DrawGlCache & c = drawGl();
+	c.blend = ( c.depth && !wwCellUniRed() ) ? ( on ? 1 : 0 ) : -1;	// lane CELLUNI4: the red asks again
 }
 
 bool wwCellAoLean()
@@ -736,23 +751,32 @@ void wwRestoreSrgbDecode()
  * must not decode it again (measured: decoded twice, the gate's first run sat at 0.35 of the expected). Called
  * with the cube bound on the active unit; returns the shader's cube mode: 3 = the sampler decodes, 1 = an
  * untagged cube, decoded in the shader (after the filter: the nearest an untagged texture allows) */
-float wwCellCubeDecodeMode()
+float wwCellCubeDecodeMode( TexCache * tc )
 {
-	GLint tex = 0;
-	glGetIntegerv( GL_TEXTURE_BINDING_CUBE_MAP, &tex );
-	if ( !tex )
-		return 1.0f;
+	// lane CELLUNI3: tc = the cache whose bindCube bound this cube last; its mode is asked once per texture (a load forgets it)
+	const GLuint id = ( tc && !wwCellUniRed() ) ? tc->wwCubeBound : 0;
+	if ( id && tc->wwCubeMode( id ) )
+		return float( tc->wwCubeMode( id ) );
+	GLint tex = GLint( id );
+	if ( !id ) {
+		glGetIntegerv( GL_TEXTURE_BINDING_CUBE_MAP, &tex );
+		if ( !tex )
+			return 1.0f;
+	}
 	GLint f = 0;
 	glGetTexLevelParameteriv( GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0, GL_TEXTURE_INTERNAL_FORMAT, &f );
-	if ( f != 0x8C40 && f != 0x8C41 && f != 0x8C42 && f != 0x8C43 && ( f < 0x8C48 || f > 0x8C4F ) && f != 0x8E8D )
-		return 1.0f;	// not sRGB-tagged: the sampler returns the stored bytes
-	return 3.0f;
+	const int mode = ( f != 0x8C40 && f != 0x8C41 && f != 0x8C42 && f != 0x8C43 && ( f < 0x8C48 || f > 0x8C4F ) && f != 0x8E8D )
+		? 1 : 3;	// 1: not sRGB-tagged, the sampler returns the stored bytes
+	if ( id )
+		tc->wwCubeModeSet( id, mode );
+	return float( mode );
 }
 } // namespace
 
 NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program * hint )
 {
 	PassTime::DrawCpuScope wwSetupT( PassTime::CpuSetup );	// lane PERF2
+	WwCellUni::forgetBlend();	// lane CELLUNI3: the census takes the blend from this draw's own writes, or asks
 	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
 	wwAoScene = mesh->scene;	// lane AO1
@@ -1078,6 +1102,8 @@ static inline void setupGLBlendModeSF( int blendMode, NifSkopeOpenGLContext::GLF
 	const GLenum *	p = &( blendModeMap[blendMode << 2] );
 	fn->glEnable( GL_BLEND );
 	fn->glBlendFuncSeparate( p[0], p[1], p[2], p[3] );
+	WwCellUni::noteBlend( true );	// lane CELLUNI3
+	WwCellUni::noteBlendDst( int( p[1] ) );
 }
 
 bool Renderer::setupProgramCE2( const NifModel * nif, Program * prog, Shape * mesh )
@@ -1486,8 +1512,10 @@ bool Renderer::setupProgramCE2( const NifModel * nif, Program * prog, Shape * me
 		}
 	}
 	prog->uni1i( "alphaFlags", alphaFlags );
-	if ( !( alphaFlags & 2 ) )
+	if ( !( alphaFlags & 2 ) ) {
 		fn->glDisable( GL_BLEND );
+		WwCellUni::noteBlend( false );	// lane CELLUNI3
+	}
 
 	if ( !mesh->depthTest ) [[unlikely]]
 		fn->glDisable( GL_DEPTH_TEST );
@@ -1874,6 +1902,8 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		prog->uni1f( "alphaThreshold", m.alphaThreshold );
 		if ( composition >= 2 && scene->hasOption( Scene::DoBlending ) ) {
 			glEnable( GL_BLEND );
+			WwCellUni::noteBlend( true );	// lane CELLUNI3 (the factor: asked if needed)
+			WwCellUni::noteBlendDst( -1 );
 			switch ( composition ) {
 			case 3:	// Premultiplied
 				fn->glBlendFuncSeparate( GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
@@ -1890,6 +1920,7 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 			}
 		} else {
 			glDisable( GL_BLEND );
+			WwCellUni::noteBlend( false );	// lane CELLUNI3
 		}
 	} else if ( wwLandSplat ) {
 		/* lane TERRBLEND1: the NiAlphaProperty the cell build wrote (4109 = SRC_ALPHA, ONE
@@ -1899,6 +1930,8 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	} else if ( mesh->translucent && scene->hasOption( Scene::DoBlending ) ) {
 		glEnable( GL_BLEND );
 		fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
+		WwCellUni::noteBlend( true );	// lane CELLUNI3
+		WwCellUni::noteBlendDst( GL_ONE_MINUS_SRC_ALPHA );
 		prog->uni1i( "alphaFlags", ( mesh->alphaProperty && mesh->alphaProperty->hasAlphaTest() ? 12 : 8 ) );
 		prog->uni1f( "alphaThreshold", 0.1f );
 	} else {
@@ -1958,6 +1991,7 @@ bool Renderer::setupProgramRoute( const NifModel * nif, Program * prog, Shape * 
 	prog->uni3f( "routeColor", c[0], c[1], c[2] );
 
 	glDisable( GL_BLEND );
+	WwCellUni::noteBlend( false );	// lane CELLUNI3
 	glDisable( GL_POLYGON_OFFSET_FILL );
 	glEnable( GL_DEPTH_TEST );
 	glDepthFunc( GL_LEQUAL );
@@ -1993,6 +2027,9 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			wwCellLightsUniforms( scene );	// lane PRTP3: a no-op unless this is fo4_cell.prog
 			wwSunShadowUniforms( scene );	// lane SUNCELL1: a no-op unless this is a cascade program (fo4_cellcsm, fo4_csm, fo4_fogcsm)
 		} );
+		const bool uniRed = wwCellUniRed();	// lane CELLUNI3: the tail's scalars through the program's cache
+		WwCellUni::state().red = uniRed;
+		const WwCellUni::Scope tailScope( WwCellUni::Tail );
 		if ( prog->uniLocation( "landSplat" ) >= 0 )	// lane TERRBLEND1: a blended-ground pass's alpha is its share
 			prog->uni1b( "landSplat", wwCellLandIs( scene->nifModel, mesh->id() ) );
 		if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
@@ -2018,9 +2055,20 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			wwLandLodUniforms( scene, prog, mesh );
 		if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 			// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
-			GLint dst = 0;
-			glGetIntegerv( GL_BLEND_DST_RGB, &dst );
-			prog->uni1b( "fxAdditive", glIsEnabled( GL_BLEND ) && dst == GL_ONE );
+			// lane CELLUNI3: from the setup's blend note where it holds the answer (the red: both asks)
+			const WwCellUni::BlendNote bn = uniRed ? WwCellUni::BlendNote() : WwCellUni::blendNote();
+			bool additive = false;
+			if ( bn.on == 1 && bn.dst >= 0 ) {
+				additive = bn.dst == GL_ONE;
+			} else if ( bn.on != 0 ) {
+				GLint dst = 0;
+				glGetIntegerv( GL_BLEND_DST_RGB, &dst );
+				WwCellUni::queried();
+				if ( bn.on < 0 )
+					WwCellUni::queried();
+				additive = ( bn.on == 1 || glIsEnabled( GL_BLEND ) ) && dst == GL_ONE;
+			}
+			prog->uni1b( "fxAdditive", additive );
 			if ( prog->uniLocation( "fxDecalProbe" ) >= 0 )	// lane DECALLIT1: the gate's light probe
 				prog->uni1b( "fxDecalProbe", wwCellDecalLitProbe() && mesh->effectDecal && wwCellProbePass( scene ) );
 			if ( prog->uniLocation( "fxRoomLit" ) >= 0 )	// lane GIDARK1: an exterior's lit effect, lit by its spot
@@ -2029,6 +2077,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				// lane FXLIT1: its probes write the lit effects opaque, the nearest card winning: layered cards drawn
 				// without a depth write leave the last one drawn, which differed between the five probe runs
 				glDisable( GL_BLEND );
+				WwCellUni::noteBlend( false );	// lane CELLUNI3
 				glEnable( GL_DEPTH_TEST );
 				glDepthFunc( GL_LEQUAL );
 				glDepthMask( GL_TRUE );
@@ -2275,7 +2324,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				: lsp->hasSF1( ShaderFlags::SLSF1_Specular );
 			const bool specView = scene->hasOption( Scene::DoSpecular ) && scene->hasOption( Scene::DoLighting );
 			prog->uni4f( "cellCubeMat", FloatVector4( specOn && specView ? lsp->specularStrength : 0.0f, lsp->specularGloss,
-				ownCube ? wwCellCubeDecodeMode() : 0.0f, float( ownCube ? wwCellCubeTag( lsp->getName() ) : 0 ) ) );
+				ownCube ? wwCellCubeDecodeMode( scene->textures ) : 0.0f,	// CELLUNI4: FO76's CubeMap2 (bound last) too
+				float( ownCube ? wwCellCubeTag( lsp->getName() ) : 0 ) ) );
 		}
 
 		// Screen-space refraction preview (SLSF1_Refraction): the shape draws
@@ -2554,6 +2604,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			glEnable( GL_BLEND );
 			fn->glBlendFuncSeparate( blendMap[mat->iAlphaSrc], blendMap[mat->iAlphaDst],
 										GL_ONE, blendMap[mat->iAlphaDst] );
+			WwCellUni::noteBlend( true );	// lane CELLUNI3
+			WwCellUni::noteBlendDst( int( blendMap[mat->iAlphaDst] ) );
 			alphaFlags = 8;
 			const GLint bf[4] = { GLint( blendMap[mat->iAlphaSrc] ), GLint( blendMap[mat->iAlphaDst] ), GL_ONE,
 				GLint( blendMap[mat->iAlphaDst] ) };
@@ -2561,6 +2613,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			WWDP( WwDp::BlendSep, 0, 0, bf, 4 );
 		} else {
 			glDisable( GL_BLEND );
+			WwCellUni::noteBlend( false );	// lane CELLUNI3
 			WWDP( WwDp::Disable, GL_BLEND );
 		}
 
@@ -2598,6 +2651,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		if ( mesh->translucent && scene->hasOption(Scene::DoBlending) ) {
 			glEnable( GL_BLEND );
 			fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
+			WwCellUni::noteBlend( true );	// lane CELLUNI3
+			WwCellUni::noteBlendDst( GL_ONE_MINUS_SRC_ALPHA );
 			if ( WwDp::rec ) {
 				const GLint bf[4] = { GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA };
 				WWDP( WwDp::Enable, GL_BLEND );
