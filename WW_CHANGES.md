@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane OPENCELLFIX1 (2026-10-27, branch opencellfix1-20261027): Open Cell with an MO2 profile opens the whole cell; the Cell dock is tabs
+
+- **The bug:** importing an MO2 profile's plugins.txt listed the mods only. Fallout4.esm, the DLC and the Creation Club
+  files were never added, and the Data folder typed in the dialog was kept only on Enter. The cell then opened from
+  the mods alone: grey ground and only the mods' references (Commonwealth -11,7: 51, -15,17: 11, Goodneighbor 5,-3:
+  none at all).
+- **Fix:** the import puts the masters the game always loads first (as the LOD panel does) and reads an MO2 profile
+  through the LOD panel's reader. The mod folders go along with the cell, so their meshes and textures load too.
+  A load order that is still missing a master is refused with the names, instead of opening a grey cell. Same three
+  cells with bungo's profile: 180 / 679 / 1693 references, ground present, 43 resource folders.
+- **The Cell dock is four tabs** on the block-list strip: Load order (Data folder, profile, language, plugins, Mods),
+  Cells (worldspace, search, list, X,Y, size, Open), References (filter, list, Legend) and Show (World / Lighting /
+  Effects as folding check-box groups with their sliders, the Color row and PRTP). The last tab picked comes back;
+  opening a cell switches to References; the reference parts stay hidden until a cell is open; the second
+  "N references" line is gone. File > Open Cell and Recent Cells open the dock on the Cells tab; no separate window.
+- **Every choice comes back on the next start.** If the saved Data folder or load order is gone, the dock uses the LOD
+  panel's MO2 profile. A plugins.txt changed since the last start is read again. A one-letter language is not kept.
+- **The Show menu stays open on a tick**, its submenus too. The Show tab's boxes and the menu are the same switches.
+- `nifskope-cli cellrefs "<spec>" | <file.wwcell>` prints what an open would place (rc 0 refs > 0, 1 none, 2 error).
+- Unit tests: tests/opencell (98 checks; reds WW_OPENCELL_RED=masters 5 failed, =restore 7 failed) and tests/cellshow
+  (18 checks; reds WW_CELLSHOW_RED=menu 2 failed, =sync 3 failed). In-app rows in WW_CELLWS_TEST for the tabs.
+
 ## Lane LODMNAME1 (2026-10-27, branch lodmname1-20261027): far-LOD texture arrays lose the family word
 
 - **One set per size:** the far-LOD texture arrays are now `<ws>.LodgenArrays.<WxH>` and
@@ -208,7 +230,6 @@
 - Offline gate `tests/spells/cloudfly_check.py` (bound, distance field, continuity, inside look, age, cost).
 - Cost (offline, 1080p, this machine): High +0.10 ms march + 0.06 ms rolling build a frame, 2 MB; Ultra +0.15 + 0.07 ms,
   3.9 MB. A full rebuild (weather change) 0.6 .. 1.3 ms once.
-
 ## Lane CELLSPAWN2 (2026-10-27, branch cellspawn2-20261027): the spawn hold can see the spawn
 
 - **WW_CELL_CAM_DUMP is written with the Cell lights row off:** the dump moved out of the cell lights' uniforms (which

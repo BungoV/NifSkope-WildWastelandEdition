@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
@@ -210,6 +211,16 @@ QByteArray usesLightPlugin()
 
 QString hex( quint32 v ) { return QStringLiteral( "%1" ).arg( v, 8, 16, QLatin1Char( '0' ) ).toUpper(); }
 
+// lane OPENCELLFIX1: the LOD panel's MO2 profile as the application finds it; the test sets it.
+OpenCellFallback g_fallback;
+OpenCellFallback openCellFallback() { return g_fallback; }
+
+QStringList sortedCopy( QStringList v )
+{
+	v.sort( Qt::CaseInsensitive );
+	return v;
+}
+
 int main( int argc, char ** argv )
 {
 	qputenv( "QT_QPA_PLATFORM", "offscreen" );
@@ -254,7 +265,7 @@ int main( int argc, char ** argv )
 	// listed, no exterior's Editor ID cell reads blank (Wilderness stands in), and every row shows an 8-digit FormID.
 	// WW_OPENCELL_RED=list (the old list) must FAIL.
 	if ( argc >= 4 && QByteArray( argv[1] ) == "--census" ) {
-		OpenCellDialog cd;
+		OpenCellPicker cd;
 		cd.setDataDir( QString::fromLocal8Bit( argv[2] ) );
 		cd.setPluginsTicked( QString::fromLocal8Bit( argv[3] ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) );
 		cd.readNow();
@@ -263,7 +274,7 @@ int main( int argc, char ** argv )
 		for ( const QString & item : cd.worldItems() ) {
 			// the combo's text is "EDID (name)"; select by the EDID
 			const QString edid = item.section( QStringLiteral( " (" ), 0, 0 );
-			if ( edid == QLatin1String( OpenCellDialog::allItem ) )
+			if ( edid == QLatin1String( OpenCellPicker::allItem ) )
 				continue;
 			cd.selectWorld( edid );
 			const QStringList heads = cd.cellHeaders();
@@ -286,7 +297,7 @@ int main( int argc, char ** argv )
 				formOk += cf >= 0 && c.value( cf ).size() == 8 && ( c.value( cf ).toUInt( &ok, 16 ), ok );
 			}
 			// An interior with no editor ID reads blank, as in the CK (it is listed by its FormID); an exterior reads Wilderness.
-			const bool interiors = edid == QLatin1String( OpenCellDialog::interiorItem );
+			const bool interiors = edid == QLatin1String( OpenCellPicker::interiorItem );
 			const bool ok = rows == cd.cellTotal() && ( interiors || blankShown == 0 ) && formOk == rows;
 			pass = pass && ok;
 			std::printf( "census %-28s rows %6d listed %6d  edid %6d  name %6d  neither %6d  wilderness %6d  blank %6d  formid %6d  %s\n",
@@ -308,6 +319,28 @@ int main( int argc, char ** argv )
 		std::printf( "census total rows %lld edid %lld name %lld neither %lld blank %lld formid %lld\n%s\n",
 			tot[0], tot[1], tot[2], tot[3], tot[4], tot[5], pass ? "PASS" : "FAIL" );
 		return pass ? 0 : 1;
+	}
+
+	// lane OPENCELLFIX1 --spec <Data> <plugins.txt> <world> <x,y> <n> <out dir>: the cell file the Cells tab's Open
+	// writes for that load order (the user's own install; nothing of it is in the repo). nifskope-cli cellrefs reads it.
+	if ( argc >= 8 && QByteArray( argv[1] ) == "--spec" ) {
+		OpenCellPicker p;
+		p.setDataDir( QString::fromLocal8Bit( argv[2] ) );
+		p.importLoadOrder( QString::fromLocal8Bit( argv[3] ) );
+		p.readNow();
+		p.selectWorld( QString::fromLocal8Bit( argv[4] ) );
+		const QStringList xy = QString::fromLocal8Bit( argv[5] ).split( QLatin1Char( ',' ) );
+		p.selectCell( xy.value( 0 ).toInt(), xy.value( 1 ).toInt(), QByteArray( argv[6] ).toInt() );
+		const QStringList ticked = p.tickedPlugins();
+		std::printf( "spec: plugins %d (first %s), data %s, resources %d\n", int( p.loadOrderPaths().size() ),
+			qPrintable( ticked.value( 0 ) ), qPrintable( p.loadOrderSources().dataDir ), int( p.loadOrderSources().resources.size() ) );
+		if ( p.specLine().isEmpty() ) {
+			std::printf( "spec: refused: %s\nFAIL\n", qPrintable( p.refusal() ) );
+			return 1;
+		}
+		const bool ok = p.writeSpec( QString::fromLocal8Bit( argv[7] ) );
+		std::printf( "spec: %s\n%s\n", qPrintable( p.specPath() ), ok ? "PASS" : "FAIL" );
+		return ok ? 0 : 1;
 	}
 
 	QTemporaryDir tmp;
@@ -442,7 +475,7 @@ int main( int argc, char ** argv )
 	checkEq( mosrc.resolve( QStringLiteral( "Base.esm" ) ), QDir::cleanPath( base ), QStringLiteral( "a plugin in no mod resolves to Data" ) );
 
 	std::printf( "dialog\n" );
-	OpenCellDialog dlg;
+	OpenCellPicker dlg;
 	dlg.setDataDir( data );
 	dlg.setPluginsTicked( { QStringLiteral( "Mod.esp" ) } );
 	dlg.readNow();
@@ -559,6 +592,97 @@ int main( int argc, char ** argv )
 		openCellRecentAdd( p );
 	}
 	check( openCellRecent().size() == openCellRecentMax, QStringLiteral( "Recent Cells keeps the last 10" ) );
+
+	/* lane OPENCELLFIX1, the bug: an MO2 plugins.txt lists the mods only; the game loads Fallout4.esm, the DLC and the
+	 * Creation Club files first whatever the file says. Without them the cell opened with 0 references.
+	 * Red: WW_OPENCELL_RED=masters (the old import; a missing master no longer refused) must FAIL. */
+	std::printf( "game load order\n" );
+	const QString game = tmp.path() + QStringLiteral( "/Game" );
+	const QString data2 = game + QStringLiteral( "/Data" );
+	writeFile( data2 + QStringLiteral( "/Fallout4.esm" ), header( 1, {} )
+		+ group( "WRLD", 0, record( "WRLD", 0x3C, zstring( "EDID", "Commonwealth" ) ) ) );
+	writeFile( data2 + QStringLiteral( "/DLCRobot.esm" ), header( 1, { QStringLiteral( "Fallout4.esm" ) } ) );
+	writeFile( data2 + QStringLiteral( "/ccTest.esl" ), header( 0x201, { QStringLiteral( "Fallout4.esm" ) } ) );
+	writeFile( game + QStringLiteral( "/Fallout4.ccc" ), "ccTest.esl\n" );
+	writeFile( data2 + QStringLiteral( "/Mod2.esp" ), header( 0, { QStringLiteral( "Fallout4.esm" ) } ) );
+	const QString gameTxt = game + QStringLiteral( "/plugins.txt" );
+	writeFile( gameTxt, "*Mod2.esp\n" );
+	const QStringList gameOrder{ QStringLiteral( "Fallout4.esm" ), QStringLiteral( "DLCRobot.esm" ),
+		QStringLiteral( "ccTest.esl" ), QStringLiteral( "Mod2.esp" ) };
+	{
+		OpenCellSources gs;
+		gs.dataDir = data2;
+		QStringList got;
+		openCellImportLoadOrder( gameTxt, got, gs, nullptr );
+		checkEq( got, gameOrder, QStringLiteral( "a plugins.txt import leads with Fallout4.esm, the DLC and the CC files" ) );
+
+		const QString mo = tmp.path() + QStringLiteral( "/MO2b" );
+		writeFile( mo + QStringLiteral( "/profiles/P/plugins.txt" ), "*Mod3.esp\n" );
+		writeFile( mo + QStringLiteral( "/profiles/P/modlist.txt" ), "+M3\n" );
+		writeFile( mo + QStringLiteral( "/mods/M3/Mod3.esp" ), header( 0, { QStringLiteral( "Fallout4.esm" ) } ) );
+		OpenCellSources ms;
+		ms.dataDir = data2;
+		openCellImportLoadOrder( mo + QStringLiteral( "/profiles/P/plugins.txt" ), got, ms, nullptr );
+		checkEq( got, QStringList{ QStringLiteral( "Fallout4.esm" ), QStringLiteral( "DLCRobot.esm" ),
+			QStringLiteral( "ccTest.esl" ), QStringLiteral( "Mod3.esp" ) },
+			QStringLiteral( "an MO2 profile import leads with the masters, as the LOD panel reads it" ) );
+		bool hasMod = false;
+		for ( const QString & r : ms.resources )
+			hasMod = hasMod || QDir::cleanPath( r ).endsWith( QStringLiteral( "/mods/M3" ) );
+		checkEq( hasMod, true, QStringLiteral( "the profile's mod folders become the cell's resources" ) );
+	}
+	writeFile( data2 + QStringLiteral( "/Orphan.esp" ), header( 0, { QStringLiteral( "Gone.esm" ) } )
+		+ group( "WRLD", 0, record( "WRLD", 0x01000801, zstring( "EDID", "OrphanWorld" ) ) ) );
+	{
+		OpenCellPicker p;
+		p.setDataDir( data2 );
+		p.setPluginsTicked( { QStringLiteral( "Orphan.esp" ) } );
+		p.readNow();
+		p.selectWorld( QStringLiteral( "OrphanWorld" ) );
+		p.selectCell( 0, 0, 1 );
+		checkEq( p.specLine(), QString(), QStringLiteral( "a load order missing a master opens nothing (no 0-reference cell)" ) );
+		checkEq( p.refusal().contains( QStringLiteral( "Gone.esm" ) ), true, QStringLiteral( "the refusal names the missing master" ) );
+	}
+
+	/* lane OPENCELLFIX1 (bungo: "make sure the plugin list is saved between sessions"): every choice comes back on the
+	 * next start. Red: WW_OPENCELL_RED=restore must FAIL. */
+	std::printf( "saved between starts\n" );
+	QStringList aTicked;
+	{
+		OpenCellPicker a;
+		a.setDataDir( data );
+		a.setPluginsTicked( { QStringLiteral( "Mod.esp" ) } );
+		a.readNow();
+		a.selectWorld( QStringLiteral( "TestWorld" ) );
+		a.selectCell( 5, -3, 3 );
+		aTicked = a.tickedPlugins();
+	}
+	{
+		OpenCellPicker b;
+		checkEq( b.loadOrderSources().dataDir, QDir::cleanPath( data ), QStringLiteral( "the Data folder comes back" ) );
+		checkEq( b.tickedPlugins(), aTicked, QStringLiteral( "the ticked plugins come back" ) );
+		b.readNow();
+		checkEq( b.specLine().section( QLatin1Char( '|' ), 1 ), QStringLiteral( "TestWorld|5,-3|3" ),
+			QStringLiteral( "the worldspace, X,Y and size come back" ) );
+	}
+	{	// the saved Data folder is gone: the LOD panel's profile (here the game's plugins.txt) fills the tab
+		QSettings().setValue( QStringLiteral( "WW/OpenCell/DataDir" ), tmp.path() + QStringLiteral( "/NoSuchData" ) );
+		g_fallback = { data2, gameTxt };
+		OpenCellPicker c;
+		checkEq( c.loadOrderSources().dataDir, QDir::cleanPath( data2 ), QStringLiteral( "a gone Data folder falls back to the profile's" ) );
+		checkEq( sortedCopy( c.tickedPlugins() ), sortedCopy( gameOrder ), QStringLiteral( "the fallback's load order is ticked, masters too" ) );
+		checkEq( c.loadOrderFile(), QDir::cleanPath( gameTxt ), QStringLiteral( "the fallback's plugins.txt is the load-order file" ) );
+	}
+	{	// plugins.txt changed since: read again
+		writeFile( data2 + QStringLiteral( "/Extra.esp" ), header( 0, { QStringLiteral( "Fallout4.esm" ) } ) );
+		writeFile( gameTxt, "*Mod2.esp\n*Extra.esp\n" );
+		OpenCellPicker d;
+		checkEq( d.tickedPlugins().contains( QStringLiteral( "Extra.esp" ) ), true,
+			QStringLiteral( "a plugins.txt changed since the last start is read again" ) );
+		const QString before = openCellStringsLanguage();
+		d.setLanguage( QStringLiteral( "e" ) );
+		checkEq( openCellStringsLanguage(), before, QStringLiteral( "a one-letter language is not kept" ) );
+	}
 
 	std::printf( "%d checks, %d failed\n%s\n", checks, fails, fails ? "FAIL" : "PASS" );
 	return fails ? 1 : 0;

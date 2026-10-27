@@ -15,6 +15,7 @@ SOURCES += opencelltest.cpp \
 	$$ROOT/src/ui/opencellcatalog.cpp \
 	$$ROOT/src/ui/opencelldialog.cpp \
 	$$ROOT/src/wwswitch.cpp \
+	$$ROOT/src/lodgenloadorder.cpp \
 	$$ROOT/lib/libfo76utils/src/ba2file.cpp \
 	$$ROOT/lib/libfo76utils/src/esmfile.cpp \
 	$$ROOT/lib/libfo76utils/src/filebuf.cpp \

@@ -152,6 +152,7 @@ struct CellSceneSpec
 	int n = 1;              //!< block size, odd: 1, 3, 5
 	CellOverlay overlay = CellOverlay::None;
 	QString lodiPath;       //!< a bake to read GROUP ids out of, for CellOverlay::Identity
+	QStringList resources;  //!< lane OPENCELLFIX1: the load order's resource folders (a file's `resources|a;b` line), empty = unchanged
 	bool showDisabled = false;  //!< draw initially-disabled / enable-parent-off refs, tinted
 	bool showMarkers = false;
 	bool terrain = true;
@@ -183,7 +184,7 @@ struct CellSceneSpec
 //! Parse `plugins|world|x,y|n[|overlay]` or `plugins|interior|<cell>[|overlay]`.
 //! False (with `*error`) on a bad line.
 bool cellSpecFromLine( const QString & line, CellSceneSpec & spec, QString * error );
-//! Read a `.wwcell` file's first non-comment line.
+//! Read a `.wwcell` file's first non-comment line, and a `resources|a;b;c` line after it (lane OPENCELLFIX1).
 bool cellSpecFromFile( const QString & path, CellSceneSpec & spec, QString * error );
 /*! `WW_CELL_OPEN`, plus `WW_CELL_OVERLAY`, `WW_CELL_DISABLED`, `WW_CELL_MARKERS`,
  *  `WW_CELL_DATAROOT`, `WW_CELL_LODI`, `WW_CELL_NOTERRAIN`, `WW_CELL_NOWATER`,

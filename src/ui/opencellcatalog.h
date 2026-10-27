@@ -58,6 +58,7 @@ struct OpenCellSources
 {
 	QString dataDir;
 	QStringList modDirs;
+	QStringList resources;   //!< lane OPENCELLFIX1: an MO2 profile's resource folders, lowest first (empty: Data only)
 	QString resolve( const QString & plugin ) const;   //!< full path, or empty when no source has it
 };
 
@@ -77,7 +78,11 @@ QStringList openCellParsePluginsTxt( const QString & text );
 //! An MO2 modlist.txt: the enabled mods, highest priority first (the file's own order).
 QStringList openCellParseModlist( const QString & text );
 
-//! A load-order file: its active plugins and, for an MO2 profile, the mod folders plugins come from.
+/*! A load-order file: its active plugins and, for an MO2 profile, the mod folders plugins come from.
+ *  lane OPENCELLFIX1: led by the masters the game loads whatever the file says (Fallout4.esm, the DLC, Fallout4.ccc's
+ *  files present in Data), which neither the game's nor MO2's plugins.txt lists. An MO2 profile goes through the LOD
+ *  panel's reader (lodgenLoadOrderFromMo2): its Data folder comes from ModOrganizer.ini when `src.dataDir` holds no
+ *  Fallout4.esm, and `src.resources` gets its folder stack. WW_OPENCELL_RED=masters: the old import (no masters). */
 bool openCellImportLoadOrder( const QString & pluginsTxt, QStringList & plugins, OpenCellSources & src,
 	QString * error );
 

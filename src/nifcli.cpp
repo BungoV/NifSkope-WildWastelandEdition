@@ -8104,6 +8104,13 @@ int nifskopeCliMain( const QStringList & args )
 		err().flush();
 		return rc;
 	}
+	// lane OPENCELLFIX1: what an open would place, per spec line or file (src/cellspawn.cpp)
+	if ( cmd == QLatin1String( "cellrefs" ) ) {
+		const int rc = cellRefsCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	if ( cmd == QLatin1String( "weather" ) ) {
 		out().flush();
 		const int rc = cmdWeather( a );

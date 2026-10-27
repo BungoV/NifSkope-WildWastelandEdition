@@ -11,8 +11,9 @@ BSD License - see nifskope.h
 #include <QActionGroup>
 #include <QApplication>
 #include <QComboBox>
-#include <QDialogButtonBox>
+#include <QDateTime>
 #include <QDir>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGridLayout>
@@ -27,12 +28,15 @@ BSD License - see nifskope.h
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QVBoxLayout>
 
 #include <algorithm>
 #include <limits>
 
 // src/ui/widgets/wwnumberfield.h: a selector styled as the number fields beside it (skill nifskope-ww-panel-style)
 void wwMatchFieldStyle( QWidget * selector );
+// src/wwskin.h: a section heading
+QLabel * wwHeading( const QString & text, QWidget * parent );
 
 namespace {
 
@@ -57,6 +61,15 @@ QString formHex( quint32 form )
 	return QStringLiteral( "%1" ).arg( form, 8, 16, QLatin1Char( '0' ) ).toUpper();
 }
 
+//! lane OPENCELLFIX1: a load-order file "as it was": its size and time, so a changed plugins.txt is read again
+QString stampOf( const QString & path )
+{
+	const QFileInfo fi( path );
+	if ( !fi.isFile() )
+		return QString();
+	return QStringLiteral( "%1@%2" ).arg( fi.size() ).arg( fi.lastModified().toMSecsSinceEpoch() );
+}
+
 // The roles every row carries, in the old list and the new one.
 constexpr int RoleForm = Qt::UserRole;          // the reader's form (a spec line's interior name when no EDID)
 constexpr int RoleXY = Qt::UserRole + 1;        // "x,y"
@@ -78,118 +91,182 @@ struct Row
 	int order = 0;     // the catalog's order, the tie-break of every sort
 };
 
+//! One label width for both pages, so the value edge is one line down the dock (skill nifskope-ww-panel-style).
+constexpr int kLabelW = 84;
+
+QGridLayout * formGrid()
+{
+	auto * g = new QGridLayout;
+	g->setContentsMargins( 0, 0, 0, 0 );
+	g->setHorizontalSpacing( 6 );
+	g->setVerticalSpacing( 4 );
+	g->setColumnMinimumWidth( 0, kLabelW );
+	g->setColumnStretch( 1, 1 );
+	return g;
+}
+
 } // namespace
 
-OpenCellDialog::OpenCellDialog( QWidget * parent ) : QDialog( parent )
+OpenCellPicker::OpenCellPicker( QWidget * parent ) : QWidget( parent )
 {
-	setWindowTitle( tr( "Open Cell" ) );
 	build();
 	loadSettings();
 }
 
-void OpenCellDialog::build()
+void OpenCellPicker::build()
 {
-	auto * grid = new QGridLayout( this );
-	grid->setContentsMargins( 8, 8, 8, 8 );
-	grid->setHorizontalSpacing( 6 );
-	grid->setVerticalSpacing( 4 );
-	int row = 0;
-	auto label = [&]( const QString & t ) {
-		auto * l = new QLabel( t, this );
-		grid->addWidget( l, row, 0, Qt::AlignRight | Qt::AlignTop );
-	};
+	auto * outer = new QVBoxLayout( this );
+	outer->setContentsMargins( 0, 0, 0, 0 );
+	loPage = new QWidget( this );
+	loPage->setObjectName( QStringLiteral( "OpenCellLoadOrderPage" ) );
+	cellPage = new QWidget( this );
+	cellPage->setObjectName( QStringLiteral( "OpenCellCellsPage" ) );
+	outer->addWidget( loPage );
+	outer->addWidget( cellPage, 1 );
 
-	label( tr( "Data" ) );
+	// ---- Load order: where the plugins are, which ones load, in what order
+	auto * lo = new QVBoxLayout( loPage );
+	lo->setContentsMargins( 6, 6, 6, 6 );
+	lo->setSpacing( 4 );
+	auto * g = formGrid();
+	int row = 0;
+	auto label = [&]( QGridLayout * grid, const QString & t ) {
+		grid->addWidget( new QLabel( t ), row, 0, Qt::AlignLeft | Qt::AlignVCenter );
+	};
+	label( g, tr( "Data folder" ) );
 	auto * dataRow = new QHBoxLayout;
-	dataEdit = new QLineEdit( this );
-	auto * browse = new QToolButton( this );
+	dataEdit = new QLineEdit( loPage );
+	dataEdit->setObjectName( QStringLiteral( "OpenCellData" ) );
+	dataEdit->setPlaceholderText( tr( "Fallout 4\\Data" ) );
+	auto * browse = new QToolButton( loPage );
 	browse->setText( QStringLiteral( "..." ) );
-	browse->setToolTip( tr( "Pick the Data folder" ) );
-	auto * import = new QToolButton( this );
-	import->setText( tr( "Import" ) );
-	import->setToolTip( tr( "Import a load order: plugins.txt, or an MO2 profile's plugins.txt" ) );
+	browse->setToolTip( tr( "Pick the game's Data folder" ) );
 	dataRow->addWidget( dataEdit, 1 );
 	dataRow->addWidget( browse );
-	dataRow->addWidget( import );
-	grid->addLayout( dataRow, row++, 1 );
+	g->addLayout( dataRow, row++, 1 );
 
-	label( tr( "Language" ) );
-	langCombo = new QComboBox( this );
+	label( g, tr( "Load order" ) );
+	auto * orderRow = new QHBoxLayout;
+	orderEdit = new QLineEdit( loPage );
+	orderEdit->setObjectName( QStringLiteral( "OpenCellLoadOrderFile" ) );
+	orderEdit->setReadOnly( true );
+	orderEdit->setPlaceholderText( tr( "plugins.txt" ) );
+	orderEdit->setToolTip( tr( "A Mod Organizer profile's plugins.txt, or the game's (%LOCALAPPDATA%\\Fallout4)" ) );
+	auto * import = new QToolButton( loPage );
+	import->setObjectName( QStringLiteral( "OpenCellImport" ) );
+	import->setText( QStringLiteral( "..." ) );
+	import->setToolTip( tr( "Pick a plugins.txt" ) );
+	orderRow->addWidget( orderEdit, 1 );
+	orderRow->addWidget( import );
+	g->addLayout( orderRow, row++, 1 );
+
+	label( g, tr( "Language" ) );
+	langCombo = new QComboBox( loPage );
+	langCombo->setObjectName( QStringLiteral( "OpenCellLanguage" ) );
 	langCombo->setEditable( true );   // the game's language codes; any other a mod ships can be typed
+	langCombo->setInsertPolicy( QComboBox::NoInsert );
 	langCombo->addItems( { QStringLiteral( "en" ), QStringLiteral( "de" ), QStringLiteral( "fr" ), QStringLiteral( "it" ),
 		QStringLiteral( "es" ), QStringLiteral( "pl" ), QStringLiteral( "ptbr" ), QStringLiteral( "ru" ),
 		QStringLiteral( "ja" ), QStringLiteral( "cn" ) } );
 	langCombo->setToolTip( tr( "Names of localized plugins come from Strings/<plugin>_<language>.STRINGS" ) );
 	langCombo->setCurrentText( openCellStringsLanguage() );
 	wwMatchFieldStyle( langCombo );
-	grid->addWidget( langCombo, row++, 1 );
+	g->addWidget( langCombo, row++, 1 );
+	lo->addLayout( g );
 
-	label( tr( "Plugins" ) );
-	pluginList = new QListWidget( this );
+	auto * plHead = new QHBoxLayout;
+	plHead->addWidget( wwHeading( tr( "Plugins" ), loPage ) );
+	plHead->addStretch( 1 );
+	pluginCount = new QLabel( loPage );
+	pluginCount->setObjectName( QStringLiteral( "OpenCellPluginCount" ) );
+	plHead->addWidget( pluginCount );
+	lo->addLayout( plHead );
+	pluginList = new QListWidget( loPage );
+	pluginList->setObjectName( QStringLiteral( "OpenCellPlugins" ) );
 	pluginList->setDragDropMode( QAbstractItemView::InternalMove );   // the list order is the load order
 	pluginList->setMinimumHeight( 120 );
-	grid->addWidget( pluginList, row++, 1 );
+	lo->addWidget( pluginList, 1 );
+	loStatus = new QLabel( loPage );
+	loStatus->setObjectName( QStringLiteral( "OpenCellLoadOrderStatus" ) );
+	loStatus->setWordWrap( true );
+	loStatus->hide();
+	lo->addWidget( loStatus );
 
-	label( tr( "Worldspace" ) );
-	worldCombo = new QComboBox( this );
+	// ---- Cells: the CK's Cell View
+	auto * cl = new QVBoxLayout( cellPage );
+	cl->setContentsMargins( 6, 6, 6, 6 );
+	cl->setSpacing( 4 );
+	auto * cg = formGrid();
+	row = 0;
+	label( cg, tr( "Worldspace" ) );
+	worldCombo = new QComboBox( cellPage );
 	worldCombo->setObjectName( QStringLiteral( "OpenCellWorld" ) );
 	wwMatchFieldStyle( worldCombo );
-	grid->addWidget( worldCombo, row++, 1 );
+	cg->addWidget( worldCombo, row++, 1 );
 
 	// The block list's search bar: one field, a Filters menu beside it (src/nifskope.cpp, BlockListToolbar).
-	label( tr( "Cell" ) );
+	label( cg, tr( "Cell" ) );
 	auto * searchRow = new QHBoxLayout;
 	searchRow->setSpacing( 2 );
-	filterEdit = new QLineEdit( this );
+	filterEdit = new QLineEdit( cellPage );
 	filterEdit->setObjectName( QStringLiteral( "OpenCellSearch" ) );
 	filterEdit->setPlaceholderText( tr( "Search cells…" ) );
 	filterEdit->setClearButtonEnabled( true );
 	filterEdit->setToolTip( tr( "Editor ID, name or FormID; space-separated terms must all match. x, y finds a grid cell." ) );
 	searchRow->addWidget( filterEdit, 1 );
-	filterButton = new QToolButton( this );
+	filterButton = new QToolButton( cellPage );
 	filterButton->setObjectName( QStringLiteral( "OpenCellFilters" ) );
 	filterButton->setPopupMode( QToolButton::InstantPopup );
 	filterButton->setAutoRaise( true );
 	filterButton->setToolButtonStyle( Qt::ToolButtonTextOnly );
 	filterButton->setAccessibleName( tr( "Cell search filters" ) );
 	searchRow->addWidget( filterButton );
-	grid->addLayout( searchRow, row++, 1 );
+	cg->addLayout( searchRow, row++, 1 );
+	cl->addLayout( cg );
 
-	cellTree = new QTreeWidget( this );
+	cellTree = new QTreeWidget( cellPage );
 	cellTree->setObjectName( QStringLiteral( "OpenCellList" ) );
 	cellTree->setRootIsDecorated( false );
 	cellTree->setUniformRowHeights( true );
-	cellTree->setMinimumHeight( 220 );
+	cellTree->setMinimumHeight( 160 );
 	cellTree->setColumnCount( ColCount );
 	cellTree->header()->setStretchLastSection( false );
 	cellTree->header()->setSectionsClickable( true );
-	grid->addWidget( cellTree, row++, 1 );
-	countLabel = new QLabel( this );
+	cl->addWidget( cellTree, 1 );
+	countLabel = new QLabel( cellPage );
 	countLabel->setObjectName( QStringLiteral( "OpenCellCount" ) );
-	grid->addWidget( countLabel, row++, 1 );
+	cl->addWidget( countLabel );
 
+	auto * ag = formGrid();
+	row = 0;
+	label( ag, tr( "X, Y" ) );
 	auto * at = new QHBoxLayout;
-	xyEdit = new QLineEdit( this );
+	xyEdit = new QLineEdit( cellPage );
+	xyEdit->setObjectName( QStringLiteral( "OpenCellXY" ) );
 	xyEdit->setPlaceholderText( QStringLiteral( "x, y" ) );
-	sizeCombo = new QComboBox( this );
+	sizeCombo = new QComboBox( cellPage );
+	sizeCombo->setObjectName( QStringLiteral( "OpenCellSize" ) );
 	for ( int n : { 1, 3, 5 } )
 		sizeCombo->addItem( QStringLiteral( "%1 x %1" ).arg( n ), n );
 	wwMatchFieldStyle( sizeCombo );
 	at->addWidget( xyEdit, 1 );
-	at->addWidget( new QLabel( tr( "Size" ), this ) );
+	at->addWidget( new QLabel( tr( "Size" ), cellPage ) );
 	at->addWidget( sizeCombo );
-	label( tr( "X, Y" ) );
-	grid->addLayout( at, row++, 1 );
+	ag->addLayout( at, row++, 1 );
+	cl->addLayout( ag );
 
-	status = new QLabel( this );
+	status = new QLabel( cellPage );
+	status->setObjectName( QStringLiteral( "OpenCellStatus" ) );
 	status->setWordWrap( true );
-	grid->addWidget( status, row++, 1 );
-
-	auto * buttons = new QDialogButtonBox( QDialogButtonBox::Open | QDialogButtonBox::Cancel, this );
-	openButton = buttons->button( QDialogButtonBox::Open );
-	grid->addWidget( buttons, row++, 0, 1, 2 );
-	grid->setColumnStretch( 1, 1 );
-	resize( 720, 640 );
+	status->hide();
+	cl->addWidget( status );
+	auto * buttons = new QHBoxLayout;
+	buttons->addStretch( 1 );
+	openButton = new QPushButton( tr( "Open" ), cellPage );
+	openButton->setObjectName( QStringLiteral( "OpenCellOpen" ) );
+	openButton->setDefault( true );
+	buttons->addWidget( openButton );
+	cl->addLayout( buttons );
 
 	readTimer = new QTimer( this );
 	readTimer->setSingleShot( true );
@@ -197,28 +274,53 @@ void OpenCellDialog::build()
 	searchTimer = new QTimer( this );
 	searchTimer->setSingleShot( true );
 	searchTimer->setInterval( 150 );   // a whole worldspace is thousands of rows: list once per pause in typing
+	dataTimer = new QTimer( this );
+	dataTimer->setSingleShot( true );
+	dataTimer->setInterval( 500 );     // a typed or pasted Data folder counts once it names a folder
 	buildFilters();
 
-	connect( browse, &QToolButton::clicked, this, &OpenCellDialog::browseData );
-	connect( import, &QToolButton::clicked, this, &OpenCellDialog::browseImport );
-	connect( dataEdit, &QLineEdit::editingFinished, this, [this]() { setDataDir( dataEdit->text() ); } );
-	connect( langCombo, &QComboBox::currentTextChanged, this, &OpenCellDialog::setLanguage );
-	connect( pluginList, &QListWidget::itemChanged, this, &OpenCellDialog::pluginsChanged );
-	connect( pluginList->model(), &QAbstractItemModel::rowsMoved, this, &OpenCellDialog::pluginsChanged );
-	connect( readTimer, &QTimer::timeout, this, &OpenCellDialog::readNow );
-	connect( worldCombo, &QComboBox::currentIndexChanged, this, &OpenCellDialog::fillCells );
+	connect( browse, &QToolButton::clicked, this, &OpenCellPicker::browseData );
+	connect( import, &QToolButton::clicked, this, &OpenCellPicker::browseImport );
+	// lane OPENCELLFIX1: a Data folder counts as soon as it exists, not only after Enter (it was lost on a paste)
+	connect( dataEdit, &QLineEdit::textEdited, this, [this]() { dataTimer->start(); } );
+	connect( dataTimer, &QTimer::timeout, this, [this]() {
+		if ( QFileInfo( dataEdit->text() ).isDir() )
+			setDataDir( dataEdit->text() );
+	} );
+	connect( dataEdit, &QLineEdit::editingFinished, this, [this]() {
+		dataTimer->stop();
+		if ( QDir::cleanPath( dataEdit->text() ) != sources.dataDir )
+			setDataDir( dataEdit->text() );
+	} );
+	// lane OPENCELLFIX1: the language counts once picked or typed out, never per keystroke (it saved "e")
+	connect( langCombo, &QComboBox::activated, this, [this]( int i ) { setLanguage( langCombo->itemText( i ) ); } );
+	connect( langCombo->lineEdit(), &QLineEdit::editingFinished, this, [this]() { setLanguage( langCombo->currentText() ); } );
+	connect( pluginList, &QListWidget::itemChanged, this, &OpenCellPicker::pluginsChanged );
+	connect( pluginList->model(), &QAbstractItemModel::rowsMoved, this, &OpenCellPicker::pluginsChanged );
+	connect( readTimer, &QTimer::timeout, this, &OpenCellPicker::readNow );
+	connect( worldCombo, &QComboBox::currentIndexChanged, this, [this]() { fillCells(); saveSettings(); } );
 	connect( filterEdit, &QLineEdit::textChanged, this, [this]() { searchTimer->start(); } );
-	connect( searchTimer, &QTimer::timeout, this, &OpenCellDialog::fillCells );
+	connect( searchTimer, &QTimer::timeout, this, &OpenCellPicker::fillCells );
 	connect( cellTree->header(), &QHeaderView::sectionClicked, this, [this]( int col ) {
 		sortCells( col, col == sortColumn ? !sortDescending : false );
 	} );
-	connect( cellTree, &QTreeWidget::itemSelectionChanged, this, &OpenCellDialog::cellPicked );
-	connect( cellTree, &QTreeWidget::itemDoubleClicked, this, &OpenCellDialog::openClicked );
-	connect( buttons, &QDialogButtonBox::accepted, this, &OpenCellDialog::openClicked );
-	connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
+	connect( cellTree, &QTreeWidget::itemSelectionChanged, this, &OpenCellPicker::cellPicked );
+	connect( cellTree, &QTreeWidget::itemDoubleClicked, this, &OpenCellPicker::openClicked );
+	connect( xyEdit, &QLineEdit::textChanged, this, [this]() { saveSettings(); } );
+	connect( sizeCombo, &QComboBox::currentIndexChanged, this, [this]() { saveSettings(); } );
+	connect( openButton, &QPushButton::clicked, this, &OpenCellPicker::openClicked );
+	cellPage->installEventFilter( this );
 }
 
-void OpenCellDialog::buildFilters()
+bool OpenCellPicker::eventFilter( QObject * o, QEvent * e )
+{
+	// The catalog is read when the Cells page is first looked at, not at start: a full master takes seconds.
+	if ( o == cellPage && e->type() == QEvent::Show && readOwed )
+		readTimer->start( 0 );
+	return QWidget::eventFilter( o, e );
+}
+
+void OpenCellPicker::buildFilters()
 {
 	// The block list's advanced-search menu: bold disabled headings, checkable groups, one reset at the end.
 	filterMenu = new QMenu( filterButton );
@@ -320,7 +422,7 @@ void OpenCellDialog::buildFilters()
 	refreshFilterButton();
 }
 
-void OpenCellDialog::fillPluginFilter()
+void OpenCellPicker::fillPluginFilter()
 {
 	pluginMenu->clear();
 	for ( QAction * a : pluginGroup->actions() )
@@ -339,25 +441,37 @@ void OpenCellDialog::fillPluginFilter()
 		add( catalog.plugins[i], i );
 }
 
-void OpenCellDialog::setDataDir( const QString & dir )
+void OpenCellPicker::setDataDir( const QString & dir )
 {
 	const QString d = QDir::cleanPath( dir );
-	if ( dataEdit->text() != d )
+	if ( dataEdit->text() != d && !( d == QLatin1String( "." ) && dataEdit->text().isEmpty() ) ) {
+		QSignalBlocker b( dataEdit );
 		dataEdit->setText( d );
+	}
 	if ( sources.dataDir == d && pluginList->count() )
 		return;
 	sources.dataDir = d;
-	QSignalBlocker block( pluginList );
-	pluginList->clear();
-	for ( const QString & name : openCellDataPlugins( d ) ) {
-		auto * it = new QListWidgetItem( name, pluginList );
-		it->setFlags( it->flags() | Qt::ItemIsUserCheckable );
-		it->setCheckState( Qt::Unchecked );
+	if ( !restoring && orderFile.isEmpty() ) {	// a hand-made list: no profile's mod folders any more
+		sources.modDirs.clear();
+		sources.resources.clear();
 	}
-	pluginsChanged();
+	const QStringList keep = tickedPlugins();
+	{
+		QSignalBlocker block( pluginList );
+		pluginList->clear();
+		for ( const QString & name : openCellDataPlugins( d ) ) {
+			auto * it = new QListWidgetItem( name, pluginList );
+			it->setFlags( it->flags() | Qt::ItemIsUserCheckable );
+			it->setCheckState( Qt::Unchecked );
+		}
+	}
+	if ( !keep.isEmpty() )
+		setPluginsTicked( keep );   // the ticks survive a Data folder change
+	else
+		pluginsChanged();
 }
 
-void OpenCellDialog::setPluginsTicked( const QStringList & names )
+void OpenCellPicker::setPluginsTicked( const QStringList & names )
 {
 	{
 		QSignalBlocker block( pluginList );
@@ -381,70 +495,111 @@ void OpenCellDialog::setPluginsTicked( const QStringList & names )
 	pluginsChanged();
 }
 
-void OpenCellDialog::setLanguage( const QString & lang )
+void OpenCellPicker::setLanguage( const QString & lang )
 {
-	if ( langCombo->currentText() != lang ) {
-		langCombo->setCurrentText( lang );   // re-enters through currentTextChanged
+	const QString l = lang.trimmed();
+	if ( l.size() < 2 ) {	// lane OPENCELLFIX1: no game language is one letter; put the saved one back
+		QSignalBlocker b( langCombo );
+		langCombo->setCurrentText( openCellStringsLanguage() );
 		return;
 	}
-	if ( lang.trimmed().isEmpty() || lang.trimmed() == openCellStringsLanguage() )
+	if ( langCombo->currentText() != l ) {
+		QSignalBlocker b( langCombo );
+		langCombo->setCurrentText( l );
+	}
+	if ( l == openCellStringsLanguage() )
 		return;
-	openCellSetStringsLanguage( lang );
+	openCellSetStringsLanguage( l );
 	pluginsChanged();
 }
 
-bool OpenCellDialog::importLoadOrder( const QString & pluginsTxt )
+bool OpenCellPicker::importLoadOrder( const QString & pluginsTxt )
 {
 	QStringList plugins;
 	QString err;
-	if ( !openCellImportLoadOrder( pluginsTxt, plugins, sources, &err ) ) {
-		status->setText( err );
+	OpenCellSources next = sources;
+	if ( !openCellImportLoadOrder( pluginsTxt, plugins, next, &err ) ) {
+		setStatus( err );
 		return false;
 	}
+	orderFile = QDir::cleanPath( QFileInfo( pluginsTxt ).absoluteFilePath() );
+	orderEdit->setText( QDir::toNativeSeparators( orderFile ) );
+	sources.modDirs = next.modDirs;
+	sources.resources = next.resources;
+	if ( next.dataDir != sources.dataDir || !pluginList->count() ) {
+		{
+			QSignalBlocker b( pluginList );
+			pluginList->clear();	// the file's ticks replace the old ones
+		}
+		sources.dataDir = QString();
+		setDataDir( next.dataDir );
+	}
 	setPluginsTicked( plugins );
+	setStatus( err );
+	saveSettings();
 	return true;
 }
 
-void OpenCellDialog::browseData()
+void OpenCellPicker::browseData()
 {
 	const QString d = QFileDialog::getExistingDirectory( this, tr( "Data folder" ), dataEdit->text() );
 	if ( !d.isEmpty() )
 		setDataDir( d );
 }
 
-void OpenCellDialog::browseImport()
+void OpenCellPicker::browseImport()
 {
-	const QString f = QFileDialog::getOpenFileName( this, tr( "Load order" ), sources.dataDir,
-		tr( "Load order (plugins.txt *.txt)" ) );
+	const QString f = QFileDialog::getOpenFileName( this, tr( "Load order" ),
+		orderFile.isEmpty() ? sources.dataDir : QFileInfo( orderFile ).absolutePath(), tr( "Load order (plugins.txt *.txt)" ) );
 	if ( !f.isEmpty() )
 		importLoadOrder( f );
 }
 
-void OpenCellDialog::pluginsChanged()
+void OpenCellPicker::pluginsChanged()
 {
-	readTimer->start();
+	readOwed = true;
+	refreshCount();
+	saveSettings();
+	if ( cellPage->isVisible() )
+		readTimer->start();
 }
 
-QStringList OpenCellDialog::loadOrderPaths() const
+void OpenCellPicker::refreshCount()
+{
+	pluginCount->setText( tr( "%1 ticked of %2" ).arg( tickedPlugins().size() ).arg( pluginList->count() ) );
+}
+
+QStringList OpenCellPicker::tickedPlugins() const
 {
 	QStringList ticked;
 	for ( int i = 0; i < pluginList->count(); i++ )
 		if ( pluginList->item( i )->checkState() == Qt::Checked )
 			ticked.append( pluginList->item( i )->text() );
+	return ticked;
+}
+
+QStringList OpenCellPicker::missingMasters() const
+{
+	QStringList missing;
+	openCellWithMasters( tickedPlugins(), sources, &missing );
+	return missing;
+}
+
+QStringList OpenCellPicker::loadOrderPaths() const
+{
 	QStringList missing;
 	QStringList paths;
-	for ( const QString & n : openCellWithMasters( ticked, sources, &missing ) )
+	for ( const QString & n : openCellWithMasters( tickedPlugins(), sources, &missing ) )
 		paths.append( sources.resolve( n ) );
 	return paths;
 }
 
-void OpenCellDialog::readNow()
+void OpenCellPicker::readNow()
 {
 	readTimer->stop();
-	QStringList ticked, missing;
-	for ( int i = 0; i < pluginList->count(); i++ )
-		if ( pluginList->item( i )->checkState() == Qt::Checked )
-			ticked.append( pluginList->item( i )->text() );
+	readOwed = false;
+	const QStringList ticked = tickedPlugins();
+	QStringList missing;
 	const QStringList order = openCellWithMasters( ticked, sources, &missing );
 	QString err;
 	const QString keepPlugin = pluginIndex >= 0 ? catalog.plugins.value( pluginIndex ) : QString();
@@ -458,23 +613,34 @@ void OpenCellDialog::readNow()
 	}
 	const int added = int( order.size() - ticked.size() ) + int( missing.size() );
 	if ( !missing.isEmpty() )
-		status->setText( tr( "Missing master: %1" ).arg( missing.join( QStringLiteral( ", " ) ) ) );
+		setStatus( refusal() );
 	else if ( !err.isEmpty() )
-		status->setText( err );
+		setStatus( err );
 	else if ( added > 0 )
-		status->setText( tr( "%n master(s) added", nullptr, added ) );
+		setStatus( tr( "%n master(s) added", nullptr, added ) );
 	else if ( !catalog.noStrings.isEmpty() )
-		status->setText( tr( "No %1 strings for %2: names stay blank" )
+		setStatus( tr( "No %1 strings for %2: names stay blank" )
 			.arg( openCellStringsLanguage(), catalog.noStrings.join( QStringLiteral( ", " ) ) ) );
 	else
-		status->clear();
+		setStatus( QString() );
 	// the filter's plugin is kept by name while it is still in the load order
 	pluginIndex = keepPlugin.isEmpty() ? -1 : int( catalog.plugins.indexOf( keepPlugin ) );
 	fillPluginFilter();
+	const bool wasRestoring = restoring;
+	restoring = true;	// the combo refills: what was saved stays saved
 	fillWorlds();
+	if ( !pendingWorld.isEmpty() ) {
+		selectWorld( pendingWorld );
+		pendingWorld.clear();
+	}
+	if ( !pendingCell.isEmpty() ) {
+		selectInterior( pendingCell );
+		pendingCell.clear();
+	}
+	restoring = wasRestoring;
 }
 
-void OpenCellDialog::fillWorlds()
+void OpenCellPicker::fillWorlds()
 {
 	const QString keep = worldCombo->currentData( Qt::UserRole + 1 ).toString();
 	QSignalBlocker block( worldCombo );
@@ -498,12 +664,12 @@ void OpenCellDialog::fillWorlds()
 	fillCells();
 }
 
-bool OpenCellDialog::allMode() const
+bool OpenCellPicker::allMode() const
 {
 	return worldCombo->currentData( Qt::UserRole + 1 ).toString() == QLatin1String( allItem );
 }
 
-bool OpenCellDialog::interiorMode() const
+bool OpenCellPicker::interiorMode() const
 {
 	if ( worldCombo->currentData( Qt::UserRole + 1 ).toString() == QLatin1String( interiorItem ) )
 		return true;
@@ -513,7 +679,7 @@ bool OpenCellDialog::interiorMode() const
 	return !sel.isEmpty() && sel.first()->data( 0, RoleInterior ).toBool();
 }
 
-QString OpenCellDialog::exteriorWorld() const
+QString OpenCellPicker::exteriorWorld() const
 {
 	if ( !allMode() )
 		return worldCombo->currentData( Qt::UserRole + 1 ).toString();
@@ -521,7 +687,7 @@ QString OpenCellDialog::exteriorWorld() const
 	return sel.isEmpty() ? QString() : sel.first()->data( 0, RoleWorld ).toString();
 }
 
-void OpenCellDialog::fillCellsOld()
+void OpenCellPicker::fillCellsOld()
 {
 	const bool interior = interiorMode();
 	const QString f = filterEdit->text().trimmed();
@@ -561,7 +727,7 @@ void OpenCellDialog::fillCellsOld()
 	sizeCombo->setEnabled( !interior );
 }
 
-void OpenCellDialog::fillCells()
+void OpenCellPicker::fillCells()
 {
 	searchTimer->stop();
 	refreshFilterButton();
@@ -718,7 +884,7 @@ void OpenCellDialog::fillCells()
 	sizeCombo->setEnabled( !interiorWorld );
 }
 
-void OpenCellDialog::refreshFilterButton()
+void OpenCellPicker::refreshFilterButton()
 {
 	int active = 0;
 	active += searchFields != ( SearchEditorId | SearchName | SearchFormId );
@@ -739,14 +905,15 @@ void OpenCellDialog::refreshFilterButton()
 		pluginMenu->setTitle( pluginIndex >= 0 ? catalog.plugins.value( pluginIndex ) : tr( "Any plugin" ) );
 }
 
-void OpenCellDialog::cellPicked()
+void OpenCellPicker::cellPicked()
 {
 	const auto sel = cellTree->selectedItems();
 	if ( !sel.isEmpty() && !sel.first()->data( 0, RoleInterior ).toBool() )
 		xyEdit->setText( sel.first()->data( 0, RoleXY ).toString() );
+	saveSettings();
 }
 
-QStringList OpenCellDialog::worldItems() const
+QStringList OpenCellPicker::worldItems() const
 {
 	QStringList out;
 	for ( int i = 0; i < worldCombo->count(); i++ )
@@ -754,7 +921,7 @@ QStringList OpenCellDialog::worldItems() const
 	return out;
 }
 
-QStringList OpenCellDialog::cellItems() const
+QStringList OpenCellPicker::cellItems() const
 {
 	QStringList out;
 	for ( int i = 0; i < cellTree->topLevelItemCount(); i++ ) {
@@ -768,7 +935,7 @@ QStringList OpenCellDialog::cellItems() const
 	return out;
 }
 
-QStringList OpenCellDialog::cellHeaders() const
+QStringList OpenCellPicker::cellHeaders() const
 {
 	QStringList out;
 	for ( int c = 0; c < cellTree->columnCount(); c++ )
@@ -777,17 +944,17 @@ QStringList OpenCellDialog::cellHeaders() const
 	return out;
 }
 
-int OpenCellDialog::cellCount() const
+int OpenCellPicker::cellCount() const
 {
 	return cellTree->topLevelItemCount();
 }
 
-int OpenCellDialog::cellTotal() const
+int OpenCellPicker::cellTotal() const
 {
 	return totalRows;
 }
 
-void OpenCellDialog::setSearch( const QString & text )
+void OpenCellPicker::setSearch( const QString & text )
 {
 	{
 		QSignalBlocker b( filterEdit );
@@ -796,27 +963,27 @@ void OpenCellDialog::setSearch( const QString & text )
 	fillCells();
 }
 
-void OpenCellDialog::sortCells( int column, bool descending )
+void OpenCellPicker::sortCells( int column, bool descending )
 {
 	sortColumn = column;
 	sortDescending = descending;
 	fillCells();
 }
 
-void OpenCellDialog::selectWorld( const QString & edid )
+void OpenCellPicker::selectWorld( const QString & edid )
 {
 	const int i = worldCombo->findData( edid, Qt::UserRole + 1 );
 	if ( i >= 0 )
 		worldCombo->setCurrentIndex( i );
 }
 
-void OpenCellDialog::selectCell( int x, int y, int n )
+void OpenCellPicker::selectCell( int x, int y, int n )
 {
 	xyEdit->setText( QStringLiteral( "%1,%2" ).arg( x ).arg( y ) );
 	sizeCombo->setCurrentIndex( qMax( 0, sizeCombo->findData( n ) ) );
 }
 
-void OpenCellDialog::selectInterior( const QString & edid )
+void OpenCellPicker::selectInterior( const QString & edid )
 {
 	for ( int i = 0; i < cellTree->topLevelItemCount(); i++ ) {
 		QTreeWidgetItem * it = cellTree->topLevelItem( i );
@@ -826,10 +993,13 @@ void OpenCellDialog::selectInterior( const QString & edid )
 	}
 }
 
-QString OpenCellDialog::specLine() const
+QString OpenCellPicker::specLine() const
 {
 	const QStringList paths = loadOrderPaths();
 	if ( paths.isEmpty() || worldCombo->currentIndex() < 0 )
+		return QString();
+	// lane OPENCELLFIX1: a load order with a master missing is refused, never opened without it (0 references)
+	if ( !missingMasters().isEmpty() && wwEnvStr( "WW_OPENCELL_RED" ) != QLatin1String( "masters" ) )
 		return QString();
 	if ( interiorMode() ) {
 		const auto sel = cellTree->selectedItems();
@@ -847,12 +1017,30 @@ QString OpenCellDialog::specLine() const
 	return openCellExteriorLine( paths, world, x, y, sizeCombo->currentData().toInt() );
 }
 
-bool OpenCellDialog::writeSpec( const QString & dir )
+QString OpenCellPicker::refusal() const
+{
+	if ( tickedPlugins().isEmpty() )
+		return tr( "Tick the plugins to load on the Load order tab" );
+	const QStringList missing = missingMasters();
+	if ( !missing.isEmpty() ) {
+		const bool game = missing.contains( QStringLiteral( "Fallout4.esm" ), Qt::CaseInsensitive );
+		return game ? tr( "Missing master: %1. Set the Data folder on the Load order tab" ).arg( missing.join( QStringLiteral( ", " ) ) )
+			: tr( "Missing master: %1" ).arg( missing.join( QStringLiteral( ", " ) ) );
+	}
+	if ( worldCombo->currentIndex() < 0 )
+		return tr( "No worldspace or interior in these plugins" );
+	if ( interiorMode() )
+		return tr( "Pick an interior cell" );
+	if ( allMode() && exteriorWorld().isEmpty() )
+		return tr( "Pick a cell" );
+	return tr( "Enter x, y" );
+}
+
+bool OpenCellPicker::writeSpec( const QString & dir )
 {
 	const QString line = specLine();
 	if ( line.isEmpty() ) {
-		status->setText( interiorMode() ? tr( "Pick an interior cell" )
-			: ( allMode() && exteriorWorld().isEmpty() ) ? tr( "Pick a cell" ) : tr( "Enter x, y" ) );
+		setStatus( refusal() );
 		return false;
 	}
 	QString name;
@@ -864,9 +1052,14 @@ bool OpenCellDialog::writeSpec( const QString & dir )
 		name = openCellFileName( exteriorWorld(), x, y, sizeCombo->currentData().toInt() );
 	}
 	const QString path = QDir( dir ).filePath( name );
+	// lane OPENCELLFIX1: an MO2 profile's folders ride along on a second line, so the cell's models and textures
+	// come from the same mods its plugins do (cellSpecFromFile reads it; older builds stop at the first line)
+	QString text = line;
+	if ( !sources.resources.isEmpty() )
+		text += QStringLiteral( "\nresources|" ) + sources.resources.join( QLatin1Char( ';' ) );
 	QString err;
-	if ( !openCellWriteSpec( path, line, &err ) ) {
-		status->setText( err );
+	if ( !openCellWriteSpec( path, text, &err ) ) {
+		setStatus( err );
 		return false;
 	}
 	written = path;
@@ -874,50 +1067,101 @@ bool OpenCellDialog::writeSpec( const QString & dir )
 	return true;
 }
 
-void OpenCellDialog::openClicked()
+void OpenCellPicker::openClicked()
 {
 	if ( !writeSpec( openCellSpecDir() ) )
 		return;
+	setStatus( QString() );
 	saveSettings();
-	accept();
+	emit openRequested( written );
 }
 
-void OpenCellDialog::saveSettings() const
+void OpenCellPicker::setStatus( const QString & text )
 {
+	status->setText( text );
+	status->setVisible( !text.isEmpty() );
+	loStatus->setText( text );
+	loStatus->setVisible( !text.isEmpty() );
+}
+
+QString OpenCellPicker::statusText() const
+{
+	return status->text();
+}
+
+void OpenCellPicker::saveSettings() const
+{
+	if ( restoring )
+		return;
 	QSettings s;
 	s.setValue( key( "DataDir" ), sources.dataDir );
+	s.setValue( key( "LoadOrderFile" ), orderFile );
+	s.setValue( key( "LoadOrderStamp" ), stampOf( orderFile ) );
 	s.setValue( key( "ModDirs" ), sources.modDirs );
-	QStringList order, ticked;
-	for ( int i = 0; i < pluginList->count(); i++ ) {
-		order.append( pluginList->item( i )->text() );
-		if ( pluginList->item( i )->checkState() == Qt::Checked )
-			ticked.append( pluginList->item( i )->text() );
-	}
-	s.setValue( key( "Ticked" ), ticked );
-	s.setValue( key( "World" ), worldCombo->currentData( Qt::UserRole + 1 ) );
+	s.setValue( key( "Resources" ), sources.resources );
+	s.setValue( key( "Ticked" ), tickedPlugins() );
+	if ( worldCombo->currentIndex() >= 0 )
+		s.setValue( key( "World" ), worldCombo->currentData( Qt::UserRole + 1 ) );
 	s.setValue( key( "XY" ), xyEdit->text() );
 	s.setValue( key( "Size" ), sizeCombo->currentData() );
+	const auto sel = cellTree->selectedItems();
+	s.setValue( key( "Cell" ), !sel.isEmpty() && sel.first()->data( 0, RoleInterior ).toBool()
+		? sel.first()->data( 0, RoleEdid ).toString() : QString() );
 }
 
-void OpenCellDialog::loadSettings()
+void OpenCellPicker::loadSettings()
 {
-	QSettings s;
-	const QString d = s.value( key( "DataDir" ) ).toString();
-	if ( d.isEmpty() )
+	/* lane OPENCELLFIX1: everything comes back on every start. A saved Data folder or load-order file that is gone
+	 * (or none saved yet) falls back to the LOD panel's MO2 profile; a plugins.txt changed since is read again.
+	 * WW_OPENCELL_RED=restore: nothing comes back (the unit test's red). */
+	if ( wwEnvStr( "WW_OPENCELL_RED" ) == QLatin1String( "restore" ) )
 		return;
+	restoring = true;
+	QSettings s;
+	QString d = s.value( key( "DataDir" ) ).toString();
+	QString f = s.value( key( "LoadOrderFile" ) ).toString();
+	const bool dataOk = !d.isEmpty() && QFileInfo( d ).isDir();
+	const bool fileOk = f.isEmpty() || QFileInfo( f ).isFile();
+	bool fell = false;
+	if ( !dataOk || !fileOk ) {
+		const OpenCellFallback fb = openCellFallback();
+		if ( !dataOk )
+			d = fb.dataDir;
+		if ( !fileOk || ( !dataOk && f.isEmpty() ) )
+			f = fb.pluginsTxt;
+		fell = true;
+	}
 	sources.modDirs = s.value( key( "ModDirs" ) ).toStringList();
-	setDataDir( d );
-	setPluginsTicked( s.value( key( "Ticked" ) ).toStringList() );
-	readNow();
-	selectWorld( s.value( key( "World" ) ).toString() );
+	sources.resources = s.value( key( "Resources" ) ).toStringList();
+	if ( !f.isEmpty() && QFileInfo( f ).isFile() ) {
+		orderFile = QDir::cleanPath( f );
+		orderEdit->setText( QDir::toNativeSeparators( orderFile ) );
+	}
+	if ( !d.isEmpty() )
+		setDataDir( d );
+	if ( !orderFile.isEmpty() && ( fell || stampOf( orderFile ) != s.value( key( "LoadOrderStamp" ) ).toString() ) ) {
+		restoring = false;
+		importLoadOrder( orderFile );	// new or changed since: read it again
+		restoring = true;
+	} else if ( !fell ) {
+		setPluginsTicked( s.value( key( "Ticked" ) ).toStringList() );
+	}
+	pendingWorld = s.value( key( "World" ) ).toString();
+	pendingCell = s.value( key( "Cell" ) ).toString();
 	xyEdit->setText( s.value( key( "XY" ) ).toString() );
 	sizeCombo->setCurrentIndex( qMax( 0, sizeCombo->findData( s.value( key( "Size" ), 1 ) ) ) );
+	restoring = false;
+	refreshCount();
+	if ( fell )
+		saveSettings();
 }
 
 QString openCellShot( QWidget * parent, const QString & png )
 {
-	auto * dlg = new OpenCellDialog( parent );
+	auto * dlg = new OpenCellPicker( nullptr );
 	dlg->setAttribute( Qt::WA_DeleteOnClose );
+	dlg->setWindowFlag( Qt::Tool );
+	Q_UNUSED( parent );
 	if ( wwEnvIsSet( "WW_OPENCELL_SHOT_DATA" ) )
 		dlg->setDataDir( wwEnvStr( "WW_OPENCELL_SHOT_DATA" ) );
 	if ( wwEnvIsSet( "WW_OPENCELL_SHOT_PLUGINS" ) )
@@ -927,6 +1171,7 @@ QString openCellShot( QWidget * parent, const QString & png )
 		dlg->selectWorld( wwEnvStr( "WW_OPENCELL_SHOT_WORLD" ) );
 	if ( wwEnvIsSet( "WW_OPENCELL_SHOT_SEARCH" ) )
 		dlg->setSearch( wwEnvStr( "WW_OPENCELL_SHOT_SEARCH" ) );
+	dlg->resize( 640, 900 );
 	dlg->show();
 	for ( int i = 0; i < 3; i++ )
 		QApplication::processEvents();
