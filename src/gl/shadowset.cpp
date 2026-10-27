@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "harnesswindow.h"
 #include "impostorchunk.h"	// lane FAR5: the far cards as terrain-shadow casters
+#include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground fog's low-pass terrain from the same heights
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -178,6 +179,8 @@ struct TerrJob
 	int extra = 0;
 	Terrain w0;
 	std::vector<std::uint16_t> hOut;
+	WwFogTerrGrid fog;	// lane FOGTERRAIN1: the terrain-only heights, low-passed (re-made on a raster)
+	bool fogNew = false;
 };
 
 struct Contact
@@ -999,6 +1002,31 @@ void runTerrJob( TerrJob * j )
 		w0 = Terrain();
 		j->hOut = std::vector<std::uint16_t>();
 	}
+	// lane FOGTERRAIN1: the ground fog's terrain, from the terrain-only heights (no buildings, no object LOD)
+	if ( ( j->raster || j->fog.nx == 0 || j->fog.x0 != w.x0 || j->fog.y0 != w.y0 ) && !w.H.empty()
+		&& !j->stop.load( std::memory_order_relaxed ) ) {
+		const std::vector<float> * src = &w.H;
+		Terrain t0;
+		bool objs = false;
+		for ( const TerrSrc & k : j->srcKept )
+			objs = objs || k.obj;
+		if ( objs && w0.H.size() == w.H.size() && w0.x0 == w.x0 && w0.y0 == w.y0 ) {
+			src = &w0.H;
+		} else if ( objs ) {
+			std::vector<TerrSrc> terr;
+			for ( const TerrSrc & k : j->srcKept )
+				if ( !k.obj )
+					terr.push_back( k );
+			t0.N = w.N;
+			t0.T = w.T;
+			t0.x0 = w.x0;
+			t0.y0 = w.y0;
+			rasterTerrain( t0, terr, j->stop );
+			src = &t0.H;
+		}
+		wwFogTerrainLowpass( *src, w.N, w.T, w.x0, w.y0, kNoHeight, kFogTerrSigma, j->fog );
+		j->fogNew = true;
+	}
 	j->workMs = double( tm.nsecsElapsed() ) * 1e-6;
 }
 
@@ -1191,6 +1219,11 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 		if ( j.busy && ( s.sync || j.fut.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready ) ) {
 			j.fut.get();
 			j.busy = false;
+			if ( j.fogNew ) {	// lane FOGTERRAIN1
+				WwFogTerrGrid g = j.fog;
+				wwFogTerrainPublish( std::move( g ) );
+				j.fogNew = false;
+			}
 			if ( j.w.line >= j.w.N && j.w.N == t.N && j.wn.N == t.Nn && j.wn.line >= j.wn.N && j.extra == t.extra ) {
 				t.uploading = true;
 				t.upRow = 0;

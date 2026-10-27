@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FOGTERRAIN1 (2026-10-27, branch fogterrain1-20261027): the ground fog layer follows the terrain
+
+- **Why:** the ground fog layer (groundFog .recx, or FOGHEIGHT1's derived layer) was anchored at one absolute height,
+  so it lay buried on hills and floated over valleys.
+- **Fix:** the terrain shadow's worker already rasters the terrain-only heights (cell LAND + the far terrain LOD).
+  It now also low-passes them (`src/gl/fogterrain.cpp`: 512-unit texels, Gaussian sigma 1024 units), and the air
+  pass raises the layer's anchor by the local ground's rise over the fog frame's ground
+  (`res/shaders/cell_airmed.glsl` airGroundAt, per froxel sub-step). Thickness and strength keep their meaning, measured
+  above the local ground. Flat ground at the frame's ground draws the absolute law exactly. The air census prints
+  `terrain=on(...)` / `off(why)`.
+- **Red:** `WW_FOG_TERRAIN_RED=absolute` (live): the old absolute anchor.
+- Particles and the surfaces' far tail still use the absolute anchor.
+
 ## Lane STREAMMEM1 (2026-10-27, branch streammem1-20261027): streamed-out cells give their meshes back
 
 - **Why:** the stream walk's memory check (d) failed at x1.19 (11788 -> 14060 MB private over 20 crossings, bar 5%).
