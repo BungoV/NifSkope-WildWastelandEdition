@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "gl/cellpost.h"
 #include "gl/cellssr.h"
 #include "gl/glscene.h"
+#include "gl/glshape.h"	// lane CLOUDLOOK1: the shapes' spheres (vaShapesTop)
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "gl/shadowset.h"	// lane FARGRID1: the terrain map
@@ -34,6 +35,7 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 /* ---- lane VOLAIR1: the air (cellvolair.h, res/shaders/cell_volair.frag) ---- */
@@ -66,6 +68,7 @@ struct VaState
 	int red = 0;
 	bool shellStep = false;	// SKY2 red WW_CELL_AIR_RED=shellstep: the old law (no air volume, the GI shell's edge one voxel wide)
 	bool noAirVol = false;	// SKY2 red WW_CELL_AIR_RED=noairvol: no air volume, the shell read over the probes' reach (the stopgap)
+	bool sphereTop = false;	// lane CLOUDLOOK1 red WW_CELL_AIR_RED=spheretop: the air's top at the scene sphere's (the veil)
 	int terms = 15;
 	int probe = 0;
 	int fogBlend = 0;	// WW_CELL_VOLAIR_FOGBLEND=1 (option B, test only): the game's fog drawn over the lit air
@@ -95,6 +98,7 @@ VaState & vs()
 			s.red = d.red;
 			s.shellStep = d.shellStep;
 			s.noAirVol = d.noAirVol;
+			s.sphereTop = d.sphereTop;
 			s.terms = d.terms;
 			s.opt = d.opt;
 		}
@@ -109,6 +113,7 @@ VaState & vs()
 			const QByteArray r = t.trimmed();
 			s.shellStep = s.shellStep || r == "shellstep";
 			s.noAirVol = s.noAirVol || r == "noairvol";
+			s.sphereTop = s.sphereTop || r == "spheretop";
 			s.red |= r == "off" ? 1 : r == "gioff" ? 2 : r == "flat" ? 4 : r == "noshadow" ? 8 : r == "nolights" ? 16
 				: r == "wrongmed" ? 32 : r == "blendnear" ? 64 : r == "farfit" ? 128 : r == "physcol" ? 256 : r == "nosunt" ? 512 : r == "froxonly" ? 1024 : r == "oldsun" ? 2048
 				: r == "dropcluster" ? 4096 : r == "nearskip" ? 8192 : r == "noground" ? 16384 : r == "nosidecar" ? 32768 : r == "nosky" ? 65536 : r == "fxfog" ? 131072 : r == "lightmid" ? 262144 : r == "bluescatter" ? 524288 : r == "zcolour" ? 1048576 : r == "nofarclamp" ? 2097152 : r == "roomstep" ? 4194304
@@ -970,6 +975,44 @@ void wwVolAirPass( Scene * scene, bool run )
 		std::fprintf( stderr, "air prof: inner %.3f ms echo %.3f ms\n", double( tInner ) * 1e-6, double( pt.nsecsElapsed() - tInner ) * 1e-6 );
 }
 
+/* lane CLOUDLOOK1: the medium's top = the scene's highest point, taken as the highest top of a visible shape's own
+ * sphere (the far LOD left out, as Scene::bounds does). The scene's sphere is a union: its top sat a radius over its
+ * centre, ~1 km over the ground on a cell set, and the sky's air (cell_volsky, optical depth ~3 up that column) laid a
+ * uniform veil over the clouds. Cached per document, shape count and scene sphere. Red spheretop: the union's top. */
+static float vaShapesTop( Scene * scene, const BoundSphere & bs )
+{
+	static const void * doc = nullptr;
+	static qsizetype count = -1;
+	static float key[4] = {}, top = 0.0f;
+	const float k[4] = { bs.center[0], bs.center[1], bs.center[2], bs.radius };
+	if ( doc == scene->nifModel && count == scene->shapes.size() && std::equal( k, k + 4, key ) )
+		return top;
+	doc = scene->nifModel;
+	count = scene->shapes.size();
+	std::copy( k, k + 4, key );
+	float t = -std::numeric_limits<float>::infinity();
+	int used = 0;
+	for ( Shape * sh : scene->shapes ) {
+		if ( !sh || !sh->isVisible() )
+			continue;
+		bool far = false;
+		for ( const Node * n = sh; n && !far; n = n->parentNode() )
+			far = n->getName().startsWith( QLatin1String( "FarLOD" ) );
+		if ( far )
+			continue;
+		const BoundSphere b = sh->bounds();
+		if ( !( b.radius > 0.0f ) )
+			continue;
+		t = std::max( t, b.center[2] + b.radius );
+		used++;
+	}
+	const float u = bs.center[2] + bs.radius;
+	top = used ? std::min( t, u ) : u;	// never above the union's: it bounds every shape
+	qInfo().noquote() << QStringLiteral( "cell air top: %1 (the highest of %2 shapes' spheres; the scene sphere's %3)" )
+		.arg( double( top ), 0, 'f', 1 ).arg( used ).arg( double( u ), 0, 'f', 1 );
+	return top;
+}
+
 static void vaPassInner( Scene * scene, bool run )
 {
 	if ( !scene || !scene->renderer )
@@ -1114,7 +1157,7 @@ static void vaPassInner( Scene * scene, bool run )
 	for ( int j = 0; j < 3; j++ )
 		camZw -= vt.rotation( j, 2 ) * vt.translation[j] / sc;
 	const BoundSphere bs = scene->bounds();
-	const float topW = bs.center[2] + bs.radius;
+	const float topW = s.sphereTop ? bs.center[2] + bs.radius : vaShapesTop( scene, bs );
 	// the booth's even air has no top: a lone fixture would otherwise end the air at its own crown (lane LIGHTBOOTH1)
 	const float zTop = boothAir > 0.0f ? 1.0e6f : topW + fogView[3] - camZw;
 

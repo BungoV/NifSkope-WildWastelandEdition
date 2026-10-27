@@ -443,9 +443,16 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni1f( "cvMsOn", noMs ? 0.0f : 1.0f );
 	p->uni1f( "cvMsG", V::msMeanCosine( drop ) );
 	p->uni1f( "cvTopOn", red( "notop" ) ? 0.0f : 1.0f );	// lane CLOUD2C: the light the cloud below reflects up
+	// lane CLOUDLOOK1: literal names (the location cache keys on the name's address; a heap name per loop set all three
+	// through cvTint[0]). Red tintname: the old heap names.
+	static const char * const kTint[3] = { "cvTint[0]", "cvTint[1]", "cvTint[2]" };
 	for ( int i = 0; i < 3; i++ ) {
-		const QByteArray n = QByteArrayLiteral( "cvTint[" ) + QByteArray::number( i ) + ']';
-		p->uni3f( n.constData(), d.b.tint[i][0], d.b.tint[i][1], d.b.tint[i][2] );
+		if ( red( "tintname" ) ) {
+			const QByteArray n = QByteArrayLiteral( "cvTint[" ) + QByteArray::number( i ) + ']';
+			p->uni3f( n.constData(), d.b.tint[i][0], d.b.tint[i][1], d.b.tint[i][2] );	// uniname-red
+		} else {
+			p->uni3f( kTint[i], d.b.tint[i][0], d.b.tint[i][1], d.b.tint[i][2] );
+		}
 	}
 	fn->glActiveTexture( GL_TEXTURE6 );
 	fn->glBindTexture( GL_TEXTURE_2D, sceneTex );
@@ -893,7 +900,7 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	const double mb = ( 128.0 * 128 * 128 * 8 / 7 + 32.0 * 32 * 32 * 8 / 7 + ( 2.0 * hw * hh + double( mw ) * mh ) * 12.0 ) / 1048576.0;
 	QString reds;
 	for ( const char * w : { "noreproj", "nooctaves", "nocal", "everypixel", "noms", "nodepth", "notint", "notop", "wind0",
-			  "display", "firstpaint", "lookdevback" } )
+			  "display", "firstpaint", "lookdevback", "tintname" } )
 		if ( red( w ) )
 			reds += QStringLiteral( ",RED=%1" ).arg( QLatin1StringView( w ) );
 	// lane CLOUD2C: clip = which scene depth ends the march (last = the last paint's, this = this paint's, after the scene)
