@@ -69,6 +69,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellfogbloom.h"
 #include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
 #include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
+#include "gl/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 
@@ -865,7 +866,9 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		if ( p->name != std::string_view( "fo4_fog.prog" ) && p->name != std::string_view( "fo4_default.prog" )
 			&& p->name != std::string_view( "fo4_cell.prog" ) && p->name != std::string_view( "fo4_cellcsm.prog" )
 			&& p->name != std::string_view( "fo4_csm.prog" ) && p->name != std::string_view( "fo4_fogcsm.prog" )
-			&& p->name != std::string_view( "fo4_cellbl.prog" ) && p->name != std::string_view( "fo4_cellcsmbl.prog" ) )
+			&& p->name != std::string_view( "fo4_cellbl.prog" ) && p->name != std::string_view( "fo4_cellcsmbl.prog" )
+			&& p->name != std::string_view( "fo4_cellfgl.prog" ) && p->name != std::string_view( "fo4_cellfgc.prog" )	// lane FARDRAW1
+			&& p->name != std::string_view( "fo4_cellcsmfgl.prog" ) && p->name != std::string_view( "fo4_cellcsmfgc.prog" ) )
 			return p;
 		// red fognoswap: never swap, so the legacy path cannot fog
 		// lane SKYA: the sky's aerial perspective reads the fog program too (with the Fog row off)
@@ -876,7 +879,19 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			? ( wwSunShadowWanted( mesh->scene ) ? "fo4_cellcsm.prog" : "fo4_cell.prog" )	// lane SUNCELL1: + the cascades
 			: wwSunShadowWanted( mesh->scene ) ? ( fog ? "fo4_fogcsm.prog" : "fo4_csm.prog" )	// lane SUNCELL1: Lookdev, not cell-lit
 			: fog ? "fo4_fog.prog" : "fo4_default.prog";
-		if ( ( want[4] == 'c' && want[5] == 'e' ) && wwBlWants() ) {	// lane BINDLESS2: fo4_cell / fo4_cellcsm
+		// lane FARDRAW1: ring 0's terrain takes the live-ground twin while the Far ground row is live
+		const bool fgCsm = std::string_view( want ) == "fo4_cellcsm.prog";
+		bool fgTwin = false;	// MERGE1027: a far-ground twin draws as itself, never as a bindless twin
+		if ( fgCsm || std::string_view( want ) == "fo4_cell.prog" ) {
+			static const char * const kTwin[2][2] = { { "fo4_cellfgl.prog", "fo4_cellfgc.prog" },
+				{ "fo4_cellcsmfgl.prog", "fo4_cellcsmfgc.prog" } };
+			const int t = CellFarGround::twinFor( mesh->scene->nifModel, mesh->id() );
+			if ( t > 0 ) {
+				want = kTwin[fgCsm ? 1 : 0][t - 1];
+				fgTwin = true;
+			}
+		}
+		if ( !fgTwin && ( want[4] == 'c' && want[5] == 'e' ) && wwBlWants() ) {	// lane BINDLESS2: fo4_cell / fo4_cellcsm
 			const char * bl = want[8] == 'c' ? "fo4_cellcsmbl.prog" : "fo4_cellbl.prog";
 			Program * base = useProgram( want );
 			Program * q = base ? useProgram( bl ) : nullptr;
@@ -1915,6 +1930,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)
 		}
 		wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
+		if ( prog->uniLocation( "fgMode" ) >= 0 )	// lane FARDRAW1: a live-ground twin's grid, layers and decals
+			CellFarGround::uniforms( scene, prog );
 		if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 			// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
 			GLint dst = 0;

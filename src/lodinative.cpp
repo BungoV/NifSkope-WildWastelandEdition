@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include <QTextStream>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -205,6 +206,92 @@ void appendWireBox( std::vector<OutVert> & verts, std::vector<Triangle> & tris,
 	}
 }
 
+//! The shader, texture set and alpha blocks of one bucket's shape, linked under `iRoot`.
+void attachMaterial( NifModel * nif, const QModelIndex & iRoot, const QModelIndex & iShape, const Bucket & b )
+{
+	/* The material plumbing is the chunk builder's (src/lodgen.cpp ~4189),
+	 * not a second one: the same block pair, the same ten slots, the same
+	 * flag words, and the BGSM in the shader's Name so the renderer
+	 * resolves it exactly as it does for a `.BTO` shape whose source named
+	 * a material (src/gl/glproperty.cpp, BSShaderLightingProperty::setMaterial). */
+	QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
+	nif->set<quint32>( iShader, "Shader Type", 0 );
+	nif->set<quint32>( iShader, "Shader Flags 1",
+		b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) );
+	// 0x20 = vertex colours, the same bit the terrain route sets for its plane views
+	nif->set<quint32>( iShader, "Shader Flags 2", ( b.withColour || b.libColour ) ? 0x25U : 5U );
+	// lane FARLOD1: SLSF2 Tree_Anim (bit 29) + vertex colours, so the colour's A is the wind weight
+	if ( b.sway )
+		nif->set<quint32>( iShader, "Shader Flags 2",
+			nif->get<quint32>( iShader, "Shader Flags 2" ) | 0x20U | ( 1U << 29 ) );
+	// `.lodo` v5: SLSF1 bit 3 Vertex_Alpha, only where the source shader set it
+	if ( b.vertexAlpha )
+		nif->set<quint32>( iShader, "Shader Flags 1", nif->get<quint32>( iShader, "Shader Flags 1" ) | 0x8U );
+	QModelIndex iTexSet = nif->insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
+	nif->setLink( iShader, "Texture Set", nif->getBlockNumber( iTexSet ) );
+	nif->set<uint>( iTexSet, "Num Textures", 10 );
+	nif->updateArraySize( iTexSet, "Textures" );
+	QModelIndex iArr = nif->getIndex( iTexSet, "Textures" );
+	if ( isMaterialFile( b.matString ) ) {
+		nif->set<QString>( iShader, "Name", materialNameFor( b.matString ) );
+	} else if ( !b.matString.isEmpty() ) {
+		nif->set<QString>( nif->getIndex( iArr, 0 ), b.matString );
+		const QString n = siblingSuffix( b.matString, "_n" );
+		if ( !n.isEmpty() )
+			nif->set<QString>( nif->getIndex( iArr, 1 ), n );
+		const QString s = siblingSuffix( b.matString, "_s" );
+		if ( !s.isEmpty() )
+			nif->set<QString>( nif->getIndex( iArr, 7 ), s );
+	}
+	if ( b.emits )
+		nif->set<float>( iShader, "Emissive Multiple", b.emissiveScale );
+	nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
+	if ( b.hasAlpha ) {
+		QModelIndex iAlpha = nif->insertNiBlock( QStringLiteral( "NiAlphaProperty" ) );
+		nif->set<int>( iAlpha, "Flags", 4844 );
+		nif->set<int>( iAlpha, "Threshold", int( b.alphaThreshold ) );
+		nif->setLink( iShape, "Alpha Property", nif->getBlockNumber( iAlpha ) );
+	}
+	addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iShape ) );
+}
+
+/*! lane FARDRAW1: an instanced bucket as ONE BSTriShape with no vertices of its own. The document holds the same
+ *  name, flags and material blocks as the flat shape; the geometry and the placements wait in `d` (gl/cellfarinst.h). */
+void emitInstBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b, const QSharedPointer<CellMeshInst> & d,
+	const Vector3 & origin, const Vector3 & lo, const Vector3 & hi )
+{
+	BSVertexDesc desc( LODI_VERTEX_DESC );
+	if ( b.layer >= 0 )
+		desc.SetFlag( VertexFlags::VF_UV_2 );
+	const bool col = b.withColour || b.libColour || b.sway;
+	if ( col )
+		desc.SetFlag( VertexFlags::VF_COLORS );
+	if ( b.layer >= 0 || col )
+		desc.ResetAttributeOffsets( 130 );
+	QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
+	nif->set<QString>( iShape, "Name", b.name );
+	nif->set<quint32>( iShape, "Flags", 14 );
+	nif->set<float>( iShape, "Scale", 1.0f );
+	nif->set<Vector3>( iShape, "Translation", origin );
+	nif->set<BSVertexDesc>( iShape, "Vertex Desc", desc.Value() );
+	nif->set<quint32>( iShape, "Num Vertices", 0 );
+	nif->set<quint32>( iShape, "Num Triangles", 0 );
+	nif->set<quint32>( iShape, "Data Size", 0 );
+	QModelIndex iBound = nif->getIndex( iShape, "Bounding Sphere" );
+	if ( iBound.isValid() ) {
+		nif->set<Vector3>( iBound, "Center", ( lo + hi ) / 2.0f );
+		nif->set<float>( iBound, "Radius", ( ( hi - lo ) / 2.0f ).length() );
+	}
+	QSharedPointer<CellMesh> m( new CellMesh );
+	m->withColour = col;
+	// one entry: the renderer's "has a colour stream" tests compare counts (the instanced draw binds its own)
+	if ( col )
+		m->colors.append( Color4( 1.0f, 1.0f, 1.0f, 1.0f ) );
+	m->inst = d;
+	cellMeshPut( nif, iShape, m );
+	attachMaterial( nif, iRoot, iShape, b );
+}
+
 /*! Write one bucket's geometry as one or more BSTriShapes under `iRoot`.
  *  Splits at MAX_SHAPE_VERTS, because a BSTriShape counts vertices in a u16. */
 bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
@@ -373,50 +460,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		}
 		nif->restoreState();
 
-		/* The material plumbing is the chunk builder's (src/lodgen.cpp ~4189),
-		 * not a second one: the same block pair, the same ten slots, the same
-		 * flag words, and the BGSM in the shader's Name so the renderer
-		 * resolves it exactly as it does for a `.BTO` shape whose source named
-		 * a material (src/gl/glproperty.cpp, BSShaderLightingProperty::setMaterial). */
-		QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
-		nif->set<quint32>( iShader, "Shader Type", 0 );
-		nif->set<quint32>( iShader, "Shader Flags 1",
-			b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) );
-		// 0x20 = vertex colours, the same bit the terrain route sets for its plane views
-		nif->set<quint32>( iShader, "Shader Flags 2", ( b.withColour || b.libColour ) ? 0x25U : 5U );
-		// lane FARLOD1: SLSF2 Tree_Anim (bit 29) + vertex colours, so the colour's A is the wind weight
-		if ( b.sway )
-			nif->set<quint32>( iShader, "Shader Flags 2",
-				nif->get<quint32>( iShader, "Shader Flags 2" ) | 0x20U | ( 1U << 29 ) );
-		// `.lodo` v5: SLSF1 bit 3 Vertex_Alpha, only where the source shader set it
-		if ( b.vertexAlpha )
-			nif->set<quint32>( iShader, "Shader Flags 1", nif->get<quint32>( iShader, "Shader Flags 1" ) | 0x8U );
-		QModelIndex iTexSet = nif->insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
-		nif->setLink( iShader, "Texture Set", nif->getBlockNumber( iTexSet ) );
-		nif->set<uint>( iTexSet, "Num Textures", 10 );
-		nif->updateArraySize( iTexSet, "Textures" );
-		QModelIndex iArr = nif->getIndex( iTexSet, "Textures" );
-		if ( isMaterialFile( b.matString ) ) {
-			nif->set<QString>( iShader, "Name", materialNameFor( b.matString ) );
-		} else if ( !b.matString.isEmpty() ) {
-			nif->set<QString>( nif->getIndex( iArr, 0 ), b.matString );
-			const QString n = siblingSuffix( b.matString, "_n" );
-			if ( !n.isEmpty() )
-				nif->set<QString>( nif->getIndex( iArr, 1 ), n );
-			const QString s = siblingSuffix( b.matString, "_s" );
-			if ( !s.isEmpty() )
-				nif->set<QString>( nif->getIndex( iArr, 7 ), s );
-		}
-		if ( b.emits )
-			nif->set<float>( iShader, "Emissive Multiple", b.emissiveScale );
-		nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
-		if ( b.hasAlpha ) {
-			QModelIndex iAlpha = nif->insertNiBlock( QStringLiteral( "NiAlphaProperty" ) );
-			nif->set<int>( iAlpha, "Flags", 4844 );
-			nif->set<int>( iAlpha, "Threshold", int( b.alphaThreshold ) );
-			nif->setLink( iShape, "Alpha Property", nif->getBlockNumber( iAlpha ) );
-		}
-		addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iShape ) );
+		attachMaterial( nif, iRoot, iShape, b );
 	}
 	return true;
 }
@@ -803,6 +847,197 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 		return meshCache.insert( key, std::move( parts ) ).value();
 	};
 
+	//! One bucket's material fields (shared by the flat buckets and the instanced ones)
+	auto newBucket = [&]( quint16 baseId, const LodoBase & base, quint16 materialId, quint32 bkey ) -> Bucket {
+		Bucket nb;
+		nb.baseId = baseId;
+		nb.materialId = materialId;
+		const QString model = lib.stringAt( base.modelStringOffset );
+		if ( spec.mergeBases )
+			nb.name = spec.namePrefix + QString( "m%1 %2" ).arg( materialId ).arg( bkey >> 16 );
+		else
+			nb.name = spec.namePrefix + QString( "%1 %2 m%3" )
+				.arg( QString::number( base.formId, 16 ).rightJustified( 8, QChar( '0' ) ) )
+				.arg( model.isEmpty() ? QStringLiteral( "?" )
+					: QFileInfo( QString( model ).replace( QChar( '\\' ), QChar( '/' ) ) )
+						.completeBaseName() )
+				.arg( materialId );
+		if ( materialId < lib.materials.size() ) {
+			const LodoMaterial & mat = lib.materials[materialId];
+			nb.matString = lib.stringAt( mat.lodmStringOffset );
+			nb.hasAlpha = mat.alphaThreshold != 0;
+			nb.alphaThreshold = mat.alphaThreshold;
+			/* PICTURE-ONLY dial for the tree-card cutoff question (bungo
+			 * 2026-09-18, "what is going with those trees? They seem broken"):
+			 * WW_LODL_TREE_ALPHA=1..255 draws every TREE material that tests
+			 * alpha at that threshold instead of the file's (the chunk builder
+			 * writes 128 on every LOD material, lodgen.cpp ~2179; the tree LOD
+			 * BGSMs themselves say 80/82). The file is not touched. NOTE the
+			 * renderer takes the BGSM's own ref over this NiAlphaProperty when
+			 * the BGSM loads (src/gl/renderer.cpp ~1321, same dial there); this
+			 * one covers the no-BGSM fallback only. */
+			if ( nb.hasAlpha && ( mat.flags & LODO_MAT_TREE ) ) {
+				const int dial = wwEnvInt( "WW_LODL_TREE_ALPHA" );
+				if ( dial >= 1 && dial <= 255 )
+					nb.alphaThreshold = quint8( dial );
+			}
+			nb.twoSided = ( mat.flags & LODO_MAT_TWO_SIDED ) != 0;
+			nb.emits = ( mat.flags & LODO_MAT_EMITS ) != 0;
+			nb.emissiveScale = mat.emissiveScale;
+			nb.layer = ( mat.layer == LODO_NO_LAYER ) ? -1 : int( mat.layer );
+			nb.sway = spec.sway && ( mat.flags & LODO_MAT_TREE );
+		}
+		nb.withColour = wantAo || objectChannel || streamPerVertex;
+		return nb;
+	};
+
+	/* lane FARDRAW1: the instanced far ring. Buckets key as mergeBases has them; each (mesh, part) is copied into its
+	 * bucket ONCE in mesh-local space and each placement adds one 64-byte row. A view that stores a value per vertex
+	 * per placement (vertex AO stream, sky/ground streams) stays flat. */
+	const bool instMode = spec.instanced && spec.sideMesh && spec.mergeBases && cellMeshOn() && !streamPerVertex
+		&& !( wantAo && !table.vertexAoFirst.empty() );
+	cnt.instanced = instMode;
+	struct InstSub
+	{
+		int firstIndex = 0, indexCount = 0, baseVertex = 0, vertCount = 0;
+		Vector3 centre;
+		float radius = 0.0f, uMid = 0.0f;
+		int chanLo = 255, chanHi = 0;
+		double chanSum = 0.0;
+	};
+	struct InstRec
+	{
+		quint32 tile = 0;
+		int sub = 0;
+		float row[16];
+		Vector3 c;
+		float r = 0.0f;
+	};
+	struct InstBucket
+	{
+		Bucket meta;
+		QSharedPointer<CellMeshInst> d;
+		QHash<quint64, int> subOf;
+		QVector<InstSub> subs;
+		std::vector<InstRec> recs;
+	};
+	QHash<quint32, InstBucket> instBuckets;
+	auto pack1010102 = []( const Vector3 & v ) -> quint32 {
+		quint32 r = 0;
+		for ( int k = 0; k < 3; k++ )
+			r |= ( quint32( int( std::lround( qBound( -1.0f, v[k], 1.0f ) * 511.0f ) ) ) & 0x3FFu ) << ( 10 * k );
+		return r;
+	};
+	auto unorm8 = []( float f ) { return quint8( std::lround( qBound( 0.0f, f, 1.0f ) * 255.0f ) ); };
+	auto placeInst = [&]( quint16 baseId, const LodoBase & base, quint16 meshId, const std::vector<MeshPart> & parts,
+		const Vector3 & pos, const float m[9], float scale, bool mirrorU, const float rgb[3], int cellX, int cellY ) {
+		const LodoMesh & meshRow = lib.meshes[meshId];
+		const quint32 tile = ( quint32( ( cellX >> 2 ) + 32768 ) << 16 ) | quint32( ( cellY >> 2 ) + 32768 );
+		for ( int pi = 0; pi < int( parts.size() ); pi++ ) {
+			const MeshPart & p = parts[size_t( pi )];
+			if ( p.verts.empty() || p.tris.empty() )
+				continue;
+			const quint32 bkey = quint32( p.materialId ) | ( ( meshRow.flags & LODO_MESH_VERTEX_COLOUR ) ? 0x10000u : 0u )
+				| ( ( meshRow.flags & LODO_MESH_VERTEX_ALPHA ) ? 0x20000u : 0u );
+			auto bit = instBuckets.find( bkey );
+			if ( bit == instBuckets.end() ) {
+				InstBucket nb;
+				nb.meta = newBucket( baseId, base, p.materialId, bkey );
+				nb.d.reset( new CellMeshInst );
+				bit = instBuckets.insert( bkey, nb );
+			}
+			InstBucket & ib = bit.value();
+			if ( meshRow.flags & LODO_MESH_VERTEX_COLOUR )
+				ib.meta.libColour = true;
+			if ( meshRow.flags & LODO_MESH_VERTEX_ALPHA )
+				ib.meta.vertexAlpha = true;
+			const quint64 skey = ( quint64( meshId ) << 32 ) | quint64( pi );
+			int si;
+			auto sit = ib.subOf.constFind( skey );
+			if ( sit != ib.subOf.constEnd() ) {
+				si = sit.value();
+			} else {
+				// first use of this (mesh, part) in the bucket: its vertices once, as the flat path would colour them
+				CellMeshInst & d = *ib.d;
+				InstSub sub;
+				sub.baseVertex = int( d.vbo.size() / 36 );
+				sub.vertCount = int( p.verts.size() );
+				sub.firstIndex = int( d.ebo.size() );
+				sub.indexCount = int( p.tris.size() ) * 3;
+				Vector3 lo( 3.4e38f, 3.4e38f, 3.4e38f ), hi( -3.4e38f, -3.4e38f, -3.4e38f );
+				float uLo = p.verts[0].uv[0], uHi = uLo;
+				const qsizetype at = d.vbo.size();
+				d.vbo.resize( at + 36 * qsizetype( p.verts.size() ) );
+				char * w = d.vbo.data() + at;
+				for ( const OutVert & sv : p.verts ) {
+					float lc = 1.0f;
+					if ( channel == LodlChannel::Sway )
+						lc = sv.sway;
+					else if ( channel == LodlChannel::SelfAo )
+						lc = sv.selfAo;
+					else if ( !objectChannel && wantAo )
+						lc = sv.selfAo;   // times the placement's AO, in the row
+					if ( channel == LodlChannel::Sway || channel == LodlChannel::SelfAo ) {
+						const int cv = int( lc * 255.0f + 0.5f );
+						sub.chanLo = qMin( sub.chanLo, cv );
+						sub.chanHi = qMax( sub.chanHi, cv );
+						sub.chanSum += cv;
+					}
+					std::memcpy( w, &sv.pos[0], 12 );
+					const quint8 c4[4] = { unorm8( lc * sv.rgba[0] ), unorm8( lc * sv.rgba[1] ), unorm8( lc * sv.rgba[2] ),
+						unorm8( ib.meta.sway ? sv.sway : sv.rgba[3] ) };
+					std::memcpy( w + 12, c4, 4 );
+					const quint32 nq[3] = { pack1010102( sv.nrm ), pack1010102( sv.tan ), pack1010102( sv.bit ) };
+					std::memcpy( w + 16, nq, 12 );
+					std::memcpy( w + 28, &sv.uv[0], 8 );
+					w += 36;
+					for ( int k = 0; k < 3; k++ ) {
+						lo[k] = qMin( lo[k], sv.pos[k] );
+						hi[k] = qMax( hi[k], sv.pos[k] );
+					}
+					uLo = qMin( uLo, sv.uv[0] );
+					uHi = qMax( uHi, sv.uv[0] );
+				}
+				for ( const Triangle & t : p.tris )
+					d.ebo << t[0] << t[1] << t[2];
+				sub.centre = ( lo + hi ) / 2.0f;
+				sub.radius = ( ( hi - lo ) / 2.0f ).length();
+				sub.uMid = uLo + uHi;
+				d.uniqueVerts += sub.vertCount;
+				d.uniqueTris += qint64( p.tris.size() );
+				si = ib.subs.size();
+				ib.subs.append( sub );
+				ib.subOf.insert( skey, si );
+			}
+			const InstSub & sub = ib.subs[si];
+			InstRec r;
+			r.tile = tile;
+			r.sub = si;
+			for ( int k = 0; k < 3; k++ ) {
+				r.row[4 * k] = scale * m[3 * k];
+				r.row[4 * k + 1] = scale * m[3 * k + 1];
+				r.row[4 * k + 2] = scale * m[3 * k + 2];
+				r.row[4 * k + 3] = pos[k];
+			}
+			r.row[12] = sub.uMid;
+			r.row[13] = rgb[0];
+			r.row[14] = rgb[1];
+			r.row[15] = rgb[2] + ( mirrorU ? 2.0f : 0.0f );
+			r.c = pos + rotate( m, sub.centre * scale );
+			r.r = sub.radius * scale;
+			ib.recs.push_back( r );
+			cnt.tris += qint64( sub.indexCount / 3 );
+			if ( ib.meta.sway )
+				cnt.swayVerts += sub.vertCount;
+			if ( channel == LodlChannel::Sway || channel == LodlChannel::SelfAo ) {
+				chanLo = qMin( chanLo, sub.chanLo );
+				chanHi = qMax( chanHi, sub.chanHi );
+				chanSum += sub.chanSum;
+				chanCount += sub.vertCount;
+			}
+		}
+	};
+
 	QHash<quint32, Bucket> buckets;
 	QHash<quint32, QVector<Bucket>> spilled;	// full buckets set aside, in fill order
 	qint64 read = 0, placed = 0, outsideRegion = 0, noMesh = 0, noGeometry = 0;
@@ -1057,6 +1292,18 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			const LodoMesh & meshRow = lib.meshes[meshId];
 			const float uMidMesh = 2.0f * meshRow.uvMin[0] + meshRow.uvExtent[0];
 
+			if ( instMode ) {
+				// lane FARDRAW1: one row a part; the colour a placement adds is the flat path's per-placement factor
+				float rgb[3] = { 1.0f, 1.0f, 1.0f };
+				if ( channel == LodlChannel::Sway || channel == LodlChannel::SelfAo ) {
+				} else if ( objectChannel ) {
+					for ( int k = 0; k < 3; k++ )
+						rgb[k] = placeChan[k];
+				} else if ( wantAo ) {
+					rgb[0] = rgb[1] = rgb[2] = placementAo;
+				}
+				placeInst( inst.baseId, base, meshId, parts, pos, m, scale, mirrorU, rgb, cellX, cellY );
+			} else
 			for ( const MeshPart & p : parts ) {
 				/* The mirror is about THIS part's own U range, as the chunk builder
 				 * has it per shape (src/lodgen.cpp, `uMid = uMin + uMax`). The
@@ -1079,46 +1326,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					: ( 0x80000000u | ( quint32( inst.baseId ) << 16 ) | quint32( p.materialId ) );
 				auto bit = buckets.find( bkey );
 				if ( bit == buckets.end() ) {
-					Bucket nb;
-					nb.baseId = inst.baseId;
-					nb.materialId = p.materialId;
-					const QString model = lib.stringAt( base.modelStringOffset );
-					if ( spec.mergeBases )
-						nb.name = spec.namePrefix + QString( "m%1 %2" ).arg( p.materialId ).arg( bkey >> 16 );
-					else
-					nb.name = spec.namePrefix + QString( "%1 %2 m%3" )
-						.arg( QString::number( base.formId, 16 ).rightJustified( 8, QChar( '0' ) ) )
-						.arg( model.isEmpty() ? QStringLiteral( "?" )
-							: QFileInfo( QString( model ).replace( QChar( '\\' ), QChar( '/' ) ) )
-								.completeBaseName() )
-						.arg( p.materialId );
-					if ( p.materialId < lib.materials.size() ) {
-						const LodoMaterial & mat = lib.materials[p.materialId];
-						nb.matString = lib.stringAt( mat.lodmStringOffset );
-						nb.hasAlpha = mat.alphaThreshold != 0;
-						nb.alphaThreshold = mat.alphaThreshold;
-						/* PICTURE-ONLY dial for the tree-card cutoff question (bungo
-						 * 2026-09-18, "what is going with those trees? They seem broken"):
-						 * WW_LODL_TREE_ALPHA=1..255 draws every TREE material that tests
-						 * alpha at that threshold instead of the file's (the chunk builder
-						 * writes 128 on every LOD material, lodgen.cpp ~2179; the tree LOD
-						 * BGSMs themselves say 80/82). The file is not touched. NOTE the
-						 * renderer takes the BGSM's own ref over this NiAlphaProperty when
-						 * the BGSM loads (src/gl/renderer.cpp ~1321, same dial there); this
-						 * one covers the no-BGSM fallback only. */
-						if ( nb.hasAlpha && ( mat.flags & LODO_MAT_TREE ) ) {
-							const int dial = wwEnvInt( "WW_LODL_TREE_ALPHA" );
-							if ( dial >= 1 && dial <= 255 )
-								nb.alphaThreshold = quint8( dial );
-						}
-						nb.twoSided = ( mat.flags & LODO_MAT_TWO_SIDED ) != 0;
-						nb.emits = ( mat.flags & LODO_MAT_EMITS ) != 0;
-						nb.emissiveScale = mat.emissiveScale;
-						nb.layer = ( mat.layer == LODO_NO_LAYER ) ? -1 : int( mat.layer );
-						nb.sway = spec.sway && ( mat.flags & LODO_MAT_TREE );
-					}
-					nb.withColour = wantAo || objectChannel || streamPerVertex;
-					bit = buckets.insert( bkey, nb );
+					bit = buckets.insert( bkey, newBucket( inst.baseId, base, p.materialId, bkey ) );
 				}
 				Bucket & bk = bit.value();
 				/* `.lodo` v5: the DRAWN mesh's colour stream, drawn in every view and
@@ -1225,6 +1433,73 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 
 	qint64 shapes = 0, verts = 0, kept = 0;
 	const bool side = spec.sideMesh && cellMeshOn();   // lane FARLOD2
+	if ( instMode ) {
+		static std::atomic<quint64> instIds { 0 };
+		QList<quint32> ikeys = instBuckets.keys();
+		std::sort( ikeys.begin(), ikeys.end() );
+		for ( quint32 key : ikeys ) {
+			InstBucket & ib = instBuckets[key];
+			CellMeshInst & d = *ib.d;
+			// by tile, then sub-mesh: each run of equal (tile, sub) is one command
+			std::stable_sort( ib.recs.begin(), ib.recs.end(), []( const InstRec & a, const InstRec & b ) {
+				return a.tile != b.tile ? a.tile < b.tile : a.sub < b.sub;
+			} );
+			d.inst.resize( qsizetype( ib.recs.size() ) * 16 );
+			Vector3 lo( 3.4e38f, 3.4e38f, 3.4e38f ), hi( -3.4e38f, -3.4e38f, -3.4e38f );
+			Vector3 tlo, thi;
+			for ( size_t i = 0; i < ib.recs.size(); i++ ) {
+				const InstRec & r = ib.recs[i];
+				std::memcpy( d.inst.data() + i * 16, r.row, sizeof( r.row ) );
+				const bool newTile = i == 0 || r.tile != ib.recs[i - 1].tile;
+				const bool newCmd = newTile || r.sub != ib.recs[i - 1].sub;
+				if ( newTile ) {
+					CellMeshInst::Tile t;
+					t.firstCmd = d.cmds.size();
+					d.tiles.append( t );
+					tlo = Vector3( 3.4e38f, 3.4e38f, 3.4e38f );
+					thi = Vector3( -3.4e38f, -3.4e38f, -3.4e38f );
+				}
+				if ( newCmd ) {
+					const InstSub & sub = ib.subs[r.sub];
+					CellMeshInst::Cmd c;
+					c.count = quint32( sub.indexCount );
+					c.firstIndex = quint32( sub.firstIndex );
+					c.baseVertex = sub.baseVertex;
+					c.baseInstance = quint32( i );
+					d.cmds.append( c );
+					d.tiles.last().cmdCount++;
+				}
+				d.cmds.last().instanceCount++;
+				for ( int k = 0; k < 3; k++ ) {
+					tlo[k] = qMin( tlo[k], r.c[k] - r.r );
+					thi[k] = qMax( thi[k], r.c[k] + r.r );
+					lo[k] = qMin( lo[k], tlo[k] );
+					hi[k] = qMax( hi[k], thi[k] );
+				}
+				d.tiles.last().centre = ( tlo + thi ) / 2.0f;
+				d.tiles.last().radius = ( ( thi - tlo ) / 2.0f ).length();
+			}
+			for ( const CellMeshInst::Cmd & c : d.cmds ) {
+				d.instances += c.instanceCount;
+				d.drawnTris += qint64( c.count / 3 ) * qint64( c.instanceCount );
+			}
+			d.alphaTested = ib.meta.hasAlpha;
+			d.id = ++instIds;
+			std::vector<InstRec>().swap( ib.recs );
+			if ( d.cmds.isEmpty() )
+				continue;
+			emitInstBucket( nif, iRoot, ib.meta, ib.d, shapeOrigin, lo, hi );
+			shapes++;
+			cnt.instancesDrawn += d.instances;
+			cnt.uniqueVerts += d.uniqueVerts;
+			cnt.uniqueTris += d.uniqueTris;
+			cnt.geoBytes += qint64( d.vbo.size() ) + qint64( d.ebo.size() ) * 2;
+			cnt.instBytes += qint64( d.inst.size() ) * 4 + qint64( d.cmds.size() ) * qint64( sizeof( CellMeshInst::Cmd ) )
+				+ qint64( d.tiles.size() ) * qint64( sizeof( CellMeshInst::Tile ) );
+		}
+		kept += cnt.geoBytes + cnt.instBytes;
+		instBuckets.clear();
+	}
 	QList<quint32> keys = buckets.keys();
 	std::sort( keys.begin(), keys.end() );
 	if ( spec.maxTris > 0 ) {	// lane FARLOD1 (FINALFIX): the budget is checked BEFORE the document grows
@@ -1466,10 +1741,12 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 	QString lodi;
 	struct Ring { int r[9]; };
 	QVector<Ring> rings;
-	bool perBase = false;
+	bool perBase = false, instanced = false;
 	for ( int i = 0; i < args.size(); i++ ) {
 		if ( args[i] == QLatin1String( "--perbase" ) ) {
 			perBase = true;
+		} else if ( args[i] == QLatin1String( "--instanced" ) ) {
+			instanced = true;   // lane FARDRAW1: the cell view's instanced rings
 		} else if ( args[i] == QLatin1String( "--ring" ) && i + 1 < args.size() ) {
 			const QStringList p = args[++i].split( QLatin1Char( ',' ) );
 			if ( p.size() != 9 ) {
@@ -1485,7 +1762,7 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 		}
 	}
 	if ( lodi.isEmpty() || rings.isEmpty() ) {
-		out << "usage: farobjcensus <ws.lodi> --ring x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot [--ring ...]\n";
+		out << "usage: farobjcensus <ws.lodi> --ring x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot [--ring ...] [--perbase|--instanced]\n";
 		return 2;
 	}
 	double p0 = 0, w0 = 0, k0 = 0;
@@ -1518,6 +1795,7 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 		os.sideMesh = true;
 		os.sway = true;
 		os.mergeBases = !perBase;
+		os.instanced = instanced;
 		double pa = 0, wa = 0, ka = 0, pb = 0, wb = 0, kb = 0;
 		farCensusMem( pa, wa, ka );
 		const int blocks0 = nif.getBlockCount();
@@ -1543,6 +1821,12 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 			.arg( pa, 0, 'f', 0 ).arg( pb, 0, 'f', 0 ).arg( pb - pa, 0, 'f', 0 )
 			.arg( c.tris > 0 ? ( pb - pa ) * 1024.0 * 1024.0 / double( c.tris ) : 0.0, 0, 'f', 0 )
 			.arg( kb, 0, 'f', 0 ).arg( t.elapsed() );
+		if ( c.instanced )
+			out << QString( "farobjcensus ring %1 instanced: %2 placements, %3 rows drawn, %4 tris drawn; unique copy %5 verts "
+				"%6 tris; geometry %7 MB + placement rows %8 MB\n" )
+				.arg( i ).arg( c.placed ).arg( c.instancesDrawn ).arg( c.tris ).arg( c.uniqueVerts ).arg( c.uniqueTris )
+				.arg( double( c.geoBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 )
+				.arg( double( c.instBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 );
 		out.flush();
 	}
 	double p1 = 0, w1 = 0, k1 = 0;

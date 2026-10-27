@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #endif
 #include "gl/cellwater.h"
 #include "gl/cellbindless.h"	// lane BINDLESS2FIX: the sway reaches the bindless twins
+#include "gl/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "model/nifmodel.h"
@@ -211,6 +212,8 @@ QString farlod1CullRegister( NifModel * nif, int firstBlock )
 		std::vector<Vector3> p;
 		QVector<Triangle> tris;
 		if ( const QSharedPointer<CellMesh> cm = cellMeshFor( nif, iB ) ) {
+			if ( cm->inst )
+				continue;   // lane FARDRAW1: instanced rings cull their own tiles (gl/cellfarinst)
 			nv = cm->verts.size();
 			p.assign( cm->verts.cbegin(), cm->verts.cend() );
 			tris = cm->triangles;
@@ -312,6 +315,7 @@ void cellFarLodForget( const void * nif )
 {
 	if ( docs().remove( nif ) )
 		ImpostorChunk::forgetCellFar();
+	CellFarGround::forget( nif );
 }
 
 QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWorld & world,
@@ -327,6 +331,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	clock.start();
 	docs().remove( nif );
 	ImpostorChunk::forgetCellFar();
+	CellFarGround::forget( nif );
 
 	// the gates' red controls: nocut | nosnap | watercut | nowater (cardsafter, nocardcull, pbrnosway act at draw)
 	const QByteArray red = wwEnv( "WW_CELL_FARLOD_RED" );
@@ -338,6 +343,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	const bool perBaseRed = red == "perbase";   // lane FAR3: the far objects' old per-base shapes and charge
 	// lane SHORE1: the far water's old texel-grid shore (red watergrid, or the switch off)
 	const bool waterGrid = red == "watergrid" || ( wwEnvIsSet( "WW_CELL_FARLOD_SHORE" ) && wwEnvInt( "WW_CELL_FARLOD_SHORE" ) == 0 );
+	const bool flatRed = red == "flat";   // lane FARDRAW1: the flattened rings and their budget refusals
 	const int h = std::max( 0, ( n - 1 ) / 2 );
 	const int bx0 = cx - h, by0 = cy - h, bx1 = cx + h, by1 = cy + h;
 	// lane CELLSTREAM1: objects and cards leave out every cell a 5x5 round any roam position can load
@@ -547,11 +553,20 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		if ( ours && terrOk ) {
 			std::vector<LodlFarRing> one( 1, r );
 			const qint64 left = maxVerts > 0 ? std::max<qint64>( 1, maxVerts - runVerts ) : 0;
+			const int blocksBefore = nif->getBlockCount();
 			if ( !nifAppendLodlFarRings( nif, iFar, lodlPath, shift, one, left, &terr ) ) {
 				terrOk = false;
 				say( QStringLiteral( "far lod: terrain REFUSED -- %1" ).arg( terr ) );
 			} else {
 				r = one[0];
+				if ( i == 0 && !stream && r.built ) {	// lane FARDRAW1: ring 0's live ground (the Far ground row)
+					QStringList fg;
+					CellFarGround::prepare( nif, world, lodlPath, blocksBefore, nif->getBlockCount(),
+						std::max( r.x0, r.ox0 ), std::max( r.y0, r.oy0 ), std::min( r.x1, r.ox1 ), std::min( r.y1, r.oy1 ),
+						r.cx0, r.cy0, r.cx1, r.cy1, &fg );
+					for ( const QString & l : fg )
+						say( l );
+				}
 				if ( r.built )
 					runVerts += r.verts;
 				if ( stream && i == 0 ) {
@@ -1046,7 +1061,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			}
 			double wsR = 0, pkR = 0;
 			memNow( wsR, pkR );
-			if ( usedMB > budgetMB ) {
+			// lane FARDRAW1: one GPU copy per base mesh + a 64-byte row a placement; every ring is built
+			const bool inst = !flatRed && !perBaseRed && cellMeshOn();
+			if ( !inst && usedMB > budgetMB ) {
 				say( QStringLiteral( "far lod: objects ring %1 NOT BUILT -- the far field's estimate %2 MB is past its "
 					"budget of %3 MB" ).arg( int( i ) ).arg( usedMB, 0, 'f', 0 ).arg( budgetMB, 0, 'f', 0 ) );
 				ringState[i] = QStringLiteral( "NOT BUILT (budget)" );
@@ -1073,6 +1090,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			os.dropTreesBeyond = treeDist;   // 0 = no cut (lane FARLOD2)
 			os.sideMesh = true;              // lane FARLOD2: arrays beside the document, not rows
 			os.mergeBases = !perBaseRed;     // lane FAR3: one shape per material
+			os.instanced = inst;
 			os.dropX = ctrX;
 			os.dropY = ctrY;
 			os.sway = swayAmp() > 0.0f;
@@ -1109,10 +1127,17 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 					.arg( oc.tris > 0 ? ( wsA - wsR ) * 1024.0 * 1024.0 / double( oc.tris ) : 0.0, 0, 'f', 0 )
 					.arg( sideMesh ? QStringLiteral( "arrays beside the document" ) : QStringLiteral( "document rows" ) )
 					.arg( QStringLiteral( "estimate %1" ).arg( kBytesPerTri, 0, 'f', 0 ) ) ) );
+			if ( oc.instanced )
+				say( QStringLiteral( "far lod: objects ring %1 instanced: %2 placements, %3 rows drawn, %4 tris drawn; "
+					"unique copy %5 verts %6 tris; geometry %7 MB + placement rows %8 MB" ).arg( int( i ) ).arg( oc.placed )
+					.arg( oc.instancesDrawn ).arg( oc.tris ).arg( oc.uniqueVerts ).arg( oc.uniqueTris )
+					.arg( double( oc.geoBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 )
+					.arg( double( oc.instBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 ) );
 			ringTris[i] = oc.tris;
 			ringPlaced[i] = oc.placed;
 			ringState[i] = QStringLiteral( "built" );
-			usedMB += double( oc.tris ) * kBytesPerTri / ( 1024.0 * 1024.0 );
+			usedMB += oc.instanced ? double( oc.geoBytes + oc.instBytes ) / ( 1024.0 * 1024.0 )
+				: double( oc.tris ) * kBytesPerTri / ( 1024.0 * 1024.0 );
 			oPlaced += oc.placed;
 			oTris += oc.tris;
 			oSway += oc.swayVerts;

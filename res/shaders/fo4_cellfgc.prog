@@ -1,0 +1,4 @@
+# fo4_cell with the far ring 0's live ground (lane FARDRAW1). No conditions: Renderer::setupProgram swaps it
+# in by name for fo4_cell.prog on ring 0's terrain shapes (src/gl/cellfarground.cpp).
+
+shaders fo4_default.vert fo4_cellfgc.frag

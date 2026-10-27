@@ -9,6 +9,8 @@ BSD License - see nifskope.h
 #include "cellunits.h"
 #include "gametaa.h"
 #include "gl/cellwater.h"	// lane SUNCELL1: water never casts
+#include "cellmesh.h"	// lane FARDRAW1: CellMeshInst
+#include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings cast
 #include "gl/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 #include "gl/cellgrass.h"	// lane FAR5: a wind cable's shadow sways with it
 #include "gl/celllooks.h"
@@ -23,6 +25,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "gl/shadowset.h"	// lane TERRSHADOW1: the unified set (presets, terrain, contact, composition)
 #include "gl/cloudshadow.h"	// lane CLOUD3
+#include "gl/cellfarground.h"	// lane FARDRAW1
 
 #include <QDir>
 #include <QFile>
@@ -759,6 +762,7 @@ void wwSunShadowPass( Scene * scene )
 	sunShadowPassImpl( scene );
 	wwShadowSetFrame( scene );	// lane TERRSHADOW1: the terrain sweep's step, whatever the Shadows row says
 	wwCloudShadowPass( scene );	// lane CLOUD3: the clouds' shadow map rows, whatever the Shadows row says
+	CellFarGround::pass( scene );	// lane FARDRAW1: the far ring 0's live ground (uploads, page stamps, frees)
 	csmEchoFrame();
 }
 
@@ -877,8 +881,8 @@ static void sunShadowPassImpl( Scene * scene )
 		// shadowed its whole bed). Red WW_CSM_RED=watercasts keeps it.
 		if ( !red( "watercasts" ) && wwCellWaterIsShape( scene->nifModel, sh->id() ) )
 			continue;
-		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
-			continue;
+		if ( !sh->wwFarInstData() && ( sh->verts.isEmpty() || sh->triangles.isEmpty() ) )
+			continue;   // lane FARDRAW1: an instanced far ring has no rows and casts through gl/cellfarinst
 		// lane VOLAIR1: red WW_CSM_RED=atnone drops the alpha-tested casters (the window gate's ceiling: glass gone)
 		if ( red( "atnone" ) && sh->wwAlphaTested() )
 			continue;
@@ -887,18 +891,18 @@ static void sunShadowPassImpl( Scene * scene )
 		// alpha test keeps, as the colour pass draws it; it cast a solid card before, and the sun never reached the
 		// air behind a window. Red WW_CSM_RED=atsolid casts them solid again.
 		c.alphaTested = !red( "atsolid" ) && sh->wwAlphaTested() && sh->wwShaderLighting()
-			&& !sh->coords.isEmpty() && sh->coords.constFirst().size() == sh->verts.size();
+			&& ( sh->wwFarInstData() || ( !sh->coords.isEmpty() && sh->coords.constFirst().size() == sh->verts.size() ) );
 		if ( cpuSkin && sh->wwGpuSkinned() ) {
 			c.skinned.resize( size_t( sh->verts.size() ) );
 			for ( qsizetype v = 0; v < sh->verts.size(); v++ )
 				c.skinned[size_t( v )] = sh->skinVertex( int( v ), sh->verts.at( v ) );
 		}
-		if ( cableSwayOn && c.skinned.empty() && cableSway( scene, sh, c.skinned ) )
+		if ( cableSwayOn && c.skinned.empty() && !sh->wwFarInstData() && cableSway( scene, sh, c.skinned ) )
 			s.swayCables++;
 		if ( cst.on )
 			c.dynamic = !ShadowCache::classify( sh, sh->wwGpuSkinned() || !c.skinned.empty(), c.twoSided, c.alphaTested,
 				c.sig );
-		s.tris += int( sh->triangles.size() );
+		s.tris += sh->wwFarInstData() ? int( sh->wwFarInstData()->drawnTris ) : int( sh->triangles.size() );
 		casters.push_back( std::move( c ) );
 	}
 	s.casters = int( casters.size() );
@@ -1168,7 +1172,7 @@ static void sunShadowPassImpl( Scene * scene )
 	if ( progQ ) {
 		for ( std::size_t n = 0; n < casters.size(); n++ ) {
 			const Caster & k = casters[n];
-			if ( !k.skinned.empty() || k.sh->wwGpuSkinned() )
+			if ( !k.skinned.empty() || k.sh->wwGpuSkinned() || k.sh->wwFarInstData() )
 				continue;
 			const bool at = progAt && k.alphaTested;
 			if ( ( at && !progAtQ ) || !GpuDriven::poolEnsure( r, k.sh, entry[n] ) || ( at && !entry[n].uv ) )
@@ -1313,8 +1317,21 @@ static void sunShadowPassImpl( Scene * scene )
 				p->uni2f( "uvOffset", bsp->uvOffset.x, bsp->uvOffset.y );
 				p->uni1f( "alpha", lsp ? lsp->alpha : 1.0f );
 				p->uni1f( "alphaThreshold", k.sh->wwAlphaThreshold() );
-				attrv[7] = &( k.sh->coords.constFirst().constFirst()[0] );
+				if ( !k.sh->wwFarInstData() )
+					attrv[7] = &( k.sh->coords.constFirst().constFirst()[0] );
 				mask = 0x20000003ULL;
+			}
+			if ( k.sh->wwFarInstData() ) {
+				// lane FARDRAW1: the ring's tiles inside this cascade, one indirect call (gl/cellfarinst.h)
+				const Matrix4 mv = k.sh->viewTrans().toMatrix4();
+				const float * a = c.clipFromView, * b = mv.data();
+				float m[16];
+				for ( int col = 0; col < 4; col++ )
+					for ( int row = 0; row < 4; row++ )
+						m[col * 4 + row] = a[row] * b[col * 4] + a[4 + row] * b[col * 4 + 1] + a[8 + row] * b[col * 4 + 2]
+							+ a[12 + row] * b[col * 4 + 3];
+				CellFarInst::drawCascade( r, *k.sh->wwFarInstData(), p, m );
+				continue;
 			}
 			const float * const * attrs = attrv;
 			if ( runs ) {

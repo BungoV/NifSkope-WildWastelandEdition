@@ -50,11 +50,18 @@ constexpr int CloudShadow = 46;	// lane CLOUD3: the clouds' Beer shadow map, rea
 constexpr int CloudBuildShape = 47;	// lane CLOUD3: the shadow map's build reads the volume's noise and the cloud map (47-49)
 constexpr int CloudBuildDetail = 48;
 constexpr int CloudBuildMap = 49;
+constexpr int FarGroundGrid = 50;	// lane FARDRAW1: ring 0's live ground (cellfarground.cpp): the .lodl grid (usampler2D)
+constexpr int FarGroundLtex = 51;	// the LTEX layers (sampler2DArray)
+constexpr int FarGroundDecal = 52;	// the decal records, bins and lists (samplerBuffer)
+constexpr int FarGroundAtlas = 53;	// the decal pieces' colour (sampler2D)
+constexpr int FarGroundPages = 54;	// the cached option's pages (sampler2DArray)
+constexpr int FarGroundHeight = 55;	// the stamp's heights (sampler2D)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
 	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans, ContactGbuf, GiAir, CardDepth,
-	CloudShadow, CloudBuildShape, CloudBuildDetail, CloudBuildMap };
+	CloudShadow, CloudBuildShape, CloudBuildDetail, CloudBuildMap, FarGroundGrid, FarGroundLtex, FarGroundDecal, FarGroundAtlas,
+	FarGroundPages, FarGroundHeight };
 
 constexpr bool distinct()
 {

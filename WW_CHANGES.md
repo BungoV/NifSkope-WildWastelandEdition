@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FARDRAW1 (2026-10-26, branch fardraw1-20261026): the whole FO4CS far-LOD bake drawn, ring 0's ground live
+
+- **Every ring, every instance:** far object rings keep one GPU copy per base mesh plus a 64-byte row a placement,
+  drawn by multi-draw-indirect after a CPU tile cull (src/gl/cellfarinst). No ring refuses on the memory budget any
+  more. Concord, 10-24 bake: object rings 652.8 MB flattened vs 23.7 MB instanced; private memory +721 -> +77 MB,
+  peak 750 -> 169 MB. Census `WW_CELL_FARINST_CENSUS=1`. Red `WW_CELL_FARLOD_RED=flat` (live) = the old flattened rings.
+- **Far ground (Show > Far ground):** Baked (today, the default) | Live, shader decals | Live, cached pages; and
+  Far ground pages (Low/Medium/High/Ultra, the cached pages' sharpness). Live = ring 0's terrain drawn from the .lodl
+  grid's four LTEX layers and weights per pixel, plus the .lodd/.lodg decals, either looked up per pixel in the shader
+  or stamped once into a page per cell. Pins `WW_CELL_FARGROUND`, `WW_CELL_FARGROUND_QUALITY`; red
+  `WW_CELL_FARGROUND_RED=nodecals|baked`. Notes line `far ground: ... VRAM ... MB`. Programs fo4_cellfgl/fgc and
+  fo4_cellcsmfgl/fgc (twins of fo4_cell/fo4_cellcsm: the default programs are unchanged).
+- Not yet: far shapes are not pickable, cast no far shadow, are not in probes, lamp shadows, TAA object velocity or
+  gpucull; the live ground keeps the baked sheet's normals and has no .loda AO; PBR mode and streamed rings keep the sheet.
+- GPU ms per ring and the decal pick (lookup if < +0.2 ms over cached) come from notes/fardraw1/hold (after MERGE1026).
+
 ## Lane GLOWHAZE1 (2026-10-27, branch glowhaze1-20261027): disabled Sanctuary mists, soft fade at the water (vanilla rules, no menu rows)
 
 - **Enable parents outside the loaded block:** the cell view took a ref's enable-parent state only from persistent refs
