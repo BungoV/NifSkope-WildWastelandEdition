@@ -147,6 +147,8 @@ struct WwSkyGmst
 	float masserFadeStart = 5.0f, masserFadeEnd = 10.0f;
 	QStringList fromEsm;	// the EditorIDs a loaded plugin set
 	float dirFogPower = 8.0f;	// fDirectionalFogPower (lane FOG1; ESM and exe agree on 8)
+	// lane WEATHERBLEND1: the weather change length, exe defaults (Fallout4.esm sets Max 3 and Accel 16)
+	float transMax = 1.0f, transMin = 0.01f, transAccel = 4.0f;	// fWeatherTrans{Max,Min,Accel}
 	// lane SKYFULL1: the stars' turn, exe defaults (angle = 2 pi fmod(days, rotDays) / rotDays about the axis)
 	float starsRotDays = 4.0f;	// fStarsRotateDays
 	float starsAxis[3] = { 0.0f, 0.0f, 1.0f };	// fStarsRotate{X,Y,Z}Axis
@@ -183,6 +185,8 @@ void wwRgbToLab( const float rgb[3], float lab[3] );
 void wwLabToRgb( const float lab[3], float rgb[3] );
 //! the engine's color blend: two keys blended in CIELab; bytes in, 0..1 out
 void wwLabBlend( const unsigned char a[3], const unsigned char b[3], float t, float rgb[3] );
+//! lane WEATHERBLEND1: the same blend over four colours by weight (a weather change: two weathers x two keys)
+void wwLabBlend4( const unsigned char * const c[4], const float wt[4], float rgb[3] );
 
 //! the climate the engine clock reads: TNAM 6 bytes (TNAM[5] = moons / phase length), FNAM, GNAM
 struct WwClimateData
@@ -272,6 +276,7 @@ struct WwWeatherData
 
 	// lane PBRWX1: the sky, sun glare and cloud fields
 	quint8 sunGlare = 0;	// DATA byte 4 (/255 = the glare strength)
+	quint8 transDelta = 0;	// lane WEATHERBLEND1: DATA byte 3, Trans Delta (the change length, wwWeatherTransHours)
 	// lane LIGHTS4: GNAM, the Sun Glare Lens Flare (a LENS; wbDefinitionsFO4 WTHR), read with the weather
 	quint32 sunLensForm = 0;
 	WwLens sunLens;
@@ -314,7 +319,22 @@ struct WwWeatherData
 	quint32 wgdr[8] = {};
 	WwGodRayMedium godRay[8];
 	int godRayFound = 0;	// slots whose link resolved to a GDRY
+
+	/* lane WEATHERBLEND1: a weather change in progress: the weather the sky is leaving and this weather's share (the
+	 * game's linear transition pct). The blends below read both while blending() */
+	std::shared_ptr<const WwWeatherData> last;
+	float transPct = 1.0f;
+	bool blending() const { return last && transPct < 1.0f; }
 };
+
+//! lane WEATHERBLEND1: the game's weather change length in game hours, Trans Delta / 255 x (Max - Min) + Min
+double wwWeatherTransHours( quint8 transDelta, const WwSkyGmst & g );
+//! the new weather's share after `gameHours` of the change, 0..1 (linear, no ease, as the game's)
+float wwWeatherTransPct( double gameHours, quint8 transDelta, const WwSkyGmst & g );
+//! wall seconds -> game hours at the game's default timescale (20)
+double wwWeatherTransGameHours( double seconds );
+//! the four colour weights: current keys a, b x pct, then the leaving weather's keys a, b x (1 - pct)
+void wwWeatherTransWeights( const WwTodKeys & k, float pct, float wt[4] );
 
 /*! The engine fog at one hour (lane FOG1, spec_fog.md 2.1-2.3): the FNAM floats
  *  blended day <-> night on the engine's fog day weight, the four NAM0 fog colours

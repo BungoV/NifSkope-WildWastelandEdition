@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WEATHERBLEND1 (2026-10-27, branch weatherblend1-20261027): weather changes blend like the game
+
+- **Why:** a new lookdev weather snapped in at once. The game keeps the weather it leaves and blends old to new over
+  the new weather's Trans Delta (WTHR DATA byte 3): Delta/255 x (fWeatherTransMax - Min) + Min game hours, linear.
+  Fallout4.esm sets Max 3, so Delta 255 is 3 game hours = 9 real minutes at timescale 20.
+- **Blend:** `WwWeatherData` keeps the weather it changes from (`last`) and the change's `transPct`. The colour rows
+  (NAM0, Lab), DALC, the NAM4 fog scales, the sky scale and the cloud colours/alphas blend on four weights (the two
+  time-of-day keys of each weather times pct); the fog distances, wind, god rays, sun glare, DOF and the imagespace
+  values blend on pct; the clouds draw both weathers' layers (old at 1-pct, new at pct). One shared blend in
+  `src/esmweather.cpp` that every reader goes through; with no change running every path is the old code.
+- **Clock:** a live window runs the wall clock (one step per 15 ms or more, the view asks for frames while a change
+  runs); a harness snaps unless `WW_WEATHER_BLEND_TIME=<seconds since the change>` pins it.
+- **Red:** `WW_WEATHER_BLEND_RED=snap` (live): the new weather snaps in, as before.
+- **Not like the game yet:** the imagespace LUTs swap at half way (the game blends up to 4); a pick made during a
+  change restarts from the weather it was changing to (the game defers it); fWeatherTransAccel is not used.
+- **Test:** `bash tests/weatherblend/run.sh <out>` (green PASS 22 of 22; red against 0db18b4b FAIL 12 of 22).
+
 ## Lane FOGTERRAIN1 (2026-10-27, branch fogterrain1-20261027): the ground fog layer follows the terrain
 
 - **Why:** the ground fog layer (groundFog .recx, or FOGHEIGHT1's derived layer) was anchored at one absolute height,

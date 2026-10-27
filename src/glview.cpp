@@ -22405,6 +22405,8 @@ void GLView::advanceGears()
 		update();	// lane LIGHTFLICKER1: a flickering lamp needs a frame every tick
 	if ( wwCellWorldAnimWantsFrames( scene ) )
 		update();	// lane FXPARITY2: the world clock moves the cell
+	if ( wwLookdevWeatherChanging() )
+		update();	// lane WEATHERBLEND1: a weather change blends a little every frame
 	if ( CellFarGround::wantsFrames( scene ) )
 		update();	// lane FARPAGES1: far ground pages still painting or fading in
 

@@ -394,6 +394,27 @@ void wwLabBlend( const unsigned char a[3], const unsigned char b[3], float t, fl
 	wwLabToRgb( l, rgb );
 }
 
+void wwLabBlend4( const unsigned char * const c[4], const float wt[4], float rgb[3] )
+{
+	if ( wwLookdevRed( "rgbblend" ) ) {
+		for ( int k = 0; k < 3; k++ )
+			rgb[k] = ( float( c[0][k] ) * wt[0] + float( c[1][k] ) * wt[1] + float( c[2][k] ) * wt[2] + float( c[3][k] ) * wt[3] ) / 255.0f;
+		return;
+	}
+	float l[3] = { 0.0f, 0.0f, 0.0f };
+	for ( int i = 0; i < 4; i++ ) {
+		if ( wt[i] == 0.0f )
+			continue;
+		float v[3], lab[3];
+		for ( int k = 0; k < 3; k++ )
+			v[k] = float( c[i][k] ) / 255.0f;
+		wwRgbToLab( v, lab );
+		for ( int k = 0; k < 3; k++ )
+			l[k] += lab[k] * wt[i];
+	}
+	wwLabToRgb( l, rgb );
+}
+
 EsmWeather::EsmWeather() = default;
 EsmWeather::~EsmWeather() = default;
 
@@ -774,6 +795,7 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 				dalcs << bytes();
 			else if ( f == "DATA" && f.size() >= 5 ) {
 				out.sunGlare = quint8( f.data()[4] );
+				out.transDelta = quint8( f.data()[3] );
 				if ( f.size() >= 20 ) {	// lane GRASSMB1: the wind (the game's sky wind update reads these four)
 					out.windSpeed = quint8( f.data()[0] );
 					out.windDir = quint8( f.data()[17] );
@@ -1179,6 +1201,8 @@ WwSkyGmst EsmWeather::gmst()
 		{ "fDirectionalFogPower", &g.dirFogPower, false },
 		{ "fStarsRotateDays", &g.starsRotDays, false }, { "fStarsRotateXAxis", &g.starsAxis[0], false },	// lane SKYFULL1
 		{ "fStarsRotateYAxis", &g.starsAxis[1], false }, { "fStarsRotateZAxis", &g.starsAxis[2], false },
+		{ "fWeatherTransMax", &g.transMax, false }, { "fWeatherTransMin", &g.transMin, false },	// lane WEATHERBLEND1
+		{ "fWeatherTransAccel", &g.transAccel, false },
 	};
 	const ESMFile::ESMRecord * r0 = esm->findRecord( 0U );
 	if ( !r0 )
@@ -1261,21 +1285,82 @@ bool EsmWeather::climate( quint32 formID, unsigned char tnam[4], QString * edid,
 	return got;
 }
 
+/* lane WEATHERBLEND1: the weather change (notes/weatherblend1/RESULTS.md). While blending(), every colour is the sum
+ * of four by wwWeatherTransWeights: this weather's two keys x pct, the leaving weather's two keys x (1 - pct) */
+double wwWeatherTransHours( quint8 transDelta, const WwSkyGmst & g )
+{
+	return double( transDelta ) / 255.0 * double( g.transMax - g.transMin ) + double( g.transMin );
+}
+
+float wwWeatherTransPct( double gameHours, quint8 transDelta, const WwSkyGmst & g )
+{
+	const double len = wwWeatherTransHours( transDelta, g );
+	if ( !( len > 0.0 ) )
+		return 1.0f;
+	return float( std::clamp( gameHours / len, 0.0, 1.0 ) );
+}
+
+double wwWeatherTransGameHours( double seconds )
+{
+	return seconds * 20.0 / 3600.0;
+}
+
+void wwWeatherTransWeights( const WwTodKeys & k, float pct, float wt[4] )
+{
+	wt[0] = ( 1.0f - k.t ) * pct;
+	wt[1] = k.t * pct;
+	wt[2] = ( 1.0f - k.t ) * ( 1.0f - pct );
+	wt[3] = k.t * ( 1.0f - pct );
+}
+
+namespace
+{
+//! the four-weight linear sum of a byte colour (rows, DALC): this weather's keys, then the leaving one's
+void transSum( const unsigned char * const c[4], const float wt[4], float rgb[3] )
+{
+	for ( int k = 0; k < 3; k++ )
+		rgb[k] = float( c[0][k] ) * wt[0] + float( c[1][k] ) * wt[1] + float( c[2][k] ) * wt[2] + float( c[3][k] ) * wt[3];
+}
+}	// namespace
+
 void EsmWeather::blendRow( const WwWeatherData & w, int row, const WwTodKeys & k, float rgb[3] )
 {
+	if ( w.blending() ) {
+		float wt[4];
+		wwWeatherTransWeights( k, w.transPct, wt );
+		const unsigned char * const c[4] = { w.color[k.a][row], w.color[k.b][row], w.last->color[k.a][row], w.last->color[k.b][row] };
+		transSum( c, wt, rgb );
+		return;
+	}
 	for ( int c = 0; c < 3; c++ )
 		rgb[c] = float( w.color[k.a][row][c] ) * ( 1.0f - k.t ) + float( w.color[k.b][row][c] ) * k.t;
 }
 
 void EsmWeather::blendDalc( const WwWeatherData & w, int axis, const WwTodKeys & k, float rgb[3] )
 {
+	if ( w.blending() ) {
+		// a leaving weather without DALC lights flat by its NAM0 Ambient (the viewer's fallback)
+		const WwWeatherData & o = *w.last;
+		float wt[4];
+		wwWeatherTransWeights( k, w.transPct, wt );
+		const unsigned char * const c[4] = { w.dalc[k.a][axis], w.dalc[k.b][axis],
+			o.hasDalc ? o.dalc[k.a][axis] : o.color[k.a][WwRowAmbient], o.hasDalc ? o.dalc[k.b][axis] : o.color[k.b][WwRowAmbient] };
+		transSum( c, wt, rgb );
+		return;
+	}
 	for ( int c = 0; c < 3; c++ )
 		rgb[c] = float( w.dalc[k.a][axis][c] ) * ( 1.0f - k.t ) + float( w.dalc[k.b][axis][c] ) * k.t;
 }
 
 void EsmWeather::blendRowLab( const WwWeatherData & w, int row, const WwTodKeys & k, float rgb[3] )
 {
-	wwLabBlend( w.color[k.a][row], w.color[k.b][row], k.t, rgb );
+	if ( w.blending() ) {
+		float wt[4];
+		wwWeatherTransWeights( k, w.transPct, wt );
+		const unsigned char * const c[4] = { w.color[k.a][row], w.color[k.b][row], w.last->color[k.a][row], w.last->color[k.b][row] };
+		wwLabBlend4( c, wt, rgb );
+	} else
+		wwLabBlend( w.color[k.a][row], w.color[k.b][row], k.t, rgb );
 	for ( int c = 0; c < 3; c++ )
 		rgb[c] *= 255.0f;
 }
@@ -1283,6 +1368,26 @@ void EsmWeather::blendRowLab( const WwWeatherData & w, int row, const WwTodKeys 
 void EsmWeather::blendCloud( const WwWeatherData & w, int layer, const WwTodKeys & k, float rgb[3], float * alpha )
 {
 	const int l = ( layer < 0 || quint32( layer ) >= w.cloudLayers || layer >= 32 ) ? 0 : layer;
+	if ( w.blending() ) {
+		// the game's: a layer colour of zero in one weather takes the other weather's; the alpha is a linear sum
+		const WwWeatherData & o = *w.last;
+		const int m = ( layer < 0 || quint32( layer ) >= o.cloudLayers || layer >= 32 ) ? 0 : layer;
+		float wt[4];
+		wwWeatherTransWeights( k, w.transPct, wt );
+		auto zero = []( const unsigned char * p ) { return !p[0] && !p[1] && !p[2]; };
+		const unsigned char * ca = w.cloudColor[k.a][l], * cb = w.cloudColor[k.b][l];
+		const unsigned char * oa = o.cloudColor[k.a][m], * ob = o.cloudColor[k.b][m];
+		const unsigned char * const c[4] = { zero( ca ) ? oa : ca, zero( cb ) ? ob : cb, zero( oa ) ? ca : oa, zero( ob ) ? cb : ob };
+		wwLabBlend4( c, wt, rgb );
+		for ( int i = 0; i < 3; i++ )
+			rgb[i] *= 255.0f;
+		if ( alpha ) {
+			*alpha = w.cloudAlpha[k.a][l] * wt[0] + w.cloudAlpha[k.b][l] * wt[1] + o.cloudAlpha[k.a][m] * wt[2] + o.cloudAlpha[k.b][m] * wt[3];
+			if ( wwLookdevRed( "cloudalphaone" ) )
+				*alpha = 1.0f;
+		}
+		return;
+	}
 	wwLabBlend( w.cloudColor[k.a][l], w.cloudColor[k.b][l], k.t, rgb );
 	for ( int c = 0; c < 3; c++ )
 		rgb[c] *= 255.0f;
@@ -1295,6 +1400,11 @@ void EsmWeather::blendCloud( const WwWeatherData & w, int layer, const WwTodKeys
 
 float EsmWeather::blendSkyScale( const WwWeatherData & w, const WwTodKeys & k )
 {
+	if ( w.blending() ) {
+		float wt[4];
+		wwWeatherTransWeights( k, w.transPct, wt );
+		return w.skyScale[k.a] * wt[0] + w.skyScale[k.b] * wt[1] + w.last->skyScale[k.a] * wt[2] + w.last->skyScale[k.b] * wt[3];
+	}
 	return w.skyScale[k.a] * ( 1.0f - k.t ) + w.skyScale[k.b] * k.t;
 }
 
@@ -1344,6 +1454,21 @@ WwFog wwFogAt( const WwWeatherData & w, double hour, const unsigned char tnam[4]
 	o.hds = mix( F[12], F[13] );
 	o.fMid = mix( F[14], F[16] );
 	o.fRange = mix( F[15], F[17] );
+	if ( w.blending() ) {
+		// lane WEATHERBLEND1: each weather's scalars on the day weight, then this one x pct + the leaving one x (1 - pct)
+		const float * L = w.last->fog;
+		const float p = w.transPct;
+		auto tr = [&]( float & v, int d, int n ) { v = v * p + mix( L[d], L[n] ) * ( 1.0f - p ); };
+		tr( o.fogNear, 0, 2 );
+		tr( o.fogFar, 1, 3 );
+		tr( o.power, 4, 5 );
+		tr( o.maxv, 6, 7 );
+		tr( o.nMid, 8, 10 );
+		tr( o.nRange, 9, 11 );
+		tr( o.hds, 12, 13 );
+		tr( o.fMid, 14, 16 );
+		tr( o.fRange, 15, 17 );
+	}
 	if ( wwLookdevRed( "fogpower1" ) )
 		o.power = 1.0f;
 	if ( wwLookdevRed( "fognear0" ) )
@@ -1354,10 +1479,22 @@ WwFog wwFogAt( const WwWeatherData & w, double hour, const unsigned char tnam[4]
 	const int rows[4] = { WwRowFogNear, WwRowFogFar, WwRowFogNearHigh, WwRowFogFarHigh };
 	float * dst[4] = { o.nearLow, o.farLow, o.nearHigh, o.farHigh };
 	const bool noNam4 = wwLookdevRed( "fognonam4" ), noGamma = wwLookdevRed( "fognogamma" );
+	float wt[4] = {};
+	if ( w.blending() )
+		wwWeatherTransWeights( o.keys, w.transPct, wt );
 	for ( int k = 0; k < 4; k++ ) {
 		float rgb[3];
-		wwLabBlend( w.color[o.keys.a][rows[k]], w.color[o.keys.b][rows[k]], o.keys.t, rgb );
-		o.scale[k] = noNam4 ? 1.0f : w.fogScale[k][o.keys.a] * ( 1.0f - o.keys.t ) + w.fogScale[k][o.keys.b] * o.keys.t;
+		if ( w.blending() ) {	// lane WEATHERBLEND1: the four-weight colour and NAM4 scale
+			const WwWeatherData & L = *w.last;
+			const int a = o.keys.a, b = o.keys.b;
+			const unsigned char * const c[4] = { w.color[a][rows[k]], w.color[b][rows[k]], L.color[a][rows[k]], L.color[b][rows[k]] };
+			wwLabBlend4( c, wt, rgb );
+			o.scale[k] = noNam4 ? 1.0f
+				: w.fogScale[k][a] * wt[0] + w.fogScale[k][b] * wt[1] + L.fogScale[k][a] * wt[2] + L.fogScale[k][b] * wt[3];
+		} else {
+			wwLabBlend( w.color[o.keys.a][rows[k]], w.color[o.keys.b][rows[k]], o.keys.t, rgb );
+			o.scale[k] = noNam4 ? 1.0f : w.fogScale[k][o.keys.a] * ( 1.0f - o.keys.t ) + w.fogScale[k][o.keys.b] * o.keys.t;
+		}
 		for ( int c = 0; c < 3; c++ ) {
 			const float v = std::max( 0.0f, rgb[c] * o.scale[k] );
 			dst[k][c] = noGamma ? v : std::pow( v, 2.2f );
