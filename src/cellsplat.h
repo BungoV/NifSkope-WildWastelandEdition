@@ -147,6 +147,7 @@ struct CellSplatBucket
 	quint32 ltex = 0;               //!< the LTEX form; 0 = no texture resolved
 	QString diffuse;                //!< TX00, or the MNAM material when material-backed
 	QString normal;                 //!< TX01
+	QString spec;                   //!< TX07, the _s smoothness/spec map the game's Landscape shader reads (DUNESAND1)
 	int order = 0;                  //!< the ATXT layer index; -1 = an opaque base pass
 	bool blend = false;             //!< false = opaque base, true = alpha-over
 	int quads = 0;
@@ -179,6 +180,7 @@ struct CellSplatBuild
 	int layersRead = 0;
 	int ltexUnresolved = 0;
 	int layersInRecordOrder = 0;    //!< layers composited WITHOUT a known paint order
+	int bucketsSpec = 0;            //!< buckets that carry their LTEX's TX07 map (DUNESAND1)
 	QStringList notes;
 };
 
@@ -204,6 +206,9 @@ void wwCellLandForget( const void * nif, int block );
 //! lane LIVESET3: the document's blocks were renumbered (a live set removed or moved some)
 void wwCellLandRemap( const void * nif, const WwBlockMap & m );
 bool wwCellLandIs( const void * nif, int block );
+
+//! lane DUNESAND1: WW_TERRBLEND_RED=nospec drops the ground's TX07 map (the old smoothness 1, mask 1 ground)
+bool cellSplatSpecRed();
 
 //! The one-line summary for the scene notes, in the shape cellGroundLegend uses.
 QString cellSplatLegend( const CellSplatBuild & b );

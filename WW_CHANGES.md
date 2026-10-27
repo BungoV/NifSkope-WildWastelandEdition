@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane DUNESAND1 (2026-10-27, branch dunesand1-20261027): the ground takes its texture set's _s map
+
+- **Why:** CoastDune02's sand drew darker than the ground beside it (0.166 vs 0.234 linear near the dune, ratio 0.71),
+  with the SAME diffuse (CoastSandDry01_d, linear albedo 0.099 dune vs 0.100 ground, white vertex colours on both).
+  The game's Landscape pixel shader samples each layer's TX07 smoothness/spec map; the viewer's blended ground bound only
+  TX00/TX01, so it drew at smoothness 1 and spec mask 1 (Lambert instead of the game's Oren-Nayar, no rim, the full
+  ambient Fresnel and SSR terms). The dune's BGSM names the same CoastSandDry01_s (gloss 0.13, mask 0.08): the dune was
+  right and the ground too bright.
+- **Fix:** `src/cellsplat.cpp` puts each LTEX's TX07 on its bucket (a material-backed set's .bgsm names its own);
+  `src/cellview.cpp` binds it in slot 7. The legend says `N of M passes carry their TX07 _s map`.
+- **Red:** `WW_TERRBLEND_RED=nospec` (the old ground; read at the cell build like the switch's other values).
+- **Offline gate:** `nifskope-cli -no-gui cellrefs "<plugins>|<world>|x,y|n" --ground` prints every ground pass with its
+  diffuse, normal and spec map; an independent ESM reader checks each pass's spec against its LTEX's TX07.
+- **Not changed:** the hard-edged mosaic fallback (past the splat's vertex cap) still binds no spec map.
+
 ## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
 
 - **Why:** the far objects, far cards and far rings past ring 0 were cut once, round the open's centre. The stream

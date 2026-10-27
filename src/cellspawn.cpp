@@ -5,6 +5,8 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellspawn.h"
+#include "cellground.h"
+#include "cellsplat.h"
 
 #include "cellview.h"
 #include "esmdata.h"
@@ -341,6 +343,7 @@ int cellSpawnCli( const QStringList & args )
 int cellRefsCli( const QStringList & args )
 {
 	const QString arg = args.isEmpty() ? QString() : args.first();
+	const bool groundPasses = args.contains( QLatin1String( "--ground" ) );	// lane DUNESAND1: the splat's passes
 	CellSceneSpec spec;
 	QString err;
 	const bool file = arg.endsWith( QLatin1String( ".wwcell" ), Qt::CaseInsensitive );
@@ -392,5 +395,18 @@ int cellRefsCli( const QStringList & args )
 		placed++;
 	}
 	std::printf( "cellrefs: cells %d of %d, ground %d, refs %d\n", cells, ( x1 - x0 + 1 ) * ( y1 - y0 + 1 ), ground, placed );
+	if ( groundPasses ) {
+		// lane DUNESAND1: each blended-ground pass with the textures an open binds (diffuse, normal, the TX07 _s map)
+		CellSplatBuild sb;
+		QString serr;
+		if ( !cellBuildSplat( world, x0, y0, x1, y1, 0.0f, 0.0f, CELL_GROUND_TILING, sb, &serr ) ) {
+			std::printf( "cellrefs: ground passes FAIL (%s)\n", qPrintable( serr ) );
+			return 1;
+		}
+		for ( const CellSplatBucket & b : sb.buckets )
+			std::printf( "cellrefs: pass ltex %08X %s | %s | spec %s\n", b.ltex, qPrintable( b.diffuse ),
+				qPrintable( b.normal ), b.spec.isEmpty() ? "-" : qPrintable( b.spec ) );
+		std::printf( "cellrefs: ground passes %d, with spec %d\n", int( sb.buckets.size() ), sb.bucketsSpec );
+	}
 	return placed > 0 ? 0 : 1;
 }
