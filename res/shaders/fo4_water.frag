@@ -81,6 +81,10 @@ out vec4 fragColor;
 #ifdef WW_WATER_CLEAR	// lane WATERLOOK1 step 8 (WATERCOLOR1): the water's own colour by body class (after water_depth)
 #include "water_clear.glsl"
 #endif
+// lane WATERLOOK1 step 10 (WATERSKYVIS1): the sky reflection and the sun's glare where their sky is seen (after cell_lights)
+#ifdef WW_WATER_SKYVIS
+#include "water_skyvis.glsl"
+#endif
 #ifdef WW_WATER_CAUSTICS	// lane WATERCAUSTICS1: the sun's cascades at the bed, then the caustic law
 #include "ww_sunshadow.glsl"
 #include "water_caustics.glsl"
@@ -361,6 +365,15 @@ void main()
 	vec3 reflSky = waterReflOn ? wwWaterCloudSky( sky, P, R ) : sky;	// lane WATERREFL1: before the game's SSR blend
 	vec4 reflRaw = vec4( 0.0 ), reflFin = vec4( 0.0 );
 #endif
+#ifdef WW_WATER_SKYVIS	// lane WATERLOOK1 step 10: the sky seen on the reflection's direction (the SSR over it is not dimmed)
+#ifdef WW_WATER_REFL
+	float skyVis = under ? 1.0 : wwWaterSkyVis( P, Ns, R, sqrt( max( reflA2, 0.0 ) ) );
+	reflSky *= skyVis;
+#else
+	float skyVis = under ? 1.0 : wwWaterSkyVis( P, Ns, R, 0.0 );
+#endif
+	sky *= skyVis;
+#endif
 	// lane WATER2: the game's screen-space reflection over the sky (02102 lines 146-152)
 	vec4 ssr = vec4( 0.0 );
 	if ( waterSsrOn && !under ) {
@@ -479,6 +492,10 @@ void main()
 	float reflAlpha = sqrt( max( reflA2, 0.0 ) );
 	float reflF = wwWaterFresnel( dot( -V, Ns ), reflAlpha, waterGlintK.y );
 	vec3 reflEnv = wwWaterReflEnv( reflSky, reflRaw, reflFin, waterSsrOn && !under && ( waterRed & 256 ) == 0, reflAlpha );
+#endif
+#ifdef WW_WATER_SKYVIS
+	if ( !under )
+		spec *= wwWaterSkyVisSun( P, Ns, Ldir );	// lane WATERLOOK1 step 10: the glare where the sun's sky is seen
 #endif
 	if ( ( waterRed & 8 ) != 0 )
 		spec = vec3( 0.0 );

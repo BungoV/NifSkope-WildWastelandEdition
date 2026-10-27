@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 10 (2026-10-27, branch waterlook1-20261027): water under a bridge is darker (WATERSKYVIS1)
+
+- New row **Water sky visibility** (WW_CELL_WATER_SKYVIS). Water reflects the sky only where it can see the sky.
+  Under a bridge, a pier or an overhang, the sky in the reflection is dimmed by how much of the sky the baked probe
+  sky grid sees in the reflected direction. Calm water reads straight along the reflection; rough water reads closer
+  to straight up. The sun's glare is dimmed by the sky seen toward the sun. Screen-space reflections of the scene
+  are not dimmed.
+- It uses the same probe sky grid that the surfaces' specular occlusion reads. The row loads that grid on its own,
+  so the surfaces' row can stay off. Nothing changes indoors, under water, without a probe bake, or at the grid's
+  edge (the read fades out there). New res/shaders/water_skyvis.glsl.
+- Reds on WW_CELL_WATER_SKYVIS_RED: `one` (visibility 1: today's look), `nosun` (the glare not dimmed).
+  fo4_water.prog (rows off) keeps its machine code.
+- Offline (no window, the real shader, a bridge in a made-up probe grid):
+  - Under the deck the sky reflection reads 4% looking straight down, 39% at 60 degrees across the bridge, and 65%
+    at 60 degrees along it. Open water reads 100% at every angle. Every value matches the model.
+  - The read is exactly the surfaces' specular occlusion read at 4096 random points.
+  - The glare under the deck with the sun high: 11%. The edge fade matches. Every off case gives 1.
+  - About 0.05 ms a 1080p pass. All programs link.
+- Far water: the lodgen far bake has no sky visibility byte for water yet. Past the probe grid the water reads 1.
+
 ## Lane WATERLOOK1 step 9 (2026-10-27, branch waterlook1-20261027): the sun glitters on near water (WATERGLINT1)
 
 - **Water sun glare** row. The glare is still the smooth average over everything one pixel covers, but it is now

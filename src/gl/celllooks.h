@@ -56,6 +56,7 @@ enum class WwLook : int
 	WaterOcean,			// WATERLOOK1: the wind's wave spectrum (FFT) replaces the baked bodies' normal maps (WW_CELL_WATER_OCEAN)
 	Underwater,			// WATERUNDER1: the camera under a water surface sees the WATR's underwater fog (WW_CELL_UNDERWATER)
 	WaterClear,			// WATERLOOK1 step 8: the water's own colour by body class, not the WATR ramp (WW_CELL_WATER_CLEAR)
+	WaterSkyVis,			// WATERLOOK1 step 10: the water's sky reflection and glare where their sky is seen (WW_CELL_WATER_SKYVIS)
 	Count
 };
 

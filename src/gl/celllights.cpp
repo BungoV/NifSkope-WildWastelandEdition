@@ -1623,7 +1623,8 @@ void wwCellLightsUniforms( Scene * scene )
 		g.skyVersion = s.giVersion.value( scene->nifModel );
 	}
 	// lane SPECOCC1: with the sky specular occlusion on, the GI texture carries the sky grid's slot 0 after its own slabs
-	const bool specSky = G && wwCellSpecOccMode() > 0 && G->skyLit && G->sky.size() == G->rgba.size();
+	// lane WATERLOOK1 step 10: the Water sky visibility row reads the same slot
+	const bool specSky = G && ( wwCellSpecOccMode() > 0 || wwLookOn( WwLook::WaterSkyVis ) ) && G->skyLit && G->sky.size() == G->rgba.size();
 	if ( G && pass != 2 && !G->rgba.empty()
 		&& ( g.giDoc != scene->nifModel || g.giVersion != s.giVersion.value( scene->nifModel ) || g.giSpecSky != specSky ) ) {
 		if ( !g.giTex )
@@ -1839,8 +1840,7 @@ void wwCellLightsUniforms( Scene * scene )
 	// lane SPECOCC1: the sky grid's slabs start after the GI's own (6, or 12 with the rooms' second slot)
 	const bool specOccDraw = giDraw && !skyDraw && G->skyLit && g.giSpecSky;
 	prog->uni1i( "cellSpecOcc", specOccDraw ? wwCellSpecOccMode() : 0 );
-	if ( specOccDraw )
-		prog->uni1f( "cellSpecSkyBase", G->slotRooms.empty() ? 6.0f : 12.0f );
+	prog->uni1f( "cellSpecSkyBase", specOccDraw ? ( G->slotRooms.empty() ? 6.0f : 12.0f ) : 0.0f );	// 0: no sky slot (the water reads it)
 	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
 	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
 	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1

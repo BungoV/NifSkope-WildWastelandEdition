@@ -77,6 +77,11 @@ bool wwCellWaterSsrWanted( Scene * scene );
  *  WW_CELL_WATER_CLEAR): the water's own absorption and lit in-scatter by body class in place of the WATR's depth ramp
  *  and silt (res/shaders/water_clear.glsl): the clear sea turquoise over sand at 1-3 m, blue past about 10 m; lakes
  *  greener, rivers brown-green. Red WW_CELL_WATER_CLEAR_RED=noscatter | nodown | fast. */
+/*! lane WATERLOOK1 step 10 (WATERSKYVIS1, 2026-10-27): the Water sky visibility row (WwLook::WaterSkyVis, pin
+ *  WW_CELL_WATER_SKYVIS): the water's sky reflection read on the probe sky grid's open-sky share along the reflected
+ *  lobe, the sun's glare along the sun (res/shaders/water_skyvis.glsl): water under a bridge or a pier is darker than
+ *  open water at the same angle. The row packs the sky grid into cellGi as SPECOCC1 does (celllights.cpp).
+ *  Red WW_CELL_WATER_SKYVIS_RED=one (visibility 1) | nosun. */
 const char * wwCellWaterProgram();
 //! lane WATERCOMBINE1: any water look row is on (the water draws with fo4_waterlook.prog)
 bool wwCellWaterLookOn();
