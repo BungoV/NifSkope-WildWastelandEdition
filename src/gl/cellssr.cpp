@@ -639,7 +639,7 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 	cellProgram = cellProgram && ssrIsCellProgram( prog );
 	if ( s.pass && s.waterRay ) {
 		// lane WATER2: the water ray pass: the water alone writes, behind the opaque depth, writing no depth
-		const bool water = prog && prog->name == std::string_view( "fo4_water.prog" );
+		const bool water = prog && wwIsCellWaterProgramName( prog->name );
 		glColorMask( water, water, water, water );
 		glDepthMask( GL_FALSE );
 		if ( water ) {

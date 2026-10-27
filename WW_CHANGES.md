@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERDEPTH1 (2026-10-27, branch waterdepth1-20261027): water coloured and absorbed by the true bed depth, near and far
+
+- **Show row "Water depth colour"** (WW/CellWaterDepth, pin WW_CELL_WATER_DEPTH, live, ships off). On, the water draws
+  with fo4_waterdepth.prog (fo4_water.frag + WW_WATER_DEPTH); off, the default fo4_water.prog is used unchanged (its
+  NVIDIA binary equals the base's in all 3 modes but the run stamp and the 8-byte source hash).
+- **Depth:** the vertical bed depth from the WATERDATA1 lookup (body height - ground, 128 u texels, bilinear over the
+  four texels, a dry or other-body texel counts 0, a surface more than 128 u off the body height reads unknown). The
+  scene depth still wins where it is present (per pixel, sees rocks and placed objects); the baked depth wins where
+  there is no scene (far water past the near cells, sky behind) or the scene is more than 256 u below the baked bed.
+- **Look:** the WATR record's own shallow/deep colours, alphas and ranges (the game's depthFog curve) driven by that
+  depth, plus a physical absorption term exp(-k L) on the view path L = depth / cos, k = Pope & Fry 1997 pure water
+  (0.340, 0.0565, 0.00922) /m at 0.0142875 m a unit (Frostbite/Lagarde form). With no scene the bed shows the WATR
+  shallow colour. Far water (past 8192 u) blends its flat far colour toward the depth colour, so it is no longer one
+  colour. Sloped and placed water (bake depth 0) stays at the shallow end.
+- **Red** WW_CELL_WATER_DEPTH_RED=flat (bed read as 0) | noabsorb (no exp term) | nearest (no bilinear, 128 u steps);
+  probes WW_CELL_WATER_PROBE=32 (depth used, grey /1024) and 33 (cyan baked, green scene, red none).
+- **Cost:** offline on the RTX 5070 Ti, a 1920x1080 screen of water with no scene: +0.012 ms (near) to +0.014 ms (far).
+- **For later lanes:** res/shaders/water_depth.glsl holds wwWaterBedDepth / wwWaterAbsorb / wwWaterBedAt (caustics).
+  The water status line names the program in use (`; program fo4_waterdepth.prog`).
+
 ## Lane WATERDATA1 (2026-10-27, branch waterdata1-20261027): the baked water planes bound to the water shader (data only, no visible change)
 
 - **What it binds:** the worldspace .lodl's water planes (body id, shore distance, surface delta) and its body table,

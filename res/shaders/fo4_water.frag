@@ -38,7 +38,9 @@
  *   25/26 (WATERHDR1) the linear light the water writes ( lin / 4 )  27 the water's pixels, magenta
  *   WATERDATA1, only in the WW_WATER_INFO_PROBE build (launch WW_CELL_WATER_INFO_PROBE=1), water_info.glsl:
  *   28 (shore steps, depth code, lookup on) as bytes  29 (body id high byte, low byte, class + 1)
- *   30 cyan where the lookup finds water, red where it finds none  31 depth / 1024 as grey */
+ *   30 cyan where the lookup finds water, red where it finds none  31 depth / 1024 as grey
+ *   WATERDEPTH1, only in fo4_waterdepth (the Water depth colour row), water_depth.glsl: 32 the depth used / 1024
+ *   as grey, 33 cyan where the bake wins, green where the scene does, red where no depth is known */
 
 #define WW_FOG 1
 #define WW_CELLLIGHTS 1
@@ -59,6 +61,9 @@ out vec4 fragColor;
 #include "lookdev_fog.glsl"
 #include "cell_lights.glsl"
 #include "water_info.glsl"
+#ifdef WW_WATER_DEPTH
+#include "water_depth.glsl"
+#endif
 
 uniform vec4 waterMat[13];	// shallow, deep, reflection, underwater, light silt, dark silt, var, p1..p4, amplitude, uv scale
 uniform vec4 waterSky[3];	// horizon, lower, upper (linear)
@@ -142,7 +147,11 @@ vec3 depthFog( vec3 c, float along, float vert )
 	float xf = clamp( ( rwF - P3.y ) / ( P3.x - P3.y ), 0.0, 1.0 );
 	float a = pow( max( 1.0 - ( 3.0 - 2.0 * xf ) * xf * xf, 0.0 ), 0.33 ) * ( P3.w - P3.z ) + P3.z;
 	float xc = smooth01( clamp( ( rzF - P4.y ) / ( P4.x - P4.y ), 0.0, 1.0 ) );
+#ifdef WW_WATER_DEPTH
+	return wwWaterDepthMix( c, mix( waterMat[1].rgb, waterMat[0].rgb, xc ), a, along );	// lane WATERDEPTH1
+#else
 	return mix( c, mix( waterMat[1].rgb, waterMat[0].rgb, xc ), a );
+#endif
 }
 
 vec3 hi16( vec3 v )
@@ -253,8 +262,15 @@ void main()
 	// lane WATER2: the depth-colour pass already drawn into the copy: here at this pixel's own distances, at the
 	// offset texel at that texel's (its view ray met with the water's plane, where the water stands before the scene)
 	float offAlong = 0.0, offVert = 0.0, offHit = 0.0;
+#ifdef WW_WATER_DEPTH
+	WwWaterBed bed = wwWaterBedAt( P, V, vert, along );	// lane WATERDEPTH1: the bed depth this pixel uses
+#endif
 	if ( !under && waterSslr == 0 ) {
+#ifdef WW_WATER_DEPTH
+		refr = bed.baked ? depthFog( waterMat[0].rgb, bed.along, bed.vert ) : depthFog( refr, along, vert );
+#else
 		refr = depthFog( refr, along, vert );
+#endif
 		vec2 ndc = ( vec2( opx ) + 0.5 ) / vec2( size ) * 2.0 - 1.0;
 		float odz = waterHaveDepth ? texelFetch( waterDepth, opx, 0 ).r : 1.0;
 		mat4 iP = inverse( projectionMatrix );
@@ -292,6 +308,9 @@ void main()
 	} else {
 		float wRefl = ( waterRed & 1 ) != 0 ? 0.0 : F * Var.y;
 		vec3 far = mix( waterMat[2].rgb, sky, waterMat[2].w );
+#ifdef WW_WATER_DEPTH
+		far = wwWaterDepthFar( far, silted, F, bed.known );	// lane WATERDEPTH1
+#endif
 		lin = mix( silted, sky, wRefl );
 		lin = mix( far, lin, dfade ) + spec;
 		lin = mix( lin, refrOff, shore );
@@ -348,6 +367,11 @@ void main()
 				: waterProbe == 30 ? ( id != 0u ? vec3( 0.0, 1.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 ) )
 				: vec3( clamp( wi.y / 1024.0, 0.0, 1.0 ) );
 		}
+#endif
+#ifdef WW_WATER_DEPTH
+		else if ( waterProbe == 32 || waterProbe == 33 )	// WATERDEPTH1: 32 the depth used / 1024 grey; 33 baked cyan, scene green, none red
+			o = waterProbe == 32 ? vec3( clamp( bed.vert / 1024.0, 0.0, 1.0 ) )
+				: bed.baked ? vec3( 0.0, 1.0, 1.0 ) : bed.known ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 );
 #endif
 		fragColor = vec4( o, 1.0 );
 	}

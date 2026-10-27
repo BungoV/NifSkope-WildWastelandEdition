@@ -3,6 +3,7 @@
 
 #include "cellhdr.h"
 #include "celllights.h"
+#include "celllooks.h"	// lane WATERDEPTH1: the Water depth colour row
 #include "cellssr.h"
 #include "cellwaterinfo.h"	// lane WATERDATA1: the baked water planes
 #include "lookdevstage.h"
@@ -233,6 +234,10 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	prog->uni4fv( "waterSky", sk, 3 );
 	prog->uni1i( "waterRed", s.red );
 	prog->uni1i( "waterProbe", s.probe );
+	{	// lane WATERDEPTH1: its red (only fo4_waterdepth reads it)
+		WW_SWITCH_STATIC( QByteArray, dr, wwEnv( "WW_CELL_WATER_DEPTH_RED" ).trimmed() );
+		prog->uni1i( "waterDepthRed", dr == "flat" ? 1 : dr == "noabsorb" ? 2 : dr == "nearest" ? 3 : 0 );
+	}
 	// the normals' scroll: lane FXPARITY2, wind direction x speed x the world clock (INFERRED); off: time 0 as before
 	if ( wwCellWorldAnimOn() ) {
 		float s0[4], s1[4];
@@ -313,6 +318,11 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	return true;
 }
 
+const char * wwCellWaterProgram()
+{
+	return wwLookOn( WwLook::WaterDepth ) ? "fo4_waterdepth.prog" : "fo4_water.prog";
+}
+
 bool wwCellWaterWritesLinear()
 {
 	return st().linear;
@@ -327,8 +337,9 @@ QString wwCellWaterEcho( const void * nif )
 	QStringList names;
 	for ( const WaterBody & b : it->bodies )
 		names << QStringLiteral( "%1 %2" ).arg( b.rec.form, 8, 16, QLatin1Char( '0' ) ).arg( b.rec.editorId );
-	return QStringLiteral( "water: %1 shape(s), %2 record(s) [%3]%4" ).arg( it->shapeBody.size() )
+	return QStringLiteral( "water: %1 shape(s), %2 record(s) [%3]%4; program %5" ).arg( it->shapeBody.size() )
 		.arg( it->bodies.size() ).arg( names.join( QLatin1String( ", " ) ) )
 		.arg( s.pinOff ? ( s.pinned ? QStringLiteral( ", pinned off (WW_CELL_WATER=0)" ) : QStringLiteral( ", off (row)" ) )
-			: QString() );
+			: QString() )
+		.arg( QLatin1String( wwCellWaterProgram() ) );	// lane WATERDEPTH1
 }

@@ -5,6 +5,8 @@
 
 #include <QString>
 
+#include <string_view>
+
 class Scene;
 struct WwWaterRecord;
 
@@ -51,6 +53,17 @@ bool wwCellWaterUniforms( Scene * scene, int block, int firstTextureUnit );
 bool wwCellWaterWritesLinear();
 //! Lane WATER2: a water surface of this scene draws as water and its WATR's SSR flag is set (cellssr.h).
 bool wwCellWaterSsrWanted( Scene * scene );
+/*! lane WATERDEPTH1 (2026-10-27): the Water depth colour row (WwLook::WaterDepth, pin WW_CELL_WATER_DEPTH) swaps in
+ *  fo4_waterdepth.prog: the depth colour from the baked bed depth (res/shaders/water_depth.glsl) where the frame has
+ *  no scene behind the water, pure water's absorption (Pope & Fry 1997) on the game's ramp, and the far colour
+ *  letting the body through by 1 - F. Off = fo4_water.prog as before. Red WW_CELL_WATER_DEPTH_RED=flat | noabsorb |
+ *  nearest; probes WW_CELL_WATER_PROBE=32 (the depth used) and 33 (who wins). */
+const char * wwCellWaterProgram();
+//! either water program (the row's or the default)
+inline bool wwIsCellWaterProgramName( std::string_view n )
+{
+	return n == "fo4_water.prog" || n == "fo4_waterdepth.prog";
+}
 //! One census line: how many shapes and records this document registered.
 QString wwCellWaterEcho( const void * nif );
 
