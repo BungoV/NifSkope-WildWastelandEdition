@@ -1,5 +1,14 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane TERRAINBLOCK1 (2026-10-27, branch terrainblock1-20261027): ground decals fray at their edges again
+
+- **Cause:** a near cell shape kept its own vertex alpha only for effect shaders and cables; a lit shape with SLSF1
+  Vertex_Alpha drew alpha 1. CoastDune02's grass decal (CoastGrassSand01Decal.BGSM, alpha test 110) fades out through
+  border vertices at 0x9F, so its holes were drawn hard-edged and the dune's sand showed through as rectangular blocks
+  (measured on the drawn frame: C.a 1.000 on all 12314 decal pixels, 0.62 expected at the border).
+- **Fix:** lit shapes with Vertex_Alpha keep it (a tree's wind weight still does not; src/cellvertexalpha.h).
+  Red WW_CELL_VERTEXALPHA_RED=1. Unit test tests/cellvertexalpha (tests/spells/cell_vertex_alpha_unit.sh).
+
 ## Lane CELLSPAWN2 (2026-10-27, branch cellspawn2-20261027): the spawn hold can see the spawn
 
 - **WW_CELL_CAM_DUMP is written with the Cell lights row off:** the dump moved out of the cell lights' uniforms (which
