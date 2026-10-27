@@ -107,12 +107,18 @@ class ESMFile
   std::vector< std::uint32_t > lightFiles;
   inline ESMRecord& insertFormID(unsigned int formID);
   const unsigned char *uncompressRecord(ESMRecord& r);
+  ESMFile(const char *fileNames, bool enableZLibCache,
+          const std::vector< std::pair< const unsigned char *, size_t > > *images);
   unsigned int loadRecords(size_t& groupCnt, FileBuffer& buf, size_t endPos,
                            unsigned int parent, const std::uint32_t *fidMap,
                            unsigned int fileIdx);
  public:
   // fileNames can be a single ESM file, or a comma separated list
   ESMFile(const char *fileNames, bool enableZLibCache = false);
+  // lane SKYTOP1: the same list, each file read from an image in memory
+  // (images[i] = {data, size}, kept alive by the caller) instead of from disk
+  ESMFile(const char *fileNames,
+          const std::vector< std::pair< const unsigned char *, size_t > >& images);
   virtual ~ESMFile();
   // translate a raw form ID read from record r's DATA into the load-order
   // mapped ID space (identity when r's file lists no resolvable masters)

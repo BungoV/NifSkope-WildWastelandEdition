@@ -157,6 +157,20 @@ unsigned int ESMFile::mapFormID(const ESMRecord& r, unsigned int rawID) const
 }
 
 ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
+  : ESMFile(fileNames, enableZLibCache, nullptr)
+{
+}
+
+ESMFile::ESMFile(
+    const char *fileNames,
+    const std::vector< std::pair< const unsigned char *, size_t > >& images)
+  : ESMFile(fileNames, false, &images)
+{
+}
+
+ESMFile::ESMFile(
+    const char *fileNames, bool enableZLibCache,
+    const std::vector< std::pair< const unsigned char *, size_t > > *images)
   : recordHdrSize(0),
     esmVersion(0),
     esmFlags(0),
@@ -203,7 +217,10 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
     for (size_t i = 0; i < tmpFileNames.size(); i++)
     {
       const char  *fName = tmpFileNames[i].c_str();
-      esmFiles[i] = new FileBuffer(fName);
+      if (images && i < images->size())
+        esmFiles[i] = new FileBuffer((*images)[i].first, (*images)[i].second);
+      else
+        esmFiles[i] = new FileBuffer(fName);
       if (!FileBuffer::checkType(esmFiles[i]->readUInt32(), "TES4"))
         throw NifSkopeError("input file %s is not in ESM format", fName);
       (void) esmFiles[i]->readUInt32();
