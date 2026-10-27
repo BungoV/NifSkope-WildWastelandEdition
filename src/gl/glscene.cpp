@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/renderer.h"
 #include "gl/cellhdr.h"
 #include "gl/cellwater.h"	// lane WATER1
+#include "gl/celllights.h"	// lane GLOWHAZE1: wwCellFxRed
 #include "gl/gltex.h"
 #include "gl/glcontroller.h"
 #include "gl/controllers.h"
@@ -733,10 +734,18 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 		Shape * s = dynamic_cast<Shape *>( node );
 		return s && !isDecal( node ) && s->wwWaterDraws();
 	};
+	bool waterDrew = false;
 	for ( Node * node : secondPass.list() ) {
-		if ( isWater( node ) )
+		if ( isWater( node ) ) {
 			node->drawShapes();
+			waterDrew = true;
+		}
 	}
+	/* lane GLOWHAZE1: the water writes depth, and the soft fade of every effect after it must see that surface (a mist
+	 * card standing in a river fades into it, no hard line at the waterline); the water itself read the depth before
+	 * it drew. So the next Soft effect grabs the depth again. Red WW_CELL_FX_RED=prewater: the grab before the water. */
+	if ( waterDrew && !( wwCellFxRed() & 16 ) )
+		++fxDepthPassNow;
 
 	// Particle systems are additive VFX: draw them after every other transparent
 	// shape, including transparent shapes from other workspace documents.

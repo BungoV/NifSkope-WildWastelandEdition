@@ -371,7 +371,8 @@ bool wwCellImageSpaceMeasuresEffects();
  *  script-set emit colour, white when unset), colour linear (texture and base colour decoded with 2.2), alpha x the
  *  soft fade x the near fade for a Soft effect, the fog, then the cell's imagespace (no bloom: the frame has it).
  *  WW_CELL_FX_RED=legacy (the viewer's effect shader, as before), nosoft (both fades 1), nolin (no 2.2 decode),
- *  hide (the gate's reference: cell-lit effects draw nothing), comma-separated. tests/spells/cell_fx.sh gates it. */
+ *  hide (the gate's reference: cell-lit effects draw nothing), prewater (lane GLOWHAZE1: the soft fade reads the depth
+ *  grabbed before the water drew, as before), comma-separated. tests/spells/cell_fx.sh gates it. */
 int wwCellFxRed();
 //! the measured mean luminance of the last measure (negative before any)
 void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels );

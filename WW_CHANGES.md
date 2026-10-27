@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GLOWHAZE1 (2026-10-27, branch glowhaze1-20261027): disabled Sanctuary mists, soft fade at the water (vanilla rules, no menu rows)
+
+- **Enable parents outside the loaded block:** the cell view took a ref's enable-parent state only from persistent refs
+  inside the 5x5 block, and a parent outside it counted as enabled. In the game the world's persistent refs are always
+  loaded. At Sanctuary (lake block -21,19) five MistLargeRoundDustyBrightish02 mists (scale 10) hang under the marker
+  VideoTempClouds, which is initially disabled and stands one cell north of the block, so the game never shows them;
+  the cell view drew them as a bright white glow over the river bank and the houses. Now every persistent ref of the
+  world gives its state. Red `WW_CELL_REFS_RED=persistbox` (the block's persistent refs only, as before).
+- **Soft effects fade into the water surface:** the soft fade of effect cards read a depth grabbed before the water
+  drew, so a mist card standing in the river faded against the riverbed and was cut off hard where the water's depth
+  test hid it, and card parts just above the water showed as white smudges. The depth is now grabbed again after the
+  water draws. Red `WW_CELL_FX_RED=prewater` (the grab before the water, as before).
+
 ## Lane GAPPERF-BINDLESS (2026-10-25, branch bindless-20261025): draw packets in the cell view (speed change, no menu row)
 
 - **Draw packets (PERF5-DRAWPACKETS):** a cell-lit shape's material setup (every uniform, texture bind, texture
