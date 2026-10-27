@@ -2083,11 +2083,12 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		for ( const ProbeVolumeRoom & rm : V.rooms )
 			anchors.insert( anchors.end(), rm.anchor, rm.anchor + 3 );
 		fg.anchors = anchors.data();
-		// volcheck's per-point rays, on the GPU when the bake would take it (the answers are the CPU tree's)
+		/* volcheck's per-point rays (the answers are the CPU tree's). VOLFIT4: the fastest path the machine has, the RT
+		 * whole-ray tracer (exact), without the bake row; WW_BAKE_RT=0 pins the CPU, the compute path only when asked */
 		std::unique_ptr<bakert::Scene> scene;
-		if ( bakert::pickPath() != bakert::Path::Cpu ) {
-			scene = bakert::Scene::make( rb );
-			if ( scene && scene->path() != bakert::Path::Cpu )
+		if ( bakert::pickPath( nullptr, true ) != bakert::Path::Cpu ) {
+			scene = bakert::Scene::make( rb, nullptr, true );
+			if ( scene && ( scene->path() == bakert::Path::Rt || ( scene->path() != bakert::Path::Cpu && bakert::gpuWanted() ) ) )
 				fg.scene = scene.get();
 		}
 		const size_t nSoupTris = soup.tris.size() / 9;
@@ -2128,12 +2129,15 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			else if ( k == QLatin1String( "ownedout" ) ) spec.ownedOut = x;
 			else if ( k == QLatin1String( "snap" ) && x > 0 ) spec.snapSteps = x;
 			else if ( k == QLatin1String( "badw" ) ) spec.badW = x;
+			else if ( k == QLatin1String( "bado" ) ) spec.badO = x;
 			else if ( k == QLatin1String( "extras" ) ) spec.extras = int( x );
 			else if ( k == QLatin1String( "budget" ) && x > 0 ) spec.budget = x;
 			else if ( k == QLatin1String( "rounds" ) ) spec.rounds = int( x );
 			else if ( k == QLatin1String( "jitter" ) ) spec.jitter = x != 0;
 		}
 		spec.legacy = legacyFine;
+		if ( red == QLatin1String( "volfit3" ) )   // lane VOLFIT4's red: overlaps priced as plain foreign air
+			spec.badO = spec.badW;
 		std::vector<std::vector<ProbeVolumeShape>> gridShapes;
 		if ( !legacyFine ) {
 			for ( const ProbeVolumeRoom & rm : V.rooms )
@@ -2161,6 +2165,9 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		if ( !legacyFine )
 			V.fineNote = QStringLiteral( "; volfit3 grid shapes %1 rooms grid %2 moved %3 extras %4 faces %5 merged %6" ).arg( fs.gridShapes )
 				.arg( fs.pickGrid ).arg( fs.pickMoved ).arg( fs.extrasUsed ).arg( fs.facesMoved ).arg( fs.merged );
+		V.fineNote += QStringLiteral( "; fine ms wall %1 big %2 owner %3 edges %4 class %5 greedy %6 moves %7" ).arg( qRound( fs.msWall ) )
+			.arg( qRound( fs.msBig ) ).arg( qRound( fs.msOwner ) ).arg( qRound( fs.msRays ) ).arg( qRound( fs.msClass ) ).arg( qRound( fs.msGreedy ) )
+			.arg( qRound( fs.msMoves ) );
 		V.msFine = fc.nsecsElapsed() / 1e6;
 	}
 	V.refineRays = refineRays;

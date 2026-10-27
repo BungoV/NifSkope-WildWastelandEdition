@@ -58,8 +58,9 @@ struct XHit { double t; int tri; };
 extern const char * const kBakeRtSettingKey;
 //! the GPU bake asked for: WW_BAKE_RT when set (pins it), else the row; `why` says which
 bool gpuWanted( std::string * why = nullptr );
-//! the path a new Scene takes: cpu unless gpuWanted, then the red, then what the machine has (RT > compute > cpu)
-Path pickPath( std::string * why = nullptr );
+//! the path a new Scene takes: cpu unless gpuWanted, then the red, then what the machine has (RT > compute > cpu).
+//! fastest (lane VOLFIT4, callers whose answers equal the CPU's): the GPU whenever the machine has one, unless WW_BAKE_RT=0
+Path pickPath( std::string * why = nullptr, bool fastest = false );
 //! the GPU's name ("" without one)
 std::string deviceName();
 
@@ -69,7 +70,7 @@ class Scene
 {
 public:
 	//! the tracer for `bvh` on the picked path; never null (cpu when nothing else works -- path() tells)
-	static std::unique_ptr<Scene> make( const probebvh::Bvh & bvh, std::string * log = nullptr );
+	static std::unique_ptr<Scene> make( const probebvh::Bvh & bvh, std::string * log = nullptr, bool fastest = false );
 	~Scene();
 	Path path() const { return path_; }
 	/* trace n rays (nearest hit, alpha holes pass); the cpu path runs probebvh on the bake pool. anyHit: an occlusion

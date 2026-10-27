@@ -63,6 +63,8 @@ struct ProbeFineSpec
 	int extras = 8;                 //!< lattice boxes tried per room on top of the moved grid boxes
 	double budget = 1.45;           //!< all rooms' shapes at most this times the grid fit's (the bar: x1.5 VOLRAY1's)
 	int rounds = 2;                 //!< face-move passes over the grid boxes
+	// lane VOLFIT4
+	double badO = 16.0;             //!< a non-room point inside another room's grid shape costs this many (a cross-wall overlap)
 };
 
 struct ProbeFineStats
@@ -76,6 +78,8 @@ struct ProbeFineStats
 	int gridShapes = 0;
 	int rooms = 0, boxes = 0;
 	double msOwner = 0, msRays = 0, msCover = 0;
+	double msClass = 0, msGreedy = 0, msMoves = 0;   //!< VOLFIT4's profile (thread-summed, as msRays/msCover)
+	double msBig = 0, msWall = 0;                    //!< wall clock: the big rooms (one at a time), the whole fit
 };
 
 /*! Per room (index r = room r + 1): its boxes, empty where the room has no air on the lattice (keep the grid fit).

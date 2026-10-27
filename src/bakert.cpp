@@ -501,12 +501,15 @@ bool gpuWanted( std::string * why )
 	return on;
 }
 
-Path pickPath( std::string * why )
+Path pickPath( std::string * why, bool fastest )
 {
 	/* the CPU bake is the default: no Vulkan is touched unless the GPU bake is asked for (the off path is the bakes'
 	 * own loops, byte-identical to before RTBAKE1) */
 	std::string want;
-	if ( !gpuWanted( &want ) ) {
+	const char * pin = std::getenv( "WW_BAKE_RT" );
+	if ( fastest && !( pin && !std::strcmp( pin, "0" ) ) ) {
+		want = "fastest path (exact answers)";
+	} else if ( !gpuWanted( &want ) ) {
 		if ( why )
 			*why = want;
 		return Path::Cpu;
@@ -817,12 +820,12 @@ bool writeSet( Dev & D, Scene::Impl & I, int which )
 
 } // namespace
 
-std::unique_ptr<Scene> Scene::make( const probebvh::Bvh & bvh, std::string * log )
+std::unique_ptr<Scene> Scene::make( const probebvh::Bvh & bvh, std::string * log, bool fastest )
 {
 	std::unique_ptr<Scene> s( new Scene() );
 	s->bvh_ = &bvh;
 	std::string why;
-	Path p = pickPath( &why );
+	Path p = pickPath( &why, fastest );
 	if ( bvh.t.empty() || bvh.nodes.empty() )
 		p = Path::Cpu;
 	if ( p != Path::Cpu ) {

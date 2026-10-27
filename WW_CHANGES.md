@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLFIT4 (2026-10-27, branch volfit4-20261027): GI room fit stops growing through walls into other rooms, 2-5x faster
+
+- **Cross-wall overlap priced:** a room's face move now pays 16 (was 2) for every point it takes inside another room's
+  grid shape that its own air never reached. Museum overlaps 1.55 -> 0.20M u3 (VOLRAY1 1.41M), pokes 7.75 -> 3.73M;
+  Goodneighbor overlaps 0.55 -> 0.01M. All four real cells now beat VOLRAY1 on gap, pokes and overlaps with shapes
+  within x1.5. Pin `WW_VOLFIT_SPEC=bado=N`; red `volfit3` (bado = badw) restores VOLFIT3's fit.
+- **Fit speed:** the per-point rays (85-95% of the fit) take the GPU's exact whole-ray tracer whenever the machine has
+  RT hardware, without the bake row; `WW_BAKE_RT=0` pins the CPU. The .space files are byte-identical either way.
+  Same run, fit seconds VOLRAY1 / VOLFIT3 / VOLFIT4: museum 2.7 / 37.9 / 7.8, Goodneighbor 5.4 / 76.7 / 21.6,
+  Sanctuary 3.3 / 5.1 / 4.8, Concord 13.4 / 49.4 / 24.8.
+- Cost: offline only, 0 GPU-ms and 0 memory at runtime. The census adds "; fine ms wall .. big .. class .. moves ..".
+
 ## Lane VOLFIT3 (2026-10-27, branch volfit3-20261027): GI room fit starts from the grid shapes and moves their faces
 
 - **Grid-first fine fit:** each room starts from its ray-refined grid shapes. Box faces move along volcheck's own

@@ -296,7 +296,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	S.msOwner = clock.nsecsElapsed() / 1e6;
 
 	std::atomic<qint64> nRays( 0 ), nFree( 0 ), nSnap( 0 ), nPts( 0 ), nRoom( 0 ), nCov( 0 ), nForeign( 0 );
-	std::atomic<qint64> nsRays( 0 ), nsCover( 0 );
+	std::atomic<qint64> nsRays( 0 ), nsCover( 0 ), nsClass( 0 ), nsGreedy( 0 ), nsMoves( 0 );
 	// VOLFIT3: per room the grid fit's score and the moved set's (u3 of uncovered room air + badW x foreign air held),
 	// and its extra lattice boxes with what each cuts
 	struct V3Room
@@ -469,6 +469,8 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		// lattice is never reached, and the rays are the fit's cost)
 		std::vector<quint8> pc( P, 0 ), known( P, 0 );
 		auto classify = [&]( const std::vector<size_t> & ids ) {
+			QElapsedTimer tc;
+			tc.start();
 			const size_t K = sdirs.size(), per = std::max<size_t>( 1, size_t( par ? 4000000 : 500000 ) / K ), chunk = 256;
 			std::vector<bakert::XRay> rays;
 			std::vector<bakert::XHit> hits;
@@ -530,6 +532,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 				} );
 			}
 			nEnc += qint64( ids.size() );
+			nsClass += tc.nsecsElapsed();
 		};
 		{
 			std::vector<size_t> ids;
@@ -676,6 +679,8 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		}
 		std::vector<std::array<int, 6>> boxes;
 		qint64 covered = 0;
+		QElapsedTimer tg;
+		tg.start();
 		for ( int pass = 0;; pass++ ) {
 			boxes.clear();
 			covered = 0;
@@ -837,10 +842,13 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		}
 		nCov += covered;
 		nsCover += t0.nsecsElapsed();
+		nsGreedy += tg.nsecsElapsed();
 		if ( !spec.legacy && g.grid && size_t( r ) < g.grid->size() ) {
 			t0.start();
 			V3Room & V = v3r[size_t( r )];
-			const double h3 = h * h * h, bw = spec.badW;
+			const double h3 = h * h * h, bw = spec.badW, bo = std::max( spec.badW, spec.badO );
+			// what a shape holding the point costs: 1 room air (-1), 2 foreign air, 3 another room's grid shape (overlap)
+			auto cost = [&]( quint8 k ) { return k == 1 ? -1.0 : k == 2 ? bw : k == 3 ? bo : 0.0; };
 			const double yawDeg = std::atan2( s, c ) * 180.0 / kFinePi;
 			// per point: 1 room air past the skin (a gap when no shape holds it), 2 foreign air (a poke when one does);
 			// the room's own solid band is free, never air to cover (covering it reads as a poke)
@@ -880,17 +888,18 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 				return Ext { m[0] - rad, m[1] - rad, m[2] - rad, m[0] + rad, m[1] + rad, m[2] + rad };
 			};
 			// points (air or solid) no flood of this room reached inside another room's grid shape: a box there overlaps it
+			// (VOLFIT4: priced apart, a cross-wall overlap must not ride on the room air a move gains beside it)
 			for ( size_t q = 0; q < g.grid->size(); q++ )
 				if ( q != size_t( r ) )
 					for ( const ProbeVolumeShape & sh : ( *g.grid )[q] )
 						forBox( shapeExt( sh ), [&]( size_t a, const double * ) {
-							if ( kd[a] || cls[a] == 1 )
+							if ( kd[a] == 3 || cls[a] == 1 || ( kd[a] == 2 && bo == bw ) )
 								return;
 							double w[3];
 							ptW( a, w );
 							const float p[3] = { float( w[0] ), float( w[1] ), float( w[2] ) };
 							if ( sh.contains( p ) )
-								kd[a] = 2;
+								kd[a] = bo == bw ? 2 : 3;
 						} );
 			// the grid shapes: boxes square to the frame move; any other shape (a wedge, a cylinder, a turned box) stays
 			const std::vector<ProbeVolumeShape> & gs = ( *g.grid )[size_t( r )];
@@ -932,7 +941,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			auto score = [&]() {
 				double sc = 0;
 				for ( size_t a = 0; a < P; a++ )
-					sc += kd[a] == 1 && !cnt[a] ? 1.0 : kd[a] == 2 && cnt[a] ? bw : 0.0;
+					sc += kd[a] == 1 ? ( cnt[a] ? 0.0 : 1.0 ) : cnt[a] ? cost( kd[a] ) : 0.0;
 				return sc * h3;
 			};
 			recount();
@@ -959,9 +968,9 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 									break;
 								forBox( slabOf( E, aa, p, np ), [&]( size_t a, const double * ) {
 									if ( grow && !cnt[a] )
-										acc += kd[a] == 1 ? -1.0 : kd[a] == 2 ? bw : 0.0;
+										acc += cost( kd[a] );
 									else if ( !grow && cnt[a] == 1 )
-										acc += kd[a] == 1 ? 1.0 : kd[a] == 2 ? -bw : 0.0;
+										acc -= cost( kd[a] );
 								} );
 								p = np;
 								if ( acc < best ) {
@@ -1050,7 +1059,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 						double dl = 0;
 						forBox( U, [&]( size_t a, const double * ) {
 							if ( !cnt[a] )
-								dl += kd[a] == 1 ? -1.0 : kd[a] == 2 ? bw : 0.0;
+								dl += cost( kd[a] );
 						} );
 						if ( dl > 1e-9 )
 							continue;
@@ -1073,7 +1082,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 					double val = 0;
 					forBox( bx[i], [&]( size_t a, const double * ) {
 						if ( cnt[a] == 1 )
-							val += kd[a] == 1 ? 1.0 : kd[a] == 2 ? -bw : 0.0;
+							val -= cost( kd[a] );
 					} );
 					if ( val * h3 < spec.minGain ) {
 						addBox( bx[i], -1 );
@@ -1227,6 +1236,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 				V.extra.push_back( toShape( e ) );
 			V.on = true;
 			nsCover += t0.nsecsElapsed();
+			nsMoves += t0.nsecsElapsed();
 			return;
 		}
 		// faces onto the triangles: when every room point on a face meets a triangle (or a threshold) within a step,
@@ -1363,6 +1373,8 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	};
 	// big rooms one at a time over every thread; the rest a room per thread
 	std::vector<int> small;
+	QElapsedTimer tb;
+	tb.start();
 	for ( int r = 0; r < rooms; r++ ) {
 		const std::array<double, 6> & b = bb[size_t( r )];
 		if ( b[0] > b[1] )
@@ -1373,6 +1385,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		else
 			small.push_back( r );
 	}
+	S.msBig = tb.nsecsElapsed() / 1e6;
 	fineFor( small.size(), true, [&]( size_t k ) { fitRoom( small[k], false ); } );
 	if ( !spec.legacy && g.grid ) {
 		// VOLFIT3: each room the best of its grid fit and its moved set within the grid fit's count; then the extra boxes
@@ -1480,6 +1493,10 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	S.pruned = nPruned;
 	S.msRays = double( nsRays ) / 1e6;
 	S.msCover = double( nsCover ) / 1e6;
+	S.msClass = double( nsClass ) / 1e6;
+	S.msGreedy = double( nsGreedy ) / 1e6;
+	S.msMoves = double( nsMoves ) / 1e6;
+	S.msWall = clock.nsecsElapsed() / 1e6;
 	if ( stats )
 		*stats = S;
 	return out;
