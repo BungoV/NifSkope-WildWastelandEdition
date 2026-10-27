@@ -216,6 +216,54 @@ inline double localSiderealDeg( double jd, double lonDeg )
 	return l < 0.0 ? l + 360.0 : l;
 }
 
+// lane SKYDISC1: an ecliptic direction (of date) as a horizontal unit vector, the arithmetic of moon() above
+inline void eclipticToHorizontal( double jd, double lonEcl, double latEcl, double latDeg, double lonDeg, double out[3] )
+{
+	const double obl = obliquityDeg( centuries( jd ) );
+	const double sl = std::sin( lonEcl * kRad ), cl = std::cos( lonEcl * kRad ), sb = std::sin( latEcl * kRad ), cb = std::cos( latEcl * kRad );
+	const double se = std::sin( obl * kRad ), ce = std::cos( obl * kRad );
+	const double ra = std::atan2( sl * ce * cb - sb * se, cl * cb );
+	double sd = sb * ce + cb * se * sl;
+	sd = sd < -1.0 ? -1.0 : ( sd > 1.0 ? 1.0 : sd );
+	const double dec = std::asin( sd ), ha = ( localSiderealDeg( jd, lonDeg ) ) * kRad - ra;
+	const double sp = std::sin( latDeg * kRad ), cp = std::cos( latDeg * kRad );
+	// local frame: z up, y north, x east (the hour angle runs west)
+	const double cd = std::cos( dec ), ch = std::cos( ha );
+	out[2] = sp * sd + cp * cd * ch;
+	out[1] = cp * sd - sp * cd * ch;
+	out[0] = -cd * std::sin( ha );
+}
+
+/* lane SKYDISC1: the moon's optical libration (Meeus ch. 53, no nutation: l' = A - F, b') in degrees, and the lunar
+ * spin pole in ecliptic coordinates (Cassini's laws: the equator's ascending node is the orbit's descending node, so
+ * the pole sits at longitude Omega + 90, latitude 90 - I). */
+struct Libration
+{
+	double lDeg = 0.0, bDeg = 0.0, poleLon = 0.0, poleLat = 90.0;
+};
+
+inline Libration libration( double jd )
+{
+	Libration r;
+	double lon, lat;
+	moonEcliptic( jd, lon, lat );
+	const double d = jd - 2451545.0;
+	const double I = 1.54242 * kRad;
+	const double om = 125.0445479 - 0.0529538083 * d, F = 93.2720950 + 13.22935024 * d;
+	const double W = ( lon - om ) * kRad, b = lat * kRad;
+	const double A = std::atan2( std::sin( W ) * std::cos( b ) * std::cos( I ) - std::sin( b ) * std::sin( I ), std::cos( W ) * std::cos( b ) );
+	double l = std::fmod( A * kDeg - F, 360.0 );
+	if ( l > 180.0 )
+		l -= 360.0;
+	if ( l < -180.0 )
+		l += 360.0;
+	r.lDeg = l;
+	r.bDeg = std::asin( -std::sin( W ) * std::cos( b ) * std::sin( I ) - std::sin( b ) * std::cos( I ) ) * kDeg;
+	r.poleLon = std::fmod( om + 90.0, 360.0 );
+	r.poleLat = 90.0 - 1.54242;
+	return r;
+}
+
 }	// namespace wwephem
 
 #endif // SKYEPHEM_H

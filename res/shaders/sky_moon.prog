@@ -1,0 +1,4 @@
+# lane SKYDISC1: our moon globe (Physical Sky on), a quad around the moon's direction in the lookdev backdrop
+# (src/gl/lookdevstage.cpp drawMoonGlobe). Never picked for a shape; selected by name.
+
+shaders lookdev_bill.vert sky_moon.frag

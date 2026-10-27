@@ -19,6 +19,7 @@ uniform float atSunK;	// pi * k for the sun
 uniform float atMoonK;	// pi * k for the moon; 0 = no moon term
 uniform float atLimb;	// 1 = limb darkening (High+)
 uniform float atDiscCap;	// the disc's display cap (scene units)
+uniform float atDiscHue;	// lane SKYDISC1: 1 = one scale for the whole disc (its centre to the cap): hue and limb kept
 uniform float sceneExposure;
 uniform int viewTransform;
 uniform float atTintOn;	// lane SKYA (ATMOCHECK1): 1 = the Sky Color row's Weather Tint
@@ -82,7 +83,14 @@ void main()
 			limb = pow( vec3( sqrt( max( 0.0, 1.0 - x ) ) ), a ) * ( a + 2.0 ) * 0.5;
 		}
 		vec3 disc = atSunK * atTrans( atTransTex, atCamR, d.z ) * limb / kSunSolid;
-		c += min( disc, vec3( atDiscCap ) );
+		if ( atDiscHue > 0.5 ) {
+			vec3 a = vec3( 0.397, 0.503, 0.652 );
+			vec3 centre = atSunK * atTrans( atTransTex, atCamR, atSunW.z ) * ( a + 2.0 ) * 0.5 / kSunSolid;
+			float m = max( centre.r, max( centre.g, centre.b ) );
+			c += disc * ( m > atDiscCap ? atDiscCap / m : 1.0 );
+		} else {
+			c += min( disc, vec3( atDiscCap ) );
+		}
 	}
 	fragColor = vec4( studioOutput( c ), 1.0 );
 }

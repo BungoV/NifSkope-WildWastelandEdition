@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SKYDISC1 (2026-10-27, branch skydisc1-20261027): our sun disc and moon globe under Physical Sky
+
+- **Physical Sky on** now draws our own sun and moon; **off** draws the vanilla sun and moon exactly as before (no new
+  row). `WW_ATMO_DISC_RED=vanilla` (no menu row) brings back the old disc and the vanilla moon billboards under Physical
+  Sky; `WW_ATMO_DISC_RED=nophase` lights the moon from behind the eye (gate red).
+- **Sun:** a disc of the real size (0.2665 deg half-angle), colored by the transmittance LUT, limb darkened at every
+  Physical Sky tier, scaled as one piece so its hue and limb survive the display cap. No glare card, no halo.
+- **Moon:** a lit globe of 0.26 deg half-angle (`sky_moon.prog`), Lommel-Seeliger surface law lit from the real sun
+  direction, so the phase comes from the light. The whole-disc brightness follows Krisciunas-Schaefer, the same curve as
+  the moonlight on the world ("Moon Phase and Stars"), which now takes the phase angle of the drawn moon. Faint
+  earthshine on the night side, dimmed and reddened by the per-pixel transmittance toward the horizon. Orientation and
+  libration from the ephemeris (Real sky) or a fixed pole (game clock). Positions as before. Stars stay vanilla.
+- **Surface:** loose files `Textures\Sky\Moon\Moon_d.dds` (BC1 2048x1024, 9 mips) and `Moon_n.dds` (BC5 1024x512) in
+  the FO4CS mod folder, 2.00 MB, made by `tools/moon_texture.py` from the NASA SVS CGI Moon Kit. Missing textures: a
+  `moon:refused(...)` log line and the vanilla moon.
+- Gates (`tests/spells/skydisc_check.py`, offline, real shaders): sizes within 0.2 % at 10 and 2 deg fov, no pixel past
+  the disc + 1 px, the sun's limb within 0.0023 of mu^a, the moon's lit fraction within 0.0062 of (1 + cos a) / 2, the
+  disc mean within 2.1 % of KS, earthshine > 0 and redder low, atDiscHue 0 identical to the old sky shader.
+- Cost (estimate, not measured live): one quad of about 10 x 10 px at 55 deg fov, well under 0.01 ms at 1080p; 2.0 MB
+  of texture memory.
+
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
 - **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,

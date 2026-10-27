@@ -104,7 +104,8 @@ class Sky:
         self.getq(self.q, 0x8866, ctypes.byref(ns))
         return ns.value / 1e6 / reps
 
-    def render(self, W, H, cam, sun, camZkm=0.02, lut=(192, 108), perpixel=False, ground=1.0, vfov=55.0, reps=1, disc=1e4):
+    def render(self, W, H, cam, sun, camZkm=0.02, lut=(192, 108), perpixel=False, ground=1.0, vfov=55.0, reps=1, disc=1e4,
+               extra=None):
         """cam = (yaw deg, pitch deg); sun = (az deg, elev deg); returns (linear rgb HxWx3 row 0 = top, gpu ms)"""
         camR = 6360.0 + camZkm
         sw = sundir(*sun)
@@ -132,6 +133,8 @@ class Sky:
                    atMoonW=(0.0, 0.0, -1.0), atSunK=(math.pi / tl,), atMoonK=(0.0,), atLimb=(1.0,), atDiscCap=(disc,),
                    sceneExposure=(1.0,), atTintOn=(0.0,), atMsSize=(32.0, 32.0), atMsOn=(1.0,), atGround=(ground,),
                    atPerPixel=(1.0 if perpixel else 0.0,))
+        uni.update(extra or {})   # SKYDISC1: atLimb / atDiscHue / atSunK for the disc gates
+        self.last = dict(uni, M=M, P=Pm, sv=sv, camR=camR)   # SKYDISC1: a pass drawn over this one reuses the camera
         for k, v in uni.items():
             l = lm(k)
             if l >= 0:

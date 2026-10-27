@@ -31,6 +31,7 @@ struct WwAtmoInputs
 	float tint[17][3] = {};	//!< lane SKYA (ATMOCHECK1): the weather dome's linear color at atmomath.h's tint elevations
 	bool tintOk = false;	//!< the table is filled (the dome resolved); else Weather Tint draws the physical color
 	bool capture = false;	//!< lane SKYA (SKYGI1): the probes' sky capture; no timing, no exposure read-back, no air
+	bool discs = false;	//!< lane SKYDISC1: our sun disc (limb darkening at every tier, a hue-keeping cap)
 };
 
 //! draws the sky full screen in place of the dome; false when it cannot (the caller falls back to the dome)
@@ -52,6 +53,8 @@ struct WwAtmoFrame
 	unsigned trans = 0, sunView = 0, moonView = 0;
 	int viewW = 0, viewH = 0;
 	unsigned long long frame = 0;	//!< wwAtmoApFrame's count when drawn
+	bool tintOn = false;	//!< lane SKYDISC1: the Weather Tint drawn, with its table (the moon redraws the sky behind it)
+	float tint[17][3] = {};
 };
 const WwAtmoFrame & wwAtmoFrame();
 
@@ -93,6 +96,14 @@ bool wwAtmoNightPinned();
 bool wwAtmoNightOn();	//!< the row on and the Physical Sky on
 int wwAtmoNightKey( int phase );	//!< 0 when off; else a memo key of the phase and red (lookdevstage's light cache)
 float wwAtmoMoonFactor( int phase );	//!< the moon's light against the full moon's (1 when off)
+/* lane SKYDISC1 (bungo 10-27): with the Physical Sky on, our sun disc (real size, limb darkened, colour through the air,
+ * no glare card) and our moon globe (NASA albedo + relief, lit from the sun's direction, earthshine) replace the vanilla
+ * sun quad, glare and moon billboards; Physical Sky Off = the vanilla sun and moons as before. No row of its own. Red
+ * WW_ATMO_DISC_RED = vanilla (the old disc and the moon billboards with the Physical Sky on) | nophase (the moon lit as
+ * full whatever the sun). The moon's light follows the drawn moon's phase angle (wwAtmoMoonFactorDeg). */
+bool wwAtmoDiscs();	//!< the Physical Sky on and the red not "vanilla"
+bool wwAtmoDiscRed( const char * word );
+float wwAtmoMoonFactorDeg( float alphaDeg );	//!< wwAtmoMoonFactor at a phase angle in degrees (1 when off)
 void wwAtmoStarExtinction( float mu, float out[3] );	//!< T(mu) / T(1) from the drawn sky's haze (1 when off)
 
 /* lane SKYA (EXPO1): the eye adaptation counts the sky. The imagespace measure averages the cell-lit pixels only;

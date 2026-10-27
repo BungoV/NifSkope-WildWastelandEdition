@@ -23,6 +23,8 @@ BSD License - see nifskope.h
 #include "gl/cloudvol.h"	// lane CLOUD2: the volume clouds
 #include "gl/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
 #include "gl/skyephem.h"	// lane EPHEM1: the real moon's phase texture
+#include "gl/skydisc.h"	// lane SKYDISC1: our moon globe's math
+#include "gl/celllooks.h"	// lane SKYDISC1: the real-sky look decides the moon's frame
 #include "gl/sunshadow.h"
 #include "model/nifmodel.h"
 
@@ -342,6 +344,66 @@ struct LdLight
 LdLight computeLight();
 WwFog currentFog();
 
+/* lane SKYDISC1: our moon (Physical Sky on): its place, the sun direction that lights it (the phase) and its axes.
+ * Real sky (EPHEM1): the ephemeris moon, sun, spin pole and libration. Game clock: the engine's moon point, the sun
+ * 45 deg x the phase index round the celestial equator from it, no libration. Red nophase: the sun behind the eye. */
+struct MoonGeo
+{
+	double D[3] = { 0.0, 0.0, 1.0 }, S[3] = { 0.0, 0.0, -1.0 }, P[3] = { 0.0, 0.0, 1.0 };
+	double lDeg = 0.0, alphaDeg = 0.0;
+	bool real = false;
+};
+
+MoonGeo moonGeo( const LdState & s, const float gamePos[3] )
+{
+	MoonGeo g;
+	if ( wwSkyMoonFrame( s.hour, s.gameDay, g.D, g.S, g.P, &g.lDeg ) ) {
+		g.real = true;
+	} else {
+		const double len = std::sqrt( double( gamePos[0] ) * gamePos[0] + double( gamePos[1] ) * gamePos[1] + double( gamePos[2] ) * gamePos[2] );
+		for ( int k = 0; k < 3; k++ )
+			g.D[k] = len > 1e-9 ? gamePos[k] / len : ( k == 2 ? 1.0 : 0.0 );
+		g.P[0] = 0.0;
+		g.P[1] = std::cos( wwephem::kBostonLat * wwskydisc::kRad );
+		g.P[2] = std::sin( wwephem::kBostonLat * wwskydisc::kRad );
+		const int p = std::max( 0, wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+		wwskydisc::sunFromElongation( g.D, g.P, 180.0 + 45.0 * p, g.S );
+	}
+	if ( wwAtmoDiscRed( "nophase" ) )
+		for ( int k = 0; k < 3; k++ )
+			g.S[k] = -g.D[k];
+	g.alphaDeg = wwskydisc::phaseAngleDeg( g.D, g.S );
+	return g;
+}
+
+//! the phase angle the moonlight follows (the drawn globe's), memoised: the light asks once per shape
+float moonAlphaNow( const LdState & s )
+{
+	static double hour = -1.0, day = -1.0;
+	static int moons = -1, look = -1, red = -1;
+	static WwSunPathKey path;
+	static float memo = 0.0f;
+	const WwSunPathKey pk = wwSunPathKey();
+	const int lk = wwLookOn( WwLook::Ephemeris ) ? 1 : 0, rd = wwAtmoDiscRed( "nophase" ) ? 1 : 0;
+	if ( hour != s.hour || day != s.gameDay || moons != s.clim.tnam[5] || look != lk || red != rd || !( path == pk ) ) {
+		const float up[3] = { 0.0f, 0.0f, 1.0f };
+		memo = float( moonGeo( s, up ).alphaDeg );
+		hour = s.hour;
+		day = s.gameDay;
+		moons = s.clim.tnam[5];
+		look = lk;
+		red = rd;
+		path = pk;
+	}
+	return memo;
+}
+
+//! the moon's light against the full moon's: our globe's phase angle with the Physical Sky on, else the engine's phase
+float moonLightFactor( const LdState & s )
+{
+	return wwAtmoDiscs() ? wwAtmoMoonFactorDeg( moonAlphaNow( s ) ) : wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+}
+
 /* lane PERF1: every shape's program setup asks for the light several times a frame; it is a pure function of
  * the resolved weather (gen), the hour and the Sun row, so it is computed once per change of those */
 LdLight currentLight()
@@ -355,7 +417,9 @@ LdLight currentLight()
 	static WwSunPathKey sunPath;	// lane GAPTOOL2: a live WW_SUNPATH set (or the Sun Path row) moves the light
 	static LdLight memo;
 	// lane SKYA (NIGHT1): the Moon Phase and Stars row with the moon's phase (the game day moves it)
-	const int atmoKey = wwAtmoSunKey() + 3 * 16 * wwAtmoNightKey( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+	int atmoKey = wwAtmoSunKey() + 3 * 16 * wwAtmoNightKey( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+	if ( wwAtmoDiscs() && wwAtmoNightOn() )	// lane SKYDISC1: the light follows our globe's phase angle (0.1 deg steps)
+		atmoKey += 4096 * ( 1 + int( moonAlphaNow( s ) * 10.0f ) );
 	const WwSunPathKey sunKey = wwSunPathKey();
 	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) ) {
 		memo = computeLight();
@@ -439,7 +503,7 @@ LdLight computeLight()
 		// lane SKYA (NIGHT1): by night the engine's key light is the moon's: its phase dims it
 		const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
 		if ( s.hour < raw.A || s.hour > raw.D ) {
-			const float k = wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+			const float k = moonLightFactor( s );
 			for ( int c = 0; c < 3; c++ )
 				L.sun[c] *= k;
 		}
@@ -1607,6 +1671,125 @@ void drawMoon( Scene * scene, const SkyFrame & f, float mul, QStringList & drew 
 		drew << QString( "moon:none(the climate's moons byte 0x%1 names neither moon)" ).arg( moons, 2, 16, QChar( '0' ) );
 }
 
+/* lane SKYDISC1: our moon globe in place of the vanilla moon billboards and shadow disc (Physical Sky on, after the
+ * physical sky drew this frame). False = its textures did not resolve: the caller draws the vanilla moon. */
+bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & drew )
+{
+	LdState & s = st();
+	if ( !s.haveWeather ) {
+		drew << QString( "moon:refused(%1)" ).arg( s.weatherRefusal );
+		return true;
+	}
+	const unsigned char moons = s.clim.tnam[5];
+	if ( !( moons & 0xC0 ) ) {
+		drew << QString( "moon:none(the climate's moons byte 0x%1 names neither moon)" ).arg( moons, 2, 16, QChar( '0' ) );
+		return true;
+	}
+	const WwAtmoFrame & af = wwAtmoFrame();
+	if ( !af.valid ) {
+		drew << QStringLiteral( "moon:globe:refused(no physical sky this frame)" );
+		return true;
+	}
+	const MoonGeo g = moonGeo( s, f.c.sunPos );
+	const bool masser = moons & 0x80;
+	// the real moon is up whenever it is above the horizon (faint by day); the game's fades with the engine's clock
+	float alpha = g.real ? 1.0f : wwMoonAlpha( f.c, s.gmst, masser ? s.gmst.masserFadeStart : s.gmst.secundaFadeStart,
+		masser ? s.gmst.masserFadeEnd : s.gmst.secundaFadeEnd );
+	const bool black = f.moonGlare[0] <= 0.0f && f.moonGlare[1] <= 0.0f && f.moonGlare[2] <= 0.0f;
+	const bool full = mul >= 1.0f;
+	if ( full && ( black || alpha <= 0.0f || g.D[2] < -0.01 ) ) {
+		drew << QString( "moon:globe:hidden(alpha=%1%2)" ).arg( f3( alpha ), black ? QStringLiteral( ",moonglare black" ) : QString() );
+		return true;
+	}
+	alpha = full ? alpha : mul;
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "sky_moon.prog" );
+	if ( !prog ) {
+		drew << QStringLiteral( "moon:refused(sky_moon.prog did not link) vanilla moon" );
+		return false;
+	}
+	static const QString texD = QStringLiteral( "textures/sky/moon/moon_d.dds" ), texN = QStringLiteral( "textures/sky/moon/moon_n.dds" );
+	for ( int u = 0; u < 2; u++ ) {
+		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+		if ( scene->bindTexture( QStringView( u ? texN : texD ), true ) <= 0 ) {
+			r->stopProgram();
+			r->fn->glActiveTexture( GL_TEXTURE0 );
+			drew << QString( "moon:refused(%1 not found: the loose files of mods\\FO4CS\\Textures\\Sky\\Moon) vanilla moon" ).arg( u ? texN : texD );
+			return false;
+		}
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	}
+	const GLuint luts[3] = { af.trans, af.sunView, af.moonView };
+	for ( int u = 0; u < 3; u++ ) {
+		r->fn->glActiveTexture( GLenum( GL_TEXTURE2 + u ) );
+		glBindTexture( GL_TEXTURE_2D, luts[u] );
+	}
+	double ex[3], ey[3], ez[3];
+	if ( !wwskydisc::bodyFrame( g.D, g.P, g.lDeg, ex, ey, ez ) ) {
+		ez[0] = ez[1] = 0.0, ez[2] = 1.0;
+		ex[0] = 1.0, ex[1] = ex[2] = 0.0;
+		ey[0] = 0.0, ey[1] = 1.0, ey[2] = 0.0;
+	}
+	GLint vp[4];
+	glGetIntegerv( GL_VIEWPORT, vp );
+	const float p11 = r->globalUniforms->projectionMatrix[1][1];
+	const double pxAng = 2.0 / ( double( p11 > 1e-6f ? p11 : 1.0f ) * double( std::max( vp[3], 1 ) ) );
+	const double sinR = std::sin( wwskydisc::kMoonHalfDeg * wwskydisc::kRad );
+	const float exposure = skyExposure();
+	const wwskydisc::MoonTerms t = wwskydisc::moonTerms( g.alphaDeg, af.sunK, exposure );
+	skyState( r, true, false );
+	r->fn->glBlendFuncSeparate( GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE );	// premultiplied coverage
+	prog->uni1i( "atAlbedo", 0 );
+	prog->uni1i( "atRelief", 1 );
+	prog->uni1i( "atTransTex", 2 );
+	prog->uni1i( "atSunView", 3 );
+	prog->uni1i( "atMoonView", 4 );
+	prog->uni2f( "atViewSize", float( af.viewW ), float( af.viewH ) );
+	prog->uni4f( "atRect", FloatVector4( float( vp[0] ), float( vp[1] ), 1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
+	prog->uni1f( "atCamR", af.camR );
+	prog->uni3f( "atSunW", af.sunW[0], af.sunW[1], af.sunW[2] );
+	prog->uni3f( "atMoonW", af.moonW[0], af.moonW[1], af.moonW[2] );
+	prog->uni1f( "atSunK", af.sunK );
+	prog->uni1f( "atMoonK", af.moonK );
+	prog->uni1f( "atTintOn", af.tintOn ? 1.0f : 0.0f );
+	const GLint tintLoc = prog->uniLocation( "atTint" );
+	if ( af.tintOn && tintLoc >= 0 )
+		r->fn->glUniform3fv( tintLoc, 17, &af.tint[0][0] );
+	prog->uni3f( "moonD", float( g.D[0] ), float( g.D[1] ), float( g.D[2] ) );
+	prog->uni3f( "moonS", float( g.S[0] ), float( g.S[1] ), float( g.S[2] ) );
+	prog->uni3f( "bodyX", float( ex[0] ), float( ex[1] ), float( ex[2] ) );
+	prog->uni3f( "bodyY", float( ey[0] ), float( ey[1] ), float( ey[2] ) );
+	prog->uni3f( "bodyZ", float( ez[0] ), float( ez[1] ), float( ez[2] ) );
+	prog->uni1f( "sinR", float( sinR ) );
+	prog->uni1f( "pxAng", float( pxAng ) );
+	prog->uni1f( "lodD", float( wwskydisc::moonLod( 2048.0, pxAng ) ) );
+	prog->uni1f( "lodN", float( wwskydisc::moonLod( 1024.0, pxAng ) ) );
+	prog->uni1f( "albedoInv", float( 1.0 / wwskydisc::kAlbedoMean ) );
+	prog->uni1f( "sunTerm", float( t.sunTerm ) );
+	prog->uni1f( "earthTerm", float( t.earthTerm ) );
+	prog->uni1f( "alpha", alpha );
+	prog->uni1f( "sceneExposure", exposure );
+	prog->uni1i( "viewTransform", skyViewTransform() );
+	const float c[3] = { float( g.D[0] ), float( g.D[1] ), float( g.D[2] ) };
+	prog->uni3f( "centerWorld", c[0], c[1], c[2] );
+	prog->uni1f( "halfSize", float( std::tan( wwskydisc::kMoonHalfDeg * wwskydisc::kRad ) * 1.5 + 2.0 * pxAng ) );
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
+	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	r->stopProgram();
+	for ( int u = 4; u >= 0; u-- ) {
+		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+		glBindTexture( GL_TEXTURE_2D, 0 );
+	}
+	drew << QString( "moon:globe(alpha=%1,phase=%2deg,lit=%3,lib=%4,%5%6)" ).arg( f3( alpha ) )
+		.arg( g.alphaDeg, 0, 'f', 1 ).arg( 0.5 * ( 1.0 + std::cos( g.alphaDeg * wwskydisc::kRad ) ), 0, 'f', 3 )
+		.arg( g.lDeg, 0, 'f', 2 ).arg( g.real ? QStringLiteral( "real" ) : QStringLiteral( "game" ) )
+		.arg( wwAtmoDiscRed( "nophase" ) ? QStringLiteral( ",DISC_RED=nophase" ) : QString() );
+	return true;
+}
+
 void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & drew )
 {
 	LdState & s = st();
@@ -1906,6 +2089,12 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 		for ( int c = 0; c < 3; c++ )
 			in.moonW[c] = raw.sunPos[c];
 		in.moonUp = raw.sunPos[2] > 0.0f;
+		if ( wwAtmoDiscs() ) {	// lane SKYDISC1: the sky's moonlight from where our globe is drawn
+			const MoonGeo g = moonGeo( s, raw.sunPos );
+			for ( int c = 0; c < 3; c++ )
+				in.moonW[c] = float( g.D[c] );
+			in.moonUp = g.D[2] > 0.0;
+		}
 	}
 	auto keyLum = [&]( int tod ) {
 		WwTodKeys k;
@@ -1917,7 +2106,7 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 	};
 	const float scale = wwLookdevSunlightScale();
 	in.sunLum = keyLum( WwTodDay ) * scale;
-	in.moonLum = keyLum( WwTodNight ) * scale * wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) );
+	in.moonLum = keyLum( WwTodNight ) * scale * moonLightFactor( s );
 	const WwFog fog = currentFog();
 	if ( !fog.effOff ) {
 		in.fogFar = fog.fogFar;
@@ -1933,6 +2122,7 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 		in.camZ = g_skyCaptureZ;	// SKY3: the probes see the sky from where they stand, not from the view camera
 	in.disc = s.sun && !capture;	// lane SKYA (SKYGI1): the probes' capture has no disc (the sun is the bake's own term)
 	in.capture = capture;
+	in.discs = wwAtmoDiscs() && !capture;	// lane SKYDISC1: our sun disc
 	in.exposure = skyExposure();
 	in.viewTransform = skyViewTransform();
 	// lane SKYA (ATMOCHECK1): the weather dome's colors by elevation for the Sky Color row's Weather Tint; the rings come
@@ -2029,7 +2219,8 @@ bool wwLookdevDrawBackground( Scene * scene )
 		if ( !sx.sky && wwLookdevRed( "skyleak" ) )
 			drawDome( scene, f, 0.02f, drew );
 		const float moonMul = sx.moon ? 1.0f : ( wwLookdevRed( "moonleak" ) ? 0.02f : 0.0f );
-		if ( moonMul > 0.0f )
+		// lane SKYDISC1: the Physical Sky's moon is our globe; missing loose files = the vanilla moon, named in the line
+		if ( moonMul > 0.0f && !( physical && wwAtmoDiscs() && drawMoonGlobe( scene, f, moonMul, drew ) ) )
 			drawMoon( scene, f, moonMul, drew );
 		// lane ATMO1: the physical sky draws its own disc; glow comes from the bloom (post), never a drawn glare
 		const float sunMul = physical ? 0.0f : sx.sun ? 1.0f : ( wwLookdevRed( "sunleak" ) ? 0.02f : 0.0f );
