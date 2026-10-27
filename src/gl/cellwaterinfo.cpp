@@ -2,6 +2,7 @@
 #include "wwswitch.h"
 
 #include "lodtfile.h"
+#include "gl/cellunits.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 
@@ -25,6 +26,11 @@
 quint64 WwWaterInfoTables::bytes() const
 {
 	return quint64( index.size() + atlas.size() ) * 4 + quint64( bodies.size() ) * 4;
+}
+
+quint64 WwWaterInfoTables::landBytes() const
+{
+	return quint64( landIndex.size() ) * 4 + quint64( landAtlas.size() );
 }
 
 uint32_t wwWaterInfoDepthCode( double depth )
@@ -89,8 +95,11 @@ bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * er
 	std::vector<int> sparseTile;	// index tile of each kept sub-tile, in the order found
 	std::vector<uint32_t> sparseWords;
 	const int ftX = W / fe, ftY = H / fe, fn = fe * fe;
-	std::vector<uint32_t> id( fn ), sh( fn ), sf( fn ), word( fn );
+	std::vector<uint32_t> id( fn ), sh( fn ), sf( fn ), word( fn ), lb( fn );
 	std::vector<double> depth( fn );
+	t.landIndex.assign( size_t( t.tilesX ) * t.tilesY, 0u );
+	std::vector<int> landTile;
+	std::vector<uint8_t> landWords;
 	auto fill = [&]( int plane, int fx, int fy, std::vector<uint32_t> & out ) {
 		quint32 v = 0;
 		if ( f.waterTileUniform( plane, fx, fy, v ) ) {
@@ -117,6 +126,15 @@ bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * er
 			fill( 0, fx, fy, id );
 			fill( 1, fx, fy, sh );
 			fill( 2, fx, fy, sf );
+			/* the land side out of the shore plane's dry texels; the water words keep 255 there, as a file
+			 * without the land side has it */
+			for ( int k = 0; k < fn; k++ ) {
+				lb[k] = id[k] ? 0u : sh[k];
+				if ( !id[k] ) {
+					t.landNearTexels += sh[k] < 255u ? 1 : 0;
+					sh[k] = 255u;
+				}
+			}
 			for ( int y = 0; y < fe; y++ )
 				for ( int x = 0; x < fe; x++ ) {
 					const int k = y * fe + x;
@@ -135,6 +153,20 @@ bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * er
 			for ( int sy = 0; sy < fe / E; sy++ )
 				for ( int sx = 0; sx < fe / E; sx++ ) {
 					const int o = sy * E * fe + sx * E;
+					const int ti = ( fy * ( fe / E ) + sy ) * t.tilesX + fx * ( fe / E ) + sx;
+					bool lbU = true;
+					for ( int y = 0; y < E && lbU; y++ )
+						for ( int x = 0; x < E; x++ )
+							lbU = lbU && lb[o + y * fe + x] == lb[o];
+					if ( lbU ) {
+						t.landIndex[size_t( ti )] = lb[o];
+						( lb[o] == 255u ? t.landUniformFar : lb[o] == 0u ? t.landUniformWet : t.landUniformOther )++;
+					} else {
+						landTile.push_back( ti );
+						for ( int y = 0; y < E; y++ )
+							for ( int x = 0; x < E; x++ )
+								landWords.push_back( uint8_t( lb[o + y * fe + x] ) );
+					}
 					bool idU = true, shU = true, sfU = true;
 					double lo = depth[o], hi = depth[o], acc = 0.0;
 					for ( int y = 0; y < E; y++ )
@@ -147,7 +179,6 @@ bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * er
 							hi = std::max( hi, depth[k] );
 							acc += depth[k];	// row-major: the reference's order
 						}
-					const int ti = ( fy * ( fe / E ) + sy ) * t.tilesX + fx * ( fe / E ) + sx;
 					const bool dry = idU && id[o] == 0;
 					if ( dry && shU ) {
 						t.index[size_t( ti ) * 2 + 1] = sh[o] << 16;
@@ -192,6 +223,22 @@ bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * er
 			std::copy_n( sparseWords.begin() + ( size_t( k ) * E + y ) * E, E,
 				t.atlas.begin() + size_t( ay + y ) * t.atlasW + ax );
 	}
+	// the land side's slots, the same way (row-major tile order, 64 tiles an atlas row, atlasW wide)
+	std::vector<int> lorder( landTile.size() );
+	for ( size_t k = 0; k < lorder.size(); k++ )
+		lorder[k] = int( k );
+	std::sort( lorder.begin(), lorder.end(), [&]( int a, int b ) { return landTile[a] < landTile[b]; } );
+	t.landSlots = int( lorder.size() );
+	t.landAtlasH = ( t.landSlots + R - 1 ) / R * E;
+	t.landAtlas.assign( size_t( t.atlasW ) * t.landAtlasH, uint8_t( 255 ) );
+	for ( int s = 0; s < t.landSlots; s++ ) {
+		const int k = lorder[s];
+		t.landIndex[size_t( landTile[k] )] = uint32_t( s + 1 ) << 8;
+		const int ax = ( s % R ) * E, ay = ( s / R ) * E;
+		for ( int y = 0; y < E; y++ )
+			std::copy_n( landWords.begin() + ( size_t( k ) * E + y ) * E, E,
+				t.landAtlas.begin() + size_t( ay + y ) * t.atlasW + ax );
+	}
 	t.buildSeconds = clk.elapsed() / 1000.0;
 	return true;
 }
@@ -206,6 +253,16 @@ QString wwWaterInfoCensus( const WwWaterInfoTables & t )
 		.arg( t.sparseSurface ).arg( t.sparseDepth ).arg( t.atlasW ).arg( t.atlasH ).arg( t.bodyCount )
 		.arg( quint64( t.index.size() ) * 4 ).arg( quint64( t.atlas.size() ) * 4 ).arg( quint64( t.bodies.size() ) * 4 )
 		.arg( t.bytes() ).arg( double( t.bytes() ) / 1048576.0, 0, 'f', 2 ).arg( t.buildSeconds, 0, 'f', 2 );
+}
+
+QString wwLandShoreCensus( const WwWaterInfoTables & t )
+{
+	return QStringLiteral( "land shore: %1 x %2 tiles; uniform far %3 wet %4 other %5; sparse %6; atlas %7 x %8; "
+		"%9 dry texel(s) near water; bytes index %10 atlas %11 total %12 (%13 MB)" )
+		.arg( t.tilesX ).arg( t.tilesY ).arg( t.landUniformFar ).arg( t.landUniformWet ).arg( t.landUniformOther )
+		.arg( t.landSlots ).arg( t.atlasW ).arg( t.landAtlasH ).arg( t.landNearTexels )
+		.arg( quint64( t.landIndex.size() ) * 4 ).arg( quint64( t.landAtlas.size() ) ).arg( t.landBytes() )
+		.arg( double( t.landBytes() ) / 1048576.0, 0, 'f', 2 );
 }
 
 bool wwWaterInfoDump( const WwWaterInfoTables & t, const QString & dir, QString * error )
@@ -225,10 +282,14 @@ bool wwWaterInfoDump( const WwWaterInfoTables & t, const QString & dir, QString 
 			.arg( double( t.originX ) ).arg( double( t.originY ) ).arg( double( t.texel ) ).arg( double( t.shoreQuantum ) )
 			.arg( t.tilesX ).arg( t.tilesY ).arg( WwWaterInfoTables::kTileEdge ).arg( WwWaterInfoTables::kTilesPerRow )
 			.arg( t.bodyRows ) ).toUtf8();
+	const QByteArray landCensus = ( wwLandShoreCensus( t ) + QStringLiteral( "\n" ) ).toUtf8();
 	return put( QStringLiteral( "index.u32" ), t.index.data(), qint64( t.index.size() ) * 4 )
 		&& put( QStringLiteral( "atlas.u32" ), t.atlas.data(), qint64( t.atlas.size() ) * 4 )
 		&& put( QStringLiteral( "bodies.f32" ), t.bodies.data(), qint64( t.bodies.size() ) * 4 )
-		&& put( QStringLiteral( "census.txt" ), census.constData(), census.size() );
+		&& put( QStringLiteral( "census.txt" ), census.constData(), census.size() )
+		&& put( QStringLiteral( "land_index.u32" ), t.landIndex.data(), qint64( t.landIndex.size() ) * 4 )
+		&& put( QStringLiteral( "land_atlas.u8" ), t.landAtlas.data(), qint64( t.landAtlas.size() ) )
+		&& put( QStringLiteral( "land_census.txt" ), landCensus.constData(), landCensus.size() );
 }
 
 namespace
@@ -244,6 +305,7 @@ struct Job
 struct Gpu
 {
 	GLuint tex[3] = { 0, 0, 0 };
+	GLuint landTex[2] = { 0, 0 };	// lane WATERWETBAKE1: land index (R32UI), land atlas (R8UI)
 	std::shared_ptr<Job> job;
 	QString uploaded;	// the census of what the GL holds, read back
 };
@@ -265,6 +327,12 @@ State & st()
 bool infoRed()
 {
 	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_WATER_INFO_RED" ).trimmed() == "off" );
+	return red;
+}
+
+bool landRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_LAND_SHORE_RED" ).trimmed() == "off" );
 	return red;
 }
 
@@ -304,11 +372,46 @@ void upload( Renderer * r, Gpu & g, const std::shared_ptr<Job> & job )
 		parts << QStringLiteral( "%1 %2x%3 %4" ).arg( QLatin1String( name[k] ) ).arg( gw ).arg( gh )
 			.arg( QLatin1String( gf == GL_RG32UI ? "RG32UI" : gf == GL_R32UI ? "R32UI" : gf == GL_RGBA32F ? "RGBA32F" : "??" ) );
 	}
+	// lane WATERWETBAKE1: the land side, read back the same way
+	if ( !g.landTex[0] )
+		fn->glGenTextures( 2, g.landTex );
+	static const uint8_t farFill[4] = { 255, 255, 255, 255 };
+	QStringList landParts;
+	qint64 landBytes = 0;
+	GLint align = 4;
+	fn->glGetIntegerv( GL_UNPACK_ALIGNMENT, &align );
+	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+	for ( int k = 0; k < 2; k++ ) {
+		fn->glBindTexture( GL_TEXTURE_2D, g.landTex[k] );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+		if ( k == 0 )
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R32UI, t.tilesX, t.tilesY, 0, GL_RED_INTEGER, GL_UNSIGNED_INT,
+				t.landIndex.data() );
+		else
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R8UI, t.landAtlas.empty() ? 1 : t.atlasW,
+				std::max( 1, t.landAtlasH ), 0, GL_RED_INTEGER, GL_UNSIGNED_BYTE,
+				t.landAtlas.empty() ? (const void *) farFill : (const void *) t.landAtlas.data() );
+		GLint gw = 0, gh = 0, gf = 0;
+		fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &gw );
+		fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &gh );
+		fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &gf );
+		landBytes += qint64( gw ) * gh * ( gf == GL_R32UI ? 4 : gf == GL_R8UI ? 1 : 0 );
+		landParts << QStringLiteral( "%1 %2x%3 %4" ).arg( QLatin1String( k ? "land atlas" : "land index" ) )
+			.arg( gw ).arg( gh ).arg( QLatin1String( gf == GL_R32UI ? "R32UI" : gf == GL_R8UI ? "R8UI" : "??" ) );
+	}
+	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, align );
 	fn->glBindTexture( GL_TEXTURE_2D, GLuint( was ) );
 	g.job = job;
-	g.uploaded = QStringLiteral( "water info uploaded: %1; %2 bytes (%3 MB); %4 sparse tiles of %5, %6 bodies" )
+	g.uploaded = QStringLiteral( "water info uploaded: %1; %2 bytes (%3 MB); %4 sparse tiles of %5, %6 bodies; "
+		"%7; land %8 bytes (%9 MB), %10 sparse tiles" )
 		.arg( parts.join( QLatin1String( ", " ) ) ).arg( bytes ).arg( double( bytes ) / 1048576.0, 0, 'f', 2 )
-		.arg( t.slotCount ).arg( qint64( t.tilesX ) * t.tilesY ).arg( t.bodyCount );
+		.arg( t.slotCount ).arg( qint64( t.tilesX ) * t.tilesY ).arg( t.bodyCount )
+		.arg( landParts.join( QLatin1String( ", " ) ) ).arg( landBytes )
+		.arg( double( landBytes ) / 1048576.0, 0, 'f', 2 ).arg( t.landSlots );
 	st().lastUpload = g.uploaded;
 	qInfo().noquote() << g.uploaded;
 }
@@ -382,6 +485,48 @@ int wwCellWaterInfoUniforms( Scene * scene, int unit )
 	return 3;
 }
 
+void wwCellLandShoreUniforms( Scene * scene, bool terrain )
+{
+	if ( !scene || !scene->renderer )
+		return;
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
+	if ( !prog )
+		return;
+	const int lIndex = prog->uniLocation( "landShoreIndex" );
+	if ( lIndex < 0 )
+		return;	// the default programs do not read the land side: nothing bound, nothing set
+	State & s = st();
+	QOpenGLContext * ctx = QOpenGLContext::currentContext();
+	const std::shared_ptr<Job> job = s.docs.value( scene->nifModel );
+	const Gpu * g = nullptr;
+	if ( ctx && job && job->state.load( std::memory_order_acquire ) == 1 ) {
+		if ( !s.gpu.contains( ctx ) )
+			QObject::connect( ctx, &QOpenGLContext::aboutToBeDestroyed, [ctx]() { st().gpu.remove( ctx ); } );
+		Gpu & gg = s.gpu[ctx];
+		if ( gg.job != job )
+			upload( r, gg, job );
+		g = &gg;
+	}
+	auto fn = r->fn;
+	const int loc[2] = { lIndex, prog->uniLocation( "landShoreAtlas" ) };
+	const int unit[2] = { WwCellUnit::LandShoreIndex, WwCellUnit::LandShoreAtlas };
+	for ( int k = 0; k < 2; k++ ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit[k] ) );
+		fn->glBindTexture( GL_TEXTURE_2D, g ? g->landTex[k] : 0 );
+		prog->uni1i_l( loc[k], unit[k] );
+	}
+	fn->glActiveTexture( GL_TEXTURE0 );
+	prog->uni1b( "landShoreOn", g && !landRed() );
+	prog->uni1b( "landShoreTerrain", terrain );
+	if ( g ) {
+		const WwWaterInfoTables & t = job->t;
+		prog->uni4f( "landShoreGrid", FloatVector4( t.originX, t.originY, t.texel, t.shoreQuantum ) );
+		prog->uni4f( "landShoreLayout", FloatVector4( float( t.tilesX ), float( t.tilesY ),
+			float( WwWaterInfoTables::kTileEdge ), float( WwWaterInfoTables::kTilesPerRow ) ) );
+	}
+}
+
 QString wwCellWaterInfoEcho( const void * nif )
 {
 	const State & s = st();
@@ -396,5 +541,9 @@ QString wwCellWaterInfoEcho( const void * nif )
 		line += QStringLiteral( "; last %1" ).arg( s.lastUpload );
 	if ( infoRed() )
 		line += QStringLiteral( "; WW_CELL_WATER_INFO_RED=off (neutral lookup)" );
+	if ( state == 1 )
+		line += QStringLiteral( "; " ) + wwLandShoreCensus( job->t );
+	if ( landRed() )
+		line += QStringLiteral( "; WW_CELL_LAND_SHORE_RED=off (land side neutral)" );
 	return line;
 }

@@ -140,5 +140,8 @@ bool wwTerrainShadowPending();
 //! the census line
 QString wwShadowSetSummary();
 bool wwShadowRed( const char * name );
+//! lane WATERWETBAKE1: the shadow set's terrain test (the cells' LAND under "ground", the far LOD's terrain)
+class Shape;
+bool wwCellIsTerrainShape( const Shape * sh );
 
 #endif

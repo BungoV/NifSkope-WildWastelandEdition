@@ -1387,15 +1387,25 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 		 * belonging to a different body counts as a shore at distance zero, so
 		 * two bodies that touch each have their own shore along the seam. */
 		const quint16 BIG = 60000;
+		/* Lane WATERWETBAKE1: with shoreLand the same sweep runs on the dry side too, so a land texel
+		 * carries its distance to the nearest wet texel; the wet rule never reads a dry value. */
+		const bool land = in.opt.shoreLand;
 		shore.assign( size_t( samples ), 0 );
 		for ( size_t i = 0; i < grid.size(); i++ )
-			shore[i] = grid[i] ? BIG : 0;
+			shore[i] = ( grid[i] || land ) ? BIG : 0;
 		auto step = [&]( qint64 y, qint64 x, qint64 ny, qint64 nx, int w ) {
 			if ( ny < 0 || ny >= gh || nx < 0 || nx >= gw )
 				return;
 			const size_t at = size_t( y * gw + x ), nat = size_t( ny * gw + nx );
-			if ( !grid[at] )
+			if ( !grid[at] ) {
+				if ( !land )
+					return;
+				const quint16 dcand = grid[nat] ? quint16( w )
+					: quint16( qMin( int( shore[nat] ) + w, int( BIG ) ) );
+				if ( dcand < shore[at] )
+					shore[at] = dcand;
 				return;
+			}
 			const quint16 cand = ( grid[nat] == grid[at] )
 				? quint16( qMin( int( shore[nat] ) + w, int( BIG ) ) )
 				: quint16( w );
@@ -1419,7 +1429,7 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 	}
 
 	quint64 pos = baseOffset + quint64( out.bodyTable.size() ) + quint64( out.strokeStore.size() );
-	qint64 uniformId = 0, uniformFlow = 0, uniformShore = 0;
+	qint64 uniformId = 0, uniformFlow = 0, uniformShore = 0, landNear = 0;
 	const int stepB = spc / bodyS;
 	out.idPlane = lodtPackPlane( cellsX, cellsY, bodyS, 2, pos,
 		[&]( int tx, int ty, quint8 * dst ) {
@@ -1478,9 +1488,11 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 						 * 4096/spc world units and a step is 32 of them. */
 						const double texels = double( shore[at] ) / 3.0;
 						const double units = texels * ( 4096.0 / double( spc ) );
-						const int v = grid[at]
+						const int v = ( grid[at] || in.opt.shoreLand )
 							? int( qMin( 255.0, units / double( LODL_SHORE_QUANTUM ) + 0.5 ) )
 							: 255;
+						if ( !grid[at] && v < 255 )
+							landNear++;
 						dst[j * bodyS + i] = quint8( v );
 					}
 				}
@@ -1651,6 +1663,9 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			"%4 texel(s) wet under a sloped mesh, %5 sample(s) off their body's plane" )
 			.arg( out.surfacePlane.size() ).arg( uniformSurf )
 			.arg( qint64( cellsX ) * cellsY ).arg( slopedWet ).arg( surfNonZero );
+		if ( in.opt.shore && in.opt.shoreLand )
+			out.summary += QString( "; shore plane land side: %1 dry sample(s) within %2 units of water" )
+				.arg( landNear ).arg( 255 * int( LODL_SHORE_QUANTUM ) );
 	}
 	if ( error )
 		error->clear();

@@ -7047,7 +7047,8 @@ int usage()
 		  << "                                          REWRITES the file it is given,\n"
 		  << "                                          so give it a copy\n"
 		  << "  lodl <file.lodl> --water-info <dir>     the water shader's sparse tables (index,\n"
-		  << "                                          atlas, bodies, census) into <dir>\n"
+		  << "                                          atlas, bodies, census) into <dir>, and the\n"
+		  << "                                          land side's (land_index, land_atlas)\n"
 		  << "  lodl <out.lodl> --water-slope-selftest [--water-slope-flat <flat.lodl>]\n"
 		  << "                                          sloped-water known-answer test: it\n"
 		  << "                                          WRITES <out.lodl> (a tilted river\n"
@@ -8790,6 +8791,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-body-samples" ) ) gLodlWater.bodySamples = next().toInt();
 		else if ( t == QLatin1String( "--water-flow-samples" ) ) gLodlWater.flowSamples = next().toInt();
 		else if ( t == QLatin1String( "--water-no-shore" ) ) gLodlWater.shore = false;
+		else if ( t == QLatin1String( "--water-no-shore-land" ) ) gLodlWater.shoreLand = false;
 		else if ( t == QLatin1String( "--water-velocities" ) ) gLodlWater.velocityPlugin = next();
 		else if ( t == QLatin1String( "--water-report" ) ) gLodlWater.reportPath = next();
 		else if ( t == QLatin1String( "--dump-land" ) ) lgDumpLand = next();
@@ -9766,7 +9768,7 @@ int nifskopeCliMain( const QStringList & args )
 			QString werr;
 			const bool ok = wwWaterInfoBuild( file, t, &werr ) && wwWaterInfoDump( t, lodlWaterInfoDir, &werr );
 			if ( ok )
-				out() << wwWaterInfoCensus( t ) << Qt::endl;
+				out() << wwWaterInfoCensus( t ) << Qt::endl << wwLandShoreCensus( t ) << Qt::endl;
 			else
 				err() << "error: " << werr << Qt::endl;
 			rc = ok ? 0 : 1;

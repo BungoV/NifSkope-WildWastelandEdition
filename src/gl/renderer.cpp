@@ -56,6 +56,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellgrass.h"	// lane GRASSMB1
 #include "gl/cellcull.h"	// lane DECALS1: the placed decals' parallax
 #include "gl/celllooks.h"
+#include "gl/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
+#include "gl/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
 #include "gl/cellssr.h"
 #include "gl/cellreflprobe.h"	// lane REFLPROBE1
 #include "gl/cellssgi.h"
@@ -1737,6 +1739,8 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
 		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
+	if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: no default program reads it
+		wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
 
 	// Per-draw GL state, same as the spec/gloss path ends with. Omitting it made
 	// the shape inherit whatever blend/depth state the previous program left
@@ -1888,6 +1892,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)
 		}
 		wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
+		if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: no default program reads it
+			wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
 		if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 			// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
 			GLint dst = 0;
