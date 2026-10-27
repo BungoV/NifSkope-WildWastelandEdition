@@ -442,7 +442,7 @@ QString at3( const double p[3] ) { return QStringLiteral( "(%1, %2, %3)" ).arg( 
 
 int probeVolCheckCli( const QStringList & args )
 {
-	QString soupPath, spacePath, outDir, raysWay = QStringLiteral( "auto" ), mutate, cellsOnly, pngPath;
+	QString soupPath, spacePath, outDir, raysWay = QStringLiteral( "auto" ), mutate, cellsOnly, pngPath, pointsPath;
 	double h = 16, margin = 128, tolPoke = 4, tolSkin = 8, tolGap = 4096, skyMax = 0.25, openMax = 0.25, reach = 1536;
 	int K = 32;
 	for ( int i = 0; i < args.size(); i++ ) {
@@ -455,6 +455,7 @@ int probeVolCheckCli( const QStringList & args )
 		else if ( a == QLatin1String( "--mutate" ) ) { mutate = nx; i++; }
 		else if ( a == QLatin1String( "--cells" ) ) { cellsOnly = nx; i++; }
 		else if ( a == QLatin1String( "--png" ) ) { pngPath = nx; i++; }
+		else if ( a == QLatin1String( "--points" ) ) { pointsPath = nx; i++; }
 		else if ( a == QLatin1String( "--h" ) ) { h = nx.toDouble(); i++; }
 		else if ( a == QLatin1String( "--margin" ) ) { margin = nx.toDouble(); i++; }
 		else if ( a == QLatin1String( "--k" ) ) { K = nx.toInt(); i++; }
@@ -468,7 +469,7 @@ int probeVolCheckCli( const QStringList & args )
 	if ( soupPath.isEmpty() || spacePath.isEmpty() || h <= 0 || K < 8 ) {
 		o << "usage: volcheck --soup S --space <dir|file.space> [--out D] [--rays auto|cpu|gpu|both] [--h 16] [--margin 128] "
 			"[--k 32] [--tol-poke 4] [--tol-skin 8] [--tol-gap 4096] [--cells k1,k2] [--mutate grow:N|shrink:N|shift:N|drop] "
-			"[--png f]\n";
+			"[--png f] [--points f]\n";
 		return 2;
 	}
 	QElapsedTimer total;
@@ -909,6 +910,7 @@ int probeVolCheckCli( const QStringList & args )
 	// ---- shape points the room's own flood never reached: sealed, solid, a spill through an opening or a wall poke
 	struct PokeRay { int room, p, q; };
 	std::vector<PokeRay> pk;
+	std::vector<std::pair<PokeRay, double>> pokeDump;   // --points: every poke point, its room and depth
 	for ( int ri = 0; ri < NR; ri++ ) {
 		RoomStat & S = st[size_t( ri )];
 		const std::vector<int> & mine = inRoom[size_t( ri )];
@@ -987,6 +989,8 @@ int probeVolCheckCli( const QStringList & args )
 			}
 			S.poke++;
 			pokes[size_t( x.room )].push_back( { depth, x.p } );
+			if ( !pointsPath.isEmpty() )
+				pokeDump.push_back( { x, depth } );
 			if ( nRooms( size_t( x.p ) ) > 1 )
 				S.overlap++;
 			if ( compOpen[size_t( D.f( x.p ) )] && reachCount[size_t( x.p )] == 0 )
@@ -1052,6 +1056,36 @@ int probeVolCheckCli( const QStringList & args )
 				for ( int a = 0; a < 3; a++ )
 					S.blobAt[a] = c[a] / double( real );
 			}
+		}
+	}
+
+	// ---- --points: the real gap points (with how many rooms' floods reach each) and the poke points, one per line
+	if ( !pointsPath.isEmpty() ) {
+		QFile pf( pointsPath );
+		if ( pf.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+			QTextStream ps( &pf );
+			ps << "kind\tx\ty\tz\trooms\troom\tdepth\n";
+			for ( size_t i = 0; i < P; i++ )
+				if ( counted[i] ) {
+					int first = -1;
+					for ( int ri = 0; ri < NR && first < 0; ri++ )
+						if ( std::binary_search( reached[size_t( ri )].begin(), reached[size_t( ri )].end(), int( i ) ) )
+							first = ri;
+					const double * p = L.at( int( i ) );
+					ps << "gap\t" << f0( p[0] ) << "\t" << f0( p[1] ) << "\t" << f0( p[2] ) << "\t" << reachCount[i] << "\t"
+						<< ( first >= 0 ? rooms[size_t( first )].name() : QString() ) << "\t" << f1( R.minT[i] ) << "\n";
+				}
+			for ( const auto & d : pokeDump ) {
+				const double * p = L.at( d.first.p );
+				ps << ( nRooms( size_t( d.first.p ) ) > 1 ? "overlap\t" : "poke\t" ) << f0( p[0] ) << "\t" << f0( p[1] ) << "\t" << f0( p[2] )
+					<< "\t" << nRooms( size_t( d.first.p ) ) << "\t" << rooms[size_t( d.first.room )].name() << "\t" << f1( d.second ) << "\n";
+			}
+			for ( int ri = 0; ri < NR; ri++ )
+				for ( int i : reached[size_t( ri )] )
+					if ( holds( size_t( i ), ri ) && !enclosed[size_t( i )] ) {
+						const double * p = L.at( i );
+						ps << "leak\t" << f0( p[0] ) << "\t" << f0( p[1] ) << "\t" << f0( p[2] ) << "\t1\t" << rooms[size_t( ri )].name() << "\t0\n";
+					}
 		}
 	}
 
