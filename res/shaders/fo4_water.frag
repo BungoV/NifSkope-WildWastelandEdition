@@ -132,6 +132,10 @@ uniform int waterProbe;
 #ifdef WW_WATER_CONTACT
 #include "water_contact.glsl"
 #endif
+// lane WATERLOOK1 step 15 (WATERFLOW1): foam streaks carried by the baked river flow (after water_info + water_shore)
+#ifdef WW_WATER_RIVERFOAM
+#include "water_riverfoam.glsl"
+#endif
 #ifdef WW_WATER_DISP	// lane WATERLOOK1 step 2: fo4_waterlookd.prog, the displaced water: the undisplaced world xy (u)
 in vec2 wwOcBase;
 #endif
@@ -338,6 +342,12 @@ void main()
 	vec4 contact = wwWaterContact( vert, P, ripS, eye, waterShoreTime );
 	if ( under )
 		contact.x = 0.0;
+#endif
+#ifdef WW_WATER_RIVERFOAM
+	// lane WATERLOOK1 step 15: river foam (density, alpha, C T, speed); the pixel's width (u) in uniform flow
+	vec4 rfoam = wwWaterRiverFoam( P.xy, waterShoreTime, sqrt( length( cross( dFdx( P ), dFdy( P ) ) ) ) );
+	if ( under )
+		rfoam = vec4( 0.0 );
 #endif
 	vec3 N0 = N;
 	N = normalize( flatten * ( N - vec3( 0.0, 0.0, 1.0 ) ) + vec3( 0.0, 0.0, 1.0 ) );
@@ -554,6 +564,9 @@ void main()
 #ifdef WW_WATER_CONTACT
 		lin = mix( lin, foamLin, wwContactFoamAlpha( contact.x, P.xy, contact.w, waterShoreTime ) );	// step 12: contact foam
 #endif
+#ifdef WW_WATER_RIVERFOAM
+		lin = mix( lin, foamLin, rfoam.y );	// step 15: river foam streaks
+#endif
 #endif
 #ifdef WW_WATER_OCEAN
 		// lane WATERLOOK1 step 4: sunlight through the crests, the body colour, near faces and far mean alike (red noglow)
@@ -655,6 +668,10 @@ void main()
 #ifdef WW_WATER_CONTACT
 		else if ( waterProbe == 47 )	// WATERLOOK1 step 12: (contact foam density, distance / 1024, trust)
 			o = vec3( contact.x, clamp( contact.y / 1024.0, 0.0, 1.0 ), contact.z );
+#endif
+#ifdef WW_WATER_RIVERFOAM
+		else if ( waterProbe == 48 )	// WATERLOOK1 step 15: (river foam density, alpha, 0.5 + 0.5 C T)
+			o = vec3( rfoam.x, rfoam.y, clamp( 0.5 + 0.5 * rfoam.z, 0.0, 1.0 ) );
 #endif
 		fragColor = vec4( o, 1.0 );
 	}

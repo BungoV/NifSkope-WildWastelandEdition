@@ -96,6 +96,10 @@ bool wwCellWaterSsrWanted( Scene * scene );
  *  The contact distance comes from the depth behind the pixel; each strike lays foam that drifts out and decays, so
  *  rings pulse out once a wave period; the strength follows the shore foam's energy rule (calm: a thin lap line at
  *  most); banks stay with the Shore foam row. Red WW_CELL_WATER_CONTACT_RED=nodepth | flat | still | noshorecut. */
+/*! lane WATERLOOK1 step 15 (WATERFLOW1, 2026-10-27): the River foam row (WwLook::WaterRiverFoam, pin
+ *  WW_CELL_WATER_RIVERFOAM): foam streaks on baked rivers, laid along the baked flow and carried downstream by it
+ *  (res/shaders/water_riverfoam.glsl). The moving water makes the foam; it gathers where the flow converges and thins
+ *  where it spreads. Red WW_CELL_WATER_RIVERFOAM_RED=nodiv | still | iso | alias (combinable). */
 const char * wwCellWaterProgram();
 //! lane WATERCOMBINE1: any water look row is on (the water draws with fo4_waterlook.prog)
 bool wwCellWaterLookOn();

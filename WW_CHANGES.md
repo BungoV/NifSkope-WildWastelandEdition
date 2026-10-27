@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 15 (2026-10-27, branch waterlook1-20261027): foam streaks on rivers (WATERFLOW1)
+
+- New row **River foam** (WW_CELL_WATER_RIVERFOAM), a water row. Rivers get long, thin foam streaks that lie along
+  the baked flow and drift downstream with it. Only rivers get them; lakes and the sea are untouched.
+- Faster water makes more foam. At the bake's typical river speed the foam covers about 7% of the surface. The foam
+  gathers where the flow squeezes together and thins where it spreads out, as real river foam does.
+- The streaks follow the river through bends without breaking up or jumping. Each streak fades out and back in
+  over two minutes, so nothing slides forever or snaps back. Far away the streaks blend into an even pale tint
+  instead of flickering.
+- Drawn in the water look programs. With the row off nothing changes, and the plain water program keeps its machine
+  code. New file res/shaders/water_riverfoam.glsl. Probe 48 shows (foam amount, alpha, gathering).
+- Reds on WW_CELL_WATER_RIVERFOAM_RED (combinable): `nodiv` (no gathering), `still` (foam not carried), `iso`
+  (round blobs, not streaks), `alias` (no far fade).
+- Offline (no window, the real shader on synthetic rivers):
+  - The cover matches the asked amount within 0.02 at 5%, 15%, 30% and 50%, and stays within 0.02 through a whole
+    foam life.
+  - The foam moves at 19.95 u/s on a 20 u/s river; with each flow texel given its own noise it read 10 u/s.
+  - The streaks are 7 times longer than wide. On converging against diverging flow the cover ratio is 2.84 (law 2.85).
+  - In a bend, each strip's cover is within 0.03 of its amount. No frame-to-frame pop.
+  - About 0.27 ms a 1080p pass with every pixel on a river. All 107 programs link.
+
 ## Lane WATERLOOK1 step 14 (2026-10-27, branch waterlook1-20261027): waves running up the beach (WATERSWASH1)
 
 - New row **Wave run-up** (WW_CELL_LAND_SWASH), a water row. Each wave that reaches the shore runs up the beach as a

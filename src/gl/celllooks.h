@@ -61,6 +61,7 @@ enum class WwLook : int
 	WaterContact,			// WATERLOOK1 step 12: foam rings where waves strike anything standing in the water (WW_CELL_WATER_CONTACT)
 	LandWet,			// WATERLOOK1 step 13: the ground darkens and shines beside baked water (WW_CELL_LAND_WET)
 	LandSwash,			// WATERLOOK1 step 14: the waves run up the beach and drain back (WW_CELL_LAND_SWASH)
+	WaterRiverFoam,			// WATERLOOK1 step 15: foam streaks carried by the baked river flow (WW_CELL_WATER_RIVERFOAM)
 	Count
 };
 
