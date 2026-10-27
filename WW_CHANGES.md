@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 5 (2026-10-27, branch waterlook1-20261027): waves carried along the river flow
+
+- **Waves travel with the current** (Ocean waves row). On water with a baked flow plane (WATERFLOWBAKE1), the wind's
+  waves now drift downstream at the current's speed. Two reads of the waves, half a 4 s period apart, each fading out
+  where it restarts, so no restart shows. The mix is rescaled by how alike the two reads are at their separation,
+  which comes from the wave spectrum itself, so the water does not turn smoother and rougher each period. The flow is
+  blended between bake texels, so the waves do not tear along texel edges. Still water reads the waves as before. New
+  res/shaders/water_flowwaves.glsl. src/gl/oceanspectrum.h computes the correlation table.
+- Wave heights (the step 2 vertices) are not carried. Fresh-water heights are centimetres.
+- Red WW_CELL_WATER_OCEAN_RED=noflow. fo4_water.prog (row off) keeps its machine code.
+- Offline (no window, the real spectrum and flow lookup): the mixed roughness stays within 4% of one read at every
+  phase, for 0 to 2 m/s along, across and at 45 degrees to the wind (red, no rescale: 33% swings). Waves move 17 px
+  for a wanted 17.5. Where a current starts, the difference from still water falls with the speed, to 0.8% at
+  1/256 u/s (red, a 30% seam: stays 30%). No step across flow texels beyond the bilinear ramp (red, nearest: a full
+  1 m/s jump). The correlation table matches the Python model to 5e-13. All programs link.
+
 ## Lane WATERLOOK1 step 4 (2026-10-27, branch waterlook1-20261027): far colour from the spectrum
 
 - **Crest glow** (Ocean waves row). Sunlight entering the back of a wave scatters forward and leaves through the face

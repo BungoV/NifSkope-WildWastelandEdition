@@ -113,6 +113,7 @@ uniform int waterProbe;
 #include "water_ocean.glsl"
 #include "water_ripple.glsl"
 #include "water_sss.glsl"
+#include "water_flowwaves.glsl"
 #endif
 #ifdef WW_WATER_DISP	// lane WATERLOOK1 step 2: fo4_waterlookd.prog, the displaced water: the undisplaced world xy (u)
 in vec2 wwOcBase;
@@ -301,7 +302,7 @@ void main()
 	vec2 ocP = P.xy;
 #endif
 	vec2 ocDx = dFdx( ocP ), ocDy = dFdy( ocP );
-	WwOcean oc = waterOceanOn ? wwWaterOcean( ocP, ocDx, ocDy ) : WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
+	WwOcean oc = waterOceanOn ? wwWaterOceanFlowed( ocP, ocDx, ocDy ) : WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
 	if ( oc.w > 0.0 )
 		N = normalize( vec3( mix( N.xy / max( N.z, 1e-3 ), oc.slope, oc.w ), 1.0 ) );
 	// step 3: the incident short waves reflect off what stands in the water (red norip); uniform flow (derivatives)

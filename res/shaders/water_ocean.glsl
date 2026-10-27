@@ -178,13 +178,16 @@ int wwOcBody( vec2 P, out float ws, out float a, out vec3 gc, out float m, out f
 	return set;
 }
 
-/* the spectrum at world xy P (u); dPx, dPy its screen derivatives; w = 0 off a baked body (today's water) */
-WwOcean wwWaterOcean( vec2 P, vec2 dPx, vec2 dPy )
+/* the spectrum at world xy P (u); dPx, dPy its screen derivatives; w = 0 off a baked body (today's water). Q: where
+ * the cascades are read (step 5: the flow carries the waves, so a river reads them upstream); the body is P's, its
+ * set (0 sea, 1 fresh, -1 none) in setOut */
+WwOcean wwWaterOceanQ( vec2 P, vec2 Q, vec2 dPx, vec2 dPy, out int setOut )
 {
 	WwOcean o = WwOcean( vec2( 0.0 ), 0.0, 0.0, 0.0, 1.0 );
 	float ws, a, m, pw;
 	vec3 gc;
 	int set = wwOcBody( P, ws, a, gc, m, pw );
+	setOut = set;
 	if ( set < 0 )
 		return o;
 	o.w = ws;
@@ -192,7 +195,7 @@ WwOcean wwWaterOcean( vec2 P, vec2 dPx, vec2 dPy )
 
 	// the tiles run along the wind: rotate world metres into them, and the slopes back
 	vec2 d = waterOceanWind.xy, e = vec2( -d.y, d.x );
-	vec2 Pm = P * kOcMetre, gxm = dPx * kOcMetre, gym = dPy * kOcMetre;
+	vec2 Pm = Q * kOcMetre, gxm = dPx * kOcMetre, gym = dPy * kOcMetre;
 	vec2 q = vec2( dot( Pm, d ), dot( Pm, e ) ), qx = vec2( dot( gxm, d ), dot( gxm, e ) ), qy = vec2( dot( gym, d ), dot( gym, e ) );
 	vec4 iL = waterOceanInvL[set];
 	vec4 B = vec4( 0.0 );
@@ -216,6 +219,12 @@ WwOcean wwWaterOcean( vec2 P, vec2 dPx, vec2 dPy )
 	o.white = ( 1.0 - smoothstep( 0.15, 0.55, J ) ) * smoothstep( 4.0, 8.0, U ) * ws;
 	o.cau = clamp( a * waterOceanSetB[set].y * gc.z / max( waterOceanWind.w, 1e-3 ), 0.0, 3.0 );
 	return o;
+}
+
+WwOcean wwWaterOcean( vec2 P, vec2 dPx, vec2 dPy )
+{
+	int set;
+	return wwWaterOceanQ( P, P, dPx, dPy, set );
 }
 
 // one cascade's ( h, Dx, Dy ) at tile uv and mip lod: the slopes' blend and offsets, so heights and normals agree

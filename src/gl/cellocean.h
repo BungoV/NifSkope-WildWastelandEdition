@@ -28,12 +28,17 @@ class Scene;
  *  Step 4 (water_sss.glsl): sunlight through the crests (the body colour, forward lobe g 0.5, faces tilted to the eye);
  *  a pixel takes the expected facing part over its resolved slope and the lost variance, so far water shows the
  *  spectrum's mean glow with no shimmer. Gates: notes/waterlook1/tools/sss_gl.py.
+ *  Step 5 (water_flowwaves.glsl): on the baked river flow (WATERFLOWBAKE1) the waves' slopes travel downstream, two
+ *  reads half a 4 s period apart, each fading out at its own restart; the mix is renormalised by the slope field's
+ *  correlation at the reads' separation, computed from the spectrum (oceanspectrum.h slopeCorr), so the water never
+ *  breathes. The flow is bilinear between the bake's texels. Still water reads one sample (today's waves). The
+ *  vertices (step 2) are not carried: fresh-water heights are centimetres. Gates: notes/waterlook1/tools/flow_gl.py.
  *
  *  Row "Ocean waves" (WW/CellWaterOcean), pin WW_CELL_WATER_OCEAN=0|1. Off: no GL call, the water draws as before.
  *  Red WW_CELL_WATER_OCEAN_RED = old (today's normals under the row) | tile (plain repeats) | nopatch (no wind patches)
  *  | novar (no lost slope variance, so no rings either) | nochop (no chop in the slopes, the whitecaps or the vertices)
  *  | flat (step 2: no displacement, fo4_waterlook.prog) | norip (step 3: no contact rings) | noglow (step 4: no crest
- *  glow).
+ *  glow) | noflow (step 5: the waves stay put on a flowing river).
  *  Probes WW_CELL_WATER_PROBE=39 (the spectrum's slope, its weight) and 40 (whitecaps, lost slope rms, caustic factor). */
 
 //! Build this frame's spectrum (before the reflections pass: the water's ray pass reads it too).
