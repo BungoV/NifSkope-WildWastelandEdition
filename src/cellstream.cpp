@@ -927,7 +927,8 @@ bool cellStreamWanted()
 {
 	if ( wwEnvIsSet( "WW_CELL_STREAM" ) )
 		return wwEnvInt( "WW_CELL_STREAM" ) != 0;
-	return wwEnvIsEmpty( "WW_CELL_OPEN" );   // a harness's fixed block stays fixed
+	// a harness's fixed block stays fixed; the census walk opens exterior blocks itself and must weld them
+	return wwEnvIsEmpty( "WW_CELL_OPEN" ) && wwEnvIsEmpty( "WW_CELL_CENSUS_TEST" );
 }
 
 void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
