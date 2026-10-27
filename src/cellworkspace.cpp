@@ -36,6 +36,9 @@ BSD License - see nifskope.h
 #include "ui/opencelldialog.h"	// lane OPENCELLFIX1: the Load order and Cells tabs
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX1: the Show tab, the Show menu stays open
 #include "ui/widgets/wwdropdown.h"	// lane OPENCELLFIX2: the dock's one dropdown
+#include "gl/cellvolair.h"	// lane OPENCELLFIX2: the fog group's rows (notes 22)
+#include "gl/lookdevstage.h"
+#include "gl/shadowset.h"	// lane OPENCELLFIX2: the shadow group's Scene window rows (note 26)
 #include "wwswitch.h"
 #include "cellmodpick.h"
 
@@ -525,7 +528,7 @@ void CellWorkspacePanel::buildUi()
 	cellFarLodTypeGroup->setExclusive( true );
 	{
 		const int t = cellFarLodTypePinned() != WwFarLodAuto ? cellFarLodTypePinned() : cellFarLodLastType();
-		const QStringList names = { tr( "Vanilla" ), tr( "FO4CS" ) };
+		const QStringList names = { tr( "Vanilla" ), tr( "Fusion Shaders" ) };	// note 21: the full name
 		for ( int k = 0; k < names.size(); k++ ) {
 			QAction * a = cellFarLodType->addAction( names.at( k ) );
 			a->setCheckable( true );
@@ -567,7 +570,7 @@ void CellWorkspacePanel::buildUi()
 	}
 	section( tr( "Lighting" ), "lighting" );
 	cellLights = tick( showMenu, tr( "Cell lights" ), "CellWorkspaceCellLights", wwCellLightsOn() );
-	cellGi = tick( showMenu, tr( "GI" ), "CellWorkspaceCellGi", wwCellGiOn() );
+	cellGi = tick( showMenu, tr( "Precomputed Radiance Transfer" ), "CellWorkspaceCellGi", wwCellGiOn() );	// bungo 10-27 note 12: the label only
 	/* lane SKYSTR1 (bungo 10-13, FO4CS's Skylighting strength): how much the GI's sky visibility darkens, 0-100 %.
 	 * A label | field row as the Bloom rows; live (the grid relights 0.4 s after the value stands still) */
 	{
@@ -613,7 +616,7 @@ void CellWorkspacePanel::buildUi()
 	}
 	cellFar = tick( showMenu, tr( "Far light" ), "CellWorkspaceCellFar", wwCellFarOn() );
 	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
-	cellPass = showMenu->addMenu( tr( "Far light mode" ) );
+	cellPass = showMenu->addMenu( tr( "Debug view" ) );	// bungo 10-27 note 13: under Precomputed Radiance Transfer
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
 	cellPassGroup = new QActionGroup( cellPass );
 	cellPassGroup->setExclusive( true );
@@ -631,7 +634,7 @@ void CellWorkspacePanel::buildUi()
 	cellShadow = tick( showMenu, tr( "Light shadows" ), "CellWorkspaceLightShadows", wwCellShadowOn() );
 	cellFlicker = tick( showMenu, tr( "Light flicker" ), "CellWorkspaceLightFlicker", wwCellFlickerOn() );
 	// lane LAMPSHADOW1: stored lamp shadows, ships Off; the tier is the face size (Medium = the cube pass's own)
-	cellLampShadow = showMenu->addMenu( tr( "Lamp shadows" ) );
+	cellLampShadow = showMenu->addMenu( tr( "Cached lamp shadows" ) );	// note 16: label only
 	cellLampShadow->setObjectName( QStringLiteral( "CellWorkspaceLampShadows" ) );
 	cellLampShadowGroup = new QActionGroup( cellLampShadow );
 	cellLampShadowGroup->setExclusive( true );
@@ -663,7 +666,7 @@ void CellWorkspacePanel::buildUi()
 	}
 	cellShadowBudget->setEnabled( !wwCellShadowBudgetPinned() );
 	// lane LIGHTPHYS1: the light intensity curve, ships Off (curve 1)
-	cellLightCurve = showMenu->addMenu( tr( "Light intensity curve" ) );
+	cellLightCurve = showMenu->addMenu( tr( "Lamp brightness contrast" ) );	// note 17: label only
 	cellLightCurve->setObjectName( QStringLiteral( "CellWorkspaceLightCurve" ) );
 	cellLightCurveGroup = new QActionGroup( cellLightCurve );
 	cellLightCurveGroup->setExclusive( true );
@@ -679,7 +682,7 @@ void CellWorkspacePanel::buildUi()
 	}
 	cellLightCurve->setEnabled( !wwCellLightCurvePinned() );
 	// lane LIGHTPHYS3: the Advanced light model's calibration, ships 1 (FO4CS's default)
-	cellLightCalib = showMenu->addMenu( tr( "Advanced light calibration" ) );
+	cellLightCalib = showMenu->addMenu( tr( "Calibration" ) );	// note 25: under Advanced model
 	cellLightCalib->setObjectName( QStringLiteral( "CellWorkspaceLightCalibration" ) );
 	cellLightCalibGroup = new QActionGroup( cellLightCalib );
 	cellLightCalibGroup->setExclusive( true );
@@ -716,7 +719,7 @@ void CellWorkspacePanel::buildUi()
 	// lane MOTION1: the game's temporal AA, the same state as the Scene popup's Temporal AA row; ships off
 	cellTaa = tick( showMenu, tr( "Temporal AA" ), "CellWorkspaceTemporalAa", wwGameTaaRowOn() );
 	// lane TAA2: our own resolve in place of the game's, Off | Low | Medium | High | Ultra; ships Off
-	cellModernTaa = showMenu->addMenu( tr( "Modern temporal AA" ) );
+	cellModernTaa = showMenu->addMenu( tr( "Improved Temporal Anti-Aliasing" ) );	// note 19: label only
 	cellModernTaa->setObjectName( QStringLiteral( "CellWorkspaceModernTaa" ) );
 	cellModernTaa->setEnabled( !wwTaa2Pinned() );
 	cellModernTaaGroup = new QActionGroup( cellModernTaa );
@@ -732,14 +735,15 @@ void CellWorkspacePanel::buildUi()
 		}
 	}
 	// lane TAA3: the Modern resolve on the linear frame, before the tone map; ships Off
-	cellModernTaaHdr = tick( showMenu, tr( "Modern temporal AA before tone map" ), "CellWorkspaceModernTaaHdr", wwTaa2HdrOn() );
-	cellSsr = tick( showMenu, tr( "SSR" ), "CellWorkspaceSsr", wwCellSsrOn() );
-	cellSsrExt = tick( showMenu, tr( "SSR outdoors" ), "CellWorkspaceSsrOutdoors", wwCellSsrExteriorOn() );
+	cellModernTaaHdr = tick( showMenu, tr( "Before tone map" ), "CellWorkspaceModernTaaHdr", wwTaa2HdrOn() );
+	cellSsr = tick( showMenu, tr( "Screen-Space Reflections" ), "CellWorkspaceSsr", wwCellSsrOn() );	// note 15: labels only
+	if ( wwCellSsrExteriorOn() != wwCellSsrOn() )
+		wwCellSsrRowSet( wwCellSsrOn() );	// note 20: one row sets both halves; an old split takes the row's state
 	cellReflProbe = tick( showMenu, tr( "Reflection probes" ), "CellWorkspaceReflProbe", wwCellReflProbeOn() );	// lane REFLPROBE1
 	// lane SSGI1: the screen-space bounce, ships off; its quality is FO4CS's four tiers
-	cellSsgi = tick( showMenu, tr( "SSGI" ), "CellWorkspaceSsgi", wwCellSsgiOn() );
+	cellSsgi = tick( showMenu, tr( "Screen-Space Global Illumination" ), "CellWorkspaceSsgi", wwCellSsgiOn() );	// note 14: label only
 	cellSsgi->setEnabled( !wwCellSsgiPinned() );
-	cellSsgiQ = showMenu->addMenu( tr( "SSGI quality" ) );
+	cellSsgiQ = showMenu->addMenu( tr( "Screen-Space Global Illumination quality" ) );
 	cellSsgiQ->setObjectName( QStringLiteral( "CellWorkspaceSsgiQuality" ) );
 	cellSsgiQGroup = new QActionGroup( cellSsgiQ );
 	cellSsgiQGroup->setExclusive( true );
@@ -913,6 +917,98 @@ void CellWorkspacePanel::buildUi()
 			} );
 		}
 	}
+	/* lane OPENCELLFIX2 (bungo 10-27 notes 17-26): the Display groups' own ticks -- a master per new or split group
+	 * (gl/celllooks.h WwGroup) -- and the Scene window's fog and shadow settings, one state with its rows: each side
+	 * says wwLiveChanged( topic ) and re-reads on the other's word. */
+	QMenu * groupsMenu = showMenu->addMenu( tr( "Groups" ) );
+	groupsMenu->setObjectName( QStringLiteral( "CellWorkspaceGroups" ) );
+	for ( int k = 0; k < int( WwGroup::Count ); k++ ) {
+		const WwGroup g = WwGroup( k );
+		QAction * a = tick( groupsMenu, tr( wwGroupLabel( g ) ),
+			( QByteArray( "CellWorkspaceGroup_" ) + wwGroupName( g ) ).constData(), wwGroupOn( g ) );
+		a->setData( k );
+	}
+	auto liveTick = [&]( const char * name, const QString & label, const char * topic, bool ( *get )(), void ( *set )( bool ) ) {
+		QAction * a = tick( groupsMenu, label, name, get() );
+		const QString t = QLatin1String( topic );
+		connect( a, &QAction::toggled, this, [this, set, t]( bool on ) {
+			set( on );
+			wwLiveChanged( t );
+			if ( glView )
+				glView->update();
+		} );
+		wwLiveWatch( a, t, [a, get]() {
+			if ( a->isChecked() != get() )
+				a->setChecked( get() );
+		} );
+	};
+	auto liveTier = [&]( const char * name, const QString & label, const char * topic, int ( *get )(), void ( *set )( int ) ) {
+		QMenu * m = groupsMenu->addMenu( label );
+		m->setObjectName( QLatin1String( name ) );
+		auto * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		const QStringList names = { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) };
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == get() );
+			grp->addAction( a );
+		}
+		const QString t = QLatin1String( topic );
+		connect( grp, &QActionGroup::triggered, this, [this, set, t]( QAction * a ) {
+			set( a->data().toInt() );
+			wwLiveChanged( t );
+			if ( glView )
+				glView->update();
+		} );
+		wwLiveWatch( m, t, [grp, get]() {
+			for ( QAction * a : grp->actions() )
+				if ( a->data().toInt() == get() && !a->isChecked() )
+					a->setChecked( true );
+		} );
+	};
+	liveTick( "CellWorkspaceVolAir", tr( "Improved Volumetric Fog" ), "volAir", &wwVolAirOn, &wwVolAirSetOn );
+	liveTier( "CellWorkspaceFarAir", tr( "Far air" ), "farAir", &wwVolAirFarTier, &wwVolAirSetFarTier );
+	liveTick( "CellWorkspaceVolPart", tr( "Particles" ), "volPart", &wwVolPartOn, &wwVolPartSetOn );
+	liveTick( "CellWorkspaceFogDrift", tr( "Drift" ), "fogDrift", &wwVolAirDriftOn, &wwVolAirSetDriftOn );
+	liveTick( "CellWorkspaceCascadedShadows", tr( "Cascaded shadows" ), "lookdevShadows", &wwLookdevShadows, &wwLookdevSetShadows );
+	liveTier( "CellWorkspaceCascadeQuality", tr( "Cascade quality" ), "cascadeQuality", &wwShadowCascadeTier, &wwShadowSetCascadeTier );
+	{	// the cascades' reach, a label | field row folded under Cascaded shadows
+		QWidget * panel = new QWidget( groupsMenu );
+		panel->setObjectName( QStringLiteral( "CellWorkspaceShadowDistancePanel" ) );
+		QGridLayout * gl = new QGridLayout( panel );
+		gl->setContentsMargins( 8, 2, 8, 2 );
+		WwNumberField * f = new WwNumberField( panel );
+		f->setObjectName( QStringLiteral( "CellWorkspaceShadowDistance" ) );
+		f->setRange( 2000.0, 24000.0 );
+		f->setSingleStep( 500.0 );
+		f->setDecimals( 0 );
+		f->setValue( wwShadowDistance() );
+		gl->addWidget( new QLabel( tr( "Distance" ), panel ), 0, 0 );
+		gl->addWidget( f, 0, 1 );
+		connect( f, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( double v ) {
+			wwShadowSetDistance( v );
+			wwLiveChanged( QStringLiteral( "shadowDistance" ) );
+			if ( glView )
+				glView->update();
+		} );
+		wwLiveWatch( f, QStringLiteral( "shadowDistance" ), [f]() {
+			if ( f->value() != wwShadowDistance() )
+				f->setValue( wwShadowDistance() );
+		} );
+		auto * wa = new QWidgetAction( groupsMenu );
+		wa->setDefaultWidget( panel );
+		wa->setText( tr( "Distance" ) );
+		wa->setObjectName( QStringLiteral( "CellWorkspaceShadowDistanceRow" ) );
+		groupsMenu->addAction( wa );
+	}
+	liveTier( "CellWorkspaceScreenSpaceShadows", tr( "Screen-space shadows" ), "contactShadows", &wwShadowContactTier,
+		&wwShadowSetContactTier );
+	liveTier( "CellWorkspaceTerrainShadows", tr( "Terrain shadows" ), "terrainShadows", &wwShadowTerrainTier,
+		&wwShadowSetTerrainTier );
+	liveTick( "CellWorkspaceShadowRules", tr( "Fusion Shaders shadow rules" ), "shadowPar",
+		[]() { return wwShadowParMask() != 0; }, []( bool on ) { wwShadowSetParMask( on ? WwParAll : 0 ); } );
 	if ( showButton )
 		showButton->setMenu( showMenu );
 	/* lane OPENCELLFIX1 (bungo 10-27: "For show, don't close it when I click on one thing", "Maybe make that a sub
@@ -947,39 +1043,138 @@ void CellWorkspacePanel::buildUi()
 		rows << color << row( g.at( 0 ), "CellWorkspaceShow_borders" ) << row( g.at( 0 ), "CellWorkspaceShow_markers" )
 			<< row( g.at( 0 ), "CellWorkspaceShow_disabled" ) << row( g.at( 0 ), "CellWorkspacePrevis" )
 			<< row( g.at( 0 ), "CellWorkspaceCulling" ) << row( g.at( 0 ), "CellWorkspaceLook_WW_BINDLESS" );
-		rows << row( g.at( 1 ), "CellWorkspaceShow_ground" ) << row( g.at( 1 ), "CellWorkspaceShow_water" )
-			<< row( g.at( 1 ), "CellWorkspaceCellGrass" ) << row( g.at( 1 ), "CellWorkspaceParticles" )
-			<< row( g.at( 1 ), "CellWorkspaceFarLod", "CellWorkspaceFarLodType" )
-			<< row( g.at( 1 ), "CellWorkspaceCellLights" ) << row( g.at( 1 ), "CellWorkspaceLightShadows" )
-			<< row( g.at( 1 ), "CellWorkspaceLightFlicker" ) << row( g.at( 1 ), "CellWorkspaceCellImageSpace" )
-			<< row( g.at( 1 ), "CellWorkspaceTemporalAa" ) << row( g.at( 1 ), "CellWorkspaceSsr" )
-			<< row( g.at( 1 ), "CellWorkspaceCellDof" ) << row( g.at( 1 ), "CellWorkspaceCellMotionBlur" );
-		rows << row( g.at( 2 ), "CellWorkspaceCellGi", "", -1, false, { QStringLiteral( "CellWorkspaceSkyVisRow" ) } )
-			<< row( g.at( 2 ), "CellWorkspaceCellFar", "CellWorkspaceCellPass" )
-			<< row( g.at( 2 ), "", "CellWorkspaceLampShadows", 0, true, { QStringLiteral( "CellWorkspaceShadowBudget" ) } )
-			<< row( g.at( 2 ), "", "CellWorkspaceLightCurve", 0 )
-			<< row( g.at( 2 ), "CellWorkspaceLook_WW_CELL_LIGHT_ADV", "", -1, false,
-				{ QStringLiteral( "CellWorkspaceLightCalibration" ) } )
-			<< row( g.at( 2 ), "CellWorkspaceAo" ) << row( g.at( 2 ), "CellWorkspaceAoDecals" )
-			<< row( g.at( 2 ), "CellWorkspaceSkySpecOcc" ) << row( g.at( 2 ), "CellWorkspaceGpuRelight" )
-			<< row( g.at( 2 ), "CellWorkspaceEmissiveGiGrid" )
-			<< row( g.at( 2 ), "", "CellWorkspaceModernTaa", 0, true ) << row( g.at( 2 ), "CellWorkspaceModernTaaHdr" )
-			<< row( g.at( 2 ), "CellWorkspaceSsrOutdoors" ) << row( g.at( 2 ), "CellWorkspaceReflProbe" )
-			<< row( g.at( 2 ), "CellWorkspaceSsgi", "CellWorkspaceSsgiQuality", -1, true )
-			<< row( g.at( 2 ), "", "CellWorkspaceBloom", 0 )
-			<< row( g.at( 2 ), "", "CellWorkspaceFarGround", 0, false, { QStringLiteral( "CellWorkspaceFarGroundPages" ) } );
-		// the look ticks: what the game itself draws goes under Vanilla, the rest is ours
-		const QList<WwLook> vanillaLooks = { WwLook::ActorsOutdoors, WwLook::WeaponParts, WwLook::WorldAnim,
-			WwLook::AnimObjects, WwLook::DecalFade, WwLook::DecalParallax, WwLook::CableShadowSway, WwLook::BtoSway,
-			WwLook::PlacementEmittance, WwLook::RegionEmittance, WwLook::ParticleEmittance, WwLook::LensFlares,
-			WwLook::LightPatterns };
-		for ( int k = 0; k < int( WwLook::Count ); k++ ) {
-			const WwLook l = WwLook( k );
-			if ( !wwLookHasRow( l ) || l == WwLook::BindlessDraws || l == WwLook::LightAdvanced )
-				continue;
-			const QByteArray name = QByteArray( "CellWorkspaceLook_" ) + wwLookPinName( l );
-			rows << row( g.at( vanillaLooks.contains( l ) ? 1 : 2 ), name.constData() );
-		}
+		/* bungo 10-27 notes 18-26: a group is one row and its rows fold under it, indented; groups by kind (lighting,
+		 * reflections, air, water, distance, image, content), then the plain rows. A child drops the group's word.
+		 * What the game draws is Vanilla, the rest Fusion Shaders; a group split between them has a master per half. */
+		const QString V = g.at( 1 ), F = g.at( 2 );
+		QString in;	// the group row the next children go under
+		auto head = [&]( const QString & group, const char * tick, const char * choices = "", int off = -1,
+			bool quality = false, const QStringList & extras = QStringList(), const QString & label = QString() ) {
+			WwDisplayRow r = row( group, tick, choices, off, quality, extras );
+			r.label = label;
+			in = QLatin1String( *tick ? tick : choices );
+			rows << r;
+		};
+		auto master = [&]( const QString & group, WwGroup m ) {
+			const QByteArray name = QByteArray( "CellWorkspaceGroup_" ) + wwGroupName( m );
+			WwDisplayRow r = row( group, name.constData() );
+			r.master = true;
+			in = QString::fromLatin1( name );
+			rows << r;
+		};
+		auto kid = [&]( const char * tick, const QString & label, const char * choices = "", int off = -1,
+			bool quality = false, const QStringList & extras = QStringList(), bool shared = false ) {
+			WwDisplayRow r = row( QString(), tick, choices, off, quality, extras );
+			r.label = label;
+			r.parent = in;
+			r.shared = shared;
+			rows << r;
+		};
+		auto look = [&]( WwLook l, const QString & label ) {
+			kid( ( QByteArray( "CellWorkspaceLook_" ) + wwLookPinName( l ) ).constData(), label );
+		};
+		// Vanilla
+		head( V, "CellWorkspaceCellLights" );
+		kid( "CellWorkspaceLightFlicker", tr( "Flicker" ) );
+		look( WwLook::LightPatterns, tr( "Patterns" ) );
+		master( V, WwGroup::Emittance );
+		look( WwLook::PlacementEmittance, tr( "Placement" ) );
+		look( WwLook::RegionEmittance, tr( "Region" ) );
+		look( WwLook::ParticleEmittance, tr( "Particles" ) );
+		master( V, WwGroup::ShadowsVanilla );
+		kid( "CellWorkspaceLightShadows", tr( "Light shadows" ) );
+		look( WwLook::CableShadowSway, tr( "Cable shadows sway" ) );
+		head( V, "CellWorkspaceSsr" );	// note 20: one row, indoors and outdoors
+		master( V, WwGroup::BloomVanilla );
+		look( WwLook::LensFlares, tr( "Lens flares" ) );
+		master( V, WwGroup::CameraVanilla );
+		kid( "CellWorkspaceCellDof", tr( "Depth of field" ) );
+		kid( "CellWorkspaceCellMotionBlur", tr( "Motion blur" ) );
+		master( V, WwGroup::Decals );
+		look( WwLook::DecalFade, tr( "Distance fade" ) );
+		look( WwLook::DecalParallax, tr( "Parallax" ) );
+		master( V, WwGroup::Objects );
+		look( WwLook::ActorsOutdoors, tr( "Actors outdoors" ) );
+		look( WwLook::WeaponParts, tr( "Weapon mod parts" ) );
+		look( WwLook::AnimObjects, tr( "Animated objects" ) );
+		look( WwLook::WorldAnim, tr( "World animation" ) );
+		head( V, "CellWorkspaceCellGrass" );
+		head( V, "CellWorkspaceParticles" );
+		head( V, "CellWorkspaceShow_ground" );
+		head( V, "CellWorkspaceShow_water" );
+		head( V, "CellWorkspaceCellImageSpace" );
+		head( V, "CellWorkspaceTemporalAa", "", -1, false, QStringList(), tr( "Temporal anti-aliasing" ) );
+		// Fusion Shaders
+		head( F, "CellWorkspaceCellGi", "", -1, false,
+			{ QStringLiteral( "CellWorkspaceSkyVisRow" ), QStringLiteral( "CellWorkspaceCellPass" ) } );
+		look( WwLook::ProbeShare, tr( "Probe sharing" ) );
+		look( WwLook::ProbeShareWide, tr( "Wide probe sharing" ) );
+		look( WwLook::ProbeDepthVis, tr( "Probe depth visibility" ) );
+		look( WwLook::ProbeSmooth, tr( "Probe light smoothing" ) );
+		look( WwLook::ProbeClear, tr( "Probes out of walls" ) );
+		kid( "CellWorkspaceEmissiveGiGrid", tr( "Emissive grid" ) );
+		kid( "CellWorkspaceGpuRelight", tr( "GPU relight" ) );
+		look( WwLook::BounceEmittance, tr( "Emittance in bounce light" ) );
+		kid( "CellWorkspaceSkySpecOcc", tr( "Sky specular occlusion" ) );
+		kid( "CellWorkspaceAoDecals", tr( "Ambient occlusion decals" ) );
+		master( F, WwGroup::ImprovedLights );
+		look( WwLook::LightPhysFalloff, tr( "Physical falloff" ) );
+		look( WwLook::LightArea, tr( "Area" ) );
+		kid( "CellWorkspaceLook_WW_CELL_LIGHT_ADV", tr( "Advanced model" ), "", -1, false,
+			{ QStringLiteral( "CellWorkspaceLightCalibration" ) } );
+		master( F, WwGroup::CellLights );
+		look( WwLook::NifxLights, tr( "Mesh (.nifx)" ) );
+		kid( "", tr( "Lamp brightness contrast" ), "CellWorkspaceLightCurve", 0 );
+		kid( "CellWorkspaceCellFar", tr( "Far" ) );
+		master( F, WwGroup::Shadows );
+		kid( "CellWorkspaceCascadedShadows", tr( "Cascaded shadows" ), "CellWorkspaceCascadeQuality", -1, false,
+			{ QStringLiteral( "CellWorkspaceShadowDistanceRow" ) }, true );
+		kid( "", tr( "Screen-space shadows" ), "CellWorkspaceScreenSpaceShadows", 0, true, QStringList(), true );
+		kid( "", tr( "Terrain shadows" ), "CellWorkspaceTerrainShadows", 0, true, QStringList(), true );
+		kid( "CellWorkspaceShadowRules", tr( "Fusion Shaders shadow rules" ), "", -1, false, QStringList(), true );
+		kid( "", tr( "Cached lamp shadows" ), "CellWorkspaceLampShadows", 0, true,
+			{ QStringLiteral( "CellWorkspaceShadowBudget" ) } );
+		look( WwLook::ContactLocal, tr( "Lamp contact shadows" ) );
+		look( WwLook::ContactFar, tr( "Far contact shadows" ) );
+		look( WwLook::TerrMoonSky, tr( "Moonlit terrain shadows" ) );
+		look( WwLook::TerrSlopeMap, tr( "Terrain shadow slope from heights" ) );
+		look( WwLook::TerrGroundGate, tr( "Object LOD shadows on ground only" ) );
+		look( WwLook::FarCardShadows, tr( "Far tree card shadows" ) );
+		look( WwLook::TerrPbrDim, tr( "PBR ambient in terrain shadow" ) );
+		head( F, "CellWorkspaceAo", "", -1, false, QStringList(), tr( "Ambient Occlusion" ) );
+		head( F, "CellWorkspaceSsgi", "CellWorkspaceSsgiQuality", -1, true );
+		master( F, WwGroup::Reflections );
+		kid( "CellWorkspaceReflProbe", tr( "Probes" ) );
+		head( F, "CellWorkspaceVolAir" );	// note 22: the Volumetric Air switch is the group's tick
+		look( WwLook::AirMultiScatter, tr( "Multiple scattering" ) );
+		look( WwLook::GroundBurnOff, tr( "Ground burn-off" ) );
+		look( WwLook::GroundFogDerived, tr( "Ground layer from weather" ) );
+		kid( "", tr( "Far air" ), "CellWorkspaceFarAir", 0, true );
+		kid( "CellWorkspaceVolPart", tr( "Particles" ) );
+		kid( "CellWorkspaceFogDrift", tr( "Drift" ) );
+		master( F, WwGroup::Sky );
+		look( WwLook::Ephemeris, tr( "Real sun and moon" ) );
+		look( WwLook::WeatherRecx, tr( "Weather .recx" ) );
+		master( F, WwGroup::Water );
+		look( WwLook::WaterDepth, tr( "Depth colour" ) );
+		look( WwLook::WaterCaustics, tr( "Caustics" ) );
+		look( WwLook::WaterSoftEdge, tr( "Soft edge" ) );
+		look( WwLook::ShoreFoam, tr( "Shore foam" ) );
+		look( WwLook::WaterSwell, tr( "Swell" ) );
+		look( WwLook::WaterRefl, tr( "Reflections" ) );
+		look( WwLook::WaterGlint, tr( "Sun glare" ) );
+		look( WwLook::WaterOcean, tr( "Ocean waves" ) );
+		head( F, "CellWorkspaceFarLod", "", -1, false, QStringList(), tr( "LOD" ) );	// note 21 + 26b: one LOD group
+		kid( "", tr( "Source" ), "CellWorkspaceFarLodType" );
+		kid( "", tr( "Terrain" ), "CellWorkspaceFarGround" );
+		kid( "", tr( "Terrain pages" ), "CellWorkspaceFarGroundPages" );
+		look( WwLook::BtoSway, tr( "Game trees sway" ) );
+		head( F, "", "CellWorkspaceModernTaa", 0, true );
+		kid( "CellWorkspaceModernTaaHdr", tr( "Before tone map" ) );
+		head( F, "", "CellWorkspaceBloom", 0 );
+		look( WwLook::BloomMip, tr( "Width in fog" ) );
+		master( F, WwGroup::Camera );
+		look( WwLook::ExposureWide, tr( "Wide exposure range" ) );
 		showPanel = wwMenuAsDisplay( showMenu, rows, this, ps );
 		page->addWidget( showPanel );
 	}
@@ -1045,8 +1240,7 @@ void CellWorkspacePanel::buildUi()
 	fxLive( cellAo, &wwCellAoSetOn );
 	fxLive( cellShadow, &wwCellShadowSetOn );
 	fxLive( cellFlicker, &wwCellFlickerSetOn );
-	fxLive( cellSsr, &wwCellSsrSetOn );
-	fxLive( cellSsrExt, &wwCellSsrExteriorSetOn );
+	fxLive( cellSsr, &wwCellSsrRowSet );	// note 20: indoors and outdoors alike
 	fxLive( cellReflProbe, &wwCellReflProbeSetOn );
 	fxLive( cellSsgi, &wwCellSsgiSetOn );
 	fxLive( cellSpecOcc, &wwCellSpecOccSetOn );	// lane SPECOCC1: the GI texture re-uploads with or without the sky grid
@@ -1097,6 +1291,30 @@ void CellWorkspacePanel::buildUi()
 			if ( glView )
 				glView->update();
 		} );
+	// lane OPENCELLFIX2: a group master. Its rows read off with it; a row read while the cell is built reopens it
+	for ( QAction * a : groupsMenu->actions() ) {
+		if ( !a->objectName().startsWith( QLatin1String( "CellWorkspaceGroup_" ) ) )
+			continue;
+		connect( a, &QAction::toggled, this, [this, g = WwGroup( a->data().toInt() ), liveFirst]( bool on ) {
+			wwGroupSet( g, on );
+			bool reopen = false;
+			for ( QAction * la : lookActions ) {
+				const WwLook l = WwLook( la->data().toInt() );
+				reopen = reopen || ( wwLookGroup( l ) == g && wwLookReopens( l ) && la->isChecked() );
+			}
+			if ( reopen && !syncing && !g_path.isEmpty() ) {
+				if ( liveFirst() )
+					return;
+				g_over = g_spec;
+				g_haveOverrides = true;
+				say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+				emit reopenRequested( g_path );
+				return;
+			}
+			if ( glView )
+				glView->update();
+		} );
+	}
 	connect( cellModernTaaGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		wwTaa2SetTier( a->data().toInt() );
 		if ( glView )

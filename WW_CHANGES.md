@@ -10,13 +10,21 @@
   settings. Quality dropdowns are Low / Medium / High / Ultra. Extra number rows fold under the row. The rows sit in the
   groups Editor, Vanilla and Fusion Shaders. The Show menu's actions stay the only truth (a tick calls `trigger()`), so
   every change is live, and the WW_* keys and switch names are unchanged.
-- **Presets:** save, rename, overwrite and delete named Display states; a picker and a Next button at the top. They are
-  kept in QSettings (`CellEditor/DisplayPresets`), and applying one is live.
+- **Presets:** every saved Display state is a button at the top, in the Block List strip's segmented look, wrapping
+  onto more lines. One click applies it live, and the active one is highlighted. "+" saves the current state under a
+  typed name; right-click a preset for Save (overwrite), Rename and Delete. With no presets the strip is "+" alone.
+  They are kept in QSettings (`CellEditor/DisplayPresets`).
+- **Rows (round 2):** a row's dropdown sits right-aligned on the tick row, as tall as the tick, so every row has one
+  height. The fold arrow is the first thing on the row ("> [ ] Bloom"); rows with nothing to fold keep its width empty,
+  and the separate "... settings" rows are gone. "GI" reads "Precomputed Radiance Transfer", "SSGI" reads
+  "Screen-Space Global Illumination", "SSR" and "SSR outdoors" read "Screen-Space Reflections" and
+  "Screen-Space Reflections outdoors", "Lamp shadows" reads "Cached lamp shadows" (labels only), and "Debug view" (the old Far light mode, same switch) folds under
+  Precomputed Radiance Transfer; Far light is a plain tick.
 - **One dropdown:** `src/ui/widgets/wwdropdown.*` (WwDropdown) is the toolbar's Object Mode selector, text only. Every
   dock dropdown and the mode button use `WwDropdown::applyStyle`.
 - **Removed:** the "Show" button to the right of the Color row.
 - **Tests:** tests/opencell and tests/cellshow, with new rows in the in-app Cell workspace test. Reds:
-  `WW_OPENCELL_RED=lang|dblclick`, `WW_CELLSHOW_RED=ticks|groups|dropdown|presets|showbutton`, `WW_DROPDOWN_RED=1`.
+  `WW_OPENCELL_RED=lang|dblclick`, `WW_CELLSHOW_RED=ticks|groups|dropdown|presets|presetbar|inline|foldrows|showbutton`, `WW_DROPDOWN_RED=1`.
 
 ## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
 

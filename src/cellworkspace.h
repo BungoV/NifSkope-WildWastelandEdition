@@ -257,8 +257,7 @@ private:
 	QMenu * cellLightCalib = nullptr;	// lane LIGHTPHYS3: 0.5 | 0.75 | 1 | 1.5 | 2
 	QActionGroup * cellLightCalibGroup = nullptr;
 	QList<QAction *> lookActions;	// lane GAPLOOK1: one tick a WwLook (gl/celllooks.h)
-	QAction * cellSsr = nullptr;
-	QAction * cellSsrExt = nullptr;
+	QAction * cellSsr = nullptr;	// lane OPENCELLFIX2 note 20: indoors and outdoors alike
 	QAction * cellReflProbe = nullptr;	// lane REFLPROBE1
 	QAction * cellSsgi = nullptr;	// lane SSGI1
 	QMenu * cellSsgiQ = nullptr;

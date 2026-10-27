@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 
 #include <QHash>
 #include <QList>
+#include <QPointer>
 #include <QToolButton>
 #include <QVariant>
 
@@ -48,6 +49,8 @@ public:
 	QMenu * itemMenu() const { return popup; }
 	//! Picks item `i` as a click in its menu would (currentIndexChanged, then activated).
 	void pick( int i );
+	//! Sits inline on a tick row (bungo 10-27 note 10): the same look, no vertical padding, as tall as `tick`.
+	void setRowBuddy( QWidget * tick );
 
 	QSize sizeHint() const override;
 	QSize minimumSizeHint() const override;
@@ -63,6 +66,7 @@ private:
 	QList<QHash<int, QVariant>> roles;
 	int cur = -1;
 	int fitWidth = 0;
+	QPointer<QWidget> buddy;
 
 	void refit();
 };

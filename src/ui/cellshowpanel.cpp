@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLayout>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
@@ -28,11 +29,15 @@ BSD License - see nifskope.h
 #include <QSet>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidgetAction>
 
 #include <algorithm>
+
+QString wwSegmentedToolButtonQss();	// src/nifskope_ui.cpp (declared in wwskin.h): the Block List strip's segments
+
 namespace {
 
 bool red( const char * which )
@@ -115,7 +120,8 @@ struct Builder
 	bool noSync = red( "sync" );
 
 	//! One fold: an arrow, the title, a body. Returns the body's layout.
-	QVBoxLayout * fold( QVBoxLayout * into, const QString & title, const QString & id, bool heading, QAction * enabler )
+	QVBoxLayout * fold( QVBoxLayout * into, const QString & title, const QString & id, bool heading, QAction * enabler,
+		int openFirst = -1 )
 	{
 		auto * head = new QWidget;
 		auto * hl = new QHBoxLayout( head );
@@ -130,14 +136,21 @@ struct Builder
 		QLabel * label = heading && style.heading ? style.heading( title, head ) : new QLabel( title, head );
 		hl->addWidget( label, 1 );
 		into->addWidget( head );
+		return foldBody( into, arrow, id, openFirst < 0 ? heading : openFirst != 0, 18, enabler, head );
+	}
+
+	//! A fold's body under `into`, opened and closed by `arrow` (on a title row of its own, or on a tick row).
+	QVBoxLayout * foldBody( QVBoxLayout * into, QToolButton * arrow, const QString & id, bool openFirst, int indent,
+		QAction * enabler, QWidget * head )
+	{
 		auto * body = new QWidget;
 		body->setObjectName( QStringLiteral( "CellShowBody_" ) + id );
 		auto * bl = new QVBoxLayout( body );
-		bl->setContentsMargins( 18, 0, 0, 2 );
+		bl->setContentsMargins( indent, 0, 0, 2 );
 		bl->setSpacing( 1 );
 		into->addWidget( body );
 		const QString key = style.foldGroup + QLatin1Char( '/' ) + id;
-		const bool open = style.foldGroup.isEmpty() || QSettings().value( key, heading ).toBool();
+		const bool open = style.foldGroup.isEmpty() || QSettings().value( key, openFirst ).toBool();
 		auto show = [arrow, body]( bool on ) {
 			arrow->setArrowType( on ? Qt::DownArrow : Qt::RightArrow );
 			body->setVisible( on );
@@ -345,6 +358,9 @@ namespace {
 const char * const kPresetGroup = "CellEditor/DisplayPresets";
 const char * const kPresetCurrent = "CellEditor/DisplayPreset";
 const char * const kLastGroup = "CellEditor/DisplayLast";	// the level a row comes back to when ticked again
+const int kRowArrow = 16;	// the fold arrow's width on a Display row (or the empty space where it would be)
+
+void refreshPresetBar( QWidget * panel );
 
 QString trp( const char * s )
 {
@@ -438,76 +454,175 @@ void unstyleRed( QToolButton * d )
 	}
 }
 
+/* bungo 10-27 note 9: "don't make me unfold them to select a preset". Every preset is a button in the Block List
+ * strip's segmented look, wrapping onto more lines; each line is its own strip (first/last rounded). */
+class PresetFlow final : public QLayout
+{
+public:
+	explicit PresetFlow( QWidget * parent ) : QLayout( parent )
+	{
+		setContentsMargins( 0, 0, 0, 4 );
+		setSpacing( 2 );	// between lines; the segments of a line touch
+	}
+	~PresetFlow() override
+	{
+		while ( QLayoutItem * i = takeAt( 0 ) )
+			delete i;
+	}
+	void addItem( QLayoutItem * i ) override { items.append( i ); }
+	int count() const override { return int( items.size() ); }
+	QLayoutItem * itemAt( int i ) const override { return items.value( i ); }
+	QLayoutItem * takeAt( int i ) override { return i >= 0 && i < int( items.size() ) ? items.takeAt( i ) : nullptr; }
+	Qt::Orientations expandingDirections() const override { return {}; }
+	bool hasHeightForWidth() const override { return true; }
+	int heightForWidth( int w ) const override { return place( QRect( 0, 0, w, 0 ), false ); }
+	QSize sizeHint() const override { return minimumSize(); }
+	QSize minimumSize() const override
+	{
+		QSize s;
+		for ( QLayoutItem * i : items )
+			s = s.expandedTo( i->minimumSize() );
+		const QMargins m = contentsMargins();
+		return s + QSize( m.left() + m.right(), m.top() + m.bottom() );
+	}
+	void setGeometry( const QRect & r ) override
+	{
+		QLayout::setGeometry( r );
+		place( r, true );
+	}
+
+private:
+	QList<QLayoutItem *> items;
+
+	static void mark( QWidget * w, const char * name, bool on )
+	{
+		if ( !w || w->property( name ).toBool() == on )
+			return;
+		w->setProperty( name, on );
+		w->style()->unpolish( w );	// the sheet's [wwSegmentFirst]/[wwSegmentLast] selectors read it at polish
+		w->style()->polish( w );
+	}
+
+	int place( const QRect & r, bool apply ) const
+	{
+		const QRect a = r.marginsRemoved( contentsMargins() );
+		int x = a.x(), y = a.y(), lineH = 0;
+		QList<QList<QLayoutItem *>> lines( 1 );
+		for ( QLayoutItem * i : items ) {
+			if ( i->isEmpty() )
+				continue;
+			const QSize h = i->sizeHint();
+			if ( x > a.x() && x + h.width() > a.x() + a.width() ) {
+				x = a.x();
+				y += lineH + spacing();
+				lineH = 0;
+				lines.append( QList<QLayoutItem *>() );
+			}
+			if ( apply )
+				i->setGeometry( QRect( QPoint( x, y ), h ) );
+			x += h.width();
+			lineH = std::max( lineH, h.height() );
+			lines.last().append( i );
+		}
+		if ( apply )
+			for ( const QList<QLayoutItem *> & line : lines )
+				for ( int k = 0; k < int( line.size() ); k++ ) {
+					mark( line.at( k )->widget(), "wwSegmentFirst", k == 0 );
+					mark( line.at( k )->widget(), "wwSegmentLast", k == int( line.size() ) - 1 );
+				}
+		return y + lineH - r.y() + contentsMargins().bottom();
+	}
+};
+
+QString askName( QWidget * parent, const QString & title, const QString & start, bool * ok )
+{
+	return QInputDialog::getText( parent, title, trp( "Name" ), QLineEdit::Normal, start, ok );
+}
+
+QToolButton * presetButton( QWidget * bar, QWidget * panel, const QString & name )
+{
+	auto * b = new QToolButton( bar );
+	b->setObjectName( QStringLiteral( "CellDisplayPreset" ) );
+	b->setProperty( "wwPresetName", name );
+	b->setText( QString( name ).replace( QLatin1Char( '&' ), QLatin1String( "&&" ) ) );
+	b->setToolButtonStyle( Qt::ToolButtonTextOnly );
+	b->setCheckable( true );
+	b->setContextMenuPolicy( Qt::CustomContextMenu );
+	auto * m = new QMenu( b );
+	m->setObjectName( QStringLiteral( "CellDisplayPresetMenu" ) );
+	QAction * save = m->addAction( trp( "Save" ) );
+	save->setObjectName( QStringLiteral( "CellDisplayPresetCtxSave" ) );
+	QAction * ren = m->addAction( trp( "Rename" ) );
+	ren->setObjectName( QStringLiteral( "CellDisplayPresetCtxRename" ) );
+	QAction * del = m->addAction( trp( "Delete" ) );
+	del->setObjectName( QStringLiteral( "CellDisplayPresetCtxDelete" ) );
+	QPointer<QWidget> p( panel );
+	QObject::connect( b, &QToolButton::clicked, b, [p, name]() {
+		wwDisplayPresetApply( p, name );
+		refreshPresetBar( p );	// a click on the active one keeps it highlighted
+	} );
+	QObject::connect( b, &QWidget::customContextMenuRequested, b, [b, m]( const QPoint & at ) { m->popup( b->mapToGlobal( at ) ); } );
+	QObject::connect( save, &QAction::triggered, b, [p, name]() { wwDisplayPresetSave( p, name ); } );	// overwrite with now
+	QObject::connect( ren, &QAction::triggered, b, [p, name]() {
+		bool ok = false;
+		const QString n = askName( p, trp( "Rename preset" ), name, &ok );
+		if ( ok && n.trimmed() != name )
+			wwDisplayPresetRename( p, name, n );
+	} );
+	QObject::connect( del, &QAction::triggered, b, [p, name]() { wwDisplayPresetDelete( p, name ); } );
+	return b;
+}
+
 void refreshPresetBar( QWidget * panel )
 {
-	if ( !panel )
+	QWidget * bar = panel ? panel->findChild<QWidget *>( QStringLiteral( "CellDisplayPresetBar" ) ) : nullptr;
+	auto * add = bar ? bar->findChild<QToolButton *>( QStringLiteral( "CellDisplayPresetAdd" ) ) : nullptr;
+	if ( !add || !bar->layout() )
 		return;
-	auto * pick = panel->findChild<WwDropdown *>( QStringLiteral( "CellDisplayPresetPicker" ) );
-	if ( !pick )
-		return;
-	const QStringList names = wwDisplayPresetNames();
+	const QStringList names = red( "presetbar" ) ? QStringList() : wwDisplayPresetNames();	// red: no preset buttons
 	const QString cur = wwDisplayPresetCurrent();
-	{
-		QSignalBlocker sb( pick );
-		pick->clear();
-		pick->addItems( names );
-		pick->setCurrentIndex( int( names.indexOf( cur ) ) );
-		if ( pick->currentIndex() < 0 )
-			pick->setText( names.isEmpty() ? trp( "No presets" ) : trp( "Presets" ) );
+	QList<QToolButton *> have = bar->findChildren<QToolButton *>( QStringLiteral( "CellDisplayPreset" ), Qt::FindDirectChildrenOnly );
+	QStringList shown;
+	for ( QToolButton * b : have )
+		shown.append( b->property( "wwPresetName" ).toString() );
+	if ( shown != names ) {	// rebuilt only when the names change, so a click never deletes the button it came from
+		for ( QToolButton * b : have ) {
+			bar->layout()->removeWidget( b );
+			b->hide();
+			b->setParent( nullptr );
+			b->deleteLater();
+		}
+		bar->layout()->removeWidget( add );
+		have.clear();
+		for ( const QString & n : names ) {
+			have.append( presetButton( bar, panel, n ) );
+			bar->layout()->addWidget( have.last() );
+		}
+		bar->layout()->addWidget( add );	// "+" ends the strip
 	}
-	pick->setEnabled( !names.isEmpty() );
-	const bool have = names.contains( cur );
-	for ( const char * n : { "CellDisplayPresetNext" } )
-		if ( auto * b = panel->findChild<QToolButton *>( QLatin1String( n ) ) )
-			b->setEnabled( !names.isEmpty() );
-	for ( const char * n : { "CellDisplayPresetRename", "CellDisplayPresetDelete" } )
-		if ( auto * b = panel->findChild<QToolButton *>( QLatin1String( n ) ) )
-			b->setEnabled( have );
+	for ( QToolButton * b : have )
+		b->setChecked( b->property( "wwPresetName" ).toString() == cur );
 }
 
 void presetBar( QWidget * panel, QVBoxLayout * top )
 {
 	auto * bar = new QWidget( panel );
 	bar->setObjectName( QStringLiteral( "CellDisplayPresetBar" ) );
-	auto * hl = new QHBoxLayout( bar );
-	hl->setContentsMargins( 0, 0, 0, 4 );
-	hl->setSpacing( 4 );
-	hl->addWidget( new QLabel( trp( "Preset" ), bar ) );
-	auto * pick = new WwDropdown( bar );
-	pick->setObjectName( QStringLiteral( "CellDisplayPresetPicker" ) );
-	unstyleRed( pick );
-	hl->addWidget( pick, 1 );
-	auto button = [bar, hl]( const char * name, const QString & text ) {
-		auto * b = new QToolButton( bar );
-		b->setObjectName( QLatin1String( name ) );
-		b->setText( text );
-		b->setToolButtonStyle( Qt::ToolButtonTextOnly );
-		hl->addWidget( b );
-		return b;
-	};
-	QToolButton * next = button( "CellDisplayPresetNext", trp( "Next" ) );
-	QToolButton * save = button( "CellDisplayPresetSave", trp( "Save" ) );
-	QToolButton * ren = button( "CellDisplayPresetRename", trp( "Rename" ) );
-	QToolButton * del = button( "CellDisplayPresetDelete", trp( "Delete" ) );
+	bar->setStyleSheet( wwSegmentedToolButtonQss() );
+	auto * flow = new PresetFlow( bar );
+	auto * add = new QToolButton( bar );
+	add->setObjectName( QStringLiteral( "CellDisplayPresetAdd" ) );
+	add->setText( QStringLiteral( "+" ) );
+	add->setToolButtonStyle( Qt::ToolButtonTextOnly );
+	flow->addWidget( add );
 	top->addWidget( bar );
 	QPointer<QWidget> p( panel );
-	QObject::connect( pick, &WwDropdown::activated, bar, [p, pick]( int i ) { wwDisplayPresetApply( p, pick->itemText( i ) ); } );
-	QObject::connect( next, &QToolButton::clicked, bar, [p]() { wwDisplayPresetNext( p ); } );
-	QObject::connect( save, &QToolButton::clicked, bar, [p]() {
+	QObject::connect( add, &QToolButton::clicked, bar, [p]() {
 		bool ok = false;
-		const QString n = QInputDialog::getText( p, trp( "Save preset" ), trp( "Name" ), QLineEdit::Normal,
-			wwDisplayPresetCurrent(), &ok );
+		const QString n = askName( p, trp( "New preset" ), QString(), &ok );
 		if ( ok )
-			wwDisplayPresetSave( p, n );	// the same name overwrites
+			wwDisplayPresetSave( p, n );	// a name in use is overwritten, as Save does
 	} );
-	QObject::connect( ren, &QToolButton::clicked, bar, [p]() {
-		const QString cur = wwDisplayPresetCurrent();
-		bool ok = false;
-		const QString n = QInputDialog::getText( p, trp( "Rename preset" ), trp( "Name" ), QLineEdit::Normal, cur, &ok );
-		if ( ok )
-			wwDisplayPresetRename( p, cur, n );
-	} );
-	QObject::connect( del, &QToolButton::clicked, bar, [p]() { wwDisplayPresetDelete( p, wwDisplayPresetCurrent() ); } );
 	refreshPresetBar( panel );
 }
 
@@ -521,13 +636,16 @@ struct DisplayBuilder
 	QVBoxLayout * fusion = nullptr;
 	const bool noTicks = red( "ticks" );
 	const bool oneGroup = red( "groups" );
+	const bool foldRows = red( "foldrows" );	// red: "<row> settings" on a row of its own (note 11)
+	const bool flat = red( "nest" );	// red: a group's children lie flat after it (note 18)
+	const QList<WwDisplayRow> * all = nullptr;
 	int leftovers = 0;
 
 	QVBoxLayout * group( const QString & g0 )
 	{
 		const QString g = oneGroup ? trp( "Display" ) : g0;
 		if ( !groups.contains( g ) )
-			groups.insert( g, b.fold( top, g, groupId( g ), true, nullptr ) );
+			groups.insert( g, b.fold( top, g, groupId( g ), true, nullptr, 0 ) );	// note 25: all start closed
 		return groups.value( g );
 	}
 
@@ -611,7 +729,8 @@ struct DisplayBuilder
 			QObject::connect( menuAct, &QAction::changed, w, sync );
 	}
 
-	void row( const WwDisplayRow & r )
+	//! A row of the list into its group's section, or into `into` (a group row's fold). The widgets it added.
+	QList<QWidget *> row( const WwDisplayRow & r, QVBoxLayout * into = nullptr )
 	{
 		QAction * t = findAction( menu, r.tick );
 		if ( t && ( t->menu() || !t->isCheckable() ) )
@@ -620,8 +739,15 @@ struct DisplayBuilder
 		QMenu * c = cm && cm->menu() ? cm->menu() : nullptr;
 		auto * custom = qobject_cast<WwDropdown *>( r.dropdown );
 		if ( !t && !c && !custom )
-			return;	// not in this menu
-		rowOf( group( r.group ), r, t, c, custom );
+			return {};	// not in this menu
+		QVBoxLayout * in = into ? into : group( r.group );
+		const int from = in->count();
+		rowOf( in, r, t, c, custom );
+		QList<QWidget *> added;
+		for ( int i = from; i < in->count(); i++ )
+			if ( QWidget * w = in->itemAt( i )->widget() )
+				added << w;
+		return added;
 	}
 
 	void rowOf( QVBoxLayout * into, const WwDisplayRow & r, QAction * t, QMenu * c, WwDropdown * custom )
@@ -639,6 +765,22 @@ struct DisplayBuilder
 		QList<QAction *> list = items;
 		if ( off >= 0 && off < int( items.size() ) )
 			list.removeAt( off );
+		// what is finer than the row folds under it: the submenu's other rows and the named extras
+		QList<QAction *> more;
+		if ( c )
+			for ( QAction * a : c->actions() )
+				if ( !a->isSeparator() && !items.contains( a ) )
+					more.append( a );
+		for ( const QString & n : r.extras )
+			if ( QAction * a = findAction( menu, n ) )
+				if ( !more.contains( a ) )
+					more.append( a );
+		QList<WwDisplayRow> kids;	// note 18: the group's rows
+		if ( all )
+			for ( const WwDisplayRow & k : *all )
+				if ( !k.parent.isEmpty() && k.parent == key )
+					kids << k;
+		const bool folds = !more.isEmpty() || ( !kids.isEmpty() && !flat );
 
 		auto * w = new QWidget;
 		w->setObjectName( QStringLiteral( "CellDisplayRow_" ) + key );
@@ -646,19 +788,46 @@ struct DisplayBuilder
 		auto * hl = new QHBoxLayout( w );
 		hl->setContentsMargins( 0, 0, 0, 0 );
 		hl->setSpacing( 6 );
+		/* bungo 10-27 note 11: "> [ ] Bloom" -- the fold arrow sits on the tick row; a row with nothing to fold
+		 * keeps the arrow's width empty so every tick lines up. The arrow never sets the row's height. */
+		QToolButton * arrow = nullptr;
+		if ( !foldRows ) {
+			arrow = new QToolButton( w );
+			arrow->setAutoRaise( true );
+			arrow->setCheckable( true );
+			arrow->setToolButtonStyle( Qt::ToolButtonIconOnly );
+			arrow->setArrowType( Qt::RightArrow );
+			arrow->setFixedWidth( kRowArrow );
+			arrow->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Ignored );
+			if ( !folds ) {
+				arrow->setObjectName( QStringLiteral( "CellDisplayArrowSpace" ) );
+				QSizePolicy sp = arrow->sizePolicy();
+				sp.setRetainSizeWhenHidden( true );
+				arrow->setSizePolicy( sp );
+				arrow->hide();
+			} else {
+				arrow->setObjectName( QStringLiteral( "CellShowFold_settings_" ) + key );
+			}
+			hl->addWidget( arrow );
+		}
 		WwDropdown * d = custom;
 		if ( !d && list.size() >= 2 )
 			d = dropdown( QStringLiteral( "CellDisplayChoice_" ) + key, list, r.quality );
+		QWidget * tickOrLabel = nullptr;
 		QCheckBox * box = nullptr;
-		if ( d && noTicks ) {	// red: a row with settings has only its dropdown
-			hl->addWidget( new QLabel( label, w ), 1 );
+		if ( d && ( noTicks || ( !t && !custom && off < 0 ) ) ) {	// red: a row with settings has only its dropdown;
+			// a choice with no off item (LOD source, LOD terrain) is a label | dropdown row
+			tickOrLabel = new QLabel( label, w );
 		} else {
 			box = new QCheckBox( label, w );
 			box->setObjectName( QStringLiteral( "CellDisplayTick_" ) + key );
-			hl->addWidget( box, 1 );
+			tickOrLabel = box;
 		}
+		hl->addWidget( tickOrLabel, 1 );
 		if ( d ) {
 			d->setParent( w );
+			if ( !red( "inline" ) )	// red: the dropdown keeps its own taller box (note 10)
+				d->setRowBuddy( tickOrLabel );
 			hl->addWidget( d );
 		}
 		into->addWidget( w );
@@ -774,21 +943,27 @@ struct DisplayBuilder
 			hook( w, sync, items, c->menuAction() );
 		}
 
-		// what is finer than the row folds under it: the submenu's other rows and the named extras
-		QList<QAction *> more;
-		if ( c )
-			for ( QAction * a : c->actions() )
-				if ( !a->isSeparator() && !items.contains( a ) )
-					more.append( a );
-		for ( const QString & n : r.extras )
-			if ( QAction * a = findAction( menu, n ) )
-				if ( !more.contains( a ) )
-					more.append( a );
-		if ( !more.isEmpty() ) {
-			QVBoxLayout * f = b.fold( into, trp( "%1 settings" ).arg( label ), QStringLiteral( "settings_" ) + key, false,
-				c ? c->menuAction() : nullptr );
+		if ( folds ) {
+			QAction * enabler = c ? c->menuAction() : nullptr;
+			const QString id = QStringLiteral( "settings_" ) + key;
+			QVBoxLayout * f = arrow ? b.foldBody( into, arrow, id, false, kRowArrow + hl->spacing(), enabler, arrow )
+				: b.fold( into, trp( "%1 settings" ).arg( label ), id, false, enabler );	// red "foldrows": its own row
 			for ( QAction * a : more )
 				extra( f, a );
+			for ( const WwDisplayRow & k : kids ) {
+				const QList<QWidget *> kw = row( k, f );
+				if ( r.master && t && !k.shared ) {	// a master off: its rows read off, so they grey (their ticks stay)
+					auto grey = [t, kw]() {
+						for ( QWidget * x : kw )
+							x->setEnabled( t->isChecked() );
+					};
+					grey();
+					QObject::connect( t, &QAction::toggled, w, grey );
+				}
+			}
+		} else {
+			for ( const WwDisplayRow & k : kids )
+				row( k, into );	// red "nest"
 		}
 	}
 
@@ -838,8 +1013,10 @@ QWidget * wwMenuAsDisplay( QMenu * menu, const QList<WwDisplayRow> & rows, QWidg
 	if ( !d.oneGroup )
 		for ( const QString & g : wwDisplayGroups() )
 			d.group( g );	// the fixed order
+	d.all = &rows;
 	for ( const WwDisplayRow & r : rows )
-		d.row( r );
+		if ( r.parent.isEmpty() )
+			d.row( r );
 	if ( menu )
 		d.leftover( menu );
 	panel->setProperty( "wwDisplayLeftovers", d.leftovers );
@@ -994,4 +1171,39 @@ QString wwDisplayPresetNext( QWidget * panel )
 		return QString();
 	const QString n = names.at( ( names.indexOf( wwDisplayPresetCurrent() ) + 1 ) % names.size() );
 	return wwDisplayPresetApply( panel, n ) ? n : QString();
+}
+
+namespace {
+struct LiveWatch
+{
+	QPointer<QObject> owner;
+	std::function<void()> reread;
+};
+QMultiHash<QString, LiveWatch> & liveWatches()
+{
+	static QMultiHash<QString, LiveWatch> w;
+	return w;
+}
+}	// namespace
+
+void wwLiveWatch( QObject * owner, const QString & topic, const std::function<void()> & reread )
+{
+	if ( owner && reread )
+		liveWatches().insert( topic, { owner, reread } );
+}
+
+void wwLiveChanged( const QString & topic )
+{
+	static bool telling = false;	// a re-read that sets an action tells again: once is enough
+	if ( telling || red( "livebind" ) )
+		return;
+	telling = true;
+	QList<LiveWatch> ws = liveWatches().values( topic );
+	liveWatches().remove( topic );
+	for ( const LiveWatch & lw : ws )
+		if ( lw.owner ) {
+			liveWatches().insert( topic, lw );	// the gone ones drop out here
+			lw.reread();
+		}
+	telling = false;
 }

@@ -570,7 +570,7 @@ const WwCellFar * wwCellFarFor( const void * nif )
 
 bool wwCellFarOn()
 {
-	return st().farOn;
+	return st().farOn && ( st().farPinned || wwGroupLets( WwGroup::CellLights ) );	// lane OPENCELLFIX2: the group's master
 }
 
 void wwCellFarSetOn( bool on )
@@ -2286,7 +2286,7 @@ bool wwCellImageSpaceOn()
 
 bool wwCellShadowOn()
 {
-	return st().shadowOn;
+	return st().shadowOn && ( st().shadowPinned || wwGroupLets( WwGroup::ShadowsVanilla ) );	// lane OPENCELLFIX2
 }
 
 void wwCellShadowSetOn( bool on )

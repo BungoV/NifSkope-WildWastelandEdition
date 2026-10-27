@@ -18,6 +18,7 @@ QString wwBoxedButtonQss( const QString & padding );	// src/nifskope_ui.cpp (dec
 
 namespace {
 const char * const kPadding = "3px 6px";	// the Object Mode selector's
+const char * const kInlinePadding = "0px 6px";	// on a tick row: the row's height decides
 }
 
 WwDropdown::WwDropdown( QWidget * parent ) : QToolButton( parent )
@@ -53,7 +54,16 @@ bool WwDropdown::hasStyle( const QWidget * w )
 {
 	auto * b = qobject_cast<const QToolButton *>( w );
 	return b && b->property( "wwDropdown" ).toBool() && b->popupMode() == QToolButton::InstantPopup && !b->autoRaise()
-		&& b->styleSheet() == wwBoxedButtonQss( QLatin1String( kPadding ) );
+		&& ( b->styleSheet() == wwBoxedButtonQss( QLatin1String( kPadding ) )
+			|| b->styleSheet() == wwBoxedButtonQss( QLatin1String( kInlinePadding ) ) );
+}
+
+void WwDropdown::setRowBuddy( QWidget * tick )
+{
+	buddy = tick;
+	if ( hasStyle( this ) )
+		setStyleSheet( wwBoxedButtonQss( QLatin1String( kInlinePadding ) ) );
+	updateGeometry();
 }
 
 int WwDropdown::addItem( const QString & text, const QVariant & data )
@@ -172,6 +182,8 @@ QSize WwDropdown::sizeHint() const
 {
 	QSize s = QToolButton::sizeHint();
 	s.setWidth( std::max( s.width(), fitWidth ) );
+	if ( buddy )
+		s.setHeight( buddy->sizeHint().height() );
 	return s;
 }
 

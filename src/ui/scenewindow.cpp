@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"	// lane GAPTOOL1: the SSAO row
 #include "gl/cellbloom.h"	// lane GAPTOOL1: the Bloom row
 #include "gl/fxparity.h"	// lane FXPARITY1
+#include "ui/cellshowpanel.h"	// lane OPENCELLFIX2: the Display tab's fog and shadow rows share these settings
 #include "esmweather.h"
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
@@ -277,7 +278,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveCheck( fogDriftBox, "fogDrift", tr( "Fog Drift" ), wwVolAirDriftOn() );	// lane FOGDRIFT1: ships off
 	heading( tr( "Effects" ) );
 	liveCheck( shadowsBox, "lookdevShadows", tr( "Cascaded Shadows" ), wwLookdevShadows() );	// lane CSM1
-	liveCheck( taaBox, "gameTaa", tr( "Temporal AA" ), wwGameTaaRowOn() );	// lane MOTION1: every mode, ships off
+	liveCheck( taaBox, "gameTaa", tr( "Temporal Anti-Aliasing" ), wwGameTaaRowOn() );	// lane MOTION1: every mode, ships off
 	// lane TERRSHADOW1: the unified shadow set, each Off / Low / Medium / High / Ultra, ships Off
 	auto tierBox = [&]( QComboBox *& box, const char * name, const QString & label, int tier ) {
 		box = new QComboBox( tree );
@@ -287,13 +288,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		wwMatchFieldStyle( box );
 		row( label, box, true );
 	};
-	tierBox( modernTaaBox, "modernTaa", tr( "Modern temporal AA" ), wwTaa2Tier() );	// lane TAA2: ships Off
-	liveCheck( modernTaaHdrBox, "modernTaaHdr", tr( "Modern temporal AA before tone map" ), wwTaa2HdrOn() );	// lane TAA3: ships Off
+	tierBox( modernTaaBox, "modernTaa", tr( "Improved Temporal Anti-Aliasing" ), wwTaa2Tier() );	// lane TAA2: ships Off
+	liveCheck( modernTaaHdrBox, "modernTaaHdr", tr( "Improved Temporal Anti-Aliasing Before Tone Map" ), wwTaa2HdrOn() );	// lane TAA3: ships Off
 	tierBox( cascadeQualityBox, "cascadeQuality", tr( "Cascade Quality" ), wwShadowCascadeTier() );
-	tierBox( contactShadowsBox, "contactShadows", tr( "Contact Shadows" ), wwShadowContactTier() );
+	tierBox( contactShadowsBox, "contactShadows", tr( "Screen-Space Shadows" ), wwShadowContactTier() );
 	tierBox( terrainShadowsBox, "terrainShadows", tr( "Terrain Shadows" ), wwShadowTerrainTier() );
 	// lane SHADOWPAR1: every FO4CS-parity item at once (WW_SHADOW_PAR picks single ones), and the cascade reach
-	liveCheck( shadowParBox, "shadowPar", tr( "FO4CS-Level Shadows" ), wwShadowParMask() != 0 );
+	liveCheck( shadowParBox, "shadowPar", tr( "Fusion Shaders Shadow Rules" ), wwShadowParMask() != 0 );
 	shadowDistanceBox = new QDoubleSpinBox( tree );
 	shadowDistanceBox->setObjectName( QStringLiteral( "shadowDistance" ) );
 	shadowDistanceBox->setRange( 2000.0, 24000.0 );
@@ -303,12 +304,12 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	wwMakeScrubField( shadowDistanceBox );
 	row( tr( "Shadow Distance" ), shadowDistanceBox, true );
 	// lane GAPTOOL1: SSAO and Bloom were greyed placeholders; now the cell view's own AO and bloom mode (a pin greys them)
-	liveCheck( aoBox, "cellAo", tr( "SSAO" ), wwCellAoOn() );
+	liveCheck( aoBox, "cellAo", tr( "Screen-Space Ambient Occlusion" ), wwCellAoOn() );
 	aoBox->setEnabled( !wwCellAoPinned() );
-	liveCheck( ssgiBox, "cellSsgi", tr( "SSGI" ), wwCellSsgiOn() );	// lane SSGI1: ships off
+	liveCheck( ssgiBox, "cellSsgi", tr( "Screen-Space Global Illumination" ), wwCellSsgiOn() );	// lane SSGI1: ships off
 	bloomBox = new QComboBox( tree );
 	bloomBox->setObjectName( QStringLiteral( "cellBloom" ) );
-	bloomBox->addItems( { tr( "Vanilla" ), tr( "FO4CS" ) } );
+	bloomBox->addItems( { tr( "Vanilla" ), tr( "Fusion Shaders" ) } );
 	bloomBox->setCurrentIndex( wwCellBloomSettings().fo4cs ? 1 : 0 );
 	wwMatchFieldStyle( bloomBox );
 	row( tr( "Bloom" ), bloomBox, true );
@@ -468,6 +469,39 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		if ( m_repaint )
 			m_repaint();
 	} );
+	if ( live ) {	// lane OPENCELLFIX2 (notes 22, 26)
+		auto shareTick = [this]( QCheckBox * box, const char * topic, bool ( *get )() ) {
+			const QString t = QLatin1String( topic );
+			connect( box, &QCheckBox::toggled, this, [t]() { wwLiveChanged( t ); } );
+			wwLiveWatch( box, t, [box, get]() {
+				const QSignalBlocker b( box );
+				box->setChecked( get() );
+			} );
+		};
+		auto shareTier = [this]( QComboBox * box, const char * topic, int ( *get )() ) {
+			const QString t = QLatin1String( topic );
+			connect( box, qOverload<int>( &QComboBox::currentIndexChanged ), this, [t]() { wwLiveChanged( t ); } );
+			wwLiveWatch( box, t, [box, get]() {
+				const QSignalBlocker b( box );
+				box->setCurrentIndex( std::clamp( get(), 0, 4 ) );
+			} );
+		};
+		shareTick( volAirBox, "volAir", &wwVolAirOn );
+		shareTier( farAirBox, "farAir", &wwVolAirFarTier );
+		shareTick( volPartBox, "volPart", &wwVolPartOn );
+		shareTick( fogDriftBox, "fogDrift", &wwVolAirDriftOn );
+		shareTick( shadowsBox, "lookdevShadows", &wwLookdevShadows );
+		shareTier( cascadeQualityBox, "cascadeQuality", &wwShadowCascadeTier );
+		shareTier( contactShadowsBox, "contactShadows", &wwShadowContactTier );
+		shareTier( terrainShadowsBox, "terrainShadows", &wwShadowTerrainTier );
+		shareTick( shadowParBox, "shadowPar", []() { return wwShadowParMask() != 0; } );
+		connect( shadowDistanceBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this,
+			[]() { wwLiveChanged( QStringLiteral( "shadowDistance" ) ); } );
+		wwLiveWatch( shadowDistanceBox, QStringLiteral( "shadowDistance" ), [box = shadowDistanceBox]() {
+			const QSignalBlocker b( box );
+			box->setValue( wwShadowDistance() );
+		} );
+	}
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
 		if ( live )
 			wwLookdevSetGameDay( d );

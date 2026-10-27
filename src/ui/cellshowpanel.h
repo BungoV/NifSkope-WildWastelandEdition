@@ -17,6 +17,7 @@ BSD License - see nifskope.h
 class QDoubleSpinBox;
 class QLabel;
 class QMenu;
+class QObject;
 class QWidget;
 
 /* lane OPENCELLFIX1 (bungo 10-27): the Cell dock's Show switches as a tab, and a Show menu that stays open.
@@ -63,6 +64,11 @@ struct WwDisplayRow
 	QString label;                 //!< empty: the tick's own text, else the submenu's title
 	bool quality = false;          //!< the dropdown is the four quality levels
 	QStringList extras;            //!< more of the menu (ticks, submenus, value rows) folded under the row
+	/* lane OPENCELLFIX2 (bungo 10-27 note 18): a group is one row. A child names its group row's tick (or submenu)
+	 * and unfolds indented under the group row's arrow, in list order. WW_CELLSHOW_RED=nest: children lie flat. */
+	QString parent;
+	bool master = false;           //!< the group row's tick is a master: off, its children grey
+	bool shared = false;           //!< a child its master does not gate (a Scene window setting): never greyed
 };
 
 QStringList wwDisplayGroups();   //!< Editor, Vanilla, Fusion Shaders
@@ -85,5 +91,11 @@ bool wwDisplayPresetApply( QWidget * panel, const QString & name );
 bool wwDisplayPresetRename( QWidget * panel, const QString & from, const QString & to );
 bool wwDisplayPresetDelete( QWidget * panel, const QString & name );
 QString wwDisplayPresetNext( QWidget * panel );   //!< applies the preset after the current one; its name
+
+/* lane OPENCELLFIX2 (bungo 10-27 notes 22, 26): one setting with two homes (a Display row and a Scene window row)
+ * follows itself live. Each home watches the topic with a re-read of the setting; whoever changed it says so.
+ * A watch ends with its owner. WW_CELLSHOW_RED=livebind: nobody is told. */
+void wwLiveWatch( QObject * owner, const QString & topic, const std::function<void()> & reread );
+void wwLiveChanged( const QString & topic );
 
 #endif // CELLSHOWPANEL_H
