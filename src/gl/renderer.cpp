@@ -878,11 +878,20 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			: fog ? "fo4_fog.prog" : "fo4_default.prog";
 		if ( ( want[4] == 'c' && want[5] == 'e' ) && wwBlWants() ) {	// lane BINDLESS2: fo4_cell / fo4_cellcsm
 			const char * bl = want[8] == 'c' ? "fo4_cellcsmbl.prog" : "fo4_cellbl.prog";
-			Program * base = useProgram( want );
-			Program * q = base ? useProgram( bl ) : nullptr;
-			if ( q ) {
-				q->wwTwin = base;
-				return q;
+			if ( WwBl::red() != 5 ) {	// lane BINDLESSPERF1: the twin first; its base is looked up once
+				Program * q = useProgram( bl );
+				Program * base = !q ? nullptr : ( q->wwTwin && q->wwTwin->status ) ? q->wwTwin : useProgram( want );
+				if ( q && base ) {
+					q->wwTwin = base;
+					return q;
+				}
+			} else {
+				Program * base = useProgram( want );
+				Program * q = base ? useProgram( bl ) : nullptr;
+				if ( q ) {
+					q->wwTwin = base;
+					return q;
+				}
 			}
 		}
 		if ( p->name == std::string_view( want ) )
@@ -902,8 +911,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		else
 			setupStatus = setupProgramFO3( nif, program, mesh );
 		if ( setupStatus ) {
-			if ( program->wwBindless )	// lane BINDLESS2: the draw's row
+			if ( program->wwBindless ) {	// lane BINDLESS2: the draw's row
+				PassTime::DrawCpuScope blT( PassTime::CpuBlRow );	// lane BINDLESSPERF1
 				WwBl::commit( fn, program );
+			}
 			return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
 		}

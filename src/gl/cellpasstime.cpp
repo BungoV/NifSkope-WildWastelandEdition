@@ -340,7 +340,8 @@ void collect( Slot & sl )
 			if ( subSeen[k] )
 				line += QByteArray( " | sub " ) + subName[k] + " " + QByteArray::number( sub[k], 'f', 2 );
 		static const char * const cpuSubName[CpuSubCount] = { "setup", "cell-uni", "sun-uni", "fog-uni", "ao-draw", "ssr-draw",
-			"air-state", "air-setup", "air-clusters", "air-tile", "air-inject", "air-integrate", "air-far", "air-tail", "air-echo" };
+			"air-state", "air-setup", "air-clusters", "air-tile", "air-inject", "air-integrate", "air-far", "air-tail", "air-echo",
+			"bl-geo", "bl-row" };
 		for ( int k = 0; k < CpuSubCount; k++ )
 			if ( sl.cpuSubN[k] > 0 )
 				line += QByteArray( " | cpu " ) + cpuSubName[k] + " " + QByteArray::number( sl.cpuSub[k], 'f', 2 ) + " n="

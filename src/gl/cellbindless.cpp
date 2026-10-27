@@ -31,6 +31,7 @@ namespace WwBl
 {
 bool anyFrozen = false;
 bool resolving = false;
+GLuint resolvedTex = 0;
 Geo geo;
 
 namespace
@@ -104,7 +105,15 @@ std::unordered_map<const QOpenGLContext *, Ctx> & ctxs()
 
 Ctx & cx()
 {
-	return ctxs()[QOpenGLContext::currentContext()];
+	// lane BINDLESSPERF1: the last context's state without a map lookup (several calls a draw; map nodes never move)
+	static const QOpenGLContext * lastQ = nullptr;
+	static Ctx * lastC = nullptr;
+	const QOpenGLContext * q = QOpenGLContext::currentContext();
+	if ( !lastC || q != lastQ ) {
+		lastC = &ctxs()[q];
+		lastQ = q;
+	}
+	return *lastC;
 }
 
 Row row;
@@ -149,7 +158,7 @@ int red()
 {
 	WW_SWITCH_STATIC( int, r, [] {
 		const QByteArray v = wwEnv( "WW_BINDLESS_RED" ).trimmed();
-		return v == "sampler" ? 1 : v == "pooloff1" ? 2 : v == "nopool" ? 3 : v == "cellname" ? 4 : 0;
+		return v == "sampler" ? 1 : v == "pooloff1" ? 2 : v == "nopool" ? 3 : v == "cellname" ? 4 : v == "slow" ? 5 : 0;
 	}() );
 	return r;
 }
@@ -160,6 +169,12 @@ bool on()
 		return false;
 	Ctx & c = cx();
 	return init( c );
+}
+
+bool fastOn()
+{
+	const int r = red();
+	return r != 3 && r != 5 && on();
 }
 
 bool frozenSkip( GLuint tex, int wrapS, int wrapT, int minFilter, float aniso )
@@ -194,8 +209,9 @@ void noteKey( int wrapS, int wrapT, int minFilter, float aniso )
 std::uint64_t handleOfBound( NifSkopeOpenGLContext::GLFunctions * f )
 {
 	Ctx & c = cx();
-	GLint tex = 0;
-	f->glGetIntegerv( GL_TEXTURE_BINDING_2D, &tex );
+	GLint tex = GLint( resolvedTex );	// lane BINDLESSPERF1: the bind just made, no query (the slow red asks)
+	if ( !tex || red() == 5 )
+		f->glGetIntegerv( GL_TEXTURE_BINDING_2D, &tex );
 	const bool r = red() == 1;
 	auto & map = r ? c.redHandles : c.handles;
 	if ( tex ) {
@@ -488,6 +504,8 @@ bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigne
 		f->glBufferSubData( GL_ELEMENT_ARRAY_BUFFER, GLintptr( sp.firstIndex ) * 2, GLsizeiptr( idx ) * 2,
 			sh->triangles.constData() );
 		c.uploads++;
+	} else if ( red() != 5 ) {
+		f->glBindVertexArray( k.vao );	// lane BINDLESSPERF1: no query (it waits for the driver's thread)
 	} else {
 		GLint cur = 0;
 		f->glGetIntegerv( GL_VERTEX_ARRAY_BINDING, &cur );
@@ -509,7 +527,8 @@ bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigne
 
 void poolEnd( NifSkopeOpenGLContext::GLFunctions * f )
 {
-	if ( geo.on )
+	// lane BINDLESSPERF1: the layout's array stays bound; every later draw binds its own before drawing
+	if ( geo.on && red() == 5 )
 		f->glBindVertexArray( geo.ownVao );
 	geo.on = false;
 }
@@ -580,7 +599,8 @@ void frame()
 			.arg( poolBytes / 1048576.0, 0, 'f', 1 ).arg( double( kRows ) * sizeof( Row ) / 1048576.0, 0, 'f', 1 )
 			.arg( c.waits ).arg( c.conflicts ).arg( c.fallbacks ).arg( c.rebuilds ).arg( c.conflictsAll )
 			.arg( red() == 1 ? QStringLiteral( " RED sampler" ) : red() == 2 ? QStringLiteral( " RED pooloff1" )
-				: red() == 3 ? QStringLiteral( " RED nopool" ) : red() == 4 ? QStringLiteral( " RED cellname" ) : QString() );
+				: red() == 3 ? QStringLiteral( " RED nopool" ) : red() == 4 ? QStringLiteral( " RED cellname" )
+				: red() == 5 ? QStringLiteral( " RED slow" ) : QString() );
 		if ( line != c.line && wwFrameLog() ) {
 			c.line = line;
 			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );

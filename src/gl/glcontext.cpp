@@ -951,10 +951,15 @@ bool NifSkopeOpenGLContext::Program::uniSampler( BSShaderLightingProperty * bspr
 					return false;
 				f->glActiveTexture( GL_TEXTURE0 + texunit );
 				WWDP( WwDp::ActiveTex, GL_TEXTURE0 + texunit );
+				/* lane BINDLESSPERF1: the unit is given back only for the packet check's state compare (the twin never
+				 * samples it) and in the slow red; a query waits for the driver's thread */
+				const bool giveBack = WwBl::red() == 5 || WwDp::mode() == 2;
 				GLint prev = 0;
-				f->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prev );
+				if ( giveBack )
+					f->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prev );
 				const size_t recOps = WwDp::rec ? WwDp::rec->ops.size() : 0, recData = WwDp::rec ? WwDp::rec->data.size() : 0;
 				WwBl::resolving = true;
+				WwBl::resolvedTex = 0;
 				const bool ok = wwBindChain( bsprop, textureSlot, alternate, clamp, forced );
 				WwBl::resolving = false;
 				if ( WwDp::rec ) {	// the replay sets the handle, never the bind
@@ -963,7 +968,9 @@ bool NifSkopeOpenGLContext::Program::uniSampler( BSShaderLightingProperty * bspr
 				}
 				if ( ok )
 					h = WwBl::handleOfBound( f );
-				f->glBindTexture( GL_TEXTURE_2D, GLuint( prev ) );
+				WwBl::resolvedTex = 0;
+				if ( giveBack )
+					f->glBindTexture( GL_TEXTURE_2D, GLuint( prev ) );
 				if ( !ok )
 					return false;
 				texunit++;
@@ -1449,7 +1456,8 @@ void NifSkopeOpenGLContext::bindShape(
 			}
 			cacheLastItem = d;
 			d->usedEpoch = cacheEpoch;
-			f.glBindVertexArray( d->vao );
+			if ( !wwVaoDefer ) [[likely]]
+				f.glBindVertexArray( d->vao );
 			return;
 		}
 		j = i;

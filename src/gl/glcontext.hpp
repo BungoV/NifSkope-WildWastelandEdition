@@ -368,6 +368,10 @@ public:
 					const float * const * attrData, const void * elementData );
 
 	void bindShape( const ShapeDataHash & h, const float * const * attrData, const void * elementData );
+	/* lane BINDLESSPERF1: while set, a cached shape is found but its vertex array not bound (a draw that may take the
+	 * bindless pool binds it only when it is not pooled); wwShapeVao() is the array bindShape found or made */
+	bool	wwVaoDefer = false;
+	unsigned int wwShapeVao() const { return cacheLastItem ? cacheLastItem->vao : 0u; }
 
 	//! Bind geometry data and draw elements
 	//     elementMode = GL_POINTS, GL_LINES, GL_TRIANGLES, etc.
