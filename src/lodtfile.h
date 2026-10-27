@@ -342,6 +342,12 @@ public:
 
 	//! Body id at a sample of the BODY plane's own grid; 0 = no water here.
 	quint16 bodyIdAt( int bx, int by ) const;
+	//! Lane SHORE1: true when the cell tile holding body sample (bx, by) is one value (`id`, or `d` the delta).
+	bool bodyTileUniform( int bx, int by, quint16 & id ) const;
+	bool surfaceTileUniform( int bx, int by, float & d ) const;
+	//! Lane SHORE1: an n x n block of body ids / surface deltas from (bx, by), row-major, inside one cell tile.
+	void bodyIdBlock( int bx, int by, int n, quint16 * out ) const;
+	void surfaceDeltaBlock( int bx, int by, int n, float * out ) const;
 	//! Flow word at a sample of the FLOW plane's own grid; 0 = still water.
 	quint16 flowWordAt( int fx, int fy ) const;
 	//! Shore steps at a sample of the SHORE plane's own grid; 255 = far/absent.
@@ -471,6 +477,8 @@ private:
 		QString * error ) const;
 	//! One tile, inflated; `uniform` tiles never touch the file.
 	quint32 planeSampleOf( const PlaneStore & s, int x, int y, quint32 absent ) const;
+	bool planeTileUniformOf( const PlaneStore & s, int x, int y, quint32 absent, quint32 & v ) const;
+	void planeBlockOf( const PlaneStore & s, int x, int y, int n, quint32 absent, quint32 * out ) const;
 	mutable QHash<quint64, QByteArray> tileCache;
 	mutable QList<quint64> tileOrder;
 

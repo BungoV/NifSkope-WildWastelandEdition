@@ -42,6 +42,7 @@ OVERRIDES = {
     'WW_CELL_FARLOD': ('live', 'far section added/cut in place (LIVESET4); a changed near stack owes a reopen, named in the reply'),
     'WW_CELL_FARLOD_TYPE': ('live', 'far section rebuilt in place (LIVESET4); a changed near stack owes a reopen, named in the reply'),
     'WW_CELL_FARLOD_RED': ('live', 'rebuilt in place (live section); a stack red that changes the near stack owes a reopen'),
+    'WW_CELL_FARLOD_SHORE': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_NEARONLY': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_MAX': ('live', 'rebuilt in place (live section)'),
     'WW_CELL_FARLOD_L0': ('live', 'rebuilt in place (live section)'),

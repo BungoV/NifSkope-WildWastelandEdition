@@ -3672,6 +3672,79 @@ quint16 LodtFile::bodyIdAt( int bx, int by ) const
 	return quint16( planeSampleOf( idStore, bx, by, 0 ) );
 }
 
+bool LodtFile::planeTileUniformOf( const PlaneStore & s, int x, int y, quint32 absent, quint32 & v ) const
+{
+	v = absent;
+	if ( !s.ok || s.tileEdge <= 0 )
+		return true;
+	const int tx = x / s.tileEdge, ty = y / s.tileEdge;
+	if ( x < 0 || y < 0 || tx >= s.tilesX || ty >= s.tilesY )
+		return true;
+	const qsizetype e = ( qsizetype( ty ) * s.tilesX + tx ) * 16;
+	if ( rd<quint32>( s.dir, e + 8 ) )
+		return false;
+	v = rd<quint32>( s.dir, e + 12 );
+	return true;
+}
+
+void LodtFile::planeBlockOf( const PlaneStore & s, int x, int y, int n, quint32 absent, quint32 * out ) const
+{
+	quint32 u = 0;
+	if ( planeTileUniformOf( s, x, y, absent, u ) ) {
+		std::fill( out, out + size_t( n ) * size_t( n ), u );
+		return;
+	}
+	planeSampleOf( s, x, y, absent );   // inflates the tile into the cache
+	const int tx = x / s.tileEdge, ty = y / s.tileEdge;
+	const quint64 key = ( quint64( quintptr( &s ) ) << 1 ) ^ ( quint64( ty ) << 20 ) ^ quint64( tx );
+	const QByteArray raw = tileCache.value( key );
+	for ( int b = 0; b < n; b++ )
+		for ( int a = 0; a < n; a++ ) {
+			const int lx = ( x + a ) % s.tileEdge, ly = ( y + b ) % s.tileEdge;
+			const qsizetype k = ( qsizetype( ly ) * s.tileEdge + lx ) * s.bytesPerSample;
+			quint32 v = absent;
+			if ( ( x + a ) / s.tileEdge == tx && ( y + b ) / s.tileEdge == ty && k + s.bytesPerSample <= raw.size() ) {
+				v = 0;
+				for ( int c = 0; c < s.bytesPerSample; c++ )
+					v |= quint32( quint8( raw.at( k + c ) ) ) << ( 8 * c );
+			} else if ( raw.isEmpty() || ( x + a ) / s.tileEdge != tx || ( y + b ) / s.tileEdge != ty ) {
+				v = planeSampleOf( s, x + a, y + b, absent );
+			}
+			out[size_t( b ) * size_t( n ) + size_t( a )] = v;
+		}
+}
+
+void LodtFile::bodyIdBlock( int bx, int by, int n, quint16 * out ) const
+{
+	std::vector<quint32> v( size_t( n ) * size_t( n ) );
+	planeBlockOf( idStore, bx, by, n, 0, v.data() );
+	for ( size_t i = 0; i < v.size(); i++ )
+		out[i] = quint16( v[i] );
+}
+
+void LodtFile::surfaceDeltaBlock( int bx, int by, int n, float * out ) const
+{
+	std::vector<quint32> v( size_t( n ) * size_t( n ) );
+	planeBlockOf( surfStore, bx, by, n, 0, v.data() );
+	std::memcpy( out, v.data(), v.size() * 4 );
+}
+
+bool LodtFile::bodyTileUniform( int bx, int by, quint16 & id ) const
+{
+	quint32 v = 0;
+	const bool u = planeTileUniformOf( idStore, bx, by, 0, v );
+	id = quint16( v );
+	return u;
+}
+
+bool LodtFile::surfaceTileUniform( int bx, int by, float & d ) const
+{
+	quint32 bits = 0;
+	const bool u = planeTileUniformOf( surfStore, bx, by, 0, bits );
+	std::memcpy( &d, &bits, 4 );
+	return u;
+}
+
 quint16 LodtFile::flowWordAt( int fx, int fy ) const
 {
 	return quint16( planeSampleOf( flowStore, fx, fy, 0 ) );

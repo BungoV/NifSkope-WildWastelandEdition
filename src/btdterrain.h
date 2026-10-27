@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QTextStream>
 
 #include <array>
 #include <functional>
@@ -271,11 +272,14 @@ struct LodlFarWater
 	bool noCut = false;         //!< red control: the cut cells get water too
 	int texels = 4;             //!< body-plane samples a cell edge, wanted (clamped to the file's)
 	bool perCell = false;       //!< lane CELLSTREAM1: quads never cross a cell edge, one shape set a cell
+	bool gridLaw = false;       //!< lane SHORE1 red/off: the old law (corner sample, texel-grid shore)
 	QString prefix = QStringLiteral( "FarLOD water" );
 
 	// ---- out
 	int rate = 0;               //!< the samples a cell edge it took
 	qint64 quads = 0, wetTexels = 0, grownTexels = 0;
+	qint64 splitTexels = 0;     //!< lane SHORE1: coast texels written per body sample
+	std::vector<std::array<float, 6>> * dump = nullptr;   //!< lane SHORE1 census: each quad x0,y0,x1,y1,z,body
 	int shapes = 0;
 	QSet<quint16> bodies;
 	std::vector<std::pair<int, quint32>> blocks;   //!< each shape's block and WATR form
@@ -287,5 +291,8 @@ struct LodlFarWater
 //! False (with `error`) when the file has no body plane; nothing is appended then.
 bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QString & lodlPath,
 	const float shift[3], std::vector<LodlFarWater> & rings, QString * error );
+
+//! Lane SHORE1: `farwatercensus <ws.lodl> --ring x0,y0,x1,y1,texels [--grid] [--percell] --out <quads.txt>`
+int farWaterCensusCli( const QStringList & args, QTextStream & out );
 
 #endif // BTDTERRAIN_H

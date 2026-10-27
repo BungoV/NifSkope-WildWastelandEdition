@@ -8053,6 +8053,14 @@ int nifskopeCliMain( const QStringList & args )
 		err().flush();
 		return rc;
 	}
+	// lane SHORE1: `farwatercensus` builds one far water ring headless and writes its quads
+	if ( cmd == QLatin1String( "farwatercensus" ) ) {
+		if ( !initModelLayer() ) { err().flush(); return 1; }
+		const int rc = farWaterCensusCli( a, out() );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	if ( cmd == QLatin1String( "farlightmap" ) ) {
 		const int rc = farLightMapCli( a );
 		out().flush();

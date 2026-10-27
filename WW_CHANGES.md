@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SHORE1 (2026-10-27, branch shore1-20261027): far water shore follows the coast, not the texel grid
+
+- **Far water shore law:** the far water rings used to make a texel wet from one corner sample, so every coast was a
+  staircase of whole water texels (512-4096 units). Now each texel takes its dominant body at its highest surface,
+  grows one texel into its 8 neighbours, and coast texels are written per full-rate sample: a sample is wet where the
+  file has water or where the ground is under that surface. Offline on the harbour: shore edges on texel lines
+  46-58% -> 0%, square notches 2168 (ring 1) -> 0. Inland seams stay closed (stream ring 0 runs never cross a cell).
+- Switch `WW_CELL_FARLOD_SHORE` (default on; `=0` = the old texel grid, live). Red `WW_CELL_FARLOD_RED=watergrid`.
+  Notes line: `far lod: water ring ..., shore law: N coast texels per sample` (or `shore law OFF (texel grid)`).
+- Cost (offline upper bound from open 14,3): far water quads ~1.7k -> ~21.7k (about 43k triangles), GPU well under
+  0.05 ms at 1080p (estimate); build CPU ~70 -> ~720 ms over all rings.
+- CLI: `NifSkope -no-gui farwatercensus <ws.lodl> --ring x0,y0,x1,y1,texels [--grid] [--percell] [--out quads.txt]`.
+- Stream trace (`WW_CELL_STREAM_TRACE=1`): each `build` line names the eye cell, the pick's distance and the queue size.
+- New `.lodl` plane reads: tile-uniform tests and block reads for the body id and surface planes.
+
 ## Lane SKYLIVE1 (2026-10-27, branch skylive1-20261027): a live weather-source change relights like a fresh open
 
 - **Bug (found by SKYTOP1):** setting the Plugin row live (Load order -> Fallout4.esm, or a pinned list) moved the sky,

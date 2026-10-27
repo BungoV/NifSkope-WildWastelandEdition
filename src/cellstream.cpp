@@ -320,10 +320,12 @@ void Stream::pumpWorker( const Vector3 & eye )
 	const int ex = cellOf( eye[0] ), ey = cellOf( eye[1] );
 	StreamCell * best = nullptr;
 	double bestScore = 1.0e30;
+	int queued = 0;
 	for ( auto & kv : cells ) {
 		StreamCell & c = kv.second;
 		if ( c.st != CellState::Queued )
 			continue;
+		queued++;
 		const double d = std::hypot( double( c.x - ex ), double( c.y - ey ) );
 		const double score = ( wanted.count( kv.first ) ? 0.0 : 1000.0 ) + d;
 		if ( score < bestScore ) {
@@ -334,7 +336,10 @@ void Stream::pumpWorker( const Vector3 & eye )
 	if ( !best )
 		return;
 	best->st = CellState::Building;
-	trace( QStringLiteral( "build %1,%2 (%3)" ).arg( best->x ).arg( best->y ).arg( wanted.count( Key( best->x, best->y ) ) ? "wanted" : "prefetch" ) );
+	// lane SHORE1: the eye cell, the pick's distance and the queue it beat, so a log proves nearest-first
+	trace( QStringLiteral( "build %1,%2 (%3) eye %4,%5 d %6 of %7 queued" ).arg( best->x ).arg( best->y )
+		.arg( wanted.count( Key( best->x, best->y ) ) ? "wanted" : "prefetch" ).arg( ex ).arg( ey )
+		.arg( std::fmod( bestScore, 1000.0 ), 0, 'f', 2 ).arg( queued ) );
 	job = std::make_shared<CellChunk>();
 	job->seed = seed;
 	job->cx = best->x;
