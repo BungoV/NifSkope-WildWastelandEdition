@@ -46,6 +46,15 @@ struct CellMeshInst
 	quint64 id = 0;          //!< the GPU copy's key (unique per build)
 	qint64 instances = 0, uniqueVerts = 0, uniqueTris = 0, drawnTris = 0;
 	bool alphaTested = false;
+	// lane FARHOLE2 (cellfarhide.h): per row, the cell it stands in and its REFR (0 = none), so a streamed near cell
+	// can leave its own objects out; the document that holds the bucket; the rows drawn now, cached per change
+	QVector<qint64> rowCell;
+	QVector<quint32> rowRef;
+	const void * doc = nullptr;
+	mutable quint64 visFor = ~quint64( 0 ), visKey = 0;
+	mutable qint64 visHidden = 0;
+	mutable QVector<Cmd> visCmds;
+	mutable QVector<Tile> visTiles;
 };
 
 struct CellMesh

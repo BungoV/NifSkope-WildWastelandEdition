@@ -10,7 +10,9 @@ BSD License - see nifskope.h
 #include "lodifile.h"
 #include "lodofile.h"
 
+#include "cellfarhide.h"	// lane FARHOLE2: rows a streamed near cell leaves out (and the farobjcensus gate)
 #include "cellmesh.h"
+#include "esmdata.h"
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 
@@ -24,6 +26,7 @@ BSD License - see nifskope.h
 #include <QTextStream>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -288,6 +291,7 @@ void emitInstBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b
 	if ( col )
 		m->colors.append( Color4( 1.0f, 1.0f, 1.0f, 1.0f ) );
 	m->inst = d;
+	d->doc = nif;   // lane FARHOLE2: the document whose streamed cells hide its rows
 	cellMeshPut( nif, iShape, m );
 	attachMaterial( nif, iRoot, iShape, b );
 }
@@ -912,6 +916,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 		float row[16];
 		Vector3 c;
 		float r = 0.0f;
+		qint64 cell = 0;     // lane FARHOLE2: the placement's cell and REFR
+		quint32 ref = 0;
 	};
 	struct InstBucket
 	{
@@ -930,7 +936,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	};
 	auto unorm8 = []( float f ) { return quint8( std::lround( qBound( 0.0f, f, 1.0f ) * 255.0f ) ); };
 	auto placeInst = [&]( quint16 baseId, const LodoBase & base, quint16 meshId, const std::vector<MeshPart> & parts,
-		const Vector3 & pos, const float m[9], float scale, bool mirrorU, const float rgb[3], int cellX, int cellY ) {
+		const Vector3 & pos, const float m[9], float scale, bool mirrorU, const float rgb[3], int cellX, int cellY,
+		quint32 ref ) {
 		const LodoMesh & meshRow = lib.meshes[meshId];
 		const quint32 tile = ( quint32( ( cellX >> 2 ) + 32768 ) << 16 ) | quint32( ( cellY >> 2 ) + 32768 );
 		for ( int pi = 0; pi < int( parts.size() ); pi++ ) {
@@ -1025,6 +1032,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			r.row[15] = rgb[2] + ( mirrorU ? 2.0f : 0.0f );
 			r.c = pos + rotate( m, sub.centre * scale );
 			r.r = sub.radius * scale;
+			r.cell = CellFarHide::cellKey( cellX, cellY );
+			r.ref = ref;
 			ib.recs.push_back( r );
 			cnt.tris += qint64( sub.indexCount / 3 );
 			if ( ib.meta.sway )
@@ -1302,7 +1311,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				} else if ( wantAo ) {
 					rgb[0] = rgb[1] = rgb[2] = placementAo;
 				}
-				placeInst( inst.baseId, base, meshId, parts, pos, m, scale, mirrorU, rgb, cellX, cellY );
+				placeInst( inst.baseId, base, meshId, parts, pos, m, scale, mirrorU, rgb, cellX, cellY,
+					ii < table.cold.size() ? table.cold[ii].refFormId : 0u );
 			} else
 			for ( const MeshPart & p : parts ) {
 				/* The mirror is about THIS part's own U range, as the chunk builder
@@ -1445,11 +1455,15 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				return a.tile != b.tile ? a.tile < b.tile : a.sub < b.sub;
 			} );
 			d.inst.resize( qsizetype( ib.recs.size() ) * 16 );
+			d.rowCell.resize( qsizetype( ib.recs.size() ) );
+			d.rowRef.resize( qsizetype( ib.recs.size() ) );
 			Vector3 lo( 3.4e38f, 3.4e38f, 3.4e38f ), hi( -3.4e38f, -3.4e38f, -3.4e38f );
 			Vector3 tlo, thi;
 			for ( size_t i = 0; i < ib.recs.size(); i++ ) {
 				const InstRec & r = ib.recs[i];
 				std::memcpy( d.inst.data() + i * 16, r.row, sizeof( r.row ) );
+				d.rowCell[qsizetype( i )] = r.cell;
+				d.rowRef[qsizetype( i )] = r.ref;
 				const bool newTile = i == 0 || r.tile != ib.recs[i - 1].tile;
 				const bool newCmd = newTile || r.sub != ib.recs[i - 1].sub;
 				if ( newTile ) {
@@ -1495,7 +1509,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			cnt.uniqueTris += d.uniqueTris;
 			cnt.geoBytes += qint64( d.vbo.size() ) + qint64( d.ebo.size() ) * 2;
 			cnt.instBytes += qint64( d.inst.size() ) * 4 + qint64( d.cmds.size() ) * qint64( sizeof( CellMeshInst::Cmd ) )
-				+ qint64( d.tiles.size() ) * qint64( sizeof( CellMeshInst::Tile ) );
+				+ qint64( d.tiles.size() ) * qint64( sizeof( CellMeshInst::Tile ) )
+				+ qint64( d.rowCell.size() ) * 12;
 		}
 		kept += cnt.geoBytes + cnt.instBytes;
 		instBuckets.clear();
@@ -1736,14 +1751,153 @@ void farCensusMem( double & privMB, double & wsMB, double & peakMB )
 }
 } // namespace
 
+/* lane FARHOLE2: the far objects a streamed 5x5 leaves out, counted on the rings just built. Each --loaded block is
+ * one step: its cells and the REFRs they list (read from the plugins as a streamed cell's build reads them: the
+ * cell's own refs + the persistent refs standing in it) go into the document's hidden set, and every far bucket is
+ * asked what it draws now, through the same calls the renderer makes (CellFarHide::view / applyMask).
+ *   double  = a drawn row whose REFR a loaded cell lists (the near cell draws that object too): must be 0
+ *   noref   = a drawn row with no REFR standing in a loaded cell: must be 0
+ *   reach   = a drawn row standing in a loaded cell whose REFR no loaded cell lists (its owner is not loaded: right)
+ *   flat    = drawn triangles of the non-instanced far shapes centred in a loaded cell: must be 0
+ * WW_CELL_FARHIDE_RED=off / bypos are the reds. */
+static int farHideCensus( NifModel & nif, const QVector<std::array<int, 4>> & loaded, const QString & esmPath,
+	quint32 wsForm, QTextStream & out )
+{
+	if ( esmPath.isEmpty() ) {
+		out << "farobjcensus: --loaded wants --esm <plugins>\n";
+		return 2;
+	}
+	EsmWorld world;
+	QString err;
+	if ( !world.load( esmPath, wsForm, &err ) ) {
+		out << "farobjcensus: could not load " << esmPath << " -- " << err << "\n";
+		return 1;
+	}
+	struct Inst { int block; QSharedPointer<CellMeshInst> d; };
+	QVector<Inst> insts;
+	QVector<int> flats;
+	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+		const QModelIndex iB = nif.getBlockIndex( b );
+		const QSharedPointer<CellMesh> cm = cellMeshFor( &nif, iB );
+		if ( !cm )
+			continue;
+		if ( cm->inst )
+			insts.append( { b, cm->inst } );
+		else if ( !cm->triangles.isEmpty() )
+			flats.append( b );
+	}
+	const char * modeName[3] = { "off", "bypos", "byref" };
+	int fails = 0;
+	for ( int s = 0; s < loaded.size(); s++ ) {
+		const std::array<int, 4> & L = loaded[s];
+		CellFarHide::clear( &nif );
+		QSet<qint64> cells;
+		QSet<quint32> listed;
+		for ( int y = L[1]; y <= L[3]; y++ )
+			for ( int x = L[0]; x <= L[2]; x++ ) {
+				QVector<quint32> refs;
+				for ( const EsmRefr & r : world.refrs( x, y ) )
+					refs << r.formID;
+				for ( const EsmRefr & r : world.persistentRefrsIn( float( x ) * 4096.0f, float( y ) * 4096.0f,
+						float( x + 1 ) * 4096.0f, float( y + 1 ) * 4096.0f ) )
+					refs << r.formID;
+				for ( quint32 r : refs )
+					listed.insert( r );
+				cells.insert( CellFarHide::cellKey( x, y ) );
+				CellFarHide::setCell( &nif, x, y, true, refs );
+			}
+		qint64 rows = 0, hidden = 0, dbl = 0, noref = 0, reach = 0, hidOut = 0, trisAll = 0, trisDrawn = 0, viewRows = 0;
+		int keyed = 0, hidShapes = 0;
+		for ( const Inst & in : insts ) {
+			const CellMeshInst & d = *in.d;
+			const CellFarHide::View vw = CellFarHide::view( d );
+			const qint64 n = d.rowCell.size();
+			std::vector<char> vis( size_t( n ), 0 );
+			for ( const CellMeshInst::Cmd & c : *vw.cmds ) {
+				viewRows += c.instanceCount;
+				trisDrawn += qint64( c.instanceCount ) * ( c.count / 3 );
+				for ( quint32 i = c.baseInstance; i < c.baseInstance + c.instanceCount && qint64( i ) < n; i++ )
+					vis[i] = 1;
+			}
+			trisAll += d.drawnTris;
+			if ( vw.hiddenRows ) {
+				hidShapes++;
+				keyed += ( vw.key && CellFarHide::shadowKeyed() ) ? 1 : 0;   // what sunshadow classify() is fed
+			}
+			for ( qint64 i = 0; i < n; i++ ) {
+				rows++;
+				const bool in5 = cells.contains( d.rowCell[i] );
+				const quint32 ref = i < d.rowRef.size() ? d.rowRef[i] : 0u;
+				if ( !vis[size_t( i )] ) {
+					hidden++;
+					hidOut += in5 ? 0 : 1;
+					continue;
+				}
+				if ( ref && listed.contains( ref ) )
+					dbl++;
+				else if ( !ref && in5 )
+					noref++;
+				else if ( in5 )
+					reach++;
+			}
+		}
+		qint64 flatIn = 0, flatMasked = 0, flatAll = 0;
+		for ( const int b : flats ) {
+			const QModelIndex iB = nif.getBlockIndex( b );
+			const QSharedPointer<CellMesh> cm = cellMeshFor( &nif, iB );
+			QVector<Triangle> t = cm->triangles;
+			const Transform w( &nif, iB );
+			CellFarHide::registerMask( &nif, b, -100000, -100000, 100000, 100000 );
+			flatMasked += CellFarHide::applyMask( &nif, b, w, cm->verts, t );
+			for ( const Triangle & tr : t ) {
+				if ( tr[0] == tr[1] && tr[1] == tr[2] )
+					continue;
+				flatAll++;
+				const Vector3 c = w * ( ( cm->verts.at( tr[0] ) + cm->verts.at( tr[1] ) + cm->verts.at( tr[2] ) ) / 3.0f );
+				flatIn += cells.contains( CellFarHide::cellKey( int( std::floor( c[0] / 4096.0f ) ),
+					int( std::floor( c[1] / 4096.0f ) ) ) ) ? 1 : 0;
+			}
+		}
+		const bool pass = rows + flatAll > 0 && dbl == 0 && noref == 0 && flatIn == 0 && viewRows + hidden == rows
+			&& keyed == hidShapes;
+		fails += pass ? 0 : 1;
+		out << QString( "farhide step %1 loaded %2,%3..%4,%5 mode %6: %7 refs listed; rows %8, hidden %9 (%10 standing "
+			"outside the loaded cells); drawn in the loaded cells: double %11, noref %12, reach %13 (owner not loaded); "
+			"tris drawn %14 of %15; shadow key changed on %16 of %17 shapes; flat tris %18 masked %19 centred-in %20 -- %21\n" )
+			.arg( s ).arg( L[0] ).arg( L[1] ).arg( L[2] ).arg( L[3] ).arg( modeName[CellFarHide::mode()] )
+			.arg( listed.size() ).arg( rows ).arg( hidden ).arg( hidOut ).arg( dbl ).arg( noref ).arg( reach )
+			.arg( trisDrawn ).arg( trisAll ).arg( keyed ).arg( hidShapes ).arg( flatAll ).arg( flatMasked ).arg( flatIn )
+			.arg( pass ? "PASS" : "FAIL" );
+		out.flush();
+	}
+	CellFarHide::clear( &nif );
+	out << QString( "farhide: %1 steps, %2 failed -- VERDICT %3\n" ).arg( loaded.size() ).arg( fails )
+		.arg( fails ? "FAIL" : "PASS" );
+	return 0;
+}
+
 int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 {
 	QString lodi;
 	struct Ring { int r[9]; };
 	QVector<Ring> rings;
 	bool perBase = false, instanced = false;
+	QVector<std::array<int, 4>> loaded;   // lane FARHOLE2: streamed 5x5 blocks to hide, one step each
+	QString esmPath;
+	quint32 wsForm = 0x3C;
 	for ( int i = 0; i < args.size(); i++ ) {
-		if ( args[i] == QLatin1String( "--perbase" ) ) {
+		if ( args[i] == QLatin1String( "--loaded" ) && i + 1 < args.size() ) {
+			const QStringList p = args[++i].split( QLatin1Char( ',' ) );
+			if ( p.size() != 4 ) {
+				out << "farobjcensus: --loaded wants x0,y0,x1,y1\n";
+				return 2;
+			}
+			loaded.append( { p[0].toInt(), p[1].toInt(), p[2].toInt(), p[3].toInt() } );
+		} else if ( args[i] == QLatin1String( "--esm" ) && i + 1 < args.size() ) {
+			esmPath = args[++i];
+		} else if ( args[i] == QLatin1String( "--wsform" ) && i + 1 < args.size() ) {
+			wsForm = args[++i].toUInt( nullptr, 0 );
+		} else if ( args[i] == QLatin1String( "--perbase" ) ) {
 			perBase = true;
 		} else if ( args[i] == QLatin1String( "--instanced" ) ) {
 			instanced = true;   // lane FARDRAW1: the cell view's instanced rings
@@ -1762,7 +1916,8 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 		}
 	}
 	if ( lodi.isEmpty() || rings.isEmpty() ) {
-		out << "usage: farobjcensus <ws.lodi> --ring x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot [--ring ...] [--perbase|--instanced]\n";
+		out << "usage: farobjcensus <ws.lodi> --ring x0,y0,x1,y1,hx0,hy0,hx1,hy1,slot [--ring ...] [--perbase|--instanced]"
+			" [--esm <plugins> [--wsform 0x3C] --loaded x0,y0,x1,y1 ...]\n";
 		return 2;
 	}
 	double p0 = 0, w0 = 0, k0 = 0;
@@ -1828,6 +1983,13 @@ int lodiFarObjCensusCli( const QStringList & args, QTextStream & out )
 				.arg( double( c.geoBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 )
 				.arg( double( c.instBytes ) / ( 1024.0 * 1024.0 ), 0, 'f', 2 );
 		out.flush();
+	}
+	if ( !loaded.isEmpty() ) {
+		const int rc = farHideCensus( nif, loaded, esmPath, wsForm, out );
+		if ( rc ) {
+			cellMeshClear( &nif );
+			return rc;
+		}
 	}
 	double p1 = 0, w1 = 0, k1 = 0;
 	farCensusMem( p1, w1, k1 );

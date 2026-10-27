@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 #include "gl/cellwater.h"	// lane SUNCELL1: water never casts
 #include "cellmesh.h"	// lane FARDRAW1: CellMeshInst
 #include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings cast
+#include "cellfarhide.h"	// lane FARHOLE2: the rows a loaded near cell leaves out
 #include "gl/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 #include "gl/cellgrass.h"	// lane FAR5: a wind cable's shadow sways with it
 #include "gl/celllooks.h"
@@ -551,6 +552,9 @@ bool classify( const Shape * sh, bool skinned, bool twoSided, bool alphaTested, 
 		h.w( dh->h[0] );
 		h.w( dh->h[1] );
 	}
+	// lane FARHOLE2: an instanced far ring casts only the rows drawn now; the cached cascades redraw when they change
+	if ( sh->wwFarInstData() && CellFarHide::shadowKeyed() )
+		h.w( CellFarHide::view( *sh->wwFarInstData() ).key );
 	if ( alphaTested ) {
 		const BSLightingShaderProperty * lsp = sh->wwLightingShader();
 		BSShaderLightingProperty * bsp = sh->wwShaderLighting();

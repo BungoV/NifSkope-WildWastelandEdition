@@ -2,8 +2,10 @@
 #include "cellstream.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
+#include "cellfarhide.h"	// lane FARHOLE2: the far field leaves room for every loaded cell
 #include "cellmesh.h"
 #include "cellsplat.h"
+#include "impostorchunk.h"
 #include "gl/bsshape.h"
 #include "gl/cellcull.h"
 #include "gl/cellgrass.h"
@@ -22,6 +24,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <iterator>
@@ -139,6 +142,7 @@ public:
 
 	~Stream() override
 	{
+		farHideForget();
 		if ( worker.joinable() )
 			worker.join();
 		if ( reaper.joinable() )
@@ -209,6 +213,16 @@ private:
 	void wire( StreamCell & c );
 	bool attach( StreamCell & c, const QElapsedTimer & t, double budget );
 	void showFar( int x, int y, bool show );
+public:
+	// lane FARHOLE2 (cellfarhide.h): the far shapes past the hand tiles that a loaded cell masks
+	QHash<int, QPointer<Node>> maskShapes;
+	const void * hideDoc = nullptr;
+	int hideMode = -1;
+	void farHide( StreamCell & c, bool hide );
+	void farHideRefresh( int x, int y );
+	void farHideForget();
+	void registerMasks( Scene * sc );
+private:
 	void rebuild();
 	Node * makeNode( const QModelIndex & idx, const QString & type );
 	void setRootSlot( int from, int to );
@@ -261,6 +275,7 @@ bool Stream::resolve( Scene * sc )
 		f.parent = f.node ? f.node->parentNode() : nullptr;
 		farTiles.push_back( f );
 	}
+	registerMasks( sc );
 	for ( auto & kv : cells ) {
 		StreamCell & c = kv.second;
 		if ( c.st == CellState::Writing ) {   // its half-written node was never in the document's tree
@@ -402,6 +417,94 @@ void Stream::setRootSlot( int from, int to )
 	nif->updateBlockLinks( seed->rootBlock );
 }
 
+/* lane FARHOLE2: every far shape that is not a ring-0 hand tile (showFar hands those over per cell) nor an
+ * instanced object ring (its rows are filtered at draw) masks the triangles centred in a loaded cell: ring 1+
+ * terrain and water, the game's .btr/.bto chunks, flattened object rings. Registered with the cells its vertices span,
+ * so an attach re-takes only the shapes that reach that cell. */
+void Stream::registerMasks( Scene * sc )
+{
+	hideDoc = nif;
+	maskShapes.clear();
+	QSet<int> hand;
+	for ( const auto & h : seed->farHand )
+		hand.insert( h[0] );
+	for ( Shape * sh : sc->shapes ) {
+		if ( !sh || !sh->getName().startsWith( QLatin1String( "FarLOD" ) ) )
+			continue;
+		const int b = nif->getBlockNumber( sh->index() );
+		if ( b < 0 || hand.contains( b ) )
+			continue;
+		const QSharedPointer<CellMesh> cm = cellMeshFor( nif, sh->index() );
+		if ( cm && cm->inst )
+			continue;
+		const QVector<Vector3> & V = cm ? cm->verts : sh->verts;
+		int x0 = -1000000, y0 = -1000000, x1 = 1000000, y1 = 1000000;   // unknown span: every cell
+		if ( !V.isEmpty() ) {
+			const Transform w = sh->restWorldTrans();
+			float lo[2] = { 3.4e38f, 3.4e38f }, hi[2] = { -3.4e38f, -3.4e38f };
+			for ( const Vector3 & v : V ) {
+				const Vector3 p = w * v;
+				lo[0] = std::min( lo[0], p[0] );
+				lo[1] = std::min( lo[1], p[1] );
+				hi[0] = std::max( hi[0], p[0] );
+				hi[1] = std::max( hi[1], p[1] );
+			}
+			x0 = cellOf( lo[0] );
+			y0 = cellOf( lo[1] );
+			x1 = cellOf( hi[0] );
+			y1 = cellOf( hi[1] );
+		}
+		CellFarHide::registerMask( nif, b, x0, y0, x1, y1 );
+		maskShapes.insert( b, sh );
+		sh->wwRefreshData();   // a scene made again: its arrays are whole until the mask applies
+	}
+	hideMode = CellFarHide::mode();
+	sc->transformDirty = true;
+	trace( QStringLiteral( "far mask: %1 shapes registered" ).arg( maskShapes.size() ) );
+}
+
+void Stream::farHide( StreamCell & c, bool hide )
+{
+	if ( !nif )
+		return;
+	QVector<quint32> refs;
+	if ( c.chunk )
+		for ( int i = 0; i < c.chunk->refs.size(); i++ )
+			refs << c.chunk->refs.at( i ).refForm;
+	CellFarHide::setCell( nif, c.x, c.y, hide, refs );
+	farHideRefresh( c.x, c.y );
+}
+
+//! the masked shapes reaching (x, y) (every one for INT_MIN) take their arrays again; the cards follow the cells
+void Stream::farHideRefresh( int x, int y )
+{
+	for ( const int b : CellFarHide::maskBlocks( nif, x, y ) ) {
+		Node * n = maskShapes.value( b ).data();
+		if ( Shape * sh = static_cast<Shape *>( n ) )
+			sh->wwRefreshData();
+	}
+	const CellFarHide::Hidden * h = CellFarHide::hiddenFor( nif );
+	ImpostorChunk::cellFarHideSet( ( h && CellFarHide::mode() != CellFarHide::Off ) ? h->cells : QSet<qint64>() );
+	if ( scene && root )
+		scene->transformDirty = true;
+}
+
+//! the stream ends: every masked shape takes its whole arrays again, every card draws
+void Stream::farHideForget()
+{
+	for ( auto it = maskShapes.cbegin(); it != maskShapes.cend(); ++it )
+		if ( Shape * sh = static_cast<Shape *>( it.value().data() ) )
+			sh->wwRefreshData();
+	maskShapes.clear();
+	if ( hideDoc ) {
+		CellFarHide::clear( hideDoc );
+		ImpostorChunk::cellFarHideSet( QSet<qint64>() );
+	}
+	hideDoc = nullptr;
+	if ( scene && root && nif )   // root dies with the scene
+		scene->transformDirty = true;
+}
+
 void Stream::showFar( int x, int y, bool show )
 {
 	for ( FarTile & f : farTiles ) {
@@ -541,6 +644,7 @@ bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 		c.cellNode->makeParent( root.data() );
 	if ( red != QLatin1String( "nohandover" ) )
 		showFar( c.x, c.y, false );   // the near ground replaces the far tile in the same step: no overlap
+	farHide( c, true );   // lane FARHOLE2: and the far objects, cards and rings past 0 it holds
 	c.st = CellState::Attached;
 	st.attaches++;
 	trace( QStringLiteral( "attach %1,%2 block %3 after %4 ms of writing" ).arg( c.x ).arg( c.y ).arg( c.cellBlock ).arg( c.writeMs, 0, 'f', 1 ) );
@@ -558,6 +662,7 @@ void Stream::unload( StreamCell & c )
 	if ( c.cellBlock >= 0 && c.st == CellState::Attached )
 		setRootSlot( c.cellBlock, -1 );
 	showFar( c.x, c.y, true );
+	farHide( c, false );   // lane FARHOLE2
 	QSet<int> nodeBlocks, propBlocks;
 	for ( const auto & tk : c.takes ) {
 		const int b = tk.first;
@@ -779,6 +884,11 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	nif->streamQuiet = true;
 	nif->setState( BaseModel::Processing );
 	bool changed = false;
+	if ( CellFarHide::mode() != hideMode ) {   // lane FARHOLE2: WW_CELL_FARHIDE_RED set live
+		hideMode = CellFarHide::mode();
+		farHideRefresh( INT_MIN, INT_MIN );
+		changed = true;
+	}
 
 	shiftCentre( eye );
 	wanted.clear();
@@ -1213,8 +1323,71 @@ QString cellStreamCoverage( const NifModel * nif, int * holes, int * doubles, in
 		*doubles = nD;
 	if ( samples )
 		*samples = nS;
+	// lane FARHOLE2: what the far field still draws inside the loaded cells (single-token keys, word pairs)
+	//   farinstDouble  drawn instanced rows whose REFR a loaded cell lists (the near cell draws it too): must be 0
+	//   farinstNoref   drawn rows with no REFR placed in a loaded cell: must be 0
+	//   farinstReach   drawn rows placed in a loaded cell whose owner is not loaded (right: nothing near draws them)
+	//   farmaskCentred drawn triangles of the masked far shapes centred in a loaded cell: must be 0
+	//   farcardsPlaced far cards placed in a loaded cell still drawn: must be 0
+	QSet<qint64> loadedCells;
+	QSet<quint32> listed;
+	for ( const auto & kv : s->cells ) {
+		const StreamCell & c = kv.second;
+		if ( c.st != CellState::Attached )
+			continue;
+		loadedCells.insert( CellFarHide::cellKey( c.x, c.y ) );
+		if ( c.chunk )
+			for ( int i = 0; i < c.chunk->refs.size(); i++ )
+				if ( c.chunk->refs.at( i ).refForm )
+					listed.insert( c.chunk->refs.at( i ).refForm );
+	}
+	qint64 iRows = 0, iHidden = 0, iDouble = 0, iNoref = 0, iReach = 0, mCentred = 0, mShapes = 0;
+	for ( Shape * sh : s->scene->shapes ) {
+		if ( !sh )
+			continue;
+		if ( const CellMeshInst * d = sh->wwFarInstData() ) {
+			const CellFarHide::View vw = CellFarHide::view( *d );
+			const qint64 n = d->rowCell.size();
+			std::vector<char> vis( size_t( n ), 0 );
+			for ( const CellMeshInst::Cmd & m : *vw.cmds )
+				for ( quint32 i = m.baseInstance; i < m.baseInstance + m.instanceCount && qint64( i ) < n; i++ )
+					vis[i] = 1;
+			for ( qint64 i = 0; i < n; i++ ) {
+				iRows++;
+				if ( !vis[size_t( i )] ) {
+					iHidden++;
+					continue;
+				}
+				const bool in = loadedCells.contains( d->rowCell[i] );
+				const quint32 ref = i < d->rowRef.size() ? d->rowRef[i] : 0u;
+				if ( ref && listed.contains( ref ) )
+					iDouble++;
+				else if ( !ref && in )
+					iNoref++;
+				else if ( in )
+					iReach++;
+			}
+			continue;
+		}
+		if ( !s->maskShapes.contains( s->nif->getBlockNumber( sh->index() ) ) || !sh->parentNode() )
+			continue;
+		mShapes++;
+		const Transform w = sh->worldTrans();
+		const QVector<Vector3> & V = sh->verts;
+		for ( const Triangle & t : sh->triangles ) {
+			if ( t[0] >= V.size() || t[1] >= V.size() || t[2] >= V.size() || ( t[0] == t[1] && t[1] == t[2] ) )
+				continue;
+			const Vector3 p = w * ( ( V[t[0]] + V[t[1]] + V[t[2]] ) / 3.0f );
+			mCentred += loadedCells.contains( CellFarHide::cellKey( cellOf( p[0] ), cellOf( p[1] ) ) ) ? 1 : 0;
+		}
+	}
 	return QStringLiteral( "coverage edges %1 samples %2 holes %3 doubles %4 nearTris %5 farTris %6" )
-		.arg( edges ).arg( nS ).arg( nH ).arg( nD ).arg( nearT.size() ).arg( farT.size() );
+		.arg( edges ).arg( nS ).arg( nH ).arg( nD ).arg( nearT.size() ).arg( farT.size() )
+		+ QStringLiteral( " farhideMode %1 farinstRows %2 farinstHidden %3 farinstDouble %4 farinstNoref %5 farinstReach %6"
+			" farmaskShapes %7 farmaskTris %8 farmaskCentred %9" )
+		.arg( CellFarHide::mode() ).arg( iRows ).arg( iHidden ).arg( iDouble ).arg( iNoref ).arg( iReach ).arg( mShapes )
+		.arg( CellFarHide::maskedTris( s->nif ) ).arg( mCentred )
+		+ QStringLiteral( " farcardsPlaced %1" ).arg( ImpostorChunk::cellFarCardsShownIn( loadedCells ) );
 }
 
 qint64 cellStreamPrivateBytes()

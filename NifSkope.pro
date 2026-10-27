@@ -400,6 +400,7 @@ HEADERS += \
 	src/cellmodpickbox.h \
 	src/cellmodsource.h \
 	src/cellfarvanilla.h \
+	src/cellfarhide.h \
 	src/cellmesh.h \
 	src/cellspeed.h \
 	src/cellstream.h \
@@ -728,6 +729,7 @@ SOURCES += \
 	src/cellmodpicktest.cpp \
 	src/cellmodsource.cpp \
 	src/cellfarvanilla.cpp \
+	src/cellfarhide.cpp \
 	src/cellmesh.cpp \
 	src/cellspeed.cpp \
 	src/cellstream.cpp \

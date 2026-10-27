@@ -14,6 +14,7 @@
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the main walks' render queues
 #include "gl/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
 #include "gl/cellfarinst.h"	// lane FARDRAW1: the instanced far rings
+#include "cellfarhide.h"	// lane FARHOLE2: far triangles inside a streamed near cell
 #include "gl/glproperty.h"
 #include "cellmesh.h"
 #include "cellspeed.h"
@@ -87,6 +88,7 @@ void BSShape::updateData( const NifModel * nif )
 		resetSkeletonData();
 		triangles = cm->triangles;
 		wwFarInst = cm->inst;
+		wwFarMask( nif );
 		removeInvalidIndices();
 		updateLodLevel();
 		return;
@@ -185,6 +187,7 @@ void BSShape::updateData( const NifModel * nif )
 		if ( iTriData.isValid() )
 			triangles = nif->getArray<Triangle>( iTriData );
 	}
+	wwFarMask( nif );
 	removeInvalidIndices();
 	updateLodLevel();
 
@@ -979,6 +982,15 @@ BoundSphere BSShape::bounds() const
 	}
 
 	return worldTrans() * boundSphere;
+}
+
+// lane FARHOLE2: a far shape the stream registered drops its triangles centred in a loaded near cell (the copy only;
+// the arrays beside the document stay whole, so a cell that leaves gets them back on the next take)
+void BSShape::wwFarMask( const NifModel * nif )
+{
+	const int b = nif->getBlockNumber( iBlock );
+	if ( CellFarHide::maskRegistered( nif, b ) )
+		CellFarHide::applyMask( nif, b, restWorldTrans(), verts, triangles );
 }
 
 void BSShape::updateLodLevel()
