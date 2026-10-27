@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FOGTERRAIN3 (2026-10-27, branch fogterrain3-20261027): fog on the water, a better far anchor, a fine level
+
+- **Fog stands on the water:** the fog job also rasters the scene's water shapes over the same window
+  (`src/gl/shadowset.cpp` runFogJob) and raises the terrain to the water where the water is higher, before the low pass
+  (`src/gl/fogterrain.cpp` wwFogTerrainWaterMerge). The layer now lies on the sea and lakes, not on their floor; land
+  above the water is never lowered.
+- **Far tail and sky anchor:** the single mid-ray sample is replaced by `wwAirGroundRay` (`res/shaders/lookdev_fog.glsl`):
+  six samples over the part of the ray inside the grid, spread over a wider copy of the layer's own weight and weighted
+  back, merged as the column grows (mean of exp(h/H)). Offline worst error 0.06 H (was 7.8 H).
+- **Fine level:** unit 57 is now a 2-layer R32F array. Layer 0 is the coarse grid as before; layer 1 a 1024-texel,
+  128 u, sigma 128 level re-centred around the camera, faded at its edge (`cell_airmed.glsl` airTerrH,
+  `lookdev_fog.glsl` wwAirTerrH). The NW mountain windows (-68,68) and (-84,40) now keep 150 u above ground within
+  0.81..1.15 of flat. The census adds ` fine=N water=N wet=N`.
+- **Reds:** `WW_FOG_TERRAIN_RED=seafloor` (no water) and `=coarse` (no fine level), live like `absolute`.
+- **Cost (offline, RTX 5070 Ti, 1080p):** fog terrain total 0.305 ms in the bench (+0.137 over absolute; FOGTERRAIN2
+  0.200); memory +4 MB VRAM (layer 1) + 4 MB CPU published fine copy; while the worker runs +16 MB water raster and
+  +4 MB fine raster; worker CPU +5.6 ms water merge, +19.7 ms fine level per raster (off-thread).
+
+## Lane FOGTERRAIN2 (2026-10-27, branch fogterrain2-20261027): all fog stands on the terrain, the grid has its own job
+
+- **Why:** FOGTERRAIN1 raised the ground fog layer over the terrain in the froxel air only. Particles and the surfaces'
+  far tail, sky and sun kept the absolute anchor, and the terrain grid existed only while the terrain shadow job ran
+  (exterior, sun up, terrain shadows on), so a night view had no grid.
+- **Same anchor everywhere:** the surfaces (`res/shaders/lookdev_fog.glsl` wwAirGroundAt: the tail at its middle, the
+  sky ray at its middle, the sun at the surface; flag 64), the sky and the particles (`res/shaders/cell_volpart.glsl`
+  vpLight calls airGroundAt) read the same low-pass grid (unit 57) as the froxels.
+- **Own job:** `src/gl/shadowset.cpp` fogTerrainFrame rasters the terrain-only heights for the fog on its own worker
+  (2048 texels of 256 u, re-centred in eighths, collected every 16 frames), independent of the sun and the shadow
+  tier; it is kept while the air asks for it (wwFogTerrainRequest) and retired 120 frames after the last ask.
+- **Sigma 256 u** (was 1024): the study kept hilltops within 2.5 % of the layer for 300-864 u layers (sigma 1024: 21 %
+  off at 300 u). The census line reads `terrain=on(... job shapes=N ms=M)`.
+- **Red:** `WW_FOG_TERRAIN_RED=absolute` (live, stage 0; the liveswitch unit checks it).
+- **Cost (offline, RTX 5070 Ti, 1080p):** +0.035 ms GPU (near froxels +0.019, far grid +0.016, surfaces +0.001 a
+  layer); memory 4 MB VRAM grid + 4 MB CPU published copy, while the worker runs 16 MB raster + about 32 MB of
+  low-pass doubles.
+
 ## Lane LANDSPEC1 (2026-10-27, branch landspec1-20261027): the far ground's specular and the land-LOD blend
 
 - **Why:** the game draws its LOD land with fLODLandSpecPower 0.22 (gloss) and fLODLandSpecScale 0.06 (spec mask), and

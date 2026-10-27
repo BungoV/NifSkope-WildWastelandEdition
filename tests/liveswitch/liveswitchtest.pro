@@ -10,4 +10,4 @@ ROOT = $$PWD/../..
 INCLUDEPATH += $$ROOT/src
 !*msvc*:QMAKE_CXXFLAGS += -march=haswell
 
-SOURCES += liveswitchtest.cpp $$ROOT/src/wwswitch.cpp
+SOURCES += liveswitchtest.cpp $$ROOT/src/wwswitch.cpp $$ROOT/src/gl/fogterrain.cpp

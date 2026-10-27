@@ -107,6 +107,7 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 	thin = vec3( 0.0 );
 	thick = vec3( 0.0 );
 	vec3 skyThin = vec3( 0.0 ), skyThick = vec3( 0.0 );	// the sky's share: the records' colour at the end (the air's rule)
+	airGroundAt( P );	// FOGTERRAIN2: the ground layer on the pass's terrain grid, as the froxels at this point
 	if ( ( volPartRed & 1 ) != 0 )
 		N = cellWorldDir( vec3( 0.0, 0.0, 1.0 ) );	// red flat: every pixel faces the eye's axis
 	if ( ( volTerms & 1 ) != 0 && cellHasDir ) {

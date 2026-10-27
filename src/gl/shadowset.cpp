@@ -21,7 +21,8 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "harnesswindow.h"
 #include "impostorchunk.h"	// lane FAR5: the far cards as terrain-shadow casters
-#include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground fog's low-pass terrain from the same heights
+#include "gl/cellwater.h"	// lane FOGTERRAIN3: the water shapes the ground fog stands on
+#include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground fog's low-pass terrain (FOGTERRAIN2: its own job here)
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -180,8 +181,27 @@ struct TerrJob
 	int extra = 0;
 	Terrain w0;
 	std::vector<std::uint16_t> hOut;
-	WwFogTerrGrid fog;	// lane FOGTERRAIN1: the terrain-only heights, low-passed (re-made on a raster)
-	bool fogNew = false;
+};
+
+//! lane FOGTERRAIN2: the ground fog's terrain grid has its own worker (it lived inside the shadow job, so it was gone at
+//! night and with terrain shadows off): terrain-only heights, rastered and low-passed while the air pass asks for them
+struct FogJob
+{
+	Terrain t;	// the raster, freed once low-passed
+	std::vector<TerrSrc> next, src;	// the set last collected; the set in flight
+	// lane FOGTERRAIN3: the water shapes (raised over the terrain), the fine level's window and what the red leaves out
+	std::vector<TerrSrc> nextWater, srcWater;
+	Terrain ft;	// the fine level's raster (window set at dispatch)
+	double fx = 1e300, fy = 1e300;
+	bool water = true, fine = true;
+	WwFogTerrGrid grid;
+	std::future<void> fut;
+	std::atomic<bool> stop { false };
+	bool busy = false, haveGrid = false;
+	quint64 sig = 0, rastered = 0;	// the set (and window) now; the one the grid in flight or in use was made from
+	double cx = 1e300, cy = 1e300;
+	int checkIn = 0, shapes = 0;
+	double ms = 0;
 };
 
 struct Contact
@@ -220,6 +240,7 @@ struct SetState
 
 	Terrain t;
 	TerrJob job;
+	FogJob fog;	// lane FOGTERRAIN2
 	bool terrWants = false;	// fix 10-22: the last frame found the map stale (a sweep owed or running)
 	Contact c;
 	GpuTimer tmTerrain, tmContact;
@@ -1003,32 +1024,193 @@ void runTerrJob( TerrJob * j )
 		w0 = Terrain();
 		j->hOut = std::vector<std::uint16_t>();
 	}
-	// lane FOGTERRAIN1: the ground fog's terrain, from the terrain-only heights (no buildings, no object LOD)
-	if ( ( j->raster || j->fog.nx == 0 || j->fog.x0 != w.x0 || j->fog.y0 != w.y0 ) && !w.H.empty()
-		&& !j->stop.load( std::memory_order_relaxed ) ) {
-		const std::vector<float> * src = &w.H;
-		Terrain t0;
-		bool objs = false;
-		for ( const TerrSrc & k : j->srcKept )
-			objs = objs || k.obj;
-		if ( objs && w0.H.size() == w.H.size() && w0.x0 == w.x0 && w0.y0 == w.y0 ) {
-			src = &w0.H;
-		} else if ( objs ) {
-			std::vector<TerrSrc> terr;
-			for ( const TerrSrc & k : j->srcKept )
-				if ( !k.obj )
-					terr.push_back( k );
-			t0.N = w.N;
-			t0.T = w.T;
-			t0.x0 = w.x0;
-			t0.y0 = w.y0;
-			rasterTerrain( t0, terr, j->stop );
-			src = &t0.H;
-		}
-		wwFogTerrainLowpass( *src, w.N, w.T, w.x0, w.y0, kNoHeight, kFogTerrSigma, j->fog );
-		j->fogNew = true;
-	}
 	j->workMs = double( tm.nsecsElapsed() ) * 1e-6;
+}
+
+void runFogJob( FogJob * j )
+{
+	QElapsedTimer tm;
+	tm.start();
+	// lane FOGTERRAIN3: a level's raster = the terrain, raised by the water where the water is higher
+	int wet = 0;
+	auto level = [j, &wet]( Terrain & t ) {
+		rasterTerrain( t, j->src, j->stop );
+		if ( j->srcWater.empty() || j->stop.load( std::memory_order_relaxed ) )
+			return;
+		Terrain w;
+		w.N = t.N;
+		w.T = t.T;
+		w.x0 = t.x0;
+		w.y0 = t.y0;
+		rasterTerrain( w, j->srcWater, j->stop );
+		wet += wwFogTerrainWaterMerge( t.H, w.H, kNoHeight );
+	};
+	level( j->t );
+	if ( !j->stop.load( std::memory_order_relaxed ) )
+		wwFogTerrainLowpass( j->t.H, j->t.N, j->t.T, j->t.x0, j->t.y0, kNoHeight, kFogTerrSigma, j->grid );
+	j->grid.shapes = j->t.shapes;
+	j->t.H = std::vector<float>();	// 16 MB: the raster lives only while the job runs
+	if ( j->ft.N > 0 && !j->stop.load( std::memory_order_relaxed ) ) {
+		level( j->ft );
+		if ( !j->stop.load( std::memory_order_relaxed ) )
+			wwFogTerrainFine( j->ft.H, j->ft.N, j->ft.T, j->ft.x0, j->ft.y0, kNoHeight, j->grid );
+		j->ft.H = std::vector<float>();
+	}
+	j->grid.water = int( j->srcWater.size() );
+	j->grid.wet = wet;
+	j->ms = double( tm.nsecsElapsed() ) * 1e-6;
+	j->grid.ms = j->ms;
+}
+
+void stopFogJob( FogJob & j )
+{
+	if ( !j.busy )
+		return;
+	j.stop = true;
+	j.fut.wait();
+	j.fut = std::future<void>();
+	j.busy = false;
+	j.stop = false;
+}
+
+//! lane FOGTERRAIN2: the fog's grid, every frame: reap, collect the terrain-only set (every 16 frames, no object LOD, a
+//! window re-centred in eighths), then wwFogTerrainAct's decision (pure, gated in notes/fogterrain2/gate)
+void fogTerrainFrame( Scene * scene )
+{
+	SetState & s = ss();
+	FogJob & j = s.fog;
+	auto reap = [&j]() {
+		j.fut.get();
+		j.busy = false;
+		j.src.clear();
+		j.srcWater.clear();
+		if ( j.grid.nx > 0 ) {
+			wwFogTerrainPublish( std::move( j.grid ) );
+			j.haveGrid = true;
+		}
+		j.grid = WwFogTerrGrid();
+	};
+	if ( j.busy && ( s.sync || j.fut.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready ) )
+		reap();
+	const bool requested = wwFogTerrainRequested();
+	const double span = kFogTerrRasterN * kFogTerrRasterT;
+	if ( requested && --j.checkIn <= 0 ) {
+		j.checkIn = 16;
+		const Transform & vt = scene->view;
+		const double sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
+		double cam[2];
+		for ( int a = 0; a < 2; a++ ) {
+			double c = 0;
+			for ( int k = 0; k < 3; k++ )
+				c -= vt.rotation( k, a ) * vt.translation[k];
+			cam[a] = c / sc;
+		}
+		if ( std::fabs( cam[0] - j.cx ) > span / 4.0 || std::fabs( cam[1] - j.cy ) > span / 4.0 ) {
+			j.cx = std::round( cam[0] / ( span / 8.0 ) ) * ( span / 8.0 );
+			j.cy = std::round( cam[1] / ( span / 8.0 ) ) * ( span / 8.0 );
+		}
+		std::vector<const Shape *> shapes;
+		std::vector<char> isObj;
+		quint64 sig = 0;
+		int objCount = 0, objSkipped = 0;
+		const float noCut[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
+		collectTerrain( scene, shapes, isObj, sig, false, objCount, objSkipped, noCut );
+		sig ^= quint64( std::llround( j.cx ) ) * 31ull ^ quint64( std::llround( j.cy ) ) * 17ull;
+		// lane FOGTERRAIN3: the fine level's window (re-centred in its own eighths), the water shapes, the red
+		const double fspan = kFogTerrFineN * kFogTerrFineCell;
+		if ( std::fabs( cam[0] - j.fx ) > fspan / 4.0 || std::fabs( cam[1] - j.fy ) > fspan / 4.0 ) {
+			j.fx = std::round( cam[0] / ( fspan / 8.0 ) ) * ( fspan / 8.0 );
+			j.fy = std::round( cam[1] / ( fspan / 8.0 ) ) * ( fspan / 8.0 );
+		}
+		const WwFogTerrRed red = wwFogTerrainRed();
+		j.water = red != WwFogTerrRed::Seafloor;
+		j.fine = red != WwFogTerrRed::Coarse;
+		std::vector<const Shape *> water;
+		if ( j.water && !shapes.empty() )
+			for ( Node * node : scene->nodes.list() ) {
+				const Shape * sh = dynamic_cast<const Shape *>( node );
+				if ( sh && sh->isVisible() && !sh->verts.isEmpty() && !sh->triangles.isEmpty()
+					&& wwCellWaterIsShape( scene->nifModel, sh->id() ) ) {
+					water.push_back( sh );
+					const Transform & w = sh->worldTrans();
+					sig = ( sig ^ quint64( reinterpret_cast<quintptr>( sh ) ) ) * 1099511628211ull;
+					sig = ( sig ^ quint64( std::llround( double( w.translation[2] ) * 16.0 ) ) ) * 1099511628211ull;
+				}
+			}
+		sig ^= quint64( water.size() ) * 0x9e3779b97f4a7c15ull ^ ( j.fine ? 0x51ull : 0x52ull );
+		if ( j.fine )
+			sig ^= quint64( std::llround( j.fx ) ) * 131ull ^ quint64( std::llround( j.fy ) ) * 137ull;
+		j.shapes = int( shapes.size() );
+		if ( sig != j.sig ) {
+			j.sig = sig;
+			j.next.clear();
+			j.next.reserve( shapes.size() );
+			for ( const Shape * sh : shapes )
+				j.next.push_back( { sh->worldTrans(), sh->verts, sh->triangles } );
+			j.nextWater.clear();
+			for ( const Shape * sh : water )
+				j.nextWater.push_back( { sh->worldTrans(), sh->verts, sh->triangles } );
+		}
+	}
+	WwFogTerrFrame f;
+	f.requested = requested;
+	f.shapes = j.shapes;
+	f.setChanged = j.sig != j.rastered;
+	f.busy = j.busy;
+	f.haveGrid = j.haveGrid;
+	switch ( wwFogTerrainAct( f ) ) {
+	case WwFogTerrAct::Retire:
+		stopFogJob( j );
+		j.next.clear();
+		j.src.clear();
+		j.nextWater.clear();
+		j.srcWater.clear();
+		j.grid = WwFogTerrGrid();
+		j.sig = j.rastered = 0;
+		j.cx = j.cy = 1e300;
+		j.fx = j.fy = 1e300;
+		j.checkIn = 0;
+		j.shapes = 0;
+		if ( j.haveGrid )
+			wwFogTerrainPublish( WwFogTerrGrid() );
+		j.haveGrid = false;
+		break;
+	case WwFogTerrAct::Empty:
+		wwFogTerrainPublish( WwFogTerrGrid() );
+		j.haveGrid = false;
+		j.rastered = j.sig;
+		break;
+	case WwFogTerrAct::Raster:
+		j.t = Terrain();
+		j.t.N = kFogTerrRasterN;
+		j.t.T = kFogTerrRasterT;
+		j.t.x0 = j.cx - span * 0.5;
+		j.t.y0 = j.cy - span * 0.5;
+		j.ft = Terrain();
+		if ( j.fine ) {
+			j.ft.N = kFogTerrFineN;
+			j.ft.T = kFogTerrFineCell;
+			j.ft.x0 = j.fx - kFogTerrFineN * kFogTerrFineCell * 0.5;
+			j.ft.y0 = j.fy - kFogTerrFineN * kFogTerrFineCell * 0.5;
+		}
+		j.src = j.next;
+		j.srcWater = j.nextWater;
+		j.rastered = j.sig;
+		j.stop = false;
+		j.busy = true;
+		if ( s.sync ) {
+			std::promise<void> done;
+			runFogJob( &j );
+			done.set_value();
+			j.fut = done.get_future();
+			reap();
+		} else {
+			j.fut = std::async( std::launch::async, runFogJob, &j );
+		}
+		break;
+	case WwFogTerrAct::Idle:
+		break;
+	}
 }
 
 void stopTerrJob( TerrJob & j )
@@ -1220,11 +1402,6 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 		if ( j.busy && ( s.sync || j.fut.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready ) ) {
 			j.fut.get();
 			j.busy = false;
-			if ( j.fogNew ) {	// lane FOGTERRAIN1
-				WwFogTerrGrid g = j.fog;
-				wwFogTerrainPublish( std::move( g ) );
-				j.fogNew = false;
-			}
 			if ( j.w.line >= j.w.N && j.w.N == t.N && j.wn.N == t.Nn && j.wn.line >= j.wn.N && j.extra == t.extra ) {
 				t.uploading = true;
 				t.upRow = 0;
@@ -1695,6 +1872,7 @@ void wwShadowSetFrame( Scene * scene )
 	wwLookdevShadowLight( sunDir, disc );
 	double to[3] = { sunDir[0], sunDir[1], sunDir[2] };
 	norm3( to );
+	fogTerrainFrame( scene );	// lane FOGTERRAIN2: before the sun's early returns, by night too
 	terrainFrame( scene, to, disc );
 	echoSummary();
 }

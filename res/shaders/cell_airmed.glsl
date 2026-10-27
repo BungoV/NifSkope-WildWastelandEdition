@@ -7,15 +7,25 @@ uniform vec4 airMed;			// sigma0 (per game unit), zb, 1 / H (0: uniform), the to
 uniform vec4 airLayer;			// the near band's share w, zn, 1 / Hn, the ground layer's strength s (cellvolair.cpp VaLayer)
 uniform vec4 airGround;			// the ground layer's anchor zg, 1 / its thickness
 uniform int airTerrOn;			// FOGTERRAIN1: the ground layer follows the low-pass terrain (red absolute: 0)
-uniform sampler2D airTerr;		// the low-pass terrain height, world z (R32F, clamped at its edge)
+uniform sampler2DArray airTerr;	// the low-pass terrain height, world z (R32F, clamped at its edge); FOGTERRAIN3: layer 1 the fine level
 uniform vec4 airTerrXf;			// u = x X.x + X.y, v = y X.z + X.w (world)
+uniform vec4 airTerrFineXf;		// FOGTERRAIN3: the fine level's (uv -1 everywhere: none)
 uniform float airTerrRef;		// the world z the absolute anchor stands on (the fog frame's 0)
 float airGz = 0.0;				// the local ground's rise over the frame's ground at the current sample (0: the absolute law)
 
-// FOGTERRAIN1: set the ground layer's anchor for world point Pw (the froxel pass; particles keep the absolute law)
+// FOGTERRAIN3: the ground at world xy, the fine level blended over the coarse one, faded out in its window's last 16th
+float airTerrH( vec2 Pw )
+{
+	float hc = texture( airTerr, vec3( Pw.x * airTerrXf.x + airTerrXf.y, Pw.y * airTerrXf.z + airTerrXf.w, 0.0 ) ).r;
+	vec2 uf = vec2( Pw.x * airTerrFineXf.x + airTerrFineXf.y, Pw.y * airTerrFineXf.z + airTerrFineXf.w );
+	float wf = clamp( min( min( uf.x, 1.0 - uf.x ), min( uf.y, 1.0 - uf.y ) ) * 16.0, 0.0, 1.0 );
+	return wf > 0.0 ? mix( hc, texture( airTerr, vec3( uf, 1.0 ) ).r, wf ) : hc;
+}
+
+// FOGTERRAIN1: set the ground layer's anchor for world point Pw (the froxel pass; FOGTERRAIN2: the particles too)
 void airGroundAt( vec3 Pw )
 {
-	airGz = airTerrOn != 0 ? texture( airTerr, vec2( Pw.x * airTerrXf.x + airTerrXf.y, Pw.y * airTerrXf.z + airTerrXf.w ) ).r - airTerrRef : 0.0;
+	airGz = airTerrOn != 0 ? airTerrH( Pw.xy ) - airTerrRef : 0.0;
 }
 uniform int volRed;				// 2 gioff, 4 flat, 8 noshadow, 16 nolights, 256 physcol, 262144 lightmid, 524288 bluescatter, 4194304 roomstep (1 off, 32 wrongmed, 128 farfit: the CPU's)
 uniform vec4 volPhase[3];		// rgb: the weight of the air (Rayleigh), forward and back terms; w: the HG g (0 for air)

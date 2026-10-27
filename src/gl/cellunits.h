@@ -57,7 +57,7 @@ constexpr int FarGroundAtlas = 53;	// the decal pieces' colour (sampler2D)
 constexpr int FarGroundPages = 54;	// the cached option's pages (sampler2DArray)
 constexpr int FarGroundHeight = 55;	// the stamp's heights (sampler2D)
 constexpr int FarGroundPagesFar = 56;	// lane FARPAGES1: the far pool's pages (FarGroundPages = the near pool)
-constexpr int AirTerrain = 57;	// lane FOGTERRAIN1: the ground fog's low-pass terrain heights (sampler2D R32F, the air pass only)
+constexpr int AirTerrain = 57;	// lane FOGTERRAIN1: the ground fog's low-pass terrain heights (FOGTERRAIN3: sampler2DArray R32F, layer 0 coarse, 1 fine; FOGTERRAIN2: also the surfaces' fog and the particles)
 constexpr int WaterMoment0 = 60;	// lane WATERREFL1: the water noise layers' slope second moments (sampler2D, 60-62; 50-56 taken by FARDRAW1/FARPAGES1)
 constexpr int WaterMoment1 = 61;
 constexpr int WaterMoment2 = 62;
