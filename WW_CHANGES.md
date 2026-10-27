@@ -33,6 +33,28 @@
 - **Cost:** offline on the RTX 5070 Ti, a 1920x1080 screen of water with no scene: +0.012 ms (near) to +0.014 ms (far).
 - **For later lanes:** res/shaders/water_depth.glsl holds wwWaterBedDepth / wwWaterAbsorb / wwWaterBedAt (caustics).
   The water status line names the program in use (`; program fo4_waterdepth.prog`).
+## Lane WATERWAVES1 (2026-10-27, branch waterwaves1-20261027): a calm swell on lakes, rivers and the sea
+
+- **What it draws:** a slow, gentle swell in the water's normal (no geometry moves), on top of the game's three
+  wind-scrolled noise layers, which stay as they are. Four long-crested waves (Tessendorf's deep-water dispersion,
+  w = sqrt(g k)) whose wavelength comes from the body under the pixel in the WATERDATA1 table: its class and the
+  square root of its baked area. Lakes 1.5 to 8 m, rivers 1 to 4 m, the sea one 24 m swell. Steepness is that of calm
+  water (a k 0.03 / 0.015 / 0.045). They travel along the WATR's first wind direction, and their height follows the
+  weather's wind speed (0.6x calm to 1.4x full). Engineering choices: the game draws no swell to match.
+- **Where it fades:** it fades in from the waterline (64 u) over half a wavelength, so shores and the seams between
+  two bodies stay calm. A body flagged tiny or under 4 texels gets none. Each wave fades out once it is under two pixels
+  wide, so the far water does not shimmer. Water with no baked body under it (placed water, interiors) gets none.
+- **Clock:** the world clock (World animation row, `WW_CELL_WORLDANIM_TIME` pins it), so tests are deterministic.
+- **Switch:** Show menu row "Water swell" (`WW_CELL_WATER_WAVES`, live, ships off). On, the water draws with the
+  twin program fo4_waterwaves.prog (fo4_water.frag with `WW_WATER_WAVES`). Off, fo4_water.prog draws and its NVIDIA
+  binary is unchanged in all 3 modes (only the stamp and the 8-byte source hash differ). Reds
+  `WW_CELL_WATER_WAVES_RED=flat|noshore|alias` (live): every body lake-sized / no shore fade / no far fade.
+  `WW_CELL_WATER_PROBE=34` shows (0.5 + 4 x slope x, y; weight). Telemetry: the water census line adds ", swell on".
+- **Gates (offline):** the real water_info.glsl + water_waves.glsl through the driver on the Commonwealth table dump
+  (999,424 points over the harbour and the lakes) equals an independent numpy model of the reference tables (0 of 4
+  runs differ); every red differs and matches its own model; off is zero everywhere. Cost about 0.07 ms for a 1080p
+  frame of water. All programs link in all 3 modes. The live hold is owed after the merge
+  (notes/waterwaves1/hold.sh, rows.txt).
 
 ## Lane WATERDATA1 (2026-10-27, branch waterdata1-20261027): the baked water planes bound to the water shader (data only, no visible change)
 

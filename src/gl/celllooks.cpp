@@ -57,6 +57,7 @@ const LookRow kRows[] = {
 	{ "Water caustics", "WW/CellWaterCaustics" },
 	{ "Water soft edge", "WW/CellWaterEdge" },
 	{ "Shore foam", "WW/CellWaterFoam" },
+	{ "Water swell", "WW/CellWaterWaves" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -238,6 +239,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_FOAM" ).trimmed() );
 		return p;
 	}
+	case WwLook::WaterSwell: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_WATER_WAVES" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -293,6 +298,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::WaterCaustics: return "WW_CELL_WATER_CAUSTICS";
 	case WwLook::WaterSoftEdge: return "WW_CELL_WATER_EDGE";
 	case WwLook::ShoreFoam: return "WW_CELL_WATER_FOAM";
+	case WwLook::WaterSwell: return "WW_CELL_WATER_WAVES";
 	default: return "";
 	}
 }

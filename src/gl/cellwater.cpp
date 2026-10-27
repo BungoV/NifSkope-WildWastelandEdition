@@ -52,6 +52,7 @@ struct WaterState
 				// 1024 hdrraw (WATERHDR1: the water's linear light written back untone-mapped, the old defect)
 	int probe = 0;
 	int shoreRed = 0;	// WATERSHORE1: 1 nearest (WW_CELL_WATER_SHORE_RED)
+	int wavesRed = 0;	// WATERWAVES1: 1 flat, 2 noshore, 4 alias (WW_CELL_WATER_WAVES_RED)
 	bool linear = false;	// WATERHDR1: the last water draw wrote linear light into the HDR frame
 	QString dump;
 	QSet<QString> missing;	// noise textures that did not bind (the census says so)
@@ -76,6 +77,8 @@ WaterState & st()
 			: r == "nossr" ? 256 : r == "fogunits" ? 512 : r == "hdrraw" ? 1024 : 0;
 		s->probe = wwEnvInt( "WW_CELL_WATER_PROBE" );
 		s->shoreRed = wwEnv( "WW_CELL_WATER_SHORE_RED" ).trimmed() == "nearest" ? 1 : 0;
+		const QByteArray wr = wwEnv( "WW_CELL_WATER_WAVES_RED" ).trimmed();
+		s->wavesRed = wr == "flat" ? 1 : wr == "noshore" ? 2 : wr == "alias" ? 4 : 0;
 		s->dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_WATER_DUMP" ) );
 	}
 	return *s;
@@ -328,6 +331,26 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni4f( "waterShoreK1", FloatVector4( waveLength, wavePeriod, foamFloor, foamOpacity ) );
 		// the world clock as the normals' scroll reads it: frozen at 0 with the world's animation off
 		prog->uni1f( "waterShoreTime", wwCellWorldAnimOn() ? float( wwCellWorldSeconds() ) : 0.0f );
+	}
+	if ( prog->uniLocation( "waterWavesOn" ) >= 0 ) {
+		/* lane WATERWAVES1 (fo4_waterwaves.prog, water_waves.glsl). Engineering choices in game units (70 u = 1 m); the
+		 * game draws no swell to match. Wavelength = the body's length (sqrt of its baked area) / a divisor, clamped:
+		 * lakes 1.5-8 m (/12), rivers 1-4 m (/16), the sea one 24 m swell. Total steepness a k 0.03 / 0.015 / 0.045:
+		 * calm water, far under the 0.44 breaking limit. It fades in from the waterline (64 u) over half a wavelength;
+		 * a body flagged tiny or under 4 texels gets none, full from 64 texels. */
+		const FloatVector4 cls[3] = { FloatVector4( 1.0f, 1680.0f, 1680.0f, 0.045f ),
+			FloatVector4( 16.0f, 70.0f, 280.0f, 0.015f ), FloatVector4( 12.0f, 105.0f, 560.0f, 0.03f ) };
+		prog->uni4fv( "waterWavesClass", cls, 3 );
+		prog->uni4f( "waterWavesShore", FloatVector4( 64.0f, 0.5f, 4.0f, 64.0f ) );
+		// travels along the WATR's first noise layer's wind (the compass, 0 = +Y, as the scroll); height by the
+		// weather's wind speed byte, 0.6x calm to 1.4x full (1x with no weather loaded)
+		const double a = double( b.rec.windDirection[0] ) * 3.14159265358979323846 / 180.0;
+		quint8 wind[4] = { 0, 0, 0, 0 };
+		const float amp = wwLookdevWind( wind ) ? 0.6f + 0.8f * float( wind[0] ) / 255.0f : 1.0f;
+		prog->uni4f( "waterWavesK", FloatVector4( float( std::sin( a ) ), float( std::cos( a ) ),
+			wwCellWorldAnimOn() ? float( wwCellWorldSeconds() ) : 0.0f, amp ) );	// the world clock, 0 with it off
+		prog->uni1i( "waterWavesOn", wwLookOn( WwLook::WaterSwell ) ? 1 : 0 );
+		prog->uni1i( "waterWavesRed", s.wavesRed );
 	}
 	fn->glActiveTexture( GL_TEXTURE0 );
 
