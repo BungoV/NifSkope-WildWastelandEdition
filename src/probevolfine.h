@@ -34,6 +34,7 @@ struct ProbeFineGrid
 	bakert::Scene * scene = nullptr;   //!< the per-point rays on the GPU (null: the CPU tree; the answers are the same)
 	std::function<bool( int, const double * )> backFace;   //!< ray direction d met triangle tri's back (solid rule)
 	std::function<double( int, const double * )> facing;  //!< cosine of triangle tri's normal and direction d
+	const std::vector<std::vector<ProbeVolumeShape>> * grid = nullptr;   //!< per room: the refined grid fit (VOLFIT3 starts there)
 };
 
 struct ProbeFineSpec
@@ -54,6 +55,14 @@ struct ProbeFineSpec
 	int checkPasses = 2;            //!< refits after volcheck's flood over the boxes (room points it misses go foreign)
 	int sphereK = 32;               //!< the indoor rule (volcheck's): K rays, at most skyMax of the upper ones
 	double skyMax = 0.25, openMax = 0.25, openReach = 1536.0;   //!< miss the world, at most openMax miss or pass reach
+	// lane VOLFIT3
+	bool legacy = false;            //!< VOLFIT2's fit (red "volfit2"): the lattice boxes as they come, curved rooms on the grid
+	bool jitter = true;             //!< rooms square to the world sit on volcheck's own jittered lattice
+	double skin = 8.0;              //!< a room point this near a triangle is no gap (volcheck's tolSkin)
+	double badW = 2.0;              //!< a foreign point in a shape costs this many uncovered room points
+	int extras = 8;                 //!< lattice boxes tried per room on top of the moved grid boxes
+	double budget = 1.45;           //!< all rooms' shapes at most this times the grid fit's (the bar: x1.5 VOLRAY1's)
+	int rounds = 2;                 //!< face-move passes over the grid boxes
 };
 
 struct ProbeFineStats
@@ -63,11 +72,16 @@ struct ProbeFineStats
 	qint64 encTests = 0, encGrown = 0;   //!< indoor-rule tests, points grown past the owned cells
 	qint64 checkLost = 0;                //!< room points the check flood missed (made foreign before a refit)
 	qint64 pruned = 0;                   //!< snapped boxes the others covered within minGain (dropped)
+	int pickGrid = 0, pickMoved = 0, extrasUsed = 0, facesMoved = 0, merged = 0;   //!< VOLFIT3's per-room picks
+	int gridShapes = 0;
 	int rooms = 0, boxes = 0;
 	double msOwner = 0, msRays = 0, msCover = 0;
 };
 
 /*! Per room (index r = room r + 1): its boxes, empty where the room has no air on the lattice (keep the grid fit).
+ *  VOLFIT3: with `g.grid` set, each room's refined grid shapes have their box faces moved on the lattice (room points in,
+ *  foreign points out), lattice boxes are added where they cut the most uncovered air, and every room keeps whichever
+ *  set scores better (uncovered room points + badW x foreign points) within the shape budget over all rooms.
  *  `yaw` per room in radians (the footprint frame), `bvhO` the x y the tree's triangles were moved by. */
 std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::Bvh & bvh, const double bvhO[2],
 	const ProbeFineGrid & g, int rooms, const std::vector<double> & yaw, const ProbeFineSpec & spec, ProbeFineStats * stats );

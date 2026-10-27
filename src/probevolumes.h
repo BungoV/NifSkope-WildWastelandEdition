@@ -141,6 +141,7 @@ struct ProbeVolumes
 	qint64 finePruned = 0;      //!< fine boxes dropped (the others covered them within minGain)
 	qint64 fineLost = 0;        //!< room points the check flood missed
 	double msFine = 0;
+	QString fineNote;           //!< lane VOLFIT3: the per-room picks (grid / moved), extras, faces moved, merges
 	QString roomsLine;
 
 	size_t index( int x, int y, int z ) const

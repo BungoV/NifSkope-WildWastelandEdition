@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLFIT3 (2026-10-27, branch volfit3-20261027): GI room fit starts from the grid shapes and moves their faces
+
+- **Grid-first fine fit:** each room starts from its ray-refined grid shapes. Box faces move along volcheck's own
+  jittered h=16 lattice, scored as uncovered room air plus foreign points held. Faces then snap, near-boxes merge,
+  boxes that add little are dropped, and a few extra lattice boxes go in where they cut the most gap. Each room keeps the
+  grid fit or the moved set, whichever scores better. A shape budget across all rooms (`budget`, 1.45x the grid count)
+  keeps GI hull cost near VOLRAY1's. Curved rooms join the fit (their wedges and cylinders stay).
+- Real cells vs VOLRAY1:
+  - Goodneighbor: gap 44.3 -> 38.1 % (VOLFIT2 made it worse, 58.6 %); pokes 79 -> 64M u3.
+  - Concord: gap 50.8 -> 39.3 %; overlaps 3.8 -> 1.8M.
+  - Museum: gap 31.3 -> 19.8 %, but overlaps are 1.41 -> 1.55M (one room).
+  - Shapes are x0.9-1.45 (VOLFIT2: x2-8).
+- Cost: fitting is offline, 0 GPU-ms at runtime. Fit time is about x3-13 of VOLRAY1 on a busy machine, the same as VOLFIT2.
+- Tuning pin: `WW_VOLFIT_SPEC` badw/extras/budget/rounds/jitter. Red `volfit2` restores VOLFIT2's fit; the census line
+  ends "; volfit3 grid shapes ... rooms grid/moved ... extras ... merged".
+
 ## Lane VOLFIT2 (2026-10-27, branch volfit2-20261027): GI room volumes fitted on a fine lattice
 
 - **Fine room fit:** each room's boxes now come from an h=16 lattice in the room's own frame, classified by

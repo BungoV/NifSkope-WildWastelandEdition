@@ -1196,6 +1196,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 	const bool refineOn = red != QLatin1String( "norefine" ) && !soup.tris.empty();
 	// lane VOLFIT2: the fine lattice fit replaces the per-face refine (red "nofine" keeps the VOLRAY1 refine)
 	const bool fineOn = refineOn && red != QLatin1String( "nofine" );
+	// lane VOLFIT3: the fine fit moves the refined grid shapes on volcheck's lattice (red "volfit2": VOLFIT2's fit)
+	const bool legacyFine = red == QLatin1String( "volfit2" );
 	const double rC = double( C );
 	probebvh::Bvh rb;
 	double rO[2] = { 0, 0 };
@@ -1930,8 +1932,9 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		bool curved = false;
 		for ( const ProbeVolumeShape & s : shapes )
 			curved = curved || s.type != ProbeShapeType::Box;
-		keepGrid[r] = curved;
-		if ( refineOn && ( !fineOn || curved ) && !shapes.empty() ) {
+		keepGrid[r] = curved && legacyFine;
+		// VOLFIT3 starts every room's fine fit from its refined grid shapes
+		if ( refineOn && ( !fineOn || curved || !legacyFine ) && !shapes.empty() ) {
 			const std::vector<ProbeVolumeShape> grid = shapes;
 			for ( size_t k = 0; k < shapes.size(); k++ ) {
 				std::vector<const ProbeVolumeShape *> sib;
@@ -2124,6 +2127,18 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			else if ( k == QLatin1String( "marginopen" ) && x > 0 ) spec.marginOpen = x;
 			else if ( k == QLatin1String( "ownedout" ) ) spec.ownedOut = x;
 			else if ( k == QLatin1String( "snap" ) && x > 0 ) spec.snapSteps = x;
+			else if ( k == QLatin1String( "badw" ) ) spec.badW = x;
+			else if ( k == QLatin1String( "extras" ) ) spec.extras = int( x );
+			else if ( k == QLatin1String( "budget" ) && x > 0 ) spec.budget = x;
+			else if ( k == QLatin1String( "rounds" ) ) spec.rounds = int( x );
+			else if ( k == QLatin1String( "jitter" ) ) spec.jitter = x != 0;
+		}
+		spec.legacy = legacyFine;
+		std::vector<std::vector<ProbeVolumeShape>> gridShapes;
+		if ( !legacyFine ) {
+			for ( const ProbeVolumeRoom & rm : V.rooms )
+				gridShapes.push_back( rm.shapes );
+			fg.grid = &gridShapes;
 		}
 		ProbeFineStats fs;
 		const std::vector<std::vector<ProbeVolumeShape>> fine = probeVolumesFineFit( rb, rO, fg, int( V.rooms.size() ), roomYaw, spec, &fs );
@@ -2143,6 +2158,9 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		V.fineGrown = fs.encGrown;
 		V.finePruned = fs.pruned;
 		V.fineLost = fs.checkLost;
+		if ( !legacyFine )
+			V.fineNote = QStringLiteral( "; volfit3 grid shapes %1 rooms grid %2 moved %3 extras %4 faces %5 merged %6" ).arg( fs.gridShapes )
+				.arg( fs.pickGrid ).arg( fs.pickMoved ).arg( fs.extrasUsed ).arg( fs.facesMoved ).arg( fs.merged );
 		V.msFine = fc.nsecsElapsed() / 1e6;
 	}
 	V.refineRays = refineRays;
@@ -2311,7 +2329,7 @@ QString probeVolumesCensusText( const ProbeVolumes & v )
 		.arg( v.skyCells ).arg( v.skyCoarse ).arg( v.doorWidth, 0, 'f', 0 )
 		.arg( qRound( v.msRooms ) ).arg( qRound( v.msSky ) ).arg( qRound( v.msClassify ) ).arg( qRound( v.msThresholds ) )
 		.arg( qRound( v.msFit ) ).arg( qRound( v.msTotal ) ).arg( v.merged )
-		+ ( v.msFine > 0 ? QStringLiteral( "; fine boxes %1 pruned %5 lost %6 rays %2 grown %3 ms %4" ).arg( v.fineBoxes ).arg( v.fineRays ).arg( v.fineGrown ).arg( qRound( v.msFine ) ).arg( v.finePruned ).arg( v.fineLost ) : QString() );
+		+ ( v.msFine > 0 ? QStringLiteral( "; fine boxes %1 pruned %5 lost %6 rays %2 grown %3 ms %4" ).arg( v.fineBoxes ).arg( v.fineRays ).arg( v.fineGrown ).arg( qRound( v.msFine ) ).arg( v.finePruned ).arg( v.fineLost ) + v.fineNote : QString() );
 }
 
 // ---------------------------------------------------------------- files

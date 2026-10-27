@@ -12,11 +12,25 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <numeric>
+#include <queue>
 #include <thread>
 
 namespace {
 
 constexpr double kFinePi = 3.14159265358979323846;
+
+//! volcheck's lattice jitter (src/probevolcheck.cpp), so a room square to the world classes the very points volcheck will
+double fineJitter( int x, int y, int z, int axis )
+{
+	quint32 v = quint32( x ) * 73856093u ^ quint32( y ) * 19349663u ^ quint32( z ) * 83492791u ^ quint32( axis + 1 ) * 2654435761u;
+	v ^= v >> 15;
+	v *= 0x2c1b3c6du;
+	v ^= v >> 12;
+	v *= 0x297a2d39u;
+	v ^= v >> 15;
+	return double( v & 0xFFFF ) / 65535.0 - 0.5;
+}
 
 //! n jobs over the machine's threads, or on this thread (a room small enough to run whole on one worker)
 void fineFor( size_t n, bool par, const std::function<void( size_t )> & fn )
@@ -283,13 +297,25 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 
 	std::atomic<qint64> nRays( 0 ), nFree( 0 ), nSnap( 0 ), nPts( 0 ), nRoom( 0 ), nCov( 0 ), nForeign( 0 );
 	std::atomic<qint64> nsRays( 0 ), nsCover( 0 );
+	// VOLFIT3: per room the grid fit's score and the moved set's (u3 of uncovered room air + badW x foreign air held),
+	// and its extra lattice boxes with what each cuts
+	struct V3Room
+	{
+		bool on = false;
+		int nA = 0, faces = 0, merged = 0;
+		double scoreA = 0, scoreB = 0;
+		std::vector<ProbeVolumeShape> base, extra;
+		std::vector<double> gain;
+	};
+	std::vector<V3Room> v3r( static_cast<size_t>( rooms ) );
 	auto fitRoom = [&]( int r, bool par ) {
 		const std::array<double, 6> & b = bb[size_t( r )];
 		if ( b[0] > b[1] )
 			return;
 		const int room = r + 1;
 		const double mg = ( spec.ownerReach + 0.5 + spec.grow ) * C;
-		const double lo[3] = { b[0] - mg, b[2] - mg, b[4] - mg }, hi[3] = { b[1] + mg, b[3] + mg, b[5] + mg };
+		double lo[3] = { b[0] - mg, b[2] - mg, b[4] - mg };
+		const double hi[3] = { b[1] + mg, b[3] + mg, b[5] + mg };
 		double h = spec.h;
 		auto count = [&]( double hh ) {
 			return qint64( std::ceil( ( hi[0] - lo[0] ) / hh ) ) * qint64( std::ceil( ( hi[1] - lo[1] ) / hh ) )
@@ -297,6 +323,14 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		};
 		if ( count( h ) > spec.maxPoints )
 			h *= std::cbrt( double( count( h ) ) / double( spec.maxPoints ) ) * 1.001;
+		// a room square to the world takes volcheck's own points: world-aligned cells, each point jittered in its cell
+		const bool jit = spec.jitter && !spec.legacy && sn[size_t( r )] == 0.0 && cs[size_t( r )] > 0.0 && h == spec.h;
+		int g0[3] = { 0, 0, 0 };
+		if ( jit )
+			for ( int k = 0; k < 3; k++ ) {
+				g0[k] = int( std::floor( lo[k] / h ) );
+				lo[k] = g0[k] * h;
+			}
 		const int n[3] = { std::max( 1, int( std::ceil( ( hi[0] - lo[0] ) / h ) ) ), std::max( 1, int( std::ceil( ( hi[1] - lo[1] ) / h ) ) ),
 			std::max( 1, int( std::ceil( ( hi[2] - lo[2] ) / h ) ) ) };
 		const int nx = n[0], ny = n[1], nz = n[2];
@@ -311,6 +345,17 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		};
 		auto pidx = [&]( int i, int j, int k ) { return ( size_t( k ) * size_t( ny ) + size_t( j ) ) * size_t( nx ) + size_t( i ); };
 		const size_t sj = size_t( nx ), sk = size_t( nx ) * size_t( ny );
+		// a point in lattice units (its cell's index + where in the cell it sits) and in the world
+		auto ptL = [&]( size_t a, double l[3] ) {
+			const int ii[3] = { int( a % sj ), int( ( a / sj ) % size_t( ny ) ), int( a / sk ) };
+			for ( int k = 0; k < 3; k++ )
+				l[k] = ii[k] + 0.5 + ( jit ? 0.5 * fineJitter( g0[0] + ii[0], g0[1] + ii[1], g0[2] + ii[2], k ) : 0.0 );
+		};
+		auto ptW = [&]( size_t a, double w[3] ) {
+			double l[3];
+			ptL( a, l );
+			world( l[0], l[1], l[2], w );
+		};
 		QElapsedTimer t0;
 		t0.start();
 		// per point: bit 0 the room owns its cell, bit 1 the room's own air (a seed), bit 2 not the room's (foreign),
@@ -341,7 +386,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			for ( int j = 0; j < ny; j++ )
 				for ( int i = 0; i < nx; i++ ) {
 					double w[3];
-					world( i + 0.5, j + 0.5, k + 0.5, w );
+					ptW( pidx( i, j, k ), w );
 					const long long gi = cg.at( w );
 					quint8 f = 4;
 					if ( gi >= 0 && owner[size_t( gi )] == room ) {
@@ -362,7 +407,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 				for ( int i = 0; i < nx; i++ ) {
 					const size_t a = pidx( i, j, k );
 					double p[3];
-					world( i + 0.5, j + 0.5, k + 0.5, p );
+					ptW( a, p );
 					quint8 m = 0;
 					for ( int e = 0; e < 3; e++ ) {
 						const int i2 = i + ( e == 0 ), j2 = j + ( e == 1 ), k2 = k + ( e == 2 );
@@ -372,7 +417,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 						if ( !( fl[a] & 9 ) && !( fl[bq] & 9 ) )
 							continue;
 						double q[3];
-						world( i2 + 0.5, j2 + 0.5, k2 + 0.5, q );
+						ptW( bq, q );
 						bool thr = false;
 						for ( const TBox * t : thrNear )
 							if ( t->seg( p, q ) ) {
@@ -390,7 +435,11 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 						const double o[3] = { p[0] - bvhO[0], p[1] - bvhO[1], p[2] };
 						double th = 0;
 						nr++;
-						if ( bvh.ray( o, ax[e], h, &th ) )
+						double dq[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] };
+						const double lq = std::sqrt( dq[0] * dq[0] + dq[1] * dq[1] + dq[2] * dq[2] );
+						for ( double & x : dq )
+							x /= lq;
+						if ( bvh.ray( o, dq, lq, &th ) )
 							m |= quint8( 1 << e );
 					}
 					cut[a] = m;
@@ -433,7 +482,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 					for ( size_t x = b + ci * chunk; x < x1; x++ ) {
 						const size_t a = ids[x];
 						double w[3];
-						world( double( a % sj ) + 0.5, double( ( a / sj ) % size_t( ny ) ) + 0.5, double( a / sk ) + 0.5, w );
+						ptW( a, w );
 						for ( size_t k = 0; k < K; k++ ) {
 							bakert::XRay & y = rays[( x - b ) * K + k];
 							y.o[0] = w[0] - bvhO[0];
@@ -457,6 +506,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 					const size_t x1 = std::min( e, b + ( ci + 1 ) * chunk );
 					for ( size_t x = b + ci * chunk; x < x1; x++ ) {
 						int sky = 0, open = 0, hit = 0, back = 0;
+						double minT = 1e30;
 						for ( size_t k = 0; k < K; k++ ) {
 							const bakert::XHit & z = hits[( x - b ) * K + k];
 							if ( z.tri < 0 ) {
@@ -465,6 +515,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 								continue;
 							}
 							hit++;
+							minT = std::min( minT, z.t );
 							open += z.t > spec.openReach;
 							back += g.backFace && g.backFace( z.tri, sdirs[k].data() );
 						}
@@ -473,7 +524,8 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 						const double m = spec.margin, mo = spec.marginOpen;
 						pc[ids[x]] = quint8( ( sky <= skyLim && open <= openLim ? 1 : 0 ) | ( hit * 2 >= int( K ) && back * 2 >= hit ? 2 : 0 )
 							| ( hit * 2 >= m * double( K ) && back * 2 >= m * hit ? 4 : 0 ) | ( sky > mo * skyLim || open > mo * openLim ? 8 : 0 )
-							| ( spec.ownedOut > 0 && ( sky > spec.ownedOut * skyLim || open > spec.ownedOut * openLim ) ? 16 : 0 ) );
+							| ( spec.ownedOut > 0 && ( sky > spec.ownedOut * skyLim || open > spec.ownedOut * openLim ) ? 16 : 0 )
+							| ( minT < spec.skin ? 32 : 0 ) );   // bit 32: within volcheck's skin of a triangle (never a real gap)
 					}
 				} );
 			}
@@ -497,7 +549,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			for ( size_t a = 0; a < P; a++ )
 				if ( ( fl[a] & 2 ) && !( pc[a] & 2 ) ) {
 					double w[3];
-					world( double( a % sj ) + 0.5, double( ( a / sj ) % size_t( ny ) ) + 0.5, double( a / sk ) + 0.5, w );
+					ptW( a, w );
 					cand.push_back( { ( w[0] - an[0] ) * ( w[0] - an[0] ) + ( w[1] - an[1] ) * ( w[1] - an[1] ) + ( w[2] - an[2] ) * ( w[2] - an[2] ), a } );
 				}
 			const size_t m = std::min<size_t>( 12, cand.size() );
@@ -506,7 +558,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			for ( size_t c = 0; c < m; c++ ) {
 				double w[3];
 				const size_t a = cand[c].second;
-				world( double( a % sj ) + 0.5, double( ( a / sj ) % size_t( ny ) ) + 0.5, double( a / sk ) + 0.5, w );
+				ptW( a, w );
 				double d[3] = { w[0] - an[0], w[1] - an[1], w[2] - an[2] };
 				const double len = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
 				if ( len > 1e-6 ) {
@@ -555,7 +607,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 					if ( ( fl[bq] & 1 ) && !( pc[bq] & 16 ) ) {
 						cls[bq] = 1;
 						qu.push_back( bq );
-					} else if ( ( fl[bq] & 8 ) && pc[bq] == 1 ) {
+					} else if ( ( fl[bq] & 8 ) && ( pc[bq] & 31 ) == 1 ) {
 						cls[bq] = 1;
 						qu.push_back( bq );
 						nGrown++;
@@ -602,7 +654,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 					if ( cls[a] == 2 )
 						continue;
 					double w[3];
-					world( double( a % sj ) + 0.5, double( ( a / sj ) % size_t( ny ) ) + 0.5, double( a / sk ) + 0.5, w );
+					ptW( a, w );
 					std::fprintf( fo, "%.1f\t%.1f\t%.1f\t%d\t%d\t%d\n", w[0], w[1], w[2], int( cls[a] ), int( fl[a] ), int( pc[a] ) );
 				}
 				std::fclose( fo );
@@ -785,6 +837,398 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		}
 		nCov += covered;
 		nsCover += t0.nsecsElapsed();
+		if ( !spec.legacy && g.grid && size_t( r ) < g.grid->size() ) {
+			t0.start();
+			V3Room & V = v3r[size_t( r )];
+			const double h3 = h * h * h, bw = spec.badW;
+			const double yawDeg = std::atan2( s, c ) * 180.0 / kFinePi;
+			// per point: 1 room air past the skin (a gap when no shape holds it), 2 foreign air (a poke when one does);
+			// the room's own solid band is free, never air to cover (covering it reads as a poke)
+			std::vector<quint8> kd( P, 0 );
+			for ( size_t a = 0; a < P; a++ )
+				kd[a] = cls[a] == 1 ? ( ( pc[a] & 34 ) ? 0 : 1 ) : ( cls[a] == 2 && !( pc[a] & 6 ) ) ? 2 : 0;
+			using Ext = std::array<double, 6>;   // a box in lattice units: lo u v z, hi u v z
+			auto forBox = [&]( const Ext & e, const auto & fn ) {
+				int i0[3], i1[3];
+				for ( int k = 0; k < 3; k++ ) {   // a point sits within a quarter step of its cell's middle
+					i0[k] = std::max( 0, int( std::floor( e[k] - 0.75 ) ) );
+					i1[k] = std::min( n[k] - 1, int( std::ceil( e[3 + k] - 0.25 ) ) );
+					if ( i0[k] > i1[k] )
+						return;
+				}
+				for ( int z = i0[2]; z <= i1[2]; z++ )
+					for ( int y = i0[1]; y <= i1[1]; y++ )
+						for ( int x = i0[0]; x <= i1[0]; x++ ) {
+							const size_t a = pidx( x, y, z );
+							double l[3];
+							ptL( a, l );
+							if ( l[0] >= e[0] && l[0] <= e[3] && l[1] >= e[1] && l[1] <= e[4] && l[2] >= e[2] && l[2] <= e[5] )
+								fn( a, l );
+						}
+			};
+			auto slabOf = [&]( const Ext & e, int aa, double p0, double p1 ) {
+				Ext o = e;
+				o[aa] = std::min( p0, p1 );
+				o[3 + aa] = std::max( p0, p1 );
+				return o;
+			};
+			auto volE = [&]( const Ext & e ) { return ( e[3] - e[0] ) * ( e[4] - e[1] ) * ( e[5] - e[2] ); };
+			auto shapeExt = [&]( const ProbeVolumeShape & sh ) {   // a shape's bounding sphere in lattice units
+				const double rad = 0.5 * std::sqrt( double( sh.size[0] ) * sh.size[0] + double( sh.size[1] ) * sh.size[1] + double( sh.size[2] ) * sh.size[2] ) / h;
+				const double u = c * sh.center[0] + s * sh.center[1], v = -s * sh.center[0] + c * sh.center[1];
+				const double m[3] = { ( u - lo[0] ) / h, ( v - lo[1] ) / h, ( sh.center[2] - lo[2] ) / h };
+				return Ext { m[0] - rad, m[1] - rad, m[2] - rad, m[0] + rad, m[1] + rad, m[2] + rad };
+			};
+			// points (air or solid) no flood of this room reached inside another room's grid shape: a box there overlaps it
+			for ( size_t q = 0; q < g.grid->size(); q++ )
+				if ( q != size_t( r ) )
+					for ( const ProbeVolumeShape & sh : ( *g.grid )[q] )
+						forBox( shapeExt( sh ), [&]( size_t a, const double * ) {
+							if ( kd[a] || cls[a] == 1 )
+								return;
+							double w[3];
+							ptW( a, w );
+							const float p[3] = { float( w[0] ), float( w[1] ), float( w[2] ) };
+							if ( sh.contains( p ) )
+								kd[a] = 2;
+						} );
+			// the grid shapes: boxes square to the frame move; any other shape (a wedge, a cylinder, a turned box) stays
+			const std::vector<ProbeVolumeShape> & gs = ( *g.grid )[size_t( r )];
+			std::vector<Ext> bx;
+			std::vector<ProbeVolumeShape> fixedS;
+			for ( const ProbeVolumeShape & sh : gs ) {
+				double d = std::fmod( double( sh.rotation[2] ) - yawDeg, 180.0 );
+				if ( d < 0 )
+					d += 180.0;
+				const bool sq = d < 0.01 || d > 179.99, sw = std::fabs( d - 90.0 ) < 0.01;
+				if ( sh.type != ProbeShapeType::Box || std::fabs( sh.rotation[0] ) > 0.01f || std::fabs( sh.rotation[1] ) > 0.01f || !( sq || sw ) ) {
+					fixedS.push_back( sh );
+					continue;
+				}
+				const double u = c * sh.center[0] + s * sh.center[1], v = -s * sh.center[0] + c * sh.center[1];
+				const double m[3] = { ( u - lo[0] ) / h, ( v - lo[1] ) / h, ( sh.center[2] - lo[2] ) / h };
+				const double hs[3] = { ( sw ? sh.size[1] : sh.size[0] ) * 0.5 / h, ( sw ? sh.size[0] : sh.size[1] ) * 0.5 / h, sh.size[2] * 0.5 / h };
+				bx.push_back( { m[0] - hs[0], m[1] - hs[1], m[2] - hs[2], m[0] + hs[0], m[1] + hs[1], m[2] + hs[2] } );
+			}
+			V.nA = int( gs.size() );
+			std::vector<quint8> cnt0( P, 0 ), cnt;   // shapes holding each point: the fixed ones, then all
+			for ( const ProbeVolumeShape & sh : fixedS ) {
+				forBox( shapeExt( sh ), [&]( size_t a, const double * ) {
+					double w[3];
+					ptW( a, w );
+					const float p[3] = { float( w[0] ), float( w[1] ), float( w[2] ) };
+					if ( sh.contains( p ) && cnt0[a] < 255 )
+						cnt0[a]++;
+				} );
+			}
+			auto addBox = [&]( const Ext & e, int d ) {
+				forBox( e, [&]( size_t a, const double * ) { cnt[a] = quint8( std::clamp( int( cnt[a] ) + d, 0, 255 ) ); } );
+			};
+			auto recount = [&]() {
+				cnt = cnt0;
+				for ( const Ext & e : bx )
+					addBox( e, 1 );
+			};
+			auto score = [&]() {
+				double sc = 0;
+				for ( size_t a = 0; a < P; a++ )
+					sc += kd[a] == 1 && !cnt[a] ? 1.0 : kd[a] == 2 && cnt[a] ? bw : 0.0;
+				return sc * h3;
+			};
+			recount();
+			V.scoreA = score();
+			// faces move by whole steps (onto the lattice's cell walls, between the points) while the score drops
+			std::vector<quint8> moved( bx.size(), 0 );
+			for ( int round = 0; round < spec.rounds; round++ ) {
+				int now = 0;
+				for ( size_t bi = 0; bi < bx.size(); bi++ )
+					for ( int f = 0; f < 6; f++ ) {
+						Ext & E = bx[bi];
+						const int aa = f % 3;
+						const bool hiF = f >= 3;
+						const double cur = E[f];
+						double best = -1e-9, bestPos = cur;
+						for ( int pass = 0; pass < 2; pass++ ) {
+							const bool grow = pass == 0, up = hiF == grow;
+							double acc = 0, p = cur;
+							for ( int st = 0; st < 4; st++ ) {
+								const double np = up ? std::floor( p ) + 1.0 : std::ceil( p ) - 1.0;
+								if ( grow && ( np < 0.0 || np > double( n[aa] ) ) )
+									break;
+								if ( !grow && ( hiF ? np < E[aa] + 0.5 : np > E[3 + aa] - 0.5 ) )
+									break;
+								forBox( slabOf( E, aa, p, np ), [&]( size_t a, const double * ) {
+									if ( grow && !cnt[a] )
+										acc += kd[a] == 1 ? -1.0 : kd[a] == 2 ? bw : 0.0;
+									else if ( !grow && cnt[a] == 1 )
+										acc += kd[a] == 1 ? 1.0 : kd[a] == 2 ? -bw : 0.0;
+								} );
+								p = np;
+								if ( acc < best ) {
+									best = acc;
+									bestPos = p;
+								}
+							}
+						}
+						if ( bestPos != cur ) {
+							addBox( slabOf( E, aa, cur, bestPos ), ( hiF ? bestPos > cur : bestPos < cur ) ? 1 : -1 );
+							E[f] = bestPos;
+							moved[bi] |= quint8( 1 << f );
+							now++;
+						}
+					}
+				V.faces += now;
+				if ( !now )
+					break;
+			}
+			// a face with a wall in front of every room point of its outer step stands at the wall (poke past it)
+			auto snapFace = [&]( Ext & E, int f ) {
+				const int aa = f % 3;
+				const bool hiF = f >= 3;
+				const double fp = E[f], sg = hiF ? 1.0 : -1.0;
+				const double d[3] = { sg * ax[aa][0], sg * ax[aa][1], sg * ax[aa][2] };
+				double lim = hiF ? 1e300 : -1e300, edge = hiF ? -1e300 : 1e300;
+				bool all = true, any = false;
+				qint64 ns = 0;
+				forBox( slabOf( E, aa, fp, hiF ? fp - 1.0 : fp + 1.0 ), [&]( size_t a, const double * l ) {
+					if ( cls[a] != 1 || !all )
+						return;
+					any = true;
+					edge = hiF ? std::max( edge, l[aa] ) : std::min( edge, l[aa] );
+					const double reach = std::fabs( fp - l[aa] ) * h;
+					double w[3];
+					ptW( a, w );
+					const double o[3] = { w[0] - d[0] - bvhO[0], w[1] - d[1] - bvhO[1], w[2] - d[2] };
+					double th = 0, t = 1e300;
+					int tri = -1;
+					ns++;
+					bool hitT = bvh.ray( o, d, reach + 1.0, &th, &tri );
+					if ( hitT && th < 1.001 && g.backFace && g.backFace( tri, d ) ) {
+						const double o2[3] = { w[0] - bvhO[0], w[1] - bvhO[1], w[2] };
+						hitT = bvh.ray( o2, d, reach, &th, &tri );
+						th += 1.0;
+					}
+					if ( hitT && g.facing && std::fabs( g.facing( tri, d ) ) < 0.05 )
+						hitT = false;
+					if ( hitT )
+						t = std::max( 0.0, th - 1.0 ) + spec.poke;
+					if ( reach > 0 ) {
+						const double e[3] = { w[0] + d[0] * reach, w[1] + d[1] * reach, w[2] + d[2] * reach };
+						for ( const TBox * tb : thrNear ) {
+							const double u = tb->enter( w, e );
+							if ( u >= 0 )
+								t = std::min( t, u * reach );
+						}
+					}
+					if ( t >= reach ) {
+						all = false;
+						return;
+					}
+					lim = hiF ? std::min( lim, l[aa] + t / h ) : std::max( lim, l[aa] - t / h );
+				} );
+				nSnap += ns;
+				if ( any && all )
+					E[f] = hiF ? std::max( lim, edge + 1e-3 ) : std::min( lim, edge - 1e-3 );
+			};
+			for ( size_t bi = 0; bi < bx.size(); bi++ )
+				for ( int f = 0; f < 6; f++ )
+					if ( moved[bi] & ( 1 << f ) )
+						snapFace( bx[bi], f );
+			recount();
+			// two boxes become one where their joint box takes no foreign air the score would pay for
+			for ( bool again = true; again; ) {
+				again = false;
+				for ( size_t i = 0; i < bx.size() && !again; i++ )
+					for ( size_t j = i + 1; j < bx.size() && !again; j++ ) {
+						Ext U;
+						for ( int k = 0; k < 3; k++ ) {
+							U[k] = std::min( bx[i][k], bx[j][k] );
+							U[3 + k] = std::max( bx[i][3 + k], bx[j][3 + k] );
+						}
+						if ( volE( U ) > 1.2 * ( volE( bx[i] ) + volE( bx[j] ) ) )
+							continue;
+						double dl = 0;
+						forBox( U, [&]( size_t a, const double * ) {
+							if ( !cnt[a] )
+								dl += kd[a] == 1 ? -1.0 : kd[a] == 2 ? bw : 0.0;
+						} );
+						if ( dl > 1e-9 )
+							continue;
+						addBox( bx[i], -1 );
+						addBox( bx[j], -1 );
+						addBox( U, 1 );
+						bx[i] = U;
+						bx.erase( bx.begin() + std::ptrdiff_t( j ) );
+						V.merged++;
+						again = true;
+					}
+			}
+			// drop (smallest first) a box whose own share cuts less than minGain of the score
+			{
+				std::vector<size_t> ord( bx.size() );
+				std::iota( ord.begin(), ord.end(), size_t( 0 ) );
+				std::stable_sort( ord.begin(), ord.end(), [&]( size_t x, size_t y ) { return volE( bx[x] ) < volE( bx[y] ); } );
+				std::vector<char> gone( bx.size(), 0 );
+				for ( size_t i : ord ) {
+					double val = 0;
+					forBox( bx[i], [&]( size_t a, const double * ) {
+						if ( cnt[a] == 1 )
+							val += kd[a] == 1 ? 1.0 : kd[a] == 2 ? -bw : 0.0;
+					} );
+					if ( val * h3 < spec.minGain ) {
+						addBox( bx[i], -1 );
+						gone[i] = 1;
+						nPruned++;
+					}
+				}
+				size_t k = 0;
+				for ( size_t i = 0; i < bx.size(); i++ )
+					if ( !gone[i] )
+						bx[k++] = bx[i];
+				bx.resize( k );
+			}
+			V.scoreB = score();
+			// extra lattice boxes, greedy over the room air nothing holds yet (deepest first), never on a foreign point
+			std::vector<Ext> xb;
+			if ( spec.extras > 0 ) {
+				std::vector<quint16> dist( P );
+				for ( size_t a = 0; a < P; a++ )
+					dist[a] = cls[a] == 2 ? 0 : 65535;
+				for ( int k = 0; k < nz; k++ )
+					for ( int j = 0; j < ny; j++ )
+						for ( int i = 0; i < nx; i++ ) {
+							const size_t a = pidx( i, j, k );
+							int dd = dist[a];
+							dd = std::min( dd, ( i ? dist[a - 1] : 0 ) + 1 );
+							dd = std::min( dd, ( j ? dist[a - sj] : 0 ) + 1 );
+							dd = std::min( dd, ( k ? dist[a - sk] : 0 ) + 1 );
+							dist[a] = quint16( std::min( dd, 65535 ) );
+						}
+				for ( int k = nz - 1; k >= 0; k-- )
+					for ( int j = ny - 1; j >= 0; j-- )
+						for ( int i = nx - 1; i >= 0; i-- ) {
+							const size_t a = pidx( i, j, k );
+							int dd = dist[a];
+							dd = std::min( dd, ( i + 1 < nx ? dist[a + 1] : 0 ) + 1 );
+							dd = std::min( dd, ( j + 1 < ny ? dist[a + sj] : 0 ) + 1 );
+							dd = std::min( dd, ( k + 1 < nz ? dist[a + sk] : 0 ) + 1 );
+							dist[a] = quint16( std::min( dd, 65535 ) );
+						}
+				std::vector<size_t> seeds;
+				for ( size_t a = 0; a < P; a++ )
+					if ( kd[a] == 1 && !cnt[a] )
+						seeds.push_back( a );
+				std::stable_sort( seeds.begin(), seeds.end(), [&]( size_t x, size_t y ) { return dist[x] > dist[y]; } );
+				std::vector<quint16>().swap( dist );
+				const size_t tx = size_t( nx ) + 1, ty = size_t( ny ) + 1;
+				auto tIdx = [&]( int i, int j, int k ) { return ( size_t( k ) * ty + size_t( j ) ) * tx + size_t( i ); };
+				std::vector<qint32> tF( tx * ty * ( size_t( nz ) + 1 ), 0 ), tR( tF.size(), 0 );
+				for ( int k = 1; k <= nz; k++ )
+					for ( int j = 1; j <= ny; j++ )
+						for ( int i = 1; i <= nx; i++ ) {
+							const size_t a = pidx( i - 1, j - 1, k - 1 );
+							const quint8 v = cls[a];
+							for ( int w = 0; w < 2; w++ ) {
+								std::vector<qint32> & T = w ? tR : tF;
+								T[tIdx( i, j, k )] = ( w ? kd[a] == 1 && !cnt[a] : ( v == 2 || ( v == 0 && !spec.freeD ) ) ) + T[tIdx( i - 1, j, k )] + T[tIdx( i, j - 1, k )]
+									+ T[tIdx( i, j, k - 1 )] - T[tIdx( i - 1, j - 1, k )] - T[tIdx( i - 1, j, k - 1 )] - T[tIdx( i, j - 1, k - 1 )] + T[tIdx( i - 1, j - 1, k - 1 )];
+							}
+						}
+				auto sum = [&]( const std::vector<qint32> & T, const int a[3], const int z[3] ) {
+					const int i0 = a[0], j0 = a[1], k0 = a[2], i1 = z[0] + 1, j1 = z[1] + 1, k1 = z[2] + 1;
+					return T[tIdx( i1, j1, k1 )] - T[tIdx( i0, j1, k1 )] - T[tIdx( i1, j0, k1 )] - T[tIdx( i1, j1, k0 )]
+						+ T[tIdx( i0, j0, k1 )] + T[tIdx( i0, j1, k0 )] + T[tIdx( i1, j0, k0 )] - T[tIdx( i0, j0, k0 )];
+				};
+				std::vector<quint8> cov( P, 0 );
+				int attempts = 0;
+				std::vector<std::pair<double, Ext>> got;
+				for ( size_t sd : seeds ) {
+					if ( int( got.size() ) >= spec.extras || attempts >= spec.extras * 8 )
+						break;
+					if ( cov[sd] )
+						continue;
+					attempts++;
+					int blo[3] = { int( sd % sj ), int( ( sd / sj ) % size_t( ny ) ), int( sd / sk ) };
+					int bhi[3] = { blo[0], blo[1], blo[2] };
+					for ( bool grew = true; grew; ) {
+						grew = false;
+						for ( int f = 0; f < 6; f++ ) {
+							const int aa = f / 2;
+							int l0[3] = { blo[0], blo[1], blo[2] }, l1[3] = { bhi[0], bhi[1], bhi[2] };
+							if ( f & 1 ) {
+								if ( blo[aa] == 0 )
+									continue;
+								l0[aa] = l1[aa] = blo[aa] - 1;
+							} else {
+								if ( bhi[aa] + 1 >= n[aa] )
+									continue;
+								l0[aa] = l1[aa] = bhi[aa] + 1;
+							}
+							if ( sum( tF, l0, l1 ) != 0 || sum( tR, l0, l1 ) == 0 )
+								continue;
+							bool fresh = false;
+							for ( int k = l0[2]; k <= l1[2] && !fresh; k++ )
+								for ( int j = l0[1]; j <= l1[1] && !fresh; j++ )
+									for ( int i = l0[0]; i <= l1[0]; i++ ) {
+										const size_t q = pidx( i, j, k );
+										if ( kd[q] == 1 && !cnt[q] && cov[q] != 1 ) {
+											fresh = true;
+											break;
+										}
+									}
+							if ( !fresh )
+								continue;
+							( f & 1 ? blo : bhi )[aa] = l0[aa];
+							grew = true;
+						}
+					}
+					qint64 gain = 0;
+					for ( int k = blo[2]; k <= bhi[2]; k++ )
+						for ( int j = blo[1]; j <= bhi[1]; j++ )
+							for ( int i = blo[0]; i <= bhi[0]; i++ ) {
+								const size_t a = pidx( i, j, k );
+								gain += kd[a] == 1 && !cnt[a] && cov[a] != 1;
+							}
+					const bool keep = double( gain ) * h3 >= spec.minGain;
+					for ( int k = blo[2]; k <= bhi[2]; k++ )
+						for ( int j = blo[1]; j <= bhi[1]; j++ )
+							for ( int i = blo[0]; i <= bhi[0]; i++ ) {
+								const size_t a = pidx( i, j, k );
+								if ( kd[a] == 1 && !cnt[a] && cov[a] != 1 )
+									cov[a] = keep ? 1 : 2;
+							}
+					if ( keep )
+						got.push_back( { double( gain ) * h3, Ext { double( blo[0] ), double( blo[1] ), double( blo[2] ), bhi[0] + 1.0, bhi[1] + 1.0, bhi[2] + 1.0 } } );
+				}
+				std::stable_sort( got.begin(), got.end(), [&]( const std::pair<double, Ext> & x, const std::pair<double, Ext> & y ) { return x.first > y.first; } );
+				for ( auto & x : got ) {
+					for ( int f = 0; f < 6; f++ )
+						snapFace( x.second, f );
+					V.gain.push_back( x.first );
+					xb.push_back( x.second );
+				}
+			}
+			auto toShape = [&]( const Ext & e ) {
+				ProbeVolumeShape sh;
+				sh.type = ProbeShapeType::Box;
+				double w[3];
+				world( ( e[0] + e[3] ) * 0.5, ( e[1] + e[4] ) * 0.5, ( e[2] + e[5] ) * 0.5, w );
+				for ( int k = 0; k < 3; k++ ) {
+					sh.center[k] = float( w[k] );
+					sh.size[k] = float( ( e[3 + k] - e[k] ) * h );
+				}
+				sh.rotation[2] = float( yawDeg );
+				return sh;
+			};
+			V.base = fixedS;
+			for ( const Ext & e : bx )
+				V.base.push_back( toShape( e ) );
+			for ( const Ext & e : xb )
+				V.extra.push_back( toShape( e ) );
+			V.on = true;
+			nsCover += t0.nsecsElapsed();
+			return;
+		}
 		// faces onto the triangles: when every room point on a face meets a triangle (or a threshold) within a step,
 		// the face stands at the nearest of them, at most `poke` past a triangle: the lattice stops up to a step short
 		// of a wall and volcheck reads that sliver as a gap. Otherwise it sits half a step past its outer points
@@ -930,6 +1374,95 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			small.push_back( r );
 	}
 	fineFor( small.size(), true, [&]( size_t k ) { fitRoom( small[k], false ); } );
+	if ( !spec.legacy && g.grid ) {
+		// VOLFIT3: each room the best of its grid fit and its moved set within the grid fit's count; then the extra boxes
+		// that cut the most score per shape, over all rooms, until the budget (budget x the grid fit's shapes)
+		std::vector<int> cur( static_cast<size_t>( rooms ), -1 );
+		auto nOf = [&]( const V3Room & V, int k ) { return k < 0 ? V.nA : int( V.base.size() ) + k; };
+		auto scOf = [&]( const V3Room & V, int k ) {
+			if ( k < 0 )
+				return V.scoreA;
+			double sc = V.scoreB;
+			for ( int i = 0; i < k; i++ )
+				sc -= V.gain[size_t( i )];
+			return sc;
+		};
+		int total = 0, gridN = 0;
+		for ( int r = 0; r < rooms; r++ ) {
+			const V3Room & V = v3r[size_t( r )];
+			if ( !V.on ) {
+				const int ng = size_t( r ) < g.grid->size() ? int( ( *g.grid )[size_t( r )].size() ) : 0;
+				total += ng;
+				gridN += ng;
+				continue;
+			}
+			gridN += V.nA;
+			int best = -1;
+			for ( int k = 0; k <= int( V.gain.size() ); k++ )
+				if ( nOf( V, k ) > 0 && nOf( V, k ) <= V.nA && scOf( V, k ) < scOf( V, best ) - 1e-6 )
+					best = k;
+			cur[size_t( r )] = best;
+			total += nOf( V, best );
+		}
+		const int budget = int( std::floor( spec.budget * gridN ) );
+		struct Step
+		{
+			double per;
+			int r, k, from;
+			bool operator<( const Step & o ) const { return per < o.per; }
+		};
+		std::priority_queue<Step> pq;
+		auto push = [&]( int r ) {
+			const V3Room & V = v3r[size_t( r )];
+			const int k0 = cur[size_t( r )];
+			double bp = 0;
+			int bk = -2;
+			for ( int k = std::max( 0, k0 + 1 ); k <= int( V.gain.size() ); k++ ) {
+				const int dn = nOf( V, k ) - nOf( V, k0 );
+				const double ds = scOf( V, k0 ) - scOf( V, k );
+				if ( dn > 0 && ds / dn > bp ) {
+					bp = ds / dn;
+					bk = k;
+				}
+			}
+			if ( bk >= 0 && bp >= spec.minGain )
+				pq.push( { bp, r, bk, k0 } );
+		};
+		for ( int r = 0; r < rooms; r++ )
+			if ( v3r[size_t( r )].on )
+				push( r );
+		while ( !pq.empty() ) {
+			const Step st = pq.top();
+			pq.pop();
+			if ( cur[size_t( st.r )] != st.from )
+				continue;
+			const V3Room & V = v3r[size_t( st.r )];
+			const int dn = nOf( V, st.k ) - nOf( V, st.from );
+			if ( total + dn > budget )
+				continue;
+			total += dn;
+			cur[size_t( st.r )] = st.k;
+			push( st.r );
+		}
+		for ( int r = 0; r < rooms; r++ ) {
+			const V3Room & V = v3r[size_t( r )];
+			S.gridShapes += V.on ? V.nA : 0;
+			S.facesMoved += V.faces;
+			S.merged += V.merged;
+			if ( !V.on )
+				continue;
+			const int k = cur[size_t( r )];
+			if ( k < 0 ) {
+				S.pickGrid++;
+				continue;
+			}
+			std::vector<ProbeVolumeShape> o = V.base;
+			o.insert( o.end(), V.extra.begin(), V.extra.begin() + k );
+			out[size_t( r )] = std::move( o );
+			S.pickMoved++;
+			S.extrasUsed += k;
+		}
+	}
 	for ( const auto & v : out ) {
 		S.boxes += int( v.size() );
 		S.rooms += !v.empty();
