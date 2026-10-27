@@ -2250,7 +2250,8 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " | " << cov
 				<< " | expected " << s.expected << " | loaded " << s.loaded
 				<< " | hitchMaxMs " << QString::asprintf( "%.1f", hitchMs ) << " over33 " << hitchOver
-				<< " hitchFrames " << hitchFrames << " | " << s1mem;
+				<< " hitchFrames " << hitchFrames << " | " << s1mem
+				<< " | " << s.worstTick << " | " << s.worstUnload << " scannedNodes " << s.scannedNodes;	// lane CELLSPIKE2: key-value pairs only
 			if ( !s.lastError.isEmpty() )
 				log << " | error " << s.lastError;
 			log << "\n";

@@ -736,6 +736,7 @@ SOURCES += \
 	src/cellspeed.cpp \
 	src/cellstream.cpp \
 	src/cellspawn.cpp \
+	src/cellstreamwalk.cpp \
 	src/celltexahead.cpp \
 	src/cellmodelahead.cpp \
 	src/probealbedo.cpp \

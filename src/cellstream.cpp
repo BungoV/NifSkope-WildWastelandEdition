@@ -276,6 +276,10 @@ bool Stream::resolve( Scene * sc )
 		farTiles.push_back( f );
 	}
 	registerMasks( sc );
+	// lane CELLSPIKE2: the attached cells' nodes are found again here, in ONE pass over the new scene; before, each
+	// later unload scanned every scene node for its own (81 ms a cell on the first crossing). Red WW_CELL_UNLOAD_RED=1
+	WW_SWITCH_STATIC( bool, rescanRed, wwEnvStr( "WW_CELL_UNLOAD_RED" ) == QLatin1String( "1" ) );
+	QHash<int, StreamCell *> owner;
 	for ( auto & kv : cells ) {
 		StreamCell & c = kv.second;
 		if ( c.st == CellState::Writing ) {   // its half-written node was never in the document's tree
@@ -287,7 +291,21 @@ bool Stream::resolve( Scene * sc )
 			c.cellNode = sc->findNode( nif, nif->getBlockIndex( c.cellBlock ) );
 			c.nodes.clear();
 			showFar( c.x, c.y, red == QLatin1String( "nohandover" ) );
+			if ( !rescanRed )
+				for ( const auto & tk : c.takes )
+					if ( isNodeType( tk.second ) )
+						owner.insert( tk.first, &c );
 		}
+	}
+	if ( !owner.isEmpty() ) {
+		QElapsedTimer f;
+		f.start();
+		for ( Node * n : sc->nodes.list() ) {
+			const int b = nif->getBlockNumber( n->index() );
+			if ( StreamCell * c = owner.value( b ) )
+				c->nodes.insert( b, n );
+		}
+		trace( QStringLiteral( "resolve: %1 cell node blocks found again in %2 ms" ).arg( owner.size() ).arg( msOf( f ), 0, 'f', 1 ) );
 	}
 	return true;
 }
@@ -661,8 +679,10 @@ void Stream::unload( StreamCell & c )
 		c.cellNode->makeParent( nullptr );
 	if ( c.cellBlock >= 0 && c.st == CellState::Attached )
 		setRootSlot( c.cellBlock, -1 );
+	const double msRoot = msOf( t );
 	showFar( c.x, c.y, true );
 	farHide( c, false );   // lane FARHOLE2
+	const double msFar = msOf( t );
 	QSet<int> nodeBlocks, propBlocks;
 	for ( const auto & tk : c.takes ) {
 		const int b = tk.first;
@@ -675,12 +695,16 @@ void Stream::unload( StreamCell & c )
 		wwCellXemiForget( nif, b );   // lane LIGHTS2 (XEMI1)
 		( isNodeType( tk.second ) ? nodeBlocks : propBlocks ).insert( b );
 	}
+	const double msTakes = msOf( t );
 	std::vector<Node *> ns;
 	for ( auto it = c.nodes.cbegin(); it != c.nodes.cend(); ++it )
 		if ( it.value() )
 			ns.push_back( it.value().data() );
+	int scanned = 0;
 	if ( int( ns.size() ) < nodeBlocks.size() ) {   // the scene was made again: find them by block
 		ns.clear();
+		scanned = scene->nodes.list().size();
+		st.scannedNodes += scanned;
 		for ( Node * n : scene->nodes.list() )
 			if ( nodeBlocks.contains( nif->getBlockNumber( n->index() ) ) )
 				ns.push_back( n );
@@ -705,10 +729,7 @@ void Stream::unload( StreamCell & c )
 	toClear.insert( toClear.end(), ns.begin(), ns.end() );
 	const double msNodes = msOf( t );
 	scene->properties.delMany( props );
-	if ( msOf( t ) > 3.0 )
-		trace( QStringLiteral( "slow unload %1,%2: %3 ms (forget %4, shapes+props %5, nodes out %6, props %7; %8 nodes %9 props)" )
-			.arg( c.x ).arg( c.y ).arg( msOf( t ), 0, 'f', 1 ).arg( msForget, 0, 'f', 1 ).arg( msShapes - msForget, 0, 'f', 1 )
-			.arg( msNodes - msShapes, 0, 'f', 1 ).arg( msOf( t ) - msNodes, 0, 'f', 1 ).arg( ns.size() ).arg( props.size() ) );
+	const double msProps = msOf( t );
 	toReset.insert( toReset.end(), c.takes.begin(), c.takes.end() );
 	pfxLive -= c.pfx;
 	c.pfx = 0;
@@ -721,7 +742,18 @@ void Stream::unload( StreamCell & c )
 	c.cellBlock = -1;
 	c.chunk.reset();
 	st.unloads++;
-	st.unloadMaxMs = std::max( st.unloadMaxMs, msOf( t ) );
+	// lane CELLSPIKE2: each part of the dearest unload (the dump's worstUnload field, the trace past 3 ms)
+	const double ms = msOf( t );
+	const QString parts = QStringLiteral( "wuRoot %1 wuFar %2 wuForget %3 wuFind %4 wuShapes %5 wuNodesOut %6 wuProps %7 "
+		"wuTail %8 wuNodes %9 wuTakes %10 wuScanned %11" ).arg( msRoot, 0, 'f', 2 ).arg( msFar - msRoot, 0, 'f', 2 )
+		.arg( msTakes - msFar, 0, 'f', 2 ).arg( msForget - msTakes, 0, 'f', 2 ).arg( msShapes - msForget, 0, 'f', 2 )
+		.arg( msNodes - msShapes, 0, 'f', 2 ).arg( msProps - msNodes, 0, 'f', 2 ).arg( ms - msProps, 0, 'f', 2 )
+		.arg( ns.size() ).arg( nodeBlocks.size() + propBlocks.size() ).arg( scanned );
+	if ( ms > 3.0 )
+		trace( QStringLiteral( "slow unload %1,%2: %3 ms (%4)" ).arg( c.x ).arg( c.y ).arg( ms, 0, 'f', 1 ).arg( parts ) );
+	if ( ms > st.unloadMaxMs )
+		st.worstUnload = QStringLiteral( "wuMs %1 " ).arg( ms, 0, 'f', 2 ) + parts;
+	st.unloadMaxMs = std::max( st.unloadMaxMs, ms );
 	dirty = true;
 }
 
@@ -904,6 +936,7 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 				prefetch.insert( Key( ex + dx, ey + dy ) );
 
 	unloadWaiting = false;
+	const double msUnload0 = msOf( t );
 	for ( auto it = cells.begin(); it != cells.end(); ) {
 		StreamCell & c = it->second;
 		const bool w = wanted.count( it->first ) > 0, p = prefetch.count( it->first ) > 0;
@@ -948,6 +981,7 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 			c.y = k.second;
 			cells.emplace( k, std::move( c ) );
 		}
+	const double msUnload = msOf( t ) - msUnload0;
 	g_phase = "pump";
 	const double msPump0 = msOf( t );
 	pumpWorker( eye );
@@ -1024,6 +1058,11 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		trace( QStringLiteral( "slow tick: %1 ms (pump %2, bury %5, drain %6, write %7, rebuild %8, model state %3)%4" ).arg( msOf( t ), 0, 'f', 1 ).arg( msPump, 0, 'f', 1 )
 			.arg( msOf( t ) - msIdle0, 0, 'f', 1 ).arg( building() ? QStringLiteral( " worker busy" ) : QStringLiteral( " worker idle" ) )
 			.arg( msDrain0 - msBury0, 0, 'f', 1 ).arg( msWrite0 - msDrain0, 0, 'f', 1 ).arg( msWrite, 0, 'f', 1 ).arg( msRebuild, 0, 'f', 1 ) );
+	if ( msOf( t ) > st.tickMaxMs )   // lane CELLSPIKE2: the stages of the step's dearest frame (dump field worstTick)
+		st.worstTick = QStringLiteral( "wtMs %1 wtPre %2 wtUnload %3 wtPump %4 wtBury %5 wtDrain %6 wtWrite %7 wtRebuild %8 wtIdle %9" )
+			.arg( msOf( t ), 0, 'f', 2 ).arg( msUnload0, 0, 'f', 2 ).arg( msUnload, 0, 'f', 2 ).arg( msPump, 0, 'f', 2 )
+			.arg( msDrain0 - msBury0, 0, 'f', 2 ).arg( msWrite0 - msDrain0, 0, 'f', 2 ).arg( msWrite, 0, 'f', 2 )
+			.arg( msRebuild, 0, 'f', 2 ).arg( msOf( t ) - msIdle0, 0, 'f', 2 );
 	st.tickMaxMs = std::max( st.tickMaxMs, msOf( t ) );
 	return changed;
 }
@@ -1191,6 +1230,9 @@ CellStreamStats cellStreamStats( const NifModel * nif, bool resetMaxima )
 	if ( resetMaxima ) {
 		s->st.tickMaxMs = s->st.sliceMaxMs = s->st.unloadMaxMs = s->st.drainMaxMs = s->st.rebuildMaxMs = s->st.buryMaxMs = 0;
 		s->st.buildMaxMs = 0;
+		s->st.worstTick.clear();
+		s->st.worstUnload.clear();
+		s->st.scannedNodes = 0;
 	}
 	return r;
 }

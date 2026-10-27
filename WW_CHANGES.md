@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLSPIKE2 (2026-10-27, branch cellspike2-20261027): a cell unload no longer walks the whole scene
+
+- **Why:** MERGE1027's walk had one 81.5 ms crossing frame, all of it one cell unload (step 1, 5 unloads). When the
+  view makes the scene again (GLView modelChanged), the stream forgets each attached cell's scene nodes, and every
+  later unload then walked every scene node (`getBlockNumber` per node) to find its own. The first walk in a big
+  window touches cold memory.
+- **Fix (`Stream::resolve`):** right after a scene remake the attached cells' nodes are found again in ONE pass over
+  the new scene (about 1.3 ms for 3208 blocks offline), so an unload never walks the scene. Nothing else changes.
+- **Instrument:** the unload parts carry `wuScanned` (scene nodes walked), the stats carry `scannedNodes`, and the
+  GUI dump line prints the stages of the dearest frame and unload. Trace line `resolve: N cell node blocks found again`.
+- **Offline harness:** `NifSkope -no-gui streamwalk <path file> [--bar ms] [--dump file] [--trim] [--remake k]` walks
+  the stream with no window (WW_CELL_OPEN names the open) and prints one line a step and a verdict; `--remake k` makes
+  the scene again before step k, `--trim` pages the process out before each step.
+- **Red:** `WW_CELL_UNLOAD_RED=1` keeps the old per-unload scene walk. Live (read at each scene remake).
+
 ## Lane OPENCELLFIX2 (2026-10-27, branch opencellfix2-20261027): the Cell dock's Display tab, presets and one dropdown
 
 - **Load order tab:** the language box is gone. The strings language is the game's `[General] sLanguage` from
@@ -82,7 +97,6 @@
   row or method (the code already did since AOOFF1; the cellssr.h note said otherwise). The keep rule is now
   `wwAoSharedPassRuns` (tests/aomethod). Red: `WW_CELL_AO_SSR_RED=old` (AO off leaves SSR no pass).
 - **Default:** vanilla runs the same passes in the same order as before, so the default picture does not change.
-
 ## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
 
 - **Why:** the far objects, far cards and far rings past ring 0 were cut once, round the open's centre. The stream
