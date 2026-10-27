@@ -391,6 +391,7 @@ HEADERS += \
 	src/cellmesh.h \
 	src/cellspeed.h \
 	src/cellstream.h \
+	src/cellspawn.h \
 	src/celltexahead.h \
 	src/cellmodelahead.h \
 	src/probealbedo.h \
@@ -710,6 +711,7 @@ SOURCES += \
 	src/cellmesh.cpp \
 	src/cellspeed.cpp \
 	src/cellstream.cpp \
+	src/cellspawn.cpp \
 	src/celltexahead.cpp \
 	src/cellmodelahead.cpp \
 	src/probealbedo.cpp \

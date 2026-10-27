@@ -47,6 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellstream.h"		// lane CELLSTREAM1
 #include "cellworkspace.h"	// lane CELLWORK1
 #include "cellview.h"		// lane LIVESET1: the far LOD and the probe markers in place
+#include "cellspawn.h"		// lane CELLSPAWN1: where a cell's camera starts
 #include "cellmodpick.h"
 #include "nifskope.h"
 #include "starterscene.h"
@@ -227,6 +228,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <functional>
 #include <QtEndian>
 #include "ui/opencellmenu.h"
+#include "ui/opencelldialog.h"	// lane CELLSPAWN1: the WW_OPENCELL_SHOT harness
 #include "gl/cellpasstime.h"	// lane STREAM1
 #include "celltexahead.h"		// lane GAPFIX1
 #include <vector>
@@ -8394,6 +8396,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * and nothing at all if the button is not found — which is itself the failure
 	 * this is here to catch.
 	 */
+	// lane CELLSPAWN1 (WW_OPENCELL_SHOT=<out.png>): File > Open Cell's dialog and its Filters menu, grabbed after the
+	// file loads (src/ui/opencelldialog.h openCellShot; WW_OPENCELL_SHOT_DATA/_PLUGINS/_WORLD/_SEARCH fill it).
+	if ( !fname.isEmpty() && wwEnvIsSet( "WW_OPENCELL_SHOT" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope]() {
+				qInfo().noquote() << openCellShot( skope, wwEnvStr( "WW_OPENCELL_SHOT" ) );
+				if ( !wwEnvIsSet( "WW_RENDER_SHOT" ) )	// alone, the harness ends the run itself
+					QCoreApplication::quit();
+			} );
+		}, Qt::SingleShotConnection );
+	}
+
 	if ( !fname.isEmpty() && wwEnvIsSet( "WW_SHOT_UI" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 1200, skope, [skope]() {
@@ -23803,6 +23817,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								viewIdx = int( GLView::ViewFront );
 							skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
 						}
+						/* lane CELLSPAWN2: say which camera the shot took. An unset WW_RENDER_VIEW refits Front over the
+						 * cell's spawn (the CELLSPAWN1 hold was blind for it); a cell's first-open view needs -1. */
+						qInfo().noquote() << ( viewIdx >= 0
+							? QStringLiteral( "render shot camera: view %1 refit to the scene" ).arg( viewIdx )
+							: QStringLiteral( "render shot camera: kept as the open left it (WW_RENDER_VIEW < 0)" ) );
 					}
 
 					// Force the two Viewport Effects toggles ON. They default to
@@ -34116,8 +34135,17 @@ void NifSkope::onLoadComplete( bool success, QString & fname )
 
 	// A new tab gets a useful initial framing. Reloading/replacing a document in
 	// an existing tab preserves that tab's live camera for the current session.
-	if ( !hasLoadedDocument )
-		ogl->center();
+	if ( !hasLoadedDocument ) {
+		/* lane CELLSPAWN1 (bungo 10-26): a cell opens standing on its ground, not framed from above
+		 * (src/cellspawn.h). A pinned harness camera keeps the old path, so its pictures do not move. */
+		CellSpawn spawn;
+		const bool tookSpawn = cellSpawnTake( nif, spawn );
+		if ( success && tookSpawn && spawn.valid && fname.endsWith( QLatin1String( ".wwcell" ), Qt::CaseInsensitive )
+			&& !GLView::wwCameraPinFromEnvironment().active )
+			qInfo().noquote() << ogl->wwSpawnAt( Vector3( spawn.eye[0], spawn.eye[1], spawn.eye[2] ), spawn.yawDeg );
+		else
+			ogl->center();
+	}
 	hasLoadedDocument = success;
 	refreshAllDocumentSessions();
 

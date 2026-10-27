@@ -390,6 +390,8 @@ int wwCellFarDotsDraw( Scene * scene );
 
 //! the Cell lights row (ships off); the pin WW_CELL_LIT wins
 bool wwCellLightsOn();
+//! WW_CELL_CAM_DUMP=<file>: the eye in world units, rewritten when it moves; GLView::paintGL calls it each frame
+void wwCellCamDump( Scene * scene );
 void wwCellLightsSetOn( bool on );
 
 /*! LIGHT FLICKER (lane LIGHTFLICKER1): a placed LIGH with flag 0x8 (flicker) or 0x80 / 0x100 (pulse) varies each frame as

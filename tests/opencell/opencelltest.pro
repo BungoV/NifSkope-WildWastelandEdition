@@ -11,6 +11,7 @@ INCLUDEPATH += $$ROOT/src/ui $$ROOT/src $$ROOT/lib/libfo76utils/src
 
 HEADERS += $$ROOT/src/ui/opencellcatalog.h $$ROOT/src/ui/opencelldialog.h
 SOURCES += opencelltest.cpp \
+	stubs.cpp \
 	$$ROOT/src/ui/opencellcatalog.cpp \
 	$$ROOT/src/ui/opencelldialog.cpp \
 	$$ROOT/src/wwswitch.cpp \

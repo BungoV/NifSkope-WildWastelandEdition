@@ -104,6 +104,7 @@ See the LICENSE.md file for the full license text.
 #include "lib/qhull.h"
 #include "gl/gltools.h"
 #include "spells/blocks.h"
+#include "cellspawn.h"	// lane CELLSPAWN1
 class QWidget;
 QModelIndex tlCreateCollisionBody( NifModel * nif, const QModelIndex & targetNode );
 QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
@@ -8084,6 +8085,13 @@ int nifskopeCliMain( const QStringList & args )
 	// (lane PRTPFAR; src/probefar.cpp)
 	if ( cmd == QLatin1String( "probefar" ) ) {
 		const int rc = probeFarCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// lane CELLSPAWN1: where a cell's camera starts, and the eye-height check (src/cellspawn.cpp)
+	if ( cmd == QLatin1String( "cellspawn" ) ) {
+		const int rc = cellSpawnCli( a );
 		out().flush();
 		err().flush();
 		return rc;

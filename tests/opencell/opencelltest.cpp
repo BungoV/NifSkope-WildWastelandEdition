@@ -8,6 +8,7 @@
 #include "opencelldialog.h"
 #include "esmfile.hpp"
 
+#include <QAction>
 #include <QApplication>
 #include <QDir>
 #include <QFile>
@@ -29,6 +30,8 @@ void check( bool ok, const QString & what )
 
 QString shown( const QStringList & v ) { return v.join( QStringLiteral( " | " ) ); }
 QString shown( const QString & v ) { return v; }
+QString shown( int v ) { return QString::number( v ); }
+QString shown( bool v ) { return v ? QStringLiteral( "true" ) : QStringLiteral( "false" ); }
 QString shown( const QByteArray & v ) { return QString::fromUtf8( v ).replace( QLatin1Char( '\n' ), QLatin1String( "\\n" ) ); }
 
 template <typename T>
@@ -115,7 +118,9 @@ QByteArray basePlugin()
 QByteArray modPlugin()
 {
 	const QByteArray world = record( "WRLD", 0xF01, zstring( "EDID", "TestWorld" ) + zstring( "FULL", "Test World" ) );
-	const QByteArray children = group( u32( 0xF01 ), 1, exteriorBlock( cell( 0x01000800, "ModCell", "", 5, -3 ) ) );
+	// lane CELLSPAWN1: it also edits Base.esm's CellB (a name), so CellB is added by Base.esm and last edited by Mod.esp
+	const QByteArray children = group( u32( 0xF01 ), 1, exteriorBlock( cell( 0x01000800, "ModCell", "", 5, -3 )
+		+ cell( 0xF04, "CellB", "Cell B Edited", 1, 0 ) ) );
 	const QByteArray own = record( "WRLD", 0x01000801, zstring( "EDID", "ModWorld" ) );
 	return header( 0, { QStringLiteral( "Base.esm" ) } ) + group( "WRLD", 0, world + children + own );
 }
@@ -241,6 +246,67 @@ int main( int argc, char ** argv )
 			qPrintable( cat.noStrings.join( QLatin1Char( ',' ) ) ), read ? "" : qPrintable( QStringLiteral( " error " ) + err ) );
 		const bool pass = read && localized && cat.noStrings.isEmpty() && wn > 0;
 		std::printf( "%s\n", pass ? "PASS" : "FAIL" );
+		return pass ? 0 : 1;
+	}
+
+	// lane CELLSPAWN1 --census <Data> <plugin,plugin,...>: the real load order through the dialog. Per worldspace (and
+	// Interior): catalog rows with an editor ID / a name / neither, against what the list shows. PASS when every row is
+	// listed, no exterior's Editor ID cell reads blank (Wilderness stands in), and every row shows an 8-digit FormID.
+	// WW_OPENCELL_RED=list (the old list) must FAIL.
+	if ( argc >= 4 && QByteArray( argv[1] ) == "--census" ) {
+		OpenCellDialog cd;
+		cd.setDataDir( QString::fromLocal8Bit( argv[2] ) );
+		cd.setPluginsTicked( QString::fromLocal8Bit( argv[3] ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) );
+		cd.readNow();
+		bool pass = !cd.worldItems().isEmpty();
+		long long tot[6] = {};
+		for ( const QString & item : cd.worldItems() ) {
+			// the combo's text is "EDID (name)"; select by the EDID
+			const QString edid = item.section( QStringLiteral( " (" ), 0, 0 );
+			if ( edid == QLatin1String( OpenCellDialog::allItem ) )
+				continue;
+			cd.selectWorld( edid );
+			const QStringList heads = cd.cellHeaders();
+			const int ce = heads.indexOf( QStringLiteral( "Editor ID" ) ), cn = heads.indexOf( QStringLiteral( "Name" ) );
+			const int cf = heads.indexOf( QStringLiteral( "FormID" ) );
+			int rows = 0, withEdid = 0, withName = 0, neither = 0, blankShown = 0, wild = 0, formOk = 0;
+			for ( const QString & line : cd.cellItems() ) {
+				const QStringList c = line.split( QLatin1Char( '\t' ) );
+				const QString e = c.value( ce ), n = c.value( cn );
+				const bool isWild = e == QLatin1String( "Wilderness" );
+				rows++;
+				withEdid += !e.isEmpty() && !isWild;
+				withName += !n.isEmpty();
+				neither += ( e.isEmpty() || isWild ) && n.isEmpty();
+				if ( e.isEmpty() && blankShown < 5 )
+					std::printf( "  blank editor ID: %s\n", qPrintable( QString( line ).replace( QLatin1Char( '\t' ), QLatin1Char( '|' ) ) ) );
+				blankShown += e.isEmpty();
+				wild += isWild;
+				bool ok = false;
+				formOk += cf >= 0 && c.value( cf ).size() == 8 && ( c.value( cf ).toUInt( &ok, 16 ), ok );
+			}
+			// An interior with no editor ID reads blank, as in the CK (it is listed by its FormID); an exterior reads Wilderness.
+			const bool interiors = edid == QLatin1String( OpenCellDialog::interiorItem );
+			const bool ok = rows == cd.cellTotal() && ( interiors || blankShown == 0 ) && formOk == rows;
+			pass = pass && ok;
+			std::printf( "census %-28s rows %6d listed %6d  edid %6d  name %6d  neither %6d  wilderness %6d  blank %6d  formid %6d  %s\n",
+				qPrintable( edid ), cd.cellTotal(), rows, withEdid, withName, neither, wild, blankShown, formOk, ok ? "ok" : "FAIL" );
+			const long long v[6] = { rows, withEdid, withName, neither, blankShown, formOk };
+			for ( int i = 0; i < 6; i++ )
+				tot[i] += v[i];
+		}
+		// [<world>=<search> ...]: the hits of a search, with the first hit's row (a known EDID, name, FormID)
+		for ( int i = 4; i < argc; i++ ) {
+			const QString q = QString::fromLocal8Bit( argv[i] );
+			cd.selectWorld( q.section( QLatin1Char( '=' ), 0, 0 ) );
+			cd.setSearch( q.section( QLatin1Char( '=' ), 1 ) );
+			std::printf( "search %s: %d of %d [%s]\n", qPrintable( q ), cd.cellCount(), cd.cellTotal(),
+				qPrintable( cd.cellItems().value( 0 ).replace( QLatin1Char( '\t' ), QLatin1Char( '|' ) ) ) );
+			pass = pass && cd.cellCount() > 0;
+			cd.setSearch( QString() );
+		}
+		std::printf( "census total rows %lld edid %lld name %lld neither %lld blank %lld formid %lld\n%s\n",
+			tot[0], tot[1], tot[2], tot[3], tot[4], tot[5], pass ? "PASS" : "FAIL" );
 		return pass ? 0 : 1;
 	}
 
@@ -381,18 +447,101 @@ int main( int argc, char ** argv )
 	dlg.setPluginsTicked( { QStringLiteral( "Mod.esp" ) } );
 	dlg.readNow();
 	checkEq( dlg.loadOrderPaths(), QStringList{ QDir::cleanPath( base ), QDir::cleanPath( mod ) }, QStringLiteral( "load order paths" ) );
-	checkEq( dlg.worldItems(), QStringList{ QStringLiteral( "TestWorld (Test World)" ), QStringLiteral( "ModWorld" ), QStringLiteral( "Interior" ) },
-		QStringLiteral( "worldspace list (overridden TestWorld listed once)" ) );
+	checkEq( dlg.worldItems(), QStringList{ QStringLiteral( "TestWorld (Test World)" ), QStringLiteral( "ModWorld" ),
+		QStringLiteral( "Interior" ), QStringLiteral( "All Cells" ) },
+		QStringLiteral( "worldspace list (overridden TestWorld listed once, then Interior and All Cells)" ) );
 	dlg.selectWorld( QStringLiteral( "TestWorld" ) );
-	checkEq( dlg.cellItems(), QStringList{ QStringLiteral( "ModCell\t\t5\t-3" ), QStringLiteral( "CellA\tCell A\t0\t0" ),
-		QStringLiteral( "CellB\t\t1\t0" ), QStringLiteral( "\t\t-1\t2" ) },
-		QStringLiteral( "cell list: the mod's new cell joins, the persistent cell does not" ) );
+	checkEq( dlg.cellHeaders(), QStringList{ QStringLiteral( "Editor ID" ), QStringLiteral( "Name" ), QStringLiteral( "X" ),
+		QStringLiteral( "Y" ), QStringLiteral( "FormID" ), QStringLiteral( "Plugin" ), QStringLiteral( "Last Edit" ) },
+		QStringLiteral( "exterior columns as the CK's (no Worldspace column inside one worldspace)" ) );
+	checkEq( dlg.cellItems(), QStringList{ QStringLiteral( "ModCell\t\t5\t-3\t01000800\tMod.esp\tMod.esp" ),
+		QStringLiteral( "CellA\tCell A\t0\t0\t00000F03\tBase.esm\tBase.esm" ),
+		QStringLiteral( "CellB\tCell B Edited\t1\t0\t00000F04\tBase.esm\tMod.esp" ),
+		QStringLiteral( "Wilderness\t\t-1\t2\t00000F05\tBase.esm\tBase.esm" ) },
+		QStringLiteral( "cell list: winning names, FormIDs, owner and last edit; a cell with no editor ID reads Wilderness" ) );
 	dlg.selectWorld( QStringLiteral( "Interior" ) );
-	checkEq( dlg.cellItems(), QStringList{ QStringLiteral( "AnotherRoom\t\t00000F11" ), QStringLiteral( "TestInterior\tTest Interior\t00000F10" ) },
-		QStringLiteral( "interior list" ) );
+	checkEq( dlg.cellItems(), QStringList{ QStringLiteral( "AnotherRoom\t\t00000F11\tBase.esm\tBase.esm" ),
+		QStringLiteral( "TestInterior\tTest Interior\t00000F10\tBase.esm\tBase.esm" ) },
+		QStringLiteral( "interior list (no grid columns)" ) );
+
+	std::printf( "search and filters\n" );
+	{
+		dlg.selectWorld( QStringLiteral( "TestWorld" ) );
+		auto hits = [&]( const QString & s ) { dlg.setSearch( s ); return dlg.cellCount(); };
+		checkEq( hits( QStringLiteral( "cella" ) ), 1, QStringLiteral( "search: an editor ID (any case)" ) );
+		checkEq( hits( QStringLiteral( "Edited" ) ), 1, QStringLiteral( "search: a name" ) );
+		checkEq( hits( QStringLiteral( "01000800" ) ), 1, QStringLiteral( "search: a FormID" ) );
+		checkEq( hits( QStringLiteral( "0x00000F05" ) ), 1, QStringLiteral( "search: a FormID with 0x" ) );
+		checkEq( hits( QStringLiteral( "-1, 2" ) ), 1, QStringLiteral( "search: x, y" ) );
+		checkEq( hits( QStringLiteral( "Wilderness" ) ), 1, QStringLiteral( "search: Wilderness finds the cell with no editor ID" ) );
+		checkEq( hits( QStringLiteral( "cell b" ) ), 1, QStringLiteral( "search: every term must match" ) );
+		checkEq( hits( QStringLiteral( "nothing-like-this" ) ), 0, QStringLiteral( "search: no match lists nothing" ) );
+		checkEq( dlg.cellTotal(), 4, QStringLiteral( "the total stays the worldspace's" ) );
+		auto act = [&]( const char * name ) {
+			QAction * a = dlg.findChild<QAction *>( QLatin1String( name ) );
+			check( a != nullptr, QStringLiteral( "filter action %1 exists" ).arg( QLatin1String( name ) ) );
+			if ( a )
+				a->trigger();
+		};
+		dlg.setSearch( QStringLiteral( "Edited" ) );
+		act( "OpenCellSearchName" );   // Search In: name off
+		checkEq( dlg.cellCount(), 0, QStringLiteral( "Search In without Name: a name no longer hits" ) );
+		act( "OpenCellSearchName" );
+		act( "OpenCellSearchEditorId" );
+		act( "OpenCellSearchFormId" );
+		dlg.setSearch( QStringLiteral( "00000F03" ) );
+		checkEq( dlg.cellCount(), 0, QStringLiteral( "Search In without FormID: a FormID no longer hits" ) );
+		act( "OpenCellSearchName" );   // the last field cannot be turned off
+		checkEq( dlg.findChild<QAction *>( QStringLiteral( "OpenCellSearchName" ) )->isChecked(), true,
+			QStringLiteral( "Search In keeps one field" ) );
+		act( "OpenCellResetSearchFilters" );
+		checkEq( dlg.cellCount(), 4, QStringLiteral( "Reset Search and Filters lists everything" ) );
+
+		dlg.selectWorld( QStringLiteral( "All Cells" ) );
+		checkEq( dlg.cellTotal(), 6, QStringLiteral( "All Cells = 4 exterior + 0 + 2 interior" ) );
+		checkEq( dlg.cellHeaders().contains( QStringLiteral( "Worldspace" ) ), true, QStringLiteral( "All Cells shows the Worldspace column" ) );
+		act( "OpenCellCellsInterior" );
+		checkEq( dlg.cellCount(), 2, QStringLiteral( "filter interior only" ) );
+		act( "OpenCellCellsExterior" );
+		checkEq( dlg.cellCount(), 4, QStringLiteral( "filter exterior only" ) );
+		act( "OpenCellCellsAll" );
+		act( "OpenCellNamed" );
+		checkEq( dlg.cellCount(), 3, QStringLiteral( "filter with a name (Cell A, Cell B Edited, Test Interior)" ) );
+		act( "OpenCellUnnamed" );
+		checkEq( dlg.cellCount(), 3, QStringLiteral( "filter without a name" ) );
+		act( "OpenCellNameAny" );
+		act( "OpenCellPlugin_Mod.esp" );
+		checkEq( dlg.cellCount(), 1, QStringLiteral( "filter added by Mod.esp" ) );
+		act( "OpenCellPluginLastEdit" );
+		checkEq( dlg.cellCount(), 2, QStringLiteral( "filter last edited by Mod.esp" ) );
+		act( "OpenCellPlugin_Base.esm" );
+		checkEq( dlg.cellCount(), 4, QStringLiteral( "filter last edited by Base.esm" ) );
+		act( "OpenCellResetSearchFilters" );
+		checkEq( dlg.cellCount(), 6, QStringLiteral( "reset again lists all 6" ) );
+		dlg.selectWorld( QStringLiteral( "ModWorld" ) );
+		checkEq( dlg.cellTotal(), 0, QStringLiteral( "a worldspace lists only its own cells" ) );
+
+		dlg.selectWorld( QStringLiteral( "TestWorld" ) );
+		dlg.sortCells( 2, false );   // X
+		checkEq( dlg.cellItems().value( 0 ).section( QLatin1Char( '\t' ), 0, 0 ), QStringLiteral( "Wilderness" ),
+			QStringLiteral( "sort by X: -1 first" ) );
+		dlg.sortCells( 4, true );    // FormID, descending
+		checkEq( dlg.cellItems().value( 0 ).section( QLatin1Char( '\t' ), 0, 0 ), QStringLiteral( "ModCell" ),
+			QStringLiteral( "sort by FormID descending: 01000800 first" ) );
+		dlg.sortCells( -1, false );
+		checkEq( hex( openCellShownForm( 0x03000800U, 3, { false, true, true, false } ) ), hex( 0x01000800U ),
+			QStringLiteral( "load-order FormID counts full plugins only" ) );
+		checkEq( hex( openCellShownForm( 0xFE001C02U, 2, { false, true, true } ) ), hex( 0xFE001C02U ),
+			QStringLiteral( "a light plugin's FE FormID stays" ) );
+	}
 
 	std::printf( ".wwcell\n" );
 	const QString cells = tmp.path() + QStringLiteral( "/cells" );
+	dlg.selectWorld( QStringLiteral( "All Cells" ) );
+	dlg.selectInterior( QStringLiteral( "TestInterior" ) );
+	checkEq( dlg.specLine().section( QLatin1Char( '|' ), 1 ), QStringLiteral( "interior|TestInterior" ),
+		QStringLiteral( "an interior picked under All Cells opens as an interior" ) );
+	dlg.selectWorld( QStringLiteral( "Interior" ) );
 	dlg.selectInterior( QStringLiteral( "TestInterior" ) );
 	check( dlg.writeSpec( cells ), QStringLiteral( "interior spec written" ) );
 	checkEq( readFile( dlg.specPath() ), ( QDir::cleanPath( base ) + QStringLiteral( "," ) + QDir::cleanPath( mod )

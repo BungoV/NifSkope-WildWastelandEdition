@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLSPAWN2 (2026-10-27, branch cellspawn2-20261027): the spawn hold can see the spawn
+
+- **WW_CELL_CAM_DUMP is written with the Cell lights row off:** the dump moved out of the cell lights' uniforms (which
+  run only on fo4_cell.prog) into wwCellCamDump, called by GLView::paintGL every frame, so a fresh-scope cell shot
+  (lights off by default) still writes where its eye is. Before, no dump file appeared at all.
+- **The render shot says which camera it took** (`render shot camera: view N refit to the scene` or `kept as the open
+  left it (WW_RENDER_VIEW < 0)`). An unset WW_RENDER_VIEW still refits Front over the whole scene 2.5 s after the open
+  (every unpinned baseline keeps its framing); that refit is what replaced the spawn in the CELLSPAWN1 hold. A shot of
+  a cell's first-open view sets WW_RENDER_VIEW=-1. Nothing changes in the GUI.
+
+## Lane CELLSPAWN1 (2026-10-26, branch cellspawn1-20261026): a cell opens standing on its ground; File > Open Cell lists like the CK
+
+- **Spawn:** a freshly opened exterior puts the camera at the opened cell's centre on its LAND (or on the water when
+  the water is higher) at the player's eye height (120.48, node 'Camera' of the 1st-person skeleton), level, looking
+  north. If placed objects stand on the centre, the nearest open terrain point of the cell is used. An interior starts
+  at its COC marker, else at its first load door's arrival point. src/cellspawn.cpp; `-no-gui cellspawn "<spec>" --check`.
+- Pinned harness cameras and View > Center keep the old framing. Reds WW_CELL_SPAWN_RED=old|z0.
+- **Open Cell list:** Editor ID, Name, X, Y, FormID (load order), owner plugin and last edit; "Wilderness" for unnamed
+  exterior cells; one search over EDID / name / FormID / grid; a Filters menu; "All Cells" in the worldspace selector.
+  Harness WW_OPENCELL_SHOT grabs the dialog and its Filters menu. Unit test tests/opencell (85 checks; red 18 failed).
+
 ## Lane BINDLESS2FIX (2026-10-27, branch bindless2fix-20261027): Bindless draws no longer draw a black, fogless cell
 
 - **Cause:** the cell's own uniforms (its lights, sun, ambient, obscurance, reflections, fog and the linear output) are
