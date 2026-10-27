@@ -1,5 +1,44 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LANDSPEC1 (2026-10-27, branch landspec1-20261027): the far ground's specular and the land-LOD blend
+
+- **Why:** the game draws its LOD land with fLODLandSpecPower 0.22 (gloss) and fLODLandSpecScale 0.06 (spec mask), and
+  its near land shader lerps the ground's own gloss/spec toward those two by distance. The viewer drew the far ground
+  and the outer near cells with their own values (gloss up to 1).
+- **Law (from the game's shaders):** v = 1 - saturate((9625.6 - d) / 2662.4), d = the xy distance to the centre of the
+  camera's cell; 0 within 1.7 cells, whole from 2.35 cells. gloss = lerp(own, 0.22, v), spec = lerp(own, 0.06, v).
+  Far LOD terrain: v = 1. `src/landlodspec.h` holds it; `fo4_default.frag` (cell programs, uniforms `landLod`,
+  `landLodK`) runs it for the lit specular, the Oren-Nayar roughness and the SSR weight.
+- **Red:** `WW_LANDSPEC_RED=off` (live, stage 0) draws the ground as before. Specular view off sends a 0 spec target.
+- **Not done:** wetness. The law and the game's wetness clock are in the header, untested in pictures; the viewer reads
+  no precipitation yet. PBR mode (pbrm_cell) keeps the old ground spec.
+- **Test:** `tests/landspec` (green PASS; red `-DLANDSPEC_RED`, and the base's shader, FAIL).
+
+## Lane DUNESAND3 (2026-10-27, branch dunesand3-20261027): the ground legend follows a live spec red
+
+- **Why:** DUNESAND2 made `WW_TERRBLEND_RED=nospec` swap the ground's TX07 in place, but the ground legend line was
+  written once at open and kept naming the open's value.
+- **Fix:** the TX07 clause comes from one function (`src/cellgroundlegend.h`) for blend and mosaic, and both forms now
+  carry the wanted count (`... no TX07 map on the ground (38 of 44 passes name one)`). After a live set the cell
+  workspace rewrites the clause in its notes (`cellWorkspaceNotesLive`) and the panel reads them again; the live reply
+  adds `ground legend: RED CONTROL nospec` / `ground legend: TX07 bound`. The green text is unchanged.
+- **Engine check (no code):** the Landscape G-buffer pixel shader's gloss/spec scalars beside the _s maps are the
+  material's smoothness and specular scale, both 1.0 for near land, so the ground's nif defaults already match.
+- **Test:** `tests/groundlegend` (green PASS; red `-DGROUNDLEGEND_RED`, the never-rewritten legend, FAILs).
+
+## Lane DUNESAND2 (2026-10-27, branch dunesand2-20261027): the mosaic ground binds its _s map; the spec red is live
+
+- **Why:** DUNESAND1 bound each layer's TX07 _s map on the blended ground (cellsplat) only. Past the splat's vertex cap
+  the cell view falls back to the hard-edged mosaic (`src/gl/cellground.cpp`), which still drew every ground shape at
+  the nif defaults (smoothness 1, spec mask 1).
+- **Fix:** mosaic buckets take the LTEX's TX07 (`world.ltexTextureSet`) into Textures[7], like the blend. The legend
+  says how many mosaic buckets carry their _s map.
+- **CLI:** `cellrefs <spec> --ground` past the splat cap (or with `WW_CELL_SPLAT_CAP=1`) also prints
+  `cellrefs: mosaic pass ltex ... | spec ...` and `mosaic passes N, with spec M`.
+- **Live:** `WW_TERRBLEND_RED=nospec` now drops / binds the ground shapes' TX07 in place (`src/cellview.cpp`
+  liveTerrRed, stage 0). `nearest` / `facenormal` still owe a cell reopen, and the reply says so.
+- **Red:** `WW_TERRBLEND_RED=nospec` (no TX07 on blend or mosaic ground).
+
 ## Lane WEATHERBLEND1 (2026-10-27, branch weatherblend1-20261027): weather changes blend like the game
 
 - **Why:** a new lookdev weather snapped in at once. The game keeps the weather it leaves and blends old to new over
@@ -16,7 +55,6 @@
 - **Not like the game yet:** the imagespace LUTs swap at half way (the game blends up to 4); a pick made during a
   change restarts from the weather it was changing to (the game defers it); fWeatherTransAccel is not used.
 - **Test:** `bash tests/weatherblend/run.sh <out>` (green PASS 22 of 22; red against 0db18b4b FAIL 12 of 22).
-
 ## Lane FOGTERRAIN1 (2026-10-27, branch fogterrain1-20261027): the ground fog layer follows the terrain
 
 - **Why:** the ground fog layer (groundFog .recx, or FOGHEIGHT1's derived layer) was anchored at one absolute height,

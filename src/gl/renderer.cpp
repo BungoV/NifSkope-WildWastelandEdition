@@ -73,6 +73,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellunits.h"	// lane PERF1: the first dedicated unit
 #include "gl/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "gl/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
+#include "landlodspec.h"	// lane LANDSPEC1
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 
@@ -360,6 +361,39 @@ static bool wwFxEnvNone()
 {
 	WW_SWITCH_STATIC( bool, v, qgetenv( "WW_FX_ENVMASK_RED" ).trimmed() == "noenv" );
 	return v;
+}
+
+/* lane LANDSPEC1: the game's LOD land spec on the ground (src/landlodspec.h): far LOD terrain whole, the cells' LAND by
+ * the land-LOD blend round the camera's cell. Red WW_LANDSPEC_RED=off draws the ground as before. */
+static void wwLandLodUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, const Shape * mesh )
+{
+	WW_SWITCH_STATIC( bool, off, qgetenv( "WW_LANDSPEC_RED" ).trimmed() == "off" );
+	int mode = LandLodSpec::Off;
+	for ( const Node * p = mesh; p && !off; p = p->parentNode() ) {
+		const QString & n = p->getName();
+		if ( n.startsWith( QLatin1StringView( "FarLOD terrain" ) ) ) {
+			mode = LandLodSpec::Far;
+			break;
+		}
+		if ( n.compare( QLatin1StringView( "ground" ), Qt::CaseInsensitive ) == 0 )
+			mode = LandLodSpec::Near;
+	}
+	if ( mode == LandLodSpec::Off && !off && wwCellLandIs( scene->nifModel, mesh->id() ) )
+		mode = LandLodSpec::Near;
+	// the camera in scene units: R^T (0 - t) / scale, as cellRow's w
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	float cam[2];
+	for ( int k = 0; k < 2; k++ ) {
+		float w = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			w -= vt.rotation( j, k ) * vt.translation[j];
+		cam[k] = LandLodSpec::cellCentre( w / sc );
+	}
+	const bool specView = scene->hasOption( Scene::DoSpecular ) && scene->hasOption( Scene::DoLighting );
+	prog->uni4f( "landLod", FloatVector4( float( mode ), cam[0], cam[1], 0.0f ) );
+	prog->uni4f( "landLodK", FloatVector4( LandLodSpec::kPower, specView ? LandLodSpec::kScale : 0.0f,
+		LandLodSpec::kBlendEnd, LandLodSpec::kBlendInv ) );
 }
 
 
@@ -1980,6 +2014,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			CellFarGround::uniforms( scene, prog );
 		if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: no default program reads it
 			wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
+		if ( prog->uniLocation( "landLod" ) >= 0 )	// lane LANDSPEC1: the cell programs only
+			wwLandLodUniforms( scene, prog, mesh );
 		if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
 			// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
 			GLint dst = 0;

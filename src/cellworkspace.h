@@ -105,6 +105,9 @@ void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
 //! The `.wwcell` that is open, or empty. The view rows re-open this path.
 QString cellWorkspacePath();
 
+//! lane DUNESAND3: after a live set, rewrite the notes' ground TX07 clause to the switch's value now; empty if unchanged
+QString cellWorkspaceNotesLive();
+
 //! True once a view row has been touched this session (the overrides are live).
 bool cellWorkspaceHasOverrides();
 

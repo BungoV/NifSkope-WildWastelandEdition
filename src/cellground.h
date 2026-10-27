@@ -87,6 +87,8 @@ struct CellGroundBucket
 	quint32 ltex = 0;               //!< the LTEX form; 0 = no texture resolved
 	QString diffuse;                //!< TX00, or the MNAM material when the TXST is material-backed
 	QString normal;                 //!< TX01
+	QString spec;                   //!< TX07 _s as bound (empty under WW_TERRBLEND_RED=nospec), lane DUNESAND2
+	QString specWant;               //!< TX07 whatever the red says (a live set puts it back)
 	int quads = 0;
 };
 
@@ -103,6 +105,7 @@ struct CellGroundBuild
 	int layersRead = 0;             //!< ATXT/VTXT layers over every quadrant
 	int quadsFromLayer = 0;         //!< a layer beat the base texture here
 	int ltexUnresolved = 0;         //!< LTEX forms that named no TXST texture
+	int bucketsSpec = 0;            //!< buckets that carry their LTEX's TX07 map (DUNESAND2)
 	/*! THE TWO REASONS A QUAD IS BARE, WHICH ADD UP TO `quadsBare` EXACTLY.
 	 *
 	 *  `quadsUnpainted`: the quadrant carries no BTXT and every layer is at

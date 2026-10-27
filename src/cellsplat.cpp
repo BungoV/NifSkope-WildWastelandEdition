@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellsplat.h"
+#include "cellgroundlegend.h"	// lane DUNESAND3: the TX07 clause a live set rewrites
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmdata.h"
@@ -351,8 +352,10 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 		 * ground drew at smoothness 1 / mask 1 and 1.4x brighter than a static with the same sand. A material-backed set's
 		 * .bgsm names its own. */
 		const EsmLtexTextureSet & set = world.ltexTextureSet( ltex );
-		if ( set.material.isEmpty() && !cellSplatSpecRed() )
-			b.spec = set.specular;
+		if ( set.material.isEmpty() )
+			b.specWant = set.specular;
+		if ( !cellSplatSpecRed() )
+			b.spec = b.specWant;
 		if ( !b.spec.isEmpty() )
 			out.bucketsSpec++;
 		b.order = order;
@@ -544,10 +547,12 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 
 QString cellSplatLegend( const CellSplatBuild & b )
 {
-	int used = 0;
+	int used = 0, specWant = 0;
 	for ( const CellSplatBucket & k : b.buckets ) {
 		if ( k.ltex && k.quads )
 			used++;
+		if ( !k.specWant.isEmpty() )
+			specWant++;
 	}
 	const double mult = b.quadsTotal
 		? double( b.quadsEmitted ) / double( b.quadsTotal ) : 0.0;
@@ -573,8 +578,7 @@ QString cellSplatLegend( const CellSplatBuild & b )
 			"(its SW corner), the per-quad switching put back on purpose" );
 	if ( b.ltexUnresolved )
 		s += QString( "; %1 LTEX forms named no texture" ).arg( b.ltexUnresolved );
-	s += cellSplatSpecRed() ? QStringLiteral( "; RED CONTROL WW_TERRBLEND_RED=nospec: no TX07 map on the ground" )
-		: QString( "; %1 of %2 passes carry their TX07 _s map" ).arg( b.bucketsSpec ).arg( b.buckets.size() );
+	s += cellGroundSpecClause( cellSplatSpecRed(), specWant, b.buckets.size(), QStringLiteral( "passes" ) );
 	/* THE ONE THING A READER MUST NOT HAVE TO ASK. Without the ATXT layer index
 	 * the composite is in the order the layers happen to sit in the record,
 	 * which is not the engine's paint order and can put gravel under grass that
@@ -605,12 +609,30 @@ QHash<const void *, QSet<int>> & landDocs()
 	static QHash<const void *, QSet<int>> d;
 	return d;
 }
+QHash<const void *, QHash<int, QString>> & groundSpecDocs()
+{
+	static QHash<const void *, QHash<int, QString>> d;
+	return d;
+}
 } // namespace
 
 void wwCellLandBegin( const void * nif )
 {
 	QMutexLocker lock( &landMutex() );
 	landDocs().remove( nif );
+	groundSpecDocs().remove( nif );
+}
+
+void wwCellGroundSpecShape( const void * nif, int block, const QString & spec )
+{
+	QMutexLocker lock( &landMutex() );
+	groundSpecDocs()[nif].insert( block, spec );
+}
+
+QHash<int, QString> wwCellGroundSpecs( const void * nif )
+{
+	QMutexLocker lock( &landMutex() );
+	return groundSpecDocs().value( nif );
 }
 
 void wwCellLandForget( const void * nif, int block )
@@ -619,6 +641,9 @@ void wwCellLandForget( const void * nif, int block )
 	auto d = landDocs().find( nif );
 	if ( d != landDocs().end() )
 		d->remove( block );
+	auto g = groundSpecDocs().find( nif );
+	if ( g != groundSpecDocs().end() )
+		g->remove( block );
 }
 
 void wwCellLandRemap( const void * nif, const WwBlockMap & m )
@@ -627,6 +652,9 @@ void wwCellLandRemap( const void * nif, const WwBlockMap & m )
 	auto d = landDocs().find( nif );
 	if ( d != landDocs().end() )
 		wwRemapKeys( *d, m );
+	auto g = groundSpecDocs().find( nif );
+	if ( g != groundSpecDocs().end() )
+		wwRemapKeys( *g, m );
 }
 
 void wwCellLandShape( const void * nif, int block )
