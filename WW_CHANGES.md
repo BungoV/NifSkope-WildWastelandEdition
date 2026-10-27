@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BINDLESS2FIX (2026-10-27, branch bindless2fix-20261027): Bindless draws no longer draw a black, fogless cell
+
+- **Cause:** the cell's own uniforms (its lights, sun, ambient, obscurance, reflections, fog and the linear output) are
+  set only for programs that `wwIsCellProgramName` names. The bindless twins fo4_cellbl / fo4_cellcsmbl were not in it,
+  so every cell-lit draw with the row on got none of them (MERGE1026 hold: Concord mean luma 21.5 -> 4.3).
+- **Fix:** the twins count as cell programs; the GPU-driven cull takes them as fo4_cell's transform; the far-field
+  sway reaches them. Row off is the old code path (only the twin names are new).
+- **Second cause (model-space normals):** fo4_default.frag reads `normalMatrix` itself for `_msn` maps; the twins took
+  it from a uniform that is never set for them (zero matrix, NaN normal). The fragment stage now reads it from the
+  draw's row like the vertex stage. The default programs' driver binaries are unchanged but the stamp and source hash.
+- Red WW_BINDLESS_RED=cellname puts back the old rule. The per-frame `bindless:` line is printed again after each live
+  set, so a row that repeats the previous row's numbers (the packet check row) still prints it.
+
+## Lane BINDLESS2 (2026-10-26, branch bindless2-20261026): bindless draws (Show menu row "Bindless draws", off by default)
+
+- **Maps and matrices from one buffer:** with the row on (pin WW_BINDLESS, live), a cell-lit FO4 lighting draw uses the
+  bindless twin of fo4_cell / fo4_cellcsm (fo4_cellbl, fo4_cellcsmbl). Its texture maps are resident handles and its
+  model-view and normal matrices sit in a per-draw row of one persistent buffer (binding 12, 8 x 8192 rows of 176 bytes,
+  11.0 MiB, fenced per segment); the shader reads the row through `uniform uint wwDrawIdx`. The bound path is the red.
+- **Geometry from arenas:** each vertex layout has one vertex array with one float vertex buffer per attribute and one
+  16-bit index buffer; a draw uses the BaseVertex calls into it. GPU-driven indirect draws keep the shape's own arrays.
+- A handle freezes a texture's sampler state, so later sampler sets on it are skipped and counted (`conflicts=` in the
+  per-frame `bindless:` line). The draw packets record a BlTex op per map; WW_DRAW_PACKET_CHECK also compares the
+  per-draw row.
+- Row off = the old programs (driver binaries identical but the stamp and source hash) and the old C++ path.
+  Reds: WW_BINDLESS_RED=sampler (a mirrored nearest sampler handle), pooloff1 (pool offset one draw off), nopool.
+- Gates: tests/bindlesspool (pool offsets, red POOL FAIL), offline link sweep 3 modes, hold rows in the lane notes.
+
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
 - **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,

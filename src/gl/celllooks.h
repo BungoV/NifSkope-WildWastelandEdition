@@ -46,6 +46,7 @@ enum class WwLook : int
 	LightArea,			// LIGHTPHYS1: PBR specular from a sphere of 8 units, not a point (WW_CELL_LIGHT_AREA)
 	LightPatterns,		// GOBO1 (LIGHTS5): a spot light's pattern texture (LIGH gobo) on surfaces, effects and air (WW_CELL_GOBO)
 	NifxLights,			// NIFXLIGHT1: a fixture mesh's .nifx lights replace the placed lights inside it (WW_CELL_NIFX_LIGHTS)
+	BindlessDraws,		// BINDLESS2: cell-lit draws read maps + matrices from one per-draw buffer, geometry from arenas (WW_BINDLESS)
 	Count
 };
 

@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/lookdevstage.h"
 #include "gl/cellqueue.h"	// lane GPUDRIVEN1: the sampler census
 #include "gl/celldrawpacket.h"	// lane GAPPERF-BINDLESS
+#include "gl/cellbindless.h"	// lane BINDLESS2
 
 /*! Which vertex-colour channel the viewport previews, or 0 for normal shading.
  *  It lives here because this is where the vertex-colour uniforms are set: the
@@ -1673,7 +1674,18 @@ bool BSShaderLightingProperty::bind( const QStringView & fname, bool forceTextur
 		std::memcpy( &w[3], &an, 4 );
 		WwDp::put( WwDp::TexParamNeeded, 0, WwDp::lastBound(), w, 4 );
 	}
-	if ( scene->textures->wwParamsNeeded( wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() ) ) {
+	/* lane BINDLESS2: a texture with a handle keeps the sampler state it froze with (GL_ARB_bindless_texture); its sets
+	 * are skipped and a different state counted (the census gate). A bindless sampler's bind notes its state. */
+	bool wwBlSkip = false;
+	if ( WwBl::anyFrozen || WwBl::resolving ) {
+		GLint blTex = GLint( scene->textures->wwParamPeek() );
+		if ( !blTex )
+			glGetIntegerv( GL_TEXTURE_BINDING_2D, &blTex );
+		if ( WwBl::resolving )
+			WwBl::noteKey( wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() );
+		wwBlSkip = WwBl::anyFrozen && WwBl::frozenSkip( GLuint( blTex ), wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() );
+	}
+	if ( scene->textures->wwParamsNeeded( wrapS, wrapT, minFilter, TexCache::get_max_anisotropy() ) && !wwBlSkip ) {
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT );
 

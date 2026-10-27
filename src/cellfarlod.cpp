@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #define FARLOD1_HAVE_CULL 1
 #endif
 #include "gl/cellwater.h"
+#include "gl/cellbindless.h"	// lane BINDLESS2FIX: the sway reaches the bindless twins
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "model/nifmodel.h"
@@ -1393,8 +1394,13 @@ void wwCellFarLodFrame( Scene * scene )
 		blk[3] = float( std::max( f->bx1 - f->bx0, f->by1 - f->by0 ) + 1 ) * 0.5f * kC * scene->view.scale;
 	}
 	QStringList set;
-	for ( const char * name : { "fo4_cell.prog", "fo4_default.prog", "fo4_fog.prog", "pbrm_cell.prog", "pbrm_default.prog",
-			"pbrm_csm.prog", "fo4_cellcsm.prog", "fo4_csm.prog", "fo4_fogcsm.prog", "pbrm_cellcsm.prog" } ) {
+	std::vector<const char *> swayProgs = { "fo4_cell.prog", "fo4_default.prog", "fo4_fog.prog", "pbrm_cell.prog",
+		"pbrm_default.prog", "pbrm_csm.prog", "fo4_cellcsm.prog", "fo4_csm.prog", "fo4_fogcsm.prog", "pbrm_cellcsm.prog" };
+	if ( WwBl::on() && WwBl::red() != 4 ) {	// lane BINDLESS2FIX: the twins draw the cell while Bindless draws is on
+		swayProgs.push_back( "fo4_cellbl.prog" );
+		swayProgs.push_back( "fo4_cellcsmbl.prog" );
+	}
+	for ( const char * name : swayProgs ) {
 		if ( auto prog = r->useProgram( name ) ) {
 			prog->uni1f( "farSwayAmp", amp );
 			prog->uni1f( "farSwayTime", t );

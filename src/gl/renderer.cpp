@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "gl/celldrawstate.h"	// lane PERF3
 #include "gl/celldrawpacket.h"	// lane GAPPERF-BINDLESS
+#include "gl/cellbindless.h"	// lane BINDLESS2
 #include "gl/cellqueue.h"	// lane GAPPERF-BINDLESS: the sampler census reads every bind
 #include "gl/cellvrs.h"	// lane VRS1
 #include "gl/cellfxres.h"	// lane FXRES1
@@ -831,6 +832,16 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * legacy zero set moved (GRailCurveR01, alpha-test edges, up to 56 levels).
 	 * So fo4_default.prog stays the pre-fog shader, and the fog program is swapped
 	 * in by name only while this draw fogs (a hint is swapped either way). */
+	/* lane BINDLESS2: a cell-lit FO4 lighting draw takes the bindless twin of fo4_cell / fo4_cellcsm while the Bindless
+	 * draws row is on: the shapes the draw packets record (no selection, refraction or census pass) */
+	auto wwBlWants = [mesh]() -> bool {
+		if ( !mesh->bslsp || !WwBl::on() )
+			return false;
+		const Scene * scene = mesh->scene;
+		const auto v = scene->nifModel->getBSVersion();
+		return v >= 130 && v < 151 && !scene->selecting && !( mesh->bslsp->hasRefraction && scene->showRefraction )
+			&& !GpuDriven::census();
+	};
 	auto fogVariant = [&]( Program * p ) -> Program * {
 		/* lane EFX2: a cell-lit effect draw takes fo4_effectcell.prog (the effect shader the game's way: unlit,
 		 * linear, soft and near fades, fog, the cell's imagespace); red legacy keeps the viewer's effect shader */
@@ -853,7 +864,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		}
 		if ( p->name != std::string_view( "fo4_fog.prog" ) && p->name != std::string_view( "fo4_default.prog" )
 			&& p->name != std::string_view( "fo4_cell.prog" ) && p->name != std::string_view( "fo4_cellcsm.prog" )
-			&& p->name != std::string_view( "fo4_csm.prog" ) && p->name != std::string_view( "fo4_fogcsm.prog" ) )
+			&& p->name != std::string_view( "fo4_csm.prog" ) && p->name != std::string_view( "fo4_fogcsm.prog" )
+			&& p->name != std::string_view( "fo4_cellbl.prog" ) && p->name != std::string_view( "fo4_cellcsmbl.prog" ) )
 			return p;
 		// red fognoswap: never swap, so the legacy path cannot fog
 		// lane SKYA: the sky's aerial perspective reads the fog program too (with the Fog row off)
@@ -864,6 +876,15 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			? ( wwSunShadowWanted( mesh->scene ) ? "fo4_cellcsm.prog" : "fo4_cell.prog" )	// lane SUNCELL1: + the cascades
 			: wwSunShadowWanted( mesh->scene ) ? ( fog ? "fo4_fogcsm.prog" : "fo4_csm.prog" )	// lane SUNCELL1: Lookdev, not cell-lit
 			: fog ? "fo4_fog.prog" : "fo4_default.prog";
+		if ( ( want[4] == 'c' && want[5] == 'e' ) && wwBlWants() ) {	// lane BINDLESS2: fo4_cell / fo4_cellcsm
+			const char * bl = want[8] == 'c' ? "fo4_cellcsmbl.prog" : "fo4_cellbl.prog";
+			Program * base = useProgram( want );
+			Program * q = base ? useProgram( bl ) : nullptr;
+			if ( q ) {
+				q->wwTwin = base;
+				return q;
+			}
+		}
 		if ( p->name == std::string_view( want ) )
 			return p;
 		Program * q = useProgram( want );
@@ -880,9 +901,12 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			setupStatus = setupProgramCE1( nif, program, mesh );
 		else
 			setupStatus = setupProgramFO3( nif, program, mesh );
-		if ( setupStatus )
+		if ( setupStatus ) {
+			if ( program->wwBindless )	// lane BINDLESS2: the draw's row
+				WwBl::commit( fn, program );
 			return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
+		}
 		stopProgram();
 	}
 
@@ -910,9 +934,12 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 				setupStatus = setupProgramCE1( nif, program, mesh );
 			else
 				setupStatus = setupProgramFO3( nif, program, mesh );
-			if ( setupStatus )
+			if ( setupStatus ) {
+				if ( program->wwBindless )	// lane BINDLESS2
+					WwBl::commit( fn, program );
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
+			}
 			stopProgram();
 		}
 	}
@@ -1912,13 +1939,15 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	 * frame's first pass and replayed by its later ones (celldrawpacket.h); the tail above runs every time */
 	WwDp::Packet * dpSlot = nullptr;
 	if ( lsp && nifVersion >= 130 && nifVersion < 151 && !scene->selecting && !( lsp->hasRefraction && scene->showRefraction )
-		&& ( prog->name == std::string_view( "fo4_cell.prog" ) || prog->name == std::string_view( "fo4_cellcsm.prog" ) )
+		&& ( prog->name == std::string_view( "fo4_cell.prog" ) || prog->name == std::string_view( "fo4_cellcsm.prog" )
+			|| prog->wwBindless )	// lane BINDLESS2
 		&& !GpuDriven::census() )
 		dpSlot = WwDp::slot( mesh, prog );
 	int dpMismatch = -1;
 	GlSnap dpA;
 	WwDp::FixedSnap dpFixA;
 	WwDp::Packet dpOld;
+	WwBl::Row blA;	// lane BINDLESS2: the row the replay staged
 	if ( dpSlot && WwDp::valid( *dpSlot, prog ) ) {
 		std::pair<Shape *, Program *> dpLive( mesh, prog );
 		WwDp::replay( *dpSlot, fn, scene->textures, []( void * c ) {
@@ -1932,6 +1961,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		glSnap( this, prog->id, dpA );
 		WwDp::snapFixed( fn, dpFixA );
 		dpOld = *dpSlot;
+		blA = WwBl::staged();
 		dpMismatch = 0;
 	}
 	struct DpGuard
@@ -2513,8 +2543,11 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			glSnap( this, prog->id, b );
 			WwDp::snapFixed( fn, fb );
 			static int said = 0;
+			const int blDiff = prog->wwBindless && std::memcmp( &blA, &WwBl::staged(), sizeof( WwBl::Row ) ) ? 1 : 0;
+			if ( blDiff && said < 20 )
+				std::fprintf( stderr, "draw packets: bindless row differs, shape %d\n", mesh->id() );
 			dpMismatch += glSnapDiff( dpA, b, said < 20, "draw packets" ) + ( dpFixA.v != fb.v ? 1 : 0 )
-				+ ( WwDp::sameOps( dpOld, *dpSlot ) ? 0 : 1 );
+				+ ( WwDp::sameOps( dpOld, *dpSlot ) ? 0 : 1 ) + blDiff;
 			if ( dpMismatch && said++ < 20 )
 				std::fprintf( stderr, "draw packets: MISMATCH shape %d fixed=%d ops=%d\n", mesh->id(), dpFixA.v != fb.v ? 1 : 0,
 					WwDp::sameOps( dpOld, *dpSlot ) ? 0 : 1 );

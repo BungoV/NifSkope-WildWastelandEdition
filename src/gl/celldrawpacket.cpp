@@ -3,6 +3,7 @@
 #include "wwswitch.h"
 #include "gl/glcontext.hpp"
 #include "gl/gltex.h"
+#include "gl/cellbindless.h"
 
 #include <QString>
 
@@ -175,7 +176,8 @@ void replay( const Packet & p, NifSkopeOpenGLContext::GLFunctions * f, TexCache 
 		case TexParamNeeded:
 			// the PERF5 shadow decides again, as the setup would have at this point
 			tc->wwParamArm( GLuint( o.b ) );
-			if ( tc->wwParamsNeeded( xi[0], xi[1], xi[2], x[3] ) ) {
+			if ( tc->wwParamsNeeded( xi[0], xi[1], xi[2], x[3] )
+				&& !WwBl::frozenSkip( GLuint( o.b ), xi[0], xi[1], xi[2], x[3] ) ) {	// lane BINDLESS2
 				f->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, xi[0] );
 				f->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, xi[1] );
 				f->glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, x[3] );
@@ -193,6 +195,12 @@ void replay( const Packet & p, NifSkopeOpenGLContext::GLFunctions * f, TexCache 
 		case DepthMask: f->glDepthMask( GLboolean( o.a ) ); break;
 		case PolyMode: f->glPolygonMode( GLenum( o.a ), GLenum( o.b ) ); break;
 		case Live: live( ctx ); break;
+		case BlTex: {
+			std::uint64_t h = 0;
+			std::memcpy( &h, w, 8 );
+			WwBl::setSlot( o.a, h );
+			break;
+		}
 		}
 	}
 }

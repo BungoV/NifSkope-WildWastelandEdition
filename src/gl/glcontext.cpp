@@ -40,6 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "harnesswindow.h"
 #include "cellpasstime.h"	// lane PERF1
 #include "celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
+#include "cellbindless.h"	// lane BINDLESS2
 int wwCellGiVis();	// lane PERF1: src/gl/celllights.cpp (1: the march, WW_CELL_GI_MARCH)
 
 #include <QElapsedTimer>
@@ -651,6 +652,8 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 				f->glBindBufferBase( GL_UNIFORM_BUFFER, 1, context->boneTransformsBufferObject );
 			}
 			wwShadowFrame = false;	// lane PERF3: gl/sunshadow.cpp fills and binds the buffer
+			wwBindless = name.size() > 7 && name.substr( name.size() - 7 ) == std::string_view( "bl.prog" );	// lane BINDLESS2
+			wwDrawIdLoc = wwBindless ? f->glGetUniformLocation( id, "wwDrawIdx" ) : -1;
 			if ( unsigned int l = f->glGetUniformBlockIndex( id, "wwShadowFrame" ); l != GL_INVALID_INDEX ) {
 				f->glUniformBlockBinding( id, l, 2 );
 				wwShadowFrame = true;
@@ -937,12 +940,57 @@ bool NifSkopeOpenGLContext::Program::uniSampler( BSShaderLightingProperty * bspr
 									uint clamp, const QString & forced )
 {
 	int	uniSamp = uniLocation( var );
+	/* lane BINDLESS2: a map the bindless twin reads from its row: bound as the twin would bind it, its handle taken and
+	 * the unit given back; a map the twin does not read stays 0 */
+	if ( uniSamp < 0 && wwBindless && wwTwin ) {
+		const int slot = WwBl::slotOf( var );
+		if ( slot >= 0 ) {
+			std::uint64_t h = 0;
+			if ( wwTwin->uniLocation( var ) >= 0 ) {
+				if ( texunit >= TexCache::num_texture_units ) [[unlikely]]
+					return false;
+				f->glActiveTexture( GL_TEXTURE0 + texunit );
+				WWDP( WwDp::ActiveTex, GL_TEXTURE0 + texunit );
+				GLint prev = 0;
+				f->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prev );
+				const size_t recOps = WwDp::rec ? WwDp::rec->ops.size() : 0, recData = WwDp::rec ? WwDp::rec->data.size() : 0;
+				WwBl::resolving = true;
+				const bool ok = wwBindChain( bsprop, textureSlot, alternate, clamp, forced );
+				WwBl::resolving = false;
+				if ( WwDp::rec ) {	// the replay sets the handle, never the bind
+					WwDp::rec->ops.resize( recOps );
+					WwDp::rec->data.resize( recData );
+				}
+				if ( ok )
+					h = WwBl::handleOfBound( f );
+				f->glBindTexture( GL_TEXTURE_2D, GLuint( prev ) );
+				if ( !ok )
+					return false;
+				texunit++;
+			}
+			WwBl::setSlot( slot, h );
+			WWDP( WwDp::BlTex, slot, 0, &h, 2 );
+			return true;
+		}
+	}
 	if ( uniSamp < 0 )
 		return true;
 	if ( texunit >= TexCache::num_texture_units ) [[unlikely]]
 		return false;
 	f->glActiveTexture( GL_TEXTURE0 + texunit );
 	WWDP( WwDp::ActiveTex, GL_TEXTURE0 + texunit );
+	if ( !wwBindChain( bsprop, textureSlot, alternate, clamp, forced ) )
+		return false;
+
+	WWDP( WwDp::U1i, uniSamp, 0, &texunit, 1 );
+	f->glUniform1i( uniSamp, texunit++ );
+	return true;
+}
+
+//! the material texture bind of uniSampler: forced, the slot's file, the alternate, then the slot's default
+bool NifSkopeOpenGLContext::Program::wwBindChain( BSShaderLightingProperty * bsprop, int textureSlot, const QString & alternate,
+									uint clamp, const QString & forced )
+{
 
 	// TODO: On stream 155 bsprop->fileName can reference incorrect strings because
 	// the BSSTS is not filled out nor linked from the BSSP
@@ -968,9 +1016,6 @@ bool NifSkopeOpenGLContext::Program::uniSampler( BSShaderLightingProperty * bspr
 
 		return false;
 	} while ( false );
-
-	WWDP( WwDp::U1i, uniSamp, 0, &texunit, 1 );
-	f->glUniform1i( uniSamp, texunit++ );
 	return true;
 }
 

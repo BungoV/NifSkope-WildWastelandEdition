@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "gl/cellgpucull.h"
+#include "gl/cellbindless.h"	// lane BINDLESS2
 
 #include "gl/cellcull.h"
 #include "gl/cellgrass.h"
@@ -69,12 +70,18 @@ constexpr std::uint32_t kClusterTris = 128;
 // the programs that transform with fo4_default.vert (no displacement on a shape that is not skinned, grass or swaying)
 bool vertexProgram( const std::string_view & n, bool & occluder )
 {
-	static const char * const solid[] = { "fo4_cell", "fo4_cellcsm", "fo4_csm", "fo4_default", "fo4_fog", "fo4_fogcsm" };
+	// lane BINDLESS2FIX: + the bindless twins (fo4_defaultbl.vert is the same transform); red cellname leaves them out
+	static const char * const solid[] = { "fo4_cell", "fo4_cellcsm", "fo4_csm", "fo4_default", "fo4_fog", "fo4_fogcsm",
+		"fo4_cellbl", "fo4_cellcsmbl" };
 	// the PBR path discards on its own composition, which the queue does not see: a candidate, never an occluder
 	static const char * const pbr[] = { "pbr_route", "pbrm_cell", "pbrm_cellcsm", "pbrm_csm", "pbrm_default" };
 	std::string_view b = n;
 	if ( b.size() > 5 && b.substr( b.size() - 5 ) == ".prog" )
 		b = b.substr( 0, b.size() - 5 );
+	if ( ( b == "fo4_cellbl" || b == "fo4_cellcsmbl" ) && WwBl::red() == 4 ) {
+		occluder = false;
+		return false;
+	}
 	for ( const char * s : solid ) {
 		if ( b == s ) {
 			occluder = true;
@@ -1157,6 +1164,7 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 	auto fn = scene->renderer->fn;
 	Gpu * gp = rec.indirect ? gpuOf() : nullptr;
 	if ( gp && qsizetype( rec.numTris ) == numTriangles ) {
+		WwBl::unpoolForIndirect( fn );	// lane BINDLESS2: the commands hold the shape's own offsets
 		gp->g->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, gp->cmds );
 		gp->g->glMultiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT,
 			(const void *) ( std::size_t( rec.cmdFirst ) * sizeof( GpuDriven::DrawCmd ) ), GLsizei( rec.cmdCount ),
@@ -1169,8 +1177,7 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 	}
 	// the CPU cull's ranges, as BSShape::drawShapes draws them (the cull was asked once, in prepare)
 	if ( rec.whole ) {
-		fn->glDrawElements( GL_TRIANGLES, GLsizei( std::min< qsizetype >( numTriangles, rec.numTris ) * 3 ), GL_UNSIGNED_SHORT,
-			(void *) 0 );
+		WwBl::drawElements( fn, GLsizei( std::min< qsizetype >( numTriangles, rec.numTris ) * 3 ), 0 );
 		PassTime::countDraw( 1 );
 	} else {
 		static std::vector<GLsizei> counts;
@@ -1182,7 +1189,7 @@ bool draw( Scene * scene, Shape * sh, qsizetype numTriangles )
 			offsets.push_back( (const void *) ( std::size_t( rec.ranges[k] ) * 6 ) );
 		}
 		if ( !counts.empty() ) {
-			fn->glMultiDrawElements( GL_TRIANGLES, counts.data(), GL_UNSIGNED_SHORT, offsets.data(), GLsizei( counts.size() ) );
+			WwBl::multiDrawElements( fn, counts.data(), offsets.data(), GLsizei( counts.size() ) );
 			PassTime::countDraw( qint64( counts.size() ) );
 		}
 	}

@@ -146,6 +146,9 @@ public:
 		QString cacheFile;	// lane PERF1: the program binary cache file of this source, empty when off
 		int linkFrom = 0;	// 0 none, 1 linked from the source, 2 loaded from the cache
 		bool wwShadowFrame = false;	// lane PERF3: reads the cascades from the wwShadowFrame block (binding 2)
+		bool wwBindless = false;	// lane BINDLESS2: a *bl.prog twin (maps and matrices from the per-draw row)
+		int wwDrawIdLoc = -1;	// its wwDrawIdx uniform
+		Program * wwTwin = nullptr;	// the program it stands in for (its sampler locations decide which maps bind)
 
 		ConditionGroup conditions;
 
@@ -248,6 +251,8 @@ public:
 		}
 		bool uniSampler( class BSShaderLightingProperty * bsprop, const char * var, int textureSlot,
 							int & texunit, const QString & alternate, uint clamp, const QString & forced = {} );
+		bool wwBindChain( class BSShaderLightingProperty * bsprop, int textureSlot, const QString & alternate, uint clamp,
+							const QString & forced );
 	};
 
 	struct ShapeDataHash {

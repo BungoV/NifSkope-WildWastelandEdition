@@ -2,6 +2,7 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celllights.h"
+#include "gl/cellbindless.h"	// lane BINDLESS2
 #include "gl/cellfxlit.h"
 #include "gl/cellwater.h"	// lane WATER1
 #include "gl/cellcull.h"	// lane SUNCELL1
@@ -437,6 +438,15 @@ void BSShape::drawShapes( NodeList * secondPass )
 	if ( singleSample )
 		glDisable( GL_MULTISAMPLE );
 
+	// lane BINDLESS2: a bindless draw reads its geometry from its vertex layout's arena (one vertex array a layout)
+	if ( !selectionFlags && !hiddenT && numTriangles > 0 ) {
+		const auto * cp = context->getCurrentProgram();
+		if ( cp && cp->wwBindless ) {
+			GLint ownVao = 0;
+			glGetIntegerv( GL_VERTEX_ARRAY_BINDING, &ownVao );
+			WwBl::poolBind( this, context->fn, GLuint( ownVao ) );
+		}
+	}
 	// lane SUNCELL1: a welded cell shape draws only the placements that touch the camera's frustum (gl/cellcull.h)
 	static std::vector<std::uint32_t> cullRanges;
 	if ( !selectionFlags )
@@ -456,8 +466,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			fadeOffsets.push_back( (const void *) ( size_t( fadeKeep[k] ) * 6 ) );
 		}
 		if ( !fadeCounts.empty() ) {
-			context->fn->glMultiDrawElements( GL_TRIANGLES, fadeCounts.data(), GL_UNSIGNED_SHORT, fadeOffsets.data(),
-				GLsizei( fadeCounts.size() ) );
+			WwBl::multiDrawElements( context->fn, fadeCounts.data(), fadeOffsets.data(), GLsizei( fadeCounts.size() ) );
 			PassTime::countDraw( qint64( fadeCounts.size() ) );
 		}
 		if ( !fadeAlpha.empty() ) {
@@ -489,8 +498,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 					cur->uni1f_l( la, a0 * fadeAlpha[k] );
 				else
 					context->fn->glBlendColor( 0.0f, 0.0f, 0.0f, fadeAlpha[k] );
-				context->fn->glDrawElements( GL_TRIANGLES, GLsizei( fadeBand[2 * k + 1] * 3 ), GL_UNSIGNED_SHORT,
-					(void *) ( size_t( fadeBand[2 * k] ) * 6 ) );
+				WwBl::drawElements( context->fn, GLsizei( fadeBand[2 * k + 1] * 3 ), size_t( fadeBand[2 * k] ) * 6 );
 			}
 			PassTime::countDraw( qint64( fadeAlpha.size() ) );
 			if ( viaAlpha ) {
@@ -517,12 +525,11 @@ void BSShape::drawShapes( NodeList * secondPass )
 			cullOffsets.push_back( (const void *) ( size_t( cullRanges[k] ) * 6 ) );
 		}
 		if ( !cullCounts.empty() ) {
-			context->fn->glMultiDrawElements( GL_TRIANGLES, cullCounts.data(), GL_UNSIGNED_SHORT, cullOffsets.data(),
-				GLsizei( cullCounts.size() ) );
+			WwBl::multiDrawElements( context->fn, cullCounts.data(), cullOffsets.data(), GLsizei( cullCounts.size() ) );
 			PassTime::countDraw( qint64( cullCounts.size() ) );	// lane PERF1
 		}
 	} else if ( numTriangles > 0 && !hiddenT ) {
-		context->fn->glDrawElements( GL_TRIANGLES, GLsizei( numTriangles * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
+		WwBl::drawElements( context->fn, GLsizei( numTriangles * 3 ), 0 );
 		PassTime::countDraw( 1 );	// lane PERF1
 	} else if ( numTriangles > 0 ) {
 		qsizetype runStart = 0;
@@ -536,6 +543,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			}
 		}
 	}
+	WwBl::poolEnd( context->fn );	// lane BINDLESS2: the shape's own vertex array again
 	if ( singleSample )
 		glEnable( GL_MULTISAMPLE );
 	if ( vpFx & 2 )

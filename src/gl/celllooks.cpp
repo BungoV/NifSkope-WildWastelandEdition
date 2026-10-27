@@ -53,6 +53,7 @@ const LookRow kRows[] = {
 	{ "Area lights", "WW/CellLightArea" },
 	{ "Light patterns", "WW/CellLightPatterns" },
 	{ "Mesh lights (.nifx)", "WW/CellNifxLights" },
+	{ "Bindless draws", "WW/CellBindless" },
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -218,6 +219,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_NIFX_LIGHTS" ).trimmed() );
 		return p;
 	}
+	case WwLook::BindlessDraws: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_BINDLESS" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -269,6 +274,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::LightArea: return "WW_CELL_LIGHT_AREA";
 	case WwLook::LightPatterns: return "WW_CELL_GOBO";
 	case WwLook::NifxLights: return "WW_CELL_NIFX_LIGHTS";
+	case WwLook::BindlessDraws: return "WW_BINDLESS";
 	default: return "";
 	}
 }

@@ -16,6 +16,17 @@
 #include "ww_sunshadow.glsl"
 #endif
 
+#ifdef WW_BINDLESS
+// lane BINDLESS2: the material's maps as resident handles in the draw's row (slots of src/gl/cellbindless.h)
+#include "ww_bindless.glsl"
+#define BaseMap sampler2D( wwDraws[wwDrawIdx].tex[0] )
+#define NormalMap sampler2D( wwDraws[wwDrawIdx].tex[1] )
+#define GlowMap sampler2D( wwDraws[wwDrawIdx].tex[2] )
+#define BacklightMap sampler2D( wwDraws[wwDrawIdx].tex[3] )
+#define SpecularMap sampler2D( wwDraws[wwDrawIdx].tex[4] )
+#define GreyscaleMap sampler2D( wwDraws[wwDrawIdx].tex[5] )
+#define EnvironmentMap sampler2D( wwDraws[wwDrawIdx].tex[6] )
+#else
 uniform sampler2D BaseMap;
 uniform sampler2D NormalMap;
 uniform sampler2D GlowMap;
@@ -23,6 +34,7 @@ uniform sampler2D BacklightMap;
 uniform sampler2D SpecularMap;
 uniform sampler2D GreyscaleMap;
 uniform sampler2D EnvironmentMap;
+#endif
 uniform samplerCube CubeMap;
 
 uniform vec3 specColor;
@@ -78,7 +90,13 @@ uniform bool hasModelSpaceNormals;
 // model -> view rotation, the same row-major uniform the vertex stage uses for
 // the normal, tangent and bitangent.  Declared here because the model-space
 // path has no tangent frame to ride on.
+#ifdef WW_BINDLESS
+// lane BINDLESS2FIX: the twin's normal matrix is in the draw's row (the uniform is never set for it: a zero matrix
+// turned every model-space normal into NaN)
+#define normalMatrix mat3( wwDraws[wwDrawIdx].nm[0].xyz, wwDraws[wwDrawIdx].nm[1].xyz, wwDraws[wwDrawIdx].nm[2].xyz )
+#else
 uniform mat3 normalMatrix;
+#endif
 
 uniform float subsurfaceRolloff;
 uniform float rimPower;

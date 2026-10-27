@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glshape.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
+#include "gl/cellbindless.h"	// lane BINDLESS2
 
 #include "gl/controllers.h"
 #include "gl/glscene.h"
@@ -744,8 +745,12 @@ void Shape::setUniforms( NifSkopeOpenGLContext::Program * prog ) const
 		scene->renderer->updateBoneTransforms( boneTransforms.data(), boneTransforms.size() / 3 );
 
 	const Transform &	v = viewTrans();
-	prog->uni3m( "normalMatrix", v.rotation );
-	prog->uni4m( "modelViewMatrix", v.toMatrix4() );
+	if ( prog->wwBindless ) {	// lane BINDLESS2: the matrices go to the draw's row (src/gl/cellbindless.h)
+		WwBl::setMatrices( v.rotation.data(), v.toMatrix4().data() );
+	} else {
+		prog->uni3m( "normalMatrix", v.rotation );
+		prog->uni4m( "modelViewMatrix", v.toMatrix4() );
+	}
 	/* lane FARLOD1: the tree-animation flag the far field's sway reads (fo4_default.vert), for every program
 	 * that has it -- the PBR path (pbrm_*) never set it, so its far trees stood still. The legacy path sets
 	 * the same value again in its own setup. WW_CELL_FARLOD_RED=pbrnosway is the old path, the red control. */
