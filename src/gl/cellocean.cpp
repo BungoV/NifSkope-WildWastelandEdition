@@ -60,7 +60,7 @@ int redNow()
 {
 	WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_OCEAN_RED" ).trimmed() );
 	return rr == "old" ? 1 : rr == "tile" ? 2 : rr == "nopatch" ? 4 : rr == "novar" ? 8 : rr == "nochop" ? 16
-		: rr == "flat" ? 32 : rr == "norip" ? 64 : 0;
+		: rr == "flat" ? 32 : rr == "norip" ? 64 : rr == "noglow" ? 128 : 0;
 }
 
 GLuint tex2d( NifSkopeOpenGLContext::GLFunctions * fn, GLint ifmt, int w, int h, GLenum fmt, const float * data )
@@ -353,9 +353,9 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 	if ( wasCull ) fn->glEnable( GL_CULL_FACE );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST );
 	restoreBindings();
-	static const char * const redName[7] = { "old", "tile", "nopatch", "novar", "nochop", "flat", "norip" };
+	static const char * const redName[8] = { "old", "tile", "nopatch", "novar", "nochop", "flat", "norip", "noglow" };
 	QString red;
-	for ( int k = 1; k < 7; k++ )
+	for ( int k = 1; k < 8; k++ )
 		if ( s.red & ( 1 << k ) )
 			red = QStringLiteral( ", RED %1" ).arg( QLatin1String( redName[k] ) );
 	s.why = s.built ? QStringLiteral( "ocean: wind %1 m/s, swell %2 m, Hs sea %3 m, fresh %4 m, gpu %5 ms, displaced %6%7" )

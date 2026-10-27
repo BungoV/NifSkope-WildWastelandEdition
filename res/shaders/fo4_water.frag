@@ -112,6 +112,7 @@ uniform int waterProbe;
 #ifdef WW_WATER_OCEAN	// lane WATERLOOK1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_ocean.glsl"
 #include "water_ripple.glsl"
+#include "water_sss.glsl"
 #endif
 #ifdef WW_WATER_DISP	// lane WATERLOOK1 step 2: fo4_waterlookd.prog, the displaced water: the undisplaced world xy (u)
 in vec2 wwOcBase;
@@ -478,6 +479,9 @@ void main()
 		lin = mix( lin, foamLin, shoreFoamV * waterShoreK1.w );
 #endif
 #ifdef WW_WATER_OCEAN
+		// lane WATERLOOK1 step 4: sunlight through the crests, the body colour, near faces and far mean alike (red noglow)
+		if ( waterOceanOn && ( waterOceanRed & 128 ) == 0 && oc.w > 0.0 )
+			lin += ( 1.0 - F ) * oc.w * wwWaterCrestGlow( N0.xy / max( N0.z, 1e-3 ), oc.var, V, Ldir, sun, waterMat[0].rgb );
 		/* lane WATERLOOK1: whitecaps where the chop folds the surface (its Jacobian, Tessendorf 2001 section 4.4), from
 		 * 4 m/s; lit as WATERSHORE1's foam (albedo 0.55, Koepke 1984) */
 		if ( oc.white > 0.0 )

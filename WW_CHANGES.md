@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERLOOK1 step 4 (2026-10-27, branch waterlook1-20261027): far colour from the spectrum
+
+- **Crest glow** (Ocean waves row). Sunlight entering the back of a wave scatters forward and leaves through the face
+  turned to the eye: baked water now shows its own body colour on wave faces, brightest looking towards a low sun,
+  none at night. Each pixel takes the expected glow over its resolved slope and the slopes the spectrum's mips lost,
+  so near water glows on its own faces and far water takes the spectrum's mean glow, with no shimmer and the same mean
+  at every distance. New res/shaders/water_sss.glsl.
+- Red WW_CELL_WATER_OCEAN_RED=noglow. fo4_water.prog (row off) keeps its machine code.
+- Offline (no window): far glow = the mean of the near glows inside it to 3e-5 (red, added parts: off by up to 171%);
+  far glow with no resolved slope = the spectrum's mean to 2e-7; towards a low sun 22 x the sun behind (red g 0: 1 x);
+  no glow at night (red: glows); a face turned away gives none; all 106 programs link.
+
 ## Lane WATERLOOK1 step 3 (2026-10-27, branch waterlook1-20261027): ripples around whatever stands in the water
 
 - **Contact rings** (Ocean waves row). Posts, piers, rocks and actors standing in baked water now send ring trains
