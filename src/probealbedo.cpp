@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "data/niftypes.h"
+#include "gamemanager.h"
 #include "io/material.h"
 #include "io/pbrmfile.h"
 #include "lodgen.h"
@@ -106,8 +107,9 @@ DDSTexture16 * ProbeAlbedo::decode( const QString & texIn, int cap )
 		}
 		path.replace( QChar( '\\' ), QChar( '/' ) );
 	}
-	if ( !path.isEmpty() && !path.startsWith( QLatin1String( "textures/" ), Qt::CaseInsensitive ) )
-		path.prepend( QLatin1String( "textures/" ) );
+	/* lane REDFIX1: the shared rule (strip a leading data/ etc., add textures/ only when absent). A light's NAM0
+	 * pattern names data\textures\gobo\...; the old prepend made textures/data/textures/... and read nothing. */
+	path = QString::fromStdString( Game::GameManager::get_full_path( path, "textures", "" ) );
 	DDSTexture16 * tex = nullptr;
 	QByteArray dds;
 	if ( !path.isEmpty() && lodgenProbeAsset( root, path, nullptr, nullptr, nullptr, &dds ) ) {
