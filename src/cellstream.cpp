@@ -1114,6 +1114,18 @@ int cellStreamTexKeepSec()
 	return std::max( keep, 0 );
 }
 
+int cellStreamGeoKeepSec()
+{
+	WW_SWITCH_STATIC( int, keep, wwEnvIsSet( "WW_CELL_STREAM_GEOKEEP" ) ? wwEnvInt( "WW_CELL_STREAM_GEOKEEP" ) : cellStreamTexKeepSec() );
+	return std::clamp( keep, 0, 60 );
+}
+
+void cellStreamCountGeoEvicted( const NifModel * nif, int n )
+{
+	if ( Stream * s = streamFor( nif ) )
+		s->st.geoEvicted += n;
+}
+
 bool cellStreamOn( const NifModel * nif )
 {
 	return nif && streamFor( nif ) != nullptr;

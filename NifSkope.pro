@@ -274,6 +274,7 @@ HEADERS += \
 	src/gl/cellaodecalgl.h \
 	src/gl/cellvolair.h \
 	src/gl/cellpasstime.h \
+	src/gl/geokeepclock.h \
 	src/gl/cellqueue.h \
 	src/gl/celldrawpacket.h \
 	src/gl/cellbindless.h \

@@ -770,6 +770,12 @@ void prepare( Scene * scene )
 	f.frame++;
 	G.frame++;
 	f.flushing = true;
+	// lane STREAMMEM1: shapes unseen for 600 frames (cells that left) leave the learned table; a lookup needs one
+	// seen within 2 frames, so nothing drawn changes, and a new shape at a freed address inherits nothing
+	if ( ( f.frame % 600 ) == 0 ) {
+		for ( auto it = f.learned.begin(); it != f.learned.end(); )
+			it = ( f.frame - it->seen > 600 ) ? f.learned.erase( it ) : std::next( it );
+	}
 	for ( const auto & n : f.notes )
 		f.noted.insert( n.first );
 

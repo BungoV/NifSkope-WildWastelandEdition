@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane STREAMMEM1 (2026-10-27, branch streammem1-20261027): streamed-out cells give their meshes back
+
+- **Why:** the stream walk's memory check (d) failed at x1.19 (11788 -> 14060 MB private over 20 crossings, bar 5%).
+  The walk's dump showed textures, scene nodes and properties back at their start figures. The geometry cache did not
+  return: 386 -> 1043 MB on the card, and 3537 -> 8119 cached meshes for 3882 in the scene. The cache only drops a
+  mesh after about 1800 undrawn paints, and STREAM1 gave it a 1.5 GB budget, so the meshes of every cell that
+  left (and every old far-mask copy, FARHOLE2) stayed for most of the walk. The driver keeps its pool at that high
+  mark, so private memory does not fall back afterwards.
+- **Fix:** while a document streams, the view frees cached meshes by the texture rule: undrawn for the keep and not
+  drawn by the last 3 paints, checked every 2 s (`NifSkopeOpenGLContext::evictUndrawnSince`, `src/gl/geokeepclock.h`).
+  Nothing a paint draws is freed, so the picture does not change; a mesh that comes back into view is uploaded again.
+  The 1.5 GB budget (`WW_GEOCACHE_MB`) stays as the named upper bound.
+- **Knob:** `WW_CELL_STREAM_GEOKEEP=<s>` (default: the texture keep, 5; 0 = the cache's own rule; at most 60). The
+  walk's dump line adds `geoEvicted`, and the step linger waits for the longer of the two keeps.
+- **Red:** `WW_STREAM1_RED=geokeep` keeps the old rule (the memory growth).
+- **Also:** the GPU cull's learned table (`gl/cellgpucull.cpp`) drops shapes unseen for 600 frames. A lookup needs a
+  shape seen within 2 frames, so nothing drawn changes, and a new shape at a freed address no longer inherits
+  stale state.
+- **Offline proof:** `tests/streammem` uses the real driver, a copy of the cache's list and rules, and the view's real
+  clock. Over 20 crossings out and back, green goes 763 -> 795 MB private (x1.042, no mesh of the last paint
+  uploaded again). The red goes 759 -> 2073 MB (x2.73) and FAILs.
+
 ## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
 
 - **Why:** the far objects, far cards and far rings past ring 0 were cut once, round the open's centre. The stream

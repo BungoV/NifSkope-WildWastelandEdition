@@ -2194,10 +2194,11 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 		const qint64 waited = wwCellStreamSettle( ogl, 10, waitMs );
 		wwCellStreamSettle( ogl, 4, waitMs );   // transforms and the far tiles' data, drawn once
 		// lane CELLSTREAM1: and long enough for the textures of the cells that left to be freed (the view's rule)
-		if ( cellStreamTexKeepSec() > 0 ) {
+		const int lingerSec = std::max( cellStreamTexKeepSec(), cellStreamGeoKeepSec() );   // lane STREAMMEM1: meshes too
+		if ( lingerSec > 0 ) {
 			QElapsedTimer linger;
 			linger.start();
-			while ( linger.elapsed() < ( cellStreamTexKeepSec() + 3 ) * 1000 ) {
+			while ( linger.elapsed() < ( lingerSec + 3 ) * 1000 ) {
 				ogl->wwCellStreamFrame();
 				ogl->update();
 				qApp->processEvents();
@@ -2240,7 +2241,7 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " | built " << s.built << " attaches " << s.attaches << " unloads " << s.unloads
 				<< " inserted " << s.inserted << " recycled " << s.recycled << " blocks " << s.blocks << " pooled " << s.pooled
 				<< " | private " << priv << " live " << privLive << " heapBusy " << heapBusy << " heapHeld " << heapHeld
-				<< " regions " << regions[0] << "/" << regions[1] << "/" << regions[2] << " texEvicted " << s.texEvicted
+				<< " regions " << regions[0] << "/" << regions[1] << "/" << regions[2] << " texEvicted " << s.texEvicted << " geoEvicted " << s.geoEvicted
 				<< " quietResets " << s.quietResets << " loudResets " << s.loudResets
 				<< " texAheadAgain " << texAgain << " texDrawRead " << texDrawRead	// lane GAPFIX1
 				<< " | persistent " << s.persistent << " nodes " << s.sceneNodes << " props " << s.sceneProps
