@@ -22,7 +22,8 @@ int wwNifxRedOf( const QByteArray & words )
 			: t == "bulbsurface" ? WwNifxRedBulbSurface : t == "bulblit" ? WwNifxRedBulbLit
 			: t == "norelight" ? WwNifxRedNoRelight : t == "nobulbgi" ? WwNifxRedNoBulbGi
 			: t == "staticdim" ? WwNifxRedStaticDim : t == "nobulbflicker" ? WwNifxRedNoBulbFlicker
-			: t == "nolivenew" ? WwNifxRedNoLiveNew : t == "nooffkept" ? WwNifxRedNoOffKept : 0;
+			: t == "nolivenew" ? WwNifxRedNoLiveNew : t == "nooffkept" ? WwNifxRedNoOffKept
+			: t == "anchor800" ? WwNifxRedAnchor800 : t == "radius1lux" ? WwNifxRedRadius1Lux : 0;
 	}
 	return r;
 }
@@ -138,7 +139,9 @@ void wwNifxLightsApply( WwCellLighting & L, const QHash<QString, nifxl::Lights> 
 			dn = std::sqrt( dn );
 			for ( int r = 0; r < 3 && dn > 0; r++ )
 				l.dir[r] = float( l.dir[r] / dn );
-			const nifxl::Converted cv = nifxl::convert( x, ( red & WwNifxRedTintDims ) != 0 );
+			const nifxl::Converted cv = nifxl::convert( x, ( red & WwNifxRedTintDims ) != 0,
+				( red & WwNifxRedAnchor800 ) ? nifxl::kLumensPerFadeOld : nifxl::kLumensPerFade,
+				( red & WwNifxRedRadius1Lux ) ? nifxl::kRadiusPerSqrtCandelaOld : nifxl::kRadiusPerSqrtCandela );
 			// lane NIFXLIGHT2: the reach grows with the fixture's placed scale, as its position does (then the spec's range)
 			l.radius = ( red & WwNifxRedNoScale ) ? float( cv.radius ) : std::clamp( float( cv.radius ) * f.scale, 16.0f, 16384.0f );
 			for ( int k = 0; k < 3; k++ ) {

@@ -36,10 +36,10 @@ struct Light
 {
 	std::string name;	// as authored
 	bool hasType = false, hasKelvin = false, hasTint = false, hasTier = false, hasNode = false, hasFollows = false;
-	bool hasPosition = false, hasDirection = false, hasCone = false, hasFog = false;
+	bool hasPosition = false, hasDirection = false, hasCone = false, hasFog = false, hasRadius = false;
 	int type = Omni;
 	int tier = Normal;
-	double lumens = 0, kelvin = 6500, cone = 90, fogScale = 1;
+	double lumens = 0, kelvin = 6500, cone = 90, fogScale = 1, radius = 0;
 	double tint[3] = { 1, 1, 1 }, position[3] = { 0, 0, 0 }, direction[3] = { 1, 0, 0 };
 	std::string node, follows;
 };
@@ -62,9 +62,27 @@ Lights read( const std::string & bytes );
 
 struct Converted { int color[3] = { 255, 255, 255 }; double fade = 1, radius = 16; };
 
+// Lane NIFXCAL1, measured on the vanilla masters (notes/nifxcal1/CENSUS.md). Vanilla's household bulbs (cage bulbs,
+// ceiling lamps, sconces: 1710 placed lights) sit at a median white fade of 1.256; their real twin, a 60 W bulb, gives
+// 800 lm (ENERGY STAR / FTC lumens table). So a white omni at fade 1.0 is 800 / 1.256 = 637 lm.
+constexpr double kLumensPerFade = 637.0;
+// Radius per sqrt(candela): the median over vanilla's 12,944 fixture lights. The 1-lux reach (69.99) put a .nifx bulb
+// 4.6x further than vanilla's own bulbs; this one cuts at about 21 lux.
+constexpr double kRadiusPerSqrtCandela = 15.1;
+// The guesses before NIFXCAL1 (reds anchor800 and radius1lux).
+constexpr double kLumensPerFadeOld = 800.0, kRadiusPerSqrtCandelaOld = 69.99;
+
 //! lumens + kelvin + tint to FO4's colour bytes, fade and radius (nifx/SPEC.md, Converting). red = a tint dims.
-Converted convert( const Light & l, bool redTintDims = false );
+Converted convert( const Light & l, bool redTintDims = false, double lumensPerFade = kLumensPerFade,
+	double radiusPerSqrtCandela = kRadiusPerSqrtCandela );
 void kelvinRgb( double kelvin, double rgb[3] );
+
+//! A vanilla light (colour bytes, fade, radius, type, cone, shadow flag) in .nifx terms, so convert() gives it back:
+//! kelvin = the nearest black body (CIE 1960 uv), tint = the rest as the gel colour, lumens by the same anchor,
+//! tier hero when it casts a shadow. `radius` is set only when the law would give another one. FO4 bytes need not
+//! reach 255; the spec's always do, so the bytes come back scaled to a brightest 255 and the fade carries the rest.
+Light fromVanilla( const int color[3], double fade, double radius, int type, double cone, bool shadow,
+	double lumensPerFade = kLumensPerFade, double radiusPerSqrtCandela = kRadiusPerSqrtCandela );
 
 std::string fold( const std::string & s );
 std::string suggest( const std::string & key, std::vector<std::string> known );

@@ -6498,6 +6498,43 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			nifxFix.append( f );
 		}
 	}
+	// lane NIFXCAL1: the pick panel reads out each light under its own ref and under the smallest box holding it
+	// (+ 32 units: a bulb's light sits just off the fixture's mesh)
+	for ( const EsmRefr & r : lightRefs ) {
+		const EsmLight & b = world.light( r.base );
+		if ( !b.exists )
+			continue;
+		CellPickLight pl;
+		pl.ref = r.formID;
+		pl.base = r.base;
+		pl.edid = b.edid;
+		for ( int k = 0; k < 3; k++ )
+			pl.color[k] = b.color[k];
+		pl.fade = b.fade + ( r.xligCount >= 2 ? r.xlig[1] : 0.0f );
+		pl.fov = b.fov + ( r.xligCount >= 1 ? r.xlig[0] : 0.0f );
+		pl.radius = float( b.radius ) + ( r.hasRadius ? r.radius : 0.0f );
+		pl.flags = b.flags;
+		pl.box = r.lightBox != 0;
+		int best = -1;
+		float bestVol = 0.0f;
+		for ( int i = 0; i < picks.size(); i++ ) {
+			const CellPickEntry & e = picks.at( i );
+			if ( e.refForm == r.formID ) {
+				picks.addLight( i, pl );
+				continue;
+			}
+			bool in = true;
+			for ( int k = 0; k < 3 && in; k++ )
+				in = r.pos[k] >= e.bmin[k] - 32.0f && r.pos[k] <= e.bmax[k] + 32.0f;
+			const float vol = ( e.bmax[0] - e.bmin[0] + 64.0f ) * ( e.bmax[1] - e.bmin[1] + 64.0f ) * ( e.bmax[2] - e.bmin[2] + 64.0f );
+			if ( in && ( best < 0 || vol < bestVol ) ) {
+				best = i;
+				bestVol = vol;
+			}
+		}
+		if ( best >= 0 && picks.at( best ).lights.size() < 8 )
+			picks.addLight( best, pl );
+	}
 
 	// ---- emit
 	CellSpeed::mark( "ground, water, lights, probes" );

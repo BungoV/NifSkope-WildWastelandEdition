@@ -31,6 +31,17 @@ BSD License - see nifskope.h
  *     window and without a screenshot.  That is what makes the gate honest.
  * --------------------------------------------------------------------------- */
 
+//! Lane NIFXCAL1: a placed light at a placement (its own ref, or one inside its box), as stored on the records.
+struct CellPickLight
+{
+	quint32 ref = 0, base = 0;
+	QString edid;
+	int color[3] = { 255, 255, 255 };
+	float fade = 1, radius = 0, fov = 90;	//!< base + the ref's XLIG / XRDS
+	quint32 flags = 0;						//!< LIGH DATA flags
+	bool box = false;						//!< linked to a light box
+};
+
 //! One drawn placement, and everything the panel shows for it.
 struct CellPickEntry
 {
@@ -61,6 +72,7 @@ struct CellPickEntry
 	int groupSize = 0;
 	bool haveGroup = false;
 	quint32 triangles = 0;      //!< triangles this placement contributed
+	QVector<CellPickLight> lights;	//!< lane NIFXCAL1
 };
 
 //! A ray in world units.
@@ -79,6 +91,11 @@ public:
 
 	//! Append; the form index takes the FIRST entry of a ref (SCOL part 0).
 	void append( const CellPickEntry & e );
+
+	//! Lane NIFXCAL1: a light the panel reads out under entry i.
+	void addLight( int i, const CellPickLight & l ) { entries[i].lights.append( l ); }
+	//! A light's vanilla values in .nifx terms (lumens, kelvin, gel, type, cone, shadow, flicker, tier), read-only.
+	static QString nifxReadout( const CellPickLight & l );
 
 	//! Index of the first entry with this REFR form id, or -1.
 	int indexOfForm( quint32 refForm ) const;
