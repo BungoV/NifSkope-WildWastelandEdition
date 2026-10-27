@@ -70,12 +70,18 @@ constexpr std::uint32_t kClusterTris = 128;
 // the programs that transform with fo4_default.vert (no displacement on a shape that is not skinned, grass or swaying)
 bool vertexProgram( const std::string_view & n, bool & occluder )
 {
-	static const char * const solid[] = { "fo4_cell", "fo4_cellcsm", "fo4_csm", "fo4_default", "fo4_fog", "fo4_fogcsm" };
+	// lane BINDLESS2FIX: + the bindless twins (fo4_defaultbl.vert is the same transform); red cellname leaves them out
+	static const char * const solid[] = { "fo4_cell", "fo4_cellcsm", "fo4_csm", "fo4_default", "fo4_fog", "fo4_fogcsm",
+		"fo4_cellbl", "fo4_cellcsmbl" };
 	// the PBR path discards on its own composition, which the queue does not see: a candidate, never an occluder
 	static const char * const pbr[] = { "pbr_route", "pbrm_cell", "pbrm_cellcsm", "pbrm_csm", "pbrm_default" };
 	std::string_view b = n;
 	if ( b.size() > 5 && b.substr( b.size() - 5 ) == ".prog" )
 		b = b.substr( 0, b.size() - 5 );
+	if ( ( b == "fo4_cellbl" || b == "fo4_cellcsmbl" ) && WwBl::red() == 4 ) {
+		occluder = false;
+		return false;
+	}
 	for ( const char * s : solid ) {
 		if ( b == s ) {
 			occluder = true;

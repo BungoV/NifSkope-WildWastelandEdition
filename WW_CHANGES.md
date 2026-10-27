@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane BINDLESS2FIX (2026-10-27, branch bindless2fix-20261027): Bindless draws no longer draw a black, fogless cell
+
+- **Cause:** the cell's own uniforms (its lights, sun, ambient, obscurance, reflections, fog and the linear output) are
+  set only for programs that `wwIsCellProgramName` names. The bindless twins fo4_cellbl / fo4_cellcsmbl were not in it,
+  so every cell-lit draw with the row on got none of them (MERGE1026 hold: Concord mean luma 21.5 -> 4.3).
+- **Fix:** the twins count as cell programs; the GPU-driven cull takes them as fo4_cell's transform; the far-field
+  sway reaches them. Row off is the old code path (only the twin names are new).
+- Red WW_BINDLESS_RED=cellname puts back the old rule. The per-frame `bindless:` line is printed again after each live
+  set, so a row that repeats the previous row's numbers (the packet check row) still prints it.
+
 ## Lane BINDLESS2 (2026-10-26, branch bindless2-20261026): bindless draws (Show menu row "Bindless draws", off by default)
 
 - **Maps and matrices from one buffer:** with the row on (pin WW_BINDLESS, live), a cell-lit FO4 lighting draw uses the

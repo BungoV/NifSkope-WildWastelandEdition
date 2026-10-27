@@ -53,11 +53,17 @@ BSD License - see nifskope.h
 
 class Scene;
 
+//! lane BINDLESS2FIX (gl/cellbindless.cpp): WW_BINDLESS_RED=cellname, the bindless twins not taken as cell programs
+bool wwBlCellNameRed();
+
 /*! lane SUNCELL1: a cell-lit program by name -- fo4_cell / pbrm_cell, and their cascade variants fo4_cellcsm /
- *  pbrm_cellcsm (the same shaders with the Lookdev sun shadows compiled in, chosen while the map is built) */
+ *  pbrm_cellcsm (the same shaders with the Lookdev sun shadows compiled in, chosen while the map is built).
+ *  lane BINDLESS2FIX: and the bindless twins fo4_cellbl / fo4_cellcsmbl, which stand in for fo4_cell / fo4_cellcsm
+ *  (without them every cell uniform -- lights, sun, AO, fog, linear output -- skipped the twin: a black, fogless frame) */
 inline bool wwIsCellProgramName( std::string_view n )
 {
-	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog";
+	return n == "fo4_cell.prog" || n == "pbrm_cell.prog" || n == "fo4_cellcsm.prog" || n == "pbrm_cellcsm.prog"
+		|| ( ( n == "fo4_cellbl.prog" || n == "fo4_cellcsmbl.prog" ) && !wwBlCellNameRed() );
 }
 
 /*! lane DECALLIT1: an effect decal's program by name -- fo4_effectdecal and its cascade variant fo4_effectdecalcsm.

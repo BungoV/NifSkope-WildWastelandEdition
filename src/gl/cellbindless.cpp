@@ -149,7 +149,7 @@ int red()
 {
 	WW_SWITCH_STATIC( int, r, [] {
 		const QByteArray v = wwEnv( "WW_BINDLESS_RED" ).trimmed();
-		return v == "sampler" ? 1 : v == "pooloff1" ? 2 : v == "nopool" ? 3 : 0;
+		return v == "sampler" ? 1 : v == "pooloff1" ? 2 : v == "nopool" ? 3 : v == "cellname" ? 4 : 0;
 	}() );
 	return r;
 }
@@ -555,6 +555,9 @@ void frame()
 		return;
 	c.bound = false;
 	c.frameNo++;
+	static quint64 lineGen = 0;	// lane BINDLESS2FIX: a live set says the line again (the check row repeated the on row's)
+	if ( wwSwitchMoved( lineGen ) )
+		c.line.clear();
 	if ( ( c.frameNo % 64 ) == 0 ) {	// shapes not drawn for 600 frames give their span back
 		for ( auto it = c.entries.begin(); it != c.entries.end(); ) {
 			if ( c.frameNo - it->second.lastFrame > 600 ) {
@@ -577,7 +580,7 @@ void frame()
 			.arg( poolBytes / 1048576.0, 0, 'f', 1 ).arg( double( kRows ) * sizeof( Row ) / 1048576.0, 0, 'f', 1 )
 			.arg( c.waits ).arg( c.conflicts ).arg( c.fallbacks ).arg( c.rebuilds ).arg( c.conflictsAll )
 			.arg( red() == 1 ? QStringLiteral( " RED sampler" ) : red() == 2 ? QStringLiteral( " RED pooloff1" )
-				: red() == 3 ? QStringLiteral( " RED nopool" ) : QString() );
+				: red() == 3 ? QStringLiteral( " RED nopool" ) : red() == 4 ? QStringLiteral( " RED cellname" ) : QString() );
 		if ( line != c.line && wwFrameLog() ) {
 			c.line = line;
 			std::fprintf( stderr, "%s\n", line.toLocal8Bit().constData() );
@@ -585,4 +588,9 @@ void frame()
 	}
 	c.draws = c.pooled = c.uploads = c.waits = c.conflicts = c.fallbacks = c.rebuilds = 0;
 }
+}
+
+bool wwBlCellNameRed()
+{
+	return WwBl::red() == 4;
 }
