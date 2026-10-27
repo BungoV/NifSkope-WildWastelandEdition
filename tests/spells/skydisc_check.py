@@ -56,7 +56,7 @@ def moon_terms(a, sunK, expo, gain=EARTH_GAIN):
     return R_, (R_ * ks(a) / ls if ls > 1e-6 else 0.0), R_ * earthshine(a) * gain
 
 
-def moon_lod(width, px):
+def moon_lod(width, px):   # the SKYDISC1 shader's one mip (the --moon-frag red reads it)
     p = width / (2 * math.pi) * px / math.sin(MOON_HALF * RAD)
     return math.log2(p) if p > 1 else 0.0
 
@@ -90,7 +90,8 @@ def ubo_free(src):
 
 def load_dds(path):
     b = open(path, 'rb').read()
-    h, w, mips = struct.unpack('<III', b[12:24])
+    h, w = struct.unpack('<II', b[12:20])
+    mips = struct.unpack('<I', b[28:32])[0]   # dwMipMapCount (20..24 is the linear size)
     cc = b[84:88]
     fmt, blk = {b'DXT1': (0x83F0, 8), b'ATI2': (0x8DBD, 16)}[cc]
     t = GLuint()
@@ -107,7 +108,11 @@ def load_dds(path):
     gl.glTexParameteri(0x0DE1, 0x813D, max(mips, 1) - 1)   # GL_TEXTURE_MAX_LEVEL
     for k, v in ((0x2801, 0x2703), (0x2800, 0x2601), (0x2802, 0x2901), (0x2803, 0x812F)):
         gl.glTexParameteri(0x0DE1, k, v)
+    gl.glTexParameterf(0x0DE1, 0x84FE, ctypes.c_float(ANISO))   # GL_TEXTURE_MAX_ANISOTROPY: drawMoonGlobe sets the app's
     return t.value, (w, h, mips)
+
+
+ANISO = 16.0   # the app's Anisotropic Filtering setting at its default
 
 
 def flat_tex(rgba):
@@ -122,10 +127,10 @@ def flat_tex(rgba):
 
 
 class Moon:
-    def __init__(self, sky, tex_dir):
+    def __init__(self, sky, tex_dir, frag=None):
         self.sky = sky
         vs = ubo_free(S.expand(SDIR + '/lookdev_bill.vert'))
-        fs = ubo_free(S.expand(SDIR + '/sky_moon.frag'))
+        fs = ubo_free(S.expand(frag or SDIR + '/sky_moon.frag'))
         self.p = R.compile_src(vs, fs)
         self.flat = (flat_tex((149, 149, 149, 255)), flat_tex((128, 128, 255, 255)))
         self.real = None
@@ -192,6 +197,119 @@ def radial(W, H, vfov, ang_center=None):
     return np.arctan(np.hypot(X, Y) / f), np.arctan2(Y, X)
 
 
+def bilinear(a, x, y):
+    H, W = a.shape
+    x0 = np.clip(np.floor(x - 0.5).astype(int), 0, W - 2)
+    y0 = np.clip(np.floor(y - 0.5).astype(int), 0, H - 2)
+    fx = np.clip(x - 0.5 - x0, 0, 1)
+    fy = np.clip(y - 0.5 - y0, 0, 1)
+    return (a[y0, x0] * (1 - fx) * (1 - fy) + a[y0, x0 + 1] * fx * (1 - fy)
+            + a[y0 + 1, x0] * (1 - fx) * fy + a[y0 + 1, x0 + 1] * fx * fy)
+
+
+def rim_stats(img, ref, rpx, chip_k=0.25):
+    """the limb of a moon drawn at the image centre (rpx = its true radius in px) against ref, the same moon drawn at
+    8x and box-filtered (the antialiased truth). Returns the per-angle 50 % coverage radius std (px), the coverage error
+    against an 8x8 sampled disc, and the chips: rim pixels whose premultiplied luminance is off the truth by more than
+    chip_k x the lit disc's level (inside the disc texture filtering alone reaches 0.15 at 2 deg)."""
+    H, W = img.shape[:2]
+    cov = img[..., 3]
+    cx, cy = W / 2.0, H / 2.0
+    n = max(64, int(2 * math.pi * rpx))
+    ph = (np.arange(n) + 0.5) / n * 2 * math.pi
+    steps = np.arange(-3.0, 3.0, 0.01)
+    rr = np.broadcast_to(rpx + steps[None, :], (n, len(steps)))
+    a = bilinear(cov, cx + rr * np.cos(ph)[:, None], cy + rr * np.sin(ph)[:, None])
+    r50 = np.empty(n)
+    for i in range(n):
+        out = np.nonzero(a[i] >= 0.5)[0]
+        j = out[-1] if len(out) else 0
+        j = min(j, len(steps) - 2)
+        a0, a1 = a[i, j], a[i, j + 1]
+        r50[i] = rr[i, j] + (0.01 * (a0 - 0.5) / (a0 - a1) if a0 != a1 else 0.0)
+    X, Y = np.meshgrid(np.arange(W) + 0.5 - cx, np.arange(H) + 0.5 - cy)
+    rho = np.hypot(X, Y)
+    sub = (np.arange(8) + 0.5) / 8 - 0.5
+    ideal = np.zeros_like(rho)
+    band = np.abs(rho - rpx) < 2
+    for sx in sub:
+        for sy in sub:
+            ideal[band] += (np.hypot(X[band] + sx, Y[band] + sy) < rpx) / 64.0
+    ideal[rho <= rpx - 2] = 1.0
+    cov_err = float(np.abs(cov - ideal)[band].max())
+    lum = np.array([0.2126, 0.7152, 0.0722])
+    y, yr = img[..., :3] @ lum, ref[..., :3] @ lum
+    # the lit level: the truth's p99 over the covered disc (a crescent's bright limb included, at 55 deg the inner
+    # pixels of a 9 px crescent are all near the terminator)
+    lit = float(np.percentile(yr[ref[..., 3] > 0.5], 99))
+    rim = (rho > rpx - 2.0) & (rho < rpx + 1.0)
+    e = (y - yr) / max(lit, 1e-12)
+    dev = np.abs(e)[rim]
+    # a chip is a notch: off the truth AND off its covered neighbours' median error (a crater whose filtered slopes
+    # read a little dark over several pixels is texture filtering, as inside the disc)
+    covd = ref[..., 3] > 0.0
+    nb = []
+    for oy in (-1, 0, 1):
+        for ox in (-1, 0, 1):
+            if ox or oy:
+                nb.append(np.where(np.roll(covd, (oy, ox), (0, 1)), np.roll(e, (oy, ox), (0, 1)), np.nan))
+    med = np.nanmedian(np.stack(nb), axis=0)
+    notch = (np.abs(e) > chip_k) & (np.abs(e - np.nan_to_num(med)) > 0.5 * chip_k)
+    inner = rho < rpx - 3.0
+    dev_in = np.abs(y - yr)[inner] / max(lit, 1e-12) if inner.sum() else np.zeros(1)
+    return dict(cov_err=cov_err, r50_std=float(r50.std()), r50_mean=float(r50.mean() - rpx), rim=int(rim.sum()),
+                chips=int(notch[rim].sum()), over=int((dev > chip_k).sum()), dev_max=float(dev.max()), dev_p99=float(np.percentile(dev, 99)), in_max=float(dev_in.max()), in_p999=float(np.percentile(dev_in, 99.9)))
+
+
+def rim_gate(sky, moon, P, gate, png=None):
+    """bungo 10-27 "pixel edge cutoff chips": the limb must be a clean round antialiased outline at every size and phase.
+    Each case is drawn at the pixel size a 1080-px-high view of that fov has, in a window just round the moon, and at
+    8x (box-filtered) as the truth."""
+    az, el = 160.0, 50.0
+    D = np.array(R.sundir(az, el))
+    worst = dict(std=0.0, chips=0, rim=0, cov=0.0)
+    for vfov in (55.0, 10.0, 2.0):
+        f = focal(1080, vfov)
+        rpx = f * math.tan(MOON_HALF * RAD)
+        N = 2 * int(math.ceil(rpx + 6))
+        vs = 2 * math.degrees(math.atan((N / 2) / f))
+        for alph in (0, 45, 90, 135):
+            Sd = sun_from_elong(D, P, 180.0 + alph)
+            out = []
+            for k in (1, 8):
+                sky.render(N * k, N * k, (az, el), (20.0, -40.0), vfov=vs, disc=0.0)
+                img, info = moon.draw(N * k, N * k, D, Sd, P, real=moon.real is not None, blend=False)
+                out.append(img if k == 1 else img.reshape(N, 8, N, 8, 4).mean(axis=(1, 3)))
+            img, ref = out
+            s = rim_stats(img, ref, rpx)
+            print('  rim %4.0f deg a=%3d r %.1f px: r50 std %.3f px (mean %+.3f), cov vs 8x8 disc %.3f, rim px %d, chips %d (%d off the truth), '
+                  '|y - 8x truth| / lit max %.3f p99 %.3f'
+                  % (vfov, alph, rpx, s['r50_std'], s['r50_mean'], s['cov_err'], s['rim'], s['chips'], s['over'], s['dev_max'], s['dev_p99']) + ' inner max %.3f p99.9 %.3f' % (s['in_max'], s['in_p999']))
+            worst['cov'] = max(worst['cov'], s['cov_err'])
+            worst['std'] = max(worst['std'], s['r50_std'])
+            worst['chips'] += s['chips']
+            worst['rim'] += s['rim']
+            if png and vfov == 2.0 and alph in (45, 90):
+                # 4x nearest crops: the lit limb (toward the light) and where the terminator meets the limb
+                from PIL import Image
+                c8 = R.to8(np.clip(img[..., :3], 0, None), 0.5 / info['R'])[0]
+                yl = img[..., :3] @ np.array([0.2126, 0.7152, 0.0722])
+                gy, gx = np.mgrid[0:N, 0:N]
+                wsum = yl.sum()
+                phl = math.atan2((yl * (gy + 0.5 - N / 2)).sum() / wsum, (yl * (gx + 0.5 - N / 2)).sum() / wsum)
+                crops = []
+                for dphi in (0.0, math.pi / 2 if alph == 90 else 2.0):
+                    px_ = int(N / 2 + (rpx - 10) * math.cos(phl + dphi))
+                    py_ = int(N / 2 + (rpx - 10) * math.sin(phl + dphi))
+                    px_, py_ = min(max(px_, 40), N - 40), min(max(py_, 40), N - 40)
+                    crops.append(np.asarray(Image.fromarray(c8[py_ - 40:py_ + 40, px_ - 40:px_ + 40]).resize((320, 320), Image.NEAREST)))
+                Image.fromarray(np.concatenate(crops, axis=1)).save(png + '/moon_rim_zoom4x_a%d.png' % alph)
+    gate('moon rim round', worst['std'] < 0.08 and worst['cov'] < 0.1,
+         'worst per-angle 50 %% coverage radius std %.3f px; coverage vs an 8x8 sampled disc max %.3f' % (worst['std'], worst['cov']))
+    gate('moon rim no chips', worst['chips'] == 0,
+         '%d chips of %d rim pixels (|luminance - the 8x truth| > 0.25 x the lit level and > 0.125 off its neighbours error; 3 sizes x 4 phases)' % (worst['chips'], worst['rim']))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--tex', default='E:/Projects/Fallout 4 Mods/mods/FO4CS/Textures/Sky/Moon')
@@ -199,6 +317,8 @@ def main():
     ap.add_argument('--dump', default=None)
     ap.add_argument('--red', default='', choices=['', 'vanilla', 'nophase'])
     ap.add_argument('--base', default='origin/merge1026-20261026', help='the commit whose atmo_sky.frag is the OFF reference')
+    ap.add_argument('--only', default='', choices=['', 'rim'], help='rim = the limb gate alone')
+    ap.add_argument('--moon-frag', default=None, help='another sky_moon.frag (in res/shaders, for the includes): the rim red')
     a = ap.parse_args()
     fails = []
 
@@ -208,6 +328,11 @@ def main():
             fails.append(name)
 
     sky = R.Sky(SDIR)
+    if a.only == 'rim':
+        rim_gate(sky, Moon(sky, a.tex, a.moon_frag), nrm([0.0, math.cos(42.36 * RAD), math.sin(42.36 * RAD)]), gate, a.png)
+        print('%d gates failed%s' % (len(fails), (': ' + ', '.join(fails)) if fails else ''))
+        print('SKYDISC %s' % ('FAIL' if fails else 'PASS'))
+        return 1 if fails else 0
     van = a.red == 'vanilla'
     hueOn = 0.0 if van else 1.0
     limbOn = 0.0 if van else 1.0   # the old disc below High had no limb darkening
@@ -277,7 +402,7 @@ def main():
         sky.g.use(0)
 
     # ---- 3. moon: size and halo (coverage only), the vanilla quad as the red ----
-    moon = Moon(sky, a.tex)
+    moon = Moon(sky, a.tex, a.moon_frag)
     P = nrm([0.0, math.cos(42.36 * RAD), math.sin(42.36 * RAD)])
     for (W, H, vfov, tol) in ((1080, 1080, 55.0, 0.04), (1080, 1080, 10.0, 0.01), (1080, 1080, 2.0, 0.005)):
         az, el = 200.0, 35.0
@@ -354,7 +479,10 @@ def main():
     gate('earthshine reddened low', e6[0] / e6[2] > e60[0] / e60[2] and e6.mean() < e60.mean(),
          'R/B %.3f at el 6 vs %.3f at el 60; mean %.3g vs %.3g' % (e6[0] / e6[2], e60[0] / e60[2], e6.mean(), e60.mean()))
 
-    # ---- 6. pictures: the phases with the real surface, and the moon at true size in a 55-deg day sky ----
+    # ---- 5b. the limb: round, no chips (real surface, 3 sizes x 4 phases) ----
+    rim_gate(sky, moon, P, gate, a.png)
+
+    # ---- 6. pictures:the phases with the real surface, and the moon at true size in a 55-deg day sky ----
     if a.png and moon.real:
         from PIL import Image
         tiles = []

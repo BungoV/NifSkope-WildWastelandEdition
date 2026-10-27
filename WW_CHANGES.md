@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SKYDISC1B (2026-10-27, branch skydisc1b-20261027): the moon's rim without chipped pixels
+
+- **Moon rim:** the limb is a clean antialiased outline at every size and phase. A limb pixel now averages four shading
+  points over its covered part (one point past the edge was lit as a grazing slope and chipped the outline), the relief
+  fades to the sphere where the view grazes, and the surface is filtered by each pixel's own footprint (long radially
+  near the limb) instead of one mip for the whole disc. The moon textures take the Anisotropic Filtering setting.
+- **Gate:** `tests/spells/skydisc_check.py` checks the rim against the same moon drawn at 8x: the 50 % coverage radius
+  per angle (std 0.052 px) and the chipped pixels at 55, 10 and 2 deg fov and 4 phases (old shader 131, now 0).
+  `--only rim` runs it alone, `--moon-frag <file>` runs another moon shader (the red). The DDS reader now takes the mip
+  count from the right header field.
+
 ## Lane SKYDISC1 (2026-10-27, branch skydisc1-20261027): our sun disc and moon globe under Physical Sky
 
 - **Physical Sky on** now draws our own sun and moon; **off** draws the vanilla sun and moon exactly as before (no new

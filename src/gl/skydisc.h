@@ -162,13 +162,6 @@ inline MoonTerms moonTerms( double alphaDeg, double sunK, double exposure )
 	return t;
 }
 
-//! the mip of a texture `width` texels round the moon for one pixel of pxAng radians (the disc's centre)
-inline double moonLod( double width, double pxAng )
-{
-	const double perPx = width / ( 2.0 * kPi ) * pxAng / std::sin( kMoonHalfDeg * kRad );
-	return perPx > 1.0 ? std::log2( perPx ) : 0.0;
-}
-
 }	// namespace wwskydisc
 
 #endif // SKYDISC_H
