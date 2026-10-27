@@ -39,6 +39,25 @@
 - **Ambient Occlusion** (merges lane SSAO2): the row's method dropdown inline -- Vanilla Screen-Space Ambient
   Occlusion, Ground Truth Ambient Occlusion, Intel Xe Ground Truth Ambient Occlusion, Horizon-Based Ambient Occlusion
   Plus (`WW/CellAoMethod`), greyed on the `WW_CELL_AO_METHOD` pin.
+- **Round 4:** fold arrows draw no frame when open, pressed or hovered (red `WW_CELLSHOW_RED=arrowframe`). A row's
+  dropdown (quality levels, method, source, Color) is now the first row of the row's fold, on the left where a
+  child row's tick starts; a row that only had a dropdown now has a fold arrow (red `dropright`). A choice inside a
+  fold has its dropdown on the left with its name after it. Long names are cut short with "..." in the closed box,
+  so the dropdown fits the panel; the list shows the full names (red `WW_DROPDOWN_RED=fit`). The Vanilla label
+  reads "Temporal Anti-Aliasing".
+- **Round 4 greying:** a Vanilla row is greyed while a Fusion Shaders row replaces it, and comes back when that row
+  is turned off. The tick keeps its value. Field `WwDisplayRow::overriddenBy`; red `override`. The only case the
+  code shows is Temporal Anti-Aliasing, which is replaced by Improved Temporal Anti-Aliasing at any level above Off
+  (gl/gametaa.cpp: `modern = s.taa2 > 0` skips the game resolve).
+- **Round 4 presets:** the Preset row is back and always shown: label, dropdown, Next, Save, Rename, Delete. The
+  dropdown lists the built-in presets Low / Medium / High / Ultra first, then the user's own. Built-in presets
+  change only the Fusion Shaders rows:
+  - Ultra, High and Medium turn every row on at that level.
+  - Low uses Low levels and turns the heavy rows off (`WwDisplayRow::heavy`: Precomputed Radiance Transfer,
+    Screen-Space Global Illumination, Volumetric Air, Far air, Particles).
+  - A built-in preset cannot be saved over, renamed or deleted.
+  - After a change by hand, the dropdown reads "Custom" (snapshot `CellEditor/DisplayPresetState`).
+  - Reds: `builtin`, `presetbar`.
 - **Tests:** tests/opencell, tests/cellshow and tests/cellgroups, with new rows in the in-app Cell workspace test. Reds:
   `WW_OPENCELL_RED=lang|dblclick`, `WW_CELLSHOW_RED=ticks|groups|dropdown|presets|presetbar|inline|foldrows|showbutton|nest|livebind`,
   `WW_CELLGROUP_RED=<group>|ssr`, `WW_DROPDOWN_RED=1`.

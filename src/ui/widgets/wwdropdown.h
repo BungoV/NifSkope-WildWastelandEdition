@@ -51,9 +51,16 @@ public:
 	void pick( int i );
 	//! Sits inline on a tick row (bungo 10-27 note 10): the same look, no vertical padding, as tall as `tick`.
 	void setRowBuddy( QWidget * tick );
+	//! Fits a narrow panel (bungo 10-27): may shrink below its longest item; the closed box elides, the list stays whole.
+	void setElide( bool on );
+	//! The text the closed box shows at its width (elided when narrower than the pick).
+	QString shownText() const;
 
 	QSize sizeHint() const override;
 	QSize minimumSizeHint() const override;
+
+protected:
+	void paintEvent( QPaintEvent * e ) override;
 
 signals:
 	void currentIndexChanged( int index );
@@ -66,6 +73,7 @@ private:
 	QList<QHash<int, QVariant>> roles;
 	int cur = -1;
 	int fitWidth = 0;
+	bool elide = false;
 	QPointer<QWidget> buddy;
 
 	void refit();

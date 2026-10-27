@@ -69,13 +69,21 @@ struct WwDisplayRow
 	QString parent;
 	bool master = false;           //!< the group row's tick is a master: off, its children grey
 	bool shared = false;           //!< a child its master does not gate (a Scene window setting): never greyed
+	/* round 4 (bungo 10-27): a Vanilla row whose path the engine skips while a Fusion Shaders row is on greys then
+	 * (live, its value kept). overriddenBy: that row's tick, or its submenu (on = any item but overriddenOff). */
+	QString overriddenBy;
+	int overriddenOff = 0;
+	bool heavy = false;            //!< built-in preset Low turns this Fusion Shaders row off (its GPU cost)
 };
 
 QStringList wwDisplayGroups();   //!< Editor, Vanilla, Fusion Shaders
 
 /*! The Display panel of `menu` laid out by `rows`, with the preset bar on top. A checkable action no row names gets a
  *  row of its own in Fusion Shaders and is counted (wwDisplayLeftovers). Reds (WW_CELLSHOW_RED): `ticks` (a row
- *  with settings has no tick), `groups` (one group), `dropdown` (the dropdowns lose the mode selector's look). */
+ *  with settings has no tick), `groups` (one group), `dropdown` (the dropdowns lose the mode selector's look),
+ *  `arrowframe` (an open fold arrow keeps its pressed frame), `dropright` (a dropdown on the right of its row, not
+ *  first in its fold), `override` (a Vanilla row never greys for Fusion Shaders), `builtin` (every built-in is Ultra),
+ *  `presetbar` (no built-ins in the Preset dropdown). */
 QWidget * wwMenuAsDisplay( QMenu * menu, const QList<WwDisplayRow> & rows, QWidget * parent, const WwMenuPanelStyle & style );
 int wwDisplayLeftovers( const QWidget * panel );
 
@@ -84,7 +92,8 @@ int wwDisplayLeftovers( const QWidget * panel );
  * is live. WW_CELLSHOW_RED=presets: a save writes nothing. */
 QVariantMap wwDisplayState( const QWidget * panel );
 void wwDisplaySetState( QWidget * panel, const QVariantMap & state );
-QStringList wwDisplayPresetNames();
+QStringList wwDisplayPresetNames();      //!< his own, sorted
+QStringList wwDisplayPresetBuiltins();   //!< Low, Medium, High, Ultra: the Fusion Shaders rows only; never renamed or deleted
 QString wwDisplayPresetCurrent();
 bool wwDisplayPresetSave( QWidget * panel, const QString & name );   //!< a new name, or overwrite one
 bool wwDisplayPresetApply( QWidget * panel, const QString & name );

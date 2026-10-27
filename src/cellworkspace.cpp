@@ -1124,10 +1124,12 @@ void CellWorkspacePanel::buildUi()
 		head( V, "CellWorkspaceShow_ground" );
 		head( V, "CellWorkspaceShow_water" );
 		head( V, "CellWorkspaceCellImageSpace" );
-		head( V, "CellWorkspaceTemporalAa", "", -1, false, QStringList(), tr( "Temporal anti-aliasing" ) );
+		head( V, "CellWorkspaceTemporalAa", "", -1, false, QStringList(), tr( "Temporal Anti-Aliasing" ) );	// round 4: Title Case
+		rows.last().overriddenBy = QStringLiteral( "CellWorkspaceModernTaa" );	// gametaa.cpp: a Modern tier replaces it
 		// Fusion Shaders
 		head( F, "CellWorkspaceCellGi", "", -1, false,
 			{ QStringLiteral( "CellWorkspaceSkyVisRow" ), QStringLiteral( "CellWorkspaceCellPass" ) } );
+		rows.last().heavy = true;	// built-in Low: off (PRTP bounce light)
 		look( WwLook::ProbeShare, tr( "Probe sharing" ) );
 		look( WwLook::ProbeShareWide, tr( "Wide probe sharing" ) );
 		look( WwLook::ProbeDepthVis, tr( "Probe depth visibility" ) );
@@ -1162,16 +1164,20 @@ void CellWorkspacePanel::buildUi()
 		look( WwLook::TerrGroundGate, tr( "Object LOD shadows on ground only" ) );
 		look( WwLook::FarCardShadows, tr( "Far tree card shadows" ) );
 		look( WwLook::TerrPbrDim, tr( "PBR ambient in terrain shadow" ) );
-		head( F, "CellWorkspaceAo", "CellWorkspaceAoMethod" );	// item 27: the method inline, right-aligned
+		head( F, "CellWorkspaceAo", "CellWorkspaceAoMethod" );	// item 27 + round 4: the method first in its fold
 		head( F, "CellWorkspaceSsgi", "CellWorkspaceSsgiQuality", -1, true );
+		rows.last().heavy = true;
 		master( F, WwGroup::Reflections );
 		kid( "CellWorkspaceReflProbe", tr( "Probes" ) );
 		head( F, "CellWorkspaceVolAir" );	// note 22: the Volumetric Air switch is the group's tick
+		rows.last().heavy = true;	// fogperf1: the air zone ~3.4-3.8 ms at Concord
 		look( WwLook::AirMultiScatter, tr( "Multiple scattering" ) );
 		look( WwLook::GroundBurnOff, tr( "Ground burn-off" ) );
 		look( WwLook::GroundFogDerived, tr( "Ground layer from weather" ) );
 		kid( "", tr( "Far air" ), "CellWorkspaceFarAir", 0, true );
+		rows.last().heavy = true;
 		kid( "CellWorkspaceVolPart", tr( "Particles" ) );
+		rows.last().heavy = true;
 		kid( "CellWorkspaceFogDrift", tr( "Drift" ) );
 		master( F, WwGroup::Sky );
 		look( WwLook::Ephemeris, tr( "Real sun and moon" ) );

@@ -11,6 +11,8 @@ BSD License - see nifskope.h
 #include <QActionGroup>
 #include <QFontMetrics>
 #include <QMenu>
+#include <QStyleOptionToolButton>
+#include <QStylePainter>
 
 #include <algorithm>
 
@@ -19,6 +21,7 @@ QString wwBoxedButtonQss( const QString & padding );	// src/nifskope_ui.cpp (dec
 namespace {
 const char * const kPadding = "3px 6px";	// the Object Mode selector's
 const char * const kInlinePadding = "0px 6px";	// on a tick row: the row's height decides
+const int kChrome = 24;	// the sheet's padding, the border and the menu arrow around the text (refit)
 }
 
 WwDropdown::WwDropdown( QWidget * parent ) : QToolButton( parent )
@@ -174,7 +177,7 @@ void WwDropdown::refit()
 	int w = 0;
 	for ( QAction * a : acts )
 		w = std::max( w, fm.horizontalAdvance( a->text() ) );
-	fitWidth = w + 24;
+	fitWidth = w + kChrome;
 	updateGeometry();
 }
 
@@ -189,5 +192,35 @@ QSize WwDropdown::sizeHint() const
 
 QSize WwDropdown::minimumSizeHint() const
 {
-	return sizeHint();
+	QSize s = sizeHint();
+	if ( elide )	// room for a letter and the ellipsis
+		s.setWidth( std::min( s.width(), kChrome + QFontMetrics( font() ).horizontalAdvance( ( QStringLiteral( "M" ) + QChar( 0x2026 ) ) ) ) );
+	return s;
+}
+
+void WwDropdown::setElide( bool on )
+{
+	elide = on && wwEnvStr( "WW_DROPDOWN_RED" ) != QLatin1String( "fit" );	// red: the box keeps its longest item's width
+	updateGeometry();
+	update();
+}
+
+QString WwDropdown::shownText() const
+{
+	if ( !elide )
+		return text();
+	return QFontMetrics( font() ).elidedText( text(), Qt::ElideRight, std::max( 0, width() - kChrome ) );
+}
+
+void WwDropdown::paintEvent( QPaintEvent * e )
+{
+	if ( !elide || shownText() == text() ) {
+		QToolButton::paintEvent( e );
+		return;
+	}
+	QStylePainter p( this );
+	QStyleOptionToolButton opt;
+	initStyleOption( &opt );
+	opt.text = shownText();
+	p.drawComplexControl( QStyle::CC_ToolButton, opt );
 }

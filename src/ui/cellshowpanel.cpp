@@ -30,13 +30,13 @@ BSD License - see nifskope.h
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QStyle>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidgetAction>
 
 #include <algorithm>
 
-QString wwSegmentedToolButtonQss();	// src/nifskope_ui.cpp (declared in wwskin.h): the Block List strip's segments
 
 namespace {
 
@@ -143,6 +143,10 @@ struct Builder
 	QVBoxLayout * foldBody( QVBoxLayout * into, QToolButton * arrow, const QString & id, bool openFirst, int indent,
 		QAction * enabler, QWidget * head )
 	{
+		if ( !red( "arrowframe" ) )	// bungo 10-27: an open arrow is a folded one pointing down -- no frame, any state
+			arrow->setStyleSheet( QStringLiteral( "QToolButton { border: none; background: transparent; padding: 0px; }"
+				" QToolButton:hover, QToolButton:pressed, QToolButton:checked, QToolButton:checked:hover, QToolButton:focus"
+				" { border: none; background: transparent; }" ) );
 		auto * body = new QWidget;
 		body->setObjectName( QStringLiteral( "CellShowBody_" ) + id );
 		auto * bl = new QVBoxLayout( body );
@@ -357,6 +361,7 @@ namespace {
 
 const char * const kPresetGroup = "CellEditor/DisplayPresets";
 const char * const kPresetCurrent = "CellEditor/DisplayPreset";
+const char * const kPresetState = "CellEditor/DisplayPresetState";	// the Display as the current preset left it
 const char * const kLastGroup = "CellEditor/DisplayLast";	// the level a row comes back to when ticked again
 const int kRowArrow = 16;	// the fold arrow's width on a Display row (or the empty space where it would be)
 
@@ -454,175 +459,136 @@ void unstyleRed( QToolButton * d )
 	}
 }
 
-/* bungo 10-27 note 9: "don't make me unfold them to select a preset". Every preset is a button in the Block List
- * strip's segmented look, wrapping onto more lines; each line is its own strip (first/last rounded). */
-class PresetFlow final : public QLayout
+//! The panel's Fusion Shaders rows as built-in preset steps (0 Low .. 3 Ultra), in list order (masters first).
+struct PresetSteps final : public QObject
 {
-public:
-	explicit PresetFlow( QWidget * parent ) : QLayout( parent )
-	{
-		setContentsMargins( 0, 0, 0, 4 );
-		setSpacing( 2 );	// between lines; the segments of a line touch
-	}
-	~PresetFlow() override
-	{
-		while ( QLayoutItem * i = takeAt( 0 ) )
-			delete i;
-	}
-	void addItem( QLayoutItem * i ) override { items.append( i ); }
-	int count() const override { return int( items.size() ); }
-	QLayoutItem * itemAt( int i ) const override { return items.value( i ); }
-	QLayoutItem * takeAt( int i ) override { return i >= 0 && i < int( items.size() ) ? items.takeAt( i ) : nullptr; }
-	Qt::Orientations expandingDirections() const override { return {}; }
-	bool hasHeightForWidth() const override { return true; }
-	int heightForWidth( int w ) const override { return place( QRect( 0, 0, w, 0 ), false ); }
-	QSize sizeHint() const override { return minimumSize(); }
-	QSize minimumSize() const override
-	{
-		QSize s;
-		for ( QLayoutItem * i : items )
-			s = s.expandedTo( i->minimumSize() );
-		const QMargins m = contentsMargins();
-		return s + QSize( m.left() + m.right(), m.top() + m.bottom() );
-	}
-	void setGeometry( const QRect & r ) override
-	{
-		QLayout::setGeometry( r );
-		place( r, true );
-	}
-
-private:
-	QList<QLayoutItem *> items;
-
-	static void mark( QWidget * w, const char * name, bool on )
-	{
-		if ( !w || w->property( name ).toBool() == on )
-			return;
-		w->setProperty( name, on );
-		w->style()->unpolish( w );	// the sheet's [wwSegmentFirst]/[wwSegmentLast] selectors read it at polish
-		w->style()->polish( w );
-	}
-
-	int place( const QRect & r, bool apply ) const
-	{
-		const QRect a = r.marginsRemoved( contentsMargins() );
-		int x = a.x(), y = a.y(), lineH = 0;
-		QList<QList<QLayoutItem *>> lines( 1 );
-		for ( QLayoutItem * i : items ) {
-			if ( i->isEmpty() )
-				continue;
-			const QSize h = i->sizeHint();
-			if ( x > a.x() && x + h.width() > a.x() + a.width() ) {
-				x = a.x();
-				y += lineH + spacing();
-				lineH = 0;
-				lines.append( QList<QLayoutItem *>() );
-			}
-			if ( apply )
-				i->setGeometry( QRect( QPoint( x, y ), h ) );
-			x += h.width();
-			lineH = std::max( lineH, h.height() );
-			lines.last().append( i );
-		}
-		if ( apply )
-			for ( const QList<QLayoutItem *> & line : lines )
-				for ( int k = 0; k < int( line.size() ); k++ ) {
-					mark( line.at( k )->widget(), "wwSegmentFirst", k == 0 );
-					mark( line.at( k )->widget(), "wwSegmentLast", k == int( line.size() ) - 1 );
-				}
-		return y + lineH - r.y() + contentsMargins().bottom();
-	}
+	using QObject::QObject;	// found by name: a .cpp-local class has no Q_OBJECT
+	QList<std::function<void( int )>> steps;
 };
 
-QString askName( QWidget * parent, const QString & title, const QString & start, bool * ok )
+PresetSteps * presetSteps( const QWidget * panel )
 {
-	return QInputDialog::getText( parent, title, trp( "Name" ), QLineEdit::Normal, start, ok );
+	QObject * o = panel ? panel->findChild<QObject *>( QStringLiteral( "CellDisplayPresetSteps" ) ) : nullptr;
+	return static_cast<PresetSteps *>( o );
 }
 
-QToolButton * presetButton( QWidget * bar, QWidget * panel, const QString & name )
+//! The Display still reads as the preset last applied or saved (a snapshot kept beside its name).
+bool presetMatches( const QWidget * panel )
 {
-	auto * b = new QToolButton( bar );
-	b->setObjectName( QStringLiteral( "CellDisplayPreset" ) );
-	b->setProperty( "wwPresetName", name );
-	b->setText( QString( name ).replace( QLatin1Char( '&' ), QLatin1String( "&&" ) ) );
-	b->setToolButtonStyle( Qt::ToolButtonTextOnly );
-	b->setCheckable( true );
-	b->setContextMenuPolicy( Qt::CustomContextMenu );
-	auto * m = new QMenu( b );
-	m->setObjectName( QStringLiteral( "CellDisplayPresetMenu" ) );
-	QAction * save = m->addAction( trp( "Save" ) );
-	save->setObjectName( QStringLiteral( "CellDisplayPresetCtxSave" ) );
-	QAction * ren = m->addAction( trp( "Rename" ) );
-	ren->setObjectName( QStringLiteral( "CellDisplayPresetCtxRename" ) );
-	QAction * del = m->addAction( trp( "Delete" ) );
-	del->setObjectName( QStringLiteral( "CellDisplayPresetCtxDelete" ) );
-	QPointer<QWidget> p( panel );
-	QObject::connect( b, &QToolButton::clicked, b, [p, name]() {
-		wwDisplayPresetApply( p, name );
-		refreshPresetBar( p );	// a click on the active one keeps it highlighted
-	} );
-	QObject::connect( b, &QWidget::customContextMenuRequested, b, [b, m]( const QPoint & at ) { m->popup( b->mapToGlobal( at ) ); } );
-	QObject::connect( save, &QAction::triggered, b, [p, name]() { wwDisplayPresetSave( p, name ); } );	// overwrite with now
-	QObject::connect( ren, &QAction::triggered, b, [p, name]() {
-		bool ok = false;
-		const QString n = askName( p, trp( "Rename preset" ), name, &ok );
-		if ( ok && n.trimmed() != name )
-			wwDisplayPresetRename( p, name, n );
-	} );
-	QObject::connect( del, &QAction::triggered, b, [p, name]() { wwDisplayPresetDelete( p, name ); } );
-	return b;
+	const QVariant v = QSettings().value( QLatin1String( kPresetState ) );
+	return !v.isValid() || v.toMap() == wwDisplayState( panel );
+}
+
+//! A row's widgets grey for any of their reasons (a master off, a Fusion Shaders row replacing it); the value stays.
+void greyFor( QWidget * x, const char * why, bool grey )
+{
+	x->setProperty( why, grey );
+	x->setEnabled( !x->property( "wwGreyMaster" ).toBool() && !x->property( "wwGreyFusion" ).toBool() );
 }
 
 void refreshPresetBar( QWidget * panel )
 {
-	QWidget * bar = panel ? panel->findChild<QWidget *>( QStringLiteral( "CellDisplayPresetBar" ) ) : nullptr;
-	auto * add = bar ? bar->findChild<QToolButton *>( QStringLiteral( "CellDisplayPresetAdd" ) ) : nullptr;
-	if ( !add || !bar->layout() )
+	auto * pick = panel ? panel->findChild<WwDropdown *>( QStringLiteral( "CellDisplayPresetPicker" ) ) : nullptr;
+	if ( !pick )
 		return;
-	const QStringList names = red( "presetbar" ) ? QStringList() : wwDisplayPresetNames();	// red: no preset buttons
+	const QStringList own = wwDisplayPresetNames();
+	const QStringList names = ( red( "presetbar" ) ? QStringList() : wwDisplayPresetBuiltins() ) + own;	// red: no built-ins
 	const QString cur = wwDisplayPresetCurrent();
-	QList<QToolButton *> have = bar->findChildren<QToolButton *>( QStringLiteral( "CellDisplayPreset" ), Qt::FindDirectChildrenOnly );
-	QStringList shown;
-	for ( QToolButton * b : have )
-		shown.append( b->property( "wwPresetName" ).toString() );
-	if ( shown != names ) {	// rebuilt only when the names change, so a click never deletes the button it came from
-		for ( QToolButton * b : have ) {
-			bar->layout()->removeWidget( b );
-			b->hide();
-			b->setParent( nullptr );
-			b->deleteLater();
+	const bool same = !cur.isEmpty() && names.contains( cur ) && presetMatches( panel );
+	{
+		QSignalBlocker sb( pick );
+		QStringList have;
+		for ( int i = 0; i < pick->count(); i++ )
+			have << pick->itemText( i );
+		if ( have != names ) {
+			pick->clear();
+			pick->addItems( names );
 		}
-		bar->layout()->removeWidget( add );
-		have.clear();
-		for ( const QString & n : names ) {
-			have.append( presetButton( bar, panel, n ) );
-			bar->layout()->addWidget( have.last() );
-		}
-		bar->layout()->addWidget( add );	// "+" ends the strip
+		pick->setCurrentIndex( same ? int( names.indexOf( cur ) ) : -1 );
+		if ( !same )
+			pick->setText( trp( "Custom" ) );	// changed by hand since, or nothing applied yet
 	}
-	for ( QToolButton * b : have )
-		b->setChecked( b->property( "wwPresetName" ).toString() == cur );
+	const bool mine = same && own.contains( cur );	// a built-in is never renamed or deleted
+	for ( const char * n : { "CellDisplayPresetRename", "CellDisplayPresetDelete" } )
+		if ( auto * b = panel->findChild<QToolButton *>( QLatin1String( n ) ) )
+			b->setEnabled( mine );
+	if ( auto * b = panel->findChild<QToolButton *>( QStringLiteral( "CellDisplayPresetNext" ) ) )
+		b->setEnabled( !names.isEmpty() );
 }
 
+//! Any change on the Display re-reads the Preset row once (the dropdown turns "Custom" after a change by hand).
+void watchForCustom( QWidget * panel, QMenu * menu )
+{
+	QPointer<QWidget> p( panel );
+	auto later = [p]() {
+		if ( !p || p->property( "wwPresetPending" ).toBool() )
+			return;
+		p->setProperty( "wwPresetPending", true );
+		QTimer::singleShot( 0, p, [p]() {
+			p->setProperty( "wwPresetPending", false );
+			refreshPresetBar( p );
+		} );
+	};
+	QList<QPair<QString, QAction *>> acts;
+	collectActions( menu, acts );
+	for ( const auto & ka : acts )
+		QObject::connect( ka.second, &QAction::toggled, panel, later );
+	QList<QDoubleSpinBox *> fields;
+	collectFields( menu, fields );
+	for ( QDoubleSpinBox * f : fields )
+		QObject::connect( f, qOverload<double>( &QDoubleSpinBox::valueChanged ), panel, later );
+	for ( WwDropdown * d : panel->findChildren<WwDropdown *>() )
+		if ( !d->property( "wwPresetKey" ).toString().isEmpty() )
+			QObject::connect( d, &WwDropdown::currentIndexChanged, panel, later );
+}
+
+/* bungo 10-27 (round 4): "Display the preset dropdown always, with the stuff there" + "All the buttons". The Preset
+ * row: label, dropdown (Low / Medium / High / Ultra built in, then his own), Next, Save, Rename, Delete. */
 void presetBar( QWidget * panel, QVBoxLayout * top )
 {
 	auto * bar = new QWidget( panel );
 	bar->setObjectName( QStringLiteral( "CellDisplayPresetBar" ) );
-	bar->setStyleSheet( wwSegmentedToolButtonQss() );
-	auto * flow = new PresetFlow( bar );
-	auto * add = new QToolButton( bar );
-	add->setObjectName( QStringLiteral( "CellDisplayPresetAdd" ) );
-	add->setText( QStringLiteral( "+" ) );
-	add->setToolButtonStyle( Qt::ToolButtonTextOnly );
-	flow->addWidget( add );
+	auto * hl = new QHBoxLayout( bar );
+	hl->setContentsMargins( 0, 0, 0, 4 );
+	hl->setSpacing( 4 );
+	hl->addWidget( new QLabel( trp( "Preset" ), bar ) );
+	auto * pick = new WwDropdown( bar );
+	pick->setObjectName( QStringLiteral( "CellDisplayPresetPicker" ) );
+	pick->setElide( true );
+	unstyleRed( pick );
+	hl->addWidget( pick, 1 );
+	auto button = [bar, hl]( const char * name, const QString & text ) {
+		auto * b = new QToolButton( bar );
+		b->setObjectName( QLatin1String( name ) );
+		b->setText( text );
+		b->setToolButtonStyle( Qt::ToolButtonTextOnly );
+		hl->addWidget( b );
+		return b;
+	};
+	QToolButton * next = button( "CellDisplayPresetNext", trp( "Next" ) );
+	QToolButton * save = button( "CellDisplayPresetSave", trp( "Save" ) );
+	QToolButton * ren = button( "CellDisplayPresetRename", trp( "Rename" ) );
+	QToolButton * del = button( "CellDisplayPresetDelete", trp( "Delete" ) );
 	top->addWidget( bar );
 	QPointer<QWidget> p( panel );
-	QObject::connect( add, &QToolButton::clicked, bar, [p]() {
+	QObject::connect( pick, &WwDropdown::activated, bar, [p, pick]( int i ) { wwDisplayPresetApply( p, pick->itemText( i ) ); } );
+	QObject::connect( next, &QToolButton::clicked, bar, [p]() { wwDisplayPresetNext( p ); } );
+	QObject::connect( save, &QToolButton::clicked, bar, [p]() {
+		const QString cur = wwDisplayPresetCurrent();
 		bool ok = false;
-		const QString n = askName( p, trp( "New preset" ), QString(), &ok );
+		const QString n = QInputDialog::getText( p, trp( "Save preset" ), trp( "Name" ), QLineEdit::Normal,
+			wwDisplayPresetNames().contains( cur ) ? cur : QString(), &ok );	// a built-in saves as a new one
 		if ( ok )
-			wwDisplayPresetSave( p, n );	// a name in use is overwritten, as Save does
+			wwDisplayPresetSave( p, n );	// the same name overwrites
 	} );
+	QObject::connect( ren, &QToolButton::clicked, bar, [p]() {
+		const QString cur = wwDisplayPresetCurrent();
+		bool ok = false;
+		const QString n = QInputDialog::getText( p, trp( "Rename preset" ), trp( "Name" ), QLineEdit::Normal, cur, &ok );
+		if ( ok && n.trimmed() != cur )
+			wwDisplayPresetRename( p, cur, n );
+	} );
+	QObject::connect( del, &QToolButton::clicked, bar, [p]() { wwDisplayPresetDelete( p, wwDisplayPresetCurrent() ); } );
 	refreshPresetBar( panel );
 }
 
@@ -640,6 +606,8 @@ struct DisplayBuilder
 	const bool flat = red( "nest" );	// red: a group's children lie flat after it (note 18)
 	const QList<WwDisplayRow> * all = nullptr;
 	int leftovers = 0;
+	PresetSteps * steps = nullptr;
+	bool inFusion = false;	// the row being built sits under Fusion Shaders (the built-in presets step it)
 
 	QVBoxLayout * group( const QString & g0 )
 	{
@@ -688,8 +656,14 @@ struct DisplayBuilder
 				hl->setSpacing( 6 );
 				auto * l = new QLabel( a->text(), w );
 				WwDropdown * d = dropdown( QStringLiteral( "CellDisplayChoice_" ) + m->objectName(), items, false );
-				hl->addWidget( l, 1 );
-				hl->addWidget( d );
+				if ( red( "dropright" ) ) {	// red: the dropdown on the right of its row
+					hl->addWidget( l, 1 );
+					hl->addWidget( d );
+				} else {	// bungo 10-27 "Just move it to the left side": where a tick would be, its name after it
+					d->setElide( true );
+					hl->addWidget( d );
+					hl->addWidget( l, 1 );
+				}
 				into->addWidget( w );
 				QPointer<QMenu> pm( m );
 				auto sync = [pm, items, d, l]() {
@@ -742,12 +716,48 @@ struct DisplayBuilder
 			return {};	// not in this menu
 		QVBoxLayout * in = into ? into : group( r.group );
 		const int from = in->count();
+		const bool wasFusion = inFusion;
+		if ( !into )
+			inFusion = r.group == trp( "Fusion Shaders" );
 		rowOf( in, r, t, c, custom );
+		inFusion = wasFusion;
 		QList<QWidget *> added;
 		for ( int i = from; i < in->count(); i++ )
 			if ( QWidget * w = in->itemAt( i )->widget() )
 				added << w;
+		overridden( r, added );
 		return added;
+	}
+
+	/* bungo 10-27 "if a setting in fusion shaders overrides something in vanilla, grey it out in vanilla": while the
+	 * Fusion Shaders row named by overriddenBy is on, the engine skips this row's path, so the row and its fold grey
+	 * (live; the tick keeps its value). WW_CELLSHOW_RED=override: never greyed. */
+	void overridden( const WwDisplayRow & r, const QList<QWidget *> & added )
+	{
+		QAction * by = r.overriddenBy.isEmpty() ? nullptr : findAction( menu, r.overriddenBy );
+		if ( !by || added.isEmpty() || red( "override" ) )
+			return;
+		QList<QAction *> items = by->menu() ? exclusiveItems( by->menu() ) : QList<QAction *>();
+		QPointer<QAction> pb( by );
+		const int off = r.overriddenOff;
+		auto on = [pb, items, off]() {
+			if ( !pb )
+				return false;
+			return items.isEmpty() ? pb->isChecked() : checkedIn( items ) >= 0 && checkedIn( items ) != off;
+		};
+		QList<QPointer<QWidget>> ws;
+		for ( QWidget * x : added )
+			ws << x;
+		auto grey = [ws, on]() {
+			for ( const QPointer<QWidget> & x : ws )
+				if ( x )
+					greyFor( x, "wwGreyFusion", on() );
+		};
+		grey();
+		if ( items.isEmpty() )
+			items << by;
+		for ( QAction * a : items )
+			QObject::connect( a, &QAction::toggled, added.first(), grey );
 	}
 
 	void rowOf( QVBoxLayout * into, const WwDisplayRow & r, QAction * t, QMenu * c, WwDropdown * custom )
@@ -780,7 +790,14 @@ struct DisplayBuilder
 			for ( const WwDisplayRow & k : *all )
 				if ( !k.parent.isEmpty() && k.parent == key )
 					kids << k;
-		const bool folds = !more.isEmpty() || ( !kids.isEmpty() && !flat );
+		WwDropdown * d = custom;
+		if ( !d && list.size() >= 2 )
+			d = dropdown( QStringLiteral( "CellDisplayChoice_" ) + key, list, r.quality );
+		/* bungo 10-27 "they should become the first thing under each unwrapped thing" + "Just move it to the left side"
+		 * + "closer": a row's dropdown is the first row of its fold, at the child ticks' indent, nothing before it.
+		 * WW_CELLSHOW_RED=dropright: on the right of the tick row, as before. */
+		const bool dropIn = d && !red( "dropright" );
+		const bool folds = dropIn || !more.isEmpty() || ( !kids.isEmpty() && !flat );
 
 		auto * w = new QWidget;
 		w->setObjectName( QStringLiteral( "CellDisplayRow_" ) + key );
@@ -810,9 +827,6 @@ struct DisplayBuilder
 			}
 			hl->addWidget( arrow );
 		}
-		WwDropdown * d = custom;
-		if ( !d && list.size() >= 2 )
-			d = dropdown( QStringLiteral( "CellDisplayChoice_" ) + key, list, r.quality );
 		QWidget * tickOrLabel = nullptr;
 		QCheckBox * box = nullptr;
 		if ( d && ( noTicks || ( !t && !custom && off < 0 ) ) ) {	// red: a row with settings has only its dropdown;
@@ -828,7 +842,10 @@ struct DisplayBuilder
 			d->setParent( w );
 			if ( !red( "inline" ) )	// red: the dropdown keeps its own taller box (note 10)
 				d->setRowBuddy( tickOrLabel );
-			hl->addWidget( d );
+			if ( dropIn )
+				d->setElide( true );	// the fold's width decides; the list keeps the whole names
+			else
+				hl->addWidget( d );
 		}
 		into->addWidget( w );
 		const QString lastKey = QLatin1String( kLastGroup ) + QLatin1Char( '/' ) + key;
@@ -943,19 +960,34 @@ struct DisplayBuilder
 			hook( w, sync, items, c->menuAction() );
 		}
 
+		if ( steps && inFusion && !custom )
+			addStep( t, list, items.value( off ), r.heavy );
+
 		if ( folds ) {
 			QAction * enabler = c ? c->menuAction() : nullptr;
 			const QString id = QStringLiteral( "settings_" ) + key;
 			QVBoxLayout * f = arrow ? b.foldBody( into, arrow, id, false, kRowArrow + hl->spacing(), enabler, arrow )
 				: b.fold( into, trp( "%1 settings" ).arg( label ), id, false, enabler );	// red "foldrows": its own row
+			if ( dropIn ) {
+				auto * dr = new QWidget;
+				dr->setObjectName( QStringLiteral( "CellDisplayDropRow_" ) + key );
+				auto * dl = new QHBoxLayout( dr );
+				const bool kidIndent = !kids.isEmpty() || more.isEmpty();	// a child row's tick sits past its arrow space
+				dl->setContentsMargins( kidIndent ? kRowArrow + hl->spacing() : 0, 0, 0, 0 );
+				dl->setSpacing( 0 );
+				d->setParent( dr );
+				dl->addWidget( d );
+				dl->addStretch( 1 );
+				f->addWidget( dr );
+			}
 			for ( QAction * a : more )
 				extra( f, a );
 			for ( const WwDisplayRow & k : kids ) {
-				const QList<QWidget *> kw = row( k, f );
+				const QList<QWidget *> kw = row( k, flat ? into : f );
 				if ( r.master && t && !k.shared ) {	// a master off: its rows read off, so they grey (their ticks stay)
 					auto grey = [t, kw]() {
 						for ( QWidget * x : kw )
-							x->setEnabled( t->isChecked() );
+							greyFor( x, "wwGreyMaster", !t->isChecked() );
 					};
 					grey();
 					QObject::connect( t, &QAction::toggled, w, grey );
@@ -965,6 +997,34 @@ struct DisplayBuilder
 			for ( const WwDisplayRow & k : kids )
 				row( k, into );	// red "nest"
 		}
+	}
+
+	/* Built-in presets (bungo 10-27; memory: four steps Low / Medium / High / Ultra): every Fusion Shaders row on at
+	 * the preset's level; Low turns the heavy rows off. A level is the item named Low..Ultra; a choice with an off
+	 * item and no level that is a plain two-way switch (Bloom's Vanilla | FO4CS) takes its other item when on. Other
+	 * choices (look curves such as Lamp brightness contrast, methods, sources) are left as they are. */
+	void addStep( QAction * t, const QList<QAction *> & list, QAction * offAct, bool heavy )
+	{
+		QPointer<QAction> pt( t ), po( offAct );
+		steps->steps.append( [pt, po, list, heavy]( int p ) {
+			static const char * const kLevel[] = { "Low", "Medium", "High", "Ultra" };
+			const bool on = !( heavy && p == 0 );
+			QAction * level = nullptr;
+			for ( QAction * a : list )
+				if ( a->text() == QLatin1String( kLevel[std::clamp( p, 0, 3 )] ) )
+					level = a;
+			if ( pt && pt->isChecked() != on && actionReachable( pt ) )
+				pt->trigger();
+			if ( !on ) {
+				if ( !pt && po && !po->isChecked() && actionReachable( po ) )
+					po->trigger();
+				return;
+			}
+			if ( !level && po && po->isChecked() && list.size() == 1 )	// list holds the items other than off
+				level = list.last();
+			if ( level && !level->isChecked() && actionReachable( level ) )
+				level->trigger();
+		} );
 	}
 
 	//! A switch no row names still gets one (and is counted, so a new switch cannot hide).
@@ -1007,9 +1067,12 @@ QWidget * wwMenuAsDisplay( QMenu * menu, const QList<WwDisplayRow> & rows, QWidg
 	auto * top = new QVBoxLayout( panel );
 	top->setContentsMargins( 0, 0, 0, 0 );
 	top->setSpacing( 2 );
+	auto * steps = new PresetSteps( panel );
+	steps->setObjectName( QStringLiteral( "CellDisplayPresetSteps" ) );
 	presetBar( panel, top );
 	Builder b{ style, panel };
 	DisplayBuilder d{ menu, b, top };
+	d.steps = steps;
 	if ( !d.oneGroup )
 		for ( const QString & g : wwDisplayGroups() )
 			d.group( g );	// the fixed order
@@ -1021,6 +1084,9 @@ QWidget * wwMenuAsDisplay( QMenu * menu, const QList<WwDisplayRow> & rows, QWidg
 		d.leftover( menu );
 	panel->setProperty( "wwDisplayLeftovers", d.leftovers );
 	top->addStretch( 1 );
+	if ( menu )
+		watchForCustom( panel, menu );
+	refreshPresetBar( panel );
 	return panel;
 }
 
@@ -1088,9 +1154,23 @@ void wwDisplaySetState( QWidget * panel, const QVariantMap & st )
 	syncInto( panel );
 }
 
-static bool presetName( const QString & n )
+static bool presetName( const QString & n )	// one of his own: never a built-in's name
 {
-	return !n.trimmed().isEmpty() && !n.contains( QLatin1Char( '/' ) ) && !n.contains( QLatin1Char( '\\' ) );
+	return !n.trimmed().isEmpty() && !n.contains( QLatin1Char( '/' ) ) && !n.contains( QLatin1Char( '\\' ) )
+		&& !wwDisplayPresetBuiltins().contains( n.trimmed() );
+}
+
+QStringList wwDisplayPresetBuiltins()
+{
+	return { trp( "Low" ), trp( "Medium" ), trp( "High" ), trp( "Ultra" ) };
+}
+
+//! Name and snapshot of the preset the Display now shows.
+static void presetIsNow( QWidget * panel, const QString & name )
+{
+	QSettings s;
+	s.setValue( QLatin1String( kPresetCurrent ), name.trimmed() );
+	s.setValue( QLatin1String( kPresetState ), wwDisplayState( panel ) );
 }
 
 static QString presetKey( const QString & n )
@@ -1119,9 +1199,8 @@ bool wwDisplayPresetSave( QWidget * panel, const QString & name )
 	if ( !presetName( name ) || !menuOf( panel ) )
 		return false;
 	if ( !red( "presets" ) ) {	// red: nothing is kept
-		QSettings s;
-		s.setValue( presetKey( name ), wwDisplayState( panel ) );
-		s.setValue( QLatin1String( kPresetCurrent ), name.trimmed() );
+		QSettings().setValue( presetKey( name ), wwDisplayState( panel ) );
+		presetIsNow( panel, name );
 	}
 	refreshPresetBar( panel );
 	return true;
@@ -1129,12 +1208,22 @@ bool wwDisplayPresetSave( QWidget * panel, const QString & name )
 
 bool wwDisplayPresetApply( QWidget * panel, const QString & name )
 {
-	QSettings s;
-	const QVariant v = s.value( presetKey( name ) );
-	if ( !presetName( name ) || !v.isValid() || !menuOf( panel ) )
-		return false;
-	wwDisplaySetState( panel, v.toMap() );
-	s.setValue( QLatin1String( kPresetCurrent ), name.trimmed() );
+	const int builtin = int( wwDisplayPresetBuiltins().indexOf( name.trimmed() ) );
+	if ( builtin >= 0 ) {	// Fusion Shaders only; Vanilla and Editor keep what they are
+		PresetSteps * st = presetSteps( panel );
+		if ( !st || !menuOf( panel ) )
+			return false;
+		for ( int pass = 0; pass < 2; pass++ )	// twice: a master on can enable its rows
+			for ( const auto & step : st->steps )
+				step( red( "builtin" ) ? 3 : builtin );	// red: every built-in is Ultra
+		syncInto( panel );
+	} else {
+		const QVariant v = QSettings().value( presetKey( name ) );
+		if ( !presetName( name ) || !v.isValid() || !menuOf( panel ) )
+			return false;
+		wwDisplaySetState( panel, v.toMap() );
+	}
+	presetIsNow( panel, name );
 	refreshPresetBar( panel );
 	return true;
 }
@@ -1166,7 +1255,7 @@ bool wwDisplayPresetDelete( QWidget * panel, const QString & name )
 
 QString wwDisplayPresetNext( QWidget * panel )
 {
-	const QStringList names = wwDisplayPresetNames();
+	const QStringList names = wwDisplayPresetBuiltins() + wwDisplayPresetNames();
 	if ( names.isEmpty() )
 		return QString();
 	const QString n = names.at( ( names.indexOf( wwDisplayPresetCurrent() ) + 1 ) % names.size() );

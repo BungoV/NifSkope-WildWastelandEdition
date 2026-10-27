@@ -3,6 +3,7 @@
 // Red: WW_CELLSHOW_RED=menu (a tick closes the menu again) must FAIL.
 // Red: WW_CELLSHOW_RED=sync (an action that changes leaves its box behind) must FAIL.
 // lane OPENCELLFIX2 reds, each must FAIL: WW_CELLSHOW_RED=ticks|groups|dropdown|presets|nest|livebind, WW_DROPDOWN_RED=1.
+// Round 4 reds, each must FAIL: WW_CELLSHOW_RED=arrowframe|dropright|override|builtin|presetbar, WW_DROPDOWN_RED=fit.
 
 #include "cellshowpanel.h"
 #include "widgets/wwdropdown.h"
@@ -18,6 +19,7 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
+#include <QImage>
 #include <QMouseEvent>
 #include <QRadioButton>
 #include <QSet>
@@ -62,24 +64,50 @@ void answer( const QString & text )
 	} );
 }
 
-QList<QToolButton *> presetButtons( QWidget * panel )
+QStringList pickerTexts( QWidget * panel )
 {
-	return panel->findChildren<QToolButton *>( QStringLiteral( "CellDisplayPreset" ) );
+	QStringList t;
+	if ( auto * d = panel->findChild<WwDropdown *>( QStringLiteral( "CellDisplayPresetPicker" ) ) )
+		for ( int i = 0; i < d->count(); i++ )
+			t << d->itemText( i );
+	return t;
 }
 
-QToolButton * presetButton( QWidget * panel, const QString & name )
+WwDropdown * picker( QWidget * panel )
 {
-	for ( QToolButton * b : presetButtons( panel ) )
-		if ( b->property( "wwPresetName" ).toString() == name )
-			return b;
-	return nullptr;
+	return panel->findChild<WwDropdown *>( QStringLiteral( "CellDisplayPresetPicker" ) );
 }
 
-//! A right-click action of a preset button (Save, Rename, Delete).
-QAction * presetAction( QToolButton * b, const char * which )
+QToolButton * barButton( QWidget * panel, const char * which )
 {
-	QMenu * m = b ? b->findChild<QMenu *>( QStringLiteral( "CellDisplayPresetMenu" ) ) : nullptr;
-	return m ? m->findChild<QAction *>( QStringLiteral( "CellDisplayPresetCtx" ) + QLatin1String( which ) ) : nullptr;
+	return panel->findChild<QToolButton *>( QStringLiteral( "CellDisplayPreset" ) + QLatin1String( which ) );
+}
+
+//! Picks preset `name` in the Preset dropdown as a click in its list would.
+void pickPreset( QWidget * panel, const QString & name )
+{
+	if ( WwDropdown * d = picker( panel ) )
+		d->pick( d->findText( name ) );
+	QCoreApplication::processEvents();
+}
+
+//! The arrow paints the same checked and unchecked (both pointing down), hovered or not: no pressed frame.
+bool arrowFlat( QToolButton * a )
+{
+	if ( !a )
+		return false;
+	a->resize( a->sizeHint() );
+	const bool was = a->isChecked();
+	auto img = [a]( bool checked, bool hover ) {
+		const QSignalBlocker sb( a );
+		a->setChecked( checked );
+		a->setAttribute( Qt::WA_UnderMouse, hover );
+		a->setArrowType( Qt::DownArrow );
+		return a->grab().toImage();
+	};
+	const QImage open = img( true, false ), plain = img( false, false ), openHover = img( true, true ), hover = img( false, true );
+	img( was, false );
+	return !open.isNull() && open == plain && openHover == hover && open == hover;
 }
 
 void heading( QMenu * m, const char * text, const char * id )
@@ -174,7 +202,8 @@ struct DisplayMenu
 {
 	QMenu menu;
 	QAction * borders, * grass, * farLod, * ssgi, * stray;
-	QMenu * farType, * lamp, * ssgiQ, * bloom;
+	QMenu * farType, * lamp, * ssgiQ, * bloom, * aoMethod;
+	QAction * ao;
 	QAction * bloomGlare = nullptr;
 	QDoubleSpinBox * strength = nullptr;
 	WwDropdown * color;
@@ -204,6 +233,9 @@ struct DisplayMenu
 		auto * wa = new QWidgetAction( bloom );
 		wa->setDefaultWidget( host );
 		bloom->addAction( wa );
+		ao = tick( &menu, "Ao", true );	// round 4: names as long as the Ambient Occlusion methods, and longer
+		aoMethod = choices( &menu, "AoMethod", { QStringLiteral( "Vanilla Screen-Space Ambient Occlusion With Its Long Name" ),
+			QStringLiteral( "Horizon-Based Ambient Occlusion Plus And Some More Words" ) }, 0 );
 		stray = tick( &menu, "Stray", false );
 		color = new WwDropdown;
 		color->setObjectName( QStringLiteral( "Color" ) );
@@ -227,8 +259,10 @@ struct DisplayMenu
 		c.dropdown = color;	// moves into the panel's row (the panel owns it then)
 		c.off = 0;
 		c.label = QStringLiteral( "Color" );
+		WwDisplayRow ssgiRow = r( 2, "Ssgi", "SsgiQuality", -1, true );
+		ssgiRow.heavy = true;	// built-in Low turns it off
 		return { c, r( 0, "Borders" ), r( 1, "Grass" ), r( 1, "FarLod", "FarLodType" ), r( 2, "", "LampShadows", 0, true ),
-			r( 2, "Ssgi", "SsgiQuality", -1, true ), r( 2, "", "Bloom", 0 ) };
+			ssgiRow, r( 2, "", "Bloom", 0 ), r( 2, "Ao", "AoMethod" ) };
 	}
 };
 
@@ -334,37 +368,104 @@ void displayChecks( const WwMenuPanelStyle & style )
 	auto * grassSpace = panel->findChild<QWidget *>( QStringLiteral( "CellDisplayRow_Grass" ) );
 	grassSpace = grassSpace ? grassSpace->findChild<QToolButton *>( QStringLiteral( "CellDisplayArrowSpace" ) ) : nullptr;
 	check( grassSpace && grassSpace->isHidden(), "a row with nothing to fold shows no arrow (Grass)" );
-	int h0 = -1, same = 0, withDrop = 0;
+	int h0 = -1, same = 0;
 	for ( QWidget * r : rows ) {
 		const int h = r->sizeHint().height();
 		if ( h0 < 0 )
 			h0 = h;
 		same += h == h0;
-		withDrop += r->findChild<WwDropdown *>() != nullptr;
 	}
-	check( withDrop >= 3 && same == int( rows.size() ), "every row is the same height, a dropdown row too" );
-	auto * lampRow = panel->findChild<QWidget *>( QStringLiteral( "CellDisplayRow_LampShadows" ) );
-	check( lampRow && lampDrop && lampDrop->parentWidget() == lampRow && lampTick
-		&& lampDrop->sizeHint().height() == lampTick->sizeHint().height(), "the quality dropdown is inline, as tall as its tick" );
+	check( same == int( rows.size() ), "every row is the same height" );
 
-	std::printf( "Display presets: a button each, a click applies, right-click Save / Rename / Delete, a fresh panel\n" );
+	std::printf( "round 4: a row's dropdown is the first row of its fold, on the left at the child indent; it fits\n" );
+	int onRow = 0;
+	for ( QWidget * r : rows )
+		onRow += r->findChildren<WwDropdown *>().size();
+	check( onRow == 0, "no dropdown sits on a tick row" );
+	auto * lampRow = panel->findChild<QWidget *>( QStringLiteral( "CellDisplayRow_LampShadows" ) );
+	auto * lampBody = panel->findChild<QWidget *>( QStringLiteral( "CellShowBody_settings_LampShadows" ) );
+	auto * lampArrow = panel->findChild<QToolButton *>( QStringLiteral( "CellShowFold_settings_LampShadows" ) );
+	auto * lampDropRow = panel->findChild<QWidget *>( QStringLiteral( "CellDisplayDropRow_LampShadows" ) );
+	auto * bodyL = lampBody ? qobject_cast<QVBoxLayout *>( lampBody->layout() ) : nullptr;
+	check( lampRow && lampArrow && lampArrow->parentWidget() == lampRow && lampDrop && lampDropRow
+		&& lampDrop->parentWidget() == lampDropRow && bodyL && bodyL->count() && bodyL->itemAt( 0 )->widget() == lampDropRow,
+		"a dropdown with no other settings gets a fold arrow; the dropdown is the fold's first row" );
+	check( lampDropRow && lampDropRow->sizeHint().height() == h0, "the dropdown's row is a tick row's height" );
+	auto * aoBody = panel->findChild<QWidget *>( QStringLiteral( "CellShowBody_settings_Ao" ) );
+	auto * aoDrop = panel->findChild<WwDropdown *>( QStringLiteral( "CellDisplayChoice_Ao" ) );
+	auto * aoArrow = panel->findChild<QToolButton *>( QStringLiteral( "CellShowFold_settings_Ao" ) );
+	auto * fusionArrow = panel->findChild<QToolButton *>( QStringLiteral( "CellShowFold_FusionShaders" ) );
+	if ( fusionArrow && !fusionArrow->isChecked() )
+		fusionArrow->click();
+	if ( aoArrow && !aoArrow->isChecked() )
+		aoArrow->click();
+	if ( lampArrow && !lampArrow->isChecked() )
+		lampArrow->click();
+	const int width = 320;
+	panel->resize( width, 1600 );
+	panel->show();
+	QCoreApplication::processEvents();
+	auto * aoTick = panel->findChild<QCheckBox *>( QStringLiteral( "CellDisplayTick_Ao" ) );
+	const int tickX = aoTick ? aoTick->mapTo( panel, QPoint( 0, 0 ) ).x() : -1;
+	const int kidX = tickX + 16 + 6;	// a child row: its arrow space, the row's spacing, then its tick
+	const int dropX = aoDrop ? aoDrop->mapTo( panel, QPoint( 0, 0 ) ).x() : -2;
+	check( aoBody && aoBody->isVisible() && aoDrop && aoDrop->isVisible() && dropX == kidX,
+		"the dropdown starts exactly where a child row's tick starts (no label column, not pushed right)" );
+	const int right = aoDrop ? aoDrop->mapTo( panel, QPoint( aoDrop->width(), 0 ) ).x() : 1 << 20;
+	check( panel->width() <= width && right <= panel->width(), "a long-named dropdown fits the panel's width (Ambient Occlusion)" );
+	check( aoDrop && aoDrop->shownText() != aoDrop->text() && aoDrop->shownText().endsWith( QChar( 0x2026 ) )
+		&& aoDrop->itemText( 1 ) == m.aoMethod->actions().at( 1 )->text(), "the closed box elides; the list keeps the whole names" );
+	panel->hide();
+
+	std::printf( "round 4: fold arrows have no frame open, closed, hovered (heading and row)\n" );
+	check( arrowFlat( fusionArrow ), "an open heading arrow paints as a folded one pointing down (Fusion Shaders)" );
+	check( arrowFlat( lampArrow ), "an open row arrow paints the same (Lamp shadows)" );
+
+	std::printf( "round 4: the Preset row: label, dropdown, Next / Save / Rename / Delete; Low..Ultra built in\n" );
 	auto * bar = panel->findChild<QWidget *>( QStringLiteral( "CellDisplayPresetBar" ) );
-	auto * add = panel->findChild<QToolButton *>( QStringLiteral( "CellDisplayPresetAdd" ) );
-	bool barText = false;
+	bool barLabel = false;
 	if ( bar )
 		for ( QLabel * l : bar->findChildren<QLabel *>() )
-			barText |= !l->text().isEmpty();
-	check( bar && add && presetButtons( panel ).isEmpty() && !barText && !panel->findChild<WwDropdown *>( QStringLiteral( "CellDisplayPresetPicker" ) )
-		&& bar->findChildren<QWidget *>( QString(), Qt::FindDirectChildrenOnly ).size() == 1,
-		"no presets: the strip is the + button alone (no label, no picker)" );
+			barLabel |= l->text() == QStringLiteral( "Preset" );
+	QToolButton * nextB = barButton( panel, "Next" ), * saveB = barButton( panel, "Save" );
+	QToolButton * renB = barButton( panel, "Rename" ), * delB = barButton( panel, "Delete" );
+	check( bar && barLabel && picker( panel ) && nextB && saveB && renB && delB && !nextB->isHidden() && !saveB->isHidden()
+		&& !renB->isHidden() && !delB->isHidden(), "with no saved presets the row is all there: label, dropdown, four buttons" );
+	check( wwDisplayPresetNames().isEmpty() && pickerTexts( panel ) == four, "the dropdown lists Low, Medium, High, Ultra" );
+	check( picker( panel ) && picker( panel )->currentIndex() < 0 && picker( panel )->text() == QStringLiteral( "Custom" ),
+		"nothing applied yet reads Custom" );
+	m.grass->setChecked( false );
+	item( m.lamp, QStringLiteral( "Off" ) )->trigger();
+	m.ssgi->setChecked( false );
+	item( m.ssgiQ, QStringLiteral( "Low" ) )->trigger();
+	item( m.bloom, QStringLiteral( "Vanilla" ) )->trigger();
+	pickPreset( panel, QStringLiteral( "Ultra" ) );
+	check( item( m.lamp, QStringLiteral( "Ultra" ) )->isChecked() && m.ssgi->isChecked() && item( m.ssgiQ, QStringLiteral( "Ultra" ) )->isChecked()
+		&& item( m.bloom, QStringLiteral( "FO4CS" ) )->isChecked(), "Ultra: every Fusion Shaders row on at its top level" );
+	check( !m.grass->isChecked(), "a built-in leaves Vanilla alone" );
+	check( picker( panel )->currentText() == QStringLiteral( "Ultra" ) && renB && !renB->isEnabled() && delB && !delB->isEnabled(),
+		"the dropdown shows the built-in; Rename and Delete grey on a built-in" );
+	pickPreset( panel, QStringLiteral( "Medium" ) );
+	check( item( m.lamp, QStringLiteral( "Medium" ) )->isChecked() && m.ssgi->isChecked() && item( m.ssgiQ, QStringLiteral( "Medium" ) )->isChecked(),
+		"Medium steps every level down to Medium" );
+	pickPreset( panel, QStringLiteral( "Low" ) );
+	check( item( m.lamp, QStringLiteral( "Low" ) )->isChecked() && !m.ssgi->isChecked() && item( m.bloom, QStringLiteral( "FO4CS" ) )->isChecked(),
+		"Low: the cheap set (a heavy row off, the light ones at Low)" );
+	item( m.lamp, QStringLiteral( "High" ) )->trigger();
+	QCoreApplication::processEvents();
+	check( picker( panel )->currentIndex() < 0 && picker( panel )->text() == QStringLiteral( "Custom" ), "a change by hand after a preset reads Custom" );
+	check( !wwDisplayPresetSave( panel, QStringLiteral( "Ultra" ) ) && !wwDisplayPresetRename( panel, QStringLiteral( "Ultra" ), QStringLiteral( "Mine" ) )
+		&& !wwDisplayPresetDelete( panel, QStringLiteral( "Low" ) ), "a built-in is never overwritten, renamed or deleted" );
+
 	m.grass->setChecked( true );
 	m.ssgi->setChecked( false );
 	m.strength->setValue( 1.0 );
 	answer( QStringLiteral( "Quiet" ) );
-	if ( add )
-		add->click();
-	check( wwDisplayPresetNames() == QStringList( QStringLiteral( "Quiet" ) ) && presetButtons( panel ).size() == 1,
-		"+ saves the current Display as a named preset" );
+	if ( saveB )
+		saveB->click();
+	check( wwDisplayPresetNames() == QStringList( QStringLiteral( "Quiet" ) ) && pickerTexts( panel ) == four + QStringList( QStringLiteral( "Quiet" ) )
+		&& picker( panel )->currentText() == QStringLiteral( "Quiet" ), "Save keeps the Display as a named preset, listed after the built-ins" );
+	check( renB && renB->isEnabled() && delB && delB->isEnabled(), "Rename and Delete work on his own preset" );
 	const QVariantMap quiet = wwDisplayState( panel );
 	m.grass->setChecked( false );
 	m.ssgi->setChecked( true );
@@ -372,96 +473,72 @@ void displayChecks( const WwMenuPanelStyle & style )
 	m.strength->setValue( 3.0 );
 	m.color->setCurrentIndex( 2 );
 	answer( QStringLiteral( "Loud" ) );
-	if ( add )
-		add->click();
-	check( wwDisplayPresetNames().size() == 2 && presetButtons( panel ).size() == wwDisplayPresetNames().size(),
-		"every preset is a button, nothing to open (buttons == presets)" );
-	QToolButton * quietB = presetButton( panel, QStringLiteral( "Quiet" ) );
-	QToolButton * loudB = presetButton( panel, QStringLiteral( "Loud" ) );
-	check( loudB && loudB->isChecked() && quietB && !quietB->isChecked(), "the active preset is highlighted" );
-	check( bar && bar->layout() && bar->layout()->itemAt( bar->layout()->count() - 1 )->widget() == add, "+ ends the strip" );
-	if ( quietB )
-		quietB->click();
+	if ( saveB )
+		saveB->click();
+	pickPreset( panel, QStringLiteral( "Quiet" ) );
 	check( m.grass->isChecked() && !m.ssgi->isChecked() && qFuzzyCompare( m.strength->value(), 1.0 ) && m.color->currentIndex() == 1
 		&& wwDisplayState( panel ) == quiet && wwDisplayPresetCurrent() == QStringLiteral( "Quiet" ),
-		"one click applies the whole preset, live (round trip)" );
-	check( quietB && quietB->isChecked() && loudB && !loudB->isChecked(), "the highlight moves to the clicked preset" );
-	if ( quietB )
-		quietB->click();
-	check( quietB && quietB->isChecked(), "a click on the active one keeps it highlighted" );
-	check( loudB && loudB->contextMenuPolicy() == Qt::CustomContextMenu && presetAction( loudB, "Save" )
-		&& presetAction( loudB, "Rename" ) && presetAction( loudB, "Delete" ), "right-click gives Save, Rename, Delete" );
-	m.ssgi->setChecked( true );
-	item( m.ssgiQ, QStringLiteral( "Ultra" ) )->trigger();
-	m.strength->setValue( 3.0 );
-	m.color->setCurrentIndex( 2 );
-	m.grass->setChecked( true );	// Loud was saved with Grass off
-	if ( QAction * a = presetAction( loudB, "Save" ) )
-		a->trigger();
-	if ( quietB )
-		quietB->click();
-	m.grass->setChecked( false );
-	if ( loudB )
-		loudB->click();
-	check( m.grass->isChecked() && m.ssgi->isChecked() && wwDisplayPresetCurrent() == QStringLiteral( "Loud" ),
-		"right-click Save overwrites the preset with the current Display" );
+		"picking a preset applies all of it, live (round trip)" );
+	if ( nextB )
+		nextB->click();
+	check( wwDisplayPresetCurrent() == QStringLiteral( "Low" ), "Next goes round the built-ins and his own" );
+	pickPreset( panel, QStringLiteral( "Loud" ) );
 	answer( QStringLiteral( "Party" ) );
-	if ( QAction * a = presetAction( loudB, "Rename" ) )
-		a->trigger();
-	QToolButton * partyB = presetButton( panel, QStringLiteral( "Party" ) );
-	check( wwDisplayPresetNames() == QStringList( { QStringLiteral( "Party" ), QStringLiteral( "Quiet" ) } ) && partyB && partyB->isChecked()
-		&& !presetButton( panel, QStringLiteral( "Loud" ) ) && presetButtons( panel ).size() == 2,
-		"right-click Rename renames the button (and keeps it active)" );
+	if ( renB )
+		renB->click();
+	check( wwDisplayPresetNames() == QStringList( { QStringLiteral( "Party" ), QStringLiteral( "Quiet" ) } )
+		&& picker( panel )->currentText() == QStringLiteral( "Party" ), "Rename renames the current preset (and keeps it current)" );
 	check( !wwDisplayPresetRename( panel, QStringLiteral( "Party" ), QStringLiteral( "Quiet" ) ), "a rename onto a used name is refused" );
-	if ( QAction * a = presetAction( presetButton( panel, QStringLiteral( "Quiet" ) ), "Delete" ) )
-		a->trigger();
-	check( wwDisplayPresetNames() == QStringList( QStringLiteral( "Party" ) ) && presetButtons( panel ).size() == 1,
-		"right-click Delete removes the preset and its button" );
-	QCoreApplication::processEvents();	// the deleted buttons go
-	check( wwDisplayPresetSave( panel, QStringLiteral( "Quiet" ) ) && presetButtons( panel ).size() == 2, "a save through the API adds its button" );
-
-	QStringList many;
-	for ( char c = 'A'; c <= 'H'; c++ )
-		many << QStringLiteral( "Preset " ) + QLatin1Char( c );
-	for ( const QString & n : many )
-		wwDisplayPresetSave( panel, n );
-	int lines = 0, inside = 0, firstOk = 0;
-	const int width = 160;
-	if ( bar && bar->layout() ) {
-		bar->layout()->setGeometry( QRect( 0, 0, width, bar->layout()->heightForWidth( width ) ) );
-		QSet<int> ys;
-		QList<QToolButton *> all = presetButtons( panel );
-		all << add;
-		for ( QToolButton * b : all ) {
-			ys.insert( b->geometry().y() );
-			inside += b->geometry().right() < width;
-			firstOk += ( b->geometry().x() == 0 ) == b->property( "wwSegmentFirst" ).toBool();
-		}
-		lines = int( ys.size() );
-		check( presetButtons( panel ).size() == 10 && lines > 1 && inside == int( all.size() ) && firstOk == int( all.size() ),
-			"many presets wrap onto more lines, each line its own strip" );
-	} else {
-		check( false, "many presets wrap onto more lines, each line its own strip" );
-	}
-	for ( const QString & n : many )
-		wwDisplayPresetDelete( panel, n );
-	wwDisplayPresetApply( panel, QStringLiteral( "Party" ) );
+	pickPreset( panel, QStringLiteral( "Quiet" ) );
+	if ( delB )
+		delB->click();
+	check( wwDisplayPresetNames() == QStringList( QStringLiteral( "Party" ) ) && pickerTexts( panel ) == four + QStringList( QStringLiteral( "Party" ) ),
+		"Delete removes the current preset" );
+	pickPreset( panel, QStringLiteral( "Party" ) );
 	delete panel;
 
 	DisplayMenu m2;	// a fresh menu and panel: what was saved comes back
 	QWidget * fresh = wwMenuAsDisplay( &m2.menu, m2.rows(), nullptr, style );
-	check( wwDisplayPresetNames().size() == 2 && presetButtons( fresh ).size() == 2, "the presets persist for a fresh panel, a button each" );
-	QToolButton * freshParty = presetButton( fresh, QStringLiteral( "Party" ) );
-	check( freshParty && freshParty->isChecked(), "a fresh panel highlights the active preset" );
-	if ( QToolButton * q = presetButton( fresh, QStringLiteral( "Quiet" ) ) )
-		q->click();
-	if ( freshParty )
-		freshParty->click();
-	check( m2.grass->isChecked() && m2.ssgi->isChecked() && item( m2.ssgiQ, QStringLiteral( "Ultra" ) )->isChecked()
-		&& qFuzzyCompare( m2.strength->value(), 3.0 ) && m2.color->currentIndex() == 2, "a click on a fresh panel applies a saved preset" );
+	check( pickerTexts( fresh ) == four + QStringList( QStringLiteral( "Party" ) ), "the presets persist for a fresh panel" );
+	pickPreset( fresh, QStringLiteral( "Party" ) );
+	check( m2.grass->isChecked() == false && m2.ssgi->isChecked() && item( m2.ssgiQ, QStringLiteral( "Ultra" ) )->isChecked()
+		&& qFuzzyCompare( m2.strength->value(), 3.0 ) && m2.color->currentIndex() == 2, "a fresh panel applies a saved preset" );
 	check( !wwDisplayPresetSave( fresh, QStringLiteral( "a/b" ) ) && !wwDisplayPresetSave( fresh, QStringLiteral( " " ) ),
 		"a name with a slash or no name is refused" );
 	delete fresh;
+}
+
+//! round 4: "if a setting in fusion shaders overrides something in vanilla, grey it out in vanilla".
+void overrideChecks( const WwMenuPanelStyle & style )
+{
+	std::printf( "round 4: a Vanilla row greys while the Fusion Shaders row replacing it is on (live, value kept)\n" );
+	QMenu menu;
+	QAction * taa = tick( &menu, "Taa", true );
+	QMenu * modern = choices( &menu, "ModernTaa", { QStringLiteral( "Off" ), QStringLiteral( "Low" ), QStringLiteral( "Ultra" ) }, 0 );
+	tick( &menu, "Grass", true );
+	const QStringList g = wwDisplayGroups();
+	WwDisplayRow v;
+	v.group = g.at( 1 );
+	v.tick = QStringLiteral( "Taa" );
+	v.overriddenBy = QStringLiteral( "ModernTaa" );
+	WwDisplayRow grass;
+	grass.group = g.at( 1 );
+	grass.tick = QStringLiteral( "Grass" );
+	WwDisplayRow f;
+	f.group = g.at( 2 );
+	f.choices = QStringLiteral( "ModernTaa" );
+	f.off = 0;
+	f.quality = true;
+	QWidget * panel = wwMenuAsDisplay( &menu, { v, grass, f }, nullptr, style );
+	auto * row = panel->findChild<QWidget *>( QStringLiteral( "CellDisplayRow_Taa" ) );
+	auto * other = panel->findChild<QWidget *>( QStringLiteral( "CellDisplayRow_Grass" ) );
+	check( row && row->isEnabled(), "the Fusion row off: the Vanilla row is live" );
+	item( modern, QStringLiteral( "Low" ) )->trigger();
+	check( row && !row->isEnabled() && taa->isChecked(), "the Fusion row on: the Vanilla row greys, its tick keeps its value" );
+	check( other && other->isEnabled(), "a Vanilla row nothing replaces stays live" );
+	item( modern, QStringLiteral( "Off" ) )->trigger();
+	check( row && row->isEnabled() && taa->isChecked(), "the Fusion row off again: the Vanilla row comes back as it was" );
+	delete panel;
 }
 
 //! notes 18-26: a group is one row (fold arrow + tick + name), its rows indented in its fold; a master greys them.
@@ -626,6 +703,7 @@ int main( int argc, char ** argv )
 
 	displayChecks( style );
 	groupChecks( style );
+	overrideChecks( style );
 	liveBindChecks();
 
 	std::printf( "%d checks, %d failed\n%s\n", checks, fails, fails ? "FAIL" : "PASS" );
