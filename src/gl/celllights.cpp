@@ -1315,9 +1315,14 @@ void wwCellCamDump( Scene * scene )
 			w -= cv.rotation( j, k ) * cv.translation[j];
 		camW[k] = w / csc;
 	}
+	// lane CAMSPOT1: look = a point 1000 u ahead (the view looks down -Z), the live driver's cam: target
+	float look[3];
+	for ( int k = 0; k < 3; k++ )
+		look[k] = camW[k] - 1000.0f * cv.rotation( 2, k );
 	static QString camLast;
-	const QString line = QStringLiteral( "cam=%1,%2,%3 fogprobe=%4 probe=%5\n" ).arg( double( camW[0] ), 0, 'f', 2 )
-		.arg( double( camW[1] ), 0, 'f', 2 ).arg( double( camW[2] ), 0, 'f', 2 ).arg( s.fogProbe ).arg( s.probe );
+	const QString line = QStringLiteral( "cam=%1,%2,%3 look=%6,%7,%8 fogprobe=%4 probe=%5\n" ).arg( double( camW[0] ), 0, 'f', 2 )
+		.arg( double( camW[1] ), 0, 'f', 2 ).arg( double( camW[2] ), 0, 'f', 2 ).arg( s.fogProbe ).arg( s.probe )
+		.arg( double( look[0] ), 0, 'f', 2 ).arg( double( look[1] ), 0, 'f', 2 ).arg( double( look[2] ), 0, 'f', 2 );
 	QFile f( camDump );
 	if ( line != camLast && f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
 		f.write( line.toUtf8() );
