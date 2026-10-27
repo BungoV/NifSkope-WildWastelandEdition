@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLFIT5 (2026-10-27, branch volfit5-20261027): GI room fit faster, same bytes
+
+- **Edge rays on the GPU:** the room fit's edge rays now go to the exact whole-ray tracer in batches instead of one at a
+  time on the CPU. **Big rooms side by side:** the big rooms are fitted at the same time, sharing the cores. Neither
+  changes a byte: the .space files equal VOLFIT4's on all four real cells, GPU and CPU alike. Pins
+  `WW_VOLFIT_SPEC=edgegpu=0,bigpar=0` restore VOLFIT4's path.
+- Same run, fit seconds VOLRAY1 / VOLFIT4 / VOLFIT5: museum 2.6 / 7.7 / 6.2, Goodneighbor 4.8 / 20.5 / 12.1,
+  Sanctuary 3.3 / 4.7 / 4.7, Concord 12.7 / 25.9 / 25.2.
+- Cost: offline only, 0 GPU-ms and 0 memory at runtime. The census adds " edge casts N".
+
 ## Lane VOLFIT4 (2026-10-27, branch volfit4-20261027): GI room fit stops growing through walls into other rooms, 2-5x faster
 
 - **Cross-wall overlap priced:** a room's face move now pays 16 (was 2) for every point it takes inside another room's

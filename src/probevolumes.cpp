@@ -2134,6 +2134,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			else if ( k == QLatin1String( "budget" ) && x > 0 ) spec.budget = x;
 			else if ( k == QLatin1String( "rounds" ) ) spec.rounds = int( x );
 			else if ( k == QLatin1String( "jitter" ) ) spec.jitter = x != 0;
+			else if ( k == QLatin1String( "edgegpu" ) ) spec.edgeGpu = x != 0;
+			else if ( k == QLatin1String( "bigpar" ) ) spec.bigPar = x != 0;
 		}
 		spec.legacy = legacyFine;
 		if ( red == QLatin1String( "volfit3" ) )   // lane VOLFIT4's red: overlaps priced as plain foreign air
@@ -2167,7 +2169,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 				.arg( fs.pickGrid ).arg( fs.pickMoved ).arg( fs.extrasUsed ).arg( fs.facesMoved ).arg( fs.merged );
 		V.fineNote += QStringLiteral( "; fine ms wall %1 big %2 owner %3 edges %4 class %5 greedy %6 moves %7" ).arg( qRound( fs.msWall ) )
 			.arg( qRound( fs.msBig ) ).arg( qRound( fs.msOwner ) ).arg( qRound( fs.msRays ) ).arg( qRound( fs.msClass ) ).arg( qRound( fs.msGreedy ) )
-			.arg( qRound( fs.msMoves ) );
+			.arg( qRound( fs.msMoves ) ) + QStringLiteral( " edge casts %1" ).arg( fs.edgeCast );
 		V.msFine = fc.nsecsElapsed() / 1e6;
 	}
 	V.refineRays = refineRays;

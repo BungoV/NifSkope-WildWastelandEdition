@@ -32,6 +32,9 @@ double fineJitter( int x, int y, int z, int axis )
 	return double( v & 0xFFFF ) / 65535.0 - 0.5;
 }
 
+//! VOLFIT5: how many big rooms share the machine; a big room's own fan-outs take their share of the threads
+thread_local int tlFineShare = 1;
+
 //! n jobs over the machine's threads, or on this thread (a room small enough to run whole on one worker)
 void fineFor( size_t n, bool par, const std::function<void( size_t )> & fn )
 {
@@ -40,7 +43,7 @@ void fineFor( size_t n, bool par, const std::function<void( size_t )> & fn )
 			fn( k );
 		return;
 	}
-	const int nThreads = std::max( 1, int( std::thread::hardware_concurrency() ) );
+	const int nThreads = std::max( 1, int( std::thread::hardware_concurrency() ) / std::max( 1, tlFineShare ) );
 	std::atomic<size_t> next( 0 );
 	std::vector<std::thread> pool;
 	for ( int i = 0; i < nThreads; i++ )
@@ -295,7 +298,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			}
 	S.msOwner = clock.nsecsElapsed() / 1e6;
 
-	std::atomic<qint64> nRays( 0 ), nFree( 0 ), nSnap( 0 ), nPts( 0 ), nRoom( 0 ), nCov( 0 ), nForeign( 0 );
+	std::atomic<qint64> nRays( 0 ), nFree( 0 ), nSnap( 0 ), nPts( 0 ), nRoom( 0 ), nCov( 0 ), nForeign( 0 ), nEdgeCast( 0 );
 	std::atomic<qint64> nsRays( 0 ), nsCover( 0 ), nsClass( 0 ), nsGreedy( 0 ), nsMoves( 0 );
 	// VOLFIT3: per room the grid fit's score and the moved set's (u3 of uncovered room air + badW x foreign air held),
 	// and its extra lattice boxes with what each cuts
@@ -399,54 +402,89 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 					fl[pidx( i, j, k )] = f;
 				}
 		} );
-		// segments to the +u +v +z neighbour: cut when a triangle lies on them (only where the room owns an end)
-		fineFor( size_t( nz ), par, [&]( size_t ks ) {
-			const int k = int( ks );
-			qint64 nr = 0, nf = 0;
-			for ( int j = 0; j < ny; j++ )
-				for ( int i = 0; i < nx; i++ ) {
-					const size_t a = pidx( i, j, k );
-					double p[3];
-					ptW( a, p );
-					quint8 m = 0;
-					for ( int e = 0; e < 3; e++ ) {
-						const int i2 = i + ( e == 0 ), j2 = j + ( e == 1 ), k2 = k + ( e == 2 );
-						if ( i2 >= nx || j2 >= ny || k2 >= nz )
-							continue;
-						const size_t bq = pidx( i2, j2, k2 );
-						if ( !( fl[a] & 9 ) && !( fl[bq] & 9 ) )
-							continue;
-						double q[3];
-						ptW( bq, q );
-						bool thr = false;
-						for ( const TBox * t : thrNear )
-							if ( t->seg( p, q ) ) {
-								thr = true;
-								break;
+		// segments to the +u +v +z neighbour: cut when a triangle lies on them (only where the room owns an end).
+		// VOLFIT5: with a scene, a slab of slices gathers its rays and casts them as one batch (any-hit on the whole-ray
+		// tracer, whose answer is the CPU tree's); the cut bits come out the same
+		const bool edgeCast = g.scene && spec.edgeGpu;
+		const size_t slab = edgeCast ? std::max<size_t>( 1, size_t( par ? 4000000 / std::max( 1, tlFineShare ) : 500000 ) / ( 3 * sk ) )
+			: size_t( nz );
+		for ( size_t k0 = 0; k0 < size_t( nz ); k0 += slab ) {
+			const size_t k1 = std::min( size_t( nz ), k0 + slab );
+			std::vector<std::vector<bakert::XRay>> eRays( edgeCast ? k1 - k0 : 0 );
+			std::vector<std::vector<quint32>> eAt( edgeCast ? k1 - k0 : 0 );   // per ray: point a * 4 + axis, within the slice
+			fineFor( k1 - k0, par, [&]( size_t ks ) {
+				const int k = int( k0 + ks );
+				qint64 nr = 0, nf = 0;
+				for ( int j = 0; j < ny; j++ )
+					for ( int i = 0; i < nx; i++ ) {
+						const size_t a = pidx( i, j, k );
+						double p[3];
+						ptW( a, p );
+						quint8 m = 0;
+						for ( int e = 0; e < 3; e++ ) {
+							const int i2 = i + ( e == 0 ), j2 = j + ( e == 1 ), k2 = k + ( e == 2 );
+							if ( i2 >= nx || j2 >= ny || k2 >= nz )
+								continue;
+							const size_t bq = pidx( i2, j2, k2 );
+							if ( !( fl[a] & 9 ) && !( fl[bq] & 9 ) )
+								continue;
+							double q[3];
+							ptW( bq, q );
+							bool thr = false;
+							for ( const TBox * t : thrNear )
+								if ( t->seg( p, q ) ) {
+									thr = true;
+									break;
+								}
+							if ( thr ) {
+								m |= quint8( 1 << e );
+								continue;
 							}
-						if ( thr ) {
-							m |= quint8( 1 << e );
-							continue;
+							if ( !spec.exactEdges && cg.segAir( p, q ) ) {
+								nf++;
+								continue;
+							}
+							const double o[3] = { p[0] - bvhO[0], p[1] - bvhO[1], p[2] };
+							double th = 0;
+							nr++;
+							double dq[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] };
+							const double lq = std::sqrt( dq[0] * dq[0] + dq[1] * dq[1] + dq[2] * dq[2] );
+							for ( double & x : dq )
+								x /= lq;
+							if ( edgeCast ) {
+								eRays[ks].push_back( { { o[0], o[1], o[2] }, lq, { dq[0], dq[1], dq[2] }, 0.0 } );
+								eAt[ks].push_back( quint32( ( a - size_t( k ) * sk ) * 4 + size_t( e ) ) );
+								continue;
+							}
+							if ( bvh.ray( o, dq, lq, &th ) )
+								m |= quint8( 1 << e );
 						}
-						if ( !spec.exactEdges && cg.segAir( p, q ) ) {
-							nf++;
-							continue;
-						}
-						const double o[3] = { p[0] - bvhO[0], p[1] - bvhO[1], p[2] };
-						double th = 0;
-						nr++;
-						double dq[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] };
-						const double lq = std::sqrt( dq[0] * dq[0] + dq[1] * dq[1] + dq[2] * dq[2] );
-						for ( double & x : dq )
-							x /= lq;
-						if ( bvh.ray( o, dq, lq, &th ) )
-							m |= quint8( 1 << e );
+						cut[a] = m;
 					}
-					cut[a] = m;
+				nRays += nr;
+				nFree += nf;
+			} );
+			if ( edgeCast ) {
+				std::vector<size_t> at( k1 - k0 + 1, 0 );
+				for ( size_t s = 0; s < k1 - k0; s++ )
+					at[s + 1] = at[s] + eRays[s].size();
+				std::vector<bakert::XRay> rays( at.back() );
+				std::vector<bakert::XHit> hits( rays.size() );
+				for ( size_t s = 0; s < k1 - k0; s++ ) {
+					std::copy( eRays[s].begin(), eRays[s].end(), rays.begin() + std::ptrdiff_t( at[s] ) );
+					std::vector<bakert::XRay>().swap( eRays[s] );
 				}
-			nRays += nr;
-			nFree += nf;
-		} );
+				if ( !rays.empty() )
+					g.scene->cast( rays.data(), rays.size(), hits.data(), g.scene->whole() );
+				nEdgeCast += qint64( rays.size() );
+				fineFor( k1 - k0, par, [&]( size_t s ) {
+					const size_t base = ( k0 + s ) * sk;
+					for ( size_t x = 0; x < eAt[s].size(); x++ )
+						if ( hits[at[s] + x].tri >= 0 )
+							cut[base + eAt[s][x] / 4] |= quint8( 1 << ( eAt[s][x] & 3 ) );
+				} );
+			}
+		}
 		nsRays += t0.nsecsElapsed();
 		t0.start();
 		// floods: the room from its own air through uncut segments into what it owns; then foreign from everything
@@ -471,7 +509,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		auto classify = [&]( const std::vector<size_t> & ids ) {
 			QElapsedTimer tc;
 			tc.start();
-			const size_t K = sdirs.size(), per = std::max<size_t>( 1, size_t( par ? 4000000 : 500000 ) / K ), chunk = 256;
+			const size_t K = sdirs.size(), per = std::max<size_t>( 1, size_t( par ? 4000000 / std::max( 1, tlFineShare ) : 500000 ) / K ), chunk = 256;
 			std::vector<bakert::XRay> rays;
 			std::vector<bakert::XHit> hits;
 			for ( size_t b = 0; b < ids.size(); b += per ) {
@@ -1371,8 +1409,9 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		shapes.resize( k );
 		out[size_t( r )] = std::move( shapes );
 	};
-	// big rooms one at a time over every thread; the rest a room per thread
-	std::vector<int> small;
+	// big rooms over every thread, side by side (each over its share of the threads); the rest a room per thread. A room
+	// writes only its own slots and sums only counts, so running rooms together changes no byte (bigpar=0: one at a time)
+	std::vector<int> big, small;
 	QElapsedTimer tb;
 	tb.start();
 	for ( int r = 0; r < rooms; r++ ) {
@@ -1380,10 +1419,18 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 		if ( b[0] > b[1] )
 			continue;
 		const double vol = ( b[1] - b[0] + 8 * C ) * ( b[3] - b[2] + 8 * C ) * ( b[5] - b[4] + 8 * C ) / ( spec.h * spec.h * spec.h );
-		if ( vol > 400000.0 )
+		( vol > 400000.0 ? big : small ).push_back( r );
+	}
+	if ( spec.bigPar && big.size() > 1 ) {
+		const int share = int( std::min<size_t>( big.size(), size_t( std::max( 1u, std::thread::hardware_concurrency() ) ) ) );
+		fineFor( big.size(), true, [&]( size_t k ) {
+			tlFineShare = share;
+			fitRoom( big[k], true );
+			tlFineShare = 1;
+		} );
+	} else {
+		for ( int r : big )
 			fitRoom( r, true );
-		else
-			small.push_back( r );
 	}
 	S.msBig = tb.nsecsElapsed() / 1e6;
 	fineFor( small.size(), true, [&]( size_t k ) { fitRoom( small[k], false ); } );
@@ -1482,6 +1529,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	}
 	S.rays = nRays;
 	S.freeEdges = nFree;
+	S.edgeCast = nEdgeCast;
 	S.snapRays = nSnap;
 	S.points = nPts;
 	S.roomPts = nRoom;

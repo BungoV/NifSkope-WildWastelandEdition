@@ -65,6 +65,9 @@ struct ProbeFineSpec
 	int rounds = 2;                 //!< face-move passes over the grid boxes
 	// lane VOLFIT4
 	double badO = 16.0;             //!< a non-room point inside another room's grid shape costs this many (a cross-wall overlap)
+	// lane VOLFIT5 (neither changes a byte of the result; 0 = VOLFIT4's path)
+	bool edgeGpu = true;            //!< the edge rays go to g.scene in batches (any-hit on the RT tracer)
+	bool bigPar = true;             //!< the big rooms are fitted side by side, not one at a time
 };
 
 struct ProbeFineStats
@@ -79,7 +82,8 @@ struct ProbeFineStats
 	int rooms = 0, boxes = 0;
 	double msOwner = 0, msRays = 0, msCover = 0;
 	double msClass = 0, msGreedy = 0, msMoves = 0;   //!< VOLFIT4's profile (thread-summed, as msRays/msCover)
-	double msBig = 0, msWall = 0;                    //!< wall clock: the big rooms (one at a time), the whole fit
+	double msBig = 0, msWall = 0;                    //!< wall clock: the big rooms, the whole fit
+	qint64 edgeCast = 0;                             //!< VOLFIT5: edge rays sent to the scene
 };
 
 /*! Per room (index r = room r + 1): its boxes, empty where the room has no air on the lattice (keep the grid fit).
