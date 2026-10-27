@@ -1719,6 +1719,8 @@ bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & 
 		}
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		// lane SKYDISC1B: the limb's footprint is long radially (and the poles' along a parallel)
+		glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, TexCache::get_max_anisotropy() );
 	}
 	const GLuint luts[3] = { af.trans, af.sunView, af.moonView };
 	for ( int u = 0; u < 3; u++ ) {
@@ -1763,8 +1765,6 @@ bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & 
 	prog->uni3f( "bodyZ", float( ez[0] ), float( ez[1] ), float( ez[2] ) );
 	prog->uni1f( "sinR", float( sinR ) );
 	prog->uni1f( "pxAng", float( pxAng ) );
-	prog->uni1f( "lodD", float( wwskydisc::moonLod( 2048.0, pxAng ) ) );
-	prog->uni1f( "lodN", float( wwskydisc::moonLod( 1024.0, pxAng ) ) );
 	prog->uni1f( "albedoInv", float( 1.0 / wwskydisc::kAlbedoMean ) );
 	prog->uni1f( "sunTerm", float( t.sunTerm ) );
 	prog->uni1f( "earthTerm", float( t.earthTerm ) );
