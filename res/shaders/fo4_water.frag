@@ -47,7 +47,8 @@
  *   WATERWAVES1 (Water swell row), water_waves.glsl: 34 (0.5 + 4 x the swell's slope x, y; its weight)
  *   WATERCAUSTICS1 (Water caustics row), water_caustics.glsl: 35 the factor on the bed / 2 as grey,
  *   36 (focus I / 8, depth envelope, sun share)
- *   WATERSHORE1 (Water soft edge, Shore foam rows), water_shore.glsl: 37 (edge, foam, shore distance / 1024)
+ *   WATERSHORE1 (Water soft edge, Shore foam rows), water_shore.glsl: 37 (edge, foam, shore distance / 1024);
+ *   WATERFOAMDETAIL1 (the foam's wave-energy law): 38 (Hs / 64 u, energy amount, water column / 64 u)
  *   (was 32 in the shore lane's own twin, which clashed with the depth probe) */
 
 #define WW_FOG 1
@@ -236,8 +237,16 @@ void main()
 #ifdef WW_WATER_SHORE
 	// lane WATERSHORE1: the baked shore distance also fades the edge, so far water (no depth term) fades as near does
 	vec2 shoreField = waterShoreOn != 0 ? wwShoreField( P.xy ) : vec2( 0.0 );
-	float shoreEdgeV = ( waterShoreOn & 1 ) != 0 ? wwShoreEdge( shoreField ) : 0.0;
-	float shoreFoamV = ( waterShoreOn & 2 ) != 0 && !under ? wwShoreFoam( shoreField, P.xy, waterShoreTime ) : 0.0;
+	// lane WATERFOAMDETAIL1: the soft contact from the water path to the scene behind and the bake (law 1), red: the bake
+	float shoreEdgeV = ( waterShoreOn & 1 ) == 0 ? 0.0
+		: waterShoreEdgeLaw == 1 ? wwShoreEdgeSoft( shoreField, along, V.z ) : wwShoreEdge( shoreField );
+	// lane WATERFOAMDETAIL1: the foam by the wave energy at the shore (waterShoreLaw 1), the old band as its red (0)
+	float shoreFoot = max( length( dFdx( P.xy ) ), length( dFdy( P.xy ) ) );
+	float shoreColFoot = fwidth( min( vert, 4096.0 ) );
+	vec3 shoreFoamDbg = vec3( 0.0 );
+	float shoreFoamV = ( waterShoreOn & 2 ) == 0 || under ? 0.0
+		: waterShoreLaw == 1 ? wwShoreFoamWave( shoreField, P.xy, waterShoreTime, vert, shoreColFoot, shoreFoot, shoreFoamDbg )
+		: wwShoreFoam( shoreField, P.xy, waterShoreTime );
 	if ( ( waterRed & 16 ) == 0 )
 		shore = max( shore, shoreEdgeV );
 #endif
@@ -300,6 +309,9 @@ void main()
 	vec3 texOff = texelFetch( waterScene, opx, 0 ).rgb;
 	vec3 refr = frameToLinear( texIn );
 	vec3 refrOff = frameToLinear( texOff );
+#ifdef WW_WATER_SHORE
+	vec3 refrIn = refr;	// lane WATERFOAMDETAIL1: the scene at this very pixel, before any water colour
+#endif
 	// lane WATER2: the depth-colour pass already drawn into the copy: here at this pixel's own distances, at the
 	// offset texel at that texel's (its view ray met with the water's plane, where the water stands before the scene)
 	float offAlong = 0.0, offVert = 0.0, offHit = 0.0;
@@ -371,6 +383,10 @@ void main()
 		lin = mix( far, lin, dfade ) + spec;
 		lin = mix( lin, refrOff, shore );
 #ifdef WW_WATER_SHORE
+		/* lane WATERFOAMDETAIL1: at the contact the water path is 0, so no depth colour, murk or shifted tap either: the
+		 * pixel becomes the scene it covers and the dry side continues without a seam */
+		if ( waterShoreEdgeLaw == 1 && ( waterRed & 16 ) == 0 )
+			lin = mix( lin, refrIn, shoreEdgeV );
 		/* lane WATERSHORE1: the foam, a Lambert white of albedo 0.55 (fresh sea foam, Koepke 1984, Applied Optics
 		 * 23(11)) lit by the sun and the water's upper sky row; opacity K1.w lets the water read through its holes */
 		vec3 foamLin = 0.55 * ( sun * clamp( Ldir.z, 0.0, 1.0 ) + waterSky[2].rgb );
@@ -442,6 +458,8 @@ void main()
 #ifdef WW_WATER_SHORE
 		else if ( waterProbe == 37 )	// WATERSHORE1: (edge, foam, shore distance / 1024) at this pixel
 			o = vec3( shoreEdgeV, shoreFoamV, clamp( shoreField.x / 1024.0, 0.0, 1.0 ) );
+		else if ( waterProbe == 38 )	// WATERFOAMDETAIL1: (Hs / 64 u, the energy amount, the column used / 64 u)
+			o = clamp( shoreFoamDbg, 0.0, 1.0 );
 #endif
 #ifdef WW_WATER_WAVES
 		else if ( waterProbe == 34 )	// WATERWAVES1: (0.5 + 4 x the swell's slope x, y; its weight) at this pixel

@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERFOAMDETAIL1 (2026-10-27, branch waterfoamdetail1-20261027): shore foam by wave energy, a soft waterline
+
+- **Shore foam follows the waves at the shore** (Shore foam row, water_shore.glsl wwShoreFoamWave). Wave height from
+  the wind (the weather's wind byte as 1-20 m/s) over the body's fetch (JONSWAP, capped by Pierson-Moskowitz), plus
+  the sea swell on the sea; foam where the column is under H / 0.78 (breaking), its amount by H^2.5, fresh water keeps
+  0.25 of it. Calm rivers and lakes get no foam; a lap line only from 5 cm waves, thin, translucent and broken.
+- **Foam detail:** five periodic value-noise octaves (24 u down to 0.3 u) and a Worley bubble lace at 1.2 u, each
+  fading to its mean once a pixel covers it (no shimmer at range); soft thresholds, no slabs.
+- **Soft waterline** (Water soft edge row, wwShoreEdgeSoft): the water fades into whatever it covers over the water
+  path to the scene behind (depth buffer: banks, rocks, debris, actors) or the baked shore distance, 0.5 m looking
+  down to 1.5 m at a grazing view. At the contact the pixel is the scene itself (no depth colour, murk or shifted tap):
+  before, the edge row used only the 128 u bake and blended to a murked, shifted scene, which left a dark line.
+- **Switches (all live):** WW_CELL_WATER_FOAM_RED=old (the old distance band), WW_CELL_WATER_EDGE_RED=old (the old
+  baked edge), WW_CELL_WATER_FOAM_WIND=0..255 (pin the wind byte). Probe 38: Hs / 64 u, foam amount, column / 64 u.
+  The census line adds the edge and foam laws and the wind and swell used.
+- **Off unchanged:** fo4_water.prog's NVIDIA binaries equal the base's in 3 modes and the info-probe build, but the
+  run stamp and the 8-byte source hash; 300 of 300 programs x modes link.
+- **Offline gates (notes/waterfoamdetail1/tools/foam_readback.py):** near-shore fresh water covered 0.0000 at wind
+  0 and 64 (old band 0.32), the sea 0.04 / 0.17 / 0.86 at wind 0 / 64 / 255 (old 0.31); close-up neighbour step
+  12.9 levels vs 1.2 old; edge law equals its model on 8604 points. Cost 0.089 ms per 1080p of shore water.
+
 ## Lane WATERCOMBINE1 (2026-10-27, branch watercombine1-20261027): every water look draws together, one program
 
 - **Merged** watershore1 (Water soft edge + Shore foam) and waterwaves1 (Water swell) onto watercaustics1 (depth +

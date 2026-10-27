@@ -53,6 +53,9 @@ struct WaterState
 	int probe = 0;
 	int shoreRed = 0;	// WATERSHORE1: 1 nearest (WW_CELL_WATER_SHORE_RED)
 	int wavesRed = 0;	// WATERWAVES1: 1 flat, 2 noshore, 4 alias (WW_CELL_WATER_WAVES_RED)
+	bool foamOld = false;	// WATERFOAMDETAIL1: WW_CELL_WATER_FOAM_RED=old, the distance band instead of the wave law
+	int foamWind = -1;	// WATERFOAMDETAIL1: WW_CELL_WATER_FOAM_WIND=0..255 pins the weather's wind byte (gates)
+	bool edgeOld = false;	// WATERFOAMDETAIL1: WW_CELL_WATER_EDGE_RED=old, the baked band only (no soft contact)
 	bool linear = false;	// WATERHDR1: the last water draw wrote linear light into the HDR frame
 	QString dump;
 	QSet<QString> missing;	// noise textures that did not bind (the census says so)
@@ -79,9 +82,23 @@ WaterState & st()
 		s->shoreRed = wwEnv( "WW_CELL_WATER_SHORE_RED" ).trimmed() == "nearest" ? 1 : 0;
 		const QByteArray wr = wwEnv( "WW_CELL_WATER_WAVES_RED" ).trimmed();
 		s->wavesRed = wr == "flat" ? 1 : wr == "noshore" ? 2 : wr == "alias" ? 4 : 0;
+		s->foamOld = wwEnv( "WW_CELL_WATER_FOAM_RED" ).trimmed() == "old";
+		const QByteArray fw = wwEnv( "WW_CELL_WATER_FOAM_WIND" ).trimmed();
+		s->foamWind = fw.isEmpty() ? -1 : std::clamp( fw.toInt(), 0, 255 );
+		s->edgeOld = wwEnv( "WW_CELL_WATER_EDGE_RED" ).trimmed() == "old";
 		s->dump = QString::fromLocal8Bit( wwEnv( "WW_CELL_WATER_DUMP" ) );
 	}
 	return *s;
+}
+
+// lane WATERFOAMDETAIL1: the foam's drive, the weather's wind (or the pin) as m/s and the sea swell in m
+void foamDrive( const WaterState & s, float & windMs, float & swellM )
+{
+	quint8 wind[4] = { 0, 0, 0, 0 };
+	const bool haveWind = s.foamWind >= 0 || wwLookdevWind( wind );
+	const float w01 = s.foamWind >= 0 ? float( s.foamWind ) / 255.0f : float( wind[0] ) / 255.0f;
+	windMs = haveWind ? 1.0f + 19.0f * w01 : 5.0f;
+	swellM = 0.344f * ( haveWind ? 0.6f + 0.8f * w01 : 1.0f );
 }
 
 //! NAM2-4 store "data\Textures\Water\X.dds"; the cache resolves paths under the data folder
@@ -333,6 +350,20 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni4f( "waterShoreK1", FloatVector4( waveLength, wavePeriod, foamFloor, foamOpacity ) );
 		// the world clock as the normals' scroll reads it: frozen at 0 with the world's animation off
 		prog->uni1f( "waterShoreTime", wwCellWorldAnimOn() ? float( wwCellWorldSeconds() ) : 0.0f );
+		/* lane WATERFOAMDETAIL1: the foam follows the wave energy at the shore (water_shore.glsl wwShoreFoamWave).
+		 * Wind: the weather's speed byte as 1-20 m/s (the game's meaning of the byte is unknown; 5 m/s with no
+		 * weather). Sea swell: WATERWAVES1's sea swell (a k 0.045 at 24 m = 0.34 m crest to trough) times its wind
+		 * factor. A river's fetch is its width, 40 m. Full foam at 0.6 m breakers; fresh water keeps 0.25 of it;
+		 * breaker index 0.78 (McCowan 1894); the lap line 0.35 opaque at most, from 5 cm waves (ripples run up clear). */
+		float windMs = 0.0f, swellM = 0.0f;
+		foamDrive( s, windMs, swellM );
+		prog->uni1i( "waterShoreLaw", s.foamOld ? 0 : 1 );
+		prog->uni4f( "waterShoreK2", FloatVector4( windMs, swellM, 40.0f, 0.6f ) );
+		prog->uni4f( "waterShoreK3", FloatVector4( 0.25f, 0.78f, 0.35f, 0.05f ) );
+		/* the soft contact: the water path to the scene behind fades the water out over 35 u (0.5 m) looking down to
+		 * 105 u (1.5 m) at a grazing view; the bake's distance counts 64 u (half a texel) more for its error */
+		prog->uni1i( "waterShoreEdgeLaw", s.edgeOld ? 0 : 1 );
+		prog->uni4f( "waterShoreK4", FloatVector4( 35.0f, 105.0f, 64.0f, 0.0f ) );
 	}
 	if ( prog->uniLocation( "waterWavesOn" ) >= 0 ) {
 		/* lane WATERWAVES1 (fo4_waterlook.prog, water_waves.glsl). Engineering choices in game units (70 u = 1 m); the
@@ -407,6 +438,21 @@ QString wwCellWaterEcho( const void * nif )
 				.arg( wwLookOn( WwLook::WaterSoftEdge ) ? QLatin1String( "on" ) : QLatin1String( "off" ) )
 				.arg( wwLookOn( WwLook::ShoreFoam ) ? QLatin1String( "on" ) : QLatin1String( "off" ) )
 				.arg( s.shoreRed ? QLatin1String( " (red nearest)" ) : QLatin1String( "" ) )
+			: QString() )
+		// lane WATERFOAMDETAIL1: the edge's law
+		+ ( wwLookOn( WwLook::WaterSoftEdge )
+			? ( s.edgeOld ? QStringLiteral( ", edge law old (red)" ) : QStringLiteral( ", edge law contact 35-105 u" ) )
+			: QString() )
+		// lane WATERFOAMDETAIL1: the foam's law and what drove it at the last draw
+		+ ( wwLookOn( WwLook::ShoreFoam )
+			? ( s.foamOld ? QStringLiteral( ", foam law old (red)" )
+				: [&s]() {
+					float windMs = 0.0f, swellM = 0.0f;
+					foamDrive( s, windMs, swellM );
+					return QStringLiteral( ", foam law wave: wind %1 m/s%2, sea swell %3 m" ).arg( double( windMs ), 0, 'f', 2 )
+						.arg( s.foamWind >= 0 ? QStringLiteral( " (pinned %1)" ).arg( s.foamWind ) : QString() )
+						.arg( double( swellM ), 0, 'f', 3 );
+				}() )
 			: QString() )
 		// lane WATERWAVES1: said only while the swell is on, so the census line with the row off is as before
 		+ ( wwLookOn( WwLook::WaterSwell )
