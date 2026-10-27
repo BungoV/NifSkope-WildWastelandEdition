@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "lodtfile.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "watermark.h"	// lane WATERFLOWBAKE1: WaterFlowGrid, the per-texel river solve
 #include "esmdata.h"
 #include "lodgenlayout.h"
 #include "data/niftypes.h"   // lane WATER1: Matrix, for placed water refs
@@ -1335,6 +1336,247 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 	out.flowSamples = flowS;
 	out.shoreSamples = in.opt.shore ? bodyS : 0;
 
+	/* ---- the per-texel river field (lane WATERFLOWBAKE1) --------------------
+	 * A constant word points a river one way over its whole length, so every
+	 * bend flows into its own bank. Each river with a direction is solved for
+	 * potential flow on its own mask with the marking tool's core (WaterFlowGrid):
+	 * conductance = the water depth, one sink at the outlet the rules above
+	 * already picked (the drain contact, else the far end along the mean flow),
+	 * one source spread over the upstream end (the last tenth by walking distance) plus one at
+	 * every body that drains into it. u = -grad phi; the body's MEDIAN speed is
+	 * code 8 (= its |meanFlow|), and confidence 8 marks "solved by the writer".
+	 * opt.flowField off (--water-flow-constant) writes the constant word, byte
+	 * for byte the old file. */
+	struct RiverField
+	{
+		qint64 x0 = 0, y0 = 0, w = 0, h = 0;
+		std::vector<float> depth;
+		std::vector<quint16> word;   //!< empty = the body keeps the constant word
+	};
+	std::vector<RiverField> river;
+	int riversSolved = 0, riversFellBack = 0;
+	qint64 riverTexels = 0, riverIterations = 0;
+	double riverWorstResidual = 0.0, riverSeconds = 0.0;
+	if ( in.opt.flowField ) {
+		QElapsedTimer riverClock;
+		riverClock.start();
+		river.resize( size_t( nBodies ) );
+		std::vector<qint64> cand;
+		qint64 rowLo = gh, rowHi = -1;
+		for ( qint64 i = 0; i < nBodies; i++ ) {
+			const WaterBody & W = bodies[size_t( i )];
+			if ( W.cls != 1 || !W.flowSource || W.area < 16
+				|| ( W.flowX == 0.0 && W.flowY == 0.0 ) )
+				continue;
+			RiverField & R = river[size_t( i )];
+			R.x0 = W.x0;
+			R.y0 = W.y0;
+			R.w = qint64( W.x1 ) - W.x0 + 1;
+			R.h = qint64( W.y1 ) - W.y0 + 1;
+			R.depth.assign( size_t( R.w * R.h ), 0.0f );
+			cand.push_back( i );
+			rowLo = qMin( rowLo, R.y0 );
+			rowHi = qMax( rowHi, R.y0 + R.h - 1 );
+		}
+		// the inflows: a body whose own outlet is this one feeds it at their contact
+		std::vector<std::vector<std::pair<double, double>>> inflow;
+		inflow.resize( size_t( nBodies ) );
+		for ( qint64 i = 0; i < nBodies; i++ ) {
+			const WaterBody & W = bodies[size_t( i )];
+			const std::vector<Lower> & lo = lower[size_t( i )];
+			if ( W.flowSource == 3 && W.outlet > 0 && !lo.empty() && lo[0].body == W.outlet )
+				inflow[size_t( W.outlet ) - 1].push_back( { lo[0].cx, lo[0].cy } );
+		}
+		// depth = water height - bed, one pass over the rows the rivers cover
+		if ( !cand.empty() ) {
+			std::vector<quint16> row( size_t( gw ), quint16( 0 ) );
+			for ( qint64 gy = rowLo; gy <= rowHi; gy++ ) {
+				bool want = false;
+				for ( qint64 i : cand ) {
+					const RiverField & R = river[size_t( i )];
+					if ( gy >= R.y0 && gy < R.y0 + R.h ) {
+						want = true;
+						break;
+					}
+				}
+				if ( !want )
+					continue;
+				in.heightRow( int( gy ), row.data() );
+				const quint16 * g = grid.data() + size_t( gy * gw );
+				for ( qint64 i : cand ) {
+					RiverField & R = river[size_t( i )];
+					if ( gy < R.y0 || gy >= R.y0 + R.h )
+						continue;
+					const double wh = double( bodies[size_t( i )].wh );
+					for ( qint64 x = 0; x < R.w; x++ ) {
+						const qint64 gx = R.x0 + x;
+						if ( g[gx] != quint16( i + 1 ) )
+							continue;
+						const double bed = ( double( row[size_t( gx )] ) - 32767.0 ) * double( in.quantum );
+						R.depth[size_t( ( gy - R.y0 ) * R.w + x )] = float( wh - bed );
+					}
+				}
+			}
+		}
+		for ( qint64 i : cand ) {
+			const WaterBody & W = bodies[size_t( i )];
+			RiverField & R = river[size_t( i )];
+			const int w = int( R.w ), h = int( R.h );
+			const quint16 id = quint16( i + 1 );
+			std::vector<quint8> wet( size_t( w ) * size_t( h ), quint8( 0 ) );
+			std::vector<float> k( size_t( w ) * size_t( h ), 1.0f );
+			for ( int y = 0; y < h; y++ )
+				for ( int x = 0; x < w; x++ ) {
+					const size_t at = size_t( y ) * size_t( w ) + size_t( x );
+					if ( grid[size_t( ( R.y0 + y ) * gw + R.x0 + x )] != id )
+						continue;
+					wet[at] = 1;
+					k[at] = qBound( 8.0f, R.depth[at], 1024.0f );
+				}
+			R.depth.clear();
+			R.depth.shrink_to_fit();
+			WaterFlowGrid G;
+			G.build( w, h, wet, k );
+			auto nearestCell = [&]( double px, double py, int piece ) -> int {
+				int best = -1;
+				double bd = 0.0;
+				for ( int c = 0; c < G.n; c++ ) {
+					if ( piece >= 0 && G.comp[size_t( c )] != piece )
+						continue;
+					const double dx = double( G.cx[size_t( c )] ) - px, dy = double( G.cy[size_t( c )] ) - py;
+					const double d = dx * dx + dy * dy;
+					if ( best < 0 || d < bd ) {
+						best = c;
+						bd = d;
+					}
+				}
+				return best;
+			};
+			// the sink: the drain contact, else the texel farthest along the mean flow
+			int sink = -1;
+			const std::vector<Lower> & lo = lower[size_t( i )];
+			if ( W.flowSource == 3 && !lo.empty() ) {
+				sink = nearestCell( lo[0].cx - double( R.x0 ), lo[0].cy - double( R.y0 ), -1 );
+			} else {
+				double bt = 0.0;
+				for ( int c = 0; c < G.n; c++ ) {
+					const double t = double( G.cx[size_t( c )] ) * W.flowX + double( G.cy[size_t( c )] ) * W.flowY;
+					if ( sink < 0 || t > bt ) {
+						sink = c;
+						bt = t;
+					}
+				}
+			}
+			bool ok = sink >= 0;
+			const int piece = ok ? G.comp[size_t( sink )] : -1;
+			// walking distance from the sink over the piece; the farthest texel is the source
+			std::vector<int> dist( size_t( qMax( 0, G.n ) ), -1 );
+			int source = -1;
+			int pieceCells = 0;
+			if ( ok ) {
+				std::vector<int> q;
+				q.reserve( size_t( G.n ) );
+				q.push_back( sink );
+				dist[size_t( sink )] = 0;
+				for ( size_t qi = 0; qi < q.size(); qi++ ) {
+					const int c = q[qi];
+					pieceCells++;
+					if ( source < 0 || dist[size_t( c )] > dist[size_t( source )] )
+						source = c;
+					const int x = G.cx[size_t( c )], y = G.cy[size_t( c )];
+					const int nx[4] = { x - 1, x + 1, x, x };
+					const int ny[4] = { y, y, y - 1, y + 1 };
+					for ( int e = 0; e < 4; e++ ) {
+						if ( nx[e] < 0 || ny[e] < 0 || nx[e] >= w || ny[e] >= h )
+							continue;
+						const int nc = G.idx[size_t( ny[e] ) * size_t( w ) + size_t( nx[e] )];
+						if ( nc < 0 || dist[size_t( nc )] >= 0 )
+							continue;
+						dist[size_t( nc )] = dist[size_t( c )] + 1;
+						q.push_back( nc );
+					}
+				}
+				ok = pieceCells >= 8 && source != sink;
+			}
+			std::vector<double> ux, uy;
+			if ( ok ) {
+				std::vector<double> b( size_t( G.n ), 0.0 );
+				double fed = 1.0;
+				/* the source is the upstream END, not one texel: every texel within the last tenth of
+				 * the walking distance shares it, so the far end does not radiate back up its banks */
+				const int band = dist[size_t( source )] - qMax( 1, dist[size_t( source )] / 10 );
+				int nBand = 0;
+				for ( int c = 0; c < G.n; c++ )
+					nBand += dist[size_t( c )] >= band;
+				for ( int c = 0; c < G.n; c++ )
+					if ( dist[size_t( c )] >= band )
+						b[size_t( c )] += 1.0 / double( nBand );
+				for ( const auto & p : inflow[size_t( i )] ) {
+					const int c = nearestCell( p.first - double( R.x0 ), p.second - double( R.y0 ), piece );
+					if ( c >= 0 && c != sink ) {
+						b[size_t( c )] += 1.0;
+						fed += 1.0;
+					}
+				}
+				b[size_t( sink )] -= fed;
+				std::vector<double> phi;
+				int it = 0;
+				double res = 0.0;
+				ok = G.solve( b, std::vector<quint8>(), phi, it, res, 1e-8, 40000 ) && res <= 1e-4;
+				riverIterations += it;
+				riverWorstResidual = qMax( riverWorstResidual, res );
+				if ( ok )
+					G.velocity( phi, ux, uy );
+			}
+			// the solved field must agree with the direction the rules picked
+			double median = 0.0;
+			if ( ok ) {
+				double proj = 0.0;
+				std::vector<double> sp;
+				sp.reserve( size_t( pieceCells ) );
+				for ( int c = 0; c < G.n; c++ ) {
+					if ( G.comp[size_t( c )] != piece )
+						continue;
+					proj += ux[size_t( c )] * W.flowX + uy[size_t( c )] * W.flowY;
+					const double s = std::sqrt( ux[size_t( c )] * ux[size_t( c )] + uy[size_t( c )] * uy[size_t( c )] );
+					if ( s > 0.0 )
+						sp.push_back( s );
+				}
+				if ( !sp.empty() ) {
+					std::nth_element( sp.begin(), sp.begin() + std::ptrdiff_t( sp.size() / 2 ), sp.end() );
+					median = sp[sp.size() / 2];
+				}
+				ok = proj > 0.0 && median > 0.0;
+			}
+			if ( !ok ) {
+				riversFellBack++;
+				continue;
+			}
+			double a0 = std::atan2( W.flowY, W.flowX );
+			if ( a0 < 0.0 )
+				a0 += kTwoPi;
+			const quint16 constant = quint16( ( int( a0 / kTwoPi * 256.0 + 0.5 ) & 0xFF ) | ( 8 << 8 ) );
+			R.word.assign( size_t( w ) * size_t( h ), quint16( 0 ) );
+			for ( int c = 0; c < G.n; c++ ) {
+				const size_t at = size_t( G.cy[size_t( c )] ) * size_t( w ) + size_t( G.cx[size_t( c )] );
+				if ( G.comp[size_t( c )] != piece ) {
+					R.word[at] = constant;      // an islet the river never reaches
+					continue;
+				}
+				const double vx = ux[size_t( c )], vy = uy[size_t( c )];
+				double a = std::atan2( vy, vx );
+				if ( a < 0.0 )
+					a += kTwoPi;
+				const int dir = int( a / kTwoPi * 256.0 + 0.5 ) & 0xFF;
+				const int spd = qBound( 0, int( std::floor( 8.0 * std::sqrt( vx * vx + vy * vy ) / median + 0.5 ) ), 15 );
+				R.word[at] = quint16( dir | ( spd << 8 ) | ( kLodlFlowSolvedConfidence << 12 ) );
+				riverTexels++;
+			}
+			riversSolved++;
+		}
+		riverSeconds = double( riverClock.nsecsElapsed() ) / 1e9;
+	}
+
 	Buf table;
 	for ( qint64 i = 0; i < nBodies; i++ ) {
 		const WaterBody & W = bodies[size_t( i )];
@@ -1444,7 +1686,11 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 					const qint64 gx = qint64( tx ) * spc + qint64( i ) * stepF;
 					const quint16 b = grid[size_t( gy * gw + gx )];
 					quint16 word = 0;
-					if ( b ) {
+					const RiverField * RF = ( b && size_t( b ) <= river.size()
+						&& !river[size_t( b ) - 1].word.empty() ) ? &river[size_t( b ) - 1] : nullptr;
+					if ( RF ) {
+						word = RF->word[size_t( ( gy - RF->y0 ) * RF->w + ( gx - RF->x0 ) )];
+					} else if ( b ) {
 						const WaterBody & W = bodies[size_t( b ) - 1];
 						const double m = std::sqrt( W.flowX * W.flowX + W.flowY * W.flowY );
 						if ( m > 0.0 ) {
@@ -1614,6 +1860,12 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 		if ( directionNoSpeed )
 			L << QString( "  %1 bodies have a DIRECTION but no speed: the rule that set the "
 					"direction carries none and NAM0 was unavailable" ).arg( directionNoSpeed );
+		L << ( in.opt.flowField
+			? QString( "  flow field: %1 river(s) solved per texel (%2 texels), %3 kept the constant "
+				"word, %4 iterations, worst residual %5, %6 s" )
+				.arg( riversSolved ).arg( riverTexels ).arg( riversFellBack ).arg( riverIterations )
+				.arg( riverWorstResidual, 0, 'g', 3 ).arg( riverSeconds, 0, 'f', 2 )
+			: QStringLiteral( "  flow field: off (--water-flow-constant), every body carries its constant word" ) );
 		L << QString();
 		L << QStringLiteral( "== THE 20 BIGGEST BODIES ==" );
 		L << QStringLiteral( "  id   form     class      area   height parts  elong  aniso flow      cells" );
@@ -1651,6 +1903,9 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			"%4 texel(s) wet under a sloped mesh, %5 sample(s) off their body's plane" )
 			.arg( out.surfacePlane.size() ).arg( uniformSurf )
 			.arg( qint64( cellsX ) * cellsY ).arg( slopedWet ).arg( surfNonZero );
+		if ( in.opt.flowField )
+			out.summary += QString( "; flow field %1 river(s), %2 texels, %3 constant" )
+				.arg( riversSolved ).arg( riverTexels ).arg( riversFellBack );
 	}
 	if ( error )
 		error->clear();
@@ -3690,13 +3945,13 @@ quint32 LodtFile::dyeWordAt( int dx, int dy ) const
 
 int LodtFile::waterTileEdge( int plane ) const
 {
-	const PlaneStore & s = plane == 0 ? idStore : plane == 1 ? shoreStore : surfStore;
+	const PlaneStore & s = plane == 0 ? idStore : plane == 1 ? shoreStore : plane == 3 ? flowStore : surfStore;
 	return s.ok ? s.tileEdge : 0;
 }
 
 bool LodtFile::waterTileUniform( int plane, int tx, int ty, quint32 & value ) const
 {
-	const PlaneStore & s = plane == 0 ? idStore : plane == 1 ? shoreStore : surfStore;
+	const PlaneStore & s = plane == 0 ? idStore : plane == 1 ? shoreStore : plane == 3 ? flowStore : surfStore;
 	if ( !s.ok || s.tileEdge <= 0 ) {
 		value = plane == 1 ? 255u : 0u;
 		return true;

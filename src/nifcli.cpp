@@ -8733,6 +8733,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-body-samples" ) ) gLodlWater.bodySamples = next().toInt();
 		else if ( t == QLatin1String( "--water-flow-samples" ) ) gLodlWater.flowSamples = next().toInt();
 		else if ( t == QLatin1String( "--water-no-shore" ) ) gLodlWater.shore = false;
+		else if ( t == QLatin1String( "--water-flow-constant" ) ) gLodlWater.flowField = false;	// lane WATERFLOWBAKE1
 		else if ( t == QLatin1String( "--water-velocities" ) ) gLodlWater.velocityPlugin = next();
 		else if ( t == QLatin1String( "--water-report" ) ) gLodlWater.reportPath = next();
 		else if ( t == QLatin1String( "--dump-land" ) ) lgDumpLand = next();

@@ -25,7 +25,11 @@ class Scene;
  *    WW_CELL_WATER_INFO_RED=off      the lookup answers its neutral values (8160 u shore, depth 0, body 0, class -1)
  *    WW_CELL_WATER_INFO_PROBE=1      (launch) the probes' build of fo4_water: WW_CELL_WATER_PROBE=28 shore,
  *                                    29 depth, 30 body id, 31 class
- *  CLI: nifskope -no-gui lodl <file> --water-info <dir> writes the tables and the census (no window). */
+ *  CLI: nifskope -no-gui lodl <file> --water-info <dir> writes the tables and the census (no window).
+ *
+ *  Lane WATERFLOWBAKE1 adds the FLOW tables (wwWaterFlow in water_info.glsl, probe 32 in the probe build): the
+ *  .lodl flow plane decoded to a velocity per texel, the same sparse layout. WW_CELL_WATER_INFO_RED=off gives
+ *  (0, 0) there too. Nothing in the default program reads it. */
 
 struct WwWaterInfoTables
 {
@@ -46,8 +50,27 @@ struct WwWaterInfoTables
 	int uniformDry = 0, uniformWet = 0, sparseBody = 0, sparseShore = 0, sparseSurface = 0, sparseDepth = 0;
 	double buildSeconds = 0.0;
 
+	/* Lane WATERFLOWBAKE1: the flow plane as a velocity, same tile layout at the flow plane's own rate. Texel
+	 * word = vx | vy << 16, each a signed 16-bit count of 1/1024 world units a second (+-32 u/s); 0 = still or
+	 * dry. A confidence-0 word (the body's constant) decodes to the body's exact mean flow; any other to
+	 * direction x speed code x |mean| / 8. A tile is uniform when its words are equal (exact). */
+	static constexpr double kFlowScale = 1024.0;
+	int flowTilesX = 0, flowTilesY = 0;	// 0 = the file has no flow plane
+	float flowTexel = 0.0f;
+	std::vector<uint32_t> flowIndex;	// flowTilesY rows of flowTilesX (slot + 1, uniform word)
+	std::vector<uint32_t> flowAtlas;	// flowAtlasH rows of flowAtlasW words
+	int flowAtlasW = 0, flowAtlasH = 0, flowSlotCount = 0;
+	int flowUniformStill = 0, flowUniformMoving = 0;
+	qint64 flowMovingTexels = 0, flowSolvedTexels = 0;
+
 	quint64 bytes() const;
+	quint64 flowBytes() const;
 };
+
+//! A velocity (world units a second) as the flow table's texel word.
+uint32_t wwWaterFlowPack( double vx, double vy );
+//! The flow census line (counts and bytes).
+QString wwWaterFlowCensus( const WwWaterInfoTables & t );
 
 //! The packed depth code (0..255) of a depth in world units.
 uint32_t wwWaterInfoDepthCode( double depth );
@@ -55,13 +78,14 @@ uint32_t wwWaterInfoDepthCode( double depth );
 bool wwWaterInfoBuild( const QString & lodl, WwWaterInfoTables & t, QString * error );
 //! The census lines of a build (counts and bytes), as the CLI and the gate print them.
 QString wwWaterInfoCensus( const WwWaterInfoTables & t );
-//! index.u32, atlas.u32, bodies.f32, census.txt into `dir`.
+//! index.u32, atlas.u32, bodies.f32, census.txt (+ WATERFLOWBAKE1 flowindex.u32, flowatlas.u32) into `dir`.
 bool wwWaterInfoDump( const WwWaterInfoTables & t, const QString & dir, QString * error );
 
 //! The cell document's worldspace .lodl ("" = none, an interior). Starts the build on a worker thread.
 void wwCellWaterInfoSet( const void * nif, const QString & lodl );
 //! With fo4_water.prog bound: uploads the tables once they are built and binds them at units unit..unit+2 when
-//! the program reads them. Returns the units it used (0 or 3).
+//! the program reads them, and the flow tables at the next two units when it reads waterFlowIndex (lane
+//! WATERFLOWBAKE1). Returns the units it used (0, 2, 3 or 5).
 int wwCellWaterInfoUniforms( Scene * scene, int unit );
 //! One census line: what this document's water info is and what was uploaded (read back from the GL).
 QString wwCellWaterInfoEcho( const void * nif );

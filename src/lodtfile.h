@@ -99,6 +99,11 @@ struct LodtWaterBody
  *  bytes it always got); the two front ends turn it ON (lane WATER1,
  *  2026-09-27): the command line unless `--no-water-bodies`, the panel row
  *  ticked unless unticked. */
+/*! The flow word's confidence nibble the WRITER puts on a texel it solved
+ *  (lane WATERFLOWBAKE1): 0 = the body's constant mean, 15 = a stroke, 8 = the
+ *  automatic per-texel potential solve. */
+static const int kLodlFlowSolvedConfidence = 8;
+
 struct LodtWaterOptions
 {
 	bool enabled = false;        //!< on in both front ends; --no-water-bodies
@@ -112,6 +117,10 @@ struct LodtWaterOptions
 	int bodySamples = 0;         //!< body-ID plane rate; 0 = the file's own
 	int flowSamples = 0;         //!< flow plane rate; 0 = the file's own
 	bool shore = true;           //!< bake the shore-distance plane
+	/*! Lane WATERFLOWBAKE1: solve each river's flow per texel (potential flow
+	 *  on its mask, confidence 8 in the word). Off = the constant word a body,
+	 *  byte for byte the file before it (--water-flow-constant). */
+	bool flowField = true;
 	/*! The plugin the WATR `NAM0` linear velocities are read from -- vanilla's
 	 *  ONLY flow signal, and the fallback floor under the automatic rules. Empty
 	 *  means the arm is unavailable, which the census SAYS rather than silently
@@ -359,9 +368,9 @@ public:
 	float surfaceDeltaAt( int bx, int by ) const;
 	bool waterSurfaceAt( int bx, int by, float & z ) const;
 
-	/*! Lane WATERDATA1: a water plane's tile store, `plane` 0 body id, 1 shore, 2 surface. The tile edge in
-	 *  samples (0 = the plane is absent), and whether tile (tx, ty) is stored UNIFORM, its one sample in `value`
-	 *  (an absent plane is uniform at its neutral value: 0, 255, 0). */
+	/*! Lane WATERDATA1: a water plane's tile store, `plane` 0 body id, 1 shore, 2 surface (WATERFLOWBAKE1: 3 flow).
+	 *  The tile edge in samples (0 = the plane is absent), and whether tile (tx, ty) is stored UNIFORM, its one
+	 *  sample in `value` (an absent plane is uniform at its neutral value: 0, 255, 0, 0). */
 	int waterTileEdge( int plane ) const;
 	bool waterTileUniform( int plane, int tx, int ty, quint32 & value ) const;
 

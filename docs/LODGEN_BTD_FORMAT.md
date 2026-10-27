@@ -858,8 +858,27 @@ bits 0..7    direction, 0..255 = 0..2pi measured from +X toward +Y in the
 bits 8..11   speed, 0..15, times the body's speed quantum = |mean flow| / 8,
              so 8 is the body's mean and 15 is ~1.9x it
 bits 12..15  confidence, 0..15: 15 = a stroke crosses this sample, 0 = the
-             body's own mean (cross-fade to `meanFlow`)
+             body's own mean (cross-fade to `meanFlow`), 8 = solved per
+             texel by the writer (lane WATERFLOWBAKE1, below)
 ```
+
+**The river flow field (lane WATERFLOWBAKE1, 2026-10-27; no version bump).**
+Every river (class 1) with a direction, at least 16 texels and a nonzero mean
+flow is solved for potential flow on its own mask (`WaterFlowGrid`, the marking
+tool's solver): conductance = water depth (height - bed, 8..1024 u), the sink
+at the outlet the rules below picked (the drain contact, else the far end along
+the mean flow), the source spread over the upstream end (the last tenth of the
+walking distance from the sink), plus one unit at every body that drains into
+it. The field must agree with the body's mean direction, or the river keeps the
+constant word. Each wet texel of the river then writes
+`dir | speed << 8 | 8 << 12`, the speed scaled so the river's MEDIAN speed is 8
+(= its |mean flow|); islets the solve never reaches keep the constant word.
+Lakes, the sea and any river that fails these checks keep the constant word
+(Commonwealth 10-27: 114 rivers solved, 138,611 texels; 3 kept the constant). A reader
+that ignores confidence still gets a direction and a speed in the same units.
+`--water-flow-constant` (panel row *Solve river flow* off) writes the file
+byte for byte as before. The marking tool keeps a solved word on texels nobody
+marked (`WaterMarkDoc::baseWord`).
 
 **Dry samples write 0, which is also "no flow", and the two are the same value
 on purpose**: a consumer that forgets to test the body-ID plane draws still

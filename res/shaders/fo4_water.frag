@@ -38,7 +38,8 @@
  *   25/26 (WATERHDR1) the linear light the water writes ( lin / 4 )  27 the water's pixels, magenta
  *   WATERDATA1, only in the WW_WATER_INFO_PROBE build (launch WW_CELL_WATER_INFO_PROBE=1), water_info.glsl:
  *   28 (shore steps, depth code, lookup on) as bytes  29 (body id high byte, low byte, class + 1)
- *   30 cyan where the lookup finds water, red where it finds none  31 depth / 1024 as grey */
+ *   30 cyan where the lookup finds water, red where it finds none  31 depth / 1024 as grey
+ *   WATERFLOWBAKE1, same build: 32 the baked flow ( vx / 4 x 0.5 + 0.5, vy / 4 x 0.5 + 0.5, flow lookup on ) */
 
 #define WW_FOG 1
 #define WW_CELLLIGHTS 1
@@ -347,6 +348,10 @@ void main()
 				: waterProbe == 29 ? vec3( float( id >> 8 ), float( id & 0xFFu ), wi.w + 1.0 ) / 255.0
 				: waterProbe == 30 ? ( id != 0u ? vec3( 0.0, 1.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 ) )
 				: vec3( clamp( wi.y / 1024.0, 0.0, 1.0 ) );
+		}
+		else if ( waterProbe == 32 ) {	// WATERFLOWBAKE1: the baked flow at this pixel, u/s
+			vec2 fv = wwWaterFlow( P.xy );
+			o = vec3( clamp( fv * 0.125 + 0.5, 0.0, 1.0 ), waterFlowOn ? 1.0 : 0.0 );
 		}
 #endif
 		fragColor = vec4( o, 1.0 );

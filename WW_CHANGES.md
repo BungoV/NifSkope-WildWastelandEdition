@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERFLOWBAKE1 (2026-10-27, branch waterflowbake1-20261027): river flow baked per texel (data only, no visible change)
+
+- **What it bakes:** lodgen now solves each river's flow per texel instead of writing one direction for the whole
+  river, so a river's flow follows its bends. The solve is potential flow on the river's own outline: water runs from
+  the upstream end (and from every stream that drains into it) to the outlet the existing rules already pick, faster
+  where the river is narrow or shallow. Lakes and the sea are unchanged. Commonwealth: 114 rivers solved, 138,611
+  texels; 3 rivers whose solve did not agree with their own direction keep the old constant word.
+- **Where it lives:** in the .lodl's existing flow plane (no version bump; readers stay compatible). A solved texel's
+  word has confidence 8; speed 8 = the river's median speed. The flow plane grows from 628,993 to 797,503 bytes
+  (+165 KB on a 39.2 MB file). Whole-worldspace .lodl write: 13-17 s, 0.96 GB peak.
+- **Way back:** `--water-flow-constant`, or the LOD Generation panel row *Solve river flow* off, writes the file
+  byte for byte as before (checked on the Commonwealth).
+- **For the water shader:** new flow tables beside WATERDATA1's water info (texture units 10-11, 2.56 MB, Commonwealth:
+  1,419 of 147,456 tiles sparse), and `wwWaterFlow(worldXY)` in res/shaders/water_info.glsl gives the velocity in
+  world units a second, (0,0) where no water flows. `WW_CELL_WATER_INFO_RED=off` also turns it off. Probe 32 (under
+  the probe define only) shows it. The default water program does not read it: its NVIDIA binary differs only in the
+  stamp and the source hash. WATERFLOW1 will draw with it.
+- **Marking tool:** a texel nobody marked keeps the writer's solved word, kept across a save so that removing a
+  stroke gives the file back byte for byte.
+
 ## Lane WATERDATA1 (2026-10-27, branch waterdata1-20261027): the baked water planes bound to the water shader (data only, no visible change)
 
 - **What it binds:** the worldspace .lodl's water planes (body id, shore distance, surface delta) and its body table,
