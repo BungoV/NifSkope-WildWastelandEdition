@@ -1,5 +1,14 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CELLSPAWN2 (2026-10-27, branch cellspawn2-20261027): the spawn hold can see the spawn
+
+- **WW_CELL_CAM_DUMP is written with the Cell lights row off:** the dump moved above the cell lights' early return, so
+  a fresh-scope cell shot (lights off by default) still writes where its eye is. Before, no dump file appeared at all.
+- **The render shot says which camera it took** (`render shot camera: view N refit to the scene` or `kept as the open
+  left it (WW_RENDER_VIEW < 0)`). An unset WW_RENDER_VIEW still refits Front over the whole scene 2.5 s after the open
+  (every unpinned baseline keeps its framing); that refit is what replaced the spawn in the CELLSPAWN1 hold. A shot of
+  a cell's first-open view sets WW_RENDER_VIEW=-1. Nothing changes in the GUI.
+
 ## Lane CELLSPAWN1 (2026-10-26, branch cellspawn1-20261026): a cell opens standing on its ground; File > Open Cell lists like the CK
 
 - **Spawn:** a freshly opened exterior puts the camera at the opened cell's centre on its LAND (or on the water when

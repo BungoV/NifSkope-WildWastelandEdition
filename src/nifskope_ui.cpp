@@ -23812,6 +23812,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								viewIdx = int( GLView::ViewFront );
 							skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
 						}
+						/* lane CELLSPAWN2: say which camera the shot took. An unset WW_RENDER_VIEW refits Front over the
+						 * cell's spawn (the CELLSPAWN1 hold was blind for it); a cell's first-open view needs -1. */
+						qInfo().noquote() << ( viewIdx >= 0
+							? QStringLiteral( "render shot camera: view %1 refit to the scene" ).arg( viewIdx )
+							: QStringLiteral( "render shot camera: kept as the open left it (WW_RENDER_VIEW < 0)" ) );
 					}
 
 					// Force the two Viewport Effects toggles ON. They default to
