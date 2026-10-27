@@ -161,6 +161,31 @@ float cvRdir( float tau, float mu0, float g, float w )
 	return clamp( wp * num / den, 0.0, 1.0 );
 }
 
+#ifdef WW_CLOUDFLY
+/* lane CLOUD4: the fly-through grid (src/gl/cloudfly.cpp): a box of cells round the camera over the band, each holding
+ * its Chebyshev distance in cells (cloud_flysdf.frag) to a cell where the density may be above 0 (cloud_flybake.frag).
+ * Inside the box the march steps cfStepKm (a quarter cell) and jumps the free cells less cfSafe (kSafe + the grid's
+ * age in cells), so a jump lands on the same fine steps and never passes a cell that may hold cloud. */
+uniform sampler3D cfSdf;
+uniform vec3 cfOrgKm;
+uniform vec3 cfDim;	// cells x, y, z
+uniform float cfCellKm;
+uniform float cfStepKm;
+uniform int cfMaxSteps;
+uniform float cfSafe;	// cells kept clear (the red sdfshrink makes it -1)
+uniform float cfOn;	// 0 = the plain march (no grid for this view)
+uniform float cfSkip;	// 0 = the red skip: fine steps through every cell (the continuity reference)
+
+//! where the ray leaves the box (flat: the earth's curve over the box is under a cell, kept by kSafe)
+float cfExit( vec3 o, vec3 d )
+{
+	vec3 dd = mix( d, vec3( 1e-9 ), lessThan( abs( d ), vec3( 1e-9 ) ) );
+	vec3 ta = ( cfOrgKm - o ) / dd, tb = ( cfOrgKm + cfDim * cfCellKm - o ) / dd;
+	vec3 tf = max( ta, tb );
+	return min( tf.x, min( tf.y, tf.z ) );
+}
+#endif
+
 void main()
 {
 	if ( cvProbe == 1 ) {
@@ -218,61 +243,39 @@ void main()
 	float T = 1.0, wsum = 0.0, dsum = 0.0;
 	float cosT = dot( d, cvKeyW );
 	if ( hi > lo && t0 >= 0.0 && t1 > t0 && t0 < tGround ) {
+#ifdef WW_CLOUDFLY
+		float pixKm = 2.0 / ( cvProj.y * cvHistSize.y );
+		float j = fract( 52.9829189 * fract( dot( q, vec2( 0.06711056, 0.00583715 ) ) ) + cvFrame * 0.618034 );
+		// lane CLOUD4: fine steps through the box first, jumping its free cells; the plain march takes the rest of the ray
+		if ( cfOn > 0.5 ) {
+			float tEnd = min( t1, cfExit( o, d ) ), tc = t0, tn = t0;
+			for ( int i = 0; i < cfMaxSteps && tc < tEnd; i++, tc = tn ) {
+				vec3 cfUp;
+				vec3 c = ( vec3( o.xy + d.xy * tc, cvHeight( o, d, tc, cfUp ) ) - cfOrgKm ) / cfCellKm;
+				if ( any( lessThan( c, vec3( 0.0 ) ) ) || any( greaterThanEqual( c, cfDim ) ) )
+					break;
+				float free = floor( texelFetch( cfSdf, ivec3( c ), 0 ).r * 255.0 + 0.5 ) - cfSafe;
+				if ( cfSkip > 0.5 && free >= 1.0 ) {
+					tn = min( tc + free * cfCellKm, tEnd );
+					continue;
+				}
+				float dt = min( cfStepKm, tEnd - tc );
+				tn = tc + dt;
+				float t = tc + j * dt;
+				#include "cloud_march_step.glsl"
+			}
+			t0 = T < 0.005 ? t1 : tc;
+		}
+		float dt = ( t1 - t0 ) / float( cvSteps );
+		for ( int i = 0; i < cvSteps && t1 > t0; i++ ) {
+#else
 		float dt = ( t1 - t0 ) / float( cvSteps );
 		float pixKm = 2.0 / ( cvProj.y * cvHistSize.y );	// one history pixel's angle (the light taps share it)
 		float j = fract( 52.9829189 * fract( dot( q, vec2( 0.06711056, 0.00583715 ) ) ) + cvFrame * 0.618034 );
 		for ( int i = 0; i < cvSteps; i++ ) {
+#endif
 			float t = t0 + ( float( i ) + j ) * dt;
-			vec3 p = o + d * t;
-			vec3 up;
-			p.z = cvHeight( o, d, t, up );
-			cvFootKm = t * pixKm;
-			float dens = cvDens( p );
-			if ( dens <= 0.0 )
-				continue;
-			float tauL = 0.0;
-			for ( int k = 0; k < cvTaps; k++ ) {
-				float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );
-				float tk = cvLightKm * 0.5 * ( a * a + b * b ), dk = cvLightKm * ( b * b - a * a );
-				vec3 pl = p + cvKeyW * tk;
-				pl.z = p.z + dot( up, cvKeyW ) * tk;
-				tauL += cvDens( pl ) * kCvSigma * dk;
-			}
-			float hf = clamp( ( p.z - lo ) / max( hi - lo, 1e-3 ), 0.0, 1.0 );
-			float mu0 = dot( up, cvKeyW );
-			vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, mu0 );
-			float ph = cvOctaveSum( cosT, tauL );
-			// lane CLOUD2B: the octaves' floor: the diffuse light through the cloud above, as a slab of tauL mu0 (gate C)
-			if ( cvMsOn > 0.5 && mu0 > 0.01 ) {
-				float fd = mu0 * cvTdif( tauL * mu0, mu0, cvMsG, kCvAlbedo );
-				/* lane CLOUD2C: what the cloud UNDER the sample sends back up (a thick top seen from above): its slab
-				 * reflection (cvRdir) of the light reaching the sample, the direct beam and fd, the slab's depth from
-				 * taps straight down. Seen along d it weighs (1 - g d.z) / 2: the phase's share of up-going light
-				 * scattered toward the eye (Coakley & Chylek 1975: a backscatter fraction (1 - g) / 2). Gate R. */
-				if ( cvTopOn > 0.5 ) {
-					float tauB = 0.0;
-					for ( int k = 0; k < cvTaps; k++ ) {
-						float a = float( k ) / float( cvTaps ), b = float( k + 1 ) / float( cvTaps );
-						float tk = cvLightKm * 0.5 * ( a * a + b * b ), dk = cvLightKm * ( b * b - a * a );
-						vec3 pb = p - up * tk;
-						pb.z = p.z - tk;
-						tauB += cvDens( pb ) * kCvSigma * dk;
-					}
-					float fu = cvRdir( tauB, mu0, cvMsG, kCvAlbedo ) * ( mu0 * exp( -tauL ) + fd );
-					fd += 0.5 * ( 1.0 - cvMsG * d.z ) * fu;
-				}
-				ph = max( ph, fd / kPi );
-			}
-			vec3 tint = p.z < cvBands.topKm.x ? cvTint[0] : cvTint[1];
-			vec3 S = kCvAlbedo * tint * ( key * ph + cvAmbOn * cvAmb * mix( 0.5, 1.0, hf ) );
-			float tr = exp( -dens * kCvSigma * dt );
-			float w = T * ( 1.0 - tr );
-			L += S * w;	// Frostbite: S (1 - e^(-sigma dt)) / sigma x sigma_s, sigma_s = albedo sigma
-			dsum += w * t;
-			wsum += w;
-			T *= tr;
-			if ( T < 0.005 )
-				break;
+			#include "cloud_march_step.glsl"
 		}
 	}
 	// the High band: a thin sheet at its base, behind the volume

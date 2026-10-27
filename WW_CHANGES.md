@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane CLOUD4 (2026-10-26, branch cloud4-20261026): fly-through clouds
+
+- **New row Render > Scene > Fly-through Clouds** (Off / Low / Medium / High / Ultra, ships Off, live; needs Volume
+  Clouds Medium or more). Pin `WW_CLOUDFLY` (tier name or 0..4); a harness run is Off unless pinned.
+- **Clouds at real heights:** with the row on, the cloud bands sit at metres above sea level instead of above the eye,
+  so a free camera (or TCL) at cloud height is inside them. Heights: the weather's `.recx` `clouds.layers.<n>.base/top`
+  (WX1's keys, clamped 600 .. 20000 m), else the layer type's height (Fill 600-2000 m, Lower 1000-2500 m, ...). Pin
+  `WW_CLOUDFLY_BAND=<base>,<top>` (m) for the Low band.
+- **Inside look:** near a band a box of cells round the camera holds a bound of the cloud density and its distance
+  field (Chebyshev, capped at 15 cells). The march steps finely (a quarter cell) through the box and jumps the empty
+  cells, so the fog round the camera has its near detail; the aerial perspective is CLOUD2's. The box is rebuilt over
+  32 frames as the wind and the camera move, at once on a weather change or when it is more than 8 cells old; jumps keep
+  2 cells plus the grid's age away from cloud. After Schneider, "Nubis Cubed" (SIGGRAPH 2023); the talk's numbers are
+  not known here, these are ours.
+- Off: the march, resolve and composite shaders compile to the same machine code as before (the march's sample moved
+  into `cloud_march_step.glsl`, included as is); the C++ takes the old paths when the row is Off.
+- Reds (`WW_CLOUDFLY_RED`): `skip` (fine steps everywhere: the reference), `sdfshrink` (jumps pass cloud), `stale`
+  (never rebuilt), `nobox` (the plain march), `eyeheights` (the bands back above the eye).
+- Offline gate `tests/spells/cloudfly_check.py` (bound, distance field, continuity, inside look, age, cost).
+- Cost (offline, 1080p, this machine): High +0.10 ms march + 0.06 ms rolling build a frame, 2 MB; Ultra +0.15 + 0.07 ms,
+  3.9 MB. A full rebuild (weather change) 0.6 .. 1.3 ms once.
+
 ## Lane CELLSPAWN2 (2026-10-27, branch cellspawn2-20261027): the spawn hold can see the spawn
 
 - **WW_CELL_CAM_DUMP is written with the Cell lights row off:** the dump moved out of the cell lights' uniforms (which
@@ -48,7 +70,6 @@
 - Row off = the old programs (driver binaries identical but the stamp and source hash) and the old C++ path.
   Reds: WW_BINDLESS_RED=sampler (a mirrored nearest sampler handle), pooloff1 (pool offset one draw off), nopool.
 - Gates: tests/bindlesspool (pool offsets, red POOL FAIL), offline link sweep 3 modes, hold rows in the lane notes.
-
 ## Lane NIFXLIGHT3 (2026-10-26, branch nifxlight3-20261026): mesh lights seen live, dimmers play, bulbs flicker
 
 - **New .nifx files live:** the Mesh lights tick (500 ms) also stats the folders of the cell's fixtures, a few per tick,
