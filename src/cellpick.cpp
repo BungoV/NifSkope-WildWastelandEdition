@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellpick.h"
+#include "io/nifxlights.h"
 
 #include <QStringList>
 
@@ -171,7 +172,54 @@ QVector<QPair<QString, QString>> CellPickTable::rowsFor( int i ) const
 	add( rows, "Identity group", e.haveGroup
 		? QStringLiteral( "%1  (%2 placements)" ).arg( e.group ).arg( e.groupSize )
 		: QStringLiteral( "no bake loaded" ) );
+	// lane NIFXCAL1: each light here, vanilla fade + colour, and beside them the same light in .nifx terms
+	for ( int k = 0; k < e.lights.size(); k++ ) {
+		const CellPickLight & l = e.lights.at( k );
+		rows.append( qMakePair( QStringLiteral( "Light %1" ).arg( k + 1 ),
+			QStringLiteral( "%1  %2  fade %3  colour %4, %5, %6  radius %7" )
+				.arg( formName( l.ref ), l.edid.isEmpty() ? formName( l.base ) : l.edid )
+				.arg( l.fade, 0, 'f', 3 ).arg( l.color[0] ).arg( l.color[1] ).arg( l.color[2] )
+				.arg( l.radius, 0, 'f', 1 ) ) );
+		rows.append( qMakePair( QStringLiteral( "Light %1 as .nifx" ).arg( k + 1 ), nifxReadout( l ) ) );
+	}
 	return rows;
+}
+
+QString CellPickTable::nifxReadout( const CellPickLight & l )
+{
+	if ( l.flags & 0x100000 )
+		return QStringLiteral( "Ambient Only: no .nifx match (it scales the cell ambient)" );
+	const int type = ( l.flags & 0x800 ) ? nifxl::Hemisphere : ( l.flags & ( 0x400 | 0x4000 ) ) ? nifxl::Spot : nifxl::Omni;
+	const bool shadow = ( l.flags & ( 0x400 | 0x800 | 0x1000 ) ) != 0;
+	const nifxl::Light n = nifxl::fromVanilla( l.color, l.fade, l.radius, type, l.fov, shadow );
+	QStringList p;
+	p << QStringLiteral( "≈ %1 lm" ).arg( n.lumens, 0, 'f', 0 );
+	p << ( n.hasKelvin ? QStringLiteral( "%1 kelvin" ).arg( n.kelvin, 0, 'f', 0 ) : QStringLiteral( "white (6500 kelvin)" ) );
+	if ( n.hasTint ) {
+		// the gel: the rest of the colour after the black body, as sRGB bytes (brightest 255)
+		int g[3];
+		for ( int c = 0; c < 3; c++ )
+			g[c] = int( std::floor( 255.0 * std::pow( n.tint[c], 1.0 / 2.2 ) + 0.5 ) );
+		p << QStringLiteral( "gel #%1%2%3 (%4, %5, %6)" )
+			.arg( g[0], 2, 16, QLatin1Char( '0' ) ).arg( g[1], 2, 16, QLatin1Char( '0' ) ).arg( g[2], 2, 16, QLatin1Char( '0' ) )
+			.arg( g[0] ).arg( g[1] ).arg( g[2] );
+	} else {
+		p << QStringLiteral( "no gel" );
+	}
+	if ( type == nifxl::Spot )
+		p << QStringLiteral( "spot, cone %1°" ).arg( n.cone, 0, 'f', 0 );
+	else
+		p << QString::fromLatin1( nifxl::typeWord( type ) ) + ( l.box ? QStringLiteral( " in a light box" ) : QString() );
+	p << ( shadow ? QStringLiteral( "shadow" ) : QStringLiteral( "no shadow" ) );
+	if ( l.flags & 0x8 )
+		p << QStringLiteral( "flicker" );
+	if ( l.flags & ( 0x80 | 0x100 ) )
+		p << QStringLiteral( "pulse" );
+	p << QStringLiteral( "tier %1" ).arg( QString::fromLatin1( nifxl::tierWord( n.tier ) ) );
+	const nifxl::Converted law = nifxl::convert( [&n]() { nifxl::Light m = n; m.hasRadius = false; return m; }() );
+	p << ( n.hasRadius ? QStringLiteral( "radius %1 (law %2)" ).arg( n.radius, 0, 'f', 0 ).arg( law.radius, 0, 'f', 0 )
+		: QStringLiteral( "radius by law %1" ).arg( law.radius, 0, 'f', 0 ) );
+	return p.join( QLatin1String( ", " ) );
 }
 
 static CellPickTable s_table;

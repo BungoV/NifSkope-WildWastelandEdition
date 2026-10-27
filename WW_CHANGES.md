@@ -1,5 +1,30 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane NIFXFIX2 (2026-10-27, branch nifxfix2-20261027): mesh lights no longer flood the street; flashers flash
+
+- **Orange street (Memory Den, night):** carries lane NIFXCAL1 (merged here): an 800 lm `.nifx` bulb now reaches
+  120 units (vanilla ceiling lamps: 113), not 558, and 637 lm is fade 1. Offline over the shot's 76 drawn lights:
+  the street got 46.95x vanilla's light on 44.6% of the ground; now 0.79x on 9.9% (vanilla 12.4%). Reds `radius1lux`,
+  `anchor800` (WW_NIFX_LIGHTS_RED, live).
+- **Dimmer with no effect:** a `.nifx` light that names no `NiLight` now follows the mesh's only `NiLight` when its
+  dimmer is animated (`WallEmergencyLight01FlashOmni`'s Bulb and Glow flash with it). A `NiLight` that rests at
+  Dimmer 0 and is animated is lit at full and scaled by its keys (it was dark and never played). Census line
+  `N lights follow the mesh's only NiLight (no follows named), M dark still dimmers lit for their track`.
+  Reds `nofollowdefault`, `darkrest` (live). Memory Den itself has no animated NiLight, so its dimmer rows stay equal.
+- **Test:** tests/nifxfix (street reach and brightness against the vanilla census; the flasher at 0.5/1.0/1.5 s;
+  two NiLights or an untracked one stay steady).
+
+## Lane NIFXCAL1 (2026-10-27, branch nifxcal1-20261026): mesh light lumens match vanilla bulbs
+
+- **Anchor 637 lm per fade 1.0** (was 800): the median vanilla household bulb (1,710 lights under 18 ceiling, cage
+  and sconce meshes) set equal to a 60 W bulb, 800 lm. The old anchor drew every .nifx light 1.26x too dim.
+- **Radius law 15.1 x sqrt(candela)** (was 69.99, a 1-lux cut that put an 800 lm bulb's edge at 558; now 120, vanilla
+  ceiling lamps 113). New optional .nifx key `radius` (16..16384, x placed scale) overrides the law.
+- **Pick panel readout:** each light near a picked object gets `Light N` and `Light N as .nifx` rows: lumens, kelvin,
+  gel colour, type / cone / light box, shadow, flicker, pulse, tier and radius, the way a .nifx would write it.
+- Reds `WW_NIFX_LIGHTS_RED=anchor800`,
+  `radius1lux`. Tests: tests/nifxcal (new, colour bytes through kelvin + tint within 1 byte), nifxconform, nifxapply.
+
 ## Lane CLOUDLOOK1 (2026-10-27, branch cloudlook1-20261027): the sky's air no longer veils the volume clouds
 
 - **Air top** (src/gl/cellvolair.cpp vaShapesTop): the Volumetric Air's top is the highest visible shape's own
@@ -257,7 +282,6 @@
 - `nifskope-cli cellrefs "<spec>" | <file.wwcell>` prints what an open would place (rc 0 refs > 0, 1 none, 2 error).
 - Unit tests: tests/opencell (98 checks; reds WW_OPENCELL_RED=masters 5 failed, =restore 7 failed) and tests/cellshow
   (18 checks; reds WW_CELLSHOW_RED=menu 2 failed, =sync 3 failed). In-app rows in WW_CELLWS_TEST for the tabs.
-
 ## Lane LODMNAME1 (2026-10-27, branch lodmname1-20261027): far-LOD texture arrays lose the family word
 
 - **One set per size:** the far-LOD texture arrays are now `<ws>.LodgenArrays.<WxH>` and

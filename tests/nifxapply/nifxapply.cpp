@@ -34,6 +34,8 @@ void check( bool ok, const QString & what )
 }
 
 bool near( double a, double b, double tol = 1e-3 ) { return std::fabs( a - b ) <= tol * std::max( 1.0, std::fabs( b ) ); }
+// lane NIFXCAL1: an 800 lm white light's fade at the measured anchor
+const double f800 = 800.0 / nifxl::kLumensPerFade;
 
 std::shared_ptr<WwNifxModel> loadModel( const QString & framesDir, const QString & nifxDir, const QString & model )
 {
@@ -253,9 +255,9 @@ int main( int argc, char ** argv )
 	const WwCellLight * lb = byName( L.lights, QStringLiteral( "Bulb" ), aBulbF );
 	check( lb != nullptr, QStringLiteral( "A Bulb drawn at its node (%1 %2 %3)" ).arg( aBulb[0] ).arg( aBulb[1] ).arg( aBulb[2] ) );
 	if ( lb ) {
-		// 800 lm omni, white: I = 800/4pi, r = 69.99 sqrt(I), bytes 255, fade 1
-		check( near( lb->radius, 69.99 * std::sqrt( 800.0 / ( 4 * 3.14159265358979323846 ) ) ) && near( lb->color[0], 1.0 )
-			&& near( lb->color[2], 1.0 ) && lb->shadow == 0 && lb->tier == nifxl::Normal,
+		// 800 lm omni, white: I = 800/4pi, r = kRadiusPerSqrtCandela sqrt(I), bytes 255, fade 800 / kLumensPerFade
+		check( near( lb->radius, nifxl::kRadiusPerSqrtCandela * std::sqrt( 800.0 / ( 4 * 3.14159265358979323846 ) ) ) && near( lb->color[0], f800 )
+			&& near( lb->color[2], f800 ) && lb->shadow == 0 && lb->tier == nifxl::Normal,
 			QStringLiteral( "A Bulb 800 lm white: radius %1 color %2 shadow %3" ).arg( lb->radius ).arg( lb->color[0] ).arg( lb->shadow ) );
 		check( lb->flicker == 1 && near( lb->flickerPeriod, 0.25 ) && lb->ref == 0xA1 && lb->recxBaseLocal == 0xA1 + 0x1000
 			&& lb->recxRefLocal == 0xA1, QStringLiteral( "A Bulb carries the nearest placed light (flicker %1 ref %2)" )
@@ -268,21 +270,21 @@ int main( int argc, char ** argv )
 		const double om = 2 * 3.14159265358979323846 * ( 1 - std::cos( 50.0 * 3.14159265358979323846 / 180.0 ) );
 		const nifxl::Converted cv = nifxl::convert( *shade );
 		check( ls->spot && ls->shadow == 1 && near( ls->cosOuter, std::cos( 50.0 * 3.14159265358979323846 / 180.0 ) )
-			&& near( ls->radius, std::min( 16384.0, 69.99 * std::sqrt( 1200.0 / om ) ) ),
+			&& near( ls->radius, std::min( 16384.0, nifxl::kRadiusPerSqrtCandela * std::sqrt( 1200.0 / om ) ) ),
 			QStringLiteral( "A Shade hero spot 100 deg: shadow slot %1, radius %2" ).arg( ls->shadow ).arg( ls->radius ) );
 		check( near( ls->dir[0], 0 ) && near( ls->dir[1], 0 ) && near( ls->dir[2], -1 ), QStringLiteral( "A Shade points down" ) );
 		double Y = 0;
 		const double w[3] = { 0.2126, 0.7152, 0.0722 };
 		for ( int k = 0; k < 3; k++ )
 			Y += w[k] * std::pow( cv.color[k] / 255.0, 2.2 );
-		check( near( cv.fade, ( 1200.0 / om ) / ( 800.0 / ( 4 * 3.14159265358979323846 ) ) / Y, 1e-6 )
+		check( near( cv.fade, ( 1200.0 / om ) / ( nifxl::kLumensPerFade / ( 4 * 3.14159265358979323846 ) ) / Y, 1e-6 )
 			&& near( ls->color[0], std::pow( cv.color[0] / 255.0, 2.2 ) * cv.fade, 1e-4 ),
 			QStringLiteral( "A Shade 3000 K: bytes %1 %2 %3 fade %4" ).arg( cv.color[0] ).arg( cv.color[1] ).arg( cv.color[2] ).arg( cv.fade ) );
 	}
 	const float aBlueF[3] = { float( aBlue[0] ), float( aBlue[1] ), float( aBlue[2] ) };
 	const WwCellLight * lu = byName( L.lights, QStringLiteral( "Blue" ), aBlueF );
-	check( lu && near( lu->byteColor[2], 1.0 ) && near( lu->byteColor[0], 0.0 ) && near( lu->color[2], 1.0 / 0.0722, 1e-4 ),
-		QStringLiteral( "A Blue: a tint never dims (fade 1/Y = %1, got %2)" ).arg( 1.0 / 0.0722 ).arg( lu ? lu->color[2] : -1.0f ) );
+	check( lu && near( lu->byteColor[2], 1.0 ) && near( lu->byteColor[0], 0.0 ) && near( lu->color[2], f800 / 0.0722, 1e-4 ),
+		QStringLiteral( "A Blue: a tint never dims (fade 1/Y = %1, got %2)" ).arg( f800 / 0.0722 ).arg( lu ? lu->color[2] : -1.0f ) );
 
 	// tiers: the bulb tier is never drawn
 	check( L.nifxBulbs.size() == 2 && !byName( L.lights, QStringLiteral( "Glow" ) ) && near( L.nifxBulbs[0].nifxFog, 2.5 ),
@@ -352,7 +354,7 @@ int main( int argc, char ** argv )
 		wwNifxLightsApply( T, d2, red, &c2 );
 		for ( const QString & c : c2 )
 			std::printf( "  %s\n", c.toUtf8().constData() );
-		const double r800 = 69.99 * std::sqrt( 800.0 / ( 4 * 3.14159265358979323846 ) );
+		const double r800 = nifxl::kRadiusPerSqrtCandela * std::sqrt( 800.0 / ( 4 * 3.14159265358979323846 ) );
 		const float fF[3] = { float( pF[0] ), float( pF[1] ), float( pF[2] ) };
 		const float fE[3] = { float( pE[0] ), float( pE[1] ), float( pE[2] ) };
 		const float fU[3] = { float( pU[0] ), float( pU[1] ), float( pU[2] ) };
@@ -362,11 +364,11 @@ int main( int argc, char ** argv )
 		check( tf && te && tu, QStringLiteral( "two: Follow, Edit, Unbound drawn where the scale-2 placement puts them" ) );
 		check( tf && near( tf->radius, 2 * r800 ) && tu && near( tu->radius, 2 * r800 ),
 			QStringLiteral( "two: radius x placed scale 2 (%1, want %2)" ).arg( tf ? tf->radius : -1.0f ).arg( 2 * r800 ) );
-		check( tf && near( tf->color[0], 0.5 ) && near( tf->color[2], 0.5 ),
+		check( tf && near( tf->color[0], 0.5 * f800 ) && near( tf->color[2], 0.5 * f800 ),
 			QStringLiteral( "two: follows LampLight takes its dimmer 0.5 (got %1)" ).arg( tf ? tf->color[0] : -1.0f ) );
-		check( te && near( te->color[0], 0.25 ),
+		check( te && near( te->color[0], 0.25 * f800 ),
 			QStringLiteral( "two: a NiLight edited in place keeps its own dimmer 0.25 (got %1)" ).arg( te ? te->color[0] : -1.0f ) );
-		check( tu && near( tu->color[0], 1.0 ), QStringLiteral( "two: an unbound follows stays at full strength" ) );
+		check( tu && near( tu->color[0], f800 ), QStringLiteral( "two: an unbound follows stays at full strength" ) );
 		check( !byName( T.lights, QStringLiteral( "Bulb2" ) ) && !byName( T.lights, QStringLiteral( "Bulb3" ) )
 			&& !byName( T.offLights, QStringLiteral( "Bulb2" ) ), QStringLiteral( "two: no bulb-tier light on the surfaces" ) );
 		check( T.nifxBulbs.size() == 1 && T.nifxBulbs[0].nifxName == QLatin1String( "Bulb3" ) && T.offLights.isEmpty(),
