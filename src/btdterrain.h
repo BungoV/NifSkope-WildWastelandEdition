@@ -295,4 +295,7 @@ bool nifAppendLodlFarWater( NifModel * nif, const QModelIndex & parent, const QS
 //! Lane SHORE1: `farwatercensus <ws.lodl> --ring x0,y0,x1,y1,texels [--grid] [--percell] --out <quads.txt>`
 int farWaterCensusCli( const QStringList & args, QTextStream & out );
 
+//! Lane SHORE2: the far water's old texel-grid law is asked (WW_CELL_FARLOD_RED=watergrid or WW_CELL_FARLOD_SHORE=0)
+bool lodlFarWaterGridEnv();
+
 #endif // BTDTERRAIN_H

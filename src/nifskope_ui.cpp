@@ -2184,11 +2184,14 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 	}
 	const qint64 waitMs = wwEnvIsSet( "WW_CELL_STREAM_WAIT" ) ? wwEnvInt( "WW_CELL_STREAM_WAIT" ) : 600000;
 	const bool shots = wwEnvInt( "WW_CELL_STREAM_SHOTS" ) != 0;
+	const bool snap = wwEnvInt( "WW_CELL_STREAM_SNAP" ) == 1;	// lane SHORE2: the block a launch's history picked
 	const CellStreamStats s0 = cellStreamStats( nullptr, true );
 	if ( dumpOk )
 		log << "stream " << ( s0.on ? "on" : "off" ) << " steps " << steps.size() << " path " << pathFile << "\n";
 	for ( int i = 0; i < steps.size(); i++ ) {
 		ogl->wwSetPathCamera( true, steps[i].eye, steps[i].at, steps[i].fov );
+		if ( snap )
+			cellStreamSnapCentre( steps[i].eye );
 		cellStreamStats( nullptr, true );
 		PassTime::stream1Hitch( nullptr, nullptr, nullptr, true );	// lane STREAM1: this step's paints only
 		const qint64 waited = wwCellStreamSettle( ogl, 10, waitMs );
@@ -2252,6 +2255,8 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 				<< " hitchFrames " << hitchFrames << " | " << s1mem;
 			if ( !s.lastError.isEmpty() )
 				log << " | error " << s.lastError;
+			if ( snap )
+				log << " | snap 1";
 			log << "\n";
 			log.flush();
 		}

@@ -1108,6 +1108,15 @@ bool cellStreamTick( NifModel * nif, Scene * scene, const Vector3 & eye )
 	return ( s && nif ) ? s->tick( scene, eye ) : false;
 }
 
+void cellStreamSnapCentre( const Vector3 & eye )
+{
+	// lane SHORE2: shiftCentre's hysteresis keeps the block of eyes seen before the path camera (the shot refit's)
+	for ( auto & kv : streams() ) {
+		kv.second->ccx = cellOf( eye[0] );
+		kv.second->ccy = cellOf( eye[1] );
+	}
+}
+
 int cellStreamTexKeepSec()
 {
 	WW_SWITCH_STATIC( int, keep, wwEnvIsSet( "WW_CELL_STREAM_TEXKEEP" ) ? wwEnvInt( "WW_CELL_STREAM_TEXKEEP" ) : 5 );

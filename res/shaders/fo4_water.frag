@@ -96,6 +96,7 @@ uniform sampler2D waterNoise2;
 uniform sampler2D waterScene;	// the frame behind the water, the viewport's corner at texel 0
 uniform sampler2D waterDepth;	// the opaque pass's depth, likewise
 uniform bool waterHaveDepth;
+uniform bool waterFarMask;	// lane SHORE2: far shore-law water, discarded on the samples the .lodl calls dry
 uniform int waterRed;		// 1 norefl, 2 nofresnel, 4 nosilt, 8 nospec, 16 noshore, 32 nonormal,
 				// 64 nodepthfog, 128 nofar (the noise sampler's, in cellwater.cpp), 256 nossr, 512 fogunits
 uniform bool waterSsrOn;	// lane WATER2: this frame's reflections are bound (half the view, top row first)
@@ -202,6 +203,8 @@ void main()
 	vec4 Amp = waterMat[11], UV = waterMat[12];
 	vec3 posView = -ViewDir;
 	vec3 P = cellWorldPos( posView );
+	if ( waterFarMask && wwFarWaterDry( P.xy ) )
+		discard;
 	vec3 eye = cellWorldPos( vec3( 0.0 ) );
 	vec3 ray = P - eye;
 	float dist = length( ray );

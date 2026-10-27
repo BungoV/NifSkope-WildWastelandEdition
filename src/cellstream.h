@@ -126,6 +126,8 @@ void cellStreamStop( NifModel * nif );
 std::shared_ptr<CellStreamSeed> cellStreamSuspend( NifModel * nif );
 //! One frame (GLView): follow the eye (world units). True when the document or the scene changed.
 bool cellStreamTick( NifModel * nif, Scene * scene, const Vector3 & eye );
+//! lane SHORE2: every stream's block centres on the eye's own cell now (the harness path's WW_CELL_STREAM_SNAP=1)
+void cellStreamSnapCentre( const Vector3 & eye );
 //! Cells queued, building or being written (a shot waits for false). Null = any document.
 bool cellStreamBusy( const NifModel * nif );
 //! lane CELLSTREAM1: this document streams its cells

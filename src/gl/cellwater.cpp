@@ -45,6 +45,7 @@ struct WaterDoc
 	QVector<WaterBody> bodies;
 	QHash<quint32, int> byForm;
 	QHash<int, int> shapeBody;	// written shape's block -> index into bodies
+	QSet<int> farMask;		// lane SHORE2: far shore-law water blocks (dry samples discarded)
 };
 
 struct WaterState
@@ -198,7 +199,7 @@ void wwCellWaterBegin( const void * nif )
 	st().docs.remove( nif );
 }
 
-void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec )
+void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec, bool farMask )
 {
 	WaterDoc & d = st().docs[nif];
 	auto it = d.byForm.constFind( rec.form );
@@ -216,20 +217,28 @@ void wwCellWaterShape( const void * nif, int block, const WwWaterRecord & rec )
 		i = it.value();
 	}
 	d.shapeBody.insert( block, i );
+	if ( farMask )
+		d.farMask.insert( block );
+	else
+		d.farMask.remove( block );
 }
 
 void wwCellWaterForget( const void * nif, int block )
 {
 	auto d = st().docs.find( nif );
-	if ( d != st().docs.end() )
+	if ( d != st().docs.end() ) {
 		d->shapeBody.remove( block );
+		d->farMask.remove( block );
+	}
 }
 
 void wwCellWaterRemap( const void * nif, const WwBlockMap & m )
 {
 	auto d = st().docs.find( nif );
-	if ( d != st().docs.end() )
+	if ( d != st().docs.end() ) {
 		wwRemapKeys( d->shapeBody, m );
+		wwRemapKeys( d->farMask, m );
+	}
 }
 
 bool wwCellWaterOn()
@@ -411,6 +420,10 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	prog->uni1i_l( prog->uniLocation( "waterSsrFin" ), unit++ );
 	prog->uni1b( "waterSsrOn", ssrOn );
 	unit += wwCellWaterInfoUniforms( scene, unit );	// lane WATERDATA1: units 7..9 when the program reads them (WATERFLOWBAKE1's flow: cell units 66/67)
+	{	// lane SHORE2: per draw; the red keeps SHORE1's quads whole
+		WW_SWITCH_STATIC( bool, maskRed, wwSwitchEcho( "far water dry mask red", wwEnv( "WW_CELL_FARWATER_RED" ).trimmed() == "nomask" ) );
+		prog->uni1b( "waterFarMask", dit->farMask.contains( block ) && !maskRed );
+	}
 	if ( prog->uniLocation( "waterShoreOn" ) >= 0 ) {
 		/* lane WATERSHORE1 (fo4_waterlook.prog, water_shore.glsl). Engineering choices in world units, no game value
 		 * exists (the game draws no shore foam): the field reads 64 at the waterline (half a 128 u texel, a dry texel
