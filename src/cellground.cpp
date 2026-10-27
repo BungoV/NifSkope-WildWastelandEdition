@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "cellground.h"
 #include "cellsplat.h"
+#include "cellgroundlegend.h"	// lane DUNESAND3: the TX07 clause a live set rewrites
 
 #include "esmdata.h"
 
@@ -252,10 +253,12 @@ bool cellBuildGround( EsmWorld & world, int x0, int y0, int x1, int y1,
 
 QString cellGroundLegend( const CellGroundBuild & b )
 {
-	int used = 0;
+	int used = 0, specWant = 0;
 	for ( const CellGroundBucket & k : b.buckets ) {
 		if ( k.ltex && k.quads )
 			used++;
+		if ( !k.specWant.isEmpty() )
+			specWant++;
 	}
 	QString s = QString( "ground: %L1 LAND cells (%L2 with VCLR), %L3 quads over %L4 "
 		"landscape textures -- %L5 textured, %L6 bare; %L7 quads took an ATXT layer "
@@ -265,8 +268,7 @@ QString cellGroundLegend( const CellGroundBuild & b )
 		.arg( b.layersRead );
 	if ( b.ltexUnresolved )
 		s += QString( "; %1 LTEX forms named no texture" ).arg( b.ltexUnresolved );
-	s += cellSplatSpecRed() ? QStringLiteral( "; RED CONTROL WW_TERRBLEND_RED=nospec: no TX07 map on the ground" )
-		: QString( "; %1 of %2 mosaic buckets carry their TX07 _s map" ).arg( b.bucketsSpec ).arg( b.buckets.size() );
+	s += cellGroundSpecClause( cellSplatSpecRed(), specWant, b.buckets.size(), QStringLiteral( "mosaic buckets" ) );
 	/* WHY EACH BARE QUAD IS BARE (lane CELLVIEW3). Without this the number
 	 * "133 bare" was unreadable: it mixed quads the plugin never painted with
 	 * quads a null-form layer had blanked, and only the second kind was a

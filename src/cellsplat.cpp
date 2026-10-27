@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellsplat.h"
+#include "cellgroundlegend.h"	// lane DUNESAND3: the TX07 clause a live set rewrites
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "esmdata.h"
@@ -546,10 +547,12 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 
 QString cellSplatLegend( const CellSplatBuild & b )
 {
-	int used = 0;
+	int used = 0, specWant = 0;
 	for ( const CellSplatBucket & k : b.buckets ) {
 		if ( k.ltex && k.quads )
 			used++;
+		if ( !k.specWant.isEmpty() )
+			specWant++;
 	}
 	const double mult = b.quadsTotal
 		? double( b.quadsEmitted ) / double( b.quadsTotal ) : 0.0;
@@ -575,8 +578,7 @@ QString cellSplatLegend( const CellSplatBuild & b )
 			"(its SW corner), the per-quad switching put back on purpose" );
 	if ( b.ltexUnresolved )
 		s += QString( "; %1 LTEX forms named no texture" ).arg( b.ltexUnresolved );
-	s += cellSplatSpecRed() ? QStringLiteral( "; RED CONTROL WW_TERRBLEND_RED=nospec: no TX07 map on the ground" )
-		: QString( "; %1 of %2 passes carry their TX07 _s map" ).arg( b.bucketsSpec ).arg( b.buckets.size() );
+	s += cellGroundSpecClause( cellSplatSpecRed(), specWant, b.buckets.size(), QStringLiteral( "passes" ) );
 	/* THE ONE THING A READER MUST NOT HAVE TO ASK. Without the ATXT layer index
 	 * the composite is in the order the layers happen to sit in the record,
 	 * which is not the engine's paint order and can put gravel under grass that

@@ -2519,6 +2519,11 @@ QString wwLiveApply( NifSkope * skope )
 	// lane LIVESET1: the far LOD and the probe markers rebuild in place; the reopen only when they cannot
 	QString liveWhy;
 	const int liveSec = ( L.owed & 2 ) ? 0 : cellLiveSections( skope->getNifModel(), &liveWhy );
+	if ( liveSec == 1 ) {	// lane DUNESAND3: the legend names the value set now, not the open's
+		const QString legend = cellWorkspaceNotesLive();
+		if ( !legend.isEmpty() )
+			liveWhy += QStringLiteral( "; " ) + legend;
+	}
 	if ( liveSec ) {
 		std::fprintf( stderr, "live: %s%s\n", liveSec == 2 ? "reopen owed: " : "", qPrintable( liveWhy ) );
 		std::fflush( stderr );

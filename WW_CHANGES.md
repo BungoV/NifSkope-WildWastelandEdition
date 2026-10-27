@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane DUNESAND3 (2026-10-27, branch dunesand3-20261027): the ground legend follows a live spec red
+
+- **Why:** DUNESAND2 made `WW_TERRBLEND_RED=nospec` swap the ground's TX07 in place, but the ground legend line was
+  written once at open and kept naming the open's value.
+- **Fix:** the TX07 clause comes from one function (`src/cellgroundlegend.h`) for blend and mosaic, and both forms now
+  carry the wanted count (`... no TX07 map on the ground (38 of 44 passes name one)`). After a live set the cell
+  workspace rewrites the clause in its notes (`cellWorkspaceNotesLive`) and the panel reads them again; the live reply
+  adds `ground legend: RED CONTROL nospec` / `ground legend: TX07 bound`. The green text is unchanged.
+- **Engine check (no code):** the Landscape G-buffer pixel shader's gloss/spec scalars beside the _s maps are the
+  material's smoothness and specular scale, both 1.0 for near land, so the ground's nif defaults already match.
+- **Test:** `tests/groundlegend` (green PASS; red `-DGROUNDLEGEND_RED`, the never-rewritten legend, FAILs).
+
 ## Lane DUNESAND2 (2026-10-27, branch dunesand2-20261027): the mosaic ground binds its _s map; the spec red is live
 
 - **Why:** DUNESAND1 bound each layer's TX07 _s map on the blended ground (cellsplat) only. Past the splat's vertex cap

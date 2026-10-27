@@ -15,6 +15,8 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 
 #include "cellview.h"
+#include "cellsplat.h"
+#include "cellgroundlegend.h"	// lane DUNESAND3
 #include "cellfarlod.h"
 #include "cellmodpickbox.h"	// lane MODPICK1: the Mods band
 #include "gl/celllights.h"
@@ -132,6 +134,17 @@ void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
 QString cellWorkspacePath()
 {
 	return g_path;
+}
+
+QString cellWorkspaceNotesLive()
+{
+	const bool nospec = cellSplatSpecRed();
+	const QString now = cellGroundSpecClauseLive( g_notes, nospec );
+	if ( now == g_notes )
+		return QString();
+	g_notes = now;
+	emit CellPickBus::instance()->sceneChanged();
+	return nospec ? QStringLiteral( "ground legend: RED CONTROL nospec" ) : QStringLiteral( "ground legend: TX07 bound" );
 }
 
 bool cellWorkspaceHasOverrides()
@@ -1287,8 +1300,10 @@ void CellWorkspacePanel::buildUi()
 		const int r = cellLiveRebuild( nif, &why );
 		if ( r == 2 )
 			return false;	// the reopen below
-		if ( r == 1 )
-			say( why, false );
+		if ( r == 1 ) {
+			const QString legend = cellWorkspaceNotesLive();
+			say( legend.isEmpty() ? why : why + QStringLiteral( "; " ) + legend, false );
+		}
 		if ( glView )
 			glView->update();
 		return true;
