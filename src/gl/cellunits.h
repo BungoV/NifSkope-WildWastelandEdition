@@ -50,11 +50,15 @@ constexpr int CloudShadow = 46;	// lane CLOUD3: the clouds' Beer shadow map, rea
 constexpr int CloudBuildShape = 47;	// lane CLOUD3: the shadow map's build reads the volume's noise and the cloud map (47-49)
 constexpr int CloudBuildDetail = 48;
 constexpr int CloudBuildMap = 49;
+constexpr int WaterMoment0 = 60;	// lane WATERREFL1: the water noise layers' slope second moments (sampler2D, 60-62; 50-56 taken by FARDRAW1/FARPAGES1)
+constexpr int WaterMoment1 = 61;
+constexpr int WaterMoment2 = 62;
+constexpr int WaterCloudMap = 63;	// lane WATERREFL1: CLOUD1 map for the reflected sky
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
 	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans, ContactGbuf, GiAir, CardDepth,
-	CloudShadow, CloudBuildShape, CloudBuildDetail, CloudBuildMap };
+	CloudShadow, CloudBuildShape, CloudBuildDetail, CloudBuildMap, WaterMoment0, WaterMoment1, WaterMoment2, WaterCloudMap };
 
 constexpr bool distinct()
 {

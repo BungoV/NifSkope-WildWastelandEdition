@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 
 #include "gl/celllights.h"
 #include "gl/cellwater.h"
+#include "gl/celllooks.h"	// lane WATERREFL1: the Water reflections row picks the water march's twin
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -307,7 +308,8 @@ void wwCellSsrPass( Scene * scene, bool run )
 	 * this frame can use them; else the scene pass as before */
 	int prevWhy = 0;
 	if ( ssrPrevOn() && s.on ) {
-		prevWhy = sceneOnly || wwCellSsgiWantsScene( scene ) ? 2 : waterSsr ? 3 : !g.prevValid ? 4
+		// lane WATERREFL1: with the Water reflections row the water's rays march the previous frame too (no second scene)
+		prevWhy = sceneOnly || wwCellSsgiWantsScene( scene ) ? 2 : waterSsr && !wwLookOn( WwLook::WaterRefl ) ? 3 : !g.prevValid ? 4
 			: g.prevDoc != scene->nifModel ? 5 : ( g.prev.w != W || g.prev.h != H ) ? 6 : 1;
 		if ( prevWhy != g.lastPrev ) {
 			static const char * const words[7] = { "", "on", "scene pass (the bounce reads it)", "scene pass (water rays)",
@@ -345,7 +347,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 	const GLenum sceneBufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 	fn->glDrawBuffers( wantEmit ? 2 : 1, sceneBufs );
 	const bool complete = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
-	NifSkopeOpenGLContext::Program * prog = complete ? r->useProgram( "cell_ssr.prog" ) : nullptr;
+	// lane WATERREFL1: the twin (cell_ssrwater.prog) marches the water's rays further, edge fade only, unclamped
+	const char * ssrProg = wwLookOn( WwLook::WaterRefl ) ? "cell_ssrwater.prog" : "cell_ssr.prog";
+	NifSkopeOpenGLContext::Program * prog = complete ? r->useProgram( ssrProg ) : nullptr;
 	if ( prog )
 		r->stopProgram();
 	if ( !prog ) {
@@ -374,7 +378,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 		fn->glEnable( GL_STENCIL_TEST );
 		fn->glStencilMask( 0 );
 		fn->glStencilFunc( GL_EQUAL, 1, 0x01 );
-		prog = r->useProgram( "cell_ssr.prog" );
+		prog = r->useProgram( ssrProg );
 		prog->uni1i( "ssrStage", 0 );
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 		r->stopProgram();
@@ -459,6 +463,8 @@ void wwCellSsrPass( Scene * scene, bool run )
 			s.pass = true;
 			s.waterRay = true;
 			s.gbuf = ao.gbuf;
+			if ( usePrev )	// lane WATERREFL1: the previous frame stood in for step 1, so nothing was collected
+				scene->collectShapes( sceneSecond );
 			// a particle inherits the masks of the draw before it (it may follow the water): then the whole old pass
 			bool waterAlone = opaqueOnly;
 			for ( Node * node : sceneSecond.list() )
@@ -486,7 +492,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 	}
 
 	// 2. the full-screen passes (cell_ssr.frag)
-	prog = r->useProgram( "cell_ssr.prog" );
+	prog = r->useProgram( ssrProg );
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDisable( GL_CULL_FACE );
 	fn->glDisable( GL_BLEND );

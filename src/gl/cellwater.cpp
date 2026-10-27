@@ -11,6 +11,8 @@
 #include "esmwater.h"
 #include "sunshadow.h"	// lane WATERCAUSTICS1: the caustics read the sun's cascades when they are built
 #include "cellworldanim.h"	// lane FXPARITY2: the world clock
+#include "cellunits.h"	// lane WATERREFL1: the noise layers' moment textures
+#include "cloudmap.h"	// lane WATERREFL1: the weather's clouds in the reflected sky
 #include "gl/glscene.h"
 #include "gl/gltex.h"
 #include "gl/renderer.h"
@@ -24,6 +26,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <vector>
 
 namespace
 {
@@ -117,6 +121,58 @@ void writeDump( const WaterDoc & d, const float sky[3][3], bool skyFromWeather, 
 		  << QString::number( d.bodies[it.value()].rec.form, 16 ) << "\n";
 }
 
+/* lane WATERREFL1: a noise layer's slope second moments for LEAN mapping (Olano and Baker 2010): (t.x^2, t.y^2) of
+ * the decoded slope t = 2 texel - 1 at level 0, mipmapped, so the shader gets back the variance its filter averaged
+ * away. Built once per renderer and texture (rebuilt if the cache hands the path another texture), bound on unit */
+void bindWaterMoment( NifSkopeOpenGLContext::GLFunctions * fn, const void * renderer, const QString & path, GLuint src,
+	int unit, float aniso )
+{
+	struct Moment { GLuint src = 0, tex = 0; };
+	static QHash<QPair<const void *, QString>, Moment> cache;
+	Moment & m = cache[qMakePair( renderer, path )];
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
+	if ( !m.tex || m.src != src ) {
+		GLint w = 0, h = 0, pack = 0;
+		std::vector<float> px;
+		if ( src ) {
+			fn->glBindTexture( GL_TEXTURE_2D, src );
+			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w );
+			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h );
+		}
+		if ( w > 0 && h > 0 && w <= 4096 && h <= 4096 ) {
+			px.resize( size_t( w ) * size_t( h ) * 4 );
+			fn->glGetIntegerv( GL_PIXEL_PACK_BUFFER_BINDING, &pack );
+			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+			fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+			fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, px.data() );
+			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, GLuint( pack ) );
+		} else {
+			w = h = 1;
+			px.assign( 4, 0.5f );	// a flat layer: no variance
+		}
+		std::vector<float> mo( size_t( w ) * size_t( h ) * 2 );
+		for ( size_t i = 0; i < mo.size() / 2; i++ ) {
+			const float tx = px[i * 4] * 2.0f - 1.0f, ty = px[i * 4 + 1] * 2.0f - 1.0f;
+			mo[i * 2] = tx * tx;
+			mo[i * 2 + 1] = ty * ty;
+		}
+		if ( !m.tex )
+			fn->glGenTextures( 1, &m.tex );
+		m.src = src;
+		fn->glBindTexture( GL_TEXTURE_2D, m.tex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RG32F, w, h, 0, GL_RG, GL_FLOAT, mo.data() );
+		fn->glGenerateMipmap( GL_TEXTURE_2D );
+		std::fprintf( stderr, "water moments: %s %dx%d\n", qPrintable( path ), int( w ), int( h ) );
+	}
+	fn->glBindTexture( GL_TEXTURE_2D, m.tex );
+	// sampled as the layer is (lane WATER2's sampler), so the moment's footprint is the normal's
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+	fn->glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso );
+}
+
 } // namespace
 
 void wwCellWaterBegin( const void * nif )
@@ -192,7 +248,7 @@ bool wwCellWaterSsrWanted( Scene * scene )
 	for ( const WaterBody & b : it->bodies )
 		if ( b.rec.ssr )
 			return true;
-	return false;
+	return wwLookOn( WwLook::WaterRefl );	// lane WATERREFL1: every body reflects the scene (lakes' WATR flag is 0)
 }
 
 bool wwCellWaterIsShape( const void * nif, int block )
@@ -268,6 +324,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	}
 
 	static const char * const noiseUni[3] = { "waterNoise0", "waterNoise1", "waterNoise2" };
+	GLint noiseTex[3] = { 0, 0, 0 };	// lane WATERREFL1: the layers as bound, for their moments
+	float noiseAniso = 1.0f;
 	for ( int k = 0; k < 3; k++ ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 		if ( b.noise[k].isEmpty() || !scene->textures->bind( QStringView( b.noise[k] ), scene->nifModel ) ) {
@@ -288,6 +346,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
 		glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, ( s.red & 128 ) ? 1.0f : std::min( 16.0f, maxAniso ) );
+		noiseAniso = ( s.red & 128 ) ? 1.0f : std::min( 16.0f, maxAniso );
+		glGetIntegerv( GL_TEXTURE_BINDING_2D, &noiseTex[k] );
 		prog->uni1i_l( prog->uniLocation( noiseUni[k] ), unit++ );
 	}
 	// the scene behind the water (the second pass's copy) and the opaque frame's depth; in the reflections' scene
@@ -311,7 +371,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	s.linear = wwCellHdrActive() && s.probe == 0 && !rayPass && !( s.red & 1024 );
 	// lane WATER2: this frame's reflections (the game reads them only when its WATR's SSR flag is set)
 	unsigned int ssrRaw = 0, ssrFin = 0;
-	const bool ssrOn = !inSsr && b.rec.ssr && wwCellSsrWaterTextures( scene, ssrRaw, ssrFin );
+	const bool ssrOn = !inSsr && ( b.rec.ssr || wwLookOn( WwLook::WaterRefl ) ) && wwCellSsrWaterTextures( scene, ssrRaw, ssrFin );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, ssrOn ? ssrRaw : 0 );
 	prog->uni1i_l( prog->uniLocation( "waterSsrRaw" ), unit++ );
@@ -354,6 +414,42 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1i( "waterWavesOn", wwLookOn( WwLook::WaterSwell ) ? 1 : 0 );
 		prog->uni1i( "waterWavesRed", s.wavesRed );
 	}
+	if ( prog->uniLocation( "waterReflOn" ) >= 0 ) {
+		/* lane WATERREFL1 (fo4_waterlook.prog, water_refl.glsl). F0 0.0204 = water at IOR 1.333; the glare's shoulder at
+		 * 16 x the sun colour (the WATR sun magnitudes run 4.75 creek .. 17.6 ocean); footprint clamp 0.18 (Tokuyoshi and
+		 * Kaplanyan 2019); the march stays sharp below alpha 0.015 and is its blur from 0.12 */
+		const bool reflOn = wwLookOn( WwLook::WaterRefl ), glintOn = wwLookOn( WwLook::WaterGlint );
+		WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_REFL_RED" ).trimmed() );
+		WW_SWITCH_STATIC( QByteArray, gr, wwEnv( "WW_CELL_WATER_GLINT_RED" ).trimmed() );
+		prog->uni1b( "waterReflOn", reflOn );
+		prog->uni1b( "waterGlintOn", glintOn );
+		prog->uni1i( "waterReflRed", rr == "record" ? 1 : rr == "farcolour" ? 2 : rr == "sharp" ? 4 : 0 );
+		prog->uni1i( "waterGlintRed", gr == "game" ? 1 : gr == "nolean" ? 2 : gr == "noshoulder" ? 4 : 0 );
+		prog->uni4f( "waterGlintK", FloatVector4( 16.0f, 0.0204f, 0.18f, 0.015f ) );
+		static const char * const momentUni[3] = { "waterMoment0", "waterMoment1", "waterMoment2" };
+		for ( int k = 0; k < 3; k++ ) {
+			const int mu = WwCellUnit::WaterMoment0 + k;
+			if ( reflOn || glintOn ) {
+				bindWaterMoment( fn, r, b.noise[k].isEmpty() ? QStringLiteral( "#flat" ) : b.noise[k], GLuint( noiseTex[k] ),
+					mu, noiseAniso );
+			} else {
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + mu ) );
+				fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			}
+			prog->uni1i_l( prog->uniLocation( momentUni[k] ), mu );
+		}
+		// the latest cloud map (built by the sky pass; never rebuilt here, mid-scene)
+		const WwCloudMap & cm = wwCloudMap();
+		const bool clouds = reflOn && cm.valid && cm.tex;
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::WaterCloudMap ) );
+		fn->glBindTexture( GL_TEXTURE_2D, clouds ? cm.tex : 0 );
+		prog->uni1i( "waterCloudMap", WwCellUnit::WaterCloudMap );
+		prog->uni4f( "waterCloudGeo", FloatVector4( cm.centerX, cm.centerY, std::max( cm.halfExtent, 1.0f ), clouds ? 1.0f : 0.0f ) );
+		prog->uni4f( "waterCloudZ", FloatVector4( cm.band[WwCloudLow].baseZ, cm.band[WwCloudMid].baseZ, cm.band[WwCloudHigh].baseZ, 0.0f ) );
+		prog->uni4f( "waterCloudCov", FloatVector4( cm.band[WwCloudLow].coverage, cm.band[WwCloudMid].coverage,
+			cm.band[WwCloudHigh].coverage, 0.0f ) );
+		prog->uni3f( "waterCloudTint", cm.band[WwCloudLow].tint[0], cm.band[WwCloudLow].tint[1], cm.band[WwCloudLow].tint[2] );
+	}
 	fn->glActiveTexture( GL_TEXTURE0 );
 
 	// an opaque surface: it composites the scene behind it itself
@@ -379,7 +475,8 @@ const char * wwCellWaterProgram()
 bool wwCellWaterLookOn()
 {
 	return wwLookOn( WwLook::WaterDepth ) || wwLookOn( WwLook::WaterCaustics ) || wwLookOn( WwLook::WaterSoftEdge )
-		|| wwLookOn( WwLook::ShoreFoam ) || wwLookOn( WwLook::WaterSwell );
+		|| wwLookOn( WwLook::ShoreFoam ) || wwLookOn( WwLook::WaterSwell ) || wwLookOn( WwLook::WaterRefl )
+		|| wwLookOn( WwLook::WaterGlint );	// lane WATERREFL1
 }
 
 bool wwCellWaterWritesLinear()
@@ -421,5 +518,7 @@ QString wwCellWaterEcho( const void * nif )
 				.arg( wwLookOn( WwLook::WaterSoftEdge ) ? QLatin1String( " edge" ) : QLatin1String( "" ) )
 				.arg( wwLookOn( WwLook::ShoreFoam ) ? QLatin1String( " foam" ) : QLatin1String( "" ) )
 				.arg( wwLookOn( WwLook::WaterSwell ) ? QLatin1String( " swell" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterRefl ) ? QLatin1String( " reflections" ) : QLatin1String( "" ) )
+				+ ( wwLookOn( WwLook::WaterGlint ) ? QLatin1String( " glare" ) : QLatin1String( "" ) )
 			: QString() );
 }
