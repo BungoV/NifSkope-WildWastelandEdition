@@ -14,6 +14,7 @@
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
+#include "data/nifitemcache.h"
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 
@@ -29,6 +30,7 @@
 #include <cstdio>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <set>
 #include <thread>
 #include <typeinfo>
@@ -36,14 +38,45 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <psapi.h>
+#include <intrin.h>
 #ifdef __MINGW32__
 #include <pthread.h>
 #endif
 #endif
 
+extern std::vector<NifItem *> * g_nifResetGrave;   // lane CELLSPIKE3: nifmodel.cpp resetNiBlock
+
 namespace {
 
 constexpr float kCell = 4096.0f;
+
+/* lane CELLSPIKE3: the old path of each fix, live: WW_CELL_SPIKE3_RED holds any of drain (freed-block rows freed in
+ * the frame, no item estimate), write (a slice starts whenever the budget has room), lock (builder and reaper take the item pool's lock per item) */
+bool spikeRed( const char * part )
+{
+	WW_SWITCH_STATIC( QString, r, wwEnvStr( "WW_CELL_SPIKE3_RED" ) );
+	return r.contains( QLatin1String( part ) );
+}
+
+// lane CELLSPIKE3: this thread's processor time, ms (cycle counter scaled by the TSC rate seen since the first call)
+double threadCpuMs()
+{
+#ifdef Q_OS_WIN
+	static const quint64 tsc0 = __rdtsc();
+	static QElapsedTimer wall;
+	if ( !wall.isValid() )
+		wall.start();
+	ULONG64 cyc = 0;
+	QueryThreadCycleTime( GetCurrentThread(), &cyc );
+	const double ms = double( wall.nsecsElapsed() ) * 1.0e-6;
+	static double perMs = 0.0;
+	if ( ms > 200.0 && perMs == 0.0 )
+		perMs = double( __rdtsc() - tsc0 ) / ms;
+	return perMs > 0.0 ? double( cyc ) / perMs : 0.0;
+#else
+	return 0.0;
+#endif
+}
 using Key = std::pair<int, int>;
 
 enum class CellState { Queued, Building, Ready, Writing, Attached };
@@ -120,9 +153,12 @@ public:
 		QVector<Triangle> triangles;
 	};
 	std::vector<DeadArrays> dead;
+	std::vector<NifItem *> deadItems;   //!< lane CELLSPIKE3: reset blocks' old rows, freed by the reaper too
 	std::thread reaper;
 	std::atomic<bool> reaperDone { true };
 	double clearEstMs = 0.0, freeEstMs = 0.0;   //!< the dearest recent item of each, decaying
+	double resetEstMs = 0.0;                    //!< lane CELLSPIKE3: the same for a freed block's reset
+	double sliceEstMs = 0.0;                    //!< lane CELLSPIKE3: ... and for a write slice
 	StreamCell * writing = nullptr;
 	std::thread worker;
 	std::shared_ptr<CellChunk> job;
@@ -147,6 +183,8 @@ public:
 			worker.join();
 		if ( reaper.joinable() )
 			reaper.join();
+		for ( NifItem * i : deadItems )
+			delete i;
 		for ( Node * n : toClear )
 			n->clear();
 		for ( Node * n : toClear )
@@ -209,6 +247,7 @@ private:
 	void unload( StreamCell & c );
 	void drain( const QElapsedTimer & t );
 	void bury( const QElapsedTimer & t );
+	void reap();
 	bool write( StreamCell & c, double budget );
 	void wire( StreamCell & c );
 	bool attach( StreamCell & c, const QElapsedTimer & t, double budget );
@@ -388,11 +427,17 @@ void Stream::pumpWorker( const Vector3 & eye )
 	std::shared_ptr<CellChunk> j = job;
 	std::atomic<bool> * flag = &jobDone;
 	// a thread a job: the loaders' per-thread caches go with it
-	worker = std::thread( [j, flag]() {
+	// lane CELLSPIKE3: the builder takes item slots a run per lock; one lock per item, held by a low-priority thread
+	// the machine had pre-empted, stalled the main thread 10-35 ms off the processor (red lock)
+	const bool ownSlots = !spikeRed( "lock" );
+	worker = std::thread( [j, flag, ownSlots]() {
 #ifdef Q_OS_WIN
 		// lane CELLSTREAM1: the builder yields to the main thread (its frame slices are what the gate times)
 		SetThreadPriority( GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL );
 #endif
+		std::optional<NifItemThreadCache> itemRun;
+		if ( ownSlots )
+			itemRun.emplace();
 		cellChunkBuild( *j );
 		flag->store( true );
 	} );
@@ -588,6 +633,7 @@ bool Stream::write( StreamCell & c, double budget )
 			trace( QStringLiteral( "slow attach slice %1,%2: %3 ms (%4 of %5 containers linked)" ).arg( c.x ).arg( c.y )
 				.arg( ms, 0, 'f', 1 ).arg( c.linked ).arg( c.containers.size() ) );
 		c.writeMs += ms;
+		sliceEstMs = std::max( 0.9 * sliceEstMs, ms );
 		return hooked;
 	}
 	writing = &c;
@@ -644,6 +690,7 @@ bool Stream::write( StreamCell & c, double budget )
 			.arg( ms - emitMs - wireMs, 0, 'f', 1 )
 			+ ( building() ? QStringLiteral( " worker busy" ) : QStringLiteral( " worker idle" ) ) );
 	c.writeMs += ms;
+	sliceEstMs = std::max( 0.9 * sliceEstMs, ms );
 	return hooked;
 }
 
@@ -801,17 +848,29 @@ void Stream::bury( const QElapsedTimer & t )
 		if ( msOf( d ) - n0 > 2.0 )
 			trace( QStringLiteral( "slow node free: %1 ms (%2)" ).arg( msOf( d ) - n0, 0, 'f', 1 ).arg( kind ) );
 	}
-	if ( !dead.empty() && reaperDone.load() ) {
-		if ( reaper.joinable() )
-			reaper.join();   // done already: a quick join
-		reaperDone = false;
-		reaper = std::thread( [batch = std::move( dead ), done = &reaperDone]() mutable {
-			batch.clear();
-			done->store( true );
-		} );
-		dead.clear();
-	}
 	st.buryMaxMs = std::max( st.buryMaxMs, msOf( d ) );
+}
+
+void Stream::reap()
+{
+	if ( ( dead.empty() && deadItems.empty() ) || !reaperDone.load() )
+		return;
+	if ( reaper.joinable() )
+		reaper.join();   // done already: a quick join
+	reaperDone = false;
+	const bool ownSlots = !spikeRed( "lock" );
+	reaper = std::thread( [batch = std::move( dead ), items = std::move( deadItems ), done = &reaperDone, ownSlots]() mutable {
+		batch.clear();
+		std::optional<NifItemThreadCache> itemRun;   // lane CELLSPIKE3: the frees go back in one splice (red lock: per item)
+		if ( ownSlots )
+			itemRun.emplace();
+		for ( NifItem * i : items )   // lane CELLSPIKE3: plain frees (pool slots, strings); no model or parent is touched
+			delete i;
+		itemRun.reset();
+		done->store( true );
+	} );
+	dead.clear();
+	deadItems.clear();
 }
 
 void Stream::drain( const QElapsedTimer & t )
@@ -826,14 +885,24 @@ void Stream::drain( const QElapsedTimer & t )
 	const QSet<int> pinned = red == QLatin1String( "loudreset" ) ? QSet<int>() : nif->blocksWithPersistent();
 	const bool loud = red == QLatin1String( "loudreset" );
 	const double scanMs = msOf( d );
-	while ( !toReset.empty() && msOf( t ) < budgetMs ) {   // the writes wait for an empty pool queue anyway
+	// lane CELLSPIKE3: the old rows go to the reaper (red: freed here), and a reset starts only if the dearest recent
+	// one still fits the budget (the first of a frame may take the half budget, as bury)
+	const bool redDrain = spikeRed( "drain" );
+	g_nifResetGrave = redDrain ? nullptr : &deadItems;
+	int items = 0;
+	auto fits = [&]() { return redDrain ? msOf( t ) < budgetMs
+		: ( msOf( t ) + resetEstMs < budgetMs || ( items == 0 && msOf( t ) < 0.5 * budgetMs ) ); };
+	while ( !toReset.empty() && fits() ) {   // the writes wait for an empty pool queue anyway
 		const auto tk = toReset.back();
 		toReset.pop_back();
 		const double r0 = msOf( d );
 		const bool quiet = !loud && !pinned.contains( tk.first );
 		st.quietResets += quiet ? 1 : 0;
 		st.loudResets += quiet ? 0 : 1;
-		if ( nif->resetNiBlock( tk.first, quiet ) )
+		const bool reset = nif->resetNiBlock( tk.first, quiet );
+		items++;
+		resetEstMs = std::max( 0.9 * resetEstMs, msOf( d ) - r0 );
+		if ( reset )
 			pool[tk.second].insert( tk.first );
 		if ( msOf( d ) - r0 > 3.0 )
 			trace( QStringLiteral( "slow reset %1 %2%8: %3 ms (remove %4 insert %5 links %6, %7 persistent, scan %9 ms)" )
@@ -842,6 +911,7 @@ void Stream::drain( const QElapsedTimer & t )
 				.arg( quiet ? " quiet" : "" ).arg( scanMs, 0, 'f', 2 )
 				+ ( worker.joinable() && !jobDone.load() ? QStringLiteral( " worker busy" ) : QStringLiteral( " worker idle" ) ) );
 	}
+	g_nifResetGrave = nullptr;
 	st.drainMaxMs = std::max( st.drainMaxMs, msOf( d ) );
 	if ( msOf( d ) > budgetMs )
 		trace( QStringLiteral( "slow drain: %1 ms (scan %2 ms, tick at %3 ms on entry)" ).arg( msOf( d ), 0, 'f', 1 )
@@ -909,6 +979,7 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		return false;
 	QElapsedTimer t;
 	t.start();
+	const double cpu0 = threadCpuMs();
 	if ( sc != scene || !root ) {
 		if ( !resolve( sc ) )
 			return false;
@@ -1000,8 +1071,13 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	const double msDrain0 = msOf( t );
 	if ( !midCell )
 		drain( t );
+	reap();
 	const double msWrite0 = msOf( t );
-	while ( !building() && msOf( t ) < budgetMs ) {
+	// lane CELLSPIKE3: a slice always writes one bucket, so it starts only if the dearest recent slice still ends
+	// under the frame cap (2 budgets less 1 ms), or at the very start of a frame (red: whenever the budget has room)
+	const bool redWrite = spikeRed( "write" );
+	while ( !building() && msOf( t ) < budgetMs
+		&& ( redWrite || msOf( t ) < 0.5 || msOf( t ) + sliceEstMs < 2.0 * budgetMs - 1.0 ) ) {
 		// the cell being written, else the nearest built one the block wants
 		StreamCell * next = nullptr;
 		double bestD = 1.0e30;
@@ -1062,7 +1138,8 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		st.worstTick = QStringLiteral( "wtMs %1 wtPre %2 wtUnload %3 wtPump %4 wtBury %5 wtDrain %6 wtWrite %7 wtRebuild %8 wtIdle %9" )
 			.arg( msOf( t ), 0, 'f', 2 ).arg( msUnload0, 0, 'f', 2 ).arg( msUnload, 0, 'f', 2 ).arg( msPump, 0, 'f', 2 )
 			.arg( msDrain0 - msBury0, 0, 'f', 2 ).arg( msWrite0 - msDrain0, 0, 'f', 2 ).arg( msWrite, 0, 'f', 2 )
-			.arg( msRebuild, 0, 'f', 2 ).arg( msOf( t ) - msIdle0, 0, 'f', 2 );
+			.arg( msRebuild, 0, 'f', 2 ).arg( msOf( t ) - msIdle0, 0, 'f', 2 )
+			+ QStringLiteral( " wtCpu %1" ).arg( threadCpuMs() - cpu0, 0, 'f', 2 );   // lane CELLSPIKE3: on-processor ms
 	st.tickMaxMs = std::max( st.tickMaxMs, msOf( t ) );
 	return changed;
 }
