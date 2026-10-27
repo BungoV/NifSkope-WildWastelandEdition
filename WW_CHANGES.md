@@ -26,6 +26,27 @@
 - **Tests:** tests/opencell and tests/cellshow, with new rows in the in-app Cell workspace test. Reds:
   `WW_OPENCELL_RED=lang|dblclick`, `WW_CELLSHOW_RED=ticks|groups|dropdown|presets|presetbar|inline|foldrows|showbutton`, `WW_DROPDOWN_RED=1`.
 
+## Lane SSAO2 (2026-10-27, branch ssao2-20261027): three more Ambient Occlusion methods, chosen in the Show menu
+
+- **Row:** "AO" is now "Ambient Occlusion", and a new "Ambient Occlusion method" menu sits under it. Its four
+  choices, in order: Vanilla Screen-Space Ambient Occlusion (the default; lane AO1's port of the game's own, unchanged),
+  Ground Truth Ambient Occlusion, Intel Xe Ground Truth Ambient Occlusion, Horizon-Based Ambient Occlusion Plus.
+- **Methods:** `res/shaders/cell_aox.frag` (+ `cell_aox_xe.glsl`, Intel's MIT licence kept) ports the FO4 Community
+  Shaders' GTAO, XeGTAO and HBAO+ passes to GLSL. They run at full resolution over lane AO1's opaque pass:
+  - a working depth pyramid (mip 0 the linear depth, 1-4 the FO4CS depth mip filter);
+  - the method's main pass, stored as 8 bits like FO4CS;
+  - its denoise (GTAO/HBAO+: two bilateral passes; XeGTAO: its edge-aware denoise, then one bilateral pass).
+  The FO4CS defaults: radius 38.4 units, falloff 0.615, intensity 1, power 1.5, 9 slices x 3 steps, denoise radius
+  2 sigma 0.08, XeGTAO blur beta 1.2. The cell programs read the result through the same `cellAo` sampler, so nothing
+  that consumes the term changed. `src/gl/cellaomethod.h` holds the stage order and the names.
+- **Switch:** `WW_CELL_AO_METHOD=vanilla|gtao|xegtao|hbao` (pin; else `WW/CellAoMethod`), live (stage 0).
+  Reds: `WW_CELL_AO_METHOD_RED=vanilla` (the method runs, vanilla's term is bound), `=raw` (no bilateral denoise).
+  `WW_CELL_AO_DUMP` writes `<file>.aox` (W H, the bound term) for a ported method.
+- **SSR:** the opaque pass and depth pyramid run whenever Screen-Space Reflections are on, whatever the Ambient Occlusion
+  row or method (the code already did since AOOFF1; the cellssr.h note said otherwise). The keep rule is now
+  `wwAoSharedPassRuns` (tests/aomethod). Red: `WW_CELL_AO_SSR_RED=old` (AO off leaves SSR no pass).
+- **Default:** vanilla runs the same passes in the same order as before, so the default picture does not change.
+
 ## Lane FARHOLE2 (2026-10-27, branch farhole2-20261027): the far field leaves room for every loaded cell
 
 - **Why:** the far objects, far cards and far rings past ring 0 were cut once, round the open's centre. The stream
