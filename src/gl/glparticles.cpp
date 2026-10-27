@@ -738,6 +738,17 @@ void Particles::drawShapes( NodeList * secondPass )
 					fprintf( stderr, "cell particles drawn: %d systems so far with particles_cell.prog (latest %s: %d live, %s, %s frame)\n",
 						n, qPrintable( getName() ), active, additive ? "additive" : "blended", frame );
 			}
+			/* lane PARTICLEHDR1: the line above is said at a system's FIRST draw, which comes before the first linear
+			 * frame, so it read "plain" for every system. Say each frame kind once, as particles first reach it. */
+			static QSet<QByteArray> framesSeen;
+			const QByteArray frameKind( frame );
+			if ( !framesSeen.contains( frameKind ) ) {
+				framesSeen.insert( frameKind );
+				fprintf( stderr, "cell particles frame: first drawn into the %s frame (%s)\n", frame,
+					frameKind == "hdr linear" ? "linear light, stencil 1: measured for exposure and bloom, then tone-mapped"
+					: frameKind == "measure" ? "the imagespace's own measure pass"
+					: "no linear frame open: each fragment tone-mapped as drawn, no bloom" );
+			}
 			// telemetry: the lit systems drawn, said at 1, 2, 4, 8, ... (or the red, once)
 			static QSet<const void *> litDrawn;
 			if ( litNow && !litDrawn.contains( this ) ) {

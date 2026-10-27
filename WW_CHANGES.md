@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane PARTICLEHDR1 (2026-10-27, branch parthdr1-20261027): where cell particles draw against the tone map
+
+- **Measured (code order):** cell particles already draw INSIDE the linear (HDR) frame, before the tone map:
+  paintGL `wwCellHdrBegin` -> `scene->draw()` -> `Scene::drawDeferredShapes` (particles last of the blended pass) ->
+  `wwCellHdrEnd` (measure + bloom read the frame, then the tone quads). In that frame a particle writes linear light
+  (`cellIsLinear`) and stencil 1, so the exposure/bloom measure and tone-map mode 0 take it like any cell surface.
+  No move and no row: an "on" would draw the same picture as "off".
+- **Why it looked otherwise:** `cell particles drawn: ... plain frame` is said once per system at its FIRST draw,
+  which comes before the first linear frame opens, so every log read "plain". New line, once per frame kind:
+  `cell particles frame: first drawn into the <plain|hdr linear|measure> frame (...)`.
+- **Not in the linear frame:** particles of Loaded NIFs beside a cell (their own scenes draw after the tone map), and
+  the red `perfrag` / refused-HDR path (each fragment tone-mapped as drawn, no bloom).
+
 ## Lane STREAMMEM1 (2026-10-27, branch streammem1-20261027): streamed-out cells give their meshes back
 
 - **Why:** the stream walk's memory check (d) failed at x1.19 (11788 -> 14060 MB private over 20 crossings, bar 5%).
