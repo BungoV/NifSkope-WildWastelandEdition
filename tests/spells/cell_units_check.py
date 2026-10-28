@@ -5,6 +5,7 @@ Every sampler the cell surface programs and the air pass declare has its unit in
   T  the table: every unit distinct, none under 10 (0..9 are TexCache's), every name in kAll;
   L  no literal unit elsewhere in src/gl: `constexpr int k...Unit... = <number>` or a `units > <number>` limit,
      except the passes with programs of their own (ALLOW below), which bind low units no cell sampler sits beside;
+     since WATERFIX7 those units are named in cellunits.h's WwPassUnit block, which T does not judge (red `pass`);
   R  two reds run on copies in memory and must FAIL: `dup` (AirVol put on FarRec's unit, the clash before the lane)
      and `literal` (the AO decal's old `units > 20 ? 20` limit put back in celllights.cpp).
 Usage: python tests/spells/cell_units_check.py [repo root]
@@ -27,6 +28,7 @@ LIT_LIMIT = re.compile(r'\bunits\s*>\s*\d+')
 
 
 def judge_table(text):
+    text = text.split('namespace WwPassUnit')[0]	# lane WATERFIX7: the own-program passes' low units are not cell units
     bad = []
     units = [(n, int(v)) for n, v in ENTRY.findall(text)]
     m = KALL.search(text)
@@ -103,7 +105,14 @@ def main():
     lit_fails = len(lb) > len(lbad)
     print(f'  red literal (units > 20 ? 20) -> L {"FAIL" if lit_fails else "PASS"} (must FAIL)')
 
-    ok = not tbad and not lbad and dup_fails and lit_fails
+    # lane WATERFIX7: a pass's low unit put in the cell table (above the WwPassUnit block) must still fail T
+    red_pass = table.replace('constexpr int kAll[]', 'constexpr int TaaLock = 12;\n\nconstexpr int kAll[]', 1)
+    red_pass = red_pass.replace('UnderDepthMs, FxDepth };', 'UnderDepthMs, FxDepth, TaaLock };', 1)
+    _, rp = judge_table(red_pass)
+    pass_fails = bool(rp) and 'namespace WwPassUnit' in table
+    print(f'  red pass (TaaLock 12 in the cell table) -> T {"FAIL" if rp else "PASS"} (must FAIL)' + (f': {rp[0]}' if rp else ''))
+
+    ok = not tbad and not lbad and dup_fails and lit_fails and pass_fails
     print('CELL UNITS VERDICT ' + ('PASS' if ok else 'FAIL'))
     return 0 if ok else 1
 

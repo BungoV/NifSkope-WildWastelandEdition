@@ -1,0 +1,4 @@
+# lane WATERFIX7: fo4_waterlookd with the probes (see fo4_waterlookp.prog). Picked by name while WW_CELL_WATER_PROBE is set
+# and the Ocean waves row builds the spectrum (src/gl/cellwater.cpp wwCellWaterProgram).
+
+shaders fo4_default.vert fo4_waterdisp.tesc fo4_waterdisp.tese fo4_waterlookdp.frag

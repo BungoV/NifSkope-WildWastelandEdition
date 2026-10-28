@@ -5,6 +5,7 @@
 #include "gl/celllights.h"
 #include "gl/cellpasstime.h"
 #include "gl/cellssr.h"
+#include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "gl/cellvrs.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
@@ -22,7 +23,7 @@
 namespace {
 
 // the full-screen passes' units: the per-draw setup binds its own textures there again (and the memo is re-armed)
-constexpr int kUnit0 = 0;
+constexpr int kUnit0 = WwPassUnit::FullScreen0;
 
 enum Red { RedNone, RedFull, RedQuarter, RedBilinear };
 

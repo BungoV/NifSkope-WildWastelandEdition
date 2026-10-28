@@ -32,7 +32,7 @@ constexpr int kSrcUnit = 8;		// the linear frame (sampler2DMS) in cell_hdr.prog;
 constexpr int kFogBloomUnit = 7;	// lane FOGBLOOM1: the bloom-intensity target (sampler2DMS); no TexCache map in this pass (9 in the lane: TONEMAP1's stencil holds it)
 constexpr int kFoBloomUnit = WwCellUnit::Bloom;	// lane BLOOM1b: the FO4CS chain's top (sampler2D), on the vanilla bloom's unit (same type)
 
-constexpr int kStencilUnit = 9;	// lane TONEMAP1: the frame's stencil (usampler2DMS) in cell_hdr.prog, always assigned
+constexpr int kStencilUnit = WwPassUnit::HdrStencil;	// lane TONEMAP1: the frame's stencil (usampler2DMS) in cell_hdr.prog, always assigned
 
 // lane TONEMAP1: the depth / stencil is a texture and the tone map tests the stencil in its shader, so only the depth
 // goes back to the view (the MSAA stencil blit was the pass's cost). WW_CELL_HDR_STEX_RED=1: renderbuffer + both blitted.

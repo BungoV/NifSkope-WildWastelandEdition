@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gl/cellhdr.h"	// lane SUNCELL1: the HDR frame's stencil
 #include "gl/cellqueue.h"	// lane GPUFIX1
+#include "gl/cellunits.h"	// lane WATERFIX7: the soft-depth unit
 #include "gl/celllights.h"	// lane SUNCELL1: the cell effect law
 #include "gl/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights
 #include "gl/cellvolair.h"	// lane VOLPART1: volumetric particles
@@ -66,7 +67,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * lights' records (8 texels a light, as the shader reads them) go to <file>.lights. The last frame's alone. */
 namespace
 {
-constexpr int kVpFxDepthUnit = 9;	// the opaque pass's depth (sampler2D); the cell's units are 10..22
+constexpr int kVpFxDepthUnit = WwCellUnit::FxDepth;	// the opaque pass's depth (sampler2D), in the cell table (was 9)
 constexpr int kVpDumpMax = 2048;	// particles a system's probe row holds
 
 void vpDumpWrite( Scene * scene, NifSkopeOpenGLContext::Program * prog, const QString & path, const QString & name,

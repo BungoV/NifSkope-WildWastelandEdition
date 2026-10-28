@@ -2,6 +2,7 @@
 #include "wwswitch.h"
 
 #include "gl/cellgrass.h"
+#include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "gl/gametaa.h"
 #include "gl/glparticles.h"
 #include "gl/glproperty.h"
@@ -27,7 +28,7 @@
 
 namespace {
 
-constexpr int kUnitA = 12, kUnitB = 13;	// above the TAA's 8-11
+constexpr int kUnitA = WwPassUnit::TaaInA, kUnitB = WwPassUnit::TaaInB;	// above the TAA's 8-11
 
 struct Dmat
 {

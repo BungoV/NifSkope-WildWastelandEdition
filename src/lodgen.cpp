@@ -43,6 +43,7 @@ BSD License - see nifskope.h
 #include <QBuffer>
 #include <QPainter>
 #include <memory>
+#include <mutex>
 #include <string_view>
 #include <cstddef>
 #include <QFile>
@@ -12843,7 +12844,149 @@ private:
 				}
 			}
 		}
+		if ( runsOn )
+			collectRuns( src, pos, rot, scale );
 		return tris;
+	}
+
+	/*! Lane WATERFIX7: the sky slabs' z runs of one placement, in a pass of its own: sharing the scan loop let the
+	 *  compiler fuse its height maths differently (-march=haswell FMA), and the tops moved on 3 squares. */
+	__attribute__( ( noinline ) ) void collectRuns( const QVector<LodSrcShape> & src, const Vector3 & pos,
+		const Matrix & rot, float scale )
+	{
+		std::vector<LodtSlabRun> recs;
+		for ( const LodSrcShape & sh : src ) {
+			if ( sh.tris.isEmpty() || sh.pos.isEmpty() )
+				continue;
+			std::vector<Vector3> wp( size_t( sh.pos.size() ) );
+			for ( int k = 0; k < sh.pos.size(); k++ )
+				wp[size_t( k )] = pos + rot * ( sh.pos[k] * scale );
+			for ( const Triangle & t : sh.tris ) {
+				if ( int( t.v1() ) >= sh.pos.size() || int( t.v2() ) >= sh.pos.size()
+					|| int( t.v3() ) >= sh.pos.size() )
+					continue;
+				const Vector3 & a = wp[size_t( t.v1() )];
+				const Vector3 & b = wp[size_t( t.v2() )];
+				const Vector3 & c = wp[size_t( t.v3() )];
+				if ( slabRunKind( a, b, c, recs ) != 1 )
+					continue;
+				runPoint( a, recs );
+				runPoint( b, recs );
+				runPoint( c, recs );
+				const float e = ( b[0] - a[0] ) * ( c[1] - a[1] )
+					- ( b[1] - a[1] ) * ( c[0] - a[0] );
+				if ( e == 0.0f )
+					continue;
+				const int lx0 = int( std::floor( qMin( a[0], qMin( b[0], c[0] ) ) / CELL ) );
+				const int lx1 = int( std::floor( qMax( a[0], qMax( b[0], c[0] ) ) / CELL ) );
+				const int ly0 = int( std::floor( qMin( a[1], qMin( b[1], c[1] ) ) / CELL ) );
+				const int ly1 = int( std::floor( qMax( a[1], qMax( b[1], c[1] ) ) / CELL ) );
+				for ( int gy = ly0; gy <= ly1; gy++ ) {
+					for ( int gx = lx0; gx <= lx1; gx++ ) {
+						const float px = ( float( gx ) + 0.5f ) * CELL;
+						const float py = ( float( gy ) + 0.5f ) * CELL;
+						const float w0 = ( ( b[0] - a[0] ) * ( py - a[1] )
+							- ( b[1] - a[1] ) * ( px - a[0] ) ) / e;
+						const float w1 = ( ( c[0] - b[0] ) * ( py - b[1] )
+							- ( c[1] - b[1] ) * ( px - b[0] ) ) / e;
+						const float w2 = ( ( a[0] - c[0] ) * ( py - c[1] )
+							- ( a[1] - c[1] ) * ( px - c[0] ) ) / e;
+						if ( w0 < 0.0f || w1 < 0.0f || w2 < 0.0f )
+							continue;
+						const float z = a[2] * w1 + b[2] * w2 + c[2] * w0;
+						runAt( gx, gy, z, z, recs );
+					}
+				}
+			}
+		}
+		if ( !recs.empty() ) {
+			runsClose( recs, 0 );
+			std::lock_guard<std::mutex> lock( *runMx );
+			runRecs.insert( runRecs.end(), recs.begin(), recs.end() );
+			if ( runRecs.size() > runCompactAt ) {	// gap closing is order-free, so a mid-walk pass keeps the bytes
+				runsClose( runRecs, 0 );
+				runCompactAt = qMax( size_t( 1 ) << 22, 2 * runRecs.size() );
+			}
+		}
+	}
+
+	/*! Lane WATERFIX7: how a triangle enters the sky slabs' z runs. A steep piece whose footprint stays under
+	 *  kSlabThin (a pile, a post) stays out: 0. A steep wide one (a wall, a cliff face) puts its whole z range into
+	 *  every square along its edges here: 2. Anything flatter gives its corner and scan points (the caller): 1. */
+	static constexpr float kSlabThin = 64.0f;
+	static constexpr float kSlabGap = 16.0f;	// runs closer than this join (two quanta of the sky plane)
+	int slabRunKind( const Vector3 & a, const Vector3 & b, const Vector3 & c, std::vector<LodtSlabRun> & recs ) const
+	{
+		const Vector3 n = Vector3::crossproduct( b - a, c - a );
+		const float len = n.length();
+		if ( !( len > 0.0f ) )
+			return 0;
+		if ( std::fabs( n[2] ) >= 0.7f * len )
+			return 1;
+		const float ext = qMax( qMax( a[0], qMax( b[0], c[0] ) ) - qMin( a[0], qMin( b[0], c[0] ) ),
+			qMax( a[1], qMax( b[1], c[1] ) ) - qMin( a[1], qMin( b[1], c[1] ) ) );
+		if ( ext < kSlabThin )
+			return 0;
+		const float zlo = qMin( a[2], qMin( b[2], c[2] ) ), zhi = qMax( a[2], qMax( b[2], c[2] ) );
+		const Vector3 * v[4] = { &a, &b, &c, &a };
+		for ( int k = 0; k < 3; k++ ) {
+			const Vector3 & p = *v[k];
+			const Vector3 & q = *v[k + 1];
+			const float l = std::hypot( q[0] - p[0], q[1] - p[1] );
+			const int steps = int( std::ceil( l / 32.0f ) );
+			for ( int s = 0; s <= steps; s++ ) {
+				const float t = steps ? float( s ) / float( steps ) : 0.0f;
+				runAt( int( std::floor( ( p[0] + ( q[0] - p[0] ) * t ) / CELL ) ),
+					int( std::floor( ( p[1] + ( q[1] - p[1] ) * t ) / CELL ) ), zlo, zhi, recs );
+			}
+		}
+		return 2;
+	}
+	void runPoint( const Vector3 & p, std::vector<LodtSlabRun> & recs ) const
+	{
+		runAt( int( std::floor( p[0] / CELL ) ), int( std::floor( p[1] / CELL ) ), p[2], p[2], recs );
+	}
+	void runAt( int gx, int gy, float lo, float hi, std::vector<LodtSlabRun> & recs ) const
+	{
+		gx -= gx0;
+		gy -= gy0;
+		if ( gx < 0 || gy < 0 || gx >= gw || gy >= gh )
+			return;
+		LodtSlabRun r;
+		r.o = quint32( size_t( gy ) * size_t( gw ) + size_t( gx ) );
+		r.lo = lo;
+		r.hi = hi;
+		recs.push_back( r );
+	}
+	/*! Sort by square then lo, join runs within kSlabGap; `cap` > 0 then fills a square's smallest gaps until it
+	 *  holds `cap` runs (only at the end: a cap mid-walk would depend on the order). */
+	static void runsClose( std::vector<LodtSlabRun> & v, int cap )
+	{
+		std::sort( v.begin(), v.end(), []( const LodtSlabRun & x, const LodtSlabRun & y ) {
+			return x.o != y.o ? x.o < y.o : ( x.lo != y.lo ? x.lo < y.lo : x.hi < y.hi );
+		} );
+		size_t w = 0;
+		for ( size_t i = 0; i < v.size(); ) {
+			const size_t s0 = w;
+			const quint32 o = v[i].o;
+			for ( ; i < v.size() && v[i].o == o; i++ ) {
+				if ( w > s0 && v[i].lo <= v[w - 1].hi + kSlabGap )
+					v[w - 1].hi = qMax( v[w - 1].hi, v[i].hi );
+				else
+					v[w++] = v[i];
+			}
+			while ( cap > 0 && w - s0 > size_t( cap ) ) {
+				size_t best = s0 + 1;
+				for ( size_t k = s0 + 2; k < w; k++ )
+					if ( v[k].lo - v[k - 1].hi < v[best].lo - v[best - 1].hi )
+						best = k;
+				v[best - 1].hi = qMax( v[best - 1].hi, v[best].hi );
+				for ( size_t k = best + 1; k < w; k++ )
+					v[k - 1] = v[k];
+				w--;
+			}
+		}
+		v.resize( w );
 	}
 
 public:
@@ -12857,6 +13000,13 @@ public:
 		hi = std::move( grid );
 		lo = std::move( gridMin );
 	}
+	//! Lane WATERFIX7: hand the z runs out (at most 4 a square), moved like the lattice.
+	void takeRuns( std::vector<LodtSlabRun> & out )
+	{
+		runsClose( runRecs, 4 );
+		out = std::move( runRecs );
+	}
+	bool runsOn = false;	//!< lane WATERFIX7: rasterise also collects the sky slabs' z runs (lodgenStaticTops)
 	qint64 treesSkipped = 0;
 	QString parallelNote;   //!< lane WATERSKYVISFAR3: what the parallel walk ran on, empty after a serial one
 
@@ -12865,6 +13015,9 @@ private:
 	QHash<QString, QVector<LodSrcShape>> modelCache;
 	std::vector<float> grid;      //!< MAX object surface a square, `NONE` where empty
 	std::vector<float> gridMin;   //!< MIN object surface a square, `NONE_LOW` where empty
+	std::vector<LodtSlabRun> runRecs;	//!< lane WATERFIX7: the z runs so far (gap-closed, not capped)
+	std::shared_ptr<std::mutex> runMx = std::make_shared<std::mutex>();	// shared: the self-test copies the field
+	size_t runCompactAt = size_t( 1 ) << 22;
 	int gx0 = 0, gy0 = 0, gw = 0, gh = 0;
 	QSet<QString> noLodSeen;
 	LodgenObjectAoCensus cen;
@@ -13772,6 +13925,7 @@ bool lodgenStaticTops( const EsmWorld & world, const QString & dataRoot, int cx0
 	const std::function<bool( int, int )> & cellWanted, LodtStaticTops & out )
 {
 	LodgenObjectHeightField f;
+	f.runsOn = out.wantRuns;	// lane WATERFIX7: the sky slabs' z runs
 	QElapsedTimer clock;
 	clock.start();
 	f.gather( world, dataRoot, cx0, cy0, cx1, cy1, cellWanted, true, true );
@@ -13781,6 +13935,8 @@ bool lodgenStaticTops( const EsmWorld & world, const QString & dataRoot, int cx0
 	out.census = QString( "%1 placement(s), %2 LOD model(s), %3 tree(s) left out, %4 no LOD mesh, %5 would not load" )
 		.arg( c.placements ).arg( c.meshes ).arg( f.treesSkipped ).arg( c.refusedNoLod ).arg( c.refusedNoLoad );
 	f.takeTops( out.gx0, out.gy0, out.gw, out.gh, out.hi, out.lo );
+	if ( out.wantRuns )
+		f.takeRuns( out.runs );
 	return out.gw > 0 && out.gh > 0;
 }
 

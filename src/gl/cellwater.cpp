@@ -620,6 +620,9 @@ const char * wwCellWaterProgram()
 	// lane WATERLOOK1 step 2: and its displaced form while the spectrum is built (the Ocean waves row, red not old/flat)
 	if ( !wwCellWaterLookOn() )
 		return "fo4_water.prog";
+	// lane WATERFIX7: the probes live in the *p twins (in the shipping look they tipped a compiler cliff, +0.18 ms)
+	if ( st().probe != 0 )
+		return wwCellOceanDispOn() ? "fo4_waterlookdp.prog" : "fo4_waterlookp.prog";
 	return wwCellOceanDispOn() ? "fo4_waterlookd.prog" : "fo4_waterlook.prog";
 }
 

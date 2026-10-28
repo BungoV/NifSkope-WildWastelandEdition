@@ -141,6 +141,10 @@ struct LodtWaterOptions
 	 *  through the statics as SLABS (lowest to highest surface) instead of the walls; every other texel keeps the
 	 *  wall bytes. Off = the WATERSKYVISFAR2 bytes (--water-sky-walls-only). */
 	bool skySlabs = true;
+	/*! Lane WATERFIX7: a square's slab is ONE run lowest to highest surface, piles and all (a pier's piles made its
+	 *  square one floor-to-deck slab). Off (default) = up to 4 runs a square; on = the WATERSKYVISFAR3 bytes
+	 *  (--water-sky-one-slab). */
+	bool skyOneSlab = false;
 	//! Lane WATERSKYVISFAR2: --water-sky-dump <file>, the ray heightfield before and after the statics (gate input).
 	QString skyDumpPath;
 	/*! The plugin the WATR `NAM0` linear velocities are read from -- vanilla's
@@ -151,6 +155,13 @@ struct LodtWaterOptions
 	QString reportPath;          //!< --water-report <file>, empty = stdout only
 };
 
+/*! Lane WATERFIX7: one z run of a square's statics (o = the square, row-major from gx0, gy0; lo..hi world z). */
+struct LodtSlabRun
+{
+	quint32 o = 0;
+	float lo = 0.0f, hi = 0.0f;
+};
+
 /*! Lane WATERSKYVISFAR2: the placed statics' far-LOD surfaces over world-aligned 128 u squares
  *  (square = floor( world / 128 ), row-major from gx0, gy0). hi = the highest surface, lo = the lowest;
  *  hi < -1e29 = no static over the square. Filled by LodtOptions::staticTops (the lodgen object height field). */
@@ -158,6 +169,10 @@ struct LodtStaticTops
 {
 	int gx0 = 0, gy0 = 0, gw = 0, gh = 0;
 	std::vector<float> hi, lo;
+	/*! Lane WATERFIX7: in: also fill `runs`, the square's surfaces as up to 4 z runs (a deck and the water under
+	 *  it apart), with thin steep pieces (piles, posts) left out. Out: sorted by o, then lo. */
+	bool wantRuns = false;
+	std::vector<LodtSlabRun> runs;
 	QString census;   //!< the gather's own line (refs, models, trees skipped, load failures)
 };
 

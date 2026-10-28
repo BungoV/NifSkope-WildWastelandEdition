@@ -16,4 +16,7 @@
 #define WW_WATER_CONTACT 1
 #define WW_WATER_RIVERFOAM 1
 #define WW_WATER_UNDER 1
+#ifndef WW_WATER_PROBES	// lane WATERFIX7: the probe tail tipped the look over a compiler cliff (+0.18 ms); fo4_waterlookp
+#define WW_WATER_NOPROBE 1
+#endif
 #include "fo4_water.frag"

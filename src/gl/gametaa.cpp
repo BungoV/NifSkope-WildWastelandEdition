@@ -2,6 +2,7 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "gl/celluniform.h"	// lane CELLUNI4: the tone map's known state
+#include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "gl/taainputs.h"	// lane TAA3: Ultra's velocity and mask
@@ -40,7 +41,7 @@ constexpr float kPostSharpen = 0.21f;
 constexpr float kPostOverlay = 0.21f;
 
 constexpr int kUnitCur = 8, kUnitHist = 9, kUnitMv = 10, kUnitDepth = 11;
-constexpr int kUnitLock = 12, kUnitVel = 13, kUnitMask = 14;	// lane TAA3
+constexpr int kUnitLock = WwPassUnit::TaaLock, kUnitVel = WwPassUnit::TaaVel, kUnitMask = WwPassUnit::TaaMask;	// lane TAA3
 const char * const kTaa2HdrKey = "Settings/Render/Modern temporal AA before tone map";	// lane TAA3
 
 struct Dmat

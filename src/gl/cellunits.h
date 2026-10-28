@@ -75,6 +75,7 @@ constexpr int LandLodDetail = 77;	// Textures\Terrain\DetailNormals.dds
 constexpr int WaterOceanD = 78;	// lane WATERLOOK1 step 2: its heights + chop (sampler2DArray RGBA16F), read by fo4_waterdisp.tese (70 in the lane)
 constexpr int LandWaterInfo = 79;	// lane WATERLOOK1 step 14: the cell programs' water lookup for the Wave run-up row (79-81: index, atlas, bodies) (71-73 in the lane)
 constexpr int UnderDepthMs = 82;	// lane WATERUNDER4: the underwater pass reads the frame's depth per sample (sampler2DMS) (74 in the lane)
+constexpr int FxDepth = 83;	// lane WATERFIX7: a particle's soft-depth read of the opaque pass (sampler2D; was 9, a TexCache unit)
 constexpr int WaterFlowAtlas = 67;	// lane WATERFLOWBAKE1: its sparse tiles (usampler2D R32UI; was 11, under Bloom)	// lane WATERWETBAKE1: its sparse tiles (usampler2D R8UI; 47 in the lane)
 
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
@@ -85,7 +86,7 @@ constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, R
 	WaterMoment0, WaterMoment1, WaterMoment2, WaterCloudMap,
 	LandShoreIndex, LandShoreAtlas, WaterFlowIndex, WaterFlowAtlas, WaterOceanB, WaterOceanC, WaterSkyIndex, WaterSkyAtlas, AirTerrain,
 	LandLodDiff, LandLodNoise, LandLodDetail, WaterOceanD,
-	LandWaterInfo, LandWaterInfo + 1, LandWaterInfo + 2, UnderDepthMs };
+	LandWaterInfo, LandWaterInfo + 1, LandWaterInfo + 2, UnderDepthMs, FxDepth };
 
 constexpr bool distinct()
 {
@@ -100,6 +101,21 @@ constexpr bool distinct()
 	return true;
 }
 static_assert( distinct(), "two cell-view samplers share a texture unit (src/gl/cellunits.h)" );
+}
+
+/* lane WATERFIX7: the low units of passes that draw with programs of their own (no cell sampler sits beside them),
+ * named here so no literal unit hides in a .cpp; each group is one program's, and groups may reuse units. */
+namespace WwPassUnit
+{
+constexpr int FullScreen0 = 0;	// cellfxres: the full-screen passes' first unit
+constexpr int HdrStencil = 9;	// cell_hdr.prog: the frame's stencil (usampler2DMS), lane TONEMAP1
+constexpr int VrsSrc = 8;	// cell_vrs_rate.prog: the units the tone map used, free once its quads are drawn
+constexpr int VrsMv = 9;
+constexpr int TaaLock = 12;	// the TAA resolve: lane TAA3's lock, velocity and mask, above its 8-11
+constexpr int TaaVel = 13;
+constexpr int TaaMask = 14;
+constexpr int TaaInA = 12;	// taainputs: Ultra's velocity and mask passes, above the TAA's 8-11
+constexpr int TaaInB = 13;
 }
 
 #endif
