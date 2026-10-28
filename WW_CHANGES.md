@@ -18,6 +18,15 @@
   `greedy2` bits 1/2/4). A placement face with an opening takes no pad (the synth church and turned rooms poked there).
 - **Thresholds cover the open hole only:** 16 x 16 rays across each wall threshold; the open samples get up to 4
   all-open rectangles until 90 % are held. Shut (< 3 open) or 95 % open ones stay. Knob `openfit=0`.
+- **A roofed room must fit a person:** clear height 180 u and a floor of 14884 u2 (the store's fire escape landing,
+  244 x 244 x 122 u, read as a room). Knobs `minheight`, `minfloor`.
+- **A leftover strip gets its own box:** under the 3 % stop, a strip of the room's air wider than one cell on both floor
+  axes still gets a box. Knob `strip=0`.
+- **Thresholds snap to the door frame:** each jamb is scanned across the wall 1 u at a time; where the jamb starts and
+  ends are the wall's two faces at that jamb, the sill and the head are read over each jamb end, and the threshold
+  holds those 8 corners (`"corners"` in the .space shape; `contains()` is inside its 12 triangles; its box becomes the
+  corners' box in the wall's frame, so the GI mask gets the wall's turn and depth). A hole whose floor runs on through
+  the wall is a door. The store's front door: 7 degrees turned, as bungo's hand-made reference. Knob `rim=0`.
 - **PRTP Debug View:** rooms are drawn solid and thresholds dashed (still in their two rooms' colours);
   `WW_CELL_VOLUMES_DASHRED=1` (live) draws VOLVIEW2's style.
 - **Gate:** `tests/spells/cell_volplace.sh gate|red` rebuilds the store window's soup and checks it against the soup's

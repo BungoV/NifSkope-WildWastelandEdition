@@ -336,6 +336,26 @@ WwCellVolumeGeometry wwCellVolumeGeometry( const ProbeVolumes & v )
 		for ( int k = 0; k < 4; k++ )
 			for ( int i = 0; i < 3; i++ )
 				q[k][i] = float( t.shape.center[i] + m[i][0] * lc[k][0] + m[i][2] * lc[k][1] );
+		if ( t.shape.hull ) {   // lane VOLPLACE2: a threshold snapped to its frame: its mid-depth face and the frame's 12 edges
+			static const int mid[4][2] = { { 0, 2 }, { 1, 3 }, { 5, 7 }, { 4, 6 } };
+			for ( int k = 0; k < 4; k++ )
+				for ( int i = 0; i < 3; i++ )
+					q[k][i] = 0.5f * ( t.shape.corners[mid[k][0]][i] + t.shape.corners[mid[k][1]][i] );
+			Pen pen { g, {}, {}, { col[0], col[1], col[2], 1.0f }, 0 };
+			for ( int a = 0; a < 3; a++ )
+				for ( int b = 0; b < 3; b++ )
+					pen.m[a][b] = a == b ? 1.0 : 0.0;
+			for ( int a = 0; a < 8; a++ )
+				for ( int bit : { 1, 2, 4 } )
+					if ( !( a & bit ) ) {
+						double p0[3], p1[3];
+						for ( int i = 0; i < 3; i++ ) {
+							p0[i] = t.shape.corners[a][i];
+							p1[i] = t.shape.corners[a | bit][i];
+						}
+						pen.seg( p0, p1 );
+					}
+		}
 		for ( int k : { 0, 1, 2, 0, 2, 3 } ) {
 			g.tris.insert( g.tris.end(), q[k], q[k] + 3 );
 			g.triColor.insert( g.triColor.end(), col, col + 4 );
