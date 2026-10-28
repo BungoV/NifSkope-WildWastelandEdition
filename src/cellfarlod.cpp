@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "btdterrain.h"
+#include "cellfarstackrule.h"	// lane CELLUNI5: the bake stack's refusals
 #include "cellfarvanilla.h"
 #include "esmdata.h"
 #include "esmwater.h"
@@ -1289,8 +1290,16 @@ CellFarStack cellFarLodStackFor( const QString & ws, const QString & lodlPath, c
 			: QStringLiteral( " differences: " ) + QStringList( moved.mid( 0, 4 ) ).join( QStringLiteral( "; " ) )
 				+ ( moved.size() > 4 ? QStringLiteral( "; ..." ) : QString() ) )
 		.arg( resSame ? QString() : QStringLiteral( "; resource stack %1 roots now, %2 in the bake" ).arg( nowRes.size() ).arg( bakeRes.size() ) );
-	if ( wwEnv( "WW_CELL_FARLOD_RED" ) == "ownstack" ) {
+	// lane CELLUNI5: the refusals in one rule (cellfarstackrule.h): FARLOD3's red, and the near gate's arm (NEARONLY)
+	const CellFarStackRefusal refusal = cellFarStackRefusal( wwEnv( "WW_CELL_FARLOD_RED" ).constData(),
+		wwEnvInt( "WW_CELL_FARLOD_NEARONLY" ) );
+	if ( refusal == CellFarStackRefusal::RedOwnStack ) {
 		r.line = QStringLiteral( "far lod: stack MISMATCH -- %1; NOT adopted (RED ownstack)" ).arg( what );
+		return r;
+	}
+	if ( refusal == CellFarStackRefusal::NearOnly ) {
+		r.line = QStringLiteral( "far lod: stack MISMATCH -- %1; NOT adopted (NEARONLY: the far planes alone, the near cells "
+			"keep their load order)" ).arg( what );
 		return r;
 	}
 	/* lane FARLOD3 (bungo 10-12: "the loaded cells display the same modded trees" as the far LOD): the near

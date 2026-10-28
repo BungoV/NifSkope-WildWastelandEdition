@@ -58,6 +58,7 @@ struct BloomGpu
 	GLuint mip[kMaxMips] = {}, up[kMaxMips] = {};
 	int dims[kMaxMips][2] = {};
 	int mipCount = 0, w = 0, h = 0, samples = 0;
+	WwCellUni::ErrTrust err;	// lane CELLUNI5: the error reads, until a clean frame on these targets
 };
 
 struct BloomState
@@ -483,14 +484,18 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	}
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
-	while ( fn->glGetError() != GL_NO_ERROR ) {
-	}
 	BloomGpu & g = bloomGpus()[r];
 	const int S = std::max( samples, 1 );
+	const bool remake = !g.srcFbo || g.w != W || g.h != H || g.samples != S || g.mipCount != mipCount
+		|| ( mipCount && ( g.dims[0][0] != dims[0][0] || g.dims[0][1] != dims[0][1] ) );
+	// lane CELLUNI5: the drain and the error reads until a clean frame on these targets (WW_CELL_UNI_RED=1: every frame)
+	const bool check = g.err.check( wwCellUniRed(), remake );
+	if ( check )
+		WwCellUni::drainErrors( fn );
 	bool made = false;
-	if ( !g.srcFbo || g.w != W || g.h != H || g.samples != S || g.mipCount != mipCount
-		|| ( mipCount && ( g.dims[0][0] != dims[0][0] || g.dims[0][1] != dims[0][1] ) ) ) {
+	if ( remake ) {
 		made = true;
+		g.err.forget();
 		freeGpu( r, g );
 		if ( !g.srcFbo ) {
 			fn->glGenFramebuffers( 1, &g.srcFbo );
@@ -605,7 +610,7 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.srcFbo );
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.resFbo );
 		fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
-		const GLenum err = fn->glGetError();
+		const GLenum err = check ? fn->glGetError() : GLenum( GL_NO_ERROR );
 		if ( ok && err != GL_NO_ERROR ) {
 			ok = false;
 			why = QStringLiteral( "the source pass or its resolve failed, GL error %1" ).arg( err );
@@ -666,7 +671,7 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		const float total = std::max( base + glare, kEps );
 		finalWeight *= base / total + ( glare / total ) * wwBloomGlareBand( set, 0, 1 );
 	}
-	if ( ok ) {
+	if ( ok && check ) {
 		const GLenum err = fn->glGetError();
 		if ( err != GL_NO_ERROR ) {
 			ok = false;
@@ -738,6 +743,7 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	if ( wasCull ) fn->glEnable( GL_CULL_FACE ); else fn->glDisable( GL_CULL_FACE );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST );
 
+	g.err.after( check, ok );
 	if ( !ok ) {
 		note( s, QStringLiteral( "fo4cs refused (%1): the vanilla bloom drawn" ).arg( why ) );
 		return false;
@@ -765,7 +771,7 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	return true;
 }
 
-void wwCellBloomFinal( Renderer * r, int unit )
+void wwCellBloomFinal( Renderer * r, int unit, int knownActive )
 {
 	BloomState & s = bs();
 	auto prog = r ? r->getCurrentProgram() : nullptr;
@@ -776,8 +782,7 @@ void wwCellBloomFinal( Renderer * r, int unit )
 	if ( !s.replacing )
 		return;
 	auto fn = r->fn;
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	const GLint prevActive = WwCellUni::activeUnit( fn, knownActive );	// lane CELLUNI5: the tone quads' unit, or asked
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, s.top );
 	/* lane GAPLOOK1 (BLOOMMIP): the top's own mips, so the composite picks a wider blur per pixel; w = 1 the fog's
@@ -795,13 +800,12 @@ void wwCellBloomFinal( Renderer * r, int unit )
 	prog->uni2f( "cellIsFoBloomFrame", float( s.w ), float( s.h ) );
 }
 
-void wwCellBloomDone( Renderer * r, int unit )
+void wwCellBloomDone( Renderer * r, int unit, int knownActive )
 {
 	BloomState & s = bs();
 	if ( s.replacing && r ) {
 		auto fn = r->fn;
-		GLint prevActive = 0;
-		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+		const GLint prevActive = WwCellUni::activeUnit( fn, knownActive );	// lane CELLUNI5
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 		if ( s.topMips && s.top ) {
 			// the chain renders into the top again next frame: back to its one level

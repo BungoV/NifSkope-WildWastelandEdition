@@ -33,6 +33,7 @@ struct FbGpu
 	GLuint q[4] = { 0, 0, 0, 0 };	// two timestamp pairs, read a frame late
 	bool pending[2] = { false, false };
 	int cur = 0;
+	WwCellUni::ErrTrust err;	// lane CELLUNI5: the error reads, until a clean frame on these targets
 };
 
 struct FbState
@@ -142,8 +143,11 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
 	FbGpu & g = gpus()[r];
-	while ( fn->glGetError() != GL_NO_ERROR ) {
-	}
+	const bool remake = !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != GLenum( dsFormat );
+	// lane CELLUNI5: the drain and the error reads until a clean frame on these targets (WW_CELL_UNI_RED=1: every frame)
+	const bool check = g.err.check( wwCellUniRed(), remake );
+	if ( check )
+		WwCellUni::drainErrors( fn );
 	if ( s.time ) {
 		if ( !g.q[0] )
 			fn->glGenQueries( 4, g.q );
@@ -152,8 +156,9 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 		fn->glQueryCounter( g.q[g.cur * 2], kTimestamp );
 	}
 	bool made = false;
-	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != GLenum( dsFormat ) ) {
+	if ( remake ) {
 		made = true;
+		g.err.forget();
 		if ( !g.fbo ) {
 			fn->glGenFramebuffers( 1, &g.fbo );
 			fn->glGenFramebuffers( 1, &g.depthFbo );
@@ -224,7 +229,7 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( hdrFbo ) );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.depthFbo );
 	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
-	if ( const GLenum e = fn->glGetError(); e != GL_NO_ERROR ) {
+	if ( const GLenum e = check ? fn->glGetError() : GLenum( GL_NO_ERROR ); e != GL_NO_ERROR ) {
 		ok = false;
 		why = QStringLiteral( "the depth resolve failed, GL error %1" ).arg( e );
 	}
@@ -288,7 +293,7 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 			fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, 0, 0 );
 		else
 			fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0 );
-		if ( const GLenum e = fn->glGetError(); ok && e != GL_NO_ERROR ) {
+		if ( const GLenum e = check ? fn->glGetError() : GLenum( GL_NO_ERROR ); ok && e != GL_NO_ERROR ) {
 			ok = false;
 			why = QStringLiteral( "the pass failed, GL error %1" ).arg( e );
 		}
@@ -313,6 +318,7 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 		g.pending[g.cur] = true;
 		g.cur = 1 - g.cur;
 	}
+	g.err.after( check, ok );
 	if ( !ok ) {
 		note( s, QStringLiteral( "refused (%1): the uniform bloom" ).arg( why ) );
 		return false;
@@ -324,7 +330,7 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 	return true;
 }
 
-void wwCellFogBloomFinal( Renderer * r, int unit, bool ran )
+void wwCellFogBloomFinal( Renderer * r, int unit, bool ran, int knownActive )
 {
 	FbState & s = fs();
 	auto prog = r ? r->getCurrentProgram() : nullptr;
@@ -334,20 +340,18 @@ void wwCellFogBloomFinal( Renderer * r, int unit, bool ran )
 	prog->uni1i( "cellFogBloom", unit );	// always its own unit: a sampler2DMS, never left on 0 beside another type
 	prog->uni1b( "cellFogBloomOn", on );
 	auto fn = r->fn;
-	GLint prevActive = 0;
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	const GLint prevActive = WwCellUni::activeUnit( fn, knownActive );	// lane CELLUNI5: the tone quads' unit, or asked
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, on ? s.target : 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
 }
 
-void wwCellFogBloomDone( Renderer * r, int unit )
+void wwCellFogBloomDone( Renderer * r, int unit, int knownActive )
 {
 	FbState & s = fs();
 	if ( r ) {
 		auto fn = r->fn;
-		GLint prevActive = 0;
-		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+		const GLint prevActive = WwCellUni::activeUnit( fn, knownActive );	// lane CELLUNI5
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 		fn->glActiveTexture( GLenum( prevActive ) );

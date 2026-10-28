@@ -341,6 +341,37 @@ template <class F> const KnownGl * known( F * fn )
 		state().knownStale++;
 	return &real;
 }
+/* lane CELLUNI5: the active texture unit (GL_TEXTURE0 + n) a caller knows, or -1: ask. WW_SETUP_MEMO_CHECK=1 asks
+ * anyway, counts a wrong one (knownStale) and returns the driver's. The callers pass -1 under WW_CELL_UNI_RED=1. */
+template <class F> int activeUnit( F * fn, int knownActive )
+{
+	if ( knownActive >= 0 && !state().vpCheck )
+		return knownActive;
+	int real = 0;
+	fn->glGetIntegerv( 0x84E0, &real );	// GL_ACTIVE_TEXTURE
+	if ( knownActive >= 0 && real != knownActive )
+		state().knownStale++;
+	return real;
+}
+/* lane CELLUNI5: a pass's GL error drain and reads, kept as the temporal AA and the VRS build keep theirs (lane SYNC1's
+ * regime): read until one clean frame on the same targets, then skipped; new targets or a failed frame read again.
+ * WW_CELL_UNI_RED=1 reads every frame. */
+struct ErrTrust
+{
+	bool trusted = false;
+	bool check( bool red, bool remade ) const { return red || remade || !trusted; }
+	void after( bool checked, bool ok )
+	{
+		if ( checked )
+			trusted = ok;
+	}
+	void forget() { trusted = false; }
+};
+template <class F> void drainErrors( F * fn )
+{
+	while ( fn->glGetError() != 0 ) {
+	}
+}
 
 //! lane CELLUNI4: a framebuffer's depth format, asked once per (context, framebuffer, size); another key asks again
 struct DepthCfg

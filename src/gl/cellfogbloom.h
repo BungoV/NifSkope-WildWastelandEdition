@@ -28,8 +28,9 @@ bool wwCellFogBloomMarks();
  *  tone map should read it. */
 bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int w, int h, int samples, unsigned dsFormat, bool dsTexture );
 //! The tone map's uniforms (cell_hdr.prog current), the target on `unit`; cellFogBloomOn false when the run did not.
-void wwCellFogBloomFinal( Renderer * r, int unit, bool ran );
-void wwCellFogBloomDone( Renderer * r, int unit );
+//! knownActive: the active unit (GL_TEXTURE0 + n) the caller knows, -1 = ask (lane CELLUNI5)
+void wwCellFogBloomFinal( Renderer * r, int unit, bool ran, int knownActive = -1 );
+void wwCellFogBloomDone( Renderer * r, int unit, int knownActive = -1 );
 QString wwCellFogBloomEcho();
 
 #endif
