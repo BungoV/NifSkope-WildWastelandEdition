@@ -88,9 +88,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int w, int h
 //! True between a successful wwCellBloomRun and wwCellBloomDone: the vanilla bloom stands down.
 bool wwCellBloomReplacing();
 //! The tone map's uniforms for the final combine, on the current program (cell_hdr.prog), the chain on `unit`.
-void wwCellBloomFinal( Renderer * r, int unit );
+//! knownActive: the active unit (GL_TEXTURE0 + n) the caller knows, -1 = ask (lane CELLUNI5)
+void wwCellBloomFinal( Renderer * r, int unit, int knownActive = -1 );
 //! After the tone map: unbinds, ends the frame's replacement.
-void wwCellBloomDone( Renderer * r, int unit );
+void wwCellBloomDone( Renderer * r, int unit, int knownActive = -1 );
 //! One line for the notes: the mode, the glare values and the mip count used (or why not).
 QString wwCellBloomEcho();
 

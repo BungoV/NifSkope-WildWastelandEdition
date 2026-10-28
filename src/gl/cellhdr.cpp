@@ -1133,8 +1133,12 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	prog->uni1i( "hdrStencil", kStencilUnit );
 	prog->uni1i( "hdrStencilTest", 0 );
-	wwCellFogBloomFinal( r, kFogBloomUnit, fogBloom );
-	wwCellBloomFinal( r, kFoBloomUnit );	// lane BLOOM1b: the final combine's uniforms (off: cellIsFoBloomOn false)
+	/* lane CELLUNI5: from here to the fog bloom's Done the active unit is kSrcUnit (the quads draw on it, the VRS build
+	 * ends on its own source unit, the same one), so the bloom passes take it instead of asking (red: they ask) */
+	static_assert( WwPassUnit::VrsSrc == kSrcUnit, "the VRS build must end on the tone map's source unit" );
+	const int quadsActive = sync && !wwCellUniRed() ? int( GL_TEXTURE0 + kSrcUnit ) : -1;
+	wwCellFogBloomFinal( r, kFogBloomUnit, fogBloom, quadsActive );
+	wwCellBloomFinal( r, kFoBloomUnit, quadsActive );	// lane BLOOM1b: the final combine's uniforms (off: cellIsFoBloomOn false)
 
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -1216,7 +1220,7 @@ void wwCellHdrEnd( Scene * scene )
 		fn->glDisable( GL_BLEND );
 	}
 	r->stopProgram();
-	wwCellBloomDone( r, kFoBloomUnit );
+	wwCellBloomDone( r, kFoBloomUnit, quadsActive );
 	if ( g.dsTex ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kStencilUnit ) );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
@@ -1227,7 +1231,7 @@ void wwCellHdrEnd( Scene * scene )
 	if ( !sync && wwCellVrsWanted() )
 		fn->glGetIntegerv( GL_VIEWPORT, sn.vp );
 	wwCellVrsBuild( scene, s.prevDraw, s.prevRead, s.w, s.h, sn.vp );
-	wwCellFogBloomDone( r, kFogBloomUnit );
+	wwCellFogBloomDone( r, kFogBloomUnit, quadsActive );
 
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
