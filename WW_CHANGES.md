@@ -75,6 +75,27 @@
   Red: `WW_CELL_FARLOD_RED=nearadopt` (adopts as before).
 - Cost: fewer GL queries a frame on the CPU side; no GPU or picture change. Tests: tests/celluni5 (red
   `-DCELLUNI5_RED`), tests/farstackrule (red `-DFARSTACKRULE_RED`).
+## Lane WEATHERBLEND4 (2026-10-28, branch weatherblend4-20261028): the WEATHERBLEND3 leftovers with no ruling
+
+- **A DefaultImageSpace slot takes its own Sky Scale and depth of field:** the game adds every value of the
+  default imagespace (form 0x167) in its weighted sum, Sky Scale (0) and DoF too, as for any other slot. The viewer
+  kept the weather's own values (Sky Scale 1) there. Red (a new value of `WW_LOOKDEV_RED`): `imgsdefaultown`.
+- **A teleport picks the region weather:** opening a new exterior cell reads the cell's regions (XCLR). Of the ones with
+  weather data whose areas hold the cell's centre, the game's winner is taken (an override beats priority, else the
+  higher priority, else the first). Then a draw over its list's chances (a chance set by a global reads the
+  global's value; a zero chance is never picked), seeded by the cell, so a reopen repeats it. A region that lists
+  the current weather keeps it. A pinned weather is left alone. Telemetry: summary ` region=<region>:<weather|keep|empty>`.
+  CLI: `-no-gui weather --region r[;r..] --at x,y --seed s` prints the `region` and `regionpick` lines. Red (a new
+  value of `WW_WEATHER_BLEND_RED`): `noregionpick`.
+- **Dragging the hour back during a change waits nothing:** the hour box counts the shortest way round the clock,
+  so only a forward step is a wait. Before this, 2 h -> 1 h counted as a 23 h wait and ended the change. Red: `backwait`.
+- **The sun's light through the air and the puffs' own air drift with the volume air:** the sun column's optical
+  depth is scaled by the drifting air's factor half way up the column (at most 2048 units along the sun), in the air
+  pass, on the surfaces and on the lit puffs. The puffs' placed lights take the drift at the puff. Drift off (the
+  default) changes nothing. Red (a new value of `WW_CELL_FOGDRIFT_RED`): `nosun`.
+- Cost (1080p, drift on): two fetches of the existing 64^3 noise per sun-lit surface pixel and per froxel, under
+  0.1 ms estimated (live GPU-ms owed); drift off: one uniform test. GPU memory: none new.
+- Not done: the weather-type fog rule and the viewer's default pick (console `sw`) wait for bungo's ruling.
 
 ## Lane LANDSPEC5 (2026-10-28, branch landspec5-20261028): the LANDSPEC4 leftovers
 

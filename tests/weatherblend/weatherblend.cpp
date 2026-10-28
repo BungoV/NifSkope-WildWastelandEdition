@@ -265,6 +265,37 @@ int main()
 		near1( "|offset| within range / 2", mx <= 90.0 ? 1.0 : 0.0, 1.0, 0.0 );
 	}
 
+	// 14. lane WEATHERBLEND4: the hour box the shortest way round (only a forward step is a wait)
+	{
+		near1( "hour step 22h -> 2h", wwWeatherHourStep( 22.0, 2.0 ), 4.0, 1e-9 );
+		near1( "hour step 2h -> 1h is backward", wwWeatherHourStep( 2.0, 1.0 ), -1.0, 1e-9 );
+		near1( "hour step 1h -> 23h is backward", wwWeatherHourStep( 1.0, 23.0 ), -2.0, 1e-9 );
+		near1( "hour step 10h -> 13.5h", wwWeatherHourStep( 10.0, 13.5 ), 3.5, 1e-9 );
+	}
+
+	// 15. the region list pick (r % sum over the bins in order; a zero chance holds no bin) and the region choice
+	{
+		const WwRegionWeatherEntry L[3] = { { 0xA, 60 }, { 0xB, 0 }, { 0xC, 40 } };
+		near1( "pick r 59 -> A", wwRegionWeatherPick( L, 3, 59u ), 0xA, 0.0 );
+		near1( "pick r 60 -> C (B holds no bin)", wwRegionWeatherPick( L, 3, 60u ), 0xC, 0.0 );
+		near1( "pick r 199 -> C (mod the sum)", wwRegionWeatherPick( L, 3, 199u ), 0xC, 0.0 );
+		const WwRegionWeatherEntry Z[2] = { { 0xA, 0 }, { 0xB, -5 } };
+		near1( "pick of no chances -> none", wwRegionWeatherPick( Z, 2, 7u ), 0.0, 0.0 );
+		int hit[2] = { 0, 0 };
+		for ( quint32 k = 1; k <= 10000; k++ )
+			hit[wwRegionWeatherPick( L, 3, wwRegionDraw( k ) ) == 0xA ? 0 : 1]++;
+		near1( "drawn picks follow the chances (60 %)", hit[0] / 10000.0, 0.6, 0.02 );
+		const WwRegionRank p[2] = { { false, 5 }, { false, 9 } };
+		near1( "choose: the higher priority", wwRegionChoose( p, 2 ), 1.0, 0.0 );
+		const WwRegionRank o[2] = { { false, 9 }, { true, 1 } };
+		near1( "choose: an override beats priority", wwRegionChoose( o, 2 ), 1.0, 0.0 );
+		const WwRegionRank q[2] = { { true, 9 }, { false, 99 } };
+		near1( "choose: an override keeps its place", wwRegionChoose( q, 2 ), 0.0, 0.0 );
+		const WwRegionRank t[2] = { { false, 5 }, { false, 5 } };
+		near1( "choose: a tie keeps the first", wwRegionChoose( t, 2 ), 0.0, 0.0 );
+		near1( "choose: none", wwRegionChoose( t, 0 ), -1.0, 0.0 );
+	}
+
 	std::printf( "WEATHERBLEND %s %d of %d failed\n", fails ? "FAIL" : "PASS", fails, checks );
 	return fails ? 1 : 0;
 }

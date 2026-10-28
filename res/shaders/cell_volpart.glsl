@@ -113,12 +113,14 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 	if ( ( volTerms & 1 ) != 0 && cellHasDir ) {
 		vec3 to = normalize( cellDirTo );
 		float vis = ( !cellInterior && volCsm && ( volPartRed & 64 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
-		vec3 e = vpTint( cellDirColor ) * vis * airTup( z, to.z );
+		// lane WEATHERBLEND4: the sun's column through the drifting air (lookdev_fog.glsl wwAirDriftSunK)
+		vec3 e = vpTint( cellDirColor ) * vis * pow( airTup( z, to.z ), wwAirDriftSunK( posView, z, to.z, airMed.w ) );
 		skyThin += e * vpPhase( dot( to, dW ) );
 		skyThick += e * vpWrap( dot( N, to ), w ) * vpPhaseN( dot( to, dW ) );
 	}
 	float zOff = z - P.z;	// the fog's height frame minus world z
 	if ( ( volTerms & 2 ) != 0 && ( volPartRed & 8 ) == 0 ) {
+		float dP = wwAirDriftAt( posView );	// lane WEATHERBLEND4: the drifting air at the puff, on its lamps' paths
 		for ( int i = 0; i < cellLightCount; i++ ) {
 			vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 			float d = length( t0.xyz - P );
@@ -129,7 +131,7 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 			vec3 e = cellLightE( i, P, L, Lo, noSpec );	// N = L, as the air: no N.L, the shadow lifted toward the light
 			if ( all( equal( e, vec3( 0.0 ) ) ) )
 				continue;
-			e = vpTint( e ) * exp( -airOd( z, t0.z + zOff, d ) );
+			e = vpTint( e ) * exp( -airOd( z, t0.z + zOff, d ) * dP );
 			thin += e * vpPhase( dot( L, dW ) );
 			thick += e * vpWrap( dot( N, L ), w ) * vpPhaseN( dot( L, dW ) );
 		}
