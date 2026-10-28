@@ -463,6 +463,7 @@ HEADERS += \
 	src/wwcollisionlibrary.h \
 	src/wwlibrary.h \
 	src/wwskin.h \
+	src/wwsharedread.h \
 	src/version.h \
 	lib/coacd.h \
 	lib/dds.h \
@@ -744,6 +745,7 @@ SOURCES += \
 	src/cellstream.cpp \
 	src/cellspawn.cpp \
 	src/cellstreamwalk.cpp \
+	src/wwsharedread.cpp \
 	src/celltexahead.cpp \
 	src/cellmodelahead.cpp \
 	src/probealbedo.cpp \

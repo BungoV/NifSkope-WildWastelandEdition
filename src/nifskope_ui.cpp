@@ -82,6 +82,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "spells/blocks.h"
 #include "spells/normaltransfer.h"
 #include "wwskin.h"
+#include "wwsharedread.h"		// lane FRAMESPEED1
 #include "skeletontools.h"
 
 #include <functional>
@@ -2161,15 +2162,21 @@ static void wwCellStreamPathRun( GLView * ogl, const QString & pathFile, const Q
 	QFile dump( dumpPath );
 	const bool dumpOk = dump.open( QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate );
 	QTextStream log( &dump );
-	QFile pf( pathFile );
-	if ( !pf.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
+	// lane FRAMESPEED1 (CONCORDQUIT1): Concord's path file was named con.fly.path, and "con" is a Windows device name,
+	// so QFile opened the console instead; the reader retries through the \\?\ form and says why
+	bool readOk = false;
+	QString why;
+	const QByteArray pathBytes = wwReadFileShared( pathFile, &readOk, &why );
+	if ( !why.isEmpty() && dumpOk )
+		log << "path read: " << why << "\n";
+	if ( !readOk ) {
 		if ( dumpOk )
 			log << "refused: cannot read " << pathFile << "\n";
 		return;
 	}
 	struct Step { Vector3 eye, at; float fov = 70.0f; };
 	QVector<Step> steps;
-	for ( const QString & raw : QString::fromUtf8( pf.readAll() ).split( QLatin1Char( '\n' ) ) ) {
+	for ( const QString & raw : QString::fromUtf8( pathBytes ).replace( QLatin1Char( '\r' ), QLatin1Char( '\n' ) ).split( QLatin1Char( '\n' ) ) ) {
 		const QString line = raw.trimmed();
 		if ( line.isEmpty() || line.startsWith( QLatin1Char( '#' ) ) )
 			continue;
