@@ -30,6 +30,28 @@
   exterior lit-effect path was already the default.
 - Notes-side fixes (no build): the GIREBAKE3 bake script now gives each cell its own camera. The CHECKKIT1 hold no
   longer passes its part filter (ONLY/SKIP) to the live runner. Evidence: notes/shotfix1/RESULTS.md.
+## Lane WEATHERBLEND5 (2026-10-28, branch weatherblend5-20261028): region weather by the game's rules, the fog drift fixes
+
+- **Which regions count:** a region with no area (no RPLD) is never inside, as in the game; a deleted region and a
+  region of another worldspace (WNAM) are skipped. Sanctuary (-19,22) no longer picks FXWthrInvertDayNighWarm from the
+  area-less FXlightRegioninvertWarm. Reds `WW_WEATHER_BLEND_RED=noareainside` (the old "no area = inside") and
+  `noregionskip`.
+- **Tested at the camera:** the region outline is tested at the spawn eye, not the cell's middle. Red `regioncentre`.
+- **A listed weather follows its duration:** duration = fWeatherDurationMin + (Max - Min)(255 - v)/255 game hours,
+  v = the climate's volatility x the weather's VNAM; in the same region the weather is kept until its duration runs
+  out, in a new region it is kept with the chance 1 - elapsed/duration. Red `nodurationkeep` (the old keep-outright).
+- **Weather box:** the Weather box in the scene window follows a region pick (it showed the old pick).
+- **Fog drift:** the drift is reset when the weather is re-read live (SHOTPASS1 D12: the drift-vs-still gap shrank over
+  the path). The sun's drift takes 3 samples along the sun ray (red `WW_CELL_FOGDRIFT_RED=onesun`); the puffs' lights
+  drift along the lamp path, not at the puff only (red `puffonly`; lit decals keep the puff-only drift, their program
+  sits at the instruction limit in the GI march mode). The red `still` and its old path are retired
+  (confirmed live in SHOTPASS1).
+- **Menu:** Show > Bloom "Fog bloom" is now "Fog Bloom Boost" (the settings key WW/CellFogBloom and WW_CELL_FOGBLOOM
+  are unchanged).
+- CLI: `weather --world <hex> --region-red noareainside,noregionskip`; the region line prints areas, deleted, world and
+  counts.
+- Cost: region pick runs once per teleport (CPU, microseconds); the drift samples add 2 noise reads per air step on
+  the sun term. No new GPU memory.
 
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 

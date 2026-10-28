@@ -96,12 +96,15 @@ float airDrift( vec3 dirView, float t )
 	return airDriftW( cellWorldPos( dirView * ( t / fogDistScale ) ), t );
 }
 
-// lane WEATHERBLEND4: the factor on the sun column's optical depth from posView (height z, the sun's rise mu): the drift
-// half way up the column, at most half the noise's tile (2048 units) along the sun (lookdev_fog.glsl wwAirDriftSunK)
+// lane WEATHERBLEND4: the factor on the sun column's optical depth from posView (height z, the sun's rise mu): the drift's
+// mean at 1/6, 1/2, 5/6 of the column, at most the noise's tile (4096 units) (lookdev_fog.glsl wwAirDriftSunK; WEATHERBLEND5)
 float airDriftSunK( vec3 posView, float z, float mu )
 {
-	float h = 0.5 * min( max( airMed.w - z, 0.0 ) / max( mu, 0.02 ), 4096.0 );
-	return airDriftW( cellWorldPos( posView ) + normalize( cellDirTo ) * h, length( posView ) * fogDistScale );
+	vec3 P = cellWorldPos( posView ), s = normalize( cellDirTo ) * min( max( airMed.w - z, 0.0 ) / max( mu, 0.02 ), 4096.0 );
+	float t = length( posView ) * fogDistScale;
+	if ( ( volAirDriftRed & 1 ) != 0 )
+		return airDriftW( P + 0.5 * s, t );
+	return ( airDriftW( P + s / 6.0, t ) + airDriftW( P + 0.5 * s, t ) + airDriftW( P + s * ( 5.0 / 6.0 ), t ) ) * ( 1.0 / 3.0 );
 }
 
 // lane FARGRID1: the cloud shadow's input, 1 = no clouds; lane CLOUD3 feeds it (ww_sunshadow.glsl ussCloudT: 1 when the

@@ -143,6 +143,9 @@ struct LdState
 	double cloudBase[32][2] = {};
 	const void * regionDoc = nullptr;	// lane WEATHERBLEND4: a teleport's cell, its region weather picked at the next resolve
 	QString regionLast;
+	// lane WEATHERBLEND5: the region the last pick chose, and the current weather's form and start hour (its elapsed)
+	quint32 regionForm = 0, startForm = 0;
+	double startHour = 0.0;
 	QString skyLast = QStringLiteral( "pending" );	// what the last sky pass drew, for the echo
 
 	// the weather fog (lane FOG1)
@@ -461,10 +464,20 @@ void transTick( LdState & s )
 	}
 }
 
+// lane WEATHERBLEND5: the current weather's start hour (Sky's elapsed reads it), noted when the weather in use changes
+void noteWeatherStart( LdState & s )
+{
+	if ( s.haveWeather && s.w.formID != s.startForm ) {
+		s.startForm = s.w.formID;
+		s.startHour = s.hour;
+	}
+}
+
 /* lane WEATHERBLEND4: a teleport to an exterior picks the region weather (Sky::UpdateWeather on a new region): of the
- * cell's regions (XCLR) with weather data whose areas hold the cell's centre, the override / priority winner; then its
- * list's chance draw, seeded by the cell (a reopen repeats). A region listing the current weather keeps it (the game
- * keeps it with chance elapsed / duration; a teleport has none elapsed). Red WW_WEATHER_BLEND_RED=noregionpick */
+ * cell's regions (XCLR) with weather data whose areas hold the player, the override / priority winner; then its list's
+ * chance draw, seeded by the cell (a reopen repeats). Red WW_WEATHER_BLEND_RED=noregionpick.
+ * WEATHERBLEND5: the spawn eye (red regioncentre: the cell's middle); deleted / other-world / no-area regions skipped
+ * (reds noregionskip, noareainside); the current weather kept by its duration and elapsed hours (red nodurationkeep) */
 void regionPick( LdState & s )
 {
 	const void * doc = s.regionDoc;
@@ -472,11 +485,16 @@ void regionPick( LdState & s )
 	const WwCellLighting * cl = doc ? wwCellLightsFor( doc ) : nullptr;
 	if ( !cl || cl->interior || s.pinWeather || weatherBlendRed( "noregionpick" ) )
 		return;
+	noteWeatherStart( s );
+	const bool centre = !cl->regionEyeOk || weatherBlendRed( "regioncentre" );
+	const float px = centre ? cl->regionAt[0] : cl->regionEye[0], py = centre ? cl->regionAt[1] : cl->regionEye[1];
+	const int red = ( weatherBlendRed( "noareainside" ) ? int( WwRegionRedNoAreaInside ) : 0 )
+		| ( weatherBlendRed( "noregionskip" ) ? int( WwRegionRedNoSkip ) : 0 );
 	QVector<WwRegionWeather> in;
 	QVector<WwRegionRank> rank;
 	for ( quint32 regn : cl->regions ) {
 		WwRegionWeather g;
-		if ( s.esm.regionWeatherAt( regn, cl->regionAt[0], cl->regionAt[1], g ) && g.hasWeather && g.inside ) {
+		if ( s.esm.regionWeatherAt( regn, px, py, g ) && wwRegionCounts( g, cl->regionWorld, red ) ) {
 			in.append( g );
 			rank.append( g.rank );
 		}
@@ -484,22 +502,36 @@ void regionPick( LdState & s )
 	const int k = wwRegionChoose( rank.constData(), int( rank.size() ) );
 	if ( k < 0 ) {
 		s.regionLast = QStringLiteral( "none(%1 regions)" ).arg( cl->regions.size() );
+		s.regionForm = 0;
 		return;
 	}
 	const WwRegionWeather & g = in.at( k );
-	const bool usesCur = s.haveWeather && std::any_of( g.list.cbegin(), g.list.cend(),
-		[&]( const WwRegionWeatherEntry & e ) { return e.weather == s.w.formID; } );
-	const quint32 pick = usesCur ? 0u
-		: wwRegionWeatherPick( g.list.constData(), int( g.list.size() ), wwRegionDraw( cl->regionSeed ) );
-	if ( !pick ) {
-		s.regionLast = QStringLiteral( "%1:%2" ).arg( g.edid, usesCur ? QStringLiteral( "keep" ) : QStringLiteral( "empty" ) );
+	const bool same = g.form == s.regionForm;
+	s.regionForm = g.form;
+	const quint32 cur = s.haveWeather ? s.w.formID : 0u;
+	const quint32 draw = wwRegionDraw( cl->regionSeed );
+	const double dur = wwWeatherDurationHours( s.clim.tnam[4], s.haveWeather ? s.w.volMult : 1.0f, s.gmst );
+	const double el = wwWeatherElapsedHours( s.hour, s.startHour );
+	quint32 pick = 0;
+	if ( weatherBlendRed( "nodurationkeep" ) ) {	// the WEATHERBLEND4 rule: a listed current weather is kept outright
+		const bool usesCur = cur && std::any_of( g.list.cbegin(), g.list.cend(),
+			[&]( const WwRegionWeatherEntry & e ) { return e.weather == cur; } );
+		pick = usesCur ? cur : wwRegionWeatherPick( g.list.constData(), int( g.list.size() ), draw );
+	} else {
+		pick = wwRegionWeatherFollow( g.list.constData(), int( g.list.size() ), cur, same, el, dur, draw,
+			double( wwRegionDraw( cl->regionSeed ^ 0x9e3779b9u ) ) / 4294967296.0 );
+	}
+	const QString law = QStringLiteral( "(%1 el=%2 dur=%3)" ).arg( same ? QStringLiteral( "same" ) : QStringLiteral( "new" ) )
+		.arg( el, 0, 'f', 2 ).arg( dur, 0, 'f', 2 );
+	if ( !pick || pick == cur ) {
+		s.regionLast = QStringLiteral( "%1:%2%3" ).arg( g.edid, pick ? QStringLiteral( "keep" ) : QStringLiteral( "empty" ), law );
 		return;
 	}
 	QString key = hex8( pick );
 	for ( const WwWeatherEntry & e : s.list )
 		if ( e.formID == pick && !e.edid.isEmpty() )
 			key = e.edid;
-	s.regionLast = QStringLiteral( "%1:%2" ).arg( g.edid, key );
+	s.regionLast = QStringLiteral( "%1:%2%3" ).arg( g.edid, key, law );
 	if ( key != s.weatherKey ) {	// the region's, not the user's pick: not saved
 		s.weatherKey = key;
 		s.dirtyWeather = true;
@@ -552,6 +584,7 @@ void resolve()
 			}
 		}
 	}
+	noteWeatherStart( s );	// lane WEATHERBLEND5
 	if ( s.regionDoc && s.loadRefusal.isEmpty() )
 		regionPick( s );
 	if ( s.dirtyWeather ) {

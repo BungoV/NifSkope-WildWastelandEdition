@@ -515,6 +515,23 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		if ( m_repaint )
 			m_repaint();
 	} );
+	// lane WEATHERBLEND5: the Weather box follows a pick it did not make (a teleport's region weather)
+	QTimer * weatherSync = new QTimer( this );
+	weatherSync->setInterval( 250 );
+	connect( weatherSync, &QTimer::timeout, this, [this]() {
+		if ( !weatherBox || !isVisible() || !wwLookdevActive() || weatherBox->count() == 0 )
+			return;
+		const QString key = wwLookdevWeatherKey();
+		if ( weatherBox->currentData().toString().compare( key, Qt::CaseInsensitive ) == 0 )
+			return;
+		const int i = weatherBox->findData( key, Qt::UserRole, Qt::MatchFixedString );
+		if ( i < 0 || i == weatherBox->currentIndex() )
+			return;
+		QSignalBlocker b( weatherBox );
+		weatherBox->setCurrentIndex( i );
+		refreshStatus();
+	} );
+	weatherSync->start();
 	refreshPlugins();
 	syncEnabled();
 	if ( wwLookdevActive() )
