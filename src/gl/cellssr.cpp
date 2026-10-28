@@ -28,6 +28,7 @@ BSD License - see nifskope.h
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
+#include <cstring>
 #include <vector>
 
 /* ---- lane SSR1: the screen-space reflections (cellssr.h, res/shaders/cell_ssr.frag) ---- */
@@ -142,6 +143,45 @@ void ssrAlloc( NifSkopeOpenGLContext::GLFunctions * fn, SsrTarget & t, int w, in
 bool ssrIsCellProgram( const NifSkopeOpenGLContext::Program * p )
 {
 	return p && ( wwIsCellProgramName( p->name ) );
+}
+
+/*! lane REFLDRAWS1, gates only: the water rays just drawn the new way, read back; then cleared, drawn by the old walk
+ *  and compared. The old walk's result stays, so a check row's picture is the old one. */
+template <typename F> void ssrWaterRayCheck( NifSkopeOpenGLContext::GLFunctions * fn, GLuint fbo, int W, int H, F oldWalk )
+{
+	static std::vector<float> a, b;	// scratch: the GL thread alone draws
+	static long long frames = 0, bad = 0, lastDiff = -1;
+	a.resize( size_t( W ) * size_t( H ) * 4 );
+	b.resize( a.size() );
+	auto readBack = [&]( std::vector<float> & v ) {
+		GLint prevRead = 0;
+		fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, fbo );
+		fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
+		fn->glReadPixels( 0, 0, W, H, GL_RGBA, GL_FLOAT, v.data() );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	};
+	readBack( a );
+	const GLfloat none4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	fn->glDisable( GL_SCISSOR_TEST );
+	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+	fn->glClearBufferfv( GL_COLOR, 0, none4 );
+	fn->glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );	// the pass's start state
+	fn->glDepthMask( GL_TRUE );
+	oldWalk();
+	readBack( b );
+	long long diff = 0, water = 0;
+	for ( size_t p = 0; p < a.size(); p += 4 ) {
+		diff += std::memcmp( &a[p], &b[p], 4 * sizeof( float ) ) != 0 ? 1 : 0;
+		water += ( b[p] != 0.0f || b[p + 1] != 0.0f || b[p + 2] != 0.0f || b[p + 3] != 0.0f ) ? 1 : 0;
+	}
+	frames++;
+	bad += diff ? 1 : 0;
+	if ( diff != lastDiff || frames % 120 == 0 ) {
+		lastDiff = diff;
+		std::fprintf( stderr, "refldraws check: water rays differ px=%lld of %lld (old walk wrote %lld) frames=%lld bad=%lld (must be 0)\n",
+			diff, (long long)( a.size() / 4 ), water, frames, bad );
+	}
 }
 
 }	// namespace
@@ -483,9 +523,33 @@ void wwCellSsrPass( Scene * scene, bool run )
 						node->drawShapes();
 				}
 			} else {
-				NodeList second;
-				scene->collectShapes( second );
-				Scene::drawDeferredShapes( second );
+				/* lane REFLDRAWS1: with a particle in the list, the sorted part again in the old order, but no second walk
+				 * of the opaque scene: no water is opaque, so each opaque draw there shut both masks and wrote nothing.
+				 * WW_CELL_REFLDRAWS_RED=1: the old walk. WW_CELL_REFLDRAWS_CHECK=1 draws both and compares the rays */
+				WW_SWITCH_STATIC( int, reflRed, wwEnvInt( "WW_CELL_REFLDRAWS_RED" ) );
+				WW_SWITCH_STATIC( bool, reflCheck, wwEnvInt( "WW_CELL_REFLDRAWS_CHECK" ) == 1 );
+				auto oldWalk = [&]() {
+					NodeList second;
+					scene->collectShapes( second );
+					Scene::drawDeferredShapes( second );
+				};
+				{
+					static int said = -1;
+					if ( reflRed != said ) {
+						said = reflRed;
+						std::fprintf( stderr, "cell ssr water rays: %s\n", reflRed == 1 ? "opaque scene walked again (RED=1)"
+							: reflRed == 2 ? "sorted list skipped (RED=2, check gate only)" : "sorted list reused, no opaque walk" );
+					}
+				}
+				if ( reflRed == 1 ) {
+					oldWalk();
+				} else {
+					fn->glDepthMask( GL_FALSE );	// as the old walk's opaque draws left it
+					if ( reflRed != 2 )
+						Scene::drawDeferredShapes( sceneSecond );
+					if ( reflCheck )
+						ssrWaterRayCheck( fn, g.wray.fbo, W, H, oldWalk );
+				}
 			}
 			s.pass = false;
 			s.waterRay = false;
