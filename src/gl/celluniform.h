@@ -381,7 +381,10 @@ struct DepthCfg
 	int fbo = -1, w = 0, h = 0;
 	int depthBits = 0, stencilBits = 0, compType = 0;
 	bool trusted = false;	// a frame on this key raised no GL error: its error reads are skipped
+	std::uint64_t serial = 0;	// lane CELLUNI6: the GL context's serial it was asked under (glctxserial.h)
 	bool hit( const void * c, int f, int ww, int hh ) const { return fbo >= 0 && ctx == c && fbo == f && w == ww && h == hh; }
+	//! lane CELLUNI6: the context's serial in the key too: a context made again never hits, whoever owns the cache
+	bool hit( const void * c, std::uint64_t s, int f, int ww, int hh ) const { return hit( c, f, ww, hh ) && serial == s; }
 	void keep( const void * c, int f, int ww, int hh, int d, int s, int t )
 	{
 		ctx = c;
@@ -392,6 +395,12 @@ struct DepthCfg
 		stencilBits = s;
 		compType = t;
 		trusted = false;
+		serial = 0;
+	}
+	void keep( const void * c, std::uint64_t ser, int f, int ww, int hh, int d, int s, int t )
+	{
+		keep( c, f, ww, hh, d, s, t );
+		serial = ser;
 	}
 	void forget()
 	{

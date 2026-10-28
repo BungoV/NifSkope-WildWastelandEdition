@@ -616,8 +616,15 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 	const WwCellUni::KnownGl * kn = linear ? WwCellUni::known( fn ) : nullptr;
 	static WwCellUni::DepthCfg depthCfg;	// the frame's depth format, asked once per framebuffer and size
 	static WwCellUni::CtxWatch ctxWatch;	// lane FRAMESPEED1: a context made again may reuse the fbo id and size
-	if ( ctxWatch.changed( r, wwGlContextSerial() ) && depthCfg.ctx == r )
+	/* lane CELLUNI6: a serial that also changes when the same context object is made again, and part of the cache's key
+	 * (WW_CELL_UNI6_RED=depthcfg: FRAMESPEED1's serial and the watch alone) */
+	const bool cfgBySerial = !wwCellUni6Red( "depthcfg" );
+	const std::uint64_t ctxSerial = cfgBySerial ? wwGlContextLife() : wwGlContextSerial();
+	if ( ctxWatch.changed( r, ctxSerial ) && depthCfg.ctx == r )
 		depthCfg.forget();
+	auto cfgHitAt = [&]( int fb, int w, int h ) {
+		return cfgBySerial ? depthCfg.hit( r, ctxSerial, fb, w, h ) : depthCfg.hit( r, fb, w, h );
+	};
 
 	GLint prevDraw = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 };
 	if ( kn ) {
@@ -632,7 +639,7 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 	const int W = vp[2], H = vp[3];
 	// lane CELLUNI6: after the tone map (HDR off) too, on the window's own framebuffer (WW_CELL_UNI6_RED=nonlinear: asked)
 	const bool useCfg = WwCellUni::depthCfgServes( kn != nullptr, linear, prevDraw, wwCellUni6Red( "nonlinear" ) );
-	const bool cfgHit = useCfg && depthCfg.hit( r, prevDraw, W, H );
+	const bool cfgHit = useCfg && cfgHitAt( prevDraw, W, H );
 	const bool checkErr = !cfgHit || !depthCfg.trusted;	// errors read until a frame on this framebuffer raised none
 	if ( checkErr ) {
 		while ( fn->glGetError() != GL_NO_ERROR ) {
@@ -656,7 +663,7 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 			GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &stencilBits );
 		fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &compType );
 		if ( useCfg )
-			depthCfg.keep( r, prevDraw, W, H, depthBits, stencilBits, compType );
+			depthCfg.keep( r, ctxSerial, prevDraw, W, H, depthBits, stencilBits, compType );
 	}
 	GLenum dsFormat = 0, dsFmt = 0, dsType = 0;
 	GLbitfield blitBits = GL_DEPTH_BUFFER_BIT;
@@ -822,7 +829,7 @@ bool taaResolveImpl( Scene * scene, GLuint linearFbo, GLenum linearFormat, float
 	const GLenum blitErr = checkErr ? fn->glGetError() : GLenum( GL_NO_ERROR );
 	if ( useCfg && blitErr != GL_NO_ERROR )
 		depthCfg.forget();	// lane CELLUNI4: asked again, and errors read, next frame
-	else if ( useCfg && checkErr && depthCfg.hit( r, prevDraw, W, H ) )
+	else if ( useCfg && checkErr && cfgHitAt( prevDraw, W, H ) )
 		depthCfg.trusted = true;
 
 	fn->glDisable( GL_DEPTH_TEST );

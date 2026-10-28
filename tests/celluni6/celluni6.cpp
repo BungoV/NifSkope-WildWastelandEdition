@@ -465,6 +465,100 @@ static void bsshape()
 	check( u.stale == 1 && u.reads == r.reads, "bsshape: WW_SETUP_MEMO_CHECK=1 on it: blendstale 1, the driver's blend used" );
 }
 
+// ---------------------------------------------------------------- 6. depthcfg
+/* gametaa.cpp's depth-format cache across context losses, with framebuffer 1 at 96x64 every time. The context's two
+ * serials as src/gl/glctxserial.h gives them (a property of the QOpenGLContext object): FRAMESPEED1's serial survives the
+ * same object being made again (create() on a made context), the CELLUNI6 life serial is dropped by its
+ * aboutToBeDestroyed. Frames 1-6 on context object A (D24S8); at 7 A is made again (D32F_S8); at 13 a new object B at
+ * A's address (D24S8); at 19 B made again (D32F_S8). The truth asks every frame. */
+struct FakeCtx
+{
+	std::uint64_t serial = 0, life = 0;	// 0: the property is not set
+	static std::uint64_t & nextSerial() { static std::uint64_t n = 0; return n; }
+	static std::uint64_t & nextLife() { static std::uint64_t n = 0; return n; }
+	std::uint64_t getSerial() { return serial ? serial : ( serial = ++nextSerial() ); }
+	std::uint64_t getLife() { return life ? life : ( life = ++nextLife() ); }
+	void remade() { life = 0; }	// aboutToBeDestroyed: the life property dropped; the serial property kept
+};
+enum class CfgMode { Green, Red, Truth, LifeWatchOnly };
+struct CfgOut
+{
+	std::vector<int> landed;
+	long long asks = 0;
+};
+static CfgOut cfgRun( CfgMode m )
+{
+	FakeGl gl;
+	FakeCtx a;
+	WwCellUni::DepthCfg cfg;
+	WwCellUni::CtxWatch watch;
+	const int renderer = 0;
+	bool bySerial = m == CfgMode::Green || m == CfgMode::LifeWatchOnly;
+#ifdef CELLUNI6_RED_DEPTHCFG
+	if ( m == CfgMode::Green )
+		bySerial = false;
+#endif
+	CfgOut out;
+	for ( int f = 1; f <= 24; f++ ) {
+		if ( f == 7 || f == 19 )
+			a.remade();
+		if ( f == 13 )
+			a = FakeCtx();	// a new object: neither property set
+		gl.fbFormat[1] = ( f >= 7 && f < 13 ) || f >= 19 ? 2 : 1;
+		const bool useLife = bySerial && m != CfgMode::LifeWatchOnly ? true : m == CfgMode::LifeWatchOnly;
+		const std::uint64_t ser = useLife ? a.getLife() : a.getSerial();
+		if ( watch.changed( &renderer, ser ) && cfg.ctx == &renderer )
+			cfg.forget();
+		auto hitAt = [&]() {
+			if ( m == CfgMode::Truth )
+				return false;
+			return bySerial && m != CfgMode::LifeWatchOnly ? cfg.hit( &renderer, ser, 1, 96, 64 ) : cfg.hit( &renderer, 1, 96, 64 );
+		};
+		const bool cfgHit = hitAt();
+		const bool checkErr = !cfgHit || !cfg.trusted;
+		if ( checkErr )
+			while ( gl.glGetError() != kNoError ) {
+			}
+		int fmt = 0;
+		if ( cfgHit )
+			fmt = cfg.depthBits;
+		else {
+			fmt = gl.attachFormat( 1 );
+			if ( bySerial && m != CfgMode::LifeWatchOnly )
+				cfg.keep( &renderer, ser, 1, 96, 64, fmt, 8, 0 );
+			else
+				cfg.keep( &renderer, 1, 96, 64, fmt, 8, 0 );
+		}
+		if ( fmt != gl.fbFormat[1] )
+			gl.errors.push_back( kInvalidOp );
+		const unsigned blitErr = checkErr ? gl.glGetError() : kNoError;
+		if ( blitErr != kNoError )
+			cfg.forget();
+		else if ( checkErr && hitAt() )
+			cfg.trusted = true;
+		out.landed.push_back( fmt == gl.fbFormat[1] ? 1 : 0 );
+	}
+	out.asks = gl.total;
+	return out;
+}
+static void depthcfg()
+{
+	{
+		WwCellUni::DepthCfg c;
+		const int owner = 0;
+		c.keep( &owner, 5, 1, 96, 64, 24, 8, 0 );
+		check( c.hit( &owner, 5, 1, 96, 64 ) && !c.hit( &owner, 6, 1, 96, 64 ),
+			"depthcfg: the same framebuffer id and size under another context serial misses" );
+	}
+	const CfgOut t = cfgRun( CfgMode::Truth ), g = cfgRun( CfgMode::Green ), r = cfgRun( CfgMode::Red );
+	check( std::count( t.landed.begin(), t.landed.end(), 0 ) == 0, "depthcfg: asking every frame, every depth blit lands (the model is sound)" );
+	check( g.landed == t.landed, "depthcfg: green lands every blit across two re-creates of one context object and a new object" );
+	std::printf( "     depthcfg: asks green %lld truth %lld\n", g.asks, t.asks );
+	check( g.asks < t.asks, "depthcfg: green still asks less than every frame" );
+	check( r.landed != t.landed, "depthcfg: the red (FRAMESPEED1's serial, kept by a re-created object) misses a blit" );
+	check( cfgRun( CfgMode::LifeWatchOnly ).landed == t.landed, "depthcfg: the life serial through the watch alone also lands (the key is the second guard)" );
+}
+
 int main()
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -474,6 +568,7 @@ int main()
 	hdrdepth();
 	hdrbegin();
 	bsshape();
+	depthcfg();
 	std::printf( "%s (%d failed)\n", fails ? "CELLUNI6 FAIL" : "CELLUNI6 OK", fails );
 	return fails ? 1 : 0;
 }

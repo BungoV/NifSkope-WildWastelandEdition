@@ -22,4 +22,25 @@ inline std::uint64_t wwGlContextSerial()
 	return std::uint64_t( v.toULongLong() );
 }
 
+/*! lane CELLUNI6: as wwGlContextSerial(), and new again when the same QOpenGLContext object is made again: create() on a
+ *  made context destroys the old one first, and its aboutToBeDestroyed drops this property (wwGlContextSerial()'s
+ *  survives that, so a cache keyed on it would answer for the old context). */
+inline std::uint64_t wwGlContextLife()
+{
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	if ( !c )
+		return 0;
+	QVariant v = c->property( "wwCtxLife" );
+	if ( !v.isValid() ) {
+		static std::uint64_t next = 0;
+		v = QVariant::fromValue<qulonglong>( ++next );
+		c->setProperty( "wwCtxLife", v );
+		if ( !c->property( "wwCtxLifeHook" ).isValid() ) {	// once per object: the hook outlives a re-create
+			c->setProperty( "wwCtxLifeHook", true );
+			QObject::connect( c, &QOpenGLContext::aboutToBeDestroyed, c, [c]() { c->setProperty( "wwCtxLife", QVariant() ); } );
+		}
+	}
+	return std::uint64_t( v.toULongLong() );
+}
+
 #endif
