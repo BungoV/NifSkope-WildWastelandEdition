@@ -252,7 +252,7 @@ bool layout( Dev & D, int which )
 	li.pBindings = b.data();
 	if ( vk.vkCreateDescriptorSetLayout( D.dev, &li, nullptr, &D.dsl[which] ) != VK_SUCCESS )
 		return false;
-	VkPushConstantRange pr { VK_SHADER_STAGE_COMPUTE_BIT, 0, 24 };
+	VkPushConstantRange pr { VK_SHADER_STAGE_COMPUTE_BIT, 0, 32 };   // ROOMFIT10: rqx.comp's grow + pad
 	VkPipelineLayoutCreateInfo pi { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	pi.setLayoutCount = 1;
 	pi.pSetLayouts = &D.dsl[which];
@@ -1036,6 +1036,24 @@ void Scene::cast( const XRay * rays, size_t n, XHit * out, bool anyHit )
 	CastTimes & ct = castTimes();
 	ct.calls++;
 	std::vector<uint32_t> ans( std::min( n, D.cap ) * 2 );
+	/* lane ROOMFIT10: rqx.comp narrows its edge band to the double rounding on a grown BLAS (pc.grow = the growth).
+	 * Red WW_BAKE_RT_SURE_RED: `float` keeps RTGI1's float band (grow 0); `ungrown` forces the narrow band on a BLAS
+	 * that was not grown (with WW_BAKE_RT_INFLATE_RED=off: WW_BAKE_RT_CHECK=1 must then find unlike answers). */
+	static const int sureRed = [] {
+		const char * r = std::getenv( "WW_BAKE_RT_SURE_RED" );
+		return !r ? 0 : !std::strcmp( r, "float" ) ? 1 : !std::strcmp( r, "ungrown" ) ? 2 : 0;
+	}();
+	const float growPc = sureRed == 1 ? 0.0f : sureRed == 2 ? 1e30f : float( inflate );
+	uint32_t growBits;
+	std::memcpy( &growBits, &growPc, 4 );
+	/* lane ROOMFIT10: an unsure ray re-walks bounded at its GPU triangle's t. Red WW_BAKE_RT_TIE_RED: `full` walks
+	 * every unsure ray whole (the old pass); `short` bounds just below that t (WW_BAKE_RT_CHECK=1 must then differ). */
+	static const int tieRed = [] {
+		const char * r = std::getenv( "WW_BAKE_RT_TIE_RED" );
+		return !r ? 0 : !std::strcmp( r, "full" ) ? 1 : !std::strcmp( r, "short" ) ? 2 : 0;
+	}();
+	// lane ROOMFIT10: red WW_BAKE_RT_GRAZE_RED=off: phase 2 reaches only kErr past the committed t (rqx.comp kGraze)
+	static const uint32_t grazeOff = [] { const char * r = std::getenv( "WW_BAKE_RT_GRAZE_RED" ); return r && !std::strcmp( r, "off" ) ? 2u : 0u; }();
 	for ( size_t b0 = 0; b0 < n; b0 += D.cap ) {
 		const size_t m = std::min( D.cap, n - b0 );
 		bool ok;
@@ -1049,8 +1067,8 @@ void Scene::cast( const XRay * rays, size_t n, XHit * out, bool anyHit )
 			if ( ok ) {
 				vk.vkCmdBindPipeline( D.cb, VK_PIPELINE_BIND_POINT_COMPUTE, D.pipe[2] );
 				vk.vkCmdBindDescriptorSets( D.cb, VK_PIPELINE_BIND_POINT_COMPUTE, D.pl[2], 0, 1, &d_->dsx, 0, nullptr );
-				const uint32_t pcv[6] = { 0u, uint32_t( m ), d_->useMask, d_->nTri, d_->nOpaque, anyHit ? 1u : 0u };
-				vk.vkCmdPushConstants( D.cb, D.pl[2], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pcv, pcv );
+				const uint32_t pcv[8] = { 0u, uint32_t( m ), d_->useMask, d_->nTri, d_->nOpaque, ( anyHit ? 1u : 0u ) | grazeOff, growBits, 0u };
+				vk.vkCmdPushConstants( D.cb, D.pl[2],VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pcv, pcv );
 				vk.vkCmdDispatch( D.cb, uint32_t( ( m + 127 ) / 128 ), 1, 1 );
 				VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 				mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -1067,15 +1085,17 @@ void Scene::cast( const XRay * rays, size_t n, XHit * out, bool anyHit )
 		if ( !ok )   // a lost device: this batch walks on the CPU
 			for ( size_t k = 0; k < m; k++ ) {
 				ans[k * 2] = 0xFFFFFFFFu;
-				ans[k * 2 + 1] = 1u;
+				ans[k * 2 + 1] = 32u;   // unsure: no answer
 			}
-		std::atomic<long long> nSure( 0 ), nRecast( 0 ), nDiff( 0 );
+		std::atomic<long long> nSure( 0 ), nRecast( 0 ), nDiff( 0 ), nBounded( 0 ), nChecked( 0 );
 		poolFor( m, [&]( size_t b, size_t e ) {
-			long long sr = 0, rc = 0, df = 0;
+			long long sr = 0, rc = 0, df = 0, bw = 0, ck = 0, wy[6] = { 0, 0, 0, 0, 0, 0 };
 			for ( size_t k = b; k < e; k++ ) {
 				const XRay & r = rays[b0 + k];
 				XHit & h = out[b0 + k];
 				const int gt = int( ans[k * 2] );
+				for ( int w = 0; w < 6; w++ )   // ROOMFIT10: rqx.comp's reason bits
+					wy[w] += ( ans[k * 2 + 1] >> w ) & 1u;
 				bool done = false;
 				if ( ans[k * 2 + 1] == 0u ) {
 					if ( gt < 0 ) {   // a sure miss
@@ -1094,11 +1114,43 @@ void Scene::cast( const XRay * rays, size_t n, XHit * out, bool anyHit )
 				}
 				if ( !done ) {
 					rc++;
-					walk( r, h );
+					/* ROOMFIT10: an unsure ray whose GPU triangle probebvh's own test accepts (t tg): the nearest hit is at
+					 * most tg, so the walk starts bounded there (padded far past the slab and triangle rounding). Its DFS
+					 * order is fixed, and a box it prunes holds no triangle at <= the bound, so it keeps the full walk's
+					 * last-visited triangle at the nearest t. An occlusion ray just takes that triangle. */
+					double tg = 0.0, gu, gv;
+					const bool own = tieRed != 1 && gt >= 0 && size_t( gt ) < B.t.size() / 9
+						&& probebvh::Bvh::tri( &B.t[size_t( gt ) * 9], r.o, r.d, tg, gu, gv ) && tg > 1e-4 && tg <= r.tmax
+						&& !( useMask && B.mask->hole( gt, gu, gv ) );
+					if ( !own ) {
+						walk( r, h );
+						continue;
+					}
+					bw++;
+					if ( anyHit ) {
+						h.tri = gt;
+						h.t = tg;
+					} else {
+						XRay rb = r;
+						rb.tmax = tieRed == 2 ? tg * ( 1.0 - 1e-6 ) : std::min( r.tmax, tg * ( 1.0 + 1e-6 ) + 1e-4 );
+						walk( rb, h );
+					}
+					if ( check ) {
+						XHit c;
+						walk( r, c );
+						ck++;
+						const bool same = anyHit ? ( c.tri >= 0 ) == ( h.tri >= 0 ) : ( c.tri == h.tri && ( c.tri < 0 || c.t == h.t ) );
+						df += same ? 0 : 1;
+						static std::atomic<int> shownB( 0 );
+						if ( !same && shownB.fetch_add( 1 ) < 20 )
+							fprintf( stderr, "rt check unlike (bounded)%s: o %.17g %.17g %.17g d %.17g %.17g %.17g tmax %.17g | bounded tri %d t %.17g | cpu tri %d t %.17g\n",
+								anyHit ? " (any)" : "", r.o[0], r.o[1], r.o[2], r.d[0], r.d[1], r.d[2], r.tmax, h.tri, h.t, c.tri, c.t );
+					}
 					continue;
 				}
 				sr++;
 				if ( check ) {
+					ck++;
 					XHit c;
 					walk( r, c );
 					const bool same = anyHit ? ( c.tri >= 0 ) == ( h.tri >= 0 ) : ( c.tri == h.tri && ( c.tri < 0 || c.t == h.t ) );
@@ -1107,18 +1159,28 @@ void Scene::cast( const XRay * rays, size_t n, XHit * out, bool anyHit )
 					if ( !same && shown.fetch_add( 1 ) < 20 )
 						fprintf( stderr, "rt check unlike%s: o %.17g %.17g %.17g d %.17g %.17g %.17g tmax %.17g | gpu tri %d t %.17g | cpu tri %d t %.17g\n",
 							anyHit ? " (any)" : "", r.o[0], r.o[1], r.o[2], r.d[0], r.d[1], r.d[2], r.tmax, h.tri, h.t, c.tri, c.t );
+					if ( !same && c.tri >= 0 && shown.load() <= 20 ) {   // ROOMFIT10: the CPU's triangle, for the miss hunt
+						const float * p = &B.t[size_t( c.tri ) * 9];
+						fprintf( stderr, "rt check unlike cpu tri %d verts %.9g %.9g %.9g | %.9g %.9g %.9g | %.9g %.9g %.9g\n", c.tri,
+							p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8] );
+					}
 				}
 			}
 			nSure += sr;
 			nRecast += rc;
 			nDiff += df;
+			nBounded += bw;
+			nChecked += ck;
+			for ( int w = 0; w < 6; w++ )
+				unsureWhy[w] += wy[w];
 		} );
 		sure += nSure.load();
 		recast += nRecast.load();
 		ct.recast += nRecast.load();
+		bounded += nBounded.load();
 		ct.postNs += std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::steady_clock::now() - tp ).count();
 		if ( check ) {
-			checked += nSure.load();
+			checked += nChecked.load();
 			diff += nDiff.load();
 		}
 	}
@@ -1135,6 +1197,10 @@ std::string census( const char * who, const Scene & s )
 		o << ", whole: sure " << s.sure.load();
 	if ( s.checked.load() )
 		o << ", check: answers unlike the CPU's " << s.diff.load() << " of " << s.checked.load();
+	if ( s.whole() )   // lane ROOMFIT10
+		o << ", unsure: edge " << s.unsureWhy[0].load() << " hole " << s.unsureWhy[1].load() << " det " << s.unsureWhy[2].load()
+		  << " tlimit " << s.unsureWhy[3].load() << " tie " << s.unsureWhy[4].load() << " none " << s.unsureWhy[5].load()
+		  << ", re-cast bounded " << s.bounded.load();
 	if ( s.whole() )   // lane GIBAKE2
 		o << ", BLAS grown " << s.inflate << " u (" << s.inflateTris << " triangles, " << s.inflateCapped << " corners capped"
 		  << ( s.inflate > 0.0 ? "" : "; off" ) << ")";

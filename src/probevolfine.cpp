@@ -20,6 +20,8 @@
 namespace {
 
 constexpr double kFinePi = 3.14159265358979323846;
+// ROOMFIT10: the slack of a threshold box's world bounds in the quick rejects (units; the box tests round at ~1e-10)
+constexpr double kTBoxPad = 1e-3;
 
 //! volcheck's lattice jitter (src/probevolcheck.cpp), so a room square to the world classes the very points volcheck will
 double fineJitter( int x, int y, int z, int axis )
@@ -206,9 +208,22 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 	{
 		double c[3], h[3], r[3][3], lo[3], hi[3];
 		bool seg( const double a[3], const double b[3] ) const { return enter( a, b ) >= 0; }
+		//! ROOMFIT10: the world box lo..hi, grown by m, meets the axis box lo2..hi2
+		bool meets( const double lo2[3], const double hi2[3], double m ) const
+		{
+			return hi[0] + m >= lo2[0] && lo[0] - m <= hi2[0] && hi[1] + m >= lo2[1] && lo[1] - m <= hi2[1] && hi[2] + m >= lo2[2]
+				&& lo[2] - m <= hi2[2];
+		}
 		//! where segment a..b enters the box, as a fraction of it (0 when a is inside); -1 when it misses
 		double enter( const double a[3], const double b[3] ) const
 		{
+			// ROOMFIT10: a segment whose own box stays clear of the world box (by far more than the rounding below) misses
+			{
+				const double sl[3] = { std::min( a[0], b[0] ), std::min( a[1], b[1] ), std::min( a[2], b[2] ) };
+				const double sh[3] = { std::max( a[0], b[0] ), std::max( a[1], b[1] ), std::max( a[2], b[2] ) };
+				if ( !meets( sl, sh, kTBoxPad ) )
+					return -1;
+			}
 			double la[3], lb[3];
 			for ( int k = 0; k < 3; k++ ) {
 				la[k] = r[0][k] * ( a[0] - c[0] ) + r[1][k] * ( a[1] - c[1] ) + r[2][k] * ( a[2] - c[2] );
@@ -438,7 +453,27 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 			fineFor( k1 - k0, par, [&]( size_t ks ) {
 				const int k = int( k0 + ks );
 				qint64 nr = 0, nf = 0;
-				for ( int j = 0; j < ny; j++ )
+				/* ROOMFIT10: only the thresholds whose world box meets this row's segments (lattice i 0..nx + 1, j..j + 2,
+				 * k..k + 2 hold every point of the row and its +u +v +z neighbours, jitter included) can cut one; the
+				 * row keeps thrNear's order, so the cut bits are the same (Concord's segment tests: 54 s summed) */
+				std::vector<const TBox *> thrRow;
+				thrRow.reserve( thrNear.size() );
+				for ( int j = 0; j < ny; j++ ) {
+					{
+						double rl[3] = { 1e300, 1e300, 1e300 }, rh[3] = { -1e300, -1e300, -1e300 };
+						for ( int q = 0; q < 8; q++ ) {
+							double w[3];
+							world( ( q & 1 ) ? nx + 1 : 0, j + ( ( q & 2 ) ? 2 : 0 ), k + ( ( q & 4 ) ? 2 : 0 ), w );
+							for ( int x = 0; x < 3; x++ ) {
+								rl[x] = std::min( rl[x], w[x] );
+								rh[x] = std::max( rh[x], w[x] );
+							}
+						}
+						thrRow.clear();
+						for ( const TBox * t : thrNear )
+							if ( t->meets( rl, rh, kTBoxPad ) )
+								thrRow.push_back( t );
+					}
 					for ( int i = 0; i < nx; i++ ) {
 						const size_t a = pidx( i, j, k );
 						double p[3];
@@ -454,7 +489,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 							double q[3];
 							ptW( bq, q );
 							bool thr = false;
-							for ( const TBox * t : thrNear )
+							for ( const TBox * t : thrRow )
 								if ( t->seg( p, q ) ) {
 									thr = true;
 									break;
@@ -484,6 +519,7 @@ std::vector<std::vector<ProbeVolumeShape>> probeVolumesFineFit( const probebvh::
 						}
 						cut[a] = m;
 					}
+				}
 				nRays += nr;
 				nFree += nf;
 			} );

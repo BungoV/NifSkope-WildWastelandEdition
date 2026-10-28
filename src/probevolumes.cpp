@@ -2244,6 +2244,8 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		V.msFine = fc.nsecsElapsed() / 1e6;
 		prof += QStringLiteral( " scene %1 fine %2 measure %3;" ).arg( qRound( msScene ) ).arg( qRound( fs.msWall ) ).arg( qRound( pf.nsecsElapsed() / 1e6 ) )
 			+ fs.prof;
+		if ( fg.scene )   // ROOMFIT10: the fit's own ray census (sure, re-cast, the check's unlike answers)
+			prof += QStringLiteral( "; " ) + QString::fromStdString( bakert::census( "fit", *fg.scene ) );
 	}
 	V.fineNote += prof;
 	V.refineRays = refineRays;

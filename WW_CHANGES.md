@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
+
+- **Fewer rays sent back to the CPU:** the GPU ray tracer (src/bakert/rqx.comp) now calls a ray "unsure" only within
+  the real double-precision rounding of an edge, when the BLAS is grown (it was the float band). Phase 1 runs every
+  triangle through the double test (no opaque commits on the grown rims). The float ray starts a little behind the
+  true origin, so a lattice point lying on a surface still meets that surface. Phase 2 looks a little further past the
+  first hit, so a nearer hit on a grazing ray is not lost. Same-run classification rays re-cast on the CPU,
+  ROOMFIT9 -> now: museum 3.04 -> 2.45 %, Concord 8.00 -> 0.95 %, Goodneighbor 3.18 -> 2.65 %, Sanctuary 7.82 -> 0.02 %.
+  What is left is almost all exact ties (two triangles at one distance).
+- **Unsure rays walk a bounded tree:** a re-cast ray whose GPU triangle the CPU's own test accepts walks the CPU tree
+  only out to that distance, with the same answer.
+- **Reasons in the census:** the fit's log line now has its own ray census ("fit rays: ... unsure: edge .. hole ..
+  det .. tlimit .. tie .. none .., re-cast bounded ..").
+- **Edge segment tests:** a threshold box is tested only when the segment's box meets it, and each lattice row keeps
+  only the thresholds near it. Concord edge segment time (thread-summed) 50.6 -> 24.0 s, museum 1.1 -> 0.5 s.
+- **Exact:** the .space files are byte-identical between ROOMFIT9, this lane, the CPU (`WW_BAKE_RT=0`) and check mode
+  on museum, Concord 5x5, Goodneighbor 3x3 and Sanctuary. Check mode (`WW_BAKE_RT_CHECK=1`) finds 0 answers unlike
+  the CPU's in 52 M + 260 M + 166 M + 7.5 M rays.
+- **Reds:** `WW_BAKE_RT_SURE_RED=float` (the old band), `=ungrown` (with `WW_BAKE_RT_INFLATE_RED=off`: check finds
+  178 / 1599 / 431 / 37 unlike); `WW_BAKE_RT_TIE_RED=full` (whole walks), `=short` (bound too short: every bounded ray
+  differs); `WW_BAKE_RT_GRAZE_RED=off` (check finds 5 / 1 / 1 unlike on Concord / Goodneighbor / Sanctuary).
+- Fit wall time, same run: museum 3.5 -> 3.0 s, Concord 20.6 -> 17.6 s, Goodneighbor 6.6 -> 5.9 s.
+- Cost: offline bakes only. 0 GPU ms at draw time, no new GPU memory (two push-constant words).
+
 ## Lane ROOMFIT9 (2026-10-28, branch roomfit9-20261028): Space files rebuilt offline exactly as the cell view made them
 
 - **`volumes --like-cell <file>.spacein`:** a cell view that dumps its soup (`WW_CELL_PROBE_SOUP`) now also writes

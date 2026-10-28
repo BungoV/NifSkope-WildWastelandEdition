@@ -3,7 +3,8 @@
 // nearest accepted triangle (or, for an occlusion ray, whether any is accepted) -- and says whether it is SURE.
 // Every candidate the hardware reports is re-tested in double with probebvh::Bvh::tri's own arithmetic and the
 // alpha hole in double (AlphaMask::hole). Unsure (the CPU then casts the ray itself):
-//   - a candidate passing within the float trace's error of a triangle edge (an unreported neighbour may hit there),
+//   - a candidate passing within the float trace's error of a triangle edge (an unreported neighbour may hit there;
+//     on a grown BLAS only within the double rounding, see testD),
 //   - a hole decision on a texel border or at the threshold, a determinant at probebvh's 1e-12 cut,
 //   - a hit at the ray's 1e-4 start or its tmax, two accepted hits within bakertwalk.h's near pad of each other.
 // Phase 1 finds the nearest hit; phase 2 re-walks (start, that hit + the float error] with every triangle reported,
@@ -23,15 +24,20 @@ layout( std430, set = 0, binding = 7 ) readonly buffer Remap { int remap[]; };  
 layout( std430, set = 0, binding = 8 ) readonly buffer Verts { float vt[]; };    // 9 floats a BLAS primitive
 
 // flags bit 0: occlusion ray (any accepted hit answers)
-layout( push_constant ) uniform Pc { uint first; uint count; uint useMask; uint nTri; uint nOpaque; uint flags; } pc;
+// grow: how far bakert.cpp grew the BLAS triangles (0 = not grown: the float-scale edge band, RTGI1's rule)
+layout( push_constant ) uniform Pc { uint first; uint count; uint useMask; uint nTri; uint nOpaque; uint flags; float grow; uint pad; } pc;
 
 const double kNearPad = 1e-6LF;   // bakertwalk.h
 const double kErr = 4e-6LF;       // the float trace's error, relative to the coordinates' size (~30 float ulps)
+/* ROOMFIT10: on a grazing ray (|cos| ~2e-3..3e-2 to the plane) the hardware t of a triangle is off by the float
+ * origin's rounding over cos (0.05-0.4 u at Concord), so a nearer true hit could sit past phase 1's committed t plus
+ * kErr: phase 2 reaches this much further (relative to the coordinates' size). Red: flags bit 2 (kErr only). */
+const double kGraze = 1e-4LF;
 
 float mf( uint i ) { return uintBitsToFloat( mt[i] ); }
 
-// AlphaMask::hole in double; *marg = the texel or threshold decision sat on its edge
-bool holeD( int tri, double b1, double b2, inout bool marg )
+// AlphaMask::hole in double; why |= 2 when the texel or threshold decision sat on its edge
+bool holeD( int tri, double b1, double b2, inout uint why )
 {
 	if ( pc.useMask == 0u || tri < 0 || uint( tri ) >= pc.nTri )
 		return false;
@@ -48,7 +54,7 @@ bool holeD( int tri, double b1, double b2, inout bool marg )
 	const double xu = u * double( mp.y ), yv = v * double( mp.z );
 	const double fx = xu - floor( xu ), fy = yv - floor( yv );
 	if ( fx < 1e-7LF || fx > 1.0LF - 1e-7LF || fy < 1e-7LF || fy > 1.0LF - 1e-7LF || u < 1e-9LF || v < 1e-9LF )
-		marg = true;
+		why |= 2u;
 	const int x = clamp( int( xu ), 0, int( mp.y ) - 1 );
 	const int y = clamp( int( yv ), 0, int( mp.z ) - 1 );
 	const uint off = mp.x + uint( y ) * mp.y + uint( x );
@@ -59,13 +65,13 @@ bool holeD( int tri, double b1, double b2, inout bool marg )
 	const double s = b0 * double( mf( b + 8u ) ) + b1 * double( mf( b + 9u ) ) + b2 * double( mf( b + 10u ) );
 	const double lhs = double( a ) * s;
 	if ( abs( lhs - double( thr ) ) <= 1e-9LF * ( 1.0LF + double( thr ) ) )
-		marg = true;
+		why |= 2u;
 	return lhs < double( thr );
 }
 
 /* BLAS primitive p against the double ray: probebvh::Bvh::tri, then (1e-4, tmax] and the hole. Returns accepted;
- * tt = its distance; marg = any of those decisions sat within its error band. */
-bool testD( uint p, dvec3 o, dvec3 d, double tmax, double eDist, out double tt, inout bool marg )
+ * tt = its distance; why = which of those decisions sat within its error band (the reason bits). */
+bool testD( uint p, dvec3 o, dvec3 d, double tmax, double eDist, out double tt, inout uint why )
 {
 	tt = 0.0LF;
 	const uint b = p * 9u;
@@ -76,7 +82,7 @@ bool testD( uint p, dvec3 o, dvec3 d, double tmax, double eDist, out double tt, 
 	const dvec3 pv = dvec3( d.y * e2.z - d.z * e2.y, d.z * e2.x - d.x * e2.z, d.x * e2.y - d.y * e2.x );
 	const double det = e1.x * pv.x + e1.y * pv.y + e1.z * pv.z;
 	if ( abs( abs( det ) - 1e-12LF ) <= 1e-18LF )
-		marg = true;
+		why |= 4u;
 	if ( abs( det ) < 1e-12LF )
 		return false;
 	const double id = 1.0LF / det;
@@ -91,16 +97,30 @@ bool testD( uint p, dvec3 o, dvec3 d, double tmax, double eDist, out double tt, 
 	const double h0 = a2 / max( length( p2 - p1 ), 1e-30LF ), h1 = a2 / max( length( e2 ), 1e-30LF ),
 		h2 = a2 / max( length( e1 ), 1e-30LF );
 	const double w = 1.0LF - u - v;
-	if ( abs( w ) * h0 <= eDist || abs( u ) * h1 <= eDist || abs( v ) * h2 <= eDist )
-		marg = true;
+	/* lane ROOMFIT10: on a grown BLAS a triangle the double test accepts is reported by the float hardware however
+	 * near its edge the ray passes (GIBAKE2), so the edge band only has to cover the GPU's double rounding against the
+	 * CPU's: 1e-9 x (|o| + t + 1). Kept at the float band when the growth does not cover the float error (eDist past
+	 * it), for a grazing ray (|cos| < 4e-3: the float ray crosses the plane ulp / cos away) and for a sliver (a corner
+	 * with sin(half angle) < 2e-3: growTri caps its corner shift, so the grown rim is thinner there). */
+	double eEdge = eDist;
+	if ( pc.grow > 0.0 && eDist <= 0.9LF * double( pc.grow ) && abs( dot( nn, d ) ) >= 4e-3LF * a2 * length( d ) ) {
+		const double l0 = length( p2 - p1 ), l1 = length( e2 ), l2 = length( e1 );
+		const double c0 = dot( e1, e2 ) / max( l1 * l2, 1e-300LF ), c1 = dot( -e1, p2 - p1 ) / max( l2 * l0, 1e-300LF ),
+			c2 = dot( -e2, p1 - p2 ) / max( l1 * l0, 1e-300LF );
+		// sin(half angle)^2 = (1 - cos) / 2 >= 4e-6 at every corner
+		if ( min( c0, min( c1, c2 ) ) > -2.0LF && max( c0, max( c1, c2 ) ) <= 1.0LF - 8e-6LF )
+			eEdge = eDist * 2.5e-4LF;
+	}
+	if ( abs( w ) * h0 <= eEdge || abs( u ) * h1 <= eEdge || abs( v ) * h2 <= eEdge )
+		why |= 1u;
 	// a grazing ray: the float trace's t error grows as 1 / cos
 	if ( u < 0.0LF || u > 1.0LF || v < 0.0LF || u + v > 1.0LF )
 		return false;
 	if ( abs( tt - 1e-4LF ) <= 1e-9LF || abs( tt - tmax ) <= kNearPad * ( 1.0LF + tmax ) )
-		marg = true;
+		why |= 8u;
 	if ( !( tt > 1e-4LF ) || tt > tmax )
 		return false;
-	if ( holeD( remap[p], u, v, marg ) )
+	if ( holeD( remap[p], u, v, why ) )
 		return false;
 	return true;
 }
@@ -118,25 +138,33 @@ void main()
 	const double tmax = r.tmax;
 	const bool any = ( pc.flags & 1u ) != 0u;
 	const double oMag = max( abs( o.x ), max( abs( o.y ), abs( o.z ) ) );
-	const vec3 of = vec3( o ), df = vec3( d );
-	const float tmaxF = float( tmax * ( 1.0LF + kErr ) + kErr * ( oMag + 1.0LF ) );
-	bool marg = false;
+	/* lane ROOMFIT10: the float ray starts `back` behind the true origin. A point on a surface (the volume fit's lattice)
+	 * meets a triangle at t ~1e-4..2e-3, inside the float origin's rounding: from the rounded origin the hardware saw
+	 * it behind the ray and never reported it (check: 190 unlike answers on Concord). The hardware t is then back
+	 * longer than the true t; the double test uses the true origin. */
+	const double back = kErr * ( oMag + 1.0LF );
+	const vec3 of = vec3( o - d * back ), df = vec3( d );
+	const float tmaxF = float( tmax * ( 1.0LF + kErr ) + kErr * ( oMag + 1.0LF ) + back );
+	uint why = 0u;   // ROOMFIT10: the unsure reasons (0 = sure), each counted in the census
 	int tri = -1;
 
-	// phase 1: the nearest hit; opaque triangles commit in hardware, alpha-tested ones by the double test
+	/* phase 1: the nearest hit. ROOMFIT10: every triangle goes through the double test (no opaque commits in hardware):
+	 * on the grown BLAS a ray passing a silhouette within the growth (2 u at Concord) committed the rim, phase 2 then
+	 * found no true hit and the ray went to the CPU (7.5% of Concord's fit rays) */
 	rayQueryEXT q;
-	rayQueryInitializeEXT( q, tlas, any ? gl_RayFlagsTerminateOnFirstHitEXT : gl_RayFlagsNoneEXT, 0xFF, of, 0.0, df, tmaxF );
+	rayQueryInitializeEXT( q, tlas, any ? gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsNoOpaqueEXT : gl_RayFlagsNoOpaqueEXT, 0xFF, of, 0.0, df,
+		tmaxF );
 	while ( rayQueryProceedEXT( q ) ) {
 		if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
 			continue;
 		const uint p = PRIM( q, false );
 		const float tf = rayQueryGetIntersectionTEXT( q, false );
 		double tt;
-		bool m = false;
+		uint m = 0u;
 		const bool acc = testD( p, o, d, tmax, kErr * ( oMag + double( tf ) + 1.0LF ), tt, m );
-		marg = marg || m;
+		why |= m;
 		if ( any ) {   // an occlusion ray ends on its first SURE accepted hit; a doubtful one only marks the ray
-			if ( acc && !m ) {
+			if ( acc && m == 0u ) {
 				tri = remap[p];
 				rayQueryConfirmIntersectionEXT( q );
 			}
@@ -145,7 +173,7 @@ void main()
 	}
 	const bool hit1 = rayQueryGetIntersectionTypeEXT( q, true ) == gl_RayQueryCommittedIntersectionTriangleEXT;
 	if ( !hit1 ) {   // a miss: sure unless an alpha decision on the way sat on its edge
-		hits[pc.first + k] = uvec2( 0xFFFFFFFFu, marg ? 1u : 0u );
+		hits[pc.first + k] = uvec2( 0xFFFFFFFFu, why );
 		return;
 	}
 	const float t0 = rayQueryGetIntersectionTEXT( q, true );
@@ -157,16 +185,17 @@ void main()
 		// an opaque commit: sure when its double re-test accepts it clear of every edge
 		const uint p = PRIM( q, true );
 		double tt;
-		bool m2 = false;
+		uint m2 = 0u;
 		const bool acc = testD( p, o, d, tmax, kErr * ( oMag + double( t0 ) + 1.0LF ), tt, m2 );
-		hits[pc.first + k] = acc && !m2 ? uvec2( uint( remap[p] ), 0u ) : uvec2( 0xFFFFFFFFu, 1u );
+		hits[pc.first + k] = acc && m2 == 0u ? uvec2( uint( remap[p] ), 0u ) : uvec2( 0xFFFFFFFFu, acc ? m2 : m2 | 32u );
 		return;
 	}
 
 	// phase 2: everything in (0, t0 + the float error], each in double; nothing committed so nothing is culled
-	marg = false;
+	why = 0u;
 	const double eT = kErr * ( oMag + double( t0 ) + 1.0LF );
-	const float tEnd = min( tmaxF, float( double( t0 ) * ( 1.0LF + kErr ) + eT ) );
+	const double eG = ( pc.flags & 2u ) != 0u ? 0.0LF : kGraze * ( oMag + double( t0 ) + 1.0LF );
+	const float tEnd = min( tmaxF, float( double( t0 ) * ( 1.0LF + kErr ) + eT + eG ) );
 	rayQueryEXT q2;
 	rayQueryInitializeEXT( q2, tlas, gl_RayFlagsNoOpaqueEXT, 0xFF, of, 0.0, df, tEnd );
 	double best = 1e300LF, second = 1e300LF;
@@ -176,7 +205,7 @@ void main()
 			continue;
 		const uint p = PRIM( q2, false );
 		double tt;
-		if ( !testD( p, o, d, tmax, eT, tt, marg ) )
+		if ( !testD( p, o, d, tmax, eT, tt, why ) )
 			continue;
 		const int st = remap[p];
 		if ( tt < best ) {
@@ -187,7 +216,9 @@ void main()
 		} else if ( st != bestTri && tt < second )
 			second = tt;
 	}
-	if ( bestTri < 0 || second - best <= kNearPad * ( 1.0LF + best ) )
-		marg = true;
-	hits[pc.first + k] = uvec2( bestTri < 0 ? 0xFFFFFFFFu : uint( bestTri ), marg ? 1u : 0u );
+	if ( bestTri < 0 )
+		why |= 32u;
+	else if ( second - best <= kNearPad * ( 1.0LF + best ) )
+		why |= 16u;
+	hits[pc.first + k] = uvec2( bestTri < 0 ? 0xFFFFFFFFu : uint( bestTri ), why );
 }

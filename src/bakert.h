@@ -97,6 +97,9 @@ public:
 	std::atomic<long long> traced { 0 }, recast { 0 };
 	std::atomic<long long> gpuUs { 0 };
 	std::atomic<long long> sure { 0 }, checked { 0 }, diff { 0 };   // lane RTGI1: cast()'s sure rays, its check
+	// lane ROOMFIT10: why rqx.comp called rays unsure (a ray may count in several): edge, hole, det, t limit, tie, none
+	std::atomic<long long> unsureWhy[6] = {};
+	std::atomic<long long> bounded { 0 };   // of the re-cast rays, the ones walked bounded at the GPU triangle's t
 	double inflate = 0.0;   // lane GIBAKE2: how far the BLAS triangles were grown (0 = red WW_BAKE_RT_INFLATE_RED=off)
 	long long inflateTris = 0, inflateCapped = 0;
 	struct Impl;
