@@ -362,7 +362,6 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 {
 	paramId = 0;	// lane PERF5
 	wwBound = 0;	// lane CELLUNI3
-	wwBl2D = 0;	// lane FRAMESPEED2
 	Tex *	tx = insertTex( fname );
 	if ( !tx ) [[unlikely]]
 		return 0;
@@ -371,17 +370,7 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 		if ( tx->id[0] )
 			return 0;
 
-		const int m = loadTex( *tx, nif );
-		/* lane FRAMESPEED2 (D1): a first load binds through its own path; the unit's 2D binding counts only when it is
-		 * the loaded texture (loadTex may grow the table, so the entry is looked up again) */
-		if ( m ) {
-			const Tex * t = insertTex( fname );
-			GLint b = 0;
-			glGetIntegerv( GL_TEXTURE_BINDING_2D, &b );
-			if ( t && t->target == GL_TEXTURE_2D && t->id[0] && GLuint( b ) == t->id[0] )
-				wwBl2D = t->id[0];
-		}
-		return m;
+		return loadTex( *tx, nif );
 	}
 
 	if ( !tx->target ) [[unlikely]]
@@ -389,7 +378,6 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 	glBindTexture( tx->target, tx->id[0] );
 	WWDP( WwDp::BindTex, GLint( tx->target ), GLint( tx->id[0] ) );	// lane GAPPERF-BINDLESS
 	wwBound = tx->target == GL_TEXTURE_2D ? tx->id[0] : 0;	// lane CELLUNI3
-	wwBl2D = wwBound;	// lane FRAMESPEED2
 	// lane PERF5: the shadow follows its own caller's binds; any other caller may set other parameters
 	if ( wwParamCaller && tx->target == GL_TEXTURE_2D ) {
 		paramId = tx->id[0];

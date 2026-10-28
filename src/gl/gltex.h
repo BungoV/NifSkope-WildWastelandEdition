@@ -231,9 +231,6 @@ protected:
 public:
 	// lane CELLUNI3: the 2D texture bind() / the cube bindCube() last bound from a loaded entry (0: none, ask GL)
 	GLuint wwBound = 0, wwCubeBound = 0;
-	/* lane FRAMESPEED2 (D1): the 2D texture bind() left bound, a first load included (0: none, or not 2D). The bindless
-	 * resolve takes its handle from this, never from the unit's binding, which may be a pass's render target. */
-	GLuint wwBl2D = 0;
 	int wwCubeMode( GLuint id ) const { return id < paramShadow.size() ? paramShadow[id].cube : 0; }
 	void wwCubeModeSet( GLuint id, int mode )
 	{

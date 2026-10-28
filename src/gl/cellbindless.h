@@ -63,16 +63,6 @@ const Row & staged();
 void frame();
 void forget( GLuint tex );	// a texture is deleted
 void forgetAll();
-/* lane FRAMESPEED2 (D1): a screen-sized target about to take a new size. Once a handle was taken of a texture its
- * storage is immutable for good (ARB_bindless_texture), even after forgetAll: glTexImage2D on it is refused (0x0502),
- * and after a live reopen (the viewport 1026 -> 1110 tall) NVIDIA ended the process inside it (SSR, 0xC0000409).
- * An existing name is forgotten, deleted and made anew; 0 gets a fresh name. The caller then (re)specifies it and
- * re-attaches it. Belt only: handleOfBound no longer takes handles of render targets (below). */
-void renew( NifSkopeOpenGLContext::GLFunctions * f, GLuint & tex );
-/* lane FRAMESPEED2 (D1) reds, launch key WW_CELL_TARGET_RED: respec = 1 (renew keeps the name and re-specifies it),
- * stale = 2 (a bind that left no cache 2D texture takes a handle of the unit's binding, a pass's render target, as
- * before), old = 3 (both: the crash on a live reopen) */
-int targetRed();
 
 //! the pooled draw of the shape now drawing: valid while `on`
 struct Geo
