@@ -232,12 +232,93 @@ static void nonlinear()
 	check( d.landed != r.landed, "nonlinear: doctored, the cache on a harness framebuffer misses its new format (frame 18)" );
 }
 
+// ---------------------------------------------------------------- 3. hdrdepth
+/* cellhdr.cpp wwCellHdrDepthMax and its readers in one HDR frame, in glview's order: the far cards take it and then
+ * draw (they write depth), the volume clouds take it, the underwater pass takes it (frames 4-8: the camera under water).
+ * The depth max is a texture made from the frame's depth as it is at the call: the model gives each make the depth's
+ * version, and each reader what it read. Frames 10-12 have no far cards. */
+struct DmOut
+{
+	std::vector<long long> seen;	// per reader: the depth version its texture holds
+	long long makes = 0;
+	std::uint64_t stale = 0;
+};
+enum class DmMode { Green, Red, DocNoWrote, DocNoFrame };
+static DmOut dmRun( DmMode m, bool check )
+{
+	resetKit();
+	WwCellUni::FrameOnce once;
+	const int owner = 0;
+	DmOut out;
+	long long depth = 0, texHolds = -1;
+	std::uint64_t serial = 0;
+	bool red = m == DmMode::Red;
+#ifdef CELLUNI6_RED_HDRDEPTH
+	red = true;
+#endif
+	auto make = [&]() {
+		out.makes++;
+		texHolds = depth;
+		return 5u;	// the texture's name: the same every frame
+	};
+	auto take = [&]() -> unsigned {	// the wrapper, as cellhdr.cpp has it
+		const std::uint64_t f = m == DmMode::DocNoFrame ? 1 : serial;
+		unsigned tex = 0;
+		if ( red )
+			return make();
+		if ( !once.take( &owner, f, 64ull << 32 | 32, tex ) ) {
+			tex = make();
+			once.keep( &owner, f, 64ull << 32 | 32, tex );
+			return tex;
+		}
+		if ( check ) {
+			const long long kept = texHolds;
+			const unsigned made = make();
+			if ( made != tex || texHolds != kept )
+				WwCellUni::state().knownStale++;
+			return made;
+		}
+		return tex;
+	};
+	for ( int f = 1; f <= 12; f++ ) {
+		serial++;	// Begin
+		depth += 100;	// the scene draws
+		if ( f < 10 ) {
+			take();
+			out.seen.push_back( texHolds );
+			if ( m != DmMode::DocNoWrote )
+				once.dirty();	// wwCellHdrDepthMaxWrote
+			depth += 1;	// the cards' depth
+		}
+		take();	// the volume clouds
+		out.seen.push_back( texHolds );
+		if ( f >= 4 && f <= 8 ) {
+			take();	// under water
+			out.seen.push_back( texHolds );
+		}
+	}
+	out.stale = WwCellUni::state().knownStale;
+	return out;
+}
+static void hdrdepth()
+{
+	const DmOut g = dmRun( DmMode::Green, false ), r = dmRun( DmMode::Red, false );
+	check( g.seen == r.seen, "hdrdepth: every reader's depth max as the red's (12 frames, cards in 9, under water in 5)" );
+	std::printf( "     hdrdepth: makes green %lld red %lld\n", g.makes, r.makes );
+	check( g.makes == r.makes - 5, "hdrdepth: green makes it once less in each frame with two readers after the cards" );
+	check( dmRun( DmMode::DocNoWrote, false ).seen != r.seen, "hdrdepth: doctored, the cards' depth writes not said: differs" );
+	check( dmRun( DmMode::DocNoFrame, false ).seen != r.seen, "hdrdepth: doctored, kept across frames: differs" );
+	const DmOut c = dmRun( DmMode::Green, true );
+	check( c.seen == r.seen && c.stale == 0, "hdrdepth: WW_SETUP_MEMO_CHECK=1: same textures, knownstale 0" );
+}
+
 int main()
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
 	redNames();
 	jitter();
 	nonlinear();
+	hdrdepth();
 	std::printf( "%s (%d failed)\n", fails ? "CELLUNI6 FAIL" : "CELLUNI6 OK", fails );
 	return fails ? 1 : 0;
 }

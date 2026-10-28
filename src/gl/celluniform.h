@@ -408,6 +408,32 @@ inline bool depthCfgServes( bool known, bool linear, int drawFb, bool red )
 	return known || ( !linear && drawFb == 0 && !red );
 }
 
+/* lane CELLUNI6 (hdrdepth): a value made from the frame once and handed to every later reader of the same frame, until a
+ * writer of what it was made from says it changed (dirty). The frame: a serial the maker bumps at each frame's start. */
+struct FrameOnce
+{
+	const void * owner = nullptr;
+	std::uint64_t frame = 0, key = 0;
+	unsigned value = 0;
+	bool have = false;
+	bool take( const void * o, std::uint64_t f, std::uint64_t k, unsigned & v ) const
+	{
+		if ( !have || owner != o || frame != f || key != k )
+			return false;
+		v = value;
+		return true;
+	}
+	void keep( const void * o, std::uint64_t f, std::uint64_t k, unsigned v )
+	{
+		owner = o;
+		frame = f;
+		key = k;
+		value = v;
+		have = true;
+	}
+	void dirty() { have = false; }
+};
+
 /*! lane FRAMESPEED1: an owner (a Renderer) whose GL context was made again (a context loss) shows a new serial: what was
  *  cached for the old context (DepthCfg: the same fbo id and size may now hold another format) must be forgotten */
 struct CtxWatch
