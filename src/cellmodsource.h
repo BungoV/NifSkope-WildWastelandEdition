@@ -80,8 +80,12 @@ QStringList cellModPluginArchives( const QString & pluginPath );
 
 /*! lane LANDSPEC8: [General] uGridsToLoad as the game reads it (Fallout4_Default.ini, then My Games' Fallout4.ini,
  *  Fallout4Prefs.ini, Fallout4Custom.ini; a later file overrides; WW_MODPICK_MYGAMES a fixture folder alone).
- *  0 = unset (the game's 5); `from` the ini that set it. */
-int cellGameGrids( QString * from = nullptr );
+ *  lane LANDSPEC9: when cellModSource() is an MO2 profile with local inis (the same test as sTestFile above), its
+ *  Fallout4.ini, Fallout4Prefs.ini, Fallout4Custom.ini are read in place of My Games' (Fallout4_Default.ini from the
+ *  game folder still first). Red WW_LANDSPEC_RED=mygames: My Games always (LANDSPEC8).
+ *  0 = unset (the game's 5); `from` the ini that set it; `read` the folder read ("the MO2 profile's own inis in
+ *  <dir>" or "My Games <dir>"). */
+int cellGameGrids( QString * from = nullptr, QString * read = nullptr );
 
 //! the loaded block's half width from cellGameGrids (LandLodSpec::gridHalf); red WW_LANDSPEC_RED=grids5: 5's 2
 int cellGameGridHalf( QString * note = nullptr );

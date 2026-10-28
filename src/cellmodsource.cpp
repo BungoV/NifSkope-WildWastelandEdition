@@ -221,15 +221,22 @@ QStringList testFiles( const QStringList & inis, QString * from )
 	return out;
 }
 
+/*! the folder the game's inis are read from: the MO2 profile's own when it has local inis (a Fallout4.ini or
+ *  Fallout4Custom.ini in it), else My Games; `local` says which (lane LANDSPEC9: shared by sTestFile and uGridsToLoad) */
+QString iniFolder( const QString & profile, bool * local = nullptr )
+{
+	const bool p = !profile.isEmpty() && ( QFileInfo( profile + QStringLiteral( "/Fallout4.ini" ) ).isFile()
+		|| QFileInfo( profile + QStringLiteral( "/Fallout4Custom.ini" ) ).isFile() );
+	if ( local )
+		*local = p;
+	return p ? profile : myGames();
+}
+
 //! the inis the game reads sTestFile from: the profile's own when it has them (MO2), else My Games
 QStringList gameInis( const QString & profile )
 {
-	if ( !profile.isEmpty() ) {
-		const QStringList p{ profile + QStringLiteral( "/Fallout4.ini" ), profile + QStringLiteral( "/Fallout4Custom.ini" ) };
-		if ( QFileInfo( p.at( 0 ) ).isFile() || QFileInfo( p.at( 1 ) ).isFile() )
-			return p;
-	}
-	return { myGames() + QStringLiteral( "/Fallout4.ini" ), myGames() + QStringLiteral( "/Fallout4Custom.ini" ) };
+	const QString d = iniFolder( profile );
+	return { d + QStringLiteral( "/Fallout4.ini" ), d + QStringLiteral( "/Fallout4Custom.ini" ) };
 }
 
 /* The sTestFile exception: the list becomes the masters (no Creation Club
@@ -326,14 +333,27 @@ QStringList iniArchives( const QString & game )
 
 } // namespace
 
-int cellGameGrids( QString * from )
+int cellGameGrids( QString * from, QString * read )
 {
 	QString gameFrom;
 	const QString game = gameFolder( &gameFrom );
-	QStringList inis{ myGames() + QStringLiteral( "/Fallout4.ini" ), myGames() + QStringLiteral( "/Fallout4Prefs.ini" ),
-		myGames() + QStringLiteral( "/Fallout4Custom.ini" ) };
-	if ( !game.isEmpty() && wwEnv( "WW_MODPICK_MYGAMES" ).isEmpty() )	// a fixture stands alone
+	/* lane LANDSPEC9: the open MO2 profile (cellModSource's, the mod picker's) with local inis is read in
+	 * place of My Games, as the game run from that profile does; red mygames: My Games always (LANDSPEC8) */
+	QString profile;
+	if ( wwEnv( "WW_LANDSPEC_RED" ) != "mygames" ) {
+		const CellModSource src = cellModSource();
+		if ( src.kind == QLatin1String( "mo2" ) )
+			profile = src.from;
+	}
+	bool local = false;
+	const QString dir = iniFolder( profile, &local );
+	QStringList inis{ dir + QStringLiteral( "/Fallout4.ini" ), dir + QStringLiteral( "/Fallout4Prefs.ini" ),
+		dir + QStringLiteral( "/Fallout4Custom.ini" ) };
+	if ( !game.isEmpty() && ( local || wwEnv( "WW_MODPICK_MYGAMES" ).isEmpty() ) )	// a My Games fixture stands alone
 		inis.prepend( game + QStringLiteral( "/Fallout4_Default.ini" ) );
+	if ( read )
+		*read = QStringLiteral( "%1 %2" ).arg( local ? QStringLiteral( "the MO2 profile's own inis in" )
+			: QStringLiteral( "My Games" ), QDir::toNativeSeparators( dir ) );
 	int g = 0;
 	for ( const QString & ini : inis ) {
 		bool general = false;
@@ -351,14 +371,15 @@ int cellGameGrids( QString * from )
 
 int cellGameGridHalf( QString * note )
 {
-	QString from;
-	const int g = cellGameGrids( &from );
+	QString from, read;
+	const int g = cellGameGrids( &from, &read );
 	const bool red = wwEnv( "WW_LANDSPEC_RED" ) == "grids5";
 	const int h = LandLodSpec::gridHalf( red ? LandLodSpec::kGridsDefault : g );
 	if ( note )
-		*note = red ? QStringLiteral( "RED grids5: 5 (the ini says %1)" ).arg( g )
+		*note = ( red ? QStringLiteral( "RED grids5: 5 (the ini says %1)" ).arg( g )
 			: g > 0 ? QStringLiteral( "%1 (%2)" ).arg( g ).arg( from )
-			: QStringLiteral( "unset, the game's %1" ).arg( LandLodSpec::kGridsDefault );
+			: QStringLiteral( "unset, the game's %1" ).arg( LandLodSpec::kGridsDefault ) )
+			+ QStringLiteral( "; read %1" ).arg( read );	// LANDSPEC9: which folder's inis
 	return h;
 }
 
