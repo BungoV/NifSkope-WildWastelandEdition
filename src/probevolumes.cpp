@@ -2567,8 +2567,20 @@ ProbeVolumesInputs probeVolumesInputs( const ProbeSoup & soup, const std::vector
 			sha( h, d.lo, 12 );
 			sha( h, d.hi, 12 );
 		}
-		sha( h, soup.twoSided.data(), soup.twoSided.size() );
-		sha( h, soup.amask.triOf.data(), soup.amask.triOf.size() * sizeof( int ) );
+		// lane ROOMFIT9: two-sided and masked triangles by index, so a soup read back (tails padded to every triangle)
+		// hashes as the one the view wrote
+		for ( size_t i = 0; i < soup.twoSided.size(); i++ )
+			if ( soup.twoSided[i] ) {
+				const quint32 k = quint32( i );
+				sha( h, &k, 4 );
+				sha( h, &soup.twoSided[i], 1 );
+			}
+		for ( size_t i = 0; i < soup.amask.triOf.size(); i++ )
+			if ( soup.amask.triOf[i] >= 0 ) {
+				const quint32 k = quint32( i );
+				sha( h, &k, 4 );
+				sha( h, &soup.amask.triOf[i], sizeof( int ) );
+			}
 		for ( const auto & t : soup.amask.tris ) {
 			sha( h, &t.map, sizeof( int ) );
 			sha( h, &t.thr, 1 );
@@ -2689,6 +2701,7 @@ bool probeVolumesMarkersWrite( const QString & path, const std::vector<ProbeVolu
 	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
 		return false;
 	QTextStream s( &f );
+	s.setRealNumberPrecision( 9 );   // lane ROOMFIT9: floats round-trip (6 digits moved the CLI's fit off the view's)
 	for ( const ProbeVolumeMarker & m : ms ) {
 		s << m.type << ' ' << m.ref << ' ' << m.from << ' ' << m.to;
 		for ( float v : m.c )
@@ -2731,11 +2744,86 @@ bool probeVolumesMarkersRead( const QString & path, std::vector<ProbeVolumeMarke
 	return true;
 }
 
+// lane ROOMFIT9: 9 significant digits round-trip a float exactly
+static QString exactF( float v )
+{
+	return QString::number( double( v ), 'g', 9 );
+}
+
+bool probeVolumesStageInWrite( const QString & path, const std::vector<ProbeVolumeAperture> & aps, const ProbeVolumesStageSpec & st )
+{
+	QFile f( path );
+	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+		return false;
+	QTextStream s( &f );
+	s << "spacein\t1\n" << "world\t" << st.world << "\n" << "interior\t" << ( st.interior ? 1 : 0 ) << "\n"
+	  << "byanchor\t" << ( st.byAnchor ? 1 : 0 ) << "\n" << "keys\t" << st.keys.join( '\t' ) << "\n";
+	s << "clip";
+	for ( int c = 0; c < 3; c++ )
+		s << '\t' << exactF( st.spec.clipLo[c] );
+	for ( int c = 0; c < 3; c++ )
+		s << '\t' << exactF( st.spec.clipHi[c] );
+	s << "\n" << "red\t" << st.spec.red << "\n" << "recx\t" << st.recxFile << '\t' << st.recxName << "\n";
+	for ( const ProbeVolumeAperture & a : aps )
+		s << "aperture\t" << a.type << '\t' << exactF( a.pos[0] ) << '\t' << exactF( a.pos[1] ) << '\t' << exactF( a.pos[2] )
+		  << '\t' << exactF( a.width ) << '\t' << exactF( a.height ) << '\t' << a.doorRef << "\n";
+	return true;
+}
+
+bool probeVolumesStageInRead( const QString & path, std::vector<ProbeVolumeAperture> * aps, ProbeVolumesStageSpec * st )
+{
+	QFile f( path );
+	if ( !f.open( QIODevice::ReadOnly ) )
+		return false;
+	aps->clear();
+	bool head = false;
+	for ( QByteArray line : f.readAll().split( '\n' ) ) {
+		if ( line.endsWith( '\r' ) )
+			line.chop( 1 );
+		const QList<QByteArray> w = line.split( '\t' );
+		const QByteArray & k = w[0];
+		if ( k == "spacein" )
+			head = w.size() > 1 && w[1] == "1";
+		else if ( k == "world" && w.size() > 1 )
+			st->world = QString::fromUtf8( w[1] );
+		else if ( k == "interior" && w.size() > 1 )
+			st->interior = w[1] == "1";
+		else if ( k == "byanchor" && w.size() > 1 )
+			st->byAnchor = w[1] == "1";
+		else if ( k == "keys" ) {
+			st->keys.clear();
+			for ( int i = 1; i < w.size(); i++ )
+				if ( !w[i].isEmpty() )
+					st->keys << QString::fromUtf8( w[i] );
+		} else if ( k == "clip" && w.size() == 7 ) {
+			for ( int c = 0; c < 3; c++ ) {
+				st->spec.clipLo[c] = w[1 + c].toFloat();
+				st->spec.clipHi[c] = w[4 + c].toFloat();
+			}
+		} else if ( k == "red" && w.size() > 1 )
+			st->spec.red = QString::fromUtf8( w[1] );
+		else if ( k == "recx" && w.size() > 2 ) {
+			st->recxFile = QString::fromUtf8( w[1] );
+			st->recxName = QString::fromUtf8( w[2] );
+		} else if ( k == "aperture" && w.size() == 8 ) {
+			ProbeVolumeAperture a;
+			a.type = w[1].toInt();
+			for ( int c = 0; c < 3; c++ )
+				a.pos[c] = w[2 + c].toFloat();
+			a.width = w[5].toFloat();
+			a.height = w[6].toFloat();
+			a.doorRef = w[7].toUInt();
+			aps->push_back( a );
+		}
+	}
+	return head && !st->keys.isEmpty();
+}
+
 // ---------------------------------------------------------------- CLI
 
 int probeVolumesCli( const QStringList & args )
 {
-	QString soupPath, outDir, key, world, markersPath, recxPath, rect, recxName, viewDump, giMap;
+	QString soupPath, outDir, key, world, markersPath, recxPath, rect, recxName, viewDump, giMap, likeCell;
 	bool interior = false, gridOut = false, aps = false;
 	ProbeVolumeSpec spec;
 	for ( int i = 0; i < args.size(); i++ ) {
@@ -2751,6 +2839,7 @@ int probeVolumesCli( const QStringList & args )
 		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
 		else if ( a == QLatin1String( "--view-dump" ) ) { viewDump = nx; i++; }
 		else if ( a == QLatin1String( "--gi-map" ) ) { giMap = nx; i++; }
+		else if ( a == QLatin1String( "--like-cell" ) ) { likeCell = nx; i++; }
 		else if ( a == QLatin1String( "--skymax" ) ) { spec.skyMax = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--pinch" ) ) { spec.pinch = nx.toFloat(); i++; }
 		else if ( a == QLatin1String( "--cell" ) ) { spec.cell = nx.toFloat(); i++; }
@@ -2761,11 +2850,14 @@ int probeVolumesCli( const QStringList & args )
 		else if ( a == QLatin1String( "--apertures" ) ) aps = true;
 	}
 	QTextStream o( stdout );
-	if ( soupPath.isEmpty() || outDir.isEmpty() || ( interior && key.isEmpty() ) || ( !interior && rect.isEmpty() && key.isEmpty() ) ) {
-		o << "usage: volumes --soup S --out D (--interior --key EDID | --rect x0,y0,x1,y1 [--world W] | --key K) [--markers f] "
-			"[--recx f [--recx-name N]] [--skymax s] [--red r] [--grid] [--apertures] [--view-dump f] [--gi-map f]\n";
+	if ( soupPath.isEmpty() || outDir.isEmpty()
+		|| ( likeCell.isEmpty() && ( ( interior && key.isEmpty() ) || ( !interior && rect.isEmpty() && key.isEmpty() ) ) ) ) {
+		o << "usage: volumes --soup S --out D (--interior --key EDID | --rect x0,y0,x1,y1 [--world W] | --key K | --like-cell f) "
+			"[--markers f] [--recx f [--recx-name N]] [--skymax s] [--red r] [--grid] [--apertures] [--view-dump f] [--gi-map f]\n";
 		return 2;
 	}
+	if ( !likeCell.isEmpty() && markersPath.isEmpty() && QFileInfo::exists( soupPath + QStringLiteral( ".markers" ) ) )
+		markersPath = soupPath + QStringLiteral( ".markers" );
 	ProbeSoup soup;
 	QString err;
 	if ( !probeSoupRead( soupPath, &soup, &err ) ) {
@@ -2828,6 +2920,28 @@ int probeVolumesCli( const QStringList & args )
 		for ( int y = int( std::floor( rc[1] / 4096.0 ) ); y <= int( std::floor( rc[3] / 4096.0 ) ); y++ )
 			for ( int x = int( std::floor( rc[0] / 4096.0 ) ); x <= int( std::floor( rc[2] / 4096.0 ) ); x++ )
 				st.keys << QStringLiteral( "%1_%2" ).arg( x ).arg( y );
+	if ( !likeCell.isEmpty() ) {   // lane ROOMFIT9: the view's own stage inputs, not a rect's guess at them
+		ProbeVolumesStageSpec in;
+		if ( !probeVolumesStageInRead( likeCell, &apertures, &in ) ) {
+			o << "volumes: cannot read the stage inputs " << likeCell << "\n";
+			return 1;
+		}
+		st.world = in.world;
+		st.interior = in.interior;
+		st.flat = false;
+		st.byAnchor = in.byAnchor;
+		st.keys = in.keys;
+		for ( int c = 0; c < 3; c++ ) {
+			st.spec.clipLo[c] = in.spec.clipLo[c];
+			st.spec.clipHi[c] = in.spec.clipHi[c];
+		}
+		if ( spec.red.isEmpty() )
+			st.spec.red = in.spec.red;
+		if ( recxPath.isEmpty() ) {
+			st.recxFile = in.recxFile;
+			st.recxName = in.recxName;
+		}
+	}
 	ProbeVolumes v;
 	bool ok = false;
 	o << probeVolumesStage( soup, markers, apertures, st, &v, &ok );
