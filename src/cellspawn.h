@@ -29,6 +29,9 @@ struct CellSpawn
 	int blockers = 0;           //!< exterior: placed objects whose bounds stand on the centre
 	float moved = 0.0f;         //!< exterior: how far the nearest open point is from the centre
 	QString centreObjects;      //!< exterior: the first few objects standing on the centre (form, model, box size)
+	//! lane FAVCAM1: a saved favorite placed it (src/cellfavorites.h); the view takes these as well as eye and yaw
+	bool favorite = false;
+	float pitchDeg = 0.0f, rollDeg = 0.0f, fovDeg = 0.0f, dist = 64.0f;
 	QString line() const;       //!< the notes line, "cell spawn: ..."
 };
 
@@ -36,8 +39,10 @@ struct CellSpawn
  *  (Meshes\Actors\Character\_1stPerson\CharacterAssets\skeleton.nif) stands at z 120.4828. */
 constexpr float cellEyeHeight = 120.4828f;
 
-//! The spawn for this spec, read from the world the open indexed. WW_CELL_SPAWN_RED=old|z0 are the gate's reds.
-CellSpawn cellSpawnCompute( const EsmWorld & world, const CellSceneSpec & spec );
+/*! The spawn for this spec, read from the world the open indexed. WW_CELL_SPAWN_RED=old|z0 are the gate's reds.
+ *  `favorites` (the window's open, lane FAVCAM1): the start favorite in the opened cells wins over the rule; a shot
+ *  run (WW_RENDER_SHOT or --port) reads favorites only from an explicit WW_CELL_FAVORITES file. */
+CellSpawn cellSpawnCompute( const EsmWorld & world, const CellSceneSpec & spec, bool favorites = false );
 //! The open of document `nif` publishes its spawn; the window takes it once, on the tab's first load.
 void cellSpawnPublish( const void * nif, const CellSpawn & s );
 bool cellSpawnTake( const void * nif, CellSpawn & out );

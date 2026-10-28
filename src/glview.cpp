@@ -22683,6 +22683,42 @@ QString GLView::wwSpawnAt( const Vector3 & eye, float yawDeg )
 		.arg( double( yawDeg ), 0, 'f', 2 ).arg( double( back.length() ), 0, 'f', 3 );
 }
 
+bool GLView::wwCameraNow( float eye[3], float rot[3], float & fovDeg, float & dist, float at[3] ) const
+{
+	const Transform vt = viewTransform();
+	const Vector3 e = vt.rotation.inverted() * ( Vector3() - vt.translation );
+	for ( int i = 0; i < 3; i++ ) {
+		eye[i] = e[i];
+		rot[i] = Rot[i];
+		at[i] = e[i] - 512.0f * vt.rotation( 2, i );	// row 2 is the view's back axis
+	}
+	fovDeg = float( cfg.fov / Zoom );
+	dist = float( Dist );
+	return !wwPathActive && cfg.upAxis == ZAxis;
+}
+
+QString GLView::wwCameraGoTo( const float eye[3], const float rot[3], float fovDeg, float dist )
+{
+	const Vector3 e( eye[0], eye[1], eye[2] );
+	doCenter = false;
+	if ( view != ViewWalk )
+		view = ViewUser;
+	perspectiveMode = true;
+	Zoom = fovDeg > 0.0f ? std::clamp( double( cfg.fov ) / double( fovDeg ), 0.05, 20.0 ) : Zoom;
+	Dist = dist > 0.0f ? dist : 64.0f;
+	Rot = Vector3( rot[0], rot[1], rot[2] );
+	Matrix m;
+	m.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+	Pos = Vector3() - e + ( view != ViewWalk ? m.inverted() * Vector3( 0.0f, 0.0f, 2.0f * float( Dist ) ) : Vector3() );
+	updateViewpoint();
+	update();
+	const Vector3 back = viewTransform() * e;	// the eye must land at the view's origin
+	return QStringLiteral( "camera favorite eye %1,%2,%3 rot %4,%5,%6 fov %7 | eye residual %8" )
+		.arg( double( eye[0] ), 0, 'f', 2 ).arg( double( eye[1] ), 0, 'f', 2 ).arg( double( eye[2] ), 0, 'f', 2 )
+		.arg( double( rot[0] ), 0, 'f', 2 ).arg( double( rot[1] ), 0, 'f', 2 ).arg( double( rot[2] ), 0, 'f', 2 )
+		.arg( double( fovDeg ), 0, 'f', 2 ).arg( double( back.length() ), 0, 'f', 3 );
+}
+
 QString GLView::wwPlaceCamera( const Vector3 & eye, const Vector3 & at )
 {
 	Vector3 f = at - eye;

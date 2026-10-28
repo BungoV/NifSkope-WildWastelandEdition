@@ -444,6 +444,8 @@ HEADERS += \
 	src/cellaodecal.h \
 	src/esmplaced.h \
 	src/cellworkspace.h \
+	src/cellfavorites.h \
+	src/cellfavoritespanel.h \
 	src/lodinative.h \
 	src/lodtsheets.h \
 	src/lodgenaggregate.h \
@@ -777,6 +779,8 @@ SOURCES += \
 	src/cellaodecal.cpp \
 	src/esmplaced.cpp \
 	src/cellworkspace.cpp \
+	src/cellfavorites.cpp \
+	src/cellfavoritespanel.cpp \
 	src/cellworkspacetest.cpp \
 	src/cellcensustest.cpp \
 	src/lodinative.cpp \

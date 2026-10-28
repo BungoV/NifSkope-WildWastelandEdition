@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FAVCAM1 (2026-10-28, branch favcam1-20261028): favorite camera spots in the cell view
+
+- **What (bungo 10-28):** the Cell dock has a Favorites tab. Save Camera stores where the camera stands and where it
+  points (eye, yaw, pitch, roll, field of view, orbit distance, plus a spot 512 units ahead) and opens the new row's name
+  for typing ("Favorite N" if left). A click jumps the camera there. F2 or Rename (right-click) renames, Del or Delete
+  (right-click) removes. The row last saved or jumped to is marked Start; rows outside the opened cells are greyed.
+- **It always opens there:** a cell's first open in a tab stands the camera at the Start favorite of that worldspace
+  (an interior cell has its own list) when it lies in the opened cells, else at the most recent one that does, else the
+  spawn rule (src/cellspawn.cpp). `WW_CELL_SPAWN_EYE` still wins over favorites, and a pinned harness camera
+  (`WW_RENDER_CENTER/DIST/FOV/ORTHO`) wins over both. A shot run (`WW_RENDER_SHOT` or `--port`) reads favorites only from
+  an explicit `WW_CELL_FAVORITES` file, so unpinned harness pictures do not move. The notes line says
+  `cell spawn: rule=favorite "<name>"`; the window prints `camera favorite eye ... | eye residual`.
+- **Where:** one JSON file, `camera_favorites.json` in the app data folder (`%APPDATA%\NifTools\NifSkope 2.0\`, follows
+  `WW_SETTINGS_SCOPE`); `WW_CELL_FAVORITES=<file>` points it elsewhere. Code: src/cellfavorites.{h,cpp} (file + pick),
+  src/cellfavoritespanel.{h,cpp} (the tab), GLView::wwCameraNow / wwCameraGoTo.
+- **Gate:** tests/cellfavorites (notes/favcam1/unit/unit.sh): 22 checks PASS; reds `WW_CELL_FAVORITES_RED=range` (the
+  pick ignores the opened cells, 5 FAIL) and `=angles` (the writer drops yaw and pitch, 1 FAIL).
+
 ## Lane REFLDRAWS1 (2026-10-27, branch refldraws1-20261027): the reflections pass stops re-walking the opaque scene
 
 - **Which pass:** the "reflections" row of the pass timer is the screen-space reflections (`wwCellSsrPass`,

@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "cellspawn.h"
+#include "cellfavorites.h"
 #include "cellground.h"
 #include "cellsplat.h"
 
@@ -13,6 +14,7 @@ BSD License - see nifskope.h
 #include "wwswitch.h"
 #include "data/niftypes.h"
 
+#include <QCoreApplication>
 #include <QHash>
 #include <QMutex>
 #include <QSet>
@@ -257,7 +259,7 @@ QString CellSpawn::line() const
 		.arg( blockers ).arg( double( moved ), 0, 'f', 1 );
 }
 
-CellSpawn cellSpawnCompute( const EsmWorld & world, const CellSceneSpec & spec )
+CellSpawn cellSpawnCompute( const EsmWorld & world, const CellSceneSpec & spec, bool favorites )
 {
 	CellSpawn s = spec.interior ? interior( world ) : exterior( world, spec.cx, spec.cy );
 	const QString red = wwEnvStr( "WW_CELL_SPAWN_RED" ).trimmed();
@@ -268,6 +270,32 @@ CellSpawn cellSpawnCompute( const EsmWorld & world, const CellSceneSpec & spec )
 		s.eye[2] = 0.0f;
 		s.rule += QStringLiteral( " RED eye z 0" );
 	}
+	// lane FAVCAM1: the start favorite of this worldspace (or interior) when it lies in the opened cells
+	const bool shotRun = wwEnvIsSet( "WW_RENDER_SHOT" ) || QCoreApplication::arguments().contains( QLatin1String( "--port" ) );
+	if ( favorites && red.isEmpty() && ( !shotRun || wwEnvIsSet( "WW_CELL_FAVORITES" ) ) ) {
+		CellFavoriteStore store;
+		QString err;
+		if ( cellFavoritesRead( cellFavoritesPath(), store, &err ) ) {
+			const QVector<CellFavorite> list = store.lists.value( cellFavoritesKey( spec.interior, spec.world, spec.interiorCell ) );
+			const int k = cellFavoritesPick( list, spec.interior, spec.cx, spec.cy, spec.n );
+			if ( k >= 0 ) {
+				const CellFavorite & c = list.at( k );
+				for ( int i = 0; i < 3; ++i )
+					s.eye[i] = c.eye[i];
+				s.yawDeg = c.yawDeg;
+				s.pitchDeg = c.pitchDeg;
+				s.rollDeg = c.rollDeg;
+				s.fovDeg = c.fovDeg;
+				s.dist = c.dist;
+				s.ground = s.eye[2] - cellEyeHeight;
+				s.favorite = true;
+				s.valid = true;
+				s.rule = QStringLiteral( "favorite \"%1\"" ).arg( c.name );
+			}
+		} else {
+			s.rule += QStringLiteral( " (favorites unread: %1)" ).arg( err );
+		}
+	}
 	// lane SPAWNEYE1: WW_CELL_SPAWN_EYE=x,y,z,yaw starts the free camera at that eye (world units, yaw as above)
 	const QStringList e = wwEnvStr( "WW_CELL_SPAWN_EYE" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
 	if ( e.size() == 4 ) {
@@ -275,6 +303,7 @@ CellSpawn cellSpawnCompute( const EsmWorld & world, const CellSceneSpec & spec )
 			s.eye[i] = e[i].toFloat();
 		s.yawDeg = e[3].toFloat();
 		s.ground = s.eye[2] - 120.4828f;
+		s.favorite = false;
 		s.valid = true;
 		s.rule = QStringLiteral( "WW_CELL_SPAWN_EYE" );
 	}
