@@ -78,4 +78,12 @@ QStringList cellModDataStack( const QString & dataDir, const QStringList & plugi
 //! The archives named for one plugin, sitting beside it: "<stem> - *.ba2" (and "<stem>.ba2"), by name.
 QStringList cellModPluginArchives( const QString & pluginPath );
 
+/*! lane LANDSPEC8: [General] uGridsToLoad as the game reads it (Fallout4_Default.ini, then My Games' Fallout4.ini,
+ *  Fallout4Prefs.ini, Fallout4Custom.ini; a later file overrides; WW_MODPICK_MYGAMES a fixture folder alone).
+ *  0 = unset (the game's 5); `from` the ini that set it. */
+int cellGameGrids( QString * from = nullptr );
+
+//! the loaded block's half width from cellGameGrids (LandLodSpec::gridHalf); red WW_LANDSPEC_RED=grids5: 5's 2
+int cellGameGridHalf( QString * note = nullptr );
+
 #endif // CELLMODSOURCE_H

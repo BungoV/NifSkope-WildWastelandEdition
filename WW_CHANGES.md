@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LANDSPEC8 (2026-10-28, branch landspec8-20261028): land LOD chunks on first load, the whole Commonwealth, uGridsToLoad
+
+- **Chunks loaded in the same frame now show (SHOTPASS1 D6):** the near land's LOD window skipped every chunk texture
+  whose file it had just loaded, because the texture cache reports the bound texture only for files already loaded.
+  After a reopen (the ownlod row's Commonwealth 0,-8) this showed as "0 of 36 chunks" until the camera crossed a chunk.
+  The window now binds a freshly loaded chunk a second time (src/landlodspec.h chunkTex). Red `WW_LANDSPEC_RED=firstload`.
+- **The whole Commonwealth's outer window, no paging:** a block wider than the driver's 45 x 45 layers (the Commonwealth
+  is 49 chunks a side, 2401 layers) now packs 2 x 2 chunks at mip 2 into one 256 x 256 layer: 625 layers, 6 levels,
+  52.1 MiB (LANDSPEC7's paged 45 x 45 was 42.2 MiB and left land past 84 cells bare). Wider than 50 chunks pages the
+  50 x 50 round the camera (every cell within 96). Up to 45 chunks the tiers are unchanged. Red `WW_LANDSPEC_RED=outer45`.
+- **uGridsToLoad read from the game's inis:** [General] uGridsToLoad from Fallout4_Default.ini, then My Games'
+  Fallout4.ini, Fallout4Prefs.ini and Fallout4Custom.ini (a later file wins) sets the streamed block (was 5 x 5), a
+  fixed world's open fit (was WCTR +- 2) and an exterior bake's block (was 5 x 5). Unset: the game's 5; at most 21.
+  The stream prints `cell stream: uGridsToLoad <n> (<ini>): n x n cells`. Red `WW_LANDSPEC_RED=grids5`.
+- **Retired reds (confirmed live by SHOTPASS1):** `WW_LANDSPEC_RED=off` (the ground without the LOD spec law) and
+  `WW_LANDSPEC_RED=notex` (no band textures), with their code paths.
+- Cost: the packed window only on blocks wider than 45 chunks: +9.8 MiB GPU memory over LANDSPEC7's page, one more
+  branch per outer-window pixel (est. < 0.05 ms at 1080p, live measurement owed). The second bind is CPU only, once
+  per chunk load. uGridsToLoad 5 (the default) draws exactly as before.
+
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 
 - **Fewer rays sent back to the CPU:** the GPU ray tracer (src/bakert/rqx.comp) now calls a ray "unsure" only within

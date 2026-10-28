@@ -6,6 +6,7 @@
 #include "cellmesh.h"
 #include "cellsplat.h"
 #include "landlodspec.h"	// lane LANDSPEC6: streamCentre
+#include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
 #include "impostorchunk.h"
 #include "gl/bsshape.h"
 #include "gl/cellcull.h"
@@ -192,6 +193,7 @@ public:
 	//! lane LANDSPEC7: a fixed world builds no cell round the eye past WCTR +- 2: the block never moves there, and the
 	//! game never loads those cells (red WW_LANDSPEC_RED=fixedopen: the prefetch row is built)
 	bool noPrefetch = false;
+	int gridHalf = LandLodSpec::kFixedGridHalf;	//!< lane LANDSPEC8: uGridsToLoad / 2 from the game's inis (was 2)
 
 	~Stream() override
 	{
@@ -1014,14 +1016,14 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	if ( !fixedCentre )	// lane LANDSPEC6: the game skips every grid shift in a fixed world
 		shiftCentre( eye );
 	wanted.clear();
-	for ( int dy = -2; dy <= 2; dy++ )
-		for ( int dx = -2; dx <= 2; dx++ )
+	for ( int dy = -gridHalf; dy <= gridHalf; dy++ )
+		for ( int dx = -gridHalf; dx <= gridHalf; dx++ )
 			wanted.insert( Key( ccx + dx, ccy + dy ) );
 	// the row the next move needs, as soon as the eye is in the neighbour cell
 	prefetch.clear();
 	const int ex = cellOf( eye[0] ), ey = cellOf( eye[1] );
-	for ( int dy = -2; dy <= 2; dy++ )
-		for ( int dx = -2; dx <= 2; dx++ )
+	for ( int dy = -gridHalf; dy <= gridHalf; dy++ )
+		for ( int dx = -gridHalf; dx <= gridHalf; dx++ )
 			if ( !noPrefetch && !wanted.count( Key( ex + dx, ey + dy ) ) )
 				prefetch.insert( Key( ex + dx, ey + dy ) );
 
@@ -1200,6 +1202,10 @@ void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
 	s->fixedCentre = seed->fixedWorld && wwEnvStr( "WW_LANDSPEC_RED" ) != QLatin1String( "fixedfollow" );
 	LandLodSpec::streamCentre( s->fixedCentre, seed->fixedX, seed->fixedY, seed->cx, seed->cy, s->ccx, s->ccy );	// LANDSPEC6
 	s->noPrefetch = s->fixedCentre && wwEnvStr( "WW_LANDSPEC_RED" ) != QLatin1String( "fixedopen" );	// LANDSPEC7
+	QString gridNote;
+	s->gridHalf = cellGameGridHalf( &gridNote );	// LANDSPEC8
+	std::fprintf( stderr, "cell stream: uGridsToLoad %s: %d x %d cells\n", qPrintable( gridNote ), 2 * s->gridHalf + 1,
+		2 * s->gridHalf + 1 );
 	if ( seed->fixedWorld )
 		std::fprintf( stderr, "cell stream: fixed world, block centre %d,%d (%s)%s\n", s->ccx, s->ccy,
 			s->fixedCentre ? "WCTR, no shifts" : "RED fixedfollow: the open's, shifting",

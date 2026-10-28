@@ -6,7 +6,10 @@
  * blend factor of the distance (xy) to the centre of the camera's cell. fo4_default.frag (landLod) runs the same law. */
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
+#include <string>
 
 namespace LandLodSpec
 {
@@ -165,7 +168,21 @@ struct Window
 {
 	int fx = 0, fy = 0, w = kWindow;
 	int mip = 0;	// lane LANDSPEC7: the chunks' mip each layer holds (the outer window's 1 or 2)
+	int pack = 1;	// lane LANDSPEC8: chunks a side in one layer (2: the packed outer window)
 };
+
+/* lane LANDSPEC8: a chunk's texture id from bind( id ), which returns the mip count and sets id only when the file was
+ * already loaded (TexCache::bind leaves wwBound 0 on the call that loads it), so a load binds once more. Red
+ * WW_LANDSPEC_RED=firstload: no second bind (every chunk a window loads stays out, SHOTPASS1 D6's "0 of 36"). */
+template <class Bind>
+inline unsigned chunkTex( Bind bind, bool once = false )
+{
+	unsigned id = 0;
+	int m = bind( id );
+	if ( m > 0 && !id && !once )
+		m = bind( id );
+	return m > 0 ? id : 0;
+}
 
 inline int chunkFloor( int c )
 {
@@ -219,7 +236,47 @@ constexpr int kOuterReach = ( kOuterMax / 2 - 1 ) * kLodLevel;	// 60 cells
 constexpr int kOuterMax2 = 45;
 constexpr int kOuterMip2 = 2;
 constexpr int kOuterReach2 = ( kOuterMax2 / 2 - 1 ) * kLodLevel;	// 84 cells
-constexpr int kOuterBitWords = ( kOuterMax2 * kOuterMax2 + 63 ) / 64;	// 32 (LANDSPEC6: 16)
+
+/* lane LANDSPEC8: a block wider than the driver's mip-2 cap (45 chunks, the whole Commonwealth's 49) packs 2 x 2 chunks
+ * at mip 2 into one 256 x 256 layer (6 levels: the chunk's 128..4, BC3 copies stay block-aligned; 87,360 B a layer), up
+ * to kOuterPackMax chunks a side: 49 x 49 = 25 x 25 = 625 layers = 52.1 MiB, whole. Wider pages the 50 x 50 round the
+ * camera (every cell within kOuterReachPack = 96 of it). Layer = (x / 2) + ((n + 1) / 2)(y / 2); the chunk at odd x
+ * sits right, at odd y (north) on the layer's top rows. Red WW_LANDSPEC_RED=outer45: LANDSPEC7's 45 x 45, paged. */
+constexpr int kOuterPackMax = 50;
+constexpr int kOuterReachPack = ( kOuterPackMax / 2 - 1 ) * kLodLevel;	// 96 cells
+constexpr int kOuterPackMinPx = 4;	// a packed level holds the chunk's levels at least one BC3 block wide
+constexpr int kOuterBitWords = ( kOuterPackMax * kOuterPackMax + 63 ) / 64;	// 40 (LANDSPEC7: 32, LANDSPEC6: 16)
+
+inline int packSide( int n )
+{
+	return ( n + 1 ) / 2;
+}
+
+//! the layer and the corner (in chunk widths: 0 or 1 each) of chunk x, y of a packed window n chunks a side
+inline int packLayer( int x, int y, int n, int & ox, int & oy )
+{
+	ox = x & 1;
+	oy = 1 - ( y & 1 );	// north (odd y) on the top rows: v = 1 - f.y as the unpacked layers
+	return ( x >> 1 ) + packSide( n ) * ( y >> 1 );
+}
+
+//! a packed layer's levels for chunks cw x ch (at the window's mip) that have `levels` levels
+inline int packLevels( int cw, int ch, int levels )
+{
+	int l = 0;
+	while ( l < levels && ( cw >> l ) >= kOuterPackMinPx && ( ch >> l ) >= kOuterPackMinPx )
+		l++;
+	return l;
+}
+
+//! the outer window's chunks a side packed for a driver giving `layers` layers: even, (c / 2)^2 <= layers
+inline int outerCapPack( int layers )
+{
+	int c = 0;
+	while ( c + 2 <= kOuterPackMax && ( ( c + 2 ) / 2 ) * ( ( c + 2 ) / 2 ) <= layers )
+		c += 2;
+	return c;
+}
 
 //! a BC3 array's bytes (16 B a 4 x 4 block, every level at least one block): w x h, `levels` levels, `layers` layers
 inline long long arrayBytes( int w, int h, int levels, int layers )
@@ -239,7 +296,8 @@ inline int outerCap2( int layers )
 	return c > kOuterMax ? c : 0;
 }
 
-inline Window outerFor( int camX, int camY, int bx0, int by0, int bx1, int by1, int layers = 2048, bool red32 = false )
+inline Window outerFor( int camX, int camY, int bx0, int by0, int bx1, int by1, int layers = 2048, bool red32 = false,
+	bool red45 = false )
 {
 	const int c0 = chunkFloor( bx0 ), c1 = chunkFloor( bx1 ), r0 = chunkFloor( by0 ), r1 = chunkFloor( by1 );
 	const int wb = std::max( c1 - c0, r1 - r0 ) / kLodLevel + 1;
@@ -252,6 +310,10 @@ inline Window outerFor( int camX, int camY, int bx0, int by0, int bx1, int by1, 
 		return Window{ pageFirst( camX, c0, c1, kOuterMax ), pageFirst( camY, r0, r1, kOuterMax ), kOuterMax, kOuterMip };
 	if ( wb <= cap )
 		return Window{ c0, r0, wb, kOuterMip2 };
+	const int pc = red45 ? 0 : outerCapPack( layers );	// LANDSPEC8: packed 2 x 2 a layer
+	if ( pc > cap )
+		return wb <= pc ? Window{ c0, r0, wb, kOuterMip2, 2 }
+			: Window{ pageFirst( camX, c0, c1, pc ), pageFirst( camY, r0, r1, pc ), pc, kOuterMip2, 2 };
 	return Window{ pageFirst( camX, c0, c1, cap ), pageFirst( camY, r0, r1, cap ), cap, kOuterMip2 };
 }
 
@@ -285,7 +347,44 @@ inline void streamCentre( bool fixed, int wx, int wy, int openX, int openY, int 
  * uGridsToLoad a side, moved (not cut: a spec block is square round its centre) until it lies inside WCTR +- g. The
  * camera stands on the fitted block's centre. Returns whether the block changed. Red WW_LANDSPEC_RED=fixedopen: the
  * asked block, cells the game never loads included (LANDSPEC6). */
-constexpr int kFixedGridHalf = 2;	// uGridsToLoad 5 / 2
+constexpr int kFixedGridHalf = 2;	// uGridsToLoad 5 / 2 (the default; LANDSPEC8 reads the ini: gridHalf)
+
+/* lane LANDSPEC8: [General] uGridsToLoad from the game's inis (Fallout4_Default.ini, then My Games' Fallout4.ini,
+ * Fallout4Prefs.ini, Fallout4Custom.ini, a later file overriding), not a hard-coded 5: the loaded block's half width
+ * (u - 1) / 2, unset or < 1 the game's 5, at most kGridsHalfMax. Red WW_LANDSPEC_RED=grids5: 5 whatever the ini says. */
+constexpr int kGridsDefault = 5;
+constexpr int kGridsHalfMax = 10;	// 21 x 21 cells
+
+inline int gridHalf( int grids )
+{
+	return std::min( kGridsHalfMax, ( ( grids >= 1 ? grids : kGridsDefault ) - 1 ) / 2 );
+}
+
+//! one ini line: tracks the [General] section; returns the uGridsToLoad it sets, else -1
+inline int gridsLine( const std::string & raw, bool & general )
+{
+	const size_t a = raw.find_first_not_of( " \t" ), b = raw.find_last_not_of( " \t\r\n" );
+	if ( a == std::string::npos )
+		return -1;
+	std::string l = raw.substr( a, b - a + 1 );
+	for ( char & c : l )
+		c = char( std::tolower( static_cast<unsigned char>( c ) ) );
+	if ( l[0] == '[' ) {
+		general = l == "[general]";
+		return -1;
+	}
+	const size_t eq = l.find( '=' );
+	if ( !general || eq == std::string::npos )
+		return -1;
+	std::string key = l.substr( 0, eq );
+	key.erase( key.find_last_not_of( " \t" ) + 1 );
+	if ( key != "ugridstoload" )
+		return -1;
+	const size_t v = l.find_first_not_of( " \t", eq + 1 );
+	if ( v == std::string::npos || !std::isdigit( static_cast<unsigned char>( l[v] ) ) )
+		return -1;
+	return std::atoi( l.c_str() + v );
+}
 
 inline bool fixedBlock( int wx, int wy, int g, int & cx, int & cy, int & n )
 {

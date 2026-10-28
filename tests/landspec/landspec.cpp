@@ -9,6 +9,7 @@
 #include <initializer_list>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef LANDSPEC_RED	// the viewer before LANDSPEC1: the ground keeps its own gloss/spec at every distance
 namespace LandLodSpec
@@ -91,8 +92,22 @@ inline GlossSpec landRed( GlossSpec own, Mode, float, float, float = kScale ) { 
 #define OUTERFOR( cx, cy, x0, y0, x1, y1 ) LandLodSpec::Window{ 0, 0, 0 }
 #elif defined( LANDSPEC_RED_OUTER2 )
 #define OUTERFOR( cx, cy, x0, y0, x1, y1 ) LandLodSpec::outerFor( cx, cy, x0, y0, x1, y1, 2048, true )
+#elif defined( LANDSPEC_RED_PACK )
+#define OUTERFOR( cx, cy, x0, y0, x1, y1 ) LandLodSpec::outerFor( cx, cy, x0, y0, x1, y1, 2048, false, true )
 #else
 #define OUTERFOR( cx, cy, x0, y0, x1, y1 ) LandLodSpec::outerFor( cx, cy, x0, y0, x1, y1 )
+#endif
+// lane LANDSPEC8 reds: -DLANDSPEC_RED_PACK (LANDSPEC7's 45 x 45 paged, no packed window: outer45),
+// -DLANDSPEC_RED_FIRSTLOAD (a chunk's loading bind not repeated: firstload), -DLANDSPEC_RED_GRIDS (the ini ignored: grids5)
+#ifdef LANDSPEC_RED_FIRSTLOAD
+#define CHUNKTEX( b ) LandLodSpec::chunkTex( b, true )
+#else
+#define CHUNKTEX( b ) LandLodSpec::chunkTex( b )
+#endif
+#ifdef LANDSPEC_RED_GRIDS
+#define GRIDSLINE( l, g ) ( (void)( l ), (void)( g ), -1 )
+#else
+#define GRIDSLINE( l, g ) LandLodSpec::gridsLine( l, g )
 #endif
 #ifdef LANDSPEC_RED_FIXEDOPEN
 #define FIXEDBLOCK( wx, wy, g, cx, cy, n ) ( (void)( wx ), (void)( wy ), (void)( g ), (void)( cx ), (void)( cy ), (void)( n ), false )
@@ -301,13 +316,14 @@ int main( int argc, char ** argv )
 				}
 		std::printf( "outer cells checked %ld, past the page %ld\n", cells, outerCells );
 		near( "outer holes within 60 cells (blocks 63 .. 201)", float( holes ), 0.0f );
-		near( "outer widest", float( widest ), float( kOuterMax2 ) );	// LANDSPEC7: 45 at mip 2 (LANDSPEC6: 32)
+		// LANDSPEC8: the widest block here (half 94: chunks -96..92) is 48 chunks, now whole packed (LANDSPEC7: 45, 6: 32)
+		near( "outer widest", float( widest ), 48.0f );
 		const Window o61 = OUTERFOR( 0, 0, -30, -30, 30, 30 );
 		near( "outer none for 61 x 61", float( o61.w ), 0.0f );
 		const Window o81 = OUTERFOR( 0, 0, -40, -40, 40, 40 );	// cells -40..40: chunks -40..40 = 21 a side
 		near( "outer 81 x 81 w", float( o81.w ), 21.0f );
 		near( "outer 81 x 81 fx", float( o81.fx ), -40.0f );
-		near( "outer bit words", float( kOuterBitWords ), 32.0f );	// LANDSPEC7: 2048 bits for 45 x 45 (LANDSPEC6: 16)
+		near( "outer bit words", float( kOuterBitWords ), 40.0f );	// LANDSPEC8: 2500 bits for 50 x 50 (7: 32, 6: 16)
 		// memory: 256 x 256 BC3 and its 8 mips = 87,408 bytes a layer; 21^2 = 36.76 MiB, 32^2 = 85.36 MiB
 		near( "outer 81 x 81 MiB", float( 21 * 21 ) * 87408.0f / 1048576.0f, 36.76141f, 1e-3f );
 		near( "outer cap MiB", float( kOuterMax * kOuterMax ) * 87408.0f / 1048576.0f, 85.35938f, 1e-3f );
@@ -346,10 +362,12 @@ int main( int argc, char ** argv )
 		const Window o125 = OUTERFOR( 0, 0, -62, -62, 62, 62 );	// 32 a side: LANDSPEC6's mip 1 unchanged
 		near( "outer 125 x 125 w", float( o125.w ), 32.0f );
 		near( "outer 125 x 125 mip", float( o125.mip ), float( kOuterMip ) );
-		// the Commonwealth's bounds (-96..96: 49 chunks, 2401 layers > 2048) page 45 round the camera (chunk 21 in)
+		// the Commonwealth's bounds (-96..96: 49 chunks, 2401 layers > 2048): LANDSPEC7 paged 45 round the camera;
+		// LANDSPEC8 packs 2 x 2 a layer, whole (625 layers)
 		const Window oc = OUTERFOR( 0, 0, -96, -96, 96, 96 );
-		near( "outer2 Commonwealth w", float( oc.w ), 45.0f );
-		near( "outer2 Commonwealth fx", float( oc.fx ), -84.0f );
+		near( "outer8 Commonwealth w", float( oc.w ), 49.0f );
+		near( "outer8 Commonwealth fx", float( oc.fx ), -96.0f );
+		near( "outer8 Commonwealth packed", float( oc.pack ), 2.0f );
 		// the driver's layer limit: 2048 -> 45, 1600 -> 40, 1024 -> none past 32 (LANDSPEC6's page)
 		near( "outer2 cap 2048 layers", float( outerCap2( 2048 ) ), 45.0f );
 		near( "outer2 cap 1600 layers", float( outerCap2( 1600 ) ), 40.0f );
@@ -360,6 +378,104 @@ int main( int argc, char ** argv )
 		near( "outer2 mip 2 layer bytes", float( arrayBytes( 128, 128, 8, 1 ) ), 21872.0f );
 		near( "outer2 129 x 129 MiB", float( arrayBytes( 128, 128, 8, 33 * 33 ) ) / 1048576.0f, 22.71519f, 1e-3f );
 		near( "outer2 cap MiB", float( arrayBytes( 128, 128, 8, 45 * 45 ) ) / 1048576.0f, 42.23900f, 1e-3f );
+	}
+	// LANDSPEC8: the whole Commonwealth (49 chunks a side) packed 2 x 2 at mip 2: every block cell holds a layer
+	// wherever the camera stands; wider blocks page 50 round the camera (every cell within 96 of it)
+	{
+		long whole = 0, near96 = 0;
+		for ( int camX = -96; camX <= 96; camX += 13 )
+			for ( int camY = -96; camY <= 96; camY += 13 ) {
+				const Window w = WINDOWWIDE( camX, camY, -96, -96, 96, 96 );
+				const Window o = OUTERFOR( camX, camY, -96, -96, 96, 96 );
+				for ( int x = -96; x <= 96; x++ )
+					for ( int y = -96; y <= 96; y++ )
+						whole += windowLayer( x, y, w.fx, w.fy, w.w ) >= 0
+							|| ( o.w > 0 && windowLayer( x, y, o.fx, o.fy, o.w ) >= 0 ) ? 0 : 1;
+			}
+		near( "outer8 Commonwealth holes anywhere", float( whole ), 0.0f );
+		for ( int camX = -120; camX <= 120; camX += 17 )	// 241 x 241 (61 chunks): paged
+			for ( int camY = -120; camY <= 120; camY += 17 ) {
+				const Window w = WINDOWWIDE( camX, camY, -120, -120, 120, 120 );
+				const Window o = OUTERFOR( camX, camY, -120, -120, 120, 120 );
+				for ( int x = std::max( -120, camX - kOuterReachPack ); x <= std::min( 120, camX + kOuterReachPack ); x++ )
+					for ( int y = std::max( -120, camY - kOuterReachPack ); y <= std::min( 120, camY + kOuterReachPack ); y++ )
+						near96 += windowLayer( x, y, w.fx, w.fy, w.w ) >= 0
+							|| ( o.w > 0 && windowLayer( x, y, o.fx, o.fy, o.w ) >= 0 ) ? 0 : 1;
+			}
+		near( "outer8 241 x 241 holes within 96 cells", float( near96 ), 0.0f );
+		// the packed layers: 49 a side -> 25 x 25 = 625, each (layer, corner) once, odd y (north) on the top rows
+		std::vector<int> seen( 625 * 4, 0 );
+		int over = 0;
+		for ( int y = 0; y < 49; y++ )
+			for ( int x = 0; x < 49; x++ ) {
+				int ox = 0, oy = 0;
+				const int l = packLayer( x, y, 49, ox, oy );
+				if ( l < 0 || l >= 625 ) {
+					over++;
+					continue;
+				}
+				seen[l * 4 + ox + 2 * oy]++;
+			}
+		int twice = 0;
+		for ( int s : seen )
+			twice += s > 1 ? 1 : 0;
+		near( "pack layers past 625", float( over ), 0.0f );
+		near( "pack corners twice", float( twice ), 0.0f );
+		int ox = 0, oy = 0;
+		near( "pack 3,5 layer", float( packLayer( 3, 5, 49, ox, oy ) ), float( 1 + 25 * 2 ) );
+		near( "pack 3,5 right", float( ox ), 1.0f );
+		near( "pack 3,5 north on top", float( oy ), 0.0f );
+		packLayer( 2, 4, 49, ox, oy );
+		near( "pack 2,4 south below", float( oy ), 1.0f );
+		near( "pack cap 2048 layers", float( outerCapPack( 2048 ) ), 50.0f );
+		near( "pack cap 624 layers", float( outerCapPack( 624 ) ), 48.0f );
+		// 128 x 128 chunks (mip 2, 8 levels): 6 levels stay >= 4 px; the layer 256 x 256: 87,360 B; 625 = 52.07 MiB
+		near( "pack levels", float( packLevels( 128, 128, 8 ) ), 6.0f );
+		near( "pack layer bytes", float( arrayBytes( 256, 256, 6, 1 ) ), 87360.0f );
+		near( "pack Commonwealth MiB", float( arrayBytes( 256, 256, 6, 625 ) ) / 1048576.0f, 52.07062f, 1e-3f );
+	}
+	// LANDSPEC8 (SHOTPASS1 D6): TexCache::bind leaves wwBound 0 on the call that loads the file; the chunk binds again
+	{
+		auto fake = []( bool loaded, bool exists, int * calls ) {
+			return [loaded, exists, calls]( unsigned & id ) mutable {
+				( *calls )++;
+				if ( !exists )
+					return 0;
+				id = loaded ? 7u : 0u;
+				loaded = true;
+				return 10;
+			};
+		};
+		int calls = 0;
+		near( "chunk first load id", float( CHUNKTEX( fake( false, true, &calls ) ) ), 7.0f );
+		near( "chunk first load binds", float( calls ), 2.0f );
+		calls = 0;
+		near( "chunk loaded id", float( CHUNKTEX( fake( true, true, &calls ) ) ), 7.0f );
+		near( "chunk loaded binds once", float( calls ), 1.0f );
+		calls = 0;
+		near( "chunk missing id", float( CHUNKTEX( fake( false, false, &calls ) ) ), 0.0f );
+		near( "chunk missing binds once", float( calls ), 1.0f );
+	}
+	// LANDSPEC8: uGridsToLoad from the inis ([General] only, a later line overriding); half (u - 1) / 2, unset 5's 2
+	{
+		const char * ini[] = { "[Display]", "uGridsToLoad=9", "[General]", "sStartingCell=", "  uGridsToLoad = 7 \r",
+			"uGridsToLoadX=3", ";uGridsToLoad=11", "[Archive]", "uGridsToLoad=13" };
+		bool general = false;
+		int g = 0;
+		for ( const char * l : ini ) {
+			const int v = GRIDSLINE( std::string( l ), general );
+			if ( v >= 0 )
+				g = v;
+		}
+		near( "grids from the ini", float( g ), 7.0f );
+		near( "grid half 7", float( gridHalf( g ) ), 3.0f );
+		near( "grid half unset", float( gridHalf( 0 ) ), 2.0f );
+		near( "grid half 5", float( gridHalf( 5 ) ), 2.0f );
+		near( "grid half capped", float( gridHalf( 99 ) ), float( kGridsHalfMax ) );
+		int x = 10, y = 10, n = 9;	// a fixed world with uGridsToLoad 7: the open fits WCTR +- 3, 7 a side
+		LandLodSpec::fixedBlock( 0, 0, gridHalf( g ), x, y, n );
+		near( "fixed open uGrids 7 n", float( n ), 7.0f );
+		near( "fixed open uGrids 7 x", float( x ), 0.0f );
 	}
 	// LANDSPEC7: a fixed world's open is fitted inside WCTR +- 2 (the cells the game loads: uGridsToLoad 5)
 	{
@@ -505,7 +621,10 @@ int main( int argc, char ** argv )
 			"baseMap.rgb *= noiseK;	// lane LANDSPEC4", "vec3( -dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) )",
 			"normal = landSplat ? landDetailSplatN(",
 			// LANDSPEC6: the outer window past the page, its 16 bit words
-			"uniform sampler2DArray LandLodOuter;", "uniform vec4 landLodOuterBits[32];",	// LANDSPEC7: 32 words
+			"uniform sampler2DArray LandLodOuter;", "uniform vec4 landLodOuterBits[40];",	// LANDSPEC8: 40 words
+			// LANDSPEC8: the packed layer's quarter, odd y on top, layer (x / 2) + ((n + 1) / 2)(y / 2)
+			"if ( landLodOuter.w > 1.5 ) {", "( vec2( co.x & 1, 1 - ( co.y & 1 ) ) + uvl.xy ) * 0.5",
+			"float( ( co.x >> 1 ) + ( ( nO + 1 ) >> 1 ) * ( co.y >> 1 ) )", "flipV *= 0.5;",
 			"} else if ( landLodOuter.z > 0.5 ) {", "int ko = co.x + nO * co.y;",
 			"( ( int( landLodOuterBits[ko >> 6][( ko >> 4 ) & 3] ) >> ( ko & 15 ) ) & 1 ) != 0" } );
 		must( t, "pbrm_default.frag", { "1.0 - clamp( ( landLodK.z - distance( cellWorldPos( -ViewDir ).xy, landLod.yz ) ) * landLodK.w, 0.0, 1.0 )",
