@@ -2689,6 +2689,9 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				s.smoothness = src.get<float>( iShader, "Smoothness" );
 				s.specMult = src.get<float>( iShader, "Specular Strength" );
 				s.g2pFlag = ( src.get<quint32>( iShader, "Shader Flags 1" ) & ( 1U << 4 ) ) != 0;
+				// lane GLTFCELL1: the texture border rule; a BGSM's tile flags replace it below
+				if ( src.getIndex( iShader, "Texture Clamp Mode" ).isValid() )
+					nf.tile = quint8( src.get<int>( iShader, "Texture Clamp Mode" ) & 3 );
 				s.g2pScale = src.get<float>( iShader, "Grayscale to Palette Scale" );
 				s.emitColor = src.get<Color3>( iShader, "Emissive Color" );
 				s.emitMult = src.get<float>( iShader, "Emissive Multiple" );
@@ -2820,6 +2823,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							nf.pbr = ( msf2 & 0x00000020U ) != 0;
 							nf.modelSpaceNormals = nf.modelSpaceNormals || ( msf2 & 0x00000200U ) != 0;
 							nf.treeAnim = nf.treeAnim || ( msf2 & 0x00080000U ) != 0;
+							nf.tile = quint8( sm.commonShaderFlags1() & 3U );
 							nf.textures = t;
 						}
 					}

@@ -76,6 +76,7 @@ struct GltfExportMesh
 	QString normalUri;                        //!< tangent-space normal map URI, may be empty
 	int alphaMode = 0;                        //!< 0 OPAQUE (not written), 1 MASK, 2 BLEND
 	float alphaCutoff = 0.5f;                 //!< MASK only
+	int wrap = 3;                             //!< texture border: bit 0x2 S repeats, 0x1 T; clear = clamp to edge
 	bool doubleSided = true;
 	QVector<QPair<QString, QString>> materialExtras;   //!< string extras written after nifTexturePath
 	QVector<QVector<float>> colorSets;        //!< COLOR_0, COLOR_1..: 4 linear floats per vertex each; empty = none

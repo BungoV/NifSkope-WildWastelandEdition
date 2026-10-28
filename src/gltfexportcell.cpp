@@ -80,6 +80,7 @@ public:
 	int meshesPainted = 0;
 	int placementsSeen = 0, placementsKept = 0, placementsEmpty = 0, shapesSkipped = 0, landQuads = 0;
 	int meshesColored = 0, meshesDecal = 0, landLayers = 0, ltexFromMaterial = 0, ltexUnresolved = 0;
+	int meshesClamped = 0;   //!< materials whose texture clamps on an axis (the game's tile flags off)
 	qint64 trisPlaced = 0;
 	float decalOffset = 1.0f;      // game units pushed along the normal: Blender has no depth bias for coplanar decals
 
@@ -324,6 +325,9 @@ public:
 				m.alphaMode = 2;
 			}
 			m.doubleSided = f.twoSided;
+			m.wrap = f.tile & 3;
+			if ( m.wrap != 3 )
+				meshesClamped++;
 			auto extra = [&m]( const char * k, const QString & v ) {
 				if ( !v.isEmpty() )
 					m.materialExtras.append( { QString::fromLatin1( k ), v } );
@@ -542,12 +546,14 @@ int gltfCellCli( const QStringList & args )
 		std::printf( "gltf-cell: texture missing %s\n", qPrintable( m ) );
 	std::printf( "MEASURED placements_seen=%d placements=%d placements_empty=%d models=%d meshes=%d nodes=%d "
 		"land_quads=%d land_layers=%d ltex_bgsm=%d ltex_unresolved=%d meshes_coloured=%d meshes_decal=%d "
-		"meshes_painted=%d decal_offset=%g shapes_skipped=%d tris_placed=%lld textures=%d copied=%d missing=%d origin=%g,%g,%g\n",
+		"meshes_painted=%d decal_offset=%g shapes_skipped=%d tris_placed=%lld textures=%d copied=%d missing=%d origin=%g,%g,%g "
+		"meshes_clamped=%d\n",
 		sink.placementsSeen, sink.placementsKept, sink.placementsEmpty, int( sink.meshesOf.size() ),
 		int( sink.scene.meshes.size() ), int( sink.scene.nodes.size() ), sink.landQuads, sink.landLayers,
 		sink.ltexFromMaterial, sink.ltexUnresolved, sink.meshesColored, sink.meshesDecal, sink.meshesPainted,
 		double( sink.decalOffset ),
 		sink.shapesSkipped,
-		sink.trisPlaced, int( sink.textures.size() ), copied, missing, sink.origin[0], sink.origin[1], sink.origin[2] );
+		sink.trisPlaced, int( sink.textures.size() ), copied, missing, sink.origin[0], sink.origin[1], sink.origin[2],
+		sink.meshesClamped );
 	return 0;
 }
