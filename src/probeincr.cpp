@@ -611,7 +611,7 @@ int checkMain()
 					}
 				}
 			}
-			if ( why.isEmpty() && cellBakeFarDigest( worldName, dataRoot, x, y, half ) != far )
+			if ( why.isEmpty() && cellBakeFarDigest( worldName, dataRoot, x, y, half, &world ) != far )	// LANDSPEC5
 				why = QStringLiteral( "far" );
 			if ( why.isEmpty() ) {
 				out << "cell " << x << " " << y << " clean\n";

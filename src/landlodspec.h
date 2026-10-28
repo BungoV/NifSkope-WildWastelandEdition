@@ -151,8 +151,15 @@ inline int windowLayer( int cx, int cy, int fx, int fy, int w = kWindow )
 }
 
 /* lane LANDSPEC4: the window also covers the whole near block (cells bx0..bx1, by0..by1), up to kWindowMax chunks a
- * side (64 layers, 21.8 MB of vanilla BC3); a wider union falls back to the camera's 4 x 4 */
-constexpr int kWindowMax = 8;
+ * side; a wider union falls back to the camera's 4 x 4.
+ * LANDSPEC5: kWindowMax 16 (256 layers): n x n layers of one vanilla level-4 chunk each (512 x 512 BC3, 10 levels,
+ * 341 KB), so blocks to 61 x 61 are whole at n^2 x 341 KB (21 x 21: 8 x 8 = 21.8 MB; 61 x 61: 16 x 16 = 87.4 MB).
+ * A wider union pages: a 16 x 16 window round the camera (every cell within kPageReach of it), kept inside the union
+ * and rebuilt when the camera crosses a chunk. Red WW_LANDSPEC_RED=win8: LANDSPEC4's cap 8, no paging. */
+constexpr int kWindowMax = 16;
+constexpr int kWindowMax4 = 8;	// LANDSPEC4's cap (the red)
+constexpr int kBitWords = kWindowMax * kWindowMax / 64;	// the bound layers, 64 a word
+constexpr int kPageReach = ( kWindowMax / 2 - 1 ) * kLodLevel;	// 28 cells
 
 struct Window
 {
@@ -164,7 +171,15 @@ inline int chunkFloor( int c )
 	return int( std::floor( float( c ) / float( kLodLevel ) ) ) * kLodLevel;
 }
 
-inline Window windowFor( int camX, int camY, bool block, int bx0, int by0, int bx1, int by1 )
+//! the first chunk of a page of `w` chunks: the camera's chunk (w / 2 - 1) in, kept inside the chunks lo..hi
+inline int pageFirst( int cam, int lo, int hi, int w )
+{
+	const int f = chunkFloor( cam ) - ( w / 2 - 1 ) * kLodLevel;
+	return std::max( lo, std::min( f, hi - ( w - 1 ) * kLodLevel ) );
+}
+
+inline Window windowFor( int camX, int camY, bool block, int bx0, int by0, int bx1, int by1, int cap = kWindowMax,
+	bool page = true )
 {
 	const Window cam{ windowFirst( camX ), windowFirst( camY ), kWindow };
 	if ( !block )
@@ -172,7 +187,16 @@ inline Window windowFor( int camX, int camY, bool block, int bx0, int by0, int b
 	const int x0 = chunkFloor( std::min( camX - kReach, bx0 ) ), x1 = chunkFloor( std::max( camX + kReach, bx1 ) );
 	const int y0 = chunkFloor( std::min( camY - kReach, by0 ) ), y1 = chunkFloor( std::max( camY + kReach, by1 ) );
 	const int w = std::max( x1 - x0, y1 - y0 ) / kLodLevel + 1;
-	return w <= kWindowMax ? Window{ x0, y0, std::max( w, kWindow ) } : cam;
+	if ( w <= cap )
+		return Window{ x0, y0, std::max( w, kWindow ) };
+	if ( !page )
+		return cam;
+	// LANDSPEC5: the block alone when it fits (the camera's reach past the block's edge has no near land), else a page
+	const int c0 = chunkFloor( bx0 ), c1 = chunkFloor( bx1 ), r0 = chunkFloor( by0 ), r1 = chunkFloor( by1 );
+	const int wb = std::max( c1 - c0, r1 - r0 ) / kLodLevel + 1;
+	if ( wb <= cap )
+		return Window{ c0, r0, std::max( wb, kWindow ) };
+	return Window{ pageFirst( camX, c0, c1, cap ), pageFirst( camY, r0, r1, cap ), cap };
 }
 
 /* lane LANDSPEC3: a .pbrm ground's roughness at the LOD gloss g: the GGX lobe matching the legacy draw's Blinn-Phong
@@ -187,6 +211,24 @@ inline float pbrRough( float g )
 inline bool usesParentLod( unsigned parentForm, unsigned pnam )
 {
 	return parentForm != 0 && ( pnam & 2u ) != 0;
+}
+
+/* lane LANDSPEC5: the game's terrain manager is the one of the END of the chain: it climbs WNAM while each world sets
+ * "Use LOD Data" (a child of a child draws the root's). step( wnam, pnam ) moves to the parent and reads its own
+ * WNAM / PNAM (false: unreadable, stop). `once` = LANDSPEC3/4's one step (red WW_LANDSPEC_RED=climb1). Returns the
+ * steps taken; kLodClimbMax stops a WNAM loop. */
+constexpr int kLodClimbMax = 8;
+
+template <class Step>
+inline int lodClimb( unsigned wnam, unsigned pnam, Step step, bool once = false )
+{
+	int n = 0;
+	while ( n < kLodClimbMax && usesParentLod( wnam, pnam ) && step( wnam, pnam ) ) {
+		n++;
+		if ( once )
+			break;
+	}
+	return n;
 }
 
 //! a world xy's uv in the level-4 chunk whose corner cell is (cx, cy), as the near land VS writes it

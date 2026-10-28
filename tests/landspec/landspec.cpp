@@ -66,6 +66,18 @@ inline GlossSpec landRed( GlossSpec own, Mode, float, float, float = kScale ) { 
 #else
 #define WINDOWFOR( cx, cy, b, x0, y0, x1, y1 ) LandLodSpec::windowFor( cx, cy, b, x0, y0, x1, y1 )
 #endif
+// lane LANDSPEC5 reds: -DLANDSPEC_RED_CLIMB (one parent step: WW_LANDSPEC_RED=climb1)
+#ifdef LANDSPEC_RED_CLIMB
+#define CLIMB( w, p, s ) LandLodSpec::lodClimb( w, p, s, true )
+#else
+#define CLIMB( w, p, s ) LandLodSpec::lodClimb( w, p, s )
+#endif
+// -DLANDSPEC_RED_PAGE (LANDSPEC4's cap 8, no paging: WW_LANDSPEC_RED=win8)
+#ifdef LANDSPEC_RED_PAGE
+#define WINDOWWIDE( cx, cy, x0, y0, x1, y1 ) LandLodSpec::windowFor( cx, cy, true, x0, y0, x1, y1, LandLodSpec::kWindowMax4, false )
+#else
+#define WINDOWWIDE( cx, cy, x0, y0, x1, y1 ) LandLodSpec::windowFor( cx, cy, true, x0, y0, x1, y1 )
+#endif
 //! the per-layer pass before LANDSPEC4: bandNormal's target in the layer normal's own frame, unnormalized
 static LandLodSpec::V3 perLayerRaw( LandLodSpec::V3 n, LandLodSpec::V3 d, float v )
 {
@@ -203,8 +215,49 @@ int main( int argc, char ** argv )
 	const Window w21 = WINDOWFOR( 10, 10, true, -10, -10, 10, 10 );	// cam at a corner: chunks -12..16 = 8 a side
 	near( "window 21 x 21 corner w", float( w21.w ), 8.0f );
 	near( "window 21 x 21 corner fx", float( w21.fx ), -12.0f );
-	const Window wBig = windowFor( 0, 0, true, -20, -20, 20, 20 );	// past kWindowMax: the camera's 4 x 4
-	near( "window too wide w", float( wBig.w ), 4.0f );
+	const Window wBig = windowFor( 0, 0, true, -20, -20, 20, 20, kWindowMax4, false );	// LANDSPEC4's cap: the camera's 4 x 4
+	near( "window cap 8 too wide w", float( wBig.w ), 4.0f );
+	// LANDSPEC5: blocks 23 x 23 .. 61 x 61 whole (the camera anywhere in them, every third cell); wider ones paged: every
+	// block cell within kPageReach (28) of the camera, blocks to 101 x 101
+	{
+		long cells = 0, holes = 0;
+		for ( int half = 11; half <= 30; half++ )
+			for ( int camX = -half; camX <= half; camX += 3 )
+				for ( int camY = -half; camY <= half; camY += 3 ) {
+					const Window w = WINDOWWIDE( camX + 1, camY - 3, 1 - half, -3 - half, 1 + half, -3 + half );
+					for ( int x = -half; x <= half; x++ )
+						for ( int y = -half; y <= half; y++ ) {
+							cells++;
+							holes += windowLayer( x + 1, y - 3, w.fx, w.fy, w.w ) < 0 ? 1 : 0;
+						}
+				}
+		std::printf( "window wide block cells checked %ld\n", cells );
+		near( "window holes in blocks 23 x 23 .. 61 x 61", float( holes ), 0.0f );
+		cells = 0, holes = 0;
+		int widest = 0;
+		for ( int half = 31; half <= 50; half += 3 )
+			for ( int camX = -half; camX <= half; camX += 5 )
+				for ( int camY = -half; camY <= half; camY += 5 ) {
+					const Window w = WINDOWWIDE( camX, camY, -half, -half, half, half );
+					widest = std::max( widest, w.w );
+					for ( int x = std::max( -half, camX - kPageReach ); x <= std::min( half, camX + kPageReach ); x++ )
+						for ( int y = std::max( -half, camY - kPageReach ); y <= std::min( half, camY + kPageReach ); y++ ) {
+							cells++;
+							holes += windowLayer( x, y, w.fx, w.fy, w.w ) < 0 ? 1 : 0;
+						}
+				}
+		std::printf( "window paged cells checked %ld\n", cells );
+		near( "window paged holes within 28 cells", float( holes ), 0.0f );
+		near( "window paged widest", float( widest ), 16.0f );
+		const Window w61 = WINDOWWIDE( 30, 30, -30, -30, 30, 30 );	// cells -30..30: chunks -32..28 = 16 a side
+		near( "window 61 x 61 corner w", float( w61.w ), 16.0f );
+		near( "window 61 x 61 corner fx", float( w61.fx ), -32.0f );
+		const Window wp = WINDOWWIDE( 0, 0, -50, -50, 50, 50 );	// paged: the camera's chunk 7 in
+		near( "window paged fx", float( wp.fx ), -28.0f );
+		const Window we = WINDOWWIDE( 50, 0, -50, -50, 50, 50 );	// paged at the edge: kept inside chunks -52..48
+		near( "window paged edge fx", float( we.fx ), -12.0f );
+		near( "window bit words", float( kBitWords ), 4.0f );
+	}
 	near( "window layer x + 8 y", float( windowLayer( 5, 9, 0, 0, 8 ) ), 17.0f );
 	float u = 0.0f, v = 0.0f;
 	lodUv( 6144.0f, 0.0f, 0, -4, u, v );
@@ -246,10 +299,35 @@ int main( int argc, char ** argv )
 	// alpha^2 = 2 / 11.1896 = 0.178738, rough = 0.178738^0.25 = 0.650212; g 1 -> n 2048 -> 0.176733
 	near( "pbr rough 0.22", PBRROUGH( 0.22f ), 0.650212f, 1e-4f );
 	near( "pbr rough 1", PBRROUGH( 1.0f ), 0.176733f, 1e-4f );
-	// a child worldspace draws its parent's LOD under PNAM bit 1 (Goodneighbor 0x1F); DiamondCity 0x22 too, bit 0 not
+	// a child worldspace draws its parent's LOD under PNAM bit 1 (Goodneighbor 0x1F); DiamondCity 0x16 too, bit 0 not
 	near( "lod Goodneighbor", float( PARENTLOD( 0x3Cu, 0x1Fu ) ), 1.0f );
+	near( "lod DiamondCity", float( PARENTLOD( 0x3Cu, 0x16u ) ), 1.0f );
 	near( "lod land data only", float( PARENTLOD( 0x3Cu, 0x01u ) ), 0.0f );
 	near( "lod no parent", float( PARENTLOD( 0u, 0x02u ) ), 0.0f );
+	// LANDSPEC5: the chain's end. Worlds 1 -> 2 -> 3 -> 4: 1 and 2 set "Use LOD Data", 3 only "Use Land Data", so 1
+	// draws 3's (two steps); 5 <-> 6 loop and stop at kLodClimbMax; a parent that cannot be read stops at once
+	{
+		const unsigned wn[8] = { 0, 2, 3, 4, 0, 6, 5, 0 }, pn[8] = { 0, 0x16, 0x1F, 0x01, 0, 0x02, 0x02, 0 };
+		auto climbFrom = [&]( unsigned w0, bool readable, unsigned * end ) {
+			unsigned at = w0;
+			const int n = CLIMB( wn[w0], pn[w0], [&]( unsigned & w, unsigned & p ) {
+				if ( !readable )
+					return false;
+				at = w;
+				w = wn[at];
+				p = pn[at];
+				return true;
+			} );
+			*end = at;
+			return n;
+		};
+		unsigned end = 0;
+		near( "lod climb 1 -> 3 steps", float( climbFrom( 1, true, &end ) ), 2.0f );
+		near( "lod climb 1 -> 3 end", float( end ), 3.0f );
+		near( "lod climb own (3)", float( climbFrom( 3, true, &end ) ), 0.0f );
+		near( "lod climb loop capped", float( climbFrom( 5, true, &end ) ), float( kLodClimbMax ) );
+		near( "lod climb unreadable", float( climbFrom( 1, false, &end ) ), 0.0f );
+	}
 
 	// the shaders run the same laws (goal 1: pbrm_default.frag; goal 2: fo4_default.frag)
 	if ( argc > 1 ) {
@@ -263,7 +341,8 @@ int main( int argc, char ** argv )
 			"uniform sampler2DArray LandLodDiff;", "baseMap.rgb *= noiseK;",
 			"float landDetailV = landLod.x > 1.5 ? 1.0 : landBandV;", "msnN = landDetailN( msnN,",
 			// LANDSPEC4: the n x n window and its bits, the far ring 0's noise, one detail target for the splat passes
-			"int k = ci.x + nW * ci.y;", "( ( int( landLodBits[k >> 4] ) >> ( k & 15 ) ) & 1 ) != 0",
+			"int k = ci.x + nW * ci.y;", "( ( int( landLodBits[k >> 6][( k >> 4 ) & 3] ) >> ( k & 15 ) ) & 1 ) != 0",
+			"uniform vec4 landLodBits[4];",
 			"baseMap.rgb *= noiseK;	// lane LANDSPEC4", "vec3( -dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) )",
 			"normal = landSplat ? landDetailSplatN(" } );
 		must( t, "pbrm_default.frag", { "1.0 - clamp( ( landLodK.z - distance( cellWorldPos( -ViewDir ).xy, landLod.yz ) ) * landLodK.w, 0.0, 1.0 )",

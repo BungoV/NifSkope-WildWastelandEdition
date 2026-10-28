@@ -1761,17 +1761,18 @@ static bool cellBakeFarNormals()
 }
 
 static QString cellBakeFarSoup( const CellSceneSpec & spec, const QString & dataRoot, const QByteArray & red,
-	ProbeSoup & soup )
+	ProbeSoup & soup, const EsmWorld * world )
 {
 	if ( !red.isEmpty() )
 		return QStringLiteral( "far soup: none (RED %1)" ).arg( QString::fromLatin1( red ) );
 	QElapsedTimer t;
 	t.start();
 	QStringList searched;
-	const QString lodl = cellFarLodl( spec.world, dataRoot, searched );
+	const QString lodWs = cellLodWs( spec.world, world );	// lane LANDSPEC5: a "Use LOD Data" child bakes its parent's
+	const QString lodl = cellFarLodl( lodWs, dataRoot, searched );
 	if ( lodl.isEmpty() ) {
 		const QString why = QStringLiteral( "far soup: NONE -- no FO4CSLOD/%1/%1.lodl in %2" )
-			.arg( spec.world, searched.join( QLatin1String( "; " ) ) );
+			.arg( lodWs, searched.join( QLatin1String( "; " ) ) );
 		qWarning() << qPrintable( why );
 		return why;
 	}
@@ -2054,10 +2055,11 @@ static int cellCopyDoorBranch( NifModel * nif, const QModelIndex & iParent, NifM
 /* lane BAKEINCR1: the far soup a bake of (cx, cy) with this block would append, as one sha1 -- the
  * triangles, their albedo and glass, the very ring probeFarAppendRing reads. "none" when the world has
  * no FO4CSLOD .lodl (the bake then appends none either). Only cells whose ring content moved go dirty. */
-QString cellBakeFarDigest( const QString & world, const QString & dataRoot, int cx, int cy, int half )
+QString cellBakeFarDigest( const QString & world, const QString & dataRoot, int cx, int cy, int half,
+	const EsmWorld * w )
 {
 	QStringList searched;
-	const QString lodl = cellFarLodl( world, dataRoot, searched );
+	const QString lodl = cellFarLodl( cellLodWs( world, w ), dataRoot, searched );	// lane LANDSPEC5: the parent's ring
 	if ( lodl.isEmpty() )
 		return QStringLiteral( "none" );
 	const QFileInfo li( lodl );
@@ -2795,8 +2797,18 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		if ( preRoot.isEmpty() && !lodgenResourceSearchPaths().isEmpty() )
 			preRoot = lodgenResourceSearchPaths().first();
 		QStringList preSearched;
-		const CellFarStack fs = cellFarLodStackFor( spec.world, cellFarLodl( spec.world, preRoot, preSearched ), spec.plugins );
+		/* lane LANDSPEC5: a "Use LOD Data" child's stack is its parent's bake (no EsmWorld yet: the WRLD read alone);
+		 * red WW_LANDSPEC_RED=ownlod keeps the child's own */
+		const QString preParent = wwEnv( "WW_LANDSPEC_RED" ) == "ownlod" ? QString()
+			: EsmWorld::lodWorldOf( spec.plugins, spec.world );
+		const QString preWs = preParent.isEmpty() ? spec.world : preParent;
+		const CellFarStack fs = cellFarLodStackFor( preWs, cellFarLodl( preWs, preRoot, preSearched ), spec.plugins );
 		farStackNote = QStringLiteral( "  " ) + fs.line + QLatin1Char( '\n' );
+		if ( !preParent.isEmpty() ) {
+			const QString pl = QStringLiteral( "far stack: %1 takes the far LOD stack of %2" ).arg( spec.world, preParent );
+			farStackNote += QStringLiteral( "  " ) + pl + QLatin1Char( '\n' );
+			qInfo().noquote() << pl;
+		}
 		modLodb = fs.lodb;
 		modBakePresent = fs.bakePresent;
 		qInfo().noquote() << fs.line;
@@ -6236,7 +6248,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		const bool placed = probePlace( probeSoup, ps, &pr );
 		// lane BAKEBLOCK1: past the loaded block, out to the bake's ray reach, the LOD files' far soup
 		// (after the placing, which the loaded block decides; before the dump, so the gates see it)
-		const QString farLine = bakeExterior && placed ? cellBakeFarSoup( spec, dataRoot, blockRed, probeSoup ) : QString();
+		const QString farLine = bakeExterior && placed ? cellBakeFarSoup( spec, dataRoot, blockRed, probeSoup, &world ) : QString();
 		PassTime::memLog( "probe soup built" );	// lane PERF1
 		const QByteArray soupDump = wwEnv( "WW_CELL_PROBE_SOUP" );
 		QString perr;
@@ -6585,7 +6597,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						const int half = ( spec.n - 1 ) / 2;
 						const QString recs = ProbeIncr::recordsDigest( world, spec.cx, spec.cy, half );
 						const QString recs1 = ProbeIncr::recordsDigest( world, spec.cx, spec.cy, 0 );
-						const QString far = cellBakeFarDigest( spec.world, dataRoot, spec.cx, spec.cy, half );
+						const QString far = cellBakeFarDigest( spec.world, dataRoot, spec.cx, spec.cy, half, &world );
 						QString rerr;
 						// lane FARLIGHTMAP1: a far-light bake's record holds its lights too (light moves no .tbk byte)
 						const QString lights = qEnvironmentVariableIsEmpty( "WW_CELL_FARLIGHT" ) ? QString()

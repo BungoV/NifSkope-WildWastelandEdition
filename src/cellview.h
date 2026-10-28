@@ -209,7 +209,10 @@ const CellProbeKind * cellProbeKinds( int * count );
  *  shapes, vertices, triangles, the ground and water facts, the overlay legend
  *  and the load time -- so a picture is never the only evidence. */
 //! lane BAKEINCR1: sha1 of the far soup a bake of (cx, cy) with a (2 half + 1)^2 block appends; "none" without LOD
-QString cellBakeFarDigest( const QString & world, const QString & dataRoot, int cx, int cy, int half );
+//! lane LANDSPEC5: with `w`, a "Use LOD Data" child's ring is its parent's (the bake's own)
+class EsmWorld;
+QString cellBakeFarDigest( const QString & world, const QString & dataRoot, int cx, int cy, int half,
+	const EsmWorld * w = nullptr );
 
 bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	QString * error, QString * notes = nullptr );

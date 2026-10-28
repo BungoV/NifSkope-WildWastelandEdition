@@ -609,6 +609,9 @@ public:
 	//! All worldspaces in the file: formID -> EDID (static convenience).
 	static QVector<QPair<quint32, QString>> listWorldspaces( const QString & esmPath, QString * error );
 
+	//! lane LANDSPEC5: the parent EDID whose terrain LOD `wsEdid` draws ("Use LOD Data"), else empty; no load()
+	static QString lodWorldOf( const QString & esmPath, const QString & wsEdid, QString * error = nullptr );
+
 	/*! Lane PRTP1: every INTERIOR cell of a load order: formID -> EDID, in
 	 *  file order. Walks the top-level CELL group only (blocks, subblocks). */
 	static QVector<QPair<quint32, QString>> listInteriors( const QString & esmPath, QString * error );
