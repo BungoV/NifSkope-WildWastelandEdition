@@ -161,6 +161,8 @@ struct CellStreamStats
 	QString persistentTop;              //!< the block types holding the most persistent indexes
 	QString worstTick, worstUnload;     //!< lane CELLSPIKE2: the stages of the dearest frame and unload
 	qint64 scannedNodes = 0;            //!< lane CELLSPIKE2: scene nodes unloads walked to find their own (since reset)
+	double cpuMaxMs = 0;                //!< lane FRAMESPEED1: the dearest frame's on-processor ms (not the dearest wall frame's)
+	QString worstCpuTick;               //!< lane FRAMESPEED1: that frame's stages
 	QString lastError;
 };
 CellStreamStats cellStreamStats( const NifModel * nif, bool resetMaxima );

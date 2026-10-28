@@ -5,7 +5,9 @@
  * in (at least 10 + 4 frames, as wwCellStreamPathRun), the scene transformed every 250 ms like a paint. One line
  * a step: the step's worst frame, slice, unload, drain and bury, and the stages of its worst frame and unload.
  * The verdict: every crossing step's worst frame (steps 1..n-1) within the bar (8 ms). No GL: no paint, no
- * textures, so it times the stream's own frame work, which is what the bar is about. */
+ * textures, so it times the stream's own frame work, which is what the bar is about.
+ * lane FRAMESPEED1: a second verdict (CPU-VERDICT) holds every crossing step's dearest ON-PROCESSOR frame to the same
+ * bar: the wall bar also counts the machine's pre-emption and paging, which no change here moves. */
 
 #include "cellstream.h"
 #include "cellview.h"
@@ -111,6 +113,8 @@ int cellStreamWalkCli( const QStringList & args )
 	cellStreamStats( &nif, true );
 	double worst = 0.0;
 	int worstStep = -1, over = 0;
+	double cpuWorst = 0.0;
+	int cpuWorstStep = -1, cpuOver = 0;
 	double unloadWorst = 0.0;
 	qint64 scanned = 0;
 	for ( int i = 0; i < steps.size(); i++ ) {
@@ -143,7 +147,8 @@ int cellStreamWalkCli( const QStringList & args )
 			.arg( i ).arg( s.cx ).arg( s.cy ).arg( s.match ? 1 : 0 ).arg( waited ).arg( s.tickMaxMs, 0, 'f', 3 )
 			.arg( s.sliceMaxMs, 0, 'f', 3 ).arg( s.unloadMaxMs, 0, 'f', 3 ).arg( s.drainMaxMs, 0, 'f', 3 )
 			.arg( s.buryMaxMs, 0, 'f', 3 ).arg( s.rebuildMaxMs, 0, 'f', 3 ).arg( s.unloads ).arg( s.attaches )
-			.arg( s.worstTick, s.worstUnload + QStringLiteral( " scannedNodes %1" ).arg( s.scannedNodes ) );
+			.arg( s.worstTick, s.worstUnload + QStringLiteral( " scannedNodes %1" ).arg( s.scannedNodes ) )
+			+ QStringLiteral( " | cpuMaxMs %1 cpuTick %2" ).arg( s.cpuMaxMs, 0, 'f', 3 ).arg( s.worstCpuTick );
 		std::printf( "%s\n", qPrintable( line ) );
 		std::fflush( stdout );
 		if ( dumpOk ) {
@@ -159,6 +164,12 @@ int cellStreamWalkCli( const QStringList & args )
 				worst = s.tickMaxMs;
 				worstStep = i;
 			}
+			if ( s.cpuMaxMs > bar )
+				cpuOver++;
+			if ( s.cpuMaxMs > cpuWorst ) {
+				cpuWorst = s.cpuMaxMs;
+				cpuWorstStep = i;
+			}
 		}
 	}
 	cellStreamStop( &nif );
@@ -166,6 +177,9 @@ int cellStreamWalkCli( const QStringList & args )
 	std::printf( "streamwalk: unload worst %.3f ms, scene nodes scanned %lld\n", unloadWorst, scanned );
 	std::printf( "streamwalk: worst crossing frame %.3f ms at step %d, %d of %d crossings over %.1f ms VERDICT %s\n",
 		worst, worstStep, over, std::max( 0, int( steps.size() ) - 1 ), bar, over == 0 && steps.size() > 1 ? "PASS" : "FAIL" );
+	std::printf( "streamwalk: worst crossing cpu frame %.3f ms at step %d, %d of %d crossings over %.1f ms CPU-VERDICT %s\n",
+		cpuWorst, cpuWorstStep, cpuOver, std::max( 0, int( steps.size() ) - 1 ), bar,
+		cpuOver == 0 && steps.size() > 1 ? "PASS" : "FAIL" );
 	std::fflush( stdout );
 	return over == 0 && steps.size() > 1 ? 0 : 1;
 }

@@ -45,6 +45,23 @@
   A child worldspace's far rings cost what the parent's do at that spot. Live GPU-ms owed.
 - Not done: the rain wetness (waits on WEATHERLOOK1 phase B); the far LOD bake paths and the open's pre-world
   stack note still name the child.
+## Lane FRAMESPEED1 (2026-10-28, branch framespeed1-20261028): crossing CPU verdict, Concord path file, TAA cache on context loss
+
+- **Concord's stream walks quit at their first frames** ("refused: cannot read .../con.fly.path"): the file is named
+  `con.fly.path`, and `con` is a Windows device name, so QFile opened the console (or refused the name), never the
+  file. The Boston walks (`bos.*`) were never affected. The path file is now read by `wwReadFileShared`
+  (src/wwsharedread.*): a name that starts with a device name (con, prn, aux, nul, com1-9, lpt1-9) or a file QFile
+  refuses is read through the `\\?\` form with every share flag. The stream dump says how: "path read: the name
+  starts with the Windows device name con; read through \\?\". Line ends: `\r` alone now splits lines too.
+- **streamwalk CPU-VERDICT:** each crossing step's dearest ON-PROCESSOR main-thread frame (it was only the processor
+  time of the worst wall frame, which can hide an on-processor spike) is held to the same 8 ms bar:
+  "streamwalk: worst crossing cpu frame X ms at step S, N of M crossings over 8.0 ms CPU-VERDICT PASS|FAIL". The
+  exit code is still the wall verdict. Each step line adds `cpuMaxMs` and the stages of that frame (`cpuTick`). The
+  worst-frame stage string adds `wtFaults` (process page faults during the tick), to tell paging from waiting.
+- **TAA depth-format cache on a context loss:** the cache (renderer, fbo id, size) is forgotten when the current GL
+  context changes (a serial kept as a property of each QOpenGLContext, src/gl/glctxserial.h; WwCellUni::CtxWatch).
+  A new context reuses fbo id 1 at the same size, so the cache answered the old context's depth format.
+- Cost: no shader change (GPU 0 ms); two GetProcessMemoryInfo calls per stream tick; memory negligible.
 
 ## Lane LANDSPEC3 (2026-10-28, branch landspec3-20261028): the far ground's noise and detail, a wider band window
 
