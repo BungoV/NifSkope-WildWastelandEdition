@@ -4364,7 +4364,7 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Overlays );	// lane PERF1: everything after the frame (closed by frameEnd)
 	// lane PROBEVIEW1: the PRTP band's Pass overlays (surfel tiles, lit probes, the picked probe's links)
 	wwCellProbeViewDraw( scene, viewTrans );
-	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds (WW_CELL_VOLUMES_VIEW=1)
+	wwCellVolumeViewDraw( scene, viewTrans );   // lane VOLFIT1: rooms, shapes, thresholds; VOLVIEW2: in the PRTP Debug View
 
 	if ( !cleanView ) {	// lane VIEWFULL1: Clean View hides the paint helpers (block kept at its old indent)
 	// Selected-bone weight heatmap. Per-corner colours are supplied by the
@@ -5702,7 +5702,10 @@ void GLView::paintGL()
 	 * SHOTFIX1 (D4): not in a harness grab either (the log still says it): it was OPENREDS g10's 468 px "blob" */
 	const QString modPickNote = ( model && !passTimeClean ) ? cellModPickViewNote( model ) : QString();
 	const QStringList passTimeLines = ( passTimeClean || scene->selecting ) ? QStringList() : PassTime::overlay();
-	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() ) ) {
+	// lane VOLVIEW2: the PRTP Debug View's room and threshold labels (empty when the view is off)
+	const std::vector<WwCellVolumeLabel> volLabels = scene->selecting ? std::vector<WwCellVolumeLabel>()
+		: wwCellVolumeViewLabels( scene->nifModel );
+	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() || !volLabels.empty() ) ) {
 		// The scene passes (esp. collision wireframe) leave GL state that
 		// QPainter inherits: depth test on (so filled overlay shapes get
 		// depth-rejected against the geometry, while text glyphs survive - the
@@ -5725,6 +5728,63 @@ void GLView::paintGL()
 		}
 		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 		QPainter painter( this );
+		if ( !volLabels.empty() ) {	// lane VOLVIEW2: each room's name (and its group) and each threshold's two rooms
+			painter.setRenderHint( QPainter::TextAntialiasing, true );
+			QFont f = painter.font();
+			const qreal base = f.pointSizeF() > 0 ? f.pointSizeF() : 9.0;
+			// lane VOLPLACE1: labels no longer pile up. Nearest first; a label that meets one already drawn moves one
+			// line down, then one line up; if both meet, the farther label is hidden. WW_CELL_VOLUMES_LABELRED=1 (read
+			// each frame): every label at its anchor, the old overlap.
+			const bool labelRed = qEnvironmentVariableIntValue( "WW_CELL_VOLUMES_LABELRED" ) != 0;
+			struct Placed { const WwCellVolumeLabel * l; QPointF sp; float depth; };
+			std::vector<Placed> order;
+			const Transform vt = viewTransform();
+			for ( const WwCellVolumeLabel & l : volLabels ) {
+				QPointF sp;
+				if ( !worldToScreen( l.at, sp ) )
+					continue;
+				order.push_back( { &l, sp, -( vt * l.at )[2] } );
+			}
+			if ( !labelRed )
+				std::stable_sort( order.begin(), order.end(), []( const Placed & a, const Placed & b ) { return a.depth < b.depth; } );
+			std::vector<QRectF> taken;
+			for ( const Placed & p : order ) {
+				const WwCellVolumeLabel & l = *p.l;
+				f.setPointSizeF( l.isThreshold ? base * 0.85 : base * 1.1 );
+				f.setBold( !l.isThreshold );
+				painter.setFont( f );
+				const QFontMetrics fm( f );
+				QPointF at( p.sp.x() - fm.horizontalAdvance( l.text ) * 0.5, p.sp.y() + fm.ascent() * 0.5 );
+				if ( !labelRed ) {
+					const qreal lh = fm.height() + 1;
+					bool placed = false;
+					for ( qreal dy : { 0.0, lh, -lh } ) {
+						const QRectF box( at.x() - 1, at.y() + dy - fm.ascent() - 1, fm.horizontalAdvance( l.text ) + 3, lh + 1 );
+						bool hit = false;
+						for ( const QRectF & t : taken )
+							if ( t.intersects( box ) ) {
+								hit = true;
+								break;
+							}
+						if ( !hit ) {
+							taken.push_back( box );
+							at.ry() += dy;
+							placed = true;
+							break;
+						}
+					}
+					if ( !placed )
+						continue;
+				}
+				painter.setPen( QColor( 0, 0, 0, 220 ) );
+				painter.drawText( at + QPointF( 1, 1 ), l.text );
+				painter.setPen( QColor::fromRgbF( l.rgb[0], l.rgb[1], l.rgb[2] ) );
+				painter.drawText( at, l.text );
+			}
+			f.setBold( false );
+			f.setPointSizeF( base );
+			painter.setFont( f );
+		}
 		if ( !passTimeLines.isEmpty() ) {	// lane PERF1: top right, one pass a line (CPU / GPU ms)
 			QFont f = painter.font();
 			f.setPointSizeF( 8.5 );

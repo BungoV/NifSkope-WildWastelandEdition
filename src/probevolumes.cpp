@@ -2181,11 +2181,17 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			return l > 0 ? ( n[0] * d[0] + n[1] * d[1] + n[2] * d[2] ) / l : 1.0;
 		};
 		ProbeFineSpec spec;
+		// lane VOLPLACE1: the wall placement pass after the fit (knobs place=0 off, placepad, placeq; red "noplace")
+		bool placeOn = !legacyFine && red != QLatin1String( "noplace" );
+		double placePad = rC * 0.5, placeQ = 0.1;
 		// a tuning pin for the gate runs: WW_VOLFIT_SPEC=h=16,boxes=64,gain=12288,grow=4,reach=3
 		for ( const QString & kv : qEnvironmentVariable( "WW_VOLFIT_SPEC" ).split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
 			const QString k = kv.section( QLatin1Char( '=' ), 0, 0 ).trimmed();
 			const double x = kv.section( QLatin1Char( '=' ), 1 ).toDouble();
-			if ( k == QLatin1String( "h" ) && x > 0 ) spec.h = x;
+			if ( k == QLatin1String( "place" ) ) placeOn = placeOn && x != 0;
+			else if ( k == QLatin1String( "placepad" ) && x >= 0 ) placePad = x;
+			else if ( k == QLatin1String( "placeq" ) && x >= 0 && x < 1 ) placeQ = x;
+			else if ( k == QLatin1String( "h" ) && x > 0 ) spec.h = x;
 			else if ( k == QLatin1String( "boxes" ) && x > 0 ) spec.maxBoxes = int( x );
 			else if ( k == QLatin1String( "gain" ) ) spec.minGain = x;
 			else if ( k == QLatin1String( "grow" ) ) spec.grow = x;
@@ -2230,6 +2236,380 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			rm.overshootAir = oa;
 			rm.overshootSolid = os;
 		}
+		/* lane VOLPLACE1 (bungo 10-28: "Those volumes have incorrect placement"): each box face onto the room's real wall,
+		 * floor or ceiling, padded into it. Per face, rays from the box's middle plane along the face normal find the
+		 * first surface whose far side is not the room's own air (a shelf or a counter with the room behind it is
+		 * skipped) and that wall's thickness (to its back face within 256; a one-sided wall has none and takes no pad).
+		 * The face goes to the front of the walls (the placeQ quantile of the samples) plus min(placePad, half the median
+		 * thickness), never past the middle of a wall at or beyond that plane. A shrink needs 60 % of the face's samples
+		 * with the wall inside the box and not the room's own air at the face (clutter in the room never pulls it in); a
+		 * grow never sweeps another room's air or the outdoors and stops short of other rooms' shapes (as fitted, before
+		 * the pass); a face that is mostly open (doorways, the street, a threshold) stays. A face within 2 units stays,
+		 * and a box another box of its room then holds whole is dropped. Boxes only (wedges and cylinders keep theirs). */
+		int placeFaces = 0, placeMoved = 0, placeGrown = 0, placeShrunk = 0, placeOpen = 0, placeDropped = 0, placeRooms = 0, placeTrim = 0;
+		double msPlace = 0;
+		if ( placeOn ) {
+			QElapsedTimer pc;
+			pc.start();
+			std::vector<std::vector<const ProbeVolumeShape *>> thrOf( V.rooms.size() );
+			for ( const ProbeVolumeThreshold & t : V.thresholds )
+				for ( int e : { t.a, t.b } )
+					if ( e > 0 && size_t( e ) <= V.rooms.size() )
+						thrOf[size_t( e - 1 )].push_back( &t.shape );
+			std::atomic<int> aFaces( 0 ), aMoved( 0 ), aGrown( 0 ), aShrunk( 0 ), aOpen( 0 ), aDropped( 0 ), aRooms( 0 );
+			const double reachP = std::max( 2.0 * rC, 128.0 );
+			std::vector<char> placed( V.rooms.size(), 0 );
+			// every room's shapes as fitted: the grow guard reads these (rooms are placed side by side, so never the live ones)
+			std::vector<std::vector<ProbeVolumeShape>> before( V.rooms.size() );
+			for ( size_t r = 0; r < V.rooms.size(); r++ )
+				before[r] = V.rooms[r].shapes;
+			auto halfDiag = []( const ProbeVolumeShape & t ) {
+				return 0.5 * std::sqrt( double( t.size[0] ) * t.size[0] + double( t.size[1] ) * t.size[1] + double( t.size[2] ) * t.size[2] );
+			};
+			struct PlaceGrow {
+				ProbeVolumeShape orig;
+				double move[6] = { 0, 0, 0, 0, 0, 0 };
+			};
+			std::vector<std::vector<PlaceGrow>> grows( V.rooms.size() );   // aligned with each placed room's shapes
+			// a box from its shape before the pass and its six face moves (+ = outward)
+			auto applyMoves = []( const ProbeVolumeShape & o, const double mv[6] ) {
+				ProbeVolumeShape s = o;
+				double m[3][3];
+				rotMatrix( o.rotation, m );
+				double dc[3] = { 0, 0, 0 };
+				for ( int a = 0; a < 3; a++ ) {
+					const double h = o.size[a] * 0.5, lo = -h - mv[2 * a + 1], hi = h + mv[2 * a];
+					s.size[a] = float( hi - lo );
+					for ( int c = 0; c < 3; c++ )
+						dc[c] += ( lo + hi ) * 0.5 * m[c][a];
+				}
+				for ( int c = 0; c < 3; c++ )
+					s.center[c] = float( o.center[c] + dc[c] );
+				return s;
+			};
+			volParallel( V.rooms.size(), [&]( size_t r ) {
+				ProbeVolumeRoom & rm = V.rooms[r];
+				if ( rm.handShapes )
+					return;
+				const int room = int( r ) + 1;
+				bool changed = false;
+				std::vector<ProbeVolumeShape> out = rm.shapes;
+				std::vector<PlaceGrow> gi( out.size() );
+				for ( ProbeVolumeShape & s : out ) {
+					if ( s.type != ProbeShapeType::Box )
+						continue;
+					PlaceGrow & g = gi[size_t( &s - out.data() )];
+					g.orig = s;
+					double m[3][3];
+					rotMatrix( s.rotation, m );
+					const double ax[3][3] = { { m[0][0], m[1][0], m[2][0] }, { m[0][1], m[1][1], m[2][1] }, { m[0][2], m[1][2], m[2][2] } };
+					const double hh[3] = { s.size[0] * 0.5, s.size[1] * 0.5, s.size[2] * 0.5 };
+					double move[6] = { 0, 0, 0, 0, 0, 0 };
+					std::vector<const ProbeVolumeShape *> others;   // other rooms' shapes this box could grow into
+					{
+						const double rs = halfDiag( s ) + reachP + placePad;
+						for ( size_t o = 0; o < before.size(); o++ )
+							if ( o != r )
+								for ( const ProbeVolumeShape & t : before[o] ) {
+									double d2 = 0;
+									for ( int c = 0; c < 3; c++ )
+										d2 += ( double( t.center[c] ) - s.center[c] ) * ( double( t.center[c] ) - s.center[c] );
+									const double rr = rs + halfDiag( t );
+									if ( d2 < rr * rr )
+										others.push_back( &t );
+								}
+					}
+					for ( int f = 0; f < 6; f++ ) {
+						const int a = f / 2, a1 = ( a + 1 ) % 3, a2 = ( a + 2 ) % 3;
+						const double sg = ( f & 1 ) ? -1.0 : 1.0;
+						const double n[3] = { sg * ax[a][0], sg * ax[a][1], sg * ax[a][2] };
+						const double D = hh[a];
+						if ( D < 1.0 )
+							continue;
+						aFaces++;
+						const int n1 = std::clamp( int( std::ceil( s.size[a1] / 16.0 ) ), 1, 48 );
+						const int n2 = std::clamp( int( std::ceil( s.size[a2] / 16.0 ) ), 1, 48 );
+						std::vector<double> tw, th, pts;   // wall front (from the face, + = outward), thickness, face points
+						int nOpen = 0;
+						for ( int i1 = 0; i1 < n1; i1++ )
+							for ( int i2 = 0; i2 < n2; i2++ ) {
+								double l[3];
+								l[a] = sg * hh[a];
+								l[a1] = -hh[a1] + ( i1 + 0.5 ) * s.size[a1] / n1;
+								l[a2] = -hh[a2] + ( i2 + 0.5 ) * s.size[a2] / n2;
+								double P[3];
+								for ( int c = 0; c < 3; c++ )
+									P[c] = s.center[c] + l[0] * ax[0][c] + l[1] * ax[1][c] + l[2] * ax[2][c];
+								const double O[3] = { P[0] - n[0] * D - rO[0], P[1] - n[1] * D - rO[1], P[2] - n[2] * D };
+								double tcur = 0;
+								bool wall = false, say = true;
+								double tWall = 0, tThick = 0;
+								for ( int hop = 0; hop < 6; hop++ ) {
+									const double o[3] = { O[0] + n[0] * tcur, O[1] + n[1] * tcur, O[2] + n[2] * tcur };
+									double t = 0;
+									int tri = -1;
+									refineRays++;
+									if ( !rb.ray( o, n, D + reachP - tcur, &t, &tri ) )
+										break;   // open within reach
+									const double tHit = tcur + t;
+									if ( fg.facing && std::fabs( fg.facing( tri, n ) ) < 0.05 ) {   // grazing a jamb's plane
+										tcur = tHit + 0.5;
+										continue;
+									}
+									if ( fg.backFace && fg.backFace( tri, n ) ) {   // the ray starts inside solid: no say
+										say = false;
+										break;
+									}
+									// thickness: from just inside the surface to its far side
+									const double o2[3] = { o[0] + n[0] * ( t + 0.5 ), o[1] + n[1] * ( t + 0.5 ), o[2] + n[2] * ( t + 0.5 ) };
+									double t2 = 0;
+									int tri2 = -1;
+									refineRays++;
+									// only a back face is the wall's far side; a one-sided wall (the next hit faces us, or
+									// nothing within 256) has no measured middle, so it takes no pad
+									const bool exitHit = rb.ray( o2, n, 256.0, &t2, &tri2 ) && fg.backFace && fg.backFace( tri2, n );
+									const double thick = exitHit ? t2 + 0.5 : 0.0;
+									// what lies behind it on the grid (past the solid cells the surface touches)
+									int kind = 3;
+									for ( int k = 0; k < 4 && kind == 3; k++ ) {
+										const double dq = tHit + thick + 2.0 + k * rC * 0.5;
+										const double q[3] = { P[0] - n[0] * D + n[0] * dq, P[1] - n[1] * D + n[1] * dq, P[2] - n[2] * D + n[2] * dq };
+										kind = gridKind( q, room );
+									}
+									if ( kind == 1 ) {   // the room's own air behind: furniture, a beam, a column
+										tcur = tHit + thick + 1.0;
+										continue;
+									}
+									wall = true;
+									tWall = tHit - D;
+									tThick = thick;
+									break;
+								}
+								if ( !say )
+									continue;
+								// a threshold of this room at the surface: an opening, not a wall
+								if ( wall ) {
+									const float hp[3] = { float( P[0] + n[0] * ( tWall - 1.0 ) ), float( P[1] + n[1] * ( tWall - 1.0 ) ), float( P[2] + n[2] * ( tWall - 1.0 ) ) };
+									for ( const ProbeVolumeShape * ts : thrOf[r] )
+										if ( ts->contains( hp ) ) {
+											wall = false;
+											break;
+										}
+								}
+								if ( !wall ) {
+									nOpen++;
+									continue;
+								}
+								tw.push_back( tWall );
+								th.push_back( tThick );
+								pts.insert( pts.end(), P, P + 3 );
+							}
+						const size_t nw = tw.size();
+						if ( nw < 3 || double( nw ) < 0.5 * double( nw + size_t( nOpen ) ) ) {
+							aOpen++;
+							continue;
+						}
+						std::vector<double> sw = tw, st2 = th;
+						std::sort( sw.begin(), sw.end() );
+						std::sort( st2.begin(), st2.end() );
+						const double tq = sw[size_t( std::floor( placeQ * double( nw - 1 ) ) )];
+						const double thMed = st2[nw / 2];
+						double target = tq + std::min( placePad, 0.5 * thMed );
+						for ( size_t i = 0; i < nw; i++ )   // never past the middle of a wall at or beyond the plane
+							if ( tw[i] >= tq )
+								target = std::min( target, tw[i] + 0.5 * th[i] );
+						if ( target < 0 ) {   // a shrink needs most of the face behind a wall, not the room's air
+							size_t inside = 0;
+							for ( size_t i = 0; i < nw; i++ )
+								if ( tw[i] < -2.0 && gridKind( &pts[3 * i], room ) != 1 )
+									inside++;
+							if ( double( inside ) < 0.6 * double( nw + size_t( nOpen ) ) )
+								target = 0;
+						}
+						if ( target > 0 ) {   // a grow never sweeps another room's air or the outdoors
+							size_t foreign = 0;
+							for ( size_t i = 0; i < nw; i++ ) {
+								const double tmax = std::min( target, tw[i] );
+								bool fo = false;
+								for ( double t = rC * 0.25; t < tmax && !fo; t += rC * 0.25 ) {
+									const double q[3] = { pts[3 * i] + n[0] * t, pts[3 * i + 1] + n[1] * t, pts[3 * i + 2] + n[2] * t };
+									fo = gridKind( q, room ) == 2;
+								}
+								foreign += fo ? 1 : 0;
+							}
+							if ( double( foreign ) > 0.05 * double( nw ) )
+								target = 0;
+							// ... and never into another room's shape: stop 4 units short of the first sample that enters one
+							for ( size_t i = 0; i < nw && target > 0; i++ )
+								for ( double t = 1.0; t <= target; t += 4.0 ) {
+									const float q[3] = { float( pts[3 * i] + n[0] * t ), float( pts[3 * i + 1] + n[1] * t ), float( pts[3 * i + 2] + n[2] * t ) };
+									bool in = false;
+									for ( const ProbeVolumeShape * o : others )
+										if ( o->contains( q ) ) {
+											in = true;
+											break;
+										}
+									if ( in ) {
+										target = std::max( 0.0, t - 4.0 );
+										break;
+									}
+								}
+						}
+						if ( std::fabs( target ) <= 2.0 || s.size[a] + target < 8.0 )
+							continue;
+						move[f] = target;
+					}
+					bool any = false;
+					for ( int f = 0; f < 6; f++ )
+						if ( move[f] != 0 ) {
+							any = true;
+							aMoved++;
+							( move[f] > 0 ? aGrown : aShrunk )++;
+						}
+					if ( !any )
+						continue;
+					for ( int f = 0; f < 6; f++ )
+						g.move[f] = move[f];
+					// apply: face f moves by move[f] along its normal
+					double dc[3] = { 0, 0, 0 };
+					for ( int a = 0; a < 3; a++ ) {
+						const double lo = -hh[a] - move[2 * a + 1], hi = hh[a] + move[2 * a];
+						s.size[a] = float( hi - lo );
+						for ( int c = 0; c < 3; c++ )
+							dc[c] += ( lo + hi ) * 0.5 * ax[a][c];
+					}
+					for ( int c = 0; c < 3; c++ )
+						s.center[c] = float( s.center[c] + dc[c] );
+					changed = true;
+				}
+				if ( !changed )
+					return;
+				// a box another box of the room holds whole adds nothing
+				std::vector<char> gone( out.size(), 0 );
+				for ( size_t i = 0; i < out.size(); i++ ) {
+					if ( out[i].type != ProbeShapeType::Box )
+						continue;
+					double m[3][3];
+					rotMatrix( out[i].rotation, m );
+					for ( size_t j = 0; j < out.size() && !gone[i]; j++ ) {
+						if ( j == i || gone[j] || out[j].type != ProbeShapeType::Box || out[j].volume() < out[i].volume() )
+							continue;
+						bool all = true;
+						for ( int k = 0; k < 8 && all; k++ ) {
+							const double l[3] = { ( k & 1 ? 0.5 : -0.5 ) * ( out[i].size[0] - 2.0 ), ( k & 2 ? 0.5 : -0.5 ) * ( out[i].size[1] - 2.0 ),
+								( k & 4 ? 0.5 : -0.5 ) * ( out[i].size[2] - 2.0 ) };
+							float p[3];
+							for ( int c = 0; c < 3; c++ )
+								p[c] = float( out[i].center[c] + m[c][0] * l[0] + m[c][1] * l[1] + m[c][2] * l[2] );
+							all = out[j].contains( p );
+						}
+						if ( all )
+							gone[i] = 1;
+					}
+				}
+				std::vector<ProbeVolumeShape> kept;
+				std::vector<PlaceGrow> keptG;
+				for ( size_t i = 0; i < out.size(); i++ )
+					if ( !gone[i] ) {
+						kept.push_back( out[i] );
+						keptG.push_back( gi[i] );
+					} else
+						aDropped++;
+				rm.shapes = kept;
+				grows[r] = keptG;
+				placed[r] = 1;
+				aRooms++;
+			} );
+			int placeTrimmed = 0;
+			for ( size_t r = 0; r < V.rooms.size(); r++ ) {
+				if ( !placed[r] )
+					continue;
+				std::vector<ProbeVolumeShape> & sh = V.rooms[r].shapes;
+				for ( size_t k = 0; k < sh.size() && k < grows[r].size(); k++ ) {
+					PlaceGrow & g = grows[r][k];
+					if ( g.orig.type != ProbeShapeType::Box || std::max( { g.move[0], g.move[2], g.move[4], g.move[1], g.move[3], g.move[5] } ) <= 0 )
+						continue;
+					bool trimmed = false;
+					double m[3][3];
+					rotMatrix( g.orig.rotation, m );
+					std::vector<const ProbeVolumeShape *> nearS;
+					const double rs = halfDiag( sh[k] );
+					for ( size_t o = 0; o < V.rooms.size(); o++ )
+						if ( o != r )
+							for ( const ProbeVolumeShape & t : V.rooms[o].shapes ) {
+								double d2 = 0;
+								for ( int c = 0; c < 3; c++ )
+									d2 += ( double( t.center[c] ) - sh[k].center[c] ) * ( double( t.center[c] ) - sh[k].center[c] );
+								const double rr = rs + halfDiag( t );
+								if ( d2 < rr * rr )
+									nearS.push_back( &t );
+							}
+					if ( nearS.empty() )
+						continue;
+					for ( int f = 0; f < 6; f++ ) {
+						if ( g.move[f] <= 0 )
+							continue;
+						const int a = f / 2, a1 = ( a + 1 ) % 3, a2 = ( a + 2 ) % 3;
+						const double sg = ( f & 1 ) ? -1.0 : 1.0;
+						const double n[3] = { sg * m[0][a], sg * m[1][a], sg * m[2][a] };
+						const double h[3] = { g.orig.size[0] * 0.5, g.orig.size[1] * 0.5, g.orig.size[2] * 0.5 };
+						const int n1 = std::clamp( int( std::ceil( g.orig.size[a1] / 16.0 ) ), 1, 48 );
+						const int n2 = std::clamp( int( std::ceil( g.orig.size[a2] / 16.0 ) ), 1, 48 );
+						double lim = g.move[f];
+						for ( int i1 = 0; i1 < n1 && lim > 0; i1++ )
+							for ( int i2 = 0; i2 < n2 && lim > 0; i2++ ) {
+								double l[3];
+								l[a] = sg * h[a];
+								l[a1] = -h[a1] + ( i1 + 0.5 ) * g.orig.size[a1] / n1;
+								l[a2] = -h[a2] + ( i2 + 0.5 ) * g.orig.size[a2] / n2;
+								double P[3];
+								for ( int c = 0; c < 3; c++ )
+									P[c] = g.orig.center[c] + m[c][0] * l[0] + m[c][1] * l[1] + m[c][2] * l[2];
+								for ( double t = 1.0; t <= lim; t += 4.0 ) {
+									const float q[3] = { float( P[0] + n[0] * t ), float( P[1] + n[1] * t ), float( P[2] + n[2] * t ) };
+									bool in = false;
+									for ( const ProbeVolumeShape * o : nearS )
+										if ( o->contains( q ) ) {
+											in = true;
+											break;
+										}
+									if ( in ) {
+										lim = std::max( 0.0, t - 4.0 );
+										break;
+									}
+								}
+							}
+						if ( lim < g.move[f] ) {
+							g.move[f] = lim <= 2.0 ? 0.0 : lim;
+							trimmed = true;
+						}
+					}
+					if ( trimmed ) {
+						sh[k] = applyMoves( g.orig, g.move );
+						placeTrimmed++;
+					}
+				}
+			}
+			for ( size_t r = 0; r < V.rooms.size(); r++ ) {   // the moved rooms' measure (only theirs: the rest stay as fitted)
+				ProbeVolumeRoom & rm = V.rooms[r];
+				if ( !placed[r] )
+					continue;
+				float cov = 0, oa = 0, os = 0;
+				measure( int( r ) + 1, rm.shapes, &cov, &oa, &os );
+				rm.coverage = cov;
+				rm.overshootAir = oa;
+				rm.overshootSolid = os;
+			}
+			placeFaces = aFaces;
+			placeMoved = aMoved;
+			placeGrown = aGrown;
+			placeShrunk = aShrunk;
+			placeOpen = aOpen;
+			placeDropped = aDropped;
+			placeRooms = aRooms;
+			placeTrim = placeTrimmed;
+			msPlace = pc.nsecsElapsed() / 1e6;
+		}
 		V.fineBoxes = fs.boxes;
 		V.fineRays = fs.rays + fs.snapRays + fs.encTests * spec.sphereK;
 		V.fineGrown = fs.encGrown;
@@ -2238,6 +2618,9 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		if ( !legacyFine )
 			V.fineNote = QStringLiteral( "; volfit3 grid shapes %1 rooms grid %2 moved %3 extras %4 faces %5 merged %6" ).arg( fs.gridShapes )
 				.arg( fs.pickGrid ).arg( fs.pickMoved ).arg( fs.extrasUsed ).arg( fs.facesMoved ).arg( fs.merged );
+		V.fineNote += placeOn ? QStringLiteral( "; volplace faces %1 moved %2 (grown %3 shrunk %4) open %5 rooms %6 dropped %7 trimmed %8 ms %9" )
+				.arg( placeFaces ).arg( placeMoved ).arg( placeGrown ).arg( placeShrunk ).arg( placeOpen ).arg( placeRooms ).arg( placeDropped )
+				.arg( placeTrim ).arg( qRound( msPlace ) ) : QStringLiteral( "; volplace off" );
 		V.fineNote += QStringLiteral( "; fine ms wall %1 big %2 owner %3 edges %4 class %5 greedy %6 moves %7" ).arg( qRound( fs.msWall ) )
 			.arg( qRound( fs.msBig ) ).arg( qRound( fs.msOwner ) ).arg( qRound( fs.msRays ) ).arg( qRound( fs.msClass ) ).arg( qRound( fs.msGreedy ) )
 			.arg( qRound( fs.msMoves ) ) + QStringLiteral( " edge casts %1" ).arg( fs.edgeCast );
@@ -2419,6 +2802,48 @@ QString probeVolumesCensusText( const ProbeVolumes & v )
 
 // ---------------------------------------------------------------- files
 
+QString probeVolumesRoomName( const ProbeVolumeRoom & r )
+{
+	return r.cellKey + QLatin1Char( ':' ) + hexId( r.id );
+}
+
+int probeVolumesGroups( ProbeVolumes * v )
+{
+	const int n = int( v->rooms.size() );
+	std::vector<int> up( static_cast<size_t>( n ) );
+	for ( int i = 0; i < n; i++ )
+		up[size_t( i )] = i;
+	auto top = [&]( int i ) {
+		while ( up[size_t( i )] != i )
+			i = up[size_t( i )] = up[size_t( up[size_t( i )] )];
+		return i;
+	};
+	for ( const ProbeVolumeThreshold & t : v->thresholds )
+		if ( t.a > 0 && t.b > 0 && t.a <= n && t.b <= n && t.a != t.b ) {
+			const int x = top( t.a - 1 ), y = top( t.b - 1 );
+			if ( x != y )
+				up[size_t( std::max( x, y ) )] = std::min( x, y );
+		}
+	std::vector<int> best( size_t( n ), -1 );
+	for ( int i = 0; i < n; i++ ) {
+		int & b = best[size_t( top( i ) )];
+		if ( b < 0 )
+			b = i;
+		else {
+			const ProbeVolumeRoom & r = v->rooms[size_t( i )], & q = v->rooms[size_t( b )];
+			if ( r.cells > q.cells || ( r.cells == q.cells && probeVolumesRoomName( r ) < probeVolumesRoomName( q ) ) )
+				b = i;
+		}
+	}
+	int groups = 0;
+	for ( int i = 0; i < n; i++ ) {
+		if ( top( i ) == i )
+			groups++;
+		v->rooms[size_t( i )].group = probeVolumesRoomName( v->rooms[size_t( best[size_t( top( i ) )] )] );
+	}
+	return groups;
+}
+
 QByteArray probeVolumesJson( const ProbeVolumes & v, const QString & key, const QString & world, bool interior )
 {
 	QJsonObject root;
@@ -2469,6 +2894,8 @@ QByteArray probeVolumesJson( const ProbeVolumes & v, const QString & key, const 
 		o.insert( QStringLiteral( "classify" ), cls );
 		o.insert( QStringLiteral( "bounds" ), QJsonArray { vec3( r.lo ), vec3( r.hi ) } );
 		o.insert( QStringLiteral( "evidence" ), QJsonArray::fromStringList( r.evidence ) );
+		if ( !r.group.isEmpty() )	// lane VOLVIEW2
+			o.insert( QStringLiteral( "group" ), r.group );
 		rooms.append( o );
 	}
 	root.insert( QStringLiteral( "rooms" ), rooms );
@@ -2525,6 +2952,7 @@ bool probeVolumesRead( const QString & path, ProbeVolumes * out, QString * error
 		r.cells = qint64( fit.value( QStringLiteral( "cells" ) ).toDouble() );
 		r.coverage = float( fit.value( QStringLiteral( "coverage" ) ).toDouble() );
 		r.handShapes = fit.value( QStringLiteral( "hand" ) ).toBool();
+		r.group = o.value( QStringLiteral( "group" ) ).toString();	// lane VOLVIEW2 (empty in a file before it)
 		byName[o.value( QStringLiteral( "room" ) ).toString()] = int( out->rooms.size() ) + 1;
 		out->rooms.push_back( r );
 	}
@@ -3057,6 +3485,10 @@ QString probeVolumesStage( const ProbeSoup & soup, const std::vector<ProbeVolume
 				for ( const QString & l : probeVolumesKeepIds( &v, k, prev ) )
 					o << "  ids " << k << ": " << l << "\n";
 		}
+	/* lane VOLVIEW2: the building each room belongs to, across cells (after the ids: a group is named by a kept id).
+	 * Red WW_CELL_VOLUMES_RED=nogroup: no group field (the files as before the lane, byte for byte) */
+	if ( spec.red != QLatin1String( "nogroup" ) )
+		o << "  groups " << probeVolumesGroups( &v ) << " of " << v.rooms.size() << " rooms\n";
 	for ( const QString & k : st.keys ) {
 		const QString d = dirOf( k );
 		QString err;

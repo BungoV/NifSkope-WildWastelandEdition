@@ -2212,6 +2212,118 @@ int cmdCollisionBodies( const QString & file )
 	return 0;
 }
 
+/*! lane VOLPLACE1: `colmesh <nif> -o <tsv>` -- the render triangles and the compiled collision triangles of one
+ *  NIF, both in its ROOT space and game units, so a script can test the collision against the render mesh.
+ *  Lines: `R <block> <name> x0 y0 z0 x1 y1 z1 x2 y2 z2` per render triangle (BSTriShape and subclasses, every
+ *  NiAVObject transform below the root applied) and one `C` line per collision
+ *  triangle (bhkNPCollisionObject -> its node's transform, Havok units x 69.99125, compound instance transforms
+ *  applied: the same placement the viewport draws; the solid is that hull pushed out by the radius column, game
+ *  units: `C <body> <layer> <shape> <class> <radius> x0 .. z2`). Header lines start with '#'. Read only.
+ */
+static int cmdColMesh( const QString & file, const QString & outFile )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+	if ( outFile.isEmpty() ) {
+		err() << "error: colmesh writes; pass -o <out.tsv>" << Qt::endl;
+		return 2;
+	}
+	QFile f( outFile );
+	if ( !f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+		err() << "error: cannot write " << outFile << Qt::endl;
+		return 1;
+	}
+	QTextStream o( &f );
+	o.setRealNumberNotation( QTextStream::FixedNotation );
+	o.setRealNumberPrecision( 3 );
+	const QList<int> roots = nif.getRootLinks();
+	if ( roots.isEmpty() ) {
+		err() << "error: no root" << Qt::endl;
+		return 1;
+	}
+	const int root = roots.first();
+	// a node's transform relative to the root (the root's own transform is the ref's, left out)
+	auto toRoot = [&nif, root]( int b ) {
+		Transform t;
+		for ( int i = b; i >= 0 && i != root; i = nif.getParent( i ) )
+			t = Transform( &nif, nif.getBlockIndex( i ) ) * t;
+		return t;
+	};
+	auto tri = [&o]( const Vector3 & a, const Vector3 & b, const Vector3 & c ) {
+		o << '\t' << a[0] << '\t' << a[1] << '\t' << a[2] << '\t' << b[0] << '\t' << b[1] << '\t' << b[2]
+		  << '\t' << c[0] << '\t' << c[1] << '\t' << c[2] << '\n';
+	};
+	o << "# colmesh " << file << '\n';
+	int nr = 0, nc = 0, systems = 0;
+	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+		const QModelIndex iB = nif.getBlockIndex( b );
+		if ( nif.blockInherits( iB, "BSTriShape" ) ) {
+			const Transform t = toRoot( b );
+			const QModelIndex iVerts = nif.getIndex( iB, "Vertex Data" );
+			const int n = int( nif.get<quint32>( iB, "Num Vertices" ) );
+			const BSVertexDesc desc( nif.get<BSVertexDesc>( iB, "Vertex Desc" ) );
+			const bool full = ( desc.GetFlags() & VertexFlags::VF_FULLPREC );
+			QVector<Vector3> pos;
+			for ( int v = 0; iVerts.isValid() && v < n; v++ ) {
+				const QModelIndex row = nif.index( v, 0, iVerts );
+				pos.append( t * ( full ? nif.get<Vector3>( row, "Vertex" ) : Vector3( nif.get<HalfVector3>( row, "Vertex" ) ) ) );
+			}
+			QString name = nif.get<QString>( iB, "Name" );
+			for ( QChar & ch : name )
+				if ( ch.isSpace() )
+					ch = QLatin1Char( '_' );
+			if ( name.isEmpty() )
+				name = QStringLiteral( "-" );
+			for ( const Triangle & tr : nif.getArray<Triangle>( nif.getIndex( iB, "Triangles" ) ) ) {
+				if ( tr[0] >= pos.size() || tr[1] >= pos.size() || tr[2] >= pos.size() )
+					continue;
+				o << "R\t" << b << '\t' << name;
+				tri( pos[tr[0]], pos[tr[1]], pos[tr[2]] );
+				nr++;
+			}
+		} else if ( nif.blockInherits( iB, "bhkNPCollisionObject" ) ) {
+			const int sysB = nif.getLink( iB, "Data" );
+			if ( !nif.isValidBlockNumber( sysB ) )
+				continue;
+			const int target = nif.getLink( iB, "Target" );
+			const int node = nif.isValidBlockNumber( target ) ? target : nif.getParent( b );
+			const quint32 wantBody = nif.get<quint32>( iB, "Body ID" );
+			const HknpSystem sys = hknpDecode( nif.get<QByteArray>( nif.getBlockIndex( sysB ), "Binary Data" ) );
+			systems++;
+			if ( !sys.valid ) {
+				o << "# system " << sysB << " not decoded: " << sys.error << '\n';
+				continue;
+			}
+			if ( !sys.unknownShapes.isEmpty() )
+				o << "# system " << sysB << " shapes not decoded: " << sys.unknownShapes.join( QStringLiteral( "," ) ) << '\n';
+			const Transform t = toRoot( node );
+			const HknpBodyPhys phys = int( wantBody ) < sys.bodyPhys.size() ? sys.bodyPhys.at( int( wantBody ) ) : HknpBodyPhys();
+			const quint32 layer = phys.layer;	// HknpBodyPhys::layer (display layer; the packed filter's layer)
+			const float sc = 69.99125f;
+			for ( int s = 0; s < sys.shapes.size(); s++ ) {
+				const HknpShape & shp = sys.shapes.at( s );
+				if ( shp.bodyId >= 0 ? quint32( shp.bodyId ) != wantBody : wantBody != 0 )
+					continue;
+				const int nv = shp.verts.size();
+				QVector<Vector3> pos( nv );
+				for ( int i = 0; i < nv; i++ )
+					pos[i] = t * ( shp.transformed( shp.verts.at( i ) ) * sc );
+				for ( const Triangle & tr : shp.tris ) {
+					if ( tr[0] >= nv || tr[1] >= nv || tr[2] >= nv )
+						continue;
+					o << "C\t" << wantBody << '\t' << layer << '\t' << s << '\t' << shp.className << '\t' << shp.convexRadius * sc;
+					tri( pos[tr[0]], pos[tr[1]], pos[tr[2]] );
+					nc++;
+				}
+			}
+		}
+	}
+	o << "# render " << nr << " collision " << nc << " systems " << systems << '\n';
+	out() << "colmesh " << file << ": render " << nr << " collision " << nc << " systems " << systems << Qt::endl;
+	return 0;
+}
+
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )
 {
 	NifModel nif;
@@ -9784,6 +9896,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8,
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,
 			dragBody, dragSpring, dragFirmness, selfTest, verboseSim );
+	else if ( cmd == QLatin1String( "colmesh" ) )	// lane VOLPLACE1
+		rc = cmdColMesh( file, outFile );
 	else if ( cmd == QLatin1String( "collision" ) )
 		rc = bodiesOnly ? cmdCollisionBodies( file )
 			 : skeletonOnly ? cmdCollisionSkeleton( file )

@@ -6360,7 +6360,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			for ( const QString & l : vlog.split( '\n', Qt::SkipEmptyParts ) )
 				probeNotes += QStringLiteral( "  %1\n" ).arg( l );
 			probeNotes += QStringLiteral( "  space stage %1 ms (%2)\n" ).arg( vt.elapsed() ).arg( vok ? QStringLiteral( "ok" ) : QStringLiteral( "FAILED" ) );
-			wwCellVolumeViewPublish( nif, vol );
+			// lane VOLVIEW2: with WW_CELL_VOLUMES_GI=1 the GI's room labels are these rooms (the view colors probes by them)
+			wwCellVolumeViewPublish( nif, vol, vok && wwEnv( "WW_CELL_VOLUMES_GI" ) == "1" );
 			if ( vok && wwEnv( "WW_CELL_VOLUMES_GI" ) == "1" ) {
 				volGi = std::make_shared<const ProbeVolumes>( std::move( vol ) );
 				volGiOn = true;
