@@ -28,6 +28,7 @@
 #include "data/niftypes.h"
 
 #include <QByteArray>
+#include <QPair>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -40,6 +41,8 @@ struct GltfExportNode
 	Vector3 translation;
 	Quat rotation;                            //!< NifSkope order (w, x, y, z)
 	Vector3 scale = Vector3( 1.0f, 1.0f, 1.0f );
+	//! lane GLTFCELL1: a node that shows an UNSKINNED mesh another node already holds (an instance); -1 = none
+	int mesh = -1;
 };
 
 //! FO4 stores exactly four influences per vertex.
@@ -68,6 +71,13 @@ struct GltfExportMesh
 	QString diffuseUri;                       //!< external image URI, may be empty
 	QString diffuseSourcePath;                //!< the RAW path the NIF stored, before normalising; extras only
 	QStringList mergedPartitions;             //!< the segments merged into this primitive, recorded in extras
+	/* lane GLTFCELL1: the rest of the material, for a cell export. The defaults write the bytes the
+	 * character export always wrote (two-sided, opaque, no normal map, no extra extras). */
+	QString normalUri;                        //!< tangent-space normal map URI, may be empty
+	int alphaMode = 0;                        //!< 0 OPAQUE (not written), 1 MASK, 2 BLEND
+	float alphaCutoff = 0.5f;                 //!< MASK only
+	bool doubleSided = true;
+	QVector<QPair<QString, QString>> materialExtras;   //!< string extras written after nifTexturePath
 };
 
 //! Per-frame local TRS for one node. Any of the three may be empty (that
@@ -116,6 +126,8 @@ struct GltfExportScene
 	QString upAxisNodeName = QStringLiteral( "NifSkope_Y_up" );
 	QString generator;
 	QString copyright;
+	//! lane GLTFCELL1: write each image URI once and share it between materials (off = one image per use, as before)
+	bool shareImages = false;
 };
 
 //! Writes <gltfPath> and <gltfPath with .bin>. False + a sentence in `error`

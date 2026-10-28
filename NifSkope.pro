@@ -199,6 +199,7 @@ HEADERS += \
 	src/hkxanim.h \
 	src/gltfexport.h \
 	src/gltfexportnif.h \
+	src/gltfexportcell.h \
 	src/gltfexportopts.h \
 	src/gltfexportchar.h \
 	src/gltfexportdialog.h \
@@ -499,6 +500,7 @@ SOURCES += \
 	src/hkxanim.cpp \
 	src/gltfexport.cpp \
 	src/gltfexportnif.cpp \
+	src/gltfexportcell.cpp \
 	src/gltfexportopts.cpp \
 	src/gltfexportchar.cpp \
 	src/gltfexportdialog.cpp \

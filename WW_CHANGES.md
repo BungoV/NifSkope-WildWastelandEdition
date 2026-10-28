@@ -1,5 +1,30 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GLTFCELL1 (2026-10-28, branch gltfcell1-20261028): glTF export of whole exterior cells
+
+- **Command:** `NifSkope -no-gui gltf-cell "<plugins|world|x,y|n>"|<file.wwcell> --out <abs .gltf> [--cells x,y ...]
+  [--origin x,y,z] [--textures copy|none] [--terrain on|off]` (src/gltfexportcell.cpp). Set `WW_LODGEN_RESOURCES` as
+  for the other -no-gui cell commands.
+- **Where the placements come from:** the cell view's own builder. `cellBuild` hands every placement it loads (SCOL
+  parts, MSWP swaps, markers and sky cards already handled) to a `CellExportSink` (cellview.h) and returns before the
+  weld, ground, GI and far LOD. With no sink set (every ordinary open) nothing changes.
+- **What is written:** one glTF mesh per shape of each model+swap, shared by all its placements (a new `node.mesh`
+  instance field in the writer); one node per placement with its position, rotation and scale; the LAND as one mesh
+  per cell quadrant with its base LTEX diffuse and normal. Materials carry diffuse, normal map, alpha mask/blend and
+  two-sided; specular/gloss, glow, greyscale palette, smoothness and the material file go to material extras.
+  Textures are copied out of the resource stack (archives or loose) beside the file, with relative URIs written once.
+- **Writer changes (src/gltfexport.cpp):** `node.mesh` instances, `normalUri`, `alphaMode`/`alphaCutoff`,
+  `doubleSided`, extra material extras and `shareImages`. Their defaults write the old bytes: the character export
+  of MaleBody.nif (ruled defaults and `--legacy-defaults`) is byte-identical to the base exe's, apart from the .bin
+  file name.
+- **Measured (Concord hardware store, 3x3 build at -14,17, 4 cells kept):** 2707 placements seen, 1350 kept, 549
+  models, 1475 meshes, 4234 nodes, 16 LAND quadrants, 1.04 M triangles placed, 854 of 857 textures copied. The 3
+  misses are LTEX entries that name a .bgsm, not a texture. The top corner of the export's box matches the
+  probe-soup OBJ of the same cells within 0.1 m. West and south it reaches up to 16 m further, from models placed in
+  these cells that stick out past the cell edge.
+- **Not written yet:** vertex colors, LAND paint layers and vertex colors, the greyscale palette, billboard
+  turning, interiors.
+
 ## Lane REFLDRAWS1 (2026-10-27, branch refldraws1-20261027): the reflections pass stops re-walking the opaque scene
 
 - **Which pass:** the "reflections" row of the pass timer is the screen-space reflections (`wwCellSsrPass`,

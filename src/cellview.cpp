@@ -2754,6 +2754,14 @@ bool cellFarLightRelit( const void * nif, const ProbeSoup & soup, const QString 
 	return true;
 }
 
+// lane GLTFCELL1: the cell export's sink (cellview.h); null = an ordinary open
+static CellExportSink * g_cellExportSink = nullptr;
+
+void cellExportSetSink( CellExportSink * sink )
+{
+	g_cellExportSink = sink;
+}
+
 // lane CELLSTREAM1: the builder; `chunk` set = one streamed cell (n = 1), no document touched, stops before emit
 static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChunk * chunk,
 	QString * error, QString * notes )
@@ -4178,6 +4186,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		}
 		fprintf( stderr, "cell speed red: %d placements of %s stand on the first one\n", most, qPrintable( worst ) );
 	}
+	// lane GLTFCELL1: an export takes the placements and their loaded models, then the build stops after the loop
+	CellExportSink * const exportSink = chunk ? nullptr : g_cellExportSink;
+	if ( exportSink )
+		exportSink->begin( world, dataRoot );
 	// lane SPEED1: every model the loop below will ask for, read and parsed on worker threads first
 	CellModelAhead modelsAhead( dataRoot, refsRed != "root" );
 	for ( const Placement & p : placements )
@@ -4324,6 +4336,26 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			mit = modelCache.insert( mkey, shapes );
 		}
 		placementsSwapped += subst ? 1 : 0;
+		if ( exportSink ) {
+			CellExportPlaced e;
+			e.ref = p.ref;
+			e.base = p.base;
+			e.part = p.part;
+			e.model = model;
+			e.key = mkey;
+			e.swap = subst ? p.swap : 0;
+			for ( int r = 0; r < 3; r++ ) {
+				e.pos[r] = p.pos[r];
+				for ( int c = 0; c < 3; c++ )
+					e.rot[r * 3 + c] = p.rot( r, c );
+			}
+			e.scale = p.scale;
+			e.cellX = p.cellX;
+			e.cellY = p.cellY;
+			e.shapes = &mit.value();
+			exportSink->placed( e );
+			continue;
+		}
 		/* THE PAINT (lane PRTPPLACE, 2026-09-30). An MSWP row's CNAM color remapping index
 		 * replaces the material's palette row, and only on a Greyscale_To_PaletteColor
 		 * material (engine 1.10.155, lane FIX1's reading, nativeemit.cpp). The row is found by
@@ -5361,6 +5393,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			drawn += isActor ? 0 : 1;
 		}
 	}
+	if ( exportSink )
+		return true;   // lane GLTFCELL1: the export has what it came for
 	CellSpeed::mark( "models loaded and placements welded" );
 	/* lane CABLES1: the cables' census. "XBSD refs" counts every reference read that carries one and is not
 	 * deleted or hidden; "placed" those on a BNDS base that reached the placements; "built" those the

@@ -108,6 +108,7 @@ See the LICENSE.md file for the full license text.
 #include "spells/blocks.h"
 #include "cellspawn.h"	// lane CELLSPAWN1
 int cellStreamWalkCli( const QStringList & args );	// lane CELLSPIKE2: src/cellstreamwalk.cpp
+#include "gltfexportcell.h"	// lane GLTFCELL1
 class QWidget;
 QModelIndex tlCreateCollisionBody( NifModel * nif, const QModelIndex & targetNode );
 QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
@@ -8243,6 +8244,14 @@ int nifskopeCliMain( const QStringList & args )
 		return rc;
 	}
 	// lane OPENCELLFIX1: what an open would place, per spec line or file (src/cellspawn.cpp)
+	// lane GLTFCELL1: a cell block as glTF, every placement, its materials, the LAND (src/gltfexportcell.cpp)
+	if ( cmd == QLatin1String( "gltf-cell" ) ) {
+		if ( !initModelLayer() ) { err().flush(); return 1; }
+		const int rc = gltfCellCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	if ( cmd == QLatin1String( "cellrefs" ) ) {
 		const int rc = cellRefsCli( a );
 		out().flush();

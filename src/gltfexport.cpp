@@ -12,6 +12,7 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 
 #include <cmath>
 #include <cstring>
@@ -525,6 +526,23 @@ bool gltfExportWrite( const GltfExportScene & scene, const QString & gltfPath, Q
 	}
 	buf.align4();
 
+	// lane GLTFCELL1: instances share an unskinned mesh; children listed once instead of a scan per node
+	for ( int i = 0; i < nn; i++ ) {
+		const int m = scene.nodes[i].mesh;
+		if ( m < 0 )
+			continue;
+		if ( m >= int( scene.meshes.size() ) || !scene.meshes[m].skin.isEmpty() || meshOfNode[i] >= 0 ) {
+			error = QStringLiteral( "node %1 '%2' instances mesh %3: out of range, skinned, or the node holds a mesh" )
+				.arg( i ).arg( scene.nodes[i].name ).arg( m );
+			return false;
+		}
+		meshOfNode[i] = m;
+	}
+	QVector<QVector<int>> childrenOf( nn );
+	for ( int c = 0; c < nn; c++ )
+		if ( scene.nodes[c].parent >= 0 )
+			childrenOf[scene.nodes[c].parent].append( c );
+
 	// ---- the JSON -------------------------------------------------------
 	// glTF node 0 is the synthetic up-axis root; scene node i is glTF node i+1.
 	const int OFF = 1;
@@ -579,12 +597,11 @@ bool gltfExportWrite( const GltfExportScene & scene, const QString & gltfPath, Q
 				j += ",\"skin\":" + QByteArray::number( meshOfNode[i] );
 		}
 		QByteArray kids;
-		for ( int c = 0; c < nn; c++ )
-			if ( scene.nodes[c].parent == i ) {
-				if ( !kids.isEmpty() )
-					kids += ",";
-				kids += QByteArray::number( c + OFF );
-			}
+		for ( const int c : childrenOf[i] ) {
+			if ( !kids.isEmpty() )
+				kids += ",";
+			kids += QByteArray::number( c + OFF );
+		}
 		if ( !kids.isEmpty() )
 			j += ",\"children\":[" + kids + "]";
 		j += "}";
@@ -597,6 +614,7 @@ bool gltfExportWrite( const GltfExportScene & scene, const QString & gltfPath, Q
 	// of empty ones. They are built aside and appended only when non-empty.
 	QByteArray images, textures, materials, meshesJson;
 	int nImages = 0;
+	QHash<QString, int> imageOf;
 	for ( int m = 0; m < scene.meshes.size(); m++ ) {
 		const GltfExportMesh & mesh = scene.meshes[m];
 		if ( m )
@@ -625,22 +643,40 @@ bool gltfExportWrite( const GltfExportScene & scene, const QString & gltfPath, Q
 			materials += ",\n";
 		materials += "{\"name\":" + jstr( mesh.materialName.isEmpty()
 			? ( mesh.name + QStringLiteral( "_material" ) ) : mesh.materialName )
-			+ ",\"doubleSided\":true,\"pbrMetallicRoughness\":{";
-		if ( !mesh.diffuseUri.isEmpty() ) {
+			+ ( mesh.doubleSided ? ",\"doubleSided\":true" : "" ) + ",\"pbrMetallicRoughness\":{";
+		// one texture per image; with shareImages (a cell) an image URI is written once and shared
+		auto texOf = [&]( const QString & uri ) -> int {
+			if ( scene.shareImages && imageOf.contains( uri ) )
+				return imageOf.value( uri );
 			if ( nImages )
 				images += ",";
-			images += "{\"uri\":" + juri( mesh.diffuseUri ) + "}";
+			images += "{\"uri\":" + juri( uri ) + "}";
 			if ( nImages )
 				textures += ",";
 			textures += "{\"sampler\":0,\"source\":" + QByteArray::number( nImages ) + "}";
-			materials += "\"baseColorTexture\":{\"index\":" + QByteArray::number( nImages ) + "},";
-			nImages++;
+			imageOf.insert( uri, nImages );
+			return nImages++;
+		};
+		if ( !mesh.diffuseUri.isEmpty() ) {
+			materials += "\"baseColorTexture\":{\"index\":" + QByteArray::number( texOf( mesh.diffuseUri ) ) + "},";
 		} else {
 			materials += "\"baseColorFactor\":[0.8,0.8,0.8,1],";
 		}
 		materials += "\"metallicFactor\":0,\"roughnessFactor\":1}";
-		if ( !mesh.diffuseSourcePath.isEmpty() )
-			materials += ",\"extras\":{\"nifTexturePath\":" + jstr( mesh.diffuseSourcePath ) + "}";
+		if ( !mesh.normalUri.isEmpty() )
+			materials += ",\"normalTexture\":{\"index\":" + QByteArray::number( texOf( mesh.normalUri ) ) + "}";
+		if ( mesh.alphaMode == 1 )
+			materials += ",\"alphaMode\":\"MASK\",\"alphaCutoff\":" + num( mesh.alphaCutoff );
+		else if ( mesh.alphaMode == 2 )
+			materials += ",\"alphaMode\":\"BLEND\"";
+		if ( !mesh.diffuseSourcePath.isEmpty() || !mesh.materialExtras.isEmpty() ) {
+			QByteArray ex;
+			if ( !mesh.diffuseSourcePath.isEmpty() )
+				ex += "\"nifTexturePath\":" + jstr( mesh.diffuseSourcePath );
+			for ( const auto & kv : mesh.materialExtras )
+				ex += ( ex.isEmpty() ? "" : "," ) + jstr( kv.first ) + ":" + jstr( kv.second );
+			materials += ",\"extras\":{" + ex + "}";
+		}
 		materials += "}";
 	}
 	if ( !meshesJson.isEmpty() ) {

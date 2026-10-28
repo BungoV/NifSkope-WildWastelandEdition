@@ -11,6 +11,8 @@ BSD License - see nifskope.h
 #include <QStringList>
 #include <QVector>
 
+#include <vector>
+
 class NifModel;
 
 /* ---------------------------------------------------------------------------
@@ -216,6 +218,32 @@ QString cellBakeFarDigest( const QString & world, const QString & dataRoot, int 
 
 bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	QString * error, QString * notes = nullptr );
+
+/*! lane GLTFCELL1: the cell export's view of the open. With a sink set, the build hands it every placement it
+ *  loads -- the model as the cell view loaded it (material swap applied, sky cards and markers already out) and
+ *  the placement's world transform -- and stops after the model loop: no weld, no ground, no GI. */
+struct NativeSrcShape;
+struct CellExportPlaced
+{
+	quint32 ref = 0, base = 0;
+	int part = -1;                  //!< SCOL part index, -1 for a plain reference
+	QString model;                  //!< the model path; with a swap the key is "model|swap"
+	QString key;                    //!< the load cache key: one per distinct model + swap
+	quint32 swap = 0;
+	float pos[3] = { 0, 0, 0 };     //!< world units
+	float rot[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };   //!< row-major, world = R * (local * scale) + pos
+	float scale = 1.0f;
+	int cellX = 0, cellY = 0;
+	const std::vector<NativeSrcShape> * shapes = nullptr;   //!< model space; valid during the call
+};
+class CellExportSink
+{
+public:
+	virtual ~CellExportSink() = default;
+	virtual void begin( const EsmWorld & world, const QString & dataRoot ) = 0;
+	virtual void placed( const CellExportPlaced & p ) = 0;
+};
+void cellExportSetSink( CellExportSink * sink );
 
 /*! lane LIVESET1: the far LOD and the probe markers follow a live set in place (the document's last sections).
  *  0 = nothing moved, 1 = rebuilt (`why` says what), 2 = a reopen is needed (`why` says which input). */
