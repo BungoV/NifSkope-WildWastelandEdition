@@ -1,5 +1,30 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane VOLPLACE1 (2026-10-28, branch volview2-20261028): room boxes hug their walls; volume labels stop overlapping
+
+- **Placement pass (src/probevolumes.cpp, after the fine fit):** every Box shape of every room casts rays from its middle
+  plane out through each face (16 u apart, up to 48 x 48 per face). A hit is a wall only when the space behind it is
+  solid or not this room's air (furniture and clutter with room air behind are passed through, up to 6 hops). Each
+  face then moves to the walls' near quantile (`placeq`, 0.1) plus a pad into the wall (`placepad`, half a room-grid
+  cell, never more than half the wall's measured thickness, never past any sample's wall middle). A face with under 3
+  wall samples or under 50 % walls (a doorway, an open side) stays put; a grow that would sweep more than 5 % other
+  room or outdoor air is cancelled; a box another box of the same room holds whole is dropped. Only rooms that changed
+  are re-measured. Wedges and cylinders are not moved.
+- **Knobs and red:** `WW_VOLFIT_SPEC=place=0` or `--red noplace` (`WW_CELL_VOLUMES_RED=noplace` in the view) writes the
+  old .space bytes exactly (checked on the Concord store soup). Census line: "; volplace faces N moved M (grown G
+  shrunk S) open O rooms R dropped D ms T".
+- **Concord hardware store (the live soup of bungo's picture):** 58 boxes in 9 rooms, measured per face against the soup (notes/volview2/place, boxcheck.py + rank.py): summed score 13526 -> 11766, gaps to the wall (8 u) 9274 -> 6527 samples, overlap with other rooms 1.30 -> 1.36 M u3, wall crossings 2761 -> 2879, pokes 1175 -> 2027 (mostly the pad into the walls, by design). The share of each room's surface inside its own boxes rises in 6 of 9 rooms (0x0024 16 -> 37 %, 0x0026 23 -> 36 %, 0x0015 21 -> 30 %), is flat in 2 and falls in 0x001E (46 -> 42 %). The pass also trims a grown face short of any other room's shape (two rooms grown into one gap).
+- **Labels (src/glview.cpp):** volume labels are placed nearest first; a label that meets one already placed tries one
+  line down, then one line up, and is hidden if all three meet. `WW_CELL_VOLUMES_LABELRED=1` (read every frame, live)
+  draws the old overlapping labels.
+- **The black and brown cubes** in the PRTP Debug View are the probe markers: each face shows that probe's baked
+  irradiance in that direction (dark = little light reached the probe from that side). Not a defect.
+- **`colmesh` CLI command (src/nifcli.cpp):** writes a NIF's hknp collision as world triangles by Havok layer (with
+  the convex radius) for offline checks. The fit does not use collision: checked against the render mesh, 43 of 109 (42 had no collision, 24 passed) of
+  the store's models failed, so the fit stays render-mesh only.
+- **Cost:** the placement pass is CPU, at Space-stage build only (1811 ms on the Concord 5x5 soup); nothing per frame.
+  Labels: CPU, a sort and a rectangle test per label while the PRTP Debug View is on; GPU 1080p 0 ms, memory 0.
+
 ## Lane VOLVIEW2 (2026-10-28, branch volview2-20261028): rooms, groups, thresholds and probe links in the PRTP Debug View
 
 - **"Show probes" is now "PRTP Debug View"** (same settings key CELL_SHOW_GROUP/probes, same objectName

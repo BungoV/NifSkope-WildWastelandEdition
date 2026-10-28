@@ -5732,15 +5732,50 @@ void GLView::paintGL()
 			painter.setRenderHint( QPainter::TextAntialiasing, true );
 			QFont f = painter.font();
 			const qreal base = f.pointSizeF() > 0 ? f.pointSizeF() : 9.0;
+			// lane VOLPLACE1: labels no longer pile up. Nearest first; a label that meets one already drawn moves one
+			// line down, then one line up; if both meet, the farther label is hidden. WW_CELL_VOLUMES_LABELRED=1 (read
+			// each frame): every label at its anchor, the old overlap.
+			const bool labelRed = qEnvironmentVariableIntValue( "WW_CELL_VOLUMES_LABELRED" ) != 0;
+			struct Placed { const WwCellVolumeLabel * l; QPointF sp; float depth; };
+			std::vector<Placed> order;
+			const Transform vt = viewTransform();
 			for ( const WwCellVolumeLabel & l : volLabels ) {
 				QPointF sp;
 				if ( !worldToScreen( l.at, sp ) )
 					continue;
+				order.push_back( { &l, sp, -( vt * l.at )[2] } );
+			}
+			if ( !labelRed )
+				std::stable_sort( order.begin(), order.end(), []( const Placed & a, const Placed & b ) { return a.depth < b.depth; } );
+			std::vector<QRectF> taken;
+			for ( const Placed & p : order ) {
+				const WwCellVolumeLabel & l = *p.l;
 				f.setPointSizeF( l.isThreshold ? base * 0.85 : base * 1.1 );
 				f.setBold( !l.isThreshold );
 				painter.setFont( f );
 				const QFontMetrics fm( f );
-				const QPointF at( sp.x() - fm.horizontalAdvance( l.text ) * 0.5, sp.y() + fm.ascent() * 0.5 );
+				QPointF at( p.sp.x() - fm.horizontalAdvance( l.text ) * 0.5, p.sp.y() + fm.ascent() * 0.5 );
+				if ( !labelRed ) {
+					const qreal lh = fm.height() + 1;
+					bool placed = false;
+					for ( qreal dy : { 0.0, lh, -lh } ) {
+						const QRectF box( at.x() - 1, at.y() + dy - fm.ascent() - 1, fm.horizontalAdvance( l.text ) + 3, lh + 1 );
+						bool hit = false;
+						for ( const QRectF & t : taken )
+							if ( t.intersects( box ) ) {
+								hit = true;
+								break;
+							}
+						if ( !hit ) {
+							taken.push_back( box );
+							at.ry() += dy;
+							placed = true;
+							break;
+						}
+					}
+					if ( !placed )
+						continue;
+				}
 				painter.setPen( QColor( 0, 0, 0, 220 ) );
 				painter.drawText( at + QPointF( 1, 1 ), l.text );
 				painter.setPen( QColor::fromRgbF( l.rgb[0], l.rgb[1], l.rgb[2] ) );
