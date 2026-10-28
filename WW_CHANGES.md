@@ -1,5 +1,30 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane LANDSPEC5 (2026-10-28, branch landspec5-20261028): the LANDSPEC4 leftovers
+
+- **Bakes and the open's far stack use the parent:** a worldspace with "Use LOD Data" bakes its probes against its
+  parent's far soup (the bake's far soup and its incremental digest, also in the incremental check), and the open's
+  pre-world far-stack note reads the parent from the WRLD records before the worldspace loads (one plugin read per
+  load order and worldspace, cached). Telemetry: "far stack: <child> takes the far LOD stack of <parent>". Red
+  `ownlod` (as LANDSPEC4) keeps the child's own name here too.
+- **The whole parent chain:** the LOD worldspace is the end of the "Use LOD Data" chain (a child of a child draws the
+  root's), as the game's terrain manager climbs it. Vanilla has no two-step chain, so vanilla worlds draw as before.
+  Red (a new value of `WW_LANDSPEC_RED`): `climb1`, one step.
+- **Band texture for near blocks wider than 21 x 21:** the LOD diffuse window grows to 16 x 16 chunks, so blocks to
+  61 x 61 are whole with the camera anywhere in them. A wider block pages: a 16 x 16 window round the camera (every
+  block cell within 28 cells of it), kept inside the block and rebuilt when the camera crosses a chunk. Red `win8`:
+  LANDSPEC4's 8 x 8 cap, no paging.
+- **DiamondCity** (its own 96 terrain LOD meshes and "Use LOD Data", PNAM 0x16) draws Commonwealth's terrain LOD:
+  the game's terrain manager of a "Use LOD Data" world is its parent's, so the viewer already matched; checked from
+  the records, the BA2 and the game code.
+- Cost (1080p): the band's layer bit is read from a 4-entry uniform array instead of one vec4 (no extra fetch;
+  estimated under 0.01 ms). GPU memory: unchanged to 21 x 21 (at most 8 x 8 chunks, 21.8 MB); 341 KB a chunk
+  beyond that: 61 x 61 = 16 x 16 chunks = 87.4 MB; a wider block 87.4 MB (paged), and each chunk crossing copies the
+  window again (up to 87.4 MB on the GPU, first visit reads the new chunks' textures). The texture cache holds the
+  source chunks as well (the same again). Live GPU-ms owed.
+- Not done: the rain wetness (waits on WEATHERLOOK1 phase B); the game holds a "Fixed Dimensions" world's
+  (DiamondCity's) far LOD still while the player walks, the viewer re-centres it on the camera.
+
 ## Lane LANDSPEC4 (2026-10-28, branch landspec4-20261028): the LANDSPEC3 leftovers
 
 - **Detail normal blended once:** the blended ground draws one additive pass a layer, and each pass moved its own

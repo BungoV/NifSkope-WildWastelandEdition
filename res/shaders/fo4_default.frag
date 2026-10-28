@@ -317,7 +317,7 @@ uniform vec4 landLodK;	// fLODLandSpecPower, fLODLandSpecScale (0: specular off)
 // landLodWin xy the chunk window's corner (world), z its bound chunks (bits, layer = x + 4 y)
 uniform vec4 landLodTex;
 uniform vec4 landLodWin;	// lane LANDSPEC4: z the window's chunks a side (layer = x + z y), w 1 = red perlayer
-uniform vec4 landLodBits;	// lane LANDSPEC4: the bound layers, 16 a component
+uniform vec4 landLodBits[4];	// lane LANDSPEC4: the bound layers, 16 a component; LANDSPEC5: 64 a vec4 (16 x 16)
 uniform sampler2DArray LandLodDiff;	// lane LANDSPEC3: the 4 x 4 level-4 LOD diffuse chunks round the camera (clamped)
 uniform sampler2D LandLodNoise;
 uniform sampler2D LandLodDetail;
@@ -462,12 +462,12 @@ void main()
 			* 3.777778 - 2.006;
 		vec2 g = ( landBandW - landLodWin.xy ) * ( 1.0 / 16384.0 );
 		ivec2 ci = ivec2( floor( g ) );
-		int nW = int( landLodWin.z );	// lane LANDSPEC4: the window spans the near block (up to 8 x 8)
+		int nW = int( landLodWin.z );	// lane LANDSPEC4: the window spans the near block (LANDSPEC5: up to 16 x 16)
 		int k = ci.x + nW * ci.y;
 		if ( landLod.x > 1.5 ) {
 			baseMap.rgb *= noiseK;	// lane LANDSPEC4: the far ring 0's live ground too
 		} else if ( ci.x >= 0 && ci.y >= 0 && ci.x < nW && ci.y < nW
-			&& ( ( int( landLodBits[k >> 4] ) >> ( k & 15 ) ) & 1 ) != 0 ) {
+			&& ( ( int( landLodBits[k >> 6][( k >> 4 ) & 3] ) >> ( k & 15 ) ) & 1 ) != 0 ) {
 			vec2 f = g - vec2( ci );
 			const vec2 flipV = vec2( 1.0, -1.0 ) / 16384.0;
 			vec3 lod = textureGrad( LandLodDiff, vec3( f.x, 1.0 - f.y, float( k ) ), landWdx * flipV, landWdy * flipV ).rgb;

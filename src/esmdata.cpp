@@ -8,6 +8,9 @@ BSD License - see nifskope.h
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "esmwater.h"
 #include "landlodspec.h"	// lane LANDSPEC3: usesParentLod
+#include <QFileInfo>	// lane LANDSPEC5: lodWorldOf's cache key
+#include <QHash>
+#include <QMutex>
 
 #include <cstdio>
 
@@ -47,6 +50,37 @@ QString fieldString( const ESMFile::ESMField & f )
 }
 
 } // namespace
+
+/* lane LANDSPEC5: the EDID of the world whose terrain LOD `w` (its WNAM / PNAM given) draws: up the WNAM chain while
+ * each world sets PNAM "Use LOD Data" (LandLodSpec::lodClimb), empty when `w` keeps its own or its parent is
+ * unreadable; red WW_LANDSPEC_RED=climb1 stops at the first parent (LANDSPEC3/4) */
+static QString esmLodWorldEdid( ESMFile & esm, const ESMFile::ESMRecord & w, quint32 wnam, quint32 pnam )
+{
+	const ESMFile::ESMRecord * cur = &w;
+	QString edid;
+	LandLodSpec::lodClimb( wnam, pnam, [&]( unsigned & wn, unsigned & pn ) {
+		const ESMFile::ESMRecord * pr = esm.findRecord( esm.mapFormID( *cur, wn ) );
+		if ( !pr || !( *pr == "WRLD" ) )
+			return false;
+		QString e;
+		unsigned w2 = 0, p2 = 0;
+		ESMFile::ESMField f( esm, *pr );
+		while ( f.next() ) {
+			if ( f == "EDID" )
+				e = fieldString( f );
+			else if ( f == "WNAM" && f.size() >= 4 )
+				w2 = f.readUInt32();
+			else if ( f == "PNAM" && f.size() >= 2 )
+				p2 = f.readUInt16();
+		}
+		edid = e;
+		cur = pr;
+		wn = w2;
+		pn = p2;
+		return true;
+	}, wwEnv( "WW_LANDSPEC_RED" ) == "climb1" );
+	return edid;
+}
 
 EsmWorld::EsmWorld() = default;
 EsmWorld::~EsmWorld() = default;
@@ -102,16 +136,7 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 		tr( "load: cells indexed" );
 		lodEdid.clear();
 		if ( LandLodSpec::usesParentLod( wnam, pnam ) ) {	// lane LANDSPEC3: the parent lends its terrain LOD
-			const ESMFile::ESMRecord * pr = esm->findRecord( esm->mapFormID( w, wnam ) );
-			if ( pr && *pr == "WRLD" ) {
-				ESMFile::ESMField f( *esm, *pr );
-				while ( f.next() ) {
-					if ( f == "EDID" ) {
-						lodEdid = fieldString( f );
-						break;
-					}
-				}
-			}
+			lodEdid = esmLodWorldEdid( *esm, w, wnam, pnam );	// lane LANDSPEC5: the chain's end
 			std::fprintf( stderr, "esm world: %s takes its terrain LOD from %s\n", qPrintable( wsEdid ),
 				lodEdid.isEmpty() ? "(unreadable parent)" : qPrintable( lodEdid ) );
 		}
@@ -1795,6 +1820,78 @@ QVector<QPair<quint32, QString>> EsmWorld::listWorldspaces( const QString & esmP
 			*error = QString::fromLatin1( e.what() );
 	}
 	return out;
+}
+
+/* lane LANDSPEC5: the worldspace whose terrain LOD `wsEdid` draws, read before any EsmWorld loads: its parent's EDID
+ * under WRLD PNAM bit 1 "Use LOD Data" (LandLodSpec::usesParentLod, as load() reads it), else empty. One plugin open
+ * per load order and worldspace: cached on the plugin paths, their sizes and times. */
+QString EsmWorld::lodWorldOf( const QString & esmPath, const QString & wsEdid, QString * error )
+{
+	if ( error )
+		error->clear();
+	if ( esmPath.isEmpty() || wsEdid.isEmpty() )
+		return QString();
+	QString key = wsEdid.toLower() + QLatin1Char( '|' ) + QString::fromLatin1( wwEnv( "WW_LANDSPEC_RED" ) ) + QLatin1Char( '|' )
+		+ esmPath;
+	for ( const QString & p : esmPath.split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
+		const QFileInfo fi( p.trimmed() );
+		key += QStringLiteral( "|%1:%2" ).arg( fi.size() ).arg( fi.lastModified().toMSecsSinceEpoch() );
+	}
+	static QMutex mx;
+	static QHash<QString, QString> memo;
+	{
+		QMutexLocker lk( &mx );
+		const auto it = memo.constFind( key );
+		if ( it != memo.cend() )
+			return *it;
+	}
+	QString lod;
+	try {
+		ESMFile esm( esmPath.toLocal8Bit().constData() );
+		const ESMFile::ESMRecord * r0 = esm.findRecord( 0U );
+		const ESMFile::ESMRecord * hit = nullptr;
+		std::function<void( unsigned int, int )> walk = [&]( unsigned int id, int depth ) {
+			while ( id && !hit ) {
+				const ESMFile::ESMRecord * r = esm.findRecord( id );
+				if ( !r )
+					return;
+				if ( r->type != GRUP && *r == "WRLD" ) {
+					ESMFile::ESMField f( esm, *r );
+					while ( f.next() )
+						if ( f == "EDID" ) {
+							if ( fieldString( f ).compare( wsEdid, Qt::CaseInsensitive ) == 0 )
+								hit = r;
+							break;
+						}
+				} else if ( r->type == GRUP && r->children && depth == 0 ) {
+					walk( r->children, 1 );	// the top groups' records (a world's cells: not walked)
+				}
+				id = r->next;
+			}
+		};
+		if ( r0 )
+			walk( r0->next, 0 );
+		if ( hit ) {
+			quint32 wnam = 0, pnam = 0;
+			ESMFile::ESMField f( esm, *hit );
+			while ( f.next() ) {
+				if ( f == "WNAM" && f.size() >= 4 )
+					wnam = f.readUInt32();
+				else if ( f == "PNAM" && f.size() >= 2 )
+					pnam = f.readUInt16();
+			}
+			lod = esmLodWorldEdid( esm, *hit, wnam, pnam );
+		} else if ( error ) {
+			*error = QStringLiteral( "no WRLD %1" ).arg( wsEdid );
+		}
+	} catch ( std::exception & e ) {
+		if ( error )
+			*error = QString::fromLatin1( e.what() );
+		return QString();
+	}
+	QMutexLocker lk( &mx );
+	memo.insert( key, lod );
+	return lod;
 }
 
 
