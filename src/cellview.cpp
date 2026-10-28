@@ -1199,7 +1199,7 @@ std::shared_ptr<const WwNifxModel> wwCellNifxModelLoad( const QString & dataRoot
 static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, const CellSceneSpec & spec,
 	const QVector<EsmRefr> & lightRefs, const QHash<quint32, EsmRefr> & primRefs, const Vector3 & center,
 	WwCellLighting * chunkOut = nullptr, const QHash<quint32, bool> * startOffOf = nullptr,
-	const QVector<WwNifxFixture> * nifx = nullptr )
+	const QVector<WwNifxFixture> * nifx = nullptr, const float * eyeXY = nullptr )
 {
 	WwCellLighting L;
 	L.interior = spec.interior;
@@ -1209,6 +1209,12 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		L.regions = world.cellRegions( spec.cx, spec.cy, &L.regionSeed );
 		L.regionAt[0] = ( float( spec.cx ) + 0.5f ) * 4096.0f;
 		L.regionAt[1] = ( float( spec.cy ) + 0.5f ) * 4096.0f;
+		L.regionWorld = world.worldspace();
+		if ( eyeXY ) {	// lane WEATHERBLEND5: the areas are tested at the player (the spawn eye), as the game does
+			L.regionEye[0] = eyeXY[0];
+			L.regionEye[1] = eyeXY[1];
+			L.regionEyeOk = true;
+		}
 	}
 	for ( int k = 0; k < 3; k++ )
 		L.center[k] = center[k];
@@ -2931,8 +2937,13 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	}
 	// lane CELLSPAWN1: where the window stands the camera when this open is a tab's first document (src/cellspawn.h)
 	QString spawnNote = fixedOpenNote;
+	float spawnXY[2] = { 0.0f, 0.0f };	// lane WEATHERBLEND5: the region weather's test point
+	bool spawnAt = false;
 	if ( !chunk ) {
 		const CellSpawn spawn = cellSpawnCompute( world, spec );
+		spawnAt = spawn.valid;
+		spawnXY[0] = spawn.eye[0];
+		spawnXY[1] = spawn.eye[1];
 		cellSpawnPublish( nif, spawn );
 		spawnNote += QStringLiteral( "  %1\n" ).arg( spawn.line() );
 	}
@@ -7121,7 +7132,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	}
 
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
-	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin, nullptr, &lightStartOff, &nifxFix );
+	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin, nullptr, &lightStartOff, &nifxFix,
+		spawnAt ? spawnXY : nullptr );
 	wwCellFxLitPick( nif );   // lane FXLIT1: each lit effect model's four placed lights
 	if ( streamInit ) {	// lane CELLSTREAM1: the cells themselves come from the streamer, round the camera
 		seed.origin = origin;

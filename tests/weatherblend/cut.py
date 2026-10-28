@@ -36,7 +36,15 @@ LAWS = [('void wwImageSpaceSlots(',
         ('quint32 wwRegionWeatherPick(',
          'quint32 wwRegionWeatherPick(const WwRegionWeatherEntry*e,int n,quint32)\n{\n\tquint32 b=0;qint32 c=0;\n'
          '\tfor(int i=0;i<n;i++)if(e[i].chance>c){c=e[i].chance;b=e[i].weather;}\n\treturn b;\n}\n'),
-        ('int wwRegionChoose(', 'int wwRegionChoose(const WwRegionRank*,int n)\n{\n\treturn n>0?0:-1;\n}\n')]
+        ('int wwRegionChoose(', 'int wwRegionChoose(const WwRegionRank*,int n)\n{\n\treturn n>0?0:-1;\n}\n'),
+        # lane WEATHERBLEND5: the base's behaviour: no area = inside, nothing skipped, a listed weather kept outright
+        ('bool wwRegionCounts(',
+         'bool wwRegionCounts(const WwRegionWeather&g,quint32,int)\n{\n\treturn g.hasWeather&&(g.inside||!g.areas);\n}\n'),
+        ('double wwWeatherDurationHours(', 'double wwWeatherDurationHours(int,float,const WwSkyGmst&)\n{\n\treturn 1e9;\n}\n'),
+        ('double wwWeatherElapsedHours(', 'double wwWeatherElapsedHours(double,double)\n{\n\treturn 0.0;\n}\n'),
+        ('quint32 wwRegionWeatherFollow(',
+         'quint32 wwRegionWeatherFollow(const WwRegionWeatherEntry*e,int n,quint32 cur,bool,double,double,quint32 d,double)\n{\n'
+         '\tfor(int i=0;i<n;i++)if(cur&&e[i].weather==cur)return cur;\n\treturn wwRegionWeatherPick(e,n,d);\n}\n')]
 
 
 def cut(path, sig):

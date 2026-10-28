@@ -150,6 +150,7 @@ struct WwSkyGmst
 	float dirFogPower = 8.0f;	// fDirectionalFogPower (lane FOG1; ESM and exe agree on 8)
 	// lane WEATHERBLEND1: the weather change length, exe defaults (Fallout4.esm sets Max 3 and Accel 16)
 	float transMax = 1.0f, transMin = 0.01f, transAccel = 4.0f;	// fWeatherTrans{Max,Min,Accel}
+	float durMin = 1.0f, durMax = 23.0f;	// lane WEATHERBLEND5: fWeatherDuration{Min,Max}, hours (exe defaults)
 	// lane SKYFULL1: the stars' turn, exe defaults (angle = 2 pi fmod(days, rotDays) / rotDays about the axis)
 	float starsRotDays = 4.0f;	// fStarsRotateDays
 	float starsAxis[3] = { 0.0f, 0.0f, 1.0f };	// fStarsRotate{X,Y,Z}Axis
@@ -278,6 +279,7 @@ struct WwWeatherData
 	// lane PBRWX1: the sky, sun glare and cloud fields
 	quint8 sunGlare = 0;	// DATA byte 4 (/255 = the glare strength)
 	quint8 transDelta = 0;	// lane WEATHERBLEND1: DATA byte 3, Trans Delta (the change length, wwWeatherTransHours)
+	float volMult = 1.0f;	// lane WEATHERBLEND5: VNAM, the volatility multiplier (wwWeatherDurationHours)
 	// lane LIGHTS4: GNAM, the Sun Glare Lens Flare (a LENS; wbDefinitionsFO4 WTHR), read with the weather
 	quint32 sunLensForm = 0;
 	WwLens sunLens;
@@ -391,7 +393,25 @@ struct WwRegionWeather
 	WwRegionRank rank;
 	QVector<WwRegionWeatherEntry> list;
 	QString edid;
+	// lane WEATHERBLEND5: the record's deleted flag (0x20), its worldspace (WNAM, 0 = none), whether it has areas, its form
+	bool deleted = false, areas = false;
+	quint32 world = 0, form = 0;
 };
+//! lane WEATHERBLEND5: the region's reds (WW_WEATHER_BLEND_RED): no area counts as inside; deleted / other world kept
+enum WwRegionRed : int { WwRegionRedNoAreaInside = 1, WwRegionRedNoSkip = 2 };
+/*! lane WEATHERBLEND5: whether a region takes part in the weather choice (PlayerRegionState): weather data, the point
+ *  inside one of its areas (none = never inside), not deleted, and no worldspace or the cell's (cellWorld 0 = any) */
+bool wwRegionCounts( const WwRegionWeather & g, quint32 cellWorld, int red = 0 );
+/*! the weather's duration in game hours (Sky::GetCurrentWeatherDuration): v = clamp(climate volatility (TNAM byte 4)
+ *  x VNAM, 0, 255); Min + (Max - Min)(255 - v)/255, at least 0.1 */
+double wwWeatherDurationHours( int climVolatility, float volMult, const WwSkyGmst & g );
+//! the hours since the weather began (Sky::GetCurrentWeatherTimeElapsed: +24 when the clock went past midnight)
+double wwWeatherElapsedHours( double hourNow, double startHour );
+/*! the region weather the game applies (Sky::UpdateWeather): the same region listing cur keeps it until its duration
+ *  ran out; otherwise the list's pick (draw), and a new region listing cur keeps it when u01 > elapsed / duration.
+ *  0 = nothing to apply */
+quint32 wwRegionWeatherFollow( const WwRegionWeatherEntry * e, int n, quint32 cur, bool sameRegion, double elapsed,
+	double duration, quint32 draw, double u01 );
 
 /*! The engine fog at one hour (lane FOG1, spec_fog.md 2.1-2.3): the FNAM floats
  *  blended day <-> night on the engine's fog day weight, the four NAM0 fog colours

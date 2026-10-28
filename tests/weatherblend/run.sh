@@ -5,7 +5,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 OUT="${1:?out dir}"
-BASE="${2:-5dd180a5}"	# WEATHERBLEND4's base (WEATHERBLEND3's: ddf6483e, WEATHERBLEND2's: 50023dfa, WEATHERBLEND1's: 0db18b4b)
+BASE="${2:-940baf4a}"	# WEATHERBLEND5's base (4: 5dd180a5, 3: ddf6483e, 2: 50023dfa, 1: 0db18b4b)
 mkdir -p "$OUT/green" "$OUT/red"
 git -C "$ROOT" show "$BASE:src/esmweather.cpp" > "$OUT/red/esmweather_base.cpp" || exit 2
 python -I "$HERE/cut.py" "$ROOT/src/esmweather.cpp" "$ROOT/src/esmweather.cpp" "$OUT/green/cut.inc" < /dev/null || exit 2

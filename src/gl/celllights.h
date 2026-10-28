@@ -207,6 +207,11 @@ struct WwCellLighting
 	QVector<quint32> regions;	//!< lane WEATHERBLEND4: an exterior's centre cell's regions (XCLR), the weather pick's
 	float regionAt[2] = { 0, 0 };	//!< the centre cell's middle (world x, y), the point the regions' areas are tested at
 	quint32 regionSeed = 0;	//!< the centre cell's form: the pick's seed
+	// lane WEATHERBLEND5: the worldspace (a region naming another is skipped) and the spawn eye, the player's point the
+	// game tests the areas at (red WW_WEATHER_BLEND_RED=regioncentre: regionAt)
+	quint32 regionWorld = 0;
+	float regionEye[2] = { 0, 0 };
+	bool regionEyeOk = false;
 	bool showSky = false;	//!< lane SKYFULL1: an interior whose CELL DATA has bit 7 (Show Sky); the Lookdev sky draws there
 	QVector<WwCellLight> lights;
 	QVector<WwCellAmbientLight> ambientLights;  //!< lane AMBO2, in plugin order (the first that holds a point wins)

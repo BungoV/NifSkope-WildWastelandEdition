@@ -447,14 +447,20 @@ float wwAirDriftAt( vec3 p )
 	return 1.0 + volAirDrift.x * f * ( a - volAirDrift.w + 0.5 * f * ( b - volAirDrift.w ) ) * ( 1.0 / 1.5 );
 }
 
-// the factor on the sun column's optical depth from p (height lo, the sun's rise mu, the air's top): the drift half way
-// up the column, at most half the noise's tile (2048 units) along the sun
+uniform int volAirDriftRed;		// lane WEATHERBLEND5: 1 red onesun (the sun's column at one point), 2 red puffonly
+// the factor on the sun column's optical depth from p (height lo, the sun's rise mu, the air's top): the drift's mean at
+// 1/6, 1/2 and 5/6 of the column, at most the noise's tile (4096 units) along the sun; red onesun: half way only
 float wwAirDriftSunK( vec3 p, float lo, float mu, float top )
 {
 	if ( volAirDrift.x <= 0.0 )
 		return 1.0;
-	float h = 0.5 * min( max( top - lo, 0.0 ) / max( mu, 0.02 ), 4096.0 );
-	return wwAirDriftAt( p + fogSun.xyz * ( h / max( fogDistScale, 1e-12 ) ) );
+	vec3 s = fogSun.xyz * ( min( max( top - lo, 0.0 ) / max( mu, 0.02 ), 4096.0 ) / max( fogDistScale, 1e-12 ) );
+	// a loop on a uniform count: one copy of the noise reads (three unrolled copies broke the decal program's limit)
+	int n = ( volAirDriftRed & 1 ) != 0 ? 1 : 3;
+	float f0 = n == 1 ? 0.5 : 1.0 / 6.0, k = 0.0;
+	for ( int i = 0; i < n; i++ )
+		k += wwAirDriftAt( p + s * ( f0 + float( i ) / 3.0 ) );
+	return k / float( n );
 }
 
 /* FOGSUN1 (bungo 10-14): the sun reaching a surface through the air -- the air's transmittance from the surface's

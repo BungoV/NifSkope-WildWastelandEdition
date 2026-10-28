@@ -777,6 +777,7 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 	// the counts come from the FORM VERSION (xEdit wbWeatherColors), never from the size
 	out.nam0Rows = out.formVersion >= 119 ? 19 : 17;
 	out.nam0Tods = out.formVersion >= 111 ? 8 : 4;
+	out.volMult = 1.0f;
 	QVector<QByteArray> dalcs;
 	QByteArray pnam, jnam, qnam, rnam, onam, imsp, wgdr;
 	quint32 gnam = 0;
@@ -810,6 +811,8 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 				wgdr = bytes();
 			else if ( f == "GNAM" && f.size() >= 4 )	// lane LIGHTS4: the sun's lens flare
 				std::memcpy( &gnam, f.data(), 4 );
+			else if ( f == "VNAM" && f.size() >= 4 )	// lane WEATHERBLEND5: the volatility multiplier
+				std::memcpy( &out.volMult, f.data(), 4 );
 			else if ( f == "PNAM" )
 				pnam = bytes();
 			else if ( f == "JNAM" )
@@ -1175,6 +1178,8 @@ bool EsmWeather::regionWeatherAt( quint32 regn, float x, float y, WwRegionWeathe
 	};
 	bool areas = false;
 	quint32 type = 0;
+	out.form = regn;
+	out.deleted = ( r->flags & 0x20u ) != 0;	// lane WEATHERBLEND5: the deleted record flag
 	try {
 		ESMFile::ESMField f( *esm, *r );
 		while ( f.next() ) {
@@ -1191,6 +1196,8 @@ bool EsmWeather::regionWeatherAt( quint32 regn, float x, float y, WwRegionWeathe
 						in = !in;
 				}
 				out.inside = out.inside || in;
+			} else if ( f == "WNAM" && f.size() >= 4 ) {	// lane WEATHERBLEND5: the region's worldspace
+				out.world = u32( f, 0 ) ? esm->mapFormID( *r, u32( f, 0 ) ) : 0u;
 			} else if ( f == "RDAT" && f.size() >= 4 ) {
 				type = u32( f, 0 );
 				if ( type == 3 ) {
@@ -1218,9 +1225,40 @@ bool EsmWeather::regionWeatherAt( quint32 regn, float x, float y, WwRegionWeathe
 	} catch ( std::exception & ) {
 		return false;
 	}
-	if ( !areas )
-		out.inside = true;	// no area of its own: the cell's region list (XCLR) stands for it
+	out.areas = areas;	// lane WEATHERBLEND5: no area = never inside (the game's law; red noareainside: inside)
 	return true;
+}
+
+bool wwRegionCounts( const WwRegionWeather & g, quint32 cellWorld, int red )
+{
+	if ( !g.hasWeather || !( g.inside || ( !g.areas && ( red & WwRegionRedNoAreaInside ) ) ) )
+		return false;
+	if ( red & WwRegionRedNoSkip )
+		return true;
+	return !g.deleted && ( !g.world || !cellWorld || g.world == cellWorld );
+}
+
+double wwWeatherDurationHours( int climVolatility, float volMult, const WwSkyGmst & g )
+{
+	const double v = std::clamp( double( climVolatility ) * double( volMult ), 0.0, 255.0 );
+	return std::max( double( g.durMin ) + ( double( g.durMax ) - double( g.durMin ) ) * ( 255.0 - v ) / 255.0, 0.1 );
+}
+
+double wwWeatherElapsedHours( double hourNow, double startHour )
+{
+	return hourNow < startHour ? hourNow + 24.0 - startHour : hourNow - startHour;
+}
+
+quint32 wwRegionWeatherFollow( const WwRegionWeatherEntry * e, int n, quint32 cur, bool sameRegion, double elapsed,
+	double duration, quint32 draw, double u01 )
+{
+	const bool usesCur = cur && std::any_of( e, e + n, [cur]( const WwRegionWeatherEntry & x ) { return x.weather == cur; } );
+	if ( sameRegion && usesCur && !( elapsed > duration ) )
+		return cur;
+	const quint32 pick = wwRegionWeatherPick( e, n, draw );
+	if ( !sameRegion && usesCur && pick != cur && u01 > elapsed / std::max( duration, 1e-6 ) )
+		return cur;
+	return pick;
 }
 
 bool EsmWeather::climateData( quint32 formID, WwClimateData & out, QString * why )
@@ -1279,6 +1317,7 @@ WwSkyGmst EsmWeather::gmst()
 		{ "fStarsRotateYAxis", &g.starsAxis[1], false }, { "fStarsRotateZAxis", &g.starsAxis[2], false },
 		{ "fWeatherTransMax", &g.transMax, false }, { "fWeatherTransMin", &g.transMin, false },	// lane WEATHERBLEND1
 		{ "fWeatherTransAccel", &g.transAccel, false },
+		{ "fWeatherDurationMin", &g.durMin, false }, { "fWeatherDurationMax", &g.durMax, false },	// lane WEATHERBLEND5
 	};
 	const ESMFile::ESMRecord * r0 = esm->findRecord( 0U );
 	if ( !r0 )
@@ -1857,7 +1896,8 @@ int cmdWeather( const QStringList & args )
 	bool groups = false, loadOrder = false;	// lane SKYTOP1
 	bool imgs = false;	// lane WEATHERBLEND3
 	QString regionArg, atArg;	// lane WEATHERBLEND4
-	quint32 regionSeed = 0;
+	quint32 regionSeed = 0, regionWorld = 0;
+	int regionRed = 0;	// lane WEATHERBLEND5
 	double cloudTime = 0.0;
 	for ( int i = 0; i < args.size(); i++ ) {
 		const QString & a = args.at( i );
@@ -1892,6 +1932,12 @@ int cmdWeather( const QStringList & args )
 			atArg = next();
 		else if ( a == "--seed" )
 			regionSeed = next().toUInt( nullptr, 0 );
+		else if ( a == "--world" )	// lane WEATHERBLEND5: the cell's worldspace for the region skip
+			regionWorld = next().toUInt( nullptr, 16 );
+		else if ( a == "--region-red" ) {	// noareainside, noregionskip
+			const QString v = next();
+			regionRed = ( v.contains( "noareainside" ) ? 1 : 0 ) | ( v.contains( "noregionskip" ) ? 2 : 0 );
+		}
 		else if ( a == "--sky" )
 			sky = true;
 		else if ( a == "--day" )
@@ -2001,8 +2047,10 @@ int cmdWeather( const QStringList & args )
 				l << QString( "%1:%2" ).arg( hex8( e.weather ) ).arg( e.chance );
 			say( QString( "region id=%1 ok=%2 edid=%3 weather=%4 inside=%5 override=%6 priority=%7 list=%8" ).arg( hex8( regn ) )
 				.arg( ok ? 1 : 0 ).arg( g.edid ).arg( g.hasWeather ? 1 : 0 ).arg( g.inside ? 1 : 0 ).arg( g.rank.overrides ? 1 : 0 )
-				.arg( g.rank.priority ).arg( l.isEmpty() ? QStringLiteral( "-" ) : l.join( ',' ) ) );
-			if ( ok && g.hasWeather && g.inside ) {
+				.arg( g.rank.priority ).arg( l.isEmpty() ? QStringLiteral( "-" ) : l.join( ',' ) )
+				+ QString( " areas=%1 deleted=%2 world=%3 counts=%4" ).arg( g.areas ? 1 : 0 ).arg( g.deleted ? 1 : 0 )
+				.arg( hex8( g.world ) ).arg( ok && wwRegionCounts( g, regionWorld, regionRed ) ? 1 : 0 ) );
+			if ( ok && wwRegionCounts( g, regionWorld, regionRed ) ) {
 				in.append( g );
 				rank.append( g.rank );
 			}

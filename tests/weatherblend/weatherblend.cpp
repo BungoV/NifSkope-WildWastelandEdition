@@ -296,6 +296,37 @@ int main()
 		near1( "choose: none", wwRegionChoose( t, 0 ), -1.0, 0.0 );
 	}
 
+	// 16. lane WEATHERBLEND5: which regions count, the weather's duration and elapsed hours, the keep-or-pick law
+	{
+		WwRegionWeather g;
+		g.hasWeather = true;
+		near1( "counts: no area is never inside", wwRegionCounts( g, 7u ) ? 1.0 : 0.0, 0.0, 0.0 );
+		near1( "counts: red noareainside", wwRegionCounts( g, 7u, WwRegionRedNoAreaInside ) ? 1.0 : 0.0, 1.0, 0.0 );
+		g.areas = g.inside = true;
+		g.deleted = true;
+		near1( "counts: a deleted region is skipped", wwRegionCounts( g, 7u ) ? 1.0 : 0.0, 0.0, 0.0 );
+		near1( "counts: red noregionskip keeps it", wwRegionCounts( g, 7u, WwRegionRedNoSkip ) ? 1.0 : 0.0, 1.0, 0.0 );
+		g.deleted = false;
+		g.world = 5u;
+		near1( "counts: another worldspace is skipped", wwRegionCounts( g, 7u ) ? 1.0 : 0.0, 0.0, 0.0 );
+		near1( "counts: its own worldspace", wwRegionCounts( g, 5u ) ? 1.0 : 0.0, 1.0, 0.0 );
+		const WwSkyGmst gm;
+		near1( "duration: volatility 0 -> 23 h", wwWeatherDurationHours( 0, 1.0f, gm ), 23.0, 1e-9 );
+		near1( "duration: volatility 128", wwWeatherDurationHours( 128, 1.0f, gm ), 1.0 + 22.0 * 127.0 / 255.0, 1e-9 );
+		near1( "duration: 200 x VNAM 2 clamps to 255 -> 1 h", wwWeatherDurationHours( 200, 2.0f, gm ), 1.0, 1e-9 );
+		WwSkyGmst g0;
+		g0.durMin = g0.durMax = 0.0f;
+		near1( "duration: at least 0.1 h", wwWeatherDurationHours( 0, 1.0f, g0 ), 0.1, 1e-9 );
+		near1( "elapsed 12h -> 14h", wwWeatherElapsedHours( 14.0, 12.0 ), 2.0, 1e-9 );
+		near1( "elapsed 23h -> 1h over midnight", wwWeatherElapsedHours( 1.0, 23.0 ), 2.0, 1e-9 );
+		const WwRegionWeatherEntry L[2] = { { 0xA, 60 }, { 0xC, 40 } };
+		near1( "follow: same region, inside its duration: kept", wwRegionWeatherFollow( L, 2, 0xA, true, 2.0, 5.0, 70u, 0.5 ), 0xA, 0.0 );
+		near1( "follow: same region, duration over: picked", wwRegionWeatherFollow( L, 2, 0xA, true, 6.0, 5.0, 70u, 0.5 ), 0xC, 0.0 );
+		near1( "follow: new region, u > elapsed/duration: kept", wwRegionWeatherFollow( L, 2, 0xA, false, 1.0, 4.0, 70u, 0.9 ), 0xA, 0.0 );
+		near1( "follow: new region, u <= elapsed/duration: picked", wwRegionWeatherFollow( L, 2, 0xA, false, 1.0, 4.0, 70u, 0.1 ), 0xC, 0.0 );
+		near1( "follow: an unlisted weather: picked", wwRegionWeatherFollow( L, 2, 0xD, true, 0.0, 4.0, 10u, 0.9 ), 0xA, 0.0 );
+	}
+
 	std::printf( "WEATHERBLEND %s %d of %d failed\n", fails ? "FAIL" : "PASS", fails, checks );
 	return fails ? 1 : 0;
 }

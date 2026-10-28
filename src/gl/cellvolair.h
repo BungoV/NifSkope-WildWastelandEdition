@@ -111,7 +111,7 @@ void wwVolAirSetFarTier( int tier );
  *  lights) scatters by the same noisy sub-step, so a lamp's glow brightens and dims as the lumps pass. Exteriors drift;
  *  an interior only when it shows the sky; a sealed one is drawn exactly as with the row off.
  *  The row "Fog Drift" under Volumetric Air ships OFF (QSettings WW/VolAirDrift; the pin WW_CELL_FOGDRIFT=0|1 wins).
- *  WW_CELL_FOGDRIFT_RED=still (no motion) | smooth (no noise) | wobble (the old wobbling, gusting law); WW_CELL_FOGDRIFT_T=<s>
+ *  WW_CELL_FOGDRIFT_RED=smooth (no noise) | wobble (the old wobbling, gusting law) | nosun | onesun | puffonly; WW_CELL_FOGDRIFT_T=<s>
  *  pins the clock (a harness pins t = 0). Echo: drift=on(law wind dir range turb speed t) in the census; the dump's "drift". */
 bool wwVolAirDriftOn();
 void wwVolAirSetDriftOn( bool on );

@@ -121,6 +121,7 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 	float zOff = z - P.z;	// the fog's height frame minus world z
 	if ( ( volTerms & 2 ) != 0 && ( volPartRed & 8 ) == 0 ) {
 		float dP = wwAirDriftAt( posView );	// lane WEATHERBLEND4: the drifting air at the puff, on its lamps' paths
+		float s2 = dot( cellRow[0].xyz, cellRow[0].xyz );	// WEATHERBLEND5: world to view = rows transposed / scale^2
 		for ( int i = 0; i < cellLightCount; i++ ) {
 			vec4 t0 = texelFetch( cellLights, i * CELL_TPL );
 			float d = length( t0.xyz - P );
@@ -131,7 +132,19 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 			vec3 e = cellLightE( i, P, L, Lo, noSpec );	// N = L, as the air: no N.L, the shadow lifted toward the light
 			if ( all( equal( e, vec3( 0.0 ) ) ) )
 				continue;
-			e = vpTint( e ) * exp( -airOd( z, t0.z + zOff, d ) * dP );
+			// lane WEATHERBLEND5: the drift over the lamp's path (puff, middle, lamp: 1/4, 1/2, 1/4); red puffonly: at the puff
+			float dL = dP;
+			int nL = volAirDrift.x > 0.0 && ( volAirDriftRed & 2 ) == 0 ? 2 : 0;	// a uniform count: one copy of the reads
+#ifdef WW_FX_DECALLIT
+			nL = 0;	// a lit decal's program sits at the instruction limit (GI march): the drift at the puff only
+#endif
+			if ( nL > 0 ) {
+				vec3 dV = ( cellRow[0].xyz * ( t0.x - P.x ) + cellRow[1].xyz * ( t0.y - P.y ) + cellRow[2].xyz * ( t0.z - P.z ) ) / s2;
+				dL = 0.25 * dP;
+				for ( int j = 1; j <= nL; j++ )
+					dL += ( j == 1 ? 0.5 : 0.25 ) * wwAirDriftAt( posView + ( 0.5 * float( j ) ) * dV );
+			}
+			e = vpTint( e ) * exp( -airOd( z, t0.z + zOff, d ) * dL );
 			thin += e * vpPhase( dot( L, dW ) );
 			thick += e * vpWrap( dot( N, L ), w ) * vpPhaseN( dot( L, dW ) );
 		}

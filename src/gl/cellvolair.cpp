@@ -174,7 +174,7 @@ struct VaDrift
 {
 	bool loaded = false, on = false, pinned = false;
 	quint64 liveGen = 0;		// fix TDFIX2: a live set of WW_CELL_FOGDRIFT* re-reads them
-	int red = 0;				// 1 still (no motion), 2 smooth (no noise), 3 wobble (the pre-FOGWIND1 wind law), 4 nosun
+	int red = 0;				// 2 smooth (no noise), 3 wobble (the pre-FOGWIND1 wind law), 4 nosun, 5 onesun, 6 puffonly
 	float amp = 0.0f;			// lane WEATHERBLEND4: the last air pass's amplitude (0: smooth), for the surfaces and the puffs
 	bool timePinned = false;
 	double tPin = 0.0;
@@ -197,6 +197,11 @@ VaDrift & vd()
 		d.pinned = false;	// back to the defaults before the re-read
 		d.timePinned = false;
 		d.tPin = 0.0;
+		// lane WEATHERBLEND5 (SHOTPASS1 D12): a live set starts the wind's offsets from 0, as a fresh launch does
+		d.tDone = 0.0;
+		d.vel[0] = d.vel[1] = 0.0f;
+		std::fill( &d.ofs[0][0], &d.ofs[0][0] + 6, 0.0f );
+		d.clock.invalidate();
 		const QByteArray pin = qgetenv( "WW_CELL_FOGDRIFT" ).trimmed();
 		if ( !pin.isEmpty() ) {
 			d.pinned = true;
@@ -205,7 +210,7 @@ VaDrift & vd()
 			d.on = QSettings().value( QStringLiteral( "WW/VolAirDrift" ), false ).toBool();
 		}
 		const QByteArray red = qgetenv( "WW_CELL_FOGDRIFT_RED" ).trimmed();
-		d.red = red == "still" ? 1 : red == "smooth" ? 2 : red == "wobble" ? 3 : red == "nosun" ? 4 : 0;	// 4: WEATHERBLEND4
+		d.red = red == "smooth" ? 2 : red == "wobble" ? 3 : red == "nosun" ? 4 : red == "onesun" ? 5 : red == "puffonly" ? 6 : 0;	// 5, 6: WEATHERBLEND5
 		bool ok = false;
 		const double t = qEnvironmentVariable( "WW_CELL_FOGDRIFT_T" ).toDouble( &ok );
 		if ( ok ) {	// a fixed clock (the shots' frames): the drift integrated from 0 to t in fixed steps
@@ -216,6 +221,12 @@ VaDrift & vd()
 		}
 	}
 	return d;
+}
+
+// lane WEATHERBLEND5: the shaders' volAirDriftRed (lookdev_fog.glsl): 1 the sun's column at one point, 2 a lamp's path at the puff
+int vaDriftRedBits( const VaDrift & d )
+{
+	return d.red == 5 ? 1 : d.red == 6 ? 2 : 0;
 }
 
 // tileable gradient noise at (x, y, z) in lattice cells, period P cells
@@ -1502,7 +1513,7 @@ static void vaPassInner( Scene * scene, bool run )
 					fn->glTexParameteri( GL_TEXTURE_3D, w, GL_REPEAT );
 				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0 );
 			}
-			const bool blows = hasWind && wind[0] > 0 && dr.red != 1;
+			const bool blows = hasWind && wind[0] > 0;
 			if ( blows ) {
 				if ( !dr.clock.isValid() )
 					dr.clock.start();
@@ -1518,7 +1529,7 @@ static void vaPassInner( Scene * scene, bool run )
 				.arg( hasWind ? wind[0] / 255.0 : 0.0, 0, 'f', 3 ).arg( wind[1] / 255.0 * 360.0, 0, 'f', 1 )
 				.arg( wind[2] / 255.0 * 180.0, 0, 'f', 1 ).arg( wind[3] / 255.0, 0, 'f', 3 )
 				.arg( double( std::hypot( dr.vel[0], dr.vel[1] ) ), 0, 'f', 1 ).arg( dr.tDone, 0, 'f', 3 )
-				.arg( !blows ? ( dr.red == 1 ? QStringLiteral( " still(red)" ) : QStringLiteral( " still(no wind)" ) ) : QString() )
+				.arg( !blows ? QStringLiteral( " still(no wind)" ) : QString() )
 				.arg( dr.red == 3 ? QStringLiteral( "wobble(red)" ) : QStringLiteral( "game" ) )
 				.arg( QStringLiteral( " offset=%1" ).arg( double( wind[4] ), 0, 'f', 2 ) );
 		}
@@ -1528,6 +1539,7 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1i( "volNoise", kNoiseUnit );
 	prog->uni4f( "volDrift", FloatVector4( driftAmp, kDriftFade0, 1.0f / ( kDriftFade1 - kDriftFade0 ), dr.mean ) );
 	prog->uni1b( "volDriftSun", dr.red != 4 );	// lane WEATHERBLEND4: the sun's column drifts too (red nosun: not)
+	prog->uni1i( "volAirDriftRed", vaDriftRedBits( dr ) );	// lane WEATHERBLEND5: red onesun
 	dr.amp = driftAmp;
 	for ( int o = 0; o < 2; o++ )
 		prog->uni4f_l( prog->uniLocation( "volDriftOfs[%d]", o ), FloatVector4( dr.ofs[o][0], dr.ofs[o][1], dr.ofs[o][2],
@@ -2056,6 +2068,7 @@ void wwVolAirUniforms( Scene * scene )
 	prog->uni1i( "volFarClamp", clamp ? 1 : 0 );
 	if ( noiseLoc >= 0 ) {	// lane WEATHERBLEND4: the noise's uvw at a view point, per octave, as the air pass's airDrift
 		prog->uni4f( "volAirDrift", FloatVector4( drift ? dr.amp : 0.0f, kDriftFade0, 1.0f / ( kDriftFade1 - kDriftFade0 ), dr.mean ) );
+		prog->uni1i( "volAirDriftRed", vaDriftRedBits( dr ) );	// lane WEATHERBLEND5: reds onesun, puffonly
 		const Transform & vt = scene->view;
 		const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
 		for ( int o = 0; o < 2; o++ ) {
