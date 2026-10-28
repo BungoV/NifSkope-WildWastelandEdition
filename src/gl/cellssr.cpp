@@ -422,7 +422,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );	// wwCellSsrDraw opens it for the opaque cell-lit draws
 	s.pass = true;
 	if ( memo )
-		wwSetupMemoArm( true );
+		wwSetupMemoArm( true, "cellProbe" );	// wwCellSsrDraw sets it (60) after every setup
 	scene->collectShapes( sceneSecond );
 	if ( memo )
 		wwSetupMemoArm( false );

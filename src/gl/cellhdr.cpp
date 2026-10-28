@@ -1005,10 +1005,6 @@ void wwCellHdrEnd( Scene * scene )
 	known.sFail = sn.sFail, known.sZFail = sn.sZFail, known.sPass = sn.sPass;
 	WwCellUni::knownSlot() = sync && !wwCellUniRed() ? &known : nullptr;
 	wwCellSsrKeepFrame( scene, g.fbo, s.w, s.h );	// lane PERF3: WW_CELL_SSR_PREV's previous frame (else nothing)
-	{	// lane TAA3: the Modern temporal AA on this linear frame when its row says so (no GL call otherwise)
-		const float adapted = wwCellImageSpaceAdapted( scene );
-		wwGameTaaResolveLinear( scene, g.fbo, g.colorFormat, adapted >= 0.0f ? std::clamp( 0.18f / ( adapted + 0.001f ), 1.0f / 64.0f, 64.0f ) : 1.0f );
-	}
 	// lane VOLAIR1 (gates only): WW_CELL_HDR_DUMP=<file> writes the linear frame before the bloom and the tone map,
 	// samples resolved: int32 W H, then W x H x RGBA float32, bottom row first. Every frame (a still path: the last).
 	WW_SWITCH_STATIC( QByteArray, hdrDump, wwEnv( "WW_CELL_HDR_DUMP" ) );

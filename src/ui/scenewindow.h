@@ -68,7 +68,6 @@ public:
 	QCheckBox * shadowsBox = nullptr;
 	QCheckBox * taaBox = nullptr;	// lane MOTION1
 	QComboBox * modernTaaBox = nullptr;	// lane TAA2
-	QCheckBox * modernTaaHdrBox = nullptr;	// lane TAA3
 	QCheckBox * ssgiBox = nullptr;	// lane SSGI1
 	QCheckBox * aoBox = nullptr;	// lane GAPTOOL1: the cell AO (the Show menu's AO row's state)
 	QComboBox * bloomBox = nullptr;	// lane GAPTOOL1: Vanilla | FO4CS (the Show menu's Bloom mode)

@@ -56,7 +56,8 @@ typedef unsigned int GLenum;
 typedef unsigned int GLuint;
 
 //! lane PERF1: the scene-global setters run once per program inside an armed pass (Scene::drawShapes)
-void wwSetupMemoArm( bool on );
+//! lane FRAMESPEED2 (D5): passOwned = a uniform the pass's draw hook writes after every setup (the check ignores it)
+void wwSetupMemoArm( bool on, const char * passOwned = nullptr );
 /* lane PERF2FIX1: the obscurance/reflection opaque passes skip a sorted shape whose last draw (last frame) wrote
  * nothing there: blended or not cell-lit. NewFrame once per obscurance pass; Arm around the sorted draws */
 void wwOpaqueCutNewFrame();

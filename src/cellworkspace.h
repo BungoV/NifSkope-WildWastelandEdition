@@ -246,7 +246,6 @@ private:
 	QAction * cellTaa = nullptr;      // lane MOTION1: the game's temporal AA (one state with the Scene popup's row)
 	QMenu * cellModernTaa = nullptr;	// lane TAA2: Off | Low | Medium | High | Ultra
 	QActionGroup * cellModernTaaGroup = nullptr;
-	QAction * cellModernTaaHdr = nullptr;	// lane TAA3: Modern temporal AA before the tone map
 	// lane CELLALL1: the second row, the features that were env-only (their defaults unchanged; new ones ship off)
 	QAction * cellAo = nullptr;
 	QAction * cellShadow = nullptr;

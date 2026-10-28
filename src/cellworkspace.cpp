@@ -768,8 +768,6 @@ void CellWorkspacePanel::buildUi()
 			cellModernTaaGroup->addAction( a );
 		}
 	}
-	// lane TAA3: the Modern resolve on the linear frame, before the tone map; ships Off
-	cellModernTaaHdr = tick( showMenu, tr( "Before tone map" ), "CellWorkspaceModernTaaHdr", wwTaa2HdrOn() );
 	cellSsr = tick( showMenu, tr( "Screen-Space Reflections" ), "CellWorkspaceSsr", wwCellSsrOn() );	// note 15: labels only
 	if ( wwCellSsrExteriorOn() != wwCellSsrOn() )
 		wwCellSsrRowSet( wwCellSsrOn() );	// note 20: one row sets both halves; an old split takes the row's state
@@ -1210,7 +1208,6 @@ void CellWorkspacePanel::buildUi()
 		kid( "", tr( "Terrain pages" ), "CellWorkspaceFarGroundPages" );
 		look( WwLook::BtoSway, tr( "Game trees sway" ) );
 		head( F, "", "CellWorkspaceModernTaa", 0, true );
-		kid( "CellWorkspaceModernTaaHdr", tr( "Before tone map" ) );
 		head( F, "", "CellWorkspaceBloom", 0 );
 		look( WwLook::BloomMip, tr( "Width in fog" ) );
 		master( F, WwGroup::Camera );
@@ -1404,11 +1401,6 @@ void CellWorkspacePanel::buildUi()
 	} );
 	connect( cellTaa, &QAction::toggled, this, [this]( bool on ) {
 		wwGameTaaSetOn( on );
-		if ( glView )
-			glView->update();
-	} );
-	connect( cellModernTaaHdr, &QAction::toggled, this, [this]( bool on ) {	// lane TAA3
-		wwTaa2SetHdrOn( on );
 		if ( glView )
 			glView->update();
 	} );

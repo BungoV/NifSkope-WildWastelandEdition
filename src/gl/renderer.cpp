@@ -101,6 +101,7 @@ struct SetupMemo
 	int mode = 1;
 	bool check = false;
 	bool armed = false;
+	const char * passOwned = nullptr;	// lane FRAMESPEED2 (D5): the uniform the pass's draw hook writes after every setup
 	quint64 epoch = 1;
 	std::unordered_map<const void *, std::pair<const void *, quint64>> stamps;	// program -> scene, epoch
 	qint64 hits = 0, runs = 0, checked = 0, bad = 0, arms = 0;
@@ -182,7 +183,7 @@ void glSnap( Renderer * r, GLuint prog, GlSnap & o )
 	}
 }
 
-int glSnapDiff( const GlSnap & a, const GlSnap & b, bool print, const char * tag = "setup memo" )
+int glSnapDiff( const GlSnap & a, const GlSnap & b, bool print, const char * tag = "setup memo", const char * skip = nullptr )
 {
 	int d = ( a.active != b.active ) ? 1 : 0;
 	if ( d && print )
@@ -194,7 +195,7 @@ int glSnapDiff( const GlSnap & a, const GlSnap & b, bool print, const char * tag
 				std::fprintf( stderr, "%s: MISMATCH unit %d target %d texture %d -> %d\n", tag, int( i / 7 ), int( i % 7 ), a.tex[i], b.tex[i] );
 		}
 	for ( size_t i = 0; i < a.uni.size() && i < b.uni.size(); i++ )
-		if ( a.uni[i].second != b.uni[i].second ) {
+		if ( a.uni[i].second != b.uni[i].second && !( skip && a.uni[i].first == skip ) ) {
 			d++;
 			if ( print )
 				std::fprintf( stderr, "%s: MISMATCH uniform %s\n", tag, a.uni[i].first.c_str() );
@@ -276,12 +277,13 @@ void wwOpaqueCutCheckNote( bool predictedSkip, const QString & name )
 	}
 }
 
-void wwSetupMemoArm( bool on )
+void wwSetupMemoArm( bool on, const char * passOwned )
 {
 	SetupMemo & m = setupMemo();
 	m.epoch++;
 	m.stamps.clear();
 	m.armed = on && m.mode > 0;
+	m.passOwned = on ? passOwned : nullptr;
 	if ( on && ++m.arms % 300 == 0 )
 		std::fprintf( stderr, "setup memo: mode=%d check=%d passes=%lld kept=%lld ran=%lld checked=%lld mismatches=%lld\n", m.mode,
 			m.check ? 1 : 0, (long long)m.arms, (long long)m.hits, (long long)m.runs, (long long)m.checked, (long long)m.bad );
@@ -305,7 +307,9 @@ template <typename F> static void wwSceneGlobals( Renderer * r, Scene * scene, i
 			run();
 			glSnap( r, prog->id, b );
 			m.checked++;
-			m.bad += glSnapDiff( a, b, m.bad < 20 );
+			// lane FRAMESPEED2 (D5): the AO/SSR opaque passes' draw hook writes cellProbe after every setup, so the
+			// skipped setter's value never reaches a draw there: the snapshot before the setter holds the hook's
+			m.bad += glSnapDiff( a, b, m.bad < 20, "setup memo", m.passOwned );
 			return;
 		}
 	}

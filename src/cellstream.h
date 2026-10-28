@@ -23,7 +23,6 @@
  *   WW_CELL_STREAM_DUMP=<file>     one line a step: loaded vs expected, slice / frame ms, private bytes, coverage
  *   WW_CELL_STREAM_RED=nounload    cells that leave the block stay (the memory gate's red)
  *   WW_STREAM1_RED=geokeep         lane STREAMMEM1: undrawn cached meshes stay ~1800 paints (the old memory growth)
- *                     =nohandover  the far ring-0 ground stays under loaded cells (the far-LOD gate's red)
  */
 
 #include "cellview.h"

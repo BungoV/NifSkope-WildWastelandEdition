@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane FRAMESPEED2 (2026-10-28, branch framespeed2-20261028): one TAA path, honest stream gates, a clean memo check
+
+- **Improved TAA runs after the tone map only (TAAHDRPICK1):** SHOTPASS1 picked "Before tone map" OFF at Concord
+  (edge shimmer 1.682 vs 2.357). The before-tone-map resolve, its menu row (Show menu and the scene window's live
+  box), its setting key and the `WW_TAA2_HDR` pin are gone, with the linear-input branches in taa2.frag,
+  taa2_rcas.frag, taainputs.cpp and cellhdr's hand-off. No toggle is left. The toned path now keeps its depth-format
+  ask in the per-(context, framebuffer, size) cache CELLUNI4 gave the linear path (`WW_CELL_UNI_RED` asks every frame).
+- **`WW_CELL_STREAM_RED=nohandover` retired** with its old path (confirmed live in SHOTPASS1): the near ground always
+  hides the far tile in the same step. cell_stream.sh / cell_stream_check.py lose that red.
+- **The stream walk's frame gate judges the stream's own work (D2):** the live dump gets `cpuMaxMs` (the step's
+  dearest on-processor frame), and cell_stream_check.py holds that to the 8 ms bar, as streamwalk's CPU-VERDICT does.
+  SHOTPASS1's 14.21 ms was one frame at step 15 that spent 0.05 ms on the processor: 14.17 ms passed before any stream
+  work, a wall stall (paging, 18.3 GB private on a 10.3 GB working set). The worst on-processor crossing frame there was
+  6.34 ms. The wall worst, its step and its off-processor share are still printed.
+- **The setup memo check no longer counts the AO/SSR passes' own `cellProbe` (D5):** those opaque passes' draw hooks
+  write `cellProbe` (20 / 60) after every setup, so the snapshot before a skipped setter held the hook's value and
+  every check read MISMATCH (409,173 of 443,401 in SHOTPASS1). The pass now names that uniform when it arms the memo
+  and the check skips it there; any other uniform still counts.
+- Cost: 0 GPU ms and no new memory at draw time (one less colour path; the depth-format ask is cached, so a few
+  glGet calls fewer a frame on the toned path).
+
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 
 - **Fewer rays sent back to the CPU:** the GPU ray tracer (src/bakert/rqx.comp) now calls a ray "unsure" only within
