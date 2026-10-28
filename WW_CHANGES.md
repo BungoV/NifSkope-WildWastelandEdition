@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane SHOTFIX1 (2026-10-28, branch shotfix1-20261028): the SHOTPASS1 defects, fixed or traced
+
+- **No mod note in a harness grab:** the "Mods differ from the far LOD bake" note (lane MODPICK1) is now left out of a
+  frame taken with WW_RENDER_CLEAN=1, like the Frame Timers. The log still says it. This note was the 468 px "far
+  foliage blob" that OPENREDS g10 reported: text drawn in one arm only. With the note masked, both cameras pass.
+- **Lit effects outdoors, no red left:** the red WW_CELL_FXLIT_EXT_RED=indoors (exteriors self-lit) is retired, with its
+  old path. SHOTPASS1 confirmed exterior lit effects live. The switch table is regenerated.
+- **Cost:** 0 ms GPU at 1080p and no memory. The note is a QPainter overlay that a grab no longer draws, and the
+  exterior lit-effect path was already the default.
+- Notes-side fixes (no build): the GIREBAKE3 bake script now gives each cell its own camera. The CHECKKIT1 hold no
+  longer passes its part filter (ONLY/SKIP) to the live runner. Evidence: notes/shotfix1/RESULTS.md.
+
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 
 - **Fewer rays sent back to the CPU:** the GPU ray tracer (src/bakert/rqx.comp) now calls a ray "unsure" only within

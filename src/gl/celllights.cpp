@@ -2233,7 +2233,7 @@ void wwCellLightsUniforms( Scene * scene )
 	 * base term: the game's lit-effect setup puts pow(directional colour, 2.2) x the light's fade x
 	 * the imagespace Sunlight Scale (the imagespace HDR data's 7th float, HNAM's 7th float) in
 	 * cb2[12]; the scene's directional outdoors is the sun. No ambient: the lit asm reads cb2 rows 0..14 only
-	 * (lights 0..11, base 12, alpha 13..14). Red WW_CELL_FXLIT_EXT_RED=indoors leaves exteriors self-lit.
+	 * (lights 0..11, base 12, alpha 13..14).
 	 * lane ALLON2 (2026-10-12, the Goodneighbor steam drew near-white): the game puts that same Sunlight Scale on the
 	 * SURFACES' sun too (the lit-surface and deferred-light setups both multiply the imagespace Sunlight Scale
 	 * in; checked in Todd's treat), so effect and wall keep a 1:1 sun. This
@@ -2245,7 +2245,6 @@ void wwCellLightsUniforms( Scene * scene )
 	 * shader's lit branch reads that effect colour. CommonwealthClear at noon: Sunlight 225 grey, Effect Lighting 150 grey
 	 * (0.41x linear); at night 53,70,87 vs 33,51,67. Red WW_CELL_FXLIT_COLOR_RED=sun takes the sunlight again. */
 	{
-		WW_SWITCH_STATIC( bool, fxExtRed, wwEnv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors" );
 		WW_SWITCH_STATIC( bool, fxScaleRed, wwEnv( "WW_CELL_FXLIT_SCALE_RED" ).trimmed() == "game" );
 		WW_SWITCH_STATIC( bool, fxColorRed, wwEnv( "WW_CELL_FXLIT_COLOR_RED" ).trimmed() == "sun" );
 		const bool fxProg = prog->name == std::string_view( "fo4_effectcell.prog" )
@@ -2256,7 +2255,7 @@ void wwCellLightsUniforms( Scene * scene )
 		float dalc[6][3];
 		if ( !L->interior && roomProg ) {
 			float base[3] = { 0.0f, 0.0f, 0.0f };
-			if ( !fxExtRed && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
+			if ( wwLookdevActive() && wwLookdevDalc( dalc ) ) {
 				float dif[4] = {}, amb[4] = {};
 				wwLookdevLight( dirTo, dif, amb );
 				float fxCol[3] = { dif[0], dif[1], dif[2] };
@@ -2269,7 +2268,7 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 			prog->uni3f( "cellFxBase", base[0], base[1], base[2] );
 		}
-		if ( !L->interior && fxProg && !fxExtRed && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
+		if ( !L->interior && fxProg && wwLookdevActive() && wwLookdevDalc( dalc ) ) {
 			float dif[4] = {}, amb[4] = {};
 			wwLookdevLight( dirTo, dif, amb );
 			float fxCol[3] = { dif[0], dif[1], dif[2] };
@@ -2302,8 +2301,7 @@ void wwCellLightsUniforms( Scene * scene )
 		} else if ( !L->interior && fxProg ) {
 			static bool fxSunSaid = false;
 			if ( !fxSunSaid ) {
-				fprintf( stderr, "cell fx sun: exterior lit effects take no sun (%s)\n",
-					fxExtRed ? "RED WW_CELL_FXLIT_EXT_RED=indoors" : "no weather loaded" );
+				fprintf( stderr, "cell fx sun: exterior lit effects take no sun (no weather loaded)\n" );
 				fxSunSaid = true;
 			}
 		}
