@@ -959,6 +959,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		Program * waterProg = useProgram( wwCellWaterProgram() );	// lane WATERCOMBINE1: or the water looks' twin
 		if ( !waterProg && std::string_view( wwCellWaterProgram() ) == "fo4_waterlookd.prog" )
 			waterProg = useProgram( "fo4_waterlook.prog" );	// lane WATERLOOK1 step 2: the displaced twin refused, the flat one
+		else if ( !waterProg && std::string_view( wwCellWaterProgram() ) == "fo4_waterlookdp.prog" )
+			waterProg = useProgram( "fo4_waterlookp.prog" );	// lane WATERFIX7: the same for the probe twins
 		if ( Program * program = waterProg ) {
 			if ( setupProgramCE1( nif, program, mesh ) && wwCellWaterUniforms( mesh->scene, mesh->id(), 0 ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,

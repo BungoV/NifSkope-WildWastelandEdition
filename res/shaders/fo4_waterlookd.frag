@@ -17,4 +17,7 @@
 #define WW_WATER_RIVERFOAM 1
 #define WW_WATER_UNDER 1
 #define WW_WATER_DISP 1
+#ifndef WW_WATER_PROBES	// lane WATERFIX7: as fo4_waterlook.frag; the probes in fo4_waterlookdp
+#define WW_WATER_NOPROBE 1
+#endif
 #include "fo4_water.frag"

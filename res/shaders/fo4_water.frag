@@ -633,6 +633,7 @@ void main()
 	vec3 outC = ( cellOn && cellIsOn ) ? ( cellIsLinear ? lin : cellImageSpace( s ) ) : tonemap( s );
 	fragColor = vec4( outC, 1.0 );
 
+#ifndef WW_WATER_NOPROBE	// lane WATERFIX7: the looks' shipping twins leave the probes to their probe twins (*p.prog)
 	if ( waterProbe > 0 ) {
 		vec3 o = vec3( 0.0 );
 		if ( waterProbe == 1 || waterProbe == 2 )
@@ -726,4 +727,5 @@ void main()
 #endif
 		fragColor = vec4( o, 1.0 );
 	}
+#endif
 }

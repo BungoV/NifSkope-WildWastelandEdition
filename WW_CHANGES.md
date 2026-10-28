@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WATERFIX7 (2026-10-28, branch waterfix7-20261028): water look cost, far water under decks, named texture units
+
+- **Merged water look back to its old cost:** the probe (debug) views of the water look made the shipping water
+  program hit a driver compile limit, and it cost about +0.2 ms at 1080p. The probe views now live in their own
+  programs (`fo4_waterlookp` / `fo4_waterlookdp`), used only while `WW_CELL_WATER_PROBE` is set. Cost of the shipping
+  look at 1080p: rows off 0.331 ms (chain 0.306, before this lane 0.504), all rows on 0.755 ms (chain 0.716, before 1.441).
+  No memory change.
+- **Far water under piers and decks (Commonwealth .lodl sky byte):** each 128-unit square now keeps up to 4 separate
+  height runs (a deck and the water under it stay apart). Before, the square was one slab from its lowest to its
+  highest surface. Piles and posts (steep pieces narrower than 64 units) are left out of the runs, so they no longer
+  turn a square into one solid block from floor to deck. 25608 of 31046 covered wet texels change: mean sky 0.291 ->
+  0.224 (19312 darker, 6296 brighter). Open water is unchanged. `--water-sky-one-slab` bakes the old one-slab bytes.
+  Cost: bake +0.2 s; runtime 0 GPU-ms and 0 memory (same 1-byte plane).
+- **Texture units by name:** the full-screen, HDR stencil, VRS and TAA passes take their units from `WwPassUnit`
+  (cellunits.h), and the particle soft-depth read moves from unit 9 to its own cell unit `FxDepth` (83).
+  `tests/spells/cell_units_check.py` now passes both checks (0 literal units in src/gl).
+- The under-water gates follow the WATERUNDER3 rule (radial red = uwRed bit 4); `spec_gate` names the 29a2fdda base.
+
 ## Lane HALLINDOOR1 (2026-10-28, branch hallindoor1-20261027): air under a glazed roof reads indoor
 
 - **The indoor rule's openings:** a point's sky ray (or a hit past the 1536-unit reach) that leaves through a room's

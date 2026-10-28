@@ -656,9 +656,48 @@ static QByteArray lodtPackPlane( int tilesX, int tilesY, int tileEdge,
  *  SLAB: each grid point's 128 u square holds [lo, hi] (quantised; lo 0 = down to the ground, hi 0 = none). The
  *  march is a DDA over the squares, centred on the grid points, and stops past `topMax` or the grid's edge. A
  *  texel inside its own slab (lo <= z) leaves its own square out, or every ray would start blocked. */
+/*! Lane WATERFIX7: one z run of a bake grid point's statics (quantised as the slab planes; lo 0 = to the ground). */
+struct LodtSkyRun
+{
+	quint32 k = 0;
+	quint16 lo = 0, hi = 0;
+};
+
+/*! Lane WATERFIX7: sort by point then lo, join runs within two quanta, and fill a point's smallest gaps until it
+ *  holds at most 4 (two squares may land on one point when the texel is over 128 u). */
+static void lodtSkyRunsClose( std::vector<LodtSkyRun> & v )
+{
+	std::sort( v.begin(), v.end(), []( const LodtSkyRun & x, const LodtSkyRun & y ) {
+		return x.k != y.k ? x.k < y.k : ( x.lo != y.lo ? x.lo < y.lo : x.hi < y.hi );
+	} );
+	size_t w = 0;
+	for ( size_t i = 0; i < v.size(); ) {
+		const size_t s0 = w;
+		const quint32 k = v[i].k;
+		for ( ; i < v.size() && v[i].k == k; i++ ) {
+			if ( w > s0 && int( v[i].lo ) <= int( v[w - 1].hi ) + 2 )
+				v[w - 1].hi = qMax( v[w - 1].hi, v[i].hi );
+			else
+				v[w++] = v[i];
+		}
+		while ( w - s0 > 4 ) {
+			size_t best = s0 + 1;
+			for ( size_t j = s0 + 2; j < w; j++ )
+				if ( int( v[j].lo ) - int( v[j - 1].hi ) < int( v[best].lo ) - int( v[best - 1].hi ) )
+					best = j;
+			v[best - 1].hi = qMax( v[best - 1].hi, v[best].hi );
+			for ( size_t j = best + 1; j < w; j++ )
+				v[j - 1] = v[j];
+			w--;
+		}
+	}
+	v.resize( w );
+}
+
 static float lodtSkySlabVis( const LodgenAoScene & terr, const Vector3 & o, float maxTScene, float kScale,
 	qint64 xb, qint64 yb, float z, const std::vector<quint16> & sLo, const std::vector<quint16> & sHi,
-	qint64 gwB, qint64 ghB, float texel, float quantum, float topMax, float allOpen )
+	qint64 gwB, qint64 ghB, float texel, float quantum, float topMax, float allOpen,
+	const std::vector<LodtSkyRun> * runs )
 {
 	const LodgenAoScene::SkyDir * sd = LodgenAoScene::skyDirs();
 	const float maxT = maxTScene * kScale;   // world units
@@ -678,7 +717,20 @@ static float lodtSkySlabVis( const LodgenAoScene & terr, const Vector3 & o, floa
 			if ( zIn > topMax )
 				return false;
 			const size_t k = size_t( iy * gwB + ix );
-			if ( sHi[k] && !( inside && k == k0 ) ) {
+			if ( sHi[k] && runs ) {
+				/* lane WATERFIX7: the point's several runs; on its own point only a run wholly above the start
+				 * blocks (the deck over the water, not the piles it stands among) */
+				auto it = std::lower_bound( runs->begin(), runs->end(), quint32( k ),
+					[]( const LodtSkyRun & r, quint32 v ) { return r.k < v; } );
+				for ( ; it != runs->end() && it->k == quint32( k ); ++it ) {
+					const bool toGround = it->lo == 0;
+					const float lo = ( float( it->lo ) - 32767.0f ) * quantum;
+					if ( k == k0 && ( toGround || lo <= z0 ) )
+						continue;
+					if ( zIn <= ( float( it->hi ) - 32767.0f ) * quantum && ( toGround || zOut >= lo ) )
+						return true;
+				}
+			} else if ( sHi[k] && !( inside && k == k0 ) ) {
 				const float hi = ( float( sHi[k] ) - 32767.0f ) * quantum;
 				const bool toGround = sLo[k] == 0;
 				const float lo = ( float( sLo[k] ) - 32767.0f ) * quantum;
@@ -1901,6 +1953,8 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 		 * under or inside a static marches those (lodtSkySlabVis) instead of the walls that bury it. */
 		std::vector<quint16> hTerr, sLoQ, sHiQ;
 		const bool slabs = in.opt.skySlabs;
+		std::vector<LodtSkyRun> sRuns;	// lane WATERFIX7: the slabs as several z runs a point (empty = one slab)
+		qint64 runSquares = 0;
 		if ( in.opt.skyStatics && in.staticTops ) {
 			QElapsedTimer stClock;
 			stClock.start();
@@ -1923,6 +1977,7 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 						wantC[size_t( y ) * size_t( cellsX ) + size_t( x )] = 1;
 			}
 			LodtStaticTops tops;
+			tops.wantRuns = slabs && !in.opt.skyOneSlab;
 			const bool got = in.staticTops( [&]( int wcx, int wcy ) {
 				const int x = wcx - in.minX, y = wcy - in.minY;
 				return x >= 0 && y >= 0 && x < cellsX && y < cellsY && wantC[size_t( y ) * size_t( cellsX ) + size_t( x )];
@@ -1936,6 +1991,7 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 					sLoQ.assign( hB.size(), quint16( 65535 ) );
 					sHiQ.assign( hB.size(), quint16( 0 ) );
 				}
+				size_t ri = 0;	// lane WATERFIX7: tops.runs walks with the squares (both row-major)
 				for ( int gy = 0; gy < tops.gh; gy++ )
 					for ( int gx = 0; gx < tops.gw; gx++ ) {
 						const size_t o = size_t( gy ) * size_t( tops.gw ) + size_t( gx );
@@ -1958,6 +2014,22 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 								32767.0 + std::floor( double( tops.lo[o] ) / double( in.quantum ) ), 65535.0 ) );
 							sHiQ[k] = qMax( sHiQ[k], qh );
 							sLoQ[k] = qMin( sLoQ[k], ql );
+							// lane WATERFIX7: the square's runs at the same point; the lowest reaches the ground as above
+							while ( ri < tops.runs.size() && tops.runs[ri].o < quint32( o ) )
+								ri++;
+							bool first = true;
+							for ( ; ri < tops.runs.size() && tops.runs[ri].o == quint32( o ); ri++ ) {
+								const LodtSlabRun & r = tops.runs[ri];
+								LodtSkyRun s;
+								s.k = quint32( k );
+								s.hi = quint16( qBound( 1.0, 32767.0 + std::ceil( double( r.hi ) / double( in.quantum ) ), 65535.0 ) );
+								s.lo = ( first && dry && r.lo <= ( float( hT[k] ) - 32767.0f ) * in.quantum + kWallGap )
+									? quint16( 0 ) : quint16( qBound( 1.0, 32767.0 + std::floor( double( r.lo ) / double( in.quantum ) ),
+									65535.0 ) );
+								sRuns.push_back( s );
+								runSquares += first;
+								first = false;
+							}
 						}
 						if ( tops.lo[o] > ( float( hT[k] ) - 32767.0f ) * in.quantum + kWallGap ) {
 							stCeil++;
@@ -1970,6 +2042,11 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 					}
 				for ( size_t k = 0; k < hB.size(); k++ )
 					stRaised += hB[k] != hT[k];
+				if ( tops.wantRuns ) {
+					lodtSkyRunsClose( sRuns );
+					if ( sRuns.empty() )	// no static left a run: an empty list must not read as the one-slab march
+						sRuns.push_back( LodtSkyRun() );
+				}
 				if ( !in.opt.skyDumpPath.isEmpty() ) {
 					QFile df( in.opt.skyDumpPath );
 					if ( df.open( QIODevice::WriteOnly ) ) {
@@ -1984,10 +2061,22 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 							df.write( reinterpret_cast<const char *>( sLoQ.data() ), qint64( sLoQ.size() * 2 ) );
 							df.write( reinterpret_cast<const char *>( sHiQ.data() ), qint64( sHiQ.size() * 2 ) );
 						}
+						if ( !sRuns.empty() ) {	// lane WATERFIX7: + "RUNS", u32 count, count x (u32 point, u16 lo, u16 hi)
+							const quint32 nr = quint32( sRuns.size() );
+							df.write( "RUNS", 4 );
+							df.write( reinterpret_cast<const char *>( &nr ), 4 );
+							for ( const LodtSkyRun & r : sRuns ) {
+								df.write( reinterpret_cast<const char *>( &r.k ), 4 );
+								df.write( reinterpret_cast<const char *>( &r.lo ), 2 );
+								df.write( reinterpret_cast<const char *>( &r.hi ), 2 );
+							}
+						}
 					}
 				}
 				stNote = QString( "statics %1 (%2 square(s), %3 ceiling(s) left out, %4 grid point(s) raised)" )
 					.arg( tops.census ).arg( stSquares ).arg( stCeil ).arg( stRaised );
+				if ( tops.wantRuns )
+					stNote += QString( "; sky slab runs: %1 over %2 square(s)" ).arg( qint64( sRuns.size() ) ).arg( runSquares );
 			} else {
 				stNote = QStringLiteral( "terrain only (the statics gather failed: %1)" ).arg( tops.census );
 			}
@@ -2069,7 +2158,7 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 							terrUp = true;
 						}
 						vis = lodtSkySlabVis( terr, p + Vector3( 0.0f, 0.0f, 2.0f ), kSkyReach / kSkyScale, kSkyScale,
-							xb, yb, z, sLoQ, sHiQ, gwB, ghB, texel, in.quantum, slabTop, allOpen );
+							xb, yb, z, sLoQ, sHiQ, gwB, ghB, texel, in.quantum, slabTop, allOpen, sRuns.empty() ? nullptr : &sRuns );
 						cv++;
 						if ( sLoQ[kb] != 0 && ( float( sLoQ[kb] ) - 32767.0f ) * in.quantum <= z + 8.0f )
 							cvIn++;

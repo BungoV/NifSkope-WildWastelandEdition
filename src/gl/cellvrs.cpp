@@ -3,6 +3,7 @@
 
 #include "gl/cellhdr.h"
 #include "gl/cellpasstime.h"
+#include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "gl/gametaa.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -35,8 +36,8 @@
 
 namespace {
 
-constexpr int kUnitSrc = 8;	// the units cellhdr's tone map used (free again once its quads are drawn)
-constexpr int kUnitMv = 9;
+constexpr int kUnitSrc = WwPassUnit::VrsSrc;	// the units cellhdr's tone map used (free again once its quads are drawn)
+constexpr int kUnitMv = WwPassUnit::VrsMv;
 constexpr int kPalette = 7;	// cell_vrs_rate.frag's indices: 1x1, 1x2, 2x1, 2x2, 2x4, 4x2, 4x4 (width x height)
 
 using BindImageFn = void ( * )( GLuint );

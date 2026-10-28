@@ -1,0 +1,4 @@
+# lane WATERFIX7: fo4_waterlook with the probes (the shipping look leaves them out: they tipped it over a compiler cliff).
+# No conditions: never picked for a shape; src/gl/cellwater.cpp wwCellWaterProgram names it while WW_CELL_WATER_PROBE is set.
+
+shaders fo4_default.vert fo4_waterlookp.frag
