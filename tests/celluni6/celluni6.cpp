@@ -392,6 +392,79 @@ static void hdrbegin()
 	check( l.stale == 1 && l.begin != lr.begin, "hdrbegin: WW_SETUP_MEMO_CHECK=1, a pass that leaves the read framebuffer moved: knownstale 1" );
 }
 
+// ---------------------------------------------------------------- 5. bsshape
+/* bsshape.cpp BSShape::drawShapes for one draw: setupProgram forgets the blend note and notes its own blend writes (a
+ * draw with no blend write leaves it unknown), the census hooks (the SSR water-ray hook turns blend off and says so:
+ * wwDrawGlCacheBlend), the X-ray blend after the setup (a whole frame in X-ray), then the draw's blend reads (the
+ * single-sample test outside the linear frame, the decal fade's two). A pick draws without setupProgram. */
+enum class BsMode { Green, Red, DocXrayUnnoted, DocPickTrusts, DocSetupWrong };
+struct BsOut
+{
+	std::vector<int> reads;
+	long long asks = 0;
+	std::uint64_t stale = 0;
+};
+static BsOut bsRun( BsMode m, bool check )
+{
+	resetKit();
+	WwCellUni::forgetBlend();
+	FakeGl gl;
+	BsOut out;
+	bool red = m == BsMode::Red;
+#ifdef CELLUNI6_RED_BSSHAPE
+	red = true;
+#endif
+	for ( int d = 0; d < 40; d++ ) {
+		const bool pick = d % 13 == 12, xray = d >= 30, waterRay = d % 7 == 3, decal = d % 5 == 1;
+		const int setupWrites = d % 3;	// 0 none, 1 blend on, 2 blend off
+		if ( !pick ) {
+			WwCellUni::forgetBlend();	// setupProgram's entry
+			if ( setupWrites == 1 ) {
+				gl.blend = true;
+				WwCellUni::noteBlend( !( m == BsMode::DocSetupWrong && d == 4 ) );	// the doctored setup notes it wrong
+			} else if ( setupWrites == 2 ) {
+				gl.blend = false;
+				WwCellUni::noteBlend( false );
+			}
+			if ( waterRay ) {
+				gl.blend = false;
+				WwCellUni::noteBlend( false );	// wwDrawGlCacheBlend( false )
+			}
+		} else {
+			gl.blend = d % 2 == 0;	// the pick's own program state
+		}
+		if ( xray && !pick ) {
+			gl.blend = true;
+			if ( m != BsMode::DocXrayUnnoted )
+				WwCellUni::noteBlend( true );
+		}
+		const bool held = ( m == BsMode::DocPickTrusts ? true : !pick ) && !red;
+		auto blendNow = [&]() { return WwCellUni::blendFor( held, check, [&]() { return gl.glIsEnabled( kBlend ); } ); };
+		out.reads.push_back( blendNow() ? 1 : 0 );	// the single-sample test
+		if ( decal ) {
+			out.reads.push_back( blendNow() ? 1 : 0 );	// viaAlpha
+			out.reads.push_back( blendNow() ? 1 : 0 );	// blendWas
+		}
+	}
+	out.asks = gl.asks[kBlend];
+	out.stale = WwCellUni::state().blendStale;
+	return out;
+}
+static void bsshape()
+{
+	const BsOut g = bsRun( BsMode::Green, false ), r = bsRun( BsMode::Red, false );
+	check( g.reads == r.reads, "bsshape: every blend read as the red's (40 draws: setup writes, water rays, X-ray, picks, decals)" );
+	std::printf( "     bsshape: blend asks green %lld red %lld\n", g.asks, r.asks );
+	check( g.asks * 2 < r.asks, "bsshape: green asks blend less than half as often" );
+	check( bsRun( BsMode::DocXrayUnnoted, false ).reads != r.reads, "bsshape: doctored, the X-ray blend outside the note differs" );
+	check( bsRun( BsMode::DocPickTrusts, false ).reads != r.reads, "bsshape: doctored, a pick trusting the last draw's note differs" );
+	const BsOut c = bsRun( BsMode::Green, true );
+	check( c.reads == r.reads && c.stale == 0, "bsshape: WW_SETUP_MEMO_CHECK=1: same reads, blendstale 0" );
+	const BsOut u = bsRun( BsMode::DocSetupWrong, true ), ur = bsRun( BsMode::DocSetupWrong, false );
+	check( ur.reads != r.reads, "bsshape: doctored, a setup that notes its blend wrong differs" );
+	check( u.stale == 1 && u.reads == r.reads, "bsshape: WW_SETUP_MEMO_CHECK=1 on it: blendstale 1, the driver's blend used" );
+}
+
 int main()
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -400,6 +473,7 @@ int main()
 	nonlinear();
 	hdrdepth();
 	hdrbegin();
+	bsshape();
 	std::printf( "%s (%d failed)\n", fails ? "CELLUNI6 FAIL" : "CELLUNI6 OK", fails );
 	return fails ? 1 : 0;
 }

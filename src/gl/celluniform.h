@@ -484,6 +484,20 @@ template <class F> bool targetFrom( F * fn, TargetNote & n, std::uint64_t frame,
 	return noted;
 }
 
+/* lane CELLUNI6 (bsshape): GL_BLEND for a shape's draw from its blend note (setupProgram's writes, the census hooks', the
+ * X-ray blend after it), when the draw's own setup made the note (not a pick); -1 in the note, or not held: asked.
+ * WW_SETUP_MEMO_CHECK=1 asks anyway, counts a wrong note (blendStale) and returns the driver's. */
+template <class Ask> bool blendFor( bool held, bool check, Ask ask )
+{
+	const int on = held ? blendNote().on : -1;
+	if ( on >= 0 && !check )
+		return on != 0;
+	const bool real = ask();
+	if ( on >= 0 && ( real ? 1 : 0 ) != on )
+		state().blendStale++;
+	return real;
+}
+
 /*! lane FRAMESPEED1: an owner (a Renderer) whose GL context was made again (a context loss) shows a new serial: what was
  *  cached for the old context (DepthCfg: the same fbo id and size may now hold another format) must be forgotten */
 struct CtxWatch

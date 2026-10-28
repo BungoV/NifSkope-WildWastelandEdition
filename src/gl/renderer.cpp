@@ -810,12 +810,14 @@ void wwDrawViewport( int vp[4] )
 void wwDrawGlCacheDirty()
 {
 	drawGl().blend = -1;
+	WwCellUni::blendNote().on = -1;	// lane CELLUNI6: the draw's blend note does not know it either (bsshape asks)
 }
 
 void wwDrawGlCacheBlend( bool on )
 {
 	DrawGlCache & c = drawGl();
 	c.blend = ( c.depth && !wwCellUniRed() ) ? ( on ? 1 : 0 ) : -1;	// lane CELLUNI4: the red asks again
+	WwCellUni::noteBlend( on );	// lane CELLUNI6: the note stays the draw's blend after the census (bsshape reads it)
 }
 
 bool wwCellAoLean()
