@@ -2901,12 +2901,35 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			keptKey = worldKey;
 		}
 	}
+	/* lane LANDSPEC7: the game loads a fixed world's cell only within uGridsToLoad / 2 of WCTR, so the open's block is
+	 * fitted inside WCTR +- 2 (src/landlodspec.h fixedBlock) before the camera, the far rings, the land-LOD block and
+	 * the streamer read it. Red WW_LANDSPEC_RED=fixedopen: the asked block. */
+	QString fixedOpenNote;
+	if ( !chunk && !spec.interior && LandLodSpec::fixedWorld( world.worldFlags() ) ) {
+		const int ax = spec.cx, ay = spec.cy, an = spec.n;
+		int fx = ax, fy = ay, fn = an;
+		const bool moved = LandLodSpec::fixedBlock( world.fixedCentreX(), world.fixedCentreY(),
+			LandLodSpec::kFixedGridHalf, fx, fy, fn );
+		const bool red = wwEnv( "WW_LANDSPEC_RED" ) == "fixedopen";
+		if ( moved && !red ) {
+			spec.cx = fx;
+			spec.cy = fy;
+			spec.n = fn;
+		}
+		fixedOpenNote = QStringLiteral( "  landspec: fixed world, WCTR %1,%2 +-%3: asked %4,%5 n%6 -> %7\n" )
+			.arg( world.fixedCentreX() ).arg( world.fixedCentreY() ).arg( LandLodSpec::kFixedGridHalf )
+			.arg( ax ).arg( ay ).arg( an )
+			.arg( !moved ? QStringLiteral( "inside, kept" )
+				: red ? QStringLiteral( "RED fixedopen: kept, %1,%2 n%3 is what the game loads" ).arg( fx ).arg( fy ).arg( fn )
+				: QStringLiteral( "%1,%2 n%3" ).arg( fx ).arg( fy ).arg( fn ) );
+		std::fprintf( stderr, "%s", qPrintable( fixedOpenNote.trimmed() + QLatin1Char( '\n' ) ) );
+	}
 	// lane CELLSPAWN1: where the window stands the camera when this open is a tab's first document (src/cellspawn.h)
-	QString spawnNote;
+	QString spawnNote = fixedOpenNote;
 	if ( !chunk ) {
 		const CellSpawn spawn = cellSpawnCompute( world, spec );
 		cellSpawnPublish( nif, spawn );
-		spawnNote = QStringLiteral( "  %1\n" ).arg( spawn.line() );
+		spawnNote += QStringLiteral( "  %1\n" ).arg( spawn.line() );
 	}
 
 	/* WHERE MODELS COME FROM. The spec's data root when it names one, else the

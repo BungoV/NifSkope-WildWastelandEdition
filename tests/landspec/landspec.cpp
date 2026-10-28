@@ -85,10 +85,19 @@ inline GlossSpec landRed( GlossSpec own, Mode, float, float, float = kScale ) { 
 #else
 #define FIXEDWORLD( f ) LandLodSpec::fixedWorld( f )
 #endif
+// lane LANDSPEC7 reds: -DLANDSPEC_RED_OUTER2 (LANDSPEC6's 32 x 32 at mip 1 past 125 cells: outer32),
+// -DLANDSPEC_RED_FIXEDOPEN (a fixed world's open keeps the asked block: fixedopen)
 #ifdef LANDSPEC_RED_OUTER
 #define OUTERFOR( cx, cy, x0, y0, x1, y1 ) LandLodSpec::Window{ 0, 0, 0 }
+#elif defined( LANDSPEC_RED_OUTER2 )
+#define OUTERFOR( cx, cy, x0, y0, x1, y1 ) LandLodSpec::outerFor( cx, cy, x0, y0, x1, y1, 2048, true )
 #else
 #define OUTERFOR( cx, cy, x0, y0, x1, y1 ) LandLodSpec::outerFor( cx, cy, x0, y0, x1, y1 )
+#endif
+#ifdef LANDSPEC_RED_FIXEDOPEN
+#define FIXEDBLOCK( wx, wy, g, cx, cy, n ) ( (void)( wx ), (void)( wy ), (void)( g ), (void)( cx ), (void)( cy ), (void)( n ), false )
+#else
+#define FIXEDBLOCK( wx, wy, g, cx, cy, n ) LandLodSpec::fixedBlock( wx, wy, g, cx, cy, n )
 #endif
 //! the per-layer pass before LANDSPEC4: bandNormal's target in the layer normal's own frame, unnormalized
 static LandLodSpec::V3 perLayerRaw( LandLodSpec::V3 n, LandLodSpec::V3 d, float v )
@@ -292,16 +301,95 @@ int main( int argc, char ** argv )
 				}
 		std::printf( "outer cells checked %ld, past the page %ld\n", cells, outerCells );
 		near( "outer holes within 60 cells (blocks 63 .. 201)", float( holes ), 0.0f );
-		near( "outer widest", float( widest ), float( kOuterMax ) );
+		near( "outer widest", float( widest ), float( kOuterMax2 ) );	// LANDSPEC7: 45 at mip 2 (LANDSPEC6: 32)
 		const Window o61 = OUTERFOR( 0, 0, -30, -30, 30, 30 );
 		near( "outer none for 61 x 61", float( o61.w ), 0.0f );
 		const Window o81 = OUTERFOR( 0, 0, -40, -40, 40, 40 );	// cells -40..40: chunks -40..40 = 21 a side
 		near( "outer 81 x 81 w", float( o81.w ), 21.0f );
 		near( "outer 81 x 81 fx", float( o81.fx ), -40.0f );
-		near( "outer bit words", float( kOuterBitWords ), 16.0f );
+		near( "outer bit words", float( kOuterBitWords ), 32.0f );	// LANDSPEC7: 2048 bits for 45 x 45 (LANDSPEC6: 16)
 		// memory: 256 x 256 BC3 and its 8 mips = 87,408 bytes a layer; 21^2 = 36.76 MiB, 32^2 = 85.36 MiB
 		near( "outer 81 x 81 MiB", float( 21 * 21 ) * 87408.0f / 1048576.0f, 36.76141f, 1e-3f );
 		near( "outer cap MiB", float( kOuterMax * kOuterMax ) * 87408.0f / 1048576.0f, 85.35938f, 1e-3f );
+	}
+	// LANDSPEC7: blocks wider than 32 chunks (129 x 129 .. 201 x 201) read the outer window from mip 2: whole to 45
+	// chunks a side (177 cells), paged past it; every block cell within kOuterReach2 (84) of the camera holds a layer
+	{
+		long cells = 0, holes = 0, outside = 0;
+		for ( int half = 64; half <= 100; half += 4 )
+			for ( int camX = -half; camX <= half; camX += 11 )
+				for ( int camY = -half; camY <= half; camY += 11 ) {
+					const Window w = WINDOWWIDE( camX, camY, -half, -half, half, half );
+					const Window o = OUTERFOR( camX, camY, -half, -half, half, half );
+					for ( int x = std::max( -half, camX - kOuterReach2 ); x <= std::min( half, camX + kOuterReach2 ); x++ )
+						for ( int y = std::max( -half, camY - kOuterReach2 ); y <= std::min( half, camY + kOuterReach2 ); y++ ) {
+							cells++;
+							if ( windowLayer( x, y, w.fx, w.fy, w.w ) >= 0 )
+								continue;
+							holes += o.w > 0 && windowLayer( x, y, o.fx, o.fy, o.w ) >= 0 ? 0 : 1;
+						}
+					if ( half <= 88 )	// whole: every block cell, however far from the camera
+						for ( int x = -half; x <= half; x++ )
+							for ( int y = -half; y <= half; y++ )
+								outside += windowLayer( x, y, w.fx, w.fy, w.w ) >= 0
+									|| ( o.w > 0 && windowLayer( x, y, o.fx, o.fy, o.w ) >= 0 ) ? 0 : 1;
+				}
+		std::printf( "outer2 cells checked %ld\n", cells );
+		near( "outer2 holes within 84 cells (blocks 129 .. 201)", float( holes ), 0.0f );
+		near( "outer2 holes anywhere (blocks 129 .. 177)", float( outside ), 0.0f );
+		const Window o129 = OUTERFOR( 0, 0, -64, -64, 64, 64 );	// cells -64..64: chunks -64..64 = 33 a side
+		near( "outer2 129 x 129 w", float( o129.w ), 33.0f );
+		near( "outer2 129 x 129 mip", float( o129.mip ), float( kOuterMip2 ) );
+		const Window o177 = OUTERFOR( 80, -80, -88, -88, 88, 88 );	// 45 a side, whole wherever the camera stands
+		near( "outer2 177 x 177 w", float( o177.w ), 45.0f );
+		near( "outer2 177 x 177 fx", float( o177.fx ), -88.0f );
+		const Window o125 = OUTERFOR( 0, 0, -62, -62, 62, 62 );	// 32 a side: LANDSPEC6's mip 1 unchanged
+		near( "outer 125 x 125 w", float( o125.w ), 32.0f );
+		near( "outer 125 x 125 mip", float( o125.mip ), float( kOuterMip ) );
+		// the Commonwealth's bounds (-96..96: 49 chunks, 2401 layers > 2048) page 45 round the camera (chunk 21 in)
+		const Window oc = OUTERFOR( 0, 0, -96, -96, 96, 96 );
+		near( "outer2 Commonwealth w", float( oc.w ), 45.0f );
+		near( "outer2 Commonwealth fx", float( oc.fx ), -84.0f );
+		// the driver's layer limit: 2048 -> 45, 1600 -> 40, 1024 -> none past 32 (LANDSPEC6's page)
+		near( "outer2 cap 2048 layers", float( outerCap2( 2048 ) ), 45.0f );
+		near( "outer2 cap 1600 layers", float( outerCap2( 1600 ) ), 40.0f );
+		near( "outer2 cap 1024 layers", float( outerCap2( 1024 ) ), 0.0f );
+		near( "outer2 1024-layer driver w", float( outerFor( 0, 0, -88, -88, 88, 88, 1024 ).w ), 32.0f );
+		// memory: 128 x 128 BC3 and its 7 mips = 21,872 B a layer (256 x 256: 87,408); 33^2 = 22.72 MiB, 45^2 = 42.24 MiB
+		near( "outer mip 1 layer bytes", float( arrayBytes( 256, 256, 9, 1 ) ), 87408.0f );
+		near( "outer2 mip 2 layer bytes", float( arrayBytes( 128, 128, 8, 1 ) ), 21872.0f );
+		near( "outer2 129 x 129 MiB", float( arrayBytes( 128, 128, 8, 33 * 33 ) ) / 1048576.0f, 22.71519f, 1e-3f );
+		near( "outer2 cap MiB", float( arrayBytes( 128, 128, 8, 45 * 45 ) ) / 1048576.0f, 42.23900f, 1e-3f );
+	}
+	// LANDSPEC7: a fixed world's open is fitted inside WCTR +- 2 (the cells the game loads: uGridsToLoad 5)
+	{
+		int x = 10, y = 10, n = 5;	// DiamondCity WCTR (0, 0), opened at 10, 10 n5
+		near( "fixed open moved", float( FIXEDBLOCK( 0, 0, kFixedGridHalf, x, y, n ) ), 1.0f );
+		near( "fixed open far x", float( x ), 0.0f );
+		near( "fixed open far n", float( n ), 5.0f );
+		x = 1, y = 0, n = 3;	// inside: kept
+		near( "fixed open inside kept", float( FIXEDBLOCK( 0, 0, kFixedGridHalf, x, y, n ) ), 0.0f );
+		x = 3, y = -1, n = 3;	// one past the edge: moved in to 1, -1
+		FIXEDBLOCK( 0, 0, kFixedGridHalf, x, y, n );
+		near( "fixed open edge x", float( x ), 1.0f );
+		x = 0, y = 0, n = 7;	// wider than the grid: 5
+		FIXEDBLOCK( 0, 0, kFixedGridHalf, x, y, n );
+		near( "fixed open wide n", float( n ), 5.0f );
+		x = 0, y = 0, n = 1;	// NukaWorldMarket WCTR (0, -5), opened at 0, 0 n1: 0, -3
+		FIXEDBLOCK( 0, -5, kFixedGridHalf, x, y, n );
+		near( "fixed open NukaWorldMarket y", float( y ), -3.0f );
+		long outside = 0;	// every open from -12..12 n1..9: no block cell past WCTR +- 2
+		for ( int ox = -12; ox <= 12; ox++ )
+			for ( int oy = -12; oy <= 12; oy++ )
+				for ( int on = 1; on <= 9; on += 2 ) {
+					int bx = ox, by = oy, bn = on;
+					FIXEDBLOCK( -1, -5, kFixedGridHalf, bx, by, bn );
+					const int h = ( bn - 1 ) / 2;
+					for ( int cx = bx - h; cx <= bx + h; cx++ )
+						for ( int cy = by - h; cy <= by + h; cy++ )
+							outside += std::abs( cx + 1 ) > kFixedGridHalf || std::abs( cy + 5 ) > kFixedGridHalf ? 1 : 0;
+				}
+		near( "fixed open cells past WCTR +- 2", float( outside ), 0.0f );
 	}
 	// LANDSPEC6: "Fixed Dimensions" (WRLD DATA 0x40): DiamondCity 0xD9, DiamondCityFX 0x51, NukaWorld 0x41; the
 	// Commonwealth 0x00. The blend centre is the WCTR cell's middle in scene units and the streamed block stays on WCTR.
@@ -417,7 +505,7 @@ int main( int argc, char ** argv )
 			"baseMap.rgb *= noiseK;	// lane LANDSPEC4", "vec3( -dd, sqrt( 1.0 - min( dot( dd, dd ), 1.0 ) ) )",
 			"normal = landSplat ? landDetailSplatN(",
 			// LANDSPEC6: the outer window past the page, its 16 bit words
-			"uniform sampler2DArray LandLodOuter;", "uniform vec4 landLodOuterBits[16];",
+			"uniform sampler2DArray LandLodOuter;", "uniform vec4 landLodOuterBits[32];",	// LANDSPEC7: 32 words
 			"} else if ( landLodOuter.z > 0.5 ) {", "int ko = co.x + nO * co.y;",
 			"( ( int( landLodOuterBits[ko >> 6][( ko >> 4 ) & 3] ) >> ( ko & 15 ) ) & 1 ) != 0" } );
 		must( t, "pbrm_default.frag", { "1.0 - clamp( ( landLodK.z - distance( cellWorldPos( -ViewDir ).xy, landLod.yz ) ) * landLodK.w, 0.0, 1.0 )",

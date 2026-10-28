@@ -321,8 +321,9 @@ uniform vec4 landLodBits[4];	// lane LANDSPEC4: the bound layers, 16 a component
 uniform sampler2DArray LandLodDiff;	// lane LANDSPEC3: the 4 x 4 level-4 LOD diffuse chunks round the camera (clamped)
 // lane LANDSPEC6: past the page (a block wider than 61 cells), the outer window: xy its corner (world), z its chunks a
 // side (0 none), its bound layers 64 a vec4 (32 x 32), each a chunk's mip 1
+// lane LANDSPEC7: up to 45 x 45 (2025 layers, 32 vec4) at mip 2 past 32 chunks a side
 uniform vec4 landLodOuter;
-uniform vec4 landLodOuterBits[16];
+uniform vec4 landLodOuterBits[32];
 uniform sampler2DArray LandLodOuter;
 uniform sampler2D LandLodNoise;
 uniform sampler2D LandLodDetail;
