@@ -93,3 +93,6 @@ for secs, wait_h, f in ((270.0, 0.0, -1.0), (600.0, 0.0, -1.0), (180.0, 1.0, -1.
     print('pct integral %.0f s wait %.0f h accel %.1f = %.4f' % (secs, wait_h, f, integral(secs, wait_h, f)))
 # the one scroll: 0.25 + 0.5 x 0.1 x 10 + (1.5 - 0.5) x 0.1 x 4, wrapped; wind 200 / 51 at 30%
 print('one scroll %.4f' % ((0.25 + 0.05 * 10 + 0.1 * 4) % 1.0), 'wind %.4f' % (200 * 0.3 + 51 * 0.7))
+# lane WEATHERBLEND6: the walk samples on the first 16 ms frame at least 250 ms after the last (every 256 ms);
+# at 600 units/s the first sample past the border x 8192 lies within 600 x 0.256 units of it
+print('walk sample every %d ms, re-pick within %.1f units past the border' % (16 * math.ceil(250 / 16), 600 * 0.256))

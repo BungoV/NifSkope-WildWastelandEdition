@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane WEATHERBLEND6 (2026-10-28, branch weatherblend6-20261028): the region weather follows the streamed camera
+
+- **Re-pick on a border:** in a streamed exterior cell view the camera moves like the player; when its cell or the set
+  of regions counting under it changes, the region choice runs again by the WEATHERBLEND5 rules (the camera's eye,
+  deleted / other-worldspace / no-area regions skipped, override and priority). Entering a new region applies the
+  follow law: the current weather is kept when the region lists it and u01 > elapsed/duration, else that region's
+  draw (seeded by the cell the border is crossed in) starts its weather through the existing weather change (a pick
+  during a change waits for its end). The first sample after an open or a teleport only sets the baseline.
+- **Cost:** sampled at most every 250 ms and only after the camera moved; the region areas are tested only then, never
+  per frame. The camera cell's region list (XCLR) is read once each time the camera enters a cell.
+- **Census:** a stderr line on each re-pick: `lookdev region walk: cell x,y region A -> B, weather kept|changed W[ -> W2]:
+  <why>` (why: the duration rule, u01 against elapsed/duration, not listed, the draw, no region); the echo's `region=`
+  reads `B:<weather|keep>(walk A->B kept|changed)`.
+- **Weather box:** follows a re-pick's weather, and its tooltip names the current region ("Region: <EditorID>").
+- **Red:** `WW_CELL_REGION_RED=spawnonly` keeps the old behavior (the teleport's pick only).
+- **Tests:** tests/weatherblend gains a synthetic two-region path (section 17: one re-pick at the border, the keep rule,
+  none inside one region or while still, the 250 ms throttle) and `run_linux.sh` (system g++ and Qt6Core); the switch
+  red and the base build fail the crossing.
+
 ## Lane WEATHERBLEND5 (2026-10-28, branch weatherblend5-20261028): region weather by the game's rules, the fog drift fixes
 
 - **Which regions count:** a region with no area (no RPLD) is never inside, as in the game; a deleted region and a

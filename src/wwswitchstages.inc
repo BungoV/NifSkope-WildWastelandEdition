@@ -454,6 +454,7 @@
 { "WW_CELL_REFLPROBE_RED", 0, "src/gl/cellreflprobe.cpp:70 rps | re-read per frame or per call (a)" },
 { "WW_CELL_REFLPROBE_TIME", 0, "src/gl/cellreflprobe.cpp:831 wwCellReflProbePass | re-read per frame or per call (a)" },
 { "WW_CELL_REFS_RED", 1, "src/cellview.cpp:3042 cellBuild | read while the cell document is built" },
+{ "WW_CELL_REGION_RED", 0, "src/gl/lookdevstage.cpp:599 regionWalk | re-read per frame or per call (a)" },
 { "WW_CELL_ROOMCLAMP_PIN", 1, "src/cellview.cpp:3977 cellBuild | read while the cell document is built" },
 { "WW_CELL_ROOMS_RED", 1, "src/cellview.cpp:6604 cellBuild | read while the cell document is built" },
 { "WW_CELL_SHADOW", 0, "src/gl/celllights.cpp:221 st | init-once state, re-read when a live set moves its prefix (b)" },

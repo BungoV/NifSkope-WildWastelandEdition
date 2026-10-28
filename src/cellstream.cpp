@@ -5,6 +5,7 @@
 #include "cellfarhide.h"	// lane FARHOLE2: the far field leaves room for every loaded cell
 #include "cellmesh.h"
 #include "cellsplat.h"
+#include "esmdata.h"		// lane WEATHERBLEND6: the camera cell's regions
 #include "landlodspec.h"	// lane LANDSPEC6: streamCentre
 #include "impostorchunk.h"
 #include "gl/bsshape.h"
@@ -192,6 +193,7 @@ public:
 	//! lane LANDSPEC7: a fixed world builds no cell round the eye past WCTR +- 2: the block never moves there, and the
 	//! game never loads those cells (red WW_LANDSPEC_RED=fixedopen: the prefetch row is built)
 	bool noPrefetch = false;
+	CellStreamCamera cam;         //!< lane WEATHERBLEND6: the eye's cell and its regions, for the region walk
 
 	~Stream() override
 	{
@@ -1020,6 +1022,17 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	// the row the next move needs, as soon as the eye is in the neighbour cell
 	prefetch.clear();
 	const int ex = cellOf( eye[0] ), ey = cellOf( eye[1] );
+	if ( !cam.valid || ex != cam.cx || ey != cam.cy ) {	// lane WEATHERBLEND6: the regions read on entering a cell only
+		cam.valid = true;
+		cam.cx = ex;
+		cam.cy = ey;
+		cam.cellForm = 0;
+		cam.regions = seed && seed->world ? seed->world->cellRegions( ex, ey, &cam.cellForm ) : QVector<quint32>();
+		cam.world = seed && seed->world ? seed->world->worldspace() : 0;
+		cam.gen++;
+	}
+	cam.eye[0] = eye[0];
+	cam.eye[1] = eye[1];
 	for ( int dy = -2; dy <= 2; dy++ )
 		for ( int dx = -2; dx <= 2; dx++ )
 			if ( !noPrefetch && !wanted.count( Key( ex + dx, ey + dy ) ) )
@@ -1254,6 +1267,12 @@ bool cellStreamTick( NifModel * nif, Scene * scene, const Vector3 & eye )
 {
 	Stream * s = streamFor( nif );
 	return ( s && nif ) ? s->tick( scene, eye ) : false;
+}
+
+const CellStreamCamera * cellStreamCamera( const NifModel * nif )
+{
+	const Stream * s = nif ? streamFor( nif ) : nullptr;
+	return ( s && s->cam.valid ) ? &s->cam : nullptr;
 }
 
 void cellStreamSnapCentre( const Vector3 & eye )

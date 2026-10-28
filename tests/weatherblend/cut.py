@@ -44,7 +44,15 @@ LAWS = [('void wwImageSpaceSlots(',
         ('double wwWeatherElapsedHours(', 'double wwWeatherElapsedHours(double,double)\n{\n\treturn 0.0;\n}\n'),
         ('quint32 wwRegionWeatherFollow(',
          'quint32 wwRegionWeatherFollow(const WwRegionWeatherEntry*e,int n,quint32 cur,bool,double,double,quint32 d,double)\n{\n'
-         '\tfor(int i=0;i<n;i++)if(cur&&e[i].weather==cur)return cur;\n\treturn wwRegionWeatherPick(e,n,d);\n}\n')]
+         '\tfor(int i=0;i<n;i++)if(cur&&e[i].weather==cur)return cur;\n\treturn wwRegionWeatherPick(e,n,d);\n}\n'),
+        # lane WEATHERBLEND6: the base's behavior: the spawn pick only, a border never re-picks
+        ('bool wwRegionWalkDue(', 'bool wwRegionWalkDue(const WwRegionWalk&w,qint64,int,int,const float*)\n{\n\treturn !w.started;\n}\n'),
+        ('bool wwRegionWalkSample(',
+         'bool wwRegionWalkSample(WwRegionWalk&w,qint64,int,int,const float*,QVector<quint32>,quint32 c,int)\n{\n'
+         '\tif(!w.started)w.region=c;\n\tw.started=true;\n\tw.samples++;\n\treturn false;\n}\n'),
+        ('quint32 wwRegionWalkFollow(',
+         'quint32 wwRegionWalkFollow(const WwRegionWeatherEntry*,int,quint32 cur,double,double,quint32,double,QString*)\n{\n'
+         '\treturn cur;\n}\n')]
 
 
 def cut(path, sig):
