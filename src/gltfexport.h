@@ -78,6 +78,7 @@ struct GltfExportMesh
 	float alphaCutoff = 0.5f;                 //!< MASK only
 	bool doubleSided = true;
 	QVector<QPair<QString, QString>> materialExtras;   //!< string extras written after nifTexturePath
+	QVector<QVector<float>> colorSets;        //!< COLOR_0, COLOR_1..: 4 linear floats per vertex each; empty = none
 };
 
 //! Per-frame local TRS for one node. Any of the three may be empty (that

@@ -3,12 +3,14 @@
 #include "gltfexportcell.h"
 
 #include "cellground.h"
+#include "cellvertexalpha.h"
 #include "cellview.h"
 #include "esmdata.h"
 #include "gltfexport.h"
 #include "lodgen.h"
 #include "nativeemit.h"
 #include "wwswitch.h"
+#include "io/material.h"
 #include "model/nifmodel.h"
 
 #include <QDir>
@@ -74,7 +76,52 @@ public:
 	QSet<QString> textures;        // relative "textures/..." paths the materials name
 	QHash<QString, QVector<int>> meshesOf;   // model key -> its glTF meshes (one per drawn shape)
 	int placementsSeen = 0, placementsKept = 0, placementsEmpty = 0, shapesSkipped = 0, landQuads = 0;
+	int meshesColored = 0, meshesDecal = 0, landLayers = 0, ltexFromMaterial = 0, ltexUnresolved = 0;
 	qint64 trisPlaced = 0;
+	float decalOffset = 1.0f;      // game units pushed along the normal: Blender has no depth bias for coplanar decals
+
+	// FO4 vertex colours multiply the gamma-space diffuse; glTF COLOR_n is linear
+	static float linearOf( quint8 b ) { return std::pow( b / 255.0f, 2.2f ); }
+
+	// an LTEX's diffuse and normal; a material-backed TXST names a .bgsm, whose own slots answer (as lodgen reads them)
+	void ltexResolve( const EsmWorld & world, quint32 ltex, QString & diffuse, QString & normal )
+	{
+		diffuse.clear();
+		normal.clear();
+		if ( !ltex )
+			return;
+		world.ltexTextures( ltex, diffuse, normal );
+		const EsmLtexTextureSet & set = world.ltexTextureSet( ltex );
+		QString mat = set.material;
+		if ( mat.isEmpty() && diffuse.endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive ) )
+			mat = diffuse;
+		if ( mat.isEmpty() )
+			return;
+		diffuse.clear();
+		normal.clear();
+		mat = mat.toLower();
+		mat.replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) );
+		const int mi = mat.lastIndexOf( QLatin1String( "materials/" ) );
+		if ( mi > 0 )
+			mat.remove( 0, mi );
+		else if ( mi < 0 )
+			mat.prepend( QLatin1String( "materials/" ) );
+		QByteArray bytes;
+		if ( lodgenReadAssetBytes( dataRoot, mat, "materials", ".bgsm", bytes ) ) {
+			const ShaderMaterial sm( bytes );
+			if ( sm.isValid() ) {
+				const QStringList & t = sm.textures();
+				if ( t.size() > 0 )
+					diffuse = t[0];
+				if ( t.size() > 1 )
+					normal = t[1];
+			}
+		}
+		if ( diffuse.isEmpty() )
+			ltexUnresolved++;
+		else
+			ltexFromMaterial++;
+	}
 
 	bool want( float x, float y ) const
 	{
@@ -139,16 +186,42 @@ public:
 						m.indices << a << b << e << a << e << d;
 					}
 				QString diffuse, normal;
-				if ( land.baseTex[q] )
-					world.ltexTextures( land.baseTex[q], diffuse, normal );
-				m.materialName = QStringLiteral( "land_%1" ).arg( land.baseTex[q], 8, 16, QLatin1Char( '0' ) );
+				ltexResolve( world, land.baseTex[q], diffuse, normal );
+				m.materialName = m.name;   // the paint differs per quadrant, so the material does too
 				m.diffuseSourcePath = diffuse;
 				m.diffuseUri = tex( diffuse );
 				m.normalUri = tex( normal );
 				m.doubleSided = false;
 				m.materialExtras.append( { QStringLiteral( "ltex" ),
 					QStringLiteral( "%1" ).arg( land.baseTex[q], 8, 16, QLatin1Char( '0' ) ) } );
-				m.materialExtras.append( { QStringLiteral( "paintLayers" ), QString::number( land.layers[q].size() ) } );
+				/* COLOR_0 = the LAND's vertex colours (white without VCLR); COLOR_1.. = the ATXT/VTXT layer opacities,
+				 * four layers per set in paint order, layerN* extras name each layer's textures. */
+				QVector<float> vc;
+				vc.reserve( 17 * 17 * 4 );
+				for ( int r = r0; r <= r0 + 16; r++ )
+					for ( int k = c0; k <= c0 + 16; k++ )
+						for ( int ch = 0; ch < 4; ch++ )
+							vc.append( ch < 3 && land.hasColors ? linearOf( land.colors[r][k][ch] ) : 1.0f );
+				m.colorSets.append( vc );
+				int nl = 0;
+				for ( const EsmLandLayer & L : land.layers[q] ) {
+					QString ld, ln;
+					ltexResolve( world, L.ltex, ld, ln );
+					if ( ld.isEmpty() )
+						continue;
+					if ( nl % 4 == 0 )
+						m.colorSets.append( QVector<float>( 17 * 17 * 4, 0.0f ) );
+					QVector<float> & w = m.colorSets.last();
+					for ( int r = 0; r <= 16; r++ )
+						for ( int k = 0; k <= 16; k++ )
+							w[( r * 17 + k ) * 4 + nl % 4] = L.opacity[r][k];
+					m.materialExtras.append( { QStringLiteral( "layer%1" ).arg( nl ), tex( ld ) } );
+					if ( !ln.isEmpty() )
+						m.materialExtras.append( { QStringLiteral( "layer%1Normal" ).arg( nl ), tex( ln ) } );
+					nl++;
+				}
+				landLayers += nl;
+				m.materialExtras.append( { QStringLiteral( "paintLayers" ), QString::number( nl ) } );
 				m.node = node( m.name, landNode );
 				scene.meshes.append( m );
 				landQuads++;
@@ -184,6 +257,24 @@ public:
 			for ( quint32 t : g.tris )
 				m.indices.append( t );
 			const NearShapeFacts & f = s.nearFacts;
+			// filled only when the shape has a colour channel AND the Vertex_Colors flag (lodofile.h)
+			const bool coloured = g.rgba.size() == nv * 4;
+			// A is opacity only where the game uses it so; a tree's vertex alpha is its wind weight (cellvertexalpha.h)
+			const bool alphaKept = coloured
+				&& wwCellKeepsVertexAlpha( true, f.effectShader, false, g.vertexAlpha, f.treeAnim, false );
+			if ( coloured ) {
+				QVector<float> vc( int( nv * 4 ) );
+				for ( size_t v = 0; v < nv * 4; v++ )
+					vc[int( v )] = v % 4 != 3 ? linearOf( g.rgba[v] ) : alphaKept ? g.rgba[v] / 255.0f : 1.0f;
+				m.colorSets.append( vc );
+				meshesColored++;
+			}
+			const bool decal = f.decal;   // the shape's flags OR'd with its .bgsm's (lodgen.cpp)
+			if ( decal && decalOffset > 0.0f && m.normals.size() == m.positions.size() ) {
+				for ( int v = 0; v < m.positions.size(); v++ )
+					m.positions[v] += m.normals[v] * decalOffset;
+				meshesDecal++;
+			}
 			const QString diffuse = s.tex0.isEmpty() ? s.effectTex0 : s.tex0;
 			m.materialName = s.matName.isEmpty() ? m.name : s.matName;
 			m.diffuseSourcePath = diffuse;
@@ -205,16 +296,21 @@ public:
 			extra( "specularTexture", f.effectShader ? QString() : texRel( s.tex7 ) );   // R specular, G gloss
 			extra( "glowTexture", texRel( s.glowTex ) );
 			extra( "greyscaleTexture", s.g2p ? texRel( s.g2pTex ) : QString() );
+			// the game's palette lookup: albedo = palette( diffuse G, paletteScale x vertex R ) (fo4_default.frag)
+			extra( "paletteScale", s.g2p && !s.g2pTex.isEmpty() ? QString::number( s.g2pScale ) : QString() );
 			extra( "smoothness", f.effectShader ? QString() : QString::number( s.smoothness ) );
 			extra( "specularMult", f.effectShader ? QString() : QString::number( s.specMult ) );
 			if ( s.ownEmit || s.glowFlag )
 				extra( "emitColor", QStringLiteral( "%1 %2 %3 x%4" ).arg( s.emitColor[0] ).arg( s.emitColor[1] )
 					.arg( s.emitColor[2] ).arg( s.emitMult ) );
 			extra( "effect", f.effectShader ? QStringLiteral( "1" ) : QString() );
-			extra( "decal", f.decal ? QStringLiteral( "1" ) : QString() );
-			extra( "vertexColors", f.vertexColour ? QStringLiteral( "not written" ) : QString() );
+			extra( "decal", decal ? QString::number( decalOffset ) : QString() );
+			extra( "vertexColors", coloured ? QStringLiteral( "COLOR_0" ) : QString() );
+			extra( "vertexAlpha", alphaKept ? QStringLiteral( "1" ) : QString() );
 			if ( !s.glowTex.isEmpty() )
 				tex( s.glowTex );
+			if ( s.g2p && !s.g2pTex.isEmpty() )
+				tex( s.g2pTex );
 			if ( !f.effectShader && !s.tex7.isEmpty() )
 				tex( s.tex7 );
 			out.append( scene.meshes.size() );
@@ -260,7 +356,7 @@ public:
 void usage( const QString & why )
 {
 	std::fprintf( stderr, "gltf-cell: %s\nusage: gltf-cell \"plugins|world|x,y|n\"|<file.wwcell> --out <abs .gltf> "
-		"[--cells x,y ...] [--origin x,y,z] [--textures copy|none] [--terrain on|off]\n", qPrintable( why ) );
+		"[--cells x,y ...] [--origin x,y,z] [--textures copy|none] [--terrain on|off] [--decal-offset units]\n", qPrintable( why ) );
 }
 
 bool parseTriple( const QString & s, float * v, int n )
@@ -302,6 +398,8 @@ int gltfCellCli( const QStringList & args )
 			i++;
 		} else if ( a == QLatin1String( "--terrain" ) && ( v == QLatin1String( "on" ) || v == QLatin1String( "off" ) ) ) {
 			sink.terrain = v == QLatin1String( "on" );
+			i++;
+		} else if ( a == QLatin1String( "--decal-offset" ) && parseTriple( v, &sink.decalOffset, 1 ) ) {
 			i++;
 		} else if ( a == QLatin1String( "--cells" ) ) {
 			float xy[2];
@@ -399,9 +497,12 @@ int gltfCellCli( const QStringList & args )
 	for ( const QString & m : missed )
 		std::printf( "gltf-cell: texture missing %s\n", qPrintable( m ) );
 	std::printf( "MEASURED placements_seen=%d placements=%d placements_empty=%d models=%d meshes=%d nodes=%d "
-		"land_quads=%d shapes_skipped=%d tris_placed=%lld textures=%d copied=%d missing=%d origin=%g,%g,%g\n",
+		"land_quads=%d land_layers=%d ltex_bgsm=%d ltex_unresolved=%d meshes_coloured=%d meshes_decal=%d "
+		"decal_offset=%g shapes_skipped=%d tris_placed=%lld textures=%d copied=%d missing=%d origin=%g,%g,%g\n",
 		sink.placementsSeen, sink.placementsKept, sink.placementsEmpty, int( sink.meshesOf.size() ),
-		int( sink.scene.meshes.size() ), int( sink.scene.nodes.size() ), sink.landQuads, sink.shapesSkipped,
+		int( sink.scene.meshes.size() ), int( sink.scene.nodes.size() ), sink.landQuads, sink.landLayers,
+		sink.ltexFromMaterial, sink.ltexUnresolved, sink.meshesColored, sink.meshesDecal, double( sink.decalOffset ),
+		sink.shapesSkipped,
 		sink.trisPlaced, int( sink.textures.size() ), copied, missing, sink.origin[0], sink.origin[1], sink.origin[2] );
 	return 0;
 }

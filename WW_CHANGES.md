@@ -22,8 +22,19 @@
   misses are LTEX entries that name a .bgsm, not a texture. The top corner of the export's box matches the
   probe-soup OBJ of the same cells within 0.1 m. West and south it reaches up to 16 m further, from models placed in
   these cells that stick out past the cell edge.
-- **Not written yet:** vertex colors, LAND paint layers and vertex colors, the greyscale palette, billboard
-  turning, interiors.
+- **Fixes after bungo's first look in Blender (same lane):**
+  - Vertex colors go out as `COLOR_0` (linear; the game multiplies the gamma-space diffuse). The alpha is opacity
+    only where the game reads it so (`wwCellKeepsVertexAlpha`); a tree's vertex alpha is its wind weight, and the
+    first try cut the maple trunks away.
+  - The greyscale palette: `paletteScale` beside `greyscaleTexture`, and the palette is copied. The game draws
+    albedo = palette(diffuse G, scale x vertex R), and that is where the purple bricks and trim came from.
+  - Decals (shape or .bgsm flag) are pushed `--decal-offset` units along the normal (default 1, 1.4 cm), because
+    Blender has no depth bias. 229 meshes in the store.
+  - LAND: material-backed LTEX resolve through the .bgsm's own slots (the 3 misses are gone). Each quadrant
+    writes `COLOR_0` = VCLR and `COLOR_1..` = ATXT/VTXT opacities (four layers per set, paint order), and names
+    its layers in `layerN` / `layerNNormal` extras: 56 layers over 16 quadrants.
+  - The writer's `colorSets` field is empty for a character, so MaleBody.nif is still byte-identical (both modes).
+- **Not written yet:** billboard turning, interiors.
 
 ## Lane REFLDRAWS1 (2026-10-27, branch refldraws1-20261027): the reflections pass stops re-walking the opaque scene
 

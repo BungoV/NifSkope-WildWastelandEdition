@@ -388,7 +388,7 @@ bool gltfExportWrite( const GltfExportScene & scene, const QString & gltfPath, Q
 	Buffer buf;
 	const float U = scene.unitScale;
 
-	struct MeshAcc { int pos = -1, nrm = -1, uv = -1, joints = -1, weights = -1, idx = -1, ibm = -1, material = -1; };
+	struct MeshAcc { int pos = -1, nrm = -1, uv = -1, joints = -1, weights = -1, idx = -1, ibm = -1, material = -1; QVector<int> col; };
 	QVector<MeshAcc> ma( int( scene.meshes.size() ) );
 
 	for ( int m = 0; m < scene.meshes.size(); m++ ) {
@@ -423,6 +423,8 @@ bool gltfExportWrite( const GltfExportScene & scene, const QString & gltfPath, Q
 			}
 			ma[m].uv = buf.addFloats( uv, "VEC2", 34962, false, 2 );
 		}
+		for ( const QVector<float> & c : mesh.colorSets )
+			ma[m].col.append( c.size() == nv * 4 ? buf.addFloats( c, "VEC4", 34962, false, 4 ) : -1 );
 		if ( !mesh.skin.isEmpty() ) {
 			QVector<quint16> j( nv * 4 );
 			QVector<float> w( nv * 4 );
@@ -625,6 +627,9 @@ bool gltfExportWrite( const GltfExportScene & scene, const QString & gltfPath, Q
 			meshesJson += ",\"NORMAL\":" + QByteArray::number( ma[m].nrm );
 		if ( ma[m].uv >= 0 )
 			meshesJson += ",\"TEXCOORD_0\":" + QByteArray::number( ma[m].uv );
+		for ( int c = 0, n = 0; c < ma[m].col.size(); c++ )
+			if ( ma[m].col[c] >= 0 )
+				meshesJson += ",\"COLOR_" + QByteArray::number( n++ ) + "\":" + QByteArray::number( ma[m].col[c] );
 		if ( ma[m].joints >= 0 )
 			meshesJson += ",\"JOINTS_0\":" + QByteArray::number( ma[m].joints )
 				+ ",\"WEIGHTS_0\":" + QByteArray::number( ma[m].weights );
