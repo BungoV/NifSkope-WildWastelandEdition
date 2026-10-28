@@ -348,7 +348,7 @@ bool Stream::resolve( Scene * sc )
 		} else if ( c.st == CellState::Attached && c.cellBlock >= 0 ) {
 			c.cellNode = sc->findNode( nif, nif->getBlockIndex( c.cellBlock ) );
 			c.nodes.clear();
-			showFar( c.x, c.y, red == QLatin1String( "nohandover" ) );
+			showFar( c.x, c.y, false );	// lane FRAMESPEED2: the nohandover red is retired (SHOTPASS1 confirmed it live)
 			if ( !rescanRed )
 				for ( const auto & tk : c.takes )
 					if ( isNodeType( tk.second ) )
@@ -726,8 +726,7 @@ bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 	setRootSlot( -1, c.cellBlock );
 	if ( c.cellNode && root )
 		c.cellNode->makeParent( root.data() );
-	if ( red != QLatin1String( "nohandover" ) )
-		showFar( c.x, c.y, false );   // the near ground replaces the far tile in the same step: no overlap
+	showFar( c.x, c.y, false );   // the near ground replaces the far tile in the same step: no overlap
 	farHide( c, true );   // lane FARHOLE2: and the far objects, cards and rings past 0 it holds
 	c.st = CellState::Attached;
 	st.attaches++;

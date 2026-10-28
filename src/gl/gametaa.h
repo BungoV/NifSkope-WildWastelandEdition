@@ -51,10 +51,9 @@ class Transform;
  *  The resolve and its final pass are GPU-timed: a "modern temporal aa: tier N gpu X ms" line every 60 frames.
  *
  *  Lane TAA3 (2026-10-25): every tier keeps a thin-feature lock (taa2.frag o2; AMD FSR 2's idea) so a sub-pixel
- *  wire standing still keeps its history; Ultra reads TAAINPUTS1's velocity and mask (gl/taainputs.h); the row
- *  "Modern temporal AA before tone map" (ships Off, saved) resolves the cell's linear frame before its tone map.
- *   WW_TAA2_RED=...|nolock|noinputs  more reds (no lock; Ultra without the inputs)
- *   WW_TAA2_HDR=0|1            the before-tone-map row (a harness without it: Off) */
+ *  wire standing still keeps its history; Ultra reads TAAINPUTS1's velocity and mask (gl/taainputs.h).
+ *  Lane FRAMESPEED2 (TAAHDRPICK1): the resolve runs on the tone-mapped frame only (the before-tone-map row is gone).
+ *   WW_TAA2_RED=...|nolock|noinputs  more reds (no lock; Ultra without the inputs) */
 
 //! True when either resolve runs (the game's row or a Modern tier): the frame is jittered.
 bool wwGameTaaOn();
@@ -67,9 +66,6 @@ void wwGameTaaSetOn( bool on );
 int wwTaa2Tier();
 void wwTaa2SetTier( int tier );
 bool wwTaa2Pinned();
-//! lane TAA3: the "Modern temporal AA before tone map" row; the setter saves it unless WW_TAA2_HDR pins it.
-bool wwTaa2HdrOn();
-void wwTaa2SetHdrOn( bool on );
 
 /*! The frame index the next frames use: >= 0 pins it (the camera path renders frame k as index k, so a
  *  repeated paint of the same frame is the same picture), -1 (default) counts paints. */
@@ -88,11 +84,6 @@ bool wwGameTaaFrame( int & frame );
 
 //! After the scene's draw (and the cell view's one tone map): the vectors, the resolve, the frame back.
 void wwGameTaaResolve( Scene * scene );
-/*! lane TAA3: the cell's linear frame (fbo, its colour format) before the tone map, when the row is on and a Modern
- *  tier runs; expose scales it to about display level. The later wwGameTaaResolve then only ends the frame. */
-void wwGameTaaResolveLinear( Scene * scene, unsigned fbo, unsigned format, float expose );
-//! lane TAA3: true (once) when the linear resolve already ran this frame's TAAINPUTS1 pass.
-bool wwGameTaaInputsRan();
 //! True when the view moved recently: an interactive window paints a few more frames to settle.
 bool wwGameTaaWantsSettle();
 

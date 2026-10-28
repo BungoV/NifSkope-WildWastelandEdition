@@ -4345,7 +4345,7 @@ void wwCellAoPass( Scene * scene, bool run )
 		NodeList second;
 		wwOpaqueCutNewFrame();
 		if ( memo )
-			wwSetupMemoArm( true );
+			wwSetupMemoArm( true, "cellProbe" );	// wwCellAoDraw sets it (20) after every setup
 		scene->collectShapes( second );
 		if ( memo )
 			wwSetupMemoArm( false );

@@ -72,6 +72,45 @@
   counts.
 - Cost: region pick runs once per teleport (CPU, microseconds); the drift samples add 2 noise reads per air step on
   the sun term. No new GPU memory.
+## Lane FRAMESPEED2 (2026-10-28, branch framespeed2-20261028): one TAA path, honest stream gates, a clean memo check
+
+- **Improved TAA runs after the tone map only (TAAHDRPICK1):** SHOTPASS1 picked "Before tone map" OFF at Concord
+  (edge shimmer 1.682 vs 2.357). The before-tone-map resolve, its menu row (Show menu and the scene window's live
+  box), its setting key and the `WW_TAA2_HDR` pin are gone, with the linear-input branches in taa2.frag,
+  taa2_rcas.frag, taainputs.cpp and cellhdr's hand-off. No toggle is left. The toned path now keeps its depth-format
+  ask in the per-(context, framebuffer, size) cache CELLUNI4 gave the linear path (`WW_CELL_UNI_RED` asks every frame).
+- **`WW_CELL_STREAM_RED=nohandover` retired** with its old path (confirmed live in SHOTPASS1): the near ground always
+  hides the far tile in the same step. cell_stream.sh / cell_stream_check.py lose that red.
+- **The stream walk's frame gate judges the stream's own work (D2):** the live dump gets `cpuMaxMs` (the step's
+  dearest on-processor frame), and cell_stream_check.py holds that to the 8 ms bar, as streamwalk's CPU-VERDICT does.
+  SHOTPASS1's 14.21 ms was one frame at step 15 that spent 0.05 ms on the processor: 14.17 ms passed before any stream
+  work, a wall stall (paging, 18.3 GB private on a 10.3 GB working set). The worst on-processor crossing frame there was
+  6.34 ms. The wall worst, its step and its off-processor share are still printed.
+- **The setup memo check no longer counts the AO/SSR passes' own `cellProbe` (D5):** those opaque passes' draw hooks
+  write `cellProbe` (20 / 60) after every setup, so the snapshot before a skipped setter held the hook's value and
+  every check read MISMATCH (409,173 of 443,401 in SHOTPASS1). The pass now names that uniform when it arms the memo
+  and the check skips it there; any other uniform still counts.
+- Cost: 0 GPU ms and no new memory at draw time (one less colour path; the depth-format ask is cached, so a few
+  glGet calls fewer a frame on the toned path).
+- **The re-measure on the girebake3 bake** (volume keys + `WW_CELL_GLARE=1` pinned; SHOTPASS1's rows had loaded the
+  stale 10-02 SKY1 bake): D1 (live reopen at Concord 5x5 with everything on) still crashes, 3 of 3 with bindless on,
+  0 of 1 with `WW_BINDLESS=0`. D2 (crossing spike) and D3 (stream memory growth) never depended on the bake: the
+  stream walk loads none, and a loaded bake turns streaming off (a GI-loaded walk read "stream off" on all 22 steps).
+  They stand as measured. No defect went away.
+- Note: the volume keys rewrite the bake's .space files. Two runs here rewrote notes/girebake3/bakes/concord/vol/*/*.space
+  before the runner moved to a copy (notes/framespeed2/vol).
+- LEFTOVER: D1 is diagnosed, not fixed. gdb on a symbol twin: 0xC0000409 inside the NVIDIA driver under glTexImage2D,
+  the first re-specify of an existing screen target after the reopen (SSR's first; with SSR given fresh names, the
+  volumetric air column tile next, a texture that never had a bindless handle). Not memory (GPU 5 GB and commit 8 GB
+  free at the crash; the 29 GB private line is the crash dump). A texture that had a bindless handle cannot be
+  re-specified (offline unit, GL error 0x0502), but taking handles only of the texture cache's own 2D binds did not
+  stop it, so the driver state is damaged earlier in the reopen. Next suspects: a pooled or ring row still naming a
+  handle made non-resident by the reopen's flush, and the geometry pool's persistent buffers across the reopen. Both
+  tries were reverted. Tools: notes/framespeed2/tools/gdbrun3.sh, attach.gdb, whichcall.sh.
+- LEFTOVER: D3, the stream's texture churn. A budgeted LRU or recycle pool for file textures, after a
+  `WW_CELL_STREAM_TEXKEEP=0` A/B walk.
+- LEFTOVER: CELLUNI6 items not done here: the jitter viewport ask, cellhdr's Begin, the bsshape blend asks,
+  wwCellHdrDepthMax, and a GL error check on the trusted frame.
 
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 

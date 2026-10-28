@@ -18,8 +18,6 @@
 
 uniform sampler2D srcTex;
 uniform float rcasSharp;	// exp2(-stops): 1 = the strongest
-uniform int rcasLinear;	// lane TAA3: 1 the source is the linear (HDR) frame: sharpen in c / (1 + max(c)), write linear
-uniform float rcasExpose;	// lane TAA3: the linear frame's scale to about display level
 
 out vec4 fragColor;
 
@@ -27,11 +25,7 @@ const float kRcasLimit = 0.25 - 1.0 / 16.0;
 
 vec3 tap( ivec2 q )
 {
-	vec3 c = texelFetch( srcTex, q, 0 ).rgb;
-	if ( rcasLinear == 0 )
-		return c;
-	c = max( c, vec3( 0.0 ) ) * rcasExpose;
-	return c / ( 1.0 + max( c.r, max( c.g, c.b ) ) );
+	return texelFetch( srcTex, q, 0 ).rgb;
 }
 
 void main()
@@ -64,9 +58,5 @@ void main()
 	lobe *= nz;
 	float rcpL = 1.0 / ( 4.0 * lobe + 1.0 );
 	vec3 o = clamp( ( lobe * ( b + d + f + h ) + e ) * rcpL, 0.0, 1.0 );
-	if ( rcasLinear != 0 ) {
-		o = min( o, vec3( 0.999 ) );
-		o = o / ( ( 1.0 - max( o.r, max( o.g, o.b ) ) ) * max( rcasExpose, 1e-6 ) );
-	}
 	fragColor = vec4( o, 1.0 );
 }

@@ -28,8 +28,6 @@ uniform int taa2Red;	// bits: 1 noclip, 2 nobicubic, 4 wrongjitter (the filter t
 						// 32 oldmotion, 64 oldfilter (lane TAA4: the TAA2 motion weight / current filter width)
 uniform int taa2NoHist;	// 1: no history this frame (first frame, reset, size change)
 uniform int taa2Inputs;	// lane TAA3: bits 1 velTex bound, 2 maskTex bound
-uniform int taa2Linear;	// lane TAA3: 1 the input is the linear (HDR) frame, before the tone map
-uniform float taa2Expose;	// lane TAA3: the linear frame's scale to about display level (last frame's exposure)
 uniform mat4 reproj;	// current unjittered clip -> previous unjittered clip
 
 layout ( location = 0 ) out vec4 o0;
@@ -44,23 +42,6 @@ vec3 toYCoCg( vec3 c )
 vec3 toRgb( vec3 y )
 {
 	return vec3( y.x + y.y - y.z, y.x + y.z, y.x - y.y - y.z );
-}
-
-// Karis 2014: the resolve runs on c / (1 + max(c)), so one bright sample cannot take the box or the blend over
-vec3 tonemapIn( vec3 c )
-{
-	if ( taa2Linear == 0 )
-		return c;
-	c = max( c, vec3( 0.0 ) ) * taa2Expose;
-	return c / ( 1.0 + max( c.r, max( c.g, c.b ) ) );
-}
-
-vec3 tonemapOut( vec3 t )
-{
-	if ( taa2Linear == 0 )
-		return clamp( t, 0.0, 1.0 );
-	t = clamp( t, 0.0, 0.999 );
-	return t / ( ( 1.0 - max( t.r, max( t.g, t.b ) ) ) * max( taa2Expose, 1e-6 ) );
 }
 
 // Jimenez 2016: Catmull-Rom from 5 bilinear taps (the four corner taps dropped, weights renormalised)
@@ -111,7 +92,7 @@ void main()
 	for ( int dy = -1; dy <= 1; dy++ ) {
 		for ( int dx = -1; dx <= 1; dx++ ) {
 			ivec2 q = clamp( ip + ivec2( dx, dy ), ivec2( 0 ), size - 1 );
-			vec3 c = toYCoCg( tonemapIn( texelFetch( curTex, q, 0 ).rgb ) );
+			vec3 c = toYCoCg( texelFetch( curTex, q, 0 ).rgb );
 			float d = texelFetch( depthTex, q, 0 ).r;
 			if ( d < dMin ) {
 				dMin = d;
@@ -195,6 +176,6 @@ void main()
 	}
 	vec3 rgb = max( toRgb( res ), vec3( 0.0 ) );
 	o0 = vec4( rgb, 1.0 - min( dMin, 1.0 ) );
-	o1 = vec4( tonemapOut( rgb ), 1.0 );
+	o1 = vec4( clamp( rgb, 0.0, 1.0 ), 1.0 );
 	o2 = vec4( lockOut, 0.0, 1.0 );
 }

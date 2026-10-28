@@ -3,7 +3,6 @@
 
 #include "gl/cellgrass.h"
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
-#include "gl/celluniform.h"	// lane CELLUNI5: the tone map's known state
 #include "gl/gametaa.h"
 #include "gl/glparticles.h"
 #include "gl/glproperty.h"
@@ -369,19 +368,11 @@ void wwTaaInputsPass( Scene * scene )
 	while ( fn->glGetError() != GL_NO_ERROR ) {
 	}
 
-	/* lane CELLUNI5: run from the linear resolve (inside cellhdr's End), the tone map's known state; after the tone map
-	 * (glview's post) the slot is empty: asked, as before */
-	const WwCellUni::KnownGl * kn = WwCellUni::known( fn );
+	// lane FRAMESPEED2 (TAAHDRPICK1): runs after the tone map only (glview's post), so the state is asked
 	GLint prevDraw = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 };
-	if ( kn ) {
-		prevDraw = kn->draw;
-		prevRead = kn->read;
-		std::memcpy( vp, kn->vp, sizeof vp );
-	} else {
-		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
-		fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
-		fn->glGetIntegerv( GL_VIEWPORT, vp );
-	}
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	fn->glGetIntegerv( GL_VIEWPORT, vp );
 	const int W = vp[2], H = vp[3];
 	if ( W < 2 || H < 2 )
 		return;
@@ -570,10 +561,7 @@ void wwTaaInputsPass( Scene * scene )
 
 	// state kept for the restore
 	GLint prevActive = 0, blendEq = 0, bSrc = 0, bDst = 0, bSrcA = 0, bDstA = 0, depthFunc = 0;
-	if ( kn )
-		prevActive = kn->active;
-	else
-		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	fn->glGetIntegerv( GL_BLEND_EQUATION_RGB, &blendEq );
 	fn->glGetIntegerv( GL_BLEND_SRC_RGB, &bSrc );
 	fn->glGetIntegerv( GL_BLEND_DST_RGB, &bDst );
@@ -581,16 +569,11 @@ void wwTaaInputsPass( Scene * scene )
 	fn->glGetIntegerv( GL_BLEND_DST_ALPHA, &bDstA );
 	fn->glGetIntegerv( GL_DEPTH_FUNC, &depthFunc );
 	GLboolean colorMask[4], depthMask = GL_TRUE;
-	if ( kn ) {
-		std::memcpy( colorMask, kn->colorMask, sizeof colorMask );
-		depthMask = kn->depthMask;
-	} else {
-		fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
-		fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
-	}
-	const bool wasDepth = kn ? kn->depth : fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = kn ? kn->blend : fn->glIsEnabled( GL_BLEND );
-	const bool wasCull = kn ? kn->cull : fn->glIsEnabled( GL_CULL_FACE ), wasStencil = kn ? kn->stencil : fn->glIsEnabled( GL_STENCIL_TEST );
-	const bool wasScissor = kn ? kn->scissor : fn->glIsEnabled( GL_SCISSOR_TEST ), wasOffset = fn->glIsEnabled( GL_POLYGON_OFFSET_FILL );
+	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
+	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+	const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST ), wasOffset = fn->glIsEnabled( GL_POLYGON_OFFSET_FILL );
 	GLfloat offFactor = 0.0f, offUnits = 0.0f;
 	fn->glGetFloatv( GL_POLYGON_OFFSET_FACTOR, &offFactor );
 	fn->glGetFloatv( GL_POLYGON_OFFSET_UNITS, &offUnits );

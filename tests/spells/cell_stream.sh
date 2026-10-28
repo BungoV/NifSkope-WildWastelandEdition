@@ -6,7 +6,7 @@
 #   (b) the picture after streaming in == the fixed-block open at the same centre and camera (far LOD off)
 #   (c) far LOD on: no hole and no double draw either side of the loaded / unloaded border
 #   (d) private bytes after crossing 20 within 5% of the first full load
-#   reds: WW_CELL_STREAM_RED=nounload must fail (d); WW_CELL_STREAM_RED=nohandover must fail (c)
+#   reds: WW_CELL_STREAM_RED=nounload must fail (d) (nohandover retired 10-28, FRAMESPEED2: confirmed live)
 #
 # usage: bash tests/spells/cell_stream.sh            every phase
 #        PHASE="walk check" bash tests/spells/cell_stream.sh
@@ -121,8 +121,6 @@ if has reds; then
 	say "== reds"
 	writepath "$OUT/red_nounload.path" 5
 	run red_nounload "$CX,$CY|1" "$OUT/red_nounload.path" WW_CELL_STREAM=1 WW_CELL_FARLOD=1 WW_CELL_STREAM_RED=nounload
-	writepath "$OUT/red_nohandover.path" 3
-	run red_nohandover "$CX,$CY|1" "$OUT/red_nohandover.path" WW_CELL_STREAM=1 WW_CELL_FARLOD=1 WW_CELL_STREAM_RED=nohandover
 fi
 
 if has pictures; then
