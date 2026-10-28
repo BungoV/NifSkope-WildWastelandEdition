@@ -14,6 +14,26 @@
 - **GI census:** the Space-rooms-into-GI line adds "unmapped thinner than a grid cell N". These are rooms thinner than
   one GI room-grid cell, so no cell centre can fall in them.
 - Cost: none at draw time (0 GPU ms at 1080p, no GPU memory). One small text file is written next to a soup dump.
+## Lane LANDSPEC6 (2026-10-28, branch landspec6-20261028): the LANDSPEC5 leftovers
+
+- **"Fixed Dimensions" worlds stay put:** a worldspace with WRLD DATA bit 0x40 (DiamondCity, DiamondCityFX,
+  NukaWorldAmphitheater, NukaWorldMarket) now reads its WCTR centre cell. As in the game, the land-LOD blend centre
+  sits on the middle of the WCTR cell (no glide), and a streamed open's near block is centred on WCTR and never
+  shifts with the camera. The far LOD rings were already built once round the open, which matches the game placing
+  its terrain LOD once at the arrival point. Telemetry: "esm world: <world> has Fixed Dimensions ...", "landspec:
+  <world> is a fixed world ...", "cell stream: fixed world, block centre x,y ...". Red (a new value of
+  `WW_LANDSPEC_RED`): `fixedfollow`, the centre and the block follow the camera as before.
+- **Band texture past the page:** a near block wider than 61 x 61 also gets an outer window, one layer per level-4
+  LOD chunk read from the chunk's mip 1 (256 x 256), covering the whole block up to 32 x 32 chunks (about 125 x 125
+  cells). Cells more than 28 from the camera now get the band texture. A wider block pages the outer window round
+  the camera too (every cell within 60 of it). Red `page28`: no outer window (LANDSPEC5).
+- Cost (1080p): ground pixels the page holds add one uniform compare; pixels past it take one array fetch where they
+  had none (estimated under 0.01 ms). GPU memory: none for blocks to 61 x 61 (no outer window is made); 85.4 KiB a
+  chunk past that: 81 x 81 = 21 x 21 chunks = 36.8 MiB, about 125 x 125 and wider = 32 x 32 = 85.4 MiB. The texture
+  cache also loads the source chunks (341 KiB each), as with the page. A fixed world costs nothing. Live GPU-ms owed.
+- Not done: the rain wetness (waits on WEATHERLOOK1 phase B); an open whose centre lies more than uGridsToLoad / 2
+  from WCTR still shows the cells asked for, which the game never loads; blocks wider than 32 chunks still lose the
+  band past 60 cells from the camera.
 
 ## Lane LANDSPEC5 (2026-10-28, branch landspec5-20261028): the LANDSPEC4 leftovers
 

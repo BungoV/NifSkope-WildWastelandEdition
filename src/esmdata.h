@@ -461,6 +461,11 @@ public:
 	QString worldspaceEdid() const { return wsEdid; }
 	//! lane LANDSPEC3: whose terrain LOD files the worldspace draws (the parent's under PNAM "Use LOD Data")
 	QString lodWorldEdid() const { return lodEdid.isEmpty() ? wsEdid : lodEdid; }
+	//! lane LANDSPEC6: WRLD DATA (the flags byte; 0x40 "Fixed Dimensions") and WCTR (the fixed centre cell)
+	unsigned worldFlags() const { return wsFlags; }
+	bool hasFixedCentre() const { return wsHasCentre; }
+	int fixedCentreX() const { return wsCentreX; }
+	int fixedCentreY() const { return wsCentreY; }
 
 	//! Exactly the string load() was given: one plugin path, or a comma-separated list in load order.
 	QString pluginList() const { return srcPath; }
@@ -651,6 +656,9 @@ private:
 	quint32 wsForm = 0;
 	QString wsEdid;
 	QString lodEdid;            //!< lane LANDSPEC3: the parent's EDID when it lends its LOD, else empty
+	unsigned wsFlags = 0;       //!< lane LANDSPEC6: WRLD DATA
+	bool wsHasCentre = false;   //!< lane LANDSPEC6: WRLD WCTR read
+	int wsCentreX = 0, wsCentreY = 0;
 	QString srcPath;            //!< what load() was given, verbatim
 	float defLandH = 0.0f;
 	float defWaterH = 0.0f;

@@ -619,6 +619,8 @@ struct LandOrigin
 	QString ws;
 	float x = 0.0f, y = 0.0f;
 	int bx = 0, by = 0, half = -1;	// lane LANDSPEC4: the near block (-1 none)
+	bool fixed = false;	// lane LANDSPEC6: a fixed world, its WCTR cell
+	int wx = 0, wy = 0;
 };
 QHash<const void *, LandOrigin> & landOrigins()
 {
@@ -651,6 +653,26 @@ bool wwCellLandBlockOf( const void * nif, int * cx, int * cy, int * half )
 	*cx = it->bx;
 	*cy = it->by;
 	*half = it->half;
+	return true;
+}
+
+void wwCellLandFixed( const void * nif, bool fixed, int wx, int wy )
+{
+	QMutexLocker lock( &landMutex() );
+	LandOrigin & o = landOrigins()[nif];
+	o.fixed = fixed;
+	o.wx = wx;
+	o.wy = wy;
+}
+
+bool wwCellLandFixedOf( const void * nif, int * wx, int * wy )
+{
+	QMutexLocker lock( &landMutex() );
+	const auto it = landOrigins().constFind( nif );
+	if ( it == landOrigins().constEnd() || !it->fixed )
+		return false;
+	*wx = it->wx;
+	*wy = it->wy;
 	return true;
 }
 

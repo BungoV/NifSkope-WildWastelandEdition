@@ -57,6 +57,8 @@ struct CellStreamSeed
 	int rootBlock = -1;
 	int cx = 0, cy = 0;                 //!< the open's centre cell
 	int roam = 4;                       //!< cells from the open's centre the far ring 0 covers uncut
+	bool fixedWorld = false;            //!< lane LANDSPEC6: a "Fixed Dimensions" world: the block stays on WCTR
+	int fixedX = 0, fixedY = 0;         //!< its WCTR cell
 	WwCellLighting base;                //!< the open's published lighting (no cell lights)
 	std::vector<std::array<int, 3>> farHand;    //!< far ring-0 shapes: block, cell x, cell y
 	int farLand = 0;                    //!< how many of them (the first) are terrain; the rest are water

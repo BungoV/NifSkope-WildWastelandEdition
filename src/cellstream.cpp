@@ -5,6 +5,7 @@
 #include "cellfarhide.h"	// lane FARHOLE2: the far field leaves room for every loaded cell
 #include "cellmesh.h"
 #include "cellsplat.h"
+#include "landlodspec.h"	// lane LANDSPEC6: streamCentre
 #include "impostorchunk.h"
 #include "gl/bsshape.h"
 #include "gl/cellcull.h"
@@ -187,6 +188,7 @@ public:
 	double wirePerNodeMs = 0.4;   //!< running average: one scene node made from a written block
 	int sliceNodes = 0;           //!< node blocks taken in this slice, still to be wired
 	float shift = 2048.0f;
+	bool fixedCentre = false;     //!< lane LANDSPEC6: a fixed world's block never shifts (red WW_LANDSPEC_RED=fixedfollow)
 
 	~Stream() override
 	{
@@ -1006,7 +1008,8 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		changed = true;
 	}
 
-	shiftCentre( eye );
+	if ( !fixedCentre )	// lane LANDSPEC6: the game skips every grid shift in a fixed world
+		shiftCentre( eye );
 	wanted.clear();
 	for ( int dy = -2; dy <= 2; dy++ )
 		for ( int dx = -2; dx <= 2; dx++ )
@@ -1191,8 +1194,11 @@ void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )
 	auto s = std::make_unique<Stream>();
 	s->nif = nif;
 	s->seed = seed;
-	s->ccx = seed->cx;
-	s->ccy = seed->cy;
+	s->fixedCentre = seed->fixedWorld && wwEnvStr( "WW_LANDSPEC_RED" ) != QLatin1String( "fixedfollow" );
+	LandLodSpec::streamCentre( s->fixedCentre, seed->fixedX, seed->fixedY, seed->cx, seed->cy, s->ccx, s->ccy );	// LANDSPEC6
+	if ( seed->fixedWorld )
+		std::fprintf( stderr, "cell stream: fixed world, block centre %d,%d (%s)\n", s->ccx, s->ccy,
+			s->fixedCentre ? "WCTR, no shifts" : "RED fixedfollow: the open's, shifting" );
 	if ( wwEnvIsSet( "WW_CELL_STREAM_BUDGET" ) )
 		s->budgetMs = std::clamp( wwEnvStr( "WW_CELL_STREAM_BUDGET" ).toDouble(), 0.5, 100.0 );
 	if ( wwEnvIsSet( "WW_CELL_STREAM_SHIFT" ) )
@@ -1249,6 +1255,8 @@ void cellStreamSnapCentre( const Vector3 & eye )
 {
 	// lane SHORE2: shiftCentre's hysteresis keeps the block of eyes seen before the path camera (the shot refit's)
 	for ( auto & kv : streams() ) {
+		if ( kv.second->fixedCentre )
+			continue;	// lane LANDSPEC6: a fixed world's block stays on WCTR
 		kv.second->ccx = cellOf( eye[0] );
 		kv.second->ccy = cellOf( eye[1] );
 	}
