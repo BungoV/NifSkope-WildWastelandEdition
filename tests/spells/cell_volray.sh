@@ -5,11 +5,13 @@
 #
 #   synth   known-answer .space files (exact fit PASS, a wall poke, a missing leg, a cross-wall overlap FAIL), the
 #           fitter's own output on lroom, church, thin wall, twins, house (each PASS), its mutations (each FAIL),
-#           and GPU == CPU on the L room (--rays both; named SKIP without an RT device)
+#           and GPU == CPU on the L room (--rays both; named SKIP without an RT device); lane HALLINDOOR1: a hall under
+#           a roof hole named a window reads indoor, the same hole as a plain opening and the air above it outdoor
+#           (`--indoor openings`), and the glazed hall's fit names its roof window
 #   red     every red below, each run must FAIL
 #   cell    one real soup: OUT= folder, SOUP= soup.psp, SPACE= .space folder or file, ARGS= extra volcheck flags
 #
-# RED CONTROLS (each must FAIL): known nomutate norefine nofine
+# RED CONTROLS (each must FAIL): known nomutate norefine nofine oldindoor (VOLRAY1's indoor rule: no window openings)
 #
 # USAGE  bash tests/spells/cell_volray.sh [synth|red|cell]     OUT= the run folder
 
@@ -22,7 +24,7 @@ EXE="${EXE:-$REPO/release/NifSkope.exe}"
 PHASE="${1:-synth}"
 OUT="${OUT:-$REPO/scratchpad/volray1/gate}"
 CHECK="$REPO/tests/spells/cell_volray_check.py"
-REDS="known nomutate norefine nofine"
+REDS="known nomutate norefine nofine oldindoor"
 mkdir -p "$OUT"
 LOG="$OUT/cell_volray_${PHASE}.log"
 : > "$LOG"

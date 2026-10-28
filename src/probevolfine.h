@@ -35,6 +35,8 @@ struct ProbeFineGrid
 	std::function<bool( int, const double * )> backFace;   //!< ray direction d met triangle tri's back (solid rule)
 	std::function<double( int, const double * )> facing;  //!< cosine of triangle tri's normal and direction d
 	const std::vector<std::vector<ProbeVolumeShape>> * grid = nullptr;   //!< per room: the refined grid fit (VOLFIT3 starts there)
+	const std::vector<ProbeVolumeShape> * openings = nullptr;   //!< HALLINDOOR1: room-to-outside thresholds (null: the old indoor rule)
+	const std::vector<int> * windowRooms = nullptr;   //!< HALLINDOOR1: labels of the rooms behind those windows
 };
 
 struct ProbeFineSpec
@@ -60,6 +62,7 @@ struct ProbeFineSpec
 	bool jitter = true;             //!< rooms square to the world sit on volcheck's own jittered lattice
 	double skin = 8.0;              //!< a room point this near a triangle is no gap (volcheck's tolSkin)
 	double badW = 2.0;              //!< a foreign point in a shape costs this many uncovered room points
+	double badWin = 4.0;            //!< HALLINDOOR1: badW in a room behind a window (its hall air now reads indoor)
 	int extras = 8;                 //!< lattice boxes tried per room on top of the moved grid boxes
 	double budget = 1.45;           //!< all rooms' shapes at most this times the grid fit's (the bar: x1.5 VOLRAY1's)
 	int rounds = 2;                 //!< face-move passes over the grid boxes

@@ -18,7 +18,12 @@ Space stage's shapes against the soup's real triangles.
               when no RT device)
   Reds (each must FAIL): known (the checker's known-answer rows read as the opposite verdict), nomutate (the mutate
   rows run unmutated), norefine (the fitter without its ray refine of the faces: the cell-wide inset is a gap),
-  nofine (VOLFIT2: the grid fit with VOLRAY1's face refine instead of the fine lattice fit: turned and shelf gap).
+  nofine (VOLFIT2: the grid fit with VOLRAY1's face refine instead of the fine lattice fit: turned and shelf gap),
+  oldindoor (lane HALLINDOOR1: VOLRAY1's indoor rule in the fit and the check: the hall under its window leaks 24.8%).
+  hall      (HALLINDOOR1) the indoor rule: sky seen through a room's own window threshold is not outdoor air.
+              skylight: the hall's air under a roof hole named a window, leak <= 1% (the old rule >= 10%: the scene
+              bites); open_roof: the same hole as a plain opening (a broken roof) leaks >= 10%; above: the air over
+              the hole reads outdoor (<= 1% indoor); the glazed hall's fit names a window threshold to the outside.
 """
 
 import json
@@ -70,24 +75,45 @@ def scene_shelf():
     return dict(tris=tris, rooms={'A': [(200, 150, 150)]}, outside=[(400, -400, 150)])
 
 
+HALL_SKY = (400, 300, 2000, 900)   # the skylight hole in the hall's roof (x0, y0, x1, y1)
+
+
+def scene_hall(glazed=False):
+    """Lane HALLINDOOR1: a 2400 x 1200 hall, 600 tall, a door in -y and a 1600 x 600 skylight hole in the roof
+    (the museum's glass roof: its alpha-masked panes and missing panes let the hall's upward rays escape)."""
+    x0, y0, x1, y1 = HALL_SKY
+    h = 600
+    tris = cv.ground(-800, -800, 3200, 2000)
+    tris += cv.room(0, 0, 2400, 1200, h, {'-y': [(1100, 1228, 0, 220)]}, roof=False)
+    for a in ((-T, -T, 2400 + T, y0), (-T, y1, 2400 + T, 1200 + T), (-T, y0, x0, y1), (x1, y0, 2400 + T, y1)):
+        tris += cv.sbox(a[0], a[1], h, a[2], a[3], h + T)
+    # glazed: one pane over the hole (the fitter then names a roof window; rays stop at glass). Unglazed: the rays'
+    # view of the museum's masked and missing panes, judged against a hand-named window threshold
+    zg = h + T / 2
+    glass = [((x0, y0, zg), (x1, y0, zg), (x1, y1, zg)), ((x0, y0, zg), (x1, y1, zg), (x0, y1, zg))] if glazed else []
+    return dict(tris=tris, glass=glass, rooms={'A': [(1200, 150, 300), (200, 600, 300), (1200, 600, 500)]},
+                outside=[(1200, -400, 150), (1200, 600, 900)])
+
+
 def space_file(path, key, rooms, thresholds=()):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     doc = dict(format='space', version=1, cell=key, rooms=[], thresholds=[])
     for rid, anchor, shapes in rooms:
         doc['rooms'].append(dict(room=rid, anchor=list(anchor), source='test', shapes=[
             dict(type=t, center=list(c), size=list(s), rotation=[0, 0, 0]) for t, c, s in shapes]))
-    for i, (a, b, c, s) in enumerate(thresholds):
-        doc['thresholds'].append(dict(threshold='T%04d' % (i + 1), between=[a, b], opening='door',
+    for i, t in enumerate(thresholds):
+        a, b, c, s = t[:4]
+        doc['thresholds'].append(dict(threshold='T%04d' % (i + 1), between=[a, b], opening=t[4] if len(t) > 4 else 'door',
                                       shape=dict(type='box', center=list(c), size=list(s), rotation=[0, 0, 0])))
     with open(path, 'w') as f:
         json.dump(doc, f, indent=1)
 
 
-def volcheck(exe, soup, space, out, extra=()):
+def volcheck(exe, soup, space, out, extra=(), env=None):
     os.makedirs(out, exist_ok=True)
     cmd = [exe, '-no-gui', 'volcheck', '--soup', soup, '--space', space, '--out', out,
            '--png', os.path.join(out, 'volcheck.png')] + list(extra)
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, **env) if env else None)
     text = p.stdout + p.stderr
     with open(os.path.join(out, 'volcheck.txt'), 'w') as f:
         f.write(text)
@@ -189,16 +215,73 @@ def synth(exe, work, red, rays):
     known('twins_over', TW, [('0x0001', (300, 250, 150), [('box', (332, 250, 150), (664, 500, 300))]),
                              ('0x0002', (900, 250, 150), [b_box])], thr, False, over_check)
 
+    # ---- the indoor rule (lane HALLINDOOR1): sky seen through a room's own named opening is not outdoor air
+    H = scene_hall()
+    sx0, sy0, sx1, sy1 = HALL_SKY
+    hall_box = ('box', (1200, 600, 300), (2400, 1200, 600))
+    door_h = ('0x0001', 'outside', (1164, -T / 2, 110), (128, T, 220))
+    sky_h = ('0x0001', 'outside', ((sx0 + sx1) / 2, (sy0 + sy1) / 2, 600 + T / 2), (sx1 - sx0, sy1 - sy0, T), 'window')
+    hole_h = sky_h[:4] + ('opening',)
+    old_rule = ['--indoor', 'old'] if red == 'oldindoor' else []
+
+    def leak_case(name, rooms, thresholds, extra, judge):
+        soup = soup_of('hall_' + name, H)
+        sp = os.path.join(work, 'hall_' + name, 'space', name + '.space')
+        space_file(sp, name, rooms, thresholds)
+        out = os.path.join(work, 'hall_' + name, 'check')
+        rc, text = volcheck(exe, soup, sp, out, rx + extra)
+        rows = rooms_tsv(out) if os.path.isfile(os.path.join(out, 'volcheck_rooms.tsv')) else []
+        if not rows:
+            fails.append('hall %s: no rooms table (rc %d): %s' % (name, rc, text[-400:]))
+            return
+        leak = sum(float(r['leak_u3']) for r in rows)
+        air = sum(float(r['air_u3']) for r in rows)
+        rule = re.search(r'indoor rule [a-z]+( \d+)?', text)
+        log.append('hall %s: leak %.0f u3, air %.0f u3 (%s)' % (name, leak, air, rule.group(0) if rule else 'no rule line'))
+        msg = judge(leak, air)
+        if msg:
+            fails.append('hall %s: %s' % (name, msg))
+    hall = [('0x0001', (1200, 600, 300), [hall_box])]
+    # the hall's air under its named skylight: indoor (leak <= 1% of the hall); the old rule must read it outdoor
+    leak_case('skylight', hall, [door_h, sky_h], old_rule,
+              lambda l, a: None if l <= 0.01 * (l + a) else 'leak %.1f%% of the hall (want <= 1%%)' % (100 * l / (l + a)))
+    leak_case('skylight_old', hall, [door_h, sky_h], ['--indoor', 'old'],
+              lambda l, a: None if l >= 0.10 * (l + a) else 'old rule leak %.1f%% (want >= 10%%: the scene must bite)' % (100 * l / (l + a)))
+    # the same hole as a plain opening (a broken roof, no glass): outdoor as before, the door too
+    leak_case('open_roof', hall, [door_h, hole_h], [],
+              lambda l, a: None if l >= 0.10 * (l + a) else 'broken roof leak %.1f%% (want >= 10%%)' % (100 * l / (l + a)))
+    # the air just above the named skylight sees the sky through no opening of its own: it stays outdoor (the flood
+    # stops at the threshold, so read the points themselves: WW_VOLCHECK_DUMPBOX over the hole, z 640..900)
+    soup = soup_of('hall_above', H)
+    sp = os.path.join(work, 'hall_above', 'space', 'above.space')
+    space_file(sp, 'above', hall, [door_h, sky_h])
+    out = os.path.join(work, 'hall_above', 'check')
+    dump = os.path.join(work, 'hall_above', 'points.tsv')
+    rc, text = volcheck(exe, soup, sp, out, rx + old_rule, env=dict(
+        WW_VOLCHECK_DUMP=dump, WW_VOLCHECK_DUMPROOM='above:0x0001',
+        WW_VOLCHECK_DUMPBOX='%d,%d,%d,%d,%d,%d' % (sx0 + 32, sy0 + 32, 600 + T + 24, sx1 - 32, sy1 - 32, 900)))
+    pts = []
+    if os.path.isfile(dump):
+        with open(dump) as f:
+            head = f.readline().rstrip('\n').split('\t')
+            pts = [dict(zip(head, l.rstrip('\n').split('\t'))) for l in f]
+    air_pts = [p for p in pts if p['solid'] == '0']
+    inside = sum(p['enclosed'] == '1' for p in air_pts)
+    log.append('hall above: %d air points above the skylight, %d read indoor' % (len(air_pts), inside))
+    if len(air_pts) < 100 or inside > 0.01 * len(air_pts):
+        fails.append('hall above: %d of %d air points above the skylight read indoor (want <= 1%%, >= 100 points)'
+                     % (inside, len(air_pts)))
+
     # ---- the fitter's output
     scenes = dict(lroom=cv.scene_lroom(), church=cv.scene_church(), thin=scene_thin(), twins=cv.scene_twins(),
-                  house=cv.scene_house(), turned=scene_turned(), shelf=scene_shelf())
+                  house=cv.scene_house(), turned=scene_turned(), shelf=scene_shelf(), hall=scene_hall(True))
     fitted = {}
     for name, s in scenes.items():
         soup = soup_of('fit_' + name, s)
         out = os.path.join(work, 'fit_' + name)
         if os.path.isdir(out):
             shutil.rmtree(out)
-        rc, text = cv.run(exe, soup, out, name, red if red in ('norefine', 'nofine') else '')
+        rc, text = cv.run(exe, soup, out, name, red if red in ('norefine', 'nofine', 'oldindoor') else '')
         if rc != 0:
             fails.append('fitted %s: volumes rc %d: %s' % (name, rc, text[-300:]))
             continue
@@ -213,6 +296,15 @@ def synth(exe, work, red, rays):
                 log.append('  ' + l)
         if v is None or v['verdict'] != 'PASS':
             fails.append('fitted %s: %s' % (name, v))
+
+    # the glazed hall: one room, its roof glass a window threshold to the outside (the openings rule's input)
+    if 'hall' in fitted:
+        with open(os.path.join(fitted['hall'][1], 'hall.space')) as f:
+            thr = json.load(f)['thresholds']
+        wins = [t for t in thr if t.get('opening') == 'window' and 'outside' in t['between']]
+        log.append('fitted hall: thresholds %s' % [(t['between'], t['opening'], t['shape']['size']) for t in thr])
+        if not wins:
+            fails.append('fitted hall: no window threshold to the outside')
 
     # ---- mutations of the fitted shapes: each must FAIL
     for name in ('lroom', 'twins', 'church'):

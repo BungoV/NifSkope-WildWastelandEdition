@@ -2113,9 +2113,15 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 	if ( fineOn ) {
 		QElapsedTimer fc;
 		fc.start();
-		std::vector<ProbeVolumeShape> cuts;
-		for ( const ProbeVolumeThreshold & t : V.thresholds )
+		std::vector<ProbeVolumeShape> cuts, openings;
+		std::vector<int> windowRooms;
+		for ( const ProbeVolumeThreshold & t : V.thresholds ) {
 			cuts.push_back( t.shape );
+			if ( ( t.a == 0 || t.b == 0 ) && t.opening == QLatin1String( "window" ) ) {
+				openings.push_back( t.shape );
+				windowRooms.push_back( t.a + t.b );
+			}
+		}
 		ProbeFineGrid fg;
 		fg.labels = V.labels.data();
 		fg.state = st.data();
@@ -2125,6 +2131,11 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 		}
 		fg.cell = C;
 		fg.cuts = &cuts;
+		if ( red != QLatin1String( "oldindoor" ) )   // lane HALLINDOOR1's red: VOLRAY1's indoor rule (no openings)
+		{
+			fg.openings = &openings;
+			fg.windowRooms = &windowRooms;
+		}
 		std::vector<float> anchors;
 		for ( const ProbeVolumeRoom & rm : V.rooms )
 			anchors.insert( anchors.end(), rm.anchor, rm.anchor + 3 );
@@ -2177,6 +2188,7 @@ bool probeVolumesBuild( const ProbeSoup & soup, const std::vector<ProbeVolumeMar
 			else if ( k == QLatin1String( "snap" ) && x > 0 ) spec.snapSteps = x;
 			else if ( k == QLatin1String( "badw" ) ) spec.badW = x;
 			else if ( k == QLatin1String( "bado" ) ) spec.badO = x;
+			else if ( k == QLatin1String( "badwin" ) ) spec.badWin = x;
 			else if ( k == QLatin1String( "extras" ) ) spec.extras = int( x );
 			else if ( k == QLatin1String( "budget" ) && x > 0 ) spec.budget = x;
 			else if ( k == QLatin1String( "rounds" ) ) spec.rounds = int( x );

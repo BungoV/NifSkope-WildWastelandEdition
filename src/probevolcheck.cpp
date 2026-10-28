@@ -6,6 +6,7 @@
 #include "bakert.h"
 #include "probebvh.h"
 #include "probeplace.h"
+#include "probevolopen.h"
 
 #include <QColor>
 #include <QDir>
@@ -319,7 +320,7 @@ struct PointRays
 };
 
 void castPoints( Tracer & T, const Lat & L, const std::vector<std::array<double, 3>> & dirs, double reach, PointRays * R,
-	double * msEdges, double * msSphere, long long * nEdges, long long * nSphere )
+	double * msEdges, double * msSphere, long long * nEdges, long long * nSphere, const ProbeVolOpenings * op )
 {
 	const size_t P = L.size(), K = dirs.size();
 	R->blocked.assign( P, 0 );
@@ -374,6 +375,8 @@ void castPoints( Tracer & T, const Lat & L, const std::vector<std::array<double,
 				const bakert::XHit & x = hits[( i - b ) * K + k];
 				sig = ( sig ^ quint32( x.tri + 1 ) ) * 16777619u;
 				if ( x.tri < 0 ) {
+					if ( op && op->through( L.at( int( i ) ), dirs[k].data(), 1e300 ) )
+						continue;   // sky through the room's own opening: light in, not outdoor air
 					R->open[i]++;
 					if ( dirs[k][2] > 0 )
 						R->sky[i]++;
@@ -381,7 +384,7 @@ void castPoints( Tracer & T, const Lat & L, const std::vector<std::array<double,
 				}
 				sig = ( sig ^ quint32( std::lround( x.t * 64.0 ) ) ) * 16777619u;
 				R->hits[i]++;
-				if ( x.t > reach )
+				if ( x.t > reach && !( op && op->through( L.at( int( i ) ), dirs[k].data(), x.t ) ) )
 					R->open[i]++;
 				R->minT[i] = std::min( R->minT[i], float( x.t ) );
 				if ( T.back( x.tri, dirs[k].data() ) )
@@ -443,6 +446,7 @@ QString at3( const double p[3] ) { return QStringLiteral( "(%1, %2, %3)" ).arg( 
 int probeVolCheckCli( const QStringList & args )
 {
 	QString soupPath, spacePath, outDir, raysWay = QStringLiteral( "auto" ), mutate, cellsOnly, pngPath, pointsPath;
+	QString indoorRule = QStringLiteral( "openings" );   // lane HALLINDOOR1; "old" = VOLRAY1's rule (the red)
 	double h = 16, margin = 128, tolPoke = 4, tolSkin = 8, tolGap = 4096, skyMax = 0.25, openMax = 0.25, reach = 1536;
 	int K = 32;
 	for ( int i = 0; i < args.size(); i++ ) {
@@ -464,12 +468,14 @@ int probeVolCheckCli( const QStringList & args )
 		else if ( a == QLatin1String( "--tol-gap" ) ) { tolGap = nx.toDouble(); i++; }
 		else if ( a == QLatin1String( "--skymax" ) ) { skyMax = nx.toDouble(); i++; }
 		else if ( a == QLatin1String( "--openmax" ) ) { openMax = nx.toDouble(); i++; }
+		else if ( a == QLatin1String( "--reach" ) ) { reach = nx.toDouble(); i++; }
+		else if ( a == QLatin1String( "--indoor" ) ) { indoorRule = nx; i++; }
 	}
 	QTextStream o( stdout );
 	if ( soupPath.isEmpty() || spacePath.isEmpty() || h <= 0 || K < 8 ) {
 		o << "usage: volcheck --soup S --space <dir|file.space> [--out D] [--rays auto|cpu|gpu|both] [--h 16] [--margin 128] "
 			"[--k 32] [--tol-poke 4] [--tol-skin 8] [--tol-gap 4096] [--cells k1,k2] [--mutate grow:N|shrink:N|shift:N|drop] "
-			"[--png f] [--points f]\n";
+			"[--png f] [--points f] [--reach 1536] [--indoor openings|old]\n";
 		return 2;
 	}
 	QElapsedTimer total;
@@ -680,10 +686,19 @@ int probeVolCheckCli( const QStringList & args )
 		pathLine = T.gpu ? QStringLiteral( "%1 (%2)" ).arg( QLatin1String( bakert::pathName( T.scene->path() ) ),
 			QString::fromStdString( bakert::deviceName() ) ) : QStringLiteral( "cpu (no GPU path: %1)" ).arg( QString::fromStdString( log ) );
 	}
+	// the indoor rule's openings: every window (glass: light passes, air does not) between a room and the outside;
+	// doors and plain openings stay outdoor air
+	ProbeVolOpenings openings;
+	if ( indoorRule != QLatin1String( "old" ) ) {
+		for ( const VThr & t : thrs )
+			if ( ( t.a == -1 || t.b == -1 ) && t.opening == QLatin1String( "window" ) )
+				openings.add( t.box.c, t.box.h, t.box.r );
+		openings.build( reach );
+	}
 	PointRays R;
 	double msE = 0, msS = 0;
 	long long nE = 0, nS = 0;
-	castPoints( T, L, dirs, reach, &R, &msE, &msS, &nE, &nS );
+	castPoints( T, L, dirs, reach, &R, &msE, &msS, &nE, &nS, &openings );
 	QString compareLine;
 	if ( raysWay == QLatin1String( "both" ) && T.gpu ) {
 		const bool keep = T.gpu;
@@ -691,7 +706,7 @@ int probeVolCheckCli( const QStringList & args )
 		PointRays C;
 		double cE = 0, cS = 0;
 		long long cnE = 0, cnS = 0;
-		castPoints( T, L, dirs, reach, &C, &cE, &cS, &cnE, &cnS );
+		castPoints( T, L, dirs, reach, &C, &cE, &cS, &cnE, &cnS, &openings );
 		qint64 unlikeE = 0, unlikeS = 0;
 		for ( size_t i = 0; i < P; i++ ) {
 			unlikeE += R.blocked[i] != C.blocked[i] ? 1 : 0;
@@ -897,7 +912,7 @@ int probeVolCheckCli( const QStringList & args )
 			if ( rooms[size_t( ri )].name() != want || !df.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
 				continue;
 			QTextStream ds( &df );
-			ds << "x\ty\tz\treached\tsolid\tenclosed\tin\trooms\n";
+			ds << "x\ty\tz\treached\tsolid\tenclosed\tin\trooms\tsky\thits\topen\n";
 			const std::vector<int> & got = reached[size_t( ri )];
 			for ( size_t i = 0; i < P; i++ ) {
 				const double * p = L.at( i );
@@ -908,7 +923,8 @@ int probeVolCheckCli( const QStringList & args )
 					continue;
 				ds << f0( p[0] ) << '\t' << f0( p[1] ) << '\t' << f0( p[2] ) << '\t'
 				   << int( std::binary_search( got.begin(), got.end(), int( i ) ) ) << '\t' << int( solid[i] ) << '\t'
-				   << int( enclosed[i] ) << '\t' << int( holds( i, ri ) ) << '\t' << nRooms( i ) << '\n';
+				   << int( enclosed[i] ) << '\t' << int( holds( i, ri ) ) << '\t' << nRooms( i ) << '\t' << int( R.sky[i] ) << '\t'
+				   << int( R.hits[i] ) << '\t' << int( R.open[i] ) << '\n';
 			}
 		}
 	}
@@ -1257,7 +1273,8 @@ int probeVolCheckCli( const QStringList & args )
 	// ---- the census and the verdict
 	const bool pass = all.blobs == 0 && all.sharedBlobs == 0 && all.poke == 0 && all.overlap == 0;
 	o << "volcheck: soup " << ( soup.tris.size() / 9 ) << " triangles + " << ( soup.glass.size() / 9 ) << " glass; " << files.size()
-		<< " .space files, rooms " << all.rooms << " checked of " << NR << ", thresholds " << thrs.size() << "\n";
+		<< " .space files, rooms " << all.rooms << " checked of " << NR << ", thresholds " << thrs.size() << "; indoor rule "
+		<< ( indoorRule == QLatin1String( "old" ) ? QStringLiteral( "old" ) : QStringLiteral( "openings %1" ).arg( openings.size() ) ) << "\n";
 	o << "volcheck: lattice " << P << " points at h " << h << " (margin " << margin << "), rays " << T.rays << " on " << pathLine
 		<< ": edges " << nE << " in " << f0( msE ) << " ms, sphere " << nS << " (K " << K << ") in " << f0( msS ) << " ms, total ray ms "
 		<< f0( T.ms ) << "\n";
