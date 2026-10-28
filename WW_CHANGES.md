@@ -1,5 +1,46 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Lane GIWALL2 (2026-10-28, branch giwall2-20261028): a GI voxel in a wall or behind one gets no weight
+
+- **Why:** on Concord's hardware store ceiling a few points read 10-18x the path-traced reference (p90), and the walls
+  about 3x. The GI voxels there are 267 units and straddle the wall. For the hot points 64% of the blend weight sat in
+  voxels whose centres are in solid, and 87.5% in voxels behind a wall, which hold the sunlit street's light. There
+  were three causes in res/shaders/cell_lights.glsl:
+  - The volumes read (`cellGiVolume`, the default GI visibility) had no wall test. The store is open to the street,
+    so it is one room (and one volume) with the street, and the slot label kept the street's voxels.
+  - The march's `cellGiSeen` left the voxel's centre out, so a voxel whose centre is just inside the wall passed.
+  - `cellGiSeen` stopped at 12 taps. At this voxel size a segment's taps fell more than a room cell apart, so a wall
+    one cell thick could be stepped over.
+- **Fix:** `cellGiWall` taps up to and including the centre, never more than half a room cell apart on any axis. A
+  voxel counts only when its centre is air and no solid cell lies between it and the surface's view point
+  (`cellGiSeeFrom`). The test now runs in every path that weighs voxels by room: the march's room blend, its gap fill
+  (`cellGiFillAt` for a room), its seen fill, the stranded answers, and all three passes of the volumes read.
+- **No black recesses (GIBLACK1):** when no voxel is seen, the room fill, the seen fill and the volumes' second pass
+  take the *buried* voxels before the plain trilinear (which reads through walls). A buried voxel's centre is inside
+  the wall the surface faces: air up to the first solid tap, solid from there to the centre. A voxel behind a wall is
+  never taken. This applies in every grid, so an interior pocket keeps its own room's light and does not fall to the
+  trilinear. The last fill and the plain trilinear stay as the final fallbacks, as before.
+- **Red:** `WW_CELL_GIWALL_RED=off` (`cellPassRed` 8192) gives the old weights exactly: GISHADE1's taps, no test in
+  the fill or the volumes, no buried fallback. It is a uniform bit, so it does not switch the GI visibility mode.
+- **Check (Linux, synthetic, no game data):** `python3 tests/spells/cell_rooms_check.py giwall`. The mirror adds
+  `gi_wall`, the fill's and seen fill's rules, and a mirror of the volumes read (`gi_volume`). The fixture is a store
+  open to the street, voxel 267, room cell 16, indoor 0.05, street 2.0. The fix reads indoor in both paths; the red
+  reads the street's light:
+  - wall (the voxel column and layer inside the wall and ceiling): fix 0.0500 / 0.0500; red 1.84 (march), 1.91 (volumes).
+  - thin (the column in open air past a thin wall): fix 0.0500 / 0.0500; red 0.27 / 0.95.
+  - recess (no voxel seen, a sealed pocket behind): fix 2.00 / 2.00 (buried voxels); red 1.88 (the pocket's black mixed in).
+    Without the buried fallback it would be the plain trilinear, 1.88.
+  - pocket (the same recess read as an interior grid, gap fill on): fix 2.00 / 2.00; red 1.88 / 1.88.
+  - taps: the red equals the old rule on 20000 random segments.
+  With `GI_CHECK_GIWALL=0` it FAILS (`--expect fail` passes).
+- **Shader compile:** glslangValidator compiled the programs that include cell_lights.glsl in the volumes, march and
+  march-once modes. Before and after alike, cell_gihalf, cell_volair and cell_reflrelight need a variable named `cast`
+  renamed in the scratch copy first (a reserved word to glslang).
+- **Not built here:** not compiled, run or timed on Windows. The cost is the wall walk: at most one room-grid fetch
+  per half cell, per voxel kept. The march programs grow, and GIDARK1 hit the driver's link limit there, so the fo4_cell
+  link and the GPU ms are still to be checked. The Concord ceiling and walls against the reference are still to be
+  measured.
+
 ## Lane ROOMFIT10 (2026-10-28, branch roomfit10-20261028): the volume fit's rays, mostly on the GPU, still exact
 
 - **Fewer rays sent back to the CPU:** the GPU ray tracer (src/bakert/rqx.comp) now calls a ray "unsure" only within

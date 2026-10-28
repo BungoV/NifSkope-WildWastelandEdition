@@ -68,7 +68,7 @@ uniform vec4 cellGiFineDim[8];		// nx, ny, nz, first layer
 // lane PROBEVIEW1: the PRTP band's Pass (0 Combined, 1 GI, 2 Sky visibility, 3 Surfel color, 4 Surfel light).
 // In the Sky visibility pass the CPU binds the sky grid on cellGi (same layout, rgb = the probes' sky share).
 uniform int cellPass;
-uniform int cellPassRed;			// the gate's reds: 1 direct (the lights leak into GI), 2 nonormal (sampled facing up)
+uniform int cellPassRed;			// the gate's reds: 1 direct (the lights leak into GI), 2 nonormal (sampled facing up); 8192 WW_CELL_GIWALL_RED=off (lane GIWALL2)
 
 // lane IMGS1: the cell's imagespace, the game's own HDR -> display chain (src/gl/celllights.h)
 uniform bool cellIsOn;
@@ -338,7 +338,8 @@ ivec2 cellRoomAt( vec3 q )
  * so the room clamp keeps a voxel whose centre is across the shop's wall: the sunlit facade's light on the ceiling
  * along that wall (Concord's hardware store: 20-56x the brute-force reference). A voxel counts only when the fine
  * room grid shows no solid cell between the surface's view point and the voxel's centre, tapped every half cell, the
- * centre itself left out (a voxel's centre may sit in the wall it straddles). Red: WW_CELL_PV_RED=nosee. */
+ * centre itself left out (a voxel's centre may sit in the wall it straddles). Red: WW_CELL_PV_RED=nosee. Lane GIWALL2
+ * (cellGiWall): the centre is tapped too, the taps never more than half a cell apart. */
 bool cellRoomSolid( vec3 q )
 {
 	vec3 c = floor( ( q - cellRoomsOrigin ) / cellRoomsCell );
@@ -384,16 +385,39 @@ vec3 cellGiSeeFrom( vec3 P, vec3 N )
 	}
 	return r;
 }
+/* lane GIWALL2: the wall test of a voxel c seen from `from`: 2 seen (no solid cell on the segment, its centre air), 1
+ * buried (its centre in the wall the surface faces: air up to the first solid tap, solid from there to the centre), 0
+ * not seen (a solid centre with `loose` false, or air past a wall: the voxel is behind it). GISHADE1's taps left the
+ * centre out and stopped at 12: at Concord's 267-unit voxels a segment's taps fell more than a room cell apart, past a
+ * one-cell wall, and a voxel straddling the store's wall with its centre inside it passed (the hot ceiling points: 64%
+ * of the blend in solid-centre voxels, 87.5% behind a wall, the sunlit street's light). Now the taps run to the centre,
+ * no tap more than half a cell from the last on any axis, so a wall a cell thick is never stepped over. loose (the
+ * fills' and the volumes' last answer when nothing is seen): walk on past the first solid tap to tell buried from
+ * behind. Red
+ * WW_CELL_GIWALL_RED=off (cellPassRed 8192): GISHADE1's taps exactly (2 or 0). */
+int cellGiWall( vec3 from, ivec3 c, bool loose )
+{
+	vec3 d = cellGiOrigin + ( vec3( c ) + 0.5 ) * cellGiVoxel - from;
+	vec3 a = abs( d );
+	bool red = ( cellPassRed & 8192 ) != 0;	// one loop for both: the program's size (GIDARK1's link limit)
+	int nt = red ? clamp( int( ceil( length( d ) / ( 0.5 * cellRoomsCell ) ) ), 1, 12 )
+	             : clamp( int( ceil( max( a.x, max( a.y, a.z ) ) / ( 0.5 * cellRoomsCell ) ) ), 1, 255 );
+	bool hit = false;
+	for ( int j = 1; j <= ( red ? nt : nt + 1 ); j++ ) {	// j = nt + 1: the centre itself
+		bool s = cellRoomSolid( from + d * ( float( j ) / float( nt + 1 ) ) );
+		if ( s && ( red || !loose ) )
+			return 0;
+		if ( hit && !s )
+			return 0;	// air past the wall: behind it
+		hit = hit || s;
+	}
+	return hit ? 1 : 2;
+}
 bool cellGiSeen( vec3 from, ivec3 c )
 {
 	if ( ( cellPassRed & 16 ) != 0 )
 		return true;
-	vec3 d = cellGiOrigin + ( vec3( c ) + 0.5 ) * cellGiVoxel - from;
-	int nt = clamp( int( ceil( length( d ) / ( 0.5 * cellRoomsCell ) ) ), 1, 12 );
-	for ( int j = 1; j <= nt; j++ )
-		if ( cellRoomSolid( from + d * ( float( j ) / float( nt + 1 ) ) ) )
-			return false;
-	return true;
+	return cellGiWall( from, c, false ) == 2;
 }
 // lane ROOMCLAMP1: the blend of the 8 voxels' slots of room L, trilinear weights (sum in .rgba, weight in ws);
 // lane GISHADE1: only the voxels seen from `from` (cellGiSeen)
@@ -507,17 +531,21 @@ vec4 cellGiRoomSample( vec3 P, vec3 N, vec3 from, bool outdoorsOnly, out ivec2 L
 /* lane GICAL1 (item 5): the gap fill. A surface whose blend has no valid weight (no probe reached the 8 voxels: today
  * black, or with rooms the plain trilinear, which ignores walls) takes the weighted mean of the valid voxels within
  * 2 voxels (the 4x4x4 block round the sample), of the surface's own room (L) when the grid has rooms; weight
- * (1 - d / 2.5)^2 in voxels. Returns rgba / the weight (cellGiE divides by .a); .a = 0: nothing in reach. */
+ * (1 - d / 2.5)^2 in voxels. Returns rgba / the weight (cellGiE divides by .a); .a = 0: nothing in reach.
+ * Lane GIWALL2: of a room (not the last fill) only the voxels seen from `from` (cellGiWall): the room's slot is no wall
+ * guard where the room is open to the street (a shop is the outdoors' room); none seen, the room's buried voxels
+ * (centre in the wall the surface faces), never one behind a wall. Red WW_CELL_GIWALL_RED=off: every one. */
 const ivec2 cellGiAnyRoom = ivec2( -2 );	// lane WALLSTACK1: cellGiFillAt's L for the last fill (every voxel's first slot, as the trilinear reads)
-vec4 cellGiFillAt( vec3 P, vec3 N, ivec2 L )
+vec4 cellGiFillAt( vec3 P, vec3 N, ivec2 L, vec3 from )
 {
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel - 0.5;
 	ivec3 i0 = ivec3( floor( g ) );
 	ivec3 dm = ivec3( cellGiDims );
 	ivec3 sl = ivec3( N.x >= 0.0 ? 0 : 1, N.y >= 0.0 ? 2 : 3, N.z >= 0.0 ? 4 : 5 ) * dm.z;
 	vec3 n2 = N * N;
-	vec4 s = vec4( 0.0 );
-	float ws = 0.0;
+	vec4 s = vec4( 0.0 ), sb = vec4( 0.0 );
+	float ws = 0.0, wb = 0.0;
+	bool see = cellGiRooms && L != cellGiAnyRoom && ( cellPassRed & ( 16 | 8192 ) ) == 0;
 	for ( int k = 0; k < 64; k++ ) {
 		ivec3 c = i0 + ivec3( k & 3, ( k >> 2 ) & 3, ( k >> 4 ) & 3 ) - 1;
 		if ( any( lessThan( c, ivec3( 0 ) ) ) || any( greaterThanEqual( c, dm ) ) )
@@ -539,15 +567,26 @@ vec4 cellGiFillAt( vec3 P, vec3 N, ivec2 L )
 		       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + base + sl.z ), 0 );
 		if ( v.a <= 0.0 )
 			continue;
+		int sn = see ? cellGiWall( from, c, true ) : 2;
+		if ( sn == 0 )
+			continue;
 		w *= w;
+		if ( sn == 1 ) {
+			sb += w * v;
+			wb += w;
+			continue;
+		}
 		s += w * v;
 		ws += w;
 	}
-	return ws > 0.0 ? s / ws : vec4( 0.0 );
+	return ws > 0.0 ? s / ws : wb > 0.0 ? sb / wb : vec4( 0.0 );
 }
 
 /* lane GISHADE1: no room's blend has weight: the voxels of the 4x4x4 block the surface sees (any room), weight
- * (1 - d / 2.5)^2 in voxels, before the plain trilinear (which sees through walls). .a = 0: none seen. */
+ * (1 - d / 2.5)^2 in voxels, before the plain trilinear (which sees through walls). .a = 0: none seen.
+ * Lane GIWALL2: the last answer before the trilinear (which reads through walls), so an outdoor recess (GIBLACK1) or a
+ * pocket keeps its light where every voxel round it now fails the wall test: none seen, the buried voxels (centre in
+ * the wall the surface faces, cellGiWall 1), never one behind a wall. Red WW_CELL_GIWALL_RED=off: none. */
 vec4 cellGiSeenFill( vec3 P, vec3 N, vec3 from )
 {
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel - 0.5;
@@ -555,14 +594,18 @@ vec4 cellGiSeenFill( vec3 P, vec3 N, vec3 from )
 	ivec3 dm = ivec3( cellGiDims );
 	ivec3 sl = ivec3( N.x >= 0.0 ? 0 : 1, N.y >= 0.0 ? 2 : 3, N.z >= 0.0 ? 4 : 5 ) * dm.z;
 	vec3 n2 = N * N;
-	vec4 s = vec4( 0.0 );
-	float ws = 0.0;
+	vec4 s = vec4( 0.0 ), sb = vec4( 0.0 );
+	float ws = 0.0, wb = 0.0;
+	bool loose = ( cellPassRed & ( 16 | 8192 ) ) == 0;
 	for ( int k = 0; k < 64; k++ ) {
 		ivec3 c = i0 + ivec3( k & 3, ( k >> 2 ) & 3, ( k >> 4 ) & 3 ) - 1;
 		if ( any( lessThan( c, ivec3( 0 ) ) ) || any( greaterThanEqual( c, dm ) ) )
 			continue;
 		float w = 1.0 - length( vec3( c ) - g ) / 2.5;
-		if ( w <= 0.0 || !cellGiSeen( from, c ) )
+		if ( w <= 0.0 )
+			continue;
+		int see = ( cellPassRed & 16 ) != 0 ? 2 : cellGiWall( from, c, loose );
+		if ( see == 0 )
 			continue;
 		vec4 v = n2.x * texelFetch( cellGi, ivec3( c.xy, c.z + sl.x ), 0 )
 		       + n2.y * texelFetch( cellGi, ivec3( c.xy, c.z + sl.y ), 0 )
@@ -570,10 +613,15 @@ vec4 cellGiSeenFill( vec3 P, vec3 N, vec3 from )
 		if ( v.a <= 0.0 )
 			continue;
 		w *= w;
+		if ( see == 1 ) {
+			sb += w * v;
+			wb += w;
+			continue;
+		}
 		s += w * v;
 		ws += w;
 	}
-	return ws > 0.0 ? s / ws : vec4( 0.0 );
+	return ws > 0.0 ? s / ws : wb > 0.0 ? sb / wb : vec4( 0.0 );
 }
 
 /* lane GIBLACK2: the stranded surface's evidence. Outdoors (a sky-lit grid; also an interior that shows the sky), a
@@ -639,7 +687,7 @@ vec4 cellGiStrandAnswer( vec3 P, vec3 N, ivec2 L, vec3 C, out int path )
 		return s / ws;
 	if ( indoor ) {
 		path = 7;
-		vec4 f = cellGiFillAt( P, N, L );
+		vec4 f = cellGiFillAt( P, N, L, C );
 		if ( f.a > 0.01 )
 			return f;
 	}
@@ -773,7 +821,7 @@ vec4 cellGiSampleFull( vec3 P, vec3 N )
 			return r;
 		cellGiPath = 2;
 		if ( fill ) {	// lane GICAL1: a gap, or no room with weight (the plain trilinear ignores walls)
-			vec4 f = cellGiFillAt( P, N, Ls );
+			vec4 f = cellGiFillAt( P, N, Ls, from );
 			if ( f.a > 0.01 || r.a >= 0.0 )
 				return f.a > 0.01 ? f : r;
 		}
@@ -802,7 +850,7 @@ vec4 cellGiSampleFull( vec3 P, vec3 N )
 	 * weighted over the valid voxels only. Red WW_CELL_PV_RED=nolastfill: the plain trilinear's black. One call site:
 	 * the program's size (see cellPassOut). */
 	if ( fill && s.a <= 0.01 && ( !cellGiRooms || ( cellPassRed & ( 8 | 4096 ) ) == 0 ) ) {	// the noclamp red keeps its old tail
-		vec4 f = cellGiFillAt( P, N, cellGiRooms ? cellGiAnyRoom : Ls );
+		vec4 f = cellGiFillAt( P, N, cellGiRooms ? cellGiAnyRoom : Ls, P );	// lane GIWALL2: the last fill reads through walls (no view point)
 		if ( f.a > 0.01 ) {
 			if ( cellGiRooms )
 				cellGiPath = 10;
@@ -902,8 +950,15 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 	if ( strand )
 		L = ivec2( 0, -1 );
 	bool anyRoom = !cellGiRooms || L.x == -2;
-	vec4 own = vec4( 0.0 ), oth = vec4( 0.0 );
-	float wOwn = 0.0, wOth = 0.0, tAcc = 0.0, tBest = 0.0;
+	/* lane GIWALL2: a volume's slot is no wall guard (Concord's hardware store is open to the street: one volume with the
+	 * street, its voxels straddling the wall read the sun outside), so every pass keeps only the voxels the surface sees
+	 * (cellGiWall from cellGiSeeFrom, the march's rule): no solid centre, no wall between. Pass 1 keeps the buried voxels
+	 * apart as the last answer before the trilinear, which reads through walls (an outdoor recess, GIBLACK1). Red
+	 * WW_CELL_GIWALL_RED=off: no test, the old weights. */
+	bool wall = cellGiRooms && ( cellPassRed & ( 16 | 8192 ) ) == 0;
+	vec3 from = wall ? cellGiSeeFrom( P, N ) : P;
+	vec4 own = vec4( 0.0 ), oth = vec4( 0.0 ), bur = vec4( 0.0 );
+	float wOwn = 0.0, wOth = 0.0, tAcc = 0.0, tBest = 0.0, wBur = 0.0;
 	int other = -1;
 	bool nearPick = false;
 	// pass 0: the 8 corners, own volume (and the thresholds' weight); 1: none had it, the 27 round the nearest corner;
@@ -942,6 +997,14 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 			       + n2.z * texelFetch( cellGi, ivec3( c.xy, c.z + bq + sl.z ), 0 );
 			if ( u.a <= 0.0 )
 				continue;	// an empty slot (no probe of its volume reached the voxel): no weight
+			int see = wall ? cellGiWall( from, c, ps == 1 ) : 2;
+			if ( see == 0 )
+				continue;
+			if ( see == 1 ) {
+				bur += w * u;
+				wBur += w;
+				continue;
+			}
 			if ( ps == 2 ) {
 				oth += w * u;
 				wOth += w;
@@ -961,6 +1024,11 @@ vec4 cellGiVolume( vec3 P, vec3 N, ivec2 L )
 				}
 			}
 		}
+	}
+	if ( wOwn <= 0.0 && wBur > 0.0 ) {	// pass 1 found only buried voxels (tAcc is 0: no pass 2)
+		own = bur;
+		wOwn = wBur;
+		nearPick = true;
 	}
 	vec4 s = wOwn > 0.0 ? own / wOwn : vec4( 0.0 );
 	if ( wOth > 0.0 )
