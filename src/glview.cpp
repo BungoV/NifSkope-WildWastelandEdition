@@ -5697,10 +5697,11 @@ void GLView::paintGL()
 	// 2D overlays drawn over the GL scene with QPainter: the Blender-style
 	// navigation gizmo and the 3D cursor (constant screen size, like Blender)
 	bool drawSnapMarker = snapIndicator && ( gizmoMode != 0 || elemTransform );
-	// lane MODPICK1: the near cells load other mods than the far LOD bake shows -- said in the view, never silent
-	const QString modPickNote = model ? cellModPickViewNote( model ) : QString();
 	// lane PERF1: the Frame Timers overlay (never in a harness grab: WW_RENDER_CLEAN keeps the frame clean)
 	WW_SWITCH_STATIC( bool, passTimeClean, wwEnvInt( "WW_RENDER_CLEAN" ) == 1 );
+	/* lane MODPICK1: the near cells load other mods than the far LOD bake shows -- said in the view, never silent.
+	 * SHOTFIX1 (D4): not in a harness grab either (the log still says it): it was OPENREDS g10's 468 px "blob" */
+	const QString modPickNote = ( model && !passTimeClean ) ? cellModPickViewNote( model ) : QString();
 	const QStringList passTimeLines = ( passTimeClean || scene->selecting ) ? QStringList() : PassTime::overlay();
 	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() ) ) {
 		// The scene passes (esp. collision wireframe) leave GL state that

@@ -3523,10 +3523,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	/* Lane FXLIT1: in an interior a lit effect shape (the effect-lighting flag) takes a bucket per placement,
 	 * because the game lights it with its MODEL's four placed lights (src/gl/cellfxlit.h). */
 	/* lane SUNCELL1 final: exteriors too. The game's lit effect constants (its lit-effect setup, lit branch)
-	 * take the scene's directional (the sun outdoors) and the placed lights near the model, inside or out. Red
-	 * WW_CELL_FXLIT_EXT_RED=indoors keeps exteriors self-lit, as before. */
-	WW_SWITCH_STATIC( bool, fxLitExtRed, wwEnv( "WW_CELL_FXLIT_EXT_RED" ).trimmed() == "indoors" );
-	const bool fxLitOn = ( spec.interior || !fxLitExtRed ) && spec.overlay == CellOverlay::None;
+	 * take the scene's directional (the sun outdoors) and the placed lights near the model, inside or out. */
+	const bool fxLitOn = spec.overlay == CellOverlay::None;
 	const int fxLitCap = 4096;
 	int fxLitModels = 0, fxLitShapes = 0;
 	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
@@ -6958,7 +6956,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				qPrintable( pfxWhy ), pfxCapped, cap );
 			fprintf( stderr, "cell particles lit: %d systems of %d placed models registered with their placed lights%s (%d past the lit cap)\n",
 				pfxLitSystems, pfxLitModels, fxLitOn ? ( spec.interior ? " (interior)" : " (exterior: the sun is the base)" )
-					: " (off: exterior self-lit, red WW_CELL_FXLIT_EXT_RED=indoors)", pfxLitCapped );
+					: " (off: overlay)", pfxLitCapped );
 			fprintf( stderr, "cell particles emittance: %s, %d unlit systems take their placement's colour (%d lack External "
 				"Emittance, %d lit: the game's lit variants never read it)\n",
 				wwLookOn( WwLook::ParticleEmittance ) ? "on" : "off", pfxXemiSystems, pfxXemiNoFlag, pfxXemiLit );
