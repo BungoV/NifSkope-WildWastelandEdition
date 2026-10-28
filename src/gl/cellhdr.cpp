@@ -849,6 +849,8 @@ void wwCellHdrDepthMsEnd( Scene * scene, int unit )
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( colorOnlyGpus()[r].prevDraw ) );
 }
 
+quint64 wwGlPaintCount();	// glview.cpp
+
 bool wwCellHdrBegin( Scene * scene )
 {
 	HdrState & s = hst();
@@ -869,9 +871,9 @@ bool wwCellHdrBegin( Scene * scene )
 	r->stopProgram();
 
 	GLint vp[4] = { 0, 0, 1, 1 }, samples = 0;
-	fn->glGetIntegerv( GL_VIEWPORT, vp );
-	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &s.prevDraw );
-	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &s.prevRead );
+	/* lane CELLUNI6: the frame's target as the obscurance pass asked it in this paint (every cell pass since put it
+	 * back); no note (no obscurance pass, another paint) or WW_CELL_UNI6_RED=hdrbegin (it keeps none): asked */
+	WwCellUni::targetFrom( fn, WwCellUni::frameTarget(), wwGlPaintCount(), s.prevDraw, s.prevRead, vp, wwSetupMemoChecking() );
 	const int W = vp[0] + vp[2], H = vp[1] + vp[3];
 	HdrGpu & g = hdrGpus()[r];
 	const bool sync = syncOn();

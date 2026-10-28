@@ -38,7 +38,7 @@ struct FakeGl
 	std::map<int, int> fbFormat;	// framebuffer -> its depth format (1 = D24S8, 2 = D32FS8, ...)
 	std::map<unsigned, long long> asks;
 	long long total = 0;
-	void glGetIntegerv( unsigned p, int * v )
+	[[gnu::noinline]] void glGetIntegerv( unsigned p, int * v )	// out of line: g++ -Warray-bounds would follow the viewport copy into a scalar ask
 	{
 		asks[p]++;
 		total++;
@@ -312,6 +312,86 @@ static void hdrdepth()
 	check( c.seen == r.seen && c.stale == 0, "hdrdepth: WW_SETUP_MEMO_CHECK=1: same textures, knownstale 0" );
 }
 
+// ---------------------------------------------------------------- 4. hdrbegin
+/* glview's paint up to cellhdr.cpp wwCellHdrBegin: the paint's target (the window, framebuffer 0, or a harness shot's
+ * framebuffer 9 in paints 5 and 6 at another size), the obscurance pass (asks the three, binds its own, puts them back;
+ * off in paints 3 and 5), the other cell passes (bind their own, put back), then Begin's three asks. */
+enum class TgMode { Green, Red, DocKeep, DocLeakRead };
+struct TgOut
+{
+	std::vector<int> begin;	// Begin's draw, read, viewport per paint
+	long long asks = 0;
+	std::uint64_t stale = 0;
+};
+static TgOut tgRun( TgMode m, bool check )
+{
+	resetKit();
+	WwCellUni::frameTarget() = WwCellUni::TargetNote();
+	FakeGl gl;
+	TgOut out;
+	bool red = m == TgMode::Red;
+#ifdef CELLUNI6_RED_HDRBEGIN
+	red = true;
+#endif
+	WwCellUni::TargetNote kept;	// DocKeep: a note never forgotten
+	for ( std::uint64_t f = 1; f <= 10; f++ ) {
+		const bool shot = f == 5 || f == 6;
+		gl.draw = gl.read = shot ? 9 : 0;
+		gl.glViewport( 0, 0, shot ? 128 : 64, shot ? 128 : 32 );
+		if ( f != 3 && f != 5 ) {	// the obscurance pass
+			int d = 0, rd = 0, vp[4];
+			gl.glGetIntegerv( kDrawFb, &d );
+			gl.glGetIntegerv( kReadFb, &rd );
+			gl.glGetIntegerv( kViewport, vp );
+			if ( !red )
+				( m == TgMode::DocKeep ? kept : WwCellUni::frameTarget() ).put( m == TgMode::DocKeep ? 1 : f, d, rd, vp );
+			gl.draw = gl.read = 40;
+			gl.glViewport( 0, 0, 32, 16 );
+			gl.draw = d, gl.read = rd;
+			gl.glViewport( vp[0], vp[1], vp[2], vp[3] );
+		}
+		for ( int pass = 0; pass < 3; pass++ ) {	// SSR, SSGI, the air: their own targets, then the frame's back
+			int d = 0, rd = 0, vp[4];
+			gl.glGetIntegerv( kDrawFb, &d );
+			gl.glGetIntegerv( kReadFb, &rd );
+			gl.glGetIntegerv( kViewport, vp );
+			gl.draw = gl.read = 50 + pass;
+			gl.glViewport( 0, 0, 8, 8 );
+			gl.draw = d, gl.read = ( m == TgMode::DocLeakRead && pass == 2 && f == 8 ) ? 52 : rd;
+			gl.glViewport( vp[0], vp[1], vp[2], vp[3] );
+		}
+		int d = 0, rd = 0, vp[4] = {};
+		if ( m == TgMode::DocKeep ) {
+			if ( !kept.take( 1, d, rd, vp ) ) {
+				gl.glGetIntegerv( kViewport, vp );
+				gl.glGetIntegerv( kDrawFb, &d );
+				gl.glGetIntegerv( kReadFb, &rd );
+			}
+			kept.frame = 1;	// never forgotten
+		} else {
+			WwCellUni::targetFrom( &gl, WwCellUni::frameTarget(), f, d, rd, vp, check );
+		}
+		out.begin.push_back( d );
+		out.begin.push_back( rd );
+		out.begin.insert( out.begin.end(), vp, vp + 4 );
+	}
+	out.asks = gl.total;
+	out.stale = WwCellUni::state().knownStale;
+	return out;
+}
+static void hdrbegin()
+{
+	const TgOut g = tgRun( TgMode::Green, false ), r = tgRun( TgMode::Red, false );
+	check( g.begin == r.begin, "hdrbegin: Begin's draw, read and viewport as the red's (10 paints, a shot, no obscurance twice)" );
+	std::printf( "     hdrbegin: asks green %lld red %lld\n", g.asks, r.asks );
+	check( g.asks == r.asks - 3 * 8, "hdrbegin: green asks 3 less in each paint with the obscurance pass (8 of 10)" );
+	check( tgRun( TgMode::DocKeep, false ).begin != r.begin, "hdrbegin: doctored, a note kept across paints differs" );
+	const TgOut c = tgRun( TgMode::Green, true );
+	check( c.begin == r.begin && c.stale == 0, "hdrbegin: WW_SETUP_MEMO_CHECK=1, every pass puts it back: knownstale 0" );
+	const TgOut l = tgRun( TgMode::DocLeakRead, true ), lr = tgRun( TgMode::Red, false );
+	check( l.stale == 1 && l.begin != lr.begin, "hdrbegin: WW_SETUP_MEMO_CHECK=1, a pass that leaves the read framebuffer moved: knownstale 1" );
+}
+
 int main()
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -319,6 +399,7 @@ int main()
 	jitter();
 	nonlinear();
 	hdrdepth();
+	hdrbegin();
 	std::printf( "%s (%d failed)\n", fails ? "CELLUNI6 FAIL" : "CELLUNI6 OK", fails );
 	return fails ? 1 : 0;
 }

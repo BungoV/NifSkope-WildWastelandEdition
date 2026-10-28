@@ -4279,6 +4279,8 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
 	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
 	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	if ( !wwCellUni6Red( "hdrbegin" ) )	// lane CELLUNI6: the HDR frame's Begin takes them (every pass after puts them back)
+		WwCellUni::frameTarget().put( wwGlPaintCount(), prevFbo, prevRead, vp );
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
 	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );

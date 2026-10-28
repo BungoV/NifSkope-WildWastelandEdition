@@ -434,6 +434,56 @@ struct FrameOnce
 	void dirty() { have = false; }
 };
 
+/* lane CELLUNI6 (hdrbegin): the frame's target (draw and read framebuffer, viewport) as the first cell pass of the paint
+ * asked it (the obscurance pass, wwCellAoPass). Every cell pass from there to the HDR frame's Begin binds its own targets
+ * and puts these three back, so Begin takes them instead of asking. Taken once, in the same paint. */
+struct TargetNote
+{
+	std::uint64_t frame = 0;	// the paint that asked (0: none)
+	int draw = 0, read = 0, vp[4] = {};
+	void put( std::uint64_t f, int d, int r, const int v[4] )
+	{
+		frame = f;
+		draw = d;
+		read = r;
+		std::memcpy( vp, v, sizeof vp );
+	}
+	bool take( std::uint64_t f, int & d, int & r, int v[4] )
+	{
+		const bool ok = frame != 0 && frame == f;
+		if ( ok ) {
+			d = draw;
+			r = read;
+			std::memcpy( v, vp, sizeof vp );
+		}
+		frame = 0;
+		return ok;
+	}
+};
+inline TargetNote & frameTarget()
+{
+	static TargetNote n;
+	return n;
+}
+//! the note's target, else asked (viewport, draw, read: Begin's order). WW_SETUP_MEMO_CHECK=1 asks anyway, counts a
+//! wrong note (knownStale) and returns the driver's
+template <class F> bool targetFrom( F * fn, TargetNote & n, std::uint64_t frame, int & draw, int & read, int vp[4], bool check )
+{
+	const bool noted = n.take( frame, draw, read, vp );
+	if ( noted && !check )
+		return true;
+	int real[4] = {}, d = 0, r = 0;
+	fn->glGetIntegerv( 0x0BA2, real );	// GL_VIEWPORT
+	fn->glGetIntegerv( 0x8CA6, &d );	// GL_DRAW_FRAMEBUFFER_BINDING
+	fn->glGetIntegerv( 0x8CAA, &r );	// GL_READ_FRAMEBUFFER_BINDING
+	if ( noted && ( d != draw || r != read || std::memcmp( real, vp, sizeof real ) != 0 ) )
+		state().knownStale++;
+	draw = d;
+	read = r;
+	std::memcpy( vp, real, sizeof real );
+	return noted;
+}
+
 /*! lane FRAMESPEED1: an owner (a Renderer) whose GL context was made again (a context loss) shows a new serial: what was
  *  cached for the old context (DepthCfg: the same fbo id and size may now hold another format) must be forgotten */
 struct CtxWatch
