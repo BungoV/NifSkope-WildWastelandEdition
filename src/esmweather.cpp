@@ -933,13 +933,19 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 		if ( n > 0 && n < 8 )
 			for ( int tod = 0; tod < 8; tod++ )
 				out.imsp[tod] = out.imsp[storedSlot( tod, 4 )];
+		// lane WEATHERBLEND3: a slot with no IMGS reads the game's default, form 0x167 (red WW_LOOKDEV_RED=imgsnodefault)
+		const ESMFile::ESMRecord * def = wwLookdevRed( "imgsnodefault" ) ? nullptr : esm->findRecord( 0x167u );
+		if ( def && !( *def == "IMGS" ) )
+			def = nullptr;
 		for ( int tod = 0; tod < 8; tod++ ) {
-			if ( !out.imsp[tod] )
+			const ESMFile::ESMRecord * ig = out.imsp[tod] ? esm->findRecord( out.imsp[tod] ) : nullptr;
+			if ( !ig || !( *ig == "IMGS" ) ) {
+				ig = def;
+				out.isDefault[tod] = def != nullptr;
+			}
+			if ( !ig )
 				continue;
-			const ESMFile::ESMRecord * ig = esm->findRecord( out.imsp[tod] );
-			if ( !ig || !( *ig == "IMGS" ) )
-				continue;
-			try {
+			if ( !out.isDefault[tod] ) try {	// the Sky Scale and DoF stay the weather's own (1 / none)
 				ESMFile::ESMField g( *esm, *ig );
 				while ( g.next() ) {
 					if ( g == "HNAM" && g.size() >= 32 ) {
@@ -1361,6 +1367,81 @@ int wwWeatherPickRule( bool changing, bool sameAsCurrent, bool interior, bool fo
 	return changing ? WwPickDefer : WwPickStart;	// a running change keeps the pick until it ends
 }
 
+/* lane WEATHERBLEND3 (notes/weatherblend3/RESULTS.md): the snaps, the one cloud scroll, the unrounded wind */
+int wwWeatherSnapRule( int rule, unsigned flags )
+{
+	if ( rule == WwPickDefer && ( flags & WwSnapFastTravel ) )
+		return WwPickSnap;	// fast travel applies the waiting pick now, snapped
+	if ( rule == WwPickStart && ( flags & ( WwSnapFastTravel | WwSnapPassTime ) ) )
+		return WwPickSnap;
+	return rule;
+}
+
+double wwWeatherWaitHours( double from, double to )
+{
+	const double d = std::fmod( to - from, 24.0 );
+	return d < 0.0 ? d + 24.0 : d;
+}
+
+double wwWeatherTransPctSeconds( double secs, double waitHours, quint8 transDelta, const WwSkyGmst & g, float accelFrom )
+{
+	const double cE = wwWeatherTransHours( transDelta, g ) * 180.0;	// real seconds to pct 1 (1 game hour = 180 s)
+	if ( !( cE > 0.0 ) || secs <= 0.0 )
+		return std::max( secs, 0.0 );
+	const double f = accelFrom, K = double( g.transAccel ) + 1.0;
+	const bool acc = f >= 0.0 && f < 1.0 && K > 1.0;
+	const double a = acc ? cE * f : cE, u1 = acc ? cE * ( f + ( 1.0 - f ) / K ) : cE;
+	auto J = [&]( double u ) {	// the integral from shifted second 0 to u (raw = u / cE)
+		const double ua = std::min( u, a );
+		double s = ua * ua / ( 2.0 * cE );
+		if ( u > a && acc ) {
+			const double ub = std::min( u, u1 );
+			s += f * ( ub - a ) + K * ( ( ub * ub - a * a ) / ( 2.0 * cE ) - f * ( ub - a ) );
+		}
+		if ( u > u1 )
+			s += u - u1;
+		return s;
+	};
+	const double S = std::max( waitHours, 0.0 ) * 180.0;
+	return J( S + secs ) - J( S );
+}
+
+float wwCloudScroll( double base, float vOld, float vNew, double seconds, double pctSeconds )
+{
+	if ( wwLookdevRed( "cloudgametime" ) ) {
+		seconds *= 20.0;
+		pctSeconds *= 20.0;
+	}
+	const double o = base + double( vOld ) * 0.1 * seconds + ( double( vNew ) - double( vOld ) ) * 0.1 * pctSeconds;
+	return float( o - std::floor( o ) );
+}
+
+float wwWeatherWindBlend( quint8 cur, quint8 last, float pct )
+{
+	return float( cur ) * pct + float( last ) * ( 1.0f - pct );
+}
+
+float wwWindRangeOffset( quint8 dirByte, quint8 rangeByte, quint32 seed )
+{
+	const float k255 = 1.0f / 255.0f;
+	const float dir = float( dirByte ) * k255 * 360.0f, hr = float( rangeByte ) * k255 * 180.0f * 0.5f;
+	if ( !( hr > 0.0f ) )
+		return 0.0f;
+	quint32 h = seed * 2654435761u + ( quint32( dirByte ) << 8 | rangeByte );
+	if ( !h )
+		h = 1u;
+	float best = 0.0f;
+	for ( int i = 0; i < 4; i++ ) {
+		h ^= h << 13;	// xorshift32 stands in for BSRandom::Float( dir - hr, dir + hr )
+		h ^= h >> 17;
+		h ^= h << 5;
+		const float x = ( ( dir - hr ) + float( h >> 8 ) * ( 1.0f / 16777216.0f ) * ( 2.0f * hr ) ) - dir;
+		if ( i == 0 || std::fabs( x ) < std::fabs( best ) )
+			best = x;
+	}
+	return best;
+}
+
 namespace
 {
 //! the four-weight linear sum of a byte colour (rows, DALC): this weather's keys, then the leaving one's
@@ -1630,6 +1711,7 @@ QString WwFog::describe() const
  *   --tnam a,b,c,d    pure blend: no plugin needed
  *   --census          every WTHR: parse verdict + the NAM0/DALC histograms
  *   --list            every WTHR, one line each
+ *   --imagespace      (with --weather) an `imgs` line per ToD: the IMGS read, default=1 where the game's 0x167 stands in
  *   --sky             (with --weather + --hour) the engine clock (lane PBRWX1): `gmst`, `climate2`, and per
  *                     hour `skyclock`, `skycolor`, `cloud` (layers 0..15) and `moon` (per --day)
  *   --day d[,d..]     game days for the `moon` lines (default 0)
@@ -1651,6 +1733,7 @@ int cmdWeather( const QStringList & args )
 	QString fogProbeArg;
 	bool census = false, doList = false, sky = false, fog = false;
 	bool groups = false, loadOrder = false;	// lane SKYTOP1
+	bool imgs = false;	// lane WEATHERBLEND3
 	double cloudTime = 0.0;
 	for ( int i = 0; i < args.size(); i++ ) {
 		const QString & a = args.at( i );
@@ -1677,6 +1760,8 @@ int cmdWeather( const QStringList & args )
 			loadOrder = true;
 		else if ( a == "--list" )
 			doList = true;
+		else if ( a == "--imagespace" )	// lane WEATHERBLEND3: an `imgs` line per ToD
+			imgs = true;
 		else if ( a == "--sky" )
 			sky = true;
 		else if ( a == "--day" )
@@ -1843,6 +1928,16 @@ int cmdWeather( const QStringList & args )
 			for ( int a = 0; a < 7; a++ )
 				say( QString( "dalc tod=%1 axis=%2 rgb=%3,%4,%5" ).arg( wwTodName( tod ), ax[a] )
 					.arg( w.dalc[tod][a][0] ).arg( w.dalc[tod][a][1] ).arg( w.dalc[tod][a][2] ) );
+		for ( int tod = 0; tod < 8 && imgs; tod++ ) {
+			QStringList hl;
+			for ( int k = 0; k < 9; k++ )
+				hl << QString::number( double( w.isHdr[tod][k] ), 'g', 6 );
+			say( QString( "imgs tod=%1 imsp=%2 found=%3 default=%4 edid=%5 hdr=%6 lut=%7 skyscale=%8" ).arg( wwTodName( tod ) )
+				.arg( hex8( w.imsp[tod] ) ).arg( w.isFound[tod] ? 1 : 0 ).arg( w.isDefault[tod] ? 1 : 0 )
+				.arg( w.isEdid[tod].isEmpty() ? QStringLiteral( "-" ) : w.isEdid[tod], hl.join( QChar( ',' ) ),
+					w.isLut[tod].isEmpty() ? QStringLiteral( "-" ) : w.isLut[tod] )
+				.arg( double( w.skyScale[tod] ), 0, 'g', 6 ) );
+		}
 		for ( double h : hourList() ) {
 			todLine( h, tnam );
 			const WwTodKeys k = wwTodKeys( h, tnam );

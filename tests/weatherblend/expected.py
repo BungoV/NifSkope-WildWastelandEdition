@@ -73,3 +73,23 @@ for s, raw in ((0.2, 0.21), (0.2, 0.25), (0.5, 0.5)):
 # delta 128: accelerated at half way (135.9776 s) it ends when raw = 0.5 + 0.5 / 17
 h = 128 / 255.0 * (3.0 - 0.01) + 0.01
 print('delta 128 accelerated at 0.5 ends at %.4f s (unaccelerated %.4f s)' % ((0.5 + 0.5 / 17.0) * h * 180.0, h * 180.0))
+
+
+# lane WEATHERBLEND3: the pct integral by the midpoint rule (delta 255, 1..3 h: 540 s), a wait shifts the start
+def pct_at(u, cE, f):
+    raw = min(u / cE, 1.0)
+    if f < 0 or raw <= f:
+        return raw
+    return min(1.0, f + (raw - f) * 17.0)
+
+
+def integral(secs, wait_h, f, n=200000):
+    cE, S = 540.0, wait_h * 180.0
+    d = secs / n
+    return sum(pct_at(S + (k + 0.5) * d, cE, f) for k in range(n)) * d
+
+
+for secs, wait_h, f in ((270.0, 0.0, -1.0), (600.0, 0.0, -1.0), (180.0, 1.0, -1.0), (280.0, 0.0, 0.5)):
+    print('pct integral %.0f s wait %.0f h accel %.1f = %.4f' % (secs, wait_h, f, integral(secs, wait_h, f)))
+# the one scroll: 0.25 + 0.5 x 0.1 x 10 + (1.5 - 0.5) x 0.1 x 4, wrapped; wind 200 / 51 at 30%
+print('one scroll %.4f' % ((0.25 + 0.05 * 10 + 0.1 * 4) % 1.0), 'wind %.4f' % (200 * 0.3 + 51 * 0.7))

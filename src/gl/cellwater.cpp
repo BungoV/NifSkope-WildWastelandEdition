@@ -115,7 +115,7 @@ WaterState & st()
 // lane WATERFOAMDETAIL1: the foam's drive, the weather's wind (or the pin) as m/s and the sea swell in m
 void foamDrive( const WaterState & s, float & windMs, float & swellM )
 {
-	quint8 wind[4] = { 0, 0, 0, 0 };
+	float wind[5] = { 0, 0, 0, 0, 0 };
 	const bool haveWind = s.foamWind >= 0 || wwLookdevWind( wind );
 	const float w01 = s.foamWind >= 0 ? float( s.foamWind ) / 255.0f : float( wind[0] ) / 255.0f;
 	windMs = haveWind ? 1.0f + 19.0f * w01 : 5.0f;
@@ -550,7 +550,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		// travels along the WATR's first noise layer's wind (the compass, 0 = +Y, as the scroll); height by the
 		// weather's wind speed byte, 0.6x calm to 1.4x full (1x with no weather loaded)
 		const double a = double( b.rec.windDirection[0] ) * 3.14159265358979323846 / 180.0;
-		quint8 wind[4] = { 0, 0, 0, 0 };
+		float wind[5] = { 0, 0, 0, 0, 0 };
 		const float amp = wwLookdevWind( wind ) ? 0.6f + 0.8f * float( wind[0] ) / 255.0f : 1.0f;
 		prog->uni4f( "waterWavesK", FloatVector4( float( std::sin( a ) ), float( std::cos( a ) ),
 			wwCellWorldAnimOn() ? float( wwCellWorldSeconds() ) : 0.0f, amp ) );	// the world clock, 0 with it off
